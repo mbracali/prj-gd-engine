@@ -124,7 +124,7 @@ jobs:
         with:
           distribution: temurin
           java-version: 21
-      - uses: android-actions/setup-android@v3
+      - uses: android-actions/setup-android@v4
         with:
           # Its default list includes the obsolete "tools" package, which no longer exists.
           packages: platform-tools ndk;28.2.13676358 cmake;4.1.2 platforms;android-36 build-tools;36.1.0
