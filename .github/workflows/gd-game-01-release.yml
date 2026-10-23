@@ -60,6 +60,7 @@ jobs:
       - uses: gitleaks/gitleaks-action@v3
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: false  # no report artifact among the downloads
 
   build:
     needs: check
@@ -85,6 +86,7 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           path: dist
+          pattern: gd01-*  # only the builds' downloads
           merge-multiple: true
       - name: Checksums
         working-directory: dist

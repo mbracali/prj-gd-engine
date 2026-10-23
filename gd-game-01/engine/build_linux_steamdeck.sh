@@ -25,7 +25,6 @@ rm -rf "$d" && mkdir -p "$d/licenses"
 cp build/steamdeck/gd01 README.md ../../LICENSE ../../LICENSE-ADDITIONAL-TERMS.md "$d/"
 strip "$d/gd01"
 cp res/gd01_icon_512.png "$d/gd01.png"
-cp linux/add-to-app-menu.sh "$d/"
 sdl="$(ldd build/steamdeck/gd01 | awk '/libSDL3\.so/ {print $3}')"
 cp -L "$sdl" "$d/libSDL3.so.0"
 cp /usr/share/doc/libsdl3-0/copyright "$d/licenses/SDL3-LICENSE.txt" 2>/dev/null || true
@@ -44,7 +43,8 @@ gd01 on the Steam Deck
    (Without an .iso in the folder: tap the screen or press A to pick one.)
 
 Icon: in Steam, gd01's Properties > the icon square > choose gd01.png from
-this folder (for the desktop's menu, run add-to-app-menu.sh in Desktop Mode).
+this folder. Started once in Desktop Mode, gd01 also adds itself, with its
+icon, to the desktop's application menu.
 
 The settings are already tuned for the Deck (60 FPS, 1280 x 800, full
 screen). Change them in Options > Enhanced Settings; "Apply Steam Deck

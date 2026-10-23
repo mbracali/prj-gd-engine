@@ -27,13 +27,13 @@ Panel::Panel(Renderer& renderer, const GameData& data, UiResources& res, const s
     sr_->setCustomDraw([this](const SceneObject& o, const Mat4& vp, const Mat4& model) { drawComponent(o, vp, model); });
     camera_ = sr_->firstCamera();
     anims_ = std::make_unique<AnimPlayer>(std::vector<Scene*>{scene_.get()});
-    // [I] The splash screen's legal lines carry the GD01 notice: five lines
+    // [I] The splash screen's legal lines carry the GD-Engine notice: five lines
     // over the five legal labels (legal4 / legal5 are hidden in the original),
     // at the original size, a little lower and wider spaced so the extra
     // lines clear PRESS ANY BUTTON; each kept on one line.
     if (name_ == "splash") {
         static const char* const kLegal[][2] = {
-            {"splash_legal4.lbl", "-GD01- offers a NON PROFIT, 100% free and open source labor of love"},
+            {"splash_legal4.lbl", "-GD-Engine- offers a NON PROFIT, 100% free and source-available labor of love"},
             {"splash_legal5.lbl", "for you to play a modern version of a timeless classic."},
             {"splash_legal2.lbl", "We do not endorse or support piracy, find an original copy of the game to play."},
             {"splash_legal3.lbl", "\xa9" "2005 RedOctane Inc.  ALL RIGHTS RESERVED"},
@@ -235,7 +235,7 @@ float Panel::drawLaidOut(const std::string& key, const std::string& str, const s
             if (lx > 0) c.sx /= lx;
             if (lz > 0) c.sz /= lz;
         }
-        // [I] The loading tip: the GD01 tips run longer than the original's;
+        // [I] The loading tip: the GD-Engine tips run longer than the original's;
         // one over kTipLines lines is laid out wider and scaled down as a
         // whole until it fits that height.
         if (key == "tip.lbl" && name_ == "loading" && tm.lines > kTipLines && ts.wrapWidth > 0) {

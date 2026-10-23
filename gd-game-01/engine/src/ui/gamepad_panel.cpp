@@ -19,7 +19,9 @@ namespace {
 // strum" and Reset (right). On a controller, Left / Right (or Select) changes
 // its player (none, P1, P2; one controller per player); on a binding, Select
 // waits for the new button, axis or key (Esc cancels, Delete or the row's
-// mouse "x" leaves it unbound, 10 s timeout).
+// mouse "x" leaves it unbound, 10 s timeout). The touch screen (listed while
+// touch controls are on) plays as P1 and has its settings instead of
+// bindings: Select / Left / Right change them.
 class GamepadPanel : public NativePanel {
 public:
     GamepadPanel(SelectHost& host, Input* input) : host_(host), input_(input) {}
@@ -49,6 +51,11 @@ public:
             setPlayer(devs[size_t(focus_)], std::clamp(devs[size_t(focus_)].player + (button == kRight ? 1 : -1), -1, 1));
             return true;
         }
+        if (isTouch(devs) && focus_ >= int(devs.size()) && (button == kLeft || button == kRight)) {
+            const int c = focus_ - int(devs.size());
+            if (c < Input::kTouchOptions) input_->cycleTouchOption(c, button == kRight ? 1 : -1), sound("button_select");
+            return true;
+        }
         if (host_.isSelectButton(button)) return activate(devs), true;
         return false;  // back: the screen's auto-back
     }
@@ -64,10 +71,10 @@ public:
         clamp(devs);
         for (int r = 0; r < rowCount(devs); ++r) {
             float x0, y0, x1, y1;
-            rowRect(r, int(devs.size()), x0, y0, x1, y1);
+            rowRect(r, int(devs.size()), x0, y0, x1, y1, isTouch(devs));
             if (x < x0 || x > x1 || y < y0 || y > y1) continue;
             const int c = r - int(devs.size());
-            if (click && c >= 0 && c < int(Input::Control::Count) && x >= x1 - kClearW) {
+            if (click && !isTouch(devs) && c >= 0 && c < int(Input::Control::Count) && x >= x1 - kClearW) {
                 focus_ = r;
                 input_->clearBinding(devs[size_t(selected_)].id, Input::Control(c));
                 sound("button_back");
@@ -114,11 +121,17 @@ public:
             const bool f = int(d) == focus_, sel = int(d) == selected_;
             if (f) quad(x0 + o, y0, x1 + o, y1, {1, 0.86f, 0.2f, 0.14f});
             else if (sel) quad(x0 + o, y0, x1 + o, y1, {1, 1, 1, 0.06f});
-            text("impactor.font", fit(devs[d].name, 21, x1 - x0 - 120), x0 + 14 + o, y0 + 18, 21, f ? kFocused : kNormal, 0x21);
-            text("impactor.font", fit(devs[d].profile, 16, x1 - x0 - 120), x0 + 14 + o, y0 + 42, 16, kDim, 0x21);
+            const float h = y1 - y0;  // rows shrink when many controllers are connected
+            if (h >= 50) {
+                text("impactor.font", fit(devs[d].name, 21, x1 - x0 - 120), x0 + 14 + o, y0 + 18, 21, f ? kFocused : kNormal, 0x21);
+                text("impactor.font", fit(devs[d].profile, 16, x1 - x0 - 120), x0 + 14 + o, y0 + 42, 16, kDim, 0x21);
+            } else {
+                text("impactor.font", fit(devs[d].name, 19, x1 - x0 - 120), x0 + 14 + o, (y0 + y1) * 0.5f + 1, 19, f ? kFocused : kNormal, 0x21);
+            }
             const int pn = devs[d].player;
             const std::string pl = pn < 0 ? "--" : pn == 0 ? "P1" : "P2";
-            text("impactor.font", f ? "< " + pl + " >" : pl, x1 - 44 + o, y0 + 30, 22, pn < 0 ? kDim : pn == 0 ? kP1 : kP2, 0x22);
+            const bool fixed = devs[d].id == "touch";
+            text("impactor.font", f && !fixed ? "< " + pl + " >" : pl, x1 - 44 + o, (y0 + y1) * 0.5f, 22, pn < 0 ? kDim : pn == 0 ? kP1 : kP2, 0x22);
         }
         // The selected controller's raw input, live.
         const std::string& id = devs[size_t(selected_)].id;
@@ -126,8 +139,8 @@ public:
         text("impactor.font", "LIVE INPUT", kLeftX0 + 16 + o, ry, 18, kAccent, 0x11);
         std::string pressed;
         for (const std::string& n : input_->rawPressed(id)) pressed += (pressed.empty() ? "" : "  ") + n;
-        text("impactor.font", pressed.empty() ? "(press something)" : fit(pressed, 18, 420), kLeftX0 + 16 + o, ry + 26, 18,
-             pressed.empty() ? kDim : kOn, 0x11);
+        text("impactor.font", id == "touch" ? "(touch the screen)" : pressed.empty() ? "(press something)" : fit(pressed, 18, 420),
+             kLeftX0 + 16 + o, ry + 26, 18, pressed.empty() ? kDim : kOn, 0x11);
         const auto axes = input_->rawAxes(id);
         for (size_t a = 0; a < axes.size(); ++a) {
             const float ax = kLeftX0 + 16 + float(a % 2) * 215 + o, ay = ry + 56 + float(a / 2) * 26;
@@ -141,6 +154,26 @@ public:
         text("impactor.font", "BUTTONS: " + fit(devs[size_t(selected_)].name, 22, 420), kRightX0 + 16 + o, kTop - 2, 22, kAccent, 0x11);
         const Input::Bindings& b = input_->bindings(id);
         const bool capturing = input_->capturing();
+        if (isTouch(devs)) {  // the touch screen's settings, then Reset
+            for (int c = 0; c <= Input::kTouchOptions; ++c) {
+                const int r = int(devs.size()) + c;
+                float x0, y0, x1, y1;
+                rowRect(r, int(devs.size()), x0, y0, x1, y1, true);
+                const bool f = r == focus_;
+                if (f) quad(x0 + o, y0, x1 + o, y1, {1, 0.86f, 0.2f, 0.14f});
+                const float cy = (y0 + y1) * 0.5f + 1;
+                if (c == Input::kTouchOptions) {
+                    text("impactor.font", "Reset to Defaults", (x0 + x1) * 0.5f + o, cy, 20, f ? kFocused : kNormal, 0x22);
+                    continue;
+                }
+                text("impactor.font", Input::touchOptionName(c), x0 + 16 + o, cy, 19, f ? kFocused : kNormal, 0x21);
+                const std::string v = input_->touchOptionValue(c);
+                text("impactor.font", f ? "< " + v + " >" : v, x1 - 110 + o, cy, 19, f ? kFocused : kOn, 0x22);
+            }
+            text("impactor.font", "Taps click; a finger on a lane plays it; two fingers swipe; buttons show at the right edge.",
+                 kRightX0 + 16 + o, kTop + 24 + float(Input::kTouchOptions + 1) * kTouchRow + 20, 16, kDim, 0x11);
+            return;
+        }
         for (int c = 0; c < extraRow(devs) + 1; ++c) {
             const int r = int(devs.size()) + c;
             float x0, y0, x1, y1;
@@ -183,7 +216,7 @@ public:
 private:
     static constexpr int kUp = 12, kDown = 14, kLeft = 15, kRight = 13;
     static constexpr float kTop = 168, kBottom = 640, kLeftX0 = 56, kLeftX1 = 520, kRightX0 = 548, kRightX1 = 1224;
-    static constexpr float kDevRow = 60, kBindRow = 25.5f, kClearW = 28;
+    static constexpr float kDevRow = 60, kBindRow = 25.5f, kClearW = 28, kTouchRow = 46;
     static constexpr std::array<float, 4> kTitle{0.95f, 0.95f, 0.95f, 1}, kFocused{1, 0.86f, 0.2f, 1},
         kNormal{0.85f, 0.85f, 0.88f, 1}, kDim{0.55f, 0.55f, 0.6f, 1}, kAccent{1, 0.55f, 0.15f, 1}, kOn{0.3f, 1, 0.35f, 1},
         kP1{0.45f, 0.75f, 1, 1}, kP2{1, 0.5f, 0.45f, 1};
@@ -191,9 +224,12 @@ private:
         std::array<float, 4>{0.2f, 0.85f, 0.25f, 1}, {0.9f, 0.2f, 0.2f, 1}, {0.95f, 0.85f, 0.2f, 1}, {0.25f, 0.45f, 0.95f, 1},
         {0.95f, 0.55f, 0.15f, 1}};
 
-    // The right column after the controls: Reset, then (keyboard) Frets also strum.
+    // The right column after the controls: Reset, then (keyboard) Frets also
+    // strum. The touch screen: its settings, then Reset.
     static int resetRow() { return int(Input::Control::Count); }
+    bool isTouch(const std::vector<Input::Device>& devs) const { return devs[size_t(selected_)].id == "touch"; }
     int extraRow(const std::vector<Input::Device>& devs) const {
+        if (isTouch(devs)) return Input::kTouchOptions;
         return resetRow() + (devs[size_t(selected_)].id == "keyboard" ? 1 : 0);
     }
     int rowCount(const std::vector<Input::Device>& devs) const { return int(devs.size()) + extraRow(devs) + 1; }
@@ -202,9 +238,16 @@ private:
         focus_ = std::clamp(focus_, 0, rowCount(devs) - 1);
     }
     // Row r: a controller (left column) or a binding / Reset (right column).
-    static void rowRect(int r, int devs, float& x0, float& y0, float& x1, float& y1) {
+    static void rowRect(int r, int devs, float& x0, float& y0, float& x1, float& y1, bool touch = false) {
         if (r < devs) {
-            x0 = kLeftX0 + 8, x1 = kLeftX1 - 8, y0 = kTop + 22 + float(r) * kDevRow, y1 = y0 + kDevRow - 4;
+            // Up to the live input box (kBottom - 150): 60 units a row, less with many controllers.
+            const float row = std::min(kDevRow, (kBottom - 160 - (kTop + 22)) / float(std::max(devs, 1)));
+            x0 = kLeftX0 + 8, x1 = kLeftX1 - 8, y0 = kTop + 22 + float(r) * row, y1 = y0 + row - 4;
+        } else if (touch) {  // the touch screen's settings, then Reset
+            r -= devs;
+            x0 = kRightX0 + 8, x1 = kRightX1 - 8;
+            if (r == Input::kTouchOptions) y0 = kTop + 24 + float(r) * kTouchRow + 6, y1 = y0 + 30, x0 = kRightX1 - 260;
+            else y0 = kTop + 24 + float(r) * kTouchRow, y1 = y0 + kTouchRow - 4;
         } else {
             r -= devs;
             x0 = kRightX0 + 8, x1 = kRightX1 - 8, y0 = kTop + 24 + float(r) * kBindRow, y1 = y0 + kBindRow - 1;
@@ -213,7 +256,7 @@ private:
         }
     }
     void setPlayer(const Input::Device& d, int player) {
-        if (d.player == player) return sound("button_error");  // at the end of none, P1, P2
+        if (d.player == player || d.id == "touch") return sound("button_error");  // at the end of none, P1, P2; touch is P1
         input_->setPlayer(d.id, player);
         sound("button_select");
     }
@@ -222,6 +265,12 @@ private:
         if (focus_ < n) return setPlayer(devs[size_t(focus_)], devs[size_t(focus_)].player == 1 ? -1 : devs[size_t(focus_)].player + 1);
         const int c = focus_ - n;
         const std::string& id = devs[size_t(selected_)].id;
+        if (isTouch(devs)) {
+            if (c < Input::kTouchOptions) input_->cycleTouchOption(c, 1);
+            else input_->resetTouchOptions();
+            sound("button_select");
+            return;
+        }
         if (c == resetRow()) {
             input_->resetBindings(id);
             sound("button_select");
