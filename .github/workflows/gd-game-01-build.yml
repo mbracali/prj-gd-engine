@@ -1,20 +1,26 @@
-# Builds gd-game-01 (gd01) for every platform. Called by gd-game-01-ci.yml
-# (pull requests and pushes) and gd-game-01-release.yml (tags).
+# Builds the gd-game-01 (gd01) downloads with the same scripts as
+# gd-game-01/local_build.sh. Called by gd-game-01-release.yml; can also be
+# started by hand (Actions > gd-game-01 build > Run workflow) to get test
+# builds of any branch without releasing. Nothing runs it automatically.
 name: gd-game-01 build
 
 on:
   workflow_call:
     inputs:
       version:
-        description: Version in the package names (the tag's version, or the commit for CI builds)
         type: string
         required: true
       release:
-        description: Release build (DLSS on Linux, APK signed with the release key)
         type: boolean
         default: false
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Name used in the file names
+        type: string
+        default: test
       macos:
-        description: Build macOS too (its runner minutes count 10x on private repos)
+        description: Build macOS too (its minutes count 10x)
         type: boolean
         default: false
 
@@ -26,109 +32,104 @@ env:
 
 jobs:
   windows:
-    # Cross-compiled with MinGW on Fedora (build.sh also builds the Linux
-    # program here, as a compile check with the newest compiler).
     name: Windows
     runs-on: ubuntu-latest
     container: fedora:44
+    timeout-minutes: 20
     env:
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CMAKE_C_COMPILER_LAUNCHER: ccache
       CMAKE_CXX_COMPILER_LAUNCHER: ccache
     steps:
-      - uses: actions/checkout@v4
-      - name: Install toolchains
-        run: dnf install -y gcc-c++ cmake ninja-build ccache SDL3-devel mingw64-gcc-c++ mingw64-SDL3 curl zip tar
-      - uses: actions/cache@v4
+      - uses: actions/checkout@v7
+      - name: Install the MinGW toolchain
+        run: dnf install -y --setopt=install_weak_deps=False cmake ninja-build ccache mingw64-gcc-c++ mingw64-SDL3 zip >/dev/null
+      - uses: actions/cache@v6
         with:
           path: .ccache
-          key: ccache-gd01-fedora-${{ github.sha }}
-          restore-keys: ccache-gd01-fedora-
-      - name: Build
-        run: gd-game-01/engine/build.sh
-      - name: Package
-        working-directory: gd-game-01/engine/dist
-        run: zip -qr "gd01-$V-windows-x64.zip" gd01-windows-x64
-      - uses: actions/upload-artifact@v4
+          key: ccache-gd01-mingw-${{ github.sha }}
+          restore-keys: ccache-gd01-mingw-
+      - run: gd-game-01/engine/build_windows.sh
+      - run: gd-game-01/engine/package.sh windows "$V" out
+      - uses: actions/upload-artifact@v7
         with:
           name: gd01-windows-x64
-          path: gd-game-01/engine/dist/gd01-${{ inputs.version }}-windows-x64.zip
-          retention-days: 7
+          path: gd-game-01/engine/out/
+          retention-days: 3
 
   linux:
-    # Built on Ubuntu 22.04 with SDL3 shipped next to the program: runs on any
+    # Ubuntu 22.04 with SDL3 shipped next to the program: runs on any
     # distribution from 2022 on without installing anything.
     name: Linux
     runs-on: ubuntu-latest
     container: ubuntu:22.04
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/cache@v4
+      - uses: actions/checkout@v7
+      - uses: actions/cache@v6
         with:
           path: gd-game-01/engine/build/portable/sdl3-prefix
           key: sdl3-ubuntu2204-${{ hashFiles('gd-game-01/engine/build_linux_portable.sh') }}
       - name: Fetch the DLSS SDK
-        if: inputs.release
         run: apt-get update -qq && apt-get install -y -qq curl ca-certificates >/dev/null && gd-game-01/tools/fetch_dlss.sh
-      - name: Build
-        run: gd-game-01/engine/build_linux_portable.sh
-      - name: Smoke test
-        run: gd-game-01/engine/dist/gd01-linux-x86_64/gd01 --help
-      - name: Package
-        working-directory: gd-game-01/engine/dist
-        run: tar czf "gd01-$V-linux-x86_64.tar.gz" gd01-linux-x86_64
-      - uses: actions/upload-artifact@v4
+      - run: gd-game-01/engine/build_linux_portable.sh
+      - run: gd-game-01/engine/dist/gd01-linux-x86_64/gd01 --help
+      - run: gd-game-01/engine/package.sh linux "$V" out
+      - uses: actions/upload-artifact@v7
         with:
           name: gd01-linux-x86_64
-          path: gd-game-01/engine/dist/gd01-${{ inputs.version }}-linux-x86_64.tar.gz
-          retention-days: 7
+          path: gd-game-01/engine/out/
+          retention-days: 3
+
+  steamdeck:
+    # Valve's Steam Runtime 3 SDK, the environment Steam runs games in: runs
+    # from Steam's Game Mode and the desktop, with the handheld defaults.
+    name: Steam Deck
+    runs-on: ubuntu-latest
+    container: registry.gitlab.steamos.cloud/steamrt/sniper/sdk:latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - run: gd-game-01/engine/build_linux_steamdeck.sh
+      - run: gd-game-01/engine/dist/gd01-steamdeck/gd01 --help
+      - run: gd-game-01/engine/package.sh steamdeck "$V" out
+      - uses: actions/upload-artifact@v7
+        with:
+          name: gd01-steamdeck
+          path: gd-game-01/engine/out/
+          retention-days: 3
 
   macos:
-    # The engine has not been built on a Mac yet, so a failure here does not
-    # fail the run (remove continue-on-error once it builds).
     name: macOS
-    if: inputs.macos
+    if: inputs.release || inputs.macos
     runs-on: macos-latest
-    continue-on-error: true
+    timeout-minutes: 30
+    continue-on-error: true  # not tested on a real Mac yet; never blocks a release
     steps:
-      - uses: actions/checkout@v4
-      - name: Install dependencies
-        run: brew install sdl3 ninja dylibbundler
-      - name: Build
-        run: |
-          cmake -S gd-game-01/engine -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-          cmake --build build
-      - name: Bundle SDL3 into the app and package
-        run: |
-          app=build/gd01.app
-          dylibbundler -od -b -x "$app/Contents/MacOS/gd01" -d "$app/Contents/Frameworks/" -p @executable_path/../Frameworks/
-          codesign --force --deep --sign - "$app"
-          d=gd01-macos
-          mkdir -p "$d/licenses"
-          cp -R "$app" gd-game-01/engine/README.md LICENSE LICENSE-ADDITIONAL-TERMS.md "$d/"
-          cp gd-game-01/engine/third_party/fidelityfx/LICENSE.txt "$d/licenses/FidelityFX-SDK-LICENSE.txt"
-          cp gd-game-01/engine/third_party/volk/LICENSE.md "$d/licenses/volk-LICENSE.md"
-          ditto -c -k --keepParent "$d" "gd01-$V-macos.zip"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/checkout@v7
+      - run: brew install sdl3 ninja dylibbundler
+      - run: gd-game-01/engine/build_macos.sh
+      - run: gd-game-01/engine/package.sh macos "$V" out
+      - uses: actions/upload-artifact@v7
         with:
           name: gd01-macos
-          path: gd01-${{ inputs.version }}-macos.zip
-          retention-days: 7
+          path: gd-game-01/engine/out/
+          retention-days: 3
 
   android:
     name: Android
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: 21
-      - uses: android-actions/setup-android@v3
+      - uses: android-actions/setup-android@v4
         with:
-          # Its default list includes the obsolete "tools" package, which no longer exists.
           packages: platform-tools ndk;28.2.13676358 cmake;4.1.2 platforms;android-36 build-tools;36.1.0
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: |
             ~/.gradle/caches
@@ -136,8 +137,6 @@ jobs:
             gd-game-01/engine/build/android/SDL3-*
           key: android-gd01-${{ hashFiles('gd-game-01/engine/android/**/*.gradle', 'gd-game-01/engine/android/gradle/wrapper/*.properties', 'gd-game-01/engine/build_android.sh') }}
       - name: Release key
-        id: key
-        if: inputs.release
         env:
           KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
           KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -145,8 +144,7 @@ jobs:
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           if [ -z "$KEYSTORE_B64" ]; then
-            echo "::warning::No ANDROID_KEYSTORE_B64 secret: the APK is not published with this release."
-            echo "signed=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::No ANDROID_KEYSTORE_B64 secret: the APK is signed with a throwaway debug key."
             exit 0
           fi
           echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
@@ -156,16 +154,11 @@ jobs:
             echo "GD01_RELEASE_KEY_ALIAS=$KEY_ALIAS"
             echo "GD01_RELEASE_KEY_PASSWORD=$KEY_PASSWORD"
           } >> "$GITHUB_ENV"
-          echo "signed=true" >> "$GITHUB_OUTPUT"
-      - name: Build
-        run: gd-game-01/engine/build_android.sh
-      - name: Package
-        run: cp gd-game-01/engine/dist/android/gd01.apk "gd01-$V-android.apk"
-      - uses: actions/upload-artifact@v4
-        # CI builds are signed with a throwaway debug key: fine for testing,
-        # never published. Releases need the release key.
-        if: ${{ !inputs.release || steps.key.outputs.signed == 'true' }}
+      - name: Build (arm64, what phones use)
+        run: ABIS=arm64-v8a gd-game-01/engine/build_android.sh
+      - run: gd-game-01/engine/package.sh android "$V" out
+      - uses: actions/upload-artifact@v7
         with:
           name: gd01-android
-          path: gd01-${{ inputs.version }}-android.apk
-          retention-days: 7
+          path: gd-game-01/engine/out/
+          retention-days: 3

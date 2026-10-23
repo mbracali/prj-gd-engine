@@ -14,6 +14,7 @@
 #          otherwise the APK is signed with the Android debug key.
 set -euo pipefail
 cd "$(dirname "$0")"
+. ./build_common.sh
 
 SDL3_VERSION=3.4.18
 export ANDROID_HOME="${ANDROID_HOME:-$HOME/Android/Sdk}"
@@ -31,6 +32,7 @@ fi
 mkdir -p build/android
 SDL3_DIR="$PWD/build/android/SDL3-$SDL3_VERSION"
 if [ ! -f "$SDL3_DIR/CMakeLists.txt" ]; then
+  say "Downloading the SDL3 $SDL3_VERSION source (first time only)..."
   curl -fsSL "https://github.com/libsdl-org/SDL/releases/download/release-$SDL3_VERSION/SDL3-$SDL3_VERSION.tar.gz" \
     | tar xz -C build/android
 fi
@@ -47,13 +49,15 @@ if [ -n "${GD01_RELEASE_KEYSTORE:-}" ]; then
         -PreleaseKeyAlias="$GD01_RELEASE_KEY_ALIAS" -PreleaseKeyPassword="${GD01_RELEASE_KEY_PASSWORD:-$GD01_RELEASE_KEYSTORE_PASSWORD}")
 fi
 
+say "Building the APK with Gradle (ABIs: ${ABIS:-arm64-v8a,x86_64}; Gradle skips what is already up to date)..."
 (cd android && ./gradlew --no-daemon -q assembleRelease -Psdl3Dir="$SDL3_DIR" -Pabis="${ABIS:-arm64-v8a,x86_64}" "${sign[@]}")
 
 APK=build/android/gradle/outputs/apk/release/app-release.apk
 BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
-"$BT/apksigner" verify "$APK"
+"$BT/apksigner" verify "$APK" 2>/dev/null
+if [ ${#sign[@]} -gt 0 ]; then say "APK signed with the release key"; else say "APK signed with the Android debug key (no release key given)"; fi
 rm -rf dist/android
 mkdir -p dist/android
 cp "$APK" dist/android/gd01.apk
 cp README.md dist/android/
-echo "Built: dist/android/gd01.apk"
+say "Ready: dist/android/gd01.apk"

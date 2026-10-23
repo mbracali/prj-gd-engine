@@ -82,9 +82,58 @@ Saves and settings live in the `gd-engine/gd01` folder of your user data
 (`~/.local/share`, `%APPDATA%`, `~/Library/Application Support`). Saves from
 the earlier name (`gh1re`) are copied over on the first start.
 
+## Default settings
+
+Each download starts with Enhanced Settings tuned for its system (change
+them in Options > Enhanced Settings; your changes are kept).
+"Apply Steam Deck Settings" sets the Steam Deck column on any PC.
+
+| Setting | Linux | Steam Deck | Windows | macOS | Android |
+|---|---|---|---|---|---|
+| Screen Mode | Windowed | Full Screen | Windowed | Windowed | Full Screen |
+| In-Game Max FPS | 120 | 60 | 120 | 120 | 60 |
+| Show FPS Counter | on | off | on | on | off |
+| Internal Resolution | 1080p | 800p | 1440p | 1440p | 900p |
+| Sharper Text & Sprites | on | on | on | on | off |
+| Anti-Aliasing / AI Upscaling | None | None | None | None | None |
+| Bokeh Effect | Stronger | Stronger | Stronger | Stronger | Stronger |
+| Particles FX | on | on | on | on | on |
+| Bloom | High | Medium | High | High | Medium |
+| Cinematic Color | on | on | on | on | on |
+| Color Grading | Off | Off | Off | Off | Off |
+| Film Grain | Light | Off | Light | Light | Off |
+| Chromatic Aberration | on | on | on | on | on |
+| Anamorphic Light Streaks | off | off | off | off | off |
+| Ambient Occlusion | on | off | on | on | off |
+| Sharpening | Low | Off | Low | Low | Low |
+| Blur on Star Power | High | Medium | High | High | Light |
+| All Band Mates Cast Shadows | on | off | on | on | off |
+| More Lights on Venues | Subtle | Subtle | Subtle | Subtle | Subtle |
+| Dust in Light Beams | on | off | on | on | off |
+| Add Fog to the Ground | Low | None | Low | Low | None |
+| Disable Shaky Camera | off | off | off | off | off |
+| Controls | Keyboard (touch off) | Keyboard (touch off) | Keyboard (touch off) | Keyboard (touch off) | Touch |
+
+In the menus every controller works: any gamepad, guitar or keyboard
+navigates and selects, and on a screen with nothing to choose ("press any
+button") a click or a tap continues.
+
 ## Building
 
-See [BUILD_INSTRUCTIONS.md](BUILD_INSTRUCTIONS.md). In short, on Fedora:
+The quickest way, producing the same files a release publishes, in
+`local_builds/`:
+
+```sh
+./local_build.sh                  # the build for your system
+./local_build.sh steamdeck        # or: linux, steamdeck, windows, macos, android, all
+```
+
+Or double-click a file in [build_commands/](build_commands/): `build-linux.sh`,
+`build-steamdeck.sh`, `build-windows.sh` (Linux) / `build-windows.bat`
+(Windows, with MSYS2), `build-macos.command`, `build-android.sh`, `build-all.sh`.
+Each opens a terminal, builds, and tells you where the files are.
+
+See [BUILD_INSTRUCTIONS.md](BUILD_INSTRUCTIONS.md) for the toolchains. Developer build on Fedora:
 
 ```sh
 sudo dnf install gcc-c++ cmake ninja-build SDL3-devel mingw64-gcc-c++ mingw64-SDL3
@@ -100,6 +149,7 @@ engine/dist/gd01-linux-x86_64/gd01 --selftest "path/to/Guitar Hero (USA).iso"
 | `engine/` | The program (C++20, SDL3, OpenGL; Vulkan for the AI upscalers) |
 | `tools/` | Python readers for the game's formats, Ghidra scripts, `fetch_dlss.sh` |
 | `docs/` | Research notes: `FINDINGS.md` (rules and formats), one note per system, `backlog.md` |
+| `local_build.sh` | Builds the release downloads into `local_builds/` (`build_commands/`: double-click versions) |
 | `CHANGELOG.md` | What changed in each release |
 
 ## Licence

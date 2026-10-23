@@ -915,13 +915,11 @@ public:
         frame(kBoxX0 + o, kBoxY0, kBoxX1 + o, kBoxY1, 1.5f, {1, 1, 1, 0.12f});
         text("rokk.font", "ENHANCED SETTINGS", 90 + o, 40, 62, kTitle, 0x11);
         text("impactor.font", "Features of this PC version, beyond the original game", 92 + o, 110, 20, kDim, 0x11);
-        // The user-files result for a few seconds, else the Steam Deck note.
+        // The user-files (or Steam Deck) result for a few seconds.
         if (statusMs_ > 0) {
             std::array<float, 4> c = kOn;
             c[3] = std::min(1.0f, statusMs_ / 500);
             text("impactor.font", status_, 92 + o, 134, 18, c, 0x11);
-        } else if (deckOn()) {
-            text("impactor.font", "Steam Deck mode is on: the other options are locked", 92 + o, 134, 18, kAccent, 0x11);
         }
         for (size_t r = 0; r < rows_.size(); ++r) drawRow(int(r));
         // More above / below.
@@ -952,9 +950,12 @@ private:
         static const std::vector<Item> k = {
             {Kind::Section, "deck", "STEAM DECK MODE", true,
              "Settings for handheld PCs such as the Steam Deck."},
-            {Kind::Check, "steam_deck", "Steam Deck Mode", true,
-             "Tunes the game down to run well on a handheld: 60 FPS, a 1280 x 800 internal resolution, borderless full "
-             "screen and the original sprites. While it is on, every other option is locked at its default."},
+            {Kind::Button, "steam_deck", "Apply Steam Deck Settings", true,
+             "Sets every option to what runs best on a handheld PC such as the Steam Deck: full screen at 60 FPS, a "
+             "1280 x 800 internal resolution, and lighter effects (medium bloom, no ambient occlusion, film grain, "
+             "fog or extra shadows). You can still change any option afterwards. The Steam Deck download starts "
+             "with these settings.",
+             {{"", "Apply"}}},
             {Kind::Separator, "", "", true, ""},
             {Kind::Section, "controls", "CONTROLS & GAMEPAD", true, "Mouse, touch, guitars and gamepads."},
             {Kind::Check, "mouse", "Enable Mouse Selection", true,
@@ -1020,7 +1021,7 @@ private:
              "the gameplay is the same."},
             {Kind::Choice, "bloom", "Bloom", true,
              "A soft glow around the brightest lights of the venue, like a camera lens.",
-             {{"off", "Off"}, {"low", "Low"}, {"high", "High"}}},
+             {{"off", "Off"}, {"low", "Low"}, {"medium", "Medium"}, {"high", "High"}}},
             {Kind::Check, "cinematic_color", "Cinematic Color", true,
              "A filmic colour curve with a gentle grade and vignette on the venue, for a richer, more cinematic image."},
             {Kind::Choice, "color_grade", "Color Grading", true,
@@ -1086,9 +1087,9 @@ private:
              "Loads content left unused on the original disc into the game."},
             {Kind::Check, "no_fail", "No Fail Mode", true, "The rock meter cannot fail you: every song plays to the end."},
             {Kind::Check, "autoplay", "Autoplay", true, "The game plays every note of a song by itself, without a miss."},
-            {Kind::Choice, "hopo_mode", "Hammer-ons & Pull-offs", true,
-             "Notes with a coloured top can be played without strumming. Original: as on the PS2, after a strum "
-             "while a fret stays held, from 40 ms before the note, and a wrong fret locks the note out. Forgiving: no "
+            {Kind::Choice, "hopo_mode", "Forgiving Hammer-ons & Pull-offs", true,
+             "Notes with a coloured top can be played without strumming. Off (as on the PS2): after a strum while a "
+             "fret stays held, from 40 ms before the note, and a wrong fret locks the note out. On (forgiving): no "
              "strum or held fret needed after the previous note was hit, as early as a strum may be, and a wrong "
              "fret can be corrected.",
              {{"original", "Original"}, {"forgiving", "Forgiving"}}},
@@ -1172,12 +1173,14 @@ private:
     }
 
     // -- values
-    bool deckOn() { return host_.enhancedSetting("steam_deck"); }
     bool settingOn(const char* key) {
         std::string v = host_.enhancedValue(key);
         return v.empty() ? host_.enhancedSetting(key) : v != "none" && v != "off";
     }
-    bool editable(const Item& it) { return it.ready && (std::string(it.key) == "steam_deck" || !deckOn()); }
+    bool editable(const Item& it) { return it.ready; }
+    // A choice of exactly two values is shown and used as a check box: ticked
+    // is the second value (e.g. Hammer-ons & Pull-offs: Original / Forgiving).
+    static bool isToggle(const Item& it) { return it.kind == Kind::Choice && it.options.size() == 2; }
     static int optionIndex(const Item& it, const std::string& v) {
         for (size_t k = 0; k < it.options.size(); ++k)
             if (v == it.options[k].value) return int(k);
@@ -1208,13 +1211,18 @@ private:
             return;
         case Kind::Choice: {
             if (!editable(it)) return sound("button_error");
+            if (isToggle(it)) {
+                setValue(it, it.options[optionIndex(it, host_.enhancedValue(it.key)) == 1 ? 0 : 1].value);
+                rebuild();
+                sound("button_select");
+                return;
+            }
             dropdown_ = focus_;
             ddFocus_ = optionIndex(it, host_.enhancedValue(it.key));
             sound("button_select");
             return;
         }
         case Kind::Button:
-            // The user files and the calibration work in Steam Deck mode too.
             if (!it.ready) return sound("button_error");
             sound("button_select");
             if (std::string(it.key) == "calibrate") return calibStart();
@@ -1299,16 +1307,17 @@ private:
         const std::array<float, 4> nameC = f ? kFocused : locked ? kDim : kNormal;
         // A long name next to a dropdown is drawn smaller to fit before it.
         float nameH = 23;
-        if (it.kind == Kind::Choice)
+        if (it.kind == Kind::Choice && !isToggle(it))
             if (float w = host_.textWidth("impactor.font", it.name, 23), room = kDdX0 - kNameX - 14; w > room) nameH = 23 * room / w;
         text("impactor.font", it.name, kNameX + o, cy + 1, nameH, nameC, 0x21);
         if (!it.ready) warning(kNameX + o + host_.textWidth("impactor.font", it.name, 23) + 10, cy);
         const std::array<float, 4> ctrl = locked ? kDim : f ? kFocused : kNormal;
-        switch (it.kind) {
+        const Kind shown = isToggle(it) ? Kind::Check : it.kind;
+        switch (shown) {
         case Kind::Check: {
             const float x1 = kCtrlX1 + o, x0 = x1 - 24;
             frame(x0, cy - 12, x1, cy + 12, 2.5f, ctrl);
-            if (host_.enhancedSetting(it.key)) {
+            if (isToggle(it) ? optionIndex(it, host_.enhancedValue(it.key)) == 1 : host_.enhancedSetting(it.key)) {
                 auto c = locked ? kDim : kOn;
                 line(x0 + 5, cy + 1, x0 + 10, cy + 7, 4, c);
                 line(x0 + 10, cy + 7, x0 + 20, cy - 7, 4, c);

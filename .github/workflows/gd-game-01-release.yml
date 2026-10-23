@@ -1,48 +1,88 @@
-# Push a tag gd-game-01/vX.Y.Z (or vX.Y.Z-alpha / -beta / -rc.N) to build every
-# platform and publish a GitHub Release with the packages, SHA256SUMS.txt,
-# how-to-play notes and the version's notes from gd-game-01/CHANGELOG.md.
+# A merge into main that changes gd-game-01 releases it, when its version
+# (project(gd01 VERSION X.Y.Z) in gd-game-01/engine/CMakeLists.txt) has no
+# release yet: the repo guard and every platform's build run, then the release
+# page gets the downloads, SHA256SUMS.txt, how-to-play notes and the version's
+# section of gd-game-01/CHANGELOG.md, tagged gd-game-01/vX.Y.Z.
+# A merge without a new version does nothing (one quick check).
 # See docs/release-process.md.
 name: gd-game-01 release
 
 on:
   push:
-    tags: ["gd-game-01/v*"]
+    branches: [main]
+    paths: ["gd-game-01/**"]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: gd-game-01-release
+  cancel-in-progress: false
+
 jobs:
-  version:
+  check:
+    name: New version?
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       version: ${{ steps.v.outputs.version }}
+      new: ${{ steps.v.outputs.new }}
     steps:
+      - uses: actions/checkout@v7
       - id: v
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          v="${GITHUB_REF_NAME#gd-game-01/v}"
-          echo "$v" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta|rc)(\.[0-9]+)?)?$' || { echo "::error::Tag $GITHUB_REF_NAME is not gd-game-01/vX.Y.Z[-alpha|-beta|-rc.N]"; exit 1; }
+          v="$(sed -n 's/^project(gd01 VERSION \([0-9.]*\).*/\1/p' gd-game-01/engine/CMakeLists.txt)"
           echo "version=$v" >> "$GITHUB_OUTPUT"
+          if gh release view "gd-game-01/v$v" >/dev/null 2>&1; then
+            echo "new=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::gd-game-01 v$v is already released; bump the version in gd-game-01/engine/CMakeLists.txt to release again."
+            exit 0
+          fi
+          if ! grep -q "^## \[$v\]" gd-game-01/CHANGELOG.md; then
+            echo "::error::gd-game-01/CHANGELOG.md needs a '## [$v] - YYYY-MM-DD' section for the release notes"; exit 1
+          fi
+          echo "new=true" >> "$GITHUB_OUTPUT"
+
+  guard:
+    name: Repo guard
+    needs: check
+    if: needs.check.outputs.new == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - run: python3 .github/scripts/repo_guard.py
+      - uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
 
   build:
-    needs: version
+    needs: check
+    if: needs.check.outputs.new == 'true'
     uses: ./.github/workflows/gd-game-01-build.yml
     with:
-      version: ${{ needs.version.outputs.version }}
+      version: ${{ needs.check.outputs.version }}
       release: true
-      macos: true
     secrets: inherit
 
   publish:
-    needs: [version, build]
+    name: Publish the release
+    needs: [check, guard, build]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: write
     env:
-      V: ${{ needs.version.outputs.version }}
+      V: ${{ needs.check.outputs.version }}
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
@@ -56,9 +96,6 @@ jobs:
             on && /^## \[/ { exit }
             on { print }
           ' gd-game-01/CHANGELOG.md > changes.md
-          if [ ! -s changes.md ]; then
-            echo "::error::gd-game-01/CHANGELOG.md has no '## [$V]' section"; exit 1
-          fi
           {
             echo "## How to play"
             echo
@@ -68,7 +105,10 @@ jobs:
             echo "|---|---|---|"
             echo "| **Windows** 10/11 | \`gd01-$V-windows-x64.zip\` | Extract the zip, run \`gd01.exe\`, click the window and pick your \`.iso\`. |"
             echo "| **Linux** (any distribution from 2022 on) | \`gd01-$V-linux-x86_64.tar.gz\` | Extract it, run \`gd01\`, click the window and pick your \`.iso\`. |"
-            echo "| **macOS** | \`gd01-$V-macos.zip\` (when present) | Extract, right-click \`gd01.app\` > Open (it is not notarised), pick your \`.iso\`. |"
+            echo "| **Steam Deck** | \`gd01-$V-steamdeck.tar.gz\` | In Desktop Mode extract it, copy your \`.iso\` into the folder, add \`gd01\` to Steam (Add a Non-Steam Game) and start it from Game Mode. See \`STEAM-DECK.txt\`. Settings are tuned for the Deck. |"
+            if [ -f "dist/gd01-$V-macos.zip" ]; then
+              echo "| **macOS** | \`gd01-$V-macos.zip\` | Extract, right-click \`gd01.app\` > Open (it is not notarised), pick your \`.iso\`. |"
+            fi
             echo "| **Android** 7+ | \`gd01-$V-android.apk\` | Install the APK, open \"GD Engine 01\", tap the screen and pick your \`.iso\`. |"
             echo
             echo "The game remembers where your \`.iso\` is. Your saves and settings stay on your device."
@@ -80,9 +120,9 @@ jobs:
             echo "---"
             echo "Based on Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. Free, noncommercial: PolyForm Noncommercial 1.0.0 plus \`LICENSE-ADDITIONAL-TERMS.md\` (included in every download)."
           } > notes.md
-      - name: Publish the release
+      - name: Publish
         run: |
           pre=""
           case "$V" in *-*) pre="--prerelease" ;; esac
-          gh release create "$GITHUB_REF_NAME" dist/* $pre \
+          gh release create "gd-game-01/v$V" dist/* --target "$GITHUB_SHA" $pre \
             --title "gd01 $V: Guitar Hero (PS2) reimplementation" --notes-file notes.md

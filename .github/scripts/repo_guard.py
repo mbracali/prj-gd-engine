@@ -18,7 +18,7 @@ MAX_BYTES = 20 * 1024 * 1024
 FORBIDDEN = re.compile(
     r"\.(iso|bin|cue|img|chd|xex|ark|hdr|vgs|bik|mogg|apk|aab|keystore|jks|gpr)$"
     r"|\.milo"
-    r"|(^|/)(original_rom|original_files|extracted[^/]*|analysis|ghidra|decomp|rips)/"
+    r"|(^|/)(original_rom|original_files|original_isos|extracted[^/]*|analysis|ghidra|decomp|rips|local_builds)/"
     r"|(^|/)third_party/dlss/(?!README\.md$)",
     re.IGNORECASE,
 )
