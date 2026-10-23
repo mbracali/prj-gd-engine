@@ -1,0 +1,25 @@
+# Every push and pull request: no game data, RE output, large files, signing
+# keys or personal paths (.github/scripts/repo_guard.py), and no secrets (gitleaks).
+name: repo guard
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Files
+        run: python3 .github/scripts/repo_guard.py
+      - name: Secrets
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ github.token }}

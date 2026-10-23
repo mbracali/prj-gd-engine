@@ -1,0 +1,73 @@
+# Push a tag gd-game-01/vX.Y.Z (or vX.Y.Z-alpha / -beta / -rc.N) to build every
+# platform and create a DRAFT GitHub Release with the packages, SHA256SUMS.txt
+# and the version's notes from gd-game-01/CHANGELOG.md. Review the draft, then
+# publish it by hand. See docs/release-process.md.
+name: gd-game-01 release
+
+on:
+  push:
+    tags: ["gd-game-01/v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - id: v
+        run: |
+          v="${GITHUB_REF_NAME#gd-game-01/v}"
+          echo "$v" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta|rc)(\.[0-9]+)?)?$' || { echo "::error::Tag $GITHUB_REF_NAME is not gd-game-01/vX.Y.Z[-alpha|-beta|-rc.N]"; exit 1; }
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: version
+    uses: ./.github/workflows/gd-game-01-build.yml
+    with:
+      version: ${{ needs.version.outputs.version }}
+      release: true
+      macos: true
+    secrets: inherit
+
+  publish:
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      V: ${{ needs.version.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
+      - name: Release notes
+        run: |
+          awk -v v="$V" '
+            $0 ~ "^## \\[" v "\\]" { on = 1; next }
+            on && /^## \[/ { exit }
+            on { print }
+          ' gd-game-01/CHANGELOG.md > notes.md
+          if [ ! -s notes.md ]; then
+            echo "::error::gd-game-01/CHANGELOG.md has no '## [$V]' section"; exit 1
+          fi
+          cat >> notes.md <<'NOTE'
+
+          ---
+          **No game data is included.** You need your own copy of Guitar Hero (PS2, 2005): the game reads it from your disc image.
+          Based on Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. Licence: PolyForm Noncommercial 1.0.0 plus LICENSE-ADDITIONAL-TERMS.md (no sale; modifications must be published).
+          NOTE
+      - name: Draft release
+        run: |
+          pre=""
+          case "$V" in *-*) pre="--prerelease" ;; esac
+          gh release create "$GITHUB_REF_NAME" dist/* --draft $pre \
+            --title "gd01 $V (Guitar Hero PS2 reimplementation)" --notes-file notes.md

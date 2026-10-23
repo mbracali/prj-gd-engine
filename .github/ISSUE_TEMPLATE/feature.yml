@@ -1,0 +1,17 @@
+name: Feature
+description: A new feature or an enhanced (PC-only) option.
+labels: [feature]
+body:
+  - type: dropdown
+    id: game
+    attributes:
+      label: Game
+      options: [gd-game-01 (Guitar Hero, PS2), All games / engine]
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What and why
+    validations:
+      required: true
