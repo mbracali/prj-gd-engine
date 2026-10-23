@@ -79,8 +79,8 @@ inputs() {  # the files a build is made from
   local common=("$engine/src" "$engine/CMakeLists.txt" "$engine/third_party" "$engine/README.md" "$engine/res" "$engine/cmake"
                 "$engine/build_common.sh" "$engine/package.sh" "$repo/LICENSE" "$repo/LICENSE-ADDITIONAL-TERMS.md")
   case "$1" in
-    linux) echo "${common[@]}" "$engine/build_linux_portable.sh" "$engine/linux" ;;
-    steamdeck) echo "${common[@]}" "$engine/build_linux_steamdeck.sh" "$engine/linux" ;;
+    linux) echo "${common[@]}" "$engine/build_linux_portable.sh" ;;
+    steamdeck) echo "${common[@]}" "$engine/build_linux_steamdeck.sh" ;;
     windows) echo "${common[@]}" "$engine/build_windows.sh" ;;
     macos) echo "${common[@]}" "$engine/build_macos.sh" ;;
     android) echo "${common[@]}" "$engine/build_android.sh" "$engine/android" ;;
@@ -154,7 +154,6 @@ build_linux() {
     rm -rf "$d" && mkdir -p "$d/licenses"
     cp "$engine/build/native/gd01" "$engine/README.md" "$repo/LICENSE" "$repo/LICENSE-ADDITIONAL-TERMS.md" "$d/"
     cp "$engine/res/gd01_icon_512.png" "$d/gd01.png"
-    cp "$engine/linux/add-to-app-menu.sh" "$d/"
     local sdl
     sdl="$(ldd "$d/gd01" | awk '/libSDL3\.so/ {print $3}')"
     [ -n "$sdl" ] && cp -L "$sdl" "$d/"

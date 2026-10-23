@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstdlib>
 #include <fstream>
 #include <iterator>
@@ -70,11 +71,18 @@ const char* const kRockBandMappings[] = {
     "rightshoulder:b5,back:b8,start:b9,guide:b12,dpup:h0.1,dpdown:h0.4,dpleft:h0.8,dpright:h0.2,rightx:a2,righty:a3,",
 };
 
-// Touch: the top-right corner pauses; the HUD's Star Power meter area deploys (menu units).
+// Touch (menu units): the pause corner's area (top right, or mirrored top
+// left); the HUD's Star Power meter area deploys.
 constexpr float kPauseX0 = 1160, kPauseY1 = 110;
 constexpr float kMeterX0 = 900, kMeterX1 = 1200, kMeterY0 = 430;
 constexpr uint64_t kChordNs = 30000000;   // fingers this close strum once
 constexpr uint64_t kTwoFingerNs = 250000000;
+constexpr float kSlide = 22;              // a finger that moves farther slides (no tap)
+constexpr float kSwipe = 60;              // a two-finger swipe moves both fingers this far up or down
+// [I] The on-screen buttons sit at the right edge, where the menus have the
+// least to show (menu units); the song's pause button in the pause corner.
+constexpr float kButtonX = 1246, kButtonR = 30, kPauseR = 28;
+constexpr uint64_t kSameNs = 80000000;    // the same press from two devices (menus)
 
 const char* const kControlKeys[] = {"green", "red", "yellow", "blue", "orange", "strum_up", "strum_down", "whammy",
                                     "star_power", "start", "select", "back", "menu_up", "menu_down", "menu_left", "menu_right"};
@@ -198,6 +206,19 @@ void Input::close() {
 }
 
 void Input::emit(std::vector<InputEvent>& out, Action a, bool down, uint64_t ts, ControllerMode mode, int player) {
+    if (!inGame()) {  // the menus: one press from two devices at once acts once
+        const int k = int(a);
+        if (down) {
+            Recent& r = recent_[size_t(k)];
+            if (r.ns && ts >= r.ns && ts - r.ns < kSameNs && r.device != device_) {
+                dropped_.insert({device_, k});
+                return;
+            }
+            r = {ts, device_};
+        } else if (dropped_.erase({device_, k})) {
+            return;
+        }
+    }
     if (player == 0) lastMode_ = mode;
     out.push_back({a, down, ts, mode, player});
 }
@@ -241,6 +262,10 @@ void Input::load() {
         SDL_Log("controllers.json: %s", ex.what());
         return;
     }
+    const Json& t = root["touch"];
+    const char* const kTouchKeys[] = {"buttons", "swipe_up", "swipe_down", "pause_corner"};
+    for (int i = 0; i < kTouchOptions; ++i)
+        if (t[kTouchKeys[i]].type == Json::Type::Number) touchOpt_[size_t(i)] = std::clamp(int(t[kTouchKeys[i]].n), 0, 2);
     for (const auto& [guid, d] : root["devices"].o) {
         if (d["player"].type == Json::Type::Number) players_[guid] = std::clamp(int(d["player"].n), -1, 1);
         if (guid == "keyboard") kbFretsStrum_ = d["frets_strum"].truthy();
@@ -293,6 +318,10 @@ void Input::save() const {
     }
     Json root = Json::object();
     root.set("devices", devs);
+    Json t = Json::object();
+    const char* const kTouchKeys[] = {"buttons", "swipe_up", "swipe_down", "pause_corner"};
+    for (int i = 0; i < kTouchOptions; ++i) t.set(kTouchKeys[i], Json::number(touchOpt_[size_t(i)]));
+    root.set("touch", t);
     std::ofstream out(prefPath("controllers.json"));
     out << root.dump(2) << "\n";
     if (!out) SDL_Log("could not save controllers.json");
@@ -311,6 +340,13 @@ const Input::Bindings& Input::bindingsFor(const std::string& guid, Profile p) co
 void Input::handle(const SDL_Event& e, std::vector<InputEvent>& out) {
     if (!loaded_) load();
     switch (e.type) {
+    case SDL_EVENT_JOYSTICK_ADDED:
+        // A controller SDL has no gamepad mapping for (some PS2 adapters,
+        // guitars, arcade sticks) gets a generic one, so it shows in the
+        // Gamepads screen and its buttons can be bound; SDL then announces it
+        // as a gamepad.
+        if (!SDL_IsGamepad(e.jdevice.which)) addGenericMapping(e.jdevice.which);
+        break;
     case SDL_EVENT_GAMEPAD_ADDED: {
         SDL_JoystickID id = e.gdevice.which;
         if (pads_.count(id)) break;
@@ -328,6 +364,8 @@ void Input::handle(const SDL_Event& e, std::vector<InputEvent>& out) {
         np.name = SDL_GetGamepadName(pad) ? SDL_GetGamepadName(pad) : "Gamepad";
         // The axes' rest values as connected (a whammy bar rests at -32768).
         for (int a = 0; a < SDL_GAMEPAD_AXIS_COUNT; ++a) np.axes[size_t(a)] = np.rest[size_t(a)] = SDL_GetGamepadAxis(pad, SDL_GamepadAxis(a));
+        // Some report zeros until their first report: the rest values settle first.
+        np.settleNs = SDL_GetTicksNS() + 300000000;
         // Its chosen player unless a connected device holds it, else the
         // lowest free one, else none (a third pad works the menus only).
         np.slot = -1;
@@ -338,8 +376,8 @@ void Input::handle(const SDL_Event& e, std::vector<InputEvent>& out) {
             for (int s = 0; s < 2 && np.slot < 0; ++s)
                 if (!slotTaken(s, nullptr)) np.slot = s;
         pads_[id] = np;
-        SDL_Log("Controller connected: %s (%s, %s)", np.name.c_str(), profileName(profile),
-                np.slot < 0 ? "no player" : np.slot == 0 ? "player 1" : "player 2");
+        SDL_Log("Controller connected: %s (%04x:%04x, %s, %s)", np.name.c_str(), SDL_GetGamepadVendorForID(id),
+                SDL_GetGamepadProductForID(id), profileName(profile), np.slot < 0 ? "no player" : np.slot == 0 ? "player 1" : "player 2");
         break;
     }
     case SDL_EVENT_GAMEPAD_REMOVED:
@@ -353,6 +391,8 @@ void Input::handle(const SDL_Event& e, std::vector<InputEvent>& out) {
         if (auto it = pads_.find(e.gbutton.which); it != pads_.end() && e.gbutton.button < SDL_GAMEPAD_BUTTON_COUNT) {
             Pad& p = it->second;
             p.buttons[e.gbutton.button] = e.gbutton.down;
+            device_ = int64_t(it->first);
+            if (e.gbutton.down) touchUsed_ = false;
             if (e.gbutton.down && captureFrom("pad:" + std::to_string(it->first), btn(SDL_GamepadButton(e.gbutton.button)))) break;
             if (capturing_ && captureId_ == "pad:" + std::to_string(it->first)) break;
             update(p, e.gbutton.timestamp, out);
@@ -363,6 +403,7 @@ void Input::handle(const SDL_Event& e, std::vector<InputEvent>& out) {
             Pad& p = it->second;
             const int a = e.gaxis.axis;
             p.axes[size_t(a)] = e.gaxis.value;
+            device_ = int64_t(it->first);
             const std::string id = "pad:" + std::to_string(it->first);
             if (capturing_ && captureId_ == id) {
                 int d = int(e.gaxis.value) - int(captureRest_[size_t(a)]);
@@ -379,10 +420,16 @@ void Input::handle(const SDL_Event& e, std::vector<InputEvent>& out) {
     case SDL_EVENT_FINGER_DOWN:
     case SDL_EVENT_FINGER_UP:
     case SDL_EVENT_FINGER_CANCELED:
+        device_ = -2;
         if (touch_) touchEvent(e.tfinger, e.type == SDL_EVENT_FINGER_DOWN, out);
+        break;
+    case SDL_EVENT_FINGER_MOTION:
+        if (touch_) touchMotion(e.tfinger);
         break;
     case SDL_EVENT_KEY_DOWN:
     case SDL_EVENT_KEY_UP:
+        device_ = -1;
+        if (e.key.down) touchUsed_ = false;
         if (!e.key.repeat) keyEvent(e.key, out);
         break;
     default: break;
@@ -467,6 +514,10 @@ bool Input::sourceActive(const Pad& p, const Source& s, bool wasDown) const {
 
 void Input::update(Pad& p, uint64_t ts, std::vector<InputEvent>& out) {
     const Bindings& b = bindingsFor(p.guid, p.profile);
+    if (ts < p.settleNs) {  // just connected: its axes' rest is what they report now; nothing is pressed yet
+        p.rest = p.axes;
+        return;
+    }
     const bool joypad = p.profile == Profile::Joypad;
     // The analog whammy: the first bound axis, from its rest (a bar resting at
     // -32768 spans the whole range; a centred stick either way).
@@ -548,6 +599,7 @@ const Input::Pad* Input::padById(const std::string& id) const { return const_cas
 std::vector<Input::Device> Input::devices() const {
     std::vector<Device> d;
     d.push_back({"keyboard", "Keyboard", profileName(Profile::Keyboard), keyboardSlot()});
+    if (touch_) d.push_back({"touch", "Touch Screen", "Touch: taps, lanes, swipes, on-screen buttons", 0});
     std::vector<SDL_JoystickID> ids;
     for (const auto& [id, p] : pads_) ids.push_back(id);
     std::sort(ids.begin(), ids.end());
@@ -559,6 +611,7 @@ std::vector<Input::Device> Input::devices() const {
 }
 
 void Input::setPlayer(const std::string& id, int player) {
+    if (id == "touch") return;  // the touch screen always plays as player 1
     player = std::clamp(player, -1, 1);
     Pad* mine = padById(id);
     if (!mine && id != "keyboard") return;
@@ -693,26 +746,147 @@ void Input::resetBindings(const std::string& id) {
     save();
 }
 
+void Input::addGenericMapping(SDL_JoystickID id) {
+    SDL_Joystick* j = SDL_OpenJoystick(id);
+    if (!j) return;
+    const int buttons = SDL_GetNumJoystickButtons(j), axes = SDL_GetNumJoystickAxes(j), hats = SDL_GetNumJoystickHats(j);
+    std::string name = SDL_GetJoystickName(j) ? SDL_GetJoystickName(j) : "Controller";
+    char guid[64];
+    SDL_GUIDToString(SDL_GetJoystickGUID(j), guid, sizeof guid);
+    SDL_CloseJoystick(j);
+    if (buttons <= 0) return;  // sensors and the like
+    for (char& c : name)
+        if (c == ',') c = ' ';
+    // Buttons and axes in order; the first hat is the d-pad. The Gamepads
+    // screen rebinds anything (captured from this mapping).
+    static const char* const kButtons[] = {"a", "b", "x", "y", "leftshoulder", "rightshoulder", "back", "start",
+                                           "leftstick", "rightstick", "guide", "misc1", "paddle1", "paddle2",
+                                           "paddle3", "paddle4", "misc2", "misc3", "misc4", "misc5", "misc6", "touchpad"};
+    static const char* const kAxes[] = {"leftx", "lefty", "rightx", "righty", "lefttrigger", "righttrigger"};
+    std::string m = std::string(guid) + "," + name + " (generic)";
+    for (int b = 0; b < buttons && b < int(std::size(kButtons)); ++b) m += std::string(",") + kButtons[b] + ":b" + std::to_string(b);
+    for (int a = 0; a < axes && a < int(std::size(kAxes)); ++a) m += std::string(",") + kAxes[a] + ":a" + std::to_string(a);
+    if (hats > 0) m += ",dpup:h0.1,dpright:h0.2,dpdown:h0.4,dpleft:h0.8";
+    m += ",";
+    if (SDL_AddGamepadMapping(m.c_str()) < 0) SDL_Log("generic mapping for %s: %s", name.c_str(), SDL_GetError());
+    else SDL_Log("Controller without a known mapping: %s (%d buttons, %d axes, %d hats), generic mapping added", name.c_str(), buttons, axes, hats);
+}
+
 // ------------------------------------------------------------------- touch
+
+const char* Input::touchOptionName(int i) {
+    static const char* const kNames[] = {"On-Screen Buttons", "Two-Finger Swipe Up (in a song)",
+                                         "Two-Finger Swipe Down (in a song)", "Pause Corner (in a song)"};
+    return i >= 0 && i < kTouchOptions ? kNames[i] : "";
+}
+
+std::string Input::touchOptionValue(int i) const {
+    static const char* const kValues[kTouchOptions][3] = {{"When touched", "Always", "Off"},
+                                                          {"Star Power", "Pause", "Nothing"},
+                                                          {"Star Power", "Pause", "Nothing"},
+                                                          {"Top right", "Top left", "None"}};
+    return i >= 0 && i < kTouchOptions ? kValues[i][touchOpt_[size_t(i)]] : "";
+}
+
+void Input::cycleTouchOption(int i, int dir) {
+    if (i < 0 || i >= kTouchOptions) return;
+    touchOpt_[size_t(i)] = (touchOpt_[size_t(i)] + (dir < 0 ? 2 : 1)) % 3;
+    save();
+}
+
+void Input::resetTouchOptions() {
+    touchOpt_ = {0, 0, 1, 0};
+    save();
+}
+
+std::vector<Input::TouchButton> Input::touchButtons() const {
+    std::vector<TouchButton> b;
+    if (!touch_ || touchOpt_[0] == 2 || (touchOpt_[0] == 0 && !touchUsed_)) return b;
+    if (inGame()) {
+        if (touchOpt_[3] == 0) b.push_back({Action::Start, 1280 - 42, 46, kPauseR});
+        if (touchOpt_[3] == 1) b.push_back({Action::Start, 42, 46, kPauseR});
+        return b;
+    }
+    b.push_back({Action::Up, kButtonX, 300, kButtonR});
+    b.push_back({Action::Down, kButtonX, 386, kButtonR});
+    b.push_back({Action::Start, kButtonX, 472, kButtonR});
+    return b;
+}
+
+// A two-finger swipe: in a song what the settings say, in the menus Up / Down.
+void Input::touchGesture(bool up, bool game, uint64_t ts, std::vector<InputEvent>& out) {
+    Action a = up ? Action::Up : Action::Down;
+    if (game) {
+        const int what = touchOpt_[up ? 1 : 2];
+        if (what == 2) return;
+        a = what == 0 ? Action::StarPower : Action::Start;
+    }
+    emit(out, a, true, ts, ControllerMode::Joypad, 0);
+    emit(out, a, false, ts, ControllerMode::Joypad, 0);
+}
+
+void Input::touchMotion(const SDL_TouchFingerEvent& f) {
+    auto it = fingers_.find(f.fingerID);
+    if (it == fingers_.end() || !toMenu_) return;
+    Finger& fg = it->second;
+    toMenu_(f.x, f.y, fg.mx, fg.my);
+    if (std::abs(fg.mx - fg.x0) > kSlide || std::abs(fg.my - fg.y0) > kSlide) fg.moved = true;
+}
 
 void Input::touchEvent(const SDL_TouchFingerEvent& f, bool down, std::vector<InputEvent>& out) {
     const uint64_t ts = f.timestamp;
-    if (!down) {  // up or cancelled: release its fret
+    const bool game = inGame();
+    if (!down) {  // lifted or cancelled
         auto it = fingers_.find(f.fingerID);
         if (it == fingers_.end()) return;
-        if (it->second.fret >= 0) emit(out, Action(int(Action::Fret0) + it->second.fret), false, ts, ControllerMode::Joypad, it->second.player);
+        Finger fg = it->second;
         fingers_.erase(it);
+        if (toMenu_) toMenu_(f.x, f.y, fg.mx, fg.my);
+        if (std::abs(fg.mx - fg.x0) > kSlide || std::abs(fg.my - fg.y0) > kSlide) fg.moved = true;
+        if (fg.button >= 0) return emit(out, Action(fg.button), false, ts, ControllerMode::Joypad, 0);
+        if (fg.fret >= 0) return emit(out, Action(int(Action::Fret0) + fg.fret), false, ts, ControllerMode::Joypad, fg.player);
+        if (fg.done) return;
+        // With its partner finger (landed together, not on a lane or button):
+        // both slid the same way up or down -> a swipe; neither slid -> in a
+        // song, a two-finger tap (Star Power).
+        for (auto& [id, o] : fingers_) {
+            if (o.fret >= 0 || o.button >= 0 || o.done || !fg.multi || !o.multi) continue;
+            if (fg.downNs > o.downNs ? fg.downNs - o.downNs > kTwoFingerNs : o.downNs - fg.downNs > kTwoFingerNs) continue;
+            const float dy = fg.my - fg.y0, ody = o.my - o.y0;
+            if (std::abs(dy) > kSwipe && std::abs(ody) > kSwipe && (dy < 0) == (ody < 0) && std::abs(dy) > std::abs(fg.mx - fg.x0)) {
+                touchGesture(dy < 0, game, ts, out);
+                o.done = true;
+            } else if (game && !fg.moved && !o.moved) {
+                emit(out, Action::StarPower, true, ts, ControllerMode::Joypad, 0);
+                emit(out, Action::StarPower, false, ts, ControllerMode::Joypad, 0);
+                o.done = true;
+            }
+            break;
+        }
+        // The menus: a lone finger that did not slide is a click where it landed.
+        if (!game && !fg.multi && !fg.moved) menuTaps_.push_back({fg.x0, fg.y0});
         return;
     }
+    touchUsed_ = true;
     float mx = 0, my = 0;
     if (toMenu_) toMenu_(f.x, f.y, mx, my);
-    Finger fg{0, -1, mx, my, ts};
-    const bool game = lanes_[0].active || lanes_[1].active;
+    Finger fg{0, -1, mx, my, ts, mx, my};
+    // An on-screen button: held while the finger stays down.
+    for (const TouchButton& b : touchButtons())
+        if (std::hypot(mx - b.x, my - b.y) <= b.r * 1.3f) {
+            fg.button = int(b.action);
+            fingers_[f.fingerID] = fg;
+            return emit(out, b.action, true, ts, ControllerMode::Joypad, 0);
+        }
+    // Landing with another free finger (within 250 ms): a two-finger tap or swipe.
+    for (auto& [id, o] : fingers_)
+        if (o.fret < 0 && o.button < 0 && ts - o.downNs < kTwoFingerNs) o.multi = fg.multi = true;
     if (!game) {
-        menuTaps_.push_back({mx, my});
+        fingers_[f.fingerID] = fg;
         return;
     }
-    if (mx >= kPauseX0 && my <= kPauseY1) {
+    const bool corner = touchOpt_[3] == 0 ? mx >= kPauseX0 && my <= kPauseY1 : touchOpt_[3] == 1 && mx <= 1280 - kPauseX0 && my <= kPauseY1;
+    if (corner) {
         emit(out, Action::Start, true, ts, ControllerMode::Joypad, 0);
         emit(out, Action::Start, false, ts, ControllerMode::Joypad, 0);
         return;
@@ -734,6 +908,7 @@ void Input::touchEvent(const SDL_TouchFingerEvent& f, bool down, std::vector<Inp
         }
     }
     if (fg.fret >= 0) {
+        fg.multi = false;
         emit(out, Action(int(Action::Fret0) + fg.fret), true, ts, ControllerMode::Joypad, fg.player);
         PendingStrum& s = strum_[size_t(fg.player)];
         if (!s.on) s.on = true, s.dueNs = ts + kChordNs;
@@ -741,13 +916,11 @@ void Input::touchEvent(const SDL_TouchFingerEvent& f, bool down, std::vector<Inp
         fingers_[f.fingerID] = fg;
         return;
     }
-    // Off the lanes: the Star Power meter, or a second finger above the highway.
-    bool sp = mx >= kMeterX0 && mx <= kMeterX1 && my >= kMeterY0;
-    for (const auto& [id, other] : fingers_)
-        if (other.fret < 0 && ts - other.downNs < kTwoFingerNs) sp = true;
-    if (sp) {
+    // Off the lanes: a tap on the Star Power meter deploys at once.
+    if (mx >= kMeterX0 && mx <= kMeterX1 && my >= kMeterY0 && !fg.multi) {
         emit(out, Action::StarPower, true, ts, ControllerMode::Joypad, 0);
         emit(out, Action::StarPower, false, ts, ControllerMode::Joypad, 0);
+        fg.done = true;
     }
     fingers_[f.fingerID] = fg;
 }

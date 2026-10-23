@@ -633,7 +633,7 @@ constexpr const char* kGd01Credits = R"dta(
 ("" "github.com/mbracali/prj-gd-engine" "")
 ()
 ("MAIN DEVELOPERS")
-("" "BRACA DEVELOPER" "")
+("" "GD-Engine Devs" "")
 ("" "Anthropic Claude (yeah... What can I say)" "")
 ()
 ("THANKS, OPEN SOURCE COMMUNITY")
@@ -964,7 +964,9 @@ private:
             {Kind::Check, "touch", "Enable Touch Controls", true,
              "Play on a touch screen. In the menus a tap is a click. In a song, touch a lane at the bottom of the "
              "highway when its note arrives: it plays the fret and the strum at once (hold the finger for long notes, "
-             "several fingers for chords). Two fingers above the highway deploy Star Power; the top corner pauses."},
+             "several fingers for chords). Two fingers above the highway deploy Star Power; the top corner pauses. "
+             "On-screen Up / Down / Start buttons appear once you touch the screen; two-finger swipes move up and "
+             "down. Set the buttons, swipes and pause corner in GAMEPADS > Touch Screen. Always on in the Android app."},
             {Kind::Check, "rockband", "Enable Rock Band Guitars", true,
              "Plays with the USB Rock Band guitars for Xbox 360 and PlayStation 3 / 4: the five frets (the solo frets "
              "too), the strum bar, the whammy bar, and tilt or Select for Star Power."},
@@ -1177,7 +1179,12 @@ private:
         std::string v = host_.enhancedValue(key);
         return v.empty() ? host_.enhancedSetting(key) : v != "none" && v != "off";
     }
-    bool editable(const Item& it) { return it.ready; }
+    bool editable(const Item& it) {
+#ifdef __ANDROID__
+        if (std::string(it.key) == "touch") return false;  // always on: a phone may have no other control
+#endif
+        return it.ready;
+    }
     // A choice of exactly two values is shown and used as a check box: ticked
     // is the second value (e.g. Hammer-ons & Pull-offs: Original / Forgiving).
     static bool isToggle(const Item& it) { return it.kind == Kind::Choice && it.options.size() == 2; }

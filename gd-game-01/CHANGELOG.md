@@ -6,6 +6,46 @@ matches the tag's version.
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-10-23
+
+### Added
+- Touch: on-screen Up / Down / START buttons at the right edge of the menus
+  and a pause button in a song. By default they appear once you touch the
+  screen, and hide again when a keyboard or controller is used.
+- Touch: two-finger swipes move up and down in the menus; in a song, swipe
+  up deploys Star Power and swipe down pauses (both can be changed).
+- The touch screen is listed in GAMEPADS ("Touch Screen", always P1), with
+  its settings: on-screen buttons (when touched / always / off), each swipe
+  (Star Power / pause / nothing) and the pause corner (top right / top left /
+  none).
+- Controllers SDL has no mapping for get a generic one, so every connected
+  controller shows in GAMEPADS and can be set up there.
+- Linux and Steam Deck downloads add the game, with its icon, to the
+  desktop's application menu on the first start, so the window and taskbar
+  show the icon (set `GD01_NO_DESKTOP_ENTRY=1` to skip). This replaces
+  `add-to-app-menu.sh`.
+
+### Fixed
+- One press counted two or three times in the menus (most visible on the
+  Steam Deck): a controller seen twice (the device and Steam's virtual copy),
+  or Steam's desktop layout typing Enter for A, now acts once.
+- The Steam Deck's controls missing when the game is started from Steam:
+  Steam's virtual gamepad is now used when Steam hides the real one.
+- In the menus a tap clicks when the finger lifts and only if it did not
+  slide, so swipes no longer click by accident.
+- GAMEPADS fits more controllers (the rows shrink instead of running into the
+  live input box).
+- Icons: the small sizes (taskbar, title bar, file lists, launchers) show the
+  badge's centre so the letters stay readable; the Windows icon uses classic
+  bitmaps; the Android adaptive icon fills its shape without a black ring.
+
+### Changed
+- Android: touch controls are always on (a phone may have no other control).
+- Texts: "GD01" in the loading, save and splash texts is now "GD-Engine", and
+  "BRACA DEVELOPER" is now "GD-Engine Devs".
+- The splash line says "free and source-available" (the licence is not an
+  open-source one).
+
 ## [1.1.0] - 2026-10-23
 
 ### Added

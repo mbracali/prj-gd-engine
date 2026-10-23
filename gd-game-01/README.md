@@ -118,6 +118,13 @@ In the menus every controller works: any gamepad, guitar or keyboard
 navigates and selects, and on a screen with nothing to choose ("press any
 button") a click or a tap continues.
 
+**Touch** (always on in the Android app; Enhanced Settings > Enable Touch
+Controls elsewhere): tap to click; in a song a finger on a lane plays it;
+on-screen Up / Down / START buttons (menus) and a pause button (songs) show
+once you touch the screen; two-finger swipes move up / down (in a song: Star
+Power / pause). Set the buttons, swipes and pause corner in GAMEPADS >
+Touch Screen.
+
 ## Building
 
 The quickest way, producing the same files a release publishes, in

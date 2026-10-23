@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(gd01 VERSION 1.1.0 LANGUAGES C CXX)
+project(gd01 VERSION 1.1.1 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -144,13 +144,16 @@ endif()
 # The icon (res/, made by tools/make_icons.py from the repo's res/icon_full.jpg):
 # the PNG built into the program (window icon, first screen), the .exe's icon
 # on Windows, the .app's on macOS. Android's launcher icons are in android/.
-set(GD01_ICON_CPP ${CMAKE_CURRENT_BINARY_DIR}/gd01_icon_data.cpp)
-add_custom_command(OUTPUT ${GD01_ICON_CPP}
-  COMMAND ${CMAKE_COMMAND} -DIN=${CMAKE_CURRENT_SOURCE_DIR}/res/gd01_icon.png -DOUT=${GD01_ICON_CPP}
-          -DNAME=kGd01IconPng -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_file.cmake
-  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/res/gd01_icon.png ${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_file.cmake
-  VERBATIM)
-target_sources(gd01 PRIVATE ${GD01_ICON_CPP})
+set(GD01_ICON_FILES gd01_icon gd01_icon_small)
+set(GD01_ICON_SYMBOLS kGd01IconPng kGd01IconSmallPng)
+foreach(file symbol IN ZIP_LISTS GD01_ICON_FILES GD01_ICON_SYMBOLS)
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${file}_data.cpp
+    COMMAND ${CMAKE_COMMAND} -DIN=${CMAKE_CURRENT_SOURCE_DIR}/res/${file}.png -DOUT=${CMAKE_CURRENT_BINARY_DIR}/${file}_data.cpp
+            -DNAME=${symbol} -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_file.cmake
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/res/${file}.png ${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_file.cmake
+    VERBATIM)
+  target_sources(gd01 PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/${file}_data.cpp)
+endforeach()
 if(WIN32)
   enable_language(RC)
   file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/gd01.rc "1 ICON \"${CMAKE_CURRENT_SOURCE_DIR}/res/gd01.ico\"\n")

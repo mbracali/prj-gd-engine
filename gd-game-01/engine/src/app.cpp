@@ -267,6 +267,7 @@ private:
     void frame();
     void drawNeedData();
     void drawLogo();
+    void drawTouchButtons();
     int logoTexture_ = -1;  // the badge on the first screen (0: could not load)
     void drawMenu();
     void drawResults();
@@ -325,6 +326,9 @@ private:
     Json enhanced_ = Json::object();  // Enhanced Settings (enhanced.json)
     // A setting's value in effect: saved, else its default.
     Json enhanced(const std::string& key) const {
+#ifdef __ANDROID__
+        if (key == "touch") return Json::boolean(true);  // a phone may have no other control
+#endif
         auto def = enhancedDefaults().find(key);
         if (enhanced_.has(key)) return enhanced_[key];
         return def != enhancedDefaults().end() ? def->second : Json();
@@ -1822,6 +1826,41 @@ void App::onAction(const InputEvent& e) {
     }
 }
 
+// The touch screen's on-screen buttons (Input::touchButtons): a dark,
+// see-through disc with a light rim and its symbol, over everything.
+void App::drawTouchButtons() {
+    for (const Input::TouchButton& b : input_.touchButtons()) {
+        std::vector<Vertex> v;
+        auto disc = [&](float r, SDL_Color c) {
+            constexpr int kSeg = 32;
+            for (int i = 0; i < kSeg; ++i) {
+                float a0 = 6.2831853f * float(i) / kSeg, a1 = 6.2831853f * float(i + 1) / kSeg;
+                v.push_back({b.x, b.y, 0, 0, 0, c.r, c.g, c.b, c.a});
+                v.push_back({b.x + r * std::cos(a0), b.y + r * std::sin(a0), 0, 0, 0, c.r, c.g, c.b, c.a});
+                v.push_back({b.x + r * std::cos(a1), b.y + r * std::sin(a1), 0, 0, 0, c.r, c.g, c.b, c.a});
+            }
+        };
+        disc(b.r, {230, 230, 235, 120});      // the rim
+        disc(b.r - 3, {10, 10, 14, 120});     // the face
+        const SDL_Color ink{240, 240, 245, 220};
+        auto tri = [&](float x0, float y0, float x1, float y1, float x2, float y2) {
+            v.push_back({x0, y0, 0, 0, 0, ink.r, ink.g, ink.b, ink.a});
+            v.push_back({x1, y1, 0, 0, 0, ink.r, ink.g, ink.b, ink.a});
+            v.push_back({x2, y2, 0, 0, 0, ink.r, ink.g, ink.b, ink.a});
+        };
+        const float k = b.r * 0.45f;
+        const bool song = screen_ == Screen::Playing && b.action == Action::Start && b.y < 100;
+        if (b.action == Action::Up) tri(b.x, b.y - k, b.x - k, b.y + k * 0.7f, b.x + k, b.y + k * 0.7f);
+        if (b.action == Action::Down) tri(b.x - k, b.y - k * 0.7f, b.x + k, b.y - k * 0.7f, b.x, b.y + k);
+        if (song) {  // pause: two bars
+            const float w = k * 0.35f, h = k;
+            for (float x : {b.x - k * 0.55f, b.x + k * 0.2f}) tri(x, b.y - h, x + w, b.y - h, x + w, b.y + h), tri(x, b.y - h, x + w, b.y + h, x, b.y + h);
+        }
+        renderer_.draw(v.data(), v.size(), 0, Blend::Alpha);
+        if (b.action == Action::Start && !song) renderer_.textCentered(b.x, b.y - 7, 1.0f, ink, "START");
+    }
+}
+
 // The Guitar Dream Engine badge above the first screen's text.
 void App::drawLogo() {
     if (logoTexture_ < 0) {
@@ -1829,7 +1868,7 @@ void App::drawLogo() {
         logoTexture_ = appIconImage(icon) ? renderer_.createTexture(icon) : 0;
     }
     if (logoTexture_ > 0) renderer_.image(logoTexture_, kScreenW / 2 - 100, 70, 200, 200, {255, 255, 255, 255}, Blend::Alpha);
-    else renderer_.textCentered(kScreenW / 2, 240, 3, kAccent, "GD01");
+    else renderer_.textCentered(kScreenW / 2, 240, 3, kAccent, "GD-Engine");
 }
 
 void App::drawNeedData() {
@@ -2127,8 +2166,14 @@ int App::run() {
 #ifdef __ANDROID__
     SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");  // the back button is the game's Back, not "leave the app"
 #endif
+    // Started by Steam (Game Mode, or any game Steam starts), Steam hides the
+    // real controllers from the game (SDL_GAMECONTROLLER_IGNORE_DEVICES) and
+    // offers its virtual gamepads instead, which SDL skips unless allowed: take
+    // them, or the Steam Deck's controls would be missing.
+    if (SDL_getenv("SDL_GAMECONTROLLER_IGNORE_DEVICES") || SDL_getenv("SDL_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT"))
+        SDL_setenv_unsafe("SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD", "1", 0);  // read from the environment (SDL_gamepad.c)
     // The app id ties the window to its launcher entry (the taskbar icon on
-    // Wayland; Linux downloads: add-to-app-menu.sh writes io.github.mbracali.gd01.desktop).
+    // Wayland; Linux downloads write io.github.mbracali.gd01.desktop, installDesktopEntry).
     SDL_SetAppMetadata("GD Engine 01", GD01_VERSION, "io.github.mbracali.gd01");
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMEPAD)) {
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, kAppTitle, SDL_GetError(), nullptr);
@@ -2161,6 +2206,7 @@ int App::run() {
 #endif
     );
     setAppWindowIcon(window_);
+    installDesktopEntry();
     std::string glError;
     bool glOk = window_ && renderer_.init(window_, glError);
     gpu::started(glOk, renderer_.gpuName());
@@ -2245,6 +2291,7 @@ int App::run() {
         renderer_.beginFrame({movie_ ? uint8_t(0) : uint8_t(12), movie_ ? uint8_t(0) : uint8_t(10), movie_ ? uint8_t(0) : uint8_t(16), 255});
         if (movie_) movieFrame();
         else frame();
+        if (!movie_) drawTouchButtons();
         if (enhancedOn("fps_counter")) drawFpsCounter();
         captureDebugScreenshot();
         renderer_.endFrame();
