@@ -1,0 +1,52 @@
+# ---- Game data: copyrighted. Never commit, in any game folder. ----
+*.iso
+*.ISO
+*.bin
+*.cue
+*.img
+*.chd
+*.xex
+*.ark
+*.hdr
+*.vgs
+*.bik
+*.mogg
+*.milo*
+**/original_rom/
+**/original_files/
+**/extracted*/
+**/rips/
+
+# ---- Reverse-engineering output: contains original code. Never commit. ----
+**/analysis/
+**/ghidra/
+**/decomp/
+*.gpr
+*.rep/
+
+# ---- NVIDIA DLSS SDK: downloaded by tools/fetch_dlss.sh ----
+**/third_party/dlss/*
+!**/third_party/dlss/README.md
+
+# ---- Build output and signing keys ----
+**/build/
+**/build_*/
+**/dist/
+**/.gradle/
+**/android/app/.cxx/
+**/local.properties
+*.apk
+*.aab
+*.keystore
+*.jks
+__pycache__/
+*.pyc
+
+# ---- Editors / OS / tools ----
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+.claude/
+compile_commands.json

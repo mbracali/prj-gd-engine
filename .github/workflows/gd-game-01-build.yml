@@ -1,0 +1,171 @@
+# Builds gd-game-01 (gd01) for every platform. Called by gd-game-01-ci.yml
+# (pull requests and pushes) and gd-game-01-release.yml (tags).
+name: gd-game-01 build
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: Version in the package names (the tag's version, or the commit for CI builds)
+        type: string
+        required: true
+      release:
+        description: Release build (DLSS on Linux, APK signed with the release key)
+        type: boolean
+        default: false
+      macos:
+        description: Build macOS too (its runner minutes count 10x on private repos)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  V: ${{ inputs.version }}
+
+jobs:
+  windows:
+    # Cross-compiled with MinGW on Fedora (build.sh also builds the Linux
+    # program here, as a compile check with the newest compiler).
+    name: Windows
+    runs-on: ubuntu-latest
+    container: fedora:44
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CMAKE_C_COMPILER_LAUNCHER: ccache
+      CMAKE_CXX_COMPILER_LAUNCHER: ccache
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchains
+        run: dnf install -y gcc-c++ cmake ninja-build ccache SDL3-devel mingw64-gcc-c++ mingw64-SDL3 curl zip tar
+      - uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-gd01-fedora-${{ github.sha }}
+          restore-keys: ccache-gd01-fedora-
+      - name: Build
+        run: gd-game-01/engine/build.sh
+      - name: Package
+        working-directory: gd-game-01/engine/dist
+        run: zip -qr "gd01-$V-windows-x64.zip" gd01-windows-x64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gd01-windows-x64
+          path: gd-game-01/engine/dist/gd01-${{ inputs.version }}-windows-x64.zip
+          retention-days: 7
+
+  linux:
+    # Built on Ubuntu 22.04 with SDL3 shipped next to the program: runs on any
+    # distribution from 2022 on without installing anything.
+    name: Linux
+    runs-on: ubuntu-latest
+    container: ubuntu:22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: gd-game-01/engine/build/portable/sdl3-prefix
+          key: sdl3-ubuntu2204-${{ hashFiles('gd-game-01/engine/build_linux_portable.sh') }}
+      - name: Fetch the DLSS SDK
+        if: inputs.release
+        run: apt-get update -qq && apt-get install -y -qq curl ca-certificates >/dev/null && gd-game-01/tools/fetch_dlss.sh
+      - name: Build
+        run: gd-game-01/engine/build_linux_portable.sh
+      - name: Smoke test
+        run: gd-game-01/engine/dist/gd01-linux-x86_64/gd01 --help
+      - name: Package
+        working-directory: gd-game-01/engine/dist
+        run: tar czf "gd01-$V-linux-x86_64.tar.gz" gd01-linux-x86_64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gd01-linux-x86_64
+          path: gd-game-01/engine/dist/gd01-${{ inputs.version }}-linux-x86_64.tar.gz
+          retention-days: 7
+
+  macos:
+    # The engine has not been built on a Mac yet, so a failure here does not
+    # fail the run (remove continue-on-error once it builds).
+    name: macOS
+    if: inputs.macos
+    runs-on: macos-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: brew install sdl3 ninja dylibbundler
+      - name: Build
+        run: |
+          cmake -S gd-game-01/engine -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build
+      - name: Bundle SDL3 into the app and package
+        run: |
+          app=build/gd01.app
+          dylibbundler -od -b -x "$app/Contents/MacOS/gd01" -d "$app/Contents/Frameworks/" -p @executable_path/../Frameworks/
+          codesign --force --deep --sign - "$app"
+          d=gd01-macos
+          mkdir -p "$d/licenses"
+          cp -R "$app" gd-game-01/engine/README.md LICENSE LICENSE-ADDITIONAL-TERMS.md "$d/"
+          cp gd-game-01/engine/third_party/fidelityfx/LICENSE.txt "$d/licenses/FidelityFX-SDK-LICENSE.txt"
+          cp gd-game-01/engine/third_party/volk/LICENSE.md "$d/licenses/volk-LICENSE.md"
+          ditto -c -k --keepParent "$d" "gd01-$V-macos.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gd01-macos
+          path: gd01-${{ inputs.version }}-macos.zip
+          retention-days: 7
+
+  android:
+    name: Android
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: android-actions/setup-android@v3
+        with:
+          # Its default list includes the obsolete "tools" package, which no longer exists.
+          packages: platform-tools ndk;28.2.13676358 cmake;4.1.2 platforms;android-36 build-tools;36.1.0
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            gd-game-01/engine/build/android/SDL3-*
+          key: android-gd01-${{ hashFiles('gd-game-01/engine/android/**/*.gradle', 'gd-game-01/engine/android/gradle/wrapper/*.properties', 'gd-game-01/engine/build_android.sh') }}
+      - name: Release key
+        id: key
+        if: inputs.release
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ]; then
+            echo "::warning::No ANDROID_KEYSTORE_B64 secret: the APK is not published with this release."
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          {
+            echo "GD01_RELEASE_KEYSTORE=$RUNNER_TEMP/release.jks"
+            echo "GD01_RELEASE_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD"
+            echo "GD01_RELEASE_KEY_ALIAS=$KEY_ALIAS"
+            echo "GD01_RELEASE_KEY_PASSWORD=$KEY_PASSWORD"
+          } >> "$GITHUB_ENV"
+          echo "signed=true" >> "$GITHUB_OUTPUT"
+      - name: Build
+        run: gd-game-01/engine/build_android.sh
+      - name: Package
+        run: cp gd-game-01/engine/dist/android/gd01.apk "gd01-$V-android.apk"
+      - uses: actions/upload-artifact@v4
+        # CI builds are signed with a throwaway debug key: fine for testing,
+        # never published. Releases need the release key.
+        if: ${{ !inputs.release || steps.key.outputs.signed == 'true' }}
+        with:
+          name: gd01-android
+          path: gd01-${{ inputs.version }}-android.apk
+          retention-days: 7

@@ -1,0 +1,68 @@
+plugins {
+    id 'com.android.application'
+}
+
+// SDL3 source tree (its Java glue matches the native SDL3 built from it);
+// build_android.sh passes -Psdl3Dir=..., or set it in local.properties.
+def sdl3Dir = project.findProperty('sdl3Dir') ?: System.getenv('GD01_SDL3_DIR')
+if (!sdl3Dir) throw new GradleException('Pass -Psdl3Dir=<SDL3 source dir> (see engine/build_android.sh)')
+def abis = (project.findProperty('abis') ?: 'arm64-v8a,x86_64').split(',')
+
+android {
+    namespace = "io.github.mbracali.gd01"
+    compileSdk 36
+    ndkVersion = "28.2.13676358"
+    defaultConfig {
+        applicationId "io.github.mbracali.gd01"
+        minSdkVersion 24
+        targetSdkVersion 36
+        versionCode 1
+        versionName "0.1.0"
+        externalNativeBuild {
+            cmake {
+                arguments "-DANDROID_PLATFORM=android-24", "-DANDROID_STL=c++_static",
+                          "-DGD01_SDL3_SOURCE=${sdl3Dir}"
+                abiFilters(*abis)
+            }
+        }
+    }
+    signingConfigs {
+        // Debug-keystore signed release, so the APK installs as is. Pass
+        // -PreleaseKeystore=... (+ password/alias properties) for your own key.
+        release {
+            if (project.hasProperty('releaseKeystore')) {
+                storeFile file(project.property('releaseKeystore'))
+                storePassword project.property('releaseKeystorePassword')
+                keyAlias project.property('releaseKeyAlias')
+                keyPassword project.property('releaseKeyPassword')
+            } else {
+                storeFile file("${System.getProperty('user.home')}/.android/debug.keystore")
+                storePassword 'android'
+                keyAlias 'androiddebugkey'
+                keyPassword 'android'
+            }
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.release
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_11
+        targetCompatibility JavaVersion.VERSION_11
+    }
+    sourceSets.main.java.srcDirs += "${sdl3Dir}/android-project/app/src/main/java"
+    externalNativeBuild {
+        cmake {
+            path '../../CMakeLists.txt'
+            version '4.1.2'
+            buildStagingDirectory "${rootDir}/../build/android/cxx"
+        }
+    }
+    buildDir = "${rootDir}/../build/android/gradle"
+    lint {
+        abortOnError = false
+    }
+}

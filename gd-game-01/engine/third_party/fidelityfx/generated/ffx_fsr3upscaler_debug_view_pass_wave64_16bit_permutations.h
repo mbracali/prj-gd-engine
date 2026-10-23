@@ -1,0 +1,5 @@
+// ffx_fsr3upscaler_debug_view_pass_wave64_16bit_permutations.h: generated; the port uses the wave32 permutations.
+#pragma once
+#include "ffx_fsr3upscaler_debug_view_pass_16bit_permutations.h"
+#define g_ffx_fsr3upscaler_debug_view_pass_wave64_16bit_IndirectionTable g_ffx_fsr3upscaler_debug_view_pass_16bit_IndirectionTable
+#define g_ffx_fsr3upscaler_debug_view_pass_wave64_16bit_PermutationInfo g_ffx_fsr3upscaler_debug_view_pass_16bit_PermutationInfo

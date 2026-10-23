@@ -1,0 +1,34 @@
+name: Bug
+description: Something crashes, breaks or behaves wrongly.
+labels: [bug]
+body:
+  - type: dropdown
+    id: game
+    attributes:
+      label: Game
+      options: [gd-game-01 (Guitar Hero, PS2)]
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version and platform
+      placeholder: "gd01 0.1.0-alpha, Windows 11, RTX 3060"
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: "1. Career > Easy > Tier 1 > I Love Rock 'n Roll ..."
+  - type: textarea
+    id: log
+    attributes:
+      label: Log or screenshot
+      description: Never attach game files or parts of your disc image.
