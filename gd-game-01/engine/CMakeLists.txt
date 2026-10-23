@@ -1,0 +1,136 @@
+cmake_minimum_required(VERSION 3.24)
+project(gh1re VERSION 0.1.0 LANGUAGES C CXX)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+  set(CMAKE_BUILD_TYPE Release)
+endif()
+
+if(ANDROID)
+  # Android (engine/build_android.sh): SDL3 built from source next to the game
+  # as libSDL3.so; the game is libgh1re.so, loaded by the Java activity
+  # (android/app/src/main/java/io/github/gh1re/GH1Activity.java).
+  set(SDL_SHARED ON CACHE BOOL "" FORCE)
+  set(SDL_STATIC OFF CACHE BOOL "" FORCE)
+  set(SDL_TEST_LIBRARY OFF CACHE BOOL "" FORCE)
+  add_subdirectory(${GH1RE_SDL3_SOURCE} SDL3 EXCLUDE_FROM_ALL)
+  add_library(gh1re SHARED)
+else()
+  find_package(SDL3 REQUIRED CONFIG)
+  add_executable(gh1re WIN32 MACOSX_BUNDLE)
+endif()
+
+target_sources(gh1re PRIVATE
+  src/main.cpp
+  src/app.cpp
+  src/audio/mixer.cpp
+  src/audio/adpcm.cpp
+  src/audio/spu.cpp
+  src/audio/sound_bank.cpp
+  src/audio/synth.cpp
+  src/audio/crowd_audio.cpp
+  src/data/bitmap.cpp
+  src/data/dta.cpp
+  src/data/game_data.cpp
+  src/data/inflate.cpp
+  src/data/iso9660.cpp
+  src/data/midi.cpp
+  src/data/vgs.cpp
+  src/game/chart.cpp
+  src/game/player.cpp
+  src/game/rules.cpp
+  src/game/song_db.cpp
+  src/input/input.cpp
+  src/render/crowd_renderer.cpp
+  src/render/gl.cpp
+  src/render/highway.cpp
+  src/render/post_fx.cpp
+  src/render/vk_upscaler.cpp
+  src/render/renderer.cpp
+  src/render/scene_renderer.cpp
+  src/render/image_enhance.cpp
+  src/render/text_layout.cpp
+  src/render/track_renderer.cpp
+  src/render/venue_renderer.cpp
+  src/game/venue_camera.cpp
+  src/game/venue_script.cpp
+  src/script/script.cpp
+  src/scene/anim.cpp
+  src/scene/particles.cpp
+  src/video/mpeg2.cpp
+  src/video/pss.cpp
+  src/ui/panel.cpp
+  src/ui/select_panels.cpp
+  src/ui/tutorial_panel.cpp
+  src/ui/game_panels.cpp
+  src/ui/career_objects.cpp
+  src/game/guitar_anim.cpp
+  src/game/guitar_walk.cpp
+  src/game/campaign.cpp
+  src/data/json.cpp
+  src/ui/ui_resources.cpp
+  src/ui/pc_strings.cpp
+  src/ui/gamepad_panel.cpp
+  src/ui/ui_system.cpp
+  src/platform/gpu_select.cpp
+  src/scene/character.cpp
+  src/scene/clip.cpp
+  src/scene/scene.cpp
+)
+target_include_directories(gh1re PRIVATE src)
+target_link_libraries(gh1re PRIVATE SDL3::SDL3)
+
+# AI upscaling (render/vk_upscaler.cpp): Vulkan loaded at run time through
+# volk, AMD FidelityFX FSR 3.1 (third_party/fidelityfx) and, on Linux x86-64,
+# NVIDIA DLSS (third_party/dlss: the NGX static library and the DLSS model
+# library, copied next to the executable).
+if(ANDROID)
+  # No Vulkan upscalers on Android (FSR 3.1 / DLSS 4 need the desktop GL
+  # interop): the stub reports them unavailable.
+  get_target_property(GH1RE_SRC gh1re SOURCES)
+  list(REMOVE_ITEM GH1RE_SRC src/render/vk_upscaler.cpp)
+  set_target_properties(gh1re PROPERTIES SOURCES "${GH1RE_SRC}")
+  target_sources(gh1re PRIVATE src/render/vk_upscaler_stub.cpp src/platform/android_data.cpp)
+  target_compile_definitions(gh1re PRIVATE GH1RE_DLSS=0)
+  target_link_libraries(gh1re PRIVATE android log)
+else()
+add_subdirectory(third_party/fidelityfx)
+target_include_directories(gh1re SYSTEM PRIVATE third_party/vulkan third_party/volk third_party/fidelityfx/include)
+target_link_libraries(gh1re PRIVATE ffx_fsr3 volk ${CMAKE_DL_LIBS})
+set(GH1RE_DLSS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/dlss)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64" AND EXISTS ${GH1RE_DLSS_DIR}/lib/Linux_x86_64/libnvsdk_ngx.a)
+  target_compile_definitions(gh1re PRIVATE GH1RE_DLSS=1)
+  target_include_directories(gh1re SYSTEM PRIVATE ${GH1RE_DLSS_DIR}/include)
+  target_link_libraries(gh1re PRIVATE ${GH1RE_DLSS_DIR}/lib/Linux_x86_64/libnvsdk_ngx.a)
+  file(GLOB GH1RE_DLSS_MODEL ${GH1RE_DLSS_DIR}/lib/Linux_x86_64/libnvidia-ngx-dlss.so.*)
+  add_custom_command(TARGET gh1re POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${GH1RE_DLSS_MODEL} $<TARGET_FILE_DIR:gh1re>)
+elseif(MSVC AND EXISTS ${GH1RE_DLSS_DIR}/lib/Windows_x86_64/x64/nvsdk_ngx_s.lib)
+  # Windows: NVIDIA ships the NGX library for MSVC only (not in the MinGW
+  # build); add lib/Windows_x86_64 from the DLSS SDK to third_party/dlss.
+  target_compile_definitions(gh1re PRIVATE GH1RE_DLSS=1)
+  target_include_directories(gh1re SYSTEM PRIVATE ${GH1RE_DLSS_DIR}/include)
+  target_link_libraries(gh1re PRIVATE ${GH1RE_DLSS_DIR}/lib/Windows_x86_64/x64/nvsdk_ngx_s.lib)
+  add_custom_command(TARGET gh1re POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${GH1RE_DLSS_DIR}/lib/Windows_x86_64/rel/nvngx_dlss.dll $<TARGET_FILE_DIR:gh1re>)
+else()
+  target_compile_definitions(gh1re PRIVATE GH1RE_DLSS=0)
+endif()
+endif()  # NOT ANDROID
+
+if(MSVC)
+  target_compile_options(gh1re PRIVATE /W4 /permissive-)
+else()
+  target_compile_options(gh1re PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+if(MINGW)
+  # One less set of DLLs to ship next to the executable.
+  target_link_options(gh1re PRIVATE -static-libgcc -static-libstdc++ -static $<$<CONFIG:Release>:-s>)
+endif()
+
+set_target_properties(gh1re PROPERTIES
+  MACOSX_BUNDLE_BUNDLE_NAME "gh1re"
+  MACOSX_BUNDLE_GUI_IDENTIFIER "io.github.gh1re"
+  MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}")

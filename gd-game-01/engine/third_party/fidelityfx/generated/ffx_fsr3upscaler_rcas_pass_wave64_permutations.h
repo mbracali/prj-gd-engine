@@ -1,0 +1,5 @@
+// ffx_fsr3upscaler_rcas_pass_wave64_permutations.h: generated; the port uses the wave32 permutations.
+#pragma once
+#include "ffx_fsr3upscaler_rcas_pass_permutations.h"
+#define g_ffx_fsr3upscaler_rcas_pass_wave64_IndirectionTable g_ffx_fsr3upscaler_rcas_pass_IndirectionTable
+#define g_ffx_fsr3upscaler_rcas_pass_wave64_PermutationInfo g_ffx_fsr3upscaler_rcas_pass_PermutationInfo
