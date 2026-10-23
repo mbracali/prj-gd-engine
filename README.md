@@ -26,11 +26,13 @@ A re implementation of all major guitar hero and rock band engines.
 | gd-game-09 | The Beatles: Rock Band            | Xbox 360      | No          |
 | gd-game-10 | Guitar Hero: Metallica            | Xbox 360      | No          |
 | gd-game-11 | Guitar Hero: Smash Hits           | Xbox 360      | No          |
-| gd-game-11 | Guitar Hero 5                     | Xbox 360      | No          |
-| gd-game-12 | Lego Rock Band                    | Xbox 360      | No          |
-| gd-game-13 | Band Hero                         | Xbox 360      | No          |
-| gd-game-14 | Guitar Hero: Van Halen            | Xbox 360      | No          |
-| gd-game-15 | Green Day: Rock Band              | Xbox 360      | No          |
-| gd-game-16 | Guitar Hero: Warriors of Rock     | Xbox 360      | No          |
-| gd-game-17 | Rock Band 3                       | Xbox 360      | No          |
-| gd-game-18 | Rock Band 4                       | Xbox One      | No          |
+| gd-game-12 | Guitar Hero 5                     | Xbox 360      | No          |
+| gd-game-13 | Lego Rock Band                    | Xbox 360      | No          |
+| gd-game-14 | Band Hero                         | Xbox 360      | No          |
+| gd-game-15 | Guitar Hero: Van Halen            | Xbox 360      | No          |
+| gd-game-16 | Green Day: Rock Band              | Xbox 360      | No          |
+| gd-game-17 | Guitar Hero: Warriors of Rock     | Xbox 360      | No          |
+| gd-game-18 | Rock Band 3                       | Xbox 360      | No          |
+| gd-game-19 | Rock Band 4                       | Xbox One      | No          |
+
+More documentation in the docs folder
