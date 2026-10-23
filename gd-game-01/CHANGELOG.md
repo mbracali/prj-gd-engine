@@ -9,6 +9,10 @@ matches the tag's version.
 ## [1.1.0] - 2026-10-23
 
 ### Added
+- The Guitar Dream Engine icon: on the Windows `.exe`, the macOS app, the
+  Android launcher (adaptive on Android 8+), the game window and the first
+  screen. The Linux and Steam Deck downloads include `gd01.png` and
+  `add-to-app-menu.sh` (adds the game, with its icon, to the app menu).
 - Steam Deck download (`gd01-<version>-steamdeck.tar.gz`): built in Valve's
   Steam Runtime, so it runs from Game Mode as a non-Steam game; starts with
   the handheld settings; finds an `.iso` copied into its folder by itself.

@@ -19,11 +19,13 @@ configure -S . -B build/steamdeck -G Ninja -DCMAKE_BUILD_TYPE=Release -DGD01_STE
   -DCMAKE_EXE_LINKER_FLAGS="-static-libstdc++ -static-libgcc"
 compile build/steamdeck "gd01 (Steam Deck)"
 
-say "Assembling dist/gd01-steamdeck (program, SDL3, licences, STEAM-DECK.txt)..."
+say "Assembling dist/gd01-steamdeck (program, SDL3, icon, licences, STEAM-DECK.txt)..."
 d=dist/gd01-steamdeck
 rm -rf "$d" && mkdir -p "$d/licenses"
 cp build/steamdeck/gd01 README.md ../../LICENSE ../../LICENSE-ADDITIONAL-TERMS.md "$d/"
 strip "$d/gd01"
+cp res/gd01_icon_512.png "$d/gd01.png"
+cp linux/add-to-app-menu.sh "$d/"
 sdl="$(ldd build/steamdeck/gd01 | awk '/libSDL3\.so/ {print $3}')"
 cp -L "$sdl" "$d/libSDL3.so.0"
 cp /usr/share/doc/libsdl3-0/copyright "$d/licenses/SDL3-LICENSE.txt" 2>/dev/null || true
@@ -40,6 +42,9 @@ gd01 on the Steam Deck
    file "gd01" in this folder > Add Selected Programs.
 3. Back in Game Mode, start gd01 from your library and play.
    (Without an .iso in the folder: tap the screen or press A to pick one.)
+
+Icon: in Steam, gd01's Properties > the icon square > choose gd01.png from
+this folder (for the desktop's menu, run add-to-app-menu.sh in Desktop Mode).
 
 The settings are already tuned for the Deck (60 FPS, 1280 x 800, full
 screen). Change them in Options > Enhanced Settings; "Apply Steam Deck

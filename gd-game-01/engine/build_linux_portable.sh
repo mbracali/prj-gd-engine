@@ -42,11 +42,13 @@ configure -S . -B build/portable/gd01 -G Ninja -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_EXE_LINKER_FLAGS="-static-libstdc++ -static-libgcc"
 compile build/portable/gd01 gd01
 
-say "Assembling dist/gd01-linux-x86_64 (program, SDL3, licences)..."
+say "Assembling dist/gd01-linux-x86_64 (program, SDL3, icon, menu entry script, licences)..."
 d=dist/gd01-linux-x86_64
 rm -rf "$d" && mkdir -p "$d/licenses"
 cp build/portable/gd01/gd01 README.md ../../LICENSE ../../LICENSE-ADDITIONAL-TERMS.md "$d/"
 strip "$d/gd01"
+cp res/gd01_icon_512.png "$d/gd01.png"
+cp linux/add-to-app-menu.sh "$d/"
 cp -L build/portable/sdl3-prefix/lib/libSDL3.so.0 "$d/"
 cp build/portable/sdl3-prefix/LICENSE.txt "$d/licenses/SDL3-LICENSE.txt"
 cp third_party/fidelityfx/LICENSE.txt "$d/licenses/FidelityFX-SDK-LICENSE.txt"

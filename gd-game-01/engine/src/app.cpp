@@ -46,6 +46,7 @@
 #include "scene/particles.h"
 #include "platform/gpu_select.h"
 #include "platform/paths.h"
+#include "platform/app_icon.h"
 #include <cctype>
 #include <filesystem>
 #ifdef __ANDROID__
@@ -265,6 +266,8 @@ private:
     void onAction(const InputEvent& e);
     void frame();
     void drawNeedData();
+    void drawLogo();
+    int logoTexture_ = -1;  // the badge on the first screen (0: could not load)
     void drawMenu();
     void drawResults();
 
@@ -1819,13 +1822,23 @@ void App::onAction(const InputEvent& e) {
     }
 }
 
+// The Guitar Dream Engine badge above the first screen's text.
+void App::drawLogo() {
+    if (logoTexture_ < 0) {
+        Image icon;
+        logoTexture_ = appIconImage(icon) ? renderer_.createTexture(icon) : 0;
+    }
+    if (logoTexture_ > 0) renderer_.image(logoTexture_, kScreenW / 2 - 100, 70, 200, 200, {255, 255, 255, 255}, Blend::Alpha);
+    else renderer_.textCentered(kScreenW / 2, 240, 3, kAccent, "GD01");
+}
+
 void App::drawNeedData() {
 #ifdef __ANDROID__
     if (std::string iso = isoImport_.takeReady(); !iso.empty()) {
         tryLoadData(iso);
         if (screen_ != Screen::NeedData) return;
     }
-    renderer_.textCentered(kScreenW / 2, 240, 3, kAccent, "GD01");
+    drawLogo();
     renderer_.textCentered(kScreenW / 2, 310, 2, kText, "Tap the screen to choose your Guitar Hero (PS2) disc image (.iso),");
     renderer_.textCentered(kScreenW / 2, 340, 2, kText, "or copy it into " + AndroidIsoImport::folder());
     renderer_.textCentered(kScreenW / 2, 390, 1.5f, kDim, "Game data is read from your own copy; nothing is included with this program.");
@@ -1834,7 +1847,7 @@ void App::drawNeedData() {
     if (!message_.empty()) renderer_.textCentered(kScreenW / 2, 460, 1.5f, kBad, message_);
     return;
 #endif
-    renderer_.textCentered(kScreenW / 2, 240, 3, kAccent, "GD01");
+    drawLogo();
     renderer_.textCentered(kScreenW / 2, 310, 2, kText, "Click here (or press Enter) to choose your Guitar Hero (PS2) disc image (.iso),");
     renderer_.textCentered(kScreenW / 2, 340, 2, kText, "or drop the .iso or the extracted game folder onto this window.");
     renderer_.textCentered(kScreenW / 2, 390, 1.5f, kDim, "Game data is read from your own copy; nothing is included with this program.");
@@ -2114,6 +2127,9 @@ int App::run() {
 #ifdef __ANDROID__
     SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");  // the back button is the game's Back, not "leave the app"
 #endif
+    // The app id ties the window to its launcher entry (the taskbar icon on
+    // Wayland; Linux downloads: add-to-app-menu.sh writes io.github.mbracali.gd01.desktop).
+    SDL_SetAppMetadata("GD Engine 01", GD01_VERSION, "io.github.mbracali.gd01");
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMEPAD)) {
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, kAppTitle, SDL_GetError(), nullptr);
         return 1;
@@ -2144,6 +2160,7 @@ int App::run() {
                                    | SDL_WINDOW_FULLSCREEN
 #endif
     );
+    setAppWindowIcon(window_);
     std::string glError;
     bool glOk = window_ && renderer_.init(window_, glError);
     gpu::started(glOk, renderer_.gpuName());
