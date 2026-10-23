@@ -5,7 +5,7 @@ name: gd-game-01 CI
 
 on:
   push:
-    branches: ["**"]
+    branches: [develop, main]  # other branches build through their pull request
     paths: ["gd-game-01/**", ".github/workflows/gd-game-01-*.yml"]
   pull_request:
     types: [opened, synchronize, reopened, labeled]

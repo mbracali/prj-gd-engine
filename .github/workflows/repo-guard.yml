@@ -4,8 +4,9 @@ name: repo guard
 
 on:
   push:
-    branches: ["**"]
+    branches: [develop, main]  # other branches build through their pull request
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
