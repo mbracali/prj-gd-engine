@@ -22,6 +22,6 @@ jobs:
       - name: Files
         run: python3 .github/scripts/repo_guard.py
       - name: Secrets
-        uses: gitleaks/gitleaks-action@v2
+        uses: gitleaks/gitleaks-action@v3
         env:
           GITHUB_TOKEN: ${{ github.token }}
