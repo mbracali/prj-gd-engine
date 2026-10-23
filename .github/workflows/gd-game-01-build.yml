@@ -49,7 +49,7 @@ jobs:
       - name: Package
         working-directory: gd-game-01/engine/dist
         run: zip -qr "gd01-$V-windows-x64.zip" gd01-windows-x64
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: gd01-windows-x64
           path: gd-game-01/engine/dist/gd01-${{ inputs.version }}-windows-x64.zip
@@ -77,7 +77,7 @@ jobs:
       - name: Package
         working-directory: gd-game-01/engine/dist
         run: tar czf "gd01-$V-linux-x86_64.tar.gz" gd01-linux-x86_64
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: gd01-linux-x86_64
           path: gd-game-01/engine/dist/gd01-${{ inputs.version }}-linux-x86_64.tar.gz
@@ -109,7 +109,7 @@ jobs:
           cp gd-game-01/engine/third_party/fidelityfx/LICENSE.txt "$d/licenses/FidelityFX-SDK-LICENSE.txt"
           cp gd-game-01/engine/third_party/volk/LICENSE.md "$d/licenses/volk-LICENSE.md"
           ditto -c -k --keepParent "$d" "gd01-$V-macos.zip"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: gd01-macos
           path: gd01-${{ inputs.version }}-macos.zip
@@ -161,7 +161,7 @@ jobs:
         run: gd-game-01/engine/build_android.sh
       - name: Package
         run: cp gd-game-01/engine/dist/android/gd01.apk "gd01-$V-android.apk"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         # CI builds are signed with a throwaway debug key: fine for testing,
         # never published. Releases need the release key.
         if: ${{ !inputs.release || steps.key.outputs.signed == 'true' }}
