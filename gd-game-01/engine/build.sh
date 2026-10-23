@@ -17,16 +17,22 @@ mkdir -p dist/gd01-linux-x86_64 dist/gd01-windows-x64
 cp build/linux/gd01 README.md dist/gd01-linux-x86_64/
 cp build/windows/gd01.exe README.md dist/gd01-windows-x64/
 cp /usr/x86_64-w64-mingw32/sys-root/mingw/bin/SDL3.dll dist/gd01-windows-x64/
-# AI upscaling: the DLSS model library next to the Linux executable (NGX looks
-# there), and the third-party licences with both builds.
-cp third_party/dlss/lib/Linux_x86_64/libnvidia-ngx-dlss.so.* dist/gd01-linux-x86_64/
+# The project licence, and the third-party licences, with both builds.
 for d in dist/gd01-linux-x86_64 dist/gd01-windows-x64; do
   mkdir -p "$d/licenses"
+  cp ../../LICENSE ../../LICENSE-ADDITIONAL-TERMS.md "$d/"
   cp third_party/fidelityfx/LICENSE.txt "$d/licenses/FidelityFX-SDK-LICENSE.txt"
   cp third_party/volk/LICENSE.md "$d/licenses/volk-LICENSE.md"
-  cp third_party/vulkan/LICENSE.md "$d/licenses/Vulkan-Headers-LICENSE.md" 2>/dev/null || true
+  cp third_party/vulkan/LICENSE.md "$d/licenses/Vulkan-Headers-LICENSE.md"
 done
-cp third_party/dlss/LICENSE.txt dist/gd01-linux-x86_64/licenses/NVIDIA-RTX-SDK-LICENSE.txt
+# AI upscaling: the DLSS model library next to the Linux executable (NGX looks
+# there), when ../tools/fetch_dlss.sh has downloaded the DLSS SDK.
+if ls third_party/dlss/lib/Linux_x86_64/libnvidia-ngx-dlss.so.* >/dev/null 2>&1; then
+  cp third_party/dlss/lib/Linux_x86_64/libnvidia-ngx-dlss.so.* dist/gd01-linux-x86_64/
+  cp third_party/dlss/LICENSE.txt dist/gd01-linux-x86_64/licenses/NVIDIA-RTX-SDK-LICENSE.txt
+else
+  echo "build.sh: no DLSS SDK (run ../tools/fetch_dlss.sh to include DLSS)" >&2
+fi
 echo "Built:"
 find dist -type f | sort
 

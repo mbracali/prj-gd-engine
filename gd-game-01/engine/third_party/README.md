@@ -9,7 +9,7 @@ missing at run time.
 | `vulkan/` | Khronos Vulkan-Headers (C headers only) | 1.4.350 | Apache-2.0 / MIT (`vulkan/LICENSE.md`) |
 | `volk/` | Vulkan meta-loader (Vulkan is loaded at run time; no SDK needed to build) | 1.4.350 | MIT (`volk/LICENSE.md`) |
 | `fidelityfx/` | AMD FidelityFX SDK: the FSR 3.1 upscaler and its Vulkan backend only | 1.1.4 | MIT (`fidelityfx/LICENSE.txt`) |
-| `dlss/` | NVIDIA DLSS SDK: NGX headers, the Linux NGX static library and the DLSS model library | 310.9.16 | NVIDIA RTX SDKs licence (`dlss/LICENSE.txt`) |
+| `dlss/` | NVIDIA DLSS SDK: NGX headers, the Linux NGX static library and the DLSS model library. **Not in the repo:** `../tools/fetch_dlss.sh` downloads it (pinned, SHA-256 checked) | 310.9.16 | NVIDIA RTX SDKs licence (`dlss/LICENSE.txt`, downloaded with it) |
 
 ## Changes to the FidelityFX SDK (marked `[I] gd01`)
 
@@ -29,6 +29,6 @@ missing at run time.
 ## DLSS on Windows
 
 NVIDIA ships the NGX library for MSVC only, so the MinGW build has no DLSS.
-An MSVC build gets it when `dlss/lib/Windows_x86_64/x64/nvsdk_ngx_s.lib` and
-`dlss/lib/Windows_x86_64/rel/nvngx_dlss.dll` (from the same SDK release) are
-added here.
+An MSVC build gets it after `../tools/fetch_dlss.sh --windows`, which also
+downloads `dlss/lib/Windows_x86_64/x64/nvsdk_ngx_s.lib` and
+`dlss/lib/Windows_x86_64/rel/nvngx_dlss.dll` from the same SDK release.
