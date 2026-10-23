@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read  # gitleaks lists the PR's commits
 
 jobs:
   guard:
