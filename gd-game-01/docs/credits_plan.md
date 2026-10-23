@@ -202,7 +202,7 @@ The 200 s track loops about 4 times over the full roll.
 **Duration**: 892 rows × 56 polls = 49 952 polls. At 60 Hz [I: UI poll rate] that is **832.5 s ≈ 13 min 52 s**: 0.933 s per row, or 26.8 list units/s.
 
 ---------------------------------------------------------------------------------------------------
-## 6. Implementation in gh1re
+## 6. Implementation in gd01
 
 Current state:
 - `new_credits_panel` is created as a generic panel (`ui_system.cpp` installVerbs → `makeNativePanel` returns null).

@@ -561,7 +561,7 @@ if corr != 0 && |pred-P| > 0: P += (pred-P) * (dBeat·corr/|pred-P|)
    - Delete `rehome_` / `home_` and the whole "keeps to his spot" branch (`:283-298`). If drift appears again, the cause is in root motion (for example, stand clips with non-constant `bone_facing`); the hold should absorb it at each transition.
 10. **`loseTeleport`**: unchanged, but set `hold_` to the spot's pos/yaw afterwards, or clear it [I]. The original only sets the root (`FUN_0018f060`).
 11. **Callers.** `VenueRenderer` (`:167`, `:181-187`) keeps `walkBusy` gating the mood `playAt` / `play`. Gate `playAt` on `state_ ∈ {1,2}` rather than on `walkingNow()`.
-12. **Debug.** Keep `GH1RE_LOG_SHOTS` logging of the chain (clip names, start/src), `corr`, and the final residual.
+12. **Debug.** Keep `GD01_LOG_SHOTS` logging of the chain (clip names, start/src), `corr`, and the final residual.
 13. **Checks.**
     - big_club 01 → 02: `turn_right_90`, `walk(_normal)_right` × N, `stop_left_90`. The end position should be within 18 units of walk_spot_02, facing −Y after the next mood transition.
     - Arena solo walk to the catwalk front.

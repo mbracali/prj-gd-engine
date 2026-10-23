@@ -293,9 +293,9 @@ void VenueCamera::gameOver(bool won, bool finalWin, bool grim) {
 }
 
 void VenueCamera::switchTo(const Shot& picked) {
-    // Development aid: GH1RE_SHOT=<shot name> holds that shot at every switch.
+    // Development aid: GD01_SHOT=<shot name> holds that shot at every switch.
     const Shot* forced = nullptr;
-    if (const char* want = SDL_getenv("GH1RE_SHOT"))
+    if (const char* want = SDL_getenv("GD01_SHOT"))
         for (const auto& [g, shots] : groups_)
             for (const Shot& x : shots)
                 if (x.name == want) forced = &x;
@@ -307,7 +307,7 @@ void VenueCamera::switchTo(const Shot& picked) {
     currentShot_ = &shot;
     current_ = shot;
     focusSet_ = false;  // the focus jumps to the head on a cut
-    if (SDL_getenv("GH1RE_LOG_SHOTS")) SDL_Log("camera: %.1f s %s%s", ms_ / 1000.0f, shot.name.c_str(), shot.dof ? " (dof)" : "");
+    if (SDL_getenv("GD01_LOG_SHOTS")) SDL_Log("camera: %.1f s %s%s", ms_ / 1000.0f, shot.name.c_str(), shot.dof ? " (dof)" : "");
     // start / end are percentages of the path's length (FUN_0016f3b8).
     float len = anims_ ? anims_->endFrame(shot.path + ".tnm") : 0;
     f0_ = shot.start * (len / 100.0f);

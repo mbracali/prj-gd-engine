@@ -177,7 +177,7 @@ private:
     bool strongerBokeh_ = false;  // the shot of the last frame (the cut snap)
     std::vector<Xfm> spots2_;          // the walk spots, for the face-off standing guard
     float lastGuardBeat_ = -1e30f;
-    float lastRootLogBeat_ = 0;  // GH1RE_ROOTLOG (development aid)
+    float lastRootLogBeat_ = 0;  // GD01_ROOTLOG (development aid)
     bool rootLogInit_ = false;
     Xfm rootLog0_;
     bool won2_ = false;

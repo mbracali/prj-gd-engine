@@ -73,7 +73,7 @@ public:
     // slot 1 (a removed pad frees its slot) unless the Gamepads screen gave the
     // device a player. The keyboard plays for slot 0 when no pad holds it, else
     // for the lowest empty slot (or its chosen player). With the split
-    // keyboard (GH1RE_KB2P / --kb2p) it plays both: P2 on H J K L ; (frets),
+    // keyboard (GD01_KB2P / --kb2p) it plays both: P2 on H J K L ; (frets),
     // N / M (strum), B (Star Power), O (Start).
     bool padConnected(int slot) const;
     void setSplitKeyboard(bool on) { splitKeyboard_ = on; }

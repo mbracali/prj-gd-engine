@@ -13,20 +13,20 @@ cmake -S . -B build/windows -G Ninja -DCMAKE_BUILD_TYPE=Release \
 cmake --build build/windows
 
 rm -rf dist
-mkdir -p dist/gh1re-linux-x86_64 dist/gh1re-windows-x64
-cp build/linux/gh1re README.md dist/gh1re-linux-x86_64/
-cp build/windows/gh1re.exe README.md dist/gh1re-windows-x64/
-cp /usr/x86_64-w64-mingw32/sys-root/mingw/bin/SDL3.dll dist/gh1re-windows-x64/
+mkdir -p dist/gd01-linux-x86_64 dist/gd01-windows-x64
+cp build/linux/gd01 README.md dist/gd01-linux-x86_64/
+cp build/windows/gd01.exe README.md dist/gd01-windows-x64/
+cp /usr/x86_64-w64-mingw32/sys-root/mingw/bin/SDL3.dll dist/gd01-windows-x64/
 # AI upscaling: the DLSS model library next to the Linux executable (NGX looks
 # there), and the third-party licences with both builds.
-cp third_party/dlss/lib/Linux_x86_64/libnvidia-ngx-dlss.so.* dist/gh1re-linux-x86_64/
-for d in dist/gh1re-linux-x86_64 dist/gh1re-windows-x64; do
+cp third_party/dlss/lib/Linux_x86_64/libnvidia-ngx-dlss.so.* dist/gd01-linux-x86_64/
+for d in dist/gd01-linux-x86_64 dist/gd01-windows-x64; do
   mkdir -p "$d/licenses"
   cp third_party/fidelityfx/LICENSE.txt "$d/licenses/FidelityFX-SDK-LICENSE.txt"
   cp third_party/volk/LICENSE.md "$d/licenses/volk-LICENSE.md"
   cp third_party/vulkan/LICENSE.md "$d/licenses/Vulkan-Headers-LICENSE.md" 2>/dev/null || true
 done
-cp third_party/dlss/LICENSE.txt dist/gh1re-linux-x86_64/licenses/NVIDIA-RTX-SDK-LICENSE.txt
+cp third_party/dlss/LICENSE.txt dist/gd01-linux-x86_64/licenses/NVIDIA-RTX-SDK-LICENSE.txt
 echo "Built:"
 find dist -type f | sort
 

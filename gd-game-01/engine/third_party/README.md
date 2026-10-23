@@ -11,7 +11,7 @@ missing at run time.
 | `fidelityfx/` | AMD FidelityFX SDK: the FSR 3.1 upscaler and its Vulkan backend only | 1.1.4 | MIT (`fidelityfx/LICENSE.txt`) |
 | `dlss/` | NVIDIA DLSS SDK: NGX headers, the Linux NGX static library and the DLSS model library | 310.9.16 | NVIDIA RTX SDKs licence (`dlss/LICENSE.txt`) |
 
-## Changes to the FidelityFX SDK (marked `[I] gh1re`)
+## Changes to the FidelityFX SDK (marked `[I] gd01`)
 
 - `ffx_port.h` (force-included): the MSVC-only CRT helpers for gcc / clang
   (mingw-w64 has its own).

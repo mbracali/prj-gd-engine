@@ -5,7 +5,7 @@
 
 #include <SDL3/SDL_opengl.h>
 
-#define GH1RE_GL_FUNCTIONS(X)                                                         \
+#define GD01_GL_FUNCTIONS(X)                                                         \
     X(PFNGLACTIVETEXTUREPROC, glActiveTexture)                                        \
     X(PFNGLATTACHSHADERPROC, glAttachShader)                                          \
     X(PFNGLBINDBUFFERPROC, glBindBuffer)                                              \
@@ -58,7 +58,7 @@
 
 // GL 1.1 functions: their prototypes come from SDL_opengl.h; only the types
 // are used (nothing is linked), and the pointers are still fetched through SDL.
-#define GH1RE_GL11_FUNCTIONS(X)                                                        \
+#define GD01_GL11_FUNCTIONS(X)                                                        \
     X(decltype(&::glEnable), glEnable)                                                \
     X(decltype(&::glDisable), glDisable)                                              \
     X(decltype(&::glBlendFunc), glBlendFunc)                                          \
@@ -87,13 +87,13 @@
     X(PFNGLDELETESYNCPROC, glDeleteSync)
 
 namespace gl {
-#define GH1RE_DECLARE(type, name) extern type name;
-GH1RE_GL_FUNCTIONS(GH1RE_DECLARE)
-GH1RE_GL11_FUNCTIONS(GH1RE_DECLARE)
-#undef GH1RE_DECLARE
+#define GD01_DECLARE(type, name) extern type name;
+GD01_GL_FUNCTIONS(GD01_DECLARE)
+GD01_GL11_FUNCTIONS(GD01_DECLARE)
+#undef GD01_DECLARE
 
 // Loads every entry point; returns the name of the first missing one, or nullptr.
-// On an OpenGL ES 3 context (Android, or GH1RE_GLES=1 on desktop) a few entry
+// On an OpenGL ES 3 context (Android, or GD01_GLES=1 on desktop) a few entry
 // points are wrapped so the desktop code runs unchanged: shaders get the
 // "#version 300 es" preamble, float render targets fall back to RGBA8 without
 // EXT_color_buffer_(half_)float, and depth reads (no ES equivalent) return 1.

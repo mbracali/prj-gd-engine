@@ -380,7 +380,7 @@ void CrowdRenderer::update(float beat, float ms, int excitement, bool newShot, i
         int e = std::clamp(excitement, 0, 4);
         setSizes(kSizes[e], kSizes[e]);
         animate(kWeights[e]);
-        static const bool log = SDL_getenv("GH1RE_LOG_SHOTS") != nullptr;
+        static const bool log = SDL_getenv("GD01_LOG_SHOTS") != nullptr;
         if (log) SDL_Log("crowd: region %d, %d members, %d leaving", region_, int(active_.size()), int(leaving_.size()));
     }
     // FUN_001720e8: leaving members off screen go back to the pool; the

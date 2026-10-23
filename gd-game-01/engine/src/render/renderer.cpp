@@ -8,7 +8,7 @@
 
 namespace {
 
-// Development aid: GH1RE_GPULOG logs the GPU time of the frame's parts
+// Development aid: GD01_GPULOG logs the GPU time of the frame's parts
 // (before the scene, the 3D scene, its post-processing / upscaling, the rest)
 // averaged over 120 frames, from GL timestamps read three frames later.
 struct GpuTimer {
@@ -31,7 +31,7 @@ struct GpuTimer {
     void begin() {
         if (!loaded) {
             loaded = true;
-            on = SDL_getenv("GH1RE_GPULOG") != nullptr;
+            on = SDL_getenv("GD01_GPULOG") != nullptr;
             genQueries = reinterpret_cast<void(APIENTRY*)(GLsizei, GLuint*)>(SDL_GL_GetProcAddress("glGenQueries"));
             queryCounter = reinterpret_cast<void(APIENTRY*)(GLuint, GLenum)>(SDL_GL_GetProcAddress("glQueryCounter"));
             getQueryObjectui64v = reinterpret_cast<void(APIENTRY*)(GLuint, GLenum, GLuint64*)>(SDL_GL_GetProcAddress("glGetQueryObjectui64v"));

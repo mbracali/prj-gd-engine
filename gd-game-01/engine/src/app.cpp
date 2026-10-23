@@ -43,6 +43,7 @@
 #include "scene/scene.h"
 #include "scene/particles.h"
 #include "platform/gpu_select.h"
+#include "platform/paths.h"
 #ifdef __ANDROID__
 #include <filesystem>
 
@@ -58,30 +59,23 @@ constexpr double kIntroMs = 10000;
 // game.dta (track_extend_ms -2000): arena extend_track -> track_panel do_extend_sequence.
 constexpr float kTrackExtendMs = -2000;
 constexpr float kOutroMs = 2500;
+// Window and message box title.
+constexpr const char* kAppTitle = "Guitar Dream Engine: Game 01";
 const SDL_Color kText{230, 230, 235, 255}, kDim{140, 140, 150, 255}, kAccent{255, 210, 80, 255}, kBad{240, 90, 80, 255};
 
 std::string configPath() {
-    char* pref = SDL_GetPrefPath("gh1re", "gh1re");
-    std::string p = pref ? std::string(pref) + "config.txt" : "";
-    SDL_free(pref);
-    return p;
+    return prefDir().empty() ? std::string() : prefDir() + "config.txt";
 }
 
 // The career save (one file for the 8 profiles and the high scores, like the
 // PS2 memory card's BASLUS-21224/data).
 std::string careerPath() {
-    char* pref = SDL_GetPrefPath("gh1re", "gh1re");
-    std::string p = pref ? std::string(pref) + "career.json" : "career.json";
-    SDL_free(pref);
-    return p;
+    return prefDir().empty() ? std::string("career.json") : prefDir() + "career.json";
 }
 
 // The port's Enhanced Settings (options > Enhanced Settings), apart from the career.
 std::string enhancedPath() {
-    char* pref = SDL_GetPrefPath("gh1re", "gh1re");
-    std::string p = pref ? std::string(pref) + "enhanced.json" : "enhanced.json";
-    SDL_free(pref);
-    return p;
+    return prefDir().empty() ? std::string("enhanced.json") : prefDir() + "enhanced.json";
 }
 
 // Enhanced Settings defaults (keys of enhanced.json). Steam Deck mode locks
@@ -626,14 +620,14 @@ void App::tryLoadData(const std::string& path) {
                     else if (msg == "set_smasher_glowing") tr->setSmasherGlowing(num(0), a.size() > 1 && a[1].truthy());
                     else if (msg == "reset") tr->reset();
                     else if (msg == "explode") {
-                        if (SDL_getenv("GH1RE_UILOG")) SDL_Log("ui: track_panel explode");
+                        if (SDL_getenv("GD01_UILOG")) SDL_Log("ui: track_panel explode");
                         tr->explode();
                     }
                 }
             };
             ui_ = std::make_unique<UiSystem>(renderer_, *data_, hooks);
             applyCheats();
-            bool skipBoot = opt_.skipBoot || SDL_getenv("GH1RE_SKIP_BOOT");
+            bool skipBoot = opt_.skipBoot || SDL_getenv("GD01_SKIP_BOOT");
             if (skipBoot && campaign_) {
                 // Development path: straight to the main menu with the saved profiles
                 // (a first profile "Rocker" when there are none) and autosave on.
@@ -644,9 +638,9 @@ void App::tryLoadData(const std::string& path) {
                         campaign_->setSlot(s);
                         break;
                     }
-                if (const char* slot = SDL_getenv("GH1RE_SLOT")) campaign_->setSlot(std::atoi(slot));  // e.g. 8: The Glitches
+                if (const char* slot = SDL_getenv("GD01_SLOT")) campaign_->setSlot(std::atoi(slot));  // e.g. 8: The Glitches
                 ui_->interp().var("autosave") = Value::integer(1);
-                const char* screen = SDL_getenv("GH1RE_SCREEN");  // dev aid: open this screen, e.g. credits
+                const char* screen = SDL_getenv("GD01_SCREEN");  // dev aid: open this screen, e.g. credits
                 ui_->gotoScreen(screen ? screen : "main");
             } else {
                 ui_->boot(false);
@@ -877,21 +871,21 @@ void App::tutorialStart(bool skipIntro, bool startPaused) {
     if (startPaused) mixer_.setPaused(true);
 }
 
-// Development aid: GH1RE_SCREENSHOT=<file.bmp> [GH1RE_SCREENSHOT_AT=<song ms>]
+// Development aid: GD01_SCREENSHOT=<file.bmp> [GD01_SCREENSHOT_AT=<song ms>]
 // saves one frame and quits (works with SDL_VIDEO_DRIVER=offscreen).
-// GH1RE_SCREENSHOT_WALL=<ms>[,<ms>...]: wait that long after start (menus);
+// GD01_SCREENSHOT_WALL=<ms>[,<ms>...]: wait that long after start (menus);
 // with several times, each shot is saved as <file>_<ms>.bmp and the last one quits.
 void App::captureDebugScreenshot() {
-    const char* file = SDL_getenv("GH1RE_SCREENSHOT");
+    const char* file = SDL_getenv("GD01_SCREENSHOT");
     if (!file) return;
-    const char* at = SDL_getenv("GH1RE_SCREENSHOT_AT");
+    const char* at = SDL_getenv("GD01_SCREENSHOT_AT");
     if (at && !(screen_ == Screen::Playing && mixer_.songTimeMs() >= std::atof(at))) return;
     static std::vector<double> walls;
     static size_t next = 0;
     static bool parsed = false;
     if (!parsed) {
         parsed = true;
-        if (const char* w = SDL_getenv("GH1RE_SCREENSHOT_WALL"))
+        if (const char* w = SDL_getenv("GD01_SCREENSHOT_WALL"))
             for (const char* p = w; *p;) {
                 walls.push_back(std::atof(p));
                 const char* comma = std::strchr(p, ',');
@@ -977,7 +971,7 @@ void App::updateTouchLanes() {
     }
 }
 
-// Development aid: GH1RE_KEYS="ms:key,..." presses and releases `key` at `ms`
+// Development aid: GD01_KEYS="ms:key,..." presses and releases `key` at `ms`
 // after start; "+key" only presses it, "-key" only releases it (held keys);
 // "p2key" is player 2's pad; "hoverX_Y" / "clickX_Y" move / click the mouse
 // at menu units (1280 x 720); "touchX_Y" taps a finger there, "+touchX_Y" /
@@ -995,7 +989,7 @@ void App::injectDebugKeys(std::vector<InputEvent>& out) {
     static bool parsed = false;
     if (!parsed) {
         parsed = true;
-        if (const char* k = SDL_getenv("GH1RE_KEYS")) {
+        if (const char* k = SDL_getenv("GD01_KEYS")) {
             std::string all = k;
             size_t start = 0;
             while (start < all.size()) {
@@ -1271,7 +1265,7 @@ void App::playerEvent(const PlayerEvent& ev, int player) {
     case K::PhraseCaptured: ui_->gameEvent("star_power_handlers", "phrase_captured", {p0}); break;
     case K::PhraseMissed: ui_->gameEvent("star_power_handlers", "phrase_miss", {Value::integer(ev.gem)}); break;
     case K::StarPowerStart:
-        if (SDL_getenv("GH1RE_UILOG")) SDL_Log("star power start at %.0f ms", songMs_);
+        if (SDL_getenv("GD01_UILOG")) SDL_Log("star power start at %.0f ms", songMs_);
         ui_->gameEvent("star_power_handlers", "start_using", {p0});
         break;
     case K::StarPowerEnd: ui_->gameEvent("star_power_handlers", "stop_using", {p0}); break;
@@ -1436,7 +1430,7 @@ bool App::drawMenuBackdrop(float& focusX, float& focusY) {
 
 // The venue's part of the post-processing frame: Super Fog's light cones and
 // Blur on Star Power's fade (in over 0.25 s while any player's Star Power is
-// on, out over 0.5 s after it ends; GH1RE_STARBLUR=1 forces it, a development aid).
+// on, out over 0.5 s after it ends; GD01_STARBLUR=1 forces it, a development aid).
 void App::postFrameExtras(PostFrame& pf, VenueRenderer& venue, bool song) {
     if (renderer_.post().fog >= 3)
         for (const auto& l : venue.beamLights()) pf.lights.push_back({{l[0], l[1], l[2]}, {l[3], l[4], l[5]}, {l[6], l[7], l[8]}});
@@ -1446,7 +1440,7 @@ void App::postFrameExtras(PostFrame& pf, VenueRenderer& venue, bool song) {
     if (song && renderer_.post().starBlur)
         for (int p = 0; p < 2; ++p)
             if (Player* pl = playerAt(p); pl && pl->starPowerActive()) on = true;
-    if (const char* force = SDL_getenv("GH1RE_STARBLUR"); force && *force == '1') on = true, starBlurFade_ = 1;
+    if (const char* force = SDL_getenv("GD01_STARBLUR"); force && *force == '1') on = true, starBlurFade_ = 1;
     starBlurFade_ = on ? std::min(1.0f, starBlurFade_ + dt / 0.25f) : std::max(0.0f, starBlurFade_ - dt / 0.5f);
     pf.starBlur = starBlurFade_;
 }
@@ -1458,8 +1452,8 @@ void App::saveEnhanced() {
 }
 
 namespace {
-constexpr const char* kSettingsFile = "GH1RE-user-settings.json";
-constexpr const char* kProgressFile = "GH1RE-user-progress.json";
+constexpr const char* kSettingsFile = "GD01-user-settings.json";
+constexpr const char* kProgressFile = "GD01-user-progress.json";
 
 struct DialogRequest {
     std::mutex* mutex;
@@ -1477,8 +1471,8 @@ void SDLCALL dialogDone(void* user, const char* const* files, int) {
 
 void App::userFiles(const std::string& action) {
     userFilesStatus_.clear();
-    // Development aid: GH1RE_DIALOG=<path> answers the dialog at once (headless tests).
-    if (const char* forced = SDL_getenv("GH1RE_DIALOG")) {
+    // Development aid: GD01_DIALOG=<path> answers the dialog at once (headless tests).
+    if (const char* forced = SDL_getenv("GD01_DIALOG")) {
         std::lock_guard<std::mutex> lock(dialogMutex_);
         dialogResults_.push_back({action, forced});
         return;
@@ -1487,7 +1481,7 @@ void App::userFiles(const std::string& action) {
     if (action == "export") {
         SDL_ShowOpenFolderDialog(dialogDone, req, window_, nullptr, false);
     } else {
-        static const SDL_DialogFileFilter kJson[] = {{"GH1RE settings", "json"}};
+        static const SDL_DialogFileFilter kJson[] = {{"GD01 settings", "json"}};
         SDL_ShowOpenFileDialog(dialogDone, req, window_, kJson, 1, nullptr, false);
     }
 }
@@ -1506,7 +1500,7 @@ void App::pollUserFiles() {
     }
 }
 
-// GH1RE-user-settings.json: every Enhanced Setting; GH1RE-user-progress.json:
+// GD01-user-settings.json: every Enhanced Setting; GD01-user-progress.json:
 // the career save (bands, progress, high scores).
 void App::exportUserFiles(const std::string& dir) {
     std::string base = dir;
@@ -1763,7 +1757,7 @@ void App::drawNeedData() {
         tryLoadData(iso);
         if (screen_ != Screen::NeedData) return;
     }
-    renderer_.textCentered(kScreenW / 2, 240, 3, kAccent, "GH1RE");
+    renderer_.textCentered(kScreenW / 2, 240, 3, kAccent, "GD01");
     renderer_.textCentered(kScreenW / 2, 310, 2, kText, "Tap the screen to choose your Guitar Hero (PS2) disc image (.iso),");
     renderer_.textCentered(kScreenW / 2, 340, 2, kText, "or copy it into " + AndroidIsoImport::folder());
     renderer_.textCentered(kScreenW / 2, 390, 1.5f, kDim, "Game data is read from your own copy; nothing is included with this program.");
@@ -1772,7 +1766,7 @@ void App::drawNeedData() {
     if (!message_.empty()) renderer_.textCentered(kScreenW / 2, 460, 1.5f, kBad, message_);
     return;
 #endif
-    renderer_.textCentered(kScreenW / 2, 240, 3, kAccent, "GH1RE");
+    renderer_.textCentered(kScreenW / 2, 240, 3, kAccent, "GD01");
     renderer_.textCentered(kScreenW / 2, 310, 2, kText, "Drop your Guitar Hero (PS2) disc image (.iso)");
     renderer_.textCentered(kScreenW / 2, 340, 2, kText, "or extracted game folder onto this window.");
     renderer_.textCentered(kScreenW / 2, 390, 1.5f, kDim, "Game data is read from your own copy; nothing is included with this program.");
@@ -1810,8 +1804,8 @@ void App::pollPlayer(int p, float t) {
     if (ap && !endWallNs_) ap->feed(pl, t);
     if (!endWallNs_) {
         // The bar: the guitar's analog whammy, or a wiggle while a digital whammy is held.
-        // Development aid: GH1RE_WHAMMY=1 holds a digital whammy all song.
-        static const bool devWhammy = SDL_getenv("GH1RE_WHAMMY") != nullptr;
+        // Development aid: GD01_WHAMMY=1 holds a digital whammy all song.
+        static const bool devWhammy = SDL_getenv("GD01_WHAMMY") != nullptr;
         if (devWhammy) pl.setWhammy(true);
         float w = input_.whammyValue(p);
         if (pl.whammyHeld()) w = std::max(w, 0.3f + 0.3f * std::sin(t * 0.025f));
@@ -1877,14 +1871,14 @@ void App::frame() {
     uint64_t nowNs = SDL_GetTicksNS();
     float dt = lastFrameNs_ ? (nowNs - lastFrameNs_) / 1e9f : 0;
     lastFrameNs_ = nowNs;
-    if (dt > 0.1f && SDL_getenv("GH1RE_UILOG")) SDL_Log("frame: %.0f ms stall", dt * 1000.0f);
-    // FPS: frames counted over half-second windows (the FPS counter, GH1RE_FRAMELOG).
+    if (dt > 0.1f && SDL_getenv("GD01_UILOG")) SDL_Log("frame: %.0f ms stall", dt * 1000.0f);
+    // FPS: frames counted over half-second windows (the FPS counter, GD01_FRAMELOG).
     fpsFrames_ += 1;
     fpsWorst_ = std::max(fpsWorst_, dt);
     if (nowNs - fpsWindowNs_ >= 500000000ull) {
         if (fpsWindowNs_) {
             fps_ = float(fpsFrames_) * 1e9f / float(nowNs - fpsWindowNs_);
-            static const bool log = SDL_getenv("GH1RE_FRAMELOG") != nullptr;
+            static const bool log = SDL_getenv("GD01_FRAMELOG") != nullptr;
             if (log) SDL_Log("fps %.1f worst %.1f ms", fps_, fpsWorst_ * 1000.0f);
         }
         fpsWindowNs_ = nowNs, fpsFrames_ = 0, fpsWorst_ = 0;
@@ -1990,7 +1984,7 @@ void App::frame() {
                 renderer_.clearDepth();  // track_panel explode (arena game_won)
                 track_->draw(*player_, drawT, rules_.trackSpeed[difficulty_], rules_.slopMs, *song_, flashes_.data());
                 if (multi_ && track2_ && player2_) track2_->draw(*player2_, drawT, rules_.trackSpeed[difficulty_], rules_.slopMs, *song_, flashes2_.data());
-            } else if ((ui_ && endMs_ >= 0) || SDL_getenv("GH1RE_GUITARIST_CAM") || SDL_getenv("GH1RE_NOTRACK")) {
+            } else if ((ui_ && endMs_ >= 0) || SDL_getenv("GD01_GUITARIST_CAM") || SDL_getenv("GD01_NOTRACK")) {
                 // the game is over (or the guitarist close-up dev view)
             } else if (track_ && ui_ && ui_->inGame() && !ui_->trackShowing()) {
                 // track_panel set_showing FALSE (the attract mode)
@@ -2051,10 +2045,10 @@ int App::run() {
     SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");  // the back button is the game's Back, not "leave the app"
 #endif
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMEPAD)) {
-        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "gh1re", SDL_GetError(), nullptr);
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, kAppTitle, SDL_GetError(), nullptr);
         return 1;
     }
-    input_.setSplitKeyboard(opt_.splitKeyboard || SDL_getenv("GH1RE_KB2P"));
+    input_.setSplitKeyboard(opt_.splitKeyboard || SDL_getenv("GD01_KB2P"));
     input_.setTouchToMenu([this](float nx, float ny, float& mx, float& my) {
         int w = 0, h = 0;
         SDL_GetWindowSize(window_, &w, &h);
@@ -2063,7 +2057,7 @@ int App::run() {
 #ifdef __ANDROID__
     const bool gles = true;
 #else
-    const bool gles = SDL_getenv("GH1RE_GLES") != nullptr;  // development aid: the Android (OpenGL ES 3) renderer
+    const bool gles = SDL_getenv("GD01_GLES") != nullptr;  // development aid: the Android (OpenGL ES 3) renderer
 #endif
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, gles ? 0 : 3);
@@ -2071,10 +2065,10 @@ int App::run() {
     if (!gles) SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_FORWARD_COMPATIBLE_FLAG);  // required on macOS
     SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
-    // Development aid: GH1RE_WINDOW=<w>x<h> sets the starting window size (e.g. ultrawide tests).
+    // Development aid: GD01_WINDOW=<w>x<h> sets the starting window size (e.g. ultrawide tests).
     int winW = int(kScreenW), winH = int(kScreenH);
-    if (const char* ws = SDL_getenv("GH1RE_WINDOW")) std::sscanf(ws, "%dx%d", &winW, &winH);
-    window_ = SDL_CreateWindow("gh1re", winW, winH,
+    if (const char* ws = SDL_getenv("GD01_WINDOW")) std::sscanf(ws, "%dx%d", &winW, &winH);
+    window_ = SDL_CreateWindow(kAppTitle, winW, winH,
                                SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY
 #ifdef __ANDROID__
                                    | SDL_WINDOW_FULLSCREEN
@@ -2085,14 +2079,14 @@ int App::run() {
     gpu::started(glOk, renderer_.gpuName());
     if (!glOk) {
         std::string msg = "Cannot start graphics: " + (window_ ? glError : std::string(SDL_GetError()));
-        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "gh1re", msg.c_str(), window_);
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, kAppTitle, msg.c_str(), window_);
         return 1;
     }
     applyEnhanced();
 
     std::string audioError;
     if (!mixer_.open(audioError)) {
-        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "gh1re", ("Cannot open audio: " + audioError).c_str(), window_);
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, kAppTitle, ("Cannot open audio: " + audioError).c_str(), window_);
         return 1;
     }
 

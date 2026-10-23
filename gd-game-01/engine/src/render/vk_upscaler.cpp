@@ -20,12 +20,13 @@
 #include <FidelityFX/host/ffx_fsr3upscaler.h>
 #include <FidelityFX/host/backends/vk/ffx_vk.h>
 
-#if GH1RE_DLSS
+#if GD01_DLSS
 #include "nvsdk_ngx_helpers_vk.h"
 #include "nvsdk_ngx_vk.h"
 #endif
 
 #include "render/gl.h"
+#include "platform/paths.h"
 
 namespace {
 
@@ -236,7 +237,7 @@ struct VkUpscaler::Impl {
     // DLSS
     bool ngxReady = false, dlssAvailable = false;
     std::string dlssWhy;
-#if GH1RE_DLSS
+#if GD01_DLSS
     NVSDK_NGX_Parameter* ngxParams = nullptr;
     NVSDK_NGX_Handle* dlss = nullptr;
     int dlssW = 0, dlssH = 0, dlssOW = 0, dlssOH = 0, dlssQuality = -1;
@@ -270,7 +271,7 @@ bool VkUpscaler::Impl::init() {
 
     std::vector<const char*> instExts;
     std::vector<const char*> ngxDevExts;
-#if GH1RE_DLSS
+#if GD01_DLSS
     {
         unsigned ic = 0, dc = 0;
         const char** ie = nullptr;
@@ -288,8 +289,8 @@ bool VkUpscaler::Impl::init() {
     }
 #endif
     auto app = vkStruct<VkApplicationInfo>(VK_STRUCTURE_TYPE_APPLICATION_INFO);
-    app.pApplicationName = "gh1re";
-    app.pEngineName = "gh1re";
+    app.pApplicationName = "gd01";
+    app.pEngineName = "gd01";
     app.apiVersion = VK_API_VERSION_1_2;
     auto ici = vkStruct<VkInstanceCreateInfo>(VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO);
     ici.pApplicationInfo = &app;
@@ -445,19 +446,17 @@ bool VkUpscaler::Impl::init() {
 }
 
 void VkUpscaler::Impl::initNgx() {
-#if GH1RE_DLSS
+#if GD01_DLSS
     const char* base = SDL_GetBasePath();
     std::string dir = base ? base : "./";
     ngxModulePath.assign(dir.begin(), dir.end());
-    char* pref = SDL_GetPrefPath("gh1re", "gh1re");
-    std::string data = pref ? pref : dir;
-    SDL_free(pref);
+    std::string data = prefDir().empty() ? dir : prefDir();
     ngxDataPath.assign(data.begin(), data.end());
     const wchar_t* paths[] = {ngxModulePath.c_str()};
     NVSDK_NGX_FeatureCommonInfo info{};
     info.PathListInfo.Path = paths;
     info.PathListInfo.Length = 1;
-    info.LoggingInfo.MinimumLoggingLevel = SDL_getenv("GH1RE_NGXLOG") ? NVSDK_NGX_LOGGING_LEVEL_VERBOSE : NVSDK_NGX_LOGGING_LEVEL_OFF;
+    info.LoggingInfo.MinimumLoggingLevel = SDL_getenv("GD01_NGXLOG") ? NVSDK_NGX_LOGGING_LEVEL_VERBOSE : NVSDK_NGX_LOGGING_LEVEL_OFF;
     NVSDK_NGX_Result r = NVSDK_NGX_VULKAN_Init_with_ProjectID("8c4f3b1e-6a2d-4e57-9b0a-1f7d2c5e9a41", NVSDK_NGX_ENGINE_TYPE_CUSTOM, "1.0",
                                                                ngxDataPath.c_str(), instance, phys, device, vkGetInstanceProcAddr,
                                                                vkGetDeviceProcAddr, &info, NVSDK_NGX_Version_API);
@@ -500,7 +499,7 @@ void VkUpscaler::Impl::shutdown() {
     destroyFsr();
     if (sharedContextReady) ffxInterface.fpDestroyBackendContext(&ffxInterface, sharedContext);
     sharedContextReady = false;
-#if GH1RE_DLSS
+#if GD01_DLSS
     if (dlss) NVSDK_NGX_VULKAN_ReleaseFeature(dlss);
     dlss = nullptr;
     if (ngxParams) NVSDK_NGX_VULKAN_DestroyParameters(ngxParams);
@@ -781,7 +780,7 @@ bool VkUpscaler::Impl::runFsr(VkCommandBuffer c, const VkUpscaleFrame& f) {
 }
 
 bool VkUpscaler::Impl::runDlss(VkCommandBuffer c, const VkUpscaleFrame& f) {
-#if GH1RE_DLSS
+#if GD01_DLSS
     if (!dlssAvailable) return false;
     if (!dlss || dlssW != f.sw || dlssH != f.sh || dlssOW != f.ow || dlssOH != f.oh || dlssQuality != f.quality) {
         if (dlss) {

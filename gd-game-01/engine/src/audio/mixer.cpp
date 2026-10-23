@@ -113,8 +113,8 @@ void SDLCALL Mixer::callback(void* user, SDL_AudioStream* stream, int additional
     std::lock_guard<std::mutex> lock(self->mutex_);
     self->fill(frames);
     for (float& x : self->out_) x = std::clamp(x, -1.0f, 1.0f);
-    // Development aid: GH1RE_AUDIO_DUMP=<file> appends the mixed output (f32 stereo).
-    static FILE* dump = SDL_getenv("GH1RE_AUDIO_DUMP") ? std::fopen(SDL_getenv("GH1RE_AUDIO_DUMP"), "wb") : nullptr;
+    // Development aid: GD01_AUDIO_DUMP=<file> appends the mixed output (f32 stereo).
+    static FILE* dump = SDL_getenv("GD01_AUDIO_DUMP") ? std::fopen(SDL_getenv("GD01_AUDIO_DUMP"), "wb") : nullptr;
     if (dump) std::fwrite(self->out_.data(), sizeof(float), self->out_.size(), dump);
     SDL_PutAudioStreamData(stream, self->out_.data(), frames * int(2 * sizeof(float)));
     self->framesPushed_ += frames;

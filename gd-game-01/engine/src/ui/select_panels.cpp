@@ -622,9 +622,9 @@ private:
 // a row a poll (60 Hz), the top and bottom two rows fading; once the last
 // page is reached the panel sends go_back. Rows: () blank, ("X") heading,
 // ("role" "name"), ("" "text" "") centred.
-// [I] The GH1RE credits roll first, then a spacer and the original's.
+// [I] The GD01 credits roll first, then a spacer and the original's.
 constexpr const char* kGh1reCredits = R"dta(
-("GH1RE PROJECT")
+("GD01 PROJECT")
 ()
 ("MAIN DEVELOPERS")
 ("" "BRACA DEVELOPER" "")
@@ -1062,16 +1062,16 @@ private:
             {Kind::Button, "replace_textures", "Replace Textures", false,
              "Choose a folder on your computer with replacement textures, loaded over the game's own.", {{"", "Browse..."}}},
             {Kind::Button, "export", "Export User Files", true,
-             "Choose a folder to save two files in: GH1RE-user-settings.json with every Enhanced Setting, and "
-             "GH1RE-user-progress.json with all your bands and their progress. Use them as a backup or to move to "
+             "Choose a folder to save two files in: GD01-user-settings.json with every Enhanced Setting, and "
+             "GD01-user-progress.json with all your bands and their progress. Use them as a backup or to move to "
              "another computer.",
              {{"", "Export..."}}},
             {Kind::Button, "load_settings", "Load User Settings", true,
-             "Choose a GH1RE-user-settings.json file to load. The settings take effect at once; any setting in the "
+             "Choose a GD01-user-settings.json file to load. The settings take effect at once; any setting in the "
              "file that is missing or not valid keeps its default.",
              {{"", "Browse..."}}},
             {Kind::Button, "load_progress", "Load User Progress", true,
-             "Choose a GH1RE-user-progress.json file to load. It replaces your bands and their progress and is saved "
+             "Choose a GD01-user-progress.json file to load. It replaces your bands and their progress and is saved "
              "at once; any value in the file that is missing or not valid keeps its default.",
              {{"", "Browse..."}}},
             {Kind::Separator, "", "", true, ""},

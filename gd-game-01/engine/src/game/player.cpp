@@ -67,7 +67,7 @@ bool Player::phraseIntact(int phrase) const {
 // ---------------------------------------------------------------- input layer
 
 void Player::strum(float t) {
-    if (std::getenv("GH1RE_HOPOLOG")) std::fprintf(stderr, "strum at %.1f (held %02x)\n", t, pressed_);
+    if (std::getenv("GD01_HOPOLOG")) std::fprintf(stderr, "strum at %.1f (held %02x)\n", t, pressed_);
     if (mode_ != ControllerMode::Guitar || failed_) return;
     if (lastStrumMs_ + kStrumDebounceMs < t) {
         lastStrumMs_ = t;
@@ -78,7 +78,7 @@ void Player::strum(float t) {
 
 void Player::fretDown(int fret, float t) {
     if (failed_) return;
-    if (std::getenv("GH1RE_HOPOLOG"))
+    if (std::getenv("GD01_HOPOLOG"))
         std::fprintf(stderr, "fret %d down at %.1f (held %02x, strummed %d, mode %s)\n", fret, t, pressed_, int(strummed_),
                      mode_ == ControllerMode::Guitar ? "guitar" : "joypad");
     uint32_t bit = 1u << fret;
@@ -195,8 +195,8 @@ void Player::pendingCheck(float t, int fret) {
 
 // FUN_002639b8
 void Player::hopoAttempt(int fret, float t) {
-    // Development aid: GH1RE_HOPOLOG=1 logs every try and why it failed.
-    static const bool log = std::getenv("GH1RE_HOPOLOG") != nullptr;
+    // Development aid: GD01_HOPOLOG=1 logs every try and why it failed.
+    static const bool log = std::getenv("GD01_HOPOLOG") != nullptr;
     int i = nearestGem(t);
     auto why = [&](const char* r) {
         if (log) std::fprintf(stderr, "hopo try fret %d at %.1f: gem %d (%.1f, %+.1f ms) %s\n", fret, t, i,

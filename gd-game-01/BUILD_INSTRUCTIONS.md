@@ -1,15 +1,15 @@
 # Build instructions
 
-gh1re is a C++20 program built with CMake (3.24 or newer) and SDL3. The
+gd01 is a C++20 program built with CMake (3.24 or newer) and SDL3. The
 source is in `engine/`. It contains no game data: to play, you need your own
 copy of Guitar Hero (PS2), as a disc image (`Guitar Hero (USA).iso`) or an
 extracted game folder (the one containing `GEN/MAIN.HDR`).
 
 | Platform | Built on | Result |
 |---|---|---|
-| Linux x86_64 | Linux | `engine/dist/gh1re-linux-x86_64/gh1re` |
-| Windows x64 | Linux (MinGW cross-compiler) or Windows (MSYS2) | `engine/dist/gh1re-windows-x64/gh1re.exe` + `SDL3.dll` |
-| macOS (Apple Silicon or Intel) | a Mac | `gh1re.app` |
+| Linux x86_64 | Linux | `engine/dist/gd01-linux-x86_64/gd01` |
+| Windows x64 | Linux (MinGW cross-compiler) or Windows (MSYS2) | `engine/dist/gd01-windows-x64/gd01.exe` + `SDL3.dll` |
+| macOS (Apple Silicon or Intel) | a Mac | `gd01.app` |
 
 ---
 
@@ -24,7 +24,7 @@ cmake -S . -B build/linux -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build/linux
 ```
 
-The program is `engine/build/linux/gh1re`.
+The program is `engine/build/linux/gd01`.
 
 `engine/build.sh` builds Linux and Windows in one go and copies both into
 `engine/dist/` (see "Windows, cross-compiled from Fedora" below for the extra
@@ -44,7 +44,7 @@ cmake --build build/linux
 
 If your distribution has no SDL3 package yet, build SDL3 from source
 (https://github.com/libsdl-org/SDL, release 3.2 or newer) and install it with
-`cmake --install`, then build gh1re as above.
+`cmake --install`, then build gd01 as above.
 
 ### Running on Linux
 
@@ -52,10 +52,10 @@ The binary uses the system SDL3 library, so the machine that runs it needs it
 installed (`sudo dnf install SDL3` or `sudo apt install libsdl3-0`).
 
 ```sh
-./gh1re "path/to/Guitar Hero (USA).iso"
+./gd01 "path/to/Guitar Hero (USA).iso"
 ```
 
-Or start `./gh1re` without arguments and drop the `.iso` (or the game folder)
+Or start `./gd01` without arguments and drop the `.iso` (or the game folder)
 onto the window. The path is remembered for the next start.
 
 ---
@@ -70,9 +70,9 @@ cd engine
 ./build.sh
 ```
 
-The result is `engine/dist/gh1re-windows-x64/`, which contains `gh1re.exe`,
+The result is `engine/dist/gd01-windows-x64/`, which contains `gd01.exe`,
 `SDL3.dll` and `README.md`. Copy the **whole folder** to the Windows PC;
-`gh1re.exe` needs `SDL3.dll` beside it.
+`gd01.exe` needs `SDL3.dll` beside it.
 
 ### Built on Windows with MSYS2
 
@@ -89,7 +89,7 @@ The result is `engine/dist/gh1re-windows-x64/`, which contains `gh1re.exe`,
    cmake --build build/windows
    ```
 4. To run the exe outside the MSYS2 shell, copy the DLLs it needs from
-   `C:\msys64\ucrt64\bin` next to `gh1re.exe`: `SDL3.dll`, and if the exe
+   `C:\msys64\ucrt64\bin` next to `gd01.exe`: `SDL3.dll`, and if the exe
    asks for them, `libstdc++-6.dll`, `libgcc_s_seh-1.dll` and
    `libwinpthread-1.dll`.
 
@@ -99,11 +99,11 @@ solution.
 
 ### Running on Windows
 
-Double-click `gh1re.exe` and drop your `.iso` onto the window, or run it from a
+Double-click `gd01.exe` and drop your `.iso` onto the window, or run it from a
 command prompt:
 
 ```bat
-gh1re.exe "C:\Games\Guitar Hero (USA).iso"
+gd01.exe "C:\Games\Guitar Hero (USA).iso"
 ```
 
 ---
@@ -124,10 +124,10 @@ Linux).
    cmake -S . -B build/macos -G Ninja -DCMAKE_BUILD_TYPE=Release
    cmake --build build/macos
    ```
-   The result is the app bundle `engine/build/macos/gh1re.app`.
+   The result is the app bundle `engine/build/macos/gd01.app`.
 4. Run it from the terminal (so you can pass the disc image):
    ```sh
-   ./build/macos/gh1re.app/Contents/MacOS/gh1re "path/to/Guitar Hero (USA).iso"
+   ./build/macos/gd01.app/Contents/MacOS/gd01 "path/to/Guitar Hero (USA).iso"
    ```
    Or open the app and drop the `.iso` onto its window.
 
@@ -137,8 +137,8 @@ The app above uses Homebrew's SDL3. To bundle SDL3 inside the app:
 
 ```sh
 brew install dylibbundler
-app=build/macos/gh1re.app
-dylibbundler -od -b -x "$app/Contents/MacOS/gh1re" -d "$app/Contents/Frameworks/" \
+app=build/macos/gd01.app
+dylibbundler -od -b -x "$app/Contents/MacOS/gd01" -d "$app/Contents/Frameworks/" \
     -p @executable_path/../Frameworks/
 codesign --force --deep --sign - "$app"
 ```
@@ -156,15 +156,15 @@ and a bundled macOS app on every push. To use it:
 1. Put the project in a GitHub repository. Do **not** commit game data:
    `original_rom/`, `extracted/`, `extracted_dta/`, `extracted_png/` and
    anything else copied from the disc stay out (add them to `.gitignore`).
-2. Push. The workflow's run page offers three downloads: `gh1re-linux-x86_64`,
-   `gh1re-windows-x64` and `gh1re-macos-arm64`.
+2. Push. The workflow's run page offers three downloads: `gd01-linux-x86_64`,
+   `gd01-windows-x64` and `gd01-macos-arm64`.
 
 ---
 
 ## Checking a build
 
 ```sh
-gh1re --selftest "path/to/Guitar Hero (USA).iso"
+gd01 --selftest "path/to/Guitar Hero (USA).iso"
 ```
 
 It plays every chart automatically through the game's rules and must end with

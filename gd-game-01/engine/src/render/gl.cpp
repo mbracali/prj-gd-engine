@@ -7,10 +7,10 @@
 #include <vector>
 
 namespace gl {
-#define GH1RE_DEFINE(type, name) type name = nullptr;
-GH1RE_GL_FUNCTIONS(GH1RE_DEFINE)
-GH1RE_GL11_FUNCTIONS(GH1RE_DEFINE)
-#undef GH1RE_DEFINE
+#define GD01_DEFINE(type, name) type name = nullptr;
+GD01_GL_FUNCTIONS(GD01_DEFINE)
+GD01_GL11_FUNCTIONS(GD01_DEFINE)
+#undef GD01_DEFINE
 
 namespace {
 
@@ -71,12 +71,12 @@ bool hasExtension(const char* name) {
 bool isEs() { return es; }
 
 const char* load() {
-#define GH1RE_LOAD(type, name)                                                   \
+#define GD01_LOAD(type, name)                                                   \
     name = reinterpret_cast<type>(SDL_GL_GetProcAddress(#name));                 \
     if (!name) return #name;
-    GH1RE_GL_FUNCTIONS(GH1RE_LOAD)
-    GH1RE_GL11_FUNCTIONS(GH1RE_LOAD)
-#undef GH1RE_LOAD
+    GD01_GL_FUNCTIONS(GD01_LOAD)
+    GD01_GL11_FUNCTIONS(GD01_LOAD)
+#undef GD01_LOAD
     using GetString = const GLubyte*(APIENTRY*)(GLenum);
     auto getString = reinterpret_cast<GetString>(SDL_GL_GetProcAddress("glGetString"));
     const char* version = getString ? reinterpret_cast<const char*>(getString(GL_VERSION)) : nullptr;

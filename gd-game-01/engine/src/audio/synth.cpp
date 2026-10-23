@@ -331,7 +331,7 @@ std::unique_ptr<Synth::Sound> Synth::start(const std::string& name, float volume
         if (!bank) continue;
         std::vector<const SoundBank::Desc*> layers = bank->layers(name);
         if (layers.empty()) continue;
-        if (SDL_getenv("GH1RE_SFXLOG"))  // development aid
+        if (SDL_getenv("GD01_SFXLOG"))  // development aid
             SDL_Log("sfx %s (%s, %d layers, vol %.2f pan %.2f)", name.c_str(), bank->path().c_str(), int(layers.size()), double(volume), double(pan));
         float ratio = std::pow(2.0f, transpose / 12.0f);
         for (const SoundBank::Desc* d : layers) {
@@ -349,7 +349,7 @@ std::unique_ptr<Synth::Sound> Synth::start(const std::string& name, float volume
         }
         return sound;
     }
-    if (SDL_getenv("GH1RE_SFXLOG")) SDL_Log("sfx %s: not in any loaded bank", name.c_str());
+    if (SDL_getenv("GD01_SFXLOG")) SDL_Log("sfx %s: not in any loaded bank", name.c_str());
     return sound;  // "couldn't find sfx": silent
 }
 

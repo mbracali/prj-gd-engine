@@ -4,16 +4,16 @@ plugins {
 
 // SDL3 source tree (its Java glue matches the native SDL3 built from it);
 // build_android.sh passes -Psdl3Dir=..., or set it in local.properties.
-def sdl3Dir = project.findProperty('sdl3Dir') ?: System.getenv('GH1RE_SDL3_DIR')
+def sdl3Dir = project.findProperty('sdl3Dir') ?: System.getenv('GD01_SDL3_DIR')
 if (!sdl3Dir) throw new GradleException('Pass -Psdl3Dir=<SDL3 source dir> (see engine/build_android.sh)')
 def abis = (project.findProperty('abis') ?: 'arm64-v8a,x86_64').split(',')
 
 android {
-    namespace = "io.github.gh1re"
+    namespace = "io.github.mbracali.gd01"
     compileSdk 36
     ndkVersion = "28.2.13676358"
     defaultConfig {
-        applicationId "io.github.gh1re"
+        applicationId "io.github.mbracali.gd01"
         minSdkVersion 24
         targetSdkVersion 36
         versionCode 1
@@ -21,7 +21,7 @@ android {
         externalNativeBuild {
             cmake {
                 arguments "-DANDROID_PLATFORM=android-24", "-DANDROID_STL=c++_static",
-                          "-DGH1RE_SDL3_SOURCE=${sdl3Dir}"
+                          "-DGD01_SDL3_SOURCE=${sdl3Dir}"
                 abiFilters(*abis)
             }
         }

@@ -8,7 +8,7 @@
 #   - network on the first run (Gradle, the Android Gradle plugin and the SDL3
 #     source release matching the desktop SDL3, unpacked into build/android/).
 # Options: ABIS=arm64-v8a ./build_android.sh   (one ABI only)
-#          GH1RE_RELEASE_KEYSTORE=... (+ _PASSWORD, _ALIAS, _KEY_PASSWORD) to sign with your key;
+#          GD01_RELEASE_KEYSTORE=... (+ _PASSWORD, _ALIAS, _KEY_PASSWORD) to sign with your key;
 #          otherwise the APK is signed with the Android debug key.
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -34,15 +34,15 @@ if [ ! -f "$SDL3_DIR/CMakeLists.txt" ]; then
 fi
 
 # The debug key (what Android Studio would create) signs the APK by default.
-if [ -z "${GH1RE_RELEASE_KEYSTORE:-}" ] && [ ! -f "$HOME/.android/debug.keystore" ]; then
+if [ -z "${GD01_RELEASE_KEYSTORE:-}" ] && [ ! -f "$HOME/.android/debug.keystore" ]; then
   mkdir -p "$HOME/.android"
   "$JAVA_HOME/bin/keytool" -genkeypair -keystore "$HOME/.android/debug.keystore" -storepass android -keypass android \
     -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US" >/dev/null
 fi
 sign=()
-if [ -n "${GH1RE_RELEASE_KEYSTORE:-}" ]; then
-  sign=(-PreleaseKeystore="$GH1RE_RELEASE_KEYSTORE" -PreleaseKeystorePassword="$GH1RE_RELEASE_KEYSTORE_PASSWORD"
-        -PreleaseKeyAlias="$GH1RE_RELEASE_KEY_ALIAS" -PreleaseKeyPassword="${GH1RE_RELEASE_KEY_PASSWORD:-$GH1RE_RELEASE_KEYSTORE_PASSWORD}")
+if [ -n "${GD01_RELEASE_KEYSTORE:-}" ]; then
+  sign=(-PreleaseKeystore="$GD01_RELEASE_KEYSTORE" -PreleaseKeystorePassword="$GD01_RELEASE_KEYSTORE_PASSWORD"
+        -PreleaseKeyAlias="$GD01_RELEASE_KEY_ALIAS" -PreleaseKeyPassword="${GD01_RELEASE_KEY_PASSWORD:-$GD01_RELEASE_KEYSTORE_PASSWORD}")
 fi
 
 (cd android && ./gradlew --no-daemon -q assembleRelease -Psdl3Dir="$SDL3_DIR" -Pabis="${ABIS:-arm64-v8a,x86_64}" "${sign[@]}")
@@ -52,6 +52,6 @@ BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
 "$BT/apksigner" verify "$APK"
 rm -rf dist/android
 mkdir -p dist/android
-cp "$APK" dist/android/gh1re.apk
+cp "$APK" dist/android/gd01.apk
 cp README.md dist/android/
-echo "Built: dist/android/gh1re.apk"
+echo "Built: dist/android/gd01.apk"

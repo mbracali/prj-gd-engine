@@ -1,4 +1,5 @@
 #include "platform/gpu_select.h"
+#include "platform/paths.h"
 
 #include <SDL3/SDL.h>
 
@@ -36,10 +37,7 @@ const char* const kVars[] = {"__NV_PRIME_RENDER_OFFLOAD", "__GLX_VENDOR_LIBRARY_
                              "__EGL_VENDOR_LIBRARY_FILENAMES", "DRI_PRIME"};
 
 std::string prefFile(const char* name) {
-    char* pref = SDL_GetPrefPath("gh1re", "gh1re");
-    std::string p = pref ? std::string(pref) + name : name;
-    SDL_free(pref);
-    return p;
+    return prefDir().empty() ? std::string(name) : prefDir() + name;
 }
 
 std::string readLine(const std::filesystem::path& p) {
@@ -92,7 +90,7 @@ std::string fingerprint() {
 void setArgs(int argc, char** argv) { gArgs.assign(argv, argv + argc), gArgs.push_back(nullptr); }
 
 void preferDedicated() {
-    if (const char* v = SDL_getenv("GH1RE_GPU"); v && std::string(v) == "system") return;
+    if (const char* v = SDL_getenv("GD01_GPU"); v && std::string(v) == "system") return;
     for (const char* v : kVars)
         if (SDL_getenv(v)) return;  // the user (or a launcher) chose already
     std::error_code ec;
@@ -110,10 +108,10 @@ void preferDedicated() {
         return;
     }
 
-    if (const char* v = SDL_getenv("GH1RE_GPU"); v && std::string(v) == "testfail") {
+    if (const char* v = SDL_getenv("GD01_GPU"); v && std::string(v) == "testfail") {
         // Development aid: a dedicated GPU that cannot start, to exercise the fallback.
-        setenv("__GLX_VENDOR_LIBRARY_NAME", "gh1re_none", 1);
-        setenv("__EGL_VENDOR_LIBRARY_FILENAMES", "/nonexistent/gh1re_none.json", 1);
+        setenv("__GLX_VENDOR_LIBRARY_NAME", "gd01_none", 1);
+        setenv("__EGL_VENDOR_LIBRARY_FILENAMES", "/nonexistent/gd01_none.json", 1);
         gPreferred = true;
         std::ofstream(prefFile("gpu_probe")) << fingerprint() << "\n";
         return;
@@ -163,7 +161,7 @@ void started(bool ok, const std::string& glRenderer) {
             ok ? glRenderer.c_str() : SDL_GetError());
     std::filesystem::rename(prefFile("gpu_probe"), prefFile("gpu_system"), ec);
     for (const char* v : kVars) unsetenv(v);
-    setenv("GH1RE_GPU", "system", 1);
+    setenv("GD01_GPU", "system", 1);
     if (!gArgs.empty()) execv("/proc/self/exe", gArgs.data());
     SDL_Log("GPU: restart failed");
 }

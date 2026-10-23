@@ -1,4 +1,4 @@
-// [I] gh1re: the MSVC-only helpers the FidelityFX SDK 1.1.4 sources use, for
+// [I] gd01: the MSVC-only helpers the FidelityFX SDK 1.1.4 sources use, for
 // gcc / clang / mingw (force-included into the SDK's translation units only).
 #pragma once
 #ifdef __cplusplus

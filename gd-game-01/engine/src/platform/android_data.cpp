@@ -1,4 +1,5 @@
 #include "platform/android_data.h"
+#include "platform/paths.h"
 
 #include <SDL3/SDL.h>
 
@@ -14,10 +15,7 @@ AndroidIsoImport::~AndroidIsoImport() {
 std::string AndroidIsoImport::folder() {
     const char* ext = SDL_GetAndroidExternalStoragePath();
     if (ext && *ext) return std::string(ext) + "/";
-    char* pref = SDL_GetPrefPath("gh1re", "gh1re");
-    std::string p = pref ? pref : "";
-    SDL_free(pref);
-    return p;
+    return prefDir();
 }
 
 std::string AndroidIsoImport::findIso() {

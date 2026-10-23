@@ -55,7 +55,7 @@
 /// The size of the context specified in 32bit values.
 ///
 /// @ingroup ffxFsr3Upscaler
-// [I] gh1re: doubled, the private context holds wchar_t names (4 bytes off Windows).
+// [I] gd01: doubled, the private context holds wchar_t names (4 bytes off Windows).
 #define FFX_FSR3UPSCALER_CONTEXT_SIZE (FFX_SDK_DEFAULT_CONTEXT_SIZE * 2)
 
 #if defined(__cplusplus)

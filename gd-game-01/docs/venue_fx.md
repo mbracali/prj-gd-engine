@@ -289,7 +289,7 @@ Venue handlers are all `(hit_gem {hit_guitar_amp $slot})`, except basement, whic
 Other GH1 hit_gem consumers: the GuitarCharacter "hitting" flag (the engine has it) and the track smash effects (docs/hit_fx.md).
 
 ---------------------------------------------------------------------------------------------------
-## 6. Implementation plan for gh1re
+## 6. Implementation plan for gd01
 
 ### 6.1 Venue script runner (prerequisite for everything script-driven)
 The mini-runner in `engine/src/game/venue_script.cpp` cannot evaluate `if`, `foreach`, `switch`, `random_int`,

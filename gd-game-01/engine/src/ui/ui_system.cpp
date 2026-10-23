@@ -796,7 +796,7 @@ public:
             if (allowed) ok.push_back(t.children[0].s);
         }
         // The localized text (the script passes it to set_localized_text).
-        if (const char* forced = SDL_getenv("GH1RE_TIP")) return r = Value::string(localize_(forced)), true;  // dev aid
+        if (const char* forced = SDL_getenv("GD01_TIP")) return r = Value::string(localize_(forced)), true;  // dev aid
         if (!ok.empty()) r = Value::string(localize_(ok[std::uniform_int_distribution<size_t>(0, ok.size() - 1)(rng_)]));
         return true;
     }
@@ -1887,7 +1887,7 @@ UiSystem::UiSystem(Renderer& renderer, const GameData& data, Hooks hooks)
     add(new BeatmatchObj(*this));
     add(new MemcardObj(*this));
     try {
-        // [I] The GH1RE tips join the pool, on every difficulty.
+        // [I] The GD01 tips join the pool, on every difficulty.
         DataNode tips = loader_.load("config/tips.dta");
         for (int k = 0; k < kPcLoadingTipCount; ++k)
             tips.children.push_back(parseDtaText(std::string("(") + kPcLoadingTips[k] + ")").children.at(0));
@@ -2194,7 +2194,7 @@ void UiSystem::enterScreen(ScreenObj* next) {
         // quickplay: the song's own (songs.dta quickplay), "" here.
         // The game config: quickplay copied the song's setup into it, career the player's choices.
         int songId = g->engineSongId >= 0 ? g->engineSongId : provider->engineSong(g->songIndex);
-        if (SDL_getenv("GH1RE_UILOG"))
+        if (SDL_getenv("GD01_UILOG"))
             SDL_Log("ui: start game: song %d, difficulty %d, venue %s, character %s, guitar %s", songId, g->difficulty,
                     g->venue.c_str(), g->players[0]->character.c_str(),
                     (g->players[0]->skin.empty() ? g->players[0]->guitar : g->players[0]->skin).c_str());
@@ -2220,7 +2220,7 @@ bool UiSystem::inGame() const {
 }
 
 void UiSystem::gotoScreen(const std::string& name) {
-    if (SDL_getenv("GH1RE_UILOG")) SDL_Log("ui: goto_screen %s", name.c_str());  // development aid
+    if (SDL_getenv("GD01_UILOG")) SDL_Log("ui: goto_screen %s", name.c_str());  // development aid
     ScreenObj* next = screen(name);
     if (!next) {
         SDL_Log("ui: no screen %s", name.c_str());

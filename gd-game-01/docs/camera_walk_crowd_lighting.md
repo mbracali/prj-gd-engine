@@ -97,7 +97,7 @@ What the engine does: `upcomingSection("solo")` → `pickSolo()` → uniform ove
 3. **Arena/fest circle01 close-ups.** Parent/target resolve through `guitarist0::spot_neck_fret01/20` (works via `Character::find` on the guitar scene). Keep the parent's full world (with the spots' scaled Z rows) as the game does. If the guitarist is missing, the fallback is `arena::stage_spot_01.mesh`. Check that the guitar spot worlds are current at camera time (the camera runs after `guitarist_->poll` in `VenueRenderer::update`, which is the right order).
 4. Missing per-shot extras that make the close-ups look like the original: `enable_dof` (depth of field focused at 2·dist; all SOLO_NEAR shots set it), `hide_crowd`, `crowd_region`, `shaky` (`shaky_cam1.tnm` multiplied in), `eyes` (guitarist looks at the camera), `force_char_lod`.
 
-**Verification run** (the current `engine/build/linux/gh1re`, `--song smokeonthewater --autoplay --at theatre|arena`, 16 screenshots between 184 s and 219 s, inside the first solo, which runs 182.4–223.7 s): our build *does* show SOLO_NEAR shots during solos. In the theatre, 5 of 8 frames are torso/guitar close-ups (Cam_t_p_close, head above the frame). In the arena, the 194 s frame is the Cam_t_p_circle01 neck shot, with the camera on the neck looking toward the body and the strumming hand. So the claim that we never show them is too strong. What is actually wrong:
+**Verification run** (the current `engine/build/linux/gd01`, `--song smokeonthewater --autoplay --at theatre|arena`, 16 screenshots between 184 s and 219 s, inside the first solo, which runs 182.4–223.7 s): our build *does* show SOLO_NEAR shots during solos. In the theatre, 5 of 8 frames are torso/guitar close-ups (Cam_t_p_close, head above the frame). In the arena, the 194 s frame is the Cam_t_p_circle01 neck shot, with the camera on the neck looking toward the body and the strumming hand. So the claim that we never show them is too strong. What is actually wrong:
 - **(a) Frequency.** Solos are short and rare (1–2 per song, about 20 bars). Outside solos the data has no close-up at all, so they only "exist" there. In the original they also appear only in solos, but after the first regular shot times out.
 - **(b) Framing.** The focus is a fixed point, so the close-up drifts off the hands whenever the solo clip moves the head.
 - **(c) Look.** There's no depth of field, which the original applies on every SOLO_NEAR shot and which is what sells them as close-ups. There's no `hide_crowd`, and no shaky camera.
@@ -544,7 +544,7 @@ Data:
 
 ---
 
-### 10. Implementable algorithm for gh1re
+### 10. Implementable algorithm for gd01
 
 Engine today:
 - `VenueRenderer::update` sets `guitarist_->setPlacement(walk_spot_02)` every frame.
@@ -907,7 +907,7 @@ The first 6 created double as the block archetypes; the region code takes them l
 | 0x106348 | song text events (crowd_*_tempo) |
 
 ## 4. Lighting and visual effects (full report)
-### GH1 venue lighting / visual effects: what the original does that gh1re does not
+### GH1 venue lighting / visual effects: what the original does that gd01 does not
 
 [C] = read from code (decomp / VU / data), [I] = inference. Addresses are EE (SLUS_212.24).
 Data counts come from decoding every venue `.rnd_ps2` (scripts in `scratchpad/lt/`:

@@ -134,7 +134,7 @@ Resulting behaviour of a full whammy, held 1 s after the hit:
 - Because `frequency` = 0.0, they never fire.
 - **Ignore for the port.**
 
-## 6. Implementation plan for gh1re
+## 6. Implementation plan for gd01
 
 ### 6.1 Mixer: a guitar delay line (the same model as the slip voice)
 

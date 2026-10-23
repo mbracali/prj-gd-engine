@@ -1,4 +1,4 @@
-# gh1re: what this project is, what users get, how to organise the code
+# gd01: what this project is, what users get, how to organise the code
 
 ## 1. What are we doing?
 
@@ -10,7 +10,7 @@ We are building a **reimplementation** of Guitar Hero (PS2, 2005), informed by *
 | **Re-engineering** | Taking an existing system and rebuilding or restructuring it, usually keeping its behaviour. The umbrella term for "reverse engineer, then rebuild". | Broadly yes: the whole project is re-engineering. |
 | **Decompilation / recompilation** | Turning the machine code back into equivalent C (by hand or tool) and compiling *that*, so the new program *is* the old code (e.g. the Mario 64 and Zelda decomps, or static recompilers). | **No.** We read the decompiled code to understand it, but we do not ship it. |
 | **Emulation** | Running the original executable on a simulated PS2 (PCSX2). | **No.** |
-| **Reimplementation** | Writing new code from scratch that behaves like the original and reads the original's data (like OpenMW for Morrowind, OpenRCT2, ScummVM). | **Yes, the engineering half.** The `engine/` (gh1re, C++/SDL3/OpenGL) is new code. It loads the game data from the user's own disc. |
+| **Reimplementation** | Writing new code from scratch that behaves like the original and reads the original's data (like OpenMW for Morrowind, OpenRCT2, ScummVM). | **Yes, the engineering half.** The `engine/` (gd01, C++/SDL3/OpenGL) is new code. It loads the game data from the user's own disc. |
 
 So: **we reverse engineer the original to learn its exact rules, then reimplement them in new, portable code that runs the original game data**.
 Where the game's logic is data (the DTA scripts for menus, sounds, the arena, the HUD wiring), we go further and run
@@ -40,34 +40,34 @@ option to go beyond the original later (the "extended features").
 One small download per platform. **No game data is included**: the player points it at their own copy.
 
 ```
-gh1re-windows-x64/            gh1re-linux-x86_64/             gh1re-macos/
-  gh1re.exe                     gh1re                           gh1re.app/
-  SDL3.dll                      README.md                         Contents/MacOS/gh1re
-  README.md                     (gh1re.AppImage, later)           Contents/Frameworks/libSDL3*.dylib
+gd01-windows-x64/            gd01-linux-x86_64/             gd01-macos/
+  gd01.exe                     gd01                           gd01.app/
+  SDL3.dll                      README.md                         Contents/MacOS/gd01
+  README.md                     (gd01.AppImage, later)           Contents/Frameworks/libSDL3*.dylib
                                                                   Contents/Resources/
                                                                 README.md
 ```
 
 How they use it:
 
-- **Windows:** unzip, double-click `gh1re.exe`, drop the `.iso` (or extracted folder) on the window once.
-- **Linux:** unpack, run `./gh1re /path/to/disc.iso` (or drop the ISO on the window); later an AppImage or Flatpak.
-- **macOS:** open `gh1re.app` (right-click → Open the first time, as it is unsigned), drop the ISO on the window.
+- **Windows:** unzip, double-click `gd01.exe`, drop the `.iso` (or extracted folder) on the window once.
+- **Linux:** unpack, run `./gd01 /path/to/disc.iso` (or drop the ISO on the window); later an AppImage or Flatpak.
+- **macOS:** open `gd01.app` (right-click → Open the first time, as it is unsigned), drop the ISO on the window.
 
 The game remembers the disc path. Saves and settings live in the platform's standard user folder:
 
 | Platform | Folder |
 |---|---|
-| Windows | `%APPDATA%\gh1re\gh1re\` |
-| Linux | `~/.local/share/gh1re/gh1re/` |
-| macOS | `~/Library/Application Support/gh1re/gh1re/` |
+| Windows | `%APPDATA%\gd01\gd01\` |
+| Linux | `~/.local/share/gd01/gd01/` |
+| macOS | `~/Library/Application Support/gd01/gd01/` |
 
 Inside: `config.txt` (disc path, later settings) and `career.json` (profiles, careers, high scores).
 
 ### For developers (this repository today)
 
 ```
-engine/          the gh1re reimplementation (C++20, SDL3, OpenGL 3.3, CMake)
+engine/          the gd01 reimplementation (C++20, SDL3, OpenGL 3.3, CMake)
   src/           app, audio, data (ARK/ISO/DTB/MIDI/VGS), game, render, scene, script, ui
   build.sh       Linux + Windows (mingw) builds into dist/
 tools/           Python decoders for every file format (validated byte-exact)
@@ -87,7 +87,7 @@ contain decompiled code), and keep the licence of the reimplementation clear.
 ### Option A: one repository, clean split (simplest)
 
 ```
-gh1re/
+gd01/
   engine/      the game (released)
   tools/       format decoders (released)
   docs/        specs (released)
@@ -100,8 +100,8 @@ gh1re/
 
 ### Option B: two repositories (what you suggested)
 
-1. **`gh1re`** (the product): `engine/`, its docs, CI, releases. Players and contributors to the game only need this.
-2. **`gh1re-research`** (the tooling): `tools/`, `docs/` RE specs, Ghidra scripts, notebooks, `FINDINGS.md`.
+1. **`gd01`** (the product): `engine/`, its docs, CI, releases. Players and contributors to the game only need this.
+2. **`gd01-research`** (the tooling): `tools/`, `docs/` RE specs, Ghidra scripts, notebooks, `FINDINGS.md`.
    Possibly private, since it is closer to the original binary.
 
 - The engine can reference the specs by link; the research repo can pin an engine version for tests.
@@ -109,10 +109,10 @@ gh1re/
 
 ### Option C: three repositories (if the project grows)
 
-1. **`gh1re`**: the engine only.
-2. **`gh1re-formats`**: a reusable library + CLI for the Milo/GH1 formats (ARK, DTB, RND, VGS, BNK…), usable by
+1. **`gd01`**: the engine only.
+2. **`gd01-formats`**: a reusable library + CLI for the Milo/GH1 formats (ARK, DTB, RND, VGS, BNK…), usable by
    modders and other projects, published on its own (PyPI / crates).
-3. **`gh1re-research`**: Ghidra/REA scripts and notes, private.
+3. **`gd01-research`**: Ghidra/REA scripts and notes, private.
 
 - Fits the "extended features" era (modding, new songs, texture packs), where the format tools become a product.
 

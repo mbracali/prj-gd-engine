@@ -1,4 +1,4 @@
-// gh1re Android build (engine/build_android.sh runs it). Based on SDL3's
+// gd01 Android build (engine/build_android.sh runs it). Based on SDL3's
 // android-project template; the native code is engine/CMakeLists.txt.
 buildscript {
     repositories {

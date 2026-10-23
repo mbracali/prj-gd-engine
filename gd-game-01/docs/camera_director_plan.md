@@ -419,7 +419,7 @@ All changes are in `engine/src/game/venue_camera.{h,cpp}`, `engine/src/render/ve
     - `intro_skip` → `barsLeft_ = 0; downbeat-style check` (D15/D16).
 
 **Verification:**
-- `GH1RE_LOG_SHOTS=1` on a 4/4 song at each venue. Expect:
+- `GD01_LOG_SHOTS=1` on a 4/4 song at each venue. Expect:
   - durations in `[lo, hi)` bars;
   - no Left→Left / Right→Right;
   - no Far/balcony↔Far/band_POV pairs;

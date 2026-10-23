@@ -1,4 +1,4 @@
-# Career end to end: original behaviour vs gh1re, and the gap list
+# Career end to end: original behaviour vs gd01, and the gap list
 
 Scope: everything a player meets in Career, from picking a difficulty to beating the final song:
 tiers, unlocks, encores, cash, the store, bonus songs and videos, the final win, Battle Axe, saving,

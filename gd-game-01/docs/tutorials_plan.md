@@ -1,4 +1,4 @@
-# Tutorials: how the original runs them and how to make them playable in gh1re
+# Tutorials: how the original runs them and how to make them playable in gd01
 
 Tags: **[C]** confirmed from the decompilation or the shipped scripts/data, **[I]** inferred or a port decision.
 Addresses are EE (SLUS_212.24) addresses; decompiled code is in `analysis/decomp/00150000.c` unless stated otherwise.
@@ -20,7 +20,7 @@ Addresses are EE (SLUS_212.24) addresses; decompiled code is in `analysis/decomp
   two trainers). Either way the tutorial goes on to the next lesson; there is no fail and no retry.
 - Unlocking happens **when a tutorial is selected**, not when it is finished: `campaign do_tutorial N` raises
   `tutorials_done`. Tutorial 2 needs `tutorials_done >= 1` and tutorial 3 needs `>= 2`.
-- Missing from gh1re today: the ThreadTask runtime; the TutorialPanel natives (`tutorial` is a `StubObj`); VO streaming;
+- Missing from gd01 today: the ThreadTask runtime; the TutorialPanel natives (`tutorial` is a `StubObj`); VO streaming;
   the two trainers; the tutorial game mode, i.e. starting the song from the `tut_script` screen, loading tutorial songs
   (they are filtered out of `songs_`), `load_song`/`loaded`/`start_song`/`set_time_paused`; about 10 Player setters; 6 player
   callbacks; real `set_local_pos/scale`, `set_stage_tex` and `set_wrap_width`; and tutorial-mode differences in the arena, HUD and banks.
@@ -61,7 +61,7 @@ TutorialHopoTrain play them (§5, §6).
 
 ### 2.2 `tutorials` screen (panels `tutorials meta helpbar`)
 - `enter`: focus `tut_1.btn`. `tut_2.btn` is kNormal if `tutorials_done >= 1`, otherwise kDisabled. `tut_3.btn` needs `>= 2`.
-  - `campaign tutorials_done` returns 3 when `skip_tutorials` or `tutorial_access` is set (`docs/career.md`, `FUN_001392b8`). gh1re already does this (career_objects.cpp:131).
+  - `campaign tutorials_done` returns 3 when `skip_tutorials` or `tutorial_access` is set (`docs/career.md`, `FUN_001392b8`). gd01 already does this (career_objects.cpp:131).
 - `FOCUS_MSG` puts `TUT_n_BLURB` into `tut_blurb.lbl`.
 - `SELECT_MSG`:
 
@@ -97,7 +97,7 @@ TutorialHopoTrain play them (§5, §6).
 
 ### 2.5 Port decision on controllers [I]
 The original refuses tutorials without a guitar (main button disabled, `tut_pause_controller`).
-On PC, keyboard and gamepads have a strum key in gh1re. Recommendation:
+On PC, keyboard and gamepads have a strum key in gd01. Recommendation:
 - `tutorial is_missing_guitar` returns 0 whenever the active input mode is Guitar.
 - `game get_controller` keeps returning `guitar`/`joypad` from `ui_.guitar_`.
 - Make the keyboard count as a guitar for this purpose. Optionally add an Enhanced Setting "allow tutorials on joypad", which maps to `campaign set_tutorial_access`.
@@ -352,7 +352,7 @@ Fields:
 ### 7.2 `player0::player` (Player_v1 0x1174f8, `00110000.c`) [C]
 | message | semantics |
 |---|---|
-| `percent_complete`, `star_power_ready`, `in_star_mode` | getters (gh1re already has them) |
+| `percent_complete`, `star_power_ready`, `in_star_mode` | getters (gd01 already has them) |
 | `set_crowd_rating_active B` (+0x64) | when 0, `FUN_001171b8` skips every crowd update, so the rock meter is frozen and the player **cannot fail**. A fail also clears it. |
 | `set_crowd_rating x` | clamp 0..1, then set the rock meter's rating and raw value (FUN_0011d3f8) |
 | `fill_star_power` / `empty_star_power` / `set_star_power x` | meter = 1 / 0 / x (FUN_0011cd68; crossing ready sends the deploy-ready message) |
@@ -369,7 +369,7 @@ native events to global funcs. `system_script.dta reset_all_callbacks` redefines
 
 | native event | handler block | callback | when |
 |---|---|---|---|
-| `hit ($slot $star $hopoable $hopoed $p)` | player_matcher_handlers | `gem_hit_callback $slot $hopoable $hopoed` | gem hit (gh1re sends this) |
+| `hit ($slot $star $hopoable $hopoed $p)` | player_matcher_handlers | `gem_hit_callback $slot $hopoable $hopoed` | gem hit (gd01 sends this) |
 | `miss ($p)` | player_matcher_handlers | `gem_miss_callback` (+ seq miss_chink) | overstrum / wrong strum [I] |
 | `pass` | player_matcher_handlers | `gem_pass_callback` | gem scrolled past unplayed [I] |
 | `hopo` (PlayerMatcher_v17, string 0x2ff310 "hopo") | player_matcher_handlers | `hopo_callback` | gem hit by hammer-on/pull-off without strum [I] |
@@ -377,7 +377,7 @@ native events to global funcs. `system_script.dta reset_all_callbacks` redefines
 | `held_note_released ($fraction)` (FUN_00116f50) | handlers | `held_note_released_callback $fraction` | a sustained gem ends; fraction = kept part (FUN_0011d5c8). 1 = held to the end |
 | `whammy_start` / `whammy_end` (FUN_00116930) | handlers | `whammy_*_callback` | while holding a sustain with whammy-SP enabled. **In a tutorial every held sustain counts; otherwise only Star Power phrase notes count.** `start` is sent on every poll while the bar is active; `end` on every poll once it has been inactive for 500 ms (and the note has been held for 500 ms or more). Level-triggered [C] |
 | `star_gem_hit` | star_power_handlers | `star_gem_hit_callback` | a gem of a star phrase is hit (FUN_0011c390) |
-| `phrase_captured`, `phrase_miss`, `start_using`, `stop_using` | star_power_handlers | `star_phrase_captured/miss`, `star_use_begin/end_callback` | gh1re already sends these events |
+| `phrase_captured`, `phrase_miss`, `start_using`, `stop_using` | star_power_handlers | `star_phrase_captured/miss`, `star_use_begin/end_callback` | gd01 already sends these events |
 
 ### 7.4 Other objects
 - `track_panel animate_track_out_fast` = `game anim_task track_panel 600 0 1920`. `animate_track_in_fast` reverses it after a 500 ms delay (track_panel.dta). The intro_skip in tutorial mode puts the track at frame 0 (hidden) [C].
@@ -404,7 +404,7 @@ native events to global funcs. `system_script.dta reset_all_callbacks` redefines
 - Quitting from the pause menu takes the same `tutorial_quit` path.
 
 ---------------------------------------------------------------------------------------------------
-## 9. Implementation plan for gh1re
+## 9. Implementation plan for gd01
 
 Order matters: steps 1–3 make T1.1/T1.6/T1.9 run, step 4 adds VO, steps 5–8 make the song lessons work, step 9 adds the trainers.
 
@@ -519,12 +519,12 @@ Order matters: steps 1–3 make T1.1/T1.6/T1.9 run, step 4 adds VO, steps 5–8 
 
 ### Step 11: Verification
 - Add `--tutorial N` (dev aid) that boots into `tutorials`, selects N and logs `ui: goto_screen` + `tutorial: state X`.
-  Use GH1RE_UILOG for `play_vo`, dropped VO and task waits.
+  Use GD01_UILOG for `play_vo`, dropped VO and task waits.
 - Autoplay can pass the song lessons:
   - T1.2–T1.5 by hitting.
   - T3.2/T3.3b need autoplay to use HOPOs (no strum) so `hopo` fires.
-  - T2.3 needs the dev whammy (`GH1RE_WHAMMY`). T2.4 needs autoplay to deploy SP.
-- The trainers need scripted input. Add `GH1RE_TUTORIAL_INPUT` with a sequence of (ms, frets, strum) or a "trainer autopilot" in debug builds.
+  - T2.3 needs the dev whammy (`GD01_WHAMMY`). T2.4 needs autoplay to deploy SP.
+- The trainers need scripted input. Add `GD01_TUTORIAL_INPUT` with a sequence of (ms, frets, strum) or a "trainer autopilot" in debug builds.
 - Screenshot each lesson's overlay (existing screenshot hook) and compare against the box sizes `TUTn_m_BOX`.
 - Timeouts: run with no input and check that "LESSON TIMED OUT!" appears and the next lesson starts (97 % / 60 s).
 

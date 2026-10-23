@@ -1,4 +1,4 @@
-# gh1re
+# gd01
 
 A from-scratch reimplementation of Guitar Hero (PS2, 2005) for Linux, macOS
 and Windows. It plays the songs from **your own copy** of the game: no game
@@ -14,12 +14,12 @@ with the original clips. The crowd isn't drawn yet.
 
 ## Running
 
-Start `gh1re` and drop your disc image (`.iso`) or extracted game folder (the
+Start `gd01` and drop your disc image (`.iso`) or extracted game folder (the
 one containing `GEN/MAIN.HDR`) onto the window. The path is remembered.
 Or pass it on the command line:
 
-    gh1re "Guitar Hero (USA).iso"
-    gh1re --song smokeonthewater --difficulty 3 path/to/game
+    gd01 "Guitar Hero (USA).iso"
+    gd01 --song smokeonthewater --difficulty 3 path/to/game
 
 Options: `--song <id>`, `--difficulty 0-3`, `--av-offset <ms>`, `--no-fail`,
 `--autoplay`, `--no-venue`, `--selftest`.
@@ -47,7 +47,7 @@ Actions workflow, which builds all three platforms.
 
 ### Android
 
-`./build_android.sh` writes `dist/android/gh1re.apk` (arm64-v8a and x86_64,
+`./build_android.sh` writes `dist/android/gd01.apk` (arm64-v8a and x86_64,
 Android 7.0+, OpenGL ES 3.0). `./build.sh` also runs it when an Android SDK is
 found at `$ANDROID_HOME` (default `~/Android/Sdk`). One-time setup, no root:
 
@@ -60,14 +60,14 @@ found at `$ANDROID_HOME` (default `~/Android/Sdk`). One-time setup, no root:
    desktop SDL3 (into `build/android/`).
 
 The APK is signed with the Android debug key (created if missing); set
-`GH1RE_RELEASE_KEYSTORE` (+ `_PASSWORD`, `GH1RE_RELEASE_KEY_ALIAS`) to sign with
+`GD01_RELEASE_KEYSTORE` (+ `_PASSWORD`, `GD01_RELEASE_KEY_ALIAS`) to sign with
 your own. `ABIS=arm64-v8a ./build_android.sh` builds one ABI only.
 
-Install with `adb install -r dist/android/gh1re.apk` (or copy the APK to the
+Install with `adb install -r dist/android/gd01.apk` (or copy the APK to the
 phone and open it, allowing installs from that app). On the first start, tap
 the screen and pick your disc image with the file picker: it is copied into the
-app's folder (`Android/data/io.github.gh1re/files/`, about 2.2 GB), or copy any
+app's folder (`Android/data/io.github.mbracali.gd01/files/`, about 2.2 GB), or copy any
 `.iso` there yourself (USB or `adb push`). Touch controls are on by default;
 USB and Bluetooth controllers work as on the desktop, and the back button is
 the game's Back. FSR 3.1 and DLSS 4 are desktop-only (FSR 1 and the other
-effects work). On the desktop, `GH1RE_GLES=1` runs the same OpenGL ES renderer.
+effects work). On the desktop, `GD01_GLES=1` runs the same OpenGL ES renderer.

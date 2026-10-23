@@ -8,6 +8,7 @@
 #include <string>
 
 #include "data/json.h"
+#include "platform/paths.h"
 
 namespace {
 
@@ -78,10 +79,7 @@ const char* const kControlKeys[] = {"green", "red", "yellow", "blue", "orange", 
 const char* const kKindKeys[] = {"button", "axis_pos", "axis_neg", "axis_any", "key"};
 
 std::string prefPath(const char* file) {
-    char* pref = SDL_GetPrefPath("gh1re", "gh1re");
-    std::string p = pref ? std::string(pref) + file : file;
-    SDL_free(pref);
-    return p;
+    return prefDir().empty() ? std::string(file) : prefDir() + file;
 }
 
 Input::Source btn(SDL_GamepadButton b) { return {Kind::Button, int(b)}; }

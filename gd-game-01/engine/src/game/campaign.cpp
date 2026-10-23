@@ -426,7 +426,7 @@ void Campaign::addHighScore(const std::string& song, int diff, const std::string
 
 bool Campaign::save(const std::string& path) {
     Json root = Json::object();
-    root.set("format", Json::string("gh1re-career"));
+    root.set("format", Json::string("gd01-career"));
     root.set("version", Json::number(6));
     Json profiles = Json::array();
     for (int s = 0; s < 8; ++s) {
@@ -528,7 +528,7 @@ bool Campaign::load(const std::string& path) {
     };
     try {
         Json root = Json::parse(ss.str());
-        if (root.type != Json::Type::Object || root["format"].str() != "gh1re-career") return false;
+        if (root.type != Json::Type::Object || (root["format"].str() != "gd01-career" && root["format"].str() != "gh1re-career")) return false;
         const Json& profiles = root["profiles"];
         for (size_t s = 0; s < 8 && profiles.type == Json::Type::Array && s < profiles.a.size(); ++s) {
             const Json& jp = profiles.a[s];

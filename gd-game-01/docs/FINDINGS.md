@@ -162,7 +162,7 @@ The engine now ends it only when no fret is held for longer than a pad frame
 instructions at 0x263a58..0x263a8c and the constructor's `0x42700000` (60.0)
 at watcher +0x74. Enhanced "Hammer-ons & Pull-offs: Forgiving" widens the early
 side to −100 ms, needs no strum / held fret, and does not lock out a gem after a
-wrong fret. `GH1RE_HOPOLOG=1` logs every try and why it failed.
+wrong fret. `GD01_HOPOLOG=1` logs every try and why it failed.
 
 Joypad mode (`FUN_0025bea8`): each fret press is also a strum, and the 60 ms
 grace applies only to chords.

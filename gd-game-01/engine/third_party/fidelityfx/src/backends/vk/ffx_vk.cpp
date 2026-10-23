@@ -1408,7 +1408,7 @@ FfxErrorCode CreateBackendContextVK(FfxInterface* backendInterface, FfxEffect ef
         uint32_t pipelineArraySize = FFX_ALIGN_UP(backendContext->maxEffectContexts * FFX_MAX_PASS_COUNT * sizeof(BackendContext_VK::PipelineLayout), 16);
         uint32_t resourceArraySize = FFX_ALIGN_UP(backendContext->maxEffectContexts * FFX_MAX_RESOURCE_COUNT * sizeof(BackendContext_VK::Resource), 16);
         uint32_t contextArraySize = FFX_ALIGN_UP(backendContext->maxEffectContexts * sizeof(BackendContext_VK::EffectContext), 16);
-        // [I] gh1re: every array 16-byte aligned (gcc vectorizes the struct stores with aligned SSE).
+        // [I] gd01: every array 16-byte aligned (gcc vectorizes the struct stores with aligned SSE).
         uint8_t* pMem = (uint8_t*)FFX_ALIGN_UP((uintptr_t)(backendContext + 1), 16);
 
         // Map gpu job array
@@ -2088,7 +2088,7 @@ FfxErrorCode GetDeviceCapabilitiesVK(FfxInterface* backendInterface, FfxDeviceCa
         }
     }
 
-    // [I] gh1re: the generated FSR 3.1 shaders (tools/ffx_gen_shaders.py) are
+    // [I] gd01: the generated FSR 3.1 shaders (tools/ffx_gen_shaders.py) are
     // the wave32 permutations, in 32-bit and (when the device has shaderFloat16) 16-bit.
     deviceCapabilities->waveLaneCountMin = deviceCapabilities->waveLaneCountMax = 32;
     return FFX_OK;

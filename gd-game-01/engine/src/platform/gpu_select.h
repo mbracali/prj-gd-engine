@@ -11,7 +11,7 @@
 // or DRI_PRIME=pci-... (Mesa) select it. If graphics then fail to start, or
 // the previous launch died while starting them, the game uses the GPU the
 // system picks (and remembers that, in gpu_system in the save folder, until
-// the driver or kernel changes). GH1RE_GPU=system skips the preference; GH1RE_GPU=testfail
+// the driver or kernel changes). GD01_GPU=system skips the preference; GD01_GPU=testfail
 // fakes a dedicated GPU that cannot start.
 // macOS and Android: nothing to choose.
 namespace gpu {

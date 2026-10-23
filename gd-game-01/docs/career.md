@@ -457,7 +457,7 @@ volumes 1.0, stereo on; high scores = the dummy table.
 
 ```json
 {
-  "format": "gh1re-career", "version": 6,
+  "format": "gd01-career", "version": 6,
   "profiles": [                                  // exactly 8 slots
     {
       "empty": false,

@@ -270,7 +270,7 @@ Light position per walk spot (`{switch {char_sys get_spot guitarist0} …}`):
 
 ---
 
-## 6. Implementation plan for gh1re
+## 6. Implementation plan for gd01
 
 Files: `engine/src/render/venue_renderer.{h,cpp}`, `engine/src/game/venue_script.cpp`, `engine/src/scene/anim.{h,cpp}`, `engine/src/render/scene_renderer.{h,cpp}`.
 

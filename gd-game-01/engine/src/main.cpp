@@ -7,12 +7,13 @@
 
 #include "app.h"
 #include "platform/gpu_select.h"
+#include "platform/paths.h"
 
 namespace {
 
 void usage() {
     std::printf(
-        "usage: gh1re [options] [path-to-iso-or-game-folder]\n"
+        "usage: gd01 [options] [path-to-iso-or-game-folder]\n"
         "  --song <id>          start a song directly (e.g. smokeonthewater)\n"
         "  --difficulty <0-3>   0 Easy, 1 Medium, 2 Hard, 3 Expert (default 3)\n"
         "  --av-offset <ms>     audio/video latency compensation\n"
@@ -26,6 +27,7 @@ void usage() {
 }  // namespace
 
 int main(int argc, char** argv) {
+    aliasLegacyEnv();
     gpu::setArgs(argc, argv);
     Options opt;
     bool selftest = false, scenetest = false;

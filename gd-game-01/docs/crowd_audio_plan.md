@@ -1,4 +1,4 @@
-# Crowd audio: original vs gh1re, gap list
+# Crowd audio: original vs gd01, gap list
 
 This audit covers every crowd and ambient sound during gameplay. It builds on `docs/audio_sfx.md` §4 ("Crowd audio is streamed") and adds the CrowdAudio internals.
 

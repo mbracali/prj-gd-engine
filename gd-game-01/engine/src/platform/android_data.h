@@ -9,7 +9,7 @@ struct SDL_Window;
 
 // Android: the user's Guitar Hero disc image cannot ship in the APK. The game
 // reads it from the app's external files folder
-// (Android/data/io.github.gh1re/files/, where it can be copied over USB or
+// (Android/data/io.github.mbracali.gd01/files/, where it can be copied over USB or
 // with `adb push`), or the user picks it once with the system file picker and
 // it is copied there (content:// URIs cannot be read as plain files).
 class AndroidIsoImport {

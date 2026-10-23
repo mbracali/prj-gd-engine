@@ -262,7 +262,7 @@ void VenueRenderer::update(const VenueFrame& f) {
             standGuard(*guitarist2_, spots2_[0].pos, yaw(spots2_[0]), dBeat);
         }
         lastGuardBeat_ = beat;
-        if (static const bool rootLog = SDL_getenv("GH1RE_ROOTLOG") != nullptr; rootLog && placed_ && std::floor(beat / 2) != std::floor(lastRootLogBeat_ / 2)) {
+        if (static const bool rootLog = SDL_getenv("GD01_ROOTLOG") != nullptr; rootLog && placed_ && std::floor(beat / 2) != std::floor(lastRootLogBeat_ / 2)) {
             const Xfm& r = guitarist_->placement();
             if (!rootLogInit_) rootLogInit_ = true, rootLog0_ = r;
             auto yaw = [](const Xfm& x) { return -std::atan2(x.rot[3], x.rot[4]); };
@@ -375,7 +375,7 @@ void VenueRenderer::update(const VenueFrame& f) {
             const std::string& shot = camera_->shotName();
             const bool cut = shot != snapShot_;
             snapShot_ = shot;
-            if ((cut || !onScreen(*guitarist_)) && walk_->snapHome(*guitarist_) && SDL_getenv("GH1RE_LOG_SHOTS"))
+            if ((cut || !onScreen(*guitarist_)) && walk_->snapHome(*guitarist_) && SDL_getenv("GD01_LOG_SHOTS"))
                 SDL_Log("walk: guitarist reset on his spot (%s %s)", cut ? "cut to" : "out of", shot.c_str());
         }
     } else {
@@ -387,8 +387,8 @@ void VenueRenderer::update(const VenueFrame& f) {
 }
 
 void VenueRenderer::draw() {
-    // Development aid: GH1RE_GUITARIST_CAM=1 frames the guitarist up close.
-    if (SDL_getenv("GH1RE_GUITARIST_CAM"))
+    // Development aid: GD01_GUITARIST_CAM=1 frames the guitarist up close.
+    if (SDL_getenv("GD01_GUITARIST_CAM"))
         if (const SceneObject* pelvis = guitarist_ ? guitarist_->find("bone_pelvis.mesh") : nullptr) {
             const auto& p = pelvis->transformable()->world.pos;
             float fovY = 2.0f * std::atan(std::tan(0.35f) / (4.0f / 3.0f));
@@ -677,7 +677,7 @@ void VenueRenderer::loadBand(Renderer& renderer, const GameData& data, int tempo
     DataNode charsys = parseDtb(data.read(dtbPath("charsys/charsys.dta")));
     DataNode chars = parseDtb(data.read(dtbPath("charsys/band_chars.dta")));
     const DataNode* spots = charsys.find("band_spots");
-    if (const char* dev = SDL_getenv("GH1RE_BAND")) {  // dev aid: "SINGER_FEMALE_METAL BASS_METAL DRUMMER_METAL"
+    if (const char* dev = SDL_getenv("GD01_BAND")) {  // dev aid: "SINGER_FEMALE_METAL BASS_METAL DRUMMER_METAL"
         lineup.clear();
         std::istringstream in(dev);
         for (std::string w; in >> w;) lineup.push_back(w);

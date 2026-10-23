@@ -80,7 +80,7 @@ GuitarWalk::GuitarWalk(std::vector<Xfm> spots, const Config& config, const std::
     if (spots_.size() < 2) config_.allow = false;
     hub_ = std::max(0, int(spots_.size()) - 1);
     if (config_.soloPoint >= hub_) config_.soloPoint = -1;
-    if (SDL_getenv("GH1RE_LOG_SHOTS"))
+    if (SDL_getenv("GD01_LOG_SHOTS"))
         for (size_t i = 0; i < spots_.size(); ++i)
             SDL_Log("walk: spot %d at %.0f %.0f %.0f facing %.0f deg%s", int(i), spots_[i].pos[0], spots_[i].pos[1], spots_[i].pos[2],
                     yawOf(spots_[i]) * 180 / kPi, int(i) == hub_ ? " (hub)" : "");
@@ -181,8 +181,8 @@ bool GuitarWalk::update(Character& c, float beat, float ms, float ticks, int sta
     // excitement has passed (only while no clip change is in progress).
     if (!c.blending() && (state_ == 0 || state_ == 3)) {
         int e = std::clamp(excitement, 0, 4);
-        // Development aid: GH1RE_FORCE_WALKS=1 walks about every 6 s whatever the excitement.
-        static const bool force = SDL_getenv("GH1RE_FORCE_WALKS") != nullptr;
+        // Development aid: GD01_FORCE_WALKS=1 walks about every 6 s whatever the excitement.
+        static const bool force = SDL_getenv("GD01_FORCE_WALKS") != nullptr;
         if (force) e = 3, excitement = 3, rolled_[3] = std::min(rolled_[3], 6.0f);
         int n = int(spots_.size());
         if (config_.allow && n > 2 && state == 1 && pre2_ < 1 && config_.delays[size_t(e)][0] >= 0 && noWalkUntil_ < ticks &&
@@ -221,7 +221,7 @@ bool GuitarWalk::startWalkTo(Character& c, int dest, int excitement, int mode) {
     }
     walkF |= excitement < 3 ? C::kWalkNormal : C::kWalkExtreme;
 
-    if (SDL_getenv("GH1RE_LOG_SHOTS")) {
+    if (SDL_getenv("GD01_LOG_SHOTS")) {
         int s = nearestSpot(root.pos, false);
         SDL_Log("walk: starting %.1f units from spot %d, facing off by %.1f deg", dist(root.pos, spots_[size_t(s)].pos), s,
                 wrap(yawOf(spots_[size_t(s)]) - yawOf(root)) * 180 / kPi);
@@ -253,7 +253,7 @@ bool GuitarWalk::startWalkTo(Character& c, int dest, int excitement, int mode) {
             if (err < bestErr) bestErr = err, best = k, bestT = t, bestP = P;
         }
         if (best < 0) {
-            if (SDL_getenv("GH1RE_LOG_SHOTS")) SDL_Log("walk: no turn to spot %d (flags %x)", dest, turnF);
+            if (SDL_getenv("GD01_LOG_SHOTS")) SDL_Log("walk: no turn to spot %d (flags %x)", dest, turnF);
             return false;
         }
         chain.push_back({best, bestT.dest, bestT.src});
@@ -275,7 +275,7 @@ bool GuitarWalk::startWalkTo(Character& c, int dest, int excitement, int mode) {
             if (best >= 0) bestT = c.transition(chain[0].clip, chain[0].start, best, C::kAnimLongest);
         }
         if (best < 0) {
-            if (SDL_getenv("GH1RE_LOG_SHOTS")) SDL_Log("walk: no walk clip to spot %d (flags %x)", dest, walkF);
+            if (SDL_getenv("GD01_LOG_SHOTS")) SDL_Log("walk: no walk clip to spot %d (flags %x)", dest, walkF);
             return false;
         }
         c.touchClip(best);
@@ -307,7 +307,7 @@ bool GuitarWalk::startWalkTo(Character& c, int dest, int excitement, int mode) {
             if (err < bestErr) bestErr = err, best = k;
         }
         if (best < 0) {
-            if (SDL_getenv("GH1RE_LOG_SHOTS")) SDL_Log("walk: no stop to spot %d (flags %x)", dest, stopF);
+            if (SDL_getenv("GD01_LOG_SHOTS")) SDL_Log("walk: no stop to spot %d (flags %x)", dest, stopF);
             return false;
         }
         chain.push_back({best, std::floor(c.clipEnd(best) - 2.2f - c.clipBlendWidth(best) * 0.5f), 0});
@@ -318,7 +318,7 @@ bool GuitarWalk::startWalkTo(Character& c, int dest, int excitement, int mode) {
     planClip_ = c.currentClip();
     state_ = 1;
     if (!layout(c)) return false;
-    if (SDL_getenv("GH1RE_LOG_SHOTS")) {
+    if (SDL_getenv("GD01_LOG_SHOTS")) {
         std::string names;
         for (const WalkClip& w : chain_) names += " " + c.clipNameOf(w.clip);
         SDL_Log("walk: to spot %d via%s (corr %.3f)", dest, names.c_str(), corr_);
@@ -452,7 +452,7 @@ void GuitarWalk::poll(Character& c, float beat) {
     }
     case 3:
         if (c.currentClip() != chain_.back().clip) {  // a mood clip has taken over from the stop
-            if (SDL_getenv("GH1RE_LOG_SHOTS") && !path_.empty()) {
+            if (SDL_getenv("GD01_LOG_SHOTS") && !path_.empty()) {
                 const V3& p = c.placement().pos;
                 int s = nearestSpot(p, false);
                 SDL_Log("walk: ended %.1f units from spot %d, facing off by %.1f deg", dist(p, spots_[size_t(s)].pos), s,
@@ -470,8 +470,8 @@ void GuitarWalk::poll(Character& c, float beat) {
         break;
     default: break;
     }
-    // Development aid: GH1RE_FACELOG=1 logs the facing against the nearest spot every 2 beats.
-    if (static const bool faceLog = SDL_getenv("GH1RE_FACELOG") != nullptr; faceLog && std::floor(beat / 2) != std::floor((beat - dBeat) / 2)) {
+    // Development aid: GD01_FACELOG=1 logs the facing against the nearest spot every 2 beats.
+    if (static const bool faceLog = SDL_getenv("GD01_FACELOG") != nullptr; faceLog && std::floor(beat / 2) != std::floor((beat - dBeat) / 2)) {
         const Xfm& root = c.placement();
         int s = nearestSpot(root.pos, false);
         float pel = 0;

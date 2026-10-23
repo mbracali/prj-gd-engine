@@ -49,7 +49,7 @@ public:
     // before use (its first play is the 2nd file), then round-robins.
     void play(const std::string& event) {
         if (busy()) {
-            if (SDL_getenv("GH1RE_UILOG")) SDL_Log("VoiceMgr::Play - dropping voice over %s", event.c_str());
+            if (SDL_getenv("GD01_UILOG")) SDL_Log("VoiceMgr::Play - dropping voice over %s", event.c_str());
             return;
         }
         for (Event& e : events_)
@@ -291,7 +291,7 @@ public:
     bool handle(const std::string& msg, std::vector<Value>& a, Value& r) override {
         auto arg = [&](size_t k) { return k < a.size() ? a[k] : Value::integer(0); };
         r = Value::integer(0);
-        static const bool log = SDL_getenv("GH1RE_TUTLOG") != nullptr;  // development aid
+        static const bool log = SDL_getenv("GD01_TUTLOG") != nullptr;  // development aid
         if (log && msg != "is_vo_playing" && msg != "is_tuning" && msg != "is_hopo_training")
             SDL_Log("tutorial %.1f s: %s %s", SDL_GetTicks() / 1000.0, msg.c_str(), a.empty() ? "" : a[0].str().c_str());
         if (msg == "play_vo") return vo_.play(arg(0).str()), true;
