@@ -36,7 +36,7 @@ struct PostSettings {
     Upscaler upscaler = Upscaler::None;
     float fsrScale = 1;     // render scale with an upscaler: 0.5 / 0.59 / 0.67
     int quality = 2;        // the upscaler's mode: 0 performance, 1 balanced, 2 quality
-    int bloom = 0;          // 0 off, 1 low, 2 high
+    int bloom = 0;          // 0 off, 1 low, 2 medium, 3 high
     bool cinematic = false; // filmic curve, grade and vignette
     int fog = 0;            // ground fog: 0 none, 1 low, 2 full, 3 super (volumetric, light shafts)
     // Colour grading after the cinematic curve: 0 off, 1 warm, 2 cold, 3 vintage, 4 noir, 5 neon.

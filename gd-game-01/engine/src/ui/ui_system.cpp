@@ -2568,7 +2568,9 @@ void UiSystem::repeatHeld(float dtMs) {
 }
 
 void UiSystem::buttonDown(int button, bool guitar, int player) {
-    if (player == 0) guitar_ = guitar;
+    // [I] Port: every controller drives the menus, so select / back follow the
+    // kind of controller just pressed (the original read player 1's only).
+    guitar_ = guitar;
     if (button == Up || button == Down || button == Left || button == Right) held_[size_t(player & 1)] = {button, 0, false};
     if (!logos_.empty()) {
         // The original's logos are not skippable; the port skips them all on
@@ -2598,6 +2600,11 @@ void UiSystem::playerSetup(int p, std::string& character, std::string& guitar) c
 }
 
 bool UiSystem::mouse(float x, float y, bool click) {
+    if (!logos_.empty() && click) {  // a click or tap skips the boot logos, like a button
+        buttonDown(Start, guitar_, 0);
+        buttonUp(Start, 0);
+        return true;
+    }
     if (!logos_.empty() || phase_ != Phase::Idle || !current_) return false;
     auto inside = [&](const Panel::Hit& h, float pad) { return x >= h.x0 - pad && x <= h.x1 + pad && y >= h.y0 - pad && y <= h.y1 + pad; };
     const int select = guitar_ ? R2 : Cross;
@@ -2647,6 +2654,21 @@ bool UiSystem::mouse(float x, float y, bool click) {
         if (fp->focus_ != comp) fp->setFocus(comp);
         if (click) press(select);
         return true;
+    }
+    // [I] A screen with nothing to choose from ("press any button", the
+    // splash, end screens): a click or tap anywhere continues, as select does
+    // (on a phone the touch screen may be the only control).
+    if (click && fp->vertical_.empty() && fp->horizontal_.empty()) {
+        bool choices = false;
+        for (const auto& [n, c] : fp->components_) {
+            UiObj::Kind k = c->kind();
+            choices |= k == UiObj::Kind::Button || k == UiObj::Kind::List || k == UiObj::Kind::Slider ||
+                       k == UiObj::Kind::TextEntry || k == UiObj::Kind::PictureToggle;
+        }
+        if (!choices) {
+            press(select);
+            return true;
+        }
     }
     return false;
 }

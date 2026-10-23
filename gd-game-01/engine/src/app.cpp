@@ -46,9 +46,10 @@
 #include "scene/particles.h"
 #include "platform/gpu_select.h"
 #include "platform/paths.h"
-#ifdef __ANDROID__
+#include "platform/app_icon.h"
+#include <cctype>
 #include <filesystem>
-
+#ifdef __ANDROID__
 #include "platform/android_data.h"
 #endif
 
@@ -80,11 +81,59 @@ std::string enhancedPath() {
     return prefDir().empty() ? std::string("enhanced.json") : prefDir() + "enhanced.json";
 }
 
-// Enhanced Settings defaults (keys of enhanced.json). Steam Deck mode locks
-// every other option at its default, except these handheld values.
+// The graphics, enhancer and control settings each download ships with
+// (gd-game-01/README.md, "Default settings"): desktop Linux, Windows and
+// macOS; the Steam Deck build (Linux built with -DGD01_STEAM_DECK=ON); Android.
+// Steam Deck is also what Enhanced Settings > Apply Steam Deck Settings sets.
+std::map<std::string, Json> profileValues(bool deck) {
+    auto b = [](bool v) { return Json::boolean(v); };
+    auto t = [](const char* v) { return Json::string(v); };
+    std::map<std::string, Json> d = {
+        // Every build.
+        {"antialiasing", t("none")}, {"ai_upscaling", t("none")}, {"bokeh", t("stronger")}, {"particles", b(true)},
+        {"cinematic_color", b(true)}, {"color_grade", t("off")}, {"chromatic", b(true)}, {"light_streaks", b(false)},
+        {"more_lights", t("subtle")}, {"no_shaky_cam", b(false)},
+        // Desktop: Linux, Windows, macOS.
+        {"screen_mode", t("windowed")}, {"max_fps", t("120")}, {"fps_counter", b(true)}, {"internal_res", t("1080")},
+        {"sharp_ui", b(true)}, {"bloom", t("high")}, {"film_grain", t("light")}, {"ssao", b(true)},
+        {"sharpening", t("low")}, {"star_blur", t("high")}, {"shadows_all", b(true)}, {"light_dust", b(true)},
+        {"ground_fog", t("low")}, {"touch", b(false)},
+    };
+    auto handheld = [&] {
+        for (auto& [k, v] : std::map<std::string, Json>{
+                 {"screen_mode", t("fullscreen")}, {"max_fps", t("60")}, {"fps_counter", b(false)}, {"bloom", t("medium")},
+                 {"film_grain", t("off")}, {"ssao", b(false)}, {"shadows_all", b(false)}, {"light_dust", b(false)},
+                 {"ground_fog", t("none")}})
+            d[k] = v;
+    };
+#if defined(__ANDROID__)
+    (void)deck;
+    handheld();
+    for (auto& [k, v] : std::map<std::string, Json>{{"internal_res", t("900")}, {"sharp_ui", b(false)},
+                                                     {"sharpening", t("low")}, {"star_blur", t("light")}, {"touch", b(true)}})
+        d[k] = v;
+#else
+#if defined(GD01_STEAM_DECK)
+    deck = true;
+#endif
+#if defined(_WIN32) || defined(__APPLE__)
+    d["internal_res"] = t("1440");
+#endif
+    if (deck) {
+        handheld();
+        for (auto& [k, v] : std::map<std::string, Json>{{"internal_res", t("800")}, {"sharpening", t("off")}, {"star_blur", t("medium")}})
+            d[k] = v;
+    }
+#endif
+    return d;
+}
+
+// Enhanced Settings defaults (keys of enhanced.json): the build's profile
+// over the rest.
 const std::map<std::string, Json>& enhancedDefaults() {
-    static const std::map<std::string, Json> d = {
-        {"steam_deck", Json::boolean(false)},     {"mouse", Json::boolean(true)},
+    static const std::map<std::string, Json> d = [] {
+        std::map<std::string, Json> m = {
+        {"mouse", Json::boolean(true)},
         {"touch", Json::boolean(true)},           {"rockband", Json::boolean(false)},
         {"xinput", Json::boolean(true)},          {"screen_mode", Json::string("windowed")},
         {"max_fps", Json::string("120")},         {"fps_counter", Json::boolean(false)},
@@ -106,7 +155,10 @@ const std::map<std::string, Json>& enhancedDefaults() {
         {"cheat_no_venue", Json::boolean(false)},   {"cheat_monkey_crowd", Json::boolean(false)},
         {"cheat_skull_crowd", Json::boolean(false)}, {"audio_offset", Json::string("0")},
         {"video_offset", Json::string("0")},
-    };
+        };
+        for (auto& [k, v] : profileValues(false)) m[k] = v;
+        return m;
+    }();
     return d;
 }
 // The values a choice setting may take (Load User Settings drops anything else).
@@ -126,7 +178,7 @@ const std::map<std::string, std::set<std::string>>& enhancedChoices() {
         {"sharpening", {"off", "low", "high"}},
         {"star_blur", {"none", "light", "medium", "high"}},
         {"hopo_mode", {"original", "forgiving"}},
-        {"bloom", {"off", "low", "high"}}};
+        {"bloom", {"off", "low", "medium", "high"}}};
     return c;
 }
 // Number settings (as strings, ms) and their range.
@@ -142,18 +194,25 @@ const std::map<std::string, std::string>& enhancedExclusive() {
         {"cheat_monkey_crowd", "cheat_skull_crowd"}, {"cheat_skull_crowd", "cheat_monkey_crowd"}};
     return x;
 }
-const std::map<std::string, Json>& steamDeckValues() {
-    static const std::map<std::string, Json> d = {
-        {"max_fps", Json::string("60")}, {"internal_res", Json::string("800")}, {"screen_mode", Json::string("borderless")},
-        {"sharp_ui", Json::boolean(false)}};
-    return d;
-}
 
+// The disc image the game starts with: the one picked last time, else an
+// .iso lying next to the program (the Steam Deck instructions put it there;
+// Game Mode may show no file picker).
 std::string loadRememberedPath() {
     std::ifstream in(configPath());
     std::string line;
     while (std::getline(in, line))
         if (line.rfind("data=", 0) == 0) return line.substr(5);
+#ifndef __ANDROID__
+    if (const char* base = SDL_GetBasePath()) {
+        std::error_code ec;
+        for (const auto& e : std::filesystem::directory_iterator(std::filesystem::path(base), ec)) {
+            std::string ext = e.path().extension().string();
+            for (char& c : ext) c = char(std::tolower(static_cast<unsigned char>(c)));
+            if (ext == ".iso" && e.is_regular_file(ec)) return e.path().string();
+        }
+    }
+#endif
     return {};
 }
 
@@ -207,6 +266,8 @@ private:
     void onAction(const InputEvent& e);
     void frame();
     void drawNeedData();
+    void drawLogo();
+    int logoTexture_ = -1;  // the badge on the first screen (0: could not load)
     void drawMenu();
     void drawResults();
 
@@ -262,15 +323,9 @@ private:
     std::unique_ptr<Scene> viewScene_;
     std::unique_ptr<UiSystem> ui_;  // the original menus (ghui scripts)
     Json enhanced_ = Json::object();  // Enhanced Settings (enhanced.json)
-    // A setting's value in effect: saved, else its default; Steam Deck mode
-    // overrides the others.
+    // A setting's value in effect: saved, else its default.
     Json enhanced(const std::string& key) const {
         auto def = enhancedDefaults().find(key);
-        // The calibration is the player's setup, kept in Steam Deck mode too.
-        if (key != "steam_deck" && !enhancedRanges().count(key) && enhanced("steam_deck").truthy()) {
-            if (auto d = steamDeckValues().find(key); d != steamDeckValues().end()) return d->second;
-            return def != enhancedDefaults().end() ? def->second : Json();
-        }
         if (enhanced_.has(key)) return enhanced_[key];
         return def != enhancedDefaults().end() ? def->second : Json();
     }
@@ -1473,6 +1528,13 @@ void SDLCALL dialogDone(void* user, const char* const* files, int) {
 
 void App::userFiles(const std::string& action) {
     userFilesStatus_.clear();
+    if (action == "steam_deck") {  // Apply Steam Deck Settings: the handheld profile, once; every option stays editable
+        for (auto& [key, value] : profileValues(true)) enhanced_.set(key, value);
+        saveEnhanced();
+        applyEnhanced();
+        userFilesStatus_ = "Steam Deck settings applied";
+        return;
+    }
     // Development aid: GD01_DIALOG=<path> answers the dialog at once (headless tests).
     if (const char* forced = SDL_getenv("GD01_DIALOG")) {
         std::lock_guard<std::mutex> lock(dialogMutex_);
@@ -1609,7 +1671,7 @@ void App::applyEnhanced() {
                                         : PostSettings::Upscaler::None;
         post.quality = mode == "performance" ? 0 : mode == "balanced" ? 1 : 2;
         post.fsrScale = mode == "performance" ? 1 / 2.0f : mode == "balanced" ? 1 / 1.7f : 1 / 1.5f;
-        post.bloom = enhanced("bloom").str() == "high" ? 2 : enhanced("bloom").str() == "low" ? 1 : 0;
+        post.bloom = enhanced("bloom").str() == "high" ? 3 : enhanced("bloom").str() == "medium" ? 2 : enhanced("bloom").str() == "low" ? 1 : 0;
         post.cinematic = enhancedOn("cinematic_color");
         const std::string fog = enhanced("ground_fog").str(), grade = enhanced("color_grade").str();
         post.fog = fog == "super" ? 3 : fog == "full" ? 2 : fog == "low" ? 1 : 0;
@@ -1760,13 +1822,23 @@ void App::onAction(const InputEvent& e) {
     }
 }
 
+// The Guitar Dream Engine badge above the first screen's text.
+void App::drawLogo() {
+    if (logoTexture_ < 0) {
+        Image icon;
+        logoTexture_ = appIconImage(icon) ? renderer_.createTexture(icon) : 0;
+    }
+    if (logoTexture_ > 0) renderer_.image(logoTexture_, kScreenW / 2 - 100, 70, 200, 200, {255, 255, 255, 255}, Blend::Alpha);
+    else renderer_.textCentered(kScreenW / 2, 240, 3, kAccent, "GD01");
+}
+
 void App::drawNeedData() {
 #ifdef __ANDROID__
     if (std::string iso = isoImport_.takeReady(); !iso.empty()) {
         tryLoadData(iso);
         if (screen_ != Screen::NeedData) return;
     }
-    renderer_.textCentered(kScreenW / 2, 240, 3, kAccent, "GD01");
+    drawLogo();
     renderer_.textCentered(kScreenW / 2, 310, 2, kText, "Tap the screen to choose your Guitar Hero (PS2) disc image (.iso),");
     renderer_.textCentered(kScreenW / 2, 340, 2, kText, "or copy it into " + AndroidIsoImport::folder());
     renderer_.textCentered(kScreenW / 2, 390, 1.5f, kDim, "Game data is read from your own copy; nothing is included with this program.");
@@ -1775,7 +1847,7 @@ void App::drawNeedData() {
     if (!message_.empty()) renderer_.textCentered(kScreenW / 2, 460, 1.5f, kBad, message_);
     return;
 #endif
-    renderer_.textCentered(kScreenW / 2, 240, 3, kAccent, "GD01");
+    drawLogo();
     renderer_.textCentered(kScreenW / 2, 310, 2, kText, "Click here (or press Enter) to choose your Guitar Hero (PS2) disc image (.iso),");
     renderer_.textCentered(kScreenW / 2, 340, 2, kText, "or drop the .iso or the extracted game folder onto this window.");
     renderer_.textCentered(kScreenW / 2, 390, 1.5f, kDim, "Game data is read from your own copy; nothing is included with this program.");
@@ -2055,6 +2127,9 @@ int App::run() {
 #ifdef __ANDROID__
     SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");  // the back button is the game's Back, not "leave the app"
 #endif
+    // The app id ties the window to its launcher entry (the taskbar icon on
+    // Wayland; Linux downloads: add-to-app-menu.sh writes io.github.mbracali.gd01.desktop).
+    SDL_SetAppMetadata("GD Engine 01", GD01_VERSION, "io.github.mbracali.gd01");
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMEPAD)) {
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, kAppTitle, SDL_GetError(), nullptr);
         return 1;
@@ -2085,6 +2160,7 @@ int App::run() {
                                    | SDL_WINDOW_FULLSCREEN
 #endif
     );
+    setAppWindowIcon(window_);
     std::string glError;
     bool glOk = window_ && renderer_.init(window_, glError);
     gpu::started(glOk, renderer_.gpuName());

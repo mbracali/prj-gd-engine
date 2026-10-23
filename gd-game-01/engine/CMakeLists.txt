@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(gd01 VERSION 1.0.0 LANGUAGES C CXX)
+project(gd01 VERSION 1.1.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -75,6 +75,7 @@ target_sources(gd01 PRIVATE
   src/ui/ui_system.cpp
   src/platform/gpu_select.cpp
   src/platform/paths.cpp
+  src/platform/app_icon.cpp
   src/scene/character.cpp
   src/scene/clip.cpp
   src/scene/scene.cpp
@@ -120,6 +121,15 @@ else()
 endif()
 endif()  # NOT ANDROID
 
+target_compile_definitions(gd01 PRIVATE GD01_VERSION="${PROJECT_VERSION}")
+
+# The Steam Deck download (build_linux_steamdeck.sh): the Linux program with
+# the handheld settings as its defaults (app.cpp profileValues).
+option(GD01_STEAM_DECK "Steam Deck build: handheld default settings" OFF)
+if(GD01_STEAM_DECK)
+  target_compile_definitions(gd01 PRIVATE GD01_STEAM_DECK=1)
+endif()
+
 if(MSVC)
   target_compile_options(gd01 PRIVATE /W4 /permissive-)
 else()
@@ -131,7 +141,29 @@ if(MINGW)
   target_link_options(gd01 PRIVATE -static-libgcc -static-libstdc++ -static $<$<CONFIG:Release>:-s>)
 endif()
 
+# The icon (res/, made by tools/make_icons.py from the repo's res/icon_full.jpg):
+# the PNG built into the program (window icon, first screen), the .exe's icon
+# on Windows, the .app's on macOS. Android's launcher icons are in android/.
+set(GD01_ICON_CPP ${CMAKE_CURRENT_BINARY_DIR}/gd01_icon_data.cpp)
+add_custom_command(OUTPUT ${GD01_ICON_CPP}
+  COMMAND ${CMAKE_COMMAND} -DIN=${CMAKE_CURRENT_SOURCE_DIR}/res/gd01_icon.png -DOUT=${GD01_ICON_CPP}
+          -DNAME=kGd01IconPng -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_file.cmake
+  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/res/gd01_icon.png ${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_file.cmake
+  VERBATIM)
+target_sources(gd01 PRIVATE ${GD01_ICON_CPP})
+if(WIN32)
+  enable_language(RC)
+  file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/gd01.rc "1 ICON \"${CMAKE_CURRENT_SOURCE_DIR}/res/gd01.ico\"\n")
+  target_sources(gd01 PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/gd01.rc)
+  set_source_files_properties(${CMAKE_CURRENT_BINARY_DIR}/gd01.rc PROPERTIES OBJECT_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/res/gd01.ico)
+endif()
+if(APPLE)
+  target_sources(gd01 PRIVATE res/gd01.icns)
+  set_source_files_properties(res/gd01.icns PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
+endif()
+
 set_target_properties(gd01 PROPERTIES
+  MACOSX_BUNDLE_ICON_FILE gd01.icns
   MACOSX_BUNDLE_BUNDLE_NAME "GD Engine 01"
   MACOSX_BUNDLE_GUI_IDENTIFIER "io.github.mbracali.gd01"
   MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}")
