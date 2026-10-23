@@ -45,6 +45,9 @@ matches the tag's version.
   "BRACA DEVELOPER" is now "GD-Engine Devs".
 - The splash line says "free and source-available" (the licence is not an
   open-source one).
+- The credits: the GH1RE project's developers (mbracali, Anthropic Claude),
+  the open-source thanks, the beta testers (now with Viajor, ogabrielluiz and
+  Arthur Brum) and the original heroes, before the original game's credits.
 
 ## [1.1.0] - 2026-10-23
 

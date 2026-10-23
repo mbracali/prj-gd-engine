@@ -627,14 +627,13 @@ private:
 // [I] The Guitar Dream Engine credits roll first (with the attribution line
 // LICENSE-ADDITIONAL-TERMS.md clause A asks for), then a spacer and the original's.
 constexpr const char* kGd01Credits = R"dta(
-("GUITAR DREAM ENGINE")
-("" "Game 01: a reimplementation of Guitar Hero (PS2, 2005)" "")
+("GH1RE PROJECT")
 ("" "Based on Guitar Dream Engine" "")
 ("" "github.com/mbracali/prj-gd-engine" "")
 ()
 ("MAIN DEVELOPERS")
-("" "GD-Engine Devs" "")
-("" "Anthropic Claude (yeah... What can I say)" "")
+("" "mbracali" "")
+("" "Anthropic Claude (yeah... What can say??)" "")
 ()
 ("THANKS, OPEN SOURCE COMMUNITY")
 ("" "Folks from REA, GHIDRA and JAVA, YOU ROCK!" "")
@@ -646,6 +645,9 @@ constexpr const char* kGd01Credits = R"dta(
 ("" "Nevessilva91" "")
 ("" "Bracalister" "")
 ("" "M@D_C@W" "")
+("" "Viajor" "")
+("" "ogabrielluiz" "")
+("" "Arthur Brum" "")
 ()
 ("ORIGINAL HEROES")
 ("" "RedOctane, Harmonix, MTV Games and Activision..." "")
