@@ -2,6 +2,14 @@
 
 Based on Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine
 
+## Quick start
+
+1. You need your own Guitar Hero (PS2) disc image (`.iso`). No game data is included.
+2. Start `gd01` (`gd01.exe` on Windows, `gd01.app` on macOS: right-click > Open
+   the first time; "GD Engine 01" on Android).
+3. Click the window (or press Enter, or tap on Android) and pick your `.iso`.
+   That's it: the game remembers it.
+
 A from-scratch reimplementation of Guitar Hero (PS2, 2005) for Linux, macOS
 and Windows. It plays the songs from **your own copy** of the game: no game
 data is included. The gameplay rules (hit window, HOPOs, scoring, Star Power,

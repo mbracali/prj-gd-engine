@@ -1,7 +1,7 @@
 # Push a tag gd-game-01/vX.Y.Z (or vX.Y.Z-alpha / -beta / -rc.N) to build every
-# platform and create a DRAFT GitHub Release with the packages, SHA256SUMS.txt
-# and the version's notes from gd-game-01/CHANGELOG.md. Review the draft, then
-# publish it by hand. See docs/release-process.md.
+# platform and publish a GitHub Release with the packages, SHA256SUMS.txt,
+# how-to-play notes and the version's notes from gd-game-01/CHANGELOG.md.
+# See docs/release-process.md.
 name: gd-game-01 release
 
 on:
@@ -55,19 +55,34 @@ jobs:
             $0 ~ "^## \\[" v "\\]" { on = 1; next }
             on && /^## \[/ { exit }
             on { print }
-          ' gd-game-01/CHANGELOG.md > notes.md
-          if [ ! -s notes.md ]; then
+          ' gd-game-01/CHANGELOG.md > changes.md
+          if [ ! -s changes.md ]; then
             echo "::error::gd-game-01/CHANGELOG.md has no '## [$V]' section"; exit 1
           fi
-          cat >> notes.md <<'NOTE'
-
-          ---
-          **No game data is included.** You need your own copy of Guitar Hero (PS2, 2005): the game reads it from your disc image.
-          Based on Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. Licence: PolyForm Noncommercial 1.0.0 plus LICENSE-ADDITIONAL-TERMS.md (no sale; modifications must be published).
-          NOTE
-      - name: Draft release
+          {
+            echo "## How to play"
+            echo
+            echo "You need your own Guitar Hero (PS2, 2005) disc image (\`.iso\`). No game data is included."
+            echo
+            echo "| System | Download | Then |"
+            echo "|---|---|---|"
+            echo "| **Windows** 10/11 | \`gd01-$V-windows-x64.zip\` | Extract the zip, run \`gd01.exe\`, click the window and pick your \`.iso\`. |"
+            echo "| **Linux** (any distribution from 2022 on) | \`gd01-$V-linux-x86_64.tar.gz\` | Extract it, run \`gd01\`, click the window and pick your \`.iso\`. |"
+            echo "| **macOS** | \`gd01-$V-macos.zip\` (when present) | Extract, right-click \`gd01.app\` > Open (it is not notarised), pick your \`.iso\`. |"
+            echo "| **Android** 7+ | \`gd01-$V-android.apk\` | Install the APK, open \"GD Engine 01\", tap the screen and pick your \`.iso\`. |"
+            echo
+            echo "The game remembers where your \`.iso\` is. Your saves and settings stay on your device."
+            echo
+            echo "## What's new"
+            echo
+            cat changes.md
+            echo
+            echo "---"
+            echo "Based on Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. Free, noncommercial: PolyForm Noncommercial 1.0.0 plus \`LICENSE-ADDITIONAL-TERMS.md\` (included in every download)."
+          } > notes.md
+      - name: Publish the release
         run: |
           pre=""
           case "$V" in *-*) pre="--prerelease" ;; esac
-          gh release create "$GITHUB_REF_NAME" dist/* --draft $pre \
-            --title "gd01 $V (Guitar Hero PS2 reimplementation)" --notes-file notes.md
+          gh release create "$GITHUB_REF_NAME" dist/* $pre \
+            --title "gd01 $V: Guitar Hero (PS2) reimplementation" --notes-file notes.md

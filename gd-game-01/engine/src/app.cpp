@@ -1482,6 +1482,10 @@ void App::userFiles(const std::string& action) {
     auto* req = new DialogRequest{&dialogMutex_, &dialogResults_, action};
     if (action == "export") {
         SDL_ShowOpenFolderDialog(dialogDone, req, window_, nullptr, false);
+    } else if (action == "locate_iso") {
+        // The first screen: pick the disc image instead of dropping it on the window.
+        static const SDL_DialogFileFilter kIso[] = {{"Guitar Hero (PS2) disc image", "iso;ISO"}};
+        SDL_ShowOpenFileDialog(dialogDone, req, window_, kIso, 1, nullptr, false);
     } else {
         static const SDL_DialogFileFilter kJson[] = {{"GD01 settings", "json"}};
         SDL_ShowOpenFileDialog(dialogDone, req, window_, kJson, 1, nullptr, false);
@@ -1496,7 +1500,8 @@ void App::pollUserFiles() {
     }
     for (const auto& [action, path] : done) {
         if (path.empty()) continue;  // cancelled
-        if (action == "export") exportUserFiles(path);
+        if (action == "locate_iso") tryLoadData(path);
+        else if (action == "export") exportUserFiles(path);
         else if (action == "load_settings") userFilesStatus_ = importSettings(path) ? "Settings loaded" : "Could not load that settings file";
         else if (action == "load_progress") userFilesStatus_ = importProgress(path) ? "Progress loaded" : "Could not load that progress file";
     }
@@ -1677,6 +1682,8 @@ void App::onAction(const InputEvent& e) {
         if (e.down && e.action == Action::Back) running_ = false;
 #ifdef __ANDROID__
         if (e.down && (e.action == Action::Confirm || e.action == Action::Start || e.action == Action::Fret0)) isoImport_.pick(window_);
+#else
+        if (e.down && (e.action == Action::Confirm || e.action == Action::Start || e.action == Action::Fret0)) userFiles("locate_iso");
 #endif
         break;
     case Screen::Menu:
@@ -1769,8 +1776,8 @@ void App::drawNeedData() {
     return;
 #endif
     renderer_.textCentered(kScreenW / 2, 240, 3, kAccent, "GD01");
-    renderer_.textCentered(kScreenW / 2, 310, 2, kText, "Drop your Guitar Hero (PS2) disc image (.iso)");
-    renderer_.textCentered(kScreenW / 2, 340, 2, kText, "or extracted game folder onto this window.");
+    renderer_.textCentered(kScreenW / 2, 310, 2, kText, "Click here (or press Enter) to choose your Guitar Hero (PS2) disc image (.iso),");
+    renderer_.textCentered(kScreenW / 2, 340, 2, kText, "or drop the .iso or the extracted game folder onto this window.");
     renderer_.textCentered(kScreenW / 2, 390, 1.5f, kDim, "Game data is read from your own copy; nothing is included with this program.");
     if (!message_.empty()) renderer_.textCentered(kScreenW / 2, 460, 1.5f, kBad, message_);
 }
@@ -2018,8 +2025,10 @@ void App::frame() {
     }
     if (screen_ == Screen::SceneView) drawSceneView();
     if (screen_ == Screen::PanelView && panel_) panel_->draw();
-    if (screen_ == Screen::NeedData) drawNeedData();
-    else if (screen_ == Screen::Menu && ui_) {
+    if (screen_ == Screen::NeedData) {
+        pollUserFiles();
+        if (screen_ == Screen::NeedData) drawNeedData();
+    } else if (screen_ == Screen::Menu && ui_) {
         uint64_t now = SDL_GetTicksNS();
         float dt = uiTicks_ ? float(now - uiTicks_) / 1e6f : 16.0f;
         uiTicks_ = now;
@@ -2123,6 +2132,9 @@ int App::run() {
             else if (e.type == SDL_EVENT_DROP_FILE && e.drop.data && screen_ != Screen::Playing) tryLoadData(e.drop.data);
 #ifdef __ANDROID__
             else if (e.type == SDL_EVENT_FINGER_UP && screen_ == Screen::NeedData) isoImport_.pick(window_);
+#else
+            else if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_LEFT && screen_ == Screen::NeedData)
+                userFiles("locate_iso");
 #endif
             // Mouse support: hover focuses menu entries (only while the window has
             // focus), a left click selects, the wheel scrolls.

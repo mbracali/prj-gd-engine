@@ -12,5 +12,5 @@ std::string prefDir();
 
 // The developer environment variables were GH1RE_*; they are GD01_* now. Call
 // first thing in main: copies every GH1RE_x the user set to GD01_x, unless
-// GD01_x is set too. (Accepted until 0.2.0.)
+// GD01_x is set too. (Accepted for now; to be removed in a later major version.)
 void aliasLegacyEnv();
