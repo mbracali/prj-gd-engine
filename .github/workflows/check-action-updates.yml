@@ -1,0 +1,20 @@
+# Started by hand only (Actions > check action updates > Run workflow): lists
+# the actions our workflows use that have a newer major version, in the run's
+# summary. Opens no branches or pull requests; we update by hand.
+name: check action updates
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - run: python3 .github/scripts/check_action_updates.py
+        env:
+          GH_TOKEN: ${{ github.token }}

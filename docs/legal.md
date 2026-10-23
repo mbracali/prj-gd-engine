@@ -14,8 +14,8 @@ reimplements.
 | Large vendor binaries (the NVIDIA DLSS SDK) | Size; they have their own distribution terms | Downloaded at build time (`gd-game-NN/tools/fetch_dlss.sh`) |
 | Signing keys, passwords, tokens | Security | GitHub Actions secrets |
 
-The **repo guard** (`.github/scripts/repo_guard.py`, run on every push and
-pull request) rejects these; run it locally with
+The **repo guard** (`.github/scripts/repo_guard.py`, run before every
+release and by `gd-game-01/local_build.sh`) rejects these; run it locally with
 `python3 .github/scripts/repo_guard.py`.
 
 ## What is allowed

@@ -14,6 +14,7 @@
 *.milo*
 **/original_rom/
 **/original_files/
+**/original_isos/
 **/extracted*/
 **/rips/
 
@@ -30,8 +31,9 @@
 
 # ---- Build output and signing keys ----
 **/build/
-**/build_*/
+**/engine/build_*/
 **/dist/
+**/local_builds/
 **/.gradle/
 **/android/app/.cxx/
 **/local.properties

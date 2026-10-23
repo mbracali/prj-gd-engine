@@ -7,7 +7,7 @@ decompiler output, ever.
 
 | Branch | Purpose |
 |---|---|
-| `main` | Released code. Changes only through a release or hotfix PR. |
+| `main` | Released code. A merge with a new version publishes a release. |
 | `develop` | Integration: every feature and fix lands here first. |
 | `feature/<game-id>/<topic>` | New work, e.g. `feature/gd-game-01/star-power-meter` |
 | `fix/<game-id>/<topic>` | Bug fixes |
@@ -29,7 +29,8 @@ Use `repo` as the game id for changes to workflows, docs or the licence
 ## Pull requests
 
 1. Branch from `develop`, open the PR against `develop`.
-2. CI must be green: the game's build on every platform, and the repo guard.
+2. Build it locally the way the release does: `gd-game-01/local_build.sh`
+   (GitHub builds nothing on pull requests; see docs/release-process.md).
 3. Fill in the PR checklist. For gameplay changes, run the self-test with your
    own disc image: `gd01 --selftest "path/to/Guitar Hero (USA).iso"` must
    print `all charts fully hit`. CI cannot run it (it has no game data).
@@ -40,7 +41,7 @@ Use `repo` as the game id for changes to workflows, docs or the licence
 
 `gd-game-01` (one per game), `bug`, `parity` (differs from the original),
 `feature`, `enhanced` (PC-only extras), `platform:linux|windows|macos|android`,
-`needs-capture` (needs footage of the original), `ci:macos` (build macOS on this PR).
+`needs-capture` (needs footage of the original).
 
 ## Code style
 
