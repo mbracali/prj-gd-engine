@@ -10,8 +10,8 @@ Based on Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine
 3. Click the window (or press Enter, or tap on Android) and pick your `.iso`.
    That's it: the game remembers it.
 
-Linux: run `add-to-app-menu.sh` (in this folder) to get "GD Engine 01" with
-its icon in your application menu.
+Linux: the first start adds "GD Engine 01", with its icon, to your
+application menu (pointing at this folder; set GD01_NO_DESKTOP_ENTRY=1 to skip).
 
 A from-scratch reimplementation of Guitar Hero (PS2, 2005) for Linux, macOS
 and Windows. It plays the songs from **your own copy** of the game: no game

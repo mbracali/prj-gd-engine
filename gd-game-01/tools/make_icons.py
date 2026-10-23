@@ -11,7 +11,9 @@ builds themselves need nothing extra.
 
 Writes:
     engine/res/gd01_icon.png       256 px: built into the program (window icon,
-                                   first screen) and shipped as gd01.png on Linux
+                                   first screen, Linux app-menu icon)
+    engine/res/gd01_icon_small.png 64 px, the badge's centre (the big GDE letters):
+                                   built in too, the window icon's small sizes
     engine/res/gd01_icon_512.png   512 px: shipped with the Linux / Steam Deck downloads
     engine/res/gd01.ico            Windows: the icon of gd01.exe (16 to 256 px)
     engine/res/gd01.icns           macOS: the icon of gd01.app
@@ -32,15 +34,20 @@ ANDROID_RES = os.path.join(GAME, "engine", "android", "app", "src", "main", "res
 
 # The badge in res/icon_full.jpg (2048 x 2048): its circle's centre and radius.
 CX, CY, R = 1023, 1030, 992
+# Small icons (48 px and below: taskbars, title bars, file lists, phone
+# launchers) show the badge's centre, so the GDE letters stay readable.
+SMALL = 0.78
 
 # Android launcher sizes (48 dp) and adaptive-icon layer sizes (108 dp).
 DENSITIES = {"mdpi": 1, "hdpi": 1.5, "xhdpi": 2, "xxhdpi": 3, "xxxhdpi": 4}
 
 
-def badge(size):
-    """The round badge, size x size, transparent outside the circle."""
+def badge(size, frac=1.0):
+    """The round badge (its centre `frac` of the radius), size x size,
+    transparent outside the circle."""
     src = Image.open(SRC).convert("RGB")
-    crop = src.crop((CX - R, CY - R, CX + R, CY + R))
+    r = round(R * frac)
+    crop = src.crop((CX - r, CY - r, CX + r, CY + r))
     big = 2048  # mask drawn large, then scaled: a smooth edge
     mask = Image.new("L", (big, big), 0)
     ImageDraw.Draw(mask).ellipse((0, 0, big - 1, big - 1), fill=255)
@@ -49,11 +56,11 @@ def badge(size):
     return out.resize((size, size), Image.LANCZOS)
 
 
-def padded(size, scale):
+def padded(size, scale, frac=1.0):
     """The badge at `scale` of a transparent size x size square, centred."""
     canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     inner = max(1, round(size * scale))
-    b = badge(inner)
+    b = badge(inner, frac)
     canvas.paste(b, ((size - inner) // 2, (size - inner) // 2), b)
     return canvas
 
@@ -63,20 +70,30 @@ def main():
         sys.exit(f"make_icons.py: {SRC} not found")
     os.makedirs(RES, exist_ok=True)
     master = badge(1024)
+    small = badge(1024, SMALL)
     master.resize((256, 256), Image.LANCZOS).save(os.path.join(RES, "gd01_icon.png"), optimize=True)
     master.resize((512, 512), Image.LANCZOS).save(os.path.join(RES, "gd01_icon_512.png"), optimize=True)
-    master.save(os.path.join(RES, "gd01.ico"), sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
-    master.save(os.path.join(RES, "gd01.icns"))
+    small.resize((64, 64), Image.LANCZOS).save(os.path.join(RES, "gd01_icon_small.png"), optimize=True)
+    # Windows: classic bitmaps (every part of Windows draws them), the centre
+    # crop up to 48 px, the whole badge above.
+    sizes = [16, 24, 32, 48, 64, 128, 256]
+    images = [(small if s <= 48 else master).resize((s, s), Image.LANCZOS) for s in sizes]
+    images[-1].save(os.path.join(RES, "gd01.ico"), format="ICO", sizes=[(s, s) for s in sizes],
+                    append_images=images[:-1], bitmap_format="bmp")
+    # macOS: the same split (Finder lists and the Dock's small sizes).
+    icns = [(small if s <= 48 else master).resize((s, s), Image.LANCZOS) for s in (16, 32, 64, 128, 256, 512)]
+    master.save(os.path.join(RES, "gd01.icns"), append_images=icns)
 
     for name, k in DENSITIES.items():
         d = os.path.join(ANDROID_RES, f"mipmap-{name}")
         os.makedirs(d, exist_ok=True)
-        legacy = padded(round(48 * k), 44 / 48)  # the classic icon: a little margin around the circle
+        legacy = padded(round(48 * k), 46 / 48, SMALL)  # the classic icon (Android 7): the badge's centre
         legacy.save(os.path.join(d, "ic_launcher.png"), optimize=True)
         legacy.save(os.path.join(d, "ic_launcher_round.png"), optimize=True)
-        # Adaptive icon foreground (108 dp): the launcher's mask shows the
-        # inner 72 dp; the badge fills the 66 dp safe circle.
-        padded(round(108 * k), 66 / 108).save(os.path.join(d, "ic_launcher_foreground.png"), optimize=True)
+        # Adaptive icon foreground (108 dp): the launcher's mask shows about
+        # the inner 72 dp; the badge (90% of it) fills it to the edge (no black
+        # ring), the background behind is black like the badge's rim.
+        padded(round(108 * k), 72 / 108, 0.9).save(os.path.join(d, "ic_launcher_foreground.png"), optimize=True)
     anydpi = os.path.join(ANDROID_RES, "mipmap-anydpi-v26")
     os.makedirs(anydpi, exist_ok=True)
     xml = ('<?xml version="1.0" encoding="utf-8"?>\n'
