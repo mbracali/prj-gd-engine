@@ -8,6 +8,12 @@ def sdl3Dir = project.findProperty('sdl3Dir') ?: System.getenv('GD01_SDL3_DIR')
 if (!sdl3Dir) throw new GradleException('Pass -Psdl3Dir=<SDL3 source dir> (see engine/build_android.sh)')
 def abis = (project.findProperty('abis') ?: 'arm64-v8a,x86_64').split(',')
 
+// The version of every build: project(gd01 VERSION X.Y.Z) in engine/CMakeLists.txt.
+// versionCode (what Android compares for updates) = X * 10000 + Y * 100 + Z.
+def gdVersion = (file('../../CMakeLists.txt').text =~ /project\(gd01 VERSION (\d+)\.(\d+)\.(\d+)/)[0]
+def gdVersionName = "${gdVersion[1]}.${gdVersion[2]}.${gdVersion[3]}"
+def gdVersionCode = gdVersion[1].toInteger() * 10000 + gdVersion[2].toInteger() * 100 + gdVersion[3].toInteger()
+
 android {
     namespace = "io.github.mbracali.gd01"
     compileSdk 36
@@ -16,8 +22,8 @@ android {
         applicationId "io.github.mbracali.gd01"
         minSdkVersion 24
         targetSdkVersion 36
-        versionCode 1
-        versionName "0.1.0"
+        versionCode gdVersionCode
+        versionName gdVersionName
         externalNativeBuild {
             cmake {
                 arguments "-DANDROID_PLATFORM=android-24", "-DANDROID_STL=c++_static",

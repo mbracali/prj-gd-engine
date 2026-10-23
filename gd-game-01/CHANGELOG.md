@@ -6,6 +6,33 @@ matches the tag's version.
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-23
+
+### Added
+- Steam Deck download (`gd01-<version>-steamdeck.tar.gz`): built in Valve's
+  Steam Runtime, so it runs from Game Mode as a non-Steam game; starts with
+  the handheld settings; finds an `.iso` copied into its folder by itself.
+- Every download starts with settings tuned for its system (see the README,
+  "Default settings").
+- Bloom has a Medium level.
+- A `.iso` next to the program is used automatically on the first start.
+
+### Changed
+- Steam Deck Mode is now a button, "Apply Steam Deck Settings": it sets every
+  option to the handheld values once, and nothing is locked afterwards.
+- Every controller drives the menus: a second gamepad, a guitar or the
+  keyboard can select, not just player 1's.
+- On screens with nothing to choose ("press any button", the boot logos), a
+  click or a tap continues; on a phone the touch screen is enough.
+- An option with only two values is a check box ("Forgiving Hammer-ons &
+  Pull-offs").
+- The Android app's version now follows the game's (1.1.0), so new
+  versions install as updates over the old one.
+
+### Kept
+- The Glitches, the ninth band with everything unlocked, is in every
+  download (Choose Band / Load Band).
+
 ## [1.0.0] - 2026-10-23
 
 First release of Guitar Hero (PS2) on Guitar Dream Engine.

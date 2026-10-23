@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(gd01 VERSION 1.0.0 LANGUAGES C CXX)
+project(gd01 VERSION 1.1.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -119,6 +119,13 @@ else()
   target_compile_definitions(gd01 PRIVATE GD01_DLSS=0)
 endif()
 endif()  # NOT ANDROID
+
+# The Steam Deck download (build_linux_steamdeck.sh): the Linux program with
+# the handheld settings as its defaults (app.cpp profileValues).
+option(GD01_STEAM_DECK "Steam Deck build: handheld default settings" OFF)
+if(GD01_STEAM_DECK)
+  target_compile_definitions(gd01 PRIVATE GD01_STEAM_DECK=1)
+endif()
 
 if(MSVC)
   target_compile_options(gd01 PRIVATE /W4 /permissive-)

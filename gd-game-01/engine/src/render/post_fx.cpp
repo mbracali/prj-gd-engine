@@ -912,7 +912,7 @@ unsigned PostFx::process(unsigned color, unsigned depth, int sw, int sh, int ow,
         gl::glUniform1f(uniform(pComposite_, "uFogDensity"), s.fog >= 2 ? 0.0065f : 0.004f);
         gl::glUniform1f(uniform(pComposite_, "uFogMax"), s.fog >= 2 ? 0.88f : 0.68f);
         gl::glUniform1f(uniform(pComposite_, "uTime"), f.timeSec);
-        gl::glUniform1f(uniform(pComposite_, "uBloom"), !pyramid ? 0.0f : s.bloom >= 2 ? 0.9f : s.bloom == 1 ? 0.45f : 0.0f);
+        gl::glUniform1f(uniform(pComposite_, "uBloom"), !pyramid ? 0.0f : s.bloom >= 3 ? 0.9f : s.bloom == 2 ? 0.68f : s.bloom == 1 ? 0.45f : 0.0f);
         gl::glUniform1f(uniform(pComposite_, "uStreaks"), s.streaks && pyramid ? 1.1f : 0.0f);
         gl::glUniform2f(uniform(pComposite_, "uTexel"), 1.0f / float(sw), 1.0f / float(sh));
         gl::glUniform2f(uniform(pComposite_, "uTexelMid"), pyramid ? 1.0f / float(down_[0].w) : 0.0f, pyramid ? 1.0f / float(down_[0].h) : 0.0f);
