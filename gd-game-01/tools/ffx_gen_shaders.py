@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
+# Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 """Generate the FidelityFX FSR 3.1 upscaler shader permutation headers for the
 Vulkan backend, as FidelityFX_SC (the SDK's Windows-only shader compiler)
 would with -compiler=glslang -reflection.

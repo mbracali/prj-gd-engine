@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
+# Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 """Decoders for Guitar Hero (PS2) material-side scene records:
 Mat, Tex, Environ, Light, Cam, Font, Text, Flare, Movie.
 

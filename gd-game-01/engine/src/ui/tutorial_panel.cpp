@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
+// Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 // TutorialPanel (new_tutorial_panel; vtable 0x2f8a20, handler 0x153f60):
 // the `tutorial` object the lesson scripts talk to. It owns the voice-over
 // player (VoiceMgr / StreamPlayer 0x1543a0..0x155890) and the two trainers:

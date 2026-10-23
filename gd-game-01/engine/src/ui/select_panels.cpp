@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
+// Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "ui/select_panels.h"
 
 #include <SDL3/SDL.h>
@@ -622,9 +624,13 @@ private:
 // a row a poll (60 Hz), the top and bottom two rows fading; once the last
 // page is reached the panel sends go_back. Rows: () blank, ("X") heading,
 // ("role" "name"), ("" "text" "") centred.
-// [I] The GD01 credits roll first, then a spacer and the original's.
-constexpr const char* kGh1reCredits = R"dta(
-("GD01 PROJECT")
+// [I] The Guitar Dream Engine credits roll first (with the attribution line
+// LICENSE-ADDITIONAL-TERMS.md clause A asks for), then a spacer and the original's.
+constexpr const char* kGd01Credits = R"dta(
+("GUITAR DREAM ENGINE")
+("" "Game 01: a reimplementation of Guitar Hero (PS2, 2005)" "")
+("" "Based on Guitar Dream Engine" "")
+("" "github.com/mbracali/prj-gd-engine" "")
 ()
 ("MAIN DEVELOPERS")
 ("" "BRACA DEVELOPER" "")
@@ -657,7 +663,7 @@ public:
         try {
             DataNode d = parseDtb(host.data().read(dtbPath("config/credits.dta")));
             // After the original's opening blank rows (the list starts empty and rolls up).
-            DataNode ours = parseDtaText(kGh1reCredits);
+            DataNode ours = parseDtaText(kGd01Credits);
             size_t first = 0;
             while (first < d.children.size() && d.children[first].isList() && d.children[first].children.empty()) ++first;
             d.children.insert(d.children.begin() + long(first), ours.children.begin(), ours.children.end());

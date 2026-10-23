@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
+# Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 """Shared readers and base-class decoders for Guitar Hero (PS2) scene records.
 
 Each decoder takes a Reader positioned at its data and returns a dict, reading

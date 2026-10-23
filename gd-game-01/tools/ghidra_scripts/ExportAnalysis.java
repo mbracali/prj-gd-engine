@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
+// Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 // Export functions, strings, call graph and decompiled C for offline study.
 // Usage (headless postScript): ExportAnalysis.java <output_dir>
 // @category gd-game-01

@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
+# Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 """Recover GCC 2.x vtables from SLUS_212.24 using the exported Ghidra tables.
 
 Each vtable entry is 8 bytes {s32 this_delta, u32 function}; an object's

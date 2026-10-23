@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
+# Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 """Repo guard: keeps game data, reverse-engineering output, large binaries,
 signing keys and personal paths out of the repo. Checks every tracked file
 (git ls-files), so it runs the same in CI and locally:

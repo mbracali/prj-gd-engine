@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
+# Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 """Find code in SLUS_212.24 that builds given addresses with lui/addiu (or
 lui/ori, or a load/store offset), even where Ghidra did not disassemble it.
 

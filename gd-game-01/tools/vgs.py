@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
+# Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 """Decode Guitar Hero (PS2) .vgs multitrack audio to one WAV per channel.
 
 Recovered from SLUS_212.24 (VAGFileReader_New, FUN_0021d7c0 / FUN_0021da70):

@@ -1,10 +1,13 @@
-# gd01
+# gd01 (Guitar Dream Engine, game 01)
+
+Based on Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine
 
 A from-scratch reimplementation of Guitar Hero (PS2, 2005) for Linux, macOS
 and Windows. It plays the songs from **your own copy** of the game: no game
 data is included. The gameplay rules (hit window, HOPOs, scoring, Star Power,
-rock meter) were recovered from the original executable; see `FINDINGS.md`
-in the project root.
+rock meter) were recovered from the original executable; see
+`gd-game-01/docs/FINDINGS.md` in the repository
+(https://github.com/mbracali/prj-gd-engine).
 
 Songs play on the original highway in front of the song's venue, both drawn
 from your game data: venue geometry, the lighting that follows the crowd
@@ -71,3 +74,12 @@ app's folder (`Android/data/io.github.mbracali.gd01/files/`, about 2.2 GB), or c
 USB and Bluetooth controllers work as on the desktop, and the back button is
 the game's Back. FSR 3.1 and DLSS 4 are desktop-only (FSR 1 and the other
 effects work). On the desktop, `GD01_GLES=1` runs the same OpenGL ES renderer.
+
+## Licence
+
+PolyForm Noncommercial 1.0.0 plus the additional terms in
+`LICENSE-ADDITIONAL-TERMS.md` (both next to this file in every download):
+free to play, study and share; no selling; keep the credit to the original
+project; publish any changes you distribute. The third-party licences are in
+`licenses/`. Guitar Hero is a trademark of its owner; this project is not
+affiliated with or endorsed by it.

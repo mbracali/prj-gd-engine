@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
+# Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 # Downloads the NVIDIA DLSS SDK files the build uses into engine/third_party/dlss/
 # (not in the repo: the DLSS model library alone is 57 MB). Pinned to one SDK
 # release and checked by SHA-256. Without them the game builds and runs

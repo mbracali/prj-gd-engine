@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
+# Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 """Read Guitar Hero (PS2) UI panel files (ghui/*.gh) and decode their UI objects.
 
 How the game loads them (see FINDINGS.md "UI panels"):

@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
+# Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 """Decode Guitar Hero (PS2) character animation files (.acp, .acg, .acs).
 
 .acp  one AnimClipSamples clip (charsys/<char>/anims/[finger/|editor/]gen/<clip>.acp)
