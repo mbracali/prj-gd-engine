@@ -1,0 +1,29 @@
+name: Differs from the original
+description: The game looks, sounds or plays differently from the original console version.
+labels: [parity]
+body:
+  - type: dropdown
+    id: game
+    attributes:
+      label: Game
+      options: [gd-game-01 (Guitar Hero, PS2)]
+    validations:
+      required: true
+  - type: textarea
+    id: original
+    attributes:
+      label: What the original does
+      description: A video or screenshot from a real console (or a trusted emulator) helps most. Link it; do not attach game files.
+    validations:
+      required: true
+  - type: textarea
+    id: ours
+    attributes:
+      label: What gd01 does
+    validations:
+      required: true
+  - type: input
+    id: where
+    attributes:
+      label: Where
+      placeholder: "Song / venue / menu, difficulty, settings"

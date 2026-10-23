@@ -1,0 +1,18 @@
+// gd01 Android build (engine/build_android.sh runs it). Based on SDL3's
+// android-project template; the native code is engine/CMakeLists.txt.
+buildscript {
+    repositories {
+        mavenCentral()
+        google()
+    }
+    dependencies {
+        classpath 'com.android.tools.build:gradle:8.13.0'
+    }
+}
+
+allprojects {
+    repositories {
+        mavenCentral()
+        google()
+    }
+}
