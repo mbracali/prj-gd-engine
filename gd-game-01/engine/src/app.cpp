@@ -2151,6 +2151,23 @@ void App::frame() {
     else if (screen_ == Screen::Results) drawResults();
 }
 
+// The GL context the game asks for: OpenGL 3.3 core (forward compatible, as
+// macOS requires), or OpenGL ES 3.0 on Android and with GD01_GLES.
+bool setGlAttributes() {
+#ifdef __ANDROID__
+    const bool gles = true;
+#else
+    const bool gles = SDL_getenv("GD01_GLES") != nullptr;  // development aid: the Android (OpenGL ES 3) renderer
+#endif
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, gles ? 0 : 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, gles ? SDL_GL_CONTEXT_PROFILE_ES : SDL_GL_CONTEXT_PROFILE_CORE);
+    if (!gles) SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_FORWARD_COMPATIBLE_FLAG);  // required on macOS
+    SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
+    SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
+    return gles;
+}
+
 int App::run() {
     // The Enhanced Settings first (before SDL starts).
     if (std::ifstream in(enhancedPath()); in) {
@@ -2185,17 +2202,7 @@ int App::run() {
         SDL_GetWindowSize(window_, &w, &h);
         renderer_.windowToMenu(nx * float(w), ny * float(h), mx, my);
     });
-#ifdef __ANDROID__
-    const bool gles = true;
-#else
-    const bool gles = SDL_getenv("GD01_GLES") != nullptr;  // development aid: the Android (OpenGL ES 3) renderer
-#endif
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, gles ? 0 : 3);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, gles ? SDL_GL_CONTEXT_PROFILE_ES : SDL_GL_CONTEXT_PROFILE_CORE);
-    if (!gles) SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_FORWARD_COMPATIBLE_FLAG);  // required on macOS
-    SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
-    SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
+    setGlAttributes();
     // Development aid: GD01_WINDOW=<w>x<h> sets the starting window size (e.g. ultrawide tests).
     int winW = int(kScreenW), winH = int(kScreenH);
     if (const char* ws = SDL_getenv("GD01_WINDOW")) std::sscanf(ws, "%dx%d", &winW, &winH);
@@ -2357,6 +2364,34 @@ int runSelfTest(const Options& options) {
         std::fprintf(stderr, "self-test failed: %s\n", ex.what());
         return 2;
     }
+}
+
+int runShaderTest() {
+    // A hidden window: only the GL context is needed. No game data.
+    if (!SDL_Init(SDL_INIT_VIDEO)) {
+        std::fprintf(stderr, "shader test: cannot start video: %s\n", SDL_GetError());
+        return 2;
+    }
+    const bool gles = setGlAttributes();
+    SDL_Window* window = SDL_CreateWindow(kAppTitle, 320, 180, SDL_WINDOW_OPENGL | SDL_WINDOW_HIDDEN);
+    Renderer renderer;
+    std::string error;
+    if (!window || !renderer.init(window, error)) {
+        std::fprintf(stderr, "shader test: no OpenGL%s context: %s\n", gles ? " ES" : "", window ? error.c_str() : SDL_GetError());
+        if (window) SDL_DestroyWindow(window);
+        SDL_Quit();
+        return 2;
+    }
+    int programs = 0;
+    std::vector<std::string> failed = renderer.compileAllShaders(programs);
+    std::printf("%s: %s\n", gles ? "OpenGL ES" : "OpenGL", renderer.gpuName().c_str());
+    for (const std::string& name : failed) std::printf("  FAILED: %s (the compiler's message is above)\n", name.c_str());
+    if (failed.empty()) std::printf("all %d shader programs compiled\n", programs);
+    else std::printf("%d of %d shader programs failed\n", int(failed.size()), programs);
+    renderer.shutdown();
+    SDL_DestroyWindow(window);
+    SDL_Quit();
+    return failed.empty() ? 0 : 1;
 }
 
 int runSceneTest(const Options& options) {

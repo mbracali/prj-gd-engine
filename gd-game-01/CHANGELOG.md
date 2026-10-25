@@ -6,6 +6,19 @@ matches the tag's version.
 
 ## [Unreleased]
 
+### Fixed
+- macOS: the venue, the band and the 3D scenes (in a song and behind
+  Enhanced Settings) were black. One post-processing shader ("super fog") used
+  a name Apple's OpenGL compiler reserves, so the whole effects chain failed
+  to start and the scene was never shown. The shader is fixed, and if an
+  effects shader ever fails to compile on a graphics driver again, the game
+  now draws the scene without effects instead of a black screen.
+
+### Added
+- `--shadertest`: compiles every shader on this computer's graphics driver
+  and reports any that fail (no game data needed). The macOS local build runs
+  it before packaging.
+
 ## [1.1.1] - 2026-10-23
 
 ### Added

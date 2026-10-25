@@ -36,7 +36,8 @@ Or pass it on the command line:
     gd01 --song smokeonthewater --difficulty 3 path/to/game
 
 Options: `--song <id>`, `--difficulty 0-3`, `--av-offset <ms>`, `--no-fail`,
-`--autoplay`, `--no-venue`, `--selftest`.
+`--autoplay`, `--no-venue`, `--selftest`, `--shadertest` (compiles every shader
+on this graphics driver and reports any that fail; no game data needed).
 
 ## Controls
 

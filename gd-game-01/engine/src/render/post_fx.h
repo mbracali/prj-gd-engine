@@ -93,6 +93,11 @@ public:
     std::string upscalerStatus() const { return upscalerStatus_; }
     // FSR 3.1 / DLSS: the upscaler's GPU time per frame (0 when none runs).
     float upscalerMs() const;
+    // Compiles every shader of the chain now (normally on first use); false when
+    // any failed (then the chain stays off and failedPrograms() names them).
+    bool ready() { return init(); }
+    static constexpr int kPrograms = 13;  // built by init()
+    const std::vector<std::string>& failedPrograms() const { return failedPrograms_; }
 
 private:
     struct Target {
@@ -107,6 +112,7 @@ private:
     void drawQuad();
 
     bool ready_ = false, failed_ = false;
+    std::vector<std::string> failedPrograms_;
     unsigned vao_ = 0;
     unsigned pDown_ = 0, pUp_ = 0, pComposite_ = 0, pTaa_ = 0, pFxaa_ = 0, pDownsample_ = 0, pEasu_ = 0, pRcas_ = 0, pCopy_ = 0;
     unsigned pAo_ = 0, pFogVol_ = 0, pStarBlur_ = 0, pFinish_ = 0;

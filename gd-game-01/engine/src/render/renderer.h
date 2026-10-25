@@ -69,6 +69,7 @@ public:
     // The PS2 depth-of-field pass (FUN_0019afa8): pixels at or beyond window
     // depth `depth` get a 4-tap box blur (taps 0 and +tapPx in x and y).
     void depthBlur(float depth, float tapPx);
+    bool ensureBlurProgram();  // builds the depth-of-field program on first use
     int viewportHeight() const { return viewport_[3]; }
     int viewportWidth() const { return viewport_[2]; }
     // Window depth (0..1) at viewport pixel (x, y from the bottom), or 1.
@@ -141,7 +142,8 @@ public:
     // endScene (inside beginWide / endWide) the 3D game frame draws off
     // screen at the chain's render scale; endScene runs the effects and lays
     // the result into the viewport. beginScene returns false (and draws go
-    // straight to the frame as before) when every effect is off.
+    // straight to the frame as before) when every effect is off, or when the
+    // effects' shaders do not compile on this driver.
     void setPost(const PostSettings& s) { post_ = s; }
     // What the AI upscaler is doing, or why it fell back (Enhanced Settings shows it).
     std::string upscalerStatus() const;
@@ -151,6 +153,11 @@ public:
 
     // Reads back the current frame as RGBA (for screenshots).
     Image readPixels();
+
+    // --shadertest: compiles every GL shader program now (most are built on
+    // first use) and returns the names of those that failed; `programs` is how
+    // many were tried. The main program is already built by init().
+    std::vector<std::string> compileAllShaders(int& programs);
 
 private:
     std::string gpuName_;

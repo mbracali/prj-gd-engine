@@ -277,7 +277,9 @@ float hash3(vec3 p) {
     p += dot(p, p.zyx + 31.32);
     return fract((p.x + p.y) * p.z);
 }
-float noise3(vec3 p) {
+// Not "noise3": GLSL reserves noise1..noise4 as built-ins (vec3 noise3(genType)),
+// and Apple's compiler rejects a redeclaration with another return type.
+float fogNoise3(vec3 p) {
     vec3 i = floor(p), f = fract(p);
     vec3 u = f * f * (3.0 - 2.0 * f);
     return mix(mix(mix(hash3(i), hash3(i + vec3(1, 0, 0)), u.x), mix(hash3(i + vec3(0, 1, 0)), hash3(i + vec3(1, 1, 0)), u.x), u.y),
@@ -302,7 +304,7 @@ void main() {
         float h = max(q.z - uFloorZ, 0.0);
         vec3 nq = q * 0.011 + vec3(uTime * 0.05, uTime * 0.02, -uTime * 0.03);
         // The second octave only in the ground layer, where the billows show.
-        float n = h < 80.0 ? noise3(nq) * 0.6 + noise3(nq * 2.6 + 7.3) * 0.4 : noise3(nq);
+        float n = h < 80.0 ? fogNoise3(nq) * 0.6 + fogNoise3(nq * 2.6 + 7.3) * 0.4 : fogNoise3(nq);
         float ground = 0.009 * exp(-h / 26.0) * mix(0.25, 1.9, n);
         float haze = 0.00055 * mix(0.6, 1.4, n);
         float dens = ground + haze;
@@ -696,6 +698,7 @@ unsigned PostFx::program(const char* fragment, const char* name) {
     if (!fs) {
         SDL_Log("post-processing %s: %s", name, error.c_str());
         if (vs) gl::glDeleteShader(vs);
+        failedPrograms_.push_back(name);
         return 0;
     }
     unsigned p = gl::glCreateProgram();
@@ -711,6 +714,7 @@ unsigned PostFx::program(const char* fragment, const char* name) {
         gl::glGetProgramInfoLog(p, sizeof log, nullptr, log);
         SDL_Log("post-processing %s: %s", name, log);
         gl::glDeleteProgram(p);
+        failedPrograms_.push_back(name);
         return 0;
     }
     return p;
