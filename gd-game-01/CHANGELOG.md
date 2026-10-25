@@ -6,6 +6,13 @@ matches the tag's version.
 
 ## [Unreleased]
 
+## [1.1.2] - 2026-10-25
+
+**macOS: the black screen is fixed.** On Macs, songs, venues and the
+Enhanced Settings menu showed a black screen while the menus and the highway
+still drew. They now show the full venue, band and lighting. Windows, Linux,
+Steam Deck and Android players see no change.
+
 ### Fixed
 - macOS: the venue, the band and the 3D scenes (in a song and behind
   Enhanced Settings) were black. One post-processing shader ("super fog") used
