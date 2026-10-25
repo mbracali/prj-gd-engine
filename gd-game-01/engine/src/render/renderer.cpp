@@ -576,30 +576,54 @@ void main() {
 
 }  // namespace
 
+bool Renderer::ensureBlurProgram() {
+    if (blurProgram_) return blurProgram_ != ~0u;
+    std::string error;
+    unsigned vs = compile(GL_VERTEX_SHADER, kBlurVertexShader, error);
+    unsigned fs = vs ? compile(GL_FRAGMENT_SHADER, kBlurFragmentShader, error) : 0;
+    if (!fs) {
+        SDL_Log("depth of field: %s", error.c_str());
+        if (vs) gl::glDeleteShader(vs);
+        blurProgram_ = ~0u;
+        return false;
+    }
+    blurProgram_ = gl::glCreateProgram();
+    gl::glAttachShader(blurProgram_, vs);
+    gl::glAttachShader(blurProgram_, fs);
+    gl::glLinkProgram(blurProgram_);
+    gl::glDeleteShader(vs);
+    gl::glDeleteShader(fs);
+    GLint ok = 0;
+    gl::glGetProgramiv(blurProgram_, GL_LINK_STATUS, &ok);
+    if (!ok) {
+        char log[1024];
+        gl::glGetProgramInfoLog(blurProgram_, sizeof log, nullptr, log);
+        SDL_Log("depth of field: shader link: %s", log);
+        gl::glDeleteProgram(blurProgram_);
+        blurProgram_ = ~0u;
+        return false;
+    }
+    uBlurTex_ = gl::glGetUniformLocation(blurProgram_, "uTex");
+    uBlurDepth_ = gl::glGetUniformLocation(blurProgram_, "uDepth");
+    uBlurTap_ = gl::glGetUniformLocation(blurProgram_, "uTap");
+    uBlurSize_ = gl::glGetUniformLocation(blurProgram_, "uSize");
+    uBlurOrigin_ = gl::glGetUniformLocation(blurProgram_, "uOrigin");
+    return true;
+}
+
+std::vector<std::string> Renderer::compileAllShaders(int& programs) {
+    std::vector<std::string> failed;
+    programs = 2;  // the main program (init) and depth of field
+    if (!ensureBlurProgram()) failed.push_back("depth of field");
+    bool postOk = postFx_.ready();
+    programs += PostFx::kPrograms;
+    if (!postOk) failed.insert(failed.end(), postFx_.failedPrograms().begin(), postFx_.failedPrograms().end());
+    return failed;
+}
+
 void Renderer::depthBlur(float depth, float tapPx) {
     if (depth <= 0 || depth >= 1) return;
-    if (!blurProgram_) {
-        std::string error;
-        unsigned vs = compile(GL_VERTEX_SHADER, kBlurVertexShader, error);
-        unsigned fs = vs ? compile(GL_FRAGMENT_SHADER, kBlurFragmentShader, error) : 0;
-        if (!fs) {
-            SDL_Log("depth of field: %s", error.c_str());
-            blurProgram_ = ~0u;
-            return;
-        }
-        blurProgram_ = gl::glCreateProgram();
-        gl::glAttachShader(blurProgram_, vs);
-        gl::glAttachShader(blurProgram_, fs);
-        gl::glLinkProgram(blurProgram_);
-        gl::glDeleteShader(vs);
-        gl::glDeleteShader(fs);
-        uBlurTex_ = gl::glGetUniformLocation(blurProgram_, "uTex");
-        uBlurDepth_ = gl::glGetUniformLocation(blurProgram_, "uDepth");
-        uBlurTap_ = gl::glGetUniformLocation(blurProgram_, "uTap");
-        uBlurSize_ = gl::glGetUniformLocation(blurProgram_, "uSize");
-        uBlurOrigin_ = gl::glGetUniformLocation(blurProgram_, "uOrigin");
-    }
-    if (blurProgram_ == ~0u) return;
+    if (!ensureBlurProgram()) return;
     const int x = viewport_[0], y = viewport_[1], w = viewport_[2], h = viewport_[3];
     if (!blurTex_) gl::glGenTextures(1, &blurTex_);
     gl::glActiveTexture(GL_TEXTURE0);
@@ -965,6 +989,15 @@ void Renderer::setJitter(float x, float y) {
 
 bool Renderer::beginScene() {
     if (!post_.any() || sceneActive_) return false;
+    // A shader the driver rejects (logged by PostFx) turns the effects off:
+    // the scene then draws straight to the frame, as with every effect off,
+    // instead of into a target nothing would show (a black venue).
+    if (!postFx_.ready()) {
+        static bool told = false;
+        if (!told) SDL_Log("post-processing is off: a shader failed to compile (see above); drawing without effects");
+        told = true;
+        return false;
+    }
     const int vw = viewport_[2], vh = viewport_[3];
     const float scale = post_.renderScale();
     const int sw = std::max(1, int(std::lround(vw * scale))), sh = std::max(1, int(std::lround(vh * scale)));

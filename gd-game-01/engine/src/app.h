@@ -25,5 +25,8 @@ int runApp(const Options& options);
 // Plays every chart with perfect input through the real judgment code and
 // reports scores; returns non-zero if any chart is not fully hit.
 int runSelfTest(const Options& options);
+// Compiles every GL shader on this machine's driver (no game data needed);
+// returns 1 if any fails, 2 if no GL context could be made.
+int runShaderTest();
 // Decodes every scene file in the game data and reports objects that fail.
 int runSceneTest(const Options& options);

@@ -189,6 +189,17 @@ build_windows() {
 
 build_macos() {
   "$engine/build_macos.sh"
+  # Apple's GLSL compiler is stricter than the Linux and Windows drivers: compile
+  # every shader on this Mac before shipping (exit 2: no GL context, e.g. over ssh).
+  local rc=0
+  "$engine/dist/gd01-macos/gd01.app/Contents/MacOS/gd01" --shadertest > "$out/logs/macos-shadertest.log" 2>&1 || rc=$?
+  case "$rc" in
+    0) say "Shaders: $(tail -1 "$out/logs/macos-shadertest.log")" ;;
+    2) say "${Y}Shaders: not checked (no OpenGL context here; see local_builds/logs/macos-shadertest.log)${N}" ;;
+    *) grep -E 'ERROR|FAILED|failed' "$out/logs/macos-shadertest.log" | head -20
+       say "${R}Shaders: a shader does not compile on this Mac (see local_builds/logs/macos-shadertest.log)${N}"
+       return 1 ;;
+  esac
   ship macos gd01-macos
 }
 
