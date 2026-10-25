@@ -23,7 +23,8 @@ void usage() {
         "  --autoplay           play the chart automatically\n"
         "  --kb2p               two players on one keyboard (P2: H J K L ; frets, N M strum, B Star Power, O Start)\n"
         "  --no-venue           plain background instead of the song's venue\n"
-        "  --selftest           auto-play every chart headlessly and report\n");
+        "  --selftest           auto-play every chart headlessly and report\n"
+        "  --shadertest         compile every shader on this GPU and report (no game data)\n");
 }
 
 }  // namespace
@@ -32,7 +33,7 @@ int main(int argc, char** argv) {
     aliasLegacyEnv();
     gpu::setArgs(argc, argv);
     Options opt;
-    bool selftest = false, scenetest = false;
+    bool selftest = false, scenetest = false, shadertest = false;
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
         auto value = [&]() -> std::string {
@@ -52,6 +53,7 @@ int main(int argc, char** argv) {
         else if (a == "--venue") opt.venue = true;
         else if (a == "--selftest") selftest = true;
         else if (a == "--scenetest") scenetest = true;
+        else if (a == "--shadertest") shadertest = true;
         else if (a == "--view") opt.viewScene = value();
         else if (a == "--panel") opt.panel = value();
         else if (a == "--character") opt.character = value();
@@ -64,6 +66,7 @@ int main(int argc, char** argv) {
         else if (!a.empty() && a[0] == '-' && a.rfind("-psn_", 0) != 0) { usage(); return 2; }  // -psn_: macOS Finder
         else if (a.rfind("-psn_", 0) != 0) opt.dataPath = a;
     }
+    if (shadertest) return runShaderTest();
     if (scenetest) return runSceneTest(opt);
     return selftest ? runSelfTest(opt) : runApp(opt);
 }
