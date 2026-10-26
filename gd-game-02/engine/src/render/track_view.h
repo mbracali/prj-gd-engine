@@ -10,6 +10,7 @@
 
 #include "game/chart.h"
 #include "game/player.h"
+#include "render/particles.h"
 #include "render/scene_gpu.h"
 
 class GameData;
@@ -29,28 +30,51 @@ class Renderer;
 // chart's gems as the track's TrackWidgets (normal / HOPO / Star Power /
 // Star Power HOPO / bonus during Star Power / missed), sustain tails built
 // by code (bent by the whammy bar), the smashers reacting to held frets and
-// hits, the smash flames, beat and measure lines from the tempo map, and the
-// Star Power look (lightning, rails).
+// hits, the smash effects (flame lights and particles), the burn and the
+// Star Power tail sparks, beat and measure lines from the tempo map, the
+// Star Power look (lightning, rails), the intro (extend sequence, smashers
+// popping), the explode when the song is won, the lefty flip, and each
+// player's track of the two-player panel.
 class TrackView {
 public:
     TrackView();
     ~TrackView();
     // Loads the scene and the config; throws std::runtime_error on failure.
-    void load(const GameData& data, scene::MiloLibrary& library);
+    // `player`: -1 for one player (track_panel_1p, track.cam), else 0 / 1,
+    // the player's track of track_panel_2p (track_new_1 / _2: its camera
+    // track_p1 / track_p2.cam, which draws in the left / right half).
+    void load(const GameData& data, scene::MiloLibrary& library, int player = -1);
     bool loaded() const { return track_ != nullptr; }
-    // A new song (clears the per-song state and effects).
-    void reset();
+    // A new song (clears the per-song state and effects). `introStartMs`:
+    // the song time the track's extend sequence starts (game.dta
+    // extend_track; none: the track is out already).
+    void reset(float introStartMs = -1e9f);
+    // Lefty flip (the player's option): the slots mirror (0x82699E78,
+    // 0x82691348) [C].
+    void setLefty(bool lefty) { lefty_ = lefty; }
+    // The song is won (game.dta game_won_msg: {track_panel explode}).
+    void explode(float nowMs);
+    bool exploded() const { return explodeMs_ > -1e8f; }
     // The player's events of this frame (hits start smash effects, passes
     // turn gems into misses, releases cut tails).
     void onEvents(const std::vector<PlayerEvent>& events, const Player& player, float nowMs);
     // Draws the track with its own camera into the bound 16:9 picture.
     void draw(gfx::Renderer& r, gfx::SceneCache& cache, const Song& song, const Player& player, float nowMs, float trackSpeed);
+    // Particles drawn last frame (statistics).
+    int particlesDrawn() const { return particlesDrawn_; }
 
 private:
-    struct Effect {
-        int slot = 0;
-        int kind = 0;  // 0 normal, 1 star, 2 bonus
-        float startMs = 0;
+    // A smash view's copy for one slot (0x8269C968): normal, star or bonus.
+    struct Smash {
+        float startMs = -1e9f;
+        bool active = false;
+        gfx::ParticleSet parts;
+    };
+    // tail_bonus.part's copy on a held Star Power tail (0x8269EAD0).
+    struct TailSparks {
+        gfx::ParticleSet parts;
+        float startY = 0, endY = 0;  // absolute track y of the tail's start and end
+        bool live = false;
     };
     // Per gem of the chart.
     enum class GemState : uint8_t { Live, Missed, Released };
@@ -76,8 +100,16 @@ private:
     void drawTails(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, const Player& player, float nowMs);
     void drawSmashers(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, const Player& player, float nowMs);
     void drawEffects(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, const Player& player, float nowMs);
+    void drawParticles(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, const Player& player, float nowMs);
+    void drawExplode(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, float nowMs);
+    float slotX(int slot) const { return lefty_ ? -slotX_[size_t(slot)] : slotX_[size_t(slot)]; }
 
     scene::Milo* track_ = nullptr;
+    int player_ = -1;
+    bool lefty_ = false;
+    const scene::Cam* cam_ = nullptr;
+    std::array<float, 4> screenRect_{0, 0, 1, 1};
+    float nearPlane_ = 50, farPlane_ = 200;
     gfx::ScenePose pose_;
     gfx::Camera camera_;
     const scene::Environ* currentEnv_ = nullptr;
@@ -109,7 +141,15 @@ private:
 
     std::array<float, 5> hitMs_{};    // last hit per slot (smasher hit anim)
     std::array<float, 5> missMs_{};   // last miss per slot (smasher pop anim)
-    std::vector<Effect> effects_;
+    std::array<std::array<Smash, 3>, 5> smash_;
+    std::array<gfx::ParticleSet, 5> burn_;
+    std::array<bool, 5> burnOn_{};
+    std::unordered_map<int, TailSparks> tailSparks_;  // gem x 8 + slot
+    gfx::ParticleSet explodeParts_;
+    float explodeMs_ = -1e9f;
+    float introStartMs_ = -1e9f;
+    std::unique_ptr<gfx::ParticleRenderer> particles_;
+    int particlesDrawn_ = 0;
     std::vector<GemState> gemState_;
     std::unordered_map<int, float> releaseClip_;  // released gem -> frozen tail start (relative y)
     float blowMs_ = -1e9f;

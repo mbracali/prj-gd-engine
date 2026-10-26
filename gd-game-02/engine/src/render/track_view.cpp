@@ -57,8 +57,7 @@
 //   slot (smash_bonus in Star Power, smash_star for Star Power gems, else
 //   smash_normal) at 30 fps; while a sustain is held burn_tail.view, its
 //   state frame 10 (whammy on a Star Power tail) / 20 (bonus) / 0 (0x826A0868).
-//   The particle systems of these views are not drawn yet (only their
-//   flame-light meshes) [simplified].
+//   Their particle systems run as per-slot copies (render/particles.h).
 // - Beat lines (0x82699F40, 0x8235C890) [C]: one every 240 ticks: half_beat
 //   between beats, beat_line on beats, bar_line on measures; none ahead
 //   before song time -2000 ms, ramping in until -1000 ms.
@@ -90,15 +89,23 @@ const scene::Mat* TrackView::slotMat(const char* format, int slot) const {
     return get<scene::Mat>(name);
 }
 
-void TrackView::load(const GameData& data, scene::MiloLibrary& library) {
-    // ui/track_panel.dta: one player uses track_panel_1p.milo, whose
-    // GHTrackDir proxies track_new.milo.
-    scene::Milo& panel = library.load("track/gen/track_panel_1p.milo_xbox");
+void TrackView::load(const GameData& data, scene::MiloLibrary& library, int player) {
+    // ui/track_panel.dta: one player uses track_panel_1p.milo, two players
+    // track_panel_2p.milo; each GHTrackDir there is a proxy of
+    // track_new.milo whose first field is its player (-1, 0, 1) [C data].
+    player_ = player;
+    scene::Milo& panel = library.load(player < 0 ? "track/gen/track_panel_1p.milo_xbox" : "track/gen/track_panel_2p.milo_xbox");
     scene::Milo* track = nullptr;
-    for (const auto& o : panel.root().objects)
-        if (o->cls == "GHTrackDir")
-            if ((track = library.proxy(panel, *o))) break;
-    if (!track) throw std::runtime_error("track_panel_1p: no track directory");
+    int index = 0;
+    for (const auto& o : panel.root().objects) {
+        if (o->cls != "GHTrackDir") continue;
+        const auto* d = o->as<scene::DirObj>();
+        const int owner = d && d->hasGHTrack ? d->ghTrack.unknown : index;
+        ++index;
+        if (player >= 0 && owner != player) continue;
+        if ((track = library.proxy(panel, *o))) break;
+    }
+    if (!track) throw std::runtime_error("track panel: no track directory for this player");
     auto* self = track->root().self ? track->root().self->as<scene::DirObj>() : nullptr;
     if (!self || !self->hasTrack || !self->hasGHTrack) throw std::runtime_error("track_new: not a GHTrackDir");
     track_ = track;
@@ -145,21 +152,54 @@ void TrackView::load(const GameData& data, scene::MiloLibrary& library) {
     }
     tailSegLen_ = (horizonY_ - removeY_) * 1.01f / float(tailSegments_);
 
-    if (!get<scene::Cam>(self->ghTrack.spCamera.empty() ? "track.cam" : self->ghTrack.spCamera))
-        throw std::runtime_error("track_new: no track camera");
+    // The camera: the single-player one, or the player's of the
+    // multiplayer list (track_p1 / track_p2.cam, whose screen rects are the
+    // left and right halves) [C data; selection I]. Its planes come from
+    // track_graphics (cam (near_plane 50) (far_plane 200)) [C 0x82696330].
+    std::string camName = self->ghTrack.spCamera.empty() ? "track.cam" : self->ghTrack.spCamera;
+    if (player >= 0) camName = size_t(player) < self->ghTrack.mpCameras.size() ? self->ghTrack.mpCameras[size_t(player)]
+                                                                               : (player == 0 ? "track_p1.cam" : "track_p2.cam");
+    cam_ = get<scene::Cam>(camName);
+    if (!cam_) throw std::runtime_error("track_new: no track camera " + camName);
+    screenRect_ = cam_->screenRect;
+    if (const DataNode* cam = cfg.find("cam")) {
+        num(cam, "near_plane", nearPlane_);
+        num(cam, "far_plane", farPlane_);
+    }
     trackEnv_ = envOf(get<scene::Group>("draw.grp"), nullptr);
     reset();
 }
 
-void TrackView::reset() {
+void TrackView::reset(float introStartMs) {
     pose_.clear();
-    effects_.clear();
     hitMs_.fill(-1e9f);
     missMs_.fill(-1e9f);
     gemState_.clear();
     releaseClip_.clear();
     whammyHist_.fill(0);
     blowMs_ = -1e9f, blowLevel_ = 0;
+    introStartMs_ = introStartMs;
+    explodeMs_ = -1e9f;
+    // The effect copies (0x8269C968: one smash view of each kind per slot,
+    // and the burn view), and the explode view's systems.
+    static const char* const kViews[3] = {"smash_normal.view", "smash_star.view", "smash_bonus.view"};
+    for (int f = 0; f < 5; ++f) {
+        for (int k = 0; k < 3; ++k) {
+            Smash& sm = smash_[size_t(f)][size_t(k)];
+            sm.active = false, sm.startMs = -1e9f;
+            sm.parts.build(obj(kViews[k]), uint32_t(f * 3 + k + 1));
+        }
+        burn_[size_t(f)].build(obj("burn_tail.view"), uint32_t(100 + f));
+        burnOn_[size_t(f)] = false;
+    }
+    tailSparks_.clear();
+    explodeParts_.build(obj("track_explode.view"), 200);
+}
+
+void TrackView::explode(float nowMs) {
+    if (exploded()) return;
+    explodeMs_ = nowMs;
+    explodeParts_.reset();
 }
 
 void TrackView::onEvents(const std::vector<PlayerEvent>& events, const Player& player, float nowMs) {
@@ -175,7 +215,10 @@ void TrackView::onEvents(const std::vector<PlayerEvent>& events, const Player& p
             for (int f = 0; f < 5; ++f)
                 if (g.frets & (1u << f)) {
                     hitMs_[size_t(f)] = nowMs;
-                    effects_.push_back({f, kind, nowMs});
+                    // The slot's copy restarts from frame 0: its particles
+                    // born after frame 0 die on the next move [C 0x82212A48].
+                    Smash& sm = smash_[size_t(f)][size_t(kind)];
+                    sm.startMs = nowMs, sm.active = true;
                 }
             break;
         }
@@ -309,7 +352,7 @@ void TrackView::drawGems(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, cons
                 const size_t k = asBonus ? 5 : missed ? 6 : size_t(f);
                 w = k < set.size() ? set[k] : nullptr;
             }
-            drawWidget(mr, cache, w, slotX_[size_t(f)], y);
+            drawWidget(mr, cache, w, slotX(f), y);
         }
     }
 }
@@ -337,7 +380,7 @@ void TrackView::buildTail(const Gem& g, int gi, int slot, const Player& player, 
     if (e <= s + 0.01f) return;
     const float L = e - s;
     const float base = startRel + s;  // the tail's start, relative to the now bar
-    const float x0 = slotX_[size_t(slot)];
+    const float x0 = slotX(slot);
 
     const bool dead = state != GemState::Live;
     const bool bonusGem = !dead && player.starPowerActive();
@@ -462,13 +505,24 @@ void TrackView::drawSmashers(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, 
     const float hitEnd = gfx::ScenePose::endFrame(hitAnim), popEnd = gfx::ScenePose::endFrame(popAnim);
     setEnv(mr, cache, envOf(get<scene::Group>("track.view"), trackEnv_));
     for (int s = 0; s < 5; ++s) {
-        const bool held = player.heldFrets() & (1u << s);
+        // The extend sequence pops the smashers one by one, 1.3 s + 0.1 s per
+        // slot after it starts, and lights them (set_smasher_glowing) until
+        // refresh_track_buttons at 2.5 s (track_panel.dta) [C data; the glow
+        // as the pressed look is I].
+        float popMs = missMs_[size_t(s)];
+        bool glowing = false;
+        if (introStartMs_ > -1e8f) {
+            const float pop = introStartMs_ + 1300.0f + 100.0f * float(s);
+            if (nowMs >= pop && pop > popMs) popMs = pop;
+            glowing = nowMs >= pop && nowMs < introStartMs_ + 2500.0f;
+        }
+        const bool held = (player.heldFrets() & (1u << s)) || glowing;
         const float sinceHit = (nowMs - hitMs_[size_t(s)]) * 0.001f * kFrameRate;
-        const float sinceMiss = (nowMs - missMs_[size_t(s)]) * 0.001f * kFrameRate;
+        const float sinceMiss = (nowMs - popMs) * 0.001f * kFrameRate;
         pose_.resetLocal(smasher);
         if (sinceHit >= 0 && sinceHit < hitEnd) pose_.setFrame(hitAnim, sinceHit);
         else if (sinceMiss >= 0 && sinceMiss < popEnd) pose_.setFrame(popAnim, sinceMiss);
-        const Mat4 offset = Mat4::translation(slotX_[size_t(s)], 0, 0);
+        const Mat4 offset = Mat4::translation(slotX(s), 0, 0);
         const scene::Mat* body = held ? slotMat("gem_smasher_%s.mat", s) : get<scene::Mat>("gem_smasher.mat");
         gfx::drawMesh(mr, cache, *smasher, offset * gfx::toMat4(pose_.world(smasher)), &pose_, body);
         if (rim) gfx::drawMesh(mr, cache, *rim, offset * gfx::toMat4(pose_.world(rim)), &pose_, slotMat("now_ring_%s.mat", s));
@@ -478,10 +532,11 @@ void TrackView::drawSmashers(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, 
 
 void TrackView::drawEffects(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, const Player& player, float nowMs) {
     setEnv(mr, cache, nullptr);
-    // The burn while a sustain is held: burn_tail.view's flame light at the
-    // slots of the held gem.
+    // The burn while a sustain is held: burn_tail.view (its flame light
+    // here, its particles in drawParticles) at the slots of the held gem.
     const int sg = player.sustainGem();
     const auto& gems = player.chart().gems;
+    std::array<bool, 5> burning{};
     if (sg >= 0 && size_t(sg) < gems.size())
         if (const scene::Group* burn = get<scene::Group>("burn_tail.view")) {
             const Gem& g = gems[size_t(sg)];
@@ -490,39 +545,158 @@ void TrackView::drawEffects(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, c
             pose_.setFrame(obj("burn_castlight.filt"), nowMs * 0.001f * kFrameRate);
             for (int f = 0; f < 5; ++f) {
                 if (!(g.frets & (1u << f))) continue;
-                const Mat4 offset = Mat4::translation(slotX_[size_t(f)], 0, 0);
+                burning[size_t(f)] = true;
+                const Mat4 offset = Mat4::translation(slotX(f), 0, 0);
                 for (const std::string& n : burn->objects)
                     if (const scene::Mesh* m = burn->dir->resolve<scene::Mesh>(n))
                         gfx::drawMesh(mr, cache, *m, offset * gfx::toMat4(pose_.world(m)), &pose_);
             }
         }
-
-    static const char* const kViews[3] = {"smash_normal.view", "smash_star.view", "smash_bonus.view"};
-    effects_.erase(std::remove_if(effects_.begin(), effects_.end(),
-                                  [&](const Effect& e) {
-                                      const float f = (nowMs - e.startMs) * 0.001f * kFrameRate;
-                                      return f > 9 || f < -2;
-                                  }),
-                   effects_.end());
-    for (const Effect& e : effects_) {
-        const scene::Group* view = get<scene::Group>(kViews[e.kind]);
-        if (!view) continue;
-        const float frame = std::max(0.0f, (nowMs - e.startMs) * 0.001f * kFrameRate);
-        for (const std::string& n : view->objects) {
-            const scene::Object* o = view->dir->resolve(n);
-            if (o && (o->as<scene::TransAnim>() || o->as<scene::MatAnim>())) pose_.setFrame(o, frame);
-        }
-        const Mat4 offset = Mat4::translation(slotX_[size_t(e.slot)], 0, 0);
-        for (const std::string& n : view->objects)
-            if (const scene::Mesh* m = view->dir->resolve<scene::Mesh>(n))
-                gfx::drawMesh(mr, cache, *m, offset * gfx::toMat4(pose_.world(m)), &pose_);
+    // The burn view's particles follow its state frame (the ParticleSysAnims
+    // of burn_tail_state.view) and run on the clock; a new hold starts them
+    // afresh, a release hides them [I].
+    for (int f = 0; f < 5; ++f) {
+        gfx::ParticleSet& b = burn_[size_t(f)];
+        if (burning[size_t(f)] && !burnOn_[size_t(f)]) b.reset();
+        burnOn_[size_t(f)] = burning[size_t(f)];
+        if (!burning[size_t(f)]) continue;
+        b.sync(pose_);
+        b.setFrame(nowMs * 0.001f * kFrameRate);
     }
+
+    // Smash views (0x8269CD60): each slot's copy at frame (now - hit) x 0.03.
+    static const char* const kViews[3] = {"smash_normal.view", "smash_star.view", "smash_bonus.view"};
+    for (int f = 0; f < 5; ++f)
+        for (int k = 0; k < 3; ++k) {
+            Smash& sm = smash_[size_t(f)][size_t(k)];
+            if (!sm.active) continue;
+            const scene::Group* view = get<scene::Group>(kViews[k]);
+            if (!view) continue;
+            const float frame = std::max(0.0f, (nowMs - sm.startMs) * 0.001f * kFrameRate);
+            pose_.setFrame(view, frame);
+            sm.parts.sync(pose_);
+            if (frame > 9) continue;  // the flame light's anims are over
+            const Mat4 offset = Mat4::translation(slotX(f), 0, 0);
+            for (const std::string& n : view->objects)
+                if (const scene::Mesh* m = view->dir->resolve<scene::Mesh>(n))
+                    gfx::drawMesh(mr, cache, *m, offset * gfx::toMat4(pose_.world(m)), &pose_);
+        }
+}
+
+// The track's particles, simulated in the game's track space (the rig, and
+// with it the smashers, moving forward by now_y: world-space particles stay
+// on the track and scroll towards the player, as in the game) and drawn
+// with the rig at rest (an offset of -now_y).
+void TrackView::drawParticles(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, const Player& player, float nowMs) {
+    if (!particles_) particles_ = std::make_unique<gfx::ParticleRenderer>(cache.device());
+    particles_->resetStats();
+    setEnv(mr, cache, nullptr);
+    const float clock = nowMs * 0.001f * kFrameRate;
+    const Mat4 offset = Mat4::translation(0, -nowY_, 0);
+    auto at = [&](float x, float y) {
+        scene::Xfm b;
+        b.pos = {x, y, 0};
+        return b;
+    };
+    // Burn (behind the smash sparks).
+    for (int f = 0; f < 5; ++f) {
+        if (!burnOn_[size_t(f)]) continue;
+        burn_[size_t(f)].update(pose_, at(slotX(f), nowY_), clock);
+        burn_[size_t(f)].draw(*particles_, mr, cache, camera_, offset, &pose_);
+    }
+    // tail_bonus.part on held Star Power tails (0x8269EAD0) [C]: a copy per
+    // tail at the tail's start, emitting 2 x the whammy a frame while the
+    // tail is whammied [I: the value is the tail's whammy blend], particles
+    // past the tail's end removed.
+    const auto& gems = player.chart().gems;
+    const int sg = player.sustainGem();
+    for (auto& [key, t] : tailSparks_) t.live = false;
+    if (sg >= 0 && size_t(sg) < gems.size()) {
+        const Gem& g = gems[size_t(sg)];
+        const bool starTail = !player.starPowerActive() && g.phrase >= 0 && player.phraseIntact(g.phrase);
+        if (starTail && obj("tail_bonus.part"))
+            for (int f = 0; f < 5; ++f) {
+                if (!(g.frets & (1u << f))) continue;
+                TailSparks& t = tailSparks_[sg * 8 + f];
+                if (t.parts.empty()) t.parts.build(obj("tail_bonus.part"), uint32_t(sg * 8 + f + 300));
+                t.live = true;
+                const float gemY = yOf(g.ms);
+                t.startY = std::max(gemY + kTailClip, nowY_ + nowbarTailClip_);
+                t.endY = std::min(yOf(g.ms + g.durationMs), nowY_ + horizonY_);
+                const float w = player.whammying() ? std::clamp(player.whammyBar(), 0.0f, 1.0f) : 0.0f;
+                for (gfx::ParticleSystem& ps : t.parts.systems()) ps.params().emitRate = {w * 2, w * 2};
+            }
+    }
+    for (auto it = tailSparks_.begin(); it != tailSparks_.end();) {
+        TailSparks& t = it->second;
+        t.parts.setEmitting(t.live);
+        t.parts.setFrame(clock);
+        // The copy sits at the tail's start (its own Trans replaced) [C].
+        const int slot = it->first % 8;
+        scene::Xfm base = at(slotX(slot), t.startY);
+        for (gfx::ParticleSystem& ps : t.parts.systems()) {
+            scene::Xfm w = pose_.world(&ps.def());
+            w.pos = {0, 0, 0};
+            w = scene::compose(w, base);
+            ps.setTransform(w, w);
+            ps.poll(clock);
+            const float endY = t.endY;
+            ps.removeIf([endY](const gfx::Vec3& p) { return p.y > endY; });
+        }
+        if (!t.live && t.parts.count() == 0) {
+            it = tailSparks_.erase(it);
+            continue;
+        }
+        t.parts.draw(*particles_, mr, cache, camera_, offset, nullptr);
+        ++it;
+    }
+    // Smash sparks.
+    for (int f = 0; f < 5; ++f)
+        for (int k = 0; k < 3; ++k) {
+            Smash& sm = smash_[size_t(f)][size_t(k)];
+            if (!sm.active) continue;
+            sm.parts.update(pose_, at(slotX(f), nowY_), clock);
+            sm.parts.draw(*particles_, mr, cache, camera_, offset, &pose_);
+            if ((nowMs - sm.startMs) > 3000 && sm.parts.count() == 0) sm.active = false;
+        }
+    particlesDrawn_ = particles_->drawnParticles();
+}
+
+// track_explode.view (0x82695988, poll 0x82695C08) [C]: shown, parented
+// to the rig, and played by track_explode.filt at (now - explode) x 0.03;
+// the track and its gems are hidden.
+void TrackView::drawExplode(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, float nowMs) {
+    const scene::Group* view = get<scene::Group>("track_explode.view");
+    if (!view) return;
+    const float f = (nowMs - explodeMs_) * 0.001f * kFrameRate;
+    pose_.setFrame(obj("track_explode.filt"), f);
+    pose_.setShowing(view, true);
+    explodeParts_.sync(pose_);
+    const scene::Environ* env = envOf(view, nullptr);
+    setEnv(mr, cache, env);
+    for (const std::string& n : view->objects)
+        if (const scene::Mesh* m = view->dir->resolve<scene::Mesh>(n); m && pose_.showing(m))
+            gfx::drawMesh(mr, cache, *m, gfx::toMat4(pose_.world(m)), &pose_);
+    if (!particles_) particles_ = std::make_unique<gfx::ParticleRenderer>(cache.device());
+    particles_->resetStats();
+    explodeParts_.update(pose_, scene::Xfm{}, nowMs * 0.001f * kFrameRate);
+    setEnv(mr, cache, nullptr);
+    explodeParts_.draw(*particles_, mr, cache, camera_, Mat4::identity(), &pose_);
+    particlesDrawn_ = particles_->drawnParticles();
 }
 
 void TrackView::draw(gfx::Renderer& r, gfx::SceneCache& cache, const Song& song, const Player& player, float nowMs, float trackSpeed) {
     if (!track_) return;
-    int vx, vy;
-    r.pictureRect(vx, vy, viewW_, viewH_);
+    particlesDrawn_ = 0;
+    // game.dta game_lost: {track_panel set_showing FALSE} [C].
+    if (player.failed()) return;
+    int vx, vy, vw, vh;
+    r.pictureRect(vx, vy, vw, vh);
+    // The camera's screen rect (two players: each track in its half) [C data;
+    // the projection keeping the rect's own aspect is I].
+    const bool sub = screenRect_ != std::array<float, 4>{0, 0, 1, 1};
+    viewW_ = std::max(1, int(float(vw) * screenRect_[2])), viewH_ = std::max(1, int(float(vh) * screenRect_[3]));
+    if (sub) r.device().setViewport(vx + int(float(vw) * screenRect_[0]), vy + int(float(vh) * screenRect_[1]), viewW_, viewH_);
     frameSet_ = false;
     speed_ = trackSpeed;
     nowY_ = yOf(nowMs);
@@ -533,6 +707,14 @@ void TrackView::draw(gfx::Renderer& r, gfx::SceneCache& cache, const Song& song,
     pose_.setFrame(obj("anim.grp"), nowY_);
     for (const char* n : {"rig.grp", "cameras.grp", "track.cam"})
         if (const scene::Object* o = obj(n)) pose_.resetLocal(o);
+    // The extend sequence (track_panel.dta animate_track_out: the panel's
+    // frame 0 -> TRACK_END_FRAME 1920 in a second; extend_track_normal.tnm
+    // brings the cameras in) [C data]; at rest it holds frame 1920.
+    {
+        float frame = 1920;
+        if (introStartMs_ > -1e8f) frame = std::clamp((nowMs - introStartMs_) / 1000.0f * 1920.0f, 0.0f, 1920.0f);
+        pose_.setFrame(obj("extend_track_normal.tnm"), frame);
+    }
     // blow_streak: the surface flash and the camera shake.
     if (const scene::Mat* m = get<scene::Mat>("track_surface.mat")) pose_.matState(m).hasColor = false;
     if (blowLevel_ >= 2) {
@@ -558,18 +740,36 @@ void TrackView::draw(gfx::Renderer& r, gfx::SceneCache& cache, const Song& song,
     const float beats = float(song.tempo.msToTick(std::max(0.0f, nowMs)) / std::max(1, song.tempo.division()));
     pose_.setFrame(obj(kRails[(star ? 1 : 0) + (warning ? 2 : 0)]), beats);
 
-    const scene::Cam* cam = get<scene::Cam>("track.cam");
-    camera_.world = gfx::toMat4(pose_.world(cam));
-    camera_.yFov = cam->yFov, camera_.nearPlane = cam->nearPlane, camera_.farPlane = cam->farPlane;
+    camera_.world = gfx::toMat4(pose_.world(cam_));
+    camera_.yFov = cam_->yFov, camera_.nearPlane = nearPlane_, camera_.farPlane = farPlane_;
+    camera_.aspect = float(viewW_) / float(viewH_);
+    // Two players watch the explode through track_explode.cam (0x826967B8
+    // makes it for two players only, mirrored for the second player: the
+    // data's track_explode_p2.cam) [C; the _p2 cam standing in for the
+    // mirror is I].
+    if (exploded() && player_ >= 0)
+        if (const scene::Cam* ec = get<scene::Cam>(player_ == 1 ? "track_explode_p2.cam" : "track_explode.cam")) {
+            camera_.world = gfx::toMat4(pose_.world(ec));
+            camera_.yFov = ec->yFov;
+        }
 
-    // draw.grp's order: surfaces, rails and lane lines, bar widgets, tails,
-    // gem widgets, lightning; then the smashers and effects.
-    for (const char* g : {"wood_track_surface_starpower.grp", "wood_track_surface.grp", "track_surface.grp"})
-        drawGroup(mr, cache, get<scene::Group>(g), trackEnv_);
-    drawBeatLines(mr, cache, song, nowMs);
-    drawTails(mr, cache, player, nowMs);
-    drawGems(mr, cache, player, nowMs);
-    drawGroup(mr, cache, get<scene::Group>("lightning.grp"), trackEnv_);
-    drawSmashers(mr, cache, player, nowMs);
-    drawEffects(mr, cache, player, nowMs);
+    if (exploded()) {
+        // 0x82695988: the gems and the track's own drawing are hidden, the
+        // explode view drawn (with the track camera in one player, 0x826957F0).
+        drawExplode(mr, cache, nowMs);
+    } else {
+        // draw.grp's order: surfaces, rails and lane lines, bar widgets, tails,
+        // gem widgets, lightning; then the smashers, effects and particles.
+        for (const char* g : {"wood_track_surface_starpower.grp", "wood_track_surface.grp", "track_surface.grp"})
+            drawGroup(mr, cache, get<scene::Group>(g), trackEnv_);
+        drawBeatLines(mr, cache, song, nowMs);
+        drawTails(mr, cache, player, nowMs);
+        drawGems(mr, cache, player, nowMs);
+        drawGroup(mr, cache, get<scene::Group>("lightning.grp"), trackEnv_);
+        drawSmashers(mr, cache, player, nowMs);
+        drawEffects(mr, cache, player, nowMs);
+        drawParticles(mr, cache, player, nowMs);
+    }
+    if (sub) r.device().setViewport(vx, vy, vw, vh);
+    viewW_ = vw, viewH_ = vh;
 }

@@ -46,6 +46,10 @@ public:
     void setPaused(bool paused);
     // The player's guitar channels heard (true) or muted after a miss (false).
     void setGuitarAudible(bool audible) { guitarTarget_.store(audible ? 1.0f : 0.0f); }
+    // Playback speed (1 normal): the song is resampled, so its pitch follows
+    // (GH2's set_music_speed: the failed song winding down, practice) [I for
+    // the pitch]. The song clock is not corrected for it.
+    void setSpeed(float speed);
 
     // Song time in ms at `ticksNs` (SDL_GetTicksNS clock), or now if 0.
     double songTimeMs(uint64_t ticksNs = 0) const;

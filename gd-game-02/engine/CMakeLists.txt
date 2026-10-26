@@ -56,6 +56,7 @@ target_sources(gd02 PRIVATE
   src/render/highway.cpp
   src/render/hud_view.cpp
   src/render/material.cpp
+  src/render/particles.cpp
   src/render/renderer.cpp
   src/render/scene_gpu.cpp
   src/render/scene_view.cpp

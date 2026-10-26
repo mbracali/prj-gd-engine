@@ -35,6 +35,7 @@ Status: ✅ done · 🟡 partly done / approximated · ❌ not started
 | M4/M5 | New renderer from GH2's own: GL 3.3 / GLES 3 device (Vulkan-ready interface), GH2's shader keys, Mat rules, lighting, fence pacing, `--shadertest` (546 programs) | `docs/renderer.md` |
 | M5 | C++ `.milo_xbox` loader: every typed object of all 503 milos decodes (`--scenetest`); `--view <milo>` | `docs/milo_and_textures.md` |
 | M6 | GH2's original highway from `track_new` (surface, gems, HOPO / star / bonus, built tails, smashers, flames, beat lines, Star Power) and the `hud_sp` HUD (score, multiplier, streak, star meter, rock meter, messages) | `docs/highway_and_hud.md`; `GD02_DEBUG_HIGHWAY=1` for the old one |
+| M6 | Particles (generic, `render/particles`), sparks, tail and star-meter particles, intro sequence, win explode + "You Rock!", fail wind-down, Lefty, two-player tracks and the vs / co-op / practice HUDs (dev flag `GD02_MODE`) | `docs/highway_and_hud.md`; the 360's peak flames draw nothing in the original |
 
 ## In progress
 
@@ -49,8 +50,7 @@ Nothing right now.
 | M2 | Research | Practice audio: confirm the pitch drops when slowed (voice class of the song stream) | ❌ | FINDINGS open question 1 |
 | M2 | Research | Co-op fail (player or band meter), face-off note assignment, `min_length`, co-op star thresholds | ❌ | FINDINGS open questions 2–5, 7 |
 | M2 | Research | Lefty Flip, input sampling rate, controller latency (`watcher +0x2c`) on the 360 | ❌ | L3: where rules depend on sampling |
-| M6 | Highway | Particles (sparks, tail bonus, star meter), intro sparkle, rock meter peak flames, track-fail explode, far-end fade, Lefty mirror, two-player tracks | 🟡 | The rest is done (see Done) |
-| M6 | HUD | hud_vs / hud_coop / hud_practice | ❌ | hud_sp done |
+| M10 | Modes | Practice track surface (rosewood) and practice UI pieces | ❌ | Two-player rules: see below |
 | M7 | UI | Touch lanes for the new renderer; the GAMEPADS screen | ❌ | Input API ready |
 | M7 | UI | gd01's interpreter on GH2's `ui/*.dtb` panels: boot, main menu, Quickplay, difficulty, loading, pause, results | ❌ | L1: log every unhandled message |
 | M7 | UI | Profiles and save; every setter marks `needs_save` | ❌ | L12 |

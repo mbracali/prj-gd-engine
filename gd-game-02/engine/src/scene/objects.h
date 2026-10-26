@@ -240,7 +240,9 @@ public:
 
 // RndParticleSys v30 (Load @ 0x82216ad0). Ranges are (low, high) pairs a
 // particle draws from; names follow GH1's v22 record, whose fields GH2 keeps
-// in the same order. Q: the fields new in v26..v30.
+// in the same order, and the object layout the particle code reads (init
+// 0x82213E58, move 0x82212A48, emit 0x82214620, poll 0x822158A8): times are
+// frames (30 a second), speeds units per frame, angles radians.
 class ParticleSys : public Object {
 public:
     Animatable anim;
@@ -249,21 +251,23 @@ public:
     std::array<float, 2> life{}, speed{}, pitch{}, yaw{}, emitRate{}, startSize{}, deltaSize{};
     std::array<float, 3> posLow{}, posHigh{}, force{};
     std::array<float, 4> startColorLow{}, startColorHigh{}, endColorLow{}, endColorHigh{};
-    std::string bounce;     // v26+: the collision object ("%s_bounce.trans")
+    std::string bounce;     // v26+: the collision plane's Trans ("%s_bounce.trans")
     std::string mat;
-    int type = 0;
+    int type = 0;           // 1: the "fancy" particles (grow / shrink, mid colour, drag, spin)
     float growRatio = 0, shrinkRatio = 0, midColorRatio = 0;
     std::array<float, 4> midColorLow{}, midColorHigh{};
     int maxParticles = 0;
     std::array<float, 2> bubblePeriod{}, bubbleSize{};
     bool bubble = false;
-    bool v30Flag = false;              // Q
-    std::array<float, 2> v30Range{};   // Q
-    uint32_t v30A = 0, v30B = 0;       // Q
-    float relativeMotion = 0;
-    std::string relativeParent;        // Q: v27+ object name
-    std::string mesh;                  // mesh emitter
-    bool v28Flag = true, v29Flag = false;  // Q
+    bool spin = false;                  // v30: particles turn (object +0x27f)
+    std::array<float, 2> spinSpeed{};   // v30: turns a minute (x 2 pi / 1800 per frame), random sign
+    float spinDamping = 0;              // v30: spin x (1 - d) every 30 frames
+    float drag = 0;                     // v30: speed x (1 - d) every 30 frames
+    float relativeMotion = 0;           // 1: particles live in the parent's space; 0: world space
+    std::string relativeParent;         // v27+: that parent (usually the system itself)
+    std::string mesh;                   // mesh emitter
+    bool frameDrive = true;             // v28+: runs on its animation frame (else on the clock x 30)
+    bool preSpawn = false;              // v29+: warms up on the first poll
     struct Preserved {
         std::array<float, 3> pos;
         std::array<float, 4> color;

@@ -65,6 +65,7 @@ void Mixer::play(std::unique_ptr<VorbisStream> stream, std::vector<Track> tracks
     rate_ = stream->sampleRate();
     SDL_AudioSpec spec{SDL_AUDIO_F32, 2, rate_};
     SDL_SetAudioStreamFormat(stream_, &spec, nullptr);
+    SDL_SetAudioStreamFrequencyRatio(stream_, 1.0f);
     tracks.resize(size_t(stream->channels()));
     tracks_ = std::move(tracks);
     ring_.assign(size_t(stream->channels()), std::vector<float>(size_t(kRing), 0.0f));
@@ -81,6 +82,10 @@ void Mixer::play(std::unique_ptr<VorbisStream> stream, std::vector<Track> tracks
     SDL_UnlockAudioStream(stream_);
     startWorker();
     SDL_ResumeAudioStreamDevice(stream_);
+}
+
+void Mixer::setSpeed(float speed) {
+    if (stream_) SDL_SetAudioStreamFrequencyRatio(stream_, std::clamp(speed, 0.01f, 100.0f));
 }
 
 void Mixer::stop() {

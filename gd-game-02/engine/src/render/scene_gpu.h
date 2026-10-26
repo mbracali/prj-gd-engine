@@ -39,7 +39,9 @@ public:
     void clear();
     // Plays `anim` at `frame`: TransAnim (its Trans), MatAnim (its Mat),
     // AnimFilter (the filtered anim at the filtered frame), Group (every
-    // member, as RndGroup::SetFrame does). Other classes are ignored.
+    // member, as RndGroup::SetFrame does), MeshAnim, and ParticleSys /
+    // ParticleSysAnim (their frame is kept, animFrame). Other classes are
+    // ignored.
     void setFrame(const scene::Object* anim, float frame);
     // The last frame of an anim object's keys (0 when it has none).
     static float endFrame(const scene::Object* anim);
@@ -65,6 +67,11 @@ public:
     };
     const MeshAnimState* meshAnim(const scene::Mesh* m) const;
 
+    // The last frame a setFrame gave a ParticleSys (RndAnimatable::SetFrame:
+    // frame-driven systems run on it) or a ParticleSysAnim, or nullptr. The
+    // running systems (render/particles.h) read them.
+    const float* animFrame(const scene::Object* o) const;
+
 private:
     void transAnim(const scene::TransAnim& a, float frame);
     void matAnim(const scene::MatAnim& a, float frame);
@@ -73,6 +80,7 @@ private:
     std::unordered_map<const scene::Mat*, MatState> mats_;
     std::unordered_map<const scene::Object*, bool> showing_;
     std::unordered_map<const scene::Mesh*, MeshAnimState> meshAnims_;
+    std::unordered_map<const scene::Object*, float> animFrames_;
 };
 
 // A mesh's vertices (packVertices' layout) with the positions of a MeshAnim

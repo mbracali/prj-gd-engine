@@ -137,6 +137,7 @@ public:
     // gives lefty_guitar the same watcher [C: 0x8234a278]) and its strum up /
     // down move the menus the other way (held upside down) [I].
     void setLefty(bool p1, bool p2) { lefty_ = {p1, p2}; }
+    bool lefty(int player) const { return player >= 0 && player < 2 && lefty_[size_t(player)]; }
     void setRockBand(bool on);
 
     // -- the Gamepads screen

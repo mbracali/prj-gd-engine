@@ -80,6 +80,7 @@ void ScenePose::clear() {
     mats_.clear();
     showing_.clear();
     meshAnims_.clear();
+    animFrames_.clear();
 }
 
 scene::Xfm ScenePose::local(const scene::Object* o) const {
@@ -148,7 +149,14 @@ void ScenePose::setFrame(const scene::Object* anim, float frame) {
             if (const scene::Object* o = g->dir ? g->dir->resolve(n) : nullptr; o && o != g) setFrame(o, frame);
     } else if (auto* ma = anim->as<scene::MeshAnim>()) {
         if (const scene::Mesh* m = ma->dir ? ma->dir->resolve<scene::Mesh>(ma->mesh) : nullptr) meshAnims_[m] = {ma, frame};
+    } else if (anim->as<scene::ParticleSys>() || anim->as<scene::ParticleSysAnim>()) {
+        animFrames_[anim] = frame;
     }
+}
+
+const float* ScenePose::animFrame(const scene::Object* o) const {
+    auto it = animFrames_.find(o);
+    return it == animFrames_.end() ? nullptr : &it->second;
 }
 
 const ScenePose::MeshAnimState* ScenePose::meshAnim(const scene::Mesh* m) const {

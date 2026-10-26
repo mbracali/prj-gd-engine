@@ -420,15 +420,15 @@ void readParticleSys(In& in, ParticleSys& p) {
     in.fs(p.bubblePeriod);
     in.fs(p.bubbleSize);
     p.bubble = in.b();
-    p.v30Flag = in.b();
-    in.fs(p.v30Range);
-    p.v30A = in.u32();
-    p.v30B = in.u32();
+    p.spin = in.b();
+    in.fs(p.spinSpeed);
+    p.spinDamping = in.f();
+    p.drag = in.f();
     p.relativeMotion = in.f();
     p.relativeParent = in.str();
     p.mesh = in.str();
-    p.v28Flag = in.b();
-    p.v29Flag = in.b();
+    p.frameDrive = in.b();
+    p.preSpawn = in.b();
     if (in.b()) {  // preserved particles (@ 0x82212708): pos, colour, size
         uint32_t n = in.u32();
         if (n > in.remaining() / 32) bad("implausible particle count");

@@ -77,6 +77,8 @@ public:
     int streak() const { return streak_; }
     int longestStreak() const { return longestStreak_; }
     int multiplier() const { return baseMultiplier_ * spMultiplier(); }
+    // The streak multiplier without Star Power's doubling (1..4).
+    int baseMultiplier() const { return baseMultiplier_; }
     int notesHit() const { return notesHit_; }
     int passes() const { return passes_; }
     int penalties() const { return penalties_; }
@@ -93,6 +95,9 @@ public:
     float whammyBar() const { return whammyKey_ ? 1.0f : whammyValue_; }
     bool phraseIntact(int phrase) const;
     bool failed() const { return failed_; }
+    // Development aid (GD02_FAIL_AT): fails the song now, as an empty rock
+    // meter does (the Failed event; no-fail does not stop it).
+    void forceFail();
     // The base score (0x826a0ab0) and the stars it gives (0x822d6410) [C].
     int baseScore() const { return baseScore_; }
     int stars() const;

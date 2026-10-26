@@ -541,6 +541,12 @@ void Player::crowdUpdate(float target, float t) {
     }
 }
 
+void Player::forceFail() {
+    if (failed_) return;
+    failed_ = true;
+    emit(PlayerEvent::Kind::Failed, -1);
+}
+
 // ============================================================= star power
 
 // Meter clamped to 0..1 (0x822db788) [C]; star_power_ready once it reaches
