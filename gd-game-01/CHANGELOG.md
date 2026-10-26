@@ -16,6 +16,9 @@ matches the tag's version.
   fret buttons and hit effects too), a gamepad's frets take the original's
   lefty order (Cross, R2, R1, L1, L2), and a guitar's strum moves the menus
   the other way. Touch lanes follow the mirrored highway. (#15)
+- Game Settings (Lefty Flip, the band / guitar / sound effects volumes,
+  stereo) were not saved: they were lost when the game restarted. Leaving the
+  screen now saves them, as in the original.
 - PS2 guitars on USB adapters that say they are a PlayStation 3 pad played
   like a gamepad (each fret strummed, the strum bar did nothing). GAMEPADS has
   a **Type** for each controller: Auto, Gamepad, PS2 guitar (adapter), Xbox

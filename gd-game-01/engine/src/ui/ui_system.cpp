@@ -1468,9 +1468,14 @@ bool UiSystem::ScreenObj::handleNative(Interp& in, const std::string& msg, std::
     }
     if (msg == "is_up") return result = Value::integer(ui_.current_ == this ? 1 : 0), true;
     if (msg == "anim_task") return ui_.animTask(a), true;
-    // UIScreen_v1 (0x208240): what the screen doesn't handle goes to its focus panel.
+    // UIScreen_v1 (0x208240): what the screen doesn't handle goes to its focus
+    // panel, its script handlers too (game_settings' Back sends the screen
+    // set_volumes, a handler of the panel of the same name).
     if (ui_.current_ == this)
-        if (PanelObj* fp = ui_.focusPanel()) return fp->handleNative(in, msg, a, result);
+        if (PanelObj* fp = ui_.focusPanel()) {
+            if (fp->handler(msg)) return result = in.send(fp, msg, a), true;
+            return fp->handleNative(in, msg, a, result);
+        }
     return false;
 }
 
