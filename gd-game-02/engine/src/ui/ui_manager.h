@@ -125,7 +125,7 @@ public:
     // game; kTaskUISeconds: the menus'; kTaskBeats: the song's beats).
     double clockSeconds(int units) const;
     // A sound effect (logged as a STUB until GH2's banks are decoded).
-    void playSfx(const std::string& name);
+    void playSfx(const std::string& name, float volumeDb = 0, float pan = 0, float transpose = 0);
     void logOnce(const std::string& what);
     ScreenText& screenText();
     double nowMs() const { return uiMs_; }

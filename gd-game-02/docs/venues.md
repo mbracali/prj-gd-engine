@@ -93,9 +93,11 @@ undecoded.
   keyframe and the INTRO preset's first keyframe (the shot's parent and
   path at frame 0 multiplied in, turned to its targets). In a song the
   camera director ("Camera director") plays the shots and the preset
-  manager ("Lighting presets") the presets. Band slots stand at their start
-  waypoints (guitarist0 flag 1, guitarist1 2, singer 4, keyboard 8, bassist
-  16, drummer 32, face-off guitarist0 512; macros.dta [C data]) until M9.
+  manager ("Lighting presets") the presets. The band slots draw their
+  members where the slots sit in the draw list (`docs/band.md`); without a
+  band (`--view <venue>`) a slot stands at its start waypoint (guitarist0
+  flag 1, guitarist1 2, singer 4, keyboard 8, bassist 16, drummer 32,
+  face-off guitarist0 512; macros.dta [C data]).
 - Spotlights, their beams, floor spots, cans, lenses and flares, and the
   RndFlares, after the draw list ("Spotlights and flares").
 - Order of a frame: the venue (into the post-process's HDR buffer), the
@@ -119,9 +121,8 @@ The crowd: "Crowd" below. Venues are therefore darker than GH2's (theatre most).
   (on at first); with wait_for_events it waits for one of them; firing plays
   the anims (with their own filter when it is enabled), shows objects, hides
   others after their delays, calls proxies (the message goes to the proxy
-  directory's script type, e.g. bottle_throw start, and its triggers), logs
-  sounds (`world_sfx` STUBs: the banks are not decoded) and fires
-  next_random.
+  directory's script type, e.g. bottle_throw start, and its triggers), plays
+  its sounds (the venue bank's Sfx, audio/synth.h) and fires next_random.
 - The `world` script object: the venue's WorldDir type (world_objects.dta:
   WORLD_OBJECT_BASE + world/<v>/<v>.dta), with the menus on the UI's
   interpreter (the type from the boot tree's `(objects ...)`), else on its
@@ -135,8 +136,10 @@ The crowd: "Crowd" below. Venues are therefore darker than GH2's (theatre most).
   header type (CamShot `band`: camshot.dta) [C data]. Venue
   objects are script objects by name (`sparks.filt animate`, `[env1]
   animate (dest 10) (period 0.01)`, `band_shadow1.mesh set_showing`), the
-  band slots answer 0 as STUBs until M9; `{waypoint_find flags}` finds a
-  waypoint by its kStart* bits.
+  band slots are the band's characters (`docs/band.md`; without a band
+  they answer 0 as STUBs); `{waypoint_find flags}` finds a waypoint by its
+  kStart* bits; `{dir exists x}` is false for a band slot left empty and
+  `remove_sink` drops a sink.
 - Events from the song (game/world_driver.h): beat / downbeat; EVENTS
   [verse] / [chorus] / [solo] and one_bar_to four beats early,
   [lighting (x)] -> lighting_change four beats early too (the EVENTS
@@ -186,9 +189,10 @@ The natives [C addresses]:
   INTRO, INTRO_ENCORE, INTRO_FAST always; `special` refuses; else
   cam_check_shot (0x822B2240): guitarist0 in its Star Power clip (flag
   0x80000) needs starpower_ok, its far one (0x4000) far_starpower_ok, and
-  the waypoint nearest it (within 192) must not be in bad_waypoints. Until
-  the band (M9): player 0's Star Power, never far, and guitarist0 on its
-  start waypoint [I] (so shots listing start_guitarist0.way never run).
+  the waypoint nearest it among those flagged kWalkSpot | kSoloWalkSpot
+  (Waypoint::Nearest 0x82195548, mask 0xc0, squared distance, no radius;
+  looked up once per beat) must not be in bad_waypoints. The band answers
+  (`docs/band.md`); without one, player 0's Star Power stands in.
 - force_shot (0x82266A10), current_shot, find_shot (0x82268418),
   cycle_shot (0x82266958, by name), set_pick_shot / toggle_pick_shot,
   play_camera_sequence (0x82265D58), toggle_free_cam (no free camera:
@@ -402,31 +406,21 @@ addresses; behaviour I unless noted]:
 - turn_off (ui lose.dta) [C data]; here also at game_lost [I]. set_paused
   follows the game's pause.
 - Reaction sounds (0x822DF350, when the mode's crowd_reactions) [C]: at the
-  intro (+0x64), at game_won_msg (+0x68) and per level change (index (level
-  + 14) x 2 + (previous <= level): crowd_upto_* / crowd_dnto_*) [I: the
-  names, from the banks]. They are bank Sfx: reported as `world_sfx` STUBs.
+  intro (+0x64 crowd_begin), at game_won_msg (+0x68 crowd_win), at
+  game_lost (+0x6c crowd_lose) and per level change (+0x70: index (level
+  + 14) x 2 + (previous <= level), `crowd_<dnto|upto>_<danger poor norm
+  good peak>`, 0x822DFAB0) [C]; a new one stops the last. They are the
+  bank's Sfx and play (docs/audio_and_charts.md "Sound effects").
 
-### The sound banks (not decoded)
+### The sound banks
 
-`world/<v>/gen/<v>_bank.milo_xbox` (and sfx/gen/*_bank): Sfx v5 (a list of
-SynthSample names with volume / pan / ...), SfxSeq v3, RandomGroupSeq v1,
-SerialGroupSeq v1, WaitSeq v2, SynthSample v5. SynthSample v5 [C data, all
-329 on the disc]: u32 5, the object header, str file (`../samples/x.wav`),
-u8 looping, i32 loop_start, i32 loop_end (-1), then SampleData: u32 11,
-u32 format = 3 (every sample: kXMA in Harmonix's SampleData formats [I]),
-u32 sample count, u32 rate (44100 / 22050 / 16000), u32 byte size, the
-data (whole 2048-byte packets), one trailing byte. The xex plays them
-through SynthSample360 / XMA_PLAYBACK_INIT [C: RTTI and strings]. FFmpeg's
-xma1 / xma2 decoders (wrapped in a RIFF XMA / XMA2 header, mono or stereo)
-reject the data ("broken frame"): every fourth packet starts with a
-plausible header (`00 3c 00 01`: no frame count, skip 1) and the others do
-not, so the packets are not in plain XMA stream order. To play the venue
-cues (claps, crowd reactions, crowd_win / crowd_lose, encore_yes / no,
-blew_bignote): find the packet layout in the SynthSample360 / XMA buffer
-code (XMABuffer 0x82687380 is the streamed `.hxma` reader; the in-memory
-sample path is next to it), then decode XMA (FFmpeg's wmaprodec-based
-xma1 / xma2, LGPL, or a port of it). Until then `play_sfx` / Sfx `play` /
-the triggers' sounds are `world_sfx` STUBs.
+`world/<v>/gen/<v>_bank.milo_xbox`: Sfx, SfxSeq, RandomGroupSeq,
+SerialGroupSeq, WaitSeq, FxSendReverb and the SynthSamples (XMA2). Their
+layouts, how they play and gd02's Synth are in docs/audio_and_charts.md,
+section 4 "Sound effects". The venue cues play: claps, crowd reactions,
+crowd_win / crowd_lose, encore_yes / no, blew_bignote, vroom; the UI's
+play_sfx / play_meta_sfx of a venue cue (crowd_win, encore_yes) finds it in
+the loaded venue.
 
 ## Two players, encores and the venues' extras
 
@@ -518,5 +512,6 @@ the triggers' sounds are `world_sfx` STUBs.
 - Crowd: the 2D cards (render-to-texture imposters) and the crowd clips
   (M9: main.drv's groups, beat_scale, the lighter hands); the CamShot
   crowd3d second value is a card index [I: 0x82247FD0 walks the card list].
-- Sound banks: the XMA packet layout ("The sound banks"); crowd_audio
-  play_stream (stone's wingame.mogg after the campaign) is a STUB.
+- Sound banks: no reverb sends or ADSR (docs/audio_and_charts.md section
+  4); crowd_audio play_stream (stone's wingame.mogg after the campaign) is a
+  STUB.

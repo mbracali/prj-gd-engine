@@ -29,9 +29,23 @@ endif()
 target_sources(gd02 PRIVATE
   src/main.cpp
   src/app.cpp
+  src/audio/audio_device.cpp
   src/audio/crowd_audio.cpp
   src/audio/mixer.cpp
+  src/audio/sfx_dsp.cpp
+  src/audio/sfx_player.cpp
+  src/audio/synth.cpp
   src/audio/vorbis_stream.cpp
+  src/audio/xaudio_reverb.cpp
+  src/audio/xma_decoder.cpp
+  src/char/char_objects.cpp
+  src/char/facefx.cpp
+  src/char/midi_parser.cpp
+  src/char/char_driver.cpp
+  src/char/clip.cpp
+  src/char/skeleton.cpp
+  src/char/rig.cpp
+  src/char/character.cpp
   src/data/crypt.cpp
   src/data/dta.cpp
   src/data/game_data.cpp
@@ -43,6 +57,7 @@ target_sources(gd02 PRIVATE
   src/devaids/menu_keys.cpp
   src/devaids/screenshot.cpp
   src/game/camera_director.cpp
+  src/game/band.cpp
   src/game/chart.cpp
   src/game/crowd.cpp
   src/game/player.cpp
@@ -58,7 +73,9 @@ target_sources(gd02 PRIVATE
   src/platform/app_icon.cpp
   src/platform/disc_picker.cpp
   src/platform/paths.cpp
+  src/render/band_view.cpp
   src/render/canvas.cpp
+  src/render/char_view.cpp
   src/render/crowd_view.cpp
   src/render/gl_api.cpp
   src/render/gl_device.cpp
@@ -84,6 +101,7 @@ target_sources(gd02 PRIVATE
   src/scene/milo.cpp
   src/scene/objects.cpp
   src/scene/scenetest.cpp
+  src/scene/synth_objects.cpp
   src/script/script.cpp
   src/script/script_builtins.cpp
   src/script/tasks.cpp
@@ -101,11 +119,16 @@ target_sources(gd02 PRIVATE
   src/ui/script_classes.cpp
   src/ui/ui_manager.cpp
   src/tests/selftest.cpp
+  src/tests/sfxtest.cpp
+  src/tests/facefxtest.cpp
   src/tests/uitest.cpp
   src/tests/walktest.cpp
   src/tests/venuetest.cpp
   src/tests/director_golden.cpp
   src/tests/venuetest_crowd.cpp
+  src/tests/chartest.cpp
+  src/tests/chartest_band.cpp
+  src/tests/miditest.cpp
   src/video/wmv_player.cpp
 )
 target_include_directories(gd02 PRIVATE src)
@@ -133,19 +156,21 @@ target_link_libraries(gd02 PRIVATE Threads::Threads)
 
 target_compile_definitions(gd02 PRIVATE GD02_VERSION="${PROJECT_VERSION}")
 
-# GH2's videos (src/video/wmv_player.cpp): FFmpeg's libavformat, libavcodec
+# GH2's videos (src/video/wmv_player.cpp) and sound effects (XMA,
+# src/audio/xma_decoder.cpp): FFmpeg's libavformat, libavcodec
 # and libavutil as shared libraries, the minimal LGPL build of
 # build_common.sh's build_ffmpeg, installed in GD02_FFMPEG_DIR (on Android one
 # build per ABI: <dir>/<ABI>/ffmpeg-prefix), or else the system's (pkg-config). The build
 # copies the libraries next to the program (Linux: found through RPATH
 # $ORIGIN; Windows: the DLLs beside the .exe); build_macos.sh's dylibbundler
 # puts them in the .app, and the Android Gradle plugin into the APK. Without
-# FFmpeg (GD02_VIDEO OFF) the videos are skipped with a log line.
+# FFmpeg (GD02_VIDEO OFF) the videos are skipped with a log line and the
+# sound effects are silent.
 set(GD02_FFMPEG_DIR "" CACHE PATH "FFmpeg install prefix (include/, lib/) for the video player")
 if(GD02_FFMPEG_DIR)
-  option(GD02_VIDEO "Play GH2's videos with FFmpeg" ON)
+  option(GD02_VIDEO "Play GH2's videos and sound effects with FFmpeg" ON)
 else()
-  option(GD02_VIDEO "Play GH2's videos with FFmpeg" OFF)
+  option(GD02_VIDEO "Play GH2's videos and sound effects with FFmpeg" OFF)
 endif()
 if(GD02_VIDEO)
   set(ffmpeg_dir "${GD02_FFMPEG_DIR}")

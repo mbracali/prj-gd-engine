@@ -10,9 +10,14 @@
 #include <set>
 #include <stdexcept>
 
+#include "char/char_objects.h"
 #include "data/game_data.h"
+#include "audio/synth.h"
+#include "game/band.h"
 #include "game/crowd.h"
+#include "scene/synth_objects.h"
 #include "script/tasks.h"
+#include "ui/sfx_args.h"
 
 namespace {
 
@@ -130,16 +135,24 @@ public:
         }
         if (msg == "show_objects") return w_.showObjects(in, args), true;
         if (msg == "find") {
+            if (w_.band)
+                if (Band::Member* m = w_.band->memberOf(o_); m && m->script)
+                    return r = in.send(m->script.get(), "find", args, false), true;
             scene::Object* f = args.empty() ? nullptr : w_.venue_.find(text(in, args[0]));
             return r = Value::obj(f ? w_.objectFor(f) : nullptr), true;
         }
-        if ((o_->cls == "Sfx" || o_->cls == "SfxSeq" || o_->cls == "RandomGroupSeq" || o_->cls == "SerialGroupSeq" ||
-             o_->cls == "WaitSeq") &&
-            (msg == "play" || msg == "stop")) {
-            // The sound banks are not decoded yet: log the cue.
-            ++w_.stats_.sounds;
+        if ((o_->as<scene::Sfx>() || o_->as<scene::SequenceObj>()) && (msg == "play" || msg == "stop")) {
             if (w_.log) SDL_Log("world: sound %s %s", o_->name.c_str(), msg.c_str());
-            in.onStub("world_sfx", o_->name + " " + msg, r);
+            if (msg == "stop") {
+                if (w_.synth_) w_.synth_->stop(*o_);
+                else in.onStub("world_sfx", o_->name + " " + msg, r);
+                return true;
+            }
+            ++w_.stats_.sounds;
+            // (volume {options get_fx_volume}) and the like (ui/sfx_args.h).
+            const SfxArgs a = sfxArgs(in, args, 0);
+            if (w_.synth_) w_.synth_->play(*o_, a.volume, a.pan, a.transpose);
+            else in.onStub("world_sfx", o_->name + " " + msg, r);
             return true;
         }
         // The band's characters (M9): their methods answer 0 for now.
@@ -227,6 +240,11 @@ World::World(Venue& venue, Interp* interp, const DataNode* objects) : venue_(ven
 }
 
 World::~World() {
+    if (synth_)
+        for (const auto& p : venue_.parts()) synth_->forget(p.milo->root());
+    if (synth_)
+        for (const auto& p : venue_.proxies())
+            if (p.milo) synth_->forget(p.milo->root());
     crowd_.reset();
     tasks_.clear();
     if (!interp_) return;
@@ -287,6 +305,9 @@ void World::attach() {
             if ((int(w->flags) & flags) == flags && flags) return Value::obj(objectFor(w));
         return Value::integer(0);
     });
+    // {waypoint_last w}: CHAR_COMMON start_at after a teleport (0x821973C0
+    // [I: it records the waypoint a character last stood on; nothing reads it]).
+    interp_->addBuiltin("waypoint_last", [](Interp&, const DataNode&) { return Value::integer(0); });
 }
 
 ScriptObject* World::script() { return world_.get(); }
@@ -585,6 +606,23 @@ void World::fire(const std::string& event) {
 void World::setTriggerEnabled(const scene::EventTrigger* t, bool on) { triggers_[t].enabled = on; }
 
 // EventTrigger::Trigger (0x82257d00) [I: order of the parts].
+bool World::playSound(const std::string& name, const scene::Directory* from, float volumeDb, float pan, float transpose) {
+    const scene::Object* o = from ? from->resolve(name) : nullptr;
+    if (!o) o = venue_.find(name);
+    if (!o || (!o->as<scene::Sfx>() && !o->as<scene::SequenceObj>())) {
+        interp_->onStub("world_sfx", name + " play (not in the bank)", Value::integer(0));
+        return false;
+    }
+    ++stats_.sounds;
+    if (synth_) synth_->play(*o, volumeDb, pan, transpose);
+    else interp_->onStub("world_sfx", name + " play", Value::integer(0));
+    return true;
+}
+
+void World::stopSound(const std::string& name) {
+    if (const scene::Object* o = venue_.find(name); o && synth_) synth_->stop(*o);
+}
+
 void World::trigger(const scene::EventTrigger* t) {
     if (!t || !t->dir) return;
     if (auto it = triggers_.find(t); it != triggers_.end() && !it->second.enabled) return;
@@ -606,9 +644,8 @@ void World::trigger(const scene::EventTrigger* t) {
         animate(o, args);
     }
     for (const auto& s : t->sounds) {
-        ++stats_.sounds;
         if (log) SDL_Log("world: %s: sound %s", t->name.c_str(), s.c_str());
-        interp_->onStub("world_sfx", s + " play", Value::integer(0));
+        playSound(s, &d);
     }
     for (const auto& s : t->shows)
         if (const scene::Object* o = d.resolve(s) ? d.resolve(s) : venue_.find(s)) {
@@ -650,6 +687,9 @@ Value World::message(const std::string& msg, std::vector<Value> args) { return i
 void World::start(bool multiplayer, bool players) {
     interp_->send(world_.get(), "enter", {}, false);
     crowd_->enter();
+    // The band's characters enter with the directory (Character / GuitarCharacter Enter).
+    started_ = true;
+    if (band) band->enter();
     message("start");
     if (players) message(multiplayer ? "multi_player" : "single_player");
 }
@@ -709,6 +749,20 @@ Value World::native(const std::string& msg, std::vector<Value>& args, bool& hand
         if (o.type == Value::Type::Object && o.object) addSink(o.object, msgs);
         return Value::integer(0);
     }
+    if (msg == "remove_sink" && !args.empty()) {
+        const Value o = interp_->evalValue(args[0]);
+        if (o.type == Value::Type::Object && o.object) removeSink(o.object);
+        return Value::integer(0);
+    }
+    // {dir exists name}: a venue object, less the band slots left empty
+    // (game/band.h) [C 0x822B7670: empty slots are deleted].
+    if (msg == "exists" && !args.empty()) {
+        const std::string n = text(*interp_, args[0]);
+        scene::Object* o = venue_.find(n);
+        bool there = o != nullptr;
+        if (band && o && o->as<scene::CharacterObj>()) there = band->member(n) != nullptr;
+        return Value::integer(there ? 1 : 0);
+    }
     if (msg == "add_sink" || msg == "remove_sink" || msg == "add_sinks" || msg == "set_name") return Value::integer(0);
     for (const NativeHandler& h : natives_) {
         Value r = Value::integer(0);
@@ -720,6 +774,10 @@ Value World::native(const std::string& msg, std::vector<Value>& args, bool& hand
     }
     handled = false;
     return Value::unhandled();
+}
+
+void World::removeSink(ScriptObject* sink) {
+    for (auto it = sinks_.begin(); it != sinks_.end();) it = it->second == sink ? sinks_.erase(it) : std::next(it);
 }
 
 void World::addSink(ScriptObject* sink, const std::vector<std::string>& messages) {

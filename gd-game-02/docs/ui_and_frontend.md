@@ -137,8 +137,9 @@ next to it to start.
 
 ## Not done
 
-- Sound effects: GH2's banks are XMA SynthSamples (not decoded); `synth sfx`
-  is a stub.
+- Sound effects play (docs/audio_and_charts.md section 4) without the
+  reverb sends, the ADSR envelopes or the mute cheat (`synth
+  set_master_vol`).
 - The endgame stats receipt draws dark (`turn_off_ambient` /
   `reset_ambient` are no-ops).
 - Volume sliders apply from the next song or preview.

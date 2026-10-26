@@ -14,6 +14,7 @@
 
 class World;
 class CrowdView;
+class BandView;
 namespace gfx {
 class Renderer;
 }
@@ -57,6 +58,7 @@ public:
     int particlesDrawn() const { return particles_; }
     size_t roots() const { return roots_.size(); }
     const CrowdView& crowdView() const { return *crowdView_; }
+    BandView& bandView() { return *bandView_; }
 
 private:
     struct Root {
@@ -82,6 +84,7 @@ private:
     std::unique_ptr<gfx::DynamicMesh> dynamic_;
     std::unique_ptr<gfx::SpotlightView> spotlights_;
     std::unique_ptr<CrowdView> crowdView_;
+    std::unique_ptr<BandView> bandView_;
     const scene::Environ* currentEnv_ = nullptr;
     bool envSet_ = false;
     bool hdr_ = false;

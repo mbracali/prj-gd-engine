@@ -10,7 +10,9 @@
 #include <vector>
 
 #include "data/game_data.h"
+#include "data/midi.h"
 #include "game/autoplay.h"
+#include "game/band.h"
 #include "game/camera_director.h"
 #include "game/light_presets.h"
 #include "game/player.h"
@@ -29,8 +31,10 @@ constexpr const char* kVenue = "arena";
 // The expected log: its line count and FNV-1a hash. A change in the
 // director, the presets, the world's scripts or the chart's events moves
 // them; check the log (GD02_GOLDEN_LOG=<file>) and update both.
-constexpr int kGoldenLines = 328;
-constexpr uint32_t kGoldenHash = 0x1a4f4ffdu;
+// M9: the band on stage, cam_check_shot mask 0xc0 (kWalkSpot|kSoloWalkSpot)
+// and guitarist0's character root (not a 192-unit radius over every waypoint).
+constexpr int kGoldenLines = 333;
+constexpr uint32_t kGoldenHash = 0xa7668b37u;
 
 uint32_t fnv(const std::string& s, uint32_t h) {
     for (unsigned char c : s) h = (h ^ c) * 16777619u;
@@ -59,6 +63,9 @@ int runDirectorGolden(const GameData& data) {
     LightPresets lights(world, 0x4c504d31u);
     CameraDirector director(world, 0x43414d31u);
     director.provideGameObjects(false, "single");
+    // The band on stage (M9): the director's targets, Star Power and walk
+    // spots come from it.
+    Band band(world, data, *info, Band::Config{});
     std::vector<std::string> log;
     auto line = [&](const std::string& what) {
         char b[32];
@@ -68,12 +75,15 @@ int runDirectorGolden(const GameData& data) {
     lights.onSwitch = line;
     director.onShot = line;
     Player p(song, Part::Guitar, Difficulty::Expert, rules, ControllerMode::Guitar, false);
+    band.rating = [&](int) { return p.rockMeter(); };
+    band.loadSong(parseMidi(data.read(info->audio.midiPath)), &song);
     Autoplay bot(p.chart());
     WorldDriver driver(true);
     const float lead = -3000;
     driver.reset(lead);
     world.setClock(lead / 1000.0, lead / 500.0);
     world.start(false);
+    band.enter();
     for (float t = lead; t < song.endMs + 6000; t += 1000.0f / 60.0f) {
         bot.feed(p, t);
         p.update(t);
@@ -82,6 +92,7 @@ int runDirectorGolden(const GameData& data) {
         if (t >= song.endMs) driver.gameWon(world);
         world.update();
         lights.update();
+        band.update(world.seconds(), world.beats());
         director.setStarPower(p.starPowerActive());
         director.update();
     }

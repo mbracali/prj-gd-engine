@@ -11,9 +11,11 @@
 #include <cstdlib>
 #include <set>
 
+#include "audio/audio_device.h"
 #include "game/song_db.h"
 #include "script/tasks.h"
 #include "ui/natives.h"
+#include "ui/sfx_args.h"
 #include "ui/ui_host.h"
 #include "ui/ui_objects.h"
 
@@ -405,14 +407,31 @@ private:
     UiManager& ui_;
 };
 
-// Sounds (synth, play_sfx): GH2's banks are not decoded yet (STUB, once).
+// Sounds (synth, play_sfx): GH2's Synth through the host (audio/synth.h).
 class SynthObj : public ScriptObject {
 public:
     explicit SynthObj(UiManager& ui) : ScriptObject("synth", "Synth"), ui_(ui) {}
-    bool handleNative(Interp&, const std::string& msg, std::vector<Value>& args, Value& r) override {
+    // Synth::Handle 0x822EAB08 and Synth360's 0x82682338 [C].
+    bool handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) override {
         r = Value::integer(0);
-        if (msg == "play_sequence" || msg == "play") return ui_.playSfx(args.empty() ? std::string() : args[0].str()), true;
-        if (msg == "stop_all_sfx" || msg == "pause_all_sfx" || msg == "set_master_vol" || msg == "toggle_hud" || msg == "toggle_limiter") return true;
+        if (msg == "play_sequence" || msg == "play") {
+            const SfxArgs a = sfxArgs(in, args, 1);
+            return ui_.playSfx(args.empty() ? std::string() : args[0].str(), a.volume, a.pan, a.transpose), true;
+        }
+        if (msg == "stop_all_sfx") return ui_.host().stopAllSfx(), true;
+        if (msg == "pause_all_sfx") return ui_.host().pauseAllSfx(args.empty() || args[0].truthy()), true;
+        // The master Fader (0x822F7878): the mute cheat's kDbSilence / 0.
+        if (msg == "set_master_vol") {
+            const Value v = args.empty() ? Value::integer(0) : in.evalValue(args[0]);
+            return ui_.host().setSfxMasterDb(v.isNumber() ? v.number() : -96.0f), true;
+        }
+        if (msg == "master_vol") return r = Value::real(ui_.host().sfxMasterDb()), true;
+        // The master limiter on the mastering voice (0x826822C8).
+        if (msg == "toggle_limiter") return audiodev::toggleLimiter(), true;
+        // set_fx / set_fx_vol: the PS2's SPU2 effect cores; Synth360's slots
+        // for them are empty (vtable 0x820D4CF4) [C]. toggle_hud: Synth360's
+        // debug overlay.
+        if (msg == "set_fx" || msg == "set_fx_vol" || msg == "toggle_hud") return true;
         return false;
     }
 
@@ -440,9 +459,12 @@ private:
 class QuietObj : public ScriptObject {
 public:
     QuietObj(UiManager& ui, const std::string& name, std::set<std::string> msgs) : ScriptObject(name, "Native"), ui_(ui), msgs_(std::move(msgs)) {}
-    bool handleNative(Interp&, const std::string& msg, std::vector<Value>& args, Value& r) override {
+    bool handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) override {
         r = Value::integer(0);
-        if (msg == "play_sfx" || msg == "play_meta_sfx") return ui_.playSfx(args.empty() ? "" : args[0].str()), true;
+        if (msg == "play_sfx" || msg == "play_meta_sfx") {
+            const SfxArgs a = sfxArgs(in, args, 1);
+            return ui_.playSfx(args.empty() ? "" : args[0].str(), a.volume, a.pan, a.transpose), true;
+        }
         if (msg == "show" && name() == "cheat_display") return SDL_Log("cheat: %s", args.empty() ? "" : args[0].str().c_str()), true;
         return msgs_.count(msg) != 0;
     }
@@ -487,10 +509,14 @@ void installNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Scrip
 
     // Builtins the host gives.
     in.addBuiltin("play_sfx", [&ui](Interp& i, const DataNode& c) {
-        ui.playSfx(i.evalArg(c, 1).str());
+        const SfxArgs a = sfxArgs(i, i.evalArgs(c, 2), 0);
+        ui.playSfx(i.evalArg(c, 1).str(), a.volume, a.pan, a.transpose);
         return Value::integer(0);
     });
-    in.addBuiltin("stop_sfx", [](Interp&, const DataNode&) { return Value::integer(0); });
+    in.addBuiltin("stop_sfx", [&ui](Interp& i, const DataNode& c) {
+        ui.host().stopSfx(i.evalArg(c, 1).str());
+        return Value::integer(0);
+    });
     in.addBuiltin("song_preview", [&ui](Interp& i, const DataNode& c) {
         const std::string s = c.children.size() > 1 ? i.evalArg(c, 1).str() : std::string();
         if (s != ui.session().lastPreview) {

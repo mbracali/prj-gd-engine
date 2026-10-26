@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include "audio/synth.h"
 #include "data/game_data.h"
 #include "game/world.h"
 #include "script/tasks.h"
@@ -325,28 +326,48 @@ void Crowd::iterateFrac(Interp& in, State& s, std::vector<Value>& args) {
     ++revision_;
 }
 
+// A reaction sound (0x822DF350) [C]: the one playing stops, the new one
+// plays; the names the venue's bank lacks (crowd_upto_peak...) are silent
+// (a null ObjPtr in GH2).
+void Crowd::reactionSound(const std::string& name) {
+    if (name.empty()) return;
+    const scene::Object* o = world_.venue().find(name);
+    if (!o) return;
+    if (!reaction_.empty()) world_.stopSound(reaction_);
+    // At the options' sound effects volume, 0 dB in the attract mode
+    // (0x822DF140, 0x822B0F08) [C].
+    world_.playSound(name, nullptr, attract_ || !world_.synth() ? 0.0f : world_.synth()->fxVolumeDb());
+    reaction_ = name;
+}
+
 // World messages the crowd audio follows (GH2's CrowdAudio is a game sink).
 void Crowd::listen(Interp& in, const std::string& msg, const std::vector<Value>& args) {
     auto arg = [&](size_t k) { return k < args.size() ? in.evalValue(args[k]) : Value::integer(0); };
     const double now = world_.seconds();
+    if (ScriptObject* cfg = in.findObject("gamecfg")) {
+        std::vector<Value> key{Value::symbol("mode")};
+        Value mode;
+        attract_ = cfg->handleNative(in, "get", key, mode) && mode.isText() && mode.s == "attract";
+    }
     if (msg == "intro_start_msg") {
         const bool fast = arg(0).truthy(), encore = arg(1).truthy();
         audio_->introStart(fast, encore);
-        if (!encore) in.onStub("world_sfx", "crowd_begin play", Value::integer(0));
+        if (!encore) reactionSound("crowd_begin");
         if (!in.findObject("game"))
             for (State& s : crowds_) setFullness(s, encore ? 1.0f : 0.5f, encore ? 1.0f : 0.5f);
     } else if (msg == "music_start") {
         audio_->musicStart(excitement_, now);
     } else if (msg == "excitement") {
         const int level = arg(0).integerValue();
-        if (level != excitement_) in.onStub("world_sfx", CrowdAudio::reaction(excitement_, level) + " play", Value::integer(0));
+        if (level != excitement_) reactionSound(CrowdAudio::reaction(excitement_, level));
         excitement_ = level;
         audio_->excitement(level, now);
         if (!in.findObject("game"))
             for (State& s : crowds_) setFullness(s, fullnessFor(level), fullnessFor(level));
     } else if (msg == "game_won_msg") {
-        in.onStub("world_sfx", "crowd_win play", Value::integer(0));
+        reactionSound("crowd_win");
     } else if (msg == "game_lost") {
+        reactionSound("crowd_lose");
         audio_->turnOff();
     } else if (msg == "encore_outro") {
         audio_->encoreOutro();

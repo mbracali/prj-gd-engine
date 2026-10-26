@@ -311,10 +311,10 @@ Value UiManager::foreachPlayer(const std::vector<Value>& args) {
     return last;
 }
 
-void UiManager::playSfx(const std::string& name) {
-    // GH2's sound banks (sfx/gen/*_bank.milo_xbox: SynthSample records,
-    // XMA data) are not decoded yet: the sounds are reported once.
-    interp_.onStub("synth", "sfx " + name, Value::integer(0));
+void UiManager::playSfx(const std::string& name, float volumeDb, float pan, float transpose) {
+    // GH2's Synth (audio/synth.h, through the host): a name no bank has is
+    // reported once.
+    if (!host_.playSfxArgs(name, volumeDb, pan, transpose)) interp_.onStub("synth", "sfx " + name, Value::integer(0));
 }
 
 // ---------------------------------------------------------------- screens

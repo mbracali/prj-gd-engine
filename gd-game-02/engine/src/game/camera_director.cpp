@@ -8,6 +8,7 @@
 #include <cmath>
 #include <set>
 
+#include "game/band.h"
 #include "game/world.h"
 #include "render/scene_gpu.h"
 #include "render/venue_view.h"
@@ -319,7 +320,13 @@ bool CameraDirector::native(Interp& in, const std::string& msg, std::vector<Valu
         return true;
     }
     if (msg == "reset_postproc") return postProc_ = nullptr, true;
-    if (msg == "set_min_lod") return true;  // the band's LOD (M9)
+    if (msg == "set_min_lod") {
+        // The band's characters (Character set_min_lod, 0x82152108).
+        if (world_.band)
+            for (const auto& m : world_.band->members())
+                if (m->character) m->character->minLod = args.empty() ? 0 : in.evalValue(args[0]).integerValue();
+        return true;
+    }
     return false;
 }
 
@@ -338,13 +345,18 @@ bool CameraDirector::objectNative(Interp& in, scene::Object& o, const std::strin
         if (msg == "select") return postProc_ = p, true;
         return false;
     }
-    // The band slots until M9: what the camera scripts ask guitarist0.
+    // The band slots: guitarist0's clip flags, walk and lose_teleport.
     if (o.cls == "Character" || o.cls == "BandCharacter") {
-        (void)in;
-        if (msg == "playing_starpower" || msg == "in_star_mode")
-            return r = Value::integer(o.name == "guitarist0" && starPower_ ? 1 : 0), true;
-        if (msg == "actually_walking") return r = Value::integer(0), true;
-        if (msg == "lose_teleport") return true;
+        Band* band = world_.band;
+        if (msg == "playing_starpower")
+            return r = Value::integer(band ? (band->playingStarpower(o.name) ? 1 : 0) : (o.name == "guitarist0" && starPower_ ? 1 : 0)), true;
+        if (msg == "in_star_mode") return r = Value::integer(o.name == "guitarist0" && starPower_ ? 1 : 0), true;
+        if (msg == "actually_walking") return r = Value::integer(band && band->actuallyWalking(o.name) ? 1 : 0), true;
+        if (msg == "lose_teleport") {
+            if (band)
+                if (Band::Member* m = band->member(o.name); m && m->script) in.send(m->script.get(), "lose_teleport", args, false);
+            return true;
+        }
     }
     return false;
 }
@@ -427,26 +439,40 @@ bool CameraDirector::camShotOk(const scene::CamShot& shot) {
     return camCheckShot(shot);
 }
 
-// 0x822B2240 with the band's state from the players (M9 replaces it).
+// 0x822B2240: player 0's character (the band's guitarist0; without a band,
+// player 0's Star Power and the start waypoint stand in): no Star Power
+// clips (flag 0x80000 weight > 0) unless starpower_ok, no far ones (0x4000)
+// unless far_starpower_ok, and not when the waypoint nearest the character
+// with a kWalkSpot | kSoloWalkSpot flag (Waypoint::Nearest 0x82195548: mask
+// 0xc0, squared distance, no radius; looked up once per beat) is one of
+// the shot's bad_waypoints.
 bool CameraDirector::camCheckShot(const scene::CamShot& shot) {
-    if (starPower_ && !prop(shot, "starpower_ok").truthy()) return false;
-    // Flag 0x4000 ("far" Star Power) is never set without the band.
+    Band* band = world_.band;
+    const bool sp = band && band->character("guitarist0") ? band->flagWeight("guitarist0", 0x80000) > 0 : starPower_;
+    if (sp && !prop(shot, "starpower_ok").truthy()) return false;
+    if (band && band->flagWeight("guitarist0", 0x4000) > 0 && !prop(shot, "far_starpower_ok").truthy()) return false;
     const Value bad = prop(shot, "bad_waypoints");
     if (bad.type != Value::Type::Array || !bad.array || bad.array->empty()) return true;
-    // The waypoint nearest guitarist0 within 192 units: its start waypoint.
-    const bool mp = world_.venue().variant() != VenueVariant::Single;
-    scene::Xfm g;
-    if (!venueObjectXfm(world_, "guitarist0", mp, g)) return true;
-    const scene::Waypoint* nearest = nullptr;
-    float best = 192;
-    for (const scene::Waypoint* w : world_.venue().all<scene::Waypoint>()) {
-        const float d = len(sub(world_.pose().world(w).pos, g.pos));
-        if (d <= best) best = d, nearest = w;
+    if (world_.beats() != nearestBeat_) {
+        nearestBeat_ = world_.beats();
+        nearest_ = nullptr;
+        const bool mp = world_.venue().variant() != VenueVariant::Single;
+        scene::Xfm g;
+        const bool got = (band && band->objectXfm("guitarist0", "", g)) || venueObjectXfm(world_, "guitarist0", mp, g);
+        if (got) {
+            float best = 0;
+            for (const scene::Waypoint* w : world_.venue().all<scene::Waypoint>()) {
+                if (!(w->flags & 0xc0)) continue;  // kWalkSpot | kSoloWalkSpot [C 0x82195548]
+                const V3 d = sub(world_.pose().world(w).pos, g.pos);
+                const float d2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
+                if (!nearest_ || d2 < best) best = d2, nearest_ = w;
+            }
+        }
     }
-    if (!nearest) return true;
+    if (!nearest_) return true;
     for (const Value& v : *bad.array) {
         const std::string n = v.type == Value::Type::Object && v.object ? v.object->name() : v.str();
-        if (n == nearest->name) return false;
+        if (n == nearest_->name) return false;
     }
     return true;
 }
@@ -488,6 +514,14 @@ void CameraDirector::endShot() {
 
 bool CameraDirector::targetPoint(const scene::CamTarget& t, std::array<float, 3>& out) const {
     if (t.object.empty()) return false;
+    // A band member and its subpart (a bone of its directory).
+    if (world_.band) {
+        scene::Xfm bx;
+        if (world_.band->objectXfm(t.object, t.subpart, bx)) {
+            out = bx.pos;
+            return true;
+        }
+    }
     const bool mp = world_.venue().variant() != VenueVariant::Single;
     scene::Xfm x;
     if (!venueObjectXfm(world_, t.object, mp, x)) return false;
@@ -539,7 +573,8 @@ bool CameraDirector::keyframeXfm(const scene::CamShot& shot, ShotState& st, size
     if (!kf.parent.object.empty()) {
         const bool mp = world_.venue().variant() != VenueVariant::Single;
         scene::Xfm px;
-        if (venueObjectXfm(world_, kf.parent.object, mp, px)) {
+        const bool bandParent = world_.band && world_.band->objectXfm(kf.parent.object, kf.parent.subpart, px);
+        if (bandParent || venueObjectXfm(world_, kf.parent.object, mp, px)) {
             V3 p;
             if (targetPoint(kf.parent, p)) px.pos = p;
             lowPass(st.parentPos[k], px.pos);

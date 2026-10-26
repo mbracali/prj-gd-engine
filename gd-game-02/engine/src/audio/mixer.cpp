@@ -7,18 +7,20 @@
 #include <cmath>
 #include <cstdio>
 
+#include "audio/audio_device.h"
+
 Mixer::~Mixer() { close(); }
 
 void Mixer::close() {
     stopWorker();
-    if (stream_) SDL_DestroyAudioStream(stream_);
+    if (stream_) audiodev::closeStream(stream_);
     stream_ = nullptr;
     source_.reset();
 }
 
 bool Mixer::open(std::string& error) {
     SDL_AudioSpec spec{SDL_AUDIO_F32, 2, rate_};
-    stream_ = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, &Mixer::callback, this);
+    stream_ = audiodev::openStream(spec, &Mixer::callback, this);
     if (!stream_) {
         error = SDL_GetError();
         return false;

@@ -13,6 +13,7 @@
 
 #include "data/game_data.h"
 #include "scene/milo.h"
+#include "scene/synth_objects.h"
 #include "scene/ui_objects.h"
 #include "scene/ui_styles.h"
 #include "scene/world_objects.h"
@@ -122,6 +123,20 @@ void dumpObject(const Object& o, int indent) {
     } else if (auto* sp = o.as<Spotlight>()) {
         std::printf("%sbeam '%s' spot '%s' target '%s' intensity %.2f color %.2f %.2f %.2f showing %d\n", pad.c_str(), sp->beam.material.c_str(),
                     sp->spotMaterial.c_str(), sp->target.c_str(), sp->intensity, sp->color[0], sp->color[1], sp->color[2], sp->draw.showing);
+    } else if (auto* s = o.as<SynthSample>()) {
+        std::printf("%sfile '%s' format %u, %u frames at %u Hz, %u bytes%s\n", pad.c_str(), s->file.c_str(), s->sample.format,
+                    s->sample.sampleCount, s->sample.rate, s->sample.size,
+                    s->looping ? (" loop " + std::to_string(s->loopStart) + ".." + std::to_string(s->loopEnd)).c_str() : "");
+    } else if (auto* x = o.as<Sfx>()) {
+        std::string maps;
+        for (const auto& m : x->maps)
+            maps += (maps.empty() ? "" : ", ") + m.sample + " (" + std::to_string(m.volume) + " dB pan " + std::to_string(m.pan) + ")";
+        std::printf("%smaps [%s] send '%s'\n", pad.c_str(), maps.c_str(), x->send.c_str());
+    } else if (auto* g = o.as<GroupSeq>()) {
+        std::printf("%schildren [%s] volume %.1f+-%.1f transpose %.1f+-%.1f\n", pad.c_str(), join(g->children).c_str(),
+                    g->params.avgVolume, g->params.volumeSpread, g->params.avgTranspose, g->params.transposeSpread);
+    } else if (auto* q = o.as<SfxSeq>()) {
+        std::printf("%schild '%s'\n", pad.c_str(), q->child.c_str());
     } else if (auto* e = o.as<Environ>()) {
         std::printf("%slights [%s] ambient %.2f %.2f %.2f\n", pad.c_str(), join(e->lights).c_str(), e->ambientColor[0],
                     e->ambientColor[1], e->ambientColor[2]);
@@ -322,6 +337,27 @@ int runSceneTest(const std::string& dataPath) {
             }
         }
         std::printf("venue classes decoded: %s (%s)\n", counts.c_str(), countFailures ? "MISMATCH" : "as expected");
+        // The character classes (M9, char/char_objects.h; their directory
+        // records are --chartest's): every object on the disc, by class.
+        static const std::pair<const char*, int> kCharCounts[] = {
+            {"CharClipSamples", 1994}, {"CharClipGroup", 330},   {"CharClipFilter", 82},    {"CharBone", 5797},
+            {"Character", 85},         {"BandCharacter", 16},    {"CharDriver", 58},        {"CharDriverMidi", 38},
+            {"CharIKHand", 38},        {"CharIKMidi", 19},       {"CharHair", 92},          {"CharLookAt", 36},
+            {"CharEyes", 18},          {"CharWeightSetter", 38}, {"CharUpperTwist", 88},    {"CharForeTwist", 79},
+            {"CharServoBone", 57},     {"CharWalk", 19},         {"CharPosConstraint", 4},  {"CharIKRod", 4},
+            {"OutfitLoader", 20},      {"FaceFxLipSyncServo", 22}};
+        const int venueCountFailures = countFailures;
+        counts.clear();
+        for (const auto& [cls, want] : kCharCounts) {
+            const auto it = stats.find(cls);
+            const int got = it == stats.end() ? 0 : it->second.decoded;
+            counts += std::string(counts.empty() ? "" : ", ") + cls + " " + std::to_string(got);
+            if (got != want) {
+                ++countFailures;
+                std::printf("  character class %s: %d decoded, expected %d\n", cls, got, want);
+            }
+        }
+        std::printf("character classes decoded: %s (%s)\n", counts.c_str(), countFailures != venueCountFailures ? "MISMATCH" : "as expected");
         bool ok = fileFailures == 0 && typedFailures == 0 && files > 0 && chainFailures == 0 && countFailures == 0;
         std::printf("\nscene test %s: %d typed objects failed, %d files failed\n", ok ? "passed" : "FAILED", typedFailures,
                     fileFailures);

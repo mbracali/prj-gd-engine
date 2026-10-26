@@ -53,3 +53,4 @@ __pycache__/
 Thumbs.db
 .claude/
 compile_commands.json
+gd-game-02/handoff/

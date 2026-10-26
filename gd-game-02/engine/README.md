@@ -32,7 +32,7 @@ The game folder is the disc's extracted files (the one containing
 `gen/main.hdr`). Options: `--song <id>`, `--difficulty 0-3`, `--venue <name>`
 (battle, small1, small2, big, theatre, fest, arena, stone), `--autoplay`,
 `--no-fail`, `--selftest` (checks the data and auto-plays every chart without
-a window; also `--scripttest`, `--uitest`, `--venuetest`,
+a window; also `--scripttest`, `--uitest`, `--venuetest`, `--sfxtest`,
 `--walktest quickplay|lose|pause|attract`), `--playmovie intro.wmv` (plays one of the disc's videos: `intro.wmv`,
 `hmx.wmv`, `wg.wmv`; Start, Enter or A skips it), `--help`. `GD02_SKIP_MOVIES=1`
 skips the videos.
@@ -111,10 +111,11 @@ project; publish any changes you distribute. The third-party licences are in
 `licenses/`. Guitar Hero is a trademark of its owner; this project is not
 affiliated with or endorsed by it.
 
-The videos play through FFmpeg (https://ffmpeg.org), a separate work under the
-GNU LGPL 2.1 or later, shipped unmodified as shared libraries next to the
-program (`libav*.so.*` on Linux, `av*.dll` on Windows, inside `gd02.app` on
-macOS, inside the APK on Android). `licenses/FFmpeg-NOTICE.txt` names the
+The videos and the sound effects (XMA) play through FFmpeg
+(https://ffmpeg.org), a separate work under the GNU LGPL 2.1 or later,
+shipped unmodified as shared libraries next to the program (`libav*.so.*`
+on Linux, `av*.dll` on Windows, inside `gd02.app` on macOS, inside the APK
+on Android). `licenses/FFmpeg-NOTICE.txt` names the
 exact version, its source download and the configure options, and
 `licenses/FFmpeg-LICENSE.LGPL-2.1.txt` is the licence (in the APK: under
 `assets/licenses/`). You may replace those libraries with your own build.

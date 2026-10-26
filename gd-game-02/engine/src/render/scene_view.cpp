@@ -17,6 +17,7 @@
 #include "render/canvas.h"
 #include "render/scene_gpu.h"
 #include "render/ui_view.h"
+#include "render/band_view.h"
 #include "render/venue_view.h"
 #include "scene/milo.h"
 #include "scene/world_objects.h"
@@ -327,5 +328,7 @@ int SceneView::run(const std::string& dataPath, const std::string& miloPath) {
 int runSceneView(const std::string& dataPath, const std::string& miloPath) {
     // A venue (its world milo or its name) draws as the game loads it (render/venue_view.h).
     if (isVenuePath(miloPath)) return runVenueView(dataPath, miloPath);
+    // A character (char/alterna1 or its milo) draws posed (render/band_view.h).
+    if (isCharPath(miloPath)) return runCharView(dataPath, miloPath);
     return SceneView().run(dataPath, miloPath);
 }

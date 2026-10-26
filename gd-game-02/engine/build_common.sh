@@ -33,7 +33,8 @@ configure() {
   rm -f "$log"
 }
 
-# ---- FFmpeg (GH2's videos: WMV3 video + WMA v2 audio in ASF) ----
+# ---- FFmpeg (GH2's videos: WMV3 video + WMA v2 audio in ASF; the sound
+# effects: XMA, decoded by the xma1 / xma2 decoders) ----
 # A minimal LGPL build, shared libraries shipped next to gd02 (libavformat,
 # libavcodec, libavutil), from the pinned release tarball, unmodified. The
 # tarball's SHA-256 was taken after checking its signature with FFmpeg's
@@ -45,7 +46,7 @@ FFMPEG_URL="https://ffmpeg.org/releases/ffmpeg-$FFMPEG_VERSION.tar.xz"
 FFMPEG_CONFIGURE=(--disable-everything --disable-programs --disable-doc --disable-network --disable-autodetect
   --disable-avdevice --disable-avfilter --disable-swscale --disable-swresample --disable-debug
   --enable-shared --disable-static --enable-pic
-  --enable-demuxer=asf --enable-decoder=wmv3,wmav2)
+  --enable-demuxer=asf --enable-decoder=wmv3,wmav2,xma1,xma2)
 
 sha256_of() { if command -v sha256sum >/dev/null; then sha256sum "$1"; else shasum -a 256 "$1"; fi | cut -d' ' -f1; }
 
@@ -132,7 +133,7 @@ ship_ffmpeg_licence() {
   local prefix="$1" d="$2"
   mkdir -p "$d/licenses"
   cp "$prefix/COPYING.LGPLv2.1" "$d/licenses/FFmpeg-LICENSE.LGPL-2.1.txt"
-  { echo "gd02 plays Guitar Hero II's videos with FFmpeg (https://ffmpeg.org), a separate"
+  { echo "gd02 plays Guitar Hero II's videos and sound effects with FFmpeg (https://ffmpeg.org), a separate"
     echo "work under the GNU LGPL 2.1 or later, used as shared libraries (avformat, avcodec,"
     echo "avutil) next to the program. Its source code:"
     echo

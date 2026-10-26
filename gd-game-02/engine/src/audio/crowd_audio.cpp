@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include "audio/audio_device.h"
 #include "audio/vorbis_stream.h"
 #include "data/dta.h"
 #include "data/game_data.h"
@@ -61,7 +62,7 @@ CrowdAudio::CrowdAudio(const GameData& data, const std::string& venue, const Dat
 }
 
 CrowdAudio::~CrowdAudio() {
-    if (stream_) SDL_DestroyAudioStream(stream_);
+    if (stream_) audiodev::closeStream(stream_);
     if (worker_.joinable()) worker_.join();
 }
 
@@ -116,7 +117,7 @@ int CrowdAudio::decodedStreams() {
 bool CrowdAudio::open() {
     if (stream_) return true;
     const SDL_AudioSpec spec{SDL_AUDIO_F32, 2, kRate};
-    stream_ = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, &CrowdAudio::callback, this);
+    stream_ = audiodev::openStream(spec, &CrowdAudio::callback, this);
     if (!stream_) {
         SDL_Log("crowd audio: no audio device: %s", SDL_GetError());
         return false;
@@ -235,7 +236,8 @@ void CrowdAudio::setEnabled(bool on) {
 }
 
 std::string CrowdAudio::reaction(int prev, int level) {
-    static const char* const kTo[] = {"danger", "poor", "norm", "good", "good"};
+    // 0x822DFAB0 [C]: crowd_%s_%s of dnto / upto and the levels.
+    static const char* const kTo[] = {"danger", "poor", "norm", "good", "peak"};
     if (level < 0 || level > 4) return {};
     return std::string(prev <= level ? "crowd_upto_" : "crowd_dnto_") + kTo[level];
 }

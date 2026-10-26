@@ -153,8 +153,19 @@ bool TaskMgr::kill(ScriptObject* o) {
 }
 
 void TaskMgr::killFor(const ScriptObject* self) {
-    for (auto& t : tasks_)
-        if (t->self == self) finish(*t);
+    if (!self) return;
+    for (auto& t : tasks_) {
+        if (t->dead) continue;
+        if (t->self == self) {
+            finish(*t);
+            continue;
+        }
+        for (const auto& [name, value] : t->vars)
+            if (value.type == Value::Type::Object && value.object == self) {
+                finish(*t);
+                break;
+            }
+    }
 }
 
 void TaskMgr::clear() {

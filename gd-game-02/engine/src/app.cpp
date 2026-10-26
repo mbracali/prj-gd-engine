@@ -16,10 +16,12 @@
 
 #include "app_ids.h"
 #include "audio/mixer.h"
+#include "audio/synth.h"
 #include "data/game_data.h"
 #include "devaids/menu_keys.h"
 #include "devaids/screenshot.h"
 #include "game/autoplay.h"
+#include "game/band.h"
 #include "game/camera_director.h"
 #include "game/key_script.h"
 #include "game/light_presets.h"
@@ -164,6 +166,7 @@ public:
         paused_ = paused;
         mixer_.setPaused(paused || musicPaused_);
         if (world_) world_->crowd().audio().setPaused(paused);
+        if (synth_) synth_->setPaused(paused);
     }
     bool gamePaused() const override { return paused_; }
     double gameTimeMs() const override { return lastT_; }
@@ -193,6 +196,19 @@ public:
     void playMovie(const std::string& name) override;
     void applyOptions(float band, float guitar, float fx, bool lefty0, bool lefty1, int syncOffsetMs) override;
     void quit() override { running_ = false; }
+    bool playSfx(const std::string& name) override { return playSfxArgs(name, 0, 0, 0); }
+    bool playSfxArgs(const std::string& name, float volumeDb, float pan, float transpose) override;
+    void setSfxMasterDb(float db) override {
+        if (synth_) synth_->setMasterVolumeDb(db);
+    }
+    float sfxMasterDb() override { return synth_ ? synth_->masterVolumeDb() : 0.0f; }
+    void stopSfx(const std::string& name) override;
+    void stopAllSfx() override {
+        if (synth_) synth_->stopAll();
+    }
+    void pauseAllSfx(bool paused) override {
+        if (synth_) synth_->setPaused(paused);
+    }
 
 private:
     bool loadData(const std::string& path);
@@ -213,6 +229,7 @@ private:
     void drawWorld();
     bool loadVenue(const std::string& venue, VenueVariant variant);
     void unloadVenue();
+    void startBand();
     void frameList();
     bool prepareTrack();
     void stopMusic();
@@ -298,6 +315,8 @@ private:
     std::unique_ptr<VenueView> venueView_;
     // The camera director and the lighting presets (M8 phase 2; game/camera_director.h, game/light_presets.h).
     std::unique_ptr<CameraDirector> director_;
+    // The band on stage (M9, game/band.h): made when the song begins in the venue.
+    std::unique_ptr<Band> band_;
     std::unique_ptr<LightPresets> lighting_;
     WorldDriver worldDriver_;
     std::string venuePath_;
@@ -312,6 +331,16 @@ private:
     float failMs_ = -1e9f;
     // The menus' music: none, a meta loop or a song's preview.
     enum class Music { None, Menu, Preview, Credits } music_ = Music::None;
+    // GH2's sound effects (audio/synth.h): config/sound.dta's banks, the
+    // venue's through the world; made with the game data.
+    std::unique_ptr<Synth> synth_;
+    float fxVolumeDb_ = 0;  // the options' sound effects volume (dB): {options get_fx_volume}
+    // The menus' background sounds while their music plays (MetaMusic,
+    // 0x822A23F8 reads config/synth.dta (background_sfx (sequence
+    // meta_people) (min_delay_sec 10) (max_delay_sec 20))) [C data]; a
+    // uniform delay between the two (0x822A1440) [C]: when the next one is due (s).
+    double metaSfxDue_ = -1;
+    void metaBackgroundSfx();
 };
 
 int App::run() {
@@ -386,6 +415,10 @@ int App::run() {
             if (std::string picked = picker_.takePicked(); !picked.empty()) {
                 if (loadData(picked) && !debugMenu_) startUi();
             }
+        if (synth_) {
+            synth_->update();
+            metaBackgroundSfx();
+        }
         if (ui_) frameUi();
         else if (player_) frameSong();
         else if (!data_) frameNeedData();
@@ -402,6 +435,11 @@ int App::run() {
     stopMusic();
     unloadVenue();
     ui_.reset();
+    if (synth_)
+        SDL_Log("sound effects: %d played (%d voices, %llu started on the device), %d samples decoded in %.0f ms, %d failures",
+                synth_->stats().plays, synth_->stats().voices, (unsigned long long)synth_->player().started(), synth_->stats().decoded,
+                synth_->stats().decodeMs, synth_->stats().decodeFailures + synth_->stats().unresolved);
+    synth_.reset();
     hud_.reset(), track_.reset(), track2_.reset();
     sceneCache_.reset();
     milos_.reset();
@@ -426,7 +464,16 @@ bool App::loadData(const std::string& path) {
         hud_.reset(), track_.reset(), track2_.reset();
         sceneCache_.reset(), milos_.reset();
         trackTried_ = false;
+        synth_.reset();
         data_ = std::move(data), rules_ = rules, songs_ = std::move(songs);
+        // The sound effects: the banks decode here (all of them: ~0.1 s).
+        const uint64_t t0 = SDL_GetTicksNS();
+        synth_ = std::make_unique<Synth>();
+        for (const auto& p : synth_->loadBanks(*data_)) SDL_Log("sound effects: %s", p.c_str());
+        synth_->player().open();
+        synth_->setFxVolumeDb(fxVolumeDb_);
+        SDL_Log("sound effects: %d banks, %d samples decoded in %.0f ms", int(synth_->banks().size()), synth_->stats().decoded,
+                double(SDL_GetTicksNS() - t0) / 1e6);
     } catch (const std::exception& ex) {
         dataMessage_ = ex.what();
         SDL_Log("%s", dataMessage_.c_str());
@@ -552,6 +599,7 @@ bool App::loadSong(const SongInfo& info, int difficulty, bool autoplay, float ba
                                                                                    : VenueVariant::Single;
         loadVenue(v, var);
     }
+    if (!band_) startBand();
     worldDriver_ = WorldDriver(!ui_);
     worldDriver_.reset(float(-leadInMs_));
     return true;
@@ -615,6 +663,7 @@ void App::endSong() {
     mixer_.setPaused(false);
     mixer_.setSpeed(1);
     mixer_.stop();
+    band_.reset();
     bot_.reset(), player_.reset(), bot2_.reset(), player2_.reset(), song_.reset(), pendingStream_.reset();
     info_ = nullptr;
     input_.setInGame(false);
@@ -768,9 +817,20 @@ void App::updateSong(float t) {
         else if (t >= song_->endMs) worldDriver_.gameWon(*world_);
         world_->update();
         if (lighting_) lighting_->update();
+        if (band_) {
+            const gfx::Vec3 c = venueView_->camera().position();
+            const std::array<float, 3> cam{c.x, c.y, c.z};
+            band_->update(world_->seconds(), world_->beats(), &cam);
+        }
         if (director_) {
             director_->setStarPower(player_->starPowerActive());
             director_->update();
+            // Development aid: GD02_FORCE_SHOT=<CamShot> plays that shot whenever another starts.
+            if (const char* fs = SDL_getenv("GD02_FORCE_SHOT"))
+                if (const auto* shot = venue_->find<scene::CamShot>(fs); shot && director_->shot() != shot) {
+                    director_->forceShot(shot);
+                    director_->update();
+                }
             if (director_->hasCamera()) venueView_->setCamera(director_->camera());
         }
         venueView_->update();
@@ -782,13 +842,16 @@ void App::updateSong(float t) {
     const uint64_t now = SDL_GetTicksNS();
     if (!wonSent_ && !lostSent_ && !player_->failed() && t >= song_->endMs) {
         wonSent_ = true, overNs_ = now, overT_ = t, outroAtNs_ = now + uint64_t(kExplodeOutroMs * 1e6);
-        ui_->gameEvent("game_over");
+        // GH2's order: the result, then game_over (0x822CB5B8).
+        if (band_) band_->setResult(true);
         ui_->gameEvent("game_won_msg", {Value::integer(0)});
+        ui_->gameEvent("game_over");
     }
     if (!wonSent_ && !lostSent_ && player_->failed()) {
         lostSent_ = true, overNs_ = now, overT_ = t, outroAtNs_ = now + uint64_t(kLoseOutroMs * 1e6);
-        ui_->gameEvent("game_over");
+        if (band_) band_->setResult(false);
         ui_->gameEvent("game_lost");
+        ui_->gameEvent("game_over");
     }
     if ((wonSent_ || lostSent_) && !outroSent_ && !paused_ && now >= outroAtNs_) {
         outroSent_ = true;
@@ -965,6 +1028,11 @@ bool App::loadVenue(const std::string& venue, VenueVariant variant) {
         for (const auto& p : venue_->problems()) SDL_Log("venue: %s", p.c_str());
         const DataNode* objects = ui_ && ui_->bootTree() ? ui_->bootTree()->find("objects") : nullptr;
         world_ = std::make_unique<World>(*venue_, ui_ ? &ui_->interp() : nullptr, objects);
+        if (synth_) {
+            world_->setSynth(synth_.get());
+            // The venue bank's samples decode now, not at their first cue.
+            for (const auto& p : venue_->parts()) synth_->preload(p.milo->root());
+        }
         venueCache_ = std::make_unique<gfx::SceneCache>(canvas_.renderer().device());
         venueView_ = std::make_unique<VenueView>(*world_, *venueCache_);
         lighting_ = std::make_unique<LightPresets>(*world_);
@@ -982,6 +1050,7 @@ bool App::loadVenue(const std::string& venue, VenueVariant variant) {
     }
     venuePath_ = path;
     if (const scene::LightPreset* p = world_->firstPreset()) world_->applyPreset(*p, 0);
+    if (song_ && info_) startBand();
     // The static shot's PostProc (its `postprocess` flag) [I: the director
     // selects it on every shot from phase 2 on].
     venuePostOn_ = false;
@@ -1020,6 +1089,7 @@ bool App::loadVenue(const std::string& venue, VenueVariant variant) {
 }
 
 void App::unloadVenue() {
+    band_.reset();
     worldDraw_ = nullptr;
     director_.reset();
     lighting_.reset();
@@ -1028,6 +1098,48 @@ void App::unloadVenue() {
     venue_.reset();
     venueCache_.reset();
     venuePath_.clear();
+}
+
+// GH2's play_sfx / synth play_sequence: the game's banks, then the venue's
+// (crowd_win, encore_yes... from the UI's scripts).
+bool App::playSfxArgs(const std::string& name, float volumeDb, float pan, float transpose) {
+    if (!synth_) return false;
+    if (synth_->play(name, volumeDb, pan, transpose)) return true;
+    return world_ && world_->venue().find(name) && world_->playSound(name, nullptr, volumeDb, pan, transpose);
+}
+
+void App::stopSfx(const std::string& name) {
+    if (!synth_) return;
+    if (!synth_->stop(name) && world_) world_->stopSound(name);
+}
+
+// The band (game/band.h) once the song begins in a venue: player 0's
+// character is the song's quickplay one (GD02_CHAR=<outfit> and
+// GD02_GUITAR=<guitar> override it until the character screens set it,
+// M9.10); GD02_NO_BAND=1 leaves the stage empty.
+void App::startBand() {
+    band_.reset();
+    if (!world_ || !song_ || !info_ || envOn("GD02_NO_BAND")) return;
+    Band::Config cfg;
+    cfg.players = twoPlayers(mode_) ? 2 : 1;
+    if (const char* c = SDL_getenv("GD02_CHAR")) cfg.character[0] = c;
+    if (const char* g = SDL_getenv("GD02_GUITAR")) cfg.guitar[0] = g;
+    const DataNode* objects = ui_ && ui_->bootTree() ? ui_->bootTree()->find("objects") : nullptr;
+    try {
+        band_ = std::make_unique<Band>(*world_, *data_, *info_, cfg, objects);
+        band_->rating = [this](int p) {
+            const Player* pl = p == 0 ? player_.get() : player2_.get();
+            return pl ? pl->rockMeter() : 0.5f;
+        };
+        band_->loadSong(parseMidi(data_->read(info_->audio.midiPath)), song_.get());
+        // The characters enter with the world (World::start); a world already
+        // started (the menus' world_panel) gets them at once.
+        if (world_->started()) band_->enter();
+        for (const auto& p : band_->problems()) SDL_Log("band: %s", p.c_str());
+    } catch (const std::exception& e) {
+        SDL_Log("band: %s", e.what());
+        band_.reset();
+    }
 }
 
 // world_panel's milo: ../world/<v>/<v>[_mp|_coop].milo (GD02_VENUE replaces the venue).
@@ -1117,6 +1229,21 @@ void App::menuMusic(bool on) {
     }
 }
 
+void App::metaBackgroundSfx() {
+    constexpr double kMinDelay = 10, kMaxDelay = 20;  // config/synth.dta background_sfx
+    const double now = double(SDL_GetTicksNS()) / 1e9;
+    if (music_ != Music::Menu) {
+        metaSfxDue_ = -1;
+        return;
+    }
+    const double delay = kMinDelay + (kMaxDelay - kMinDelay) * double(SDL_randf());  // RandomFloat(min, max) 0x822A1440 [C]
+    if (metaSfxDue_ < 0) metaSfxDue_ = now + delay;
+    else if (now >= metaSfxDue_) {
+        synth_->play("meta_people");
+        metaSfxDue_ = now + delay;
+    }
+}
+
 void App::creditsMusic(bool on) {
     if (player_) return;
     if (!on) {
@@ -1143,7 +1270,12 @@ void App::playMovie(const std::string& name) {
 }
 
 void App::applyOptions(float band, float guitar, float fx, bool lefty0, bool lefty1, int syncOffsetMs) {
-    (void)fx;  // the sound effects are not played yet
+    // The sound effects volume: the options' index (fx x 11) through
+    // config/sound.dta's slider dB table.
+    // GH2 passes it as the volume of its game sounds (play_game_sfx, the
+    // crowd's reactions), not to every sound (audio/synth.h).
+    fxVolumeDb_ = data_ ? Synth::optionsVolumeDb(*data_, int(std::lround(fx * 11.0f))) : 20.0f * std::log10(std::max(fx, 1e-5f));
+    if (synth_) synth_->setFxVolumeDb(fxVolumeDb_);
     bandVolume_ = band, guitarVolume_ = guitar;
     syncOffsetMs_ = syncOffsetMs;
     if (!SDL_getenv("GD02_LEFTY")) input_.setLefty(lefty0, lefty1);

@@ -31,10 +31,12 @@ struct DataNode;
 //     +0x34) the level's loop (excitement_loop), every time;
 //   encore_outro -> encore_outro, looping between its loop_ms (0x822E1688);
 //   turn_off (ui lose.dta; here at game_lost [I]) -> silence.
-// The reaction sounds (+0x64 at the intro, +0x68 at game_won_msg, per
-// level change crowd_upto_* / crowd_dnto_*: 0x822DF350, when the mode's
-// crowd_reactions) are bank Sfx (XMA): reported as world_sfx STUBs by the
-// caller (reaction()).
+// The reaction sounds (+0x64 crowd_begin at the intro, +0x68 crowd_win at
+// game_won_msg, +0x6c crowd_lose at game_lost, per level change
+// crowd_upto_* / crowd_dnto_* (+0x70): 0x822DFAB0 looks them up, 0x822DF350
+// plays one, stopping the last, when the mode's crowd_reactions) are the
+// venue bank's Sfx: game/crowd.cpp plays them through the world
+// (audio/synth.h), reaction() names them.
 //
 // Playback: its own SDL audio stream (SDL mixes it with the song's), 44100
 // Hz stereo float; the moggs are decoded once, on a worker thread, into
@@ -74,8 +76,10 @@ public:
     // What plays (for the tests and logs): the stream, or kStreams.
     Stream playing() const { return Stream(playing_.load()); }
     int started() const { return started_; }
-    // The reaction sound the game would play for a change prev -> level
-    // (crowd_upto_good...) [I: names from the banks].
+    // The reaction sound the game plays for a change prev -> level:
+    // crowd_<upto | dnto>_<danger poor norm good peak> (0x822DFAB0, slot
+    // (level + 14) x 2 + (prev <= level), 0x822DF590) [C]; the banks have
+    // only upto_poor / norm / good and dnto_danger / poor / norm.
     static std::string reaction(int prev, int level);
     // Decoded streams (waits for the worker).
     int decodedStreams();

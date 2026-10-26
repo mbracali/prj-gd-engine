@@ -14,6 +14,7 @@
 #include <utility>
 #include <vector>
 
+#include "audio/synth.h"
 #include "data/game_data.h"
 #include "game/venue.h"
 #include "game/camera_director.h"
@@ -22,16 +23,17 @@
 #include "tests/director_golden.h"
 #include "script/script.h"
 #include "scene/milo.h"
+#include "scene/synth_objects.h"
 #include "scene/world_objects.h"
 
 namespace {
 
 using namespace scene;
 
-// Classes the port does not decode yet, expected in venue milos: the band's
-// characters (M9) and the sound banks.
-const std::set<std::string> kRawClasses = {"Character", "BandCharacter", "Sfx", "SynthSample", "SfxSeq", "RandomGroupSeq",
-                                           "WaitSeq", "SerialGroupSeq", "FxSendReverb"};
+// Classes the port does not decode, expected in venue milos: the banks'
+// reverb send (not played, audio/synth.h). The band slots (Character /
+// BandCharacter) decode since M9 (char/char_objects.h).
+const std::set<std::string> kRawClasses = {"FxSendReverb"};
 
 // World milos no venue loads [C data: nothing names them]: the old
 // face-off geometry (the _mp worlds load the full geom) and an unused prop.
@@ -133,6 +135,13 @@ std::vector<Ref> refsOf(const Object& o) {
         add("flare_material", s->flareMaterial);
         add("lens_material", s->lensMaterial);
         addAll("additional_objects", s->additionalObjects);
+    } else if (auto* x = o.as<Sfx>()) {
+        for (const auto& m : x->maps) add("sample", m.sample);
+        add("send", x->send);
+    } else if (auto* g = o.as<GroupSeq>()) {
+        addAll("children", g->children);
+    } else if (auto* q = o.as<SfxSeq>()) {
+        add("child", q->child);
     } else if (auto* e = o.as<EventTrigger>()) {
         for (const auto& a : e->anims) add("anims", a.anim);
         addAll("sounds", e->sounds);
@@ -220,7 +229,10 @@ VariantResult checkVariant(const Venue& v, std::set<std::string>& loaded) {
 // texts, a won song. Returns the problems (unknown names, script errors,
 // unhandled messages); the stubs (the next phase's methods) are listed.
 int scriptRun(Venue& v, std::string& summary) {
+    // The sound effects play on a Synth without a device (counted).
+    Synth synth;
     World w(v);
+    w.setSynth(&synth);
     // The camera director and the lighting presets (game/camera_director.h, game/light_presets.h).
     LightPresets lights(w);
     CameraDirector director(w);
@@ -266,13 +278,21 @@ int scriptRun(Venue& v, std::string& summary) {
     int problems = int(in.unknownCounts().size() + in.errors().size() + in.unhandledCounts().size());
     summary = std::to_string(st.eventsFired) + " events, " + std::to_string(st.triggersFired) + " triggers, " +
               std::to_string(st.animsStarted) + " anims, " + std::to_string(st.shows) + " shows, " + std::to_string(st.hides) +
-              " hides, " + std::to_string(st.proxyCalls) + " proxy calls, " + std::to_string(st.sounds) + " sounds, " +
+              " hides, " + std::to_string(st.proxyCalls) + " proxy calls, " + std::to_string(st.sounds) + " sounds (" +
+              std::to_string(synth.stats().voices) + " voices), " +
               std::to_string(director.shotsStarted()) + " shots, " + std::to_string(lights.switches()) + " presets; stubs:";
     for (const auto& [k, n] : in.stubCounts())
         if (k.rfind("world ", 0) == 0) summary += " " + k.substr(6);
     for (const auto& [k, n] : in.unknownCounts()) summary += "\n    UNKNOWN " + k;
     for (const auto& [k, n] : in.unhandledCounts()) summary += "\n    UNHANDLED " + k;
     for (const auto& e : in.errors()) summary += "\n    ERROR " + e;
+    // Every sound the triggers and the crowd play is in the bank and decodes.
+    const Synth::Stats& ss = synth.stats();
+    problems += ss.decodeFailures + ss.unresolved;
+    if (ss.decodeFailures || ss.unresolved)
+        summary += "\n    SOUNDS " + std::to_string(ss.decodeFailures) + " decode failures, " + std::to_string(ss.unresolved) + " unresolved";
+    for (const auto& [k, n] : in.stubCounts())
+        if (k.rfind("world_sfx ", 0) == 0) ++problems, summary += "\n    SOUND " + k.substr(10);
     return problems;
 }
 

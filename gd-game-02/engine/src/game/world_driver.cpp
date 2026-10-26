@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <string>
 
+#include "game/band.h"
 #include "game/light_presets.h"
 #include "game/world.h"
 
@@ -131,7 +132,11 @@ void WorldDriver::playerEvents(World& world, int index, const Player* p, const s
             break;
         case PlayerEvent::Kind::BuildStreak: world.message("build_streak"); break;
         case PlayerEvent::Kind::StarPowerReady: world.message("star_power_ready"); break;
-        case PlayerEvent::Kind::StarPowerStart: world.message("star_power_start"); break;
+        case PlayerEvent::Kind::StarPowerStart:
+            world.message("star_power_start");
+            // The game tells the player's character (0x822E3840 -> GuitarCharacter 0x822D25A8).
+            if (world.band) world.band->starPowerStart(index);
+            break;
         case PlayerEvent::Kind::StarPowerEnd: world.message("star_power_stop"); break;
         default: break;
         }
@@ -141,11 +146,15 @@ void WorldDriver::playerEvents(World& world, int index, const Player* p, const s
 void WorldDriver::gameWon(World& world) {
     if (overSent_) return;
     overSent_ = true;
-    if (gameEvents_) world.message("game_won_msg", {Value::integer(0)});
+    // The players' result first ({$this player} won); GH2's game then sends
+    // the result and game_over after it (0x822CB5B8).
+    if (world.band) world.band->setResult(true);
+    if (gameEvents_) world.message("game_won_msg", {Value::integer(0)}), world.message("game_over");
 }
 
 void WorldDriver::gameLost(World& world) {
     if (overSent_) return;
     overSent_ = true;
-    if (gameEvents_) world.message("game_lost");
+    if (world.band) world.band->setResult(false);
+    if (gameEvents_) world.message("game_lost"), world.message("game_over");
 }

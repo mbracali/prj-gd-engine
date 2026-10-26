@@ -10,6 +10,7 @@
 #include "scene/ui_objects.h"
 #include "script/tasks.h"
 #include "ui/natives.h"
+#include "ui/sfx_args.h"
 #include "ui/ui_host.h"
 #include "ui/ui_objects.h"
 
@@ -308,7 +309,10 @@ bool ComponentObj::handleNative(Interp& in, const std::string& msg, std::vector<
         return true;
     }
     // A sound cue in a panel ({sync_click.cue play}) or another sound object.
-    if (msg == "play") return ui.playSfx(name()), true;
+    if (msg == "play") {
+        const SfxArgs a = sfxArgs(in, args, 0);
+        return ui.playSfx(name(), a.volume, a.pan, a.transpose), true;
+    }
     if (msg == "set_mat" || msg == "set_name" || msg == "set_rendered") return true;
     if (msg == "enable") return panel->enable(name()), true;
     if (msg == "disable") return panel->disable(name(), kPad_DDown), true;

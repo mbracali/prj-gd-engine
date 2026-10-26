@@ -58,10 +58,13 @@ Nothing right now.
 | M2 | Research | Lefty Flip, input sampling rate, controller latency (`watcher +0x2c`) on the 360 | ❌ | L3: where rules depend on sampling |
 | M10 | Modes | Practice track surface (rosewood) and practice UI pieces | ❌ | Two-player rules: see below |
 | M7 | UI | Touch lanes for the new renderer | ❌ | Input API ready |
-| M7 | UI | Sound effects (XMA SynthSample banks), endgame receipt lighting (`turn_off_ambient`), live volume sliders, help bar boxes, progress export / import | ❌ | `docs/ui_and_frontend.md` "Not done" |
-| M8 | Venues | Sound effects: SynthSample v5 / SampleData v11 XMA, packets not in plain stream order (reader near `0x82687380`); GH2's beam shader; crowd card imposters; free camera | ❌ | `docs/venues.md` open items; band-targeted shots wait for M9 |
-| M9 | Band | Characters, skinning, clips, `BAND *` tracks, hand positions (notes 40–59) | ❌ | |
-| M9 | Band | Lip-sync and faces (`.voc` "FACE…Harmonix", `.fac`), crowd | ❌ | |
+| M7 | UI | Endgame receipt lighting (`turn_off_ambient`), live volume sliders, help bar boxes, progress export / import | ❌ | `docs/ui_and_frontend.md` "Not done" |
+| M7 / M8 | Audio | Sound effects: SynthSample v5 / SampleData v11 = plain XMA2 (FFmpeg xma2), Sfx and sequences, the UI's and the venues' cues, menu background sfx | ✅ | `docs/audio_and_charts.md` section 4; `--sfxtest` |
+| M7 / M8 | Audio | Sound effect voices as the 360 plays them: envelope (attack / release), 5.1 pan + stereo fold, FxSendReverb sends with XAudio's reverb (bit-exact port), master limiter, `set_master_vol` / `toggle_limiter`, fx volume per GH2's callers, RandomGroupSeq rule (the PS2 fx cores do nothing on the 360) | ✅ | `docs/audio_and_charts.md` section 4; `--sfxtest` |
+| M8 | Venues | GH2's beam shader; crowd card imposters; free camera | ❌ | `docs/venues.md` open items; band-targeted shots wait for M9 |
+| M9 | Band | Characters, outfits, LODs, skinning, clips (CharDriver), the pose (servo, IK, twists, hair, look-ats), MidiParser (hands, fret position 40–59, `BAND *` tracks), GuitarCharacter, the band on stage, drum kit hits, director hooks | 🟡 | Phase 1 done: `docs/band.md`, `--chartest`, `--view char/<c>`; walks / interacts (M9.6), the shadow pass, hair collision open |
+| M9 | Band | Walks and interacts (CharWalk, walk schedule to solo / win spots, interact_probs, lose_teleport walks) | ❌ | M9.6; the solo and win shots aim at the walk spots |
+| M9 | Band | Lip-sync and faces (`.voc` "FACE…Harmonix", `.fac`), crowd clips, character / guitar choice, endgame photos | ❌ | M9.8–M9.10 |
 | M10 | Modes | Co-op (shared Star Power, band streak, score normalisation), face-off, pro face-off | ❌ | FINDINGS "Two players" |
 | M10 | Modes | Practice: sections, 100/85/65/50 % (resampled, no pitch correction), click track | ❌ | |
 | M10 | Modes | Career with encores, store (26 bonus songs at 550), unlocks, cheats | ❌ | |

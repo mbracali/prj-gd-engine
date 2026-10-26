@@ -103,6 +103,8 @@ private:
     bool objectNative(Interp& in, scene::Object& o, const std::string& msg, std::vector<Value>& args, Value& r);
     void iterateFrac(Interp& in, State& s, std::vector<Value>& args);
     void listen(Interp& in, const std::string& msg, const std::vector<Value>& args);
+    void reactionSound(const std::string& name);
+    bool attract_ = false;  // gamecfg mode attract: reactions at 0 dB (0x822DF140)
 
     World& world_;
     std::vector<State> crowds_;
@@ -112,4 +114,5 @@ private:
     std::vector<std::unique_ptr<ScriptObject>> owned_;
     int revision_ = 0;
     int excitement_ = 2;
+    std::string reaction_;  // the reaction sound playing (0x822DF350 stops it for the next)
 };

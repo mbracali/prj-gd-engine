@@ -2,7 +2,8 @@
 
 How a GH2 song is stored: the `.mogg` audio container, how its channels map
 to instruments (from `config/gen/songs.dtb`), and the `.mid` chart layout,
-compared with GH1 (see `gd-game-01/docs/FINDINGS.md`, "Song charts").
+compared with GH1 (see `gd-game-01/docs/FINDINGS.md`, "Song charts"); and
+the sound effects (section 4: SynthSample banks, XMA).
 
 Tools (Python 3, stdlib only):
 
@@ -225,6 +226,252 @@ trim and tolerate them.
 
 Tutorial charts have only `PART GUITAR` and `EVENTS` (`[end]`) at 120 BPM,
 although songs.dta gives them `(bpm 108)`.
+
+## 4. Sound effects (SynthSample banks)
+
+[C] = confirmed in the executable (addresses are functions in
+`gd-game-02/analysis`), [C data] = checked over every file on the disc,
+[I] = inference.
+
+### Where they are
+
+313 SynthSamples in 15 milos [C data]: `sfx/gen/{ingame,metagame,practice,
+song_default}_bank`, `tutorial/gen/tutorial_bank`, the eight
+`world/<v>/gen/<v>_bank` (a venue chain's last directory, docs/venues.md),
+`char/shared/gen/guitar_smashing_sounds` and `system/run/char/gen/chartest`
+(an earlier count of 329 was wrong: 313 class-table entries, 313 records).
+Rates: 22050 Hz 161, 44100 Hz 144, 16000 Hz 8; 900.6 s in all; 5 loop.
+`config/sound.dta` names the banks the Synth keeps loaded: `(banks (game
+sfx/ingame_bank) (meta sfx/metagame_bank) (tutorial tutorial/tutorial_bank))`
+[C data]; a venue's bank comes with its world. The bank milos also hold
+`Sfx` (346), `SfxSeq` (180), `RandomGroupSeq` (39), `SerialGroupSeq` (8),
+`WaitSeq` (8) and `FxSendReverb` objects.
+
+`.hxma` is something else: the Synth's streams (`0x826820D8`) open
+`<name>.hxma` when `use_xma` is set, else `<name>.mogg` [C]; the retail
+`config/synth.dta` has `(use_xma FALSE)` and no `.hxma` is on the disc
+[C data]. `XMABuffer` (`0x82687380`) is that streamed reader, not the
+samples' path.
+
+### SynthSample v5 and SampleData v11
+
+- **SynthSample::Load** `0x822FEAB8` [C]: u32 revision (< 6); Hmx::Object
+  (rev > 1, the usual 13 bytes); file path (`../samples/x.wav`); u8
+  looping; i32 loop start; i32 loop end (rev > 2; −1 = the end); then, when
+  the Synth loads samples from the bank (a global flag) and rev ≥ 5,
+  SampleData::Load; otherwise (rev ≥ 4) it would load the `.wav` from disk.
+- **SampleData::Load** `0x823005F8` [C]: u32 revision (< 12); u32 format;
+  u32 sample count; u32 rate; u32 size in bytes; u8 **has data** (rev > 10;
+  1 when absent); then `size` bytes into physical memory ("SampleData(phys)",
+  allocator `*0x8280e6b0`). Older data has no revision: its first u32 is
+  the rate (1001–150000 Hz), then the size. The format's byte-size estimate (`0x82300790`): 0 / 1 →
+  count × 2 (16-bit PCM), 2 → ((count + 111) / 112) × 64, 3 → count / 5
+  (XMA) [C]; every sample on the disc is format 3 [C data].
+- **The data is plain XMA2** [C data, decoder-verified]: one mono stream,
+  2048-byte packets in stream order. The earlier "packets out of order"
+  reading came from starting the data one byte early: the byte before it is
+  the has-data flag, so there is no trailing byte. Each packet starts with
+  the XMA2 header (big-endian bits: 6 frame count, 15 first-frame bit offset
+  after the header, 3 metadata = 1, 8 packet skip = 0); every fourth packet
+  has offset 0 (the encoder starts a frame on each 8 KiB block) [C data]; the
+  last packet may be the padding packet `0x03FFF800` (no frame, metadata 0).
+  FFmpeg's `xma2` decoder (one stream, XMA2WAVEFORMATEX channel mask
+  centre) decodes all 313 to exactly their SampleData sample count with no
+  error [C data], the start skip and end trim coming from the stream itself.
+  Loop points are all inside the sample [C data].
+- Python reference (L21; kept outside the repository, it writes decoded
+  audio): parse the record, wrap the data in a RIFF `WAVE_FORMAT_XMA2`
+  (0x166) header and decode with an FFmpeg built from the same 7.1.5 tarball
+  with the `xma2` decoder. Checks over all 313: no decoder error, decoded
+  frames = sample count, loops in range, RMS 0.028–0.398, the peaks at full
+  scale only on loud hits (guitar smashes, miss chinks); spectrograms show
+  ordinary effects (the 44.1 kHz ones band-limited near 16 kHz). gd02's decoder
+  matches the reference within 1 LSB (16-bit rounding) on every sample.
+
+### Sfx and the sequences
+
+Each Load was found through the class's ClassName virtual (Sfx
+`0x822EDFC8`, SfxSeq `0x822F2E60`, WaitSeq `0x822F30A0`, RandomGroupSeq
+`0x822F3A80`, SerialGroupSeq `0x822F3D88`) → vtable (Load six slots later)
+[C]; property names from each SyncProperty.
+
+- **Sfx v5** `0x822EE8B0` (props `0x822EE598`) [C]: Hmx::Object (rev > 1);
+  `sfxmaps`: u32 count, each SfxMap (`0x822FF580`): sample name (ObjPtr
+  SynthSample), and for rev > 2 f32 volume (dB), f32 pan, f32 transpose
+  (semitones), i32 fx core (kFXCoreNone / kFXCore0 / kFXCore1, the PS2's
+  SPU2 cores: system/run/config/synth_objects.dta), for rev > 3 an ADSR;
+  then (rev > 4) `send` (an FxSend: `FXverb.send` / `SPverb.send` on 8,
+  else empty) and f32 `send_volume` (1.0 on 341). A stereo sound is two maps
+  of mono samples panned −1 and 1 [C data].
+- **ADSR v1** `0x822F8E50` [C]: f32 attack_rate, decay_rate, sustain_rate,
+  release_rate (seconds), sustain_level, then u32 attack_mode, sustain_mode,
+  release_mode (offsets from SyncProperty `0x822EC0E0`). The PS2 packs them
+  into SPU2 ADSR registers (`0x822F8CE0`, tables at `0x8204E290`...); the
+  360 uses attack_rate and release_rate only (below). In the data: attack
+  1.3 ms on 472 maps, 1 ms on 92, up to 1 s on a few; release 5.8 ms / 5 ms,
+  up to 1.5 s [C data].
+- **FxSendReverb v1** `0x822FC6F0` [C]: FxSend (`0x823000D8`: u32 rev < 2,
+  Hmx::Object, next_send ObjPtr, stage i32), then the environment symbol
+  (an I3DL2 preset name). Three in the data: ingame_bank `SPverb.send`
+  (plate) and `FXverb.send` (small_room), tutorial_bank `SPverb.send`
+  (plate); 8 Sfx send to them (sp_gemhit1–4, beat_venue / easy / other,
+  drummer_exp) [C data].
+- **Sequence v1** `0x822EFB30` (props `0x822EFBE8`) [C]: avg_volume,
+  volume_spread, avg_transpose, transpose_spread, avg_pan, pan_spread. The
+  sequence records of these revisions carry no Hmx::Object block (SfxSeq
+  rev < 3 would).
+- **SfxSeq v3** `0x822F1280`: Sequence, the child (ObjPtr Sequence; empty in
+  song_default_bank). **WaitSeq v2** `0x822EFFE0`: Sequence,
+  avg_wait_seconds, wait_spread. **GroupSeq v3** `0x822F4C20`: Sequence,
+  children (u32 count, names). **RandomGroupSeq v1** `0x822F5100`: GroupSeq,
+  u32 num_simul. **SerialGroupSeq v1** `0x822F5200`: GroupSeq [C].
+
+### Playing them
+
+How the 360 build plays a sound, from the Synth360 classes (`Synth360`
+vtable `0x820D4CF4`, `SampleInst360` vtable `0x820D5C94`, `Voice`
+`0x82689618`...) [C unless marked]:
+
+- **Sfx::Play** `0x822ED7F0` (the caller's volume dB, pan, transpose): one
+  SampleInst per map (`0x822ED458`). Its volume is the product of three
+  linear factors, each through dB → linear (`0x826910A0`: 10^(dB/20), 0 at
+  ≤ −96): the caller's, the map's and the Sfx's fader group (the Synth's
+  master Fader is in every Sfx's group, Sfx ctor `0x822EE190`) (`0x822FF828`
+  / `0x822FF880` / `0x822FF8D8`); the voice clamps it to 0..1 (`0x8268A078`).
+  Pan = caller's + map's (`0x822FF6E0`), wrapped to −4..4 as fmod(p + 4, 8)
+  − 4 (`0x8268A0A8`). Speed = 2^(caller's transpose / 12) × 2^(map's / 12)
+  (`0x822FFAB8`, `0x822FF720`), at least 0.01 and, for XMA, at most 2
+  (`0x8268A100`); XAudio gets it as pitch in octaves (12/ln 2 × ln speed /
+  12, `0x822FFAF0`, `0x82689BB0`). The map's fx core goes to an empty slot
+  (SampleInst360 +0x48 = `0x822F5468`): **the 360 has no FX cores**, and
+  config/synth.dta's `(fx (chain) (core_0 kFXModeEcho ...) (core_1
+  kFXModeLargeStudio ...))` reach only empty Synth360 slots (+0x4C ... +0x6C,
+  set by `0x822E6C20`); `set_fx` / `set_fx_vol` likewise. Re-playing a
+  playing instance stops it first (`0x822FF7E8`).
+- **The voice** (`0x82689C68`, one XAudio source voice per play): rate =
+  int(SampleData rate × 0.9975) (`0x82689768`, the float at `0x820D5C88`) —
+  the effects play 0.25 % slow; XMA loop points round down to 128-frame
+  multiples. XAudio mixes at 48 kHz in 256-frame passes.
+- **Envelope**: GH2's own XAudio effect (id 4, vtable `0x820D4F6C`) on every
+  voice; SetADSR `0x8268A590` passes only attack_rate and release_rate
+  (×48000 frames, `0x82684430`); Stop (`0x826896F0`) starts the release.
+  Process `0x826844C8`: per 256-frame pass the gain moves 60 dB × 256 /
+  frames dB (up in the attack, down in the release) from a −60 dB floor,
+  stepping linearly in amplitude across the pass; the attack ends at 0 dB
+  (then the voice passes through), the release when below −60 dB (then
+  silence, and the voice no longer counts as playing: IsPlaying
+  `0x826897A8` asks the effect). The first pass starts from gain 0. Decay,
+  sustain and the modes are not used on the 360.
+- **5.1 pan** (`0x826898C8`): equal power (cos / sin of a quarter turn)
+  between neighbouring speakers at −5 RR, −3 RL, −1 FL, 0 C, 1 FR, 3 RR,
+  5 RL, times the clamped volume, to the mastering voice (FL FR C LFE RL RR).
+- **Sends** (`0x826898C8`, `0x8268A168`): a voice whose Sfx has a send
+  (dynamic_cast to FxSend360) also outputs to the send's three submix voices
+  (FxSend360 `0x826861D0` / `0x826863D0`: front 2 ch, centre 1 ch, rear 2 ch,
+  48 kHz) at send_volume (clamped 0.0001..5) × the pan gains — **not** times
+  the voice's volume; for an FxSendReverb the centre also gets half of each
+  front and each rear its side's front. Each submix voice runs XAudio's
+  reverb (effect id 3) set to the environment's I3DL2 preset (the 30-entry
+  table in `0x826848A0`, SetEffectParam(0, 1, I3DL2, 0x30 bytes)); without a
+  next_send their output maps take input channels 0 (/ 1) to the master's
+  FL FR / C / RL RR (`0x826861D0`).
+- **XAudio's reverb** (effect id 3: create `0x826AB9A8`, factory
+  `0x826AD5D8`, Process `0x826AD2F0` → `0x826AD0E0` → network `0x826AB9C0`;
+  I3DL2 → native `0x826B6A18` → `0x826B6740` → `0x826B4D48`, the same mapping
+  as XAudio2's ReverbConvertI3DL2ToNative, delay lengths rounded to primes
+  by `0x826BDC20`) [C]: a 16384-sample cross-fading reflections delay, a
+  two-pole room filter (`0x826AA970`), tapped delays and all-passes
+  (`0x826AAAA0`…`0x826AB320`), a late field of 12 all-passes, 4 two-tap
+  delays and 10 decay-EQ filters, 4 output all-passes (`0x826AB048`) and a
+  5 ms rear delay (`0x826AB3C8`). Its output is 5.1 (FL FR SL SR written,
+  C LFE untouched), wet only (wet = parameter 2, never set by GH2, so 1.0;
+  output stage `0x826ACF54`). A mono submix voice feeds both halves of the
+  network. gd02's port (`audio/xaudio_reverb.{h,cpp}`) matches the original
+  code run in a PowerPC interpreter bit for bit (all 30 presets + 300 random
+  parameter sets for the conversion; impulses and noise, preset switches,
+  for the output) [C]. That the submix voices' output maps apply to the
+  effect's output channels (so each voice's reverb FL / FR return and its SL
+  SR do not) is XAudio's voice semantics [I]. An environment not in GH2's
+  table makes GH2 read one entry past it (garbage); gd02 uses "default".
+- **Master limiter**: GH2's XAudio effect id 9 on the mastering voice
+  (`0x82682958`, params `0x82682A68`), from default.dta `(synth (limiter
+  (attack_ms 1) (release_ms 50) (threshold -2)))` (Synth360::Init
+  `0x82682558`), on from the start; `synth toggle_limiter` flips it
+  (`0x826822C8`). Per frame: peak over the channels; above threshold × g the
+  divisor g grows 1 / (attack × 48000), else falls 1 / (release × 48000),
+  never below 1; the output is divided by g. It covers everything
+  (songs, crowd, effects).
+- **Stereo**: the master is 5.1; folding it to stereo is the console's
+  system software, not GH2 [I: gd02 uses the ITU-R BS.775 Lo/Ro fold, FL +
+  0.7071 C + 0.7071 RL; 20 maps pan into the rears].
+- **No voice limit or stealing** in GH2's play path (`0x822ED458` →
+  `0x8268A3C0` → `0x82689C68`); a failed XAudio voice is silent [C]; gd02
+  caps at 256 voices and starts nothing beyond [I].
+- **Sequences**: each child gets RandomFloat(avg − spread, avg + spread) (a
+  16-bit draw, `0x8226DDA0`) added to volume / transpose / pan (SfxSeq
+  `0x822F0398` / `0x822F0410` / `0x822F0488`, groups per child `0x822F0560`
+  / `0x822F06A0` / `0x822F0600`); WaitSeq waits avg ± spread (`0x822EF118`).
+  **RandomGroupSeq** (`0x822F4F18`): n = min(num_simul, children) (num_simul
+  1 on 35, 2 on 4); n = 1 picks RandomInt(0, children) uniformly; otherwise
+  selection sampling over the list in order (taken when needed = left, or
+  when RandomFloat ≤ needed / left); no repeat rule; num_simul 0 plays
+  nothing. SerialGroupSeq: one after another [I: from the instance class].
+- **Script messages** (Synth::Handle `0x822EAB08`): `play_sequence <name>
+  (volume dB) (pan p) (transpose t)` (`0x822E8A90`; the Sfx's `play` takes
+  the same), `stop_all_sfx` (Sfx and sequences), `pause_all_sfx` (Sfx
+  instances), `set_master_vol <dB>` / `master_vol` (the master Fader,
+  `0x822F7878`; the mute cheat uses kDbSilence), `toggle_limiter`,
+  `toggle_hud` (debug), `set_fx` / `set_fx_vol` (PS2 only).
+- **The options' effects volume** is not a global gain: `{options
+  get_fx_volume}` (dB from the slider table) is passed as the volume of the
+  game's own sounds — system_script.dta play_game_sfx / play_game_sequence,
+  world_objects_worldbase.dta play_sfx — and of the crowd's reactions
+  (`0x822DF350` with `0x822DF140`: fx volume, 0 dB in the attract mode).
+  Menu sounds (button_select...) play at 0 dB.
+- The crowd's reactions (CrowdAudio `0x822DFAB0`, `0x822DF590`,
+  `0x822DF350`) [C]: crowd_begin (intro), crowd_win (game_won_msg),
+  crowd_lose (game_lost) and per excitement change
+  `crowd_<upto|dnto>_<danger poor norm good peak>` (slot (level + 14) × 2 +
+  (previous ≤ level)); a new reaction stops the one playing. The banks have
+  upto_poor / norm / good and dnto_danger / poor / norm only: the others
+  (dnto_good, upto_peak) are null and silent [C data].
+- **The menus' background sounds** (MetaMusic `0x822A23F8`, poll
+  `0x822A1C10`): config/synth.dta `(background_sfx (sequence meta_people)
+  (min_delay_sec 10) (max_delay_sec 20))`; at start (`0x822A1D60`) and after
+  each check the next is due RandomFloat(min, max) s later (`0x822A1440`);
+  when due it plays the sequence (0 dB) only if the menu music stream is
+  playing, and reschedules either way; stop (`0x822A1330`) clears it [C].
+- The options' sound effects volume: `config/sound.dta (options_screen
+  (slider -96 -28 -24 -20 -16 -12 -10 -8 -6 -4 -2 0))` dB per index
+  [C data].
+
+### In gd02
+
+`scene/synth_objects.{h,cpp}` (the classes; --scenetest decodes all of
+them), `audio/xma_decoder.{h,cpp}` (FFmpeg's xma2, the LGPL libraries the
+videos use: `--enable-decoder=xma1,xma2` in build_common.sh),
+`audio/sfx_dsp.{h,cpp}` (envelope, pan, sends, stereo fold, limiter, dB),
+`audio/xaudio_reverb.{h,cpp}` (XAudio's reverb), `audio/sfx_player.{h,cpp}`
+(48 kHz voices in 256-frame passes, the send buses, the 5.1 master folded to
+stereo), `audio/audio_device.{h,cpp}` (one logical SDL device for the song,
+the crowd and the effects, with the master limiter as its postmix) and
+`audio/synth.{h,cpp}` (the banks, the sequences, a decode cache: the three
+config banks decode at load in ~0.15 s, a venue's bank with the venue).
+The UI's `synth play_sequence` / `play_sfx` / `play_meta_sfx` (with their
+volume / pan / transpose), `stop_sfx`, `synth stop_all_sfx` /
+`pause_all_sfx` / `set_master_vol` / `master_vol` / `toggle_limiter`, the
+venues' `<sfx> play` / `stop`, EventTrigger sounds and the crowd's reactions
+play. `gd02 --sfxtest` checks the voice DSP against the rules above (numbers
+only), decodes every sample and checks the banks, the sends and the names
+the scripts play (`GD02_SFX_DUMP=<dir>` writes WAVs).
+
+Not exact: XAudio's sample-rate converter (linear here), the console's
+5.1 → stereo fold (ITU here), the limiter running on the device's mix (its
+rate and channels) rather than the 48 kHz 5.1 master, the random number
+generator (same distributions, not GH2's sequence), SerialGroupSeq's
+details [I], the master Fader fade GH2 applies in `0x822D50E0` (not
+reproduced), the reverb's pow / log10 / cos coming from the host's C
+library (last-bit differences never seen in 330 parameter sets).
 
 ## Open questions
 

@@ -15,7 +15,9 @@
 #include "script/script.h"
 
 struct DataNode;
+class Band;
 class Crowd;
+class Synth;
 
 // A venue at run time, GH2's WorldDir (docs/venues.md): its clock, the
 // animations its EventTriggers and scripts start, the EventTriggers
@@ -43,8 +45,9 @@ class Crowd;
 //   a fired trigger waits for one of those. Firing plays its anims (with
 //   their own filter when the entry enables one), shows objects, hides
 //   others after their delays (seconds), calls its proxies (the message
-//   goes to the proxy directory's script type and triggers), logs its
-//   sounds (no sound banks yet) and fires next_random.
+//   goes to the proxy directory's script type and triggers), plays its
+//   sounds (the venue bank's Sfx / sequences, audio/synth.h) and fires
+//   next_random.
 // - The `world` object: the venue's WorldDir type (world_objects.dta,
 //   WORLD_OBJECT_BASE + world/<v>/<v>.dta) run by the interpreter, its
 //   messages forwarded to the chain's RndDir types (lighting, chars, geom:
@@ -105,14 +108,31 @@ public:
     // to the sink (the WorldCrowd's crowd.dta: intro_start_msg, crowd_update,
     // excitement, crowd_hide, crowd_lighters_*, crowd_*_tempo).
     void addSink(ScriptObject* sink, const std::vector<std::string>& messages);
+    // {dir remove_sink obj}: every message of that sink (the band on game_over and when it goes).
+    void removeSink(ScriptObject* sink);
     // The audience and its audio (game/crowd.h).
     Crowd& crowd() { return *crowd_; }
+    // The sound effects (audio/synth.h): the venue bank's Sfx and sequences
+    // (`play` / `stop`, EventTrigger sounds, the crowd's cues) play through
+    // it; without one they are reported as world_sfx STUBs.
+    void setSynth(Synth* synth) { synth_ = synth; }
+    Synth* synth() const { return synth_; }
+    // The band on stage (game/band.h), when one is loaded: the director's
+    // targets and band queries use it (venueObjectXfm).
+    Band* band = nullptr;
+    // Plays / stops a sound object of the venue by name (resolved from
+    // `from`'s directory first when given); false when there is none.
+    // `volumeDb` / `pan` / `transpose`: the caller's (audio/synth.h).
+    bool playSound(const std::string& name, const scene::Directory* from = nullptr, float volumeDb = 0, float pan = 0,
+                   float transpose = 0);
+    void stopSound(const std::string& name);
     // The script object of a venue object (created on first use).
     ScriptObject* scriptFor(scene::Object* o) { return objectFor(o); }
     // The world panel entered (WORLD_OBJECT_BASE enter + `start`): call
     // once the venue is up; with `players`, then single_player (or
     // multi_player), as world_panel's enter script sends.
     void start(bool multiplayer, bool players = true);
+    bool started() const { return started_; }
 
     // Animations.
     struct AnimArgs {
@@ -236,4 +256,6 @@ private:
     std::vector<Listener> listeners_;
     std::multimap<std::string, ScriptObject*> sinks_;
     std::unique_ptr<Crowd> crowd_;
+    bool started_ = false;
+    Synth* synth_ = nullptr;
 };

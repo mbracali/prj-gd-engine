@@ -14,7 +14,10 @@
 #include "tests/scripttest.h"
 #include "tests/selftest.h"
 #include "tests/uitest.h"
+#include "tests/sfxtest.h"
+#include "tests/facefxtest.h"
 #include "tests/venuetest.h"
+#include "tests/chartest.h"
 #include "video/wmv_player.h"
 
 namespace {
@@ -31,12 +34,17 @@ void usage() {
         "  --scenetest          parse every .milo_xbox scene and report decoded objects per class\n"
         "  --scripttest         load every script, run the boot scripts with stub objects and report (GD02_UILOG=1 logs\n"
         "                       UNHANDLED / STUB / UNKNOWN script messages once each, also in the game)\n"
+        "  --sfxtest            decode every sound effect (XMA SynthSamples) and check the banks and the sounds the\n"
+        "                       scripts play (GD02_SFX_DUMP=<dir> writes them as WAVs)\n"
+        "  --facefxtest         parse every FaceFX .voc / .fac and check the lip servo's face graph against reference values\n"
         "  --shadertest         compile every shader on this GPU and report (no game data; GD02_GLES=1: OpenGL ES)\n"
         "  --view <milo>        draw one scene, e.g. world/stone/gen/stone.milo_xbox (development viewer); a UI\n"
         "                       panel (ui/gen/main.milo_xbox) draws with its components and texts (GD02_VIEW_LANG=\n"
         "                       eng|fre|deu|ita|esl, GD02_VIEW_FOCUS=<button>, GD02_VIEW_UI=0 plain scene)\n"
         "  --playmovie <name>   play one of the disc's videos (intro.wmv, hmx.wmv, wg.wmv), then quit\n"
         "  --uitest             run GH2's menu scripts headlessly: every screen and panel, their milos and components\n"
+        "  --chartest           decode every character class on the disc (clips, rigs, band slots), check the counts\n"
+        "                       and golden poses\n"
         "  --venuetest          load the 8 venues (one player, face-off, co-op): their milos, classes, references and\n"
         "                       scripts, headlessly\n"
         "  --walktest <walk>    play through the menus with scripted buttons and check them: quickplay, lose, pause,\n"
@@ -67,7 +75,7 @@ void usage() {
 
 int main(int argc, char** argv) {
     Options opt;
-    bool selftest = false, scenetest = false, shadertest = false, scripttest = false, uitest = false, venuetest = false;
+    bool selftest = false, scenetest = false, shadertest = false, scripttest = false, uitest = false, venuetest = false, sfxtest = false, facefxtest = false, chartest = false;
     std::string viewPath, movie;
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
@@ -88,6 +96,9 @@ int main(int argc, char** argv) {
         else if (a == "--scripttest") scripttest = true;
         else if (a == "--uitest") uitest = true;
         else if (a == "--venuetest") venuetest = true;
+        else if (a == "--chartest") chartest = true;
+        else if (a == "--sfxtest") sfxtest = true;
+        else if (a == "--facefxtest") facefxtest = true;
         else if (a == "--walktest") opt.walk = value();
         else if (a == "--view") viewPath = value();
         else if (a == "--playmovie") movie = value();
@@ -96,7 +107,7 @@ int main(int argc, char** argv) {
         else if (a.rfind("-psn_", 0) != 0) opt.dataPath = a;
     }
     if (shadertest) return runShaderTest();
-    if ((selftest || scenetest || scripttest || uitest || venuetest || !opt.walk.empty() || !viewPath.empty() || !movie.empty()) && opt.dataPath.empty()) {
+    if ((selftest || scenetest || scripttest || uitest || venuetest || sfxtest || facefxtest || chartest || !opt.walk.empty() || !viewPath.empty() || !movie.empty()) && opt.dataPath.empty()) {
         usage();
         return 2;
     }
@@ -104,6 +115,9 @@ int main(int argc, char** argv) {
     if (scripttest) return runScriptTest(opt.dataPath);
     if (uitest) return runUiTest(opt.dataPath);
     if (venuetest) return runVenueTest(opt.dataPath);
+    if (chartest) return runCharTest(opt.dataPath);
+    if (sfxtest) return runSfxTest(opt.dataPath);
+    if (facefxtest) return runFaceFxTest(opt.dataPath);
     if (!viewPath.empty()) return runSceneView(opt.dataPath, viewPath);
     if (!movie.empty()) return runPlayMovie(opt.dataPath, movie);
     return selftest ? runSelfTest(opt.dataPath) : runApp(opt);

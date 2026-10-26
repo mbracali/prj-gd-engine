@@ -51,7 +51,7 @@ public:
 
     bool isTask(const ScriptObject* o) const;
     bool kill(ScriptObject* task);           // false if it is not a live task
-    void killFor(const ScriptObject* self);  // ends the tasks whose $this is `self` (its object is going away)
+    void killFor(const ScriptObject* self);  // ends tasks whose $this (or a captured object) is `self`
     size_t count() const;                     // live tasks
 
 private:

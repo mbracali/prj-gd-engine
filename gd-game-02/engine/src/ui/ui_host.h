@@ -69,6 +69,18 @@ public:
     virtual void worldUnload() {}
     virtual ScriptObject* worldScript() { return nullptr; }
 
+    // GH2's Synth (audio/synth.h): plays the bank sound `name` (the game's
+    // banks of config/sound.dta, then the venue's); false when none has it.
+    virtual bool playSfx(const std::string& /*name*/) { return false; }
+    // The same with the caller's volume (dB), pan and transpose (ui/sfx_args.h).
+    virtual bool playSfxArgs(const std::string& name, float /*volumeDb*/, float /*pan*/, float /*transpose*/) { return playSfx(name); }
+    // `synth set_master_vol` / `master_vol` (dB; audio/synth.h).
+    virtual void setSfxMasterDb(float /*db*/) {}
+    virtual float sfxMasterDb() { return 0; }
+    virtual void stopSfx(const std::string& /*name*/) {}
+    virtual void stopAllSfx() {}
+    virtual void pauseAllSfx(bool /*paused*/) {}
+
     // song_preview: loops the song's (preview a b) section; "" stops it.
     virtual void songPreview(const std::string& songId) = 0;
     // meta_music start / stop: the menus' music loops (config/synth.dta metamusic).

@@ -10,10 +10,13 @@
 #include <set>
 
 #include "app_ids.h"
+#include "char/char_objects.h"
 #include "data/game_data.h"
 #include "devaids/screenshot.h"
+#include "game/band.h"
 #include "game/crowd.h"
 #include "game/world.h"
+#include "render/band_view.h"
 #include "render/canvas.h"
 #include "render/crowd_view.h"
 #include "render/renderer.h"
@@ -24,6 +27,7 @@ namespace {
 
 bool drawable(const scene::Object* o) {
     return o->as<scene::Mesh>() || o->as<scene::Group>() || o->as<scene::ParticleSys>() || o->as<scene::WorldCrowd>() ||
+           o->as<scene::CharacterObj>() ||  // a band slot (render/band_view.h)
            (o->as<scene::DirObj>() && !o->as<scene::DirObj>()->own);
 }
 
@@ -64,6 +68,7 @@ VenueView::VenueView(World& world, gfx::SceneCache& cache) : world_(world), cach
     dynamic_ = std::make_unique<gfx::DynamicMesh>(cache.device());
     spotlights_ = std::make_unique<gfx::SpotlightView>(world, cache);
     crowdView_ = std::make_unique<CrowdView>(world, cache);
+    bandView_ = std::make_unique<BandView>(world, cache);
     build();
     setShot(world_.firstShot());
 }
@@ -94,6 +99,8 @@ bool venueObjectXfm(const World& world, const std::string& name, bool multiplaye
     static const std::pair<const char*, uint32_t> kSlots[] = {{"guitarist0", 1},  {"guitarist1", 2}, {"singer", 4},
                                                               {"keyboard", 8},    {"bassist", 16},   {"drummer", 32}};
     const Venue& v = world.venue();
+    // The band, when loaded: the member itself (game/band.h).
+    if (world.band && world.band->objectXfm(name, "", out)) return true;
     for (const auto& [slot, flag] : kSlots) {
         if (name != slot) continue;
         const uint32_t want = multiplayer && flag == 1 ? 512u : flag;
@@ -225,6 +232,9 @@ void VenueView::drawObject(gfx::MaterialRenderer& mr, const scene::Object* o, co
             if (auto* e = g->dir->resolve<scene::Environ>(g->environment)) env = e;
         for (const std::string& n : g->objects)
             if (const scene::Object* c = g->dir ? g->dir->resolve(n) : nullptr; c && c != g) drawObject(mr, c, env, base, depth + 1);
+    } else if (o->as<scene::CharacterObj>()) {
+        // A band slot: its member, when the band is loaded.
+        bandView_->draw(mr, o, env, camera_, hdr_, [&](const scene::Environ* e) { selectEnv(mr, e); });
     } else if (auto* c = o->as<scene::WorldCrowd>()) {
         // The audience (render/crowd_view.h).
         selectEnv(mr, env);

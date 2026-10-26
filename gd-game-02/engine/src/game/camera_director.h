@@ -137,6 +137,8 @@ private:
     bool starPower_ = false;
     bool pickEnabled_ = true, freeCam_ = false;
     std::vector<const scene::CamShot*> sequence_;
+    double nearestBeat_ = -1e30;               // cam_check_shot's nearest walk spot, once per beat
+    const scene::Waypoint* nearest_ = nullptr;
     double lastSeconds_ = 0;
     uint32_t rng_;
     int started_ = 0, failedPicks_ = 0;

@@ -8,6 +8,8 @@
 #include <map>
 #include <stdexcept>
 
+#include "char/char_objects.h"
+#include "scene/synth_objects.h"
 #include "scene/ui_objects.h"
 #include "scene/world_objects.h"
 
@@ -831,7 +833,7 @@ void readDrawAt(const Bytes& record, size_t& pos, Draw& d) {
 }
 
 bool isTypedClass(const std::string& cls) {
-    return decoders().count(cls) != 0 || isDirClass(cls) || isUiClass(cls) || isWorldClass(cls);
+    return decoders().count(cls) != 0 || isDirClass(cls) || isUiClass(cls) || isWorldClass(cls) || isSynthClass(cls) || isCharClass(cls);
 }
 
 std::unique_ptr<Object> decodeObject(const std::string& cls, const std::string& name, const uint8_t* data, size_t size) {
@@ -839,23 +841,29 @@ std::unique_ptr<Object> decodeObject(const std::string& cls, const std::string& 
     auto it = m.find(cls);
     const bool ui = it == m.end() && isUiClass(cls);  // scene/ui_objects.h
     const bool world = it == m.end() && !ui && isWorldClass(cls);  // scene/world_objects.h
+    const bool synth = it == m.end() && !ui && !world && isSynthClass(cls);  // scene/synth_objects.h
+    const bool chr = it == m.end() && !ui && !world && !synth && isCharClass(cls);  // char/char_objects.h
     std::unique_ptr<Object> o = it != m.end() ? it->second.make()
                                 : ui          ? makeUiObject(cls)
                                 : world       ? makeWorldObject(cls)
+                                : synth       ? makeSynthObject(cls)
+                                : chr         ? makeCharObject(cls)
                                               : std::make_unique<Object>();
     o->cls = cls;
     o->name = name;
     o->record.assign(data, data + size);
-    o->typed = it != m.end() || ui || world;
+    o->typed = it != m.end() || ui || world || synth || chr;
     if (size >= 4) o->version = uint32_t(data[0]) | uint32_t(data[1]) << 8 | uint32_t(data[2]) << 16 | uint32_t(data[3]) << 24;
     if (!o->typed) return o;
     try {
         size_t left = 0;
-        if (ui || world) {
+        if (ui || world || synth || chr) {
             size_t pos = 4;
             if (size < 4) bad("record too short");
             if (ui) readUiObject(*o, o->record, pos);
-            else readWorldObject(*o, o->record, pos);
+            else if (world) readWorldObject(*o, o->record, pos);
+            else if (synth) readSynthObject(*o, o->record, pos);
+            else readCharObject(*o, o->record, pos);
             left = size - pos;
         } else {
             In in(o->record.data(), o->record.size());
