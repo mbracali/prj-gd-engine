@@ -21,7 +21,8 @@ Status: ✅ done · 🟡 partly done / approximated · ❌ not started
 | Research | Charts: GH1 note layout + PART BASS / RHYTHM / GUITAR COOP, EVENTS, TRIGGERS | `tools/midi_chart.py` |
 | Research | Scenes: all 503 `.milo_xbox` (directory v25, deflate blocks, inline sub-dirs) | `tools/milo.py`; `docs/milo_and_textures.md` |
 | Research | Textures: all 3,533 (DXT1 / DXT5 / BC5, 16-bit swap, no tiling) | `tools/tex.py` |
-| Research | Executable in Ghidra: XEXLoaderWV plugin, 24,029 functions | REA cannot open XEX (no PowerPC); project in `ghidra/`, export in `analysis/` (both git-ignored) |
+| Research | Executable in Ghidra: XEXLoaderWV plugin | REA cannot open XEX (no PowerPC); project in `ghidra/`, export in `analysis/` (both git-ignored) |
+| Research (R1) | Complete export: functions rebuilt from `.pdata` (save/restore helpers inlined and returning), 35,365 `lis`/lo references, 28,394 functions, 5,732 strings with their users, `refs.tsv` | `tools/ghidra_scripts/` (FixXexFunctions, ExportAnalysisXex, README); VMX128 opcodes stay undecoded (a Ghidra PowerPC gap) |
 | Research | Gameplay rules from the code: watcher, HOPO, scoring, Star Power, rock meter, practice, two-player modes | `docs/FINDINGS.md` |
 | Research | What gd-game-01 gives gd02, and its lessons | `docs/reuse_and_lessons.md` |
 | Engine (M1/M3/M4) | gd02 skeleton: disc image or folder, ARK, DTB, song list, charts for every part, `.mogg` via stb_vorbis, mixer with guitar mute | `engine/`; version 0.1.0 |
@@ -30,9 +31,7 @@ Status: ✅ done · 🟡 partly done / approximated · ❌ not started
 
 ## In progress
 
-| # | Area | Item | Status | Notes |
-|---|---|---|---|---|
-| R1 | Research | Complete Ghidra export: rebuild functions from `.pdata` (the save/restore helpers were taken as non-returning), string references from `lis`/`addi` pairs | 🟡 | ~6,280 functions were cut short in the first export |
+Nothing right now.
 
 ## Open
 
