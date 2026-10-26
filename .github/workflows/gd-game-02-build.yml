@@ -1,0 +1,162 @@
+# Builds the gd-game-02 (gd02) downloads with the same scripts as
+# gd-game-02/local_build.sh. Called by gd-game-02-release.yml; can also be
+# started by hand (Actions > gd-game-02 build > Run workflow) to get test
+# builds of any branch without releasing. Nothing runs it automatically.
+name: gd-game-02 build
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        type: string
+        required: true
+      release:
+        type: boolean
+        default: false
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Name used in the file names
+        type: string
+        default: test
+      macos:
+        description: Build macOS too (its minutes count 10x)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  V: ${{ inputs.version }}
+
+jobs:
+  windows:
+    name: Windows
+    runs-on: ubuntu-latest
+    container: fedora:44
+    timeout-minutes: 20
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CMAKE_C_COMPILER_LAUNCHER: ccache
+      CMAKE_CXX_COMPILER_LAUNCHER: ccache
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install the MinGW toolchain
+        run: dnf install -y --setopt=install_weak_deps=False cmake ninja-build ccache mingw64-gcc-c++ mingw64-SDL3 zip >/dev/null
+      - uses: actions/cache@v6
+        with:
+          path: .ccache
+          key: ccache-gd02-mingw-${{ github.sha }}
+          restore-keys: ccache-gd02-mingw-
+      - run: gd-game-02/engine/build_windows.sh
+      - run: gd-game-02/engine/package.sh windows "$V" out
+      - uses: actions/upload-artifact@v7
+        with:
+          name: gd02-windows-x64
+          path: gd-game-02/engine/out/
+          retention-days: 3
+
+  linux:
+    # Ubuntu 22.04 with SDL3 shipped next to the program: runs on any
+    # distribution from 2022 on without installing anything.
+    name: Linux
+    runs-on: ubuntu-latest
+    container: ubuntu:22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/cache@v6
+        with:
+          path: gd-game-02/engine/build/portable/sdl3-prefix
+          key: sdl3-gd02-ubuntu2204-${{ hashFiles('gd-game-02/engine/build_linux_portable.sh') }}
+      - run: gd-game-02/engine/build_linux_portable.sh
+      - run: gd-game-02/engine/dist/gd02-linux-x86_64/gd02 --help
+      - run: gd-game-02/engine/package.sh linux "$V" out
+      - uses: actions/upload-artifact@v7
+        with:
+          name: gd02-linux-x86_64
+          path: gd-game-02/engine/out/
+          retention-days: 3
+
+  steamdeck:
+    # Valve's Steam Runtime 3 SDK, the environment Steam runs games in: runs
+    # from Steam's Game Mode and the desktop, with the handheld defaults.
+    name: Steam Deck
+    runs-on: ubuntu-latest
+    container: registry.gitlab.steamos.cloud/steamrt/sniper/sdk:latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - run: gd-game-02/engine/build_linux_steamdeck.sh
+      - run: gd-game-02/engine/dist/gd02-steamdeck/gd02 --help
+      - run: gd-game-02/engine/package.sh steamdeck "$V" out
+      - uses: actions/upload-artifact@v7
+        with:
+          name: gd02-steamdeck
+          path: gd-game-02/engine/out/
+          retention-days: 3
+
+  macos:
+    name: macOS
+    if: inputs.release || inputs.macos
+    runs-on: macos-latest
+    timeout-minutes: 30
+    continue-on-error: true  # not tested on a real Mac yet; never blocks a release
+    steps:
+      - uses: actions/checkout@v7
+      - run: brew install sdl3 ninja dylibbundler
+      - run: gd-game-02/engine/build_macos.sh
+      - run: gd-game-02/engine/package.sh macos "$V" out
+      - uses: actions/upload-artifact@v7
+        with:
+          name: gd02-macos
+          path: gd-game-02/engine/out/
+          retention-days: 3
+
+  android:
+    name: Android
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools ndk;28.2.13676358 cmake;4.1.2 platforms;android-36 build-tools;36.1.0
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            gd-game-02/engine/build/android/SDL3-*
+          key: android-gd02-${{ hashFiles('gd-game-02/engine/android/**/*.gradle', 'gd-game-02/engine/android/gradle/wrapper/*.properties', 'gd-game-02/engine/build_android.sh') }}
+      - name: Release key
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_GD02_KEYSTORE_B64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_GD02_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_GD02_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_GD02_KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ]; then
+            echo "::warning::No ANDROID_GD02_KEYSTORE_B64 secret: the APK is signed with a throwaway debug key."
+            exit 0
+          fi
+          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          {
+            echo "GD02_RELEASE_KEYSTORE=$RUNNER_TEMP/release.jks"
+            echo "GD02_RELEASE_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD"
+            echo "GD02_RELEASE_KEY_ALIAS=$KEY_ALIAS"
+            echo "GD02_RELEASE_KEY_PASSWORD=$KEY_PASSWORD"
+          } >> "$GITHUB_ENV"
+      - name: Build (arm64, what phones use)
+        run: ABIS=arm64-v8a gd-game-02/engine/build_android.sh
+      - run: gd-game-02/engine/package.sh android "$V" out
+      - uses: actions/upload-artifact@v7
+        with:
+          name: gd02-android
+          path: gd-game-02/engine/out/
+          retention-days: 3

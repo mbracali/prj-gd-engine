@@ -8,6 +8,9 @@
 
 #include "app.h"
 #include "app_ids.h"
+#include "render/scene_view.h"
+#include "render/shadertest.h"
+#include "scene/scenetest.h"
 #include "tests/selftest.h"
 
 namespace {
@@ -15,15 +18,21 @@ namespace {
 void usage() {
     std::printf(
         "%s %s: Guitar Hero II (Xbox 360) reimplementation (first skeleton)\n"
-        "usage: %s [options] <disc.iso | game folder>\n"
+        "usage: %s [options] [disc.iso | game folder]\n"
         "  --song <id>          play one song directly (e.g. yyz), then quit\n"
         "  --difficulty <0-3>   0 Easy, 1 Medium, 2 Hard, 3 Expert (default 3)\n"
         "  --autoplay           play the chart automatically\n"
         "  --no-fail            the rock meter cannot fail you\n"
         "  --selftest           check the data, auto-play every chart and check the rules headlessly\n"
+        "  --scenetest          parse every .milo_xbox scene and report decoded objects per class\n"
+        "  --shadertest         compile every shader on this GPU and report (no game data; GD02_GLES=1: OpenGL ES)\n"
+        "  --view <milo>        draw one scene, e.g. world/stone/gen/stone.milo_xbox (development viewer)\n"
         "Environment: GD02_KEYS=\"<song ms>:<key>,...\" scripted input (+green/-green .. orange, strum,\n"
-        "  starpower, whammy=<0..1>).\n"
-        "The game folder is the disc's files (gen/main.hdr, gen/main_0.ark, ...).\n",
+        "  starpower, whammy=<0..1>); GD02_VIRTUAL_PAD=<vendor>:<product>[:guitar] (hex) plugs in a virtual\n"
+        "  controller (e.g. 1430:4748:guitar, 045e:028e).\n"
+        "The game folder is the disc's files (gen/main.hdr, gen/main_0.ark, ...). Without one, the\n"
+        "disc image picked last time is used (or an .iso next to the program), else the first\n"
+        "screen asks for it.\n",
         app::kProgram, app::kVersion, app::kProgram);
 }
 
@@ -31,7 +40,8 @@ void usage() {
 
 int main(int argc, char** argv) {
     Options opt;
-    bool selftest = false;
+    bool selftest = false, scenetest = false, shadertest = false;
+    std::string viewPath;
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
         auto value = [&]() -> std::string {
@@ -46,13 +56,19 @@ int main(int argc, char** argv) {
         else if (a == "--autoplay") opt.autoplay = true;
         else if (a == "--no-fail") opt.noFail = true;
         else if (a == "--selftest") selftest = true;
+        else if (a == "--scenetest") scenetest = true;
+        else if (a == "--shadertest") shadertest = true;
+        else if (a == "--view") viewPath = value();
         else if (a == "--help" || a == "-h") { usage(); return 0; }
         else if (!a.empty() && a[0] == '-' && a.rfind("-psn_", 0) != 0) { usage(); return 2; }  // -psn_: macOS Finder
         else if (a.rfind("-psn_", 0) != 0) opt.dataPath = a;
     }
-    if (opt.dataPath.empty()) {
+    if (shadertest) return runShaderTest();
+    if ((selftest || scenetest || !viewPath.empty()) && opt.dataPath.empty()) {
         usage();
         return 2;
     }
+    if (scenetest) return runSceneTest(opt.dataPath);
+    if (!viewPath.empty()) return runSceneView(opt.dataPath, viewPath);
     return selftest ? runSelfTest(opt.dataPath) : runApp(opt);
 }
