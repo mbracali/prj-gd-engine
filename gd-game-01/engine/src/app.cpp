@@ -268,6 +268,7 @@ private:
     void drawNeedData();
     void drawLogo();
     void drawTouchButtons();
+    void drawVersion();
     int logoTexture_ = -1;  // the badge on the first screen (0: could not load)
     void drawMenu();
     void drawResults();
@@ -1206,6 +1207,15 @@ void App::drawFpsCounter() {
     }
 }
 
+// The version on the main title screen, top right: the FPS counter's font and
+// size, in white.
+void App::drawVersion() {
+    if (!ui_ || movie_ || screen_ != Screen::Menu || ui_->currentScreen() != "main") return;
+    const std::string v = std::string("v") + GD01_VERSION;
+    ui_->drawText("impactor.font", v, kScreenW - 23 + 2, 17 + 2, 24, {0, 0, 0, 0.6f}, 0x14);  // shadow
+    ui_->drawText("impactor.font", v, kScreenW - 23, 17, 24, {1, 1, 1, 1}, 0x14);
+}
+
 void App::endMovie() {
     if (!movie_) return;
     if (movie_->audio) SDL_DestroyAudioStream(movie_->audio);
@@ -1988,6 +1998,14 @@ void App::drawResults() {
 }
 
 void App::frame() {
+    // Lefty Flip (Options > Game Settings), per player: the mirrored highway,
+    // the lefty gamepad layout, and a guitar's swapped menu strum.
+    if (campaign_) {
+        const auto& o = campaign_->profile().options;
+        if (track_) track_->setLefty(o.lefty[0]);
+        if (track2_) track2_->setLefty(o.lefty[1]);
+        input_.setLefty(o.lefty[0], o.lefty[1]);
+    }
     uint64_t nowNs = SDL_GetTicksNS();
     float dt = lastFrameNs_ ? (nowNs - lastFrameNs_) / 1e9f : 0;
     lastFrameNs_ = nowNs;
@@ -2196,6 +2214,19 @@ int App::run() {
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, kAppTitle, SDL_GetError(), nullptr);
         return 1;
     }
+    // Development aid: GD01_VIRTUAL_PAD=<vendor>:<product> (hex, e.g. 054c:0268)
+    // plugs in a virtual gamepad, to test the Gamepads screen without hardware.
+    if (const char* vp = SDL_getenv("GD01_VIRTUAL_PAD")) {
+        unsigned vendor = 0, product = 0;
+        std::sscanf(vp, "%x:%x", &vendor, &product);
+        SDL_VirtualJoystickDesc desc;
+        SDL_INIT_INTERFACE(&desc);
+        desc.type = SDL_JOYSTICK_TYPE_GAMEPAD;
+        desc.vendor_id = Uint16(vendor), desc.product_id = Uint16(product);
+        desc.naxes = SDL_GAMEPAD_AXIS_COUNT, desc.nbuttons = SDL_GAMEPAD_BUTTON_COUNT;
+        desc.name = "PLAYSTATION(R)3 Controller (virtual)";
+        if (!SDL_AttachVirtualJoystick(&desc)) SDL_Log("virtual pad: %s", SDL_GetError());
+    }
     input_.setSplitKeyboard(opt_.splitKeyboard || SDL_getenv("GD01_KB2P"));
     input_.setTouchToMenu([this](float nx, float ny, float& mx, float& my) {
         int w = 0, h = 0;
@@ -2298,6 +2329,7 @@ int App::run() {
         renderer_.beginFrame({movie_ ? uint8_t(0) : uint8_t(12), movie_ ? uint8_t(0) : uint8_t(10), movie_ ? uint8_t(0) : uint8_t(16), 255});
         if (movie_) movieFrame();
         else frame();
+        drawVersion();
         if (!movie_) drawTouchButtons();
         if (enhancedOn("fps_counter")) drawFpsCounter();
         captureDebugScreenshot();

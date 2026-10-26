@@ -1070,8 +1070,6 @@ private:
             {Kind::Check, "no_shaky_cam", "Disable Shaky Camera", true,
              "The original game shakes the camera on its close-up shots of the band, like a handheld camera. Turn this "
              "on for steady close-ups."},
-            {Kind::Button, "replace_textures", "Replace Textures", false,
-             "Choose a folder on your computer with replacement textures, loaded over the game's own.", {{"", "Browse..."}}},
             {Kind::Button, "export", "Export User Files", true,
              "Choose a folder to save two files in: GD01-user-settings.json with every Enhanced Setting, and "
              "GD01-user-progress.json with all your bands and their progress. Use them as a backup or to move to "

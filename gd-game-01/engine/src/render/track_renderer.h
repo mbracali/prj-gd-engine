@@ -33,6 +33,11 @@ public:
     void explode();
     // Multiplayer face-off: player 0 (left) or 1 (right).
     void setFaceOff(int player);
+    // Lefty Flip (Options > Game Settings, per player): the lanes mirrored, green
+    // on the right. FUN_00163828: a lane's x uses 4 - lane when lefty, and the
+    // hit effects' fan angle is negated.
+    void setLefty(bool on) { lefty_ = on; }
+    bool lefty() const { return lefty_; }
     // The player's character's highway surface (characters.dta track_surface,
     // put on track_surface.tex as FUN_0015c540 does); false when not found.
     bool setSurface(const GameData& data, const std::string& character);
@@ -51,6 +56,8 @@ public:
     void stopHitEffects();
 
 private:
+    bool lefty_ = false;
+    float laneX(int fret) const;
     Renderer& renderer_;
     std::unique_ptr<Scene> scene_;
     std::unique_ptr<SceneRenderer> sr_;

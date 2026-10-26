@@ -6,6 +6,38 @@ matches the tag's version.
 
 ## [Unreleased]
 
+## [1.1.3] - 2026-10-25
+
+**Lefty Flip works, and PS2 guitars on adapters play as guitars.**
+
+### Fixed
+- Lefty Flip (Options > Game Settings, per player) did nothing. As in the
+  original: the highway is mirrored (green on the right, the gems, tails,
+  fret buttons and hit effects too), a gamepad's frets take the original's
+  lefty order (Cross, R2, R1, L1, L2), and a guitar's strum moves the menus
+  the other way. Touch lanes follow the mirrored highway. (#15)
+- Game Settings (Lefty Flip, the band / guitar / sound effects volumes,
+  stereo) were not saved: they were lost when the game restarted. Leaving the
+  screen now saves them, as in the original.
+- PS2 guitars on USB adapters that say they are a PlayStation 3 pad played
+  like a gamepad (each fret strummed, the strum bar did nothing). GAMEPADS has
+  a **Type** for each controller: Auto, Gamepad, PS2 guitar (adapter), Xbox
+  guitar or Rock Band guitar. Choose "PS2 guitar (adapter)" and the guitar
+  plays with its strum bar, with the original's PS2 guitar buttons. It is
+  remembered for that controller.
+
+### Added
+- The version (e.g. "v1.1.3") in the top-right corner of the main title
+  screen.
+- A controller report for bug reports: GAMEPADS writes
+  `controllers-report.txt` in the save folder (its path is shown on the
+  screen) with every controller's name, USB id, SDL mapping, type, player and
+  buttons, and the last raw button / axis presses.
+
+### Removed
+- "Replace Textures" in Enhanced Settings (never built; dropped from the
+  roadmap).
+
 ## [1.1.2] - 2026-10-25
 
 **macOS: the black screen is fixed.** On Macs, songs, venues and the

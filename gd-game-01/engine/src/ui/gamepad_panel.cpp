@@ -29,9 +29,10 @@ public:
     void enter() override {
         focus_ = 0, selected_ = 0;
         captureMs_ = 0;
+        if (input_) input_->writeReport();
     }
     void exit() override {
-        if (input_) input_->cancelCapture();
+        if (input_) input_->cancelCapture(), input_->writeReport();  // with what was pressed here
     }
 
     bool buttonDown(int button, int player) override {
@@ -49,6 +50,11 @@ public:
         }
         if (focus_ < int(devs.size()) && (button == kLeft || button == kRight)) {
             setPlayer(devs[size_t(focus_)], std::clamp(devs[size_t(focus_)].player + (button == kRight ? 1 : -1), -1, 1));
+            return true;
+        }
+        if (isPad(devs) && focus_ - int(devs.size()) == resetRow() + 1 && (button == kLeft || button == kRight)) {
+            input_->cycleDeviceType(devs[size_t(selected_)].id, button == kRight ? 1 : -1);
+            sound("button_select");
             return true;
         }
         if (isTouch(devs) && focus_ >= int(devs.size()) && (button == kLeft || button == kRight)) {
@@ -92,6 +98,10 @@ public:
     }
 
     void poll(float dtMs) override {
+        if (input_ && input_->devices().size() != reportedDevices_) {  // a controller came or went: a fresh report
+            reportedDevices_ = input_->devices().size();
+            input_->writeReport();
+        }
         if (input_ && input_->capturing()) {
             captureMs_ += dtMs;
             if (captureMs_ > 10000) input_->cancelCapture(), sound("button_back");
@@ -112,6 +122,7 @@ public:
         clamp(devs);
         text("rokk.font", "GAMEPADS", 90 + o, 40, 62, kTitle, 0x11);
         text("impactor.font", "Controllers, their players and their buttons", 92 + o, 110, 20, kDim, 0x11);
+        text("impactor.font", "Report for bug reports: " + fit(input_->reportPath(), 15, 760), 92 + o, 136, 15, kDim, 0x11);
         // Left: the controllers.
         quad(kLeftX0 + o, kTop - 16, kLeftX1 + o, kBottom, {1, 1, 1, 0.05f});
         text("impactor.font", "CONTROLLERS", kLeftX0 + 16 + o, kTop - 2, 22, kAccent, 0x11);
@@ -184,6 +195,13 @@ public:
                 text("impactor.font", "Reset to Defaults", (x0 + x1) * 0.5f + o, (y0 + y1) * 0.5f + 1, 20, f ? kFocused : kNormal, 0x22);
                 continue;
             }
+            if (c > resetRow() && isPad(devs)) {  // the controller's type
+                if (f) quad(x0 + o, y0, x1 + o, y1, {1, 0.86f, 0.2f, 0.14f});
+                const std::string t = input_->deviceType(id);
+                text("impactor.font", "Type: " + (f ? "< " + t + " >" : t), x0 + 12 + o, (y0 + y1) * 0.5f + 1, 18,
+                     f ? kFocused : kNormal, 0x21);
+                continue;
+            }
             if (c > resetRow()) {  // the keyboard's Frets also strum
                 const bool on = input_->keyboardFretsStrum();
                 if (f) quad(x0 + o, y0, x1 + o, y1, {1, 0.86f, 0.2f, 0.14f});
@@ -228,9 +246,11 @@ private:
     // strum. The touch screen: its settings, then Reset.
     static int resetRow() { return int(Input::Control::Count); }
     bool isTouch(const std::vector<Input::Device>& devs) const { return devs[size_t(selected_)].id == "touch"; }
+    bool isPad(const std::vector<Input::Device>& devs) const { return devs[size_t(selected_)].id.rfind("pad:", 0) == 0; }
+    // After Reset: the keyboard's Frets also strum, or a controller's type.
     int extraRow(const std::vector<Input::Device>& devs) const {
         if (isTouch(devs)) return Input::kTouchOptions;
-        return resetRow() + (devs[size_t(selected_)].id == "keyboard" ? 1 : 0);
+        return resetRow() + (devs[size_t(selected_)].id == "keyboard" || isPad(devs) ? 1 : 0);
     }
     int rowCount(const std::vector<Input::Device>& devs) const { return int(devs.size()) + extraRow(devs) + 1; }
     void clamp(const std::vector<Input::Device>& devs) {  // devices come and go
@@ -273,6 +293,11 @@ private:
         }
         if (c == resetRow()) {
             input_->resetBindings(id);
+            sound("button_select");
+            return;
+        }
+        if (c > resetRow() && isPad(devs)) {
+            input_->cycleDeviceType(id, 1);
             sound("button_select");
             return;
         }
@@ -319,6 +344,7 @@ private:
     Input* input_;
     int focus_ = 0, selected_ = 0;
     float captureMs_ = 0, offset_ = 0, fade_ = 1;
+    size_t reportedDevices_ = 0;
 };
 
 }  // namespace
