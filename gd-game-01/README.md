@@ -125,6 +125,12 @@ once you touch the screen; two-finger swipes move up / down (in a song: Star
 Power / pause). Set the buttons, swipes and pause corner in GAMEPADS >
 Touch Screen.
 
+**Controllers:** GAMEPADS lists every connected controller. Each one has a
+**Type** (Auto, Gamepad, PS2 guitar (adapter), Xbox guitar, Rock Band guitar):
+a PS2 guitar on an adapter that calls itself a PlayStation 3 pad plays as a
+guitar once its type is "PS2 guitar (adapter)". For a bug report, attach
+`controllers-report.txt` from the save folder (GAMEPADS shows its path).
+
 ## Building
 
 The quickest way, producing the same files a release publishes, in

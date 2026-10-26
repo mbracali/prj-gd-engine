@@ -1988,6 +1988,14 @@ void App::drawResults() {
 }
 
 void App::frame() {
+    // Lefty Flip (Options > Game Settings), per player: the mirrored highway,
+    // the lefty gamepad layout, and a guitar's swapped menu strum.
+    if (campaign_) {
+        const auto& o = campaign_->profile().options;
+        if (track_) track_->setLefty(o.lefty[0]);
+        if (track2_) track2_->setLefty(o.lefty[1]);
+        input_.setLefty(o.lefty[0], o.lefty[1]);
+    }
     uint64_t nowNs = SDL_GetTicksNS();
     float dt = lastFrameNs_ ? (nowNs - lastFrameNs_) / 1e9f : 0;
     lastFrameNs_ = nowNs;
@@ -2195,6 +2203,19 @@ int App::run() {
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMEPAD)) {
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, kAppTitle, SDL_GetError(), nullptr);
         return 1;
+    }
+    // Development aid: GD01_VIRTUAL_PAD=<vendor>:<product> (hex, e.g. 054c:0268)
+    // plugs in a virtual gamepad, to test the Gamepads screen without hardware.
+    if (const char* vp = SDL_getenv("GD01_VIRTUAL_PAD")) {
+        unsigned vendor = 0, product = 0;
+        std::sscanf(vp, "%x:%x", &vendor, &product);
+        SDL_VirtualJoystickDesc desc;
+        SDL_INIT_INTERFACE(&desc);
+        desc.type = SDL_JOYSTICK_TYPE_GAMEPAD;
+        desc.vendor_id = Uint16(vendor), desc.product_id = Uint16(product);
+        desc.naxes = SDL_GAMEPAD_AXIS_COUNT, desc.nbuttons = SDL_GAMEPAD_BUTTON_COUNT;
+        desc.name = "PLAYSTATION(R)3 Controller (virtual)";
+        if (!SDL_AttachVirtualJoystick(&desc)) SDL_Log("virtual pad: %s", SDL_GetError());
     }
     input_.setSplitKeyboard(opt_.splitKeyboard || SDL_getenv("GD01_KB2P"));
     input_.setTouchToMenu([this](float nx, float ny, float& mx, float& my) {

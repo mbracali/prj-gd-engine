@@ -36,6 +36,9 @@ Mat4 translate(float x, float y, float z) {
 
 }  // namespace
 
+// A lane's x on the track: mirrored with Lefty Flip (FUN_00163828: 4 - lane).
+float TrackRenderer::laneX(int fret) const { return kLaneX[size_t(lefty_ ? 4 - fret : fret)]; }
+
 // The sustain tail (FUN_001609b0 / FUN_001633d8, docs/render_gems_dof.md
 // §2.3): tail02.mesh's 6-vertex cross-section swept along y in N = 30 rows of
 // 4 units anchored to the far end (the first N - k rows collapse onto the
@@ -193,7 +196,7 @@ bool TrackRenderer::laneScreen(int fret, float along, float& mx, float& my) cons
     std::array<float, 3> base{0, 0, 0};
     if (const SceneObject* o = scene_->find("gem_smasher.mesh"); o && o->transformable()) base = o->transformable()->world.pos;
     const auto& m = lastVp_.m;
-    const float x = base[0] + kLaneX[fret], y = base[1] + along, z = base[2];
+    const float x = base[0] + laneX(fret), y = base[1] + along, z = base[2];
     float cx = m[0] * x + m[4] * y + m[8] * z + m[12], cy = m[1] * x + m[5] * y + m[9] * z + m[13];
     float cw = m[3] * x + m[7] * y + m[11] * z + m[15];
     if (cw <= 1e-6f) return false;
@@ -366,7 +369,7 @@ void TrackRenderer::draw(const Player& player, float nowMs, float trackSpeed, fl
                             for (int k = 0; k < 3; ++k) col[k] += (sm->mat->color[size_t(k)] - col[k]) * whammyRamp_;
                     std::copy_n(col, 4, tail.tint);
                     float maxS = 1;
-                    tail.geometry = tailStrip(kLaneX[f], y0, y1, sustaining, maxS);
+                    tail.geometry = tailStrip(laneX(f), y0, y1, sustaining, maxS);
                     sr_->drawMesh("tail02.mesh", vp, Mat4{}, tail);
                     // The glow line (RndLine at z 0.16, FUN_001609b0): a tight cyan core on
                     // unplayed star tails; while sustaining, 1.5 w wide in the fret / star /
@@ -391,15 +394,15 @@ void TrackRenderer::draw(const Player& player, float nowMs, float trackSpeed, fl
                                 lc[k] = lm->mat->color[size_t(k)] + (wm->mat->color[size_t(k)] - lm->mat->color[size_t(k)]) * whammyRamp_;
                             lineCol = lc;
                         }
-                        sr_->drawLine(lineMat, vp, {kLaneX[f], y0, 0.16f}, {kLaneX[f], y1, 0.16f}, w, lineCol);
+                        sr_->drawLine(lineMat, vp, {laneX(f), y0, 0.16f}, {laneX(f), y1, 0.16f}, w, lineCol);
                     }
                 }
             }
             if (hit || y < kRemoveY || y > kHorizonY) continue;
 
             // Gems (FUN_001602a8): the body by state, the top by kind; a missed gem keeps its top.
-            Mat4 at = translate(kLaneX[f], y, 0);
-            Mat4 starAt = translate(kLaneX[f] - kStarOffsetX, y - kStarOffsetY, 0);
+            Mat4 at = translate(laneX(f), y, 0);
+            Mat4 starAt = translate(laneX(f) - kStarOffsetX, y - kStarOffsetY, 0);
             // Layers (docs/render_gems_dof.md §2.1): top, body, then the spec slot,
             // an additive texgen-5 env-map highlight (gem2; gem_bonus2's moving streak
             // in Star Power) that stays on a missed gem.
@@ -436,8 +439,8 @@ void TrackRenderer::draw(const Player& player, float nowMs, float trackSpeed, fl
                 if (player.gemHit(i) || y < 0 || y > kHorizonY) continue;
                 for (int f = 0; f < 5; ++f)
                     if (g.frets & (1u << f)) {
-                        sr_->drawMesh("gem_bonus_spark2.mesh", vp, translate(kLaneX[f], y, 0), {});
-                        sr_->drawMesh("gem_bonus_spark1.mesh", vp, translate(kLaneX[f], y, 0), {});
+                        sr_->drawMesh("gem_bonus_spark2.mesh", vp, translate(laneX(f), y, 0), {});
+                        sr_->drawMesh("gem_bonus_spark1.mesh", vp, translate(laneX(f), y, 0), {});
                     }
             }
         }
@@ -459,7 +462,7 @@ void TrackRenderer::draw(const Player& player, float nowMs, float trackSpeed, fl
             anims_->setFrame("tail_bonus.part", nowMs * 0.03f);
             if (!p.live.empty())
                 for (int f = 0; f < 5; ++f)
-                    if (tailFrets_ & (1u << f)) sr_->draw("tail_bonus.part", vp, translate(kLaneX[f], 0, 0));
+                    if (tailFrets_ & (1u << f)) sr_->draw("tail_bonus.part", vp, translate(laneX(f), 0, 0));
         }
     }
 
@@ -488,7 +491,7 @@ void TrackRenderer::draw(const Player& player, float nowMs, float trackSpeed, fl
         else if (hitFrame < 6) anims_->setFrame("gem_smasher_hit.tnm", hitFrame);
         else anims_->setFrame("gem_smasher.tnm", 5);
         anims_->updateTransforms();
-        Mat4 at = translate(kLaneX[f], 0, 0);
+        Mat4 at = translate(laneX(f), 0, 0);
         sr_->drawMesh("smasher shadow.mesh", vp, at, {});
         Opt smasher;
         smasher.material = held ? std::string("gem_smasher_") + kColors[f] + ".mat" : "gem_smasher.mat";
@@ -507,9 +510,9 @@ void TrackRenderer::draw(const Player& player, float nowMs, float trackSpeed, fl
         anims_->updateTransforms();
         for (int f = 0; f < 5; ++f) {
             if (!(mask & (1u << f))) continue;
-            Mat4 at = translate(kLaneX[f], 0, 0);
+            Mat4 at = translate(laneX(f), 0, 0);
             if (fan) {  // set [10]: rotated about the track's Y by (lane - 2) * 12 degrees (single player)
-                float a = float(f - 2) * 12.0f * 3.14159265f / 180.0f;
+                float a = float((lefty_ ? 4 - f : f) - 2) * 12.0f * 3.14159265f / 180.0f;  // negated for lefty
                 Xfm r;
                 r.rot = {std::cos(a), 0, -std::sin(a), 0, 1, 0, std::sin(a), 0, std::cos(a)};
                 at = at * Mat4::fromRowXfm(r.rot, r.pos);
