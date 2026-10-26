@@ -16,6 +16,9 @@
 
 class World;
 class GameData;
+namespace scene {
+class Waypoint;
+}
 class MidiParserSet;
 struct MidiFile;
 struct Song;
@@ -44,7 +47,8 @@ public:
         std::array<std::string, 2> guitar;     // guitars.dta guitar (lespaul...); empty: quickplay's
         std::array<std::string, 2> skin;       // its skin (lp_cherry...); empty: the first
         std::array<bool, 2> bass{};            // the player plays the bass track (bass_strum)
-        bool campaignFinal = false;            // the career's last song (win_finals)
+        bool campaignFinal = false;            // the career's last song (win_finals, kWinGameWalkSpot)
+        bool encore = false;                   // an encore follows (kEncoreWalkSpot, post-game idle)
         uint32_t seed = 0x42414e44u;           // the band's random numbers
     };
 
@@ -86,13 +90,27 @@ public:
     // Director / script queries (GuitarCharacter 0x822D1180 / 0x822D13B0).
     bool playingStarpower(const std::string& slot) const;     // 0x80000 weight > 0 and 0x4000 weight <= 0
     float flagWeight(const std::string& slot, uint32_t flags) const;  // main.drv's clip weights
-    bool actuallyWalking(const std::string& slot) const;      // CharWalk (M9.6): false
+    bool actuallyWalking(const std::string& slot) const;      // CharWalk 0x8218A568
     // A band object's world transform: a member, or one of its bones /
     // objects (`subpart`, e.g. bone_spine2.mesh). False when not a member.
     bool objectXfm(const std::string& name, const std::string& subpart, scene::Xfm& out) const;
 
     // The player's rock meter rating (0..1) for "bad" (0x822C6DC0); the host sets it.
     std::function<float(int player)> rating;
+    // The game's excitement (Game +0x338, set by 0x822CBAC8 from 0x822CAAB0:
+    // 0 Boot .. 3 Great; the world's `excitement` message) for walk_delays,
+    // interact_probs, the walk speed and the faces. Unset: {game get excitement}.
+    std::function<int()> excitement;
+
+    // Waypoint::Nearest (0x82195548): the waypoint with any of `mask`'s
+    // flags nearest `p` (squared distance; ties: the first in GH2's global
+    // list, World::waypoints()).
+    const scene::Waypoint* nearestWaypoint(const std::array<float, 3>& p, uint32_t mask) const;
+    // Walks started (walk task starts that planned a walk), for the tests.
+    int walksStarted() const { return walksStarted_; }
+    int interactsStarted() const { return interactsStarted_; }
+    // How far (x y) from its target each finished walk ended.
+    const std::vector<float>& walkArrivals() const { return walkArrivals_; }
     // Each clip a main driver starts: (beat, slot, clip) for the golden logs.
     std::function<void(double beat, const std::string& slot, const std::string& clip)> onClip;
     bool log = false;  // GD02_BANDLOG=1
@@ -109,6 +127,7 @@ public:
     double beat() const { return beat_; }
 
     struct GuitarState;
+    struct Task;
     class CharObj;
     class PartObj;
     class PlayerObj;
@@ -135,11 +154,32 @@ private:
     void runClipScript(Member& m, const std::string& script);
     void fireTriggers(Member& m, const std::string& event);
     scene::Xfm slotXfm(const Member& m) const;
+    // Walks (M9.6).
+    chr::Spot spotOf(const scene::Waypoint* w) const;
+    const scene::Waypoint* findWaypoint(uint32_t mask) const;           // 0x821954F8
+    std::vector<const scene::Waypoint*> connections(const scene::Waypoint* w) const;
+    std::vector<chr::Spot> searchPath(const scene::Waypoint* from, uint32_t target, uint32_t pass);  // 0x82196940
+    float maxDistance(uint32_t from, uint32_t to) const;                 // 0x82195618
+    int currentExcitement() const;
+    double beatOfMs(double ms) const;
+    float clipBeats(float frames, const scene::CharClipSamples* clip, const GuitarState& st) const;  // 0x822D1C88
+    void walkSchedule(Member& m);                                        // 0x822D16B8
+    void rollWalkDelays(GuitarState& st);                                // 0x822D12E8
+    void addTask(Member& m, std::unique_ptr<Task> t);                    // 0x82198348
+    void pollTasks(Member& m);                                           // 0x82197FB0
+    void startTask(Member& m, Task& t);
+    void taskPoll(Member& m, Task& t);
+    void endTask(Member& m, Task& t);
+    void walkStart(Member& m, Task& t);                                  // 0x822E4E78
+    std::unique_ptr<Task> newWalk(Member& m, float start, float end, float priority, uint32_t flags);  // 0x822E4898
+    std::unique_ptr<Task> newTimed(Member& m, int kind, scene::CharClipSamples* clip, float priority); // 0x822E4AF8 / 0x822E4C80
+    float nextSoloEvent(const Member& m, float before) const;            // 0x822D1518
 
     World& world_;
     const GameData& data_;
     Config config_;
     std::string venueName_;
+    std::string midiFile_;  // songs.dta midi_file (the singer's .voc)
     int animTempo_ = 1;
     std::vector<std::string> bandList_;
     std::unique_ptr<chr::ClipLibrary> clips_;
@@ -154,6 +194,10 @@ private:
     std::vector<std::string> problems_;
     std::map<std::string, int> triggerCounts_;
     double seconds_ = 0, beat_ = 0;
+    float dBeats_ = 0;
+    const Song* song_ = nullptr;
+    int walksStarted_ = 0, interactsStarted_ = 0;
+    std::vector<float> walkArrivals_;
     bool first_ = true, entered_ = false;
     bool won_ = false, over_ = false;
 };

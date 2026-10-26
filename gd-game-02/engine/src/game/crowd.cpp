@@ -8,7 +8,9 @@
 #include <cmath>
 
 #include "audio/synth.h"
+#include "data/dta.h"
 #include "data/game_data.h"
+#include "game/venue.h"
 #include "game/world.h"
 #include "script/tasks.h"
 
@@ -19,33 +21,22 @@ std::string textOf(Interp& in, const Value& v) {
     return e.type == Value::Type::Object && e.object ? e.object->name() : e.str();
 }
 
-// An archetype in iterate_frac's scripts: $this; its `main.drv`.
-class ArchetypeObj : public ScriptObject {
-public:
-    explicit ArchetypeObj(const std::string& name) : ScriptObject(name, "Character") {}
-};
+uint32_t flagsArg(Interp& in, std::vector<Value>& args, size_t k, uint32_t def) {
+    if (k >= args.size()) return def;
+    const Value v = in.evalValue(args[k]);
+    return v.isNumber() ? uint32_t(v.integerValue()) : def;
+}
 
-// The archetype's CharDriver (main.drv): the clip group it is told to play
-// and its beat_scale, kept for the band's clips (M9).
-class DriverObj : public ScriptObject {
-public:
-    explicit DriverObj(Crowd::Archetype& a) : ScriptObject("main.drv", "CharDriver"), a_(a) {}
-    bool handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) override {
-        r = Value::integer(0);
-        if (msg == "play_group") {
-            if (!args.empty()) a_.group = textOf(in, args[0]);
-            return true;
-        }
-        if (msg == "set" && args.size() >= 2 && textOf(in, args[0]) == "beat_scale") {
-            a_.beatScale = in.evalValue(args[1]).number();
-            return true;
-        }
-        return false;
+// (types (<type> ...)) for a class in an (objects ...) tree.
+const DataNode* typeDef(const DataNode* objects, const std::string& cls, const std::string& type) {
+    if (!objects || type.empty()) return nullptr;
+    for (const DataNode& c : objects->children) {
+        if (!c.isList() || c.children.empty() || !c.children[0].isText() || c.children[0].s != cls) continue;
+        if (const DataNode* types = c.find("types"))
+            if (const DataNode* t = types->find(type)) return t;
     }
-
-private:
-    Crowd::Archetype& a_;
-};
+    return nullptr;
+}
 
 // `rnd` for the world's own interpreter (crowd.dta's {rnd aspect}) when the
 // host has none.
@@ -87,6 +78,105 @@ private:
 
 }  // namespace
 
+// ---- the archetypes' script objects ------------------------------------------
+
+// An archetype: $this in iterate_frac's scripts and $dude in its clips'
+// events, with char_objects.dta's Character type crowd (enter, set_hand).
+class Crowd::ArchetypeObj : public ScriptObject {
+public:
+    ArchetypeObj(Crowd& c, Actor& a, const std::string& scope) : ScriptObject(scope, "Character"), c_(c), a_(a) {
+        nameScope = scope;
+        random = &c.rng_;
+    }
+    bool handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) override {
+        r = Value::integer(0);
+        if (msg == "get" || msg == "set" || msg == "has" || msg == "name") return false;
+        chr::Character* ch = a_.character.get();
+        if (msg == "find" || msg == "exists") {
+            const std::string n = args.empty() ? std::string() : textOf(in, args[0]);
+            ScriptObject* so = n.empty() ? nullptr : in.findObject(ScriptObject::scoped(nameScope, n));
+            if (msg == "exists") return r = Value::integer(so ? 1 : 0), true;
+            r = Value::obj(so);
+            return true;
+        }
+        if (msg == "dir") return r = Value::obj(c_.world_.script()), true;
+        if (msg == "get_type") return r = Value::symbol("crowd"), true;
+        if (msg == "set_showing") return ch && (ch->visible = !args.empty() && in.evalValue(args[0]).truthy()), true;
+        if (msg == "showing") return r = Value::integer(ch && ch->visible ? 1 : 0), true;
+        if (msg == "teleport" || msg == "recenter" || msg == "set_min_lod") return true;
+        // Its dta handler ran and left nothing to do (set_hand with the hand
+        // it already shows).
+        if (handler(msg)) return true;
+        in.onStub(name(), msg, r);
+        return true;
+    }
+
+private:
+    Crowd& c_;
+    Actor& a_;
+};
+
+// An object of an archetype's directory (hand_L-clap.mesh, lighter_flame,
+// main.drv...), in the archetype's name scope.
+class Crowd::PartObj : public ScriptObject {
+public:
+    PartObj(Crowd& c, Actor& a, const std::string& scope, scene::Object* o)
+        : ScriptObject(ScriptObject::scoped(scope, o->name), o->cls), c_(c), a_(a), o_(o) {
+        drv_ = a.character->driver(o->name);
+        random = &c.rng_;
+    }
+    bool handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) override {
+        r = Value::integer(0);
+        chr::Character& ch = *a_.character;
+        if (msg == "name") return r = Value::symbol(o_->name), true;
+        if (drv_) return driver(in, msg, args, r);
+        if (msg == "get" || msg == "has") {
+            if (!args.empty() && textOf(in, args[0]) == "showing") return r = Value::integer(ch.showing(o_) ? 1 : 0), true;
+            return false;
+        }
+        if (msg == "set" && args.size() >= 2 && textOf(in, args[0]) == "showing") return ch.setShowing(o_, in.evalValue(args[1]).truthy()), true;
+        if (msg == "set_showing") return ch.setShowing(o_, !args.empty() && in.evalValue(args[0]).truthy()), true;
+        if (msg == "showing") return r = Value::integer(ch.showing(o_) ? 1 : 0), true;
+        // lighter_flame (a RndDir: its MatAnim under a looping AnimFilter):
+        // start / stop (RndAnimatable StartAnim / EndAnim) [I: drawn while
+        // started, render/crowd_view.h].
+        if (o_->as<scene::DirObj>() && (msg == "start" || msg == "stop")) return a_.lighter = msg == "start", true;
+        in.onStub(name(), msg, r);
+        return true;
+    }
+
+private:
+    // CharDriver Handle 0x8216CAB0: what crowd.dta sends main.drv.
+    bool driver(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) {
+        chr::ClipDriver& d = *drv_;
+        if (msg == "play_group" && !args.empty()) {
+            a_.group = textOf(in, args[0]);
+            d.playGroup(a_.group, flagsArg(in, args, 1, chr::kPlayLast));
+            return true;
+        }
+        if (msg == "set" && args.size() >= 2) {
+            const std::string k = textOf(in, args[0]);
+            if (k == "beat_scale") d.beatScale = a_.beatScale = in.evalValue(args[1]).number();
+            else if (k == "realign") d.realign = in.evalValue(args[1]).truthy();
+            else in.onStub(name(), "set " + k, r);
+            return true;
+        }
+        if (msg == "set_beat_scale") {
+            if (!args.empty()) d.setBeatScale(a_.beatScale = in.evalValue(args[0]).number());
+            return true;
+        }
+        if (msg == "get" && !args.empty() && textOf(in, args[0]) == "beat_scale") return r = Value::real(d.beatScale), true;
+        if (msg == "enter") return true;
+        in.onStub(name(), msg, r);
+        return true;
+    }
+
+    Crowd& c_;
+    Actor& a_;
+    scene::Object* o_;
+    chr::ClipDriver* drv_ = nullptr;
+};
+
 // ---- State --------------------------------------------------------------------
 
 std::vector<std::pair<int, int>> Crowd::State::shown() const {
@@ -116,6 +206,15 @@ int Crowd::State::total() const {
 
 Crowd::Crowd(World& world) : world_(world) {
     Venue& v = world.venue();
+    clips_ = std::make_unique<chr::ClipLibrary>(v.data());
+    if (!v.all<scene::WorldCrowd>().empty()) {
+        try {
+            ScriptLoader loader(v.data());
+            objects_ = &world.interp().keep(loader.load("char/char_objects.dta"));
+        } catch (const std::exception& e) {
+            SDL_Log("crowd: char/char_objects.dta: %s", e.what());
+        }
+    }
     for (scene::WorldCrowd* c : v.all<scene::WorldCrowd>()) {
         if (!c->decoded) continue;
         State s;
@@ -128,18 +227,8 @@ Crowd::Crowd(World& world) : world_(world) {
             a.height = ch.height;
             a.placements = ch.placements;
             for (int i = 0; i < int(a.placements.size()); ++i) a.cards.push_back(i);
-            // char/crowd/og/<name>.milo; "og" folders resolve to "ng" (0x821c9480).
-            const std::string base = a.name.find('/') == std::string::npos ? "char/crowd/ng/" + a.name + ".milo" : a.name;
-            try {
-                a.milo = &v.library().load(base);
-            } catch (const std::exception& e) {
-                SDL_Log("crowd %s: %s: %s", c->name.c_str(), base.c_str(), e.what());
-            }
+            if ((a.actor = actor(a.name))) a.milo = &a.actor->character->milo();
             s.archetypes.push_back(std::move(a));
-        }
-        for (Archetype& a : s.archetypes) {
-            a.object = std::make_unique<ArchetypeObj>(a.name);
-            a.driver = std::make_unique<DriverObj>(a);
         }
         s.script = world.scriptFor(c);
         crowds_.push_back(std::move(s));
@@ -171,6 +260,89 @@ Crowd::~Crowd() {
     in.unregisterName("crowd_audio", audioObj_.get());
     if (prevAudioObj_) in.registerAs("crowd_audio", prevAudioObj_);
     for (auto& o : owned_) in.unregisterName(o->name(), o.get());
+    for (auto& a : actors_) {
+        for (auto& p : a->parts) in.tasks().killFor(p.get()), in.unregisterObject(p.get());
+        if (a->object) in.tasks().killFor(a->object.get()), in.unregisterObject(a->object.get());
+    }
+}
+
+// An archetype's character, loaded once per name: the <v>_chars proxy's
+// file (../../../char/crowd/og/<name>.milo -> char/crowd/ng/gen/<name>.
+// milo_xbox), its environ, the script objects of it and its directory, its
+// clips' events.
+Crowd::Actor* Crowd::actor(const std::string& name) {
+    for (auto& a : actors_)
+        if (a->name == name) return a->character ? a.get() : nullptr;
+    auto own = std::make_unique<Actor>();
+    Actor& a = *own;
+    a.name = name;
+    actors_.push_back(std::move(own));
+    Venue& v = world_.venue();
+    const GameData& data = v.data();
+    const scene::CharacterObj* proxy = v.find<scene::CharacterObj>(name);
+    const std::string from = "world/" + v.name() + "/gen/" + v.name() + "_chars.milo_xbox";
+    const std::string rel = proxy && !proxy->objectDir.proxyFile.empty() ? proxy->objectDir.proxyFile : "../../../char/crowd/og/" + name + ".milo";
+    const std::string path = scene::findMiloRelative(data, from, rel);
+    try {
+        a.character = std::make_unique<chr::Character>(data, path, *clips_);
+    } catch (const std::exception& e) {
+        SDL_Log("crowd: %s: %s: %s", name.c_str(), path.c_str(), e.what());
+        return nullptr;
+    }
+    chr::Character& c = *a.character;
+    if (proxy && !proxy->rnd.environment.empty() && proxy->dir) a.env = proxy->dir->resolve<scene::Environ>(proxy->rnd.environment);
+    Interp& in = world_.interp();
+    const std::string scope = "crowd:" + name;
+    auto obj = std::make_unique<ArchetypeObj>(*this, a, scope);
+    if (const DataNode* def = typeDef(objects_, "Character", c.type())) obj->setTypeDef(def, 1);
+    else SDL_Log("crowd: %s: no Character type '%s'", name.c_str(), c.type().c_str());
+    a.object = std::move(obj);
+    in.registerObject(a.object.get());
+    std::function<void(const scene::Directory&)> parts = [&](const scene::Directory& d) {
+        for (const auto& o : d.objects) {
+            auto p = std::make_unique<PartObj>(*this, a, scope, o.get());
+            in.registerObject(p.get());
+            a.parts.push_back(std::move(p));
+        }
+        for (const auto& [_, sub] : d.subdirs)
+            if (sub) parts(*sub);
+    };
+    parts(c.dir());
+    // Clip events ($dude = the archetype, 0x8219BFF0).
+    c.runScript = [this, &a](const std::string& script) { runClipScript(a, script); };
+    if (chr::ClipDriver* d = c.mainDriver()) {
+        d->rng = &rng_;
+        d->onPlay = [this, &a](const scene::CharClipSamples& clip, uint32_t) {
+            ++a.clipsStarted;
+            if (onClip) onClip(beats_, a.name, clip.name);
+        };
+    }
+    return &a;
+}
+
+void Crowd::runClipScript(Actor& a, const std::string& script) {
+    if (script.empty() || !a.object) return;
+    auto it = scripts_.find(script);
+    if (it == scripts_.end()) {
+        DataNode tree;
+        try {
+            tree = parseDtaText(script);
+        } catch (const std::exception& e) {
+            SDL_Log("crowd: clip script %s: %s", script.c_str(), e.what());
+        }
+        it = scripts_.emplace(script, std::move(tree)).first;
+    }
+    Interp& in = world_.interp();
+    const Value savedDude = in.var("dude"), savedThis = in.var("this");
+    in.var("dude") = Value::obj(a.object.get());
+    in.var("this") = Value::obj(a.object.get());
+    const std::string hand = a.object->getProp(in, "hand").str();
+    for (const DataNode& n : it->second.children) in.eval(n);
+    const std::string now = a.object->getProp(in, "hand").str();
+    if (now != hand && onHand) onHand(beats_, a.name, now);
+    a.hand = now;
+    in.var("dude") = savedDude;
+    in.var("this") = savedThis;
 }
 
 Crowd::State* Crowd::find(const std::string& name) {
@@ -180,8 +352,17 @@ Crowd::State* Crowd::find(const std::string& name) {
 }
 
 void Crowd::enter() {
+    Interp& in = world_.interp();
     for (State& s : crowds_)
-        if (s.script) world_.interp().send(s.script, "enter", {}, false);
+        if (s.script) in.send(s.script, "enter", {}, false);
+    // The archetypes enter with the directory (Character Enter: the dta
+    // `enter`, clap hands on and the others off).
+    for (auto& a : actors_)
+        if (a->object) {
+            in.send(a->object.get(), "enter", {}, false);
+            a->hand = a->object->getProp(in, "hand").str();
+        }
+    entered_ = true;
 }
 
 // WorldCrowd::SetFullness (0x82247C08): only the counts are kept; shown()
@@ -241,7 +422,24 @@ void Crowd::startShot(const scene::CamShot* shot, bool runScript) {
     ++revision_;
 }
 
-void Crowd::update() { audio_->update(world_.seconds()); }
+void Crowd::update() {
+    audio_->update(world_.seconds());
+    const double seconds = world_.seconds(), beats = world_.beats();
+    const float dS = first_ ? 0.0f : float(std::max(0.0, seconds - seconds_));
+    const float dB = first_ ? 0.0f : float(std::max(0.0, beats - beats_));
+    first_ = false;
+    seconds_ = seconds, beats_ = beats;
+    if (!entered_) return;
+    // The archetypes poll with the directory (Character Poll 0x82156B78):
+    // main.drv on the song's beat (x beat_scale, or seconds with
+    // kPlayRealTime), the servo poses the bones.
+    for (auto& a : actors_) {
+        if (!a->character) continue;
+        chr::RigContext ctx;
+        ctx.beat = beats, ctx.dBeats = dB, ctx.dSeconds = dS, ctx.seconds = seconds;
+        a->character->poll(ctx);
+    }
+}
 
 // The WorldCrowd's natives, and a CamShot's [crowd].
 bool Crowd::objectNative(Interp& in, scene::Object& o, const std::string& msg, std::vector<Value>& args, Value& r) {
@@ -286,12 +484,12 @@ bool Crowd::objectNative(Interp& in, scene::Object& o, const std::string& msg, s
 
 // iterate_frac (0x822452E0).
 void Crowd::iterateFrac(Interp& in, State& s, std::vector<Value>& args) {
-    std::vector<Archetype*> chars;
+    std::vector<Actor*> chars;
     for (Archetype& a : s.archetypes)
-        if (a.milo) chars.push_back(&a);
+        if (a.actor) chars.push_back(a.actor);
     if (chars.empty()) return;
-    // Shuffled (Fisher-Yates from the end, the interpreter's random numbers).
-    for (int i = int(chars.size()) - 1; i > 0; --i) std::swap(chars[size_t(i)], chars[size_t(in.randomInt(0, i + 1))]);
+    // Shuffled (Fisher-Yates from the end, the crowd's random numbers).
+    for (int i = int(chars.size()) - 1; i > 0; --i) std::swap(chars[size_t(i)], chars[size_t(rng_.integer(0, i + 1))]);
     struct Entry {
         float frac;
         Value script;
@@ -314,13 +512,15 @@ void Crowd::iterateFrac(Interp& in, State& s, std::vector<Value>& args) {
     for (const Entry& e : entries) {
         acc += e.frac * scale;
         while (next < chars.size() && float(next) < acc) {
-            Archetype& a = *chars[next++];
+            Actor& a = *chars[next++];
             in.var("this") = Value::obj(a.object.get());
-            in.registerAs("main.drv", a.driver.get());
+            // `main.drv` is the archetype's (its name scope while it is $this).
+            ScriptObject* drv = in.findObject(ScriptObject::scoped(a.object->nameScope, "main.drv"));
+            if (drv) in.registerAs("main.drv", drv);
             in.evalValue(e.script);
+            if (drv) in.unregisterName("main.drv", drv);
         }
     }
-    for (Archetype* a : chars) in.unregisterName("main.drv", a->driver.get());
     if (savedDrv) in.registerAs("main.drv", savedDrv);
     in.var("this") = savedThis;
     ++revision_;

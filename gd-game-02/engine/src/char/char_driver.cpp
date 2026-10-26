@@ -32,6 +32,52 @@ uint32_t alignOf(uint32_t flags) { return (flags >> 12) & 0xf; }
 
 }  // namespace
 
+// ---- transitions -----------------------------------------------------------
+
+bool lastEdge(const scene::CharClipSamples& from, float frame, const scene::CharClipSamples& to, float& src, float& dest) {
+    for (const auto& t : from.transitions) {
+        if (t.dest != to.name) continue;
+        for (size_t k = t.nodes.size(); k-- > 0;)
+            if (frame <= t.nodes[k].first) {
+                src = t.nodes[k].first, dest = t.nodes[k].second;
+                return true;
+            }
+        return false;
+    }
+    return false;
+}
+
+bool transition(const scene::CharClipSamples& from, float frame, const scene::CharClipSamples& to, uint32_t flags, float& src, float& dest) {
+    const uint32_t mode = flags & 0xf;
+    if (mode == kPlayNoBlend) return false;
+    if (mode == kPlayFirst) {
+        // 0x8219E4A8: the first edge at or after the frame.
+        for (const auto& t : from.transitions) {
+            if (t.dest != to.name) continue;
+            for (const auto& [s, d] : t.nodes)
+                if (frame <= s) {
+                    src = s, dest = d;
+                    return true;
+                }
+            break;
+        }
+    } else if (mode == kPlayLast && lastEdge(from, frame, to, src, dest)) {
+        return true;
+    }
+    // The default: start now (kPlayLast: not before the older clip's end less
+    // half the new blend), at the same phase of the new clip's beat align.
+    src = frame;
+    if (mode == kPlayLast) src = std::max(src, from.endFrame - to.blendWidth * 0.5f);
+    dest = to.startFrame;
+    const float a = float(alignOf(to.playFlags));
+    if (a > 0) {
+        const float d = modPos(src, a) - modPos(to.startFrame, a);
+        dest += d;
+        if (d < 0) dest += a;
+    }
+    return true;
+}
+
 // ---- ClipSet ---------------------------------------------------------------
 
 ClipSet::ClipSet(scene::Milo& milo) : milo_(milo), path_(milo.path()) {
@@ -117,6 +163,18 @@ scene::CharClipSamples* ClipSet::next(scene::CharClipGroup& g) {
     ++i;
     if (size_t(i) >= order.size()) i = 0;
     return clip(order[size_t(i)]);
+}
+
+scene::CharClipSamples* ClipSet::nextMatching(scene::CharClipGroup& g, uint32_t flags) {
+    auto& order = groupOrder_[&g];
+    order.erase(std::remove_if(order.begin(), order.end(), [&](const std::string& n) { return !clip(n); }), order.end());
+    int& cur = groupIndex_[&g];
+    const int n = int(order.size());
+    for (int k = cur + 1; k < n; ++k)
+        if (scene::CharClipSamples* c = clip(order[size_t(k)]); c && (c->flags & flags) == flags) return cur = k, c;
+    for (int k = 0; k <= cur && k < n; ++k)
+        if (scene::CharClipSamples* c = clip(order[size_t(k)]); c && (c->flags & flags) == flags) return cur = k, c;
+    return nullptr;
 }
 
 void ClipSet::shuffleGroups(Random& rng) {
@@ -282,10 +340,10 @@ ClipDriver::Node* ClipDriver::push(scene::CharClipSamples* clip, uint32_t flags,
     while (!chain_.empty() && chain_.back().weight == 0) {
         Node old = chain_.back();
         chain_.pop_back();
-        if (runScript && old.clip && !old.clip->exitEvent.empty()) runScript(old.clip->exitEvent);
+        if (runScript && old.clip && !old.clip->exitEvent.empty()) fire(old.clip, old.clip->exitEvent);
     }
     // The enter event (clip +0x3c) with $dude.
-    if (runScript && !clip->enterEvent.empty()) runScript(clip->enterEvent);
+    if (runScript && !clip->enterEvent.empty()) fire(clip, clip->enterEvent);
     // The first event.
     if (!clip->events.empty()) n.eventIndex = 0, n.nextEvent = clip->events[0].frame;
     if (!explicitStart) {
@@ -297,41 +355,8 @@ ClipDriver::Node* ClipDriver::push(scene::CharClipSamples* clip, uint32_t flags,
         } else {
             // 0x8219E598: the older clip's transition table, else the default.
             const Node& o = chain_.back();
-            const uint32_t mode = n.flags & 0xf;
             float src = 0, dest = 0;
-            bool found = false;
-            if (mode == kPlayFirst || mode == kPlayLast) {
-                for (const auto& t : o.clip->transitions) {
-                    if (t.dest != clip->name) continue;
-                    if (mode == kPlayFirst) {
-                        for (const auto& [s, d] : t.nodes)
-                            if (o.frame <= s) {
-                                src = s, dest = d, found = true;
-                                break;
-                            }
-                    } else {
-                        for (size_t k = t.nodes.size(); k-- > 0;)
-                            if (o.frame <= t.nodes[k].first) {
-                                src = t.nodes[k].first, dest = t.nodes[k].second, found = true;
-                                break;
-                            }
-                    }
-                    break;
-                }
-            }
-            if (!found) {
-                // Start now (kPlayLast: not before the older clip's end less
-                // half the new blend), at the same phase of the new clip's beat align.
-                src = o.frame;
-                if (mode == kPlayLast) src = std::max(src, o.clip->endFrame - clip->blendWidth * 0.5f);
-                dest = clip->startFrame;
-                const float a = float(alignOf(clip->playFlags));
-                if (a > 0) {
-                    const float d = modPos(src, a) - modPos(clip->startFrame, a);
-                    dest += d;
-                    if (d < 0) dest += a;
-                }
-            }
+            transition(*o.clip, o.frame, *clip, n.flags, src, dest);
             n.frame = dest;
             n.delay = src - o.frame;
             n.weight = 0;
@@ -357,7 +382,7 @@ ClipDriver::Node* ClipDriver::push(scene::CharClipSamples* clip, uint32_t flags,
 void ClipDriver::deleteOlder(size_t count) {
     // 0x821A48E8: exit events of the deleted nodes, newest first.
     for (size_t k = count; k-- > 0;)
-        if (runScript && chain_[k].clip && !chain_[k].clip->exitEvent.empty()) runScript(chain_[k].clip->exitEvent);
+        if (runScript && chain_[k].clip && !chain_[k].clip->exitEvent.empty()) fire(chain_[k].clip, chain_[k].clip->exitEvent);
     chain_.erase(chain_.begin(), chain_.begin() + std::ptrdiff_t(count));
 }
 
@@ -401,7 +426,7 @@ void ClipDriver::runEvents(Node& n, float from, float to) {
     for (;;) {
         if (n.nextEvent <= from || to <= n.nextEvent) break;
         if (first < 0) first = n.eventIndex;
-        if (runScript) runScript(ev[size_t(n.eventIndex)].script);
+        if (runScript) fire(n.clip, ev[size_t(n.eventIndex)].script);
         // FUN_821A4B40: the next event, wrapping.
         n.eventIndex = (n.eventIndex + 1) % int(ev.size());
         n.nextEvent = ev[size_t(n.eventIndex)].frame;
@@ -529,6 +554,32 @@ scene::CharClipSamples* ClipDriver::firstPlaying() const {
 uint32_t ClipDriver::firstFlags() const {
     const scene::CharClipSamples* c = firstPlaying();
     return c ? c->flags : 0;
+}
+
+void ClipDriver::fire(const scene::CharClipSamples* clip, const std::string& script) {
+    const scene::CharClipSamples* was = scriptClip;
+    scriptClip = clip;
+    runScript(script);
+    scriptClip = was;
+}
+
+int ClipDriver::dominant() const {
+    // 0x8216B3A0: newest first, each eased weight scaled by what the newer
+    // nodes leave; the largest share (the newest when none is above 0).
+    int best = chain_.empty() ? -1 : int(chain_.size()) - 1;
+    float most = 0, left = 1;
+    for (size_t k = chain_.size(); k-- > 0;) {
+        const float e = eased(chain_[k].weight);
+        if (e * left > most) most = e * left, best = int(k);
+        left *= 1 - e;
+    }
+    return best;
+}
+
+int ClipDriver::newestStarted() const {
+    for (size_t k = chain_.size(); k-- > 0;)
+        if (chain_[k].weight != 0) return int(k);
+    return -1;
 }
 
 void ClipDriver::dropUnstarted() {

@@ -62,7 +62,8 @@ Json Career::toJson() const {
         pj.set("name", Json::string(p.name));
         pj.set("cash", Json::number(p.cash));
         pj.set("tutorials_done", Json::number(p.tutorialsDone));
-        Json st = Json::array(), res = Json::array();
+        pj.set("last_difficulty", Json::number(p.lastDifficulty));
+        Json st = Json::array(), res = Json::array(), ch = Json::array();
         for (int d = 0; d < kDifficulties; ++d) {
             st.a.push_back(Json::number(p.status[size_t(d)]));
             Json r = Json::object();
@@ -74,9 +75,17 @@ Json Career::toJson() const {
                 r.set(song, e);
             }
             res.a.push_back(r);
+            const CharInfo& ci = p.chars[size_t(d)];
+            Json c = Json::object();
+            c.set("character", Json::string(ci.character));
+            c.set("outfit", Json::string(ci.outfit));
+            c.set("guitar", Json::string(ci.guitar));
+            c.set("skin", Json::string(ci.skin));
+            ch.a.push_back(c);
         }
         pj.set("status", st);
         pj.set("results", res);
+        pj.set("characters", ch);
         ps.a.push_back(pj);
     }
     j.set("profiles", ps);
@@ -123,11 +132,16 @@ bool Career::fromJson(const Json& j) {
         p.name = pj["name"].str();
         p.cash = int(pj["cash"].num());
         p.tutorialsDone = int(pj["tutorials_done"].num());
+        p.lastDifficulty = int(pj["last_difficulty"].num(1));
         for (size_t d = 0; d < size_t(kDifficulties); ++d) {
             if (d < pj["status"].a.size()) p.status[d] = int(pj["status"].a[d].num());
             if (d < pj["results"].a.size())
                 for (const auto& [song, e] : pj["results"].a[d].o)
                     p.results[d][song] = {int(e["score"].num()), int(e["stars"].num()), e["passed"].truthy()};
+            if (d < pj["characters"].a.size()) {
+                const Json& c = pj["characters"].a[d];
+                p.chars[d] = {c["character"].str(), c["outfit"].str(), c["guitar"].str(), c["skin"].str()};
+            }
         }
     }
     for (const auto& [k, v] : j["items"].o) c.items[k] = v.truthy();

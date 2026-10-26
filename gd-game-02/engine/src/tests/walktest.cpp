@@ -8,6 +8,7 @@
 #include <fstream>
 #include <sstream>
 
+#include "data/game_data.h"
 #include "data/json.h"
 #include "ui/natives.h"
 #include "ui/ui_manager.h"
@@ -130,6 +131,46 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         expect_ = {"main_screen", "qp_selsong_screen", "qp_diff_screen", "loading_screen", "game_screen", "pause_screen",
                    "pause_confirm_restart_screen", "game_screen", "pause_screen", "pause_confirm_quit_screen", "meta_loading_screen",
                    "qp_selsong_screen"};
+    } else if (scenario == "career") {
+        at("splash_screen", 30000);
+        press(kX);
+        at("startup_create_save_screen");
+        press(kX);
+        at("saving_screen");
+        at("guitar_help_screen");
+        press(kX);
+        at("main_screen");
+        press(kUp);  // CAREER (main_career.btn)
+        wait(150);
+        press(kX);
+        at("nameprof_screen");
+        press(kX);  // the band's name: "A"
+        wait(150);
+        press(kStart);
+        at("sel_difficulty_screen");
+        press(kX);  // Medium (the profile's last difficulty)
+        at("sel_character_new_screen");
+        wait(1500);  // the character opens the door
+        press(kDown);  // Punk -> Alterna (Judy Nails)
+        wait(300);
+        press(kX);  // two outfits (alterna2 bought): pick one
+        wait(800);
+        press(kDown);  // outfit1.btn -> outfit2.btn (alterna2)
+        wait(800);
+        press(kX);
+        at("sel_guitar_new_screen");
+        press(kDown);  // Les Paul -> SG
+        wait(300);
+        press(kX);  // two skins (sg_white bought): pick one
+        wait(600);
+        press(kDown);  // sg_cherry -> sg_white
+        wait(300);
+        press(kX);
+        at("tour_start_screen");
+        press(kX);
+        at("career_screen");
+        expect_ = {"main_screen", "nameprof_screen", "sel_difficulty_screen", "sel_character_new_screen", "sel_guitar_new_screen",
+                   "tour_start_screen", "saving_screen", "career_screen"};
     } else if (scenario == "attract") {
         endMs_ = 20000;
         at("splash_screen");
@@ -156,6 +197,13 @@ void WalkDriver::poll(ui::UiManager& ui, double nowMs) {
     }
     Step& s = steps_[step_];
     if (stepStart_ < 0) stepStart_ = nowMs;
+    // career: the band has bought Judy Nails' second outfit and the SG's
+    // white skin in the store (M10), so both choices offer two.
+    if (scenario_ == "career" && !seeded_ && ui.currentScreen() == "main_screen") {
+        seeded_ = true;
+        ui.career().items["alterna2"] = true;
+        ui.career().items["sg_white"] = true;
+    }
     switch (s.kind) {
     case Step::Screen:
         if (ui.currentScreen() == s.screen && !ui.inTransition()) {
@@ -219,6 +267,38 @@ int WalkDriver::finish(ui::UiManager& ui) {
             std::printf("  FAIL career.json has no score of the song\n");
             ok = false;
         }
+    }
+    // The career's look: career.json's first band at Medium (campaign
+    // set_character_info), and player 0's config back from it.
+    if (scenario_ == "career") {
+        std::ifstream f(ui.savePath());
+        std::stringstream ss;
+        ss << f.rdbuf();
+        std::string got;
+        try {
+            const Json c = Json::parse(ss.str())["profiles"].a.at(0)["characters"].a.at(1);
+            got = c["character"].str() + " " + c["outfit"].str() + " " + c["guitar"].str() + " " + c["skin"].str();
+        } catch (const std::exception& e) {
+            got = e.what();
+        }
+        const ui::Session::PlayerCfg& p = ui.session().players[0];
+        const std::string cfg = p.character + " " + p.outfit + " " + p.guitar + " " + p.skin;
+        const std::string want = "alterna alterna2 sg sg_white";
+        std::printf("  look: career.json %s, player 0 %s\n", got.c_str(), cfg.c_str());
+        if (got != want || cfg != want) std::printf("  FAIL the look is not %s\n", want.c_str()), ok = false;
+    }
+    // The endgame photo (quickplay): player 0's outfit, one of its four pictures, on the disc.
+    if (scenario_ == "quickplay") {
+        const auto& photos = ui.session().winnerPhotos;
+        const std::string outfit = ui.session().players[0].outfit;
+        const std::string p = photos.empty() ? std::string() : photos[0];
+        const std::string stem = "image/og/photo_" + outfit;
+        const bool shape = photos.size() == 1 && p.size() == stem.size() + 10 && p.compare(0, stem.size(), stem) == 0 &&
+                           p[stem.size()] >= '0' && p[stem.size()] <= '3' && p.compare(stem.size() + 1, 9, "_keep.bmp") == 0;
+        std::string ark = p;
+        if (shape) ark = "ui/image/ng/gen/" + p.substr(9) + "_xbox";
+        std::printf("  photo: %s (%s)\n", p.c_str(), ark.c_str());
+        if (!shape || !ui.data().exists(ark)) std::printf("  FAIL the endgame photo is not one of %s's\n", outfit.c_str()), ok = false;
     }
     // The script reports.
     Interp& in = ui.interp();

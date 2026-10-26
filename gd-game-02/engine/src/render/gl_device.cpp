@@ -154,6 +154,8 @@ public:
     void beginFrame() override;
     void setTarget(TargetId t) override;
     void setViewport(int x, int y, int w, int h) override;
+    TargetId currentTarget() const override { return target_; }
+    void currentViewport(int& x, int& y, int& w, int& h) const override { x = vp_[0], y = vp_[1], w = vp_[2], h = vp_[3]; }
     void clear(const float* rgba, bool depth) override;
     void draw(const DrawCall& call) override;
     UniformData stageUniforms(const void* data, size_t size) override;
@@ -195,6 +197,8 @@ private:
     GLuint boundSampler_[kMaxTextureSlots] = {};
     std::vector<std::pair<SamplerState, GLuint>> samplers_;
     int targetH_ = 0;
+    TargetId target_;
+    int vp_[4] = {};
 
     // Frame pacing (gd01 lesson L7).
     GLsync fences_[2] = {};
@@ -468,6 +472,7 @@ TargetId GlDevice::createTarget(const TargetDesc& desc, std::string& error) {
     const bool complete = gl::glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
     gl::glBindFramebuffer(GL_FRAMEBUFFER, 0);
     targetH_ = 0;
+    target_ = {};
     if (!complete) {
         error = "render target " + std::to_string(width) + "x" + std::to_string(height) + " is incomplete";
         gl::glDeleteFramebuffers(1, &t.fbo);
@@ -506,6 +511,7 @@ void GlDevice::beginFrame() {
 void GlDevice::setTarget(TargetId id) {
     const GlTarget* t = targets_.get(id.id);
     gl::glBindFramebuffer(GL_FRAMEBUFFER, t ? t->fbo : 0);
+    target_ = t ? id : TargetId{};
     int w = 0, h = 0;
     if (t) w = t->w, h = t->h;
     else drawableSize(w, h);
@@ -514,6 +520,7 @@ void GlDevice::setTarget(TargetId id) {
 }
 
 void GlDevice::setViewport(int x, int y, int w, int h) {
+    vp_[0] = x, vp_[1] = y, vp_[2] = w, vp_[3] = h;
     const int glY = targetH_ - y - h;  // GL's origin is bottom-left
     gl::glViewport(x, glY, w, h);
     gl::glScissor(x, glY, w, h);

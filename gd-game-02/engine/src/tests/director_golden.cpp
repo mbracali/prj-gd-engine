@@ -33,8 +33,14 @@ constexpr const char* kVenue = "arena";
 // them; check the log (GD02_GOLDEN_LOG=<file>) and update both.
 // M9: the band on stage, cam_check_shot mask 0xc0 (kWalkSpot|kSoloWalkSpot)
 // and guitarist0's character root (not a 192-unit radius over every waypoint).
-constexpr int kGoldenLines = 333;
-constexpr uint32_t kGoldenHash = 0xa7668b37u;
+// M9.6: guitarist0 walks (actually_walking -> walk_ok; the nearest walk spot
+// changes) and the servo regulates the band to their waypoints.
+// M9.9: the crowd's shuffles (iterate_frac) draw from the crowd's own
+// RandomGen, no longer from the interpreter's the director's scripts use
+// (with the crowd drawing from the interpreter again the old 329 / fbc0a753
+// comes back).
+constexpr int kGoldenLines = 331;
+constexpr uint32_t kGoldenHash = 0x716ffdacu;
 
 uint32_t fnv(const std::string& s, uint32_t h) {
     for (unsigned char c : s) h = (h ^ c) * 16777619u;

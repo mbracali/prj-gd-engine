@@ -185,4 +185,39 @@ void Bones::scaleDown(const scene::CharClipSamples& clip, float f) {
     }
 }
 
+void Bones::rotateBy(const scene::CharClipSamples& clip, float frame) {
+    // 0x82161F98: t clamped to [0, 1] for the full set, 0 for the static one.
+    const float t = std::clamp(clipT(clip, frame), 0.0f, 1.0f);
+    std::vector<float> v;
+    for (const Set* set : {&clip.full, &clip.one}) {
+        if (set->bones.empty() || set->count == 0) continue;
+        sampleSet(*set, set == &clip.full ? t : 0.0f, v);
+        const auto& idx = map(*set);
+        for (size_t b = 0; b < set->bones.size(); ++b) {
+            if (idx[b] < 0) continue;
+            Channel& ch = ch_[size_t(idx[b])];
+            const float* x = v.data() + set->offset[b];
+            switch (set->bones[b].type) {
+            case Set::kPos:
+            case Set::kScale:  // the entries before the quaternions (none scale on the disc)
+                for (int k = 0; k < 3; ++k) ch.v[k] += x[k];
+                break;
+            case Set::kQuat: {
+                // n * q (Hamilton, x y z w).
+                const float nx = x[0], ny = x[1], nz = x[2], nw = x[3];
+                const float qx = ch.v[0], qy = ch.v[1], qz = ch.v[2], qw = ch.v[3];
+                ch.v[0] = nw * qx + nx * qw + ny * qz - nz * qy;
+                ch.v[1] = nw * qy - nx * qz + ny * qw + nz * qx;
+                ch.v[2] = nw * qz + nx * qy - ny * qx + nz * qw;
+                ch.v[3] = nw * qw - nx * qx - ny * qy - nz * qz;
+                break;
+            }
+            default:
+                ch.v[0] += x[0];
+                break;
+            }
+        }
+    }
+}
+
 }  // namespace chr

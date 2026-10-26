@@ -320,13 +320,20 @@ gd02 draws them through the material shader [I]:
 
 ## Crowd (game/crowd.h, render/crowd_view.h)
 
-A WorldCrowd (in `<v>_chars`) has archetypes (`char/crowd/og/<name>.milo`,
-"og" -> "ng": a Character with skinned meshes, bones, hand variants and a
-lighter flame) and, per archetype, its placements [C data: 15 crowds,
-106 to 1959 placements a venue]. GH2 draws most placements as 2D cards: a
-RndMultiMesh instance of a quad whose texture it renders from the archetype
-each frame, framed by the character's bones (0x82247310) [C address,
-behaviour I]; the shot's crowd3d placements as the 3D character.
+A WorldCrowd (in `<v>_chars`) has archetypes and, per archetype, its
+placements [C data: 15 crowds, 106 to 1959 placements a venue]. An
+archetype (CharData, 0x44 bytes: +0x10 character, +0x14 height, +0x18
+density, +0x1c radius, +0x20 the card RndMultiMesh, +0x2c the shown 3D
+placements, +0x38 all of the shot's 3D ones) names a Character of the
+`<v>_chars` directory, the proxy `crowd_male01` etc. (proxy file
+`../../../char/crowd/og/crowd_male01.milo` -> `char/crowd/ng/gen/
+crowd_male01.milo_xbox`, environ `crowd.env`) [C data]: a Character of type
+crowd (skinned meshes, bones, the spot_head / spot_*-hand / spot_*-forearm
+spots, hand variants, the inline `lighter_flame` RndDir, main.drv on
+`char/crowd/anims/gen/{female,male1,male2}_main`, groups idle ok bad great
+lighter_slow lighter_fast). There is ONE Character per archetype: every
+placement of it shows the same pose, and crowds naming the same archetype
+(fest, stone) share it [C: 0x82247310 draws one character per CharData].
 
 - set_fullness a b (0x82247C08) [C]: per archetype the cards move between
   the shown list and a spare list until int(n_cards x a) show (truncated);
@@ -366,13 +373,55 @@ behaviour I]; the shot's crowd3d placements as the 3D character.
   `main.drv` its CharDriver (play_group, set beat_scale; kept per
   archetype for M9: crowd_half / double / normal_tempo set beat_scale 0.5 /
   2 / 1).
-- Drawing [I: the port's choice]: every shown placement (cards and 3D) as
-  the archetype in its bind pose (the clips are M9's). Each archetype is
-  skinned once into its bind pose and merged per material, four copies in
-  one buffer, copy k weighted fully to object matrix k of the standard
-  shader (GdObject uModel[4]): one draw shows four placements, with no
-  instancing extension (GL 3.3 / GLES 3 alike). Placements outside the view
-  are skipped (fest's balcony shot: 212 of 644 characters in 168 draws).
+- The clips [C data / C 0x822452E0]: crowd.dta's crowd_update (each
+  shot's start_shot) runs `animate` for [excitement_level] (the game's
+  excitement, Game +0x338, via the world's `excitement`): Boot all bad; Bad
+  .8 bad .2 ok; Okay .8 ok .2 great; Great / Peak great, or the lighter
+  group (lighter_slow / lighter_fast) while [lighter] is on; iterate_frac
+  gives each archetype `{main.drv play_group <g> $crowd.play_flags}`
+  (NoBlend | GraphLoop; RealTime too at intro_start_msg, which plays .8 ok
+  .2 great), so the clip changes on the cut; the group's next clip loops
+  through the transition graph. The archetypes poll with the world (song
+  beat x beat_scale; crowd_*_tempo set beat_scale .5 / 2 / 1).
+- Hands [C data]: the clips' events `{$dude set_hand clap|devil|fist|
+  lighter}` run char_objects.dta's Character type crowd `set_hand` (enter:
+  clap): the hand meshes shown / hidden, `lighter_flame start / stop`.
+  [I] lighter_flame (no RndDir start / stop handler found; its MatAnim is a
+  texture-scale flicker under a looping AnimFilter, never invisible) is
+  drawn while started, flickering at 30 frames a second.
+- Random numbers: the shuffles, the drivers' clip picks and the scripts
+  while an archetype is $this draw from the crowd's own RandomGen
+  (Crowd::random, seed 0x43524F57), like the band's.
+- Drawing (WorldCrowd draw 0x82247310) [C], per archetype: unless
+  show_3d_only, the character stands at the origin turned like the crowd
+  (rotate: x = normalize(z x camera forward), y = z x x, z = the placement
+  mesh's z; else the placement mesh's rotation) and is rendered into its
+  card texture through a card camera with the main camera's rotation, at
+  d = max(h / 2 + near, |camera - (mesh + (0, 0, h / 2))|) back along the
+  forward axis from (0, 0, h / 2), y fov 2 atan(h / 2 / d), the main
+  camera's near / far; the texture is 256 x 512 32-bit per archetype with
+  gfx_mode 1 (set at start-up, 0x82270F48; 0x822496A0), one shared 128 x 256
+  16-bit one with gfx_mode 0. The card's rectangle comes from the projected
+  feet (the origin), spot_head, both spot_*-hand and (when there) both
+  spot_*-forearm: u from min(x, .25) - .05 to max(x, .75) + .05, v from
+  min(y, .4) - .05 to max(y, .6) + .05, clamped to 0..1; the quad (four
+  vertices, 0x822490F8) spans x = u h / 2 - h / 4, z = h / 2 - v h in the
+  card mesh's frame, and the RndMultiMesh draws it at every shown card
+  placement (the placement's own transform: cards are not turned to the
+  camera, a side view sees them edge-on). The card Mat (0x82249368):
+  use_environ off, blend src, alpha_cut, clamped. Then the same character is
+  drawn at each shown 3D placement (turned as above, at z - h / 2).
+- The port (render/crowd_view.h) renders the card mid-draw as GH2 does and
+  binds the world's target and viewport again (RenderDevice::
+  currentTarget / currentViewport); one card texture per character. [I]
+  The crowd Mats have alpha_write off; how GH2's card texture gets its
+  coverage alpha is not traced: the port clears it to alpha 0 and writes
+  alpha in the card pass. `GD02_CROWD=0` leaves the crowd out.
+- "Crowd hanging from the ceiling" (arena intro, reported with the M8
+  renderer): not seen with the cards (arena intro02 and the song's intro
+  shots show the floor crowd; the upper placements are arena's stands)
+  [data]. Steep or side views make cards edge-on or stretched (battle) as
+  in the decompiled rule.
 - Without GH2's menus and without the director's `game` (the dev modes),
   intro_start_msg / excitement / a shot apply the same fullness natively.
 
@@ -473,6 +522,14 @@ the loaded venue.
   outro, loop_ms); the multiplayer hides and amps; play_encore_fx,
   drummer_explode (one-player battle / small1), arena's sparks, small2's
   neon EnvAnims, small1's four bottles.
+- `--chartest` crowd (tests/chartest_crowd.cpp): arena's crowd for two
+  minutes at 120 beats a minute, the excitement changing every 8 s with a
+  crowd_update after each, lighters from 64 s, half tempo from 96 s: every
+  archetype loads and enters (clap hands), at least four groups play, the
+  clips' events switch the hands, the lighters show, beat_scale 0.5; the
+  (beat, archetype, clip / hand) log plus each archetype's card rectangle
+  every 4 s for a fixed camera: line count and FNV hash
+  (`GD02_CROWD_LOG=<file>` writes it).
 - `--view <venue>` or `--view world/<v>/gen/<v>[_mp|_coop].milo_xbox`:
   shots (Left / Right, Up / Down keyframes), presets (P), events (1-5, K, B,
   E, G, O, X); `GD02_VIEW_CAM`, `GD02_VIEW_SHOT`, `GD02_VIEW_CATEGORY`,
@@ -509,8 +566,8 @@ the loaded venue.
 - script_task keeps the values of every $variable its body names at
   creation, and a value the task sets stays set [I: later Harmonix code's
   ScriptTask]; GH2's own rule unread.
-- Crowd: the 2D cards (render-to-texture imposters) and the crowd clips
-  (M9: main.drv's groups, beat_scale, the lighter hands); the CamShot
+- Crowd: the card texture's alpha (above); lighter_flame's show / hide;
+  `$cheat_crowd_heads` (eyeball / monkey heads) is never set; the CamShot
   crowd3d second value is a card index [I: 0x82247FD0 walks the card list].
 - Sound banks: no reverb sends or ADSR (docs/audio_and_charts.md section
   4); crowd_audio play_stream (stone's wingame.mogg after the campaign) is a

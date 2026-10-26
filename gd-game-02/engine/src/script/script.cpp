@@ -386,13 +386,20 @@ uint32_t Interp::nextRandom() {
     return result;
 }
 
+RandomGen* Interp::activeRandom() {
+    auto t = vars_.find("this");
+    return t != vars_.end() && t->second.type == Value::Type::Object && t->second.object ? t->second.object->random : nullptr;
+}
+
 float Interp::randomFloat(float lo, float hi) {
+    if (RandomGen* g = activeRandom()) return g->real(lo, hi);
     float u = static_cast<float>(nextRandom() >> 8) * (1.0f / 16777216.0f);  // [0, 1)
     float v = lo + (hi - lo) * u;
     return v < hi || hi <= lo ? v : lo;
 }
 
 int Interp::randomInt(int lo, int hi) {
+    if (RandomGen* g = activeRandom()) return g->integer(lo, hi);
     if (hi <= lo) return lo;
     uint32_t span = static_cast<uint32_t>(hi - lo);
     return lo + static_cast<int>(nextRandom() % span);

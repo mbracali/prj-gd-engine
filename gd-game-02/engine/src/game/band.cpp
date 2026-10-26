@@ -156,7 +156,34 @@ struct Band::GuitarState {
     double startAt = 1e30;       // +0x26c when the game-over clip starts (TaskMgr seconds)
     bool handsOn = true;         // +0xb8 && +0xb9
     int activePlayers = 0;       // +0x220
-    std::vector<float> interactProbs;
+    std::vector<float> interactProbs;  // +0xa4 interact_probs
+    // Walks (0x822D16B8).
+    bool canWalk = false;        // +0x250: a kWalkSpot, one player, a CharWalk
+    float tempoScale = 1;        // +0x22c: 2 when the player's track has [half_tempo]
+    float walkTime = 0;          // +0x230: beats a walk between walk spots may take
+    std::array<float, 5> delays{};  // +0x238: walk_delays rolled per excitement (s; 1e30 never)
+    double lastWalk = -15;       // +0x24c: TaskMgr seconds of the last roll
+    std::vector<std::unique_ptr<Task>> tasks;  // +0x254 (pollable +0xec), by start
+    std::vector<std::string> usedInteracts;    // +0x210: clip groups interacted with
+    int walkState = 0;           // the CharWalk's state last poll (arrival logs)
+};
+
+// The guitarist's timeline entries (TaskQueue 0x82197CB8 / 0x82198188 /
+// 0x82197FB0): {vtable, start, end (beats), priority, mask, started}.
+// Walk: 0x822E4898 (vtable 0x8204A31C: Start 0x822E4E78, Poll 0x822E48D8,
+// End 0x822E4AE8, Conflict 0x822E4910); hold: 0x82046E18 (no-ops); Star
+// Power: 0x822E4AF8 (vtable 0x8204A334: Start 0x822E49D8, Poll 0x822E4A30);
+// interact: 0x822E4C80 (vtable 0x8204A384: Start 0x822E50D0).
+struct Band::Task {
+    enum Kind { Walk, Hold, StarPower, Interact } kind = Hold;
+    float start = 0, end = 0, priority = -1;  // [1] [2] [3]
+    uint32_t mask = 0;                        // [4]
+    bool started = false;                     // [5]
+    uint32_t flags = 0;                       // walk [8]: the target's waypoint flags
+    bool fromSpot = false;                    // walk [9]
+    scene::CharClipSamples* clip = nullptr;   // Star Power / interact [8]
+    bool seen = false;                        // Star Power [9]
+    std::string group;                        // interact [7]: the waypoint's clip_group
 };
 
 // ---- script objects --------------------------------------------------------
@@ -165,7 +192,10 @@ struct Band::GuitarState {
 // GuitarCharacter natives.
 class Band::CharObj : public ScriptObject {
 public:
-    CharObj(Band& b, Member& m, const std::string& cls) : ScriptObject(m.slot, cls), b_(b), m_(m) { nameScope = m.slot; }
+    CharObj(Band& b, Member& m, const std::string& cls) : ScriptObject(m.slot, cls), b_(b), m_(m) {
+        nameScope = m.slot;
+        random = &b.rng_;
+    }
 
     bool handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) override {
         r = Value::integer(0);
@@ -174,10 +204,14 @@ public:
         if (msg == "get" || msg == "set" || msg == "has" || msg == "name") return false;
         // Character::Handle 0x82152108.
         if (msg == "teleport") {
+            // 0x82151D08: to a waypoint, which the servo then regulates to.
             if (!args.empty()) {
                 const Value w = in.evalValue(args[0]);
                 const std::string n = text(in, w);
-                if (scene::Object* o = b_.world_.venue().find(n)) c.teleport(b_.world_.pose().world(o));
+                if (scene::Object* o = b_.world_.venue().find(n)) {
+                    if (auto* wp = o->as<scene::Waypoint>()) c.teleport(b_.spotOf(wp));
+                    else c.teleport(b_.world_.pose().world(o));
+                }
             }
             return true;
         }
@@ -239,6 +273,7 @@ class Band::PartObj : public ScriptObject {
 public:
     PartObj(Band& b, Member& m, scene::Object* o) : ScriptObject(ScriptObject::scoped(m.slot, o->name), o->cls), b_(b), m_(m), o_(o) {
         drv_ = m.character->driver(o->name);
+        random = &b.rng_;
     }
     const std::string& objName() const { return o_->name; }
 
@@ -311,6 +346,23 @@ public:
             return true;
         }
         if (o_->as<scene::FaceFxLipSyncServo>() && face(in, msg, args, r)) return true;
+        if (o_->as<scene::CharServoBone>() && msg == "regulate_override") {
+            // 0x82189A40 -> 0x82189928: clip frame waypoint bone ('' 0 '' '': off).
+            const std::string clipName = args.size() > 0 ? text(in, args[0]) : std::string();
+            const float frame = args.size() > 1 ? in.evalValue(args[1]).number() : 0.0f;
+            const std::string way = args.size() > 2 ? text(in, args[2]) : std::string();
+            const std::string bone = args.size() > 3 ? text(in, args[3]) : std::string();
+            chr::ClipDriver* d = c.mainDriver();
+            const scene::CharClipSamples* clip = d && d->clipSet() && !clipName.empty() ? d->clipSet()->clip(clipName) : nullptr;
+            const scene::Waypoint* wp = way.empty() ? nullptr : b_.world_.venue().find<scene::Waypoint>(way);
+            if (wp) {
+                const chr::Spot sp = b_.spotOf(wp);
+                c.setRegulateOverride(clip, frame, &sp, bone);
+            } else {
+                c.setRegulateOverride(clip, frame, nullptr, bone);
+            }
+            return true;
+        }
         // The rest of the rig's and effects' messages come in later phases
         // (M9.6 walks: bone.servo regulate_override; the proxies' particles:
         // start / stop): reported as STUBs.
@@ -324,15 +376,7 @@ private:
         facefx::LipSync& lip = *m_.lip;
         facefx::ExpressionScript& expr = *m_.expr;
         const float now = float(in.tasks().time(kTaskSeconds));
-        auto excitement = [&]() -> std::pair<bool, int> {
-            ScriptObject* g = in.findObject("game");
-            int e = 0;
-            if (g) {
-                Value v = in.send(g, "get", {Value::symbol("excitement")}, false);
-                if (v.isNumber()) e = v.integerValue();
-            }
-            return {g != nullptr, e};
-        };
+        auto excitement = [&]() -> std::pair<bool, int> { return {in.findObject("game") != nullptr, b_.currentExcitement()}; };
         if (msg == "pick_expression") return expr.pickExpression(now), true;
         if (msg == "do_pick_expression") {
             const auto [ge, e] = excitement();
@@ -447,7 +491,7 @@ private:
 // won}); other messages go to the host's player object when there is one.
 class Band::PlayerObj : public ScriptObject {
 public:
-    PlayerObj(Band& b, int p) : ScriptObject("band_player" + std::to_string(p), "Player"), b_(b), p_(p) {}
+    PlayerObj(Band& b, int p) : ScriptObject("band_player" + std::to_string(p), "Player"), b_(b), p_(p) { random = &b.rng_; }
     bool handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) override {
         if (msg == "won") return r = Value::integer(b_.won_ ? 1 : 0), true;
         if (msg == "get" || msg == "set" || msg == "has" || msg == "name") return false;
@@ -471,9 +515,20 @@ Band::Band(World& world, const GameData& data, const SongInfo& song, Config conf
     log = l && *l && *l != '0';
     venueName_ = world.venue().name();
     animTempo_ = song.animTempo;
+    midiFile_ = song.audio.midiPath;
     clips_ = std::make_unique<chr::ClipLibrary>(data);
     assemble(data, song);
     makeScripts(objects);
+    // CharWalk types guitarist (path_radius 12).
+    float radius = 12;
+    for (const DataNode& c : objects_ ? objects_->children : std::vector<DataNode>{})
+        if (c.isList() && !c.children.empty() && c.children[0].isText() && c.children[0].s == "CharWalk")
+            if (const DataNode* t = c.find("types"))
+                if (const DataNode* g = t->find("guitarist"))
+                    if (const DataNode* r = g->find("path_radius"); r && r->children.size() > 1)
+                        radius = r->children[1].type == DataNode::Type::Float ? r->children[1].f : float(r->children[1].i);
+    for (auto& m : members_)
+        if (chr::CharWalk* w = m->character->walk()) w->pathRadius = radius;
 }
 
 Band::~Band() {
@@ -645,36 +700,34 @@ void Band::setupFace(Member& m, scene::Object* servo) {
     if (!s || !m.character) return;
     m.lip = std::make_unique<facefx::LipSync>();
     m.expr = std::make_unique<facefx::ExpressionScript>();
-    m.expr->randomInt = [this](int lo, int hi) { return world_.interp().randomInt(lo, hi); };
-    m.expr->randomFloat = [this](float lo, float hi) { return world_.interp().randomFloat(lo, hi); };
+    m.expr->randomInt = [this](int lo, int hi) { return rng_.integer(lo, hi); };
+    m.expr->randomFloat = [this](float lo, float hi) { return rng_.real(lo, hi); };
     try {
         const std::string fac = facefx::resolveFacePath(data_, m.character->path(), s->faceGraph);
         std::vector<std::string> entries;
         for (const auto& e : s->entries) entries.push_back(e.node);
         m.lip->setup(facefx::loadFaceGraph(data_, fac), facefx::loadServoVisemes(data_, s->header.type), entries);
-        if (s->header.type != "singer" && data_.exists(facefx::kBlinkTrackPath))
-            m.lip->play(std::make_shared<facefx::Anim>(facefx::loadAnim(data_, facefx::kBlinkTrackPath)));
+        // change_song (the end of PreLoad): gh2 {$this set_song _blinktrack};
+        // singer {game set_lipsync_song $this} (0x822B6A18): the song's
+        // <midi_file folder>/<base>.voc. No file (instrumentals): no song,
+        // the servo never poses.
+        const std::string voc = s->header.type == "singer" ? facefx::singerVocPath(midiFile_) : facefx::kBlinkTrackPath;
+        if (data_.exists(voc)) m.lip->play(std::make_shared<facefx::Anim>(facefx::loadAnim(data_, voc)));
+        m.character->attachFace(m.lip.get());
     } catch (const std::exception& e) {
         SDL_Log("band: %s lip.servo: %s", m.slot.c_str(), e.what());
     }
 }
 
+// The gh2 servos' expression_task (a kTaskSeconds task: it runs whether the
+// character shows or not); the faces pose in the characters' polls.
 void Band::pollFaces() {
     Interp& in = world_.interp();
     const float song = float(in.tasks().time(kTaskSeconds));
-    const float ui = float(in.tasks().time(kTaskUISeconds));
     ScriptObject* g = in.findObject("game");
-    int excitement = 0;
-    if (g) {
-        Value v = in.send(g, "get", {Value::symbol("excitement")}, false);
-        if (v.isNumber()) excitement = v.integerValue();
-    }
-    for (auto& mem : members_) {
-        if (!mem->lip || !mem->expr || !mem->character || !mem->character->visible) continue;
-        mem->expr->update(song, g != nullptr, excitement, *mem->lip);
-        facefx::FacePose pose;
-        mem->lip->poll(song, ui, nullptr, 0, pose);
-    }
+    const int excitement = currentExcitement();
+    for (auto& mem : members_)
+        if (mem->lip && mem->expr && mem->character) mem->expr->update(song, g != nullptr, excitement, *mem->lip);
 }
 
 void Band::loadSong(const MidiFile& midi, const Song* song) {
@@ -683,7 +736,9 @@ void Band::loadSong(const MidiFile& midi, const Song* song) {
     for (int p = 0; p < config_.players && p < 2; ++p)
         for (const char* k : {"_fret", "_strum", "_fret_pos", "_parser"}) names.push_back("player" + std::to_string(p) + k);
     if (config_.bass[0] || config_.bass[1]) names.push_back("bass_strum");
+    song_ = song;
     parsers_ = std::make_unique<MidiParserSet>(in, data_, names);
+    for (const auto& p : parsers_->parsers()) p->random = &rng_;  // their random picks (0x8233EB88)
     parsers_->load(midi, song);
 }
 
@@ -742,6 +797,7 @@ void Band::guitarEnter(Member& m) {
         if (const DataNode* p = def->find("interact_probs"))
             for (size_t k = 1; k < p->children.size(); ++k) st->interactProbs.push_back(p->children[k].type == DataNode::Type::Float ? p->children[k].f : float(p->children[k].i));
     chr::ClipDriver* d = m.character->mainDriver();
+    walkSchedule(m);
     if (chr::ClipSet* set = d ? d->clipSet() : nullptr) {
         // 0x82175C58: the run-time flags.
         for (const char* g : {"interact_stage", "interact_right", "interact_back"}) set->orGroupFlags(g, 0x30000);
@@ -758,9 +814,12 @@ void Band::enter() {
     std::set<const chr::ClipSet*> filtered;
     for (auto& m : members_)
         if (chr::ClipDriver* d = m->character->mainDriver(); d && d->clipSet() && filtered.insert(d->clipSet()).second) filterClips(*m);
+    // Character::Enter (0x82153050 -> the pollable's enter: the dta `enter`
+    // handler), then GuitarCharacter's own (0x822D3B18) [I: the base enter
+    // runs the script first, so the walk schedule's solo teleport wins].
     for (auto& m : members_) {
-        if (m->type == "guitarist") guitarEnter(*m);
         in.send(m->script.get(), "enter", {}, false);
+        if (m->type == "guitarist") guitarEnter(*m);
     }
     if (parsers_) parsers_->enter();
     entered_ = true;
@@ -780,9 +839,16 @@ void Band::runClipScript(Member& m, const std::string& script) {
     }
     Interp& in = world_.interp();
     Value saved = in.var("dude");
+    Value savedThis = in.var("this");
     in.var("dude") = Value::obj(m.script.get());
+    // 0x8219BFF0: $this is the clip ({$dude start_interact $this 4}); the
+    // band's random numbers stay the character's.
+    chr::ClipDriver* d = m.character->mainDriver();
+    if (d && d->scriptClip) in.var("this") = Value::symbol(d->scriptClip->name);
+    else in.var("this") = Value::obj(m.script.get());
     for (const DataNode& n : it->second.children) in.eval(n);
     in.var("dude") = saved;
+    in.var("this") = savedThis;
 }
 
 void Band::fireTriggers(Member& m, const std::string& event) {
@@ -815,7 +881,7 @@ void Band::setMode(Member& m, const std::string& group) {
     auto& st = guitar_[&m];
     st->mode = group;
     chr::ClipDriver* d = m.character->mainDriver();
-    if (!d || actuallyWalking(m.slot)) return;
+    if (!d || (m.character->walk() && m.character->walk()->state() != 0)) return;
     uint32_t flags = chr::kPlayNow;
     if (d->flagWeight(kSpecial) > 0) flags = chr::kPlayLast;
     else if (d->newest() && (d->newest()->flags & kSpecial)) return;
@@ -829,8 +895,8 @@ void Band::clearMode(Member& m, const std::string& group) {
 }
 
 void Band::oneShot(Member& m, const std::string& group) {
-    // 0x822D2780.
-    if (actuallyWalking(m.slot) || flagWeight(m.slot, kStarPower) > 0) return;
+    // 0x822D2780: not while walking (CharWalk state 1) or in Star Power.
+    if ((m.character->walk() && m.character->walk()->state() == 1) || flagWeight(m.slot, kStarPower) > 0) return;
     if (config_.players < 2 && (group == "sync_head_bang" || group == "sync_wag")) return;
     chr::ClipDriver* d = m.character->mainDriver();
     if (!d || !d->clipSet() || d->clipSet()->groupClips(group).empty()) return;
@@ -843,7 +909,7 @@ void Band::setGameOver(Member& m, const std::string& group) {
     st->gameOver = true;
     st->mode = group;
     st->win = group != "lose";
-    const bool post = config_.players > 1;  // or an encore follows a win (0x822CA6E0) [C]; no encores here
+    const bool post = config_.players > 1 || (config_.encore && group != "lose");  // 0x822CA6E0 [C]
     st->post = post ? 1 : 0;
     st->postGroup = post ? (st->win ? "win_idle" : "lose_idle") : "";
     st->startAt = seconds_ + (st->win ? 0.75 : 0.0);
@@ -856,7 +922,17 @@ void Band::gameOverPoll(Member& m) {
     if (!d) return;
     if (st->startAt != 1e30) {
         if (seconds_ < st->startAt) return;
-        // 0x822D1F80: the game-over group, no blend.
+        // 0x822D1F80: the walk dropped; a winner faces his regulate
+        // waypoint's way (its rotation rows); no regulating; the game-over
+        // group, no blend.
+        chr::Character& c = *m.character;
+        if (c.walk()) c.walk()->reset();
+        if (st->win && c.regulate()) {
+            scene::Xfm x = c.xfm();
+            x.rot = c.regulate()->xfm.rot;
+            c.setXfm(x);
+        }
+        c.setRegulate(nullptr);
         d->playGroup(st->mode, chr::kPlayNoBlend);
         st->startAt = 1e30;
     }
@@ -878,19 +954,491 @@ void Band::guitarPoll(Member& m, float dBeats) {
         return;
     }
     chr::ClipDriver* d = m.character->mainDriver();
-    if (!d || actuallyWalking(m.slot)) return;
+    chr::CharWalk* walk = m.character->walk();
+    if (!d) return;
+    pollTasks(m);
+    if (walk && walk->state() != st.walkState) {
+        if (walk->state() == 0 && st.walkState != 0) {
+            // Arrived: how far from the target spot (the servo regulates the rest).
+            const auto p = m.character->xfm().pos;
+            const auto& t = walk->target().xfm.pos;
+            const float d = std::hypot(p[0] - t[0], p[1] - t[1]);
+            walkArrivals_.push_back(d);
+            if (log) SDL_Log("band: %8.2f %s arrived at %s, %.1f off (%.2f s)", beat_, m.slot.c_str(), walk->target().name.c_str(), double(d), seconds_);
+        }
+        st.walkState = walk->state();
+    }
+    const int ex = currentExcitement();
+    // 1. The walk timer (0x822D1288): walk_delays[excitement] since the last
+    //    roll; in "normal" a walk to a kWalkSpot (0x822D11D0).
+    if (st.canWalk && walk && walk->state() == 0) {
+        const float delay = ex >= 0 && ex < 5 ? st.delays[size_t(ex)] : 1e30f;
+        if (delay - float(seconds_ - st.lastWalk) < 0 && st.mode == "normal")
+            addTask(m, newWalk(m, float(beat_), float(beat_) + st.walkTime, 1.0f, 0x40));
+    }
+    if (walk && walk->state() == 1) return;
+    // 2. An interact queued to start within this poll is dropped below Okay.
     if (!d->settled()) {
-        // An interact queued too close to its start in Star Power is dropped.
         const auto& head = d->chain().back();
         const float x = head.delay - 4.0f;
-        if (0 <= x && x < dBeats && (head.clip->flags & kInteract)) d->dropUnstarted();
+        if (0 <= x && x < dBeats && (head.clip->flags & kInteract) && ex < 2) d->dropUnstarted();
     }
+    // 3. Settled: the mode's (or "bad") group next, kPlayLast (0x204 for
+    //    idle after a realtime clip); before it, interact_probs[excitement]
+    //    for an interact at the nearest waypoint with a clip_group.
     if (d->settled()) {
         const std::string g = currentGroup(m);
         uint32_t flags = chr::kPlayLast;
-        if (g == "idle" && !d->chain().empty() && (d->chain().back().flags & 0xf600) == chr::kPlayRealTime) flags = 0x204;
-        // [M9.6] interacts: interact_probs[excitement] at the nearest interact waypoint.
+        const int ns = d->newestStarted();
+        if (g == "idle" && ns >= 0 && (d->chain()[size_t(ns)].flags & 0xf600) == chr::kPlayRealTime) {
+            flags = 0x204;
+        } else {
+            const float prob = ex >= 0 && size_t(ex) < st.interactProbs.size() ? st.interactProbs[size_t(ex)] : 0.0f;
+            if (rng_.real01() < prob) {
+                const auto pos = m.character->xfm().pos;
+                if (const scene::Waypoint* w = nearestWaypoint({pos[0], pos[1], pos[2]}, ~0u)) {
+                    std::string group;
+                    if (w->header.type == "interact") group = "interact_back";  // the type's default
+                    if (w->header.hasProps) {
+                        const auto& ch = w->header.props.children;
+                        for (size_t i = 0; i + 1 < ch.size(); i += 2)
+                            if (ch[i].str == "clip_group" && !ch[i + 1].str.empty()) group = ch[i + 1].str;
+                    }
+                    if (!group.empty() && std::find(st.usedInteracts.begin(), st.usedInteracts.end(), group) == st.usedInteracts.end() &&
+                        d->flagWeight(kSpecial) == 0) {
+                        scene::CharClipGroup* cg = d->clipSet() ? d->clipSet()->group(group) : nullptr;
+                        scene::CharClipSamples* clip = cg ? d->clipSet()->next(*cg) : nullptr;
+                        auto t = newTimed(m, Task::Interact, clip, 1.0f);
+                        t->group = group;
+                        addTask(m, std::move(t));
+                    }
+                }
+            }
+            if (!d->settled()) return;
+        }
         d->playGroup(g, flags);
+    }
+}
+
+// ---- walks (M9.6) ------------------------------------------------------------------
+
+chr::Spot Band::spotOf(const scene::Waypoint* w) const {
+    chr::Spot s;
+    s.id = w;
+    s.name = w->name;
+    s.xfm = world_.pose().world(w);
+    s.flags = w->flags;
+    s.radius = w->radius;
+    s.yRadius = w->unknown[0];
+    s.angle = w->unknown[1];
+    return s;
+}
+
+const scene::Waypoint* Band::nearestWaypoint(const std::array<float, 3>& p, uint32_t mask) const {
+    const scene::Waypoint* best = nullptr;
+    float bd = 1e30f;
+    for (const scene::Waypoint* w : world_.waypoints()) {
+        if (!(w->flags & mask)) continue;
+        const auto q = world_.pose().world(w).pos;
+        const float dx = p[0] - q[0], dy = p[1] - q[1], dz = p[2] - q[2];
+        const float d = dy * dy + dx * dx + dz * dz;
+        if (d < bd) bd = d, best = w;
+    }
+    return best;
+}
+
+const scene::Waypoint* Band::findWaypoint(uint32_t mask) const {
+    for (const scene::Waypoint* w : world_.waypoints())
+        if (w->flags & mask) return w;
+    return nullptr;
+}
+
+std::vector<const scene::Waypoint*> Band::connections(const scene::Waypoint* w) const {
+    std::vector<const scene::Waypoint*> v;
+    for (const std::string& n : w->connections)
+        if (const scene::Waypoint* c = world_.venue().find<scene::Waypoint>(n)) v.push_back(c);
+    return v;
+}
+
+std::vector<chr::Spot> Band::searchPath(const scene::Waypoint* from, uint32_t target, uint32_t pass) {
+    // 0x82196940: the first waypoint of the global list with `target` flags
+    // (not `from`) that a depth-first search through the connections reaches
+    // without crossing a waypoint with `pass` flags (0x82196430); it moves to
+    // the list's end.
+    std::vector<const scene::Waypoint*> path;
+    std::map<const scene::Waypoint*, bool> seen;
+    const scene::Waypoint* goal = nullptr;
+    std::function<bool(const scene::Waypoint*)> dfs = [&](const scene::Waypoint* n) {
+        if (n == goal) return true;
+        seen[n] = true;
+        for (const scene::Waypoint* c : connections(n)) {
+            if (seen[c]) continue;
+            if (c != goal && (c->flags & pass)) continue;
+            path.push_back(c);
+            if (dfs(c)) return true;
+            path.pop_back();
+        }
+        return false;
+    };
+    const std::vector<const scene::Waypoint*> order = world_.waypoints();
+    for (size_t i = 0; i < order.size(); ++i) {
+        const scene::Waypoint* w = order[i];
+        if (!(w->flags & target) || w == from) continue;
+        seen.clear();
+        path.clear();
+        goal = w;
+        if (dfs(from)) {
+            world_.waypointToEnd(w);
+            std::vector<chr::Spot> out;
+            for (const scene::Waypoint* p : path) out.push_back(spotOf(p));
+            return out;
+        }
+    }
+    return {};
+}
+
+float Band::maxDistance(uint32_t from, uint32_t to) const {
+    // 0x82195618 / 0x82194EA0: the longest connection path from a `from`
+    // waypoint to a `to` one through waypoints with neither.
+    float best = 0;
+    std::map<const scene::Waypoint*, bool> seen;
+    std::function<void(float, const scene::Waypoint*)> walkFrom = [&](float d, const scene::Waypoint* n) {
+        for (const scene::Waypoint* c : connections(n)) {
+            if (seen[c]) continue;
+            seen[c] = true;
+            const auto a = world_.pose().world(c).pos, b = world_.pose().world(n).pos;
+            const float dist = std::sqrt((b[1] - a[1]) * (b[1] - a[1]) + (b[0] - a[0]) * (b[0] - a[0]) + (b[2] - a[2]) * (b[2] - a[2]));
+            if (c->flags & to) best = std::max(best, dist + d);
+            else if (!(c->flags & from)) walkFrom(dist + d, c);
+        }
+    };
+    for (const scene::Waypoint* w : world_.waypoints()) {
+        if (!(w->flags & from)) continue;
+        seen.clear();
+        seen[w] = true;
+        walkFrom(0, w);
+    }
+    return best;
+}
+
+int Band::currentExcitement() const {
+    if (excitement) return excitement();
+    Interp& in = world_.interp();
+    if (ScriptObject* g = in.findObject("game")) {
+        Value v = in.send(g, "get", {Value::symbol("excitement")}, false);
+        if (v.isNumber()) return v.integerValue();
+    }
+    return -1;
+}
+
+double Band::beatOfMs(double ms) const {
+    if (!song_) return ms / 500.0;
+    return double(song_->tempo.msToTick(float(ms))) / 480.0;
+}
+
+float Band::clipBeats(float frames, const scene::CharClipSamples* clip, const GuitarState& st) const {
+    // 0x822D1C88: frames as beats (a realtime clip's through the tempo map
+    // from now), times the tempo scale.
+    float x = std::max(0.0f, frames);
+    if (clip && (clip->playFlags & chr::kPlayRealTime) && song_) {
+        const double nowMs = song_->tempo.tickToMs(float(beat_ * 480.0));
+        x = float(beatOfMs(nowMs + double(x / clip->framesPerSec) * 1000.0) - beat_);
+    }
+    return st.tempoScale * x;
+}
+
+void Band::rollWalkDelays(GuitarState& st) {
+    // 0x822D12E8: walk_delays per excitement, a range -> RandomFloat(lo, hi), else never.
+    st.lastWalk = seconds_;
+    const DataNode* wd = nullptr;
+    for (auto& m : members_)
+        if (guitar_.count(m.get()) && guitar_.at(m.get()).get() == &st && m->script && m->script->typeDef())
+            wd = m->script->typeDef()->find("walk_delays");
+    for (size_t i = 0; i < st.delays.size(); ++i) {
+        const DataNode* e = wd && i + 1 < wd->children.size() ? &wd->children[i + 1] : nullptr;
+        if (e && e->isList() && e->children.size() >= 2) {
+            const float lo = e->children[0].type == DataNode::Type::Float ? e->children[0].f : float(e->children[0].i);
+            const float hi = e->children[1].type == DataNode::Type::Float ? e->children[1].f : float(e->children[1].i);
+            st.delays[i] = rng_.real(lo, hi);
+        } else {
+            st.delays[i] = 1e30f;
+        }
+    }
+}
+
+float Band::nextSoloEvent(const Member& m, float before) const {
+    // 0x822D1518: from the player parser's next event, the first solo_on /
+    // solo_off before `before`; 1e30 when none.
+    MidiParser* p = parsers_ ? parsers_->find("player" + std::to_string(std::max(0, m.player)) + "_parser") : nullptr;
+    if (!p) return 1e30f;
+    for (const auto& e : p->events()) {
+        if (e.start < float(beat_)) continue;
+        if (before <= e.start) return 1e30f;
+        if (e.value == "solo_on" || e.value == "solo_off") return e.start;
+    }
+    return 1e30f;
+}
+
+std::unique_ptr<Band::Task> Band::newWalk(Member&, float start, float end, float priority, uint32_t flags) {
+    auto t = std::make_unique<Task>();
+    t->kind = Task::Walk;
+    t->start = start, t->end = end, t->priority = priority;
+    t->mask = 0xffffffffu;
+    t->flags = flags;
+    return t;
+}
+
+std::unique_ptr<Band::Task> Band::newTimed(Member& m, int kind, scene::CharClipSamples* clip, float priority) {
+    // 0x822E4AF8 (Star Power, mask 1) / 0x822E4C80 (interact, mask -1):
+    // from now until the current clip's end plus the clip; priority -1
+    // (refused) without a clip, and for an interact that a solo_on / off
+    // would cut.
+    auto t = std::make_unique<Task>();
+    t->kind = Task::Kind(kind);
+    t->mask = kind == Task::StarPower ? 1u : 0xffffffffu;
+    t->priority = -1;
+    t->clip = clip;
+    if (!clip) return t;
+    const auto& st = *guitar_[&m];
+    chr::ClipDriver* d = m.character->mainDriver();
+    t->start = float(beat_);
+    float remain = 0;
+    if (const int ns = d ? d->newestStarted() : -1; ns >= 0) {
+        const auto& n = d->chain()[size_t(ns)];
+        remain = clipBeats(n.clip->endFrame - n.frame, n.clip, st);
+    }
+    t->end = clipBeats(clip->endFrame - clip->startFrame, clip, st) + remain + t->start;
+    if (kind == Task::StarPower || t->end <= nextSoloEvent(m, t->end)) t->priority = priority;
+    return t;
+}
+
+void Band::walkSchedule(Member& m) {
+    // 0x822D16B8.
+    auto& st = *guitar_[&m];
+    chr::CharWalk* walk = m.character->walk();
+    st.canWalk = findWaypoint(0x40) && config_.players < 2 && walk;
+    rollWalkDelays(st);
+    st.lastWalk = -15.0;
+    const double songEnd = song_ ? beatOfMs(song_->endMs) : 1e30;  // [I: FUN_82278D30, the song's end]
+    st.tempoScale = 1;
+    MidiParser* parser = parsers_ ? parsers_->find("player" + std::to_string(std::max(0, m.player)) + "_parser") : nullptr;
+    std::vector<MidiParser::EventInfo> events;
+    if (parser) events = parser->events();
+    for (const auto& e : events)
+        if (e.value == "half_tempo") {
+            st.tempoScale = 2;
+            break;
+        }
+    st.tasks.clear();
+    if (st.canWalk) {
+        float maxWait = 6;  // MAX_WALK_WAIT
+        if (const DataNode* def = m.script->typeDef())
+            if (const DataNode* w = def->find("max_walk_wait"); w && w->children.size() > 1)
+                maxWait = w->children[1].type == DataNode::Type::Float ? w->children[1].f : float(w->children[1].i);
+        float perUnit = 0;
+        const float clips = walk->walkTime(perUnit);
+        const float unit = st.tempoScale * perUnit;
+        const float fixed = st.tempoScale * (clips + maxWait);
+        st.walkTime = maxDistance(0x40, 0x40) * unit + fixed;
+        const float soloLead = maxDistance(0x40, 0x80) * unit + fixed;
+        const uint32_t endFlag = config_.campaignFinal ? 0x1000u : (config_.encore ? 0x400u : 0x800u);
+        const float endLead = maxDistance(0x40, endFlag) * unit + fixed;
+        const scene::Waypoint* soloSpot = findWaypoint(0x80);
+        std::unique_ptr<Task> pending;
+        for (const auto& e : events) {
+            if (e.value == "solo_on") {
+                if (!soloSpot) {
+                    pending = std::make_unique<Task>();
+                    pending->kind = Task::Hold;
+                    pending->start = pending->end = e.start;
+                    pending->priority = 2;
+                    pending->mask = 0xfffffffeu;
+                } else {
+                    pending = newWalk(m, e.start - soloLead, 0, 2, 0x80);
+                    if (e.start < 8) m.character->teleport(spotOf(soloSpot));
+                }
+            } else if (e.value == "solo_off" && pending) {
+                pending->end = e.start + 4;
+                addTask(m, std::move(pending));
+            }
+        }
+        if (fixed < endLead) addTask(m, newWalk(m, float(songEnd) - endLead, float(songEnd), 4, endFlag));
+    }
+    auto hold = std::make_unique<Task>();
+    hold->kind = Task::Hold;
+    hold->start = float(songEnd);
+    hold->end = float(songEnd + 1e30);
+    hold->priority = 4;
+    hold->mask = 0xffffffffu;
+    addTask(m, std::move(hold));
+}
+
+namespace {
+
+// 0x822E4910: a walk that replaces (or outlives) another walk takes over its
+// start: an end walk a walk / solo walk's (and comes from a walk spot when
+// that was a random walk), a solo walk a random walk's.
+void conflict(Band::Task& self, const Band::Task& other) {
+    if (self.kind != Band::Task::Walk || other.kind != Band::Task::Walk) return;
+    if (!(self.flags & 0x80)) {
+        if ((self.flags & 0xc00) && (other.flags & 0xc0)) {
+            self.start = other.start;
+            if (other.flags & 0x40) self.fromSpot = true;
+        }
+    } else if (other.flags & 0x40) {
+        self.start = other.start;
+    }
+}
+
+}  // namespace
+
+void Band::addTask(Member& m, std::unique_ptr<Task> t) {
+    // 0x82198348: Check (0x82197CB8) then Insert (0x82198188).
+    auto& q = guitar_[&m]->tasks;
+    if (!t) return;
+    Task* nt = t.get();
+    size_t idx = 0;
+    Task* bumped = nullptr;
+    bool refused = nt->priority < 0;
+    if (!refused) {
+        while (idx < q.size() && q[idx]->start < nt->start) ++idx;
+        for (size_t k = idx; k-- > 0 && !refused;) {
+            const Task& e = *q[k];
+            if (nt->start < e.end && (e.mask & nt->mask) && nt->priority <= e.priority) refused = true;
+        }
+        for (size_t k = idx; k < q.size() && !refused; ++k) {
+            Task& e = *q[k];
+            if (nt->end <= e.start) break;
+            if (nt->priority <= e.priority && (e.mask & nt->mask)) bumped = &e, refused = true;
+        }
+    }
+    if (refused) {
+        if (bumped) conflict(*bumped, *nt);
+        return;
+    }
+    bool placed = false;
+    if (idx > 0 && nt->start < q[idx - 1]->end && (q[idx - 1]->mask & nt->mask)) {
+        conflict(*nt, *q[idx - 1]);
+        q[idx - 1] = std::move(t);
+        placed = true;
+    }
+    for (size_t k = idx; k < q.size(); ++k) {
+        Task& e = *q[k];
+        if (nt->end <= e.start) break;
+        if (nt->mask != 0 && e.mask != 0) {
+            if (placed) {
+                // Erased; GH2 then steps over the entry that moved into its place.
+                q.erase(q.begin() + std::ptrdiff_t(k));
+            } else {
+                q[k] = std::move(t);
+                placed = true;
+            }
+        }
+    }
+    if (!placed) q.insert(q.begin() + std::ptrdiff_t(idx), std::move(t));
+}
+
+void Band::pollTasks(Member& m) {
+    // 0x82197FB0 at the song beat.
+    auto& q = guitar_[&m]->tasks;
+    const float now = float(beat_);
+    for (size_t i = 0; i < q.size(); ++i) {
+        Task& e = *q[i];
+        if (now < e.start) return;
+        if (!e.started) {
+            e.priority = 1e30f;
+            startTask(m, e);
+            e.started = true;
+        }
+        taskPoll(m, e);
+        if (e.end < now) {
+            endTask(m, e);
+            q.erase(q.begin() + std::ptrdiff_t(i));
+            --i;
+        }
+    }
+}
+
+void Band::startTask(Member& m, Task& t) {
+    chr::ClipDriver* d = m.character->mainDriver();
+    switch (t.kind) {
+    case Task::Walk: walkStart(m, t); break;
+    case Task::StarPower:
+        // 0x822E49D8: the clip at once with kPlayFirst.
+        if (d && t.clip) d->playClip(t.clip, chr::kPlayFirst);
+        break;
+    case Task::Interact:
+        // 0x822E50D0: the clip with kPlayFirst; its group is used up.
+        if (d && t.clip) d->playClip(t.clip, chr::kPlayFirst);
+        guitar_[&m]->usedInteracts.push_back(t.group);
+        ++interactsStarted_;
+        if (log) SDL_Log("band: %8.2f %s interact %s", beat_, m.slot.c_str(), t.group.c_str());
+        break;
+    case Task::Hold: break;
+    }
+}
+
+void Band::taskPoll(Member& m, Task& t) {
+    chr::ClipDriver* d = m.character->mainDriver();
+    if (t.kind == Task::Walk) {
+        // 0x822E48D8: once the walk is over, a random walk ends; another
+        // stops holding Star Power off (mask bit 0).
+        chr::CharWalk* w = m.character->walk();
+        if (w && w->state() != 0) return;
+        if (t.flags & 0x40) t.end = t.start;
+        else t.mask &= ~1u;
+    } else if (t.kind == Task::StarPower && d) {
+        // 0x822E4A30: ends once its clip is no longer the first playing.
+        if (!t.seen) {
+            if (d->firstPlaying() == t.clip) t.seen = true;
+        } else if (d->firstPlaying() != t.clip) {
+            t.end = t.start;
+        }
+    }
+}
+
+void Band::endTask(Member& m, Task& t) {
+    // 0x822E4AE8: a walk's end rolls the walk delays again.
+    if (t.kind == Task::Walk) rollWalkDelays(*guitar_[&m]);
+}
+
+void Band::walkStart(Member& m, Task& t) {
+    // 0x822E4E78.
+    chr::Character& c = *m.character;
+    chr::CharWalk* walk = c.walk();
+    if (!walk) return;
+    if (walk->state() != 0 && walk->state() != 2 && !walk->actuallyWalking()) walk->reset();
+    const auto p = c.xfm().pos;
+    const scene::Waypoint* nearest = nearestWaypoint({p[0], p[1], p[2]}, 0x40);
+    if (!nearest) return;
+    if (!t.fromSpot && (t.flags & 0xc00) && (t.flags & nearest->flags)) return;  // already there
+    const std::vector<chr::Spot> path = searchPath(nearest, t.flags, t.flags | 0x40);
+    if (path.empty()) return;
+    // The way to the first waypoint in the target's frame: sideways
+    // (|2x| > |y|) strafes left / right (a quarter of the time forward), else
+    // forward / backward.
+    const chr::Spot& first = path.front();
+    const chr::Spot& last = path.back();
+    const float d[3] = {first.xfm.pos[0] - p[0], first.xfm.pos[1] - p[1], first.xfm.pos[2] - p[2]};
+    const auto& r = last.xfm.rot;
+    const float x = r[0] * d[0] + r[1] * d[1] + r[2] * d[2];
+    const float y = r[3] * d[0] + r[4] * d[1] + r[5] * d[2];
+    uint32_t walkFlags, turnFilter, stopFilter;
+    if (std::fabs(x * 2.0f) > std::fabs(y)) {
+        const uint32_t side = x > 0 ? 0x200u : 0x100u;  // kWalkRight / kWalkLeft
+        walkFlags = rng_.real01() < 0.25f ? 0x400u : side;
+        turnFilter = side;
+        stopFilter = 0;
+    } else {
+        const uint32_t dir = y > 0 ? 0x400u : 0x800u;  // kWalkForward / kWalkBackward
+        walkFlags = dir;
+        turnFilter = dir == 0x800u ? 0x800u : 0u;
+        stopFilter = dir;
+    }
+    walkFlags |= currentExcitement() >= 3 ? 0x2000u : 0x1000u;  // kWalkExtreme / kWalkNormal
+    if (walk->walk(path, chr::kPlayFirst, walkFlags, turnFilter, stopFilter)) {
+        ++walksStarted_;
+        if (log) SDL_Log("band: %8.2f %s walks to %s (%zu waypoints) at %.2f s", beat_, m.slot.c_str(), last.name.c_str(), path.size(), seconds_);
     }
 }
 
@@ -906,21 +1454,14 @@ bool Band::guitarMessage(Member& m, const std::string& msg, std::vector<Value>& 
     if (msg == "sync_wag" || msg == "sync_head_bang") return oneShot(m, msg), true;
     if (msg == "set_game_over") return setGameOver(m, args.empty() ? "lose" : text(in, args[0])), true;
     if (msg == "lose_teleport") {
-        // 0x822D28E8: a singer (or keyboardist) within 72 units: to the nearest walk spot.
-        if (Member* s = member("singer")) {
-            const auto a = m.character->xfm().pos, b = s->character->xfm().pos;
-            const float dx = a[0] - b[0], dy = a[1] - b[1], dz = a[2] - b[2];
-            if (dx * dx + dy * dy + dz * dz < 72.0f * 72.0f) {
-                const scene::Waypoint* best = nullptr;
-                float bd = 1e30f;
-                for (const scene::Waypoint* w : world_.venue().all<scene::Waypoint>()) {
-                    if (!(w->flags & 0x40)) continue;
-                    const auto p = world_.pose().world(w).pos;
-                    const float d = (p[0] - a[0]) * (p[0] - a[0]) + (p[1] - a[1]) * (p[1] - a[1]) + (p[2] - a[2]) * (p[2] - a[2]);
-                    if (d < bd) bd = d, best = w;
-                }
-                if (best) m.character->teleport(world_.pose().world(best));
-            }
+        // 0x822D28E8: a singer (or keyboardist) within 72 units (x y) ->
+        // the nearest kWalkSpot (a teleport: regulated there).
+        if (Member* sg = member("singer")) {
+            const auto a = m.character->xfm().pos;
+            const auto sph = sg->character->worldSphere();  // [I: the singer's world sphere centre]
+            const float dx = sph[0] - a[0], dy = sph[1] - a[1];
+            if (std::sqrt(dy * dy + dx * dx) <= 72.0f)
+                if (const scene::Waypoint* w = nearestWaypoint({a[0], a[1], a[2]}, 0x40)) m.character->teleport(spotOf(w));
         }
         return true;
     }
@@ -944,15 +1485,17 @@ bool Band::guitarMessage(Member& m, const std::string& msg, std::vector<Value>& 
 }
 
 void Band::starPowerStart(int player) {
-    // 0x822D25A8: unless a one-shot is blending, a task plays the next
-    // star_power clip at once with kPlayFirst (0x822E4AF8 / 0x822E49D8; it
+    // 0x822D25A8: unless a one-shot is blending, a Star Power task on the
+    // guitarist's timeline (priority 1, mask 1: refused while walking) plays
+    // the next star_power clip with kPlayFirst (0x822E4AF8 / 0x822E49D8; it
     // ends when that clip is no longer the first playing).
     for (auto& m : members_) {
-        if (m->type != "guitarist" || m->player != player) continue;
+        if (m->type != "guitarist" || m->player != player || !guitar_.count(m.get())) continue;
         chr::ClipDriver* d = m->character->mainDriver();
         if (!d || !d->clipSet() || d->flagWeight(kSpecial) != 0) continue;
-        if (scene::CharClipGroup* g = d->clipSet()->group("star_power"))
-            if (scene::CharClipSamples* c = d->clipSet()->next(*g)) d->playClip(c, chr::kPlayFirst);
+        scene::CharClipGroup* g = d->clipSet()->group("star_power");
+        scene::CharClipSamples* c = g ? d->clipSet()->next(*g) : nullptr;
+        addTask(*m, newTimed(*m, Task::StarPower, c, 1.0f));
     }
 }
 
@@ -966,7 +1509,10 @@ float Band::flagWeight(const std::string& slot, uint32_t flags) const {
     return d ? d->flagWeight(flags) : 0.0f;
 }
 
-bool Band::actuallyWalking(const std::string&) const { return false; }
+bool Band::actuallyWalking(const std::string& slot) const {
+    chr::Character* c = character(slot);
+    return c && c->walk() && c->walk()->actuallyWalking();
+}
 
 bool Band::objectXfm(const std::string& name, const std::string& subpart, scene::Xfm& out) const {
     chr::Character* c = character(name);
@@ -982,8 +1528,11 @@ void Band::update(double seconds, double beats, const std::array<float, 3>* came
     const float dS = first_ ? 0.0f : float(std::max(0.0, seconds - seconds_));
     const float dB = first_ ? 0.0f : float(std::max(0.0, beats - beat_));
     first_ = false;
-    seconds_ = seconds, beat_ = beats;
+    seconds_ = seconds, beat_ = beats, dBeats_ = dB;
     if (parsers_ && entered_) parsers_->poll(beats);
+    if (entered_) pollFaces();
+    Interp& in = world_.interp();
+    const float faceSong = float(in.tasks().time(kTaskSeconds)), faceUi = float(in.tasks().time(kTaskUISeconds));
     for (auto& m : members_)
         if (m->type == "guitarist" && entered_) guitarPoll(*m, dB);
     for (auto& m : members_) {
@@ -1000,8 +1549,8 @@ void Band::update(double seconds, double beats, const std::array<float, 3>* came
         }
         chr::RigContext ctx;
         ctx.beat = beats, ctx.dBeats = dB, ctx.dSeconds = dS, ctx.seconds = seconds;
+        ctx.faceSongSeconds = faceSong, ctx.faceUiSeconds = faceUi;
         if (camera) ctx.hasCamera = true, ctx.camera = *camera;
         c.poll(ctx);
     }
-    if (entered_) pollFaces();
 }

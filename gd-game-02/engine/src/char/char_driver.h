@@ -12,6 +12,7 @@
 
 #include "char/char_objects.h"
 #include "char/clip.h"
+#include "script/random_gen.h"
 
 namespace scene {
 class Milo;
@@ -30,22 +31,10 @@ enum PlayFlags : uint32_t {
     kPlayBeatAlign1 = 0x1000, kPlayBeatAlign2 = 0x2000, kPlayBeatAlign4 = 0x4000, kPlayBeatAlign8 = 0x8000,
 };
 
-// GH2's random numbers for the band (RandomInt 0x8226DCB8 / RandomFloat
-// 0x8226DDA0 on the RandomGen at 0x82783D08) [I: the generator itself; a
-// seeded xorshift keeps runs reproducible].
-class Random {
-public:
-    explicit Random(uint32_t seed = 0x42414e44u) : s_(seed ? seed : 1) {}
-    uint32_t next() {
-        s_ ^= s_ << 13, s_ ^= s_ >> 17, s_ ^= s_ << 5;
-        return s_;
-    }
-    float real(float lo, float hi) { return lo + (hi - lo) * float(next() & 0xffffff) / float(0x1000000); }
-    int integer(int lo, int hi) { return hi <= lo ? lo : lo + int(next() % uint32_t(hi - lo)); }
-
-private:
-    uint32_t s_;
-};
+// GH2's random numbers (RandomGen, script/random_gen.h) [C]. GH2 has one
+// global generator; gd02 gives the band its own instance so that other
+// systems' draws do not move the band's picks (docs/band.md).
+using Random = ::RandomGen;
 
 // A CharClipSet milo at run time: its clips (with the run-time flags the
 // game ORs in), groups, the least-recently-used list (+0x8c) and the
@@ -70,6 +59,9 @@ public:
     scene::CharClipSamples* lruSafe(uint32_t flags, uint32_t safeFlags, float length);
     // CharClipGroup::NextClip 0x82175AB8: round robin (index first incremented).
     scene::CharClipSamples* next(scene::CharClipGroup& g);
+    // 0x82176550: from the clip after the current one, round, the first with
+    // all of `flags`; it becomes the current one (null when none).
+    scene::CharClipSamples* nextMatching(scene::CharClipGroup& g, uint32_t flags);
     // 0x82176238: every group shuffled (swap(i, RandomInt(i, n))).
     void shuffleGroups(Random& rng);
     // 0x82175C58: ORs `flags` into every clip of group `g`.
@@ -148,6 +140,8 @@ public:
     std::function<float()> weight = [] { return 1.0f; };
     // Clip scripts (enter / exit / events) run with $dude = the character.
     std::function<void(const std::string& script)> runScript;
+    // The clip whose script runs (0x8219BFF0 runs it with $this = the clip).
+    const scene::CharClipSamples* scriptClip = nullptr;
     // The starved message to the character.
     std::function<void(const std::string& msg)> sendStarved;
     // Random phases (clips with a range).
@@ -185,11 +179,18 @@ public:
     scene::CharClipSamples* newest() const { return chain_.empty() ? nullptr : chain_.back().clip; }
     const std::vector<Node>& chain() const { return chain_; }  // oldest first
     bool settled() const { return chain_.size() <= 1; }
+    // 0x8216B3A0: the node (chain index) with the largest share of the
+    // blend; -1 when the chain is empty.
+    int dominant() const;
+    // 0x8216A690: the newest node that has started (weight != 0), or -1.
+    int newestStarted() const;
+    std::vector<Node>& chainNodes() { return chain_; }
     // Drops the newest node when it has not started (0x8216A520).
     void dropUnstarted();
     void clear() { chain_.clear(); }
 
 private:
+    void fire(const scene::CharClipSamples* clip, const std::string& script);
     Node* push(scene::CharClipSamples* clip, uint32_t flags, float frame, float delay, bool explicitStart);
     void advance(size_t i, double beat, float dBeats, float dSeconds, float& total);
     float alignCorrection(const Node& n, double beat) const;
@@ -204,6 +205,16 @@ private:
     bool hasLastSel_ = false;
     float lastBeat_ = 1e30f;   // +0x50
 };
+
+// A transition from `from` at `frame` to `to` (0x8219E598) [C]: with
+// kPlayFirst the first edge of from's table to `to` at or after the frame
+// (0x8219E4A8), with kPlayLast the last (0x8219E520); otherwise, or without
+// one, the default: src = the frame (kPlayLast: not before from's end less
+// half to's blend width), dest = to's start at the same phase of to's beat
+// align. kPlayNoBlend: none (false).
+bool transition(const scene::CharClipSamples& from, float frame, const scene::CharClipSamples& to, uint32_t flags, float& src, float& dest);
+// 0x8219E520 alone: the last edge at or after the frame (false when none).
+bool lastEdge(const scene::CharClipSamples& from, float frame, const scene::CharClipSamples& to, float& src, float& dest);
 
 // "kPlayLast", "{| kPlayLast kPlayGraphLoop}" values are ints by the time
 // they reach the natives; this turns a script value into a ClipSel.

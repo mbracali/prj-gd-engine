@@ -125,7 +125,9 @@ void BandView::drawMesh(gfx::MaterialRenderer& mr, chr::Character& c, const scen
         return;
     }
     for (int pass = 0; mat && pass < 4; ++pass) {
-        mr.draw(g, bones, cache_.material(*mat, pose), ctx);
+        gfx::Material gm = cache_.material(*mat, matPose ? matPose : pose);
+        if (forceAlphaWrite) gm.alphaWrite = true;
+        mr.draw(g, bones, gm, ctx);
         if (mat->nextPass.empty() || !mat->dir) break;
         const scene::Mat* next = mat->dir->resolve<scene::Mat>(mat->nextPass);
         mat = next != mat ? next : nullptr;

@@ -181,6 +181,10 @@ public:
     // (origin top-left).
     virtual void setTarget(TargetId t) = 0;
     virtual void setViewport(int x, int y, int w, int h) = 0;
+    // The target and viewport bound now, to bind them again after drawing
+    // into another target mid-frame (the crowd's cards).
+    virtual TargetId currentTarget() const = 0;
+    virtual void currentViewport(int& x, int& y, int& w, int& h) const = 0;
     virtual void clear(const float* rgba, bool depth) = 0;
     virtual void draw(const DrawCall& call) = 0;
     // Copies a uniform block for draws of this frame (until endFrame), so

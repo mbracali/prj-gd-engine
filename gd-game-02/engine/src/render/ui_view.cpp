@@ -259,6 +259,17 @@ void UiView::setLocalPos(const std::string& object, float x, float y, float z) {
     pose_.setLocal(o, l);
 }
 
+void UiView::setLocalEuler(const std::string& object, float x, float y, float z) {
+    const scene::Object* o = find(object);
+    if (!o) return;
+    const float cx = std::cos(x), sx = std::sin(x), cy = std::cos(y), sy = std::sin(y), cz = std::cos(z), sz = std::sin(z);
+    scene::Xfm l = pose_.local(o);
+    l.rot = {cz * cy - sz * sx * sy, sz * cy + cz * sx * sy, -cx * sy,  //
+             -sz * cx,               cz * cx,                sx,        //
+             cz * sy + sz * sx * cy, sz * sy - cz * sx * cy, cx * cy};
+    pose_.setLocal(o, l);
+}
+
 void UiView::setLocalScale(const std::string& object, float x, float y, float z) {
     const scene::Object* o = find(object);
     if (!o) return;
@@ -288,6 +299,28 @@ scene::UiState UiView::state(const std::string& component) const {
 void UiView::setSlider(const std::string& component, int current, int steps) { sliders_[component] = {current, steps}; }
 
 void UiView::setPictureTex(const std::string& component, const std::string& file) { pictureTex_[component] = file; }
+
+void UiView::setTexFile(const std::string& texName, const std::string& file) {
+    const scene::Tex* tex = textureFile(file);
+    if (!tex || !milo_) return;
+    const auto apply = [&](scene::Object& o) {
+        if (auto* m = o.as<scene::Mat>(); m && m->diffuseTex == texName) pose_.matState(m).tex = tex;
+    };
+    milo_->root().forEach(apply);
+    for (scene::Milo* m : subdirs_) m->root().forEach(apply);
+}
+
+bool UiView::worldXfm(const std::string& object, scene::Xfm& out) const {
+    const scene::Object* o = find(object);
+    if (!o) return false;
+    out = pose_.world(o);
+    return true;
+}
+
+LightEnv UiView::environment(const std::string& environName) {
+    if (const scene::Object* e = find(environName); e && e->as<scene::Environ>()) return cache_.lightEnv(*e->as<scene::Environ>(), &pose_);
+    return environment();
+}
 
 void UiView::setList(const std::string& component, std::vector<ListRow> rows, int selectedRow) {
     ListState& s = lists_[component];

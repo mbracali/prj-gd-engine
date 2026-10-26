@@ -70,7 +70,7 @@ int crowdRun(Venue& v, std::string& report) {
     int total = 0, shown = 0;
     for (const Crowd::State& s : crowd.crowds()) {
         total += s.total();
-        for (const auto& a : s.archetypes) c.check(a.milo != nullptr, s.crowd->name + ": archetype " + a.name + " does not load");
+        for (const auto& a : s.archetypes) c.check(a.actor != nullptr, s.crowd->name + ": archetype " + a.name + " does not load");
     }
     // crowd.dta's {exists game} branch (the game's): a bare `game` for the test.
     ScriptObject game("game", "Game");
@@ -89,7 +89,7 @@ int crowdRun(Venue& v, std::string& report) {
             std::map<std::string, int> groups;
             int n = 0;
             for (const auto& a : s.archetypes)
-                if (a.milo) ++groups[a.group], ++n;
+                if (a.actor) ++groups[a.actor->group], ++n;
             auto frac = [&](float f) { return int(float(n) * f + 0.5f - 1e-4f); };  // the accumulator's rounding
             if (level == 0) c.check(groups["bad"] == n, s.crowd->name + ": Boot plays bad");
             if (level == 1) c.check(groups["bad"] == frac(0.8f) && groups["ok"] == n - frac(0.8f), s.crowd->name + ": Bad mix");
@@ -101,7 +101,7 @@ int crowdRun(Venue& v, std::string& report) {
     }
     w.message("crowd_half_tempo");
     for (const Crowd::State& s : crowd.crowds())
-        for (const auto& a : s.archetypes) c.check(!a.milo || a.beatScale == 0.5f, s.crowd->name + ": half tempo");
+        for (const auto& a : s.archetypes) c.check(!a.actor || a.actor->beatScale == 0.5f, s.crowd->name + ": half tempo");
     w.message("crowd_normal_tempo");
     // A shot's crowd3d pairs.
     int threeD = 0;

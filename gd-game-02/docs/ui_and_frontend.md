@@ -84,8 +84,11 @@ UNKNOWN / UNHANDLED, 740 handlers smoke-run, 44 unit checks.
 - Results: `star_rating` as "***__", `avg_multiplier` = score ÷ base score;
   game_won fires at the chart's end with a 6 s outro, game_lost 3 s;
   `fast_intro` cuts the lead-in to 1 s.
-- Volume indices default to 11 (full). The endgame photo is hidden (GH2
-  renders the band into it at run time).
+- Volume indices default to 11 (full).
+- The endgame photo is one of the player's outfit's four pictures
+  (`photo_<outfit><0..3>_keep.bmp`, picked as the song loads, GamePanel
+  0x822CC730 / 0x822CC9B0) on `winner_photo0.tex` [C]; see docs/band.md
+  "Characters, guitars and photos".
 
 ## Save (`ui/career.*`)
 
@@ -94,6 +97,11 @@ GH2's Campaign::Save (`0x822869A0`, version 17, read back by `0x82287B00`)
 (`0x822B0BC0`: lefty P1 / P2, volume indices, sync offset). gd02 keeps the
 same data as `career.json` (format `gd02-save`) in the save folder, written
 atomically with `career.json.bak`. Every setter marks the save dirty (L12).
+Each profile also keeps per difficulty the band's look (character, outfit,
+guitar, skin; the four symbols 0x822A8D00 saves) and its last difficulty
+(+0x2c); the band's name (set_profile_name) and cash (`add_cash`,
+`starting_cash` 50 from campaign.dta) [C]; `career_score` [I: the best
+scores summed]. The character / guitar screens: docs/band.md.
 
 ## Port additions
 
@@ -124,8 +132,10 @@ next to it to start.
 
 - `--uitest`: 235 `new` objects, 83 panel milos, 357 component names checked
   in reachable handlers.
-- `--walktest quickplay|lose|pause|attract`: drives the menus with scripted
-  input and checks the screen order, the score in `career.json`, zero
+- `--walktest quickplay|lose|pause|attract|career`: drives the menus with
+  scripted input and checks the screen order, the score in `career.json`
+  and the endgame photo (quickplay), the band's look in `career.json`
+  (career: new band, character / outfit / guitar / skin screens), zero
   unhandled / unknown / script errors, and that every stub is whitelisted.
   Not covered: held keys, the GAMEPADS screen, volume sliders, lefty,
   the credits ending, bonus videos.
@@ -143,6 +153,7 @@ next to it to start.
 - The endgame stats receipt draws dark (`turn_off_ambient` /
   `reset_ambient` are no-ops).
 - Volume sliders apply from the next song or preview.
-- Career, multiplayer, store, tutorial and practice screens are generic
-  panels (M10 / M11); the career list reuses the quick play rules.
+- Career (beyond the band's name, difficulty and look), multiplayer, store,
+  tutorial and practice screens are generic panels (M10 / M11); the career
+  list reuses the quick play rules.
 - Help bar background boxes; GAMEPADS font sizes approximate.

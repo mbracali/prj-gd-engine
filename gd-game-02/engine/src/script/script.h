@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "data/dta.h"
+#include "script/random_gen.h"
 
 class GameData;
 class Interp;
@@ -146,6 +147,10 @@ public:
     // each keep their own throw_task: small1's bottle throws).
     std::string nameScope;
     static std::string scoped(const std::string& scope, const std::string& name) { return scope + "::" + name; }
+    // Non-null: random_int / random_float / random_elem while it is $this
+    // (its handlers and tasks) draw from this generator instead of the
+    // interpreter's (the band keeps its picks apart from other systems).
+    RandomGen* random = nullptr;
 
 private:
     std::string name_, class_;
@@ -249,6 +254,8 @@ public:
     uint32_t nextRandom();
     float randomFloat(float lo, float hi);  // [lo, hi)
     int randomInt(int lo, int hi);          // [lo, hi)
+    // $this's generator (ScriptObject::random), else null.
+    RandomGen* activeRandom();
 
     TaskMgr& tasks() { return *tasks_; }
 

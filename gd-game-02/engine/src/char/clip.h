@@ -47,6 +47,10 @@ public:
     void scaleAdd(const scene::CharClipSamples& clip, float w, float frame, float dframe);
     // The clip's channels times `f`.
     void scaleDown(const scene::CharClipSamples& clip, float f);
+    // The clip's pose at `frame` as an additive layer (CharClip slot 7,
+    // 0x82161F98 -> 0x8215E6A0): positions and angles added, quaternions
+    // q = clip * q. The static set at its sample, the full set at the frame.
+    void rotateBy(const scene::CharClipSamples& clip, float frame);
     // Every channel of a set (adds them): a clip set's skeleton.
     void addChannelsOf(const scene::CharBonesSamples& set);
 

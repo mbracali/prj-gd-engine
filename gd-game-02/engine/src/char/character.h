@@ -13,7 +13,9 @@
 
 #include "char/char_driver.h"
 #include "char/char_objects.h"
+#include "char/char_walk.h"
 #include "char/clip.h"
+#include "char/facefx.h"
 #include "char/rig.h"
 #include "char/skeleton.h"
 #include "scene/milo.h"
@@ -76,6 +78,29 @@ public:
     const scene::Xfm& xfm() const { return skeleton_.root(); }
     void setXfm(const scene::Xfm& x);
     void teleport(const scene::Xfm& waypointWorld);
+    // Teleport to a waypoint (0x82151D08): its transform, and the servo
+    // regulates to it from then on.
+    void teleport(const Spot& waypoint);
+
+    // The servo's root motion (CharServoBone Poll 0x82189408) [C]. With the
+    // clips' bone_facing_delta channels: "move self" (+0xc8, on at enter,
+    // 0x821895C8) moves the character by the deltas (0x821886E8), else
+    // bone_facing goes under the pelvis (0x82188640); a switch (+0xc9)
+    // moves the facing between the pelvis and the character so the pose
+    // stays where it is. While moving self, the regulate waypoint (+0xd8)
+    // or the override pulls the character so that the clip's motion up to
+    // the next transition (the override's frame) ends inside the
+    // waypoint's area and angle tolerance (0x82188DC8).
+    void setMoveSelf(bool on);  // FUN_82188620
+    bool moveSelf() const { return moveSelf_; }
+    void setRegulate(const Spot* s);  // Function_82150070(servo + 0xd0)
+    const Spot* regulate() const { return hasRegulate_ ? &regulate_ : nullptr; }
+    // regulate_override clip frame waypoint bone (0x82189A40 -> 0x82189928):
+    // while `clip` plays, `bone`'s position at `frame` of it (from the root,
+    // turned with the facing) is brought to the waypoint; empty: off.
+    void setRegulateOverride(const scene::CharClipSamples* clip, float frame, const Spot* spot, const std::string& bone);
+    // The CharWalk (`walk`, M9.6), null when the character has none.
+    CharWalk* walk() { return walk_.get(); }
     // A bone's (or any object's) world transform; false when absent.
     bool worldOf(const std::string& name, scene::Xfm& out);
 
@@ -103,14 +128,37 @@ public:
     std::function<void(const std::string& script)> runScript;
     std::function<void(const std::string& msg)> sendMessage;
 
+    // The face: the lip.servo (FaceFxLipSyncServo, Poll 0x8218E7E0) [C].
+    // The constructor finds the servo, its viseme clip set (`visemes` and
+    // `neutral` clips), the set's channels (its own buffer, 0x821A8368) and
+    // the eye entries; the band attaches the FaceFX runtime. Each poll at
+    // the servo's place in the rig order, unless the character is hidden:
+    // the entries' angles (eyeAngle of their local rotation), LipSync::poll,
+    // then (0x821A7978) ScaleDown `visemes` to 0, ScaleAdd each pose frame
+    // with its weight, residual onto every quaternion's w (sign-matched),
+    // the `neutral` clip at its start as an additive layer (0x82161F98 ->
+    // 0x8215E6A0: positions +, quaternions neutral * q, angles +), and the
+    // bones posed from that buffer (0x821A51E0). No pose when the player has
+    // stopped or no song was played.
+    const scene::FaceFxLipSyncServo* faceServo() const { return faceServo_; }
+    ClipSet* faceClips() const { return faceSet_; }
+    void attachFace(facefx::LipSync* lip) { lip_ = lip; }
+    facefx::LipSync* lipSync() const { return lip_; }
+    Bones& faceBones() { return faceBones_; }
+    const facefx::FacePose& lastFace() const { return lastFace_; }
+    int facePoses() const { return facePoses_; }  // polls that posed the face
+
     // Stats.
     int outfitObjects() const { return outfitObjects_; }
     std::vector<std::string> unresolvedBones() const;
 
 private:
     void loadOutfit(const GameData& data, const std::string& outfitPath);
-    void poseMeshes();
-    void servoRoot();
+    void poseMeshes(Bones& bones, std::vector<int>& channelBone, size_t& mapped);
+    void servoRoot(float dBeats);
+    void regulateRoot(float dBeats);
+    std::array<float, 3> boneOffsetAt(const scene::CharClipSamples& clip, float frame, const std::string& bone);
+    void pollFace(const RigContext& ctx);
 
     std::string path_, name_;
     std::unique_ptr<scene::Milo> milo_;
@@ -132,6 +180,29 @@ private:
     bool moveSelf_ = false;
     int facingPos_ = -1, facingRot_ = -1, facingDeltaPos_ = -1, facingDeltaRot_ = -1;
     int pelvis_ = -1;
+    bool moveChanged_ = false;  // servo +0xc9
+    bool hasRegulate_ = false;
+    Spot regulate_;             // servo +0xd8
+    struct Override {           // servo +0xdc..+0x104
+        const scene::CharClipSamples* clip = nullptr;
+        float frame = 0;
+        bool hasSpot = false;
+        Spot spot;
+        std::array<float, 3> offset{};
+    } override_;
+    std::unique_ptr<CharWalk> walk_;
+    // The face (lip.servo).
+    const scene::FaceFxLipSyncServo* faceServo_ = nullptr;
+    ClipSet* faceSet_ = nullptr;
+    const scene::CharClipSamples* visemes_ = nullptr;
+    const scene::CharClipSamples* neutral_ = nullptr;
+    facefx::LipSync* lip_ = nullptr;
+    Bones faceBones_;
+    std::vector<int> faceChannelBone_;
+    size_t faceMapped_ = 0;
+    std::vector<std::pair<int, uint32_t>> faceEntries_;  // (bone, axis)
+    facefx::FacePose lastFace_;
+    int facePoses_ = 0;
 };
 
 // The clip sets, loaded once per path and shared by the characters that

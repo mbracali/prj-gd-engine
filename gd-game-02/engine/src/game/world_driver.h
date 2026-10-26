@@ -45,6 +45,8 @@ public:
 
     // Excitement for a rock meter rating (0x822CAAB0).
     static int excitement(float rating, float warningLevel);
+    // The game's excitement now (Game +0x338): -1 before the first update.
+    int excitementLevel() const { return excitement_; }
 
 private:
     void playerEvents(World& world, int index, const Player* p, const std::vector<PlayerEvent>& events);

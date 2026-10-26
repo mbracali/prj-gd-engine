@@ -18,3 +18,5 @@ int runCharTest(const std::string& dataPath);
 
 // The band's runtime checks (tests/chartest_band.cpp): the failures.
 int chartestBandChecks(const GameData& data);
+// The crowd's runtime checks (tests/chartest_crowd.cpp): the failures.
+int chartestCrowdChecks(const GameData& data);

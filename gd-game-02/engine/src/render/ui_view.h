@@ -80,6 +80,9 @@ public:
     // set_local_pos / set_local_scale: replace one part of the object's local transform.
     void setLocalPos(const std::string& object, float x, float y, float z);
     void setLocalScale(const std::string& object, float x, float y, float z);
+    // Replaces the rotation (and scale) of the object's local transform
+    // with the Euler angles x y z (radians; MakeRotMatrix as 0x82269FC0).
+    void setLocalEuler(const std::string& object, float x, float y, float z);
     // A component's state (BandButton colours: normal / focus / disabled / selecting_color).
     void setState(const std::string& component, scene::UiState state);
     void clearStates() { states_.clear(); }
@@ -89,6 +92,16 @@ public:
     void setSlider(const std::string& component, int current, int steps);
     // UIPicture set_tex: another texture file (relative to ui/).
     void setPictureTex(const std::string& component, const std::string& file);
+    // RndTex::SetBitmap on one of the panel's textures: the materials using
+    // Tex `texName` draw the texture file `file` (relative to ui/) instead
+    // (the endgame photo, GamePanel 0x822CC9B0).
+    void setTexFile(const std::string& texName, const std::string& file);
+    // An object's world transform as the panel poses it (a BandPlacer, a
+    // UIProxy); false when the panel has no such object.
+    bool worldXfm(const std::string& object, scene::Xfm& out) const;
+    // The light environment of one of the panel's Environs (CharsysPanel
+    // set_env); the panel's own when `environName` is not one.
+    LightEnv environment(const std::string& environName);
     // A UIList's rows: per row the strings of its type's element texts and
     // the materials of its element meshes (empty: hidden), by element name.
     struct ListRow {

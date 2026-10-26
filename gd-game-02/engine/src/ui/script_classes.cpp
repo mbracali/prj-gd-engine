@@ -665,10 +665,13 @@ bool ScreenObj::handleNative(Interp&, const std::string& msg, std::vector<Value>
     }
     if (msg == "is_up") return r = Value::integer(ui.current() == this ? 1 : 0), true;
     if (msg == "foreach_player") return r = ui.foreachPlayer(args), true;
-    // Other messages go on to the focus panel's natives (credits_screen's
-    // {$this num_lines}) [I: UIScreen::Handle's forwarding].
-    if (PanelObj* fp = focusPanel())
+    // Other messages go on to the focus panel: its natives (credits_screen's
+    // {$this num_lines}), then its script (sel_guitar_new_screen's {$this
+    // choose_skins}) [I: UIScreen::Handle's forwarding].
+    if (PanelObj* fp = focusPanel()) {
         if (fp->handleNative(ui.interp(), msg, args, r)) return true;
+        if (fp->handler(msg)) return r = ui.callScript(fp, msg, args), true;
+    }
     return false;
 }
 

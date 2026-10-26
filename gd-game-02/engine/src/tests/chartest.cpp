@@ -202,6 +202,7 @@ int runCharTest(const std::string& dataPath) {
         if (goldenBad) ++failures;
 
         failures += chartestBandChecks(data);
+        failures += chartestCrowdChecks(data);
     } catch (const std::exception& e) {
         std::printf("chartest: %s\n", e.what());
         ++failures;

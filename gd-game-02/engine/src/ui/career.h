@@ -27,13 +27,25 @@ public:
         int score = 0, stars = 0;
         bool passed = false;
     };
+    // The band's look at one difficulty (the profile's per-difficulty
+    // record, 0x24 bytes at profile +0x20, saved by 0x822A8D00 / read by
+    // 0x822A8D68 as four symbols) [C]: campaign set_character_info
+    // (0x82284E88) copies player 0's config (character, outfit, guitar,
+    // skin) into it, get_character_info (0x82284E00) back; an empty
+    // character means the career at that difficulty was not started
+    // (campaign new_campaign, 0x822A8A88).
+    struct CharInfo {
+        std::string character, outfit, guitar, skin;
+    };
     struct Profile {
         bool inUse = false;
         std::string name;
         int cash = 0;
         int tutorialsDone = 0;
+        int lastDifficulty = 1;  // campaign last_difficulty (profile +0x2c) [C]; its first value [I]
         std::array<int, kDifficulties> status{};  // venues completed per difficulty
         std::array<std::map<std::string, SongResult>, kDifficulties> results;
+        std::array<CharInfo, kDifficulties> chars;
     };
     struct HighScore {
         std::string name;

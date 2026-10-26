@@ -2,6 +2,7 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #pragma once
 
+#include <array>
 #include <string>
 #include <vector>
 
@@ -31,6 +32,8 @@ public:
         int syncOffsetMs = 0;   // options sync_offset
         float bandVolume = 1, guitarVolume = 1;
         bool fastIntro = false;  // game set fast_intro (a restart skips most of the lead-in)
+        // The players' look (PlayerConfig: outfit, guitar, skin; empty: the song's quickplay one).
+        std::array<std::string, 2> outfit, guitar, skin;
     };
     virtual bool gameLoad(const GameSetup& setup, std::string& error) = 0;
     // Starts the music and the clock (after every game panel has entered).

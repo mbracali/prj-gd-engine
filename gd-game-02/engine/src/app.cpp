@@ -317,6 +317,8 @@ private:
     std::unique_ptr<CameraDirector> director_;
     // The band on stage (M9, game/band.h): made when the song begins in the venue.
     std::unique_ptr<Band> band_;
+    // The players' look from the menus (GameSetup), for the band.
+    std::array<std::string, 2> bandOutfit_, bandGuitar_, bandSkin_;
     std::unique_ptr<LightPresets> lighting_;
     WorldDriver worldDriver_;
     std::string venuePath_;
@@ -362,7 +364,7 @@ int App::run() {
     if (!options_.walk.empty()) {
         walk_ = std::make_unique<WalkDriver>(options_.walk);
         if (!walk_->known()) {
-            std::fprintf(stderr, "%s: unknown walk test '%s' (quickplay, lose, pause, attract)\n", app::kProgram, options_.walk.c_str());
+            std::fprintf(stderr, "%s: unknown walk test '%s' (quickplay, lose, pause, attract, career)\n", app::kProgram, options_.walk.c_str());
             SDL_Quit();
             return 2;
         }
@@ -954,6 +956,7 @@ bool App::gameLoad(const GameSetup& setup, std::string& error) {
         return false;
     }
     syncOffsetMs_ = setup.syncOffsetMs;
+    bandOutfit_ = setup.outfit, bandGuitar_ = setup.guitar, bandSkin_ = setup.skin;
     const bool autoplay = setup.autoplay || options_.autoplay || envOn("GD02_AUTOPLAY") || (walk_ && walk_->autoplay());
     if (!loadSong(*it, setup.difficulty, autoplay, setup.bandVolume, setup.guitarVolume, setup.fastIntro)) {
         error = message_;
@@ -1113,17 +1116,21 @@ void App::stopSfx(const std::string& name) {
     if (!synth_->stop(name) && world_) world_->stopSound(name);
 }
 
-// The band (game/band.h) once the song begins in a venue: player 0's
-// character is the song's quickplay one (GD02_CHAR=<outfit> and
-// GD02_GUITAR=<guitar> override it until the character screens set it,
-// M9.10); GD02_NO_BAND=1 leaves the stage empty.
+// The band (game/band.h) once the song begins in a venue: the players'
+// outfits, guitars and skins from their configs (the menus: quick play's
+// song character, the career's chosen one, ui/char_select.h; without the
+// menus the song's quickplay one). GD02_CHAR=<outfit>, GD02_GUITAR=<guitar>
+// and GD02_SKIN=<skin> override player 0's; GD02_NO_BAND=1 leaves the
+// stage empty.
 void App::startBand() {
     band_.reset();
     if (!world_ || !song_ || !info_ || envOn("GD02_NO_BAND")) return;
     Band::Config cfg;
     cfg.players = twoPlayers(mode_) ? 2 : 1;
+    cfg.character = bandOutfit_, cfg.guitar = bandGuitar_, cfg.skin = bandSkin_;
     if (const char* c = SDL_getenv("GD02_CHAR")) cfg.character[0] = c;
-    if (const char* g = SDL_getenv("GD02_GUITAR")) cfg.guitar[0] = g;
+    if (const char* g = SDL_getenv("GD02_GUITAR")) cfg.guitar[0] = g, cfg.skin[0].clear();
+    if (const char* k = SDL_getenv("GD02_SKIN")) cfg.skin[0] = k;
     const DataNode* objects = ui_ && ui_->bootTree() ? ui_->bootTree()->find("objects") : nullptr;
     try {
         band_ = std::make_unique<Band>(*world_, *data_, *info_, cfg, objects);
@@ -1131,6 +1138,7 @@ void App::startBand() {
             const Player* pl = p == 0 ? player_.get() : player2_.get();
             return pl ? pl->rockMeter() : 0.5f;
         };
+        band_->excitement = [this] { return worldDriver_.excitementLevel(); };
         band_->loadSong(parseMidi(data_->read(info_->audio.midiPath)), song_.get());
         // The characters enter with the world (World::start); a world already
         // started (the menus' world_panel) gets them at once.
@@ -1294,8 +1302,12 @@ void App::drawSong(float t) {
         drawWorld();
         // Two players: the track speed is the mean of their difficulties'
         // (0x826932D0) [C]; both play one difficulty here.
-        track_->draw(canvas_.renderer(), *sceneCache_, *song_, *player_, t, speed);
-        if (track2_ && player2_) track2_->draw(canvas_.renderer(), *sceneCache_, *song_, *player2_, t, speed);
+        // Development aid: GD02_TRACK=0 hides the track (to look at the band).
+        const char* showTrack = SDL_getenv("GD02_TRACK");
+        if (!showTrack || *showTrack != '0') {
+            track_->draw(canvas_.renderer(), *sceneCache_, *song_, *player_, t, speed);
+            if (track2_ && player2_) track2_->draw(canvas_.renderer(), *sceneCache_, *song_, *player2_, t, speed);
+        }
         // Development aid: GD02_HUD=0 hides the HUD (to look at the track).
         const char* showHud = SDL_getenv("GD02_HUD");
         std::vector<const Player*> players{player_.get()};

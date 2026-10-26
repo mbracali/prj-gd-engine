@@ -13,6 +13,7 @@
 #include "game/song_db.h"
 #include "input/input.h"
 #include "scene/ui_styles.h"
+#include "ui/char_select.h"
 #include "ui/natives.h"
 #include "ui/ui_host.h"
 #include "ui/ui_objects.h"
@@ -36,14 +37,7 @@ public:
         r = Value::integer(0);
         if (msg == "set_difficulty") return p.difficulty = std::clamp(intArg(args, 0, 1), 0, 3), true;
         if (msg == "get_difficulty" || msg == "difficulty") return r = Value::integer(p.difficulty), true;
-        if (msg == "set_character") return p.character = args.empty() ? p.character : args[0].str(), true;
-        if (msg == "get_character") return r = Value::symbol(p.character), true;
-        if (msg == "set_guitar_index") return p.guitarIndex = intArg(args, 0), true;
-        if (msg == "get_guitar_index") return r = Value::integer(p.guitarIndex), true;
-        if (msg == "set_guitar" || msg == "set_skin") return true;
-        if (msg == "get_outfit_index") return r = Value::integer(p.outfit), true;
-        if (msg == "set_outfit_index") return p.outfit = intArg(args, 0), true;
-        if (msg == "get_character_outfit") return r = Value::symbol(p.character), true;
+        if (chars::playerConfigNative(ui_, p, msg, args, r)) return true;
         if (msg == "set_track_type") return p.trackType = intArg(args, 0), true;
         if (msg == "get_track_type") return r = Value::integer(p.trackType), true;
         return false;
@@ -153,6 +147,18 @@ public:
         setup.syncOffsetMs = o.syncOffsetMs;
         setup.bandVolume = volume(o.bandVolumeIdx), setup.guitarVolume = volume(o.guitarVolumeIdx);
         setup.fastIntro = getProp(ui.interp(), "fast_intro").truthy();
+        // The band's look: the players' configs (0x822B7670 change_chars).
+        for (size_t p = 0; p < 2; ++p) {
+            Session::PlayerCfg& pc = s.players[p];
+            chars::validate(ui, pc);
+            setup.outfit[p] = pc.outfit, setup.guitar[p] = pc.guitar, setup.skin[p] = pc.skin;
+        }
+        // The endgame photo (0x822CC730): with a win_preload_panel (quick
+        // play, career), one picture per player of the game.
+        s.winnerPhotos.clear();
+        if (!gameCfgValue(ui, "win_preload_panel").str().empty())
+            for (int p = 0; p < std::max(1, gameCfgValue(ui, "num_players").integerValue()) && p < 2; ++p)
+                s.winnerPhotos.push_back(chars::pickPhoto(ui, s.players[size_t(p)]));
         props["fast_intro"] = Value::integer(0);
         std::string error;
         if (!ui.host().gameLoad(setup, error)) SDL_Log("game: %s", error.c_str());
@@ -216,6 +222,15 @@ public:
             // The song's quickplay venue (songs.dta (quickplay (venue x))).
             const int i = songInfoIndex(ui, s.song);
             if (i >= 0) s.venue = host.songs()[size_t(i)].venue;
+            // 0x822B86D0: player 0 plays the song's (quickplay (character_outfit X)
+            // (guitar G) [(guitar_skin S)]), skin `default` when none.
+            const DataNode* e = songEntry(ui, s.song);
+            const DataNode* q = e ? e->find("quickplay") : nullptr;
+            const DataNode* co = q ? q->find("character_outfit") : nullptr;
+            const DataNode* g = q ? q->find("guitar") : nullptr;
+            const DataNode* sk = q ? q->find("guitar_skin") : nullptr;
+            if (co && co->children.size() > 1) chars::setCharacter(ui, s.players[0], co->textAt(1), false);
+            if (g && g->children.size() > 1) chars::setGuitar(ui, s.players[0], g->textAt(1), sk && sk->children.size() > 1 ? sk->textAt(1) : "default", false);
             return true;
         }
         if (msg == "get_venue") return r = Value::symbol(s.venue), true;
@@ -224,8 +239,8 @@ public:
         if (msg == "get_difficulty") return r = Value::integer(s.players[size_t(std::clamp(intArg(args, 0), 0, 1))].difficulty), true;
         if (msg == "get_difficulty_sym")
             return r = Value::symbol(difficultySym(s.players[size_t(std::clamp(intArg(args, 0), 0, 1))].difficulty)), true;
-        if (msg == "set_character") return s.players[0].character = argStr(0), true;
-        if (msg == "set_guitar_index") return s.players[0].guitarIndex = intArg(args, 0), true;
+        // GameConfig passes the look to player 0's config (0x822BDDC0).
+        if (chars::playerConfigNative(ui, s.players[0], msg, args, r)) return true;
         if (msg == "multiplayer" || msg == "multiplayer_vs" || msg == "is_multiple_controllers")
             return r = Value::integer(msg == "is_multiple_controllers" ? 0 : gameCfgValue(ui, "num_players").integerValue() > 1), true;
         if (msg == "num_players" || msg == "get_num_players") return r = Value::integer(std::max(1, gameCfgValue(ui, "num_players").integerValue())), true;
@@ -282,8 +297,6 @@ public:
             if (!args.empty() && args[0].type == Value::Type::Object) removeSink(args[0].object);
             return true;
         }
-        if (msg == "get_total_num_skins") return r = Value::integer(0), true;
-        if (msg == "get_character_outfit") return r = Value::symbol(s.players[0].character), true;
         if (msg == "foreach_player_matcher") return true;
         if (msg == "load_song" || msg == "loaded") return r = Value::integer(host.gameLoaded() ? 1 : 0), true;
         return PanelObj::handleNative(in, msg, args, r);

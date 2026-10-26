@@ -459,7 +459,9 @@ bool CameraDirector::camCheckShot(const scene::CamShot& shot) {
         const bool mp = world_.venue().variant() != VenueVariant::Single;
         scene::Xfm g;
         const bool got = (band && band->objectXfm("guitarist0", "", g)) || venueObjectXfm(world_, "guitarist0", mp, g);
-        if (got) {
+        if (got && band) {
+            nearest_ = band->nearestWaypoint(g.pos, 0xc0);  // the band keeps GH2's waypoint list order
+        } else if (got) {
             float best = 0;
             for (const scene::Waypoint* w : world_.venue().all<scene::Waypoint>()) {
                 if (!(w->flags & 0xc0)) continue;  // kWalkSpot | kSoloWalkSpot [C 0x82195548]

@@ -14,6 +14,7 @@
 #include "scene/ui_objects.h"
 #include "scene/ui_styles.h"
 #include "script/tasks.h"
+#include "ui/char_select.h"
 #include "ui/gamepad_panel.h"
 #include "ui/natives.h"
 #include "ui/ui_host.h"
@@ -154,10 +155,11 @@ public:
     EndGamePanelObj(UiManager& ui, const std::string& name) : PanelObj(ui, name, "EndGamePanel") {}
     void enter() override {
         PanelObj::enter();
-        // The newspaper photo: GH2 renders the band into winner_photo0.tex
-        // at run time (the disc's texture is a placeholder); until the
-        // characters are drawn (M8+) the photo stays blank.
-        if (view && name() == "endgame_panel") view->setShowing("winner_photo0.mesh", false);
+        // The newspaper photo: the picture GamePanel picked as the song
+        // loaded (0x822CC730) becomes winner_photo<i>.tex (0x822CC9B0).
+        const auto& photos = ui.session().winnerPhotos;
+        if (view)
+            for (size_t i = 0; i < photos.size(); ++i) view->setTexFile("winner_photo" + std::to_string(i) + ".tex", photos[i]);
     }
     bool handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) override {
         if (msg == "generate_headline") {
@@ -372,6 +374,7 @@ std::unique_ptr<ScriptObject> makeClassObject(UiManager& ui, const std::string& 
     if (cls == "GHScreen" || cls == "UIScreen" || cls == "MultiSelectScreen" || cls == "TrackBudgetScreen")
         return std::make_unique<GenericScreen>(ui, name, cls);
     if (auto g = makeGameClass(ui, cls, name)) return g;
+    if (auto c = chars::makeClass(ui, cls, name)) return c;
     if (cls == "MetaPanel") return std::make_unique<MetaPanelObj>(ui, name);
     if (cls == "HelpBarPanel") return std::make_unique<HelpBarPanelObj>(ui, name);
     if (cls == "SelSongPanel") return std::make_unique<SelSongPanelObj>(ui, name);

@@ -102,6 +102,8 @@ public:
     Input& input() { return input_; }
     Canvas& canvas() { return canvas_; }
     scene::MiloLibrary& library() { return *library_; }
+    // The GPU copies of the scenes the menus draw (null headless).
+    gfx::SceneCache* sceneCache() { return cache_.get(); }
     const scene::Locale& locale() const { return *locale_; }
     std::string localize(const std::string& token) const;
     bool headless() const { return headless_; }

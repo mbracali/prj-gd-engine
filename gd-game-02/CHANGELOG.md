@@ -26,3 +26,12 @@ matches the tag's version. Nothing is released yet.
   cheering, and the encore effects.
 - Progress and options saved to `career.json`, and a GAMEPADS screen to set
   up guitars and gamepads.
+- The band on stage: Guitar Hero II's characters play along with the song,
+  with their hands on the notes, faces, blinks and lip sync, solo walks and
+  band interactions.
+- Guitar Hero II's crowd, drawn the way the original does it, cheering,
+  clapping and raising lighters with how well you play.
+- Sound effects from the disc (menus, crowd, Star Power), with the console's
+  reverb.
+- Character, outfit, guitar and skin choice in Career, saved with your band,
+  and the band photo in the results newspaper.

@@ -35,10 +35,14 @@ namespace {
 // the band's main clips per (beat, slot) and the drum kit's triggers.
 // A change in the drivers, the band scripts, the parsers or the director
 // moves them; check the log (GD02_BAND_LOG=<file>) and update both.
+// The band draws from its own RandomGen (GH2's generator, seeded by
+// Band::Config::seed), so the world's, the crowd's and other scripts'
+// random numbers do not move it. M9.6 / M9.8: walks, interacts, the Star
+// Power task and the expression picks are in the run.
 constexpr const char* kSong = "hangar18";
 constexpr const char* kVenue = "arena";
-constexpr int kGoldenLines = 596;
-constexpr uint32_t kGoldenHash = 0xaff9a814u;
+constexpr int kGoldenLines = 607;
+constexpr uint32_t kGoldenHash = 0x342907f5u;
 
 uint32_t fnv(const std::string& s, uint32_t h) {
     for (unsigned char c : s) h = (h ^ c) * 16777619u;
@@ -66,11 +70,31 @@ int loadChecks(const GameData& data) {
         if (p.size() < 10 || p.compare(p.size() - 10, 10, ".milo_xbox") != 0) continue;
         chars.push_back(p);
     }
-    int loaded = 0, bones = 0, drivers = 0;
+    int loaded = 0, bones = 0, drivers = 0, faces = 0, faceBad = 0;
     for (const std::string& p : chars) {
         try {
             chr::Character c(data, p, clips);
             ++loaded;
+            // The lip servo (M9.8): its viseme set has `visemes` and
+            // `neutral`, every face channel moves a bone, the eye entries
+            // resolve, the servo's weight is 1 (PoseMeshes ignores it).
+            if (const scene::FaceFxLipSyncServo* f = c.faceServo()) {
+                ++faces;
+                chr::ClipSet* set = c.faceClips();
+                int unresolved = 0;
+                for (const auto& ch : c.faceBones().channels()) {
+                    const std::string b = scene::CharBonesSamples::boneOf(ch.name);
+                    if (c.skeleton().find(b + ".trans") < 0 && c.skeleton().find(b + ".mesh") < 0) ++unresolved;
+                }
+                for (const auto& e : f->entries)
+                    if (c.skeleton().find(e.object) < 0) ++unresolved;
+                if (!set || !set->clip("visemes") || !set->clip("neutral") || unresolved || f->weightable.weight != 1.0f ||
+                    c.faceBones().channels().empty()) {
+                    std::printf("chartest: %s: lip.servo set %s, %zu face channels, %d unresolved, weight %g\n", p.c_str(), f->visemeSet.c_str(),
+                                c.faceBones().channels().size(), unresolved, double(f->weightable.weight));
+                    ++faceBad;
+                }
+            }
             for (const std::string& b : c.unresolvedBones()) {
                 if (bones < 10) std::printf("chartest: %s: bone %s does not resolve\n", p.c_str(), b.c_str());
                 ++bones;
@@ -86,9 +110,9 @@ int loadChecks(const GameData& data) {
             ++failures;
         }
     }
-    std::printf("chartest: characters: %d of %zu load, %d drivers, %d unresolved bones, %zu clip sets\n", loaded, chars.size(), drivers,
-                bones, clips.sets().size());
-    failures += bones;
+    std::printf("chartest: characters: %d of %zu load, %d drivers, %d unresolved bones, %zu clip sets, %d faces (%d bad)\n", loaded,
+                chars.size(), drivers, bones, clips.sets().size(), faces, faceBad);
+    failures += bones + faceBad;
     // Guitars and kits.
     int guitars = 0, kits = 0, outfitFail = 0;
     for (const std::string& p : data.paths()) {
@@ -203,13 +227,19 @@ int bandRun(const GameData& data) {
     band.rating = [&](int) { return p.rockMeter(); };
     Autoplay bot(p.chart());
     WorldDriver driver(true);
+    band.excitement = [&] { return driver.excitementLevel(); };
     const float lead = -3000;
     driver.reset(lead);
     world.setClock(lead / 1000.0, song.tempo.msToTick(lead) / 480.0);
     band.loadSong(midi, &song);
     world.start(false);
     band.enter();
-    int nan = 0, spFrames = 0;
+    int nan = 0, spFrames = 0, walkFrames = 0;
+    // Faces (M9.8): poses per member, the singer's visemes, the guitarist's
+    // blinks (EyesClosed, frame 9) and expressions.
+    std::map<std::string, int> facePoses;
+    int singerVisemeFrames = 0, blinkFrames = 0, hiddenPoses = 0;
+    std::set<std::string> expressions;
     bool spWas = false;
     std::set<std::string> handClips, spots;
     float maxDrift = 0;
@@ -245,6 +275,26 @@ int bandRun(const GameData& data) {
             }
         }
         if (band.playingStarpower("guitarist0")) ++spFrames;
+        if (band.actuallyWalking("guitarist0")) ++walkFrames;
+        for (const auto& m : band.members()) {
+            chr::Character& c = *m->character;
+            const int before = facePoses[m->slot];
+            facePoses[m->slot] = c.facePoses();
+            if (c.facePoses() == before) continue;
+            if (!c.visible) ++hiddenPoses;
+            const facefx::FacePose& f = c.lastFace();
+            if (m->slot == "singer") {
+                for (const auto& fr : f.frames)
+                    if (fr.frame > 0 && fr.weight > 0.05f) {
+                        ++singerVisemeFrames;
+                        break;
+                    }
+            } else if (m->slot == "guitarist0") {
+                for (const auto& fr : f.frames)
+                    if (fr.frame == 9 && fr.weight > 0.5f) ++blinkFrames;
+                if (m->lip && !m->lip->currentExpression().empty()) expressions.insert(m->lip->currentExpression());
+            }
+        }
     }
     uint32_t h = 2166136261u;
     for (const std::string& l : log) h = fnv(l + "\n", h);
@@ -260,6 +310,32 @@ int bandRun(const GameData& data) {
     std::printf("chartest: band triggers:%s\n", trig.c_str());
     std::printf("chartest: band %s in %s: %zu members, clips:%s; %zu hand clips, guitarist0 moved %.1f, %d SP frames, %d shots\n", kSong,
                 kVenue, band.members().size(), slots.c_str(), handClips.size(), double(maxDrift), spFrames, shots);
+    std::string fp;
+    for (const auto& [slot, n] : facePoses) fp += " " + slot + " " + std::to_string(n);
+    std::string ex;
+    for (const std::string& e : expressions) ex += " " + e;
+    std::printf("chartest: band faces:%s; singer visemes %d frames, guitarist0 blinks %d frames, expressions:%s\n", fp.c_str(),
+                singerVisemeFrames, blinkFrames, ex.c_str());
+    // hangar18 has a .voc (the singer sings), the drummer and bassist have no
+    // lip servo; the guitarist blinks (_blinktrack) and changes expression.
+    if (facePoses["singer"] == 0 || singerVisemeFrames < 1000 || facePoses["guitarist0"] == 0 || blinkFrames == 0 || expressions.size() < 3 ||
+        facePoses["drummer"] != 0 || hiddenPoses) {
+        std::printf("chartest: band: faces wrong (%d posed while hidden)\n", hiddenPoses);
+        ++failures;
+    }
+    // Walks and interacts (M9.6): random walks at Okay and Great, the solo
+    // walk, an interact; each walk ends near its waypoint (the plan moves
+    // the target by up to its radius along the last leg, the servo then
+    // regulates the rest).
+    float worst = 0;
+    for (float d : band.walkArrivals()) worst = std::max(worst, d);
+    std::printf("chartest: band walks: %d started, %zu arrived (worst %.1f off), %d walking frames, %d interacts\n", band.walksStarted(),
+                band.walkArrivals().size(), double(worst), walkFrames, band.interactsStarted());
+    if (band.walksStarted() < 4 || band.walkArrivals().size() + 1 < size_t(band.walksStarted()) || worst > 60 || walkFrames < 600 ||
+        band.interactsStarted() < 1) {
+        std::printf("chartest: band: walks wrong\n");
+        ++failures;
+    }
     if (nan) {
         std::printf("chartest: band: %d non-finite transforms\n", nan);
         ++failures;

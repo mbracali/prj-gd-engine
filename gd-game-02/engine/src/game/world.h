@@ -120,6 +120,12 @@ public:
     // The band on stage (game/band.h), when one is loaded: the director's
     // targets and band queries use it (venueObjectXfm).
     Band* band = nullptr;
+    // GH2's global Waypoint list (0x82782750, the venue's in load order
+    // [I]): Waypoint::Find / Nearest go through it first to last; the walk
+    // search and {waypoint_last w} move a waypoint to its end.
+    std::vector<const scene::Waypoint*>& waypoints() { return waypoints_; }
+    const std::vector<const scene::Waypoint*>& waypoints() const { return waypoints_; }
+    void waypointToEnd(const scene::Waypoint* w);
     // Plays / stops a sound object of the venue by name (resolved from
     // `from`'s directory first when given); false when there is none.
     // `volumeDb` / `pan` / `transpose`: the caller's (audio/synth.h).
@@ -221,6 +227,7 @@ private:
 
     double now(int units) const;
     void runTask(AnimTask& t);
+    std::vector<const scene::Waypoint*> waypoints_;
     float startFrameOf(const scene::Object* anim) const;
     float endFrameOf(const scene::Object* anim) const;
     int rateOf(const scene::Object* anim) const;

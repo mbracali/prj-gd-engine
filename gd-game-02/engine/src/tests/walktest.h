@@ -22,6 +22,11 @@ class UiManager;
 //              -> quit -> the song list.
 //   attract    the title screen idles 60 s -> attract mode -> a button ->
 //              the title screen again.
+//   career     boot -> main -> Career -> a band named "A" -> Medium -> the
+//              character select (Alterna) -> the guitar select (SG, skin
+//              sg_white) -> sponsored -> the career menu (autosave); the
+//              look in career.json and player 0's config.
+// quickplay also checks the endgame photo GamePanel picked.
 // Every scenario also fails on any UNHANDLED or UNKNOWN script report, or a
 // STUB not listed in tests/ui_stubs.txt (compiled in). Runs headless with
 // SDL_VIDEO_DRIVER=offscreen SDL_AUDIO_DRIVER=dummy. GD02_WALK_SHOTS=<dir>
@@ -50,6 +55,7 @@ private:
         double ms = 0;
     };
     std::string scenario_;
+    bool seeded_ = false;
     std::vector<Step> steps_;
     std::vector<std::string> expect_;  // screens that must be entered, in order
     size_t step_ = 0;

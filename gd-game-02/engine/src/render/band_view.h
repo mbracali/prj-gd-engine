@@ -40,6 +40,10 @@ public:
     void drawCharacter(gfx::MaterialRenderer& mr, chr::Character& c, const gfx::Camera& camera, bool hdr);
 
     int meshesDrawn() const { return meshes_; }
+    // Materials also write alpha (the crowd's card textures, render/crowd_view.h).
+    bool forceAlphaWrite = false;
+    // A ScenePose for the materials' animations (the crowd's lighter flame); null: the world's.
+    const gfx::ScenePose* matPose = nullptr;
     void resetStats() { meshes_ = 0; }
 
 private:

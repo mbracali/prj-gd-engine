@@ -124,7 +124,24 @@ Character::Character(const GameData& data, const std::string& path, ClipLibrary&
     facingRot_ = bones_.find("bone_facing.rotz");
     pelvis_ = skeleton_.find("bone_pelvis.trans");
     if (pelvis_ < 0) pelvis_ = skeleton_.find("bone_pelvis.mesh");
-    moveSelf_ = facingDeltaPos_ >= 0;
+    moveSelf_ = facingDeltaPos_ >= 0;  // 0x821895C8 (the servo's enter)
+    for (const auto& o : d.objects)
+        if (o->as<scene::CharWalk>()) walk_ = std::make_unique<CharWalk>(*this);
+    // The lip servo: its viseme clip set's channels in its own buffer
+    // (0x82190DB0 -> 0x821A8368) and its eye entries.
+    for (const auto& o : d.objects) {
+        auto* f = o->as<scene::FaceFxLipSyncServo>();
+        if (!f) continue;
+        faceServo_ = f;
+        faceSet_ = clips.get(path_, f->visemeSet);
+        if (faceSet_) {
+            faceSet_->listChannels(faceBones_, false);
+            visemes_ = faceSet_->clip("visemes");
+            neutral_ = faceSet_->clip("neutral");
+        }
+        for (const auto& e : f->entries) faceEntries_.emplace_back(skeleton_.find(e.object), e.axis);
+        break;
+    }
     // The first LOD shown.
     updateLod(1e30f);
 }
@@ -255,8 +272,8 @@ std::array<float, 4> Character::worldSphere() {
 }
 
 // PoseMeshes 0x821A51E0: the channels into the bones' local transforms.
-void Character::poseMeshes() {
-    auto& ch = bones_.channels();
+void Character::poseMeshes(Bones& bones, std::vector<int>& channelBone_, size_t& channelsMapped_) {
+    auto& ch = bones.channels();
     if (channelsMapped_ != ch.size()) {
         channelBone_.assign(ch.size(), -1);
         for (size_t i = 0; i < ch.size(); ++i) {
@@ -319,30 +336,147 @@ void Character::poseMeshes() {
     }
 }
 
-// CharServoBone Poll 0x82189408 after PoseMeshes: the root motion.
-void Character::servoRoot() {
+// CharServoBone Poll 0x82189408 after PoseMeshes: the root motion. Only
+// with bone_facing_delta channels (+0xbc; 0x821884D8 looks the root channels
+// up only then).
+void Character::servoRoot(float dBeats) {
     auto& ch = bones_.channels();
-    if (moveSelf_) {
-        // 0x821886E8: the character moves by the root delta, in its own frame.
-        scene::Xfm d;
-        const float* p = ch[size_t(facingDeltaPos_)].v;
-        d.pos = {p[0], p[1], p[2]};
-        if (facingDeltaRot_ >= 0) d.rot = axisRot(2, ch[size_t(facingDeltaRot_)].v[0]);
-        scene::Xfm r = scene::compose(d, skeleton_.root());
-        normalizeRows(r);
-        skeleton_.setRoot(r);
-    } else if (pelvis_ >= 0 && facingPos_ >= 0) {
-        // 0x82188640: bone_facing under the pelvis.
-        scene::Xfm f;
-        const float* p = ch[size_t(facingPos_)].v;
-        f.pos = {p[0], p[1], p[2]};
-        if (facingRot_ >= 0) f.rot = axisRot(2, ch[size_t(facingRot_)].v[0]);
-        scene::Xfm x = scene::compose(skeleton_.local(pelvis_), f);
-        skeleton_.setLocal(pelvis_, x);
+    if (facingDeltaPos_ >= 0) {
+        // 0x82188640: bone_facing applied to a transform (turned, then moved).
+        auto facing = [&](scene::Xfm& x) {
+            scene::Xfm f;
+            if (facingRot_ >= 0) f.rot = axisRot(2, ch[size_t(facingRot_)].v[0]);
+            if (facingPos_ >= 0) f.pos = {ch[size_t(facingPos_)].v[0], ch[size_t(facingPos_)].v[1], ch[size_t(facingPos_)].v[2]};
+            x = scene::compose(x, f);
+            normalizeRows(x);
+        };
+        // 0x821886E8: the delta in the transform's own frame, then its turn.
+        auto delta = [&](scene::Xfm& x) {
+            const float* p = ch[size_t(facingDeltaPos_)].v;
+            for (int j = 0; j < 3; ++j) x.pos[size_t(j)] += x.rot[size_t(j)] * p[0] + x.rot[size_t(3 + j)] * p[1] + x.rot[size_t(6 + j)] * p[2];
+            if (facingDeltaRot_ >= 0) {
+                x.rot = mul3(x.rot, axisRot(2, ch[size_t(facingDeltaRot_)].v[0]));
+                normalizeRows(x);
+            }
+        };
+        if (!moveSelf_) {
+            if (pelvis_ >= 0) {
+                scene::Xfm pl = skeleton_.local(pelvis_);
+                if (!moveChanged_) {
+                    facing(pl);
+                    skeleton_.setLocal(pelvis_, pl);
+                } else {
+                    // Switched off: the root takes what the pelvis leaves.
+                    scene::Xfm a = skeleton_.root();
+                    delta(a);
+                    const scene::Xfm e = scene::compose(pl, a);
+                    facing(pl);
+                    skeleton_.setLocal(pelvis_, pl);
+                    skeleton_.setRoot(scene::compose(inverse(pl), e));
+                }
+            }
+        } else {
+            if (!moveChanged_) {
+                scene::Xfm r = skeleton_.root();
+                delta(r);
+                skeleton_.setRoot(r);
+            } else if (pelvis_ >= 0) {
+                // Switched on: the facing moves from the pelvis to the root.
+                scene::Xfm a = skeleton_.local(pelvis_);
+                facing(a);
+                a = scene::compose(a, skeleton_.root());
+                skeleton_.setRoot(scene::compose(inverse(skeleton_.local(pelvis_)), a));
+            }
+            regulateRoot(dBeats);
+        }
+        moveChanged_ = false;
     }
     // FUN_821885D0: the deltas cleared.
     if (facingDeltaPos_ >= 0) ch[size_t(facingDeltaPos_)].v[0] = ch[size_t(facingDeltaPos_)].v[1] = ch[size_t(facingDeltaPos_)].v[2] = 0;
     if (facingDeltaRot_ >= 0) ch[size_t(facingDeltaRot_)].v[0] = 0;
+}
+
+// 0x82188DC8.
+void Character::regulateRoot(float dBeats) {
+    if (!hasRegulate_ && !override_.hasSpot) return;
+    ClipDriver* d = mainDriver();
+    if (!d || d->chain().size() < 2) return;
+    // The clip playing (the oldest node) and the one waiting to follow it.
+    const auto& oldest = d->chain()[0];
+    const auto& next = d->chain()[1];
+    if (!(0 < next.delay)) return;
+    float ahead = next.delay;
+    float span = std::max(ahead * 0.6666667f, 2.0f);
+    const Spot* spot = hasRegulate_ ? &regulate_ : nullptr;
+    if (override_.hasSpot && oldest.clip == override_.clip) {
+        ahead = override_.frame - oldest.frame;
+        if (ahead <= 0) return;
+        span = ahead * 0.6666667f;
+        spot = &override_.spot;
+    }
+    if (!spot) return;
+    scene::Xfm root = skeleton_.root();
+    const float here[4] = {root.pos[0], root.pos[1], root.pos[2], 1};
+    RootMotion m;
+    m.start(oldest.clip, here, facingOf(root));
+    m.integrate(oldest.frame, oldest.frame + ahead);
+    const float k = dBeats / span;
+    float off[3] = {override_.offset[0], override_.offset[1], override_.offset[2]};
+    {
+        const float c = std::cos(m.angle), sn = std::sin(m.angle);
+        const float x = off[0] * c - off[1] * sn, y = off[0] * sn + off[1] * c;
+        off[0] = x, off[1] = y;
+    }
+    const float p[3] = {m.pos[0] + off[0], m.pos[1] + off[1], m.pos[2] + off[2]};
+    const auto corr = spotCorrection(*spot, p);
+    for (int j = 0; j < 3; ++j) root.pos[size_t(j)] += corr[size_t(j)] * k;
+    root.rot = mul3(root.rot, axisRot(2, spotTurn(*spot, m.angle) * k));
+    skeleton_.setRoot(root);
+}
+
+void Character::setMoveSelf(bool on) {
+    if (moveSelf_ == on) return;
+    moveSelf_ = on;
+    moveChanged_ = true;
+}
+
+void Character::setRegulate(const Spot* s) {
+    hasRegulate_ = s != nullptr;
+    if (s) regulate_ = *s;
+}
+
+void Character::teleport(const Spot& w) {
+    teleport(w.xfm);
+    setRegulate(&w);
+}
+
+std::array<float, 3> Character::boneOffsetAt(const scene::CharClipSamples& clip, float frame, const std::string& bone) {
+    // 0x82194450 / 0x82192AD8 [I]: the bone's position from the root with
+    // the clip alone posed at `frame` (the root motion is the servo's).
+    const int b = skeleton_.find(bone);
+    if (b < 0) return {0, 0, 0};
+    std::vector<scene::Xfm> saved;
+    for (int i = 0; i < skeleton_.size(); ++i) saved.push_back(skeleton_.local(i));
+    const scene::Xfm root = skeleton_.root();
+    skeleton_.setRoot(scene::Xfm{});
+    Bones tmp;
+    for (const auto& c : bones_.channels()) tmp.add(c.name);
+    tmp.scaleAdd(clip, 1, frame, 0);
+    std::vector<int> map;
+    size_t mapped = 0;
+    poseMeshes(tmp, map, mapped);
+    const scene::Xfm w = skeleton_.world(b);
+    for (int i = 0; i < skeleton_.size(); ++i) skeleton_.setLocal(i, saved[size_t(i)]);
+    skeleton_.setRoot(root);
+    return {w.pos[0], w.pos[1], w.pos[2]};
+}
+
+void Character::setRegulateOverride(const scene::CharClipSamples* clip, float frame, const Spot* spot, const std::string& bone) {
+    override_.clip = clip;
+    override_.frame = frame;
+    override_.hasSpot = spot != nullptr;
+    if (spot) override_.spot = *spot;
+    override_.offset = clip && !bone.empty() ? boneOffsetAt(*clip, frame, bone) : std::array<float, 3>{0, 0, 0};
 }
 
 void Character::poll(RigContext ctx) {
@@ -354,15 +488,37 @@ void Character::poll(RigContext ctx) {
     ctx.pollDrivers = [this, beat, dB, dS] {
         for (auto& d : drivers_) d->poll(beat, dB, dS, &bones_);
     };
-    ctx.pollServo = [this] {
-        poseMeshes();
-        servoRoot();
+    ctx.pollServo = [this, dB] {
+        poseMeshes(bones_, channelBone_, channelsMapped_);
+        servoRoot(dB);
     };
+    ctx.pollWalk = [this, dB](const std::string&) {
+        if (walk_) walk_->poll(dB);
+    };
+    ctx.pollFace = [this, &ctx](const std::string&) { pollFace(ctx); };
     ctx.driverFlagWeight = [this](const std::string& drv, uint32_t flags) {
         ClipDriver* d = driver(drv);
         return d ? d->flagWeight(flags) : 0.0f;
     };
     rig_->poll(ctx);
+}
+
+// FaceFxLipSyncServo Poll 0x8218E7E0 / 0x821A7978.
+void Character::pollFace(const RigContext& ctx) {
+    if (!lip_ || !visible || !visemes_) return;
+    std::vector<float> values;
+    for (const auto& [b, axis] : faceEntries_) values.push_back(b >= 0 ? facefx::eyeAngle(skeleton_.local(b).rot.data(), axis) : 0.0f);
+    facefx::FacePose pose;
+    if (!lip_->poll(ctx.faceSongSeconds, ctx.faceUiSeconds, values.data(), values.size(), pose)) return;
+    faceBones_.scaleDown(*visemes_, 0);
+    for (const auto& f : pose.frames) faceBones_.scaleAdd(*visemes_, f.weight, float(f.frame), 0);
+    // The rest of the weight to the identity: w += residual (-= when w < 0).
+    for (auto& c : faceBones_.channels())
+        if (c.type == scene::CharBonesSamples::kQuat) c.v[3] += c.v[3] >= 0 ? pose.residual : -pose.residual;
+    if (neutral_) faceBones_.rotateBy(*neutral_, neutral_->startFrame);
+    poseMeshes(faceBones_, faceChannelBone_, faceMapped_);
+    lastFace_ = std::move(pose);
+    ++facePoses_;
 }
 
 std::vector<std::string> Character::unresolvedBones() const {

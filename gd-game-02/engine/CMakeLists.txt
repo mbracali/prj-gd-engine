@@ -46,6 +46,7 @@ target_sources(gd02 PRIVATE
   src/char/skeleton.cpp
   src/char/rig.cpp
   src/char/character.cpp
+  src/char/char_walk.cpp
   src/data/crypt.cpp
   src/data/dta.cpp
   src/data/game_data.cpp
@@ -110,6 +111,7 @@ target_sources(gd02 PRIVATE
   src/scene/world_objects.cpp
   src/tests/scripttest.cpp
   src/ui/career.cpp
+  src/ui/char_select.cpp
   src/ui/gamepad_panel.cpp
   src/ui/natives_game.cpp
   src/ui/natives_meta.cpp
@@ -128,6 +130,7 @@ target_sources(gd02 PRIVATE
   src/tests/venuetest_crowd.cpp
   src/tests/chartest.cpp
   src/tests/chartest_band.cpp
+  src/tests/chartest_crowd.cpp
   src/tests/miditest.cpp
   src/video/wmv_player.cpp
 )

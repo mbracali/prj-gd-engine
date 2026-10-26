@@ -37,14 +37,22 @@ struct Session {
     std::map<std::string, Value> cfgSet;  // gamecfg set <key> <value>
     std::string song;                   // game get_song
     int songIndex = -1;                 // game set_song_index (the provider's index)
+    // PlayerConfig (handler 0x822BDDC0) [C]: the character (+0x38) and its
+    // outfit (+0x3c, set_character 0x822BD8B8), the guitar (+0x40) and
+    // skin (+0x44, set_guitar 0x822BDAA0), kept valid against the guitars
+    // the player has (0x822BD490, ui/char_select.h).
     struct PlayerCfg {
         int difficulty = 1;  // kDifficultyMedium
-        std::string character = "punk1";
-        int guitarIndex = 0, outfit = 0;
+        std::string character = "punk", outfit = "punk1";  // main.dta reset_player_settings
+        std::string guitar, skin;
         int padnum = 0;
-        int trackType = 0;
+        int trackType = 2;  // kTrackGuitar (0x822BD6E8)
     };
     std::array<PlayerCfg, 2> players;
+    bool allAccess = false;  // campaign set_all_access (the cheat): every item unlocked
+    // The endgame photos GamePanel picked as the song loaded (0x822CC730):
+    // per player ui/image/og/photo_<outfit><0..3>_keep.bmp.
+    std::vector<std::string> winnerPhotos;
     std::string venue;
     bool fastIntro = false;
     bool tutorialRunning = false;

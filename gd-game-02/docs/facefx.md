@@ -139,7 +139,8 @@ Expressions (gh2 type dta) [C data]:
 ## In gd02
 
 `facefx::LipSync` is the servo runtime (setup, play, poll, doExpression, setRegister) and returns a
-`FacePose` (visemes clip frames + weights + residual) for the band's pose code to apply as in step 5;
+`FacePose` (visemes clip frames + weights + residual); `chr::Character` applies it as in step 5 at the
+servo's place in the rig order (docs/band.md "Faces"), the band (`game/band.cpp`) sets it up per character;
 `facefx::ExpressionScript` mirrors the gh2 type's handlers for code that does not run them through the
 interpreter. `--facefxtest` parses every archive and checks the graph values against the M9 research
 parser (`facefx.py graph_eval`) at 96 sample times, plus the servo semantics above.

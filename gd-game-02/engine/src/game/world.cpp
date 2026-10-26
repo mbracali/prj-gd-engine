@@ -46,7 +46,7 @@ const std::set<std::string>& worldEvents() {
 // through addNatives): they answer 0 and are reported as STUBs.
 const std::set<std::string>& directorStubs() {
     // set_fullness / iterate_frac are the WorldCrowd's (game/crowd.h).
-    static const std::set<std::string> s = {"waypoint_nearest"};
+    static const std::set<std::string> s = {};
     return s;
 }
 
@@ -234,9 +234,17 @@ World::World(Venue& venue, Interp* interp, const DataNode* objects) : venue_(ven
         interp_ = own_.get();
         loadOwnScripts();
     }
+    for (const scene::Waypoint* w : venue_.all<scene::Waypoint>()) waypoints_.push_back(w);
     registerTriggers();
     attach();
     crowd_ = std::make_unique<Crowd>(*this);
+}
+
+void World::waypointToEnd(const scene::Waypoint* w) {
+    auto it = std::find(waypoints_.begin(), waypoints_.end(), w);
+    if (it == waypoints_.end()) return;
+    waypoints_.erase(it);
+    waypoints_.push_back(w);
 }
 
 World::~World() {
@@ -297,17 +305,42 @@ void World::attach() {
             if (ScriptObject* o = prevResolver_(name)) return o;
         return resolveName(name);
     };
-    // {waypoint_find flags}: the first waypoint whose flags have those bits
-    // (kStartGuitarist0...) [I: Waypoint::Find by flags].
+    // {waypoint_find flags} (0x821956C8 -> 0x821954F8): the first waypoint
+    // of the global list with any of the flags.
     interp_->addBuiltin("waypoint_find", [this](Interp& in, const DataNode& c) {
-        const int flags = in.evalArg(c, 1).integerValue();
-        for (scene::Waypoint* w : venue_.all<scene::Waypoint>())
-            if ((int(w->flags) & flags) == flags && flags) return Value::obj(objectFor(w));
+        const uint32_t flags = uint32_t(in.evalArg(c, 1).integerValue());
+        for (const scene::Waypoint* w : waypoints_)
+            if (w->flags & flags) return Value::obj(objectFor(const_cast<scene::Waypoint*>(w)));
         return Value::integer(0);
     });
-    // {waypoint_last w}: CHAR_COMMON start_at after a teleport (0x821973C0
-    // [I: it records the waypoint a character last stood on; nothing reads it]).
-    interp_->addBuiltin("waypoint_last", [](Interp&, const DataNode&) { return Value::integer(0); });
+    // {waypoint_nearest object flags} (0x82195738 -> Waypoint::Nearest
+    // 0x82195548): the waypoint with any of the flags nearest the object.
+    interp_->addBuiltin("waypoint_nearest", [this](Interp& in, const DataNode& c) {
+        const std::string name = text(in, in.evalArg(c, 1));
+        const uint32_t flags = uint32_t(in.evalArg(c, 2).integerValue());
+        scene::Xfm x;
+        bool got = band && band->objectXfm(name, "", x);
+        if (!got)
+            if (const scene::Object* o = venue_.find(name)) x = pose_.world(o), got = true;
+        if (!got) return Value::integer(0);
+        const scene::Waypoint* best = nullptr;
+        float bd = 1e30f;
+        for (const scene::Waypoint* w : waypoints_) {
+            if (!(w->flags & flags)) continue;
+            const auto q = pose_.world(w).pos;
+            const float dx = x.pos[0] - q[0], dy = x.pos[1] - q[1], dz = x.pos[2] - q[2];
+            const float d = dy * dy + dx * dx + dz * dz;
+            if (d < bd) bd = d, best = w;
+        }
+        return best ? Value::obj(objectFor(const_cast<scene::Waypoint*>(best))) : Value::integer(0);
+    });
+    // {waypoint_last w} (0x821957C0): w to the end of the global list (the
+    // start waypoint after a teleport: later walks prefer the others).
+    interp_->addBuiltin("waypoint_last", [this](Interp& in, const DataNode& c) {
+        const std::string name = text(in, in.evalArg(c, 1));
+        if (const scene::Waypoint* w = venue_.find<scene::Waypoint>(name)) waypointToEnd(w);
+        return Value::integer(0);
+    });
 }
 
 ScriptObject* World::script() { return world_.get(); }

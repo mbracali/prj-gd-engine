@@ -297,7 +297,7 @@ struct Rig::Impl {
     std::vector<PosConstraint> constraints;
     std::vector<IkRod> rods;
 
-    enum Kind { kDriver, kServo, kSetter, kHand, kMidi, kUpper, kFore, kLookAt, kEyes, kHair, kConstraint, kRod };
+    enum Kind { kDriver, kServo, kFace, kWalk, kSetter, kHand, kMidi, kUpper, kFore, kLookAt, kEyes, kHair, kConstraint, kRod };
     struct Pollable {
         Kind kind;
         size_t index;
@@ -348,6 +348,19 @@ void Rig::Impl::build() {
         } else if (o->as<scene::CharServoBone>()) {
             p.kind = kServo, p.index = 0;
             p.writesAllBones = true;
+        } else if (o->as<scene::CharWalk>()) {
+            // CharWalk: queues clips on the main driver [I: its PollDeps
+            // were not read; the plan's order puts it first].
+            p.kind = kWalk, p.index = 0;
+            for (const auto& q : dir.objects)
+                if (q->as<scene::CharDriver>() && q->name == "main.drv") p.writes.push_back(q->name);
+        } else if (auto* f = o->as<scene::FaceFxLipSyncServo>()) {
+            // The lip servo: changed by its eye entries [I: its PollDeps were
+            // not read; the eyes' look-ats must come first], changes the face
+            // bones it poses.
+            weights[o->name] = {f->weightable.weight, f->weightable.weightOwner};
+            p.kind = kFace, p.index = 0;
+            for (const auto& e : f->entries) p.reads.push_back(e.object);
         } else if (auto* s = o->as<scene::CharWeightSetter>()) {
             weights[o->name] = {s->weightable.weight, s->weightable.weightOwner};
             setters.push_back({o->name, s->driver, s->flags, s->invert});
@@ -576,6 +589,12 @@ void Rig::Impl::poll(const RigContext& ctx) {
             break;
         case kServo:
             if (ctx.pollServo) ctx.pollServo();
+            break;
+        case kFace:
+            if (ctx.pollFace) ctx.pollFace(p.name);
+            break;
+        case kWalk:
+            if (ctx.pollWalk) ctx.pollWalk(p.name);
             break;
         case kSetter: pollSetter(setters[p.index], ctx); break;
         case kHand: pollHand(hands[p.index]); break;

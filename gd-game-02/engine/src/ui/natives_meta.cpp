@@ -14,6 +14,7 @@
 #include "audio/audio_device.h"
 #include "game/song_db.h"
 #include "script/tasks.h"
+#include "ui/char_select.h"
 #include "ui/natives.h"
 #include "ui/sfx_args.h"
 #include "ui/ui_host.h"
@@ -99,7 +100,7 @@ public:
         }
         for (const auto& [item, on] : c.items)
             if (on) offered.insert(item);
-        const bool all = allAccess;
+        const bool all = ui_.session().allAccess;
         const auto have = [&](const std::string& s) { return songInfoIndex(ui_, s) >= 0; };
         for (const auto& [tier, songs] : l.tiers) {
             bool first = true;
@@ -163,7 +164,6 @@ public:
     }
 
     int mode = 0;
-    bool allAccess = false;
 
 private:
     UiManager& ui_;
@@ -185,8 +185,8 @@ public:
         if (msg == "tutorials_done") return r = Value::integer(slot_ >= 0 ? c.profiles[size_t(slot_)].tutorialsDone : 0), true;
         if (msg == "needs_save") return r = Value::integer(c.needsSave ? 1 : 0), true;
         if (msg == "save_complete") return c.needsSave = false, true;
-        if (msg == "all_access") return r = Value::integer(sp_.allAccess ? 1 : 0), true;
-        if (msg == "set_all_access") return sp_.allAccess = !args.empty() && args[0].truthy(), true;
+        if (msg == "all_access") return r = Value::integer(ui_.session().allAccess ? 1 : 0), true;
+        if (msg == "set_all_access") return ui_.session().allAccess = !args.empty() && args[0].truthy(), true;
         if (msg == "profile_slot") return r = Value::integer(slot_), true;
         if (msg == "set_profile_slot") return slot_ = intArg(args, 0, -1), true;
         if (msg == "profile_name") {
@@ -197,8 +197,14 @@ public:
             const int s = intArg(args, 0, 0);
             return r = Value::integer(s >= 0 && s < Career::kProfiles && !c.profiles[size_t(s)].inUse ? 1 : 0), true;
         }
-        if (msg == "is_unlocked") return r = Value::integer(sp_.allAccess || (c.items.count(argStr(0)) && c.items[argStr(0)]) ? 1 : 0), true;
-        if (msg == "is_video_unlocked") return r = Value::integer(sp_.allAccess || (c.items.count(argStr(0)) && c.items[argStr(0)]) ? 1 : 0), true;
+        if (msg == "is_unlocked") {
+            const std::string s = argStr(0);
+            int known = 0;
+            const bool on = chars::unlocked(ui_, s, &known);  // characters, outfits, guitars, skins
+            const bool other = ui_.session().allAccess || (c.items.count(s) && c.items[s]);
+            return r = Value::integer((known ? on : other) ? 1 : 0), true;
+        }
+        if (msg == "is_video_unlocked") return r = Value::integer(ui_.session().allAccess || (c.items.count(argStr(0)) && c.items[argStr(0)]) ? 1 : 0), true;
         if (msg == "is_song_passed") {
             for (const Career::Profile& p : c.profiles)
                 for (const auto& d : p.results)
@@ -209,7 +215,7 @@ public:
             msg == "encore_unlock_potential" || msg == "encore_newly_unlocked" || msg == "is_store_song" || msg == "is_max_status" ||
             msg == "num_guitar_awards" || msg == "do_tutorial" || msg == "tutorial_access")
             return true;  // career only: nothing in a fresh quickplay session
-        if (msg == "status" || msg == "cash" || msg == "starting_cash" || msg == "cash_spent") return true;
+        if (msg == "status" || msg == "cash_spent") return true;
         if (msg == "pick_attract_song") {
             // A song quickplay offers (the attract mode).
             sp_.mode = 1;
@@ -218,6 +224,73 @@ public:
             return r = Value::symbol(n > 0 ? sp_.symbol(ui_.interp().randomInt(0, n)) : std::string()), true;
         }
         if (msg == "get_status_progress") return r = Value::string(""), true;
+        // The band profile (0x82287F58): its name (set_profile_name 0x822A6C30,
+        // has_profile_name 0x822847B0), the last difficulty (+0x2c) and the
+        // look per difficulty (set / get_character_info 0x82284E88 /
+        // 0x82284E00; new_campaign 0x822A8A88: no character stored yet).
+        Career::Profile* prof = slot_ >= 0 && slot_ < Career::kProfiles ? &c.profiles[size_t(slot_)] : nullptr;
+        const int diff = std::clamp(ui_.session().players[0].difficulty, 0, Career::kDifficulties - 1);
+        if (msg == "has_profile_name") {
+            // Another band (or, editing, any but the slot's) with the name [I: case-insensitive as the entry is upper case].
+            const std::string n = argStr(0);
+            const bool editing = args.size() > 1 && args[1].truthy();
+            for (int i = 0; i < Career::kProfiles; ++i)
+                if (c.profiles[size_t(i)].inUse && c.profiles[size_t(i)].name == n && !(editing && i == slot_)) return r = Value::integer(1), true;
+            return true;
+        }
+        if (msg == "set_profile_name") {
+            const int s = intArg(args, 1, slot_);
+            if (s < 0 || s >= Career::kProfiles) return true;
+            Career::Profile& p = c.profiles[size_t(s)];
+            if (!p.inUse) p = Career::Profile{}, p.inUse = true;
+            p.name = argStr(0);
+            slot_ = s;
+            c.touch();
+            return true;
+        }
+        if (msg == "last_difficulty") return r = Value::integer(prof ? prof->lastDifficulty : 1), true;
+        if (msg == "update_difficulty") {
+            if (prof && prof->lastDifficulty != diff) prof->lastDifficulty = diff, c.touch();
+            return true;
+        }
+        // The band's cash (config/campaign.dta (cash (starting 50))) [C data].
+        if (msg == "cash") return r = Value::integer(prof ? prof->cash : 0), true;
+        if (msg == "add_cash") {
+            if (prof) prof->cash += intArg(args, 0), c.touch();
+            return true;
+        }
+        if (msg == "starting_cash") {
+            const DataNode* boot = ui_.bootTree();
+            const DataNode* camp = boot ? boot->find("campaign") : nullptr;
+            const DataNode* cash = camp ? camp->find("cash") : nullptr;
+            const DataNode* st = cash ? cash->find("starting") : nullptr;
+            return r = Value::integer(st && st->children.size() > 1 ? st->intAt(1) : 0), true;
+        }
+        // The career score [I: the band's best scores at the difficulty, summed].
+        if (msg == "career_score") {
+            int sum = 0;
+            if (prof)
+                for (const auto& [song, sr] : prof->results[size_t(diff)]) sum += sr.score;
+            return r = Value::integer(sum), true;
+        }
+        if (msg == "new_campaign") return r = Value::integer(!prof || prof->chars[size_t(diff)].character.empty() ? 1 : 0), true;
+        if (msg == "set_character_info") {
+            if (!prof) return true;
+            Session::PlayerCfg& pc = ui_.session().players[0];
+            chars::validate(ui_, pc);
+            Career::CharInfo ci{pc.character, pc.outfit, pc.guitar, pc.skin};
+            Career::CharInfo& cur = prof->chars[size_t(diff)];
+            if (cur.character != ci.character || cur.outfit != ci.outfit || cur.guitar != ci.guitar || cur.skin != ci.skin) cur = ci, c.touch();
+            return true;
+        }
+        if (msg == "get_character_info") {
+            if (!prof) return true;
+            const Career::CharInfo& ci = prof->chars[size_t(diff)];
+            Session::PlayerCfg& pc = ui_.session().players[0];
+            chars::setCharacter(ui_, pc, ci.outfit, false);
+            chars::setGuitar(ui_, pc, ci.guitar, ci.skin, false);
+            return true;
+        }
         return false;
     }
 
@@ -506,6 +579,7 @@ void installNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Scrip
     add(std::make_unique<QuietObj>(ui, "store_item_provider", std::set<std::string>{"check_achievement", "init_data"}));
     add(std::make_unique<QuietObj>(ui, "player_matcher0", std::set<std::string>{"add_sink", "remove_sink", "auto_solo", "set_auto_solo"}));
     installGameNatives(ui, in, owned);
+    chars::installNatives(ui, in, owned);
 
     // Builtins the host gives.
     in.addBuiltin("play_sfx", [&ui](Interp& i, const DataNode& c) {

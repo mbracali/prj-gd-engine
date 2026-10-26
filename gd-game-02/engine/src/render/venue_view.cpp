@@ -236,9 +236,17 @@ void VenueView::drawObject(gfx::MaterialRenderer& mr, const scene::Object* o, co
         // A band slot: its member, when the band is loaded.
         bandView_->draw(mr, o, env, camera_, hdr_, [&](const scene::Environ* e) { selectEnv(mr, e); });
     } else if (auto* c = o->as<scene::WorldCrowd>()) {
-        // The audience (render/crowd_view.h).
+        // The audience (render/crowd_view.h); GD02_CROWD=0 leaves it out.
+        static const bool noCrowd = [] {
+            const char* e = SDL_getenv("GD02_CROWD");
+            return e && *e == '0';
+        }();
         selectEnv(mr, env);
-        crowdView_->draw(mr, *c, camera_, hdr_);
+        if (!noCrowd)
+            crowdView_->draw(mr, *c, env, camera_, hdr_, [&](const scene::Environ* e) {
+                envSet_ = false;  // the card pass set its own camera and lights
+                selectEnv(mr, e);
+            });
     } else if (auto* p = o->as<scene::ParticleSys>()) {
         auto it = systemIndex_.find(p);
         if (it == systemIndex_.end()) return;
