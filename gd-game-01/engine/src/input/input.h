@@ -88,6 +88,12 @@ public:
     // guitar layout and tilt for Star Power. Xbox 360 guitars (Guitar Hero and
     // Rock Band) are always Xbox guitars. Touch Controls: see the touch section.
     void setGamepadPlay(bool on) { gamepadPlay_ = on; }
+    // Lefty Flip per player (beatmatch_controller.dta, docs/ui_system.md): a
+    // gamepad's frets take the lefty_joypad order (X R2 R1 L1 L2, green to
+    // orange: the joypad's reversed), and a guitar's strum up / down move the
+    // menus the other way (the guitar is held upside down). The highway's
+    // mirroring is TrackRenderer::setLefty.
+    void setLefty(bool p1, bool p2) { lefty_ = {p1, p2}; }
     void setRockBand(bool on);
 
     // -- the Gamepads screen
@@ -111,6 +117,18 @@ public:
     void cancelCapture() { capturing_ = false; }
     bool capturing() const { return capturing_; }
     void resetBindings(const std::string& id);
+    // The controller's type (a pad): Auto (as detected), or chosen: Gamepad,
+    // PS2 guitar (adapter), Xbox guitar, Rock Band guitar. A guitar plays
+    // with the strum bar; a gamepad's frets also strum. Some adapters for PS2
+    // guitars say they are a PlayStation 3 pad, so the player picks it.
+    // Saved per controller model in controllers.json ("type").
+    std::string deviceType(const std::string& id) const;
+    void cycleDeviceType(const std::string& id, int dir);
+    // controllers-report.txt in the save folder: the system, every
+    // controller (name, USB id, SDL mapping, type, player, bindings) and the
+    // last raw button / axis / hat events, for bug reports.
+    std::string reportPath() const;
+    bool writeReport() const;
 
     // -- touch (SDL finger events). In the game, a finger on a lane of the
     // highway (from its far end down past the smashers) holds that fret and
@@ -154,6 +172,7 @@ private:
     struct Pad {
         SDL_Gamepad* pad = nullptr;
         Profile profile = Profile::Joypad;
+        Profile detected = Profile::Joypad;  // what the game guessed (type Auto)
         std::string guid, name;
         int slot = 0;
         bool chosenSlot = false;  // from controllers.json
@@ -184,6 +203,7 @@ private:
 
     std::map<std::string, Bindings> overrides_;  // by GUID ("keyboard" for the keyboard)
     std::map<std::string, int> players_;         // chosen players by GUID
+    std::map<std::string, Profile> types_;       // chosen controller types by GUID
     bool loaded_ = false, capturing_ = false, kbFretsStrum_ = false;
     std::string captureId_;
     Control captureControl_ = Control::Green;
@@ -208,6 +228,8 @@ private:
     // the pause corner (0 top right, 1 top left, 2 none).
     std::array<int, kTouchOptions> touchOpt_ = {0, 0, 1, 0};
     bool touchUsed_ = false;  // the screen was touched since the last key or button
+    std::array<bool, 2> lefty_{};
+    bool curGuitar_ = false;  // the device being read is a guitar (lefty: menu strum swapped)
     bool touch_ = true, gamepadPlay_ = true, rockBand_ = false, rbMappings_ = false;
     std::function<void(float, float, float&, float&)> toMenu_;
     std::array<TouchLanes, 2> lanes_;
@@ -233,6 +255,13 @@ private:
     std::array<Recent, size_t(Action::Start) + 1> recent_{};
     std::set<std::pair<int64_t, int>> dropped_;  // (device, action) presses whose release is dropped too
     void addGenericMapping(SDL_JoystickID id);
+    struct RawEvent {
+        uint64_t ns;
+        SDL_JoystickID id;
+        char kind;  // 'b' button, 'a' axis, 'h' hat (joystick events: the device's own numbers)
+        int index, value;
+    };
+    std::vector<RawEvent> raw_;  // the last kRawEvents, oldest first (for the report)
     std::unordered_map<SDL_JoystickID, Pad> pads_;
     ControllerMode lastMode_ = ControllerMode::Guitar;
 };

@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <fstream>
 #include <iterator>
@@ -87,6 +88,9 @@ constexpr uint64_t kSameNs = 80000000;    // the same press from two devices (me
 const char* const kControlKeys[] = {"green", "red", "yellow", "blue", "orange", "strum_up", "strum_down", "whammy",
                                     "star_power", "start", "select", "back", "menu_up", "menu_down", "menu_left", "menu_right"};
 const char* const kKindKeys[] = {"button", "axis_pos", "axis_neg", "axis_any", "key"};
+// controllers.json "type" values, by Input::Profile (Keyboard is not a choice).
+const char* const kTypeKeys[] = {"ps2_guitar", "xbox_guitar", "rock_band", "gamepad"};
+constexpr size_t kRawEvents = 400;
 
 std::string prefPath(const char* file) {
     return prefDir().empty() ? std::string(file) : prefDir() + file;
@@ -269,6 +273,8 @@ void Input::load() {
     for (const auto& [guid, d] : root["devices"].o) {
         if (d["player"].type == Json::Type::Number) players_[guid] = std::clamp(int(d["player"].n), -1, 1);
         if (guid == "keyboard") kbFretsStrum_ = d["frets_strum"].truthy();
+        for (int t = 0; t < 4; ++t)
+            if (d["type"].str() == kTypeKeys[t]) types_[guid] = Profile(t);
         if (d["bindings"].type != Json::Type::Object) continue;
         // A control saved empty stays unbound; one missing takes the default.
         const Bindings def = defaults(Profile::Keyboard);
@@ -293,11 +299,13 @@ void Input::save() const {
     std::set<std::string> ids;
     for (const auto& [g, b] : overrides_) ids.insert(g);
     for (const auto& [g, p] : players_) ids.insert(g);
+    for (const auto& [g, t] : types_) ids.insert(g);
     if (kbFretsStrum_) ids.insert("keyboard");
     for (const std::string& g : ids) {
         Json d = Json::object();
         if (g == "keyboard" && kbFretsStrum_) d.set("frets_strum", Json::boolean(true));
         if (auto it = players_.find(g); it != players_.end()) d.set("player", Json::number(it->second));
+        if (auto it = types_.find(g); it != types_.end()) d.set("type", Json::string(kTypeKeys[size_t(it->second)]));
         for (const auto& [id, p] : pads_)
             if (p.guid == g) d.set("name", Json::string(p.name));
         if (auto it = overrides_.find(g); it != overrides_.end()) {
@@ -339,7 +347,26 @@ const Input::Bindings& Input::bindingsFor(const std::string& guid, Profile p) co
 
 void Input::handle(const SDL_Event& e, std::vector<InputEvent>& out) {
     if (!loaded_) load();
+    if (raw_.size() > kRawEvents) raw_.erase(raw_.begin(), raw_.begin() + long(raw_.size() - kRawEvents));
     switch (e.type) {
+    case SDL_EVENT_JOYSTICK_BUTTON_DOWN:
+    case SDL_EVENT_JOYSTICK_BUTTON_UP:
+        raw_.push_back({e.jbutton.timestamp, e.jbutton.which, 'b', e.jbutton.button, e.jbutton.down ? 1 : 0});
+        break;
+    case SDL_EVENT_JOYSTICK_HAT_MOTION:
+        raw_.push_back({e.jhat.timestamp, e.jhat.which, 'h', e.jhat.hat, e.jhat.value});
+        break;
+    case SDL_EVENT_JOYSTICK_AXIS_MOTION: {
+        // Axes report constantly: kept when they move a sixth of their range from the last one kept.
+        int last = 0;
+        for (auto r = raw_.rbegin(); r != raw_.rend(); ++r)
+            if (r->id == e.jaxis.which && r->kind == 'a' && r->index == e.jaxis.axis) {
+                last = r->value;
+                break;
+            }
+        if (std::abs(int(e.jaxis.value) - last) > 10000) raw_.push_back({e.jaxis.timestamp, e.jaxis.which, 'a', e.jaxis.axis, e.jaxis.value});
+        break;
+    }
     case SDL_EVENT_JOYSTICK_ADDED:
         // A controller SDL has no gamepad mapping for (some PS2 adapters,
         // guitars, arcade sticks) gets a generic one, so it shows in the
@@ -357,11 +384,12 @@ void Input::handle(const SDL_Event& e, std::vector<InputEvent>& out) {
         else if (isXboxGuitar(id)) profile = Profile::XboxGuitar;
         else if (isPs2Guitar(pad)) profile = Profile::Ps2Guitar;
         Pad np;
-        np.pad = pad, np.profile = profile;
+        np.pad = pad, np.profile = np.detected = profile;
         char guid[64];
         SDL_GUIDToString(SDL_GetGamepadGUIDForID(id), guid, sizeof guid);
         np.guid = guid;
         np.name = SDL_GetGamepadName(pad) ? SDL_GetGamepadName(pad) : "Gamepad";
+        if (auto t = types_.find(np.guid); t != types_.end()) np.profile = profile = t->second;  // chosen in GAMEPADS
         // The axes' rest values as connected (a whammy bar rests at -32768).
         for (int a = 0; a < SDL_GAMEPAD_AXIS_COUNT; ++a) np.axes[size_t(a)] = np.rest[size_t(a)] = SDL_GetGamepadAxis(pad, SDL_GamepadAxis(a));
         // Some report zeros until their first report: the rest values settle first.
@@ -434,6 +462,82 @@ void Input::handle(const SDL_Event& e, std::vector<InputEvent>& out) {
         break;
     default: break;
     }
+}
+
+std::string Input::deviceType(const std::string& id) const {
+    const Pad* p = padById(id);
+    if (!p) return "";
+    if (types_.count(p->guid)) return profileName(p->profile);
+    return std::string("Auto (") + profileName(p->detected) + ")";
+}
+
+void Input::cycleDeviceType(const std::string& id, int dir) {
+    Pad* p = padById(id);
+    if (!p) return;
+    // Auto, then the four types.
+    static const int kOrder[] = {-1, int(Profile::Joypad), int(Profile::Ps2Guitar), int(Profile::XboxGuitar), int(Profile::RockBand)};
+    int cur = types_.count(p->guid) ? int(types_[p->guid]) : -1, i = 0;
+    for (int k = 0; k < 5; ++k)
+        if (kOrder[k] == cur) i = k;
+    i = (i + (dir < 0 ? 4 : 1)) % 5;
+    if (kOrder[i] < 0) types_.erase(p->guid), p->profile = p->detected;
+    else types_[p->guid] = p->profile = Profile(kOrder[i]);
+    p->down = {};  // the controls start released under the new type
+    resync(id);
+    save();
+}
+
+std::string Input::reportPath() const { return prefPath("controllers-report.txt"); }
+
+bool Input::writeReport() const {
+    std::ofstream out(reportPath());
+    if (!out) return false;
+    const int v = SDL_GetVersion();
+    out << "gd01 " << GD01_VERSION << " controller report (send this file with a bug report)\n"
+        << "System: " << SDL_GetPlatform() << ", SDL " << SDL_VERSIONNUM_MAJOR(v) << "." << SDL_VERSIONNUM_MINOR(v) << "."
+        << SDL_VERSIONNUM_MICRO(v) << "\nTouch controls: " << (touch_ ? "on" : "off") << ", XInput play: "
+        << (gamepadPlay_ ? "on" : "off") << ", Rock Band guitars: " << (rockBand_ ? "on" : "off") << "\n\n";
+    out << "Keyboard: player " << keyboardSlot() + 1 << (kbFretsStrum_ ? ", frets also strum" : "") << "\n\n";
+    auto hex4 = [](unsigned x) {
+        char b[8];
+        std::snprintf(b, sizeof b, "%04x", x & 0xffff);
+        return std::string(b);
+    };
+    for (const auto& [id, p] : pads_) {
+        const std::string sid = "pad:" + std::to_string(id);
+        SDL_Joystick* j = SDL_GetGamepadJoystick(p.pad);
+        out << "Controller " << id << ": " << p.name << "\n"
+            << "  USB id " << hex4(SDL_GetGamepadVendor(p.pad)) << ":" << hex4(SDL_GetGamepadProduct(p.pad))
+            << ", GUID " << p.guid << ", SDL type " << (SDL_GetGamepadStringForType(SDL_GetGamepadType(p.pad)) ? SDL_GetGamepadStringForType(SDL_GetGamepadType(p.pad)) : "?")
+            << ", " << (j ? SDL_GetNumJoystickButtons(j) : 0) << " buttons, " << (j ? SDL_GetNumJoystickAxes(j) : 0) << " axes, "
+            << (j ? SDL_GetNumJoystickHats(j) : 0) << " hats\n"
+            << "  Type: " << deviceType(sid) << ", player " << (p.slot < 0 ? std::string("none") : std::to_string(p.slot + 1)) << "\n";
+        if (char* m = SDL_GetGamepadMapping(p.pad)) {
+            out << "  SDL mapping: " << m << "\n";
+            SDL_free(m);
+        }
+        const Bindings& b = bindingsFor(p.guid, p.profile);
+        out << "  Bindings:";
+        for (size_t c = 0; c < size_t(Control::Count); ++c) {
+            std::string what;
+            for (const Source& x : b[c]) what += (what.empty() ? "" : "/") + sourceName(sid, x);
+            out << " " << controlName(Control(c)) << "=" << (what.empty() ? "-" : what) << ";";
+        }
+        out << "\n\n";
+    }
+    int n = 0;
+    if (SDL_JoystickID* all = SDL_GetJoysticks(&n)) {
+        for (int k = 0; k < n; ++k)
+            if (!pads_.count(all[k]))
+                out << "Joystick " << all[k] << " (not a gamepad): " << (SDL_GetJoystickNameForID(all[k]) ? SDL_GetJoystickNameForID(all[k]) : "?")
+                    << ", USB id " << hex4(SDL_GetJoystickVendorForID(all[k])) << ":" << hex4(SDL_GetJoystickProductForID(all[k])) << "\n";
+        SDL_free(all);
+    }
+    out << "\nLast raw events (the device's own button / axis / hat numbers):\n";
+    for (const RawEvent& r : raw_)
+        out << "  " << double(r.ns) / 1e9 << " s  controller " << r.id << "  "
+            << (r.kind == 'b' ? "button " : r.kind == 'a' ? "axis " : "hat ") << r.index << " = " << r.value << "\n";
+    return bool(out);
 }
 
 void Input::keyEvent(const SDL_KeyboardEvent& k, std::vector<InputEvent>& out) {
@@ -537,7 +641,9 @@ void Input::update(Pad& p, uint64_t ts, std::vector<InputEvent>& out) {
         if (Control(c) == C::Whammy && p.whammyAxis > 0.15f) now = true;
         p.down[c] = now;
     }
+    curGuitar_ = !joypad;
     controlEdges(was, p.down, modeFor(joypad), p.slot, joypad, ts, out);
+    curGuitar_ = false;
 }
 
 // The controls that changed. Select / Back bound to the green / red fret's
@@ -560,12 +666,16 @@ void Input::controlEdges(const std::array<bool, size_t(Control::Count)>& was, co
 void Input::controlEdge(Control c, bool down, ControllerMode mode, int player, bool joypad, uint64_t ts, std::vector<InputEvent>& out) {
     auto act = [&](Action a) { emit(out, a, down, ts, mode, player); };
     const bool play = !joypad || gamepadPlay_;
+    const bool lefty = lefty_[size_t(player & 1)];
     switch (c) {
-    case C::Green: case C::Red: case C::Yellow: case C::Blue: case C::Orange:
-        if (play) act(Action(int(Action::Fret0) + int(c)));
+    case C::Green: case C::Red: case C::Yellow: case C::Blue: case C::Orange: {
+        int fret = int(c);
+        if (lefty && joypad) fret = 4 - fret;  // lefty_joypad: X R2 R1 L1 L2
+        if (play) act(Action(int(Action::Fret0) + fret));
         break;
-    case C::StrumUp: act(Action::Up), act(Action::Strum); break;
-    case C::StrumDown: act(Action::Down), act(Action::Strum); break;
+    }
+    case C::StrumUp: act(lefty && curGuitar_ ? Action::Down : Action::Up), act(Action::Strum); break;
+    case C::StrumDown: act(lefty && curGuitar_ ? Action::Up : Action::Down), act(Action::Strum); break;
     case C::Whammy: if (play) act(Action::Whammy); break;
     case C::StarPower: act(Action::StarPower); break;
     case C::Start: act(Action::Start); break;

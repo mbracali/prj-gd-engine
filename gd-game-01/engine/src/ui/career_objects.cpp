@@ -193,13 +193,19 @@ public:
         if (msg == "get_fx_volume") return r = Value::real(o.fx), true;
         if (msg == "get_band_volume") return r = Value::real(o.band), true;
         if (msg == "get_guitar_volume") return r = Value::real(o.guitar), true;
-        if (msg == "set_fx_volume") return o.fx = arg(0).number(), true;
-        if (msg == "set_band_volume") return o.band = arg(0).number(), true;
-        if (msg == "set_guitar_volume") return o.guitar = arg(0).number(), true;
+        // [I] A changed option marks the save (options live in the profile), so
+        // autosave_goto writes it: Lefty Flip and the volumes survive a restart.
+        auto set = [&](auto& field, auto value) {
+            if (field != value) field = value, ctx_.campaign->needsSave = true;
+            return true;
+        };
+        if (msg == "set_fx_volume") return set(o.fx, arg(0).number());
+        if (msg == "set_band_volume") return set(o.band, arg(0).number());
+        if (msg == "set_guitar_volume") return set(o.guitar, arg(0).number());
         if (msg == "stereo" || msg == "get_stereo") return r = integer(o.stereo), true;
-        if (msg == "set_stereo") return o.stereo = arg(0).truthy(), true;
+        if (msg == "set_stereo") return set(o.stereo, arg(0).truthy());
         if (msg == "lefty" || msg == "get_lefty") return r = integer(o.lefty[std::clamp(arg(0).integerValue(), 0, 1)]), true;
-        if (msg == "set_lefty") return o.lefty[std::clamp(arg(0).integerValue(), 0, 1)] = arg(1).truthy(), true;
+        if (msg == "set_lefty") return set(o.lefty[std::clamp(arg(0).integerValue(), 0, 1)], arg(1).truthy());
         return true;
     }
 

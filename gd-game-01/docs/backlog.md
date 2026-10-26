@@ -199,7 +199,7 @@ Specs from the research pass: docs/crowd_audio_plan.md, career_e2e_plan.md, tuto
 | X23b | Sharper Text & Sprites default on | ✅ | |
 | X29 | Stronger Bokeh | ✅ | Focus at 1.3× the subject distance (original 2×), blur taps 4.8 px / 448 lines (original 3) |
 | X30 | No Fail Mode, Autoplay (cheats) | ✅ | As --no-fail / --autoplay, from the next song |
-| X31 | Touch controls, Rock Band guitars, XInput, Anti-aliasing, FSR 3, shadows for all, more lights, replace textures, cut content | 🟡 | All built in the thirteenth round except Replace Textures and Cut Content |
+| X31 | Touch controls, Rock Band guitars, XInput, Anti-aliasing, FSR 3, shadows for all, more lights, replace textures, cut content | 🟡 | All built in the thirteenth round except Replace Textures (dropped from the roadmap in 1.1.3) and Cut Content |
 
 ## Reported bugs and enhancements (2026-10-22, twelfth round)
 
@@ -312,7 +312,7 @@ layout for Windows / macOS / Linux, and three suggested git structures are in `d
 | X6 | 4K upscaling and native high-resolution rendering | ❌ |
 | X7 | DLSS and FSR | ❌ |
 | X8 | Advanced shaders (replacing the PS2-style ones) | ❌ |
-| X9 | Replacement textures | ❌ |
+| X9 | Replacement textures | ➖ | Dropped from the roadmap (1.1.3): the Enhanced Settings entry is removed |
 | X10 | Modding, including new songs | ❌ |
 | X11 | Ultra-wide monitors | ❌ |
 | X12 | Higher frame rates | ❌ |
