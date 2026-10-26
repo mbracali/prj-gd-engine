@@ -395,6 +395,7 @@ void ParticleRenderer::draw(MaterialRenderer& mr, SceneCache& cache, const Parti
     DrawContext ctx;
     ctx.lit = false;
     ctx.particles = true;
+    ctx.hdr = hdr_;
     mr.draw(g, model, m, ctx);
     drawn_ += int(indices_.size() / 6);
 }
@@ -403,6 +404,10 @@ void ParticleRenderer::draw(MaterialRenderer& mr, SceneCache& cache, const Parti
 
 void ParticleSet::build(const scene::Object* root, uint32_t seed) {
     systems_.clear(), anims_.clear();
+    add(root, seed);
+}
+
+void ParticleSet::add(const scene::Object* root, uint32_t seed) {
     std::vector<const scene::Object*> stack{root};
     std::vector<const scene::Object*> seen;
     while (!stack.empty()) {
@@ -411,9 +416,10 @@ void ParticleSet::build(const scene::Object* root, uint32_t seed) {
         if (!o || std::find(seen.begin(), seen.end(), o) != seen.end()) continue;
         seen.push_back(o);
         if (auto* p = o->as<scene::ParticleSys>()) {
-            systems_.emplace_back(*p, seed * 2654435761u + uint32_t(systems_.size()) * 40503u + 1);
+            if (std::none_of(systems_.begin(), systems_.end(), [&](const ParticleSystem& s) { return &s.def() == p; }))
+                systems_.emplace_back(*p, seed * 2654435761u + uint32_t(systems_.size()) * 40503u + 1);
         } else if (auto* a = o->as<scene::ParticleSysAnim>()) {
-            anims_.push_back(a);
+            if (std::find(anims_.begin(), anims_.end(), a) == anims_.end()) anims_.push_back(a);
         } else if (auto* g = o->as<scene::Group>()) {
             for (auto it = g->objects.rbegin(); it != g->objects.rend(); ++it)
                 if (const scene::Object* c = g->dir ? g->dir->resolve(*it) : nullptr; c && c != g) stack.push_back(c);

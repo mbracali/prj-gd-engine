@@ -29,6 +29,7 @@ endif()
 target_sources(gd02 PRIVATE
   src/main.cpp
   src/app.cpp
+  src/audio/crowd_audio.cpp
   src/audio/mixer.cpp
   src/audio/vorbis_stream.cpp
   src/data/crypt.cpp
@@ -41,32 +42,42 @@ target_sources(gd02 PRIVATE
   src/data/xdvdfs.cpp
   src/devaids/menu_keys.cpp
   src/devaids/screenshot.cpp
+  src/game/camera_director.cpp
   src/game/chart.cpp
+  src/game/crowd.cpp
   src/game/player.cpp
+  src/game/light_presets.cpp
   src/game/rules.cpp
   src/game/song_db.cpp
   src/game/song_setup.cpp
+  src/game/venue.cpp
+  src/game/world.cpp
+  src/game/world_driver.cpp
   src/input/input.cpp
   src/input/input_selftest.cpp
   src/platform/app_icon.cpp
   src/platform/disc_picker.cpp
   src/platform/paths.cpp
   src/render/canvas.cpp
+  src/render/crowd_view.cpp
   src/render/gl_api.cpp
   src/render/gl_device.cpp
   src/render/highway.cpp
   src/render/hud_view.cpp
   src/render/material.cpp
   src/render/particles.cpp
+  src/render/post_fx.cpp
   src/render/renderer.cpp
   src/render/scene_gpu.cpp
   src/render/scene_view.cpp
   src/render/shadertest.cpp
+  src/render/spotlight_view.cpp
   src/render/standard_shader.cpp
   src/render/texture_codec.cpp
   src/render/text_layout.cpp
   src/render/track_view.cpp
   src/render/ui_view.cpp
+  src/render/venue_view.cpp
   src/scene/anim.cpp
   src/scene/bitmap.cpp
   src/scene/inflate.cpp
@@ -78,6 +89,7 @@ target_sources(gd02 PRIVATE
   src/script/tasks.cpp
   src/scene/ui_objects.cpp
   src/scene/ui_styles.cpp
+  src/scene/world_objects.cpp
   src/tests/scripttest.cpp
   src/ui/career.cpp
   src/ui/gamepad_panel.cpp
@@ -91,6 +103,9 @@ target_sources(gd02 PRIVATE
   src/tests/selftest.cpp
   src/tests/uitest.cpp
   src/tests/walktest.cpp
+  src/tests/venuetest.cpp
+  src/tests/director_golden.cpp
+  src/tests/venuetest_crowd.cpp
   src/video/wmv_player.cpp
 )
 target_include_directories(gd02 PRIVATE src)

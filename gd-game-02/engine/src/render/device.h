@@ -60,6 +60,16 @@ struct SamplerState {
 
 enum class BufferKind : uint8_t { Vertex, Index };
 
+// Render target colour formats. RGB10A2 is GH2's own HDR buffer (2:10:10:10,
+// colour stored / 4; render/post_fx.h), colour-renderable in OpenGL ES 3.0
+// too; RGBA16F needs EXT_color_buffer_(half_)float on ES.
+enum class TargetFormat : uint8_t { RGBA8, RGB10A2, RGBA16F };
+struct TargetDesc {
+    int width = 0, height = 0;
+    bool depth = false;  // a depth buffer, sampled through targetDepth (nearest filtering only)
+    TargetFormat format = TargetFormat::RGBA8;
+};
+
 enum class BlendFactor : uint8_t { Zero, One, SrcColor, InvSrcColor, SrcAlpha, InvSrcAlpha, DstColor, InvDstColor, DstAlpha, InvDstAlpha };
 enum class BlendOp : uint8_t { Add, Subtract, ReverseSubtract };
 enum class CompareFunc : uint8_t { Never, Less, Equal, LessEqual, Greater, NotEqual, GreaterEqual, Always };
@@ -157,6 +167,9 @@ public:
     // An RGBA8 colour target with an optional depth buffer; its colour (and
     // depth) can be sampled through targetTexture / targetDepth.
     virtual TargetId createTarget(int width, int height, bool depth, std::string& error) = 0;
+    // The same in another colour format (empty with `error` set when the
+    // driver cannot render to it).
+    virtual TargetId createTarget(const TargetDesc& desc, std::string& error) = 0;
     virtual TextureId targetTexture(TargetId t) const = 0;
     virtual TextureId targetDepth(TargetId t) const = 0;
     virtual void destroyTarget(TargetId t) = 0;

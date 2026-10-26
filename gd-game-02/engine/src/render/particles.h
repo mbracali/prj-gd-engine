@@ -152,12 +152,15 @@ public:
               const Mat4& offset = Mat4::identity(), const ScenePose* pose = nullptr);
     int drawnParticles() const { return drawn_; }
     void resetStats() { drawn_ = 0; }
+    // Draws into the post-process's HDR buffer (DrawContext::hdr).
+    void setHdr(bool on) { hdr_ = on; }
 
 private:
     DynamicMesh mesh_;
     std::vector<float> verts_;
     std::vector<uint16_t> indices_;
     int drawn_ = 0;
+    bool hdr_ = false;
 };
 
 // The particle systems of a view (a Group and its sub-groups) with the
@@ -172,6 +175,9 @@ public:
     // Collects the ParticleSys and ParticleSysAnim objects reachable from
     // `root` (a Group's members, recursively; or the system itself).
     void build(const scene::Object* root, uint32_t seed = 1);
+    // Adds the systems and anims reachable from `root` to this set (a
+    // venue's many roots); systems already in it are not added again.
+    void add(const scene::Object* root, uint32_t seed = 1);
     bool empty() const { return systems_.empty(); }
     void reset();
     // Applies the frames the pose recorded for the anims and systems.

@@ -21,5 +21,8 @@ matches the tag's version. Nothing is released yet.
   "You Rock!" and the fail wind-down; Lefty Flip.
 - The intro and bonus videos (a minimal FFmpeg ships with the game, under the
   LGPL; its licence and source link are in `licenses/`).
+- All eight venues behind the highway, with Guitar Hero II's camera cuts,
+  light shows, spotlights, bloom and depth of field, the crowd and its
+  cheering, and the encore effects.
 - Progress and options saved to `career.json`, and a GAMEPADS screen to set
   up guitars and gamepads.

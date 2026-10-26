@@ -7,6 +7,7 @@
 
 class Player;
 struct SongInfo;
+class ScriptObject;
 struct Value;
 
 // What the UI (ui/ui_manager.h) asks of the program: the song code (app.cpp
@@ -56,6 +57,17 @@ public:
     virtual void hudCommand(const std::string& msg, const std::vector<Value>& args) = 0;
     virtual void drawTrack() = 0;
     virtual void drawHud() = 0;
+
+    // GH2's world_panel: the venue (game/world.h, render/venue_view.h).
+    // worldLoad gets the panel's milo (world/<v>/gen/<v>[_mp|_coop].milo_xbox)
+    // when it loads, worldEnter comes as it enters (before its script),
+    // worldDraw where it draws, worldUnload when it unloads. worldScript is
+    // the `world` script object while a venue is up (nullptr otherwise).
+    virtual void worldLoad(const std::string& /*path*/) {}
+    virtual void worldEnter() {}
+    virtual void worldDraw() {}
+    virtual void worldUnload() {}
+    virtual ScriptObject* worldScript() { return nullptr; }
 
     // song_preview: loops the song's (preview a b) section; "" stops it.
     virtual void songPreview(const std::string& songId) = 0;

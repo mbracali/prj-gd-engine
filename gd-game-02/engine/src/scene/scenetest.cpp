@@ -8,12 +8,14 @@
 #include <exception>
 #include <map>
 #include <set>
+#include <utility>
 #include <vector>
 
 #include "data/game_data.h"
 #include "scene/milo.h"
 #include "scene/ui_objects.h"
 #include "scene/ui_styles.h"
+#include "scene/world_objects.h"
 
 namespace {
 
@@ -50,11 +52,12 @@ void dumpObject(const Object& o, int indent) {
                     m->texGen, m->texWrap, m->diffuseTex.c_str(), m->normalMap.empty() ? "" : (" normal '" + m->normalMap + "'").c_str(),
                     m->emissiveMap.empty() ? "" : (" emissive '" + m->emissiveMap + "'").c_str());
     } else if (auto* m = o.as<Mesh>()) {
-        std::printf("%smat '%s' %zu verts %zu faces %zu groups%s parent '%s' showing %d pos %.1f %.1f %.1f\n", pad.c_str(),
+        std::printf("%smat '%s' %zu verts %zu faces %zu groups%s parent '%s' showing %d order %g pos %.1f %.1f %.1f\n", pad.c_str(),
                     m->mat.c_str(), m->verts.size(), m->faces.size(), m->groupSizes.size(), m->bones.empty() ? "" : " skinned",
-                    m->trans.parent.c_str(), m->draw.showing, m->trans.local.pos[0], m->trans.local.pos[1], m->trans.local.pos[2]);
+                    m->trans.parent.c_str(), m->draw.showing, m->draw.order, m->trans.local.pos[0], m->trans.local.pos[1], m->trans.local.pos[2]);
     } else if (auto* g = o.as<Group>()) {
-        std::printf("%sobjects [%s] showing %d\n", pad.c_str(), join(g->objects, 12).c_str(), g->draw.showing);
+        std::printf("%sobjects [%s] showing %d order %g environ '%s' lod '%s'\n", pad.c_str(), join(g->objects, 12).c_str(), g->draw.showing,
+                    g->draw.order, g->environment.c_str(), g->lod.c_str());
     } else if (auto* a = o.as<TransAnim>()) {
         std::printf("%strans '%s' rot %zu trans %zu scale %zu owner '%s' last frame %.1f\n", pad.c_str(), a->trans.c_str(),
                     a->rotKeys.size(), a->transKeys.size(), a->scaleKeys.size(), a->keysOwner.c_str(),
@@ -103,6 +106,22 @@ void dumpObject(const Object& o, int indent) {
                         join(g.gemWidgets).c_str(), pad.c_str(), join(g.hopoWidgets).c_str(), pad.c_str(),
                         join(g.starWidgets).c_str(), pad.c_str(), join(g.starHopoWidgets).c_str());
         }
+    } else if (auto* c = o.as<CamShot>()) {
+        std::printf("%scategory %s, %zu keyframes, %.0f frames, near %.1f far %.0f, path '%s', flags facing '%s' distance '%s' postprocess '%s'\n",
+                    pad.c_str(), c->category.c_str(), c->keyframes.size(), c->lengthFrames(), c->nearPlane, c->farPlane, c->path.c_str(),
+                    c->flag("facing").c_str(), c->flag("distance").c_str(), c->flag("postprocess").c_str());
+    } else if (auto* p = o.as<LightPreset>()) {
+        std::printf("%scategory %s, %zu keyframes, %zu spots %zu environs %zu lights, adjectives [%s], ex %d..%d%s%s\n", pad.c_str(),
+                    p->category.c_str(), p->keyframes.size(), p->spotlights.size(), p->environs.size(), p->lights.size(),
+                    join(p->adjectives).c_str(), p->minExcitement, p->maxExcitement, p->looping ? " looping" : "", p->manual ? " manual" : "");
+    } else if (auto* t = o.as<EventTrigger>()) {
+        std::string anims;
+        for (const auto& a : t->anims) anims += (anims.empty() ? "" : ", ") + a.anim;
+        std::printf("%sevents [%s] anims [%s] shows [%s] hides %zu proxy calls %zu sounds [%s]\n", pad.c_str(), join(t->triggerEvents).c_str(),
+                    anims.c_str(), join(t->shows).c_str(), t->hideDelays.size(), t->proxyCalls.size(), join(t->sounds).c_str());
+    } else if (auto* sp = o.as<Spotlight>()) {
+        std::printf("%sbeam '%s' spot '%s' target '%s' intensity %.2f color %.2f %.2f %.2f showing %d\n", pad.c_str(), sp->beam.material.c_str(),
+                    sp->spotMaterial.c_str(), sp->target.c_str(), sp->intensity, sp->color[0], sp->color[1], sp->color[2], sp->draw.showing);
     } else if (auto* e = o.as<Environ>()) {
         std::printf("%slights [%s] ambient %.2f %.2f %.2f\n", pad.c_str(), join(e->lights).c_str(), e->ambientColor[0],
                     e->ambientColor[1], e->ambientColor[2]);
@@ -285,7 +304,25 @@ int runSceneTest(const std::string& dataPath) {
         for (const auto& m : chainProblems) std::printf("  %s\n", m.c_str());
         std::printf("ui locale (eng, %zu strings): %d of %d text tokens missing\n", localeStrings, missingTokens, tokens);
         for (const auto& m : tokenProblems) std::printf("  %s\n", m.c_str());
-        bool ok = fileFailures == 0 && typedFailures == 0 && files > 0 && chainFailures == 0;
+        // The venue classes (M8): every object on the disc, by class
+        // (docs/venues.md); a different count means a file or class went missing.
+        static const std::pair<const char*, int> kVenueCounts[] = {
+            {"CamShot", 440}, {"LightPreset", 174}, {"Spotlight", 341}, {"EventTrigger", 344}, {"WorldDir (own)", 24},
+            {"WorldCrowd", 15}, {"PostProc", 28}, {"Flare", 23}, {"LightAnim", 9}, {"EnvAnim", 34}, {"Set", 50},
+            {"CubeTex", 60}, {"Waypoint", 68}, {"CamAnim", 2}};
+        int countFailures = 0;
+        std::string counts;
+        for (const auto& [cls, want] : kVenueCounts) {
+            const auto it = stats.find(cls);
+            const int got = it == stats.end() ? 0 : it->second.decoded;
+            counts += std::string(counts.empty() ? "" : ", ") + cls + " " + std::to_string(got);
+            if (got != want) {
+                ++countFailures;
+                std::printf("  venue class %s: %d decoded, expected %d\n", cls, got, want);
+            }
+        }
+        std::printf("venue classes decoded: %s (%s)\n", counts.c_str(), countFailures ? "MISMATCH" : "as expected");
+        bool ok = fileFailures == 0 && typedFailures == 0 && files > 0 && chainFailures == 0 && countFailures == 0;
         std::printf("\nscene test %s: %d typed objects failed, %d files failed\n", ok ? "passed" : "FAILED", typedFailures,
                     fileFailures);
         return ok ? 0 : 1;

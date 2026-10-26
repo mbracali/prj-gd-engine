@@ -144,7 +144,10 @@ public:
     void destroyBuffer(BufferId b) override;
     ProgramId createProgram(const ProgramDesc& desc, std::string& error) override;
     void destroyProgram(ProgramId p) override;
-    TargetId createTarget(int width, int height, bool depth, std::string& error) override;
+    TargetId createTarget(int width, int height, bool depth, std::string& error) override {
+        return createTarget(TargetDesc{width, height, depth, TargetFormat::RGBA8}, error);
+    }
+    TargetId createTarget(const TargetDesc& desc, std::string& error) override;
     TextureId targetTexture(TargetId t) const override;
     TextureId targetDepth(TargetId t) const override;
     void destroyTarget(TargetId t) override;
@@ -433,7 +436,13 @@ void GlDevice::destroyProgram(ProgramId id) {
     }
 }
 
-TargetId GlDevice::createTarget(int width, int height, bool depth, std::string& error) {
+TargetId GlDevice::createTarget(const TargetDesc& desc, std::string& error) {
+    const int width = desc.width, height = desc.height;
+    const bool depth = desc.depth;
+    if (width <= 0 || height <= 0) {
+        error = "render target: bad size";
+        return {};
+    }
     GlTarget t;
     t.w = width, t.h = height;
     auto makeTex = [&](GLenum internal, GLenum format, GLenum type) {
@@ -446,7 +455,10 @@ TargetId GlDevice::createTarget(int width, int height, bool depth, std::string& 
         gl::glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
         return TextureId{textures_.add(tex)};
     };
-    t.color = makeTex(GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
+    if (desc.format == TargetFormat::RGB10A2) t.color = makeTex(GL_RGB10_A2, GL_RGBA, GL_UNSIGNED_INT_2_10_10_10_REV);
+    else if (desc.format == TargetFormat::RGBA16F) t.color = makeTex(GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT);
+    else t.color = makeTex(GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
+    while (gl::glGetError() != GL_NO_ERROR) {}  // an unsupported format shows as an incomplete target below
     if (depth) t.depth = makeTex(GL_DEPTH_COMPONENT24, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT);
     gl::glGenFramebuffers(1, &t.fbo);
     gl::glBindFramebuffer(GL_FRAMEBUFFER, t.fbo);

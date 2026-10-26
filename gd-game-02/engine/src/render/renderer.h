@@ -10,6 +10,7 @@
 
 #include "render/device.h"
 #include "render/material.h"
+#include "render/post_fx.h"
 #include "render/standard_shader.h"
 
 // GD02's renderer, built from GH2's own rendering: a render device (OpenGL
@@ -28,6 +29,8 @@ public:
     RenderDevice& device() { return *device_; }
     StandardShaders& shaders() { return *shaders_; }
     MaterialRenderer& materials() { return *materials_; }
+    // GH2's post-process of the world (render/post_fx.h).
+    PostFx& post() { return *post_; }
 
     // Starts a frame: black bars around the 16:9 picture, which is cleared
     // to `clear` (rgba 0..1) with its depth; the picture's viewport is bound.
@@ -56,6 +59,7 @@ private:
     std::unique_ptr<RenderDevice> device_;
     std::unique_ptr<StandardShaders> shaders_;
     std::unique_ptr<MaterialRenderer> materials_;
+    std::unique_ptr<PostFx> post_;
     ProgramId canvasProgram_;
 };
 

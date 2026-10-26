@@ -199,6 +199,9 @@ public:
         UiHost& host = ui.host();
         r = Value::integer(0);
         const auto argStr = [&](size_t i) { return i < args.size() ? nameOf(args[i]) : std::string(); };
+        // The players' parts (game.dta / world_objects.dta): guitar unless co-op
+        // gives player 1 the bass [I: the part pick is M10's].
+        if (msg == "get_track_sym") return r = Value::symbol("guitar"), true;
         if (msg == "get_song") return r = Value::symbol(s.song), true;
         if (msg == "set_song") return s.song = argStr(0), true;
         if (msg == "get_song_index") return r = Value::integer(s.songIndex), true;

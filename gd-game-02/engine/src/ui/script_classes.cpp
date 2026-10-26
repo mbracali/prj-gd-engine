@@ -10,6 +10,7 @@
 #include "scene/ui_objects.h"
 #include "script/tasks.h"
 #include "ui/natives.h"
+#include "ui/ui_host.h"
 #include "ui/ui_objects.h"
 
 namespace ui {
@@ -364,8 +365,8 @@ void PanelObj::load() {
         path = scene::miloArkPath(scene::resolveMiloRelative("ui/panel.milo", file));
         std::string error;
         if (path.rfind("world/", 0) == 0) {
-            // The venue (world_panel) is milestone M8's.
-            ui.logOnce("ui: " + name() + ": the venue " + path + " is not drawn yet (M8)");
+            // The venue (world_panel): the program's (game/world.h).
+            ui.host().worldLoad(path);
         } else if (!(view = ui.makeView(path, &error)) && !ui.headless()) {
             ui.logOnce("ui: panel " + name() + ": cannot load " + path + ": " + error);
         }
@@ -379,6 +380,7 @@ void PanelObj::unload() {
     if (!loaded) return;
     if (up) exit();
     ui.callScript(this, "unload");
+    if (path.rfind("world/", 0) == 0) ui.host().worldUnload();
     components_.clear();
     view.reset();
     loaded = false;
@@ -387,6 +389,7 @@ void PanelObj::unload() {
 void PanelObj::enter() {
     if (!loaded) load();
     up = true;
+    if (path.rfind("world/", 0) == 0) ui.host().worldEnter();  // the venue starts before the panel's script
     // The focus: (focus x) unless the last one is kept (retain_last_focus,
     // default TRUE) and the panel does not reset it (reset_focus).
     const bool retain = handler("retain_last_focus") || props.count("retain_last_focus") ? getProp(ui.interp(), "retain_last_focus").truthy() : true;
@@ -533,6 +536,7 @@ bool PanelObj::buttonDown(int button, int player) {
 bool PanelObj::buttonUp(int, int) { return false; }
 
 void PanelObj::draw() {
+    if (showing && path.rfind("world/", 0) == 0) ui.host().worldDraw();
     if (!view || !showing) return;
     ui.drawView(*view);
 }
@@ -545,7 +549,9 @@ bool PanelObj::handleNative(Interp& in, const std::string& msg, std::vector<Valu
     if (msg == "unload") return unload(), true;
     if (msg == "enter") return enter(), true;
     if (msg == "exit") return exit(), true;
-    if (msg == "loaded_dir") return r = Value::obj(this), true;
+    // The world panel's directory is the venue's `world` (finish_load names it so).
+    ScriptObject* world = path.rfind("world/", 0) == 0 ? ui.host().worldScript() : nullptr;
+    if (msg == "loaded_dir") return r = Value::obj(world ? world : this), true;
     if (msg == "set_name") return true;  // {{$this loaded_dir} set_name world main}
     if (msg == "paused") return r = Value::integer(paused ? 1 : 0), true;
     if (msg == "set_paused") return paused = !args.empty() && args[0].truthy(), true;
@@ -561,7 +567,12 @@ bool PanelObj::handleNative(Interp& in, const std::string& msg, std::vector<Valu
     if (msg == "enable") return enable(argStr(0)), true;
     if (msg == "disable") return disable(argStr(0), args.size() > 1 && args[1].isNumber() ? args[1].integerValue() : kPad_DDown), true;
     if (msg == "foreach_player") return r = ui.foreachPlayer(args), true;
-    (void)in;
+    // The world panel passes the rest to its directory, the venue (world_panel
+    // enter: {handle ($this single_player)}).
+    if (world) {
+        r = in.send(world, msg, args, false);
+        return !r.isUnhandled();
+    }
     return false;
 }
 

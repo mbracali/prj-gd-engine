@@ -9,6 +9,7 @@
 #include <stdexcept>
 
 #include "scene/ui_objects.h"
+#include "scene/world_objects.h"
 
 namespace scene {
 
@@ -600,7 +601,7 @@ namespace {
 
 // ---- The ObjectDir family ------------------------------------------------
 
-constexpr uint32_t kObjectDirRev = 17, kRndDirRev = 9, kPanelDirRev = 2, kTrackDirRev = 5, kGHTrackDirRev = 3;
+constexpr uint32_t kObjectDirRev = 17, kRndDirRev = 9, kPanelDirRev = 2, kTrackDirRev = 5, kGHTrackDirRev = 3, kWorldDirRev = 12;
 
 void objectDirPre(In& in, DirObj& d) {
     expectVersion(in.u32(), kObjectDirRev, "ObjectDir");
@@ -639,6 +640,20 @@ void panelDirPost(In& in, DirObj& d) {
     if (!d.own) return;
     d.panel.cam = in.str();
     d.panel.enterTrigger = in.str();
+}
+
+// WorldDir PostLoad (0x8224de60): PanelDir's, then (own record) the default
+// camera, the sub-directory hides and bitmaps (pairs of names).
+void worldDirPost(In& in, DirObj& d) {
+    panelDirPost(in, d);
+    if (!d.own) return;
+    auto& w = d.world;
+    in.xfm(w.camXfm);
+    w.subdirHides = in.strList();
+    uint32_t n = in.u32();
+    if (n > in.remaining() / 8) bad("implausible bitmap count");
+    w.subdirBitmaps.resize(n);
+    for (auto& b : w.subdirBitmaps) b.first = in.str(), b.second = in.str();
 }
 
 void trackDirPost(In& in, DirObj& d) {
@@ -730,7 +745,7 @@ bool isHudDirClass(const std::string& cls) {
 }  // namespace
 
 bool isDirClass(const std::string& cls) {
-    return cls == "ObjectDir" || cls == "RndDir" || cls == "PanelDir" || cls == "GHTrackDir" || isHudDirClass(cls);
+    return cls == "ObjectDir" || cls == "RndDir" || cls == "PanelDir" || cls == "GHTrackDir" || cls == "WorldDir" || isHudDirClass(cls);
 }
 
 std::unique_ptr<DirObj> decodeDir(const std::string& cls, const std::string& name, const Bytes& stream, size_t start,
@@ -758,8 +773,16 @@ std::unique_ptr<DirObj> decodeDir(const std::string& cls, const std::string& nam
         d->hasGHTrack = true;
         expectVersion(in.u32(), kTrackDirRev, "TrackDir");
     }
+    if (cls == "WorldDir") {
+        // WorldDir PreLoad (0x8224e5c0): its fields, then PanelDir's chain.
+        expectVersion(d->version, kWorldDirRev, "WorldDir");
+        d->world.unknown0 = in.u32();
+        d->world.unknown1 = in.u32();
+        d->world.hudFile = in.str();
+        d->hasWorld = true;
+    }
     if (isHudDirClass(cls)) hudPre(in, *d, own);
-    if (cls == "GHTrackDir" || cls == "PanelDir") {
+    if (cls == "GHTrackDir" || cls == "PanelDir" || cls == "WorldDir") {
         if (cls == "PanelDir") expectVersion(d->version, kPanelDirRev, "PanelDir");
         else expectVersion(in.u32(), kPanelDirRev, "PanelDir");
     }
@@ -777,6 +800,7 @@ std::unique_ptr<DirObj> decodeDir(const std::string& cls, const std::string& nam
     // PostLoad chain, base class first.
     if (cls == "GHTrackDir") trackDirPost(in, *d);
     else if (cls == "PanelDir") panelDirPost(in, *d);
+    else if (cls == "WorldDir") worldDirPost(in, *d);
     else if (cls == "RndDir" || isHudDirClass(cls)) rndDirPost(in, *d);
     else objectDirPost(in, *d);
     end = in.pos();
@@ -806,25 +830,32 @@ void readDrawAt(const Bytes& record, size_t& pos, Draw& d) {
     pos = in.pos();
 }
 
-bool isTypedClass(const std::string& cls) { return decoders().count(cls) != 0 || isDirClass(cls) || isUiClass(cls); }
+bool isTypedClass(const std::string& cls) {
+    return decoders().count(cls) != 0 || isDirClass(cls) || isUiClass(cls) || isWorldClass(cls);
+}
 
 std::unique_ptr<Object> decodeObject(const std::string& cls, const std::string& name, const uint8_t* data, size_t size) {
     const auto& m = decoders();
     auto it = m.find(cls);
     const bool ui = it == m.end() && isUiClass(cls);  // scene/ui_objects.h
-    std::unique_ptr<Object> o = it != m.end() ? it->second.make() : ui ? makeUiObject(cls) : std::make_unique<Object>();
+    const bool world = it == m.end() && !ui && isWorldClass(cls);  // scene/world_objects.h
+    std::unique_ptr<Object> o = it != m.end() ? it->second.make()
+                                : ui          ? makeUiObject(cls)
+                                : world       ? makeWorldObject(cls)
+                                              : std::make_unique<Object>();
     o->cls = cls;
     o->name = name;
     o->record.assign(data, data + size);
-    o->typed = it != m.end() || ui;
+    o->typed = it != m.end() || ui || world;
     if (size >= 4) o->version = uint32_t(data[0]) | uint32_t(data[1]) << 8 | uint32_t(data[2]) << 16 | uint32_t(data[3]) << 24;
     if (!o->typed) return o;
     try {
         size_t left = 0;
-        if (ui) {
+        if (ui || world) {
             size_t pos = 4;
             if (size < 4) bad("record too short");
-            readUiObject(*o, o->record, pos);
+            if (ui) readUiObject(*o, o->record, pos);
+            else readWorldObject(*o, o->record, pos);
             left = size - pos;
         } else {
             In in(o->record.data(), o->record.size());

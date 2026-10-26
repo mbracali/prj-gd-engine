@@ -2,6 +2,7 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #pragma once
 
+#include <array>
 #include <map>
 #include <memory>
 #include <string>
@@ -11,6 +12,7 @@
 
 #include "render/material.h"
 #include "scene/objects.h"
+#include "scene/world_objects.h"
 
 // Milo scenes on the GPU, shared by the scene viewer, the track and the HUD:
 // - SceneCache uploads textures and meshes once and maps Mat objects to the
@@ -39,7 +41,8 @@ public:
     void clear();
     // Plays `anim` at `frame`: TransAnim (its Trans), MatAnim (its Mat),
     // AnimFilter (the filtered anim at the filtered frame), Group (every
-    // member, as RndGroup::SetFrame does), MeshAnim, and ParticleSys /
+    // member, as RndGroup::SetFrame does), MeshAnim, LightAnim (its Light's
+    // colour), EnvAnim (its Environ's ambient and fog), and ParticleSys /
     // ParticleSysAnim (their frame is kept, animFrame). Other classes are
     // ignored.
     void setFrame(const scene::Object* anim, float frame);
@@ -55,6 +58,24 @@ public:
 
     const MatState* mat(const scene::Mat* m) const;
     MatState& matState(const scene::Mat* m) { return mats_[m]; }
+
+    // What EnvAnim / LightAnim (and the venue's lighting presets) change in
+    // an Environ or a Light; lightEnv() reads them.
+    struct EnvState {
+        bool hasAmbient = false, hasFogColor = false, hasFogRange = false, hasFogEnable = false;
+        std::array<float, 4> ambient{}, fogColor{};
+        float fogStart = 0, fogEnd = 0;
+        bool fogEnable = false;
+    };
+    struct LightState {
+        bool hasColor = false, hasRange = false;
+        std::array<float, 4> color{};
+        float range = 0;
+    };
+    const EnvState* env(const scene::Environ* e) const;
+    EnvState& envState(const scene::Environ* e) { return envs_[e]; }
+    const LightState* light(const scene::Light* l) const;
+    LightState& lightState(const scene::Light* l) { return lights_[l]; }
 
     void setShowing(const scene::Object* o, bool showing) { showing_[o] = showing; }
     bool showing(const scene::Object* o) const;
@@ -81,6 +102,8 @@ private:
     std::unordered_map<const scene::Object*, bool> showing_;
     std::unordered_map<const scene::Mesh*, MeshAnimState> meshAnims_;
     std::unordered_map<const scene::Object*, float> animFrames_;
+    std::unordered_map<const scene::Environ*, EnvState> envs_;
+    std::unordered_map<const scene::Light*, LightState> lights_;
 };
 
 // A mesh's vertices (packVertices' layout) with the positions of a MeshAnim
@@ -95,6 +118,8 @@ public:
     SceneCache& operator=(const SceneCache&) = delete;
 
     TextureId texture(const scene::Tex* tex);
+    // A CubeTex's six faces as a cube texture (environment maps).
+    TextureId cubeTexture(const scene::CubeTex* cube);
     TextureId texture(const scene::Object* owner, const std::string& name);
     // The mesh's geometry (its geometry owner's when it has none), or
     // nullptr when there is nothing to draw.
@@ -111,6 +136,7 @@ public:
 private:
     RenderDevice& device_;
     std::map<const scene::Tex*, TextureId> textures_;
+    std::map<const scene::CubeTex*, TextureId> cubes_;
     std::map<const scene::Mesh*, std::unique_ptr<GpuMesh>> meshes_;
     std::vector<BufferId> buffers_;
     int skippedTextures_ = 0;

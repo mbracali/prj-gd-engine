@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 #include <stdexcept>
 
 namespace {
@@ -153,6 +154,20 @@ Song buildSong(const MidiFile& midi, int hopoThresholdTicks) {
     uint32_t lastTick = 0;
     for (const auto& t : midi.tracks)
         if (!t.events.empty()) lastTick = std::max(lastTick, t.events.back().tick);
+    // The band and venue notes the world plays (VenueNote).
+    const std::pair<const char*, VenueNote::Track> venueTracks[] = {
+        {"BAND DRUMS", VenueNote::Track::Drums}, {"BAND BASS", VenueNote::Track::Bass}, {"TRIGGERS", VenueNote::Track::Triggers}};
+    for (const auto& [name, kind] : venueTracks)
+        if (const MidiTrack* t = findTrack(midi, name))
+            for (const MidiEvent& e : t->events) {
+                if (!e.isNoteOn()) continue;
+                const int p = e.data1;
+                const bool used = kind == VenueNote::Track::Triggers ? (p >= 48 && p <= 50) || p == 52
+                                  : kind == VenueNote::Track::Drums  ? p == 36 || p == 37
+                                                                     : p == 36;
+                if (used) song.venueNotes.push_back({static_cast<float>(song.tempo.tickToMs(e.tick)), static_cast<int>(e.tick), kind, p});
+            }
+    std::stable_sort(song.venueNotes.begin(), song.venueNotes.end(), [](const VenueNote& a, const VenueNote& b) { return a.tick < b.tick; });
     if (const MidiTrack* events = findTrack(midi, "EVENTS")) {
         for (const MidiEvent& e : events->events) {
             if (e.status != 0xFF || e.data1 != 0x01) continue;

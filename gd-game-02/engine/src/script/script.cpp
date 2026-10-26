@@ -330,6 +330,9 @@ void Interp::unregisterName(const std::string& name, const ScriptObject* o) {
 }
 
 ScriptObject* Interp::findObject(const std::string& name) const {
+    if (auto t = vars_.find("this"); t != vars_.end() && t->second.type == Value::Type::Object && t->second.object &&
+                                      !t->second.object->nameScope.empty())
+        if (auto s = objects_.find(ScriptObject::scoped(t->second.object->nameScope, name)); s != objects_.end()) return s->second;
     auto it = objects_.find(name);
     if (it != objects_.end()) return it->second;
     if (size_t c = name.find("::"); c != std::string::npos) {  // namespaces: try the plain name

@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -19,9 +20,15 @@
 #include "devaids/menu_keys.h"
 #include "devaids/screenshot.h"
 #include "game/autoplay.h"
+#include "game/camera_director.h"
 #include "game/key_script.h"
+#include "game/light_presets.h"
 #include "game/song_db.h"
 #include "game/song_setup.h"
+#include "game/venue.h"
+#include "game/crowd.h"
+#include "game/world.h"
+#include "game/world_driver.h"
 #include "input/input.h"
 #include "platform/app_icon.h"
 #include "platform/disc_picker.h"
@@ -30,6 +37,7 @@
 #include "render/hud_view.h"
 #include "render/scene_gpu.h"
 #include "render/track_view.h"
+#include "render/venue_view.h"
 #include "scene/milo.h"
 #include "script/script.h"
 #include "tests/walktest.h"
@@ -155,6 +163,7 @@ public:
     void gameSetPaused(bool paused) override {
         paused_ = paused;
         mixer_.setPaused(paused || musicPaused_);
+        if (world_) world_->crowd().audio().setPaused(paused);
     }
     bool gamePaused() const override { return paused_; }
     double gameTimeMs() const override { return lastT_; }
@@ -173,6 +182,11 @@ public:
     void hudCommand(const std::string& msg, const std::vector<Value>& args) override;
     void drawTrack() override;
     void drawHud() override;
+    void worldLoad(const std::string& path) override;
+    void worldEnter() override;
+    void worldDraw() override { drawWorld(); }
+    void worldUnload() override { unloadVenue(); }
+    ScriptObject* worldScript() override { return world_ ? world_->script() : nullptr; }
     void songPreview(const std::string& songId) override;
     void menuMusic(bool on) override;
     void creditsMusic(bool on) override;
@@ -196,6 +210,9 @@ private:
     void frameSong();
     void frameUi();
     void drawSong(float t);
+    void drawWorld();
+    bool loadVenue(const std::string& venue, VenueVariant variant);
+    void unloadVenue();
     void frameList();
     bool prepareTrack();
     void stopMusic();
@@ -269,6 +286,23 @@ private:
     std::unique_ptr<gfx::SceneCache> sceneCache_;
     std::unique_ptr<TrackView> track_;
     std::unique_ptr<HudView> hud_;
+    // The venue behind the track (M8): set by the venue code once a venue is
+    // loaded; draws the world with the renderer, materials with
+    // DrawContext::hdr = `hdr` (GH2's HDR buffer, render/post_fx.h).
+    std::function<void(gfx::Renderer& r, bool hdr)> worldDraw_;
+    // The venue (game/venue.h, game/world.h, render/venue_view.h): without
+    // the menus the song's (venues::forSong, GD02_VENUE), else world_panel's.
+    std::unique_ptr<gfx::SceneCache> venueCache_;
+    std::unique_ptr<Venue> venue_;
+    std::unique_ptr<World> world_;
+    std::unique_ptr<VenueView> venueView_;
+    // The camera director and the lighting presets (M8 phase 2; game/camera_director.h, game/light_presets.h).
+    std::unique_ptr<CameraDirector> director_;
+    std::unique_ptr<LightPresets> lighting_;
+    WorldDriver worldDriver_;
+    std::string venuePath_;
+    gfx::PostProcState venuePost_;  // the static shot's PostProc (the director's from M8 phase 2)
+    bool venuePostOn_ = false;
     // Keyboard, controllers and touch (input/input.h); Start pauses a song.
     Input input_;
     std::vector<InputEvent> actions_;
@@ -366,6 +400,7 @@ int App::run() {
     if (walk_ && ui_) exitCode_ = walk_->finish(*ui_);
     endSong();
     stopMusic();
+    unloadVenue();
     ui_.reset();
     hud_.reset(), track_.reset(), track2_.reset();
     sceneCache_.reset();
@@ -386,6 +421,7 @@ bool App::loadData(const std::string& path) {
         Rules rules = loadRules(*data);
         std::vector<SongInfo> songs = loadSongs(*data);
         if (songs.empty()) throw std::runtime_error("No songs found in " + path);
+        unloadVenue();
         ui_.reset();
         hud_.reset(), track_.reset(), track2_.reset();
         sceneCache_.reset(), milos_.reset();
@@ -507,6 +543,17 @@ bool App::loadSong(const SongInfo& info, int difficulty, bool autoplay, float ba
         if (track2_) track2_->reset(float(-leadInMs_)), track2_->setLefty(input_.lefty(1));
         hud_->reset(float(-leadInMs_));
     }
+    // The venue: without the menus the song's (its quickplay venue or career
+    // tier, GD02_VENUE overrides); with them world_panel loads it (worldLoad).
+    if (!ui_ && !debugHighway_) {
+        const std::string v = venues::fromEnv().empty() ? venues::forSong(*data_, info) : venues::fromEnv();
+        const VenueVariant var = mode_ == DevMode::Vs || mode_ == DevMode::FaceOff ? VenueVariant::Mp
+                                 : mode_ == DevMode::Coop                          ? VenueVariant::Coop
+                                                                                   : VenueVariant::Single;
+        loadVenue(v, var);
+    }
+    worldDriver_ = WorldDriver(!ui_);
+    worldDriver_.reset(float(-leadInMs_));
     return true;
 }
 
@@ -516,6 +563,11 @@ void App::beginSong() {
     mixer_.play(std::move(pendingStream_), mixerTracks(info_->audio, bandVolume_, guitarVolume_), leadInMs_);
     input_.setInGame(true);
     begun_ = true;
+    // A song starts without a shot's PostProc or depth of field (rnd reset_postproc).
+    canvas_.renderer().post().reset();
+    canvas_.renderer().post().clearDof();
+    // Without the menus the world starts here (world_panel enter otherwise).
+    if (!ui_ && world_) world_->start(mode_ != DevMode::Single);
 }
 
 bool App::startSong(size_t index) {
@@ -621,12 +673,16 @@ void App::handleAction(const InputEvent& a) {
         if (a.action == Action::Start && a.down) {
             paused_ = !paused_;
             mixer_.setPaused(paused_);
+            if (world_) world_->crowd().audio().setPaused(paused_);
             return;
         }
         if (paused_) {
             if (!a.down) return;
             if (a.action == Action::Back || a.action == Action::Fret1) endSong();
-            else if (a.action == Action::Confirm || a.action == Action::Fret0) paused_ = false, mixer_.setPaused(false);
+            else if (a.action == Action::Confirm || a.action == Action::Fret0) {
+                paused_ = false, mixer_.setPaused(false);
+                if (world_) world_->crowd().audio().setPaused(false);
+            }
             return;
         }
         if (bot_) return;  // autoplay owns the frets
@@ -705,6 +761,20 @@ void App::updateSong(float t) {
         if (track2_ && player2_) track2_->onEvents(events2, *player2_, t), hud_->onEvents(events2, 1, t);
     }
     mixer_.setGuitarAudible(player_->guitarAudible());
+    // The venue: the song's events, its clock, anims and particles.
+    if (world_ && venueView_) {
+        worldDriver_.update(*world_, *song_, t, player_.get(), events, player2_.get(), events2);
+        if (player_->failed()) worldDriver_.gameLost(*world_);
+        else if (t >= song_->endMs) worldDriver_.gameWon(*world_);
+        world_->update();
+        if (lighting_) lighting_->update();
+        if (director_) {
+            director_->setStarPower(player_->starPowerActive());
+            director_->update();
+            if (director_->hasCamera()) venueView_->setCamera(director_->camera());
+        }
+        venueView_->update();
+    }
     if (!ui_) return;
     // GH2's game events: the song won at its end (game_won_msg: the track
     // explodes, the music stops), or lost (game_lost: the music winds down);
@@ -864,6 +934,120 @@ void App::hudCommand(const std::string& msg, const std::vector<Value>& args) {
     if (msg == "set_win_showing" && !args.empty() && args[0].truthy() && hud_) hud_->won(lastT_);
 }
 
+// The world: drawn into GH2's HDR buffer and post-processed (bloom, DOF,
+// luminance map; render/post_fx.h), or straight to the screen with
+// GD02_POST=0; the track and HUD then go on top, as GH2's final pass leaves
+// them out. No venue yet: nothing is drawn and the frame is as before.
+void App::drawWorld() {
+    if (!worldDraw_) return;
+    canvas_.flush();
+    gfx::Renderer& r = canvas_.renderer();
+    const float clear[4] = {0, 0, 0, 1};
+    if (r.post().begin(clear)) {
+        worldDraw_(r, true);
+        r.post().end();
+    } else {
+        worldDraw_(r, false);
+    }
+}
+
+// The venue: its milos (game/venue.h), the world runtime on the UI's
+// interpreter (or its own without the menus) and its view, drawn by
+// drawWorld from the static first shot (INTRO) and the INTRO lighting preset
+// until the director (M8 phase 2).
+bool App::loadVenue(const std::string& venue, VenueVariant variant) {
+    const std::string path = venues::worldMilo(venue, variant);
+    if (venue_ && path == venuePath_) return true;
+    unloadVenue();
+    const uint64_t start = SDL_GetTicksNS();
+    try {
+        venue_ = std::make_unique<Venue>(*data_, venue, variant, ui_ ? ui_->interp().language : std::string("eng"));
+        for (const auto& p : venue_->problems()) SDL_Log("venue: %s", p.c_str());
+        const DataNode* objects = ui_ && ui_->bootTree() ? ui_->bootTree()->find("objects") : nullptr;
+        world_ = std::make_unique<World>(*venue_, ui_ ? &ui_->interp() : nullptr, objects);
+        venueCache_ = std::make_unique<gfx::SceneCache>(canvas_.renderer().device());
+        venueView_ = std::make_unique<VenueView>(*world_, *venueCache_);
+        lighting_ = std::make_unique<LightPresets>(*world_);
+        director_ = std::make_unique<CameraDirector>(*world_);
+        // The crowd: each shot's crowd3d / rotate (game/crowd.h), and its audio.
+        director_->onShotStarted = [this](const scene::CamShot& s) { world_->crowd().startShot(&s); };
+        world_->crowd().audio().open();
+        if (!ui_)
+            director_->provideGameObjects(variant != VenueVariant::Single,
+                                          mode_ == DevMode::FaceOff || mode_ == DevMode::Vs ? "multi_vs" : variant == VenueVariant::Coop ? "coop" : "single");
+    } catch (const std::exception& e) {
+        SDL_Log("venue %s: %s", path.c_str(), e.what());
+        unloadVenue();
+        return false;
+    }
+    venuePath_ = path;
+    if (const scene::LightPreset* p = world_->firstPreset()) world_->applyPreset(*p, 0);
+    // The static shot's PostProc (its `postprocess` flag) [I: the director
+    // selects it on every shot from phase 2 on].
+    venuePostOn_ = false;
+    if (const scene::CamShot* shot = venueView_->shot())
+        if (auto* pp = venue_->find<scene::PostProc>(shot->flag("postprocess"))) {
+            const gfx::TextureId lum = pp->luminanceMap.empty() ? gfx::TextureId{} : venueCache_->texture(pp, pp->luminanceMap);
+            venuePost_ = gfx::postProcState(*pp, lum);
+            venuePostOn_ = true;
+        }
+    worldDraw_ = [this](gfx::Renderer& r, bool hdr) {
+        if (!venueView_) return;
+        int x = 0, y = 0, w = 0, h = 0;
+        r.pictureRect(x, y, w, h);
+        if (hdr) {
+            // The current shot's PostProc and depth of field (the director's;
+            // before the first shot, the static one's).
+            if (director_ && director_->shot()) {
+                const scene::PostProc* pp = director_->postProc();
+                if (pp) r.post().select(gfx::postProcState(*pp, pp->luminanceMap.empty() ? gfx::TextureId{} : venueCache_->texture(pp, pp->luminanceMap)));
+                else r.post().reset();
+                const CameraDirector::Dof& d = director_->dof();
+                const gfx::Camera& c = director_->camera();
+                if (d.on && d.maxBlur > 0) r.post().setDof(gfx::DofState::fromShot(d.focus, d.blurDepth, d.maxBlur, c.nearPlane, c.farPlane));
+                else r.post().clearDof();
+            } else if (venuePostOn_) {
+                r.post().select(venuePost_);
+            }
+            r.post().size(w, h);
+        }
+        venueView_->draw(r, w, h, hdr);
+    };
+    SDL_Log("venue %s %s loaded in %.0f ms: %d milos, %d proxies, shot %s", venue.c_str(), venues::variantName(variant),
+            double(SDL_GetTicksNS() - start) / 1e6, int(venue_->parts().size()), int(venue_->proxies().size()),
+            venueView_->shot() ? venueView_->shot()->name.c_str() : "none");
+    return true;
+}
+
+void App::unloadVenue() {
+    worldDraw_ = nullptr;
+    director_.reset();
+    lighting_.reset();
+    venueView_.reset();
+    world_.reset();
+    venue_.reset();
+    venueCache_.reset();
+    venuePath_.clear();
+}
+
+// world_panel's milo: ../world/<v>/<v>[_mp|_coop].milo (GD02_VENUE replaces the venue).
+void App::worldLoad(const std::string& path) {
+    for (const std::string& v : venues::names())
+        for (VenueVariant var : {VenueVariant::Single, VenueVariant::Mp, VenueVariant::Coop})
+            if (venues::worldMilo(v, var) == path) {
+                const std::string over = venues::fromEnv();
+                loadVenue(over.empty() ? v : over, var);
+                return;
+            }
+    SDL_Log("world_panel: %s is not a venue", path.c_str());
+}
+
+void App::worldEnter() {
+    // WORLD_OBJECT_BASE enter and the `start` triggers; the panel's script
+    // sends single_player / multi_player itself.
+    if (world_) world_->start(false, false);
+}
+
 void App::drawTrack() {
     if (!player_ || !song_) return;
     canvas_.flush();
@@ -975,6 +1159,7 @@ void App::drawSong(float t) {
     const float speed = rules_.trackSpeed[size_t(difficulty_)];
     if (gh2) {
         const uint64_t drawStartNs = SDL_GetTicksNS();
+        drawWorld();
         // Two players: the track speed is the mean of their difficulties'
         // (0x826932D0) [C]; both play one difficulty here.
         track_->draw(canvas_.renderer(), *sceneCache_, *song_, *player_, t, speed);

@@ -12,3 +12,21 @@ profilemgr show_marketplace (Xbox Live)
 # GH2's sound effect banks (sfx/gen/*_bank.milo_xbox: XMA SynthSamples) are
 # not decoded yet: every sound effect is reported once.
 synth sfx *
+# The venue (game/world.h): what M8's second phase has not implemented yet
+# answers 0 (the camera director and the lighting presets are done).
+world waypoint_nearest
+# The venues' sound cues: world/<v>/gen/<v>_bank.milo_xbox SynthSamples are
+# XMA (SampleData v11 format 3, 2048-byte packets) like synth's, with no
+# decoder in the port yet (docs/venues.md "Crowd audio"); the crowd loops
+# (plain Vorbis moggs) play. Every cue is reported once.
+world_sfx *
+# crowd_audio play_stream wingame (stone, after the game is won): a plain
+# mogg, not wired until the career's ending (M10).
+crowd_audio play_stream
+# The band's characters (M9): the venue's band slots answer 0.
+guitarist0 *
+guitarist1 *
+bassist *
+singer *
+drummer *
+keyboard *

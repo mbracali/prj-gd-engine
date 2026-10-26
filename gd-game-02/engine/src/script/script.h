@@ -140,6 +140,12 @@ public:
     bool hasProp(const std::string& key) const;
 
     std::map<std::string, Value> props;
+    // Non-empty: the names its tasks take ((name n)) live in this scope, and
+    // name lookups while it is $this try that scope first, as GH2 names
+    // objects in the object's own directory [I] (four proxies of one milo
+    // each keep their own throw_task: small1's bottle throws).
+    std::string nameScope;
+    static std::string scoped(const std::string& scope, const std::string& name) { return scope + "::" + name; }
 
 private:
     std::string name_, class_;

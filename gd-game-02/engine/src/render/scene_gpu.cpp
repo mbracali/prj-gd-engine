@@ -26,6 +26,10 @@ const scene::Trans* transOf(const scene::Object* o) {
     if (auto* d = o->as<scene::DirObj>(); d && d->hasRnd) return &d->rnd.trans;
     if (auto* u = o->as<scene::UIComponent>()) return &u->trans;
     if (auto* b = o->as<scene::BandPlacer>()) return &b->trans;
+    // The venue's (scene/world_objects.h): spotlights, flares, waypoints.
+    if (auto* s = o->as<scene::Spotlight>()) return &s->trans;
+    if (auto* f = o->as<scene::Flare>()) return &f->trans;
+    if (auto* w = o->as<scene::Waypoint>()) return &w->trans;
     return nullptr;
 }
 
@@ -40,6 +44,10 @@ const scene::Draw* drawOf(const scene::Object* o) {
     if (auto* u = o->as<scene::UIComponent>()) return &u->draw;
     if (auto* m = o->as<scene::ScreenMask>()) return &m->draw;
     if (auto* b = o->as<scene::BandPlacer>()) return &b->draw;
+    if (auto* c = o->as<scene::WorldCrowd>()) return &c->draw;
+    if (auto* s = o->as<scene::Spotlight>()) return &s->draw;
+    if (auto* f = o->as<scene::Flare>()) return &f->draw;
+    if (auto* w = o->as<scene::Waypoint>()) return &w->draw;
     return nullptr;
 }
 
@@ -87,6 +95,18 @@ void ScenePose::clear() {
     showing_.clear();
     meshAnims_.clear();
     animFrames_.clear();
+    envs_.clear();
+    lights_.clear();
+}
+
+const ScenePose::EnvState* ScenePose::env(const scene::Environ* e) const {
+    auto it = envs_.find(e);
+    return it == envs_.end() ? nullptr : &it->second;
+}
+
+const ScenePose::LightState* ScenePose::light(const scene::Light* l) const {
+    auto it = lights_.find(l);
+    return it == lights_.end() ? nullptr : &it->second;
 }
 
 scene::Xfm ScenePose::local(const scene::Object* o) const {
@@ -133,6 +153,11 @@ float ScenePose::endFrame(const scene::Object* anim) {
         return f;
     }
     if (auto* f = anim->as<scene::AnimFilter>()) return f->end;
+    if (auto* l = anim->as<scene::LightAnim>()) return scene::lastFrame(keysOf(*l)->colorKeys);
+    if (auto* e = anim->as<scene::EnvAnim>()) {
+        const scene::EnvAnim* k = keysOf(*e);
+        return scene::lastFrame(k->ambientKeys, k->fogColorKeys, k->fogRangeKeys);
+    }
     if (auto* g = anim->as<scene::Group>()) {
         float f = 0;
         for (const std::string& n : g->objects)
@@ -155,6 +180,27 @@ void ScenePose::setFrame(const scene::Object* anim, float frame) {
             if (const scene::Object* o = g->dir ? g->dir->resolve(n) : nullptr; o && o != g) setFrame(o, frame);
     } else if (auto* ma = anim->as<scene::MeshAnim>()) {
         if (const scene::Mesh* m = ma->dir ? ma->dir->resolve<scene::Mesh>(ma->mesh) : nullptr) meshAnims_[m] = {ma, frame};
+    } else if (auto* la = anim->as<scene::LightAnim>()) {
+        // RndLightAnim::SetFrame [I: GH1's]: the colour keys set the light's colour.
+        if (const scene::Light* l = la->dir ? la->dir->resolve<scene::Light>(la->light) : nullptr) {
+            std::array<float, 4> c;
+            if (scene::sampleLinear(keysOf(*la)->colorKeys, frame, c)) {
+                LightState& st = lights_[l];
+                st.hasColor = true;
+                st.color = c;
+            }
+        }
+    } else if (auto* ea = anim->as<scene::EnvAnim>()) {
+        // RndEnvAnim::SetFrame [I: GH1's, plus the fog keys of v2 / v3].
+        if (const scene::Environ* e = ea->dir ? ea->dir->resolve<scene::Environ>(ea->environName) : nullptr) {
+            const scene::EnvAnim& k = *keysOf(*ea);
+            EnvState& st = envs_[e];
+            std::array<float, 4> c;
+            if (scene::sampleLinear(k.ambientKeys, frame, c)) st.hasAmbient = true, st.ambient = c;
+            if (scene::sampleLinear(k.fogColorKeys, frame, c)) st.hasFogColor = true, st.fogColor = c;
+            std::array<float, 2> r;
+            if (scene::sampleLinear(k.fogRangeKeys, frame, r)) st.hasFogRange = true, st.fogStart = r[0], st.fogEnd = r[1];
+        }
     } else if (anim->as<scene::ParticleSys>() || anim->as<scene::ParticleSysAnim>()) {
         animFrames_[anim] = frame;
     }
@@ -307,6 +353,8 @@ scene::Xfm texCoordXfm(const scene::Xfm& t, int texGen) {
 SceneCache::~SceneCache() {
     for (auto& [tex, id] : textures_)
         if (id) device_.destroyTexture(id);
+    for (auto& [cube, id] : cubes_)
+        if (id) device_.destroyTexture(id);
     for (BufferId b : buffers_) device_.destroyBuffer(b);
 }
 
@@ -338,6 +386,41 @@ TextureId SceneCache::texture(const scene::Tex* tex) {
         ++skippedTextures_;
     }
     textures_[tex] = id;
+    return id;
+}
+
+// RndCubeTex (PostLoad 0x82209618): six inline bitmaps of one size and
+// format, uploaded as a cube (faces right, left, top, bottom, front, back =
+// +x -x +y -y +z -z, Direct3D's order, which OpenGL samples the same way).
+TextureId SceneCache::cubeTexture(const scene::CubeTex* cube) {
+    if (!cube) return {};
+    if (auto it = cubes_.find(cube); it != cubes_.end()) return it->second;
+    TextureId id;
+    const scene::Bitmap& f0 = cube->faces[0];
+    bool ok = cube->inlineBitmaps && !f0.empty();
+    TexFormat format = TexFormat::BC1;
+    switch (f0.format) {
+    case scene::Bitmap::Format::DXT1: format = TexFormat::BC1; break;
+    case scene::Bitmap::Format::DXT5: format = TexFormat::BC3; break;
+    default: ok = false; break;
+    }
+    // Levels down to 4x4 (smaller ones are shorter than a block on the disc).
+    int mips = 0;
+    for (const auto& l : f0.levels)
+        if (l.width >= 4 && l.height >= 4) ++mips;
+    for (const auto& f : cube->faces)
+        if (f.format != f0.format || f.width != f0.width || f.height != f0.height || int(f.levels.size()) < mips) ok = false;
+    if (ok && mips > 0) {
+        std::vector<TexLevel> levels;
+        for (const auto& f : cube->faces)
+            for (int i = 0; i < mips; ++i) levels.push_back({f.level(size_t(i)), f.levels[size_t(i)].size});
+        std::string error;
+        id = device_.createTexture({f0.width, f0.height, mips, format, TexKind::Cube}, levels.data(), error);
+        if (!id) SDL_Log("render: cube texture %s: %s", cube->name.c_str(), error.c_str());
+    } else {
+        ++skippedTextures_;
+    }
+    cubes_[cube] = id;
     return id;
 }
 
@@ -412,7 +495,8 @@ Material SceneCache::material(const scene::Mat& mat, const ScenePose* pose) {
     g.emissiveMap = texture(&mat, mat.emissiveMap);
     g.specularMap = texture(&mat, mat.specularMap);
     g.customDiffuseMap = texture(&mat, mat.customDiffuseMap);
-    // Environment maps are CubeTex objects: not decoded yet.
+    // The environment map: a CubeTex.
+    if (!mat.environMap.empty() && mat.dir) g.environMap = cubeTexture(mat.dir->resolve<scene::CubeTex>(mat.environMap));
     if (const ScenePose::MatState* s = pose ? pose->mat(&mat) : nullptr) {
         if (s->hasColor) g.color[0] = s->rgb[0], g.color[1] = s->rgb[1], g.color[2] = s->rgb[2];
         if (s->hasAlpha) g.alpha = s->alpha;
@@ -429,6 +513,13 @@ LightEnv SceneCache::lightEnv(const scene::Environ& e, const ScenePose* pose) {
     env.fog = e.fogEnable;
     for (int k = 0; k < 4; ++k) env.fogColor[k] = e.fogColor[size_t(k)];
     env.fogStart = e.fogStart, env.fogEnd = e.fogEnd;
+    if (const ScenePose::EnvState* st = pose ? pose->env(&e) : nullptr) {
+        if (st->hasAmbient) env.envAmbient = {st->ambient[0], st->ambient[1], st->ambient[2]};
+        if (st->hasFogEnable) env.fog = st->fogEnable;
+        if (st->hasFogColor)
+            for (int k = 0; k < 4; ++k) env.fogColor[k] = st->fogColor[size_t(k)];
+        if (st->hasFogRange) env.fogStart = st->fogStart, env.fogEnd = st->fogEnd;
+    }
     env.fade = e.fadeOut, env.fadeStart = e.fadeStart, env.fadeEnd = e.fadeEnd;
     int point = 0, dir = 0;
     for (const std::string& name : e.lights) {
@@ -439,6 +530,10 @@ LightEnv SceneCache::lightEnv(const scene::Environ& e, const ScenePose* pose) {
         Light& g = env.lights[env.lightCount++];
         g.color = {l->color[0], l->color[1], l->color[2]};
         g.range = l->range;
+        if (const ScenePose::LightState* st = pose ? pose->light(l) : nullptr) {
+            if (st->hasColor) g.color = {st->color[0], st->color[1], st->color[2]};
+            if (st->hasRange) g.range = st->range;
+        }
         // [I] GH1's light types: 0 point, 1 directional. A directional light
         // shines along its +y axis, so the vector towards it is -y.
         if (l->type == 1) {

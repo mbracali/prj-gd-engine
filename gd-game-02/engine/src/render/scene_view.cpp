@@ -17,7 +17,9 @@
 #include "render/canvas.h"
 #include "render/scene_gpu.h"
 #include "render/ui_view.h"
+#include "render/venue_view.h"
 #include "scene/milo.h"
+#include "scene/world_objects.h"
 
 namespace {
 
@@ -73,7 +75,47 @@ private:
     scene::Locale locale_;
     std::unique_ptr<gfx::UiView> ui_;
     void startUi();
+    // GH2's post-process (render/post_fx.h) with a venue's PostProc.
+    std::unique_ptr<scene::Milo> postMilo_;
+    bool post_ = false;
+    float dof_[3] = {};
+    void startPost();
 };
+
+// Development aid: GD02_VIEW_POST=<milo>[:<PostProc>] draws through GH2's
+// post-process with that PostProc (e.g. world/arena/gen/arena.milo_xbox:
+// close_bloom.pp; "-" for the viewed milo's own); GD02_VIEW_DOF=<focus
+// distance>,<blur_depth>,<max_blur> adds the depth of field.
+void SceneView::startPost() {
+    const char* spec = SDL_getenv("GD02_VIEW_POST");
+    if (!spec || !*spec) return;
+    std::string path = spec, name;
+    if (size_t colon = path.find(':'); colon != std::string::npos) name = path.substr(colon + 1), path.resize(colon);
+    try {
+        if (path != "-") postMilo_ = scene::loadMilo(*data_, path);
+        scene::Milo& m = postMilo_ ? *postMilo_ : *milo_;
+        scene::PostProc* pp = nullptr;
+        for (scene::PostProc* x : m.root().all<scene::PostProc>())
+            if (x->decoded && (name.empty() || x->name == name)) {
+                pp = x;
+                break;
+            }
+        gfx::PostFx& post = canvas_.renderer().post();
+        if (pp) {
+            const gfx::TextureId lum = pp->luminanceMap.empty() ? gfx::TextureId{} : cache_->texture(pp, pp->luminanceMap);
+            post.select(gfx::postProcState(*pp, lum));
+            SDL_Log("view: post-process %s (bloom %.2f, luminance map %s%s)", pp->name.c_str(), double(pp->bloomIntensity),
+                    pp->luminanceMap.empty() ? "none" : pp->luminanceMap.c_str(), pp->luminanceMap.empty() || lum ? "" : " not found");
+        } else {
+            SDL_Log("view: no PostProc%s%s in %s; the default (reset_postproc)", name.empty() ? "" : " ", name.c_str(), path.c_str());
+        }
+        post_ = true;
+    } catch (const std::exception& e) {
+        SDL_Log("view: GD02_VIEW_POST: %s", e.what());
+    }
+    if (const char* d = SDL_getenv("GD02_VIEW_DOF"))
+        if (std::sscanf(d, "%f,%f,%f", &dof_[0], &dof_[1], &dof_[2]) != 3) dof_[2] = 0;
+}
 
 // GD02_VIEW_LANG=eng|fre|deu|ita|esl picks the locale, GD02_VIEW_FOCUS=<button>
 // the focused component, GD02_VIEW_UI=0 draws a PanelDir as a plain scene.
@@ -187,6 +229,14 @@ void SceneView::frame() {
     gfx::Renderer& r = canvas_.renderer();
     int vx, vy, vw, vh;
     r.pictureRect(vx, vy, vw, vh);
+    gfx::PostFx& post = r.post();
+    if (post_ && !ui_) {
+        const float c[4] = {clear.r / 255.0f, clear.g / 255.0f, clear.b / 255.0f, 1};
+        if (dof_[2] > 0) post.setDof(gfx::DofState::fromShot(dof_[0], dof_[1], dof_[2], cam.nearPlane, cam.farPlane));
+        if (post.begin(c)) post.size(vw, vh);
+    }
+    gfx::DrawContext ctx;
+    ctx.hdr = post.hdr();
     r.materials().setFrame(cam, env_, vw, vh);
     const Vec3 eye = cam.position();
     if (ui_) {
@@ -200,14 +250,15 @@ void SceneView::frame() {
     std::vector<const Drawn*> blended;
     for (const Drawn& d : drawn_) {
         if (d.blended) blended.push_back(&d);
-        else r.materials().draw(d.gpu, d.bones, d.mat, {d.boneCount});
+        else ctx.bones = d.boneCount, r.materials().draw(d.gpu, d.bones, d.mat, ctx);
     }
     // Blended meshes far to near.
     std::sort(blended.begin(), blended.end(), [&](const Drawn* a, const Drawn* b) {
         const Vec3 da = a->center - eye, db = b->center - eye;
         return gfx::dot(da, da) > gfx::dot(db, db);
     });
-    for (const Drawn* d : blended) r.materials().draw(d->gpu, d->bones, d->mat, {d->boneCount});
+    for (const Drawn* d : blended) ctx.bones = d->boneCount, r.materials().draw(d->gpu, d->bones, d->mat, ctx);
+    post.end();
 
     char line[256];
     std::snprintf(line, sizeof line, "%s  camera %s (%zu/%zu, Left/Right)  %zu meshes  environ %s, %d lights", miloPath_.c_str(),
@@ -241,6 +292,7 @@ int SceneView::run(const std::string& dataPath, const std::string& miloPath) {
     build();
     environment();
     startUi();
+    startPost();
     if (ui_)
         for (const std::string& p : ui_->problems()) SDL_Log("view: UI: %s", p.c_str());
     SDL_Log("view: %s: %d meshes, %d textures (%d not decodable), %d cameras, environ '%s' with %d %s lights",
@@ -272,4 +324,8 @@ int SceneView::run(const std::string& dataPath, const std::string& miloPath) {
 
 }  // namespace
 
-int runSceneView(const std::string& dataPath, const std::string& miloPath) { return SceneView().run(dataPath, miloPath); }
+int runSceneView(const std::string& dataPath, const std::string& miloPath) {
+    // A venue (its world milo or its name) draws as the game loads it (render/venue_view.h).
+    if (isVenuePath(miloPath)) return runVenueView(dataPath, miloPath);
+    return SceneView().run(dataPath, miloPath);
+}

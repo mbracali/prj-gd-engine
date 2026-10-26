@@ -22,6 +22,7 @@ struct TaskMgr::Spec {
     std::string name;
     std::vector<const DataNode*> body;
     std::vector<std::string> preserve;
+    std::vector<std::string> captured;  // a script_task's other $variables (scriptTask)
     ScriptObject* self = nullptr;
 };
 
@@ -33,7 +34,7 @@ struct TaskMgr::Task : ScriptObject {
         once = s.once;
         body = s.body;
         self = s.self;
-        registered = s.name;
+        registered = s.name.empty() || !self || self->nameScope.empty() ? s.name : scoped(self->nameScope, s.name);
     }
     TaskMgr& mgr;
     bool thread = false, once = true, dead = false;
@@ -44,6 +45,7 @@ struct TaskMgr::Task : ScriptObject {
     double deadline = -1;  // wait_timeout
     std::vector<const DataNode*> body;
     std::vector<std::pair<std::string, Value>> vars;  // preserved variables, swapped in while it runs
+    std::vector<std::string> captured;  // of those, the ones only captured: a value the task sets stays set
     ScriptObject* self = nullptr;
     std::string registered;  // the name it answers to as an object
     size_t index = 0;
@@ -83,9 +85,9 @@ struct TaskMgr::Task : ScriptObject {
         if (msg == "set_name") {
             std::string n = a.empty() ? "" : a[0].str();
             if (!registered.empty()) in.unregisterName(registered, this);
-            registered = n;
+            registered = n.empty() || !self || self->nameScope.empty() ? n : scoped(self->nameScope, n);
             rename(n.empty() ? "task" : n);
-            if (!n.empty()) in.registerAs(n, this);
+            if (!n.empty()) in.registerAs(registered, this);
             return true;
         }
         if (msg == "units") return r = Value::integer(units), true;
@@ -165,9 +167,14 @@ ScriptObject* TaskMgr::start(const Spec& s) {
     t->resumeAtWake = true;
     t->vars.push_back({"this", Value::obj(s.self)});
     for (const std::string& p : s.preserve) t->vars.push_back({p, in_.var(p)});
+    for (const std::string& c : s.captured)
+        if (std::find(s.preserve.begin(), s.preserve.end(), c) == s.preserve.end()) {
+            t->vars.push_back({c, in_.var(c)});
+            t->captured.push_back(c);
+        }
     if (!s.name.empty()) {
         // A new task under a live task's name replaces the name (DELETE_TASK runs first in GH2's scripts).
-        in_.registerAs(s.name, t.get());
+        in_.registerAs(t->registered, t.get());
     }
     tasks_.push_back(std::move(t));
     return tasks_.back().get();
@@ -206,9 +213,22 @@ void readSpec(Interp& in, const DataNode& cmd, size_t first, std::vector<const D
 
 }  // namespace
 
+// The $variables a script_task's body names, kept with their values at its
+// creation [I: later Harmonix code's ScriptTask::UpdateVarsObjects], so a
+// task started inside a {do ($x ...)} still sees $x when it runs
+// (WORLD_OBJECT_BASE game_won_msg's delayed {pick_shot $category}).
+static void collectVars(const DataNode& n, std::vector<std::string>& out) {
+    if (n.type == DataNode::Type::Var) {
+        const std::string v = varName(n.s);
+        if (v != "this" && v != "task" && std::find(out.begin(), out.end(), v) == out.end()) out.push_back(v);
+    }
+    for (const DataNode& c : n.children) collectVars(c, out);
+}
+
 ScriptObject* TaskMgr::scriptTask(const DataNode& cmd, size_t first) {
     Spec s;
     readSpec(in_, cmd, first, s.body, s.units, s.delay, s.once, s.name, s.preserve);
+    for (const DataNode* b : s.body) collectVars(*b, s.captured);
     s.self = in_.var("this").object;
     return start(s);
 }
@@ -300,6 +320,11 @@ void TaskMgr::run(Task& t, double now) {
         in_.onError(std::string("task ") + t.name() + ": " + ex.what());
         finish(t);
     }
-    for (auto& [name, value] : t.vars) value = in_.var(name);  // the task keeps its own copies
-    for (auto it = saved.rbegin(); it != saved.rend(); ++it) in_.var(it->first) = it->second;
+    std::vector<std::string> written;  // captured variables the task set: they keep the new value
+    for (auto& [name, value] : t.vars) {
+        if (std::find(t.captured.begin(), t.captured.end(), name) != t.captured.end() && !(in_.var(name) == value)) written.push_back(name);
+        value = in_.var(name);  // the task keeps its own copies
+    }
+    for (auto it = saved.rbegin(); it != saved.rend(); ++it)
+        if (std::find(written.begin(), written.end(), it->first) == written.end()) in_.var(it->first) = it->second;
 }

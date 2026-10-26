@@ -14,6 +14,7 @@
 #include "tests/scripttest.h"
 #include "tests/selftest.h"
 #include "tests/uitest.h"
+#include "tests/venuetest.h"
 #include "video/wmv_player.h"
 
 namespace {
@@ -36,6 +37,8 @@ void usage() {
         "                       eng|fre|deu|ita|esl, GD02_VIEW_FOCUS=<button>, GD02_VIEW_UI=0 plain scene)\n"
         "  --playmovie <name>   play one of the disc's videos (intro.wmv, hmx.wmv, wg.wmv), then quit\n"
         "  --uitest             run GH2's menu scripts headlessly: every screen and panel, their milos and components\n"
+        "  --venuetest          load the 8 venues (one player, face-off, co-op): their milos, classes, references and\n"
+        "                       scripts, headlessly\n"
         "  --walktest <walk>    play through the menus with scripted buttons and check them: quickplay, lose, pause,\n"
         "                       attract (headless: SDL_VIDEO_DRIVER=offscreen SDL_AUDIO_DRIVER=dummy)\n"
         "Environment: GD02_KEYS=\"<ms>:<key>,...,s<song ms>:<key>,...\" scripted input: menu keys at wall-clock ms\n"
@@ -50,6 +53,8 @@ void usage() {
         "  instead of GH2's track and HUD; GD02_HUD=0 hides the HUD. GD02_MODE=vs|faceoff|coop|practice\n"
         "  shows that mode's tracks and HUD with a second autoplaying player; GD02_LEFTY=1|2|12 lefty flip;\n"
         "  GD02_FAIL_AT=<ms> fails the song then, GD02_END_AT=<ms> ends (wins) it then; GD02_STATS=1 logs fps.\n"
+        "  GD02_POST=0 draws the venue without GH2's post-process; GD02_POST_DEBUG=bloom|dof|lum|doflow shows its\n"
+        "  buffers (--view: GD02_VIEW_POST=<milo>[:<PostProc>], GD02_VIEW_DOF=<focus>,<blur_depth>,<max_blur>).\n"
         "  GD02_SKIP_MOVIES=1 skips the videos; GD02_MOVIE_DUMP=<file.yuv> makes --playmovie only decode\n"
         "  GD02_MOVIE_FRAMES (default 120) pictures into that file, headless.\n"
         "The game folder is the disc's files (gen/main.hdr, gen/main_0.ark, ...). Without one, the\n"
@@ -62,7 +67,7 @@ void usage() {
 
 int main(int argc, char** argv) {
     Options opt;
-    bool selftest = false, scenetest = false, shadertest = false, scripttest = false, uitest = false;
+    bool selftest = false, scenetest = false, shadertest = false, scripttest = false, uitest = false, venuetest = false;
     std::string viewPath, movie;
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
@@ -82,6 +87,7 @@ int main(int argc, char** argv) {
         else if (a == "--shadertest") shadertest = true;
         else if (a == "--scripttest") scripttest = true;
         else if (a == "--uitest") uitest = true;
+        else if (a == "--venuetest") venuetest = true;
         else if (a == "--walktest") opt.walk = value();
         else if (a == "--view") viewPath = value();
         else if (a == "--playmovie") movie = value();
@@ -90,13 +96,14 @@ int main(int argc, char** argv) {
         else if (a.rfind("-psn_", 0) != 0) opt.dataPath = a;
     }
     if (shadertest) return runShaderTest();
-    if ((selftest || scenetest || scripttest || uitest || !opt.walk.empty() || !viewPath.empty() || !movie.empty()) && opt.dataPath.empty()) {
+    if ((selftest || scenetest || scripttest || uitest || venuetest || !opt.walk.empty() || !viewPath.empty() || !movie.empty()) && opt.dataPath.empty()) {
         usage();
         return 2;
     }
     if (scenetest) return runSceneTest(opt.dataPath);
     if (scripttest) return runScriptTest(opt.dataPath);
     if (uitest) return runUiTest(opt.dataPath);
+    if (venuetest) return runVenueTest(opt.dataPath);
     if (!viewPath.empty()) return runSceneView(opt.dataPath, viewPath);
     if (!movie.empty()) return runPlayMovie(opt.dataPath, movie);
     return selftest ? runSelfTest(opt.dataPath) : runApp(opt);

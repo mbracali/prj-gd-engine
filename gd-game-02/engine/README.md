@@ -19,8 +19,8 @@ A from-scratch reimplementation of Guitar Hero II (Xbox 360, 2007) for Linux,
 Steam Deck, Windows, macOS and Android. It plays the songs from **your own
 copy** of the game: no game data is included. This is an early build: the game's
 own menus, Quick play and its highway and HUD, with the original game's rules
-(see `gd-game-02/docs/FINDINGS.md` in the repository). Venues, the band,
-career and multiplayer come later.
+(see `gd-game-02/docs/FINDINGS.md` in the repository). The venues are in;
+the band, career and multiplayer come later.
 
 ## Running
 
@@ -29,10 +29,11 @@ career and multiplayer come later.
     gd02 --song yyz --difficulty 3 path/to/game-folder
 
 The game folder is the disc's extracted files (the one containing
-`gen/main.hdr`). Options: `--song <id>`, `--difficulty 0-3`, `--autoplay`,
-`--no-fail`, `--selftest`, `--uitest`, `--walktest quickplay|lose|pause|attract`,
-`--scripttest` (checks the data and auto-plays every chart without
-a window), `--playmovie intro.wmv` (plays one of the disc's videos: `intro.wmv`,
+`gen/main.hdr`). Options: `--song <id>`, `--difficulty 0-3`, `--venue <name>`
+(battle, small1, small2, big, theatre, fest, arena, stone), `--autoplay`,
+`--no-fail`, `--selftest` (checks the data and auto-plays every chart without
+a window; also `--scripttest`, `--uitest`, `--venuetest`,
+`--walktest quickplay|lose|pause|attract`), `--playmovie intro.wmv` (plays one of the disc's videos: `intro.wmv`,
 `hmx.wmv`, `wg.wmv`; Start, Enter or A skips it), `--help`. `GD02_SKIP_MOVIES=1`
 skips the videos.
 

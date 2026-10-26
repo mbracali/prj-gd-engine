@@ -39,6 +39,8 @@ Status: ✅ done · 🟡 partly done / approximated · ❌ not started
 | M7 | gd01's interpreter on GH2's 177 `.dtb` (`#merge`, `new`, `handle`, task units, L1 logging); `--scripttest` | `docs/ui_and_frontend.md` |
 | M7 | UI object decoders, text chains, styles; GH2's front end: boot, title / attract, main, Quick play, difficulty, loading, game, results, high scores, pause, lose, options, credits, bonus videos | `--uitest`, `--walktest`; debug song list behind `GD02_DEBUG_MENU=1` |
 | M7 | Save (`career.json`, GH2's version 17 data, atomic + `.bak`, every setter marks it dirty: L12); GAMEPADS screen | |
+| M8 | All 8 venues (sp / _mp / _coop chains, proxies): decoders for every world class, world clock, anims, EventTriggers, WorldDir scripts as `world`; `--venuetest`, `--venue` / `GD02_VENUE` | `docs/venues.md` |
+| M8 | Camera director (CamShot playback, pick_shot, script schedule), lighting preset manager, spotlights / floor spots / flares, bloom + DOF post, crowd (fullness, crowd3d, instanced), crowd audio loops, encore fx and venue extras | Golden director log in `--venuetest` |
 | M7 / Q2 | `.wmv` videos: minimal LGPL FFmpeg 7.1.5 (ASF, WMV3, WMA v2), shared libraries + licence notice in every download | `--playmovie` |
 
 ## In progress
@@ -57,7 +59,7 @@ Nothing right now.
 | M10 | Modes | Practice track surface (rosewood) and practice UI pieces | ❌ | Two-player rules: see below |
 | M7 | UI | Touch lanes for the new renderer | ❌ | Input API ready |
 | M7 | UI | Sound effects (XMA SynthSample banks), endgame receipt lighting (`turn_off_ambient`), live volume sliders, help bar boxes, progress export / import | ❌ | `docs/ui_and_frontend.md` "Not done" |
-| M8 | Venues | `world/` venues, venue scripts, lighting (TRIGGERS 48–50/52), camera director, particles, bloom / DOF | ❌ | |
+| M8 | Venues | Sound effects: SynthSample v5 / SampleData v11 XMA, packets not in plain stream order (reader near `0x82687380`); GH2's beam shader; crowd card imposters; free camera | ❌ | `docs/venues.md` open items; band-targeted shots wait for M9 |
 | M9 | Band | Characters, skinning, clips, `BAND *` tracks, hand positions (notes 40–59) | ❌ | |
 | M9 | Band | Lip-sync and faces (`.voc` "FACE…Harmonix", `.fac`), crowd | ❌ | |
 | M10 | Modes | Co-op (shared Star Power, band streak, score normalisation), face-off, pro face-off | ❌ | FINDINGS "Two players" |

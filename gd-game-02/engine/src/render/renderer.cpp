@@ -6,6 +6,7 @@
 #include <cstdlib>
 
 #include "render/camera.h"
+#include "render/spotlight_view.h"
 
 namespace gfx {
 namespace {
@@ -90,6 +91,7 @@ bool Renderer::init(SDL_Window* window, std::string& error) {
     }
     shaders_ = std::make_unique<StandardShaders>(*device_);
     materials_ = std::make_unique<MaterialRenderer>(*device_, *shaders_);
+    post_ = std::make_unique<PostFx>(*this);
     // The plainest material variant is every other one's last fallback.
     if (!shaders_->program(0)) SDL_Log("render: the standard shader does not compile here; 3D scenes will not draw");
     if (const char* fps = SDL_getenv("GD02_FPS")) device_->setFrameCap(std::atoi(fps));  // development aid
@@ -98,6 +100,7 @@ bool Renderer::init(SDL_Window* window, std::string& error) {
 
 void Renderer::shutdown() {
     if (!device_) return;
+    post_.reset();
     materials_.reset();
     shaders_.reset();
     if (canvasProgram_) device_->destroyProgram(canvasProgram_);
@@ -156,6 +159,20 @@ std::vector<std::string> Renderer::compileAll(int& programs) {
             SDL_Log("shader %s (%s): %s", name, StandardShaders::name(key).c_str(), error.c_str());
             failed.push_back(std::string(name) + " (" + StandardShaders::name(key) + ")");
         }
+    }
+    // The spotlight flares' programs (render/spotlight_view.h).
+    for (const ProgramDesc& d : SpotlightView::allPrograms()) {
+        ++programs;
+        error.clear();
+        if (ProgramId p = device_->createProgram(d, error)) device_->destroyProgram(p);
+        else SDL_Log("shader %s: %s", d.name.c_str(), error.c_str()), failed.push_back(d.name);
+    }
+    // The post-process passes (render/post_fx.h).
+    for (const ProgramDesc& d : PostFx::allPrograms()) {
+        ++programs;
+        error.clear();
+        if (ProgramId p = device_->createProgram(d, error)) device_->destroyProgram(p);
+        else SDL_Log("shader %s: %s", d.name.c_str(), error.c_str()), failed.push_back(d.name);
     }
     return failed;
 }

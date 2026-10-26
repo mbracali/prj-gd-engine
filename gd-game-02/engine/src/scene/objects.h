@@ -399,6 +399,18 @@ struct HudDirData {
     std::vector<std::string> refs;
     std::vector<uint32_t> values;
 };
+// WorldDir v12 (PreLoad @ 0x8224e5c0, PostLoad @ 0x8224de60; the venue's
+// own directory, world/<v>/gen/<v>[_mp|_coop].milo): PreLoad reads u32 0,
+// u32 1.0f (Q: names) and the HUD milo, then PanelDir's; PostLoad adds
+// after PanelDir's the default camera transform, sub-directory hides and
+// bitmaps (own record only).
+struct WorldDirData {
+    uint32_t unknown0 = 0, unknown1 = 0;  // Q: 0 and 0x3f800000 everywhere
+    std::string hudFile;                   // e.g. "../../../hud/hud_1p_nocam.milo"
+    Xfm camXfm;
+    std::vector<std::string> subdirHides;
+    std::vector<std::pair<std::string, std::string>> subdirBitmaps;
+};
 
 class DirObj : public Object {
 public:
@@ -411,6 +423,8 @@ public:
     GHTrackDirData ghTrack;
     bool hasHud = false;
     HudDirData hud;
+    bool hasWorld = false;
+    WorldDirData world;
 };
 
 // TrackWidget v4 (Load @ 0x82367260; names from SyncProperty @ 0x82366a58):
@@ -424,8 +438,8 @@ public:
     bool multiMesh = false, allowRotation = false;
 };
 
-// Directory classes decoded by decodeDir (ObjectDir, RndDir, PanelDir, GHTrackDir
-// and the Band* HUD directories above).
+// Directory classes decoded by decodeDir (ObjectDir, RndDir, PanelDir, GHTrackDir,
+// WorldDir and the Band* HUD directories above).
 bool isDirClass(const std::string& cls);
 // Decodes a directory record that starts at stream[start]. `inlineDir` is
 // called with the position where an inline proxied directory starts and

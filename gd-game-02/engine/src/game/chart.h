@@ -61,6 +61,19 @@ struct SongEvent {
     std::string text;
 };
 
+// A note of the band and venue tracks the world plays (config/
+// midi_parsers.dta [C data]): BAND DRUMS 36 kick_drum / 37 crash_symbal
+// (drummer_kick_drum), BAND BASS 36 bass_hit (speaker_pulse), TRIGGERS
+// 48 / 49 / 50 do_lighting_next / prev / first_keyframe (lighting_parser,
+// start_offset -4: four beats early) and 52 venue_effect (effect_parser).
+struct VenueNote {
+    enum class Track : uint8_t { Drums, Bass, Triggers };
+    float ms;
+    int tick;
+    Track track;
+    int pitch;
+};
+
 struct Song {
     TempoMap tempo;
     // charts[part][difficulty]; `hasPart` says whether the MIDI has the track.
@@ -68,6 +81,7 @@ struct Song {
     std::array<bool, kPartCount> hasPart{};
     std::vector<BeatLine> beats;
     std::vector<SongEvent> events;  // in time order
+    std::vector<VenueNote> venueNotes;  // note-ons, in time order
     float endMs = 0;  // the EVENTS track's [end], or the last event
 
     const Chart& chart(Part p, Difficulty d) const { return charts[size_t(p)][size_t(d)]; }

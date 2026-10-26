@@ -29,11 +29,13 @@ Compiled shaders on the disc are named `<effect>_<hex key>_vs|ps4314`
 | 10–11 | TEX_GEN | 28–29 | PROJ_LIGHTS |
 | | | 30 | USE_ENVIRON |
 
-Postprocess shaders reuse the low bits for their own switches (COLORXFM,
-NOISE, DOF, BLOOM, BLENDPREVIOUS, COPYPREVIOUS, NUM_TAPS at 14–17, LUMMAP at
-20). gd02 builds the same keys (`standard_shader.*`), so `standard_<hex>`
-in gd02 names the same variant as the disc's file. `--shadertest` compiles
-all 547 programs gd02 builds (546 + the video program).
+Postprocess shaders reuse the low bits for their own switches (COLORXFM 1,
+NOISE 2, DOF 3, BLOOM 4, BLENDPREVIOUS 5, COPYPREVIOUS 6, NUM_TAPS at 14–17,
+FOG 18, LUMMAP 20; define builder `0x8268d898`). gd02 builds the same keys
+(`standard_shader.*`, `post_fx.*`), so `standard_<hex>` / `postprocess_<hex>`
+in gd02 name the same variant as the disc's file. `--shadertest` compiles
+all 585 programs gd02 builds (the 2D program, 545 standard variants, the
+video program and 38 post-process programs).
 
 ## How a Mat picks its key — `0x8268d280` (from shader selection `0x82308098`) [C]
 
@@ -115,10 +117,81 @@ per_pixel_lit 0xb1, normalize 0xb2, emissive_multiplier 0xb4, specular_rgb
 - `canvas.*`: 2D batcher at 1280×720 logical, letterboxed.
 - `--shadertest`, `--view <milo>` (scene viewer, `GD02_VIEW_CAM`).
 
+## Post-process (DX DoPost `0x82303e68`) [C]
+
+`0x823055e8` ends each frame: resolve the HDR buffer's colour (cleared with
+the clear colour / 4) and depth to textures, then DoPost, then present.
+Everything (world, track, HUD) is drawn into one 2:10:10:10 buffer with
+colours / 4 (the HDR key bit). DoPost, with the selected RndPostProc
+(`0x821ea108`: the shot's, else the Rnd's "[default postproc]"):
+
+1. DOF, when the camera set it (rnd +0x1dc): the buffer unpacked (× 4) and
+   box-filtered (downsample_collapse, 4 taps ± ½ texel, alpha 0) to a
+   640×320 buffer, then blur.fx twice (`0x82302308`): 7 taps (`0x827469f4`)
+   weighted 1/7 at {−3.5, −2.5, −1.5, 0, 1.5, 2.5, 3.5} × 0.666
+   (`0x827469f0`) texels, across then down.
+2. Bloom, when bloom_intensity > 0: bloom.fx at full size into an 8-bit
+   buffer (point sampling; white = smoothstep(threshold.w, 4, luminance),
+   rgb = saturate((c − threshold.rgb) × 1024) − white), two 2× box
+   downsamples, then a 15-tap Gaussian twice (`0x82303a60`), down then
+   across at a quarter of the size: weight(i) = kernel × exp(−i²/2σ²) /
+   √(2πσ²), σ = bloom_scale, i = 0, ±1..±7 texels.
+3. postprocess.fx full screen: unpack; for pixels deeper than the UI plane
+   (0.1, set every frame): DOF lerp to the low-resolution blur by
+   clamp(|z·a + b|, 0, max_blur), bloom added (rgb + white) × intensity,
+   noise, colour transform (rows red/green/blue select + bias), the
+   luminance map (rgb × curve(luminance / 4), the curve divided by the
+   luminance above 1). Program by shader type `0x823073f8`: DOF + BLOOM
+   from the passes run, NOISE when noise_intensity ≠ 0, LUMMAP with a
+   luminance texture, COLORXFM whenever a PostProc is selected,
+   BLENDPREVIOUS when threshold < 1 and duration > 0, COPYPREVIOUS +0xfd.
+
+RndPostProc v9 (Load `0x821eb3d0`, SyncProperty `0x821eb598`, constructor
+`0x821eafb8`): bloom thresholds r/g/b/white +0x28 (default 4 4 4 4), kernel
+multiplier +0x38 (1), bloom scale +0x3c (1), intensity +0x40 (0, so no
+bloom), luminance_map +0x44, hue/saturation/lightness/contrast/brightness
++0x50..+0x60 (editor inputs to the transform), red/green/blue select
++0x64/+0x74/+0x84 and biases +0x94..+0x9c (identity), flicker intensity
++0xa4 / secs_range +0xac (`0x821ea128`), noise_base_scale +0xc8 (32, 24),
++0xd0 (1.3591, the second noise layer's scale), noise_intensity +0xd4,
+noise_map +0xd8, threshold +0xe4 (1), duration +0xe8, emulate_fps +0x100.
+All 28 shipped PostProcs: thresholds 3.9 3.9 3.9 1, scale 3, intensity 1,
+kernel 2.5, luminance map arena_luminancetest04.tex (512×8: a curve dipping
+to ~0.55 around luminance 1.5; none in the _mp milos), no noise, no
+trails, no flicker. `rnd reset_postproc` (`0x821e5088`) selects the default.
+
+Depth of field (Rnd::SetDOF, DX `0x82302728`), from the CamShot keyframes
+(`0x82227440`): focus = |camera − focal target| × (1 + focus_blur_multiplier),
+blur_depth and max_blur lerped between keyframes; on when max_blur > 0;
+blur_depth ≥ 0.001; zf = depth(focus), zb = depth(focus × (1 − blur_depth))
+with depth(d) = (far − far·near/d) / (far − near) (0 nearer than near); the
+constants are (1/(zf − zb), −zf/(zf − zb), 0, max_blur). Every CamShot has
+use_depth_of_field and a focal target (guitarist0); most keyframes have
+blur_depth 0.5, max_blur 0.5.
+
+gd02 (`render/post_fx.*`, `Renderer::post()`): the world goes into a
+RGB10A2 target (RGBA8 fallback) with a depth texture; DOF buffers at half
+size (blur offsets kept in GH2's 640×320 uv units), the bright pass straight
+to half size (the 2×2 average of the full-size results, the same numbers),
+the Gaussian at a quarter; the final pass into the picture. The track and
+HUD are drawn afterwards over it [I: same picture, except that GH2's bright
+gems also feed the world's bloom]. Not built: FOG (depth-volume fog),
+BLENDPREVIOUS / COPYPREVIOUS and the flicker (unused by the data). The DOF /
+bloom buffers' 8-bit format is [I] (`0x821d5e30` with the screen's bpp).
+`GD02_POST=0` turns it off; `GD02_POST_DEBUG=bloom|dof|lum|doflow` shows the
+bloom buffer, the DOF blend, the luminance factor (× ½) or the DOF buffer;
+`--view` takes `GD02_VIEW_POST=<milo>[:<PostProc>]` and
+`GD02_VIEW_DOF=<focus>,<blur_depth>,<max_blur>`.
+
 ## Open / inferred
 
-- Tangents are generated at load [I]; CubeTex is not decoded yet (no
-  environment maps on screen yet).
+- Tangents are generated at load [I]. Environment maps: a Mat's
+  environ_map names a CubeTex (v1, six inline faces, docs/venues.md),
+  uploaded as a cube texture (SceneCache::cubeTexture) in Direct3D's face
+  order, which OpenGL samples the same way.
 - alpha_cut threshold 0.5 [I]; blend 7 as premultiplied alpha [I]; light
   types 0 point / 1 directional, shining along +y [I].
-- Shadow-map, particles, postprocess (bloom, DOF) passes: not done yet.
+- Shadow-map pass: not done yet. Post-process: the noise map is our own
+  white noise (GH2's rnd +0x29c is not on the disc) [I]; the shader type →
+  effect mapping (4 downsample, 5 downsample_collapse, 8 blur, 9 bloom, 10
+  postprocess) is [I] from the call sites.
