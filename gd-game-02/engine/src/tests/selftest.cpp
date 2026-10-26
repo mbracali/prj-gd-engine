@@ -19,6 +19,7 @@
 #include "game/key_script.h"
 #include "game/song_db.h"
 #include "game/song_setup.h"
+#include "input/input_selftest.h"
 
 namespace {
 
@@ -81,7 +82,7 @@ struct NoteSpec {
     int len = 100;
 };
 
-constexpr uint8_t G = 1, R = 2, Y = 4, B = 8, O = 16;
+[[maybe_unused]] constexpr uint8_t G = 1, R = 2, Y = 4, B = 8, O = 16;  // fret bits; O is unused so far
 
 Song makeSong(const std::vector<NoteSpec>& notes, const std::vector<std::pair<int, int>>& phrases = {}, int hopoTicks = 170) {
     MidiFile midi;
@@ -395,9 +396,12 @@ int runSelfTest(const std::string& dataPath) {
         std::printf("rule checks:\n");
         const int ruleFailures = runRuleChecks(rules);
         std::printf(ruleFailures ? "%d rule check(s) failed\n" : "all rule checks passed\n", ruleFailures);
+        std::printf("input checks (virtual controllers):\n");
+        const int inputFailures = runInputChecks();
+        std::printf(inputFailures ? "%d input check(s) failed\n" : "all input checks passed\n", inputFailures);
         std::printf("%d song audio file(s) with problems, %d script(s) not decoded\n", audioFailures, scriptFailures);
         std::printf(chartFailures ? "%d chart(s) not fully hit\n" : "all charts fully hit\n", chartFailures);
-        return chartFailures || audioFailures || scriptFailures || ruleFailures ? 1 : 0;
+        return chartFailures || audioFailures || scriptFailures || ruleFailures || inputFailures ? 1 : 0;
     } catch (const std::exception& ex) {
         std::fprintf(stderr, "self-test failed: %s\n", ex.what());
         return 2;
