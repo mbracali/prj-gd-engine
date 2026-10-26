@@ -330,3 +330,63 @@ and our shaders must be written independently.
 - Inline sub-directory detection is heuristic (it looks for a valid header);
   it would be better to read the ObjectDir fields that announce it (proxy path
   and inline flag) once the ObjectDir layout is known.
+
+## Confirmed in the executable (gd02's C++ loader, `engine/src/scene/`)
+
+Each class's Load was found through its class-name string → ClassName
+virtual → vtable (Load is slot 9, PreLoad 13, PostLoad 14). `gd02
+--scenetest` decodes every typed object of all 503 milos to its end marker.
+
+- **Hmx::Object** `0x82315350`: u32 rev, symbol type, u8 has-props + DataArray,
+  a note string when rev > 0. The common 13 bytes = rev 1, empty type, no
+  props, empty note (CamShot: `band…`; HUD dirs: `gh2`).
+- **Trans v9** `0x821b0a28`: 12 f32 local, 12 f32 world, u32 constraint,
+  target, u8 preserve-scale, parent.
+- **Draw v3** `0x821b36c0`: showing, sphere (4 f32), draw_order.
+- **Animatable v4** `0x821e96c0`: two u32 (the second is `rate`).
+- **Tex v10** (PreLoad `0x821d62d0`, PostLoad `0x821d6438`; bitmap
+  `0x821efd90` / `0x821f1f38`): each further mip is (w·bpp/8)·h bytes at half
+  size (levels under 4×4 are shorter than a block).
+- **Mat v28** `0x821eebb8` (names `0x821ed930`), load order: blend, color,
+  use_environ, prelit, z_mode, alpha_cut, alpha_write, tex_gen, tex_wrap,
+  tex_xfm, diffuse_tex, next_pass, intensify, cull, emissive_multiplier,
+  specular_rgb + power, normal_map, emissive_map, specular_map,
+  custom_diffuse_map, environ_map, per_pixel_lit, normalize, stencil_mode.
+- **Mesh v28** `0x821c2b60`: Object, Trans, Draw, mat, geom owner, mutable,
+  volume, BSP tree (`0x8226ab80`), 48-byte vertices, u16×3 faces, u8 group
+  sizes, bone 0 and (when set) 3 more bones + 4 transforms
+  (`0x821c3278`–`0x821c33f4`).
+- **Group v12** `0x821dc6d0`; **Cam v12** `0x821d8c38` (near, far, y_fov, …);
+  **Environ v5** `0x821d9f68`; **Light v9** `0x8220c3e8`.
+- **TransAnim v6** `0x821b6230`, **MatAnim v7** `0x82204590`, **AnimFilter v1**
+  `0x82207d88`, **ParticleSys v30** `0x82216ad0` (GH1 v22's fields, Object
+  block read twice), **ParticleSysAnim v3**, **MeshAnim v1**, **Font v15**,
+  **Text v17**, **TrackWidget v4** `0x82367260`.
+- **ObjectDir v17** (`0x82322598` / `0x8231ff08`): viewports, proxy file,
+  subdirs, inline-proxy flag (1 or 2 → inline sub-directory). RndDir v9,
+  PanelDir v2, **TrackDir v5** (y_per_second, top_y, bottom_y, slots,
+  draw_group, anim_group), **GHTrackDir v3** (cameras, gem / hopo / star /
+  star-hopo widget lists), Band* HUD dirs (values kept in load order).
+- Proxies resolve through the engine's og/ → ng/ path swap (`0x821c9480`).
+
+### The highway and HUD scenes
+
+- **Track:** `ui/track_panel.dta` → `track/track_panel_1p.milo` (`_2p` holds
+  two) → GHTrackDir proxies to `track/gen/track_new.milo_xbox` (571 objects):
+  cameras `track.cam` / `track_p1.cam` / `track_p2.cam` (near 50, far 250,
+  y_fov 0.41), y_per_second 60, top_y 120, bottom_y −10, slots at x = −8, −4,
+  0, 4, 8. Surface `track_surface.grp`; gems `<color>_gem.wid`, `_hopo`,
+  `_star`, `_star_hopo`, bonus (Star Power), miss; sustain tails are built
+  by code (tail_* materials); `gem_smasher.view`; hit effects
+  `smash_normal/star/bonus/combo.view`; beat lines `bar_widgets.grp`; Star
+  Power surface and lightning; `track_explode.view` (fail).
+- **HUD:** `modes.dta hud_file` (hud_sp / hud_vs / hud_coop / hud_practice /
+  hud_blank) via `ui/hud_panel.dta`. `hud_sp`: meters_slide_in.view,
+  hud1_score_meter0.view, hud1_rock_meter.view, and proxies to
+  `streak_display.milo` (multiplier, streak lights), `score_display.milo`
+  (digits), `star_meter.milo` (the amp tube), `crowd_meter.milo` (rock meter
+  needle and lights).
+
+Open: Animatable's first u32; Cam's last three fields; Band* field names;
+enum meanings (Mat blend, z_mode, tex_gen, Light type, Trans constraint);
+spline TransAnim interpolation (sampled linearly for now).
