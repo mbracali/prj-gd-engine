@@ -25,14 +25,14 @@ Status: ✅ done · 🟡 partly done / approximated · ❌ not started
 | Research | Gameplay rules from the code: watcher, HOPO, scoring, Star Power, rock meter, practice, two-player modes | `docs/FINDINGS.md` |
 | Research | What gd-game-01 gives gd02, and its lessons | `docs/reuse_and_lessons.md` |
 | Engine (M1/M3/M4) | gd02 skeleton: disc image or folder, ARK, DTB, song list, charts for every part, `.mogg` via stb_vorbis, mixer with guitar mute | `engine/`; version 0.1.0 |
-| Engine (M4) | Debug highway, keyboard input, `--selftest` on every part and difficulty ("all charts fully hit"), `GD02_SCREENSHOT` | Rules still GH1 placeholders until G1 lands |
+| Engine (M4) | Debug highway, keyboard input, `--selftest` on every part and difficulty ("all charts fully hit"), `GD02_SCREENSHOT` | |
+| Gameplay (G1) | GH2's rules from `FINDINGS.md` replace the GH1 placeholders: chart parser, guitar / joypad watcher, scoring, Star Power, rock meter (constants from `scoring.dta` / `beatmatcher.dta` / `songs.dta`); focused PASS / FAIL rule checks in `--selftest`; `GD02_KEYS` scripted input | Single player; co-op, face-off normalisation and practice are TODOs in `game/player.h` |
 
 ## In progress
 
 | # | Area | Item | Status | Notes |
 |---|---|---|---|---|
 | R1 | Research | Complete Ghidra export: rebuild functions from `.pdata` (the save/restore helpers were taken as non-returning), string references from `lis`/`addi` pairs | 🟡 | ~6,280 functions were cut short in the first export |
-| G1 | Gameplay | Replace the GH1 placeholder rules with GH2's (`FINDINGS.md`), focused rule checks in `--selftest` | 🟡 | HOPO −100…+160 ms, no strum gate, 10th note at 2×, stars 2.0 / 2.8, rock meter from `scoring.dta` |
 
 ## Open
 

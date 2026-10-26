@@ -15,6 +15,7 @@
 #include "data/game_data.h"
 #include "devaids/screenshot.h"
 #include "game/autoplay.h"
+#include "game/key_script.h"
 #include "game/song_db.h"
 #include "game/song_setup.h"
 #include "input/keyboard.h"
@@ -74,6 +75,9 @@ private:
     std::unique_ptr<Song> song_;
     std::unique_ptr<Player> player_;
     std::unique_ptr<Autoplay> bot_;
+    // Development aid: GD02_KEYS="<song ms>:<key>,..." (game/key_script.h)
+    // plays scripted guitar input in every song, at exact song times.
+    KeyScript keys_;
     Highway highway_;
     std::vector<float> flashes_ = std::vector<float>(5, 0.0f);
     double lastFrameMs_ = 0;
@@ -154,6 +158,8 @@ bool App::startSong(size_t index) {
         player_ = std::make_unique<Player>(*song_, Part::Guitar, static_cast<Difficulty>(difficulty_), rules_,
                                            ControllerMode::Guitar, options_.noFail || options_.autoplay);
         bot_ = options_.autoplay ? std::make_unique<Autoplay>(player_->chart()) : nullptr;
+        keys_ = KeyScript(SDL_getenv("GD02_KEYS") ? SDL_getenv("GD02_KEYS") : "");
+        if (!keys_.valid()) SDL_Log("GD02_KEYS: some items were not understood and are ignored");
         SDL_Log("%s (%s): %d Hz, %d channels, %zu %s gems, hopo_threshold %d", info.id.c_str(), info.name.c_str(),
                 stream->sampleRate(), stream->channels(), player_->chart().gems.size(),
                 difficultyName(static_cast<Difficulty>(difficulty_)), hopoThreshold(info.audio, rules_));
@@ -223,6 +229,7 @@ void App::handleEvent(const SDL_Event& e) {
 
 void App::frameSong() {
     const float t = float(mixer_.frameTimeMs());
+    keys_.feed(*player_, t);
     if (bot_) bot_->feed(*player_, t);
     player_->update(t);
     const float dt = std::clamp(float(t - lastFrameMs_), 0.0f, 100.0f);

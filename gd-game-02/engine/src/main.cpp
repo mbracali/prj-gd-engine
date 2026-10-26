@@ -20,7 +20,9 @@ void usage() {
         "  --difficulty <0-3>   0 Easy, 1 Medium, 2 Hard, 3 Expert (default 3)\n"
         "  --autoplay           play the chart automatically\n"
         "  --no-fail            the rock meter cannot fail you\n"
-        "  --selftest           check the data and auto-play every chart headlessly\n"
+        "  --selftest           check the data, auto-play every chart and check the rules headlessly\n"
+        "Environment: GD02_KEYS=\"<song ms>:<key>,...\" scripted input (+green/-green .. orange, strum,\n"
+        "  starpower, whammy=<0..1>).\n"
         "The game folder is the disc's files (gen/main.hdr, gen/main_0.ark, ...).\n",
         app::kProgram, app::kVersion, app::kProgram);
 }

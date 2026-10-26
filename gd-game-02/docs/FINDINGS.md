@@ -498,3 +498,8 @@ Modes (`config/gen/modes.dta`) [C]:
    offset (`watcher +0x2c`, from the player's lag setting).
 7. Timing class (perfect/good): only computed; check the HUD or stats for a
    use.
+8. `player_mask` in single player: the parser fills it from the face-off
+   section notes in every chart, but applying "mine = mask 0 or my bit" to a
+   single player makes the sweep pass gems early (≈296 guitar charts fail).
+   gd02 applies ownership only in face-off [I]; find where the original
+   decides that the mask is used.

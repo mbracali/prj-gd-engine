@@ -18,6 +18,38 @@ const DataNode& require(const DataNode& parent, std::string_view key) {
     return *n;
 }
 
+// One (default_config ...) / (coop_config ...) block: crowd (0x822de640)
+// and star_power (0x822d5fc0) [C].
+ScoreConfig readScoreConfig(const DataNode& config) {
+    ScoreConfig c;
+    const DataNode& sp = require(config, "star_power");
+    StarPowerRules& s = c.starPower;
+    s.rechargeRate = require(sp, "recharge_rate").floatAt(1);
+    s.deployRate = require(sp, "deploy_rate").floatAt(1);
+    s.phrase = require(sp, "star_phrase").floatAt(1);
+    s.whammyRate = require(sp, "whammy_rate").floatAt(1);
+    s.readyLevel = require(sp, "ready_level").floatAt(1);
+    s.multiplier = require(sp, "multiplier").intAt(1);
+    s.crowdBoost = require(sp, "crowd_boost").floatAt(1);
+    s.minLength = require(sp, "min_length").floatAt(1);
+    s.whammySpeed = require(sp, "whammy_speed").floatAt(1);
+    s.whammyTimeout = require(sp, "whammy_timeout").floatAt(1);
+
+    const DataNode& crowd = require(config, "crowd");
+    for (int d = 0; d < kDifficultyCount; ++d) {
+        const DataNode& n = require(crowd, kDifficultySymbols[d]);
+        CrowdRules& cr = c.crowd[size_t(d)];
+        cr.noteWeight = require(n, "note_weight").floatAt(1);
+        const DataNode& range = require(n, "range");
+        cr.rangeLow = range.floatAt(1);
+        cr.rangeHigh = range.floatAt(2);
+        cr.freeRide = require(n, "free_ride").floatAt(1);
+        cr.warningLevel = require(n, "warning_level").floatAt(1);
+        cr.loseLevel = require(n, "lose_level").floatAt(1);
+    }
+    return c;
+}
+
 }  // namespace
 
 const char* difficultyName(Difficulty d) {
@@ -25,8 +57,9 @@ const char* difficultyName(Difficulty d) {
     return names[static_cast<int>(d)];
 }
 
+// GH2 0x822d66b0 [C]: table (0 -> 1) plus scoring.dtb streaks; the last entry
+// whose count <= streak.
 int Rules::multiplierForStreak(int streak) const {
-    // GH1 (FUN_0010b450): the last entry whose threshold the streak has reached [I for GH2].
     int mult = 1;
     for (const auto& [count, value] : streaks) {
         if (streak < count) break;
@@ -38,9 +71,8 @@ int Rules::multiplierForStreak(int streak) const {
 Rules loadRules(const GameData& data) {
     Rules r;
 
-    // GH2 keeps points / error_class / streaks at the top of scoring.dtb and
-    // moves crowd and star_power into default_config (single player) and
-    // coop_config [C data]. Co-op is not read yet.
+    // Score singleton 0x822d69c8: +0 head, +4 tail, +0xc good, +0x10 perfect,
+    // +0x14 streaks, +0x24 star power config [C].
     DataNode scoring = parseDtb(data.read("config/gen/scoring.dtb"));
     const DataNode& points = require(scoring, "points");
     r.headPoints = require(points, "head").intAt(1);
@@ -49,43 +81,31 @@ Rules loadRules(const GameData& data) {
     r.goodMs = require(errorClass, "good").intAt(1);
     r.perfectMs = require(errorClass, "perfect").intAt(1);
 
-    // GH1's code prepends an implicit (0 1) entry; GH2's data starts at (10 2) too [I].
     const DataNode& streaks = require(scoring, "streaks");
-    r.streaks = {{0, 1}};
+    r.streaks = {{0, 1}};  // 0x822d66b0's implicit first entry [C]
     for (size_t i = 1; i < streaks.children.size(); ++i)
         r.streaks.emplace_back(streaks.children[i].intAt(0), streaks.children[i].intAt(1));
 
-    const DataNode& config = require(scoring, "default_config");
-    const DataNode& sp = require(config, "star_power");
-    r.spDeployRate = require(sp, "deploy_rate").floatAt(1);
-    r.spPhrase = require(sp, "star_phrase").floatAt(1);
-    r.spWhammyRate = require(sp, "whammy_rate").floatAt(1);
-    r.spReadyLevel = require(sp, "ready_level").floatAt(1);
-    r.spMultiplier = require(sp, "multiplier").intAt(1);
-    r.spCrowdBoost = require(sp, "crowd_boost").floatAt(1);
+    r.solo = readScoreConfig(require(scoring, "default_config"));
+    r.coop = readScoreConfig(require(scoring, "coop_config"));
 
-    const DataNode& crowd = require(config, "crowd");
+    // (star_ratings (thresholds (kDifficultyEasy 2.0 2.8) ...)), 0x822d6410 [C].
+    // thresholds_section is never read by the executable [C].
+    const DataNode& thresholds = require(require(scoring, "star_ratings"), "thresholds");
     for (int d = 0; d < kDifficultyCount; ++d) {
-        const DataNode& c = require(crowd, kDifficultySymbols[d]);
-        CrowdRules& cr = r.crowd[d];
-        cr.noteWeight = require(c, "note_weight").floatAt(1);
-        const DataNode& range = require(c, "range");
-        cr.rangeLow = range.floatAt(1);
-        cr.rangeHigh = range.floatAt(2);
-        cr.freeRide = require(c, "free_ride").floatAt(1);
-        cr.warningLevel = require(c, "warning_level").floatAt(1);
-        cr.loseLevel = require(c, "lose_level").floatAt(1);
+        const DataNode& t = require(thresholds, kDifficultySymbols[d]);
+        r.starThresholds[size_t(d)] = {t.floatAt(1), t.floatAt(2)};
     }
 
-    // GH2: (watcher (slop 100) ...) and (parser (hopo_threshold 170)) at the
-    // top of beatmatcher.dtb (GH1 nested the watcher in beatmatch.dta) [C data].
+    // (watcher (slop 100) ...) read by the watcher constructor 0x82350ae0, and
+    // (parser (hopo_threshold 170)) read by 0x823341d0 [C].
     DataNode beatmatcher = parseDtb(data.read("config/gen/beatmatcher.dtb"));
     r.slopMs = require(require(beatmatcher, "watcher"), "slop").floatAt(1);
     r.hopoThresholdTicks = require(require(beatmatcher, "parser"), "hopo_threshold").intAt(1);
 
     DataNode track = parseDtb(data.read("config/gen/track_graphics.dtb"));
     const DataNode& speed = require(track, "track_speed");
-    for (int d = 0; d < kDifficultyCount; ++d) r.trackSpeed[d] = require(speed, kDifficultySymbols[d]).floatAt(1);
+    for (int d = 0; d < kDifficultyCount; ++d) r.trackSpeed[size_t(d)] = require(speed, kDifficultySymbols[d]).floatAt(1);
 
     return r;
 }

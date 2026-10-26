@@ -8,10 +8,13 @@
 
 namespace {
 
-// GH1's DifficultyParser constants (gd01 FINDINGS.md "Song charts"); GH2's
-// charts use the same note layout [C data], the constants are [I] for GH2.
-constexpr int kChordTicks = 10;      // fret note-ons this close form one chord [I]
-constexpr int kSustainTicks = 161;   // shorter gems have no sustain [I]
+// GH2 0x82344de0 [C]: fret note-ons whose ticks differ by at most 10
+// (|Δ| < 11) form one chord gem.
+constexpr int kChordTicks = 10;
+// GH2 0x82345480 [C]: a gem <= 160 ticks long (< 0xa1) has no sustain. The
+// parser's ignore_durations flag (every gem without sustain) is not set by
+// any GH2 guitar parser, so it is not modelled [I].
+constexpr int kNoSustainTicks = 160;
 
 std::string trim(const std::string& s) {
     size_t a = s.find_first_not_of(" \t\r\n"), b = s.find_last_not_of(" \t\r\n");
@@ -32,23 +35,32 @@ const MidiTrack* findTrack(const MidiFile& midi, const std::string& name) {
     return nullptr;
 }
 
-// GH1's GameGemList insert (FUN_0025b1f0 / FUN_0025b5f0) sets the HOPO flag:
-// a single-fret gem that shares no fret with the previous gem and starts at
-// most 169 ticks after it. GH2 makes the distance data (hopo_threshold, 170
-// by default, so `gap < threshold` keeps GH1's boundary); the comparison and
-// the single-fret / no-shared-fret conditions are [I] for GH2. GH2 has no
-// forced-HOPO notes [C data].
-void appendGem(Chart& chart, Gem g, int hopoTicks) {
-    if (!chart.gems.empty()) {
-        const Gem& prev = chart.gems.back();
-        g.hopo = g.fretCount() == 1 && (g.frets & prev.frets) == 0 && g.tick - prev.tick < hopoTicks;
+// GH2 HOPO marking, 0x8234dcc8 (called by the add-gem routine 0x8234e190) [C]:
+//   hopo(new) = list not empty
+//            && (prev.fret_mask & new.fret_mask) == 0   (prev = the last gem added; a chord is one gem)
+//            && popcount(new.fret_mask) == 1           (chords are never HOPOs)
+//            && new.tick - prev.tick < hopo_threshold   (strict: blt at 0x8234dd38)
+// The threshold is the song's, else beatmatcher's (0x823341d0) [C]; it does
+// not depend on the difficulty [C]. GH2 has no forced HOPO notes [C].
+// TODO(face-off): the game keeps one gem list per player (0x8233fe50 ->
+// 0x8234e0f0), so "prev" may be the previous gem of that player's list; with
+// one list for every player (single player) this is exact.
+void markHopos(Chart& chart, int hopoTicks) {
+    for (size_t i = 0; i < chart.gems.size(); ++i) {
+        Gem& g = chart.gems[i];
+        if (i == 0) {
+            g.hopo = false;
+            continue;
+        }
+        const Gem& prev = chart.gems[i - 1];
+        g.hopo = (prev.frets & g.frets) == 0 && g.fretCount() == 1 && g.tick - prev.tick < hopoTicks;
     }
-    chart.gems.push_back(g);
 }
 
-// GH1's DifficultyParser (FUN_002619d0) for one difficulty of a PART track:
-// base = 60 + 12 * difficulty; base+0..4 frets, base+7 Star Power,
-// base+9 / base+10 face-off sections [C data: the same layout in GH2].
+// One difficulty of a PART track: base = 60 + 12 * difficulty; base+0..4
+// frets, base+7 Star Power, base+9 / base+10 face-off sections [C data: the
+// same layout as GH1]. The face-off section handling is GH1's (FUN_002619d0)
+// [I for GH2, FINDINGS open question 3].
 Chart parseDifficulty(const MidiTrack& track, int difficulty, const TempoMap& tempo, int hopoTicks) {
     Chart chart;
     struct Open { int tick = -1; uint8_t players = 0; };
@@ -87,7 +99,7 @@ Chart parseDifficulty(const MidiTrack& track, int difficulty, const TempoMap& te
         g.durationTicks = tick - start;
         g.ms = static_cast<float>(tempo.tickToMs(start));
         g.durationMs = std::trunc(static_cast<float>(tempo.tickToMs(tick)) - g.ms);
-        g.noSustain = g.durationTicks < kSustainTicks;
+        g.noSustain = g.durationTicks <= kNoSustainTicks;  // 0x82345480 [C]
         g.players = open[rel].players;
         for (int f = 0; f < 5; ++f) {
             if (open[f].tick >= 0 && std::abs(open[f].tick - start) <= kChordTicks) {
@@ -95,12 +107,16 @@ Chart parseDifficulty(const MidiTrack& track, int difficulty, const TempoMap& te
                 open[f] = {};
             }
         }
-        appendGem(chart, g, hopoTicks);
+        chart.gems.push_back(g);
     }
 
     // Gems are emitted at note-off; keep that order unless it breaks time order.
     if (!std::is_sorted(chart.gems.begin(), chart.gems.end(), [](const Gem& a, const Gem& b) { return a.tick < b.tick; }))
         std::stable_sort(chart.gems.begin(), chart.gems.end(), [](const Gem& a, const Gem& b) { return a.tick < b.tick; });
+    // The game adds gems in time order; mark HOPOs in that order.
+    markHopos(chart, hopoTicks);
+
+    // Phrase membership, 0x822bc1e8 [C]: phrase.start <= gem.tick < phrase.end.
 
     for (size_t p = 0; p < chart.phrases.size(); ++p) {
         StarPhrase& ph = chart.phrases[p];

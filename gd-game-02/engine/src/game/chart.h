@@ -11,18 +11,24 @@
 #include "data/midi.h"
 #include "game/rules.h"
 
+// GH2's gem record (16 bytes, built by 0x82345480) [C]:
+// {f32 start_ms; s32 start_tick; u16 duration_ms; u16 duration_ticks;
+//  u8 fret_mask; u8 flags; u8 player_mask; u8 pad}, flags bit 7 = HOPO-able,
+// bit 6 = no sustain.
 struct Gem {
-    float ms = 0;          // start time
-    int tick = 0;
-    float durationMs = 0;  // a whole number of ms, as in GH1 [I for GH2]
+    float ms = 0;          // start_ms
+    int tick = 0;          // start_tick
+    float durationMs = 0;  // u16 duration_ms (whole ms)
     int durationTicks = 0;
-    uint8_t frets = 0;     // bit 0 = green .. bit 4 = orange
-    bool hopo = false;     // can be hammered on / pulled off
-    bool noSustain = false;
-    uint8_t players = 0;   // face-off ownership bits (multiplayer only)
-    // GH1 (FUN_0025b688): mask 0 (no section note held) or 3 is both players'.
+    uint8_t frets = 0;     // fret_mask: bit 0 = green .. bit 4 = orange
+    bool hopo = false;     // flags 0x80
+    bool noSustain = false;  // flags 0x40
+    // player_mask: 0 = every player, else bit p = player p (0x82347688) [C].
+    // Set from the face-off section notes (assumed as in GH1, FINDINGS open
+    // question 3) [I].
+    uint8_t players = 0;
     bool ownedBy(int p) const { return players == 0 || ((players >> p) & 1); }
-    int phrase = -1;       // Star Power phrase index, or -1
+    int phrase = -1;       // Star Power phrase index, or -1 (0x822bc1e8)
 
     int fretCount() const { return std::popcount(static_cast<unsigned>(frets)); }
 };
@@ -67,8 +73,8 @@ struct Song {
     const Chart& chart(Part p, Difficulty d) const { return charts[size_t(p)][size_t(d)]; }
 };
 
-// Builds the playable charts of every PART track with GH1's parser rules
-// (gd01 game/chart.cpp; [I] for GH2 until read in the 360 executable) and
-// GH2's HOPO threshold in ticks (beatmatcher.dtb, or the song's own).
+// Builds the playable charts of every PART track with GH2's parser rules
+// (docs/FINDINGS.md "Chart -> gem list") and the song's HOPO threshold in
+// ticks (songs.dtb's hopo_threshold, else beatmatcher.dtb's; 0x823341d0).
 // Throws on malformed input.
 Song buildSong(const MidiFile& midi, int hopoThresholdTicks);

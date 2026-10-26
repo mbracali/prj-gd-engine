@@ -10,10 +10,12 @@
 
 // Perfect guitar-mode input for a chart: press a gem's frets just before it,
 // strum on time, and hold until the next gem. With `hammer`, HOPO-able gems are
-// played as the original's watcher allows (FUN_002639b8): a hammer-on presses a
+// played as GH2's NonStrumSwing allows (0x8234f210): a hammer-on presses a
 // fret above all held ones, a pull-off releases down to a fret already held,
-// neither strums, and all frets are never let go in between. Used by
-// --autoplay and the self-test.
+// neither strums. Without `hammer` every gem is strummed; GH2 has no strum
+// gate, so pressing the fret of an eligible HOPO gem already hits it and the
+// strum after it is forgiven (swingAtHopo). Used by --autoplay and the
+// self-test.
 class Autoplay {
 public:
     // `player` >= 0: a face-off player, who plays only the gems it owns.
@@ -33,7 +35,7 @@ public:
             const Gem& g = gems[i];
             if (player >= 0 && !g.ownedBy(player)) continue;
             const int f = g.fretCount() == 1 ? std::countr_zero(unsigned(g.frets)) : -1;
-            // Inside the HOPO window (gem - 40 .. gem + 160 ms) and after the previous hit.
+            // Inside the HOPO window (gem - 100 .. gem + 160 ms) and after the previous hit.
             const float ht = g.ms + 5;
             const bool chain = hammer && g.hopo && f >= 0 && prev == int(i) - 1 && held && prevHit + 1 < ht;
             if (chain && f > top(held)) {  // hammer-on
