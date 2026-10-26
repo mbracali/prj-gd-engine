@@ -12,7 +12,7 @@ id = `gd-game-02`
 **This folder contains the re implementation of**:
 - **Game**: Guitar Hero 2
 - **Version**: Xbox 360
-- **Launched**: Nov/2006 (original)
+- **Launched**: Apr/2007 (Xbox 360; the PS2 original came out Nov/2006)
 - **Musics**: --
 - **Venues**: --
 - **Chars**: --
