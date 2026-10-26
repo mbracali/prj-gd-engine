@@ -10,7 +10,10 @@ struct Options {
     int difficulty = 3;    // 0 Easy .. 3 Expert
     bool autoplay = false;
     bool noFail = false;
+    std::string walk;      // --walktest <scenario> (tests/walktest.h)
 };
 
-// The window, a debug song list and the debug highway. Returns the exit code.
+// The window and GH2's own front end (ui/ui_manager.h) around the song
+// screen; `--song` plays one song directly, GD02_DEBUG_MENU=1 shows the
+// debug song list instead of the menus. Returns the exit code.
 int runApp(const Options& options);

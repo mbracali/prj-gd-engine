@@ -86,6 +86,7 @@
     X(decltype(&::glScissor), glScissor)                                        \
     X(decltype(&::glTexImage2D), glTexImage2D)                                  \
     X(decltype(&::glTexParameteri), glTexParameteri)                            \
+    X(decltype(&::glTexSubImage2D), glTexSubImage2D)                            \
     X(decltype(&::glViewport), glViewport)
 
 namespace gl {

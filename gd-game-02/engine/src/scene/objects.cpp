@@ -8,6 +8,8 @@
 #include <map>
 #include <stdexcept>
 
+#include "scene/ui_objects.h"
+
 namespace scene {
 
 float DataNode::asFloat() const {
@@ -485,7 +487,7 @@ void readFont(In& in, Font& f) {
     f.mat = in.str();
     in.fs(f.cellSize);
     f.deprecatedSize = in.f();
-    f.space = in.f();
+    f.spacing = in.f();
     f.chars = in.str();
     if (in.b()) {  // kerning table (@ 0x821d4a00): u32 count, (u32 pair, f32 amount)
         uint32_t n = in.u32();
@@ -497,11 +499,11 @@ void readFont(In& in, Font& f) {
         }
     }
     f.textureOwner = in.str();
-    f.flagA = in.b();
-    f.flagB = in.b();
+    f.monospace = in.b();
+    f.unknown1074 = in.b();
     f.texWidth = in.u32();
     f.texHeight = in.u32();
-    in.fs(f.baseKerning);
+    in.fs(f.cellUv);
     for (auto& g : f.glyphs) {
         g.x = in.f();
         g.y = in.f();
@@ -785,23 +787,52 @@ std::unique_ptr<DirObj> decodeDir(const std::string& cls, const std::string& nam
     return d;
 }
 
-bool isTypedClass(const std::string& cls) { return decoders().count(cls) != 0 || isDirClass(cls); }
+ObjectHeader readObjectHeaderAt(const Bytes& record, size_t& pos) {
+    In in(record, pos);
+    ObjectHeader h = readObjectHeader(in);
+    pos = in.pos();
+    return h;
+}
+
+void readTransAt(const Bytes& record, size_t& pos, Trans& t) {
+    In in(record, pos);
+    readTrans(in, t);
+    pos = in.pos();
+}
+
+void readDrawAt(const Bytes& record, size_t& pos, Draw& d) {
+    In in(record, pos);
+    readDraw(in, d);
+    pos = in.pos();
+}
+
+bool isTypedClass(const std::string& cls) { return decoders().count(cls) != 0 || isDirClass(cls) || isUiClass(cls); }
 
 std::unique_ptr<Object> decodeObject(const std::string& cls, const std::string& name, const uint8_t* data, size_t size) {
     const auto& m = decoders();
     auto it = m.find(cls);
-    std::unique_ptr<Object> o = it != m.end() ? it->second.make() : std::make_unique<Object>();
+    const bool ui = it == m.end() && isUiClass(cls);  // scene/ui_objects.h
+    std::unique_ptr<Object> o = it != m.end() ? it->second.make() : ui ? makeUiObject(cls) : std::make_unique<Object>();
     o->cls = cls;
     o->name = name;
     o->record.assign(data, data + size);
-    o->typed = it != m.end();
+    o->typed = it != m.end() || ui;
     if (size >= 4) o->version = uint32_t(data[0]) | uint32_t(data[1]) << 8 | uint32_t(data[2]) << 16 | uint32_t(data[3]) << 24;
     if (!o->typed) return o;
     try {
-        In in(o->record.data(), o->record.size());
-        in.u32();
-        it->second.read(in, *o);
-        if (in.remaining() != 0) bad(std::to_string(in.remaining()) + " bytes left before the end marker");
+        size_t left = 0;
+        if (ui) {
+            size_t pos = 4;
+            if (size < 4) bad("record too short");
+            readUiObject(*o, o->record, pos);
+            left = size - pos;
+        } else {
+            In in(o->record.data(), o->record.size());
+            in.u32();
+            it->second.read(in, *o);
+            left = in.remaining();
+        }
+        if (left != 0) bad(std::to_string(left) + " bytes left before the end marker");
         o->decoded = true;
     } catch (const std::exception& e) {
         o->error = e.what();

@@ -8,6 +8,7 @@
 #include <cmath>
 
 #include "scene/milo.h"
+#include "scene/ui_objects.h"
 
 namespace gfx {
 
@@ -23,6 +24,8 @@ const scene::Trans* transOf(const scene::Object* o) {
     if (auto* p = o->as<scene::ParticleSys>()) return &p->trans;
     if (auto* t = o->as<scene::Text>()) return &t->trans;
     if (auto* d = o->as<scene::DirObj>(); d && d->hasRnd) return &d->rnd.trans;
+    if (auto* u = o->as<scene::UIComponent>()) return &u->trans;
+    if (auto* b = o->as<scene::BandPlacer>()) return &b->trans;
     return nullptr;
 }
 
@@ -34,6 +37,9 @@ const scene::Draw* drawOf(const scene::Object* o) {
     if (auto* t = o->as<scene::Text>()) return &t->draw;
     if (auto* w = o->as<scene::TrackWidget>()) return &w->draw;
     if (auto* d = o->as<scene::DirObj>(); d && d->hasRnd) return &d->rnd.draw;
+    if (auto* u = o->as<scene::UIComponent>()) return &u->draw;
+    if (auto* m = o->as<scene::ScreenMask>()) return &m->draw;
+    if (auto* b = o->as<scene::BandPlacer>()) return &b->draw;
     return nullptr;
 }
 

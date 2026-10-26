@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <string>
 
+#include "audio/audio_source.h"
 #include "data/bytes.h"
 
 struct stb_vorbis;
@@ -13,21 +14,21 @@ struct stb_vorbis;
 // (third_party/stb_vorbis), from a .mogg held in memory. GH2's song moggs are
 // 4-6 channels at 32000, 32250 or 44100 Hz [C data]. Not thread-safe: one
 // thread decodes (the mixer's worker).
-class VorbisStream {
+class VorbisStream final : public AudioSource {
 public:
     // Takes the whole .mogg file; throws std::runtime_error when it is not a
     // plain mogg or its Vorbis headers do not decode.
     explicit VorbisStream(Bytes mogg);
-    ~VorbisStream();
+    ~VorbisStream() override;
     VorbisStream(const VorbisStream&) = delete;
     VorbisStream& operator=(const VorbisStream&) = delete;
 
-    int channels() const { return channels_; }
-    int sampleRate() const { return rate_; }
+    int channels() const override { return channels_; }
+    int sampleRate() const override { return rate_; }
     uint64_t lengthFrames() const { return length_; }
     // Decodes up to `frames` frames into one buffer per channel; returns the
     // count decoded (less than asked only at the end of the stream).
-    int decode(float* const* channelBuffers, int frames);
+    int decode(float* const* channelBuffers, int frames) override;
     bool seek(uint64_t frame);
 
 private:

@@ -36,6 +36,10 @@ Status: ✅ done · 🟡 partly done / approximated · ❌ not started
 | M5 | C++ `.milo_xbox` loader: every typed object of all 503 milos decodes (`--scenetest`); `--view <milo>` | `docs/milo_and_textures.md` |
 | M6 | GH2's original highway from `track_new` (surface, gems, HOPO / star / bonus, built tails, smashers, flames, beat lines, Star Power) and the `hud_sp` HUD (score, multiplier, streak, star meter, rock meter, messages) | `docs/highway_and_hud.md`; `GD02_DEBUG_HIGHWAY=1` for the old one |
 | M6 | Particles (generic, `render/particles`), sparks, tail and star-meter particles, intro sequence, win explode + "You Rock!", fail wind-down, Lefty, two-player tracks and the vs / co-op / practice HUDs (dev flag `GD02_MODE`) | `docs/highway_and_hud.md`; the 360's peak flames draw nothing in the original |
+| M7 | gd01's interpreter on GH2's 177 `.dtb` (`#merge`, `new`, `handle`, task units, L1 logging); `--scripttest` | `docs/ui_and_frontend.md` |
+| M7 | UI object decoders, text chains, styles; GH2's front end: boot, title / attract, main, Quick play, difficulty, loading, game, results, high scores, pause, lose, options, credits, bonus videos | `--uitest`, `--walktest`; debug song list behind `GD02_DEBUG_MENU=1` |
+| M7 | Save (`career.json`, GH2's version 17 data, atomic + `.bak`, every setter marks it dirty: L12); GAMEPADS screen | |
+| M7 / Q2 | `.wmv` videos: minimal LGPL FFmpeg 7.1.5 (ASF, WMV3, WMA v2), shared libraries + licence notice in every download | `--playmovie` |
 
 ## In progress
 
@@ -51,16 +55,15 @@ Nothing right now.
 | M2 | Research | Co-op fail (player or band meter), face-off note assignment, `min_length`, co-op star thresholds | ❌ | FINDINGS open questions 2–5, 7 |
 | M2 | Research | Lefty Flip, input sampling rate, controller latency (`watcher +0x2c`) on the 360 | ❌ | L3: where rules depend on sampling |
 | M10 | Modes | Practice track surface (rosewood) and practice UI pieces | ❌ | Two-player rules: see below |
-| M7 | UI | Touch lanes for the new renderer; the GAMEPADS screen | ❌ | Input API ready |
-| M7 | UI | gd01's interpreter on GH2's `ui/*.dtb` panels: boot, main menu, Quickplay, difficulty, loading, pause, results | ❌ | L1: log every unhandled message |
-| M7 | UI | Profiles and save; every setter marks `needs_save` | ❌ | L12 |
+| M7 | UI | Touch lanes for the new renderer | ❌ | Input API ready |
+| M7 | UI | Sound effects (XMA SynthSample banks), endgame receipt lighting (`turn_off_ambient`), live volume sliders, help bar boxes, progress export / import | ❌ | `docs/ui_and_frontend.md` "Not done" |
 | M8 | Venues | `world/` venues, venue scripts, lighting (TRIGGERS 48–50/52), camera director, particles, bloom / DOF | ❌ | |
 | M9 | Band | Characters, skinning, clips, `BAND *` tracks, hand positions (notes 40–59) | ❌ | |
 | M9 | Band | Lip-sync and faces (`.voc` "FACE…Harmonix", `.fac`), crowd | ❌ | |
 | M10 | Modes | Co-op (shared Star Power, band streak, score normalisation), face-off, pro face-off | ❌ | FINDINGS "Two players" |
 | M10 | Modes | Practice: sections, 100/85/65/50 % (resampled, no pitch correction), click track | ❌ | |
 | M10 | Modes | Career with encores, store (26 bonus songs at 550), unlocks, cheats | ❌ | |
-| M11 | Polish | Tutorials (9 charts, narration in 5 languages), `.wmv` videos (decoder to choose), credits | ❌ | |
+| M11 | Polish | Tutorials (9 charts, narration in 5 languages) | ❌ | |
 | M11 | Polish | Enhanced Settings (L20), per-build defaults, Steam Deck pass, first release `gd-game-02/v1.0.0` | ❌ | |
 
 ### Questions for the owner
@@ -68,5 +71,5 @@ Nothing right now.
 | # | Question | Status |
 |---|---|---|
 | Q1 | Reference captures from the original: Xenia or a real Xbox 360 | Decide later (user) |
-| Q2 | `.wmv` video decoder (intro, logos) | ❌ |
+| Q2 | `.wmv` video decoder (intro, logos) | ✅ minimal LGPL FFmpeg |
 | Q3 | Achievements, leaderboards and the DLC sample package (`xboxlive/gh2xp0001`) | ❌ |

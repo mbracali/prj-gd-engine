@@ -10,6 +10,23 @@
 #include "data/bytes.h"
 #include "data/random_file.h"
 
+// A file of the disc's own file system, outside the archive (GH2's videos:
+// "videos/intro.wmv"), in the disc image or the extracted folder.
+// Reads are thread-safe (RandomFile serialises them).
+class DiscFile {
+public:
+    DiscFile(RandomFile* file, std::unique_ptr<RandomFile> owned, uint64_t base, uint64_t size)
+        : file_(file), owned_(std::move(owned)), base_(base), size_(size) {}
+    uint64_t size() const { return size_; }
+    // Reads bytes [offset, offset + n), clamped to the file's end; returns the count.
+    size_t read(uint64_t offset, void* dst, size_t n);
+
+private:
+    RandomFile* file_;
+    std::unique_ptr<RandomFile> owned_;
+    uint64_t base_, size_;
+};
+
 // Read access to the files inside GH2's ARK archive (gen/main.hdr +
 // gen/main_<n>.ark), loaded from either an Xbox 360 disc image or an
 // extracted folder (the game partition's files: gen/, default.xex, ...).
@@ -32,6 +49,9 @@ public:
     const std::string& description() const { return description_; }
     // All archive paths (lower case), in no particular order.
     std::vector<std::string> paths() const;
+    // Opens a file of the disc's file system (not the archive), matched
+    // case-insensitively, e.g. "videos/intro.wmv"; nullptr if missing.
+    std::unique_ptr<DiscFile> openDiscFile(const std::string& discPath) const;
 
 private:
     struct Part {
@@ -53,4 +73,6 @@ private:
     std::vector<Part> parts_;
     std::unordered_map<std::string, Entry> entries_;
     std::string description_;
+    RandomFile* image_ = nullptr;  // the disc image, or
+    std::string folder_;           // the extracted folder
 };

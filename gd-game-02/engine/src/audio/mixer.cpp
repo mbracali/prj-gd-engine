@@ -58,7 +58,7 @@ void Mixer::workerLoop() {
     }
 }
 
-void Mixer::play(std::unique_ptr<VorbisStream> stream, std::vector<Track> tracks, double leadInMs) {
+void Mixer::play(std::unique_ptr<AudioSource> stream, std::vector<Track> tracks, double leadInMs) {
     stop();
     SDL_LockAudioStream(stream_);
     SDL_ClearAudioStream(stream_);

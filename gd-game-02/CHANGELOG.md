@@ -14,5 +14,12 @@ matches the tag's version. Nothing is released yet.
 - The Guitar Dream Engine badge as the icon of the window, `gd02.exe`,
   `gd02.app`, the Android app and (Linux downloads) the application menu entry.
 - Downloads for Windows, Linux, Steam Deck, macOS and Android ("GD Engine 02").
-- A song list and a debug highway that play every song's chart against its
-  audio with Guitar Hero II's own rules, on the keyboard.
+- Guitar Hero II's own menus, from its scripts: the intro, title screen,
+  main menu, Quick play song list, difficulty, loading, results (the Daily
+  Dose), high scores with name entry, pause, options and credits.
+- Guitar Hero II's highway and HUD, with sparks, the intro sequence,
+  "You Rock!" and the fail wind-down; Lefty Flip.
+- The intro and bonus videos (a minimal FFmpeg ships with the game, under the
+  LGPL; its licence and source link are in `licenses/`).
+- Progress and options saved to `career.json`, and a GAMEPADS screen to set
+  up guitars and gamepads.

@@ -46,6 +46,10 @@ public:
     // The 2D program (canvas.cpp): GdCanvas block, sampler sTex in slot 0.
     ProgramId canvasProgram() const { return canvasProgram_; }
     static ProgramDesc canvasProgramDesc();
+    // The video program (video/wmv_player.cpp): the canvas's vertices and
+    // GdCanvas block; samplers sY, sU, sV (slots 0-2) are a frame's YUV 4:2:0
+    // planes, converted to RGB here (BT.601, limited range).
+    static ProgramDesc videoProgramDesc();
 
 private:
     SDL_Window* window_ = nullptr;

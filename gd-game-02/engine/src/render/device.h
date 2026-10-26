@@ -32,7 +32,8 @@ struct TargetId { uint32_t id = 0; explicit operator bool() const { return id !=
 // normal maps); the data passed in is in PC block order (the Xbox 360's
 // 16-bit swap already undone, texture_codec.h). Where the GPU lacks S3TC or
 // RGTC (most GLES drivers) the device decodes them to RGBA8 on the CPU.
-enum class TexFormat : uint8_t { RGBA8, BC1, BC3, BC5 };
+// R8: one 8-bit channel (the video player's Y, U and V planes).
+enum class TexFormat : uint8_t { RGBA8, BC1, BC3, BC5, R8 };
 enum class TexKind : uint8_t { Tex2D, Cube };
 
 struct TextureDesc {
@@ -143,6 +144,9 @@ public:
     // Resources. Creation returns an empty handle and sets `error` on failure.
     virtual TextureId createTexture(const TextureDesc& desc, const TexLevel* levels, std::string& error) = 0;
     virtual void destroyTexture(TextureId t) = 0;
+    // Replaces mip level 0 of an RGBA8 or R8 2D texture (streamed images:
+    // video frames); `pitch` is the source's bytes per row.
+    virtual void updateTexture(TextureId t, const void* data, size_t pitch) = 0;
     virtual BufferId createBuffer(BufferKind kind, size_t size, const void* data, bool dynamic) = 0;
     // Replaces `size` bytes at `offset`. A dynamic buffer written at offset 0
     // is renamed first, so the GPU may still read the previous contents.

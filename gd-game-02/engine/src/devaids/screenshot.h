@@ -11,3 +11,12 @@ class Canvas;
 // SDL_AUDIO_DRIVER=dummy. Call after drawing a frame, before presenting it;
 // returns true when the program should quit.
 bool captureDebugScreenshot(Canvas& canvas, bool inSong, double songMs);
+
+#include <string>
+
+// Saves the frame being drawn (before it is presented) as a .bmp; false on failure.
+bool saveScreenshot(Canvas& canvas, const std::string& path);
+
+// With GH2's menus: GD02_SCREENSHOT_AT's plain times are wall-clock ms since
+// the menus started, "s<ms>" times song ms (when a song plays, `songMs` >= -1e8).
+bool captureMenuScreenshot(Canvas& canvas, double wallMs, double songMs);

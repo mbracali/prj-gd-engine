@@ -299,20 +299,25 @@ public:
     std::vector<VertKey<std::array<float, 4>>> colorKeys;
 };
 
-// RndFont v15 (Load @ 0x821d4cd8): a glyph sheet (the material's texture).
+// RndFont v15 (Load @ 0x821d4cd8): a glyph sheet (the material's texture)
+// with a stored glyph table (render/text_layout.h has the layout rules).
 class Font : public Object {
 public:
     std::string mat;
-    std::array<float, 2> cellSize{};
-    float deprecatedSize = 0, space = 0;
+    std::array<float, 2> cellSize{};  // one cell in texels (+0x1048)
+    float deprecatedSize = 0;
+    float spacing = 0;      // added between every glyph pair, cell widths (+0x1044; Q: name)
     std::string chars;
-    std::vector<std::pair<uint32_t, float>> kerning;  // (char pair, amount)
-    std::string textureOwner;  // Q: v9+ font reference
-    bool flagA = false, flagB = false;  // Q: v11+ / v15+ bytes
-    uint32_t texWidth = 0, texHeight = 0;  // Q: v13+ (the sheet size the cells were made for)
-    std::array<float, 2> baseKerning{};    // Q: v14+
+    std::vector<std::pair<uint32_t, float>> kerning;  // (first | second << 8, amount in cell widths)
+    std::string textureOwner;  // the font whose glyph table and kerning are used (itself when empty)
+    bool monospace = false;    // v11+ (+0x1068): advance 1 cell, no kerning (Q: name)
+    bool unknown1074 = false;  // v15+ (+0x1074; Q: not used by the layout)
+    uint32_t texWidth = 0, texHeight = 0;  // v13+: the sheet size the cells were made for
+    std::array<float, 2> cellUv{};         // v14+: one cell in UV (+0x106C)
     struct Glyph {
-        float x = 0, y = 0, width = 0, advance = 0;  // Q: names
+        float x = 0, y = 0;     // UV of the cell's top-left corner
+        float width = 0;        // quad width in cell widths
+        float advance = 0;      // pen advance in cell widths
     };
     std::array<Glyph, 256> glyphs{};
 };
@@ -428,6 +433,12 @@ bool isDirClass(const std::string& cls);
 // record's end marker (checked). Throws on malformed data.
 std::unique_ptr<DirObj> decodeDir(const std::string& cls, const std::string& name, const Bytes& stream, size_t start,
                                   bool own, const std::function<size_t(size_t)>& inlineDir, size_t& end);
+
+// The shared sub-records for decoders in other files (scene/ui_objects.cpp):
+// each reads at record[pos] and advances pos; throws on malformed data.
+ObjectHeader readObjectHeaderAt(const Bytes& record, size_t& pos);
+void readTransAt(const Bytes& record, size_t& pos, Trans& t);
+void readDrawAt(const Bytes& record, size_t& pos, Draw& d);
 
 // Classes this decoder knows (all objects of these classes are typed).
 bool isTypedClass(const std::string& cls);

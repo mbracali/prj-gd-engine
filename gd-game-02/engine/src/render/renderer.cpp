@@ -36,7 +36,35 @@ void main() {
 }
 )";
 
+// YUV 4:2:0 to RGB: ITU-R BT.601, limited range (Y 16..235, Cb / Cr
+// 16..240), what WMV3 / VC-1 Main profile carries at 720x480 [I].
+const char* kVideoFragment = R"(
+in vec4 vColor;
+in vec2 vUv;
+uniform sampler2D sY;
+uniform sampler2D sU;
+uniform sampler2D sV;
+out vec4 fragColor;
+void main() {
+    float y = (texture(sY, vUv).r - 16.0 / 255.0) * (255.0 / 219.0);
+    float u = (texture(sU, vUv).r - 128.0 / 255.0) * (255.0 / 224.0);
+    float v = (texture(sV, vUv).r - 128.0 / 255.0) * (255.0 / 224.0);
+    vec3 rgb = vec3(y + 1.402 * v, y - 0.344136 * u - 0.714136 * v, y + 1.772 * u);
+    fragColor = vec4(clamp(rgb, 0.0, 1.0), 1.0) * vColor;
+}
+)";
+
 }  // namespace
+
+ProgramDesc Renderer::videoProgramDesc() {
+    ProgramDesc d;
+    d.name = "video";
+    d.vertex = kCanvasVertex;
+    d.fragment = kVideoFragment;
+    d.uniformBlocks = {"GdCanvas"};
+    d.samplers = {"sY", "sU", "sV"};
+    return d;
+}
 
 Renderer::~Renderer() { shutdown(); }
 
@@ -113,6 +141,11 @@ std::vector<std::string> Renderer::compileAll(int& programs) {
     ++programs;
     if (ProgramId p = device_->createProgram(canvasProgramDesc(), error)) device_->destroyProgram(p);
     else SDL_Log("shader canvas: %s", error.c_str()), failed.push_back("canvas");
+    // The video player's YUV program.
+    ++programs;
+    error.clear();
+    if (ProgramId p = device_->createProgram(videoProgramDesc(), error)) device_->destroyProgram(p);
+    else SDL_Log("shader video: %s", error.c_str()), failed.push_back("video");
     // Every standard permutation.
     for (uint32_t key : StandardShaders::testKeys()) {
         ++programs;

@@ -141,9 +141,11 @@ build_linux() {
     say "Building in an ubuntu:22.04 container ($runner), exactly like the release"
     in_container "$runner" docker.io/library/ubuntu:22.04 build_linux_portable.sh
   else
-    say "Building natively (no container; needs cmake, ninja, a C++20 compiler and SDL3 development files)"
+    say "Building natively (no container; needs cmake, ninja, make, a C++20 compiler and SDL3 development files)"
     . "$engine/build_common.sh"
+    (cd "$engine" && build_ffmpeg build/ffmpeg/linux Linux --disable-x86asm)
     cmake -S "$engine" -B "$engine/build/native" -G Ninja -DCMAKE_BUILD_TYPE=Release \
+      -DGD02_FFMPEG_DIR="$engine/build/ffmpeg/linux/ffmpeg-prefix" \
       -DCMAKE_BUILD_RPATH='$ORIGIN' -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON -DCMAKE_INSTALL_RPATH='$ORIGIN' >/dev/null
     compile "$engine/build/native" gd02
     local d="$engine/dist/gd02-linux-x86_64"
@@ -154,6 +156,8 @@ build_linux() {
     sdl="$(ldd "$d/gd02" | awk '/libSDL3\.so/ {print $3}')"
     [ -n "$sdl" ] && cp -L "$sdl" "$d/"
     cp "$engine/third_party/stb_vorbis/LICENSE.txt" "$d/licenses/stb_vorbis-LICENSE.txt"
+    cp "$engine"/build/native/libav*.so.[0-9]* "$d/"
+    ship_ffmpeg_licence "$engine/build/ffmpeg/linux/ffmpeg-prefix" "$d"
   fi
   ship linux gd02-linux-x86_64
 }

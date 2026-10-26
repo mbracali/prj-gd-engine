@@ -183,6 +183,8 @@ Object* Directory::find(const std::string& name) const {
     if (Object* o = get(name)) return o;
     for (const auto& [owner, d] : subdirs)
         if (Object* o = d->find(name)) return o;
+    for (const Directory* d : linked)
+        if (Object* o = d != this ? d->get(name) : nullptr) return o;
     return nullptr;
 }
 

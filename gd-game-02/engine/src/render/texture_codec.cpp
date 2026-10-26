@@ -56,6 +56,7 @@ void channelBlock(const uint8_t* b, uint8_t out[16]) {
 
 size_t levelSize(TexFormat format, int w, int h) {
     if (format == TexFormat::RGBA8) return size_t(w) * size_t(h) * 4;
+    if (format == TexFormat::R8) return size_t(w) * size_t(h);
     return size_t((w + 3) / 4) * size_t((h + 3) / 4) * blockBytes(format);
 }
 

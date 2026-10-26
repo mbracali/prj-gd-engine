@@ -62,6 +62,7 @@ GameData::GameData(const std::string& path) {
             files_.push_back(std::move(pf));
         }
         description_ = "folder " + path;
+        folder_ = path;
     } else {
         auto image = RandomFile::open(path);
         if (!image) throw std::runtime_error("Cannot open " + path);
@@ -77,6 +78,7 @@ GameData::GameData(const std::string& path) {
             if (!e) throw std::runtime_error("Disc image is missing gen/" + partName(i));
             parts_.push_back({image.get(), e->offset, e->size});
         }
+        image_ = image.get();
         files_.push_back(std::move(image));
         description_ = "disc image " + path;
     }
@@ -164,4 +166,38 @@ std::vector<std::string> GameData::paths() const {
     out.reserve(entries_.size());
     for (const auto& [path, entry] : entries_) out.push_back(path);
     return out;
+}
+
+size_t DiscFile::read(uint64_t offset, void* dst, size_t n) {
+    if (offset >= size_) return 0;
+    n = static_cast<size_t>(std::min<uint64_t>(n, size_ - offset));
+    if (n) file_->read(base_ + offset, dst, n);
+    return n;
+}
+
+std::unique_ptr<DiscFile> GameData::openDiscFile(const std::string& discPath) const {
+    if (image_) {
+        auto disc = Xdvdfs::open(*image_);
+        auto e = disc ? disc->find(discPath) : std::nullopt;
+        if (!e) return nullptr;
+        return std::make_unique<DiscFile>(image_, nullptr, e->offset, e->size);
+    }
+    fs::path p = folder_;
+    for (size_t at = 0; at <= discPath.size();) {
+        size_t slash = discPath.find('/', at);
+        if (slash == std::string::npos) slash = discPath.size();
+        if (slash > at) {
+            auto child = findChild(p, discPath.substr(at, slash - at));
+            if (!child) return nullptr;
+            p = *child;
+        }
+        at = slash + 1;
+    }
+    std::error_code ec;
+    if (!fs::is_regular_file(p, ec)) return nullptr;
+    auto f = RandomFile::open(p.string());
+    if (!f) return nullptr;
+    RandomFile* raw = f.get();
+    const uint64_t size = raw->size();
+    return std::make_unique<DiscFile>(raw, std::move(f), 0, size);
 }

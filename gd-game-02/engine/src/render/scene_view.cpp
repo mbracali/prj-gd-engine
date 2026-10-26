@@ -16,6 +16,7 @@
 #include "devaids/screenshot.h"
 #include "render/canvas.h"
 #include "render/scene_gpu.h"
+#include "render/ui_view.h"
 #include "scene/milo.h"
 
 namespace {
@@ -66,7 +67,34 @@ private:
     gfx::Camera autoCam_;
     gfx::LightEnv env_;
     std::string envName_;
+    // A UI panel (PanelDir): drawn with its components (render/ui_view.h).
+    std::unique_ptr<scene::MiloLibrary> library_;
+    scene::UiStyles styles_;
+    scene::Locale locale_;
+    std::unique_ptr<gfx::UiView> ui_;
+    void startUi();
 };
+
+// GD02_VIEW_LANG=eng|fre|deu|ita|esl picks the locale, GD02_VIEW_FOCUS=<button>
+// the focused component, GD02_VIEW_UI=0 draws a PanelDir as a plain scene.
+void SceneView::startUi() {
+    const char* off = SDL_getenv("GD02_VIEW_UI");
+    if (milo_->root().cls != "PanelDir" || (off && std::string(off) == "0")) return;
+    try {
+        library_ = std::make_unique<scene::MiloLibrary>(*data_);
+        styles_.load(*data_);
+        const char* lang = SDL_getenv("GD02_VIEW_LANG");
+        locale_.load(*data_, lang ? lang : "eng");
+        ui_ = std::make_unique<gfx::UiView>(*data_, *library_, styles_, locale_, *cache_);
+        ui_->load(miloPath_);
+        if (const char* f = SDL_getenv("GD02_VIEW_FOCUS")) ui_->setFocus(f);
+        env_ = ui_->environment();
+        envName_ = "panel";
+    } catch (const std::exception& e) {
+        SDL_Log("view: UI panel: %s", e.what());
+        ui_.reset();
+    }
+}
 
 void SceneView::build() {
     Vec3 lo, hi;
@@ -139,20 +167,36 @@ void SceneView::environment() {
 void SceneView::frame() {
     gfx::Camera cam = autoCam_;
     std::string camName = "auto";
-    if (cam_ < cams_.size()) {
+    if (ui_ && cam_ == 0) {
+        cam = ui_->camera();
+        camName = ui_->cameraName();
+    } else if (ui_ && cam_ - 1 < cams_.size()) {
+        const scene::Cam* c = cams_[cam_ - 1];
+        cam.world = toMat4(worldXfm(c));
+        cam.yFov = c->yFov, cam.nearPlane = c->nearPlane, cam.farPlane = c->farPlane;
+        camName = c->name;
+    } else if (!ui_ && cam_ < cams_.size()) {
         const scene::Cam* c = cams_[cam_];
         cam.world = toMat4(worldXfm(c));
         cam.yFov = c->yFov, cam.nearPlane = c->nearPlane, cam.farPlane = c->farPlane;
         camName = c->name;
     }
     const SDL_Color clear = env_.fog ? SDL_Color{Uint8(env_.fogColor[0] * 255), Uint8(env_.fogColor[1] * 255), Uint8(env_.fogColor[2] * 255), 255}
-                                     : SDL_Color{24, 24, 30, 255};
+                                     : ui_ ? SDL_Color{0, 0, 0, 255} : SDL_Color{24, 24, 30, 255};
     canvas_.begin(clear);
     gfx::Renderer& r = canvas_.renderer();
     int vx, vy, vw, vh;
     r.pictureRect(vx, vy, vw, vh);
     r.materials().setFrame(cam, env_, vw, vh);
     const Vec3 eye = cam.position();
+    if (ui_) {
+        ui_->draw(r.materials());
+        char info[256];
+        std::snprintf(info, sizeof info, "%s  camera %s  %d meshes, %d texts  locale %s", miloPath_.c_str(), camName.c_str(),
+                      ui_->meshesDrawn(), ui_->textsDrawn(), locale_.language().c_str());
+        if (!SDL_getenv("GD02_VIEW_CLEAN")) canvas_.text(12, 8, 1.5f, {235, 235, 240, 255}, info);
+        return;
+    }
     std::vector<const Drawn*> blended;
     for (const Drawn& d : drawn_) {
         if (d.blended) blended.push_back(&d);
@@ -196,6 +240,9 @@ int SceneView::run(const std::string& dataPath, const std::string& miloPath) {
     cache_ = std::make_unique<gfx::SceneCache>(canvas_.renderer().device());
     build();
     environment();
+    startUi();
+    if (ui_)
+        for (const std::string& p : ui_->problems()) SDL_Log("view: UI: %s", p.c_str());
     SDL_Log("view: %s: %d meshes, %d textures (%d not decodable), %d cameras, environ '%s' with %d %s lights",
             miloPath.c_str(), int(drawn_.size()), int(cache_->textureCount()), cache_->skippedTextures(), int(cams_.size()), envName_.c_str(), env_.lightCount,
             env_.directional ? "directional" : "point");
@@ -206,7 +253,7 @@ int SceneView::run(const std::string& dataPath, const std::string& miloPath) {
         while (SDL_PollEvent(&e)) {
             if (e.type == SDL_EVENT_QUIT) running = false;
             if (e.type != SDL_EVENT_KEY_DOWN) continue;
-            const size_t n = cams_.size() + 1;  // the cameras, then the framing one
+            const size_t n = cams_.size() + 1;  // the cameras, then the framing one (UI: the panel's camera first)
             if (e.key.key == SDLK_ESCAPE) running = false;
             if (e.key.key == SDLK_RIGHT) cam_ = (cam_ + 1) % n;
             if (e.key.key == SDLK_LEFT) cam_ = (cam_ + n - 1) % n;
@@ -215,6 +262,7 @@ int SceneView::run(const std::string& dataPath, const std::string& miloPath) {
         if (captureDebugScreenshot(canvas_, false, 0)) running = false;
         canvas_.end();
     }
+    ui_.reset();
     cache_.reset();
     canvas_.shutdown();
     SDL_DestroyWindow(window);

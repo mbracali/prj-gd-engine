@@ -19,6 +19,12 @@
 #ifndef GL_COMPRESSED_RG_RGTC2
 #define GL_COMPRESSED_RG_RGTC2 0x8DBD
 #endif
+#ifndef GL_R8
+#define GL_R8 0x8229
+#endif
+#ifndef GL_UNPACK_ROW_LENGTH
+#define GL_UNPACK_ROW_LENGTH 0x0CF2
+#endif
 #ifndef GL_CLAMP_TO_BORDER
 #define GL_CLAMP_TO_BORDER 0x812D
 #endif
@@ -78,6 +84,8 @@ private:
 struct GlTexture {
     GLuint name = 0;
     GLenum target = GL_TEXTURE_2D;
+    int w = 0, h = 0;
+    TexFormat format = TexFormat::RGBA8;
 };
 struct GlBuffer {
     GLuint name = 0;
@@ -130,6 +138,7 @@ public:
     const DeviceInfo& info() const override { return info_; }
     TextureId createTexture(const TextureDesc& desc, const TexLevel* levels, std::string& error) override;
     void destroyTexture(TextureId t) override;
+    void updateTexture(TextureId t, const void* data, size_t pitch) override;
     BufferId createBuffer(BufferKind kind, size_t size, const void* data, bool dynamic) override;
     void updateBuffer(BufferId b, size_t offset, const void* data, size_t size) override;
     void destroyBuffer(BufferId b) override;
@@ -258,13 +267,15 @@ TextureId GlDevice::createTexture(const TextureDesc& desc, const TexLevel* level
         error = "texture: bad size";
         return {};
     }
-    const bool native = desc.format == TexFormat::RGBA8 || (desc.format == TexFormat::BC5 ? info_.rgtc : info_.s3tc);
+    const bool native = desc.format == TexFormat::RGBA8 || desc.format == TexFormat::R8 || (desc.format == TexFormat::BC5 ? info_.rgtc : info_.s3tc);
     GLenum internal = GL_RGBA8;
     if (native && desc.format == TexFormat::BC1) internal = GL_COMPRESSED_RGBA_S3TC_DXT1_EXT;
     if (native && desc.format == TexFormat::BC3) internal = GL_COMPRESSED_RGBA_S3TC_DXT5_EXT;
     if (native && desc.format == TexFormat::BC5) internal = GL_COMPRESSED_RG_RGTC2;
+    if (desc.format == TexFormat::R8) internal = GL_R8;
 
     GlTexture t;
+    t.w = desc.width, t.h = desc.height, t.format = desc.format;
     t.target = desc.kind == TexKind::Cube ? GL_TEXTURE_CUBE_MAP : GL_TEXTURE_2D;
     gl::glGenTextures(1, &t.name);
     gl::glActiveTexture(GL_TEXTURE0);
@@ -287,6 +298,8 @@ TextureId GlDevice::createTexture(const TextureDesc& desc, const TexLevel* level
                 gl::glTexImage2D(target, level, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
             } else if (internal == GL_RGBA8) {
                 gl::glTexImage2D(target, level, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, l.data);
+            } else if (internal == GL_R8) {
+                gl::glTexImage2D(target, level, GL_R8, w, h, 0, GL_RED, GL_UNSIGNED_BYTE, l.data);
             } else {
                 gl::glCompressedTexImage2D(target, level, internal, w, h, 0, GLsizei(levelSize(desc.format, w, h)), l.data);
             }
@@ -308,6 +321,18 @@ void GlDevice::destroyTexture(TextureId t) {
         gl::glDeleteTextures(1, &p->name);
         textures_.remove(t.id);
     }
+}
+
+void GlDevice::updateTexture(TextureId id, const void* data, size_t pitch) {
+    GlTexture* t = textures_.get(id.id);
+    if (!t || t->target != GL_TEXTURE_2D || (t->format != TexFormat::RGBA8 && t->format != TexFormat::R8)) return;
+    const int bpp = t->format == TexFormat::R8 ? 1 : 4;
+    gl::glActiveTexture(GL_TEXTURE0);
+    gl::glBindTexture(GL_TEXTURE_2D, t->name);
+    boundTex_[0] = 0;
+    gl::glPixelStorei(GL_UNPACK_ROW_LENGTH, GLint(pitch / size_t(bpp)));
+    gl::glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, t->w, t->h, bpp == 1 ? GL_RED : GL_RGBA, GL_UNSIGNED_BYTE, data);
+    gl::glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
 }
 
 BufferId GlDevice::createBuffer(BufferKind kind, size_t size, const void* data, bool dynamic) {

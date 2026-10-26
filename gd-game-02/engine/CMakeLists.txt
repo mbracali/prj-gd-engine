@@ -39,6 +39,7 @@ target_sources(gd02 PRIVATE
   src/data/mogg.cpp
   src/data/random_file.cpp
   src/data/xdvdfs.cpp
+  src/devaids/menu_keys.cpp
   src/devaids/screenshot.cpp
   src/game/chart.cpp
   src/game/player.cpp
@@ -63,14 +64,34 @@ target_sources(gd02 PRIVATE
   src/render/shadertest.cpp
   src/render/standard_shader.cpp
   src/render/texture_codec.cpp
+  src/render/text_layout.cpp
   src/render/track_view.cpp
+  src/render/ui_view.cpp
   src/scene/anim.cpp
   src/scene/bitmap.cpp
   src/scene/inflate.cpp
   src/scene/milo.cpp
   src/scene/objects.cpp
   src/scene/scenetest.cpp
+  src/script/script.cpp
+  src/script/script_builtins.cpp
+  src/script/tasks.cpp
+  src/scene/ui_objects.cpp
+  src/scene/ui_styles.cpp
+  src/tests/scripttest.cpp
+  src/ui/career.cpp
+  src/ui/gamepad_panel.cpp
+  src/ui/natives_game.cpp
+  src/ui/natives_meta.cpp
+  src/ui/panels.cpp
+  src/ui/port_screens.cpp
+  src/ui/screen_text.cpp
+  src/ui/script_classes.cpp
+  src/ui/ui_manager.cpp
   src/tests/selftest.cpp
+  src/tests/uitest.cpp
+  src/tests/walktest.cpp
+  src/video/wmv_player.cpp
 )
 target_include_directories(gd02 PRIVATE src)
 target_link_libraries(gd02 PRIVATE SDL3::SDL3)
@@ -96,6 +117,63 @@ find_package(Threads REQUIRED)
 target_link_libraries(gd02 PRIVATE Threads::Threads)
 
 target_compile_definitions(gd02 PRIVATE GD02_VERSION="${PROJECT_VERSION}")
+
+# GH2's videos (src/video/wmv_player.cpp): FFmpeg's libavformat, libavcodec
+# and libavutil as shared libraries, the minimal LGPL build of
+# build_common.sh's build_ffmpeg, installed in GD02_FFMPEG_DIR (on Android one
+# build per ABI: <dir>/<ABI>/ffmpeg-prefix), or else the system's (pkg-config). The build
+# copies the libraries next to the program (Linux: found through RPATH
+# $ORIGIN; Windows: the DLLs beside the .exe); build_macos.sh's dylibbundler
+# puts them in the .app, and the Android Gradle plugin into the APK. Without
+# FFmpeg (GD02_VIDEO OFF) the videos are skipped with a log line.
+set(GD02_FFMPEG_DIR "" CACHE PATH "FFmpeg install prefix (include/, lib/) for the video player")
+if(GD02_FFMPEG_DIR)
+  option(GD02_VIDEO "Play GH2's videos with FFmpeg" ON)
+else()
+  option(GD02_VIDEO "Play GH2's videos with FFmpeg" OFF)
+endif()
+if(GD02_VIDEO)
+  set(ffmpeg_dir "${GD02_FFMPEG_DIR}")
+  if(ANDROID AND ffmpeg_dir)
+    set(ffmpeg_dir "${ffmpeg_dir}/${ANDROID_ABI}/ffmpeg-prefix")
+  endif()
+  if(ffmpeg_dir)
+    target_include_directories(gd02 SYSTEM PRIVATE "${ffmpeg_dir}/include")
+    foreach(lib avformat avcodec avutil)
+      find_library(GD02_FFMPEG_${lib} NAMES ${lib} PATHS "${ffmpeg_dir}/lib" NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
+      if(NOT GD02_FFMPEG_${lib})
+        message(FATAL_ERROR "GD02_FFMPEG_DIR: no ${lib} library in ${ffmpeg_dir}/lib")
+      endif()
+      add_library(gd02_ffmpeg_${lib} SHARED IMPORTED)
+      if(WIN32)
+        file(GLOB dll "${ffmpeg_dir}/bin/${lib}-*.dll")
+        set_target_properties(gd02_ffmpeg_${lib} PROPERTIES IMPORTED_IMPLIB "${GD02_FFMPEG_${lib}}" IMPORTED_LOCATION "${dll}")
+        add_custom_command(TARGET gd02 POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy_if_different "${dll}" "$<TARGET_FILE_DIR:gd02>")
+      else()
+        set_target_properties(gd02_ffmpeg_${lib} PROPERTIES IMPORTED_LOCATION "${GD02_FFMPEG_${lib}}")
+        if(NOT APPLE AND NOT ANDROID)
+          # The file named by the library's SONAME (libavcodec.so.61), copied next to the program.
+          file(GLOB sonames "${ffmpeg_dir}/lib/lib${lib}.so.[0-9]*")
+          list(FILTER sonames INCLUDE REGEX "\\.so\\.[0-9]+$")
+          add_custom_command(TARGET gd02 POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy_if_different ${sonames} "$<TARGET_FILE_DIR:gd02>")
+        endif()
+      endif()
+      target_link_libraries(gd02 PRIVATE gd02_ffmpeg_${lib})
+    endforeach()
+    if(NOT APPLE AND NOT ANDROID AND NOT WIN32)
+      set_target_properties(gd02 PROPERTIES BUILD_WITH_INSTALL_RPATH ON INSTALL_RPATH "$ORIGIN")
+    endif()
+  else()
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(GD02_FFMPEG REQUIRED IMPORTED_TARGET libavformat libavcodec libavutil)
+    target_link_libraries(gd02 PRIVATE PkgConfig::GD02_FFMPEG)
+  endif()
+  target_compile_definitions(gd02 PRIVATE GD02_VIDEO=1)
+  message(STATUS "gd02: videos with FFmpeg (${ffmpeg_dir})")
+else()
+  target_compile_definitions(gd02 PRIVATE GD02_VIDEO=0)
+  message(STATUS "gd02: no FFmpeg (GD02_VIDEO OFF): videos are skipped")
+endif()
 
 # The Steam Deck download (build_linux_steamdeck.sh): the Linux program with
 # the handheld settings as its defaults (gd01's GD01_STEAM_DECK).
@@ -137,6 +215,13 @@ foreach(file symbol IN ZIP_LISTS GD02_ICON_FILES GD02_ICON_SYMBOLS)
     VERBATIM)
   target_sources(gd02 PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/${file}_data.cpp)
 endforeach()
+# The walk test's STUB whitelist (tests/ui_stubs.txt), built in.
+add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/ui_stubs_data.cpp
+  COMMAND ${CMAKE_COMMAND} -DIN=${CMAKE_CURRENT_SOURCE_DIR}/tests/ui_stubs.txt -DOUT=${CMAKE_CURRENT_BINARY_DIR}/ui_stubs_data.cpp
+          -DNAME=kUiStubsTxt -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_file.cmake
+  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/tests/ui_stubs.txt ${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_file.cmake
+  VERBATIM)
+target_sources(gd02 PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/ui_stubs_data.cpp)
 if(WIN32)
   enable_language(RC)
   file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/gd02.rc "1 ICON \"${CMAKE_CURRENT_SOURCE_DIR}/res/gd02.ico\"\n")

@@ -53,3 +53,50 @@ bool captureDebugScreenshot(Canvas& canvas, bool inSong, double songMs) {
     }
     return times.empty() || next >= times.size();
 }
+
+bool saveScreenshot(Canvas& canvas, const std::string& path) {
+    SDL_Surface* shot = canvas.readPixels();
+    if (!shot) return false;
+    const bool ok = SDL_SaveBMP(shot, path.c_str());
+    SDL_DestroySurface(shot);
+    return ok;
+}
+
+bool captureMenuScreenshot(Canvas& canvas, double wallMs, double songMs) {
+    const char* file = SDL_getenv("GD02_SCREENSHOT");
+    if (!file) return false;
+    struct Shot {
+        double at;
+        bool song;
+        std::string tag;
+    };
+    static std::vector<Shot> shots = [] {
+        std::vector<Shot> v;
+        const char* at = SDL_getenv("GD02_SCREENSHOT_AT");
+        for (const char* p = at; p && *p;) {
+            const bool song = *p == 's';
+            if (song) ++p;
+            char* end = nullptr;
+            const double t = std::strtod(p, &end);
+            if (end == p) break;
+            v.push_back({t, song, std::string(song ? "s" : "") + std::to_string(long(t))});
+            p = *end == ',' ? end + 1 : end;
+        }
+        return v;
+    }();
+    static size_t next = 0;
+    std::string path = file;
+    if (!shots.empty()) {
+        if (next >= shots.size()) return true;
+        const Shot& s = shots[next];
+        if (s.song ? (songMs < -1e8 || songMs < s.at) : wallMs < s.at) return false;
+        if (shots.size() > 1) {
+            const size_t dot = path.rfind('.');
+            path = dot == std::string::npos ? path + "_" + s.tag : path.substr(0, dot) + "_" + s.tag + path.substr(dot);
+        }
+        ++next;
+    }
+    if (saveScreenshot(canvas, path)) SDL_Log("GD02_SCREENSHOT: saved %s", path.c_str());
+    else SDL_Log("GD02_SCREENSHOT: cannot save %s: %s", path.c_str(), SDL_GetError());
+    return shots.empty() || next >= shots.size();
+}

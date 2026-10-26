@@ -34,9 +34,19 @@ public:
     // Inline sub-directories, keyed by the object that holds each.
     std::vector<std::pair<std::string, std::unique_ptr<Directory>>> subdirs;
     Directory* parent = nullptr;
+    // Directories of other milos this one's ObjectDir subdirs name (a
+    // PanelDir's ../metacam.milo...), linked by the code that loads them
+    // (render/ui_view.cpp): find() searches them after the inline ones.
+    std::vector<const Directory*> linked;
 
     // This directory's object `name` (exact, case-sensitive), or nullptr.
     Object* get(const std::string& name) const;
+    // Adds an object (the port's own UI additions); returns it.
+    Object* add(std::unique_ptr<Object> object) {
+        objects.push_back(std::move(object));
+        index_.clear();
+        return objects.back().get();
+    }
     // Searches this directory, then its inline sub-directories (depth first).
     Object* find(const std::string& name) const;
     template <class T> T* find(const std::string& name) const {

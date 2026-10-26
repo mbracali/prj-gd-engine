@@ -12,6 +12,8 @@
 
 #include "data/game_data.h"
 #include "scene/milo.h"
+#include "scene/ui_objects.h"
+#include "scene/ui_styles.h"
 
 namespace {
 
@@ -132,6 +134,7 @@ int runSceneTest(const std::string& dataPath) {
         std::map<std::string, int> dirClasses;
         int files = 0, fileFailures = 0, inlineDirs = 0, proxiesFound = 0, proxiesMissing = 0;
         std::vector<std::string> missingProxies;
+        std::map<std::string, int> rawInUi;  // untyped objects in ui/ milos, per class
         for (const auto& p : paths) {
             std::unique_ptr<Milo> milo;
             try {
@@ -168,6 +171,7 @@ int runSceneTest(const std::string& dataPath) {
                     s.typed = o->typed;
                     ++s.objects;
                     s.versions.insert(o->version);
+                    if (!o->typed && p.rfind("ui/", 0) == 0) ++rawInUi[o->cls];
                     if (o->decoded) ++s.decoded;
                     else if (o->typed && s.failures.size() < 5) s.failures.push_back(p + ": " + o->name + ": " + o->error);
                     seen.insert(key);
@@ -216,7 +220,72 @@ int runSceneTest(const std::string& dataPath) {
             line += item;
         }
         if (line.size() > 1) std::printf("%s\n", line.c_str());
-        bool ok = fileFailures == 0 && typedFailures == 0 && files > 0;
+        int rawUi = 0;
+        std::string rawUiList;
+        for (const auto& [cls, n] : rawInUi) rawUi += n, rawUiList += " " + cls + " " + std::to_string(n);
+        std::printf("raw (untyped) objects in ui/: %d%s\n", rawUi, rawUiList.c_str());
+        // The text chain of every label / button / slider in ui/ (scene/ui_styles.h):
+        // type -> resource_file -> template Text -> Font; localized tokens in eng.
+        int chained = 0, chainFailures = 0, tokens = 0, missingTokens = 0;
+        size_t localeStrings = 0;
+        std::vector<std::string> chainProblems, tokenProblems;
+        {
+            UiStyles styles;
+            styles.load(data);
+            Locale locale;
+            locale.load(data, "eng");
+            localeStrings = locale.size();
+            MiloLibrary lib(data);
+            for (const auto& p : paths) {
+                if (p.rfind("ui/", 0) != 0) continue;
+                Milo& milo = lib.load(p);
+                milo.root().forEach([&](Object& o) {
+                    const auto* label = o.as<UILabel>();
+                    const auto* slider = o.as<BandSlider>();
+                    if (!label && !slider) return;
+                    const std::string& token = label ? (label->localize ? label->textToken : std::string()) : slider->textToken;
+                    if (!token.empty()) {
+                        ++tokens;
+                        if (!locale.find(token)) {
+                            ++missingTokens;
+                            if (tokenProblems.size() < 8) tokenProblems.push_back(p + ": " + o.name + " '" + token + "'");
+                        }
+                    }
+                    const UiStyle st = styles.style(o.cls, o.header.type);
+                    const std::string file = st.resourceFile.empty() ? st.classResourceFile : st.resourceFile;
+                    std::string why;
+                    const Text* tmpl = nullptr;
+                    if (!st.node) why = "unknown type '" + o.header.type + "'";
+                    else if (file.empty() || st.textTemplate.empty()) why = "no resource_file / text";
+                    else {
+                        const std::string path = UiStyles::resourcePath(data, file);
+                        if (!data.exists(path)) why = "missing " + path;
+                        else if (!(tmpl = lib.load(path).find<Text>(st.textTemplate))) why = "no " + st.textTemplate + " in " + path;
+                    }
+                    if (tmpl && !tmpl->font.empty()) {
+                        // The font may live in a subdirectory milo of the resource (slider.milo).
+                        bool found = tmpl->dir && tmpl->dir->resolve<Font>(tmpl->font);
+                        if (!found)
+                            for (const auto& sub : lib.load(UiStyles::resourcePath(data, file)).root().self->as<DirObj>()->objectDir.subdirs) {
+                                const std::string sp = findMiloRelative(data, UiStyles::resourcePath(data, file), sub);
+                                if (data.exists(sp) && lib.load(sp).find<Font>(tmpl->font)) found = true;
+                            }
+                        if (!found) why = tmpl->name + ": no font " + tmpl->font;
+                    }
+                    if (why.empty()) ++chained;
+                    else {
+                        ++chainFailures;
+                        if (chainProblems.size() < 8) chainProblems.push_back(p + ": " + o.cls + " " + o.name + ": " + why);
+                    }
+                });
+            }
+        }
+        std::printf("ui text chain: %d components resolve type -> resource -> template Text -> Font, %d do not\n", chained,
+                    chainFailures);
+        for (const auto& m : chainProblems) std::printf("  %s\n", m.c_str());
+        std::printf("ui locale (eng, %zu strings): %d of %d text tokens missing\n", localeStrings, missingTokens, tokens);
+        for (const auto& m : tokenProblems) std::printf("  %s\n", m.c_str());
+        bool ok = fileFailures == 0 && typedFailures == 0 && files > 0 && chainFailures == 0;
         std::printf("\nscene test %s: %d typed objects failed, %d files failed\n", ok ? "passed" : "FAILED", typedFailures,
                     fileFailures);
         return ok ? 0 : 1;

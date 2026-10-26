@@ -7,6 +7,10 @@ plugins {
 def sdl3Dir = project.findProperty('sdl3Dir') ?: System.getenv('GD02_SDL3_DIR')
 if (!sdl3Dir) throw new GradleException('Pass -Psdl3Dir=<SDL3 source dir> (see engine/build_android.sh)')
 def abis = (project.findProperty('abis') ?: 'arm64-v8a,x86_64').split(',')
+// FFmpeg for the videos, one build per ABI in <ffmpegDir>/<ABI>/ffmpeg-prefix
+// (build_android.sh passes -PffmpegDir=...); without it the videos are skipped.
+// Its libraries are linked by CMake, so the plugin packs them into the APK.
+def ffmpegDir = project.findProperty('ffmpegDir') ?: ''
 
 // The version of every build: project(gd02 VERSION X.Y.Z) in engine/CMakeLists.txt.
 // versionCode (what Android compares for updates) = X * 10000 + Y * 100 + Z.
@@ -27,7 +31,8 @@ android {
         externalNativeBuild {
             cmake {
                 arguments "-DANDROID_PLATFORM=android-24", "-DANDROID_STL=c++_static",
-                          "-DGD02_SDL3_SOURCE=${sdl3Dir}"
+                          "-DGD02_SDL3_SOURCE=${sdl3Dir}", "-DGD02_FFMPEG_DIR=${ffmpegDir}",
+                          "-DGD02_VIDEO=${ffmpegDir ? 'ON' : 'OFF'}"
                 abiFilters(*abis)
             }
         }
@@ -60,6 +65,8 @@ android {
         targetCompatibility JavaVersion.VERSION_11
     }
     sourceSets.main.java.srcDirs += "${sdl3Dir}/android-project/app/src/main/java"
+    // The third-party licences (FFmpeg's LGPL notice), written by build_android.sh.
+    sourceSets.main.assets.srcDirs += "${rootDir}/../build/android/assets"
     externalNativeBuild {
         cmake {
             path '../../CMakeLists.txt'

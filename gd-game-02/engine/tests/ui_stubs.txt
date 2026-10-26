@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
+# Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
+# The script STUBs the walk test (gd02 --walktest) accepts: what the port does
+# not have on purpose, one prefix per line ("<object> <message>" as
+# GD02_UILOG=1 prints them; a line ending in * matches any message).
+# Xbox Live and its services (no Live in the port).
+achievements *
+leaderboards *
+content_mgr *
+profilemgr signin (Xbox Live)
+profilemgr show_marketplace (Xbox Live)
+# GH2's sound effect banks (sfx/gen/*_bank.milo_xbox: XMA SynthSamples) are
+# not decoded yet: every sound effect is reported once.
+synth sfx *

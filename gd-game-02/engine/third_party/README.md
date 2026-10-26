@@ -3,6 +3,22 @@
 | Folder | What | Version | Licence |
 |---|---|---|---|
 | `stb_vorbis/` | Sean Barrett's single-file Ogg Vorbis decoder: decodes the `.mogg` song audio (`src/audio/vorbis_stream.cpp`) | v1.22 | Public domain (Unlicense) or MIT, at your choice (`stb_vorbis/LICENSE.txt`; the same text closes `stb_vorbis.c`) |
+| (not in the repo) FFmpeg | The videos' decoder (`src/video/wmv_player.cpp`): ASF demuxer, WMV3 and WMA v2 decoders only | 7.1.5 | LGPL 2.1 or later |
+
+## FFmpeg: downloaded and built by the build scripts
+
+Not committed: `build_common.sh` (`build_ffmpeg`) downloads
+<https://ffmpeg.org/releases/ffmpeg-7.1.5.tar.xz> into `build/ffmpeg-src/`,
+checks its SHA-256 (`de668509caf9e35e3cd162473441fdb29538c6d96ed080292b3cf9e6fc5d558f`,
+taken after verifying the tarball's `.asc` signature with FFmpeg's release key
+`FCF986EA15E6E293A5644F10B4322F04D67658D8`), builds it unmodified as shared
+libraries with `--disable-everything` plus only the ASF demuxer and the WMV3 /
+WMA v2 decoders (no GPL, version3 or nonfree options; the build stops if
+`config.h` does not say "LGPL version 2.1 or later"), and
+`ship_ffmpeg_licence` puts the LGPL text and a notice with the exact source and
+configure line into every download's `licenses/`. To update: change
+`FFMPEG_VERSION` and `FFMPEG_SHA256` in `build_common.sh` (check the new
+tarball's signature first) and the version here.
 
 ## stb_vorbis: pinned upstream source
 

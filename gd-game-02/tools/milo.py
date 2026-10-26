@@ -6,6 +6,8 @@
     milo.py list   <file>             class, name and record size of every object
     milo.py unpack <file> <out dir>   decompressed stream + one blob per object
     milo.py scan   <dir>              parse every .milo_xbox below <dir>: totals
+    milo.py ui     <file|dir> [-v]    decode the UI component, Font and Text
+                                      records (checks each ends at its marker)
 
 Container (all little-endian, recovered by inspection; see
 docs/milo_and_textures.md):
@@ -190,6 +192,308 @@ def tex_info(rec):
             "bitmap": r.p if len(rec) - r.p >= 32 else None}
 
 
+# ---- UI components, Font and Text --------------------------------------
+# Record layouts confirmed against the Load routines of default.xex (each
+# class's PreLoad data, then its PostLoad data; addresses in the docstrings).
+# Field names come from each class's SyncProperty strings; "Q:" marks guesses.
+
+class Rec(Reader):
+    """Reader over one object record with the shared Harmonix sub-records."""
+
+    def f32(self):
+        v = struct.unpack_from("<f", self.d, self.p)[0]
+        self.p += 4
+        return v
+
+    def i32(self):
+        v = struct.unpack_from("<i", self.d, self.p)[0]
+        self.p += 4
+        return v
+
+    def b(self):
+        v = self.d[self.p]
+        self.p += 1
+        return v != 0
+
+    def floats(self, n):
+        return [self.f32() for _ in range(n)]
+
+    def version(self, cls, allowed):
+        v = self.u32()
+        if v not in allowed:
+            raise ValueError(f"{cls} version {v}")
+        return v
+
+    def data_array(self, depth=0):
+        """DataArray::Load @ 0x8231aa20 (skipped, returns the node count)."""
+        n = struct.unpack_from("<h", self.d, self.p)[0]
+        self.p += 6
+        for _ in range(n):
+            t = struct.unpack_from("<H", self.d, self.p)[0]
+            self.p += 4
+            if t in (0x10, 0x11, 0x13):
+                self.data_array(depth + 1)
+            elif t in (0x12, 2, 3, 4, 5, 7, 0x20, 0x21, 0x22, 0x23):
+                self.string()
+            else:
+                self.p += 4
+        return n
+
+    def object_header(self):
+        """Hmx::Object::Load @ 0x82315350: rev, type, props, (rev>0) note."""
+        rev = self.u32()
+        typ = self.string()
+        if self.b():
+            self.data_array()
+        if rev > 0:
+            self.string()
+        return typ
+
+    def trans(self):
+        """RndTransformable v9 @ 0x821b0a28 -> local position."""
+        self.version("Trans", (9,))
+        local = self.floats(12)
+        self.floats(12)  # world
+        self.u32()       # constraint
+        self.string()    # target
+        self.b()         # preserve_scale
+        parent = self.string()
+        return {"rot": local[:9], "pos": local[9:], "parent": parent}
+
+    def draw(self):
+        """RndDrawable v3 @ 0x821b36c0 -> showing."""
+        self.version("Draw", (3,))
+        showing = self.b()
+        self.floats(5)   # sphere, draw order
+        return showing
+
+
+def ui_component(r, o):
+    """UIComponent PreLoad @ 0x8236fa30: u32 rev (<= 1), Object, Trans,
+    Draw, (rev >= 1) nav_right and nav_down object names (@ 0x8236f568)."""
+    rev = r.version("UIComponent", (0, 1))
+    o["type"] = r.object_header()
+    o["trans"] = r.trans()
+    o["showing"] = r.draw()
+    if rev >= 1:
+        o["nav_right"], o["nav_down"] = r.string(), r.string()
+
+
+def ui_label(r, o):
+    """UILabel PreLoad @ 0x8236ddb8: u32 rev (<= 1), UIComponent, (rev >= 1)
+    bool localize; localize ? symbol text_token : string text."""
+    rev = r.version("UILabel", (0, 1))
+    ui_component(r, o)
+    o["localize"] = r.b() if rev >= 1 else False
+    if o["localize"]:
+        o["text_token"] = r.string()
+    else:
+        o["text"] = r.string()
+
+
+def band_text_fields(r, o, color):
+    """The text fields BandLabel v12 / BandButton v10 share (offsets from the
+    setters @ 0x8214c4f8.. and SyncProperty @ 0x8214b400 / 0x82123b88)."""
+    o["fit_text"] = r.u32()        # Q: enum (0 wrap?)
+    o["width"], o["height"] = r.f32(), r.f32()
+    o["leading"] = r.f32()
+    o["alignment"] = r.u32()       # RndText flags: 1/2/4 left/centre/right | 0x10/0x20/0x40 top/middle/bottom
+    o["unknown"] = r.u32()         # Q: no property; read since v3
+    o["delta"] = r.floats(3)       # deltaX, deltaZ, deltaRot (jitter ranges)
+    o["all_caps"] = r.b()
+    o["kerning"] = r.f32()
+    o["text_size"] = r.f32()
+
+
+def band_label(r, o):
+    """BandLabel v12 PreLoad @ 0x8214acb8 (PostLoad @ 0x8214a7a8 reads nothing)."""
+    r.version("BandLabel", (11, 12))
+    ui_label(r, o)
+    band_text_fields(r, o, True)
+    o["wrap_width"] = r.f32()      # v12; v11 copies width
+    o["color"] = r.floats(4)       # @ 0x821222e0
+
+
+def band_button(r, o):
+    """BandButton v10 PreLoad @ 0x82123398: UIButton (@ 0x82370498: u32 rev
+    <= 0 + UILabel), the shared text fields, wrap_width (v10)."""
+    r.version("BandButton", (9, 10))
+    r.version("UIButton", (0,))
+    ui_label(r, o)
+    band_text_fields(r, o, False)
+    o["wrap_width"] = r.f32()
+
+
+def ui_list(r, o):
+    """UIList v3: PreLoad @ 0x8237a4e8 (UIComponent), PostLoad @ 0x8237a540."""
+    rev = r.version("UIList", (1, 2, 3))
+    ui_component(r, o)
+    o["spacing"], o["arrow_offset"] = r.f32(), r.f32()
+    o["fade_offset"] = r.i32()
+    o["display_num"] = r.i32()
+    o["circular"] = r.b()
+    o["scroll_time"] = r.f32()
+    if rev > 2:
+        o["paginate"] = r.b()
+    if rev == 1:
+        r.u32(), r.u32()
+
+
+def simple_component(cls, allowed=(0,)):
+    def fn(r, o):
+        r.version(cls, allowed)
+        ui_component(r, o)
+    return fn
+
+
+def band_slider(r, o):
+    """BandSlider v2 PreLoad @ 0x82145b90: UISlider (@ 0x823757f0: u32 rev
+    <= 0 + UIComponent), then symbol text_token."""
+    r.version("BandSlider", (2,))
+    r.version("UISlider", (0,))
+    ui_component(r, o)
+    o["text_token"] = r.string()
+
+
+def band_text_entry(r, o):
+    """BandTextEntry v3: PreLoad @ 0x82142df8 (UIComponent), PostLoad @
+    0x82141f78 (names from SyncProperty @ 0x82144910)."""
+    rev = r.version("BandTextEntry", (1, 2, 3))
+    ui_component(r, o)
+    if rev > 1:
+        o["text_scale"], o["flash_time"], o["arrow_offset"] = r.floats(3)
+    if rev > 2:
+        o["entered_color"], o["dynamic_color"] = r.floats(4), r.floats(4)
+
+
+def ui_trigger(r, o):
+    """UITrigger v0 PreLoad @ 0x8237d898: UIComponent, symbol event,
+    ObjPtr anim (@ 0x82127788), bool block_transition."""
+    r.version("UITrigger", (0,))
+    ui_component(r, o)
+    o["event"], o["anim"] = r.string(), r.string()
+    o["block_transition"] = r.b()
+
+
+def screen_mask(r, o):
+    """RndScreenMask v2 Load @ 0x8221a970 (SyncProperty @ 0x8221aa28)."""
+    rev = r.version("ScreenMask", (0, 1, 2))
+    o["type"] = r.object_header()
+    o["showing"] = r.draw()
+    o["mat"] = r.string()
+    o["color"] = r.floats(4)       # rgb + alpha
+    if rev > 0:
+        o["screen_rect"] = r.floats(4)
+    if rev > 1:
+        o["use_cam_rect"] = r.b()
+
+
+def font(r, o):
+    """RndFont v15 Load @ 0x821d4cd8. Glyphs are stored (no texture scan as
+    in GH1): u, v of the cell's top-left, width and advance in cell widths;
+    the quad's UV size is (cell_uv.x * width, cell_uv.y) (@ 0x821d2e40)."""
+    r.version("Font", (15,))
+    o["type"] = r.object_header()
+    o["mat"] = r.string()
+    o["cell_size"] = r.floats(2)   # pixels (+0x1048 / +0x104c)
+    o["deprecated_size"] = r.f32()
+    o["kerning"] = r.f32()         # Q: name; added between every pair (+0x1044)
+    o["chars"] = r.string()
+    pairs = []
+    if r.b():                      # @ 0x821d4a00: key = first | second << 8
+        for _ in range(r.u32()):
+            pairs.append((r.u32(), r.f32()))
+    o["pairs"] = pairs
+    o["texture_owner"] = r.string()  # Font whose glyph table is used
+    o["monospace"] = r.b()         # Q: name; +0x1068: advance 1, no kerning
+    o["flag_1074"] = r.b()         # Q: unused by layout
+    o["tex_size"] = (r.u32(), r.u32())
+    o["cell_uv"] = r.floats(2)
+    o["glyphs"] = [r.floats(4) for _ in range(256)]
+
+
+def text(r, o):
+    """RndText v17 Load @ 0x821d1a68."""
+    r.version("Text", (17,))
+    o["type"] = r.object_header()
+    o["showing"] = r.draw()
+    o["trans"] = r.trans()
+    o["font"] = r.string()
+    o["align"] = r.u32()
+    o["text"] = r.string()
+    o["color"] = r.floats(4)
+    o["wrap_width"], o["leading"] = r.f32(), r.f32()
+    o["fixed_length"] = r.u32()
+    o["italics"], o["size"] = r.f32(), r.f32()
+    o["markup"] = r.b()
+    o["caps_mode"] = r.u32()
+
+
+def band_placer(r, o):
+    """BandPlacer v2 (Load not located; layout from the data, every record
+    ends exactly): Object, Draw, Trans, then one object name (Q: "center",
+    the other SyncProperty string @ 0x8212a4a0 besides "proxy")."""
+    r.version("BandPlacer", (2,))
+    o["type"] = r.object_header()
+    o["showing"] = r.draw()
+    o["trans"] = r.trans()
+    o["center"] = r.string()
+
+
+UI_DECODERS = {
+    "BandPlacer": band_placer, "UILabel": ui_label,
+    "BandLabel": band_label, "BandButton": band_button, "UIList": ui_list,
+    "CheckBox": simple_component("CheckBox"),
+    "UIPicture": simple_component("UIPicture"),
+    "UIProxy": simple_component("UIProxy"),
+    "BandSlider": band_slider, "BandTextEntry": band_text_entry,
+    "UITrigger": ui_trigger, "ScreenMask": screen_mask,
+    "Font": font, "Text": text,
+}
+
+
+def decode_ui(cls, rec):
+    """Record -> dict; raises if the decoder does not end exactly at the end."""
+    r = Rec(rec)
+    o = {}
+    UI_DECODERS[cls](r, o)
+    if r.p != len(rec):
+        raise ValueError(f"{len(rec) - r.p} bytes left")
+    return o
+
+
+def ui_cmd(target, verbose):
+    from collections import Counter
+    files = [target] if os.path.isfile(target) else sorted(
+        os.path.join(b, f) for b, _, fs in os.walk(target) for f in fs
+        if f.endswith(".milo_xbox"))
+    ok, bad, values = Counter(), [], {}
+    for path in files:
+        for cls, name, rec in objects(open(path, "rb").read()):
+            if cls not in UI_DECODERS:
+                continue
+            try:
+                o = decode_ui(cls, rec)
+            except Exception as e:
+                bad.append(f"{path}: {cls} {name}: {e}")
+                continue
+            ok[cls] += 1
+            for k, v in o.items():
+                if isinstance(v, (int, float, bool)) and not isinstance(v, list):
+                    values.setdefault((cls, k), Counter())[v] += 1
+            if verbose:
+                show = {k: v for k, v in o.items() if k not in ("glyphs", "pairs")}
+                print(f"{os.path.basename(path)}: {cls} {name}: {show}")
+    for cls, n in sorted(ok.items()):
+        print(f"{cls:14} {n:5} decoded")
+    for (cls, k), c in sorted(values.items()):
+        if len(c) <= 8:
+            print(f"  {cls}.{k}: {dict(c.most_common())}")
+    for b in bad[:30]:
+        print("FAIL", b)
+    print(f"{sum(ok.values())} decoded, {len(bad)} failed")
+
+
 def _safe(name):
     return re.sub(r"[^A-Za-z0-9._ -]", "_", name)
 
@@ -219,6 +523,8 @@ def main():
             fn = f"{i:04d}_{_safe(cls)}_{_safe(name)}.bin"
             open(os.path.join(a[2], fn), "wb").write(rec)
         print(f"{len(objs)} records written to {a[2]}")
+    elif len(a) >= 2 and a[0] == "ui":
+        ui_cmd(a[1], "-v" in a)
     elif len(a) == 2 and a[0] == "scan":
         scan(a[1])
     else:

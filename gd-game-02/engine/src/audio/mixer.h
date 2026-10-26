@@ -10,6 +10,7 @@
 #include <thread>
 #include <vector>
 
+#include "audio/audio_source.h"
 #include "audio/vorbis_stream.h"
 
 // Plays a song's multitrack audio and owns the song clock. The clock and
@@ -41,7 +42,8 @@ public:
         bool guitar = false;  // muted while the player is missing
     };
     // Starts playback after `leadInMs` of silence; song time 0 is the start of the audio.
-    void play(std::unique_ptr<VorbisStream> stream, std::vector<Track> tracks, double leadInMs);
+    // `stream`: a song (VorbisStream) or any AudioSource (a video's sound).
+    void play(std::unique_ptr<AudioSource> stream, std::vector<Track> tracks, double leadInMs);
     void stop();
     void setPaused(bool paused);
     // The player's guitar channels heard (true) or muted after a miss (false).
@@ -71,7 +73,7 @@ private:
     SDL_AudioStream* stream_ = nullptr;
     int rate_ = 44100;
 
-    std::unique_ptr<VorbisStream> source_;
+    std::unique_ptr<AudioSource> source_;
     std::vector<Track> tracks_;
     std::vector<float> out_;
     int64_t leadInFrames_ = 0;

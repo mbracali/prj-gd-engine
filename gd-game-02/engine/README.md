@@ -17,10 +17,10 @@ application menu (pointing at this folder; set GD02_NO_DESKTOP_ENTRY=1 to skip).
 
 A from-scratch reimplementation of Guitar Hero II (Xbox 360, 2007) for Linux,
 Steam Deck, Windows, macOS and Android. It plays the songs from **your own
-copy** of the game: no game data is included. This is an early build: a song
-list and a debug highway that play every song's chart against its audio with
-the original game's rules (see `gd-game-02/docs/FINDINGS.md` in the
-repository). The game's own menus, highway art and venues come later.
+copy** of the game: no game data is included. This is an early build: the game's
+own menus, Quick play and its highway and HUD, with the original game's rules
+(see `gd-game-02/docs/FINDINGS.md` in the repository). Venues, the band,
+career and multiplayer come later.
 
 ## Running
 
@@ -30,8 +30,11 @@ repository). The game's own menus, highway art and venues come later.
 
 The game folder is the disc's extracted files (the one containing
 `gen/main.hdr`). Options: `--song <id>`, `--difficulty 0-3`, `--autoplay`,
-`--no-fail`, `--selftest` (checks the data and auto-plays every chart without
-a window), `--help`.
+`--no-fail`, `--selftest`, `--uitest`, `--walktest quickplay|lose|pause|attract`,
+`--scripttest` (checks the data and auto-plays every chart without
+a window), `--playmovie intro.wmv` (plays one of the disc's videos: `intro.wmv`,
+`hmx.wmv`, `wg.wmv`; Start, Enter or A skips it), `--help`. `GD02_SKIP_MOVIES=1`
+skips the videos.
 
 ## Controls
 
@@ -43,8 +46,10 @@ a window), `--help`.
 | Whammy | hold W |
 | Back / quit | Esc |
 
-In the song list: Up / Down pick a song, Left / Right the difficulty, Enter
-plays. Guitar controllers and gamepads come later.
+In the menus: arrows move, Enter (or green / 1) confirms, Esc (or red / 2)
+goes back, Tab is Start (pause in a song). Guitars and gamepads work too; the
+GAMEPADS screen (yellow on the main menu, or Options) sets them up.
+`GD02_DEBUG_MENU=1` shows the old debug song list instead of the game's menus.
 
 ## Building
 
@@ -64,6 +69,14 @@ found) into `dist/`.
 
 `package.sh <platform> <version> <out dir>` turns a `dist/` folder into the
 download (`gd02-<version>-<platform>.<zip|tar.gz|apk>`).
+
+Every build also builds FFmpeg for the game's videos (WMV3 video + WMA v2
+sound): a minimal LGPL build of the release pinned in `build_common.sh`
+(version, SHA-256 and configure options), downloaded from ffmpeg.org once
+into `build/ffmpeg-src/` and built with `make` (no nasm needed) into
+`build/ffmpeg/<platform>/`. Its shared libraries (avformat, avcodec, avutil)
+ship next to the program. `GD02_VIDEO=0 ./build.sh` builds without it (the
+videos are then skipped).
 
 ### Android
 
@@ -96,3 +109,11 @@ free to play, study and share; no selling; keep the credit to the original
 project; publish any changes you distribute. The third-party licences are in
 `licenses/`. Guitar Hero is a trademark of its owner; this project is not
 affiliated with or endorsed by it.
+
+The videos play through FFmpeg (https://ffmpeg.org), a separate work under the
+GNU LGPL 2.1 or later, shipped unmodified as shared libraries next to the
+program (`libav*.so.*` on Linux, `av*.dll` on Windows, inside `gd02.app` on
+macOS, inside the APK on Android). `licenses/FFmpeg-NOTICE.txt` names the
+exact version, its source download and the configure options, and
+`licenses/FFmpeg-LICENSE.LGPL-2.1.txt` is the licence (in the APK: under
+`assets/licenses/`). You may replace those libraries with your own build.

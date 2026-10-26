@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <filesystem>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -15,6 +16,7 @@
 #include "app_ids.h"
 #include "audio/mixer.h"
 #include "data/game_data.h"
+#include "devaids/menu_keys.h"
 #include "devaids/screenshot.h"
 #include "game/autoplay.h"
 #include "game/key_script.h"
@@ -29,6 +31,11 @@
 #include "render/scene_gpu.h"
 #include "render/track_view.h"
 #include "scene/milo.h"
+#include "script/script.h"
+#include "tests/walktest.h"
+#include "ui/ui_host.h"
+#include "ui/ui_manager.h"
+#include "video/wmv_player.h"
 
 namespace {
 
@@ -41,6 +48,8 @@ constexpr float kOutroMs = 2000;
 constexpr float kExplodeOutroMs = 6000;
 // game.dta LOSE_MUSIC_SLOW_SEC: a failed song's music winds down to a stop.
 constexpr float kLoseSlowMs = 2000;
+// A failed song's outro (the slow-down, then SONG FAILED a moment) [I].
+constexpr float kLoseOutroMs = 3000;
 constexpr uint64_t kMinFrameNs = 4'000'000;
 
 // songs.dtb's per-channel lists as mixer tracks: vols are dB [I: by name and
@@ -70,32 +79,127 @@ const char* hudFile(DevMode m) {
     }
 }
 
-std::vector<Mixer::Track> mixerTracks(const SongAudio& a) {
+bool envOn(const char* name) {
+    const char* v = SDL_getenv(name);
+    return v && *v && *v != '0';
+}
+
+std::vector<Mixer::Track> mixerTracks(const SongAudio& a, float band = 1, float guitar = 1) {
     std::vector<Mixer::Track> tracks(a.pans.size());
     for (size_t c = 0; c < tracks.size(); ++c) {
         tracks[c].pan = a.pans[c];
-        tracks[c].volume = c < a.vols.size() ? std::pow(10.0f, a.vols[c] / 20.0f) : 1.0f;
         tracks[c].guitar = c < a.cores.size() && a.cores[c] == 1;
+        tracks[c].volume = (c < a.vols.size() ? std::pow(10.0f, a.vols[c] / 20.0f) : 1.0f) * (tracks[c].guitar ? guitar : band);
     }
     return tracks;
 }
 
-class App {
+// A section of a .mogg looped (song_preview: songs.dta (preview a b) with a
+// fade in and out [I: GH2's fade times]; the menu music: the whole loop).
+class LoopSource final : public AudioSource {
+public:
+    LoopSource(std::unique_ptr<VorbisStream> s, double startMs, double endMs, double fadeMs)
+        : s_(std::move(s)), start_(uint64_t(std::max(0.0, startMs) * s_->sampleRate() / 1000.0)) {
+        end_ = endMs > startMs ? uint64_t(endMs * s_->sampleRate() / 1000.0) : s_->lengthFrames();
+        end_ = std::min<uint64_t>(std::max<uint64_t>(end_, start_ + 1), s_->lengthFrames() ? s_->lengthFrames() : end_);
+        fade_ = uint64_t(fadeMs * s_->sampleRate() / 1000.0);
+        s_->seek(start_);
+        pos_ = start_;
+    }
+    int channels() const override { return s_->channels(); }
+    int sampleRate() const override { return s_->sampleRate(); }
+    int decode(float* const* out, int frames) override {
+        int done = 0;
+        std::vector<float*> ptr(static_cast<size_t>(channels()));
+        while (done < frames) {
+            if (pos_ >= end_) {
+                s_->seek(start_);
+                pos_ = start_;
+            }
+            for (int c = 0; c < channels(); ++c) ptr[size_t(c)] = out[c] + done;
+            const int want = int(std::min<uint64_t>(uint64_t(frames - done), end_ - pos_));
+            const int n = s_->decode(ptr.data(), want);
+            if (n <= 0) {
+                if (pos_ == start_) break;  // nothing decodes
+                pos_ = end_;
+                continue;
+            }
+            if (fade_ > 0)
+                for (int i = 0; i < n; ++i) {
+                    const uint64_t p = pos_ + uint64_t(i);
+                    const float g = std::min({1.0f, float(p - start_) / float(fade_), float(end_ - p) / float(fade_)});
+                    for (int c = 0; c < channels(); ++c) ptr[size_t(c)][i] *= g;
+                }
+            pos_ += uint64_t(n);
+            done += n;
+        }
+        return done;
+    }
+
+private:
+    std::unique_ptr<VorbisStream> s_;
+    uint64_t start_ = 0, end_ = 0, pos_ = 0, fade_ = 0;
+};
+
+class App final : public UiHost {
 public:
     explicit App(const Options& o) : options_(o), difficulty_(std::clamp(o.difficulty, 0, kDifficultyCount - 1)) {}
     int run();
 
+    // ---- UiHost (GH2's menus around the song)
+    const std::vector<SongInfo>& songs() const override { return songs_; }
+    bool gameLoad(const GameSetup& setup, std::string& error) override;
+    void gameBegin() override;
+    void gameEnd() override { endSong(); }
+    bool gameLoaded() const override { return player_ != nullptr; }
+    void gameSetPaused(bool paused) override {
+        paused_ = paused;
+        mixer_.setPaused(paused || musicPaused_);
+    }
+    bool gamePaused() const override { return paused_; }
+    double gameTimeMs() const override { return lastT_; }
+    float gameBeat() const override {
+        return song_ ? float(song_->tempo.msToTick(std::max(0.0f, lastT_)) / std::max(1, song_->tempo.division())) : 0.0f;
+    }
+    float songDurationMs() const override { return song_ ? song_->endMs : 0.0f; }
+    const Player* gamePlayer(int index) const override { return index == 0 ? player_.get() : player2_.get(); }
+    int gameCounter(int player, const std::string& key) const override;
+    void setMusicSpeed(float speed) override { mixer_.setSpeed(std::max(0.0f, speed)); }
+    void setMusicPaused(bool paused) override {
+        musicPaused_ = paused;
+        mixer_.setPaused(paused || paused_);
+    }
+    void trackCommand(const std::string& msg, const std::vector<Value>& args) override;
+    void hudCommand(const std::string& msg, const std::vector<Value>& args) override;
+    void drawTrack() override;
+    void drawHud() override;
+    void songPreview(const std::string& songId) override;
+    void menuMusic(bool on) override;
+    void creditsMusic(bool on) override;
+    void playMovie(const std::string& name) override;
+    void applyOptions(float band, float guitar, float fx, bool lefty0, bool lefty1, int syncOffsetMs) override;
+    void quit() override { running_ = false; }
+
 private:
     bool loadData(const std::string& path);
+    void startUi();
     void frameNeedData();
+    bool loadSong(const SongInfo& info, int difficulty, bool autoplay, float band, float guitar, bool fastIntro);
+    void beginSong();
     bool startSong(size_t index);
     void endSong();
     void handleEvent(const SDL_Event& e);
     void handleAction(const InputEvent& a);
+    void playerAction(const InputEvent& a);
+    void updateSong(float t);
+    float songClock();
     void frameSong();
+    void frameUi();
     void drawSong(float t);
     void frameList();
     bool prepareTrack();
+    void stopMusic();
+    void shootScreens();
 
     Options options_;
     int difficulty_;
@@ -106,9 +210,21 @@ private:
     Rules rules_;
     std::vector<SongInfo> songs_;
     bool running_ = true;
+    int exitCode_ = 0;
     // The first screen (no disc image yet): the file dialog and its last error.
     DiscPicker picker_;
     std::string dataMessage_;
+
+    // GH2's front end (ui/ui_manager.h); GD02_DEBUG_MENU=1 shows the debug
+    // song list instead.
+    std::unique_ptr<ui::UiManager> ui_;
+    bool debugMenu_ = false;
+    double uiStartMs_ = 0;
+    MenuKeys menuKeys_;
+    std::unique_ptr<WalkDriver> walk_;
+    size_t shotsTaken_ = 0;
+    double shotDue_ = -1;
+    std::string shotScreen_;
 
     // The song list.
     size_t cursor_ = 0;
@@ -119,6 +235,10 @@ private:
     std::unique_ptr<Song> song_;
     std::unique_ptr<Player> player_;
     std::unique_ptr<Autoplay> bot_;
+    std::unique_ptr<VorbisStream> pendingStream_;
+    float bandVolume_ = 1, guitarVolume_ = 1;
+    int syncOffsetMs_ = 0;
+    double leadInMs_ = kLeadInMs;
     // GD02_MODE's second player (TODO M10: the modes' own rules).
     DevMode mode_ = DevMode::Single;
     std::unique_ptr<Player> player2_;
@@ -128,6 +248,13 @@ private:
     float failAtMs_ = 1e30f;
     uint64_t failTicks_ = 0;
     bool exploded_ = false;
+    // The UI's song: the game events sent so far, the outro, the counts.
+    bool begun_ = false, wonSent_ = false, lostSent_ = false, outroSent_ = false, spReadySent_ = false;
+    uint64_t overNs_ = 0, outroAtNs_ = 0;
+    float overT_ = 0;
+    bool musicPaused_ = false;
+    int spPhrases_[2] = {}, streaksBroken_[2] = {};
+    float lastT_ = 0;
     // Development aid: GD02_KEYS="<song ms>:<key>,..." (game/key_script.h)
     // plays scripted guitar input in every song, at exact song times.
     KeyScript keys_;
@@ -149,6 +276,8 @@ private:
     std::vector<float> flashes_ = std::vector<float>(5, 0.0f);
     double lastFrameMs_ = 0;
     float failMs_ = -1e9f;
+    // The menus' music: none, a meta loop or a song's preview.
+    enum class Music { None, Menu, Preview, Credits } music_ = Music::None;
 };
 
 int App::run() {
@@ -165,7 +294,17 @@ int App::run() {
 #ifdef __ANDROID__
     flags |= SDL_WINDOW_FULLSCREEN;
 #endif
-    if (const char* d = SDL_getenv("GD02_DEBUG_HIGHWAY")) debugHighway_ = *d && *d != '0';
+    debugHighway_ = envOn("GD02_DEBUG_HIGHWAY");
+    debugMenu_ = envOn("GD02_DEBUG_MENU");
+    if (!options_.walk.empty()) {
+        walk_ = std::make_unique<WalkDriver>(options_.walk);
+        if (!walk_->known()) {
+            std::fprintf(stderr, "%s: unknown walk test '%s' (quickplay, lose, pause, attract)\n", app::kProgram, options_.walk.c_str());
+            SDL_Quit();
+            return 2;
+        }
+        debugMenu_ = false;
+    }
     window_ = SDL_CreateWindow(app::kWindowTitle, int(kScreenW), int(kScreenH), flags);
     setAppWindowIcon(window_);
     installDesktopEntry();
@@ -187,19 +326,21 @@ int App::run() {
     // next to the program); without one, the first screen asks for it.
     const std::string path = options_.dataPath.empty() ? loadRememberedPath() : options_.dataPath;
     if (!path.empty()) loadData(path);
-    int exitCode = 0;
-    if (!options_.song.empty() && !data_) {
+    if ((!options_.song.empty() || walk_) && !data_) {
         std::fprintf(stderr, "%s: %s\n", app::kProgram, dataMessage_.empty() ? "no disc image given" : dataMessage_.c_str());
-        running_ = false, exitCode = 2;
+        running_ = false, exitCode_ = 2;
     } else if (!options_.song.empty()) {
         auto it = std::find_if(songs_.begin(), songs_.end(), [&](const SongInfo& s) { return s.id == options_.song; });
         if (it == songs_.end()) {
             std::fprintf(stderr, "%s: no song '%s' (see the song list without --song)\n", app::kProgram, options_.song.c_str());
-            running_ = false, exitCode = 2;
+            running_ = false, exitCode_ = 2;
         } else if (!startSong(size_t(it - songs_.begin()))) {
             std::fprintf(stderr, "%s: %s\n", app::kProgram, message_.c_str());
-            running_ = false, exitCode = 2;
+            running_ = false, exitCode_ = 2;
         }
+    } else if (data_ && !debugMenu_) {
+        startUi();
+        if (walk_ && !ui_) running_ = false, exitCode_ = 1;
     }
 
     while (running_) {
@@ -208,8 +349,11 @@ int App::run() {
         while (SDL_PollEvent(&e)) handleEvent(e);
         if (!running_) break;
         if (!data_)
-            if (std::string picked = picker_.takePicked(); !picked.empty()) loadData(picked);
-        if (player_) frameSong();
+            if (std::string picked = picker_.takePicked(); !picked.empty()) {
+                if (loadData(picked) && !debugMenu_) startUi();
+            }
+        if (ui_) frameUi();
+        else if (player_) frameSong();
         else if (!data_) frameNeedData();
         else frameList();
         // Without vsync (e.g. SDL_VIDEO_DRIVER=offscreen) keep to about 250
@@ -219,7 +363,10 @@ int App::run() {
         if (spent < kMinFrameNs) SDL_DelayNS(kMinFrameNs - spent);
     }
 
+    if (walk_ && ui_) exitCode_ = walk_->finish(*ui_);
     endSong();
+    stopMusic();
+    ui_.reset();
     hud_.reset(), track_.reset(), track2_.reset();
     sceneCache_.reset();
     milos_.reset();
@@ -230,7 +377,7 @@ int App::run() {
     canvas_.shutdown();
     SDL_DestroyWindow(window_);
     SDL_Quit();
-    return exitCode;
+    return exitCode_;
 }
 
 bool App::loadData(const std::string& path) {
@@ -239,6 +386,7 @@ bool App::loadData(const std::string& path) {
         Rules rules = loadRules(*data);
         std::vector<SongInfo> songs = loadSongs(*data);
         if (songs.empty()) throw std::runtime_error("No songs found in " + path);
+        ui_.reset();
         hud_.reset(), track_.reset(), track2_.reset();
         sceneCache_.reset(), milos_.reset();
         trackTried_ = false;
@@ -255,14 +403,47 @@ bool App::loadData(const std::string& path) {
     return true;
 }
 
-bool App::startSong(size_t index) {
-    const SongInfo& info = songs_[index];
+// GH2's front end: the boot splashes and the intro (unless GD02_SKIP_BOOT=1
+// or GD02_SCREEN=<screen>, which opens that screen), then the menus.
+void App::startUi() {
+    if (walk_) {
+        // The walk test: no videos, a fresh save of its own, its song settings.
+        SDL_setenv_unsafe("GD02_SKIP_MOVIES", "1", 1);
+        static std::string dir;
+        dir = (std::filesystem::temp_directory_path() / ("gd02-walk-" + std::to_string(SDL_GetTicksNS()))).string() + "/";
+        std::filesystem::create_directories(dir);
+        SDL_setenv_unsafe("GD02_SAVE_DIR", dir.c_str(), 1);
+    }
+    auto ui = std::make_unique<ui::UiManager>(*data_, canvas_, *this, input_);
+    std::string error;
+    if (!ui->init(error)) {
+        SDL_Log("GH2's menus could not start (%s); showing the debug song list", error.c_str());
+        message_ = error;
+        return;
+    }
+    ui_ = std::move(ui);
+    ui_->applyOptions();
+    const char* keys = SDL_getenv("GD02_KEYS");
+    menuKeys_ = MenuKeys(keys ? keys : "");
+    if (!menuKeys_.valid()) SDL_Log("GD02_KEYS: some menu items were not understood and are ignored");
+    std::string screen = SDL_getenv("GD02_SCREEN") ? SDL_getenv("GD02_SCREEN") : "";
+    if (walk_) screen = walk_->startScreen();
+    const bool skip = envOn("GD02_SKIP_BOOT") || !screen.empty();
+    if (envOn("GD02_SKIP_BOOT") && screen.empty()) screen = "splash_screen";
+    ui_->start(skip, screen);
+    uiStartMs_ = double(SDL_GetTicksNS()) / 1e6;
+}
+
+bool App::loadSong(const SongInfo& info, int difficulty, bool autoplay, float band, float guitar, bool fastIntro) {
+    endSong();
+    stopMusic();
     try {
         song_ = std::make_unique<Song>(loadChart(*data_, info, rules_));
-        auto stream = std::make_unique<VorbisStream>(data_->read(info.audio.moggPath));
+        pendingStream_ = std::make_unique<VorbisStream>(data_->read(info.audio.moggPath));
+        difficulty_ = std::clamp(difficulty, 0, kDifficultyCount - 1);
         // The watcher follows the device that acted last: a guitar or the
         // keyboard strums, a gamepad's frets strum (GH2's joypad_guitar).
-        mode_ = devMode();
+        mode_ = ui_ ? DevMode::Single : devMode();
         // Face-off players own their gems (player_mask); co-op plays lead and
         // bass / rhythm [I: the part pick], the others the guitar part.
         const bool faceOff = mode_ == DevMode::FaceOff;
@@ -272,10 +453,11 @@ bool App::startSong(size_t index) {
             if (song_->hasPart[size_t(Part::Rhythm)]) part1 = Part::Rhythm;
             if (song_->hasPart[size_t(Part::Bass)]) part1 = Part::Bass;
         }
-        const bool noFail = options_.noFail || options_.autoplay || mode_ != DevMode::Single;
+        const bool noFail = options_.noFail || autoplay || mode_ != DevMode::Single;
         player_ = std::make_unique<Player>(*song_, part0, static_cast<Difficulty>(difficulty_), rules_, input_.lastMode(), noFail,
                                            faceOff ? 0 : -1);
-        bot_ = options_.autoplay ? std::make_unique<Autoplay>(player_->chart(), faceOff ? 0 : -1) : nullptr;
+        player_->setCalibrationMs(float(syncOffsetMs_));
+        bot_ = autoplay ? std::make_unique<Autoplay>(player_->chart(), faceOff ? 0 : -1) : nullptr;
         player2_.reset(), bot2_.reset();
         if (twoPlayers(mode_)) {
             player2_ = std::make_unique<Player>(*song_, part1, static_cast<Difficulty>(difficulty_), rules_, ControllerMode::Guitar,
@@ -285,37 +467,60 @@ bool App::startSong(size_t index) {
         failAtMs_ = SDL_getenv("GD02_FAIL_AT") ? float(std::atof(SDL_getenv("GD02_FAIL_AT"))) : 1e30f;
         // Development aid: GD02_END_AT=<song ms> ends (wins) the song early.
         if (const char* e = SDL_getenv("GD02_END_AT")) song_->endMs = std::min(song_->endMs, float(std::atof(e)));
+        if (walk_) {
+            song_->endMs = std::min(song_->endMs, walk_->songEndMs());
+            failAtMs_ = std::min(failAtMs_, walk_->songFailMs());
+        }
         failTicks_ = 0;
         exploded_ = false;
         // Development aid: GD02_LEFTY=1 (player 1), 2 (player 2) or 12 (both)
-        // turns on the lefty flip until the options screen exists.
+        // turns on the lefty flip (the options' lefty in the menus).
         if (const char* l = SDL_getenv("GD02_LEFTY")) input_.setLefty(SDL_strchr(l, '1') != nullptr, SDL_strchr(l, '2') != nullptr);
-        keys_ = KeyScript(SDL_getenv("GD02_KEYS") ? SDL_getenv("GD02_KEYS") : "");
+        // GD02_KEYS: with the menus, only its "s<song ms>:" items play in the song.
+        const char* k = SDL_getenv("GD02_KEYS");
+        keys_ = KeyScript(ui_ ? MenuKeys::songItems(k ? k : "") : (k ? k : ""));
         if (!keys_.valid()) SDL_Log("GD02_KEYS: some items were not understood and are ignored");
         SDL_Log("%s (%s): %d Hz, %d channels, %d %s gems, hopo_threshold %d", info.id.c_str(), info.name.c_str(),
-                stream->sampleRate(), stream->channels(), int(player_->chart().gems.size()),
+                pendingStream_->sampleRate(), pendingStream_->channels(), int(player_->chart().gems.size()),
                 difficultyName(static_cast<Difficulty>(difficulty_)), hopoThreshold(info.audio, rules_));
-        mixer_.play(std::move(stream), mixerTracks(info.audio), kLeadInMs);
     } catch (const std::exception& ex) {
         message_ = info.id + ": " + ex.what();
         SDL_Log("%s", message_.c_str());
-        player_.reset(), bot_.reset(), song_.reset();
+        player_.reset(), bot_.reset(), song_.reset(), pendingStream_.reset();
         return false;
     }
+    bandVolume_ = band, guitarVolume_ = guitar;
+    // A restart from the pause menu skips most of the lead-in (game fast_intro) [I].
+    leadInMs_ = fastIntro ? 1000 : kLeadInMs;
     info_ = &info;
-    input_.setInGame(true);
+    begun_ = wonSent_ = lostSent_ = outroSent_ = spReadySent_ = false;
+    musicPaused_ = false;
+    spPhrases_[0] = spPhrases_[1] = streaksBroken_[0] = streaksBroken_[1] = 0;
     paused_ = false;
+    lastT_ = float(-leadInMs_);
     std::fill(flashes_.begin(), flashes_.end(), 0.0f);
-    lastFrameMs_ = -kLeadInMs;
+    lastFrameMs_ = -leadInMs_;
     failMs_ = -1e9f;
-    // The intro: GH2 extends the track when the song's countdown starts
-    // (game.dta extend_track, track_extend_sec -2), here the lead-in.
     if (prepareTrack()) {
-        track_->reset(float(-kLeadInMs));
+        track_->reset(float(-leadInMs_));
         track_->setLefty(input_.lefty(0));
-        if (track2_) track2_->reset(float(-kLeadInMs)), track2_->setLefty(input_.lefty(1));
-        hud_->reset(float(-kLeadInMs));
+        if (track2_) track2_->reset(float(-leadInMs_)), track2_->setLefty(input_.lefty(1));
+        hud_->reset(float(-leadInMs_));
     }
+    return true;
+}
+
+void App::beginSong() {
+    if (!pendingStream_ || !info_) return;
+    mixer_.setSpeed(1);
+    mixer_.play(std::move(pendingStream_), mixerTracks(info_->audio, bandVolume_, guitarVolume_), leadInMs_);
+    input_.setInGame(true);
+    begun_ = true;
+}
+
+bool App::startSong(size_t index) {
+    if (!loadSong(songs_[index], difficulty_, options_.autoplay, 1, 1, false)) return false;
+    beginSong();
     return true;
 }
 
@@ -358,10 +563,11 @@ void App::endSong() {
     mixer_.setPaused(false);
     mixer_.setSpeed(1);
     mixer_.stop();
-    bot_.reset(), player_.reset(), bot2_.reset(), player2_.reset(), song_.reset();
+    bot_.reset(), player_.reset(), bot2_.reset(), player2_.reset(), song_.reset(), pendingStream_.reset();
     info_ = nullptr;
     input_.setInGame(false);
     paused_ = false;
+    begun_ = false;
     if (!options_.song.empty()) running_ = false;  // --song: one song, then quit
 }
 
@@ -375,16 +581,19 @@ void App::handleEvent(const SDL_Event& e) {
     if (!data_) {
         // The first screen: a click, a tap, Enter or a gamepad's A opens the
         // file dialog; a disc image dropped onto the window is used at once.
-        if (e.type == SDL_EVENT_DROP_FILE && e.drop.data) loadData(e.drop.data);
-        else if ((e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_LEFT && e.button.which != SDL_TOUCH_MOUSEID) ||
-                 e.type == SDL_EVENT_FINGER_UP ||
-                 (e.type == SDL_EVENT_KEY_DOWN && !e.key.repeat && (e.key.key == SDLK_RETURN || e.key.key == SDLK_KP_ENTER)) ||
-                 (e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN && e.gbutton.button == SDL_GAMEPAD_BUTTON_SOUTH))
+        if (e.type == SDL_EVENT_DROP_FILE && e.drop.data) {
+            if (loadData(e.drop.data) && !debugMenu_) startUi();
+        } else if ((e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_LEFT && e.button.which != SDL_TOUCH_MOUSEID) ||
+                   e.type == SDL_EVENT_FINGER_UP ||
+                   (e.type == SDL_EVENT_KEY_DOWN && !e.key.repeat && (e.key.key == SDLK_RETURN || e.key.key == SDLK_KP_ENTER)) ||
+                   (e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN && e.gbutton.button == SDL_GAMEPAD_BUTTON_SOUTH)) {
             picker_.open(window_);
-        else if (e.type == SDL_EVENT_KEY_DOWN && (e.key.key == SDLK_ESCAPE || e.key.key == SDLK_AC_BACK)) running_ = false;
+        } else if (e.type == SDL_EVENT_KEY_DOWN && (e.key.key == SDLK_ESCAPE || e.key.key == SDLK_AC_BACK)) {
+            running_ = false;
+        }
         return;
     }
-    if (e.type == SDL_EVENT_DROP_FILE && e.drop.data && !player_) {  // another disc image
+    if (e.type == SDL_EVENT_DROP_FILE && e.drop.data && !player_ && !ui_) {  // another disc image
         loadData(e.drop.data);
         message_ = dataMessage_;
         return;
@@ -392,10 +601,18 @@ void App::handleEvent(const SDL_Event& e) {
     for (const InputEvent& a : actions_) handleAction(a);
 }
 
-// One game action: in a song the player's controller layer (Player), Start
-// pauses (then Start or green / Confirm resumes, Back quits the song); in the
-// song list Up / Down pick, Left / Right the difficulty, Confirm plays, Back quits.
+// One input action. With the menus: the player's controller layer while
+// the song plays, and every action to the menus (GH2's kPad buttons: Start
+// pauses through game_screen's script). Without them (--song, the debug
+// list): Start pauses, then Start or green / Confirm resumes, Back quits the
+// song; in the list Up / Down pick, Left / Right the difficulty, Confirm
+// plays, Back quits.
 void App::handleAction(const InputEvent& a) {
+    if (ui_) {
+        if (player_ && begun_ && !paused_ && !bot_) playerAction(a);
+        ui_->action(a);
+        return;
+    }
     if (player_) {
         if (a.action == Action::Back && a.down && !paused_) {
             endSong();
@@ -413,18 +630,7 @@ void App::handleAction(const InputEvent& a) {
             return;
         }
         if (bot_) return;  // autoplay owns the frets
-        const float t = float(mixer_.songTimeMs(a.timestampNs));
-        player_->update(t);
-        if (isFret(a.action)) {
-            if (a.down) player_->fretDown(fretOf(a.action), t);
-            else player_->fretUp(fretOf(a.action), t);
-        } else if (a.action == Action::Strum && a.down) {
-            player_->strum(t);
-        } else if (a.action == Action::StarPower && a.down) {
-            player_->starPowerButton(t);  // Select / tilt (force_mercury)
-        } else if (a.action == Action::Whammy && !a.analog) {
-            player_->setWhammy(a.down);  // a key or button; an analog bar is sampled every frame
-        }
+        playerAction(a);
         return;
     }
     if (!a.down || songs_.empty()) return;
@@ -436,6 +642,87 @@ void App::handleAction(const InputEvent& a) {
     case Action::Confirm: case Action::Start: message_.clear(), startSong(cursor_); break;
     case Action::Back: running_ = false; break;
     default: break;
+    }
+}
+
+void App::playerAction(const InputEvent& a) {
+    if (exploded_ || wonSent_ || lostSent_) return;
+    const float t = float(mixer_.songTimeMs(a.timestampNs));
+    player_->update(t);
+    if (isFret(a.action)) {
+        if (a.down) player_->fretDown(fretOf(a.action), t);
+        else player_->fretUp(fretOf(a.action), t);
+    } else if (a.action == Action::Strum && a.down) {
+        player_->strum(t);
+    } else if (a.action == Action::StarPower && a.down) {
+        player_->starPowerButton(t);  // Select / tilt (force_mercury)
+    } else if (a.action == Action::Whammy && !a.analog) {
+        player_->setWhammy(a.down);  // a key or button; an analog bar is sampled every frame
+    }
+}
+
+// The song clock for this frame: the mixer's, then (after the song is over)
+// the wall clock from there: GH2's `game set_realtime TRUE` keeps the track
+// moving while the music winds down or stops.
+float App::songClock() {
+    if (!begun_) return float(-leadInMs_);
+    if (overNs_ && !paused_) return overT_ + float(double(SDL_GetTicksNS() - overNs_) / 1e6);
+    if (overNs_) return lastT_;
+    return float(mixer_.frameTimeMs());
+}
+
+// One frame of the song's rules: scripted and autoplay input, the players,
+// the track and HUD events, and (with the menus) GH2's game events.
+void App::updateSong(float t) {
+    // The analog whammy bar, sampled every frame (Player's movement detection).
+    if (!bot_ && !paused_ && input_.analogWhammy()) player_->setWhammyValue(input_.whammyValue(), t);
+    const bool over = exploded_ || wonSent_ || lostSent_;
+    if (!over && !paused_) {
+        keys_.feed(*player_, t);
+        if (bot_) bot_->feed(*player_, t);
+        if (t >= failAtMs_ && !player_->failed()) player_->forceFail();
+        player_->update(t);
+        if (player2_) bot2_->feed(*player2_, t), player2_->update(t);
+    }
+    const float dt = std::clamp(float(t - lastFrameMs_), 0.0f, 100.0f);
+    lastFrameMs_ = t;
+    for (float& f : flashes_) f = std::max(0.0f, f - dt / 150.0f);
+    const std::vector<PlayerEvent> events = player_->takeEvents();
+    const std::vector<PlayerEvent> events2 = player2_ ? player2_->takeEvents() : std::vector<PlayerEvent>{};
+    for (const PlayerEvent& e : events) {
+        if (e.kind == PlayerEvent::Kind::PhraseCaptured) ++spPhrases_[0];
+        if (e.kind == PlayerEvent::Kind::EndStreak) ++streaksBroken_[0];
+        if (e.kind == PlayerEvent::Kind::StarPowerReady && ui_) ui_->gameEvent("star_power_ready", {Value::integer(0)});
+        if (e.kind != PlayerEvent::Kind::Hit || e.gem < 0) continue;
+        const Gem& g = player_->chart().gems[size_t(e.gem)];
+        for (int f = 0; f < 5; ++f)
+            if (g.frets & (1u << f)) flashes_[size_t(f)] = 1.0f;
+    }
+    const bool gh2 = track_ && hud_ && !debugHighway_;
+    if (gh2) {
+        track_->onEvents(events, *player_, t);
+        hud_->onEvents(events, 0, t);
+        if (track2_ && player2_) track2_->onEvents(events2, *player2_, t), hud_->onEvents(events2, 1, t);
+    }
+    mixer_.setGuitarAudible(player_->guitarAudible());
+    if (!ui_) return;
+    // GH2's game events: the song won at its end (game_won_msg: the track
+    // explodes, the music stops), or lost (game_lost: the music winds down);
+    // then game_outro_complete takes the menus on.
+    const uint64_t now = SDL_GetTicksNS();
+    if (!wonSent_ && !lostSent_ && !player_->failed() && t >= song_->endMs) {
+        wonSent_ = true, overNs_ = now, overT_ = t, outroAtNs_ = now + uint64_t(kExplodeOutroMs * 1e6);
+        ui_->gameEvent("game_over");
+        ui_->gameEvent("game_won_msg", {Value::integer(0)});
+    }
+    if (!wonSent_ && !lostSent_ && player_->failed()) {
+        lostSent_ = true, overNs_ = now, overT_ = t, outroAtNs_ = now + uint64_t(kLoseOutroMs * 1e6);
+        ui_->gameEvent("game_over");
+        ui_->gameEvent("game_lost");
+    }
+    if ((wonSent_ || lostSent_) && !outroSent_ && !paused_ && now >= outroAtNs_) {
+        outroSent_ = true;
+        ui_->gameEvent("game_outro_complete");
     }
 }
 
@@ -453,35 +740,11 @@ void App::frameSong() {
         if (since >= kLoseSlowMs) mixer_.setPaused(true);
         t = failMs_ + since;
     }
-    // The analog whammy bar, sampled every frame (Player's movement detection).
-    if (!bot_ && !paused_ && input_.analogWhammy()) player_->setWhammyValue(input_.whammyValue(), t);
-    if (!exploded_) {
-        keys_.feed(*player_, t);
-        if (bot_) bot_->feed(*player_, t);
-        if (t >= failAtMs_ && !player_->failed()) player_->forceFail();
-        player_->update(t);
-        if (player2_) bot2_->feed(*player2_, t), player2_->update(t);
-    }
-    const float dt = std::clamp(float(t - lastFrameMs_), 0.0f, 100.0f);
-    lastFrameMs_ = t;
-    for (float& f : flashes_) f = std::max(0.0f, f - dt / 150.0f);
-    const std::vector<PlayerEvent> events = player_->takeEvents();
-    const std::vector<PlayerEvent> events2 = player2_ ? player2_->takeEvents() : std::vector<PlayerEvent>{};
-    for (const PlayerEvent& e : events) {
-        if (e.kind != PlayerEvent::Kind::Hit || e.gem < 0) continue;
-        const Gem& g = player_->chart().gems[size_t(e.gem)];
-        for (int f = 0; f < 5; ++f)
-            if (g.frets & (1u << f)) flashes_[size_t(f)] = 1.0f;
-    }
-    const bool gh2 = track_ && hud_ && !debugHighway_;
-    if (gh2) {
-        track_->onEvents(events, *player_, t);
-        hud_->onEvents(events, 0, t);
-        if (track2_ && player2_) track2_->onEvents(events2, *player2_, t), hud_->onEvents(events2, 1, t);
-    }
-    mixer_.setGuitarAudible(player_->guitarAudible());
+    updateSong(t);
+    lastT_ = t;
     // The song is won at its end: the track explodes (game.dta game_won_msg:
     // {track_panel explode}, beatmatch paused).
+    const bool gh2 = track_ && hud_ && !debugHighway_;
     if (!player_->failed() && !exploded_ && t >= song_->endMs) {
         exploded_ = true;
         if (track_) track_->explode(t);
@@ -495,8 +758,215 @@ void App::frameSong() {
     if (!paused_ && (t > song_->endMs + outro || (player_->failed() && t > failMs_ + 3000))) endSong();
 }
 
-// One frame of the song screen: GH2's track and HUD (or the debug highway),
-// then the 2D text on top.
+// One frame with GH2's menus: the scripted keys, the UI's update (which
+// may start or end the song), the song's rules, then the UI's drawing (the
+// track and HUD are its game panels).
+void App::frameUi() {
+    const double now = double(SDL_GetTicksNS()) / 1e6 - uiStartMs_;
+    actions_.clear();
+    input_.poll(SDL_GetTicksNS(), actions_);
+    for (const InputEvent& a : actions_) handleAction(a);
+    for (const MenuKeys::Key& k : menuKeys_.due(now)) {
+        if (k.edge >= 0) ui_->buttonDown(k.button, k.player);
+        if (k.edge <= 0) ui_->buttonUp(k.button, k.player);
+    }
+    if (walk_) {
+        walk_->poll(*ui_, now);
+        if (walk_->done()) running_ = false;
+    }
+    ui_->update();
+    if (!running_) return;
+    // The menus get the guitar's green / red as Confirm / Back when no song is being played.
+    input_.setInGame(player_ && begun_ && !paused_ && ui_->currentScreen() == "game_screen");
+    if (player_ && begun_) {
+        const float t = songClock();
+        updateSong(t);
+        lastT_ = t;
+    }
+    canvas_.begin({0, 0, 0, 255});
+    ui_->draw();
+    shootScreens();
+    // GD02_SCREENSHOT_AT: wall-clock ms in the menus, "s<ms>" song times.
+    if (captureMenuScreenshot(canvas_, now, player_ && begun_ ? double(lastT_) : -1e9)) running_ = false;
+    canvas_.end();
+}
+
+// Development aid: GD02_SHOTS=<dir> (or the walk test's GD02_WALK_SHOTS)
+// saves each screen the menus reach, once settled, as <dir>/NN_<screen>.bmp.
+void App::shootScreens() {
+    const char* dir = SDL_getenv("GD02_WALK_SHOTS");
+    if (!dir) dir = SDL_getenv("GD02_SHOTS");
+    if (!dir || !ui_) return;
+    const auto& h = ui_->history();
+    const double now = double(SDL_GetTicksNS()) / 1e6;
+    if (h.size() > shotsTaken_ && !ui_->inTransition()) {
+        if (shotDue_ < 0 || shotScreen_ != h.back()) shotDue_ = now + 700, shotScreen_ = h.back();
+        if (now >= shotDue_ && ui_->currentScreen() == shotScreen_) {
+            char name[32];
+            std::snprintf(name, sizeof name, "%02zu_", h.size());
+            const std::string path = std::string(dir) + "/" + name + shotScreen_ + ".bmp";
+            if (saveScreenshot(canvas_, path)) SDL_Log("screen shot: %s", path.c_str());
+            shotsTaken_ = h.size();
+            shotDue_ = -1;
+        }
+    }
+}
+
+// ---- UiHost
+
+bool App::gameLoad(const GameSetup& setup, std::string& error) {
+    auto it = std::find_if(songs_.begin(), songs_.end(), [&](const SongInfo& s) { return s.id == setup.song; });
+    if (it == songs_.end()) {
+        error = "no song '" + setup.song + "'";
+        return false;
+    }
+    syncOffsetMs_ = setup.syncOffsetMs;
+    const bool autoplay = setup.autoplay || options_.autoplay || envOn("GD02_AUTOPLAY") || (walk_ && walk_->autoplay());
+    if (!loadSong(*it, setup.difficulty, autoplay, setup.bandVolume, setup.guitarVolume, setup.fastIntro)) {
+        error = message_;
+        return false;
+    }
+    if (track_) track_->setLefty(setup.lefty);
+    overNs_ = 0;
+    return true;
+}
+
+void App::gameBegin() {
+    overNs_ = 0;
+    beginSong();
+}
+
+int App::gameCounter(int player, const std::string& key) const {
+    const int p = std::clamp(player, 0, 1);
+    if (key == "sp_phrases") return spPhrases_[p];
+    if (key == "streaks_broken") return streaksBroken_[p];
+    if (key == "gems") {
+        const Player* pl = gamePlayer(p);
+        return pl ? int(pl->chart().gems.size()) : 0;
+    }
+    return 0;
+}
+
+void App::trackCommand(const std::string& msg, const std::vector<Value>& args) {
+    (void)args;
+    // The track view keeps its own intro, extend and smasher animations
+    // (render/track_view.h); explode is the scripts' (game_won_msg).
+    if (msg == "explode" && !exploded_) {
+        exploded_ = true;
+        if (track_) track_->explode(lastT_);
+        if (track2_) track2_->explode(lastT_);
+    }
+}
+
+void App::hudCommand(const std::string& msg, const std::vector<Value>& args) {
+    // set_win_showing TRUE: the HUD's win message (HudView::won); the meters
+    // and SONG FAILED are the HUD view's own.
+    if (msg == "set_win_showing" && !args.empty() && args[0].truthy() && hud_) hud_->won(lastT_);
+}
+
+void App::drawTrack() {
+    if (!player_ || !song_) return;
+    canvas_.flush();
+    canvas_.renderer().device().clear(nullptr, true);
+    const float speed = rules_.trackSpeed[size_t(difficulty_)];
+    if (track_ && !debugHighway_) {
+        track_->draw(canvas_.renderer(), *sceneCache_, *song_, *player_, lastT_, speed);
+        if (track2_ && player2_) track2_->draw(canvas_.renderer(), *sceneCache_, *song_, *player2_, lastT_, speed);
+    } else {
+        highway_.draw(canvas_, *song_, *player_, lastT_, speed, info_ ? info_->name : "", flashes_);
+    }
+}
+
+void App::drawHud() {
+    if (!player_ || !hud_ || debugHighway_) return;
+    canvas_.flush();
+    canvas_.renderer().device().clear(nullptr, true);
+    std::vector<const Player*> players{player_.get()};
+    if (player2_) players.push_back(player2_.get());
+    hud_->draw(canvas_.renderer(), *sceneCache_, canvas_, players, lastT_);
+}
+
+void App::stopMusic() {
+    if (music_ != Music::None && !player_) mixer_.stop();
+    music_ = Music::None;
+}
+
+void App::songPreview(const std::string& songId) {
+    if (player_) return;
+    if (songId.empty()) {
+        if (music_ == Music::Preview) stopMusic();
+        return;
+    }
+    auto it = std::find_if(songs_.begin(), songs_.end(), [&](const SongInfo& s) { return s.id == songId; });
+    if (it == songs_.end()) return;
+    try {
+        auto s = std::make_unique<VorbisStream>(data_->read(it->audio.moggPath));
+        auto loop = std::make_unique<LoopSource>(std::move(s), it->previewStartMs, it->previewEndMs, 1000);
+        mixer_.play(std::move(loop), mixerTracks(it->audio, bandVolume_, guitarVolume_), 0);
+        music_ = Music::Preview;
+    } catch (const std::exception& e) {
+        SDL_Log("song_preview %s: %s", songId.c_str(), e.what());
+    }
+}
+
+void App::menuMusic(bool on) {
+    if (player_) return;
+    if (!on) {
+        if (music_ == Music::Menu) stopMusic();
+        return;
+    }
+    if (music_ == Music::Menu) return;
+    // config/synth.dta (metamusic (volume -6) (music metaloop1_warpigs ...)):
+    // a random loop from sfx/streams.
+    static const char* const kLoops[] = {"metaloop1_warpigs", "metaloop2_psycho", "metaloop3_whowas", "metaloop_artillery", "metaloop_crowns",
+                                         "metaloop_ftk", "metaloop_hoods", "metaloop_rawdog", "metaloop_voivod"};
+    const std::string name = kLoops[SDL_GetTicks() % (sizeof kLoops / sizeof kLoops[0])];
+    try {
+        auto s = std::make_unique<VorbisStream>(data_->read("sfx/streams/" + name + ".mogg"));
+        const int ch = s->channels();
+        std::vector<Mixer::Track> tracks(static_cast<size_t>(ch));
+        for (int c = 0; c < ch; ++c) tracks[size_t(c)].pan = ch == 2 ? (c == 0 ? -1.0f : 1.0f) : 0.0f, tracks[size_t(c)].volume = 0.5f;
+        mixer_.play(std::make_unique<LoopSource>(std::move(s), 0, 0, 0), tracks, 0);
+        music_ = Music::Menu;
+    } catch (const std::exception& e) {
+        SDL_Log("meta_music %s: %s", name.c_str(), e.what());
+    }
+}
+
+void App::creditsMusic(bool on) {
+    if (player_) return;
+    if (!on) {
+        if (music_ == Music::Credits) stopMusic();
+        return;
+    }
+    try {
+        auto s = std::make_unique<VorbisStream>(data_->read("sfx/streams/credits.mogg"));
+        // Channels 0 / 2 left, 1 / 3 right (CreditsPanel 0x8229B310) [C].
+        std::vector<Mixer::Track> tracks(static_cast<size_t>(s->channels()));
+        for (size_t c = 0; c < tracks.size(); ++c) tracks[c].pan = c % 2 ? 1.0f : -1.0f, tracks[c].volume = 0.8f;
+        mixer_.play(std::make_unique<LoopSource>(std::move(s), 0, 0, 0), tracks, 0);
+        music_ = Music::Credits;
+    } catch (const std::exception& e) {
+        SDL_Log("credits music: %s", e.what());
+    }
+}
+
+void App::playMovie(const std::string& name) {
+    stopMusic();
+    if (name.empty() || !data_) return;
+    if (::playMovie(*data_, name, canvas_, mixer_, input_) == WmvPlayer::Result::Quit) running_ = false;
+    mixer_.stop();
+}
+
+void App::applyOptions(float band, float guitar, float fx, bool lefty0, bool lefty1, int syncOffsetMs) {
+    (void)fx;  // the sound effects are not played yet
+    bandVolume_ = band, guitarVolume_ = guitar;
+    syncOffsetMs_ = syncOffsetMs;
+    if (!SDL_getenv("GD02_LEFTY")) input_.setLefty(lefty0, lefty1);
+}
+
+// One frame of the song screen without the menus (--song, the debug list):
+// GH2's track and HUD (or the debug highway), then the 2D text on top.
 void App::drawSong(float t) {
     const bool gh2 = track_ && hud_ && !debugHighway_;
     canvas_.begin(gh2 ? SDL_Color{0, 0, 0, 255} : SDL_Color{12, 10, 16, 255});
@@ -570,6 +1040,7 @@ void App::frameNeedData() {
     canvas_.end();
 }
 
+// The debug song list (GD02_DEBUG_MENU=1, or when GH2's menus cannot start).
 void App::frameList() {
     canvas_.begin({14, 12, 20, 255});
     canvas_.text(40, 30, 3, {235, 235, 240, 255}, std::string(app::kWindowTitle) + "  " + app::kVersion);

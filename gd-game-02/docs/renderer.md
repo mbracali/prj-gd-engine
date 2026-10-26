@@ -33,7 +33,7 @@ Postprocess shaders reuse the low bits for their own switches (COLORXFM,
 NOISE, DOF, BLOOM, BLENDPREVIOUS, COPYPREVIOUS, NUM_TAPS at 14–17, LUMMAP at
 20). gd02 builds the same keys (`standard_shader.*`), so `standard_<hex>`
 in gd02 names the same variant as the disc's file. `--shadertest` compiles
-all 546 programs gd02 builds.
+all 547 programs gd02 builds (546 + the video program).
 
 ## How a Mat picks its key — `0x8268d280` (from shader selection `0x82308098`) [C]
 
