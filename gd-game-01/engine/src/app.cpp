@@ -268,6 +268,7 @@ private:
     void drawNeedData();
     void drawLogo();
     void drawTouchButtons();
+    void drawVersion();
     int logoTexture_ = -1;  // the badge on the first screen (0: could not load)
     void drawMenu();
     void drawResults();
@@ -1204,6 +1205,15 @@ void App::drawFpsCounter() {
     } else {
         renderer_.text(23, 672, 1.5f, {50, 255, 80, 255}, buf);
     }
+}
+
+// The version on the main title screen, top right: the FPS counter's font and
+// size, in white.
+void App::drawVersion() {
+    if (!ui_ || movie_ || screen_ != Screen::Menu || ui_->currentScreen() != "main") return;
+    const std::string v = std::string("v") + GD01_VERSION;
+    ui_->drawText("impactor.font", v, kScreenW - 23 + 2, 17 + 2, 24, {0, 0, 0, 0.6f}, 0x14);  // shadow
+    ui_->drawText("impactor.font", v, kScreenW - 23, 17, 24, {1, 1, 1, 1}, 0x14);
 }
 
 void App::endMovie() {
@@ -2319,6 +2329,7 @@ int App::run() {
         renderer_.beginFrame({movie_ ? uint8_t(0) : uint8_t(12), movie_ ? uint8_t(0) : uint8_t(10), movie_ ? uint8_t(0) : uint8_t(16), 255});
         if (movie_) movieFrame();
         else frame();
+        drawVersion();
         if (!movie_) drawTouchButtons();
         if (enhancedOn("fps_counter")) drawFpsCounter();
         captureDebugScreenshot();

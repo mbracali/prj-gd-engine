@@ -27,6 +27,8 @@ matches the tag's version.
   remembered for that controller.
 
 ### Added
+- The version (e.g. "v1.1.3") in the top-right corner of the main title
+  screen.
 - A controller report for bug reports: GAMEPADS writes
   `controllers-report.txt` in the save folder (its path is shown on the
   screen) with every controller's name, USB id, SDL mapping, type, player and
