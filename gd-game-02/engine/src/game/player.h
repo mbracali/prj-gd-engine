@@ -88,6 +88,9 @@ public:
     bool starPowerReady() const { return spReady_ && !spActive_; }
     bool starPowerActive() const { return spActive_; }
     bool whammying() const;
+    // The whammy bar's position (0 rest .. 1), 1 while a whammy key is held:
+    // the track bends sustained tails with it.
+    float whammyBar() const { return whammyKey_ ? 1.0f : whammyValue_; }
     bool phraseIntact(int phrase) const;
     bool failed() const { return failed_; }
     // The base score (0x826a0ab0) and the stars it gives (0x822d6410) [C].

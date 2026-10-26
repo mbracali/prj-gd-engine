@@ -29,7 +29,8 @@ void usage() {
         "  --view <milo>        draw one scene, e.g. world/stone/gen/stone.milo_xbox (development viewer)\n"
         "Environment: GD02_KEYS=\"<song ms>:<key>,...\" scripted input (+green/-green .. orange, strum,\n"
         "  starpower, whammy=<0..1>); GD02_VIRTUAL_PAD=<vendor>:<product>[:guitar] (hex) plugs in a virtual\n"
-        "  controller (e.g. 1430:4748:guitar, 045e:028e).\n"
+        "  controller (e.g. 1430:4748:guitar, 045e:028e). GD02_DEBUG_HIGHWAY=1 draws the debug highway\n"
+        "  instead of GH2's track and HUD; GD02_HUD=0 hides the HUD.\n"
         "The game folder is the disc's files (gen/main.hdr, gen/main_0.ark, ...). Without one, the\n"
         "disc image picked last time is used (or an .iso next to the program), else the first\n"
         "screen asks for it.\n",

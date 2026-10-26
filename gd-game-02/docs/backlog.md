@@ -28,6 +28,13 @@ Status: ✅ done · 🟡 partly done / approximated · ❌ not started
 | Engine (M1/M3/M4) | gd02 skeleton: disc image or folder, ARK, DTB, song list, charts for every part, `.mogg` via stb_vorbis, mixer with guitar mute | `engine/`; version 0.1.0 |
 | Engine (M4) | Debug highway, keyboard input, `--selftest` on every part and difficulty ("all charts fully hit"), `GD02_SCREENSHOT` | |
 | Gameplay (G1) | GH2's rules from `FINDINGS.md` replace the GH1 placeholders: chart parser, guitar / joypad watcher, scoring, Star Power, rock meter (constants from `scoring.dta` / `beatmatcher.dta` / `songs.dta`); focused PASS / FAIL rule checks in `--selftest`; `GD02_KEYS` scripted input | Single player; co-op, face-off normalisation and practice are TODOs in `game/player.h` |
+| M0 | Icon (the GD Engine badge), first screen that picks the disc image (dialog, drop, `.iso` next to the program, remembered) | `tools/make_icons.py`, `platform/app_icon`, `platform/disc_picker` |
+| M0 | `local_build.sh` + `build_commands/`; Linux, Steam Deck, Windows, macOS, Android builds; `package.sh`; Android `io.github.mbracali.gd02` with its own release key | Linux, Steam Deck, Windows, Android built here; macOS untested (no Mac); Windows not run, APK not run on a device |
+| M0 | Workflows `gd-game-02-{build,release}.yml` (tags `gd-game-02/v*`, `ANDROID_GD02_*` secrets), CHANGELOG | Not run yet (branch local) |
+| M4 | Input: gd01's layer (bindings, Type, report, touch, dedupe, settle, Steam virtual pads) with GH2's controller types (`hx_guitar_xbox_new`, `joypad_guitar`, lefty, PS2 guitar) | 22 input checks in `--selftest`; `GD02_VIRTUAL_PAD` |
+| M4/M5 | New renderer from GH2's own: GL 3.3 / GLES 3 device (Vulkan-ready interface), GH2's shader keys, Mat rules, lighting, fence pacing, `--shadertest` (546 programs) | `docs/renderer.md` |
+| M5 | C++ `.milo_xbox` loader: every typed object of all 503 milos decodes (`--scenetest`); `--view <milo>` | `docs/milo_and_textures.md` |
+| M6 | GH2's original highway from `track_new` (surface, gems, HOPO / star / bonus, built tails, smashers, flames, beat lines, Star Power) and the `hud_sp` HUD (score, multiplier, streak, star meter, rock meter, messages) | `docs/highway_and_hud.md`; `GD02_DEBUG_HIGHWAY=1` for the old one |
 
 ## In progress
 
@@ -39,19 +46,12 @@ Nothing right now.
 
 | # | Milestone | Item | Status | Notes |
 |---|---|---|---|---|
-| M0 | Scaffold | Icon (same GD Engine badge), first screen that picks the `.iso`, `--shadertest` | ❌ | Own builds and packages for gd-game-02 (user decision) |
-| M0 | Scaffold | `local_build.sh` + `build_commands/`, build scripts for Linux, Steam Deck, Windows, macOS, Android | ❌ | Mirror gd-game-01; Android `io.github.mbracali.gd02`, own release key |
-| M0 | Scaffold | Workflows `gd-game-02-{build,release}.yml` (tags `gd-game-02/v*`), CHANGELOG, licence files in the packages | ❌ | Releases only on `main`, as gd01 |
 | M2 | Research | Practice audio: confirm the pitch drops when slowed (voice class of the song stream) | ❌ | FINDINGS open question 1 |
 | M2 | Research | Co-op fail (player or band meter), face-off note assignment, `min_length`, co-op star thresholds | ❌ | FINDINGS open questions 2–5, 7 |
 | M2 | Research | Lefty Flip, input sampling rate, controller latency (`watcher +0x2c`) on the 360 | ❌ | L3: where rules depend on sampling |
-| M4 | Gameplay | Xbox 360 guitar and gamepad input (gd01's `input/`: controller Type, report, touch, dedupe) | ❌ | Keyboard only in the skeleton |
-| M4 | Gameplay | Move to gd01's GL renderer (fences, limiter, post-processing, upscalers) | ❌ | The skeleton draws with SDL_Renderer |
-| M5 | Scenes | C++ `.milo_xbox` loader and the Rnd object model (Mesh v28, Mat v28, Trans v9, Tex v10, …) | ❌ | Skip the per-object header GH1 doesn't have |
-| M5 | Scenes | Our own GLSL material shaders from the research notes on GH2's `.fx` (never ship HLSL) | ❌ | L15, L18 |
-| M5 | Scenes | `--view <milo>` scene viewer | ❌ | |
-| M6 | Highway | The original track: surfaces, gems, HOPO tops, star gems, tails, smashers, hit effects, Lefty mirror | ❌ | gd01 `track_renderer` as reference |
-| M6 | HUD | Score, multiplier, rock meter, Star Power meter from `hud/` | ❌ | |
+| M6 | Highway | Particles (sparks, tail bonus, star meter), intro sparkle, rock meter peak flames, track-fail explode, far-end fade, Lefty mirror, two-player tracks | 🟡 | The rest is done (see Done) |
+| M6 | HUD | hud_vs / hud_coop / hud_practice | ❌ | hud_sp done |
+| M7 | UI | Touch lanes for the new renderer; the GAMEPADS screen | ❌ | Input API ready |
 | M7 | UI | gd01's interpreter on GH2's `ui/*.dtb` panels: boot, main menu, Quickplay, difficulty, loading, pause, results | ❌ | L1: log every unhandled message |
 | M7 | UI | Profiles and save; every setter marks `needs_save` | ❌ | L12 |
 | M8 | Venues | `world/` venues, venue scripts, lighting (TRIGGERS 48–50/52), camera director, particles, bloom / DOF | ❌ | |

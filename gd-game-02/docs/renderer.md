@@ -69,7 +69,8 @@ per_pixel_lit 0xb1, normalize 0xb2, emissive_multiplier 0xb4, specular_rgb
   multiply = zero/src-colour, or dest-colour/src-colour (2×) with intensify.
 - z_mode: 0 off; 1 LESS + write; 2 LEQUAL, no write; 3 ALWAYS + write;
   4 LEQUAL + write.
-- cull culls clockwise faces (D3D's screen winding).
+- cull culls clockwise faces in D3D's screen space; in GL (Y flipped) that
+  is counter-clockwise (see `highway_and_hud.md`).
 - tex_wrap applies to sampler slots 0–3; the environment map (slot 4) and
   custom diffuse (slot 11) are clamped.
 - Constants: multipliers = (emissive_multiplier, intensify + 1); default

@@ -23,7 +23,9 @@
 // - z_mode: disable (0) no test or write; normal (1) less, write;
 //   transparent (2) less-equal, no write; force (3) always, write;
 //   decal (4) less-equal, write;
-// - cull: the game culls clockwise faces (Direct3D's "CW") when set;
+// - cull: the game culls clockwise faces (Direct3D's "CW") when set, in its
+//   left-handed projection; in ours that is the counter-clockwise side
+//   (materialPipeline);
 // - tex_wrap applies to the diffuse, normal, specular and glow maps; the
 //   environment and custom-diffuse maps always clamp;
 // - shader constants: emissive multiplier, intensify + 1 as the diffuse
@@ -100,6 +102,8 @@ PipelineState materialPipeline(const Material& m, const LightEnv* env);
 struct GpuMesh {
     BufferId vertices, indices;
     int indexCount = 0;
+    int firstIndex = 0;          // where the draw starts in `indices`
+    size_t vertexOffset = 0;     // bytes into `vertices`
     bool indices32 = false;
     bool skinned = false;        // the four floats after the normal are weights, not colour
     bool tangents = false;       // 64-byte vertices with a tangent (xyz, handedness) after the uv

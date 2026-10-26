@@ -25,6 +25,10 @@
 #include "platform/disc_picker.h"
 #include "render/canvas.h"
 #include "render/highway.h"
+#include "render/hud_view.h"
+#include "render/scene_gpu.h"
+#include "render/track_view.h"
+#include "scene/milo.h"
 
 namespace {
 
@@ -61,7 +65,9 @@ private:
     void handleEvent(const SDL_Event& e);
     void handleAction(const InputEvent& a);
     void frameSong();
+    void drawSong(float t);
     void frameList();
+    bool prepareTrack();
 
     Options options_;
     int difficulty_;
@@ -88,7 +94,17 @@ private:
     // Development aid: GD02_KEYS="<song ms>:<key>,..." (game/key_script.h)
     // plays scripted guitar input in every song, at exact song times.
     KeyScript keys_;
+    // The song screen: GH2's own highway and HUD (render/track_view.h,
+    // render/hud_view.h), loaded with the first song; gd01's debug highway
+    // (render/highway.h) with GD02_DEBUG_HIGHWAY=1, or when GH2's scenes
+    // cannot be loaded.
     Highway highway_;
+    bool debugHighway_ = false;
+    bool trackTried_ = false;
+    std::unique_ptr<scene::MiloLibrary> milos_;
+    std::unique_ptr<gfx::SceneCache> sceneCache_;
+    std::unique_ptr<TrackView> track_;
+    std::unique_ptr<HudView> hud_;
     // Keyboard, controllers and touch (input/input.h); Start pauses a song.
     Input input_;
     std::vector<InputEvent> actions_;
@@ -112,6 +128,7 @@ int App::run() {
 #ifdef __ANDROID__
     flags |= SDL_WINDOW_FULLSCREEN;
 #endif
+    if (const char* d = SDL_getenv("GD02_DEBUG_HIGHWAY")) debugHighway_ = *d && *d != '0';
     window_ = SDL_CreateWindow(app::kWindowTitle, int(kScreenW), int(kScreenH), flags);
     setAppWindowIcon(window_);
     installDesktopEntry();
@@ -166,6 +183,9 @@ int App::run() {
     }
 
     endSong();
+    hud_.reset(), track_.reset();
+    sceneCache_.reset();
+    milos_.reset();
     // A controller was used: its report (the save folder) for bug reports.
     if (input_.anyPad() && input_.writeReport()) SDL_Log("controller report: %s", input_.reportPath().c_str());
     input_.close();
@@ -182,6 +202,9 @@ bool App::loadData(const std::string& path) {
         Rules rules = loadRules(*data);
         std::vector<SongInfo> songs = loadSongs(*data);
         if (songs.empty()) throw std::runtime_error("No songs found in " + path);
+        hud_.reset(), track_.reset();
+        sceneCache_.reset(), milos_.reset();
+        trackTried_ = false;
         data_ = std::move(data), rules_ = rules, songs_ = std::move(songs);
     } catch (const std::exception& ex) {
         dataMessage_ = ex.what();
@@ -223,6 +246,31 @@ bool App::startSong(size_t index) {
     std::fill(flashes_.begin(), flashes_.end(), 0.0f);
     lastFrameMs_ = -kLeadInMs;
     failMs_ = -1e9f;
+    if (prepareTrack()) track_->reset(), hud_->reset();
+    return true;
+}
+
+// GH2's track and HUD scenes, loaded once (with the first song). On failure
+// the debug highway stands in.
+bool App::prepareTrack() {
+    if (debugHighway_) return false;
+    if (trackTried_) return track_ && hud_;
+    trackTried_ = true;
+    const uint64_t start = SDL_GetTicksNS();
+    try {
+        milos_ = std::make_unique<scene::MiloLibrary>(*data_);
+        sceneCache_ = std::make_unique<gfx::SceneCache>(canvas_.renderer().device());
+        auto track = std::make_unique<TrackView>();
+        track->load(*data_, *milos_);
+        auto hud = std::make_unique<HudView>();
+        hud->load(*data_, *milos_);
+        track_ = std::move(track), hud_ = std::move(hud);
+    } catch (const std::exception& ex) {
+        SDL_Log("GH2's track or HUD could not be loaded (%s); using the debug highway", ex.what());
+        track_.reset(), hud_.reset(), sceneCache_.reset(), milos_.reset();
+        return false;
+    }
+    SDL_Log("track and HUD loaded in %.0f ms", double(SDL_GetTicksNS() - start) / 1e6);
     return true;
 }
 
@@ -328,29 +376,47 @@ void App::frameSong() {
     const float dt = std::clamp(float(t - lastFrameMs_), 0.0f, 100.0f);
     lastFrameMs_ = t;
     for (float& f : flashes_) f = std::max(0.0f, f - dt / 150.0f);
-    for (const PlayerEvent& e : player_->takeEvents()) {
+    const std::vector<PlayerEvent> events = player_->takeEvents();
+    for (const PlayerEvent& e : events) {
         if (e.kind != PlayerEvent::Kind::Hit || e.gem < 0) continue;
         const Gem& g = player_->chart().gems[size_t(e.gem)];
         for (int f = 0; f < 5; ++f)
             if (g.frets & (1u << f)) flashes_[size_t(f)] = 1.0f;
     }
+    const bool gh2 = track_ && hud_ && !debugHighway_;
+    if (gh2) track_->onEvents(events, *player_, t), hud_->onEvents(events, *player_, t);
     mixer_.setGuitarAudible(player_->guitarAudible());
-
-    canvas_.begin({12, 10, 16, 255});
-    std::string title = info_->name + " - " + info_->artist + "  [" + difficultyName(static_cast<Difficulty>(difficulty_)) +
-                        (bot_ ? ", autoplay]" : "]");
-    highway_.draw(canvas_, *song_, *player_, t, rules_.trackSpeed[size_t(difficulty_)], title, flashes_);
-    char buf[64];
-    std::snprintf(buf, sizeof buf, "%d:%02d / %d:%02d", int(std::max(0.0f, t) / 60000), int(std::max(0.0f, t) / 1000) % 60,
-                  int(song_->endMs / 60000), int(song_->endMs / 1000) % 60);
-    canvas_.text(24, 44, 1.5f, {160, 160, 170, 255}, buf);
-    if (player_->failed()) canvas_.textCentered(kScreenW * 0.5f, 330, 4, {230, 60, 60, 255}, "SONG FAILED");
-    else if (paused_) canvas_.textCentered(kScreenW * 0.5f, 330, 4, {235, 235, 240, 255}, "PAUSED");
-    if (captureDebugScreenshot(canvas_, true, t)) running_ = false;
-    canvas_.end();
+    drawSong(t);
     // A failed song closes a little after the fail (GH2's lose screen comes later).
     if (player_->failed() && failMs_ < -1e8f) failMs_ = t;
     if (!paused_ && (t > song_->endMs + kOutroMs || (player_->failed() && t > failMs_ + 3000))) endSong();
+}
+
+// One frame of the song screen: GH2's track and HUD (or the debug highway),
+// then the 2D text on top.
+void App::drawSong(float t) {
+    const bool gh2 = track_ && hud_ && !debugHighway_;
+    canvas_.begin(gh2 ? SDL_Color{0, 0, 0, 255} : SDL_Color{12, 10, 16, 255});
+    const std::string title = info_->name + " - " + info_->artist + "  [" + difficultyName(static_cast<Difficulty>(difficulty_)) +
+                              (bot_ ? ", autoplay]" : "]");
+    const float speed = rules_.trackSpeed[size_t(difficulty_)];
+    if (gh2) {
+        track_->draw(canvas_.renderer(), *sceneCache_, *song_, *player_, t, speed);
+        // Development aid: GD02_HUD=0 hides the HUD (to look at the track).
+        const char* showHud = SDL_getenv("GD02_HUD");
+        if (!showHud || *showHud != '0') hud_->draw(canvas_.renderer(), *sceneCache_, canvas_, *player_, t);
+    } else {
+        highway_.draw(canvas_, *song_, *player_, t, speed, title, flashes_);
+        char buf[64];
+        std::snprintf(buf, sizeof buf, "%d:%02d / %d:%02d", int(std::max(0.0f, t) / 60000), int(std::max(0.0f, t) / 1000) % 60,
+                      int(song_->endMs / 60000), int(song_->endMs / 1000) % 60);
+        canvas_.text(24, 44, 1.5f, {160, 160, 170, 255}, buf);
+    }
+    // GH2's HUD shows "SONG FAILED!" itself (HudView).
+    if (player_->failed() && !gh2) canvas_.textCentered(kScreenW * 0.5f, 330, 4, {230, 60, 60, 255}, "SONG FAILED");
+    else if (paused_) canvas_.textCentered(kScreenW * 0.5f, 330, 4, {235, 235, 240, 255}, "PAUSED");
+    if (captureDebugScreenshot(canvas_, true, t)) running_ = false;
+    canvas_.end();
 }
 
 // The first screen, shown until there is a disc image. All its drawing is

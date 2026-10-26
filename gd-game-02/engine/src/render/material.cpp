@@ -71,7 +71,12 @@ PipelineState materialPipeline(const Material& m, const LightEnv* env) {
     case ZMode::Force: s.depthTest = true, s.depthWrite = true, s.depthFunc = CompareFunc::Always; break;
     case ZMode::Decal: s.depthTest = true, s.depthWrite = true, s.depthFunc = CompareFunc::LessEqual; break;
     }
-    s.cull = m.cull ? Cull::Clockwise : Cull::None;
+    // GH2's meshes wind their visible faces counter-clockwise about the
+    // normal (every face of the track and gem meshes); through our
+    // right-handed projection those are clockwise on a y-down screen, so
+    // the culled side is the counter-clockwise one. The game's D3D "CW"
+    // applies to its mirrored (left-handed) projection [I].
+    s.cull = m.cull ? Cull::CounterClockwise : Cull::None;
     s.alphaWrite = m.alphaWrite;
     return s;
 }
@@ -130,8 +135,10 @@ void MaterialRenderer::draw(const GpuMesh& mesh, const Mat4* bones, const Materi
     c.state = materialPipeline(m, &env_);
     c.layout = &meshLayout(mesh.skinned, mesh.tangents);
     c.vertices = mesh.vertices;
+    c.vertexOffset = mesh.vertexOffset;
     c.indices = mesh.indices;
     c.indices32 = mesh.indices32;
+    c.first = mesh.firstIndex;
     c.count = mesh.indexCount;
 
     Wrap wrap = Wrap::Repeat;

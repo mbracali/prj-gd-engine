@@ -54,12 +54,15 @@ target_sources(gd02 PRIVATE
   src/render/gl_api.cpp
   src/render/gl_device.cpp
   src/render/highway.cpp
+  src/render/hud_view.cpp
   src/render/material.cpp
   src/render/renderer.cpp
+  src/render/scene_gpu.cpp
   src/render/scene_view.cpp
   src/render/shadertest.cpp
   src/render/standard_shader.cpp
   src/render/texture_codec.cpp
+  src/render/track_view.cpp
   src/scene/anim.cpp
   src/scene/bitmap.cpp
   src/scene/inflate.cpp
