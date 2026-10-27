@@ -30,6 +30,11 @@ class UiManager;
 //              character select (Alterna) -> the guitar select (SG, skin
 //              sg_white) -> sponsored -> the career menu (autosave); the
 //              look in career.json and player 0's config.
+//   career_full  career, then the first tier at Medium: three songs passed
+//              with GH2's cheat_beat_song, the fourth played (the encore
+//              offered), the encore played (battle complete, small1
+//              unlocked, status 1, $450), the store (lp_cayenne bought for
+//              $250, on the Les Paul) and career.json checked.
 //   enhanced   main -> Options -> Enhanced Options -> Internal Resolution
 //              changed (the window's own -> 448p) and saved in enhanced.json
 //              -> back -> back -> main.

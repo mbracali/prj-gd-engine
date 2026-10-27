@@ -85,6 +85,9 @@ public:
     int perfectHits() const { return perfect_; }
     int goodHits() const { return good_; }
     float rockMeter() const { return rating_; }
+    // The crowd's SetRating (0x822DE530): the rating clamped to 0..1, raw
+    // at that point of the range (GamePanel sets 1 for an encore, 0x822CCA60).
+    void setCrowdRating(float rating);
     float warningLevel() const { return crowd_.warningLevel; }
     float starMeter() const { return spMeter_; }
     bool starPowerReady() const { return spReady_ && !spActive_; }

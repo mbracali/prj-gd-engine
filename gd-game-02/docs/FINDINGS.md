@@ -504,6 +504,32 @@ Modes (`config/gen/modes.dta`) [C]:
   sound (`config/gen/beatmatch.dta`) [C for the data, I for "no other
   difference"].
 
+## Career: tours, encores and cash
+
+Details, the save and the store: `docs/career_and_store.md`.
+
+- Tiers: 8 venues of 6 songs (campaign.dta `order`), the last of each the
+  encore; Easy has 7 tiers (0x822A2BC8) and no encores (0x822A9B38) [C].
+- `required_songs` (0x822A3468): Easy 4 (last tier 5), Medium 5 (6), Hard
+  and Expert 6. The encore unlocks at `required − 1` songs passed
+  (0x822A9578); at Medium and up only the encore completes the venue (with
+  `required` passed), on Easy any song (0x822A9BB0); the next venue then
+  unlocks with its songs [C].
+- Passed = three stars or more (0x822AE8F8); status = completed tiers + 1
+  when every tier song has five stars (0x822A9D30) [C].
+- Cash (0x822A8078 / 0x822AA598): each new star 3 / 4 / 5 pays 150 / 200 /
+  250 at Medium, Hard, Expert (0 on Easy), at the difficulty played **and
+  every easier one** where the song had fewer stars (not for store songs);
+  each new status pays `status_awards` (100 200 300 400 500 700 800 1000 0),
+  plus the easier difficulties' for the same status unless a harder one
+  completed the venue; $50 to start (not on Easy) [C].
+- A tour passed / five-starred unlocks guitars.dta's reward guitars for the
+  store (`in_stock` 0x822C02A8) and is announced (unlock_guitar_screen); a
+  tour won unlocks pro face-off (Campaign +0x68) [C].
+- An encore starts with the crowd full (SetRating 1, 0x822CCA60 /
+  0x822DE530) and the encore intro; a song that can unlock the encore ends
+  with `game_won_msg 1` (the crowd chants) or `encore_lost` [C].
+
 ## GH1 vs GH2
 
 | Rule | GH1 (PS2) | GH2 (360) |

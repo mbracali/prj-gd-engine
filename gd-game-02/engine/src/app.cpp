@@ -212,6 +212,7 @@ public:
     void stopAllSfx() override {
         if (synth_) synth_->stopAll();
     }
+    bool saveScreenshot(const std::string& path) override { return ::saveScreenshot(canvas_, path); }
     std::string enhancedValue(const std::string& key) override;
     void setEnhancedValue(const std::string& key, const std::string& value) override;
     void menuBackdrop(bool on) override;
@@ -335,6 +336,7 @@ private:
     std::unique_ptr<Band> band_;
     // The players' look from the menus (GameSetup), for the band.
     std::array<std::string, 2> bandOutfit_, bandGuitar_, bandSkin_;
+    bool encoreCheck_ = false, encoreFx_ = false, campaignFinal_ = false;  // GameSetup's encore state
     std::unique_ptr<LightPresets> lighting_;
     WorldDriver worldDriver_;
     // The Enhanced Options' live backdrop (menuBackdrop): the second venue
@@ -926,13 +928,18 @@ void App::updateSong(float t) {
         wonSent_ = true, overNs_ = now, overT_ = t, outroAtNs_ = now + uint64_t(kExplodeOutroMs * 1e6);
         // GH2's order: the result, then game_over (0x822CB5B8).
         if (band_) band_->setResult(true);
-        ui_->gameEvent("game_won_msg", {Value::integer(0)});
+        // $encore: the crowd calls for an encore (0x822CA6E0), every player's crowd full.
+        if (encoreCheck_)
+            for (int p = 0; p < 2; ++p)
+                if (Player* pl = p == 0 ? player_.get() : player2_.get()) pl->setCrowdRating(1.0f);
+        ui_->gameEvent("game_won_msg", {Value::integer(encoreCheck_ ? 1 : 0)});
         ui_->gameEvent("game_over");
     }
     if (!wonSent_ && !lostSent_ && player_->failed()) {
         lostSent_ = true, overNs_ = now, overT_ = t, outroAtNs_ = now + uint64_t(kLoseOutroMs * 1e6);
         if (band_) band_->setResult(false);
         ui_->gameEvent("game_lost");
+        if (encoreCheck_) ui_->gameEvent("encore_lost");
         ui_->gameEvent("game_over");
     }
     if ((wonSent_ || lostSent_) && !outroSent_ && !paused_ && now >= outroAtNs_) {
@@ -1041,7 +1048,7 @@ void App::shootScreens() {
             char name[32];
             std::snprintf(name, sizeof name, "%02zu_", h.size());
             const std::string path = std::string(dir) + "/" + name + shotScreen_ + ".bmp";
-            if (saveScreenshot(canvas_, path)) SDL_Log("screen shot: %s", path.c_str());
+            if (::saveScreenshot(canvas_, path)) SDL_Log("screen shot: %s", path.c_str());
             shotsTaken_ = h.size();
             shotDue_ = -1;
         }
@@ -1058,6 +1065,7 @@ bool App::gameLoad(const GameSetup& setup, std::string& error) {
     }
     syncOffsetMs_ = setup.syncOffsetMs;
     bandOutfit_ = setup.outfit, bandGuitar_ = setup.guitar, bandSkin_ = setup.skin;
+    encoreCheck_ = setup.encoreCheck, encoreFx_ = setup.encoreFx, campaignFinal_ = setup.campaignFinal;
     const bool autoplay = setup.autoplay || options_.autoplay || envOn("GD02_AUTOPLAY") || (walk_ && walk_->autoplay());
     if (!loadSong(*it, setup.difficulty, autoplay, setup.bandVolume, setup.guitarVolume, setup.fastIntro)) {
         error = message_;
@@ -1070,6 +1078,10 @@ bool App::gameLoad(const GameSetup& setup, std::string& error) {
 
 void App::gameBegin() {
     overNs_ = 0;
+    // GamePanel's start (0x822CCA60): an encore begins with every crowd full.
+    if (encoreFx_)
+        for (int p = 0; p < 2; ++p)
+            if (Player* pl = p == 0 ? player_.get() : player2_.get()) pl->setCrowdRating(1.0f);
     beginSong();
 }
 
@@ -1230,6 +1242,7 @@ void App::startBand(const SongInfo& info, const Song& song, bool backdrop) {
     cfg.players = backdrop ? 1 : twoPlayers(mode_) ? 2 : 1;
     if (!backdrop) {
         cfg.character = bandOutfit_, cfg.guitar = bandGuitar_, cfg.skin = bandSkin_;
+        cfg.encore = encoreCheck_, cfg.campaignFinal = campaignFinal_;
         if (const char* c = SDL_getenv("GD02_CHAR")) cfg.character[0] = c;
         if (const char* g = SDL_getenv("GD02_GUITAR")) cfg.guitar[0] = g, cfg.skin[0].clear();
         if (const char* k = SDL_getenv("GD02_SKIN")) cfg.skin[0] = k;

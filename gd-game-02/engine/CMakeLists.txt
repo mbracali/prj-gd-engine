@@ -111,6 +111,8 @@ target_sources(gd02 PRIVATE
   src/scene/world_objects.cpp
   src/tests/scripttest.cpp
   src/ui/career.cpp
+  src/ui/campaign.cpp
+  src/ui/store.cpp
   src/ui/char_select.cpp
   src/ui/gamepad_panel.cpp
   src/ui/enhanced_panel.cpp

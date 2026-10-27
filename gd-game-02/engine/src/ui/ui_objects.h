@@ -134,6 +134,7 @@ public:
     UiManager& ui;
     ScreenObj* back = nullptr;
     bool backSet = false;
+    PanelObj* focusOverride = nullptr;  // set_focus_panel (cleared as the screen enters)
     std::vector<PanelObj*> panels() const;
     PanelObj* focusPanel() const;
     bool flag(const std::string& key, bool def) const;

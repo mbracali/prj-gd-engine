@@ -18,6 +18,7 @@
 #include "ui/enhanced_panel.h"
 #include "ui/gamepad_panel.h"
 #include "ui/natives.h"
+#include "ui/store.h"
 #include "ui/ui_host.h"
 #include "ui/ui_objects.h"
 
@@ -401,6 +402,7 @@ std::unique_ptr<ScriptObject> makeClassObject(UiManager& ui, const std::string& 
         return std::make_unique<GenericScreen>(ui, name, cls);
     if (auto g = makeGameClass(ui, cls, name)) return g;
     if (auto c = chars::makeClass(ui, cls, name)) return c;
+    if (auto c = store::makeClass(ui, cls, name)) return c;
     if (cls == "MetaPanel") return std::make_unique<MetaPanelObj>(ui, name);
     if (cls == "HelpBarPanel") return std::make_unique<HelpBarPanelObj>(ui, name);
     if (cls == "SelSongPanel") return std::make_unique<SelSongPanelObj>(ui, name);
@@ -413,7 +415,7 @@ std::unique_ptr<ScriptObject> makeClassObject(UiManager& ui, const std::string& 
     if (cls == "GamepadPanel") return makeGamepadPanel(ui, name);
     if (cls == "EnhancedPanel") return makeEnhancedPanel(ui, name);
     // GHPanel / UIPanel, and the classes of screens outside quickplay
-    // (career, multiplayer, store, tutorials: later milestones) as plain panels.
+    // (multiplayer, tutorials: later milestones) as plain panels.
     if (std::find(knownClasses().begin(), knownClasses().end(), cls) != knownClasses().end())
         return std::make_unique<PanelObj>(ui, name, cls);
     return nullptr;

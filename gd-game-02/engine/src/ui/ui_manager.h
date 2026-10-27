@@ -123,7 +123,8 @@ public:
     Value callScript(ScriptObject* o, const std::string& msg, std::vector<Value> args = {});
     // Plays an anim / group of a panel over time: frames from..to over
     // `seconds` (units: kTaskUISeconds, kTaskSeconds...); looping by the data.
-    void animate(PanelObj* panel, const std::string& object, float from, float to, float seconds, int units);
+    // `task`: the task's (name ...), an object `exists` finds while it runs.
+    void animate(PanelObj* panel, const std::string& object, float from, float to, float seconds, int units, const std::string& task = "");
     void stopAnimation(PanelObj* panel, const std::string& object);
     // A task clock in seconds (kTaskSeconds: game time, paused with the
     // game; kTaskUISeconds: the menus'; kTaskBeats: the song's beats).
@@ -157,6 +158,10 @@ public:
     std::vector<ScriptObject*>& madeObjects() { return made_; }
     Session& session() { return *session_; }
     // Draws a panel view through its camera (depth cleared first), then its screen masks.
+    // A 3D display panel (GuitarDisplayPanel, CharsysPanel) drew: the next
+    // panel keeps its depth, so the store's guitar and characters stay in
+    // front of store.milo's wall [I: GH2's panels share the z-buffer].
+    void keepDepthOnce() { keepDepth_ = true; }
     void drawView(gfx::UiView& v);
     // GHScreen backwards_anim: the next transition plays backwards.
     void setBackwardsAnim() { backwardsAnim_ = true; }
@@ -197,6 +202,7 @@ private:
 
     const GameData& data_;
     Canvas& canvas_;
+    bool keepDepth_ = false;
     UiHost& host_;
     Input& input_;
     bool headless_ = false;
@@ -240,6 +246,10 @@ private:
     std::vector<std::pair<std::string, float>> metacam_{{"trans_in_forward.grp", 1.0f}};
     std::set<std::string> viewPanels_;  // the panels that have made a view
     std::vector<ScreenObj*> stack_;  // push_screen
+    // GH2's PushScreen (0x8236B800) enters the new screen over the current
+    // one without exiting it; PopScreen (0x8236AE40) exits the pushed screen
+    // and the one below goes on as it was (not entered again).
+    bool pushing_ = false, popping_ = false;
     std::vector<std::string> history_;
     double transitionMs_ = 500;  // default.dta (ui (transition_time 0.5))
 
@@ -262,8 +272,11 @@ private:
         float from, to;
         double start, length;  // in the units' clock (s)
         int units;
+        std::string task;  // (name ...): registered while it runs
     };
     std::vector<Anim> anims_;
+    std::map<std::string, std::unique_ptr<ScriptObject>> namedTasks_;
+    void endTask(const std::string& task);
 
     // key repeat (JoypadClient): per player the held direction.
     struct Held {

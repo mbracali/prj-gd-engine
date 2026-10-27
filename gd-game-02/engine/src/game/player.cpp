@@ -528,6 +528,11 @@ void Player::finishSustain(float t) {
 //   once at or below lose_level it can only rise; during the free ride
 //   (progress <= free_ride) it cannot drop to warning_level.
 //   Fail when rating < lose_level, unless the mode cannot fail.
+void Player::setCrowdRating(float rating) {
+    rating_ = std::clamp(rating, 0.0f, 1.0f);
+    raw_ = crowd_.rangeLow + (crowd_.rangeHigh - crowd_.rangeLow) * rating_;
+}
+
 void Player::crowdUpdate(float target, float t) {
     if (failed_) return;
     const float k = (target > raw_ && spActive_) ? sp_.crowdBoost : 1.0f;

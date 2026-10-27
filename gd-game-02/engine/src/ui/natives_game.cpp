@@ -13,6 +13,7 @@
 #include "game/song_db.h"
 #include "input/input.h"
 #include "scene/ui_styles.h"
+#include "ui/campaign.h"
 #include "ui/char_select.h"
 #include "ui/natives.h"
 #include "ui/ui_host.h"
@@ -159,6 +160,15 @@ public:
         if (!gameCfgValue(ui, "win_preload_panel").str().empty())
             for (int p = 0; p < std::max(1, gameCfgValue(ui, "num_players").integerValue()) && p < 2; ++p)
                 s.winnerPhotos.push_back(chars::pickPhoto(ui, s.players[size_t(p)]));
+        // The encore (0x822CA6E0 / 0x822CA5D0): GamePanel's script sets
+        // [encore_unlock_check] as it enters; the native reads the same.
+        const bool career = gameCfgValue(ui, "mode").str() == "career";
+        encoreCheck_ = gameCfgValue(ui, "encore_fx").truthy() &&
+                       (getProp(ui.interp(), "force_encore").truthy() ||
+                        (career && ui.interp().send("campaign", "encore_unlock_potential", {}).truthy()));
+        setup.encoreCheck = encoreCheck_;
+        setup.encoreFx = wantEncoreFx();
+        setup.campaignFinal = career && ui.interp().send("campaign", "final_song", {}).truthy();
         props["fast_intro"] = Value::integer(0);
         std::string error;
         if (!ui.host().gameLoad(setup, error)) SDL_Log("game: %s", error.c_str());
@@ -180,12 +190,20 @@ public:
             pendingBegin_ = false;
             if (ui.host().gameLoaded()) {
                 ui.host().gameBegin();
-                ui.gameEvent("intro_start_msg", {Value::integer(0), Value::integer(0)});
+                ui.gameEvent("intro_start_msg", {Value::integer(0), Value::integer(wantEncoreFx() ? 1 : 0)});  // 0x822CCA60
             }
         }
     }
 
     static float volume(int idx) { return float(std::clamp(idx, 0, 11)) / 11.0f; }
+
+    // want_encore_fx (0x822CA5D0): the mode's encore_fx, and force_encore or
+    // an encore whose venue's encore is unlocked.
+    bool wantEncoreFx() {
+        if (!gameCfgValue(ui, "encore_fx").truthy()) return false;
+        return getProp(ui.interp(), "force_encore").truthy() || campaign::wantEncoreFx(ui);
+    }
+    bool encoreCheck_ = false;
 
     void dispatch(const std::string& msg, std::vector<Value> args) {
         if (msg == "game_won_msg") props["won"] = Value::integer(1);
@@ -217,7 +235,16 @@ public:
                 s.song = p->symbol(s.songIndex);
             return true;
         }
-        if (msg == "set_career_song" || msg == "set_need_intro" || msg == "retain_world_bank") return true;
+        if (msg == "set_need_intro" || msg == "retain_world_bank") return true;
+        // The career's venue and song (0x822B42C8 / 0x822B89B8, ui/campaign.h);
+        // the song's index in song_provider's list.
+        if (msg == "set_career_venue") return campaign::setCareerVenue(ui), true;
+        if (msg == "set_career_song") {
+            campaign::setCareerSong(ui);
+            if (auto* p = dynamic_cast<ListProvider*>(in.findObject("song_provider"))) s.songIndex = p->indexOf(s.song);
+            return true;
+        }
+        if (msg == "get_venue_index") return r = Value::integer(campaign::venueIndex(ui, s.venue)), true;
         if (msg == "set_quickplay") {
             // The song's quickplay venue (songs.dta (quickplay (venue x))).
             const int i = songInfoIndex(ui, s.song);
@@ -274,7 +301,7 @@ public:
             r = Value::string(ui.localize(c && c->children.size() > 1 && c->children[1].isText() ? c->children[1].s : "mtv_made_famous"));
             return true;
         }
-        if (msg == "want_encore_fx") return r = Value::integer(0), true;
+        if (msg == "want_encore_fx") return r = Value::integer(wantEncoreFx() ? 1 : 0), true;
         if (msg == "set_tutorial_running") return s.tutorialRunning = !args.empty() && args[0].truthy(), true;
         if (msg == "is_tutorial_running") return r = Value::integer(s.tutorialRunning ? 1 : 0), true;
         if (msg == "get_bank_loader") return r = Value::obj(bank_.get()), true;

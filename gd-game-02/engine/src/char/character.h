@@ -62,6 +62,12 @@ public:
     const std::string& name() const { return name_; }  // the character dir's name (alterna1)
     scene::Milo& milo() { return *milo_; }
     const scene::Directory& dir() const { return milo_->root(); }
+    // Every object of the character's milo and its outfits' (guitar, kit).
+    template <class F>
+    void forEachObject(F&& f) {
+        milo_->root().forEach(f);
+        for (auto& m : outfits_) m->root().forEach(f);
+    }
     const scene::CharacterObj& own() const { return *own_; }
     bool band() const { return own_->band; }
     const std::string& type() const { return own_->header.type; }  // guitarist / singer / ... / crowd / ui

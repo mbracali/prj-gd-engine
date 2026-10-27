@@ -48,6 +48,19 @@ matches the tag's version. Nothing is released yet.
   Mode, Hyper Speed and the Eyeball / Monkey Head crowds work; Flaming Head
   does not burn yet.
 - A band called The Glitches in every save.
+- Career mode, played end to end as in Guitar Hero II: pick your band,
+  difficulty, character and guitar, choose a venue on the map and play its
+  setlist (scores, stars and checks on each song); pass enough songs and the
+  crowd calls for an encore; finish the encore to complete the tier, get
+  sponsored and drive to the next venue. Cash for every new star and every
+  tier, exactly as the original pays it (easier difficulties pay too when you
+  play a harder one first).
+- The store: spend your cash on bonus songs, guitars, finishes, characters,
+  outfits and videos, shown in the shop as in the original. What you buy is
+  yours at once: bonus songs in your setlist and in Quick Play, guitars and
+  finishes in Change Guitar, characters and outfits in Change Character.
+  Beating a tour puts its reward guitar on sale.
+- Your tours, cash and purchases are saved with each band.
 
 ### Changed
 - Options is laid out like the original (Audio, Video, Manage Band, Data,
@@ -60,6 +73,8 @@ matches the tag's version. Nothing is released yet.
 - Notes are judged by Guitar Hero II's own rules (hammer-ons and pull-offs,
   chords, holding sustains), and the band's faces and lip sync keep time
   with the song.
+- Store items belong to the band that bought them, as in the original; Quick
+  Play offers every song and item any band has unlocked.
 
 ### Fixed
 - Going back to the main menu no longer leaves its camera off to one side.

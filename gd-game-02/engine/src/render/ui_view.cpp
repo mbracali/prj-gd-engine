@@ -379,13 +379,23 @@ void UiView::addMask(const scene::ScreenMask& m) {
         }
         for (int k = 0; k < 3; ++k) d.rgba[size_t(k)] *= rgb[k];
         d.rgba[3] *= a;
+        d.blend = mat->blend;
+        // RndScreenMask draws its quad with the mat: a texture's alpha shapes it
+        // (unlockvenue<n>.milo's matte.mask: black through light_gw.tex).
+        if (!mat->diffuseTex.empty()) d.texture = cache_.texture(mat, mat->diffuseTex).id;
     }
     d.rect = m.screenRect;
     if (d.rgba[3] > 0.001f) masks_.push_back(d);
 }
 
 void UiView::drawObject(MaterialRenderer& r, const scene::Object& o, int depth) {
-    if (depth > 16 || !pose_.showing(&o)) return;
+    if (depth > 16) return;
+    // A proxy something draws through (the store's guitar.pxy) draws with
+    // its group, whatever its own showing (store.milo's is off) [I: GH2's
+    // GuitarDisplayPanel shows it as it loads the guitar].
+    if (o.as<scene::UIProxy>())
+        if (auto it = objectDraws.find(o.name); it != objectDraws.end() && it->second) return it->second(r);
+    if (!pose_.showing(&o)) return;
     if (const auto* g = o.as<scene::Group>()) {
         for (const std::string& name : g->objects)
             if (const scene::Object* c = o.dir ? o.dir->resolve(name) : find(name); c && c != &o) drawObject(r, *c, depth + 1);
@@ -403,7 +413,20 @@ void UiView::drawObject(MaterialRenderer& r, const scene::Object& o, int depth) 
     if (const auto* u = o.as<scene::UILabel>()) return drawLabel(r, *u, nullptr, nullptr);
     if (o.as<scene::UIList>()) return drawList(r, o);
     if (o.as<scene::BandTextEntry>()) return drawTextEntry(r, o);
-    if (const auto* sm = o.as<scene::ScreenMask>()) return addMask(*sm);
+    if (const auto* sm = o.as<scene::ScreenMask>()) {
+        const size_t before = masks_.size();
+        addMask(*sm);
+        if (maskNow && masks_.size() > before) {
+            const MaskDraw d = masks_.back();
+            masks_.pop_back();
+            maskNow(d);
+        }
+        return;
+    }
+    if (o.as<scene::UIProxy>() || o.as<scene::BandPlacer>()) {
+        if (auto it = objectDraws.find(o.name); it != objectDraws.end() && it->second) it->second(r);
+        return;
+    }
     if (o.as<scene::UIPicture>() || o.as<scene::CheckBox>() || o.as<scene::BandSlider>()) return drawStyleMeshes(r, o);
 }
 
@@ -639,7 +662,7 @@ void UiView::drawList(MaterialRenderer& r, const scene::Object& o) {
         const ListRow& lr = s.rows[size_t(row)];
         const float off = (lr.slot > -1 ? lr.slot : float(row)) * list->spacing;
         const scene::Xfm rowWorld = scene::compose(vertical ? moveXfm(0, 0, -off) : moveXfm(off, 0, 0), lw);
-        const char* kind = row == s.selected ? "highlight" : "normal";
+        const char* kind = lr.disabled ? "disabled" : row == s.selected ? "highlight" : "normal";
         for (size_t e = 0; e < elements.size(); ++e) {
             float rgb[3] = {1, 1, 1};
             bool hasRgb = false;

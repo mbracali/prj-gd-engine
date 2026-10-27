@@ -18,6 +18,7 @@
 #include "render/ui_view.h"
 #include "scene/milo.h"
 #include "script/tasks.h"
+#include "ui/char_select.h"
 #include "ui/natives.h"
 #include "ui/ui_objects.h"
 #include "ui/ui_host.h"
@@ -154,7 +155,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         expect_ = {"main_screen", "qp_selsong_screen", "qp_diff_screen", "loading_screen", "game_screen", "pause_screen",
                    "game_screen", "pause_screen", "pause_confirm_restart_screen", "game_screen", "pause_screen",
                    "pause_confirm_quit_screen", "meta_loading_screen", "qp_selsong_screen"};
-    } else if (scenario == "career") {
+    } else if (scenario == "career" || scenario == "career_full") {
         at("splash_screen", 30000);
         press(kX);
         at("startup_create_save_screen");
@@ -196,6 +197,73 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         at("career_screen");
         expect_ = {"main_screen", "chooseprof_screen", "nameprof_screen", "sel_difficulty_screen", "sel_character_new_screen", "sel_guitar_new_screen",
                    "tour_start_screen", "saving_screen", "career_screen"};
+        if (scenario == "career_full") {
+            // The first tier at Medium: three songs passed with GH2's own
+            // debug cheat (campaign cheat_beat_song), the fourth played (it
+            // unlocks the encore), the encore played (the tier complete, the
+            // next venue unlocked), then the store.
+            endMs_ = 35000;
+            check("career_seed");
+            press(kX);  // LET'S ROCK
+            at("sel_venue_screen");
+            wait(900);  // (its screenshot)
+            press(kX);  // the venue (set_career_venue: the newest unlocked)
+            at("sel_song_screen");
+            wait(900);
+            check("career_song_salvation");
+            press(kX);
+            at("loading_screen");
+            at("game_screen", 30000);
+            at("endgame_encore_screen", 90000);
+            check("career_encore_offered");
+            wait(1500);
+            press(kX);  // yes.btn: the encore
+            at("loading_screen", 30000);
+            at("game_screen", 30000);
+            at("endgame_screen", 90000);
+            wait(1500);
+            press(kX);  // CONTINUE
+            at("status_screen");  // the tier complete: the next sponsorship
+            check("career_tier");
+            wait(1000);
+            press(kX);
+            at("unlock_venue_screen");  // the next venue (its 3 s animation, then on)
+            wait(1600);
+            check("shot_unlock_venue");
+            at("complete_screen", 20000);
+            wait(900);
+            press(kX);  // CONTINUE: the career menu
+            at("career_screen", 30000);
+            for (int i = 0; i < 3; ++i) press(kDown), wait(150);  // LET'S ROCK -> ... -> STORE
+            press(kX);
+            at("store_screen");
+            wait(1000);
+            press(kDown);  // GUITARS -> FINISHES
+            wait(300);
+            press(kX);
+            wait(1500);
+            check("shot_store_item");
+            press(kX);  // buy the first finish
+            at("store_bought_screen");
+            wait(900);
+            press(kX);
+            at("store_screen");
+            check("career_bought");
+            press(kTri);  // the categories
+            wait(800);
+            press(kDown), wait(200), press(kDown), wait(200);  // FINISHES -> SONGS -> CHARACTERS
+            press(kX);
+            wait(3000);  // the character loads and walks in
+            check("shot_store_character");
+            press(kTri);
+            wait(800);
+            press(kTri);  // the career menu (autosave)
+            at("career_screen", 30000);
+            expect_.insert(expect_.end(), {"sel_venue_screen", "sel_song_screen", "loading_screen", "game_screen", "post_show_screen",
+                                           "endgame_encore_screen", "loading_screen", "game_screen", "post_show_screen", "endgame_screen",
+                                           "status_screen", "unlock_venue_screen", "complete_screen", "career_screen", "store_screen",
+                                           "store_bought_screen", "store_screen", "career_screen"});
+        }
     } else if (scenario == "back") {
         at("main_screen");
         check("camera_record");
@@ -272,10 +340,11 @@ void WalkDriver::poll(ui::UiManager& ui, double nowMs) {
     if (stepStart_ < 0) stepStart_ = nowMs;
     // career: the band has bought Judy Nails' second outfit and the SG's
     // white skin in the store (M10), so both choices offer two.
-    if (scenario_ == "career" && !seeded_ && ui.currentScreen() == "main_screen") {
+    if ((scenario_ == "career" || scenario_ == "career_full") && !seeded_ && ui.currentScreen() == "sel_difficulty_screen" && ui.session().profileSlot >= 0) {
         seeded_ = true;
-        ui.career().items["alterna2"] = true;
-        ui.career().items["sg_white"] = true;
+        Career::Profile& p = ui.career().profiles[size_t(ui.session().profileSlot)];
+        p.items["alterna2"] = true;
+        p.items["sg_white"] = true;
     }
     switch (s.kind) {
     case Step::Screen:
@@ -389,6 +458,55 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         ++step_, stepStart_ = -1;
         return;
     }
+    if (s.screen.rfind("shot_", 0) == 0) {
+        // A screenshot now (GD02_WALK_SHOTS): the store's second page, the venue's unlock.
+        if (const char* dir = SDL_getenv("GD02_WALK_SHOTS")) ui.host().saveScreenshot(std::string(dir) + "/" + s.screen.substr(5) + ".bmp");
+        ++step_, stepStart_ = -1;
+        return;
+    }
+    if (s.screen == "career_seed") {
+        for (const char* song : {"surrender", "possum", "heartshapedbox"})
+            ui.interp().send("campaign", "cheat_beat_song", {Value::symbol(song), Value::integer(1)});
+        ++step_, stepStart_ = -1;
+        return;
+    }
+    if (s.screen == "career_song_salvation") {
+        // set_career_song (0x822B89B8): the venue's first unlocked song not passed yet.
+        std::printf("  career: venue %s, song %s\n", ui.session().venue.c_str(), ui.session().song.c_str());
+        if (ui.session().venue != "battle" || ui.session().song != "salvation") return fail("the career did not offer battle's salvation");
+        ++step_, stepStart_ = -1;
+        return;
+    }
+    if (s.screen == "career_encore_offered") {
+        std::printf("  career: encore offered after %s (cash %d)\n", ui.session().song.c_str(),
+                    ui.interp().send("campaign", "cash", {}).integerValue());
+        ++step_, stepStart_ = -1;
+        return;
+    }
+    if (s.screen == "career_tier" || s.screen == "career_bought") {
+        // The tour at Medium (ui/campaign.h): battle complete with its
+        // encore, small1 unlocked, status 1; the cash: 50 to start, 150 per
+        // three-star song (salvation, the encore), 100 for status 1; then
+        // the first finish of the store (lp_cayenne, 250) bought and on the
+        // Les Paul's finishes.
+        Interp& in = ui.interp();
+        const int cash = in.send("campaign", "cash", {}).integerValue();
+        const int status = in.send("campaign", "status", {}).integerValue();
+        const bool small1 = in.send("campaign", "is_unlocked", {Value::symbol("small1")}).truthy();
+        const bool battle = in.send("campaign", "is_song_passed", {Value::symbol("shoutatthedevil")}).truthy();
+        std::printf("  career: status %d, cash %d, small1 %s, encore passed %s\n", status, cash, small1 ? "unlocked" : "locked", battle ? "yes" : "no");
+        if (s.screen == "career_tier") {
+            if (status != 1 || cash != 450 || !small1 || !battle) return fail("the first tier is not complete as GH2's rules say (status 1, $450)");
+        } else {
+            const auto skins = ui::chars::skins(ui, "lespaul");
+            const bool on = std::find(skins.begin(), skins.end(), "lp_cayenne") != skins.end();
+            const int spent = in.send("campaign", "cash_spent", {}).integerValue();
+            std::printf("  store: lp_cayenne %s, cash %d, spent %d\n", on ? "bought" : "not bought", cash, spent);
+            if (!on || cash != 200 || spent != 250) return fail("the store did not sell lp_cayenne for $250");
+        }
+        ++step_, stepStart_ = -1;
+        return;
+    }
     fail("unknown check " + s.screen);
 }
 
@@ -435,7 +553,7 @@ int WalkDriver::finish(ui::UiManager& ui) {
         }
     }
     // The port's band in every save: a fresh career.json has The Glitches.
-    if (scenario_ == "quickplay" || scenario_ == "career") {
+    if (scenario_ == "quickplay" || scenario_ == "career" || scenario_ == "career_full") {
         std::ifstream f(ui.savePath());
         std::stringstream ss;
         ss << f.rdbuf();
@@ -451,7 +569,7 @@ int WalkDriver::finish(ui::UiManager& ui) {
     }
     // The career's look: career.json's first band at Medium (campaign
     // set_character_info), and player 0's config back from it.
-    if (scenario_ == "career") {
+    if (scenario_ == "career" || scenario_ == "career_full") {
         std::ifstream f(ui.savePath());
         std::stringstream ss;
         ss << f.rdbuf();
@@ -467,6 +585,28 @@ int WalkDriver::finish(ui::UiManager& ui) {
         const std::string want = "alterna alterna2 sg sg_white";
         std::printf("  look: career.json %s, player 0 %s\n", got.c_str(), cfg.c_str());
         if (got != want || cfg != want) std::printf("  FAIL the look is not %s\n", want.c_str()), ok = false;
+    }
+    // career_full: the band's tour, cash and items in career.json.
+    if (scenario_ == "career_full") {
+        std::ifstream f(ui.savePath());
+        std::stringstream ss;
+        ss << f.rdbuf();
+        std::string got;
+        try {
+            const Json p = Json::parse(ss.str())["profiles"].a.at(0);
+            const Json& med = p["tour"].a.at(1);
+            char buf[256];
+            std::snprintf(buf, sizeof buf, "cash %d spent %d battle %s small1 %s salvation %d* encore %d* lp_cayenne %s", int(p["cash"].num()),
+                          int(p["cash_spent"].num()), med["battle"]["completed"].truthy() ? "completed" : "-",
+                          med["small1"]["unlocked"].truthy() ? "unlocked" : "-", int(med["salvation"]["stars"].num()),
+                          int(med["shoutatthedevil"]["stars"].num()), p["items"]["lp_cayenne"].truthy() ? "bought" : "-");
+            got = buf;
+        } catch (const std::exception& e) {
+            got = e.what();
+        }
+        const std::string want = "cash 200 spent 250 battle completed small1 unlocked salvation 3* encore 3* lp_cayenne bought";
+        std::printf("  career.json: %s\n", got.c_str());
+        if (got != want) std::printf("  FAIL career.json is not: %s\n", want.c_str()), ok = false;
     }
     // The endgame photo (quickplay): player 0's outfit, one of its four pictures, on the disc.
     if (scenario_ == "quickplay") {

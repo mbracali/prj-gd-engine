@@ -26,6 +26,8 @@ public:
     virtual int numData() = 0;
     virtual std::string symbol(int index) = 0;
     virtual int indexOf(const std::string& sym);
+    // UIListProvider::IsActive: an inactive row is drawn disabled and cannot be chosen.
+    virtual bool active(int /*index*/) { return true; }
     // The list's rows (headers included) for gfx::UiView::setList, and the
     // row of data index `selected`.
     virtual void rows(std::vector<gfx::UiView::ListRow>& out, int selected, int& selectedRow) = 0;
@@ -50,6 +52,10 @@ struct Session {
     };
     std::array<PlayerCfg, 2> players;
     bool allAccess = false;  // campaign set_all_access (the cheat): every item unlocked
+    int profileSlot = -1;    // campaign profile_slot (Campaign +0x48): the band chosen
+    // The guitars a tour just awarded (Campaign +0x7c, 0x822A8078), shown
+    // by unlock_guitar_screen (next_guitar_award takes the last).
+    std::vector<std::string> guitarAwards;
     // The endgame photos GamePanel picked as the song loaded (0x822CC730):
     // per player ui/image/og/photo_<outfit><0..3>_keep.bmp.
     std::vector<std::string> winnerPhotos;

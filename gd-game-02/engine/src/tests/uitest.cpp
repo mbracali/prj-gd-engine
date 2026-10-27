@@ -13,10 +13,13 @@
 #include <vector>
 
 #include "data/game_data.h"
+#include "data/json.h"
 #include "game/song_db.h"
 #include "input/input.h"
 #include "render/canvas.h"
 #include "scene/milo.h"
+#include "ui/campaign.h"
+#include "ui/natives.h"
 #include "ui/ui_host.h"
 #include "ui/ui_manager.h"
 #include "ui/ui_objects.h"
@@ -115,6 +118,73 @@ void miloNames(const GameData& data, scene::MiloLibrary& lib, const std::string&
 
 }  // namespace
 
+// GH2's career rules (ui/campaign.h) on a scratch band, Hard: the cash of
+// stars (this and the easier difficulties), the encore, the tier, the
+// store. Returns the failures.
+static int campaignChecks(ui::UiManager& ui) {
+    namespace cp = ui::campaign;
+    int fails = 0, n = 0;
+    auto check = [&](bool ok, const std::string& what) {
+        ++n;
+        if (!ok) std::printf("  FAIL campaign: %s\n", what.c_str()), ++fails;
+    };
+    Career saved = ui.career();
+    ui::Session& s = ui.session();
+    const ui::Session keep = s;
+    Career::Profile& p = ui.career().profiles[0];
+    p = Career::Profile{};
+    p.inUse = true, p.name = "T", p.cash = 50;
+    s.profileSlot = 0, s.mode = "career", s.players[0].difficulty = 2, s.venue = "battle", s.allAccess = false;
+    check(cp::numTiers(ui, 0) == 7 && cp::numTiers(ui, 1) == 8, "easy has 7 tiers, the others 8");
+    check(cp::requiredSongs(ui, 1, "battle") == 5 && cp::requiredSongs(ui, 1, "stone") == 6 && cp::requiredSongs(ui, 0, "arena") == 5,
+          "required songs (campaign.dta)");
+    check(cp::encoreOf(ui, "battle") == "shoutatthedevil" && cp::isEncore(ui, "freebird"), "the encores are the tiers' last songs");
+    check(cp::isUnlocked(ui, "surrender") && !cp::isUnlocked(ui, "shoutatthedevil") && !cp::isUnlocked(ui, "small1"), "a new tour");
+    auto play = [&](const std::string& song, int stars) {
+        s.song = song;
+        return cp::finishSong(ui, 1000, stars, 50);
+    };
+    cp::FinishResult r = play("surrender", 5);
+    check(r.cash == 1200 && r.cashReason == "award_5_star", "five stars at Hard: 150+200+250 at Hard and Medium, 0 at Easy (got " +
+                                                                 std::to_string(r.cash) + ")");
+    for (const char* song : {"possum", "heartshapedbox", "salvation"}) play(song, 3);
+    s.song = "strutter";
+    check(ui.interp().send("campaign", "encore_unlock_potential", {}).truthy(), "the fifth song may unlock the encore at Hard");
+    r = play("strutter", 3);
+    check(r.cash == 300 && r.newStatus == 0 && r.newVenue.empty(), "three stars: 150 at Hard and Medium; no venue before the encore");
+    check(cp::isUnlocked(ui, "shoutatthedevil") && !cp::unlockedAt(ui, p, 0, "shoutatthedevil"), "the encore unlocked (never at Easy)");
+    r = play("shoutatthedevil", 3);
+    check(r.newVenue == "small1" && r.newStatus == 1 && r.statusAward == 200,
+          "the encore completes battle: small1, status 1, $100 at Hard + $100 at Medium (got " + std::to_string(r.statusAward) + ")");
+    check(p.cash == 50 + 1200 + 3 * 300 + 300 + 300 + 200 && cp::status(ui, p, 2) == 1, "the band's cash and status");
+    check(cp::isUnlocked(ui, "possum") && !cp::isUnlocked(ui, "rawdog") && !cp::isUnlocked(ui, "classic") && cp::isUnlocked(ui, "lespaul") &&
+              !cp::isUnlocked(ui, "fish_reward"),
+          "the store's items are locked, the others not");
+    const int cash = p.cash;
+    cp::buyItem(ui, "rawdog", 550);
+    cp::buyItem(ui, "classic", 5000);
+    check(cp::isUnlocked(ui, "rawdog") && p.cash == cash - 550 && p.cashSpent == 550 && !cp::isUnlocked(ui, "classic"),
+          "a song bought (all four records), a character too dear");
+    const auto career = cp::careerSongs(ui, false);
+    check(std::find(career.begin(), career.end(), "rawdog") != career.end(), "the bought song in the career list");
+    s.mode = "quickplay";
+    const auto qp = cp::quickplaySongs(ui);
+    check(std::find(qp.begin(), qp.end(), "rawdog") != qp.end() && std::find(qp.begin(), qp.end(), "mother") != qp.end() &&
+              std::find(qp.begin(), qp.end(), "carryonwayward") == qp.end(),
+          "quick play: the first two tiers and the bought song");
+    // The save keeps it.
+    Career back;
+    back.fromJson(ui.career().toJson());
+    const auto& e = back.profiles[0].entries[2];
+    check(back.profiles[0].cashSpent == 550 && e.at("battle").completed && e.at("small1").unlocked && e.at("surrender").stars == 5 &&
+              e.at("rawdog").unlocked && back.profiles[0].entries[1].at("surrender").maxStars == 5,
+          "career.json keeps the tour");
+    std::printf("uitest: campaign: %d checks, %d failed\n", n, fails);
+    ui.career() = saved;
+    s = keep;
+    return fails;
+}
+
 int runUiTest(const std::string& dataPath) {
     std::unique_ptr<GameData> data;
     std::vector<SongInfo> songs;
@@ -210,6 +280,7 @@ int runUiTest(const std::string& dataPath) {
     }
     std::printf("uitest: %d panels, %d milos loaded, %d component names checked, %d run-time milos skipped, %d handlers nothing calls\n",
                 panels, loaded, checked, dynamic, unreachable);
+    failures += campaignChecks(ui);
     for (const auto& [k, n] : in.unknownCounts()) std::printf("  UNKNOWN %s (%d)\n", k.c_str(), n), ++failures;
     for (const auto& [k, n] : in.unhandledCounts()) std::printf("  UNHANDLED %s (%d)\n", k.c_str(), n), ++failures;
     for (const auto& [k, n] : in.stubCounts()) std::printf("  STUB %s (%d)\n", k.c_str(), n);

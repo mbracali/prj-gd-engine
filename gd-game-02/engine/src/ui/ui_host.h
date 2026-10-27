@@ -34,6 +34,11 @@ public:
         bool fastIntro = false;  // game set fast_intro (a restart skips most of the lead-in)
         // The players' look (PlayerConfig: outfit, guitar, skin; empty: the song's quickplay one).
         std::array<std::string, 2> outfit, guitar, skin;
+        // GamePanel's encore state (0x822CA6E0 / 0x822CA5D0): the song may
+        // unlock an encore (the crowd calls for it: game_won_msg $encore,
+        // encore_lost, the band's encore spot), the encore itself plays (the
+        // encore intro, the crowd full); the career's last song.
+        bool encoreCheck = false, encoreFx = false, campaignFinal = false;
     };
     virtual bool gameLoad(const GameSetup& setup, std::string& error) = 0;
     // Starts the music and the clock (after every game panel has entered).
@@ -98,6 +103,8 @@ public:
     // (enhanced.json in the save folder; its default when unset) and a
     // change, saved and put in effect at once.
     virtual std::string enhancedValue(const std::string& /*key*/) { return {}; }
+    // The last frame drawn as a .bmp (the walk test's shots); false if none.
+    virtual bool saveScreenshot(const std::string& /*path*/) { return false; }
     virtual void setEnhancedValue(const std::string& /*key*/, const std::string& /*value*/) {}
     // The Enhanced Options' live backdrop: the second venue with the band
     // playing, while the screen is up; drawMenuBackdrop draws it (false
