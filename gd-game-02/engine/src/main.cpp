@@ -75,7 +75,9 @@ void usage() {
 
 }  // namespace
 
-int main(int argc, char** argv) {
+// The program: main() below, or the launcher module's gd_game_run
+// (platform/module_entry.cpp) in the Guitar Dream Universal Launcher.
+int gd02Main(int argc, char** argv) {
     Options opt;
     bool selftest = false, scenetest = false, shadertest = false, scripttest = false, uitest = false, venuetest = false, sfxtest = false, facefxtest = false, chartest = false;
     std::string viewPath, movie;
@@ -124,3 +126,7 @@ int main(int argc, char** argv) {
     if (!movie.empty()) return runPlayMovie(opt.dataPath, movie);
     return selftest ? runSelfTest(opt.dataPath) : runApp(opt);
 }
+
+#ifndef GD02_MODULE
+int main(int argc, char** argv) { return gd02Main(argc, argv); }
+#endif

@@ -10,3 +10,7 @@ based_on: Xbox 360
 guitar_dream_version: "0.1.1"
 ready_to_play: true
 completeness: 0.6
+# How the launcher recognises this game's disc image (by content, not name).
+iso_signatures:
+  - format: xdvdfs          # Xbox 360 disc
+    xex_title_id: "415607E7"  # default.xex title ID (Guitar Hero II, USA)

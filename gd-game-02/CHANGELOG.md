@@ -7,6 +7,10 @@ matches the tag's version. Nothing is released yet.
 ## [Unreleased]
 
 ### Added
+- gd02 plays inside the Guitar Dream Universal Launcher: CMake option
+  `GD02_MODULE=ON` also builds it as the launcher module `gd-game-02.so` /
+  `gd-game-02.dll` (entry point `src/platform/module_entry.cpp`); the `gd02`
+  program is unchanged.
 - A first screen when no disc image is set: click, press Enter (or tap on
   Android) to choose your Guitar Hero II (Xbox 360) `.iso` with the system's
   file dialog, or drop it onto the window. The game remembers it, and finds an

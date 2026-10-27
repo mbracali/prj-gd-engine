@@ -60,11 +60,21 @@ Guitar Dream version, whether it is ready to play and how complete it is.
 
 # Guitar Dream Universal Launcher
 
-`gd-engine-launcher/` holds the launcher: one program that lists every game
-from `gd-engine-launcher/games.yaml` (the path of each `game-info.yaml`), finds
-your disc images in `original_isos/` (or lets you pick or drop one) and plays
-the games in its own window. Its version is in
+`gd-engine-launcher/` holds the launcher (gdul): one program, one window, that
+lists every game from `gd-engine-launcher/games.yaml` (the path of each
+`game-info.yaml`), recognises your disc images by their content (found in
+`original_isos/`, picked with Load ISO, or dropped onto the window) and plays
+the ready games inside its own window. Each game is a module (a `.so` /
+`.dll`) the launcher loads into its process and hands its window; quitting the
+game returns to the list. Every action is logged (date, user, action) in
+`gdul.log` in the launcher's save folder. Its version is in
 `gd-engine-launcher/launcher-info.yaml` (from 0.1.0).
+
+Build it (Linux and Windows x86-64) with `gd-engine-launcher/scripts/build.sh`;
+the result is in `gd-engine-launcher/local_builds/gdul-<version>-<os>-x86_64/`,
+and a game module is only rebuilt when its `guitar_dream_version` changed.
+Architecture, the module ABI, the build manifest and the log:
+[gd-engine-launcher/README.md](gd-engine-launcher/README.md).
 
 # Licence
 

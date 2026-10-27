@@ -282,3 +282,46 @@ set_target_properties(gd02 PROPERTIES
   MACOSX_BUNDLE_BUNDLE_NAME "GD Engine 02"
   MACOSX_BUNDLE_GUI_IDENTIFIER "io.github.mbracali.gd02"
   MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}")
+
+# The launcher module (GD02_MODULE=ON; gd-engine-launcher/README.md): gd02 also
+# as a shared library, gd-game-02.so / gd-game-02.dll, that the Guitar Dream
+# Universal Launcher loads into its own window. The same sources and settings
+# as the program above, plus its entry point (src/platform/module_entry.cpp)
+# and the launcher's SDL shims (gd_module_shim.h, force-included). The
+# program itself is unchanged.
+option(GD02_MODULE "Also build gd02 as a Guitar Dream Universal Launcher module" OFF)
+if(GD02_MODULE AND NOT ANDROID)
+  set(GD02_HOST_SDK "${CMAKE_CURRENT_SOURCE_DIR}/../../gd-engine-launcher/sdk" CACHE PATH
+      "The launcher's module SDK (gd_host.h, gd_module_shim.h/.cpp)")
+  get_target_property(gd02_srcs gd02 SOURCES)
+  list(FILTER gd02_srcs EXCLUDE REGEX "\\.(rc|icns)$")
+  add_library(gd02_module SHARED ${gd02_srcs} src/platform/module_entry.cpp ${GD02_HOST_SDK}/gd_module_shim.cpp)
+  foreach(prop INCLUDE_DIRECTORIES COMPILE_DEFINITIONS COMPILE_OPTIONS LINK_LIBRARIES LINK_OPTIONS)
+    get_target_property(value gd02 ${prop})
+    if(value)
+      set_property(TARGET gd02_module PROPERTY ${prop} ${value})
+    endif()
+  endforeach()
+  if(GD02_VIDEO AND ffmpeg_dir)
+    target_include_directories(gd02_module SYSTEM PRIVATE "${ffmpeg_dir}/include")
+  endif()
+  target_include_directories(gd02_module PRIVATE ${GD02_HOST_SDK})
+  target_compile_definitions(gd02_module PRIVATE GD02_MODULE=1)
+  if(MSVC)
+    target_compile_options(gd02_module PRIVATE "/FI${GD02_HOST_SDK}/gd_module_shim.h")
+  else()
+    target_compile_options(gd02_module PRIVATE "SHELL:-include \"${GD02_HOST_SDK}/gd_module_shim.h\"")
+  endif()
+  if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    # Unique symbols would keep the library loaded after the launcher unloads
+    # it, and with it the game's globals of the last run.
+    target_compile_options(gd02_module PRIVATE -fno-gnu-unique)
+  endif()
+  set_target_properties(gd02_module PROPERTIES OUTPUT_NAME gd-game-02 PREFIX ""
+    CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
+  if(NOT WIN32 AND NOT APPLE)
+    # FFmpeg next to the module; only gd_game_run exported (not stb_vorbis's).
+    set_target_properties(gd02_module PROPERTIES BUILD_WITH_INSTALL_RPATH ON INSTALL_RPATH "$ORIGIN")
+    target_link_options(gd02_module PRIVATE -Wl,--exclude-libs,ALL)
+  endif()
+endif()

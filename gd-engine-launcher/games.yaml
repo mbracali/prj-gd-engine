@@ -20,3 +20,11 @@ games:
   - gd-game-17/game-info.yaml
   - gd-game-18/game-info.yaml
   - gd-game-19/game-info.yaml
+
+# Disc signatures for games whose folder cannot carry them in its own
+# game-info.yaml (gd-game-01 is finished and left untouched). Same fields as
+# a game-info.yaml's iso_signatures, plus `game`.
+extra_iso_signatures:
+  - game: gd-game-01
+    format: iso9660         # PlayStation 2 disc
+    ps2_boot: "SLUS_212.24"   # SYSTEM.CNF BOOT2 (Guitar Hero, USA)
