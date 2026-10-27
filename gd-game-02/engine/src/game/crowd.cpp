@@ -121,7 +121,7 @@ private:
 class Crowd::PartObj : public ScriptObject {
 public:
     PartObj(Crowd& c, Actor& a, const std::string& scope, scene::Object* o)
-        : ScriptObject(ScriptObject::scoped(scope, o->name), o->cls), c_(c), a_(a), o_(o) {
+        : ScriptObject(ScriptObject::scoped(scope, o->name), o->cls), a_(a), o_(o) {
         drv_ = a.character->driver(o->name);
         random = &c.rng_;
     }
@@ -171,7 +171,6 @@ private:
         return true;
     }
 
-    Crowd& c_;
     Actor& a_;
     scene::Object* o_;
     chr::ClipDriver* drv_ = nullptr;
