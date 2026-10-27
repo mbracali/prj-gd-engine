@@ -12,7 +12,7 @@ id = `gd-game-02`
 **This folder contains the re implementation of**:
 - **Game**: Guitar Hero 2
 - **Version**: Xbox 360
-- **Launched**: Nov/2006 (original)
+- **Launched**: Apr/2007 (Xbox 360; the PS2 original came out Nov/2006)
 - **Musics**: --
 - **Venues**: --
 - **Chars**: --
@@ -52,3 +52,19 @@ id = `gd-game-02`
 - Cut content restored.
 - Extended gamepad support.
 - Mods support
+
+
+**Running** (`engine/README.md` has the details, it ships in every download):
+- You need your own Guitar Hero II (Xbox 360) disc image (`.iso`). No game data is included.
+- Start `gd02` and click the window (or press Enter, or tap on Android) to pick the `.iso`, or drop it onto the window. It is remembered (`config.txt` in the save folder `gd-engine/gd02/`); an `.iso` next to the program is found by itself.
+- Command line: `gd02 [--song <id>] [--difficulty 0-3] [--autoplay] [--no-fail] [disc.iso | game folder]`.
+- `gd02 --selftest <disc.iso>` checks the data, auto-plays every chart and checks the rules without a window.
+
+
+**Building** (the same scripts the release workflow runs):
+- `gd-game-02/local_build.sh [linux|steamdeck|windows|macos|android|all] [--native] [--force]` builds the downloads into `gd-game-02/local_builds/` (git-ignored): a ready-to-run folder and the release file (`gd02-<version>-<platform>.<tar.gz|zip|apk>`) per build, a log per build in `local_builds/logs/`, and a summary. Builds whose sources did not change are reported "up to date". Without a build name: the one for the system you are on.
+- `gd-game-02/build_commands/`: the same, by double-click (`build-linux.sh`, `build-steamdeck.sh`, `build-windows.sh` / `.bat`, `build-macos.command`, `build-android.sh`, `build-all.sh`).
+- Linux: an ubuntu:22.04 container (podman or docker), SDL3 built from source and shipped next to the program; `--native` uses this machine's compiler and SDL3. Steam Deck: Valve's Steam Runtime 3 "sniper" SDK container. Windows: MinGW-w64 (Fedora `mingw64-gcc-c++ mingw64-SDL3`, or an MSYS2 UCRT64 shell). macOS: on a Mac with `brew install cmake sdl3 ninja dylibbundler`. Android: the Android SDK, NDK and a JDK (`engine/README.md`); signed with `~/.config/gd-engine/gd02-release.jks` when it is there, else the debug key.
+- `engine/build.sh`: the quick developer build (Linux with the system SDL3, Windows, Android when its SDK is found) into `engine/dist/`.
+- The version is `project(gd02 VERSION X.Y.Z)` in `engine/CMakeLists.txt` (the Android `versionCode` is X*10000 + Y*100 + Z). A merge into `main` with a version that has no `gd-game-02/vX.Y.Z` release yet, and a `## [X.Y.Z]` section in `CHANGELOG.md`, publishes it (`.github/workflows/gd-game-02-release.yml`). `gd-game-02-build.yml` can be started by hand for test builds.
+- Icons: `python3 gd-game-02/tools/make_icons.py` (needs Pillow) remakes them from the badge `res/icon_full.jpg`.
