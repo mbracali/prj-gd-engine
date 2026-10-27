@@ -10,7 +10,8 @@
 #     SDL_Quit, SDL_CreateWindow, SDL_DestroyWindow and the GL context calls go
 #     through the launcher's shims (the launcher's window, its SDL);
 #   - gd01_module_entry.cpp is the module's gd_game_run, gd01_module_explore.cpp
-#     its gd_game_explore (the launcher's model explorer, with gd01's loaders).
+#     its gd_game_explore (the launcher's model explorer, with gd01's loaders),
+#     gd01_module_sounds.cpp its gd_game_ui_sounds (Guitar Hero's menu sounds).
 # Used by ../../scripts/build.sh.
 cmake_minimum_required(VERSION 3.24)
 project(gd01_module LANGUAGES C CXX)
@@ -40,7 +41,7 @@ endif()
 message(STATUS "gd01 module: gd01 ${GD01_VERSION}")
 
 find_package(SDL3 REQUIRED CONFIG)
-add_library(gd01_module SHARED ${gd01_srcs} gd01_module_entry.cpp gd01_module_explore.cpp ${GDUL_SDK}/gd_module_shim.cpp)
+add_library(gd01_module SHARED ${gd01_srcs} gd01_module_entry.cpp gd01_module_explore.cpp gd01_module_sounds.cpp ${GDUL_SDK}/gd_module_shim.cpp)
 target_include_directories(gd01_module PRIVATE ${GD01_ENGINE}/src ${GDUL_SDK})
 target_link_libraries(gd01_module PRIVATE SDL3::SDL3)
 target_compile_definitions(gd01_module PRIVATE GD01_VERSION="${GD01_VERSION}")

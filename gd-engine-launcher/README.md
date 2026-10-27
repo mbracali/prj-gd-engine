@@ -7,7 +7,8 @@ one process and one window. Builds: Linux x86-64, Windows x86-64 (MinGW-w64),
 Android arm64 (one APK, OpenGL ES 3.0) and macOS arm64 (an .app, not yet tried
 on a Mac); see "Other systems" below.
 
-Version: `launcher-info.yaml` (`launcher_version`, SemVer, from 0.1.0).
+Version: `launcher-info.yaml` (`launcher_version`, SemVer, from 0.1.0); the
+changes of each version: `CHANGELOG.md`.
 
 ```
 gd-engine-launcher/
@@ -43,10 +44,25 @@ three buttons:
   viewer that turns, zooms, pans and plays their animations (below).
 
 A row is lit (green) when its game is ready to play and has a disc. Disc
-images are found by themselves in `original_isos/` next to the program and,
-for a build inside the repository (`local_builds/`), in the repository's
-`original_isos/`. A disc chosen with Load ISO or dropped on the window is
-saved in `config.txt` in the launcher's save folder and wins over a found one.
+images are found by themselves in these `original_isos/` folders:
+
+- next to the program (macOS: next to the `.app`; and inside it,
+  `Contents/Resources/original_isos/`);
+- macOS, an app run from where a download put it (App Translocation, below):
+  next to its real place, which `Security.framework` tells
+  (`SecTranslocateCreateOriginalPathForURL`, through `dlsym`);
+- in the launcher's save folder (always writable: Program Files, a read-only
+  image, a translocated app);
+- for a build inside the repository (`local_builds/`), the repository's.
+
+The header says how many were found; its "folders" / "where we looked" link
+lists each folder with what it had (or why it could not be read), with Open
+folder and Look again. Each folder is also logged at start. A disc chosen
+with Load ISO or dropped on the window is saved in `config.txt` in the
+launcher's save folder and wins over a found one.
+
+The header's **OFFICIAL SITE** pill opens https://guitardreamengine.com
+(`SDL_OpenURL`).
 
 **Drop a disc image anywhere** on the window: the launcher reads it,
 recognises the game by its content (never by the file name), and offers to
@@ -63,7 +79,14 @@ Controls (keyboard, mouse, gamepad or guitar; the colours are the frets):
 | Load ISO (yellow) | L | Y | yellow fret |
 | Explore models (blue) | E | X | blue fret |
 
-The mouse points and clicks; the wheel scrolls. Quitting a game returns to
+The mouse points and clicks every button; the wheel scrolls. (The list has no
+legend of these keys: its buttons say what they do.)
+
+**Menu sounds**: Guitar Hero's own (move, select, play, back, error), read at
+run time from the player's Guitar Hero disc by the gd-game-01 module
+(`gd_game_ui_sounds`, below) when that disc is known; silent otherwise. Never
+shipped: they live in memory only. The launcher's audio device is released
+before a game runs and opened again after. Quitting a game returns to
 the list in the same window (closing the window while a game runs also
 returns to the list).
 
@@ -81,6 +104,11 @@ own loaders and renderer through the optional `gd_game_explore` entry point
 |---|---|---|
 | gd-game-02 | characters (24), crowd, guitars and basses, drum kits, venues (geometry, face-off variants), venue props | characters as `chr::Character` + `BandView` with their main driver's clips (idle first) and the venue outfits (guitar_sg, the arena kit); the rest as scenes through GH2's materials and standard shader, lit by their own Environ or a key light; guitars stood up |
 | gd-game-01 | guitarists, band (band_chars.dta), crowd, guitars, venues | guitarists and band as gd01's `Character` with every clip (idle first), the rest as `Scene` + `SceneRenderer` (the views no other view draws), a key light; guitars stood up |
+
+The list is grouped by kind; a group's header opens and closes it (click it,
+or green on it; left closes and right opens it; a search shows every match).
+The footer's actions are buttons in their fret's colour: click them or press
+the fret.
 
 Controls: up/down or click choose (the model loads after a short pause, at
 once with green / click), left/right or drag turn, wheel / triggers / `+` `-`
@@ -127,7 +155,8 @@ iso_probe.*     disc identification: ISO 9660 (PVD, root folder, SYSTEM.CNF
                 default.xex's title ID)
 module_host.*   loads a game module and runs it in the window, or opens its
                 model explorer (below)
-explorer.cpp    the Explore models screen (list, search, viewer, camera)
+explorer.cpp    the Explore models screen (list, groups, search, viewer, camera)
+ui_sounds.*     the menu sounds (a game's, from its disc) on SDL's audio device
 palette.h       the launcher's colours
 action_log.*    the action log
 platform.*      folders, user name, time, shared libraries per system
@@ -178,9 +207,15 @@ typedef struct GdExplorer {
 While it is open the module keeps its own GL context on the launcher's
 window and the shims make its `SDL_GL_SwapWindow` do nothing
 (`gdshim_set_exploring`). Each frame the launcher calls `draw` (the module
-makes its context current, draws the whole window with the model centred in
-the viewer's rectangle), makes its own context current again, draws its
-panels over that frame without clearing and presents it. The launcher keeps
+makes its context current and draws the whole window with the model centred
+in the viewer's rectangle), reads the viewer's rectangle of that context's
+back buffer (`gfx::readBackBuffer`: `glReadPixels` of the default
+framebuffer's back buffer, all other state left alone), makes its own
+context current again, uploads it to a texture, clears, draws the backdrop,
+that texture (rounded) and its panels, and presents. Only the launcher's
+context ever presents, and every frame starts cleared: drawing over another
+context's back buffer flickered on macOS, where each `NSOpenGLContext` has
+its own drawable and a back buffer is undefined after a swap. The launcher keeps
 the input (the module polls no events); `close` frees everything and the
 library is unloaded as after a game. `module_host.cpp`'s `ExploreSession`
 does the loading; the game's log goes to `logs/<id>-explore.log`. How to
@@ -229,6 +264,18 @@ launcher's context: whatever it allocates is freed with its context, and no
 GL state leaks either way. Anything left behind (a window, a context, a
 subsystem) is cleaned up by `gdshim_end()` when `gd_game_run` returns.
 
+**Menu sounds** (optional) are a third export, `gd_game_ui_sounds(host,
+sound, user)`: the module reads the disc and gives each sound (`"move"`,
+`"select"`, `"play"`, `"back"`, `"error"`; variations allowed) as stereo
+float samples. The launcher asks, after its first frames, each game with a
+module and a disc in `games.yaml` order until one gives some (gd-game-01:
+`modules/gd01/gd01_module_sounds.cpp`, Guitar Hero's `sfx/metagame` bank
+rendered through gd01's software SPU2: button_toggle, button_select,
+button_play, button_back, button_error, as GH1's `ghui/sfx.dta` plays them),
+keeps them (`ui_sounds.*`) and logs where they came from. `fetchUiSounds`
+in `module_host.cpp` loads and unloads the module; its log lines go to
+`logs/<id>-sounds.log`.
+
 **gd-game-02** has its own entry point: `src/platform/module_entry.cpp`
 (`gd_game_run` -> `gd02Main`, the former `main`), and its CMakeLists.txt option
 `GD02_MODULE=ON` builds `gd-game-02.so/.dll` from the same sources and settings
@@ -276,7 +323,7 @@ cross-compiled with MinGW-w64 (Fedora: `dnf install mingw64-gcc-c++
 mingw64-SDL3`). The result:
 
 ```
-local_builds/gdul-0.1.0-linux-x86_64/
+local_builds/gdul-0.1.1-linux-x86_64/
   Guitar Dream Universal Launcher          the program (.exe on Windows)
   Guitar Dream Universal Launcher.png      its icon (.ico on Windows)
   libSDL3.so.0 (SDL3.dll), libnvidia-ngx-dlss.so.*   platform libraries
@@ -298,7 +345,7 @@ game's `guitar_dream_version` it was built from, the module file, when it was
 built and whether it was reused:
 
 ```json
-{ "launcher_version": "0.1.0", "os": "linux", "arch": "x86_64",
+{ "launcher_version": "0.1.1", "os": "linux", "arch": "x86_64",
   "assembled_at": "2026-10-27T13:13:51Z", "source_commit": "eb65d56",
   "games": { "gd-game-02": { "guitar_dream_version": "0.1.1",
              "module": "gd-game-02.so", "built_at": "...", "reused": false } } }
@@ -325,12 +372,13 @@ A new game needs a recipe in `scripts/build.sh` (`build_module_NN`): see
 
 | Variable | Effect |
 |---|---|
-| `GDUL_SCRIPT="<ms>:<cmd>[=<arg>];..."` | commands at those times since start: `up down left right green red yellow blue`, `drop=<file>` (a real drop event), `play=<game id>`, `explore=<game id>`, `shot=<file.bmp>`, `drag=1\|0` (the drop overlay), `toast=<text>`, `quit`; in the explorer also `pick=<text>` (the first model whose name or path has it, shown at once), `search=<text>`, `orbit=<yaw>,<pitch>` (degrees), `zoom=<factor>`, `pan=<x>,<y>`, `clip=next`, `reset`, `turntable=0\|1` |
+| `GDUL_SCRIPT="<ms>:<cmd>[=<arg>];..."` | commands at those times since start: `up down left right green red yellow blue`, `drop=<file>` (a real drop event), `play=<game id>`, `explore=<game id>`, `shot=<file.bmp>`, `drag=1\|0` (the drop overlay), `toast=<text>`, `folders` (the disc folders dialog), `quit`; in the explorer also `collapse=<group text>\|all`, `expand=<group text>\|all`, `pick=<text>` (the first model whose name or path has it, shown at once), `search=<text>`, `orbit=<yaw>,<pitch>` (degrees), `zoom=<factor>`, `pan=<x>,<y>`, `clip=next`, `reset`, `turntable=0\|1` |
 | `GDUL_WINDOW=<w>x<h>` | the starting window size |
 | `GDUL_GAME_QUIT_AFTER=<ms>` | quits each game that long after it starts |
 | `GDUL_GAME_ARGS="..."` | more arguments for the game, before the disc |
 | `GDUL_VIRTUAL_PAD=<vendor>:<product>` | plugs in a virtual gamepad (hex, e.g. `045e:028e`) |
 | `GDUL_GAMES_YAML=<file>` | another games.yaml |
+| `GDUL_SOUND_LOG=1` | logs each menu sound played (always on with `GDUL_SCRIPT`) |
 
 Headless: `SDL_VIDEO_DRIVER=offscreen SDL_AUDIO_DRIVER=dummy`. For example,
 play gd-game-02 from the list and come back:
@@ -339,7 +387,7 @@ play gd-game-02 from the list and come back:
 GDUL_SCRIPT="1000:play=gd-game-02;1100:shot=/tmp/back.bmp;1200:quit" \
 GD02_SKIP_BOOT=1 GD02_SCREENSHOT=/tmp/gd02.bmp GD02_SCREENSHOT_AT=12000 \
 SDL_VIDEO_DRIVER=offscreen SDL_AUDIO_DRIVER=dummy \
-"local_builds/gdul-0.1.0-linux-x86_64/Guitar Dream Universal Launcher"
+"local_builds/gdul-0.1.1-linux-x86_64/Guitar Dream Universal Launcher"
 ```
 
 ## Other systems: macOS and Android
@@ -351,7 +399,7 @@ ninja sdl3 dylibbundler`; build.sh needs bash 4 or newer). Apple silicon
 (arm64), ad-hoc signed, not notarised (first start: right-click > Open):
 
 ```
-local_builds/gdul-0.1.0-macos-arm64/
+local_builds/gdul-0.1.1-macos-arm64/
   Guitar Dream Universal Launcher.app/Contents/
     MacOS/Guitar Dream Universal Launcher
     Frameworks/libSDL3.0.dylib                  (dylibbundler)
@@ -364,7 +412,18 @@ local_builds/gdul-0.1.0-macos-arm64/
 
 `SDL_GetBasePath()` is the app's `Contents/Resources/`, so the launcher
 finds `gd-engine-games/` there as on the other systems, and looks for discs
-in the `original_isos/` folder next to the app. The modules' libraries are
+in the `original_isos/` folder next to the app (and inside it, and in the
+save folder).
+
+**App Translocation**: an app unpacked from a download keeps the quarantine
+mark, and until it is moved with the Finder, macOS runs it from a read-only
+copy at a random path (`/private/var/folders/.../AppTranslocation/...`), so
+"next to the app" is not the download's folder. The launcher detects it,
+asks macOS for the app's real place and looks next to that too, and, when
+no disc is found, opens the folders dialog with what to do: move the app
+with the Finder, or `xattr -dr com.apple.quarantine "<the .app>"`. macOS may
+also ask for permission to read Downloads, Documents or Desktop (a folder
+denied is listed as "cannot be read"). The modules' libraries are
 rewritten to find FFmpeg next to them (`@loader_path`) and SDL3 in the app's
 `Frameworks/` (`@executable_path/../Frameworks`, the launcher's own copy),
 then everything is signed. Not yet tried on a real Mac. gd-game-01's module

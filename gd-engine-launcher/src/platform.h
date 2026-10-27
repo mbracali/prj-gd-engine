@@ -41,6 +41,17 @@ std::string fileName(const std::string& path);
 bool isFile(const std::string& path);  // Android: also a file in the APK's assets (a relative path)
 bool isDir(const std::string& path);
 std::vector<std::string> listFiles(const std::string& dir);  // full paths, sorted
+// The same; `error` gets why the folder cannot be read (missing, no permission).
+std::vector<std::string> listFiles(const std::string& dir, std::string& error);
+
+// macOS: the .app the launcher runs from (no trailing separator), "" elsewhere.
+std::string appBundle();
+// macOS runs an app that came with a download's quarantine mark from a
+// read-only copy (App Translocation) until it is moved with the Finder: true
+// for such a path.
+bool isTranslocated(const std::string& path);
+// That app's real place (Security.framework's SecTranslocateCreateOriginalPathForURL), or "".
+std::string originalAppBundle(const std::string& app);
 
 // Android: the folder of the APK's native libraries (libmain.so, the game
 // modules lib<id>.so), with a trailing separator; "" elsewhere.

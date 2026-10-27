@@ -41,6 +41,7 @@ target_sources(gdul PRIVATE
   src/explorer.cpp
   src/action_log.cpp
   src/platform.cpp
+  src/ui_sounds.cpp
   src/yaml.cpp
 )
 target_include_directories(gdul PRIVATE src sdk)

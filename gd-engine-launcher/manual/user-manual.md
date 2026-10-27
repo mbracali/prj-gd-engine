@@ -23,10 +23,18 @@ Dream version and disc image. On the right:
 The light on the left: green, ready to rock (playable and a disc is known);
 yellow, playable but needs a disc; grey, coming soon. A green row is lit up.
 
+At the top right, **OFFICIAL SITE** opens the project's website,
+https://guitardreamengine.com, in your browser; under it, how many games are
+ready and how many disc images were found.
+
 ## Disc images
 
-- Put them in `original_isos/` next to the launcher: they are found every
-  time it starts.
+- Put them in `original_isos/` next to the launcher (on macOS, next to
+  `Guitar Dream Universal Launcher.app`), or in `original_isos/` in the
+  launcher's save folder (below): they are found every time it starts.
+  The **folders** link at the top right (it says **where we looked** when
+  nothing was found) lists every folder searched and what was in it, and
+  has **Open folder** and **Look again**.
 - Or **drop a disc image anywhere on the window**: the launcher reads it,
   tells you which game it is, and offers to remember it for that game and
   play. If it is not a disc of a game it knows, it says
@@ -47,6 +55,10 @@ The launcher recognises discs by their content, not their name.
 
 You can also point and click with the mouse, and scroll with the wheel.
 
+**Sounds**: if a Guitar Hero (PlayStation 2) disc is known, the launcher's
+menus use Guitar Hero's own menu sounds, read from your disc each time it
+starts (nothing is copied). Without that disc the launcher is silent.
+
 ## Playing
 
 Press **Play**: the game opens in the same window. Its controls and options
@@ -59,7 +71,10 @@ quit the game (or close the window), you are back in the list.
 list on the left, grouped (for Guitar Hero II: characters, crowd, guitars
 and basses, drum kits, venues, venue props; for Guitar Hero: guitarists, band,
 crowd, guitars, venues), and the chosen model on the right, slowly turning
-on a turntable. Characters play their animations (idle first).
+on a turntable. Characters play their animations (idle first). Click a
+group's header (or press green on it) to close or open it; left and right
+on a header close and open it too. The buttons at the bottom (Show, Back,
+Reset view, Next animation, Turntable) can be clicked.
 
 | | Keyboard | Mouse | Gamepad | Guitar |
 |---|---|---|---|---|
@@ -85,7 +100,15 @@ The launcher keeps its settings and a log in your user folder:
 - Android: the app's own storage (removed with the app)
 
 On **macOS** put your disc images in `original_isos/` next to
-`Guitar Dream Universal Launcher.app`. On **Android** use Load ISO: the
+`Guitar Dream Universal Launcher.app`. If they are not found, the app is
+probably still where the download put it: macOS then runs it from a hidden
+temporary copy (App Translocation) and the launcher tells you so. Move the
+app to another folder with the Finder (Applications, say; take
+`original_isos/` along or keep the discs in the save folder's
+`original_isos/`) and open it again, or in Terminal run
+`xattr -dr com.apple.quarantine "/path/to/Guitar Dream Universal Launcher.app"`.
+If macOS asks whether the launcher may read your Downloads, Documents or
+Desktop folder, allow it when your discs are there. On **Android** use Load ISO: the
 launcher copies the disc image you pick into its folder
 (`Android/data/io.github.mbracali.gdul/files/original_isos/`, which takes a
 few minutes and as much space again; afterwards the file you picked is no longer needed) and
@@ -100,7 +123,8 @@ their last run. Each game keeps its own saves and settings in its own folder
 ## Problems
 
 - A game is not lit: check that its disc image is in `original_isos/` or
-  load it with Load ISO; the row says which disc it uses.
+  load it with Load ISO; the row says which disc it uses, and the folders
+  link at the top right says where the launcher looked.
 - A game does not start: the launcher shows why; `gdul.log` and
   `logs/<game>.log` in the folder above have the details. Please include them
   when you report a problem.
