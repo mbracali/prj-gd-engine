@@ -1442,7 +1442,7 @@ void Band::walkStart(Member& m, Task& t) {
     walkFlags |= currentExcitement() >= 3 ? 0x2000u : 0x1000u;  // kWalkExtreme / kWalkNormal
     if (walk->walk(path, chr::kPlayFirst, walkFlags, turnFilter, stopFilter)) {
         ++walksStarted_;
-        if (log) SDL_Log("band: %8.2f %s walks to %s (%zu waypoints) at %.2f s", beat_, m.slot.c_str(), last.name.c_str(), path.size(), seconds_);
+        if (log) SDL_Log("band: %8.2f %s walks to %s (%d waypoints) at %.2f s", beat_, m.slot.c_str(), last.name.c_str(), int(path.size()), seconds_);
     }
 }
 

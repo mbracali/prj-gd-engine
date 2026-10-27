@@ -13,7 +13,7 @@
 #include "scene/objects.h"
 
 // GH2's venue classes (world/ milos), as their Load routines in the Xbox 360
-// executable read them (gd-game-02/analysis; each Load found through the
+// executable read them (gd-game-02/ghidra/analysis; each Load found through the
 // class's RTTI type descriptor -> vtable, Hmx::Object sub-vtable slot 9).
 // Every record of every class on the disc decodes exactly to its end marker
 // (--scenetest). Field names come from each class's SyncProperty strings;

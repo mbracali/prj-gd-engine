@@ -1,0 +1,12 @@
+# Read by the Guitar Dream Universal Launcher (gd-engine-launcher/games.yaml).
+# launch: release date (YYYY-MM-DD) of the version this folder reimplements
+# (based_on). guitar_dream_version: this folder's own version. completeness: 0..1.
+id: gd-game-03
+name: "Guitar Hero Encore: Rocks the 80s"
+nick_name: "Guitar Hero 80s"
+launch: 2007-07-24
+platforms: [PlayStation 2]
+based_on: PlayStation 2
+guitar_dream_version: "0.0.0"
+ready_to_play: false
+completeness: 0

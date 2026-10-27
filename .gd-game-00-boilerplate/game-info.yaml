@@ -1,0 +1,20 @@
+# Read by the Guitar Dream Universal Launcher (gd-engine-launcher/games.yaml).
+# launch: release date (YYYY-MM-DD) of the version this folder reimplements
+# (based_on). guitar_dream_version: this folder's own version. completeness: 0..1.
+# Template: copy with the folder, then fill in every value.
+id: gd-game-xx
+name: "Original game's full name"
+nick_name: "Short name"
+launch: 2000-01-01
+platforms: [Xbox 360]
+based_on: Xbox 360
+guitar_dream_version: "0.0.0"
+ready_to_play: false
+completeness: 0
+# How the launcher recognises the game's disc image by its content (see
+# docs/adding-a-game.md); any one matching signature identifies it.
+iso_signatures:
+  - format: xdvdfs          # xdvdfs (Xbox, Xbox 360) or iso9660 (PlayStation 2, ...)
+    xex_title_id: "00000000"  # Xbox 360: default.xex's title ID
+#  - format: iso9660
+#    ps2_boot: "SLUS_000.00"  # PlayStation 2: SYSTEM.CNF's BOOT2 program

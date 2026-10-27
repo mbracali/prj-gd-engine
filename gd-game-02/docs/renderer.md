@@ -3,7 +3,7 @@
 gd02's renderer (`engine/src/render/`) is written new from Guitar Hero II's
 own rendering. OpenGL 3.3 core / GLES 3.0 first, behind a device interface
 (`device.h`) so a Vulkan back end can be added later. Addresses are in
-`default.xex` (see `analysis/`); **[C]** confirmed in code, **[I]** inferred.
+`default.xex` (see `ghidra/analysis/`); **[C]** confirmed in code, **[I]** inferred.
 The game's shader sources ship on the disc as HLSL (`system/run/shaders/*.fx`);
 they are game data and stay out of the repo. gd02's GLSL is our own,
 computing the same results.

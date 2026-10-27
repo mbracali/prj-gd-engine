@@ -59,6 +59,7 @@ id = `gd-game-02`
 - Start `gd02` and click the window (or press Enter, or tap on Android) to pick the `.iso`, or drop it onto the window. It is remembered (`config.txt` in the save folder `gd-engine/gd02/`); an `.iso` next to the program is found by itself.
 - Command line: `gd02 [--song <id>] [--difficulty 0-3] [--autoplay] [--no-fail] [disc.iso | game folder]`.
 - `gd02 --selftest <disc.iso>` checks the data, auto-plays every chart and checks the rules without a window.
+- Developers: keep the disc image in the repo root's `original_isos/` (git-ignored), e.g. `engine/build/linux/gd02 "../original_isos/Guitar Hero II (USA) (Rev1) (X360).iso" --selftest` from `gd-game-02/`.
 
 
 **Building** (the same scripts the release workflow runs):
@@ -66,5 +67,12 @@ id = `gd-game-02`
 - `gd-game-02/build_commands/`: the same, by double-click (`build-linux.sh`, `build-steamdeck.sh`, `build-windows.sh` / `.bat`, `build-macos.command`, `build-android.sh`, `build-all.sh`).
 - Linux: an ubuntu:22.04 container (podman or docker), SDL3 built from source and shipped next to the program; `--native` uses this machine's compiler and SDL3. Steam Deck: Valve's Steam Runtime 3 "sniper" SDK container. Windows: MinGW-w64 (Fedora `mingw64-gcc-c++ mingw64-SDL3`, or an MSYS2 UCRT64 shell). macOS: on a Mac with `brew install cmake sdl3 ninja dylibbundler`. Android: the Android SDK, NDK and a JDK (`engine/README.md`); signed with `~/.config/gd-engine/gd02-release.jks` when it is there, else the debug key.
 - `engine/build.sh`: the quick developer build (Linux with the system SDL3, Windows, Android when its SDK is found) into `engine/dist/`.
-- The version is `project(gd02 VERSION X.Y.Z)` in `engine/CMakeLists.txt` (the Android `versionCode` is X*10000 + Y*100 + Z). A merge into `main` with a version that has no `gd-game-02/vX.Y.Z` release yet, and a `## [X.Y.Z]` section in `CHANGELOG.md`, publishes it (`.github/workflows/gd-game-02-release.yml`). `gd-game-02-build.yml` can be started by hand for test builds.
+- The version is `project(gd02 VERSION X.Y.Z)` in `engine/CMakeLists.txt` (the Android `versionCode` is X*10000 + Y*100 + Z). Keep `guitar_dream_version` in `game-info.yaml` the same; gd02 ships inside the launcher release (docs/release-process.md). `gd-game-02-build.yml` can be started by hand for test builds.
 - Icons: `python3 gd-game-02/tools/make_icons.py` (needs Pillow) remakes them from the badge `res/icon_full.jpg`.
+
+
+**Folder layout**:
+- `game-info.yaml`: id, names, launch date, platforms, version, playable flag and completeness; read by the Guitar Dream Universal Launcher (`gd-engine-launcher/games.yaml`).
+- `engine/`: the C++ source. `docs/`: formats and findings. `tools/`: Python decoders and Ghidra scripts. `build_commands/` and `local_build.sh`: builds.
+- `agents/`: context notes for AI coding agents (`agents/scratch/` is local only, git-ignored).
+- Local only, git-ignored: `extracted/` (your own rip of the disc), `ghidra/` (the Ghidra project and its `analysis/` export: original code, never commit), `local_builds/`.

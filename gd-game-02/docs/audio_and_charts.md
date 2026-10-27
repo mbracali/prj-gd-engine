@@ -230,7 +230,7 @@ although songs.dta gives them `(bpm 108)`.
 ## 4. Sound effects (SynthSample banks)
 
 [C] = confirmed in the executable (addresses are functions in
-`gd-game-02/analysis`), [C data] = checked over every file on the disc,
+`gd-game-02/ghidra/analysis`), [C data] = checked over every file on the disc,
 [I] = inference.
 
 ### Where they are

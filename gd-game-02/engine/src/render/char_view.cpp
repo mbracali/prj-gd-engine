@@ -118,8 +118,8 @@ int runCharView(const std::string& dataPath, const std::string& character) {
             float yaw = SDL_getenv("GD02_VIEW_YAW") ? float(std::atof(SDL_getenv("GD02_VIEW_YAW"))) : clipName.empty() ? 180.0f : 90.0f;  // bind poses face +y, the clips -x
             float dist = SDL_getenv("GD02_VIEW_DIST") ? float(std::atof(SDL_getenv("GD02_VIEW_DIST"))) : 140.0f;
             const float height = SDL_getenv("GD02_VIEW_HEIGHT") ? float(std::atof(SDL_getenv("GD02_VIEW_HEIGHT"))) : 42.0f;
-            SDL_Log("view: character %s (%s, %s): %d bones, %zu drivers, LODs %zu, clip %s", c->name().c_str(), path.c_str(), c->type().c_str(),
-                    c->skeleton().size(), c->drivers().size(), c->own().lods.size(), clipName.empty() ? "(bind pose)" : clipName.c_str());
+            SDL_Log("view: character %s (%s, %s): %d bones, %d drivers, LODs %d, clip %s", c->name().c_str(), path.c_str(), c->type().c_str(),
+                    c->skeleton().size(), int(c->drivers().size()), int(c->own().lods.size()), clipName.empty() ? "(bind pose)" : clipName.c_str());
             double t = 0;
             uint64_t last = SDL_GetTicksNS();
             bool running = true, first = true;

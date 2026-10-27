@@ -11,7 +11,7 @@ walks and interacts (M9.6, "Walks"); the faces (M9.8, "Faces", FaceFX). The
 crowd's characters, clips and cards (M9.9) are in `docs/venues.md` "Crowd";
 the character / guitar choice and the endgame photos (M9.10) are in
 "Characters, guitars and photos".
-Addresses are in `default.xex` (`analysis/`); **[C]** confirmed in code or
+Addresses are in `default.xex` (`ghidra/analysis/`); **[C]** confirmed in code or
 data, **[I]** inferred.
 
 Code: `char/char_objects.*` (decoders), `char/clip.*` (the channel buffer

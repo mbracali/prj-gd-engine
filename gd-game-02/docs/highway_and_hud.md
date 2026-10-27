@@ -3,7 +3,7 @@
 How Guitar Hero II places and animates its track (`track/gen/track_new.milo_xbox`)
 and its single-player HUD (`hud_sp`), as gd02 reproduces them in
 `engine/src/render/track_view.*` and `hud_view.*`. Addresses are in
-`default.xex` (`analysis/`); **[C]** confirmed in code, **[I]** inferred.
+`default.xex` (`ghidra/analysis/`); **[C]** confirmed in code, **[I]** inferred.
 The scenes themselves are listed in `milo_and_textures.md`.
 
 ## Track
