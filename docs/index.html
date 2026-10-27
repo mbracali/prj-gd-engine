@@ -1,0 +1,240 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: LicenseRef-PolyForm-Noncommercial-1.0.0 -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Guitar Dream Engine</title>
+<meta name="description" content="Guitar Dream Engine: free, open reimplementations of the classic Guitar Hero and Rock Band games. Bring your own discs and rock on PC, Steam Deck and Android.">
+<meta property="og:title" content="Guitar Dream Engine">
+<meta property="og:description" content="Free, open reimplementations of the classic Guitar Hero and Rock Band games. Bring your own discs.">
+<meta property="og:image" content="https://guitardreamengine.com/assets/gde-badge.jpg">
+<meta property="og:url" content="https://guitardreamengine.com/">
+<link rel="icon" href="assets/favicon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Metal+Mania&family=Barlow+Condensed:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0b0a0c; --panel: #151317; --line: #2a252d; --text: #efe9e2; --dim: #a59d96;
+    --green: #2fd35a; --red: #e8343a; --yellow: #f5c518; --blue: #2f8cf0; --orange: #ff8a1f;
+    --fire: linear-gradient(180deg, #ffd34d 0%, #ff8a1f 45%, #e8343a 100%);
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 400 19px/1.5 "Barlow Condensed", system-ui, sans-serif; overflow-x: hidden; }
+  a { color: var(--yellow); }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 16px; }
+
+  /* Hero with the note highway behind it */
+  .hero { position: relative; min-height: 100vh; display: grid; place-items: center; text-align: center; overflow: hidden; }
+  #highway { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .hero::after { content: ""; position: absolute; inset: 0; background: radial-gradient(ellipse at 50% 55%, rgba(11,10,12,.7), rgba(11,10,12,.35) 45%, rgba(11,10,12,.85) 80%); pointer-events: none; }
+  .hero-inner { position: relative; z-index: 1; padding: 48px 16px; }
+  .badge { width: min(200px, 46vw); border-radius: 50%; box-shadow: 0 0 0 4px #000, 0 0 60px rgba(255,138,31,.55); animation: pulse 2.4s ease-in-out infinite; }
+  @keyframes pulse { 50% { box-shadow: 0 0 0 4px #000, 0 0 95px rgba(232,52,58,.75); } }
+  h1 { font-family: "Metal Mania", serif; font-weight: 400; font-size: clamp(48px, 10vw, 112px); line-height: .95; margin: 18px 0 6px;
+       background: var(--fire); -webkit-background-clip: text; background-clip: text; color: transparent; filter: drop-shadow(0 4px 0 #000) drop-shadow(0 0 18px rgba(255,120,0,.35)); }
+  .tag { font-size: clamp(20px, 3vw, 28px); letter-spacing: .18em; text-transform: uppercase; color: var(--dim); margin: 0 0 28px; }
+  .ctas { display: flex; flex-wrap: wrap; gap: 14px; justify-content: center; }
+  .btn { display: inline-flex; align-items: center; gap: 10px; padding: 12px 22px; border-radius: 10px; font-weight: 800; font-size: 20px; letter-spacing: .06em;
+         text-transform: uppercase; text-decoration: none; color: var(--text); background: var(--panel); border: 2px solid var(--line); transition: transform .12s, border-color .12s; }
+  .btn:hover { transform: translateY(-2px); border-color: var(--yellow); }
+  .btn.primary { background: linear-gradient(180deg, #37e066, #1c9e3e); color: #06210f; border-color: #6ff595; }
+  .gem { width: 16px; height: 16px; border-radius: 50%; display: inline-block; box-shadow: inset 0 -3px 0 rgba(0,0,0,.35), 0 0 10px currentColor; background: currentColor; }
+  .soon { display: inline-block; margin-top: 18px; color: var(--dim); font-size: 17px; }
+
+  section { padding: 72px 0; border-top: 1px solid var(--line); }
+  h2 { font-family: "Metal Mania", serif; font-weight: 400; font-size: clamp(34px, 5vw, 52px); margin: 0 0 10px; color: var(--yellow); text-shadow: 0 3px 0 #000; }
+  .lead { color: var(--dim); max-width: 760px; margin: 0 0 32px; }
+
+  .rules { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; }
+  .rule { background: var(--panel); border: 1px solid var(--line); border-left: 6px solid var(--c); border-radius: 10px; padding: 16px 18px; font-weight: 600; }
+
+  .setlist { display: grid; gap: 8px; }
+  .song { display: grid; grid-template-columns: 110px 1fr auto; gap: 14px; align-items: center; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; }
+  .song .id { color: var(--dim); font-size: 16px; }
+  .song .name { font-weight: 800; font-size: 22px; line-height: 1.15; }
+  .song .base { color: var(--dim); font-size: 16px; font-weight: 400; display: block; }
+  .stars { font-size: 16px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--dim); white-space: nowrap; }
+  .stars.play { color: #06210f; background: var(--green); border-color: var(--green); }
+  .stars.wip { color: #2a1d00; background: var(--yellow); border-color: var(--yellow); }
+  .stars.eval { color: var(--blue); border-color: var(--blue); }
+  .song.hot { border-color: #2f6b3e; box-shadow: 0 0 24px rgba(47,211,90,.12); }
+
+  .launcher { display: grid; grid-template-columns: 1.1fr 1fr; gap: 28px; align-items: center; }
+  .feat { list-style: none; padding: 0; margin: 0; display: grid; gap: 12px; }
+  .feat li { display: flex; gap: 12px; align-items: baseline; }
+  .feat .gem { flex: none; transform: translateY(2px); }
+  .screen { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 16px; font-size: 17px; }
+  .row { display: flex; justify-content: space-between; gap: 10px; align-items: center; padding: 10px 12px; border-radius: 8px; margin-bottom: 8px; background: #1c191f; }
+  .row.lit { background: #14301d; outline: 1px solid #2f6b3e; }
+  .row b { font-weight: 800; }
+  .bar { flex: none; width: 90px; height: 6px; border-radius: 3px; background: #2a252d; overflow: hidden; }
+  .bar i { display: block; height: 100%; background: var(--green); }
+
+  .legal { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px; }
+  .card h3 { margin: 0 0 8px; font-size: 22px; }
+  .card p { margin: 0; color: var(--dim); }
+  footer { padding: 36px 0 48px; color: var(--dim); font-size: 16px; border-top: 1px solid var(--line); text-align: center; }
+
+  @media (max-width: 720px) {
+    .launcher { grid-template-columns: 1fr; }
+    .song { grid-template-columns: 1fr auto; }
+    .song .id { grid-column: 1 / -1; }
+  }
+  @media (prefers-reduced-motion: reduce) { .badge { animation: none; } }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <canvas id="highway" aria-hidden="true"></canvas>
+  <div class="hero-inner">
+    <img class="badge" src="assets/gde-badge.jpg" alt="Guitar Dream Engine badge">
+    <h1>Guitar Dream Engine</h1>
+    <p class="tag">The classics, reimplemented. Your discs. Every screen.</p>
+    <div class="ctas">
+      <a class="btn primary" href="#setlist"><span class="gem" style="color:#0c3b19"></span>See the setlist</a>
+      <a class="btn" href="https://github.com/mbracali/prj-gd-engine"><span class="gem" style="color:var(--orange)"></span>Source on GitHub</a>
+    </div>
+    <span class="soon">Downloads are coming soon.</span>
+  </div>
+</header>
+
+<main>
+  <section id="about">
+    <div class="wrap">
+      <h2>A labor of love</h2>
+      <p class="lead">Guitar Dream Engine rebuilds the engines of the big Guitar Hero and Rock Band games from scratch, so the games you own can be played on today's computers, the Steam Deck and Android, with your guitar, a gamepad or the keyboard.</p>
+      <div class="rules">
+        <div class="rule" style="--c:var(--green)">No original code.</div>
+        <div class="rule" style="--c:var(--red)">No original assets, never distributed.</div>
+        <div class="rule" style="--c:var(--yellow)">No ISOs here. Buy and rip your own discs.</div>
+        <div class="rule" style="--c:var(--blue)">We don't support or endorse piracy.</div>
+        <div class="rule" style="--c:var(--orange)">Free and noncommercial, forever.</div>
+      </div>
+    </div>
+  </section>
+
+  <section id="setlist">
+    <div class="wrap">
+      <h2>The setlist</h2>
+      <p class="lead">Nineteen games on the list. Two are already on stage; the rest are waiting in the wings.</p>
+      <div class="setlist" id="songs"></div>
+    </div>
+  </section>
+
+  <section id="launcher">
+    <div class="wrap launcher">
+      <div>
+        <h2>One launcher, every game</h2>
+        <p class="lead">The Guitar Dream Universal Launcher lists every game, finds your disc images and plays each game in the same window.</p>
+        <ul class="feat">
+          <li><span class="gem" style="color:var(--green)"></span>Drop a disc image on it: it knows which game it is.</li>
+          <li><span class="gem" style="color:var(--red)"></span>Put your ISOs in <code>original_isos/</code> and they are found by themselves.</li>
+          <li><span class="gem" style="color:var(--yellow)"></span>Explore the models of your discs: characters, guitars, venues.</li>
+          <li><span class="gem" style="color:var(--blue)"></span>Windows, Linux, Steam Deck, macOS and Android.</li>
+          <li><span class="gem" style="color:var(--orange)"></span>Guitar, gamepad, keyboard or mouse.</li>
+        </ul>
+      </div>
+      <div class="screen" aria-label="Launcher preview">
+        <div class="row lit"><span><b>gd-game-01</b>/Guitar Hero</span><span class="bar"><i style="width:94%"></i></span></div>
+        <div class="row lit"><span><b>gd-game-02</b>/Guitar Hero II</span><span class="bar"><i style="width:60%;background:var(--yellow)"></i></span></div>
+        <div class="row"><span><b>gd-game-03</b>/Guitar Hero 80s</span><span class="bar"><i style="width:0"></i></span></div>
+        <div class="row"><span><b>gd-game-04</b>/Guitar Hero III</span><span class="bar"><i style="width:0"></i></span></div>
+        <div class="row" style="margin:0"><span><b>gd-game-05</b>/Rock Band</span><span class="bar"><i style="width:0"></i></span></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="licence">
+    <div class="wrap">
+      <h2>Play it, study it, fork it</h2>
+      <p class="lead">Free to play, study and fork, <strong>not to sell</strong>: PolyForm Noncommercial 1.0.0 plus the project's additional terms.</p>
+      <div class="legal">
+        <div class="card"><h3>No selling</h3><p>No paid or paywalled builds, no ads.</p></div>
+        <div class="card"><h3>Give credit</h3><p>Every copy and fork credits "Based on Guitar Dream Engine".</p></div>
+        <div class="card"><h3>Share changes</h3><p>Modified versions publish their full source and list their changes.</p></div>
+        <div class="card"><h3>Stream away</h3><p>Gameplay videos and streams are welcome, monetised or not.</p></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    Guitar Dream Engine is a fan project. The games' names are trademarks of their owners; this project is not affiliated with or endorsed by them.<br>
+    <a href="https://github.com/mbracali/prj-gd-engine">github.com/mbracali/prj-gd-engine</a>
+  </div>
+</footer>
+
+<script>
+  // The setlist, from the project's README.
+  const games = [
+    ["gd-game-01", "Guitar Hero", "PlayStation 2", "play", "94% playable"],
+    ["gd-game-02", "Guitar Hero II", "Xbox 360", "wip", "In progress"],
+    ["gd-game-03", "Guitar Hero Encore: Rocks the 80s", "PlayStation 2", "eval", "Evaluating"],
+    ["gd-game-04", "Guitar Hero III: Legends of Rock", "Xbox 360", "eval", "Evaluating"],
+    ["gd-game-05", "Rock Band", "Xbox 360", "", "Planned"],
+    ["gd-game-06", "Guitar Hero: Aerosmith", "Xbox 360", "", "Planned"],
+    ["gd-game-07", "Guitar Hero World Tour", "Xbox 360", "", "Planned"],
+    ["gd-game-08", "Rock Band 2", "Xbox 360", "", "Planned"],
+    ["gd-game-09", "The Beatles: Rock Band", "Xbox 360", "", "Planned"],
+    ["gd-game-10", "Guitar Hero: Metallica", "Xbox 360", "", "Planned"],
+    ["gd-game-11", "Guitar Hero: Smash Hits", "Xbox 360", "", "Planned"],
+    ["gd-game-12", "Guitar Hero 5", "Xbox 360", "", "Planned"],
+    ["gd-game-13", "Lego Rock Band", "Xbox 360", "", "Planned"],
+    ["gd-game-14", "Band Hero", "Xbox 360", "", "Planned"],
+    ["gd-game-15", "Guitar Hero: Van Halen", "Xbox 360", "", "Planned"],
+    ["gd-game-16", "Green Day: Rock Band", "Xbox 360", "", "Planned"],
+    ["gd-game-17", "Guitar Hero: Warriors of Rock", "Xbox 360", "", "Planned"],
+    ["gd-game-18", "Rock Band 3", "Xbox 360", "", "Planned"],
+    ["gd-game-19", "Rock Band 4", "Xbox One", "eval", "Considering"],
+  ];
+  const list = document.getElementById("songs");
+  for (const [id, name, base, cls, status] of games) {
+    const row = document.createElement("div");
+    row.className = "song" + (cls === "play" || cls === "wip" ? " hot" : "");
+    row.innerHTML = `<span class="id">${id}</span><span class="name">${name}<span class="base">${base}</span></span><span class="stars ${cls}">${status}</span>`;
+    list.appendChild(row);
+  }
+
+  // A note highway scrolling behind the title.
+  const cv = document.getElementById("highway"), g = cv.getContext("2d");
+  const colors = ["#2fd35a", "#e8343a", "#f5c518", "#2f8cf0", "#ff8a1f"];
+  const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  let W, H, notes = [], t0 = performance.now();
+  function size() { W = cv.width = cv.offsetWidth * devicePixelRatio; H = cv.height = cv.offsetHeight * devicePixelRatio; }
+  addEventListener("resize", size); size();
+  for (let i = 0; i < 60; i++) notes.push({ lane: (Math.random() * 5) | 0, z: Math.random() });
+  function frame(now) {
+    const dt = Math.min(0.05, (now - t0) / 1000); t0 = now;
+    g.clearRect(0, 0, W, H);
+    const cx = W / 2, top = H * 0.08, bot = H * 1.02, wTop = W * 0.06, wBot = Math.min(W * 0.9, H * 1.1);
+    const lx = (lane, y) => { const k = (y - top) / (bot - top), w = wTop + (wBot - wTop) * k; return cx - w / 2 + w * (lane + 0.5) / 5; };
+    const yAt = z => top + (bot - top) * z * z;
+    // Neck and fret lines.
+    g.beginPath(); g.moveTo(cx - wTop / 2, top); g.lineTo(cx + wTop / 2, top); g.lineTo(cx + wBot / 2, bot); g.lineTo(cx - wBot / 2, bot); g.closePath();
+    g.fillStyle = "rgba(40,30,36,.55)"; g.fill();
+    const scroll = (now / 1000 * 0.35) % 0.1;
+    g.strokeStyle = "rgba(255,255,255,.07)"; g.lineWidth = 2 * devicePixelRatio;
+    for (let z = scroll; z < 1; z += 0.1) { const y = yAt(z), k = (y - top) / (bot - top), w = wTop + (wBot - wTop) * k; g.beginPath(); g.moveTo(cx - w / 2, y); g.lineTo(cx + w / 2, y); g.stroke(); }
+    for (const n of notes) {
+      if (!still) n.z += dt * 0.35;
+      if (n.z > 1) { n.z -= 1; n.lane = (Math.random() * 5) | 0; }
+      const y = yAt(n.z), x = lx(n.lane, y), k = (y - top) / (bot - top), r = (wBot / 22) * (0.15 + k);
+      g.globalAlpha = Math.min(1, n.z * 3) * 0.9;
+      g.fillStyle = colors[n.lane]; g.shadowColor = colors[n.lane]; g.shadowBlur = 18 * devicePixelRatio;
+      g.beginPath(); g.ellipse(x, y, r, r * 0.55, 0, 0, Math.PI * 2); g.fill();
+      g.shadowBlur = 0; g.fillStyle = "rgba(255,255,255,.75)";
+      g.beginPath(); g.ellipse(x, y - r * 0.1, r * 0.45, r * 0.22, 0, 0, Math.PI * 2); g.fill();
+    }
+    g.globalAlpha = 1;
+    if (!still) requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+</script>
+</body>
+</html>

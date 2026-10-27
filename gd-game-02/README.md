@@ -67,7 +67,7 @@ id = `gd-game-02`
 - `gd-game-02/build_commands/`: the same, by double-click (`build-linux.sh`, `build-steamdeck.sh`, `build-windows.sh` / `.bat`, `build-macos.command`, `build-android.sh`, `build-all.sh`).
 - Linux: an ubuntu:22.04 container (podman or docker), SDL3 built from source and shipped next to the program; `--native` uses this machine's compiler and SDL3. Steam Deck: Valve's Steam Runtime 3 "sniper" SDK container. Windows: MinGW-w64 (Fedora `mingw64-gcc-c++ mingw64-SDL3`, or an MSYS2 UCRT64 shell). macOS: on a Mac with `brew install cmake sdl3 ninja dylibbundler`. Android: the Android SDK, NDK and a JDK (`engine/README.md`); signed with `~/.config/gd-engine/gd02-release.jks` when it is there, else the debug key.
 - `engine/build.sh`: the quick developer build (Linux with the system SDL3, Windows, Android when its SDK is found) into `engine/dist/`.
-- The version is `project(gd02 VERSION X.Y.Z)` in `engine/CMakeLists.txt` (the Android `versionCode` is X*10000 + Y*100 + Z). A merge into `main` with a version that has no `gd-game-02/vX.Y.Z` release yet, and a `## [X.Y.Z]` section in `CHANGELOG.md`, publishes it (`.github/workflows/gd-game-02-release.yml`). `gd-game-02-build.yml` can be started by hand for test builds.
+- The version is `project(gd02 VERSION X.Y.Z)` in `engine/CMakeLists.txt` (the Android `versionCode` is X*10000 + Y*100 + Z). Keep `guitar_dream_version` in `game-info.yaml` the same; gd02 ships inside the launcher release (docs/release-process.md). `gd-game-02-build.yml` can be started by hand for test builds.
 - Icons: `python3 gd-game-02/tools/make_icons.py` (needs Pillow) remakes them from the badge `res/icon_full.jpg`.
 
 

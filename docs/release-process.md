@@ -1,64 +1,41 @@
 # Release process
 
-Each game is versioned and released on its own (SemVer). A release is made
-**automatically when `main` gets a new version**. The launcher (gdul) is
-released when a `gdul/vX.Y.Z` tag is pushed (see below). Nothing else runs on
-GitHub by itself (no builds on pull requests or branches, no bots).
+The project publishes **one kind of release: the Guitar Dream Universal
+Launcher (gdul)**, `gdul/vX.Y.Z`, always marked *Latest*. Each download packs
+the launcher and the newest version of every ready game. Games are no longer
+released on their own. A release is made **automatically when `main` gets a
+new `launcher_version`**. Nothing else runs on GitHub by itself (no builds on
+pull requests or branches, no bots).
+
+## Versions
+
+- The launcher: `launcher_version` in `gd-engine-launcher/launcher-info.yaml`.
+- Each game: its engine version (`project(gdNN VERSION X.Y.Z)` in
+  `gd-game-NN/engine/CMakeLists.txt`, or the newest `## [X.Y.Z]` of
+  `gd-game-01/CHANGELOG.md`), copied into `guitar_dream_version` in its
+  `game-info.yaml`. Keep the two the same, and the game's `CHANGELOG.md`
+  up to date.
 
 ## Cutting a release
 
-1. On your branch, bump the version in `gd-game-NN/engine/CMakeLists.txt`
-   (`project(gd01 VERSION X.Y.Z ...)`) and add the notes to
-   `gd-game-NN/CHANGELOG.md` under a heading `## [X.Y.Z] - YYYY-MM-DD`
-   (the release page shows exactly this section).
-2. Check it builds: `gd-game-01/local_build.sh` (see below).
+1. On your branch, bump the game versions that changed (engine and
+   `game-info.yaml`), then bump `launcher_version`. A game version bumped
+   without a launcher bump is not shipped (the release check warns about it).
+2. Check it builds: `gd-engine-launcher/scripts/build.sh all` (Linux, Windows,
+   Android here; macOS on a Mac).
 3. Merge into `develop`, then `develop` into `main`.
-4. The merge into `main` starts **gd-game-01 release**:
-   - it checks the version: already released means nothing more happens;
-   - the repo guard and the secret scan run, and every platform builds;
-   - the release `gd-game-01/vX.Y.Z` is published with how-to-play notes, the
-     CHANGELOG section and:
-     - `gd01-<v>-windows-x64.zip`
-     - `gd01-<v>-linux-x86_64.tar.gz` (built on Ubuntu 22.04, SDL3 and DLSS included)
-     - `gd01-<v>-steamdeck.tar.gz` (built in Valve's Steam Runtime 3 SDK, handheld defaults)
-     - `gd01-<v>-macos.zip` (when that build succeeds)
-     - `gd01-<v>-android.apk` (arm64, signed with the release key)
-     - `SHA256SUMS.txt`
-
-   Versions with `-alpha`, `-beta` or `-rc` become pre-releases.
-
-A merge into `main` without a version bump publishes nothing.
-
-## Releasing the launcher (gdul)
-
-The Guitar Dream Universal Launcher has its own version
-(`gd-engine-launcher/launcher-info.yaml`, `launcher_version`) and its own
-release, made **only when a tag `gdul/vX.Y.Z` is pushed** (merges into
-`main` alone never release it; `.github/workflows/gdul-release.yml`):
-
-1. On your branch, bump `launcher_version` in
-   `gd-engine-launcher/launcher-info.yaml`; check it builds:
-   `gd-engine-launcher/scripts/build.sh all` (Linux, Windows, Android here;
-   macOS on a Mac).
-2. Merge into `develop`, then `develop` into `main`.
-3. Tag the merge on `main` and push the tag:
-
-   ```sh
-   git checkout main && git pull
-   git tag gdul/v0.2.0 && git push origin gdul/v0.2.0
-   ```
-
-4. **gdul release** then:
-   - checks that the tag's version is `launcher_version`, that the tagged
-     commit is on `main` and that the version is not released yet (otherwise
-     it stops: delete the tag, fix, tag again);
+4. The merge into `main` starts **gdul release**
+   (`.github/workflows/gdul-release.yml`):
+   - it checks `launcher_version`: already released means nothing more
+     happens;
    - finds the previous `gdul/v*` release and downloads its files;
    - runs the repo guard and the secret scan, and builds each system with
      `gd-engine-launcher/scripts/build.sh <os> --previous <its download,
      unpacked>`: a game module whose `guitar_dream_version` (game-info.yaml)
      and launcher module SDK (`sdk/`, `modules/gdNN/`) are the same as in that
      release's `manifest.json` is copied from it, the others are built;
-   - publishes the release `gdul/vX.Y.Z` with:
+   - publishes the release `gdul/vX.Y.Z` (tagged on the merge commit, marked
+     Latest) with:
      - `gdul-<v>-linux-x86_64.tar.gz` (Ubuntu 22.04, SDL3 included:
        `gd-engine-launcher/scripts/build_linux_portable.sh`)
      - `gdul-<v>-windows-x86_64.zip` (MinGW-w64)
@@ -66,12 +43,12 @@ release, made **only when a tag `gdul/vX.Y.Z` is pushed** (merges into
      - `gdul-<v>-android-arm64.apk` (signed with the gdul release key)
      - `SHA256SUMS.txt`
 
-   Versions with `-alpha`, `-beta` or `-rc` become pre-releases.
+   Versions with `-alpha`, `-beta` or `-rc` become pre-releases (not Latest).
 
-The games' own releases (below) stay: each game is still published on its
-own (`gd-game-NN/vX.Y.Z`, standalone programs) when `main` gets a new game
-version. The launcher picks up a new game version at its next release (the
-module is rebuilt because the version changed).
+Actions > gdul release > Run workflow does the same by hand on `main`.
+
+The older per-game releases (`gd-game-01/v*`) stay on the Releases page as
+history; no new ones are made.
 
 ## Building locally (same as the release)
 
@@ -96,7 +73,7 @@ folder per platform and the same file a release would publish.
 
 ## Test builds on GitHub (by hand)
 
-Actions > **gd-game-01 build** > Run workflow, on any branch: builds every
+Actions > **gd-game-01 build** (or **gd-game-02 build**) > Run workflow, on any branch: builds every
 platform and keeps the files 3 days in the run. Costs Actions minutes, so only
 when you need a build you cannot make locally (macOS, for example).
 

@@ -1,17 +1,23 @@
-# Releases the Guitar Dream Universal Launcher (gdul) when a tag
-# gdul/vX.Y.Z is pushed, and only then: the tag must name the version in
-# gd-engine-launcher/launcher-info.yaml (launcher_version) and a commit on
-# main. Builds Linux x86_64, Windows x86_64, macOS arm64 and Android arm64
-# with gd-engine-launcher/scripts/build.sh; a game module whose game-info.yaml
-# guitar_dream_version (and the launcher's module SDK) is the same as in the
-# previous gdul release is taken from that release's download instead of being
-# built again. Publishes gdul-<v>-<os>-<arch> (.tar.gz, .zip, .apk) and
-# SHA256SUMS.txt as release gdul/vX.Y.Z. See docs/release-process.md.
+# Releases the Guitar Dream Universal Launcher (gdul), the project's only
+# release: a merge into main whose launcher_version (in
+# gd-engine-launcher/launcher-info.yaml) has no gdul/vX.Y.Z release yet runs
+# the repo guard and every platform's build, then publishes release
+# gdul/vX.Y.Z, marked Latest. Each download packs the newest version of every
+# ready game (the game's guitar_dream_version on main); a game module whose
+# version (and the launcher's module SDK) is the same as in the previous gdul
+# release is taken from that release's download instead of being built again.
+# A merge without a new launcher_version does nothing (one quick check); if it
+# bumps a game's version, the check warns that launcher_version needs a bump
+# too for the game to ship. Builds Linux x86_64, Windows x86_64, macOS arm64
+# and Android arm64 with gd-engine-launcher/scripts/build.sh and publishes
+# gdul-<v>-<os>-<arch> (.tar.gz, .zip, .apk) and SHA256SUMS.txt.
+# See docs/release-process.md.
 name: gdul release
 
 on:
   push:
-    tags: ["gdul/v*"]
+    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -22,44 +28,48 @@ concurrency:
 
 jobs:
   check:
-    name: Tag, version and previous release
+    name: New launcher version?
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
       version: ${{ steps.v.outputs.version }}
+      tag: ${{ steps.v.outputs.tag }}
+      new: ${{ steps.v.outputs.new }}
       previous: ${{ steps.v.outputs.previous }}
     steps:
       - uses: actions/checkout@v7
         with:
-          fetch-depth: 0
+          fetch-depth: 2
       - id: v
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
         run: |
-          v="${TAG#gdul/v}"
-          lv="$(sed -n 's/^launcher_version:[[:space:]]*"\{0,1\}\([^"#[:space:]]*\).*/\1/p' gd-engine-launcher/launcher-info.yaml)"
-          if [ "$v" != "$lv" ]; then
-            echo "::error::Tag $TAG does not match launcher_version \"$lv\" in gd-engine-launcher/launcher-info.yaml"; exit 1
+          v="$(sed -n 's/^launcher_version:[[:space:]]*"\{0,1\}\([^"#[:space:]]*\).*/\1/p' gd-engine-launcher/launcher-info.yaml)"
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "tag=gdul/v$v" >> "$GITHUB_OUTPUT"
+          if gh release view "gdul/v$v" >/dev/null 2>&1; then
+            echo "new=false" >> "$GITHUB_OUTPUT"
+            # A game version bumped without a launcher bump would not ship.
+            if git diff --name-only HEAD~1 HEAD 2>/dev/null | grep -q 'game-info.yaml$' &&
+               git diff HEAD~1 HEAD -- '*/game-info.yaml' | grep -q '^+guitar_dream_version'; then
+              echo "::warning::A game's guitar_dream_version changed, but gdul v$v is already released: bump launcher_version in gd-engine-launcher/launcher-info.yaml to ship it."
+            else
+              echo "::notice::gdul v$v is already released; bump launcher_version to release again."
+            fi
+            exit 0
           fi
-          git fetch -q origin main
-          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
-            echo "::error::Tag $TAG is not on main: merge into main first, then tag the merge"; exit 1
-          fi
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "::error::$TAG is already released; bump launcher_version to release again"; exit 1
-          fi
+          echo "new=true" >> "$GITHUB_OUTPUT"
           # The newest earlier gdul release: its modules are reused.
           prev="$( { gh release list --limit 200 --json tagName --jq '.[].tagName' | sed -n 's#^gdul/v##p'; echo "$v"; } |
             sort -uV | grep -B1 -x -F "$v" | head -1)"
           [ "$prev" = "$v" ] && prev=""
-          echo "version=$v" >> "$GITHUB_OUTPUT"
           echo "previous=${prev:+gdul/v$prev}" >> "$GITHUB_OUTPUT"
           echo "::notice::gdul $v; previous release: ${prev:-none (every module is built)}"
 
   guard:
     name: Repo guard
     needs: check
+    if: needs.check.outputs.new == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -75,7 +85,7 @@ jobs:
   previous:
     name: Previous release's downloads
     needs: check
-    if: needs.check.outputs.previous != ''
+    if: needs.check.outputs.new == 'true' && needs.check.outputs.previous != ''
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -94,7 +104,7 @@ jobs:
     # runs on any distribution from 2022 on.
     name: Linux
     needs: [check, previous]
-    if: ${{ !cancelled() && needs.check.result == 'success' }}
+    if: ${{ !cancelled() && needs.check.outputs.new == 'true' }}
     runs-on: ubuntu-latest
     container: ubuntu:22.04
     timeout-minutes: 60
@@ -140,7 +150,7 @@ jobs:
   windows:
     name: Windows
     needs: [check, previous]
-    if: ${{ !cancelled() && needs.check.result == 'success' }}
+    if: ${{ !cancelled() && needs.check.outputs.new == 'true' }}
     runs-on: ubuntu-latest
     container: fedora:44
     timeout-minutes: 60
@@ -183,7 +193,7 @@ jobs:
   macos:
     name: macOS
     needs: [check, previous]
-    if: ${{ !cancelled() && needs.check.result == 'success' }}
+    if: ${{ !cancelled() && needs.check.outputs.new == 'true' }}
     runs-on: macos-latest
     timeout-minutes: 60
     continue-on-error: true  # not tested on a real Mac yet; never blocks a release
@@ -222,7 +232,7 @@ jobs:
   android:
     name: Android
     needs: [check, previous]
-    if: ${{ !cancelled() && needs.check.result == 'success' }}
+    if: ${{ !cancelled() && needs.check.outputs.new == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
@@ -301,7 +311,7 @@ jobs:
       contents: write
     env:
       V: ${{ needs.check.outputs.version }}
-      TAG: ${{ github.ref_name }}
+      TAG: ${{ needs.check.outputs.tag }}
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v7
@@ -331,7 +341,7 @@ jobs:
             echo
             echo "Put your disc images in \`original_isos/\` next to the launcher, or use **Load ISO**. See \`manual/user-manual.md\` in the download."
             echo
-            echo "The games are also released on their own (gd-game-NN/vX.Y.Z releases)."
+            echo "Every download carries the newest version of each ready game (see \`gd-engine-games/manifest.json\`)."
             echo
             echo "---"
             echo "Based on Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. Free, noncommercial: PolyForm Noncommercial 1.0.0 plus \`LICENSE-ADDITIONAL-TERMS.md\` (included in every download)."
@@ -340,5 +350,6 @@ jobs:
         run: |
           pre=""
           case "$V" in *-*) pre="--prerelease" ;; esac
-          gh release create "$TAG" dist/* --verify-tag $pre \
+          latest="--latest"; [ -n "$pre" ] && latest=""
+          gh release create "$TAG" dist/* --target "$GITHUB_SHA" $pre $latest \
             --title "Guitar Dream Universal Launcher $V" --notes-file notes.md

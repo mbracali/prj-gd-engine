@@ -51,7 +51,7 @@ prj-gd-engine/
 ```
 
 Every game folder (`gd-game-02` is the model; `gd-game-01` keeps its older
-layout for now) has `README.md`, `CHANGELOG.md`, `local_build.sh`,
+layout for now) has `README.md`, `agent-instructions.md` (how the system works and the rules for AI agents), `CHANGELOG.md`, `local_build.sh`,
 `game-info.yaml`, `build_commands/`, `docs/`, `engine/`, `tools/`, `agents/`
 (notes for AI coding agents) and the git-ignored `extracted/` (your rip),
 `ghidra/` (reverse-engineering project; never committed) and `local_builds/`.
@@ -96,6 +96,6 @@ their owners; this project is not affiliated with or endorsed by them.
 - [docs/README.md](docs/README.md): the official codebase documentation
 - [docs/legal.md](docs/legal.md): what never goes into this repo, and why
 - [docs/contributing.md](docs/contributing.md): branches, commits, pull requests
-- [docs/release-process.md](docs/release-process.md): how a game is released
+- [docs/release-process.md](docs/release-process.md): how the launcher (with every game) is released
 - [docs/adding-a-game.md](docs/adding-a-game.md): starting a new game folder
 - Each game's own README, `docs/` and `CHANGELOG.md`

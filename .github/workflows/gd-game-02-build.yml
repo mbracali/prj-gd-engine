@@ -1,5 +1,5 @@
 # Builds the gd-game-02 (gd02) downloads with the same scripts as
-# gd-game-02/local_build.sh. Called by gd-game-02-release.yml; can also be
+# gd-game-02/local_build.sh. Test builds only (releases are the launcher's); can be
 # started by hand (Actions > gd-game-02 build > Run workflow) to get test
 # builds of any branch without releasing. Nothing runs it automatically.
 name: gd-game-02 build
