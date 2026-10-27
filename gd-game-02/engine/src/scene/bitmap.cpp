@@ -118,6 +118,11 @@ bool decodeBitmapRgba(const Bitmap& bmp, size_t level, std::vector<uint8_t>& out
     const auto& lv = bmp.levels[level];
     int w = lv.width, h = lv.height;
     size_t blockBytes;
+    if (bmp.format == Bitmap::Format::RGBA8) {
+        if (lv.size < size_t(w) * size_t(h) * 4) return false;
+        out.assign(bmp.level(level), bmp.level(level) + size_t(w) * size_t(h) * 4);
+        return true;
+    }
     switch (bmp.format) {
         case Bitmap::Format::DXT1: blockBytes = 8; break;
         case Bitmap::Format::DXT5:

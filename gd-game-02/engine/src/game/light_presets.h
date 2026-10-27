@@ -68,6 +68,8 @@ public:
     // set_lighting from C++ (the same rules as the script's).
     void setLighting(const std::vector<std::string>& categories, const std::vector<std::string>* adjectives, bool delayed);
     void setExcitement(int ex);
+    // ignore_lighting_events from C++ (the Enhanced Options' backdrop picks its own).
+    void ignoreEvents(bool on) { ignoreEvents_ = on; }
     // Switches now (no delay), e.g. the venue viewer's preset key.
     void start(const scene::LightPreset* p);
 

@@ -8,8 +8,10 @@
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
+#include <fstream>
 #include <functional>
 #include <memory>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -18,6 +20,7 @@
 #include "audio/mixer.h"
 #include "audio/synth.h"
 #include "data/game_data.h"
+#include "data/json.h"
 #include "devaids/menu_keys.h"
 #include "devaids/screenshot.h"
 #include "game/autoplay.h"
@@ -34,6 +37,7 @@
 #include "input/input.h"
 #include "platform/app_icon.h"
 #include "platform/disc_picker.h"
+#include "platform/paths.h"
 #include "render/canvas.h"
 #include "render/highway.h"
 #include "render/hud_view.h"
@@ -43,6 +47,8 @@
 #include "scene/milo.h"
 #include "script/script.h"
 #include "tests/walktest.h"
+#include "ui/enhanced_panel.h"
+#include "ui/screen_text.h"
 #include "ui/ui_host.h"
 #include "ui/ui_manager.h"
 #include "video/wmv_player.h"
@@ -206,6 +212,10 @@ public:
     void stopAllSfx() override {
         if (synth_) synth_->stopAll();
     }
+    std::string enhancedValue(const std::string& key) override;
+    void setEnhancedValue(const std::string& key, const std::string& value) override;
+    void menuBackdrop(bool on) override;
+    bool drawMenuBackdrop() override;
     void pauseAllSfx(bool paused) override {
         if (synth_) synth_->setPaused(paused);
     }
@@ -229,7 +239,11 @@ private:
     void drawWorld();
     bool loadVenue(const std::string& venue, VenueVariant variant);
     void unloadVenue();
-    void startBand();
+    void startBand(const SongInfo& info, const Song& song, bool backdrop = false);
+    void loadEnhanced();
+    void applyEnhanced();
+    void updateBackdrop();
+    void drawFpsCounter();
     void frameList();
     bool prepareTrack();
     void stopMusic();
@@ -255,6 +269,8 @@ private:
     bool debugMenu_ = false;
     double uiStartMs_ = 0;
     MenuKeys menuKeys_;
+    int escapes_ = 0;  // Back presses in a row on the main menu (three quit)
+    SDL_JoystickID virtualPad_ = 0;  // GD02_VIRTUAL_PAD's controller (GD02_KEYS "j" items)
     std::unique_ptr<WalkDriver> walk_;
     size_t shotsTaken_ = 0;
     double shotDue_ = -1;
@@ -321,6 +337,29 @@ private:
     std::array<std::string, 2> bandOutfit_, bandGuitar_, bandSkin_;
     std::unique_ptr<LightPresets> lighting_;
     WorldDriver worldDriver_;
+    // The Enhanced Options' live backdrop (menuBackdrop): the second venue
+    // with the band playing a song of its tier, silently, on the wall clock,
+    // through a camera of its own.
+    struct Backdrop {
+        const SongInfo* info = nullptr;
+        std::unique_ptr<Song> song;
+        WorldDriver driver;
+        uint64_t startNs = 0;
+        float fromMs = 0;
+        bool framed = false;  // the shot's target and direction are set
+        gfx::Vec3 target, dir;
+        float dist = 300, spread = 100, aim = 0;
+        uint64_t lastNs = 0;
+        int lightPart = -1;
+    };
+    std::unique_ptr<Backdrop> backdrop_;
+    // The Enhanced Options (enhanced.json in the save folder), what is in
+    // effect, and the FPS counter's average.
+    Json enhanced_ = Json::object();
+    std::string screenModeApplied_;
+    bool fpsCounter_ = false;
+    double fps_ = 0;
+    uint64_t fpsLastNs_ = 0;
     std::string venuePath_;
     gfx::PostProcState venuePost_;  // the static shot's PostProc (the director's from M8 phase 2)
     bool venuePostOn_ = false;
@@ -354,7 +393,7 @@ int App::run() {
     }
     // Development aid: GD02_VIRTUAL_PAD=<vendor>:<product>[:guitar] (hex, e.g.
     // 1430:4748:guitar) plugs in a virtual controller, to test without hardware.
-    if (const char* vp = SDL_getenv("GD02_VIRTUAL_PAD")) Input::attachVirtualPad(vp);
+    if (const char* vp = SDL_getenv("GD02_VIRTUAL_PAD")) virtualPad_ = Input::attachVirtualPad(vp);
     SDL_WindowFlags flags = SDL_WINDOW_RESIZABLE | gfx::prepareWindow();  // OpenGL (render/device.h)
 #ifdef __ANDROID__
     flags |= SDL_WINDOW_FULLSCREEN;
@@ -364,7 +403,7 @@ int App::run() {
     if (!options_.walk.empty()) {
         walk_ = std::make_unique<WalkDriver>(options_.walk);
         if (!walk_->known()) {
-            std::fprintf(stderr, "%s: unknown walk test '%s' (quickplay, lose, pause, attract, career)\n", app::kProgram, options_.walk.c_str());
+            std::fprintf(stderr, "%s: unknown walk test '%s' (quickplay, lose, pause, attract, career, back, enhanced, cheats)\n", app::kProgram, options_.walk.c_str());
             SDL_Quit();
             return 2;
         }
@@ -499,6 +538,7 @@ void App::startUi() {
         std::filesystem::create_directories(dir);
         SDL_setenv_unsafe("GD02_SAVE_DIR", dir.c_str(), 1);
     }
+    loadEnhanced();
     auto ui = std::make_unique<ui::UiManager>(*data_, canvas_, *this, input_);
     std::string error;
     if (!ui->init(error)) {
@@ -601,7 +641,7 @@ bool App::loadSong(const SongInfo& info, int difficulty, bool autoplay, float ba
                                                                                    : VenueVariant::Single;
         loadVenue(v, var);
     }
-    if (!band_) startBand();
+    if (!band_ && song_ && info_) startBand(*info_, *song_);
     worldDriver_ = WorldDriver(!ui_);
     worldDriver_.reset(float(-leadInMs_));
     return true;
@@ -701,6 +741,12 @@ void App::handleEvent(const SDL_Event& e) {
         message_ = dataMessage_;
         return;
     }
+    // A click or tap skips the boot splashes, like a button (gd01's logos).
+    if (ui_ && ui_->inSplashes() &&
+        ((e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.which != SDL_TOUCH_MOUSEID) || e.type == SDL_EVENT_FINGER_UP)) {
+        ui_->buttonDown(ui::kPad_Start, 0);
+        ui_->buttonUp(ui::kPad_Start, 0);
+    }
     for (const InputEvent& a : actions_) handleAction(a);
 }
 
@@ -712,7 +758,21 @@ void App::handleEvent(const SDL_Event& e) {
 // plays, Back quits.
 void App::handleAction(const InputEvent& a) {
     if (ui_) {
+        // gd01's: Escape (Back) three times in a row on the main menu quits.
+        if (a.down) escapes_ = a.action == Action::Back && ui_->currentScreen() == "main_screen" ? escapes_ + 1 : 0;
+        if (escapes_ >= 3) {
+            running_ = false;
+            return;
+        }
         if (player_ && begun_ && !paused_ && !bot_) playerAction(a);
+        // In a song Back (Esc, a joypad's B) pauses like Start, as in gd01:
+        // game_screen pauses on kPad_Start only.
+        if (a.action == Action::Back && input_.inGame()) {
+            InputEvent start = a;
+            start.action = Action::Start;
+            ui_->action(start);
+            return;
+        }
         ui_->action(a);
         return;
     }
@@ -746,7 +806,7 @@ void App::handleAction(const InputEvent& a) {
     case Action::Down: cursor_ = (cursor_ + 1) % songs_.size(); break;
     case Action::Left: difficulty_ = std::max(0, difficulty_ - 1); break;
     case Action::Right: difficulty_ = std::min(kDifficultyCount - 1, difficulty_ + 1); break;
-    case Action::Confirm: case Action::Start: message_.clear(), startSong(cursor_); break;
+    case Action::Confirm: case Action::Start: case Action::Fret0: message_.clear(), startSong(cursor_); break;
     case Action::Back: running_ = false; break;
     default: break;
     }
@@ -835,6 +895,26 @@ void App::updateSong(float t) {
                 }
             if (director_->hasCamera()) venueView_->setCamera(director_->camera());
         }
+        // Development aid: GD02_FACE_CAM=<member>[:<distance>] (guitarist0, singer, ...) frames that
+        // member's head from the director camera's side, to check the faces.
+        if (const char* fc = SDL_getenv("GD02_FACE_CAM"); fc && *fc && band_) {
+            const std::string spec = fc;
+            const size_t colon = spec.find(':');
+            const std::string who = spec.substr(0, colon);
+            const float dist = colon == std::string::npos ? 22.0f : std::strtof(spec.c_str() + colon + 1, nullptr);
+            scene::Xfm head;
+            if (band_->objectXfm(who, "bone_head.mesh", head) || band_->objectXfm(who, "bone_head.trans", head)) {
+                const gfx::Vec3 target{head.pos[0], head.pos[1], head.pos[2]};
+                // From the side the director camera is on, level with the head.
+                gfx::Vec3 dir = venueView_->camera().position() - target;
+                dir.z = 0;
+                if (gfx::dot(dir, dir) < 1e-6f) dir = {0, -1, 0};
+                const gfx::Vec3 eye = target + gfx::normalize(dir) * dist;
+                gfx::Camera cam = gfx::Camera::lookAt(eye, target);
+                cam.yFov = 0.6f;
+                venueView_->setCamera(cam);
+            }
+        }
         venueView_->update();
     }
     if (!ui_) return;
@@ -902,8 +982,26 @@ void App::frameUi() {
     input_.poll(SDL_GetTicksNS(), actions_);
     for (const InputEvent& a : actions_) handleAction(a);
     for (const MenuKeys::Key& k : menuKeys_.due(now)) {
-        if (k.edge >= 0) ui_->buttonDown(k.button, k.player);
-        if (k.edge <= 0) ui_->buttonUp(k.button, k.player);
+        if (k.keycode) {  // a real key, through the input layer (next frame's events)
+            for (int edge : {1, -1}) {
+                if ((edge > 0 && k.edge < 0) || (edge < 0 && k.edge > 0)) continue;
+                SDL_Event e{};
+                e.type = edge > 0 ? SDL_EVENT_KEY_DOWN : SDL_EVENT_KEY_UP;
+                e.key.timestamp = SDL_GetTicksNS();
+                e.key.key = SDL_Keycode(k.keycode);
+                e.key.scancode = SDL_GetScancodeFromKey(e.key.key, nullptr);
+                e.key.down = edge > 0;
+                SDL_PushEvent(&e);
+            }
+        } else if (k.padButton >= 0) {
+            if (SDL_Joystick* j = virtualPad_ ? SDL_GetJoystickFromID(virtualPad_) : nullptr)
+                SDL_SetJoystickVirtualButton(j, k.padButton, k.edge > 0);
+            else
+                SDL_Log("GD02_KEYS: a \"j\" item needs GD02_VIRTUAL_PAD");
+        } else {
+            if (k.edge >= 0) ui_->buttonDown(k.button, k.player);
+            if (k.edge <= 0) ui_->buttonUp(k.button, k.player);
+        }
     }
     if (walk_) {
         walk_->poll(*ui_, now);
@@ -917,9 +1015,12 @@ void App::frameUi() {
         const float t = songClock();
         updateSong(t);
         lastT_ = t;
+    } else if (backdrop_) {
+        updateBackdrop();
     }
     canvas_.begin({0, 0, 0, 255});
     ui_->draw();
+    drawFpsCounter();
     shootScreens();
     // GD02_SCREENSHOT_AT: wall-clock ms in the menus, "s<ms>" song times.
     if (captureMenuScreenshot(canvas_, now, player_ && begun_ ? double(lastT_) : -1e9)) running_ = false;
@@ -1053,7 +1154,7 @@ bool App::loadVenue(const std::string& venue, VenueVariant variant) {
     }
     venuePath_ = path;
     if (const scene::LightPreset* p = world_->firstPreset()) world_->applyPreset(*p, 0);
-    if (song_ && info_) startBand();
+    if (song_ && info_) startBand(*info_, *song_);
     // The static shot's PostProc (its `postprocess` flag) [I: the director
     // selects it on every shot from phase 2 on].
     venuePostOn_ = false;
@@ -1122,24 +1223,36 @@ void App::stopSfx(const std::string& name) {
 // menus the song's quickplay one). GD02_CHAR=<outfit>, GD02_GUITAR=<guitar>
 // and GD02_SKIN=<skin> override player 0's; GD02_NO_BAND=1 leaves the
 // stage empty.
-void App::startBand() {
+void App::startBand(const SongInfo& info, const Song& song, bool backdrop) {
     band_.reset();
-    if (!world_ || !song_ || !info_ || envOn("GD02_NO_BAND")) return;
+    if (!world_ || envOn("GD02_NO_BAND")) return;
     Band::Config cfg;
-    cfg.players = twoPlayers(mode_) ? 2 : 1;
-    cfg.character = bandOutfit_, cfg.guitar = bandGuitar_, cfg.skin = bandSkin_;
-    if (const char* c = SDL_getenv("GD02_CHAR")) cfg.character[0] = c;
-    if (const char* g = SDL_getenv("GD02_GUITAR")) cfg.guitar[0] = g, cfg.skin[0].clear();
-    if (const char* k = SDL_getenv("GD02_SKIN")) cfg.skin[0] = k;
+    cfg.players = backdrop ? 1 : twoPlayers(mode_) ? 2 : 1;
+    if (!backdrop) {
+        cfg.character = bandOutfit_, cfg.guitar = bandGuitar_, cfg.skin = bandSkin_;
+        if (const char* c = SDL_getenv("GD02_CHAR")) cfg.character[0] = c;
+        if (const char* g = SDL_getenv("GD02_GUITAR")) cfg.guitar[0] = g, cfg.skin[0].clear();
+        if (const char* k = SDL_getenv("GD02_SKIN")) cfg.skin[0] = k;
+    }
+    // The Air Guitar cheat: a symbol in $cheat_guitar is every guitarist's
+    // guitar (change_guitar 0x822B6250) [C]; long_cheats.dta sets air_guitar.
+    if (ui_)
+        if (const Value g = ui_->interp().var("cheat_guitar"); g.type == Value::Type::Symbol && !g.s.empty())
+            for (int p = 0; p < cfg.players; ++p) cfg.guitar[size_t(p)] = g.s, cfg.skin[size_t(p)].clear();
     const DataNode* objects = ui_ && ui_->bootTree() ? ui_->bootTree()->find("objects") : nullptr;
     try {
-        band_ = std::make_unique<Band>(*world_, *data_, *info_, cfg, objects);
-        band_->rating = [this](int p) {
-            const Player* pl = p == 0 ? player_.get() : player2_.get();
-            return pl ? pl->rockMeter() : 0.5f;
-        };
-        band_->excitement = [this] { return worldDriver_.excitementLevel(); };
-        band_->loadSong(parseMidi(data_->read(info_->audio.midiPath)), song_.get());
+        band_ = std::make_unique<Band>(*world_, *data_, info, cfg, objects);
+        if (backdrop) {
+            band_->rating = [](int) { return 0.8f; };
+            band_->excitement = [] { return 3; };  // kExcitementGreat: the crowd and the band at their liveliest
+        } else {
+            band_->rating = [this](int p) {
+                const Player* pl = p == 0 ? player_.get() : player2_.get();
+                return pl ? pl->rockMeter() : 0.5f;
+            };
+            band_->excitement = [this] { return worldDriver_.excitementLevel(); };
+        }
+        band_->loadSong(parseMidi(data_->read(info.audio.midiPath)), &song);
         // The characters enter with the world (World::start); a world already
         // started (the menus' world_panel) gets them at once.
         if (world_->started()) band_->enter();
@@ -1172,7 +1285,9 @@ void App::drawTrack() {
     if (!player_ || !song_) return;
     canvas_.flush();
     canvas_.renderer().device().clear(nullptr, true);
-    const float speed = rules_.trackSpeed[size_t(difficulty_)];
+    float speed = rules_.trackSpeed[size_t(difficulty_)];
+    // The Hyper Speed cheat: track_speed x 1.5 (0x826967B8) [C].
+    if (ui_ && ui_->cheatOn("cheat_hyper_speed_mode")) speed *= 1.5f;
     if (track_ && !debugHighway_) {
         track_->draw(canvas_.renderer(), *sceneCache_, *song_, *player_, lastT_, speed);
         if (track2_ && player2_) track2_->draw(canvas_.renderer(), *sceneCache_, *song_, *player2_, lastT_, speed);
@@ -1287,6 +1402,245 @@ void App::applyOptions(float band, float guitar, float fx, bool lefty0, bool lef
     bandVolume_ = band, guitarVolume_ = guitar;
     syncOffsetMs_ = syncOffsetMs;
     if (!SDL_getenv("GD02_LEFTY")) input_.setLefty(lefty0, lefty1);
+}
+
+// ---- the Enhanced Options (ui/enhanced_panel.h)
+
+namespace {
+
+std::string enhancedPath() {
+    const char* dir = SDL_getenv("GD02_SAVE_DIR");
+    return (dir && *dir ? std::string(dir) : prefDir()) + "enhanced.json";
+}
+
+const ui::EnhancedSetting* enhancedSetting(const std::string& key) {
+    for (const ui::EnhancedSetting& e : ui::enhancedSettings())
+        if (key == e.key) return &e;
+    return nullptr;
+}
+
+}  // namespace
+
+void App::loadEnhanced() {
+    enhanced_ = Json::object();
+    std::ifstream f(enhancedPath(), std::ios::binary);
+    if (f) {
+        std::stringstream ss;
+        ss << f.rdbuf();
+        try {
+            Json j = Json::parse(ss.str());
+            if (j.type == Json::Type::Object && j["format"].str() == "gd02-enhanced") enhanced_ = j;
+        } catch (const std::exception& e) {
+            SDL_Log("enhanced options: %s: %s (the defaults are used)", enhancedPath().c_str(), e.what());
+        }
+    }
+    applyEnhanced();
+}
+
+std::string App::enhancedValue(const std::string& key) {
+    const ui::EnhancedSetting* e = enhancedSetting(key);
+    if (!e) return {};
+    const std::string& v = enhanced_[key].str();
+    for (const char* ok : e->values)
+        if (v == ok) return v;
+    return e->values.front();  // unset or not valid: the default
+}
+
+void App::setEnhancedValue(const std::string& key, const std::string& value) {
+    if (!enhancedSetting(key)) return;
+    enhanced_.set("format", Json::string("gd02-enhanced"));
+    enhanced_.set(key, Json::string(value));
+    // Written atomically, as the save (ui/career.h).
+    const std::string path = enhancedPath(), tmp = path + ".tmp";
+    std::error_code ec;
+    if (const std::filesystem::path dir = std::filesystem::path(path).parent_path(); !dir.empty()) std::filesystem::create_directories(dir, ec);
+    {
+        std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
+        f << enhanced_.dump(1) << "\n";
+    }
+    std::filesystem::rename(tmp, path, ec);
+    if (ec) SDL_Log("enhanced options: cannot write %s: %s", path.c_str(), ec.message().c_str());
+    applyEnhanced();
+}
+
+// Puts the Enhanced Options in effect (at start and on every change), as gd01's App::applyEnhanced.
+void App::applyEnhanced() {
+    fpsCounter_ = enhancedValue("fps_counter") == "on";
+    gfx::RenderDevice& dev = canvas_.renderer().device();
+    dev.setInternalHeight(std::clamp(std::atoi(enhancedValue("internal_res").c_str()), 0, 4320));
+    if (!SDL_getenv("GD02_FPS")) dev.setFrameCap(std::clamp(std::atoi(enhancedValue("max_fps").c_str()), 30, 1000));
+    // Screen mode: windowed, fullscreen (the display's mode at the desktop
+    // size) or borderless (fullscreen at the desktop's own mode).
+    std::string mode = enhancedValue("screen_mode");
+#ifdef __ANDROID__
+    mode = "borderless";  // always full screen on phones
+#endif
+    if (window_ && mode != screenModeApplied_) {
+        bool ok = true;
+        if (mode == "windowed") {
+            ok = SDL_SetWindowFullscreen(window_, false);
+        } else {
+            const SDL_DisplayMode* fullMode = nullptr;
+            SDL_DisplayMode closest;
+            if (mode == "fullscreen") {
+                const SDL_DisplayID display = SDL_GetDisplayForWindow(window_);
+                if (const SDL_DisplayMode* desk = SDL_GetDesktopDisplayMode(display);
+                    desk && SDL_GetClosestFullscreenDisplayMode(display, desk->w, desk->h, desk->refresh_rate, true, &closest))
+                    fullMode = &closest;
+            }
+            ok = SDL_SetWindowFullscreenMode(window_, fullMode) && SDL_SetWindowFullscreen(window_, true);
+        }
+        if (!ok) SDL_Log("enhanced options: screen mode %s: %s", mode.c_str(), SDL_GetError());
+        // The first time only when not windowed (the window opens windowed).
+        screenModeApplied_ = mode;
+        if (!SDL_getenv("GD02_FPS")) dev.setFrameCap(std::clamp(std::atoi(enhancedValue("max_fps").c_str()), 30, 1000));  // the new mode's refresh rate
+    }
+}
+
+// Bottom left, in GH2's menu font: the frames drawn a second (averaged).
+void App::drawFpsCounter() {
+    const uint64_t now = SDL_GetTicksNS();
+    if (fpsLastNs_ && now > fpsLastNs_) {
+        const double f = 1e9 / double(now - fpsLastNs_);
+        fps_ = fps_ <= 0 ? f : fps_ * 0.95 + f * 0.05;
+    }
+    fpsLastNs_ = now;
+    if (!fpsCounter_ || !ui_ || ui_->headless()) return;
+    char buf[32];
+    std::snprintf(buf, sizeof buf, "%d FPS", int(std::lround(fps_)));
+    canvas_.flush();
+    ui::ScreenText& t = ui_->screenText();
+    t.begin(canvas_.renderer());
+    t.draw(canvas_.renderer().materials(), "helveticablack.font", buf, 25, 697, 22, {0, 0, 0, 0.6f}, 0x41);
+    t.draw(canvas_.renderer().materials(), "helveticablack.font", buf, 23, 695, 22, {0.2f, 1, 0.3f, 1}, 0x41);
+}
+
+// The live backdrop: the second venue (venues::names()[1], small1) with the
+// band playing the first song of its tier, without sound, looping.
+void App::menuBackdrop(bool on) {
+    if (!on) {
+        if (!backdrop_) return;
+        backdrop_.reset();
+        if (!player_) unloadVenue();
+        return;
+    }
+    if (backdrop_ || player_ || !data_ || songs_.empty() || ui_->headless()) return;
+    const std::string venue = venues::names()[1];
+    auto b = std::make_unique<Backdrop>();
+    for (const SongInfo& s : songs_)
+        if (venues::forSong(*data_, s) == venue) {
+            b->info = &s;
+            break;
+        }
+    if (!b->info) b->info = &songs_.front();
+    if (!loadVenue(venue, VenueVariant::Single)) return;
+    try {
+        b->song = std::make_unique<Song>(loadChart(*data_, *b->info, rules_));
+    } catch (const std::exception& e) {
+        SDL_Log("enhanced options: backdrop %s: %s", b->info->id.c_str(), e.what());
+        unloadVenue();
+        return;
+    }
+    b->fromMs = b->song->endMs * 0.25f;
+    b->driver.reset(b->fromMs);
+    b->startNs = SDL_GetTicksNS();
+    backdrop_ = std::move(b);
+    // The band first: it enters with the world (World::start), as in a song.
+    startBand(*backdrop_->info, *backdrop_->song, true);
+    world_->start(false, false);
+    world_->message("excitement", {Value::integer(3)});
+}
+
+bool App::drawMenuBackdrop() {
+    if (!backdrop_ || !worldDraw_) return false;
+    drawWorld();
+    return true;
+}
+
+void App::updateBackdrop() {
+    Backdrop& b = *backdrop_;
+    if (!world_ || !venueView_) return;
+    float ms = b.fromMs + float(double(SDL_GetTicksNS() - b.startNs) / 1e6);
+    if (ms > b.song->endMs - 3000) {  // around again
+        b.startNs = SDL_GetTicksNS();
+        b.driver.reset(b.fromMs);
+        b.lightPart = -1;
+        ms = b.fromMs;
+        startBand(*b.info, *b.song, true);
+    }
+    b.driver.update(*world_, *b.song, ms, nullptr, {}, nullptr, {});
+    world_->update();
+    // The lights: the venue's chorus and verse presets in turn, 20 s each,
+    // not the song's cues (their blackouts left the band in the dark).
+    if (lighting_) {
+        const int part = int(double(SDL_GetTicksNS() - b.startNs) / 20e9);
+        if (part != b.lightPart) {
+            b.lightPart = part;
+            lighting_->ignoreEvents(true);
+            lighting_->setExcitement(3);
+            lighting_->setLighting({part % 2 ? "VERSE" : "CHORUS", "CHORUS", "VERSE"}, nullptr, false);
+        }
+        lighting_->update();
+    }
+    if (band_) {
+        const gfx::Vec3 c = venueView_->camera().position();
+        const std::array<float, 3> cam{c.x, c.y, c.z};
+        band_->update(world_->seconds(), world_->beats(), &cam);
+    }
+    // The shot: from the audience's side, on the singer's chest, wide enough
+    // for the guitarist and the drummer, swaying slowly from side to side.
+    if (!b.framed && band_) {
+        scene::Xfm singer, other;
+        if (band_->objectXfm("singer", "bone_head.mesh", singer)) {
+            b.target = {singer.pos[0], singer.pos[1], singer.pos[2] - 14};
+            // The stage's front: from the drummer (at the back) to the
+            // singer; else towards the venue's first shot.
+            gfx::Vec3 dir = venueView_->camera().position() - b.target;
+            if (scene::Xfm drummer; band_->objectXfm("drummer", "bone_head.mesh", drummer))
+                dir = gfx::Vec3{singer.pos[0] - drummer.pos[0], singer.pos[1] - drummer.pos[1], 0};
+            dir.z = 0;
+            if (gfx::dot(dir, dir) < 1e-6f) dir = {0, -1, 0};
+            b.dir = gfx::normalize(dir);
+            const gfx::Vec3 side{-b.dir.y, b.dir.x, 0};
+            float spread = 40;
+            for (const char* who : {"guitarist0", "drummer", "bassist"})
+                if (band_->objectXfm(who, "bone_head.mesh", other)) {
+                    const gfx::Vec3 p{other.pos[0], other.pos[1], other.pos[2]};
+                    spread = std::max(spread, std::fabs(gfx::dot(p - b.target, side)));
+                }
+            // Wide enough for the band; the camera then looks a little to
+            // the singer's left so the band stands right of the list.
+            b.spread = spread;
+            b.dist = (spread + 34) / 0.45f;  // tan(yFov / 2) x 16:9 = 0.45 at yFov 0.5
+            // No farther than the venue's own first shot (the audience's
+            // fences and rigging stand behind it).
+            const gfx::Vec3 shot = venueView_->camera().position() - b.target;
+            b.dist = std::min(b.dist, 0.8f * std::sqrt(shot.x * shot.x + shot.y * shot.y));
+            b.aim = 0.32f * 0.45f * b.dist;  // looking that far to the singer's left: the band on the right
+            SDL_Log("enhanced options: backdrop on %s, spread %.0f, distance %.0f", b.info->id.c_str(), spread, b.dist);
+            b.framed = true;
+        }
+    }
+    if (b.framed) {
+        // Following the singer as they move about the stage, smoothly.
+        if (scene::Xfm singer; band_ && band_->objectXfm("singer", "bone_head.mesh", singer)) {
+            const gfx::Vec3 now{singer.pos[0], singer.pos[1], singer.pos[2] - 14};
+            const uint64_t ns = SDL_GetTicksNS();
+            const float dt = b.lastNs ? float(double(ns - b.lastNs) / 1e9) : 0.0f;
+            b.lastNs = ns;
+            b.target = b.target + (now - b.target) * (1 - std::exp(-std::min(dt, 0.25f) / 1.2f));
+        }
+        const float t = float(double(SDL_GetTicksNS() - b.startNs) / 1e9);
+        const float a = 0.14f * std::sin(t * 6.2831853f / 26.0f);
+        const gfx::Vec3 d{b.dir.x * std::cos(a) - b.dir.y * std::sin(a), b.dir.x * std::sin(a) + b.dir.y * std::cos(a), 0};
+        gfx::Vec3 eye = b.target + d * b.dist;
+        eye.z = b.target.z + b.dist * 0.12f + 3 * std::sin(t * 0.37f);  // above the crowd's heads
+        const gfx::Vec3 side{-d.y, d.x, 0};
+        gfx::Camera cam = gfx::Camera::lookAt(eye, b.target - side * b.aim + gfx::Vec3{0, 0, 6});
+        cam.yFov = 0.5f;
+        venueView_->setCamera(cam);
+    }
+    venueView_->update();
 }
 
 // One frame of the song screen without the menus (--song, the debug list):

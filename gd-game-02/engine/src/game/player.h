@@ -174,7 +174,7 @@ private:
     int hopoHit_ = -1;            // +0x88
     int lockedGem_ = -1;          // +0x8c
     float chordFixMs_ = -1e9f;    // +0x90
-    float lastHopoTryMs_ = -1e9f; // +0x94
+    float lastHopoTryMs_ = -1e9f; // +0x94: the last hit (no hammer-on try at that instant)
     struct Pending {              // +0x98 .. +0xa4
         int gem = -1;
         int slot = -1;

@@ -190,7 +190,7 @@ public:
     // Copies a uniform block for draws of this frame (until endFrame), so
     // shared blocks (camera, lights) are uploaded once.
     virtual UniformData stageUniforms(const void* data, size_t size) = 0;
-    // The window's size in pixels.
+    // The window's size in pixels (the internal resolution's, when one is set).
     virtual void drawableSize(int& w, int& h) const = 0;
     // Reads a rectangle of the window's back buffer (origin top-left), as
     // RGBA32. Synchronous: development aids only (screenshots).
@@ -199,6 +199,11 @@ public:
     // matches it, otherwise paced in software; headless is not paced).
     virtual void endFrame() = 0;
     virtual void setFrameCap(int fps) = 0;
+    // The internal resolution (Enhanced Options): every frame is drawn into
+    // an off-screen colour + depth target `height` lines tall (the window's
+    // aspect), which drawableSize then reports, and scaled to the window as
+    // it is presented. 0: straight to the window.
+    virtual void setInternalHeight(int height) = 0;
 };
 
 // The window flags and GL attributes the device needs: call before

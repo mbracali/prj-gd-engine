@@ -55,7 +55,11 @@ const scene::Font* ScreenText::font(const std::string& name) {
 void ScreenText::begin(gfx::Renderer& r) {
     int vx, vy, vw, vh;
     r.pictureRect(vx, vy, vw, vh);
-    r.materials().setFrame(gfx::UiView::defaultCamera(), gfx::LightEnv{}, vw, vh);
+    // Full ambient light, so fonts whose material takes the environment's
+    // (helveticablack, GH2's menu font) draw their colour as given.
+    gfx::LightEnv env;
+    env.envAmbient = {1, 1, 1};
+    r.materials().setFrame(gfx::UiView::defaultCamera(), env, vw, vh);
 }
 
 float ScreenText::width(const std::string& fontName, const std::string& text, float height) {

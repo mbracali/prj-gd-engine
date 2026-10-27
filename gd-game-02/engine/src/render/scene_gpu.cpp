@@ -374,6 +374,7 @@ TextureId SceneCache::texture(const scene::Tex* tex) {
     case scene::Bitmap::Format::DXT1: format = TexFormat::BC1; break;
     case scene::Bitmap::Format::DXT5: format = TexFormat::BC3; break;
     case scene::Bitmap::Format::ATI2: format = TexFormat::BC5; break;
+    case scene::Bitmap::Format::RGBA8: format = TexFormat::RGBA8; break;
     default: known = false; break;
     }
     if (known && !b.empty()) {

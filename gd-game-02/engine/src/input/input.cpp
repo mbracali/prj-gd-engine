@@ -297,7 +297,7 @@ void Input::emit(std::vector<InputEvent>& out, Action a, bool down, uint64_t ts,
     }
     // TODO(multiplayer): per player; gd02 plays one player, fed by every slot.
     lastMode_ = mode;
-    out.push_back({a, down, ts, mode, player, a == Action::Whammy && curAnalog_});
+    out.push_back({a, down, ts, mode, player, a == Action::Whammy && curAnalog_, curJoypad_});
 }
 
 // The keyboard's chosen player, else the lowest one no pad holds (none with two pads).
@@ -749,9 +749,9 @@ void Input::update(Pad& p, uint64_t ts, std::vector<InputEvent>& out) {
         if (Control(c) == C::Whammy && p.whammyAxis > 0.15f) now = true;
         p.down[c] = now;
     }
-    curGuitar_ = !joypad, curAnalog_ = p.analogWhammy;
+    curGuitar_ = !joypad, curJoypad_ = joypad, curAnalog_ = p.analogWhammy;
     controlEdges(was, p.down, modeFor(joypad && gamepadPlay_), p.slot, joypad, ts, out);
-    curGuitar_ = curAnalog_ = false;
+    curGuitar_ = curJoypad_ = curAnalog_ = false;
 }
 
 // The controls that changed. Select / Back bound to the green / red fret's
@@ -779,10 +779,9 @@ void Input::controlEdge(Control c, bool down, ControllerMode mode, int player, b
     case C::Green: case C::Red: case C::Yellow: case C::Blue: case C::Orange: {
         int fret = int(c);
         if (lefty && joypad) fret = 4 - fret;  // lefty_joypad_guitar: kPad_X R2 R1 L1 L2 [C]
+        // In the menus the frets are kPad buttons (UiManager::action): green
+        // selects and red goes back, as gd01's App::uiButton does.
         if (play) act(Action(int(Action::Fret0) + fret));
-        // A guitar's green / red fret select / go back in the menus [I: GH2's menus].
-        if (curGuitar_ && !inGame() && c == C::Green) act(Action::Confirm);
-        if (curGuitar_ && !inGame() && c == C::Red) act(Action::Back);
         break;
     }
     case C::StrumUp: act(lefty && curGuitar_ ? Action::Down : Action::Up), act(Action::Strum); break;

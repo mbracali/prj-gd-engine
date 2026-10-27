@@ -483,7 +483,8 @@ WmvPlayer::Result WmvPlayer::play(Canvas& canvas, Mixer& mixer, Input& input) {
         }
         input.poll(SDL_GetTicksNS(), actions);
         for (const InputEvent& a : actions)
-            if (a.down && (a.action == Action::Start || a.action == Action::Confirm)) result = Result::Skipped, running = false;
+            if (a.down && (a.action == Action::Start || a.action == Action::Confirm || a.action == Action::Back || a.action == Action::Fret0))
+                result = Result::Skipped, running = false;  // as gd01 skips its videos
         if (!running) break;
 
         // The newest picture due by the sound's clock.

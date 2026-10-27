@@ -186,8 +186,7 @@ void Player::swing(float t, int slot, bool isStrum) {
 // watcher has none (+0x1c is a no-op) [C].
 void Player::nonStrumSwing(float t, int slot, bool hammer) {
     if (mode_ != ControllerMode::Guitar || slot < 0) return;
-    if (t == lastHopoTryMs_) return;
-    lastHopoTryMs_ = t;  // +0x94; that it is set on every try is [I]
+    if (t == lastHopoTryMs_) return;  // +0x94: the time of the last hit (set by OnHit, 0x8234eb28) [C]
     const int n = static_cast<int>(chart_.gems.size());
     if (n == 0) return;
     int k = nearestGem(t + offset_);
@@ -211,10 +210,11 @@ void Player::watcherFretDown(int slot, float t) {
     const uint32_t bit = 1u << slot;
     held_ |= bit;
     if (sustainGem_ >= 0) {
-        // 0x823500c8 / 0x8234f070 [C]: a fret pressed above a single note, or
-        // any extra fret on a chord, ends the sustain.
+        // 0x823500c8 / 0x8234f070 [C]: a fret pressed above a single note
+        // ends the sustain (a lower one, an anchor, does not); on a chord any
+        // press does (the chord's frets are all held already).
         const Gem& g = chart_.gems[size_t(sustainGem_)];
-        const bool release = g.fretCount() == 1 ? slot > highestFret(g.frets) : (g.frets & bit) == 0;
+        const bool release = g.fretCount() == 1 ? slot > highestFret(g.frets) : true;
         if (release) endSustain(t, true);
     }
     fretChange(t, slot);
@@ -241,6 +241,9 @@ void Player::fretChange(float t, int pressed) {
     if (match) {
         clearPending();
         watcherHit(t, pressed >= 0 ? pressed : highestFret(held_), gem, false);
+        // A HOPO-able gem hit this way also tells the sinks "swingAtHopo"
+        // (0x8234fcb8 at 0x8234eee4) [C].
+        if (g.hopo) emit(PlayerEvent::Kind::SwingAtHopo, gem);
         if (g.fretCount() > 1) chordFixMs_ = t;  // +0x90
     } else if (pressed >= 0) {
         const int slot = pending_.slot;
@@ -301,11 +304,15 @@ void Player::joypadPress(int slot, float t) {
 // finished by the player (its step 3), after the streak update.
 void Player::watcherHit(float t, int slot, int gem, bool hopo) {
     (void)slot;
-    clearPending();  // a hit leaves nothing to resolve [I]
     sustainGem_ = -1;
     hit_[size_t(gem)] = 1;
     lastHit_ = gem;
+    // vtable +0x6c (0x8234eb28) at the end of 0x8234fe20 [C]: a HOPO hit
+    // sets the HOPO-hit gem (+0x88); every hit sets +0x94 (the time
+    // NonStrumSwing compares) and clears the pending strum.
     if (hopo) hopoHit_ = gem;
+    lastHopoTryMs_ = t;
+    clearPending();
     playerHit(t, gem);
     if (hopo) emit(PlayerEvent::Kind::Hopo, gem);
     const Gem& g = chart_.gems[size_t(gem)];
@@ -315,18 +322,20 @@ void Player::watcherHit(float t, int slot, int gem, bool hopo) {
     }
 }
 
-// Overstrum / miss: 0x823503d0 -> 0x8234f860 [C]. At most one per 50 ms
-// (`last + 50 < now`, 0x82002228). The reported gem is the given one, or the
-// next one when the sweep has already passed it [I: how "the nearest, or the
-// next if passed" maps onto the argument]. Ends the current sustain and
-// tells the player.
+// Overstrum / miss: 0x823503d0 -> 0x8234f860 [C, from disassembly]. The
+// current sustain ends first (0x8234f600, before the gap test); then at most
+// one report per 50 ms (`last + 50 < now`, 0x82002228). The gem: the given
+// one, the next (vtable +0x74 = 0x8234f768) when it is the gem the sweep
+// passed last (+0x4c), and the last gem of the list when that leaves none
+// (-1). Then the player is told.
 void Player::watcherMiss(float t, int slot, int gem) {
     (void)slot;
+    endSustain(t, false);
     if (!(lastOverstrumMs_ + rules_.overstrumGapMs < t)) return;
     lastOverstrumMs_ = t;
     const int n = static_cast<int>(chart_.gems.size());
-    if (gem >= 0 && gem <= sweep_) gem = gem + 1 < n ? gem + 1 : -1;
-    endSustain(t, false);
+    if (gem >= 0 && gem == sweep_) gem = gem + 1 < n ? gem + 1 : -1;
+    if (gem < 0) gem = n - 1;
     playerMiss(t, gem);
 }
 

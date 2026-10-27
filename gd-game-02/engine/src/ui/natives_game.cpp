@@ -343,6 +343,9 @@ public:
             if (msg == "set_paused") paused = !args.empty() && args[0].truthy();
             if (track_) ui.host().trackCommand(msg, args);
             else ui.host().hudCommand(msg, args);
+            // HudPanel's reset ends with the script's on_reset (0x8268E440):
+            // the HUD's showing (show_hud, the Performance Mode cheat) and meters.
+            if (!track_ && msg == "reset") ui.callScript(this, "on_reset");
             return true;
         }
         return PanelObj::handleNative(in, msg, args, r);

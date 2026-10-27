@@ -4,13 +4,23 @@
 
 #include <SDL3/SDL.h>
 
+#include <algorithm>
+#include <array>
+#include <cmath>
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <sstream>
 
 #include "data/game_data.h"
 #include "data/json.h"
+#include "render/scene_gpu.h"
+#include "render/ui_view.h"
+#include "scene/milo.h"
+#include "script/tasks.h"
 #include "ui/natives.h"
+#include "ui/ui_objects.h"
+#include "ui/ui_host.h"
 #include "ui/ui_manager.h"
 
 extern const unsigned char kUiStubsTxt[];
@@ -19,6 +29,8 @@ extern const std::size_t kUiStubsTxtSize;
 namespace {
 
 constexpr int kX = ui::kPad_X, kTri = ui::kPad_Tri, kStart = ui::kPad_Start, kUp = ui::kPad_DUp, kDown = ui::kPad_DDown;
+// long_cheats.dta's frets (HX_XBOX): G_YELLOW, G_BLUE, G_ORANGE.
+constexpr int kYellow = ui::kPad_Circle, kBlue = ui::kPad_Square, kOrange = ui::kPad_L1;
 
 // The STUB whitelist (tests/ui_stubs.txt): prefixes, `*` at the end matches anything.
 std::vector<std::string> whitelist() {
@@ -50,6 +62,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
     auto screen = [&](const char* s, double timeout = 20000) { steps_.push_back({S::Screen, s, 0, timeout}); };
     auto press = [&](int b) { steps_.push_back({S::Press, "", b, 0}); };
     auto wait = [&](double ms) { steps_.push_back({S::Wait, "", 0, ms}); };
+    auto check = [&](const char* what, double timeout = 0) { steps_.push_back({S::Check, what, 0, timeout}); };
     // Each screen: wait until it is up and its transition is over, then a moment.
     auto at = [&](const char* s, double timeout = 20000) {
         screen(s, timeout);
@@ -70,6 +83,9 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
     };
     if (scenario == "quickplay") {
         endMs_ = 50000;  // long enough for a high score (the table's lowest is 10000)
+        wait(300);
+        press(kX);  // skips the three splashes (9 s otherwise)
+        check("splashes_skipped", 1000);
         at("splash_screen", 30000);
         press(kX);  // any button
         at("startup_create_save_screen");
@@ -78,6 +94,8 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         at("guitar_help_screen");
         press(kX);
         quickplaySong(3);
+        wait(3000);
+        check("task_clock_song");
         at("endgame_screen", 90000);
         wait(600);
         press(kX);  // CONTINUE (me_continue.btn)
@@ -112,6 +130,11 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         wait(2500);
         press(kStart);
         at("pause_screen");
+        press(kStart);  // Start again resumes
+        at("game_screen");
+        wait(1500);
+        press(kStart);
+        at("pause_screen");
         press(kDown);  // RESTART
         wait(150);
         press(kX);
@@ -129,8 +152,8 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         at("meta_loading_screen");
         at("qp_selsong_screen");
         expect_ = {"main_screen", "qp_selsong_screen", "qp_diff_screen", "loading_screen", "game_screen", "pause_screen",
-                   "pause_confirm_restart_screen", "game_screen", "pause_screen", "pause_confirm_quit_screen", "meta_loading_screen",
-                   "qp_selsong_screen"};
+                   "game_screen", "pause_screen", "pause_confirm_restart_screen", "game_screen", "pause_screen",
+                   "pause_confirm_quit_screen", "meta_loading_screen", "qp_selsong_screen"};
     } else if (scenario == "career") {
         at("splash_screen", 30000);
         press(kX);
@@ -143,6 +166,8 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         press(kUp);  // CAREER (main_career.btn)
         wait(150);
         press(kX);
+        at("chooseprof_screen");  // a save always has a band (The Glitches, the last slot)
+        press(kX);  // cp_band0.btn: NEW BAND
         at("nameprof_screen");
         press(kX);  // the band's name: "A"
         wait(150);
@@ -169,8 +194,55 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         at("tour_start_screen");
         press(kX);
         at("career_screen");
-        expect_ = {"main_screen", "nameprof_screen", "sel_difficulty_screen", "sel_character_new_screen", "sel_guitar_new_screen",
+        expect_ = {"main_screen", "chooseprof_screen", "nameprof_screen", "sel_difficulty_screen", "sel_character_new_screen", "sel_guitar_new_screen",
                    "tour_start_screen", "saving_screen", "career_screen"};
+    } else if (scenario == "back") {
+        at("main_screen");
+        check("camera_record");
+        for (int i = 0; i < 3; ++i) press(kDown), wait(150);  // QUICK PLAY -> TRAINING -> LEADERBOARDS -> OPTIONS
+        press(kX);
+        at("options_screen");
+        press(kX);  // Audio Settings (the focus)
+        at("audio_settings_screen");
+        press(kTri);
+        at("options_screen");
+        press(kTri);
+        at("main_screen");
+        check("camera_same");
+        expect_ = {"main_screen", "options_screen", "audio_settings_screen", "options_screen", "main_screen"};
+    } else if (scenario == "enhanced") {
+        at("main_screen");
+        for (int i = 0; i < 3; ++i) press(kDown), wait(150);  // OPTIONS
+        press(kX);
+        at("options_screen");
+        press(kDown), wait(150), press(kDown), wait(150);  // Audio Settings -> Video Settings -> Enhanced Options
+        press(kX);
+        at("enhanced_options_screen");
+        check("enhanced_default");
+        // Gamepads (the focus) -> 4 controls -> calibration -> Screen Mode -> Max FPS -> FPS Counter -> Internal Resolution.
+        for (int i = 0; i < 9; ++i) press(kDown), wait(120);
+        press(kX);  // the window's own -> 448p (ps2)
+        wait(300);
+        check("enhanced_changed");
+        press(kTri);
+        at("options_screen");
+        press(kTri);
+        at("main_screen");
+        expect_ = {"main_screen", "options_screen", "enhanced_options_screen", "options_screen", "main_screen"};
+    } else if (scenario == "cheats") {
+        // GH2's codes at the main menu (config/long_cheats.dta), a press every 120 ms.
+        auto code = [&](std::initializer_list<int> buttons) {
+            for (int b : buttons) press(b), wait(120);
+        };
+        at("main_screen");
+        code({kYellow, kBlue, kYellow, kOrange, kYellow, kBlue});  // Air Guitar
+        check("cheat_air_on");
+        code({kBlue, kOrange, kYellow, kOrange, kBlue, kOrange, kYellow, kYellow});  // Hyper Speed
+        check("cheat_hyper_on");
+        wait(900);  // more than 750 ms: the next press starts afresh
+        code({kYellow, kBlue, kYellow, kOrange, kYellow, kBlue});  // Air Guitar again: off
+        check("cheat_air_off");
+        expect_ = {"main_screen"};
     } else if (scenario == "attract") {
         endMs_ = 20000;
         at("splash_screen");
@@ -184,7 +256,8 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
 }
 
 std::string WalkDriver::startScreen() const {
-    if (scenario_ == "lose" || scenario_ == "pause") return "main_screen";
+    if (scenario_ == "lose" || scenario_ == "pause" || scenario_ == "back" || scenario_ == "enhanced" || scenario_ == "cheats")
+        return "main_screen";
     if (scenario_ == "attract") return "splash_screen";
     return "";
 }
@@ -219,11 +292,104 @@ void WalkDriver::poll(ui::UiManager& ui, double nowMs) {
         ui.buttonUp(s.button, 0);
         ++step_, stepStart_ = -1;
         return;
+    case Step::Check:
+        runCheck(ui, s, nowMs);
+        return;
     case Step::Wait:
     case Step::Hold:
         if (nowMs - stepStart_ >= s.ms) ++step_, stepStart_ = -1;
         return;
     }
+}
+
+// The main menu's camera and scene: the camera's position plus the sum of
+// every transform's world position in its view (the metacam moves the
+// camera's rig and the walls with each transition).
+static bool mainCamera(ui::UiManager& ui, std::array<float, 3>& pos) {
+    ui::PanelObj* p = ui.panel("main_panel");
+    if (!p || !p->view || !p->view->milo()) return false;
+    const gfx::Vec3 c = p->view->camera().position();
+    pos = {c.x, c.y, c.z};
+    gfx::UiView& v = *p->view;
+    auto add = [&](const scene::Object& o) {
+        if (!gfx::transOf(&o)) return;
+        const scene::Xfm w = v.pose().world(&o);
+        for (size_t k = 0; k < 3; ++k) pos[k] += w.pos[k];
+    };
+    v.milo()->root().forEach(add);
+    for (const scene::Milo* m : v.subdirs()) m->root().forEach(add);
+    return true;
+}
+
+void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
+    auto fail = [&](const std::string& e) { error_ = e, failed_ = done_ = true; };
+    if (s.screen == "splashes_skipped") {
+        if (!ui.inSplashes()) {
+            SDL_Log("walk: splashes skipped (%.1f s)", nowMs / 1000);
+            ++step_, stepStart_ = -1;
+        } else if (nowMs - stepStart_ > s.ms) {
+            fail("the splashes were not skipped by a button");
+        }
+        return;
+    }
+    if (s.screen == "camera_record" || s.screen == "camera_same") {
+        std::array<float, 3> pos{};
+        if (!mainCamera(ui, pos)) return fail("main_panel has no view");
+        if (s.screen == "camera_record") {
+            camera_ = pos;
+        } else {
+            float d = 0;
+            for (int k = 0; k < 3; ++k) d = std::max(d, std::fabs(pos[size_t(k)] - camera_[size_t(k)]));
+            std::printf("  camera: main menu at (%.2f %.2f %.2f), first at (%.2f %.2f %.2f)\n", pos[0], pos[1], pos[2], camera_[0],
+                        camera_[1], camera_[2]);
+            if (d > 0.01f) return fail("going back left the main menu's camera off its resting place");
+        }
+        ++step_, stepStart_ = -1;
+        return;
+    }
+    if (s.screen == "task_clock_song") {
+        // In a game the TaskMgr's kTaskSeconds is the song's time (0x822CDEB8),
+        // not the time spent in the menus: the faces' lip sync and the venue's
+        // tasks run on it.
+        const double task = ui.interp().tasks().time(kTaskSeconds), song = ui.host().gameTimeMs() / 1000.0;
+        std::printf("  task clock: kTaskSeconds %.3f, song %.3f s\n", task, song);
+        if (!ui.host().gameLoaded() || std::fabs(task - song) > 0.05) return fail("kTaskSeconds does not follow the song in the game");
+        ++step_, stepStart_ = -1;
+        return;
+    }
+    // The Enhanced Options: Internal Resolution at its default (the
+    // window's own), then 448p after one select, saved in enhanced.json.
+    if (s.screen == "enhanced_default" || s.screen == "enhanced_changed") {
+        const std::string want = s.screen == "enhanced_default" ? "0" : "448";
+        const std::string got = ui.host().enhancedValue("internal_res");
+        std::printf("  enhanced: internal_res %s\n", got.c_str());
+        if (got != want) return fail("Internal Resolution is " + got + ", not " + want);
+        if (s.screen == "enhanced_changed") {
+            std::ifstream f(std::filesystem::path(ui.savePath()).parent_path() / "enhanced.json");
+            std::stringstream ss;
+            ss << f.rdbuf();
+            std::string saved;
+            try {
+                saved = Json::parse(ss.str())["internal_res"].str();
+            } catch (const std::exception& e) {
+                saved = e.what();
+            }
+            std::printf("  enhanced.json: internal_res %s\n", saved.c_str());
+            if (saved != want) return fail("enhanced.json does not have the change");
+        }
+        ++step_, stepStart_ = -1;
+        return;
+    }
+    if (s.screen == "cheat_air_on" || s.screen == "cheat_air_off" || s.screen == "cheat_hyper_on") {
+        const bool air = ui.cheatOn("cheat_air_guitar"), hyper = ui.cheatOn("cheat_hyper_speed_mode");
+        std::printf("  cheats: air guitar %s, hyper speed %s\n", air ? "on" : "off", hyper ? "on" : "off");
+        if (s.screen == "cheat_air_on" && !air) return fail("the Air Guitar code did not turn it on");
+        if (s.screen == "cheat_air_off" && air) return fail("the Air Guitar code did not turn it off again");
+        if (s.screen == "cheat_hyper_on" && !hyper) return fail("the Hyper Speed code did not turn it on");
+        ++step_, stepStart_ = -1;
+        return;
+    }
+    fail("unknown check " + s.screen);
 }
 
 int WalkDriver::finish(ui::UiManager& ui) {
@@ -267,6 +433,21 @@ int WalkDriver::finish(ui::UiManager& ui) {
             std::printf("  FAIL career.json has no score of the song\n");
             ok = false;
         }
+    }
+    // The port's band in every save: a fresh career.json has The Glitches.
+    if (scenario_ == "quickplay" || scenario_ == "career") {
+        std::ifstream f(ui.savePath());
+        std::stringstream ss;
+        ss << f.rdbuf();
+        int glitches = 0;
+        try {
+            const Json save = Json::parse(ss.str());
+            for (const Json& p : save["profiles"].a)
+                if (p["in_use"].truthy() && p["name"].str() == Career::kGlitches) ++glitches;
+        } catch (const std::exception&) {
+        }
+        std::printf("  bands: %d named %s\n", glitches, Career::kGlitches);
+        if (glitches != 1) std::printf("  FAIL career.json does not have The Glitches once\n"), ok = false;
     }
     // The career's look: career.json's first band at Medium (campaign
     // set_character_info), and player 0's config back from it.

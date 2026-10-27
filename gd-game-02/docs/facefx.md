@@ -144,3 +144,14 @@ servo's place in the rig order (docs/band.md "Faces"), the band (`game/band.cpp`
 `facefx::ExpressionScript` mirrors the gh2 type's handlers for code that does not run them through the
 interpreter. `--facefxtest` parses every archive and checks the graph values against the M9 research
 parser (`facefx.py graph_eval`) at 96 sample times, plus the servo semantics above.
+
+**The song clock (fixed 2026-10-27).** The servo's song seconds are the TaskMgr's kTaskSeconds, which
+GH2's Game sets from the song: the lead-in at the start (0x822CBD18), then every poll (0x822CDEB8, through
+the setter 0x823118F8) [C]. gd02 set it from the song only without the menus (`--song`); with GH2's front
+end the UI manager overwrote it every frame with the seconds spent in the menus. So in a real game every
+.voc ran ahead of the music by the time spent in the menus: the singer mouthed the wrong words, and once
+that time passed the .voc's last key (about 2.5 minutes for hangar18) its FxAnimPlayer stopped (state 4)
+and the face never posed again; expressions and blinks ran on the same wrong clock. Now
+`UiManager::taskSeconds` gives the song time while a game is loaded and `World::setClock` sets it before
+the band polls (`--walktest quickplay` checks kTaskSeconds against the song in the game).
+`GD02_FACE_CAM=<member>[:<distance>]` frames a band member's head in the game to look at the faces.

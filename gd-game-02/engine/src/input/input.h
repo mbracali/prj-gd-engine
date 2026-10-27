@@ -56,6 +56,7 @@ struct InputEvent {
     ControllerMode mode;   // mode of the device that produced it
     int player = 0;        // the player slot of the device
     bool analog = false;   // Whammy from an analog bar (the value is whammyValue()), not a key or button
+    bool joypad = false;   // from a joypad's layout (frets on the triggers, shoulders and A), not a guitar or the keyboard
 };
 
 inline int fretOf(Action a) { return static_cast<int>(a) - static_cast<int>(Action::Fret0); }
@@ -106,9 +107,10 @@ public:
     void handle(const SDL_Event& e, std::vector<InputEvent>& out);
     // The mode of the device that acted last (the app starts a song with it).
     ControllerMode lastMode() const { return lastMode_; }
-    // In a song (the menus' one-press-from-two-devices filter is off, the
-    // guitars' green / red frets stop being Confirm / Back, Enter strums).
+    // In a song (the menus' one-press-from-two-devices filter is off, Enter
+    // strums, Back pauses).
     void setInGame(bool on) { inGame_ = on; }
+    bool inGame() const { return inGame_ || lanes_[0].active || lanes_[1].active; }
     // The analog whammy of player `player`'s pads (-1: any pad), 0 at rest ..
     // 1 fully pressed; the Whammy action still fires past a threshold.
     float whammyValue(int player = -1) const;
@@ -245,7 +247,6 @@ private:
     void controlEdge(Control c, bool down, ControllerMode mode, int player, bool joypad, uint64_t ts, std::vector<InputEvent>& out);
     void controlEdges(const std::array<bool, size_t(Control::Count)>& was, const std::array<bool, size_t(Control::Count)>& now,
                       ControllerMode mode, int player, bool joypad, uint64_t ts, std::vector<InputEvent>& out);
-    bool inGame() const { return inGame_ || lanes_[0].active || lanes_[1].active; }
     bool slotTaken(int slot, const Pad* except) const;
     void keyEvent(const SDL_KeyboardEvent& k, std::vector<InputEvent>& out);
     std::string savePath(const char* file) const;
@@ -286,7 +287,8 @@ private:
     std::array<int, kTouchOptions> touchOpt_ = {0, 0, 1, 0};
     bool touchUsed_ = false;  // the screen was touched since the last key or button
     std::array<bool, 2> lefty_{};
-    bool curGuitar_ = false;  // the device being read is a guitar (menus: green / red, lefty strum)
+    bool curGuitar_ = false;  // the device being read is a guitar (lefty strum)
+    bool curJoypad_ = false;  // the device being read plays with the joypad layout (InputEvent::joypad)
     bool curAnalog_ = false;  // the device being read has an analog whammy
     bool touch_ = true, gamepadPlay_ = true, rockBand_ = false, rbMappings_ = false;
     std::function<void(float, float, float&, float&)> toMenu_;

@@ -60,7 +60,15 @@ public:
     };
 
     Career() { clear(); }
-    void clear();  // a fresh save: no profiles, default options
+    void clear();  // a fresh save: The Glitches only, default options
+
+    // The port's band in every save (not in GH2): a fresh save has it, and a
+    // save without it gets it in its last free slot (none free: not added).
+    // Its look at every difficulty is `glitchesLook` (the UI sets GH2's
+    // default one), starting cash 50 (config/campaign.dta).
+    static constexpr const char* kGlitches = "The Glitches";
+    CharInfo glitchesLook{"punk", "punk1", "", ""};
+    bool ensureGlitches();  // true when it was added
 
     std::array<Profile, kProfiles> profiles;
     std::map<std::string, bool> items;  // unlocked / bought store items (store.dta symbols)

@@ -15,6 +15,7 @@
 #include "scene/ui_styles.h"
 #include "script/tasks.h"
 #include "ui/char_select.h"
+#include "ui/enhanced_panel.h"
 #include "ui/gamepad_panel.h"
 #include "ui/natives.h"
 #include "ui/ui_host.h"
@@ -65,6 +66,7 @@ public:
         for (const char* t : {"help_bar.mesh", "help_bar_strum.mesh", "help_bar_starting.mesh", "help_bar_strumbar.mesh", "help_bar.txt"})
             view->setShowing(t, false);
         view->overlay = [this](gfx::MaterialRenderer& r) { drawItems(r); };
+        yellowIcon();
     }
 
     void setDisplay(const Value& v) {
@@ -84,6 +86,30 @@ public:
     }
 
 private:
+    // GH2's help items use only fret1 (green), fret2 (red) and strum; the
+    // disc's hb_fret3.tex is an unused placeholder without alpha (a yellow
+    // shape on black with white bars). A fret3 item (none of GH2's screens
+    // has one now) gets the green icon recoloured yellow instead, as gd01 does.
+    void yellowIcon() {
+        scene::Object* green = view->find("hb_fret1.tex");
+        scene::Object* yellow = view->find("hb_fret3.tex");
+        auto* src = green ? green->as<scene::Tex>() : nullptr;
+        auto* dst = yellow ? yellow->as<scene::Tex>() : nullptr;
+        std::vector<uint8_t> px;
+        if (!src || !dst || !scene::decodeBitmapRgba(src->bitmap, 0, px)) return;
+        for (size_t i = 0; i + 3 < px.size(); i += 4) {
+            const uint8_t g = px[i + 1], b = px[i + 2];  // green -> yellow
+            px[i] = uint8_t(std::min(255.0f, g * 1.4f)), px[i + 1] = uint8_t(std::min(255.0f, g * 1.25f)), px[i + 2] = uint8_t(b * 0.25f);
+        }
+        scene::Bitmap bmp;
+        bmp.format = scene::Bitmap::Format::RGBA8;
+        bmp.bpp = 32;
+        bmp.width = src->bitmap.levels[0].width, bmp.height = src->bitmap.levels[0].height;
+        bmp.levels.push_back({bmp.width, bmp.height, 0, px.size()});
+        bmp.data.assign(px.begin(), px.end());
+        dst->bitmap = std::move(bmp);
+    }
+
     float prop(const char* key, float def) {
         const Value v = getProp(ui.interp(), key);
         return v.isNumber() ? v.number() : def;
@@ -366,7 +392,7 @@ const std::vector<std::string>& knownClasses() {
         "GHScreen", "UIScreen", "MultiSelectScreen", "TrackBudgetScreen", "GHPanel", "UIPanel", "MetaPanel", "HelpBarPanel",
         "SelSongPanel", "SliderPanel", "EndGamePanel", "FadePanel", "GamePanel", "HudPanel", "TrackPanel", "TrackMaskPanel",
         "MidiLoaderPanel", "LagPanel", "CreditsPanel", "StatsProvider", "MultiSelectPanel", "GuitarDisplayPanel", "CharsysPanel",
-        "GuitarSelectPanel", "StorePanel", "MultiCharSelPanel", "MultiSelectListPanel", "TutorialPanel", "GamepadPanel"};
+        "GuitarSelectPanel", "StorePanel", "MultiCharSelPanel", "MultiSelectListPanel", "TutorialPanel", "GamepadPanel", "EnhancedPanel"};
     return k;
 }
 
@@ -385,6 +411,7 @@ std::unique_ptr<ScriptObject> makeClassObject(UiManager& ui, const std::string& 
     if (cls == "CreditsPanel") return std::make_unique<CreditsPanelObj>(ui, name);
     if (cls == "StatsProvider") return std::make_unique<StatsProviderObj>(name, cls);
     if (cls == "GamepadPanel") return makeGamepadPanel(ui, name);
+    if (cls == "EnhancedPanel") return makeEnhancedPanel(ui, name);
     // GHPanel / UIPanel, and the classes of screens outside quickplay
     // (career, multiplayer, store, tutorials: later milestones) as plain panels.
     if (std::find(knownClasses().begin(), knownClasses().end(), cls) != knownClasses().end())

@@ -12,7 +12,11 @@
 // orange = kPad_Circle / kPad_Square / kPad_L1); "+key" only presses it,
 // "-key" only releases it (holds, for the menus' key repeat); "p2key" is
 // player 2. Items written "s<song ms>:<key>" are song items (game/
-// key_script.h) and are skipped here.
+// key_script.h) and are skipped here. "k<SDL key name>" (kTab, kReturn,
+// kEscape, k1, kUp) is a real keyboard key and "j<SDL gamepad button>"
+// (ja, jb, jstart, jdpup) a button of GD02_VIRTUAL_PAD's controller: both
+// go through the input layer (bindings, key repeat, the frets' menu
+// buttons), not straight to the menus; a "j" press is released 80 ms on.
 class MenuKeys {
 public:
     struct Key {
@@ -20,6 +24,8 @@ public:
         int button;  // kPad_*
         int edge;    // 0 press and release, 1 press, -1 release
         int player;
+        int keycode = 0;   // "k": an SDL_Keycode (button unused)
+        int padButton = -1;  // "j": an SDL_GamepadButton (button unused)
     };
     MenuKeys() = default;
     explicit MenuKeys(const std::string& text);

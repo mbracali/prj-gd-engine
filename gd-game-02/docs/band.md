@@ -345,7 +345,11 @@ servo's CharWeightable weight, which is 1 on every disc servo). The gh2
 type's expression task (ExpressionScript: pick_expression at enter /
 intro, do_pick_expression every 1.5-2.5 s from the bad or good list by the
 game's excitement, override_expression OwFace / resume_random_expression
-on ow_face_on / off) runs whether the character shows or not.
+on ow_face_on / off) runs whether the character shows or not. All of it
+runs on kTaskSeconds = the song's seconds in a game (0x822CDEB8) [C]; with
+the menus gd02 used to leave the menus' seconds there, which pushed the
+singer's lip sync off the music and stopped it after a few minutes in the
+menus (fixed 2026-10-27, docs/facefx.md).
 
 ## Walks and interacts (M9.6; game/band.cpp, char/char_walk.cpp) [C unless noted]
 
@@ -584,7 +588,9 @@ guitar | bass | grim | cheat)`, skins with outfit milo and mat),
   one character posed (`char/<o>/ng/gen/<o>_ui.milo_xbox` with
   `GD02_VIEW_CLIP=ui_loop`: the menu character). In game: `GD02_CHAR=<outfit>`, `GD02_GUITAR=<guitar>`, `GD02_SKIN=<skin>`,
   `GD02_NO_BAND=1`, `GD02_BANDLOG=1` (clips, walks, arrivals, interacts),
-  `GD02_FORCE_SHOT=<CamShot>`, `GD02_TRACK=0` (no track, to see the band).
+  `GD02_FORCE_SHOT=<CamShot>`, `GD02_TRACK=0` (no track, to see the band),
+  `GD02_FACE_CAM=<member>[:<distance>]` (a close-up of that member's head:
+  `singer`, `guitarist0`, ...).
 
 ## Open
 

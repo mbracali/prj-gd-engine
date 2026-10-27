@@ -25,7 +25,7 @@ matches the tag's version. Nothing is released yet.
   light shows, spotlights, bloom and depth of field, the crowd and its
   cheering, and the encore effects.
 - Progress and options saved to `career.json`, and a GAMEPADS screen to set
-  up guitars and gamepads.
+  up guitars and gamepads (in Options > Enhanced Options).
 - The band on stage: Guitar Hero II's characters play along with the song,
   with their hands on the notes, faces, blinks and lip sync, solo walks and
   band interactions.
@@ -35,3 +35,28 @@ matches the tag's version. Nothing is released yet.
   reverb.
 - Character, outfit, guitar and skin choice in Career, saved with your band,
   and the band photo in the results newspaper.
+- Enhanced Options (in Options): the PC version's own settings over a live
+  shot of the band on stage. Screen mode, maximum frame rate, an FPS counter
+  and the internal resolution (from the PS2's 448p and the Xbox 360's 720p up
+  to 4K) work now and are remembered; the others are listed for later.
+- Guitar Hero II's cheats: enter the original button codes at the main menu,
+  or switch them in Enhanced Options. Unlock All, Air Guitar, Performance
+  Mode, Hyper Speed and the Eyeball / Monkey Head crowds work; Flaming Head
+  does not burn yet.
+- A band called The Glitches in every save.
+
+### Changed
+- Options is laid out like the original (Audio, Video, Manage Band, Data,
+  Bonus Videos, Credits) with Enhanced Options added; GAMEPADS moved there
+  from Options and the main menu.
+- Green selects and red goes back with every guitar, gamepad and the
+  keyboard; Back (Esc) pauses a song like Start; Esc three times on the main
+  menu quits.
+- The logos and videos at start-up can be skipped with a button.
+- Notes are judged by Guitar Hero II's own rules (hammer-ons and pull-offs,
+  chords, holding sustains), and the band's faces and lip sync keep time
+  with the song.
+
+### Fixed
+- Going back to the main menu no longer leaves its camera off to one side.
+- Audio Settings shows its button help at the bottom and its whole poster.

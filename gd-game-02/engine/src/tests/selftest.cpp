@@ -264,6 +264,34 @@ int runRuleChecks(const Rules& rules) {
         Play r2 = play(s, rules, "999:+green,1000:strum,1480:-green", 3000);
         check("sustain: 2 beats = 50 tail points held fully, 25 when let go halfway", r.p->score() == 100 && r2.p->score() == 75);
         check("sustain: base score counts the tail (50 + 960 x 25 / 480 = 100 for the first gem)", r.p->baseScore() == 100 + 50);
+        // 0x823500c8 [C]: a fret pressed below a sustained single note (an anchor) keeps it, one above ends it.
+        Song y = makeSong({{1000, Y, 960}, {5000, R}});
+        Play r3 = play(y, rules, "999:+yellow,1000:strum,1200:+green,2500:-yellow", 3000);
+        Play r4 = play(y, rules, "999:+yellow,1000:strum,1480:+blue,2500:-yellow", 3000);
+        check("sustain: a lower fret pressed during a single sustain keeps it; a higher one ends it",
+              r3.p->score() == 100 && r4.p->score() == 75);
+        // On a chord any press ends it; letting go of any of its frets too (0x8234f110).
+        Song c = makeSong({{1000, G | R, 960}, {5000, R}});
+        Play r5 = play(c, rules, "998:+green,999:+red,1000:strum,1480:+yellow,2500:-green,2500:-red", 3000);
+        Play r6 = play(c, rules, "998:+green,999:+red,1000:strum,1480:-green,2500:-red", 3000);
+        check("sustain: on a chord any extra fret or any released fret ends it", r5.p->score() == 150 && r6.p->score() == 150);
+    }
+    {
+        // GH2 lets lower frets be held on a single note (strum and HOPO: 0x8234eb60 compares the gem's fret with
+        // the highest held one; 0x8234f210 needs no held fret above it); a chord needs exactly its frets [C].
+        Song s = makeSong({{1000, Y}, {3000, Y}, {5000, G | Y}, {7000, G | Y}});
+        Play r = play(s, rules, "990:+green,995:+yellow,1000:strum,1100:-green,1100:-yellow,2990:+yellow,2995:+blue,3000:strum,3100:-blue,"
+                                "3100:-yellow,4990:+green,4992:+red,4995:+yellow,5000:strum,5100:-green,5100:-red,5100:-yellow,"
+                                "6990:+yellow,7000:strum",
+                       8000);
+        check("anchoring: green + yellow held hits a single yellow; yellow + blue does not",
+              r.p->gemHit(0) && !r.p->gemHit(1) && r.count(K::Miss, 1) == 1);
+        check("chords are exact: an extra lower fret or a missing fret misses",
+              !r.p->gemHit(2) && !r.p->gemHit(3) && r.count(K::Miss, 2) == 1 && r.count(K::Miss, 3) == 1);
+        Song h = makeSong({{1000, R}, {1100, Y}, {1200, R}, {3000, G}});
+        Play r2 = play(h, rules, "990:+green,995:+red,1000:strum,1100:+yellow,1200:-yellow", 2000);
+        check("HOPOs with an anchor: hammer-on to yellow and pull-off to red with green held",
+              r2.count(K::Hopo, 1) == 1 && r2.count(K::Hopo, 2) == 1 && r2.p->penalties() == 0);
     }
     {
         Song s = makeSong({{1000, G}, {1300, G}, {2000, G}, {2300, G}, {4000, G}, {5000, G}, {5300, G}, {14000, G}},

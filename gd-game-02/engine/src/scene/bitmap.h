@@ -18,7 +18,7 @@ namespace scene {
 // Then a palette (bpp <= 8 and no compressed encoding bit, never in GH2) and
 // each level, largest first (RndBitmap::Load @ 0x821f1f38).
 struct Bitmap {
-    enum class Format { None, DXT1, DXT5, ATI2, Other };
+    enum class Format { None, DXT1, DXT5, ATI2, Other, RGBA8 };  // RGBA8: made by the port (never on the disc)
     struct Level {
         int width = 0, height = 0;
         size_t offset = 0, size = 0;  // into `data`

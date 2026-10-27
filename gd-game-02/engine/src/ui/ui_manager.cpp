@@ -18,6 +18,7 @@
 #include "scene/ui_objects.h"
 #include "scene/ui_styles.h"
 #include "script/tasks.h"
+#include "ui/char_select.h"
 #include "ui/natives.h"
 #include "ui/screen_text.h"
 #include "ui/ui_host.h"
@@ -68,7 +69,6 @@ void UiManager::logOnce(const std::string& what) {
 }
 
 std::string UiManager::localize(const std::string& token) const {
-    if (token == "port_gamepads") return "GAMEPADS";  // the port's own help bar entry
     return locale_ ? locale_->text(token) : token;
 }
 
@@ -165,15 +165,35 @@ bool UiManager::init(std::string& error, bool headless) {
         interp_.runList(*init, 1);
     }
     runPortScripts();
+    // The long cheats: ((<buttons>) {script}) each, the buttons kPad_*
+    // through config/long_cheats.dta's G_GREEN.. macros (HX_XBOX).
+    if (const DataNode* lc = boot_->find("long_cheats"))
+        for (size_t k = 1; k < lc->children.size(); ++k) {
+            const DataNode& c = lc->children[k];
+            if (!c.isList() || c.children.size() < 2 || !c.children[0].isList()) continue;
+            LongCheat cheat;
+            for (const DataNode& b : c.children[0].children)
+                cheat.buttons.push_back(b.type == DataNode::Type::Int ? b.i : b.isText() ? macroInt(b.s, -1) : -1);
+            cheat.script = &c.children[1];
+            if (!cheat.buttons.empty()) longCheats_.push_back(std::move(cheat));
+        }
+    // The port's band in every save (Career::kGlitches): GH2's default look,
+    // main.dta's reset_player_settings (punk1) with its first guitar.
+    {
+        Session::PlayerCfg cfg;
+        chars::validate(*this, cfg);
+        career_.glitchesLook = {cfg.character, cfg.outfit, cfg.guitar, cfg.skin};
+        career_.clear();
+    }
     if (firstScreen_.empty()) firstScreen_ = interp_.var("first_screen").str();
     lastWall_ = double(SDL_GetTicksNS()) / 1e6;
     return true;
 }
 
-void UiManager::start(bool skipSplashes, const std::string& screen) {
+void UiManager::start(bool noSplashes, const std::string& screen) {
     if (!screen.empty()) firstScreen_ = screen;
     lastWall_ = double(SDL_GetTicksNS()) / 1e6;
-    if (!skipSplashes && !headless_) {
+    if (!noSplashes && !headless_) {
         // App init (0x82120208): ui/pub_splash.milo, activision_splash.milo,
         // harmonix_splash.milo, each a still picture while the game loads [C].
         for (const char* s : {"ui/gen/pub_splash.milo_xbox", "ui/gen/activision_splash.milo_xbox", "ui/gen/harmonix_splash.milo_xbox"})
@@ -206,22 +226,54 @@ void UiManager::runPortScripts() {
 }
 
 void UiManager::portPanelLoaded(PanelObj* p) {
-    // Options gets a GAMEPADS button under CREDITS (a copy of it), reached
-    // by its navigation (the port's own entry; [I] not in GH2).
+    // Audio Settings' poster (game_settings.milo) stands 40 units higher
+    // than Video Settings' (its mesh at z 20, not -20) and is taller: its top
+    // and top tape (z 223) were above the 16:9 picture's top (z ~216). The
+    // port lowers the poster, its tape, title and sliders by 24 units (the
+    // walls stay) so all of it shows [I: the original's framing not
+    // compared with a capture].
+    if (p->name() == "audio_settings_panel" && p->view && p->view->milo()) {
+        scene::Directory& root = p->view->milo()->root();
+        if (!root.get("vs_poster.mesh") || audioPosterLowered_.count(&root)) return;
+        audioPosterLowered_.insert(&root);
+        for (const auto& o : root.objects) {
+            if (o->name.rfind("vs_wall", 0) == 0) continue;
+            if (auto* t = const_cast<scene::Trans*>(gfx::transOf(o.get())); t && t->parent.empty()) t->local.pos[2] -= 24;
+        }
+        return;
+    }
+    // Options gets Enhanced Options (the port's own entry; [I] not in GH2)
+    // after Video Settings, as a copy of its button. GH2's six buttons keep
+    // their order and their staggered x; the seven share the six's column
+    // down to a row below Credits, each scaled to the closer rows.
     if (p->name() != "options_panel" || !p->view || !p->view->milo()) return;
     scene::Directory& root = p->view->milo()->root();
-    if (root.get("port_gamepads.btn")) return;
-    auto* credit = root.get("op_credit.btn") ? root.get("op_credit.btn")->as<scene::BandButton>() : nullptr;
-    auto* bonus = root.get("op_bonus.btn") ? root.get("op_bonus.btn")->as<scene::BandButton>() : nullptr;
-    if (!credit) return;
-    auto b = std::make_unique<scene::BandButton>(*credit);
-    b->name = "port_gamepads.btn";
-    const float step = bonus ? credit->trans.local.pos[2] - bonus->trans.local.pos[2] : -25.0f;
-    b->trans.local.pos[2] += step;
-    b->navDown = credit->navDown;
-    credit->navDown = b->name;
-    b->localize = false, b->text = "GAMEPADS";
+    if (root.get("port_enhanced.btn")) return;
+    auto button = [&](const char* name) { return root.get(name) ? root.get(name)->as<scene::BandButton>() : nullptr; };
+    scene::BandButton* video = button("video_settings.btn");
+    scene::BandButton* audio = button("op_audio.btn");
+    scene::BandButton* credit = button("op_credit.btn");
+    scene::BandButton* data = button("op_data.btn");
+    if (!video || !audio || !credit || !data) return;
+    auto b = std::make_unique<scene::BandButton>(*data);  // Manage Band's, the flattest tilt
+    b->name = "port_enhanced.btn";
+    b->localize = false, b->text = "Enhanced Options", b->textToken.clear();
+    b->band.width = 250;
+    b->trans.local.pos[0] = 30;
+    b->navDown = video->navDown;
+    video->navDown = b->name;
     root.add(std::move(b));
+    const char* const order[] = {"op_audio.btn", "video_settings.btn", "port_enhanced.btn", "op_data.btn",
+                                 "memory_card.btn",  "op_bonus.btn", "op_credit.btn"};
+    const float top = audio->trans.local.pos[2] + 4, bottom = credit->trans.local.pos[2] - 26;
+    const float step = (top - bottom) / 6, scale = 0.8f * std::min(1.0f, step / 31.5f);  // GH2's rows are 31.5 apart
+    int i = 0;
+    for (const char* n : order) {
+        scene::BandButton* bb = button(n);
+        if (!bb) continue;
+        bb->trans.local.pos[2] = top - step * float(i++);
+        bb->band.width *= scale, bb->band.height *= scale, bb->band.textSize *= scale;
+    }
 }
 
 void UiManager::defer(std::function<void()> fn) { deferred_.push_back(std::move(fn)); }
@@ -357,6 +409,12 @@ void UiManager::loadPanel(PanelObj* p) {
     if (!p->loaded) p->load();
 }
 
+void UiManager::panelViewLoaded(PanelObj* p) {
+    // It joins the shared metacam where it is (setMetacamFrame).
+    viewPanels_.insert(p->name());
+    for (const auto& [group, t] : metacam_) p->view->setFrame(group, t * p->view->endFrame(group));
+}
+
 void UiManager::enterPanel(PanelObj* p) {
     if (p->up) return;
     p->enter();
@@ -414,8 +472,8 @@ void UiManager::switchScreens() {
         if (p->up) continue;
         enterPanel(p);
         entered_.push_back(p);
-        if (p->view && !animIn) p->view->setFrame("trans_in_forward.grp", p->view->endFrame("trans_in_forward.grp"));
     }
+    if (!animIn) resetMetacam();
     callScript(to, "enter");
     route("screen_change", {Value::obj(to), Value::obj(from), Value::integer(back_ ? 1 : 0)});
     if (animIn) {
@@ -431,6 +489,7 @@ void UiManager::switchScreens() {
 void UiManager::finishTransition() {
     ScreenObj* to = current_;
     phase_ = Phase::Idle;
+    resetMetacam();
     next_ = nullptr;
     if (!to) return;
     // TRANSITION_COMPLETE_MSG to the screen and its panels.
@@ -442,18 +501,33 @@ void UiManager::finishTransition() {
             if (p->up) callScript(p, "transition_complete", args);
 }
 
+// GH2 keeps one metacam (ui/metacam.milo, loaded once by 0x822A1070) that
+// every panel's camera and bricks hang from; the port's panel views each
+// pose their own copy, so the metacam's frames go to all of them. Posing
+// only some copies left the others where their last transition put them:
+// going back, the main menu came back with the camera of its forward exit
+// still applied (off to one side) under the backward entrance.
+void UiManager::setMetacamFrame(const std::string& group, float t) {
+    auto it = std::find_if(metacam_.begin(), metacam_.end(), [&](const auto& g) { return g.first == group; });
+    if (it != metacam_.end()) metacam_.erase(it);
+    metacam_.emplace_back(group, t);
+    for (const std::string& name : viewPanels_)
+        if (PanelObj* p = panel(name); p && p->view) p->view->setFrame(group, t * p->view->endFrame(group));
+}
+
+// After every transition (and at boot) GH2 sets trans_in_forward.grp to its
+// end, the metacam's resting pose (0x8229FC98 / 0x822A1070).
+void UiManager::resetMetacam() {
+    metacam_.clear();
+    setMetacamFrame("trans_in_forward.grp", 1);
+}
+
 void UiManager::applyTransitionPose(float t) {
-    // GHScreen's metacam groups (0x822A1070): trans_out_* on the outgoing
-    // panels, trans_in_* on the incoming ones; panels in both stay.
+    // GHScreen's metacam groups (0x8229FB20): one group per phase,
+    // trans_out_* leaving the old screen, trans_in_* entering the new one.
     const std::string dir = back_ ? "backward" : "forward";
-    if (phase_ == Phase::Out && current_) {
-        for (PanelObj* p : current_->panels())
-            if (p->view && !(next_ && next_->hasPanel(p))) p->view->setFrame("trans_out_" + dir + ".grp", t * p->view->endFrame("trans_out_" + dir + ".grp"));
-    } else if (phase_ == Phase::In && current_) {
-        for (PanelObj* p : entered_)
-            if (p->view)
-                p->view->setFrame("trans_in_" + dir + ".grp", t * p->view->endFrame("trans_in_" + dir + ".grp"));
-    }
+    if (phase_ == Phase::Out && current_) setMetacamFrame("trans_out_" + dir + ".grp", t);
+    else if (phase_ == Phase::In && current_) setMetacamFrame("trans_in_" + dir + ".grp", t);
 }
 
 void UiManager::updateTransition() {
@@ -506,8 +580,18 @@ double UiManager::clockSeconds(int units) const {
     switch (units) {
     case kTaskUISeconds: return uiMs_ / 1000.0;
     case kTaskBeats: return host_.gameLoaded() ? host_.gameBeat() : 0.0;
-    default: return secondsMs_ / 1000.0;
+    default: return taskSeconds();
     }
+}
+
+// kTaskSeconds: in a game GH2's Game sets the TaskMgr's seconds (and beats)
+// from the song: the lead-in at the start (0x822CBD18), then every poll
+// (0x822CDEB8, through 0x823118F8) [C]. So the venue's, the band's and the
+// faces' kTaskSeconds tasks (the FaceFX lip sync and expressions) run on the
+// song clock, not on the time spent in the menus. Outside a game: the
+// menus' own seconds.
+double UiManager::taskSeconds() const {
+    return host_.gameLoaded() ? host_.gameTimeMs() / 1000.0 : secondsMs_ / 1000.0;
 }
 
 void UiManager::animate(PanelObj* panel, const std::string& object, float from, float to, float seconds, int units) {
@@ -546,17 +630,13 @@ void UiManager::update() {
         splashMs_ += frameDt_;
         if (splashMs_ >= 3000) {
             splashMs_ = 0;
-            if (++splash_ >= int(splashViews_.size())) {
-                splash_ = -1;
-                splashViews_.clear();
-                gotoScreen(firstScreen_);
-            }
+            if (++splash_ >= int(splashViews_.size())) skipSplashes();
         }
         if (splash_ >= 0) return;
     }
     TaskMgr& tm = interp_.tasks();
     tm.setTime(kTaskUISeconds, uiMs_ / 1000.0);
-    tm.setTime(kTaskSeconds, secondsMs_ / 1000.0);
+    tm.setTime(kTaskSeconds, taskSeconds());
     tm.setTime(kTaskTutorialSeconds, secondsMs_ / 1000.0);
     tm.setTime(kTaskBeats, host_.gameLoaded() ? host_.gameBeat() : 0.0);
     tm.poll();
@@ -572,6 +652,8 @@ void UiManager::update() {
             if (p->up) p->poll(frameDt_);
         if (current_ && current_->handler("poll")) callScript(current_, "poll");
         updateRepeat(frameDt_);
+    } else {
+        for (Held& h : held_) h.ms = 0, h.repeating = false;  // a held direction restarts after a transition (gd01)
     }
 }
 
@@ -606,12 +688,22 @@ void UiManager::action(const InputEvent& e) {
     case Action::Confirm: pad = kPad_X; break;
     case Action::Back: pad = kPad_Tri; break;
     case Action::Start: pad = kPad_Start; break;
-    case Action::Fret2: pad = kPad_Circle; break;   // yellow
-    case Action::Fret3: pad = kPad_Square; break;   // blue
-    case Action::Fret4: pad = kPad_L1; break;       // orange
+    // The frets are the 360 guitar's buttons (hx_guitar_xbox_new: A B Y X LB
+    // [C]): green selects and red goes back on every controller, as in gd01
+    // (App::uiButton). A joypad's yellow / blue / orange are RB / RT / A,
+    // not its Y / X / LB, so only its green / red count (A already selects).
+    case Action::Fret0: pad = kPad_X; break;                        // green
+    case Action::Fret1: pad = kPad_Tri; break;                      // red
+    case Action::Fret2: pad = e.joypad ? -1 : kPad_Circle; break;   // yellow
+    case Action::Fret3: pad = e.joypad ? -1 : kPad_Square; break;   // blue
+    case Action::Fret4: pad = e.joypad ? -1 : kPad_L1; break;       // orange
     case Action::StarPower: pad = kPad_Select; break;
-    default: break;  // green / red come as Confirm / Back; strum as Up / Down
+    default: break;  // strum comes as Up / Down
     }
+    // A joypad's yellow / blue / orange still enter the cheats' codes
+    // (long_cheats.dta's G_YELLOW / G_BLUE / G_ORANGE).
+    if (pad < 0 && e.down && splash_ < 0 && e.action >= Action::Fret2 && e.action <= Action::Fret4)
+        feedCheats(e.action == Action::Fret2 ? kPad_Circle : e.action == Action::Fret3 ? kPad_Square : kPad_L1);
     if (pad < 0) return;
     if (e.down) buttonDown(pad, e.player);
     else buttonUp(pad, e.player);
@@ -620,7 +712,80 @@ void UiManager::action(const InputEvent& e) {
 void UiManager::buttonDown(int button, int player) {
     player = std::clamp(player, 0, 1);
     if (isDirection(button)) held_[size_t(player)] = {button, 0, false};
+    if (splash_ < 0) feedCheats(button);
+    if (splash_ >= 0) {
+        // The original's splashes can't be skipped [I]; the port skips them
+        // all on select, back or Start, as gd01 skips its boot logos.
+        if (button == kPad_X || button == kPad_Tri || button == kPad_Circle || button == kPad_Start) skipSplashes();
+        return;
+    }
     routeButton(button, player);
+}
+
+// CheatsManager (0x8235B5B0) [C]: a press more than 750 ms after the last
+// one starts the buttons afresh (and completes no cheat); the last 16 are
+// kept; when the latest ones are a cheat's buttons its script runs (the
+// script checks it is allowed: the main menu, no transition) and the
+// buttons start afresh.
+void UiManager::feedCheats(int button) {
+    const double now = double(SDL_GetTicksNS()) / 1e6;
+    bool fresh = false;
+    if (!cheatButtons_.empty() && now - cheatLastMs_ > 750) cheatButtons_.clear(), fresh = true;
+    cheatLastMs_ = now;
+    cheatButtons_.push_back(button);
+    while (cheatButtons_.size() > 16) cheatButtons_.pop_front();
+    if (fresh) return;
+    for (const LongCheat& c : longCheats_) {
+        if (c.buttons.size() > cheatButtons_.size()) continue;
+        if (!std::equal(c.buttons.begin(), c.buttons.end(), cheatButtons_.end() - std::ptrdiff_t(c.buttons.size()))) continue;
+        cheatButtons_.clear();
+        try {
+            interp_.eval(*c.script);
+        } catch (const std::exception& e) {
+            SDL_Log("ui: long cheat: %s", e.what());
+        }
+        return;
+    }
+}
+
+// The scripts' cheat variables (config/long_cheats.dta, reset_all_cheats).
+bool UiManager::cheatOn(const std::string& id) const {
+    auto& in = const_cast<Interp&>(interp_);
+    if (id == "cheat_unlock_all") return in.var("cheat_enabled_unlock_all").truthy();
+    if (id == "cheat_air_guitar") return in.var("cheat_guitar").str() == "air_guitar";
+    if (id == "cheat_performance_mode") return in.var("cheat_enabled_performance_mode").truthy();
+    if (id == "cheat_hyper_speed_mode") return in.var("cheat_enabled_hyper_speed_mode").truthy();
+    if (id == "cheat_flaming_head") return in.var("cheat_enabled_flaming_head").truthy();
+    if (id == "cheat_eyeball_head_crowd") return in.var("cheat_crowd_heads").str() == "eyeball_crowd_heads";
+    if (id == "cheat_monkey_head_crowd") return in.var("cheat_crowd_heads").str() == "monkey_crowd_heads";
+    return false;
+}
+
+void UiManager::setCheat(const std::string& id, bool on) {
+    if (cheatOn(id) == on) return;
+    if (id == "cheat_unlock_all") {
+        // The code's script turns it on; reset_all_cheats off.
+        interp_.var("cheat_enabled_unlock_all") = Value::integer(on ? 1 : 0);
+        interp_.var("disable_save") = Value::integer(on ? 1 : 0);
+        interp_.var("disable_career") = Value::integer(on ? 1 : 0);
+        session_->allAccess = on;
+    } else if (id == "cheat_air_guitar") {
+        interp_.var("cheat_guitar") = on ? Value::symbol("air_guitar") : Value::integer(0);
+    } else if (id == "cheat_performance_mode" || id == "cheat_hyper_speed_mode" || id == "cheat_flaming_head") {
+        const std::string var = id == "cheat_flaming_head" ? "cheat_enabled_flaming_head" : "cheat_enabled_" + id.substr(6);
+        interp_.var(var) = Value::integer(on ? 1 : 0);
+    } else if (id == "cheat_eyeball_head_crowd" || id == "cheat_monkey_head_crowd") {
+        interp_.var("cheat_crowd_heads") = on ? Value::symbol(id == "cheat_eyeball_head_crowd" ? "eyeball_crowd_heads" : "monkey_crowd_heads") : Value::integer(0);
+    } else {
+        return;
+    }
+    playSfx(on ? "cheat" : "cheat_off");
+}
+
+void UiManager::skipSplashes() {
+    splash_ = -1, splashMs_ = 0;
+    splashViews_.clear();
+    gotoScreen(firstScreen_);
 }
 
 void UiManager::routeButton(int button, int player) {

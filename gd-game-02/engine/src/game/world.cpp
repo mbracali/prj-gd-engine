@@ -380,6 +380,11 @@ void World::setClock(double seconds, double beats) {
         own_->tasks().setTime(kTaskBeats, beats);
         own_->tasks().setTime(kTaskUISeconds, seconds);
         own_->tasks().setTime(kTaskTutorialSeconds, seconds);
+    } else if (interp_) {
+        // The menus' interpreter: the game sets the TaskMgr's seconds from
+        // the song before the world and the band poll (0x822CDEB8) [C]; the
+        // UI keeps it there for the frame (UiManager::taskSeconds).
+        interp_->tasks().setTime(kTaskSeconds, seconds);
     }
 }
 

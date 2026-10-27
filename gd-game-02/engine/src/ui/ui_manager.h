@@ -10,6 +10,7 @@
 #include <set>
 #include <string>
 #include <vector>
+#include <utility>
 
 #include "script/script.h"
 #include "ui/career.h"
@@ -70,7 +71,7 @@ public:
     bool init(std::string& error, bool headless = false);
     // Boot: GH2's three splash milos (unless `skipSplashes`), then the
     // screen the init script asked for (or `screen`, GD02_SCREEN).
-    void start(bool skipSplashes, const std::string& screen = "");
+    void start(bool noSplashes, const std::string& screen = "");
 
     // One frame: clocks and tasks, transitions, polls, key repeat, anims.
     void update();
@@ -85,6 +86,7 @@ public:
 
     std::string currentScreen() const;
     bool inTransition() const;
+    bool inSplashes() const { return splash_ >= 0; }
     // The game panel is up (the song is the UI's).
     bool inGame() const;
     // Screens entered so far, in order (the walk test).
@@ -126,6 +128,8 @@ public:
     // A task clock in seconds (kTaskSeconds: game time, paused with the
     // game; kTaskUISeconds: the menus'; kTaskBeats: the song's beats).
     double clockSeconds(int units) const;
+    // kTaskSeconds now: the song in a game, else the menus' seconds.
+    double taskSeconds() const;
     // A sound effect (logged as a STUB until GH2's banks are decoded).
     void playSfx(const std::string& name, float volumeDb = 0, float pan = 0, float transpose = 0);
     void logOnce(const std::string& what);
@@ -143,8 +147,10 @@ public:
     void defer(std::function<void()> fn);
     // The options (volumes, lefty, sync offset) to the program.
     void applyOptions();
-    // The port's additions to a panel just loaded (Options' GAMEPADS button).
+    // The port's changes to a panel just loaded (Options' Enhanced Options button, Audio Settings' poster).
     void portPanelLoaded(PanelObj* p);
+    // A panel's view was just made (its copy of the metacam follows the others).
+    void panelViewLoaded(PanelObj* p);
     bool loadSave(int& result);
     SaveFile& saveFile() { return *save_; }
     // Every object `new` made (the --uitest checks).
@@ -158,6 +164,14 @@ public:
     Value foreachPlayer(const std::vector<Value>& args);
     // The help bar shows what the current screen's (helpbar ...) says.
     void updateHelpbar();
+    // GH2's long cheats (config/long_cheats.dta, CheatsManager 0x8235B5B0):
+    // every button pressed, any player; see feedCheats.
+    void feedCheats(int button);
+    // The cheats' names (cheat_* locale tokens) and whether each is on now,
+    // as the scripts' variables say (the Enhanced Options' CHEATS section).
+    bool cheatOn(const std::string& id) const;
+    // Turns a cheat on or off as its button code does (Enhanced Options).
+    void setCheat(const std::string& id, bool on);
 
 private:
     friend class PanelObj;
@@ -170,6 +184,9 @@ private:
     void applyTransitionPose(float t);
     void updateAnims();
     void updateRepeat(double dtMs);
+    void skipSplashes();  // the splashes are over: the first screen
+    void setMetacamFrame(const std::string& group, float t);  // t 0..1 of the group, on every panel's metacam
+    void resetMetacam();
     void routeButton(int button, int player);
     void enterPanel(PanelObj* p);
     void exitPanel(PanelObj* p);
@@ -198,6 +215,16 @@ private:
     Career career_;
     std::unique_ptr<SaveFile> save_;
     std::set<std::string> logged_;
+    std::set<const void*> audioPosterLowered_;  // portPanelLoaded: Audio Settings' poster moved once
+    // The long cheats: each one's buttons and script; the buttons pressed
+    // lately (16 at most, oldest first) and when the last one was.
+    struct LongCheat {
+        std::vector<int> buttons;
+        const DataNode* script = nullptr;
+    };
+    std::vector<LongCheat> longCheats_;
+    std::deque<int> cheatButtons_;
+    double cheatLastMs_ = -1e9;
 
     // screens
     ScreenObj* current_ = nullptr;
@@ -209,6 +236,9 @@ private:
     enum class Phase { Idle, Out, In, Complete } phase_ = Phase::Idle;
     double phaseMs_ = 0, phaseLen_ = 500;
     bool backwardsAnim_ = false;
+    // The shared metacam's groups since its last reset, in order (frame 0..1).
+    std::vector<std::pair<std::string, float>> metacam_{{"trans_in_forward.grp", 1.0f}};
+    std::set<std::string> viewPanels_;  // the panels that have made a view
     std::vector<ScreenObj*> stack_;  // push_screen
     std::vector<std::string> history_;
     double transitionMs_ = 500;  // default.dta (ui (transition_time 0.5))

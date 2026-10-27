@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
-// The port's own screens, in GH2's script language, run after the game's
+// The port's own screens (Enhanced Options and the Gamepads screen it
+// opens), in GH2's script language, run after the game's
 // ui.dta (UiManager::runPortScripts). (port_patches (<object> <handlers>...))
 // adds handlers to the game's objects; later handlers win.
 
@@ -17,17 +18,15 @@ const char* const kPortScreens = R"DTA(
    (focus gamepads_panel)
    (helpbar (default ((fret1 help_select) (fret2 help_back) (strum help_updown))))
 }
+{new EnhancedPanel enhanced_panel (file "")}
+{new
+   GHScreen
+   enhanced_options_screen
+   (panels enhanced_panel helpbar)
+   (focus enhanced_panel)
+   (helpbar (default ((fret1 help_select) (fret2 help_back) (strum help_updown))))
+}
 (port_patches
-   (main_screen
-      (helpbar (default ((fret1 help_continue) (fret3 port_gamepads) (strum help_updown))))
-      (BUTTON_DOWN_MSG
-         {if_else
-            {|| {== $button kPad_Circle} {== $button kPad_Square}}
-            {do {synth play_sequence button_select} {ui goto_screen gamepads_screen} TRUE}
-            kDataUnhandled
-         }
-      )
-   )
    (main_not_logged_in_screen
       (enter
          {signin_changed_title.lbl set_localized_text "NO XBOX LIVE"}
@@ -40,8 +39,8 @@ const char* const kPortScreens = R"DTA(
    (options_screen
       (SELECT_START_MSG
          {if_else
-            {== $component port_gamepads.btn}
-            {do {ui goto_screen gamepads_screen} TRUE}
+            {== $component port_enhanced.btn}
+            {do {ui goto_screen enhanced_options_screen} TRUE}
             kDataUnhandled
          }
       )

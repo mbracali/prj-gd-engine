@@ -116,10 +116,13 @@ int runInputChecks() {
         pump(in, evs);
         evs.clear();
 
-        // In the menus the guitar's green fret selects.
+        // In the menus the guitar's green fret is the green fret, once (the
+        // menus read it as kPad_X, UiManager::action), not also Confirm.
         SDL_SetJoystickVirtualButton(guitar, SDL_GAMEPAD_BUTTON_SOUTH, true);
         pump(in, evs);
-        check(has(evs, Action::Confirm, true, ControllerMode::Guitar), "guitar green selects in the menus");
+        int greens = 0;
+        for (const InputEvent& e : evs) greens += e.down && (e.action == Action::Fret0 || e.action == Action::Confirm) && !e.joypad;
+        check(has(evs, Action::Fret0, true, ControllerMode::Guitar) && greens == 1, "guitar green is one green press in the menus");
         SDL_SetJoystickVirtualButton(guitar, SDL_GAMEPAD_BUTTON_SOUTH, false);
         pump(in, evs);
         evs.clear();
@@ -129,6 +132,9 @@ int runInputChecks() {
         SDL_SetJoystickVirtualAxis(pad, SDL_GAMEPAD_AXIS_LEFT_TRIGGER, 32767);
         pump(in, evs);
         check(has(evs, Action::Fret0, true, ControllerMode::Joypad), "pad LT is the green fret in joypad mode");
+        bool joypadFlag = false;
+        for (const InputEvent& e : evs) joypadFlag = joypadFlag || (e.action == Action::Fret0 && e.joypad);
+        check(joypadFlag, "... marked as a joypad's fret (the menus skip its yellow / blue / orange)");
         check(in.lastMode() == ControllerMode::Joypad, "... and the last mode is the joypad's");
         SDL_SetJoystickVirtualAxis(pad, SDL_GAMEPAD_AXIS_LEFT_TRIGGER, 0);
         pump(in, evs);

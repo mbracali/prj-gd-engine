@@ -159,10 +159,11 @@ public:
     void clear(const float* rgba, bool depth) override;
     void draw(const DrawCall& call) override;
     UniformData stageUniforms(const void* data, size_t size) override;
-    void drawableSize(int& w, int& h) const override { SDL_GetWindowSizeInPixels(window_, &w, &h); }
+    void drawableSize(int& w, int& h) const override;
     SDL_Surface* readPixels(int x, int y, int w, int h) override;
     void endFrame() override;
     void setFrameCap(int fps) override;
+    void setInternalHeight(int height) override { internalH_ = std::max(0, height); }
 
 private:
     void applyState(const PipelineState& s, bool force = false);
@@ -198,6 +199,11 @@ private:
     std::vector<std::pair<SamplerState, GLuint>> samplers_;
     int targetH_ = 0;
     TargetId target_;
+    // The internal resolution's frame (setInternalHeight): made at the
+    // frame's start when its size changes.
+    int internalH_ = 0;
+    TargetId frame_;
+    bool frameOn_ = false;
     int vp_[4] = {};
 
     // Frame pacing (gd01 lesson L7).
@@ -502,15 +508,39 @@ void GlDevice::destroyTarget(TargetId id) {
     }
 }
 
+void GlDevice::drawableSize(int& w, int& h) const {
+    SDL_GetWindowSizeInPixels(window_, &w, &h);
+    if (frameOn_ && h > 0) {
+        w = std::max(1, int(std::lround(double(w) * internalH_ / h)));
+        h = internalH_;
+    }
+}
+
 void GlDevice::beginFrame() {
     uboRegion_ = (uboRegion_ + 1) % kUniformRegions;
     uboOffset_ = 0;
+    // The internal resolution's frame, at the window's aspect.
+    frameOn_ = false;
+    int ww = 0, wh = 0;
+    SDL_GetWindowSizeInPixels(window_, &ww, &wh);
+    if (internalH_ > 0 && wh > 0 && internalH_ != wh) {
+        const int w = std::max(1, int(std::lround(double(ww) * internalH_ / wh))), h = internalH_;
+        const GlTarget* f = targets_.get(frame_.id);
+        if (!f || f->w != w || f->h != h) {
+            if (f) destroyTarget(frame_);
+            std::string error;
+            frame_ = createTarget(TargetDesc{w, h, true, TargetFormat::RGBA8}, error);
+            if (!frame_) SDL_Log("render: internal resolution %dx%d: %s; drawing to the window", w, h, error.c_str()), internalH_ = 0;
+        }
+        frameOn_ = bool(frame_);
+    }
     setTarget({});
 }
 
 void GlDevice::setTarget(TargetId id) {
     const GlTarget* t = targets_.get(id.id);
-    gl::glBindFramebuffer(GL_FRAMEBUFFER, t ? t->fbo : 0);
+    const GlTarget* frame = frameOn_ ? targets_.get(frame_.id) : nullptr;
+    gl::glBindFramebuffer(GL_FRAMEBUFFER, t ? t->fbo : frame ? frame->fbo : 0);
     target_ = t ? id : TargetId{};
     int w = 0, h = 0;
     if (t) w = t->w, h = t->h;
@@ -683,7 +713,8 @@ SDL_Surface* GlDevice::readPixels(int x, int y, int w, int h) {
     int dw = 0, dh = 0;
     drawableSize(dw, dh);
     std::vector<uint8_t> rows(size_t(w) * size_t(h) * 4);
-    gl::glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    const GlTarget* frame = frameOn_ ? targets_.get(frame_.id) : nullptr;
+    gl::glBindFramebuffer(GL_FRAMEBUFFER, frame ? frame->fbo : 0);
     gl::glReadPixels(x, dh - y - h, w, h, GL_RGBA, GL_UNSIGNED_BYTE, rows.data());
     SDL_Surface* s = SDL_CreateSurface(w, h, SDL_PIXELFORMAT_RGBA32);
     if (!s) return nullptr;
@@ -713,6 +744,18 @@ void GlDevice::setFrameCap(int fps) {
 }
 
 void GlDevice::endFrame() {
+    // The internal resolution's frame, scaled to the window.
+    if (const GlTarget* frame = frameOn_ ? targets_.get(frame_.id) : nullptr) {
+        int ww = 0, wh = 0;
+        SDL_GetWindowSizeInPixels(window_, &ww, &wh);
+        gl::glBindFramebuffer(GL_READ_FRAMEBUFFER, frame->fbo);
+        gl::glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+        gl::glDisable(GL_SCISSOR_TEST);
+        gl::glBlitFramebuffer(0, 0, frame->w, frame->h, 0, 0, ww, wh, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+        gl::glEnable(GL_SCISSOR_TEST);
+        gl::glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        target_ = {};
+    }
     if (paceNs_) {
         uint64_t now = SDL_GetTicksNS();
         if (nextFrameNs_ > now && nextFrameNs_ - now <= paceNs_) SDL_DelayPrecise(nextFrameNs_ - now);

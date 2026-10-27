@@ -94,5 +94,15 @@ public:
     virtual void playMovie(const std::string& name) = 0;
     // The options' volumes (0..1) for the songs, and lefty per player.
     virtual void applyOptions(float bandVolume, float guitarVolume, float fxVolume, bool lefty0, bool lefty1, int syncOffsetMs) = 0;
+    // The port's Enhanced Options (ui/enhanced_panel.h): a setting's value
+    // (enhanced.json in the save folder; its default when unset) and a
+    // change, saved and put in effect at once.
+    virtual std::string enhancedValue(const std::string& /*key*/) { return {}; }
+    virtual void setEnhancedValue(const std::string& /*key*/, const std::string& /*value*/) {}
+    // The Enhanced Options' live backdrop: the second venue with the band
+    // playing, while the screen is up; drawMenuBackdrop draws it (false
+    // when there is none).
+    virtual void menuBackdrop(bool /*on*/) {}
+    virtual bool drawMenuBackdrop() { return false; }
     virtual void quit() = 0;
 };

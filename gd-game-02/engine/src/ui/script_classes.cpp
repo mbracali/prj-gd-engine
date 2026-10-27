@@ -374,7 +374,7 @@ void PanelObj::load() {
         } else if (!(view = ui.makeView(path, &error)) && !ui.headless()) {
             ui.logOnce("ui: panel " + name() + ": cannot load " + path + ": " + error);
         }
-        if (view) ui.portPanelLoaded(this);
+        if (view) ui.panelViewLoaded(this), ui.portPanelLoaded(this);
     }
     ui.callScript(this, "load");
     ui.callScript(this, "finish_load");
@@ -418,6 +418,11 @@ void PanelObj::enter() {
     applyStates();
     ui.callScript(this, "enter");
     applyStates();
+    // The panel's own FOCUS_MSG for the focus it enters with [I: UIPanel
+    // Enter sets the focus (0x82376140)]: audio_settings_panel's
+    // update_help_display shows its help bar this way.
+    if (!focus.empty() && handler("component_focus"))
+        ui.callScript(this, "component_focus", {Value::obj(component(focus)), Value::obj(nullptr), Value::obj(this)});
 }
 
 void PanelObj::exit() {

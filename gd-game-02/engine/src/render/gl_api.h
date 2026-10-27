@@ -19,6 +19,7 @@
     X(PFNGLBINDSAMPLERPROC, glBindSampler)                                      \
     X(PFNGLBINDVERTEXARRAYPROC, glBindVertexArray)                              \
     X(PFNGLBLENDEQUATIONPROC, glBlendEquation)                                  \
+    X(PFNGLBLITFRAMEBUFFERPROC, glBlitFramebuffer)                              \
     X(PFNGLBLENDFUNCSEPARATEPROC, glBlendFuncSeparate)                          \
     X(PFNGLBUFFERDATAPROC, glBufferData)                                        \
     X(PFNGLBUFFERSUBDATAPROC, glBufferSubData)                                  \

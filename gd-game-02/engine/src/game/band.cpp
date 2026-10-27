@@ -138,6 +138,10 @@ std::pair<std::string, std::string> guitarOutfit(const GameData& data, const std
     } catch (const std::exception& ex) {
         SDL_Log("band: guitars.dtb: %s", ex.what());
     }
+    // A guitar guitars.dtb does not list, with an outfit of its own name:
+    // the Air Guitar cheat's air_guitar [I: 0x822B6250 takes $cheat_guitar
+    // as the guitar].
+    if (!guitar.empty() && data.exists("char/ng/guitars/gen/" + guitar + ".milo_xbox")) return {guitar, ""};
     return {"guitar_sg", ""};
 }
 

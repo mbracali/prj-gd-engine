@@ -152,6 +152,55 @@ if in_window(j, now) and !hit[j] and mine(j):
 OnMiss(now, slot, j)                         // overstrum
 ```
 
+### Fret matching: anchoring and chords (verified 2026-10-27) [C]
+
+The question "may lower frets be held on a single note?" (GH1 allowed it)
+is answered by the code, and GH2 allows it too:
+
+- The guitar controller passes the **highest held fret** to Swing on a
+  strum (`0x8234c538`, the loop over the controller's held mask `+0x38`).
+- Swing (`0x8234eb60`, `0x8234ecd8..0x8234ecf0`) compares a single gem's
+  fret (its lowest set bit) with that slot: green + yellow held on a yellow
+  note is a hit; yellow + blue is not. A chord (`popcount > 1`,
+  `0x82334630`) compares the watcher's held mask `+0x84` with the gem's
+  mask: **exactly** its frets, no extra lower fret, none missing.
+- HOPOs (`0x8234f210`): the gem's mask must be `1 << slot` and the held
+  mask `< 1 << (slot + 1)`: no fret above, any below.
+- Sustains: a fret pressed **above** a sustained single note ends it, a
+  lower one (an anchor) does not; on a chord any press ends it
+  (`0x823500c8` walks the gem's frets from the top: a fret below the
+  pressed slot, or a second fret, releases). Letting go of any of the
+  gem's frets ends it (`0x8234f110`: `(held & mask) != mask`).
+
+So gd02's rules were already GH2's here; nothing about anchoring changed.
+Small differences fixed in this pass (all from the disassembly):
+
+- `+0x94` (the time NonStrumSwing compares, `now == +0x94` → no try) is
+  set by every **hit** (OnHit → vtable `+0x6c` = `0x8234eb28`, which also
+  stores the HOPO-hit gem and clears the pending strum), not by every try.
+- A pending wrong strum resolved by a fret change on a HOPO-able gem also
+  notifies the sinks' "swingAtHopo" (`0x8234fcb8` at `0x8234eee4`).
+- The overstrum report (`0x8234f860`) ends the current sustain **before**
+  the 50 ms gap test, so a suppressed report still ends it.
+
+Guitar watcher vtable `0x8205b33c` [C, read from the image]: `+0x14` poll
+`0x82350d68`, `+0x18` Swing `0x8234eb60`, `+0x1c` NonStrumSwing
+`0x8234f3e0`, `+0x20` FretDown `0x8234f070`, `+0x24` FretUp `0x8234f110`,
+`+0x44` OnHit `0x823502e0`, `+0x48` OnMiss `0x823503d0`, `+0x4c` OnPass
+`0x82350488`, `+0x58` `0x823526f8`, `+0x5c` `0x82352660`, `+0x60` guitar
+poll extra `0x8234f028`, `+0x64` `0x8234eac8` (reset: pending, `+0x88`,
+`+0x8c`, `+0x90`), `+0x68` `0x8234eb00` (clear pending), `+0x6c`
+`0x8234eb28`, `+0x70` `0x8234e948`, `+0x74` `0x8234f768` (next gem or −1),
+`+0x78` `0x8234f1c8`.
+
+**Open [I]:** OnHit (`0x823502e0`), OnMiss (`0x823503d0`) and a wrong
+HOPO (`0x8234f210`) first ask the watcher's `+0x10` object (vtable `+0x28`)
+about the gem's / the song's tick; when it answers true they do not hit or
+miss but call `+0x58` (`0x823526f8`: plays `bass_%d.cue` per slot, string
+`0x8205b738`). It looks like a free-play section for the bass; which
+object and which chart data drive it is not traced. gd02 always takes the
+normal path.
+
 ### Pending wrong strum
 
 - **Fret change** (`0x8234edf8`, called after FretDown with the pressed slot
@@ -164,19 +213,20 @@ OnMiss(now, slot, j)                         // overstrum
     A release that does not match keeps waiting.
 - **Expiry** (`0x8234e968`, each poll): after the deadline the pending gem is
   reported as a miss **unless** it was set right after a HOPO hit
-  (`after_hopo`); then it is dropped silently [C].
+  (`after_hopo`); then it is dropped silently [C]. Any hit clears it
+  (`0x8234eb28`) [C].
 - The miss sweep stops at the pending gem until it is resolved
   (vtable `+0x70` = `0x8234e948`) [C].
 - The HOPO-hit forgiveness (`+0x88`) ends when that gem leaves the hit window
   (`0x8234ef50`) [C].
 
-### Overstrum / miss reporting — `0x823503d0` → `0x8234f860` [C]
+### Overstrum / miss reporting — `0x823503d0` → `0x8234f860` [C, from disassembly]
 
-- At most one overstrum per **50 ms** (`last_overstrum + 50 < now`,
-  `0x82002228`) [C]. The reported gem is the nearest one, or the next one if
-  the nearest was already passed by the sweep.
-- It ends the watcher's current sustain and calls `miss(player, slot, gem)` on
-  all sinks.
+- First the watcher's current sustain ends (`0x8234f600`), then at most one
+  report per **50 ms** (`last_overstrum + 50 < now`, `0x82002228`).
+- The reported gem: the given one; the next (`+0x74`) when it is the gem
+  the sweep passed last (`+0x4c`); the list's last gem when that leaves
+  none (−1). Then `miss(player, slot, gem)` on all sinks.
 
 ### Miss sweep — `0x82350718` [C, from disassembly]
 
@@ -216,6 +266,8 @@ else if hammer (pressed, not released) and no held fret above slot:
 - Window: **−100 … +160 ms**. GH1 was `|dt − 60| ≤ slop` = −40 … +160 ms;
   GH2 keeps the full slop on the early side [C].
 - Lower frets may be held (anchoring) for HOPOs [C].
+- `+0x94` is the time of the last hit (`0x8234eb28`), so a hammer-on in
+  the same instant as a hit is ignored [C].
 - A wrong **pull-off** never locks the gem; only a wrong hammer-on does [C].
 - After any accepted HOPO the gem can also be strummed without penalty
   while it is in the window (forgiveness above) [C].
@@ -503,3 +555,6 @@ Modes (`config/gen/modes.dta`) [C]:
    single player makes the sweep pass gems early (≈296 guitar charts fail).
    gd02 applies ownership only in face-off [I]; find where the original
    decides that the mask is used.
+9. The bass-cue path of OnHit / OnMiss / wrong HOPOs (`+0x10` vtable
+   `+0x28` by tick → `0x823526f8`, `bass_%d.cue`): which object answers and
+   what chart data marks those ticks (see "Fret matching").

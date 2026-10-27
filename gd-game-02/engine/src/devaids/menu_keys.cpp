@@ -2,6 +2,8 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "devaids/menu_keys.h"
 
+#include <SDL3/SDL.h>
+
 #include <algorithm>
 #include <cstdlib>
 #include <map>
@@ -25,12 +27,32 @@ MenuKeys::MenuKeys(const std::string& text) {
         int edge = 0, player = 0;
         if (!name.empty() && (name[0] == '+' || name[0] == '-')) edge = name[0] == '+' ? 1 : -1, name = name.substr(1);
         if (name.rfind("p2", 0) == 0) player = 1, name = name.substr(2);
+        const double at = std::strtod(item.c_str(), nullptr);
+        if (name.size() > 1 && name[0] == 'k') {  // a real keyboard key
+            const SDL_Keycode k = SDL_GetKeyFromName(name.c_str() + 1);
+            if (k == SDLK_UNKNOWN) {
+                valid_ = false;
+                continue;
+            }
+            keys_.push_back({at, -1, edge, player, int(k)});
+            continue;
+        }
+        if (name.size() > 1 && name[0] == 'j') {  // a virtual controller's button
+            const SDL_GamepadButton b = SDL_GetGamepadButtonFromString(name.c_str() + 1);
+            if (b == SDL_GAMEPAD_BUTTON_INVALID) {
+                valid_ = false;
+                continue;
+            }
+            if (edge >= 0) keys_.push_back({at, -1, 1, player, 0, int(b)});
+            if (edge <= 0) keys_.push_back({edge < 0 ? at : at + 80, -1, -1, player, 0, int(b)});
+            continue;
+        }
         auto it = kButtons.find(name);
         if (it == kButtons.end()) {
             valid_ = false;
             continue;
         }
-        keys_.push_back({std::strtod(item.c_str(), nullptr), it->second, edge, player});
+        keys_.push_back({at, it->second, edge, player});
     }
     std::stable_sort(keys_.begin(), keys_.end(), [](const Key& a, const Key& b) { return a.at < b.at; });
 }

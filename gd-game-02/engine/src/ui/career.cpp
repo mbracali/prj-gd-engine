@@ -18,7 +18,25 @@ void Career::clear() {
     defaultName.clear();
     highScores_.clear();
     autosave = 1;
+    ensureGlitches();
     needsSave = false;
+}
+
+bool Career::ensureGlitches() {
+    for (const Profile& p : profiles)
+        if (p.inUse && p.name == kGlitches) return false;
+    for (int s = kProfiles - 1; s >= 0; --s) {
+        Profile& p = profiles[size_t(s)];
+        if (p.inUse) continue;
+        p = Profile{};
+        p.inUse = true;
+        p.name = kGlitches;
+        p.cash = 50;
+        for (CharInfo& c : p.chars) c = glitchesLook;
+        touch();
+        return true;
+    }
+    return false;
 }
 
 int Career::numProfiles() const {
@@ -123,6 +141,7 @@ Json Career::toJson() const {
 bool Career::fromJson(const Json& j) {
     if (j.type != Json::Type::Object || j["format"].str() != "gd02-save" || j["version"].num() > 1) return false;
     Career c;
+    c.profiles = {};  // the file's bands only (then The Glitches when it has none)
     c.autosave = int(j["autosave"].num(1));
     const Json& ps = j["profiles"];
     for (size_t i = 0; i < ps.a.size() && i < size_t(kProfiles); ++i) {
@@ -160,6 +179,9 @@ bool Career::fromJson(const Json& j) {
     c.options.syncOffsetMs = int(o["sync_offset"].num());
     c.defaultName = j["default_name"].str();
     c.dummyNames = dummyNames;
+    c.glitchesLook = glitchesLook;
+    c.needsSave = false;
+    c.ensureGlitches();  // an older save gets the band (and is saved again)
     *this = std::move(c);
     return true;
 }
