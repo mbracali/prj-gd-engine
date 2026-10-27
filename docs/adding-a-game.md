@@ -130,12 +130,33 @@ cannot change, `gd-engine-launcher/modules/gd01/gd01_module_explore.cpp`.
    `view->x, y, w, h` (window pixels): frame it from its bounds, then orbit by
    `yaw` / `pitch`, scale the distance by `zoom` and move the centre by
    `pan_x` / `pan_y` model radii; play `view->clip` at `view->seconds`. Never
-   present; the launcher draws its panels over the frame and presents it.
+   present, and leave your context current: the launcher reads the viewer's
+   area of its back buffer, draws it with its own context under its panels
+   and presents the frame (one presenting context: no flicker on macOS,
+   where each context has its own drawable).
 5. `close`: free the models and the renderer, then `gdshim_end()`. The
    launcher unloads the library afterwards.
 
 `gd-engine-launcher/sdk/gd_explore_helpers.h` has helpers that know no
 format (e.g. `uprightRows`, which stands a guitar up for the camera).
+
+### Menu sounds (optional)
+
+A module may give the launcher its game's menu sounds, read from the disc,
+for the launcher's own menus (only one game's are used: the first in
+`games.yaml` with a disc that gives some):
+
+```c
+extern "C" int gd_game_ui_sounds(const GdHost* host, GdUiSoundFn sound, void* user);
+```
+
+Read the disc (`host->argv[host->argc - 1]`) and call `sound(user, role,
+stereo, frames, rate)` for each sound: `role` is `"move"`, `"select"`,
+`"play"`, `"back"` or `"error"` (a role may come several times: variations,
+one is picked at random), the samples interleaved stereo float. Return how
+many you gave. No window or GL work; the library is unloaded afterwards. See
+`gd-engine-launcher/modules/gd01/gd01_module_sounds.cpp` (Guitar Hero's
+metagame bank through gd01's SPU2).
 
 ## Shared code (`gd-core/`)
 

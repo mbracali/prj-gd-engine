@@ -186,6 +186,30 @@ GameRun runGameModule(SDL_Window* window, SDL_GLContext context, const Game& gam
     return run;
 }
 
+// ---- Menu sounds ----
+
+int fetchUiSounds(SDL_Window* window, SDL_GLContext context, const Game& game, const std::string& launcherVersion, ActionLog& log,
+                  GdUiSoundFn sound, void* user, std::string& error) {
+    void* lib = platform::openLibrary(game.modulePath, error);
+    if (!lib) {
+        error = "cannot load " + platform::fileName(game.modulePath) + ": " + error;
+        return 0;
+    }
+    int given = 0;
+    if (auto entry = reinterpret_cast<GdGameUiSoundsFn>(platform::librarySymbol(lib, GD_GAME_UI_SOUNDS_SYMBOL))) {
+        HostSetup setup(window, context, game, launcherVersion, log);
+        setup.captureLog(game.id + "-sounds.log");
+        given = entry(&setup.host, sound, user);
+        setup.releaseLog();
+        SDL_GL_MakeCurrent(window, context);
+        if (given == 0) error = "the module found none (see logs/" + game.id + "-sounds.log in the save folder)";
+    } else {
+        error = "no menu sounds in this module";
+    }
+    platform::closeLibrary(lib, game.modulePath);
+    return given;
+}
+
 // ---- The model explorer ----
 
 struct ExploreSession::State {

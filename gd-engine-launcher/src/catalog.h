@@ -57,6 +57,18 @@ public:
     // there is nothing new (and always on desktops).
     std::string pollCopy();
     const std::vector<std::string>& discDirs() const { return discDirs_; }
+    // Where disc images are looked for, and what was there at the last scan.
+    struct DiscDir {
+        std::string path, what;  // what: "next to the app", ...
+        std::string problem;     // "" or why it could not be read ("not there", ...)
+        int isos = 0, known = 0; // .iso files; those of a game the launcher knows
+    };
+    const std::vector<DiscDir>& discDirInfo() const { return discDirInfo_; }
+    // macOS: the app runs from a translocated (read-only, random) copy;
+    // originalApp() is its real place when macOS says it ("" if not).
+    bool translocated() const { return translocated_; }
+    const std::string& runningApp() const { return runningApp_; }
+    const std::string& originalApp() const { return originalApp_; }
     std::string launcherVersion() const { return launcherVersion_; }
     std::string gamesYaml() const { return gamesYaml_; }
     std::string configPath() const;
@@ -70,6 +82,10 @@ private:
     void startCopy(const std::string& id, const std::string& uri);
     std::vector<Game> games_;
     std::vector<std::string> discDirs_;
+    std::vector<DiscDir> discDirInfo_;
+    bool translocated_ = false;
+    std::string runningApp_, originalApp_;
+    void addDiscDir(const std::string& dir, const std::string& what);
     std::map<std::string, std::string> config_;
     std::string gamesYaml_, gamesRoot_, modulesDir_, launcherVersion_ = "0.0.0";
     int discsFound_ = 0;

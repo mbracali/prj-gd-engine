@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+class BandPerformer;
 class Player;
 struct SongInfo;
 class ScriptObject;
@@ -34,6 +35,25 @@ public:
         bool fastIntro = false;  // game set fast_intro (a restart skips most of the lead-in)
         // The players' look (PlayerConfig: outfit, guitar, skin; empty: the song's quickplay one).
         std::array<std::string, 2> outfit, guitar, skin;
+        // GamePanel's encore state (0x822CA6E0 / 0x822CA5D0): the song may
+        // unlock an encore (the crowd calls for it: game_won_msg $encore,
+        // encore_lost, the band's encore spot), the encore itself plays (the
+        // encore intro, the crowd full); the career's last song.
+        bool encoreCheck = false, encoreFx = false, campaignFinal = false;
+        // The mode (gamecfg mode, config/modes.dta): quickplay, career,
+        // attract, multi_coop (co-op), multi_vs (face-off: each player owns
+        // the face-off sections' gems), multi_fo (pro face-off: both play
+        // every gem) [C: docs/multiplayer.md]; its num_players.
+        std::string mode = "quickplay";
+        int numPlayers = 1;
+        // Per player: the difficulty (player 0's is `difficulty`), the part
+        // played (song_provider get_instrument: guitar, bass or rhythm; the
+        // co-op lead plays PART GUITAR COOP when the chart has it), lefty,
+        // and the pad (input slot) that plays it (gamecfg set_player).
+        std::array<int, 2> difficulties{1, 1};
+        std::array<std::string, 2> parts{"guitar", "guitar"};
+        std::array<bool, 2> leftys{false, false};
+        std::array<int, 2> pads{0, 1};
     };
     virtual bool gameLoad(const GameSetup& setup, std::string& error) = 0;
     // Starts the music and the clock (after every game panel has entered).
@@ -47,6 +67,9 @@ public:
     virtual float gameBeat() const = 0;        // the song position in beats
     virtual float songDurationMs() const = 0;  // to the song's end
     virtual const Player* gamePlayer(int index) const = 0;
+    // The co-op band (game/band_performer.h): its score, streak, stars and
+    // meter; nullptr outside co-op.
+    virtual const BandPerformer* gameBand() const { return nullptr; }
     // Counts the program keeps per player: "sp_phrases" (Star Power phrases
     // captured), "streaks_broken", "gems" (the chart's gem count).
     virtual int gameCounter(int player, const std::string& key) const = 0;
@@ -98,6 +121,8 @@ public:
     // (enhanced.json in the save folder; its default when unset) and a
     // change, saved and put in effect at once.
     virtual std::string enhancedValue(const std::string& /*key*/) { return {}; }
+    // The last frame drawn as a .bmp (the walk test's shots); false if none.
+    virtual bool saveScreenshot(const std::string& /*path*/) { return false; }
     virtual void setEnhancedValue(const std::string& /*key*/, const std::string& /*value*/) {}
     // The Enhanced Options' live backdrop: the second venue with the band
     // playing, while the screen is up; drawMenuBackdrop draws it (false

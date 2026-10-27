@@ -11,8 +11,8 @@ struct Json;
 
 // The game's save data, as GH2's Campaign::Save (0x822869A0) writes it to
 // save:\gh2save.dat (version 17, read back by 0x82287B00 when > 15) [C]:
-// eight band profiles, the high score tables, the bought / unlocked store
-// items and the options (0x822B0BC0: lefty P1 / P2, band / guitar / fx
+// eight band profiles (their tours, cash and bought store items), the high
+// score tables, pro face-off and the options (0x822B0BC0: lefty P1 / P2, band / guitar / fx
 // volume indices, sync offset). The port keeps the same data as JSON
 // (career.json in the save folder, format "gd02-save"), written atomically
 // with the previous file kept as career.json.bak.
@@ -23,9 +23,18 @@ public:
     static constexpr int kDifficulties = 4;
     static constexpr int kHighScores = 5;  // per song and difficulty (0x822A4988) [C]
 
-    struct SongResult {
-        int score = 0, stars = 0;
-        bool passed = false;
+    // One entry of a profile's per-difficulty table (16 bytes at record
+    // +0x14 in GH2, made by 0x822AE698): a venue or a song (or a game mode)
+    // of the campaign. The saved state only; what is a store song or an
+    // encore comes from the config (ui/campaign.h).
+    struct Entry {
+        bool unlocked = false;   // +0xe bit 0x40
+        bool completed = false;  // a venue's +0xe bit 0x08 (ae940 / ae8f8)
+        int score = 0;           // a song's best score (+0x8)
+        int stars = 0;           // the stars of the best score (+0xc & 0x7f): 3+ = passed (0x822AE8F8)
+        bool perfect = false;    // +0xc bit 0x80: 100 % of the notes (the gold stars)
+        int maxStars = 0;        // +0xd: the most stars at this or a higher difficulty (the star cash)
+        bool known = false;      // made by the record's init (or read back): false until ui/campaign.h fills it
     };
     // The band's look at one difficulty (the profile's per-difficulty
     // record, 0x24 bytes at profile +0x20, saved by 0x822A8D00 / read by
@@ -40,12 +49,18 @@ public:
     struct Profile {
         bool inUse = false;
         std::string name;
-        int cash = 0;
+        int cash = 0;       // +0x30
+        int cashSpent = 0;  // +0x34 (campaign cash_spent)
         int tutorialsDone = 0;
         int lastDifficulty = 1;  // campaign last_difficulty (profile +0x2c) [C]; its first value [I]
-        std::array<int, kDifficulties> status{};  // venues completed per difficulty
-        std::array<std::map<std::string, SongResult>, kDifficulties> results;
+        // The four per-difficulty records (profile +0x20, 0x24 bytes each):
+        // the venues' and songs' entries (ui/campaign.h fills the defaults).
+        std::array<std::map<std::string, Entry>, kDifficulties> entries;
         std::array<CharInfo, kDifficulties> chars;
+        // The profile's unlock table (+0x38, 0x822A88C8): the store items
+        // (guitars, skins, characters, outfits, videos) this band bought;
+        // every other item of the table is unlocked from the start.
+        std::map<std::string, bool> items;
     };
     struct HighScore {
         std::string name;
@@ -71,7 +86,20 @@ public:
     bool ensureGlitches();  // true when it was added
 
     std::array<Profile, kProfiles> profiles;
-    std::map<std::string, bool> items;  // unlocked / bought store items (store.dta symbols)
+    bool proFaceOff = false;            // Campaign +0x68: pro face-off unlocked (a tour won, saved after the high scores)
+    // Co-op's record (Campaign +0x4c, one for the whole save, updated by
+    // campaign finish_coop_song 0x822861A8 -> 0x822A6848) [C]: per song the
+    // band's best score (+0x8, kept when higher), its stars (+0xc & 0x7f)
+    // and the gold flag (+0xc bit 0x80: both players hit 100 % on Expert);
+    // and the bass guitars co-op has awarded (the reward entries' bit 0x40,
+    // 0x822A66E0: guitars.dta (require (songs n) (stars s))).
+    struct CoopEntry {
+        int score = 0;
+        int stars = 0;
+        bool perfect = false;
+    };
+    std::map<std::string, CoopEntry> coop;
+    std::map<std::string, bool> coopAwards;
     Options options;
     std::string defaultName;            // highscores set_default_name
     int autosave = 1;

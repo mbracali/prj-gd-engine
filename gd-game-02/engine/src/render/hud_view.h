@@ -32,7 +32,9 @@ class Renderer;
 // the HUD's own scenes through the UI camera and driven by the players'
 // state the way the game's display classes are (addresses in hud_view.cpp),
 // plus the HUD messages ("STAR POWER READY!", "SONG FAILED!") in the HUD's
-// font.
+// font. Co-op's displays show the band (game/band_performer.h) [C:
+// hud_coop's displays carry no player number; GH2's band performer holds
+// the score, streak and meter].
 class HudView {
 public:
     ~HudView();
@@ -47,12 +49,13 @@ public:
     // FALSE WIN_MESSAGE_SECS (3) later; the flag is youwin.mesh's showing,
     // 0x8268EBD8) [C].
     void won(float nowMs) { wonMs_ = nowMs; }
-    // Player `player`'s events of this frame.
+    // Player `player`'s events of this frame (-1: the co-op band's).
     void onEvents(const std::vector<PlayerEvent>& events, int player, float nowMs);
     // Draws the HUD over the bound 16:9 picture (its own camera, depth
     // cleared); the message text goes through the canvas. `players`: one or
-    // two (the second for the two-player HUDs).
-    void draw(gfx::Renderer& r, gfx::SceneCache& cache, Canvas& canvas, const std::vector<const Player*>& players, float nowMs);
+    // two (the second for the two-player HUDs); `band`: the co-op band.
+    void draw(gfx::Renderer& r, gfx::SceneCache& cache, Canvas& canvas, const std::vector<PerformerState>& players,
+              const PerformerState* band, float nowMs);
 
 private:
     enum class Kind { Score, Streak, Star, Crowd, Lead };
@@ -80,11 +83,11 @@ private:
     void drawObject(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, const scene::Object* o, const scene::Xfm& base,
                     const scene::Environ* env, Part* part, int depth);
     void setEnv(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, const scene::Environ* env, const gfx::ScenePose& pose);
-    void drive(const std::vector<const Player*>& players, float nowMs);
+    void drive(const std::vector<PerformerState>& players, const PerformerState* band, float nowMs);
     void driveScore(Part& p, int score);
     void driveStreak(Part& p, int streak, int multiplier, bool star);
-    void driveStar(Part& p, const Player& player, float dt, float loop);
-    void driveCrowd(Part& p, const Player& player, float dt, float loop, float nowMs);
+    void driveStar(Part& p, const PerformerState& player, float dt, float loop);
+    void driveCrowd(Part& p, const PerformerState& player, float dt, float loop, float nowMs);
     void driveLead(Part& p, int lead);
     static const scene::Object* in(const Part& p, const std::string& name);
     template <class T> static const T* in(const Part& p, const std::string& name) {

@@ -8,6 +8,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "game/venue.h"
@@ -153,6 +154,8 @@ public:
     };
     void animate(const scene::Object* anim, const AnimArgs& args);
     void stopAnimation(const scene::Object* anim);
+    // Stops the animations of objects going away (a band's characters).
+    void stopAnimations(const std::unordered_set<const scene::Object*>& anims);
     bool animating(const scene::Object* anim) const;
     int runningAnims() const { return int(tasks_.size()); }
     // Sets an anim's frame now (AnimFilter frames go through the filter).

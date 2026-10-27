@@ -5,6 +5,7 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <unordered_set>
 #include <cmath>
 #include <functional>
 #include <set>
@@ -544,6 +545,13 @@ Band::~Band() {
         in.unregisterObject(o);
     };
     for (auto& m : members_) drop(m->script.get());
+    // The world's animations of the characters' objects (the drum kit's
+    // EventTrigger filters): the world outlives the band when the next song
+    // plays in the same venue (an encore).
+    std::unordered_set<const scene::Object*> objs;
+    for (auto& m : members_)
+        if (m->character) m->character->forEachObject([&](scene::Object& o) { objs.insert(&o); });
+    world_.stopAnimations(objs);
     for (auto& p : parts_) drop(p.get());
     for (auto& p : players_) drop(p.get());
     parsers_.reset();

@@ -24,6 +24,9 @@ using gfx::withAlpha;
 namespace {
 
 constexpr const char* kTitle = "Guitar Dream Universal Launcher";
+constexpr const char* kWebsite = "https://guitardreamengine.com";
+// Hits that are not a row's buttons or a dialog's.
+constexpr int kHitWebsite = -10, kHitDiscs = -11;
 const std::string kDot = " \xC2\xB7 ";  // " · "
 
 using namespace palette;
@@ -129,6 +132,15 @@ bool Launcher::init() {
 
     log_.add("launcher started (gdul " + catalog_.launcherVersion() + ", " + platform::kOs + "-" + platform::kArch + ", " +
              std::to_string(catalog_.games().size()) + " games, " + std::to_string(catalog_.discsFound()) + " disc images found)");
+    for (const Catalog::DiscDir& d : catalog_.discDirInfo())
+        log_.add("disc folder " + d.path + " (" + d.what + "): " +
+                 (d.problem.empty() ? std::to_string(d.isos) + " .iso, " + std::to_string(d.known) + " known" : d.problem));
+    if (catalog_.translocated())
+        log_.add("macOS runs the app from a translocated copy: " + catalog_.runningApp() +
+                 (catalog_.originalApp().empty() ? std::string(" (its real place is unknown)") : " (its real place: " + catalog_.originalApp() + ")"));
+    // macOS, an app still where the download put it, and no disc found: say why and what to do.
+    startupNotice_ = catalog_.translocated() && catalog_.discsFound() == 0;
+    sounds_.setLogging(SDL_getenv("GDUL_SCRIPT") != nullptr || SDL_getenv("GDUL_SOUND_LOG") != nullptr);
     // Start on the first game that can be played.
     for (size_t i = 0; i < catalog_.games().size(); ++i)
         if (catalog_.games()[i].playable()) {
@@ -164,6 +176,7 @@ bool Launcher::init() {
 
 void Launcher::shutdown() {
     exploreClose();
+    sounds_.close();
     closeGamepads();
     gfx_.shutdown();
     if (context_) SDL_GL_DestroyContext(context_);
@@ -237,6 +250,12 @@ void Launcher::frame() {
     }
     runScript();
     if (!running_) return;
+    // The menu sounds, once the window shows (they take a moment to read).
+    if (!soundsTried_ && ++framesDrawn_ > 2) loadSounds();
+    if (startupNotice_ && framesDrawn_ > 2) {
+        startupNotice_ = false;
+        showDiscFolders("Where are your discs?");
+    }
     if (explore_) {
         exploreFrame();
         return;
@@ -265,6 +284,7 @@ void Launcher::runScript() {
     else if (st.cmd == "shot") pendingShot_ = st.arg;
     else if (st.cmd == "drag") dragging_ = st.arg != "0";
     else if (st.cmd == "toast") toast(st.arg);
+    else if (st.cmd == "folders") showDiscFolders("Where we look for discs");
     else if (st.cmd == "quit") running_ = false;
     else if (st.cmd == "drop") {
         static std::string dropped;  // SDL_EVENT_DROP_FILE's data must outlive the event queue
@@ -393,7 +413,12 @@ void Launcher::handle(const SDL_Event& e) {
         for (auto it = hits_.rbegin(); it != hits_.rend(); ++it) {
             if (!it->r.contains(mx, my)) continue;
             mouseUsed_ = true;
-            if (it->row < 0) {
+            if (it->row == kHitWebsite || it->row == kHitDiscs) {
+                if (click && !dialog_.open) {
+                    if (it->row == kHitWebsite) openWebsite();
+                    else showDiscFolders("Where we look for discs");
+                }
+            } else if (it->row < 0) {
                 dialog_.focus = it->col;
                 if (click) press(Fret::Green);
             } else if (!dialog_.open) {
@@ -434,14 +459,18 @@ void Launcher::move(int dRow, int dCol) {
     }
     if (dialog_.open) {
         const int n = int(dialog_.buttons.size());
+        const int was = dialog_.focus;
         if (n && dCol) dialog_.focus = std::clamp(dialog_.focus + dCol, 0, n - 1);
+        if (dialog_.focus != was) sounds_.play(UiSound::Move);
         return;
     }
     mouseUsed_ = false;
     const int rows = int(catalog_.games().size());
     if (rows == 0) return;
+    const int wasRow = focusRow_, wasCol = focusCol_;
     focusRow_ = std::clamp(focusRow_ + dRow, 0, rows - 1);
     if (dCol) focusCol_ = std::clamp(focusCol_ + dCol, 0, kColumns - 1);
+    if (focusRow_ != wasRow || focusCol_ != wasCol) sounds_.play(UiSound::Move);
 }
 
 void Launcher::press(Fret f) {
@@ -449,10 +478,12 @@ void Launcher::press(Fret f) {
         if (f == Fret::Green) {
             Button b = dialog_.buttons.empty() ? Button{} : dialog_.buttons[size_t(dialog_.focus)];
             dialog_.open = false;
+            sounds_.play(b.fret == Fret::Red ? UiSound::Back : UiSound::Select);
             if (b.action) b.action();
         } else if (f == Fret::Red) {
             // Red: the dialog's red button if it has one, else close it.
             dialog_.open = false;
+            sounds_.play(UiSound::Back);
             for (const Button& b : dialog_.buttons)
                 if (b.fret == Fret::Red && b.action) {
                     Button copy = b;
@@ -464,6 +495,7 @@ void Launcher::press(Fret f) {
                 if (b.fret == f) {
                     Button copy = b;
                     dialog_.open = false;
+                    sounds_.play(UiSound::Select);
                     if (copy.action) copy.action();
                     break;
                 }
@@ -476,7 +508,10 @@ void Launcher::press(Fret f) {
     }
     switch (f) {
     case Fret::Green: activate(focusRow_, focusCol_); break;
-    case Fret::Red: askQuit(); break;
+    case Fret::Red:
+        sounds_.play(UiSound::Back);
+        askQuit();
+        break;
     case Fret::Yellow: activate(focusRow_, kLoad); break;
     case Fret::Blue: activate(focusRow_, kExplore); break;
     default: break;
@@ -492,15 +527,20 @@ void Launcher::activate(int row, int col) {
     switch (col) {
     case kPlay:
         if (g.playable()) play(g);
-        else if (!g.ready) toast(g.title() + " is not playable yet. Coming soon!");
-        else if (!g.hasModule) toast("This launcher build has no " + g.id + " module.");
-        else toast("Load a " + g.title() + " disc image first (yellow).");
+        else if (!g.ready) sounds_.play(UiSound::Error), toast(g.title() + " is not playable yet. Coming soon!");
+        else if (!g.hasModule) sounds_.play(UiSound::Error), toast("This launcher build has no " + g.id + " module.");
+        else sounds_.play(UiSound::Error), toast("Load a " + g.title() + " disc image first (Load ISO).");
         break;
-    case kLoad: pickDisc(g); break;
+    case kLoad:
+        sounds_.play(UiSound::Select);
+        pickDisc(g);
+        break;
     case kExplore:
-        if (g.iso.empty()) toast("Load a " + g.title() + " disc image to explore its models.");
-        else if (!g.hasModule) toast(g.ready ? "This launcher build has no " + g.id + " module." : g.title() + " is not playable yet. Coming soon!");
-        else exploreOpen(g);
+        if (g.iso.empty()) sounds_.play(UiSound::Error), toast("Load a " + g.title() + " disc image to explore its models.");
+        else if (!g.hasModule)
+            sounds_.play(UiSound::Error),
+                toast(g.ready ? "This launcher build has no " + g.id + " module." : g.title() + " is not playable yet. Coming soon!");
+        else sounds_.play(UiSound::Select), exploreOpen(g);
         break;
     default: break;
     }
@@ -508,13 +548,24 @@ void Launcher::activate(int row, int col) {
 
 void Launcher::play(Game& g) {
     log_.add("play " + g.id + " (" + g.title() + " " + g.version + ") with " + g.iso);
+    const Uint64 t0 = SDL_GetTicks();
+    sounds_.play(UiSound::Play);
     drawLoading(g);
+    // The game's own audio device: the launcher's is released first (after
+    // its "play" sound had a moment to ring).
+    if (sounds_.count() > 0) {
+        const Uint64 spent = SDL_GetTicks() - t0;
+        if (spent < 450) SDL_Delay(Uint32(450 - spent));
+    }
+    sounds_.close();
     closeGamepads();
     GameRun r = runGameModule(window_, context_, g, catalog_.launcherVersion(), log_);
     restoreWindow();
     openGamepads();
+    sounds_.open();
     dragging_ = false;
     if (!r.started) {
+        sounds_.play(UiSound::Error);
         log_.add("play " + g.id + " failed: " + r.error);
         showDialog("We can't rock this! Sorry...", g.title() + " did not start: " + r.error, {{"OK", Fret::Green, nullptr}});
         return;
@@ -567,10 +618,12 @@ void Launcher::handleDisc(const std::string& path, const std::string& wantedId) 
             buttons.push_back({"Use it anyway", Fret::Yellow, [this, id, path] {
                                    catalog_.saveIso(id, path);
                                    log_.add("disc saved for " + id + " (unrecognised): " + path);
+                                   discsChanged();
                                    toast("Disc saved for " + id + ".");
                                }});
         }
         buttons.push_back({"OK", Fret::Green, nullptr});
+        sounds_.play(UiSound::Error);
         showDialog("We can't rock this! Sorry...",
                    file + " (" + disc.describe() + ") is not a disc of any game the launcher knows.", buttons);
         return;
@@ -581,6 +634,7 @@ void Launcher::handleDisc(const std::string& path, const std::string& wantedId) 
     auto save = [this, id, path] {
         catalog_.saveIso(id, path);
         log_.add("disc saved for " + id + ": " + path);
+        discsChanged();
     };
     const bool canPlay = g->ready && g->hasModule;
     std::string title = g->title() + " detected!";
@@ -620,6 +674,84 @@ void Launcher::handleDisc(const std::string& path, const std::string& wantedId) 
     }
     buttons.push_back({"Cancel", Fret::Red, [this, id] { log_.add("disc not saved for " + id); }});
     showDialog(title, body, buttons);
+}
+
+void Launcher::openWebsite() {
+    log_.add(std::string("website opened: ") + kWebsite);
+    sounds_.play(UiSound::Select);
+    if (SDL_OpenURL(kWebsite)) toast("Opening guitardreamengine.com in your browser\xE2\x80\xA6");
+    else toast("Visit guitardreamengine.com");
+}
+
+// The folders where disc images are looked for, what each had, and (macOS)
+// what to do when the app runs from a translocated copy.
+void Launcher::showDiscFolders(const std::string& title) {
+    sounds_.play(UiSound::Select);
+    std::string body;
+    for (const Catalog::DiscDir& d : catalog_.discDirInfo()) {
+        std::string state = !d.problem.empty() ? d.problem
+                            : d.isos == 0     ? "no .iso files"
+                                              : std::to_string(d.isos) + " .iso, " + std::to_string(d.known) + " known";
+        body += "\xE2\x80\xA2 " + d.what + " (" + state + "):\n" + d.path + "\n";
+    }
+    if (catalog_.translocated()) {
+        const std::string app = catalog_.originalApp().empty() ? std::string("Guitar Dream Universal Launcher.app") : catalog_.originalApp();
+        body += "\nmacOS is running the app from a temporary copy (it still has the download's quarantine mark), "
+                "so the original_isos folder next to it may not be seen. Move the app to another folder with the "
+                "Finder and open it again, or run in Terminal:\nxattr -dr com.apple.quarantine \"" + app + "\"\n";
+    }
+    body += "\nPut your .iso files in one of these folders, use Load ISO, or drop one on this window.";
+    std::vector<Button> buttons;
+    const std::string mine = platform::join(platform::saveDir(), "original_isos");
+    buttons.push_back({"Open folder", Fret::Yellow, [this, mine] {
+                           SDL_CreateDirectory(mine.c_str());
+                           std::string url = "file://" + mine;
+#ifdef _WIN32
+                           url = "file:///" + mine;
+#endif
+                           if (!SDL_OpenURL(url.c_str())) toast("Cannot open " + mine);
+                           log_.add("disc folder opened: " + mine);
+                       }});
+    buttons.push_back({"Look again", Fret::Blue, [this] {
+                           catalog_.rescanDiscs();
+                           log_.add("disc folders scanned again: " + std::to_string(catalog_.discsFound()) + " disc images found");
+                           discsChanged();
+                           toast(std::to_string(catalog_.discsFound()) + (catalog_.discsFound() == 1 ? " disc image found." : " disc images found."));
+                       }});
+    buttons.push_back({"OK", Fret::Green, nullptr});
+    showDialog(title, body, buttons);
+    dialog_.focus = 2;
+}
+
+// The menu sounds: the first game whose module gives them (Guitar Hero's,
+// from its disc). Silent while no such disc is known.
+void Launcher::loadSounds() {
+    soundsTried_ = true;
+    if (sounds_.count() > 0) return;
+    struct Sink {
+        UiSounds* sounds;
+    } sink{&sounds_};
+    auto add = [](void* user, const char* role, const float* stereo, int frames, int rate) {
+        if (role) static_cast<Sink*>(user)->sounds->add(role, stereo, frames, rate);
+    };
+    for (const Game& g : catalog_.games()) {
+        if (!g.hasModule || g.iso.empty()) continue;
+        std::string error;
+        const Uint64 t0 = SDL_GetTicks();
+        const int n = fetchUiSounds(window_, context_, g, catalog_.launcherVersion(), log_, add, &sink, error);
+        if (n > 0) {
+            log_.add("menu sounds: " + std::to_string(sounds_.count()) + " from " + g.id + " (" + g.title() + ", " +
+                     platform::fileName(g.iso) + ", " + std::to_string(SDL_GetTicks() - t0) + " ms)");
+            sounds_.open();
+            return;
+        }
+        SDL_Log("gdul: menu sounds from %s: %s", g.id.c_str(), error.c_str());
+    }
+    log_.add("menu sounds: none (no disc of a game that has them, such as Guitar Hero)");
+}
+
+void Launcher::discsChanged() {
+    if (sounds_.count() == 0) soundsTried_ = false;
 }
 
 void Launcher::askQuit() {
@@ -671,20 +803,57 @@ void Launcher::drawBackground() {
 void Launcher::drawHeader() {
     const std::vector<Game>& games = catalog_.games();
     gfx_.image(gfx_.icon(), R(kMargin - 6, 16, 104, 104));
-    text(FontId::Title, 60, 150, 20, "Guitar Dream", kCream);
+    text(FontId::Title, 60, 150, 20, "Guitar Dream Engine", kCream);
     const float subW = text(FontId::SemiBold, 17, 153, 90, "UNIVERSAL LAUNCHER", kSand, 4.5f);
     const std::string ver = "v" + catalog_.launcherVersion();
     const float vw = measure(FontId::SemiBold, 14, ver) + 16;
     gfx_.rect(R(153 + subW + 12, 89, vw, 22), withAlpha(kOxblood, 0.85f), 11 * s_);
     text(FontId::SemiBold, 14, 153 + subW + 20, 91, ver, kCream);
 
+    float mx = -1, my = -1;
+    SDL_GetMouseState(&mx, &my);
+    const float density = SDL_GetWindowPixelDensity(window_);
+    mx *= density, my *= density;
+    const bool modal = dialog_.open || dragging_;
+
+    // The project's website: a pill in the badge's oxblood, with a globe.
+    const std::string label = "OFFICIAL SITE", url = "guitardreamengine.com", arrow = "\xC2\xBB";
+    const float lw = measure(FontId::SemiBold, 12, label, 2.f), uw = measure(FontId::SemiBold, 17, url), aw = measure(FontId::SemiBold, 17, arrow);
+    const float pw = 16 + 20 + 10 + lw + 12 + uw + 8 + aw + 16, px = W_ - kMargin - pw, py = 18;
+    const Rect pill = R(px, py, pw, 36);
+    const bool hover = !modal && pill.contains(mx, my);
+    const float pulse = 0.5f + 0.5f * float(std::sin(now_ * 2.2));
+    gfx_.glow(pill, withAlpha(kOxblood, hover ? 0.7f : 0.28f + 0.12f * pulse), 18 * s_, (hover ? 22.f : 16.f) * s_);
+    gfx_.rect(pill, hover ? rgb(0x8a2a2c) : rgb(0x5a1d20, 0.95f), hover ? rgb(0x4a1416) : rgb(0x2c1013, 0.95f), 18 * s_);
+    gfx_.ring(pill, withAlpha(hover ? kCream : kSand, hover ? 0.85f : 0.45f), 18 * s_, 1.2f * s_);
+    // The globe: a ring, its equator and a meridian.
+    const float gx = px + 16, gy = py + 8;
+    const Color gc = hover ? kCream : kSand;
+    gfx_.ring(R(gx, gy, 20, 20), gc, 10 * s_, 1.6f * s_);
+    gfx_.ring(R(gx + 5.5f, gy, 9, 20), withAlpha(gc, 0.85f), 4.5f * s_, 1.3f * s_);
+    gfx_.rect(R(gx + 1, gy + 9.3f, 18, 1.4f), withAlpha(gc, 0.85f));
+    float tx = gx + 20 + 10;
+    tx += text(FontId::SemiBold, 12, tx, py + 11, label, withAlpha(kSand, hover ? 1.f : 0.85f), 2.f) + 12;
+    tx += text(FontId::SemiBold, 17, tx, py + 7, url, kCream) + 8;
+    text(FontId::SemiBold, 17, tx + (hover ? 3.f : 0.f), py + 7, arrow, hover ? kCream : kSand);
+    hits_.push_back({pill, kHitWebsite, -1});
+
     int highlighted = 0;
     for (const Game& g : games) highlighted += g.playable() ? 1 : 0;
     const std::string l1 = std::to_string(highlighted) + " of " + std::to_string(games.size()) + " games ready to rock";
+    text(FontId::SemiBold, 20, W_ - kMargin - measure(FontId::SemiBold, 20, l1), 64, l1, kCream);
+    // How many discs were found, and a link to where the launcher looked.
     const int discs = catalog_.discsFound();
-    const std::string l2 = std::to_string(discs) + (discs == 1 ? " disc image" : " disc images") + " found in original_isos";
-    text(FontId::SemiBold, 20, W_ - kMargin - measure(FontId::SemiBold, 20, l1), 40, l1, kCream);
-    text(FontId::Regular, 16, W_ - kMargin - measure(FontId::Regular, 16, l2), 68, l2, kDim);
+    const std::string found = discs == 0 ? "No disc images found" : std::to_string(discs) + (discs == 1 ? " disc image found" : " disc images found");
+    const std::string where = discs == 0 ? "where we looked" : "folders";
+    const float fw = measure(FontId::Regular, 16, found + kDot), ww = measure(FontId::SemiBold, 16, where);
+    const float lx = W_ - kMargin - fw - ww;
+    const Rect link = R(lx - 4, 88, fw + ww + 8, 24);
+    const bool hl = !modal && link.contains(mx, my);
+    text(FontId::Regular, 16, lx, 90, found + kDot, discs == 0 ? fretColor(Fret::Yellow) : kDim);
+    text(FontId::SemiBold, 16, lx + fw, 90, where, hl ? kCream : kSand);
+    gfx_.rect(R(lx + fw, 110, ww, 1.2f), withAlpha(hl ? kCream : kSand, hl ? 0.9f : 0.5f));
+    hits_.push_back({link, kHitDiscs, -1});
 
     // Column titles and the rule under the header.
     const float right = W_ - kMargin - 16;
@@ -815,20 +984,12 @@ void Launcher::drawFooter() {
     const float y = H_ - kFooterH;
     gfx_.rect(R(0, y, W_, kFooterH), rgb(0x0d0b0f, 0.92f), rgb(0x080709, 0.98f));
     gfx_.rect(R(0, y, W_, 1), withAlpha(kCream, 0.1f));
-    float x = kMargin;
     const float cy = y + kFooterH / 2;
-    auto hint = [&](Fret f, const std::string& label) {
-        gfx_.circle((x + 8) * s_, cy * s_, 8 * s_, fretColor(f));
-        gfx_.circle((x + 6) * s_, (cy - 2.5f) * s_, 2.8f * s_, withAlpha(kCream, 0.6f));
-        x += 22;
-        x += text(FontId::SemiBold, 16, x, cy - 10, label, kSand) + 24;
-    };
-    hint(Fret::Green, "Select");
-    hint(Fret::Red, "Back");
-    hint(Fret::Yellow, "Load ISO");
-    hint(Fret::Blue, "Explore models");
+    // Hints only: everything is clicked (or reached with the keys, a gamepad or a guitar).
     const std::string drop = "Drop a disc image anywhere to identify it";
-    text(FontId::Regular, 15, W_ - kMargin - measure(FontId::Regular, 15, drop), cy - 10, drop, kDim);
+    text(FontId::Regular, 15, kMargin, cy - 10, drop, kDim);
+    const std::string keys = "Mouse" + kDot + "keyboard" + kDot + "gamepad" + kDot + "guitar";
+    text(FontId::Regular, 15, W_ - kMargin - measure(FontId::Regular, 15, keys), cy - 10, keys, kMuted);
 }
 
 void Launcher::drawToast() {

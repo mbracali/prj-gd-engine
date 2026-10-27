@@ -77,6 +77,7 @@ void Mixer::play(std::unique_ptr<AudioSource> stream, std::vector<Track> tracks,
     leadIn_ = leadInFrames_;
     songFrames_ = 0;
     guitarGain_ = 1, guitarTarget_ = 1;
+    guitar2Gain_ = 1, guitar2Target_ = 1;
     anchorFrames_ = 0;
     anchorNs_ = SDL_GetTicksNS();
     paused_ = false;
@@ -168,15 +169,16 @@ void Mixer::fill(int frames) {
     int n = int(std::min<int64_t>(audible, available));
     if (n < audible && !sourceEnded_.load()) underruns_ += audible - n;
 
-    const float target = guitarTarget_.load();
+    const float target = guitarTarget_.load(), target2 = guitar2Target_.load();
     for (int i = 0; i < n; ++i) {
         size_t at = size_t((r + i) & (kRing - 1));
         // ~8 ms ramp, no click (gd01) [I].
         guitarGain_ += (target - guitarGain_) * 0.003f;
+        guitar2Gain_ += (target2 - guitar2Gain_) * 0.003f;
         float l = 0, rr = 0;
         for (size_t c = 0; c < tracks_.size(); ++c) {
             const Track& t = tracks_[c];
-            float v = ring_[c][at] * t.volume * (t.guitar ? guitarGain_ : 1.0f);
+            float v = ring_[c][at] * t.volume * (t.guitar ? guitarGain_ : t.guitar2 ? guitar2Gain_ : 1.0f);
             // gd01's linear pan law: -1 = left only, 0 = both at full, 1 = right only [I].
             l += v * std::clamp(1.0f - t.pan, 0.0f, 1.0f);
             rr += v * std::clamp(1.0f + t.pan, 0.0f, 1.0f);

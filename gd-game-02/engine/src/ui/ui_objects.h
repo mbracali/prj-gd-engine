@@ -134,6 +134,7 @@ public:
     UiManager& ui;
     ScreenObj* back = nullptr;
     bool backSet = false;
+    PanelObj* focusOverride = nullptr;  // set_focus_panel (cleared as the screen enters)
     std::vector<PanelObj*> panels() const;
     PanelObj* focusPanel() const;
     bool flag(const std::string& key, bool def) const;
@@ -141,7 +142,15 @@ public:
     bool inBackChain(const ScreenObj* s) const;  // 0x8229E8E0
     bool handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) override;
     // GHScreen's button_down (0x8229EED0): the auto back on kPad_Tri.
-    bool nativeButtonDown(int button, int player);
+    virtual bool nativeButtonDown(int button, int player);
+    // The screen class's own handling of a routed message (UIManager
+    // Handle), before the screen's script as Milo's natives come first
+    // (MultiSelectScreen 0x822978C0); false: not handled.
+    virtual bool routeNative(const std::string& /*msg*/, std::vector<Value>& /*args*/, Value& /*r*/) { return false; }
+    // The screen class's Enter, before its panels enter (MultiSelectScreen
+    // 0x82296EF8), and once they have, before the screen's script.
+    virtual void nativeEnter() {}
+    virtual void nativeEntered() {}
 };
 
 // The UIPanel class factories for `new` (script_classes.cpp).

@@ -13,10 +13,13 @@
 
 #include "audio/audio_device.h"
 #include "game/song_db.h"
+#include "input/input.h"
 #include "script/tasks.h"
+#include "ui/campaign.h"
 #include "ui/char_select.h"
 #include "ui/natives.h"
 #include "ui/sfx_args.h"
+#include "ui/store.h"
 #include "ui/ui_host.h"
 #include "ui/ui_objects.h"
 
@@ -40,85 +43,41 @@ std::string userName() {
     return n && *n ? n : "PLAYER";
 }
 
-// The campaign's song lists (config/gh2.dta (campaign (order ...)), (store (song ...)), (downloads)).
-struct SongLists {
-    std::vector<std::pair<std::string, std::vector<std::string>>> tiers;  // venue -> songs, in order
-    std::vector<std::string> store, downloads;
-};
-
-SongLists songLists(UiManager& ui) {
-    SongLists l;
-    const DataNode* boot = ui.bootTree();
-    if (const DataNode* c = boot ? boot->find("campaign") : nullptr)
-        if (const DataNode* order = c->find("order"))
-            for (size_t k = 1; k < order->children.size(); ++k) {
-                const DataNode& t = order->children[k];
-                if (!t.isList() || t.children.empty()) continue;
-                std::vector<std::string> songs;
-                for (size_t s = 1; s < t.children.size(); ++s)
-                    if (t.children[s].isText()) songs.push_back(t.children[s].s);
-                l.tiers.push_back({t.children[0].s, songs});
-            }
-    if (const DataNode* st = boot ? boot->find("store") : nullptr)
-        if (const DataNode* songs = st->find("song"))
-            for (size_t k = 1; k < songs->children.size(); ++k)
-                if (songs->children[k].isList() && !songs->children[k].children.empty()) l.store.push_back(songs->children[k].children[0].s);
-    if (const DataNode* d = boot ? boot->find("downloads") : nullptr)
-        for (size_t k = 1; k < d->children.size(); ++k) {
-            if (d->children[k].isText()) l.downloads.push_back(d->children[k].s);
-            else if (d->children[k].isList() && !d->children[k].children.empty()) l.downloads.push_back(d->children[k].children[0].s);
-        }
-    return l;
-}
-
-// song_provider: the song lists of the song screens (kSongsCareer 0,
-// kSongsQuickplay 1, kSongsLeaderboards 2), with tier headers.
+// song_provider (0x822C2160): the song lists of the song screens
+// (kSongsCareer 0, kSongsQuickplay 1, kSongsLeaderboards 2), with headers.
 class SongProviderObj : public ListProvider {
 public:
     explicit SongProviderObj(UiManager& ui) : ListProvider("song_provider", "SongProvider"), ui_(ui) {}
 
     int numData() override { return int(data_.size()); }
     std::string symbol(int i) override { return i >= 0 && i < int(data_.size()) ? data_[size_t(i)] : std::string(); }
+    // 0x822C33C0: an encore is active once it is unlocked.
+    bool active(int i) override {
+        const std::string s = symbol(i);
+        return !campaign::isEncore(ui_, s) || campaign::isUnlocked(ui_, s);
+    }
 
-    // 0x822C5A68 / 0x82287600 [C]: quickplay offers the songs of the first
-    // two tiers, every song a profile has unlocked at any difficulty,
-    // bought bonus songs and downloaded songs (all of them with the
-    // all-access cheat), in campaign order; a header before each group.
+    // 0x822C5A68: career, the band's songs (0x822A75D0); quick play, the
+    // first two tiers' songs, every song a band has unlocked, bought songs
+    // and downloads (0x82287600); in campaign order, a header before each
+    // venue's songs, the store's and the downloads'.
     void build() {
         data_.clear();
         headers_.clear();
-        const SongLists l = songLists(ui_);
-        std::set<std::string> offered;
-        for (size_t t = 0; t < l.tiers.size() && t < 2; ++t) offered.insert(l.tiers[t].second.begin(), l.tiers[t].second.end());
-        Career& c = ui_.career();
-        for (const Career::Profile& p : c.profiles) {
-            if (!p.inUse) continue;
-            // A profile's unlocked tiers: the first, and one more per completed tier [I].
-            for (int d = 0; d < Career::kDifficulties; ++d)
-                for (int t = 0; t <= p.status[size_t(d)] && t < int(l.tiers.size()); ++t)
-                    offered.insert(l.tiers[size_t(t)].second.begin(), l.tiers[size_t(t)].second.end());
-        }
-        for (const auto& [item, on] : c.items)
-            if (on) offered.insert(item);
-        const bool all = ui_.session().allAccess;
         const auto have = [&](const std::string& s) { return songInfoIndex(ui_, s) >= 0; };
-        for (const auto& [tier, songs] : l.tiers) {
-            bool first = true;
-            for (const std::string& s : songs) {
-                if (!have(s) || (!all && !offered.count(s))) continue;
-                if (first) headers_.push_back({int(data_.size()), tier}), first = false;
-                data_.push_back(s);
-            }
+        for (const std::string& s : mode == 0 ? campaign::careerSongs(ui_, storeMode_) : campaign::quickplaySongs(ui_))
+            if (have(s)) data_.push_back(s);
+        std::string last;
+        footer_ = -1;
+        for (int i = 0; i < int(data_.size()); ++i) {
+            const std::string& s = data_[size_t(i)];
+            std::string group = campaign::isDownload(ui_, s) ? "download" : campaign::isStoreSong(ui_, s) ? "store" : campaign::venueOf(ui_, s);
+            if ((group == "store" || group == "download") && footer_ < 0) footer_ = i - 1;
+            if (group != last) headers_.push_back({i, group}), last = group;
         }
-        footer_ = int(data_.size()) - 1;  // the last tier song carries the quickplay blurb
-        for (const auto* group : {&l.store, &l.downloads}) {
-            bool first = true;
-            for (const std::string& s : *group) {
-                if (!have(s) || (!all && group == &l.store && !offered.count(s))) continue;
-                if (first) headers_.push_back({int(data_.size()), group == &l.store ? "store" : "download"}), first = false;
-                data_.push_back(s);
-            }
-        }
+        // The last tier song carries the blurb, the one before when it is inactive.
+        if (footer_ < 0) footer_ = int(data_.size()) - 1;
+        if (footer_ >= 0 && !active(footer_)) --footer_;
     }
 
     int numHeaders(int pos) const {
@@ -128,21 +87,71 @@ public:
         return n;
     }
 
+    // The footer row's blurb (0x822C0070).
+    std::string blurb() {
+        Career::Profile* p = campaign::profile(ui_);
+        if (mode == 1) {
+            // Until a band is a tier from the end at medium or harder.
+            for (int d = 1; p && d < Career::kDifficulties; ++d)
+                if (int(campaign::config(ui_).tiers.size()) - 1 <= campaign::status(ui_, *p, d)) return {};
+            return ui_.localize("song_quickplay");
+        }
+        if (mode != 0 || !p) return {};
+        const int d = campaign::difficulty(ui_), nt = campaign::numTiers(ui_, d), st = campaign::status(ui_, *p, d);
+        if (nt <= st) return {};
+        const std::string venue = ui_.session().venue;
+        const int vi = campaign::venueIndex(ui_, venue);
+        if (vi < st) return ui_.localize("song_old_venue");
+        const bool encore = campaign::isUnlocked(ui_, campaign::encoreOf(ui_, venue));
+        const int req = campaign::requiredSongs(ui_, d, venue);
+        char buf[160];
+        if (vi < nt - 1 || d != 0) {
+            if (encore) return ui_.localize(vi < nt - 1 ? "song_current_venue_encore" : "song_win_other");
+            std::snprintf(buf, sizeof buf, ui_.localize("song_current_venue").c_str(), d == 0 ? req : req - 1);
+            return buf;
+        }
+        std::snprintf(buf, sizeof buf, ui_.localize("song_win_easy").c_str(), req, req);
+        return buf;
+    }
+
     void rows(std::vector<gfx::UiView::ListRow>& out, int selected, int& selectedRow) override {
         // One row per song at slot index + headers above it: a group's first
         // song carries its header.txt (placed a slot up by the template),
         // the camera follows the slot (sel_song.view frame pos + num_headers).
         out.clear();
         selectedRow = 0;
+        Career::Profile* p = campaign::profile(ui_);
+        const int d = campaign::difficulty(ui_);
+        const std::string foot = blurb();
         for (int i = 0; i < int(data_.size()); ++i) {
+            const std::string& s = data_[size_t(i)];
             gfx::UiView::ListRow r;
             r.slot = i + numHeaders(i);
             for (const auto& [idx, tier] : headers_)
                 if (idx == i) r.header = true, r.texts["header.txt"] = ui_.localize("song_header_" + tier);
-            const int info = songInfoIndex(ui_, data_[size_t(i)]);
-            r.texts["list.txt"] = info >= 0 ? ui_.host().songs()[size_t(info)].name : data_[size_t(i)];
-            // Quickplay shows no scores, stars or checkmarks outside co-op (0x822C3428 / 0x822C34E8) [C].
-            if (mode == 1 && i == footer_) r.texts["blurb.txt"] = ui_.localize("song_quickplay");
+            const int info = songInfoIndex(ui_, s);
+            r.texts["list.txt"] = info >= 0 ? ui_.host().songs()[size_t(info)].name : s;
+            r.disabled = !active(i);
+            // Career rows: the best score, the stars ("***", gold after a
+            // perfect run) and the check of a passed tour song
+            // (0x822C3428 / 0x822C34E8 / 0x822C41D8); quick play shows none
+            // outside co-op.
+            // Quick play in co-op (0x822C3428 / 0x822C34E8 with mode
+            // multi_coop): the co-op record's score and stars (Campaign +0x4c).
+            if (mode == 1 && gameCfgValue(ui_, "mode").str() == "multi_coop")
+                if (const Career::CoopEntry* e = campaign::coopEntry(ui_, s)) {
+                    if (e->score) r.texts["score.txt"] = std::to_string(e->score);
+                    if (!e->perfect && e->stars >= 3 && e->stars <= 5) r.texts["stars.txt"] = std::string(size_t(e->stars), '*');
+                    if (e->perfect && e->stars > 2) r.mats["stars_gold.mesh"] = "stars_gold_" + std::to_string(std::min(e->stars, 5)) + ".mat";
+                }
+            if (mode == 0 && p) {
+                const Career::Entry& e = campaign::record(ui_, *p, d)[s];
+                if (e.score) r.texts["score.txt"] = std::to_string(e.score);
+                if (!e.perfect && e.stars >= 3 && e.stars <= 5) r.texts["stars.txt"] = std::string(size_t(e.stars), '*');
+                if (e.perfect && e.stars > 2) r.mats["stars_gold.mesh"] = "stars_gold_" + std::to_string(std::min(e.stars, 5)) + ".mat";
+                if (e.stars >= 3 && !campaign::isStoreSong(ui_, s)) r.mats["checkmark.mesh"] = "checkmark.mat";
+            }
+            if (i == footer_ && !foot.empty()) r.texts["blurb.txt"] = foot;
             if (i == selected) selectedRow = int(out.size());
             out.push_back(std::move(r));
         }
@@ -153,13 +162,24 @@ public:
         if (msg == "set_mode") return mode = intArg(args, 0), build(), true;
         if (msg == "get_mode") return r = Value::integer(mode), true;
         if (msg == "init_data") return build(), true;
-        if (msg == "set_store_mode") return true;
+        if (msg == "set_store_mode") return storeMode_ = !args.empty() && args[0].truthy(), true;
         if (msg == "num_headers") return r = Value::integer(numHeaders(intArg(args, 0))), true;
         if (msg == "get_symbol") return r = Value::symbol(symbol(intArg(args, 0))), true;
         if (msg == "list_length" || msg == "num_data") return r = Value::integer(numData()), true;
-        if (msg == "has_instrument") return r = Value::integer(1), true;
-        if (msg == "get_instrument") return r = Value::symbol("guitar"), true;
-        if (msg == "track_num_of_instrument") return r = Value::integer(0), true;
+        // 0x822BF2C0 / 0x822BF1F8: the song's (tracks ...) of the mode's
+        // song_block (else `song`, 0x822B38F8): instrument n, and whether
+        // (the index of) an instrument is there [C].
+        if (msg == "get_instrument" || msg == "has_instrument" || msg == "track_num_of_instrument") {
+            const std::vector<std::string> inst = songInstruments(ui_, args.empty() ? std::string() : nameOf(args[0]));
+            if (msg == "get_instrument") {
+                const int i = intArg(args, 1);
+                return r = Value::symbol(i >= 0 && i < int(inst.size()) ? inst[size_t(i)] : std::string()), true;
+            }
+            const std::string want = args.size() > 1 ? nameOf(args[1]) : std::string();
+            const auto it = std::find(inst.begin(), inst.end(), want);
+            const int idx = it == inst.end() ? -1 : int(it - inst.begin());
+            return r = Value::integer(msg == "has_instrument" ? (idx >= 0 ? 1 : 0) : idx), true;
+        }
         return false;
     }
 
@@ -170,52 +190,77 @@ private:
     std::vector<std::string> data_;
     std::vector<std::pair<int, std::string>> headers_;
     int footer_ = -1;
+    bool storeMode_ = false;
 };
 
-// campaign: the save's profiles and unlocks (Campaign 0x82287F58).
+// campaign: the save's bands, their tours and the store (Campaign 0x82287F58;
+// the rules in ui/campaign.h).
 class CampaignObj : public ScriptObject {
 public:
     CampaignObj(UiManager& ui, SongProviderObj& sp) : ScriptObject("campaign", "Campaign"), ui_(ui), sp_(sp) {}
-    bool handleNative(Interp&, const std::string& msg, std::vector<Value>& args, Value& r) override {
+    bool handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) override {
         Career& c = ui_.career();
+        Session& ss = ui_.session();
+        int& slot = ss.profileSlot;
         r = Value::integer(0);
         const auto argStr = [&](size_t i) { return i < args.size() ? nameOf(args[i]) : std::string(); };
-        if (msg == "clear") return slot_ = -1, true;  // the splash: no profile chosen
+        if (msg == "clear") return slot = -1, true;  // the splash: no profile chosen
         if (msg == "num_profiles") return r = Value::integer(c.numProfiles()), true;
-        if (msg == "tutorials_done") return r = Value::integer(slot_ >= 0 ? c.profiles[size_t(slot_)].tutorialsDone : 0), true;
+        if (msg == "max_num_profiles") return r = Value::integer(Career::kProfiles), true;
+        if (msg == "tutorials_done") {
+            const int done = skipTutorials_ || tutorialAccess_ ? 3 : slot >= 0 ? c.profiles[size_t(slot)].tutorialsDone : 0;
+            return r = Value::integer(done), true;
+        }
+        if (msg == "skip_tutorials") return skipTutorials_ = !args.empty() && args[0].truthy(), true;
+        if (msg == "tutorial_access") return r = Value::integer(tutorialAccess_ ? 1 : 0), true;
+        if (msg == "set_tutorial_access") return tutorialAccess_ = !args.empty() && args[0].truthy(), true;
         if (msg == "needs_save") return r = Value::integer(c.needsSave ? 1 : 0), true;
+        if (msg == "mark_needs_save") return c.touch(), true;
         if (msg == "save_complete") return c.needsSave = false, true;
-        if (msg == "all_access") return r = Value::integer(ui_.session().allAccess ? 1 : 0), true;
-        if (msg == "set_all_access") return ui_.session().allAccess = !args.empty() && args[0].truthy(), true;
-        if (msg == "profile_slot") return r = Value::integer(slot_), true;
-        if (msg == "set_profile_slot") return slot_ = intArg(args, 0, -1), true;
+        if (msg == "all_access") return r = Value::integer(ss.allAccess ? 1 : 0), true;
+        if (msg == "set_all_access") return ss.allAccess = !args.empty() && args[0].truthy(), true;
+        if (msg == "profile_slot") return r = Value::integer(slot), true;
+        if (msg == "set_profile_slot") return slot = intArg(args, 0, -1), true;
         if (msg == "profile_name") {
-            const int s = intArg(args, 0, slot_);
-            return r = Value::string(s >= 0 && s < Career::kProfiles ? c.profiles[size_t(s)].name : std::string()), true;
+            // A band in use's name, else "Someone" [C].
+            const int s = intArg(args, 0, slot);
+            const bool used = s >= 0 && s < Career::kProfiles && c.profiles[size_t(s)].inUse;
+            return r = Value::string(used ? c.profiles[size_t(s)].name : std::string("Someone")), true;
         }
         if (msg == "is_empty_profile") {
             const int s = intArg(args, 0, 0);
             return r = Value::integer(s >= 0 && s < Career::kProfiles && !c.profiles[size_t(s)].inUse ? 1 : 0), true;
         }
-        if (msg == "is_unlocked") {
-            const std::string s = argStr(0);
-            int known = 0;
-            const bool on = chars::unlocked(ui_, s, &known);  // characters, outfits, guitars, skins
-            const bool other = ui_.session().allAccess || (c.items.count(s) && c.items[s]);
-            return r = Value::integer((known ? on : other) ? 1 : 0), true;
+        if (msg == "empty_slot") {
+            for (int s = 0; s < Career::kProfiles; ++s)
+                if (!c.profiles[size_t(s)].inUse) return r = Value::integer(s), true;
+            return r = Value::integer(-1), true;
         }
-        if (msg == "is_video_unlocked") return r = Value::integer(ui_.session().allAccess || (c.items.count(argStr(0)) && c.items[argStr(0)]) ? 1 : 0), true;
-        if (msg == "is_song_passed") {
-            for (const Career::Profile& p : c.profiles)
-                for (const auto& d : p.results)
-                    if (auto it = d.find(argStr(0)); it != d.end() && it->second.passed) return r = Value::integer(1), true;
+        if (msg == "delete_slot") {
+            const int s = intArg(args, 0, -1);
+            if (s >= 0 && s < Career::kProfiles) c.profiles[size_t(s)] = Career::Profile{}, c.touch();
             return true;
         }
-        if (msg == "store_songs_passed" || msg == "won_campaign" || msg == "final_song" || msg == "is_encore_song" ||
-            msg == "encore_unlock_potential" || msg == "encore_newly_unlocked" || msg == "is_store_song" || msg == "is_max_status" ||
-            msg == "num_guitar_awards" || msg == "do_tutorial" || msg == "tutorial_access")
-            return true;  // career only: nothing in a fresh quickplay session
-        if (msg == "status" || msg == "cash_spent") return true;
+        if (msg == "is_unlocked") return r = Value::integer(campaign::isUnlocked(ui_, argStr(0)) ? 1 : 0), true;
+        if (msg == "is_video_unlocked") {
+            // 0x82284890: any band in use has bought it.
+            if (ss.allAccess) return r = Value::integer(1), true;
+            for (Career::Profile& p : c.profiles)
+                if (p.inUse && p.items.count(argStr(0)) && p.items[argStr(0)]) return r = Value::integer(1), true;
+            return true;
+        }
+        if (msg == "is_store_song") return r = Value::integer(campaign::isStoreSong(ui_, argStr(0)) ? 1 : 0), true;
+        if (msg == "foreach_venue") {
+            // {campaign foreach_venue $v body...}: $v by name, each venue in order.
+            if (args.empty()) return true;
+            std::string var = args[0].str();
+            if (var.size() > 1 && var[0] == '$') var = var.substr(1);
+            for (const auto& [venue, songs] : campaign::config(ui_).tiers) {
+                in.var(var) = Value::symbol(venue);
+                for (size_t k = 1; k < args.size(); ++k) in.evalValue(args[k]);
+            }
+            return true;
+        }
         if (msg == "pick_attract_song") {
             // A song quickplay offers (the attract mode).
             sp_.mode = 1;
@@ -223,81 +268,190 @@ public:
             const int n = sp_.numData();
             return r = Value::symbol(n > 0 ? sp_.symbol(ui_.interp().randomInt(0, n)) : std::string()), true;
         }
-        if (msg == "get_status_progress") return r = Value::string(""), true;
-        // The band profile (0x82287F58): its name (set_profile_name 0x822A6C30,
-        // has_profile_name 0x822847B0), the last difficulty (+0x2c) and the
-        // look per difficulty (set / get_character_info 0x82284E88 /
-        // 0x82284E00; new_campaign 0x822A8A88: no character stored yet).
-        Career::Profile* prof = slot_ >= 0 && slot_ < Career::kProfiles ? &c.profiles[size_t(slot_)] : nullptr;
-        const int diff = std::clamp(ui_.session().players[0].difficulty, 0, Career::kDifficulties - 1);
+        if (msg == "finish_coop_song") {
+            // 0x822861A8: the band's result into co-op's record (the band and
+            // the players as the game left them: band / player0 / player1).
+            const int score = in.send("band", "score", {}).integerValue();
+            const int stars = in.send("band", "num_stars", {}).integerValue();
+            const int p0 = in.send("player0", "percent_hit", {}).integerValue();
+            const int p1 = in.send("player1", "percent_hit", {}).integerValue();
+            campaign::finishCoopSong(ui_, score, stars, p0, p1, ss.players[0].difficulty, ss.players[1].difficulty);
+            return true;
+        }
+        if (msg == "num_guitar_awards") return r = Value::integer(int(ss.guitarAwards.size())), true;
+        if (msg == "next_guitar_award") {
+            if (ss.guitarAwards.empty()) return r = Value::symbol(""), true;
+            r = Value::symbol(ss.guitarAwards.back());
+            ss.guitarAwards.pop_back();
+            return true;
+        }
+        if (msg == "starting_cash") return r = Value::integer(campaign::config(ui_).startingCash), true;
+        // The band chosen (Campaign +0x48) at the player's difficulty.
+        Career::Profile* prof = campaign::profile(ui_);
+        const int diff = campaign::difficulty(ui_);
         if (msg == "has_profile_name") {
             // Another band (or, editing, any but the slot's) with the name [I: case-insensitive as the entry is upper case].
             const std::string n = argStr(0);
             const bool editing = args.size() > 1 && args[1].truthy();
             for (int i = 0; i < Career::kProfiles; ++i)
-                if (c.profiles[size_t(i)].inUse && c.profiles[size_t(i)].name == n && !(editing && i == slot_)) return r = Value::integer(1), true;
+                if (c.profiles[size_t(i)].inUse && c.profiles[size_t(i)].name == n && !(editing && i == slot)) return r = Value::integer(1), true;
             return true;
         }
         if (msg == "set_profile_name") {
-            const int s = intArg(args, 1, slot_);
+            const int s = intArg(args, 1, slot);
             if (s < 0 || s >= Career::kProfiles) return true;
             Career::Profile& p = c.profiles[size_t(s)];
             if (!p.inUse) p = Career::Profile{}, p.inUse = true;
             p.name = argStr(0);
-            slot_ = s;
+            slot = s;
             c.touch();
             return true;
         }
-        if (msg == "last_difficulty") return r = Value::integer(prof ? prof->lastDifficulty : 1), true;
+        if (!prof) {
+            // Without a band: GH2 reads slot 0's; nothing to report here.
+            static const std::set<std::string> quiet{"last_difficulty", "update_difficulty", "cash", "add_cash", "cash_spent", "career_score",
+                                                     "new_campaign", "set_character_info", "get_character_info", "status", "get_cur_status_sym",
+                                                     "get_status_progress", "is_max_status", "won_campaign", "is_song_passed", "high_score",
+                                                     "final_song", "is_encore_song", "encore_unlock_potential", "encore_newly_unlocked",
+                                                     "get_cur_encore", "store_songs_passed", "check_practice_achievement", "do_tutorial",
+                                                     "buy_item", "finish_song", "cheat_beat_song", "cheat_gold_song"};
+            if (msg == "last_difficulty") return r = Value::integer(1), true;
+            if (msg == "get_status_progress") return r = Value::string(""), true;
+            return quiet.count(msg) != 0;
+        }
+        Career::Profile& p = *prof;
+        const std::string song = ss.song;
+        if (msg == "last_difficulty") return r = Value::integer(p.lastDifficulty), true;
         if (msg == "update_difficulty") {
-            if (prof && prof->lastDifficulty != diff) prof->lastDifficulty = diff, c.touch();
+            if (p.lastDifficulty != diff) p.lastDifficulty = diff, c.touch();
             return true;
         }
-        // The band's cash (config/campaign.dta (cash (starting 50))) [C data].
-        if (msg == "cash") return r = Value::integer(prof ? prof->cash : 0), true;
-        if (msg == "add_cash") {
-            if (prof) prof->cash += intArg(args, 0), c.touch();
-            return true;
-        }
-        if (msg == "starting_cash") {
-            const DataNode* boot = ui_.bootTree();
-            const DataNode* camp = boot ? boot->find("campaign") : nullptr;
-            const DataNode* cash = camp ? camp->find("cash") : nullptr;
-            const DataNode* st = cash ? cash->find("starting") : nullptr;
-            return r = Value::integer(st && st->children.size() > 1 ? st->intAt(1) : 0), true;
-        }
-        // The career score [I: the band's best scores at the difficulty, summed].
+        // The band's cash (config/campaign.dta (cash ...)) [C].
+        if (msg == "cash") return r = Value::integer(p.cash), true;
+        if (msg == "cash_spent") return r = Value::integer(p.cashSpent), true;
+        if (msg == "add_cash") return p.cash += intArg(args, 0), c.touch(), true;
+        // 0x82287310: each song's best score at any difficulty, summed.
         if (msg == "career_score") {
             int sum = 0;
-            if (prof)
-                for (const auto& [song, sr] : prof->results[size_t(diff)]) sum += sr.score;
+            for (const std::string& s : campaign::allSongs(ui_)) {
+                int best = 0;
+                for (int d = 0; d < Career::kDifficulties; ++d) best = std::max(best, campaign::record(ui_, p, d)[s].score);
+                sum += best;
+            }
             return r = Value::integer(sum), true;
         }
-        if (msg == "new_campaign") return r = Value::integer(!prof || prof->chars[size_t(diff)].character.empty() ? 1 : 0), true;
+        if (msg == "high_score") return r = Value::integer(campaign::record(ui_, p, diff)[argStr(0)].score), true;
+        // The band's look per difficulty (set / get_character_info
+        // 0x82284E88 / 0x82284E00; new_campaign 0x822A8A88: none stored yet).
+        if (msg == "new_campaign") return r = Value::integer(p.chars[size_t(diff)].character.empty() ? 1 : 0), true;
         if (msg == "set_character_info") {
-            if (!prof) return true;
-            Session::PlayerCfg& pc = ui_.session().players[0];
+            Session::PlayerCfg& pc = ss.players[0];
             chars::validate(ui_, pc);
             Career::CharInfo ci{pc.character, pc.outfit, pc.guitar, pc.skin};
-            Career::CharInfo& cur = prof->chars[size_t(diff)];
+            Career::CharInfo& cur = p.chars[size_t(diff)];
             if (cur.character != ci.character || cur.outfit != ci.outfit || cur.guitar != ci.guitar || cur.skin != ci.skin) cur = ci, c.touch();
             return true;
         }
         if (msg == "get_character_info") {
-            if (!prof) return true;
-            const Career::CharInfo& ci = prof->chars[size_t(diff)];
-            Session::PlayerCfg& pc = ui_.session().players[0];
+            const Career::CharInfo& ci = p.chars[size_t(diff)];
+            Session::PlayerCfg& pc = ss.players[0];
             chars::setCharacter(ui_, pc, ci.outfit, false);
             chars::setGuitar(ui_, pc, ci.guitar, ci.skin, false);
             return true;
         }
+        // The tour (ui/campaign.h).
+        const int st = campaign::status(ui_, p, diff), nt = campaign::numTiers(ui_, diff);
+        if (msg == "status") return r = Value::integer(st), true;
+        if (msg == "get_cur_status_sym") return r = Value::symbol("status_" + std::to_string(st)), true;
+        if (msg == "is_max_status") return r = Value::integer(nt < st ? 1 : 0), true;
+        if (msg == "won_campaign") return r = Value::integer(nt <= st ? 1 : 0), true;
+        if (msg == "get_status_progress") {
+            // 0x82284F18: "(n OF m SONGS)" at difficulty arg, " " before the first.
+            const int d = std::clamp(intArg(args, 0, diff), 0, Career::kDifficulties - 1);
+            int done = 0, total = 0;
+            const auto& tiers = campaign::config(ui_).tiers;
+            for (int t = 0; t < campaign::numTiers(ui_, d) && t < int(tiers.size()); ++t) {
+                for (const std::string& s : tiers[size_t(t)].second) done += campaign::passed(ui_, p, d, s) ? 1 : 0;
+                total += int(tiers[size_t(t)].second.size()) - (d == 0 ? 1 : 0);
+            }
+            if (!done) return r = Value::string(ui_.localize("no_progress")), true;
+            char buf[96];
+            std::snprintf(buf, sizeof buf, ui_.localize("status_progress").c_str(), done, total);
+            return r = Value::string(buf), true;
+        }
+        if (msg == "is_song_passed") return r = Value::integer(campaign::passed(ui_, p, diff, argStr(0)) ? 1 : 0), true;
+        if (msg == "is_encore_song") return r = Value::integer(campaign::isEncore(ui_, argStr(0)) ? 1 : 0), true;
+        if (msg == "get_cur_encore") return r = Value::symbol(campaign::encoreOf(ui_, campaign::venueOf(ui_, song))), true;
+        if (msg == "final_song") {
+            // 0x822A93B8: a tour song not passed yet that completes the last tier.
+            if (campaign::isStoreSong(ui_, song) || campaign::isDownload(ui_, song) || campaign::passed(ui_, p, diff, song)) return true;
+            const std::string v = campaign::venueOf(ui_, song);
+            const bool last = !v.empty() && campaign::venueIndex(ui_, v) == nt - 1 &&
+                              campaign::numPassed(ui_, p, diff, v) == campaign::requiredSongs(ui_, diff, v) - 1;
+            return r = Value::integer(last ? 1 : 0), true;
+        }
+        if (msg == "encore_unlock_potential") {
+            // 0x822AAB58: passing this song would unlock its venue's encore.
+            if (campaign::isStoreSong(ui_, song) || campaign::isDownload(ui_, song) || diff == 0) return true;
+            const std::string v = campaign::venueOf(ui_, song), enc = campaign::encoreOf(ui_, v);
+            if (v.empty() || campaign::passed(ui_, p, diff, v) || campaign::unlockedAt(ui_, p, diff, enc) || enc == song) return true;
+            const bool potential = campaign::numPassed(ui_, p, diff, v) + 1 == campaign::requiredSongs(ui_, diff, v) - 1 &&
+                                   !campaign::passed(ui_, p, diff, song);
+            return r = Value::integer(potential ? 1 : 0), true;
+        }
+        if (msg == "encore_newly_unlocked") {
+            // 0x822AAA78: $freebird (by name) = the encore is Free Bird; true once the song is passed.
+            const std::string enc = campaign::encoreOf(ui_, campaign::venueOf(ui_, song));
+            if (!args.empty()) {
+                std::string var = args[0].str();
+                if (var.size() > 1 && var[0] == '$') var = var.substr(1);
+                in.var(var) = Value::integer(enc == "freebird" ? 1 : 0);
+            }
+            return r = Value::integer(enc != song && campaign::passed(ui_, p, diff, song) ? 1 : 0), true;
+        }
+        if (msg == "store_songs_passed") {
+            for (const std::string& s : campaign::config(ui_).storeSongs)
+                if (!campaign::passed(ui_, p, diff, s)) return true;
+            return r = Value::integer(1), true;
+        }
+        if (msg == "check_practice_achievement" || msg == "do_tutorial") return true;  // achievements; the tutorials (M11)
+        if (msg == "finish_song") {
+            // {campaign finish_song $score $cash $reason $venue $status $status_award}: the outputs by name.
+            // finish_song's $vars come by name (Interp::byNameMessages): $score is read.
+            int score = intArg(args, 0);
+            if (!args.empty() && !args[0].isNumber()) {
+                std::string var = args[0].str();
+                if (var.size() > 1 && var[0] == '$') var = var.substr(1);
+                score = in.var(var).integerValue();
+            }
+            const int stars = in.send("player0", "num_stars", {}).integerValue();
+            const int hit = in.send("player0", "percent_hit", {}).integerValue();
+            const campaign::FinishResult fr = campaign::finishSong(ui_, score, stars, hit);
+            const Value outs[] = {Value::integer(fr.cash), Value::symbol(fr.cashReason), Value::symbol(fr.newVenue), Value::integer(fr.newStatus),
+                                  Value::integer(fr.statusAward)};
+            for (size_t k = 1; k < args.size() && k <= 5; ++k) {
+                std::string var = args[k].str();
+                if (var.size() > 1 && var[0] == '$') var = var.substr(1);
+                in.var(var) = outs[k - 1];
+            }
+            SDL_Log("campaign: finish_song %s score %d stars %d: cash %d (%s) venue '%s' status %d (+%d)", song.c_str(), score, stars, fr.cash,
+                    fr.cashReason.c_str(), fr.newVenue.c_str(), fr.newStatus, fr.statusAward);
+            return true;
+        }
+        if (msg == "cheat_beat_song") return campaign::cheatBeatSong(ui_, argStr(0), intArg(args, 1)), true;
+        if (msg == "cheat_gold_song") {
+            // 0x822A8C20: the song's perfect flag.
+            campaign::record(ui_, p, diff)[argStr(0)].perfect = true;
+            return c.touch(), true;
+        }
+        if (msg == "buy_item") return campaign::buyItem(ui_, argStr(0), intArg(args, 1)), true;
         return false;
     }
 
 private:
     UiManager& ui_;
     SongProviderObj& sp_;
-    int slot_ = -1;
+    bool skipTutorials_ = false, tutorialAccess_ = false;  // +0x6c, +0x6b
 };
 
 // memcard: the save device. Results come back as memcard_result
@@ -576,10 +730,10 @@ void installNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Scrip
     add(std::make_unique<QuietObj>(ui, "music_fader", std::set<std::string>{"fade"}));
     add(std::make_unique<QuietObj>(ui, "encore_stream", std::set<std::string>{"play", "stop"}));
     add(std::make_unique<QuietObj>(ui, "cheat_display", std::set<std::string>{"show"}));
-    add(std::make_unique<QuietObj>(ui, "store_item_provider", std::set<std::string>{"check_achievement", "init_data"}));
     add(std::make_unique<QuietObj>(ui, "player_matcher0", std::set<std::string>{"add_sink", "remove_sink", "auto_solo", "set_auto_solo"}));
     installGameNatives(ui, in, owned);
     chars::installNatives(ui, in, owned);
+    store::installNatives(ui, in, owned);
 
     // Builtins the host gives.
     in.addBuiltin("play_sfx", [&ui](Interp& i, const DataNode& c) {
@@ -599,8 +753,22 @@ void installNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Scrip
         }
         return Value::integer(0);
     });
-    in.addBuiltin("joypad_controller_type", [](Interp&, const DataNode&) { return Value::symbol("guitar"); });
-    in.addBuiltin("joypad_is_connected", [](Interp&, const DataNode&) { return Value::integer(1); });
+    // {joypad_is_connected n} / {joypad_controller_type n} (0x8227CA48's
+    // natives): the port's pad n is its input slot n (the keyboard's split
+    // layout plays both slots); a guitar is ro_guitar_xbox, a pad analog
+    // (joypad.dta's HX_XBOX controllers) [C data; I: the keyboard as a guitar].
+    in.addBuiltin("joypad_is_connected", [&ui](Interp& i, const DataNode& c) {
+        const int n = i.evalArg(c, 1).integerValue();
+        return Value::integer(n >= 0 && n < 2 && ui.input().padConnected(n) ? 1 : 0);
+    });
+    in.addBuiltin("joypad_controller_type", [&ui](Interp& i, const DataNode& c) {
+        const int n = i.evalArg(c, 1).integerValue();
+        if (n < 0 || n >= 2 || !ui.input().padConnected(n)) return Value::symbol("none");
+        for (const Input::Device& d : ui.input().devices())
+            if (d.id != "keyboard" && d.player == n)
+                return Value::symbol(ui.input().gh2Type(d.id).find("joypad") != std::string::npos ? "analog" : "ro_guitar_xbox");
+        return Value::symbol("ro_guitar_xbox");  // the keyboard
+    });
     in.addBuiltin("timer_ms", [](Interp&, const DataNode&) { return Value::integer(0); });
     in.addBuiltin("set_timer_ms", [](Interp&, const DataNode&) { return Value::integer(0); });
 }

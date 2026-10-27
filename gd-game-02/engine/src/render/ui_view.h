@@ -108,6 +108,7 @@ public:
         std::map<std::string, std::string> texts;
         std::map<std::string, std::string> mats;
         bool header = false;
+        bool disabled = false;  // the provider's IsActive is false: the type's "disabled" colours
         float slot = -1;  // its position in the list (rows after a header start one slot down; fractional while scrolling); -1: its index
     };
     void setList(const std::string& component, std::vector<ListRow> rows, int selectedRow);
@@ -139,8 +140,18 @@ public:
     struct MaskDraw {
         std::array<float, 4> rgba{};
         std::array<float, 4> rect{0, 0, 1, 1};
+        uint32_t texture = 0;  // the mat's diffuse texture (a TextureId), 0: plain colour
+        int blend = 3;         // the mat's blend (material.h MatBlend; no mat: SrcAlpha)
     };
     const std::vector<MaskDraw>& masks() const { return masks_; }
+    // When set, the panel's own ScreenMasks are drawn through it at their
+    // place in the draw order (unlockvenue<n>.milo's black matte.mask is the
+    // background); the subdirectories' (the metacam's edge) stay on top.
+    std::function<void(const MaskDraw&)> maskNow;
+    // Draws something else at a UIProxy's / BandPlacer's place in the panel's
+    // draw order (the store's guitar and character, drawn in store.milo's
+    // guitar.pxy / char_store.placer), by the object's name.
+    std::map<std::string, std::function<void(MaterialRenderer&)>> objectDraws;
 
     // Draws the panel (after r.setFrame with camera() / environment()).
     void draw(MaterialRenderer& r);

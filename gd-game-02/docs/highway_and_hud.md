@@ -130,9 +130,13 @@ The scenes themselves are listed in `milo_and_textures.md`.
 - HUDs `hud_vs` (lead meter), `hud_coop`, `hud_practice`; `hud_vs` / `hud_coop`
   use `ui.cam` [C data]. Lead meter `0x82126E88`: state 0/1/2 drives the glows
   and lens; needle frame 50 − 50 × min(|lead| / range, 1) × sign, range 500 [C].
-- [I]: lead = score difference; co-op band score = sum; co-op meters show
-  player 0; the second player's rules are a copy until M10.
+- [I]: lead = score difference. Co-op's displays show the band performer
+  (M10.2, `docs/multiplayer.md`): its score, streak and multiplier, the
+  shared star meter and the band's rock meter; `star_power_ready` shows the
+  shared message once (player 0's), build_streak shakes the score on the
+  band's.
 
-Dev aids: `GD02_MODE=vs|faceoff|coop|practice`, `GD02_LEFTY=1|2|12`,
+Dev aids: `GD02_MODE=faceoff|proface|coop|practice` (with `GD02_DIFF2`,
+`GD02_PARTS`; `vs` is face-off, GH2's `multi_vs`), `GD02_LEFTY=1|2|12`,
 `GD02_FAIL_AT=<ms>`, `GD02_END_AT=<ms>`, `GD02_STATS=1`, and
 `GD02_SCREENSHOT_AT` with a comma-separated list.

@@ -17,6 +17,7 @@
 #include "action_log.h"
 #include "catalog.h"
 #include "gfx.h"
+#include "ui_sounds.h"
 
 class Launcher {
 public:
@@ -68,6 +69,7 @@ private:
     bool exploreHandle(const SDL_Event& e);  // true: used (the list's handling is skipped)
     void explorePress(Fret f);
     void exploreMove(int dRow, int dCol);
+    void exploreGroup(int group, int state);  // state: 1 collapse, 0 expand, -1 toggle; group -2: all
     bool exploreScript(const std::string& cmd, const std::string& arg);  // true: a command of the explorer
     void exploreFrame();
     void exploreDraw();
@@ -79,6 +81,10 @@ private:
     void exploreLoad();
     gfx::Rect exploreViewRect() const;
     void askQuit();
+    void openWebsite();
+    void showDiscFolders(const std::string& title);
+    void loadSounds();
+    void discsChanged();
     void showDialog(const std::string& title, const std::string& body, std::vector<Button> buttons);
     void toast(const std::string& text);
     void restoreWindow();
@@ -132,6 +138,11 @@ private:
     // The system file dialog answers on its own thread.
     std::mutex pickedLock_;
     std::vector<std::pair<std::string, std::string>> picked_;  // (game id, path or "" for cancelled)
+
+    UiSounds sounds_;
+    bool soundsTried_ = false;
+    int framesDrawn_ = 0;
+    bool startupNotice_ = false;
 
     std::vector<ScriptStep> script_;
     size_t scriptPos_ = 0;

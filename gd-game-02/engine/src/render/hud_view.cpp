@@ -161,12 +161,15 @@ void HudView::onEvents(const std::vector<PlayerEvent>& events, int player, float
             // hud_panel.dta star_power_ready: show_message (the shared
             // message with a shared star meter, from player 0 only) and the
             // unhandled return lets meter_shake.trig play too [C].
+            if (player < 0) break;
             if (!sharedStar_) showMessage(player, "STAR POWER READY!", nowMs);
             else if (player == 0) showMessage(-1, "STAR POWER READY!", nowMs);
             meterShakeMs_ = nowMs;
             break;
         case PlayerEvent::Kind::Failed: showMessage(-1, "SONG FAILED!", nowMs); break;  // game_lost: kPlayerShared
-        case PlayerEvent::Kind::BuildStreak: scoreShakeMs_ = nowMs; break;               // score_shake.trig [I: which value]
+        case PlayerEvent::Kind::BuildStreak:  // score_shake.trig [I: which value]; co-op: the band's
+            if (!sharedStar_ || player < 0) scoreShakeMs_ = nowMs;
+            break;
         default: break;
         }
     }
@@ -235,9 +238,9 @@ void HudView::driveStreak(Part& p, int streak, int mult, bool star) {
 // ranges); the fill view (ref 1) shows while the value moves; the ready
 // view (ref 2) at 0.5 or while in use; the glow group (ref 5) loops; the
 // co-op engage anims (refs 3, 4) play while Star Power is on [I].
-void HudView::driveStar(Part& p, const Player& player, float dt, float loop) {
-    const float value = player.starMeter();
-    const bool using_ = player.starPowerActive();
+void HudView::driveStar(Part& p, const PerformerState& player, float dt, float loop) {
+    const float value = player.starMeter;
+    const bool using_ = player.spActive;
     p.shownStar = approach(p.shownStar, value, kStarRatePerMs * dt);
     p.pose.setFrame(in(p, ref(p.dir, 0)), p.shownStar * 100);
     if (const scene::Object* fill = in(p, ref(p.dir, 1))) {
@@ -262,25 +265,25 @@ void HudView::driveStar(Part& p, const Player& player, float dt, float loop) {
 // top_level_peak.grp and loop peak_effects_on.filt (peak_effects.trig), or
 // play peak_effects_off.filt and hide it; begin.trig hides it at the start;
 // SP_on / SP_off.trig swap peak_flames.grp and peak_flames_SP.grp [C data].
-void HudView::driveCrowd(Part& p, const Player& player, float dt, float loop, float nowMs) {
+void HudView::driveCrowd(Part& p, const PerformerState& player, float dt, float loop, float nowMs) {
     (void)nowMs;
-    const float rock = player.rockMeter();
+    const float rock = player.rock;
     p.shownRock = approach(p.shownRock, rock, kRockRatePerMs * dt);
     p.pose.setFrame(in(p, ref(p.dir, 4).empty() ? "hud1_rock_needle.view" : ref(p.dir, 4)), p.shownRock * 100);
-    size_t zone = rock < player.warningLevel() ? 0 : rock < 0.33f ? 1 : rock < 0.66f ? 2 : 3;
+    size_t zone = rock < player.warning ? 0 : rock < 0.33f ? 1 : rock < 0.66f ? 2 : 3;
     std::string anim = ref(p.dir, zone);
     if (anim.empty()) anim = zone == 0 ? "rock_meter_warning.filt" : "rock_meter_normal.mnm";
     p.pose.setFrame(in(p, anim), loop);
 
     const scene::Object* peakGrp = in(p, "top_level_peak.grp");
     if (!peakGrp) return;
-    const bool peak = player.baseMultiplier() == 4 && rock > kPeakRating;
+    const bool peak = player.baseMultiplier == 4 && rock > kPeakRating;
     if (!p.peakKnown || peak != p.peak) {
         p.peak = peak;
         p.peakKnown = true;
         p.pose.setShowing(peakGrp, peak);
     }
-    const bool sp = player.starPowerActive();
+    const bool sp = player.spActive;
     if (const scene::Object* a = in(p, "peak_flames.grp")) p.pose.setShowing(a, !sp);
     if (const scene::Object* b = in(p, "peak_flames_SP.grp")) p.pose.setShowing(b, sp);
     if (peak) p.pose.setFrame(in(p, "peak_effects_on.filt"), loop);
@@ -304,7 +307,7 @@ void HudView::driveLead(Part& p, int lead) {
     p.pose.setFrame(in(p, ref(p.dir, 0)), frac * 50 * sign + 50);
 }
 
-void HudView::drive(const std::vector<const Player*>& players, float nowMs) {
+void HudView::drive(const std::vector<PerformerState>& players, const PerformerState* band, float nowMs) {
     const float dt = std::clamp(nowMs - lastMs_, 0.0f, 100.0f);
     lastMs_ = nowMs;
     const float loop = std::max(0.0f, nowMs) * 0.001f * kLoopFps;
@@ -327,20 +330,17 @@ void HudView::drive(const std::vector<const Player*>& players, float nowMs) {
     if (const float f = (nowMs - scoreShakeMs_) * 0.001f * kLoopFps; f >= 0 && f <= 25)
         pose_.setFrame(hud_->find("score_shake_build_streak.filt"), f);
 
-    const Player& p0 = *players[0];
-    const Player& p1 = players.size() > 1 && players[1] ? *players[1] : p0;
+    const PerformerState& p0 = players[0];
+    const PerformerState& p1 = players.size() > 1 ? players[1] : p0;
     for (auto& part : parts_) {
         Part& p = *part;
-        const Player& pl = p.player == 1 ? p1 : p0;
+        const PerformerState& pl = p.player < 0 && band ? *band : p.player == 1 ? p1 : p0;
         switch (p.kind) {
-        case Kind::Score:
-            // Co-op: the band's score (TODO M10: the co-op player's own sum).
-            driveScore(p, p.player < 0 && &p1 != &p0 ? p0.score() + p1.score() : pl.score());
-            break;
-        case Kind::Streak: driveStreak(p, pl.streak(), pl.multiplier(), pl.starPowerActive()); break;
+        case Kind::Score: driveScore(p, pl.score); break;
+        case Kind::Streak: driveStreak(p, pl.streak, pl.multiplier, pl.spActive); break;
         case Kind::Star: driveStar(p, pl, dt, loop); break;
         case Kind::Crowd: driveCrowd(p, pl, dt, loop, nowMs); break;
-        case Kind::Lead: driveLead(p, p0.score() - p1.score()); break;
+        case Kind::Lead: driveLead(p, p0.score - p1.score); break;
         }
     }
 }
@@ -493,13 +493,14 @@ void HudView::drawMessage(Canvas& canvas, const scene::Text* text, const scene::
     if (id) canvas.draw(quads.data(), quads.size(), int(id.id), Blend::Alpha);
 }
 
-void HudView::draw(gfx::Renderer& r, gfx::SceneCache& cache, Canvas& canvas, const std::vector<const Player*>& players, float nowMs) {
-    if (!hud_ || players.empty() || !players[0]) return;
+void HudView::draw(gfx::Renderer& r, gfx::SceneCache& cache, Canvas& canvas, const std::vector<PerformerState>& players,
+                   const PerformerState* band, float nowMs) {
+    if (!hud_ || players.empty()) return;
     device_ = &r.device();
     cache_ = &cache;
     int vx, vy;
     r.pictureRect(vx, vy, viewW_, viewH_);
-    drive(players, nowMs);
+    drive(players, band, nowMs);
     // The HUD draws over everything (the UI camera's depth range 0..0.02).
     r.device().clear(nullptr, true);
     frameSet_ = false;

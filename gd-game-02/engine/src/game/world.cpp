@@ -594,6 +594,11 @@ void World::stopAnimation(const scene::Object* anim) {
     tasks_.erase(std::remove_if(tasks_.begin(), tasks_.end(), [&](const AnimTask& t) { return t.anim == anim; }), tasks_.end());
 }
 
+void World::stopAnimations(const std::unordered_set<const scene::Object*>& anims) {
+    tasks_.erase(std::remove_if(tasks_.begin(), tasks_.end(), [&](const AnimTask& t) { return anims.count(t.anim) != 0; }), tasks_.end());
+    for (const scene::Object* a : anims) frames_.erase(a);
+}
+
 bool World::animating(const scene::Object* anim) const {
     return std::any_of(tasks_.begin(), tasks_.end(), [&](const AnimTask& t) { return t.anim == anim; });
 }

@@ -26,6 +26,12 @@ struct GameRun {
 GameRun runGameModule(SDL_Window* window, SDL_GLContext context, const Game& game, const std::string& launcherVersion,
                       ActionLog& log);
 
+// The game's menu sounds (gd_game_ui_sounds, optional): loads the module,
+// lets it give each sound to `sound`, unloads it. Returns how many it gave;
+// 0 with `error` set when it has none.
+int fetchUiSounds(SDL_Window* window, SDL_GLContext context, const Game& game, const std::string& launcherVersion, ActionLog& log,
+                  GdUiSoundFn sound, void* user, std::string& error);
+
 // A module's model explorer (gd_game_explore), open while the launcher shows
 // the Explore models screen: the library stays loaded until close().
 class ExploreSession {

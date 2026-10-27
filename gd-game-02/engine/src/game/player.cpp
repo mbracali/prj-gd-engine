@@ -2,6 +2,8 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "game/player.h"
 
+#include "game/band_performer.h"
+
 #include <algorithm>
 #include <cmath>
 
@@ -22,12 +24,12 @@ int roundHalfAway(double v) { return static_cast<int>(std::lround(v)); }
 }  // namespace
 
 Player::Player(const Song& song, Part part, Difficulty difficulty, const Rules& rules, ControllerMode mode, bool noFail,
-               int index)
+               int index, const ScoreConfig* config)
     : song_(song),
       chart_(song.chart(part, difficulty)),
       rules_(rules),
-      crowd_(rules.solo.crowd[size_t(difficulty)]),
-      sp_(rules.solo.starPower),
+      crowd_((config ? *config : rules.solo).crowd[size_t(difficulty)]),
+      sp_((config ? *config : rules.solo).starPower),
       difficulty_(difficulty),
       mode_(mode),
       noFail_(noFail),
@@ -71,8 +73,8 @@ bool Player::phraseIntact(int phrase) const {
 int Player::stars() const {
     // 0x822d6410 [C]: 5 at >= five × base, 4 at >= four × base, else 3.
     const auto& [four, five] = rules_.starThresholds[size_t(difficulty_)];
-    if (float(score_) >= five * float(baseScore_)) return 5;
-    if (float(score_) >= four * float(baseScore_)) return 4;
+    if (float(score()) >= five * float(baseScore_)) return 5;
+    if (float(score()) >= four * float(baseScore_)) return 4;
     return 3;
 }
 
@@ -411,10 +413,22 @@ bool Player::inPractice(int gem) const {
     return tick >= practiceStartTick_ && tick < practiceEndTick_;
 }
 
-// Score add 0x822c6a58 -> 0x822dcfb0 [C]: points × base multiplier × Star
-// Power multiplier (0x822c6c20). TODO(multiplayer): × the normalisation
-// factor (0x822bb320) when two tracks are played; 1 in single player.
-void Player::addScore(int points) { score_ += points * baseMultiplier_ * spMultiplier(); }
+// Score add 0x822c6a58 -> 0x822dcfb0 [C]: score (a float) += points × the
+// normalisation factor (0x822bb320: 1 with one track) × base multiplier ×
+// Star Power multiplier (0x822c6c20). A co-op player (0x822DEB30) also adds
+// the normalised points to the band, which applies its own multiplier.
+void Player::addScore(int points) {
+    const float p = float(points) * norm_;
+    score_ += float(baseMultiplier_ * spMultiplier()) * p;
+    if (band_) band_->addScore(p);
+}
+
+// End streak, vtable +0x38: 0x822dd028 (the stats' streak reset) and, for a
+// co-op player, the band's too (0x822DEBF8) [C].
+void Player::endStreak() {
+    setStreak(0);
+    if (band_) band_->endStreak();
+}
 
 // Streak and multiplier (0x822ddf70, 0x822d66b0, 0x822dd298) [C]:
 // build_streak when the multiplier goes up, eight_x on reaching 8× total.
@@ -440,8 +454,9 @@ void Player::playerHit(float t, int gem) {
     const Gem& g = chart_.gems[size_t(gem)];
     ++notesHit_;
     setStreak(streak_ + 1);
-    // Timing class 0x822d6260 (computed on every hit, 0x822e2748): only
-    // counted, no gameplay effect found [C/I].
+    if (band_) band_->hit();  // 0x822DEBA8 [C]
+    // Timing class 0x822d6260: computed on every hit by 0x822e2748, which
+    // drops the result [C] (counted here for the stats only).
     const float err = std::abs(t + offset_ - g.ms);
     if (err <= float(rules_.perfectMs)) ++perfect_;
     else if (err <= float(rules_.goodMs)) ++good_;
@@ -481,7 +496,7 @@ void Player::playerPass(float t, int gem) {
 // gem), the sustain ended.
 void Player::penalise(float t, int gem) {
     emit(PlayerEvent::Kind::EndStreak, gem, float(streak_));
-    setStreak(0);
+    endStreak();
     crowdUpdate(0.0f, t);
     const int phrase = gem >= 0 ? chart_.gems[size_t(gem)].phrase : -1;
     if (gem < 0 || phrase < 0 || chart_.phrases[size_t(phrase)].firstGem != gem) spPhraseMiss(gem);
@@ -528,7 +543,19 @@ void Player::finishSustain(float t) {
 //   once at or below lose_level it can only rise; during the free ride
 //   (progress <= free_ride) it cannot drop to warning_level.
 //   Fail when rating < lose_level, unless the mode cannot fail.
+void Player::setCrowdRating(float rating) {
+    rating_ = std::clamp(rating, 0.0f, 1.0f);
+    raw_ = crowd_.rangeLow + (crowd_.rangeHigh - crowd_.rangeLow) * rating_;
+}
+
+// A co-op player (0x822DEC68) [C]: its own crowd (weight 1), then the
+// band's with the target mapped a + (b - a) × target and weight w.
 void Player::crowdUpdate(float target, float t) {
+    ownCrowdUpdate(target, t);
+    if (band_) band_->crowdUpdate(bandA_ + (bandB_ - bandA_) * target, bandW_, t);
+}
+
+void Player::ownCrowdUpdate(float target, float t) {
     if (failed_) return;
     const float k = (target > raw_ && spActive_) ? sp_.crowdBoost : 1.0f;
     const float w = crowd_.noteWeight * k;
@@ -543,11 +570,26 @@ void Player::crowdUpdate(float target, float t) {
     if (rating <= crowd_.warningLevel && progress <= crowd_.freeRide) return;
     raw_ = raw;
     rating_ = rating;
-    // TODO(co-op): which meter ends a co-op song is open (FINDINGS question 2).
+    // 0x822DD3E0 [C]: only a performer that can end the game fails
+    // (0x822C6B98: one player and not competitive; the co-op band, never
+    // a co-op player: their callers pass noFail), never in competitive modes.
     if (rating_ < crowd_.loseLevel && !noFail_) {
         failed_ = true;
         emit(PlayerEvent::Kind::Failed, -1);
     }
+}
+
+PerformerState Player::state() const {
+    PerformerState s;
+    s.score = score();
+    s.streak = streak_;
+    s.multiplier = multiplier();
+    s.baseMultiplier = baseMultiplier_;
+    s.starMeter = meter_->value;
+    s.spActive = spActive_;
+    s.rock = rating_;
+    s.warning = crowd_.warningLevel;
+    return s;
 }
 
 void Player::forceFail() {
@@ -558,15 +600,8 @@ void Player::forceFail() {
 
 // ============================================================= star power
 
-// Meter clamped to 0..1 (0x822db788) [C]; star_power_ready once it reaches
-// ready_level (0x822dbd60) [C].
-void Player::spAdd(float amount) {
-    spMeter_ = std::clamp(spMeter_ + amount, 0.0f, 1.0f);
-    if (!spReady_ && spMeter_ >= sp_.readyLevel) {
-        spReady_ = true;
-        emit(PlayerEvent::Kind::StarPowerReady, -1);
-    }
-}
+// The meter, clamped to 0..1 (0x822db788) [C]; shared by both co-op players.
+void Player::spAdd(float amount) { meter_->value = std::clamp(meter_->value + amount, 0.0f, 1.0f); }
 
 // Gem hit 0x822dc090 [C], phrase state 0 none / 1 broken / 2 armed / 3 captured:
 // not deployed: star_gem_hit, the first gem arms, the last gem of an armed
@@ -607,20 +642,40 @@ void Player::spPhraseMiss(int gem) {
     phraseBroken_[size_t(p)] = 1;
 }
 
-// Deploy 0x822c80f8 [C]: needs the ready flag and Star Power not already
-// active (tilt or Select). TODO: practice / attract set star_power_disable
-// (modes.dta); co-op needs both players to engage.
-void Player::starPowerButton(float t) {
+// Engage 0x822c80f8 [C]: +0xbc = the state; on TRUE, with the ready flag
+// and Star Power not active, it deploys, but with a shared meter (co-op)
+// only when the other player is engaged too, and then for both. Every call
+// sends sp_engage (player, state) to the game (multi_coop's handler plays
+// sp_deploystart.cue).
+void Player::starPowerEngage(bool engaged, float t) {
     (void)t;
-    if (failed_ || !spReady_ || spActive_) return;
-    spActive_ = true;
-    emit(PlayerEvent::Kind::StarPowerStart, -1);
+    if (failed_) return;
+    engaged_ = engaged;
+    emit(PlayerEvent::Kind::StarPowerEngage, -1, engaged ? 1.0f : 0.0f);
+    if (!engaged || spActive_ || !spReady_) return;
+    if (!partner_) {
+        spStart(true);
+        return;
+    }
+    if (!partner_->engaged_) return;
+    spStart(true);
+    partner_->spStart(true);
+}
+
+// 0x822DBA90 [C]: start_using / stop_using.
+void Player::spStart(bool on) {
+    if (spActive_ == on) return;
+    spActive_ = on;
+    emit(on ? PlayerEvent::Kind::StarPowerStart : PlayerEvent::Kind::StarPowerEnd, -1);
 }
 
 // Star Power poll 0x822dbd60 / 0x822db3f8 [C]: while deployed the meter
 // loses deploy_rate per measure and at 0 Star Power stops (stop_using /
 // depleted, the ready flag cleared); otherwise, while the whammy flag is on,
-// it gains whammy_rate per beat. recharge_rate (0) has no reader [I].
+// it gains whammy_rate per beat. Then star_power_ready once the meter
+// reaches ready_level. Each co-op player's poll drains the shared meter, so
+// with both deployed it empties twice as fast [C]. recharge_rate (0) has no
+// reader [C: no other term in the poll].
 void Player::spPoll(float t) {
     const double tick = song_.tempo.msToTick(t);
     const double beat = tick / song_.tempo.division();
@@ -628,20 +683,21 @@ void Player::spPoll(float t) {
     if (!spPolled_) {
         spPolled_ = true;
         spLastBeat_ = beat, spLastMeasure_ = measure;
-        return;
     }
     if (spActive_) {
-        spMeter_ -= static_cast<float>(sp_.deployRate * std::max(0.0, measure - spLastMeasure_));
-        if (spMeter_ <= 0) {
-            spMeter_ = 0;
-            spActive_ = false;
+        spAdd(-static_cast<float>(sp_.deployRate * std::max(0.0, measure - spLastMeasure_)));
+        if (meter_->value == 0) {
+            spStart(false);
             spReady_ = false;
-            emit(PlayerEvent::Kind::StarPowerEnd, -1);
         }
     } else if (whammyOn_ && beat > spLastBeat_) {
         spAdd(static_cast<float>(sp_.whammyRate * (beat - spLastBeat_)));
     }
     spLastBeat_ = beat, spLastMeasure_ = measure;
+    if (!spReady_ && meter_->value >= sp_.readyLevel) {
+        spReady_ = true;
+        emit(PlayerEvent::Kind::StarPowerReady, -1);
+    }
 }
 
 // Whammy bar movement (0x822c8438) [C]: moving when |Δvalue / Δms| >

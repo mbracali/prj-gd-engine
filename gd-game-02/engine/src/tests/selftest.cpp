@@ -16,6 +16,7 @@
 #include "data/game_data.h"
 #include "data/midi.h"
 #include "game/autoplay.h"
+#include "game/band_performer.h"
 #include "game/key_script.h"
 #include "game/song_db.h"
 #include "game/song_setup.h"
@@ -84,7 +85,14 @@ struct NoteSpec {
 
 [[maybe_unused]] constexpr uint8_t G = 1, R = 2, Y = 4, B = 8, O = 16;  // fret bits; O is unused so far
 
-Song makeSong(const std::vector<NoteSpec>& notes, const std::vector<std::pair<int, int>>& phrases = {}, int hopoTicks = 170) {
+// Face-off sections: (start, end, player 0 or 1) on base+9 / base+10.
+struct Section {
+    int start, end, player;
+};
+
+Song makeSong(const std::vector<NoteSpec>& notes, const std::vector<std::pair<int, int>>& phrases = {}, int hopoTicks = 170,
+              const std::vector<NoteSpec>& bass = {}, const std::vector<std::pair<int, int>>& bassPhrases = {},
+              const std::vector<Section>& sections = {}) {
     MidiFile midi;
     midi.division = 480;
     MidiTrack tempo;
@@ -94,23 +102,35 @@ Song makeSong(const std::vector<NoteSpec>& notes, const std::vector<std::pair<in
     midi.tracks.push_back(tempo);
 
     struct Raw { uint32_t tick; bool on; int note; };
-    std::vector<Raw> raw;
     int last = 0;
-    for (const NoteSpec& n : notes) {
-        for (int f = 0; f < 5; ++f)
-            if (n.frets & (1 << f)) raw.push_back({uint32_t(n.tick), true, 96 + f}), raw.push_back({uint32_t(n.tick + n.len), false, 96 + f});
-        last = std::max(last, n.tick + n.len);
-    }
-    for (const auto& [a, b] : phrases) raw.push_back({uint32_t(a), true, 103}), raw.push_back({uint32_t(b), false, 103});
-    std::stable_sort(raw.begin(), raw.end(), [](const Raw& a, const Raw& b) { return a.tick != b.tick ? a.tick < b.tick : !a.on && b.on; });
-    MidiTrack part;
-    part.name = "PART GUITAR";
-    for (const Raw& r : raw) {
-        MidiEvent e;
-        e.tick = r.tick, e.status = r.on ? 0x90 : 0x80, e.data1 = uint8_t(r.note), e.data2 = r.on ? 100 : 0;
-        part.events.push_back(e);
-    }
-    midi.tracks.push_back(part);
+    auto addPart = [&](const char* name, const std::vector<NoteSpec>& ns, const std::vector<std::pair<int, int>>& ps,
+                       const std::vector<Section>& secs) {
+        std::vector<Raw> raw;
+        for (const NoteSpec& n : ns) {
+            for (int f = 0; f < 5; ++f)
+                if (n.frets & (1 << f)) raw.push_back({uint32_t(n.tick), true, 96 + f}), raw.push_back({uint32_t(n.tick + n.len), false, 96 + f});
+            last = std::max(last, n.tick + n.len);
+        }
+        for (const auto& [a, b] : ps) raw.push_back({uint32_t(a), true, 103}), raw.push_back({uint32_t(b), false, 103});
+        for (const Section& sec : secs)
+            raw.push_back({uint32_t(sec.start), true, 105 + sec.player}), raw.push_back({uint32_t(sec.end), false, 105 + sec.player});
+        // Note-offs first at a tick, then the face-off sections' note-ons, then the frets'.
+        std::stable_sort(raw.begin(), raw.end(), [](const Raw& a, const Raw& b) {
+            if (a.tick != b.tick) return a.tick < b.tick;
+            if (a.on != b.on) return !a.on;
+            return a.note > b.note;
+        });
+        MidiTrack part;
+        part.name = name;
+        for (const Raw& r : raw) {
+            MidiEvent e;
+            e.tick = r.tick, e.status = r.on ? 0x90 : 0x80, e.data1 = uint8_t(r.note), e.data2 = r.on ? 100 : 0;
+            part.events.push_back(e);
+        }
+        midi.tracks.push_back(part);
+    };
+    addPart("PART GUITAR", notes, phrases, sections);
+    if (!bass.empty()) addPart("PART BASS", bass, bassPhrases, {});
     MidiTrack events;
     events.name = "EVENTS";
     MidiEvent end;
@@ -144,6 +164,169 @@ Play play(const Song& song, const Rules& rules, const std::string& script, float
 }
 
 using K = PlayerEvent::Kind;
+
+// Two players on one synthetic song (docs/multiplayer.md), wired as the
+// game does: co-op (guitar + bass, coop_config, the band, one Star Power
+// meter), face-off (player_mask ownership) or pro face-off (both play
+// every gem). Neither player fails on its own meter (app.cpp's noFail).
+enum class TwoMode { Coop, FaceOff, ProFaceOff };
+struct Play2 {
+    std::unique_ptr<Player> p[2];
+    std::unique_ptr<BandPerformer> band;
+    StarMeter meter;
+    std::vector<PlayerEvent> ev[2], bandEv;
+    int failedAfter = -1;  // the players' penalties when the band failed
+    int count(int who, PlayerEvent::Kind k) const {
+        const auto& list = who < 0 ? bandEv : ev[who];
+        return int(std::count_if(list.begin(), list.end(), [&](const PlayerEvent& e) { return e.kind == k; }));
+    }
+};
+
+std::unique_ptr<Play2> play2(const Song& song, const Rules& rules, TwoMode mode, const std::string& keys0, const std::string& keys1,
+                             float untilMs, Difficulty d0 = Difficulty::Expert, Difficulty d1 = Difficulty::Expert) {
+    auto r = std::make_unique<Play2>();
+    const bool coop = mode == TwoMode::Coop, faceOff = mode == TwoMode::FaceOff;
+    const ScoreConfig* config = coop ? &rules.coop : &rules.solo;
+    r->p[0] = std::make_unique<Player>(song, Part::Guitar, d0, rules, ControllerMode::Guitar, true, faceOff ? 0 : -1, config);
+    r->p[1] = std::make_unique<Player>(song, coop ? Part::Bass : Part::Guitar, d1, rules, ControllerMode::Guitar, true,
+                                       faceOff ? 1 : -1, config);
+    r->p[1]->setNumber(1);
+    normaliseScores(*r->p[0], *r->p[1]);
+    if (coop) {
+        r->band = std::make_unique<BandPerformer>(song, rules, d0, d1, "test");
+        linkCoop(*r->p[0], *r->p[1], *r->band, r->meter);
+    }
+    KeyScript k0(keys0), k1(keys1);
+    if (!k0.valid() || !k1.valid()) throw std::runtime_error("bad key script");
+    for (float t = 0; t <= untilMs; t += 1) {
+        k0.feed(*r->p[0], t);
+        k1.feed(*r->p[1], t);
+        r->p[0]->update(t);
+        r->p[1]->update(t);
+        if (r->band) r->band->poll(t);
+        for (int i = 0; i < 2; ++i)
+            for (const PlayerEvent& e : r->p[i]->takeEvents()) r->ev[i].push_back(e);
+        if (r->band)
+            for (const PlayerEvent& e : r->band->takeEvents()) {
+                if (e.kind == K::Failed) r->failedAfter = r->p[0]->penalties() + r->p[1]->penalties();
+                r->bandEv.push_back(e);
+            }
+    }
+    return r;
+}
+
+// Strums at each tick with `fret` held from the start.
+std::string strums(const std::vector<int>& ticks, const char* fret = "green") {
+    std::string k = std::string("100:+") + fret;
+    for (int t : ticks) k += "," + std::to_string(t) + ":strum";
+    return k;
+}
+
+int runTwoPlayerChecks(const Rules& rules) {
+    int failures = 0;
+    auto check = [&](const char* name, bool ok) {
+        std::printf("%s  %s\n", ok ? "PASS" : "FAIL", name);
+        failures += !ok;
+    };
+    {  // Co-op Star Power: one meter, both must engage, both drain it.
+        Song s = makeSong({{1000, G}, {1300, G}, {12000, G}}, {{1000, 1400}}, 170, {{2000, G}, {2300, G}, {12500, G}}, {{2000, 2400}});
+        const std::string k0 = strums({1000, 1300}) + ",3000:starpower";
+        const std::string k1 = strums({2000, 2300});
+        auto a = play2(s, rules, TwoMode::Coop, k0, k1, 3400);
+        check("co-op: each player's phrase fills the one shared meter (0.25 + 0.25 = ready for both)",
+              std::abs(a->meter.value - 0.5f) < 1e-6f && a->count(0, K::StarPowerReady) == 1 && a->count(1, K::StarPowerReady) == 1);
+        check("co-op: one player engaging alone does not deploy (0x822C80F8)",
+              a->count(0, K::StarPowerStart) == 0 && a->count(1, K::StarPowerStart) == 0);
+        auto b = play2(s, rules, TwoMode::Coop, k0, k1 + ",3500:starpower", 9250);
+        auto c = play2(s, rules, TwoMode::Coop, k0, k1 + ",3500:starpower", 9280);
+        // Both deployed drain 2 × 0.0833 a measure: 0.5 lasts 3.0 measures = 5762 ms from 3500.
+        std::printf("      (co-op Star Power: meter %.4f at 9250 ms)\n", double(b->meter.value));
+        check("co-op: the second engage deploys both; both polls drain the meter (0.5 lasts 3 measures)",
+              b->count(0, K::StarPowerStart) == 1 && b->count(1, K::StarPowerStart) == 1 && b->count(0, K::StarPowerEnd) == 0 &&
+                  c->count(0, K::StarPowerEnd) == 1 && c->count(1, K::StarPowerEnd) == 1);
+    }
+    {  // Co-op band streak, multiplier and score.
+        std::vector<NoteSpec> gtr, bass;
+        std::vector<int> t0, t1;
+        for (int i = 0; i < 6; ++i) gtr.push_back({1000 + 400 * i, G}), t0.push_back(1000 + 400 * i);
+        for (int i = 0; i < 6; ++i) bass.push_back({1200 + 400 * i, G}), t1.push_back(1200 + 400 * i);
+        bass.push_back({5000, G});
+        Song s = makeSong(gtr, {}, 170, bass);
+        auto r = play2(s, rules, TwoMode::Coop, strums(t0), strums(t1), 4000);
+        // 12 hits: the band's streak 12 (x2 from its 10th hit); each player's own 6.
+        check("co-op: every hit raises the band's streak (12 hits, x2), each player keeps its own (6)",
+              r->band->streak() == 12 && r->band->multiplier() == 2 && r->p[0]->streak() == 6 && r->p[1]->streak() == 6);
+        // Equal base scores: no normalisation; band points 9 x 50 + 3 x 100 = 750.
+        check("co-op: the band scores every point at its own multiplier (9 x 50 + 3 x 100 = 750)", r->band->score() == 750);
+        auto m = play2(s, rules, TwoMode::Coop, strums(t0), strums(t1), 6000);
+        check("co-op: a pass by one player ends the band's streak; the other keeps its own",
+              m->band->streak() == 0 && m->p[0]->streak() == 6 && m->band->longestStreak() == 12);
+    }
+    {  // Co-op fail: the band's meter ends the song, never a player's.
+        std::vector<NoteSpec> gtr, bass;
+        for (int i = 0; i < 40; ++i) gtr.push_back({1000 + 300 * i, G}), bass.push_back({1150 + 300 * i, G});
+        Song s = makeSong(gtr, {}, 170, bass);
+        auto r = play2(s, rules, TwoMode::Coop, "", "", 14000);
+        const CrowdRules& c = rules.coop.crowd[3];
+        int expect = 0;
+        for (float raw = (c.rangeLow + c.rangeHigh) * 0.5f; expect < 200;) {
+            raw = (1 - c.noteWeight) * raw;
+            ++expect;
+            if ((raw - c.rangeLow) / (c.rangeHigh - c.rangeLow) < c.loseLevel) break;
+        }
+        const int passes = r->failedAfter;
+        std::printf("      (co-op fail: band failed after %d passes, expected %d)\n", passes, expect);
+        check("co-op: the band fails on coop_config's meter (both players' passes); the players never fail",
+              r->band->failed() && r->count(-1, K::Failed) == 1 && passes == expect && !r->p[0]->failed() && !r->p[1]->failed());
+    }
+    {  // The band's crowd and the easier player's mix (0x822DE800).
+        Song s = makeSong({{1000, G}});
+        BandPerformer hard(s, rules, Difficulty::Expert, Difficulty::Easy, "x"), tie(s, rules, Difficulty::Hard, Difficulty::Hard, "x");
+        const BandPerformer::Mix m = hard.mix();
+        const CrowdRules& e = rules.coop.crowd[0];
+        const CrowdRules& x = rules.coop.crowd[3];
+        const float lo = m.a + (m.b - m.a) * e.rangeLow, hi = m.a + (m.b - m.a) * e.rangeHigh;
+        check("co-op: the band's crowd is the harder difficulty's; the easier player's range maps onto it, weight x min/max",
+              hard.easierPlayer() == 1 && std::abs(lo - x.rangeLow) < 1e-5f && std::abs(hi - x.rangeHigh) < 1e-5f &&
+                  std::abs(m.w - e.noteWeight / x.noteWeight) < 1e-5f && tie.easierPlayer() == 1 && std::abs(tie.mix().a) < 1e-6f &&
+                  std::abs(tie.mix().b - 1) < 1e-6f);
+    }
+    {  // Normalisation: base 500 (lead) vs 250 (bass), r = 2.
+        std::vector<NoteSpec> gtr, bass;
+        for (int i = 0; i < 10; ++i) gtr.push_back({1000 + 300 * i, G});
+        for (int i = 0; i < 5; ++i) bass.push_back({1000 + 600 * i, G});
+        Song s = makeSong(gtr, {}, 170, bass);
+        auto r = play2(s, rules, TwoMode::Coop, strums({1000}), strums({1000}), 1100);
+        check("normalisation: r = 500 / 250, player 0's points x 0.75 (37), player 1's x 1.5 (75); the band 37.5 + 75 = 112",
+              r->p[0]->score() == 37 && r->p[1]->score() == 75 && r->band->score() == 112);
+    }
+    {  // Face-off: the sections' player_mask decides who plays a gem.
+        Song s = makeSong({{1000, G}, {2000, G}, {3000, G}}, {}, 170, {}, {}, {{900, 1200, 0}, {1900, 2200, 1}});
+        const auto& g = s.chart(Part::Guitar, Difficulty::Expert).gems;
+        auto r = play2(s, rules, TwoMode::FaceOff, "", "", 5000);
+        check("face-off: section notes give player_mask 1 / 2, gems outside sections belong to both",
+              g.size() == 3 && g[0].players == 1 && g[1].players == 2 && g[2].players == 0);
+        check("face-off: each player is penalised only for its own gems and its base counts only those",
+              r->p[0]->penalties() == 2 && r->p[1]->penalties() == 2 && r->p[0]->baseScore() == 100 && r->p[1]->baseScore() == 100);
+        auto pro = play2(s, rules, TwoMode::ProFaceOff, "", "", 5000);
+        check("pro face-off: both players play every gem", pro->p[0]->penalties() == 3 && pro->p[1]->penalties() == 3);
+    }
+    {  // Pro face-off / face-off: competitive, nobody fails.
+        std::vector<NoteSpec> notes;
+        for (int i = 0; i < 60; ++i) notes.push_back({1000 + 200 * i, G});
+        Song s = makeSong(notes);
+        auto r = play2(s, rules, TwoMode::ProFaceOff, "", "", 14000);
+        check("pro face-off: a player whose meter empties does not fail (competitive, 0x822B37F8)",
+              r->p[0]->rockMeter() == 0 && !r->p[0]->failed() && !r->p[1]->failed() && r->count(0, K::Failed) == 0);
+    }
+    {  // The band's stars (0x822CE5D8): badreputation's max_scores (30243 48406 74261 95811).
+        check("co-op stars: 4 at 2.0 x max_scores[1], 5 at 2.0 x max_scores[3], a song without max_scores 5",
+              rules.coopStars("badreputation", 96811) == 3 && rules.coopStars("badreputation", 96812) == 4 &&
+                  rules.coopStars("badreputation", 191621) == 4 && rules.coopStars("badreputation", 191622) == 5 &&
+                  rules.coopStars("nosuchsong", 0) == 5);
+    }
+    return failures;
+}
 
 int runRuleChecks(const Rules& rules) {
     int failures = 0;
@@ -422,7 +605,9 @@ int runSelfTest(const std::string& dataPath) {
                     "  before the strum, which is then forgiven, as in GH2); %d songs with their own hopo_threshold\n",
                     hopos, strumHopos, ownThreshold);
         std::printf("rule checks:\n");
-        const int ruleFailures = runRuleChecks(rules);
+        int ruleFailures = runRuleChecks(rules);
+        std::printf("two-player rule checks (docs/multiplayer.md):\n");
+        ruleFailures += runTwoPlayerChecks(rules);
         std::printf(ruleFailures ? "%d rule check(s) failed\n" : "all rule checks passed\n", ruleFailures);
         std::printf("input checks (virtual controllers):\n");
         const int inputFailures = runInputChecks();

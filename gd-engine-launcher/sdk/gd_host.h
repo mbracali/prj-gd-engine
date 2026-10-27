@@ -21,6 +21,11 @@
 // it; the module lists the disc's models and draws the chosen one with its
 // own loaders and renderer (GdExplorer below).
 //
+// And (optional) the game's menu sounds, read from the disc, which the
+// launcher plays in its own menus:
+//
+//     extern "C" int gd_game_ui_sounds(const GdHost* host, GdUiSoundFn sound, void* user);
+//
 // Plain C types only: the launcher and the modules may be built with
 // different compilers or C++ runtimes. Both link the same SDL3 shared library
 // (the one next to the launcher), so the SDL objects below are shared.
@@ -111,9 +116,11 @@ typedef struct GdExplorer {
     int (*clip_count)(void* self);
     const char* (*clip_name)(void* self, int index);
     // Draws the selected model into the launcher's window with the module's
-    // own GL context (made current by the module). It must not present the
-    // frame: the launcher draws its panels over it and presents it (the
-    // shims make SDL_GL_SwapWindow do nothing while the explorer is open).
+    // own GL context (made current by the module, and left current: the
+    // launcher reads the viewer's area of that context's back buffer, then
+    // draws it with its own context and presents it). It must not present
+    // the frame (the shims make SDL_GL_SwapWindow do nothing while the
+    // explorer is open).
     void (*draw)(void* self, const GdExploreView* view);
     // Frees everything (models, GL context, SDL subsystems); the launcher
     // unloads the library afterwards.
@@ -123,6 +130,22 @@ typedef struct GdExplorer {
 typedef const GdExplorer* (*GdGameExploreFn)(const GdHost* host);
 
 #define GD_GAME_EXPLORE_SYMBOL "gd_game_explore"
+
+// ---- Menu sounds (optional) ----
+
+// One sound: `role` is what it is for in the launcher's menus, "move" (the
+// focus moved), "select", "play" (a game starts), "back" or "error"; a role
+// may come several times (variations: the launcher picks one at random).
+// Interleaved stereo float samples at `rate` Hz, valid during the call.
+typedef void (*GdUiSoundFn)(void* user, const char* role, const float* stereo, int frames, int rate);
+
+// Reads the menu sounds from the disc (host->argv's last argument) and gives
+// each to `sound`; returns how many it gave (0: none, the launcher stays
+// silent). Called once, with no window or GL work; the library is unloaded
+// afterwards.
+typedef int (*GdGameUiSoundsFn)(const GdHost* host, GdUiSoundFn sound, void* user);
+
+#define GD_GAME_UI_SOUNDS_SYMBOL "gd_game_ui_sounds"
 
 #ifdef __cplusplus
 }

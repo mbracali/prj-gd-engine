@@ -70,7 +70,10 @@ namespace {
     X(void, glDrawArrays, (GLenum, GLint, GLsizei))                                                       \
     X(void, glReadPixels, (GLint, GLint, GLsizei, GLsizei, GLenum, GLenum, void*))                        \
     X(void, glBindFramebuffer, (GLenum, GLuint))                                                          \
-    X(void, glScissor, (GLint, GLint, GLsizei, GLsizei))
+    X(void, glScissor, (GLint, GLint, GLsizei, GLsizei))                                                  \
+    X(void, glTexSubImage2D, (GLenum, GLint, GLint, GLint, GLsizei, GLsizei, GLenum, GLenum, const void*)) \
+    X(void, glReadBuffer, (GLenum))                                                                       \
+    X(void, glGetIntegerv, (GLenum, GLint*))
 
 #define GDUL_GL_DECLARE(ret, name, args) ret(APIENTRY* name) args = nullptr;
 struct Gl {
@@ -114,7 +117,7 @@ void main() {
 )";
 
 // Modes (vShape.y): 0 image, 1 text (atlas coverage), 2 filled rounded rect,
-// 3 ring (width in vUv.x), 4 glow (blur in vUv.y). vLocal: the pixel's
+// 3 ring (width in vUv.x), 4 glow (blur in vUv.y), 5 image in a rounded rect. vLocal: the pixel's
 // position from the rectangle's centre (xy) and its half size (zw); vShape.x
 // the corner radius.
 const char* kFragmentShader = GDUL_GLSL_HEADER R"(
@@ -137,7 +140,8 @@ void main() {
     float a;
     if (mode < 2.5) a = 1.0 - smoothstep(-aa, aa, d);
     else if (mode < 3.5) a = (1.0 - smoothstep(-aa, aa, d)) * smoothstep(-aa, aa, d + vUv.x);
-    else { float t = clamp(d / vUv.y, 0.0, 1.0); a = (1.0 - t) * (1.0 - t); }
+    else if (mode < 4.5) { float t = clamp(d / vUv.y, 0.0, 1.0); a = (1.0 - t) * (1.0 - t); }
+    else { vec4 c = texture(uTex, vUv) * vColor; oColor = vec4(c.rgb, c.a * (1.0 - smoothstep(-aa, aa, d))); return; }
     oColor = vec4(vColor.rgb, vColor.a * a);
 }
 )";
@@ -408,10 +412,68 @@ void Renderer::glow(const Rect& r, Color c, float radius, float blur) {
     quad(r.x - blur, r.y - blur, r.x + r.w + blur, r.y + r.h + blur, 0, blur, 0, blur, c, c, r.w * 0.5f, r.h * 0.5f, radius, 4);
 }
 
-void Renderer::image(const Texture& t, const Rect& r, Color tint) {
+void Renderer::image(const Texture& t, const Rect& r, Color tint, bool flipY, float radius) {
     if (!t.id) return;
     useTexture(t.id);
-    quad(r.x, r.y, r.x + r.w, r.y + r.h, 0, 0, 1, 1, tint, tint, 0, 0, 0, 0);
+    radius = std::min(radius, std::min(r.w, r.h) * 0.5f);
+    quad(r.x, r.y, r.x + r.w, r.y + r.h, 0, flipY ? 1.f : 0.f, 1, flipY ? 0.f : 1.f, tint, tint, r.w * 0.5f, r.h * 0.5f, radius,
+         radius > 0 ? 5.f : 0.f);
+}
+
+void Renderer::upload(Texture& t, int w, int h, const uint8_t* rgba) {
+    if (w <= 0 || h <= 0) return;
+    flush();
+    if (!t.id) {
+        gl.glGenTextures(1, &t.id);
+        gl.glBindTexture(GL_TEXTURE_2D, t.id);
+        gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    } else {
+        gl.glBindTexture(GL_TEXTURE_2D, t.id);
+    }
+    gl.glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    if (t.w != w || t.h != h) {
+        gl.glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+        t.w = w, t.h = h;
+    } else {
+        gl.glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+    }
+    boundTex_ = t.id;
+}
+
+void Renderer::release(Texture& t) {
+    if (t.id) {
+        flush();
+        if (boundTex_ == t.id) boundTex_ = 0;
+        gl.glDeleteTextures(1, &t.id);
+    }
+    t = {};
+}
+
+bool readBackBuffer(int x, int y, int w, int h, std::vector<uint8_t>& out) {
+    if (w <= 0 || h <= 0 || !gl.glReadPixels) return false;
+    // Whatever context is current (a game module's): only read state is
+    // touched, and put back as it was.
+    GLint readFb = 0, readBuf = 0, packAlign = 4, packBuffer = 0;
+    gl.glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &readFb);
+    gl.glGetIntegerv(GL_READ_BUFFER, &readBuf);
+    gl.glGetIntegerv(GL_PACK_ALIGNMENT, &packAlign);
+    gl.glGetIntegerv(GL_PIXEL_PACK_BUFFER_BINDING, &packBuffer);
+    gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+    gl.glReadBuffer(GL_BACK);
+    gl.glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+    gl.glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    out.resize(size_t(w) * size_t(h) * 4);
+    gl.glReadPixels(x, y, w, h, GL_RGBA, GL_UNSIGNED_BYTE, out.data());
+    gl.glPixelStorei(GL_PACK_ALIGNMENT, packAlign);
+    gl.glBindBuffer(GL_PIXEL_PACK_BUFFER, GLuint(packBuffer));
+    gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, GLuint(readFb));
+    if (readFb == 0) gl.glReadBuffer(GLenum(readBuf));
+    // Opaque: the module's alpha is not meant for blending.
+    for (size_t i = 3; i < out.size(); i += 4) out[i] = 255;
+    return true;
 }
 
 float Renderer::lineHeight(FontId f, float px) { return atlas(f, px)->lineHeight; }
@@ -462,6 +524,17 @@ std::vector<std::string> Renderer::wrap(FontId f, float px, const std::string& s
     std::vector<std::string> lines;
     std::string line, word;
     auto push = [&](bool hard) {
+        // A word wider than the line (a long folder path) is cut where it must.
+        while (!word.empty() && measure(f, px, word) > maxW) {
+            size_t cut = word.size();
+            while (cut > 1 && measure(f, px, word.substr(0, cut)) > maxW) {
+                do --cut;
+                while (cut > 1 && (static_cast<unsigned char>(word[cut]) & 0xC0) == 0x80);
+            }
+            if (!line.empty()) lines.push_back(line), line.clear();
+            lines.push_back(word.substr(0, cut));
+            word.erase(0, cut);
+        }
         if (!word.empty()) {
             std::string attempt = line.empty() ? word : line + " " + word;
             if (!line.empty() && measure(f, px, attempt) > maxW) {
