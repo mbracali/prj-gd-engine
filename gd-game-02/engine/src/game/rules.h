@@ -3,6 +3,7 @@
 #pragma once
 
 #include <array>
+#include <map>
 #include <string>
 #include <utility>
 #include <vector>
@@ -73,11 +74,21 @@ struct Rules {
     // (streaks (10 2) (20 3) (30 4)) behind an implicit (0 1) (0x822d66b0) [C].
     std::vector<std::pair<int, int>> streaks{{0, 1}, {10, 2}, {20, 3}, {30, 4}};
     ScoreConfig solo;  // default_config [C]
-    ScoreConfig coop;  // coop_config [C]; TODO(co-op): used by the co-op player and the band meter
+    ScoreConfig coop;  // coop_config [C]: the co-op players' and the band's crowds and Star Power
     // (star_ratings (thresholds (<difficulty> four five))): 4 stars at >= four × base,
     // 5 at >= five × base, else 3 (0x822d6410) [C].
     std::array<std::pair<float, float>, kDifficultyCount> starThresholds{
         {{2.0f, 2.8f}, {2.0f, 2.8f}, {2.0f, 2.8f}, {2.0f, 2.8f}}};
+
+    // (star_ratings (coop (thresholds (kDifficultyMedium 2.0) (kDifficultyExpert
+    // 2.0)) (max_scores <coop_max_scores.dta>))): the band's stars
+    // (0x822CE5D8) [C]: threshold k = value k × max_scores[song][index k],
+    // the index the entry's difficulty (Medium 1, Expert 3) whatever was
+    // played; 5 stars at >= the second, 4 at >= the first, else 3; a song
+    // without max_scores gets 5.
+    std::vector<std::pair<int, float>> coopThresholds{{1, 2.0f}, {3, 2.0f}};
+    std::map<std::string, std::array<int, 4>> coopMaxScores;
+    int coopStars(const std::string& song, int score) const;
 
     // ---- track_graphics.dtb (track_speed)
     std::array<float, kDifficultyCount> trackSpeed{1.0f, 1.0f, 1.4f, 1.4f};

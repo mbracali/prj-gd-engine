@@ -13,6 +13,7 @@
 
 #include "audio/audio_device.h"
 #include "game/song_db.h"
+#include "input/input.h"
 #include "script/tasks.h"
 #include "ui/campaign.h"
 #include "ui/char_select.h"
@@ -135,6 +136,14 @@ public:
             // perfect run) and the check of a passed tour song
             // (0x822C3428 / 0x822C34E8 / 0x822C41D8); quick play shows none
             // outside co-op.
+            // Quick play in co-op (0x822C3428 / 0x822C34E8 with mode
+            // multi_coop): the co-op record's score and stars (Campaign +0x4c).
+            if (mode == 1 && gameCfgValue(ui_, "mode").str() == "multi_coop")
+                if (const Career::CoopEntry* e = campaign::coopEntry(ui_, s)) {
+                    if (e->score) r.texts["score.txt"] = std::to_string(e->score);
+                    if (!e->perfect && e->stars >= 3 && e->stars <= 5) r.texts["stars.txt"] = std::string(size_t(e->stars), '*');
+                    if (e->perfect && e->stars > 2) r.mats["stars_gold.mesh"] = "stars_gold_" + std::to_string(std::min(e->stars, 5)) + ".mat";
+                }
             if (mode == 0 && p) {
                 const Career::Entry& e = campaign::record(ui_, *p, d)[s];
                 if (e.score) r.texts["score.txt"] = std::to_string(e.score);
@@ -157,9 +166,20 @@ public:
         if (msg == "num_headers") return r = Value::integer(numHeaders(intArg(args, 0))), true;
         if (msg == "get_symbol") return r = Value::symbol(symbol(intArg(args, 0))), true;
         if (msg == "list_length" || msg == "num_data") return r = Value::integer(numData()), true;
-        if (msg == "has_instrument") return r = Value::integer(1), true;
-        if (msg == "get_instrument") return r = Value::symbol("guitar"), true;
-        if (msg == "track_num_of_instrument") return r = Value::integer(0), true;
+        // 0x822BF2C0 / 0x822BF1F8: the song's (tracks ...) of the mode's
+        // song_block (else `song`, 0x822B38F8): instrument n, and whether
+        // (the index of) an instrument is there [C].
+        if (msg == "get_instrument" || msg == "has_instrument" || msg == "track_num_of_instrument") {
+            const std::vector<std::string> inst = songInstruments(ui_, args.empty() ? std::string() : nameOf(args[0]));
+            if (msg == "get_instrument") {
+                const int i = intArg(args, 1);
+                return r = Value::symbol(i >= 0 && i < int(inst.size()) ? inst[size_t(i)] : std::string()), true;
+            }
+            const std::string want = args.size() > 1 ? nameOf(args[1]) : std::string();
+            const auto it = std::find(inst.begin(), inst.end(), want);
+            const int idx = it == inst.end() ? -1 : int(it - inst.begin());
+            return r = Value::integer(msg == "has_instrument" ? (idx >= 0 ? 1 : 0) : idx), true;
+        }
         return false;
     }
 
@@ -247,6 +267,16 @@ public:
             sp_.build();
             const int n = sp_.numData();
             return r = Value::symbol(n > 0 ? sp_.symbol(ui_.interp().randomInt(0, n)) : std::string()), true;
+        }
+        if (msg == "finish_coop_song") {
+            // 0x822861A8: the band's result into co-op's record (the band and
+            // the players as the game left them: band / player0 / player1).
+            const int score = in.send("band", "score", {}).integerValue();
+            const int stars = in.send("band", "num_stars", {}).integerValue();
+            const int p0 = in.send("player0", "percent_hit", {}).integerValue();
+            const int p1 = in.send("player1", "percent_hit", {}).integerValue();
+            campaign::finishCoopSong(ui_, score, stars, p0, p1, ss.players[0].difficulty, ss.players[1].difficulty);
+            return true;
         }
         if (msg == "num_guitar_awards") return r = Value::integer(int(ss.guitarAwards.size())), true;
         if (msg == "next_guitar_award") {
@@ -723,8 +753,22 @@ void installNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Scrip
         }
         return Value::integer(0);
     });
-    in.addBuiltin("joypad_controller_type", [](Interp&, const DataNode&) { return Value::symbol("guitar"); });
-    in.addBuiltin("joypad_is_connected", [](Interp&, const DataNode&) { return Value::integer(1); });
+    // {joypad_is_connected n} / {joypad_controller_type n} (0x8227CA48's
+    // natives): the port's pad n is its input slot n (the keyboard's split
+    // layout plays both slots); a guitar is ro_guitar_xbox, a pad analog
+    // (joypad.dta's HX_XBOX controllers) [C data; I: the keyboard as a guitar].
+    in.addBuiltin("joypad_is_connected", [&ui](Interp& i, const DataNode& c) {
+        const int n = i.evalArg(c, 1).integerValue();
+        return Value::integer(n >= 0 && n < 2 && ui.input().padConnected(n) ? 1 : 0);
+    });
+    in.addBuiltin("joypad_controller_type", [&ui](Interp& i, const DataNode& c) {
+        const int n = i.evalArg(c, 1).integerValue();
+        if (n < 0 || n >= 2 || !ui.input().padConnected(n)) return Value::symbol("none");
+        for (const Input::Device& d : ui.input().devices())
+            if (d.id != "keyboard" && d.player == n)
+                return Value::symbol(ui.input().gh2Type(d.id).find("joypad") != std::string::npos ? "analog" : "ro_guitar_xbox");
+        return Value::symbol("ro_guitar_xbox");  // the keyboard
+    });
     in.addBuiltin("timer_ms", [](Interp&, const DataNode&) { return Value::integer(0); });
     in.addBuiltin("set_timer_ms", [](Interp&, const DataNode&) { return Value::integer(0); });
 }

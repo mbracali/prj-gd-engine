@@ -61,6 +61,19 @@ matches the tag's version. Nothing is released yet.
   finishes in Change Guitar, characters and outfits in Change Character.
   Beating a tour puts its reward guitar on sale.
 - Your tours, cash and purchases are saved with each band.
+- Two-player modes, through Guitar Hero II's own Multiplayer menus:
+  - Co-op: lead guitar with bass or rhythm, one shared Star Power meter that
+    both players must tilt (or press Select) at the same time to use, a band
+    streak and multiplier, one band score and a band rock meter that fails
+    the song for both. Your co-op records and bass unlocks are saved.
+  - Face-off: you take turns on the song's sections, the higher score wins.
+  - Pro Face-Off (unlocked by beating a tour): both of you play every note.
+  - Each player picks a part, difficulty, character and guitar; scores are
+    balanced between parts as in the original; the band on stage shows both
+    of you.
+  - Player 2 plays on a second guitar or gamepad, or on the keyboard's right
+    half (H J K L ; frets, N / M strum, B Star Power, O pause) when there is
+    no second controller.
 
 ### Changed
 - Options is laid out like the original (Audio, Video, Manage Band, Data,

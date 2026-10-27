@@ -71,6 +71,10 @@ turns them into GH2's kPad buttons, the way gd01's `App::uiButton` does:
 - In a song, Back (Esc, a joypad's B) pauses like Start (gd01); game_screen
   pauses on kPad_Start, pause_screen resumes on it (`pause.dta`).
 - Esc three times in a row on the main menu quits (gd01).
+- Two players (M10.2, `docs/multiplayer.md`): each controller is a pad slot;
+  after the controller select a pad's buttons are its player's. Without a
+  second controller the keyboard splits: player 2 on H J K L ; (frets), N / M
+  (strum), B (Star Power), O (Start).
 - The boot splashes skip on select, back, Start or a click / tap (the port;
   the original's can't be skipped [I]); the videos skip on Start, select,
   back or green (gd01's set; the original: Start or A [C]).
@@ -293,7 +297,7 @@ next to it to start.
 - The endgame stats receipt draws dark (`turn_off_ambient` /
   `reset_ambient` are no-ops).
 - Volume sliders apply from the next song or preview.
-- Multiplayer, tutorial and practice screens are generic panels (M10 /
+- Tutorial and practice screens are generic panels (M10 /
   M11). The career and the store: docs/career_and_store.md.
 - Help bar background boxes; GAMEPADS font sizes approximate.
 - gd01's mouse in the menus (hover focuses, click selects) is not ported.

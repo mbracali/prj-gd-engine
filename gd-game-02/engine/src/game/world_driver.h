@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "game/chart.h"
+#include "game/band_performer.h"
 #include "game/player.h"
 
 class World;
@@ -24,7 +25,8 @@ class World;
 //   gem (0x822e40e0), build_streak (0x822ddf70) when the multiplier steps
 //   up, star_power_ready / start / stop, excitement (0 Boot under the
 //   warning level, 1 Bad under 0.33, 2 Okay under 0.66, else 3 Great;
-//   0x822CAAB0, competitive: the better player) when it changes, peak_on /
+//   0x822CAAB0: player 0's rating, the co-op band's (0x822C9BE8),
+//   competitive: the better player's) when it changes, peak_on /
 //   peak_off at 4x with a rating over 0.66 (the HUD's peak, 0x822dcef0);
 // - without GH2's menus (`gameEvents`), also the game's own messages the
 //   world otherwise gets as a game sink: intro_start_msg, intro_end (at
@@ -37,8 +39,9 @@ public:
     // A new song; the clock starts at `startMs` (the lead-in).
     void reset(float startMs);
     // One frame at song time `ms`, with the players' events of this frame.
+    // `band`: the co-op band, whose meter gives the excitement and peak.
     void update(World& world, const Song& song, float ms, const Player* p0, const std::vector<PlayerEvent>& e0, const Player* p1,
-                const std::vector<PlayerEvent>& e1);
+                const std::vector<PlayerEvent>& e1, const BandPerformer* band = nullptr);
     // The song's end, won or lost (the game messages; once each).
     void gameWon(World& world);
     void gameLost(World& world);

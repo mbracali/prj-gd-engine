@@ -338,6 +338,7 @@ Value UiManager::route(const std::string& msg, std::vector<Value> args) {
     Value r = callScript(interp_.findObject("ui"), msg, args);
     if (!r.isUnhandled()) return r;
     if (current_) {
+        if (current_->routeNative(msg, args, r)) return r;
         r = callScript(current_, msg, args);
         if (!r.isUnhandled()) return r;
         if (PanelObj* fp = current_->focusPanel()) {
@@ -474,6 +475,16 @@ void UiManager::switchScreens() {
                 if (!to->hasPanel(p)) exitPanel(p);
         }
     current_ = to;
+    // The keyboard's split layout (P2 on H J K L ;, N / M, B, O) while the
+    // two-player menus need a second controller: from the controller select
+    // with fewer than two pads, until the main menu [I: the port's].
+    if (to->name() == "multi_controller_select_screen") {
+        int pads = 0;
+        for (const Input::Device& d : input_.devices()) pads += d.id != "keyboard" ? 1 : 0;
+        if (pads < 2) input_.setSplitKeyboard(true);
+    } else if (to->name() == "main_screen") {
+        input_.setSplitKeyboard(false);
+    }
     if (pop) {
         // The screen below was never exited: it goes on as it was.
         updateHelpbar();
@@ -491,12 +502,14 @@ void UiManager::switchScreens() {
     // panels' and the screen's enter scripts may set it after (the dialogs).
     updateHelpbar();
     entered_.clear();
+    to->nativeEnter();
     for (PanelObj* p : to->panels()) {
         if (p->up) continue;
         enterPanel(p);
         entered_.push_back(p);
     }
     if (!animIn) resetMetacam();
+    to->nativeEntered();
     callScript(to, "enter");
     route("screen_change", {Value::obj(to), Value::obj(from), Value::integer(back_ ? 1 : 0)});
     if (animIn) {
@@ -755,8 +768,18 @@ void UiManager::action(const InputEvent& e) {
     if (pad < 0 && e.down && splash_ < 0 && e.action >= Action::Fret2 && e.action <= Action::Fret4)
         feedCheats(e.action == Action::Fret2 ? kPad_Circle : e.action == Action::Fret3 ? kPad_Square : kPad_L1);
     if (pad < 0) return;
-    if (e.down) buttonDown(pad, e.player);
-    else buttonUp(pad, e.player);
+    // Two players: the scripts' $player_num is the player whose pad acted
+    // (gamecfg set_player), except on the controller select itself, where
+    // it is the pad [I: GH2 maps pads to players after set_player].
+    int player = e.player;
+    if (gameCfgValue(*this, "num_players").integerValue() > 1 && currentScreen() != "multi_controller_select_screen")
+        for (int p = 0; p < 2; ++p)
+            if (session_->players[size_t(p)].padnum == e.player) {
+                player = p;
+                break;
+            }
+    if (e.down) buttonDown(pad, player);
+    else buttonUp(pad, player);
 }
 
 void UiManager::buttonDown(int button, int player) {

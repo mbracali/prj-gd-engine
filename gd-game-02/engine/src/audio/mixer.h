@@ -40,6 +40,7 @@ public:
         float volume = 1;     // gain
         float pan = 0;        // -1 left .. 1 right
         bool guitar = false;  // muted while the player is missing
+        bool guitar2 = false;  // the second player's part (two players on different parts)
     };
     // Starts playback after `leadInMs` of silence; song time 0 is the start of the audio.
     // `stream`: a song (VorbisStream) or any AudioSource (a video's sound).
@@ -48,6 +49,8 @@ public:
     void setPaused(bool paused);
     // The player's guitar channels heard (true) or muted after a miss (false).
     void setGuitarAudible(bool audible) { guitarTarget_.store(audible ? 1.0f : 0.0f); }
+    // The second player's part (Track::guitar2), the same way.
+    void setGuitar2Audible(bool audible) { guitar2Target_.store(audible ? 1.0f : 0.0f); }
     // Playback speed (1 normal): the song is resampled, so its pitch follows
     // (GH2's set_music_speed: the failed song winding down, practice) [I for
     // the pitch]. The song clock is not corrected for it.
@@ -89,6 +92,8 @@ private:
 
     std::atomic<float> guitarTarget_{1};
     float guitarGain_ = 1;  // audio thread only
+    std::atomic<float> guitar2Target_{1};
+    float guitar2Gain_ = 1;
 
     // Clock anchor: `anchorFrames_` frames had been played at `anchorNs_`.
     std::atomic<int64_t> anchorFrames_{0};

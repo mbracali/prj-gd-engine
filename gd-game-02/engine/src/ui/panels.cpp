@@ -17,6 +17,7 @@
 #include "ui/char_select.h"
 #include "ui/enhanced_panel.h"
 #include "ui/gamepad_panel.h"
+#include "ui/multi_select.h"
 #include "ui/natives.h"
 #include "ui/store.h"
 #include "ui/ui_host.h"
@@ -398,7 +399,8 @@ const std::vector<std::string>& knownClasses() {
 }
 
 std::unique_ptr<ScriptObject> makeClassObject(UiManager& ui, const std::string& cls, const std::string& name) {
-    if (cls == "GHScreen" || cls == "UIScreen" || cls == "MultiSelectScreen" || cls == "TrackBudgetScreen")
+    if (auto m = makeMultiClass(ui, cls, name)) return m;
+    if (cls == "GHScreen" || cls == "UIScreen" || cls == "TrackBudgetScreen")
         return std::make_unique<GenericScreen>(ui, name, cls);
     if (auto g = makeGameClass(ui, cls, name)) return g;
     if (auto c = chars::makeClass(ui, cls, name)) return c;

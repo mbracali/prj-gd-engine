@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include "game/band_performer.h"
 #include "game/player.h"
 #include "game/song_db.h"
 #include "input/input.h"
@@ -36,7 +37,15 @@ public:
     bool handleNative(Interp&, const std::string& msg, std::vector<Value>& args, Value& r) override {
         Session::PlayerCfg& p = ui_.session().players[size_t(i_)];
         r = Value::integer(0);
-        if (msg == "set_difficulty") return p.difficulty = std::clamp(intArg(args, 0, 1), 0, 3), true;
+        if (msg == "set_difficulty") {
+            // An int (kDifficulty*) or, from the two-player difficulty panels'
+            // set_selection, the symbol easy / medium / hard / expert [I].
+            int d = intArg(args, 0, 1);
+            if (!args.empty() && !args[0].isNumber())
+                for (int k = 0; k < 4; ++k)
+                    if (nameOf(args[0]) == difficultySym(k)) d = k;
+            return p.difficulty = std::clamp(d, 0, 3), true;
+        }
         if (msg == "get_difficulty" || msg == "difficulty") return r = Value::integer(p.difficulty), true;
         if (chars::playerConfigNative(ui_, p, msg, args, r)) return true;
         if (msg == "set_track_type") return p.trackType = intArg(args, 0), true;
@@ -80,6 +89,32 @@ const DataNode* songEntry(UiManager& ui, const std::string& song) {
     return songs.find(song);
 }
 
+}  // namespace
+
+std::vector<std::string> songInstruments(UiManager& ui, const std::string& song) {
+    std::vector<std::string> out;
+    const DataNode* e = songEntry(ui, song);
+    if (!e) return out;
+    const DataNode* block = e->find(gameCfgValue(ui, "song_block").str());
+    if (!block) block = e->find("song");
+    const DataNode* tracks = block ? block->find("tracks") : nullptr;
+    const DataNode* list = tracks && tracks->children.size() > 1 && tracks->children[1].isList() ? &tracks->children[1] : nullptr;
+    if (list)
+        for (const DataNode& t : list->children)
+            if (t.isList() && !t.children.empty() && t.children[0].isText()) out.push_back(t.children[0].s);
+    return out;
+}
+
+int trackTypeOf(const std::string& instrument) { return instrument == "bass" ? 0 : instrument == "rhythm" ? 1 : 2; }
+
+namespace {
+// get_track_sym (0x822BDDC0): the instrument player `p` plays.
+Value trackSym(UiManager& ui, int p) {
+    const Session::PlayerCfg& c = ui.session().players[size_t(p)];
+    const std::vector<std::string> inst = songInstruments(ui, ui.session().song);
+    if (c.track >= 0 && c.track < int(inst.size())) return Value::symbol(inst[size_t(c.track)]);
+    return Value::symbol(c.trackType == 0 ? "bass" : c.trackType == 1 ? "rhythm" : "guitar");
+}
 }  // namespace
 
 const char* difficultySym(int d) {
@@ -169,6 +204,17 @@ public:
         setup.encoreCheck = encoreCheck_;
         setup.encoreFx = wantEncoreFx();
         setup.campaignFinal = career && ui.interp().send("campaign", "final_song", {}).truthy();
+        // The mode, its players, their difficulties, parts, lefty and pads.
+        setup.mode = gameCfgValue(ui, "mode").str();
+        setup.numPlayers = std::clamp(gameCfgValue(ui, "num_players").integerValue(), 1, 2);
+        const std::vector<std::string> inst = songInstruments(ui, s.song);
+        for (size_t p = 0; p < 2; ++p) {
+            setup.difficulties[p] = s.players[p].difficulty;
+            const int t = s.players[p].track;
+            setup.parts[p] = t >= 0 && t < int(inst.size()) ? inst[size_t(t)] : std::string("guitar");
+            setup.leftys[p] = o.lefty[p];
+            setup.pads[p] = s.players[p].padnum;
+        }
         props["fast_intro"] = Value::integer(0);
         std::string error;
         if (!ui.host().gameLoad(setup, error)) SDL_Log("game: %s", error.c_str());
@@ -225,7 +271,8 @@ public:
         const auto argStr = [&](size_t i) { return i < args.size() ? nameOf(args[i]) : std::string(); };
         // The players' parts (game.dta / world_objects.dta): guitar unless co-op
         // gives player 1 the bass [I: the part pick is M10's].
-        if (msg == "get_track_sym") return r = Value::symbol("guitar"), true;
+        if (msg == "get_track_sym") return r = trackSym(ui, std::clamp(intArg(args, 0), 0, 1)), true;
+        if (msg == "get_track_type") return r = Value::integer(s.players[size_t(std::clamp(intArg(args, 0), 0, 1))].trackType), true;
         if (msg == "get_song") return r = Value::symbol(s.song), true;
         if (msg == "set_song") return s.song = argStr(0), true;
         if (msg == "get_song_index") return r = Value::integer(s.songIndex), true;
@@ -268,8 +315,15 @@ public:
             return r = Value::symbol(difficultySym(s.players[size_t(std::clamp(intArg(args, 0), 0, 1))].difficulty)), true;
         // GameConfig passes the look to player 0's config (0x822BDDC0).
         if (chars::playerConfigNative(ui, s.players[0], msg, args, r)) return true;
-        if (msg == "multiplayer" || msg == "multiplayer_vs" || msg == "is_multiple_controllers")
-            return r = Value::integer(msg == "is_multiple_controllers" ? 0 : gameCfgValue(ui, "num_players").integerValue() > 1), true;
+        // is_multiple_controllers (0x822B4248): more than one pad connected.
+        // The port's keyboard plays two with its split layout (P2 on H J K L
+        // ;, N / M, B, O: input/input.h), so two players are always
+        // possible [I: the port's choice].
+        if (msg == "is_multiple_controllers") return r = Value::integer(1), true;
+        // multiplayer: num_players > 1; multiplayer_vs (0x822B37F8): and the mode's competitive [C].
+        if (msg == "multiplayer" || msg == "multiplayer_vs")
+            return r = Value::integer(gameCfgValue(ui, "num_players").integerValue() > 1 &&
+                                      (msg == "multiplayer" || gameCfgValue(ui, "competitive").truthy())), true;
         if (msg == "num_players" || msg == "get_num_players") return r = Value::integer(std::max(1, gameCfgValue(ui, "num_players").integerValue())), true;
         if (msg == "get_controller") {
             // guitar when a guitar plays (main_panel then offers Training first), else joypad.
@@ -389,14 +443,38 @@ public:
     std::string fileName() override { return ""; }
 };
 
-// player0 / player1 / band: a player's results for the end screens.
+// player0 / player1 / band: a player's results for the end screens; the
+// co-op band (index -1, host gameBand: its score, stars 0x822CE5D8,
+// streak and meter), player 0 outside co-op.
 class PlayerObj : public ScriptObject {
 public:
     PlayerObj(UiManager& ui, const std::string& name, int index) : ScriptObject(name, "Player"), ui_(ui), i_(index) {}
-    bool handleNative(Interp&, const std::string& msg, std::vector<Value>& args, Value& r) override {
-        const Player* p = ui_.host().gamePlayer(i_);
+    bool handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) override {
+        if (i_ < 0)
+            if (const BandPerformer* b = ui_.host().gameBand()) {
+                r = Value::integer(0);
+                if (msg == "score") return r = Value::integer(b->score()), true;
+                if (msg == "num_stars") return r = Value::integer(b->stars()), true;
+                if (msg == "star_rating") {
+                    const int n = std::clamp(b->stars(), 0, 5);
+                    return r = Value::string(std::string(size_t(n), '*') + std::string(size_t(5 - n), '_')), true;
+                }
+                if (msg == "longest_streak") return r = Value::integer(b->longestStreak()), true;
+                if (msg == "current_streak") return r = Value::integer(b->streak()), true;
+                if (msg == "base_multiplier") return r = Value::integer(b->baseMultiplier()), true;
+                if (msg == "crowd_rating") return r = Value::real(b->rockMeter()), true;
+                if (msg == "failed") return r = Value::integer(b->failed() ? 1 : 0), true;
+                if (msg == "win") return r = Value::integer(b->failed() ? 0 : 1), true;
+            }
+        return playerNative(in, msg, args, r);
+    }
+
+private:
+    bool playerNative(Interp&, const std::string& msg, std::vector<Value>& args, Value& r) {
+        const int index = std::max(0, i_);
+        const Player* p = ui_.host().gamePlayer(index);
         r = Value::integer(0);
-        const int gems = ui_.host().gameCounter(i_, "gems");
+        const int gems = ui_.host().gameCounter(index, "gems");
         if (msg == "score") return r = Value::integer(p ? p->score() : 0), true;
         if (msg == "percent_hit") return r = Value::integer(p && gems > 0 ? p->notesHit() * 100 / gems : 0), true;
         if (msg == "num_stars") return r = Value::integer(p ? p->stars() : 0), true;
@@ -417,7 +495,7 @@ public:
             // The mean multiplier: score over base score [I].
             return r = Value::real(p && p->baseScore() > 0 ? float(p->score()) / float(p->baseScore()) : 1.0f), true;
         }
-        if (msg == "sp_phrases" || msg == "streaks_broken") return r = Value::integer(ui_.host().gameCounter(i_, msg)), true;
+        if (msg == "sp_phrases" || msg == "streaks_broken") return r = Value::integer(ui_.host().gameCounter(index, msg)), true;
         if (msg == "lead_time_sec") return r = Value::real(0), true;
         if (msg == "base_multiplier") return r = Value::integer(p ? p->baseMultiplier() : 1), true;
         if (msg == "in_star_mode") return r = Value::integer(p && p->starPowerActive() ? 1 : 0), true;
@@ -468,12 +546,18 @@ public:
         if (msg == "get_difficulty") return r = Value::integer(s.players[size_t(std::clamp(intArg(args, 0), 0, 1))].difficulty), true;
         if (msg == "get_difficulty_sym")
             return r = Value::symbol(difficultySym(s.players[size_t(std::clamp(intArg(args, 0), 0, 1))].difficulty)), true;
-        if (msg == "set_track" || msg == "set_track_type") {
-            s.players[size_t(std::clamp(intArg(args, 0), 0, 1))].trackType = intArg(args, 1);
+        if (msg == "set_track") {
+            // 0x822B6BD0: the player plays the song's instrument n
+            // (song_provider get_instrument), its track type from it.
+            Session::PlayerCfg& p = s.players[size_t(std::clamp(intArg(args, 0), 0, 1))];
+            p.track = intArg(args, 1);
+            const std::vector<std::string> inst = songInstruments(ui_, s.song);
+            p.trackType = p.track >= 0 && p.track < int(inst.size()) ? trackTypeOf(inst[size_t(p.track)]) : 2;
             return true;
         }
+        if (msg == "set_track_type") return s.players[size_t(std::clamp(intArg(args, 0), 0, 1))].trackType = intArg(args, 1), true;
         if (msg == "get_track_type") return r = Value::integer(s.players[size_t(std::clamp(intArg(args, 0), 0, 1))].trackType), true;
-        if (msg == "get_track_sym") return r = Value::symbol("guitar"), true;
+        if (msg == "get_track_sym") return r = trackSym(ui_, std::clamp(intArg(args, 0), 0, 1)), true;
         if (msg == "get_player_config") return r = in.send("game", "get_player_config", args), true;
         if (msg == "foreach_player") return r = ui_.foreachPlayer(args), true;
         if (msg == "win_campaign_song") return r = Value::integer(0), true;
@@ -521,7 +605,7 @@ void installGameNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<S
     add(std::make_unique<GameCfgObj>(ui));
     add(std::make_unique<PlayerObj>(ui, "player0", 0));
     add(std::make_unique<PlayerObj>(ui, "player1", 1));
-    add(std::make_unique<PlayerObj>(ui, "band", 0));
+    add(std::make_unique<PlayerObj>(ui, "band", -1));
     add(std::make_unique<BeatmatchObj>(ui));
 }
 

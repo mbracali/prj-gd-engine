@@ -87,6 +87,19 @@ public:
 
     std::array<Profile, kProfiles> profiles;
     bool proFaceOff = false;            // Campaign +0x68: pro face-off unlocked (a tour won, saved after the high scores)
+    // Co-op's record (Campaign +0x4c, one for the whole save, updated by
+    // campaign finish_coop_song 0x822861A8 -> 0x822A6848) [C]: per song the
+    // band's best score (+0x8, kept when higher), its stars (+0xc & 0x7f)
+    // and the gold flag (+0xc bit 0x80: both players hit 100 % on Expert);
+    // and the bass guitars co-op has awarded (the reward entries' bit 0x40,
+    // 0x822A66E0: guitars.dta (require (songs n) (stars s))).
+    struct CoopEntry {
+        int score = 0;
+        int stars = 0;
+        bool perfect = false;
+    };
+    std::map<std::string, CoopEntry> coop;
+    std::map<std::string, bool> coopAwards;
     Options options;
     std::string defaultName;            // highscores set_default_name
     int autosave = 1;

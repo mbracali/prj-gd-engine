@@ -347,7 +347,7 @@ Player object vtable `0x8204579c` (co-op player `0x82049004`, band
   gem already penalised). GH1 instead re-attributed misses reported more
   than 500 ms early; that logic is not present in GH2's player.
 - **Timing class** (`0x822d6260`): |error| ≤ 30 → 2, ≤ 70 → 1, else 0. It is
-  computed on every hit (`0x822e2748`); no gameplay effect found [C/I].
+  computed on every hit by `0x822e2748`, which drops the result [C].
 - **Base score / stars** [C]: base = Σ over the player's gems
   `frets × (50 + (sustain ? duration_ticks × 25 / 480 (integer) : 0))`
   (`0x826a0ab0`). Stars (`0x822d6410`): 5 if score ≥ 2.8 × base, 4 if
@@ -395,9 +395,12 @@ clamped to 0…1 (`0x822db788`).
   range per second [I: the value range is assumed to be 0…1]) and stays
   "on" for `whammy_timeout` (500 ms) after the last such movement. Sends
   `whammy_start` / `whammy_end`.
-- `min_length` (2.0 s) is copied into the player (`+0xd4`) but no reader was
-  found [I: unused].
-- `recharge_rate` is 0 and no refill-over-time code was found [I].
+- `min_length` (2.0 s) is copied into the player (`+0xd4`, 0x822C9720) and
+  never read [C as far as the export shows].
+- `recharge_rate` is 0 and the poll (0x822DBD60) has no refill term [C].
+- The ready flag is set in the poll (0x822DBD60) once the meter reaches
+  `ready_level`; deploying is "engaging" (0x822C80F8: the held state, see
+  `docs/multiplayer.md` for co-op's shared meter) [C].
 - Practice and attract modes set `star_power_disable` [C, `modes.dta`].
 
 ## Rock meter (crowd)
@@ -469,37 +472,38 @@ decides in co-op is [I], see below].
 
 ## Two players
 
-Modes (`config/gen/modes.dta`) [C]:
+Details and gd02's implementation: `docs/multiplayer.md` (M10.2).
 
-| Mode | Players | competitive | Chart | Score config | Notes |
+Modes (`config/modes.dta`) [C]:
+
+| Mode | Shown as | competitive | Chart | Score config | Notes |
 |---|---|---|---|---|---|
-| `multi_fo` (face-off) | 2 | TRUE | shared part, `separate_parts FALSE` | default | each gem belongs to one player via `player_mask` [I: from the face-off notes, as in GH1] |
-| `multi_vs` (pro face-off) | 2 | TRUE | `midi_suffix VS` (no chart has it, falls back) | default | both play the full part |
-| `multi_coop` | 2 | FALSE | lead + bass/rhythm, `song_coop` audio, `midi_suffix COOP` | `coop_config` | shared Star Power meter |
+| `multi_vs` | Face-off | TRUE | the guitar part, `separate_parts TRUE` | default | each gem belongs to one player via `player_mask` (0x823450B0) |
+| `multi_fo` | Pro face-off | TRUE | the guitar part, `separate_parts FALSE` | default | both play every gem at one difficulty; unlocked by winning a tour |
+| `multi_coop` | Co-op | FALSE | lead (`PART GUITAR COOP`) + bass/rhythm, `song_coop` audio | `coop_config` | shared Star Power meter, the band performer |
 
-- A gem belongs to a player when its `player_mask` is 0 or has that player's
-  bit (`0x82347688`); other players' gems are swept without penalty [C].
-- Competitive modes cannot fail; the winner is the higher score
-  (`0x822c6f30`) [C].
-- **Score normalisation** (game property `use_normalization`, default TRUE,
-  `0x822bb048`) [C]: when two tracks are played, every point a player scores
-  is multiplied by `(r + 1)/2` (player 1) or `(1/r + 1)/2` (player 0), with
-  `r = base_score[0] / base_score[1]` (`0x822bb320`, `0x826a0a50`). With one
-  track, or both players on the same chart, the factor is 1. In co-op this
-  makes lead and bass/rhythm worth the same.
-- **Co-op** (player vtable `0x82049004`, band `0x82048ee4`) [C unless noted]:
-  - each hit also raises the band's streak (`0x822deba8`), and a miss resets
-    it (`0x822debf8`), so the band multiplier is shared; each player still
-    keeps a personal streak;
-  - every point is also added to the band score (normalised) (`0x822deb30`);
-  - rock meter updates go to the player's own meter and to the band meter
-    (`0x822dec68`) [I: which one ends the song; the band meter uses
-    `coop_config`];
-  - shared Star Power meter (`shared_star_meter TRUE`): deploying needs
-    **both players to engage**; the second one triggers the deploy for both
-    (`0x822c80f8`) [C];
-  - `coop_config star_power`: deploy_rate 0.0833 (a full meter lasts 12
-    measures), whammy_rate 0.028, crowd_boost 5 [C, `scoring.dta`].
+(An earlier version of this table had face-off and pro face-off swapped:
+`versus.btn` sets `multi_vs`, the locked `faceoff.btn` `multi_fo`, whose
+results show the pro face-off difficulty.)
+
+- The parser fills `player_mask` from the face-off section notes only with
+  more than one player and `separate_parts` (0x823450B0, 0x82346FA8,
+  0x822836B0) [C]: face-off only. A gem belongs to a player when its mask is
+  0 or has that player's bit (0x82347688) [C].
+- Competitive modes cannot fail (0x822DD3E0 -> 0x822B37F8); the winner is
+  the higher score [C].
+- **Score normalisation** (`use_normalization`, default TRUE, 0x822BB048)
+  [C]: every point is × `(r + 1)/2` (player 1) or `(1/r + 1)/2` (player 0),
+  `r = base_score[0] / base_score[1]` over each player's own gems
+  (0x822BB320, 0x826A0A50, 0x826A0AB0), 1 with one track.
+- **Co-op** [C]: a band performer (0x822DE170) gets every hit (its streak
+  and multiplier), every point (normalised, at the band's multiplier) and
+  every crowd update (the easier player's mapped onto the band's range, the
+  band's crowd at the harder difficulty, 0x822DE800 / 0x822DEC68); **only
+  the band's meter fails the song** (0x822C6B98, 0x8234E1E0); one Star Power
+  meter that both players must engage at once (0x822C80F8) and that both
+  players' polls drain (a full meter lasts 6 measures with deploy_rate
+  0.0833); the band's stars from `coop_max_scores.dta` (0x822CE5D8).
 - Bass: no scoring difference was found; `kTrackBass` only changes the miss
   sound (`config/gen/beatmatch.dta`) [C for the data, I for "no other
   difference"].
@@ -564,23 +568,27 @@ Details, the save and the store: `docs/career_and_store.md`.
 1. Practice audio: confirm that the song stream's channel voices are the
    class whose speed is a frequency ratio (pitch drops), by tracing the
    stream's voice creation, or by listening on hardware/emulator.
-2. Co-op failing: which meter (each player's or the band's) triggers
-   `game_lost`, and how `0x822de800` mixes the two players' difficulties
-   into the band meter.
-3. Face-off section assignment (`player_mask`) in GH2's parser
-   (`0x82344910`, `0x82344ea8`); assumed identical to GH1.
-4. `star_power min_length` (2.0) and `recharge_rate`: no reader found.
-5. The meaning of the co-op star thresholds using `max_scores` entries 1 and
-   3 regardless of difficulty.
+2. ~~Co-op failing~~ Answered (M10.2): only the band's meter fails a
+   co-op song (0x822C6B98, 0x8234E1E0); 0x822DE800 builds the band's crowd
+   at the harder difficulty and maps the easier player's targets onto it.
+   `docs/multiplayer.md`.
+3. ~~Face-off section assignment~~ Answered: base+9 / base+10 set the mask
+   bits, only with two players and `separate_parts` (0x823450B0; the
+   functions named before, 0x82344910 / 0x82344EA8, parse text events).
+4. ~~`min_length` and `recharge_rate`~~ Answered: `min_length` is copied to
+   player +0xd4 (0x822C9720) and never read; the Star Power poll
+   (0x822DBD60) has no recharge term [C as far as the export shows].
+5. ~~Co-op star thresholds~~ Answered as decoded: 0x822CE5D8 uses
+   `max_scores[song][1]` and `[3]` (the entries' difficulty keys) whatever
+   difficulty was played; a song without max scores gets 5 stars.
 6. Range of the whammy value (assumed 0…1) and the controller's calibration
    offset (`watcher +0x2c`, from the player's lag setting).
-7. Timing class (perfect/good): only computed; check the HUD or stats for a
-   use.
-8. `player_mask` in single player: the parser fills it from the face-off
-   section notes in every chart, but applying "mine = mask 0 or my bit" to a
-   single player makes the sweep pass gems early (≈296 guitar charts fail).
-   gd02 applies ownership only in face-off [I]; find where the original
-   decides that the mask is used.
+7. ~~Timing class~~ Answered: 0x822E2748 computes it (0x822D6260) and
+   drops the result; no use.
+8. ~~`player_mask` in single player~~ Answered: GH2's parser fills the
+   mask only with two players and `separate_parts` (0x823450B0), i.e. in
+   face-off; gd02's parser fills it always but applies it only in face-off,
+   which is equivalent.
 9. The bass-cue path of OnHit / OnMiss / wrong HOPOs (`+0x10` vtable
    `+0x28` by tick → `0x823526f8`, `bass_%d.cue`): which object answers and
    what chart data marks those ticks (see "Fret matching").

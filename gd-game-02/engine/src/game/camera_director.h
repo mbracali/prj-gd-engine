@@ -66,7 +66,9 @@ public:
     // (pick_new_shot): multiplayer, the tracks (guitar), no encore fx, the
     // mode (gamecfg get mode: `multi_vs` for face-off, else `single` /
     // `coop`), no campaign win. Ignored when the names exist.
-    void provideGameObjects(bool multiplayer, const std::string& mode);
+    // `parts`: the players' instruments (game get_track_sym n); multiplayer_vs
+    // is a competitive two-player mode (0x822B37F8).
+    void provideGameObjects(bool multiplayer, const std::string& mode, std::array<std::string, 2> parts = {"guitar", "guitar"});
 
     // What the band would answer (M9): player 0's Star Power.
     void setStarPower(bool on) { starPower_ = on; }

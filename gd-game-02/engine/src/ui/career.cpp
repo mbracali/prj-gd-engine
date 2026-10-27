@@ -14,6 +14,8 @@
 void Career::clear() {
     profiles = {};
     proFaceOff = false;
+    coop.clear();
+    coopAwards.clear();
     options = Options{};
     defaultName.clear();
     highScores_.clear();
@@ -117,6 +119,19 @@ Json Career::toJson() const {
     }
     j.set("profiles", ps);
     j.set("pro_faceoff", Json::boolean(proFaceOff));
+    Json co = Json::object();
+    for (const auto& [song, e] : coop) {
+        Json ej = Json::object();
+        ej.set("score", Json::number(e.score));
+        ej.set("stars", Json::number(e.stars));
+        if (e.perfect) ej.set("perfect", Json::boolean(true));
+        co.set(song, ej);
+    }
+    j.set("coop", co);
+    Json ca = Json::object();
+    for (const auto& [g, v] : coopAwards)
+        if (v) ca.set(g, Json::boolean(true));
+    j.set("coop_awards", ca);
     Json hs = Json::object();
     for (const auto& [song, tables] : highScores_) {
         Json diffs = Json::array();
@@ -194,6 +209,9 @@ bool Career::fromJson(const Json& j) {
             for (Profile& p : c.profiles)
                 if (p.inUse) p.items[k] = true;
     c.proFaceOff = j["pro_faceoff"].truthy();
+    for (const auto& [song, e] : j["coop"].o) c.coop[song] = {int(e["score"].num()), int(e["stars"].num()), e["perfect"].truthy()};
+    for (const auto& [g, v] : j["coop_awards"].o)
+        if (v.truthy()) c.coopAwards[g] = true;
     for (const auto& [song, diffs] : j["highscores"].o) {
         auto& tables = c.highScores_[song];
         for (size_t d = 0; d < diffs.a.size() && d < size_t(kDifficulties); ++d)

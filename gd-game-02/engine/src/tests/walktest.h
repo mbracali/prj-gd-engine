@@ -23,7 +23,7 @@ class UiManager;
 //              pause -> restart -> pause -> quit -> the song list.
 //   attract    the title screen idles 60 s -> attract mode -> a button ->
 //              the title screen again.
-//   back       main -> Options -> Audio Settings -> back -> back -> main;
+//   back       main -> (past Multiplayer) Options -> Audio Settings -> back -> back -> main;
 //              the main menu's camera is where it was before (the shared
 //              metacam is reset after every transition).
 //   career     boot -> main -> Career -> Choose Band (NEW BAND) -> a band named "A" -> Medium -> the
@@ -40,6 +40,16 @@ class UiManager;
 //              -> back -> back -> main.
 //   cheats     at the main menu, GH2's Air Guitar and Hyper Speed codes turn
 //              them on; Air Guitar's again, after a pause, turns it off.
+//   coop       boot (a save created) -> main -> MULTIPLAYER -> the controller select (pad 0 to
+//              P1, pad 1 to P2, both confirm) -> CO-OP -> the venue -> the first song (surrender:
+//              guitar and bass) -> the parts (P1 guitar, P2 bass) -> the difficulties (P1 Easy, P2
+//              Medium) -> both characters and guitars -> the song (both on autoplay, cut short)
+//              -> the co-op results (finish_coop_song) -> the bass award -> complete; checks the
+//              game's setup and career.json's co-op record and award.
+//   faceoff    the same to FACE-OFF (multi_vs): characters, guitars, venue, song, both
+//              difficulties -> the song -> multi_compete_screen -> complete.
+//   proface    pro face-off unlocked in the save first (a tour won), then PRO FACE-OFF
+//              (multi_fo): one difficulty for both -> the song -> multi_compete_fo_screen.
 // quickplay also checks the endgame photo GamePanel picked; quickplay and
 // career that the fresh career.json has The Glitches.
 // Every scenario also fails on any UNHANDLED or UNKNOWN script report, or a
@@ -68,6 +78,7 @@ private:
         std::string screen;
         int button = 0;
         double ms = 0;
+        int player = 0;  // a press: the player (the pad on the controller select)
     };
     std::string scenario_;
     bool seeded_ = false;

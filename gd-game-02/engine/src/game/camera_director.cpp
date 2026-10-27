@@ -141,15 +141,18 @@ bool alwaysOk(const std::string& c) {
 class FnObject : public ScriptObject {
 public:
     using Fn = std::function<bool(const std::string&, Value&)>;
+    using ArgsFn = std::function<bool(const std::string&, const std::vector<Value>&, Value&)>;
     FnObject(const std::string& name, const std::string& cls, Fn fn) : ScriptObject(name, cls), fn_(std::move(fn)) {}
-    bool handleNative(Interp&, const std::string& msg, std::vector<Value>&, Value& r) override {
+    FnObject(const std::string& name, const std::string& cls, ArgsFn fn) : ScriptObject(name, cls), argsFn_(std::move(fn)) {}
+    bool handleNative(Interp&, const std::string& msg, std::vector<Value>& args, Value& r) override {
         if (msg == "get" || msg == "set" || msg == "has" || msg == "name") return false;
         r = Value::integer(0);
-        return fn_(msg, r);
+        return argsFn_ ? argsFn_(msg, args, r) : fn_(msg, r);
     }
 
 private:
     Fn fn_;
+    ArgsFn argsFn_;
 };
 
 }  // namespace
@@ -201,15 +204,17 @@ CameraDirector::CameraDirector(World& world, uint32_t seed) : world_(world), rng
     }
 }
 
-void CameraDirector::provideGameObjects(bool multiplayer, const std::string& mode) {
+void CameraDirector::provideGameObjects(bool multiplayer, const std::string& mode, std::array<std::string, 2> parts) {
     Interp& in = world_.interp();
     if (!game_ && !in.findObject("game")) {
-        game_ = std::make_unique<FnObject>("game", "Game", [multiplayer](const std::string& msg, Value& r) {
+        const bool vs = multiplayer && (mode == "multi_vs" || mode == "multi_fo");
+        game_ = std::make_unique<FnObject>("game", "Game", FnObject::ArgsFn([multiplayer, vs, parts](const std::string& msg, const std::vector<Value>& args, Value& r) {
             if (msg == "multiplayer") r = Value::integer(multiplayer ? 1 : 0);
-            else if (msg == "get_track_sym") r = Value::symbol("guitar");
+            else if (msg == "multiplayer_vs") r = Value::integer(vs ? 1 : 0);
+            else if (msg == "get_track_sym") r = Value::symbol(parts[!args.empty() && args[0].isNumber() && args[0].integerValue() == 1 ? 1 : 0]);
             else if (msg == "is_up") r = Value::integer(1);
             return true;  // add_sink, remove_sink, want_encore_fx, set_outro_complete...: 0
-        });
+        }));
         in.registerObject(game_.get());
     }
     if (!gamecfg_ && !in.findObject("gamecfg")) {

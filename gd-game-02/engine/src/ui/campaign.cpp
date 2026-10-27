@@ -118,6 +118,12 @@ const Config& config(UiManager& ui) {
             const DataNode* type = g.find("type");
             const DataNode* req = g.find("require");
             const DataNode* diff = g.find("difficulty");
+            // (require (songs n) (stars s)): co-op's bass rewards.
+            if (const DataNode* songs = req ? req->find("songs") : nullptr) {
+                const DataNode* stars = req->find("stars");
+                c.coopRewards.push_back({g.children[0].s, songs->intAt(1), stars ? stars->intAt(1) : 3});
+                continue;
+            }
             if (!type || type->textAt(1) != "guitar" || !req || req->children.size() < 2 || !req->children[1].isText() || !diff) continue;
             const std::string r = req->children[1].s;
             if (r != "tour_passed" && r != "tour_5_star") continue;
@@ -271,9 +277,55 @@ static bool profileUnlocked(UiManager& ui, Career::Profile& p, const std::string
     return unlockedAt(ui, p, d, sym);
 }
 
+bool isCoopReward(UiManager& ui, const std::string& guitar) {
+    for (const Config::CoopReward& r : config(ui).coopRewards)
+        if (r.guitar == guitar) return true;
+    return false;
+}
+
+const Career::CoopEntry* coopEntry(UiManager& ui, const std::string& song) {
+    auto it = ui.career().coop.find(song);
+    return it == ui.career().coop.end() ? nullptr : &it->second;
+}
+
+bool finishCoopSong(UiManager& ui, int bandScore, int bandStars, int percent0, int percent1, int diff0, int diff1) {
+    Career& c = ui.career();
+    ui.session().guitarAwards.clear();  // Campaign +0x7c emptied
+    const std::string song = ui.session().song;
+    Career::CoopEntry& e = c.coop[song];
+    // 0x822A6848: a higher score keeps it (0x822AE8A0) and its stars
+    // (0x822AE8B8: never fewer, the gold flag kept), then the rewards.
+    bool changed = e.score < bandScore;
+    if (changed) {
+        e.score = std::max(e.score, bandScore);
+        e.stars = std::max(e.stars, bandStars);
+        // 0x822A5FF0: the entries with 3, 4, 5 stars or more; a reward is
+        // awarded once its (songs n) entries have its (stars s) [C].
+        std::array<int, 3> count{};
+        for (const auto& [s, x] : c.coop)
+            for (int k = 0; k < 3; ++k) count[size_t(k)] += x.stars >= k + 3 ? 1 : 0;
+        for (const Config::CoopReward& r : config(ui).coopRewards) {
+            if (auto it = c.coopAwards.find(r.guitar); it != c.coopAwards.end() && it->second) continue;
+            if (r.songs <= count[size_t(std::clamp(r.stars, 3, 5) - 3)]) {
+                c.coopAwards[r.guitar] = true;
+                ui.session().guitarAwards.push_back(r.guitar);
+            }
+        }
+    }
+    if (percent0 == 100 && percent1 == 100 && diff0 == 3 && diff1 == 3) e.perfect = true, changed = true;
+    if (changed) c.touch();
+    return changed;
+}
+
 bool isUnlocked(UiManager& ui, const std::string& sym) {
     if (ui.session().allAccess) return true;
     if (sym == "multi_fo") return ui.career().proFaceOff;
+    // Co-op's bass rewards: locked until co-op awards them [I: the reward
+    // entry's bit 0x40 (0x822A66E0) as the guitar's unlock].
+    if (isCoopReward(ui, sym)) {
+        auto it = ui.career().coopAwards.find(sym);
+        return it != ui.career().coopAwards.end() && it->second;
+    }
     if (isCareer(ui)) {
         Career::Profile* p = profile(ui);
         return p && profileUnlocked(ui, *p, sym, difficulty(ui));  // 0x822A7150

@@ -49,6 +49,9 @@ struct Session {
         std::string guitar, skin;
         int padnum = 0;
         int trackType = 2;  // kTrackGuitar (0x822BD6E8)
+        // gamecfg set_track: the index of the instrument played in the
+        // song's (tracks ...) (song_provider get_instrument), 0 the guitar.
+        int track = 0;
     };
     std::array<PlayerCfg, 2> players;
     bool allAccess = false;  // campaign set_all_access (the cheat): every item unlocked
@@ -85,6 +88,11 @@ void installNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Scrip
 // gamecfg get <key>: a (key value) set by script, else the mode's
 // (modes.dta), else the defaults'.
 Value gameCfgValue(UiManager& ui, const std::string& key);
+// The instruments of a song's (tracks ((guitar ...) (bass ...))), in order,
+// from the mode's song_block, else its `song` block (0x822B38F8) [C].
+std::vector<std::string> songInstruments(UiManager& ui, const std::string& song);
+// kTrackBass 0, kTrackRhythm 1, kTrackGuitar 2 (config/macros.dta) of an instrument.
+int trackTypeOf(const std::string& instrument);
 // The song info index of a song symbol (-1 when unknown).
 int songInfoIndex(UiManager& ui, const std::string& song);
 // The difficulty symbol (easy medium hard expert).

@@ -179,6 +179,29 @@ static int campaignChecks(ui::UiManager& ui) {
     check(back.profiles[0].cashSpent == 550 && e.at("battle").completed && e.at("small1").unlocked && e.at("surrender").stars == 5 &&
               e.at("rawdog").unlocked && back.profiles[0].entries[1].at("surrender").maxStars == 5,
           "career.json keeps the tour");
+    // Co-op (docs/multiplayer.md): the song's instruments from the mode's
+    // song_block, set_track's track type, the record and its bass awards.
+    Interp& in = ui.interp();
+    s.mode = "multi_coop", s.cfgSet.clear(), s.song = "strutter";
+    check(in.send("song_provider", "get_instrument", {Value::symbol("strutter"), Value::integer(1)}).str() == "rhythm" &&
+              in.send("song_provider", "has_instrument", {Value::symbol("surrender"), Value::symbol("bass")}).truthy() &&
+              !in.send("song_provider", "has_instrument", {Value::symbol("strutter"), Value::symbol("bass")}).truthy(),
+          "co-op's instruments: song_coop's (strutter: rhythm), else song's (surrender: bass)");
+    in.send("gamecfg", "set_track", {Value::integer(1), Value::integer(1)});
+    check(s.players[1].trackType == 1 && in.send("gamecfg", "get_track_sym", {Value::integer(1)}).str() == "rhythm", "set_track 1 1: rhythm");
+    check(!in.send("game", "multiplayer_vs", {}).truthy() && in.send("game", "multiplayer", {}).truthy(), "co-op is multiplayer, not multiplayer_vs");
+    ui.career().coop.clear(), ui.career().coopAwards.clear();
+    check(!cp::isUnlocked(ui, "bass_sg_mahogany") && cp::isUnlocked(ui, "bass_musicman"), "co-op's basses locked until awarded");
+    cp::finishCoopSong(ui, 1000, 2, 90, 90, 3, 3);
+    check(s.guitarAwards.empty() && ui.career().coop["strutter"].score == 1000, "two stars: a record, no bass");
+    cp::finishCoopSong(ui, 900, 4, 100, 100, 3, 3);
+    check(ui.career().coop["strutter"].score == 1000 && ui.career().coop["strutter"].stars == 2 && ui.career().coop["strutter"].perfect,
+          "a lower score keeps the record; 100 % on Expert by both: gold");
+    cp::finishCoopSong(ui, 2000, 3, 50, 50, 1, 1);
+    check(s.guitarAwards.size() == 1 && s.guitarAwards[0] == "bass_sg_mahogany" && cp::isUnlocked(ui, "bass_sg_mahogany"),
+          "three stars on one song: bass_sg_mahogany (songs 1, stars 3)");
+    s.mode = "multi_vs";
+    check(in.send("game", "multiplayer_vs", {}).truthy(), "face-off is multiplayer_vs");
     std::printf("uitest: campaign: %d checks, %d failed\n", n, fails);
     ui.career() = saved;
     s = keep;

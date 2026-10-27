@@ -48,6 +48,13 @@ struct Config {
         int difficulty = 0;
     };
     std::vector<Reward> rewards;
+    // guitars.dta's (require (songs n) (stars s)) guitars: co-op's bass
+    // rewards (0x822A66E0), in file order.
+    struct CoopReward {
+        std::string guitar;
+        int songs = 0, stars = 3;
+    };
+    std::vector<CoopReward> coopRewards;
 };
 const Config& config(UiManager& ui);
 
@@ -105,6 +112,17 @@ void cheatBeatSong(UiManager& ui, const std::string& song, int score);
 void buyItem(UiManager& ui, const std::string& item, int price);
 // store.dta's price of an item (StorePanel price, 0x8229D4A8); -1 if none.
 int price(UiManager& ui, const std::string& category, const std::string& item);
+
+// campaign finish_coop_song (0x822861A8 -> 0x822A6848 / 0x822A66E0): the
+// guitar awards cleared; the song's co-op entry takes a higher band score
+// (and its stars), and the gold flag when both players hit 100 % on
+// Expert; a new score then awards the bass guitars whose (require (songs
+// n) (stars s)) the entries now meet (to the guitar awards). True when
+// the record changed.
+bool finishCoopSong(UiManager& ui, int bandScore, int bandStars, int percent0, int percent1, int diff0, int diff1);
+// The co-op entry of a song (nullptr when none), for the song list.
+const Career::CoopEntry* coopEntry(UiManager& ui, const std::string& song);
+bool isCoopReward(UiManager& ui, const std::string& guitar);
 
 // The song lists: career (0x822A75D0 type 1 -> 0x822AA758, filtered by
 // 0x822AA3F8) and quick play (0x82287600).

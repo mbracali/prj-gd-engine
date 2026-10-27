@@ -59,6 +59,7 @@ target_sources(gd02 PRIVATE
   src/devaids/screenshot.cpp
   src/game/camera_director.cpp
   src/game/band.cpp
+  src/game/band_performer.cpp
   src/game/chart.cpp
   src/game/crowd.cpp
   src/game/player.cpp
@@ -114,6 +115,7 @@ target_sources(gd02 PRIVATE
   src/ui/campaign.cpp
   src/ui/store.cpp
   src/ui/char_select.cpp
+  src/ui/multi_select.cpp
   src/ui/gamepad_panel.cpp
   src/ui/enhanced_panel.cpp
   src/ui/natives_game.cpp

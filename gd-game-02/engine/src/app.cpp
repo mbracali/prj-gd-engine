@@ -25,6 +25,7 @@
 #include "devaids/screenshot.h"
 #include "game/autoplay.h"
 #include "game/band.h"
+#include "game/band_performer.h"
 #include "game/camera_director.h"
 #include "game/key_script.h"
 #include "game/light_presets.h"
@@ -71,24 +72,33 @@ constexpr uint64_t kMinFrameNs = 4'000'000;
 // songs.dtb's per-channel lists as mixer tracks: vols are dB [I: by name and
 // range], pans -1..1, and the channels flagged in `cores` (exactly the
 // guitar channels [C data]) are the ones muted while the player misses [I].
-// Development aid: GD02_MODE=vs|faceoff|coop|practice shows that mode's
-// track panel and HUD (config/modes.dta: hud_vs for face-off and pro
-// face-off, hud_coop, hud_practice) with a second, autoplaying player; the
-// modes' own rules are milestone M10.
-enum class DevMode { Single, Vs, FaceOff, Coop, Practice };
+// The song's mode (config/modes.dta, docs/multiplayer.md): GH2's
+// multi_vs is face-off (each player owns the face-off sections' gems),
+// multi_fo pro face-off (both play every gem), multi_coop co-op. Without
+// the menus, development aid GD02_MODE=faceoff|proface|coop|practice plays
+// that mode with a second, autoplaying player (GD02_DIFF2=0..3 its
+// difficulty, GD02_PARTS=<p0>,<p1> the co-op parts, e.g. guitar,bass).
+enum class DevMode { Single, FaceOff, ProFaceOff, Coop, Practice };
 DevMode devMode() {
     const char* m = SDL_getenv("GD02_MODE");
     const std::string v = m ? m : "";
-    if (v == "vs") return DevMode::Vs;
-    if (v == "faceoff" || v == "fo") return DevMode::FaceOff;
-    if (v == "coop") return DevMode::Coop;
+    if (v == "faceoff" || v == "vs" || v == "multi_vs") return DevMode::FaceOff;
+    if (v == "proface" || v == "pro" || v == "fo" || v == "multi_fo") return DevMode::ProFaceOff;
+    if (v == "coop" || v == "multi_coop") return DevMode::Coop;
     if (v == "practice") return DevMode::Practice;
     return DevMode::Single;
 }
-bool twoPlayers(DevMode m) { return m == DevMode::Vs || m == DevMode::FaceOff || m == DevMode::Coop; }
+DevMode modeOf(const std::string& gh2Mode) {
+    if (gh2Mode == "multi_vs") return DevMode::FaceOff;
+    if (gh2Mode == "multi_fo") return DevMode::ProFaceOff;
+    if (gh2Mode == "multi_coop") return DevMode::Coop;
+    if (gh2Mode == "practice") return DevMode::Practice;
+    return DevMode::Single;
+}
+bool twoPlayers(DevMode m) { return m == DevMode::FaceOff || m == DevMode::ProFaceOff || m == DevMode::Coop; }
 const char* hudFile(DevMode m) {
     switch (m) {
-    case DevMode::Vs: case DevMode::FaceOff: return "hud_vs.milo";
+    case DevMode::FaceOff: case DevMode::ProFaceOff: return "hud_vs.milo";
     case DevMode::Coop: return "hud_coop.milo";
     case DevMode::Practice: return "hud_practice.milo";
     default: return "hud_sp.milo";
@@ -100,14 +110,39 @@ bool envOn(const char* name) {
     return v && *v && *v != '0';
 }
 
-std::vector<Mixer::Track> mixerTracks(const SongAudio& a, float band = 1, float guitar = 1) {
+// Two players (`parts`: their instruments): each player's (tracks
+// (<instrument> channels)) are muted while that player misses; the guitar
+// volume applies to both [I: GH2's per-player UnmuteBeatMatchAudio].
+std::vector<Mixer::Track> mixerTracks(const SongAudio& a, float band = 1, float guitar = 1,
+                                      const std::array<std::string, 2>* parts = nullptr) {
     std::vector<Mixer::Track> tracks(a.pans.size());
+    auto channelsOf = [&](const std::string& inst) {
+        auto it = a.tracks.find(inst);
+        return it == a.tracks.end() ? std::vector<int>{} : it->second;
+    };
     for (size_t c = 0; c < tracks.size(); ++c) {
         tracks[c].pan = a.pans[c];
-        tracks[c].guitar = c < a.cores.size() && a.cores[c] == 1;
-        tracks[c].volume = (c < a.vols.size() ? std::pow(10.0f, a.vols[c] / 20.0f) : 1.0f) * (tracks[c].guitar ? guitar : band);
+        if (parts) {
+            for (int ch : channelsOf((*parts)[0])) tracks[c].guitar = tracks[c].guitar || size_t(ch) == c;
+            if ((*parts)[1] != (*parts)[0])
+                for (int ch : channelsOf((*parts)[1])) tracks[c].guitar2 = tracks[c].guitar2 || size_t(ch) == c;
+        } else {
+            tracks[c].guitar = c < a.cores.size() && a.cores[c] == 1;
+        }
+        const bool mine = tracks[c].guitar || tracks[c].guitar2;
+        tracks[c].volume = (c < a.vols.size() ? std::pow(10.0f, a.vols[c] / 20.0f) : 1.0f) * (mine ? guitar : band);
     }
     return tracks;
+}
+
+// A player's chart (docs/multiplayer.md): the instrument's PART track; the
+// co-op lead's is PART GUITAR COOP (midi_suffix COOP) when the chart has it
+// [C data], the others fall back to the plain part [I].
+Part partFor(const Song& song, const std::string& instrument, bool coop) {
+    if (instrument == "bass" && song.hasPart[size_t(Part::Bass)]) return Part::Bass;
+    if (instrument == "rhythm" && song.hasPart[size_t(Part::Rhythm)]) return Part::Rhythm;
+    if (coop && song.hasPart[size_t(Part::GuitarCoop)]) return Part::GuitarCoop;
+    return Part::Guitar;
 }
 
 // A section of a .mogg looped (song_preview: songs.dta (preview a b) with a
@@ -181,6 +216,7 @@ public:
     }
     float songDurationMs() const override { return song_ ? song_->endMs : 0.0f; }
     const Player* gamePlayer(int index) const override { return index == 0 ? player_.get() : player2_.get(); }
+    const BandPerformer* gameBand() const override { return coopBand_.get(); }
     int gameCounter(int player, const std::string& key) const override;
     void setMusicSpeed(float speed) override { mixer_.setSpeed(std::max(0.0f, speed)); }
     void setMusicPaused(bool paused) override {
@@ -290,11 +326,32 @@ private:
     float bandVolume_ = 1, guitarVolume_ = 1;
     int syncOffsetMs_ = 0;
     double leadInMs_ = kLeadInMs;
-    // GD02_MODE's second player (TODO M10: the modes' own rules).
+    // Two players (docs/multiplayer.md): the mode, per player the
+    // difficulty, the part (instrument) and the pad (input slot) that plays
+    // it; the co-op band and the shared Star Power meter.
     DevMode mode_ = DevMode::Single;
+    std::array<int, 2> difficulties_{3, 3};
+    std::array<std::string, 2> parts_{"guitar", "guitar"};
+    std::array<int, 2> pads_{0, 1};
     std::unique_ptr<Player> player2_;
     std::unique_ptr<Autoplay> bot2_;
     std::unique_ptr<TrackView> track2_;
+    std::unique_ptr<BandPerformer> coopBand_;
+    StarMeter sharedMeter_;
+    bool guitarHeard_ = true;  // face-off / pro face-off: the shared part's channels
+    // Face-off: the next gem of player 0's list and the last player_mask
+    // sent with active_players_changed (Game +0xb0 / +0xb4, 0x822CFA70).
+    size_t activeGem_ = 0;
+    int activePlayers_ = 0;
+    Player* playerFor(int pad);
+    // track_graphics.dta's speed of the difficulty; with two players the
+    // mean of theirs (0x826932D0) [C].
+    float trackSpeed() const {
+        if (!player2_) return rules_.trackSpeed[size_t(difficulty_)];
+        return (rules_.trackSpeed[size_t(difficulties_[0])] + rules_.trackSpeed[size_t(difficulties_[1])]) * 0.5f;
+    }
+    Autoplay* botFor(const Player* p) { return p == player_.get() ? bot_.get() : bot2_.get(); }
+    bool songLost() const { return coopBand_ ? coopBand_->failed() : player_ && player_->failed(); }
     // Development aid: GD02_FAIL_AT=<song ms> fails the song then.
     float failAtMs_ = 1e30f;
     uint64_t failTicks_ = 0;
@@ -316,6 +373,7 @@ private:
     Highway highway_;
     bool debugHighway_ = false;
     bool trackTried_ = false;
+    std::string trackLayout_;
     std::unique_ptr<scene::MiloLibrary> milos_;
     std::unique_ptr<gfx::SceneCache> sceneCache_;
     std::unique_ptr<TrackView> track_;
@@ -566,30 +624,76 @@ bool App::loadSong(const SongInfo& info, int difficulty, bool autoplay, float ba
     stopMusic();
     try {
         song_ = std::make_unique<Song>(loadChart(*data_, info, rules_));
-        pendingStream_ = std::make_unique<VorbisStream>(data_->read(info.audio.moggPath));
         difficulty_ = std::clamp(difficulty, 0, kDifficultyCount - 1);
+        // Without the menus: GD02_MODE (with the menus gameLoad set the mode).
+        if (!ui_) {
+            mode_ = devMode();
+            difficulties_ = {difficulty_, difficulty_};
+            if (const char* d2 = SDL_getenv("GD02_DIFF2")) difficulties_[1] = std::clamp(std::atoi(d2), 0, kDifficultyCount - 1);
+            parts_ = {"guitar", "guitar"};
+            if (mode_ == DevMode::Coop) {
+                // The second instrument the song has (song_provider get_instrument 1).
+                const SongAudio& a = info.coopAudio ? *info.coopAudio : info.audio;
+                parts_[1] = a.tracks.count("bass") ? "bass" : a.tracks.count("rhythm") ? "rhythm" : "guitar";
+                if (const char* ps = SDL_getenv("GD02_PARTS")) {
+                    const std::string v = ps;
+                    const size_t comma = v.find(',');
+                    if (comma != std::string::npos) parts_ = {v.substr(0, comma), v.substr(comma + 1)};
+                }
+            }
+            pads_ = {0, 1};
+        }
+        difficulties_[0] = difficulty_;
+        const bool coop = mode_ == DevMode::Coop, two = twoPlayers(mode_);
+        // Co-op plays the song_coop block's audio (modes.dta song_block) when
+        // the song has one, else the song's [I: the fallback].
+        const SongAudio& audio = coop && info.coopAudio ? *info.coopAudio : info.audio;
+        pendingStream_ = std::make_unique<VorbisStream>(data_->read(audio.moggPath));
+        // Face-off players own the face-off sections' gems: the parser fills
+        // player_mask only with separate_parts and two players (0x823450B0)
+        // [C]; the others play every gem.
+        const bool faceOff = mode_ == DevMode::FaceOff;
+        const Part part0 = two ? partFor(*song_, parts_[0], coop) : Part::Guitar;
+        const Part part1 = partFor(*song_, parts_[1], coop);
+        // Two players never fail on their own meters: competitive modes
+        // cannot fail, a co-op player cannot end the game (0x822C6B98); the
+        // co-op band's meter does (game/band_performer.h) [C].
+        const bool noFail = options_.noFail || autoplay || mode_ != DevMode::Single;
+        const ScoreConfig* config = coop ? &rules_.coop : &rules_.solo;  // modes.dta score_config
         // The watcher follows the device that acted last: a guitar or the
         // keyboard strums, a gamepad's frets strum (GH2's joypad_guitar).
-        mode_ = ui_ ? DevMode::Single : devMode();
-        // Face-off players own their gems (player_mask); co-op plays lead and
-        // bass / rhythm [I: the part pick], the others the guitar part.
-        const bool faceOff = mode_ == DevMode::FaceOff;
-        Part part0 = Part::Guitar, part1 = Part::Guitar;
-        if (mode_ == DevMode::Coop) {
-            if (song_->hasPart[size_t(Part::GuitarCoop)]) part0 = Part::GuitarCoop;
-            if (song_->hasPart[size_t(Part::Rhythm)]) part1 = Part::Rhythm;
-            if (song_->hasPart[size_t(Part::Bass)]) part1 = Part::Bass;
-        }
-        const bool noFail = options_.noFail || autoplay || mode_ != DevMode::Single;
-        player_ = std::make_unique<Player>(*song_, part0, static_cast<Difficulty>(difficulty_), rules_, input_.lastMode(), noFail,
-                                           faceOff ? 0 : -1);
+        // Two players: each the watcher of the controller in its pad's slot
+        // (GH2's beatmatch controller type per player, 0x822B3C50): a
+        // joypad_guitar type is the joypad watcher.
+        auto modeOfPad = [&](int pad) {
+            for (const Input::Device& d : input_.devices())
+                if (d.player == pad && d.id != "touch" && (d.id != "keyboard" || input_.padConnected(pad)))
+                    if (input_.gh2Type(d.id).find("joypad") != std::string::npos) return ControllerMode::Joypad;
+            return ControllerMode::Guitar;
+        };
+        player_ = std::make_unique<Player>(*song_, part0, static_cast<Difficulty>(difficulties_[0]), rules_,
+                                           two ? modeOfPad(pads_[0]) : input_.lastMode(), noFail, faceOff ? 0 : -1, config);
         player_->setCalibrationMs(float(syncOffsetMs_));
         bot_ = autoplay ? std::make_unique<Autoplay>(player_->chart(), faceOff ? 0 : -1) : nullptr;
-        player2_.reset(), bot2_.reset();
-        if (twoPlayers(mode_)) {
-            player2_ = std::make_unique<Player>(*song_, part1, static_cast<Difficulty>(difficulty_), rules_, ControllerMode::Guitar,
-                                                true, faceOff ? 1 : -1);
-            bot2_ = std::make_unique<Autoplay>(player2_->chart(), faceOff ? 1 : -1);
+        player2_.reset(), bot2_.reset(), coopBand_.reset();
+        sharedMeter_ = {};
+        guitarHeard_ = true;
+        activeGem_ = 0, activePlayers_ = 0;
+        if (two) {
+            player2_ = std::make_unique<Player>(*song_, part1, static_cast<Difficulty>(difficulties_[1]), rules_, autoplay || !ui_ ? ControllerMode::Guitar : modeOfPad(pads_[1]),
+                                                true, faceOff ? 1 : -1, config);
+            player2_->setNumber(1);
+            player2_->setCalibrationMs(float(syncOffsetMs_));
+            // Without the menus the second player always autoplays.
+            if (autoplay || !ui_) bot2_ = std::make_unique<Autoplay>(player2_->chart(), faceOff ? 1 : -1);
+            normaliseScores(*player_, *player2_);
+            if (coop) {
+                // The band (0x822C9E80): its crowd at the harder difficulty,
+                // the easier player's targets mapped onto it; one meter.
+                coopBand_ = std::make_unique<BandPerformer>(*song_, rules_, static_cast<Difficulty>(difficulties_[0]),
+                                                            static_cast<Difficulty>(difficulties_[1]), info.id);
+                linkCoop(*player_, *player2_, *coopBand_, sharedMeter_);
+            }
         }
         failAtMs_ = SDL_getenv("GD02_FAIL_AT") ? float(std::atof(SDL_getenv("GD02_FAIL_AT"))) : 1e30f;
         // Development aid: GD02_END_AT=<song ms> ends (wins) the song early.
@@ -610,6 +714,12 @@ bool App::loadSong(const SongInfo& info, int difficulty, bool autoplay, float ba
         SDL_Log("%s (%s): %d Hz, %d channels, %d %s gems, hopo_threshold %d", info.id.c_str(), info.name.c_str(),
                 pendingStream_->sampleRate(), pendingStream_->channels(), int(player_->chart().gems.size()),
                 difficultyName(static_cast<Difficulty>(difficulty_)), hopoThreshold(info.audio, rules_));
+        if (player2_)
+            SDL_Log("two players (%s): %s %s / %s %s, %d / %d gems, normalisation %.4f / %.4f",
+                    mode_ == DevMode::Coop ? "co-op" : mode_ == DevMode::FaceOff ? "face-off" : "pro face-off", parts_[0].c_str(),
+                    difficultyName(static_cast<Difficulty>(difficulties_[0])), parts_[1].c_str(),
+                    difficultyName(static_cast<Difficulty>(difficulties_[1])), int(player_->chart().gems.size()),
+                    int(player2_->chart().gems.size()), double(player_->normalisation()), double(player2_->normalisation()));
     } catch (const std::exception& ex) {
         message_ = info.id + ": " + ex.what();
         SDL_Log("%s", message_.c_str());
@@ -638,7 +748,7 @@ bool App::loadSong(const SongInfo& info, int difficulty, bool autoplay, float ba
     // tier, GD02_VENUE overrides); with them world_panel loads it (worldLoad).
     if (!ui_ && !debugHighway_) {
         const std::string v = venues::fromEnv().empty() ? venues::forSong(*data_, info) : venues::fromEnv();
-        const VenueVariant var = mode_ == DevMode::Vs || mode_ == DevMode::FaceOff ? VenueVariant::Mp
+        const VenueVariant var = mode_ == DevMode::FaceOff || mode_ == DevMode::ProFaceOff ? VenueVariant::Mp
                                  : mode_ == DevMode::Coop                          ? VenueVariant::Coop
                                                                                    : VenueVariant::Single;
         loadVenue(v, var);
@@ -652,7 +762,9 @@ bool App::loadSong(const SongInfo& info, int difficulty, bool autoplay, float ba
 void App::beginSong() {
     if (!pendingStream_ || !info_) return;
     mixer_.setSpeed(1);
-    mixer_.play(std::move(pendingStream_), mixerTracks(info_->audio, bandVolume_, guitarVolume_), leadInMs_);
+    const bool coop = mode_ == DevMode::Coop;
+    const SongAudio& audio = coop && info_->coopAudio ? *info_->coopAudio : info_->audio;
+    mixer_.play(std::move(pendingStream_), mixerTracks(audio, bandVolume_, guitarVolume_, player2_ ? &parts_ : nullptr), leadInMs_);
     input_.setInGame(true);
     begun_ = true;
     // A song starts without a shot's PostProc or depth of field (rnd reset_postproc).
@@ -672,12 +784,16 @@ bool App::startSong(size_t index) {
 // the debug highway stands in.
 bool App::prepareTrack() {
     if (debugHighway_) return false;
-    if (trackTried_) return track_ && hud_;
+    // The layout follows the mode: one track and hud_sp, or two tracks and
+    // hud_vs / hud_coop (loaded again when the mode changes).
+    const std::string layout = std::string(hudFile(mode_)) + (twoPlayers(mode_) ? ":2" : ":1");
+    if (trackTried_ && (!track_ || !hud_ || layout == trackLayout_)) return track_ && hud_;
     trackTried_ = true;
+    trackLayout_ = layout;
     const uint64_t start = SDL_GetTicksNS();
     try {
-        milos_ = std::make_unique<scene::MiloLibrary>(*data_);
-        sceneCache_ = std::make_unique<gfx::SceneCache>(canvas_.renderer().device());
+        if (!milos_) milos_ = std::make_unique<scene::MiloLibrary>(*data_);
+        if (!sceneCache_) sceneCache_ = std::make_unique<gfx::SceneCache>(canvas_.renderer().device());
         // One player: track_panel_1p; two: track_panel_2p's two tracks.
         const bool two = twoPlayers(mode_);
         auto track = std::make_unique<TrackView>();
@@ -704,11 +820,17 @@ void App::endSong() {
     SDL_Log("%s: score %d, %d/%d notes, longest streak %d%s (audio underruns: %lld frames)", info_->id.c_str(),
             player_->score(), player_->notesHit(), int(player_->chart().gems.size()), player_->longestStreak(),
             player_->failed() ? ", failed" : "", static_cast<long long>(mixer_.underruns()));
+    if (player2_)
+        SDL_Log("player 2: score %d, %d/%d notes, longest streak %d", player2_->score(), player2_->notesHit(),
+                int(player2_->chart().gems.size()), player2_->longestStreak());
+    if (coopBand_)
+        SDL_Log("band: score %d, %d stars, longest streak %d%s", coopBand_->score(), coopBand_->stars(), coopBand_->longestStreak(),
+                coopBand_->failed() ? ", failed" : "");
     mixer_.setPaused(false);
     mixer_.setSpeed(1);
     mixer_.stop();
     band_.reset();
-    bot_.reset(), player_.reset(), bot2_.reset(), player2_.reset(), song_.reset(), pendingStream_.reset();
+    bot_.reset(), player_.reset(), bot2_.reset(), player2_.reset(), coopBand_.reset(), song_.reset(), pendingStream_.reset();
     info_ = nullptr;
     input_.setInGame(false);
     paused_ = false;
@@ -766,7 +888,7 @@ void App::handleAction(const InputEvent& a) {
             running_ = false;
             return;
         }
-        if (player_ && begun_ && !paused_ && !bot_) playerAction(a);
+        if (player_ && begun_ && !paused_) playerAction(a);
         // In a song Back (Esc, a joypad's B) pauses like Start, as in gd01:
         // game_screen pauses on kPad_Start only.
         if (a.action == Action::Back && input_.inGame()) {
@@ -798,7 +920,6 @@ void App::handleAction(const InputEvent& a) {
             }
             return;
         }
-        if (bot_) return;  // autoplay owns the frets
         playerAction(a);
         return;
     }
@@ -814,19 +935,30 @@ void App::handleAction(const InputEvent& a) {
     }
 }
 
+// The player a pad plays for: with one player every device; with two the
+// player whose pad (gamecfg set_player) it is.
+Player* App::playerFor(int pad) {
+    if (!player2_) return player_.get();
+    if (pads_[1] == pad) return player2_.get();
+    if (pads_[0] == pad) return player_.get();
+    return nullptr;
+}
+
 void App::playerAction(const InputEvent& a) {
     if (exploded_ || wonSent_ || lostSent_) return;
+    Player* p = playerFor(a.player);
+    if (!p || botFor(p)) return;  // autoplay owns that player's frets
     const float t = float(mixer_.songTimeMs(a.timestampNs));
-    player_->update(t);
+    p->update(t);
     if (isFret(a.action)) {
-        if (a.down) player_->fretDown(fretOf(a.action), t);
-        else player_->fretUp(fretOf(a.action), t);
+        if (a.down) p->fretDown(fretOf(a.action), t);
+        else p->fretUp(fretOf(a.action), t);
     } else if (a.action == Action::Strum && a.down) {
-        player_->strum(t);
-    } else if (a.action == Action::StarPower && a.down) {
-        player_->starPowerButton(t);  // Select / tilt (force_mercury)
+        p->strum(t);
+    } else if (a.action == Action::StarPower) {
+        p->starPowerEngage(a.down, t);  // Select / tilt (force_mercury): engaged while held
     } else if (a.action == Action::Whammy && !a.analog) {
-        player_->setWhammy(a.down);  // a key or button; an analog bar is sampled every frame
+        p->setWhammy(a.down);  // a key or button; an analog bar is sampled every frame
     }
 }
 
@@ -844,20 +976,62 @@ float App::songClock() {
 // the track and HUD events, and (with the menus) GH2's game events.
 void App::updateSong(float t) {
     // The analog whammy bar, sampled every frame (Player's movement detection).
-    if (!bot_ && !paused_ && input_.analogWhammy()) player_->setWhammyValue(input_.whammyValue(), t);
+    if (!paused_) {
+        if (!player2_) {
+            if (!bot_ && input_.analogWhammy()) player_->setWhammyValue(input_.whammyValue(), t);
+        } else {
+            for (int p = 0; p < 2; ++p) {
+                Player& pl = p == 0 ? *player_ : *player2_;
+                if (!botFor(&pl) && input_.analogWhammy(pads_[size_t(p)])) pl.setWhammyValue(input_.whammyValue(pads_[size_t(p)]), t);
+            }
+        }
+    }
     const bool over = exploded_ || wonSent_ || lostSent_;
     if (!over && !paused_) {
         keys_.feed(*player_, t);
         if (bot_) bot_->feed(*player_, t);
-        if (t >= failAtMs_ && !player_->failed()) player_->forceFail();
+        if (t >= failAtMs_ && !songLost()) {
+            if (coopBand_) coopBand_->forceFail();
+            else player_->forceFail();
+        }
         player_->update(t);
-        if (player2_) bot2_->feed(*player2_, t), player2_->update(t);
+        if (player2_) {
+            if (bot2_) bot2_->feed(*player2_, t);
+            player2_->update(t);
+        }
+        if (coopBand_) coopBand_->poll(t);  // 0x822DEAD0: each co-op player's poll polls the band [C]
     }
     const float dt = std::clamp(float(t - lastFrameMs_), 0.0f, 100.0f);
     lastFrameMs_ = t;
     for (float& f : flashes_) f = std::max(0.0f, f - dt / 150.0f);
     const std::vector<PlayerEvent> events = player_->takeEvents();
     const std::vector<PlayerEvent> events2 = player2_ ? player2_->takeEvents() : std::vector<PlayerEvent>{};
+    const std::vector<PlayerEvent> bandEvents = coopBand_ ? coopBand_->takeEvents() : std::vector<PlayerEvent>{};
+    for (const PlayerEvent& e : events2) {
+        if (e.kind == PlayerEvent::Kind::PhraseCaptured) ++spPhrases_[1];
+        if (e.kind == PlayerEvent::Kind::EndStreak) ++streaksBroken_[1];
+        if (e.kind == PlayerEvent::Kind::StarPowerReady && ui_) ui_->gameEvent("star_power_ready", {Value::integer(1)});
+    }
+    // Face-off (0x822CFA70) [C]: the game walks the gem list by time and,
+    // when the next gem's player_mask differs from the last, sends
+    // active_players_changed (mask) to its sinks (the world's camera
+    // facing, the characters). Only face-off has masks (0x823450B0).
+    if (mode_ == DevMode::FaceOff && !over) {
+        const auto& gems = player_->chart().gems;
+        while (activeGem_ < gems.size() && t >= gems[activeGem_].ms) ++activeGem_;
+        if (activeGem_ < gems.size() && gems[activeGem_].players != activePlayers_) {
+            activePlayers_ = gems[activeGem_].players;
+            if (ui_) ui_->gameEvent("active_players_changed", {Value::integer(activePlayers_)});
+            else if (world_) world_->message("active_players_changed", {Value::integer(activePlayers_)});
+        }
+    }
+    // Co-op: every engage sends sp_engage (player, state) to the game
+    // (0x822C80F8; multi_coop's handler plays sp_deploystart.cue).
+    if (ui_ && mode_ == DevMode::Coop)
+        for (int p = 0; p < 2; ++p)
+            for (const PlayerEvent& e : p == 0 ? events : events2)
+                if (e.kind == PlayerEvent::Kind::StarPowerEngage)
+                    ui_->gameEvent("sp_engage", {Value::integer(p), Value::integer(e.value > 0 ? 1 : 0)});
     for (const PlayerEvent& e : events) {
         if (e.kind == PlayerEvent::Kind::PhraseCaptured) ++spPhrases_[0];
         if (e.kind == PlayerEvent::Kind::EndStreak) ++streaksBroken_[0];
@@ -872,12 +1046,27 @@ void App::updateSong(float t) {
         track_->onEvents(events, *player_, t);
         hud_->onEvents(events, 0, t);
         if (track2_ && player2_) track2_->onEvents(events2, *player2_, t), hud_->onEvents(events2, 1, t);
+        if (coopBand_) hud_->onEvents(bandEvents, -1, t);
     }
-    mixer_.setGuitarAudible(player_->guitarAudible());
+    if (!player2_) {
+        mixer_.setGuitarAudible(player_->guitarAudible());
+    } else if (parts_[0] != parts_[1]) {
+        mixer_.setGuitarAudible(player_->guitarAudible());
+        mixer_.setGuitar2Audible(player2_->guitarAudible());
+    } else {
+        // One part for both: the latest hit or miss of either [I].
+        for (const auto* list : {&events, &events2})
+            for (const PlayerEvent& e : *list) {
+                if (e.kind == PlayerEvent::Kind::Hit || e.kind == PlayerEvent::Kind::Hopo) guitarHeard_ = true;
+                if (e.kind == PlayerEvent::Kind::Miss || e.kind == PlayerEvent::Kind::EndStreak) guitarHeard_ = false;
+                if (e.kind == PlayerEvent::Kind::HeldNoteReleased && e.value < 1.0f) guitarHeard_ = false;
+            }
+        mixer_.setGuitarAudible(guitarHeard_);
+    }
     // The venue: the song's events, its clock, anims and particles.
     if (world_ && venueView_) {
-        worldDriver_.update(*world_, *song_, t, player_.get(), events, player2_.get(), events2);
-        if (player_->failed()) worldDriver_.gameLost(*world_);
+        worldDriver_.update(*world_, *song_, t, player_.get(), events, player2_.get(), events2, coopBand_.get());
+        if (songLost()) worldDriver_.gameLost(*world_);
         else if (t >= song_->endMs) worldDriver_.gameWon(*world_);
         world_->update();
         if (lighting_) lighting_->update();
@@ -887,7 +1076,7 @@ void App::updateSong(float t) {
             band_->update(world_->seconds(), world_->beats(), &cam);
         }
         if (director_) {
-            director_->setStarPower(player_->starPowerActive());
+            director_->setStarPower(player_->starPowerActive() || (player2_ && player2_->starPowerActive()));
             director_->update();
             // Development aid: GD02_FORCE_SHOT=<CamShot> plays that shot whenever another starts.
             if (const char* fs = SDL_getenv("GD02_FORCE_SHOT"))
@@ -924,7 +1113,7 @@ void App::updateSong(float t) {
     // explodes, the music stops), or lost (game_lost: the music winds down);
     // then game_outro_complete takes the menus on.
     const uint64_t now = SDL_GetTicksNS();
-    if (!wonSent_ && !lostSent_ && !player_->failed() && t >= song_->endMs) {
+    if (!wonSent_ && !lostSent_ && !songLost() && t >= song_->endMs) {
         wonSent_ = true, overNs_ = now, overT_ = t, outroAtNs_ = now + uint64_t(kExplodeOutroMs * 1e6);
         // GH2's order: the result, then game_over (0x822CB5B8).
         if (band_) band_->setResult(true);
@@ -935,7 +1124,7 @@ void App::updateSong(float t) {
         ui_->gameEvent("game_won_msg", {Value::integer(encoreCheck_ ? 1 : 0)});
         ui_->gameEvent("game_over");
     }
-    if (!wonSent_ && !lostSent_ && player_->failed()) {
+    if (!wonSent_ && !lostSent_ && songLost()) {
         lostSent_ = true, overNs_ = now, overT_ = t, outroAtNs_ = now + uint64_t(kLoseOutroMs * 1e6);
         if (band_) band_->setResult(false);
         ui_->gameEvent("game_lost");
@@ -967,7 +1156,7 @@ void App::frameSong() {
     // The song is won at its end: the track explodes (game.dta game_won_msg:
     // {track_panel explode}, beatmatch paused).
     const bool gh2 = track_ && hud_ && !debugHighway_;
-    if (!player_->failed() && !exploded_ && t >= song_->endMs) {
+    if (!songLost() && !exploded_ && t >= song_->endMs) {
         exploded_ = true;
         if (track_) track_->explode(t);
         if (track2_) track2_->explode(t);
@@ -975,9 +1164,9 @@ void App::frameSong() {
     }
     drawSong(t);
     // A failed song closes a little after the fail (GH2's lose screen comes later).
-    if (player_->failed() && failMs_ < -1e8f) failMs_ = t, failTicks_ = SDL_GetTicksNS();
+    if (songLost() && failMs_ < -1e8f) failMs_ = t, failTicks_ = SDL_GetTicksNS();
     const float outro = exploded_ && gh2 ? kExplodeOutroMs : kOutroMs;
-    if (!paused_ && (t > song_->endMs + outro || (player_->failed() && t > failMs_ + 3000))) endSong();
+    if (!paused_ && (t > song_->endMs + outro || (songLost() && t > failMs_ + 3000))) endSong();
 }
 
 // One frame with GH2's menus: the scripted keys, the UI's update (which
@@ -1067,11 +1256,19 @@ bool App::gameLoad(const GameSetup& setup, std::string& error) {
     bandOutfit_ = setup.outfit, bandGuitar_ = setup.guitar, bandSkin_ = setup.skin;
     encoreCheck_ = setup.encoreCheck, encoreFx_ = setup.encoreFx, campaignFinal_ = setup.campaignFinal;
     const bool autoplay = setup.autoplay || options_.autoplay || envOn("GD02_AUTOPLAY") || (walk_ && walk_->autoplay());
+    // The mode and the players (docs/multiplayer.md).
+    mode_ = setup.numPlayers > 1 ? modeOf(setup.mode) : setup.mode == "practice" ? DevMode::Practice : DevMode::Single;
+    if (twoPlayers(mode_) != (setup.numPlayers > 1)) mode_ = DevMode::Single;
+    difficulties_ = {std::clamp(setup.difficulty, 0, kDifficultyCount - 1), std::clamp(setup.difficulties[1], 0, kDifficultyCount - 1)};
+    parts_ = setup.parts;
+    pads_ = setup.pads;
+    input_.setLefty(setup.leftys[0] || setup.lefty, setup.leftys[1]);
     if (!loadSong(*it, setup.difficulty, autoplay, setup.bandVolume, setup.guitarVolume, setup.fastIntro)) {
         error = message_;
         return false;
     }
-    if (track_) track_->setLefty(setup.lefty);
+    if (track_) track_->setLefty(setup.lefty || setup.leftys[0]);
+    if (track2_) track2_->setLefty(setup.leftys[1]);
     overNs_ = 0;
     return true;
 }
@@ -1158,7 +1355,11 @@ bool App::loadVenue(const std::string& venue, VenueVariant variant) {
         world_->crowd().audio().open();
         if (!ui_)
             director_->provideGameObjects(variant != VenueVariant::Single,
-                                          mode_ == DevMode::FaceOff || mode_ == DevMode::Vs ? "multi_vs" : variant == VenueVariant::Coop ? "coop" : "single");
+                                          mode_ == DevMode::FaceOff      ? "multi_vs"
+                                          : mode_ == DevMode::ProFaceOff ? "multi_fo"
+                                          : mode_ == DevMode::Coop       ? "multi_coop"
+                                                                         : "single",
+                                          parts_);
     } catch (const std::exception& e) {
         SDL_Log("venue %s: %s", path.c_str(), e.what());
         unloadVenue();
@@ -1240,6 +1441,9 @@ void App::startBand(const SongInfo& info, const Song& song, bool backdrop) {
     if (!world_ || envOn("GD02_NO_BAND")) return;
     Band::Config cfg;
     cfg.players = backdrop ? 1 : twoPlayers(mode_) ? 2 : 1;
+    // Co-op: a player on the bass plays the bass track (bass_strum) [C data: char_objects.dta].
+    if (!backdrop && mode_ == DevMode::Coop)
+        for (int p = 0; p < 2; ++p) cfg.bass[size_t(p)] = parts_[size_t(p)] == "bass";
     if (!backdrop) {
         cfg.character = bandOutfit_, cfg.guitar = bandGuitar_, cfg.skin = bandSkin_;
         cfg.encore = encoreCheck_, cfg.campaignFinal = campaignFinal_;
@@ -1298,7 +1502,7 @@ void App::drawTrack() {
     if (!player_ || !song_) return;
     canvas_.flush();
     canvas_.renderer().device().clear(nullptr, true);
-    float speed = rules_.trackSpeed[size_t(difficulty_)];
+    float speed = trackSpeed();
     // The Hyper Speed cheat: track_speed x 1.5 (0x826967B8) [C].
     if (ui_ && ui_->cheatOn("cheat_hyper_speed_mode")) speed *= 1.5f;
     if (track_ && !debugHighway_) {
@@ -1313,9 +1517,10 @@ void App::drawHud() {
     if (!player_ || !hud_ || debugHighway_) return;
     canvas_.flush();
     canvas_.renderer().device().clear(nullptr, true);
-    std::vector<const Player*> players{player_.get()};
-    if (player2_) players.push_back(player2_.get());
-    hud_->draw(canvas_.renderer(), *sceneCache_, canvas_, players, lastT_);
+    std::vector<PerformerState> players{player_->state()};
+    if (player2_) players.push_back(player2_->state());
+    const PerformerState band = coopBand_ ? coopBand_->state() : PerformerState{};
+    hud_->draw(canvas_.renderer(), *sceneCache_, canvas_, players, coopBand_ ? &band : nullptr, lastT_);
 }
 
 void App::stopMusic() {
@@ -1663,12 +1868,12 @@ void App::drawSong(float t) {
     canvas_.begin(gh2 ? SDL_Color{0, 0, 0, 255} : SDL_Color{12, 10, 16, 255});
     const std::string title = info_->name + " - " + info_->artist + "  [" + difficultyName(static_cast<Difficulty>(difficulty_)) +
                               (bot_ ? ", autoplay]" : "]");
-    const float speed = rules_.trackSpeed[size_t(difficulty_)];
+    const float speed = trackSpeed();
     if (gh2) {
         const uint64_t drawStartNs = SDL_GetTicksNS();
         drawWorld();
         // Two players: the track speed is the mean of their difficulties'
-        // (0x826932D0) [C]; both play one difficulty here.
+        // (0x826932D0) [C].
         // Development aid: GD02_TRACK=0 hides the track (to look at the band).
         const char* showTrack = SDL_getenv("GD02_TRACK");
         if (!showTrack || *showTrack != '0') {
@@ -1677,9 +1882,10 @@ void App::drawSong(float t) {
         }
         // Development aid: GD02_HUD=0 hides the HUD (to look at the track).
         const char* showHud = SDL_getenv("GD02_HUD");
-        std::vector<const Player*> players{player_.get()};
-        if (player2_) players.push_back(player2_.get());
-        if (!showHud || *showHud != '0') hud_->draw(canvas_.renderer(), *sceneCache_, canvas_, players, t);
+        std::vector<PerformerState> players{player_->state()};
+        if (player2_) players.push_back(player2_->state());
+        const PerformerState band = coopBand_ ? coopBand_->state() : PerformerState{};
+        if (!showHud || *showHud != '0') hud_->draw(canvas_.renderer(), *sceneCache_, canvas_, players, coopBand_ ? &band : nullptr, t);
         // Development aid: GD02_STATS=1 prints the frame rate and particles.
         if (SDL_getenv("GD02_STATS")) {
             static uint64_t last = 0, work = 0;
@@ -1703,7 +1909,7 @@ void App::drawSong(float t) {
         canvas_.text(24, 44, 1.5f, {160, 160, 170, 255}, buf);
     }
     // GH2's HUD shows "SONG FAILED!" itself (HudView).
-    if (player_->failed() && !gh2) canvas_.textCentered(kScreenW * 0.5f, 330, 4, {230, 60, 60, 255}, "SONG FAILED");
+    if (songLost() && !gh2) canvas_.textCentered(kScreenW * 0.5f, 330, 4, {230, 60, 60, 255}, "SONG FAILED");
     else if (paused_) canvas_.textCentered(kScreenW * 0.5f, 330, 4, {235, 235, 240, 255}, "PAUSED");
     if (captureDebugScreenshot(canvas_, true, t)) running_ = false;
     canvas_.end();

@@ -224,8 +224,13 @@ become the records' best scores, the save-wide items every band's.
 
 ## Open
 
-- Co-op's records (Campaign +0x4c, the bass unlocks `(require (songs n)
-  (stars 3))`, 0x822A6330 / 0x822A66E0, finish_coop_song) are M10's co-op.
+- Co-op's records (Campaign +0x4c) and bass unlocks: done in M10.2
+  (`campaign finish_coop_song` 0x822861A8 -> 0x822A6848 / 0x822A66E0 /
+  0x822A5FF0 [C]: best band score and stars per song, the gold flag for
+  both players at 100 % on Expert, basses whose `(require (songs n) (stars
+  s))` is met awarded on a new score; `career.json` `coop` / `coop_awards`;
+  see `docs/multiplayer.md`). Open [I]: the entry flags 0x80 / 0x04 that
+  keep songs out of the bass count.
 - win_game_screen (the tour won) and unlock_guitar_screen are scripted but
   not walked; the stone ending's `crowd_audio play_stream` is a STUB.
 - Tutorials (`do_tutorial`, the tutorial count) are M11's.

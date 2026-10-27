@@ -21,40 +21,75 @@ struct PlayerEvent {
     // after one), HeldNoteReleased (value = fraction of the tail kept),
     // BuildStreak / EndStreak, EightX, StarGemHit, PhraseCaptured,
     // PhraseMissed, StarPowerReady, StarPowerStart, StarPowerEnd,
-    // WhammyStart / WhammyEnd, Failed.
+    // WhammyStart / WhammyEnd, Failed, StarPowerEngage (value 1 / 0: the
+    // sp_engage message).
     enum class Kind { Hit, Miss, Pass, Hopo, SwingAtHopo, HeldNoteReleased, BuildStreak, EndStreak, EightX,
                       StarGemHit, PhraseCaptured, PhraseMissed, StarPowerReady, StarPowerStart, StarPowerEnd,
-                      WhammyStart, WhammyEnd, Failed };
+                      WhammyStart, WhammyEnd, Failed, StarPowerEngage };
     Kind kind;
     int gem;  // gem index, or -1
     float value = 0;
 };
 
+// What the HUD shows of a performer (a player or the co-op band).
+struct PerformerState {
+    int score = 0, streak = 0, multiplier = 1, baseMultiplier = 1;
+    float starMeter = 0, rock = 0.5f, warning = 0.15f;
+    bool spActive = false;
+};
+
+// The Star Power meter {value, shown} (0x822DB478): each player's own, or
+// one shared by both co-op players (shared_star_meter, 0x822C9E80 /
+// 0x822C69E8) [C].
+struct StarMeter {
+    float value = 0;
+};
+
+class BandPerformer;
+
 // One player of GH2 (Xbox 360): the beatmatch watcher (input judgement), the
 // Player (score, streak), its Star Power object and its crowd (rock meter),
-// following docs/FINDINGS.md. Addresses are default.xex's (Ghidra, image
-// base 0x82000000); [C] confirmed there, [I] inferred.
-// All times are song milliseconds.
+// following docs/FINDINGS.md and docs/multiplayer.md. Addresses are
+// default.xex's (Ghidra, image base 0x82000000); [C] confirmed there, [I]
+// inferred. All times are song milliseconds.
 //
-// Single player is the target. TODO(multiplayer): face-off ownership is
-// kept (player_mask, `index`), and competitive modes pass noFail; the co-op
-// player (vtable 0x82049004: band streak, band score, band meter, shared
-// Star Power that both players must engage) and score normalisation
-// (0x822bb320) are not implemented yet.
+// Two players (docs/multiplayer.md): face-off players own their gems
+// (player_mask, `index`); the scores are normalised (0x822BB320); co-op
+// players (vtable 0x82049004) feed the band (game/band_performer.h) and
+// share one Star Power meter that both must engage.
 class Player {
 public:
     // `index`: this face-off player's number for gem ownership (player_mask,
     // 0x82347688) [C]; -1 (single player and the other modes) owns every gem.
     // The parser fills player_mask from the face-off section notes, which
     // only face-off uses [I: single player cannot skip any gem].
+    // `config`: the mode's score_config (default_config, or coop_config in
+    // co-op) [C]; nullptr is default_config.
     Player(const Song& song, Part part, Difficulty difficulty, const Rules& rules, ControllerMode mode, bool noFail,
-           int index = -1);
+           int index = -1, const ScoreConfig* config = nullptr);
+
+    // ---- two players (docs/multiplayer.md)
+    // The player's number (player +0x9c), for the normalisation and the
+    // shared deploy; `index` above (ownership) is set only in face-off.
+    void setNumber(int number) { number_ = number; }
+    // Every point × this (use_normalization, 0x822BB320 / 0x822C6A58) [C].
+    void setNormalisation(float factor) { norm_ = factor; }
+    float normalisation() const { return norm_; }
+    // Co-op: one meter for both players, the other player (both must
+    // engage, 0x822C80F8) and the band with this player's crowd mix
+    // (0x822DEC68, +0x118 / +0x11c / +0x120) [C].
+    void shareStarMeter(StarMeter* meter, Player* partner) { meter_ = meter, partner_ = partner; }
+    void setBand(BandPerformer* band, float a, float b, float w) { band_ = band, bandA_ = a, bandB_ = b, bandW_ = w; }
 
     // Controller layer (guitar controller 0x8234c538 down / 0x8234c6d0 up).
     void fretDown(int fret, float t);
     void fretUp(int fret, float t);
     void strum(float t);
-    void starPowerButton(float t);
+    // Engaging Star Power (Select or tilt: force_mercury; down = TRUE, up =
+    // FALSE), 0x822C80F8 [C]. starPowerButton(t) = engage(TRUE).
+    void starPowerEngage(bool engaged, float t);
+    void starPowerButton(float t) { starPowerEngage(true, t); }
+    bool starPowerEngaged() const { return engaged_; }
     // Whammy bar, 0 rest .. 1 full press [I: the range, FINDINGS open
     // question 6], sampled every frame.
     void setWhammyValue(float value, float t);
@@ -73,7 +108,8 @@ public:
     bool gemHit(int i) const { return hit_[size_t(i)] != 0; }
     int sustainGem() const { return sustainGem_; }
     uint32_t heldFrets() const { return held_; }
-    int score() const { return score_; }
+    // +0x6c, a float read with fctiwz (0x822DCB80) [C].
+    int score() const { return int(score_); }
     int streak() const { return streak_; }
     int longestStreak() const { return longestStreak_; }
     int multiplier() const { return baseMultiplier_ * spMultiplier(); }
@@ -89,7 +125,8 @@ public:
     // at that point of the range (GamePanel sets 1 for an encore, 0x822CCA60).
     void setCrowdRating(float rating);
     float warningLevel() const { return crowd_.warningLevel; }
-    float starMeter() const { return spMeter_; }
+    float starMeter() const { return meter_->value; }
+    PerformerState state() const;
     bool starPowerReady() const { return spReady_ && !spActive_; }
     bool starPowerActive() const { return spActive_; }
     bool whammying() const;
@@ -133,14 +170,17 @@ private:
     void playerPass(float t, int gem);
     void penalise(float t, int gem);
     void addScore(int points);
+    void endStreak();
     void setStreak(int streak);
     void accrueSustain(float t);
     void finishSustain(float t);
     void crowdUpdate(float target, float t);
+    void ownCrowdUpdate(float target, float t);
     bool inPractice(int gem) const;
 
     // ---- star power
     int spMultiplier() const { return spActive_ ? sp_.multiplier : 1; }
+    void spStart(bool on);
     void spAdd(float amount);
     void spGemHit(int gem);
     void spPhraseMiss(int gem);
@@ -158,6 +198,12 @@ private:
     ControllerMode mode_;
     bool noFail_;
     int index_;
+    int number_ = 0;
+    float norm_ = 1;
+    BandPerformer* band_ = nullptr;
+    float bandA_ = 0, bandB_ = 1, bandW_ = 1;
+    Player* partner_ = nullptr;
+    bool engaged_ = false;  // +0xbc
     std::vector<uint8_t> hit_;
     std::vector<PlayerEvent> events_;
     int baseScore_ = 0;
@@ -190,7 +236,7 @@ private:
     float padChordDeadline_ = 0;
 
     // Player.
-    int score_ = 0;
+    float score_ = 0;
     int streak_ = 0, longestStreak_ = 0;
     int baseMultiplier_ = 1;
     int notesHit_ = 0, passes_ = 0, penalties_ = 0, perfect_ = 0, good_ = 0;
@@ -208,8 +254,9 @@ private:
     float rating_ = 0.5f;  // +0xc
     bool failed_ = false;
 
-    // Star Power (0x822db498).
-    float spMeter_ = 0;
+    // Star Power (0x822db498); its meter (+0x6c) is ownMeter_ or the shared one.
+    StarMeter ownMeter_;
+    StarMeter* meter_ = &ownMeter_;
     bool spReady_ = false, spActive_ = false;
     int spState_ = 0;  // 0 none, 1 broken, 2 armed, 3 captured
     std::vector<uint8_t> phraseBroken_;  // drawing: the phrase can no longer be captured
