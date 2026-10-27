@@ -1,0 +1,30 @@
+# Guitar Dream Universal Launcher: the games it lists, in table order.
+# Each entry is the path, from the repository root, to a game's game-info.yaml.
+games:
+  - gd-game-01/game-info.yaml
+  - gd-game-02/game-info.yaml
+  - gd-game-03/game-info.yaml
+  - gd-game-04/game-info.yaml
+  - gd-game-05/game-info.yaml
+  - gd-game-06/game-info.yaml
+  - gd-game-07/game-info.yaml
+  - gd-game-08/game-info.yaml
+  - gd-game-09/game-info.yaml
+  - gd-game-10/game-info.yaml
+  - gd-game-11/game-info.yaml
+  - gd-game-12/game-info.yaml
+  - gd-game-13/game-info.yaml
+  - gd-game-14/game-info.yaml
+  - gd-game-15/game-info.yaml
+  - gd-game-16/game-info.yaml
+  - gd-game-17/game-info.yaml
+  - gd-game-18/game-info.yaml
+  - gd-game-19/game-info.yaml
+
+# Disc signatures for games whose folder cannot carry them in its own
+# game-info.yaml (gd-game-01 is finished and left untouched). Same fields as
+# a game-info.yaml's iso_signatures, plus `game`.
+extra_iso_signatures:
+  - game: gd-game-01
+    format: iso9660         # PlayStation 2 disc
+    ps2_boot: "SLUS_212.24"   # SYSTEM.CNF BOOT2 (Guitar Hero, USA)

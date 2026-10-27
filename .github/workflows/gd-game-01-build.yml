@@ -1,5 +1,5 @@
 # Builds the gd-game-01 (gd01) downloads with the same scripts as
-# gd-game-01/local_build.sh. Called by gd-game-01-release.yml; can also be
+# gd-game-01/local_build.sh. Test builds only (releases are the launcher's); can be
 # started by hand (Actions > gd-game-01 build > Run workflow) to get test
 # builds of any branch without releasing. Nothing runs it automatically.
 name: gd-game-01 build

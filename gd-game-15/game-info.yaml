@@ -1,0 +1,12 @@
+# Read by the Guitar Dream Universal Launcher (gd-engine-launcher/games.yaml).
+# launch: release date (YYYY-MM-DD) of the version this folder reimplements
+# (based_on). guitar_dream_version: this folder's own version. completeness: 0..1.
+id: gd-game-15
+name: "Guitar Hero: Van Halen"
+nick_name: "Guitar Hero Van Halen"
+launch: 2009-12-22
+platforms: [Xbox 360, PlayStation 3, Wii, PlayStation 2]
+based_on: Xbox 360
+guitar_dream_version: "0.0.0"
+ready_to_play: false
+completeness: 0

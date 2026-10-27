@@ -1,0 +1,12 @@
+# Read by the Guitar Dream Universal Launcher (gd-engine-launcher/games.yaml).
+# launch: release date (YYYY-MM-DD) of the version this folder reimplements
+# (based_on). guitar_dream_version: this folder's own version. completeness: 0..1.
+id: gd-game-05
+name: "Rock Band"
+nick_name: "Rock Band"
+launch: 2007-11-20
+platforms: [Xbox 360, PlayStation 3, PlayStation 2, Wii]
+based_on: Xbox 360
+guitar_dream_version: "0.0.0"
+ready_to_play: false
+completeness: 0
