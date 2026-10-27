@@ -17,6 +17,7 @@
 #include "render/canvas.h"
 #include "scene/milo.h"
 #include "scene/ui_styles.h"
+#include "ui/campaign.h"
 #include "ui/ui_manager.h"
 #include "ui/ui_objects.h"
 
@@ -100,11 +101,7 @@ bool unlocked(UiManager& ui, const std::string& sym, int* known) {
             if (s.name == sym) isItem = true;
     }
     if (known) *known = isItem ? 1 : 0;
-    if (ui.session().allAccess) return true;
-    if (indexIn(d.store, sym) < 0) return true;
-    const auto& items = ui.career().items;
-    auto it = items.find(sym);
-    return it != items.end() && it->second;
+    return campaign::isUnlocked(ui, sym);
 }
 
 std::string characterOf(UiManager& ui, const std::string& outfit, int* index) {
@@ -377,7 +374,18 @@ public:
             if (!s) return true;
             std::string obj;
             gfx::UiView* v = args.size() > 1 ? holderView(ui, args[1], obj) : nullptr;
-            if (msg == "set_placer") s->placer = obj, s->placerView = v;
+            if (msg == "set_placer") {
+                // The store's (store TRUE): drawn in the placer's panel at the
+                // placer's place (char_store.placer in store.milo), as the
+                // guitar's proxy [I].
+                if (s->placerView) s->placerView->objectDraws.erase(s->placer);
+                s->placer = obj, s->placerView = v, s->hooked = false;
+                if (v && !obj.empty() && getProp(ui.interp(), "store").truthy()) {
+                    const size_t slot = size_t(n);
+                    v->objectDraws[obj] = [this, slot](gfx::MaterialRenderer&) { drawSlot(slots_[slot], true); };
+                    s->hooked = true;
+                }
+            }
             else if (msg == "set_door") s->door = obj, s->doorView = v;
             else s->env = obj, s->envView = v;
             return true;
@@ -426,19 +434,8 @@ public:
 
     void draw() override {
         if (!showing || ui.headless() || !ui.sceneCache()) return;
-        for (Slot& s : slots_) {
-            if (!s.ch || !s.placerView || s.placer.empty() || !s.placerView->find(s.placer)) continue;
-            if (!view_) view_ = std::make_unique<BandView>(*ui.sceneCache());
-            gfx::Renderer& r = ui.canvas().renderer();
-            ui.canvas().flush();
-            int vx, vy, vw, vh;
-            r.pictureRect(vx, vy, vw, vh);
-            // The placer's panel camera; the depth its room left is kept, so
-            // the door frame and the room hide the character as on the 360 [I].
-            gfx::UiView& v = *s.placerView;
-            r.materials().setFrame(v.camera(), s.envView ? s.envView->environment(s.env) : v.environment(), vw, vh);
-            view_->drawCharacter(r.materials(), *s.ch->ch, v.camera(), false);
-        }
+        for (Slot& s : slots_)
+            if (!s.hooked) drawSlot(s, false);
     }
 
 private:
@@ -448,7 +445,25 @@ private:
         gfx::UiView* placerView = nullptr;
         gfx::UiView* envView = nullptr;
         gfx::UiView* doorView = nullptr;
+        bool hooked = false;  // drawn by the placer's panel (the store)
     };
+
+    void drawSlot(Slot& s, bool inOwner) {
+        if (!showing || !up || ui.headless() || !ui.sceneCache()) return;
+        if (!s.ch || !s.placerView || s.placer.empty() || !s.placerView->find(s.placer)) return;
+        if (!view_) view_ = std::make_unique<BandView>(*ui.sceneCache());
+        gfx::Renderer& r = ui.canvas().renderer();
+        ui.canvas().flush();
+        int vx, vy, vw, vh;
+        r.pictureRect(vx, vy, vw, vh);
+        // The placer's panel camera; the depth its room left is kept, so
+        // the door frame and the room hide the character as on the 360 [I].
+        gfx::UiView& v = *s.placerView;
+        r.materials().setFrame(v.camera(), s.envView ? s.envView->environment(s.env) : v.environment(), vw, vh);
+        view_->drawCharacter(r.materials(), *s.ch->ch, v.camera(), false);
+        if (inOwner) r.materials().setFrame(v.camera(), v.environment(), vw, vh);
+        else ui.keepDepthOnce();
+    }
 
     scene::Xfm placerXfm(const Slot& s) const {
         scene::Xfm x;
@@ -569,6 +584,15 @@ class GuitarDisplayPanelObj : public PanelObj {
 public:
     GuitarDisplayPanelObj(UiManager& ui, const std::string& name) : PanelObj(ui, name, "GuitarDisplayPanel") {}
 
+    struct Show {
+        std::string outfit, mat, proxy, filter, env;
+        gfx::UiView* view = nullptr;
+        gfx::UiView* envView = nullptr;
+        scene::Milo* milo = nullptr;
+        float frame = 0;
+        bool hooked = false;  // drawn by the proxy's panel (the store)
+    };
+
     std::string fileName() override { return ""; }
     bool drawsSomething() const override { return true; }
 
@@ -585,7 +609,12 @@ public:
                 for (const Skin& x : g->skins)
                     if (x.name == skin) sk = &x;
             std::string filt;
+            if (s.hooked && s.view) s.view->objectDraws.erase(s.proxy), s.hooked = false;
             s.view = args.size() > 3 ? holderView(ui, args[3], s.proxy) : nullptr;
+            if (s.view && !s.proxy.empty() && getProp(ui.interp(), "config").str() == "store") {
+                s.view->objectDraws[s.proxy] = [this, p](gfx::MaterialRenderer&) { drawShow(shows_[p], true); };
+                s.hooked = true;
+            }
             if (args.size() > 4) holderView(ui, args[4], filt);
             if (!sk) return true;
             if (sk->outfit != s.outfit || filt != s.filter) s.frame = 0;  // a new guitar starts the turn again
@@ -620,9 +649,19 @@ public:
 
     void draw() override {
         if (!showing || ui.headless() || !ui.sceneCache()) return;
-        for (Show& s : shows_) {
+        for (Show& s : shows_)
+            if (!s.hooked) drawShow(s, false);
+    }
+
+    // One guitar on its proxy: in this panel's own slot of the screen, or
+    // (the store's, `(config store)`) in the proxy's owner panel at the
+    // proxy's place in its draw order, as GH2's UIProxy draws its directory
+    // [I: the port hooks the store's only, whose panel comes before store_panel].
+    void drawShow(Show& s, bool inOwner) {
+        if (!showing || !up || ui.headless() || !ui.sceneCache()) return;
+        {
             scene::Xfm at;
-            if (!s.milo || !s.view || !s.view->worldXfm(s.proxy, at)) continue;
+            if (!s.milo || !s.view || !s.view->worldXfm(s.proxy, at)) return;
             gfx::Renderer& r = ui.canvas().renderer();
             ui.canvas().flush();
             int vx, vy, vw, vh;
@@ -649,17 +688,12 @@ public:
                 const scene::Mat* mat = m->name == "guitar.mesh" && skinMat ? skinMat : mo ? mo->as<scene::Mat>() : nullptr;
                 gfx::drawMesh(r.materials(), *ui.sceneCache(), *m, gfx::toMat4(scene::compose(scene::compose(pose.world(m), toMain), at)), &pose, mat);
             }
+            if (inOwner) r.materials().setFrame(s.view->camera(), s.view->environment(), vw, vh);  // the owner's frame again
+            else ui.keepDepthOnce();
         }
     }
 
 private:
-    struct Show {
-        std::string outfit, mat, proxy, filter, env;
-        gfx::UiView* view = nullptr;
-        gfx::UiView* envView = nullptr;
-        scene::Milo* milo = nullptr;
-        float frame = 0;
-    };
     std::array<Show, 2> shows_;
 };
 

@@ -33,11 +33,10 @@ struct Data {
 };
 const Data& data(UiManager& ui);
 
-// Campaign::IsUnlocked (0x82285CC0) for the band's items [C: the all-access
-// cheat unlocks everything]; an item the store sells is unlocked once
-// bought, every other one from the start [I: GH2 reads both from its
-// unlock table, profile +0x38, which was not traced]. `known` (when given)
-// is set to 1 when `sym` is a character, outfit, guitar or skin.
+// Campaign::IsUnlocked (0x82285CC0, ui/campaign.h) for the band's items:
+// the profile's unlock table (+0x38), where an item the store sells is
+// locked until the band buys it. `known` (when given) is set to 1 when
+// `sym` is a character, outfit, guitar or skin.
 bool unlocked(UiManager& ui, const std::string& sym, int* known = nullptr);
 // The character an outfit belongs to and its index (0x822BD5E0); "" when none.
 std::string characterOf(UiManager& ui, const std::string& outfit, int* index = nullptr);

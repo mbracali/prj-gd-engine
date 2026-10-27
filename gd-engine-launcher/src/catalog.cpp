@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdio>
+#include <filesystem>
 #include <sstream>
 #include <thread>
 #include <vector>
@@ -131,6 +132,7 @@ std::string Catalog::pollCopy() {
 void Catalog::load() {
     games_.clear();
     discDirs_.clear();
+    discDirInfo_.clear();
     const std::string base = platform::baseDir();
     // A launcher build: gd-engine-games/ next to the program. A development
     // run: the repository around the program (local_builds/ is inside it).
@@ -194,17 +196,38 @@ void Catalog::load() {
     // The app's own folder on the shared storage (Android/data/<app>/files/),
     // where chosen discs are copied and where one can be put by hand.
     if (const char* ext = SDL_GetAndroidExternalStoragePath(); ext && *ext)
-        discDirs_.push_back(platform::join(ext, "original_isos"));
+        addDiscDir(platform::join(ext, "original_isos"), "the app's folder");
     else
-        discDirs_.push_back(platform::join(platform::saveDir(), "original_isos"));
-#elif defined(__APPLE__)
-    // In the .app (base is <folder>/<name>.app/Contents/Resources/): the
-    // original_isos folder next to the app.
-    discDirs_.push_back(platform::join(platform::parentDir(platform::parentDir(platform::parentDir(base))), "original_isos"));
+        addDiscDir(platform::join(platform::saveDir(), "original_isos"), "the app's folder");
 #else
-    discDirs_.push_back(platform::join(base, "original_isos"));
+#ifdef __APPLE__
+    // In an .app (base is <folder>/<name>.app/Contents/Resources/): the
+    // original_isos folder next to the app, where the download has it. An app
+    // run from where a download put it is translocated (a read-only copy at
+    // a random path) until it is moved with the Finder: then next to its
+    // real place, when macOS says where that is.
+    runningApp_ = platform::appBundle();
+    if (!runningApp_.empty()) {
+        translocated_ = platform::isTranslocated(runningApp_);
+        if (translocated_) {
+            originalApp_ = platform::originalAppBundle(runningApp_);
+            if (!originalApp_.empty()) addDiscDir(platform::join(platform::parentDir(originalApp_), "original_isos"), "next to the app");
+            SDL_Log("gdul: macOS runs the app from a translocated copy (%s); its real place: %s", runningApp_.c_str(),
+                    originalApp_.empty() ? "unknown" : originalApp_.c_str());
+        }
+        addDiscDir(platform::join(platform::parentDir(runningApp_), "original_isos"), translocated_ ? "next to the translocated copy" : "next to the app");
+        addDiscDir(platform::join(base, "original_isos"), "inside the app");
+    } else {
+        addDiscDir(platform::join(base, "original_isos"), "next to the program");
+    }
+#else
+    addDiscDir(platform::join(base, "original_isos"), "next to the program");
 #endif
-    if (!repo.empty() && platform::join(repo, "original_isos") != discDirs_[0]) discDirs_.push_back(platform::join(repo, "original_isos"));
+    // Always writable, whatever the program's folder is (Program Files, a
+    // read-only image, a translocated app).
+    addDiscDir(platform::join(platform::saveDir(), "original_isos"), "in the launcher's save folder");
+#endif
+    if (!repo.empty()) addDiscDir(platform::join(repo, "original_isos"), "in the repository");
     readConfig();
     rescanDiscs();
 }
@@ -217,14 +240,31 @@ void Catalog::rescanDiscs() {
         auto it = config_.find("iso." + g.id);
         if (it != config_.end() && platform::isFile(it->second)) g.iso = it->second, g.isoSource = Game::IsoSource::Saved;
     }
-    for (const std::string& dir : discDirs_)
-        for (const std::string& f : platform::listFiles(dir)) {
+    for (DiscDir& d : discDirInfo_) {
+        d.problem.clear(), d.isos = d.known = 0;
+        for (const std::string& f : platform::listFiles(d.path, d.problem)) {
             if (lowerExt(f) != ".iso") continue;
+            ++d.isos;
             Game* g = identify(probeDisc(f));
             if (!g) continue;
-            ++discsFound_;
+            ++d.known, ++discsFound_;
             if (g->iso.empty()) g->iso = f, g->isoSource = Game::IsoSource::Found;
         }
+    }
+}
+
+void Catalog::addDiscDir(const std::string& dir, const std::string& what) {
+    // The same folder once (a build inside the repository, say).
+    auto same = [](std::string a, std::string b) {
+        while (a.size() > 1 && (a.back() == '/' || a.back() == '\\')) a.pop_back();
+        while (b.size() > 1 && (b.back() == '/' || b.back() == '\\')) b.pop_back();
+        std::error_code ec;
+        return a == b || std::filesystem::equivalent(std::filesystem::u8path(a), std::filesystem::u8path(b), ec);
+    };
+    for (const std::string& d : discDirs_)
+        if (same(d, dir)) return;
+    discDirs_.push_back(dir);
+    discDirInfo_.push_back({dir, what, "", 0, 0});
 }
 
 Game* Catalog::find(const std::string& id) {

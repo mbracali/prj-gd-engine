@@ -338,6 +338,7 @@ Value UiManager::route(const std::string& msg, std::vector<Value> args) {
     Value r = callScript(interp_.findObject("ui"), msg, args);
     if (!r.isUnhandled()) return r;
     if (current_) {
+        if (current_->routeNative(msg, args, r)) return r;
         r = callScript(current_, msg, args);
         if (!r.isUnhandled()) return r;
         if (PanelObj* fp = current_->focusPanel()) {
@@ -394,6 +395,7 @@ void UiManager::gotoScreen(const std::string& name, bool back) {
 
 void UiManager::pushScreen(const std::string& name) {
     if (current_) stack_.push_back(current_);
+    pushing_ = true;
     gotoScreen(name);
 }
 
@@ -402,6 +404,7 @@ void UiManager::popScreen(const std::string& name) {
     if (stack_.empty()) return;
     ScreenObj* s = stack_.back();
     stack_.pop_back();
+    popping_ = true;
     gotoScreen(s->name(), true);
 }
 
@@ -454,26 +457,59 @@ void UiManager::beginTransition(ScreenObj* next, bool back) {
 void UiManager::switchScreens() {
     ScreenObj* from = current_;
     ScreenObj* to = next_;
-    if (from) callScript(from, "exit");
-    if (from)
+    const bool push = pushing_, pop = popping_;
+    pushing_ = popping_ = false;
+    if (from && !push) {
+        callScript(from, "exit");
         for (PanelObj* p : from->panels())
             if (!to->hasPanel(p)) exitPanel(p);
+    }
+    // A plain goto from a pushed screen leaves the screens below too [I].
+    if (!push && !pop)
+        while (!stack_.empty()) {
+            ScreenObj* below = stack_.back();
+            stack_.pop_back();
+            if (below == to) continue;
+            callScript(below, "exit");
+            for (PanelObj* p : below->panels())
+                if (!to->hasPanel(p)) exitPanel(p);
+        }
     current_ = to;
+    // The keyboard's split layout (P2 on H J K L ;, N / M, B, O) while the
+    // two-player menus need a second controller: from the controller select
+    // with fewer than two pads, until the main menu [I: the port's].
+    if (to->name() == "multi_controller_select_screen") {
+        int pads = 0;
+        for (const Input::Device& d : input_.devices()) pads += d.id != "keyboard" ? 1 : 0;
+        if (pads < 2) input_.setSplitKeyboard(true);
+    } else if (to->name() == "main_screen") {
+        input_.setSplitKeyboard(false);
+    }
+    if (pop) {
+        // The screen below was never exited: it goes on as it was.
+        updateHelpbar();
+        route("screen_change", {Value::obj(to), Value::obj(from), Value::integer(1)});
+        phase_ = Phase::Complete;
+        return;
+    }
     // GHScreen Enter (0x822A0408): the back screen is the one we came from,
     // when that one allows going back (and we are not going back).
     if (!back_ && from && from != to && from->flag("allow_back", true)) to->back = from;
     const bool animIn = to->flag("animate_transition", true) && !headless_;
+    to->focusOverride = nullptr;
     for (PanelObj* p : to->panels()) loadPanel(p);
     // The help bar shows the screen's (helpbar ...) (none: empty); the
     // panels' and the screen's enter scripts may set it after (the dialogs).
     updateHelpbar();
     entered_.clear();
+    to->nativeEnter();
     for (PanelObj* p : to->panels()) {
         if (p->up) continue;
         enterPanel(p);
         entered_.push_back(p);
     }
     if (!animIn) resetMetacam();
+    to->nativeEntered();
     callScript(to, "enter");
     route("screen_change", {Value::obj(to), Value::obj(from), Value::integer(back_ ? 1 : 0)});
     if (animIn) {
@@ -556,8 +592,10 @@ void UiManager::updateTransition() {
 
 void UiManager::updateHelpbar() {
     PanelObj* hb = panel("helpbar");
-    if (!hb || !current_ || !current_->hasPanel(hb)) return;
+    if (!hb || !current_) return;
     const DataNode* h = current_->handler("helpbar");
+    // A pushed screen without the help bar sets the one below's (store_bought_screen).
+    if (!current_->hasPanel(hb) && (!hb->up || !h)) return;
     Value display = Value::list();
     if (h) {
         PanelObj* fp = current_->focusPanel();
@@ -594,7 +632,7 @@ double UiManager::taskSeconds() const {
     return host_.gameLoaded() ? host_.gameTimeMs() / 1000.0 : secondsMs_ / 1000.0;
 }
 
-void UiManager::animate(PanelObj* panel, const std::string& object, float from, float to, float seconds, int units) {
+void UiManager::animate(PanelObj* panel, const std::string& object, float from, float to, float seconds, int units, const std::string& task) {
     stopAnimation(panel, object);
     if (!panel || !panel->view) return;
     panel->view->setFrame(object, from);
@@ -602,12 +640,32 @@ void UiManager::animate(PanelObj* panel, const std::string& object, float from, 
         panel->view->setFrame(object, to);
         return;
     }
-    anims_.push_back({panel, object, from, to, clockSeconds(units), double(seconds), units});
+    anims_.push_back({panel, object, from, to, clockSeconds(units), double(seconds), units, task});
+    // A named task is an object while it runs ({exists unlock_anim}, unlock_venue_panel's poll).
+    if (!task.empty() && !namedTasks_.count(task)) {
+        auto o = std::make_unique<ScriptObject>(task, "Task");
+        interp_.registerObject(o.get());
+        namedTasks_[task] = std::move(o);
+    }
+}
+
+void UiManager::endTask(const std::string& task) {
+    if (task.empty()) return;
+    for (const Anim& a : anims_)
+        if (a.task == task) return;
+    if (auto it = namedTasks_.find(task); it != namedTasks_.end()) {
+        interp_.unregisterObject(it->second.get());
+        namedTasks_.erase(it);
+    }
 }
 
 void UiManager::stopAnimation(PanelObj* panel, const std::string& object) {
+    std::vector<std::string> ended;
+    for (const Anim& a : anims_)
+        if (a.panel == panel && a.object == object) ended.push_back(a.task);
     anims_.erase(std::remove_if(anims_.begin(), anims_.end(), [&](const Anim& a) { return a.panel == panel && a.object == object; }),
                  anims_.end());
+    for (const std::string& t : ended) endTask(t);
 }
 
 void UiManager::updateAnims() {
@@ -615,8 +673,13 @@ void UiManager::updateAnims() {
         Anim& a = anims_[i];
         const double t = std::clamp((clockSeconds(a.units) - a.start) / a.length, 0.0, 1.0);
         if (a.panel->view) a.panel->view->setFrame(a.object, a.from + float(t) * (a.to - a.from));
-        if (t >= 1) anims_.erase(anims_.begin() + long(i));
-        else ++i;
+        if (t >= 1) {
+            const std::string task = a.task;
+            anims_.erase(anims_.begin() + long(i));
+            endTask(task);
+        } else {
+            ++i;
+        }
     }
 }
 
@@ -705,8 +768,18 @@ void UiManager::action(const InputEvent& e) {
     if (pad < 0 && e.down && splash_ < 0 && e.action >= Action::Fret2 && e.action <= Action::Fret4)
         feedCheats(e.action == Action::Fret2 ? kPad_Circle : e.action == Action::Fret3 ? kPad_Square : kPad_L1);
     if (pad < 0) return;
-    if (e.down) buttonDown(pad, e.player);
-    else buttonUp(pad, e.player);
+    // Two players: the scripts' $player_num is the player whose pad acted
+    // (gamecfg set_player), except on the controller select itself, where
+    // it is the pad [I: GH2 maps pads to players after set_player].
+    int player = e.player;
+    if (gameCfgValue(*this, "num_players").integerValue() > 1 && currentScreen() != "multi_controller_select_screen")
+        for (int p = 0; p < 2; ++p)
+            if (session_->players[size_t(p)].padnum == e.player) {
+                player = p;
+                break;
+            }
+    if (e.down) buttonDown(pad, player);
+    else buttonUp(pad, player);
 }
 
 void UiManager::buttonDown(int button, int player) {
@@ -822,23 +895,42 @@ void UiManager::gameEvent(const std::string& msg, std::vector<Value> args) { gam
 
 // ---------------------------------------------------------------- drawing
 
+static void fillMask(Canvas& canvas_, const gfx::UiView::MaskDraw& m) {
+    if (m.blend == 0) return;  // kBlendDest: nothing written
+    const Uint8 c[4] = {Uint8(std::clamp(m.rgba[0], 0.0f, 1.0f) * 255), Uint8(std::clamp(m.rgba[1], 0.0f, 1.0f) * 255),
+                        Uint8(std::clamp(m.rgba[2], 0.0f, 1.0f) * 255), Uint8(std::clamp(m.rgba[3], 0.0f, 1.0f) * 255)};
+    const float x = m.rect[0] * kScreenW, y = m.rect[1] * kScreenH, w = m.rect[2] * kScreenW, h = m.rect[3] * kScreenH;
+    const Vertex q[6] = {{x, y, 0, 0, 0, c[0], c[1], c[2], c[3]},         {x + w, y, 0, 1, 0, c[0], c[1], c[2], c[3]},
+                         {x + w, y + h, 0, 1, 1, c[0], c[1], c[2], c[3]}, {x, y, 0, 0, 0, c[0], c[1], c[2], c[3]},
+                         {x + w, y + h, 0, 1, 1, c[0], c[1], c[2], c[3]}, {x, y + h, 0, 0, 1, c[0], c[1], c[2], c[3]}};
+    // Src (1) opaque, Add / SrcAlphaAdd (2, 4) additive, the rest alpha [I: subtract / multiply as alpha].
+    const Blend b = m.blend == 1 ? Blend::Opaque : m.blend == 2 || m.blend == 4 ? Blend::Add : Blend::Alpha;
+    canvas_.draw(q, 6, int(m.texture), b);
+}
+
 void UiManager::drawView(gfx::UiView& v) {
     gfx::Renderer& r = canvas_.renderer();
     canvas_.flush();
-    r.device().clear(nullptr, true);
+    if (!keepDepth_) r.device().clear(nullptr, true);
+    keepDepth_ = false;
     int vx, vy, vw, vh;
     r.pictureRect(vx, vy, vw, vh);
     r.materials().setFrame(v.camera(), v.environment(), vw, vh);
+    // The panel's own masks at their place in the draw order: what was drawn,
+    // the mask over it, then the 3D frame again.
+    v.maskNow = [&](const gfx::UiView::MaskDraw& m) {
+        fillMask(canvas_, m);
+        canvas_.flush();
+        r.materials().setFrame(v.camera(), v.environment(), vw, vh);
+    };
     v.draw(r.materials());
+    v.maskNow = nullptr;
     drawMasks(v);
 }
 
+
 void UiManager::drawMasks(const gfx::UiView& v) {
-    for (const gfx::UiView::MaskDraw& m : v.masks()) {
-        const SDL_Color c{Uint8(std::clamp(m.rgba[0], 0.0f, 1.0f) * 255), Uint8(std::clamp(m.rgba[1], 0.0f, 1.0f) * 255),
-                          Uint8(std::clamp(m.rgba[2], 0.0f, 1.0f) * 255), Uint8(std::clamp(m.rgba[3], 0.0f, 1.0f) * 255)};
-        canvas_.fillRect(m.rect[0] * kScreenW, m.rect[1] * kScreenH, m.rect[2] * kScreenW, m.rect[3] * kScreenH, c);
-    }
+    for (const gfx::UiView::MaskDraw& m : v.masks()) fillMask(canvas_, m);
     canvas_.flush();
 }
 
@@ -849,6 +941,12 @@ void UiManager::drawSplash() {
 
 void UiManager::drawPanels(ScreenObj* s, bool outgoing) {
     if (!s) return;
+    // The screens below a pushed one draw first [I: GH2 draws the stack].
+    if (s == current_)
+        for (ScreenObj* below : stack_)
+            if (below != s)
+                for (PanelObj* p : below->panels())
+                    if (p->up && p->showing && !s->hasPanel(p)) p->draw();
     for (PanelObj* p : s->panels()) {
         if (!p->up && !outgoing) continue;
         if (!p->showing) continue;

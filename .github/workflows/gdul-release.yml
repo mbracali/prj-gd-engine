@@ -335,7 +335,7 @@ jobs:
             echo "| **Windows** 10/11 | \`gdul-$V-windows-x86_64.zip\` | Extract it and run \`Guitar Dream Universal Launcher.exe\`. |"
             echo "| **Linux** (any distribution from 2022 on) | \`gdul-$V-linux-x86_64.tar.gz\` | Extract it and run \`Guitar Dream Universal Launcher\`. |"
             if [ -f "dist/gdul-$V-macos-arm64.zip" ]; then
-              echo "| **macOS** (Apple silicon) | \`gdul-$V-macos-arm64.zip\` | Extract it, right-click \`Guitar Dream Universal Launcher.app\` > Open (it is not notarised). |"
+              echo "| **macOS** (Apple silicon) | \`gdul-$V-macos-arm64.zip\` | Extract it, move the extracted folder out of Downloads with the Finder (so macOS runs the app where it is and finds \`original_isos/\`), then right-click \`Guitar Dream Universal Launcher.app\` > Open (it is not notarised). |"
             fi
             echo "| **Android** 7+ (arm64) | \`gdul-$V-android-arm64.apk\` | Install it, open \"Guitar Dream Universal Launcher\" and load your disc image (the launcher copies it into its own folder). |"
             echo

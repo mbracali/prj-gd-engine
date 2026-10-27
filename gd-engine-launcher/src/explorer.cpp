@@ -88,7 +88,12 @@ struct Launcher::Explore {
     float rx = 0, ry = 0, lt = 0, rt = 0;
     bool panHeld = false;
     double lastFrame = 0;
-    std::vector<Hit> hits;  // list rows (row = list row) and the search box (row -2)
+    std::vector<Hit> hits;  // list rows (row = list row), the search box (row -2), the footer's buttons (row -3, col: the fret)
+    // The module's last frame of the viewer (read back from its context).
+    gfx::Texture frameTex;
+    gfx::Rect frameRect;
+    std::vector<uint8_t> frame;
+    std::vector<bool> collapsed;  // per group: its models hidden (not while searching)
 };
 
 Launcher::Launcher() = default;
@@ -125,6 +130,7 @@ void Launcher::exploreOpen(Game& g) {
     }
     for (const Explore::Item& it : ex->items)
         if (std::find(ex->groups.begin(), ex->groups.end(), it.group) == ex->groups.end()) ex->groups.push_back(it.group);
+    ex->collapsed.assign(ex->groups.size(), false);
     log_.add("explore models of " + g.id + ": " + std::to_string(ex->items.size()) + " models in " +
              std::to_string(ex->groups.size()) + " groups");
     explore_ = std::move(ex);
@@ -142,6 +148,7 @@ void Launcher::exploreOpen(Game& g) {
 void Launcher::exploreClose() {
     if (!explore_) return;
     const std::string id = explore_->gameId;
+    gfx_.release(explore_->frameTex);
     const bool unloaded = explore_->session.close();
     explore_.reset();
     restoreWindow();
@@ -153,7 +160,7 @@ void Launcher::exploreClose() {
 
 void Launcher::exploreFilter() {
     Explore& ex = *explore_;
-    const int current = ex.cursor >= 0 && ex.cursor < int(ex.rows.size()) ? ex.rows[size_t(ex.cursor)] : -1;
+    const int current = ex.cursor >= 0 && ex.cursor < int(ex.rows.size()) ? ex.rows[size_t(ex.cursor)] : -1000000;
     ex.rows.clear();
     // Every word of the search must match.
     std::vector<std::string> words;
@@ -167,8 +174,10 @@ void Launcher::exploreFilter() {
             }
         }
     }
+    // A collapsed group shows its header only (a search shows every match).
     for (size_t gi = 0; gi < ex.groups.size(); ++gi) {
         bool header = false;
+        const bool hide = ex.collapsed[gi] && words.empty();
         for (size_t i = 0; i < ex.items.size(); ++i) {
             const Explore::Item& it = ex.items[i];
             if (it.group != ex.groups[gi]) continue;
@@ -176,26 +185,36 @@ void Launcher::exploreFilter() {
             for (const std::string& w : words) match = match && it.key.find(w) != std::string::npos;
             if (!match) continue;
             if (!header) ex.rows.push_back(-1 - int(gi)), header = true;
-            ex.rows.push_back(int(i));
+            if (!hide) ex.rows.push_back(int(i));
         }
     }
-    // Keep the same model under the cursor when it is still listed, else the first one.
+    // Keep the same row (model or group) under the cursor when it is still
+    // listed; else its group's header; else the first model.
     ex.cursor = -1;
-    for (size_t r = 0; r < ex.rows.size(); ++r)
-        if (ex.rows[r] >= 0 && (ex.cursor < 0 || ex.rows[r] == current)) {
-            ex.cursor = int(r);
-            if (ex.rows[r] == current) break;
-        }
+    int groupOf = current >= 0 ? -1 - int(std::find(ex.groups.begin(), ex.groups.end(), ex.items[size_t(current)].group) - ex.groups.begin()) : current;
+    for (int pass = 0; pass < 3 && ex.cursor < 0; ++pass)
+        for (size_t r = 0; r < ex.rows.size(); ++r)
+            if ((pass == 0 && ex.rows[r] == current && current != -1000000) || (pass == 1 && ex.rows[r] == groupOf) || (pass == 2 && ex.rows[r] >= 0)) {
+                ex.cursor = int(r);
+                break;
+            }
+    if (ex.cursor < 0 && !ex.rows.empty()) ex.cursor = 0;
     ex.mouseScrolled = false;
 }
 
-// Moves the cursor to list row `row` (an item); the model loads after a short pause.
+// Moves the cursor to list row `row` (a model, or a group's header); a
+// model loads after a short pause.
 void Launcher::exploreCursor(int row) {
     Explore& ex = *explore_;
-    if (row < 0 || row >= int(ex.rows.size()) || ex.rows[size_t(row)] < 0) return;
+    if (row < 0 || row >= int(ex.rows.size())) return;
+    if (row != ex.cursor) sounds_.play(UiSound::Move);
     ex.cursor = row;
     ex.mouseScrolled = false;
     const int item = ex.rows[size_t(row)];
+    if (item < 0) {  // a group's header: the model on show stays
+        ex.pending = -1;
+        return;
+    }
     if (item != ex.shown) {
         ex.pending = item;
         ex.pendingAt = now_ + 0.3;
@@ -205,38 +224,63 @@ void Launcher::exploreCursor(int row) {
     }
 }
 
+// Collapses (1), expands (0) or toggles (-1) group `g`; -2: every group.
+void Launcher::exploreGroup(int g, int state) {
+    Explore& ex = *explore_;
+    if (g == -2) {
+        bool all = true;
+        for (bool c : ex.collapsed) all = all && c;
+        for (size_t i = 0; i < ex.collapsed.size(); ++i) ex.collapsed[i] = state < 0 ? !all : state == 1;
+    } else if (g >= 0 && g < int(ex.collapsed.size())) {
+        const bool to = state < 0 ? !ex.collapsed[size_t(g)] : state == 1;
+        if (to == ex.collapsed[size_t(g)]) return;
+        ex.collapsed[size_t(g)] = to;
+    } else {
+        return;
+    }
+    sounds_.play(UiSound::Select);
+    // The cursor goes to the group's header, so it stays where the eye is.
+    if (g >= 0)
+        for (size_t r = 0; r < ex.rows.size(); ++r)
+            if (ex.rows[r] == -1 - g) ex.cursor = int(r);
+    exploreFilter();
+}
+
 void Launcher::exploreMove(int dRow, int dCol) {
     Explore& ex = *explore_;
     mouseUsed_ = false;
+    const int onRow = ex.cursor >= 0 && ex.cursor < int(ex.rows.size()) ? ex.rows[size_t(ex.cursor)] : 0;
+    if (dCol && onRow < 0 && !dRow) {  // on a group's header: left collapses, right expands
+        exploreGroup(-1 - onRow, dCol < 0 ? 1 : 0);
+        return;
+    }
     if (dCol) {  // left / right: turn the model by 15 degrees
         ex.yaw += float(dCol) * kPi / 12;
         ex.turntable = false;
     }
     if (!dRow || ex.rows.empty()) return;
-    // Step over group headers; Home / End (large steps) land on the first / last model.
-    int r = ex.cursor < 0 ? 0 : ex.cursor;
-    const int step = dRow > 0 ? 1 : -1;
-    for (int left = std::abs(dRow); left > 0;) {
-        int next = r + step;
-        while (next >= 0 && next < int(ex.rows.size()) && ex.rows[size_t(next)] < 0) next += step;
-        if (next < 0 || next >= int(ex.rows.size())) break;
-        r = next, --left;
-    }
+    // Group headers are rows too (green toggles them); Home / End land on the first / last row.
+    const int r = std::clamp((ex.cursor < 0 ? 0 : ex.cursor) + dRow, 0, int(ex.rows.size()) - 1);
     exploreCursor(r);
 }
 
 void Launcher::explorePress(Fret f) {
     Explore& ex = *explore_;
     switch (f) {
-    case Fret::Green:  // show the model under the cursor now
+    case Fret::Green:  // show the model under the cursor now (a group's header: open / close it)
         if (ex.searching) {
             ex.searching = false;
             SDL_StopTextInput(window_);
+            sounds_.play(UiSound::Select);
+        } else if (ex.cursor >= 0 && ex.cursor < int(ex.rows.size()) && ex.rows[size_t(ex.cursor)] < 0) {
+            exploreGroup(-1 - ex.rows[size_t(ex.cursor)], -1);
         } else if (ex.pending >= 0) {
             ex.pendingAt = now_;
+            sounds_.play(UiSound::Select);
         }
         break;
     case Fret::Red:
+        sounds_.play(UiSound::Back);
         if (ex.searching || !ex.search.empty()) {  // first leave the search
             ex.searching = false;
             SDL_StopTextInput(window_);
@@ -246,6 +290,7 @@ void Launcher::explorePress(Fret f) {
         }
         break;
     case Fret::Yellow:  // reset the view
+        sounds_.play(UiSound::Select);
         ex.yaw = 0, ex.pitch = 0.22f, ex.zoom = 1, ex.panX = ex.panY = 0;
         ex.turntable = true;
         // The shortest way back to the front.
@@ -255,11 +300,14 @@ void Launcher::explorePress(Fret f) {
         if (!ex.clips.empty()) {
             ex.clip = (ex.clip + 1) % int(ex.clips.size());
             ex.shownAt = now_;
+            sounds_.play(UiSound::Select);
         } else {
+            sounds_.play(UiSound::Error);
             toast("This model has no animations.");
         }
         break;
     case Fret::Orange:
+        sounds_.play(UiSound::Select);
         ex.turntable = !ex.turntable;
         break;
     }
@@ -343,13 +391,19 @@ bool Launcher::exploreHandle(const SDL_Event& e) {
             if (h.row == -2) {
                 ex.searching = true;
                 SDL_StartTextInput(window_);
+                sounds_.play(UiSound::Select);
+            } else if (h.row == -3) {  // a footer button: as its fret
+                explorePress(Fret(h.col));
+            } else if (ex.rows[size_t(h.row)] < 0) {  // a group's header: open / close it
+                exploreCursor(h.row);
+                exploreGroup(-1 - ex.rows[size_t(h.row)], -1);
             } else {
                 exploreCursor(h.row);
-                ex.pendingAt = now_;
+                if (ex.pending >= 0) ex.pendingAt = now_, sounds_.play(UiSound::Select);
             }
             return true;
         }
-        return false;  // the footer's hints etc.
+        return false;
     }
     case SDL_EVENT_MOUSE_BUTTON_UP:
         ex.drag = 0;
@@ -437,6 +491,12 @@ bool Launcher::exploreScript(const std::string& cmd, const std::string& arg) {
         exploreFilter();
     } else if (cmd == "pick") {
         const std::string want = lower(arg);
+        for (const Explore::Item& it : ex.items)  // its group open first
+            if (it.key.find(want) != std::string::npos) {
+                const int gi = int(std::find(ex.groups.begin(), ex.groups.end(), it.group) - ex.groups.begin());
+                if (ex.collapsed[size_t(gi)]) ex.collapsed[size_t(gi)] = false, exploreFilter();
+                break;
+            }
         for (size_t r = 0; r < ex.rows.size(); ++r)
             if (ex.rows[r] >= 0 && ex.items[size_t(ex.rows[r])].key.find(want) != std::string::npos) {
                 exploreCursor(int(r));
@@ -449,6 +509,14 @@ bool Launcher::exploreScript(const std::string& cmd, const std::string& arg) {
         explorePress(Fret::Yellow);
     } else if (cmd == "turntable") {
         ex.turntable = arg != "0";
+    } else if (cmd == "collapse" || cmd == "expand") {  // a group (its name has <arg>), or "all"
+        const std::string want = lower(arg);
+        for (size_t gi = 0; gi < ex.groups.size(); ++gi)
+            if (want == "all" || lower(ex.groups[gi]).find(want) != std::string::npos) {
+                if (want == "all") exploreGroup(-2, cmd == "collapse" ? 1 : 0);
+                else exploreGroup(int(gi), cmd == "collapse" ? 1 : 0);
+                break;
+            }
     } else {
         return false;
     }
@@ -519,11 +587,17 @@ void Launcher::exploreFrame() {
     SDL_GetWindowSizeInPixels(window_, &pw_, &ph_);
     s_ = std::max(0.25f, std::min(float(pw_) / 1280.f, float(ph_) / 720.f));
     W_ = float(pw_) / s_, H_ = float(ph_) / s_;
-    // The module draws the model over the whole window, centred in the viewer;
-    // the launcher's panels go over it.
+    // The module draws the model with its own GL context, centred in the
+    // viewer. Its frame is read back from that context (the viewer's part of
+    // its back buffer) and drawn by the launcher's context, which alone
+    // presents: one context presents every frame, cleared, on every system.
+    // (Two contexts presenting or drawing over each other's back buffer
+    // flickered on macOS, where each context has its own drawable surface
+    // and a back buffer's content is undefined after a swap.)
     const bool model = ex.shown >= 0 && ex.ok;
+    const Rect v = exploreViewRect();
+    bool frame = false;
     if (model) {
-        const Rect v = exploreViewRect();
         GdExploreView view{};
         view.x = int(v.x), view.y = int(v.y), view.w = int(v.w), view.h = int(v.h);
         view.yaw = ex.cYaw, view.pitch = ex.cPitch, view.zoom = ex.cZoom, view.pan_x = ex.cPanX, view.pan_y = ex.cPanY;
@@ -532,14 +606,21 @@ void Launcher::exploreFrame() {
         view.background[0] = kViewBg.r, view.background[1] = kViewBg.g, view.background[2] = kViewBg.b;
         const GdExplorer* api = ex.session.api();
         api->draw(api->self, &view);
+        SDL_GLContext drawn = SDL_GL_GetCurrentContext();
+        if (drawn && drawn != context_) {
+            const int x0 = std::clamp(int(v.x), 0, pw_), y0 = std::clamp(int(v.y), 0, ph_);
+            const int x1 = std::clamp(int(v.x + v.w), 0, pw_), y1 = std::clamp(int(v.y + v.h), 0, ph_);
+            frame = gfx::readBackBuffer(x0, ph_ - y1, x1 - x0, y1 - y0, ex.frame);
+            ex.frameRect = {float(x0), float(y0), float(x1 - x0), float(y1 - y0)};
+        }
         SDL_GL_MakeCurrent(window_, context_);
+        if (frame) gfx_.upload(ex.frameTex, int(ex.frameRect.w), int(ex.frameRect.h), ex.frame.data());
     }
     hits_.clear();
-    gfx_.begin(pw_, ph_, !model);
-    if (!model) {
-        drawBackground();
-        gfx_.rect(exploreViewRect(), withAlpha(kViewBg, 0.55f), 16 * s_);
-    }
+    gfx_.begin(pw_, ph_);
+    drawBackground();
+    if (model && ex.frameTex.id) gfx_.image(ex.frameTex, ex.frameRect, {}, true, 16 * s_);  // this frame's, else the last one
+    else gfx_.rect(v, withAlpha(kViewBg, 0.55f), 16 * s_);
     exploreDraw();
     drawToast();
     gfx_.end();
@@ -614,12 +695,13 @@ void Launcher::exploreDrawList(const Rect& panelPx) {
         y += ex.rows[r] < 0 ? kGroupH : kItemH;
     }
     const float content = y;
-    if (!ex.mouseScrolled && ex.cursor >= 0) {
+    if (!ex.mouseScrolled && ex.cursor >= 0 && ex.cursor < int(ex.rows.size())) {
         const float cy = ys[size_t(ex.cursor)];
+        const float ch = ex.rows[size_t(ex.cursor)] < 0 ? kGroupH : kItemH;
         // Keep the cursor's row (and its group's header when it is the first) in view.
         const float want = ex.cursor > 0 && ex.rows[size_t(ex.cursor - 1)] < 0 ? cy - kGroupH : cy;
         if (want < ex.scrollTarget) ex.scrollTarget = want;
-        if (cy + kItemH > ex.scrollTarget + view) ex.scrollTarget = cy + kItemH - view;
+        if (cy + ch > ex.scrollTarget + view) ex.scrollTarget = cy + ch - view;
     }
     ex.scrollTarget = std::clamp(ex.scrollTarget, 0.f, std::max(0.f, content - view));
     ex.scroll += (ex.scrollTarget - ex.scroll) * 0.3f;
@@ -632,14 +714,34 @@ void Launcher::exploreDrawList(const Rect& panelPx) {
         const float rh = ex.rows[r] < 0 ? kGroupH : kItemH;
         if (ry + rh < listTop || ry > listBottom) continue;
         if (ex.rows[r] < 0) {
-            const std::string& g = ex.groups[size_t(-1 - ex.rows[r])];
+            // A group's header: click (or green) opens / closes it.
+            const int gi = -1 - ex.rows[r];
+            const std::string& g = ex.groups[size_t(gi)];
+            const bool closed = ex.collapsed[size_t(gi)] && ex.search.empty();
+            const bool cur = int(r) == ex.cursor;
             int n = 0;
-            for (size_t k = r + 1; k < ex.rows.size() && ex.rows[k] >= 0; ++k) ++n;
+            for (const Explore::Item& it : ex.items) n += it.group == g ? 1 : 0;
+            if (!ex.search.empty()) {
+                n = 0;
+                for (size_t k = r + 1; k < ex.rows.size() && ex.rows[k] >= 0; ++k) ++n;
+            }
+            const Rect hr = R(x + 10, ry + 2, w - 20, kGroupH - 4);
+            if (cur) {
+                gfx_.rect(hr, rgb(0x2c2731, 0.98f), rgb(0x232027, 0.98f), 8 * s_);
+                gfx_.ring(hr, withAlpha(kCream, 0.6f), 8 * s_, 1.5f * s_);
+            }
+            // The open / closed mark: a small box with a minus or a plus.
+            const float bx = x + 20, by = ry + kGroupH / 2 - 7;
+            gfx_.rect(R(bx, by, 14, 14), closed ? withAlpha(kOxblood, 0.9f) : rgb(0x2a252e), 4 * s_);
+            gfx_.ring(R(bx, by, 14, 14), withAlpha(kSand, closed ? 0.7f : 0.45f), 4 * s_, 1 * s_);
+            gfx_.rect(R(bx + 3.5f, by + 6.25f, 7, 1.5f), kCream);
+            if (closed) gfx_.rect(R(bx + 6.25f, by + 3.5f, 1.5f, 7), kCream);
             std::string up = g;
             for (char& c : up) c = char(std::toupper(static_cast<unsigned char>(c)));
-            const float gw = text(FontId::SemiBold, 13, x + 22, ry + 12, up, kSand, 2.2f);
-            text(FontId::SemiBold, 13, x + 22 + gw + 8, ry + 12, std::to_string(n), kMuted);
-            gfx_.rect(R(x + 22, ry + kGroupH - 4, w - 44, 1), withAlpha(kCream, 0.07f));
+            const float gw = text(FontId::SemiBold, 13, x + 44, ry + 9, up, cur ? kCream : kSand, 2.2f);
+            text(FontId::SemiBold, 13, x + 44 + gw + 8, ry + 9, std::to_string(n), cur ? kSand : kMuted);
+            if (!cur) gfx_.rect(R(x + 22, ry + kGroupH - 3, w - 44, 1), withAlpha(kCream, 0.07f));
+            ex.hits.push_back({hr, int(r), -1});
             continue;
         }
         const Explore::Item& it = ex.items[size_t(ex.rows[r])];
@@ -753,18 +855,29 @@ void Launcher::exploreDrawFooter() {
     gfx_.rect(R(0, y, W_, 1), withAlpha(kCream, 0.1f));
     float x = kMargin;
     const float cy = y + kFooterH / 2;
-    auto hint = [&](Fret f, const std::string& label, bool on) {
-        const Color c = on ? fretColor(f) : withAlpha(kMuted, 0.6f);
-        gfx_.circle((x + 8) * s_, cy * s_, 8 * s_, c);
-        gfx_.circle((x + 6) * s_, (cy - 2.5f) * s_, 2.8f * s_, withAlpha(kCream, on ? 0.6f : 0.25f));
-        x += 22;
-        x += text(FontId::SemiBold, 16, x, cy - 10, label, on ? kSand : kMuted) + 22;
+    float mx = -1, my = -1;
+    SDL_GetMouseState(&mx, &my);
+    const float density = SDL_GetWindowPixelDensity(window_);
+    mx *= density, my *= density;
+    // The actions as buttons in their fret's colour: click one, or press its fret.
+    auto button = [&](Fret f, const std::string& label, bool on) {
+        const Color fc = fretColor(f);
+        const float bw = measure(FontId::SemiBold, 16, label) + 30;
+        const Rect r = R(x, cy - 17, bw, 34);
+        const bool hover = on && r.contains(mx, my);
+        if (hover) gfx_.glow(r, withAlpha(fc, 0.35f), 17 * s_, 12 * s_);
+        gfx_.rect(r, hover ? gfx::mix(fc, kInk, 0.55f) : rgb(0x1f1b23, on ? 0.95f : 0.6f), hover ? gfx::mix(fc, kInk, 0.7f) : rgb(0x18151b, on ? 0.95f : 0.6f), 17 * s_);
+        gfx_.ring(r, on ? withAlpha(fc, hover ? 0.95f : 0.6f) : withAlpha(kCream, 0.08f), 17 * s_, (hover ? 1.6f : 1.2f) * s_);
+        text(FontId::SemiBold, 16, x + 15, cy - 10, label, on ? (hover ? kCream : kSand) : kMuted);
+        if (on) ex.hits.push_back({r, -3, int(f)});
+        x += bw + 10;
     };
-    hint(Fret::Green, "Show", true);
-    hint(Fret::Red, ex.searching || !ex.search.empty() ? "Clear search" : "Back", true);
-    hint(Fret::Yellow, "Reset view", true);
-    hint(Fret::Blue, "Next animation", !ex.clips.empty());
-    hint(Fret::Orange, ex.turntable ? "Stop turning" : "Turntable", true);
+    const bool onHeader = ex.cursor >= 0 && ex.cursor < int(ex.rows.size()) && ex.rows[size_t(ex.cursor)] < 0;
+    button(Fret::Green, onHeader ? "Open / close" : "Show", true);
+    button(Fret::Red, ex.searching || !ex.search.empty() ? "Clear search" : "Back", true);
+    button(Fret::Yellow, "Reset view", true);
+    button(Fret::Blue, "Next animation", !ex.clips.empty());
+    button(Fret::Orange, ex.turntable ? "Stop turning" : "Turntable", true);
     const std::string mouse = "Drag to turn" + kDot + "right-drag to pan" + kDot + "wheel to zoom";
     if (x + measure(FontId::Regular, 15, mouse) + 20 < W_ - kMargin)
         text(FontId::Regular, 15, W_ - kMargin - measure(FontId::Regular, 15, mouse), cy - 10, mouse, kDim);

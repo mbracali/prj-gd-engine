@@ -152,7 +152,10 @@ bool ComponentObj::buttonDown(int button, int player) {
             }
             return true;
         }
-        if (button == kPad_X && state() == scene::UiState::Focused) return panel->selectStart(this, button, player), true;
+        if (button == kPad_X && state() == scene::UiState::Focused) {
+            if (p && selected >= 0 && selected < n && !p->active(selected)) return true;  // an inactive row [I: not chosen]
+            return panel->selectStart(this, button, player), true;
+        }
         return false;
     }
     if (isSlider()) {
@@ -231,7 +234,10 @@ bool ComponentObj::handleNative(Interp& in, const std::string& msg, std::vector<
         const float period = optionNumber(args, "period", 1, -1);
         const int units = int(optionNumber(args, "units", 1, float(kTaskUISeconds)));
         const float seconds = period > 0 ? period : std::fabs(to - from) / 30.0f;
-        ui.animate(panel, name(), from, to, seconds, units);
+        const Value* task = option(args, "name");
+        std::string taskName;
+        if (task && task->array->size() > 1) taskName = (*task->array)[1].str();
+        ui.animate(panel, name(), from, to, seconds, units, taskName);
         return true;
     }
     if (msg == "stop_animation") return ui.stopAnimation(panel, name()), true;
@@ -605,6 +611,7 @@ std::vector<PanelObj*> ScreenObj::panels() const {
 }
 
 PanelObj* ScreenObj::focusPanel() const {
+    if (focusOverride) return focusOverride;
     const DataNode* f = handler("focus");
     if (f && f->children.size() > 1 && f->children[1].isText()) return ui.panel(f->children[1].s);
     return nullptr;
@@ -662,6 +669,12 @@ bool ScreenObj::handleNative(Interp&, const std::string& msg, std::vector<Value>
                 if (msg == "enable") c->panel->enable(c->name());
                 else c->panel->disable(c->name(), args.size() > 1 && args[1].isNumber() ? args[1].integerValue() : kPad_DDown);
             }
+        return true;
+    }
+    if (msg == "set_focus_panel") {
+        // UIScreen::SetFocusPanel: the panel buttons go to (endgame_encore_screen's).
+        if (!args.empty())
+            if (auto* p = dynamic_cast<PanelObj*>(args[0].type == Value::Type::Object ? args[0].object : ui.panel(args[0].str()))) focusOverride = p;
         return true;
     }
     if (msg == "focus_name") {

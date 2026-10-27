@@ -493,12 +493,13 @@ guitar | bass | grim | cheat)`, skins with outfit milo and mat),
   only; else the unlocked guitars of the player's part (`guitar`, or `bass`
   for kTrackBass), filtered by type (0x822C1F08), career from the profile,
   quick play from any difficulty (0x82285FF0). Skins (0x822C6000): the
-  guitar's unlocked skins. Unlocked (Campaign::IsUnlocked 0x82285CC0): the
-  all-access cheat unlocks all; otherwise GH2 reads its unlock table
-  (profile +0x38, per difficulty, not traced); gd02: an item `store.dta`
-  sells is unlocked once bought (`career.json` items), every other one from
-  the start [I]. So a new band has Les Paul, SG and Flying V with one skin
-  each, and outfit 1 of the first eight characters.
+  guitar's unlocked skins. Unlocked (Campaign::IsUnlocked 0x82285CC0,
+  docs/career_and_store.md): the all-access cheat unlocks all; otherwise
+  the profile's unlock table (+0x38, 0x822A88C8 [C]): an item `store.dta`
+  sells is locked until the band buys it, every other one unlocked; in
+  career the band's table, elsewhere any band's. So a new band has Les
+  Paul, SG and Flying V with one skin each, and outfit 1 of the first
+  eight characters.
 - **Defaults**: `main.dta reset_player_settings`: player 0 `punk1`, player 1
   `rockabill1`, guitar index 0; quick play: the song's quickplay look.
 - **Career save** [C]: each profile keeps per difficulty a 0x24-byte record
@@ -580,7 +581,7 @@ guitar | bass | grim | cheat)`, skins with outfit milo and mat),
   each arriving, at least 600 walking frames, an interact).
 - `--venuetest`: the director golden now runs with the band.
 - `--walktest career`: a new band picks Judy Nails' second outfit and the
-  SG's white skin (the walk buys both first) through GH2's screens;
+  SG's white skin (the walk gives the new band both first) through GH2's screens;
   `career.json` and player 0's config must hold `alterna alterna2 sg
   sg_white`. `--walktest quickplay` checks the endgame photo (player 0's
   outfit, picture 0..3, on the disc).
@@ -594,11 +595,11 @@ guitar | bass | grim | cheat)`, skins with outfit milo and mat),
 
 ## Open
 
-- M9.10: GH2's unlock table (profile +0x38) and its per-difficulty unlocks;
-  the CharsysPanel preload order and memory budget; how the door / room
+- M9.10: the CharsysPanel preload order and memory budget; how the door / room
   occlude the menu character on the 360 (depth kept here); the menu
   characters' clock; CharDriver transfer; multiplayer character / guitar
-  screens (MultiCharSelPanel, M10); the store (M10).
+  screens (MultiCharSelPanel, M10). The store's characters and guitars draw
+  in store.milo's placer / proxy (docs/career_and_store.md).
 - Walks: the global waypoint list's order (load order assumed); CharWalk's
   and the lip servo's PollDeps; regulate_override's bone offset (posed
   alone); arrivals end 10-40 units from the target before the servo

@@ -277,7 +277,12 @@ Value ScriptObject::getProp(Interp& in, const std::string& key) {
     if (const DataNode* h = handler(key)) {
         if (h->children.size() == 2) {
             const DataNode& v = h->children[1];
-            return v.type == DataNode::Type::Command ? in.eval(v) : in.toValue(v);
+            if (v.type == DataNode::Type::Command) return in.eval(v);
+            // An array value is the object's own and changes in place
+            // ({set_elem [pad_pos] $n kPosP1}): kept after the first read.
+            Value val = in.toValue(v);
+            if (val.type == Value::Type::Array) props[key] = val;
+            return val;
         }
         std::vector<Value> v;
         for (size_t k = 1; k < h->children.size(); ++k) v.push_back(in.toValue(h->children[k]));

@@ -71,6 +71,10 @@ turns them into GH2's kPad buttons, the way gd01's `App::uiButton` does:
 - In a song, Back (Esc, a joypad's B) pauses like Start (gd01); game_screen
   pauses on kPad_Start, pause_screen resumes on it (`pause.dta`).
 - Esc three times in a row on the main menu quits (gd01).
+- Two players (M10.2, `docs/multiplayer.md`): each controller is a pad slot;
+  after the controller select a pad's buttons are its player's. Without a
+  second controller the keyboard splits: player 2 on H J K L ; (frets), N / M
+  (strum), B (Star Power), O (Start).
 - The boot splashes skip on select, back, Start or a click / tap (the port;
   the original's can't be skipped [I]); the videos skip on Start, select,
   back or green (gd01's set; the original: Start or A [C]).
@@ -92,10 +96,15 @@ under the backward entrance and came back off to one side.)
 ### Confirmed
 
 - Quick play list (`0x82287600` / `0x822C5A68`): the first two tiers' songs
-  (encores included), plus unlocks, bought songs and downloads; a fresh save
-  shows 12. Rows show no score, stars or check (`0x822C3428` / `0x822C34E8`);
-  the last tier song carries the `song_quickplay` blurb (`0x822C0070`);
-  headers use `song_header_%s` (`0x822BFFF0`).
+  (encores included), plus every song a band has unlocked (bought songs
+  too) and downloads; a fresh save shows 12. Rows show no score, stars or
+  check (`0x822C3428` / `0x822C34E8`); the last tier song carries the
+  `song_quickplay` blurb (`0x822C0070`); headers use `song_header_%s`
+  (`0x822BFFF0`). The career list: docs/career_and_store.md.
+- Screens (UIManager 0x8236B8B0): `push_screen` (0x8236B800) enters a
+  screen over the current one, which is not exited; `pop_screen`
+  (0x8236AE40) returns to it as it was. `set_focus_panel` changes a
+  screen's focus panel until it enters again.
 - Navigation (`0x82373A08` / `0x82374160`): nav_down / nav_right and their
   inverses, skipping disabled components; disabling moves focus on
   (`0x82374500`).
@@ -137,8 +146,10 @@ atomically with `career.json.bak`. Every setter marks the save dirty (L12).
 Each profile also keeps per difficulty the band's look (character, outfit,
 guitar, skin; the four symbols 0x822A8D00 saves) and its last difficulty
 (+0x2c); the band's name (set_profile_name) and cash (`add_cash`,
-`starting_cash` 50 from campaign.dta) [C]; `career_score` [I: the best
-scores summed]. The character / guitar screens: docs/band.md.
+`starting_cash` 50 from campaign.dta) [C]; `career_score` (each song's
+best score at any difficulty, summed, 0x82287310) [C]. The character /
+guitar screens: docs/band.md; the tours, cash and store items:
+docs/career_and_store.md.
 
 The Glitches (the port's, as gd01's): every save has a band named "The
 Glitches" (`Career::ensureGlitches`): a fresh save in its last slot, a save
@@ -253,11 +264,12 @@ next to it to start.
 
 - `--uitest`: 237 `new` objects, 82 panel milos, 357 component names checked
   in reachable handlers.
-- `--walktest quickplay|lose|pause|attract|career|back|enhanced|cheats`: drives the menus
+- `--walktest quickplay|lose|pause|attract|career|career_full|back|enhanced|cheats`: drives the menus
   with scripted input and checks the screen order, the score in
   `career.json` and the endgame photo (quickplay), the band's look in
   `career.json` (career: Choose Band > NEW BAND, character / outfit / guitar / skin
-  screens), zero unhandled / unknown / script errors, and that every stub
+  screens; career_full: the first tier, the encore and the store, see
+  docs/career_and_store.md), zero unhandled / unknown / script errors, and that every stub
   is whitelisted. quickplay also skips the splashes with a button, pause
   resumes with Start once, back goes main → Options → Audio Settings →
   back → back and checks the main menu's camera and scene are where they
@@ -285,9 +297,8 @@ next to it to start.
 - The endgame stats receipt draws dark (`turn_off_ambient` /
   `reset_ambient` are no-ops).
 - Volume sliders apply from the next song or preview.
-- Career (beyond the band's name, difficulty and look), multiplayer, store,
-  tutorial and practice screens are generic panels (M10 / M11); the career
-  list reuses the quick play rules.
+- Tutorial and practice screens are generic panels (M10 /
+  M11). The career and the store: docs/career_and_store.md.
 - Help bar background boxes; GAMEPADS font sizes approximate.
 - gd01's mouse in the menus (hover focuses, click selects) is not ported.
 - The main menu's words are stacked tightly (re-checked in bug-fix 3: rows

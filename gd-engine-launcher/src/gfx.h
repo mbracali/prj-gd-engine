@@ -63,7 +63,10 @@ public:
     // A soft glow / shadow around a rounded rectangle, `blur` pixels wide.
     void glow(const Rect& r, Color c, float radius, float blur);
     void circle(float cx, float cy, float radius, Color c) { rect({cx - radius, cy - radius, 2 * radius, 2 * radius}, c, radius); }
-    void image(const Texture& t, const Rect& r, Color tint = {});
+    void image(const Texture& t, const Rect& r, Color tint = {}, bool flipY = false, float radius = 0);
+    // Creates or refills `t` (RGBA rows, bottom row first when drawn with flipY).
+    void upload(Texture& t, int w, int h, const uint8_t* rgba);
+    void release(Texture& t);
 
     // Text: `px` is the font size in pixels; (x, y) the top-left of the line box.
     float text(FontId f, float px, float x, float y, const std::string& utf8, Color c, float tracking = 0);
@@ -101,5 +104,11 @@ private:
     std::map<std::pair<int, int>, std::unique_ptr<Atlas>> atlases_;
     Texture icon_, backdrop_;
 };
+
+// Reads [x, y, w, h] (GL coordinates, origin bottom-left) of the default
+// framebuffer's back buffer of whichever GL context is current, as opaque
+// RGBA rows (bottom row first), touching no other state. The launcher reads
+// a game module's model explorer frame with it (explorer.cpp).
+bool readBackBuffer(int x, int y, int w, int h, std::vector<uint8_t>& out);
 
 }  // namespace gfx

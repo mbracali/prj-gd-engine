@@ -38,7 +38,7 @@ void WorldDriver::reset(float startMs) {
 }
 
 void WorldDriver::update(World& world, const Song& song, float ms, const Player* p0, const std::vector<PlayerEvent>& e0,
-                         const Player* p1, const std::vector<PlayerEvent>& e1) {
+                         const Player* p1, const std::vector<PlayerEvent>& e1, const BandPerformer* band) {
     const int division = std::max(1, song.tempo.division());
     const double beats = ms >= 0 ? song.tempo.msToTick(ms) / division : ms / 500.0;
     world.setClock(ms / 1000.0, beats);
@@ -102,8 +102,12 @@ void WorldDriver::update(World& world, const Song& song, float ms, const Player*
     playerEvents(world, 1, p1, e1);
     int ex = -1;
     bool peak = false;
+    if (band) {
+        ex = excitement(band->rockMeter(), band->warningLevel());
+        peak = band->baseMultiplier() >= 4 && band->rockMeter() > 0.66f;
+    }
     for (const Player* p : {p0, p1}) {
-        if (!p) continue;
+        if (!p || band) continue;
         ex = std::max(ex, excitement(p->rockMeter(), p->warningLevel()));
         peak = peak || (p->baseMultiplier() >= 4 && p->rockMeter() > 0.66f);
     }

@@ -150,6 +150,82 @@ std::vector<std::string> listFiles(const std::string& dir) {
     return out;
 }
 
+std::vector<std::string> listFiles(const std::string& dir, std::string& error) {
+    std::vector<std::string> out;
+    std::error_code ec;
+    if (!fs::exists(toPath(dir), ec)) {
+        error = "not there";
+        return out;
+    }
+    fs::directory_iterator it(toPath(dir), ec);
+    if (ec) {
+        error = "cannot be read (" + ec.message() + ")";
+        return out;
+    }
+    for (; it != fs::directory_iterator(); it.increment(ec)) {
+        if (ec) break;
+        if (it->is_regular_file(ec)) out.push_back(it->path().u8string());
+    }
+    std::sort(out.begin(), out.end());
+    return out;
+}
+
+std::string appBundle() {
+#ifdef __APPLE__
+    // SDL_GetBasePath() is <name>.app/Contents/Resources/ in a bundle.
+    for (std::string dir = baseDir(); dir.size() > 1; dir = parentDir(dir)) {
+        std::string d = dir;
+        while (d.size() > 1 && d.back() == '/') d.pop_back();
+        if (d.size() > 4 && d.compare(d.size() - 4, 4, ".app") == 0) return d;
+        if (parentDir(dir) == dir) break;
+    }
+#endif
+    return "";
+}
+
+bool isTranslocated(const std::string& path) { return path.find("/AppTranslocation/") != std::string::npos; }
+
+std::string originalAppBundle(const std::string& app) {
+#ifdef __APPLE__
+    // CoreFoundation and Security through dlsym: no framework to link, and
+    // SecTranslocate* has no public header.
+    void* cf = dlopen("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation", RTLD_LAZY | RTLD_LOCAL);
+    void* sec = dlopen("/System/Library/Frameworks/Security.framework/Security", RTLD_LAZY | RTLD_LOCAL);
+    std::string out;
+    if (cf && sec) {
+        using CreateUrl = const void* (*)(const void*, const unsigned char*, long, unsigned char);
+        using UrlPath = unsigned char (*)(const void*, unsigned char, unsigned char*, long);
+        using Release = void (*)(const void*);
+        using IsTranslocatedUrl = unsigned char (*)(const void*, bool*, void**);
+        using OriginalUrl = const void* (*)(const void*, void**);
+        auto createUrl = reinterpret_cast<CreateUrl>(dlsym(cf, "CFURLCreateFromFileSystemRepresentation"));
+        auto urlPath = reinterpret_cast<UrlPath>(dlsym(cf, "CFURLGetFileSystemRepresentation"));
+        auto release = reinterpret_cast<Release>(dlsym(cf, "CFRelease"));
+        auto isTrans = reinterpret_cast<IsTranslocatedUrl>(dlsym(sec, "SecTranslocateIsTranslocatedURL"));
+        auto original = reinterpret_cast<OriginalUrl>(dlsym(sec, "SecTranslocateCreateOriginalPathForURL"));
+        if (createUrl && urlPath && release && isTrans && original) {
+            if (const void* url = createUrl(nullptr, reinterpret_cast<const unsigned char*>(app.c_str()), long(app.size()), 1)) {
+                bool translocated = false;
+                if (isTrans(url, &translocated, nullptr) && translocated)
+                    if (const void* orig = original(url, nullptr)) {
+                        unsigned char buf[4096] = {};
+                        if (urlPath(orig, 1, buf, long(sizeof buf))) out = reinterpret_cast<const char*>(buf);
+                        release(orig);
+                    }
+                release(url);
+            }
+        }
+    }
+    if (sec) dlclose(sec);
+    if (cf) dlclose(cf);
+    while (out.size() > 1 && out.back() == '/') out.pop_back();
+    return out;
+#else
+    (void)app;
+    return "";
+#endif
+}
+
 void* openLibrary(const std::string& path, std::string& error) {
 #ifdef _WIN32
     // The module's own folder first for its DLLs (FFmpeg), then the launcher's (SDL3).

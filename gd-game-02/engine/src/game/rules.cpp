@@ -2,6 +2,7 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "game/rules.h"
 
+#include <algorithm>
 #include <stdexcept>
 
 #include "data/dta.h"
@@ -57,6 +58,17 @@ const char* difficultyName(Difficulty d) {
     return names[static_cast<int>(d)];
 }
 
+// 0x822CE5D8 [C]: see rules.h.
+int Rules::coopStars(const std::string& song, int score) const {
+    auto it = coopMaxScores.find(song);
+    if (it == coopMaxScores.end() || coopThresholds.size() < 2) return 5;
+    int t[2];
+    for (size_t k = 0; k < 2; ++k)
+        t[k] = int(coopThresholds[k].second * float(it->second[size_t(std::clamp(coopThresholds[k].first, 0, 3))]));
+    if (score < t[1]) return score >= t[0] ? 4 : 3;
+    return 5;
+}
+
 // GH2 0x822d66b0 [C]: table (0 -> 1) plus scoring.dtb streaks; the last entry
 // whose count <= streak.
 int Rules::multiplierForStreak(int streak) const {
@@ -95,6 +107,34 @@ Rules loadRules(const GameData& data) {
     for (int d = 0; d < kDifficultyCount; ++d) {
         const DataNode& t = require(thresholds, kDifficultySymbols[d]);
         r.starThresholds[size_t(d)] = {t.floatAt(1), t.floatAt(2)};
+    }
+
+    // The band's stars (0x822CE5D8): (coop (thresholds (<difficulty> k) ...))
+    // and config/gen/coop_max_scores.dtb (scoring.dtb #includes it) [C].
+    if (const DataNode* coop = require(scoring, "star_ratings").find("coop"))
+        if (const DataNode* t = coop->find("thresholds")) {
+            r.coopThresholds.clear();
+            for (size_t i = 1; i < t->children.size(); ++i) {
+                const DataNode& e = t->children[i];
+                if (!e.isList() || e.children.size() < 2) continue;
+                int index = 0;
+                if (e.children[0].isText()) {
+                    for (int d = 0; d < kDifficultyCount; ++d)
+                        if (e.children[0].s == kDifficultySymbols[d]) index = d;
+                } else {
+                    index = e.intAt(0);
+                }
+                r.coopThresholds.emplace_back(index, e.floatAt(1));
+            }
+        }
+    if (data.exists("config/gen/coop_max_scores.dtb")) {
+        DataNode maxScores = parseDtb(data.read("config/gen/coop_max_scores.dtb"));
+        for (const DataNode& e : maxScores.children) {
+            if (!e.isList() || e.children.size() < 2 || !e.children[0].isText() || !e.children[1].isList()) continue;
+            std::array<int, 4> v{};
+            for (size_t k = 0; k < 4 && k < e.children[1].children.size(); ++k) v[k] = e.children[1].intAt(k);
+            r.coopMaxScores[e.children[0].s] = v;
+        }
     }
 
     // (watcher (slop 100) ...) read by the watcher constructor 0x82350ae0, and
