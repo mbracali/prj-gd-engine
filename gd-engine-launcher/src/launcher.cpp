@@ -9,6 +9,7 @@
 #include <cstdlib>
 
 #include "module_host.h"
+#include "palette.h"
 #include "platform.h"
 
 extern const unsigned char kGdulIconPng[];
@@ -25,13 +26,7 @@ namespace {
 constexpr const char* kTitle = "Guitar Dream Universal Launcher";
 const std::string kDot = " \xC2\xB7 ";  // " · "
 
-// The palette: the badge's black, cream and oxblood, and the five frets.
-const Color kInk = rgb(0x0b0a0d);
-const Color kCream = rgb(0xf1e7d3);
-const Color kSand = rgb(0xc9b892);
-const Color kDim = rgb(0x91877a);
-const Color kMuted = rgb(0x5f584f);
-const Color kOxblood = rgb(0xa3242b);
+using namespace palette;
 
 // Design layout (1280 x 720 units).
 constexpr float kMargin = 40;
@@ -79,10 +74,17 @@ bool Launcher::init() {
 
     // The same OpenGL setup as the games (3.3 core, 24-bit depth), so their
     // contexts fit this window.
+    // Android: OpenGL ES 3.0, as gd02 asks for there (gfx.cpp's shaders follow).
+#if defined(__ANDROID__) || defined(GDUL_GLES)
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
+#else
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_FORWARD_COMPATIBLE_FLAG);
+#endif
     SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
     // Development aid: GDUL_WINDOW=<w>x<h> sets the starting window size.
@@ -161,6 +163,7 @@ bool Launcher::init() {
 }
 
 void Launcher::shutdown() {
+    exploreClose();
     closeGamepads();
     gfx_.shutdown();
     if (context_) SDL_GL_DestroyContext(context_);
@@ -225,6 +228,8 @@ void Launcher::frame() {
         if (path.empty()) log_.add("load disc for " + id + ": cancelled");
         else handleDisc(path, id);
     }
+    // Android: how the copy of a chosen disc into the app's folder is going.
+    if (std::string copying = catalog_.pollCopy(); !copying.empty()) toast(copying);
     // Gamepad direction repeat.
     if (heldDir_ && now_ >= repeatAt_) {
         repeatAt_ = now_ + 0.09;
@@ -232,6 +237,10 @@ void Launcher::frame() {
     }
     runScript();
     if (!running_) return;
+    if (explore_) {
+        exploreFrame();
+        return;
+    }
     draw();
     if (!pendingShot_.empty()) {
         screenshot(pendingShot_);
@@ -244,6 +253,7 @@ void Launcher::runScript() {
     if (scriptPos_ >= script_.size() || now_ * 1000 < script_[scriptPos_].ms) return;
     const ScriptStep st = script_[scriptPos_++];
     SDL_Log("gdul script: %s %s", st.cmd.c_str(), st.arg.c_str());
+    if (exploreScript(st.cmd, st.arg)) return;
     if (st.cmd == "up") move(-1, 0);
     else if (st.cmd == "down") move(1, 0);
     else if (st.cmd == "left") move(0, -1);
@@ -282,6 +292,7 @@ void Launcher::screenshot(const std::string& path) {
 // ---- Input ----
 
 void Launcher::handle(const SDL_Event& e) {
+    if (explore_ && exploreHandle(e)) return;
     switch (e.type) {
     case SDL_EVENT_QUIT:
         running_ = false;
@@ -412,11 +423,15 @@ bool Launcher::enabled(int row, int col) const {
     switch (col) {
     case kPlay: return g.playable();
     case kLoad: return true;
-    default: return !g.iso.empty();  // Explore models: the disc's models (coming soon)
+    default: return !g.iso.empty() && g.hasModule;  // Explore models: the module shows the disc's models
     }
 }
 
 void Launcher::move(int dRow, int dCol) {
+    if (explore_ && !dialog_.open) {
+        exploreMove(dRow, dCol);
+        return;
+    }
     if (dialog_.open) {
         const int n = int(dialog_.buttons.size());
         if (n && dCol) dialog_.focus = std::clamp(dialog_.focus + dCol, 0, n - 1);
@@ -455,6 +470,10 @@ void Launcher::press(Fret f) {
         }
         return;
     }
+    if (explore_) {
+        explorePress(f);
+        return;
+    }
     switch (f) {
     case Fret::Green: activate(focusRow_, focusCol_); break;
     case Fret::Red: askQuit(); break;
@@ -480,7 +499,8 @@ void Launcher::activate(int row, int col) {
     case kLoad: pickDisc(g); break;
     case kExplore:
         if (g.iso.empty()) toast("Load a " + g.title() + " disc image to explore its models.");
-        else exploreModels(g);
+        else if (!g.hasModule) toast(g.ready ? "This launcher build has no " + g.id + " module." : g.title() + " is not playable yet. Coming soon!");
+        else exploreOpen(g);
         break;
     default: break;
     }
@@ -600,13 +620,6 @@ void Launcher::handleDisc(const std::string& path, const std::string& wantedId) 
     }
     buttons.push_back({"Cancel", Fret::Red, [this, id] { log_.add("disc not saved for " + id); }});
     showDialog(title, body, buttons);
-}
-
-void Launcher::exploreModels(Game& g) {
-    log_.add("explore models of " + g.id + ": coming soon");
-    showDialog("Explore models", "Coming soon: browse " + g.title() +
-                                     "'s 3D models straight from your disc image, then rotate and zoom them.",
-               {{"OK", Fret::Green, nullptr}});
 }
 
 void Launcher::askQuit() {
@@ -873,7 +886,7 @@ void Launcher::drawDropOverlay() {
     text(FontId::Regular, 19, (W_ - measure(FontId::Regular, 19, sub)) / 2, H_ / 2 + 22, sub, kSand);
 }
 
-void Launcher::drawLoading(const Game& g) {
+void Launcher::drawLoading(const Game& g, const std::string& what) {
     // Two frames (both buffers) of the loading card before the game takes the window.
     for (int i = 0; i < 2; ++i) {
         SDL_GetWindowSizeInPixels(window_, &pw_, &ph_);
@@ -884,7 +897,7 @@ void Launcher::drawLoading(const Game& g) {
         const float size = 220;
         gfx_.glow(R((W_ - size) / 2, H_ / 2 - 200, size, size), withAlpha(kOxblood, 0.4f), size / 2 * s_, 60 * s_);
         gfx_.image(gfx_.icon(), R((W_ - size) / 2, H_ / 2 - 200, size, size));
-        const std::string t = "Loading " + g.title() + "\xE2\x80\xA6";
+        const std::string t = what + " " + g.title() + "\xE2\x80\xA6";
         text(FontId::Title, 52, (W_ - measure(FontId::Title, 52, t)) / 2, H_ / 2 + 40, t, kCream);
         const std::string sub = g.id + kDot + platform::fileName(g.iso);
         text(FontId::Regular, 18, (W_ - measure(FontId::Regular, 18, sub)) / 2, H_ / 2 + 112, sub, kSand);

@@ -30,7 +30,7 @@ inline constexpr const char* kArch = "arm64";
 inline constexpr const char* kArch = "unknown";
 #endif
 
-std::string baseDir();  // the program's folder, with a trailing separator
+std::string baseDir();  // the program's folder, with a trailing separator ("" on Android: the APK's assets)
 std::string saveDir();  // the launcher's save folder (SDL_GetPrefPath("gd-engine", "gdul"))
 std::string userName();  // the OS account name
 std::string isoNow();    // local time, ISO 8601 with offset: 2026-10-27T14:03:12-03:00
@@ -38,9 +38,13 @@ std::string isoNow();    // local time, ISO 8601 with offset: 2026-10-27T14:03:1
 std::string join(const std::string& dir, const std::string& name);
 std::string parentDir(const std::string& path);
 std::string fileName(const std::string& path);
-bool isFile(const std::string& path);
+bool isFile(const std::string& path);  // Android: also a file in the APK's assets (a relative path)
 bool isDir(const std::string& path);
 std::vector<std::string> listFiles(const std::string& dir);  // full paths, sorted
+
+// Android: the folder of the APK's native libraries (libmain.so, the game
+// modules lib<id>.so), with a trailing separator; "" elsewhere.
+std::string nativeLibDir();
 
 // Shared libraries (the game modules).
 void* openLibrary(const std::string& path, std::string& error);

@@ -1,0 +1,344 @@
+# Releases the Guitar Dream Universal Launcher (gdul) when a tag
+# gdul/vX.Y.Z is pushed, and only then: the tag must name the version in
+# gd-engine-launcher/launcher-info.yaml (launcher_version) and a commit on
+# main. Builds Linux x86_64, Windows x86_64, macOS arm64 and Android arm64
+# with gd-engine-launcher/scripts/build.sh; a game module whose game-info.yaml
+# guitar_dream_version (and the launcher's module SDK) is the same as in the
+# previous gdul release is taken from that release's download instead of being
+# built again. Publishes gdul-<v>-<os>-<arch> (.tar.gz, .zip, .apk) and
+# SHA256SUMS.txt as release gdul/vX.Y.Z. See docs/release-process.md.
+name: gdul release
+
+on:
+  push:
+    tags: ["gdul/v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gdul-release
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Tag, version and previous release
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      previous: ${{ steps.v.outputs.previous }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - id: v
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          v="${TAG#gdul/v}"
+          lv="$(sed -n 's/^launcher_version:[[:space:]]*"\{0,1\}\([^"#[:space:]]*\).*/\1/p' gd-engine-launcher/launcher-info.yaml)"
+          if [ "$v" != "$lv" ]; then
+            echo "::error::Tag $TAG does not match launcher_version \"$lv\" in gd-engine-launcher/launcher-info.yaml"; exit 1
+          fi
+          git fetch -q origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::Tag $TAG is not on main: merge into main first, then tag the merge"; exit 1
+          fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "::error::$TAG is already released; bump launcher_version to release again"; exit 1
+          fi
+          # The newest earlier gdul release: its modules are reused.
+          prev="$( { gh release list --limit 200 --json tagName --jq '.[].tagName' | sed -n 's#^gdul/v##p'; echo "$v"; } |
+            sort -uV | grep -B1 -x -F "$v" | head -1)"
+          [ "$prev" = "$v" ] && prev=""
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "previous=${prev:+gdul/v$prev}" >> "$GITHUB_OUTPUT"
+          echo "::notice::gdul $v; previous release: ${prev:-none (every module is built)}"
+
+  guard:
+    name: Repo guard
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - run: python3 .github/scripts/repo_guard.py
+      - uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: false
+
+  previous:
+    name: Previous release's downloads
+    needs: check
+    if: needs.check.outputs.previous != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          PREV: ${{ needs.check.outputs.previous }}
+        run: gh release download "$PREV" -R "$GITHUB_REPOSITORY" -D previous -p 'gdul-*' && ls -l previous
+      - uses: actions/upload-artifact@v7
+        with:
+          name: previous
+          path: previous/
+          retention-days: 1
+
+  linux:
+    # Ubuntu 22.04, SDL3 built from source and shipped next to the program:
+    # runs on any distribution from 2022 on.
+    name: Linux
+    needs: [check, previous]
+    if: ${{ !cancelled() && needs.check.result == 'success' }}
+    runs-on: ubuntu-latest
+    container: ubuntu:22.04
+    timeout-minutes: 60
+    env:
+      V: ${{ needs.check.outputs.version }}
+    steps:
+      - name: git, curl (checkout with history, the DLSS SDK)
+        run: apt-get update -qq && apt-get install -y -qq --no-install-recommends git curl ca-certificates >/dev/null
+      - uses: actions/checkout@v7
+      - uses: actions/cache@v6
+        with:
+          path: gd-engine-launcher/build/portable/sdl3-prefix
+          key: sdl3-gdul-ubuntu2204-${{ hashFiles('gd-engine-launcher/scripts/build_linux_portable.sh', 'gd-game-02/engine/build_linux_portable.sh') }}
+      - uses: actions/cache@v6
+        with:
+          path: gd-game-02/engine/build/ffmpeg/linux/ffmpeg-prefix
+          key: ffmpeg-gdul-ubuntu2204-${{ hashFiles('gd-game-02/engine/build_common.sh', 'gd-engine-launcher/scripts/build.sh') }}
+      - uses: actions/download-artifact@v8
+        if: needs.previous.result == 'success'
+        with:
+          name: previous
+          path: ${{ runner.temp }}/previous-all
+      - name: Unpack the previous Linux download
+        run: |
+          mkdir -p "$RUNNER_TEMP/previous"
+          for f in "$RUNNER_TEMP"/previous-all/gdul-*-linux-x86_64.tar.gz; do
+            [ -f "$f" ] && tar -xzf "$f" -C "$RUNNER_TEMP/previous"
+          done
+          ls "$RUNNER_TEMP/previous"
+      - name: Fetch the DLSS SDK (gd-game-01's module)
+        run: gd-game-01/tools/fetch_dlss.sh
+      - run: gd-engine-launcher/scripts/build_linux_portable.sh --previous "$RUNNER_TEMP/previous"
+      - name: Package
+        run: |
+          mkdir -p out
+          tar -C gd-engine-launcher/local_builds -czf "out/gdul-$V-linux-x86_64.tar.gz" "gdul-$V-linux-x86_64"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-linux
+          path: out/
+          retention-days: 3
+
+  windows:
+    name: Windows
+    needs: [check, previous]
+    if: ${{ !cancelled() && needs.check.result == 'success' }}
+    runs-on: ubuntu-latest
+    container: fedora:44
+    timeout-minutes: 60
+    env:
+      V: ${{ needs.check.outputs.version }}
+    steps:
+      - name: Install the MinGW toolchain
+        run: |
+          dnf install -y --setopt=install_weak_deps=False git cmake ninja-build python3 mingw64-gcc-c++ mingw64-SDL3 \
+            zip unzip make xz diffutils >/dev/null
+      - uses: actions/checkout@v7
+      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - uses: actions/cache@v6
+        with:
+          path: gd-game-02/engine/build/ffmpeg/windows/ffmpeg-prefix
+          key: ffmpeg-gdul-mingw-${{ hashFiles('gd-game-02/engine/build_common.sh', 'gd-engine-launcher/scripts/build.sh') }}
+      - uses: actions/download-artifact@v8
+        if: needs.previous.result == 'success'
+        with:
+          name: previous
+          path: ${{ runner.temp }}/previous-all
+      - name: Unpack the previous Windows download
+        run: |
+          mkdir -p "$RUNNER_TEMP/previous"
+          for f in "$RUNNER_TEMP"/previous-all/gdul-*-windows-x86_64.zip; do
+            [ -f "$f" ] && unzip -q "$f" -d "$RUNNER_TEMP/previous"
+          done
+          ls "$RUNNER_TEMP/previous"
+      - run: gd-engine-launcher/scripts/build.sh windows --previous "$RUNNER_TEMP/previous"
+      - name: Package
+        run: |
+          mkdir -p out
+          (cd gd-engine-launcher/local_builds && zip -qr "../../out/gdul-$V-windows-x86_64.zip" "gdul-$V-windows-x86_64")
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-windows
+          path: out/
+          retention-days: 3
+
+  macos:
+    name: macOS
+    needs: [check, previous]
+    if: ${{ !cancelled() && needs.check.result == 'success' }}
+    runs-on: macos-latest
+    timeout-minutes: 60
+    continue-on-error: true  # not tested on a real Mac yet; never blocks a release
+    env:
+      V: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - run: brew install bash ninja sdl3 dylibbundler
+      - uses: actions/cache@v6
+        with:
+          path: gd-game-02/engine/build/ffmpeg/macos/ffmpeg-prefix
+          key: ffmpeg-gdul-macos-${{ hashFiles('gd-game-02/engine/build_common.sh', 'gd-engine-launcher/scripts/build.sh') }}
+      - uses: actions/download-artifact@v8
+        if: needs.previous.result == 'success'
+        with:
+          name: previous
+          path: ${{ runner.temp }}/previous-all
+      - name: Unpack the previous macOS download
+        run: |
+          mkdir -p "$RUNNER_TEMP/previous"
+          for f in "$RUNNER_TEMP"/previous-all/gdul-*-macos-arm64.zip; do
+            [ -f "$f" ] && ditto -x -k "$f" "$RUNNER_TEMP/previous"
+          done
+          ls "$RUNNER_TEMP/previous"
+      - run: gd-engine-launcher/scripts/build.sh macos --previous "$RUNNER_TEMP/previous"
+      - name: Package
+        run: |
+          mkdir -p out
+          ditto -c -k --keepParent "gd-engine-launcher/local_builds/gdul-$V-macos-arm64" "out/gdul-$V-macos-arm64.zip"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-macos
+          path: out/
+          retention-days: 3
+
+  android:
+    name: Android
+    needs: [check, previous]
+    if: ${{ !cancelled() && needs.check.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      V: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools ndk;28.2.13676358 cmake;4.1.2 platforms;android-36 build-tools;36.1.0
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            gd-engine-launcher/build/android/SDL3-*
+          key: android-gdul-${{ hashFiles('gd-engine-launcher/android/**/*.gradle', 'gd-engine-launcher/android/gradle/wrapper/*.properties', 'gd-game-02/engine/build_android.sh') }}
+      - uses: actions/cache@v6
+        with:
+          path: gd-game-02/engine/build/ffmpeg/android/*/ffmpeg-prefix
+          key: ffmpeg-gdul-android-${{ hashFiles('gd-game-02/engine/build_common.sh', 'gd-engine-launcher/scripts/build.sh') }}
+      - uses: actions/download-artifact@v8
+        if: needs.previous.result == 'success'
+        with:
+          name: previous
+          path: ${{ runner.temp }}/previous-all
+      - name: The previous APK
+        run: |
+          mkdir -p "$RUNNER_TEMP/previous"
+          for f in "$RUNNER_TEMP"/previous-all/gdul-*-android-arm64.apk; do
+            [ -f "$f" ] && cp "$f" "$RUNNER_TEMP/previous/"
+          done
+          ls "$RUNNER_TEMP/previous"
+      - name: Release key
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_GDUL_KEYSTORE_B64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_GDUL_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_GDUL_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_GDUL_KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ]; then
+            echo "::warning::No ANDROID_GDUL_KEYSTORE_B64 secret: the APK is signed with a throwaway debug key."
+            exit 0
+          fi
+          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/gdul-release.jks"
+          {
+            echo "GDUL_RELEASE_KEYSTORE=$RUNNER_TEMP/gdul-release.jks"
+            echo "GDUL_RELEASE_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD"
+            echo "GDUL_RELEASE_KEY_ALIAS=$KEY_ALIAS"
+            echo "GDUL_RELEASE_KEY_PASSWORD=$KEY_PASSWORD"
+          } >> "$GITHUB_ENV"
+      - run: gd-engine-launcher/scripts/build.sh android --previous "$RUNNER_TEMP/previous"
+      - name: Package
+        run: |
+          mkdir -p out
+          cp "gd-engine-launcher/local_builds/gdul-$V-android-arm64/gdul-$V-android-arm64.apk" out/
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-android
+          path: out/
+          retention-days: 3
+
+  publish:
+    name: Publish the release
+    needs: [check, guard, linux, windows, macos, android]
+    # macOS may fail (continue-on-error): published without it then.
+    if: >-
+      ${{ !cancelled() && needs.check.result == 'success' && needs.guard.result == 'success' &&
+      needs.linux.result == 'success' && needs.windows.result == 'success' && needs.android.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      V: ${{ needs.check.outputs.version }}
+      TAG: ${{ github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          pattern: release-*
+          merge-multiple: true
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
+      - name: Release notes
+        run: |
+          {
+            echo "## Guitar Dream Universal Launcher $V"
+            echo
+            echo "One program for every Guitar Dream game: it lists the games, finds or loads your own disc images and runs each game in its window. No game data is included: you need your own copies of the games."
+            echo
+            echo "| System | Download | Then |"
+            echo "|---|---|---|"
+            echo "| **Windows** 10/11 | \`gdul-$V-windows-x86_64.zip\` | Extract it and run \`Guitar Dream Universal Launcher.exe\`. |"
+            echo "| **Linux** (any distribution from 2022 on) | \`gdul-$V-linux-x86_64.tar.gz\` | Extract it and run \`Guitar Dream Universal Launcher\`. |"
+            if [ -f "dist/gdul-$V-macos-arm64.zip" ]; then
+              echo "| **macOS** (Apple silicon) | \`gdul-$V-macos-arm64.zip\` | Extract it, right-click \`Guitar Dream Universal Launcher.app\` > Open (it is not notarised). |"
+            fi
+            echo "| **Android** 7+ (arm64) | \`gdul-$V-android-arm64.apk\` | Install it, open \"Guitar Dream Universal Launcher\" and load your disc image (the launcher copies it into its own folder). |"
+            echo
+            echo "Put your disc images in \`original_isos/\` next to the launcher, or use **Load ISO**. See \`manual/user-manual.md\` in the download."
+            echo
+            echo "The games are also released on their own (gd-game-NN/vX.Y.Z releases)."
+            echo
+            echo "---"
+            echo "Based on Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. Free, noncommercial: PolyForm Noncommercial 1.0.0 plus \`LICENSE-ADDITIONAL-TERMS.md\` (included in every download)."
+          } > notes.md
+      - name: Publish
+        run: |
+          pre=""
+          case "$V" in *-*) pre="--prerelease" ;; esac
+          gh release create "$TAG" dist/* --verify-tag $pre \
+            --title "Guitar Dream Universal Launcher $V" --notes-file notes.md

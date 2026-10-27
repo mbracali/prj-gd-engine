@@ -17,7 +17,8 @@ Dream version and disc image. On the right:
   a disc image.
 - **Load ISO** / **Change ISO**: choose the game's disc image with your
   system's file dialog.
-- **Explore models**: coming soon (browse the disc's 3D models).
+- **Explore models**: the 3D models on your disc (characters, guitars,
+  drum kits, venues and more), to turn, zoom and watch them move (below).
 
 The light on the left: green, ready to rock (playable and a disc is known);
 yellow, playable but needs a disc; grey, coming soon. A green row is lit up.
@@ -52,12 +53,44 @@ Press **Play**: the game opens in the same window. Its controls and options
 are the game's own (see its README in `gd-engine-games/<game>/`). When you
 quit the game (or close the window), you are back in the list.
 
+## Exploring models
+
+**Explore models** (blue) opens the disc's 3D models in the same window: the
+list on the left, grouped (for Guitar Hero II: characters, crowd, guitars
+and basses, drum kits, venues, venue props; for Guitar Hero: guitarists, band,
+crowd, guitars, venues), and the chosen model on the right, slowly turning
+on a turntable. Characters play their animations (idle first).
+
+| | Keyboard | Mouse | Gamepad | Guitar |
+|---|---|---|---|---|
+| Choose a model | arrow keys up / down | click | D-pad / left stick | strum |
+| Search | / or F, then type | click the search box | | |
+| Turn | arrow keys left / right | drag | right stick | |
+| Zoom | + / - | wheel over the model | triggers | |
+| Move (pan) | | right or middle drag, Shift + drag | right shoulder + right stick | |
+| Reset the view | R | double-click | Y, right stick click | yellow fret |
+| Next animation | N, Tab | | X | blue fret |
+| Turntable on / off | T | | left shoulder | orange fret |
+| Back to the list | Esc | right click on the list | B | red fret |
+
+Esc first clears the search; pressing it again goes back to the list.
+
 ## Your files
 
 The launcher keeps its settings and a log in your user folder:
 
 - Linux: `~/.local/share/gd-engine/gdul/`
 - Windows: `%APPDATA%\gd-engine\gdul\`
+- macOS: `~/Library/Application Support/gd-engine/gdul/`
+- Android: the app's own storage (removed with the app)
+
+On **macOS** put your disc images in `original_isos/` next to
+`Guitar Dream Universal Launcher.app`. On **Android** use Load ISO: the
+launcher copies the disc image you pick into its folder
+(`Android/data/io.github.mbracali.gdul/files/original_isos/`, which takes a
+few minutes and as much space again; afterwards the file you picked is no longer needed) and
+says when it is ready. Only the games with an Android module can be played
+there (Guitar Hero II, gd-game-02).
 
 `config.txt` remembers the disc image chosen for each game; `gdul.log` has
 one line per action (date, user, action); `logs/` the games' messages of

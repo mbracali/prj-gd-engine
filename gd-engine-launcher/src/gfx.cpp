@@ -88,7 +88,15 @@ bool loadGl(std::string& missing) {
     return true;
 }
 
-const char* kVertexShader = R"(#version 330 core
+// GLSL 3.30 core on desktops; GLSL ES 3.00 where the context is OpenGL ES 3.0
+// (Android, or a GDUL_GLES build).
+#if defined(__ANDROID__) || defined(GDUL_GLES)
+#define GDUL_GLSL_HEADER "#version 300 es\nprecision highp float;\nprecision highp int;\n"
+#else
+#define GDUL_GLSL_HEADER "#version 330 core\n"
+#endif
+
+const char* kVertexShader = GDUL_GLSL_HEADER R"(
 layout(location = 0) in vec2 aPos;
 layout(location = 1) in vec2 aUv;
 layout(location = 2) in vec4 aColor;
@@ -109,7 +117,7 @@ void main() {
 // 3 ring (width in vUv.x), 4 glow (blur in vUv.y). vLocal: the pixel's
 // position from the rectangle's centre (xy) and its half size (zw); vShape.x
 // the corner radius.
-const char* kFragmentShader = R"(#version 330 core
+const char* kFragmentShader = GDUL_GLSL_HEADER R"(
 in vec2 vUv;
 in vec4 vColor;
 in vec4 vLocal;
@@ -319,7 +327,7 @@ Renderer::Atlas* Renderer::atlas(FontId f, float px) {
     return raw;
 }
 
-void Renderer::begin(int pixelW, int pixelH) {
+void Renderer::begin(int pixelW, int pixelH, bool clear) {
     w_ = pixelW, h_ = pixelH;
     gl.glBindFramebuffer(GL_FRAMEBUFFER, 0);
     gl.glViewport(0, 0, w_, h_);
@@ -328,8 +336,10 @@ void Renderer::begin(int pixelW, int pixelH) {
     gl.glDisable(GL_SCISSOR_TEST);
     gl.glEnable(GL_BLEND);
     gl.glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
-    gl.glClearColor(0.035f, 0.03f, 0.04f, 1);
-    gl.glClear(GL_COLOR_BUFFER_BIT);
+    if (clear) {
+        gl.glClearColor(0.035f, 0.03f, 0.04f, 1);
+        gl.glClear(GL_COLOR_BUFFER_BIT);
+    }
     gl.glUseProgram(program_);
     gl.glUniform2f(screenLoc_, float(w_), float(h_));
     gl.glActiveTexture(GL_TEXTURE0);

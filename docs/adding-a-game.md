@@ -92,6 +92,51 @@ process (`gd-engine-launcher/README.md`, "Games as modules"):
    with the option on, build the module, copy it, the libraries it needs and
    their licences (`licenses/`) into the game's folder.
 
+### The model explorer (optional)
+
+The launcher's **Explore models** screen shows the disc's models with the
+game's own loaders and renderer. A module that has one exports a second
+entry point (`gd-engine-launcher/sdk/gd_host.h`):
+
+```c
+extern "C" const GdExplorer* gd_game_explore(const GdHost* host);
+```
+
+The launcher draws the list, the search box and the help, and drives the
+camera; the module only lists models and draws the selected one. See
+`gd-game-02/engine/src/platform/module_explore.cpp` (built into
+`gd-game-02.so` next to `module_entry.cpp`) or, for a game whose folder
+cannot change, `gd-engine-launcher/modules/gd01/gd01_module_explore.cpp`.
+
+1. `gd_game_explore` calls `gdshim_begin(host)` and
+   `gdshim_set_exploring(true)` (from then on `SDL_GL_SwapWindow` does
+   nothing: the launcher presents the frames), opens the disc
+   (`host->argv[host->argc - 1]`), `SDL_Init(SDL_INIT_VIDEO)`, creates its
+   renderer on `host->window` (its own GL context, through the shims), lists
+   the models and returns a `GdExplorer` (a static one is fine), or null when
+   it cannot (the launcher then shows "We can't rock this!").
+2. `item_count` / `item`: the models in list order, each with a `group`
+   ("Characters", "Guitars", "Venues", ...; a group's items together), a
+   `name` and a `detail` line (the archive path). Strings stay valid until
+   `close`.
+3. `select(index, info, size)`: loads one model (the launcher has shown
+   "Loading..." first), returns 0 and a short description in `info` ("247
+   bones, 118 animations"), or non-zero and the reason. `clip_count` /
+   `clip_name`: its animations (the launcher plays clip 0 first; put an idle
+   one there).
+4. `draw(view)`: `gdshim_make_current()` first (the launcher's context is
+   current between calls), draw the whole window (clear it to
+   `view->background`), with the model centred in the viewer area
+   `view->x, y, w, h` (window pixels): frame it from its bounds, then orbit by
+   `yaw` / `pitch`, scale the distance by `zoom` and move the centre by
+   `pan_x` / `pan_y` model radii; play `view->clip` at `view->seconds`. Never
+   present; the launcher draws its panels over the frame and presents it.
+5. `close`: free the models and the renderer, then `gdshim_end()`. The
+   launcher unloads the library afterwards.
+
+`gd-engine-launcher/sdk/gd_explore_helpers.h` has helpers that know no
+format (e.g. `uprightRows`, which stands a guitar up for the camera).
+
 ## Shared code (`gd-core/`)
 
 Code moves into a shared `gd-core/` library only when a second game needs it

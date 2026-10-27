@@ -33,7 +33,7 @@ struct HostLog {
     std::string id;
 };
 
-void hostLog(void* user, const char* line) {
+void hostLogLine(void* user, const char* line) {
     if (user && line) static_cast<HostLog*>(user)->log->add("game " + static_cast<HostLog*>(user)->id + ": " + line);
 }
 
@@ -79,6 +79,71 @@ void announceDevices(SDL_Window* window) {
     SDL_PushEvent(&r);
 }
 
+// What a module gets: the GdHost and everything it points to.
+struct HostSetup {
+    std::vector<std::string> args;
+    std::vector<const char*> argv;
+    std::string saveDir, gameDir, launcherVersion;
+    HostLog logUser;
+    GdHost host{};
+    LogTee tee;
+
+    HostSetup(SDL_Window* window, SDL_GLContext context, const Game& game, const std::string& version, ActionLog& log)
+        : launcherVersion(version), logUser{&log, game.id} {
+        // The game's command line: its program name, then the disc image.
+        args.push_back("gd" + game.id.substr(game.id.size() >= 2 ? game.id.size() - 2 : 0));
+        if (const char* extra = SDL_getenv("GDUL_GAME_ARGS"))  // development aid: more options, space separated
+            for (std::string a; ; ++extra) {
+                if (*extra == ' ' || *extra == 0) {
+                    if (!a.empty()) args.push_back(a), a.clear();
+                    if (*extra == 0) break;
+                } else {
+                    a += *extra;
+                }
+            }
+        args.push_back(game.iso);
+        for (const std::string& a : args) argv.push_back(a.c_str());
+        argv.push_back(nullptr);
+        saveDir = platform::saveDir();
+        gameDir = platform::parentDir(game.modulePath);
+        host.abi_version = GD_HOST_ABI_VERSION;
+        host.size = sizeof(GdHost);
+        host.window = window;
+        host.gl_context = context;
+        host.argc = int(args.size());
+        host.argv = argv.data();
+        host.launcher_version = launcherVersion.c_str();
+        host.game_id = game.id.c_str();
+        host.game_dir = gameDir.c_str();
+        host.save_dir = saveDir.c_str();
+        host.log = &hostLogLine;
+        host.log_user = &logUser;
+    }
+
+    // The game's SDL_Log lines into logs/<file> in the save folder too.
+    void captureLog(const std::string& file) {
+        SDL_GetLogOutputFunction(&tee.fallback, &tee.fallbackData);
+        SDL_CreateDirectory(platform::join(saveDir, "logs").c_str());
+        tee.file = SDL_IOFromFile(platform::join(saveDir, "logs/" + file).c_str(), "wb");
+        SDL_SetLogOutputFunction(&teeLog, &tee);
+    }
+    void releaseLog() {
+        SDL_SetLogOutputFunction(tee.fallback, tee.fallbackData);
+        if (tee.file) SDL_CloseIO(tee.file);
+        tee.file = nullptr;
+    }
+};
+
+// The launcher's window state again after a module had it.
+void takeBack(SDL_Window* window, SDL_GLContext context) {
+    SDL_GL_MakeCurrent(window, context);
+    SDL_GL_SetSwapInterval(1);
+    SDL_SetWindowRelativeMouseMode(window, false);
+    SDL_ShowCursor();
+    SDL_StopTextInput(window);
+    SDL_FlushEvents(SDL_EVENT_FIRST, SDL_EVENT_LAST);
+}
+
 }  // namespace
 
 GameRun runGameModule(SDL_Window* window, SDL_GLContext context, const Game& game, const std::string& launcherVersion,
@@ -96,40 +161,7 @@ GameRun runGameModule(SDL_Window* window, SDL_GLContext context, const Game& gam
         run.unloaded = platform::closeLibrary(lib, game.modulePath);
         return run;
     }
-
-    // The game's command line: its program name, then the disc image.
-    std::string program = "gd" + game.id.substr(game.id.size() >= 2 ? game.id.size() - 2 : 0);
-    std::vector<std::string> args{program};
-    if (const char* extra = SDL_getenv("GDUL_GAME_ARGS"))  // development aid: more options, space separated
-        for (std::string a; ; ++extra) {
-            if (*extra == ' ' || *extra == 0) {
-                if (!a.empty()) args.push_back(a), a.clear();
-                if (*extra == 0) break;
-            } else {
-                a += *extra;
-            }
-        }
-    args.push_back(game.iso);
-    std::vector<const char*> argv;
-    for (const std::string& a : args) argv.push_back(a.c_str());
-    argv.push_back(nullptr);
-    const std::string saveDir = platform::saveDir();
-    const std::string gameDir = platform::parentDir(game.modulePath);
-
-    GdHost host{};
-    host.abi_version = GD_HOST_ABI_VERSION;
-    host.size = sizeof(GdHost);
-    host.window = window;
-    host.gl_context = context;
-    host.argc = int(args.size());
-    host.argv = argv.data();
-    host.launcher_version = launcherVersion.c_str();
-    host.game_id = game.id.c_str();
-    host.game_dir = gameDir.c_str();
-    host.save_dir = saveDir.c_str();
-    HostLog hostLogUser{&log, game.id};
-    host.log = &hostLog;
-    host.log_user = &hostLogUser;
+    HostSetup setup(window, context, game, launcherVersion, log);
 
     // Hand over: no launcher input state left, the controllers announced, the
     // game's log captured.
@@ -137,29 +169,72 @@ GameRun runGameModule(SDL_Window* window, SDL_GLContext context, const Game& gam
     SDL_SetWindowRelativeMouseMode(window, false);
     SDL_FlushEvents(SDL_EVENT_FIRST, SDL_EVENT_LAST);
     announceDevices(window);
-    LogTee tee;
-    SDL_GetLogOutputFunction(&tee.fallback, &tee.fallbackData);
-    SDL_CreateDirectory(platform::join(saveDir, "logs").c_str());
-    tee.file = SDL_IOFromFile(platform::join(saveDir, "logs/" + game.id + ".log").c_str(), "wb");
-    SDL_SetLogOutputFunction(&teeLog, &tee);
+    setup.captureLog(game.id + ".log");
     SDL_TimerID timer = 0;
     if (const char* q = SDL_getenv("GDUL_GAME_QUIT_AFTER")) timer = SDL_AddTimer(Uint32(std::atoi(q)), &quitTimer, nullptr);
 
     const Uint64 t0 = SDL_GetTicksNS();
     run.started = true;
-    run.exitCode = entry(&host);
+    run.exitCode = entry(&setup.host);
     run.seconds = double(SDL_GetTicksNS() - t0) / 1e9;
 
     // Take everything back.
     if (timer) SDL_RemoveTimer(timer);
-    SDL_SetLogOutputFunction(tee.fallback, tee.fallbackData);
-    if (tee.file) SDL_CloseIO(tee.file);
-    SDL_GL_MakeCurrent(window, context);
-    SDL_GL_SetSwapInterval(1);
-    SDL_SetWindowRelativeMouseMode(window, false);
-    SDL_ShowCursor();
-    SDL_StopTextInput(window);
-    SDL_FlushEvents(SDL_EVENT_FIRST, SDL_EVENT_LAST);
+    setup.releaseLog();
+    takeBack(window, context);
     run.unloaded = platform::closeLibrary(lib, game.modulePath);
     return run;
+}
+
+// ---- The model explorer ----
+
+struct ExploreSession::State {
+    SDL_Window* window;
+    SDL_GLContext context;
+    std::string modulePath;
+    void* lib = nullptr;
+    std::unique_ptr<HostSetup> setup;
+};
+
+ExploreSession::ExploreSession() = default;
+ExploreSession::~ExploreSession() { close(); }
+
+bool ExploreSession::open(SDL_Window* window, SDL_GLContext context, const Game& game, const std::string& launcherVersion,
+                          ActionLog& log, std::string& error) {
+    close();
+    void* lib = platform::openLibrary(game.modulePath, error);
+    if (!lib) {
+        error = "cannot load " + platform::fileName(game.modulePath) + ": " + error;
+        return false;
+    }
+    auto entry = reinterpret_cast<GdGameExploreFn>(platform::librarySymbol(lib, GD_GAME_EXPLORE_SYMBOL));
+    if (!entry) {
+        error = "this " + game.id + " module has no model explorer";
+        platform::closeLibrary(lib, game.modulePath);
+        return false;
+    }
+    state_ = std::make_unique<State>();
+    state_->window = window, state_->context = context, state_->modulePath = game.modulePath, state_->lib = lib;
+    state_->setup = std::make_unique<HostSetup>(window, context, game, launcherVersion, log);
+    state_->setup->captureLog(game.id + "-explore.log");
+    const GdExplorer* api = entry(&state_->setup->host);
+    SDL_GL_MakeCurrent(window, context);
+    if (!api || api->size < sizeof(GdExplorer) || !api->item_count || !api->item || !api->select || !api->draw || !api->close) {
+        error = "the " + game.id + " model explorer did not open (see logs/" + game.id + "-explore.log in the save folder)";
+        close();
+        return false;
+    }
+    api_ = api;
+    return true;
+}
+
+bool ExploreSession::close() {
+    if (!state_) return true;
+    if (api_) api_->close(api_->self);
+    api_ = nullptr;
+    state_->setup->releaseLog();
+    takeBack(state_->window, state_->context);
+    const bool unloaded = platform::closeLibrary(state_->lib, state_->modulePath);
+    state_.reset();
+    return unloaded;
 }

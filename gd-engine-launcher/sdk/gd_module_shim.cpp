@@ -11,6 +11,7 @@
 #undef SDL_DestroyWindow
 #undef SDL_GL_CreateContext
 #undef SDL_GL_DestroyContext
+#undef SDL_GL_SwapWindow
 
 #include <algorithm>
 #include <vector>
@@ -21,6 +22,7 @@ const GdHost* g_host = nullptr;
 std::vector<SDL_InitFlags> g_inits;     // each SDL_Init of the game, undone in reverse by SDL_Quit
 std::vector<SDL_GLContext> g_contexts;  // the game's GL contexts still alive
 std::vector<SDL_Window*> g_windows;     // the game's own (hidden) windows still alive
+bool g_exploring = false;               // the model explorer is open: the launcher presents
 
 SDL_Window* hostWindow() { return g_host ? static_cast<SDL_Window*>(g_host->window) : nullptr; }
 
@@ -38,6 +40,14 @@ void gdshim_end() {
     gdshim_Quit();
     g_contexts.clear(), g_windows.clear();
     g_host = nullptr;
+    g_exploring = false;
+}
+
+void gdshim_set_exploring(bool on) { g_exploring = on; }
+
+bool gdshim_make_current() {
+    if (!g_host || g_contexts.empty()) return false;
+    return SDL_GL_MakeCurrent(hostWindow(), g_contexts.back());
 }
 
 const GdHost* gdshim_host() { return g_host; }
@@ -90,4 +100,9 @@ extern "C" SDL_GLContext gdshim_GL_CreateContext(SDL_Window* window) {
 extern "C" bool gdshim_GL_DestroyContext(SDL_GLContext context) {
     g_contexts.erase(std::remove(g_contexts.begin(), g_contexts.end(), context), g_contexts.end());
     return SDL_GL_DestroyContext(context);
+}
+
+extern "C" bool gdshim_GL_SwapWindow(SDL_Window* window) {
+    if (g_exploring && window == hostWindow()) return true;  // the launcher presents the frame
+    return SDL_GL_SwapWindow(window);
 }

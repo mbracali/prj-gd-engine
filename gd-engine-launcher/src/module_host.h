@@ -7,9 +7,11 @@
 
 #include <SDL3/SDL.h>
 
+#include <memory>
 #include <string>
 
 #include "catalog.h"
+#include "gd_host.h"
 
 class ActionLog;
 
@@ -23,3 +25,28 @@ struct GameRun {
 
 GameRun runGameModule(SDL_Window* window, SDL_GLContext context, const Game& game, const std::string& launcherVersion,
                       ActionLog& log);
+
+// A module's model explorer (gd_game_explore), open while the launcher shows
+// the Explore models screen: the library stays loaded until close().
+class ExploreSession {
+public:
+    ExploreSession();
+    ~ExploreSession();
+    ExploreSession(const ExploreSession&) = delete;
+    ExploreSession& operator=(const ExploreSession&) = delete;
+
+    // Loads the module and opens its explorer; false with `error` set when the
+    // module cannot, or has no explorer.
+    bool open(SDL_Window* window, SDL_GLContext context, const Game& game, const std::string& launcherVersion, ActionLog& log,
+              std::string& error);
+    // The module's explorer (null when closed).
+    const GdExplorer* api() const { return api_; }
+    // Closes the explorer, makes the launcher's context current again and
+    // unloads the library; true when it left the process.
+    bool close();
+
+private:
+    struct State;
+    std::unique_ptr<State> state_;
+    const GdExplorer* api_ = nullptr;
+};

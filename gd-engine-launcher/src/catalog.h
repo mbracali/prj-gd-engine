@@ -6,6 +6,7 @@
 #pragma once
 
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -35,6 +36,8 @@ struct Game {
 
 class Catalog {
 public:
+    Catalog();
+    ~Catalog();
     // Finds games.yaml (a launcher build's gd-engine-games/, else the
     // repository's gd-engine-launcher/ above the program), reads every game,
     // the saved settings, and looks for disc images.
@@ -47,7 +50,12 @@ public:
     // The game whose signature matches the disc, or nullptr.
     Game* identify(const DiscInfo& disc);
 
+    // A content:// URI (Android's file dialog) is copied into the app's
+    // original_isos/ first (the games read files), then saved; see pollCopy.
     void saveIso(const std::string& id, const std::string& path);
+    // That copy's progress, about once a second, then its result; "" when
+    // there is nothing new (and always on desktops).
+    std::string pollCopy();
     const std::vector<std::string>& discDirs() const { return discDirs_; }
     std::string launcherVersion() const { return launcherVersion_; }
     std::string gamesYaml() const { return gamesYaml_; }
@@ -57,6 +65,9 @@ public:
 private:
     void readConfig();
     void writeConfig();
+    struct DiscCopy;
+    std::shared_ptr<DiscCopy> copy_;  // shared_ptr: DiscCopy is complete in catalog.cpp only
+    void startCopy(const std::string& id, const std::string& uri);
     std::vector<Game> games_;
     std::vector<std::string> discDirs_;
     std::map<std::string, std::string> config_;

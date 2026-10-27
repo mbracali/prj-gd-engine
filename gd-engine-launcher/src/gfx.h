@@ -50,7 +50,9 @@ public:
     bool init(std::string& error);
     void shutdown();
 
-    void begin(int pixelW, int pixelH);  // clears and sets the viewport
+    // Sets the viewport and clears (`clear` false: draws over what is there,
+    // e.g. a game module's 3D view).
+    void begin(int pixelW, int pixelH, bool clear = true);
     void end();                          // flushes the batch
     void clip(const Rect* r);            // draw only inside r (nullptr: everywhere)
 

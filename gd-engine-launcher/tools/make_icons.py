@@ -13,6 +13,10 @@ Writes, in gd-engine-launcher/res/:
     gdul_icon_512.png   512 px: shipped next to the program
     gdul.ico            Windows: the .exe's icon (16 to 256 px)
     gdul_backdrop.jpg   1024 px: the dimmed badge behind the game list
+    gdul.icns           macOS: the icon of "Guitar Dream Universal Launcher.app"
+and in gd-engine-launcher/android/app/src/main/res/:
+    mipmap-*/ic_launcher*.png and mipmap-anydpi-v26/ic_launcher*.xml
+                        Android: the APK's launcher icons (adaptive on 8+)
 """
 import os
 import sys
@@ -24,6 +28,8 @@ LAUNCHER = os.path.dirname(HERE)
 REPO = os.path.dirname(LAUNCHER)
 SRC = os.path.join(REPO, "res", "icon_full.jpg")
 RES = os.path.join(LAUNCHER, "res")
+ANDROID_RES = os.path.join(LAUNCHER, "android", "app", "src", "main", "res")
+DENSITIES = {"mdpi": 1, "hdpi": 1.5, "xhdpi": 2, "xxhdpi": 3, "xxxhdpi": 4}
 CX, CY, R = 1023, 1030, 992  # the badge's circle in icon_full.jpg
 SMALL = 0.78                  # small icons show the badge's centre (GDE letters)
 
@@ -40,6 +46,37 @@ def badge(size, frac=1.0):
     return out.resize((size, size), Image.LANCZOS)
 
 
+def padded(size, scale, frac=1.0):
+    """The badge at `scale` of a transparent size x size square, centred."""
+    canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    inner = max(1, round(size * scale))
+    b = badge(inner, frac)
+    canvas.paste(b, ((size - inner) // 2, (size - inner) // 2), b)
+    return canvas
+
+
+def android_icons():
+    """The same icons as gd-game-02's APK: classic and adaptive (on black)."""
+    for name, k in DENSITIES.items():
+        d = os.path.join(ANDROID_RES, f"mipmap-{name}")
+        os.makedirs(d, exist_ok=True)
+        legacy = padded(round(48 * k), 46 / 48, SMALL)
+        legacy.save(os.path.join(d, "ic_launcher.png"), optimize=True)
+        legacy.save(os.path.join(d, "ic_launcher_round.png"), optimize=True)
+        padded(round(108 * k), 72 / 108, 0.9).save(os.path.join(d, "ic_launcher_foreground.png"), optimize=True)
+    anydpi = os.path.join(ANDROID_RES, "mipmap-anydpi-v26")
+    os.makedirs(anydpi, exist_ok=True)
+    xml = ('<?xml version="1.0" encoding="utf-8"?>\n'
+           '<!-- Made by gd-engine-launcher/tools/make_icons.py: the badge on black. -->\n'
+           '<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">\n'
+           '    <background android:drawable="@color/ic_launcher_background"/>\n'
+           '    <foreground android:drawable="@mipmap/ic_launcher_foreground"/>\n'
+           '</adaptive-icon>\n')
+    for f in ("ic_launcher.xml", "ic_launcher_round.xml"):
+        with open(os.path.join(anydpi, f), "w") as out:
+            out.write(xml)
+
+
 def main():
     if not os.path.isfile(SRC):
         sys.exit(f"make_icons.py: {SRC} not found")
@@ -50,9 +87,12 @@ def main():
     images = [(small if s <= 48 else master).resize((s, s), Image.LANCZOS) for s in sizes]
     images[-1].save(os.path.join(RES, "gdul.ico"), format="ICO", sizes=[(s, s) for s in sizes],
                     append_images=images[:-1], bitmap_format="bmp")
+    icns = [(small if s <= 48 else master).resize((s, s), Image.LANCZOS) for s in (16, 32, 64, 128, 256, 512)]
+    master.save(os.path.join(RES, "gdul.icns"), append_images=icns)
+    android_icons()
     Image.open(SRC).convert("RGB").resize((1024, 1024), Image.LANCZOS).save(
         os.path.join(RES, "gdul_backdrop.jpg"), quality=82, optimize=True)
-    print("images written to", RES)
+    print("images written to", RES, "and", ANDROID_RES)
 
 
 if __name__ == "__main__":

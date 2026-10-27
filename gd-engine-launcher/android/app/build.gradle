@@ -1,0 +1,90 @@
+// SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
+// Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
+plugins {
+    id 'com.android.application'
+}
+
+// The launcher APK: libmain.so (the launcher, ../../CMakeLists.txt) and
+// libSDL3.so built here; the game modules (libgd-game-NN.so and their
+// libraries) and the assets (gd-engine-games/: games.yaml, every
+// game-info.yaml, the manifest; licences, manual) come ready from
+// scripts/build.sh android, which passes their folders.
+def sdl3Dir = project.findProperty('sdl3Dir') ?: System.getenv('GDUL_SDL3_DIR')
+if (!sdl3Dir) throw new GradleException('Pass -Psdl3Dir=<SDL3 source dir> (see gd-engine-launcher/scripts/build.sh)')
+def abis = (project.findProperty('abis') ?: 'arm64-v8a').split(',')
+def modulesDir = project.findProperty('modulesDir') ?: "${rootDir}/../build/android/jniLibs"
+def assetsDir = project.findProperty('assetsDir') ?: "${rootDir}/../build/android/assets"
+
+// launcher_version: "X.Y.Z" in launcher-info.yaml. versionCode (what Android
+// compares for updates) = X * 10000 + Y * 100 + Z.
+def gdVersion = (file('../../launcher-info.yaml').text =~ /(?m)^launcher_version:\s*"?(\d+)\.(\d+)\.(\d+)/)[0]
+def gdVersionName = "${gdVersion[1]}.${gdVersion[2]}.${gdVersion[3]}"
+def gdVersionCode = gdVersion[1].toInteger() * 10000 + gdVersion[2].toInteger() * 100 + gdVersion[3].toInteger()
+
+android {
+    namespace = "io.github.mbracali.gdul"
+    compileSdk 36
+    ndkVersion = "28.2.13676358"
+    defaultConfig {
+        applicationId "io.github.mbracali.gdul"
+        minSdkVersion 24
+        targetSdkVersion 36
+        versionCode gdVersionCode
+        versionName gdVersionName
+        externalNativeBuild {
+            cmake {
+                arguments "-DANDROID_PLATFORM=android-24", "-DANDROID_STL=c++_static", "-DGDUL_SDL3_SOURCE=${sdl3Dir}"
+                targets "gdul", "SDL3-shared"
+                abiFilters(*abis)
+            }
+        }
+    }
+    signingConfigs {
+        // Debug-keystore signed release, so the APK installs as is. Pass
+        // -PreleaseKeystore=... (+ password/alias properties) for your own key.
+        release {
+            if (project.hasProperty('releaseKeystore')) {
+                storeFile file(project.property('releaseKeystore'))
+                storePassword project.property('releaseKeystorePassword')
+                keyAlias project.property('releaseKeyAlias')
+                keyPassword project.property('releaseKeyPassword')
+            } else {
+                storeFile file("${System.getProperty('user.home')}/.android/debug.keystore")
+                storePassword 'android'
+                keyAlias 'androiddebugkey'
+                keyPassword 'android'
+            }
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.release
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_11
+        targetCompatibility JavaVersion.VERSION_11
+    }
+    // The modules are opened by path (dlopen) from the native library folder,
+    // so the libraries are extracted there at install time.
+    packagingOptions {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
+    sourceSets.main.java.srcDirs += "${sdl3Dir}/android-project/app/src/main/java"
+    sourceSets.main.jniLibs.srcDirs += modulesDir
+    sourceSets.main.assets.srcDirs += assetsDir
+    externalNativeBuild {
+        cmake {
+            path '../../CMakeLists.txt'
+            version '4.1.2'
+            buildStagingDirectory "${rootDir}/../build/android/cxx"
+        }
+    }
+    buildDir = "${rootDir}/../build/android/gradle"
+    lint {
+        abortOnError = false
+    }
+}

@@ -13,6 +13,8 @@
 //   SDL_DestroyWindow               -> nothing for the launcher's window
 //   SDL_GL_CreateContext / Destroy  -> real contexts on that window, tracked so
 //                                      none outlives the game
+//   SDL_GL_SwapWindow               -> nothing while the model explorer is open
+//                                      (the launcher presents its frames)
 //
 // With no host (gdshim_begin not called) every call goes straight to SDL, so
 // the same objects still work in a standalone program. Implementation:
@@ -35,12 +37,18 @@ SDL_Window* gdshim_CreateWindow(const char* title, int w, int h, SDL_WindowFlags
 void gdshim_DestroyWindow(SDL_Window* window);
 SDL_GLContext gdshim_GL_CreateContext(SDL_Window* window);
 bool gdshim_GL_DestroyContext(SDL_GLContext context);
+bool gdshim_GL_SwapWindow(SDL_Window* window);
 }
 
 // Called by the module's gd_game_run around the game's own main().
 void gdshim_begin(const GdHost* host);
 void gdshim_end();
 const GdHost* gdshim_host();
+// The model explorer (gd_game_explore): while on, SDL_GL_SwapWindow does nothing.
+void gdshim_set_exploring(bool on);
+// Makes the module's newest GL context current on the launcher's window
+// (each explorer call starts with it: the launcher's context is current in between).
+bool gdshim_make_current();
 // Sets an environment variable for the game (SDL's copy and the C library's).
 void gdshim_setenv(const char* name, const char* value);
 
@@ -51,5 +59,6 @@ void gdshim_setenv(const char* name, const char* value);
 #define SDL_DestroyWindow gdshim_DestroyWindow
 #define SDL_GL_CreateContext gdshim_GL_CreateContext
 #define SDL_GL_DestroyContext gdshim_GL_DestroyContext
+#define SDL_GL_SwapWindow gdshim_GL_SwapWindow
 #endif
 #endif  // __cplusplus

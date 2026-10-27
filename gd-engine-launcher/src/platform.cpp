@@ -51,8 +51,22 @@ std::string narrow(const wchar_t* w) {
 }  // namespace
 
 std::string baseDir() {
+#ifdef __ANDROID__
+    return "";  // relative paths: SDL reads them from the APK's assets
+#else
     const char* b = SDL_GetBasePath();
     return b ? b : "./";
+#endif
+}
+
+std::string nativeLibDir() {
+#ifdef __ANDROID__
+    // Where this library (libmain.so) was loaded from: the APK's native
+    // libraries are extracted there (useLegacyPackaging in android/app/build.gradle).
+    Dl_info info{};
+    if (dladdr(reinterpret_cast<void*>(&nativeLibDir), &info) && info.dli_fname) return parentDir(info.dli_fname);
+#endif
+    return "";
 }
 
 std::string saveDir() {
@@ -111,7 +125,15 @@ std::string fileName(const std::string& path) {
 
 bool isFile(const std::string& path) {
     std::error_code ec;
-    return !path.empty() && fs::is_regular_file(toPath(path), ec);
+    if (!path.empty() && fs::is_regular_file(toPath(path), ec)) return true;
+#ifdef __ANDROID__
+    if (!path.empty() && path[0] != '/')  // an asset
+        if (SDL_IOStream* io = SDL_IOFromFile(path.c_str(), "rb")) {
+            SDL_CloseIO(io);
+            return true;
+        }
+#endif
+    return false;
 }
 
 bool isDir(const std::string& path) {

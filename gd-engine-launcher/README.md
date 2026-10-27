@@ -3,8 +3,9 @@
 One program that lists every Guitar Dream Engine game, recognises your own
 disc images and plays the games inside its own window. C++17, SDL3 and
 OpenGL 3.3, the same stack as the games, so the launcher and every game share
-one process and one window. Builds: Linux x86-64 and Windows x86-64 (MinGW-w64);
-macOS and Android are planned (see "Other systems" below).
+one process and one window. Builds: Linux x86-64, Windows x86-64 (MinGW-w64),
+Android arm64 (one APK, OpenGL ES 3.0) and macOS arm64 (an .app, not yet tried
+on a Mac); see "Other systems" below.
 
 Version: `launcher-info.yaml` (`launcher_version`, SemVer, from 0.1.0).
 
@@ -15,7 +16,8 @@ gd-engine-launcher/
   launcher-info.yaml    the launcher's version
   CMakeLists.txt        the launcher program
   src/                  its code (below)
-  sdk/                  the game module ABI: gd_host.h, gd_module_shim.h/.cpp
+  sdk/                  the game module ABI: gd_host.h, gd_module_shim.h/.cpp,
+                        gd_explore_helpers.h
   modules/gd01/         gd-game-01 built as a module, from here (gd-game-01 is frozen)
   res/                  icon, backdrop and fonts (built in); tools/make_icons.py makes the images
   third_party/stb/      stb_image, stb_truetype (public domain / MIT)
@@ -37,7 +39,8 @@ three buttons:
   launcher has its module, and a disc image is known for it.
 - **Load ISO** (or **Change ISO**): the system's file dialog; the chosen disc
   is checked and saved for that game.
-- **Explore models**: a placeholder for now ("coming soon").
+- **Explore models**: the disc's 3D models, grouped and searchable, in a
+  viewer that turns, zooms, pans and plays their animations (below).
 
 A row is lit (green) when its game is ready to play and has a disc. Disc
 images are found by themselves in `original_isos/` next to the program and,
@@ -64,11 +67,33 @@ The mouse points and clicks; the wheel scrolls. Quitting a game returns to
 the list in the same window (closing the window while a game runs also
 returns to the list).
 
+## Explore models
+
+The screen is the launcher's; the models are the game's. The launcher draws
+the list (groups, a search box that matches every word of the name and the
+archive path), the help bar and the model's card, and drives an orbit camera
+(yaw, pitch, zoom, pan, eased; a slow turntable until you turn it yourself);
+the game module lists the disc's models and draws the selected one with its
+own loaders and renderer through the optional `gd_game_explore` entry point
+(below), so the launcher knows no game format.
+
+| Game | Models | How they are drawn |
+|---|---|---|
+| gd-game-02 | characters (24), crowd, guitars and basses, drum kits, venues (geometry, face-off variants), venue props | characters as `chr::Character` + `BandView` with their main driver's clips (idle first) and the venue outfits (guitar_sg, the arena kit); the rest as scenes through GH2's materials and standard shader, lit by their own Environ or a key light; guitars stood up |
+| gd-game-01 | guitarists, band (band_chars.dta), crowd, guitars, venues | guitarists and band as gd01's `Character` with every clip (idle first), the rest as `Scene` + `SceneRenderer` (the views no other view draws), a key light; guitars stood up |
+
+Controls: up/down or click choose (the model loads after a short pause, at
+once with green / click), left/right or drag turn, wheel / triggers / `+` `-`
+zoom, right or middle drag (shoulder + right stick) pan, yellow / `R` /
+double-click reset, blue / `N` next animation, orange / `T` the turntable,
+`/` or `F` search, red / Esc back (after clearing the search). Opening, each
+model shown (with its load time) and closing are logged.
+
 ## The action log
 
 Every launcher action (start, disc dialog, drop and what it was identified
 as, disc saved, play, back from a game with its exit code and time,
-explore, quit) appends a line to **`gdul.log` in the launcher's save folder**:
+explore: opened, each model shown, closed; quit) appends a line to **`gdul.log` in the launcher's save folder**:
 
 ```
 2026-10-27T14:03:12-03:00 marcelo play gd-game-02 (Guitar Hero II 0.1.1) with /media/discs/gh2.iso
@@ -100,7 +125,10 @@ catalog.*       games.yaml + every game-info.yaml, the discs found or saved, con
 iso_probe.*     disc identification: ISO 9660 (PVD, root folder, SYSTEM.CNF
                 BOOT2) and XDVDFS (at the XGD partition offsets, the root tree,
                 default.xex's title ID)
-module_host.*   loads a game module and runs it in the window (below)
+module_host.*   loads a game module and runs it in the window, or opens its
+                model explorer (below)
+explorer.cpp    the Explore models screen (list, search, viewer, camera)
+palette.h       the launcher's colours
 action_log.*    the action log
 platform.*      folders, user name, time, shared libraries per system
 yaml.*          the small YAML subset the files use
@@ -128,6 +156,35 @@ typedef struct GdHost {
     void (*log)(void* user, const char* line); void* log_user;   // the action log
 } GdHost;
 ```
+
+**The model explorer** (optional) is a second export:
+
+```c
+extern "C" const GdExplorer* gd_game_explore(const GdHost* host);  // null: no explorer
+
+typedef struct GdExplorer {
+    uint32_t size; void* self;
+    int (*item_count)(void* self);
+    int (*item)(void* self, int index, GdExploreItem* out);       // group, name, detail
+    int (*select)(void* self, int index, char* info, int size);   // 0: shown; info: a line or the error
+    int (*clip_count)(void* self);  const char* (*clip_name)(void* self, int index);
+    void (*draw)(void* self, const GdExploreView* view);          // the frame, not presented
+    void (*close)(void* self);
+} GdExplorer;
+// GdExploreView: the viewer's rectangle (window pixels), yaw, pitch, zoom,
+// pan_x/pan_y (model radii), seconds, clip, background colour.
+```
+
+While it is open the module keeps its own GL context on the launcher's
+window and the shims make its `SDL_GL_SwapWindow` do nothing
+(`gdshim_set_exploring`). Each frame the launcher calls `draw` (the module
+makes its context current, draws the whole window with the model centred in
+the viewer's rectangle), makes its own context current again, draws its
+panels over that frame without clearing and presents it. The launcher keeps
+the input (the module polls no events); `close` frees everything and the
+library is unloaded as after a game. `module_host.cpp`'s `ExploreSession`
+does the loading; the game's log goes to `logs/<id>-explore.log`. How to
+write one: `docs/adding-a-game.md`.
 
 Both the launcher and the modules link the one SDL3 shared library next to the
 launcher (`libSDL3.so.0` / `SDL3.dll`), so they share SDL's state. A run
@@ -165,6 +222,7 @@ standalone SDL program run as a module unchanged:
 | `SDL_CreateWindow(...)` | the launcher's window (its title set); a hidden window stays real |
 | `SDL_DestroyWindow(launcher's window)` | nothing |
 | `SDL_GL_CreateContext` / `SDL_GL_DestroyContext` | real contexts on the launcher's window, tracked |
+| `SDL_GL_SwapWindow` | presents, except while the model explorer is open (the launcher presents) |
 
 A game gets its own OpenGL context on the launcher's window rather than the
 launcher's context: whatever it allocates is freed with its context, and no
@@ -207,8 +265,10 @@ holds the signatures of games whose folder must not change (gd-game-01).
 ## Building
 
 ```
-gd-engine-launcher/scripts/build.sh [linux] [windows] [all] [--force]
+gd-engine-launcher/scripts/build.sh [linux] [windows] [macos] [android] [all] [--force] [--previous <folder>]
 ```
+
+(macOS and Android: see [Other systems](#other-systems-macos-and-android).)
 
 Linux: cmake, ninja, a C++20 compiler and SDL3's development files (the
 gd-game-02 module also builds FFmpeg, as gd-game-02 does). Windows:
@@ -244,10 +304,12 @@ built and whether it was reused:
              "module": "gd-game-02.so", "built_at": "...", "reused": false } } }
 ```
 
-A module is rebuilt only when the game's `guitar_dream_version` differs from
-the one in the previous build's manifest (this version's folder, else the
-newest earlier one for that system); otherwise its folder is copied from that
-build. `--force` rebuilds them all. The launcher itself is always compiled
+A module is rebuilt only when the game's `guitar_dream_version`, or the
+launcher's module SDK (`sdk/` and `modules/gdNN/`, recorded as `inputs_hash`),
+differs from the previous build's manifest (this version's folder, else the
+newest earlier one for that system; or the folder given with `--previous` /
+`GDUL_PREVIOUS_BUILD`, e.g. an unpacked release download or a released APK);
+otherwise its folder is copied from that build. `--force` rebuilds them all. The launcher itself is always compiled
 (CMake skips what is up to date) and must have 0 compiler warnings.
 `scripts/build.sh` writes `logs/build-<os>.log` and one log per step
 (`logs/<os>-launcher.log`, `logs/<os>-gd-game-NN.log`); intermediate files go
@@ -263,7 +325,7 @@ A new game needs a recipe in `scripts/build.sh` (`build_module_NN`): see
 
 | Variable | Effect |
 |---|---|
-| `GDUL_SCRIPT="<ms>:<cmd>[=<arg>];..."` | commands at those times since start: `up down left right green red yellow blue`, `drop=<file>` (a real drop event), `play=<game id>`, `shot=<file.bmp>`, `drag=1\|0` (the drop overlay), `toast=<text>`, `quit` |
+| `GDUL_SCRIPT="<ms>:<cmd>[=<arg>];..."` | commands at those times since start: `up down left right green red yellow blue`, `drop=<file>` (a real drop event), `play=<game id>`, `explore=<game id>`, `shot=<file.bmp>`, `drag=1\|0` (the drop overlay), `toast=<text>`, `quit`; in the explorer also `pick=<text>` (the first model whose name or path has it, shown at once), `search=<text>`, `orbit=<yaw>,<pitch>` (degrees), `zoom=<factor>`, `pan=<x>,<y>`, `clip=next`, `reset`, `turntable=0\|1` |
 | `GDUL_WINDOW=<w>x<h>` | the starting window size |
 | `GDUL_GAME_QUIT_AFTER=<ms>` | quits each game that long after it starts |
 | `GDUL_GAME_ARGS="..."` | more arguments for the game, before the disc |
@@ -280,12 +342,71 @@ SDL_VIDEO_DRIVER=offscreen SDL_AUDIO_DRIVER=dummy \
 "local_builds/gdul-0.1.0-linux-x86_64/Guitar Dream Universal Launcher"
 ```
 
-## Other systems (planned)
+## Other systems: macOS and Android
 
-- **macOS**: the same program as an .app; modules as `.dylib` inside it
-  (`platform.cpp` already maps the names), signed together.
-- **Android**: one APK with the launcher as SDL's activity and the games'
-  `libgd-game-NN.so` in it, loaded with `dlopen` the same way; the window is
-  the activity's surface (OpenGL ES 3.0: `gfx.cpp`'s shader is close to ES
-  already); discs come from the storage access framework.
-- Release workflows that publish these builds.
+### macOS
+
+`scripts/build.sh macos`, on a Mac with Homebrew (`brew install bash cmake
+ninja sdl3 dylibbundler`; build.sh needs bash 4 or newer). Apple silicon
+(arm64), ad-hoc signed, not notarised (first start: right-click > Open):
+
+```
+local_builds/gdul-0.1.0-macos-arm64/
+  Guitar Dream Universal Launcher.app/Contents/
+    MacOS/Guitar Dream Universal Launcher
+    Frameworks/libSDL3.0.dylib                  (dylibbundler)
+    Resources/gdul.icns
+    Resources/gd-engine-games/                  as on Linux, modules as .dylib:
+      gd-game-02/gd-game-02.dylib  libavcodec.61.dylib ...
+      gd-game-01/gd-game-01.dylib
+  original_isos/  licenses/  manual/  LICENSE ...
+```
+
+`SDL_GetBasePath()` is the app's `Contents/Resources/`, so the launcher
+finds `gd-engine-games/` there as on the other systems, and looks for discs
+in the `original_isos/` folder next to the app. The modules' libraries are
+rewritten to find FFmpeg next to them (`@loader_path`) and SDL3 in the app's
+`Frameworks/` (`@executable_path/../Frameworks`, the launcher's own copy),
+then everything is signed. Not yet tried on a real Mac. gd-game-01's module
+needs a Vulkan loader (MoltenVK), as gd01's own macOS build does.
+
+### Android
+
+`scripts/build.sh android`: one APK, `gdul-<version>-android-arm64.apk`, in
+`local_builds/gdul-<version>-android-arm64/` (with the `gd-engine-games/`
+folder next to it, for module reuse). Needs a JDK 17/21 and the Android SDK
+at `$ANDROID_HOME` (default `~/Android/Sdk`) with the packages listed in
+`gd-game-02/engine/build_android.sh`; SDL3 is the same source release as
+gd02's Android build. The Gradle project is `android/` (applicationId
+`io.github.mbracali.gdul`; its icons come from `tools/make_icons.py`).
+
+- **The launcher** is `libmain.so`, run by SDL's activity
+  (`android/.../GdulActivity.java`), next to `libSDL3.so`. OpenGL ES 3.0:
+  `gfx.cpp`'s shaders get a `#version 300 es` header (also with
+  `-DGDUL_GLES` on desktops); GL functions are loaded through
+  `SDL_GL_GetProcAddress` as everywhere.
+- **The modules** are `lib/arm64-v8a/libgd-game-NN.so` in the APK (with
+  FFmpeg's `libav*.so`), extracted at install time (`useLegacyPackaging`):
+  the launcher opens `<native library folder>/libgd-game-NN.so` with
+  `dlopen`, the folder being where its own `libmain.so` was loaded from.
+  gd02's module is built by its CMakeLists.txt (`GD02_MODULE=ON`) with the
+  NDK against the same SDL3 source, so it uses the launcher's `libSDL3.so`.
+  gd-game-01 (Vulkan, frozen, with its own APK) has no Android module: it is
+  listed only.
+- **games.yaml, game-info.yaml, launcher-info.yaml, manifest.json** are APK
+  assets under `gd-engine-games/` (SDL reads relative paths from the assets;
+  `platform::baseDir()` is "" on Android). Licences and the manual are
+  assets too.
+- **Discs**: Load ISO opens Android's file picker (a `content://` URI). The
+  launcher identifies it there (SDL reads such URIs), then copies it into
+  `Android/data/io.github.mbracali.gdul/files/original_isos/<game id>.iso`,
+  showing the progress, because the games open their disc with `fopen` (as
+  gd02's own Android build does). Discs put in that folder by hand are found
+  too.
+- **Signing**: the Android debug key (`~/.android/debug.keystore`, created if
+  missing), or `GDUL_RELEASE_KEYSTORE` (+ `GDUL_RELEASE_KEYSTORE_PASSWORD`,
+  `GDUL_RELEASE_KEY_ALIAS`, `GDUL_RELEASE_KEY_PASSWORD`). Releases use the
+  `ANDROID_GDUL_*` secrets (docs/release-process.md).
+
+Releases of all four systems: `.github/workflows/gdul-release.yml`, see
+docs/release-process.md.

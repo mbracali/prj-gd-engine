@@ -9,6 +9,7 @@
 
 #include <functional>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -19,6 +20,8 @@
 
 class Launcher {
 public:
+    Launcher();
+    ~Launcher();
     int run();
 
 private:
@@ -56,7 +59,25 @@ private:
     void play(Game& g);
     void pickDisc(Game& g);
     void handleDisc(const std::string& path, const std::string& wantedId);
-    void exploreModels(Game& g);
+    // The Explore models screen (explorer.cpp): the launcher draws the list
+    // and drives the camera, the game module (gd_game_explore) draws the model.
+    struct Explore;
+    std::unique_ptr<Explore> explore_;
+    void exploreOpen(Game& g);
+    void exploreClose();
+    bool exploreHandle(const SDL_Event& e);  // true: used (the list's handling is skipped)
+    void explorePress(Fret f);
+    void exploreMove(int dRow, int dCol);
+    bool exploreScript(const std::string& cmd, const std::string& arg);  // true: a command of the explorer
+    void exploreFrame();
+    void exploreDraw();
+    void exploreDrawList(const gfx::Rect& panel);
+    void exploreDrawViewer(const gfx::Rect& view);
+    void exploreDrawFooter();
+    void exploreFilter();
+    void exploreCursor(int row);
+    void exploreLoad();
+    gfx::Rect exploreViewRect() const;
     void askQuit();
     void showDialog(const std::string& title, const std::string& body, std::vector<Button> buttons);
     void toast(const std::string& text);
@@ -77,7 +98,7 @@ private:
     void drawDialog();
     void drawToast();
     void drawDropOverlay();
-    void drawLoading(const Game& g);
+    void drawLoading(const Game& g, const std::string& what = "Loading");
     gfx::Rect R(float x, float y, float w, float h) const { return {x * s_, y * s_, w * s_, h * s_}; }
     float text(gfx::FontId f, float px, float x, float y, const std::string& t, gfx::Color c, float tracking = 0);
     float measure(gfx::FontId f, float px, const std::string& t, float tracking = 0);
