@@ -19,7 +19,7 @@
 // gd01's input layer (gd-game-01/engine/src/input/input.*) with Guitar Hero
 // II's controller layouts. Sources: [C] = GH2's data (config/gen/
 // beatmatch_controller.dta, system/run/config/gen/joypad.dta) or default.xex
-// (analysis/, addresses with image base 0x82000000); [I] = inferred.
+// (ghidra/analysis/, addresses with image base 0x82000000); [I] = inferred.
 //
 // GH2 picks a beatmatch controller type per player (0x822b3c50) from the
 // joypad type joypad.dta detected:

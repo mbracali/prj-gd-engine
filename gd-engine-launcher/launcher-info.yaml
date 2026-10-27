@@ -1,0 +1,5 @@
+# The launcher's own version (SemVer). Bump it to release a new launcher build.
+id: gd-engine-launcher
+name: "Guitar Dream Universal Launcher"
+nick_name: "gdul"
+launcher_version: "0.1.0"

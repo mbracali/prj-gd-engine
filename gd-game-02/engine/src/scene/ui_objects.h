@@ -11,7 +11,7 @@
 #include "scene/objects.h"
 
 // GH2's UI component classes, as their Load routines in the Xbox 360
-// executable read them (gd-game-02/analysis; tools/milo.py `ui` decodes the
+// executable read them (gd-game-02/ghidra/analysis; tools/milo.py `ui` decodes the
 // same layouts). A component's Load is its PreLoad then its PostLoad (the
 // Hmx::Object sub-vtable's +0x34 / +0x38), so a record is the PreLoad data
 // followed by the PostLoad data. Field names come from each class's

@@ -3,7 +3,7 @@
 How gd02 runs Guitar Hero II's own menus (M7): the game's `ui/*.dtb` scripts
 on gd01's interpreter, the UI classes of the panel milos, the screen manager,
 the save, and the disc's `.wmv` videos. Addresses are in `default.xex`
-(`analysis/`); **[C]** confirmed in code, **[I]** inferred.
+(`ghidra/analysis/`); **[C]** confirmed in code, **[I]** inferred.
 
 ## Script interpreter (`engine/src/script/`)
 

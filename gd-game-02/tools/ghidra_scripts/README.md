@@ -1,8 +1,8 @@
 # Ghidra scripts for Guitar Hero II (Xbox 360)
 
 Headless Ghidra (12.1.x, JDK 21) scripts that turn your own copy of
-`default.xex` into the offline study files under `gd-game-02/analysis/`.
-The Ghidra project (`gd-game-02/ghidra/`) and `analysis/` hold original code
+`default.xex` into the offline study files under `gd-game-02/ghidra/analysis/`.
+The Ghidra project (`gd-game-02/ghidra/`) and `ghidra/analysis/` hold original code
 and are git-ignored: never commit them.
 
 | Script | What it does |
@@ -50,7 +50,7 @@ calls), `noanalysis` (skip the auto-analysis pass).
 
 ```sh
 <ghidra>/support/analyzeHeadless <repo>/gd-game-02/ghidra gh2 -process default.xex -noanalysis -readOnly \
-  -scriptPath <repo>/gd-game-02/tools/ghidra_scripts -postScript ExportAnalysisXex.java <repo>/gd-game-02/analysis
+  -scriptPath <repo>/gd-game-02/tools/ghidra_scripts -postScript ExportAnalysisXex.java <repo>/gd-game-02/ghidra/analysis
 ```
 
 The output directory argument is required. Files are overwritten. Decompiling

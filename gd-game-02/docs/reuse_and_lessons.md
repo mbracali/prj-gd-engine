@@ -200,7 +200,7 @@ Groups that must move together:
 | `gd-game-01/tools/ffx_gen_shaders.py` | Pre-generates the FidelityFX shaders. | Shared (gd-core) |
 | `.github/workflows/gd-game-01-build.yml` | Reusable (`workflow_call`) and manual (`workflow_dispatch`) build: windows (fedora:44 container), linux (ubuntu:22.04), steamdeck (sniper SDK), macos (macos-latest), android (secrets `ANDROID_KEYSTORE_B64`, `_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`). | Copy as `gd-game-02-build.yml` |
 | `.github/workflows/gd-game-01-release.yml` | On a push to `main` touching `gd-game-01/**`: is the version new (no `gd-game-01/vX.Y.Z` release) and does the CHANGELOG have `## [X.Y.Z]`? Then repo guard + secret scan, every build, release notes from the CHANGELOG section plus a how-to-play table, `SHA256SUMS.txt`, and `-alpha/-beta/-rc` versions as pre-releases. | Copy as `gd-game-02-release.yml`: paths `gd-game-02/**`, tag `gd-game-02/vX.Y.Z`, title "gd02 X.Y.Z: Guitar Hero II (Xbox 360) reimplementation", "pick your `.iso`" texts. |
-| `.github/scripts/repo_guard.py` | Rejects game data extensions, RE output folders, files over 20 MB, personal paths, and Ghidra names (`FUN_`, `DAT_`, `undefinedN`) in code outside comments. | Shared. Already extended on this branch with `original_iso/`. Consider adding `milo_xbox`/`_xbox` texture extensions, `.voc`, `.fac`, `.wmv` and `.xex` (`.xex`, `.mogg` and `.milo` are already covered). |
+| `.github/scripts/repo_guard.py` | Rejects game data extensions, RE output folders, files over 20 MB, personal paths, and Ghidra names (`FUN_`, `DAT_`, `undefinedN`) in code outside comments. | Shared. Covers `original_iso/` and `original_isos/` (placeholder `README.md`/`.gitkeep` files excepted). Consider adding `milo_xbox`/`_xbox` texture extensions, `.voc`, `.fac`, `.wmv` and `.xex` (`.xex`, `.mogg` and `.milo` are already covered). |
 | `.github/scripts/check_action_updates.py` + workflow | Manual check for newer action majors. No Dependabot. | Shared, unchanged |
 | `gd-game-01/CHANGELOG.md` format | `## [Unreleased]`, `## [X.Y.Z] - date`, a bold one-line summary, Fixed / Added / Changed / Removed. Written for players. | Same format in `gd-game-02/CHANGELOG.md` |
 | Licence in every download | `LICENSE`, `LICENSE-ADDITIONAL-TERMS.md`, `licenses/` (FidelityFX, volk, Vulkan-Headers, SDL3, NVIDIA RTX SDK when DLSS is in). | Same |
@@ -352,7 +352,7 @@ rule for gd-game-02.
 
 ### L18. Licensing, attribution and the repo guard
 - **Rules already in force** (`docs/legal.md`, `docs/contributing.md`, `.github/scripts/repo_guard.py`):
-  - Never commit game data, extracted files, disc images, `analysis/`, `ghidra/`, `decomp/`, or Ghidra names in code outside comments.
+  - Never commit game data, extracted files, disc images, `ghidra/analysis/`, `ghidra/`, `decomp/`, or Ghidra names in code outside comments.
   - DLSS is fetched at build time (`tools/fetch_dlss.sh`, commit 520915d).
   - Signing keys live only in Actions secrets.
   - Every download carries `LICENSE`, `LICENSE-ADDITIONAL-TERMS.md` and `licenses/`.
@@ -360,7 +360,7 @@ rule for gd-game-02.
   - The credits start with the Guitar Dream Engine attribution, then the project's developers, the open-source thanks, the testers, and the original game's credits (X36, 1.1.1).
   - Commits are signed off (`git commit -s`, DCO) with scope prefixes (`gd-game-02: ...`).
   - The splash says "free and source-available", because the licence is not an open-source one (1.1.1).
-- **For GH2.** gd-game-02 now holds `original_iso/` and `extracted/` locally. Both are git-ignored and in the guard. Run `python3 .github/scripts/repo_guard.py` before every commit. Research output from the Xbox 360 executable (`default.xex`) stays outside the repo, like gd01's `analysis/`.
+- **For GH2.** The disc image lives in the repo root's `original_isos/` (shared by every game) and the rip in `gd-game-02/extracted/`. Both are git-ignored and in the guard. Run `python3 .github/scripts/repo_guard.py` before every commit. Research output from the Xbox 360 executable (`default.xex`) stays out of git, in `gd-game-02/ghidra/` (the Ghidra project plus its `analysis/` export).
 
 ### L19. GitHub Actions budget: releases only; build locally
 - **What happened.** Commit c586410 removed CI on PRs and branches and removed Dependabot. A release runs only when `main` gets a new version, and `local_build.sh` reproduces the release exactly. A manual "build" workflow exists for macOS. Smaller fixes: the Android SDK packages had to be installed through setup-android (04d19a7), and the release had to upload only the builds' files (a620540).

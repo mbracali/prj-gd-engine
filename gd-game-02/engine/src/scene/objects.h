@@ -15,7 +15,7 @@
 
 // GH2's Harmonix scene classes, as their Load routines in the Xbox 360
 // executable read them (docs/milo_and_textures.md; addresses are the
-// functions in gd-game-02/analysis). Each record starts with the class's own
+// functions in gd-game-02/ghidra/analysis). Each record starts with the class's own
 // version; only the versions on the GH2 disc are decoded. Field names come
 // from each class's property table (its SyncProperty strings) where the
 // executable names them; "Q:" marks names that are still guesses.

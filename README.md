@@ -35,6 +35,37 @@ A re implementation of all major guitar hero and rock band engines.
 | gd-game-18 | Rock Band 3                       | Xbox 360      | --           |
 | gd-game-19 | Rock Band 4                       | Xbox One      | Considering  |
 
+# Repository layout
+
+```
+prj-gd-engine/
+  README.md LICENSE LICENSE-ADDITIONAL-TERMS.md
+  .gd-game-00-boilerplate/   the template for a new game folder
+  .github/                   workflows and the repo guard
+  docs/                      the official codebase documentation
+  gd-engine-docs/            the engine codebase (shared engine documentation)
+  gd-engine-launcher/        the Guitar Dream Universal Launcher
+  res/                       official Guitar Dream assets (icon)
+  original_isos/             your own disc images and ROMs (git-ignored)
+  gd-game-01/ ... gd-game-19/
+```
+
+Every game folder (`gd-game-02` is the model; `gd-game-01` keeps its older
+layout for now) has `README.md`, `CHANGELOG.md`, `local_build.sh`,
+`game-info.yaml`, `build_commands/`, `docs/`, `engine/`, `tools/`, `agents/`
+(notes for AI coding agents) and the git-ignored `extracted/` (your rip),
+`ghidra/` (reverse-engineering project; never committed) and `local_builds/`.
+`game-info.yaml` holds the game's id, names, launch date, platforms, its
+Guitar Dream version, whether it is ready to play and how complete it is.
+
+# Guitar Dream Universal Launcher
+
+`gd-engine-launcher/` holds the launcher: one program that lists every game
+from `gd-engine-launcher/games.yaml` (the path of each `game-info.yaml`), finds
+your disc images in `original_isos/` (or lets you pick or drop one) and plays
+the games in its own window. Its version is in
+`gd-engine-launcher/launcher-info.yaml` (from 0.1.0).
+
 # Licence
 
 Free to play, study and fork, **not to sell**: PolyForm Noncommercial 1.0.0
@@ -52,6 +83,7 @@ their owners; this project is not affiliated with or endorsed by them.
 
 # Documentation
 
+- [docs/README.md](docs/README.md): the official codebase documentation
 - [docs/legal.md](docs/legal.md): what never goes into this repo, and why
 - [docs/contributing.md](docs/contributing.md): branches, commits, pull requests
 - [docs/release-process.md](docs/release-process.md): how a game is released

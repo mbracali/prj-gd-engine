@@ -22,6 +22,8 @@ FORBIDDEN = re.compile(
     r"|(^|/)third_party/dlss/(?!README\.md$)",
     re.IGNORECASE,
 )
+# Placeholders that keep the git-ignored folders in the tree.
+PLACEHOLDER = re.compile(r"(^|/)(original_isos|extracted|ghidra|local_builds|logs)/(README\.md|\.gitkeep)$")
 PERSONAL_PATH = re.compile(r"/home/[a-z][a-z0-9_-]*/|/Users/[A-Za-z][^/\s]*/|[A-Za-z]:\\Users\\")
 # Decompiler output pasted as code (Ghidra names or types outside comments).
 DECOMP = re.compile(r"\bundefined[1248]\b|\b(FUN|DAT|LAB|PTR)_[0-9a-fA-F]{6,8}\b")
@@ -42,7 +44,7 @@ def main():
     for f in filter(None, files):
         if not os.path.isfile(f):
             continue
-        if FORBIDDEN.search(f):
+        if FORBIDDEN.search(f) and not PLACEHOLDER.search(f):
             problems.append(f"{f}: game data, RE output, build output, signing key or DLSS SDK file")
         size = os.path.getsize(f)
         if size > MAX_BYTES:

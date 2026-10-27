@@ -5,7 +5,7 @@ Milestone M8, first phase: the eight venues behind the song, loaded as
 their first camera shot and lighting preset, with their world clock,
 animations and EventTriggers running. The camera director, the lighting
 preset manager, spotlight beams, the crowd and the multiplayer specifics are
-the second phase. Addresses are in `default.xex` (`analysis/`); **[C]**
+the second phase. Addresses are in `default.xex` (`ghidra/analysis/`); **[C]**
 confirmed in code or data, **[I]** inferred.
 
 Code: `scene/world_objects.*` (decoders), `game/venue.*` (loading),

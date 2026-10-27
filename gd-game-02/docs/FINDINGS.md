@@ -7,10 +7,10 @@ own config (`.dta` file named). **[I]** = inferred, not proven. Compare with
 `gd-game-01/docs/FINDINGS.md` (GH1, PS2), which this document follows
 section by section. "GH1" below always means that document.
 
-## Tooling notes (read before using `analysis/`)
+## Tooling notes (read before using `ghidra/analysis/`)
 
 - **The first exported decompilation is incomplete.** About 6,280 functions in
-  `analysis/functions.tsv` are cut to 8 bytes. Every function that saves
+  `ghidra/analysis/functions.tsv` are cut to 8 bytes. Every function that saves
   registers with the compiler helpers at `0x8239bcc0..0x8239bcfc`
   (`__savegprlr_NN`, a chain of `std` instructions that falls into the next
   helper) was treated by Ghidra as calling a non-returning function, so its

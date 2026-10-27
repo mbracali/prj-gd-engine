@@ -14,14 +14,17 @@
 *.milo*
 **/original_rom/
 **/original_files/
-**/original_isos/
+**/original_isos/*
+!/original_isos/README.md
 **/original_iso/
-**/extracted*/
+**/extracted*/*
+!**/extracted/README.md
 **/rips/
 
 # ---- Reverse-engineering output: contains original code. Never commit. ----
 **/analysis/
-**/ghidra/
+**/ghidra/*
+!**/ghidra/README.md
 **/decomp/
 *.gpr
 *.rep/
@@ -34,7 +37,8 @@
 **/build/
 **/engine/build_*/
 **/dist/
-**/local_builds/
+**/local_builds/*
+!**/local_builds/.gitkeep
 **/.gradle/
 **/android/app/.cxx/
 **/local.properties
@@ -53,4 +57,8 @@ __pycache__/
 Thumbs.db
 .claude/
 compile_commands.json
-gd-game-02/handoff/
+
+# ---- Local-only agent notes and launcher logs ----
+**/agents/scratch/
+gd-engine-launcher/logs/*
+!gd-engine-launcher/logs/.gitkeep

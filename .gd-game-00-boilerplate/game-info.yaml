@@ -1,0 +1,13 @@
+# Read by the Guitar Dream Universal Launcher (gd-engine-launcher/games.yaml).
+# launch: release date (YYYY-MM-DD) of the version this folder reimplements
+# (based_on). guitar_dream_version: this folder's own version. completeness: 0..1.
+# Template: copy with the folder, then fill in every value.
+id: gd-game-xx
+name: "Original game's full name"
+nick_name: "Short name"
+launch: 2000-01-01
+platforms: [Xbox 360]
+based_on: Xbox 360
+guitar_dream_version: "0.0.0"
+ready_to_play: false
+completeness: 0

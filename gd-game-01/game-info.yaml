@@ -1,0 +1,12 @@
+# Read by the Guitar Dream Universal Launcher (gd-engine-launcher/games.yaml).
+# launch: release date (YYYY-MM-DD) of the version this folder reimplements
+# (based_on). guitar_dream_version: this folder's own version. completeness: 0..1.
+id: gd-game-01
+name: "Guitar Hero"
+nick_name: "Guitar Hero"
+launch: 2005-11-08
+platforms: [PlayStation 2]
+based_on: PlayStation 2
+guitar_dream_version: "1.1.3"
+ready_to_play: true
+completeness: 0.94
