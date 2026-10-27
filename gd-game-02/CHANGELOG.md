@@ -4,7 +4,7 @@ All notable changes for players. Versions follow SemVer; release tags are
 `gd-game-02/vX.Y.Z`. The release workflow publishes the section whose heading
 matches the tag's version. Nothing is released yet.
 
-## [Unreleased]
+## [0.1.2] - 2026-10-27
 
 ### Added
 - gd02 plays inside the Guitar Dream Universal Launcher: CMake option
