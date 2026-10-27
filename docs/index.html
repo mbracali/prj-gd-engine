@@ -77,6 +77,20 @@
   .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px; }
   .card h3 { margin: 0 0 8px; font-size: 22px; }
   .card p { margin: 0; color: var(--dim); }
+
+  .dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
+  .dl a { display: flex; flex-direction: column; gap: 4px; padding: 18px 20px; border-radius: 12px; text-decoration: none; color: var(--text);
+          background: var(--panel); border: 2px solid var(--line); border-top: 6px solid var(--c); transition: transform .12s, border-color .12s, box-shadow .12s; }
+  .dl a:hover { transform: translateY(-3px); border-color: var(--c); box-shadow: 0 10px 30px rgba(0,0,0,.4), 0 0 24px color-mix(in srgb, var(--c) 35%, transparent); }
+  .dl .os { font-weight: 800; font-size: 26px; letter-spacing: .04em; text-transform: uppercase; }
+  .dl .file { color: var(--dim); font-size: 16px; word-break: break-all; }
+  .dl-note { color: var(--dim); font-size: 17px; margin-top: 16px; }
+  .donate { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+  .donate .card { display: flex; flex-direction: column; gap: 14px; align-items: flex-start; }
+  .donate form { margin: 0; }
+  .btn.paypal { background: linear-gradient(180deg, #ffd34d, #f5a700); color: #1b1300; border-color: #ffe08a; }
+  .btn.mp { background: linear-gradient(180deg, #2ec5ff, #009ee3); color: #001a26; border-color: #8fe0ff; }
+  .pp-official { opacity: .85; }
   footer { padding: 36px 0 48px; color: var(--dim); font-size: 16px; border-top: 1px solid var(--line); text-align: center; }
 
   @media (max-width: 720px) {
@@ -96,14 +110,29 @@
     <h1>Guitar Dream Engine</h1>
     <p class="tag">The classics, reimplemented. Your discs. Every screen.</p>
     <div class="ctas">
-      <a class="btn primary" href="#setlist"><span class="gem" style="color:#0c3b19"></span>See the setlist</a>
+      <a class="btn primary" href="#download"><span class="gem" style="color:#0c3b19"></span>Download</a>
+      <a class="btn" href="#setlist"><span class="gem" style="color:var(--yellow)"></span>See the setlist</a>
       <a class="btn" href="https://github.com/mbracali/prj-gd-engine"><span class="gem" style="color:var(--orange)"></span>Source on GitHub</a>
     </div>
-    <span class="soon">Downloads are coming soon.</span>
+    <span class="soon" id="ver">Free. Bring your own discs.</span>
   </div>
 </header>
 
 <main>
+  <section id="download">
+    <div class="wrap">
+      <h2>Download</h2>
+      <p class="lead">The Guitar Dream Universal Launcher, with every playable game inside. Always the newest release.</p>
+      <div class="dl">
+        <a href="https://github.com/mbracali/prj-gd-engine/releases/latest" data-asset="windows-x86_64" style="--c:var(--blue)"><span class="os">Windows</span><span class="file">Windows 10 / 11 (64-bit)</span></a>
+        <a href="https://github.com/mbracali/prj-gd-engine/releases/latest" data-asset="linux-x86_64" style="--c:var(--yellow)"><span class="os">Linux</span><span class="file">Any distribution from 2022 on, Steam Deck</span></a>
+        <a href="https://github.com/mbracali/prj-gd-engine/releases/latest" data-asset="macos-arm64" style="--c:var(--red)"><span class="os">macOS</span><span class="file">Apple silicon</span></a>
+        <a href="https://github.com/mbracali/prj-gd-engine/releases/latest" data-asset="android-arm64" style="--c:var(--green)"><span class="os">Android</span><span class="file">Android 7 or newer (64-bit)</span></a>
+      </div>
+      <p class="dl-note">No game data is included: put your own disc images in <code>original_isos/</code> next to the launcher, or load them from the launcher. <a href="https://github.com/mbracali/prj-gd-engine/releases/latest">All files and release notes</a>.</p>
+    </div>
+  </section>
+
   <section id="about">
     <div class="wrap">
       <h2>A labor of love</h2>
@@ -145,6 +174,33 @@
         <div class="row"><span><b>gd-game-03</b>/Guitar Hero 80s</span><span class="bar"><i style="width:0"></i></span></div>
         <div class="row"><span><b>gd-game-04</b>/Guitar Hero III</span><span class="bar"><i style="width:0"></i></span></div>
         <div class="row" style="margin:0"><span><b>gd-game-05</b>/Rock Band</span><span class="bar"><i style="width:0"></i></span></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="donate">
+    <div class="wrap">
+      <h2>Keep the band on tour</h2>
+      <p class="lead">Guitar Dream Engine is free and always will be. If it brought back some good memories, a donation helps keep the project alive and growing.</p>
+      <div class="donate">
+        <div class="card">
+          <h3>PayPal</h3>
+          <p>Cards and PayPal balance, from anywhere.</p>
+          <a class="btn paypal" href="https://www.paypal.com/donate/?business=CSLLBSQ4GM5QY&amp;no_recurring=0&amp;item_name=Help+Guitar+Dream+Engine+to+grow%21&amp;currency_code=USD"><span class="gem" style="color:#003087"></span>Donate via PayPal</a>
+          <form class="pp-official" action="https://www.paypal.com/donate" method="post" target="_top">
+            <input type="hidden" name="business" value="CSLLBSQ4GM5QY" />
+            <input type="hidden" name="no_recurring" value="0" />
+            <input type="hidden" name="item_name" value="Help Guitar Dream Engine to grow!" />
+            <input type="hidden" name="currency_code" value="USD" />
+            <input type="image" src="https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif" border="0" name="submit" title="PayPal - The safer, easier way to pay online!" alt="Donate with PayPal button" />
+            <img alt="" border="0" src="https://www.paypal.com/en_BR/i/scr/pixel.gif" width="1" height="1" />
+          </form>
+        </div>
+        <div class="card">
+          <h3>Mercado Pago</h3>
+          <p>Pix, cards and Mercado Pago balance, from Brazil.</p>
+          <a class="btn mp" href="https://link.mercadopago.com.br/guitardreamengine"><span class="gem" style="color:#00264d"></span>Donate via MercadoLivre</a>
+        </div>
       </div>
     </div>
   </section>
@@ -200,6 +256,21 @@
     row.innerHTML = `<span class="id">${id}</span><span class="name">${name}<span class="base">${base}</span></span><span class="stars ${cls}">${status}</span>`;
     list.appendChild(row);
   }
+
+
+  // Download buttons: the newest launcher release's files (GitHub API; the
+  // buttons keep pointing at the latest release page if the API is out of reach).
+  fetch("https://api.github.com/repos/mbracali/prj-gd-engine/releases/latest")
+    .then(r => r.ok ? r.json() : Promise.reject(r.status))
+    .then(rel => {
+      if (!/^gdul\//.test(rel.tag_name || "")) return;
+      document.getElementById("ver").textContent = `Universal Launcher ${rel.tag_name.replace(/^gdul\/v/, "")} is out. Free. Bring your own discs.`;
+      for (const a of document.querySelectorAll(".dl a[data-asset]")) {
+        const f = (rel.assets || []).find(x => x.name.includes(a.dataset.asset));
+        if (f) { a.href = f.browser_download_url; a.querySelector(".file").textContent = f.name; }
+      }
+    })
+    .catch(() => {});
 
   // A note highway scrolling behind the title.
   const cv = document.getElementById("highway"), g = cv.getContext("2d");
