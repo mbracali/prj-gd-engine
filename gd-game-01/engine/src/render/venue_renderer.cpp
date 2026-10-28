@@ -252,11 +252,13 @@ void VenueRenderer::update(const VenueFrame& f) {
         if (!placed_) {  // FUN_00281cd8: single player stands on walk_spot_01
             std::vector<Xfm> spots = walkSpots();
             if (guitarist2_) {  // two guitarists: player k on walk spot k % 2 (P1 walk_spot_02, P2 walk_spot_01)
-                if (spots.size() >= 2) guitarist_->setPlacement(spots[1]), guitarist2_->setPlacement(spots[0]);
-                spots2_ = spots;
+                if (spots.size() >= 2) {  // GuitarCharacter_v7: the placement sets the hold
+                    guitarist_->setPlacement(spots[1]), guitarist2_->setPlacement(spots[0]);
+                    hold2_[0].set(spots[1]), hold2_[1].set(spots[0]);
+                }
             } else {
                 if (!walk_ && !spots.empty()) walk_ = std::make_unique<GuitarWalk>(spots, walkConfig_, std::vector<SongEvent>{});
-                if (walk_) guitarist_->setPlacement(walk_->spot(walk_->startSpot()));
+                if (walk_) walk_->place(*guitarist_, walk_->spot(walk_->startSpot()));
             }
             placed_ = true;
         }
@@ -302,14 +304,7 @@ void VenueRenderer::update(const VenueFrame& f) {
         if (hands_) hands_->update(beat, f.hitting && active(0), *guitarist_);
         guitarist_->poll(beat, f.ms, guitarScale_);
         if (walk_) walk_->poll(*guitarist_, beat);
-        // Face-off guitarists have no walk: the standing guard keeps them on their spots.
-        if (guitarist2_ && spots2_.size() >= 2 && lastGuardBeat_ > -1e29f) {
-            float dBeat = std::clamp(beat - lastGuardBeat_, 0.0f, 1.0f);
-            auto yaw = [](const Xfm& x) { return -std::atan2(x.rot[3], x.rot[4]); };
-            standGuard(*guitarist_, spots2_[1].pos, yaw(spots2_[1]), dBeat);
-            standGuard(*guitarist2_, spots2_[0].pos, yaw(spots2_[0]), dBeat);
-        }
-        lastGuardBeat_ = beat;
+        else if (guitarist2_) hold2_[0].apply(*guitarist_);  // a face-off guitarist has no walk, only the hold
         if (static const bool rootLog = SDL_getenv("GD01_ROOTLOG") != nullptr; rootLog && placed_ && std::floor(beat / 2) != std::floor(lastRootLogBeat_ / 2)) {
             const Xfm& r = guitarist_->placement();
             if (!rootLogInit_) rootLogInit_ = true, rootLog0_ = r;
@@ -329,6 +324,7 @@ void VenueRenderer::update(const VenueFrame& f) {
             if (!guitarist2_->blending()) guitarist2_->play(guitarMood(f, 1), Character::kAnimLongest);
             if (hands2_) hands2_->update(beat, f.hitting2 && active(1), *guitarist2_);
             guitarist2_->poll(beat, f.ms, guitarScale_);
+            hold2_[1].apply(*guitarist2_);
         }
     } else if (guitarist2_) {
         guitarist2_->poll(beat, f.ms, guitarScale_);
@@ -412,15 +408,6 @@ void VenueRenderer::update(const VenueFrame& f) {
         if (SceneObject* cam = anims_->find("6 foot camera.cam"); cam && cam->cam)
             cam->cam->trans.local = cam->cam->trans.world = camera_->transform();
         anims_->updateAttached();
-        // [I] At a camera cut, or while out of shot, a standing guitarist is
-        // put back exactly on his spot: the cut hides the jump.
-        if (walk_ && guitarist_ && !gameOver_) {
-            const std::string& shot = camera_->shotName();
-            const bool cut = shot != snapShot_;
-            snapShot_ = shot;
-            if ((cut || !onScreen(*guitarist_)) && walk_->snapHome(*guitarist_) && SDL_getenv("GD01_LOG_SHOTS"))
-                SDL_Log("walk: guitarist reset on his spot (%s %s)", cut ? "cut to" : "out of", shot.c_str());
-        }
     } else {
         // No shots: an audience viewpoint (venues are Z-up, the crowd toward -Y).
         constexpr float kFovX = 45.0f * 3.14159265f / 180.0f;
@@ -821,21 +808,6 @@ void VenueRenderer::setSong(const Song& song, const Chart& chart) {
     } catch (const std::exception& ex) {
         SDL_Log("guitarist hands: %s", ex.what());
     }
-}
-
-// Whether any of the character's pelvis, head or feet projects inside the view.
-bool VenueRenderer::onScreen(const Character& c) const {
-    std::vector<std::array<float, 3>> pts;
-    for (const char* b : {"bone_pelvis.mesh", "bone_head.mesh", "bone_L-foot.mesh", "bone_R-foot.mesh"})
-        if (const SceneObject* o = c.find(b); o && o->transformable()) pts.push_back(o->transformable()->world.pos);
-    if (pts.empty()) pts.push_back(c.placement().pos);
-    for (const auto& p : pts) {
-        float x = vp_.at(0, 0) * p[0] + vp_.at(0, 1) * p[1] + vp_.at(0, 2) * p[2] + vp_.at(0, 3);
-        float y = vp_.at(1, 0) * p[0] + vp_.at(1, 1) * p[1] + vp_.at(1, 2) * p[2] + vp_.at(1, 3);
-        float w = vp_.at(3, 0) * p[0] + vp_.at(3, 1) * p[1] + vp_.at(3, 2) * p[2] + vp_.at(3, 3);
-        if (w > 0 && std::fabs(x) < w * 1.15f && std::fabs(y) < w * 1.15f) return true;
-    }
-    return false;
 }
 
 void VenueRenderer::startStarPower() {

@@ -548,7 +548,7 @@ void Character::pollChain(std::vector<Clip>& clips, std::vector<Driver>& chain, 
         const AnimClip& c = *clips[size_t(d.clip)].clip;
         bool realtime = c.playFlags() & kAnimRealTime;
         d.delay -= i > 0 ? chain[i - 1].dEff : (realtime ? dSec : dBeat);
-        d.dEff = 0;
+        d.dEff = 0, d.dStep = 0;
         if (d.delay >= 0) continue;
         float step = realtime ? dSec * c.framesPerSec() : dBeat;
         d.frame += step;
@@ -559,6 +559,7 @@ void Character::pollChain(std::vector<Clip>& clips, std::vector<Driver>& chain, 
         }
         d.frame += r;
         d.dEff = step + r;
+        d.dStep = step;
         if (d.blend < 1) d.blend = c.blendWidth() <= 0 ? 1.0f : std::min(1.0f, d.blend + step / c.blendWidth());
         if ((d.mode & kAnimLoop) && d.frame > c.endFrame()) d.frame = c.startFrame() + (d.frame - c.endFrame());
     }
@@ -862,7 +863,7 @@ void Character::poll(float rawBeat, float ms, float frameScale, float measureBea
     float dSec = polled_ ? std::max(0.0f, (ms - ms_) * 0.001f) : 0;
     if (face_) pollFace(dSec, ms);
     polled_ = true;
-    beat_ = beat, ms_ = ms, rawBeat_ = rawBeat;
+    beat_ = beat, ms_ = ms, rawBeat_ = rawBeat, dBeat_ = dBeat;
     if (realign_) realign(beat);
     pollChain(clips_, chain_, beat, dBeat, dSec);
     // kAnimGraphLoop: re-queue the same clip through its graph self-edge.
@@ -1279,6 +1280,9 @@ void Character::rootDelta(int clip, float f0, float f1, std::array<float, 3>& po
 // FUN_0017bb90 + bone.servo use_delta: each driver adds w * (rotz(t) -
 // rotz(tPrev)) and w * (P(t) - P(tPrev)) rotated by -rotz(t); the root's
 // rows turn by the angle, then the root moves by the delta in its frame.
+// tPrev = frame - the poll's advance (+0x18, AnimClipDriver_v1 @0x18a870):
+// the phase snap is not part of it, so snapping a clip to the beat never
+// moves or turns the root.
 void Character::applyRootMotion() {
     float dTheta = 0;
     std::array<float, 3> dPos{};
@@ -1287,11 +1291,11 @@ void Character::applyRootMotion() {
         const Driver& d = chain_[i];
         float w = remaining * smooth(d.blend);
         remaining -= w;
-        if (w <= 0 || d.dEff == 0) continue;
+        if (w <= 0 || d.dStep == 0) continue;
         const AnimClip& c = *clips_[size_t(d.clip)].clip;
         std::array<float, 3> p0{}, p1{};
         float r0 = 0, r1 = 0;
-        if (!facingAt(c, d.frame - d.dEff, p0, r0) || !facingAt(c, d.frame, p1, r1)) continue;
+        if (!facingAt(c, d.frame - d.dStep, p0, r0) || !facingAt(c, d.frame, p1, r1)) continue;
         dTheta += w * wrapPi(r1 - r0);
         float dx = p1[0] - p0[0], dy = p1[1] - p0[1], cs = std::cos(r1), sn = std::sin(r1);
         dPos[0] += w * (dx * cs + dy * sn);

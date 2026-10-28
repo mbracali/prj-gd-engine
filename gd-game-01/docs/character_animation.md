@@ -84,7 +84,7 @@ Every animated bone has unit scale in the bind pose; only `bone_hair03` has scal
 ### 1.4 `bone_facing` and `use_delta` (root motion; nothing to do with bind or delta poses)
 
 - `use_delta` (+0x78) only selects how the `bone_facing` channels are used. Bone channels are always replaced.
-- **Clip side (`FUN_0017bb90`, AnimClipSamples_v1).** Each Apply also computes, from the clip's `bone_facing.pos` / `.rotz` samples at t (now) and tPrev (`frame − dFrame`):
+- **Clip side (`FUN_0017bb90`, AnimClipSamples_v1).** Each Apply also computes, from the clip's `bone_facing.pos` / `.rotz` samples at t (now) and tPrev (`frame − dFrame`, both clamped to the clip). dFrame is the driver's +0x18 (`AnimClipDriver_v1 @0x18a870`): this poll's advance `dBeat·speed` **without** the phase snap (+0x20 = advance + snap only counts down the next driver's delay), so snapping a clip to the beat never moves the root:
   - `Δθ = wrapPi(θ(t) − θ(tPrev))`, accumulated as `+= w·Δθ` into `bone_facing_delta.rotz`.
   - `Δp = P(t) − P(tPrev)`, rotated by **−θ(t)**: `x' = x·cosθ + y·sinθ`, `y' = −x·sinθ + y·cosθ`. It is accumulated as `+= w·Δp'` into `bone_facing_delta.pos`.
 - **Servo side.** The servo zeroes both `facing_delta` slots at the start of every frame.

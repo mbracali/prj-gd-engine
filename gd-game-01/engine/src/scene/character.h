@@ -159,6 +159,8 @@ public:
     void startAt(int clip, int mode, float frame);
     bool clipLoaded(int clip) const { return clip >= 0 && size_t(clip) < clips_.size() && clips_[size_t(clip)].clip; }
     bool rootMotion() const { return rootMotion_; }
+    // The last poll's beat delta times the frame scale (char+0x88).
+    float frameDBeat() const { return dBeat_; }
     // A clip change is queued or blending in.
     bool blending() const { return chain_.size() > 1; }
     // Hand drivers (guitarists, docs/guitarist_hands.md).
@@ -237,7 +239,10 @@ private:
     };
     struct Driver {  // AnimClipDriver
         int clip, mode;
-        float frame, delay, blend, dEff = 0;
+        // dStep: this poll's frame advance (+0x18, what the root motion and
+        // the blend use); dEff: the advance plus the phase snap (+0x20, what
+        // the next driver's delay counts down by).
+        float frame, delay, blend, dEff = 0, dStep = 0;
         int align = -1;  // the driver's copy of the beat-align nibble (-1: the clip's)
     };
     int select(uint32_t flags);
@@ -294,7 +299,7 @@ private:
         float a2b2 = 0, inv2ab = 0;
     } ik_[2];
     uint64_t clock_ = 0;
-    float beat_ = 0, ms_ = 0, rawBeat_ = 0;
+    float beat_ = 0, ms_ = 0, rawBeat_ = 0, dBeat_ = 0;
     bool realign_ = false;
     bool strict_ = false;  // applyClipRules ran: only enabled clips, no fallback
     std::string model_;

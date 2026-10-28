@@ -6,6 +6,23 @@ matches the tag's version.
 
 ## [Unreleased]
 
+## [1.1.6] - 2026-10-28
+
+**The guitarist moves freely again, as in the original.**
+
+### Fixed
+- The lead guitarist is no longer pulled back to his spot. An extra
+  correction that the original does not have kept easing him back to the
+  walk spot every frame, and he jumped back to it at camera cuts, so a
+  spin or a walk could look like a force was dragging him to one point.
+  As in the original, he now stays where a walk ends, and only straightens
+  up when his next move is about to start.
+- Spins and other moves that turn around now finish the whole turn instead
+  of stopping part way.
+- Snapping a move to the beat no longer moves or turns the guitarist.
+- Walks pick their stop move the way the original does.
+- Face-off guitarists keep their spot the way the original does.
+
 ## [1.1.5] - 2026-10-28
 
 **The band moves as in the original, and notes only count once the song starts.**

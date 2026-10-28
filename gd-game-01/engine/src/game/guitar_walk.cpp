@@ -48,19 +48,20 @@ float travel(const Character& c, int clip, float f0, float f1) {
 // The game's heading of a direction: 0 along +Y, growing counter-clockwise.
 float heading(float dx, float dy) { return -std::atan2(dx, dy); }
 
-// FUN_00196588: the angle in a clip name after `key`: forward 0, backward
-// 180, left_N +N, right_N -N degrees.
+// FUN_00196588: the angle in a clip name after `key`: backward 180,
+// left_N +N, right_N -N degrees, anything else (forward) 0. A name without
+// the key is skipped (the original would read past it; every shipped turn /
+// stop clip has it).
 bool nameAngle(const std::string& name, const std::string& key, float& out) {
     size_t at = name.find(key);
     if (at == std::string::npos) return false;
     std::string rest = name.substr(at + key.size());
-    if (rest.rfind("forward", 0) == 0) out = 0;
-    else if (rest.rfind("backward", 0) == 0) out = kPi;
-    else if (rest.rfind("left_", 0) == 0) out = float(std::atoi(rest.c_str() + 5)) * kPi / 180;
-    else if (rest.rfind("right_", 0) == 0) out = -float(std::atoi(rest.c_str() + 6)) * kPi / 180;
-    else if (rest.rfind("left", 0) == 0) out = kPi / 2;
-    else if (rest.rfind("right", 0) == 0) out = -kPi / 2;
-    else return false;
+    out = 0;
+    if (rest.rfind("backward", 0) == 0) out = kPi;
+    else if (rest.rfind("forward", 0) != 0) {
+        if (rest.rfind("left_", 0) == 0) out = float(std::atoi(rest.c_str() + 5)) * kPi / 180;
+        else if (rest.rfind("right_", 0) == 0) out = -float(std::atoi(rest.c_str() + 6)) * kPi / 180;
+    }
     return true;
 }
 
@@ -88,10 +89,6 @@ GuitarWalk::GuitarWalk(std::vector<Xfm> spots, const Config& config, const std::
             SDL_Log("walk: spot %d at %.0f %.0f %.0f facing %.0f deg%s", int(i), spots_[i].pos[0], spots_[i].pos[1], spots_[i].pos[2],
                     yawOf(spots_[i]) * 180 / kPi, int(i) == hub_ ? " (hub)" : "");
     for (float& r : rolled_) r = 0;
-    // [I] The hold starts on the start spot, so the stand clips' small
-    // bone_facing deltas are absorbed before the first walk too (and in
-    // venues without walks, where the guitarist never leaves it).
-    if (!spots_.empty()) hold_ = {true, true, spots_[size_t(start_)].pos, yawOf(spots_[size_t(start_)])};
     if (!config_.allow) return;
 
     // FUN_00281fb8: block random walks before solos and the song's end; in
@@ -124,7 +121,6 @@ GuitarWalk::GuitarWalk(std::vector<Xfm> spots, const Config& config, const std::
     std::sort(preSolo2_.begin(), preSolo2_.end());
     // FUN_00281cd8: a solo in the first 8 beats starts the guitarist on the solo point.
     if (config_.soloPoint >= 0 && !preSolo2_.empty() && preSolo2_.front() < 3840) start_ = config_.soloPoint;
-    hold_ = {true, true, spots_[size_t(start_)].pos, yawOf(spots_[size_t(start_)])};  // the solo point may have moved the start
 }
 
 float GuitarWalk::yawOf(const Xfm& x) const { return heading(x.rot[3], x.rot[4]); }
@@ -177,7 +173,8 @@ bool GuitarWalk::update(Character& c, float beat, float ms, float ticks, int sta
 
     if (state == 4) {
         cancel(c);
-        gameOver_ = true;  // the win / lose clips move as they were made to
+        if (!gameOver_) hold_.clear();  // set_game_over (FUN_00284fd8) clears the hold
+        gameOver_ = true;
         return false;
     }
     // GuitarCharacter_v13: a random walk once the rolled delay for this
@@ -284,29 +281,19 @@ bool GuitarWalk::startWalkTo(Character& c, int dest, int excitement, int mode) {
         c.touchClip(best);
         chain.push_back({best, bestT.dest, bestT.src});
     }
-    // Stop (FUN_00198570): the one ending closest to the spot's facing. [I]
-    // The original compares destYaw - heading with the angle in the clip's
-    // name, but the shipped stop clips' bone_facing turns do not follow their
-    // names (stop_left_90 turns right; measured from the entry frame), so the
-    // turn each stop actually makes from its entry frame is used, from the
-    // body's heading during the walk (travel heading minus the walk clip's own
-    // direction: sideways and backward walks).
+    // Stop (FUN_00198570): need = destYaw - heading of the last leg; the stop
+    // whose name angle + 180 degrees (the names count from the body's back)
+    // is closest to it, first in dta order on a tie.
     {
         const V3& a = path[path.size() - 2];
         const V3& b = path.back();
-        V3 wd;
-        float wr;
-        c.rootDelta(chain[1].clip, c.clipStart(chain[1].clip), c.clipEnd(chain[1].clip), wd, wr);
-        float body = heading(b[0] - a[0], b[1] - a[1]) - (len2(wd) > 1e-3f ? heading(wd[0], wd[1]) : 0.0f);
-        const float need = wrap(destYaw - body);
+        const float need = wrap(destYaw - heading(b[0] - a[0], b[1] - a[1]));
         int best = -1;
-        float bestErr = 1e9f;
+        float bestErr = 1e30f;
         for (int k : c.clipsWith(stopF, false)) {
-            if (c.clipNameOf(k).find("stop_") == std::string::npos) continue;
-            V3 sd;
-            float turn;
-            c.rootDelta(k, std::floor(c.clipEnd(k) - 2.2f - c.clipBlendWidth(k) * 0.5f), c.clipEnd(k), sd, turn);
-            float err = std::fabs(wrap(need - turn));
+            float ang;
+            if (!nameAngle(c.clipNameOf(k), "stop_", ang)) continue;
+            float err = std::fabs(wrap(need - (ang + kPi)));
             if (err < bestErr) bestErr = err, best = k;
         }
         if (best < 0) {
@@ -357,7 +344,7 @@ bool GuitarWalk::layout(Character& c) {
     Character::Transition loop = c.transition(walk, chain_[1].start, walk, Character::kAnimLongest);
     const float loopSrc = loop.src, loopDest = loop.dest;
     setSegment(1);
-    hold_ = {};
+    hold_.clear();
     const size_t n = path_.size();
     float L = 0;
     for (size_t j = 0; j + 2 < n; ++j) L += len2({path_[j + 1][0] - path_[j][0], path_[j + 1][1] - path_[j][1], 0});
@@ -423,12 +410,11 @@ bool GuitarWalk::layout(Character& c) {
 }
 
 void GuitarWalk::poll(Character& c, float beat) {
-    float dBeat = polled_ ? beat - lastBeat_ : 0;
-    lastBeat_ = beat;
-    polled_ = true;
-    if (dBeat < 0 || dBeat > 1) dBeat = 0;
-    // [I] Watchdog (port only): the longest walk takes ~20 beats; one still
-    // running after 80 is stuck and is cancelled, so the standing guard takes over.
+    // Steering and the hold run on the character's beat delta times its frame scale (char+0x88).
+    const float dBeat = c.frameDBeat();
+    // [I] Watchdog (port only, a safety net that never fires in a working
+    // walk): the longest walk takes ~20 beats; one still running after 80 is
+    // stuck and is cancelled.
     busyBeats_ = state_ == 0 ? 0 : busyBeats_ + dBeat;
     if (busyBeats_ > 80 && !gameOver_) {
         SDL_Log("walk: stuck in state %d for %.0f beats, cancelled", state_, busyBeats_);
@@ -461,12 +447,11 @@ void GuitarWalk::poll(Character& c, float beat) {
                 SDL_Log("walk: ended %.1f units from spot %d, facing off by %.1f deg", dist(p, spots_[size_t(s)].pos), s,
                         wrap(destYaw_ - yawOf(c.placement())) * 180 / kPi);
             }
-            // [I] The original holds where the walk ended; the hold targets
-            // the spot itself so walks never leave him off it (the shipped
-            // stop clips end up to ~25 units and some degrees away).
-            V3 spotPos = spots_[size_t(nearestSpot(c.placement().pos, false))].pos;
+            // FUN_00197388 state 3: the hold keeps where the walk ended, facing the spot's way.
             cancel(c);
-            hold_ = {true, true, spotPos, destYaw_};
+            hold_.hasPos = hold_.hasYaw = true;
+            hold_.pos = c.placement().pos;
+            hold_.yaw = destYaw_;
         } else {
             steer(c, dBeat);
         }
@@ -486,57 +471,13 @@ void GuitarWalk::poll(Character& c, float beat) {
     // ResetTimer (FUN_00284618) when a walk ends.
     if ((prevState_ == 1 || prevState_ == 2) && (state_ == 0 || state_ == 3)) roll(now_);
     prevState_ = state_;
-    hold(c, dBeat);
-    guard(c, dBeat);
-}
-
-// [I] The port's standing guard (not in the original): between walks the
-// mood, Star Power and win / lose clips swing the root through their
-// bone_facing deltas, and a clip cut short by the next one leaves part of its
-// swing behind (a special move into a stand clip turned the guitarist 108
-// degrees). Off the walk the root eases back to the hold (the spot it stands
-// on) every frame, and may never be more than 60 degrees or 15 units away.
-void GuitarWalk::guard(Character& c, float dBeat) {
-    if (state_ != 0 || gameOver_ || !hold_.hasPos || !hold_.hasYaw) return;
-    standGuard(c, hold_.pos, hold_.yaw, dBeat);
-}
-
-// [I] Off camera, the guitarist is put back exactly on his spot (the user's
-// request: fix him up where nobody sees it). Standing only.
-bool GuitarWalk::snapHome(Character& c) {
-    if (state_ != 0 || gameOver_ || !hold_.hasPos || !hold_.hasYaw) return false;
-    Xfm root = c.placement();
-    float err = wrap(hold_.yaw - yawOf(root));
-    if (std::fabs(err) < 2 * kPi / 180 && dist(root.pos, hold_.pos) < 1) return false;
-    rotateZ(root, err);
-    root.pos = hold_.pos;
-    c.setPlacement(root);
-    return true;
-}
-
-void standGuard(Character& c, const std::array<float, 3>& pos, float yaw, float dBeat) {
-    if (dBeat <= 0) return;
-    constexpr float kMaxYaw = 60 * kPi / 180, kMaxDist = 15;
-    Xfm root = c.placement();
-    float k = std::min(1.0f, dBeat * 0.6f);
-    float err = wrap(yaw - heading(root.rot[3], root.rot[4]));
-    float turn = err * k;
-    float after = err - turn;
-    if (std::fabs(after) > kMaxYaw) turn = err - std::copysign(kMaxYaw, after);
-    rotateZ(root, turn);
-    V3 d{root.pos[0] - pos[0], root.pos[1] - pos[1], root.pos[2] - pos[2]};
-    for (int i = 0; i < 3; ++i) d[size_t(i)] *= 1 - k;
-    float l = std::hypot(d[0], d[1], d[2]);
-    if (l > kMaxDist)
-        for (float& x : d) x *= kMaxDist / l;
-    root.pos = {pos[0] + d[0], pos[1] + d[1], pos[2] + d[2]};
-    c.setPlacement(root);
+    hold_.apply(c);
 }
 
 // FUN_001975f0: steers the root toward the path, predicting the pose one beat ahead.
 void GuitarWalk::steer(Character& c, float dBeat) {
     if (dBeat == 0 || !walking(c)) return;
-    hold_ = {};
+    hold_.clear();
     Xfm root = c.placement();
     V3 P = root.pos;
     const Character::DriverInfo cur = c.newestStarted();
@@ -595,21 +536,36 @@ void GuitarWalk::steer(Character& c, float dBeat) {
     c.setPlacement(root);
 }
 
+void PoseHold::set(const Xfm& x) {
+    hasPos = hasYaw = true;
+    pos = x.pos;
+    yaw = heading(x.rot[3], x.rot[4]);
+}
+
 // FUN_001958b0: while a clip waits to start, eases the root so that, when it
-// starts, the guitarist stands at the hold position facing the hold yaw.
-void GuitarWalk::hold(Character& c, float dBeat) {
-    if (!(hold_.hasPos || hold_.hasYaw) || !c.rootMotion() || dBeat == 0) return;
+// starts, the guitarist stands at the hold position facing the hold yaw:
+// the pose predicted at the start (the clip before it integrated over the
+// delay) moves toward the hold by dBeat * 1.1 / max(delay, blend width) of
+// the difference each frame. The position moves only when it is more than
+// `tolerance` away, scaled by `gain`.
+void PoseHold::apply(Character& c) const {
+    const float dBeat = c.frameDBeat();
+    if (!(hasPos || hasYaw) || !c.rootMotion() || dBeat == 0) return;
     Character::DriverInfo pend, before;
     if (!c.pendingAfterNewest(&pend, &before) || pend.delay < 0) return;
     Xfm root = c.placement();
     V3 pp = root.pos;
-    float py = yawOf(root);
+    float py = heading(root.rot[3], root.rot[4]);
     integrate(c, before.clip, before.frame, before.frame + pend.delay, pp, py);
-    float rate = dBeat * 1.1f / std::max({pend.delay, c.clipBlendWidth(pend.clip), 1e-3f});
-    rate = std::min(rate, 1.0f);
-    if (hold_.hasPos)
-        for (int k = 0; k < 3; ++k) root.pos[size_t(k)] += (hold_.pos[size_t(k)] - pp[size_t(k)]) * rate;
-    if (hold_.hasYaw) rotateZ(root, wrap(hold_.yaw - py) * rate);
+    const float span = std::max(pend.delay, c.clipBlendWidth(pend.clip));
+    if (span <= 0) return;  // the original would divide by zero here
+    const float rate = dBeat * 1.1f / span;
+    if (hasPos) {
+        V3 d{pos[0] - pp[0], pos[1] - pp[1], pos[2] - pp[2]};
+        if (d[0] * d[0] + d[1] * d[1] + d[2] * d[2] > tolerance * tolerance)
+            for (int k = 0; k < 3; ++k) root.pos[size_t(k)] += d[size_t(k)] * rate * gain;
+    }
+    if (hasYaw) rotateZ(root, wrap(yaw - py) * rate);
     c.setPlacement(root);
 }
 
@@ -627,17 +583,16 @@ void GuitarWalk::cancel(Character& c) {
     path_.clear();
     state_ = 0;
     k_ = 0;
-    if (!hold_.hasPos && !spots_.empty()) {  // a cancelled walk keeps to the nearest spot
-        const Xfm& s = spots_[size_t(nearestSpot(c.placement().pos, false))];
-        hold_ = {true, true, s.pos, yawOf(s)};
-    }
+}
+
+void GuitarWalk::place(Character& c, const Xfm& spot) {
+    c.setPlacement(spot);
+    hold_.set(spot);
 }
 
 void GuitarWalk::loseTeleport(Character& c, const V3& singerPelvis) {
     if (!config_.loseTeleport) return;
     const Xfm& root = c.placement();
     if (std::hypot(root.pos[0] - singerPelvis[0], root.pos[1] - singerPelvis[1]) > 72) return;
-    const Xfm& spot = spots_[size_t(nearestSpot(root.pos, false))];
-    c.setPlacement(spot);
-    hold_ = {true, true, spot.pos, yawOf(spot)};  // [I] the original only moves the root
+    place(c, spots_[size_t(nearestSpot(root.pos, false))]);  // FUN_0018f060: GuitarCharacter_v7
 }

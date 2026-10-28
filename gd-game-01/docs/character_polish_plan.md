@@ -349,7 +349,8 @@ In a chain entry, **`startFrame`** is the frame of this clip at which it enters.
    - Push `{walk, edge+8 (dest), edge+4 (src)}`.
 4. **Stop `FUN_00198570`**:
    - `need = wrapPi(destYaw + atan2(dx, dy))`, with d = `path[n−1] − path[n−2]` (that is, `destYaw − walking heading`).
-   - Over entries with `(stopFlags & flags) == stopFlags`, take the min `|wrapPi(need − FUN_00196588("stop_", name))|`. No limit, first wins ties.
+   - Over entries with `(stopFlags & flags) == stopFlags`, take the min `|wrapPi(need − (FUN_00196588("stop_", name) + π))|`: the decompile reads `fmod((need − (angle + π)) + π, 2π)`, so the stop names count from the body's back (stop_left_90 turns right). No limit, first wins ties.
+   - `FUN_00196588`: "backward" 180°, "left_N" +N°, "right_N" −N°, anything else 0.
    - Push `{stop, floor(stop.end − 2.2 − stop.blendWidth·0.5), (unset)}`. Here `stop.end` is clip +0x10 and blend width is clip +0x20.
 5. If all three succeed: addref the clips, set `+0x30 = currentClip` (`FUN_00180710`), set `state = 1`, and call **Layout** right away.
 6. On any failure: clear the path and the chain; nothing happens.

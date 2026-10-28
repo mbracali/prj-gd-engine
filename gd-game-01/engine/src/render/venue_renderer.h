@@ -183,12 +183,9 @@ private:
     std::unique_ptr<Character> guitarist2_;
     std::unique_ptr<GuitarHands> hands2_;
     int activeMask_ = 0;
-    bool onScreen(const Character& c) const;
-    std::string snapShot_;
     bool shakyCamera_ = true;
-    bool strongerBokeh_ = false;  // the shot of the last frame (the cut snap)
-    std::vector<Xfm> spots2_;          // the walk spots, for the face-off standing guard
-    float lastGuardBeat_ = -1e30f;
+    bool strongerBokeh_ = false;
+    PoseHold hold2_[2];  // the face-off guitarists' pose holds (char+0xd8), set by their placement
     float lastRootLogBeat_ = 0;  // GD01_ROOTLOG (development aid)
     bool rootLogInit_ = false;
     Xfm rootLog0_;
