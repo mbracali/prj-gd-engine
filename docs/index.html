@@ -81,12 +81,17 @@
   .card h3 { margin: 0 0 8px; font-size: 22px; }
   .card p { margin: 0; color: var(--dim); }
 
-  .dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
-  .dl a { display: flex; flex-direction: column; gap: 4px; padding: 18px 20px; border-radius: 12px; text-decoration: none; color: var(--text);
-          background: var(--panel); border: 2px solid var(--line); border-top: 6px solid var(--c); transition: transform .12s, border-color .12s, box-shadow .12s; }
-  .dl a:hover { transform: translateY(-3px); border-color: var(--c); box-shadow: 0 10px 30px rgba(0,0,0,.4), 0 0 24px color-mix(in srgb, var(--c) 35%, transparent); }
-  .dl .os { font-weight: 800; font-size: 26px; letter-spacing: .04em; text-transform: uppercase; }
-  .dl .file { color: var(--dim); font-size: 16px; word-break: break-all; }
+  .dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+  .dlcard { display: flex; flex-direction: column; gap: 8px; padding: 18px 18px 16px; border-radius: 12px; background: var(--panel);
+            border: 2px solid var(--line); border-top: 6px solid var(--c); }
+  .dlcard .os { font-weight: 800; font-size: 24px; letter-spacing: .04em; text-transform: uppercase; line-height: 1.1; }
+  .dlcard .kind { color: var(--c); font-weight: 800; font-size: 15px; letter-spacing: .14em; text-transform: uppercase; margin-bottom: 4px; }
+  .dlcard a, .dlcard .soonlink { display: flex; flex-direction: column; padding: 9px 12px; border-radius: 9px; text-decoration: none;
+            color: var(--text); background: #1c191f; border: 1px solid var(--line); transition: transform .12s, border-color .12s, box-shadow .12s; }
+  .dlcard a:hover { transform: translateY(-2px); border-color: var(--c); box-shadow: 0 0 18px color-mix(in srgb, var(--c) 30%, transparent); }
+  .dlcard b { font-size: 19px; }
+  .dlcard .file { color: var(--dim); font-size: 15px; word-break: break-all; }
+  .dlcard .soonlink { opacity: .5; }
   .dl-note { color: var(--dim); font-size: 17px; margin-top: 16px; }
   .donate-title { margin: 40px 0 14px; font-size: 26px; font-weight: 800; letter-spacing: .02em; }
   .donate { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
@@ -128,10 +133,29 @@
       <h2>Download</h2>
       <p class="lead">The Guitar Dream Universal Launcher, with every playable game inside. Always the newest release.</p>
       <div class="dl">
-        <a href="https://github.com/mbracali/prj-gd-engine/releases/latest" data-asset="windows-x86_64" style="--c:var(--blue)"><span class="os">Windows</span><span class="file">Windows 10 / 11 (64-bit)</span></a>
-        <a href="https://github.com/mbracali/prj-gd-engine/releases/latest" data-asset="linux-x86_64" style="--c:var(--yellow)"><span class="os">Linux</span><span class="file">Any distribution from 2022 on, Steam Deck</span></a>
-        <a href="https://github.com/mbracali/prj-gd-engine/releases/latest" data-asset="macos-arm64" style="--c:var(--red)"><span class="os">macOS</span><span class="file">Apple silicon</span></a>
-        <a href="https://github.com/mbracali/prj-gd-engine/releases/latest" data-asset="android-arm64" style="--c:var(--green)"><span class="os">Android</span><span class="file">Android 7 or newer (64-bit)</span></a>
+        <div class="dlcard" style="--c:var(--blue)">
+          <span class="os">Stage releases</span><span class="kind">Desktop</span>
+          <a href="https://github.com/mbracali/prj-gd-engine/releases/latest" data-asset="windows-x86_64"><b>Windows</b><span class="file">Windows 10 / 11 (64-bit)</span></a>
+          <a href="https://github.com/mbracali/prj-gd-engine/releases/latest" data-asset="macos-arm64"><b>macOS</b><span class="file">Apple silicon</span></a>
+          <a href="https://github.com/mbracali/prj-gd-engine/releases/latest" data-asset="linux-x86_64"><b>Linux</b><span class="file">Any distribution from 2022 on</span></a>
+        </div>
+        <div class="dlcard" style="--c:var(--yellow)">
+          <span class="os">Roadie releases</span><span class="kind">Handhelds</span>
+          <a href="https://github.com/mbracali/prj-gd-engine/releases/latest" data-asset="steamdeck"><b>Steam Deck</b><span class="file">SteamOS, with Deck settings</span></a>
+          <span class="soonlink"><b>PS Vita</b><span class="file">Coming soon</span></span>
+          <span class="soonlink"><b>3DS</b><span class="file">Coming soon</span></span>
+        </div>
+        <div class="dlcard" style="--c:var(--green)">
+          <span class="os">On tour releases</span><span class="kind">Mobile</span>
+          <a href="https://github.com/mbracali/prj-gd-engine/releases/latest" data-asset="android-arm64"><b>Android</b><span class="file">Android 7 or newer (64-bit)</span></a>
+          <span class="soonlink"><b>iOS</b><span class="file">Coming soon</span></span>
+        </div>
+        <div class="dlcard" style="--c:var(--red)">
+          <span class="os">Jam session releases</span><span class="kind">TV OS</span>
+          <span class="soonlink"><b>Android TV</b><span class="file">Coming soon</span></span>
+          <span class="soonlink"><b>LG TV</b><span class="file">Coming soon</span></span>
+          <span class="soonlink"><b>Samsung TV</b><span class="file">Coming soon</span></span>
+        </div>
       </div>
       <p class="dl-note">No game data is included: put your own disc images in <code>original_isos/</code> next to the launcher, or load them from the launcher. <a href="https://github.com/mbracali/prj-gd-engine/releases/latest">All files and release notes</a>.</p>
     </div>
@@ -263,8 +287,8 @@
     .then(rel => {
       if (!/^gdul\//.test(rel.tag_name || "")) return;
       document.getElementById("ver").textContent = `Universal Launcher ${rel.tag_name.replace(/^gdul\/v/, "")} is out. Free. Bring your own discs.`;
-      for (const a of document.querySelectorAll(".dl a[data-asset]")) {
-        const f = (rel.assets || []).find(x => x.name.includes(a.dataset.asset));
+      for (const a of document.querySelectorAll(".dlcard a[data-asset]")) {
+        const f = (rel.assets || []).find(x => x.name.includes(a.dataset.asset) && (a.dataset.asset === "steamdeck" || !x.name.includes("steamdeck")));
         if (f) { a.href = f.browser_download_url; a.querySelector(".file").textContent = f.name; }
       }
     })
