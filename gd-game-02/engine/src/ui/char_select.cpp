@@ -403,7 +403,12 @@ public:
         const float dt = float(std::clamp(dtMs, 0.0, 100.0) / 1000.0);
         clock_ += dt;
         for (Slot& s : slots_) {
-            if (!s.ch) continue;
+            // Poll 0x8228F250 places, wakes (the pending event, 0x8228D348)
+            // and polls a loaded character only while its slot has a placer
+            // (slot +0xc, set_placer 0x8228E6F8) [C]: the character select
+            // sets it at TRANSITION_COMPLETE, so ui_enter's kick starts once
+            // the screen is up, behind the closed door (GD02-078).
+            if (!s.ch || s.placer.empty()) continue;
             if (!s.event.empty()) {
                 // 0x8228D348: the pending event goes to the loaded character.
                 const std::string e = s.event;
@@ -417,11 +422,12 @@ public:
             s.ch->ch->poll(ctx);
         }
         for (Slot& s : slots_) {
-            // Poll 0x8228F250: the door stands at (pi / 2, 0, 0); a loaded
-            // character swings it with its bone_door (its local rotation's z).
+            // Poll 0x8228F250: the door stands at (pi / 2, 0, 0); a loaded,
+            // placed character swings it with its bone_door (its local
+            // rotation's z) [C].
             if (s.doorView && !s.door.empty()) {
                 float z = 0;
-                if (s.ch) {
+                if (s.ch && !s.placer.empty()) {
                     chr::Skeleton& sk = s.ch->ch->skeleton();
                     int b = sk.find("bone_door.trans");
                     if (b < 0) b = sk.find("bone_door.mesh");

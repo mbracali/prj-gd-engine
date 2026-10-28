@@ -428,7 +428,8 @@ void UiView::drawObject(MaterialRenderer& r, const scene::Object& o, int depth) 
     }
     if (const auto* m = o.as<scene::Mesh>()) {
         if (!cache_.mesh(m)) return;
-        drawMesh(r, cache_, *m, toMat4(pose_.world(m)), &pose_, findMat(*m, m->mat));
+        const auto mm = meshMat_.find(m->name);
+        drawMesh(r, cache_, *m, toMat4(pose_.world(m)), &pose_, findMat(*m, mm != meshMat_.end() ? mm->second : m->mat));
         ++meshesDrawn_;
         return;
     }
@@ -568,7 +569,7 @@ float UiView::templateWidth(const scene::Text& tmpl, const std::string& str) {
 }
 
 float UiView::drawTemplate(MaterialRenderer& r, const std::string& key, const scene::Text& tmpl, const std::string& str,
-                           const scene::Xfm& world, const float* rgb, float alpha) {
+                           const scene::Xfm& world, const float* rgb, float alpha, int align) {
     const scene::Font* font = tmpl.dir ? tmpl.dir->resolve<scene::Font>(tmpl.font) : nullptr;
     if (!font || str.empty()) return 0;
     auto& lt = keyed_[key];
@@ -579,7 +580,7 @@ float UiView::drawTemplate(MaterialRenderer& r, const std::string& key, const sc
         FontMetrics fm(*font);
         TextStyle st;
         st.size = tmpl.size, st.leading = tmpl.leading, st.wrapWidth = tmpl.wrapWidth, st.italics = tmpl.italics;
-        st.align = tmpl.align, st.capsMode = tmpl.capsMode, st.markup = tmpl.markup, st.color = tmpl.color;
+        st.align = align >= 0 ? align : tmpl.align, st.capsMode = tmpl.capsMode, st.markup = tmpl.markup, st.color = tmpl.color;
         lt->layout = layoutText(&fm, str, st);
     }
     const float tint[4] = {1, 1, 1, alpha};
@@ -739,22 +740,46 @@ void UiView::drawTextEntry(MaterialRenderer& r, const scene::Object& o) {
     if (const ::DataNode* t = style.node->find("text"); t && t->children.size() > 1 && t->children[1].isText()) tmplName = t->children[1].s;
     const scene::Text* tmpl = tmplName.empty() ? nullptr : res->find<scene::Text>(tmplName);
     if (!tmpl) return;
-    // The component's Text copies the template's font and style at the
-    // component's place; the entered text in entered_color, the character
-    // being picked in dynamic_color (BandTextEntry 0x82141F78).
+    // The component's two Texts copy the template's font and style at the
+    // component's place, aligned middle left (0x21, BandTextEntry Update
+    // 0x82144558) whatever the template's (entry_profile.txt is centred,
+    // 0x22), so the name grows left to right; the entered text in
+    // entered_color, the character being picked in dynamic_color
+    // (0x82141F78), moved by the entered text's width (0x821424B0) [C].
     const scene::Xfm cw = componentWorld(o);
     const EntryState& e = es->second;
     const auto* te = o.as<scene::BandTextEntry>();
     const float entered[3] = {te->enteredColor[0], te->enteredColor[1], te->enteredColor[2]};
     const float dynamic[3] = {te->dynamicColor[0], te->dynamicColor[1], te->dynamicColor[2]};
-    const float w = drawTemplate(r, o.name + "#entered", *tmpl, e.entered, cw, entered);
+    constexpr int kMiddleLeft = 0x21;
+    const float w = e.entered.empty() ? 0.0f : drawTemplate(r, o.name + "#entered", *tmpl, e.entered, cw, entered, 1, kMiddleLeft);
     if (e.done || e.picking.empty()) return;
-    // The character being picked, after the text, between the up / down arrows.
-    const scene::Xfm at = scene::compose(moveXfm(w, 0, 0), cw);
-    const float cw2 = drawTemplate(r, o.name + "#picking", *tmpl, e.picking, at, dynamic);
-    for (const char* arrow : {"char_next.mesh", "char_back.mesh"})
-        if (const scene::Mesh* m = res->find<scene::Mesh>(arrow))
-            drawMeshAt(r, *m, nullptr, scene::compose(m->trans.local, scene::compose(moveXfm(w + cw2 * 0.5f, 0, 0), cw)));
+    // The character being picked, after the text, between the up / down
+    // arrows. GH2 moves the picked Text and both arrows by the entered
+    // text's width (0x821424B0); the arrows keep their own x and are put
+    // arrow_offset above (char_back) / below (char_next) the picked Text's
+    // extent, scaled by text_scale about its middle (0x82142218), the
+    // picked Text itself scaled by text_scale (0x82142120) [C].
+    scene::Xfm scaled;  // text_scale on the picked Text (0x82142120)
+    for (float& v : scaled.rot) v *= te->textScale;
+    const scene::Xfm at = scene::compose(scaled, scene::compose(moveXfm(w, 0, 0), cw));
+    drawTemplate(r, o.name + "#picking", *tmpl, e.picking, at, dynamic, 1, kMiddleLeft);
+    float top = 0, bottom = 0;
+    if (const auto it = keyed_.find(o.name + "#picking"); it != keyed_.end() && it->second) {
+        TextStyle st;
+        st.size = tmpl->size, st.leading = tmpl->leading;
+        it->second->layout.extent(st, top, bottom);
+        const float mid = (top + bottom) * 0.5f;
+        // The bottom's "- mid" is GH2's (0x82142218): one line at the
+        // template's place gives arrows symmetric about the entry's middle.
+        top = (top - mid) * te->textScale + mid, bottom = (bottom - mid) * te->textScale - mid;
+    }
+    for (const char* arrow : {"char_back.mesh", "char_next.mesh"})
+        if (const scene::Mesh* m = res->find<scene::Mesh>(arrow)) {
+            scene::Xfm local = m->trans.local;
+            local.pos[2] = arrow[5] == 'b' ? top + te->arrowOffset : bottom - te->arrowOffset;
+            drawMeshAt(r, *m, nullptr, scene::compose(local, scene::compose(moveXfm(w, 0, 0), cw)));
+        }
 }
 
 }  // namespace gfx

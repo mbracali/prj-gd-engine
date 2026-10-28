@@ -419,7 +419,12 @@ vtable `0x820D4CF4`, `SampleInst360` vtable `0x820D5C94`, `Voice`
 - **Script messages** (Synth::Handle `0x822EAB08`): `play_sequence <name>
   (volume dB) (pan p) (transpose t)` (`0x822E8A90`; the Sfx's `play` takes
   the same), `stop_all_sfx` (Sfx and sequences), `pause_all_sfx` (Sfx
-  instances), `set_master_vol <dB>` / `master_vol` (the master Fader,
+  instances: every Sfx pauses the instances it plays now, 0x822E7C68 ->
+  0x822ECB40; sounds started later play and the sequences go on [C]. Game
+  SetPaused (0x822CB340) calls it, and game_outro_complete pauses the game
+  for good: the port's Synth-wide pause kept the menus silent after every
+  song until a restart, GD02-073; `--walktest quickplay` / `pause` / `lose`
+  check a menu sound plays after the song), `set_master_vol <dB>` / `master_vol` (the master Fader,
   `0x822F7878`; the mute cheat uses kDbSilence), `toggle_limiter`,
   `toggle_hud` (debug), `set_fx` / `set_fx_vol` (PS2 only).
 - **The options' effects volume** is not a global gain: `{options

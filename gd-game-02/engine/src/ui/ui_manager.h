@@ -214,6 +214,7 @@ private:
     void beginTransition(ScreenObj* next, bool back);
     void switchScreens();
     void finishTransition();
+    void releaseSharedFrames();
     void updateTransition();
     void applyTransitionPose(float t);
     void updateAnims();

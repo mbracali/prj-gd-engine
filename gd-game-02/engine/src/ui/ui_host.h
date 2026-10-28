@@ -110,6 +110,8 @@ public:
     virtual void stopSfx(const std::string& /*name*/) {}
     virtual void stopAllSfx() {}
     virtual void pauseAllSfx(bool /*paused*/) {}
+    // Sound effect voices playing and not paused (-1: no sound player); tests.
+    virtual int sfxLiveVoices() { return -1; }
 
     // song_preview: loops the song's (preview a b) section; "" stops it.
     virtual void songPreview(const std::string& songId) = 0;
@@ -133,5 +135,7 @@ public:
     // (false when there is none).
     virtual void menuBackdrop(bool /*on*/) {}
     virtual bool drawMenuBackdrop() { return false; }
+    // The backdrop's band is posed and its singer framed on the right (tests).
+    virtual bool menuBackdropFramed() { return false; }
     virtual void quit() = 0;
 };

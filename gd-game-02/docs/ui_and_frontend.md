@@ -148,6 +148,18 @@ animation of a shared subdirectory to every view showing the same object
 their copy dark and came back darker (`--walktest back` checks the bricks'
 light).
 
+GH2 counts each panel's screens (0x823768E0); a panel no screen holds
+unloads (UIPanel Unload 0x82376C90 deletes its directory) and with it the
+last reference to meta_bricks, so the next panel that loads it starts from
+the file's state, its light on [C]. The port keeps its panels loaded: once
+a transition is over, a shared object no panel of the current (or a pushed)
+screen shows forgets its frames (`UiManager::releaseSharedFrames`) [I: the
+moment]. Before, the career's difficulty screen left with Back (light off)
+for Choose Band came back dark, and so did every bricks screen reached
+without a Back on the way (Play Live Show, the store...), until a later
+Back turned the light on for a few seconds (gd-backlog GD02-077 / 081;
+`--walktest career` checks the light).
+
 ### Confirmed
 
 - Quick play list (`0x82287600` / `0x822C5A68`): the first two tiers' songs
@@ -168,12 +180,33 @@ light).
 - Back (`0x8229EED0`): kPad_Tri after the focus panel declines, to the
   screen we came from if it allows back (`0x822A0408`).
 - Text entry (`0x821433B0`): X adds, Tri removes, up / down picks, Start
-  finishes.
+  finishes. Its two Texts copy the type's template and are aligned middle
+  left (0x21, Update 0x82144558) whatever the template's (entry_profile.txt
+  is centred): the name grows left to right. Each change moves the picked
+  character and both arrows by the entered text's change of width
+  (0x821424B0); the arrows keep their x and sit arrow_offset above
+  (char_back) / below (char_next) the picked character's extent scaled by
+  text_scale (0x82142218), the picked character scaled by text_scale
+  (0x82142120). GH2 also takes typed keys (backspace, 0x20..0x7E,
+  0x82143880; not in the port). `--walktest career` checks the name's
+  start stays put and the picked character follows it.
 - High score defaults (`0x822A4988`): 5 per song and difficulty, 50000 down
   to 10000, names from `highscore_dummy_N`.
 - Headline tokens `0x82291428`; `is_any_button` = buttons below 16.
 - Credits rows `0x8229B590`, music `0x8229B310`. Help bar `0x8229A8C0` /
-  `0x8229A818` / `0x82299CD8` (partly).
+  `0x8229A818` / `0x82299CD8` (partly): each item is a Copy of
+  help_bar.mesh / help_bar_strum.mesh (0x82299950, 0x82299778) with its own
+  transform (the strum bar is 2 wide, 64 units; drawn at the pen's own
+  transform it was half as wide, "broken in half"), and help_bar.txt
+  (0x822994F0), placed along the pen; the background box (help_box_left /
+  mid / right) is drawn only around the items (0x822998D0, 0x82299698):
+  the port does not draw it yet and hides the box meshes (left showing
+  they stood in the middle of every screen). The port lays the items out
+  in the help bar's own space (helpbar.view, on the metacam's camera), so
+  they keep together while a transition turns the camera (they drifted
+  against their icons by a few pixels on every screen change) [I: GH2
+  sets the items' world places from the start meshes' (0x82299CD8);
+  whether its help bar slides with the transition is not confirmed].
 
 ### Inferred
 
@@ -223,7 +256,11 @@ starts at the venue list.
   port's **Enhanced Options** after Video Settings: a copy of Manage Band's
   button (the flattest), and the seven share the six's column down to a row
   below Credits, scaled to the closer rows (`UiManager::portPanelLoaded`).
-  Options shows GH2's own help bar (its `(helpbar ...)`).
+  The rows keep options.milo's own gaps (audio 42, video 12.5, data -20,
+  memory card -52, bonus -84, credits -109 [C data]: Credits is 25 below
+  Bonus Videos, the others about 32 apart), Enhanced Options taking a copy
+  of the video / data gap; spaced evenly before, Credits sat a few pixels
+  low (GD02-069). Options shows GH2's own help bar (its `(helpbar ...)`).
 - Audio Settings' help bar: audio_settings_panel shows it from its
   FOCUS_MSG (`update_help_display`); the port now sends a panel's own
   component_focus for the focus it enters with [I: UIPanel Enter sets the
@@ -259,12 +296,18 @@ starts at the venue list.
 - The still backdrop (`App::menuBackdrop`, gd01's posed band): the second
   venue (small1) loads when the screen enters. Its band runs 45 fixed 33 ms
   steps (1.5 s), from a quarter into the first song of its tier, silent, under
-  the venue's chorus light preset, and then nothing updates again. The camera
-  stands in front of the stage (from the drummer towards the singer), on the
-  singer's chest, far enough for the guitarist and the drummer, above the
-  crowd's heads. It looks a little to the singer's left, so the band is on
-  the right of the list. The panel darkens the shot slightly. The venue
-  unloads when the screen exits.
+  the venue's chorus light preset, and then nothing updates again (up to 5 s
+  more while the singer has not shown). The camera (the owner's rule in
+  `guidelines/universal_launcher.md`, gd01's pose as the model) is a still
+  close-up of the singer's head, put right of the list's box (0.3 of the
+  half width right of the centre, 0.25 up), from the audience's side 0.3
+  rad round to one flank, 2.6 x the band's half width away (140..220
+  units, never under 110: a close director shot at that moment put the
+  camera inside the singer and the shot showed no one, GD02-074), so the
+  drummer and the guitarist stand behind and beside the singer [I: the
+  port's framing]. The panel darkens the shot slightly. The venue unloads
+  when the screen exits. `--walktest enhanced` (twice) and `lose` (after a
+  song) check the singer is in the right half of the shot.
 - GAMEPADS screen: gd01's panel (layout, rows, flow, live highlight,
   rebinding, per-controller type, the mouse and its "x" that clears a
   binding), in GH2's menu font and colours (`ui/port_draw.*`). It opens with
@@ -347,7 +390,11 @@ next to it to start.
   keyboard's Whammy to E (saved in `controllers.json`), goes back, then
   clicks the help bar's GAMEPADS; stickyaxis plugs in a virtual adapter
   whose D-pad is an axis resting at -32768 (no left / right press in 2 s;
-  moved, one right press). Not covered: held keys, volume sliders, lefty,
+  moved, one right press). Wave B adds: quickplay / pause / lose check a
+  menu sound plays after the song; career checks the band name grows left
+  to right, the difficulty screen comes back lit after Back -> Choose Band
+  -> the band, and the locked portraits; enhanced (twice) and lose (after
+  the song) check the backdrop's band. Not covered: held keys, volume sliders, lefty,
   the credits ending, bonus videos.
 - `GD02_UILOG=1`, `GD02_SCREEN=<screen>`, `GD02_SKIP_BOOT=1`,
   `GD02_SKIP_MOVIES=1`, `GD02_DEBUG_MENU=1` (the old song list),

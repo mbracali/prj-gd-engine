@@ -92,6 +92,12 @@ public:
     void setSlider(const std::string& component, int current, int steps);
     // UIPicture set_tex: another texture file (relative to ui/).
     void setPictureTex(const std::string& component, const std::string& file);
+    // `{<mesh> set_mat <mat>}` (RndMesh's mat): the Mat the mesh draws with.
+    void setMeshMat(const std::string& mesh, const std::string& mat) { meshMat_[mesh] = mat; }
+    std::string meshMat(const std::string& mesh) const {
+        const auto it = meshMat_.find(mesh);
+        return it == meshMat_.end() ? std::string() : it->second;
+    }
     // RndTex::SetBitmap on one of the panel's textures: the materials using
     // Tex `texName` draw the texture file `file` (relative to ui/) instead
     // (the endgame photo, GamePanel 0x822CC9B0).
@@ -134,7 +140,7 @@ public:
     // Text in a template Text's font and style at `world`; returns its width.
     // `key` keeps the layout between frames.
     float drawTemplate(MaterialRenderer& r, const std::string& key, const scene::Text& tmpl, const std::string& str,
-                       const scene::Xfm& world, const float* rgb = nullptr, float alpha = 1);
+                       const scene::Xfm& world, const float* rgb = nullptr, float alpha = 1, int align = -1);
     float templateWidth(const scene::Text& tmpl, const std::string& str);
     void drawMeshAt(MaterialRenderer& r, const scene::Mesh& mesh, const scene::Mat* mat, const scene::Xfm& world);
     // A resource milo named by ui_objects.dta ("helpbar.milo", "../ui/button.milo"), loaded once.
@@ -221,6 +227,7 @@ private:
     std::map<std::string, bool> checks_;
     std::map<std::string, std::pair<int, int>> sliders_;
     std::map<std::string, std::string> pictureTex_;
+    std::map<std::string, std::string> meshMat_;  // setMeshMat
     std::map<std::string, ListState> lists_;
     std::map<std::string, EntryState> entries_;
     std::map<std::string, float> frames_;

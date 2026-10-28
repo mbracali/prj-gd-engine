@@ -18,7 +18,9 @@ class UiManager;
 //              cut short) -> results -> continue -> high score name ->
 //              complete -> the song list (autosave) -> back -> main;
 //              career.json written with the score.
-//   lose       main -> Quick Play -> a song that fails -> lose -> quit -> main.
+//   lose       main -> Quick Play -> a song that fails -> lose -> quit -> main
+//              (a menu sound plays) -> Options -> Enhanced Options (its
+//              backdrop shows the band) -> back -> back.
 //   pause      main -> Quick Play -> the song -> pause -> Start resumes ->
 //              pause -> restart -> pause -> quit -> the song list.
 //   attract    the title screen idles 60 s -> attract mode -> a button ->
@@ -29,7 +31,10 @@ class UiManager;
 //   career     boot -> main -> Career -> Choose Band (NEW BAND) -> a band named "A" -> Medium -> the
 //              character select (Alterna) -> the guitar select (SG, skin
 //              sg_white) -> sponsored -> the career menu (autosave); the
-//              look in career.json and player 0's config.
+//              look in career.json and player 0's config; the name grows
+//              left to right, Back to Choose Band and the band again bring
+//              the difficulty screen back lit (meta_bricks), and the locked
+//              characters' portraits draw char_locked.mat.
 //   career_full  career, then the first tier at Medium: three songs passed
 //              with GH2's cheat_beat_song, the fourth played (the encore
 //              offered), the encore played (battle complete, small1
@@ -42,7 +47,8 @@ class UiManager;
 //              / _ENHANCED (docs/career_and_store.md "Tests").
 //   enhanced   main -> Options -> Enhanced Options -> Internal Resolution
 //              changed (the window's own -> 448p) and saved in enhanced.json
-//              -> back -> back -> main.
+//              -> back -> back -> main; Enhanced Options again; both times
+//              the backdrop shows the band, its singer on the right.
 //   cheats     at the main menu, GH2's Air Guitar and Hyper Speed codes turn
 //              them on; Air Guitar's again, after a pause, turns it off.
 //   mouse      the mouse alone: hover OPTIONS on the main menu (focused), click
@@ -66,7 +72,9 @@ class UiManager;
 //              difficulties -> the song -> multi_compete_screen -> complete.
 //   proface    pro face-off unlocked in the save first (a tour won), then PRO FACE-OFF
 //              (multi_fo): one difficulty for both -> the song -> multi_compete_fo_screen.
-// quickplay also checks the endgame photo GamePanel picked; quickplay and
+// quickplay and pause check a menu sound plays after the song (the game's
+// pause holds only the sounds playing then). quickplay also checks the
+// endgame photo GamePanel picked; quickplay and
 // career that the fresh career.json has The Glitches.
 // Every scenario also fails on any UNHANDLED or UNKNOWN script report, or a
 // STUB not listed in tests/ui_stubs.txt (compiled in). Runs headless with
@@ -116,6 +124,7 @@ private:
     std::array<float, 4> bricks_{};  // the options' bricks light (the back walk)
     unsigned adapter_ = 0;           // the stickyaxis walk's virtual adapter (SDL_JoystickID)
     int sideBase_ = 0, rightBase_ = 0;
+    float nameX0_ = 0;               // the career walk's band name: where it starts
 
     void runCheck(ui::UiManager& ui, const Step& s, double nowMs);
 };

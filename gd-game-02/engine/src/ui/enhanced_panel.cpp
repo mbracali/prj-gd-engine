@@ -4,7 +4,7 @@
 // (gd-game-01/engine/src/ui/select_panels.cpp, EnhancedPanel): its
 // sections, rows, check boxes, dropdowns, explanation box and mouse, in
 // GH2's menu font and colours (PortDraw) over a still shot of a venue
-// (docs/guidelines/controls-and-enhanced-menu.md).
+// (guidelines/universal_launcher.md).
 #include "ui/enhanced_panel.h"
 
 #include <algorithm>

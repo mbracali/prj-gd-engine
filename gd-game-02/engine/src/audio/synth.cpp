@@ -48,7 +48,7 @@ Synth::Synth() : rng_(uint32_t(SDL_GetTicksNS() & 0x7fffffff) | 1) {}
 
 Synth::~Synth() = default;
 
-double Synth::now() const { return double(SDL_GetTicksNS()) / 1e9 - pausedTotal_; }
+double Synth::now() const { return double(SDL_GetTicksNS()) / 1e9; }
 
 float Synth::random01() { return float(rng_() & 0xffff) * 1.5258789e-05f; }
 
@@ -349,17 +349,15 @@ void Synth::stopAll() {
     player_.stopAll();
 }
 
-void Synth::setPaused(bool paused) {
-    if (paused == paused_) return;
-    const double wall = double(SDL_GetTicksNS()) / 1e9;
-    if (paused) pausedAt_ = wall;
-    else pausedTotal_ += wall - pausedAt_;
-    paused_ = paused;
-    player_.setPaused(paused);
-}
+// pause_all_sfx / Game::SetPaused (0x822E7C68): every Sfx pauses the
+// instances it is playing now (0x822ECB40); the sequences and the sounds
+// started afterwards go on [C]. A Synth-wide pause kept the menus silent
+// after a song (game_outro_complete pauses the game for good, gd-backlog
+// GD02-073).
+void Synth::setPaused(bool paused) { player_.setPaused(paused); }
 
 void Synth::update() {
-    if (paused_ || playing_.empty()) return;
+    if (playing_.empty()) return;
     const double t = now();
     playing_.erase(std::remove_if(playing_.begin(), playing_.end(), [&](const std::unique_ptr<Inst>& in) { return step(*in, t); }),
                    playing_.end());

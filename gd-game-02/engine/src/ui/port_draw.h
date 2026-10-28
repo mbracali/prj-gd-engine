@@ -15,7 +15,7 @@ class UiManager;
 // widgets of gd01's (gd-game-01/engine/src/ui/select_panels.cpp and
 // gamepad_panel.cpp) in GH2's menu font and colours, in menu units (1280 x
 // 720). The shared look of every gd-game's two screens is
-// docs/guidelines/controls-and-enhanced-menu.md. A frame draws in two
+// guidelines/universal_launcher.md. A frame draws in two
 // passes (begin(0): the quads, which the canvas batches; begin(1): the
 // texts); each call draws only in its pass. Text heights are line heights,
 // as gd01's drawText takes them. The page slides and fades with the screen

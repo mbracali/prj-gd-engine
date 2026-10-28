@@ -65,7 +65,13 @@ public:
     void load() override {
         PanelObj::load();
         if (!view) return;
-        for (const char* t : {"help_bar.mesh", "help_bar_strum.mesh", "help_bar_starting.mesh", "help_bar_strumbar.mesh", "help_bar.txt"})
+        // GH2 draws the icon and label templates only as copies at each
+        // item (0x8229A630), and the background box (help_box_left / mid /
+        // right) only around the items (0x822998D0, 0x82299698) [C]. The
+        // port does not draw the boxes yet; left showing, they stood at
+        // their rest place in the middle of every screen.
+        for (const char* t : {"help_bar.mesh", "help_bar_strum.mesh", "help_bar_starting.mesh", "help_bar_strumbar.mesh", "help_bar.txt",
+                              "help_box_left.mesh", "help_box_mid.mesh", "help_box_right.mesh"})
             view->setShowing(t, false);
         view->overlay = [this](gfx::MaterialRenderer& r) { drawItems(r); };
         yellowIcon();
@@ -146,9 +152,23 @@ private:
         const auto* text = view->find("help_bar.txt") ? view->find("help_bar.txt")->as<scene::Text>() : nullptr;
         if (!start || !icon || !text) return;
         const float buttonSpacing = prop("button_spacing", 35), textSpacing = prop("text_spacing", 30), strumSpacing = prop("strumbar_spacing", 70);
-        scene::Xfm pen = view->pose().world(start);
-        scene::Xfm strumPen = strumStart ? view->pose().world(strumStart) : pen;
-        const scene::Xfm textWorld = view->pose().world(text);
+        // The items are laid out in the help bar's own space (helpbar.view,
+        // parented to the metacam's camera), so they keep together and keep
+        // their place on screen while a transition moves the camera. Before,
+        // the pen moved along the world's x while the camera turned, and the
+        // labels drifted against their icons by a few pixels on every screen
+        // change (gd-backlog GD02-075) [I: GH2 positions the items from the
+        // start meshes' places, 0x82299CD8 / 0x8229A8C0].
+        const gfx::ScenePose& pose = view->pose();
+        const auto parentWorld = [&](const scene::Object* o) {
+            const scene::Trans* t = gfx::transOf(o);
+            const scene::Object* parent = t && !t->parent.empty() && o->dir ? o->dir->resolve(t->parent) : nullptr;
+            return parent && parent != o ? pose.world(parent) : scene::Xfm{};
+        };
+        const scene::Xfm space = parentWorld(start);
+        scene::Xfm pen = pose.local(start);
+        scene::Xfm strumPen = strumStart ? pose.local(strumStart) : pen;
+        const scene::Xfm textLocal = pose.local(text);
         int k = 0;
         for (const auto& [kind, token] : items_) {
             scene::Xfm& p = kind == "strum" ? strumPen : pen;
@@ -157,14 +177,19 @@ private:
                 const scene::Mesh* m = kind == "strum" && strumIcon ? strumIcon : icon;
                 const scene::Mat* mat = nullptr;
                 if (m->dir) mat = m->dir->resolve<scene::Mat>("hb_" + kind + ".mat");
-                scene::Xfm at = p;
-                view->drawMeshAt(r, *m, mat, at);
+                // GH2 places a Copy of the icon mesh (its own rotation and
+                // scale: help_bar_strum.mesh is 2 wide, 64 units) at the pen
+                // (0x82299950 / 0x8229A818) [C]; drawn at the pen's own
+                // transform, the strum bar was squeezed to half its width.
+                scene::Xfm at = pose.local(m);
+                at.pos = p.pos;
+                view->drawMeshAt(r, *m, mat, scene::compose(at, space));
                 p.pos[0] += kind == "strum" ? strumSpacing : buttonSpacing;
             }
             // The label: the template's orientation at the pen.
-            scene::Xfm at = textWorld;
+            scene::Xfm at = textLocal;
             at.pos = p.pos;
-            const float w = view->drawTemplate(r, "hb" + std::to_string(k++), *text, ui.localize(token), at);
+            const float w = view->drawTemplate(r, "hb" + std::to_string(k++), *text, ui.localize(token), scene::compose(at, space));
             p.pos[0] += w + textSpacing;
         }
     }

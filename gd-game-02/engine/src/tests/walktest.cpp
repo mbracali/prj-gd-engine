@@ -124,6 +124,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         at("qp_selsong_screen");
         press(kTri);  // back
         at("main_screen");
+        check("menu_sounds");  // game_outro_complete paused the game: menu sounds still play (GD02-073)
         expect_ = {"cut_scene_screen", "splash_screen", "startup_load_finder_screen", "startup_create_save_screen", "saving_screen",
                    "guitar_help_screen", "main_screen", "qp_selsong_screen", "qp_diff_screen", "loading_screen", "game_screen",
                    "post_show_screen", "endgame_screen", "highscore_screen", "complete_screen", "meta_loading_screen", "saving_screen",
@@ -139,8 +140,22 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         press(kX);
         at("meta_loading_screen");
         at("main_screen");
+        check("menu_sounds");
+        // After a song, Enhanced Options' backdrop still shows the band (GD02-074).
+        wait(2000);  // the main menu's entrance (a press during it is lost)
+        for (int i = 0; i < 4; ++i) press(kDown), wait(150);  // OPTIONS
+        press(kX);
+        at("options_screen");
+        press(kDown), wait(150), press(kDown), wait(150);
+        press(kX);
+        at("enhanced_options_screen");
+        check("backdrop_band");
+        press(kTri);
+        at("options_screen");
+        press(kTri);
+        at("main_screen");
         expect_ = {"main_screen", "qp_selsong_screen", "qp_diff_screen", "loading_screen", "game_screen", "lose_screen",
-                   "meta_loading_screen", "main_screen"};
+                   "meta_loading_screen", "main_screen", "options_screen", "enhanced_options_screen", "options_screen", "main_screen"};
     } else if (scenario == "pause") {
         quickplaySong(1);
         wait(2500);
@@ -167,6 +182,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         press(kX);  // quit.btn
         at("meta_loading_screen");
         at("qp_selsong_screen");
+        check("menu_sounds");
         expect_ = {"main_screen", "qp_selsong_screen", "qp_diff_screen", "loading_screen", "game_screen", "pause_screen",
                    "game_screen", "pause_screen", "pause_confirm_restart_screen", "game_screen", "pause_screen",
                    "pause_confirm_quit_screen", "meta_loading_screen", "qp_selsong_screen"};
@@ -201,11 +217,31 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         at("chooseprof_screen");  // a save always has a band (The Glitches, the last slot)
         press(kX);  // cp_band0.btn: NEW BAND
         at("nameprof_screen");
+        wait(600);
         press(kX);  // the band's name: "A"
-        wait(150);
+        wait(300);
+        check("name_entry_1");
+        press(kX);  // "AA": the name grows to the right of where it was
+        wait(300);
+        check("name_entry_2");
+        press(kTri);  // back to "A"
+        wait(300);
         key(SDLK_RETURN);  // the keyboard's Enter is Start here: finishes the name (adds no letter)
         at("sel_difficulty_screen");
         check("band_named_A");
+        if (scenario == "career") {
+            // Back to Choose Band (ui_exit_back: meta_light_off) and the band
+            // again: the difficulty screen comes back lit, as GH2 reloads
+            // meta_bricks once no panel holds it (GD02-077 / GD02-081).
+            wait(800);
+            check("bricks_record");
+            press(kTri);
+            at("chooseprof_screen");
+            press(kX);  // cp_band0.btn: the band "A"
+            at("sel_difficulty_screen");
+            wait(800);
+            check("bricks_same");
+        }
         if (scenario == "career_song") {
             // GD02_WALK_DIFF=0..3 (default Medium, the focus).
             const char* d = SDL_getenv("GD02_WALK_DIFF");
@@ -215,6 +251,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         }
         press(kX);  // Medium (the profile's last difficulty)
         at("sel_character_new_screen");
+        check("locked_portraits");
         wait(1500);  // the character opens the door
         if (scenario == "career_song" && SDL_getenv("GD02_WALK_CHAR")) {
             // GD02_WALK_CHAR=<downs> from Punk, GD02_WALK_GUITAR=<downs> from
@@ -251,6 +288,10 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         at("career_screen");
         expect_ = {"main_screen", "chooseprof_screen", "nameprof_screen", "sel_difficulty_screen", "sel_character_new_screen", "sel_guitar_new_screen",
                    "tour_start_screen", "saving_screen", "career_screen"};
+        if (scenario == "career")
+            expect_ = {"main_screen",          "chooseprof_screen",       "nameprof_screen",       "sel_difficulty_screen",
+                       "chooseprof_screen",    "sel_difficulty_screen",   "sel_character_new_screen", "sel_guitar_new_screen",
+                       "tour_start_screen",    "saving_screen",           "career_screen"};
         if (scenario == "career_song") {
             // One career song (GD02_WALK_SONG, default strutter) at
             // GD02_WALK_DIFF: every tier song before it passed with GH2's
@@ -386,6 +427,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         press(kX);
         at("enhanced_options_screen");
         check("enhanced_default");
+        check("backdrop_band");
         // Gamepads (the focus) -> 4 controls -> the PERFORMANCE AND GRAPHICS
         // section -> calibration -> Screen Mode -> Max FPS -> FPS Counter ->
         // Internal Resolution; select opens its dropdown, down and select
@@ -399,9 +441,15 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         check("enhanced_changed");
         press(kTri);
         at("options_screen");
+        press(kX);  // Enhanced Options again (the focus): the band again
+        at("enhanced_options_screen");
+        check("backdrop_band");
+        press(kTri);
+        at("options_screen");
         press(kTri);
         at("main_screen");
-        expect_ = {"main_screen", "options_screen", "enhanced_options_screen", "options_screen", "main_screen"};
+        expect_ = {"main_screen", "options_screen", "enhanced_options_screen", "options_screen", "enhanced_options_screen", "options_screen",
+                   "main_screen"};
     } else if (scenario == "mouse") {
         at("main_screen");
         wait(300);  // a frame drawn: the components' bounds are known
@@ -694,6 +742,57 @@ static bool mainCamera(ui::UiManager& ui, std::array<float, 3>& pos) {
 void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
     auto fail = [&](const std::string& e) { error_ = e, failed_ = done_ = true; };
     auto pass = [&] { ++step_, stepStart_ = -1; };
+    if (s.screen == "name_entry_1" || s.screen == "name_entry_2") {
+        // BandTextEntry's Texts are aligned middle left (0x82144558): the
+        // entered text starts at the same x whatever its length and the
+        // picked character follows it (GD02-068).
+        ui::PanelObj* fp = ui.focusPanel();
+        const gfx::UiView::Hit *entered = nullptr, *picking = nullptr;
+        if (fp && fp->view)
+            for (const gfx::UiView::Hit& h : fp->view->hits()) {
+                if (h.key.size() > 8 && h.key.compare(h.key.size() - 8, 8, "#entered") == 0) entered = &h;
+                if (h.key.size() > 8 && h.key.compare(h.key.size() - 8, 8, "#picking") == 0) picking = &h;
+            }
+        if (!entered || !picking) return fail("the name entry drew no entered text or picked character");
+        std::printf("  name entry: entered %.1f..%.1f, picking %.1f..%.1f\n", entered->x0, entered->x1, picking->x0, picking->x1);
+        if (picking->x0 < entered->x1 - 1) return fail("the picked character overlaps the entered name");
+        if (s.screen == "name_entry_1") nameX0_ = entered->x0;
+        else if (std::fabs(entered->x0 - nameX0_) > 1) return fail("the name does not grow left to right (its start moved)");
+        return pass();
+    }
+    if (s.screen == "locked_portraits") {
+        // career.dta's enter: each locked character's portrait draws with
+        // char_locked.mat, each unlocked one with char_<c>.mat (GD02-079).
+        ui::PanelObj* p = ui.panel("sel_character_panel");
+        if (!p || !p->view) return fail("no sel_character_panel view");
+        int locked = 0;
+        for (const char* c : {"punk", "alterna", "glam", "goth", "metal", "rockabill", "rock", "deathmetal", "classic", "funk1", "grim"}) {
+            const bool open = ui::campaign::isUnlocked(ui, c);
+            const std::string mat = p->view->meshMat(std::string("char_") + c + ".mesh");
+            const std::string want = open ? std::string("char_") + c + ".mat" : "char_locked.mat";
+            if (mat != want) return fail(std::string("portrait ") + c + " drawn with '" + mat + "', not " + want);
+            locked += open ? 0 : 1;
+        }
+        std::printf("  character select: %d locked portraits\n", locked);
+        return locked > 0 ? pass() : fail("a new band has every character unlocked");
+    }
+    if (s.screen == "backdrop_band") {
+        // Enhanced Options' still shot always shows the band, its singer on
+        // the right (guidelines/universal_launcher.md, GD02-074).
+        const bool ok = ui.host().menuBackdropFramed();
+        std::printf("  enhanced backdrop: %s\n", ok ? "the band, the singer on the right" : "no band in the shot");
+        return ok ? pass() : fail("Enhanced Options' backdrop shows no band");
+    }
+    if (s.screen == "menu_sounds") {
+        // A menu sound after a song plays (not held by the game's pause:
+        // pause_all_sfx pauses only the sounds playing then, 0x822E7C68).
+        const int before = ui.host().sfxLiveVoices();
+        if (before < 0) return pass();  // no sound player in this run
+        ui.playSfx("button_toggle");
+        const int after = ui.host().sfxLiveVoices();
+        std::printf("  menu sounds: %d live voice(s) after button_toggle (%d before)\n", after, before);
+        return after > before ? pass() : fail("a menu sound after the song is silent (the synth stayed paused)");
+    }
     // The mouse, gamepads and stickyaxis walks.
     if (s.screen == "focus_main_options") {
         ui::PanelObj* fp = ui.focusPanel();
@@ -765,7 +864,7 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
     }
     if (s.screen == "bricks_record" || s.screen == "bricks_same") {
         std::array<float, 4> c{};
-        if (!bricksLight(ui, c)) return fail("options_screen shows no meta_bricks");
+        if (!bricksLight(ui, c)) return fail(ui.currentScreen() + " shows no meta_bricks");
         if (s.screen == "bricks_record") {
             bricks_ = c;
         } else {
@@ -773,7 +872,7 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
             for (size_t k = 0; k < 4; ++k) d = std::max(d, std::fabs(c[k] - bricks_[k]));
             std::printf("  bricks: light (%.2f %.2f %.2f %.2f), first (%.2f %.2f %.2f %.2f)\n", c[0], c[1], c[2], c[3], bricks_[0], bricks_[1], bricks_[2],
                         bricks_[3]);
-            if (d > 0.01f) return fail("the options came back darker (meta_bricks' light stayed off)");
+            if (d > 0.01f) return fail(ui.currentScreen() + " came back darker (meta_bricks' light stayed off)");
         }
         ++step_, stepStart_ = -1;
         return;

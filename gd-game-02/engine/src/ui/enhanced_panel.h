@@ -17,7 +17,7 @@ class UiManager;
 // gd01's settings in its sections and order, with its check boxes and
 // dropdowns, over a still shot of the second venue with the band posed
 // (UiHost::menuBackdrop), the focused setting's explanation in a box on the
-// right (docs/guidelines/controls-and-enhanced-menu.md). Every change is saved and applies at
+// right (guidelines/universal_launcher.md). Every change is saved and applies at
 // once. Settings gd02 does not have yet are listed greyed, "not available
 // yet", and cannot be chosen. The CHEATS section has GH2's own cheats (the
 // main menu's button codes, config/long_cheats.dta). Defined in the port's

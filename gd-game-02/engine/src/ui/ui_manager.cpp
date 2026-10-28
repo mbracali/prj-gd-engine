@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstring>
 #include <ctime>
+#include <unordered_set>
 
 #include "data/game_data.h"
 #include "input/input.h"
@@ -259,7 +260,11 @@ void UiManager::portPanelLoaded(PanelObj* p) {
     // Options gets Enhanced Options (the port's own entry; [I] not in GH2)
     // after Video Settings, as a copy of its button. GH2's six buttons keep
     // their order and their staggered x; the seven share the six's column
-    // down to a row below Credits, each scaled to the closer rows.
+    // down to a row below Credits, each scaled to the closer rows. The rows
+    // keep options.milo's own gaps (audio 42, video 12.5, data -20, memory
+    // card -52, bonus -84, credits -109 [C data]: Credits sits 25 below
+    // Bonus Videos, not 32); Enhanced Options takes a copy of the video ->
+    // data gap.
     if (p->name() != "options_panel" || !p->view || !p->view->milo()) return;
     scene::Directory& root = p->view->milo()->root();
     if (root.get("port_enhanced.btn")) return;
@@ -276,16 +281,28 @@ void UiManager::portPanelLoaded(PanelObj* p) {
     b->trans.local.pos[0] = 30;
     b->navDown = video->navDown;
     video->navDown = b->name;
+    const float enhancedGap = video->trans.local.pos[2] - data->trans.local.pos[2];
     root.add(std::move(b));
     const char* const order[] = {"op_audio.btn", "video_settings.btn", "port_enhanced.btn", "op_data.btn",
                                  "memory_card.btn",  "op_bonus.btn", "op_credit.btn"};
-    const float top = audio->trans.local.pos[2] + 4, bottom = credit->trans.local.pos[2] - 26;
-    const float step = (top - bottom) / 6, scale = 0.8f * std::min(1.0f, step / 31.5f);  // GH2's rows are 31.5 apart
-    int i = 0;
+    // Each row's distance below Audio Settings in GH2's layout.
+    std::vector<std::pair<scene::BandButton*, float>> rows;
+    float at = 0, prev = audio->trans.local.pos[2];
     for (const char* n : order) {
         scene::BandButton* bb = button(n);
         if (!bb) continue;
-        bb->trans.local.pos[2] = top - step * float(i++);
+        if (bb != audio) {
+            const bool port = std::string(n) == "port_enhanced.btn";
+            at += port ? enhancedGap : prev - bb->trans.local.pos[2];
+            if (!port) prev = bb->trans.local.pos[2];
+        }
+        rows.push_back({bb, at});
+    }
+    const float top = audio->trans.local.pos[2] + 4, bottom = credit->trans.local.pos[2] - 26;
+    const float fit = at > 0 ? (top - bottom) / at : 1;
+    const float step = (top - bottom) / 6, scale = 0.8f * std::min(1.0f, step / 31.5f);  // GH2's rows are 31.5 apart
+    for (auto& [bb, d] : rows) {
+        bb->trans.local.pos[2] = top - d * fit;
         bb->band.width *= scale, bb->band.height *= scale, bb->band.textSize *= scale;
     }
 }
@@ -453,6 +470,39 @@ void UiManager::setViewFrame(PanelObj* p, const std::string& object, float frame
         if (PanelObj* q = panel(name); q && q != p && q->view && q->view->find(object) == o) q->view->setFrame(object, frame);
 }
 
+// GH2 counts each panel's screens (0x823768E0): a panel no screen holds
+// unloads (UIPanel Unload 0x82376C90 frees its directory), and with it the
+// last reference to a shared subdirectory such as meta_bricks.milo; the next
+// panel that loads it gets the file's state again, its light on. The port
+// keeps its panels loaded, so once a transition is over, a shared object no
+// panel of the current (or a pushed) screen shows forgets its frames: the
+// career's difficulty screen, left with Back (meta_light_off) for Choose
+// Band, came back dark until a later Back played meta_light_on
+// (gd-backlog GD02-077 / GD02-081) [C: refcounts; I: the moment, the end
+// of the transition].
+void UiManager::releaseSharedFrames() {
+    if (sharedFrames_.empty() || !current_) return;
+    std::vector<ScreenObj*> held(stack_.begin(), stack_.end());
+    held.push_back(current_);
+    for (auto it = sharedFrames_.begin(); it != sharedFrames_.end();) {
+        const scene::Object* o = it->first;
+        bool shown = false;
+        for (ScreenObj* s : held)
+            for (PanelObj* p : s->panels()) shown = shown || (p->view && p->view->find(it->second.first) == o);
+        if (shown) {
+            ++it;
+            continue;
+        }
+        std::unordered_set<const scene::Object*> objects;
+        if (o->dir)
+            for (const auto& x : o->dir->objects) objects.insert(x.get());
+        objects.insert(o);
+        for (const std::string& name : viewPanels_)
+            if (PanelObj* q = panel(name); q && q->view && q->view->find(it->second.first) == o) q->view->pose().forget(objects);
+        it = sharedFrames_.erase(it);
+    }
+}
+
 void UiManager::enterPanel(PanelObj* p) {
     if (p->up) return;
     p->enter();
@@ -561,6 +611,7 @@ void UiManager::finishTransition() {
     ScreenObj* to = current_;
     phase_ = Phase::Idle;
     resetMetacam();
+    releaseSharedFrames();
     next_ = nullptr;
     if (!to) return;
     // TRANSITION_COMPLETE_MSG to the screen and its panels.

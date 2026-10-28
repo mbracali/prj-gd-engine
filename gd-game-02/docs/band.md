@@ -563,7 +563,15 @@ guitar | bass | grim | cheat)`, skins with outfit milo and mat),
     `character.env`; a locked one in store mode gets the panel's); the door
     (`cs_door.mesh`) is set to Euler (pi/2, 0, z) with z from the
     character's `bone_door` local rotation (0x82269700): the ui_enter clip
-    kicks the door open. Drawn with the placer's panel camera, keeping the
+    kicks the door open. The poll places, wakes (the pending char_event,
+    0x8228D348), polls and lets the character swing the door only while its
+    slot has a placer (slot +0xc, set_placer 0x8228E6F8) [C]: the character
+    select sets it at TRANSITION_COMPLETE, so the kick starts once the
+    screen is up and the door is closed until then (GD02-078). The
+    portraits: career.dta's enter gives a locked character's
+    `char_<c>.mesh` `char_locked.mat` (the "?" card); the port's `set_mat`
+    was a no-op and every portrait showed (GD02-079, `--walktest career`
+    checks them). Drawn with the placer's panel camera, keeping the
     room's depth [I]; the menus' clip clock runs at 120 beats a minute [I].
   - `{reset_hair $char}`, `{{$new main.drv} transfer {$old main.drv}}`
     (the outfit switch keeps the clip and frame [I: by clip name]).

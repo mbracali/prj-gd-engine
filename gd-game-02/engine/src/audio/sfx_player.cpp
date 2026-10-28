@@ -92,17 +92,17 @@ SfxPlayer::VoiceId SfxPlayer::play(std::shared_ptr<const SfxPcm> pcm, const Para
 void SfxPlayer::stop(VoiceId id) {
     std::lock_guard<std::mutex> g(lock_);
     for (Voice& v : voices_)
-        if (v.id == id) v.env.release();
+        if (v.id == id) v.env.release(), v.ended = v.ended || v.paused;  // a paused voice can't fade: it goes
 }
 
 void SfxPlayer::stopAll() {
     std::lock_guard<std::mutex> g(lock_);
-    for (Voice& v : voices_) v.env.release();
+    for (Voice& v : voices_) v.env.release(), v.ended = v.ended || v.paused;
 }
 
 void SfxPlayer::setPaused(bool paused) {
     std::lock_guard<std::mutex> g(lock_);
-    paused_ = paused;
+    for (Voice& v : voices_) v.paused = paused;
 }
 
 void SfxPlayer::setMasterDb(float db) { masterDb_.store(db); }
@@ -112,6 +112,11 @@ bool SfxPlayer::playing(VoiceId id) const {
     for (const Voice& v : voices_)
         if (v.id == id) return true;
     return false;
+}
+
+int SfxPlayer::liveVoices() const {
+    std::lock_guard<std::mutex> g(lock_);
+    return int(std::count_if(voices_.begin(), voices_.end(), [](const Voice& v) { return !v.paused && !v.ended; }));
 }
 
 int SfxPlayer::voices() const {
@@ -162,7 +167,7 @@ void SfxPlayer::mixBlock() {
         }
     const float fader = sfxdsp::dbToLin(masterDb_.load());
     for (Voice& v : voices_) {
-        if (paused_) continue;
+        if (v.paused) continue;
         // The source: linear interpolation at the voice's step [I: XAudio's SRC].
         const SfxPcm& p = *v.pcm;
         const std::vector<float>& s = p.samples;

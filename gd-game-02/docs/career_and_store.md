@@ -137,7 +137,16 @@ deductions), unlock_guitar_screen, then complete_screen.
   (0x822C0070): `song_old_venue` (an older venue chosen),
   `song_current_venue` ("Beat %i/5 songs to continue": required − 1, Easy
   required), `song_current_venue_encore`, on the last tier `song_win_easy`
-  / `song_win_other`.
+  / `song_win_other`. The footer is the last tier row, the one before when
+  that one is inactive (0x822C5A68's end) [C]; UIList draws inactive rows in
+  the disabled colours (0x8237F528) [C]. list_song.milo puts blurb.txt 27
+  units under list.txt (-55 / -28) with rows 40 apart (ss_song.lst
+  spacing) [C data], so the blurb on the row above the locked encore
+  touches the encore's name, in the port as in that data. The rows' font
+  is the data's: dyingmarker.font, caps_mode 2, size 25, list.txt leading
+  0.6 (song2 / song3 the same, list.txt 26) [C data]. Open (GD02-082): a
+  capture of the original to compare the list's font and the blurb's
+  place.
 - **Quick play** (0x82287600): the first two tiers' songs, every song a band
   in use has unlocked at any difficulty (bought ones too), downloads; in
   campaign order. The `song_quickplay` blurb until some band is a tier from

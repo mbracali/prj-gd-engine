@@ -322,7 +322,14 @@ bool ComponentObj::handleNative(Interp& in, const std::string& msg, std::vector<
         const SfxArgs a = sfxArgs(in, args, 0);
         return ui.playSfx(name(), a.volume, a.pan, a.transpose), true;
     }
-    if (msg == "set_mat" || msg == "set_name" || msg == "set_rendered") return true;
+    // A mesh's set_mat (RndMesh SetMat): the character select's locked
+    // portraits draw with char_locked.mat (career.dta) [C data]; it was a
+    // no-op, and every portrait showed its character (GD02-079).
+    if (msg == "set_mat") {
+        if (v && object && object->as<scene::Mesh>()) v->setMeshMat(name(), argStr(0));
+        return true;
+    }
+    if (msg == "set_name" || msg == "set_rendered") return true;
     if (msg == "enable") return panel->enable(name()), true;
     if (msg == "disable") return panel->disable(name(), kPad_DDown), true;
     return false;

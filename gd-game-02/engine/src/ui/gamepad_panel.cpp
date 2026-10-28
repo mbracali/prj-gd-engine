@@ -2,7 +2,7 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 // gd01's Gamepads screen (gd-game-01/engine/src/ui/gamepad_panel.cpp): the
 // same structure, rows, flow and mouse, drawn with PortDraw (GH2's menu
-// font and colours; docs/guidelines/controls-and-enhanced-menu.md).
+// font and colours; guidelines/universal_launcher.md).
 #include "ui/gamepad_panel.h"
 
 #include <SDL3/SDL.h>
