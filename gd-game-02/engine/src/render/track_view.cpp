@@ -179,6 +179,7 @@ void TrackView::reset(float introStartMs) {
     whammyHist_.fill(0);
     blowMs_ = -1e9f, blowLevel_ = 0;
     introStartMs_ = introStartMs;
+    extendAnim_ = {};
     explodeMs_ = -1e9f;
     // The effect copies (0x8269C968: one smash view of each kind per slot,
     // and the burn view), and the explode view's systems.
@@ -455,12 +456,15 @@ void TrackView::buildTail(const Gem& g, int gi, int slot, const Player& player, 
             const float c[4] = {rgb[0], rgb[1], rgb[2], v.color[3]};
             vertex(x0 + v.pos[0] * row.sx, base + row.y, v.pos[2], v.normal, c, v.uv[0], v.uv[1]);
         }
+    // The faces as the template mesh 0x8269C2A0 builds them: (a, a+1, a+V)
+    // and (a+V, a+1, a+V+1) [C]. The other winding is culled: only the glow
+    // line showed, which looked like a translucent tail.
     const int first = int(tailIndices_.size());
     for (size_t j = 0; j + 1 < rows.size(); ++j)
         for (int c = 0; c + 1 < V; ++c) {
             const uint16_t a = uint16_t(b + j * size_t(V) + size_t(c));
             const uint16_t av = uint16_t(a + V);
-            tailIndices_.insert(tailIndices_.end(), {a, av, uint16_t(a + 1), av, uint16_t(av + 1), uint16_t(a + 1)});
+            tailIndices_.insert(tailIndices_.end(), {a, uint16_t(a + 1), av, av, uint16_t(a + 1), uint16_t(av + 1)});
         }
     tailRanges_.push_back({mat, first, int(tailIndices_.size()) - first});
 }
@@ -713,6 +717,10 @@ void TrackView::draw(gfx::Renderer& r, gfx::SceneCache& cache, const Song& song,
     {
         float frame = 1920;
         if (introStartMs_ > -1e8f) frame = std::clamp((nowMs - introStartMs_) / 1000.0f * 1920.0f, 0.0f, 1920.0f);
+        if (extendAnim_.startMs > -1e8f && nowMs >= extendAnim_.startMs) {
+            const float k = extendAnim_.periodMs > 0 ? std::min(1.0f, (nowMs - extendAnim_.startMs) / extendAnim_.periodMs) : 1.0f;
+            frame = extendAnim_.from + (extendAnim_.to - extendAnim_.from) * k;
+        }
         pose_.setFrame(obj("extend_track_normal.tnm"), frame);
     }
     // blow_streak: the surface flash and the camera shake.

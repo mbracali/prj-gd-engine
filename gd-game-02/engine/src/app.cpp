@@ -56,9 +56,18 @@
 
 namespace {
 
-// Silence before the audio starts, so the first gems scroll in [I]: GH2's
-// own intro timing is not traced yet.
-constexpr double kLeadInMs = 2000;
+// GH2's song start (GamePanel start 0x822CCA60, poll 0x822CDEB8) [C]: the
+// song clock starts at minus the length of the INTRO shot GamePanel draws
+// from the world's picker (INTRO_ENCORE for an encore; a fast intro, the
+// restart from the pause menu, at track_extend_sec); `extend_track` runs at
+// song time track_extend_sec (game.dta (track_extend_sec -2): at once when
+// the clock starts later), and past -25 ms the intro clock hands over to the
+// song stream (0x822CB260) and the controllers come on (0x822CED30 /
+// 0x822E2510). Without a venue shot the clock starts at track_extend_sec
+// [I].
+constexpr double kTrackExtendMs = -2000;
+constexpr double kLeadInMs = -kTrackExtendMs;
+constexpr float kControllersLiveMs = -25;
 // How long the highway stays after the song's [end] before the song closes
 // (longer once the track explodes: track_explode.filt runs 160 frames).
 constexpr float kOutroMs = 2000;
@@ -211,6 +220,7 @@ public:
     }
     bool gamePaused() const override { return paused_; }
     double gameTimeMs() const override { return lastT_; }
+    std::vector<std::pair<std::string, double>> gameSfx() const override { return songSfx_; }
     float gameBeat() const override {
         return song_ ? float(song_->tempo.msToTick(std::max(0.0f, lastT_)) / std::max(1, song_->tempo.division())) : 0.0f;
     }
@@ -281,6 +291,8 @@ private:
     double mouseMovedMs_ = -1e9;
     void playerAction(const InputEvent& a);
     void updateSong(float t);
+    void updateIntro(float t);
+    void gameSounds(int player, const std::vector<PlayerEvent>& events);
     float songClock();
     void frameSong();
     void frameUi();
@@ -339,6 +351,17 @@ private:
     float bandVolume_ = 1, guitarVolume_ = 1;
     int syncOffsetMs_ = 0;
     double leadInMs_ = kLeadInMs;
+    bool fastIntro_ = false;
+    // The intro (beginSong): extend_track's song time, sent yet; the
+    // controllers live yet, and the frets held while they were not (synced
+    // when they come on).
+    float extendAtMs_ = float(kTrackExtendMs);
+    bool extendSent_ = false, controllersLive_ = false;
+    std::array<uint32_t, 2> heldBeforeLive_{};
+    // Without the menus: track_panel.dta's intro sounds, played by the program.
+    int introSfx_ = 0;
+    std::vector<std::pair<std::string, double>> songSfx_;  // UiHost::gameSfx
+    float pendingAwardMs_ = -1e9f;  // without the menus: sp_awarded's time
     // Two players (docs/multiplayer.md): the mode, per player the
     // difficulty, the part (instrument) and the pad (input slot) that plays
     // it; the co-op band and the shared Star Power meter.
@@ -753,7 +776,7 @@ bool App::loadSong(const SongInfo& info, int difficulty, bool autoplay, float ba
         if (const char* l = SDL_getenv("GD02_LEFTY")) input_.setLefty(SDL_strchr(l, '1') != nullptr, SDL_strchr(l, '2') != nullptr);
         // GD02_KEYS: with the menus, only its "s<song ms>:" items play in the song.
         const char* k = SDL_getenv("GD02_KEYS");
-        keys_ = KeyScript(ui_ ? MenuKeys::songItems(k ? k : "") : (k ? k : ""));
+        keys_ = KeyScript(walk_ && !walk_->songKeys().empty() ? walk_->songKeys() : ui_ ? MenuKeys::songItems(k ? k : "") : (k ? k : ""));
         if (!keys_.valid()) SDL_Log("GD02_KEYS: some items were not understood and are ignored");
         SDL_Log("%s (%s): %d Hz, %d channels, %d %s gems, hopo_threshold %d", info.id.c_str(), info.name.c_str(),
                 pendingStream_->sampleRate(), pendingStream_->channels(), int(player_->chart().gems.size()),
@@ -771,8 +794,10 @@ bool App::loadSong(const SongInfo& info, int difficulty, bool autoplay, float ba
         return false;
     }
     bandVolume_ = band, guitarVolume_ = guitar;
-    // A restart from the pause menu skips most of the lead-in (game fast_intro) [I].
-    leadInMs_ = fastIntro ? 1000 : kLeadInMs;
+    // The lead-in until beginSong times GH2's intro clock.
+    fastIntro_ = fastIntro;
+    leadInMs_ = kLeadInMs;
+    extendAtMs_ = float(kTrackExtendMs);
     info_ = &info;
     begun_ = wonSent_ = lostSent_ = outroSent_ = spReadySent_ = false;
     musicPaused_ = false;
@@ -783,10 +808,10 @@ bool App::loadSong(const SongInfo& info, int difficulty, bool autoplay, float ba
     lastFrameMs_ = -leadInMs_;
     failMs_ = -1e9f;
     if (prepareTrack()) {
-        track_->reset(float(-leadInMs_));
+        track_->reset(extendAtMs_);
         track_->setLefty(input_.lefty(0));
-        if (track2_) track2_->reset(float(-leadInMs_)), track2_->setLefty(input_.lefty(1));
-        hud_->reset(float(-leadInMs_));
+        if (track2_) track2_->reset(extendAtMs_), track2_->setLefty(input_.lefty(1));
+        hud_->reset(extendAtMs_);
     }
     // The venue: without the menus the song's (its quickplay venue or career
     // tier, GD02_VENUE overrides); with them world_panel loads it (worldLoad).
@@ -805,6 +830,28 @@ bool App::loadSong(const SongInfo& info, int difficulty, bool autoplay, float ba
 
 void App::beginSong() {
     if (!pendingStream_ || !info_) return;
+    // GamePanel's start (0x822CCA60): the intro clock from the INTRO shot's
+    // length (CamShot +0xf0 = every keyframe's duration + blend, frames at
+    // 30 a second, 0x82226630) [C].
+    double startMs = kTrackExtendMs;
+    if (!fastIntro_ && director_)
+        if (const scene::CamShot* shot = director_->drawShot({encoreFx_ ? "INTRO_ENCORE" : "INTRO"}))
+            startMs = std::min(-double(shot->lengthFrames()) / 30.0 * 1000.0, 0.0);
+    leadInMs_ = -startMs;
+    extendAtMs_ = float(std::max(startMs, kTrackExtendMs));
+    extendSent_ = controllersLive_ = false;
+    heldBeforeLive_ = {};
+    introSfx_ = 0;
+    songSfx_.clear();
+    lastT_ = float(startMs);
+    lastFrameMs_ = startMs;
+    if (track_ && hud_) {
+        track_->reset(extendAtMs_);
+        if (track2_) track2_->reset(extendAtMs_);
+        hud_->reset(extendAtMs_);
+    }
+    worldDriver_.reset(float(startMs));
+    SDL_Log("intro: the song clock starts at %.0f ms, the track extends at %.0f ms", startMs, double(extendAtMs_));
     mixer_.setSpeed(1);
     const bool coop = mode_ == DevMode::Coop;
     const SongAudio& audio = coop && info_->coopAudio ? *info_->coopAudio : info_->audio;
@@ -1050,6 +1097,17 @@ void App::playerAction(const InputEvent& a) {
     Player* p = playerFor(a.player);
     if (!p || botFor(p)) return;  // autoplay owns that player's frets
     const float t = float(mixer_.songTimeMs(a.timestampNs));
+    // On the intro clock the beat-match controllers are off and drop every
+    // button (0x822CED30; on again in 0x822E2510 once the clock hands over)
+    // [C]: no strum, Star Power or miss before the track is up.
+    if (!controllersLive_) {
+        const size_t i = p == player2_.get() ? 1 : 0;
+        if (isFret(a.action)) {
+            const uint32_t bit = 1u << fretOf(a.action);
+            heldBeforeLive_[i] = a.down ? heldBeforeLive_[i] | bit : heldBeforeLive_[i] & ~bit;
+        }
+        return;
+    }
     p->update(t);
     if (isFret(a.action)) {
         if (a.down) p->fretDown(fretOf(a.action), t);
@@ -1075,7 +1133,86 @@ float App::songClock() {
 
 // One frame of the song's rules: scripted and autoplay input, the players,
 // the track and HUD events, and (with the menus) GH2's game events.
+// The intro after beginSong: extend_track at its song time (game.dta runs
+// track_panel do_extend_sequence: track_unfurl, the smashers popping with
+// nowbar_1..5, then slide_meter_in with meter_slide; without the menus the
+// program plays those sounds at the scripts' times), then the controllers at
+// -25 ms, the frets held until then synced (fret downs, no strum) [I: the
+// sync follows GH1's FUN_0025c070].
+void App::updateIntro(float t) {
+    if (!begun_) return;
+    if (!extendSent_ && t >= extendAtMs_) {
+        extendSent_ = true;
+        if (ui_) ui_->gameScript("extend_track");
+    }
+    if (!ui_) {
+        // track_panel.dta do_extend_sequence and hud_panel.dta slide_meter_in [C data].
+        static const struct {
+            float atMs;
+            const char* sfx;
+        } kIntro[] = {{0, "track_unfurl"}, {1300, "nowbar_1"}, {1400, "nowbar_2"}, {1500, "nowbar_3"},
+                      {1600, "nowbar_4"},  {1700, "nowbar_5"}, {2050, "meter_slide"}};
+        while (introSfx_ < int(std::size(kIntro)) && t >= extendAtMs_ + kIntro[introSfx_].atMs)
+            playSfxArgs(kIntro[introSfx_++].sfx, fxVolumeDb_, 0, 0);
+    }
+    if (!controllersLive_ && t > kControllersLiveMs) {
+        controllersLive_ = true;
+        for (int p = 0; p < 2; ++p) {
+            Player* pl = p == 0 ? player_.get() : player2_.get();
+            if (!pl || botFor(pl)) continue;
+            for (int f = 0; f < 5; ++f)
+                if (heldBeforeLive_[size_t(p)] & (1u << f)) pl->fretDown(f, t);
+        }
+    }
+}
+
+// The players' events to their script handlers, which play the game's
+// sounds [C]: the PlayerMatcher's miss sink (0x822E2B10: an overstrum or a
+// wrong fret, not a passed gem) sends `miss` (player) to beatmatch.dta's
+// player_matcher_handlers: miss_gtr, or miss_bass on a bass track; the
+// pass sink (0x822E2FD0) looks up miss_whoosh, which no bank on the disc
+// has, so a passed gem is silent [C data]. No code sends the handlers'
+// `hit` (no "hit" symbol in the executable), so sp_gemhit never plays [C
+// by absence]. The Player sends player.dta's handlers phrase_captured
+// (sp_awarded 0.2 s later), start_using (sp_deployed, the crowd's
+// crowd_upto_good, the track's Star Power bump) and stop_using
+// (sp_depleted). Without the menus the program plays the same sounds.
+void App::gameSounds(int player, const std::vector<PlayerEvent>& events) {
+    const Player* pl = player == 0 ? player_.get() : player2_.get();
+    if (!pl) return;
+    const bool multi = player2_ != nullptr;
+    const float pan = multi ? (player == 0 ? -1.0f : 1.0f) : 0.0f;  // system_script.dta player_pan
+    const bool bass = multi && parts_[size_t(player)] == "bass";
+    for (const PlayerEvent& e : events) {
+        const char* matcher = nullptr;
+        const char* handler = nullptr;
+        if (e.kind == PlayerEvent::Kind::Miss) matcher = "miss";
+        else if (e.kind == PlayerEvent::Kind::PhraseCaptured) handler = "phrase_captured";
+        else if (e.kind == PlayerEvent::Kind::StarPowerStart) handler = "start_using";
+        else if (e.kind == PlayerEvent::Kind::StarPowerEnd) handler = "stop_using";
+        else continue;
+        if (ui_) {
+            const std::string obj = std::string(matcher ? "player_matcher" : "player") + std::to_string(player);
+            ui_->callScript(ui_->interp().findObject(obj), matcher ? matcher : handler, {Value::integer(player)});
+            continue;
+        }
+        if (matcher) playSfxArgs(bass ? "miss_bass" : "miss_gtr", fxVolumeDb_, pan, 0);
+        else if (e.kind == PlayerEvent::Kind::PhraseCaptured) pendingAwardMs_ = lastT_ + 200.0f;
+        else if (e.kind == PlayerEvent::Kind::StarPowerStart) {
+            playSfxArgs(multi ? "sp_deployed_multi" : "sp_deployed", fxVolumeDb_, pan, 0);
+            if (track_) track_->animateExtend(2000, 2025, 800, lastT_);
+        } else {
+            playSfxArgs(multi ? "sp_depleted_multi" : "sp_depleted", fxVolumeDb_, pan, 0);
+        }
+    }
+    if (!ui_ && pendingAwardMs_ > -1e8f && lastT_ >= pendingAwardMs_) {
+        pendingAwardMs_ = -1e9f;
+        playSfxArgs("sp_awarded", fxVolumeDb_, 0, 0);
+    }
+}
+
 void App::updateSong(float t) {
+    updateIntro(t);
     // The analog whammy bar, sampled every frame (Player's movement detection).
     if (!paused_) {
         if (!player2_) {
@@ -1149,6 +1286,8 @@ void App::updateSong(float t) {
         if (track2_ && player2_) track2_->onEvents(events2, *player2_, t), hud_->onEvents(events2, 1, t);
         if (coopBand_) hud_->onEvents(bandEvents, -1, t);
     }
+    gameSounds(0, events);
+    if (player2_) gameSounds(1, events2);
     if (!player2_) {
         mixer_.setGuitarAudible(player_->guitarAudible());
     } else if (parts_[0] != parts_[1]) {
@@ -1416,7 +1555,26 @@ int App::gameCounter(int player, const std::string& key) const {
 }
 
 void App::trackCommand(const std::string& msg, const std::vector<Value>& args) {
-    (void)args;
+    // A player's extend anim (player.dta start_using's Star Power bump) or
+    // the panel's (game.dta beat with the barf cheat): animate (range a b)
+    // (period s) [(units u)]; the panel's own range 0..1920 is the extend
+    // sequence the track view times itself (render/track_view.h).
+    if (msg == "player_animate" || msg == "animate") {
+        float from = -1, to = -1, period = 0;
+        for (size_t k = msg == "animate" ? 0 : 1; k < args.size(); ++k) {
+            const Value& v = args[k];
+            if (v.type != Value::Type::Array || !v.array || v.array->empty()) continue;
+            const std::vector<Value>& l = *v.array;
+            const std::string key = l[0].str();
+            if (key == "range" && l.size() >= 3) from = l[1].number(), to = l[2].number();
+            if (key == "period" && l.size() >= 2) period = l[1].number();
+        }
+        if (from < 1920 || to < from) return;
+        const int p = msg == "animate" ? -1 : args.empty() ? 0 : args[0].integerValue();
+        if (track_ && p != 1) track_->animateExtend(from, to, period * 1000.0f, lastT_);
+        if (track2_ && p != 0) track2_->animateExtend(from, to, period * 1000.0f, lastT_);
+        return;
+    }
     // The track view keeps its own intro, extend and smasher animations
     // (render/track_view.h); explode is the scripts' (game_won_msg).
     if (msg == "explode" && !exploded_) {
@@ -1542,6 +1700,10 @@ void App::unloadVenue() {
 // GH2's play_sfx / synth play_sequence: the game's banks, then the venue's
 // (crowd_win, encore_yes... from the UI's scripts).
 bool App::playSfxArgs(const std::string& name, float volumeDb, float pan, float transpose) {
+    if (begun_ && player_ && songSfx_.size() < 256) songSfx_.emplace_back(name, double(lastT_));
+    // Development aid: GD02_SFXLOG=1 logs every sound the scripts or the game play.
+    static const bool sfxLog = envOn("GD02_SFXLOG");
+    if (sfxLog) SDL_Log("sfx: %s (%.1f dB, pan %.2f)%s", name.c_str(), double(volumeDb), double(pan), begun_ && player_ ? (" at song " + std::to_string(int(lastT_)) + " ms").c_str() : "");
     if (!synth_) return false;
     if (synth_->play(name, volumeDb, pan, transpose)) return true;
     return world_ && world_->venue().find(name) && world_->playSound(name, nullptr, volumeDb, pan, transpose);
@@ -1777,12 +1939,32 @@ void App::loadEnhanced() {
     applyEnhanced();
 }
 
+// The Steam Deck defaults (gd01's "Steam Deck" column, gd-game-01/README.md):
+// full screen, 60 FPS, no FPS counter, 800 lines; the Steam Deck download
+// (-DGD02_STEAM_DECK=ON) and a launcher that sees a Deck (GD02_HANDHELD=1,
+// module_entry.cpp). Saved settings still win.
+static const char* deckDefault(const std::string& key) {
+#if defined(GD02_STEAM_DECK)
+    const bool deck = true;
+#else
+    const char* h = SDL_getenv("GD02_HANDHELD");
+    const bool deck = h && h[0] == '1';
+#endif
+    if (!deck) return nullptr;
+    if (key == "screen_mode") return "fullscreen";
+    if (key == "max_fps") return "60";
+    if (key == "fps_counter") return "off";
+    if (key == "internal_res") return "800";
+    return nullptr;
+}
+
 std::string App::enhancedValue(const std::string& key) {
     const ui::EnhancedSetting* e = enhancedSetting(key);
     if (!e) return {};
     const std::string& v = enhanced_[key].str();
     for (const char* ok : e->values)
         if (v == ok) return v;
+    if (const char* d = deckDefault(key)) return d;
     return e->values.front();  // unset or not valid: the default
 }
 

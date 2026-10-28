@@ -57,7 +57,7 @@ class Synth;
 //   answer quietly now and are reported as STUBs (L1). Venue objects are
 //   script objects by name (sparks.filt animate, band_shadow1.mesh
 //   set_showing, [env1] animate (dest 10) (period 0.01)...).
-class World {
+class World : public SinkHolder {
 public:
     // `interp`: the UI's interpreter (the world's type comes from its boot
     // tree's (objects ...), `objects`); without one the world runs its own,
@@ -111,6 +111,7 @@ public:
     void addSink(ScriptObject* sink, const std::vector<std::string>& messages);
     // {dir remove_sink obj}: every message of that sink (the band on game_over and when it goes).
     void removeSink(ScriptObject* sink);
+    void sinkDestroyed(ScriptObject* sink) override { removeSink(sink); }  // a deleted sink leaves (SinkHolder)
     // The audience and its audio (game/crowd.h).
     Crowd& crowd() { return *crowd_; }
     // The sound effects (audio/synth.h): the venue bank's Sfx and sequences

@@ -87,6 +87,8 @@ public:
     // A game event for the game panel and its sinks (intro_start_msg,
     // game_won_msg, game_lost, game_outro_complete, star_power_ready...).
     void gameEvent(const std::string& msg, std::vector<Value> args = {});
+    // A message for the game panel's script alone (extend_track).
+    void gameScript(const std::string& msg, std::vector<Value> args = {});
 
     std::string currentScreen() const;
     bool inTransition() const;

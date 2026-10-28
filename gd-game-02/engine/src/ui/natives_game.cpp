@@ -154,7 +154,7 @@ namespace {
 // GamePanel `game`: GH2's GamePanel with GameConfig's methods. Entering it
 // loads the configured song through the host; its sinks get the game
 // events (UiManager::gameEvent).
-class GamePanelObj : public PanelObj {
+class GamePanelObj : public PanelObj, public SinkHolder {
 public:
     GamePanelObj(UiManager& ui, const std::string& name) : PanelObj(ui, name, "GamePanel") {
         gGame = this;
@@ -164,6 +164,7 @@ public:
         video_ = std::make_unique<SmallObj>("video_provider", "VideoProvider");
     }
     ~GamePanelObj() override {
+        stopHolding();
         if (gGame == this) gGame = nullptr;
     }
 
@@ -256,13 +257,26 @@ public:
         if (msg == "game_won_msg" || msg == "game_lost") props["game_over"] = Value::integer(1), ui.session().gameOver = true;
         ui.callScript(this, msg, args);
         // The sinks: (object, messages) pairs; no messages means all of them.
+        toSinks(msg, args);
+    }
+
+    // To the sinks that want `msg`, from a copy: a sink a handler removes or
+    // deletes on the way is skipped (still in sinks_).
+    void toSinks(const std::string& msg, const std::vector<Value>& args) {
         const auto sinks = sinks_;
         for (const auto& [o, msgs] : sinks) {
             if (!msgs.empty() && !msgs.count(msg)) continue;
+            if (std::none_of(sinks_.begin(), sinks_.end(), [o = o](const auto& p) { return p.first == o; })) continue;
             if (auto* p = dynamic_cast<PanelObj*>(o); p && !p->up) continue;
             ui.callScript(o, msg, args);
         }
     }
+
+    // A sink deleted while held: a world loaded outside a game (Enhanced
+    // Options' backdrop adds itself on enter, `{game add_sink $this}`, and
+    // is freed when the screen goes) no longer gets the next game's
+    // intro_start_msg (the career crash, bug-fix 5).
+    void sinkDestroyed(ScriptObject* o) override { removeSink(o); }
 
     bool handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) override {
         Session& s = ui.session();
@@ -379,8 +393,23 @@ public:
             return true;
         }
         if (msg == "foreach_player_matcher") return true;
+        // player.dta's {handle (game star_power_start / stop $player_num)}:
+        // the HUD and the world get Star Power from the program (HudView,
+        // WorldDriver), so nothing goes on to the sinks here.
+        if (msg == "star_power_start" || msg == "star_power_stop") return true;
         if (msg == "load_song" || msg == "loaded") return r = Value::integer(host.gameLoaded() ? 1 : 0), true;
-        return PanelObj::handleNative(in, msg, args, r);
+        if (PanelObj::handleNative(in, msg, args, r)) return true;
+        // What the game's script and natives leave goes on to the sinks:
+        // game.dta's {handle ($this slide_meter_in)} reaches hud_panel,
+        // {handle ($this intro_end)} the world [I: GH2's MsgSource
+        // forwarding, seen in those scripts]. Only messages a sink names, and
+        // intro_end, so that a query nobody answers stays unhandled (the
+        // world takes every message).
+        bool any = msg == "intro_end";
+        for (const auto& [o, msgs] : sinks_) any = any || msgs.count(msg);
+        if (!any) return false;
+        toSinks(msg, args);
+        return true;
     }
 
     void removeSink(ScriptObject* o) {
@@ -422,6 +451,21 @@ public:
         }
         if (track_ ? kTrack.count(msg) : kHud.count(msg)) {
             if (msg == "set_paused") paused = !args.empty() && args[0].truthy();
+            if (track_ && msg == "animate") {
+                // The options evaluated ((range 2000 2025) (period 0.4): the barf cheat's beat bump).
+                std::vector<Value> a;
+                for (const Value& raw : args) {
+                    Value v = in.evalValue(raw);
+                    if (v.type == Value::Type::Array && v.array) {
+                        std::vector<Value> l;
+                        for (const Value& x : *v.array) l.push_back(in.evalValue(x));
+                        v = Value::list(std::move(l));
+                    }
+                    a.push_back(v);
+                }
+                ui.host().trackCommand(msg, a);
+                return true;
+            }
             if (track_) ui.host().trackCommand(msg, args);
             else ui.host().hudCommand(msg, args);
             // HudPanel's reset ends with the script's on_reset (0x8268E440):
@@ -443,13 +487,50 @@ public:
     std::string fileName() override { return ""; }
 };
 
+// A player's track ({player0 track}: its GHTrackDir, 0x82695D48): its
+// extend anim ({{$this track} extend_anim} animate (range 2000 2025): the
+// Star Power bump, player.dta start_using) goes to the program's track view;
+// set_bonus_gems and on_miss_phrase the view does itself on the players'
+// events (render/track_view.h) [C].
+class TrackDirObj : public ScriptObject {
+public:
+    TrackDirObj(UiManager& ui, int player) : ScriptObject("track_dir" + std::to_string(player), "GHTrackDir"), ui_(ui), p_(player) {}
+    bool handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) override {
+        r = Value::integer(0);
+        if (msg == "extend_anim") return r = Value::obj(this), true;
+        if (msg == "animate") {
+            std::vector<Value> a{Value::integer(p_)};
+            for (const Value& raw : args) {
+                Value v = in.evalValue(raw);
+                if (v.type == Value::Type::Array && v.array) {
+                    std::vector<Value> l;
+                    for (const Value& x : *v.array) l.push_back(in.evalValue(x));
+                    v = Value::list(std::move(l));
+                }
+                a.push_back(v);
+            }
+            ui_.host().trackCommand("player_animate", a);
+            return true;
+        }
+        return msg == "set_bonus_gems" || msg == "on_miss_phrase";
+    }
+
+private:
+    UiManager& ui_;
+    int p_;
+};
+
 // player0 / player1 / band: a player's results for the end screens; the
 // co-op band (index -1, host gameBand: its score, stars 0x822CE5D8,
 // streak and meter), player 0 outside co-op.
 class PlayerObj : public ScriptObject {
 public:
-    PlayerObj(UiManager& ui, const std::string& name, int index) : ScriptObject(name, "Player"), ui_(ui), i_(index) {}
+    PlayerObj(UiManager& ui, const std::string& name, int index)
+        : ScriptObject(name, "Player"), ui_(ui), i_(index), track_(ui, std::max(0, index)) {}
     bool handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) override {
+        // player.dta's handlers: {$this track}, {$this player_matcher} (0x822C7060).
+        if (msg == "track") return r = Value::obj(&track_), true;
+        if (msg == "player_matcher") return r = Value::obj(in.findObject("player_matcher" + std::to_string(std::max(0, i_)))), true;
         if (i_ < 0)
             if (const BandPerformer* b = ui_.host().gameBand()) {
                 r = Value::integer(0);
@@ -514,6 +595,7 @@ private:
 private:
     UiManager& ui_;
     int i_;
+    TrackDirObj track_;
 };
 
 // gamecfg: GameConfig's mode table (config/modes.dta) and players.
@@ -611,6 +693,10 @@ void installGameNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<S
 
 void gameEventImpl(UiManager&, const std::string& msg, std::vector<Value> args) {
     if (gGame) gGame->dispatch(msg, std::move(args));
+}
+
+void gameScriptImpl(UiManager& ui, const std::string& msg, std::vector<Value> args) {
+    if (gGame) ui.callScript(gGame, msg, std::move(args));
 }
 
 }  // namespace ui

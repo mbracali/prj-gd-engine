@@ -216,6 +216,15 @@ become the records' best scores, the save-wide items every band's.
   unlock_venue_screen), $450; the store: the first finish (lp_cayenne,
   $250) bought and on the Les Paul; career.json checked (cash 200, spent
   250, battle completed, small1 unlocked, the stars, the item).
+- `--walktest career_song`: one career song through the menus.
+  `GD02_WALK_SONG` (default strutter) at `GD02_WALK_DIFF` (0..3, default
+  Medium). Every tier song before it is passed with cheat_beat_song, so
+  set_career_venue / set_career_song offer it; it is played on autoplay
+  (`GD02_WALK_END=<ms>` cuts it short) and its endgame screens are
+  followed. Options: `GD02_WALK_CHAR` / `GD02_WALK_GUITAR` (downs on the
+  character / guitar select; the first outfit / skin), `GD02_WALK_ENHANCED=1`
+  (Enhanced Options first: the bug-fix 5 crash), `GD02_WALK_FAIL=<ms>` (fail
+  there, then RESTART).
   `GD02_WALK_SHOTS=<dir>` also saves the store's item page, a store
   character and the venue map.
 - `--uitest` campaign checks: tiers, required songs, encores, the cash of

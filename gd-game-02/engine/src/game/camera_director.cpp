@@ -394,6 +394,13 @@ bool CameraDirector::passes(const scene::CamShot& shot, const std::vector<std::p
 const scene::CamShot* CameraDirector::pickShot(const std::vector<std::string>& categories,
                                                const std::vector<std::pair<std::string, Value>>& filter) {
     if (!pickEnabled_ || freeCam_ || !sequence_.empty()) return nullptr;
+    const scene::CamShot* picked = drawShot(categories, filter);
+    if (picked && picked != current_) startShot(picked);
+    return picked;
+}
+
+const scene::CamShot* CameraDirector::drawShot(const std::vector<std::string>& categories,
+                                               const std::vector<std::pair<std::string, Value>>& filter) {
     Interp& in = world_.interp();
     const Value prev = current_ ? Value::obj(world_.scriptFor(const_cast<scene::CamShot*>(current_))) : Value::integer(0);
     auto ok = [&](const scene::CamShot* s) {
@@ -439,7 +446,6 @@ const scene::CamShot* CameraDirector::pickShot(const std::vector<std::string>& c
             break;
         }
     state_[picked].used = true;
-    if (picked != current_) startShot(picked);
     return picked;
 }
 
@@ -730,8 +736,16 @@ void CameraDirector::play(const scene::CamShot& shot, ShotState& st, float f, fl
         const float l = std::sqrt(st.shakeTgt[0] * st.shakeTgt[0] + st.shakeTgt[1] * st.shakeTgt[1] + st.shakeTgt[2] * st.shakeTgt[2]);
         if (l > amp && l > 0)
             for (float& c : st.shakeTgt) c *= amp / l;
-        st.shakeAngTgt[0] = std::clamp(st.shakeAngTgt[0], -maxX, maxX);
-        st.shakeAngTgt[2] = std::clamp(st.shakeAngTgt[2], -maxZ, maxZ);
+        // 0x82224D18's limit: the excess |a| - max taken back towards zero.
+        // A clamp for max >= 0; some shots' keyframes (theatre) have a
+        // negative max angle, where GH2 lands on -max with the sign flipped
+        // (std::clamp with hi < lo is undefined: an abort with assertions).
+        auto limit = [](float a, float max) {
+            const float e = std::fabs(a) - max;
+            return e > 0 ? a + (a > 0 ? -e : e) : a;
+        };
+        st.shakeAngTgt[0] = limit(st.shakeAngTgt[0], maxX);
+        st.shakeAngTgt[2] = limit(st.shakeAngTgt[2], maxZ);
         for (int c = 0; c < 3; ++c) {
             st.shakeVel[c] += (st.shakeTgt[c] - st.shakePos[c]) * 0.02f;
             st.shakePos[c] += st.shakeVel[c];

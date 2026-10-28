@@ -229,6 +229,24 @@ record of every class on the disc to its end and asserts the counts.
   sphere radius over its depth, scaled by the camera [I: the camera
   fields]. The shadow group is not drawn in the colour pass [I: GH2 draws
   it into the shadow buffer; gd02 has no shadow pass yet].
+- A guitar on its own (GuitarDisplayPanel, the guitar select and the
+  store; wave B #14): the outfit is a Character directory and draws as one,
+  at its first LOD (the record's LOD list, so flyingv_v2's `lod0` as well
+  as the others' `lod0.grp`), the group's members in its order, the loose
+  roots by draw order, never the shadow group (`ui::chars::displayMeshes`).
+  Before, the panel drew every showing mesh in file order: flyingv_v2 has
+  `strings.mesh` (src_alpha, z_mode normal: depth written where its
+  texture is clear) before `guitar.mesh`, which cut the neck under the
+  strings out, and every guitar's `shadow_guitar.mesh` drew too. In a
+  venue the merged LOD groups keep GH2's append order (RndGroup add
+  0x821DC870 pushes back; no sort by draw order found): the outfit's
+  meshes come after the character's. `--chartest` checks every guitar and
+  bass's display list: something drawn, the body, no shadow mesh outside
+  a LOD group, no depth-writing blended mesh before an opaque one of a
+  lower draw order. Open [I]: van_yellow's lod0.grp lists its strings
+  (`guitar.1.mesh`, order 0) before `guitar.mesh` (order 0) and is drawn
+  so, as the data says; a capture of the original would show whether GH2
+  sorts equal orders some other way.
 
 ## MidiParser (char/midi_parser.*) [C unless noted]
 
@@ -599,6 +617,7 @@ guitar | bass | grim | cheat)`, skins with outfit milo and mat),
   `career.json` and player 0's config must hold `alterna alterna2 sg
   sg_white`. `--walktest quickplay` checks the endgame photo (player 0's
   outfit, picture 0..3, on the disc).
+- `GD02_VIEW_GUITAR=<outfit>` (flyingv_v2, xplorer...): `--view char/<c>`'s guitarist plays that guitar outfit instead of guitar_sg.
 - `--view char/<c>` (`GD02_VIEW_CLIP`, `GD02_VIEW_FRAME`, `GD02_VIEW_YAW`...):
   one character posed (`char/<o>/ng/gen/<o>_ui.milo_xbox` with
   `GD02_VIEW_CLIP=ui_loop`: the menu character). In game: `GD02_CHAR=<outfit>`, `GD02_GUITAR=<guitar>`, `GD02_SKIN=<skin>`,

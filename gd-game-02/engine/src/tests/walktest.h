@@ -35,6 +35,11 @@ class UiManager;
 //              offered), the encore played (battle complete, small1
 //              unlocked, status 1, $450), the store (lp_cayenne bought for
 //              $250, on the Les Paul) and career.json checked.
+//   career_song  one career song (GD02_WALK_SONG, default strutter) at
+//              GD02_WALK_DIFF (default Medium): the tier songs before it
+//              passed with cheat_beat_song, the song offered and played,
+//              its endgame followed; GD02_WALK_END / _FAIL / _CHAR / _GUITAR
+//              / _ENHANCED (docs/career_and_store.md "Tests").
 //   enhanced   main -> Options -> Enhanced Options -> Internal Resolution
 //              changed (the window's own -> 448p) and saved in enhanced.json
 //              -> back -> back -> main.
@@ -75,6 +80,8 @@ public:
     std::string startScreen() const;
     float songEndMs() const { return endMs_; }
     float songFailMs() const { return failMs_; }
+    // GD02_KEYS song items the walk plays in its songs ("<ms>:strum,...").
+    const std::string& songKeys() const { return songKeys_; }
     bool autoplay() const { return autoplay_; }
 
     // One frame: waits / presses (through ui.buttonDown / buttonUp).
@@ -103,6 +110,7 @@ private:
     double stepStart_ = -1;
     bool done_ = false, failed_ = false, autoplay_ = true;
     float endMs_ = 1e30f, failMs_ = 1e30f;
+    std::string songKeys_;
     std::string error_;
     std::array<float, 3> camera_{};  // the main menu's camera (the back walk)
     std::array<float, 4> bricks_{};  // the options' bricks light (the back walk)

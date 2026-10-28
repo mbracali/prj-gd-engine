@@ -18,6 +18,9 @@ extern "C" GD_MODULE_EXPORT int gd_game_run(const GdHost* host) {
     gdshim_begin(host);
     // The launcher has its own application-menu entry: none for gd02 here.
     gdshim_setenv("GD02_NO_DESKTOP_ENTRY", "1");
+    // A Steam Deck (the launcher's handheld profile): the Steam Deck settings
+    // are the Enhanced Options' defaults (App::enhancedValue).
+    gdshim_setenv("GD02_HANDHELD", (GD_HOST_FLAGS(host) & GD_HOST_HANDHELD) ? "1" : "0");
     std::vector<std::string> args(host->argv, host->argv + host->argc);
     if (args.empty()) args.emplace_back("gd02");
     std::vector<char*> argv;

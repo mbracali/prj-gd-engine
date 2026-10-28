@@ -730,7 +730,14 @@ void installNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Scrip
     add(std::make_unique<QuietObj>(ui, "music_fader", std::set<std::string>{"fade"}));
     add(std::make_unique<QuietObj>(ui, "encore_stream", std::set<std::string>{"play", "stop"}));
     add(std::make_unique<QuietObj>(ui, "cheat_display", std::set<std::string>{"show"}));
-    add(std::make_unique<QuietObj>(ui, "player_matcher0", std::set<std::string>{"add_sink", "remove_sink", "auto_solo", "set_auto_solo"}));
+    // The PlayerMatchers (vtable 0x8204a1ac): their handlers are gh2.dta's
+    // (beatmatch (player_matcher_handlers ...)) (0x822E44B0), added after
+    // the boot. on_start_starpower / on_stop_starpower tell the player's
+    // character (0x822E3840 / 0x822E36B8), which the program's band does on
+    // the Star Power events (game/world_driver.cpp) [C].
+    for (const char* m : {"player_matcher0", "player_matcher1"})
+        add(std::make_unique<QuietObj>(ui, m, std::set<std::string>{"add_sink", "remove_sink", "auto_solo", "set_auto_solo",
+                                                                    "on_start_starpower", "on_stop_starpower", "refresh_track_buttons"}));
     installGameNatives(ui, in, owned);
     chars::installNatives(ui, in, owned);
     store::installNatives(ui, in, owned);

@@ -46,7 +46,9 @@ void WorldDriver::update(World& world, const Song& song, float ms, const Player*
         introSent_ = true;
         world.message("intro_start_msg", {Value::integer(0), Value::integer(0)});
     }
-    if (!introEndSent_ && ms >= 0) {
+    // With the menus game.dta's extend_track sends intro_end 2 s after the
+    // track extends (song time 0 from a full intro) through the game's sinks.
+    if (gameEvents_ && !introEndSent_ && ms >= 0) {
         introEndSent_ = true;
         world.message("intro_end");
     }

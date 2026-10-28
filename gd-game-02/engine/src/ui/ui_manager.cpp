@@ -148,6 +148,19 @@ bool UiManager::init(std::string& error, bool headless) {
     }
     macros_ = loader_->macros;
     modes_ = boot_->find("modes");
+    // The players' and their matchers' handlers: gh2.dta (player (handlers
+    // ...)) (Player, 0x822C9720) and (beatmatch (player_matcher_handlers
+    // ...)) (PlayerMatcher, 0x822E44B0) [C].
+    {
+        const DataNode* player = boot_->find("player");
+        const DataNode* ph = player ? player->find("handlers") : nullptr;
+        const DataNode* beat = boot_->find("beatmatch");
+        const DataNode* mh = beat ? beat->find("player_matcher_handlers") : nullptr;
+        for (int p = 0; p < 2; ++p) {
+            if (ScriptObject* o = interp_.findObject("player" + std::to_string(p)); o && ph) o->addHandlers(*ph, 1);
+            if (ScriptObject* o = interp_.findObject("player_matcher" + std::to_string(p)); o && mh) o->addHandlers(*mh, 1);
+        }
+    }
     if (const DataNode* j = boot_->find("joypad")) {
         if (const DataNode* h = j->find("hold_ms")) holdMs_ = h->floatAt(1);
         if (const DataNode* r = j->find("repeat_ms")) repeatMs_ = r->floatAt(1);
@@ -982,6 +995,7 @@ void UiManager::buttonUp(int button, int player) {
 }
 
 void UiManager::gameEvent(const std::string& msg, std::vector<Value> args) { gameEventImpl(*this, msg, std::move(args)); }
+void UiManager::gameScript(const std::string& msg, std::vector<Value> args) { gameScriptImpl(*this, msg, std::move(args)); }
 
 // ---------------------------------------------------------------- drawing
 

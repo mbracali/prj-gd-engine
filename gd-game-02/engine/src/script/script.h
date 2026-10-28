@@ -119,7 +119,7 @@ class ScriptObject {
 public:
     explicit ScriptObject(std::string name, std::string className = "Object")
         : name_(std::move(name)), class_(std::move(className)) {}
-    virtual ~ScriptObject() = default;
+    virtual ~ScriptObject();  // drops out of every SinkHolder (below)
 
     const std::string& name() const { return name_; }
     const std::string& className() const { return class_; }
@@ -156,6 +156,26 @@ private:
     std::string name_, class_;
     std::vector<const DataNode*> handlers_;  // most recently added first
     const DataNode* typeDef_ = nullptr;
+};
+
+// Anything that keeps other objects as message sinks (GH2's MsgSource:
+// GamePanel, WorldDir, MidiParser). GH2's AddSink (0x823262C8) takes a
+// reference on the sink (Hmx::Object AddRef 0x82317480, RemoveSink's
+// Release 0x82316378), so a sink that is deleted leaves every source that
+// holds it [C refs; I: the deletion's replace]. Here a ScriptObject's
+// destructor calls sinkDestroyed on every live holder. A holder calls
+// stopHolding() first in its own destructor: its members (the sink list,
+// owned objects) go before this base does.
+class SinkHolder {
+public:
+    SinkHolder();
+    virtual ~SinkHolder();
+    SinkHolder(const SinkHolder&) = delete;
+    SinkHolder& operator=(const SinkHolder&) = delete;
+    virtual void sinkDestroyed(ScriptObject* sink) = 0;
+
+protected:
+    void stopHolding();
 };
 
 // Answers every message it has no handler for with 0, reported as a STUB

@@ -249,6 +249,25 @@ bool Value::operator==(const Value& o) const {
 
 // ---------------------------------------------------------------- objects
 
+namespace {
+std::vector<SinkHolder*>& sinkHolders() {
+    static std::vector<SinkHolder*> holders;
+    return holders;
+}
+}  // namespace
+
+SinkHolder::SinkHolder() { sinkHolders().push_back(this); }
+SinkHolder::~SinkHolder() { stopHolding(); }
+void SinkHolder::stopHolding() {
+    auto& h = sinkHolders();
+    h.erase(std::remove(h.begin(), h.end(), this), h.end());
+}
+
+ScriptObject::~ScriptObject() {
+    const std::vector<SinkHolder*> holders = sinkHolders();
+    for (SinkHolder* h : holders) h->sinkDestroyed(this);
+}
+
 void ScriptObject::addHandlers(const DataNode& list, size_t first) {
     for (size_t k = first; k < list.children.size(); ++k) {
         const DataNode& h = list.children[k];

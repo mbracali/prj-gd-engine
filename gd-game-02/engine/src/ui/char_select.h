@@ -8,6 +8,11 @@
 
 #include "ui/natives.h"
 
+namespace scene {
+class Directory;
+class Mesh;
+}  // namespace scene
+
 // The band's look (docs/band.md "Characters, guitars and photos"): GH2's
 // character and guitar data (config/gh2.dta (characters ...), guitars.dta,
 // store.dta), the player configs' character / outfit / guitar / skin
@@ -45,6 +50,16 @@ std::string characterOf(UiManager& ui, const std::string& outfit, int* index = n
 std::string outfitAt(UiManager& ui, const std::string& character, int i);
 int numOutfits(UiManager& ui, const std::string& character);
 const Guitar* guitar(UiManager& ui, const std::string& name);
+// What a guitar outfit shows on its own (GuitarDisplayPanel, the store's
+// guitars): a Character directory drawn at its first LOD, as the band's
+// characters are (render/band_view.cpp meshesToDraw): the LOD group's
+// meshes in the group's order, the loose roots by draw order, never the
+// shadow group (Character LODs 0x82156F50, shadow 0x82131680 [C]; the
+// shadow group goes to the shadow buffer only [I]). Before wave B the
+// panel drew every showing mesh in file order: flyingv_v2's strings.mesh
+// (src_alpha, depth written, mostly clear) came before guitar.mesh and cut
+// the neck under the strings out, and the shadow meshes drew too.
+std::vector<const scene::Mesh*> displayMeshes(const scene::Directory& outfit);
 // The guitars a player can pick (0x822C43B0): the grim character plays the
 // scythe only; else the unlocked guitars of the player's part (guitar, or
 // bass for kTrackBass), in guitars.dta order.

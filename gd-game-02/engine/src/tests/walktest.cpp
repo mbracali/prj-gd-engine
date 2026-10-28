@@ -19,6 +19,7 @@
 #include "render/ui_view.h"
 #include "scene/milo.h"
 #include "script/tasks.h"
+#include "ui/campaign.h"
 #include "ui/char_select.h"
 #include "ui/natives.h"
 #include "ui/ui_objects.h"
@@ -108,6 +109,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         quickplaySong(3);
         wait(3000);
         check("task_clock_song");
+        check("intro_sequence");
         at("endgame_screen", 90000);
         wait(600);
         press(kX);  // CONTINUE (me_continue.btn)
@@ -129,7 +131,9 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
     } else if (scenario == "lose") {
         autoplay_ = false;
         failMs_ = 3000;
+        songKeys_ = "1000:strum,2000:strum";  // two overstrums: GH2's miss sound each
         quickplaySong(0);
+        check("miss_sound", 30000);
         at("lose_screen", 30000);
         press(kDown), wait(150), press(kDown), wait(150);  // QUIT (lose_quit_normal.btn)
         press(kX);
@@ -166,7 +170,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         expect_ = {"main_screen", "qp_selsong_screen", "qp_diff_screen", "loading_screen", "game_screen", "pause_screen",
                    "game_screen", "pause_screen", "pause_confirm_restart_screen", "game_screen", "pause_screen",
                    "pause_confirm_quit_screen", "meta_loading_screen", "qp_selsong_screen"};
-    } else if (scenario == "career" || scenario == "career_full") {
+    } else if (scenario == "career" || scenario == "career_full" || scenario == "career_song") {
         at("splash_screen", 30000);
         press(kX);
         at("startup_create_save_screen");
@@ -175,6 +179,22 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         at("guitar_help_screen");
         press(kX);
         at("main_screen");
+        if (scenario == "career_song" && SDL_getenv("GD02_WALK_ENHANCED")) {
+            // Enhanced Options first (its backdrop loads a venue, then frees it).
+            for (int i = 0; i < 4; ++i) press(kDown), wait(150);  // OPTIONS
+            press(kX);
+            at("options_screen");
+            press(kDown), wait(150), press(kDown), wait(150);
+            press(kX);
+            at("enhanced_options_screen");
+            wait(1000);
+            press(kTri);
+            at("options_screen");
+            press(kTri);
+            at("main_screen");
+            wait(2000);  // the main menu's entrance (a press during it is lost)
+            for (int i = 0; i < 6; ++i) press(kUp), wait(400);  // OPTIONS -> QUICK PLAY
+        }
         press(kUp);  // CAREER (main_career.btn)
         wait(150);
         press(kX);
@@ -186,9 +206,30 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         key(SDLK_RETURN);  // the keyboard's Enter is Start here: finishes the name (adds no letter)
         at("sel_difficulty_screen");
         check("band_named_A");
+        if (scenario == "career_song") {
+            // GD02_WALK_DIFF=0..3 (default Medium, the focus).
+            const char* d = SDL_getenv("GD02_WALK_DIFF");
+            const int diff = d ? std::clamp(std::atoi(d), 0, 3) : 1;
+            for (int i = diff; i < 1; ++i) press(kUp), wait(150);
+            for (int i = 1; i < diff; ++i) press(kDown), wait(150);
+        }
         press(kX);  // Medium (the profile's last difficulty)
         at("sel_character_new_screen");
         wait(1500);  // the character opens the door
+        if (scenario == "career_song" && SDL_getenv("GD02_WALK_CHAR")) {
+            // GD02_WALK_CHAR=<downs> from Punk, GD02_WALK_GUITAR=<downs> from
+            // the Les Paul; the first outfit / skin when there are two.
+            const char* g = SDL_getenv("GD02_WALK_GUITAR");
+            for (int i = std::atoi(SDL_getenv("GD02_WALK_CHAR")); i > 0; --i) press(kDown), wait(300);
+            press(kX);
+            wait(1200);
+            check("confirm_on sel_character_new_screen");
+            at("sel_guitar_new_screen");
+            for (int i = g ? std::atoi(g) : 0; i > 0; --i) press(kDown), wait(300);
+            press(kX);
+            wait(900);
+            check("confirm_on sel_guitar_new_screen");
+        } else {
         press(kDown);  // Punk -> Alterna (Judy Nails)
         wait(300);
         press(kX);  // two outfits (alterna2 bought): pick one
@@ -204,11 +245,45 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         press(kDown);  // sg_cherry -> sg_white
         wait(300);
         press(kX);
+        }
         at("tour_start_screen");
         press(kX);
         at("career_screen");
         expect_ = {"main_screen", "chooseprof_screen", "nameprof_screen", "sel_difficulty_screen", "sel_character_new_screen", "sel_guitar_new_screen",
                    "tour_start_screen", "saving_screen", "career_screen"};
+        if (scenario == "career_song") {
+            // One career song (GD02_WALK_SONG, default strutter) at
+            // GD02_WALK_DIFF: every tier song before it passed with GH2's
+            // cheat_beat_song (its venue unlocked), set_career_venue /
+            // set_career_song offer it, it is played (autoplay; GD02_WALK_END
+            // <song ms> ends it early) and its endgame screens followed back
+            // towards the career menu.
+            if (const char* e = SDL_getenv("GD02_WALK_END")) endMs_ = float(std::atof(e));
+            check("career_target");
+            press(kX);  // LET'S ROCK
+            at("sel_venue_screen");
+            press(kX);  // the venue (set_career_venue: the newest unlocked)
+            at("sel_song_screen");
+            check("career_song_target");
+            press(kX);
+            at("loading_screen");
+            at("game_screen", 30000);
+            if (const char* f = SDL_getenv("GD02_WALK_FAIL")) {
+                // GD02_WALK_FAIL=<song ms>: the song fails then; RESTART (the
+                // lose screen's focus) plays it again.
+                failMs_ = float(std::atof(f));
+                autoplay_ = false;
+                at("lose_screen", 900000);
+                press(kX);
+                at("game_screen", 30000);
+                wait(8000);
+            } else {
+                at("endgame_screen|endgame_encore_screen|win_game_screen", 900000);  // win_game: the tour's last song
+                for (int i = 0; i < 6; ++i) wait(2500), press(kX);
+                wait(4000);
+            }
+            expect_.insert(expect_.end(), {"sel_venue_screen", "sel_song_screen", "loading_screen", "game_screen"});
+        }
         if (scenario == "career_full") {
             // The first tier at Medium: three songs passed with GH2's own
             // debug cheat (campaign cheat_beat_song), the fourth played (it
@@ -515,7 +590,7 @@ void WalkDriver::poll(ui::UiManager& ui, double nowMs) {
     if (stepStart_ < 0) stepStart_ = nowMs;
     // career: the band has bought Judy Nails' second outfit and the SG's
     // white skin in the store (M10), so both choices offer two.
-    if ((scenario_ == "career" || scenario_ == "career_full") && !seeded_ && ui.currentScreen() == "sel_difficulty_screen" && ui.session().profileSlot >= 0) {
+    if ((scenario_ == "career" || scenario_ == "career_full" || scenario_ == "career_song") && !seeded_ && ui.currentScreen() == "sel_difficulty_screen" && ui.session().profileSlot >= 0) {
         seeded_ = true;
         Career::Profile& p = ui.career().profiles[size_t(ui.session().profileSlot)];
         p.items["alterna2"] = true;
@@ -523,7 +598,8 @@ void WalkDriver::poll(ui::UiManager& ui, double nowMs) {
     }
     switch (s.kind) {
     case Step::Screen:
-        if (ui.currentScreen() == s.screen && !ui.inTransition()) {
+        // "a|b": either screen.
+        if (!ui.inTransition() && ("|" + s.screen + "|").find("|" + ui.currentScreen() + "|") != std::string::npos) {
             SDL_Log("walk: %s (%.1f s)", s.screen.c_str(), nowMs / 1000);
             ++step_, stepStart_ = -1;
         } else if (nowMs - stepStart_ > s.ms) {
@@ -717,6 +793,49 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         ++step_, stepStart_ = -1;
         return;
     }
+    if (s.screen == "miss_sound") {
+        // An overstrum plays beatmatch.dta's miss: miss_gtr (a guitar track),
+        // through player_matcher0's handlers; a passed gem plays nothing.
+        if (ui.host().gameTimeMs() < 2300) {
+            if (nowMs - stepStart_ > 30000) return fail("the song did not reach 2.3 s");
+            return;
+        }
+        int misses = 0;
+        for (const auto& [name, at] : ui.host().gameSfx())
+            if (name == "miss_gtr" || name == "miss_bass") {
+                std::printf("  miss sound %s at %.0f ms\n", name.c_str(), at);
+                if (name != "miss_gtr" || (std::fabs(at - 1000) > 60 && std::fabs(at - 2000) > 60)) return fail("a miss sound not at an overstrum");
+                ++misses;
+            }
+        if (misses != 2) return fail("overstrums: " + std::to_string(misses) + " of 2 miss sounds");
+        ++step_, stepStart_ = -1;
+        return;
+    }
+    if (s.screen == "intro_sequence") {
+        // GH2's song start (app.cpp kTrackExtendMs): the track extends at
+        // song time -2000 ms with track_unfurl, the smashers pop with
+        // nowbar_1..5 at -700..-300 ms, meter_slide 0.25 s after
+        // slide_meter_in (-200 ms), and no other sound before (track_panel.dta,
+        // hud_panel.dta, game.dta extend_track).
+        if (ui.host().gameTimeMs() < 300) {
+            if (nowMs - stepStart_ > 30000) return fail("the song did not reach 0 ms");
+            return;
+        }
+        const std::pair<const char*, double> want[] = {{"track_unfurl", -2000}, {"nowbar_1", -700}, {"nowbar_2", -600}, {"nowbar_3", -500},
+                                                        {"nowbar_4", -400},      {"nowbar_5", -300}, {"meter_slide", 50}};
+        const auto got = ui.host().gameSfx();
+        size_t k = 0;
+        for (const auto& [name, at] : got) {
+            if (at >= 300) break;
+            std::printf("  intro sound %s at %.0f ms\n", name.c_str(), at);
+            if (k >= std::size(want) || name != want[k].first || std::fabs(at - want[k].second) > 60)
+                return fail("intro sound " + name + " not as GH2's (" + (k < std::size(want) ? want[k].first : "none") + ")");
+            ++k;
+        }
+        if (k != std::size(want)) return fail("intro: " + std::to_string(k) + " of 7 sounds");
+        ++step_, stepStart_ = -1;
+        return;
+    }
     if (s.screen == "task_clock_song") {
         // In a game the TaskMgr's kTaskSeconds is the song's time (0x822CDEB8),
         // not the time spent in the menus: the faces' lip sync and the venue's
@@ -822,6 +941,37 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
     if (s.screen == "career_seed") {
         for (const char* song : {"surrender", "possum", "heartshapedbox"})
             ui.interp().send("campaign", "cheat_beat_song", {Value::symbol(song), Value::integer(1)});
+        ++step_, stepStart_ = -1;
+        return;
+    }
+    if (s.screen.rfind("confirm_on ", 0) == 0) {
+        // A second choice (outfit / skin) still open on that screen: take the first.
+        if (ui.currentScreen() == s.screen.substr(11) && !ui.inTransition()) ui.buttonDown(kX, 0), ui.buttonUp(kX, 0);
+        ++step_, stepStart_ = -1;
+        return;
+    }
+    if (s.screen == "career_target" || s.screen == "career_song_target") {
+        const char* w = SDL_getenv("GD02_WALK_SONG");
+        const std::string target = w ? w : "strutter";
+        if (s.screen == "career_target") {
+            // The tiers' songs in order up to the target, at this difficulty.
+            const int d = ui::campaign::difficulty(ui);
+            const auto& tiers = ui::campaign::config(ui).tiers;
+            bool found = false;
+            for (int t = 0; t < ui::campaign::numTiers(ui, d) && t < int(tiers.size()) && !found; ++t)
+                for (const std::string& song : tiers[size_t(t)].second) {
+                    if (song == target) {
+                        found = true;
+                        break;
+                    }
+                    ui.interp().send("campaign", "cheat_beat_song", {Value::symbol(song), Value::integer(1)});
+                }
+            if (!found) return fail("no career song " + target + " at difficulty " + std::to_string(d));
+        } else {
+            std::printf("  career: venue %s, song %s, difficulty %d\n", ui.session().venue.c_str(), ui.session().song.c_str(),
+                        ui::campaign::difficulty(ui));
+            if (ui.session().song != target) return fail("the career offered " + ui.session().song + ", not " + target);
+        }
         ++step_, stepStart_ = -1;
         return;
     }

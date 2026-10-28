@@ -99,6 +99,16 @@ void ScenePose::clear() {
     lights_.clear();
 }
 
+void ScenePose::forget(const std::unordered_set<const scene::Object*>& objects) {
+    if (objects.empty()) return;
+    auto drop = [&](auto& map) {
+        for (auto it = map.begin(); it != map.end();) it = objects.count(it->first) ? map.erase(it) : std::next(it);
+    };
+    drop(local_), drop(mats_), drop(showing_), drop(animFrames_), drop(envs_), drop(lights_);
+    for (auto it = meshAnims_.begin(); it != meshAnims_.end();)
+        it = objects.count(it->first) || objects.count(it->second.anim) ? meshAnims_.erase(it) : std::next(it);
+}
+
 const ScenePose::EnvState* ScenePose::env(const scene::Environ* e) const {
     auto it = envs_.find(e);
     return it == envs_.end() ? nullptr : &it->second;

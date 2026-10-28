@@ -30,13 +30,37 @@
 #include "game/world_driver.h"
 #include "render/band_view.h"
 #include "render/scene_gpu.h"
+#include "scene/milo.h"
 #include "tests/miditest.h"
+#include "ui/char_select.h"
 
 namespace {
 
 // What a character draws at each LOD (render/band_view.h meshesToDraw, the
 // world's showing from a fresh pose: the saved flags): something at every
 // LOD, the guitar when it has one, never a shadow mesh. Returns the problems.
+// A blended mesh that writes depth (src_alpha / add with z_mode normal: a
+// guitar's strings) drawn before an opaque one of a lower draw order cuts
+// it out where its texture is clear (wave B #14: the guitar select drew
+// flyingv_v2's strings, order 0.1, before guitar.mesh, order 0, in file
+// order): the first such pair, or "". Equal orders keep the data's order
+// (van_yellow's lod0.grp lists its strings first, as GH2 has them [I]).
+std::string earlyBlended(const std::vector<const scene::Mesh*>& list) {
+    std::vector<const scene::Mesh*> blended;
+    for (const scene::Mesh* m : list) {
+        const scene::Mat* mat = m->dir ? m->dir->resolve<scene::Mat>(m->mat) : nullptr;
+        if (!mat) continue;
+        const bool writes = mat->zMode == 1 || mat->zMode == 3 || mat->zMode == 4;
+        if (mat->blend == 1) {
+            for (const scene::Mesh* b : blended)
+                if (b->draw.order > m->draw.order) return b->name + " before " + m->name;
+        } else if (mat->blend != 0 && writes && mat->name.find("shadow") == std::string::npos) {
+            blended.push_back(m);
+        }
+    }
+    return {};
+}
+
 int drawListChecks(chr::Character& c, const std::string& what, bool wantGuitar) {
     const gfx::ScenePose pose;
     int problems = 0;
@@ -55,9 +79,12 @@ int drawListChecks(chr::Character& c, const std::string& what, bool wantGuitar) 
             const bool listed = lodGroup && std::find(lodGroup->objects.begin(), lodGroup->objects.end(), m->name) != lodGroup->objects.end();
             shadow |= m->mat.find("shadow") != std::string::npos && !listed;
         }
+        // (The merged LOD groups keep GH2's append order, 0x821DC870: the
+        // outfit's meshes after the character's whatever their draw order.)
+        const std::string early;
         if (list.empty() || (wantGuitar && !guitar) || shadow) {
-            std::printf("chartest: %s LOD %d draws %zu meshes%s%s\n", what.c_str(), k, list.size(), wantGuitar && !guitar ? ", no guitar" : "",
-                        shadow ? ", a shadow mesh" : "");
+            std::printf("chartest: %s LOD %d draws %zu meshes%s%s%s%s\n", what.c_str(), k, list.size(), wantGuitar && !guitar ? ", no guitar" : "",
+                        shadow ? ", a shadow mesh" : "", early.empty() ? "" : ", blended first: ", early.c_str());
             ++problems;
         }
     }
@@ -158,6 +185,29 @@ int loadChecks(const GameData& data) {
             chr::Character c(data, guitar ? "char/alterna1/ng/gen/alterna1.milo_xbox" : "char/metal_drummer/ng/gen/metal_drummer.milo_xbox", clips,
                              {{guitar ? "guitar.outfit" : "drums.outfit", p}});
             if (guitar) outfitFail += drawListChecks(c, "outfit " + p, p.find("air_guitar") == std::string::npos);
+            // The guitar on its own (GuitarDisplayPanel, the store): the
+            // same rules (ui/char_select.h displayMeshes).
+            if (guitar) {
+                scene::Milo milo(data.read(p), p);
+                const std::vector<const scene::Mesh*> list = ui::chars::displayMeshes(milo.root());
+                bool body = false, shadow = false;
+                for (const scene::Mesh* m : list) {
+                    body |= m->name.rfind("guitar", 0) == 0 || m->name.rfind("bass", 0) == 0;
+                    // Only where the data lists a shadow mesh in a LOD group (sheraton).
+                    bool listed = false;
+                    for (const auto& o : milo.root().objects)
+                        if (const auto* g = o->as<scene::Group>(); g && o->name.rfind("lod", 0) == 0)
+                            listed |= std::find(g->objects.begin(), g->objects.end(), m->name) != g->objects.end();
+                    shadow |= m->mat.find("shadow") != std::string::npos && !listed;
+                }
+                const std::string early = earlyBlended(list);
+                const bool air = p.find("air_guitar") != std::string::npos;
+                if (list.empty() != air || (!air && !body) || shadow || !early.empty()) {
+                    std::printf("chartest: display %s draws %zu meshes%s%s%s%s\n", p.c_str(), list.size(), !air && !body ? ", no guitar" : "",
+                                shadow ? ", a shadow mesh" : "", early.empty() ? "" : ", blended first: ", early.c_str());
+                    ++outfitFail;
+                }
+            }
             if (c.outfitObjects() == 0 || !c.unresolvedBones().empty()) {
                 std::printf("chartest: outfit %s: %d objects, %zu unresolved bones\n", p.c_str(), c.outfitObjects(), c.unresolvedBones().size());
                 ++outfitFail;

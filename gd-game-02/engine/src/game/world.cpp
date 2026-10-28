@@ -248,6 +248,7 @@ void World::waypointToEnd(const scene::Waypoint* w) {
 }
 
 World::~World() {
+    stopHolding();
     if (synth_)
         for (const auto& p : venue_.parts()) synth_->forget(p.milo->root());
     if (synth_)
@@ -737,7 +738,11 @@ Value World::native(const std::string& msg, std::vector<Value>& args, bool& hand
     if (sinks_.count(msg)) {
         std::vector<ScriptObject*> to;
         for (auto [it, end] = sinks_.equal_range(msg); it != end; ++it) to.push_back(it->second);
-        for (ScriptObject* s : to) interp_->send(s, msg, args, false);
+        for (ScriptObject* s : to) {
+            bool held = false;  // a sink removed or deleted by an earlier one's handler is skipped
+            for (auto [it, end] = sinks_.equal_range(msg); it != end && !held; ++it) held = it->second == s;
+            if (held) interp_->send(s, msg, args, false);
+        }
     }
     // The chain's RndDir types first (set_multiplayer, set_player1_bass...).
     bool forwarded = false;

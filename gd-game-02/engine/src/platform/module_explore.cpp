@@ -102,8 +102,11 @@ public:
     int clipCount() const { return int(clips_.size()); }
     const char* clipName(int i) const { return i >= 0 && i < clipCount() ? clipNames_[size_t(i)].c_str() : ""; }
     void draw(const GdExploreView& v);
+    int hasInstrument() const { return char_ && instrument_ ? 1 : 0; }
+    void showInstrument(bool shown);
 
 private:
+    void reloadCharacter();
     void unload();
     void list();
     std::string loadStatic(const Item& it);
@@ -126,6 +129,9 @@ private:
     std::vector<scene::CharClipSamples*> clips_;
     std::vector<std::string> clipNames_;
     int clipPlaying_ = -2;
+    int selected_ = -1;
+    bool showInstrument_ = true;  // the launcher's "Show instrument"
+    bool instrument_ = false;     // the selected character has a guitar, bass or drum kit
     float lastSeconds_ = 0;
     double animTime_ = 0;
     gfx::LightEnv env_;
@@ -205,6 +211,7 @@ void Explorer::unload() {
     clips_.clear();
     clipNames_.clear();
     clipPlaying_ = -2;
+    instrument_ = false;
 }
 
 void Explorer::close() {
@@ -219,6 +226,7 @@ int Explorer::select(int index, char* info, int infoSize) {
     unload();
     std::string result;
     bool ok = false;
+    selected_ = index;
     if (index >= 0 && index < count()) {
         const Item& it = items_[size_t(index)];
         try {
@@ -325,6 +333,8 @@ std::string Explorer::loadCharacter(const Item& it) {
         if (probe->dir().get("guitar.outfit")) outfits["guitar.outfit"] = "char/ng/guitars/gen/guitar_sg.milo_xbox";
         if (probe->dir().get("drums.outfit")) outfits["drums.outfit"] = "char/ng/drums/gen/dw_arena_drums.milo_xbox";
         probe.reset();
+        instrument_ = !outfits.empty();
+        if (!showInstrument_) outfits.clear();  // "Show instrument" off: the body alone
         char_ = std::make_unique<chr::Character>(*data_, it.path, *clipLib_, outfits);
     }
     band_ = std::make_unique<BandView>(*cache_);
@@ -345,6 +355,33 @@ std::string Explorer::loadCharacter(const Item& it) {
     char line[200];
     std::snprintf(line, sizeof line, "%s, %d bones, %zu animations", char_->type().c_str(), char_->skeleton().size(), clips_.size());
     return line;
+}
+
+// The selected character again, in its rest pose (no clip played yet).
+void Explorer::reloadCharacter() {
+    if (selected_ < 0 || selected_ >= count() || items_[size_t(selected_)].kind != Kind::Character || !char_) return;
+    band_.reset();
+    char_.reset();
+    clipLib_.reset();
+    clips_.clear();
+    clipNames_.clear();
+    clipPlaying_ = -2;
+    try {
+        // A fresh cache, as select() makes: the old one's textures went with the character.
+        cache_ = std::make_unique<gfx::SceneCache>(renderer_.device());
+        loadCharacter(items_[size_t(selected_)]);
+    } catch (const std::exception& e) {
+        SDL_Log("explore: %s: %s", items_[size_t(selected_)].path.c_str(), e.what());
+        band_.reset();
+        char_.reset();
+    }
+}
+
+void Explorer::showInstrument(bool shown) {
+    if (shown == showInstrument_) return;
+    showInstrument_ = shown;
+    if (!gdshim_make_current()) return;
+    reloadCharacter();
 }
 
 void Explorer::playClip(int clip) {
@@ -380,6 +417,8 @@ void Explorer::draw(const GdExploreView& v) {
     float dt = std::clamp(v.seconds - lastSeconds_, 0.0f, 0.1f);
     if (v.seconds < lastSeconds_) dt = 0;
     lastSeconds_ = v.seconds;
+    // Back to no clip (-1): the rest pose again, from a fresh character.
+    if (char_ && v.clip < 0 && clipPlaying_ >= 0) reloadCharacter();
     if (char_ && v.clip != clipPlaying_) playClip(v.clip);
     if (char_ && clipPlaying_ >= 0) {
         animTime_ += dt;
@@ -457,6 +496,8 @@ int itemAt(void* p, int index, GdExploreItem* out) {
 
 int selectItem(void* p, int index, char* info, int infoSize) { return self(p)->select(index, info, infoSize); }
 int clipCount(void* p) { return self(p)->clipCount(); }
+int hasInstrument(void* p) { return self(p)->hasInstrument(); }
+void showInstrument(void* p, int shown) { self(p)->showInstrument(shown != 0); }
 const char* clipName(void* p, int index) { return self(p)->clipName(index); }
 void drawView(void* p, const GdExploreView* v) {
     if (v) self(p)->draw(*v);
@@ -491,6 +532,8 @@ extern "C" GD_MODULE_EXPORT const GdExplorer* gd_game_explore(const GdHost* host
     g_api.select = &selectItem;
     g_api.clip_count = &clipCount;
     g_api.clip_name = &clipName;
+    g_api.has_instrument = &hasInstrument;
+    g_api.show_instrument = &showInstrument;
     g_api.draw = &drawView;
     g_api.close = &closeExplorer;
     return &g_api;

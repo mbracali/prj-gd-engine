@@ -91,6 +91,11 @@ public:
 
     // pick_shot / force_shot from C++.
     const scene::CamShot* pickShot(const std::vector<std::string>& categories, const std::vector<std::pair<std::string, Value>>& filter);
+    // The WorldDir's shot picker on its own (0x822682F8: weighted draw among
+    // the unused acceptable shots, the pick marked used, +0xf6), without
+    // starting the shot: GamePanel's start (0x822CCA60) times its intro clock
+    // by the INTRO shot it picks this way [C].
+    const scene::CamShot* drawShot(const std::vector<std::string>& categories, const std::vector<std::pair<std::string, Value>>& filter = {});
     void forceShot(const scene::CamShot* shot);
     bool camShotOk(const scene::CamShot& shot);
     bool camCheckShot(const scene::CamShot& shot);

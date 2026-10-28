@@ -54,6 +54,11 @@ public:
     void setLefty(bool lefty) { lefty_ = lefty; }
     // The song is won (game.dta game_won_msg: {track_panel explode}).
     void explode(float nowMs);
+    // The scripts' animate on the track's extend anim (player.dta
+    // start_using: range 2000 2025 over 0.8 s, the Star Power bump; the
+    // barf cheat on every beat): frames from -> to from song time `nowMs`
+    // over `periodMs`, the last frame held after.
+    void animateExtend(float from, float to, float periodMs, float nowMs) { extendAnim_ = {from, to, periodMs, nowMs}; }
     bool exploded() const { return explodeMs_ > -1e8f; }
     // The player's events of this frame (hits start smash effects, passes
     // turn gems into misses, releases cut tails).
@@ -148,6 +153,9 @@ private:
     gfx::ParticleSet explodeParts_;
     float explodeMs_ = -1e9f;
     float introStartMs_ = -1e9f;
+    struct ExtendAnim {
+        float from = 0, to = 0, periodMs = 0, startMs = -1e9f;
+    } extendAnim_;
     std::unique_ptr<gfx::ParticleRenderer> particles_;
     int particlesDrawn_ = 0;
     std::vector<GemState> gemState_;

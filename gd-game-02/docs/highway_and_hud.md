@@ -30,7 +30,15 @@ The scenes themselves are listed in `milo_and_textures.md`.
   while held, now + 1.5 − start; frozen on release (`0x82697710`). Whammy
   history entry = bar × −3.0, moving 2 units per frame. Materials and glow:
   `0x8269E7F0`, `0x8269E2C8`, `0x8269E340` (`tail_white` / `tail_purple` are
-  never used).
+  never used). Faces (`0x8269C2A0`): per segment (a, a+1, a+V) and (a+V,
+  a+1, a+V+1) — the other winding is culled and left only the additive glow
+  line, which looked like a translucent tail (wave B #4). The vertices
+  (`0x8269E44C`) take the colour (rgb) and keep the template's alpha: 0 on
+  the two outer edge vertices, 1 inside, so only the edges fade; the tail
+  materials are prelit, blend src_alpha, z_mode normal, the sphere-mapped
+  `gem_star.tex` (opaque) [C data]. Missed / released: `tail_miss`
+  (z_mode transparent); Star Power: `tail_bonus`; a held Star Power tail
+  whammied lerps to `tail_star`'s colour.
 - **Smashers** (`0x8269D110`) [C]: the pressed material follows the held fret;
   `gem_smasher_hit.tnm` on a hit (`0x8269CF00`), `gem_smasher.tnm` on a pop or
   miss (`0x82697958`); effects run at 30 fps.
@@ -118,6 +126,39 @@ The scenes themselves are listed in `milo_and_textures.md`.
   (`extend_track_normal.tnm` on `cameras.grp`); smashers pop at 1.3 s +
   0.1 s per slot and glow until `refresh_track_buttons` at 2.5 s; meters slide
   in after 1.8 s over 0.5 s [C data].
+- **Song start timeline** (wave B #1) [C unless marked]. GamePanel's start
+  (`0x822CCA60`): it draws a shot from the world's picker in `INTRO`
+  (`INTRO_ENCORE` for an encore; `0x822682F8`, the pick marked used, so the
+  world script's own `pick_shot INTRO` then takes another one when the venue
+  has two) and sets the song clock to minus its length (CamShot `+0xf0` =
+  every keyframe's duration + blend, `0x82226630`, at 30 frames a second;
+  `0x822CB2B0`); a fast intro (restart) starts at `track_extend_sec`. It
+  sends `start`, `intro_start_msg ($fast $encore)` and schedules
+  `extend_track` at song time `track_extend_sec` (game.dta: −2 s; at once
+  when the clock starts later). The poll (`0x822CDEB8`) runs the intro
+  clock until the song time passes −25 ms, then hands over to the song
+  stream (`0x822CB260`). While on the intro clock every PlayerMatcher's
+  controller is off (`0x822CED30` → matcher vtable `+0x40`) and drops the
+  buttons; the matcher poll (`0x822E2510`) turns it on once the game is off
+  the intro clock. So from a full intro (big: 10 s, small1: 11.7 s):
+
+  | song ms | what happens |
+  |---|---|
+  | −intro | the venue's INTRO shot, track in (frame 0), meters hidden |
+  | −2000 | `extend_track` → `track_panel do_extend_sequence`: `track_unfurl`, the track rolls out in 1 s |
+  | −700 … −300 | smashers 0..4 pop and glow, `nowbar_1` … `nowbar_5` |
+  | −200 | `slide_meter_in`: meters slide in over 0.5 s; `meter_slide` 0.25 s later (+50) |
+  | −25 | the song stream starts; the controllers come on (held frets synced [I]) |
+  | 0 | `intro_end` (2 s after `extend_track`) |
+  | +500 | `refresh_track_buttons` |
+
+  The track sounds play through `play_track_sfx` (not in attract mode).
+  gd02 runs these scripts (`App::beginSong` / `updateIntro`; without the
+  menus the program plays the same sounds at the same times); `--walktest
+  quickplay` checks the seven sounds and their times.
+- Star Power bump: player.dta `start_using` animates the player's track
+  extend anim from 2000 to 2025 over 0.8 s (`{$this track} extend_anim`,
+  `0x82695D48`); the anim's last frame (2025) holds after [C data].
 - Gem sparkle (`0x826A0270`) and `finishline.part` look unused [C by absence].
 
 ### Lefty and two players

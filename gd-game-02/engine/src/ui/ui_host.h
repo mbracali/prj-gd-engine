@@ -4,6 +4,7 @@
 
 #include <array>
 #include <string>
+#include <utility>
 #include <vector>
 
 class BandPerformer;
@@ -64,6 +65,9 @@ public:
     virtual void gameSetPaused(bool paused) = 0;
     virtual bool gamePaused() const = 0;
     virtual double gameTimeMs() const = 0;     // the song clock (negative in the lead-in)
+    // The sounds played since the song began, with their song times (the
+    // first 256; --walktest checks the intro's).
+    virtual std::vector<std::pair<std::string, double>> gameSfx() const { return {}; }
     virtual float gameBeat() const = 0;        // the song position in beats
     virtual float songDurationMs() const = 0;  // to the song's end
     virtual const Player* gamePlayer(int index) const = 0;
