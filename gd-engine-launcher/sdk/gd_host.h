@@ -31,6 +31,7 @@
 // (the one next to the launcher), so the SDL objects below are shared.
 #pragma once
 
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -72,7 +73,20 @@ typedef struct GdHost {
     // Appends a line to the launcher's action log (date, user, "game <id>: <line>").
     void (*log)(void* user, const char* line);
     void* log_user;
+
+    // (gdul 0.1.6) GD_HOST_* flags: what the launcher knows about the
+    // machine. Read only when `size` covers it (an older launcher: 0).
+    uint32_t flags;
 } GdHost;
+
+// A handheld PC (a Steam Deck: the launcher's Steam Deck download, or the
+// SteamDeck=1 environment / DMI board "Jupiter" or "Galileo"): a module
+// starts with its Steam Deck settings as the defaults (full screen 1280 x 800,
+// 60 FPS, lighter effects, handheld controls). The player's own saved
+// settings still win; nothing is locked.
+#define GD_HOST_HANDHELD 0x1u
+// The flags of a host, 0 when it is older than the field.
+#define GD_HOST_FLAGS(h) ((h)->size >= offsetof(GdHost, flags) + sizeof(uint32_t) ? (h)->flags : 0u)
 
 typedef int (*GdGameRunFn)(const GdHost* host);
 
@@ -98,7 +112,8 @@ typedef struct GdExploreView {
     float zoom;          // distance factor: 1 frames the whole model, < 1 closer
     float pan_x, pan_y;  // the orbit centre moved in the view plane, in model radii
     float seconds;       // time since the model was selected (animations)
-    int clip;            // the animation clip to play (an index of clip_name), -1 none
+    int clip;            // the animation clip to play (an index of clip_name), -1 none:
+                         // the rest (bind) pose (a T-pose for GH2's characters)
     float background[3]; // the launcher's backdrop colour (linear 0..1), for the clear
 } GdExploreView;
 
@@ -125,7 +140,19 @@ typedef struct GdExplorer {
     // Frees everything (models, GL context, SDL subsystems); the launcher
     // unloads the library afterwards.
     void (*close)(void* self);
+
+    // (gdul 0.1.6, optional: read only when `size` covers them.) The selected
+    // model carries an instrument (a character's guitar, bass or drum kit):
+    // 1, else 0. The launcher then shows a "Show instrument" checkbox.
+    int (*has_instrument)(void* self);
+    // Shows (1, the default) or hides (0) it, from the next select on and on
+    // the selected model at once (it may reload it: the module makes its own
+    // context current, the launcher its own again afterwards).
+    void (*show_instrument)(void* self, int shown);
 } GdExplorer;
+
+// A GdExplorer field the module has (its `size` covers it).
+#define GD_EXPLORER_HAS(api, field) ((api)->size >= offsetof(GdExplorer, field) + sizeof((api)->field) && (api)->field)
 
 typedef const GdExplorer* (*GdGameExploreFn)(const GdHost* host);
 

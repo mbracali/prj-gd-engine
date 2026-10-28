@@ -38,6 +38,11 @@ pull requests or branches, no bots).
      Latest) with:
      - `gdul-<v>-linux-x86_64.tar.gz` (Ubuntu 22.04, SDL3 included:
        `gd-engine-launcher/scripts/build_linux_portable.sh`)
+     - `gdul-<v>-steamdeck-x86_64.tar.gz` (the Steam Deck download: built in
+       Valve's Steam Runtime 3 "sniper" SDK container,
+       `gd-engine-launcher/scripts/build_steamdeck.sh`, every module with
+       its Steam Deck defaults, `STEAM-DECK.txt` inside; the site's Steam
+       Deck button picks the asset with "steamdeck" in its name)
      - `gdul-<v>-windows-x86_64.zip` (MinGW-w64)
      - `gdul-<v>-macos-arm64.zip` (when that build succeeds; ad-hoc signed)
      - `gdul-<v>-android-arm64.apk` (signed with the gdul release key)
@@ -56,6 +61,7 @@ history; no new ones are made.
 gd-game-01/local_build.sh                 # the build for your system
 gd-game-01/local_build.sh steamdeck       # or any of: linux steamdeck windows macos android all
 gd-game-01/local_build.sh linux --native  # Linux without a container (uses your SDL3)
+gd-engine-launcher/scripts/build.sh linux steamdeck windows android   # the launcher downloads (steamdeck: in the sniper container)
 ```
 
 Or double-click the file for a build in `gd-game-01/build_commands/`

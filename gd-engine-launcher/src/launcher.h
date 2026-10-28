@@ -21,10 +21,19 @@
 #include "gfx.h"
 #include "ui_sounds.h"
 
+// What the command line asked for (main.cpp): a game to play or explore at
+// once, with a disc image for this run, and whether to quit afterwards.
+struct CommandLine {
+    std::string play, explore;  // game ids
+    std::string iso;            // --iso: the disc for this run (not saved)
+    bool exitAfter = false;     // --exit-after: quit when the game (or the explorer) ends
+};
+
 class Launcher {
 public:
     Launcher();
     ~Launcher();
+    void setCommandLine(const CommandLine& c) { cli_ = c, cliPending_ = !c.play.empty() || !c.explore.empty(); }
     int run();
 
 private:
@@ -73,6 +82,7 @@ private:
     void exploreMove(int dRow, int dCol);
     void exploreGroup(int group, int state);  // state: 1 collapse, 0 expand, -1 toggle; group -2: all
     bool exploreScript(const std::string& cmd, const std::string& arg);  // true: a command of the explorer
+    void exploreToggleInstrument();
     void exploreFrame();
     void exploreDraw();
     void exploreDrawList(const gfx::Rect& panel);
@@ -122,6 +132,13 @@ private:
     Catalog catalog_;
     ActionLog log_;
     bool running_ = true;
+    CommandLine cli_;
+    bool cliPending_ = false;   // its game not started yet
+    bool cliExplore_ = false;   // quit when the explorer closes (--explore --exit-after)
+    int exitCode_ = 0;          // the process's: the game's, with --play --exit-after
+    int lastExit_ = 0;          // the last game run's exit code (1 when it did not start)
+    void runCommandLine();
+    void cliFail(const std::string& why);
 
     int pw_ = 0, ph_ = 0;      // window pixels
     float s_ = 1, W_ = 1280, H_ = 720;  // scale and design size

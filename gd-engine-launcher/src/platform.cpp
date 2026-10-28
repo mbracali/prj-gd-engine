@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <ctime>
 #include <filesystem>
+#include <fstream>
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -374,6 +375,24 @@ std::string originalAppBundle(const std::string& app) {
 #else
     (void)app;
     return "";
+#endif
+}
+
+bool isSteamDeck() {
+#if defined(__ANDROID__)
+    return false;
+#else
+#if defined(GDUL_STEAM_DECK)
+    return true;
+#else
+    if (const char* v = SDL_getenv("SteamDeck"); v && std::string(v) == "1") return true;
+#if defined(__linux__)
+    std::ifstream f("/sys/devices/virtual/dmi/id/board_name");
+    std::string board;
+    if (f && std::getline(f, board)) return board == "Jupiter" || board == "Galileo";
+#endif
+    return false;
+#endif
 #endif
 }
 

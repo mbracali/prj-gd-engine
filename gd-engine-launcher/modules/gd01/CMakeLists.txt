@@ -99,6 +99,12 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   # Unique symbols would keep the library loaded after the launcher unloads it.
   target_compile_options(gd01_module PRIVATE -fno-gnu-unique)
 endif()
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 14)
+  # GCC 14 (the Steam Runtime's gcc-14, the Steam Deck download) warns wrongly
+  # about std::vector::insert in pss.cpp (-Wstringop-overflow, a known false
+  # positive of its inlined memmove); gd-game-01 itself is frozen.
+  set_source_files_properties(${GD01_ENGINE}/src/video/pss.cpp PROPERTIES COMPILE_OPTIONS -Wno-stringop-overflow)
+endif()
 if(MINGW)
   target_link_options(gd01_module PRIVATE -static-libgcc -static-libstdc++ -static $<$<CONFIG:Release>:-s>)
 elseif(NOT APPLE)

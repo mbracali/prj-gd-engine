@@ -5,11 +5,16 @@
 #
 #   gd-engine-launcher/local_builds/gdul-<version>-<os>-<arch>/   (git-ignored)
 #
-# Usage: gd-engine-launcher/scripts/build.sh [linux] [windows] [macos] [android] [all]
+# Usage: gd-engine-launcher/scripts/build.sh [linux] [steamdeck] [windows] [macos] [android] [all]
 #                                            [--force] [--previous <folder>]
 #   (no build)  the one for the system you are on
 #   linux       Linux x86-64, with this machine's compiler and SDL3 (cmake,
 #               ninja, a C++20 compiler, SDL3 development files)
+#   steamdeck   Steam Deck (on Linux): gdul-<version>-steamdeck-x86_64, built in
+#               Valve's Steam Runtime 3 "sniper" SDK container (podman or docker;
+#               registry.gitlab.steamos.cloud/steamrt/sniper/sdk), with every
+#               game module's Steam Deck defaults (GD01_STEAM_DECK, GD02_STEAM_DECK)
+#               and the launcher's (GDUL_STEAM_DECK); STEAM-DECK.txt inside
 #   windows     Windows x86-64, cross-compiled with MinGW-w64 (Fedora:
 #               dnf install mingw64-gcc-c++ mingw64-SDL3), or natively in MSYS2
 #   macos       macOS arm64 (Apple silicon), on a Mac with Homebrew (brew install
@@ -56,12 +61,12 @@ esac
 targets=() force=0 previous="${GDUL_PREVIOUS_BUILD:-}"
 while [ $# -gt 0 ]; do
   case "$1" in
-    linux|windows|macos|android) targets+=("$1") ;;
-    all) targets+=(linux windows macos android) ;;
+    linux|steamdeck|windows|macos|android) targets+=("$1") ;;
+    all) targets+=(linux steamdeck windows macos android) ;;
     --force) force=1 ;;
     --previous) [ $# -ge 2 ] || { echo "build.sh: --previous needs a folder" >&2; exit 2; }; previous="$2"; shift ;;
     --previous=*) previous="${1#--previous=}" ;;
-    -h|--help) sed -n '4,41p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '4,46p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "build.sh: unknown build or option $1 (see --help)" >&2; exit 2 ;;
   esac
   shift
@@ -115,8 +120,8 @@ arch_of() {
 # APK had no gd01 module: "This launcher build has no gd-game-01 module").
 # gd01 renders with OpenGL (OpenGL ES 3.0 on Android, as its own APK does;
 # Vulkan only for its AI upscalers, which Android does not have).
-module_systems_01="linux windows macos android"
-module_systems_02="linux windows macos android"
+module_systems_01="linux steamdeck windows macos android"
+module_systems_02="linux steamdeck windows macos android"
 
 # module_inputs_hash <NN>: what a module takes from the launcher besides its
 # game's sources (the module SDK, modules/gdNN/); a module is reused only when
@@ -191,8 +196,10 @@ cmake_args() {  # <os>: cross-compile settings
   if [ "$1" = android ]; then android_cmake_args; fi
 }
 build_launcher() {  # <os> <build dir>
+  local deck=""
+  [ "$1" = steamdeck ] && deck="-DGDUL_STEAM_DECK=ON"
   # shellcheck disable=SC2046
-  cmake -S "$launcher" -B "$2" -G Ninja -DCMAKE_BUILD_TYPE=Release $(cmake_args "$1") &&
+  cmake -S "$launcher" -B "$2" -G Ninja -DCMAKE_BUILD_TYPE=Release $deck $(cmake_args "$1") &&
     cmake --build "$2"
 }
 
@@ -219,11 +226,14 @@ build_module_02() {
         --target-os=android --arch="$arch" --cc="$tc/${triple}24-clang" --cxx="$tc/${triple}24-clang++" \
         --nm="$tc/llvm-nm" --ar="$tc/llvm-ar" --ranlib="$tc/llvm-ranlib" --strip="$tc/llvm-strip" --pkg-config=false \
         --disable-x86asm --extra-ldflags=-Wl,-z,max-page-size=16384
+    elif [ "$os" = steamdeck ]; then  # in the sniper container (build_steamdeck.sh), as build_linux_steamdeck.sh
+      build_ffmpeg build/ffmpeg/steamdeck "Steam Deck" --disable-x86asm --cc="${CC:-gcc}"
     else
       build_ffmpeg build/ffmpeg/linux Linux --disable-x86asm
     fi
   )
-  local ffmpeg_arg="$ffmpeg" sdl_arg=""
+  local ffmpeg_arg="$ffmpeg" sdl_arg="" deck=""
+  [ "$os" = steamdeck ] && deck="-DGD02_STEAM_DECK=ON"
   if [ "$os" = android ]; then
     ffmpeg="$engine/build/ffmpeg/android/$android_abi/ffmpeg-prefix"
     ffmpeg_arg="$engine/build/ffmpeg/android"  # gd02's CMakeLists.txt adds <ABI>/ffmpeg-prefix
@@ -231,14 +241,14 @@ build_module_02() {
   fi
   # shellcheck disable=SC2046
   cmake -S "$engine" -B "$work" -G Ninja -DCMAKE_BUILD_TYPE=Release -DGD02_MODULE=ON -DGD02_VIDEO=ON \
-    -DGD02_FFMPEG_DIR="$ffmpeg_arg" $sdl_arg $(cmake_args "$os")
+    -DGD02_FFMPEG_DIR="$ffmpeg_arg" $sdl_arg $deck $(cmake_args "$os")
   cmake --build "$work" --target gd02_module
   mkdir -p "$dest/licenses"
   case "$os" in
     windows)
       cp "$work/gd-game-02.dll" "$ffmpeg"/bin/av*.dll "$dest/"
       (. "$engine/build_common.sh"; ship_winpthread "$dest" "$dest/licenses") ;;
-    linux)
+    linux|steamdeck)
       cp "$work/gd-game-02.so" "$dest/"
       for lib in avformat avcodec avutil; do
         cp -L "$(ls "$ffmpeg/lib/lib$lib.so."[0-9]* | grep -E '\.so\.[0-9]+$' | head -1)" "$dest/"
@@ -263,6 +273,7 @@ build_module_02() {
 build_module_01() {
   local os="$1" work="$2" dest="$3" engine="$repo/gd-game-01/engine" sdl_arg=""
   [ "$os" = android ] && sdl_arg="-DGD01_SDL3_SOURCE=$SDL3_SRC"
+  [ "$os" = steamdeck ] && sdl_arg="-DGD01_STEAM_DECK=ON"  # gd01's Steam Deck defaults (its README's table)
   # shellcheck disable=SC2046
   cmake -S "$launcher/modules/gd01" -B "$work" -G Ninja -DCMAKE_BUILD_TYPE=Release $sdl_arg $(cmake_args "$os")
   cmake --build "$work" --target gd01_module
@@ -281,7 +292,7 @@ build_module_01() {
     cp "$engine/third_party/volk/LICENSE.md" "$dest/licenses/volk-LICENSE.md"
     cp "$engine/third_party/vulkan/LICENSE.md" "$dest/licenses/Vulkan-Headers-LICENSE.md"
   fi
-  if [ "$os" = linux ] && ls "$engine"/third_party/dlss/lib/Linux_x86_64/libnvidia-ngx-dlss.so.* >/dev/null 2>&1; then
+  if { [ "$os" = linux ] || [ "$os" = steamdeck ]; } && ls "$engine"/third_party/dlss/lib/Linux_x86_64/libnvidia-ngx-dlss.so.* >/dev/null 2>&1; then
     # NGX loads the DLSS model from the program's folder: the launcher's root
     # (copied there when the build is assembled).
     mkdir -p "$dest/root"
@@ -455,7 +466,7 @@ build_os() {
       cp "$launcher/res/gdul.ico" "$stage/$exe.ico"
       cp /usr/share/licenses/mingw64-SDL3/LICENSE.txt "$stage/licenses/SDL3-LICENSE.txt" 2>/dev/null ||
         cp /usr/share/licenses/SDL3/LICENSE.txt "$stage/licenses/SDL3-LICENSE.txt" ;;
-    linux)
+    linux|steamdeck)
       local sdl
       sdl="${GDUL_SDL3_LIB:-$(ldd "$stage/$exe" | awk '/libSDL3\.so/ {print $3}')}"
       cp -L "$sdl" "$stage/libSDL3.so.0"
@@ -479,6 +490,7 @@ build_os() {
   cp "$repo/LICENSE" "$repo/LICENSE-ADDITIONAL-TERMS.md" "$stage/"
   cp "$launcher/package/README.md" "$stage/README.md"
   [ "$os" = android ] || cp "$launcher/package/original_isos-README.md" "$stage/original_isos/README.md"
+  [ "$os" = steamdeck ] && cp "$launcher/package/STEAM-DECK.txt" "$stage/STEAM-DECK.txt"
   cp "$launcher/manual/"*.md "$stage/manual/"
 
   # The manifest: what each game module was built from.
@@ -546,19 +558,36 @@ if command -v python3 >/dev/null; then
   fi
 fi
 failed=0
+in_steamrt() { grep -qs 'Steam Runtime' /etc/os-release; }
+container_runner() { if command -v podman >/dev/null; then echo podman; elif command -v docker >/dev/null; then echo docker; fi; }
+# The Steam Deck build, from a Linux host: build_steamdeck.sh in the sniper
+# SDK container (the repository mounted at /src, the --previous folder at /previous).
+build_steamdeck_in_container() {
+  local runner image=registry.gitlab.steamos.cloud/steamrt/sniper/sdk:latest args=() vols=(-v "$repo":/src:Z)
+  runner="$(container_runner)"
+  [ "$force" = 1 ] && args+=(--force)
+  if [ -n "$previous" ]; then vols+=(-v "$previous":/previous:ro,Z); args+=(--previous /previous); fi
+  echo "${B}${C}=== gdul-$version-steamdeck-x86_64 (in Valve's Steam Runtime 3 'sniper' SDK, $runner) ===${N}"
+  "$runner" run --rm "${vols[@]}" -w /src "$image" gd-engine-launcher/scripts/build_steamdeck.sh "${args[@]}"
+}
 can_build() {
   case "$1" in
     windows) return 0 ;;
+    steamdeck) [ "$host" = linux ] && { in_steamrt || [ -n "$(container_runner)" ]; } ;;
     android) { [ "$host" = linux ] || [ "$host" = macos ]; } && android_ready ;;
     *) [ "$host" = "$1" ] ;;
   esac
 }
 for t in "${targets[@]}"; do
-  if can_build "$t"; then
+  if [ "$t" = steamdeck ] && [ "$host" = linux ] && ! in_steamrt && can_build "$t"; then
+    # (Its log, logs/build-steamdeck.log, is written inside the container.)
+    { set +e; build_steamdeck_in_container; rc=$?; set -e; }
+    [ "$rc" = 0 ] || failed=$((failed + 1))
+  elif can_build "$t"; then
     { set +e; ( set -e; build_os "$t" ) 2>&1 | tee "$logs/build-$t.log"; rc=${PIPESTATUS[0]}; set -e; }
     [ "$rc" = 0 ] || failed=$((failed + 1))
   else
-    say "${Y}Skipped $t: it cannot be built on $host$([ "$t" = android ] && echo " without the Android SDK (see --help)")${N}"
+    say "${Y}Skipped $t: it cannot be built on $host$([ "$t" = android ] && echo " without the Android SDK (see --help)")$([ "$t" = steamdeck ] && echo " without podman or docker")${N}"
   fi
   echo
 done

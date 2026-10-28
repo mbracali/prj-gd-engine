@@ -8,14 +8,15 @@
 # in gd-engine-games/manifest.json. Fails loudly otherwise. build.sh runs it on every build it assembles, the
 # gdul release workflow on every archive before it is uploaded.
 #
-# Usage: gd-engine-launcher/scripts/verify_bundle.sh <build folder | .zip | .tar.gz | .apk> [linux|windows|macos|android]
-#   (the system is read from the manifest when not given)
+# Usage: gd-engine-launcher/scripts/verify_bundle.sh <build folder | .zip | .tar.gz | .apk> [linux|steamdeck|windows|macos|android]
+#   (the system is read from the manifest when not given; steamdeck is checked
+#   as linux: every ready game's module and libraries, gd01's DLSS too)
 # GDUL_REQUIRE_DLSS=1 (or CI=true): gd01's DLSS library must be in a Linux download.
 # CI=true: a module whose exports cannot be read (no nm/objdump) fails too.
 set -euo pipefail
 shopt -s inherit_errexit nullglob
 here="$(cd "$(dirname "$0")" && pwd)"
-[ $# -ge 1 ] || { sed -n '4,13p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+[ $# -ge 1 ] || { sed -n '4,15p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 target="$1" os="${2:-}"
 if [ -t 1 ]; then G=$'\e[32m' R=$'\e[31m' Y=$'\e[33m' N=$'\e[0m'; else G="" R="" Y="" N=""; fi
 problems=0
@@ -51,8 +52,12 @@ manifest_get() {  # <expression on m (the manifest)>
   python3 -I -c 'import json,sys; m=json.load(open(sys.argv[1])); print(eval(sys.argv[2]))' "$manifest" "$1"
 }
 [ -n "$os" ] || os="$(manifest_get 'm.get("os","")')"
-case "$os" in linux|windows|macos|android) ;; *) echo "verify_bundle.sh: unknown system '$os'" >&2; exit 2 ;; esac
+case "$os" in linux|steamdeck|windows|macos|android) ;; *) echo "verify_bundle.sh: unknown system '$os'" >&2; exit 2 ;; esac
 note "checking $(basename "$target") ($os)"
+if [ "$os" = steamdeck ]; then  # the Linux download built for the Deck: the same files, plus its STEAM-DECK.txt
+  os=linux
+  find "$root" -maxdepth 2 -name STEAM-DECK.txt | grep -q . || fail "STEAM-DECK.txt (missing)"
+fi
 
 yaml_value() {  # <file> <key>: a top-level scalar, quotes removed (as build.sh)
   sed -n "s/^$2:[[:space:]]*//p" "$1" | sed 's/[[:space:]]*#.*$//; s/^"\(.*\)"$/\1/; s/^'"'"'\(.*\)'"'"'$/\1/' | head -1
@@ -158,6 +163,13 @@ for gi in "${game_infos[@]}"; do
     fail "$id's module ${mod#"$root"/} (missing or empty)"
   else
     exports "$mod"
+    # Linux: every symbol the module needs is there (a game source half
+    # written, a function declared but not built, links into a .so that
+    # passes every other check and fails only on Play: "undefined symbol").
+    if [ "$os" = linux ] && [ "$(uname -s)" = Linux ] && command -v ldd >/dev/null; then
+      undef="$(LD_LIBRARY_PATH="$bundle:$libs" ldd -r "$mod" 2>&1 | grep 'undefined symbol' || true)"
+      [ -z "$undef" ] || fail "$id's module has undefined symbols (it would not load): $(echo "$undef" | head -3 | sed 's/^[[:space:]]*//' | tr '\n' ' ')"
+    fi
   fi
   case "$nn" in
     02)  # FFmpeg (videos, sound effects) and its LGPL notice

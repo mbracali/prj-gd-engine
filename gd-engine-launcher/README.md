@@ -93,7 +93,55 @@ game returns to the list in the same window (closing the window while a game
 runs also returns to the list). The launcher is always a window: after a game
 that went full screen, maximized the window or hid the cursor, it leaves full
 screen (waiting for Windows and macOS to finish) and puts back the size and
-place it had.
+place it had. That holds on every desktop build, the Steam Deck's too (in
+Gaming Mode, gamescope shows the window full screen); Android has no window
+mode, and the launcher leaves its settings alone there.
+
+### Command line
+
+```
+"Guitar Dream Universal Launcher" [--play <game> | --explore <game>] [--iso <file>] [--exit-after] [-- <game args>]
+"Guitar Dream Universal Launcher" --list | --version | --help
+```
+
+- `--play <game>` starts that game once the window shows (`gd-game-02`,
+  `gd02` or `02`); `--explore <game>` opens its Explore models screen.
+- `--iso <file>` is the disc for this run only (not saved); without it, the
+  game's saved or found disc.
+- After the game (or the explorer) the list comes back, unless
+  `--exit-after`: then the launcher quits with the game's exit code (1 when
+  it did not start, 2 for a wrong command line).
+- `-- <args>` go to the game's own command line, before the disc image
+  (as `GDUL_GAME_ARGS`).
+- `--list` prints every game (id, name, version, ready, module, the disc
+  found) and the disc folders; `--version` and `--help` print and quit.
+
+Windows: the launcher is a window program; started from a terminal it writes
+to that terminal (`AttachConsole`); `start /wait` gives its exit code to
+cmd.exe. A problem (an unknown game, no disc, no module) is printed and shown
+in a dialog (with `--exit-after`: printed, exit code 1). Steam: put the
+options in the shortcut's Launch Options (`STEAM-DECK.txt`). Implemented in
+`src/main.cpp` and `Launcher::runCommandLine`.
+
+### Steam Deck
+
+The Steam Deck download (`gdul-<v>-steamdeck-x86_64.tar.gz`, `build.sh
+steamdeck`) is the Linux launcher built in Valve's Steam Runtime 3 "sniper"
+SDK, with `GDUL_STEAM_DECK=ON` and every module built with its Steam Deck
+option (`GD01_STEAM_DECK`, `GD02_STEAM_DECK`): the games start with their
+handheld defaults (gd01: gd-game-01/README.md's "Steam Deck" column; gd02:
+full screen, 60 FPS, 800 lines, no FPS counter). It ships `STEAM-DECK.txt`
+(adding it to Steam as a non-Steam game, Gaming Mode tips).
+
+Any launcher build also detects a Deck at run time (`platform::isSteamDeck`:
+`SteamDeck=1` in the environment, or the DMI board name `Jupiter` / `Galileo`)
+and hands the games `GD_HOST_HANDHELD` in `GdHost::flags` (gd02 then uses its
+Steam Deck defaults; gd01 only in the Deck download, where they are compiled
+in, or with its Enhanced Settings > Apply Steam Deck Settings). Saved
+settings always win; nothing is locked. Controls: Steam's virtual gamepad in
+Gaming Mode (`SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD`, one press seen
+from two pads acts once) and the Deck's own controls through SDL's Steam
+Deck HIDAPI driver when Steam does not own them (`SDL_HINT_JOYSTICK_HIDAPI_STEAMDECK`).
 
 ## Explore models
 
@@ -107,8 +155,17 @@ own loaders and renderer through the optional `gd_game_explore` entry point
 
 | Game | Models | How they are drawn |
 |---|---|---|
-| gd-game-02 | characters (24), crowd, guitars and basses, drum kits, venues (geometry, face-off variants), venue props | characters as `chr::Character` + `BandView` with their main driver's clips (idle first) and the venue outfits (guitar_sg, the arena kit); the rest as scenes through GH2's materials and standard shader, lit by their own Environ or a key light; guitars stood up |
-| gd-game-01 | guitarists, band (band_chars.dta), crowd, guitars, venues | guitarists and band as gd01's `Character` with every clip (idle first), the rest as `Scene` + `SceneRenderer` (the views no other view draws), a key light; guitars stood up |
+| gd-game-02 | characters (24), crowd, guitars and basses, drum kits, venues (geometry, face-off variants), venue props | characters as `chr::Character` + `BandView` in their rest pose, with their main driver's clips (idle first) and the venue outfits (guitar_sg, the arena kit; "Show instrument" off leaves them out); the rest as scenes through GH2's materials and standard shader, lit by their own Environ or a key light; guitars stood up |
+| gd-game-01 | guitarists, band (band_chars.dta), crowd, guitars, venues | guitarists and band as gd01's `Character` in their rest pose, with every clip (idle first; "Show instrument" off builds them without their guitar or bass), the rest as `Scene` + `SceneRenderer` (the views no other view draws), a key light; guitars stood up |
+
+Characters start in their **rest pose** (the bind pose: a T-pose for GH2's
+characters, arms down for GH1's; nothing through the body); **Next animation** plays each clip in turn and
+then the rest pose again (`GdExploreView::clip` -1; a module reloads the
+character to get it back). A character with a guitar, bass or drum kit shows
+a **Show instrument** checkbox under its card (a click, `I`, or the left
+stick's click; `GdExplorer::has_instrument` / `show_instrument`, gdul 0.1.6,
+read only when the module's `size` covers them); the choice stays for the
+next models.
 
 The list is grouped by kind; a group's header opens and closes it (click it,
 or green on it; left closes and right opens it; a search shows every match).
@@ -318,10 +375,14 @@ holds the signatures of games whose folder must not change (gd-game-01).
 ## Building
 
 ```
-gd-engine-launcher/scripts/build.sh [linux] [windows] [macos] [android] [all] [--force] [--previous <folder>]
+gd-engine-launcher/scripts/build.sh [linux] [steamdeck] [windows] [macos] [android] [all] [--force] [--previous <folder>]
 ```
 
-(macOS and Android: see [Other systems](#other-systems-macos-and-android).)
+(macOS and Android: see [Other systems](#other-systems-macos-and-android).
+Steam Deck: `steamdeck` runs `scripts/build_steamdeck.sh` in the
+`registry.gitlab.steamos.cloud/steamrt/sniper/sdk` container with podman or
+docker, into `local_builds/gdul-<v>-steamdeck-x86_64/`, checked by
+`verify_bundle.sh` as a Linux build plus its `STEAM-DECK.txt`.)
 
 Linux: cmake, ninja, a C++20 compiler and SDL3's development files (the
 gd-game-02 module also builds FFmpeg, as gd-game-02 does). Windows:
@@ -378,7 +439,7 @@ A new game needs a recipe in `scripts/build.sh` (`build_module_NN`): see
 
 | Variable | Effect |
 |---|---|
-| `GDUL_SCRIPT="<ms>:<cmd>[=<arg>];..."` | commands at those times since start: `up down left right green red yellow blue`, `drop=<file>` (a real drop event), `play=<game id>`, `explore=<game id>`, `shot=<file.bmp>`, `drag=1\|0` (the drop overlay), `toast=<text>`, `folders` (the disc folders dialog), `quit`; in the explorer also `collapse=<group text>\|all`, `expand=<group text>\|all`, `pick=<text>` (the first model whose name or path has it, shown at once), `search=<text>`, `orbit=<yaw>,<pitch>` (degrees), `zoom=<factor>`, `pan=<x>,<y>`, `clip=next`, `reset`, `turntable=0\|1` |
+| `GDUL_SCRIPT="<ms>:<cmd>[=<arg>];..."` | commands at those times since start: `up down left right green red yellow blue`, `drop=<file>` (a real drop event), `play=<game id>`, `explore=<game id>`, `shot=<file.bmp>`, `drag=1\|0` (the drop overlay), `toast=<text>`, `folders` (the disc folders dialog), `quit`; in the explorer also `collapse=<group text>\|all`, `expand=<group text>\|all`, `pick=<text>` (the first model whose name or path has it, shown at once), `search=<text>`, `orbit=<yaw>,<pitch>` (degrees), `zoom=<factor>`, `pan=<x>,<y>`, `clip=next`, `reset`, `turntable=0\|1`, `instrument=0\|1` (the Show instrument checkbox) |
 | `GDUL_WINDOW=<w>x<h>` | the starting window size |
 | `GDUL_GAME_QUIT_AFTER=<ms>` | quits each game that long after it starts |
 | `GDUL_GAME_ARGS="..."` | more arguments for the game, before the disc |

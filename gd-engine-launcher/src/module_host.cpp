@@ -79,6 +79,11 @@ void announceDevices(SDL_Window* window) {
     SDL_PushEvent(&r);
 }
 
+std::vector<std::string>& extraGameArgs() {
+    static std::vector<std::string> a;
+    return a;
+}
+
 // What a module gets: the GdHost and everything it points to.
 struct HostSetup {
     std::vector<std::string> args;
@@ -107,6 +112,7 @@ struct HostSetup {
                     a += *extra;
                 }
             }
+        for (const std::string& a : extraGameArgs()) args.push_back(a);
         // Android: a disc chosen in the file dialog is a content:// document;
         // the game gets /proc/self/fd/<n> (it opens files with fopen; the
         // module runs in this process, so the descriptor is its own too).
@@ -138,6 +144,7 @@ struct HostSetup {
         host.save_dir = saveDir.c_str();
         host.log = &hostLogLine;
         host.log_user = &logUser;
+        host.flags = platform::isSteamDeck() ? GD_HOST_HANDHELD : 0u;
     }
 
     // The game's SDL_Log lines into logs/<file> in the save folder too.
@@ -299,3 +306,5 @@ bool ExploreSession::close() {
     state_.reset();
     return unloaded;
 }
+
+void setExtraGameArgs(const std::vector<std::string>& args) { extraGameArgs() = args; }

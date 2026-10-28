@@ -69,6 +69,12 @@ void closeDocument(int fd);
 std::string documentName(const std::string& uri);
 std::string displayName(const std::string& path);
 
+// A Steam Deck (or what the games treat as one, a handheld PC): the Steam
+// Deck download (built with GDUL_STEAM_DECK), SteamDeck=1 in the environment
+// (Steam sets it on the Deck, Gaming Mode and Desktop Mode alike), or the DMI
+// board name "Jupiter" (LCD) or "Galileo" (OLED). Always false on Android.
+bool isSteamDeck();
+
 // Shared libraries (the game modules).
 void* openLibrary(const std::string& path, std::string& error);
 void* librarySymbol(void* lib, const char* name);
