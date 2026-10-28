@@ -106,6 +106,21 @@ then the step log it points to: `gd-engine-launcher/logs/<os>-<game>.log`
 `gd-game-02/engine/build/ffmpeg/<os>/ffmpeg-build.log`. You can check any
 download by hand: `gd-engine-launcher/scripts/verify_bundle.sh <file or folder>`.
 
+Second case (gdul 0.1.2, Windows): `gd-game-02.dll` was there, but FFmpeg's
+`avutil-59.dll` imports MinGW's `libwinpthread-1.dll`, which no download
+carried, so Windows refused to load the game ("LoadLibrary failed (error
+126)"). The check only looked at the module's own imports. Now:
+
+- `verify_bundle.sh` follows the imports of **every** `.dll` / `.exe` in a
+  Windows download: each must be in the download or one of Windows' own DLLs.
+- `ship_winpthread` (gd-game-02/engine/build_common.sh) puts the DLL and its
+  licence next to FFmpeg, for the launcher and for gd02's own download.
+- A module is reused from the previous release only if the packaging
+  scripts are unchanged too (`module_inputs_hash`).
+- Before calling a Windows build good, load each module for real: Steam's
+  Proton has a `wine` (`files/bin/wine`) that runs a 10-line
+  `LoadLibraryExW` test program against the download.
+
 ## Test builds on GitHub (by hand)
 
 Actions > **gd-game-01 build** (or **gd-game-02 build**) > Run workflow, on any branch: builds every

@@ -9,7 +9,7 @@ Read this before working in this folder. It applies to every AI coding agent (Cl
 - Behaviour comes from the original game's executable (Ghidra project in `ghidra/`, git-ignored). The goal is to match the original exactly; mark findings **[C]** (confirmed, with address) or **[I]** (inferred) in the docs.
 
 ## This folder
-**Guitar Hero II** (Xbox 360), Guitar Dream version 0.1.3, in progress. Start with `agents/CURSOR_CONTEXT.md`, `docs/backlog.md` and `docs/FINDINGS.md`.
+**Guitar Hero II** (Xbox 360), Guitar Dream version 0.1.4, in progress. Start with `agents/CURSOR_CONTEXT.md`, `docs/backlog.md` and `docs/FINDINGS.md`.
 
 Build and test from `engine/`: `cmake --build build/linux`, `./build.sh` (all platforms, 0 compiler warnings), then the tests listed in `agents/CURSOR_CONTEXT.md` with the disc image from the root `original_isos/`.
 

@@ -175,6 +175,31 @@ for gi in "${game_infos[@]}"; do
   modules=$((modules + 1))
 done
 
+# Windows: every DLL any program or DLL of the download imports must be in the
+# download or be one of Windows' own (a missing one is LoadLibrary error 126,
+# e.g. FFmpeg's avutil needs MinGW's libwinpthread-1.dll).
+if [ "$os" = windows ]; then
+  tool="$(command -v x86_64-w64-mingw32-objdump || command -v objdump || true)"
+  if [ -z "$tool" ]; then
+    warn "no objdump: the DLLs' own imports were not checked"
+  else
+    syswin=" advapi32.dll bcrypt.dll cfgmgr32.dll comctl32.dll comdlg32.dll crypt32.dll d3d11.dll d3d12.dll dbghelp.dll dinput8.dll dwmapi.dll dxgi.dll gdi32.dll hid.dll imm32.dll iphlpapi.dll kernel32.dll msvcrt.dll ntdll.dll ole32.dll oleaut32.dll opengl32.dll powrprof.dll psapi.dll secur32.dll setupapi.dll shcore.dll shell32.dll shlwapi.dll user32.dll userenv.dll uxtheme.dll version.dll winmm.dll ws2_32.dll xinput1_4.dll "
+    while IFS= read -r -d '' bin; do
+      dir="$(dirname "$bin")"
+      while IFS= read -r dll; do
+        low="$(printf '%s' "$dll" | tr '[:upper:]' '[:lower:]')"
+        case "$syswin" in *" $low "*) continue ;; esac
+        case "$low" in api-ms-win-*|ext-ms-*) continue ;; esac
+        found=""
+        for c in "$dir" "$bundle"; do
+          [ -n "$(find "$c" -maxdepth 1 -iname "$dll" -size +0 2>/dev/null | head -1)" ] && found=1 && break
+        done
+        [ -n "$found" ] || fail "${bin#"$root"/} needs $dll, which is neither in the download nor part of Windows"
+      done < <("$tool" -p "$bin" 2>/dev/null | sed -n 's/^[[:space:]]*DLL Name: //p')
+    done < <(find "$bundle" \( -iname '*.dll' -o -iname '*.exe' \) -print0)
+  fi
+fi
+
 if [ "$problems" != 0 ]; then
   printf '%sverify: %s is INCOMPLETE (%d problem(s)): do not ship it. See docs/release-process.md, "Never again: incomplete bundles".%s\n' \
     "$R" "$(basename "$target")" "$problems" "$N"
