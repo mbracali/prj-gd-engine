@@ -518,6 +518,10 @@ universal launcher, not released on its own.
 | GD02-086 | Original | ❌ | After RESTART, `game exit` clears all sinks so track_panel and hud are not re-added; check against GH2 | docs/highway_and_hud.md | Wave B 10-28 |
 | GD02-087 | Original | ❌ | Script `hopo` (and other tutorial) callbacks are not sent yet; only `miss` is | docs/audio_and_charts.md | Wave B 10-28 |
 | GD02-088 | Bugfix | ❌ | `--walktest career_song` does not reach about 20 Easy career songs; cover them | | Wave B 10-28 |
+| GD02-089 | Bugfix | 🟡 in progress | Setlist: the "Beat X/5 songs to continue" label is drawn over the locked encore's name (owner screenshot) | Reopens GD02-082 | 10-28 owner |
+| GD02-090 | Enhancement | 🟡 in progress | The Glitches band (every build): everything already unlocked | | 10-28 owner |
+| GD02-091 | Original | 🟡 in progress | Venues: the entering animation of every venue, missing effects | | 10-28 owner |
+| GD02-092 | Bugfix | 🟡 in progress | Song intro: the time / camera work before the fretboard appears feels wrong; the camera sometimes goes under the venue | Reopens GD02-067 / camera items | 10-28 owner |
 | GD02-034 | Original | ❌ | Research: Practice audio: confirm the pitch drops when slowed (voice class of the song stream) | FINDINGS open question 1 | Milestones M2 |
 | GD02-036 | Original | ❌ | Research: Watcher bass-cue path (OnHit / OnMiss ask `+0x10` vtable `+0x28` by tick, then `bass_%d.cue`): which object and chart data | FINDINGS open question 9 | Milestones M2 |
 | GD02-037 | Original | ❌ | Research: Lefty Flip, input sampling rate, controller latency (`watcher +0x2c`) on the 360 | L3: where rules depend on sampling | Milestones M2 |
