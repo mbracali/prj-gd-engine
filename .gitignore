@@ -62,3 +62,7 @@ compile_commands.json
 **/agents/scratch/
 gd-engine-launcher/logs/*
 !gd-engine-launcher/logs/.gitkeep
+
+# ---- Store screenshots: they show original game art. Local only. ----
+res/screenshots/*
+!res/screenshots/HOWTO.md

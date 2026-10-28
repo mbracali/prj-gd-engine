@@ -159,6 +159,18 @@ void Catalog::load() {
             break;
         }
 
+    // The modules this build was assembled with (build.sh's manifest.json:
+    // "games": {"<id>": {...}}), to tell an incomplete download from a game
+    // that has no module for this system.
+    std::string manifest;
+    {
+        size_t size = 0;
+        if (void* data = SDL_LoadFile(platform::join(modulesDir_, "manifest.json").c_str(), &size)) {
+            manifest.assign(static_cast<const char*>(data), size);
+            SDL_free(data);
+        }
+    }
+
     yaml::Node list = yaml::load(gamesYaml_);
     // Signatures for games whose own folder cannot carry them (games.yaml).
     std::vector<IsoSignature> extra = signaturesOf(list["extra_iso_signatures"], "");
@@ -189,6 +201,7 @@ void Catalog::load() {
         g.modulePath = platform::join(modulesDir_, g.id + "/" + g.id + platform::kModuleExt);
 #endif
         g.hasModule = platform::isFile(g.modulePath);
+        g.moduleMissing = g.ready && !g.hasModule && manifest.find("\"" + g.id + "\": {") != std::string::npos;
         games_.push_back(g);
     }
 

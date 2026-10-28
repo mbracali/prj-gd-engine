@@ -1,5 +1,17 @@
 # Guitar Dream Universal Launcher: changes
 
+## 0.1.2
+
+Fixes
+- The Windows download has Guitar Hero II (gd-game-02) again: 0.1.1 shipped
+  without its module and FFmpeg libraries. The build now stops on any failed
+  step, and every download is checked for each ready game's module and
+  libraries before it is published.
+- An incomplete download is said at start ("This download is incomplete:
+  ... please download again") and written to the log, not only when a disc
+  is loaded.
+- Guitar Hero II 0.1.3: Enter finishes a band's name with the keyboard.
+
 ## 0.1.1
 
 Fixes

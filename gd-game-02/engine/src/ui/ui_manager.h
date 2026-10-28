@@ -79,6 +79,8 @@ public:
     // A menu action from the input layer (mapped to kPad buttons, player).
     void action(const InputEvent& e);
     void buttonDown(int button, int player);
+    // A BandTextEntry has the focus (the keyboard's Enter is Start there).
+    bool textEntryFocused();
     void buttonUp(int button, int player);
     // A game event for the game panel and its sinks (intro_start_msg,
     // game_won_msg, game_lost, game_outro_complete, star_power_ready...).
@@ -190,6 +192,7 @@ private:
     void updateAnims();
     void updateRepeat(double dtMs);
     void skipSplashes();  // the splashes are over: the first screen
+    bool enterIsStart_ = false;  // the keyboard's Enter, pressed on a text entry: Start until released
     void setMetacamFrame(const std::string& group, float t);  // t 0..1 of the group, on every panel's metacam
     void resetMetacam();
     void routeButton(int button, int player);

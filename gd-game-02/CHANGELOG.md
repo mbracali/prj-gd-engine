@@ -4,6 +4,14 @@ All notable changes for players. Versions follow SemVer; release tags are
 `gd-game-02/vX.Y.Z`. The release workflow publishes the section whose heading
 matches the tag's version. Nothing is released yet.
 
+## [0.1.3] - 2026-10-27
+
+### Fixed
+- The band's name with the keyboard: Enter (and the keypad's Enter) now
+  finishes the name, like Start, on every text entry. Before, Enter added a
+  letter and a keyboard player could not create a band. Green / X still add
+  letters on guitars and gamepads.
+
 ## [0.1.2] - 2026-10-27
 
 ### Added

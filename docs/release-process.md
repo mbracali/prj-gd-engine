@@ -71,6 +71,41 @@ build)" (`--force` builds it anyway). The run ends with a summary per build
 The results land in `gd-game-01/local_builds/` (git-ignored): a ready-to-run
 folder per platform and the same file a release would publish.
 
+## Never again: incomplete bundles
+
+**What happened.** gdul 0.1.1's Windows download shipped without gd02's module
+(`gd-game-02.dll`, the FFmpeg DLLs and their licence), so the launcher said
+"This launcher build has no gd-game-02 module". Two faults together:
+- The Windows job's Fedora container had no host C compiler (`gcc`); FFmpeg's
+  `configure` needs one even when it cross-compiles ("Host compiler lacks C11
+  support"), so FFmpeg was never built (the cache missed every time).
+- `scripts/build.sh` hid that failure: it ran each step as `step ... || return 1`,
+  and bash ignores `set -e` in a function called in a condition and in
+  everything it runs (subshells and background jobs too). The module step
+  went on after the failed FFmpeg build and copy, and "succeeded" with the
+  status of its last command.
+
+**The checks now in place.**
+- Each `build.sh` step runs in a fresh `bash -euo pipefail` (with
+  `inherit_errexit`): any failing command fails the step and the build.
+- `scripts/verify_bundle.sh` runs on every build `build.sh` assembles and, in
+  the release workflow, on every archive (`.tar.gz`, `.zip`, `.apk`) before it
+  is uploaded. For each game in `games.yaml` with `ready_to_play: true` and a
+  module for that system (`module_systems_NN` in `build.sh`) it requires the
+  module, non-empty, exporting `gd_game_run` (objdump / nm), its libraries
+  (gd02: FFmpeg's avformat, avcodec, avutil and the LGPL licence; gd01 on
+  Linux: the DLSS library), and the entry in `gd-engine-games/manifest.json`.
+- The Windows job installs `gcc`. A failing job uploads `logs-<os>` (the
+  launcher's `logs/` and FFmpeg's `ffmpeg-build.log`) as an artifact.
+- The launcher says at start when the download lacks a module its manifest
+  lists ("This download is incomplete ... please download again") and logs it.
+
+**If verify fails.** Do not publish. Read the lines it prints (what is missing),
+then the step log it points to: `gd-engine-launcher/logs/<os>-<game>.log`
+(locally, or the run's `logs-<os>` artifact), and for FFmpeg
+`gd-game-02/engine/build/ffmpeg/<os>/ffmpeg-build.log`. You can check any
+download by hand: `gd-engine-launcher/scripts/verify_bundle.sh <file or folder>`.
+
 ## Test builds on GitHub (by hand)
 
 Actions > **gd-game-01 build** (or **gd-game-02 build**) > Run workflow, on any branch: builds every

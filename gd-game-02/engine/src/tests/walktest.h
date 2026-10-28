@@ -74,7 +74,7 @@ public:
 
 private:
     struct Step {
-        enum Kind { Screen, Press, Wait, Hold, Check } kind;
+        enum Kind { Screen, Press, Wait, Hold, Check, Key } kind;  // Key: a real key (button: its SDL keycode)
         std::string screen;
         int button = 0;
         double ms = 0;

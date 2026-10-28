@@ -748,7 +748,14 @@ void UiManager::action(const InputEvent& e) {
     case Action::Down: pad = kPad_DDown; break;
     case Action::Left: pad = kPad_DLeft; break;
     case Action::Right: pad = kPad_DRight; break;
-    case Action::Confirm: pad = kPad_X; break;
+    // The keyboard's Enter is always Start on a text entry (the owner's rule,
+    // every build): it finishes the band's name, which a keyboard otherwise
+    // cannot (the original has no keyboard); X / green still add letters.
+    // (Its release goes as the same button as its press.)
+    case Action::Confirm:
+        if (e.enterKey && e.down) enterIsStart_ = textEntryFocused();
+        pad = e.enterKey && enterIsStart_ ? kPad_Start : kPad_X;
+        break;
     case Action::Back: pad = kPad_Tri; break;
     case Action::Start: pad = kPad_Start; break;
     // The frets are the 360 guitar's buttons (hx_guitar_xbox_new: A B Y X LB
@@ -780,6 +787,12 @@ void UiManager::action(const InputEvent& e) {
             }
     if (e.down) buttonDown(pad, player);
     else buttonUp(pad, player);
+}
+
+bool UiManager::textEntryFocused() {
+    PanelObj* fp = current_ ? current_->focusPanel() : nullptr;
+    ComponentObj* c = fp && fp->up ? fp->focused() : nullptr;
+    return c && c->isTextEntry();
 }
 
 void UiManager::buttonDown(int button, int player) {

@@ -702,8 +702,11 @@ void Input::keyEvent(const SDL_KeyboardEvent& k, std::vector<InputEvent>& out) {
             else emit(out, Action::Strum, false, ts, mode, std::max(kb, 0));
             return;
         }
-        a = Action::Confirm;
-        break;
+        // Confirm; on a text entry (the band's name) the menus take it as
+        // Start (UiManager::action), so the keyboard can finish the name.
+        if (const size_t n = out.size(); emit(out, Action::Confirm, down, ts, mode, std::max(kb, 0)), out.size() > n)
+            out.back().enterKey = true;
+        return;
     case SDLK_UP: a = Action::Up; break;
     case SDLK_DOWN: a = Action::Down; break;
     case SDLK_LEFT: a = Action::Left; break;
