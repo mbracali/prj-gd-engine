@@ -46,9 +46,12 @@
 
   section { padding: 72px 0; border-top: 1px solid var(--line); }
   h2 { font-family: "Metal Mania", serif; font-weight: 400; font-size: clamp(34px, 5vw, 52px); margin: 0 0 10px; color: var(--yellow); text-shadow: 0 3px 0 #000; }
-  .lead { color: var(--dim); max-width: 760px; margin: 0 0 32px; }
+  .lead { color: var(--dim); max-width: 860px; margin: 0 0 32px; }
+  p, li, h2, h3, .rule, .lead { text-wrap: pretty; }
+  code { font-size: .85em; }
 
-  .rules { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; }
+  .rules { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; }
+  @media (max-width: 1000px) { .rules { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); } }
   .rule { background: var(--panel); border: 1px solid var(--line); border-left: 6px solid var(--c); border-radius: 10px; padding: 16px 18px; font-weight: 600; }
 
   .setlist { display: grid; gap: 8px; }
@@ -85,6 +88,7 @@
   .dl .os { font-weight: 800; font-size: 26px; letter-spacing: .04em; text-transform: uppercase; }
   .dl .file { color: var(--dim); font-size: 16px; word-break: break-all; }
   .dl-note { color: var(--dim); font-size: 17px; margin-top: 16px; }
+  .donate-title { margin: 40px 0 14px; font-size: 26px; font-weight: 800; letter-spacing: .02em; }
   .donate { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
   .donate .card { display: flex; flex-direction: column; gap: 14px; align-items: flex-start; }
   .donate form { margin: 0; }
@@ -144,44 +148,7 @@
         <div class="rule" style="--c:var(--blue)">We don't support or endorse piracy.</div>
         <div class="rule" style="--c:var(--orange)">Free and noncommercial, forever.</div>
       </div>
-    </div>
-  </section>
-
-  <section id="setlist">
-    <div class="wrap">
-      <h2>The setlist</h2>
-      <p class="lead">Nineteen games on the list. Two are already on stage; the rest are waiting in the wings.</p>
-      <div class="setlist" id="songs"></div>
-    </div>
-  </section>
-
-  <section id="launcher">
-    <div class="wrap launcher">
-      <div>
-        <h2>One launcher, every game</h2>
-        <p class="lead">The Guitar Dream Universal Launcher lists every game, finds your disc images and plays each game in the same window.</p>
-        <ul class="feat">
-          <li><span class="gem" style="color:var(--green)"></span>Drop a disc image on it: it knows which game it is.</li>
-          <li><span class="gem" style="color:var(--red)"></span>Put your ISOs in <code>original_isos/</code> and they are found by themselves.</li>
-          <li><span class="gem" style="color:var(--yellow)"></span>Explore the models of your discs: characters, guitars, venues.</li>
-          <li><span class="gem" style="color:var(--blue)"></span>Windows, Linux, Steam Deck, macOS and Android.</li>
-          <li><span class="gem" style="color:var(--orange)"></span>Guitar, gamepad, keyboard or mouse.</li>
-        </ul>
-      </div>
-      <div class="screen" aria-label="Launcher preview">
-        <div class="row lit"><span><b>gd-game-01</b>/Guitar Hero</span><span class="bar"><i style="width:94%"></i></span></div>
-        <div class="row lit"><span><b>gd-game-02</b>/Guitar Hero II</span><span class="bar"><i style="width:60%;background:var(--yellow)"></i></span></div>
-        <div class="row"><span><b>gd-game-03</b>/Guitar Hero 80s</span><span class="bar"><i style="width:0"></i></span></div>
-        <div class="row"><span><b>gd-game-04</b>/Guitar Hero III</span><span class="bar"><i style="width:0"></i></span></div>
-        <div class="row" style="margin:0"><span><b>gd-game-05</b>/Rock Band</span><span class="bar"><i style="width:0"></i></span></div>
-      </div>
-    </div>
-  </section>
-
-  <section id="donate">
-    <div class="wrap">
-      <h2>Keep the band on tour</h2>
-      <p class="lead">Guitar Dream Engine is free and always will be. If it brought back some good memories, a donation helps keep the project alive and growing.</p>
+      <h3 class="donate-title">Consider donating to keep the project going</h3>
       <div class="donate">
         <div class="card">
           <h3>PayPal</h3>
@@ -201,6 +168,37 @@
           <p>Pix, cards and Mercado Pago balance, from Brazil.</p>
           <a class="btn mp" href="https://link.mercadopago.com.br/guitardreamengine"><span class="gem" style="color:#00264d"></span>Donate via MercadoLivre</a>
         </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="setlist">
+    <div class="wrap">
+      <h2>The setlist</h2>
+      <p class="lead">Nineteen games on the list. Two are already on stage; the rest are waiting in the wings.</p>
+      <div class="setlist" id="songs"></div>
+    </div>
+  </section>
+
+  <section id="launcher">
+    <div class="wrap launcher">
+      <div>
+        <h2>One launcher, every game</h2>
+        <p class="lead">The Guitar Dream Universal Launcher lists every game, finds your disc images and plays each game in the same window.</p>
+        <ul class="feat">
+          <li><span class="gem" style="color:var(--green)"></span><span>Use your original ISO files to run the original games.</span></li>
+          <li><span class="gem" style="color:var(--red)"></span><span>Explore the models of your discs: characters, guitars, venues.</span></li>
+          <li><span class="gem" style="color:var(--yellow)"></span><span>Windows, Linux, Steam Deck, macOS and Android.</span></li>
+          <li><span class="gem" style="color:var(--blue)"></span><span>Guitar, gamepad, keyboard or mouse.</span></li>
+          <li><span class="gem" style="color:var(--orange)"></span><span>Mod support in development!</span></li>
+        </ul>
+      </div>
+      <div class="screen" aria-label="Launcher preview">
+        <div class="row lit"><span><b>gd-game-01</b>/Guitar Hero</span><span class="bar"><i style="width:94%"></i></span></div>
+        <div class="row lit"><span><b>gd-game-02</b>/Guitar Hero II</span><span class="bar"><i style="width:60%;background:var(--yellow)"></i></span></div>
+        <div class="row"><span><b>gd-game-03</b>/Guitar Hero 80s</span><span class="bar"><i style="width:0"></i></span></div>
+        <div class="row"><span><b>gd-game-04</b>/Guitar Hero III</span><span class="bar"><i style="width:0"></i></span></div>
+        <div class="row" style="margin:0"><span><b>gd-game-05</b>/Rock Band</span><span class="bar"><i style="width:0"></i></span></div>
       </div>
     </div>
   </section>
@@ -272,12 +270,26 @@
     })
     .catch(() => {});
 
-  // A note highway scrolling behind the title.
+  // A note highway scrolling behind the title. Each gem is drawn once, glow
+  // included, into a sprite and then only copied: a canvas blur per gem and
+  // frame was slow on Linux browsers. The canvas is at most 1.5x the CSS size.
   const cv = document.getElementById("highway"), g = cv.getContext("2d");
   const colors = ["#2fd35a", "#e8343a", "#f5c518", "#2f8cf0", "#ff8a1f"];
   const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
-  let W, H, notes = [], t0 = performance.now();
-  function size() { W = cv.width = cv.offsetWidth * devicePixelRatio; H = cv.height = cv.offsetHeight * devicePixelRatio; }
+  const SR = 64, sprites = colors.map(c => {
+    const s = document.createElement("canvas"); s.width = s.height = SR * 2;
+    const x = s.getContext("2d");
+    x.translate(SR, SR); x.shadowColor = c; x.shadowBlur = SR * 0.45; x.fillStyle = c;
+    x.beginPath(); x.ellipse(0, 0, SR * 0.5, SR * 0.275, 0, 0, Math.PI * 2); x.fill();
+    x.shadowBlur = 0; x.fillStyle = "rgba(255,255,255,.75)";
+    x.beginPath(); x.ellipse(0, -SR * 0.05, SR * 0.225, SR * 0.11, 0, 0, Math.PI * 2); x.fill();
+    return s;
+  });
+  let W, H, dpr = 1, notes = [], t0 = performance.now();
+  function size() {
+    dpr = Math.min(1.5, devicePixelRatio || 1);
+    W = cv.width = Math.round(cv.offsetWidth * dpr); H = cv.height = Math.round(cv.offsetHeight * dpr);
+  }
   addEventListener("resize", size); size();
   for (let i = 0; i < 60; i++) notes.push({ lane: (Math.random() * 5) | 0, z: Math.random() });
   function frame(now) {
@@ -290,21 +302,21 @@
     g.beginPath(); g.moveTo(cx - wTop / 2, top); g.lineTo(cx + wTop / 2, top); g.lineTo(cx + wBot / 2, bot); g.lineTo(cx - wBot / 2, bot); g.closePath();
     g.fillStyle = "rgba(40,30,36,.55)"; g.fill();
     const scroll = (now / 1000 * 0.35) % 0.1;
-    g.strokeStyle = "rgba(255,255,255,.07)"; g.lineWidth = 2 * devicePixelRatio;
-    for (let z = scroll; z < 1; z += 0.1) { const y = yAt(z), k = (y - top) / (bot - top), w = wTop + (wBot - wTop) * k; g.beginPath(); g.moveTo(cx - w / 2, y); g.lineTo(cx + w / 2, y); g.stroke(); }
+    g.strokeStyle = "rgba(255,255,255,.07)"; g.lineWidth = 2 * dpr;
+    g.beginPath();
+    for (let z = scroll; z < 1; z += 0.1) { const y = yAt(z), k = (y - top) / (bot - top), w = wTop + (wBot - wTop) * k; g.moveTo(cx - w / 2, y); g.lineTo(cx + w / 2, y); }
+    g.stroke();
     for (const n of notes) {
       if (!still) n.z += dt * 0.35;
       if (n.z > 1) { n.z -= 1; n.lane = (Math.random() * 5) | 0; }
       const y = yAt(n.z), x = lx(n.lane, y), k = (y - top) / (bot - top), r = (wBot / 22) * (0.15 + k);
       g.globalAlpha = Math.min(1, n.z * 3) * 0.9;
-      g.fillStyle = colors[n.lane]; g.shadowColor = colors[n.lane]; g.shadowBlur = 18 * devicePixelRatio;
-      g.beginPath(); g.ellipse(x, y, r, r * 0.55, 0, 0, Math.PI * 2); g.fill();
-      g.shadowBlur = 0; g.fillStyle = "rgba(255,255,255,.75)";
-      g.beginPath(); g.ellipse(x, y - r * 0.1, r * 0.45, r * 0.22, 0, 0, Math.PI * 2); g.fill();
+      g.drawImage(sprites[n.lane], x - 2 * r, y - 2 * r, 4 * r, 4 * r);
     }
     g.globalAlpha = 1;
-    if (!still) requestAnimationFrame(frame);
+    if (!still && !document.hidden) requestAnimationFrame(frame);
   }
+  document.addEventListener("visibilitychange", () => { if (!document.hidden && !still) { t0 = performance.now(); requestAnimationFrame(frame); } });
   requestAnimationFrame(frame);
 </script>
 </body>
