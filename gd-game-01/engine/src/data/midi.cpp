@@ -83,6 +83,7 @@ void TempoMap::build(const MidiFile& midi) {
     division_ = midi.division;
     tempos_ = {{0, 0, 500000}};
     signatures_ = {{0, 0, 4}};
+    measures_ = {{0, 0, 4 * division_}};
     if (midi.tracks.empty()) return;
     for (const MidiEvent& e : midi.tracks[0].events) {
         if (e.status != 0xFF) continue;
@@ -95,6 +96,12 @@ void TempoMap::build(const MidiFile& midi) {
             double measure = tickToMeasure(e.tick);
             if (signatures_.back().tick == e.tick) signatures_.pop_back();
             signatures_.push_back({double(e.tick), measure, std::max(1, int(uint8_t(e.text[0])))});
+            const Measure& m = measures_.back();
+            int den = e.text.size() >= 2 ? 1 << std::min(6, int(uint8_t(e.text[1]))) : 4;
+            int per = std::max(1, int(uint8_t(e.text[0])) * 4 * division_ / den);
+            Measure next{int(e.tick), m.measure + (int(e.tick) - m.tick) / m.ticksPerMeasure, per};
+            if (m.tick == next.tick) measures_.back() = {next.tick, m.measure, per};
+            else measures_.push_back(next);
         }
     }
 }
@@ -118,4 +125,12 @@ double TempoMap::tickToMeasure(double tick) const {
                                [](double t, const Signature& x) { return t < x.tick; });
     const Signature& s = *(it == signatures_.begin() ? it : it - 1);
     return s.measure + (tick - s.tick) / (double(division_) * s.beatsPerMeasure);
+}
+
+float TempoMap::measureBeat(double tick) const {
+    int t = int(tick);  // FUN_002617a0 passes (int) of the float tick
+    auto it = std::upper_bound(measures_.begin(), measures_.end(), t, [](int v, const Measure& x) { return v < x.tick; });
+    const Measure& m = *(it == measures_.begin() ? it : it - 1);
+    int into = (t - m.tick) % m.ticksPerMeasure;  // C++ truncation, as the MIPS div
+    return float(into / division_) + float(into % division_) / float(division_);
 }

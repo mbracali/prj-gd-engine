@@ -80,6 +80,7 @@ void rotateZ(Xfm& x, float a) {
 GuitarWalk::GuitarWalk(std::vector<Xfm> spots, const Config& config, const std::vector<SongEvent>& events)
     : spots_(std::move(spots)), config_(config) {
     if (spots_.size() < 2) config_.allow = false;
+    if (SDL_getenv("GD01_FIXED_CLOCK")) rng_.seed(7);  // development aid: repeatable runs
     hub_ = std::max(0, int(spots_.size()) - 1);
     if (config_.soloPoint >= hub_) config_.soloPoint = -1;
     if (SDL_getenv("GD01_LOG_SHOTS"))

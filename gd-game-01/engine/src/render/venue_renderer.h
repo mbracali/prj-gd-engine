@@ -32,6 +32,14 @@ struct VenueFrame {
     bool hitting = false;               // the player hit the last gem (hit_gem; cleared by miss / pass)
     bool hitting2 = false;              // face-off: player 2
     bool starMode = false;              // player 0's Star Power is active
+    // GameCharacter_v13: the beat within the measure (MeasureMap beat + tick / 480),
+    // the phase of the realign characters (drummer, keyboard).
+    float measureBeat = 0;
+    // charbase.dta is_doing_badly: crowd_rating < 0.2 alone; in a face-off,
+    // the other player's score ahead by more than base_max_score / 15.
+    float rating = 0.5f, rating2 = 0.5f;
+    int score = 0, score2 = 0;
+    float scoreDiff = 0;
 };
 
 // A venue (venues/<name>/gen/): its sections' scenes (the venue itself plus
@@ -48,6 +56,8 @@ public:
         std::string guitarist2, guitar2;
         // The song's (band ...) lineup (SongInfo::band); empty = charsys.dta's (band ...).
         std::vector<std::string> lineup = {};
+        // The career's final song (FUN_00282870): kGuitarWin is disabled, else kGuitarWinFinal.
+        bool finalSong = false;
     };
     // Throws std::runtime_error if the venue cannot be loaded.
     VenueRenderer(Renderer& renderer, const GameData& data, const std::string& venue, const Band& band);
@@ -185,12 +195,18 @@ private:
     bool won2_ = false;
     std::unique_ptr<Character> makeGuitarist(Renderer& renderer, const GameData& data, const std::string& archetype,
                                              const std::string& guitar, int tempo);
+    // The guitarist mood flags (FUN_00285440) for guitarist `p` (0 or 1).
+    uint32_t guitarMood(const VenueFrame& f, int p) const;
     std::unique_ptr<GuitarWalk> walk_;
     GuitarWalk::Config walkConfig_;
     bool placed_ = false, wonGame_ = false;
     std::vector<Xfm> walkSpots();
     const GameData* data_ = nullptr;
     int guitarState_ = 0;  // GuitarCharacter +0x108: 0 idle, 1 playing, 2 wail, 3 solo
+    float guitarScale_ = 1;  // guitarist.dta gtr_half_tempo / gtr_double_tempo / gtr_normal_tempo
+    std::string venue_;
+    // set_frame_scale for <part>_half_tempo / _double_tempo / _normal_tempo.
+    void tempoEvent(const std::string& e);
     bool introPlayed_ = false, gameOver_ = false;
     std::string lastShot_ = "-";
     std::string postSwitchShot_;  // the shot post_switch_cam last ran for
@@ -208,7 +224,7 @@ private:
     };
     std::vector<Member> band_;
     std::unique_ptr<CrowdRenderer> crowd_;
-    void loadBand(Renderer& renderer, const GameData& data, int tempo, std::vector<std::string> lineup);
+    void loadBand(Renderer& renderer, const GameData& data, int tempo, std::vector<std::string> lineup, bool faceOff);
     // A spot's position and facing, without the marker's scale.
     bool spotPlacement(const std::string& spot, Xfm& out);
     float ms_ = 0, ticks_ = 0;

@@ -79,6 +79,13 @@ private:
     bool glow_[5] = {};
     float lastFlash_[5] = {};
     float explodeAt_ = -1;
+    // The explosion's flying pieces (the TransAnim targets under track_explode.view
+    // and their children); hidden once every piece's anim has reached its last key,
+    // as at wide aspect ratios the last poses are still in the picture.
+    std::vector<SceneObject*> explodePieces_;
+    bool explodeDone_ = false;
+    bool explodeFinished(const std::string& anim, float frame, int depth);
+    void showPieces(bool on);
     int missesSeen_ = 0;  // Player::missCount() already popped
     // The one smash effect per track, replayed on every fret of the latest hit;
     // the phrase-capture burst + lightning; the sustain burn.

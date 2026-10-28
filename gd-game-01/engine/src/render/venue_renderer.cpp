@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <sstream>
 
 #include "data/game_data.h"
@@ -16,6 +17,7 @@
 VenueRenderer::VenueRenderer(Renderer& renderer, const GameData& data, const std::string& venue, const Band& band) {
     data_ = &data;
     renderer_ = &renderer;
+    venue_ = venue;
     std::string dir = "venues/" + venue;
     script_ = std::make_unique<VenueScript>(data, venue);
     script_->getSpot = [this](const std::string&) { return walkSpotNow(); };
@@ -117,6 +119,7 @@ VenueRenderer::VenueRenderer(Renderer& renderer, const GameData& data, const std
     }
 
     guitaristName_ = band.guitarist;
+    const bool venueWalks = walkConfig_.allow;  // venues.dta allow_walks
     if (!band.guitarist.empty()) guitarist_ = makeGuitarist(renderer, data, band.guitarist, band.guitar, band.tempo);
     if (!band.guitarist2.empty()) {
         guitarist2_ = makeGuitarist(renderer, data, band.guitarist2, band.guitar2, band.tempo);
@@ -124,7 +127,13 @@ VenueRenderer::VenueRenderer(Renderer& renderer, const GameData& data, const std
         if (script_) script_->setMultiplayer(true);
         if (camera_) camera_->setFixedGroup("MULTIPLAYER");  // camera_multiplayer.dta intro
     }
-    if (!band.guitarist.empty()) loadBand(renderer, data, band.tempo, band.lineup);
+    if (!band.guitarist.empty()) loadBand(renderer, data, band.tempo, band.lineup, guitarist2_ != nullptr);
+    // MyCharSys_v10 @0x280fc0: the clips each stage character may play in this venue and song.
+    Character::ClipRules rules{venue, band.tempo, true, venueWalks, guitarist2_ ? 2 : 1, band.finalSong};
+    for (Character* g : {guitarist_.get(), guitarist2_.get()})
+        if (g) g->applyClipRules(rules);
+    rules.guitarist = false;
+    for (Member& m : band_) m.character->applyClipRules(rules);
     // The band's shadows use the guitarist's charsys_shadow.mat (metal's when he has none).
     shadowMat_ = guitarist_ ? guitarist_->shadowMaterial() : nullptr;
     if (!shadowMat_ && data.exists("charsys/metal/gen/metal_shadow.rnd_ps2")) {
@@ -186,6 +195,31 @@ std::unique_ptr<Character> VenueRenderer::makeGuitarist(Renderer& renderer, cons
     }
 }
 
+// FUN_00285440: kGuitarBad while charbase.dta is_doing_badly (in any state),
+// else by state: idle, playing, wail (kGuitarExtreme), solo.
+uint32_t VenueRenderer::guitarMood(const VenueFrame& f, int p) const {
+    bool badly = guitarist2_ ? (p == 0 ? f.score2 - f.score : f.score - f.score2) > f.scoreDiff
+                             : (p == 0 ? f.rating : f.rating2) < 0.2f;
+    if (badly) return Character::kGuitarBad;
+    static const uint32_t kMoods[] = {Character::kGuitarIdle, Character::kGuitarNormal, Character::kGuitarExtreme,
+                                      Character::kGuitarSolo};
+    return guitarState_ >= 0 && guitarState_ < 4 ? kMoods[guitarState_] : 0;
+}
+
+void VenueRenderer::tempoEvent(const std::string& e) {
+    static const std::pair<const char*, float> kScales[] = {{"_half_tempo", 0.5f}, {"_double_tempo", 2.0f}, {"_normal_tempo", 1.0f}};
+    for (const auto& [suffix, scale] : kScales) {
+        size_t n = std::strlen(suffix);
+        if (e.size() <= n || e.compare(e.size() - n, n, suffix) != 0) continue;
+        std::string part = e.substr(0, e.size() - n);
+        if (part == "gtr") guitarScale_ = scale;
+        for (Member& m : band_) {
+            std::string mine = m.role == "singer" ? "sing" : m.role == "drummer" ? "drum" : m.role == "keyboard" ? "keys" : m.role;
+            if (part == mine) m.frameScale = scale;
+        }
+    }
+}
+
 void VenueRenderer::activePlayers(int mask) {
     activeMask_ = mask;
     if (camera_ && guitarist2_ && !gameOver_) camera_->activePlayers(mask);
@@ -207,21 +241,14 @@ void VenueRenderer::update(const VenueFrame& f) {
     }
     script_->update(f.ms, f.ticks, f.excitement, f.events, f.downbeat);
     const float beat = f.ticks / 480.0f;
+    // set_frame_scale (guitarist.dta gtr_*_tempo, theband.dta <part>_*_tempo).
+    for (const std::string& e : f.events) tempoEvent(e);
     if (guitarist_ && guitarState_ == 4) {
         // GuitarCharacter_v10 runs every frame, game over included: bone_fret keeps
         // following the neck (else the fret hand stays pinned where the song ended).
         if (hands_) hands_->update(beat, false, *guitarist_);
-        guitarist_->poll(beat, f.ms);
+        guitarist_->poll(beat, f.ms, guitarScale_);
     } else if (guitarist_) {
-        // guitarist.dta / GuitarCharacter: the mood is Bad while doing badly,
-        // else by state; upcoming_gtr / wail / solo events start the new mood's
-        // clip so it has blended in on the event beat (FUN_002856a0).
-        auto mood = [&] {
-            if (f.excitement <= VenueScript::Bad && guitarState_ != 0) return Character::kGuitarBad;
-            static const uint32_t kMoods[] = {Character::kGuitarIdle, Character::kGuitarNormal, Character::kGuitarExtreme,
-                                              Character::kGuitarSolo};
-            return kMoods[guitarState_];
-        };
         if (!placed_) {  // FUN_00281cd8: single player stands on walk_spot_01
             std::vector<Xfm> spots = walkSpots();
             if (guitarist2_) {  // two guitarists: player k on walk spot k % 2 (P1 walk_spot_02, P2 walk_spot_01)
@@ -236,25 +263,44 @@ void VenueRenderer::update(const VenueFrame& f) {
         const bool walkBusy = walk_ && walk_->update(*guitarist_, beat, f.ms, f.ticks, guitarState_, f.excitement, f.events);
         if (!introPlayed_) {  // play_intro: kGuitarIntro kAnimReset, then idle
             guitarist_->play(Character::kGuitarIntro, Character::kAnimReset);
+            if (guitarist2_) guitarist2_->play(Character::kGuitarIntro, Character::kAnimReset);
             introPlayed_ = true;
         }
+        // guitarist.dta upcoming_gtr / wail / solo -> set_playing / set_wail / set_solo
+        // (FUN_00284ef8 / FUN_00284f18 / FUN_00284f60): set_playing always starts the
+        // new mood's clip (FUN_002856a0), wail and solo only when they begin; their
+        // ends just return to playing (from wail / solo only) and the next clip is
+        // the per-frame one below.
         for (const auto& [e, at] : f.soon) {
-            int s = guitarState_;
-            if (e == "gtr_on") s = 1;
-            else if (e == "gtr_off") s = 0;
-            else if (e == "wail_on") s = 2;
-            else if (e == "wail_off" || e == "solo_off") s = guitarState_ ? 1 : 0;
-            else if (e == "solo_on") s = 3;
-            else continue;
-            guitarState_ = s;
-            if (!walkBusy && !(guitarist_->clipFlags() & Character::kGuitarSpecial)) guitarist_->playAt(mood(), at);
+            bool start = true;
+            if (e == "gtr_on") guitarState_ = 1;
+            else if (e == "gtr_off") guitarState_ = 0;
+            else if (e == "wail_on") guitarState_ = 2;
+            else if (e == "solo_on") guitarState_ = 3;
+            else if (e == "wail_off" || e == "solo_off") {
+                if (guitarState_ == (e == "wail_off" ? 2 : 3)) guitarState_ = 1;
+                start = false;
+            } else {
+                continue;
+            }
+            if (!start) continue;
+            for (int p = 0; p < 2; ++p) {
+                Character* g = p == 0 ? guitarist_.get() : guitarist2_.get();
+                if (!g || (p == 0 && walkBusy)) continue;
+                // FUN_002856a0: while a kGuitarSpecial clip is current only the per-frame queue runs.
+                if (g->currentFlags() & Character::kGuitarSpecial) {
+                    if (!g->blending()) g->play(guitarMood(f, p), Character::kAnimLongest);
+                } else {
+                    g->playAt(guitarMood(f, p), at);
+                }
+            }
         }
-        // Every frame: once a clip has blended in, queue the next of the mood.
-        if (!walkBusy && !guitarist_->blending()) guitarist_->play(mood(), Character::kAnimLongest);
+        // GuitarCharacter_v13 / FUN_002855f8: once a clip has blended in, queue the next of the mood.
+        if (!walkBusy && !guitarist_->blending()) guitarist_->play(guitarMood(f, 0), Character::kAnimLongest);
         // FUN_00286298: a face-off player plays only in its own sections.
         auto active = [&](int p) { return activeMask_ == 0 || (activeMask_ >> p & 1); };
         if (hands_) hands_->update(beat, f.hitting && active(0), *guitarist_);
-        guitarist_->poll(beat, f.ms);
+        guitarist_->poll(beat, f.ms, guitarScale_);
         if (walk_) walk_->poll(*guitarist_, beat);
         // Face-off guitarists have no walk: the standing guard keeps them on their spots.
         if (guitarist2_ && spots2_.size() >= 2 && lastGuardBeat_ > -1e29f) {
@@ -280,26 +326,26 @@ void VenueRenderer::update(const VenueFrame& f) {
         }
         lastRootLogBeat_ = beat;
         if (guitarist2_) {
-            if (guitarist2_->clipName().empty()) guitarist2_->play(Character::kGuitarIntro, Character::kAnimReset);
-            if (!guitarist2_->blending()) guitarist2_->play(mood(), Character::kAnimLongest);
+            if (!guitarist2_->blending()) guitarist2_->play(guitarMood(f, 1), Character::kAnimLongest);
             if (hands2_) hands2_->update(beat, f.hitting2 && active(1), *guitarist2_);
-            guitarist2_->poll(beat, f.ms);
+            guitarist2_->poll(beat, f.ms, guitarScale_);
         }
     } else if (guitarist2_) {
-        guitarist2_->poll(beat, f.ms);
+        guitarist2_->poll(beat, f.ms, guitarScale_);
     }
     if (guitarist2_ && guitarState_ == 4) {
         if (hands2_) hands2_->update(beat, false, *guitarist2_);
-        guitarist2_->poll(beat, f.ms);
+        guitarist2_->poll(beat, f.ms, guitarScale_);
     }
     for (Member& m : band_) {
         // theband.dta: upcoming_<part>_on/off and the drummer's patterns play
-        // with kAnimNow|kAnimGraphLoop; each downbeat an active member changes
-        // clip with probability 0.2.
+        // with kAnimNow|kAnimGraphLoop; each downbeat an active member (by the
+        // flags of its current clip, get_first_flags) changes clip with
+        // probability 0.2; nobody re-plays after game over.
         std::string part = m.role == "singer" ? "sing" : m.role == "drummer" ? "drum" : m.role == "keyboard" ? "keys" : m.role;
         constexpr int kNowLoop = Character::kAnimNow | Character::kAnimGraphLoop;
         if (gameOver_) {
-            m.character->poll(beat, f.ms, m.frameScale);
+            m.character->poll(beat, f.ms, m.frameScale, f.measureBeat);
             continue;
         }
         if (m.character->clipName().empty()) m.character->play(Character::kBandIdle, Character::kAnimReset | Character::kAnimGraphLoop);
@@ -310,18 +356,13 @@ void VenueRenderer::update(const VenueFrame& f) {
             else if (m.role == "drummer" && e == "drum_double") m.character->play(Character::kBandDouble, kNowLoop);
             else if (m.role == "drummer" && e == "drum_half") m.character->play(Character::kBandHalf, kNowLoop);
         }
-        for (const std::string& e : f.events) {  // set_frame_scale
-            if (e == part + "_half_tempo") m.frameScale = 0.5f;
-            else if (e == part + "_double_tempo") m.frameScale = 2;
-            else if (e == part + "_normal_tempo") m.frameScale = 1;
-        }
-        if (f.downbeat && (m.character->clipFlags() & Character::kBandActive) &&
+        if (f.downbeat && (m.character->currentFlags() & Character::kBandActive) &&
             std::uniform_real_distribution<float>(0, 1)(rng_) < 0.2f)
             m.character->play(Character::kBandActive, Character::kAnimFirst | Character::kAnimGraphLoop);
         char spot[32];
         std::snprintf(spot, sizeof spot, "stage_spot_%02d.mesh", m.spot + 1);
         if (Xfm place; spotPlacement(spot, place)) m.character->setPlacement(place);
-        m.character->poll(beat, f.ms, m.frameScale);
+        m.character->poll(beat, f.ms, m.frameScale, f.measureBeat);
     }
     // Faces follow the global venue excitement (DAT_00363780).
     if (guitarist_) {
@@ -671,7 +712,7 @@ std::string findAnimsMacro(const DataNode& n) {
 
 }  // namespace
 
-void VenueRenderer::loadBand(Renderer& renderer, const GameData& data, int tempo, std::vector<std::string> lineup) {
+void VenueRenderer::loadBand(Renderer& renderer, const GameData& data, int tempo, std::vector<std::string> lineup, bool faceOff) {
     // The song's (band ...) in songs.dta (female singer, keyboard player, or no
     // singer at all), else charsys.dta's default (band SINGER_MALE_METAL BASS_METAL DRUMMER_METAL);
     // (band_spots (bass 1) (drummer 2) (keyboard 0) (singer 0)); each member
@@ -696,6 +737,8 @@ void VenueRenderer::loadBand(Renderer& renderer, const GameData& data, int tempo
         if (body.children.empty() || !body.children[0].isText()) continue;
         Member m;
         m.role = body.children[0].s;
+        // MyCharSys_v10: with two guitarists only the drummer is created.
+        if (faceOff && m.role != "drummer") continue;
         const DataNode* outfit = body.find("outfit");
         const DataNode* dir = outfit ? outfit->find("directory") : nullptr;
         if (!dir) continue;
@@ -759,6 +802,10 @@ bool VenueRenderer::outroDone() const {
 }
 
 void VenueRenderer::setSong(const Song& song, const Chart& chart) {
+    // FUN_00281610 (at load): the EVENTS at tick <= 0 with _half_tempo / _double_tempo go out at once.
+    for (const SongEvent& e : song.events)
+        if (e.tick <= 0 && (e.text.find("_half_tempo") != std::string::npos || e.text.find("_double_tempo") != std::string::npos))
+            tempoEvent(e.text);
     for (Member& m : band_)
         if (m.role == "singer") {
             std::vector<Character::FaceEvent> ev;
@@ -792,8 +839,11 @@ bool VenueRenderer::onScreen(const Character& c) const {
 }
 
 void VenueRenderer::startStarPower() {
-    // FUN_002858c8: not while walking, already special, or after game over.
-    if (!guitarist_ || guitarState_ == 4 || walkingNow() || (guitarist_->clipFlags() & Character::kGuitarSpecial)) return;
+    // FUN_002858c8: only with the walk idle (state 0 / 3), no kGuitarSpecial weight
+    // in the main clips (FUN_00285888) and before game over.
+    if (!guitarist_ || guitarState_ == 4 || (walk_ && walk_->state() != 0 && walk_->state() != 3) ||
+        guitarist_->flagWeight(Character::kGuitarSpecial) > 0)
+        return;
     guitarist_->play(Character::kGuitarSpecial, Character::kAnimFirst);
 }
 

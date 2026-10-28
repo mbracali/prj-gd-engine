@@ -277,6 +277,15 @@ Specs from the research pass: docs/crowd_audio_plan.md, career_e2e_plan.md, tuto
 | B84 | Hammer-ons failing in real play | ✅ | Rules re-verified against the raw instructions (window −40..+160 ms, needs a strum and a fret held since). PC difference fixed: the PS2 reads the pad once a frame, so moving from one fret to the next never showed "nothing held"; per-event input did, ending the chain. Now a gap shorter than a pad frame (16.7 ms) keeps it. New Cheats option "Hammer-ons & Pull-offs": Original / Forgiving (−100 ms early, no strum or held fret needed, wrong fret not locked out). GD01_HOPOLOG=1 logs each try; GD01_KEYS "s<song ms>:key" injects guitar input at song times |
 | N1 | Next | ❌ | FSR 1 cost on the iGPU; character motion vectors; Android on a real phone (speed, START on touch); clang -Wunused warnings seen in the Android build |
 
+## Round 2026-10-28 (1.1.5)
+
+| # | Item | Status | Notes |
+|---|---|---|---|
+| B85 | Band movement "close but wrong" | ✅ | docs/character_animation.md §5: per-song/venue clip enabling (tempo, exclude_venues, walks, win/final win, face-off) with no fallback; WIN_FINAL macro expanded; guitarist set_wail / set_solo ends, is_doing_badly in every state, gtr_*_tempo, Special checks; realign characters on the measure beat; band changeup on the current clip; face-off band = drummer. Golden log: tools/anim_golden.sh |
+| B86 | Misses heard before the highway shows | ✅ | Controllers live from song −25 ms (GamePanel_v10 / FUN_001085d8), held frets synced (FUN_0025c070); docs/FINDINGS.md "When input becomes live" |
+| B87 | Hit window feels small | ✅ [I] | Windows re-verified (±100 / grace 60 / HOPO −40..+160, debounce 52); song clock now held back by the audio device buffer (23 ms here); the rest is Audio / Video Calibration |
+| B88 | Win explosion pieces stay on screen | ✅ | Pieces hidden once every TransAnim under track_explode.view is past its last key (~1.34 s) |
+
 ## Labels to change (PC instead of PS2)
 
 | # | Item | Status | Notes |

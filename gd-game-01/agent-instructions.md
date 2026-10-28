@@ -9,7 +9,7 @@ Read this before working in this folder. It applies to every AI coding agent (Cl
 - Behaviour comes from the original game's executable (Ghidra project in `ghidra/`, git-ignored). The goal is to match the original exactly; mark findings **[C]** (confirmed, with address) or **[I]** (inferred) in the docs.
 
 ## This folder
-**Guitar Hero** (PlayStation 2), Guitar Dream version 1.1.4, playable and released. This folder is **frozen**: do not change anything in it unless the owner explicitly asks for that change.
+**Guitar Hero** (PlayStation 2), Guitar Dream version 1.1.5, playable and released. This folder is **frozen**: do not change anything in it unless the owner explicitly asks for that change.
 
 See `README.md` and `docs/` here (older layout: `engine/`, `local_build.sh`, `build_commands/`).
 
