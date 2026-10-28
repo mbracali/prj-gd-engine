@@ -42,6 +42,9 @@ prj-gd-engine/
   README.md LICENSE LICENSE-ADDITIONAL-TERMS.md
   .gd-game-00-boilerplate/   the template for a new game folder
   .github/                   workflows and the repo guard
+  gd-backlog.md              THE single backlog (every game, the launcher, releases, the site)
+  guidelines/                the rules for every task (read before working)
+  spikes/                    studies and spikes (platforms, signing, stores, HDR...)
   docs/                      the official codebase documentation
   gd-engine-docs/            the engine codebase (shared engine documentation)
   gd-engine-launcher/        the Guitar Dream Universal Launcher
@@ -57,6 +60,13 @@ layout for now) has `README.md`, `agent-instructions.md` (how the system works a
 `ghidra/` (reverse-engineering project; never committed) and `local_builds/`.
 `game-info.yaml` holds the game's id, names, launch date, platforms, its
 Guitar Dream version, whether it is ready to play and how complete it is.
+
+# Before you work
+
+Read [guidelines/](guidelines/README.md) (general guidelines, the universal
+launcher rules and the behaviours every game shares) and the single backlog
+[gd-backlog.md](gd-backlog.md). Update the backlog at the start and at the end
+of every task. Studies and spikes are in [spikes/](spikes/README.md).
 
 # Guitar Dream Universal Launcher
 

@@ -1,4 +1,80 @@
-# GAMEPADS screen, Enhanced menu and mouse: the same in every game
+# Universal launcher and the games inside it
+
+Rules for the Guitar Dream Universal Launcher (`gd-engine-launcher/`) and for
+the screens every game module shares inside it: the Enhanced menu, the
+GAMEPADS screen, controls (gamepad, mouse, Enter, touch) and packaging. Read
+with [general_guidelines.md](general_guidelines.md) and
+[smilar_behaviors.md](smilar_behaviors.md).
+
+(This file absorbed the former `docs/guidelines/controls-and-enhanced-menu.md`
+on 2026-10-28.)
+
+## The owner's rules (wave B, 2026-10-28)
+
+These win over anything older below.
+
+- **Enhanced menus (every game module).**
+  - Options are always on the **left**.
+  - A multiple choice is always a **dropdown**.
+  - A single (on / off) choice is always a **check box**.
+  - On the **right**, always a **static close-up of the vocalist**, framed
+    with room to see the **whole band**.
+  - Every option changed on the left renders **at once** on the band.
+- **Gamepad configs and menus.**
+  - Every game works with the **mouse**.
+  - **Enter is always Start.**
+  - A **touch** works as a mouse click.
+  - The touch controls and on-screen buttons have the **same layout in every
+    game** (unless the owner explicitly says otherwise).
+- **Window.** Every desktop build is windowed by default. Android has no
+  window mode: leave its settings alone.
+- **Never forget a package** (below).
+
+## Never forget a package
+
+The launcher is the project's only release, so a missing module is a broken
+release. It already happened twice (gdul 0.1.1 and 0.1.2 on Windows, then on
+Android: "This launcher build has no gd-game-01 module"). The full story is in
+[docs/release-process.md](../docs/release-process.md) "Never again:
+incomplete bundles".
+
+- **Every platform carries every ready module**, in every build: Linux, Steam
+  Deck, Windows, macOS and Android. "Ready" means `ready_to_play: true` in the
+  game's `game-info.yaml` (listed in `gd-engine-launcher/games.yaml`) and a
+  module for that system (`module_systems_NN` in
+  `gd-engine-launcher/scripts/build.sh`). A ready game without a module for a
+  system is a bug to fix, not a build to ship.
+- **`scripts/verify_bundle.sh` runs on every build** `build.sh` assembles and,
+  in the release workflow, on every archive (`.tar.gz`, `.zip`, `.apk`) before
+  it is uploaded. For each ready game it requires:
+  - the module, non-empty, exporting `gd_game_run` (objdump / nm);
+  - its libraries (gd02: FFmpeg's avformat, avcodec, avutil and the LGPL
+    licence; gd01 on Linux: the DLSS library; on Windows, `libwinpthread-1.dll`
+    and its licence);
+  - on Windows, every import of **every** `.dll` / `.exe` resolved inside the
+    download or by Windows' own DLLs;
+  - its entry in `gd-engine-games/manifest.json`.
+- **Build steps fail loudly.** Each `build.sh` step runs in a fresh
+  `bash -euo pipefail` (with `inherit_errexit`); never wrap steps in
+  `|| return 1` inside functions (bash then ignores `set -e`).
+- **If verify fails, do not publish.** Read what it prints, then the step log
+  (`gd-engine-launcher/logs/<os>-<game>.log`, the run's `logs-<os>` artifact,
+  FFmpeg's `ffmpeg-build.log`). Check any download by hand with
+  `gd-engine-launcher/scripts/verify_bundle.sh <file or folder>`.
+- **Load each module for real** before calling a build good: on Windows with
+  Proton's `wine` and the `LoadLibraryExW` test; on Android, open a game on a
+  device or emulator; everywhere, load an ISO (the other recurrent bug).
+- The launcher itself says at start when its download lacks a module its
+  manifest lists, and logs it.
+- **Local builds.** After any bugfix or improvement, build the latest launcher
+  with all the latest modules locally (every system except macOS). Keep only
+  the **current and the previous** version in
+  `gd-engine-launcher/local_builds/`; delete older ones.
+- **Steam Deck** has its own release with its own out-of-the-box settings
+  (backlog GDREL-001), and the launcher recognises the Deck's controllers
+  (Steam virtual pads).
+
+## GAMEPADS screen, Enhanced menu and mouse: the same in every game
 
 Every gd-game has two screens of its own that are not in the original game:
 the **GAMEPADS** screen and the **Enhanced** menu. A player who knows them in
@@ -18,7 +94,7 @@ Reference code:
   `engine/src/ui/port_draw.*`, and `PanelObj::mouse` in
   `engine/src/ui/script_classes.cpp`.
 
-## Shared look rules
+### Shared look rules
 
 - **Menu units.** The screens are laid out in 1280 x 720 menu units, at
   gd-game-01's coordinates. Text heights are line heights, as gd-game-01's
@@ -51,7 +127,7 @@ Reference code:
   screen transition, forwards or backwards, as in gd-game-01.
 - **Help bar.** Use the game's own help bar: select, back and up / down.
 
-## The GAMEPADS screen
+### The GAMEPADS screen
 
 - **Opening it.** The main menu's **yellow** fret or button opens it (on a
   joypad, also its yellow Y button). The main menu's help bar shows a yellow
@@ -113,13 +189,17 @@ Reference code:
     binding, it accepts only buttons and keys, never an axis.
   - A test for each rule belongs in the input self-test.
 
-## The Enhanced menu
+### The Enhanced menu
 
-- **Background.** Use a still shot of one of the game's venues, with the
-  band caught mid-song, posed and **not moving** (render a fixed number of
-  update steps, then freeze). The venue is a little darker behind the box.
-  If the game cannot draw a venue yet, use a black page. Never use a live,
-  moving band.
+- **Background.** A still shot of one of the game's venues with the band
+  caught mid-song, posed and **not moving** (render a fixed number of update
+  steps, then freeze). The camera is a **static close-up of the vocalist on
+  the right**, with room to see the **whole band** (gd-game-01's Enhanced
+  pose is the model). The band must always be there: a backdrop with no
+  character is a bug. Every option changed on the left is rendered at once
+  on this shot (it goes through the same post chain as a song). The venue is
+  a little darker behind the box. If the game cannot draw a venue yet, use a
+  black page. Never use a live, moving band.
 - **Layout** (gd-game-01's coordinates):
   - On the left, a dark box (black at about 0.65) with a thin light edge and
     a top bar in the title colour. In it: the title (gd-game-01:
@@ -185,7 +265,7 @@ Reference code:
   - Rows not built yet stay in place: greyed, with the warning sign. Trying
     to change one plays the error sound.
 
-## Mouse (every screen, original and port)
+### Mouse (every screen, original and port)
 
 - Hovering a menu entry focuses it, the same way the pad would. A list
   takes clicks only; a hover would scroll it.
@@ -208,7 +288,7 @@ Reference code:
 - Enhanced > Enable Mouse Selection turns the mouse off.
 - Taps on a touch screen are clicks.
 
-## Tests every game keeps
+### Tests every game keeps
 
 Each game keeps a walk test for each of these, plus the input self-test
 rules above:

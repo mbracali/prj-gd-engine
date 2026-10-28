@@ -78,7 +78,7 @@ turns them into GH2's kPad buttons, the way gd01's `App::uiButton` does:
   follows within the codes' 750 ms; a completed code or any other button
   cancels it (`UiManager::yellowButton`). Clicking the help item opens it at
   once. GAMEPADS' back returns to the main menu.
-- The mouse (gd01's, `docs/guidelines/controls-and-enhanced-menu.md`):
+- The mouse (gd01's, `guidelines/universal_launcher.md` at the repository root):
   every panel's view records where it drew each button, list row, slider,
   check box, picture and text entry last frame, projected to menu units
   (`gfx::UiView::hits`). `PanelObj::mouse` focuses the component under the
@@ -243,7 +243,7 @@ starts at the venue list.
   check boxes, dropdowns, framed buttons, the warning sign on rows not built
   yet, the explanation box bottom right, the mouse, and the page sliding with
   the transition (`ui/port_draw.*`;
-  `docs/guidelines/controls-and-enhanced-menu.md`). The names keep "AND",
+  `guidelines/universal_launcher.md` at the repository root). The names keep "AND",
   since helveticablack has no `&`. Working: Gamepads (opens the GAMEPADS
   screen), Enable Mouse Selection, Screen Mode (dropdown: windowed / full
   screen / no border), In-Game Max FPS (dropdown: 60 / 120 / 240), Show FPS
@@ -291,7 +291,7 @@ The codes (G_* = the 360 guitar's frets):
 | Air Guitar | Y B Y O Y B | works: `$cheat_guitar` is every guitarist's guitar (0x822B6250 [C]), `air_guitar.milo` |
 | Performance Mode | B B Y B B O B B | works: the track's and HUD's scripts hide them (the HUD's `on_reset` now runs after its reset, 0x8268E440) |
 | Hyper Speed | B O Y O B O Y Y | works: track_speed × 1.5 (0x826967B8 [C]) |
-| Flaming Head | Y O Y Y O Y Y O | the code works, nothing burns: the band's particles are STUBs (backlog) |
+| Flaming Head | Y O Y Y O Y Y O | the code works, nothing burns: the band's particles are STUBs (`gd-backlog.md`) |
 | Eyeball Head Crowd | Y O B B B O Y | works (char_objects.dta's crowd `enter`) |
 | Monkey Head Crowd | O Y B B Y O B B | works |
 

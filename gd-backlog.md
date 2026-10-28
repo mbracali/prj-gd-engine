@@ -1,0 +1,678 @@
+# Guitar Dream Engine backlog
+
+**The single backlog** for the whole repository: the launcher, releases, the
+site, the shared items and every gd-game. It replaces the old per-game
+`docs/backlog.md` files (imported here on 2026-10-28, with their statuses,
+notes and links).
+
+## How to use it
+
+- **Read it before you start** and **update it at the start and at the end
+  of every task** (mark what you start as 🟡, what you finish as ✅, add what
+  you found). See [guidelines/general_guidelines.md](guidelines/general_guidelines.md).
+- Every item has a stable ID: `GDUL-` launcher, `GDREL-` releases and
+  packaging, `GDSITE-` site, `GDALL-` all games, `GDNN-` gd-game-NN. **Never
+  renumber or reuse an ID**; new items take the next free number in their
+  section, and a dropped item stays with the status ➖.
+- Every item has one class:
+  - **Original** = *Original re-implementation*: behaviour of the original
+    game that is not reimplemented yet (or only approximated).
+  - **Enhancement**: something the original never had (Enhanced menu
+    options, platforms, builds, the launcher, the site).
+  - **Bugfix**: something the port does wrong.
+- Status: ✅ done · 🟡 partly done / approximated / in progress · ❌ not
+  started · ➖ dropped · — not applicable. `[I]` = inferred (not confirmed in
+  the original's code). "🟡 in progress (wave B)" = the owner's request of
+  2026-10-28, being worked on in `feature/20261028-gen-improvements`.
+- "From" says where an item came from: the old backlog's table and number,
+  or the request that added it.
+- Guidelines: [guidelines/](guidelines/README.md). Studies and spikes:
+  [spikes/](spikes/README.md) (an implementable study becomes an Enhancement
+  here).
+
+## Sections
+
+[Universal launcher](#universal-launcher) ·
+[Releases & packaging](#releases--packaging) · [Site](#site) ·
+[All games](#all-games) ·
+[gd-game-01](#gd-game-01-guitar-hero-playstation-2) ·
+[gd-game-02](#gd-game-02-guitar-hero-ii-xbox-360) · gd-game-03 … gd-game-19
+(one Discovery task each)
+
+
+## Universal launcher
+
+The Guitar Dream Universal Launcher (`gd-engine-launcher/`): every platform (Linux, Steam Deck, Windows, macOS, Android), the CLI, the model explorer, and the platform spikes.
+
+| ID | Class | Status | Item | Notes | From |
+|---|---|---|---|---|---|
+| GDUL-001 | Bugfix | 🟡 in progress (wave B) | Every launcher build on every platform carries every ready module. Android showed "This launcher build has no gd-game-01 module" | Recurrent bug that must never happen again ([guidelines/universal_launcher.md](guidelines/universal_launcher.md) "Never forget a package"); see GDREL-002 | Wave B 10-28 |
+| GDUL-002 | Bugfix | 🟡 in progress (wave B) | Android 15: loading an ISO fails with `Cannot open /data/data/io.github.mbracali.gdul/files/original_isos`. Find whether it is ours or the device's, and make it work | Recurrent bug: the launcher unable to load ISOs (especially Android and Windows). `gd-engine-launcher/README.md` "Discs" | Wave B 10-28 |
+| GDUL-003 | Enhancement | 🟡 in progress (wave B) | Window: windowed on all desktop builds; Android has no window mode (leave its settings alone) |  | Wave B 10-28 |
+| GDUL-004 | Bugfix | 🟡 in progress (wave B) | Explore models: characters' hands / arms go inside the body. Show characters in a T-pose by default; keep the animation menu |  | Wave B 10-28 |
+| GDUL-005 | Enhancement | 🟡 in progress (wave B) | Explore models: a checkbox to show / hide the instrument |  | Wave B 10-28 |
+| GDUL-006 | Enhancement | 🟡 in progress (wave B) | CLI: commands to launch a specific module from the terminal |  | Wave B 10-28 |
+| GDUL-007 | Enhancement | 🟡 in progress (wave B) | Recognise Steam Deck controllers (Steam virtual pads, handheld defaults) | [spikes/study_steam_deck.md](spikes/study_steam_deck.md); see GDREL-001 | Wave B 10-28 |
+| GDUL-008 | Enhancement | ❌ | Try the macOS build on a real Mac | `gd-engine-launcher/README.md`: "not yet tried on a real Mac" | New 10-28 |
+| GDUL-009 | Enhancement | 🟡 in progress (wave B) | Spike: PS Vita homebrew | `spikes/study_ps_vita.md` (being written) | Wave B 10-28 |
+| GDUL-010 | Enhancement | 🟡 in progress (wave B) | Spike: Nintendo 3DS homebrew | `spikes/study_3ds.md` (being written; earlier [spikes/study_3ds_old.md](spikes/study_3ds_old.md): not viable) | Wave B 10-28 |
+| GDUL-011 | Enhancement | 🟡 in progress (wave B) | Spike: iOS | `spikes/study_ios.md` (being written); gd-game-01's iOS item is GD01-219 | Wave B 10-28 |
+| GDUL-012 | Enhancement | 🟡 in progress (wave B) | Spike: LG webOS TV (sideloading?) | `spikes/study_lg_tv.md` (being written; earlier [spikes/study_lg_tv_old.md](spikes/study_lg_tv_old.md)) | Wave B 10-28 |
+| GDUL-013 | Enhancement | 🟡 in progress (wave B) | Spike: Samsung Tizen TV (sideloading?) | `spikes/study_samsung_tv.md` (being written; earlier [spikes/study_samsung_tv_old.md](spikes/study_samsung_tv_old.md)) | Wave B 10-28 |
+
+
+## Releases & packaging
+
+Builds, bundles, signing and stores. The process is [docs/release-process.md](docs/release-process.md).
+
+| ID | Class | Status | Item | Notes | From |
+|---|---|---|---|---|---|
+| GDREL-001 | Enhancement | 🟡 in progress (wave B) | Bring back the separate **Steam Deck release** with its own out-of-the-box settings (MANDATORY) | As gd-game-01 did: `gd-game-01/README.md` per-build defaults table (Steam Deck column), `gd-game-01/build_commands/build-steamdeck.sh`, the old `steamdeck` job (Steam Runtime sniper SDK, `-DGD0N_STEAM_DECK=ON`, `STEAM-DECK.txt`). [spikes/study_steam_deck.md](spikes/study_steam_deck.md) advised against it; the owner overruled it | Wave B 10-28 |
+| GDREL-002 | Bugfix | ✅ | gdul 0.1.1's Windows download shipped without gd02's module: `scripts/verify_bundle.sh` now checks every build and every release archive; build steps run in `bash -euo pipefail` | [docs/release-process.md](docs/release-process.md) "Never again: incomplete bundles". Still happened on Android: GDUL-001 | New 10-28 |
+| GDREL-003 | Enhancement | 🟡 in progress (wave B) | After every bugfix / improvement, build everything locally: the latest launcher with all the latest game modules (no macOS); keep only the current and the previous version in the launcher's `local_builds` | [guidelines/general_guidelines.md](guidelines/general_guidelines.md) "Packages" | Wave B 10-28 |
+| GDREL-004 | Enhancement | ❌ | macOS: Developer ID, hardened runtime, notarize, staple (US$99/yr) | [spikes/study_macos_trust.md](spikes/study_macos_trust.md) | New 10-28 |
+| GDREL-005 | Enhancement | ❌ | Windows code signing (OV cloud certificate, later) | [spikes/study_windows_trust.md](spikes/study_windows_trust.md): keep unsigned for now | New 10-28 |
+| GDREL-006 | Enhancement | ❌ | Google Play: AAB, Play App Signing, 12 testers for 14 days; register for developer verification | [spikes/study_google_play.md](spikes/study_google_play.md); main risk is IP | New 10-28 |
+| GDREL-007 | Enhancement | ❌ | Flathub listing (later) | [spikes/study_steam_deck.md](spikes/study_steam_deck.md) | New 10-28 |
+
+
+## Site
+
+The official site (`docs/index.html`, guitardreamengine.com).
+
+| ID | Class | Status | Item | Notes | From |
+|---|---|---|---|---|---|
+| GDSITE-001 | Enhancement | 🟡 in progress (wave B) | Downloads page (`docs/index.html`): cards by type. "Stage releases (Desktop)": latest Windows, macOS, Linux. "Roadie releases (Handhelds)": latest Steam Deck; PS Vita (Coming soon); 3DS (Coming soon). "On tour releases (Mobile)": latest Android; iOS (Coming soon). "Jam session releases (TV OS)": Android TV, LG TV, Samsung TV (all Coming soon) |  | Wave B 10-28 |
+
+
+## All games
+
+Items every game module shares. Each game tracks its own work in its section.
+
+| ID | Class | Status | Item | Notes | From |
+|---|---|---|---|---|---|
+| GDALL-001 | Enhancement | ❌ | Enhanced menu: HDR output (opt-in) | [spikes/study_hdr.md](spikes/study_hdr.md): FP16 pipeline plus a GL→Vulkan HDR presenter, 3 to 5 weeks. Added in wave B as a backlog item | New 10-28 |
+| GDALL-002 | Enhancement | 🟡 in progress (wave B) | Enhanced menu: one option that removes 100% of the effects (motion blur, bloom, film grain, etc.) |  | Wave B 10-28 |
+| GDALL-003 | Enhancement | 🟡 in progress (wave B) | Enhanced menus follow [guidelines/universal_launcher.md](guidelines/universal_launcher.md): options on the left, dropdowns for multiple choice, checkboxes for on / off, a static close-up of the vocalist on the right with the whole band in view, every change rendered at once on the band |  | Wave B 10-28 |
+| GDALL-004 | Enhancement | 🟡 in progress (wave B) | Controls follow the guideline: every game works with the mouse, Enter is always Start, a touch is a mouse click, the same touch controls and on-screen buttons in every game | [guidelines/universal_launcher.md](guidelines/universal_launcher.md) | Wave B 10-28 |
+| GDALL-005 | Bugfix | 🟡 in progress (wave B) | The strum icon is broken in half in every menu (gd-game-01 and gd-game-02) | Tracked per game: see the gd-game-01 and gd-game-02 sections | Wave B 10-28 |
+| GDALL-006 | Enhancement | 🟡 in progress (wave B) | Newer games' shaders in older games (recurring): gd-game-02's advanced shaders as gd-game-01 Enhanced options | `spikes/study_shader_ports.md` (being written) | Wave B 10-28 |
+| GDALL-007 | Enhancement | 🟡 in progress (wave B) | New render backends: Vulkan, DirectX on Windows, Metal on Apple, an OpenGL fallback | `spikes/study_backends.md` (being written) | Wave B 10-28 |
+
+
+## gd-game-01: Guitar Hero (PlayStation 2)
+
+Paths in Notes are relative to `gd-game-01/` (bare file names are in `gd-game-01/docs/`); the original's rules are in `gd-game-01/docs/FINDINGS.md`. The folder is frozen: change it only when the owner asks. Imported from the old `gd-game-01/docs/backlog.md` (2026-10-28); "From" is the old table and number.
+
+### Done so far
+
+Released: Guitar Dream version **1.1.5** (2026-10-28), playable end to end,
+shipped in the universal launcher.
+
+- **Research and data**: Ghidra analysis of SLUS_212.24; ARK, DTB, MIDI, VGS,
+  textures and scenes decoded byte-exact.
+- **Gameplay**: the original watcher (chords, sustains, HOPOs, hit windows),
+  scoring, Star Power, rock meter, career end to end, Quick Play, tutorials
+  (playable), face-off (two players), cheats, The Glitches band.
+- **Presentation**: the original highway and HUD, VU1-exact lighting, fog,
+  material stages, every venue with its scripts, particles, flares,
+  spotlights, the 3D crowd and its audio, the camera director, the band
+  (walks, hand IK, faces, shadows), the intro video and bonus videos
+  (own MPEG-2 decoder), the original menus through the DTA interpreter,
+  sound effects on a software SPU2.
+- **The port's own**: Enhanced Settings (Steam Deck mode, screen mode, max
+  FPS, internal resolution, AA, FSR / DLSS, bloom, fog, colour grading and
+  the rest), GAMEPADS screen, mouse and touch, Rock Band / XInput guitars,
+  A/V calibration, export / load of user files; Linux, Steam Deck, Windows,
+  macOS and Android builds.
+- Full detail: "Done (history)" below and `gd-game-01/CHANGELOG.md`.
+
+
+### Still to do
+
+| ID | Class | Status | Item | Notes | From |
+|---|---|---|---|---|---|
+| GD01-290 | Bugfix | 🟡 in progress (wave B) | Main guitarist's movement still weird: sometimes a force seems to pull him to a spot | Follows old B85 (docs/character_animation.md §5) | Wave B 10-28 |
+| GD01-291 | Bugfix | 🟡 in progress (wave B) | The strum icon is broken in half in every menu (as gd-game-02 #10) | Old B29 fixed the help bar's strum icon; it is back | Wave B 10-28 |
+| GD01-037 | Bugfix | ❌ | Weird glitches in the venues | Needs specifics (venue / moment); candidates in "Venue artifacts" below | Bugs 10-21 r1 B3 |
+| GD01-046 | Bugfix | 🟡 | Star Power: the meter gauge is wrong, there is no Star Power animation on the highway, and the guitarist's Star Power move plays only about half the time | Guitarist move via `start_starpower`; star tube MeshAnim; lightning bolts timed from the deploy; bonus gems; rails glow (red warning, blue SP ready). Missing: deploy sparkle burst, cyan burn, track shake check. Please re-check the meter | Bugs 10-21 r2 B12 |
+| GD01-050 | Bugfix | 🟡 | Some fonts look odd, especially the status on the career screen | LabelEx fit now follows the decomp (FUN_0011f868: width/height fit as a scale). Also seen: on Select Career the "NOVICE STATUS (1 OF 25 SONGS)" line overlaps EASY — check that label's position/fit | Bugs 10-21 r2 B16 |
+| GD01-060 | Bugfix | 🟡 | Characters still never leave their spot; the start-of-song animations that walk don't move them | Root motion was applied only to walk clips; the original applies every guitarist clip's `bone_facing` deltas (the intro walks around). Random walks still need Okay/Great excitement and 20–55 s | Bugs 10-21 r3 B26 |
+| GD01-061 | Bugfix | 🟡 | Select Career: the status line ("NOVICE STATUS (1 OF 25 SONGS)") overlaps the difficulty name | With B35 the buttons are box-wide and the line now sits between EASY and MEDIUM; please re-check against the original. Checked against the data and the LabelEx/ButtonEx code: the status label is top-right aligned at the button's centre line (both views share z), serif.font at size 30 with the label's own (0.8, 1, 0.4) scale. Rendering matches that; need a screenshot of the original to find what differs | Bugs 10-21 r4 B27 |
+| GD01-068 | Bugfix | 🟡 | Select Career: the font of the status label under each difficulty doesn't match the original | Style label_serif_black → label_serif_black.txt → serif.font (no font override). Same as B27: needs a reference screenshot | Bugs 10-21 r4 B34 |
+| GD01-088 | Bugfix | 🟡 | Microstutters: 60 FPS must be guaranteed | Measured headless: ~370 FPS uncapped, worst frame 4–10 ms, so it is pacing, not load. Fixed: (1) the song clock used for drawing advances with the wall clock and eases toward the audio position (the audio clock re-anchors on every callback, which jittered scrolling); (2) flare occlusion reads depth through pixel-pack buffers 3 frames late instead of a synchronous glReadPixels that stalled the GPU every frame; (3) per-frame tail / line geometry uses a pool of buffers instead of rewriting one buffer many times a frame; (4) vsync at the 60 Hz multiple of the display (interval 2 at 120 Hz), and a precise 60 FPS limiter when vsync is refused. Still possible: first-use texture / mesh builds mid-song (a few ms). Needs confirming on a real display (headless has no vsync) — the new FPS counter helps | Bugs 10-21 r9 B54 |
+| GD01-092 | Original | 🟡 | Tutorials | Playable: the tutorials menu (button kept enabled on PC), the `tutorial` object (VO player with drop / round-robin, the tuning trainer, the hammer-on / pull-off trainer), ThreadTask scripts (wait / wait_timeout / sleep / exit), set_local_pos / scale / stage_tex, the tutorial game mode (basement, no band, TUTORIAL camera, tutorial bank, songs loaded and started by the lessons, time pause, no game over), the player setters and the new callbacks (pass, hopo, swingAtHopo, held_note_released, whammy_start / end, star_gem_hit). Basic Lessons verified end to end headless; multiplayer results (multi_compete) verified; Star Power and Advanced lessons not yet walked through. Open: set_wrap_width, arena_panel set_paused, the lesson box backgrounds to check against the original | Parity 10-22 P3 |
+| GD01-093 | Original | 🟡 | Multiplayer face-off | Two players: pad slots (keyboard fills a free slot; `--kb2p` puts P2 on H J K L ; / N M / B / O), per-player menus (character, guitar), section ownership from the chart, the opponent's gems neither hittable nor missable, P2 score × B0/B1, no fail, two highways (dual perspective 0.76 in each half, 20 tail rows, own notes only), the multiplayer HUD (two score meters, two star meters, the lead meter), small_club_multi with two guitarists on walk_spot_02 / 01, no walks, lights pinned to Great, the MULTIPLAYER camera switching on active_players, winner / loser poses, player1::player stats and both newspaper photos. Open: the guitar-stem mix (UnmuteBeatMatchAudio not decoded; interim rule), per-player track shake / bonus look routing, multi_compete not yet seen end to end | Parity 10-22 P4 |
+| GD01-098 | Bugfix | 🟡 | Options: UI elements in the wrong place for 1–2 s on entry | Not reproducible headless (the entry is the original slide-in). Same family as B20: panel textures were uploaded on first draw, stalling the first frames; they now upload when the panel loads. Please re-check on your machine | R10 10-22 B57 |
+| GD01-129 | Enhancement | 🟡 | Touch controls, Rock Band guitars, XInput, Anti-aliasing, FSR 3, shadows for all, more lights, replace textures, cut content | All built in the thirteenth round except Replace Textures (dropped from the roadmap in 1.1.3) and Cut Content | R11 10-22 X31 |
+| GD01-133 | Bugfix | 🟡 | The Garden: ceiling lights flash far too fast | The ceiling rig (anim_beam01–08, orange / pink / red spots) loops 100 frames on the beat clock (480 per beat), a fifth of a beat; the floor beams loop 1000 frames. The port follows the original code path for these anims; no script slows them. Needs a capture of the original (e.g. PCSX2) to confirm a different rate | R12 10-22 B72 |
+| GD01-135 | Bugfix | 🟡 | Toxic Summer Fest: parts of the mountains are see-through | The mountain meshes fade by design: vertex alpha 0 on their two lowest rows, rising to 1 at the middle row; the material passes vertex alpha through as the original's (docs/lighting.md). cloud_MASK.mesh is not involved. Needs a capture of the original's opening shot to compare | R12 10-22 B74 |
+| GD01-152 | Enhancement | 🟡 [I] | AI Upscaling | FSR 1 (EASU + RCAS) with Performance / Balanced / Quality (0.5 / 0.59 / 0.67). FSR 3.1, FSR 4, DLSS 4, DLSS 5 listed as not available: they need DX12 / Vulkan vendor SDKs, motion vectors and specific GPUs; not possible in the OpenGL 3.3 renderer | R13 10-22 X46 |
+| GD01-162 | Bugfix | 🟡 | Garden ceiling lights, Toxic mountains | Re-checked in the decomp: the anims are on beat ticks and the vertex alpha fade is as the original code; still need a capture of the original | R13 10-22 B72b, B74b |
+| GD01-167 | Enhancement | ❌ | FSR 4, DLSS 5 | FSR 4 removed from the list (DirectX 12 + RDNA 4 only; a saved "fsr4" loads as None). DLSS 5: later | R14 10-22 X56 |
+| GD01-185 | Enhancement | ❌ | Next | FSR 1 cost on the iGPU; character motion vectors; Android on a real phone (speed, START on touch); clang -Wunused warnings seen in the Android build | R15 10-23 N1 |
+| GD01-191 | Enhancement | ❌ | Other console-specific labels (controller ports, "PlayStation 2" mentions, button names) | Inventory the locale tokens that mention PS2 hardware | PC labels L2 |
+| GD01-196 | Original | 🟡 | Lighting looks better in the original | Light cones/glows billboard to the camera (~280 meshes), transparent views drawn after the band, unlit materials use the raw vertex colour (fest grass), depth of field. Missing: extra material stages (glow/env layers), spotlight + floor glow, flares, particles | Missing from original M5 |
+| GD01-197 | Original | 🟡 | The crowd looks different: fewer people and no reaction to how well you play | The crowd's ok/great/clap/cheer clips were being dropped (their flags overlap the walk bits): now they react. Size starts full and changes on camera cuts like the original. Missing: 3D members near the stage, outfit swaps | Missing from original M6 |
+| GD01-198 | Enhancement | 🟡 | An "extended settings" screen next to (or inside) Settings for everything below — Enhanced Settings exists (ninth round, X1a); FPS Counter is the first option |  | Extended features X1 |
+| GD01-199 | Enhancement | ❌ | Several XInput and other USB guitar controllers |  | Extended features X2 |
+| GD01-200 | Enhancement | ❌ | Gamepads with the native Guitar Hero 1 inputs (no strum) |  | Extended features X3 |
+| GD01-201 | Enhancement | ❌ | Touch controls |  | Extended features X4 |
+| GD01-202 | Enhancement | ❌ | Controller configuration screen for 2 players |  | Extended features X5 |
+| GD01-203 | Enhancement | ❌ | 4K upscaling and native high-resolution rendering |  | Extended features X6 |
+| GD01-204 | Enhancement | ❌ | DLSS and FSR |  | Extended features X7 |
+| GD01-205 | Enhancement | ❌ | Advanced shaders (replacing the PS2-style ones) |  | Extended features X8 |
+| GD01-207 | Enhancement | ❌ | Modding, including new songs |  | Extended features X10 |
+| GD01-208 | Enhancement | ❌ | Ultra-wide monitors |  | Extended features X11 |
+| GD01-209 | Enhancement | ❌ | Higher frame rates |  | Extended features X12 |
+| GD01-210 | Enhancement | ❌ | Optimised settings for Steam Deck and other handhelds |  | Extended features X13 |
+| GD01-211 | Enhancement | ❌ | A custom character select screen |  | Extended features X14 |
+| GD01-212 | Enhancement | ❌ | Modding: new characters |  | Extended features X15 |
+| GD01-213 | Enhancement | ❌ | Modding: new guitars |  | Extended features X16 |
+| GD01-214 | Enhancement | ❌ | Modding: new songs |  | Extended features X17 |
+| GD01-215 | Enhancement | ❌ | "Master logger" (details to come from the user) |  | Extended features X18 |
+| GD01-216 | Enhancement | ❌ | Graphics quality options: anti-aliasing (MSAA, FXAA/SMAA), texture filtering (bilinear/trilinear/anisotropic) |  | Extended features X19 |
+| GD01-219 | Enhancement | ❌ | iOS | SDL3 supports it; same needs plus Metal or GLES via ANGLE, and App Store rules on user-supplied content | Future platforms P2 |
+| GD01-225 | Original | 🟡 | Native objects (`game`, `campaign`, `meta`, `ui`, `song_provider`, stubs for `synth` / `memcard` / ...) | Enough for quickplay; career and profiles stubbed | UI plan 6 |
+| GD01-232 | Original | ❌ | Check the hero-select layout against the original (3D character overlaps the blurb column; follows the placer/camera data) | Needs a reference capture | UI plan 7g |
+| GD01-233 | Original | ❌ | Menu character shadows (`*_shadow.lit`, `<c>_shadow.rnd`), the menu characters' default guitar (SG inferred) |  | UI plan 7h |
+| GD01-234 | Original | ❌ | Campaign unlocks (guitars, skins, characters per difficulty), store purchases | Everything reports unlocked for now | UI plan 7i |
+| GD01-235 | Original | ❌ | PictureEx / PictureToggle / Slider / TextEntry components (character select, game settings sliders, profile names) |  | UI plan 7d |
+| GD01-236 | Original | ❌ | Splash, boot, intro video, profile screens (skipped: the game starts at the main menu) |  | UI plan 7e |
+| GD01-239 | Original | ❌ | Profile screens (splash, band name entry, profile select / delete); a first profile "Rocker" is created for now | TextEntry is ready | UI plan 9b |
+| GD01-240 | Original | 🟡 | Check by playing: status screen (tier complete), win_easy / win_game + Battle Axe, store purchases, multiplayer screens | Implemented from the scripts; not yet walked through | UI plan 9c |
+| GD01-241 | Original | ❌ | Tutorials, multiplayer face-off |  | UI plan 9d |
+| GD01-242 | Original | ❌ | UI: Original menus (`ghui/*.gh` panels): career, store, multiplayer screens | Main, options, quickplay done (see UI plan) | Open table |
+| GD01-243 | Original | ❌ | UI: Original in-game HUD: score, multiplier, rock meter, Star Power meter, streak messages | Current HUD is a placeholder 2D overlay | Open table |
+| GD01-244 | Original | ❌ | UI: Results screen, pause menu, loading tips, career progression, saves |  | Open table |
+| GD01-246 | Original | 🟡 | Crowd: Head / outfit variety per instance, striped quad, `crowd_walk_offset`, facing | One head per archetype; same move for a whole block (as the original impostor) | Open table |
+| GD01-249 | Bugfix | 🟡 | Venue artifacts: User reported odd-looking things in some stages; find each root cause | Likely causes fixed: light cones were not billboarded (seen edge-on), beams/glows drawn under the band, fest grass black. Please re-check | Open table |
+| GD01-251 | Bugfix | ❌ | Venue artifacts: Environment-map stages (texgen 5), multi-stage materials | Only stage 0 is drawn | Open table |
+| GD01-252 | Bugfix | 🟡 | Venue artifacts: Blend "Add" alpha handling, vertex alpha ignored | Approximations | Open table |
+| GD01-254 | Bugfix | 🟡 | Venue artifacts: One big-club shot showed a flat brown frame | Probably a crowd-facing shot; recheck after the crowd | Open table |
+| GD01-272 | Original | ❌ | Characters: Player-strum `strum_pluck_down` (PlayerMatcher swing, flag not traced) |  | Open table |
+| GD01-274 | Original | 🟡 | Crowd: Impostor archetype facing (average block facing) and lighting environment (`DAT_003637e4`) | Identity facing, `crowd.env` | Open table |
+| GD01-276 | Original | ❌ | Characters: Walking between spots, win/lose animations, Star Power poses |  | Open table |
+| GD01-278 | Original | ❌ | Gameplay: Multiplayer face-off / co-op |  | Open table |
+| GD01-279 | Original | ❌ | Gameplay: Practice mode, tutorials | Tutorials hidden from the song list | Open table |
+| GD01-282 | Original | 🟡 | Audio: SPU2 reverb presets (approximated with a Freeverb-style room and a feedback delay), mix levels | Tune by ear against the PS2 | Open table |
+| GD01-285 | Enhancement | ❌ | UI: The PS2 picture is 4:3: things placed just off-screen (meters before slide-in) show at the edges of our 16:9 window | Decision: menus stay 4:3 and centred (pillarboxed on wide screens); gameplay may extend the scene wider, but only as far as it doesn't break or look off | Open table |
+| GD01-288 | Enhancement | ❌ | Platforms: Run-test the Windows build on Windows; build and test macOS |  | Open table |
+| GD01-289 | Enhancement | ❌ | Quality: Playtest feedback on real hardware (timing feel, controllers) |  | Open table |
+
+
+### Done (history)
+
+| ID | Class | Status | Item | Notes | From |
+|---|---|---|---|---|---|
+| GD01-001 | Original | ✅ | Reverse engineering: Ghidra headless analysis of SLUS_212.24 (R5900) | REA's Ghidra adapter rejects R5900; exports in `analysis/` | Done table |
+| GD01-002 | Original | ✅ | Data: ARK archive, encrypted DTB scripts, MIDI charts, VGS audio, textures, scene files | Python tools in `tools/`, all validated byte-exact | Done table |
+| GD01-003 | Original | ✅ | Gameplay: Chart building (chords, sustains, HOPOs), hit window, strum/HOPO judgment | Port of the game's watcher; `--selftest` hits 100% of all charts | Done table |
+| GD01-004 | Original | ✅ | Gameplay: Scoring, multiplier, Star Power, rock meter / failing | From the decompiled Player / StarPower / crowd code | Done table |
+| GD01-005 | Original | ✅ | Audio: VGS playback, guitar track muting on misses |  | Done table |
+| GD01-006 | Bugfix | ✅ | Audio: Deadlock at song start (stream lock vs mixer mutex) | Fixed: consistent lock order | Done table |
+| GD01-007 | Original | ✅ | Input: Keyboard, gamepad (joypad mode), USB guitars |  | Done table |
+| GD01-008 | Original | ✅ | Platforms: Linux and Windows builds (`engine/build.sh`), macOS via GitHub Actions | Windows not yet run on Windows; macOS not yet built | Done table |
+| GD01-009 | Original | ✅ | Highway: Original 3D highway: surface, rails, lane lines, beat lines, gems, HOPO tops, star gems, sustains, smashers, hit flames, Star Power lightning | From `track/gen/track.rnd_ps2` | Done table |
+| GD01-010 | Bugfix | ✅ | Highway: Fretboard artwork scrolling backwards | Fixed: the surface's V runs from 1 (strike line) down to −0.3 (horizon) | Done table |
+| GD01-011 | Original | ✅ | Rendering: OpenGL 3.3 renderer: materials, blend/z modes, textures, UV transforms |  | Done table |
+| GD01-012 | Original | ✅ | Rendering: Per-vertex lighting exactly as the VU1 microcode: program choice (point light replaces directionals, ≤3 directionals), `use_environ` / `vert_amb` / `vert_dyn`, clamp to 1 per vertex, Multiply2 stages ×2, light along +Y | From the `.vutext` microcode (0x6ec / 0x7c5 / 0x436) | Done table |
+| GD01-013 | Original | ✅ | Rendering: Fog (view-depth linear, environ fog colour) | VU 0x2b8/0x2b9, GS FOGCOL | Done table |
+| GD01-014 | Bugfix | ✅ | Rendering: Transform owners: an object's `parent` field names the transform it is drawn with | Fixed stage floors hanging over the crowd in every venue | Done table |
+| GD01-015 | Original | ✅ | Rendering: GPU skinning (4 bones per mesh) |  | Done table |
+| GD01-016 | Original | ✅ | Animation: TransAnim, MatAnim, LightAnim, EnvAnim, CamAnim; filters; child anims |  | Done table |
+| GD01-017 | Original | ✅ | Venues: All six venues load with their lighting sections |  | Done table |
+| GD01-018 | Original | ✅ | Venues: Venue scripts: `switch_anim` slots, funcs, handlers, `delay_task`, `anim_task`, `set_showing`, `set_frame`, `remove_anim`, `unhook_anim_parents`, `add_trans`, `set_singer_env` |  | Done table |
+| GD01-019 | Original | ✅ | Venues: Lighting states from crowd excitement × verse/chorus/solo, switched on downbeats |  | Done table |
+| GD01-020 | Original | ✅ | Camera: Shot director: intro shot, weighted pools, solo shots, section changes; path / offset / framing / fov / ease math |  | Done table |
+| GD01-021 | Original | ✅ | Characters: Skeleton, skinning, `.acp` clip playback |  | Done table |
+| GD01-022 | Original | ✅ | Characters: AnimDriver chain: frames phase-locked to the beat every tick, `.acg` graph transitions (First / Longest / Now), S-curve blends, least-recently-used clip choice, kAnimGraphLoop | `FUN_0018a4b0`, `FUN_0017f1d0` | Done table |
+| GD01-023 | Original | ✅ | Characters: Band moods from `upcoming_<part>_on/off` one beat early, drummer patterns, 20% downbeat change-ups, frame scale on half/double tempo | `theband.dta` | Done table |
+| GD01-024 | Original | ✅ | Characters: Guitarist states (idle / playing / wail / solo, Bad when doing badly), clips blended in by the event beat, intro | `GuitarCharacter` `FUN_002856a0` | Done table |
+| GD01-025 | Original | ✅ | Characters: Fore-arm and upper-arm twist servos; `.rotx` / `.roty` channels | `charbase.dta` / `bandbase.dta` servos | Done table |
+| GD01-026 | Original | ✅ | Characters: Guitarist with the song's character and guitar on the walk spot |  | Done table |
+| GD01-027 | Original | ✅ | Characters: Band (singer, bass, drummer) on the stage spots, driven by the EVENTS track |  | Done table |
+| GD01-028 | Original | ✅ | Characters: Lit by the venue's band environment |  | Done table |
+| GD01-029 | Original | ✅ | Crowd: Flat crowd: Crowd01..06 instances as live impostors, re-rendered each frame from the main camera's rotation (`FUN_00172350`), quads billboarded to the camera (FastBillboardXYZ), first N instances shown by excitement, the six `crowd instance` archetype/head pairs | 128×256 render target per block | Done table |
+| GD01-030 | Original | ✅ | UI: Animated screen transitions (common.gh `ui.enm` ambient fade, `meta_cam_*` camera turns, forward / back), gotos queued during transitions |  | Done table |
+| GD01-031 | Original | ✅ | UI: Script `if` returns kDataUnhandled when false (FUN_002313a0), so handlers ending in a false `if` pass messages on |  | Done table |
+| GD01-032 | Original | ✅ | Gameplay: Star rating (`num_stars`: score vs 2×/3× the base max score), `percent_complete`, game over → guitarist win/lose clip → `game_outro` → post_show / lose screen | docs/end_of_song.md | Done table |
+| GD01-033 | Original | ✅ | UI: `game` / PlayerConfig natives (character, guitar, skin, descriptions, `get_player_config`, `set_quickplay`), `autosave_goto`, `animate_forever_30fps`, `get_bank_loader` |  | Done table |
+| GD01-034 | Original | ✅ | Audio: Song preview on the song list (preview window, looped, 1 s fades) and menu music (`meta_loop1a..g` at 0.6) | Second mixer voice | Done table |
+| GD01-035 | Bugfix | ✅ | Character proportions look wrong | ~85% of the arm skin hangs off twist bones only the twist servos move; plus the hands now reach the neck / strum targets through IK (docs/guitarist_hands.md) | Bugs 10-21 r1 B1 |
+| GD01-036 | Bugfix | ✅ | Theatre (Cochise): the floor shows above the crowd | Not the crowd: `stage.1.mesh` etc. are drawn with their transform owner's matrix (`stage.mesh`); we drew them with their own stale identity | Bugs 10-21 r1 B2 |
+| GD01-038 | Bugfix | ✅ | Characters over-bright | The light direction sign was backwards (light travels along +Y): the 7.0 rim light flooded camera-facing surfaces. Formula now matches the VU1 microcode | Bugs 10-21 r1 B4 |
+| GD01-039 | Bugfix | ✅ | Band not in sync with the music | Frames now snap to the beat phase every tick (A = play_flags & 0xf) and moods change one beat early so blends finish on the event | Bugs 10-21 r1 B5 |
+| GD01-040 | Bugfix | ✅ | Crowd sprites look like flat paper | Quads billboard to the camera and the impostor is rendered from the main camera's angle every frame | Bugs 10-21 r1 B6 |
+| GD01-041 | Bugfix | ✅ | Pause menu: only about a quarter of the background is drawn (text and behaviour fine) | Texgen per stage was wrong: texgen 1 rotates/scales about the texture centre after the translation, texgen 4 without centring, texgen 0 ignores the transform (docs/render_gems_dof.md §1) | Bugs 10-21 r2 B7 |
+| GD01-042 | Bugfix | ✅ | Characters stay on their starting spots; they never walk around the venue | Walking reimplemented: walk/turn/stop clips, `bone_facing` root motion, hub spot, walk_delays by excitement, pre-solo blocks, solo walk point, lose-walk. Start spot fixed to walk_spot_01. Layout simplified (whole walk cycles) | Bugs 10-21 r2 B8 |
+| GD01-043 | Bugfix | ✅ | Gems look off: the original has a black round top; Star Power gems look almost fully transparent; whammy on a sustain shows no animation | Black tops (coloured only on HOPOs), star_base disc, bonus gems during Star Power, coloured star tails, grey tails once missed/released, whammy width wave on held sustains. gem2 / star2 / gem_bonus2 highlights, glow lines and burn particles now in (twelfth round H1) | Bugs 10-21 r2 B9 |
+| GD01-044 | Bugfix | ✅ | Character select: not every character's picture shows | PictureEx/PictureToggle meshes drawn (with the undo of their stale world transform) | Bugs 10-21 r2 B10 |
+| GD01-045 | Bugfix | ✅ | The help bar (button legend) stays on screen during transitions; in the original it disappears when something is selected and reappears on the new screen | Drawn only while the UI is idle | Bugs 10-21 r2 B11 |
+| GD01-047 | Bugfix | ✅ | Hands move correctly but the fingers do not | The finger mapping entries are flat symbol/value pairs; they were parsed as sublists so every note fell back to finger_open | Bugs 10-21 r2 B13 |
+| GD01-048 | Bugfix | ✅ | The close-up camera on the guitarist's hands never appears | They are the SOLO_NEAR shots (solos only). Native picker ported (side/distance rules, fresh shots, walk/Star Power validity, no switching in Star Power); focus now follows the guitarist's head; depth of field and hide_crowd per shot. Shaky cam still missing | Bugs 10-21 r2 B14 |
+| GD01-049 | Bugfix | ✅ | No bokeh (depth of field) | PS2 pass: everything at or beyond 2· | Bugs 10-21 r2 B15 |
+| GD01-051 | Bugfix | ✅ | Freeze: Iron Man with Johnny Napalm in the Basement | Most likely the same cause as B25 (song row lost after changing difficulty); the song itself plays fine | Bugs 10-21 r2 B17 |
+| GD01-052 | Bugfix | ✅ | The selected character is not carried over anywhere (neither quickplay nor career) | `game set_quickplay` with no arguments now copies the song's setup and the game always starts from the config (character, guitar, venue) | Bugs 10-21 r2 B18 |
+| GD01-053 | Bugfix | ✅ | The shop (Unlock Shop) is not available | Disabled on Easy in the original too; on Medium and up it works (store natives done) | Bugs 10-21 r2 B19 |
+| GD01-054 | Bugfix | ✅ | Entering a menu (Career or any other), the text shows in a wrong part of the screen for a second or two, then jumps to the right place | Three causes: (1) the GPU fell seconds behind (no limit on queued frames), so the first texture upload of a new screen stalled ~2 s on that frame; now at most 2 frames in flight. (2) Lit fonts ignored the transition fade (`ui.enm` ambient), so text showed before its poster. (3) The exiting screen wasn't drawn during its out-animation (black) | Bugs 10-21 r3 B20 |
+| GD01-055 | Bugfix | ✅ | The help bar buttons are gone completely; they should show, hide when something is selected, and come back on the new screen | A `helpbar set_display` from the memory-card dialogs stayed in effect on every later screen (empty list). Now reset on each screen change | Bugs 10-21 r3 B21 |
+| GD01-056 | Bugfix | ✅ | No loading screen when a song starts; it should stay at least 2 s like the save screens | The `loading` screen holds 2 s; the loading tips (`tips random_tip`, config/tips.dta, by difficulty) now show | Bugs 10-21 r3 B22 |
+| GD01-057 | Bugfix | ✅ | In game, the ROCK meter shows at the start, loaded but sideways; it should be hidden like the score until it slides in | Its pre-slide pose sits just outside the PS2's 4:3 screen; our 16:9 view showed it. The HUD is now clipped to 4:3 | Bugs 10-21 r3 B23 |
+| GD01-058 | Bugfix | ✅ | In game, every fret button looks pressed all the time | `foreach_player_matcher` handed the script a stub, so `refresh_track_buttons` never reached the track | Bugs 10-21 r3 B24 |
+| GD01-059 | Bugfix | ✅ | Freeze in Quick Play: Sharp Dressed Man on Expert | Not a freeze: the song never started. The song list is rebuilt when the difficulty changes, so the stored list row pointed at a header after picking a non-default difficulty (no song → black screen; the song's quickplay character/venue were lost too). The game now remembers the chosen song itself | Bugs 10-21 r3 B25 |
+| GD01-062 | Bugfix | ✅ | Some labels look stretched / "exploded": venue select, "34 WINSHIP ST" (the "BASEMENT" label next to it is fine) | LabelEx fit *replaces* the label's scale (FUN_0011f868 → FUN_001da700 sets the local rotation; label and text share one transform). The saved local already holds the editor's fit (0.69 × 2.67), and we applied the fit again on top (~2.7× too tall) | Bugs 10-21 r4 B28 |
+| GD01-063 | Bugfix | ✅ | Help bar: the strum (UP/DOWN) icon is cut in half, the entries are spaced differently, and the original has semi-transparent black round boxes behind the icons | Ported the HBElement draws (FUN_00149d88, ButtonHBElement_v5, LabelHBElement_v5): rounded box from resources help_box_left/mid/right (mid stretched to the element), icons on help_bar.mesh / help_bar_strum.mesh (the strum one is 2× wide), the strum entry starts at its own fixed spot (help_bar_strumbar.mesh), label text at help_bar.txt's 0.8 scale | Bugs 10-21 r4 B29 |
+| GD01-064 | Bugfix | ✅ | The ROCK meter starts the song on red (it should start in the middle); hitting notes moves it to yellow | The needle value started at 0.5 but the view was only posed once the value moved, so it stayed on frame 0 (red). Now posed every frame | Bugs 10-21 r4 B30 |
+| GD01-065 | Bugfix | ✅ | The Unlock Shop is still not accessible | Same as the original: career.dta disables `cm_store.btn` on Easy (no cash on Easy). The tested save only has an Easy career; on Medium the shop opens | Bugs 10-21 r4 B31 |
+| GD01-066 | Bugfix | ✅ | Career song list (after choosing the difficulty): the text layout differs from the original; it should be spread more evenly | Two causes. (1) The song provider started in quickplay mode (the original ctor FUN_00118400 sets 0), so the career list was the quickplay list until sel_song was left once: no scores, stars, checkmarks or career footer. (2) The layout was inferred; now ported (docs/song_list.md): one element per song, a tier header is column 3 of its first song, which sits 2 slots lower; score "%i" on every career row, stars, checkmark on beaten songs, footer at the blurb offset, highlight on name/score/stars, `spaced_selected_pos` = sel + 2·headers | Bugs 10-21 r4 B32 |
+| GD01-067 | Bugfix | ✅ | Menu music sometimes stops after a while or after some actions | The original (FUN_0020dcd8/e588) picks one meta_loop when the meta panel loads and loops it; the meta panel's Exit stops it. We chained loops and never restarted after a song (sel_song clears metamusic_on_exit). Now: one looping track, restarted whenever the menus come back | Bugs 10-21 r4 B33 |
+| GD01-069 | Bugfix | ✅ | Menu text is centred at its natural width; in the original it stretches horizontally to fill its box | RndButtonEx FUN_0012c408: with fit (+0x134) the button's text gets x scale box_width / widest line (stretch or squeeze, no height fit), centred. We had read the fit byte as caps and dropped the real caps byte (+0x12c, caps_mode 2/0). docs/button_text_fit.md | Bugs 10-21 r5 B35 |
+| GD01-070 | Bugfix | ✅ | Hitting notes shows a simpler effect than the original | The original plays particle views on every fret of the chord (docs/hit_fx.md): smash_normal / smash_star / smash_bonus (flame blobs, sparks, embers, spinning flare), the phrase-capture burst + 12°-fanned lightning, and the sustain burn (normal / whammy / Star Power colours). Added ParticleSys + ParticleSysAnim (load, simulation per PsParticleSys, camera-facing quads) and drove the views from the hit / miss / sustain-end events like FUN_00164988. Not yet: tail_bonus.part (star-tail whammy particles), venue particles | Bugs 10-21 r5 B36 |
+| GD01-071 | Bugfix | ✅ | The bokeh (depth of field) renders glitched | The PS2's 4 point taps 3 px apart (on 448 lines, softened by the TV) were scaled to ~5 px at 720p and showed as a doubled, grainy image; now the same spread as a 5×5 tent. The lookup also ignored the viewport origin (shifted blur in offset viewports) | Bugs 10-21 r5 B37 |
+| GD01-072 | Bugfix | ✅ | Star Power gems are all the same colour and don't spin | docs/star_gems.md. (1) The star meshes carry red vertex colours that the PS2 drops (star.mat: no use_environ, no vert_amb → material colour), but our unlit path multiplied them in, tinting every star; the rule now applies to all unlit meshes. (2) Nothing drove star.tnm: now at now·0.03 (loop 0..100, a turn per 3.3 s) before the gems. (3) star2.mesh highlight drawn; tops drawn under the star; the gem that breaks a phrase keeps the star look with star_miss | Bugs 10-21 r6 B38 |
+| GD01-073 | Bugfix | ✅ | Every settings menu shows a strange icon (looks like a woman, like Judy Nails) | The PictureToggle checkboxes: `set_state` / `get_state` / `toggle` are on/off and show the style's tex_on / tex_off (checkbox_checked / checkbox_empty); we treated set_state as the focus state and drew the mesh's own placeholder picture. `options get_stereo` / `get_lefty` were also unanswered (wrong names), so the boxes started unticked | Bugs 10-21 r6 B39 |
+| GD01-074 | Bugfix | ✅ | The settings menus look broken | The volume sliders were not implemented. RndSlider ported (docs/slider.md): track tinted by state (green while editing), pod at 31 + 102·pos/(steps−1), label; Select toggles editing, Up/Down ±1 with SCROLL_START_MSG, Back cancels (GH_CANCEL_MSG); SliderPanel routes Up/Down/Back to the slider being edited and answers `slider_selected` | Bugs 10-21 r6 B40 |
+| GD01-075 | Bugfix | ✅ | Pause menu: no sounds, and moving through the options doesn't work | Pausing froze the whole SPU, so the pause menu's own button sounds were silent too. The original (pause_all_sfx, IOP FUN_000041dc) freezes only the voices playing at that moment; now per voice. Keyboard navigation of the pause menu was checked working | Bugs 10-21 r6 B41 |
+| GD01-076 | Bugfix | ✅ | After the song ends, the guitarist's hand stays frozen in place while the rest of the body moves | At game over we stopped running the hand logic, so `bone_fret` (the fret-hand IK target, detached from the skeleton) froze in world space while the body moved on. GuitarCharacter_v10 runs every frame; now so does ours | Bugs 10-21 r7 B42 |
+| GD01-077 | Bugfix | ✅ | The newspaper at the end of the song shows a different guitarist than the one played | FUN_00104fd0 loads `ghui/image/photo_<character><0..3>.bmp` (random) into `winner_photo0.tex`; we never did, so the panel's own photo showed | Bugs 10-21 r7 B43 |
+| GD01-078 | Bugfix | ✅ | Pause menu: still no sound when moving through the options | Pausing paused the whole audio device (SDL), so no sound could play at all. Now only the song stops (with its own frame clock, so it resumes in sync); the SPU keeps running for the menu sounds | Bugs 10-21 r8 B44 |
+| GD01-079 | Bugfix | ✅ | End-of-song screens: no sound when moving through the options | Same cause as B44 (post_show sets the game paused) | Bugs 10-21 r8 B45 |
+| GD01-080 | Bugfix | ✅ | Sustain tails are white; they should have the note's colour | tail_<c>.mat are vert_amb mats (vertex colour, no material colour); the original's tail builder (FUN_001633d8) writes the mat colour into those vertices. Our tails now carry it as their colour | Bugs 10-21 r8 B46 |
+| GD01-081 | Bugfix | ✅ | HUD: the 1x/2x/3x/4x multiplier looks over-bright | See B52: drawn after the frame, the additive ×2 glow saturated the window to white. It is now drawn before the frame (a coloured halo around the box) [I] | Bugs 10-21 r8 B47 |
+| GD01-082 | Bugfix | ✅ | Deploying Star Power: a glitchy artifact appears on top of the notes | The deploy sparkle's MatAnims animate the UV rotation and scale (starts ×5, i.e. a small star); we only applied UV translation, so each 6-unit quad showed a magnified clamped texture (white slabs). MatAnim stage rotation / scale keys implemented (also fixes venue materials that use them) and the UVs re-bake when they change | Bugs 10-21 r8 B48 |
+| GD01-083 | Bugfix | ✅ | The guitarist drifts off his spot over a song and ends up facing a wall | The stand / play clips are not perfectly still in `bone_facing` (measured: about 2.6 units and 10° per 100 s even without walking), and walks only steered the heading, so the stop clip's overshoot added up walk after walk. Between walks the guitarist now eases back (position and facing, ~1 beat) to the spot he walked to (start spot, walk target, or the nearest one after a cancel / lose teleport). In tests he stays within 0.13 units of the spot (autoplay keeps the crowd at Peak, which never walks, so a walk itself was not exercised headless) | Bugs 10-21 r9 B49 |
+| GD01-084 | Bugfix | ✅ | Sustain whammy does not look like the original | Tails were stacked copies of tail02.mesh scaled per 4-unit block (stepped edges). Now the original strip (FUN_001633d8): tail02's 6-vertex cross-section swept in 30 rows anchored to the far end with a 1-unit pointed tip, each row widened by 1 + h from a 100-sample history pushed at a fixed 60 Hz (h = 3 × bar, 0..3), frozen when released, zeroed per tail. The bar is now analog (guitar whammy axis); a keyboard / digital whammy wiggles it. "Whammy active" follows whammy_speed / whammy_timeout (also for Star Power gain). The glow line width eases toward (max s − 1)/2 + 1 | Bugs 10-21 r9 B50 |
+| GD01-085 | Bugfix | ✅ | Whammying a Star Power sustain should glow blue | Ramp g (±0.1 per 60 Hz poll) on a held star-phrase sustain while whammying: the tail colour lerps to tail_star's blue (.08,.81,1), the glow line from tail_glow_star to tail_glow_whammy, and tail_bonus.part emits along the tail | Bugs 10-21 r9 B51 |
+| GD01-086 | Bugfix | ✅ | Score HUD colours: the streak bulbs are blue and the multiplier is over-bright | Bulbs: score_streak_N.mat carry a cyan material colour, but stage-0 blend "Src" selects TFX DECAL (texture colour only), which we never applied to the first pass. DECAL is now honoured for every stage-0 "Src" material (also rock meter LED, fireworks flare). Multiplier: see B47 | Bugs 10-21 r9 B52 |
+| GD01-087 | Bugfix | ✅ | The main menu opens on Tutorials instead of Career | main.dta focuses Tutorials on the first visit when a guitar is used and no tutorial is done (original behaviour); the port ignores that so the menu always opens on Career (user request) | Bugs 10-21 r9 B53 |
+| GD01-089 | Enhancement | ✅ | Enhanced Settings screen + FPS counter (first enhanced option) | Options gets "Enhanced Settings" between Game Settings and Data Settings (a copy of the Data Settings button; the entries below move one step down). The screen is defined in the port's own DTA (parsed from text) and uses the game's meta panel (menu music), the original guitar_display panel (a random guitar spinning on the right, with some ambient added) and the help bar; a native panel draws the black page and the list in the game's fonts. Every planned enhancement is listed as "Coming soon"; FPS Counter (default off) shows the frame rate in green, bottom left. Saved in enhanced.json next to career.json | Bugs 10-21 r9 X1a |
+| GD01-090 | Original | ✅ | Crowd audio | The crowd loops (22050 Hz) played at double speed: the mixer now resamples every stream to the device rate (also the tutorial VO). The sound-effects volume option now reaches the crowd; the screen fade fades it; set_excitement always restarts the file; Boot→Okay plays the falling reaction (venue.dta); `wingame` starts on a career final win; set_volume / set_enabled / enabled. Claps were already right (Star Power only) | Parity 10-22 P1 |
+| GD01-091 | Original | ✅ | Career end to end | Status newspaper page (its scene name is a script expression, now evaluated on every entry; character picture; band / character headlines); bonus videos play (video_provider get_video_file from store.dta); career song list follows the selected venue; guitar lists drop guitar_red_octane, and quickplay / multiplayer count unlocks at any difficulty; FINAL_WIN only above Easy. Encores do not exist in GH1. Credits panel: done in the tenth round (B58) | Parity 10-22 P2 |
+| GD01-094 | Original | ✅ | Character polish | Native CharWalk (turn by predicted pose, 2-beat layout with speed correction, chain queueing, 1-beat-ahead steering, pose hold); random walks no longer lose half their picks; drummer / keyboard realign and the beat delta after a tempo change; crowd impostors face the blocks' average; the crowd draws after the band and not under hide_crowd. [I] the stop clip is chosen by its measured turn (the shipped stop clips do not turn the way their names say) and the hold eases to the spot itself. The strum hand already matched (the player's strum never drives it in normal play) | Parity 10-22 P5 |
+| GD01-095 | Original | ✅ | Camera director | Shot durations [lo, hi) bars; beat → downbeat → one_bar_to order; the bar count keeps running in Star Power; excitement re-picks on the first beat with ≤ 1 beat left; only picker shots count as current (intro_camera_flags for the first); the pool refresh rules; low_excitement_ok means excitement ≠ Great. Open: reduced_crowd_shots, the crowd-update counter, the original RNG | Parity 10-22 P6 |
+| GD01-096 | Bugfix | ✅ | The whammy does not change the sound of held notes | docs/whammy_audio_plan.md. The original's "slip voice": the guitar channels play through a delay line whose speed drops to 2^(-1/12) (pitch_bend_range 1, ramped over ms_to_full_pitch_bend 1000 ms from the hit), down only, armed once the bar rests after the hit, lag capped at 0.9 × max_slip (270 ms), resynced at each hit and gem time. Keyboard whammy wiggles at half depth | R10 10-22 B55 |
+| GD01-097 | Bugfix | ✅ | Notes pop in at the far end of the highway; the original fades them | docs/track_fade_plan.md. The original copies a 128×32 strip of the venue before drawing the highway and lays it back over the far end with alpha 1→0 (track_fade.mat) plus +0.02 (track_add.mat); surface, lines, tails and gems fade, smashers / hit effects / lightning draw after. Face-off: each highway its own strip | R10 10-22 B56 |
+| GD01-099 | Bugfix | ✅ | Credits do nothing | docs/credits_plan.md. CreditsPanel + RndCreditList: config/credits.dta (907 rows), title / heading / name / centred templates in the font material colours, 15 rows 25 apart, 0.018 row a poll at 60 Hz with the top and bottom two rows fading, credits.vgs music (1 s fade in to 0.8, 1.25 s out), go_back to Options at the end (~14 min), Back any time | R10 10-22 B58 |
+| GD01-100 | Bugfix | ✅ | The company logos' black backgrounds stand out against the screen | The logo screens are cleared to black over the whole window | R10 10-22 B59 |
+| GD01-101 | Bugfix | ✅ | Guitarists (Pandora and the others) slowly turn to face the back of the stage and clip into objects | Measured headless: the stand / extreme / Star Power special clips move the root through their bone_facing deltas, and a clip cut short by the next one leaves part of its swing behind (special_01 → stand_medium_04 turned Pandora 108° and moved her 21 units in two beats). The original's pose hold only corrects while a clip waits to start, so recovery was luck. [I] The port adds a standing guard for every guitarist (and both face-off guitarists): off a walk the root eases back to its spot every frame and can never be more than 60° or 15 units away; off during game over (the win / lose clips move on purpose). Tested with all 7 rockers, forced walks: worst standing error 44° (root), 46° (pelvis incl. sway), 15 units. Dev aid: GD01_FACELOG=1 | R10 10-22 B60 |
+| GD01-102 | Enhancement | ✅ | Options: Enhanced Settings overlapped the poster art | Moved left (x −80) | R10 10-22 X1b |
+| GD01-103 | Enhancement | ✅ | Enhanced Settings page restyled | A random guitar (facing the player, still) or a random rocker frozen in a win-celebration pose, guitar in hand, centred in the free half of the page under a top-left key light with a visible beam and floor pool; cool rim light; no movement | R10 10-22 X1c |
+| GD01-104 | Enhancement | ✅ | Mouse support (Enhanced option, on by default) | Every menu text records its screen rectangle as it is drawn: hovering a navigable entry or list row focuses it (with the original focus / scroll sounds), a click selects; the help bar's CONTINUE / BACK (and Start) are clickable; the Enhanced Settings list too | R10 10-22 X20 |
+| GD01-105 | Enhancement | ✅ | Esc three times in a row on the main menu quits |  | R10 10-22 X21 |
+| GD01-106 | Enhancement | ✅ | Main menu help bar: GAMEPADS (blue) and MODS (orange) | Placeholders for the gamepad configurator and the mod tools; the icons are the disc's green help icon recoloured | R10 10-22 X22 |
+| GD01-107 | Enhancement | ✅ | Sharper Text & Sprites (Enhanced option) | Menu and font textures upscaled ×4 (×2 above 256 px) with Catmull-Rom on premultiplied colour; hard-edged alpha (glyphs, cut-outs) re-tightened. Applies to textures created after it is switched on (new screens) | R10 10-22 X23 |
+| GD01-108 | Bugfix | ✅ | Options > Data Settings / Game Settings: checkbox and sliders drawn in the wrong place for a moment | Reproduced headless: on the first frames of the transition (screen still black) the toggle and slider meshes were drawn at full brightness, ignoring the panel's ui.env ambient (the fade). Lit resource meshes now take the ambient like the fonts; the shared slider / toggle textures upload at start, and toggle pictures are cached | R11 10-22 B57 |
+| GD01-109 | Bugfix | ✅ [I] | Pandora still turned to face the back | Found two holes: venues without walks (basement, small club) never set the hold, so the guard never ran (69° there); and arena walks between the back corners go through the downstage hub, so the upstage leg faces 107–131° away (original path, kept). Added: hold set in every venue; a camera-cut snap (at every cut, a standing guitarist is put exactly back on his spot, hidden by the cut; also whenever he is out of shot); a walk watchdog (80 beats). Worst standing error after: 13° root / 36° pelvis incl. sway. Dev aid GD01_ROOTLOG | R11 10-22 B60b |
+| GD01-110 | Bugfix | ✅ | Whammy on a plain sustain turned the burn blue | The burn's whammy (cyan) state is the star whammy: a star-phrase sustain, or any sustain during Star Power | R11 10-22 B61 |
+| GD01-111 | Bugfix | ✅ | Mouse hover scrolled the song list | Lists keep the selection in a fixed slot, so a hover scrolled them: lists now take clicks only; the mouse wheel scrolls (Up / Down); hover only while the window has focus | R11 10-22 B62 |
+| GD01-112 | Bugfix | ✅ | Company logos not skippable | Enter / Esc / Start skip all the logos (and the intro movie) | R11 10-22 B63 |
+| GD01-113 | Bugfix | ✅ [I] | Name Your Band: the name sat off to the left | The entry's anchor is the original's left edge (it lays the name out left-aligned, growing right; FUN_00129948 align 0x21), but the template centred it on that anchor. The port centres the band name on the page (x 0, the labels' centre line), so it grows from the middle; the high-score name entry is unchanged | R11 10-22 B64 |
+| GD01-114 | Bugfix | ✅ | Max FPS followed the display's refresh rate instead of capping | Vsync only when the refresh rate is the cap or a multiple of it; otherwise vsync off and the frame loop paces to the cap (measured 60 / 120 / 240 exactly) | R11 10-22 B65 |
+| GD01-115 | Bugfix | ✅ | Every character used the same highway | characters.dta track_surface: each guitarist's own surface on track_surface.tex (both players in a face-off), as FUN_0015c540 | R11 10-22 B66 |
+| GD01-116 | Bugfix | ✅ | Idle on the title screen: black screen, then no menu music | The attract mode's `campaign get_random_song` was looked up only in the song list (not built yet): song -1. Now found in the engine's songs; player_matcher set_auto_play plays it, track_panel set_showing FALSE hides the highway, any button leaves, 120 s fade back to the title; the menu music returns | R11 10-22 B67 |
+| GD01-117 | Bugfix | ✅ | Venue select scrolled down, then up to the new venue | The map scroll starts at `{sv_map.view frame}`, which returned nothing (0, below the basement): views now report their frame | R11 10-22 B68 |
+| GD01-118 | Enhancement | ✅ | The Glitches | A ninth band at the bottom of Choose Band / Load Band (not saved): everything unlocked and bought, every song beaten with 5 stars, $9,999,999, all tutorials done, at every difficulty | R11 10-22 X24 |
+| GD01-119 | Enhancement | ✅ | Main menu help bar spacing | With GAMEPADS / MODS the strum bar follows the row; every gap is twice text_spacing | R11 10-22 X22b |
+| GD01-120 | Enhancement | ✅ | Enhanced Settings: the screen transition | The page slides and fades with the screen transition like the posters | R11 10-22 X1d |
+| GD01-121 | Enhancement | ✅ | Enhanced Settings rework | Collapsible sections (Steam Deck collapsed), separators, scrolling list, checkboxes, dropdowns (Enter opens, Left / Right cycle), ? help pop-up over the model (yellow fret / ? icon / `/` key), warning signs on options not built yet, mouse and wheel, every change applied at once | R11 10-22 X1e |
+| GD01-122 | Enhancement | ✅ | Steam Deck Mode | Locks every other option at its default; 60 FPS, 800p internal, borderless full screen, original sprites | R11 10-22 X25 |
+| GD01-123 | Enhancement | ✅ | Screen mode (windowed / full screen / borderless) | SDL fullscreen modes, applied live | R11 10-22 X26 |
+| GD01-124 | Enhancement | ✅ | In-game max FPS 60 / 120 / 240 (default 120) | vsync interval at refresh multiples, else vsync + pacing; headless unpaced | R11 10-22 X27 |
+| GD01-125 | Enhancement | ✅ | Internal resolution PS2 448p … 4K (default 1080p) | Frames render into an off-screen colour + depth target at that height (window aspect) and are scaled to the window | R11 10-22 X28 |
+| GD01-126 | Enhancement | ✅ | Sharper Text & Sprites default on |  | R11 10-22 X23b |
+| GD01-127 | Enhancement | ✅ | Stronger Bokeh | Focus at 1.3× the subject distance (original 2×), blur taps 4.8 px / 448 lines (original 3) | R11 10-22 X29 |
+| GD01-128 | Enhancement | ✅ | No Fail Mode, Autoplay (cheats) | As --no-fail / --autoplay, from the next song | R11 10-22 X30 |
+| GD01-130 | Bugfix | ✅ | Max FPS 60 still showed 120 on a 120 Hz display | The 60 cap used vsync every 2nd refresh (swap interval 2), which many drivers / compositors ignore. Now vsync stays at interval 1 and the frame loop also paces to the cap whenever the cap is below the refresh rate | R12 10-22 B69 |
+| GD01-131 | Bugfix | ✅ | After the demo (attract) mode the menu sound effects were silent until a song was played | The demo leaves through finish_fade, whose fade panel turns the sound-effect master volume to 0; the panel stayed up into finish_fade, so nothing gave it back (a song's fade panel did). The fade panel now restores the volume when it closes (verified: master 1.00 on every menu sound after the demo) | R12 10-22 B70 |
+| GD01-132 | Bugfix | ✅ | Songs with a female vocalist must show the female singer | songs.dta gives some songs their own (band ...) lineup, which the port ignored: female singer on iloverockandroll, takeitoff, farewellmyth, getready2rokk; a keyboard player on frankenstein; no singer on spanishcastlemagic, breakingwheel. SongInfo::band → VenueRenderer::Band::lineup → loadBand (charsys.dta's default band otherwise). Dev aid GD01_BAND="SINGER_FEMALE_METAL BASS_METAL DRUMMER_METAL" | R12 10-22 B71 |
+| GD01-134 | Bugfix | ✅ | The Garden: one wide shot has a far too bright light from stage left | The original sends the venue post_switch_cam after every camera cut (VenueCam switch_cam FUN_0016f3b8); the port never did, so the arena's stadium_spotlight.mesh cone stayed up in flr_far_lft03 / flr_far_rt03. Now sent at every shot change, which also turns on the other venues' per-shot hides (fest solo beams, big_club smoke and beams, basement, small_club, theatre crowd). Dev aid GD01_SHOT=<shot> holds a shot | R12 10-22 B73 |
+| GD01-136 | Enhancement | ✅ | Disable Shaky Camera | The original shaky cam ((shaky 1) shots follow shaky_cam1.tnm, ±0.2 units) was already in; VenueRenderer::setShakyCamera, off with Enhanced Settings > Disable Shaky Camera | R12 10-22 X40 |
+| GD01-137 | Enhancement | ✅ [I] | Enhanced Settings backdrop | The basement with its default band, posed for one second and frozen, filmed by a still three-quarter close-up on the singer's microphone (VenueRenderer::setStillView, singerMicPos / singerBonePos), placed upper right; the old spotlight beam and a warm glow on the microphone; the explanation box sits bottom right. Loaded on entering the screen, freed on leaving. Particles and venue lights are frozen as they are | R12 10-22 X41 |
+| GD01-138 | Original | ✅ | Gem highlight, miss pop, hit rules (highway round) | gem2.mesh highlight on normal / missed gems, gem_bonus2.mesh streak in Star Power, layer order top → body → highlight; a miss with a fret pops that smasher (PlayerMatcher_v4 → FUN_0015e2f8 → FUN_00164ae8); a pending wrong strum that expires reports its gem and fret (could never break a Star Power phrase before); sustain points by the original ms-share formula, finishing when all points are earned. Open questions in FINDINGS.md answered (HOPO +0x74 = 60 ms constant, phrase loss matches, no SOLO / PITCH tracks on the disc) | R12 10-22 H1 |
+| GD01-139 | Enhancement | ✅ [I] | Enhanced Settings overhaul | 3D model and ? icon removed; the focused (or hovered) option's explanation shows in a box on the right; the options sit on a see-through black box; Disable Shaky Camera, Audio / Video Calibration, Export User Files, Load User Settings, Load User Progress, the 7 original cheats | R12 10-22 X32 |
+| GD01-140 | Enhancement | ✅ [I] | Export / load user files | Export: a folder dialog, writes GD01-user-settings.json (every Enhanced Setting) and GD01-user-progress.json (the career save). Load settings / progress: a file dialog; applied and saved at once; every property is checked (type, allowed values, ranges, known characters / guitars / skins) and anything odd keeps its default. Dev aid GD01_DIALOG=<path> answers the dialog | R12 10-22 X33 |
+| GD01-141 | Enhancement | ✅ | Cheats in Enhanced Settings | The original long_cheats.dta cheats as on/off switches, setting the same script variables as the button codes: Air Guitar ($cheat_guitar 21: no guitar), Guitar Hero Controller Guitar (22: guitar_red_octane), Unlock Everything (campaign all_access, never saved), Locked Full Rock Meter ($cheat_meter: arena init sets the crowd rating to 1, inactive), No Venue (arena set_showing 0, now honoured: venue, band and crowd not drawn), Monkey / Skull Head Crowd ($cheat_crowd 1 / 2). Air / GH guitar and monkey / skull are exclusive pairs | R12 10-22 X34 |
+| GD01-142 | Enhancement | ✅ [I] | Audio / Video Calibration | The original has none (no strings, screens or scripts). Two steps of 8 presses on a 750 ms beat (3 lead-in beats): ticks you hear, then a ring that flashes silently; the median offsets are saved as audio_offset (moves the judging, added to --av-offset) and video_offset (draws the highway that far ahead); input delay cancels out. Kept in Steam Deck mode | R12 10-22 X35 |
+| GD01-143 | Enhancement | ✅ [I] | New credits | GD01 credits (project, main developers, open source thanks, beta testers, original heroes), a spacer, then the original credits | R12 10-22 X36 |
+| GD01-144 | Enhancement | ✅ [I] | Title screen legal text | The GD01 notice over the five legal labels (two were hidden in the original), one line each at the original size | R12 10-22 X37 |
+| GD01-145 | Enhancement | ✅ [I] | Memory card texts | ui/pc_strings.cpp: the user's From → To table (docs/texts_loading_and_save.md) over the locale, both `tok` and `tok_ps2`. save_saving used "Saving data..." (the table repeated the loading text) | R12 10-22 L1 |
+| GD01-146 | Enhancement | ✅ [I] | GD01 loading tips 30–35 | Added to the tip pool on every difficulty; a tip longer than 6 lines is laid out wider and scaled down to fit the poster. Dev aid GD01_TIP=<token> | R12 10-22 X38 |
+| GD01-147 | Enhancement | ✅ | Dev aid GD01_SCREEN=<screen> | With GD01_SKIP_BOOT, opens that menu screen (e.g. credits, enhanced_settings) | R12 10-22 X39 |
+| GD01-148 | Enhancement | ✅ [I] | Touch controls | In a song a finger on a lane at the strike line = fret + strum (hold = sustain, fingers within 30 ms = one chord, both highways in a face-off); Star Power: tap the meter or a second finger off the highway; top-right corner pauses; menus: tap = click. SDL touch-as-mouse off while on. Dev aid GD01_KEYS touchX_Y / +touchX_Y / -touchX_Y. Not tried on a real touch screen | R13 10-22 X42 |
+| GD01-149 | Enhancement | ✅ [I] | Rock Band guitars | Xbox 360 RB guitars, PS3 / Wii (added SDL mappings, layout not checked on hardware), RB4 by USB id; frets (solo frets too), d-pad strum, right-stick whammy, tilt / Select Star Power | R13 10-22 X43 |
+| GD01-150 | Enhancement | ✅ [I] | XInput controllers | On: the original gamepad mode (L2 L1 R1 R2 A frets, each press strums) plus stick whammy; off: gamepads only drive the menus | R13 10-22 X44 |
+| GD01-151 | Enhancement | ✅ [I] | Anti-aliasing | FXAA 3.11, SSAA (2x, 4-tap downsample), TAA (Halton jitter, depth reprojection, YCoCg variance clip, reset at cuts); on the venue frame only (highway / HUD / menus stay crisp) | R13 10-22 X45 |
+| GD01-153 | Enhancement | ✅ | Bokeh Effect None / Regular / Stronger (default Stronger) | Replaces Stronger Bokeh | R13 10-22 X47 |
+| GD01-154 | Enhancement | ✅ | Enable Particles FX | Global switch (scene/particles): venue particle systems and the highway hit / burn / tail particles | R13 10-22 X48 |
+| GD01-155 | Enhancement | ✅ [I] | All band mates cast shadows | A light above each member with its own floor glow (original ellipse math) and a flattened depth-only silhouette cutting it (band models have no shadow mesh) | R13 10-22 X49 |
+| GD01-156 | Enhancement | ✅ [I] | More Lights on Venues Off / Subtle / Strong + Dust in Light Beams | Additive cones / glows ×1.2 / ×1.45, band fill light, floor pools per member, soft beams to each member, dust motes; colours follow the stage spotlight | R13 10-22 X50 |
+| GD01-157 | Enhancement | ✅ [I] | Bloom, Cinematic Color | Dual-Kawase bloom (Low / High); filmic curve, warm / teal grade, vignette | R13 10-22 X51 |
+| GD01-158 | Enhancement | ✅ [I] | Add Fog to the Ground (Experimental) None / Low / Full | One fullscreen pass: world height from the venue depth, exponential height fog above the stage floor, drifting noise, coloured by the blurred frame; never over the highway / HUD | R13 10-22 X52 |
+| GD01-159 | Original | ✅ | Guitar track mutes on a miss | Decoded UnmuteBeatMatchAudio handlers (docs/guitar_audio.md): the slip voice stops on a miss / own gem passed / opponent gem / early sustain release and resumes in sync on the next hit | R13 10-22 P7 |
+| GD01-160 | Original | ✅ | Face-off guitar mix | One guitar copy per player, panned left / right, −1.5 dB, −1.5 dB more in shared sections; replaces the interim rule. Autoplay now holds sustains to their end (self-test scores slightly higher) | R13 10-22 P8 |
+| GD01-161 | Original | ✅ | Crowd | Monkey / skull head cheats (heads 6 / 7) on 3D members and impostors; the original crowd animation (excitement split, shared LRU clips, random phases), crowd tempo events. The 3D members near the stage were already in | R13 10-22 P9 |
+| GD01-163 | Enhancement | ✅ | Enhanced Settings backdrop shows every option | The backdrop goes through the same post chain as a song (AA, upscaling, bloom, cinematic colour, fog), the bokeh focuses as the shots do (2x / 1.3x the microphone distance), venue lights / shadows / particles applied live; camera pulled back (fov 0.7) | R14 10-22 X53 |
+| GD01-164 | Bugfix | ✅ | Rock Band guitar for Xbox 360 had its buttons mixed up | SDL reports it as an Xbox 360 gamepad (not a guitar) named "...Guitar", so it fell into the PS2-adapter layout; and its whammy rests at -32768, read as fully pressed. Xbox-style guitars (type GUITAR, or vendor 1bad / 1430 on an Xbox gamepad type) use the Xbox guitar layout; axes are measured from their rest value at connect, with hysteresis. Detected on the real guitar; buttons not yet pressed by a person | R14 10-22 B75 |
+| GD01-165 | Enhancement | ✅ [I] | GAMEPADS screen | Blue fret / click on the main menu's GAMEPADS. Controllers (and the keyboard) on the left with their player (1 / 2), live input, and on the right the 16 controls with their bindings, lit while held; select a control and press a button / move an axis to remap; Reset to Defaults. Table-driven bindings (input/input.cpp) with per-device overrides and players in controllers.json | R14 10-22 X54 |
+| GD01-166 | Enhancement | ✅ [I] | AI Upscaling: FSR 3.1, DLSS 4 | A Vulkan side next to GL (render/vk_upscaler.*, volk), sharing colour / depth / motion vectors / output through GL_EXT_memory_object + semaphores; motion vectors from depth and the camera; FidelityFX SDK 1.1.4 (MIT, shaders pre-generated with tools/ffx_gen_shaders.py) and DLSS SDK 310.9.16 (preset K transformer). FSR 3.1 on any Vulkan GPU, Linux + Windows; DLSS 4 on NVIDIA RTX, Linux only (NGX ships MSVC-only libraries); with DLSS selected the game starts itself on the NVIDIA GPU of hybrid laptops. Status line under AI Upscaling. Characters have no motion vectors of their own | R14 10-22 X55 |
+| GD01-168 | Original | ✅ | Hammer-ons / pull-offs | Rules already matched the original (single fret, no shared fret with the previous note, ≤169 ticks, previous note hit; window -40/+160 ms). Fixed the gem look (coloured top ring only from the third gem on, previous gem the player's own). Autoplay hammers / pulls; selftest runs strum-only and HOPO passes (FINDINGS.md "HOPO re-check") | R15 10-23 G1 |
+| GD01-169 | Bugfix | ✅ | Controller defaults | Guitar and keyboard defaults = the user's controllers.json; guitars have no Select / Back (green / red only), duplicate Select/Back-on-fret bindings dropped; Xbox guitar Star Power on Back (no tilt) | R15 10-23 B76 |
+| GD01-170 | Enhancement | ✅ | Unbound controls | Delete while capturing, or the row's "x"; empty bindings persist | R15 10-23 X57 |
+| GD01-171 | Enhancement | ✅ | Keyboard "Frets also strum" | Checkbox on the keyboard's GAMEPADS page (controllers.json frets_strum) | R15 10-23 X58 |
+| GD01-172 | Bugfix | ✅ | GAMEPADS screen | P1 / P2 / -- labels inside the box; one device per player (swap on conflict); devices without a player drive menus as P1; keyboard Esc / Enter / arrows and mouse always work in menus. Player swap not confirmed on screen; buttons of the real guitar not pressed by a person | R15 10-23 B77 |
+| GD01-173 | Bugfix | ✅ | AI upscaling tanked FPS | FSR 3.1 cost 12-15 ms on the AMD iGPU: FSR 3.1 now also relaunches on the NVIDIA GPU; upscaler outputs at screen resolution (scene at /1.5, /1.7, /2); 2-frame fence ring (no CPU stall); real FP16 FSR shaders; status shows resolutions and ms. GD01_GPULOG=1 | R15 10-23 B78 |
+| GD01-174 | Bugfix | ✅ | Quick Play list flashed career columns on exit | The setlist exit script sets the provider back to career; the list now copies its rows on set_provider / refresh like the original | R15 10-23 B79 |
+| GD01-175 | Bugfix | ✅ | Held directions repeat | Original: hold_ms then repeat_ms (1000/80 default, setlist 500/80, per-panel joypad override); keyboard, d-pad, strum. No acceleration in the original | R15 10-23 B80 |
+| GD01-176 | Bugfix | ✅ | Garden floor / Toxic cliffs / missing pieces in every venue | Meshes have their own draw lists (e.g. arrow03.mesh = Garden stage top, cliff*.mesh = Toxic rock cliffs); scene_renderer now draws them (~200 meshes), skipping children a view already lists | R15 10-23 B81 |
+| GD01-177 | Bugfix | ✅ [I] | Garden ceiling beams too fast | Driven by lighting.view on song ticks with the default 100-frame loop (~10 sweeps/s, also in the original code); slowed to 0.05 (one sweep per bar). A deliberate deviation; not frame-rate related | R15 10-23 B82 |
+| GD01-178 | Bugfix | ✅ | Toxic overbright in close-ups | Our Bloom thresholded each channel at 0.55/0.45, so Toxic's teal floor (0.39,0.62,0.59) glowed when it filled the frame. Bloom now keys on luminance with a soft knee (0.62-0.9 / 0.55-0.85), keeping the light's colour | R15 10-23 B83 |
+| GD01-179 | Enhancement | ✅ | Fog: better Low / Full, new Super Fog | Super Fog: volumetric height fog with shafts from each member's stage light, haze, glare | R15 10-23 X59 |
+| GD01-180 | Enhancement | ✅ | Color Grading, Film Grain, Chromatic Aberration, Light Streaks, Ambient Occlusion, Sharpening | All off by default, on the backdrop too | R15 10-23 X60 |
+| GD01-181 | Enhancement | ✅ | Blur on Star Power (None / Light / Medium / High) | Venue + band only, fades in 0.25 s / out 0.5 s. GD01_STARBLUR=1 | R15 10-23 X61 |
+| GD01-182 | Enhancement | ✅ [I] | Android APK | See P1 | R15 10-23 P10 |
+| GD01-183 | Enhancement | ✅ [I] | Always start on the dedicated GPU (Windows + Linux) | platform/gpu_select.*. Windows: exported NvOptimusEnablement / AmdPowerXpressRequestHighPerformance (the drivers fall back themselves). Linux: dedicated card from /sys/class/drm (NVIDIA, or AMD with >2 GB VRAM, not the boot GPU) → PRIME offload variables (NVIDIA driver) or DRI_PRIME=pci-... (Mesa). Fallback: graphics fail or land on llvmpipe → restart on the system GPU; a launch that died while starting graphics is caught next time; the failure is remembered in gpu_system until the driver or kernel changes. GD01_GPU=system / testfail. Replaces the upscaler-only switch | R15 10-23 X62 |
+| GD01-184 | Bugfix | ✅ | Hammer-ons failing in real play | Rules re-verified against the raw instructions (window −40..+160 ms, needs a strum and a fret held since). PC difference fixed: the PS2 reads the pad once a frame, so moving from one fret to the next never showed "nothing held"; per-event input did, ending the chain. Now a gap shorter than a pad frame (16.7 ms) keeps it. New Cheats option "Hammer-ons & Pull-offs": Original / Forgiving (−100 ms early, no strum or held fret needed, wrong fret not locked out). GD01_HOPOLOG=1 logs each try; GD01_KEYS "s<song ms>:key" injects guitar input at song times | R15 10-23 B84 |
+| GD01-186 | Bugfix | ✅ | Band movement "close but wrong" | docs/character_animation.md §5: per-song/venue clip enabling (tempo, exclude_venues, walks, win/final win, face-off) with no fallback; WIN_FINAL macro expanded; guitarist set_wail / set_solo ends, is_doing_badly in every state, gtr_*_tempo, Special checks; realign characters on the measure beat; band changeup on the current clip; face-off band = drummer. Golden log: tools/anim_golden.sh | R 10-28 (1.1.5) B85 |
+| GD01-187 | Bugfix | ✅ | Misses heard before the highway shows | Controllers live from song −25 ms (GamePanel_v10 / FUN_001085d8), held frets synced (FUN_0025c070); docs/FINDINGS.md "When input becomes live" | R 10-28 (1.1.5) B86 |
+| GD01-188 | Bugfix | ✅ [I] | Hit window feels small | Windows re-verified (±100 / grace 60 / HOPO −40..+160, debounce 52); song clock now held back by the audio device buffer (23 ms here); the rest is Audio / Video Calibration | R 10-28 (1.1.5) B87 |
+| GD01-189 | Bugfix | ✅ | Win explosion pieces stay on screen | Pieces hidden once every TransAnim under track_explode.view is past its last key (~1.34 s) | R 10-28 (1.1.5) B88 |
+| GD01-190 | Enhancement | ✅ | Memory card texts ("memory card (8MB) for PlayStation 2 in MEMORY CARD slot 1", "Do not remove the memory card, reset, or switch off the console", free-space wording) | Done in the twelfth round (ui/pc_strings.cpp) | PC labels L1 |
+| GD01-192 | Original | ✅ | Boot / logo screens and the intro video (`ghintro.pss`) | RedOctane / MTV / Harmonix logos, then the 20 s intro movie | Missing from original M1 |
+| GD01-193 | Original | ✅ | The screen that shows how to use the guitar | `guitar_help` in the first-boot flow (after the splash) | Missing from original M2 |
+| GD01-194 | Original | ✅ | Saving and loading screens (memory card screens in `mem_card.dta`) | The original mem_card.dta screens run on a native `memcard` mapped to `career.json`; each phase lasts at least 2 s | Missing from original M3 |
+| GD01-195 | Original | ✅ | Profile screens (band name entry, profile select / delete) | First boot: no save → create → splash → guitar help → name entry → autosave → main. Later boots: load → splash → band select | Missing from original M4 |
+| GD01-206 | Enhancement | ➖ | Replacement textures | Dropped from the roadmap (1.1.3): the Enhanced Settings entry is removed | Extended features X9 |
+| GD01-217 | Enhancement | ✅ | Mouse support (menus and settings) |  | Extended features X20 |
+| GD01-218 | Enhancement | ✅ [I] | Android | Fifteenth round (P10): engine/android + engine/build_android.sh, APK in dist/android (arm64-v8a, x86_64, Android 7+); GLES 3.0 through gl.cpp; ISO picked with the system file picker and copied to app storage. Tested in an x86_64 emulator only | Future platforms P1 |
+| GD01-220 | Original | ✅ | Load `.gh` panels in C++: external textures, UI classes (LabelEx, ButtonEx, PictureEx, List, Text, Font) |  | UI plan 1 |
+| GD01-221 | Original | ✅ | Fonts: glyph table measured from the sheet's alpha, kerning, RndText layout / alignment / wrap / markup (`docs/fonts_and_text.md`) |  | UI plan 2 |
+| GD01-222 | Original | ✅ | Styles from `ghui/config.dta` (text templates, fonts, per-state colours) and `ghui/eng/locale.dta` strings |  | UI plan 3 |
+| GD01-223 | Original | ✅ | DTA script interpreter: preprocessor (#define / #include / #ifdef, macro splicing), variables, control flow, funcs, messages, handlers with parameter lists, `kDataUnhandled` |  | UI plan 4 |
+| GD01-224 | Original | ✅ | UI framework: screens, panels (shared panels stay up), focus, navigators, routing order, auto-back, `goto_screen` / push / pop, helpbar, animated transitions |  | UI plan 5 |
+| GD01-226 | Original | ✅ | Screens: main menu, options, quickplay song select (tiers, scrolling setlist), difficulty, loading → game |  | UI plan 7 |
+| GD01-227 | Original | ✅ | Pause (resume / restart / settings / quit), lose (retry / new song / quit) through the original scripts; song end → `post_show` |  | UI plan 7b |
+| GD01-228 | Original | ✅ | End screens: post_show → endgame (newspaper, stars, streak) → status / cash award / highscore (name entry) → complete |  | UI plan 7b2 |
+| GD01-229 | Original | ✅ | Song preview audio on the song list, menu music |  | UI plan 7c |
+| GD01-230 | Original | ✅ | Sound effects: `.bnk`/`.nse`/`.seq` banks per context, software SPU2 (ADSR, pitch, pan law, 48 voices, echo / large-studio reverb), sequences, `play_sfx` / `synth play_sequence` / `play_game_*`, UI sounds | docs/audio_sfx.md | UI plan 7c2 |
+| GD01-231 | Original | ✅ | Character / guitar select panels: CharsysPanel (6-model cache, menu idle clip, placer, view camera/env), GuitarDisplayPanel (spin, skin), GuitarSelectPanel, MultiCharSelPanel (docs/select_panels.md) |  | UI plan 7f |
+| GD01-237 | Original | ✅ | Original in-game HUD (hud.rnd: score digits, multiplier, streak bulbs, rock meter, Star Power tube, messages, You Rock!), slide-in, song-title overlay timing, highway roll-out (extend_track.tnm), 10 s intro | docs/endgame_and_hud.md | UI plan 8 |
+| GD01-238 | Original | ✅ | Career mode: campaign (tiers, unlocks, status, cash awards, per-difficulty careers), career setlist, store prices, high scores, JSON save (`career.json`) | docs/career.md | UI plan 9 |
+| GD01-245 | Original | ✅ | Crowd: Full 3D crowd members inside the `crowd_limitsNN` regions (CrowdChar) | docs/crowd3d.md: the crowd instance pool (10/12/17 chars, head + outfit swap), regions by the game's inside test, switch_region per shot (crowd_region or auto score), set_sizes with the block lists, sphere cull; eyes look at a random member | Open table |
+| GD01-247 | Original | ✅ | Crowd: `hide_crowd` / `crowd_region` per shot |  | Open table |
+| GD01-248 | Original | ✅ | Crowd: Crowd audio (`crowd_v1_*`, cheering by excitement) | Parity round P1 | Open table |
+| GD01-250 | Original | ✅ | Rendering: Vertex alpha now honoured (menus' vignettes, highway rails); window alpha masked so the window stays opaque | Re-check venues for changes this caused | Open table |
+| GD01-253 | Bugfix | ✅ | Venue artifacts: MatAnim stage scale/rotation keys | rows = scale · [[cos, sin], [−sin, cos]] (B48) | Open table |
+| GD01-255 | Original | ✅ | Camera: Shaky cam (`shaky` shots, `shaky_cam1.tnm`), `eyes` (look at camera), `crowd_region` | docs/camera_endgame.md: shaky_cam1.tnm from arena fx.rnd moves the camera in path space and drifts the focus; `eyes` modes drive the guitarist's eyes. `crowd_region` waits for the 3D crowd members | Open table |
+| GD01-256 | Original | ✅ | Rendering: Extra material stages (39 materials: neon glows, reflection maps; texgen 5 env maps), gem2/star2 specular | docs/material_stages.md: every stage with a blend is its own pass (DECAL unless MultipassLit), per-pass blend / depth / fog; texgen 5 reflection map in the vertex shader; Sphere (2) approximated [I] | Open table |
+| GD01-257 | Original | ✅ | Rendering: VenueSpotLight (spotlight tracks the guitarist) and floor glow | docs/spotlight.md: spotlight01.lit aimed at the guitarist's feet every frame, floorspot_char.mesh ellipse with the venue's floorspot_glow.mat after the band. The shadow silhouette that cuts it is still missing | Open table |
+| GD01-258 | Original | ✅ | Walking: Native layout (2-beat simulation, speed correction, backward-integrated target, end hold on position) | Parity round P5 | Open table |
+| GD01-259 | Original | ✅ | Highway: Deploy sparkle burst, cyan burn on held sustains, glow lines on tails, burn particles | Glow lines: RndLine at z 0.16, the tight cyan line on unplayed star tails, 1.5× wide fret / star / bonus glow while sustaining | Open table |
+| GD01-260 | Enhancement | ✅ | Display: Ultrawide: menus and HUD stay 16:9 centred; the venue fills the window up to 21:9 | `Renderer::beginWide` | Open table |
+| GD01-261 | Original | ✅ | Highway: Intro: fret buttons pop and light up green → orange, then show the held frets (`pop_smasher`, `set_smasher_glowing`, `refresh_track_buttons`); hit pops; rims always coloured | Through the original track_panel script | Open table |
+| GD01-262 | Original | ✅ | Highway: Win explosion (`track_panel explode`): the track breaks into pieces and splinters | The explosion's particle systems now run and draw | Open table |
+| GD01-263 | Original | ✅ | UI: Walkthrough: first boot, profile, quickplay to the newspaper results, career (difficulty → character → guitar → status → autosave → venue) | Store purchase and the final Battle Axe win not walked through yet (need cash / a finished career) | Open table |
+| GD01-264 | Original | ✅ | Venue effects: Particles (ParticleSys, ParticleSysAnim), dry ice, sparks | docs/venue_fx.md: simulated per PsParticleSys; preserved static particles (basement / fest light strings); ambient tint, no fog. Script-switched emitters now run (venue scripts on the full interpreter) | Open table |
+| GD01-265 | Original | ✅ | Venue effects: Flares (Flare class), `chorus` flare sequence | Z readback a frame late, brightness count stepped at 60 Hz, distance fade, s0→s1 size, `set_steps` pop and fade | Open table |
+| GD01-266 | Original | ✅ | Venue effects: In-venue video screens (`.ipu` movies) | Not shown in the shipped game: every venue has use_video 0 and the karaoke_logo.mat they need exists in no scene (docs/video.md) | Open table |
+| GD01-267 | Original | ✅ | Venue effects: TRIGGERS track (`kick_drum`, `bass_hit`, speaker pumps) | Notes 60 / 61 sent 90 / 50 ms early as arena messages | Open table |
+| GD01-268 | Original | ✅ | Venue effects: `hit_gem` reactions (`hit_guitar_amp`), funcs with arguments, `if` / `foreach` / variables in scripts | Venue scripts run on the full interpreter (arena / game / char_sys natives, scene objects as script objects); `$slot` = the hit gem's lowest fret | Open table |
+| GD01-269 | Original | ✅ | Camera: Shaky cam, depth of field, native shot picker (`cam change_to_regular_shot`) details | Parity round P6 | Open table |
+| GD01-270 | Original | ✅ | Camera: Win / lose / game-over shots and sequences | game_over: FINAL_WIN at once (career final song), WIN after 1750 ms, LOSE (lose01, with lose_teleport as its pre-switch) at once; the director stops picking. Guitarist win waits for a transition, lose cuts in; WinFinal / LoseWalk; Star Power pose not while walking | Open table |
+| GD01-271 | Original | ✅ | Characters: Hand IK (two-bone, `frac` from the IK clip flags, align_quat, stretch), hand drivers (finger / strum clips from the gems via hand_finger_mapping / hand_strum_mapping, HandMap_/StrumMap_ events), `bone_fret` gliding between `spot_neck_fret<N>` from the ANIM track | docs/guitarist_hands.md | Open table |
+| GD01-273 | Original | ✅ | Characters: Drummer / keyboard `realign`; root motion (`use_delta`) for walking | Parity round P5 | Open table |
+| GD01-275 | Original | ✅ | Characters: Face morphs (expressions, blinking), eyes, lip-sync | docs/faces_shadows.md: hero poses follow the crowd excitement (one face changes at a time), singer mouth on T1 GEMS note 108 (257 ms early), eyes look-at with the 22° cone. The original never blinks | Open table |
+| GD01-277 | Original | ✅ | Characters: Shadows (`*_shadow.rnd`), LOD 1 | The shadow file skinned by the guitarist's bones, flattened along the spotlight onto root.z + 3 and drawn depth-only: it cuts the silhouette out of the floor glow. The crowd has no LODs | Open table |
+| GD01-280 | Original | ✅ | Gameplay: Open RE questions (watcher +0x74 HOPO offset, phrase-miss rules, SOLO/PITCH tracks) | Answered in FINDINGS.md (twelfth round H1); still open: whether the guitar audio mutes on a miss (BeatMatchAudio) | Open table |
+| GD01-281 | Original | ✅ | Audio: Crowd streams by excitement, crowd one-shots, claps in Star Power, miss / Star Power sounds via the original handler scripts | arena_game.dta, beatmatch.dta, player.dta run in the UI interpreter | Open table |
+| GD01-283 | Enhancement | ✅ | Audio: A/V calibration screen | The original has none; the port's Audio / Video Calibration (X35) | Open table |
+| GD01-284 | Original | ✅ | Audio: Music slow-down to 0 over 2 s on a fail (`beatmatch set_music_speed`) |  | Open table |
+| GD01-286 | Original | ✅ | Highway: Smasher pops / held glows (`pop_smasher`, `set_smasher_glowing`), win explosion (`explode`), rails glow | docs/endgame_and_hud.md B2; miss pop added in the twelfth round | Open table |
+| GD01-287 | Original | ✅ | Video: Intro video (`ghintro.pss`, MPEG-2) and the bonus videos | Own MPEG-2 decoder + PSS demuxer (engine/src/video, no third-party code; every frame of all four movies within 61.9 dB of ffmpeg). `meta play_movie` plays videos/<file> pillarboxed 4:3 with its 48 kHz PCM, the UI frozen, Green / X / Start skip | Open table |
+
+
+### Notes kept from the old backlog
+
+- **Parity round (2026-10-22): crowd audio, career, tutorials, multiplayer, characters, camera**: Specs from the research pass: docs/crowd_audio_plan.md, career_e2e_plan.md, tutorials_plan.md, multiplayer_plan.md, character_polish_plan.md, camera_director_plan.md.
+- **Project questions**: The explanation of the approach (reimplementation vs re-engineering, how close it can get), the end-product layout for Windows / macOS / Linux, and three suggested git structures are in `docs/project_overview.md`.
+- **UI plan (next)**: The original menus are script-driven: `ghui/*.dta` define panels (`new_gh_panel main (navigator ...) (focus ...) (enter ...) (SELECT_MSG ...)`) that talk to native objects (`ui`, `game`, `campaign`, `synth`, `beatmatch`), and each panel's art is a `ghui/<panel>.gh` scene (meshes, external `ghui/image/gen/*.bmp_ps2` textures, LabelEx / ButtonEx / PictureEx / List components, Text with fonts from `ghui/gen/resources.rnd_ps2`).
+
+
+## gd-game-02: Guitar Hero II (Xbox 360)
+
+100% parity with the original is non-negotiable. Paths in Notes are relative to `gd-game-02/` (bare file names are in `gd-game-02/docs/`): the original's rules in `FINDINGS.md`, the formats in `dtb_format.md`, `audio_and_charts.md`, `milo_and_textures.md`, the songs in `songs.md`, what comes from gd-game-01 (lessons L1–L21) in `reuse_and_lessons.md`; milestones M0–M11 follow `reuse_and_lessons.md` §4.2. Imported from the old `gd-game-02/docs/backlog.md` (2026-10-28). Wave B items 1–17 are the owner's list of 2026-10-28.
+
+### Done so far
+
+In progress: Guitar Dream version **0.1.5** (2026-10-28), shipped in the
+universal launcher, not released on its own.
+
+- **Research**: the XGD2 disc, ARK, all 177 DTB scripts, songs, `.mogg`
+  audio, charts, all 503 milos and 3,533 textures, the XEX in Ghidra with a
+  complete export, GH2's gameplay rules (`FINDINGS.md`).
+- **Engine**: GH2's rules (watcher, HOPO, scoring, Star Power, rock meter,
+  co-op / face-off / pro face-off), a renderer from GH2's own shaders, the
+  milo loader, the original highway and HUD, particles, the front end
+  through gd-game-01's interpreter, saves, all 8 venues with the camera
+  director, lighting, post effects and crowd, the band (characters,
+  skinning, faces, walks, character / guitar choice), career with encores
+  and the store, sound effects as the 360 plays them, `.wmv` videos (LGPL
+  FFmpeg).
+- **The port's own**: Enhanced Options (first settings), GAMEPADS, mouse,
+  cheats, The Glitches; Linux, Steam Deck, Windows, macOS and Android
+  builds.
+- Full detail: "Done (history)" below and `gd-game-02/CHANGELOG.md`.
+
+
+### Still to do
+
+| ID | Class | Status | Item | Notes | From |
+|---|---|---|---|---|---|
+| GD02-067 | Original | 🟡 in progress (wave B) | 1. Song start as in the original: the venue loads, a moment passes, then the fretboard appears, then the music starts (research and match exactly). The sound of the notes popping in at the start is missing |  | Wave B 10-28 |
+| GD02-068 | Bugfix | 🟡 in progress (wave B) | 2. Naming a band: the name must grow left to right; the letters pile on top of each other |  | Wave B 10-28 |
+| GD02-069 | Bugfix | 🟡 in progress (wave B) | 3. Options menu: "Credits" is a couple of pixels off; move it slightly up |  | Wave B 10-28 |
+| GD02-070 | Bugfix | 🟡 in progress (wave B) | 4. Sustain trails look translucent / transparent |  | Wave B 10-28 |
+| GD02-071 | Bugfix | 🟡 in progress (wave B) | 5. A wrong note does not play the sound it should |  | Wave B 10-28 |
+| GD02-072 | Original | 🟡 in progress (wave B) | 6. Crowd: start the work to match the original 100% | See the M9 crowd row (GD02 Milestones) and docs/venues.md "Crowd" | Wave B 10-28 |
+| GD02-073 | Bugfix | 🟡 in progress (wave B) | 7. Menu sounds absent at times (e.g. the main menu) until a restart: something turns them off and never back on |  | Wave B 10-28 |
+| GD02-074 | Bugfix | 🟡 in progress (wave B) | 8. The Enhanced menu sometimes shows no character: the band must be there (gd-game-01's Enhanced menu pose as the model) |  | Wave B 10-28 |
+| GD02-075 | Original | 🟡 in progress (wave B) | 9. Buttons animate slightly when the screen changes: check whether the original does, and match it |  | Wave B 10-28 |
+| GD02-076 | Bugfix | 🟡 in progress (wave B) | 10. The strum icon is broken in half in every menu (gd-game-01 too) |  | Wave B 10-28 |
+| GD02-077 | Bugfix | 🟡 in progress (wave B) | 11. Career: after choosing the band, the difficulty screen is darker than it should be; Back makes it normal for some seconds |  | Wave B 10-28 |
+| GD02-078 | Bugfix | 🟡 in progress (wave B) | 12. Character select: the door starts open (not the original's behaviour) |  | Wave B 10-28 |
+| GD02-079 | Bugfix | 🟡 in progress (wave B) | 13. Character select: locked characters show although not unlocked (and are not selectable) |  | Wave B 10-28 |
+| GD02-080 | Bugfix | 🟡 in progress (wave B) | 14. The front of some instruments' necks is still transparent (e.g. Gibson Flying V) |  | Wave B 10-28 |
+| GD02-081 | Bugfix | 🟡 in progress (wave B) | 15. Career "play live show" screen too dark; the darkness shows on almost every career screen depending on the path | Probably the same cause as #11 | Wave B 10-28 |
+| GD02-082 | Bugfix | 🟡 in progress (wave B) | 16. Song list: the font looks wrong (check the original's); "Beat X/5 songs to continue" is drawn over other songs' labels |  | Wave B 10-28 |
+| GD02-083 | Bugfix | 🟡 in progress (wave B) | 17. Career crash: Strutter on Medium |  | Wave B 10-28 |
+| GD02-034 | Original | ❌ | Research: Practice audio: confirm the pitch drops when slowed (voice class of the song stream) | FINDINGS open question 1 | Milestones M2 |
+| GD02-036 | Original | ❌ | Research: Watcher bass-cue path (OnHit / OnMiss ask `+0x10` vtable `+0x28` by tick, then `bass_%d.cue`): which object and chart data | FINDINGS open question 9 | Milestones M2 |
+| GD02-037 | Original | ❌ | Research: Lefty Flip, input sampling rate, controller latency (`watcher +0x2c`) on the 360 | L3: where rules depend on sampling | Milestones M2 |
+| GD02-038 | Original | ❌ | Modes: Practice track surface (rosewood) and practice UI pieces | Two-player rules: see below | Milestones M10 |
+| GD02-039 | Enhancement | ❌ | UI: Touch lanes for the new renderer | Input API ready | Milestones M7 |
+| GD02-041 | Original | 🟡 | UI: Main menu words stacked tightly: matches BandButton's fit code (re-checked in bug-fix 3: rows 14 units apart, `fit_text` 1 into 9 units against size 30 × leading 0.7, 0x8214C7B0 / 0x821CFF08), compare with a capture of the original | Q1; `docs/ui_and_frontend.md` "Not done" | Milestones M7 |
+| GD02-042 | Enhancement | ❌ | UI: Enhanced Options not built yet: Steam Deck settings, touch, Rock Band guitars, XInput, calibration, sharper text, anti-aliasing, AI upscaling, bokeh, particles, bloom, cinematic colour, colour grading, film grain, chromatic aberration, light streaks, ambient occlusion, sharpening, Star Power blur, band shadows, more lights, ground fog, shaky camera, user files export / load, cut content, no fail, autoplay, forgiving HOPOs | Listed greyed in Enhanced Options (gd01's list); L20 | Milestones M7 |
+| GD02-043 | Original | ❌ | Cheats: Flaming Head: the code works (its message, `$cheat_enabled_flaming_head`) but the band's particle systems (`cheat_headflames start`, hand flames) are STUBs, so nothing burns | Listed "not available yet" in Enhanced Options | Milestones M9 |
+| GD02-045 | Original | ❌ | Cheats: `quick_cheats` (`config/cheats.dta`, the debug keyboard's `set_key_cheats_enabled`): not wired (development cheats, not the players') |  | Milestones M7 |
+| GD02-046 | Original | ❌ | UI: Endgame receipt lighting (`turn_off_ambient`), live volume sliders, help bar boxes, progress export / import | `docs/ui_and_frontend.md` "Not done" | Milestones M7 |
+| GD02-049 | Original | ❌ | Venues: GH2's beam shader; free camera | `docs/venues.md` open items; band-targeted shots wait for M9 | Milestones M8 |
+| GD02-050 | Original | 🟡 | Band: Characters, outfits, LODs, skinning, clips (CharDriver), the pose (servo, IK, twists, hair, look-ats), MidiParser (hands, fret position 40–59, `BAND *` tracks), GuitarCharacter, the band on stage, drum kit hits, director hooks | Phase 1 done: `docs/band.md`, `--chartest`, `--view char/<c>`; the shadow pass, hair collision open | Milestones M9 |
+| GD02-051 | Original | 🟡 | Band: Walks and interacts (M9.6): CharWalk planner and steering, the GuitarCharacter timeline (walks, holds, Star Power, interacts), the walk schedule to solo / win spots, walk_delays / interact_probs by excitement, regulate / regulate_override, lose_teleport, waypoint natives | `docs/band.md` "Walks"; open: the waypoint list's load order, CharWalk / lip servo PollDeps, the interact bone offset, arrivals 10–40 units off before the servo regulates | Milestones M9 |
+| GD02-056 | Original | ❌ | Modes: Practice: sections, 100/85/65/50 % (resampled, no pitch correction), click track |  | Milestones M10 |
+| GD02-058 | Original | ❌ | Polish: Tutorials (9 charts, narration in 5 languages) |  | Milestones M11 |
+| GD02-059 | Enhancement | 🟡 | Polish: Enhanced Settings (L20): the rest of the list, per-build defaults, Steam Deck pass, first release `gd-game-02/v1.0.0` | Enhanced Options screen and four settings done (bug-fix 3) | Milestones M11 |
+| GD02-060 | Bugfix | 🟡 | Windows: "Salvation does not start in quick play": not reproduced (Linux, Wine/Proton with the Windows build: `--song`, the quick play walk and real-time menus; all 83 songs start). Needs the owner's `gd02.log` (save folder) | The log now records a crash's address | Bug-fix 4 open |
+| GD02-061 | Bugfix | 🟡 | Camera: "Goes under the venue" (mostly Windows): not reproduced; the frame-rate dependence is fixed and checked per venue | Screenshots or the shot name (`GD02_WORLDLOG=1`) would pin it | Bug-fix 4 open |
+| GD02-062 | Bugfix | 🟡 | macOS: ~20 fps on an M4 Pro: to measure with `GD02_PERF=1` (and `GD02_GL_STREAM=subdata` against the default `map`) | `docs/renderer.md` "Performance" | Bug-fix 4 open |
+| GD02-064 | Original | Decide later (user) | Reference captures from the original: Xenia or a real Xbox 360 |  | Owner questions Q1 |
+| GD02-066 | Original | ❌ | Achievements, leaderboards and the DLC sample package (`xboxlive/gh2xp0001`) |  | Owner questions Q3 |
+
+
+### Done (history)
+
+| ID | Class | Status | Item | Notes | From |
+|---|---|---|---|---|---|
+| GD02-001 | Original | ✅ | Research: Disc: Xbox 360 XGD2 image read and extracted | `tools/xdvdfs.py`; game partition at 0xFD90000 | Done table |
+| GD02-002 | Original | ✅ | Research: Archive: `gen/main.hdr` (Park-Miller XOR, version 3) + `main_0.ark`, 7,912 files | `tools/ark.py`; extraction keeps paths inside the output folder | Done table |
+| GD02-003 | Original | ✅ | Research: Scripts: all 177 `.dtb` decode (GH1's format once decrypted) | `tools/dtb.py`; `docs/dtb_format.md` | Done table |
+| GD02-004 | Original | ✅ | Research: Song list: 91 entries (48 career, 26 bonus, 9 tutorial, 8 test) | `docs/songs.md` | Done table |
+| GD02-005 | Original | ✅ | Research: Song audio: `.mogg` v10 = plain Ogg Vorbis, channel maps | `tools/mogg.py`; `docs/audio_and_charts.md` | Done table |
+| GD02-006 | Original | ✅ | Research: Charts: GH1 note layout + PART BASS / RHYTHM / GUITAR COOP, EVENTS, TRIGGERS | `tools/midi_chart.py` | Done table |
+| GD02-007 | Original | ✅ | Research: Scenes: all 503 `.milo_xbox` (directory v25, deflate blocks, inline sub-dirs) | `tools/milo.py`; `docs/milo_and_textures.md` | Done table |
+| GD02-008 | Original | ✅ | Research: Textures: all 3,533 (DXT1 / DXT5 / BC5, 16-bit swap, no tiling) | `tools/tex.py` | Done table |
+| GD02-009 | Original | ✅ | Research: Executable in Ghidra: XEXLoaderWV plugin | REA cannot open XEX (no PowerPC); project in `ghidra/`, export in `ghidra/analysis/` (both git-ignored) | Done table |
+| GD02-010 | Original | ✅ | Research (R1): Complete export: functions rebuilt from `.pdata` (save/restore helpers inlined and returning), 35,365 `lis`/lo references, 28,394 functions, 5,732 strings with their users, `refs.tsv` | `tools/ghidra_scripts/` (FixXexFunctions, ExportAnalysisXex, README); VMX128 opcodes stay undecoded (a Ghidra PowerPC gap) | Done table |
+| GD02-011 | Original | ✅ | Research: Gameplay rules from the code: watcher, HOPO, scoring, Star Power, rock meter, practice, two-player modes | `docs/FINDINGS.md` | Done table |
+| GD02-012 | Original | ✅ | Research: What gd-game-01 gives gd02, and its lessons | `docs/reuse_and_lessons.md` | Done table |
+| GD02-013 | Original | ✅ | Engine (M1/M3/M4): gd02 skeleton: disc image or folder, ARK, DTB, song list, charts for every part, `.mogg` via stb_vorbis, mixer with guitar mute | `engine/`; version 0.1.0 | Done table |
+| GD02-014 | Original | ✅ | Engine (M4): Debug highway, keyboard input, `--selftest` on every part and difficulty ("all charts fully hit"), `GD02_SCREENSHOT` |  | Done table |
+| GD02-015 | Original | ✅ | Gameplay (G1): GH2's rules from `FINDINGS.md` replace the GH1 placeholders: chart parser, guitar / joypad watcher, scoring, Star Power, rock meter (constants from `scoring.dta` / `beatmatcher.dta` / `songs.dta`); focused PASS / FAIL rule checks in `--selftest`; `GD02_KEYS` scripted input | Single player; co-op, face-off normalisation and practice are TODOs in `game/player.h` | Done table |
+| GD02-016 | Enhancement | ✅ | M0: Icon (the GD Engine badge), first screen that picks the disc image (dialog, drop, `.iso` next to the program, remembered) | `tools/make_icons.py`, `platform/app_icon`, `platform/disc_picker` | Done table |
+| GD02-017 | Enhancement | ✅ | M0: `local_build.sh` + `build_commands/`; Linux, Steam Deck, Windows, macOS, Android builds; `package.sh`; Android `io.github.mbracali.gd02` with its own release key | Linux, Steam Deck, Windows, Android built here; macOS untested (no Mac); Windows not run, APK not run on a device | Done table |
+| GD02-018 | Enhancement | ✅ | M0: Workflows `gd-game-02-{build,release}.yml` (tags `gd-game-02/v*`, `ANDROID_GD02_*` secrets), CHANGELOG | Not run yet (branch local) | Done table |
+| GD02-019 | Original | ✅ | M4: Input: gd01's layer (bindings, Type, report, touch, dedupe, settle, Steam virtual pads) with GH2's controller types (`hx_guitar_xbox_new`, `joypad_guitar`, lefty, PS2 guitar) | 22 input checks in `--selftest`; `GD02_VIRTUAL_PAD` | Done table |
+| GD02-020 | Original | ✅ | M4/M5: New renderer from GH2's own: GL 3.3 / GLES 3 device (Vulkan-ready interface), GH2's shader keys, Mat rules, lighting, fence pacing, `--shadertest` (546 programs) | `docs/renderer.md` | Done table |
+| GD02-021 | Original | ✅ | M5: C++ `.milo_xbox` loader: every typed object of all 503 milos decodes (`--scenetest`); `--view <milo>` | `docs/milo_and_textures.md` | Done table |
+| GD02-022 | Original | ✅ | M6: GH2's original highway from `track_new` (surface, gems, HOPO / star / bonus, built tails, smashers, flames, beat lines, Star Power) and the `hud_sp` HUD (score, multiplier, streak, star meter, rock meter, messages) | `docs/highway_and_hud.md`; `GD02_DEBUG_HIGHWAY=1` for the old one | Done table |
+| GD02-023 | Original | ✅ | M6: Particles (generic, `render/particles`), sparks, tail and star-meter particles, intro sequence, win explode + "You Rock!", fail wind-down, Lefty, two-player tracks and the vs / co-op / practice HUDs (dev flag `GD02_MODE`) | `docs/highway_and_hud.md`; the 360's peak flames draw nothing in the original | Done table |
+| GD02-024 | Original | ✅ | M7: gd01's interpreter on GH2's 177 `.dtb` (`#merge`, `new`, `handle`, task units, L1 logging); `--scripttest` | `docs/ui_and_frontend.md` | Done table |
+| GD02-025 | Original | ✅ | M7: UI object decoders, text chains, styles; GH2's front end: boot, title / attract, main, Quick play, difficulty, loading, game, results, high scores, pause, lose, options, credits, bonus videos | `--uitest`, `--walktest`; debug song list behind `GD02_DEBUG_MENU=1` | Done table |
+| GD02-026 | Original | ✅ | M7: Save (`career.json`, GH2's version 17 data, atomic + `.bak`, every setter marks it dirty: L12); GAMEPADS screen |  | Done table |
+| GD02-027 | Original | ✅ | M8: All 8 venues (sp / _mp / _coop chains, proxies): decoders for every world class, world clock, anims, EventTriggers, WorldDir scripts as `world`; `--venuetest`, `--venue` / `GD02_VENUE` | `docs/venues.md` | Done table |
+| GD02-028 | Original | ✅ | M8: Camera director (CamShot playback, pick_shot, script schedule), lighting preset manager, spotlights / floor spots / flares, bloom + DOF post, crowd (fullness, crowd3d, instanced), crowd audio loops, encore fx and venue extras | Golden director log in `--venuetest` | Done table |
+| GD02-029 | Original | ✅ | M7: Controls and menus bug-fix wave: frets as kPad buttons for every controller (gd01's `uiButton`; no more joypad A = select + L1), Back pauses in a song, Esc ×3 quits, splashes / videos skip like gd01, key repeat reset in transitions; the shared metacam (camera off-centre after going back); the GAMEPADS help icon | `docs/ui_and_frontend.md` "Controls in the menus", "Metacam"; `--walktest back`; `GD02_KEYS` `k` / `j` items | Done table |
+| GD02-030 | Original | ✅ | M7 / Q2: `.wmv` videos: minimal LGPL FFmpeg 7.1.5 (ASF, WMV3, WMA v2), shared libraries + licence notice in every download | `--playmovie` | Done table |
+| GD02-031 | Bugfix | ✅ | Bug-fix 3: Options: GH2's six entries in GH2's order plus the port's Enhanced Options after Video Settings (the column re-spaced, a little smaller); no GAMEPADS in Options or on the main menu's help bar; Audio Settings shows its help bar (the panel's FOCUS_MSG on enter) and its poster's top. Enhanced Options: gd01's list in GH2's font over a live shot of the second venue (small1) with the band; Screen Mode, In-Game Max FPS, Show FPS Counter, Internal Resolution (448p (ps2), 720p (x360)...) work and are saved in `enhanced.json`; Gamepads opens the GAMEPADS screen; the rest is listed "not available yet". The Glitches in every save. GH2's long cheats (button codes at the main menu, CheatsManager 0x8235B5B0) and the CHEATS section with GH2's names | `docs/ui_and_frontend.md` "Enhanced Options", "Cheats", "Save"; `--walktest enhanced`, `--walktest cheats`, The Glitches check in `--walktest quickplay` / `career` | Done table |
+| GD02-032 | Bugfix | ✅ | Bug-fix 2: Note hits checked against GH2's watcher (anchoring on single notes and HOPOs allowed, chords exact, sustain release rules: unchanged and right); exact details fixed: +0x94 set on hits, swingAtHopo on a fixed HOPO-able strum, overstrum ends the sustain before the 50 ms gap, missed-gem pick. Faces: kTaskSeconds now follows the song with the menus (the lip sync / expressions ran on the menus' clock and the singer stopped posing) | `docs/FINDINGS.md` "Fret matching", `docs/facefx.md`; new rule checks in `--selftest`, task-clock check in `--walktest quickplay`, `GD02_FACE_CAM` | Done table |
+| GD02-033 | Bugfix | ✅ | Bug-fix 4: Owner's 2026-10-28 list. Camera: the director's filter and shake ran once a frame instead of once a 1/60 s (2.4x at 144 Hz, 4x uncapped) and the shake drew from the shot picks' RNG, so the frame rate changed the shots; now GH2's 60 Hz steps at any rate (`--venuetest` camera rate check, 60 vs 240 fps, every venue). Band: a lower LOD (band_POV's `set_min_lod 1`, distance) drew nothing (the world pose's saved `lod1.grp` flag won over the LOD switch); outfits' LOD / shadow groups merged by object as 0x82158F30 (same-named groups were missed; the guitar's `shadow_guitar.mesh` drew, black and depth-writing, over the neck); `--chartest` draw-list check per LOD. Menus: GH2's `RndAnimFilter` reversed ranges (metacam's backward groups now play backwards: going back no longer replays the forward entrance), `ui_enter_back` / `_forward` events, shared subdirectories (meta_bricks' light) posed in every view (`--walktest back` bricks check). Shutdown: a null outfit slot (Band destructor). Windows: `gd02.log` + crash address in the save folder; Salvation and every song start on Linux and under Wine (not reproduced). macOS: unsynchronized buffer streaming, `GD02_PERF=1` | `docs/venues.md`, `docs/band.md`, `docs/ui_and_frontend.md`, `docs/renderer.md` | Done table |
+| GD02-035 | Original | ✅ | Research: Co-op fail (player or band meter), face-off note assignment, `min_length`, co-op star thresholds, timing class | M10.2: FINDINGS open questions 2–5, 7, 8 answered; `docs/multiplayer.md` | Milestones M2 |
+| GD02-040 | Enhancement | ✅ | UI: gd01's mouse in the menus (hover focuses, click selects, wheel) | `PanelObj::mouse` on the views' projected hits; help bar, GAMEPADS and Enhanced Options too (docs/ui_and_frontend.md) | Milestones M7 |
+| GD02-044 | Original | — | Cheats: Horse Head: GH2 has its name (`cheat_horse_head_mode`) but no code in `long_cheats.dta` (cut from the game) | Not listed | Milestones M9 |
+| GD02-047 | Original | ✅ | Audio: Sound effects: SynthSample v5 / SampleData v11 = plain XMA2 (FFmpeg xma2), Sfx and sequences, the UI's and the venues' cues, menu background sfx | `docs/audio_and_charts.md` section 4; `--sfxtest` | Milestones M7 / M8 |
+| GD02-048 | Original | ✅ | Audio: Sound effect voices as the 360 plays them: envelope (attack / release), 5.1 pan + stereo fold, FxSendReverb sends with XAudio's reverb (bit-exact port), master limiter, `set_master_vol` / `toggle_limiter`, fx volume per GH2's callers, RandomGroupSeq rule (the PS2 fx cores do nothing on the 360) | `docs/audio_and_charts.md` section 4; `--sfxtest` | Milestones M7 / M8 |
+| GD02-052 | Original | ✅ | Band: Faces (M9.8): FaceFX lip servo on the band (blink track, expressions, the singer's `.voc`, eye entries, viseme poses) | `docs/facefx.md`, `--chartest` faces | Milestones M9 |
+| GD02-053 | Original | ✅ | Band: Crowd (M9.9): one Character per archetype (the `<v>_chars` proxy) on the crowd clip sets, crowd.dta's mix per excitement, hands and lighters from the clips, the card textures rendered per frame (0x82247310) and drawn on the placements, the shot's 3D placements | `docs/venues.md` "Crowd", `--chartest` crowd golden; open: how GH2's card texture gets its alpha, the lighter flame's show / hide (`$cheat_crowd_heads` works: bug-fix 3) | Milestones M9 |
+| GD02-054 | Original | ✅ | Band: Character / guitar choice (M9.10): PlayerConfig look, character_provider, CharsysPanel (menu characters, the door), GuitarSelectPanel / GuitarDisplayPanel, the profile's look per difficulty in `career.json`, the band from the configs; endgame photos (`photo_<outfit><0..3>`) | `docs/band.md` "Characters, guitars and photos", `--walktest career`; GH2's unlock table: M10.1; the multiplayer screens: M10.2 | Milestones M9 |
+| GD02-055 | Original | ✅ | Modes: Co-op (band performer: streak, score, the band's meter that fails the song, shared Star Power both must engage), face-off (section ownership, active_players_changed), pro face-off; normalisation; the multiplayer menus, two-player HUDs, results and the band on stage | M10.2: `docs/multiplayer.md`, `--selftest` two-player rule checks, `--walktest coop | Milestones M10 |
+| GD02-057 | Original | ✅ | Modes: Career with encores, store (26 bonus songs at 550), unlocks | M10.1: `docs/career_and_store.md`, `--walktest career_full`, uitest's campaign checks; co-op's records and bass unlocks: M10.2; open: win_game_screen and unlock_guitar_screen not walked, the stone ending's stream | Milestones M10 |
+| GD02-063 | Bugfix | — | Band: sheraton lists `shadow_guitar.mesh` in its own LOD groups (drawn as GH2's data says) |  | Bug-fix 4 open |
+| GD02-065 | Original | ✅ minimal LGPL FFmpeg | `.wmv` video decoder (intro, logos) |  | Owner questions Q2 |
+
+
+## gd-game-03: Guitar Hero Encore: Rocks the 80s (PlayStation 2)
+
+| ID | Class | Status | Item | Notes | From |
+|---|---|---|---|---|---|
+| GD03-001 | Original | ❌ | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-03/agent-instructions.md`, [docs/adding-a-game.md](docs/adding-a-game.md) | New 10-28 |
+
+
+## gd-game-04: Guitar Hero III: Legends of Rock (Xbox 360)
+
+| ID | Class | Status | Item | Notes | From |
+|---|---|---|---|---|---|
+| GD04-001 | Original | ❌ | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-04/agent-instructions.md`, [docs/adding-a-game.md](docs/adding-a-game.md) | New 10-28 |
+
+
+## gd-game-05: Rock Band (Xbox 360)
+
+| ID | Class | Status | Item | Notes | From |
+|---|---|---|---|---|---|
+| GD05-001 | Original | ❌ | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-05/agent-instructions.md`, [docs/adding-a-game.md](docs/adding-a-game.md) | New 10-28 |
+
+
+## gd-game-06: Guitar Hero: Aerosmith (Xbox 360)
+
+| ID | Class | Status | Item | Notes | From |
+|---|---|---|---|---|---|
+| GD06-001 | Original | ❌ | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-06/agent-instructions.md`, [docs/adding-a-game.md](docs/adding-a-game.md) | New 10-28 |
+
+
+## gd-game-07: Guitar Hero World Tour (Xbox 360)
+
+| ID | Class | Status | Item | Notes | From |
+|---|---|---|---|---|---|
+| GD07-001 | Original | ❌ | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-07/agent-instructions.md`, [docs/adding-a-game.md](docs/adding-a-game.md) | New 10-28 |
+
+
+## gd-game-08: Rock Band 2 (Xbox 360)
+
+| ID | Class | Status | Item | Notes | From |
+|---|---|---|---|---|---|
+| GD08-001 | Original | ❌ | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-08/agent-instructions.md`, [docs/adding-a-game.md](docs/adding-a-game.md) | New 10-28 |
+
+
+## gd-game-09: The Beatles: Rock Band (Xbox 360)
+
+| ID | Class | Status | Item | Notes | From |
+|---|---|---|---|---|---|
+| GD09-001 | Original | ❌ | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-09/agent-instructions.md`, [docs/adding-a-game.md](docs/adding-a-game.md) | New 10-28 |
+
+
+## gd-game-10: Guitar Hero: Metallica (Xbox 360)
+
+| ID | Class | Status | Item | Notes | From |
+|---|---|---|---|---|---|
+| GD10-001 | Original | ❌ | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-10/agent-instructions.md`, [docs/adding-a-game.md](docs/adding-a-game.md) | New 10-28 |
+
+
+## gd-game-11: Guitar Hero: Smash Hits (Xbox 360)
+
+| ID | Class | Status | Item | Notes | From |
+|---|---|---|---|---|---|
+| GD11-001 | Original | ❌ | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-11/agent-instructions.md`, [docs/adding-a-game.md](docs/adding-a-game.md) | New 10-28 |
+
+
+## gd-game-12: Guitar Hero 5 (Xbox 360)
+
+| ID | Class | Status | Item | Notes | From |
+|---|---|---|---|---|---|
+| GD12-001 | Original | ❌ | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-12/agent-instructions.md`, [docs/adding-a-game.md](docs/adding-a-game.md) | New 10-28 |
+
+
+## gd-game-13: Lego Rock Band (Xbox 360)
+
+| ID | Class | Status | Item | Notes | From |
+|---|---|---|---|---|---|
+| GD13-001 | Original | ❌ | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-13/agent-instructions.md`, [docs/adding-a-game.md](docs/adding-a-game.md) | New 10-28 |
+
+
+## gd-game-14: Band Hero (Xbox 360)
+
+| ID | Class | Status | Item | Notes | From |
+|---|---|---|---|---|---|
+| GD14-001 | Original | ❌ | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-14/agent-instructions.md`, [docs/adding-a-game.md](docs/adding-a-game.md) | New 10-28 |
+
+
+## gd-game-15: Guitar Hero: Van Halen (Xbox 360)
+
+| ID | Class | Status | Item | Notes | From |
+|---|---|---|---|---|---|
+| GD15-001 | Original | ❌ | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-15/agent-instructions.md`, [docs/adding-a-game.md](docs/adding-a-game.md) | New 10-28 |
+
+
+## gd-game-16: Green Day: Rock Band (Xbox 360)
+
+| ID | Class | Status | Item | Notes | From |
+|---|---|---|---|---|---|
+| GD16-001 | Original | ❌ | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-16/agent-instructions.md`, [docs/adding-a-game.md](docs/adding-a-game.md) | New 10-28 |
+
+
+## gd-game-17: Guitar Hero: Warriors of Rock (Xbox 360)
+
+| ID | Class | Status | Item | Notes | From |
+|---|---|---|---|---|---|
+| GD17-001 | Original | ❌ | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-17/agent-instructions.md`, [docs/adding-a-game.md](docs/adding-a-game.md) | New 10-28 |
+
+
+## gd-game-18: Rock Band 3 (Xbox 360)
+
+| ID | Class | Status | Item | Notes | From |
+|---|---|---|---|---|---|
+| GD18-001 | Original | ❌ | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-18/agent-instructions.md`, [docs/adding-a-game.md](docs/adding-a-game.md) | New 10-28 |
+
+
+## gd-game-19: Rock Band 4 (Xbox One)
+
+| ID | Class | Status | Item | Notes | From |
+|---|---|---|---|---|---|
+| GD19-001 | Original | ❌ | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-19/agent-instructions.md`, [docs/adding-a-game.md](docs/adding-a-game.md) | New 10-28 |

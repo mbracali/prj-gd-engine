@@ -38,7 +38,7 @@ Run from `gd-game-02/engine`.
   - `FINDINGS.md` (gameplay rules)
   - `renderer.md`, `milo_and_textures.md`, `highway_and_hud.md`
   - `ui_and_frontend.md`, `venues.md`, `audio_and_charts.md` (section 4 is the sound effects)
-  - `facefx.md`, `backlog.md`, `reuse_and_lessons.md`
+  - `facefx.md`, `reuse_and_lessons.md` (the backlog is `gd-backlog.md` at the repository root)
 - M9 plan and reference parsers, in `agents/scratch/` (git-ignored, local only):
   - `M9_PLAN.md`: class table, addresses, and steps M9.0–M9.10.
   - `M9_runtime_notes.md`
@@ -73,7 +73,7 @@ Run from `gd-game-02/engine`.
 - **M9.9** GH2's crowd cards: render-to-texture cards plus 3D near the camera, and crowd clips. The owner chose to match the original here.
 - **M9.10** character, guitar and skin choice (the profile field is not traced yet); endgame photos from `ui/image/og/photo_<char><0..3>_keep.bmp`.
 - Then:
-  - Update `docs/band.md` (new), `backlog.md` and `CHANGELOG.md`.
+  - Update `docs/band.md` (new), `gd-backlog.md` (root) and `CHANGELOG.md`.
   - M10: modes (co-op, face-off, practice, career and encores, store).
   - M11: polish and the first release.
 - Other open items:
