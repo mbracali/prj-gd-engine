@@ -138,6 +138,14 @@ bool Launcher::init() {
     if (catalog_.translocated())
         log_.add("macOS runs the app from a translocated copy: " + catalog_.runningApp() +
                  (catalog_.originalApp().empty() ? std::string(" (its real place is unknown)") : " (its real place: " + catalog_.originalApp() + ")"));
+    // A playable game whose module the build has but the files do not: an
+    // incomplete download, said at once (and logged), not only on Play.
+    for (const Game& g : catalog_.games())
+        if (g.moduleMissing) {
+            SDL_Log("gdul: %s", noModuleText(g).c_str());
+            log_.add("incomplete download: " + g.id + "'s module is missing (" + g.modulePath + ")");
+            missingModules_ += (missingModules_.empty() ? "" : ", ") + g.id;
+        }
     // macOS, an app still where the download put it, and no disc found: say why and what to do.
     startupNotice_ = catalog_.translocated() && catalog_.discsFound() == 0;
     sounds_.setLogging(SDL_getenv("GDUL_SCRIPT") != nullptr || SDL_getenv("GDUL_SOUND_LOG") != nullptr);
@@ -252,6 +260,15 @@ void Launcher::frame() {
     if (!running_) return;
     // The menu sounds, once the window shows (they take a moment to read).
     if (!soundsTried_ && ++framesDrawn_ > 2) loadSounds();
+    if (!missingModules_.empty() && framesDrawn_ > 2) {
+        showDialog("This download is incomplete",
+                   "The module of " + missingModules_ + " is missing from this download, so " +
+                       (missingModules_.find(',') == std::string::npos ? "that game" : "those games") +
+                       " cannot start. Please download the launcher again from guitardreamengine.com.",
+                   {{"OK", Fret::Green, nullptr}});
+        missingModules_.clear();
+        startupNotice_ = false;  // one dialog at a time
+    }
     if (startupNotice_ && framesDrawn_ > 2) {
         startupNotice_ = false;
         showDiscFolders("Where are your discs?");
@@ -528,7 +545,7 @@ void Launcher::activate(int row, int col) {
     case kPlay:
         if (g.playable()) play(g);
         else if (!g.ready) sounds_.play(UiSound::Error), toast(g.title() + " is not playable yet. Coming soon!");
-        else if (!g.hasModule) sounds_.play(UiSound::Error), toast("This launcher build has no " + g.id + " module.");
+        else if (!g.hasModule) sounds_.play(UiSound::Error), toast(noModuleText(g));
         else sounds_.play(UiSound::Error), toast("Load a " + g.title() + " disc image first (Load ISO).");
         break;
     case kLoad:
@@ -539,7 +556,7 @@ void Launcher::activate(int row, int col) {
         if (g.iso.empty()) sounds_.play(UiSound::Error), toast("Load a " + g.title() + " disc image to explore its models.");
         else if (!g.hasModule)
             sounds_.play(UiSound::Error),
-                toast(g.ready ? "This launcher build has no " + g.id + " module." : g.title() + " is not playable yet. Coming soon!");
+                toast(g.ready ? noModuleText(g) : g.title() + " is not playable yet. Coming soon!");
         else sounds_.play(UiSound::Select), exploreOpen(g);
         break;
     default: break;
@@ -666,7 +683,7 @@ void Launcher::handleDisc(const std::string& path, const std::string& wantedId) 
                            }});
     } else {
         body += " Save it as the disc of " + id + "?";
-        body += g->ready ? " (This launcher build has no " + id + " module.)" : " (It is not playable yet; the launcher will remember it.)";
+        body += g->ready ? " (" + noModuleText(*g) + ")" : " (It is not playable yet; the launcher will remember it.)";
         buttons.push_back({"Save", Fret::Green, [this, save, id] {
                                save();
                                toast("Disc saved for " + id + ".");
@@ -766,6 +783,11 @@ void Launcher::showDialog(const std::string& title, const std::string& body, std
     dialog_.buttons = std::move(buttons);
     dialog_.focus = 0;
     dialog_.open = true;
+}
+
+std::string Launcher::noModuleText(const Game& g) {
+    if (g.moduleMissing) return "This download is incomplete: " + g.id + "'s module is missing. Please download the launcher again.";
+    return "This launcher build has no " + g.id + " module.";
 }
 
 void Launcher::toast(const std::string& t) {

@@ -57,6 +57,7 @@ struct InputEvent {
     int player = 0;        // the player slot of the device
     bool analog = false;   // Whammy from an analog bar (the value is whammyValue()), not a key or button
     bool joypad = false;   // from a joypad's layout (frets on the triggers, shoulders and A), not a guitar or the keyboard
+    bool enterKey = false; // Confirm from the keyboard's Enter (Return or the keypad's): Start on a text entry
 };
 
 inline int fretOf(Action a) { return static_cast<int>(a) - static_cast<int>(Action::Fret0); }
