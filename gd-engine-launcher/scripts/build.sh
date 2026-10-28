@@ -33,6 +33,7 @@
 # The launcher itself is always (re)compiled; CMake/Ninja skip what is up to
 # date. Logs: gd-engine-launcher/logs/ (build-<os>.log and one log per step).
 set -euo pipefail
+shopt -s inherit_errexit  # `set -e` inside $(...) too
 here="$(cd "$(dirname "$0")" && pwd)"
 launcher="$(cd "$here/.." && pwd)"
 repo="$(cd "$launcher/.." && pwd)"
@@ -74,16 +75,23 @@ version="$(yaml_value "$launcher/launcher-info.yaml" launcher_version)"
 mapfile -t game_infos < <(sed -n 's/^[[:space:]]*-[[:space:]]*\([^#[:space:]]*game-info\.yaml\).*/\1/p' "$launcher/games.yaml")
 
 # step <log name> <description> <command...>: runs a step, its output in logs/<log name>.log.
+# The step runs in a fresh bash (-euo pipefail) with this script's functions
+# and settings: bash ignores `set -e` in a function called in a condition
+# (`step ... || return 1`, `if step`) and in everything that function runs,
+# subshells and background jobs included, so a step run here could fail half
+# way and still "succeed" with the status of its last command (gdul 0.1.1
+# shipped a Windows download without gd02's module that way).
 step() {
   local name="$1" what="$2"; shift 2
   say "$what (log: gd-engine-launcher/logs/$name.log)"
-  # In the background so that `set -e` holds inside the step (it is ignored
-  # in a condition), then waited for.
-  local rc=0
-  "$@" > "$logs/$name.log" 2>&1 &
-  wait $! || rc=$?
+  local rc=0 env="$logs/.$name.env"
+  { declare -f; declare -p repo launcher here host logs out_root version force previous B G Y R C N; } > "$env"
+  bash -c 'set -euo pipefail; shopt -s inherit_errexit; . "$1"; shift; "$@"' step "$env" "$@" > "$logs/$name.log" 2>&1 || rc=$?
+  rm -f "$env"
   if [ "$rc" != 0 ]; then
-    grep -E 'error|Error|FAILED' "$logs/$name.log" | head -30 || tail -30 "$logs/$name.log"
+    grep -E 'error|Error|FAILED' "$logs/$name.log" | head -30 || true
+    echo "   ... the end of logs/$name.log:"
+    tail -15 "$logs/$name.log"
     say "${R}FAILED: $what${N}"
     return 1
   fi
@@ -132,9 +140,11 @@ android_env() {
     if [ ! -f "$SDL3_SRC/CMakeLists.txt" ]; then
       say "Downloading the SDL3 $SDL3_VERSION source (first time only)..."
       mkdir -p "$launcher/build/android"
+      # (Explicit checks: android_env runs in a condition, without `set -e`.)
       curl -fsSL "https://github.com/libsdl-org/SDL/releases/download/release-$SDL3_VERSION/SDL3-$SDL3_VERSION.tar.gz" |
-        tar xz -C "$launcher/build/android"
+        tar xz -C "$launcher/build/android" || { say "${R}SDL3 $SDL3_VERSION: download FAILED${N}"; return 1; }
     fi
+    [ -f "$SDL3_SRC/CMakeLists.txt" ] || { say "${R}SDL3 $SDL3_VERSION: no source in $SDL3_SRC${N}"; return 1; }
   fi
   export ANDROID_NDK NDK_HOST SDL3_SRC
 }
@@ -485,6 +495,8 @@ PY
     say "${G}Launcher: compiled, 0 warnings${N}"
     cp "$launcher/build/android/gradle/outputs/apk/release/app-release.apk" "$stage/$name.apk"
   fi
+  # Every playable game's module and its libraries really are in it.
+  "$here/verify_bundle.sh" "$stage" "$os"
   rm -rf "$out"
   mv "$stage" "$out"
   say "${G}Ready: gd-engine-launcher/local_builds/$name/${N}"

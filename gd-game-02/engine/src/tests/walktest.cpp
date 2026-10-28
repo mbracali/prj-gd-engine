@@ -64,6 +64,8 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
     auto press = [&](int b) { steps_.push_back({S::Press, "", b, 0}); };
     auto pressP = [&](int b, int player) { steps_.push_back({S::Press, "", b, 0, player}); };
     auto wait = [&](double ms) { steps_.push_back({S::Wait, "", 0, ms}); };
+    // A real key press, through SDL's events and the input layer (as GD02_KEYS' kReturn).
+    auto key = [&](SDL_Keycode k) { steps_.push_back({S::Key, "", int(k), 0}); };
     auto check = [&](const char* what, double timeout = 0) { steps_.push_back({S::Check, what, 0, timeout}); };
     // Each screen: wait until it is up and its transition is over, then a moment.
     auto at = [&](const char* s, double timeout = 20000) {
@@ -173,8 +175,9 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         at("nameprof_screen");
         press(kX);  // the band's name: "A"
         wait(150);
-        press(kStart);
+        key(SDLK_RETURN);  // the keyboard's Enter is Start here: finishes the name (adds no letter)
         at("sel_difficulty_screen");
+        check("band_named_A");
         press(kX);  // Medium (the profile's last difficulty)
         at("sel_character_new_screen");
         wait(1500);  // the character opens the door
@@ -457,6 +460,18 @@ void WalkDriver::poll(ui::UiManager& ui, double nowMs) {
     case Step::Check:
         runCheck(ui, s, nowMs);
         return;
+    case Step::Key:
+        for (const bool down : {true, false}) {
+            SDL_Event e{};
+            e.type = down ? SDL_EVENT_KEY_DOWN : SDL_EVENT_KEY_UP;
+            e.key.timestamp = SDL_GetTicksNS();
+            e.key.key = SDL_Keycode(s.button);
+            e.key.scancode = SDL_GetScancodeFromKey(e.key.key, nullptr);
+            e.key.down = down;
+            SDL_PushEvent(&e);
+        }
+        ++step_, stepStart_ = -1;
+        return;
     case Step::Wait:
     case Step::Hold:
         if (nowMs - stepStart_ >= s.ms) ++step_, stepStart_ = -1;
@@ -599,6 +614,15 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         if (it->second.score <= 0) return fail("the co-op record has no score");
         // One song with three stars or more: guitars.dta's (require (songs 1) (stars 3)) bass.
         if (it->second.stars >= 3 && awards != " bass_sg_mahogany") return fail("co-op did not award bass_sg_mahogany (only)");
+        ++step_, stepStart_ = -1;
+        return;
+    }
+    if (s.screen == "band_named_A") {
+        const int slot = ui.session().profileSlot;
+        if (slot < 0) return fail("no band was created");
+        const std::string& name = ui.career().profiles[size_t(slot)].name;
+        std::printf("  career: new band \"%s\" (named with the keyboard's Enter)\n", name.c_str());
+        if (name != "A") return fail("the band's name is \"" + name + "\", not \"A\" (Enter on the name must be Start)");
         ++step_, stepStart_ = -1;
         return;
     }

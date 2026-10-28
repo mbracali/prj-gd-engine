@@ -143,6 +143,8 @@ private:
     bool soundsTried_ = false;
     int framesDrawn_ = 0;
     bool startupNotice_ = false;
+    std::string missingModules_;  // ready games whose module the download lacks (said at start)
+    static std::string noModuleText(const Game& g);
 
     std::vector<ScriptStep> script_;
     size_t scriptPos_ = 0;

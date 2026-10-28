@@ -25,6 +25,9 @@ struct Game {
 
     std::string modulePath;  // gd-engine-games/<id>/<id>.so|.dll
     bool hasModule = false;
+    // The build's gd-engine-games/manifest.json lists this game's module but
+    // the file is not there: an incomplete download.
+    bool moduleMissing = false;
 
     std::string iso;        // the disc image to play, or ""
     enum class IsoSource { None, Saved, Found } isoSource = IsoSource::None;

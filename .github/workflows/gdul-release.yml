@@ -141,6 +141,18 @@ jobs:
         run: |
           mkdir -p out
           tar -C gd-engine-launcher/local_builds -czf "out/gdul-$V-linux-x86_64.tar.gz" "gdul-$V-linux-x86_64"
+      - name: Verify the download (every ready game's module and libraries)
+        run: gd-engine-launcher/scripts/verify_bundle.sh "out/gdul-$V-linux-x86_64.tar.gz"
+      - name: Build logs (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: logs-linux
+          path: |
+            gd-engine-launcher/logs/
+            gd-game-02/engine/build/ffmpeg/**/ffmpeg-build.log
+          if-no-files-found: ignore
+          retention-days: 7
       - uses: actions/upload-artifact@v7
         with:
           name: release-linux
@@ -159,7 +171,9 @@ jobs:
     steps:
       - name: Install the MinGW toolchain
         run: |
-          dnf install -y --setopt=install_weak_deps=False git cmake ninja-build python3 mingw64-gcc-c++ mingw64-SDL3 \
+          # gcc: FFmpeg's configure needs a host C compiler even when it
+          # cross-compiles (without it gdul 0.1.1 shipped no gd02 module).
+          dnf install -y --setopt=install_weak_deps=False git cmake ninja-build python3 gcc mingw64-gcc-c++ mingw64-SDL3 \
             zip unzip make xz diffutils >/dev/null
       - uses: actions/checkout@v7
       - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
@@ -184,6 +198,18 @@ jobs:
         run: |
           mkdir -p out
           (cd gd-engine-launcher/local_builds && zip -qr "../../out/gdul-$V-windows-x86_64.zip" "gdul-$V-windows-x86_64")
+      - name: Verify the download (every ready game's module and libraries)
+        run: gd-engine-launcher/scripts/verify_bundle.sh "out/gdul-$V-windows-x86_64.zip"
+      - name: Build logs (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: logs-windows
+          path: |
+            gd-engine-launcher/logs/
+            gd-game-02/engine/build/ffmpeg/**/ffmpeg-build.log
+          if-no-files-found: ignore
+          retention-days: 7
       - uses: actions/upload-artifact@v7
         with:
           name: release-windows
@@ -223,6 +249,18 @@ jobs:
         run: |
           mkdir -p out
           ditto -c -k --keepParent "gd-engine-launcher/local_builds/gdul-$V-macos-arm64" "out/gdul-$V-macos-arm64.zip"
+      - name: Verify the download (every ready game's module and libraries)
+        run: gd-engine-launcher/scripts/verify_bundle.sh "out/gdul-$V-macos-arm64.zip"
+      - name: Build logs (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: logs-macos
+          path: |
+            gd-engine-launcher/logs/
+            gd-game-02/engine/build/ffmpeg/**/ffmpeg-build.log
+          if-no-files-found: ignore
+          retention-days: 7
       - uses: actions/upload-artifact@v7
         with:
           name: release-macos
@@ -292,6 +330,18 @@ jobs:
         run: |
           mkdir -p out
           cp "gd-engine-launcher/local_builds/gdul-$V-android-arm64/gdul-$V-android-arm64.apk" out/
+      - name: Verify the download (every ready game's module and libraries)
+        run: gd-engine-launcher/scripts/verify_bundle.sh "out/gdul-$V-android-arm64.apk"
+      - name: Build logs (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: logs-android
+          path: |
+            gd-engine-launcher/logs/
+            gd-game-02/engine/build/ffmpeg/**/ffmpeg-build.log
+          if-no-files-found: ignore
+          retention-days: 7
       - uses: actions/upload-artifact@v7
         with:
           name: release-android
