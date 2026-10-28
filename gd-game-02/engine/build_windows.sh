@@ -42,6 +42,7 @@ cp build/windows/gd02.exe "$sdl_dll" README.md ../../LICENSE ../../LICENSE-ADDIT
 cp third_party/stb_vorbis/LICENSE.txt "$d/licenses/stb_vorbis-LICENSE.txt"
 if [ "${GD02_VIDEO:-1}" != 0 ]; then
   cp "$ffmpeg"/bin/av*.dll "$d/"
+  ship_winpthread "$d" "$d/licenses"
   ship_ffmpeg_licence "$ffmpeg" "$d"
 fi
 say "Ready: $d"

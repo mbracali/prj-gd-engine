@@ -145,3 +145,24 @@ ship_ffmpeg_licence() {
     echo "next to it. FFmpeg is a trademark of Fabrice Bellard."
   } > "$d/licenses/FFmpeg-NOTICE.txt"
 }
+
+# MinGW's FFmpeg DLLs import libwinpthread-1.dll (avutil: the toolchain's
+# clock_gettime / nanosleep), so a Windows download carries it and its licence
+# next to them; without it Windows cannot load them (LoadLibrary error 126).
+# ship_winpthread <dest dir> <licences dir>
+ship_winpthread() {
+  local dll="" c lic
+  for c in "${MINGW_WINPTHREAD_DLL:-}" "${MINGW_PREFIX:-/ucrt64}/bin/libwinpthread-1.dll" \
+           /usr/x86_64-w64-mingw32/sys-root/mingw/bin/libwinpthread-1.dll; do
+    if [ -n "$c" ] && [ -s "$c" ]; then dll="$c"; break; fi
+  done
+  if [ -z "$dll" ]; then echo "libwinpthread-1.dll not found (set MINGW_WINPTHREAD_DLL)" >&2; return 1; fi
+  cp "$dll" "$1/" || return 1
+  for lic in "${MINGW_WINPTHREAD_LICENSE:-}" /usr/share/licenses/mingw64-winpthreads/COPYING \
+             "${MINGW_PREFIX:-/ucrt64}/share/licenses/winpthreads/COPYING" \
+             "${MINGW_PREFIX:-/ucrt64}/share/licenses/mingw-w64-libraries/COPYING"; do
+    if [ -n "$lic" ] && [ -s "$lic" ]; then cp "$lic" "$2/winpthreads-LICENSE.txt" || return 1; return 0; fi
+  done
+  echo "the winpthreads licence was not found (set MINGW_WINPTHREAD_LICENSE)" >&2
+  return 1
+}
