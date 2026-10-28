@@ -110,7 +110,11 @@ module_systems_02="linux windows macos android"
 # game's sources (the module SDK, modules/gdNN/); a module is reused only when
 # it is the same.
 module_inputs_hash() {
-  { find "$launcher/sdk" "$launcher/modules/gd$1" -type f 2>/dev/null || true; } | LC_ALL=C sort | while IFS= read -r f; do cat "$f"; done | sha256
+  # The packaging recipes too (this script, the game's build_common.sh): a
+  # module packaged by an older recipe is rebuilt, not reused (gdul 0.1.2's
+  # gd-game-02 folder, without libwinpthread-1.dll, must not come back).
+  { find "$launcher/sdk" "$launcher/modules/gd$1" "$launcher/scripts" "$repo/gd-game-$1/engine/build_common.sh" -type f 2>/dev/null || true; } |
+    LC_ALL=C sort | while IFS= read -r f; do cat "$f"; done | sha256
 }
 
 # ---- Android: the SDK, NDK and JDK (as gd-game-02/engine/build_android.sh), SDL3's source ----
@@ -218,7 +222,9 @@ build_module_02() {
   cmake --build "$work" --target gd02_module
   mkdir -p "$dest/licenses"
   case "$os" in
-    windows) cp "$work/gd-game-02.dll" "$ffmpeg"/bin/av*.dll "$dest/" ;;
+    windows)
+      cp "$work/gd-game-02.dll" "$ffmpeg"/bin/av*.dll "$dest/"
+      (. "$engine/build_common.sh"; ship_winpthread "$dest" "$dest/licenses") ;;
     linux)
       cp "$work/gd-game-02.so" "$dest/"
       for lib in avformat avcodec avutil; do

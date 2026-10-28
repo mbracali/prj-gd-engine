@@ -4,6 +4,12 @@ All notable changes for players. Versions follow SemVer; release tags are
 `gd-game-02/vX.Y.Z`. The release workflow publishes the section whose heading
 matches the tag's version. Nothing is released yet.
 
+## [0.1.4] - 2026-10-28
+
+### Fixed
+- Windows: Guitar Hero II starts again ("LoadLibrary failed (error 126)"):
+  the download now carries `libwinpthread-1.dll`, which FFmpeg needs.
+
 ## [0.1.3] - 2026-10-27
 
 ### Fixed

@@ -3,6 +3,10 @@
 ## 0.1.3
 
 Fixes
+- Windows: Guitar Hero II did not start ("gd-game-02.dll: LoadLibrary failed
+  (error 126)"): FFmpeg's avutil needs MinGW's libwinpthread-1.dll, which
+  no download carried. It ships now (gd-game-02 0.1.4), and the download
+  check follows every DLL's own imports.
 - Guitar Hero (gd-game-01 1.1.4): Enter on the keyboard finishes the band
   name, like Start.
 
