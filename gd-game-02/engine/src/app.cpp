@@ -221,6 +221,7 @@ public:
     bool gamePaused() const override { return paused_; }
     double gameTimeMs() const override { return lastT_; }
     std::vector<std::pair<std::string, double>> gameSfx() const override { return songSfx_; }
+    double introCameraTravel() const override { return introCamTravel_; }
     float gameBeat() const override {
         return song_ ? float(song_->tempo.msToTick(std::max(0.0f, lastT_)) / std::max(1, song_->tempo.division())) : 0.0f;
     }
@@ -363,6 +364,11 @@ private:
     // Without the menus: track_panel.dta's intro sounds, played by the program.
     int introSfx_ = 0;
     std::vector<std::pair<std::string, double>> songSfx_;  // UiHost::gameSfx
+    // UiHost::introCameraTravel: the camera at the intro's first frame, and
+    // the distance from there by song time -2000 ms.
+    bool introCamSet_ = false;
+    gfx::Vec3 introCam0_{};
+    double introCamTravel_ = -1;
     float pendingAwardMs_ = -1e9f;  // without the menus: sp_awarded's time
     // Two players (docs/multiplayer.md): the mode, per player the
     // difficulty, the part (instrument) and the pad (input slot) that plays
@@ -845,6 +851,8 @@ void App::beginSong() {
     heldBeforeLive_ = {};
     introSfx_ = 0;
     songSfx_.clear();
+    introCamSet_ = false;
+    introCamTravel_ = -1;
     lastT_ = float(startMs);
     lastFrameMs_ = startMs;
     if (track_ && hud_) {
@@ -853,6 +861,10 @@ void App::beginSong() {
         hud_->reset(extendAtMs_);
     }
     worldDriver_.reset(float(startMs));
+    // The world's clock moves to the intro clock now: with the menus
+    // intro_start_msg follows at once and the world picks the INTRO shot,
+    // which must start at this time, not at the previous clock.
+    if (world_) world_->setClock(startMs / 1000.0, startMs / 500.0);
     SDL_Log("intro: the song clock starts at %.0f ms, the track extends at %.0f ms", startMs, double(extendAtMs_));
     mixer_.setSpeed(1);
     const bool coop = mode_ == DevMode::Coop;
@@ -1328,6 +1340,12 @@ void App::updateSong(float t) {
                 }
             if (director_->hasCamera()) venueView_->setCamera(director_->camera());
         }
+        if (begun_ && t <= float(kTrackExtendMs)) {
+            const gfx::Vec3 c = venueView_->camera().position();
+            if (!introCamSet_) introCamSet_ = true, introCam0_ = c;
+            const double dx = c.x - introCam0_.x, dy = c.y - introCam0_.y, dz = c.z - introCam0_.z;
+            introCamTravel_ = std::sqrt(dx * dx + dy * dy + dz * dz);
+        }
         // Development aid: GD02_FACE_CAM=<member>[:<distance>[:<degrees>[:<bone>[:<height>]]]] (guitarist0,
         // singer, ...) frames that member's head (or bone) from the director camera's side, turned
         // <degrees> about it (180: from behind), <height> units above it, to check the faces.
@@ -1552,6 +1570,11 @@ int App::gameCounter(int player, const std::string& key) const {
     if (key == "gems") {
         const Player* pl = gamePlayer(p);
         return pl ? int(pl->chart().gems.size()) : 0;
+    }
+    // The track's Star Power phrase effects (--walktest star_phrase).
+    if (const TrackView* tv = p == 1 ? track2_.get() : track_.get()) {
+        if (key == "star_smashes") return tv->starSmashes();
+        if (key == "star_glow_lines") return tv->starGlowLines();
     }
     return 0;
 }

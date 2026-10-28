@@ -68,6 +68,9 @@ public:
     // The sounds played since the song began, with their song times (the
     // first 256; --walktest checks the intro's).
     virtual std::vector<std::pair<std::string, double>> gameSfx() const { return {}; }
+    // The camera's distance travelled between the intro's start and song
+    // time -2000 ms (the INTRO shot moves in every venue), -1 unknown.
+    virtual double introCameraTravel() const { return -1; }
     virtual float gameBeat() const = 0;        // the song position in beats
     virtual float songDurationMs() const = 0;  // to the song's end
     virtual const Player* gamePlayer(int index) const = 0;

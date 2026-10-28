@@ -67,6 +67,11 @@ public:
     void draw(gfx::Renderer& r, gfx::SceneCache& cache, const Song& song, const Player& player, float nowMs, float trackSpeed);
     // Particles drawn last frame (statistics).
     int particlesDrawn() const { return particlesDrawn_; }
+    // Since reset (--walktest's star_phrase check): smash_star effects started
+    // (Star Power phrase gems hit) and star tails' glow lines drawn over
+    // their tails.
+    int starSmashes() const { return starSmashes_; }
+    int starGlowLines() const { return starGlowLines_; }
 
 private:
     // A smash view's copy for one slot (0x8269C968): normal, star or bonus.
@@ -158,6 +163,7 @@ private:
     } extendAnim_;
     std::unique_ptr<gfx::ParticleRenderer> particles_;
     int particlesDrawn_ = 0;
+    int starSmashes_ = 0, starGlowLines_ = 0;
     std::vector<GemState> gemState_;
     std::unordered_map<int, float> releaseClip_;  // released gem -> frozen tail start (relative y)
     float blowMs_ = -1e9f;

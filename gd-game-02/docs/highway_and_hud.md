@@ -32,7 +32,12 @@ The scenes themselves are listed in `milo_and_textures.md`.
   `0x8269E7F0`, `0x8269E2C8`, `0x8269E340` (`tail_white` / `tail_purple` are
   never used). Faces (`0x8269C2A0`): per segment (a, a+1, a+V) and (a+V,
   a+1, a+V+1) — the other winding is culled and left only the additive glow
-  line, which looked like a translucent tail (wave B #4). The vertices
+  line, which looked like a translucent tail (wave B #4). The glow line
+  draws after its tail, over it [I: the order; GH1's RndLine is drawn over
+  its tail]: drawn first, the solid tail hid it, and the star tails lost
+  their cyan core and the held star tail its blue glow (owner 10-28;
+  `--walktest quickplay` star_phrase counts the star glow lines and the
+  smash_star effects, and checks sp_awarded and the meter). The vertices
   (`0x8269E44C`) take the colour (rgb) and keep the template's alpha: 0 on
   the two outer edge vertices, 1 inside, so only the edges fade; the tail
   materials are prelit, blend src_alpha, z_mode normal, the sphere-mapped

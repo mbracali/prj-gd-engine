@@ -180,6 +180,7 @@ void TrackView::reset(float introStartMs) {
     blowMs_ = -1e9f, blowLevel_ = 0;
     introStartMs_ = introStartMs;
     extendAnim_ = {};
+    starSmashes_ = starGlowLines_ = 0;
     explodeMs_ = -1e9f;
     // The effect copies (0x8269C968: one smash view of each kind per slot,
     // and the burn view), and the explode view's systems.
@@ -220,6 +221,7 @@ void TrackView::onEvents(const std::vector<PlayerEvent>& events, const Player& p
                     // born after frame 0 die on the next move [C 0x82212A48].
                     Smash& sm = smash_[size_t(f)][size_t(kind)];
                     sm.startMs = nowMs, sm.active = true;
+                    if (kind == 1) ++starSmashes_;
                 }
             break;
         }
@@ -359,7 +361,7 @@ void TrackView::drawGems(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, cons
 }
 
 // One fret's tail of gem `gi` (0x8269EAD0): rows of the cross-section from
-// the clip to the end, the last row the tip; the glow line before it.
+// the clip to the end, the last row the tip; then the glow line over it.
 void TrackView::buildTail(const Gem& g, int gi, int slot, const Player& player, float nowMs) {
     if (tailRow_.empty()) return;
     const float startRel = yOf(g.ms - nowMs);
@@ -413,8 +415,14 @@ void TrackView::buildTail(const Gem& g, int gi, int slot, const Player& player, 
             width = tailGlowTightWidth_;
         }
     }
+    // The glow line goes on after the tail's faces, so it draws over them:
+    // drawn first, the solid tail (wave B #4) hid it, and with it the star
+    // tails' cyan core and the held star tail's blue glow [I: the order, as
+    // GH1's RndLine over its tail (FUN_001609b0); the line exists to show].
     const float glowEnd = std::min(e, horizonY_ - startRel - 4 * width);
-    if (glow && glowEnd > s && tailVerts_.size() / 16 + 4 < 65000) {
+    int bodyRange = -1;  // this tail's faces in tailRanges_, once pushed
+    auto glowLine = [&] {
+        if (!glow || glowEnd <= s || tailVerts_.size() / 16 + 4 >= 65000) return;
         const uint16_t b = uint16_t(tailVerts_.size() / 16);
         const float n[3] = {0, 0, 1}, c[4] = {glow->color[0], glow->color[1], glow->color[2], 1};
         const float hw = width * 0.5f, y0 = startRel + s, y1 = startRel + glowEnd;
@@ -426,8 +434,10 @@ void TrackView::buildTail(const Gem& g, int gi, int slot, const Player& player, 
         vertex(x0 + hw, y1, kGlowZ, n, c, 1, 0.5f);
         const int first = int(tailIndices_.size());
         tailIndices_.insert(tailIndices_.end(), {b, uint16_t(b + 1), uint16_t(b + 2), uint16_t(b + 1), uint16_t(b + 3), uint16_t(b + 2)});
+        // Counted only when it follows its own tail's faces (drawn over them).
+        if (starGem && bodyRange >= 0 && size_t(bodyRange) + 1 == tailRanges_.size()) ++starGlowLines_;
         tailRanges_.push_back({glow, first, 6});
-    }
+    };
 
     // Rows: the start, then every segment from the remainder r, a row 3
     // units on, and the tip (width 0).
@@ -449,7 +459,10 @@ void TrackView::buildTail(const Gem& g, int gi, int slot, const Player& player, 
         if (y > 0.01f && y < L) rows.push_back({y, bend(y, 1)});
     if (rows.back().y + 3.0f < L) rows.push_back({rows.back().y + 3.0f, bend(rows.back().y + 3.0f, 0.5f)});
     rows.push_back({L, 0});
-    if (tailVerts_.size() / 16 + rows.size() * size_t(V) >= 65000) return;
+    if (tailVerts_.size() / 16 + rows.size() * size_t(V) >= 65000) {
+        glowLine();
+        return;
+    }
     const uint16_t b = uint16_t(tailVerts_.size() / 16);
     for (const Row& row : rows)
         for (const scene::MeshVertex& v : tailRow_) {
@@ -466,7 +479,9 @@ void TrackView::buildTail(const Gem& g, int gi, int slot, const Player& player, 
             const uint16_t av = uint16_t(a + V);
             tailIndices_.insert(tailIndices_.end(), {a, uint16_t(a + 1), av, av, uint16_t(a + 1), uint16_t(av + 1)});
         }
+    bodyRange = int(tailRanges_.size());
     tailRanges_.push_back({mat, first, int(tailIndices_.size()) - first});
+    glowLine();
 }
 
 void TrackView::drawTails(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, const Player& player, float nowMs) {

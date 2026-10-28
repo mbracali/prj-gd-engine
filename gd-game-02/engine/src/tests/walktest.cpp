@@ -14,6 +14,7 @@
 
 #include "data/game_data.h"
 #include "data/json.h"
+#include "game/player.h"
 #include "input/input.h"
 #include "render/scene_gpu.h"
 #include "render/ui_view.h"
@@ -110,6 +111,8 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         wait(3000);
         check("task_clock_song");
         check("intro_sequence");
+        check("intro_camera");
+        check("star_phrase");
         at("endgame_screen", 90000);
         wait(600);
         press(kX);  // CONTINUE (me_continue.btn)
@@ -908,6 +911,41 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
                 ++misses;
             }
         if (misses != 2) return fail("overstrums: " + std::to_string(misses) + " of 2 miss sounds");
+        ++step_, stepStart_ = -1;
+        return;
+    }
+    if (s.screen == "intro_camera") {
+        // The INTRO shot moves the camera before the track extends (every
+        // venue's intro does); with the menus it once stood still until
+        // -2000 ms, started on the previous clock (owner 10-28).
+        const double travel = ui.host().introCameraTravel();
+        std::printf("  intro camera travelled %.1f units before -2000 ms\n", travel);
+        if (travel < 5) return fail("the intro camera did not move before the track extends");
+        ++step_, stepStart_ = -1;
+        return;
+    }
+    if (s.screen == "star_phrase") {
+        // A Star Power phrase played through (autoplay): player.dta's
+        // phrase_captured plays sp_awarded, the star meter fills, its gems
+        // started smash_star and the star tails' glow lines drew over their
+        // tails (hidden under the solid tails once, owner 10-28).
+        const Player* pl = ui.host().gamePlayer(0);
+        const int phrases = ui.host().gameCounter(0, "sp_phrases");
+        const int smashes = ui.host().gameCounter(0, "star_smashes"), glows = ui.host().gameCounter(0, "star_glow_lines");
+        double awardedAt = -1e9;
+        for (const auto& [name, at] : ui.host().gameSfx())
+            if (name == "sp_awarded" && awardedAt < -1e8) awardedAt = at;
+        if (phrases < 1 || awardedAt < -1e8 || glows < 1) {
+            if (nowMs - stepStart_ > 45000)
+                return fail("Star Power phrase: " + std::to_string(phrases) + " captured, sp_awarded " + (awardedAt < -1e8 ? "not played" : "played") +
+                            ", " + std::to_string(glows) + " star glow lines in 45 s");
+            return;
+        }
+        const float meter = pl ? pl->starMeter() : 0.0f;
+        std::printf("  star phrase: %d captured, sp_awarded at %.0f ms, star meter %.2f, %d smash_star, %d star glow lines\n", phrases, awardedAt,
+                    double(meter), smashes, glows);
+        if (meter <= 0) return fail("a captured Star Power phrase did not fill the star meter");
+        if (smashes < 1) return fail("the Star Power phrase's gems started no smash_star effect");
         ++step_, stepStart_ = -1;
         return;
     }
