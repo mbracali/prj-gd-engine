@@ -129,9 +129,12 @@ public:
             r.slot = i + numHeaders(i);
             for (const auto& [idx, tier] : headers_)
                 if (idx == i) r.header = true, r.texts["header.txt"] = ui_.localize("song_header_" + tier);
+            // 0x822C2080 (Text's list.txt column): the song's name, none on
+            // an inactive row (a locked encore: an empty grey row, where the
+            // blurb of the row above reads) [C].
             const int info = songInfoIndex(ui_, s);
-            r.texts["list.txt"] = info >= 0 ? ui_.host().songs()[size_t(info)].name : s;
             r.disabled = !active(i);
+            if (!r.disabled) r.texts["list.txt"] = info >= 0 ? ui_.host().songs()[size_t(info)].name : s;
             // Career rows: the best score, the stars ("***", gold after a
             // perfect run) and the check of a passed tour song
             // (0x822C3428 / 0x822C34E8 / 0x822C41D8); quick play shows none

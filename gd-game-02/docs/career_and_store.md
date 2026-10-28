@@ -139,14 +139,24 @@ deductions), unlock_guitar_screen, then complete_screen.
   required), `song_current_venue_encore`, on the last tier `song_win_easy`
   / `song_win_other`. The footer is the last tier row, the one before when
   that one is inactive (0x822C5A68's end) [C]; UIList draws inactive rows in
-  the disabled colours (0x8237F528) [C]. list_song.milo puts blurb.txt 27
-  units under list.txt (-55 / -28) with rows 40 apart (ss_song.lst
-  spacing) [C data], so the blurb on the row above the locked encore
-  touches the encore's name, in the port as in that data. The rows' font
-  is the data's: dyingmarker.font, caps_mode 2, size 25, list.txt leading
-  0.6 (song2 / song3 the same, list.txt 26) [C data]. Open (GD02-082): a
-  capture of the original to compare the list's font and the blurb's
-  place.
+  the disabled colours (0x8237F528) [C]. The provider's Text (vtable
+  0x8204481C +4 = 0x822C4170, by column: 0 header 0x822BFFF0, 1 list.txt
+  0x822C2080, 2 stars 0x822C34E8, 4 score 0x822C3428, 6 blurb 0x822C0070)
+  [C]: list.txt is the song's name only on an active row, an empty string
+  on an inactive one (0x822C2080 checks IsActive first) [C]. So a locked
+  encore is an empty grey row, and the blurb of the row above (blurb.txt,
+  27 units under list.txt at 0.7 scale, rows 40 apart) reads in its place:
+  nothing overlaps (GD02-089; the port drew the encore's name too). The
+  list's songs are the record's unlocked ones (0x822AEA68: flag 0x02 and
+  0x40, or the cheat; a venue's unlock 0x822A9088 sets 0x40 on all its
+  songs, encore included), so the locked encore is listed [C]. GapSize
+  (vtable +0x24, 0x822C3760): 40 after a row whose next row is another
+  tier, the store's or the downloads' (else 0) [C], the port's header slot.
+  The rows' font is the data's: dyingmarker.font (global
+  kerning 0, cell 62x82), caps_mode 2, size 25, list.txt leading 0.6 and
+  wrap 316, blurb.txt and the score at a slight tilt (song2 / song3 the
+  same, list.txt 26) [C data]. Open (GD02-082): a capture of the original
+  to compare the font's look.
 - **Quick play** (0x82287600): the first two tiers' songs, every song a band
   in use has unlocked at any difficulty (bought ones too), downloads; in
   campaign order. The `song_quickplay` blurb until some band is a tier from

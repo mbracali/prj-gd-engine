@@ -339,6 +339,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
             at("sel_song_screen");
             wait(900);
             check("career_song_salvation");
+            check("setlist_encore");
             press(kX);
             at("loading_screen");
             at("game_screen", 30000);
@@ -1081,6 +1082,30 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         ++step_, stepStart_ = -1;
         return;
     }
+    if (s.screen == "setlist_encore") {
+        // The locked encore's row (GD02-089): inactive, drawn without its
+        // name (0x822C2080), the blurb on the row above it (0x822C0070 /
+        // 0x822C5A68) reads where the name would be.
+        auto* sp = dynamic_cast<ui::ListProvider*>(ui.interp().findObject("song_provider"));
+        if (!sp) return fail("no song_provider");
+        std::vector<gfx::UiView::ListRow> rows;
+        int sel = 0;
+        sp->rows(rows, 0, sel);
+        const int e = sp->indexOf("shoutatthedevil");
+        if (e < 1 || e >= int(rows.size())) return fail("the setlist has no locked encore row");
+        const auto& er = rows[size_t(e)];
+        const auto& pr = rows[size_t(e - 1)];
+        const auto text = [](const gfx::UiView::ListRow& r, const char* k) {
+            auto it = r.texts.find(k);
+            return it == r.texts.end() ? std::string() : it->second;
+        };
+        std::printf("  setlist: encore row %s, name '%s'; blurb '%s' on %s\n", er.disabled ? "inactive" : "active", text(er, "list.txt").c_str(),
+                    text(pr, "blurb.txt").c_str(), sp->symbol(e - 1).c_str());
+        if (!er.disabled || !text(er, "list.txt").empty() || !text(er, "blurb.txt").empty())
+            return fail("the locked encore's row is active or shows its name (the blurb would overlap it)");
+        if (text(pr, "blurb.txt").empty()) return fail("no blurb on the row above the locked encore");
+        return pass();
+    }
     if (s.screen == "career_encore_offered") {
         std::printf("  career: encore offered after %s (cash %d)\n", ui.session().song.c_str(),
                     ui.interp().send("campaign", "cash", {}).integerValue());
@@ -1170,6 +1195,34 @@ int WalkDriver::finish(ui::UiManager& ui) {
         }
         std::printf("  bands: %d named %s\n", glitches, Career::kGlitches);
         if (glitches != 1) std::printf("  FAIL career.json does not have The Glitches once\n"), ok = false;
+        // GD02-090: The Glitches has everything unlocked, as saved: every
+        // tier venue unlocked and completed and its songs unlocked at every
+        // difficulty, every store song, every sold item bought, the cash.
+        try {
+            const Json save = Json::parse(ss.str());
+            const auto& cfg = ui::campaign::config(ui);
+            int missing = 0, entries = 0;
+            for (const Json& p : save["profiles"].a) {
+                if (!p["in_use"].truthy() || p["name"].str() != Career::kGlitches) continue;
+                for (int d = 0; d < Career::kDifficulties; ++d) {
+                    const Json& t = p["tour"].a.at(size_t(d));
+                    for (int v = 0; v < ui::campaign::numTiers(ui, d); ++v) {
+                        const auto& [venue, songs] = cfg.tiers.at(size_t(v));
+                        ++entries, missing += t[venue]["unlocked"].truthy() && t[venue]["completed"].truthy() ? 0 : 1;
+                        for (const std::string& song : songs) ++entries, missing += t[song]["unlocked"].truthy() ? 0 : 1;
+                    }
+                    for (const std::string& song : cfg.storeSongs) ++entries, missing += t[song]["unlocked"].truthy() ? 0 : 1;
+                }
+                for (const auto& [item, sold] : cfg.tableItems)
+                    if (sold) ++entries, missing += p["items"][item].truthy() ? 0 : 1;
+                if (p["cash"].num() < 1000000) ++missing;
+            }
+            if (!save["pro_faceoff"].truthy()) ++missing;
+            std::printf("  The Glitches: %d of %d unlocks missing\n", missing, entries);
+            if (missing || entries < 300) std::printf("  FAIL The Glitches does not have everything unlocked\n"), ok = false;
+        } catch (const std::exception& e) {
+            std::printf("  FAIL career.json: %s\n", e.what()), ok = false;
+        }
     }
     // The career's look: career.json's first band at Medium (campaign
     // set_character_info), and player 0's config back from it.

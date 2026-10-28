@@ -19,6 +19,7 @@
 #include "scene/ui_objects.h"
 #include "scene/ui_styles.h"
 #include "script/tasks.h"
+#include "ui/campaign.h"
 #include "ui/char_select.h"
 #include "ui/natives.h"
 #include "ui/screen_text.h"
@@ -199,6 +200,8 @@ bool UiManager::init(std::string& error, bool headless) {
         chars::validate(*this, cfg);
         career_.glitchesLook = {cfg.character, cfg.outfit, cfg.guitar, cfg.skin};
         career_.clear();
+        campaign::unlockGlitches(*this);  // everything unlocked (a fresh save's default: not marked)
+        career_.needsSave = false;
     }
     if (firstScreen_.empty()) firstScreen_ = interp_.var("first_screen").str();
     lastWall_ = double(SDL_GetTicksNS()) / 1e6;
@@ -1123,6 +1126,7 @@ void UiManager::draw() {
 bool UiManager::loadSave(int& result) {
     bool corrupt = false;
     if (save_->read(career_, corrupt)) {
+        campaign::unlockGlitches(*this);  // an older Glitches band (or one just added) gets everything
         result = 0;
         return true;
     }

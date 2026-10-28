@@ -242,10 +242,23 @@ docs/career_and_store.md.
 The Glitches (the port's, as gd01's): every save has a band named "The
 Glitches" (`Career::ensureGlitches`): a fresh save in its last slot, a save
 without one in its last free slot (when all eight are taken it is not
-added), each time the save is read. It is a band like any other, $50 to
-start, with GH2's default look at every difficulty (main.dta's
-reset_player_settings: punk1, the first guitar and skin), so its career
-starts at the venue list.
+added), each time the save is read. It has GH2's default look at every
+difficulty (main.dta's reset_player_settings: punk1, the first guitar and
+skin) and **everything unlocked** (`campaign::unlockGlitches`, GD02-090),
+written into its records as GH2's rules leave a band that won the tour at
+every difficulty: every tier venue unlocked and completed (Easy's seven),
+every tier song and store song unlocked, every item the store sells bought
+(guitars with the tour rewards, finishes, characters, outfits, videos),
+$1,000,000, and the save's pro face-off (a tour won). Its encores are
+unlocked at every difficulty, Easy's too (a port rule for this band only;
+GH2 never unlocks Easy's). It runs on the fresh save and on every save
+read (shared code, every platform), so an older Glitches band is upgraded
+and the save marked. Quick play then offers every song, as GH2 offers any
+band's unlocked songs. Not included: co-op's bass rewards (the save's,
+Campaign +0x4c, not a band's: presetting them would remove co-op's award
+flow from every save; owner's call). Checks: `--uitest` campaign (an older
+band upgraded once, everything unlocked at every difficulty) and the
+walktests' career.json check.
 
 ## Port additions
 
