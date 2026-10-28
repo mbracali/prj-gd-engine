@@ -96,8 +96,29 @@ Items every game module shares. Each game tracks its own work in its section.
 | GDALL-003 | Enhancement | 🟡 in progress (wave B) | Enhanced menus follow [guidelines/universal_launcher.md](guidelines/universal_launcher.md): options on the left, dropdowns for multiple choice, checkboxes for on / off, a static close-up of the vocalist on the right with the whole band in view, every change rendered at once on the band |  | Wave B 10-28 |
 | GDALL-004 | Enhancement | 🟡 in progress (wave B) | Controls follow the guideline: every game works with the mouse, Enter is always Start, a touch is a mouse click, the same touch controls and on-screen buttons in every game | [guidelines/universal_launcher.md](guidelines/universal_launcher.md) | Wave B 10-28 |
 | GDALL-005 | Bugfix | 🟡 in progress (wave B) | The strum icon is broken in half in every menu (gd-game-01 and gd-game-02) | Tracked per game: see the gd-game-01 and gd-game-02 sections | Wave B 10-28 |
-| GDALL-006 | Enhancement | 🟡 in progress (wave B) | Newer games' shaders in older games (recurring): gd-game-02's advanced shaders as gd-game-01 Enhanced options | `spikes/study_shader_ports.md` (being written) | Wave B 10-28 |
-| GDALL-007 | Enhancement | 🟡 in progress (wave B) | New render backends: Vulkan, DirectX on Windows, Metal on Apple, an OpenGL fallback | `spikes/study_backends.md` (being written) | Wave B 10-28 |
+| GDALL-006 | Enhancement | 🟡 in progress (wave B) | Newer games' shaders in older games (recurring): gd-game-02's advanced shaders as gd-game-01 Enhanced options | [spikes/study_shader_ports.md](spikes/study_shader_ports.md): see GDALL-008..015 | Wave B 10-28 |
+| GDALL-007 | Enhancement | 🟡 in progress (wave B) | New render backends: Vulkan, DirectX on Windows, Metal on Apple, an OpenGL fallback | [spikes/study_backends.md](spikes/study_backends.md): SDL3 GPU API behind gd02's device layer, OpenGL fallback; see GDALL-016..020 | Wave B 10-28 |
+| GDALL-008 | Enhancement | ❌ | Shared `gd-engine-fx` effects library (our own GLSL + parameter maths), seeded with gd02's bloom and DOF | [spikes/study_shader_ports.md](spikes/study_shader_ports.md), 1–1.5 weeks | Spike 10-28 |
+| GDALL-009 | Enhancement | ❌ | gd01 Enhanced option: GH2-style bloom (thresholds rescaled: GH1 has no overbright) | study_shader_ports, 3–5 days | Spike 10-28 |
+| GDALL-010 | Enhancement | ❌ | gd01 Enhanced option: colour transform with our own luminance curve | study_shader_ports, 2–3 days | Spike 10-28 |
+| GDALL-011 | Enhancement | ❌ | gd01 Enhanced option: GH2-style depth of field | study_shader_ports, 3–5 days | Spike 10-28 |
+| GDALL-012 | Enhancement | ❌ | GPU lens-flare occlusion test (removes the per-frame `glReadPixels` stall) | study_shader_ports, 2–3 days | Spike 10-28 |
+| GDALL-013 | Enhancement | ❌ | gd01: soft spotlight beams; per-pixel diffuse lighting | study_shader_ports, 3–5 days + 1–1.5 weeks | Spike 10-28 |
+| GDALL-014 | Enhancement | ❌ | "Look: GH2" preset in gd01's Enhanced menu (after GDALL-009..013) | study_shader_ports, 1 day | Spike 10-28 |
+| GDALL-015 | Enhancement | ❌ | Shadow maps (gd02 first, then gd01) | study_shader_ports, 2–3 weeks + 1 week | Spike 10-28 |
+| GDALL-016 | Enhancement | ❌ | gd02 shader pipeline: GLSL → SPIR-V offline, SDL_shadercross → MSL / DXIL | [spikes/study_backends.md](spikes/study_backends.md), 1.5–2 weeks | Spike 10-28 |
+| GDALL-017 | Enhancement | ❌ | gd02 SDL GPU device (Vulkan / D3D12 / Metal), OpenGL kept as fallback; Metal default on macOS (the M4 Pro ~20 fps) | study_backends, 3–4 weeks + 1–2 weeks validation | Spike 10-28 |
+| GDALL-018 | Enhancement | ❌ | Launcher module ABI v2: hand over a GPU device; switch the window between GL and GPU games | study_backends, ~2 weeks | Spike 10-28 |
+| GDALL-019 | Enhancement | ❌ | gd01 device layer (≈530 direct GL calls) then GPU backend | study_backends, 8–12 weeks | Spike 10-28 |
+| GDALL-020 | Enhancement | ❌ | HDR through SDL GPU HDR swapchains (replaces the GL→Vulkan presenter of GDALL-001) | study_backends + study_hdr, 1–2 weeks per game | Spike 10-28 |
+| GDALL-021 | Enhancement | ❌ | iOS: re-entrant statically linked game modules (no dlopen / dlclose on iOS) | [spikes/study_ios.md](spikes/study_ios.md), 1–2 weeks | Spike 10-28 |
+| GDALL-022 | Enhancement | ❌ | iOS build of the launcher (GLES through ANGLE on Metal), TestFlight / AltStore PAL | study_ios, 3–4 weeks + 1 week | Spike 10-28 |
+| GDALL-023 | Enhancement | ❌ | A built-in demo song of our own (App Store / Play review: the app works without a disc) | study_ios, 3–5 days | Spike 10-28 |
+| GDALL-024 | Enhancement | ❌ | PS Vita (gd01 only, homebrew VPK): hardware spike, GLES2 low-end render profile, memory diet, VitaDB release | [spikes/study_ps_vita.md](spikes/study_ps_vita.md), 1–2 + 3–4 + 2–3 + 1–2 weeks | Spike 10-28 |
+| GDALL-025 | Enhancement | ❌ | LG webOS (sideload via Developer Mode / Homebrew Channel): spike, native SDL2 build reading the ISO from USB, remote navigation, `.ipk` + webOSbrew entry | [spikes/study_lg_tv.md](spikes/study_lg_tv.md), 1 week spike, 2–4 weeks build | Spike 10-28 |
+| GDALL-026 | Enhancement | ❌ | gd02 audio-latency calibration screen (TVs) | study_lg_tv, 3–5 days | Spike 10-28 |
+| GDALL-027 | Enhancement | ➖ later | Samsung Tizen (WASM web app only; the ISO is out of reach): Emscripten launcher, TV spike, LAN asset server | [spikes/study_samsung_tv.md](spikes/study_samsung_tv.md), low priority | Spike 10-28 |
+| GDALL-028 | Enhancement | ➖ later | 3DS feasibility spike (only if the owner asks) | [spikes/study_3ds.md](spikes/study_3ds.md) | Spike 10-28 |
 
 
 ## gd-game-01: Guitar Hero (PlayStation 2)
