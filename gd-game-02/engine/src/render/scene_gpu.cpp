@@ -152,7 +152,7 @@ float ScenePose::endFrame(const scene::Object* anim) {
         if (!k->texKeys.empty()) f = std::max(f, k->texKeys.back().frame);
         return f;
     }
-    if (auto* f = anim->as<scene::AnimFilter>()) return f->end;
+    if (auto* f = anim->as<scene::AnimFilter>()) return f->dir && f->dir->resolve(f->anim) ? f->endFrame() : 0.0f;
     if (auto* l = anim->as<scene::LightAnim>()) return scene::lastFrame(keysOf(*l)->colorKeys);
     if (auto* e = anim->as<scene::EnvAnim>()) {
         const scene::EnvAnim* k = keysOf(*e);
@@ -174,7 +174,7 @@ void ScenePose::setFrame(const scene::Object* anim, float frame) {
     } else if (auto* m = anim->as<scene::MatAnim>()) {
         matAnim(*m, frame);
     } else if (auto* f = anim->as<scene::AnimFilter>()) {
-        if (const scene::Object* a = f->dir ? f->dir->resolve(f->anim) : nullptr; a && a != f) setFrame(a, f->filter(frame));
+        if (const scene::Object* a = f->dir ? f->dir->resolve(f->anim) : nullptr; a && a != f) setFrame(a, f->filter(frame, f->animatable.rate == 1 ? 480.0f : f->animatable.rate == 3 ? 1.0f : 30.0f));
     } else if (auto* g = anim->as<scene::Group>()) {
         for (const std::string& n : g->objects)
             if (const scene::Object* o = g->dir ? g->dir->resolve(n) : nullptr; o && o != g) setFrame(o, frame);

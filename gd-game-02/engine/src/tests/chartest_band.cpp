@@ -4,6 +4,7 @@
 
 #include <SDL3/SDL.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <map>
@@ -27,9 +28,44 @@
 #include "game/venue.h"
 #include "game/world.h"
 #include "game/world_driver.h"
+#include "render/band_view.h"
+#include "render/scene_gpu.h"
 #include "tests/miditest.h"
 
 namespace {
+
+// What a character draws at each LOD (render/band_view.h meshesToDraw, the
+// world's showing from a fresh pose: the saved flags): something at every
+// LOD, the guitar when it has one, never a shadow mesh. Returns the problems.
+int drawListChecks(chr::Character& c, const std::string& what, bool wantGuitar) {
+    const gfx::ScenePose pose;
+    int problems = 0;
+    const int lods = std::max(1, int(c.own().lods.size()));
+    for (int k = 0; k < lods; ++k) {
+        c.minLod = k;
+        c.updateLod(1e30f);
+        const std::vector<const scene::Mesh*> list = BandView::meshesToDraw(c, &pose);
+        bool guitar = false, shadow = false;
+        // A shadow mesh only where the data puts one in the LOD group itself
+        // (sheraton's lod0.grp / lod1.grp list shadow_guitar.mesh).
+        const scene::Object* lodObj = k < int(c.own().lods.size()) ? c.dir().get(c.own().lods[size_t(k)].group) : nullptr;
+        const scene::Group* lodGroup = lodObj ? lodObj->as<scene::Group>() : nullptr;
+        for (const scene::Mesh* m : list) {
+            guitar |= m->name.rfind("guitar", 0) == 0;
+            const bool listed = lodGroup && std::find(lodGroup->objects.begin(), lodGroup->objects.end(), m->name) != lodGroup->objects.end();
+            shadow |= m->mat.find("shadow") != std::string::npos && !listed;
+        }
+        if (list.empty() || (wantGuitar && !guitar) || shadow) {
+            std::printf("chartest: %s LOD %d draws %zu meshes%s%s\n", what.c_str(), k, list.size(), wantGuitar && !guitar ? ", no guitar" : "",
+                        shadow ? ", a shadow mesh" : "");
+            ++problems;
+        }
+    }
+    c.minLod = 0;
+    c.updateLod(1e30f);
+    return problems;
+}
+
 
 // The band's golden run: hangar18 in arena (the director golden's song),
 // the band's main clips per (beat, slot) and the drum kit's triggers.
@@ -121,6 +157,7 @@ int loadChecks(const GameData& data) {
         try {
             chr::Character c(data, guitar ? "char/alterna1/ng/gen/alterna1.milo_xbox" : "char/metal_drummer/ng/gen/metal_drummer.milo_xbox", clips,
                              {{guitar ? "guitar.outfit" : "drums.outfit", p}});
+            if (guitar) outfitFail += drawListChecks(c, "outfit " + p, p.find("air_guitar") == std::string::npos);
             if (c.outfitObjects() == 0 || !c.unresolvedBones().empty()) {
                 std::printf("chartest: outfit %s: %d objects, %zu unresolved bones\n", p.c_str(), c.outfitObjects(), c.unresolvedBones().size());
                 ++outfitFail;
@@ -340,6 +377,8 @@ int bandRun(const GameData& data) {
         std::printf("chartest: band: %d non-finite transforms\n", nan);
         ++failures;
     }
+    for (const auto& m : band.members())
+        if (m->character) failures += drawListChecks(*m->character, "band " + m->slot, m->type == "guitarist" || m->type == "bassist");
     if (band.members().size() != 4) {
         std::printf("chartest: band: expected guitarist0, singer, bassist, drummer\n");
         ++failures;

@@ -4,6 +4,36 @@ All notable changes for players. Versions follow SemVer; release tags are
 `gd-game-02/vX.Y.Z`. The release workflow publishes the section whose heading
 matches the tag's version. Nothing is released yet.
 
+## [Unreleased]
+
+### Fixed
+- The venue camera no longer speeds up on fast screens: its follow filter and
+  shake run in Guitar Hero II's 1/60 s steps at any frame rate (they ran once
+  a frame, so 2.4 times too fast at 144 Hz), and the frame rate no longer
+  changes which shots the director picks.
+- Band members no longer vanish when filmed from behind or from afar: the
+  lower-detail models (the behind-the-band shots ask for them) were never
+  drawn.
+- Guitars and basses: the guitar's shadow model was drawn over the neck,
+  hiding parts of it; outfits' detail and shadow groups now merge as in
+  Guitar Hero II.
+- Menus: going back plays Guitar Hero II's backward transition instead of
+  the forward entrance again, and screens no longer get darker after going
+  back and forth (the bricks' light comes back on).
+- A crash when a song ended with some outfits.
+- Windows: the game writes `gd02.log` in its save folder, with the address of
+  a crash, for bug reports.
+
+### Added
+- `GD02_PERF=1`: a frame-time breakdown in the log every 2 s (update, draw,
+  present, GPU wait, draws and uploads per frame). `GD02_LOG=<file>` copies
+  the log to a file.
+
+### Changed
+- macOS: uniforms and streamed vertices are written through unsynchronized
+  buffer mappings, the path Apple's OpenGL handles without stalls
+  (`GD02_GL_STREAM=map|subdata` chooses on any system).
+
 ## [0.1.4] - 2026-10-28
 
 ### Fixed

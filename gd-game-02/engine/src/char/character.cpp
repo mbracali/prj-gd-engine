@@ -93,6 +93,7 @@ Character::Character(const GameData& data, const std::string& path, ClipLibrary&
     for (const auto& l : own_->lods) lodGroups_.push_back(d.get(l.group) ? d.get(l.group)->as<scene::Group>() : nullptr);
     if (!own_->shadow.empty())
         if (auto* g = d.get(own_->shadow)) shadow_ = g->as<scene::Group>();
+    if (!shadow_) shadow_ = outfitShadow_;
     // The rig.
     rig_ = std::make_unique<Rig>(d, skeleton_);
     // Drivers: their clip sets' channels into the servo.
@@ -168,6 +169,16 @@ void Character::loadOutfit(const GameData& data, const std::string& outfitPath) 
         if (od.self) oown = scene::decodeCharacterDir(*od.self);
     } catch (const std::exception&) {
     }
+    // The outfit's LOD and shadow groups, as objects: they may share their
+    // names with the character's (battleaxe's "shadow", the "lod0.grp"s),
+    // which a lookup by name after the merge would mistake for the
+    // character's own.
+    std::vector<const scene::Group*> outfitLods;
+    const scene::Group* outfitShadow = nullptr;
+    if (oown) {
+        for (const auto& l : oown->lods) outfitLods.push_back(od.get(l.group) ? od.get(l.group)->as<scene::Group>() : nullptr);
+        if (!oown->shadow.empty() && od.get(oown->shadow)) outfitShadow = od.get(oown->shadow)->as<scene::Group>();
+    }
     // 0x82158F30 per object of the outfit.
     std::vector<std::unique_ptr<scene::Object>> keep;
     for (auto& o : od.objects) {
@@ -190,30 +201,33 @@ void Character::loadOutfit(const GameData& data, const std::string& outfitPath) 
             copyAs<scene::TransObj>(*existing, *o) || copyAs<scene::Mesh>(*existing, *o) || copyAs<scene::Group>(*existing, *o);
         }
     }
+    // The moved records leave empty slots in the outfit's list; drop them
+    // (forEachObject walks the outfits too).
+    od.objects.erase(std::remove(od.objects.begin(), od.objects.end(), nullptr), od.objects.end());
     for (auto& o : keep) {
         o->dir = &d;
         ++outfitObjects_;
         d.add(std::move(o));
     }
-    // The outfit's LOD and shadow groups merged into the character's by index.
-    if (oown) {
-        for (size_t i = 0; i < oown->lods.size() && i < own_->lods.size(); ++i) {
-            auto* cg = d.get(own_->lods[i].group);
-            auto* og = d.get(oown->lods[i].group);
-            if (!cg || !og || cg == og) continue;
-            auto* g = cg->as<scene::Group>();
-            auto* h = og->as<scene::Group>();
-            if (!g || !h) continue;
-            for (const auto& n : h->objects) g->objects.push_back(n);
-            setShowing(og, false);
-        }
-        if (!oown->shadow.empty() && !own_->shadow.empty()) {
-            auto* cg = d.get(own_->shadow);
-            auto* og = d.get(oown->shadow);
-            if (cg && og && cg != og)
-                if (auto* g = cg->as<scene::Group>(); g && og->as<scene::Group>())
-                    for (const auto& n : og->as<scene::Group>()->objects) g->objects.push_back(n);
-        }
+    // The outfit's LOD and shadow groups merged into the character's by
+    // index (0x82158F30 on the outfit's directory: 0x821DC9E8 adds the
+    // members, then the outfit's groups are deleted; here hidden). A shadow
+    // group only the outfit has becomes the character's.
+    auto merge = [&](const scene::Group* into, const scene::Group* from) {
+        if (!into || !from || into == from) return;
+        auto* g = const_cast<scene::Group*>(into);
+        for (const auto& n : from->objects)
+            if (std::find(g->objects.begin(), g->objects.end(), n) == g->objects.end()) g->objects.push_back(n);
+        setShowing(from, false);
+    };
+    for (size_t i = 0; i < outfitLods.size() && i < own_->lods.size(); ++i) {
+        const scene::Object* cg = d.get(own_->lods[i].group);
+        merge(cg ? cg->as<scene::Group>() : nullptr, outfitLods[i]);
+    }
+    if (outfitShadow) {
+        const scene::Object* cg = own_->shadow.empty() ? nullptr : d.get(own_->shadow);
+        if (const scene::Group* g = cg ? cg->as<scene::Group>() : nullptr) merge(g, outfitShadow);
+        else if (!outfitShadow_) outfitShadow_ = outfitShadow;
     }
     outfits_.push_back(std::move(m));
 }

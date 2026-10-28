@@ -243,6 +243,15 @@ uint32_t CameraDirector::random() {
 
 float CameraDirector::random01() { return float(random() >> 8) / float(1u << 24); }
 
+// The shake's draws come from their own stream, so how many 1/60 s frames a
+// shot shook (which depends on where frames fall) never changes the shots
+// the director picks next [I: GH2 draws both from its one global RandomGen,
+// whose sequence a port cannot follow anyway (it is seeded by the clock)].
+float CameraDirector::shakeRandom01() {
+    shakeRng_ ^= shakeRng_ << 13, shakeRng_ ^= shakeRng_ >> 17, shakeRng_ ^= shakeRng_ << 5;
+    return float(shakeRng_ >> 8) / float(1u << 24);
+}
+
 double CameraDirector::now(const scene::CamShot& shot) const {
     return World::unitsOf(int(shot.anim.rate)) == kTaskBeats ? world_.beats() : world_.seconds();
 }
@@ -503,7 +512,12 @@ void CameraDirector::startShot(const scene::CamShot* shot) {
     // rnd reset_postproc).
     postProc_ = world_.venue().find<scene::PostProc>(shot->flag("postprocess"));
     if (onShot) onShot("shot " + shot->name + " (" + shot->category + ")");
-    if (world_.log) SDL_Log("world: shot %s (%s)", shot->name.c_str(), shot->category.c_str());
+    if (world_.log) {
+        std::string hides;
+        for (const std::string& h : shot->hideList) hides += " " + h;
+        SDL_Log("world: shot %s (%s), planes %g..%g%s%s", shot->name.c_str(), shot->category.c_str(), double(shot->nearPlane), double(shot->farPlane),
+                hides.empty() ? "" : ", hides", hides.c_str());
+    }
     world_.interp().send(world_.scriptFor(const_cast<scene::CamShot*>(shot)), "start_shot", {}, false);
     if (onShotStarted && current_ == shot) onShotStarted(*shot);
 }
@@ -545,9 +559,11 @@ bool CameraDirector::keyframeXfm(const scene::CamShot& shot, ShotState& st, size
                                  std::array<float, 3>& target, bool& hasTarget) {
     const auto& kf = shot.keyframes[k];
     out = kf.xfm;
-    // The filter: a low-pass per 1/60 s step [I: its screen-distance factor
-    // (0x821D7030) taken as 1].
-    const float steps = std::max(1.0f, dt * 60.0f);
+    // The filter: a low-pass per 1/60 s frame (GH2 runs it once a frame at
+    // 60 Hz) [I: its screen-distance factor (0x821D7030) taken as 1]. Other
+    // frame rates take the same per-second rate: (1 - filter)^(dt x 60), so
+    // a 144 Hz or uncapped frame rate does not make the camera chase faster.
+    const float steps = std::max(0.0f, dt * 60.0f);
     auto lowPass = [&](std::array<float, 3>& f, const std::array<float, 3>& v) {
         if (!st.filtered[k] || shot.filter <= 0 || shot.filter >= 1) {
             f = v;
@@ -696,14 +712,20 @@ void CameraDirector::play(const scene::CamShot& shot, ShotState& st, float f, fl
     const float amp = ka.shakeNoiseAmp + (kb.shakeNoiseAmp - ka.shakeNoiseAmp) * t;
     const float maxX = (ka.shakeMaxAngle[0] + (kb.shakeMaxAngle[0] - ka.shakeMaxAngle[0]) * t) * kPi / 180;
     const float maxZ = (ka.shakeMaxAngle[1] + (kb.shakeMaxAngle[1] - ka.shakeMaxAngle[1]) * t) * kPi / 180;
-    for (int step = 0, steps = std::max(1, int(std::lround(dt * 60))); step < steps && dt > 0; ++step) {
-        if (random01() < freq) {
-            const float ang = random01() * 2 * kPi, mag = random01() * amp;
+    // GH2's 1/60 s frames: whole ones only, the remainder carried to the next
+    // frame (one impulse draw and spring step per 1/60 s at any frame rate).
+    st.shakeSteps += dt * 60;
+    const int steps = int(std::min(st.shakeSteps + 0.01f, 15.0f));
+    st.shakeSteps -= float(steps);
+    if (st.shakeSteps > 1) st.shakeSteps = 0;
+    for (int step = 0; step < steps; ++step) {
+        if (shakeRandom01() < freq) {
+            const float ang = shakeRandom01() * 2 * kPi, mag = shakeRandom01() * amp;
             st.shakeTgt[0] += std::cos(ang + kPi / 2) * mag;
             st.shakeTgt[1] += std::cos(ang + kPi / 2) * mag * 0.333f;
             st.shakeTgt[2] += std::sin(ang) * mag;
-            st.shakeAngTgt[0] += (random01() * 2 - 1) * maxX;
-            st.shakeAngTgt[2] += (random01() * 2 - 1) * maxZ;
+            st.shakeAngTgt[0] += (shakeRandom01() * 2 - 1) * maxX;
+            st.shakeAngTgt[2] += (shakeRandom01() * 2 - 1) * maxZ;
         }
         const float l = std::sqrt(st.shakeTgt[0] * st.shakeTgt[0] + st.shakeTgt[1] * st.shakeTgt[1] + st.shakeTgt[2] * st.shakeTgt[2]);
         if (l > amp && l > 0)

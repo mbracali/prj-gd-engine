@@ -37,6 +37,11 @@ a window; also `--scripttest`, `--uitest`, `--venuetest`, `--sfxtest`,
 `hmx.wmv`, `wg.wmv`; Start, Enter or A skips it), `--help`. `GD02_SKIP_MOVIES=1`
 skips the videos.
 
+Bug reports: on Windows the log is written to `gd02.log` in the save folder
+(`%APPDATA%\gd-engine\gd02\`), with the address of a crash; elsewhere it
+goes to the terminal, or to a file with `GD02_LOG=<file>`. `GD02_PERF=1` logs
+a frame-time breakdown every 2 s.
+
 ## Controls
 
 | Action | Keyboard |

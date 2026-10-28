@@ -416,6 +416,27 @@ void UiManager::panelViewLoaded(PanelObj* p) {
     // It joins the shared metacam where it is (setMetacamFrame).
     viewPanels_.insert(p->name());
     for (const auto& [group, t] : metacam_) p->view->setFrame(group, t * p->view->endFrame(group));
+    // And the shared directories' animations where they are.
+    for (const auto& [o, nf] : sharedFrames_)
+        if (p->view->find(nf.first) == o) p->view->setFrame(nf.first, nf.second);
+}
+
+// One animation frame on a panel's view. GH2 loads a milo once (ObjDirPtr
+// reuses a loaded directory), so the subdirectories panels share, such as
+// meta_bricks.milo under main, options, training and most menus, are one
+// object: its meta_light_off.mnm (ui_exit_back) darkens every panel that
+// shows the bricks until a ui_enter_back plays meta_light_on.mnm. The port's
+// views pose their own copies, so the frame goes to every view showing the
+// same object (before, a panel left by Back kept its own copy dark and came
+// back darker the next time).
+void UiManager::setViewFrame(PanelObj* p, const std::string& object, float frame) {
+    if (!p || !p->view) return;
+    p->view->setFrame(object, frame);
+    const scene::Object* o = p->view->find(object);
+    if (!o || o->dir == (p->view->milo() ? &p->view->milo()->root() : nullptr)) return;  // the panel's own
+    sharedFrames_[o] = {object, frame};
+    for (const std::string& name : viewPanels_)
+        if (PanelObj* q = panel(name); q && q != p && q->view && q->view->find(object) == o) q->view->setFrame(object, frame);
 }
 
 void UiManager::enterPanel(PanelObj* p) {
@@ -427,7 +448,7 @@ void UiManager::exitPanel(PanelObj* p) {
     if (!p->up) return;
     for (const char* ev : {"ui_exit", back_ ? "ui_exit_back" : "ui_exit_forward"})
         if (p->view)
-            for (const gfx::UiView::Trigger& t : p->view->triggers(ev)) p->view->setFrame(t.anim->name, t.endFrame);
+            for (const gfx::UiView::Trigger& t : p->view->triggers(ev)) setViewFrame(p, t.anim->name, t.endFrame);
     p->exit();
 }
 
@@ -635,9 +656,9 @@ double UiManager::taskSeconds() const {
 void UiManager::animate(PanelObj* panel, const std::string& object, float from, float to, float seconds, int units, const std::string& task) {
     stopAnimation(panel, object);
     if (!panel || !panel->view) return;
-    panel->view->setFrame(object, from);
+    setViewFrame(panel, object, from);
     if (seconds <= 0) {
-        panel->view->setFrame(object, to);
+        setViewFrame(panel, object, to);
         return;
     }
     anims_.push_back({panel, object, from, to, clockSeconds(units), double(seconds), units, task});
@@ -672,7 +693,7 @@ void UiManager::updateAnims() {
     for (size_t i = 0; i < anims_.size();) {
         Anim& a = anims_[i];
         const double t = std::clamp((clockSeconds(a.units) - a.start) / a.length, 0.0, 1.0);
-        if (a.panel->view) a.panel->view->setFrame(a.object, a.from + float(t) * (a.to - a.from));
+        setViewFrame(a.panel, a.object, a.from + float(t) * (a.to - a.from));
         if (t >= 1) {
             const std::string task = a.task;
             anims_.erase(anims_.begin() + long(i));

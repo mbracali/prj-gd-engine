@@ -274,6 +274,8 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         for (int i = 0; i < 4; ++i) press(kDown), wait(150);  // QUICK PLAY -> MULTIPLAYER -> TRAINING -> LEADERBOARDS -> OPTIONS
         press(kX);
         at("options_screen");
+        wait(800);
+        check("bricks_record");
         press(kX);  // Audio Settings (the focus)
         at("audio_settings_screen");
         press(kTri);
@@ -281,7 +283,17 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         press(kTri);
         at("main_screen");
         check("camera_same");
-        expect_ = {"main_screen", "options_screen", "audio_settings_screen", "options_screen", "main_screen"};
+        // The options again: the bricks' light as the first time (meta_bricks
+        // is one directory: main's ui_enter_back turns it on again for every
+        // panel showing it after options' ui_exit_back turned it off).
+        for (int i = 0; i < 4; ++i) press(kDown), wait(150);
+        press(kX);
+        at("options_screen");
+        wait(800);
+        check("bricks_same");
+        press(kTri);
+        at("main_screen");
+        expect_ = {"main_screen", "options_screen", "audio_settings_screen", "options_screen", "main_screen", "options_screen", "main_screen"};
     } else if (scenario == "enhanced") {
         at("main_screen");
         for (int i = 0; i < 4; ++i) press(kDown), wait(150);  // OPTIONS (past MULTIPLAYER)
@@ -482,6 +494,24 @@ void WalkDriver::poll(ui::UiManager& ui, double nowMs) {
 // The main menu's camera and scene: the camera's position plus the sum of
 // every transform's world position in its view (the metacam moves the
 // camera's rig and the walls with each transition).
+// The colour of the bricks' material (meta_light_on.mnm's) on the current
+// screen's panels; false without one.
+static bool bricksLight(ui::UiManager& ui, std::array<float, 4>& out) {
+    ui::ScreenObj* sc = ui.current();
+    if (!sc) return false;
+    for (ui::PanelObj* p : sc->panels()) {
+        if (!p->view) continue;
+        const scene::Object* a = p->view->find("meta_light_on.mnm");
+        const scene::MatAnim* ma = a ? a->as<scene::MatAnim>() : nullptr;
+        const scene::Mat* mat = ma && ma->dir ? ma->dir->resolve<scene::Mat>(ma->mat) : nullptr;
+        if (!mat) continue;
+        const gfx::ScenePose::MatState* st = p->view->pose().mat(mat);
+        out = st ? std::array<float, 4>{st->rgb[0], st->rgb[1], st->rgb[2], st->alpha} : std::array<float, 4>{1, 1, 1, 1};
+        return true;
+    }
+    return false;
+}
+
 static bool mainCamera(ui::UiManager& ui, std::array<float, 3>& pos) {
     ui::PanelObj* p = ui.panel("main_panel");
     if (!p || !p->view || !p->view->milo()) return false;
@@ -507,6 +537,21 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         } else if (nowMs - stepStart_ > s.ms) {
             fail("the splashes were not skipped by a button");
         }
+        return;
+    }
+    if (s.screen == "bricks_record" || s.screen == "bricks_same") {
+        std::array<float, 4> c{};
+        if (!bricksLight(ui, c)) return fail("options_screen shows no meta_bricks");
+        if (s.screen == "bricks_record") {
+            bricks_ = c;
+        } else {
+            float d = 0;
+            for (size_t k = 0; k < 4; ++k) d = std::max(d, std::fabs(c[k] - bricks_[k]));
+            std::printf("  bricks: light (%.2f %.2f %.2f %.2f), first (%.2f %.2f %.2f %.2f)\n", c[0], c[1], c[2], c[3], bricks_[0], bricks_[1], bricks_[2],
+                        bricks_[3]);
+            if (d > 0.01f) return fail("the options came back darker (meta_bricks' light stayed off)");
+        }
+        ++step_, stepStart_ = -1;
         return;
     }
     if (s.screen == "camera_record" || s.screen == "camera_same") {

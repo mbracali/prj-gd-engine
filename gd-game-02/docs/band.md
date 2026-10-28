@@ -98,7 +98,15 @@ record of every class on the disc to its end and asserts the counts.
   keeps the character's object (a Group among them gets the outfit's
   members); another duplicate whose Trans parent is a "bone_*" takes the
   outfit's data (kMerge: the guitar's neck spots); the outfit's LOD and
-  shadow groups join the character's by index.
+  shadow groups join the character's by index, as objects: 0x82158F30 on
+  the outfit's directory adds LOD i's members to the character's LOD i
+  (0x821DC9E8) and deletes the outfit's groups; a shadow group only the
+  outfit has becomes the character's (0x82153C60) [C]. The port takes the
+  groups from the outfit before its objects move (same-named groups, the
+  "lod0.grp"s and battleaxe's "shadow", stay behind and were missed by a
+  lookup by name) and hides them instead of deleting. Before (bug-fix 4)
+  most guitars' `shadow.grp` stayed a drawable root: `shadow_guitar.mesh`
+  (shadow.mat, additive black, depth written) drew over the neck.
 - Placement: the slot's transform, then BAND_COMMON / guitarist `enter`
   teleports to `{waypoint_find kStart*}` (Character::Handle 0x82152108:
   teleport 0x82151D08 = the waypoint's world transform, scale removed).
@@ -211,7 +219,13 @@ record of every class on the disc to its end and asserts the counts.
 - **LOD (DrawShowing 0x82153090):** from min_lod (`set_min_lod`, the camera
   shots' force_char_lod), the first LOD i whose screen_size x (1.09 below
   the current LOD, 0.91 from it on) the screen size reaches; FUN_82151DE0
-  shows its group and hides the old one. Screen size (0x8214FC60): the
+  shows its group and hides the old one (the Draw's showing flag, +0x18;
+  `lod1.grp` is saved hidden, so the character's own showing wins over
+  the world pose's saved flags: before bug-fix 4 any LOD above 0, as the
+  band_POV shots' `set_min_lod 1`, drew nothing but the guitar's loose
+  meshes). `--chartest` checks every guitar outfit and band member draws
+  something, its guitar and no stray shadow mesh at each LOD
+  (`BandView::meshesToDraw`). Screen size (0x8214FC60): the
   sphere radius over its depth, scaled by the camera [I: the camera
   fields]. The shadow group is not drawn in the colour pass [I: GH2 draws
   it into the shadow buffer; gd02 has no shadow pass yet].

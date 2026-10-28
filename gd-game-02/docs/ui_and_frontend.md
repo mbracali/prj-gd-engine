@@ -93,6 +93,29 @@ transition. (Before, only the outgoing / incoming panels were posed and
 nothing was reset: going back, the main menu kept its forward exit's camera
 under the backward entrance and came back off to one side.)
 
+The backward groups hold AnimFilters on the forward TransAnims
+(`in_backward.filt` -> `meta_cam_right_out.tnm`, `out_backward.filt` ->
+`meta_cam_right_in.tnm`) with start 500, end 0. RndAnimFilter (Scale
+0x822078D8, SetFrame 0x822079B0, Start / EndFrame 0x82207AF8 / 0x82207B80)
+[C]: without a period the scale is negated when end < start, and the frame
+is scale x frame + offset + (start - end), kept in the range: those filters
+play the forward moves backwards. Before bug-fix 4 the port ignored the
+reversal, so going back played the forward exit / entrance again.
+
+Panel triggers: UIPanel Enter (0x82373EB8 -> 0x823737F0) sends `ui_enter`
+and then `ui_enter_forward` or `ui_enter_back` (the transition's direction),
+Exit (0x82374010) `ui_exit` and `ui_exit_forward` / `ui_exit_back` [C]. The
+data uses the directional ones only in `meta_bricks.milo` /
+`meta_bricks_on.milo`: `meta_light_off.mnm` on ui_exit_back,
+`meta_light_on.mnm` on ui_enter_back. meta_bricks is a subdirectory of
+main, options, training and most menus, and GH2 loads it once (ObjDirPtr
+reuses a loaded directory), so its light is one state for all of them; the
+port's views pose their own copies, so `UiManager::setViewFrame` gives an
+animation of a shared subdirectory to every view showing the same object
+(and to views made later). Before, options or training left with Back kept
+their copy dark and came back darker (`--walktest back` checks the bricks'
+light).
+
 ### Confirmed
 
 - Quick play list (`0x82287600` / `0x822C5A68`): the first two tiers' songs

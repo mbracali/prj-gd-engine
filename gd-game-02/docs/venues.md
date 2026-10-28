@@ -233,6 +233,15 @@ Playback (SetFrame 0x8222a068), 30 frames a second from the start [C]:
   (random direction, size noiseamp, y a third; angles within
   +-shake_maxangle degrees about x and z, clamped), followed by springs
   (0.02 x distance, velocity x 0.9) for the offset and the angles.
+- Frame rate: GH2 runs the filter (one lerp a frame, 0x82122100) and the
+  shake once a 60 Hz frame [C: 0x82226988 / 0x82224D18 per SetFrame]. The
+  port takes the filter as (1 - filter)^(dt x 60) and runs the shake in
+  whole 1/60 s steps (the remainder carried), so 30, 60, 144 Hz or an
+  uncapped frame rate move the camera alike; the shake draws from its own
+  RNG stream, so how many steps it ran never changes the director's picks
+  (both draw from GH2's one RandomGen there, seeded by the clock) [I].
+  Before (bug-fix 4) both ran once a frame: 2.4x too fast at 144 Hz, 4x at
+  the 250 fps limiter, and the shots differed with the frame rate.
 
 ## Lighting presets (game/light_presets.h)
 
@@ -543,6 +552,13 @@ the loaded venue.
   the world, the director and the presets with fixed seeds
   (tests/director_golden.h): the (beat, shot) / (beat, preset) log's line
   count and hash must match; `GD02_GOLDEN_LOG=<file>` writes it.
+- `--venuetest` camera rate (tests/director_golden.h): in each venue its
+  first song, the band and the director stepped at 60 and at 240 fps for
+  60 s (`GD02_CAMRATE_SECONDS`): the same shots and positions within 5
+  units every 1/12 s (`GD02_CAMRATE_LOG=1` prints both).
+- `GD02_FORCE_SHOT=<CamShot>`, `GD02_FACE_CAM=<member>[:<distance>[:<degrees>[:<bone>[:<height>]]]]`
+  (e.g. `bassist:40:180:bone_pelvis.mesh:10`, from behind) frame a shot or a
+  band member; `GD02_WORLDLOG=1` lists each shot's planes and hide list.
 - `GD02_SPOTS=<letters>` draws only some spotlight parts (c cans, f floor
   spots, b beams, l lenses, F flares); `GD02_SPOTS_LOG=1` logs the lit
   spotlights and flares once a second.

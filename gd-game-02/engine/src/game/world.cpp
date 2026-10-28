@@ -461,35 +461,14 @@ int World::rateOf(const scene::Object* o) const {
     return 0;
 }
 
-namespace {
-
-// RndAnimFilter's scale: from its period when it has one [I].
-float filterScale(const scene::AnimFilter& f) {
-    if (f.period != 0) return (f.end - f.start) / (f.period * World::framesPerUnit(int(f.animatable.rate)));
-    return f.scale;
-}
-
-// RndAnimFilter::SetFrame [I]: frame x scale + offset into start..end.
-float filterFrame(const scene::AnimFilter& f, float frame) {
-    float x = frame * filterScale(f) + f.offset;
-    const float lo = std::min(f.start, f.end), hi = std::max(f.start, f.end), len = hi - lo;
-    if (f.type == 1 && len > 0) x = lo + std::fmod(std::fmod(x - lo, len) + len, len);
-    else if (f.type == 2 && len > 0) {
-        float p = std::fmod(std::fmod(x - lo, 2 * len) + 2 * len, 2 * len);
-        x = lo + (p <= len ? p : 2 * len - p);
-    } else {
-        x = std::clamp(x, lo, hi);
-    }
-    return x;
-}
-
-}  // namespace
-
+// RndAnimFilter::StartFrame / EndFrame (0x82207AF8 / 0x82207B80) [C]; a
+// loop or shuttle filter runs until replaced [I].
 float World::startFrameOf(const scene::Object* o) const {
     if (auto* f = o->as<scene::AnimFilter>()) {
-        const float s = filterScale(*f);
-        if (s == 0) return 0;
-        return std::min((f->start - f->offset) / s, (f->end - f->offset) / s);
+        const float fpu = framesPerUnit(int(f->animatable.rate));
+        float sc = f->scaleOf(fpu);
+        if (sc == 0) sc = 1;
+        return (f->start - (f->offset + (f->end < f->start ? f->start - f->end : 0.0f))) / sc;
     }
     return 0;  // [I] keyed anims start at 0
 }
@@ -497,9 +476,7 @@ float World::startFrameOf(const scene::Object* o) const {
 float World::endFrameOf(const scene::Object* o) const {
     if (auto* f = o->as<scene::AnimFilter>()) {
         if (f->type != 0) return kHuge;  // loop / shuttle filters run until replaced
-        const float s = filterScale(*f);
-        if (s == 0) return 0;
-        return std::max((f->start - f->offset) / s, (f->end - f->offset) / s);
+        return f->endFrame(framesPerUnit(int(f->animatable.rate)));
     }
     if (auto* g = o->as<scene::Group>()) {
         float e = 0;
@@ -527,7 +504,7 @@ void World::setFrame(const scene::Object* anim, float frame) {
     if (!anim) return;
     frames_[anim] = frame;
     if (auto* f = anim->as<scene::AnimFilter>()) {
-        if (const scene::Object* a = f->dir ? f->dir->resolve(f->anim) : nullptr; a && a != f) setFrame(a, filterFrame(*f, frame));
+        if (const scene::Object* a = f->dir ? f->dir->resolve(f->anim) : nullptr; a && a != f) setFrame(a, f->filter(frame, framesPerUnit(int(f->animatable.rate))));
         return;
     }
     if (auto* g = anim->as<scene::Group>()) {

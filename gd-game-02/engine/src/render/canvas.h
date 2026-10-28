@@ -35,6 +35,10 @@ public:
 
     void begin(SDL_Color clear);
     void end();
+    // GD02_PERF: the time from begin() to the present (drawing, on the CPU)
+    // and the frames drawn, summed until the caller clears them.
+    uint64_t drawNs = 0;
+    int drawnFrames = 0;
 
     // Triangles (three vertices each). `texture` is a gfx::TextureId's id,
     // 0 for plain colour (the vertices' uv are then ignored).
@@ -52,6 +56,7 @@ public:
     void flush();
 
 private:
+    uint64_t beginNs_ = 0;
     bool makeFont(std::string& error);
 
     gfx::Renderer renderer_;

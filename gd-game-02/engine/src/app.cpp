@@ -273,6 +273,7 @@ private:
     void frameSong();
     void frameUi();
     void drawSong(float t);
+    void logPerf(uint64_t periodNs, int frames, uint64_t maxNs, uint64_t limitNs);
     void drawWorld();
     bool loadVenue(const std::string& venue, VenueVariant variant);
     void unloadVenue();
@@ -507,6 +508,14 @@ int App::run() {
         if (walk_ && !ui_) running_ = false, exitCode_ = 1;
     }
 
+    // GD02_PERF=1: a frame-time breakdown every 2 s (docs/renderer.md).
+    const bool perf = envOn("GD02_PERF");
+    uint64_t perfStart = SDL_GetTicksNS(), perfMaxNs = 0, perfLimitNs = 0;
+    int perfFrames = 0;
+    if (perf) {
+        const gfx::DeviceInfo& di = canvas_.renderer().device().info();
+        SDL_Log("perf: %s %s on %s, video driver %s", di.api.c_str(), di.version.c_str(), di.gpu.c_str(), SDL_GetCurrentVideoDriver());
+    }
     while (running_) {
         const uint64_t frameStart = SDL_GetTicksNS();
         SDL_Event e;
@@ -529,6 +538,14 @@ int App::run() {
         // with its renderer.
         const uint64_t spent = SDL_GetTicksNS() - frameStart;
         if (spent < kMinFrameNs) SDL_DelayNS(kMinFrameNs - spent);
+        if (perf) {
+            const uint64_t now = SDL_GetTicksNS();
+            perfMaxNs = std::max(perfMaxNs, now - frameStart);
+            perfLimitNs += now - frameStart - spent;
+            ++perfFrames;
+            if (now - perfStart >= 2'000'000'000ull && perfFrames > 0) logPerf(now - perfStart, perfFrames, perfMaxNs, perfLimitNs);
+            if (now - perfStart >= 2'000'000'000ull) perfStart = now, perfFrames = 0, perfMaxNs = perfLimitNs = 0;
+        }
     }
 
     if (walk_ && ui_) exitCode_ = walk_->finish(*ui_);
@@ -1086,21 +1103,33 @@ void App::updateSong(float t) {
                 }
             if (director_->hasCamera()) venueView_->setCamera(director_->camera());
         }
-        // Development aid: GD02_FACE_CAM=<member>[:<distance>] (guitarist0, singer, ...) frames that
-        // member's head from the director camera's side, to check the faces.
+        // Development aid: GD02_FACE_CAM=<member>[:<distance>[:<degrees>[:<bone>[:<height>]]]] (guitarist0,
+        // singer, ...) frames that member's head (or bone) from the director camera's side, turned
+        // <degrees> about it (180: from behind), <height> units above it, to check the faces.
         if (const char* fc = SDL_getenv("GD02_FACE_CAM"); fc && *fc && band_) {
-            const std::string spec = fc;
-            const size_t colon = spec.find(':');
-            const std::string who = spec.substr(0, colon);
-            const float dist = colon == std::string::npos ? 22.0f : std::strtof(spec.c_str() + colon + 1, nullptr);
+            std::vector<std::string> f;
+            for (std::string spec = fc;;) {
+                const size_t colon = spec.find(':');
+                f.push_back(spec.substr(0, colon));
+                if (colon == std::string::npos) break;
+                spec = spec.substr(colon + 1);
+            }
+            const std::string& who = f[0];
+            const float dist = f.size() > 1 ? std::strtof(f[1].c_str(), nullptr) : 22.0f;
+            const float turn = f.size() > 2 ? std::strtof(f[2].c_str(), nullptr) * 3.14159265f / 180 : 0.0f;
+            const float up = f.size() > 4 ? std::strtof(f[4].c_str(), nullptr) : 0.0f;
             scene::Xfm head;
-            if (band_->objectXfm(who, "bone_head.mesh", head) || band_->objectXfm(who, "bone_head.trans", head)) {
+            const bool found = f.size() > 3 && !f[3].empty() ? band_->objectXfm(who, f[3], head)
+                                                             : band_->objectXfm(who, "bone_head.mesh", head) || band_->objectXfm(who, "bone_head.trans", head);
+            if (found) {
                 const gfx::Vec3 target{head.pos[0], head.pos[1], head.pos[2]};
                 // From the side the director camera is on, level with the head.
                 gfx::Vec3 dir = venueView_->camera().position() - target;
                 dir.z = 0;
                 if (gfx::dot(dir, dir) < 1e-6f) dir = {0, -1, 0};
-                const gfx::Vec3 eye = target + gfx::normalize(dir) * dist;
+                dir = gfx::normalize(dir);
+                dir = {dir.x * std::cos(turn) - dir.y * std::sin(turn), dir.x * std::sin(turn) + dir.y * std::cos(turn), 0};
+                const gfx::Vec3 eye = target + dir * dist + gfx::Vec3{0, 0, up};
                 gfx::Camera cam = gfx::Camera::lookAt(eye, target);
                 cam.yFov = 0.6f;
                 venueView_->setCamera(cam);
@@ -1863,6 +1892,32 @@ void App::updateBackdrop() {
 
 // One frame of the song screen without the menus (--song, the debug list):
 // GH2's track and HUD (or the debug highway), then the 2D text on top.
+// GD02_PERF=1 (to measure on the Mac): per frame on average over the
+// period, where the time goes: update (input, the song, the world, the band,
+// the menus' scripts; what is left), draw (building and issuing the draws on
+// the CPU), present (the internal frame's blit, the pacing's sleep and
+// SDL_GL_SwapWindow, where a driver waits for the GPU or the display) and
+// gpu wait (the fence on the frame before last: the GPU is the bottleneck).
+void App::logPerf(uint64_t periodNs, int frames, uint64_t maxNs, uint64_t limitNs) {
+    gfx::RenderDevice& dev = canvas_.renderer().device();
+    const gfx::DevicePerf p = dev.takePerf();
+    const double f = double(std::max(frames, 1)), ms = 1e-6;
+    const double frameMs = double(periodNs) * ms / f;
+    const double drawMs = double(canvas_.drawNs) * ms / f, presentMs = double(p.presentNs) * ms / f, fenceMs = double(p.fenceNs) * ms / f;
+    const double limitMs = double(limitNs) * ms / f;
+    const double updateMs = std::max(0.0, frameMs - drawMs - presentMs - fenceMs - limitMs);
+    int pw = 0, ph = 0, dw = 0, dh = 0;
+    SDL_GetWindowSizeInPixels(window_, &pw, &ph);
+    dev.drawableSize(dw, dh);
+    const double pf = double(std::max(p.frames, 1));
+    SDL_Log("perf: %.1f fps (frame %.2f ms, worst %.1f) | update %.2f ms | draw %.2f ms: %.0f draws, %.0f KB uniforms, %.0f KB vertices, "
+            "%.0f KB textures, %.1f created | present %.2f ms (pacing %.2f) | gpu wait %.2f ms | window %dx%d px, drawn at %dx%d, display scale %.2f",
+            f * 1e9 / double(periodNs), frameMs, double(maxNs) * ms, updateMs, drawMs, double(p.draws) / pf, double(p.uniformBytes) / pf / 1024,
+            double(p.bufferBytes) / pf / 1024, double(p.textureBytes) / pf / 1024, double(p.created) / pf, presentMs, double(p.paceNs) * ms / f, fenceMs, pw, ph, dw, dh,
+            double(SDL_GetWindowDisplayScale(window_)));
+    canvas_.drawNs = 0, canvas_.drawnFrames = 0;
+}
+
 void App::drawSong(float t) {
     const bool gh2 = track_ && hud_ && !debugHighway_;
     canvas_.begin(gh2 ? SDL_Color{0, 0, 0, 255} : SDL_Color{12, 10, 16, 255});

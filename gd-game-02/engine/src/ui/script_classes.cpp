@@ -418,9 +418,14 @@ void PanelObj::enter() {
             }
     focus = f;
     selecting.clear();
-    // ui_enter triggers play their anims from the start.
+    // ui_enter triggers play their anims from the start, then the
+    // direction's: UIPanel Enter (0x82373EB8 -> 0x823737F0) sends ui_enter
+    // and ui_enter_forward or ui_enter_back [C]. meta_bricks' light comes
+    // back on with ui_enter_back (meta_light_on.mnm) after its ui_exit_back
+    // turned it off; without it the menus got darker at every return.
     if (view)
-        for (const gfx::UiView::Trigger& t : view->triggers("ui_enter")) ui.animate(this, t.anim->name, 0, t.endFrame, t.endFrame / 30.0f, kTaskUISeconds);
+        for (const char* ev : {"ui_enter", ui.transitionBack() ? "ui_enter_back" : "ui_enter_forward"})
+            for (const gfx::UiView::Trigger& t : view->triggers(ev)) ui.animate(this, t.anim->name, 0, t.endFrame, t.endFrame / 30.0f, kTaskUISeconds);
     applyStates();
     ui.callScript(this, "enter");
     applyStates();

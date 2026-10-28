@@ -45,6 +45,7 @@ Status: ✅ done · 🟡 partly done / approximated · ❌ not started
 | M7 / Q2 | `.wmv` videos: minimal LGPL FFmpeg 7.1.5 (ASF, WMV3, WMA v2), shared libraries + licence notice in every download | `--playmovie` |
 | Bug-fix 3 | Options: GH2's six entries in GH2's order plus the port's Enhanced Options after Video Settings (the column re-spaced, a little smaller); no GAMEPADS in Options or on the main menu's help bar; Audio Settings shows its help bar (the panel's FOCUS_MSG on enter) and its poster's top. Enhanced Options: gd01's list in GH2's font over a live shot of the second venue (small1) with the band; Screen Mode, In-Game Max FPS, Show FPS Counter, Internal Resolution (448p (ps2), 720p (x360)...) work and are saved in `enhanced.json`; Gamepads opens the GAMEPADS screen; the rest is listed "not available yet". The Glitches in every save. GH2's long cheats (button codes at the main menu, CheatsManager 0x8235B5B0) and the CHEATS section with GH2's names | `docs/ui_and_frontend.md` "Enhanced Options", "Cheats", "Save"; `--walktest enhanced`, `--walktest cheats`, The Glitches check in `--walktest quickplay` / `career` |
 | Bug-fix 2 | Note hits checked against GH2's watcher (anchoring on single notes and HOPOs allowed, chords exact, sustain release rules: unchanged and right); exact details fixed: +0x94 set on hits, swingAtHopo on a fixed HOPO-able strum, overstrum ends the sustain before the 50 ms gap, missed-gem pick. Faces: kTaskSeconds now follows the song with the menus (the lip sync / expressions ran on the menus' clock and the singer stopped posing) | `docs/FINDINGS.md` "Fret matching", `docs/facefx.md`; new rule checks in `--selftest`, task-clock check in `--walktest quickplay`, `GD02_FACE_CAM` |
+| Bug-fix 4 | Owner's 2026-10-28 list. Camera: the director's filter and shake ran once a frame instead of once a 1/60 s (2.4x at 144 Hz, 4x uncapped) and the shake drew from the shot picks' RNG, so the frame rate changed the shots; now GH2's 60 Hz steps at any rate (`--venuetest` camera rate check, 60 vs 240 fps, every venue). Band: a lower LOD (band_POV's `set_min_lod 1`, distance) drew nothing (the world pose's saved `lod1.grp` flag won over the LOD switch); outfits' LOD / shadow groups merged by object as 0x82158F30 (same-named groups were missed; the guitar's `shadow_guitar.mesh` drew, black and depth-writing, over the neck); `--chartest` draw-list check per LOD. Menus: GH2's `RndAnimFilter` reversed ranges (metacam's backward groups now play backwards: going back no longer replays the forward entrance), `ui_enter_back` / `_forward` events, shared subdirectories (meta_bricks' light) posed in every view (`--walktest back` bricks check). Shutdown: a null outfit slot (Band destructor). Windows: `gd02.log` + crash address in the save folder; Salvation and every song start on Linux and under Wine (not reproduced). macOS: unsynchronized buffer streaming, `GD02_PERF=1` | `docs/venues.md`, `docs/band.md`, `docs/ui_and_frontend.md`, `docs/renderer.md` |
 
 ## In progress
 
@@ -82,6 +83,15 @@ Nothing right now.
 | M10 | Modes | Career with encores, store (26 bonus songs at 550), unlocks | ✅ | M10.1: `docs/career_and_store.md`, `--walktest career_full`, uitest's campaign checks; co-op's records and bass unlocks: M10.2; open: win_game_screen and unlock_guitar_screen not walked, the stone ending's stream |
 | M11 | Polish | Tutorials (9 charts, narration in 5 languages) | ❌ | |
 | M11 | Polish | Enhanced Settings (L20): the rest of the list, per-build defaults, Steam Deck pass, first release `gd-game-02/v1.0.0` | 🟡 | Enhanced Options screen and four settings done (bug-fix 3) |
+
+### From bug-fix 4 (2026-10-28)
+
+| Area | Item | Status | Notes |
+|---|---|---|---|
+| Windows | "Salvation does not start in quick play": not reproduced (Linux, Wine/Proton with the Windows build: `--song`, the quick play walk and real-time menus; all 83 songs start). Needs the owner's `gd02.log` (save folder) | 🟡 | The log now records a crash's address |
+| Camera | "Goes under the venue" (mostly Windows): not reproduced; the frame-rate dependence is fixed and checked per venue | 🟡 | Screenshots or the shot name (`GD02_WORLDLOG=1`) would pin it |
+| macOS | ~20 fps on an M4 Pro: to measure with `GD02_PERF=1` (and `GD02_GL_STREAM=subdata` against the default `map`) | 🟡 | `docs/renderer.md` "Performance" |
+| Band | sheraton lists `shadow_guitar.mesh` in its own LOD groups (drawn as GH2's data says) | — | |
 
 ### Questions for the owner
 

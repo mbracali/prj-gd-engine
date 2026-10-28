@@ -115,6 +115,9 @@ public:
 
     // Showing of the character's objects (set_showing, LOD groups, hide_drummer).
     bool showing(const scene::Object* o) const;
+    // Whether the character set o's showing itself (its LOD switch,
+    // set_showing), which then wins over the object's saved flag.
+    bool showingSet(const scene::Object* o) const { return showing_.count(o) != 0; }
     void setShowing(const scene::Object* o, bool on) { showing_[o] = on; }
     void setShowing(const std::string& name, bool on);
     bool visible = true;  // the character as a whole (guitarist1 hidden...)
@@ -178,6 +181,7 @@ private:
     std::unordered_map<const scene::Object*, bool> showing_;
     std::vector<const scene::Group*> lodGroups_;
     const scene::Group* shadow_ = nullptr;
+    const scene::Group* outfitShadow_ = nullptr;  // an outfit's, when the character has none
     int lod_ = -1;
     int outfitObjects_ = 0;
     // The servo: channel -> bone (skeleton index), and the root channels.

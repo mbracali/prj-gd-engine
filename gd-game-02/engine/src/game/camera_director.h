@@ -112,6 +112,7 @@ private:
         std::vector<bool> filtered;
         float shakePos[3] = {}, shakeVel[3] = {}, shakeTgt[3] = {};
         float shakeAng[3] = {}, shakeAngVel[3] = {}, shakeAngTgt[3] = {};
+        float shakeSteps = 0;  // 1/60 s frames not yet run
     };
 
     bool native(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r);
@@ -126,6 +127,7 @@ private:
                      std::array<float, 3>& target, bool& hasTarget);
     double now(const scene::CamShot& shot) const;
     float random01();
+    float shakeRandom01();
     uint32_t random();
 
     World& world_;
@@ -143,6 +145,7 @@ private:
     const scene::Waypoint* nearest_ = nullptr;
     double lastSeconds_ = 0;
     uint32_t rng_;
+    uint32_t shakeRng_ = 0x5348414bu;
     int started_ = 0, failedPicks_ = 0;
     std::unique_ptr<ScriptObject> rnd_, player0_, game_, gamecfg_;
     ScriptObject *prevRnd_ = nullptr, *prevPlayer0_ = nullptr;

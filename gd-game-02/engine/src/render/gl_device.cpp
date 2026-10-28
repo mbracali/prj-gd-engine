@@ -141,6 +141,11 @@ public:
     void updateTexture(TextureId t, const void* data, size_t pitch) override;
     BufferId createBuffer(BufferKind kind, size_t size, const void* data, bool dynamic) override;
     void updateBuffer(BufferId b, size_t offset, const void* data, size_t size) override;
+    DevicePerf takePerf() override {
+        DevicePerf p = perf_;
+        perf_ = {};
+        return p;
+    }
     void destroyBuffer(BufferId b) override;
     ProgramId createProgram(const ProgramDesc& desc, std::string& error) override;
     void destroyProgram(ProgramId p) override;
@@ -189,6 +194,14 @@ private:
     size_t uboAlign_ = 256, uboOffset_ = 0;
     int uboRegion_ = 0;
     bool uboOverflowLogged_ = false;
+    // Streaming writes (uniforms, appended vertices) through an unsynchronized
+    // glMapBufferRange instead of glBufferSubData: Apple's OpenGL (on Metal)
+    // stalls or copies on glBufferSubData into a buffer the GPU may still
+    // read; the regions and fences already keep those bytes unused.
+    // Default on macOS; GD02_GL_STREAM=map | subdata chooses.
+    bool streamMap_ = false;
+    void streamWrite(GLenum target, size_t offset, const void* data, size_t size);
+    DevicePerf perf_;
 
     // Cached GL state.
     PipelineState state_;
@@ -257,6 +270,10 @@ bool GlDevice::init(std::string& error) {
     gl::glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     gl::glPixelStorei(GL_PACK_ALIGNMENT, 1);
 
+#ifdef __APPLE__
+    streamMap_ = true;
+#endif
+    if (const char* m = SDL_getenv("GD02_GL_STREAM")) streamMap_ = std::strcmp(m, "map") == 0;
     GLint align = 256;
     gl::glGetIntegerv(GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT, &align);
     uboAlign_ = size_t(std::max(align, 16));
@@ -276,6 +293,7 @@ bool GlDevice::init(std::string& error) {
 }
 
 TextureId GlDevice::createTexture(const TextureDesc& desc, const TexLevel* levels, std::string& error) {
+    ++perf_.created;
     if (desc.width <= 0 || desc.height <= 0 || desc.mips < 1) {
         error = "texture: bad size";
         return {};
@@ -345,10 +363,12 @@ void GlDevice::updateTexture(TextureId id, const void* data, size_t pitch) {
     boundTex_[0] = 0;
     gl::glPixelStorei(GL_UNPACK_ROW_LENGTH, GLint(pitch / size_t(bpp)));
     gl::glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, t->w, t->h, bpp == 1 ? GL_RED : GL_RGBA, GL_UNSIGNED_BYTE, data);
+    perf_.textureBytes += uint64_t(t->w) * uint64_t(t->h) * uint64_t(bpp);
     gl::glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
 }
 
 BufferId GlDevice::createBuffer(BufferKind kind, size_t size, const void* data, bool dynamic) {
+    ++perf_.created;
     GlBuffer b;
     b.target = kind == BufferKind::Index ? GL_ELEMENT_ARRAY_BUFFER : GL_ARRAY_BUFFER;
     b.size = size;
@@ -359,9 +379,20 @@ BufferId GlDevice::createBuffer(BufferKind kind, size_t size, const void* data, 
     return {buffers_.add(b)};
 }
 
+void GlDevice::streamWrite(GLenum target, size_t offset, const void* data, size_t size) {
+    if (streamMap_)
+        if (void* p = gl::glMapBufferRange(target, GLintptr(offset), GLsizeiptr(size),
+                                           GL_MAP_WRITE_BIT | GL_MAP_INVALIDATE_RANGE_BIT | GL_MAP_UNSYNCHRONIZED_BIT)) {
+            std::memcpy(p, data, size);
+            if (gl::glUnmapBuffer(target)) return;
+        }
+    gl::glBufferSubData(target, GLintptr(offset), GLsizeiptr(size), data);
+}
+
 void GlDevice::updateBuffer(BufferId id, size_t offset, const void* data, size_t size) {
     GlBuffer* b = buffers_.get(id.id);
     if (!b || size == 0) return;
+    perf_.bufferBytes += size;
     gl::glBindBuffer(b->target, b->name);
     if (offset + size > b->size) {  // grow (contents not kept beyond this write)
         b->size = std::max(offset + size, b->size * 2);
@@ -369,7 +400,10 @@ void GlDevice::updateBuffer(BufferId id, size_t offset, const void* data, size_t
     } else if (b->dynamic && offset == 0) {  // rename: the GPU may still read the old contents
         gl::glBufferData(b->target, GLsizeiptr(b->size), nullptr, GL_STREAM_DRAW);
     }
-    gl::glBufferSubData(b->target, GLintptr(offset), GLsizeiptr(size), data);
+    // A dynamic buffer's bytes past the last write were not used since its
+    // rename (Canvas appends): unsynchronized is safe there.
+    if (b->dynamic) streamWrite(b->target, offset, data, size);
+    else gl::glBufferSubData(b->target, GLintptr(offset), GLsizeiptr(size), data);
 }
 
 void GlDevice::destroyBuffer(BufferId id) {
@@ -397,6 +431,7 @@ GLuint compileStage(GLenum stage, const std::string& source, std::string& error)
 }
 
 ProgramId GlDevice::createProgram(const ProgramDesc& desc, std::string& error) {
+    ++perf_.created;
     const std::string header = info_.es ? "#version 300 es\nprecision highp float;\nprecision highp int;\n"
                                           "precision highp sampler2D;\nprecision highp samplerCube;\n"
                                         : "#version 330 core\n";
@@ -447,6 +482,7 @@ void GlDevice::destroyProgram(ProgramId id) {
 }
 
 TargetId GlDevice::createTarget(const TargetDesc& desc, std::string& error) {
+    ++perf_.created;
     const int width = desc.width, height = desc.height;
     const bool depth = desc.depth;
     if (width <= 0 || height <= 0) {
@@ -642,7 +678,8 @@ size_t GlDevice::writeUniforms(const void* data, size_t size) {
     }
     const size_t base = size_t(uboRegion_) * kUniformRegion + at;
     gl::glBindBuffer(GL_UNIFORM_BUFFER, ubo_);
-    gl::glBufferSubData(GL_UNIFORM_BUFFER, GLintptr(base), GLsizeiptr(size), data);
+    streamWrite(GL_UNIFORM_BUFFER, base, data, size);
+    perf_.uniformBytes += size;
     uboOffset_ = at + size;
     return base;
 }
@@ -697,6 +734,7 @@ void GlDevice::draw(const DrawCall& c) {
     }
     enabledAttribs_ = enabled;
 
+    ++perf_.draws;
     const GLenum mode = c.primitive == Primitive::Lines ? GL_LINES : GL_TRIANGLES;
     if (const GlBuffer* ib = buffers_.get(c.indices.id)) {
         gl::glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ib->name);
@@ -744,6 +782,7 @@ void GlDevice::setFrameCap(int fps) {
 }
 
 void GlDevice::endFrame() {
+    const uint64_t start = SDL_GetTicksNS();
     // The internal resolution's frame, scaled to the window.
     if (const GlTarget* frame = frameOn_ ? targets_.get(frame_.id) : nullptr) {
         int ww = 0, wh = 0;
@@ -759,16 +798,21 @@ void GlDevice::endFrame() {
     if (paceNs_) {
         uint64_t now = SDL_GetTicksNS();
         if (nextFrameNs_ > now && nextFrameNs_ - now <= paceNs_) SDL_DelayPrecise(nextFrameNs_ - now);
+        perf_.paceNs += SDL_GetTicksNS() - now;
         now = SDL_GetTicksNS();
         // Keep the cap's grid unless a slow frame fell behind it.
         nextFrameNs_ = nextFrameNs_ + paceNs_ >= now ? nextFrameNs_ + paceNs_ : now + paceNs_;
     }
     SDL_GL_SwapWindow(window_);
+    const uint64_t swapped = SDL_GetTicksNS();
+    perf_.presentNs += swapped - start;
     // At most two frames in flight: wait for the one before last.
     if (fences_[1]) {
         gl::glClientWaitSync(fences_[1], GL_SYNC_FLUSH_COMMANDS_BIT, 1000000000ull);
         gl::glDeleteSync(fences_[1]);
     }
+    perf_.fenceNs += SDL_GetTicksNS() - swapped;
+    ++perf_.frames;
     fences_[1] = fences_[0];
     fences_[0] = gl::glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
 }

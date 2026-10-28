@@ -90,6 +90,7 @@ private:
     float endMs_ = 1e30f, failMs_ = 1e30f;
     std::string error_;
     std::array<float, 3> camera_{};  // the main menu's camera (the back walk)
+    std::array<float, 4> bricks_{};  // the options' bricks light (the back walk)
 
     void runCheck(ui::UiManager& ui, const Step& s, double nowMs);
 };

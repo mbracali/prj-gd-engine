@@ -26,6 +26,7 @@ class SceneCache;
 class UiView;
 }  // namespace gfx
 namespace scene {
+class Object;
 class MiloLibrary;
 class UiStyles;
 class Locale;
@@ -167,6 +168,9 @@ public:
     void drawView(gfx::UiView& v);
     // GHScreen backwards_anim: the next transition plays backwards.
     void setBackwardsAnim() { backwardsAnim_ = true; }
+    // The running (or last) transition goes back (GH2's direction flag,
+    // which picks ui_enter_back / ui_exit_back over the _forward events).
+    bool transitionBack() const { return back_; }
     // {x foreach_player $p body...}: runs the body with $p = player0 / player1.
     Value foreachPlayer(const std::vector<Value>& args);
     // The help bar shows what the current screen's (helpbar ...) says.
@@ -195,6 +199,7 @@ private:
     bool enterIsStart_ = false;  // the keyboard's Enter, pressed on a text entry: Start until released
     void setMetacamFrame(const std::string& group, float t);  // t 0..1 of the group, on every panel's metacam
     void resetMetacam();
+    void setViewFrame(PanelObj* p, const std::string& object, float frame);
     void routeButton(int button, int player);
     void enterPanel(PanelObj* p);
     void exitPanel(PanelObj* p);
@@ -247,6 +252,9 @@ private:
     bool backwardsAnim_ = false;
     // The shared metacam's groups since its last reset, in order (frame 0..1).
     std::vector<std::pair<std::string, float>> metacam_{{"trans_in_forward.grp", 1.0f}};
+    // The last frame of each animation in a directory several panels share
+    // (setViewFrame), for views made later.
+    std::map<const scene::Object*, std::pair<std::string, float>> sharedFrames_;
     std::set<std::string> viewPanels_;  // the panels that have made a view
     std::vector<ScreenObj*> stack_;  // push_screen
     // GH2's PushScreen (0x8236B800) enters the new screen over the current
