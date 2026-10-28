@@ -935,7 +935,6 @@ bool UiManager::mouse(float x, float y, bool click) {
     for (PanelObj* p : current_->panels())
         if (p->up && p->helpMouse(x, y, click)) return true;
     PanelObj* fp = current_->focusPanel();
-    if (getenv("GD02_MOUSEDBG") && fp && fp->view) { SDL_Log("mouse %.0f %.0f fp %s up %d hits %zu", x, y, fp->name().c_str(), fp->up, fp->view->hits().size()); for (auto& h : fp->view->hits()) SDL_Log("  %s %.0f %.0f %.0f %.0f", h.key.c_str(), h.x0, h.y0, h.x1, h.y1); }
     return fp && fp->up && fp->mouse(x, y, click);
 }
 
