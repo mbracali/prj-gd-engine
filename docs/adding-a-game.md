@@ -158,6 +158,13 @@ many you gave. No window or GL work; the library is unloaded afterwards. See
 `gd-engine-launcher/modules/gd01/gd01_module_sounds.cpp` (Guitar Hero's
 metagame bank through gd01's SPU2).
 
+## GAMEPADS, the Enhanced menu and the mouse
+
+Every game has the same GAMEPADS screen (opened with the yellow button on
+the main menu), the same Enhanced menu and the same mouse support, modelled
+on gd-game-01's: follow
+[guidelines/controls-and-enhanced-menu.md](guidelines/controls-and-enhanced-menu.md).
+
 ## Shared code (`gd-core/`)
 
 Code moves into a shared `gd-core/` library only when a second game needs it

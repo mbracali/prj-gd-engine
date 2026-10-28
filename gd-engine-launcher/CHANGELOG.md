@@ -1,5 +1,12 @@
 # Guitar Dream Universal Launcher: changes
 
+## 0.1.5
+
+New
+- Guitar Hero II 0.1.5: the mouse in its menus, the GAMEPADS screen and the
+  Enhanced Options laid out as in Guitar Hero, and controllers that no longer
+  press left / right by themselves.
+
 ## 0.1.4
 
 Fixes

@@ -249,17 +249,36 @@ SDL_JoystickID Input::attachVirtualPad(const std::string& spec) {
         return 0;
     }
     const bool guitar = spec.find(":guitar") != std::string::npos;
+    // ":dpadaxis=<v>": a pad whose D-pad left / right and up / down are its
+    // axes 6 and 7 (as SDL's mappings give many adapters and guitars),
+    // axis 6 resting at <v> (e.g. -32768: SDL would see left held).
+    const size_t dpadAxis = spec.find(":dpadaxis");
+    const int dpadRest = dpadAxis != std::string::npos && spec.find('=', dpadAxis) != std::string::npos
+                             ? std::atoi(spec.c_str() + spec.find('=', dpadAxis) + 1) : 0;
     SDL_VirtualJoystickDesc desc;
     SDL_INIT_INTERFACE(&desc);
     desc.type = guitar ? SDL_JOYSTICK_TYPE_GUITAR : SDL_JOYSTICK_TYPE_GAMEPAD;
     desc.vendor_id = Uint16(vendor), desc.product_id = Uint16(product);
-    desc.naxes = SDL_GAMEPAD_AXIS_COUNT, desc.nbuttons = SDL_GAMEPAD_BUTTON_COUNT;
-    desc.name = guitar ? "Xbox 360 Guitar (virtual)" : vendor == 0x054c ? "PLAYSTATION(R)3 Controller (virtual)"
-                                                                       : "Xbox 360 Controller (virtual)";
+    desc.naxes = SDL_GAMEPAD_AXIS_COUNT + (dpadAxis != std::string::npos ? 2 : 0), desc.nbuttons = SDL_GAMEPAD_BUTTON_COUNT;
+    desc.name = guitar ? "Xbox 360 Guitar (virtual)" : dpadAxis != std::string::npos ? "Adapter with a D-pad on axes (virtual)"
+                : vendor == 0x054c ? "PLAYSTATION(R)3 Controller (virtual)" : "Xbox 360 Controller (virtual)";
     const SDL_JoystickID id = SDL_AttachVirtualJoystick(&desc);
     if (!id) {
         SDL_Log("virtual pad: %s", SDL_GetError());
         return 0;
+    }
+    if (dpadAxis != std::string::npos) {
+        char guid[64];
+        SDL_GUIDToString(SDL_GetJoystickGUIDForID(id), guid, sizeof guid);
+        std::string m = std::string(guid) + "," + desc.name +
+                        ",a:b0,b:b1,x:b2,y:b3,back:b4,guide:b5,start:b6,leftstick:b7,rightstick:b8,leftshoulder:b9,"
+                        "rightshoulder:b10,dpleft:-a6,dpright:+a6,dpup:-a7,dpdown:+a7,leftx:a0,lefty:a1,rightx:a2,"
+                        "righty:a3,lefttrigger:a4,righttrigger:a5,";
+        if (SDL_AddGamepadMapping(m.c_str()) < 0) SDL_Log("virtual pad mapping: %s", SDL_GetError());
+        if (SDL_Joystick* j = SDL_OpenJoystick(id)) {  // the resting axis, before the game opens it
+            SDL_SetJoystickVirtualAxis(j, 6, Sint16(std::clamp(dpadRest, -32768, 32767)));
+            SDL_UpdateJoysticks();
+        }
     }
     if (guitar) {
         // SDL maps only virtual gamepads by themselves: the guitar gets the
@@ -443,6 +462,31 @@ void Input::handle(const SDL_Event& e, std::vector<InputEvent>& out) {
                 break;
             }
         if (std::abs(int(e.jaxis.value) - last) > 10000) raw_.push_back({e.jaxis.timestamp, e.jaxis.which, 'a', e.jaxis.axis, e.jaxis.value});
+        // A button the mapping reads from this axis: from the axis's rest.
+        if (auto it = pads_.find(e.jaxis.which); it != pads_.end() && !it->second.axisButtons.empty()) {
+            Pad& p = it->second;
+            const int a = e.jaxis.axis;
+            if (a < 0 || a >= int(p.joyAxes.size())) break;
+            p.joyAxes[size_t(a)] = e.jaxis.value;
+            if (e.jaxis.timestamp < p.settleNs) {
+                p.joyRest[size_t(a)] = e.jaxis.value;
+                break;
+            }
+            bool changed = false;
+            const std::string id = "pad:" + std::to_string(it->first);
+            for (const Pad::AxisButton& ab : p.axisButtons) {
+                if (ab.axis != a) continue;
+                const int d = (p.joyAxes[size_t(a)] - p.joyRest[size_t(a)]) * ab.dir;
+                const bool now = d > (p.buttons[size_t(ab.button)] ? 10000 : 16000);
+                if (now == p.buttons[size_t(ab.button)]) continue;
+                p.buttons[size_t(ab.button)] = now;
+                changed = true;
+                device_ = int64_t(it->first);
+                if (now) touchUsed_ = false;
+                if (now && captureFrom(id, btn(SDL_GamepadButton(ab.button)))) changed = false;
+            }
+            if (changed && !(capturing_ && captureId_ == id)) update(p, e.jaxis.timestamp, out);
+        }
         break;
     }
     case SDL_EVENT_JOYSTICK_ADDED:
@@ -470,6 +514,25 @@ void Input::handle(const SDL_Event& e, std::vector<InputEvent>& out) {
         if (auto t = types_.find(np.guid); t != types_.end()) np.profile = profile = t->second;  // chosen in GAMEPADS
         // The axes' rest values as connected (a whammy bar rests at -32768).
         for (int a = 0; a < SDL_GAMEPAD_AXIS_COUNT; ++a) np.axes[size_t(a)] = np.rest[size_t(a)] = SDL_GetGamepadAxis(pad, SDL_GamepadAxis(a));
+        // The buttons the mapping reads from an axis, and that axis's rest.
+        int nb = 0;
+        if (SDL_GamepadBinding** bs = SDL_GetGamepadBindings(pad, &nb)) {
+            for (int k = 0; k < nb; ++k) {
+                const SDL_GamepadBinding* b = bs[k];
+                if (b->input_type == SDL_GAMEPAD_BINDTYPE_AXIS && b->output_type == SDL_GAMEPAD_BINDTYPE_BUTTON &&
+                    b->output.button >= 0 && b->output.button < SDL_GAMEPAD_BUTTON_COUNT)
+                    np.axisButtons.push_back({int(b->output.button), b->input.axis.axis, b->input.axis.axis_max >= b->input.axis.axis_min ? 1 : -1});
+            }
+            SDL_free(bs);
+        }
+        if (SDL_Joystick* j = SDL_GetGamepadJoystick(pad)) {
+            const int n = std::max(0, SDL_GetNumJoystickAxes(j));
+            np.joyAxes.resize(size_t(n)), np.joyRest.resize(size_t(n));
+            for (int a = 0; a < n; ++a) np.joyAxes[size_t(a)] = np.joyRest[size_t(a)] = SDL_GetJoystickAxis(j, a);
+        }
+        // A button held as it connects rests "down" until it is released.
+        for (int b = 0; b < SDL_GAMEPAD_BUTTON_COUNT; ++b)
+            np.stuck[size_t(b)] = !np.axisButton(b) && SDL_GetGamepadButton(pad, SDL_GamepadButton(b));
         // Some report zeros until their first report: the rest values settle first.
         np.settleNs = SDL_GetTicksNS() + 300000000;
         // Its chosen player unless a connected device holds it, else the
@@ -488,6 +551,10 @@ void Input::handle(const SDL_Event& e, std::vector<InputEvent>& out) {
     }
     case SDL_EVENT_GAMEPAD_REMOVED:
         if (auto it = pads_.find(e.gdevice.which); it != pads_.end()) {
+            // What it held is released: the menus' key repeat would go on
+            // moving a direction held as it went away (a wireless pad asleep).
+            device_ = int64_t(it->first);
+            releaseAll(it->second, e.gdevice.timestamp, out);
             SDL_CloseGamepad(it->second.pad);
             pads_.erase(it);
         }
@@ -496,7 +563,14 @@ void Input::handle(const SDL_Event& e, std::vector<InputEvent>& out) {
     case SDL_EVENT_GAMEPAD_BUTTON_UP:
         if (auto it = pads_.find(e.gbutton.which); it != pads_.end() && e.gbutton.button < SDL_GAMEPAD_BUTTON_COUNT) {
             Pad& p = it->second;
-            p.buttons[e.gbutton.button] = e.gbutton.down;
+            const size_t b = e.gbutton.button;
+            if (p.axisButton(int(b))) break;  // read from its axis (SDL_EVENT_JOYSTICK_AXIS_MOTION)
+            if (e.gbutton.timestamp < p.settleNs) p.stuck[b] = e.gbutton.down;
+            if (p.stuck[b]) {  // held since it connected: nothing until released
+                if (!e.gbutton.down) p.stuck[b] = false;
+                break;
+            }
+            p.buttons[b] = e.gbutton.down;
             device_ = int64_t(it->first);
             if (e.gbutton.down) touchUsed_ = false;
             if (e.gbutton.down && captureFrom("pad:" + std::to_string(it->first), btn(SDL_GamepadButton(e.gbutton.button)))) break;
@@ -512,8 +586,12 @@ void Input::handle(const SDL_Event& e, std::vector<InputEvent>& out) {
             device_ = int64_t(it->first);
             const std::string id = "pad:" + std::to_string(it->first);
             if (capturing_ && captureId_ == id) {
+                // The menus' controls (directions, Start, select, back) take
+                // buttons only: a guitar's tilt or a drifting stick moved
+                // while one waited would hold it for good.
+                const bool menuControl = captureControl_ >= C::Start;
                 int d = int(e.gaxis.value) - int(captureRest_[size_t(a)]);
-                if (std::abs(d) > 20000) {
+                if (!menuControl && std::abs(d) > 20000) {
                     // The whammy and Star Power (tilt) take the axis either way; the others its direction.
                     Kind k = captureControl_ == C::Whammy || captureControl_ == C::StarPower ? Kind::AxisAny : d > 0 ? Kind::AxisPos : Kind::AxisNeg;
                     captureFrom(id, axis(k, SDL_GamepadAxis(a)));
@@ -547,6 +625,16 @@ std::string Input::deviceType(const std::string& id) const {
     if (!p) return "";
     if (types_.count(p->guid)) return profileName(p->profile);
     return std::string("Auto (") + profileName(p->detected) + ")";
+}
+
+void Input::releaseAll(Pad& p, uint64_t ts, std::vector<InputEvent>& out) {
+    const bool joypad = p.profile == Profile::Joypad;
+    const auto was = p.down;
+    p.down = {};
+    p.whammyAxis = 0;
+    curGuitar_ = !joypad, curJoypad_ = joypad, curAnalog_ = p.analogWhammy;
+    controlEdges(was, p.down, modeFor(joypad && gamepadPlay_), p.slot, joypad, ts, out);
+    curGuitar_ = curJoypad_ = curAnalog_ = false;
 }
 
 void Input::cycleDeviceType(const std::string& id, int dir) {

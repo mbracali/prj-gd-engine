@@ -164,6 +164,51 @@ int runInputChecks() {
         for (int k = 0; k < 4; ++k) in.cycleDeviceType(g, 1);
         check(in.deviceType(g) == "Auto (Xbox 360 guitar)", "... and back to Auto");
 
+        // A D-pad SDL's mapping reads from an axis resting off centre (an
+        // adapter's): nothing at rest, a press from that rest, and no chatter
+        // around SDL's own mid-range test; A held as it connects is nothing
+        // until released (the menus' key repeat moved left / right by itself).
+        const SDL_JoystickID adapterId = Input::attachVirtualPad("0079:0006:dpadaxis=-32768");
+        SDL_Joystick* adapter = nullptr;
+        for (int k = 0; k < 100 && !adapter; ++k) {
+            pump(in, evs);
+            adapter = SDL_GetJoystickFromID(adapterId);
+            if (!adapter) SDL_Delay(10);
+        }
+        if (adapter) {
+            SDL_SetJoystickVirtualButton(adapter, SDL_GAMEPAD_BUTTON_SOUTH, true);
+            pump(in, evs);
+            SDL_Delay(350);
+            evs.clear();
+            SDL_SetJoystickVirtualAxis(adapter, 6, -31000);
+            SDL_SetJoystickVirtualAxis(adapter, 7, 1200);
+            pump(in, evs);
+            const auto sideways = [&] { return has(evs, Action::Left, true, ControllerMode::Joypad) || has(evs, Action::Right, true, ControllerMode::Joypad); };
+            check(!sideways() && evs.empty(), "a D-pad on an axis resting off centre presses nothing at rest");
+            SDL_SetJoystickVirtualButton(adapter, SDL_GAMEPAD_BUTTON_SOUTH, false);
+            pump(in, evs);
+            check(evs.empty(), "... nor does A held as it connected, released");
+            SDL_SetJoystickVirtualAxis(adapter, 6, 0);
+            pump(in, evs);
+            check(has(evs, Action::Right, true, ControllerMode::Joypad), "... moved from its rest it presses");
+            evs.clear();
+            for (int v : {-14000, -18000, -15000, -17500}) SDL_SetJoystickVirtualAxis(adapter, 6, Sint16(v)), pump(in, evs);
+            int presses = 0;
+            for (const InputEvent& e : evs) presses += e.action == Action::Right;
+            check(presses == 0, "... and does not chatter around the middle of its range");
+            SDL_SetJoystickVirtualButton(adapter, SDL_GAMEPAD_BUTTON_SOUTH, true);
+            pump(in, evs);
+            check(has(evs, Action::Confirm, true, ControllerMode::Joypad), "... A, pressed again, selects");
+            evs.clear();
+            SDL_DetachVirtualJoystick(adapterId);
+            pump(in, evs);
+            check(has(evs, Action::Right, false, ControllerMode::Joypad) && has(evs, Action::Confirm, false, ControllerMode::Joypad),
+                  "a controller removed releases what it held");
+            evs.clear();
+        } else {
+            check(false, "the adapter opens as a gamepad");
+        }
+
         check(in.writeReport(), "controllers-report.txt written");
         const std::string report = readFile(in.reportPath());
         check(report.find("Xbox 360 Guitar (virtual)") != std::string::npos &&

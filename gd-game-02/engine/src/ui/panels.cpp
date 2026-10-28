@@ -87,6 +87,26 @@ public:
         return PanelObj::handleNative(in, msg, args, r);
     }
 
+    // The items act as their buttons (gd01's help bar): select, back, Start,
+    // and the main menu's GAMEPADS; each label's rectangle grown left over its icon.
+    bool helpMouse(float x, float y, bool click) override {
+        if (!view || !showing) return false;
+        for (const gfx::UiView::Hit& h : view->hits()) {
+            if (h.key.rfind("hb", 0) != 0) continue;
+            const size_t k = size_t(std::atoi(h.key.c_str() + 2));
+            if (k >= items_.size()) continue;
+            const std::string& kind = items_[k].first;
+            const float icon = kind == "strum" ? (h.y1 - h.y0) * 3.2f : (h.y1 - h.y0) * 1.8f;
+            if (x < h.x0 - icon || x > h.x1 + 6 || y < h.y0 - 8 || y > h.y1 + 8) continue;
+            if (!click) return true;
+            const int b = kind == "fret1" ? kPad_X : kind == "fret2" ? kPad_Tri : kind == "start" ? kPad_Start : -1;
+            if (kind == "fret3" && ui.currentScreen() == "main_screen") ui.openGamepads();
+            else if (b >= 0) ui.buttonDown(b, 0), ui.buttonUp(b, 0);
+            return true;
+        }
+        return false;
+    }
+
 private:
     // GH2's help items use only fret1 (green), fret2 (red) and strum; the
     // disc's hb_fret3.tex is an unused placeholder without alpha (a yellow

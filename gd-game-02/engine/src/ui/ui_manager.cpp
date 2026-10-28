@@ -69,6 +69,7 @@ void UiManager::logOnce(const std::string& what) {
 }
 
 std::string UiManager::localize(const std::string& token) const {
+    if (token == "port_gamepads") return "GAMEPADS";  // the port's main-menu help item
     return locale_ ? locale_->text(token) : token;
 }
 
@@ -630,6 +631,16 @@ void UiManager::updateHelpbar() {
         }
         if (pick) display = interp_.toValue(pick->children[1]);
     }
+    // The port's main menu also offers GAMEPADS on the yellow fret, before
+    // the strum bar, as gd01's does (not in GH2).
+    if (current_->name() == "main_screen" && display.type == Value::Type::Array && display.array) {
+        std::vector<Value> items = *display.array;
+        auto strum = std::find_if(items.begin(), items.end(), [](const Value& e) {
+            return e.type == Value::Type::Array && e.array && !e.array->empty() && (*e.array)[0].str() == "strum";
+        });
+        items.insert(strum, Value::list({Value::symbol("fret3"), Value::symbol("port_gamepads")}));
+        display = Value::list(std::move(items));
+    }
     setHelpbarDisplay(*this, display);
 }
 
@@ -710,6 +721,7 @@ void UiManager::update() {
     lastWall_ = wall;
     uiMs_ += frameDt_;
     if (!(host_.gameLoaded() && host_.gamePaused())) secondsMs_ += frameDt_;
+    if (gamepadsAtMs_ > 0 && wall >= gamepadsAtMs_) openGamepads();
     if (splash_ >= 0) {
         splashMs_ += frameDt_;
         if (splashMs_ >= 3000) {
@@ -763,6 +775,8 @@ void UiManager::updateRepeat(double dtMs) {
 // ---------------------------------------------------------------- input
 
 void UiManager::action(const InputEvent& e) {
+    // The yellow fret on the main menu opens GAMEPADS (gd01's help item).
+    if (e.action == Action::Fret2 && e.down) yellowButton();
     int pad = -1;
     switch (e.action) {
     case Action::Up: pad = kPad_DUp; break;
@@ -795,6 +809,7 @@ void UiManager::action(const InputEvent& e) {
     // (long_cheats.dta's G_YELLOW / G_BLUE / G_ORANGE).
     if (pad < 0 && e.down && splash_ < 0 && e.action >= Action::Fret2 && e.action <= Action::Fret4)
         feedCheats(e.action == Action::Fret2 ? kPad_Circle : e.action == Action::Fret3 ? kPad_Square : kPad_L1);
+
     if (pad < 0) return;
     // Two players: the scripts' $player_num is the player whose pad acted
     // (gamecfg set_player), except on the controller select itself, where
@@ -818,6 +833,7 @@ bool UiManager::textEntryFocused() {
 
 void UiManager::buttonDown(int button, int player) {
     player = std::clamp(player, 0, 1);
+    if (button >= 0 && button < 16) ++presses_[size_t(button)];
     if (isDirection(button)) held_[size_t(player)] = {button, 0, false};
     if (splash_ < 0) feedCheats(button);
     if (splash_ >= 0) {
@@ -836,6 +852,7 @@ void UiManager::buttonDown(int button, int player) {
 // buttons start afresh.
 void UiManager::feedCheats(int button) {
     const double now = double(SDL_GetTicksNS()) / 1e6;
+    if (button != kPad_Circle) gamepadsAtMs_ = -1;  // another button: a cheat's code, not GAMEPADS
     bool fresh = false;
     if (!cheatButtons_.empty() && now - cheatLastMs_ > 750) cheatButtons_.clear(), fresh = true;
     cheatLastMs_ = now;
@@ -846,6 +863,7 @@ void UiManager::feedCheats(int button) {
         if (c.buttons.size() > cheatButtons_.size()) continue;
         if (!std::equal(c.buttons.begin(), c.buttons.end(), cheatButtons_.end() - std::ptrdiff_t(c.buttons.size()))) continue;
         cheatButtons_.clear();
+        gamepadsAtMs_ = -1;
         try {
             interp_.eval(*c.script);
         } catch (const std::exception& e) {
@@ -887,6 +905,45 @@ void UiManager::setCheat(const std::string& id, bool on) {
         return;
     }
     playSfx(on ? "cheat" : "cheat_off");
+}
+
+// The port's GAMEPADS on the main menu's yellow fret. GH2's cheat codes are
+// entered there with the same frets (CheatsManager), so it opens once no
+// other button follows within the codes' 750 ms; a code that completes, or
+// any other button, cancels it. The help bar's item (a click) opens it at once.
+void UiManager::yellowButton() {
+    if (splash_ >= 0 || phase_ != Phase::Idle || currentScreen() != "main_screen") return;
+    gamepadsAtMs_ = double(SDL_GetTicksNS()) / 1e6 + 750;
+}
+
+void UiManager::openGamepads() {
+    gamepadsAtMs_ = -1;
+    if (splash_ >= 0 || phase_ != Phase::Idle || !pending_.empty() || currentScreen() != "main_screen") return;
+    playSfx("button_select");
+    // Back returns to the main menu (which allows no back of its own, so the
+    // screen would not take it as its back screen).
+    if (ScreenObj* g = screen("gamepads_screen")) g->back = current_;
+    gotoScreen("gamepads_screen");
+}
+
+bool UiManager::mouse(float x, float y, bool click) {
+    if (splash_ >= 0) {
+        if (click) skipSplashes();
+        return click;
+    }
+    if (!current_ || phase_ != Phase::Idle || !pending_.empty()) return false;
+    for (PanelObj* p : current_->panels())
+        if (p->up && p->helpMouse(x, y, click)) return true;
+    PanelObj* fp = current_->focusPanel();
+    if (getenv("GD02_MOUSEDBG") && fp && fp->view) { SDL_Log("mouse %.0f %.0f fp %s up %d hits %zu", x, y, fp->name().c_str(), fp->up, fp->view->hits().size()); for (auto& h : fp->view->hits()) SDL_Log("  %s %.0f %.0f %.0f %.0f", h.key.c_str(), h.x0, h.y0, h.x1, h.y1); }
+    return fp && fp->up && fp->mouse(x, y, click);
+}
+
+void UiManager::wheel(int dir) {
+    if (splash_ >= 0 || !current_ || phase_ != Phase::Idle || !pending_.empty()) return;
+    const int b = dir < 0 ? kPad_DUp : kPad_DDown;
+    buttonDown(b, 0);
+    buttonUp(b, 0);
 }
 
 void UiManager::skipSplashes() {

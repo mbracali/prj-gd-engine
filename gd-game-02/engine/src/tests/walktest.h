@@ -40,6 +40,17 @@ class UiManager;
 //              -> back -> back -> main.
 //   cheats     at the main menu, GH2's Air Guitar and Hyper Speed codes turn
 //              them on; Air Guitar's again, after a pause, turns it off.
+//   mouse      the mouse alone: hover OPTIONS on the main menu (focused), click
+//              it -> Options -> click Enhanced Options -> In-Game Max FPS's
+//              dropdown clicked open, 60 clicked -> right click -> Options ->
+//              the help bar's BACK clicked -> main.
+//   gamepads   the keyboard's yellow fret on the main menu -> GAMEPADS (once
+//              the cheat codes' 750 ms are over) -> the keyboard's Whammy
+//              rebound to E (a real key) and saved in controllers.json ->
+//              back -> main; then the help bar's GAMEPADS clicked -> GAMEPADS.
+//   stickyaxis an adapter whose D-pad is an axis resting off centre (a
+//              virtual pad, 0079:0006:dpadaxis=-32768) plugged in at the main
+//              menu: no left / right press in 2 s; moved, one right press.
 //   coop       boot (a save created) -> main -> MULTIPLAYER -> the controller select (pad 0 to
 //              P1, pad 1 to P2, both confirm) -> CO-OP -> the venue -> the first song (surrender:
 //              guitar and bass) -> the parts (P1 guitar, P2 bass) -> the difficulties (P1 Easy, P2
@@ -74,11 +85,15 @@ public:
 
 private:
     struct Step {
-        enum Kind { Screen, Press, Wait, Hold, Check, Key } kind;  // Key: a real key (button: its SDL keycode)
+        // Key: a real key (button: its SDL keycode). Mouse: button 0 hover,
+        // 1 click, 3 right click, 4 / 5 wheel up / down, at (x, y), or on the
+        // focus panel's component `screen` (its drawn bounds' centre).
+        enum Kind { Screen, Press, Wait, Hold, Check, Key, Mouse } kind;
         std::string screen;
         int button = 0;
         double ms = 0;
         int player = 0;  // a press: the player (the pad on the controller select)
+        float x = 0, y = 0;
     };
     std::string scenario_;
     bool seeded_ = false;
@@ -91,6 +106,8 @@ private:
     std::string error_;
     std::array<float, 3> camera_{};  // the main menu's camera (the back walk)
     std::array<float, 4> bricks_{};  // the options' bricks light (the back walk)
+    unsigned adapter_ = 0;           // the stickyaxis walk's virtual adapter (SDL_JoystickID)
+    int sideBase_ = 0, rightBase_ = 0;
 
     void runCheck(ui::UiManager& ui, const Step& s, double nowMs);
 };

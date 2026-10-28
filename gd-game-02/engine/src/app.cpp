@@ -267,6 +267,18 @@ private:
     void endSong();
     void handleEvent(const SDL_Event& e);
     void handleAction(const InputEvent& a);
+    // Mouse support in the menus (gd01's): `button` 0 hover, 1 left click, 3
+    // right click (back); menu units. menuWheel: -1 up, +1 down. Both only
+    // while the menus have the screen (not during a song).
+    void menuMouse(float x, float y, int button);
+    void menuWheel(int dir);
+    bool menuMouseAllowed() const;
+    // The mouse pointer: shown while the mouse moves in the menus, hidden
+    // after 3 s without it, on a key or controller press and in a song.
+    void updateCursor();
+    bool cursorShown_ = true;
+    bool inputLog_ = false;  // GD02_INPUTLOG=1: every input action
+    double mouseMovedMs_ = -1e9;
     void playerAction(const InputEvent& a);
     void updateSong(float t);
     float songClock();
@@ -398,19 +410,19 @@ private:
     bool encoreCheck_ = false, encoreFx_ = false, campaignFinal_ = false;  // GameSetup's encore state
     std::unique_ptr<LightPresets> lighting_;
     WorldDriver worldDriver_;
-    // The Enhanced Options' live backdrop (menuBackdrop): the second venue
-    // with the band playing a song of its tier, silently, on the wall clock,
-    // through a camera of its own.
+    // The Enhanced Options' backdrop (menuBackdrop): a still shot of the
+    // second venue with the band caught mid-song (gd01's: a posed band that
+    // does not move), through a camera of its own.
     struct Backdrop {
+        float simMs = 0;      // the song time run so far (fixed steps)
+        bool frozen = false;  // posed: nothing updates any more
         const SongInfo* info = nullptr;
         std::unique_ptr<Song> song;
         WorldDriver driver;
-        uint64_t startNs = 0;
         float fromMs = 0;
         bool framed = false;  // the shot's target and direction are set
         gfx::Vec3 target, dir;
         float dist = 300, spread = 100, aim = 0;
-        uint64_t lastNs = 0;
         int lightPart = -1;
     };
     std::unique_ptr<Backdrop> backdrop_;
@@ -455,6 +467,7 @@ int App::run() {
     // Development aid: GD02_VIRTUAL_PAD=<vendor>:<product>[:guitar] (hex, e.g.
     // 1430:4748:guitar) plugs in a virtual controller, to test without hardware.
     if (const char* vp = SDL_getenv("GD02_VIRTUAL_PAD")) virtualPad_ = Input::attachVirtualPad(vp);
+    inputLog_ = envOn("GD02_INPUTLOG");
     SDL_WindowFlags flags = SDL_WINDOW_RESIZABLE | gfx::prepareWindow();  // OpenGL (render/device.h)
 #ifdef __ANDROID__
     flags |= SDL_WINDOW_FULLSCREEN;
@@ -473,6 +486,14 @@ int App::run() {
     window_ = SDL_CreateWindow(app::kWindowTitle, int(kScreenW), int(kScreenH), flags);
     setAppWindowIcon(window_);
     installDesktopEntry();
+    // Touch: window-normalised positions to menu units (the 16:9 picture).
+    input_.setTouchToMenu([this](float nx, float ny, float& mx, float& my) {
+        int ww = 0, wh = 0;
+        SDL_GetWindowSize(window_, &ww, &wh);
+        const float scale = std::max(1e-4f, std::min(float(ww) / 1280.0f, float(wh) / 720.0f));
+        mx = (nx * float(ww) - (float(ww) - 1280.0f * scale) * 0.5f) / scale;
+        my = (ny * float(wh) - (float(wh) - 720.0f * scale) * 0.5f) / scale;
+    });
     std::string error;
     if (!window_ || !canvas_.init(window_, error)) {
         std::fprintf(stderr, "%s: cannot open the window: %s\n", app::kProgram, window_ ? error.c_str() : SDL_GetError());
@@ -616,6 +637,12 @@ void App::startUi() {
         SDL_setenv_unsafe("GD02_SAVE_DIR", dir.c_str(), 1);
     }
     loadEnhanced();
+    // A save folder of its own (the walk test, development) holds controllers.json too.
+    if (const char* d = SDL_getenv("GD02_SAVE_DIR"); d && *d) {
+        std::string dir = d;
+        if (dir.back() != '/' && dir.back() != '\\') dir += '/';
+        input_.setSaveDir(dir);
+    }
     auto ui = std::make_unique<ui::UiManager>(*data_, canvas_, *this, input_);
     std::string error;
     if (!ui->init(error)) {
@@ -887,8 +914,65 @@ void App::handleEvent(const SDL_Event& e) {
         ((e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.which != SDL_TOUCH_MOUSEID) || e.type == SDL_EVENT_FINGER_UP)) {
         ui_->buttonDown(ui::kPad_Start, 0);
         ui_->buttonUp(ui::kPad_Start, 0);
+    } else if (ui_ && (e.type == SDL_EVENT_MOUSE_MOTION || e.type == SDL_EVENT_MOUSE_BUTTON_DOWN) && e.motion.which != SDL_TOUCH_MOUSEID) {
+        // Mouse support (gd01's): hovering focuses (only while the window has
+        // the input focus), a left click selects, a right click goes back.
+        const bool click = e.type == SDL_EVENT_MOUSE_BUTTON_DOWN;
+        if (enhancedValue("mouse") == "off") return;  // Enhanced Options > Enable Mouse Selection
+        if (click && e.button.button != SDL_BUTTON_LEFT && e.button.button != SDL_BUTTON_RIGHT) return;
+        if (!click && !(SDL_GetWindowFlags(window_) & SDL_WINDOW_INPUT_FOCUS)) return;
+        const float wx = click ? e.button.x : e.motion.x, wy = click ? e.button.y : e.motion.y;
+        int ww = 0, wh = 0;
+        SDL_GetWindowSize(window_, &ww, &wh);
+        const float scale = std::min(float(ww) / 1280.0f, float(wh) / 720.0f);
+        if (scale <= 0) return;
+        const float mx = (wx - (float(ww) - 1280.0f * scale) * 0.5f) / scale, my = (wy - (float(wh) - 720.0f * scale) * 0.5f) / scale;
+        if (menuMouseAllowed()) mouseMovedMs_ = double(SDL_GetTicksNS()) / 1e6;
+        menuMouse(mx, my, !click ? 0 : e.button.button == SDL_BUTTON_LEFT ? 1 : 3);
+    } else if (ui_ && e.type == SDL_EVENT_MOUSE_WHEEL && e.wheel.which != SDL_TOUCH_MOUSEID && e.wheel.y != 0 && enhancedValue("mouse") != "off") {
+        if (menuMouseAllowed()) mouseMovedMs_ = double(SDL_GetTicksNS()) / 1e6;
+        menuWheel(e.wheel.y > 0 ? -1 : 1);
+    } else if (e.type == SDL_EVENT_KEY_DOWN || e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
+        mouseMovedMs_ = -1e9;  // a key or a button hides the pointer
+        // A gamepad's yellow Y button on the main menu: GAMEPADS (its yellow
+        // fret, RB, does it through the menus too).
+        if (ui_ && e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN && e.gbutton.button == SDL_GAMEPAD_BUTTON_NORTH && input_.joypadDevice(e.gbutton.which))
+            ui_->yellowButton();
     }
-    for (const InputEvent& a : actions_) handleAction(a);
+    // A tap in the menus is a click where it landed (Input::takeMenuTaps).
+    for (auto [tx, ty] : input_.takeMenuTaps()) menuMouse(tx, ty, 1);
+    for (const InputEvent& a : actions_) {
+        if (inputLog_) SDL_Log("input: %s %s player %d%s", actionName(a.action), a.down ? "down" : "up", a.player, a.joypad ? " (joypad)" : "");
+        handleAction(a);
+    }
+}
+
+bool App::menuMouseAllowed() const {
+    // Not while a song is being played (the pause menu takes it again).
+    return ui_ && !ui_->inSplashes() && !input_.inGame();
+}
+
+void App::menuMouse(float x, float y, int button) {
+    if (!menuMouseAllowed()) return;
+    if (button == 3) {  // right click: back, as the red fret
+        ui_->buttonDown(ui::kPad_Tri, 0);
+        ui_->buttonUp(ui::kPad_Tri, 0);
+        return;
+    }
+    ui_->mouse(x, y, button == 1);
+}
+
+void App::menuWheel(int dir) {
+    if (menuMouseAllowed()) ui_->wheel(dir);
+}
+
+void App::updateCursor() {
+    const double now = double(SDL_GetTicksNS()) / 1e6;
+    const bool show = menuMouseAllowed() && now - mouseMovedMs_ < 3000;
+    if (show == cursorShown_) return;
+    cursorShown_ = show;
+    if (show) SDL_ShowCursor();
+    else SDL_HideCursor();
 }
 
 // One input action. With the menus: the player's controller layer while
@@ -1203,6 +1287,7 @@ void App::frameSong() {
 // track and HUD are its game panels).
 void App::frameUi() {
     const double now = double(SDL_GetTicksNS()) / 1e6 - uiStartMs_;
+    updateCursor();
     actions_.clear();
     input_.poll(SDL_GetTicksNS(), actions_);
     for (const InputEvent& a : actions_) handleAction(a);
@@ -1218,6 +1303,14 @@ void App::frameUi() {
                 e.key.down = edge > 0;
                 SDL_PushEvent(&e);
             }
+        } else if (k.mouse) {  // the mouse, as its events would (menu units)
+            if (k.mouse >= 4) menuWheel(k.mouse == 4 ? -1 : 1);
+            else menuMouse(k.mx, k.my, k.mouse == 2 ? 1 : k.mouse == 3 ? 3 : 0);
+        } else if (k.padAxis >= 0) {
+            if (SDL_Joystick* j = virtualPad_ ? SDL_GetJoystickFromID(virtualPad_) : nullptr)
+                SDL_SetJoystickVirtualAxis(j, k.padAxis, Sint16(std::clamp(k.axisValue, -32768, 32767)));
+            else
+                SDL_Log("GD02_KEYS: a \"j\" item needs GD02_VIRTUAL_PAD");
         } else if (k.padButton >= 0) {
             if (SDL_Joystick* j = virtualPad_ ? SDL_GetJoystickFromID(virtualPad_) : nullptr)
                 SDL_SetJoystickVirtualButton(j, k.padButton, k.edge > 0);
@@ -1762,8 +1855,8 @@ void App::drawFpsCounter() {
     t.draw(canvas_.renderer().materials(), "helveticablack.font", buf, 23, 695, 22, {0.2f, 1, 0.3f, 1}, 0x41);
 }
 
-// The live backdrop: the second venue (venues::names()[1], small1) with the
-// band playing the first song of its tier, without sound, looping.
+// The backdrop: the second venue (venues::names()[1], small1) with the band
+// caught a quarter into the first song of its tier, silent and still.
 void App::menuBackdrop(bool on) {
     if (!on) {
         if (!backdrop_) return;
@@ -1790,12 +1883,15 @@ void App::menuBackdrop(bool on) {
     }
     b->fromMs = b->song->endMs * 0.25f;
     b->driver.reset(b->fromMs);
-    b->startNs = SDL_GetTicksNS();
     backdrop_ = std::move(b);
     // The band first: it enters with the world (World::start), as in a song.
     startBand(*backdrop_->info, *backdrop_->song, true);
     world_->start(false, false);
     world_->message("excitement", {Value::integer(3)});
+    // About 1.5 s of the song in fixed steps poses the band and frames the
+    // shot; then nothing moves again (gd01's backdrop).
+    for (int i = 0; i < 45 && backdrop_; ++i) updateBackdrop();
+    if (backdrop_) backdrop_->frozen = true;
 }
 
 bool App::drawMenuBackdrop() {
@@ -1806,21 +1902,15 @@ bool App::drawMenuBackdrop() {
 
 void App::updateBackdrop() {
     Backdrop& b = *backdrop_;
-    if (!world_ || !venueView_) return;
-    float ms = b.fromMs + float(double(SDL_GetTicksNS() - b.startNs) / 1e6);
-    if (ms > b.song->endMs - 3000) {  // around again
-        b.startNs = SDL_GetTicksNS();
-        b.driver.reset(b.fromMs);
-        b.lightPart = -1;
-        ms = b.fromMs;
-        startBand(*b.info, *b.song, true);
-    }
+    if (!world_ || !venueView_ || b.frozen) return;
+    b.simMs += 33;
+    const float ms = b.fromMs + b.simMs;
     b.driver.update(*world_, *b.song, ms, nullptr, {}, nullptr, {});
     world_->update();
     // The lights: the venue's chorus and verse presets in turn, 20 s each,
     // not the song's cues (their blackouts left the band in the dark).
     if (lighting_) {
-        const int part = int(double(SDL_GetTicksNS() - b.startNs) / 20e9);
+        const int part = 0;
         if (part != b.lightPart) {
             b.lightPart = part;
             lighting_->ignoreEvents(true);
@@ -1870,15 +1960,9 @@ void App::updateBackdrop() {
     }
     if (b.framed) {
         // Following the singer as they move about the stage, smoothly.
-        if (scene::Xfm singer; band_ && band_->objectXfm("singer", "bone_head.mesh", singer)) {
-            const gfx::Vec3 now{singer.pos[0], singer.pos[1], singer.pos[2] - 14};
-            const uint64_t ns = SDL_GetTicksNS();
-            const float dt = b.lastNs ? float(double(ns - b.lastNs) / 1e9) : 0.0f;
-            b.lastNs = ns;
-            b.target = b.target + (now - b.target) * (1 - std::exp(-std::min(dt, 0.25f) / 1.2f));
-        }
-        const float t = float(double(SDL_GetTicksNS() - b.startNs) / 1e9);
-        const float a = 0.14f * std::sin(t * 6.2831853f / 26.0f);
+        if (scene::Xfm singer; band_ && band_->objectXfm("singer", "bone_head.mesh", singer))
+            b.target = b.target + (gfx::Vec3{singer.pos[0], singer.pos[1], singer.pos[2] - 14} - b.target) * (1 - std::exp(-0.033f / 0.3f));
+        const float t = 0, a = 0;
         const gfx::Vec3 d{b.dir.x * std::cos(a) - b.dir.y * std::sin(a), b.dir.x * std::sin(a) + b.dir.y * std::cos(a), 0};
         gfx::Vec3 eye = b.target + d * b.dist;
         eye.z = b.target.z + b.dist * 0.12f + 3 * std::sin(t * 0.37f);  // above the crowd's heads

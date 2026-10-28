@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
-// gd01's Gamepads screen (gd-game-01/engine/src/ui/gamepad_panel.cpp),
-// kept as is; the adapter at the bottom gives it gd02's text, quads,
-// sounds and buttons.
+// gd01's Gamepads screen (gd-game-01/engine/src/ui/gamepad_panel.cpp): the
+// same structure, rows, flow and mouse, drawn with PortDraw (GH2's menu
+// font and colours; docs/guidelines/controls-and-enhanced-menu.md).
 #include "ui/gamepad_panel.h"
 
 #include <SDL3/SDL.h>
@@ -15,7 +15,7 @@
 
 #include "input/input.h"
 #include "render/canvas.h"
-#include "ui/screen_text.h"
+#include "ui/port_draw.h"
 #include "ui/ui_objects.h"
 
 namespace ui {
@@ -26,12 +26,14 @@ namespace {
 // and then the selected controller's bindings, the keyboard's "Frets also
 // strum" and Reset (right). On a controller, Left / Right (or Select) changes
 // its player (none, P1, P2; one controller per player); on a binding, Select
-// waits for the new button, axis or key (Esc cancels, Delete leaves it
-// unbound, 10 s timeout). The touch screen (listed while touch controls are
-// on) plays as P1 and has its settings instead of bindings.
+// waits for the new button, axis or key (Esc cancels, Delete or the row's
+// mouse "x" leaves it unbound, 10 s timeout). The touch screen (listed while
+// touch controls are on) plays as P1 and has its settings instead of
+// bindings: Select / Left / Right change them. The mouse: hovering a row
+// focuses it, a click acts as Select, a click while a binding waits cancels it.
 class GamepadPanelObj : public PanelObj {
 public:
-    GamepadPanelObj(UiManager& ui, const std::string& name) : PanelObj(ui, name, "GamepadPanel"), input_(&ui.input()) {}
+    GamepadPanelObj(UiManager& ui, const std::string& name) : PanelObj(ui, name, "GamepadPanel"), input_(&ui.input()), d_(ui) {}
 
     std::string fileName() override { return ""; }
     bool drawsSomething() const override { return true; }
@@ -78,6 +80,37 @@ public:
         return false;  // back: the screen's auto back
     }
 
+    bool mouse(float x, float y, bool click) override {
+        if (!input_) return false;
+        x -= d_.offset();
+        if (input_->capturing()) {
+            if (click) input_->cancelCapture(), sound("button_back");
+            return true;
+        }
+        const auto devs = input_->devices();
+        clamp(devs);
+        for (int r = 0; r < rowCount(devs); ++r) {
+            float x0, y0, x1, y1;
+            rowRect(r, int(devs.size()), x0, y0, x1, y1, isTouch(devs));
+            if (x < x0 || x > x1 || y < y0 || y > y1) continue;
+            const int c = r - int(devs.size());
+            if (click && !isTouch(devs) && c >= 0 && c < int(Input::Control::Count) && x >= x1 - kClearW) {
+                focus_ = r;
+                input_->clearBinding(devs[size_t(selected_)].id, Input::Control(c));
+                sound("button_back");
+                return true;
+            }
+            if (r != focus_) {
+                focus_ = r;
+                if (r < int(devs.size())) selected_ = r;
+                sound("button_toggle");
+            }
+            if (click) activate(devs);
+            return true;
+        }
+        return false;
+    }
+
     void poll(double dtMs) override {
         PanelObj::poll(dtMs);
         if (input_ && input_->devices().size() != reportedDevices_) {  // a controller came or went: a fresh report
@@ -94,22 +127,20 @@ public:
 
     void draw() override {
         if (!input_ || ui.headless()) return;
-        // Quads first (the canvas batches them), then the texts in GH2's fonts.
-        pass_ = 0;
-        quad(0, 0, kScreenW, kScreenH, {0, 0, 0, 0.82f});
-        drawAll();
-        ui.canvas().flush();
-        ui.screenText().begin(ui.canvas().renderer());
-        pass_ = 1;
-        drawAll();
+        d_.updateTransition();
+        for (int pass : {0, 1}) {
+            d_.begin(pass);
+            if (pass == 0) d_.quad(0, 0, kScreenW, kScreenH, {0, 0, 0, 1});
+            drawAll();
+        }
     }
 
 private:
     void drawAll() {
-        const float o = 0;
+        const float o = d_.offset();
         const auto devs = input_->devices();
         clamp(devs);
-        text("rokk.font", "GAMEPADS", 90 + o, 40, 62, kTitle, 0x11);
+        text("rokk.font", "GAMEPADS", 90 + o, 40, 66, kTitle, 0x11);
         text("impactor.font", "Controllers, their players and their buttons", 92 + o, 110, 20, kDim, 0x11);
         text("impactor.font", "Report for bug reports: " + fit(input_->reportPath(), 15, 760), 92 + o, 136, 15, kDim, 0x11);
         // Left: the controllers.
@@ -119,7 +150,7 @@ private:
             float x0, y0, x1, y1;
             rowRect(int(d), int(devs.size()), x0, y0, x1, y1);
             const bool f = int(d) == focus_, sel = int(d) == selected_;
-            if (f) quad(x0 + o, y0, x1 + o, y1, {1, 0.86f, 0.2f, 0.14f});
+            if (f) quad(x0 + o, y0, x1 + o, y1, PortDraw::kFocusBar);
             else if (sel) quad(x0 + o, y0, x1 + o, y1, {1, 1, 1, 0.06f});
             const float h = y1 - y0;  // rows shrink when many controllers are connected
             if (h >= 50) {
@@ -146,8 +177,8 @@ private:
             const float ax = kLeftX0 + 16 + float(a % 2) * 215 + o, ay = ry + 56 + float(a / 2) * 26;
             text("impactor.font", axes[a].first, ax, ay + 9, 14, kDim, 0x21);
             const float bx0 = ax + 96, bx1 = ax + 196, mid = (bx0 + bx1) * 0.5f, v = std::clamp(axes[a].second, -1.0f, 1.0f);
-            quad(bx0, ay + 4, bx1, ay + 14, {1, 1, 1, 0.12f});
-            quad(std::min(mid, mid + v * 50), ay + 4, std::max(mid, mid + v * 50), ay + 14, kOn);
+            quad(bx0 + o, ay + 4, bx1 + o, ay + 14, {1, 1, 1, 0.12f});
+            quad(std::min(mid, mid + v * 50) + o, ay + 4, std::max(mid, mid + v * 50) + o, ay + 14, kOn);
         }
         // Right: the bindings.
         quad(kRightX0 + o, kTop - 16, kRightX1 + o, kBottom, {1, 1, 1, 0.05f});
@@ -160,7 +191,7 @@ private:
                 float x0, y0, x1, y1;
                 rowRect(r, int(devs.size()), x0, y0, x1, y1, true);
                 const bool f = r == focus_;
-                if (f) quad(x0 + o, y0, x1 + o, y1, {1, 0.86f, 0.2f, 0.14f});
+                if (f) quad(x0 + o, y0, x1 + o, y1, PortDraw::kFocusBar);
                 const float cy = (y0 + y1) * 0.5f + 1;
                 if (c == Input::kTouchOptions) {
                     text("impactor.font", "Reset to Defaults", (x0 + x1) * 0.5f + o, cy, 20, f ? kFocused : kNormal, 0x22);
@@ -180,29 +211,28 @@ private:
             rowRect(r, int(devs.size()), x0, y0, x1, y1);
             const bool f = r == focus_;
             if (c == resetRow()) {  // Reset to defaults
-                if (f) quad(x0 + o, y0, x1 + o, y1, {1, 0.86f, 0.2f, 0.14f});
+                if (f) quad(x0 + o, y0, x1 + o, y1, PortDraw::kFocusBar);
                 text("impactor.font", "Reset to Defaults", (x0 + x1) * 0.5f + o, (y0 + y1) * 0.5f + 1, 20, f ? kFocused : kNormal, 0x22);
                 continue;
             }
             if (c > resetRow() && isPad(devs)) {  // the controller's type
-                if (f) quad(x0 + o, y0, x1 + o, y1, {1, 0.86f, 0.2f, 0.14f});
+                if (f) quad(x0 + o, y0, x1 + o, y1, PortDraw::kFocusBar);
                 const std::string t = input_->deviceType(id);
                 text("impactor.font", "Type: " + (f ? "< " + t + " >" : t), x0 + 12 + o, (y0 + y1) * 0.5f + 1, 18, f ? kFocused : kNormal, 0x21);
                 continue;
             }
             if (c > resetRow()) {  // the keyboard's Frets also strum
                 const bool on = input_->keyboardFretsStrum();
-                if (f) quad(x0 + o, y0, x1 + o, y1, {1, 0.86f, 0.2f, 0.14f});
+                if (f) quad(x0 + o, y0, x1 + o, y1, PortDraw::kFocusBar);
                 const float cy = (y0 + y1) * 0.5f;
-                quad(x0 + 10 + o, cy - 9, x0 + 28 + o, cy + 9, {1, 1, 1, 0.25f});
-                if (on) quad(x0 + 13 + o, cy - 6, x0 + 25 + o, cy + 6, kOn);
-                text("impactor.font", "Frets also strum (like a PlayStation pad)", x0 + 38 + o, cy + 1, 18, f ? kFocused : kNormal, 0x21);
+                d_.checkBox(x0 + 34 + o, cy, on, f ? kFocused : kNormal, PortDraw::kGold);
+                text("impactor.font", "Frets also strum (like a PlayStation pad)", x0 + 44 + o, cy + 1, 18, f ? kFocused : kNormal, 0x21);
                 continue;
             }
             const auto ctrl = Input::Control(c);
             const bool live = input_->controlDown(id, ctrl);
             if (live) quad(x0 + o, y0, x1 + o, y1, {0.3f, 1, 0.35f, 0.22f});
-            else if (f) quad(x0 + o, y0, x1 + o, y1, {1, 0.86f, 0.2f, 0.14f});
+            else if (f) quad(x0 + o, y0, x1 + o, y1, PortDraw::kFocusBar);
             if (c < 5) quad(x0 + 8 + o, y0 + 7, x0 + 16 + o, y1 - 7, kFretColors[size_t(c)]);
             text("impactor.font", Input::controlName(ctrl), x0 + 26 + o, (y0 + y1) * 0.5f + 1, 18, f ? kFocused : kNormal, 0x21);
             std::string what;
@@ -214,15 +244,19 @@ private:
             }
             text("impactor.font", fit(what, 18, x1 - x0 - 250 - kClearW), x0 + 236 + o, (y0 + y1) * 0.5f + 1, 18,
                  capturing && f ? kAccent : live ? kOn : kDim, 0x21);
+            if (!b[size_t(c)].empty() && !(capturing && f))  // the mouse's clear button
+                text("impactor.font", "x", x1 - kClearW * 0.5f + o, (y0 + y1) * 0.5f + 1, 18, f ? kFocused : kDim, 0x22);
         }
     }
 
     static constexpr int kUp = kPad_DUp, kDown = kPad_DDown, kLeft = kPad_DLeft, kRight = kPad_DRight;
     static constexpr float kTop = 168, kBottom = 640, kLeftX0 = 56, kLeftX1 = 520, kRightX0 = 548, kRightX1 = 1224;
     static constexpr float kDevRow = 60, kBindRow = 25.5f, kClearW = 28, kTouchRow = 46;
-    static constexpr std::array<float, 4> kTitle{0.95f, 0.95f, 0.95f, 1}, kFocused{1, 0.86f, 0.2f, 1},
-        kNormal{0.85f, 0.85f, 0.88f, 1}, kDim{0.55f, 0.55f, 0.6f, 1}, kAccent{1, 0.55f, 0.15f, 1}, kOn{0.3f, 1, 0.35f, 1},
-        kP1{0.45f, 0.75f, 1, 1}, kP2{1, 0.5f, 0.45f, 1};
+    // gd01's roles in GH2's colours (PortDraw): titles and headings red-orange,
+    // the focus white on a gold bar, live presses green.
+    static constexpr std::array<float, 4> kTitle = PortDraw::kTitle, kFocused = PortDraw::kFocused, kNormal = PortDraw::kNormal,
+                                          kDim = PortDraw::kDim, kAccent = PortDraw::kAccent, kOn = PortDraw::kOn,
+                                          kP1 = PortDraw::kP1, kP2 = PortDraw::kP2;
     static constexpr std::array<std::array<float, 4>, 5> kFretColors = {
         std::array<float, 4>{0.2f, 0.85f, 0.25f, 1}, {0.9f, 0.2f, 0.2f, 1}, {0.95f, 0.85f, 0.2f, 1}, {0.25f, 0.45f, 0.95f, 1},
         {0.95f, 0.55f, 0.15f, 1}};
@@ -291,26 +325,17 @@ private:
         sound("button_select");
     }
 
-    // ---- the adapter (gd01's SelectHost calls)
+    // ---- the adapter (gd01's SelectHost calls): GH2's menu font for gd01's rokk / impactor
     void sound(const char* seq) { ui.playSfx(seq); }
-    std::string fit(std::string s, float h, float width) {
-        if (ui.headless() || ui.screenText().width("impactor.font", s, h) <= width) return s;
-        while (s.size() > 1 && ui.screenText().width("impactor.font", s + "...", h) > width) s.pop_back();
-        return s + "...";
+    std::string fit(const std::string& s, float h, float width) { return d_.fit(s, h, width); }
+    void text(const char*, const std::string& s, float x, float y, float h, const std::array<float, 4>& c, uint32_t align) {
+        d_.text(s, x, y, h, c, align);
     }
-    void text(const char* font, const std::string& s, float x, float y, float h, const std::array<float, 4>& c, uint32_t align) {
-        if (pass_ == 1) ui.screenText().draw(ui.canvas().renderer().materials(), font, s, x, y, h, c, align);
-    }
-    void quad(float x0, float y0, float x1, float y1, const std::array<float, 4>& c) {
-        if (pass_ != 0) return;
-        const uint8_t r = uint8_t(c[0] * 255), g = uint8_t(c[1] * 255), bl = uint8_t(c[2] * 255), a = uint8_t(c[3] * 255);
-        const Vertex v[6] = {{x0, y0, 0, 0, 0, r, g, bl, a}, {x1, y0, 0, 0, 0, r, g, bl, a}, {x1, y1, 0, 0, 0, r, g, bl, a},
-                             {x0, y0, 0, 0, 0, r, g, bl, a}, {x1, y1, 0, 0, 0, r, g, bl, a}, {x0, y1, 0, 0, 0, r, g, bl, a}};
-        ui.canvas().draw(v, 6, 0, Blend::Alpha);
-    }
+    void quad(float x0, float y0, float x1, float y1, const std::array<float, 4>& c) { d_.quad(x0, y0, x1, y1, c); }
 
     Input* input_;
-    int focus_ = 0, selected_ = 0, pass_ = 0;
+    PortDraw d_;
+    int focus_ = 0, selected_ = 0;
     float captureMs_ = 0;
     size_t reportedDevices_ = 0;
 };

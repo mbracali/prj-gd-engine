@@ -6,6 +6,8 @@ This is the official codebase documentation of Guitar Dream Engine.
 - [contributing.md](contributing.md): branches, commits, pull requests
 - [release-process.md](release-process.md): how a game is released
 - [adding-a-game.md](adding-a-game.md): starting a new game folder and its `game-info.yaml`
+- [guidelines/controls-and-enhanced-menu.md](guidelines/controls-and-enhanced-menu.md): the GAMEPADS
+  screen, the Enhanced menu and the mouse, the same in every game (gd-game-01 is the reference)
 
 Elsewhere: each game's `README.md`, `docs/` and `CHANGELOG.md`; the engine
 codebase in `gd-engine-docs/`; the launcher in `gd-engine-launcher/`.

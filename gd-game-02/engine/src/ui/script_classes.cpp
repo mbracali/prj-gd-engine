@@ -5,6 +5,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
+#include <utility>
+#include <vector>
 
 #include "scene/milo.h"
 #include "scene/ui_objects.h"
@@ -554,6 +557,84 @@ bool PanelObj::buttonDown(int button, int player) {
 }
 
 bool PanelObj::buttonUp(int, int) { return false; }
+
+// gd01's UiSystem::mouse on GH2's 3D panels: the hits are the projected
+// bounds of what the view drew last frame (gfx::UiView::hits), topmost first.
+bool PanelObj::mouse(float x, float y, bool click) {
+    if (!view || !view->milo() || !showing) return false;
+    if (!selecting.empty()) return true;  // a selection is under way
+    for (const auto& [n, c] : components_)
+        if (c->isSlider() && c->sliderSelected) {  // a slider being moved keeps the focus; a click sets it
+            if (click) ui.buttonDown(kPad_X, 0), ui.buttonUp(kPad_X, 0);
+            return true;
+        }
+    const auto press = [&](int b) {
+        ui.buttonDown(b, 0);
+        ui.buttonUp(b, 0);
+    };
+    // Reachable by the pad: the focus, or a component in the navigation.
+    const auto navigable = [&](const std::string& n) {
+        if (n == focus) return true;
+        const auto* me = view->find(n) ? view->find(n)->as<scene::UIComponent>() : nullptr;
+        if (me && (!me->navDown.empty() || !me->navRight.empty())) return true;
+        for (const scene::UIComponent* o : view->milo()->root().all<scene::UIComponent>())
+            if (o->navDown == n || o->navRight == n) return true;
+        return false;
+    };
+    const auto interactive = [](const ComponentObj* c) {
+        return c->object && (c->isButton() || c->isList() || c->isSlider() || c->isCheck() || c->isTextEntry() ||
+                             c->object->as<scene::UIPicture>());
+    };
+    // The text boxes are a line tall, more than the glyphs, so stacked
+    // entries overlap: of the ones under the pointer, the nearest centre wins.
+    std::vector<std::pair<float, const gfx::UiView::Hit*>> under;
+    for (const gfx::UiView::Hit& h : view->hits()) {
+        constexpr float kPad = 4;
+        if (x < h.x0 - kPad || x > h.x1 + kPad || y < h.y0 - kPad || y > h.y1 + kPad) continue;
+        const float dx = (x - (h.x0 + h.x1) * 0.5f) / std::max(1.0f, h.x1 - h.x0), dy = (y - (h.y0 + h.y1) * 0.5f) / std::max(1.0f, h.y1 - h.y0);
+        under.push_back({dx * dx + dy * dy, &h});
+    }
+    std::stable_sort(under.begin(), under.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+    for (const auto& [d, h] : under) {
+        const size_t hash = h->key.find('#');
+        const std::string name = h->key.substr(0, hash);
+        if (!view->find(name)) continue;
+        ComponentObj* c = component(name);
+        if (!c || !interactive(c) || isDisabled(name) || !view->showing(name) || !navigable(name)) continue;
+        if (c->isList() && hash != std::string::npos) {
+            // A list keeps its selection in one place: a hover would scroll
+            // it, so it takes clicks only (and the wheel), gd01's rule. The
+            // click moves the selection to the row (as the pad would), then selects.
+            if (!click) return true;
+            if (focus != name) setFocus(name, true), ui.updateHelpbar();
+            const int row = std::atoi(h->key.c_str() + hash + 1);
+            for (int guard = 0; guard < 64; ++guard) {
+                const int at = view->listRow(name);
+                if (at < 0 || at == row) break;
+                ui.routeButton(row > at ? kPad_DDown : kPad_DUp, 0);
+                if (view->listRow(name) == at) break;  // it did not move (an end, or a header)
+            }
+            press(kPad_X);
+            return true;
+        }
+        if (focus != name) {
+            setFocus(name, true);
+            ui.updateHelpbar();
+        }
+        if (click) press(kPad_X);
+        return true;
+    }
+    // [I] A screen with nothing to choose from (the endgame pages, "press a
+    // button" screens): a click continues, as select does (gd01's rule).
+    if (!click) return false;
+    for (const scene::UIComponent* o : view->milo()->root().all<scene::UIComponent>()) {
+        const bool choice = o->as<scene::BandButton>() || o->cls == "UIButton" || o->as<scene::UIList>() ||
+                            o->as<scene::BandSlider>() || o->as<scene::CheckBox>() || o->as<scene::BandTextEntry>();
+        if (choice && view->showing(o->name) && !isDisabled(o->name)) return false;
+    }
+    press(kPad_X);
+    return true;
+}
 
 void PanelObj::draw() {
     if (showing && path.rfind("world/", 0) == 0) ui.host().worldDraw();

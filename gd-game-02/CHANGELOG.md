@@ -4,9 +4,16 @@ All notable changes for players. Versions follow SemVer; release tags are
 `gd-game-02/vX.Y.Z`. The release workflow publishes the section whose heading
 matches the tag's version. Nothing is released yet.
 
-## [Unreleased]
+## [0.1.5] - 2026-10-28
 
 ### Fixed
+- Controllers no longer press left / right (or any direction) by themselves:
+  a D-pad that SDL reads from an axis (many adapters and guitars) is now
+  judged from that axis's resting value with hysteresis, a button held as the
+  controller connects counts only once released, and a controller that goes
+  away releases what it held. Before, the menus' key repeat kept moving.
+- GAMEPADS: a menu control waiting for its new binding takes only buttons and
+  keys, so a guitar's tilt or a drifting stick can no longer be bound to it.
 - The venue camera no longer speeds up on fast screens: its follow filter and
   shake run in Guitar Hero II's 1/60 s steps at any frame rate (they ran once
   a frame, so 2.4 times too fast at 144 Hz), and the frame rate no longer
@@ -25,11 +32,31 @@ matches the tag's version. Nothing is released yet.
   a crash, for bug reports.
 
 ### Added
+- The mouse in every menu, as in Guitar Hero (gd-game-01): pointing at an
+  entry highlights it, a click chooses it (a list row too), a right click goes
+  back, the wheel scrolls; the help bar's items are clickable. The pointer
+  hides after a few seconds, on a key or button press and during a song.
+  Enhanced Options > Enable Mouse Selection turns it off. Taps on a touch
+  screen are clicks.
+- The main menu's yellow fret (or a gamepad's yellow Y button) opens
+  GAMEPADS again, with its item in the help bar; Guitar Hero II's cheat codes
+  still work (it opens once no other button follows within the codes' 750 ms).
+- `GD02_KEYS` mouse items (`hover<x>_<y>`, `click<x>_<y>`, `rclick<x>_<y>`,
+  `wheelup` / `wheeldown`) and axis items (`jleftx=-20000`, `ja6=0`);
+  `GD02_VIRTUAL_PAD=<vid>:<pid>:dpadaxis=<rest>`; `GD02_INPUTLOG=1`; walk
+  tests `mouse`, `gamepads` and `stickyaxis`.
 - `GD02_PERF=1`: a frame-time breakdown in the log every 2 s (update, draw,
   present, GPU wait, draws and uploads per frame). `GD02_LOG=<file>` copies
   the log to a file.
 
 ### Changed
+- GAMEPADS has Guitar Hero (gd-game-01)'s layout, flow and mouse in Guitar
+  Hero II's menu font and colours (the rows no longer overlap; the mouse's
+  "x" clears a binding).
+- Enhanced Options looks and works like Guitar Hero's Enhanced Settings:
+  collapsible sections, check boxes, dropdowns (Screen Mode, In-Game Max FPS,
+  Internal Resolution), the explanation box and the mouse, over a still shot
+  of the venue with the band (it no longer plays live behind the menu).
 - macOS: uniforms and streamed vertices are written through unsynchronized
   buffer mappings, the path Apple's OpenGL handles without stalls
   (`GD02_GL_STREAM=map|subdata` chooses on any system).

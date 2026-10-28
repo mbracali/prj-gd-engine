@@ -343,7 +343,9 @@ const scene::Mat* UiView::findMat(const scene::Object& owner, const std::string&
 void UiView::draw(MaterialRenderer& r) {
     textsDrawn_ = meshesDrawn_ = 0;
     masks_.clear();
+    hits_.clear();
     if (!milo_) return;
+    viewProj_ = camera().viewProj(false);
     const scene::Directory& root = milo_->root();
     // The drawables no group of the panel holds, by draw order.
     std::set<std::string> held;
@@ -365,6 +367,29 @@ void UiView::draw(MaterialRenderer& r) {
             if (pose_.showing(sm)) addMask(*sm);
     if (overlay) overlay(r);
     texts_.collect();
+}
+
+void UiView::addHit(const std::string& key, const float lo[3], const float hi[3], const Mat4& world) {
+    float x0 = 1e9f, y0 = 1e9f, x1 = -1e9f, y1 = -1e9f;
+    for (int c = 0; c < 8; ++c) {
+        const Vec3 p = world.transformPoint({c & 1 ? hi[0] : lo[0], c & 2 ? hi[1] : lo[1], c & 4 ? hi[2] : lo[2]});
+        const Mat4& m = viewProj_;
+        const float cx = m.at(0, 0) * p.x + m.at(0, 1) * p.y + m.at(0, 2) * p.z + m.at(0, 3);
+        const float cy = m.at(1, 0) * p.x + m.at(1, 1) * p.y + m.at(1, 2) * p.z + m.at(1, 3);
+        const float cw = m.at(3, 0) * p.x + m.at(3, 1) * p.y + m.at(3, 2) * p.z + m.at(3, 3);
+        if (cw <= 1e-4f) return;  // behind the camera
+        const float sx = (cx / cw + 1) * 640.0f, sy = (1 - cy / cw) * 360.0f;
+        x0 = std::min(x0, sx), x1 = std::max(x1, sx), y0 = std::min(y0, sy), y1 = std::max(y1, sy);
+    }
+    if (x1 > x0 && y1 > y0) hits_.push_back({key, x0, y0, x1, y1});
+}
+
+void UiView::addLayoutHit(const std::string& key, const TextLayout& layout, const Mat4& world) {
+    if (layout.verts.empty()) return;
+    float lo[3] = {1e9f, 1e9f, 1e9f}, hi[3] = {-1e9f, -1e9f, -1e9f};
+    for (const scene::MeshVertex& v : layout.verts)
+        for (int k = 0; k < 3; ++k) lo[k] = std::min(lo[k], v.pos[k]), hi[k] = std::max(hi[k], v.pos[k]);
+    addHit(key, lo, hi, world);
 }
 
 void UiView::addMask(const scene::ScreenMask& m) {
@@ -526,7 +551,9 @@ void UiView::drawLabel(MaterialRenderer& r, const scene::UILabel& l, const scene
             if (const scene::Object* p = l.dir->resolve(t->parent); p && p != &l && transOf(p)) world = scene::compose(local, pose_.world(p));
     }
     world = scene::compose(scaleXfm(lt->fit[0], 1, lt->fit[1]), world);
-    texts_.draw(r, &l, *lt->font, lt->layout, toMat4(world), matColor);
+    const Mat4 wm = toMat4(world);
+    texts_.draw(r, &l, *lt->font, lt->layout, wm, matColor);
+    if (l.as<scene::BandButton>() || l.cls == "UIButton") addLayoutHit(l.name, lt->layout, wm);
     ++textsDrawn_;
 }
 
@@ -556,7 +583,9 @@ float UiView::drawTemplate(MaterialRenderer& r, const std::string& key, const sc
         lt->layout = layoutText(&fm, str, st);
     }
     const float tint[4] = {1, 1, 1, alpha};
-    texts_.draw(r, lt.get(), *font, lt->layout, toMat4(world), rgb, alpha < 1 ? tint : nullptr);
+    const Mat4 wm = toMat4(world);
+    texts_.draw(r, lt.get(), *font, lt->layout, wm, rgb, alpha < 1 ? tint : nullptr);
+    addLayoutHit(key, lt->layout, wm);
     ++textsDrawn_;
     return lt->layout.maxWidth();
 }
@@ -619,6 +648,12 @@ void UiView::drawStyleMeshes(MaterialRenderer& r, const scene::Object& c) {
         // its TransAnim under the slider.
         const scene::Xfm world = slider ? scene::compose(podPose.local(m), cw) : cw;
         drawMesh(r, cache_, *m, toMat4(world), tex ? &texPose : nullptr, mat);
+        if (!m->verts.empty()) {
+            float lo[3] = {1e9f, 1e9f, 1e9f}, hi[3] = {-1e9f, -1e9f, -1e9f};
+            for (const scene::MeshVertex& v : m->verts)
+                for (int k = 0; k < 3; ++k) lo[k] = std::min(lo[k], v.pos[k]), hi[k] = std::max(hi[k], v.pos[k]);
+            addHit(c.name, lo, hi, toMat4(world));
+        }
         ++meshesDrawn_;
     }
     // A slider's label: its text_token in the type's template text, placed

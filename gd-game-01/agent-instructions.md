@@ -7,6 +7,7 @@ Read this before working in this folder. It applies to every AI coding agent (Cl
 - `game-info.yaml` describes the game (names, version, readiness). Keep `guitar_dream_version` equal to the engine's version.
 - The Guitar Dream Universal Launcher (`gd-engine-launcher/`) loads each ready game as a module (`gd_game_run`, optional `gd_game_explore`) into its own window, and is the project's only release (`docs/release-process.md`).
 - Behaviour comes from the original game's executable (Ghidra project in `ghidra/`, git-ignored). The goal is to match the original exactly; mark findings **[C]** (confirmed, with address) or **[I]** (inferred) in the docs.
+- Every game has the same GAMEPADS screen (yellow button on the main menu), Enhanced menu and mouse support, modelled on gd-game-01: follow `docs/guidelines/controls-and-enhanced-menu.md` at the repository root.
 
 ## This folder
 **Guitar Hero** (PlayStation 2), Guitar Dream version 1.1.5, playable and released. This folder is **frozen**: do not change anything in it unless the owner explicitly asks for that change.

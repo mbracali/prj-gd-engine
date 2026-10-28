@@ -124,9 +124,9 @@ public:
     // The last frame drawn as a .bmp (the walk test's shots); false if none.
     virtual bool saveScreenshot(const std::string& /*path*/) { return false; }
     virtual void setEnhancedValue(const std::string& /*key*/, const std::string& /*value*/) {}
-    // The Enhanced Options' live backdrop: the second venue with the band
-    // playing, while the screen is up; drawMenuBackdrop draws it (false
-    // when there is none).
+    // The Enhanced Options' backdrop: a still shot of the second venue with
+    // the band posed, while the screen is up; drawMenuBackdrop draws it
+    // (false when there is none).
     virtual void menuBackdrop(bool /*on*/) {}
     virtual bool drawMenuBackdrop() { return false; }
     virtual void quit() = 0;

@@ -14,9 +14,10 @@ class UiManager;
 
 // The port's Enhanced Options screen (gd01's Enhanced Settings, in GH2's
 // fonts and colours; not in the original game), reached from Options:
-// gd01's settings in its sections and order, over a live shot of the second
-// venue with the band playing (UiHost::menuBackdrop), the focused setting's
-// explanation in a box on the right. Every change is saved and applies at
+// gd01's settings in its sections and order, with its check boxes and
+// dropdowns, over a still shot of the second venue with the band posed
+// (UiHost::menuBackdrop), the focused setting's explanation in a box on the
+// right (docs/guidelines/controls-and-enhanced-menu.md). Every change is saved and applies at
 // once. Settings gd02 does not have yet are listed greyed, "not available
 // yet", and cannot be chosen. The CHEATS section has GH2's own cheats (the
 // main menu's button codes, config/long_cheats.dta). Defined in the port's

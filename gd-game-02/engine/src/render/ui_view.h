@@ -112,6 +112,11 @@ public:
         float slot = -1;  // its position in the list (rows after a header start one slot down; fractional while scrolling); -1: its index
     };
     void setList(const std::string& component, std::vector<ListRow> rows, int selectedRow);
+    // The list's selected row (as set_list gave it), -1 without rows.
+    int listRow(const std::string& component) const {
+        auto it = lists_.find(component);
+        return it == lists_.end() || it->second.rows.empty() ? -1 : it->second.selected;
+    }
     // A BandTextEntry: the entered text and the character being picked.
     void setTextEntry(const std::string& component, const std::string& entered, const std::string& picking, bool done);
 
@@ -155,6 +160,18 @@ public:
 
     // Draws the panel (after r.setFrame with camera() / environment()).
     void draw(MaterialRenderer& r);
+
+    // Mouse support: where the interactive components (buttons, check boxes,
+    // sliders, pictures, text entries; a list's rows as "<list>#<row>", a
+    // template text by its key) were drawn this frame, in menu units
+    // (1280 x 720), in draw order: the projected bounds of their text or mesh.
+    struct Hit {
+        std::string key;
+        float x0, y0, x1, y1;
+    };
+    const std::vector<Hit>& hits() const { return hits_; }
+    // Records `key` from a local box (lo..hi) placed by `world`.
+    void addHit(const std::string& key, const float lo[3], const float hi[3], const Mat4& world);
 
     int textsDrawn() const { return textsDrawn_; }
     int meshesDrawn() const { return meshesDrawn_; }
@@ -211,6 +228,9 @@ private:
     std::map<std::string, std::unique_ptr<LabelText>> keyed_;
     std::map<std::string, std::unique_ptr<scene::Tex>> texFiles_;
     std::vector<MaskDraw> masks_;
+    std::vector<Hit> hits_;
+    Mat4 viewProj_;  // the frame's camera, for the hits
+    void addLayoutHit(const std::string& key, const TextLayout& layout, const Mat4& world);
     int textsDrawn_ = 0, meshesDrawn_ = 0;
     std::vector<std::string> problems_;
 };

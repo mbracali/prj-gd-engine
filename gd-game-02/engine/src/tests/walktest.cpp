@@ -14,6 +14,7 @@
 
 #include "data/game_data.h"
 #include "data/json.h"
+#include "input/input.h"
 #include "render/scene_gpu.h"
 #include "render/ui_view.h"
 #include "scene/milo.h"
@@ -67,6 +68,13 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
     // A real key press, through SDL's events and the input layer (as GD02_KEYS' kReturn).
     auto key = [&](SDL_Keycode k) { steps_.push_back({S::Key, "", int(k), 0}); };
     auto check = [&](const char* what, double timeout = 0) { steps_.push_back({S::Check, what, 0, timeout}); };
+    // The mouse (UiManager::mouse): at a point, or on a component of the focus panel.
+    auto mouseAt = [&](float x, float y, int button) {
+        Step st{S::Mouse, "", button, 0};
+        st.x = x, st.y = y;
+        steps_.push_back(st);
+    };
+    auto mouseOn = [&](const char* component, int button) { steps_.push_back({S::Mouse, component, button, 0}); };
     // Each screen: wait until it is up and its transition is over, then a moment.
     auto at = [&](const char* s, double timeout = 20000) {
         screen(s, timeout);
@@ -303,8 +311,14 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         press(kX);
         at("enhanced_options_screen");
         check("enhanced_default");
-        // Gamepads (the focus) -> 4 controls -> calibration -> Screen Mode -> Max FPS -> FPS Counter -> Internal Resolution.
-        for (int i = 0; i < 9; ++i) press(kDown), wait(120);
+        // Gamepads (the focus) -> 4 controls -> the PERFORMANCE AND GRAPHICS
+        // section -> calibration -> Screen Mode -> Max FPS -> FPS Counter ->
+        // Internal Resolution; select opens its dropdown, down and select
+        // pick the next option.
+        for (int i = 0; i < 10; ++i) press(kDown), wait(120);
+        press(kX);
+        wait(200);
+        press(kDown), wait(120);
         press(kX);  // the window's own -> 448p (ps2)
         wait(300);
         check("enhanced_changed");
@@ -313,6 +327,58 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         press(kTri);
         at("main_screen");
         expect_ = {"main_screen", "options_screen", "enhanced_options_screen", "options_screen", "main_screen"};
+    } else if (scenario == "mouse") {
+        at("main_screen");
+        wait(300);  // a frame drawn: the components' bounds are known
+        mouseOn("main_options.btn", 0);
+        wait(200);
+        check("focus_main_options");
+        mouseOn("main_options.btn", 1);
+        at("options_screen");
+        wait(300);
+        mouseOn("port_enhanced.btn", 1);
+        at("enhanced_options_screen");
+        wait(300);
+        // In-Game Max FPS (the list's 13th row; its dropdown opens upward):
+        // 60 is its first option, 85 units above the row.
+        mouseAt(480, 592, 0);
+        mouseAt(480, 592, 1);
+        wait(200);
+        mouseAt(480, 502, 0);
+        mouseAt(480, 502, 1);
+        wait(300);
+        check("enhanced_fps_60");
+        mouseAt(480, 592, 3);  // right click: back
+        at("options_screen");
+        wait(300);
+        check("click_help1");  // the help bar's BACK
+        at("main_screen");
+        expect_ = {"main_screen", "options_screen", "enhanced_options_screen", "options_screen", "main_screen"};
+    } else if (scenario == "gamepads") {
+        at("main_screen");
+        key(SDLK_3);  // the keyboard's yellow fret
+        at("gamepads_screen", 3000);
+        for (int i = 0; i < 11; ++i) press(kUp), wait(80);  // up from the keyboard wraps to its rows: Whammy
+        press(kX);  // waits for a key
+        wait(200);
+        key(SDLK_E);
+        wait(300);
+        check("whammy_is_e");
+        press(kTri);
+        at("main_screen");
+        wait(300);
+        check("click_help1");  // the help bar's GAMEPADS
+        at("gamepads_screen", 3000);
+        expect_ = {"main_screen", "gamepads_screen", "main_screen", "gamepads_screen"};
+    } else if (scenario == "stickyaxis") {
+        at("main_screen");
+        check("adapter_attach");
+        wait(2000);
+        check("no_sideways");
+        check("adapter_move");
+        wait(300);
+        check("one_right");
+        expect_ = {"main_screen"};
     } else if (scenario == "cheats") {
         // GH2's codes at the main menu (config/long_cheats.dta), a press every 120 ms.
         auto code = [&](std::initializer_list<int> buttons) {
@@ -432,7 +498,8 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
 }
 
 std::string WalkDriver::startScreen() const {
-    if (scenario_ == "lose" || scenario_ == "pause" || scenario_ == "back" || scenario_ == "enhanced" || scenario_ == "cheats")
+    if (scenario_ == "lose" || scenario_ == "pause" || scenario_ == "back" || scenario_ == "enhanced" || scenario_ == "cheats" ||
+        scenario_ == "mouse" || scenario_ == "gamepads" || scenario_ == "stickyaxis")
         return "main_screen";
     if (scenario_ == "attract") return "splash_screen";
     return "";
@@ -484,6 +551,26 @@ void WalkDriver::poll(ui::UiManager& ui, double nowMs) {
         }
         ++step_, stepStart_ = -1;
         return;
+    case Step::Mouse: {
+        float x = s.x, y = s.y;
+        if (!s.screen.empty()) {  // a component: the centre of its drawn bounds
+            ui::PanelObj* fp = ui.focusPanel();
+            bool found = false;
+            if (fp && fp->view)
+                for (const gfx::UiView::Hit& h : fp->view->hits())
+                    if (h.key == s.screen) x = (h.x0 + h.x1) * 0.5f, y = (h.y0 + h.y1) * 0.5f, found = true;
+            if (!found) {
+                error_ = "the mouse: " + s.screen + " was not drawn (on " + ui.currentScreen() + ")";
+                failed_ = done_ = true;
+                return;
+            }
+        }
+        if (s.button == 3) ui.buttonDown(ui::kPad_Tri, 0), ui.buttonUp(ui::kPad_Tri, 0);
+        else if (s.button >= 4) ui.wheel(s.button == 4 ? -1 : 1);
+        else ui.mouse(x, y, s.button == 1);
+        ++step_, stepStart_ = -1;
+        return;
+    }
     case Step::Wait:
     case Step::Hold:
         if (nowMs - stepStart_ >= s.ms) ++step_, stepStart_ = -1;
@@ -530,6 +617,67 @@ static bool mainCamera(ui::UiManager& ui, std::array<float, 3>& pos) {
 
 void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
     auto fail = [&](const std::string& e) { error_ = e, failed_ = done_ = true; };
+    auto pass = [&] { ++step_, stepStart_ = -1; };
+    // The mouse, gamepads and stickyaxis walks.
+    if (s.screen == "focus_main_options") {
+        ui::PanelObj* fp = ui.focusPanel();
+        std::printf("  mouse: the hover focused %s\n", fp ? fp->focus.c_str() : "nothing");
+        return fp && fp->focus == "main_options.btn" ? pass() : fail("hovering OPTIONS did not focus it");
+    }
+    if (s.screen == "enhanced_fps_60") {
+        const std::string v = ui.host().enhancedValue("max_fps");
+        std::printf("  mouse: In-Game Max FPS %s\n", v.c_str());
+        return v == "60" ? pass() : fail("clicking the dropdown's 60 did not set In-Game Max FPS");
+    }
+    if (s.screen == "click_help1") {  // the help bar's second item, clicked
+        ui::PanelObj* hb = ui.panel("helpbar");
+        if (hb && hb->view)
+            for (const gfx::UiView::Hit& h : hb->view->hits())
+                if (h.key == "hb1") {
+                    ui.mouse((h.x0 + h.x1) * 0.5f, (h.y0 + h.y1) * 0.5f, true);
+                    return pass();
+                }
+        return fail("the help bar's second item was not drawn");
+    }
+    if (s.screen == "whammy_is_e") {
+        bool bound = false;
+        for (const Input::Source& src : ui.input().bindings("keyboard")[size_t(Input::Control::Whammy)])
+            bound = bound || (src.kind == Input::Source::Kind::Key && src.index == int(SDLK_E));
+        const char* dir = SDL_getenv("GD02_SAVE_DIR");
+        std::ifstream f(std::filesystem::path(dir ? dir : "") / "controllers.json");
+        std::stringstream ss;
+        ss << f.rdbuf();
+        bool saved = false;
+        try {
+            const Json root = Json::parse(ss.str());
+            for (const Json& j : root["devices"]["keyboard"]["bindings"]["whammy"].a)
+                saved = saved || (j["kind"].str() == "key" && int(j["index"].num()) == int(SDLK_E));
+        } catch (const std::exception&) {
+        }
+        std::printf("  gamepads: Whammy %s, controllers.json %s\n", bound ? "on E" : "not on E", saved ? "has it" : "does not");
+        return bound && saved ? pass() : fail("the rebinding of the keyboard's Whammy to E did not take or was not saved");
+    }
+    if (s.screen == "adapter_attach") {
+        adapter_ = Input::attachVirtualPad("0079:0006:dpadaxis=-32768");
+        sideBase_ = ui.pressCount(ui::kPad_DLeft) + ui.pressCount(ui::kPad_DRight);
+        rightBase_ = ui.pressCount(ui::kPad_DRight);
+        return adapter_ ? pass() : fail("no virtual adapter");
+    }
+    if (s.screen == "no_sideways") {
+        const int n = ui.pressCount(ui::kPad_DLeft) + ui.pressCount(ui::kPad_DRight) - sideBase_;
+        std::printf("  stickyaxis: %d left / right presses at rest\n", n);
+        return n == 0 ? pass() : fail("the resting adapter pressed left / right by itself");
+    }
+    if (s.screen == "adapter_move") {
+        if (SDL_Joystick* j = SDL_GetJoystickFromID(adapter_)) SDL_SetJoystickVirtualAxis(j, 6, 0);
+        return pass();
+    }
+    if (s.screen == "one_right") {
+        const int r = ui.pressCount(ui::kPad_DRight) - rightBase_;
+        std::printf("  stickyaxis: %d right press(es) once moved\n", r);
+        if (SDL_Joystick* j = SDL_GetJoystickFromID(adapter_)) SDL_SetJoystickVirtualAxis(j, 6, -32768);
+        return r == 1 ? pass() : fail("the moved adapter did not press right once");
+    }
     if (s.screen == "splashes_skipped") {
         if (!ui.inSplashes()) {
             SDL_Log("walk: splashes skipped (%.1f s)", nowMs / 1000);

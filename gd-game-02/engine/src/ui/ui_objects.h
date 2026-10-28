@@ -109,6 +109,12 @@ public:
     // Draws the panel (its view through its camera).
     virtual void draw();
     virtual bool drawsSomething() const { return view != nullptr; }
+    // Mouse support (UiManager::mouse): the panel's components under (x, y)
+    // (menu units) from its view's last draw: hovering focuses, a click
+    // selects; the port's own panels test their rows. True when hit.
+    virtual bool mouse(float x, float y, bool click);
+    // The help bar's items (HelpBarPanel); false for the others.
+    virtual bool helpMouse(float /*x*/, float /*y*/, bool /*click*/) { return false; }
     // Joypad repeat overrides ((joypad (hold_ms) (repeat_ms))).
     bool repeatTiming(float& holdMs, float& repeatMs) const;
 
