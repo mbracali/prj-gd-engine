@@ -1,5 +1,11 @@
 # Guitar Dream Universal Launcher: changes
 
+## 0.1.3
+
+Fixes
+- Guitar Hero (gd-game-01 1.1.4): Enter on the keyboard finishes the band
+  name, like Start.
+
 ## 0.1.2
 
 Fixes

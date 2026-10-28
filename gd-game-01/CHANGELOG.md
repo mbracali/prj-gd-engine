@@ -6,6 +6,12 @@ matches the tag's version.
 
 ## [Unreleased]
 
+## [1.1.4] - 2026-10-28
+
+### Fixed
+- Enter on the keyboard finishes a name (band name, high score) like Start;
+  before, it only added another letter and Start was Tab.
+
 ## [1.1.3] - 2026-10-25
 
 **Lefty Flip works, and PS2 guitars on adapters play as guitars.**

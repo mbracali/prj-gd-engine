@@ -1686,6 +1686,13 @@ bool UiSystem::ComponentObj::button(int b) {
         // splash.dta's help text: strum cycles the letter, fret1 takes it and
         // moves on, fret2 deletes, START accepts (TEXT_ENTRY_MSG).
         if (done_) return false;
+        // The port's: keyboard Enter always finishes the name, like START (on
+        // the keyboard START is Tab, which nobody guesses); fret1 / X still
+        // take the letter.
+        if (select) {
+            const bool* keys = SDL_GetKeyboardState(nullptr);
+            if (keys && (keys[SDL_SCANCODE_RETURN] || keys[SDL_SCANCODE_KP_ENTER])) b = Start, select = false;
+        }
         const UiObj* u = panel_.scene_ ? panel_.scene_->scene().find(name())->ui.get() : nullptr;
         const UiResources::Style& st = ui_.res_->style("textentry", u ? u->style : "");
         int n = std::max(1, int(st.characters.size()));
