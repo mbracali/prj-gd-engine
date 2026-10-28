@@ -1,5 +1,23 @@
 # Guitar Dream Universal Launcher: changes
 
+## 0.1.4
+
+Fixes
+- The launcher is always a window: after a game that ran full screen (or
+  maximized it, hid the cursor or grabbed the mouse), it leaves full screen,
+  waits for the system to finish (Windows and macOS do it asynchronously) and
+  puts its window back at the size and place it had. It never goes full
+  screen by itself.
+- Steam Deck (Gaming Mode) and Steam Input: the list sees Steam's virtual
+  controller, as the games do, and one press seen from two controllers at
+  once acts once.
+
+New
+- Menu sounds without a Guitar Hero disc: the launcher's own, made at start
+  (plucked strings and a small power-chord sting, nothing taken from a game),
+  at the same loudness as the disc's. With a Guitar Hero disc it still uses
+  the game's own.
+
 ## 0.1.3
 
 Fixes

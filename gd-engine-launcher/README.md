@@ -84,11 +84,16 @@ legend of these keys: its buttons say what they do.)
 
 **Menu sounds**: Guitar Hero's own (move, select, play, back, error), read at
 run time from the player's Guitar Hero disc by the gd-game-01 module
-(`gd_game_ui_sounds`, below) when that disc is known; silent otherwise. Never
-shipped: they live in memory only. The launcher's audio device is released
-before a game runs and opened again after. Quitting a game returns to
-the list in the same window (closing the window while a game runs also
-returns to the list).
+(`gd_game_ui_sounds`, below) when that disc is known. Never shipped: they
+live in memory only. Without that disc, the launcher's own built-in sounds
+(`ui_sounds.cpp`: plucked strings and a power-chord sting, synthesized at
+start, nothing taken from a game), at the same loudness. The launcher's audio
+device is released before a game runs and opened again after. Quitting a
+game returns to the list in the same window (closing the window while a game
+runs also returns to the list). The launcher is always a window: after a game
+that went full screen, maximized the window or hid the cursor, it leaves full
+screen (waiting for Windows and macOS to finish) and puts back the size and
+place it had.
 
 ## Explore models
 
@@ -156,7 +161,7 @@ iso_probe.*     disc identification: ISO 9660 (PVD, root folder, SYSTEM.CNF
 module_host.*   loads a game module and runs it in the window, or opens its
                 model explorer (below)
 explorer.cpp    the Explore models screen (list, groups, search, viewer, camera)
-ui_sounds.*     the menu sounds (a game's, from its disc) on SDL's audio device
+ui_sounds.*     the menu sounds (a game's, from its disc, or built-in) on SDL's audio device
 palette.h       the launcher's colours
 action_log.*    the action log
 platform.*      folders, user name, time, shared libraries per system
@@ -379,6 +384,7 @@ A new game needs a recipe in `scripts/build.sh` (`build_module_NN`): see
 | `GDUL_VIRTUAL_PAD=<vendor>:<product>` | plugs in a virtual gamepad (hex, e.g. `045e:028e`) |
 | `GDUL_GAMES_YAML=<file>` | another games.yaml |
 | `GDUL_SOUND_LOG=1` | logs each menu sound played (always on with `GDUL_SCRIPT`) |
+| `GDUL_BUILTIN_SOUNDS=1` | the launcher's built-in menu sounds even with a Guitar Hero disc |
 
 Headless: `SDL_VIDEO_DRIVER=offscreen SDL_AUDIO_DRIVER=dummy`. For example,
 play gd-game-02 from the list and come back:

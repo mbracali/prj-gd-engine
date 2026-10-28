@@ -66,6 +66,10 @@ float Launcher::measure(FontId f, float px, const std::string& t, float tracking
 
 bool Launcher::init() {
     SDL_SetAppMetadata(kTitle, "", "io.github.mbracali.gdul");
+    // Steam Deck Gaming Mode (and Steam Input on desktops): Steam hides the
+    // real controller behind its virtual one; SDL ignores that one unless told
+    // (read from the environment, as gd01 and gd02 set it).
+    SDL_setenv_unsafe("SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD", "1", 0);
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD | SDL_INIT_EVENTS)) {
         SDL_Log("gdul: cannot start SDL: %s", SDL_GetError());
         return false;
@@ -114,6 +118,7 @@ bool Launcher::init() {
         return false;
     }
     restoreWindow();
+    rememberWindow();
     // Development aid: GDUL_VIRTUAL_PAD=<vendor>:<product> (hex, e.g. 045e:028e)
     // plugs in a virtual gamepad, to test the controller hand-over without hardware.
     if (const char* vp = SDL_getenv("GDUL_VIRTUAL_PAD")) {
@@ -193,12 +198,71 @@ void Launcher::shutdown() {
     SDL_Quit();
 }
 
-// After a game: the launcher's title, icon and app id again.
+// The launcher's window as it is (windowed), to put back after a game.
+void Launcher::rememberWindow() {
+    const SDL_WindowFlags f = SDL_GetWindowFlags(window_);
+    if (f & (SDL_WINDOW_FULLSCREEN | SDL_WINDOW_MINIMIZED)) return;
+    saved_.maximized = (f & SDL_WINDOW_MAXIMIZED) != 0;
+    if (!saved_.maximized) {
+        SDL_GetWindowPosition(window_, &saved_.x, &saved_.y);
+        SDL_GetWindowSize(window_, &saved_.w, &saved_.h);
+    }
+    saved_.valid = true;
+}
+
+// After a game (and at start): the launcher's title, icon and app id again,
+// and always a window, never full screen, at the size and place it had.
 void Launcher::restoreWindow() {
     SDL_SetAppMetadata(kTitle, catalog_.launcherVersion().c_str(), "io.github.mbracali.gdul");
     SDL_SetWindowTitle(window_, kTitle);
     if (icon_) SDL_SetWindowIcon(window_, icon_);
     SDL_GL_SetSwapInterval(1);
+    leaveFullscreen();
+    SDL_SetWindowBordered(window_, true);
+    SDL_SetWindowResizable(window_, true);
+    SDL_SetWindowAlwaysOnTop(window_, false);
+    SDL_SetWindowMouseGrab(window_, false);
+    SDL_SetWindowKeyboardGrab(window_, false);
+    SDL_SetWindowRelativeMouseMode(window_, false);
+    SDL_SetWindowMinimumSize(window_, 960, 540);
+    SDL_ShowCursor();
+    const SDL_WindowFlags f = SDL_GetWindowFlags(window_);
+    if (f & SDL_WINDOW_MINIMIZED) SDL_RestoreWindow(window_);
+    if (saved_.valid) {
+        if (saved_.maximized) {
+            if (!(f & SDL_WINDOW_MAXIMIZED)) SDL_MaximizeWindow(window_);
+        } else {
+            if (f & SDL_WINDOW_MAXIMIZED) SDL_RestoreWindow(window_);
+            SDL_SetWindowSize(window_, saved_.w, saved_.h);
+            SDL_SetWindowPosition(window_, saved_.x, saved_.y);
+        }
+    }
+    SDL_SyncWindow(window_);
+    SDL_ShowWindow(window_);
+    SDL_RaiseWindow(window_);
+    // The transitions above came as events: the launcher's input starts clean.
+    SDL_FlushEvents(SDL_EVENT_WINDOW_FIRST, SDL_EVENT_WINDOW_LAST);
+    SDL_FlushEvents(SDL_EVENT_KEY_DOWN, SDL_EVENT_MOUSE_REMOVED);
+    SDL_GetWindowSizeInPixels(window_, &pw_, &ph_);
+    SDL_Log("gdul: window %s %dx%d", (SDL_GetWindowFlags(window_) & SDL_WINDOW_FULLSCREEN) ? "fullscreen" : "windowed", pw_, ph_);
+}
+
+// Out of full screen (a game's, or the window manager's), waiting for it: on
+// Windows and macOS the change is asynchronous.
+void Launcher::leaveFullscreen() {
+    SDL_SetWindowFullscreenMode(window_, nullptr);  // no exclusive mode left over from a game
+    if (!(SDL_GetWindowFlags(window_) & SDL_WINDOW_FULLSCREEN)) return;
+    SDL_SetWindowFullscreen(window_, false);
+    if (!SDL_SyncWindow(window_)) {
+        // Timed out (SDL waits a while): pump until the window says it left, at most 2 s.
+        for (const Uint64 end = SDL_GetTicks() + 2000; SDL_GetTicks() < end;) {
+            SDL_PumpEvents();
+            if (!(SDL_GetWindowFlags(window_) & SDL_WINDOW_FULLSCREEN)) break;
+            SDL_Delay(10);
+        }
+    }
+    log_.add(std::string("window: left full screen") +
+             ((SDL_GetWindowFlags(window_) & SDL_WINDOW_FULLSCREEN) ? " (the system did not confirm it)" : ""));
 }
 
 void Launcher::openGamepads() {
@@ -215,6 +279,25 @@ void Launcher::closeGamepads() {
     for (auto& [id, p] : pads_) SDL_CloseGamepad(p);
     pads_.clear();
     heldDir_ = 0;
+}
+
+// One press seen from two controllers at once acts once: a Steam Deck in
+// Gaming Mode is both its own controller and Steam's virtual one (as gd01's
+// menus filter it: the same button from another device within 80 ms).
+bool Launcher::duplicatePress(const SDL_Event& e) {
+    constexpr Uint64 kSameNs = 80000000;
+    if (e.type != SDL_EVENT_GAMEPAD_BUTTON_DOWN && e.type != SDL_EVENT_GAMEPAD_BUTTON_UP) return false;
+    const int b = e.gbutton.button;
+    if (b < 0 || b >= SDL_GAMEPAD_BUTTON_COUNT) return false;
+    const std::pair<SDL_JoystickID, int> key{e.gbutton.which, b};
+    if (e.type == SDL_EVENT_GAMEPAD_BUTTON_UP) return dropped_.erase(key) > 0;
+    RecentPress& r = recentPress_[size_t(b)];
+    if (r.ns && e.gbutton.timestamp >= r.ns && e.gbutton.timestamp - r.ns < kSameNs && r.device != e.gbutton.which) {
+        dropped_.insert(key);
+        return true;
+    }
+    r = {e.gbutton.timestamp, e.gbutton.which};
+    return false;
 }
 
 int Launcher::run() {
@@ -329,10 +412,14 @@ void Launcher::screenshot(const std::string& path) {
 // ---- Input ----
 
 void Launcher::handle(const SDL_Event& e) {
+    if (duplicatePress(e)) return;
     if (explore_ && exploreHandle(e)) return;
     switch (e.type) {
     case SDL_EVENT_QUIT:
         running_ = false;
+        break;
+    case SDL_EVENT_WINDOW_ENTER_FULLSCREEN:  // the launcher is always a window
+        SDL_SetWindowFullscreen(window_, false);
         break;
     case SDL_EVENT_DROP_BEGIN:
         dragging_ = true;
@@ -576,6 +663,7 @@ void Launcher::play(Game& g) {
     }
     sounds_.close();
     closeGamepads();
+    rememberWindow();
     GameRun r = runGameModule(window_, context_, g, catalog_.launcherVersion(), log_);
     restoreWindow();
     openGamepads();
@@ -744,15 +832,18 @@ void Launcher::showDiscFolders(const std::string& title) {
 // from its disc). Silent while no such disc is known.
 void Launcher::loadSounds() {
     soundsTried_ = true;
-    if (sounds_.count() > 0) return;
+    if (sounds_.count() > 0 && !sounds_.builtIn()) return;
+    sounds_.clear();
     struct Sink {
         UiSounds* sounds;
     } sink{&sounds_};
     auto add = [](void* user, const char* role, const float* stereo, int frames, int rate) {
         if (role) static_cast<Sink*>(user)->sounds->add(role, stereo, frames, rate);
     };
+    // Development aid: GDUL_BUILTIN_SOUNDS=1 uses the built-in ones even with a disc.
+    const bool builtInOnly = SDL_getenv("GDUL_BUILTIN_SOUNDS") != nullptr;
     for (const Game& g : catalog_.games()) {
-        if (!g.hasModule || g.iso.empty()) continue;
+        if (builtInOnly || !g.hasModule || g.iso.empty()) continue;
         std::string error;
         const Uint64 t0 = SDL_GetTicks();
         const int n = fetchUiSounds(window_, context_, g, catalog_.launcherVersion(), log_, add, &sink, error);
@@ -764,11 +855,15 @@ void Launcher::loadSounds() {
         }
         SDL_Log("gdul: menu sounds from %s: %s", g.id.c_str(), error.c_str());
     }
-    log_.add("menu sounds: none (no disc of a game that has them, such as Guitar Hero)");
+    // No such disc: the launcher's own (synthesized, nothing from a game).
+    sounds_.addBuiltIn();
+    sounds_.open();
+    log_.add("menu sounds: " + std::to_string(sounds_.count()) + " built-in" +
+             (builtInOnly ? " (GDUL_BUILTIN_SOUNDS)" : " (no disc of a game that has them, such as Guitar Hero)"));
 }
 
 void Launcher::discsChanged() {
-    if (sounds_.count() == 0) soundsTried_ = false;
+    if (sounds_.count() == 0 || sounds_.builtIn()) soundsTried_ = false;
 }
 
 void Launcher::askQuit() {

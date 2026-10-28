@@ -7,10 +7,12 @@
 
 #include <SDL3/SDL.h>
 
+#include <array>
 #include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -88,6 +90,9 @@ private:
     void showDialog(const std::string& title, const std::string& body, std::vector<Button> buttons);
     void toast(const std::string& text);
     void restoreWindow();
+    void rememberWindow();
+    void leaveFullscreen();
+    bool duplicatePress(const SDL_Event& e);  // true: drop it
     void openGamepads();
     void closeGamepads();
     void runScript();
@@ -132,6 +137,16 @@ private:
     bool mouseUsed_ = false;
 
     std::map<SDL_JoystickID, SDL_Gamepad*> pads_;
+    struct RecentPress {
+        Uint64 ns = 0;
+        SDL_JoystickID device = 0;
+    };
+    std::array<RecentPress, SDL_GAMEPAD_BUTTON_COUNT> recentPress_{};
+    std::set<std::pair<SDL_JoystickID, int>> dropped_;  // presses dropped: their release too
+    struct SavedWindow {
+        bool valid = false, maximized = false;
+        int x = 0, y = 0, w = 1280, h = 720;
+    } saved_;
     int heldDir_ = 0;  // gamepad direction held: 1 up, 2 down, 3 left, 4 right
     double repeatAt_ = 0;
 

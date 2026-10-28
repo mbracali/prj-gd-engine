@@ -33,7 +33,7 @@ Steam store is not.
 | Need | Status in gdul | Fix |
 |---|---|---|
 | Binary runs on SteamOS 3 | The Linux build targets glibc 2.35 (Ubuntu 22.04) and ships SDL3. SteamOS 3 is newer, so it runs on the host. Non-Steam shortcuts run on the host unless a compat tool is picked. | Nothing to change. Optional: test once under "Steam Linux Runtime 3.0 (sniper)". |
-| Controls in Gaming Mode | **Gap.** gd01 and gd02 set `SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD=1` before SDL starts its gamepad code (reuse_and_lessons L9). `gd-engine-launcher/src` never sets it. Steam hides the real pad, so the launcher list may see no controller. | Set the variable in `main.cpp` before `SDL_Init`, and move gd01's 80 ms duplicate-press filter (`kSameNs`) into the launcher. |
+| Controls in Gaming Mode | **Done in gdul 0.1.4** (the variable and the 80 ms filter). Was a gap: gd01 and gd02 set `SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD=1` before SDL starts its gamepad code (reuse_and_lessons L9). `gd-engine-launcher/src` never sets it. Steam hides the real pad, so the launcher list may see no controller. | Set the variable in `main.cpp` before `SDL_Init`, and move gd01's 80 ms duplicate-press filter (`kSameNs`) into the launcher. |
 | Handheld defaults | These used to be a compile flag in a separate build. | Detect the Deck at run time instead: `SteamDeck=1` in the environment, or DMI `board_name` of `Jupiter` (LCD) or `Galileo` (OLED). Pass a `handheld` profile to modules through `gd_host.h`, so they apply their Steam Deck settings once and lock nothing. |
 | Gaming Mode window | The game needs to be full screen at 1280x800 and must not open a file dialog it can't handle. | Use full screen by default on the Deck. Gaming Mode has no portal file picker, so rely on the `original_isos/` auto-discovery that already exists. |
 | On-screen keyboard (band name, search) | Not handled. | Call `SDL_StartTextInput` (Steam shows its keyboard when the user presses Steam+X), or open it directly with `steam://open/keyboard`. |
@@ -59,7 +59,7 @@ Steam store is not.
 
 ## Concrete steps
 
-1. In `launcher/main.cpp`, set `SDL_setenv_unsafe("SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD","1",0)` before `SDL_Init`. Move the duplicate-press filter into the launcher's input code.
+1. (Done in gdul 0.1.4, in `launcher.cpp` before `SDL_Init`.) In `launcher/main.cpp`, set `SDL_setenv_unsafe("SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD","1",0)` before `SDL_Init`. Move the duplicate-press filter into the launcher's input code.
 2. Add `platform::isSteamDeck()` (environment variable plus DMI) and a `handheld` flag in `gd_host.h`. Modules map it to their existing Steam Deck profile.
 3. Add a "Steam Deck" section to `manual/user-manual.md` and a row to the release notes ("use the Linux download; Add a Non-Steam Game").
 4. Test on a Deck from Game Mode before each release (L9 rule).
