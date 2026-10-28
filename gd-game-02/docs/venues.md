@@ -90,8 +90,8 @@ undecoded.
   (+0xcc), its transform with animate_position_from_preset (+0xcd,
   0x822387E8).
 - Before the first shot (and in `--view`): the first INTRO shot's first
-  keyframe and the INTRO preset's first keyframe (the shot's parent and
-  path at frame 0 multiplied in, turned to its targets). In a song the
+  keyframe and the INTRO preset's first keyframe, framed as the director
+  frames it (CameraDirector::evaluate). In a song the
   camera director ("Camera director") plays the shots and the preset
   manager ("Lighting presets") the presets. The band slots draw their
   members where the slots sit in the draw list (`docs/band.md`); without a
@@ -222,25 +222,54 @@ Playback (SetFrame 0x8222a068), 30 frames a second from the start [C]:
   to i + 1 (the last holds; looping wraps); t eased by the outgoing
   keyframe's blend_ease, a sigmoid from 0 to 1 (0x8226F988 / 0x8226F6E8:
   [-k, k] mapped through an odd function [I: tanh]).
-- A keyframe's transform (0x82226988): its xfm; the shot's path TransAnim
-  at end_frame x u, u = frame / length eased by path_ease (0: linear),
-  multiplied in; the parent (a band slot: its waypoint, a bone its height
-  above it [I]) added as a translation, or composed with
-  use_parent_rotation; parent and targets low-passed by `filter` (per
-  1/60 s [I: GH2 scales it by a screen-distance factor, 0x821D7030]);
-  clamp_height keeps it above a single target + clamp_height; then turned
-  so its targets' mean lands at screen_offset (-1..1, y up; 0x82224bd8 [I:
-  solved with world up, no roll]).
-- Apply (0x82227440): position lerp, rotation slerp; field of view lerped
-  plus zoom_fov lerped (zoom_fov is added after framing); near / far the
-  shot's; depth of field when use_depth_of_field: focus = |camera - focal
+- A keyframe's camera (0x82226988) [C]: its xfm; with a path, the path
+  TransAnim evaluated at end_frame x u (u = frame / length eased by
+  path_ease, 0: linear; RndTransAnim 0x821B6B00 into the shot's matrix:
+  position keys, trans_spline's Hermite 0x8226E560 / 0x8226E368, rotation
+  keys, scale keys scaling the rows; no keys: origin / identity) with the
+  FIRST keyframe's xfm multiplied in under it (0x8226A630 on keyframes[0]
+  +0x18: the other keyframes' xfms are not used); the parent (a band slot:
+  its waypoint, a bone its height above it [I]) added as a translation, or
+  multiplied in with use_parent_rotation; clamp_height (> 0, exactly one
+  target) keeps it above that target + clamp_height. The targets' mean
+  (0x82226800) and the parent's transform are low-passed per keyframe
+  (+0x8c / +0xac) by filter x min(d, 1) once a 60 Hz frame, d the screen
+  distance (0..1 across the picture) between where the current camera
+  shows the target (0x821D7030) and the keyframe's screen offset.
+- Framing (0x82227440) [C]: when the two keyframes aim at different
+  targets (0x822266F0), each keyframe's camera looks at its own filtered
+  target; then position lerp, rotation slerp (0x8226A980). When they aim at
+  the same targets the blended camera is turned to each keyframe's target
+  and those two slerped. The look-at (0x82224BD8 + 0x8214F7F0): forward =
+  target - position, the up hint the camera's own up row (the keyframe's:
+  shots roll as authored), right = forward x up, up = right x forward: the
+  target lands at the centre. The screen offset (-1..1, y up) is then a
+  move of the camera in its own plane, only with the same targets: by
+  (-so.x d tan(fov / 2) aspect, 0, -so.y d tan(fov / 2)) in camera space
+  (0x8214F950; the projection's +0xf4 = cot(fov / 2) h / w and +0x118 =
+  -cot(fov / 2), 0x821D75F8), d the distance to the target(s) and so the
+  offset, both lerped, fov without zoom_fov. Field of view lerped, then
+  zoom_fov lerped and added; near / far the shot's; depth of field (from
+  the moved camera) when use_depth_of_field: focus = |camera - focal
   target| x (1 + focus_blur_multiplier), blur_depth / max_blur lerped; only
   the outgoing keyframe with a focal target: max_blur x (1 - t), only the
   incoming one: x t; none: DOF off (Rnd vtable +0x70 / +0x74).
-- Shake (0x82224D18): per 1/60 s an impulse with probability noisefreq
-  (random direction, size noiseamp, y a third; angles within
-  +-shake_maxangle degrees about x and z, clamped), followed by springs
-  (0.02 x distance, velocity x 0.9) for the offset and the angles.
+- Shake (0x82224D18) [C]: per 1/60 s an impulse with probability noisefreq
+  (direction a random angle: x = sin(a + pi / 2), y a third of x, z =
+  sin(a), 0x8226E050 being GH2's table sine; size random x noiseamp;
+  angles within +-shake_maxangle degrees about x and z; past noiseamp the
+  offset is taken back to 2 amp - |v|), followed by springs (0.02 x
+  distance, velocity x 0.9). The offset is added in the camera's own axes
+  (0x8214F950); the angles turn it about its right and up [I: 0x8216DB48's
+  order].
+- Bug-fix GD02-092 (10-28): before, the look-at was solved with world up
+  and the screen offset as a turn, which flipped the camera over whenever
+  the target sat high above it (stone's intro: the picture upside down,
+  the crowd "hanging from the sky"); the path was multiplied under each
+  keyframe's own xfm, so arena's intro (Intro.tnm, its second keyframe's
+  xfm a world position) blended to twice the path's offset, about 300
+  units under the arena floor. `--venuetest` now frames every shot of
+  every variant through its length (tests/venuetest_camera.cpp).
 - Frame rate: GH2 runs the filter (one lerp a frame, 0x82122100) and the
   shake once a 60 Hz frame [C: 0x82226988 / 0x82224D18 per SetFrame]. The
   port takes the filter as (1 - filter)^(dt x 60) and runs the shake in
@@ -456,9 +485,11 @@ placement of it shows the same pose, and crowds naming the same archetype
   clears the card to 0 and writes alpha in the card pass (forceAlphaWrite)
   as the 360 does. `GD02_CROWD=0` leaves the crowd out.
 - "Crowd hanging from the ceiling" (arena intro, reported with the M8
-  renderer): not seen with the cards (arena intro02 and the song's intro
-  shots show the floor crowd; the upper placements are arena's stands)
-  [data]. Cards face the camera from any view (the billboard above).
+  renderer; stone's intro the same): the camera, not the crowd. The old
+  look-at turned the camera upside down when the target was high above it
+  and the old path put arena's intro under the floor (Camera director,
+  bug-fix GD02-092); seen from below the floor the crowd hangs from the
+  ground. Cards face the camera from any view (the billboard above).
 - Without GH2's menus and without the director's `game` (the dev modes),
   intro_start_msg / excitement / a shot apply the same fullness natively.
 
@@ -624,6 +655,13 @@ the loaded venue.
   the world, the director and the presets with fixed seeds
   (tests/director_golden.h): the (beat, shot) / (beat, preset) log's line
   count and hash must match; `GD02_GOLDEN_LOG=<file>` writes it.
+- `--venuetest` camera (tests/venuetest_camera.cpp): every CamShot of
+  every variant framed (CameraDirector::evaluate: no filter, no shake, the
+  band slots at their waypoints) every 5 frames and at its end: a finite,
+  orthonormal camera, not upside down (up z >= -0.5), not under the venue
+  (more than 10 below the lowest waypoint and below every up-facing static
+  triangle over its spot), and with the same targets in both keyframes the
+  targets' mean at the lerped screen offset (within 0.02).
 - `--venuetest` camera rate (tests/director_golden.h): in each venue its
   first song, the band and the director stepped at 60 and at 240 fps for
   60 s (`GD02_CAMRATE_SECONDS`): the same shots and positions within 5
@@ -644,9 +682,10 @@ the loaded venue.
 - Animatable's first u32 (a float: 160.0 on CamShots).
 - RndDir::SetFrame on proxies (all its anims) [I].
 - TRIGGERS-track lighting texts; where Peak comes from natively.
-- Director: GH2's filter scale factor (0x821D7030's second result), the
-  ease function (tanh assumed), the shake's axes; the order of downbeat and
-  one_bar_to in one frame (two cuts in the same beat happen).
+- Director: the ease function (tanh assumed), the shake angles' axes
+  (0x8216DB48's order); the order of downbeat and one_bar_to in one frame
+  (two cuts in the same beat happen); TransAnim repeat_trans / follow_path
+  on camera paths (none on the disc).
 - Spotlights: GH2's beam shader (screen-space softness, fog), the floor
   spot's plane and shape, the lens orientation, damping_constant,
   target_shadow, additional_objects, xsection / cutouts (unused on the

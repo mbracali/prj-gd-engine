@@ -69,30 +69,37 @@ float sigmoid(float x, float k) {
     return 0.5f + 0.5f * std::tanh((2 * x - 1) * k) / std::tanh(k);
 }
 
-// The camera at `pos` turned so `target` lands on screen offset `so`
-// (-1..1, y up) for a 16:9 frame of vertical fov `yFov` (0x82224bd8 [I:
-// solved with world up, no roll]).
-void reframe(scene::Xfm& x, const V3& target, const std::array<float, 2>& so, float yFov) {
-    V3 d = sub(target, x.pos);
-    const float l = len(d);
-    if (l < 1e-3f) return;
-    for (float& c : d) c /= l;
-    const float ty = std::tan(yFov * 0.5f), tx = ty * gfx::kLogicalW / gfx::kLogicalH;
-    float vx = so[0] * tx, vy = 1, vz = so[1] * ty;
-    const float vl = std::sqrt(vx * vx + vy * vy + vz * vz);
-    vx /= vl, vy /= vl, vz /= vl;
-    const float ryz = std::sqrt(vy * vy + vz * vz);
-    const float p = std::asin(std::clamp(d[2] / ryz, -1.0f, 1.0f)) - std::atan2(vz, vy);
-    const float w = vy * std::cos(p) - vz * std::sin(p);
-    const float h = std::atan2(d[0], d[1]) - std::atan2(vx, w);
-    const V3 f{std::sin(h) * std::cos(p), std::cos(h) * std::cos(p), std::sin(p)};
-    const V3 r{std::cos(h), -std::sin(h), 0};
-    const V3 u{r[1] * f[2] - r[2] * f[1], r[2] * f[0] - r[0] * f[2], r[0] * f[1] - r[1] * f[0]};
+V3 cross(const V3& a, const V3& b) { return {a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]}; }
+float dot3(const V3& a, const V3& b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
+bool normalize3(V3& v) {
+    const float l = len(v);
+    if (l == 0) return false;
+    for (float& c : v) c /= l;
+    return true;
+}
+
+// The camera at x.pos turned to look at `target` (0x82224BD8 [C]): forward
+// = target - pos, the up hint `up` (the keyframe's own up row), then
+// 0x8214F7F0's orthonormalisation: right = forward x up, up = right x
+// forward. The target lands at the centre; the screen offset is a move of
+// the camera (CameraDirector::frameShot).
+void lookAt(scene::Xfm& x, const V3& target, const V3& up) {
+    V3 f = sub(target, x.pos);
+    if (!normalize3(f)) return;
+    V3 r = cross(f, up);
+    if (!normalize3(r)) return;
+    const V3 u = cross(r, f);
     x.rot = {r[0], r[1], r[2], f[0], f[1], f[2], u[0], u[1], u[2]};
 }
 
-// A TransAnim's own keys at `frame` (the camera path).
-scene::Xfm sampleTransAnim(const scene::TransAnim& a, float frame) {
+V3 upRow(const scene::Xfm& x) { return {x.rot[6], x.rot[7], x.rot[8]}; }
+
+// The camera path's transform at `frame` (RndTransAnim 0x821B6B00 into the
+// shot's own matrix [C]): the keys owner's position keys (trans_spline:
+// the Hermite of scene::sampleTrans) or the origin, its rotation keys or
+// none, its scale keys scaling the rows. repeat_trans and follow_path are
+// unused by the disc's camera paths [C data] and not done.
+scene::Xfm evalPath(const scene::TransAnim& a, float frame) {
     const scene::TransAnim* k = &a;
     if (!a.keysOwner.empty() && a.keysOwner != a.name && a.dir)
         if (auto* o = a.dir->resolve<scene::TransAnim>(a.keysOwner)) k = o;
@@ -100,8 +107,24 @@ scene::Xfm sampleTransAnim(const scene::TransAnim& a, float frame) {
     scene::Quat q;
     if (scene::sampleRotation(k->rotKeys, frame, k->rotSlerp, q)) scene::quatToRot(q, x.rot);
     std::array<float, 3> p;
-    if (scene::sampleLinear(k->transKeys, frame, p)) x.pos = p;
+    if (scene::sampleTrans(k->transKeys, frame, k->transSpline, p)) x.pos = p;
+    std::array<float, 3> sc;
+    if (scene::sampleTrans(k->scaleKeys, frame, k->scaleSpline, sc))
+        for (int r = 0; r < 3; ++r)
+            for (int c = 0; c < 3; ++c) x.rot[size_t(r * 3 + c)] *= sc[size_t(r)];
     return x;
+}
+
+// Two keyframes aim at the same targets (0x822266F0 [C]: as many, each of
+// the first's (object, subpart) among the second's).
+bool sameTargets(const scene::CamShot::Keyframe& a, const scene::CamShot::Keyframe& b) {
+    if (a.targets.size() != b.targets.size()) return false;
+    for (const auto& t : a.targets) {
+        bool found = false;
+        for (const auto& u : b.targets) found = found || (t.object == u.object && t.subpart == u.subpart);
+        if (!found) return false;
+    }
+    return true;
 }
 
 // Bone heights above a band slot's feet until the band exists (M9) [I:
@@ -539,87 +562,224 @@ void CameraDirector::endShot() {
 
 // ---- playback ------------------------------------------------------------------------
 
-bool CameraDirector::targetPoint(const scene::CamTarget& t, std::array<float, 3>& out) const {
+bool CameraDirector::targetPoint(const World& world, const scene::CamTarget& t, std::array<float, 3>& out) {
     if (t.object.empty()) return false;
     // A band member and its subpart (a bone of its directory).
-    if (world_.band) {
+    if (world.band) {
         scene::Xfm bx;
-        if (world_.band->objectXfm(t.object, t.subpart, bx)) {
+        if (world.band->objectXfm(t.object, t.subpart, bx)) {
             out = bx.pos;
             return true;
         }
     }
-    const bool mp = world_.venue().variant() != VenueVariant::Single;
+    const bool mp = world.venue().variant() != VenueVariant::Single;
     scene::Xfm x;
-    if (!venueObjectXfm(world_, t.object, mp, x)) return false;
+    if (!venueObjectXfm(world, t.object, mp, x)) return false;
     out = x.pos;
     // A band slot's bone: its height above the slot (no band until M9).
-    if (!world_.venue().find(t.object) || world_.venue().find(t.object)->cls == "Character" ||
-        world_.venue().find(t.object)->cls == "BandCharacter")
+    if (!world.venue().find(t.object) || world.venue().find(t.object)->cls == "Character" ||
+        world.venue().find(t.object)->cls == "BandCharacter")
         out[2] += boneHeight(t.subpart);
     return true;
 }
 
-// 0x82226988: the keyframe's transform and its targets' mean.
-bool CameraDirector::keyframeXfm(const scene::CamShot& shot, ShotState& st, size_t k, float frame, float dt, scene::Xfm& out,
-                                 std::array<float, 3>& target, bool& hasTarget) {
+// 0x82226988 [C]: one keyframe's camera.
+// - Its targets' mean (0x82226800), low-passed into the keyframe's filtered
+//   target: once a 60 Hz frame by filter x min(d, 1), d the distance on the
+//   screen (0..1 across) between where the current camera shows the target
+//   (0x821D7030) and where the keyframe wants it ((so + 1) / 2, y down).
+// - The transform: the shot's path (when it has one) at end_frame x u
+//   (u = frame / length, eased by path_ease) with the FIRST keyframe's xfm
+//   multiplied in under it (0x8226A630 on keyframes[0] +0x18); else the
+//   keyframe's own xfm.
+// - The parent (+0x9c): its world transform low-passed by the same factor
+//   (rotation slerped, position lerped); with use_parent_rotation the
+//   camera is multiplied under it, else its position is added; clamp_height
+//   with exactly one target keeps the camera above that target +
+//   clamp_height.
+// - `look` (the two keyframes aim at different targets): turned to the
+//   filtered target with the transform's own up row (0x82224BD8).
+// Other frame rates take the same per-second rate: (1 - a)^(dt x 60).
+void CameraDirector::keyframeXfm(const World& world, const scene::CamShot& shot, ShotState* st, size_t k, float frame,
+                                 const Framing* prev, float dt, bool look, KeyframeCam& out) {
     const auto& kf = shot.keyframes[k];
-    out = kf.xfm;
-    // The filter: a low-pass per 1/60 s frame (GH2 runs it once a frame at
-    // 60 Hz) [I: its screen-distance factor (0x821D7030) taken as 1]. Other
-    // frame rates take the same per-second rate: (1 - filter)^(dt x 60), so
-    // a 144 Hz or uncapped frame rate does not make the camera chase faster.
-    const float steps = std::max(0.0f, dt * 60.0f);
-    auto lowPass = [&](std::array<float, 3>& f, const std::array<float, 3>& v) {
-        if (!st.filtered[k] || shot.filter <= 0 || shot.filter >= 1) {
-            f = v;
-            return;
-        }
-        const float a = 1.0f - std::pow(1.0f - shot.filter, steps);
-        f = lerp3(f, v, a);
-    };
-    // Targets: their mean.
     V3 sum{0, 0, 0};
     int n = 0;
     for (const auto& t : kf.targets) {
         V3 p;
-        if (targetPoint(t, p)) sum = {sum[0] + p[0], sum[1] + p[1], sum[2] + p[2]}, ++n;
+        if (targetPoint(world, t, p)) sum = {sum[0] + p[0], sum[1] + p[1], sum[2] + p[2]}, ++n;
     }
-    hasTarget = n > 0;
-    if (hasTarget) {
-        lowPass(st.target[k], {sum[0] / float(n), sum[1] / float(n), sum[2] / float(n)});
-        target = st.target[k];
+    out.hasTarget = n > 0;
+    const V3 raw = n > 0 ? V3{sum[0] / float(n), sum[1] / float(n), sum[2] / float(n)} : V3{0, 0, 0};
+    // The filter factor from the target's place on the current camera's screen.
+    float factor = 1;
+    if (prev && prev->valid) {
+        const scene::Xfm& c = prev->xfm;
+        const V3 d = sub(raw, c.pos);
+        const float x = dot3(d, {c.rot[0], c.rot[1], c.rot[2]}), y = dot3(d, {c.rot[3], c.rot[4], c.rot[5]}),
+                    z = dot3(d, {c.rot[6], c.rot[7], c.rot[8]});
+        const float cot = 1.0f / std::tan(prev->fov * 0.5f), aspect = float(gfx::kLogicalW) / float(gfx::kLogicalH);
+        float sx = x * cot / aspect, sy = z * cot;
+        if (y != 0) sx /= y, sy /= y;
+        const float ex = 0.5f * (sx - kf.screenOffset[0]), ey = 0.5f * (sy - kf.screenOffset[1]);
+        factor = std::min(std::sqrt(ex * ex + ey * ey), 1.0f);
     }
-    // The path TransAnim (eased by path_ease over the shot's length).
+    const bool snap = !st || !st->filtered[k] || shot.filter <= 0;
+    const float a = snap ? 1.0f : 1.0f - std::pow(1.0f - std::clamp(shot.filter * factor, 0.0f, 1.0f), std::max(0.0f, dt * 60.0f));
+    if (st) {
+        st->target[k] = snap ? raw : lerp3(st->target[k], raw, a);
+        out.target = st->target[k];
+    } else {
+        out.target = raw;
+    }
+    scene::Xfm& x = out.xfm;
+    x = kf.xfm;
     if (!shot.path.empty())
-        if (auto* path = world_.venue().find<scene::TransAnim>(shot.path)) {
+        if (auto* path = world.venue().find<scene::TransAnim>(shot.path)) {
             const float length = shot.lengthFrames();
             float u = length > 0 ? std::clamp(frame / length, 0.0f, 1.0f) : 0.0f;
             if (shot.pathEase != 0) u = sigmoid(u, shot.pathEase);
-            out = scene::compose(out, sampleTransAnim(*path, gfx::ScenePose::endFrame(path) * u));
+            x = scene::compose(shot.keyframes[0].xfm, evalPath(*path, gfx::ScenePose::endFrame(path) * u));
         }
-    // The parent: translation only, unless use_parent_rotation.
     if (!kf.parent.object.empty()) {
-        const bool mp = world_.venue().variant() != VenueVariant::Single;
+        const bool mp = world.venue().variant() != VenueVariant::Single;
         scene::Xfm px;
-        const bool bandParent = world_.band && world_.band->objectXfm(kf.parent.object, kf.parent.subpart, px);
-        if (bandParent || venueObjectXfm(world_, kf.parent.object, mp, px)) {
+        const bool bandParent = world.band && world.band->objectXfm(kf.parent.object, kf.parent.subpart, px);
+        if (bandParent || venueObjectXfm(world, kf.parent.object, mp, px)) {
             V3 p;
-            if (targetPoint(kf.parent, p)) px.pos = p;
-            lowPass(st.parentPos[k], px.pos);
-            px.pos = st.parentPos[k];
-            if (kf.useParentRotation) {
-                out = scene::compose(out, px);
-            } else {
-                out.pos = {out.pos[0] + px.pos[0], out.pos[1] + px.pos[1], out.pos[2] + px.pos[2]};
+            if (targetPoint(world, kf.parent, p)) px.pos = p;
+            if (st) {
+                scene::Xfm& f = st->parent[k];
+                if (snap) {
+                    f = px;
+                } else {
+                    scene::quatToRot(scene::slerp(rotToQuat(f.rot), rotToQuat(px.rot), a), f.rot);
+                    f.pos = lerp3(f.pos, px.pos, a);
+                }
+                px = f;
             }
+            if (kf.useParentRotation) x = scene::compose(x, px);
+            else x.pos = {x.pos[0] + px.pos[0], x.pos[1] + px.pos[1], x.pos[2] + px.pos[2]};
             // clamp_height with one target: not below it + clamp_height.
-            if (shot.clampHeight > 0 && hasTarget && kf.targets.size() == 1) out.pos[2] = std::max(out.pos[2], target[2] + shot.clampHeight);
+            if (shot.clampHeight > 0 && kf.targets.size() == 1) {
+                V3 t;
+                if (targetPoint(world, kf.targets[0], t)) x.pos[2] = std::max(x.pos[2], t[2] + shot.clampHeight);
+            }
         }
     }
-    st.filtered[k] = true;
-    if (hasTarget) reframe(out, target, kf.screenOffset, kf.fieldOfView > 0.01f ? kf.fieldOfView : 0.8f);
-    return true;
+    if (st) st->filtered[k] = true;
+    if (look && out.hasTarget) lookAt(x, out.target, upRow(x));
+}
+
+// SetFrame 0x8222A068 -> keyframes 0x82226448, apply 0x82227440 [C]: the
+// keyframe pair (hold i for its duration, then blend over its blend to
+// i + 1, eased by i's blend_ease), each keyframe's camera (keyframeXfm),
+// position lerped and rotation slerped. When both aim at the same targets
+// the blended camera is turned to each keyframe's filtered target (its up
+// row the hint) and those two slerped; then it is moved in its own plane so
+// the target lands at the screen offset: by (-so.x d tan(fov / 2) aspect,
+// 0, -so.y d tan(fov / 2)) in camera space (0x8214F950; the projection's
+// +0xf4 / +0x118), d the distance to the target(s) and so the offset, both
+// lerped, fov the keyframes' (without zoom_fov). Field of view: lerped,
+// then zoom_fov lerped and added. Depth of field from the moved camera.
+void CameraDirector::frameShot(const World& world, const scene::CamShot& shot, ShotState* st, float f, const Framing* prev, float dt,
+                               Framing& out, Dof* dof) {
+    const size_t n = shot.keyframes.size();
+    if (st) st->target.resize(n), st->parent.resize(n), st->filtered.resize(n, false);
+    size_t a = 0, b = 0;
+    float t = 0;
+    float s = 0;
+    const float length = shot.lengthFrames();
+    if (shot.looping && length > 0) f = std::fmod(f, length);
+    for (size_t i = 0; i < n; ++i) {
+        const auto& k = shot.keyframes[i];
+        a = b = i, t = 0;
+        if (f <= s + k.duration || i + 1 == n) break;
+        if (f < s + k.duration + k.blend) {
+            b = i + 1;
+            t = k.blend > 0 ? (f - s - k.duration) / k.blend : 1.0f;
+            break;
+        }
+        s += k.duration + k.blend;
+    }
+    if (shot.looping && a + 1 == n && length > 0 && shot.keyframes[a].blend > 0 && f > s + shot.keyframes[a].duration) {
+        b = 0;
+        t = (f - s - shot.keyframes[a].duration) / shot.keyframes[a].blend;
+    }
+    const auto& ka = shot.keyframes[a];
+    const auto& kb = shot.keyframes[b];
+    if (a != b && ka.blendEase != 0) t = sigmoid(t, ka.blendEase);
+    const bool same = sameTargets(ka, kb);
+    KeyframeCam ca, cb;
+    keyframeXfm(world, shot, st, a, f, prev, dt, !same, ca);
+    if (b != a) keyframeXfm(world, shot, st, b, f, prev, dt, !same, cb);
+    else cb = ca;
+    scene::Xfm x;
+    x.pos = lerp3(ca.xfm.pos, cb.xfm.pos, t);
+    scene::quatToRot(scene::slerp(rotToQuat(ca.xfm.rot), rotToQuat(cb.xfm.rot), t), x.rot);
+    const float fovA = ka.fieldOfView > 0.01f ? ka.fieldOfView : 0.8f, fovB = kb.fieldOfView > 0.01f ? kb.fieldOfView : 0.8f;
+    const float fov0 = fovA + (fovB - fovA) * t;
+    if (ca.hasTarget || cb.hasTarget) {
+        if (same) {
+            scene::Xfm xa = x, xb = x;
+            if (ca.hasTarget) lookAt(xa, ca.target, upRow(x));
+            if (cb.hasTarget) lookAt(xb, cb.target, upRow(x));
+            scene::quatToRot(scene::slerp(rotToQuat(xa.rot), rotToQuat(xb.rot), t), x.rot);
+        }
+        float d = 0;
+        std::array<float, 2> so{};
+        if (ca.hasTarget && cb.hasTarget) {
+            const float da = len(sub(ca.target, x.pos)), db = len(sub(cb.target, x.pos));
+            d = da + (db - da) * t;
+            so = {ka.screenOffset[0] + (kb.screenOffset[0] - ka.screenOffset[0]) * t,
+                  ka.screenOffset[1] + (kb.screenOffset[1] - ka.screenOffset[1]) * t};
+        } else if (ca.hasTarget) {
+            d = len(sub(ca.target, x.pos)), so = ka.screenOffset;
+        } else {
+            d = len(sub(cb.target, x.pos)), so = kb.screenOffset;
+        }
+        if (same) {
+            const float th = std::tan(std::clamp(fov0, 0.05f, 2.8f) * 0.5f), aspect = float(gfx::kLogicalW) / float(gfx::kLogicalH);
+            const float ox = -so[0] * d * th * aspect, oz = -so[1] * d * th;
+            for (int c = 0; c < 3; ++c) x.pos[size_t(c)] += ox * x.rot[size_t(c)] + oz * x.rot[size_t(6 + c)];
+        }
+    }
+    float fov = fov0 + ka.zoomFov + (kb.zoomFov - ka.zoomFov) * t;
+    out.xfm = x;
+    out.a = a, out.b = b, out.t = t;
+    out.fov = std::clamp(fov, 0.05f, 2.8f);
+    out.valid = true;
+    if (!dof) return;
+    // Depth of field: |camera - focal target| x (1 + focus_blur_multiplier).
+    *dof = {};
+    if (shot.useDepthOfField) {
+        V3 fa, fb;
+        const bool hfa = targetPoint(world, ka.focalTarget, fa), hfb = targetPoint(world, kb.focalTarget, fb);
+        if (hfa && hfb) {
+            const float da = len(sub(fa, x.pos)), db = len(sub(fb, x.pos));
+            const float m = ka.focusBlurMultiplier + (kb.focusBlurMultiplier - ka.focusBlurMultiplier) * t;
+            const float dd = da + (db - da) * t;
+            *dof = {true, dd * (1 + m), ka.blurDepth + (kb.blurDepth - ka.blurDepth) * t, ka.maxBlur + (kb.maxBlur - ka.maxBlur) * t};
+        } else if (hfa) {  // only the outgoing keyframe: max_blur fades out
+            const float dd = len(sub(fa, x.pos));
+            *dof = {true, dd * (1 + ka.focusBlurMultiplier), ka.blurDepth, ka.maxBlur * (1 - t)};
+        } else if (hfb) {  // only the incoming one: it fades in
+            const float dd = len(sub(fb, x.pos));
+            *dof = {true, dd * (1 + kb.focusBlurMultiplier), kb.blurDepth, kb.maxBlur * t};
+        }
+    }
+}
+
+gfx::Camera CameraDirector::evaluate(const World& world, const scene::CamShot& shot, float frame) {
+    gfx::Camera cam;
+    if (shot.keyframes.empty()) return cam;
+    Framing fr;
+    frameShot(world, shot, nullptr, frame, nullptr, 0, fr, nullptr);
+    cam.world = gfx::toMat4(fr.xfm);
+    cam.yFov = fr.fov;
+    cam.nearPlane = shot.nearPlane > 0 ? shot.nearPlane : 1;
+    cam.farPlane = shot.farPlane > cam.nearPlane ? shot.farPlane : 10000;
+    return cam;
 }
 
 void CameraDirector::update() {
@@ -653,64 +813,18 @@ void CameraDirector::update() {
     }
 }
 
-// SetFrame 0x8222a068 -> keyframes 0x82226448, apply 0x82227440.
+// The shot's frame (frameShot), then the shake (0x82224D18 [C]): per 1/60 s
+// an impulse with probability noisefreq (random direction, size noiseamp,
+// y a third; angles within +-shake_maxangle degrees about x and z) on a
+// spring (0.02 x distance, velocity x 0.9); the offset is in the camera's
+// own axes (0x8214F950), the angles turn it about its right and up [I].
 void CameraDirector::play(const scene::CamShot& shot, ShotState& st, float f, float dt) {
-    const size_t n = shot.keyframes.size();
-    st.target.resize(n), st.parentPos.resize(n), st.filtered.resize(n, false);
-    // The keyframe pair: hold i for its duration, then blend over its blend to i + 1.
-    size_t a = 0, b = 0;
-    float t = 0;
-    float s = 0;
-    const float length = shot.lengthFrames();
-    if (shot.looping && length > 0) f = std::fmod(f, length);
-    for (size_t i = 0; i < n; ++i) {
-        const auto& k = shot.keyframes[i];
-        a = b = i, t = 0;
-        if (f <= s + k.duration || i + 1 == n) break;
-        if (f < s + k.duration + k.blend) {
-            b = i + 1;
-            t = k.blend > 0 ? (f - s - k.duration) / k.blend : 1.0f;
-            break;
-        }
-        s += k.duration + k.blend;
-    }
-    if (shot.looping && a + 1 == n && length > 0 && shot.keyframes[a].blend > 0 && f > s + shot.keyframes[a].duration) {
-        b = 0;
-        t = (f - s - shot.keyframes[a].duration) / shot.keyframes[a].blend;
-    }
-    const auto& ka = shot.keyframes[a];
-    const auto& kb = shot.keyframes[b];
-    if (a != b && ka.blendEase != 0) t = sigmoid(t, ka.blendEase);
-    scene::Xfm xa, xb;
-    V3 ta{}, tb{};
-    bool ha = false, hb = false;
-    keyframeXfm(shot, st, a, f, dt, xa, ta, ha);
-    if (b != a) keyframeXfm(shot, st, b, f, dt, xb, tb, hb);
-    else xb = xa;
-    scene::Xfm x;
-    x.pos = lerp3(xa.pos, xb.pos, t);
-    scene::quatToRot(scene::slerp(rotToQuat(xa.rot), rotToQuat(xb.rot), t), x.rot);
-    const float fovA = ka.fieldOfView > 0.01f ? ka.fieldOfView : 0.8f, fovB = kb.fieldOfView > 0.01f ? kb.fieldOfView : 0.8f;
-    float fov = fovA + (fovB - fovA) * t + ka.zoomFov + (kb.zoomFov - ka.zoomFov) * t;
-    fov = std::clamp(fov, 0.05f, 2.8f);
-    // Depth of field: |camera - focal target| x (1 + focus_blur_multiplier).
-    dof_ = {};
-    if (shot.useDepthOfField) {
-        V3 fa, fb;
-        const bool hfa = targetPoint(ka.focalTarget, fa), hfb = targetPoint(kb.focalTarget, fb);
-        if (hfa && hfb) {
-            const float da = len(sub(fa, x.pos)), db = len(sub(fb, x.pos));
-            const float m = ka.focusBlurMultiplier + (kb.focusBlurMultiplier - ka.focusBlurMultiplier) * t;
-            const float d = da + (db - da) * t;
-            dof_ = {true, d * (1 + m), ka.blurDepth + (kb.blurDepth - ka.blurDepth) * t, ka.maxBlur + (kb.maxBlur - ka.maxBlur) * t};
-        } else if (hfa) {  // only the outgoing keyframe: max_blur fades out
-            const float d = len(sub(fa, x.pos));
-            dof_ = {true, d * (1 + ka.focusBlurMultiplier), ka.blurDepth, ka.maxBlur * (1 - t)};
-        } else if (hfb) {  // only the incoming one: it fades in
-            const float d = len(sub(fb, x.pos));
-            dof_ = {true, d * (1 + kb.focusBlurMultiplier), kb.blurDepth, kb.maxBlur * t};
-        }
-    }
+    Framing fr;
+    frameShot(world_, shot, &st, f, &last_, dt, fr, &dof_);
+    scene::Xfm x = fr.xfm;
+    const auto& ka = shot.keyframes[fr.a];
+    const auto& kb = shot.keyframes[fr.b];
+    const float t = fr.t;
     // Shake (0x82224D18): random impulses (probability noisefreq per 1/60 s
     // frame, size noiseamp, angles within +-maxangle degrees) followed by a
     // spring (0.02 x distance) with velocity damping 0.9.
@@ -727,15 +841,17 @@ void CameraDirector::play(const scene::CamShot& shot, ShotState& st, float f, fl
     for (int step = 0; step < steps; ++step) {
         if (shakeRandom01() < freq) {
             const float ang = shakeRandom01() * 2 * kPi, mag = shakeRandom01() * amp;
-            st.shakeTgt[0] += std::cos(ang + kPi / 2) * mag;
-            st.shakeTgt[1] += std::cos(ang + kPi / 2) * mag * 0.333f;
+            // 0x8226E050 is GH2's table sine: x and y from sin(a + pi / 2).
+            st.shakeTgt[0] += std::sin(ang + kPi / 2) * mag;
+            st.shakeTgt[1] += std::sin(ang + kPi / 2) * mag * 0.333f;
             st.shakeTgt[2] += std::sin(ang) * mag;
             st.shakeAngTgt[0] += (shakeRandom01() * 2 - 1) * maxX;
             st.shakeAngTgt[2] += (shakeRandom01() * 2 - 1) * maxZ;
         }
         const float l = std::sqrt(st.shakeTgt[0] * st.shakeTgt[0] + st.shakeTgt[1] * st.shakeTgt[1] + st.shakeTgt[2] * st.shakeTgt[2]);
+        // Past noiseamp the excess is taken back from it (|v| -> 2 amp - |v|).
         if (l > amp && l > 0)
-            for (float& c : st.shakeTgt) c *= amp / l;
+            for (float& c : st.shakeTgt) c *= (2 * amp - l) / l;
         // 0x82224D18's limit: the excess |a| - max taken back towards zero.
         // A clamp for max >= 0; some shots' keyframes (theatre) have a
         // negative max angle, where GH2 lands on -max with the sign flipped
@@ -755,7 +871,9 @@ void CameraDirector::play(const scene::CamShot& shot, ShotState& st, float f, fl
             st.shakeAngVel[c] *= 0.9f;
         }
     }
-    for (int c = 0; c < 3; ++c) x.pos[size_t(c)] += st.shakePos[c];
+    // The offset in the camera's own axes (0x8214F950).
+    for (int c = 0; c < 3; ++c)
+        x.pos[size_t(c)] += st.shakePos[0] * x.rot[size_t(c)] + st.shakePos[1] * x.rot[size_t(3 + c)] + st.shakePos[2] * x.rot[size_t(6 + c)];
     {
         // Pitch about the camera's right axis, then roll / yaw about its up.
         scene::Xfm r;
@@ -774,7 +892,9 @@ void CameraDirector::play(const scene::CamShot& shot, ShotState& st, float f, fl
         x.rot = turned.rot;
     }
     camera_.world = gfx::toMat4(x);
-    camera_.yFov = fov;
+    last_ = fr;
+    last_.xfm = x;  // the next frame's filter sees this camera
+    camera_.yFov = fr.fov;
     camera_.nearPlane = shot.nearPlane > 0 ? shot.nearPlane : 1;
     camera_.farPlane = shot.farPlane > camera_.nearPlane ? shot.farPlane : 10000;
     hasCamera_ = true;

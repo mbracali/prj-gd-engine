@@ -250,7 +250,8 @@ std::vector<float> meshAnimVertices(const scene::Mesh& geometry, const scene::Me
     return v;
 }
 
-// RndTransAnim::SetFrame [I: GH1's order, same fields in GH2]: rotation keys
+// RndTransAnim::SetFrame [I: GH1's order, same fields in GH2; the splines
+// [C] 0x821B6B00]: rotation keys
 // replace the rotation (scale keys then scale it), scale keys alone rescale
 // the normalised rotation, position keys replace the position.
 void ScenePose::transAnim(const scene::TransAnim& a, float frame) {
@@ -259,7 +260,7 @@ void ScenePose::transAnim(const scene::TransAnim& a, float frame) {
     const scene::TransAnim& k = *keysOf(a);
     scene::Xfm x = local(target);
     std::array<float, 3> s{1, 1, 1};
-    const bool hasScale = scene::sampleLinear(k.scaleKeys, frame, s);
+    const bool hasScale = scene::sampleTrans(k.scaleKeys, frame, k.scaleSpline, s);
     scene::Quat q;
     if (scene::sampleRotation(k.rotKeys, frame, k.rotSlerp, q)) {
         scene::quatToRot(q, x.rot);
@@ -269,7 +270,7 @@ void ScenePose::transAnim(const scene::TransAnim& a, float frame) {
         scaleRows(x.rot, s);
     }
     std::array<float, 3> p;
-    if (scene::sampleLinear(k.transKeys, frame, p)) x.pos = p;
+    if (scene::sampleTrans(k.transKeys, frame, k.transSpline, p)) x.pos = p;  // trans_spline: 0x8226E560
     local_[target] = x;
 }
 

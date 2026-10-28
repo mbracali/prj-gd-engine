@@ -14,6 +14,7 @@
 #include "data/game_data.h"
 #include "devaids/screenshot.h"
 #include "game/band.h"
+#include "game/camera_director.h"
 #include "game/crowd.h"
 #include "game/world.h"
 #include "render/band_view.h"
@@ -117,58 +118,14 @@ bool venueObjectXfm(const World& world, const std::string& name, bool multiplaye
     return true;
 }
 
-namespace {
-
-// A TransAnim's own keys at `frame` as a transform (the camera path).
-scene::Xfm sampleTransAnim(const scene::TransAnim& a, float frame) {
-    const scene::TransAnim* k = &a;
-    if (!a.keysOwner.empty() && a.keysOwner != a.name && a.dir)
-        if (auto* o = a.dir->resolve<scene::TransAnim>(a.keysOwner)) k = o;
-    scene::Xfm x;
-    scene::Quat q;
-    if (scene::sampleRotation(k->rotKeys, frame, k->rotSlerp, q)) scene::quatToRot(q, x.rot);
-    std::array<float, 3> p;
-    if (scene::sampleLinear(k->transKeys, frame, p)) x.pos = p;
-    return x;
-}
-
-}  // namespace
-
+// Keyframe k of the shot (from its start, plus `frame`), as the camera
+// director frames it (CameraDirector::evaluate: GH2's look-at, screen
+// offset, path and parent, without the filter and the shake).
 gfx::Camera shotCamera(const World& world, const scene::CamShot& shot, size_t k, float frame) {
-    gfx::Camera cam;
-    if (shot.keyframes.empty()) return cam;
-    const auto& kf = shot.keyframes[std::min(k, shot.keyframes.size() - 1)];
-    const bool mp = world.venue().variant() != VenueVariant::Single;
-    scene::Xfm x = kf.xfm;
-    // The parent: the keyframe moves with it.
-    scene::Xfm parent;
-    if (!kf.parent.object.empty() && venueObjectXfm(world, kf.parent.object, mp, parent)) {
-        if (!kf.useParentRotation) parent.rot = scene::Xfm{}.rot;
-        if (!kf.parent.subpart.empty()) parent.pos[2] += 40;
-        x = scene::compose(x, parent);
-    }
-    // The path TransAnim, multiplied in.
-    if (!shot.path.empty())
-        if (auto* path = world.venue().find<scene::TransAnim>(shot.path)) x = scene::compose(x, sampleTransAnim(*path, frame));
-    cam.world = gfx::toMat4(x);
-    // Targets: look at their mean.
-    gfx::Vec3 sum;
-    int n = 0;
-    for (const auto& t : kf.targets) {
-        scene::Xfm tx;
-        if (!venueObjectXfm(world, t.object, mp, tx)) continue;
-        sum = sum + gfx::Vec3{tx.pos[0], tx.pos[1], tx.pos[2] + (t.subpart.empty() ? 30.0f : 40.0f)};
-        ++n;
-    }
-    if (n > 0) {
-        const gfx::Vec3 eye{x.pos[0], x.pos[1], x.pos[2]};
-        const gfx::Vec3 target = sum * (1.0f / float(n));
-        if (gfx::dot(target - eye, target - eye) > 1e-4f) cam.world = gfx::Camera::lookAt(eye, target).world;
-    }
-    cam.yFov = kf.fieldOfView > 0.01f ? kf.fieldOfView : 0.8f;
-    cam.nearPlane = shot.nearPlane > 0 ? shot.nearPlane : 1;
-    cam.farPlane = shot.farPlane > cam.nearPlane ? shot.farPlane : 10000;
-    return cam;
+    if (shot.keyframes.empty()) return {};
+    float start = 0;
+    for (size_t i = 0; i < std::min(k, shot.keyframes.size() - 1); ++i) start += shot.keyframes[i].duration + shot.keyframes[i].blend;
+    return CameraDirector::evaluate(world, shot, start + frame);
 }
 
 void VenueView::setShot(const scene::CamShot* shot, size_t k) {

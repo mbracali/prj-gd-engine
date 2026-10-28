@@ -7,6 +7,14 @@ matches the tag's version. Nothing is released yet.
 ## [0.1.5] - 2026-10-28
 
 ### Fixed
+- Venue cameras frame their shots as Guitar Hero II does: they look at the
+  band with the shot's own tilt and slide sideways to put it where the shot
+  wants it, and camera paths start from the shot's first keyframe. Stone
+  Henge's intro is no longer upside down (the crowd "hanging from the sky"),
+  the arena's intro no longer flies under the floor, and every other shot
+  frames the band where the original does.
+- Venue animations that move along curves (paper planes, flash pots, swinging
+  lights and more) follow their smooth paths instead of straight lines.
 - Controllers no longer press left / right (or any direction) by themselves:
   a D-pad that SDL reads from an axis (many adapters and guitars) is now
   judged from that axis's resting value with hysteresis, a button held as the

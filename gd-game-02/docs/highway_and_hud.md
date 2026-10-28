@@ -152,6 +152,15 @@ The scenes themselves are listed in `milo_and_textures.md`.
   | 0 | `intro_end` (2 s after `extend_track`) |
   | +500 | `refresh_track_buttons` |
 
+  Re-checked 10-28 (GD02-092) [C]: `+0xf0` is in the shot's frames (the
+  director's poll 0x82268888 ends a shot at +0xf0 / its frames per second
+  after its start) and GamePanel turns it into seconds with -1/30, the rate
+  of every CamShot on the disc; each venue has one INTRO and one
+  INTRO_ENCORE shot, so GamePanel's draw (which marks it used) and the
+  world's `pick_shot INTRO` (the bag refilled) take the same shot: battle,
+  small2, big, theatre, fest and arena 10 s, small1 11.7 s, stone 16 s.
+  The intro shot's camera itself was wrong until then (docs/venues.md,
+  Camera director: the look-at and the path).
   The track sounds play through `play_track_sfx` (not in attract mode).
   gd02 runs these scripts (`App::beginSong` / `updateIntro`; without the
   menus the program plays the same sounds at the same times); `--walktest

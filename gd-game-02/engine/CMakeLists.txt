@@ -134,6 +134,7 @@ target_sources(gd02 PRIVATE
   src/tests/venuetest.cpp
   src/tests/director_golden.cpp
   src/tests/venuetest_crowd.cpp
+  src/tests/venuetest_camera.cpp
   src/tests/chartest.cpp
   src/tests/chartest_band.cpp
   src/tests/chartest_crowd.cpp

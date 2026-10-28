@@ -48,12 +48,14 @@ class PostProc;
 // Playback (CamShot SetFrame 0x8222a068, 30 frames a second from the
 // shot's start): keyframe i holds its duration, then blends over its blend
 // to the next (0x82226448; the blend eased by its blend_ease, a sigmoid
-// 0x8226F988); each keyframe's transform (0x82226988) is its xfm, moved by
-// its parent (low-passed by the shot's filter; translation only unless
-// use_parent_rotation) and the shot's path TransAnim (eased by path_ease),
-// then turned so its targets' mean sits at screen_offset (0x82224bd8);
-// field of view lerped, zoom_fov added; depth of field from the focal
-// targets (0x82227440); the shake spring (0x82224D18); near / far.
+// 0x8226F988); each keyframe's transform (0x82226988) is its xfm (with a
+// path: the first keyframe's xfm under the path TransAnim, eased by
+// path_ease), moved by its parent (low-passed by the shot's filter;
+// translation only unless use_parent_rotation); the camera looks at its
+// targets' mean with the keyframe's own up (0x82224BD8) and is moved in its
+// own plane so they sit at screen_offset (0x82227440); field of view
+// lerped, zoom_fov added; depth of field from the focal targets; the shake
+// spring (0x82224D18); near / far. See frameShot / keyframeXfm.
 class CameraDirector {
 public:
     explicit CameraDirector(World& world, uint32_t seed = 0x43414d31u);
@@ -107,17 +109,35 @@ public:
     int shotsStarted() const { return started_; }
     int failedPicks() const { return failedPicks_; }
 
+    // The shot's camera at `frame` with its targets' current places, without
+    // the filter and the shake (the viewer, --venuetest's camera checks).
+    static gfx::Camera evaluate(const World& world, const scene::CamShot& shot, float frame);
+
 private:
     struct ShotState {
         bool used = false;
         bool startedSent = false, overSent = false;
         double start = 0;  // seconds (or beats for rate 1 shots)
-        // filtered target / parent per keyframe, shake
-        std::vector<std::array<float, 3>> target, parentPos;
+        // per keyframe: the filtered target and parent (+0x8c / +0xac), shake
+        std::vector<std::array<float, 3>> target;
+        std::vector<scene::Xfm> parent;
         std::vector<bool> filtered;
         float shakePos[3] = {}, shakeVel[3] = {}, shakeTgt[3] = {};
         float shakeAng[3] = {}, shakeAngVel[3] = {}, shakeAngTgt[3] = {};
         float shakeSteps = 0;  // 1/60 s frames not yet run
+    };
+    // A camera before the shake: transform, field of view, the keyframe pair.
+    struct Framing {
+        scene::Xfm xfm;
+        float fov = 0.8f;
+        bool valid = false;
+        size_t a = 0, b = 0;
+        float t = 0;
+    };
+    struct KeyframeCam {
+        scene::Xfm xfm;
+        std::array<float, 3> target{};
+        bool hasTarget = false;
     };
 
     bool native(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r);
@@ -127,9 +147,11 @@ private:
     Value prop(const scene::CamShot& shot, const std::string& key);
     bool passes(const scene::CamShot& shot, const std::vector<std::pair<std::string, Value>>& filter);
     void play(const scene::CamShot& shot, ShotState& st, float frame, float dt);
-    bool targetPoint(const scene::CamTarget& t, std::array<float, 3>& out) const;
-    bool keyframeXfm(const scene::CamShot& shot, ShotState& st, size_t k, float frame, float dt, scene::Xfm& out,
-                     std::array<float, 3>& target, bool& hasTarget);
+    static bool targetPoint(const World& world, const scene::CamTarget& t, std::array<float, 3>& out);
+    static void keyframeXfm(const World& world, const scene::CamShot& shot, ShotState* st, size_t k, float frame, const Framing* prev,
+                            float dt, bool look, KeyframeCam& out);
+    static void frameShot(const World& world, const scene::CamShot& shot, ShotState* st, float frame, const Framing* prev, float dt,
+                          Framing& out, Dof* dof);
     double now(const scene::CamShot& shot) const;
     float random01();
     float shakeRandom01();
@@ -141,6 +163,7 @@ private:
     const scene::CamShot* current_ = nullptr;
     const scene::PostProc* postProc_ = nullptr;
     gfx::Camera camera_;
+    Framing last_;  // the camera of the last frame (the filter's screen test)
     bool hasCamera_ = false;
     Dof dof_;
     bool starPower_ = false;

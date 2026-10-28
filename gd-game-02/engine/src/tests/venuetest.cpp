@@ -346,6 +346,10 @@ int runVenueTest(const std::string& dataPath) {
             const int crowdProblems = crowdRun(*v, crowdReport);
             std::printf("    crowd: %s\n", crowdReport.c_str());
             failures += crowdProblems;
+            std::string cameraReport;
+            const int cameraProblems = cameraRun(*v, cameraReport);
+            std::printf("    camera: %s\n", cameraReport.c_str());
+            failures += cameraProblems;
             failures += int(r.problems.size()) + r.undecoded + rawUnexpected + scriptProblems;
         }
         // Every language's star message (stone's geom names ../eng/starmessage.milo).
