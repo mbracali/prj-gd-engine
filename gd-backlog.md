@@ -46,19 +46,23 @@ The Guitar Dream Universal Launcher (`gd-engine-launcher/`): every platform (Lin
 
 | ID | Class | Status | Item | Notes | From |
 |---|---|---|---|---|---|
-| GDUL-001 | Bugfix | 🟡 in progress (wave B) | Every launcher build on every platform carries every ready module. Android showed "This launcher build has no gd-game-01 module" | Recurrent bug that must never happen again ([guidelines/universal_launcher.md](guidelines/universal_launcher.md) "Never forget a package"); see GDREL-002 | Wave B 10-28 |
-| GDUL-002 | Bugfix | 🟡 in progress (wave B) | Android 15: loading an ISO fails with `Cannot open /data/data/io.github.mbracali.gdul/files/original_isos`. Find whether it is ours or the device's, and make it work | Recurrent bug: the launcher unable to load ISOs (especially Android and Windows). `gd-engine-launcher/README.md` "Discs" | Wave B 10-28 |
+| GDUL-001 | Bugfix | ✅ | Every launcher build on every platform carries every ready module. Android showed "This launcher build has no gd-game-01 module" | Recurrent bug that must never happen again ([guidelines/universal_launcher.md](guidelines/universal_launcher.md) "Never forget a package"); see GDREL-002 Done (gdul 0.1.6): gd01 is a module in the APK; build.sh and verify_bundle.sh require every ready game on every system, macOS too. | Wave B 10-28 |
+| GDUL-002 | Bugfix | ✅ | Android 15: loading an ISO fails with `Cannot open /data/data/io.github.mbracali.gdul/files/original_isos`. Find whether it is ours or the device's, and make it work | Recurrent bug: the launcher unable to load ISOs (especially Android and Windows). `gd-engine-launcher/README.md` "Discs" Done (gdul 0.1.6): the disc is read in place through SAF (persistable permission, /proc/self/fd via the module shim), no copy; the message came from "Open folder" on the private folder. | Wave B 10-28 |
 | GDUL-003 | Enhancement | 🟡 in progress (wave B) | Window: windowed on all desktop builds; Android has no window mode (leave its settings alone) |  | Wave B 10-28 |
 | GDUL-004 | Bugfix | 🟡 in progress (wave B) | Explore models: characters' hands / arms go inside the body. Show characters in a T-pose by default; keep the animation menu |  | Wave B 10-28 |
 | GDUL-005 | Enhancement | 🟡 in progress (wave B) | Explore models: a checkbox to show / hide the instrument |  | Wave B 10-28 |
 | GDUL-006 | Enhancement | 🟡 in progress (wave B) | CLI: commands to launch a specific module from the terminal |  | Wave B 10-28 |
 | GDUL-007 | Enhancement | 🟡 in progress (wave B) | Recognise Steam Deck controllers (Steam virtual pads, handheld defaults) | [spikes/study_steam_deck.md](spikes/study_steam_deck.md); see GDREL-001 | Wave B 10-28 |
 | GDUL-008 | Enhancement | ❌ | Try the macOS build on a real Mac | `gd-engine-launcher/README.md`: "not yet tried on a real Mac" | New 10-28 |
-| GDUL-009 | Enhancement | 🟡 in progress (wave B) | Spike: PS Vita homebrew | `spikes/study_ps_vita.md` (being written) | Wave B 10-28 |
-| GDUL-010 | Enhancement | 🟡 in progress (wave B) | Spike: Nintendo 3DS homebrew | `spikes/study_3ds.md` (being written; earlier [spikes/study_3ds_old.md](spikes/study_3ds_old.md): not viable) | Wave B 10-28 |
-| GDUL-011 | Enhancement | 🟡 in progress (wave B) | Spike: iOS | `spikes/study_ios.md` (being written); gd-game-01's iOS item is GD01-219 | Wave B 10-28 |
-| GDUL-012 | Enhancement | 🟡 in progress (wave B) | Spike: LG webOS TV (sideloading?) | `spikes/study_lg_tv.md` (being written; earlier [spikes/study_lg_tv_old.md](spikes/study_lg_tv_old.md)) | Wave B 10-28 |
-| GDUL-013 | Enhancement | 🟡 in progress (wave B) | Spike: Samsung Tizen TV (sideloading?) | `spikes/study_samsung_tv.md` (being written; earlier [spikes/study_samsung_tv_old.md](spikes/study_samsung_tv_old.md)) | Wave B 10-28 |
+| GDUL-020 | Bugfix | ✅ | Android: the launcher and the games shared one save folder (config, career, enhanced files clobbered each other) | Done (gdul 0.1.6): files/gd-engine/<id>/ each, old files moved once | Wave B 10-28 |
+| GDUL-021 | Bugfix | ❌ | Windows `gdul.log` shows the time zone's name instead of a -03:00 offset (`strftime %z` in MinGW, `platform::isoNow`) |  | Wave B 10-28 |
+| GDUL-022 | Enhancement | ❌ | Decide whether a failing macOS release job should block a release (now continue-on-error) |  | Wave B 10-28 |
+| GDUL-023 | Enhancement | ❌ | gd01's and gd02's own APKs still copy the picked disc into internal storage: read it in place as the launcher does (owner decision) |  | Wave B 10-28 |
+| GDUL-009 | Enhancement | ✅ | Spike: PS Vita homebrew | [spikes/study_ps_vita.md](spikes/study_ps_vita.md) | Wave B 10-28 |
+| GDUL-010 | Enhancement | ✅ | Spike: Nintendo 3DS homebrew | `spikes/study_3ds.md` (being written; earlier [spikes/study_3ds_old.md](spikes/study_3ds_old.md): not viable) | Wave B 10-28 |
+| GDUL-011 | Enhancement | ✅ | Spike: iOS | [spikes/study_ios.md](spikes/study_ios.md); gd-game-01's iOS item is GD01-219 | Wave B 10-28 |
+| GDUL-012 | Enhancement | ✅ | Spike: LG webOS TV (sideloading?) | `spikes/study_lg_tv.md` (being written; earlier [spikes/study_lg_tv_old.md](spikes/study_lg_tv_old.md)) | Wave B 10-28 |
+| GDUL-013 | Enhancement | ✅ | Spike: Samsung Tizen TV (sideloading?) | `spikes/study_samsung_tv.md` (being written; earlier [spikes/study_samsung_tv_old.md](spikes/study_samsung_tv_old.md)) | Wave B 10-28 |
 
 
 ## Releases & packaging
@@ -153,8 +157,8 @@ shipped in the universal launcher.
 
 | ID | Class | Status | Item | Notes | From |
 |---|---|---|---|---|---|
-| GD01-290 | Bugfix | 🟡 in progress (wave B) | Main guitarist's movement still weird: sometimes a force seems to pull him to a spot | Follows old B85 (docs/character_animation.md §5) | Wave B 10-28 |
-| GD01-291 | Bugfix | 🟡 in progress (wave B) | The strum icon is broken in half in every menu (as gd-game-02 #10) | Old B29 fixed the help bar's strum icon; it is back | Wave B 10-28 |
+| GD01-290 | Bugfix | ✅ | Main guitarist's movement still weird: sometimes a force seems to pull him to a spot | Follows old B85 (docs/character_animation.md §5) Done (gd01 1.1.6): port-only standGuard / snapHome / hold-to-spot removed; the original pose hold (FUN_001958b0) holds where the walk ended; root motion ignores the phase snap. | Wave B 10-28 |
+| GD01-291 | Bugfix | 🟡 needs the owner | The strum icon is broken in half in every menu (as gd-game-02 #10) | Old B29 fixed the help bar's strum icon; it is back gd01 draws the asset exactly as the original (64×16 texture has a light / dark split, same in GH2): need the owner's screenshot or a reference before changing anything. | Wave B 10-28 |
 | GD01-037 | Bugfix | ❌ | Weird glitches in the venues | Needs specifics (venue / moment); candidates in "Venue artifacts" below | Bugs 10-21 r1 B3 |
 | GD01-046 | Bugfix | 🟡 | Star Power: the meter gauge is wrong, there is no Star Power animation on the highway, and the guitarist's Star Power move plays only about half the time | Guitarist move via `start_starpower`; star tube MeshAnim; lightning bolts timed from the deploy; bonus gems; rails glow (red warning, blue SP ready). Missing: deploy sparkle burst, cyan burn, track shake check. Please re-check the meter | Bugs 10-21 r2 B12 |
 | GD01-050 | Bugfix | 🟡 | Some fonts look odd, especially the status on the career screen | LabelEx fit now follows the decomp (FUN_0011f868: width/height fit as a scale). Also seen: on Select Career the "NOVICE STATUS (1 OF 25 SONGS)" line overlaps EASY — check that label's position/fit | Bugs 10-21 r2 B16 |

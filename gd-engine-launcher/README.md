@@ -140,6 +140,7 @@ preference folder for `gd-engine/gdul`:
 - Linux: `~/.local/share/gd-engine/gdul/`
 - Windows: `%APPDATA%\gd-engine\gdul\`
 - macOS: `~/Library/Application Support/gd-engine/gdul/`
+- Android: the app's `files/gd-engine/gdul/` (internal storage)
 
 The same folder holds `config.txt` (`iso.<game id>=<path>`) and `logs/<game
 id>.log`, the game's own log lines of its last run. Moving between rows is not
@@ -456,18 +457,34 @@ gd02's Android build. The Gradle project is `android/` (applicationId
   `dlopen`, the folder being where its own `libmain.so` was loaded from.
   gd02's module is built by its CMakeLists.txt (`GD02_MODULE=ON`) with the
   NDK against the same SDL3 source, so it uses the launcher's `libSDL3.so`.
-  gd-game-01 (Vulkan, frozen, with its own APK) has no Android module: it is
-  listed only.
+  gd-game-01's module is built from `modules/gd01` as gd01's own APK builds
+  it: OpenGL ES 3.0, the upscaler stub (no Vulkan FSR / DLSS on Android).
+  Every ready game has its module in the APK, as on every system.
+  `GDUL_ABI=x86_64 scripts/build.sh android` builds an x86-64 APK
+  (`gdul-<version>-android-x86_64.apk`) for the emulator; it is not released.
 - **games.yaml, game-info.yaml, launcher-info.yaml, manifest.json** are APK
   assets under `gd-engine-games/` (SDL reads relative paths from the assets;
   `platform::baseDir()` is "" on Android). Licences and the manual are
   assets too.
 - **Discs**: Load ISO opens Android's file picker (a `content://` URI). The
-  launcher identifies it there (SDL reads such URIs), then copies it into
-  `Android/data/io.github.mbracali.gdul/files/original_isos/<game id>.iso`,
-  showing the progress, because the games open their disc with `fopen` (as
-  gd02's own Android build does). Discs put in that folder by hand are found
-  too.
+  launcher identifies the disc there (SDL reads such URIs) and saves the URI
+  itself; `GdulActivity` keeps the persistable read permission, so it still
+  works after a restart. Nothing is copied. When a game starts (or its
+  explorer, or its menu sounds) the launcher opens the document
+  (`ContentResolver.openFileDescriptor`, `GdulActivity.openDocument`) and
+  passes the game `/proc/self/fd/<n>`. Android 11+ refuses to open that path
+  again for a shared-storage file the app does not own (FUSE: EACCES), so the
+  module shim's `fopen` (`sdk/gd_module_shim.*`, Android only) reads such a
+  path through the descriptor (`pread`, one offset per `FILE`). A lost
+  permission or a document that is not a file on the device (a cloud drive)
+  is said in the Play error and logged. Discs put in
+  `Android/data/io.github.mbracali.gdul/files/original_isos/` by hand (USB)
+  are found too.
+- **Save folders**: Android's SDL gives every `SDL_GetPrefPath` caller the
+  app's `files/` folder. The launcher uses `files/gd-engine/gdul/` and the
+  shim gives each game `files/gd-engine/<game>/` (gd02's files from earlier
+  launchers are copied over once), so they no longer share `config.txt`,
+  `career.json` and `enhanced.json`.
 - **Signing**: the Android debug key (`~/.android/debug.keystore`, created if
   missing), or `GDUL_RELEASE_KEYSTORE` (+ `GDUL_RELEASE_KEYSTORE_PASSWORD`,
   `GDUL_RELEASE_KEY_ALIAS`, `GDUL_RELEASE_KEY_PASSWORD`). Releases use the

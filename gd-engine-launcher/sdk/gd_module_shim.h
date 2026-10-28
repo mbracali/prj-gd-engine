@@ -15,6 +15,17 @@
 //                                      none outlives the game
 //   SDL_GL_SwapWindow               -> nothing while the model explorer is open
 //                                      (the launcher presents its frames)
+//   SDL_GetPrefPath (Android only)  -> <app files>/<org>/<app>/: Android's SDL
+//                                      gives every caller the app's one files/
+//                                      folder, so the launcher and each game
+//                                      would share config.txt, career.json,
+//                                      enhanced.json (gd02's saves of earlier
+//                                      launchers are copied over once)
+//   fopen (Android only)            -> also reads "/proc/self/fd/<n>": the disc
+//                                      chosen in the file dialog, which Android
+//                                      15 does not let the app open again by
+//                                      that path (FUSE: EACCES); read through
+//                                      the descriptor itself (pread) instead
 //
 // With no host (gdshim_begin not called) every call goes straight to SDL, so
 // the same objects still work in a standalone program. Implementation:
@@ -51,6 +62,20 @@ void gdshim_set_exploring(bool on);
 bool gdshim_make_current();
 // Sets an environment variable for the game (SDL's copy and the C library's).
 void gdshim_setenv(const char* name, const char* value);
+
+#ifdef __ANDROID__
+#include <stdio.h>
+#include <cstdio>
+extern "C" FILE* gdshim_fopen(const char* path, const char* mode);
+extern "C" char* gdshim_GetPrefPath(const char* org, const char* app);
+namespace std {
+using ::gdshim_fopen;  // std::fopen -> std::gdshim_fopen
+}
+#ifndef GD_MODULE_SHIM_IMPL
+#define fopen gdshim_fopen
+#define SDL_GetPrefPath gdshim_GetPrefPath
+#endif
+#endif
 
 #ifndef GD_MODULE_SHIM_IMPL
 #define SDL_Init gdshim_Init

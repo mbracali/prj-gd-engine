@@ -20,7 +20,9 @@
 #               the packages gd-game-02/engine/build_android.sh lists. Signed with
 #               the Android debug key, or with GDUL_RELEASE_KEYSTORE (+
 #               GDUL_RELEASE_KEYSTORE_PASSWORD, GDUL_RELEASE_KEY_ALIAS,
-#               GDUL_RELEASE_KEY_PASSWORD)
+#               GDUL_RELEASE_KEY_PASSWORD). GDUL_ABI=x86_64 builds
+#               gdul-<version>-android-x86_64.apk instead (for the x86-64
+#               emulator; not released)
 #   all         every one this system can build
 #   --force     rebuild every game module (normally a module is reused when its
 #               game-info.yaml guitar_dream_version and the launcher's module
@@ -29,6 +31,10 @@
 #   --previous <folder>  where the previous build is (also GDUL_PREVIOUS_BUILD):
 #               a build folder, or unpacked release downloads (an .apk is
 #               unpacked too); default: the newest build in local_builds/
+#
+# Every build carries the module of EVERY game with ready_to_play true in
+# games.yaml (a build_module_NN recipe for each, for every system): a game
+# that cannot be built for a system fails the build, it is never left out.
 #
 # The launcher itself is always (re)compiled; CMake/Ninja skip what is up to
 # date. Logs: gd-engine-launcher/logs/ (build-<os>.log and one log per step).
@@ -55,7 +61,7 @@ while [ $# -gt 0 ]; do
     --force) force=1 ;;
     --previous) [ $# -ge 2 ] || { echo "build.sh: --previous needs a folder" >&2; exit 2; }; previous="$2"; shift ;;
     --previous=*) previous="${1#--previous=}" ;;
-    -h|--help) sed -n '4,34p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '4,41p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "build.sh: unknown build or option $1 (see --help)" >&2; exit 2 ;;
   esac
   shift
@@ -72,6 +78,8 @@ yaml_value() {  # <file> <key>: a top-level scalar, quotes removed
   sed -n "s/^$2:[[:space:]]*//p" "$1" | sed 's/[[:space:]]*#.*$//; s/^"\(.*\)"$/\1/; s/^'"'"'\(.*\)'"'"'$/\1/' | head -1
 }
 version="$(yaml_value "$launcher/launcher-info.yaml" launcher_version)"
+android_abi="${GDUL_ABI:-arm64-v8a}"
+case "$android_abi" in arm64-v8a|x86_64) ;; *) echo "build.sh: GDUL_ABI=$android_abi: arm64-v8a or x86_64" >&2; exit 2 ;; esac
 mapfile -t game_infos < <(sed -n 's/^[[:space:]]*-[[:space:]]*\([^#[:space:]]*game-info\.yaml\).*/\1/p' "$launcher/games.yaml")
 
 # step <log name> <description> <command...>: runs a step, its output in logs/<log name>.log.
@@ -85,7 +93,7 @@ step() {
   local name="$1" what="$2"; shift 2
   say "$what (log: gd-engine-launcher/logs/$name.log)"
   local rc=0 env="$logs/.$name.env"
-  { declare -f; declare -p repo launcher here host logs out_root version force previous B G Y R C N; } > "$env"
+  { declare -f; declare -p repo launcher here host logs out_root version android_abi force previous B G Y R C N; } > "$env"
   bash -c 'set -euo pipefail; shopt -s inherit_errexit; . "$1"; shift; "$@"' step "$env" "$@" > "$logs/$name.log" 2>&1 || rc=$?
   rm -f "$env"
   if [ "$rc" != 0 ]; then
@@ -98,12 +106,16 @@ step() {
 }
 warnings_in() { grep -E 'warning:' "$1" | grep -c -v '^ninja: ' || true; }  # compiler warnings (not Ninja's own)
 sha256() { if command -v sha256sum >/dev/null; then sha256sum; else shasum -a 256; fi | cut -d' ' -f1; }
-arch_of() { case "$1" in macos|android) echo arm64 ;; *) echo x86_64 ;; esac; }
+arch_of() {
+  case "$1" in macos) echo arm64 ;; android) [ "$android_abi" = x86_64 ] && echo x86_64 || echo arm64 ;; *) echo x86_64 ;; esac
+}
 
-# The systems each game's module is built for. gd01 renders with Vulkan and
-# has its own Android APK (gd-game-01/engine/android); in the launcher's APK
-# it is listed only.
-module_systems_01="linux windows macos"
+# The systems each game's module is built for: every one. A ready game whose
+# module cannot be built for a system fails that system's build (gdul 0.1.5's
+# APK had no gd01 module: "This launcher build has no gd-game-01 module").
+# gd01 renders with OpenGL (OpenGL ES 3.0 on Android, as its own APK does;
+# Vulkan only for its AI upscalers, which Android does not have).
+module_systems_01="linux windows macos android"
 module_systems_02="linux windows macos android"
 
 # module_inputs_hash <NN>: what a module takes from the launcher besides its
@@ -153,7 +165,7 @@ android_env() {
   export ANDROID_NDK NDK_HOST SDL3_SRC
 }
 android_cmake_args() {
-  echo "-DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK/build/cmake/android.toolchain.cmake -DANDROID_ABI=arm64-v8a" \
+  echo "-DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK/build/cmake/android.toolchain.cmake -DANDROID_ABI=$android_abi" \
        "-DANDROID_PLATFORM=android-24 -DANDROID_STL=c++_static"
 }
 
@@ -201,9 +213,10 @@ build_module_02() {
       build_ffmpeg build/ffmpeg/macos macOS --disable-x86asm
     elif [ "$os" = android ]; then
       # The same options as build_android.sh (the same build, reused).
-      local tc="$ANDROID_NDK/toolchains/llvm/prebuilt/$NDK_HOST/bin"
-      build_ffmpeg build/ffmpeg/android/arm64-v8a "Android arm64-v8a, NDK $(basename "$ANDROID_NDK")" --enable-cross-compile \
-        --target-os=android --arch=aarch64 --cc="$tc/aarch64-linux-android24-clang" --cxx="$tc/aarch64-linux-android24-clang++" \
+      local tc="$ANDROID_NDK/toolchains/llvm/prebuilt/$NDK_HOST/bin" arch=aarch64 triple=aarch64-linux-android
+      [ "$android_abi" = x86_64 ] && arch=x86_64 triple=x86_64-linux-android
+      build_ffmpeg "build/ffmpeg/android/$android_abi" "Android $android_abi, NDK $(basename "$ANDROID_NDK")" --enable-cross-compile \
+        --target-os=android --arch="$arch" --cc="$tc/${triple}24-clang" --cxx="$tc/${triple}24-clang++" \
         --nm="$tc/llvm-nm" --ar="$tc/llvm-ar" --ranlib="$tc/llvm-ranlib" --strip="$tc/llvm-strip" --pkg-config=false \
         --disable-x86asm --extra-ldflags=-Wl,-z,max-page-size=16384
     else
@@ -212,7 +225,7 @@ build_module_02() {
   )
   local ffmpeg_arg="$ffmpeg" sdl_arg=""
   if [ "$os" = android ]; then
-    ffmpeg="$engine/build/ffmpeg/android/arm64-v8a/ffmpeg-prefix"
+    ffmpeg="$engine/build/ffmpeg/android/$android_abi/ffmpeg-prefix"
     ffmpeg_arg="$engine/build/ffmpeg/android"  # gd02's CMakeLists.txt adds <ABI>/ffmpeg-prefix
     sdl_arg="-DGD02_SDL3_SOURCE=$SDL3_SRC"
   fi
@@ -248,19 +261,26 @@ build_module_02() {
 }
 
 build_module_01() {
-  local os="$1" work="$2" dest="$3" engine="$repo/gd-game-01/engine"
+  local os="$1" work="$2" dest="$3" engine="$repo/gd-game-01/engine" sdl_arg=""
+  [ "$os" = android ] && sdl_arg="-DGD01_SDL3_SOURCE=$SDL3_SRC"
   # shellcheck disable=SC2046
-  cmake -S "$launcher/modules/gd01" -B "$work" -G Ninja -DCMAKE_BUILD_TYPE=Release $(cmake_args "$os")
-  cmake --build "$work"
+  cmake -S "$launcher/modules/gd01" -B "$work" -G Ninja -DCMAKE_BUILD_TYPE=Release $sdl_arg $(cmake_args "$os")
+  cmake --build "$work" --target gd01_module
   mkdir -p "$dest/licenses"
   case "$os" in
     windows) cp "$work/gd-game-01.dll" "$dest/" ;;
     macos) cp "$work/gd-game-01.dylib" "$dest/" && macos_fix_module "$dest" ;;
+    android)
+      # In the APK's native library folder; native-libs.txt lists it (as gd02's).
+      cp "$work/libgd-game-01.so" "$dest/"
+      echo libgd-game-01.so > "$dest/native-libs.txt" ;;
     *) cp "$work/gd-game-01.so" "$dest/" ;;
   esac
-  cp "$engine/third_party/fidelityfx/LICENSE.txt" "$dest/licenses/FidelityFX-SDK-LICENSE.txt"
-  cp "$engine/third_party/volk/LICENSE.md" "$dest/licenses/volk-LICENSE.md"
-  cp "$engine/third_party/vulkan/LICENSE.md" "$dest/licenses/Vulkan-Headers-LICENSE.md"
+  if [ "$os" != android ]; then  # the AI upscalers (none on Android)
+    cp "$engine/third_party/fidelityfx/LICENSE.txt" "$dest/licenses/FidelityFX-SDK-LICENSE.txt"
+    cp "$engine/third_party/volk/LICENSE.md" "$dest/licenses/volk-LICENSE.md"
+    cp "$engine/third_party/vulkan/LICENSE.md" "$dest/licenses/Vulkan-Headers-LICENSE.md"
+  fi
   if [ "$os" = linux ] && ls "$engine"/third_party/dlss/lib/Linux_x86_64/libnvidia-ngx-dlss.so.* >/dev/null 2>&1; then
     # NGX loads the DLSS model from the program's folder: the launcher's root
     # (copied there when the build is assembled).
@@ -283,11 +303,16 @@ unpack_apks() {
     python3 -I -m zipfile -e "$apk" "$u"
     for d in "$u"/assets/gd-engine-games/gd-game-*/; do
       [ -f "$d/native-libs.txt" ] || continue
-      while IFS= read -r f; do cp "$u/lib/arm64-v8a/$f" "$d"; done < "$d/native-libs.txt"
+      for abi in arm64-v8a x86_64; do
+        [ -d "$u/lib/$abi" ] || continue
+        while IFS= read -r f; do cp "$u/lib/$abi/$f" "$d"; done < "$d/native-libs.txt"
+      done
     done
   done
 }
-manifest_os() { python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1])).get("os",""))' "$1" 2>/dev/null || true; }
+manifest_os() {  # <manifest>: "<os> <arch>"
+  python3 -I -c 'import json,sys; m=json.load(open(sys.argv[1])); print(m.get("os",""), m.get("arch",""))' "$1" 2>/dev/null || true
+}
 # previous_manifest <os> <arch> <this build's folder>: the manifest of the
 # previous build for that system: in the --previous folder, else this
 # version's own earlier build, else the newest one in local_builds/.
@@ -296,7 +321,7 @@ previous_manifest() {
   if [ -n "$previous" ]; then
     unpack_apks "$previous"
     while IFS= read -r f; do
-      if [ "$(manifest_os "$f")" = "$os" ]; then echo "$f"; return; fi
+      if [ "$(manifest_os "$f")" = "$os $arch" ]; then echo "$f"; return; fi
     done < <(find "$previous" -path '*gd-engine-games/manifest.json' 2>/dev/null | LC_ALL=C sort)
     return 0
   fi
@@ -324,7 +349,7 @@ build_apk() {  # <work dir with assets/ and jniLibs/>
     "$JAVA_HOME/bin/keytool" -genkeypair -keystore "$HOME/.android/debug.keystore" -storepass android -keypass android \
       -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
   fi
-  (cd "$launcher/android" && ./gradlew --no-daemon --console=plain assembleRelease -Psdl3Dir="$SDL3_SRC" -Pabis=arm64-v8a \
+  (cd "$launcher/android" && ./gradlew --no-daemon --console=plain assembleRelease -Psdl3Dir="$SDL3_SRC" -Pabis="$android_abi" \
     -PmodulesDir="$1/jniLibs" -PassetsDir="$1/assets" "${sign[@]}")
   local bt
   bt="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)"
@@ -333,7 +358,7 @@ build_apk() {  # <work dir with assets/ and jniLibs/>
 }
 android_launcher_recompile() {
   local cache dir cmake_bin
-  cache="$(ls -t "$launcher"/build/android/cxx/*/*/arm64-v8a/CMakeCache.txt | head -1)"
+  cache="$(ls -t "$launcher"/build/android/cxx/*/*/"$android_abi"/CMakeCache.txt | head -1)"
   dir="$(dirname "$cache")"
   cmake_bin="$(sed -n 's/^CMAKE_COMMAND:INTERNAL=//p' "$cache")"
   find "$dir/CMakeFiles/gdul.dir" -name '*.o' -delete
@@ -345,6 +370,7 @@ build_os() {
   arch="$(arch_of "$os")"
   local name="gdul-$version-$os-$arch"
   local out="$out_root/$name" work="$launcher/build/$os"
+  [ "$os" = android ] && [ "$android_abi" != arm64-v8a ] && work="$launcher/build/android-$android_abi"
   local exe="Guitar Dream Universal Launcher" modpre="" modext=".so"
   case "$os" in windows) modext=".dll" ;; macos) modext=".dylib" ;; android) modpre="lib" ;; esac
   echo "${B}${C}=== $name ===${N}"
@@ -384,14 +410,15 @@ build_os() {
     case "$ready" in true|True|yes) ;; *) continue ;; esac
     nn="${id##*-}"
     mod="$modpre$id$modext"
+    # Every ready game, on every system: never a download without one.
     if ! declare -F "build_module_$nn" >/dev/null; then
-      say "${Y}$id: ready_to_play but the launcher has no module recipe (build_module_$nn); listed only${N}"
-      continue
+      say "${R}$id: ready_to_play but the launcher has no module recipe (build_module_$nn): every build must carry it${N}"
+      return 1
     fi
     systems="module_systems_$nn"
     case " ${!systems:-} " in
       *" $os "*) ;;
-      *) say "${Y}$id: no $os module (module_systems_$nn); listed only${N}"; continue ;;
+      *) say "${R}$id: ready_to_play but no $os module (module_systems_$nn): every build must carry it${N}"; return 1 ;;
     esac
     ihash="$(module_inputs_hash "$nn")"
     local dest="$stage/gd-engine-games/$id" prev_dir="" prev_ver="" prev_hash="" built_at reused=""
@@ -440,7 +467,7 @@ build_os() {
       cp "$SDL3_SRC/LICENSE.txt" "$stage/licenses/SDL3-LICENSE.txt" ;;
   esac
   for d in "$stage"/gd-engine-games/gd-game-*/; do
-    [ -d "$d/licenses" ] && for f in "$d"licenses/*; do cp "$f" "$stage/licenses/$(basename "$d")-$(basename "$f")"; done
+    [ -d "$d/licenses" ] && for f in "$d"licenses/*; do [ -e "$f" ] || continue; cp "$f" "$stage/licenses/$(basename "$d")-$(basename "$f")"; done
     if [ -d "$d/root" ]; then  # files the game needs at the launcher's root
       (cd "$d/root" && ls) > "$d/root-files.txt"
       mv "$d"root/* "$stage/" && rmdir "$d/root"
@@ -483,12 +510,12 @@ PY
   elif [ "$os" = android ]; then
     # The APK: the assets (gd-engine-games/ without libraries, licences,
     # manual) and the modules' libraries, then Gradle.
-    rm -rf "$work/assets" "$work/jniLibs" && mkdir -p "$work/assets" "$work/jniLibs/arm64-v8a"
+    rm -rf "$work/assets" "$work/jniLibs" && mkdir -p "$work/assets" "$work/jniLibs/$android_abi"
     cp -R "$stage/gd-engine-games" "$stage/licenses" "$stage/manual" "$stage/LICENSE" "$stage/LICENSE-ADDITIONAL-TERMS.md" "$work/assets/"
     find "$work/assets/gd-engine-games" -name '*.so' -delete
     for d in "$stage"/gd-engine-games/gd-game-*/; do
       [ -f "$d/native-libs.txt" ] || continue
-      while IFS= read -r f; do cp "$d$f" "$work/jniLibs/arm64-v8a/"; done < "$d/native-libs.txt"
+      while IFS= read -r f; do cp "$d$f" "$work/jniLibs/$android_abi/"; done < "$d/native-libs.txt"
     done
     step android-apk "Launcher: compiling and packing the APK (Gradle)" build_apk "$work" || return 1
     say "$(tail -1 "$logs/android-apk.log")"

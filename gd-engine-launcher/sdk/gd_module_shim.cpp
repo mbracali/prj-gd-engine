@@ -12,9 +12,111 @@
 #undef SDL_GL_CreateContext
 #undef SDL_GL_DestroyContext
 #undef SDL_GL_SwapWindow
+#undef fopen
+#undef SDL_GetPrefPath
 
 #include <algorithm>
+#include <string>
 #include <vector>
+
+#ifdef __ANDROID__
+#include <cerrno>
+#include <cstdlib>
+#include <cstring>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
+// fopen that also reads "/proc/self/fd/<n>" (gd_module_shim.h). The launcher
+// hands a game its disc so (module_host.cpp) when the player chose it in
+// Android's file dialog: a descriptor from the document's provider. Opening
+// that path again is refused on Android 11+ for a file of shared storage the
+// app does not own (FUSE checks the opener: EACCES), so such a FILE reads the
+// descriptor itself: a duplicate, read with pread at the FILE's own offset
+// (several FILEs on one disc, on several threads, never share an offset).
+namespace {
+struct FdFile {
+    int fd;
+    off64_t pos, size;
+};
+int fdRead(void* c, char* buf, int n) {
+    auto* f = static_cast<FdFile*>(c);
+    ssize_t got;
+    do got = pread64(f->fd, buf, size_t(n), f->pos);
+    while (got < 0 && errno == EINTR);
+    if (got > 0) f->pos += got;
+    return int(got);
+}
+fpos64_t fdSeek(void* c, fpos64_t off, int whence) {
+    auto* f = static_cast<FdFile*>(c);
+    off64_t base = whence == SEEK_SET ? 0 : whence == SEEK_CUR ? f->pos : f->size;
+    if (base + off < 0) {
+        errno = EINVAL;
+        return -1;
+    }
+    f->pos = base + off;
+    return f->pos;
+}
+int fdClose(void* c) {
+    auto* f = static_cast<FdFile*>(c);
+    ::close(f->fd);
+    delete f;
+    return 0;
+}
+}  // namespace
+
+extern "C" char* gdshim_GetPrefPath(const char* org, const char* app) {
+    char* base = SDL_GetPrefPath(org, app);  // Android: <app files>/, the same for everyone
+    if (!base || !org || !app || !*org || !*app) return base;
+    const std::string root = base;
+    SDL_free(base);
+    const std::string dir = root + org + "/" + app + "/";
+    SDL_PathInfo info;
+    if (!SDL_GetPathInfo(dir.c_str(), &info)) {
+        SDL_CreateDirectory(dir.c_str());
+        // gd02 ran in launchers before 0.1.6 with <app files>/ as its save
+        // folder: its files come along once (the originals stay).
+        if (std::strcmp(app, "gd02") == 0) {
+            int n = 0;
+            if (char** names = SDL_GlobDirectory(root.c_str(), "*", 0, &n)) {
+                for (int i = 0; i < n; ++i) {
+                    const std::string from = root + names[i];
+                    if (std::strncmp(names[i], "gdul", 4) != 0 &&  // the launcher's own
+                        SDL_GetPathInfo(from.c_str(), &info) && info.type == SDL_PATHTYPE_FILE &&
+                        SDL_CopyFile(from.c_str(), (dir + names[i]).c_str()))
+                        SDL_Log("gdul shim: %s copied into %s", names[i], dir.c_str());
+                }
+                SDL_free(names);
+            }
+        }
+    }
+    return SDL_strdup(dir.c_str());
+}
+
+extern "C" FILE* gdshim_fopen(const char* path, const char* mode) {
+    if (FILE* f = ::fopen(path, mode)) return f;
+    const int why = errno;
+    static const char kFd[] = "/proc/self/fd/";
+    if (!path || std::strncmp(path, kFd, sizeof kFd - 1) != 0 || !mode || mode[0] != 'r' || std::strchr(mode, '+')) {
+        errno = why;
+        return nullptr;
+    }
+    char* end = nullptr;
+    const long n = std::strtol(path + sizeof kFd - 1, &end, 10);
+    struct stat64 st {};
+    if (end == path + sizeof kFd - 1 || *end || n < 0 || fstat64(int(n), &st) != 0 || !S_ISREG(st.st_mode)) {
+        errno = why;
+        return nullptr;
+    }
+    const int fd = fcntl(int(n), F_DUPFD_CLOEXEC, 0);
+    if (fd < 0) return nullptr;
+    auto* c = new FdFile{fd, 0, off64_t(st.st_size)};
+    FILE* f = funopen64(c, &fdRead, nullptr, &fdSeek, &fdClose);
+    if (!f) fdClose(c);
+    else SDL_Log("gdul shim: %s read through its descriptor (reopening it: %s)", path, std::strerror(why));
+    return f;
+}
+#endif
 
 namespace {
 

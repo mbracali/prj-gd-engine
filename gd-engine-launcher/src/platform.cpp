@@ -5,6 +5,8 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <cctype>
+#include <cstdlib>
 #include <ctime>
 #include <filesystem>
 
@@ -20,6 +22,10 @@
 #include <dlfcn.h>
 #include <pwd.h>
 #include <unistd.h>
+#endif
+#ifdef __ANDROID__
+#include <jni.h>
+#include <sys/stat.h>
 #endif
 
 namespace fs = std::filesystem;
@@ -48,7 +54,135 @@ std::string narrow(const wchar_t* w) {
 }
 #endif
 
+#ifdef __ANDROID__
+// GdulActivity's static methods (android/app/src/main/java/.../GdulActivity.java).
+struct Java {
+    JNIEnv* env = nullptr;
+    jclass cls = nullptr;
+    Java() {
+        env = static_cast<JNIEnv*>(SDL_GetAndroidJNIEnv());
+        jobject activity = static_cast<jobject>(SDL_GetAndroidActivity());
+        if (env && activity) cls = env->GetObjectClass(activity);
+        if (env && activity) env->DeleteLocalRef(activity);
+    }
+    ~Java() {
+        if (cls) env->DeleteLocalRef(cls);
+    }
+    Java(const Java&) = delete;
+    Java& operator=(const Java&) = delete;
+    jmethodID method(const char* name, const char* sig) {
+        if (!cls) return nullptr;
+        jmethodID m = env->GetStaticMethodID(cls, name, sig);
+        if (!m) env->ExceptionClear();
+        return m;
+    }
+    std::string string(jstring s) {
+        if (!s) return "";
+        const char* c = env->GetStringUTFChars(s, nullptr);
+        std::string out = c ? c : "";
+        if (c) env->ReleaseStringUTFChars(s, c);
+        env->DeleteLocalRef(s);
+        return out;
+    }
+    std::string callString(const char* name, const std::string& arg) {
+        jmethodID m = method(name, "(Ljava/lang/String;)Ljava/lang/String;");
+        if (!m) return "";
+        jstring a = env->NewStringUTF(arg.c_str());
+        auto r = static_cast<jstring>(env->CallStaticObjectMethod(cls, m, a));
+        env->DeleteLocalRef(a);
+        if (env->ExceptionCheck()) env->ExceptionClear(), r = nullptr;
+        return string(r);
+    }
+};
+#endif
+
 }  // namespace
+
+bool isDocument(const std::string& path) {
+#ifdef __ANDROID__
+    return path.rfind("content://", 0) == 0;
+#else
+    (void)path;
+    return false;
+#endif
+}
+
+int openDocument(const std::string& uri, std::string& error) {
+#ifdef __ANDROID__
+    Java java;
+    jmethodID open = java.method("openDocument", "(Ljava/lang/String;)I");
+    if (!open) {
+        error = "the launcher's Java side is missing (GdulActivity.openDocument)";
+        return -1;
+    }
+    jstring a = java.env->NewStringUTF(uri.c_str());
+    int fd = java.env->CallStaticIntMethod(java.cls, open, a);
+    java.env->DeleteLocalRef(a);
+    if (java.env->ExceptionCheck()) java.env->ExceptionClear(), fd = -1;
+    if (fd < 0) {
+        if (jmethodID last = java.method("lastError", "()Ljava/lang/String;")) {
+            auto s = static_cast<jstring>(java.env->CallStaticObjectMethod(java.cls, last));
+            if (java.env->ExceptionCheck()) java.env->ExceptionClear(), s = nullptr;
+            error = java.string(s);
+        }
+        if (error.empty()) error = "Android could not open it";
+        return -1;
+    }
+    // The games seek around in the disc: it must be a real file on the
+    // device (a cloud document comes as a pipe).
+    struct stat st {};
+    if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode)) {
+        ::close(fd);
+        error = "it is not a file on this device's storage (a cloud document?): copy it to the device first";
+        return -1;
+    }
+    return fd;
+#else
+    (void)uri;
+    error = "not on Android";
+    return -1;
+#endif
+}
+
+void closeDocument(int fd) {
+#ifdef __ANDROID__
+    if (fd >= 0) ::close(fd);
+#else
+    (void)fd;
+#endif
+}
+
+std::string documentName(const std::string& uri) {
+#ifdef __ANDROID__
+    if (!isDocument(uri)) return "";
+    Java java;
+    return java.callString("documentName", uri);
+#else
+    (void)uri;
+    return "";
+#endif
+}
+
+std::string displayName(const std::string& path) {
+    if (isDocument(path)) {
+        std::string name = documentName(path);
+        if (!name.empty()) return name;
+        // "content://.../document/primary%3ADownload%2Fgame.iso" -> "game.iso"
+        std::string decoded;
+        for (size_t i = 0; i < path.size(); ++i) {
+            if (path[i] == '%' && i + 2 < path.size() && std::isxdigit(static_cast<unsigned char>(path[i + 1])) &&
+                std::isxdigit(static_cast<unsigned char>(path[i + 2]))) {
+                decoded += char(std::strtol(path.substr(i + 1, 2).c_str(), nullptr, 16));
+                i += 2;
+            } else {
+                decoded += path[i];
+            }
+        }
+        size_t cut = decoded.find_last_of("/:");
+        return cut == std::string::npos ? decoded : decoded.substr(cut + 1);
+    }
+    return fileName(path);
+}
 
 std::string baseDir() {
 #ifdef __ANDROID__
@@ -73,7 +207,24 @@ std::string saveDir() {
     char* p = SDL_GetPrefPath("gd-engine", "gdul");
     std::string s = p ? p : baseDir();
     SDL_free(p);
+#ifdef __ANDROID__
+    // Android's SDL gives everyone the app's files/ folder: the launcher's
+    // own is files/gd-engine/gdul/, as the games' are files/gd-engine/<game>/
+    // (gd_module_shim). Launchers before 0.1.6 kept config.txt in files/,
+    // where gd01 and gd02 wrote theirs too: its lines come along once.
+    static const std::string dir = [&] {
+        const std::string mine = s + "gd-engine/gdul/";
+        SDL_PathInfo info;
+        if (!SDL_GetPathInfo(mine.c_str(), &info)) {
+            SDL_CreateDirectory(mine.c_str());
+            SDL_CopyFile((s + "config.txt").c_str(), (mine + "config.txt").c_str());
+        }
+        return mine;
+    }();
+    return dir;
+#else
     return s;
+#endif
 }
 
 std::string userName() {

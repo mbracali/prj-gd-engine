@@ -108,12 +108,13 @@ app to another folder with the Finder (Applications, say; take
 `original_isos/`) and open it again, or in Terminal run
 `xattr -dr com.apple.quarantine "/path/to/Guitar Dream Universal Launcher.app"`.
 If macOS asks whether the launcher may read your Downloads, Documents or
-Desktop folder, allow it when your discs are there. On **Android** use Load ISO: the
-launcher copies the disc image you pick into its folder
-(`Android/data/io.github.mbracali.gdul/files/original_isos/`, which takes a
-few minutes and as much space again; afterwards the file you picked is no longer needed) and
-says when it is ready. Only the games with an Android module can be played
-there (Guitar Hero II, gd-game-02).
+Desktop folder, allow it when your discs are there. On **Android** use Load ISO and pick
+your disc image wherever it is on the device (Downloads, an SD card...): the
+launcher reads it where it is, nothing is copied, and remembers it after a
+restart. Keep the file where it was; if you move or delete it, or Android
+withdraws the permission, Play says so: pick it again with Load ISO. A file
+on a cloud drive must be downloaded to the device first. Every ready game
+plays on Android (Guitar Hero and Guitar Hero II).
 
 `config.txt` remembers the disc image chosen for each game; `gdul.log` has
 one line per action (date, user, action); `logs/` the games' messages of

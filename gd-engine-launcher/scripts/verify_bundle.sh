@@ -1,16 +1,17 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
 # Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
-# Checks that a launcher download is complete: the launcher, and for every
-# game in games.yaml with ready_to_play true and a module for that system
-# (module_systems_NN in build.sh), its module (exporting gd_game_run) and the
-# libraries it needs, non-empty, and listed in gd-engine-games/manifest.json.
-# Fails loudly otherwise. build.sh runs it on every build it assembles, the
+# Checks that a launcher download is complete: the launcher, and for EVERY
+# game in games.yaml with ready_to_play true, on every system (no exemption:
+# a launcher never ships without a ready game's module), its module
+# (exporting gd_game_run) and the libraries it needs, non-empty, and listed
+# in gd-engine-games/manifest.json. Fails loudly otherwise. build.sh runs it on every build it assembles, the
 # gdul release workflow on every archive before it is uploaded.
 #
 # Usage: gd-engine-launcher/scripts/verify_bundle.sh <build folder | .zip | .tar.gz | .apk> [linux|windows|macos|android]
 #   (the system is read from the manifest when not given)
 # GDUL_REQUIRE_DLSS=1 (or CI=true): gd01's DLSS library must be in a Linux download.
+# CI=true: a module whose exports cannot be read (no nm/objdump) fails too.
 set -euo pipefail
 shopt -s inherit_errexit nullglob
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -21,6 +22,8 @@ problems=0
 fail() { printf '   %sverify: MISSING/BROKEN: %s%s\n' "$R" "$*" "$N"; problems=$((problems + 1)); }
 note() { printf '   verify: %s\n' "$*"; }
 warn() { printf '   %sverify: %s%s\n' "$Y" "$*" "$N"; }
+# A check this machine cannot make: a warning locally, a failure in CI.
+cannot() { if [ "${CI:-}" = true ]; then fail "$* (CI requires it)"; else warn "$*"; fi; }
 
 # An archive is unpacked into a temporary folder first.
 root="$target" tmp=""
@@ -72,7 +75,7 @@ case "$os" in
   macos) nonempty "$bundle/../MacOS/$exe" ;;
   android)
     # The APK itself, or a build folder with the APK in it.
-    if [ -d "$root/lib/arm64-v8a" ]; then apk="$root"
+    if [ -d "$root/lib" ] && [ -f "$root/AndroidManifest.xml" ]; then apk="$root"
     else
       a=("$root"/*.apk)
       if [ ${#a[@]} -eq 1 ]; then
@@ -80,7 +83,12 @@ case "$os" in
         python3 -I -m zipfile -e "${a[0]}" "$tmp2"; apk="$tmp2"
       else fail "no .apk in $target"; fi
     fi
-    [ -n "$apk" ] && { nonempty "$apk/lib/arm64-v8a/libmain.so"; nonempty "$apk/lib/arm64-v8a/libSDL3.so"; } ;;
+    abi=""
+    if [ -n "$apk" ]; then
+      for a in arm64-v8a x86_64; do [ -d "$apk/lib/$a" ] && abi="$a"; done
+      [ -n "$abi" ] || fail "no lib/arm64-v8a or lib/x86_64 in the APK"
+    fi
+    [ -n "$abi" ] && { note "APK ABI: $abi"; nonempty "$apk/lib/$abi/libmain.so"; nonempty "$apk/lib/$abi/libSDL3.so"; } ;;
 esac
 
 # exports <library>: it exports gd_game_run (when a tool can read it).
@@ -89,7 +97,7 @@ exports() {
   case "$os" in
     windows)
       tool="$(command -v x86_64-w64-mingw32-objdump || command -v objdump || true)"
-      [ -n "$tool" ] || { warn "no objdump: exports of $(basename "$lib") not checked"; return 0; }
+      [ -n "$tool" ] || { cannot "no objdump: exports of $(basename "$lib") not checked"; return 0; }
       out="$("$tool" -p "$lib" 2>/dev/null || true)"
       grep -qw gd_game_run <<<"$out" || fail "$(basename "$lib") does not export gd_game_run"
       # The DLLs it imports that a download must carry (not Windows' own).
@@ -109,16 +117,16 @@ exports() {
         [ -n "$ndk" ] || ndk="$(ls -d "${ANDROID_HOME:-$HOME/Android/Sdk}"/ndk/* 2>/dev/null | sort -V | tail -1 || true)"
         for t in "$ndk"/toolchains/llvm/prebuilt/*/bin/llvm-nm; do tool="$t"; done
       fi
-      command -v "$tool" >/dev/null || { warn "no nm: exports of $(basename "$lib") not checked"; return 0; }
+      command -v "$tool" >/dev/null || { cannot "no nm: exports of $(basename "$lib") not checked"; return 0; }
       if ! out="$("$tool" -D --defined-only "$lib" 2>/dev/null)"; then
-        warn "$tool cannot read $(basename "$lib"): exports not checked"; return 0
+        cannot "$tool cannot read $(basename "$lib"): exports not checked"; return 0
       fi
       grep -qw gd_game_run <<<"$out" || fail "$(basename "$lib") does not export gd_game_run"
       ;;
     macos)
-      command -v nm >/dev/null || { warn "no nm: exports of $(basename "$lib") not checked"; return 0; }
+      command -v nm >/dev/null || { cannot "no nm: exports of $(basename "$lib") not checked"; return 0; }
       if ! out="$(nm -gU "$lib" 2>/dev/null)"; then
-        warn "nm cannot read $(basename "$lib") (not on a Mac?): exports not checked"; return 0
+        cannot "nm cannot read $(basename "$lib") (not on a Mac?): exports not checked"; return 0
       fi
       grep -qw _gd_game_run <<<"$out" || fail "$(basename "$lib") does not export gd_game_run"
       ;;
@@ -133,19 +141,14 @@ for gi in "${game_infos[@]}"; do
   id="$(yaml_value "$games/$gi" id)"
   case "$(yaml_value "$games/$gi" ready_to_play)" in true|True|yes) ;; *) continue ;; esac
   nn="${id##*-}"
-  if ! grep -q "^build_module_$nn()" "$here/build.sh"; then
-    warn "$id: ready_to_play but build.sh has no module recipe (build_module_$nn): listed only"
-    continue
-  fi
-  systems="$(sed -n "s/^module_systems_$nn=\"\(.*\)\"/\1/p" "$here/build.sh")"
-  case " $systems " in *" $os "*) ;; *) note "$id: no $os module (module_systems_$nn)"; continue ;; esac
+  # Every ready game on every system: no "listed only" (gdul 0.1.5's APK had no gd01).
 
   d="$games/$id"
   case "$os" in
     windows) mod="$d/$id.dll" ;;
     linux) mod="$d/$id.so" ;;
     macos) mod="$d/$id.dylib" ;;
-    android) mod="$apk/lib/arm64-v8a/lib$id.so" ;;
+    android) mod="$apk/lib/${abi:-arm64-v8a}/lib$id.so" ;;
   esac
   libs="$(dirname "$mod")"
   want="$(basename "$mod")"
@@ -181,7 +184,7 @@ done
 if [ "$os" = windows ]; then
   tool="$(command -v x86_64-w64-mingw32-objdump || command -v objdump || true)"
   if [ -z "$tool" ]; then
-    warn "no objdump: the DLLs' own imports were not checked"
+    cannot "no objdump: the DLLs' own imports were not checked"
   else
     syswin=" advapi32.dll bcrypt.dll cfgmgr32.dll comctl32.dll comdlg32.dll crypt32.dll d3d11.dll d3d12.dll dbghelp.dll dinput8.dll dwmapi.dll dxgi.dll gdi32.dll hid.dll imm32.dll iphlpapi.dll kernel32.dll msvcrt.dll ntdll.dll ole32.dll oleaut32.dll opengl32.dll powrprof.dll psapi.dll secur32.dll setupapi.dll shcore.dll shell32.dll shlwapi.dll user32.dll userenv.dll uxtheme.dll version.dll winmm.dll ws2_32.dll xinput1_4.dll "
     while IFS= read -r -d '' bin; do

@@ -1,5 +1,30 @@
 # Guitar Dream Universal Launcher: changes
 
+## 0.1.6
+
+Fixes
+- Android: Guitar Hero (gd-game-01) is in the APK ("This launcher build has
+  no gd-game-01 module" is gone). It runs with OpenGL ES 3.0, as its own APK
+  does; its AI upscalers (Vulkan FSR / DLSS) are not available on Android.
+- Android 15: a disc image chosen with Load ISO could not be used ("Cannot
+  open /data/data/io.github.mbracali.gdul/files/original_isos", "Cannot open
+  /proc/self/fd/..."). The launcher no longer copies the disc into its own
+  folder (a 7 GB copy that could fail for lack of space): it reads the disc
+  where it is, through the file the file dialog gave, and keeps the right to
+  read it after a restart. If that right is lost or the file is not on the
+  device (a cloud drive), it says so and asks to choose the disc again.
+- Android: the launcher, Guitar Hero and Guitar Hero II each keep their own
+  settings and saves (they shared one folder, so one game could overwrite
+  the launcher's disc choices); Guitar Hero II's earlier saves come along.
+- Android: "Where we look for discs" offers Load ISO instead of an "Open
+  folder" button no app on Android can open.
+
+Downloads
+- Every launcher download, on every system, carries the module of every
+  ready game; a build without one fails (scripts/build.sh, verify_bundle.sh),
+  and the launcher says at start when a ready game's module is missing,
+  whatever its manifest lists.
+
 ## 0.1.5
 
 New

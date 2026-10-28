@@ -387,7 +387,7 @@ jobs:
             if [ -f "dist/gdul-$V-macos-arm64.zip" ]; then
               echo "| **macOS** (Apple silicon) | \`gdul-$V-macos-arm64.zip\` | Extract it, move the extracted folder out of Downloads with the Finder (so macOS runs the app where it is and finds \`original_isos/\`), then right-click \`Guitar Dream Universal Launcher.app\` > Open (it is not notarised). |"
             fi
-            echo "| **Android** 7+ (arm64) | \`gdul-$V-android-arm64.apk\` | Install it, open \"Guitar Dream Universal Launcher\" and load your disc image (the launcher copies it into its own folder). |"
+            echo "| **Android** 7+ (arm64) | \`gdul-$V-android-arm64.apk\` | Install it, open \"Guitar Dream Universal Launcher\" and choose your disc image with Load ISO (it is read where it is, nothing is copied). |"
             echo
             echo "Put your disc images in \`original_isos/\` next to the launcher, or use **Load ISO**. See \`manual/user-manual.md\` in the download."
             echo

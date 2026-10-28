@@ -329,11 +329,16 @@ void Launcher::frame() {
         picked.swap(picked_);
     }
     for (auto& [id, path] : picked) {
-        if (path.empty()) log_.add("load disc for " + id + ": cancelled");
-        else handleDisc(path, id);
+        if (path.empty()) {
+            log_.add("load disc for " + id + ": cancelled");
+        } else if (path[0] == '\x01') {
+            log_.add("load disc for " + id + ": the file dialog failed: " + path.substr(1));
+            sounds_.play(UiSound::Error);
+            toast("The file dialog did not open: " + path.substr(1));
+        } else {
+            handleDisc(path, id);
+        }
     }
-    // Android: how the copy of a chosen disc into the app's folder is going.
-    if (std::string copying = catalog_.pollCopy(); !copying.empty()) toast(copying);
     // Gamepad direction repeat.
     if (heldDir_ && now_ >= repeatAt_) {
         repeatAt_ = now_ + 0.09;
@@ -690,7 +695,8 @@ struct PickRequest {
 };
 void SDLCALL onPicked(void* user, const char* const* files, int) {
     auto* req = static_cast<PickRequest*>(user);
-    std::string path = files && files[0] ? files[0] : "";
+    // "" cancelled; a failed dialog as "\x01<SDL's error>".
+    std::string path = !files ? std::string("\x01") + SDL_GetError() : files[0] ? files[0] : "";
     {
         std::lock_guard<std::mutex> g(*req->lock);
         req->out->emplace_back(req->id, path);
@@ -713,7 +719,7 @@ void Launcher::pickDisc(Game& g) {
 void Launcher::handleDisc(const std::string& path, const std::string& wantedId) {
     const DiscInfo disc = probeDisc(path);
     Game* g = catalog_.identify(disc);
-    const std::string file = platform::fileName(path);
+    const std::string file = platform::displayName(path);
     log_.add("identify " + path + ": " + disc.describe() + " -> " + (g ? g->id : std::string("unknown")));
     Game* wanted = wantedId.empty() ? nullptr : catalog_.find(wantedId);
     if (!g) {
@@ -805,6 +811,18 @@ void Launcher::showDiscFolders(const std::string& title) {
                 "so the original_isos folder next to it may not be seen. Move the app to another folder with the "
                 "Finder and open it again, or run in Terminal:\nxattr -dr com.apple.quarantine \"" + app + "\"\n";
     }
+#ifdef __ANDROID__
+    // No file manager can open the app's own folders (an app's private
+    // folder cannot be shown to another app: "Cannot open
+    // /data/data/io.github.mbracali.gdul/files/original_isos"): Load ISO
+    // reads a disc from anywhere on the device instead, where it is.
+    body += "\nUse Load ISO to choose your disc image anywhere on this device (Downloads, an SD card...): "
+            "the launcher reads it where it is, nothing is copied.";
+    std::vector<Button> buttons;
+    buttons.push_back({"Load ISO", Fret::Yellow, [this] {
+                           if (focusRow_ >= 0 && focusRow_ < int(catalog_.games().size())) pickDisc(catalog_.games()[size_t(focusRow_)]);
+                       }});
+#else
     body += "\nPut your .iso files in one of these folders, use Load ISO, or drop one on this window.";
     std::vector<Button> buttons;
     const std::string mine = platform::join(platform::saveDir(), "original_isos");
@@ -817,6 +835,7 @@ void Launcher::showDiscFolders(const std::string& title) {
                            if (!SDL_OpenURL(url.c_str())) toast("Cannot open " + mine);
                            log_.add("disc folder opened: " + mine);
                        }});
+#endif
     buttons.push_back({"Look again", Fret::Blue, [this] {
                            catalog_.rescanDiscs();
                            log_.add("disc folders scanned again: " + std::to_string(catalog_.discsFound()) + " disc images found");
@@ -849,7 +868,7 @@ void Launcher::loadSounds() {
         const int n = fetchUiSounds(window_, context_, g, catalog_.launcherVersion(), log_, add, &sink, error);
         if (n > 0) {
             log_.add("menu sounds: " + std::to_string(sounds_.count()) + " from " + g.id + " (" + g.title() + ", " +
-                     platform::fileName(g.iso) + ", " + std::to_string(SDL_GetTicks() - t0) + " ms)");
+                     g.isoName + ", " + std::to_string(SDL_GetTicks() - t0) + " ms)");
             sounds_.open();
             return;
         }
@@ -1039,7 +1058,7 @@ void Launcher::drawRow(int index, float y) {
     std::string details = g.basedOn.empty() ? g.platforms : g.basedOn;
     details += kDot + year(g.launch) + kDot + "v" + g.version;
     if (!g.iso.empty())
-        details += kDot + platform::fileName(g.iso) + (g.isoSource == Game::IsoSource::Saved ? " (saved)" : " (found)");
+        details += kDot + g.isoName + (g.isoSource == Game::IsoSource::Saved ? " (saved)" : " (found)");
     else if (g.ready) details += kDot + "no disc yet: load one or drop it here";
     else details += kDot + "coming soon";
     if (g.ready && !g.hasModule) details += kDot + "module not built";
@@ -1177,7 +1196,7 @@ void Launcher::drawLoading(const Game& g, const std::string& what) {
         gfx_.image(gfx_.icon(), R((W_ - size) / 2, H_ / 2 - 200, size, size));
         const std::string t = what + " " + g.title() + "\xE2\x80\xA6";
         text(FontId::Title, 52, (W_ - measure(FontId::Title, 52, t)) / 2, H_ / 2 + 40, t, kCream);
-        const std::string sub = g.id + kDot + platform::fileName(g.iso);
+        const std::string sub = g.id + kDot + g.isoName;
         text(FontId::Regular, 18, (W_ - measure(FontId::Regular, 18, sub)) / 2, H_ / 2 + 112, sub, kSand);
         gfx_.end();
         SDL_GL_SwapWindow(window_);
