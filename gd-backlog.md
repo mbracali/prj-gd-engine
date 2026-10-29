@@ -639,6 +639,13 @@ universal launcher, not released on its own.
 | ID | Class | Status | Item | Notes | From |
 |---|---|---|---|---|---|
 | GD03-001 | Original | 🟡 in progress | Full reimplementation (decompile + recompile, 100% match), milestones M0–M10 of the kickoff; the agent adds one row per milestone and per finding | [GD-GAME-03_KICKOFF.md](GD-GAME-03_KICKOFF.md); progress in `gd-game-03/agents/PROGRESS.md` | Owner 10-28 |
+| GD03-002 | Original | 🟡 in progress | M0 set-up: folder layout, engine = gd-game-02's renamed with the PS2 layers (ISO 9660, ARK v3, dtb cipher, VGS, SPU ADPCM) from gd-game-01; Ghidra headless project and exports; REA tried (opens the ELF, no MIPS analysis) | `gd-game-03/agents/CONTEXT.md`, `DECISIONS.md` D1-D3 | Milestones M0 |
+| GD03-003 | Original | ❌ | M1 data layer: milo directory v24 and the ~30 classes older than GH2 360's, PS2 textures, every milo / texture / dtb decodes (`--scenetest`) | | Milestones M1 |
+| GD03-004 | Original | ❌ | M2 songs (VGS), charts, gameplay rules re-confirmed in SLUS_215.86 (`--selftest`, `--sfxtest`) | | Milestones M2 |
+| GD03-005 | Original | ❌ | M3 scripts, UI, asset audit (`--scripttest`, `--uitest`, `--audittest`, `--walktest quickplay`) | | Milestones M3 |
+| GD03-006 | Original | ❌ | M4 highway and HUD; M5 venues and cameras; M6 band | | Milestones M4-M6 |
+| GD03-007 | Original | ❌ | M7 modes, career, saves, The Glitches; M8 port extras; M9 launcher module and packages | | Milestones M7-M9 |
+| GD03-008 | Original | ❌ | PSS movies (VIDEOS/INTRO.PSS and the in-archive ones) through gd-game-01's MPEG-2 decoder; until then movies are skipped | Approximation: skipped | Milestones M0 |
 
 
 ## gd-game-04: Guitar Hero III: Legends of Rock (Xbox 360)

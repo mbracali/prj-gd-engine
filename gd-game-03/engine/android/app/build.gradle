@@ -1,0 +1,81 @@
+plugins {
+    id 'com.android.application'
+}
+
+// SDL3 source tree (its Java glue matches the native SDL3 built from it);
+// build_android.sh passes -Psdl3Dir=..., or set it in local.properties.
+def sdl3Dir = project.findProperty('sdl3Dir') ?: System.getenv('GD03_SDL3_DIR')
+if (!sdl3Dir) throw new GradleException('Pass -Psdl3Dir=<SDL3 source dir> (see engine/build_android.sh)')
+def abis = (project.findProperty('abis') ?: 'arm64-v8a,x86_64').split(',')
+// FFmpeg for the videos, one build per ABI in <ffmpegDir>/<ABI>/ffmpeg-prefix
+// (build_android.sh passes -PffmpegDir=...); without it the videos are skipped.
+// Its libraries are linked by CMake, so the plugin packs them into the APK.
+def ffmpegDir = project.findProperty('ffmpegDir') ?: ''
+
+// The version of every build: project(gd03 VERSION X.Y.Z) in engine/CMakeLists.txt.
+// versionCode (what Android compares for updates) = X * 10000 + Y * 100 + Z.
+def gdVersion = (file('../../CMakeLists.txt').text =~ /project\(gd03 VERSION (\d+)\.(\d+)\.(\d+)/)[0]
+def gdVersionName = "${gdVersion[1]}.${gdVersion[2]}.${gdVersion[3]}"
+def gdVersionCode = gdVersion[1].toInteger() * 10000 + gdVersion[2].toInteger() * 100 + gdVersion[3].toInteger()
+
+android {
+    namespace = "io.github.mbracali.gd03"
+    compileSdk 36
+    ndkVersion = "28.2.13676358"
+    defaultConfig {
+        applicationId "io.github.mbracali.gd03"
+        minSdkVersion 24
+        targetSdkVersion 36
+        versionCode gdVersionCode
+        versionName gdVersionName
+        externalNativeBuild {
+            cmake {
+                arguments "-DANDROID_PLATFORM=android-24", "-DANDROID_STL=c++_static",
+                          "-DGD03_SDL3_SOURCE=${sdl3Dir}", "-DGD03_FFMPEG_DIR=${ffmpegDir}",
+                          "-DGD03_VIDEO=${ffmpegDir ? 'ON' : 'OFF'}"
+                abiFilters(*abis)
+            }
+        }
+    }
+    signingConfigs {
+        // Debug-keystore signed release, so the APK installs as is. Pass
+        // -PreleaseKeystore=... (+ password/alias properties) for your own key.
+        release {
+            if (project.hasProperty('releaseKeystore')) {
+                storeFile file(project.property('releaseKeystore'))
+                storePassword project.property('releaseKeystorePassword')
+                keyAlias project.property('releaseKeyAlias')
+                keyPassword project.property('releaseKeyPassword')
+            } else {
+                storeFile file("${System.getProperty('user.home')}/.android/debug.keystore")
+                storePassword 'android'
+                keyAlias 'androiddebugkey'
+                keyPassword 'android'
+            }
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.release
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_11
+        targetCompatibility JavaVersion.VERSION_11
+    }
+    sourceSets.main.java.srcDirs += "${sdl3Dir}/android-project/app/src/main/java"
+    // The third-party licences (FFmpeg's LGPL notice), written by build_android.sh.
+    sourceSets.main.assets.srcDirs += "${rootDir}/../build/android/assets"
+    externalNativeBuild {
+        cmake {
+            path '../../CMakeLists.txt'
+            version '4.1.2'
+            buildStagingDirectory "${rootDir}/../build/android/cxx"
+        }
+    }
+    buildDir = "${rootDir}/../build/android/gradle"
+    lint {
+        abortOnError = false
+    }
+}
