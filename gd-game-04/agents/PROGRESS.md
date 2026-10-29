@@ -71,3 +71,28 @@ Verified (fresh binary, `$ISO` = the disc image):
 Not yet: the gameplay rules (agent researching the input logic in the XEX),
 "all charts fully hit", Windows / Android builds of this code.
 Next: textures (M1 gate), then the rules and the autoplayed self-test (M2).
+
+## 2026-10-29 01:45: M1 gate passed; M2 core done; songs play
+
+Verified (fresh binary each time):
+- `gd04 --formattest "$ISO"` -> every pak type decoded (.img 712, .tex 396
+  included), `formattest: all files parse`. `python3 -I tools/img.py check
+  extracted` -> `files: 1117, textures: 5747, with problems: 0`.
+- `gd04 --selftest "$ISO"` -> `charts: 664, notes: 416881, ... HOPO notes:
+  50176`, `autoplay: score (strummed) 116922761, HOPO landings 50171, phrases
+  captured 11466, charts failing 0`, **`selftest: all charts fully hit`**
+  (every song, part and difficulty; strummed, and with every legal HOPO
+  tapped).
+- `SDL_VIDEO_DRIVER=offscreen SDL_AUDIO_DRIVER=dummy gd04 --song slowride
+  --autoplay "$ISO"` -> `song: complete, score 201310, 551 / 551 notes hit`
+  (real time, the audio clock, the debug highway).
+- Windows (MinGW): 0 warnings; under Proton's wine `--selftest` (data part)
+  and `--sfxtest` (8 samples) pass. Android: APK builds (not run on a device).
+- GL and GLES: 708 textures of global.pak upload.
+
+Approximate / missing (labelled in code and backlog): the debug highway (M4
+brings GH3's own), the song start order, co-op / face-off / battle / boss
+rules, the Star Power measure length (4 beats [I]), the input offset (0 on
+PC [I]), menus (the VM runs the boot script; 1,233 natives missing).
+Next: GH3's 2D highway and HUD (agent researching the sprites), then the
+screen-element natives for menus (M3). Estimate left: ~20 h.

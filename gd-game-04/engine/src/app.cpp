@@ -25,6 +25,7 @@
 #include "platform/disc_picker.h"
 #include "platform/paths.h"
 #include "render/canvas.h"
+#include "render/texture_cache.h"
 
 // The program's window and main loop. M0 (kickoff): the platform shell
 // only: the window, the disc (picked, remembered, opened), input, audio
@@ -60,6 +61,7 @@ private:
     std::unique_ptr<Globals> globals_;
     SongDb songs_;
     std::unique_ptr<SongScreen> song_;
+    std::unique_ptr<TextureCache> textures_;
     std::string message_;
     bool running_ = true;
     int exitCode_ = 0;
@@ -168,6 +170,13 @@ int App::run() {
 
     const std::string path = options_.dataPath.empty() ? loadRememberedPath() : options_.dataPath;
     if (!path.empty()) loadData(path);
+    if (disc_) {
+        // The global pak's textures (the highway, HUD and menu sprites live there) [C data].
+        textures_ = std::make_unique<TextureCache>(canvas_.renderer().device());
+        const uint64_t t0 = SDL_GetTicksNS();
+        const int n = textures_->loadPak(*disc_, "DATA/COMPRESSED/ZONES/global.pak.xen");
+        SDL_Log("textures: %d from global.pak (%.0f ms)", n, double(SDL_GetTicksNS() - t0) / 1e6);
+    }
     if ((!options_.song.empty() || !options_.walk.empty()) && !disc_) {
         std::fprintf(stderr, "%s: %s\n", app::kProgram, message_.empty() ? "no disc image given" : message_.c_str());
         running_ = false, exitCode_ = 2;
@@ -222,6 +231,7 @@ int App::run() {
         }
     }
     song_.reset();
+    textures_.reset();
     mixer_.stop();
     input_.close();
     mixer_.close();

@@ -60,6 +60,7 @@ target_sources(gd04 PRIVATE
   src/render/gl_device.cpp
   src/render/renderer.cpp
   src/render/shadertest.cpp
+  src/render/texture_cache.cpp
   src/render/texture_codec.cpp
   src/game/chart.cpp
   src/game/note_track.cpp
