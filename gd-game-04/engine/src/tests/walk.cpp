@@ -155,7 +155,7 @@ Walk::Walk(const std::string& name) : name_(name) {
     } else if (name == "mouse") {
         // The mouse alone: hover OPTIONS on the main menu (focused), click it
         // -> Options -> click the help bar's ENHANCED -> In-Game Max FPS's
-        // dropdown clicked open, 60 clicked -> right click -> Options -> the
+        // dropdown clicked open, 120 clicked -> right click -> Options -> the
         // help bar's BACK clicked -> main (guidelines/universal_launcher.md).
         steps_ = boot;
         steps_.push_back({"main_menu_fs",
@@ -163,7 +163,7 @@ Walk::Walk(const std::string& name) : name_(name) {
                           10000});
         steps_.push_back({"options_select_option_fs", {"click:item"}, 20000});
         steps_.push_back({"port_enhanced",
-                          {"hover:row:max_fps", "click:row:max_fps", "click:option:0", "check:enhanced:max_fps=60", "rclick"}, 10000});
+                          {"hover:row:max_fps", "click:row:max_fps", "click:option:1", "check:enhanced:max_fps=120", "rclick"}, 10000});
         steps_.push_back({"options_select_option_fs", {"click:help:BACK"}, 10000});
         steps_.push_back({"main_menu_fs", {}, 20000});
     } else if (name == "gamepads") {

@@ -655,8 +655,8 @@ universal launcher, not released on its own.
 | GD03-015 | Original | ❌ | A hit lowers the "highest penalised gem" mark when the hit gem is below it (PS2 asm 0x00111254); not in the engine | `docs/FINDINGS.md` | Milestones M2 |
 | GD03-008 | Original | ✅ | PSS movies (VIDEOS/INTRO.PSS) through gd-game-01's own MPEG-2 / PSS decoders (video/movie_player.cpp): 4:3 pillarboxed, sound as the clock, fields blended; `--playmovie intro.pss`, `GD03_MOVIE_DUMP=1` decodes headless | world/shared/fest_1.ipu (an IPU stream) not used yet | Milestones M0 |
 | GD03-016 | Enhancement | ❌ | Aspect ratio: 4:3 pillarboxed by default (as the PS2), 16:9 selectable in the Enhanced menu | Owner 2026-10-29 | Owner 2026-10-29 |
-| GD03-017 | Enhancement | ❌ | MULTIPLAYER always enabled, also with one controller (the PS2 greys it out until pad 2) | Owner 2026-10-29 (D4 answered) | Owner 2026-10-29 |
-| GD03-018 | Original | ❌ | Reference captures: run the original in PCSX2 locally and compare visuals and timing with the port (goldens re-based on them) | Owner 2026-10-29: agents run the emulators | Owner 2026-10-29 |
+| GD03-017 | Enhancement | ✅ | MULTIPLAYER always enabled, also with one controller (the PS2 greys it out until pad 2) | Owner 2026-10-29 (D4 answered) | Owner 2026-10-29 |
+| GD03-018 | Original | ⛔ blocked | Reference captures: run the original in PCSX2 locally and compare visuals and timing with the port (goldens re-based on them) | Owner 2026-10-29: agents run the emulators. PCSX2 2.8.2 installed in ~/.local/opt/pcsx2; no PS2 BIOS on the machine: requested in gd-game-03/agents/OPEN_QUESTIONS.md Q5 | Owner 2026-10-29 |
 | GD03-019 | Enhancement | ❌ | Enhanced options default off (original look) | Owner 2026-10-29 | Owner 2026-10-29 |
 
 
@@ -692,7 +692,7 @@ universal launcher, not released on its own.
 | GD04-026 | Enhancement | ❌ | The Glitches: Vault purchases scoped to The Glitches' band only (other bands keep GH3's own store state) | Owner 2026-10-29 (Q6 answered; replaces D9's save-wide unlock) | Owner 2026-10-29 |
 | GD04-027 | Original | ❌ | Reference captures: run the original in Xenia locally and compare visuals and timing with the port | Owner 2026-10-29: agents run the emulators | Owner 2026-10-29 |
 | GD04-028 | Original | ❌ | Android reads the GH3 disc in place (no 7.8 GB copy), as gd-game-01/02 do on Android 15 | Owner 2026-10-29 | Owner 2026-10-29 |
-| GD04-029 | Enhancement | ❌ | Enhanced options default off (original look) | Owner 2026-10-29 | Owner 2026-10-29 |
+| GD04-029 | Enhancement | ✅ | Enhanced options default off (original look): every graphics enhancer off, Max FPS 60, no FPS counter; the platform rows only set the window and touch | `engine/src/ui/port_settings.cpp` | Owner 2026-10-29 |
 
 
 ## gd-game-05: Rock Band (Xbox 360)

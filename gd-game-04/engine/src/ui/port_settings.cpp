@@ -19,14 +19,14 @@ const std::vector<EnhancedSetting>& enhancedSettings() {
         {"rockband", {"off", "on"}},
         {"xinput", {"on", "off"}},
         {"screen_mode", {"windowed", "fullscreen", "borderless"}},
-        {"max_fps", {"120", "60", "240"}},
+        {"max_fps", {"60", "120", "240"}},
         {"fps_counter", {"off", "on"}},
         {"internal_res", {"1080", "720", "800", "900", "1440", "2160"}},
-        {"sharp_ui", {"on", "off"}},
+        {"sharp_ui", {"off", "on"}},
         {"antialiasing", {"none", "fxaa", "ssaa", "taa"}},
         {"ai_upscaling", {"none"}},
         {"ai_upscaling_mode", {"quality", "balanced", "performance"}},
-        {"bokeh", {"stronger", "none", "regular"}},
+        {"bokeh", {"none", "regular", "stronger"}},
         {"particles", {"on", "off"}},
         {"bloom", {"off", "low", "medium", "high"}},
         {"cinematic_color", {"off", "on"}},
@@ -39,7 +39,7 @@ const std::vector<EnhancedSetting>& enhancedSettings() {
         {"star_blur", {"none", "light", "medium", "high"}},
         {"shadows_all", {"off", "on"}},
         {"more_lights", {"off", "subtle", "strong"}},
-        {"light_dust", {"on", "off"}},
+        {"light_dust", {"off", "on"}},
         {"ground_fog", {"none", "low", "full", "super"}},
         {"no_shaky_cam", {"off", "on"}},
         {"no_fail", {"off", "on"}},
@@ -69,32 +69,33 @@ bool enhancedValid(const EnhancedSetting& s, const std::string& value) {
 }
 
 std::vector<std::pair<std::string, std::string>> enhancedProfile(bool deck) {
-    // gd01's profileValues (gd02's copy) [C: gd-game-01/engine/src/app.cpp].
+    // gd01's profileValues' rows (gd02's copy) [C: gd-game-01/engine/src/app.cpp].
+    // Every enhancement off: the original look by default (owner,
+    // 2026-10-29, GD04-029); the controls keep their defaults. Max FPS is the
+    // original's 60. The platform rows below only change the window and the
+    // touch controls.
     std::map<std::string, std::string> d = {
-        {"antialiasing", "none"}, {"ai_upscaling", "none"}, {"bokeh", "stronger"}, {"particles", "on"}, {"cinematic_color", "on"},
-        {"color_grade", "off"}, {"chromatic", "on"}, {"light_streaks", "off"}, {"more_lights", "subtle"}, {"no_shaky_cam", "off"},
-        {"screen_mode", "windowed"}, {"max_fps", "120"}, {"fps_counter", "on"}, {"internal_res", "1080"}, {"sharp_ui", "on"},
-        {"bloom", "high"}, {"film_grain", "light"}, {"ssao", "on"}, {"sharpening", "low"}, {"star_blur", "high"},
-        {"shadows_all", "on"}, {"light_dust", "on"}, {"ground_fog", "low"}, {"touch", "off"},
+        {"antialiasing", "none"}, {"ai_upscaling", "none"}, {"bokeh", "none"}, {"particles", "on"}, {"cinematic_color", "off"},
+        {"color_grade", "off"}, {"chromatic", "off"}, {"light_streaks", "off"}, {"more_lights", "off"}, {"no_shaky_cam", "off"},
+        {"screen_mode", "windowed"}, {"max_fps", "60"}, {"fps_counter", "off"}, {"internal_res", "1080"}, {"sharp_ui", "off"},
+        {"bloom", "off"}, {"film_grain", "off"}, {"ssao", "off"}, {"sharpening", "off"}, {"star_blur", "none"},
+        {"shadows_all", "off"}, {"light_dust", "off"}, {"ground_fog", "none"}, {"touch", "off"},
     };
     auto set = [&](std::initializer_list<std::pair<const char*, const char*>> kv) {
         for (const auto& [k, v] : kv) d[k] = v;
     };
-    auto handheld = [&] {
-        set({{"screen_mode", "fullscreen"}, {"max_fps", "60"}, {"fps_counter", "off"}, {"bloom", "medium"}, {"film_grain", "off"},
-             {"ssao", "off"}, {"shadows_all", "off"}, {"light_dust", "off"}, {"ground_fog", "none"}});
-    };
+    auto handheld = [&] { set({{"screen_mode", "fullscreen"}}); };
 #if defined(__ANDROID__)
     (void)deck;
     handheld();
-    set({{"internal_res", "900"}, {"sharp_ui", "off"}, {"sharpening", "low"}, {"star_blur", "light"}, {"touch", "on"}});
+    set({{"internal_res", "900"}, {"touch", "on"}});
 #else
 #if defined(_WIN32) || defined(__APPLE__)
     d["internal_res"] = "1440";
 #endif
     if (deck) {
         handheld();
-        set({{"internal_res", "800"}, {"sharpening", "off"}, {"star_blur", "medium"}});
+        set({{"internal_res", "800"}});
     }
 #endif
     return {d.begin(), d.end()};
