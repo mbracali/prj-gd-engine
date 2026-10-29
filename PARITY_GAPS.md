@@ -6,19 +6,18 @@ Only original behaviour is listed, no Enhanced items. "Unverified" means the por
 
 | Area | Missing or wrong | Backlog |
 |---|---|---|
-| Characters | Walking between spots, start-of-song walks, win / lose animations, Star Power poses (the Star Power move plays only about half the time), player strum `strum_pluck_down` | GD01-060, -276, -272, -046 |
+| Characters | Walking between spots, start-of-song walks, win / lose animations, Star Power poses (the Star Power move plays only about half the time), player strum `strum_pluck_down` | GD01-060, -272, -046 |
 | Star Power | Wrong meter gauge; no Star Power animation on the highway | GD01-046 |
-| Menus | Strum icon split in half; career status font and overlap; Options elements out of place for 1–2 s on entry; hero-select layout; menu character shadows | GD01-291, -050, -061, -068, -098, -232, -233 |
-| Menus (components) | PictureEx / PictureToggle / Slider / TextEntry; splash, boot, intro video and profile screens (the game starts at the main menu) | GD01-235, -236, -239 |
-| Career | Unlocks per difficulty, store purchases, status / win screens checked by playing | GD01-234, -240 |
-| Modes | Tutorials, practice mode, multiplayer face-off | GD01-092, -093, -278, -279 |
-| Venues | Glitches: Garden lights flashing too fast, see-through Toxic mountains, environment-map stages, additive blend / vertex alpha, a flat brown frame in one big-club shot | GD01-037, -133, -135, -249, -251, -252, -254 |
+| Menus | Strum icon split in half; career status font and overlap; hero-select layout; menu character shadows | GD01-291, -050, -061, -068, -232, -233 |
+| Career | Status / win screens, Battle Axe, store purchases and multiplayer screens: check by playing | GD01-240 |
+| Modes | Tutorials, practice mode, multiplayer face-off | GD01-092, -093, -279 |
+| Venues | Glitches: see-through Toxic mountains, environment-map stages, additive blend / vertex alpha, a flat brown frame in one big-club shot | GD01-037, -135, -249, -251, -252, -254 |
 | Lighting | Weaker than the original | GD01-196 |
 | Crowd | Fewer people, no reaction to how well you play, head and outfit variety, facing and lighting | GD01-197, -246, -274 |
 | Audio | SPU2 reverb approximated (Freeverb), mix levels | GD01-282 |
 | Performance | Microstutters: 60 FPS not guaranteed | GD01-088 |
 
-Some of the older gd-game-01 rows may already be fixed but never marked; check them in one play-through.
+16 old gd-game-01 rows that were already done were marked outdated on 2026-10-29.
 
 ## gd-game-02: Guitar Hero II (Xbox 360)
 
