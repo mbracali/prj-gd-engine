@@ -57,5 +57,5 @@ private:
     Globals& globals_;
     std::unique_ptr<qs::Vm> vm_;
     std::unique_ptr<ui::UiSystem> ui_;
-    double stepMs_ = 0, accum_ = 0;
+    double accum_ = 0;
 };

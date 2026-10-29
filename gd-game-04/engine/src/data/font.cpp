@@ -27,7 +27,7 @@ void zeros(const uint8_t* d, size_t a, size_t b, const char* what) {
     for (size_t i = a; i < b; ++i) need(d[i] == 0, what);
 }
 
-constexpr size_t kCharMap = 0x14, kButtonMap = 0x20014, kMarker = 0x20054, kTexOffset = 0x200A0,
+constexpr size_t kMarker = 0x20054, kTexOffset = 0x200A0,
                  kGlyphs = 0x200A4, kGlyphSize = 0x24;
 
 }  // namespace
@@ -103,9 +103,9 @@ gh3tex::Texture decodeFontTexture(const Font& f, const uint8_t* data, size_t siz
     constexpr size_t kHeaderBytes = 0x28 + 0x34, kData = 0x1000;
     if (size_t(f.textureOffset) + kHeaderBytes > size || f.pixelOffset > size) throw std::runtime_error("font texture outside the file");
     const size_t pixels = size - size_t(f.pixelOffset);
-    Bytes img(kData, 0);
-    std::copy(data + f.textureOffset, data + f.textureOffset + kHeaderBytes, img.begin());
-    img.insert(img.end(), data + f.pixelOffset, data + f.pixelOffset + pixels);
+    Bytes img(kData + pixels, 0);
+    std::memcpy(img.data(), data + f.textureOffset, kHeaderBytes);
+    if (pixels) std::memcpy(img.data() + kData, data + f.pixelOffset, pixels);
     return gh3tex::decodeImg(img);
 }
 

@@ -39,9 +39,9 @@ FrontEnd::~FrontEnd() {
     if (const char* d = SDL_getenv("GD04_UIDUMP"); d && *d && *d != '0') ui_->dump();
     if (const char* v = SDL_getenv("GD04_UISTATS"); v && *v && *v != '0') {
         const auto& st = ui_->stats();
-        SDL_Log("ui: %zu elements (%llu created, %llu destroyed), %llu events, %llu handlers, %llu sprites / %llu texts drawn, "
+        SDL_Log("ui: %llu elements (%llu created, %llu destroyed), %llu events, %llu handlers, %llu sprites / %llu texts drawn, "
                 "%llu missing textures",
-                ui_->count(), (unsigned long long)st.created, (unsigned long long)st.destroyed, (unsigned long long)st.events,
+                (unsigned long long)ui_->count(), (unsigned long long)st.created, (unsigned long long)st.destroyed, (unsigned long long)st.events,
                 (unsigned long long)st.handlersRun, (unsigned long long)st.spritesDrawn, (unsigned long long)st.textDrawn,
                 (unsigned long long)st.missingTextures);
         for (auto& r : vm_->runs()) {

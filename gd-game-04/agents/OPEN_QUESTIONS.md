@@ -8,8 +8,9 @@
    XEX. Until then gd-game-02's input layer is used as it is.
 3. **C++20.** The kickoff asks for C++17; the code is C++20 like gd-game-02
    (DECISIONS.md D2). Fine?
-4. **Main-menu texts left behind.** create_main_menu_backdrop makes its text
-   container with id 0x00d40671, but destroy_main_menu destroys
-   main_menu_text_container (0x20d40671): one bit apart, so the texts stay on
-   the next screens in the port. Either the original masks element ids, or
-   something else removes them; needs the XEX's id lookup (or a capture).
+4. ~~**Main-menu texts left behind.**~~ Answered (2026-10-29): our LZSS
+   filled its ring with zeros, the XEX's decoders (0x823071B0, 0x823072D0)
+   with spaces, so a back-reference into the unwritten ring gave 0x00 for
+   0x20: the id 0x20d40671 came out 0x00d40671 (and 1079 of 16552 scripts
+   differed, mostly `begin` read as `end`). The element lookup compares all
+   32 bits (0x820EC088) [C Ghidra].

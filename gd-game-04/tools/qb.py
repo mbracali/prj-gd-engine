@@ -61,11 +61,11 @@ class StrPtr(int):
 
 
 def lzss(src, size):
-    """Neversoft's LZSS: 4 KiB ring buffer filled with zeros, writes start at
+    """Neversoft's LZSS: 4 KiB ring buffer filled with spaces (0x20, as the XEX 0x823071B0), writes start at
     4078, one flag byte per 8 tokens (LSB first, 1 = literal), a reference is
     two bytes: position = b0 | (b1 & 0xf0) << 4, length = (b1 & 0x0f) + 3. [I]
     (checked by the decoded sizes over every script; confirm in the XEX)."""
-    ring = bytearray(4096)
+    ring = bytearray(b" " * 4096)
     r = 4078
     out = bytearray()
     i = 0

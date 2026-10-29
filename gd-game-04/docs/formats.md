@@ -88,10 +88,11 @@ string reference. Offsets are from the start of the file; a section's data
 follows its header [C: all 2,731 QB files, 46,899 sections, 16,552 scripts
 decode with every byte accounted for].
 
-**LZSS** (scripts): a 4 KiB ring filled with zeros, writes from 4078; a flag
+**LZSS** (scripts): a 4 KiB ring filled with spaces (0x20), writes from 4078; a flag
 byte per 8 tokens, LSB first, 1 = literal; a reference is 2 bytes, position
 `b0 | (b1 & 0xF0) << 4`, length `(b1 & 0x0F) + 3` [C data: every script
-unpacks to exactly its size; XEX address: TODO].
+unpacks to exactly its size; XEX 0x823071B0 / 0x823072D0, Ghidra: the
+ring's space fill; with zeros 1079 scripts decode wrongly].
 
 ## Song charts (`songs\<id>.mid.qb` in `SONGS/<id>_song.pak.xen`)
 

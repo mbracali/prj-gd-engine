@@ -187,7 +187,8 @@ const char* typeName(Type t) {
 }
 
 Bytes lzss(const uint8_t* src, size_t n, size_t outSize) {
-    uint8_t ring[4096] = {};
+    uint8_t ring[4096];
+    std::memset(ring, 0x20, sizeof ring);  // spaces, as the XEX's decoders 0x823071B0 / 0x823072D0 [C]
     unsigned r = 4078;
     Bytes out;
     out.reserve(outSize);

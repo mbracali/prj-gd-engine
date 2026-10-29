@@ -15,8 +15,6 @@ namespace qs {
 
 namespace {
 
-constexpr uint32_t kChange = qbkey::key("change");
-
 bool isEnd(Op op) { return op == kEndOfLine || op == kEndOfLineNumber || op == kEndScript; }
 
 qb::Value none() { return qb::Value{}; }
