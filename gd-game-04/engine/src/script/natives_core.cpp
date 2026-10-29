@@ -223,6 +223,16 @@ void addCoreNatives(Vm& vm) {
         const qb::Value* tag = first(p);
         if (!tag) return false;
         auto it = v.globalTags.find(tag->key);
+        // GD04_TAGLOG=<tag name>: log that tag's reads (development aid).
+        static const char* tagLog = SDL_getenv("GD04_TAGLOG");
+        if (tagLog && qbkey::key(tagLog) == tag->key) {
+            std::string d = it == v.globalTags.end() ? "missing" : "";
+            if (it != v.globalTags.end())
+                for (const qb::Item& item : it->second.items)
+                    d += qbkey::name(item.name) + "=" + qb::typeName(item.value.type) + ":" +
+                         (item.value.type == qb::Type::Int ? std::to_string(item.value.i) : item.value.str) + " ";
+            SDL_Log("tag %s read: %s", tagLog, d.c_str());
+        }
         if (it == v.globalTags.end()) return false;
         if (!run.frames.empty()) {
             if (!run.frames.back().locals) run.frames.back().locals = std::make_shared<qb::Struct>();

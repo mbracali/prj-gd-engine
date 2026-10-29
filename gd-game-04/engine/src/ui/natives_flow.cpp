@@ -6,6 +6,7 @@
 #include <SDL3/SDL_timer.h>
 
 #include <algorithm>
+#include <ctime>
 #include <string>
 #include <unordered_map>
 
@@ -155,6 +156,49 @@ void addFlowNatives(qs::Vm& vm, FlowState& st) {
     vm.addNative("MathMax", [](Vm&, ScriptRun& run, qb::Struct& p) {
         const float a = Vm::number(Vm::param(p, K("a")), 0), b = Vm::number(Vm::param(p, K("b")), 0);
         if (qb::Struct* l = locals(run)) Vm::set(*l, K("max"), Vm::makeFloat(std::max(a, b)));
+        return true;
+    });
+    // StringRemoveTrailingWhitespace string = s -> new_string [C use: confirm_band_name].
+    vm.addNative("StringRemoveTrailingWhitespace", [](Vm&, ScriptRun& run, qb::Struct& p) {
+        const qb::Value* s = Vm::param(p, K("string"));
+        if (!s) s = firstUnnamed(p);
+        if (!s) return false;
+        qb::Value out = *s;
+        while (!out.str.empty() && (out.str.back() == ' ' || out.str.back() == '\t')) out.str.pop_back();
+        if (qb::Struct* l = locals(run)) Vm::set(*l, K("new_string"), out);
+        return true;
+    });
+    // GetUpperCaseString <text> -> uppercasestring [C use: intro_song_info, the band-name date].
+    vm.addNative("GetUpperCaseString", [](Vm&, ScriptRun& run, qb::Struct& p) {
+        const qb::Value* s = firstUnnamed(p);
+        if (!s) return false;
+        qb::Value out = *s;
+        if (out.type != qb::Type::String && out.type != qb::Type::WString) out.type = qb::Type::WString;
+        for (char& c : out.str)
+            if (c >= 'a' && c <= 'z') c = char(c - 'a' + 'A');
+        if (qb::Struct* l = locals(run)) Vm::set(*l, K("uppercasestring"), out);
+        return true;
+    });
+    // GetLocalSystemTime -> localsystemtime {year month (0..11, us_month_names'
+    // index) dayofmonth hour minute second} [I: the field names from the scripts].
+    vm.addNative("GetLocalSystemTime", [](Vm&, ScriptRun& run, qb::Struct&) {
+        const std::time_t now = std::time(nullptr);
+        std::tm tm{};
+#ifdef _WIN32
+        localtime_s(&tm, &now);
+#else
+        localtime_r(&now, &tm);
+#endif
+        qb::Value t;
+        t.type = qb::Type::Struct;
+        t.st = std::make_shared<qb::Struct>();
+        Vm::set(*t.st, K("year"), Vm::makeInt(tm.tm_year + 1900));
+        Vm::set(*t.st, K("month"), Vm::makeInt(tm.tm_mon));
+        Vm::set(*t.st, K("dayofmonth"), Vm::makeInt(tm.tm_mday));
+        Vm::set(*t.st, K("hour"), Vm::makeInt(tm.tm_hour));
+        Vm::set(*t.st, K("minute"), Vm::makeInt(tm.tm_min));
+        Vm::set(*t.st, K("second"), Vm::makeInt(tm.tm_sec));
+        if (qb::Struct* l = locals(run)) Vm::set(*l, K("localsystemtime"), t);
         return true;
     });
     vm.addNative("StringLength", [](Vm&, ScriptRun& run, qb::Struct& p) {

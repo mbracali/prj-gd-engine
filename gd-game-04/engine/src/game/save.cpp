@@ -94,6 +94,8 @@ qb::Value fromJson(const Json& j) {
         v.arr = std::make_shared<qb::Array>();
         for (const Json& e : x.a) v.arr->values.push_back(fromJson(e));
         if (!v.arr->values.empty()) v.arr->type = v.arr->values.front().type;
+    } else if (t == "none") {
+        v.type = qb::Type::None;  // a script left a field unset; kept as it was
     } else {
         throw std::runtime_error("unknown value type " + t);
     }
