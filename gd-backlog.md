@@ -688,10 +688,10 @@ universal launcher, not released on its own.
 | GD04-022 | Original | ✅ | The main-menu texts stayed on the next screens: our LZSS filled its ring with zeros (the XEX: spaces), 1079 scripts decoded wrongly; fixed | OPEN_QUESTIONS.md 4 | M3 |
 | GD04-023 | Original | ✅ | Screen elements without z_priority take the parent's z + 1 (SetZTree 0x8221C160): texts under sprites fixed | `docs/ui.md` | M3 |
 | GD04-024 | Original | ✅ | Stars: GH3's Progression_SongWon (3 / 4 / 5 at 2.0 / 2.8 x base_score); base_score from CalcSongScoreInfo (frets and sustains) | OPEN_QUESTIONS.md 5 | M7 |
-| GD04-025 | Enhancement | ✅ | The Glitches: band slot 5 with everything unlocked; GH3's save-wide items unlocked save-wide (D9); `--walktest glitches` | DECISIONS D9, `engine/src/ui/glitches.cpp` | Kickoff rule 11 |
-| GD04-026 | Enhancement | ❌ | The Glitches: Vault purchases scoped to The Glitches' band only (other bands keep GH3's own store state) | Owner 2026-10-29 (Q6 answered; replaces D9's save-wide unlock) | Owner 2026-10-29 |
+| GD04-025 | Enhancement | ✅ | The Glitches: band slot 5 with everything unlocked; the Vault scoped to the band (D9, GD04-026); `--walktest glitches` | DECISIONS D9, `engine/src/ui/glitches.cpp` | Kickoff rule 11 |
+| GD04-026 | Enhancement | ✅ | The Glitches: Vault purchases scoped to The Glitches' band only (other bands keep GH3's own store state; saves store the save's own state); walks glitches and vault check it | DECISIONS D9 (revised), `engine/src/ui/glitches.cpp` | Owner 2026-10-29 |
 | GD04-027 | Original | ❌ | Reference captures: run the original in Xenia locally and compare visuals and timing with the port | Owner 2026-10-29: agents run the emulators | Owner 2026-10-29 |
-| GD04-028 | Original | ❌ | Android reads the GH3 disc in place (no 7.8 GB copy), as gd-game-01/02 do on Android 15 | Owner 2026-10-29 | Owner 2026-10-29 |
+| GD04-028 | Original | 🟡 built only | Android reads the GH3 disc in place: in the launcher through /proc/self/fd/<n> (the module shim's fopen, as gd-game-01/02), standalone through the content:// URI with SDL's IO (data/random_file.cpp); the 8 GB copy is gone. Not run on a device | `engine/src/data/random_file.cpp`, `platform/disc_picker.cpp` | Owner 2026-10-29 |
 | GD04-029 | Enhancement | ✅ | Enhanced options default off (original look): every graphics enhancer off, Max FPS 60, no FPS counter; the platform rows only set the window and touch | `engine/src/ui/port_settings.cpp` | Owner 2026-10-29 |
 
 

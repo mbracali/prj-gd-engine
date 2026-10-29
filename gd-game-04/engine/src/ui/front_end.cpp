@@ -28,6 +28,7 @@ FrontEnd::FrontEnd(const Disc& disc, Globals& globals, TextureCache& textures, g
     addGameNatives(*this, disc_, textures);
     flow.saveExists = save::exists();
     addFlowNatives(*vm_, flow);
+    installGlitchesStore(*vm_);
     std::string err;
     if (!sfx.open(err)) SDL_Log("sfx: %s", err.c_str());
     sfx.addPak(disc_, "DATA/COMPRESSED/ZONES/global_sfx.pak.xen");

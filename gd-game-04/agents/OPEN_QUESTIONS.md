@@ -19,6 +19,5 @@
    base_score comes from CalcSongScoreInfo 0x8210AF70 (50 a fret plus the
    sustains' 25 a beat) [C Ghidra + script]. The port leaves stars to the
    script and fills base_score that way.
-6. **The Glitches and the store.** GH3's purchases are save-wide, so with
-   The Glitches (everything bought, D9) every band's Vault shows SOLD. Keep
-   that, or limit the save-wide unlocks? (Owner.)
+6. ~~**The Glitches and the store.**~~ Answered by the owner (2026-10-29):
+   Vault purchases scoped to The Glitches' band only (D9 revised, GD04-026).

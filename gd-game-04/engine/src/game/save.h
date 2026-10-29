@@ -18,6 +18,8 @@ constexpr const char* kFormat = "gd04-save";
 constexpr int kVersion = 1;
 
 std::string path();  // <save folder>/save.json ("" if no save folder)
+// Another folder for the save (walks: <save folder>/walktest/); "" restores the default.
+void setFolder(const std::string& dir);
 bool exists();
 // Writes the tags; false and `error` on failure.
 using Tags = std::unordered_map<uint32_t, qb::Struct>;

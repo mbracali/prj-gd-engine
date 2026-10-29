@@ -105,7 +105,8 @@ Walk::Walk(const std::string& name) : name_(name) {
         steps_.push_back({"career_select_character_fs", {C}, 20000, true});
         steps_.push_back({"career_character_hub_fs", {D, D, D, D, C}, 20000});  // VISIT STORE
         steps_.push_back({"store_fs", {C}, 20000});
-        steps_.push_back({"store_guitars_fs", {B}, 20000});  // the first category
+        // The first category; band 1's Vault is the save's own (not The Glitches', GD04-026).
+        steps_.push_back({"store_guitars_fs", {"check:tag:Instrument_focus01.unlocked=0", B}, 20000});
         steps_.push_back({"store_fs", {B}, 20000});
         steps_.push_back({"career_character_hub_fs", {}, 20000});
     } else if (name == "cheats") {
@@ -131,7 +132,11 @@ Walk::Walk(const std::string& name) : name_(name) {
         steps_.push_back({"main_menu_fs", {"check:tag:band5_info_p1_career.cash=1000000", C}, 10000});
         steps_.push_back({"career_choose_band_fs", {D, D, D, D, C}, 20000});
         steps_.push_back({"career_select_difficulty_fs", {Action::Down, Action::Down, Action::Down, C}, 20000});
-        steps_.push_back({"career_character_hub_fs", {"check:tag:careertier8.complete=1", "check:tag:career_song1_tier8.stars=5"}, 20000});
+        // The Vault all bought for this band only (GD04-026).
+        steps_.push_back({"career_character_hub_fs",
+                          {"check:tag:careertier8.complete=1", "check:tag:career_song1_tier8.stars=5", "check:tag:Instrument_focus01.unlocked=1"},
+                          20000});
+
     } else if (name == "boss") {
         // A career boss battle: The Glitches (everything unlocked) -> EASY ->
         // venue -> the setlist's tier-2 boss, Tom Morello (bosstom) [C data

@@ -22,9 +22,8 @@ void rememberPath(const std::string& path);
 
 // The first screen's "choose your disc image": the system file dialog (it
 // answers on another thread; poll takePicked() every frame). On Android the
-// chosen file (a content:// URI, not a plain file) is copied into the app's
-// external files folder (Android/data/io.github.mbracali.gd04/files/, where it
-// can also be copied over USB or with `adb push`) and that copy is used.
+// chosen file is a content:// URI, read in place (data/random_file.cpp;
+// GD04-028): no copy.
 // Development aid: GD04_DIALOG=<path> answers the dialog at once (headless tests).
 class DiscPicker {
 public:
@@ -40,7 +39,6 @@ private:
     static void picked(void* self, const char* const* files, int filter);
     void finish(const std::string& path, const std::string& status);
 #ifdef __ANDROID__
-    void copy(std::string uri);
     std::thread worker_;
     std::atomic<long long> done_{0}, total_{0};
 #endif

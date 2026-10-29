@@ -134,6 +134,9 @@ public:
     std::unordered_map<uint32_t, qb::Struct> globalTags;
     // PushGlobalTags / PopGlobalTags sections (a band's career, by section key).
     std::unordered_map<uint32_t, std::unordered_map<uint32_t, qb::Struct>> globalTagSections;
+    // Called after PushGlobalTags (pop = false) / PopGlobalTags (pop = true)
+    // of a section (the port's The Glitches hook).
+    std::function<void(Vm&, uint32_t section, bool pop)> onTagSection;
 
     // Code of a script global (tokenized once).
     std::shared_ptr<const CodeCache> code(uint32_t name);

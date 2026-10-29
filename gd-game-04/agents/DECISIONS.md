@@ -56,15 +56,20 @@ before it, so GH3's own centred pills stay as the scripts lay them out.
 Undo: remove PortScreens::drawItems / itemAt and the Fret2 / Fret3 checks in
 App::menuAction.
 
-## D9 The Glitches unlock GH3's save-wide items save-wide (2026-10-29)
+## D9 The Glitches: the Vault scoped to their band (2026-10-29, revised)
 
 Kickoff rule 11: The Glitches band has everything unlocked. GH3 keeps a
 band's career (tiers, songs, stars, cash) in its own global-tag sections
-(push_bandtags / pop_bandtags), but guitars, finishes, characters, outfits,
-styles, videos and the quick play / bonus song lists are save-wide tags. So
-the port names band slot 5 "The Glitches" (solo and co-op, unless the player
-already uses that slot), completes its career at every difficulty in its
-sections as GH3's own debug unlock does (playday_unlockall ->
-GlobalTags_UnlockAll), gives it $1,000,000, and unlocks the save-wide items
-for the whole save (ui/glitches.cpp, run at the first main menu). Undo:
-drop the save-wide loop in ensureGlitches. Test: --walktest glitches.
+(push_bandtags / pop_bandtags), but the Vault's purchases (guitars, finishes,
+characters, outfits, styles, videos, bonus songs) are save-wide tags. The
+owner's answer (2026-10-29, GD04-026): purchases count only for The
+Glitches' band. So the port names band slot 5 "The Glitches" (solo and
+co-op, unless the player already uses that slot), completes its career at
+every difficulty in its sections as GH3's own debug unlock does
+(playday_unlockall -> GlobalTags_UnlockAll), gives it $1,000,000, and while
+that band's career is popped the Vault's tags read "all bought"; popping
+another band or pushing the Glitches' section back restores the save's own
+state, and saves always store the save's own state (ui/glitches.cpp). The
+quick play songs a finished career unlocks stay save-wide, as in GH3.
+Tests: --walktest glitches (bought for The Glitches), --walktest vault
+(band 1: for sale).

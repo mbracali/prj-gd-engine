@@ -294,6 +294,7 @@ void addCoreNatives(Vm& vm) {
         if (!tag || !sec) return false;
         auto it = v.globalTags.find(tag->key);
         v.globalTagSections[sec->key][tag->key] = it == v.globalTags.end() ? qb::Struct{} : it->second;
+        if (v.onTagSection) v.onTagSection(v, sec->key, false);
         return true;
     });
     vm.addNative("PopGlobalTags", [](Vm& v, ScriptRun&, qb::Struct& p) {
@@ -302,6 +303,7 @@ void addCoreNatives(Vm& vm) {
         auto it = v.globalTagSections.find(sec->key);
         if (it == v.globalTagSections.end()) return false;
         for (const auto& [k, st] : it->second) v.globalTags[k] = st;
+        if (v.onTagSection) v.onTagSection(v, sec->key, true);
         return true;
     });
     // AddParams <struct>: merged into the caller's parameters [I].

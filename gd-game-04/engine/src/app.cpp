@@ -23,6 +23,7 @@
 #include "ui/front_end.h"
 #include "ui/port_screens.h"
 #include "ui/port_settings.h"
+#include "game/save.h"
 #include "ui/song_screen.h"
 #include "video/movie_player.h"
 #include "devaids/menu_keys.h"
@@ -517,8 +518,14 @@ int App::run() {
         std::error_code ec;
         std::filesystem::remove(saveDir_ + "enhanced.json", ec);
         std::filesystem::remove(saveDir_ + "controllers.json", ec);
+        // The game's save too (GD04_WALK_KEEP_SAVE=1 keeps it from the last walk).
+        if (!SDL_getenv("GD04_WALK_KEEP_SAVE")) {
+            std::filesystem::remove(saveDir_ + "save.json", ec);
+            std::filesystem::remove(saveDir_ + "save.json.bak", ec);
+        }
         std::filesystem::create_directories(saveDir_, ec);
         input_.setSaveDir(saveDir_);
+        save::setFolder(saveDir_);
     }
     enhanced_.load(saveDir_.empty() ? prefDir() : saveDir_);
     applyEnhanced("");

@@ -101,12 +101,9 @@ void DiscPicker::open(SDL_Window* window) {
 void DiscPicker::picked(void* self, const char* const* files, int) {
     auto* me = static_cast<DiscPicker*>(self);
     if (!files || !files[0]) return me->finish("", files ? "" : std::string("File dialog: ") + SDL_GetError());
-#ifdef __ANDROID__
-    if (me->worker_.joinable()) me->worker_.join();
-    me->worker_ = std::thread(&DiscPicker::copy, me, std::string(files[0]));
-#else
+    // Android too: the content:// document is read in place (data/random_file.cpp),
+    // no 8 GB copy (GD04-028).
     me->finish(files[0], "");
-#endif
 }
 
 void DiscPicker::finish(const std::string& path, const std::string& status) {
@@ -117,13 +114,6 @@ void DiscPicker::finish(const std::string& path, const std::string& status) {
 }
 
 std::string DiscPicker::status() {
-#ifdef __ANDROID__
-    if (busy_ && total_ > 0) {
-        char line[96];
-        std::snprintf(line, sizeof line, "Copying the disc image... %lld / %lld MB", done_ / 1048576, (long long)total_ / 1048576);
-        return line;
-    }
-#endif
     std::lock_guard lock(mutex_);
     return status_;
 }
@@ -135,41 +125,3 @@ std::string DiscPicker::takePicked() {
     return r;
 }
 
-#ifdef __ANDROID__
-void DiscPicker::copy(std::string uri) {
-    SDL_IOStream* in = SDL_IOFromFile(uri.c_str(), "rb");  // SDL reads content:// URIs on Android
-    if (!in) return finish("", std::string("Cannot open the chosen file: ") + SDL_GetError());
-    std::string dest = androidFolder() + "game.iso", part = dest + ".part";
-    std::FILE* out = std::fopen(part.c_str(), "wb");
-    if (!out) {
-        SDL_CloseIO(in);
-        return finish("", "Cannot write " + part);
-    }
-    total_ = SDL_GetIOSize(in);
-    done_ = 0;
-    std::vector<char> buf(4 << 20);
-    bool ok = true;
-    for (;;) {
-        size_t n = SDL_ReadIO(in, buf.data(), buf.size());
-        if (n == 0) {
-            ok = SDL_GetIOStatus(in) == SDL_IO_STATUS_EOF;
-            break;
-        }
-        if (std::fwrite(buf.data(), 1, n, out) != n) {
-            ok = false;
-            break;
-        }
-        done_ += (long long)n;
-    }
-    SDL_CloseIO(in);
-    ok = std::fclose(out) == 0 && ok;
-    total_ = 0;
-    std::error_code ec;
-    if (ok) std::filesystem::rename(part, dest, ec);
-    if (!ok || ec) {
-        std::filesystem::remove(part, ec);
-        return finish("", "Copying the disc image failed (is there enough free space? It needs about 8 GB)");
-    }
-    finish(dest, "");
-}
-#endif

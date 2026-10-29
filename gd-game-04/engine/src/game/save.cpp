@@ -104,8 +104,17 @@ qb::Value fromJson(const Json& j) {
 
 }  // namespace
 
+namespace {
+std::string& folderOverride() {
+    static std::string f;
+    return f;
+}
+}  // namespace
+
+void setFolder(const std::string& dir) { folderOverride() = dir; }
+
 std::string path() {
-    const std::string dir = prefDir();
+    const std::string dir = folderOverride().empty() ? prefDir() : folderOverride();
     return dir.empty() ? "" : dir + "save.json";
 }
 

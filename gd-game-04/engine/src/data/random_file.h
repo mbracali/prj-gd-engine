@@ -23,7 +23,9 @@ public:
 
 private:
     RandomFile(std::FILE* f, uint64_t size) : f_(f), size_(size) {}
-    std::FILE* f_;
+    std::FILE* f_ = nullptr;
+    // Android: a content:// document read in place through SDL's IO (no copy).
+    struct SDL_IOStream* io_ = nullptr;
     uint64_t size_;
     std::mutex mutex_;
 };
