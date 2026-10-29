@@ -4,7 +4,7 @@ All notable changes for players. Versions follow SemVer; release tags are
 `gd-game-02/vX.Y.Z`. The release workflow publishes the section whose heading
 matches the tag's version. Nothing is released yet.
 
-## [Unreleased]
+## [0.1.7] - 2026-10-29
 
 ### Added
 - Enhanced Options now has every Guitar Hero (gd-game-01) Enhanced Setting
