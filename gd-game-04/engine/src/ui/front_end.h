@@ -35,6 +35,17 @@ public:
         int device = 0;
     } pad;
     FlowState flow;
+    // A song the scripts started (start_gem_scroller): the app plays it
+    // with the native game core, then calls songEnded.
+    struct SongRequest {
+        bool pending = false;
+        uint32_t song = 0;
+        int difficulty = 3;
+    } songRequest;
+    bool songPlaying = false;
+    // The song is over: the flow goes on with win_song / fail_song [C data:
+    // GuitarEvent_SongWon_Spawned / GuitarEvent_SongFailed_Spawned].
+    void songEnded(bool won);
 
 private:
     const Disc& disc_;

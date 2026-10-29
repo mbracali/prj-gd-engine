@@ -58,4 +58,12 @@ private:
     bool strum_ = false, star_ = false;
     float whammy_ = 0;
     double finishedAt_ = -1;
+    bool forcedFail_ = false;
+
+public:
+    // Walk tests end the song early (ms of song time; -1: play it all).
+    double walkEndMs_ = -1, walkFailMs_ = -1;
+
+public:
+    bool failed() const { return forcedFail_ || player_->stats().failed; }
 };

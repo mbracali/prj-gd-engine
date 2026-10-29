@@ -268,7 +268,7 @@ void UiSystem::applyProps(Element& e, const qb::Struct& p, bool create) {
         else if (n == K("rgba") && v.type == qb::Type::Array && v.arr) {
             for (size_t k = 0; k < 4 && k < v.arr->values.size(); ++k) e.rgba[k] = uint8_t(std::clamp(int(v.arr->values[k].number()), 0, 255));
         } else if (n == K("alpha")) e.alpha = v.number();
-        else if (n == K("z_priority")) e.z = v.number();
+        else if (n == K("z_priority")) e.z = v.number(), e.zGiven = true;
         else if (n == K("rot_angle")) e.rot = v.number();
         else if (n == K("relative_rot_angle")) e.rot += v.number();
         else if (n == K("texture")) newTexture = v.key;
@@ -398,7 +398,7 @@ std::vector<Element*> UiSystem::focusedElements() const {
 }
 
 void UiSystem::focusMenu(Element* m, const qb::Struct& data) {
-    if (m->focused) return;
+    if (m->focused && m->selected >= 0 && size_t(m->selected) < m->children.size() && m->children[size_t(m->selected)]->focused) return;
     if (const qb::Value* c = qs::Vm::param(data, K("controller"))) m->controller = int(c->number());
     if (const qb::Value* cid = qs::Vm::param(data, K("child_id")))
         for (size_t i = 0; i < m->children.size(); ++i)
@@ -486,6 +486,11 @@ void UiSystem::padEvent(uint32_t event, int device) {
         if (e->exclusiveDevice < 0 || e->exclusiveDevice == device) ids.push_back(e->id);
     // root_window gets pad_start (the pause handler lives there) [C data].
     if (event == K("pad_start") && std::find(ids.begin(), ids.end(), kRootWindow) == ids.end()) ids.push_back(kRootWindow);
+    if (const char* v = SDL_getenv("GD04_UILOG"); v && *v && *v != '0') {
+        std::string who;
+        for (uint32_t id : ids) who += " " + qbkey::name(id);
+        SDL_Log("ui: %s (device %d) ->%s", qbkey::name(event).c_str(), device, who.c_str());
+    }
     for (uint32_t id : ids)
         if (Element* e = find(id)) launch(e, event, data);
 }
@@ -616,7 +621,7 @@ void UiSystem::dump() const {
         SDL_Log("ui-dump %*s%s %s tex=%s pos=(%.1f,%.1f) dims=(%.1f,%.1f) scale=(%.3f,%.3f) rot=%.1f just=(%.1f,%.1f) z=%.1f a=%.2f%s%s%s \"%s\"",
                 n.depth * 2, "", qbkey::name(e.type).c_str(), qbkey::name(e.id).c_str(), e.texture ? qbkey::name(e.texture).c_str() : "-",
                 double(e.x), double(e.y), double(e.w), double(e.h), double(e.sx), double(e.sy), double(e.rot), double(e.justX),
-                double(e.justY), double(e.z), double(e.alpha), e.hidden ? " hidden" : "", e.flipH ? " flipH" : "", e.flipV ? " flipV" : "",
+                double(e.justY), double(e.z), double(e.alpha), e.hidden ? " hidden" : "", e.focused ? " FOCUSED" : "", e.flipV ? " flipV" : "",
                 e.text.substr(0, 40).c_str());
         for (size_t k = e.children.size(); k-- > 0;) stack.push_back({e.children[k].get(), n.depth + 1});
     }
@@ -636,14 +641,18 @@ void UiSystem::draw(Canvas& c) {
     struct Item {
         const Element* e;
         float cx, cy, wsx, wsy, wa, wrot;  // top-left corner, world scale, alpha, rotation (deg)
+        float z;
+        int depth;
     };
     struct Node {
         const Element* e;
         float cx, cy, wsx, wsy, wa, wrot;
+        float z;  // the parent's effective z
+        int depth;
     };
     std::vector<Item> items;
     std::vector<Node> stack;
-    for (size_t k = root_->children.size(); k-- > 0;) stack.push_back({root_->children[k].get(), 0, 0, 1, 1, 1, 0});
+    for (size_t k = root_->children.size(); k-- > 0;) stack.push_back({root_->children[k].get(), 0, 0, 1, 1, 1, 0, 0, 1});
     while (!stack.empty()) {
         const Node n = stack.back();
         stack.pop_back();
@@ -660,11 +669,13 @@ void UiSystem::draw(Canvas& c) {
         const float jx = (e.justX + 1) / 2 * e.w * wsx, jy = (e.justY + 1) / 2 * e.h * wsy;
         const float r = wrot * kDeg;
         const float cx = wposX - (jx * std::cos(r) - jy * std::sin(r)), cy = wposY - (jx * std::sin(r) + jy * std::cos(r));
-        items.push_back({&e, cx, cy, wsx, wsy, wa, wrot});
-        for (size_t k = e.children.size(); k-- > 0;) stack.push_back({e.children[k].get(), cx, cy, wsx, wsy, wa, wrot});
+        const float z = e.zGiven ? e.z : n.z;
+        items.push_back({&e, cx, cy, wsx, wsy, wa, wrot, z, n.depth});
+        for (size_t k = e.children.size(); k-- > 0;) stack.push_back({e.children[k].get(), cx, cy, wsx, wsy, wa, wrot, z, n.depth + 1});
     }
     // z_priority is a global key; equal z in tree order [I].
-    std::stable_sort(items.begin(), items.end(), [](const Item& l, const Item& r) { return l.e->z < r.e->z; });
+    // Equal z: deeper elements over shallower ones, then tree order [I].
+    std::stable_sort(items.begin(), items.end(), [](const Item& l, const Item& r) { return l.z < r.z || (l.z == r.z && l.depth < r.depth); });
     for (const Item& it : items) {
         const Element& e = *it.e;
         const uint8_t alpha = uint8_t(std::clamp(float(e.rgba[3]) * it.wa, 0.0f, 255.0f));
@@ -828,6 +839,14 @@ void UiSystem::addNatives() {
         parent->children.push_back(std::move(e));
         applyProps(*raw, p, true);
         ++stats_.created;
+        // new_menu focuses its menu before the items exist: the first
+        // focusable item added to a focused menu takes the focus [I].
+        if (isMenu(*parent) && parent->focused && parent->selected < 0 && !raw->notFocusable) {
+            parent->selected = int(parent->children.size()) - 1;
+            qb::Struct d;
+            Vm::set(d, K("controller"), Vm::makeInt(parent->controller));
+            launch(raw, K("focus"), d);
+        }
         if (qb::Struct* l = locals(run)) Vm::set(*l, K("id"), Vm::makeKey(raw->id));
         return true;
     });

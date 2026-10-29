@@ -76,6 +76,7 @@ target_sources(gd04 PRIVATE
   src/tests/format_checks.cpp
   src/tests/scripttest.cpp
   src/tests/selftest.cpp
+  src/tests/walk.cpp
   src/tests/selftest_play.cpp
   src/tests/sfxtest.cpp
   src/ui/song_screen.cpp

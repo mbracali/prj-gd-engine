@@ -17,6 +17,7 @@
 #include "data/qbkey.h"
 #include "game/song_db.h"
 #include "script/globals.h"
+#include "tests/walk.h"
 #include "ui/front_end.h"
 #include "ui/song_screen.h"
 #include "devaids/menu_keys.h"
@@ -64,6 +65,7 @@ private:
     std::unique_ptr<SongScreen> song_;
     std::unique_ptr<TextureCache> textures_;
     std::unique_ptr<FrontEnd> front_;
+    std::unique_ptr<Walk> walk_;
     uint64_t lastFrameNs_ = 0;
     std::string message_;
     bool running_ = true;
@@ -127,6 +129,16 @@ void App::frame() {
         const bool more = song_->frame(canvas_, mixer_, textures_.get());
         captureMenuScreenshot(canvas_, double(SDL_GetTicksNS() - startNs_) / 1e6, song_->songMs());
         canvas_.end();
+        if (!more && front_) {
+            // Back to GH3's own flow (results, setlist).
+            const bool won = !song_->failed();
+            song_.reset();
+            mixer_.stop();
+            input_.setInGame(false);
+            front_->songEnded(won);
+            if (walk_) ++walk_->songsEnded;
+            return;
+        }
         if (!more) {
             const PlayerStats& s = song_->stats();
             std::printf("song: %s, score %lld, %d / %d notes hit, best streak %d\n", s.failed ? "failed" : "complete",
@@ -136,7 +148,30 @@ void App::frame() {
         }
         return;
     }
-    if (front_) {
+    if (front_ && front_->songRequest.pending) {
+        front_->songRequest.pending = false;
+        const SongInfo* info = nullptr;
+        for (const SongInfo& s : songs_.songs())
+            if (s.checksum == front_->songRequest.song) info = &s;
+        std::string err;
+        song_ = std::make_unique<SongScreen>();
+        if (!info || !song_->start(*disc_, *globals_, *info, front_->songRequest.difficulty, options_.autoplay || walk_ ||
+                                   SDL_getenv("GD04_AUTOPLAY"), options_.noFail, mixer_, err, textures_.get())) {
+            SDL_Log("song: cannot start %s: %s", qbkey::name(front_->songRequest.song).c_str(), err.c_str());
+            song_.reset();
+            front_->songEnded(false);
+        } else {
+            if (walk_) {
+                song_->walkEndMs_ = options_.walk == "lose" ? -1 : 20000.0;
+                song_->walkFailMs_ = options_.walk == "lose" ? 10000.0 : -1;
+            }
+            front_->songPlaying = true;
+            input_.setInGame(true);
+            if (walk_) ++walk_->songsStarted;
+        }
+        return;
+    }
+    if (front_ && !front_->songPlaying) {
         const uint64_t nowNs = SDL_GetTicksNS();
         const double dt = lastFrameNs_ ? double(nowNs - lastFrameNs_) / 1e6 : 0;
         lastFrameNs_ = nowNs;
@@ -198,8 +233,8 @@ int App::run() {
     if ((!options_.song.empty() || !options_.walk.empty()) && !disc_) {
         std::fprintf(stderr, "%s: %s\n", app::kProgram, message_.empty() ? "no disc image given" : message_.c_str());
         running_ = false, exitCode_ = 2;
-    } else if (!options_.walk.empty()) {
-        std::fprintf(stderr, "%s: walks are not implemented yet (M3)\n", app::kProgram);
+    } else if (!options_.walk.empty() && !(walk_ = std::make_unique<Walk>(options_.walk))->known()) {
+        std::fprintf(stderr, "%s: unknown walk '%s' (quickplay, lose, back, boot)\n", app::kProgram, options_.walk.c_str());
         running_ = false, exitCode_ = 2;
     } else if (!options_.song.empty()) {
         const SongInfo* s = songs_.find(options_.song);
@@ -262,6 +297,18 @@ int App::run() {
         }
         if (!disc_)
             if (std::string picked = picker_.takePicked(); !picked.empty()) loadData(picked);
+        if (walk_ && front_) {
+            for (Action a : walk_->update(*front_, front_->songPlaying, double(frameStart - startNs_) / 1e6))
+                for (bool down : {true, false}) {
+                    InputEvent ev{a, down, SDL_GetTicksNS(), ControllerMode::Guitar, 0};
+                    if (song_) song_->handle(ev);
+                    else front_->handle(ev);
+                }
+            if (walk_->done() || walk_->failed()) {
+                exitCode_ = walk_->finish(*front_);
+                running_ = false;
+            }
+        }
         if (!running_) break;
         frame();
         if (quitAfter && double(SDL_GetTicksNS() - startNs_) / 1e6 >= std::atof(quitAfter)) running_ = false;

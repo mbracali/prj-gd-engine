@@ -67,7 +67,15 @@ void FrontEnd::handle(const InputEvent& e) {
     if (ev) ui_->padEvent(qbkey::key(ev), e.player);
 }
 
+void FrontEnd::songEnded(bool won) {
+    songPlaying = false;
+    qb::Struct p;
+    qs::Vm::set(p, qbkey::key("action"), qs::Vm::makeKey(qbkey::key(won ? "win_song" : "fail_song")));
+    vm_->spawn(qbkey::key("ui_flow_manager_respond_to_action"), p);
+}
+
 void FrontEnd::frame(Canvas& c, double dtMs) {
+    if (songPlaying) return;
     accum_ += dtMs;
     int steps = 0;
     while (accum_ >= kStepMs && steps < 8) {

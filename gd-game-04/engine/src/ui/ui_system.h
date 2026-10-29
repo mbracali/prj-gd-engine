@@ -38,6 +38,7 @@ struct Element {
     float anchorX = -1, anchorY = -1;      // child_anchor [C 0x82218908]
     float ijustX = 0, ijustY = 0;          // internal_just (menus, text)
     float sx = 1, sy = 1, alpha = 1, rot = 0, z = 0;  // rot in degrees
+    bool zGiven = false;  // without its own z_priority an element draws at its parent's [I]
     std::array<uint8_t, 4> rgba{255, 255, 255, 255};
     uint32_t texture = 0, font = 0;
     std::string text;

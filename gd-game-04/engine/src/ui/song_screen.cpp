@@ -114,6 +114,11 @@ bool SongScreen::frame(Canvas& canvas, Mixer& mixer, const TextureCache* texture
     lastMs_ = now;
     tick(now, mixer);
     draw(canvas, now, textures);
+    // GD04_END_AT=<song ms> / GD04_FAIL_AT=<song ms>: end (win) or fail the song then (walk tests).
+    static const double endAt = SDL_getenv("GD04_END_AT") ? std::atof(SDL_getenv("GD04_END_AT")) : walkEndMs_;
+    static const double failAt = SDL_getenv("GD04_FAIL_AT") ? std::atof(SDL_getenv("GD04_FAIL_AT")) : walkFailMs_;
+    if (failAt >= 0 && now >= failAt && finishedAt_ < 0) forcedFail_ = true, finishedAt_ = now - 2000.0;
+    if (endAt >= 0 && now >= endAt && finishedAt_ < 0) finishedAt_ = now - 2000.0;
     if (now >= endMs_ || (player_->stats().failed && finishedAt_ < 0)) {
         if (finishedAt_ < 0) finishedAt_ = now;
     }

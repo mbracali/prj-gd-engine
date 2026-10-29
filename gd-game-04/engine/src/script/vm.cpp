@@ -30,6 +30,7 @@ struct Exec {
     Frame* fr;
     const std::vector<Token>& t;
     size_t i;
+    int parens = 0;  // inside ( ): a name may be a call
 
     Exec(Vm& v, ScriptRun& r) : vm(v), run(r), fr(&r.frames.back()), t(fr->code->tokens), i(fr->pc) {}
 
@@ -142,7 +143,28 @@ struct Exec {
             v.type = qb::Type::Pair;
             v.f[0] = k.f[0], v.f[1] = k.f[1];
             return v;
-        case kName: ++i; return Vm::makeKey(k.u);
+        case kName: {
+            // A call inside an expression (`( StructureContains structure = s boss )`):
+            // a native or script name followed by its parameters [C data].
+            const uint32_t n = k.u;
+            const bool callable = vm.hasNative(n) || (vm.globals().find(n) && vm.globals().find(n)->type == qb::Type::Script);
+            const Op next = i + 1 < t.size() ? t[i + 1].op : kEndOfLine;
+            const bool operandFollows = next == kName || next == kArg || next == kStartStruct || next == kInlineStruct ||
+                                        next == kInlineStruct2 || next == kAllArgs;
+            if (parens > 0 && callable && operandFollows) {
+                ++i;
+                qb::Struct p = params();
+                return Vm::makeInt(vm.callForValue(run, n, p) ? 1 : 0);
+            }
+            if (parens > 0 && callable && (next == kCloseParen || next == kOr || next == kAnd)) {
+                // A call without parameters (`( IsXenon )`).
+                ++i;
+                qb::Struct p;
+                return Vm::makeInt(vm.callForValue(run, n, p) ? 1 : 0);
+            }
+            ++i;
+            return Vm::makeKey(n);
+        }
         case kArg: {
             ++i;
             skipNops();
@@ -173,7 +195,9 @@ struct Exec {
         }
         case kOpenParen: {
             ++i;
+            ++parens;
             qb::Value e = expression();
+            --parens;
             skipNops();
             if (i < t.size() && t[i].op == kCloseParen) ++i;
             return e;
@@ -420,7 +444,7 @@ struct Exec {
             skipNops();
             if (atEnd()) break;
             const Op op = t[i].op;
-            if (op == kEndIf || op == kFastElse || op == kElseIf || op == kCloseParen) break;
+            if (op == kEndIf || op == kFastElse || op == kElseIf || op == kCloseParen || op == kOr || op == kAnd) break;
             const size_t before = i;
             paramItem(p);
             if (i == before) ++i;  // never stall
@@ -452,7 +476,7 @@ const qb::Value* Vm::param(const qb::Struct& p, uint32_t name) {
 
 bool Vm::flag(const qb::Struct& p, uint32_t name) {
     for (const qb::Item& it : p.items)
-        if (it.name == 0 && (it.value.type == qb::Type::Key) && it.value.key == name) return true;
+        if (it.name == 0 && (it.value.type == qb::Type::Key || it.value.type == qb::Type::KeyPtr) && it.value.key == name) return true;
     return false;
 }
 
@@ -698,7 +722,19 @@ bool Vm::callForValue(ScriptRun& run, uint32_t name, qb::Struct& params) {
         f.locals = std::make_shared<qb::Struct>(params);
         sub.frames.push_back(std::move(f));
         if (step(sub, 1 << 16)) logOnce("WAIT inside a script used as a condition: " + qbkey::name(name));
-        return true;
+        // A script's value: whether it returned the flag `true` [C data:
+        // get_valid_character_index's `return index = x true`]; its other
+        // returned parameters reach the caller.
+        bool value = false;
+        if (sub.returned) {
+            value = flag(sub.lastReturn, qbkey::key("true"));
+            if (!run.frames.empty()) {
+                if (!run.frames.back().locals) run.frames.back().locals = std::make_shared<qb::Struct>();
+                for (const qb::Item& it : sub.lastReturn.items)
+                    if (it.name) set(*run.frames.back().locals, it.name, it.value);
+            }
+        }
+        return value;
     }
     if (unhandledNames_.insert(name).second) {
         stats_.unhandled = unhandledNames_.size();
@@ -814,6 +850,8 @@ bool Vm::step(ScriptRun& run, int budget) {
             Exec ex(*this, run);
             ++ex.i;
             qb::Struct ret = ex.params();
+            run.lastReturn = ret;
+            run.returned = true;
             run.frames.pop_back();
             if (run.frames.empty()) return false;
             Frame& caller = run.frames.back();

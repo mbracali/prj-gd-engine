@@ -66,6 +66,8 @@ struct ScriptRun {
     bool finished = false;
     bool paused = false;
     uint32_t spawnedBy = 0;
+    qb::Struct lastReturn;      // the parameters of the last `return` (a condition's value)
+    bool returned = false;
     uint32_t type = 0;        // SpawnScriptNow ... id / type (for KillSpawnedScript)
     uint32_t object = 0;      // the object (screen element id) the script runs on, 0: none
 };
