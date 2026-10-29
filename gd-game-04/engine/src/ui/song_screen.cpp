@@ -19,7 +19,8 @@
 namespace {
 
 constexpr double kStepMs = 1000.0 / 60.0;  // GH3 runs its judge once per game frame [I: 60 Hz]
-constexpr double kLeadInMs = 2000.0;       // silence before the audio [I: until the song start order (M4)]
+// The intro before the music: fastintro's 3000 ms (quickplay) [C script start_gem_scroller, fastintro props].
+constexpr double kLeadInMs = 3000.0;
 const SDL_Color kFretColors[5] = {{40, 200, 60, 255}, {220, 40, 40, 255}, {230, 210, 40, 255}, {40, 100, 230, 255}, {240, 130, 30, 255}};
 
 }  // namespace
@@ -101,6 +102,7 @@ void SongScreen::tick(double nowMs, Mixer& mixer) {
         }
         shownHeld_ = in.frets;
         player_->frame(stepMs_, kStepMs, in);
+        hud_.update(player_->stats(), stepMs_);
         for (const PlayerEvent& ev : player_->events()) {
             if (ev.kind == PlayerEvent::Kind::Hit) {
                 mixer.setGuitarAudible(true);
@@ -125,7 +127,18 @@ bool SongScreen::frame(Canvas& canvas, Mixer& mixer, const TextureCache* texture
     if (now >= endMs_ || (player_->stats().failed && finishedAt_ < 0)) {
         if (finishedAt_ < 0) finishedAt_ = now;
     }
-    return finishedAt_ < 0 || now < finishedAt_ + 2000.0;
+    const bool more = finishedAt_ < 0 || now < finishedAt_ + 2000.0;
+    if (!more) {
+        const Hud2D::Counters& h = hud_.counters();
+        SDL_Log("hud: score %llu, needle %llu, tubes %llu, multiplier %llu, streak bar in %llu / out %llu, dial flips %llu, combos %llu, "
+                "danger %llu, star ready %llu / on %llu / off %llu, flames %llu, missing textures %llu",
+                (unsigned long long)h.scoreChanges, (unsigned long long)h.needleChanges, (unsigned long long)h.tubeChanges,
+                (unsigned long long)h.multiplierChanges, (unsigned long long)h.streakBarIns, (unsigned long long)h.streakBarOuts,
+                (unsigned long long)h.dialFlips, (unsigned long long)h.combos, (unsigned long long)h.dangerStarts,
+                (unsigned long long)h.starReady, (unsigned long long)h.starActivations, (unsigned long long)h.starOffs,
+                (unsigned long long)highway_.flamesStarted, (unsigned long long)h.missingTextures);
+    }
+    return more;
 }
 
 void SongScreen::draw(Canvas& c, double now, const TextureCache* textures) {
@@ -133,12 +146,13 @@ void SongScreen::draw(Canvas& c, double now, const TextureCache* textures) {
     char text[160];
     if (highwayOk_ && textures && !std::getenv("GD04_DEBUG_HIGHWAY")) {
         highway_.draw(c, *textures, track_, *player_, now, shownHeld_);
-        // The HUD numbers (GH3's own HUD, create_2d_hud_elements, comes with the screen elements) [approximation].
-        std::snprintf(text, sizeof text, "%lld   x%d   streak %d", static_cast<long long>(st.score), st.multiplier(), st.currentRun);
-        c.text(40, 680, 2, SDL_Color{255, 255, 255, 255}, text);
-        std::snprintf(text, sizeof text, "rock %.2f  star %.0f%s", double(st.health), double(st.starPower), st.starPowerActive ? " ON" : "");
-        c.text(1000, 680, 2, SDL_Color{255, 255, 255, 255}, text);
-        c.text(40, 20, 2, SDL_Color{200, 200, 200, 255}, song_.title + " - " + song_.artist);
+        hud_.draw(c, *textures, now);
+        if (std::getenv("GD04_HUD_NUMBERS")) {  // development aid: the numbers behind the HUD
+            std::snprintf(text, sizeof text, "%lld   x%d   streak %d", static_cast<long long>(st.score), st.multiplier(), st.currentRun);
+            c.text(40, 680, 2, SDL_Color{255, 255, 255, 255}, text);
+            std::snprintf(text, sizeof text, "rock %.2f  star %.0f%s", double(st.health), double(st.starPower), st.starPowerActive ? " ON" : "");
+            c.text(1000, 680, 2, SDL_Color{255, 255, 255, 255}, text);
+        }
         if (finishedAt_ >= 0) {
             std::snprintf(text, sizeof text, "%s  %d / %d notes", st.failed ? "SONG FAILED" : "SONG COMPLETE", st.notesHit, int(track_.notes.size()));
             c.textCentered(640, 200, 3, SDL_Color{255, 255, 255, 255}, text);

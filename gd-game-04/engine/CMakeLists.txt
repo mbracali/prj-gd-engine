@@ -60,6 +60,7 @@ target_sources(gd04 PRIVATE
   src/render/gl_api.cpp
   src/render/gl_device.cpp
   src/render/highway2d.cpp
+  src/render/hud2d.cpp
   src/render/renderer.cpp
   src/render/shadertest.cpp
   src/render/texture_cache.cpp

@@ -13,6 +13,7 @@
 #include "game/tuning.h"
 #include "input/input.h"
 #include "render/highway2d.h"
+#include "render/hud2d.h"
 
 class Canvas;
 class Disc;
@@ -34,6 +35,8 @@ public:
     bool frame(Canvas& canvas, Mixer& mixer, const TextureCache* textures);
     const PlayerStats& stats() const { return player_->stats(); }
     double songMs() const { return lastMs_; }
+    Hud2D& hud() { return hud_; }
+    const Highway2D& highway() const { return highway_; }
 
 private:
     void tick(double nowMs, Mixer& mixer);
@@ -47,6 +50,7 @@ private:
     std::unique_ptr<Player> player_;
     std::unique_ptr<Autoplay> autoplay_;
     Highway2D highway_;
+    Hud2D hud_;
     bool highwayOk_ = false;
     const TextureCache* textures_ = nullptr;
     uint8_t shownHeld_ = 0;
