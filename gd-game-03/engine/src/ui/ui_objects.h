@@ -32,6 +32,7 @@ public:
     ComponentObj(PanelObj* panel, const scene::Object* object, const std::string& name);
     PanelObj* panel;
     const scene::Object* object;  // nullptr: not in the milo (logged once)
+    bool directory = false;       // the panel's milo itself (a RndDir: its animatables)
 
     bool handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) override;
     Value getProp(Interp& in, const std::string& key) override;

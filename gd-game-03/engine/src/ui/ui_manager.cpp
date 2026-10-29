@@ -152,6 +152,10 @@ bool UiManager::init(std::string& error, bool headless) {
     }
     macros_ = loader_->macros;
     modes_ = boot_->find("modes");
+    // $syscfg: the system config (config/gh2.dta and its includes), read
+    // by {find $syscfg ...} (modes.dta practice's pre_processed_audio,
+    // cheats_funcs.dta) [C data].
+    interp_.var("syscfg") = interp_.toValue(*boot_);
     // The players' and their matchers' handlers: gh2.dta (player (handlers
     // ...)) (Player, 0x822C9720) and (beatmatch (player_matcher_handlers
     // ...)) (PlayerMatcher, 0x822E44B0) [C].

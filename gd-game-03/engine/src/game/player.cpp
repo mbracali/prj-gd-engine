@@ -456,6 +456,15 @@ void Player::update(float t) {
 
 // ================================================================= player
 
+// 0x00110e78 [C]: beats are ticks / 480.
+void Player::bigNoteCheck(int gem) {
+    if (nextBigNote_ >= bigNotes_.size()) return;
+    const float beat = float(chart_.gems[size_t(gem)].tick) / 480.0f, big = float(bigNotes_[nextBigNote_]) / 480.0f;
+    if (big - 0.2f > beat) return;
+    ++nextBigNote_;
+    if (beat < big + 0.2f) emit(PlayerEvent::Kind::BlewBigNote, gem);
+}
+
 bool Player::inPractice(int gem) const {
     const int tick = chart_.gems[size_t(gem)].tick;
     return tick >= practiceStartTick_ && tick < practiceEndTick_;
@@ -549,6 +558,7 @@ void Player::playerPass(float t, int gem) {
     ++passes_;
     emit(PlayerEvent::Kind::Pass, gem);
     if (gem > penalisedGem_) penalise(t, gem);
+    bigNoteCheck(gem);
     const int phrase = chart_.gems[size_t(gem)].phrase;
     if (phrase >= 0 && chart_.phrases[size_t(phrase)].firstGem == gem) spPhraseMiss(gem);
 }
@@ -594,6 +604,7 @@ void Player::finishSustain(float t) {
     if (tail_.gem < 0) return;
     const Tail done = tail_;
     tail_ = {};
+    if (done.max > 0 && float(done.earned) / float(done.max) < 0.1f) bigNoteCheck(done.gem);  // 0x00112348 [C]
     const float head = float(rules_.headPoints);
     crowdUpdate((float(done.earned) + head) / (float(done.max) + head), t);
     emit(PlayerEvent::Kind::HeldNoteReleased, done.gem, done.max > 0 ? float(done.earned) / float(done.max) : 1.0f);

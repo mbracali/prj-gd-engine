@@ -39,6 +39,35 @@ interpreter, gd-game-02/docs/ui_and_frontend.md). What this disc changes:
   encore); Easy plays one tier less (0x00130c58); required songs per
   difficulty (0x001313d8); star awards 100 / 150 / 200 (Medium..Expert).
 
+## Training: practice and the tutorials
+- Practice (ui/practice.dta, PS2 0x00106840): song -> part (guitar / bass:
+  the player plays that part's chart) -> difficulty -> start and end
+  section (`game practice_section_provider`: row 0 full_song, then the
+  EVENTS track's `[section x]`, each to the next; rows before the start
+  and sections without a gem of the chart inactive; `gamecfg
+  get_section_bounds`, `set (practice_sections n)`) -> speed. modes.dta's
+  song_block picks song_practice_1..3 (songs/<s>/<s>_p85 / _p65 / _p50.vgs,
+  through `gamecfg pre_processed_audio` and `$syscfg`); the slowed audio
+  plays at the speed x its rate and the song clock runs at the speed. The
+  clock starts a measure before the start section (in the first measure,
+  four beats before 0) with the intro skipped (skip_intro: intro_skip), the
+  player counts only the sections' gems, practice_end comes at the end
+  section's end (music_fader fades the music, practice_end_screen). The
+  metronome is click_parser (TRIGGERS 24..26) at speeds below 100%, the
+  section names events_parser (EVENTS, echo); the sounds are
+  sfx/practice_bank's (practice_panel's sub-directory, kept loaded).
+- Tutorials (ui/tutorials.dta, TutorialPanel 0x0013ff68): play_vo plays
+  sound.dta's streaming_vo events (tutorial/streams/eng/*.vgs) one at a
+  time; the tuner (start_tuning_mode, 0x0014d6d8) reads player 0's frets
+  and strums: a strum with one fret held counts it (s101xx, fret_played to
+  the callback, the third tunes it: t1_fretcheck<n>.view, tuning_hit_vo),
+  two or more frets play miss_gtr; all five tuned ends it. The hopo
+  training (tutorial 3, pull-offs) is not done yet (GD03-022).
+- Video settings: progressive scan is kept (career.json) with no effect;
+  widescreen is the Enhanced Options' Widescreen (16:9). The lag
+  calibration (lag_panel) plays practice_bank's countdown and
+  sync_click.cue; `{lag animate}` animates lag.milo's own anims.
+
 ## Cheats
 - config/long_cheats.dta names PS2 guitar buttons: G_GREEN kPad_R2, G_RED
   kPad_Circle, G_YELLOW kPad_Tri, G_BLUE kPad_X, G_ORANGE kPad_Square. The

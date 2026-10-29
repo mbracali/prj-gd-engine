@@ -121,11 +121,21 @@ void MidiParser::reset() {
 
 void MidiParser::enter(Interp&) { impl_->enterPending = true; }
 
-void MidiParser::addSink(ScriptObject* sink) {
-    if (sink && std::find(sinks_.begin(), sinks_.end(), sink) == sinks_.end()) sinks_.push_back(sink);
+void MidiParser::skipTo(double beat) {
+    Impl& m = *impl_;
+    while (m.next < m.events.size() && double(m.events[m.next].start) < beat) ++m.next;
 }
 
-void MidiParser::removeSink(ScriptObject* sink) { sinks_.erase(std::remove(sinks_.begin(), sinks_.end(), sink), sinks_.end()); }
+void MidiParser::addSink(ScriptObject* sink, std::vector<std::string> msgs) {
+    if (!sink) return;
+    if (std::find(sinks_.begin(), sinks_.end(), sink) == sinks_.end()) sinks_.push_back(sink);
+    sinkMsgs_[sink] = std::move(msgs);
+}
+
+void MidiParser::removeSink(ScriptObject* sink) {
+    sinks_.erase(std::remove(sinks_.begin(), sinks_.end(), sink), sinks_.end());
+    sinkMsgs_.erase(sink);
+}
 
 double MidiParser::nextStart() const {
     const Impl& m = *impl_;
@@ -367,8 +377,12 @@ void MidiParser::poll(Interp& in, double beat) {
     Impl& m = *impl_;
     auto toSinks = [&](const std::string& msg, const std::vector<Value>& args) {
         const std::vector<ScriptObject*> sinks = sinks_;
-        for (ScriptObject* s : sinks)
-            if (std::find(sinks_.begin(), sinks_.end(), s) != sinks_.end()) in.send(s, msg, args);
+        for (ScriptObject* s : sinks) {
+            if (std::find(sinks_.begin(), sinks_.end(), s) == sinks_.end()) continue;
+            const auto f = sinkMsgs_.find(s);
+            if (f != sinkMsgs_.end() && !f->second.empty() && std::find(f->second.begin(), f->second.end(), msg) == f->second.end()) continue;
+            in.send(s, msg, args);
+        }
     };
     auto runCode = [&](const DataNode& code) {
         ScriptObject* prev = in.var("this").object;
@@ -420,7 +434,9 @@ bool MidiParser::handleNative(Interp& in, const std::string& msg, std::vector<Va
         return nullptr;
     };
     if (msg == "add_sink" || msg == "add_sinks") {
-        if (!args.empty()) addSink(object(args[0]));
+        std::vector<std::string> msgs;
+        for (size_t k = 1; k < args.size(); ++k) msgs.push_back(in.evalValue(args[k]).str());
+        if (!args.empty()) addSink(object(args[0]), std::move(msgs));
         return r = Value::integer(0), true;
     }
     if (msg == "remove_sink") {

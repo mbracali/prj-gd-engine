@@ -25,7 +25,7 @@ struct PlayerEvent {
     // sp_engage message).
     enum class Kind { Hit, Miss, Pass, Hopo, SwingAtHopo, HeldNoteReleased, BuildStreak, EndStreak,
                       StarGemHit, PhraseCaptured, PhraseMissed, StarPowerReady, StarPowerStart, StarPowerEnd,
-                      WhammyStart, WhammyEnd, Failed, StarPowerEngage };
+                      WhammyStart, WhammyEnd, Failed, StarPowerEngage, BlewBigNote };
     Kind kind;
     int gem;  // gem index, or -1
     float value = 0;
@@ -109,6 +109,11 @@ public:
     // Practice: gems before `firstGem` are skipped (watcher +0x1c) and the
     // player counts only gems with ticks in [startTick, endTick) (+0xf0/+0xf4) [C].
     void setPracticeRange(int firstGem, int startTick, int endTick);
+    // The track's big notes (Song::bigNotes, ticks; PS2 0x00110cc0): a gem
+    // passed, or a sustain let go with under a tenth of its points, within
+    // 0.2 beats of the next one blows it (BlewBigNote, game.dta
+    // blew_big_note); each big note is looked at once (0x00110e78) [C].
+    void setBigNotes(std::vector<int> ticks) { bigNotes_ = std::move(ticks), nextBigNote_ = 0; }
     void update(float t);
 
     const Chart& chart() const { return chart_; }
@@ -124,6 +129,8 @@ public:
     // The streak multiplier without Star Power's doubling (1..4).
     int baseMultiplier() const { return baseMultiplier_; }
     int notesHit() const { return notesHit_; }
+    // Gems passed unhit (0x822c9498's count; practice: its sections' only) [C].
+    int gemsPassed() const { return passes_; }
     int passes() const { return passes_; }
     int penalties() const { return penalties_; }
     // +0xac: the highest gem already penalised (-1 none).
@@ -203,6 +210,9 @@ private:
     void crowdUpdate(float target, float t);
     void ownCrowdUpdate(float target, float t);
     bool inPractice(int gem) const;
+    void bigNoteCheck(int gem);
+    std::vector<int> bigNotes_;
+    size_t nextBigNote_ = 0;
 
     // ---- star power
     int spMultiplier() const { return spActive_ ? sp_.multiplier : 1; }

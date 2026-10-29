@@ -87,11 +87,19 @@ void Mixer::play(std::unique_ptr<AudioSource> stream, std::vector<Track> tracks,
     SDL_ResumeAudioStreamDevice(stream_);
 }
 
+void Mixer::setVolumeDb(float db, float fadeMs) {
+    const float target = db <= -96.0f ? 0.0f : std::pow(10.0f, db / 20.0f);
+    const float frames = std::max(1.0f, fadeMs / 1000.0f * float(rate_));
+    volumeStep_.store(std::fabs(target - volumeTarget_.load()) / frames + 1e-9f);
+    volumeTarget_.store(target);
+}
+
 void Mixer::setSpeed(float speed) {
     if (stream_) SDL_SetAudioStreamFrequencyRatio(stream_, std::clamp(speed, 0.01f, 100.0f));
 }
 
 void Mixer::stop() {
+    clockScale_ = 1, clockOffsetMs_ = 0;
     if (!stream_) return;
     stopWorker();
     SDL_LockAudioStream(stream_);
@@ -109,7 +117,7 @@ void Mixer::setPaused(bool paused) {
     } else {
         // Re-anchor so the clock resumes where it stopped.
         anchorNs_ = SDL_GetTicksNS();
-        anchorFrames_ = static_cast<int64_t>((pausedTimeMs_ / 1000.0) * rate_) + leadIn_;
+        anchorFrames_ = static_cast<int64_t>(((pausedTimeMs_ - clockOffsetMs_) / 1000.0) * rate_) + leadIn_;
         paused_ = false;
     }
     frameNs_ = 0;
@@ -119,8 +127,8 @@ double Mixer::songTimeMs(uint64_t ticksNs) const {
     if (paused_) return pausedTimeMs_;
     if (ticksNs == 0) ticksNs = SDL_GetTicksNS();
     double elapsed = (double(ticksNs) - double(anchorNs_.load())) / 1e9;
-    double frames = double(anchorFrames_.load()) + std::max(0.0, elapsed) * rate_;
-    return (frames - double(leadIn_.load())) * 1000.0 / rate_;
+    double frames = double(anchorFrames_.load()) + std::max(0.0, elapsed) * rate_ * clockScale_;
+    return clockOffsetMs_ + (frames - double(leadIn_.load())) * 1000.0 / rate_;
 }
 
 double Mixer::frameTimeMs() {
@@ -130,7 +138,7 @@ double Mixer::frameTimeMs() {
         frameMs_ = raw, frameNs_ = now;
         return raw;
     }
-    double predicted = frameMs_ + double(now - frameNs_) / 1e6;
+    double predicted = frameMs_ + double(now - frameNs_) / 1e6 * clockScale_;
     double err = raw - predicted;
     // Big jumps (resume, a stalled device) snap; small ones ease in at 5 % a
     // frame, never moving the clock backwards (gd01).
@@ -170,15 +178,17 @@ void Mixer::fill(int frames) {
     if (n < audible && !sourceEnded_.load()) underruns_ += audible - n;
 
     const float target = guitarTarget_.load(), target2 = guitar2Target_.load();
+    const float vTarget = volumeTarget_.load(), vStep = volumeStep_.load();
     for (int i = 0; i < n; ++i) {
         size_t at = size_t((r + i) & (kRing - 1));
+        volumeGain_ = volumeGain_ < vTarget ? std::min(vTarget, volumeGain_ + vStep) : std::max(vTarget, volumeGain_ - vStep);
         // ~8 ms ramp, no click (gd01) [I].
         guitarGain_ += (target - guitarGain_) * 0.003f;
         guitar2Gain_ += (target2 - guitar2Gain_) * 0.003f;
         float l = 0, rr = 0;
         for (size_t c = 0; c < tracks_.size(); ++c) {
             const Track& t = tracks_[c];
-            float v = ring_[c][at] * t.volume * (t.guitar ? guitarGain_ : t.guitar2 ? guitar2Gain_ : 1.0f);
+            float v = ring_[c][at] * t.volume * volumeGain_ * (t.guitar ? guitarGain_ : t.guitar2 ? guitar2Gain_ : 1.0f);
             // gd01's linear pan law: -1 = left only, 0 = both at full, 1 = right only [I].
             l += v * std::clamp(1.0f - t.pan, 0.0f, 1.0f);
             rr += v * std::clamp(1.0f + t.pan, 0.0f, 1.0f);

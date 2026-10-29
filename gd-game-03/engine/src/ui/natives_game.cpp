@@ -151,6 +151,74 @@ Value gameCfgValue(UiManager& ui, const std::string& key) {
 
 namespace {
 
+// section_provider (PS2 0x0011b5b8, its methods 0x0011b920..0x0011bba8)
+// [C]: the practice sections of the song, row 0 the whole song
+// (full_song), row n the song's section n - 1; a row before the start
+// section (set_start_section n: rows from n + 1) and a section without a
+// gem of the player's chart are inactive; section_after_last names the
+// section after practice_sections' end one ('' after the last or the whole
+// song). Loaded for the configured song, part and difficulty when a list
+// takes it (load_practice_sections 0x0011b818).
+class SectionProviderObj : public ListProvider {
+public:
+    explicit SectionProviderObj(UiManager& ui) : ListProvider("section_provider", "SectionProvider"), ui_(ui) {}
+    void load() {
+        const Session& s = ui_.session();
+        const std::vector<std::string> inst = songInstruments(ui_, s.song);
+        const int t = s.players[0].track;
+        full_ = {};
+        sections_ = ui_.host().songSections(s.song, t >= 0 && t < int(inst.size()) ? inst[size_t(t)] : "guitar", s.players[0].difficulty, full_);
+        full_.name = "full_song";
+        startRow_ = 0;
+    }
+    void initData() override { load(); }
+    int numData() override { return int(sections_.size()) + 1; }
+    const UiHost::Section& entry(int sec) const {  // 0x0011ba20: -1 the whole song
+        return sec < 0 || sec >= int(sections_.size()) ? full_ : sections_[size_t(sec)];
+    }
+    std::string symbol(int row) override { return entry(row - 1).name; }
+    bool active(int row) override {  // 0x0011bb68
+        if (row < startRow_) return false;
+        return row <= 0 || entry(row - 1).hasGems;
+    }
+    void rows(std::vector<gfx::UiView::ListRow>& out, int selected, int& selectedRow) override {
+        out.assign(size_t(numData()), {});
+        for (int i = 0; i < numData(); ++i) {
+            out[size_t(i)].texts["list.txt"] = ui_.localize(symbol(i));
+            out[size_t(i)].disabled = !active(i);
+        }
+        selectedRow = selected;
+    }
+    bool handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) override {
+        r = Value::integer(0);
+        if (msg == "num_data") return r = Value::integer(numData()), true;
+        if (msg == "get_symbol") return r = Value::symbol(symbol(intArg(args, 0))), true;
+        if (msg == "is_active") return r = Value::integer(active(intArg(args, 0)) ? 1 : 0), true;
+        if (msg == "set_start_section") return startRow_ = intArg(args, 0) + 1, true;
+        if (msg == "section_after_last") {
+            const Value ps = gameCfgValue(ui_, "practice_sections");
+            const int last = ps.type == Value::Type::Array && ps.array && ps.array->size() > 1 ? in.evalValue((*ps.array)[1]).integerValue() : -1;
+            return r = Value::symbol(last != -1 && last != int(sections_.size()) - 1 ? entry(last + 1).name : std::string()), true;
+        }
+        return false;
+    }
+    int startTick(int sec) const { return entry(sec).startTick; }
+
+private:
+    UiManager& ui_;
+    std::vector<UiHost::Section> sections_;
+    UiHost::Section full_;
+    int startRow_ = 0;  // +0x54
+};
+
+// gamecfg practice_sections (n): the chosen section of index n (0 the
+// start, 1 the end), -1 the whole song.
+int practiceSection(UiManager& ui, int n) {
+    const Value ps = gameCfgValue(ui, "practice_sections");
+    if (ps.type != Value::Type::Array || !ps.array || int(ps.array->size()) <= n) return -1;
+    return ui.interp().evalValue((*ps.array)[size_t(n)]).integerValue();
+}
+
 // GamePanel `game`: GH2's GamePanel with GameConfig's methods. Entering it
 // loads the configured song through the host; its sinks get the game
 // events (UiManager::gameEvent).
@@ -216,6 +284,24 @@ public:
             setup.leftys[p] = o.lefty[p];
             setup.pads[p] = s.players[p].padnum;
         }
+        // The audio block (modes.dta song_block), skip_intro and practice's
+        // speed and sections (PS2 0x00106840: practice_speeds[practice_speed]
+        // / 100 of the song, else sound.dta's default_speeds) [C].
+        setup.songBlock = gameCfgValue(ui, "song_block").str();
+        setup.skipIntro = gameCfgValue(ui, "skip_intro").truthy();
+        if (setup.mode == "practice") {
+            const int i = songInfoIndex(ui, s.song);
+            std::vector<int> speeds = i >= 0 ? ui.host().songs()[size_t(i)].practiceSpeeds : std::vector<int>{};
+            if (speeds.size() < 4) speeds = {100, 90, 80, 60};  // config/sound.dta (practice_mode (default_speeds ...)) [C data]
+            const int k = std::clamp(gameCfgValue(ui, "practice_speed").integerValue(), 0, 3);
+            setup.practiceSpeed = float(speeds[size_t(k)]) / 100.0f;
+            if (auto* sp = dynamic_cast<SectionProviderObj*>(ui.interp().findObject("section_provider"))) {
+                if (sp->numData() <= 1) sp->load();
+                setup.practiceStartTick = sp->entry(practiceSection(ui, 0)).startTick;
+                setup.practiceEndTick = sp->entry(practiceSection(ui, 1)).endTick;
+            }
+        }
+        skipIntro_ = setup.skipIntro;
         props["fast_intro"] = Value::integer(0);
         std::string error;
         if (!ui.host().gameLoad(setup, error)) SDL_Log("game: %s", error.c_str());
@@ -237,7 +323,10 @@ public:
             pendingBegin_ = false;
             if (ui.host().gameLoaded()) {
                 ui.host().gameBegin();
-                ui.gameEvent("intro_start_msg", {Value::integer(0), Value::integer(wantEncoreFx() ? 1 : 0)});  // 0x822CCA60
+                // skip_intro (practice): intro_skip instead of the intro [I: the
+                // handlers practice_panel and game.dta have for it].
+                if (skipIntro_) ui.gameEvent("intro_skip", {});
+                else ui.gameEvent("intro_start_msg", {Value::integer(0), Value::integer(wantEncoreFx() ? 1 : 0)});  // 0x822CCA60
             }
         }
     }
@@ -250,7 +339,7 @@ public:
         if (!gameCfgValue(ui, "encore_fx").truthy()) return false;
         return getProp(ui.interp(), "force_encore").truthy() || campaign::wantEncoreFx(ui);
     }
-    bool encoreCheck_ = false;
+    bool encoreCheck_ = false, skipIntro_ = false;
 
     void dispatch(const std::string& msg, std::vector<Value> args) {
         if (msg == "game_won_msg") props["won"] = Value::integer(1);
@@ -268,7 +357,11 @@ public:
             if (!msgs.empty() && !msgs.count(msg)) continue;
             if (std::none_of(sinks_.begin(), sinks_.end(), [o = o](const auto& p) { return p.first == o; })) continue;
             if (auto* p = dynamic_cast<PanelObj*>(o); p && !p->up) continue;
-            ui.callScript(o, msg, args);
+            // As MsgSource's export: the sink's handler, then (no handler, or
+            // it returned kDataUnhandled) its native one, which is the
+            // world's (its crowd: CrowdAudio is a game sink, intro_start_msg
+            // / game_won_msg / game_lost, 0x822DF9D8) [C].
+            ui.interp().send(o, msg, args, false);
         }
     }
 
@@ -396,10 +489,18 @@ public:
             return true;
         }
         if (msg == "foreach_player_matcher") return true;
+        if (msg == "foreach_player") return r = ui.foreachPlayer(args), true;  // GameConfig's, on the game (game.dta beat)
         // player.dta's {handle (game star_power_start / stop $player_num)}:
         // the HUD and the world get Star Power from the program (HudView,
         // WorldDriver), so nothing goes on to the sinks here.
         if (msg == "star_power_start" || msg == "star_power_stop") return true;
+        // practice_section_provider (0x001275f0): GameConfig's section provider
+        // (+0x20c); load_practice_sections (0x0011b818) loads it again.
+        if (msg == "practice_section_provider" || msg == "load_practice_sections") {
+            auto* sp = dynamic_cast<SectionProviderObj*>(in.findObject("section_provider"));
+            if (sp && msg == "load_practice_sections") sp->load();
+            return r = Value::obj(sp), true;
+        }
         if (msg == "load_song" || msg == "loaded") return r = Value::integer(host.gameLoaded() ? 1 : 0), true;
         if (PanelObj::handleNative(in, msg, args, r)) return true;
         // What the game's script and natives leave goes on to the sinks:
@@ -569,7 +670,7 @@ private:
         if (msg == "longest_streak") return r = Value::integer(p ? p->longestStreak() : 0), true;
         if (msg == "current_streak") return r = Value::integer(p ? p->streak() : 0), true;
         if (msg == "gems_hit") return r = Value::integer(p ? p->notesHit() : 0), true;
-        if (msg == "gems_passed") return r = Value::integer(p ? std::max(0, gems - p->notesHit()) : 0), true;
+        if (msg == "gems_passed") return r = Value::integer(p ? p->gemsPassed() : 0), true;
         if (msg == "percent_complete") {
             const float dur = ui_.host().songDurationMs();
             const double t = ui_.host().gameTimeMs();
@@ -615,6 +716,21 @@ public:
         Session& s = ui_.session();
         r = Value::integer(0);
         const auto argStr = [&](size_t i) { return i < args.size() ? nameOf(args[i]) : std::string(); };
+        // A path ((practice_sections 1)): the element of a list value (GameConfig 0x822B8B18 get / set
+        // through DataArray paths) [C data: practice.dta].
+        const bool path = !args.empty() && args[0].type == Value::Type::Array && args[0].array && args[0].array->size() >= 2;
+        if (path && (msg == "get" || msg == "set")) {
+            const std::string key = (*args[0].array)[0].str();
+            const size_t idx = size_t(std::max(0, (*args[0].array)[1].integerValue()));
+            Value v = gameCfgValue(ui_, key);
+            std::vector<Value> list = v.type == Value::Type::Array && v.array ? *v.array : std::vector<Value>{};
+            if (msg == "get") return r = idx < list.size() ? in.evalValue(list[idx]) : Value::integer(0), true;
+            if (args.size() < 2) return true;
+            if (list.size() <= idx) list.resize(idx + 1, Value::integer(0));
+            list[idx] = args[1];
+            s.cfgSet[key] = Value::list(std::move(list));
+            return true;
+        }
         if (msg == "get") return r = gameCfgValue(ui_, argStr(0)), true;
         if (msg == "set") {
             if (args.size() < 2) return true;
@@ -652,7 +768,26 @@ public:
         if (msg == "get_player_config") return r = in.send("game", "get_player_config", args), true;
         if (msg == "foreach_player") return r = ui_.foreachPlayer(args), true;
         if (msg == "win_campaign_song") return r = Value::integer(0), true;
-        if (msg == "get_section_bounds") return true;
+        // get_section_bounds $sec $start $end (0x00127138) [C]: section $sec's
+        // start and end ms into $start / $end (-1 the whole song); the
+        // variables come by name (Interp::byNameMessages).
+        if (msg == "get_section_bounds") {
+            auto var = [&](size_t i) {
+                std::string n = i < args.size() ? args[i].str() : std::string();
+                return n.size() > 1 && n[0] == '$' ? n.substr(1) : n;
+            };
+            const int sec = !args.empty() && args[0].isNumber() ? args[0].integerValue() : in.var(var(0)).integerValue();
+            auto* sp = dynamic_cast<SectionProviderObj*>(in.findObject("section_provider"));
+            const UiHost::Section e = sp ? sp->entry(sec) : UiHost::Section{};
+            if (args.size() > 1) in.var(var(1)) = Value::real(e.startMs);
+            if (args.size() > 2) in.var(var(2)) = Value::real(e.endMs);
+            return true;
+        }
+        // A handler of the mode's table (practice's full_speed_block,
+        // pre_processed_audio: GameConfig evaluates the mode's entry) [C data: modes.dta].
+        if (const DataNode* modes = ui_.modes())
+            for (const std::string& m : {s.mode, std::string("defaults")})
+                if (const DataNode* mode = modes->find(m); mode && mode->find(msg)) return r = gameCfgValue(ui_, msg), true;
         return false;
     }
 
@@ -669,7 +804,8 @@ public:
         if (msg == "set_paused") return ui_.host().setMusicPaused(!args.empty() && args[0].truthy()), true;
         if (msg == "paused") return r = Value::integer(ui_.host().gamePaused() ? 1 : 0), true;
         if (msg == "set_music_speed") return ui_.host().setMusicSpeed(args.empty() ? 1.0f : args[0].number()), true;
-        if (msg == "set_volume" || msg == "update_practice_speed" || msg == "jump" || msg == "set_shuttle") return true;
+        if (msg == "set_volume") return ui_.host().setMusicVolume(args.empty() ? 0.0f : args[0].number(), 0), true;
+        if (msg == "update_practice_speed" || msg == "jump" || msg == "set_shuttle") return true;
         if (msg == "shuttle_active") return true;
         return false;
     }
@@ -698,6 +834,7 @@ void installGameNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<S
     add(std::make_unique<PlayerObj>(ui, "player1", 1));
     add(std::make_unique<PlayerObj>(ui, "band", -1));
     add(std::make_unique<BeatmatchObj>(ui));
+    add(std::make_unique<SectionProviderObj>(ui));
 }
 
 void gameEventImpl(UiManager&, const std::string& msg, std::vector<Value> args) {

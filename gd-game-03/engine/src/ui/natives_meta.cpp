@@ -583,6 +583,12 @@ public:
         // This disc's stereo / mono setting (ui/options.dta stereo.chk).
         if (msg == "get_stereo") return r = Value::integer(o.stereo ? 1 : 0), true;
         if (msg == "set_stereo") return o.stereo = !args.empty() && args[0].truthy(), changed(), true;
+        // The video settings: progressive scan (kept only) and widescreen,
+        // the Enhanced Options' Widescreen (16:9) (the same setting).
+        if (msg == "get_pscan") return r = Value::integer(o.pscan ? 1 : 0), true;
+        if (msg == "set_pscan") return o.pscan = !args.empty() && args[0].truthy(), changed(), true;
+        if (msg == "get_widescreen") return r = Value::integer(ui_.host().enhancedValue("widescreen") == "on" ? 1 : 0), true;
+        if (msg == "set_widescreen") return ui_.host().setEnhancedValue("widescreen", !args.empty() && args[0].truthy() ? "on" : "off"), true;
         return false;
     }
     void changed() {
@@ -718,6 +724,41 @@ private:
 
 // Objects whose messages the port answers with nothing on purpose (render
 // and audio switches of the 360 build, the world before M8).
+// music_fader (the song's music Fader, PS2 0x00120f48 names it) [C]:
+// fade <dB> <ms> (game.dta practice_end: -50 over a second); the sounds
+// added to it (practice's metronome) are not faded with it [I].
+class MusicFaderObj : public ScriptObject {
+public:
+    explicit MusicFaderObj(UiManager& ui) : ScriptObject("music_fader", "Fader"), ui_(ui) {}
+    bool handleNative(Interp&, const std::string& msg, std::vector<Value>& args, Value& r) override {
+        r = Value::integer(0);
+        if (msg == "fade") return ui_.host().setMusicVolume(args.empty() ? 0.0f : args[0].number(), args.size() > 1 ? args[1].number() : 0.0f), true;
+        return false;
+    }
+
+private:
+    UiManager& ui_;
+};
+
+// crowd_audio (CrowdAudio, 0x822E0928): `enabled` is +0x38, the mode's
+// crowd_audio (modes.dta) unless set_enabled turned it off (0x822DF9D8) [C]; its
+// streams are the world's (game/crowd.cpp), so turn_off / set_paused
+// change nothing here.
+class CrowdAudioObj : public ScriptObject {
+public:
+    explicit CrowdAudioObj(UiManager& ui) : ScriptObject("crowd_audio", "CrowdAudio"), ui_(ui) {}
+    bool handleNative(Interp&, const std::string& msg, std::vector<Value>& args, Value& r) override {
+        r = Value::integer(0);
+        if (msg == "enabled") return r = Value::integer(set_ && gameCfgValue(ui_, "crowd_audio").truthy() ? 1 : 0), true;
+        if (msg == "set_enabled") return set_ = !args.empty() && args[0].truthy(), true;
+        return msg == "turn_off" || msg == "set_paused";
+    }
+
+private:
+    UiManager& ui_;
+    bool set_ = true;
+};
+
 class QuietObj : public ScriptObject {
 public:
     QuietObj(UiManager& ui, const std::string& name, std::set<std::string> msgs) : ScriptObject(name, "Native"), ui_(ui), msgs_(std::move(msgs)) {}
@@ -760,9 +801,9 @@ void installNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Scrip
     for (const char* stub : {"achievements", "leaderboards", "content_mgr"}) add(std::make_unique<StubObject>(stub, "XboxLive"));
     add(std::make_unique<QuietObj>(ui, "rnd", std::set<std::string>{"suspend", "unset_depth_of_field", "show_overlay", "toggle_overlay",
                                                                      "reflect", "reset_postproc", "overlay_showing", "aspect"}));
-    add(std::make_unique<QuietObj>(ui, "crowd_audio", std::set<std::string>{"turn_off", "enabled", "set_enabled", "set_paused"}));
+    add(std::make_unique<CrowdAudioObj>(ui));
     add(std::make_unique<QuietObj>(ui, "world", std::set<std::string>{"set", "get", "current_shot", "add_sink", "lighting"}));
-    add(std::make_unique<QuietObj>(ui, "music_fader", std::set<std::string>{"fade"}));
+    add(std::make_unique<MusicFaderObj>(ui));
     add(std::make_unique<QuietObj>(ui, "encore_stream", std::set<std::string>{"play", "stop"}));
     add(std::make_unique<QuietObj>(ui, "cheat_display", std::set<std::string>{"show"}));
     // The PlayerMatchers (vtable 0x8204a1ac): their handlers are gh2.dta's

@@ -7,7 +7,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cctype>
+#include <cstdio>
 #include <cstring>
+#include <map>
 
 #include "render/canvas.h"
 #include "scene/milo.h"
@@ -322,6 +325,130 @@ public:
     }
 };
 
+// TutorialPanel (`tutorial`, handler 0x0013ff68, enter 0x0013f9f8, poll
+// 0x0013fb00) [C]:
+// - play_vo <event>: config/sound.dta (tutorial (streaming_vo (volume dB)
+//   (dir d) (events (<event> <file>...)))) -> d/<file>.vgs, the event's
+//   files in turn (0x00140888); dropped while another plays (0x001407f0);
+//   is_vo_playing, reset_vo (stops it).
+// - start_tuning_mode <callback> / end_tuning_mode / is_tuning: the tuner
+//   (0x0014cf88 .. 0x0014d6d8) reads player 0's guitar each poll: each fret
+//   held lights t1_fret<n>.view (frame 1, else 0); a strum with one fret
+//   held counts it (0x0014d468): sound s101<fret x 3 + min(count, 3)>
+//   (the fret's other two stopped), fret_played <n> to the callback, and
+//   at the third the fret is tuned (t1_fretcheck<n>.view shown, play_vo
+//   tuning_hit_vo); a strum with two or more is miss_gtr. Every fret
+//   counted three times ends the tuning (the frets' views back to 0).
+// - is_missing_guitar: the port's controllers always play as a guitar, so
+//   never [I: as game is_missing_controller].
+// The hopo training (tutorial_33) is not done yet.
+class TutorialPanelObj : public PanelObj {
+public:
+    TutorialPanelObj(UiManager& ui, const std::string& name) : PanelObj(ui, name, "TutorialPanel") {}
+    void enter() override {
+        PanelObj::enter();
+        tuning_ = false, callback_ = nullptr;
+        counts_ = {};
+        loadVo();
+    }
+    void poll(double dtMs) override {
+        PanelObj::poll(dtMs);
+        if (paused || !tuning_) return;
+        const unsigned frets = ui.host().playerFrets(0);
+        const int strums = ui.host().playerStrums(0);
+        int held = 0, fret = -1;
+        for (int f = 0; f < 5; ++f) {
+            const bool on = (frets >> f) & 1u;
+            setFrame("t1_fret" + std::to_string(f + 1) + ".view", on ? 1.0f : 0.0f);
+            if (on) ++held, fret = f;
+        }
+        if (strums != lastStrums_) {
+            if (held == 1) hit(fret);
+            else if (held >= 2) ui.playSfx("miss_gtr");
+        }
+        lastStrums_ = strums;
+        if (std::all_of(counts_.begin(), counts_.end(), [](int c) { return c >= 3; })) {
+            for (int f = 0; f < 5; ++f) setFrame("t1_fret" + std::to_string(f + 1) + ".view", 0);
+            tuning_ = false;
+        }
+    }
+    bool handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) override {
+        r = Value::integer(0);
+        if (msg == "play_vo") return playVo(args.empty() ? std::string() : args[0].str()), true;
+        if (msg == "is_vo_playing") return r = Value::integer(ui.host().voicePlaying() ? 1 : 0), true;
+        if (msg == "reset_vo") return ui.host().stopVoice(), true;
+        if (msg == "start_tuning_mode") {
+            if (!tuning_) lastStrums_ = ui.host().playerStrums(0);
+            callback_ = !args.empty() && args[0].type == Value::Type::Object ? args[0].object : args.empty() ? nullptr : in.findObject(args[0].str());
+            return tuning_ = true, true;
+        }
+        if (msg == "end_tuning_mode") return tuning_ = false, callback_ = nullptr, true;
+        if (msg == "is_tuning") return r = Value::integer(tuning_ ? 1 : 0), true;
+        if (msg == "is_missing_guitar") return true;
+        return PanelObj::handleNative(in, msg, args, r);
+    }
+
+private:
+    void loadVo() {
+        events_.clear();
+        const DataNode* snd = ui.bootTree() ? ui.bootTree()->find("sound") : nullptr;
+        const DataNode* t = snd ? snd->find("tutorial") : nullptr;
+        const DataNode* vo = t ? t->find("streaming_vo") : nullptr;
+        if (!vo) return;
+        if (const DataNode* v = vo->find("volume"); v && v->children.size() > 1) volumeDb_ = v->floatAt(1);
+        if (const DataNode* d = vo->find("dir"); d && d->children.size() > 1) dir_ = d->textAt(1);
+        if (const DataNode* ev = vo->find("events"))
+            for (size_t k = 1; k < ev->children.size(); ++k) {
+                const DataNode& e = ev->children[k];
+                if (!e.isList() || e.children.size() < 2 || !e.children[0].isText()) continue;
+                Event& out = events_[e.children[0].s];
+                for (size_t i = 1; i < e.children.size(); ++i)
+                    if (e.children[i].isText()) out.files.push_back(e.children[i].s);
+            }
+    }
+    void playVo(const std::string& name) {
+        if (ui.host().voicePlaying()) return ui.logOnce("tutorial: dropping voice over " + name);
+        auto it = events_.find(name);
+        if (it == events_.end() || it->second.files.empty()) return ui.logOnce("tutorial: no voice-over " + name);
+        Event& e = it->second;
+        e.next = (e.next + 1) % int(e.files.size());
+        std::string file = e.files[size_t(e.next)];
+        std::transform(file.begin(), file.end(), file.begin(), [](unsigned char c) { return char(std::tolower(c)); });
+        ui.host().playVoice(dir_ + "/" + file + ".vgs", volumeDb_);
+    }
+    void hit(int fret) {
+        int& c = counts_[size_t(fret)];
+        ++c;
+        for (int l = 1; l <= 3; ++l) ui.host().stopSfx(sound(fret, l));
+        ui.playSfx(sound(fret, std::min(c, 3)));
+        if (callback_) ui.interp().send(callback_, "fret_played", {Value::integer(fret + 1)});
+        if (c == 3) {
+            if (PanelObj* p = ui.panel("tut_script"); p && p->view) p->view->setShowing("t1_fretcheck" + std::to_string(fret + 1) + ".view", true);
+            playVo("tuning_hit_vo");
+        }
+        c = std::min(c, 3);
+    }
+    static std::string sound(int fret, int level) {
+        char b[16];
+        std::snprintf(b, sizeof b, "s101%02d", fret * 3 + level);
+        return b;
+    }
+    void setFrame(const std::string& view, float frame) {
+        if (PanelObj* p = ui.panel("tut_script"); p && p->view) p->view->setFrame(view, frame);
+    }
+    struct Event {
+        std::vector<std::string> files;
+        int next = -1;
+    };
+    std::map<std::string, Event> events_;
+    std::string dir_;
+    float volumeDb_ = 0;
+    bool tuning_ = false;
+    ScriptObject* callback_ = nullptr;
+    std::array<int, 5> counts_{};
+    int lastStrums_ = 0;
+};
+
 // StatsProvider: the endgame stats' practice sections list (none in
 // quickplay).
 class StatsProviderObj : public ListProvider {
@@ -457,6 +584,7 @@ std::unique_ptr<ScriptObject> makeClassObject(UiManager& ui, const std::string& 
     if (cls == "EndGamePanel") return std::make_unique<EndGamePanelObj>(ui, name);
     if (cls == "FadePanel") return std::make_unique<FadePanelObj>(ui, name);
     if (cls == "LagPanel") return std::make_unique<LagPanelObj>(ui, name);
+    if (cls == "TutorialPanel") return std::make_unique<TutorialPanelObj>(ui, name);
     if (cls == "CreditsPanel") return std::make_unique<CreditsPanelObj>(ui, name);
     if (cls == "StatsProvider") return std::make_unique<StatsProviderObj>(name, cls);
     if (cls == "GamepadPanel") return makeGamepadPanel(ui, name);

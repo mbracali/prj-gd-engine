@@ -154,7 +154,10 @@ Song buildSong(const MidiFile& midi, int hopoThresholdTicks) {
         if (!track) continue;
         for (int d = 0; d < kDifficultyCount; ++d)
             song.charts[size_t(p)][size_t(d)] = parseDifficulty(*track, d, song.tempo, hopoThresholdTicks);
+        for (const MidiEvent& e : track->events)
+            if (e.isNoteOn() && e.data1 == 110) song.bigNotes[size_t(p)].push_back(int(e.tick));
     }
+    song.bigNotes[size_t(Part::GuitarCoop)] = song.bigNotes[size_t(Part::Guitar)];
     if (!song.hasPart[0]) throw std::runtime_error("chart has no PART GUITAR track");
 
     uint32_t lastTick = 0;

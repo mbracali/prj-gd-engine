@@ -55,7 +55,7 @@ public:
 
     SfxPlayer& player() { return player_; }
 
-    // Loads config/sound.dta's banks (game, meta, tutorial), decodes their
+    // Loads config/sound.dta's banks (game, meta, tutorial) and sfx/practice_bank, decodes their
     // samples and adds them (in that file's order); also sets the SPU2
     // cores' effects from config/synth.dta's fx, as SynthPS2's init does
     // (0x002276D8). Returns the problems.

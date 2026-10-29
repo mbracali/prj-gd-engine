@@ -149,6 +149,7 @@ public:
                 return true;
             }
             ++w_.stats_.sounds;
+            if (w_.onSound) w_.onSound(o_->name);
             // (volume {options get_fx_volume}) and the like (ui/sfx_args.h).
             const SfxArgs a = sfxArgs(in, args, 0);
             if (w_.synth_) w_.synth_->play(*o_, a.volume, a.pan, a.transpose);
@@ -635,6 +636,7 @@ bool World::playSound(const std::string& name, const scene::Directory* from, flo
         return false;
     }
     ++stats_.sounds;
+    if (onSound) onSound(name);
     if (synth_) synth_->play(*o, volumeDb, pan, transpose);
     else interp_->onStub("world_sfx", name + " play", Value::integer(0));
     return true;

@@ -156,6 +156,7 @@ Json Career::toJson() const {
     o.set("fx_volume_idx", Json::number(options.fxVolumeIdx));
     o.set("sync_offset", Json::number(options.syncOffsetMs));
     o.set("stereo", Json::boolean(options.stereo));
+    o.set("pscan", Json::boolean(options.pscan));
     j.set("options", o);
     j.set("default_name", Json::string(defaultName));
     return j;
@@ -227,6 +228,7 @@ bool Career::fromJson(const Json& j) {
     c.options.fxVolumeIdx = std::clamp(int(o["fx_volume_idx"].num(11)), 0, 11);
     c.options.syncOffsetMs = int(o["sync_offset"].num());
     c.options.stereo = o["stereo"].truthy(true);
+    c.options.pscan = o["pscan"].truthy(false);
     c.defaultName = j["default_name"].str();
     c.dummyNames = dummyNames;
     c.glitchesLook = glitchesLook;

@@ -69,6 +69,12 @@ Venue::Venue(const GameData& data, std::string name, VenueVariant variant, const
     const std::string path = venues::worldMilo(name_, variant_);
     if (!data_.exists(path)) throw std::runtime_error("no venue " + path);
     loadChain(path, "", 0);
+    // The game's character bank (config/bankreport.dta's configuration
+    // `game`: venue_banks game_bank character_bank, the last
+    // char/shared/guitar_smashing_sounds: gtr_smash1..3, which the
+    // characters' win clips play, {gtr_smash1 play}) [C data]; loaded with
+    // the venue, its objects found as the venue's [I: the bank loader's].
+    loadChain(scene::miloArkPath("char/shared/guitar_smashing_sounds.milo"), path, 1);
     for (size_t i = 0, n = parts_.size(); i < n; ++i) loadProxies(*parts_[i].milo, 0);
     // The chain's directories find each other's objects (FindObject
     // searches sub-directories): each links every other one, in chain order.

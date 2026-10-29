@@ -9,6 +9,7 @@
 #include <utility>
 #include <vector>
 
+#include "render/scene_gpu.h"
 #include "scene/milo.h"
 #include "scene/ui_objects.h"
 #include "script/tasks.h"
@@ -227,6 +228,20 @@ bool ComponentObj::handleNative(Interp& in, const std::string& msg, std::vector<
     }
     if (msg == "frame") return r = Value::real(v ? v->frame(name()) : 0), true;
     if (msg == "end_frame") return r = Value::real(v ? v->endFrame(name()) : 0), true;
+    if (msg == "animate" && directory) {
+        // The milo itself ({lag animate}, options.dta's sync animation): a
+        // RndDir's frame is every animatable's of it, its end their last
+        // [I: RndDir's SetFrame over its anims], at 30 frames a second.
+        if (!v || !v->milo()) return true;
+        std::vector<std::pair<std::string, float>> anims;
+        float end = 0;
+        for (const auto& o : v->milo()->root().objects) {
+            const float e = gfx::ScenePose::endFrame(o.get());
+            if (e > 0) anims.emplace_back(o->name, e), end = std::max(end, e);
+        }
+        for (const auto& [n, e] : anims) ui.animate(panel, n, 0, end, end / 30.0f, kTaskUISeconds);
+        return true;
+    }
     if (msg == "animate") {
         // RndAnimatable Animate (0x821E9D00): (range a b) (period s) (dest d)
         // (units u); without a period, 30 frames a second.
@@ -318,6 +333,9 @@ bool ComponentObj::handleNative(Interp& in, const std::string& msg, std::vector<
         if (v) v->setPictureTex(name(), argStr(0));
         return true;
     }
+    // An Sfx under a fader ({practice_snare add_fader music_fader}): the
+    // sound is not faded with the fader [I: the port fades the music only].
+    if (msg == "add_fader" || msg == "remove_fader") return true;
     // A sound cue in a panel ({sync_click.cue play}) or another sound object.
     if (msg == "play") {
         const SfxArgs a = sfxArgs(in, args, 0);
@@ -363,8 +381,10 @@ ComponentObj* PanelObj::component(const std::string& name) {
     if (name.empty()) return nullptr;
     if (auto it = components_.find(name); it != components_.end()) return it->second.get();
     const scene::Object* o = view ? view->find(name) : nullptr;
-    if (!o && !anyComponent_) return nullptr;
+    const bool dir = !o && view && view->milo() && view->milo()->root().name == name;
+    if (!o && !anyComponent_ && !dir) return nullptr;
     auto c = std::make_unique<ComponentObj>(this, o, name);
+    c->directory = dir;
     ComponentObj* raw = c.get();
     components_[name] = std::move(c);
     return raw;

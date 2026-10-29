@@ -77,6 +77,26 @@ class UiManager;
 //              difficulties -> the song -> multi_compete_screen -> complete.
 //   proface    pro face-off unlocked in the save first (a tour won), then PRO FACE-OFF
 //              (multi_fo): one difficulty for both -> the song -> multi_compete_fo_screen.
+//   career_encore  career's first tier to its encore offer (iran played),
+//              declined: the venue's encore_no, then the results.
+//   practice   main -> TRAINING -> PRACTICE -> the first song -> the bass ->
+//              Medium -> the first section as start and end -> 65% -> the
+//              section (autoplay): songs/<s>/<s>_p65.vgs plays, the song
+//              clock at 0.65 of the wall clock from the measure before the
+//              section, the metronome (click_parser) and one overstrum's
+//              miss_bass -> practice_end -> the end screen (the section's
+//              gems) -> EXIT -> main.
+//   tutorial   main -> TRAINING -> TUTORIALS -> the first tutorial: its
+//              voice-over to the tuning, each fret held and strummed three
+//              times (the keyboard), tuning_complete, the next lesson ->
+//              Start -> QUIT -> main.
+//   options    main -> Options -> Audio Settings: each slider one step down
+//              with its sound, saved -> Video Settings -> the lag
+//              calibration: its countdown, 11 clicks struck in time
+//              (success) -> back x3 -> main.
+// quickplay also deploys Star Power (claps, sp_depleted) and checks the
+// crowd's crowd_begin / crowd_win; lose passes bangyourhead's first big
+// note (blew_bignote.cue).
 // quickplay and pause check a menu sound plays after the song (the game's
 // pause holds only the sounds playing then). quickplay also checks the
 // endgame photo GamePanel picked; quickplay and
@@ -131,6 +151,11 @@ private:
     int sideBase_ = 0, rightBase_ = 0;
     float nameX0_ = 0;               // the career walk's band name: where it starts
     std::array<float, 2> optionsHit_{-1, -1};  // the mouse walk: OPTIONS' hit centre in 4:3
+    std::array<double, 2> practiceClock_{-1, 0};  // the practice walk: (wall ms, song ms) first seen
+    std::array<int, 3> volumes_{};                 // the options walk: the volumes before the sliders
+    double lastNavMs_ = -1e9;                      // focus_to: the last press
+    int lagStrikes_ = 0;                           // the options walk: strums on the lag clicks
+    bool encoreDeclined_ = false;                  // career_song: NO on the encore offer
 
     void runCheck(ui::UiManager& ui, const Step& s, double nowMs);
 };

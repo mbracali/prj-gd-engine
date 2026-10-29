@@ -73,6 +73,9 @@ public:
         int bandVolumeIdx = 11, guitarVolumeIdx = 11, fxVolumeIdx = 11;
         int syncOffsetMs = 0;  // options set_sync_offset (the lag screen stores -lag)
         bool stereo = true;    // this disc's audio settings (stereo.chk); mono folds the mix (audio/audio_device.h)
+        // The video settings' progressive scan (p_scan.chk): kept and shown,
+        // no effect on a PC's output; off as the PS2 boots [I].
+        bool pscan = false;
     };
 
     Career() { clear(); }

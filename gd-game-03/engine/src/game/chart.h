@@ -79,6 +79,10 @@ struct Song {
     // charts[part][difficulty]; `hasPart` says whether the MIDI has the track.
     std::array<std::array<Chart, kDifficultyCount>, kPartCount> charts;
     std::array<bool, kPartCount> hasPart{};
+    // The big notes of each part's track (pitch 110: midi_parsers.dta's
+    // big_note_parser_guitar / _bass / _rhythm, BIG_NOTE_MAPPING), note-on
+    // ticks; the co-op lead's are PART GUITAR's (TRACK_SYMBOLS) [C data].
+    std::array<std::vector<int>, kPartCount> bigNotes;
     std::vector<BeatLine> beats;
     std::vector<SongEvent> events;  // in time order
     std::vector<VenueNote> venueNotes;  // note-ons, in time order

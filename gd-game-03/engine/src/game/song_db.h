@@ -32,6 +32,11 @@ struct SongInfo {
     std::string artist;
     SongAudio audio;                     // (song ...)
     std::optional<SongAudio> coopAudio;  // (song_coop ...), 17 songs
+    // Practice (songs.dta): (practice_speeds (100 85 65 50)) and the
+    // pre-slowed audio of speeds 1..3, (song_practice_1 ..) .. _3
+    // (songs/<s>/<s>_p85 / _p65 / _p50) [C data]; empty when the song has none.
+    std::vector<int> practiceSpeeds;
+    std::map<std::string, SongAudio> blocks;  // song_practice_1 .. _3 by name
     float previewStartMs = 0, previewEndMs = 0;
     int animTempo = 1;  // kTempoMedium 1, kTempoFast 2
     std::string venue;  // (quickplay (venue x))

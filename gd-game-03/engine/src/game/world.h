@@ -134,6 +134,8 @@ public:
     bool playSound(const std::string& name, const scene::Directory* from = nullptr, float volumeDb = 0, float pan = 0,
                    float transpose = 0);
     void stopSound(const std::string& name);
+    // Told each sound playSound plays (the walk tests' record).
+    std::function<void(const std::string&)> onSound;
     // The script object of a venue object (created on first use).
     ScriptObject* scriptFor(scene::Object* o) { return objectFor(o); }
     // The world panel entered (WORLD_OBJECT_BASE enter + `start`): call
