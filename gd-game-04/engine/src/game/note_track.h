@@ -45,3 +45,8 @@ struct NoteTrack {
 float hopoTolerance(const Chart& c, float measureScale, float t);
 
 NoteTrack buildTrack(const Chart& chart, Part part, int difficulty, const Tuning& tuning, float hammerOnMeasureScale);
+
+// Face-off: only the notes inside the player's sections (FaceOffP1 / P2:
+// time, length) enter its input array (gem_filler_enabled_time_on / off,
+// 0x82104558-0x821045CC) [C]; HOPOs keep the flags of the full chart [I].
+NoteTrack faceOffTrack(const NoteTrack& full, const std::vector<ChartPhrase>& sections);

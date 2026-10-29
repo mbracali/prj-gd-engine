@@ -96,3 +96,18 @@ NoteTrack buildTrack(const Chart& chart, Part part, int difficulty, const Tuning
     }
     return tr;
 }
+
+NoteTrack faceOffTrack(const NoteTrack& full, const std::vector<ChartPhrase>& sections) {
+    NoteTrack t = full;
+    t.notes.clear();
+    for (const TrackNote& n : full.notes)
+        for (const ChartPhrase& sct : sections)
+            if (n.time >= sct.time && n.time < sct.time + sct.length) {
+                t.notes.push_back(n);
+                break;
+            }
+    // Star Power phrases do not apply in face-off [I: no SP in face-off].
+    for (TrackNote& n : t.notes) n.phrase = -1, n.phraseLast = false;
+    t.phrases.clear();
+    return t;
+}

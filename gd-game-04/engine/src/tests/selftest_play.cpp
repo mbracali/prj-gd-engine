@@ -87,12 +87,28 @@ bool playChart(const Globals& g, const SongInfo& song, const Chart& chart, PlayT
             }
         }
     }
+    // Face-off: each player's notes (guitar, every difficulty) [C 0x82104558].
+    for (int d = 0; d < kDifficulties; ++d) {
+        if (chart.notes(Part::Guitar, d).empty() || chart.faceOffP1.empty()) continue;
+        NoteTrack full = buildTrack(chart, Part::Guitar, d, tu, scale);
+        for (const auto* sections : {&chart.faceOffP1, &chart.faceOffP2}) {
+            NoteTrack fo = faceOffTrack(full, *sections);
+            t.faceOffNotes += fo.notes.size();
+            std::string w;
+            if (!playOnce(fo, tu, d, false, t, w)) {
+                if (ok) why = std::string("face-off ") + difficultyName(d) + ": " + w;
+                ok = false;
+                ++t.failedCharts;
+            }
+        }
+    }
     return ok;
 }
 
 void printPlayTotals(const PlayTotals& t) {
     std::printf("charts: %zu, notes: %zu, chords: %zu, sustains: %zu, HOPO notes: %zu, flagged (0x20): %zu, star phrases: %zu\n",
                 t.charts, t.notes, t.chords, t.sustains, t.hopoNotes, t.flagged, t.phrases);
+    std::printf("face-off: %zu notes split between the players\n", t.faceOffNotes);
     std::printf("autoplay: score (strummed) %lld, HOPO landings %zu, phrases captured %zu, charts failing %zu\n",
                 static_cast<long long>(t.score), t.hopos, t.phrasesCaptured, t.failedCharts);
 }
