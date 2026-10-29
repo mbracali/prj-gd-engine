@@ -98,7 +98,15 @@ record of every class on the disc to its end and asserts the counts.
   keeps the character's object (a Group among them gets the outfit's
   members); another duplicate whose Trans parent is a "bone_*" takes the
   outfit's data (kMerge: the guitar's neck spots); the outfit's LOD and
-  shadow groups join the character's by index.
+  shadow groups join the character's by index, as objects: 0x82158F30 on
+  the outfit's directory adds LOD i's members to the character's LOD i
+  (0x821DC9E8) and deletes the outfit's groups; a shadow group only the
+  outfit has becomes the character's (0x82153C60) [C]. The port takes the
+  groups from the outfit before its objects move (same-named groups, the
+  "lod0.grp"s and battleaxe's "shadow", stay behind and were missed by a
+  lookup by name) and hides them instead of deleting. Before (bug-fix 4)
+  most guitars' `shadow.grp` stayed a drawable root: `shadow_guitar.mesh`
+  (shadow.mat, additive black, depth written) drew over the neck.
 - Placement: the slot's transform, then BAND_COMMON / guitarist `enter`
   teleports to `{waypoint_find kStart*}` (Character::Handle 0x82152108:
   teleport 0x82151D08 = the waypoint's world transform, scale removed).
@@ -211,10 +219,34 @@ record of every class on the disc to its end and asserts the counts.
 - **LOD (DrawShowing 0x82153090):** from min_lod (`set_min_lod`, the camera
   shots' force_char_lod), the first LOD i whose screen_size x (1.09 below
   the current LOD, 0.91 from it on) the screen size reaches; FUN_82151DE0
-  shows its group and hides the old one. Screen size (0x8214FC60): the
+  shows its group and hides the old one (the Draw's showing flag, +0x18;
+  `lod1.grp` is saved hidden, so the character's own showing wins over
+  the world pose's saved flags: before bug-fix 4 any LOD above 0, as the
+  band_POV shots' `set_min_lod 1`, drew nothing but the guitar's loose
+  meshes). `--chartest` checks every guitar outfit and band member draws
+  something, its guitar and no stray shadow mesh at each LOD
+  (`BandView::meshesToDraw`). Screen size (0x8214FC60): the
   sphere radius over its depth, scaled by the camera [I: the camera
   fields]. The shadow group is not drawn in the colour pass [I: GH2 draws
   it into the shadow buffer; gd02 has no shadow pass yet].
+- A guitar on its own (GuitarDisplayPanel, the guitar select and the
+  store; wave B #14): the outfit is a Character directory and draws as one,
+  at its first LOD (the record's LOD list, so flyingv_v2's `lod0` as well
+  as the others' `lod0.grp`), the group's members in its order, the loose
+  roots by draw order, never the shadow group (`ui::chars::displayMeshes`).
+  Before, the panel drew every showing mesh in file order: flyingv_v2 has
+  `strings.mesh` (src_alpha, z_mode normal: depth written where its
+  texture is clear) before `guitar.mesh`, which cut the neck under the
+  strings out, and every guitar's `shadow_guitar.mesh` drew too. In a
+  venue the merged LOD groups keep GH2's append order (RndGroup add
+  0x821DC870 pushes back; no sort by draw order found): the outfit's
+  meshes come after the character's. `--chartest` checks every guitar and
+  bass's display list: something drawn, the body, no shadow mesh outside
+  a LOD group, no depth-writing blended mesh before an opaque one of a
+  lower draw order. Open [I]: van_yellow's lod0.grp lists its strings
+  (`guitar.1.mesh`, order 0) before `guitar.mesh` (order 0) and is drawn
+  so, as the data says; a capture of the original would show whether GH2
+  sorts equal orders some other way.
 
 ## MidiParser (char/midi_parser.*) [C unless noted]
 
@@ -531,7 +563,15 @@ guitar | bass | grim | cheat)`, skins with outfit milo and mat),
     `character.env`; a locked one in store mode gets the panel's); the door
     (`cs_door.mesh`) is set to Euler (pi/2, 0, z) with z from the
     character's `bone_door` local rotation (0x82269700): the ui_enter clip
-    kicks the door open. Drawn with the placer's panel camera, keeping the
+    kicks the door open. The poll places, wakes (the pending char_event,
+    0x8228D348), polls and lets the character swing the door only while its
+    slot has a placer (slot +0xc, set_placer 0x8228E6F8) [C]: the character
+    select sets it at TRANSITION_COMPLETE, so the kick starts once the
+    screen is up and the door is closed until then (GD02-078). The
+    portraits: career.dta's enter gives a locked character's
+    `char_<c>.mesh` `char_locked.mat` (the "?" card); the port's `set_mat`
+    was a no-op and every portrait showed (GD02-079, `--walktest career`
+    checks them). Drawn with the placer's panel camera, keeping the
     room's depth [I]; the menus' clip clock runs at 120 beats a minute [I].
   - `{reset_hair $char}`, `{{$new main.drv} transfer {$old main.drv}}`
     (the outfit switch keeps the clip and frame [I: by clip name]).
@@ -585,6 +625,7 @@ guitar | bass | grim | cheat)`, skins with outfit milo and mat),
   `career.json` and player 0's config must hold `alterna alterna2 sg
   sg_white`. `--walktest quickplay` checks the endgame photo (player 0's
   outfit, picture 0..3, on the disc).
+- `GD02_VIEW_GUITAR=<outfit>` (flyingv_v2, xplorer...): `--view char/<c>`'s guitarist plays that guitar outfit instead of guitar_sg.
 - `--view char/<c>` (`GD02_VIEW_CLIP`, `GD02_VIEW_FRAME`, `GD02_VIEW_YAW`...):
   one character posed (`char/<o>/ng/gen/<o>_ui.milo_xbox` with
   `GD02_VIEW_CLIP=ui_loop`: the menu character). In game: `GD02_CHAR=<outfit>`, `GD02_GUITAR=<guitar>`, `GD02_SKIN=<skin>`,

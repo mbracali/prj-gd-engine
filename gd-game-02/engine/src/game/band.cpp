@@ -552,6 +552,11 @@ Band::~Band() {
     for (auto& m : members_)
         if (m->character) m->character->forEachObject([&](scene::Object& o) { objs.insert(&o); });
     world_.stopAnimations(objs);
+    // And the world pose's state of them (a mesh's MeshAnim, transforms,
+    // materials): the next band's objects can be allocated at the same
+    // addresses and drew a freed MeshAnim (a crash on the next song in the
+    // same venue, bug-fix 5).
+    world_.pose().forget(objs);
     for (auto& p : parts_) drop(p.get());
     for (auto& p : players_) drop(p.get());
     parsers_.reset();

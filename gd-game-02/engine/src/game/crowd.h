@@ -27,7 +27,8 @@ class World;
 // GH2 keeps ONE Character per archetype [C 0x82247310]: every placement of
 // an archetype shows the same pose. Each frame (WorldCrowd draw 0x82247310)
 // the archetype is rendered into its card texture (render/crowd_view.h) and
-// drawn on the shown placements as cards (a RndMultiMesh of one quad), then
+// drawn on the shown placements as camera-facing cards (a RndMultiMesh of
+// one billboard quad), then
 // drawn again in 3D at each of the shot's crowd3d placements.
 //
 //   set_fullness a b (0x82247C08): per archetype the first int(n2d x a)
@@ -85,7 +86,8 @@ public:
         std::string group = "ok";       // the clip group main.drv last played
         float beatScale = 1;
         std::string hand = "clap";      // set_hand's [hand]
-        bool lighter = false;           // lighter_flame started
+        bool lighter = false;           // lighter_flame started (world_fx: shown and animating)
+        double lighterStart = 0;        // the world's seconds at its last start
         int clipsStarted = 0;
         std::unique_ptr<ScriptObject> object;  // $this / $dude
         std::vector<std::unique_ptr<ScriptObject>> parts;  // its directory's objects (hand meshes...)
@@ -140,6 +142,7 @@ private:
     void iterateFrac(Interp& in, State& s, std::vector<Value>& args);
     void listen(Interp& in, const std::string& msg, const std::vector<Value>& args);
     void reactionSound(const std::string& name);
+    void syncAudio(Interp& in);
     Actor* actor(const std::string& name);
     void runClipScript(Actor& a, const std::string& script);
     class ArchetypeObj;

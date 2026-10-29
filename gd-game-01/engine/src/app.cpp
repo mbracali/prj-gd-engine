@@ -387,6 +387,14 @@ private:
     float endMs_ = -1;  // song time the song was failed or finished, with the UI
     float songMs_ = 0;  // current song time
     bool hitting_ = false;  // GuitarCharacter "hitting" (hit_gem, cleared by miss / pass)
+    // The beat-match controllers (PlayerMatcher ctor FUN_00107e90 creates them
+    // disabled): FUN_001085d8 enables them on the first poll after GamePanel_v10
+    // @0x105808 has left the intro clock, once the song clock passes -25 ms
+    // (FUN_00105640 starts the audio). Until then input never reaches the
+    // watcher; at enabling the frets held are synced (FUN_0025c070).
+    bool controllerLive_[2] = {false, false};
+    uint32_t heldBeforeLive_[2] = {0, 0};
+    bool controllerLive(int p, float t);
     float lastSongMs_ = -1e30f;  // song time of the previous frame (intro timeline)
     int arenaExcitement_ = 2;    // the last excitement sent to the arena script
     bool musicStarted_ = false;  // arena music_start sent (measure 2)
@@ -764,8 +772,12 @@ void App::startSong(size_t index, ControllerMode mode) {
         CrowdRenderer::setCheatCrowd(ui_ ? ui_->interp().var("cheat_crowd").integerValue() : 0);
         if (opt_.venue && !info.venue.empty()) {
             try {
-                venue_ = std::make_unique<VenueRenderer>(renderer_, *data_, info.venue,
-                                                         VenueRenderer::Band{info.character, guitar1, info.animTempo, character2, guitar2, info.band});
+                // FUN_00282870 (final_win): the career's final song (above Easy, as the game over below).
+                bool finalSong = ui_ && ui_->interp().send("meta", "get", {Value::symbol("mode")}).str() == "career" &&
+                                 difficulty_ > 0 && campaign_ && campaign_->finalSong(difficulty_, info.id);
+                venue_ = std::make_unique<VenueRenderer>(
+                    renderer_, *data_, info.venue,
+                    VenueRenderer::Band{info.character, guitar1, info.animTempo, character2, guitar2, info.band, finalSong});
                 venue_->setSong(*song_, song_->charts[size_t(difficulty_)]);
                 venue_->setStrongerBokeh(enhanced("bokeh").str() == "stronger");
                 venue_->setShakyCamera(!enhancedOn("no_shaky_cam"));
@@ -808,6 +820,8 @@ void App::startSong(size_t index, ControllerMode mode) {
         endMs_ = -1;
         endWallNs_ = 0;
         hitting_ = false;
+        controllerLive_[0] = controllerLive_[1] = false;
+        heldBeforeLive_[0] = heldBeforeLive_[1] = 0;
         bool uiGame = ui_ && ui_->inGame();
         mixer_.play(std::move(vgs), std::move(tracks), uiGame ? kIntroMs : kLeadInMs);
         setupGuitarCopies();
@@ -878,6 +892,8 @@ void App::tutorialLoad(size_t index) {
         endMs_ = -1;
         endWallNs_ = 0;
         hitting_ = false;
+        controllerLive_[0] = controllerLive_[1] = false;
+        heldBeforeLive_[0] = heldBeforeLive_[1] = 0;
         screen_ = Screen::Playing;
         lastSongMs_ = -1e30f;
     } catch (const std::exception& ex) {
@@ -1004,6 +1020,14 @@ void App::updateVenue(float t) {
     f.excitement = VenueScript::excitementFor(player_->rockMeter(), player_->warningLevel());
     f.hitting = hitting_;
     f.hitting2 = hitting2_;
+    f.measureBeat = song_->tempo.measureBeat(f.ticks);
+    f.rating = player_->rockMeter();
+    f.score = player_->displayScore();
+    if (multi_ && player2_) {
+        f.rating2 = player2_->rockMeter();
+        f.score2 = player2_->displayScore();
+        f.scoreDiff = float(baseScore(0) / 15);  // charbase.dta reset: score_diff = base_max_score 0 / 15
+    }
     // FUN_00258b20: when the first gem of a new player section reaches the now
     // line, active_players changes (camera_multiplayer.dta, the hands).
     if (multi_ && player_) {
@@ -1040,7 +1064,7 @@ void App::updateTouchLanes() {
 // "-touchX_Y" put it down / lift it.
 void App::injectDebugKeys(std::vector<InputEvent>& out) {
     struct Key {
-        uint64_t at;
+        double at;  // ms; song keys may be negative (the intro)
         Action action;
         int edge;  // 0 press + release, 1 press, -1 release
         int player;
@@ -1069,15 +1093,15 @@ void App::injectDebugKeys(std::vector<InputEvent>& out) {
                         {"yellow", Action::Fret2}, {"blue", Action::Fret3}, {"orange", Action::Fret4}, {"strum", Action::Strum},
                         {"start", Action::Start}, {"starpower", Action::StarPower}};
                     if (auto it = kNames.find(name); it != kNames.end() && item[0] == 's')
-                        songKeys.push_back({uint64_t(std::atof(item.substr(1, colon - 1).c_str())), it->second, edge, player});
+                        songKeys.push_back({std::atof(item.substr(1, colon - 1).c_str()), it->second, edge, player});
                     else if (it != kNames.end())
-                        keys.push_back({uint64_t(std::atof(item.substr(0, colon).c_str())), it->second, edge, player});
+                        keys.push_back({std::atof(item.substr(0, colon).c_str()), it->second, edge, player});
                     else if (name.rfind("hover", 0) == 0 || name.rfind("click", 0) == 0) {
-                        Key k{uint64_t(std::atof(item.substr(0, colon).c_str())), Action::Confirm, name[0] == 'h' ? 2 : 3, 0};
+                        Key k{std::atof(item.substr(0, colon).c_str()), Action::Confirm, name[0] == 'h' ? 2 : 3, 0};
                         std::sscanf(name.c_str() + 5, "%f_%f", &k.mx, &k.my);
                         keys.push_back(k);
                     } else if (name.rfind("touch", 0) == 0) {  // "touchX_Y" taps, "+touchX_Y" / "-touchX_Y" hold / lift
-                        Key k{uint64_t(std::atof(item.substr(0, colon).c_str())), Action::Confirm, edge == 1 ? 4 : edge == -1 ? 5 : 6, 0};
+                        Key k{std::atof(item.substr(0, colon).c_str()), Action::Confirm, edge == 1 ? 4 : edge == -1 ? 5 : 6, 0};
                         std::sscanf(name.c_str() + 5, "%f_%f", &k.mx, &k.my);
                         keys.push_back(k);
                     }
@@ -1798,6 +1822,13 @@ void App::onAction(const InputEvent& e) {
         Player* pl = playerAt(multi_ ? e.player : 0);
         if (!pl) break;
         float t = static_cast<float>(mixer_.songTimeMs(e.timestampNs) - avOffsetMs());
+        if (const int p = multi_ && e.player == 1 ? 1 : 0; !controllerLive(p, t)) {
+            if (isFret(e.action)) {  // only remembered, for the sync when the controller comes on
+                uint32_t bit = 1u << fretOf(e.action);
+                heldBeforeLive_[p] = e.down ? heldBeforeLive_[p] | bit : heldBeforeLive_[p] & ~bit;
+            }
+            break;
+        }
         pl->update(t);
         if (isFret(e.action)) {
             if (e.down) pl->fretDown(fretOf(e.action), t);
@@ -1922,10 +1953,23 @@ void App::drawMenu() {
 }
 
 
+bool App::controllerLive(int p, float t) {
+    constexpr float kControllerOnMs = -25;  // GamePanel_v10: the intro clock hands over at -25 ms
+    if (controllerLive_[p]) return true;
+    if (t <= kControllerOnMs) return false;
+    controllerLive_[p] = true;
+    if (Player* pl = playerAt(p))
+        for (int f = 0; f < 5; ++f)
+            if (heldBeforeLive_[p] >> f & 1) pl->fretDown(f, t);
+    heldBeforeLive_[p] = 0;
+    return true;
+}
+
 // One player's frame (FUN_00116498 per player): autoplay, whammy, the
 // judgment, then its events to the highway, the venue and the scripts.
 void App::pollPlayer(int p, float t) {
     Player& pl = *playerAt(p);
+    controllerLive(p, t);
     Autoplay* ap = p == 0 ? autoplay_.get() : autoplay2_.get();
     TrackRenderer* tr = p == 0 ? track_.get() : track2_.get();
     bool& hitting = p == 0 ? hitting_ : hitting2_;
@@ -2006,6 +2050,12 @@ void App::frame() {
         if (track2_) track2_->setLefty(o.lefty[1]);
         input_.setLefty(o.lefty[0], o.lefty[1]);
     }
+    static const bool fixedClock = [this] {
+        const char* step = SDL_getenv("GD01_FIXED_CLOCK");
+        if (step) mixer_.setFixedClock(std::atof(step) > 0 ? std::atof(step) : 1000.0 / 60.0);
+        return step != nullptr;
+    }();
+    (void)fixedClock;
     uint64_t nowNs = SDL_GetTicksNS();
     float dt = lastFrameNs_ ? (nowNs - lastFrameNs_) / 1e9f : 0;
     lastFrameNs_ = nowNs;

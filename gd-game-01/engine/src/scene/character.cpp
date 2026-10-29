@@ -94,6 +94,7 @@ Character::Character(Renderer& renderer, const GameData& data, const Spec& spec)
     renderer_ = &renderer;
     std::map<std::string, int> macros = loadMacros(data);
     const std::string& archetype = spec.model;
+    model_ = spec.model;
     const std::string& folder = spec.folder.empty() ? archetype : spec.folder;
     body_ = std::make_unique<Scene>(data.read("charsys/" + folder + "/gen/" + archetype + ".rnd_ps2"));
     auto [guitarFile, guitarMat] = spec.guitar.empty() ? std::pair<std::string, std::string>()
@@ -132,6 +133,15 @@ Character::Character(Renderer& renderer, const GameData& data, const Spec& spec)
                 v.children[0].type == DataNode::Type::Int)
                 macros[d.s] = v.children[0].i;
         }
+        // List macros a clip entry names (config/macros.dta WIN_FINAL: (metal_win_final WIN_FINAL)),
+        // expanded in place as the DataArray reader does.
+        DataNode configMacros;
+        if (data.exists("config/gen/macros.dtb")) configMacros = parseDtb(data.read("config/gen/macros.dtb"));
+        auto listMacro = [&](const std::string& name) -> const DataNode* {
+            // config/macros.dta only (the crowd's HAND_CLAP / HAND_FIST / HAND_HORN stay symbols, read below).
+            const DataNode* v = defineValue(configMacros, name);
+            return v && v->isList() && !v->children.empty() && v->children[0].isList() ? v : nullptr;
+        };
         for (size_t i = 0; i + 1 < anims.children.size(); ++i) {
             const DataNode& d = anims.children[i];
             if (d.type != DataNode::Type::Define || d.s != spec.animsMacro) continue;
@@ -160,8 +170,15 @@ Character::Character(Renderer& renderer, const GameData& data, const Spec& spec)
                 }
                 int index = -1;
                 for (size_t a = 1; a < list->children.size(); ++a) {
-                    const DataNode& clip = list->children[a];
-                    if (!clip.isList() || clip.children.empty() || !clip.children[0].isText()) continue;
+                    if (!list->children[a].isList() || list->children[a].children.empty() || !list->children[a].children[0].isText()) continue;
+                    DataNode clip = list->children[a];
+                    for (size_t k = clip.children.size(); k-- > 1;)
+                        if (clip.children[k].isText())
+                            if (const DataNode* m = listMacro(clip.children[k].s)) {
+                                std::vector<DataNode> body = m->children;
+                                clip.children.erase(clip.children.begin() + long(k));
+                                clip.children.insert(clip.children.begin() + long(k), body.begin(), body.end());
+                            }
                     ++index;
                     uint32_t flags = 0;
                     if (const DataNode* f = clip.find("flags"))
@@ -182,8 +199,12 @@ Character::Character(Renderer& renderer, const GameData& data, const Spec& spec)
                     }
                     std::string path = dir->textAt(1) + "/gen/" + clip.children[0].s + ".acp";
                     if (!data.exists(path)) continue;
+                    std::vector<std::string> exclude;  // (exclude_venues basement small_club ...)
+                    if (const DataNode* ex = clip.find("exclude_venues"))
+                        for (size_t k = 1; k < ex->children.size(); ++k)
+                            if (ex->children[k].isText()) exclude.push_back(ex->children[k].s);
                     try {
-                        clips_.push_back({std::make_unique<AnimClip>(data.read(path)), flags, hand, setNo, index});
+                        clips_.push_back({std::make_unique<AnimClip>(data.read(path)), flags, hand, setNo, index, 0, true, std::move(exclude)});
                     } catch (const std::exception& ex) {
                         SDL_Log("character %s: clip %s: %s", archetype.c_str(), path.c_str(), ex.what());
                     }
@@ -246,7 +267,7 @@ void Character::loadHandClips(const GameData& data, const DataNode& anims, const
         std::string path = dir->textAt(1) + "/gen/" + clip.children[0].s + ".acp";
         if (!data.exists(path)) continue;
         try {
-            handClips_.push_back({std::make_unique<AnimClip>(data.read(path)), 0, -1, 1, int(a - 1)});
+            handClips_.push_back({std::make_unique<AnimClip>(data.read(path)), 0, -1, 1, int(a - 1), 0, true, {}});
         } catch (const std::exception& ex) {
             SDL_Log("character: hand clip %s: %s", path.c_str(), ex.what());
         }
@@ -335,6 +356,18 @@ float modPos(float x, float a) {
 // FUN_0017e9a0: the least-recently-used clip with every wanted flag (ties go
 // to the first in dta order); clips of another anim tempo only as a fallback.
 int Character::select(uint32_t want) {
+    if (strict_) {  // FUN_0017e890: (flags & (want | 0x80000000)) == that, least recently used
+        int best = -1;
+        for (size_t i = 0; i < clips_.size(); ++i)
+            if (clips_[i].on && (clips_[i].flags & want) == want && (best < 0 || clips_[i].used < clips_[size_t(best)].used))
+                best = int(i);
+        if (best >= 0) clips_[size_t(best)].used = ++clock_;
+        else if (std::find(noClipLogged_.begin(), noClipLogged_.end(), want) == noClipLogged_.end()) {
+            noClipLogged_.push_back(want);  // FUN_0017fc28 reports it; once per category here
+            SDL_Log("character %s: no enabled clip with flags 0x%x (nothing new plays)", model_.c_str(), unsigned(want));
+        }
+        return best;
+    }
     auto pick = [&](uint32_t cat, bool matchTempo) {
         int best = -1;
         for (size_t i = 0; i < clips_.size(); ++i) {
@@ -359,9 +392,18 @@ void Character::startAt(int clip, int mode, float frame) {
     chain_.back().frame = frame;
 }
 
+namespace {
+// Development aid: GD01_ANIMLOG=1 logs every clip a character queues (the golden logs).
+bool animLog() {
+    static const bool on = SDL_getenv("GD01_ANIMLOG") != nullptr;
+    return on;
+}
+}  // namespace
+
 // AnimClipDriver construction (FUN_0018a038 + transition FUN_0017f1d0).
 void Character::start(int clip, int mode) {
     const AnimClip& n = *clips_[size_t(clip)].clip;
+    if (animLog()) SDL_Log("anim %-14s beat %8.3f play %-28s mode 0x%03x", model_.c_str(), rawBeat_, n.name().c_str(), unsigned(mode));
     if (chain_.empty() || (mode & 7) == kAnimReset) {
         chain_.assign(1, Driver{clip, mode, n.startFrame(), 0, 1});
         return;
@@ -424,6 +466,66 @@ void Character::play(uint32_t flags, int mode) {
     if (int c = select(flags); c >= 0) start(c, mode);
 }
 
+void Character::applyClipRules(const ClipRules& r) {
+    auto count = [&](uint32_t f) {
+        int n = 0;
+        for (const Clip& c : clips_) n += c.on && (c.flags & f) == f;
+        return n;
+    };
+    // FUN_0017e2a8: disable the least recently used (ties: the first) until `keep` remain.
+    auto keepOnly = [&](int keep, uint32_t f) {
+        for (int n = count(f) - keep; n > 0; --n) {
+            Clip* best = nullptr;
+            for (Clip& c : clips_)
+                if (c.on && (c.flags & f) == f && (!best || c.used < best->used)) best = &c;
+            if (best) best->on = false;
+        }
+    };
+    auto disable = [&](uint32_t f) {  // FUN_0017e060(set, f, 0)
+        for (Clip& c : clips_)
+            if (c.flags & f) c.on = false;
+    };
+    // FUN_0017e060(-1, 0) then FUN_0017e138(tempo, 3, 1): tempo-less clips and the song's tempo.
+    for (Clip& c : clips_) c.on = !(c.flags & kTempoMask) || (c.flags & uint32_t(r.tempo));
+    if (r.guitarist) {
+        constexpr uint32_t kGuitarWinFinal = 0x4000000;
+        if (!r.allowWalks) disable(kWalkMask);  // the venue's (allow_walks FALSE)
+        if (r.guitarists < 2) {
+            disable(r.finalSong ? kGuitarWin : kGuitarWinFinal);  // FUN_00282870
+        } else {
+            disable(kWalkMask);
+            keepOnly(1, kGuitarIntro);
+            keepOnly(1, kGuitarLose);
+            keepOnly(1, kGuitarWin);
+            disable(kGuitarWinFinal);
+        }
+    }
+    for (Clip& c : clips_)  // FUN_0018f0a0: (exclude_venues ...)
+        if (std::find(c.excludeVenues.begin(), c.excludeVenues.end(), r.venue) != c.excludeVenues.end()) c.on = false;
+    strict_ = true;
+    if (SDL_getenv("GD01_CLIPLOG")) {
+        for (const Clip& c : clips_)
+            SDL_Log("clips %s: %-28s 0x%08x %s", model_.c_str(), c.clip->name().c_str(), unsigned(c.flags), c.on ? "on" : "off");
+        static const std::pair<const char*, uint32_t> kCats[] = {
+            {"idle", kGuitarIdle}, {"normal", kGuitarNormal}, {"extreme", kGuitarExtreme}, {"solo", kGuitarSolo},
+            {"bad", kGuitarBad}, {"intro", kGuitarIntro}, {"win", kGuitarWin}, {"lose", kGuitarLose},
+            {"special", kGuitarSpecial}, {"winfinal", 0x4000000}, {"band_idle", kBandIdle}, {"band_active", kBandActive}};
+        std::string line;
+        for (const auto& [name, f] : kCats) {
+            int n = count(f), all = 0;
+            for (const Clip& c : clips_) all += (c.flags & f) == f;
+            if (all) line += " " + std::string(name) + " " + std::to_string(n);
+        }
+        SDL_Log("cliprules %s venue %s tempo %d:%s", model_.c_str(), r.venue.c_str(), r.tempo, line.c_str());
+    }
+}
+
+uint32_t Character::currentFlags() const {
+    for (size_t i = chain_.size(); i-- > 0;)
+        if (chain_[i].blend != 0) return clips_[size_t(chain_[i].clip)].flags;
+    return 0;
+}
+
 void Character::playAt(uint32_t flags, float eventBeat) {
     int c = select(flags);
     if (c < 0) return;
@@ -432,7 +534,9 @@ void Character::playAt(uint32_t flags, float eventBeat) {
         chain_.assign(1, Driver{c, 0, n.startFrame(), 0, 1});
         return;
     }
-    chain_.push_back(Driver{c, 0, n.startFrame(), eventBeat - n.blendWidth() - beat_, 0});
+    if (animLog()) SDL_Log("anim %-14s beat %8.3f play %-28s at beat %.3f", model_.c_str(), rawBeat_, n.name().c_str(), eventBeat);
+    // FUN_002856a0: the delay is counted from the unscaled song beat (DAT_00344268).
+    chain_.push_back(Driver{c, 0, n.startFrame(), eventBeat - n.blendWidth() - rawBeat_, 0});
 }
 
 // AnimDriver / AnimClipDriver Poll: oldest first, each new clip waiting until
@@ -444,7 +548,7 @@ void Character::pollChain(std::vector<Clip>& clips, std::vector<Driver>& chain, 
         const AnimClip& c = *clips[size_t(d.clip)].clip;
         bool realtime = c.playFlags() & kAnimRealTime;
         d.delay -= i > 0 ? chain[i - 1].dEff : (realtime ? dSec : dBeat);
-        d.dEff = 0;
+        d.dEff = 0, d.dStep = 0;
         if (d.delay >= 0) continue;
         float step = realtime ? dSec * c.framesPerSec() : dBeat;
         d.frame += step;
@@ -455,6 +559,7 @@ void Character::pollChain(std::vector<Clip>& clips, std::vector<Driver>& chain, 
         }
         d.frame += r;
         d.dEff = step + r;
+        d.dStep = step;
         if (d.blend < 1) d.blend = c.blendWidth() <= 0 ? 1.0f : std::min(1.0f, d.blend + step / c.blendWidth());
         if ((d.mode & kAnimLoop) && d.frame > c.endFrame()) d.frame = c.startFrame() + (d.frame - c.endFrame());
     }
@@ -750,13 +855,15 @@ void Character::pollFace(float dSec, float ms) {
     }
 }
 
-void Character::poll(float rawBeat, float ms, float frameScale) {
-    float beat = rawBeat * frameScale;
+void Character::poll(float rawBeat, float ms, float frameScale) { poll(rawBeat, ms, frameScale, rawBeat); }
+
+void Character::poll(float rawBeat, float ms, float frameScale, float measureBeat) {
+    float beat = (realign_ ? measureBeat : rawBeat) * frameScale;
     float dBeat = polled_ ? std::max(0.0f, rawBeat - rawBeat_) * frameScale : 0;
     float dSec = polled_ ? std::max(0.0f, (ms - ms_) * 0.001f) : 0;
     if (face_) pollFace(dSec, ms);
     polled_ = true;
-    beat_ = beat, ms_ = ms, rawBeat_ = rawBeat;
+    beat_ = beat, ms_ = ms, rawBeat_ = rawBeat, dBeat_ = dBeat;
     if (realign_) realign(beat);
     pollChain(clips_, chain_, beat, dBeat, dSec);
     // kAnimGraphLoop: re-queue the same clip through its graph self-edge.
@@ -814,6 +921,8 @@ bool Character::pendingAfterNewest(DriverInfo* pending, DriverInfo* before) cons
 }
 
 void Character::queueClip(int clip, float frame, float delay) {
+    if (animLog()) SDL_Log("anim %-14s beat %8.3f walk %-28s frame %.3f delay %.3f", model_.c_str(), rawBeat_,
+                           clips_[size_t(clip)].clip->name().c_str(), frame, delay);
     Driver d{clip, kAnimLongest, frame, delay, delay == 0 ? 1e-10f : 0};
     chain_.push_back(d);
 }
@@ -1126,8 +1235,8 @@ std::vector<int> Character::clipsWith(uint32_t flags, bool matchTempo) const {
     std::vector<int> out;
     for (size_t i = 0; i < clips_.size(); ++i) {
         uint32_t f = clips_[i].flags;
-        if ((f & flags) != flags) continue;
-        if (matchTempo && (f & kTempoMask) && !(f & kTempoMask & uint32_t(tempo_))) continue;
+        if ((f & flags) != flags || (strict_ && !clips_[i].on)) continue;
+        if (!strict_ && matchTempo && (f & kTempoMask) && !(f & kTempoMask & uint32_t(tempo_))) continue;
         out.push_back(int(i));
     }
     return out;
@@ -1171,6 +1280,9 @@ void Character::rootDelta(int clip, float f0, float f1, std::array<float, 3>& po
 // FUN_0017bb90 + bone.servo use_delta: each driver adds w * (rotz(t) -
 // rotz(tPrev)) and w * (P(t) - P(tPrev)) rotated by -rotz(t); the root's
 // rows turn by the angle, then the root moves by the delta in its frame.
+// tPrev = frame - the poll's advance (+0x18, AnimClipDriver_v1 @0x18a870):
+// the phase snap is not part of it, so snapping a clip to the beat never
+// moves or turns the root.
 void Character::applyRootMotion() {
     float dTheta = 0;
     std::array<float, 3> dPos{};
@@ -1179,11 +1291,11 @@ void Character::applyRootMotion() {
         const Driver& d = chain_[i];
         float w = remaining * smooth(d.blend);
         remaining -= w;
-        if (w <= 0 || d.dEff == 0) continue;
+        if (w <= 0 || d.dStep == 0) continue;
         const AnimClip& c = *clips_[size_t(d.clip)].clip;
         std::array<float, 3> p0{}, p1{};
         float r0 = 0, r1 = 0;
-        if (!facingAt(c, d.frame - d.dEff, p0, r0) || !facingAt(c, d.frame, p1, r1)) continue;
+        if (!facingAt(c, d.frame - d.dStep, p0, r0) || !facingAt(c, d.frame, p1, r1)) continue;
         dTheta += w * wrapPi(r1 - r0);
         float dx = p1[0] - p0[0], dy = p1[1] - p0[1], cs = std::cos(r1), sn = std::sin(r1);
         dPos[0] += w * (dx * cs + dy * sn);

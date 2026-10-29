@@ -4,6 +4,7 @@
 
 #include <array>
 #include <string>
+#include <utility>
 #include <vector>
 
 class BandPerformer;
@@ -64,6 +65,12 @@ public:
     virtual void gameSetPaused(bool paused) = 0;
     virtual bool gamePaused() const = 0;
     virtual double gameTimeMs() const = 0;     // the song clock (negative in the lead-in)
+    // The sounds played since the song began, with their song times (the
+    // first 256; --walktest checks the intro's).
+    virtual std::vector<std::pair<std::string, double>> gameSfx() const { return {}; }
+    // The camera's distance travelled between the intro's start and song
+    // time -2000 ms (the INTRO shot moves in every venue), -1 unknown.
+    virtual double introCameraTravel() const { return -1; }
     virtual float gameBeat() const = 0;        // the song position in beats
     virtual float songDurationMs() const = 0;  // to the song's end
     virtual const Player* gamePlayer(int index) const = 0;
@@ -106,6 +113,8 @@ public:
     virtual void stopSfx(const std::string& /*name*/) {}
     virtual void stopAllSfx() {}
     virtual void pauseAllSfx(bool /*paused*/) {}
+    // Sound effect voices playing and not paused (-1: no sound player); tests.
+    virtual int sfxLiveVoices() { return -1; }
 
     // song_preview: loops the song's (preview a b) section; "" stops it.
     virtual void songPreview(const std::string& songId) = 0;
@@ -124,10 +133,12 @@ public:
     // The last frame drawn as a .bmp (the walk test's shots); false if none.
     virtual bool saveScreenshot(const std::string& /*path*/) { return false; }
     virtual void setEnhancedValue(const std::string& /*key*/, const std::string& /*value*/) {}
-    // The Enhanced Options' live backdrop: the second venue with the band
-    // playing, while the screen is up; drawMenuBackdrop draws it (false
-    // when there is none).
+    // The Enhanced Options' backdrop: a still shot of the second venue with
+    // the band posed, while the screen is up; drawMenuBackdrop draws it
+    // (false when there is none).
     virtual void menuBackdrop(bool /*on*/) {}
     virtual bool drawMenuBackdrop() { return false; }
+    // The backdrop's band is posed and its singer framed on the right (tests).
+    virtual bool menuBackdropFramed() { return false; }
     virtual void quit() = 0;
 };

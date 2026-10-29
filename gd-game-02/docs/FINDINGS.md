@@ -107,6 +107,15 @@ time of last HOPO attempt, `+0x98/+0x9c/+0xa0/+0xa4` pending wrong strum
 
 ### Controller → watcher (guitar controller `0x8234c538` down / `0x8234c6d0` up) [C]
 
+- **When input is live** (wave B #1) [C]: while GamePanel runs its intro
+  clock (song time below −25 ms, `0x822CDEB8`) every PlayerMatcher's
+  controller is off (`0x822CED30` → matcher vtable `+0x40` with 1) and drops
+  the buttons; the matcher poll `0x822E2510` turns it back on (`+0x40` with
+  0) once GamePanel is off the intro clock (`+0x5c`) and not `+0x5b`. So no
+  strum, Star Power or miss counts before the track is up (it extends at
+  −2000 ms). gd02: `App::playerAction` drops them, the frets held then are
+  pressed when the controllers come on [I: GH1's FUN_0025c070 sync].
+
 - Strum buttons (D-pad up/down, ids 0xc/0xe, also 0x10/0x12):
   `Swing(highest held fret or -1, strum=1)`.
 - Fret press: `FretDown(slot)`; then, if no held fret is above it

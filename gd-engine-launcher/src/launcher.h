@@ -7,10 +7,12 @@
 
 #include <SDL3/SDL.h>
 
+#include <array>
 #include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -19,10 +21,19 @@
 #include "gfx.h"
 #include "ui_sounds.h"
 
+// What the command line asked for (main.cpp): a game to play or explore at
+// once, with a disc image for this run, and whether to quit afterwards.
+struct CommandLine {
+    std::string play, explore;  // game ids
+    std::string iso;            // --iso: the disc for this run (not saved)
+    bool exitAfter = false;     // --exit-after: quit when the game (or the explorer) ends
+};
+
 class Launcher {
 public:
     Launcher();
     ~Launcher();
+    void setCommandLine(const CommandLine& c) { cli_ = c, cliPending_ = !c.play.empty() || !c.explore.empty(); }
     int run();
 
 private:
@@ -71,6 +82,7 @@ private:
     void exploreMove(int dRow, int dCol);
     void exploreGroup(int group, int state);  // state: 1 collapse, 0 expand, -1 toggle; group -2: all
     bool exploreScript(const std::string& cmd, const std::string& arg);  // true: a command of the explorer
+    void exploreToggleInstrument();
     void exploreFrame();
     void exploreDraw();
     void exploreDrawList(const gfx::Rect& panel);
@@ -88,6 +100,9 @@ private:
     void showDialog(const std::string& title, const std::string& body, std::vector<Button> buttons);
     void toast(const std::string& text);
     void restoreWindow();
+    void rememberWindow();
+    void leaveFullscreen();
+    bool duplicatePress(const SDL_Event& e);  // true: drop it
     void openGamepads();
     void closeGamepads();
     void runScript();
@@ -117,6 +132,13 @@ private:
     Catalog catalog_;
     ActionLog log_;
     bool running_ = true;
+    CommandLine cli_;
+    bool cliPending_ = false;   // its game not started yet
+    bool cliExplore_ = false;   // quit when the explorer closes (--explore --exit-after)
+    int exitCode_ = 0;          // the process's: the game's, with --play --exit-after
+    int lastExit_ = 0;          // the last game run's exit code (1 when it did not start)
+    void runCommandLine();
+    void cliFail(const std::string& why);
 
     int pw_ = 0, ph_ = 0;      // window pixels
     float s_ = 1, W_ = 1280, H_ = 720;  // scale and design size
@@ -132,6 +154,16 @@ private:
     bool mouseUsed_ = false;
 
     std::map<SDL_JoystickID, SDL_Gamepad*> pads_;
+    struct RecentPress {
+        Uint64 ns = 0;
+        SDL_JoystickID device = 0;
+    };
+    std::array<RecentPress, SDL_GAMEPAD_BUTTON_COUNT> recentPress_{};
+    std::set<std::pair<SDL_JoystickID, int>> dropped_;  // presses dropped: their release too
+    struct SavedWindow {
+        bool valid = false, maximized = false;
+        int x = 0, y = 0, w = 1280, h = 720;
+    } saved_;
     int heldDir_ = 0;  // gamepad direction held: 1 up, 2 down, 3 left, 4 right
     double repeatAt_ = 0;
 

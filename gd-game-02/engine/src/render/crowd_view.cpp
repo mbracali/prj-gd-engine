@@ -133,9 +133,13 @@ void CrowdView::draw(gfx::MaterialRenderer& mr, const scene::WorldCrowd& c, cons
         if (!a.actor || !a.actor->character) continue;
         chr::Character& ch = *a.actor->character;
         const scene::Environ* charEnv = a.actor->env ? a.actor->env : env;
-        // The lighter flame's flicker (lighter_flame.filt: a loop on its MatAnim).
+        // The lighter flame's flicker: world_fx `start` (rnd_objects.dta)
+        // is {$this animate (range 0 kHugeFloat)}: lighter_flame.filt (a
+        // loop on its MatAnim) from frame 0 when the flame starts, 30
+        // frames a second [C data; I: the clock].
         if (a.actor->lighter)
-            if (const scene::Object* f = ch.dir().find("lighter_flame.filt")) flamePose_.setFrame(f, float(seconds * 30.0));
+            if (const scene::Object* f = ch.dir().find("lighter_flame.filt"))
+                flamePose_.setFrame(f, float(std::max(0.0, seconds - a.actor->lighterStart) * 30.0));
         int nCards = 0;
         if (!s->show3dOnly) nCards = std::min(int(a.cards.size()), int(float(a.cards.size()) * s->full2d));
         const int n3d = std::min(int(a.threeD.size()), int(float(a.threeD.size()) * s->full3d));
@@ -172,9 +176,19 @@ void CrowdView::draw(gfx::MaterialRenderer& mr, const scene::WorldCrowd& c, cons
                 std::vector<uint16_t> idx;
                 verts.reserve(size_t(nCards) * 64);
                 idx.reserve(size_t(nCards) * 6);
+                // The card mesh has the FastBillboardXYZ constraint (8) on the
+                // card camera (0x822490F8 -> SetTransConstraint 0x821AFAA0),
+                // so the RndMultiMesh draws it with multimesh.fx's BILLBOARD
+                // variant (DxMultiMesh draw 0x8230F138: effect 0x13 when the
+                // mesh's constraint is 8): each instance keeps only its
+                // position, the quad turned like the camera (x its right, y
+                // its forward, z its up) [C; C data multimesh.fx]. Cards
+                // always face the camera, never edge-on.
+                const Mat4& cw = camera.world;
+                const Vec3 rx{cw.at(0, 0), cw.at(1, 0), cw.at(2, 0)}, ry{cw.at(0, 1), cw.at(1, 1), cw.at(2, 1)},
+                    rz{cw.at(0, 2), cw.at(1, 2), cw.at(2, 2)};
                 for (int i = 0; i < nCards && i < 16383; ++i) {
                     const scene::Xfm& p = a.placements[size_t(a.cards[size_t(i)])];
-                    const Vec3 rx = row(p, 0), ry = row(p, 1), rz = row(p, 2);
                     const uint16_t base = uint16_t(verts.size() / 16);
                     for (int k = 0; k < 4; ++k) {
                         const float x = xz[k][0], z = xz[k][1];
@@ -187,9 +201,16 @@ void CrowdView::draw(gfx::MaterialRenderer& mr, const scene::WorldCrowd& c, cons
                 gfx::GpuMesh g = dynamic_->upload(verts, idx);
                 g.skinned = false;
                 gfx::Material m;
+                // The card Mat (WorldCrowd ctor 0x82249368) [C]: use_environ
+                // (+0x40) and prelit (+0xa0) off, blend 1 = src (+0x2c),
+                // alpha_cut (+0xa1), tex_wrap 0 = clamp (+0x50); cull stays
+                // the Mat default, TRUE (Mat ctor 0x821ECC78, +0xb0): the
+                // billboard always shows the camera its front.
                 m.useEnviron = false;
+                m.prelit = false;
+                m.blend = gfx::MatBlend::Src;
                 m.alphaCut = true;
-                m.cull = false;
+                m.cull = true;
                 m.texWrap = gfx::TexWrap::Clamp;
                 m.diffuseTex = dev.targetTexture(t);
                 gfx::DrawContext ctx;

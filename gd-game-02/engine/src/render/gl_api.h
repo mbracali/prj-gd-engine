@@ -52,12 +52,14 @@
     X(PFNGLGETUNIFORMBLOCKINDEXPROC, glGetUniformBlockIndex)                    \
     X(PFNGLGETUNIFORMLOCATIONPROC, glGetUniformLocation)                        \
     X(PFNGLLINKPROGRAMPROC, glLinkProgram)                                      \
+    X(PFNGLMAPBUFFERRANGEPROC, glMapBufferRange)                                \
     X(PFNGLSAMPLERPARAMETERFPROC, glSamplerParameterf)                          \
     X(PFNGLSAMPLERPARAMETERFVPROC, glSamplerParameterfv)                        \
     X(PFNGLSAMPLERPARAMETERIPROC, glSamplerParameteri)                          \
     X(PFNGLSHADERSOURCEPROC, glShaderSource)                                    \
     X(PFNGLUNIFORM1IPROC, glUniform1i)                                          \
     X(PFNGLUNIFORMBLOCKBINDINGPROC, glUniformBlockBinding)                      \
+    X(PFNGLUNMAPBUFFERPROC, glUnmapBuffer)                                      \
     X(PFNGLUSEPROGRAMPROC, glUseProgram)                                        \
     X(PFNGLVERTEXATTRIBPOINTERPROC, glVertexAttribPointer)
 

@@ -9,12 +9,15 @@
 #include <cmath>
 #include <set>
 #include <cstdio>
+#include <functional>
 
 #include "char/char_driver.h"
+#include "char/char_objects.h"
 #include "char/character.h"
 #include "char/skeleton.h"
 #include "render/band_view.h"
 #include "render/canvas.h"
+#include "render/scene_gpu.h"
 #include "scene/milo.h"
 #include "scene/ui_styles.h"
 #include "ui/campaign.h"
@@ -400,7 +403,12 @@ public:
         const float dt = float(std::clamp(dtMs, 0.0, 100.0) / 1000.0);
         clock_ += dt;
         for (Slot& s : slots_) {
-            if (!s.ch) continue;
+            // Poll 0x8228F250 places, wakes (the pending event, 0x8228D348)
+            // and polls a loaded character only while its slot has a placer
+            // (slot +0xc, set_placer 0x8228E6F8) [C]: the character select
+            // sets it at TRANSITION_COMPLETE, so ui_enter's kick starts once
+            // the screen is up, behind the closed door (GD02-078).
+            if (!s.ch || s.placer.empty()) continue;
             if (!s.event.empty()) {
                 // 0x8228D348: the pending event goes to the loaded character.
                 const std::string e = s.event;
@@ -414,11 +422,12 @@ public:
             s.ch->ch->poll(ctx);
         }
         for (Slot& s : slots_) {
-            // Poll 0x8228F250: the door stands at (pi / 2, 0, 0); a loaded
-            // character swings it with its bone_door (its local rotation's z).
+            // Poll 0x8228F250: the door stands at (pi / 2, 0, 0); a loaded,
+            // placed character swings it with its bone_door (its local
+            // rotation's z) [C].
             if (s.doorView && !s.door.empty()) {
                 float z = 0;
-                if (s.ch) {
+                if (s.ch && !s.placer.empty()) {
                     chr::Skeleton& sk = s.ch->ch->skeleton();
                     int b = sk.find("bone_door.trans");
                     if (b < 0) b = sk.find("bone_door.mesh");
@@ -575,6 +584,56 @@ private:
     std::vector<Pick> picks_;
 };
 
+std::vector<const scene::Mesh*> displayMeshesOf(const scene::Directory& d) {
+    std::unique_ptr<scene::CharacterObj> own;
+    try {
+        if (d.self) own = scene::decodeCharacterDir(*d.self);
+    } catch (const std::exception&) {
+        own.reset();
+    }
+    const scene::Group* lod0 = nullptr;
+    const scene::Group* shadow = nullptr;
+    if (own && !own->lods.empty())
+        if (const scene::Object* g = d.get(own->lods[0].group)) lod0 = g->as<scene::Group>();
+    if (own && !own->shadow.empty())
+        if (const scene::Object* g = d.get(own->shadow)) shadow = g->as<scene::Group>();
+    // The other LODs' groups hide (the Character shows only its LOD's).
+    std::set<const scene::Object*> skip;
+    if (own)
+        for (size_t k = 1; k < own->lods.size(); ++k)
+            if (const scene::Object* g = d.get(own->lods[k].group)) skip.insert(g);
+    std::set<const scene::Object*> children;
+    for (const auto& o : d.objects)
+        if (auto* g = o->as<scene::Group>())
+            for (const std::string& n : g->objects)
+                if (const scene::Object* x = d.get(n); x && x != g) children.insert(x);
+    std::vector<const scene::Object*> roots;
+    for (const auto& o : d.objects) {
+        if (!o->decoded || children.count(o.get()) || skip.count(o.get()) || o.get() == shadow) continue;
+        if (o->as<scene::Mesh>() || o->as<scene::Group>()) roots.push_back(o.get());
+    }
+    if (lod0 && std::find(roots.begin(), roots.end(), lod0) == roots.end()) roots.push_back(lod0);
+    std::stable_sort(roots.begin(), roots.end(), [](const scene::Object* a, const scene::Object* b) {
+        const scene::Draw* da = gfx::drawOf(a);
+        const scene::Draw* db = gfx::drawOf(b);
+        return (da ? da->order : 0) < (db ? db->order : 0);
+    });
+    std::vector<const scene::Mesh*> out;
+    std::set<const scene::Object*> seen;
+    std::function<void(const scene::Object*, int)> add = [&](const scene::Object* o, int depth) {
+        if (!o || depth > 16 || o == shadow || skip.count(o) || !seen.insert(o).second) return;
+        if (auto* m = o->as<scene::Mesh>()) {
+            // A mesh's own showing; a LOD group's showing is the Character's to set.
+            if (m->draw.showing) out.push_back(m);
+        } else if (auto* g = o->as<scene::Group>()) {
+            if (g != lod0 && !g->draw.showing) return;
+            for (const std::string& n : g->objects) add(d.get(n), depth + 1);
+        }
+    };
+    for (const scene::Object* o : roots) add(o, 0);
+    return out;
+}
+
 // GuitarDisplayPanel (0x822922B8): show_guitar loads the skin's outfit
 // (char/og/guitars/<outfit>.milo, 0x82291EE0) into the screen's proxy; its
 // poll (0x82291FF8) puts the skin's mat on guitar.mesh (0x822B2148) and
@@ -675,15 +734,8 @@ public:
             // its place relative to it [I: the main trans' own local dropped].
             const scene::Object* mainTrans = d.get("guitar.mesh");
             const scene::Xfm toMain = mainTrans ? chr::inverse(pose.world(mainTrans)) : scene::Xfm{};
-            // The first LOD's group (outfit0_lod0) when the outfit has one, as
-            // the Character draws it up close [I].
-            std::set<const scene::Object*> lod;
-            if (const scene::Object* g = d.get("outfit0_lod0"); g && g->as<scene::Group>())
-                for (const std::string& n : g->as<scene::Group>()->objects)
-                    if (const scene::Object* x = d.get(n)) lod.insert(x);
-            for (const auto& o : d.objects) {
-                const auto* m = o->as<scene::Mesh>();
-                if (!m || !o->decoded || !m->draw.showing || (!lod.empty() && !lod.count(m))) continue;
+            // The outfit as a Character at its first LOD, in draw order (displayMeshes).
+            for (const scene::Mesh* m : displayMeshesOf(d)) {
                 const scene::Object* mo = m->mat.empty() ? nullptr : d.get(m->mat);
                 const scene::Mat* mat = m->name == "guitar.mesh" && skinMat ? skinMat : mo ? mo->as<scene::Mat>() : nullptr;
                 gfx::drawMesh(r.materials(), *ui.sceneCache(), *m, gfx::toMat4(scene::compose(scene::compose(pose.world(m), toMain), at)), &pose, mat);
@@ -698,6 +750,8 @@ private:
 };
 
 }  // namespace
+
+std::vector<const scene::Mesh*> displayMeshes(const scene::Directory& outfit) { return displayMeshesOf(outfit); }
 
 std::unique_ptr<ScriptObject> makeClass(UiManager& ui, const std::string& cls, const std::string& name) {
     if (cls == "CharsysPanel") return std::make_unique<CharsysPanelObj>(ui, name);

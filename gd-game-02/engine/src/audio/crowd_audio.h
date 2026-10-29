@@ -21,21 +21,31 @@ struct DataNode;
 // world/<v>/streams/<file>.mogg (plain Vorbis moggs, stereo), named by the
 // venue type's (sound (crowd (intro dB file) (levels (kExcitementBoot dB
 // file) ...) (encore_outro dB file (loop_ms a b)) (encore_intro dB file)))
-// [C data: world/<v>/gen/<v>.dta]. One stream plays at a time
-// (0x822DFC10 replaces it) [I: a short fade instead of a cut]:
+// [C data: world/<v>/gen/<v>.dta]. One stream plays at a time: a new one
+// deletes the old (0x822DF860) [C]:
 //   intro_start_msg ($fast $encore) -> encore_intro when $encore and not
-//     $fast, else intro (0x822DFCA8); played once;
-//   music_start -> started, level Okay (+0x40 = 2) then the game's
-//     excitement (0x822DF590);
-//   excitement (level) -> after crowd_audio_delay (config/sound.dta: 1 s;
-//     +0x34) the level's loop (excitement_loop), every time;
+//     $fast, else intro (0x822DFCA8), and the crowd_begin reaction;
+//   music_start -> started (+0x3a), the last level (+0x40) = Okay, then
+//     the game's excitement (Game +0x338) as below;
+//   excitement (level) (0x822DF590), only once started and while enabled
+//     (+0x38): the reaction for last -> level (even the same level), the
+//     last level = level, and an `excitement_loop level` message
+//     crowd_audio_delay (config/sound.dta: 1 s; +0x34) later; each such
+//     message plays that level's loop (0x822DFD40);
 //   encore_outro -> encore_outro, looping between its loop_ms (0x822E1688);
-//   turn_off (ui lose.dta; here at game_lost [I]) -> silence.
+//   turn_off (ui lose.dta, endgame.dta) -> the stream deleted (0x822DF0E8);
+//   set_enabled (0x822DF9D8): off deletes the stream, on runs excitement
+//     with the last level; the mode's crowd_audio (modes.dta: FALSE in
+//     practice and tutorial) at construction.
+// Volume (0x822DF2F8) [C]: the entry's dB + set_volume's dB (+0x2c) +
+// crowd_volume (config/sound.dta: -2 dB; +0x30) + the options' sound
+// effects volume (0x822DF140: 0 dB in the attract mode), applied when a
+// stream starts and on set_volume.
 // The reaction sounds (+0x64 crowd_begin at the intro, +0x68 crowd_win at
-// game_won_msg, +0x6c crowd_lose at game_lost, per level change
-// crowd_upto_* / crowd_dnto_* (+0x70): 0x822DFAB0 looks them up, 0x822DF350
-// plays one, stopping the last, when the mode's crowd_reactions) are the
-// venue bank's Sfx: game/crowd.cpp plays them through the world
+// game_won_msg, +0x6c crowd_lose at game_lost, per excitement crowd_upto_*
+// / crowd_dnto_* (+0x70): 0x822DFAB0 looks them up, 0x822DF350 plays one,
+// stopping the last, when crowd_reactions (config/sound.dta: TRUE; +0x39))
+// are the venue bank's Sfx: game/crowd.cpp plays them through the world
 // (audio/synth.h), reaction() names them.
 //
 // Playback: its own SDL audio stream (SDL mixes it with the song's), 44100
@@ -61,17 +71,23 @@ public:
     // Opens the audio device (no sound until then; the tests leave it shut).
     bool open();
     // The messages (see above). `now`: seconds on the world's clock.
+    // musicStart / excitement / setEnabled return the reaction sound to
+    // play (empty: none).
     void introStart(bool fast, bool encore);
-    void musicStart(int excitement, double now);
-    void excitement(int level, double now);
+    std::string musicStart(int excitement, double now);
+    std::string excitement(int level, double now);
     void encoreOutro();
     void turnOff();
     void setPaused(bool paused);
-    void setEnabled(bool on);
+    std::string setEnabled(bool on, double now);
     bool enabled() const { return enabled_; }
-    void setVolume(float v) { volume_.store(v); }
-    // Runs the delayed excitement_loop.
+    // set_volume (dB, +0x2c).
+    void setVolumeDb(float db);
+    // The options' sound effects volume (dB) for the next stream / set_volume.
+    void setFxVolumeDb(float db) { fxDb_ = db; }
+    // Runs the delayed excitement_loop messages that are due.
     void update(double now);
+    int lastLevel() const { return level_; }
 
     // What plays (for the tests and logs): the stream, or kStreams.
     Stream playing() const { return Stream(playing_.load()); }
@@ -93,13 +109,14 @@ private:
     struct Voice {
         int stream = -1;
         double pos = 0;  // frames of the source
-        float gain = 0, target = 0;
+        float gain = 0;
         bool loop = false;
         double loopStart = 0, loopEnd = 0;  // ms (loop_ms)
     };
     static void SDLCALL callback(void* user, SDL_AudioStream* stream, int additional, int total);
     void mix(float* out, int frames);
     void play(Stream s, bool loop);
+    float gainOf(Stream s) const;
     void decodeAll();
 
     std::string venue_, bank_;
@@ -110,13 +127,14 @@ private:
     std::atomic<bool> decoded_{false};
 
     SDL_AudioStream* stream_ = nullptr;
-    std::mutex lock_;          // voices_ (audio thread and main thread)
-    std::array<Voice, 2> voices_;  // the current stream and the one fading out
+    std::mutex lock_;          // voice_ (audio thread and main thread)
+    Voice voice_;              // the one stream
     std::atomic<int> playing_{kStreams};
-    std::atomic<float> volume_{1};
     std::vector<float> scratch_;
     bool enabled_ = true, paused_ = false;
     int started_ = 0;
-    int level_ = 2;
-    double pendingAt_ = -1;  // excitement_loop time
+    int level_ = 2;            // +0x40: the last level
+    float volumeDb_ = 0;       // +0x2c set_volume
+    float fxDb_ = 0;           // 0x822DF140
+    std::vector<std::pair<double, int>> pending_;  // excitement_loop messages: (time, level)
 };

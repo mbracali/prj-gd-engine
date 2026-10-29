@@ -79,6 +79,11 @@ void announceDevices(SDL_Window* window) {
     SDL_PushEvent(&r);
 }
 
+std::vector<std::string>& extraGameArgs() {
+    static std::vector<std::string> a;
+    return a;
+}
+
 // What a module gets: the GdHost and everything it points to.
 struct HostSetup {
     std::vector<std::string> args;
@@ -88,6 +93,12 @@ struct HostSetup {
     GdHost host{};
     LogTee tee;
 
+    int discFd = -1;        // Android: the opened document (see below)
+    std::string discError;  // why the disc could not be opened, or ""
+
+    HostSetup(const HostSetup&) = delete;
+    HostSetup& operator=(const HostSetup&) = delete;
+    ~HostSetup() { platform::closeDocument(discFd); }
     HostSetup(SDL_Window* window, SDL_GLContext context, const Game& game, const std::string& version, ActionLog& log)
         : launcherVersion(version), logUser{&log, game.id} {
         // The game's command line: its program name, then the disc image.
@@ -101,7 +112,22 @@ struct HostSetup {
                     a += *extra;
                 }
             }
-        args.push_back(game.iso);
+        for (const std::string& a : extraGameArgs()) args.push_back(a);
+        // Android: a disc chosen in the file dialog is a content:// document;
+        // the game gets /proc/self/fd/<n> (it opens files with fopen; the
+        // module runs in this process, so the descriptor is its own too).
+        std::string disc = game.iso;
+        if (platform::isDocument(disc)) {
+            discFd = platform::openDocument(disc, discError);
+            if (discFd >= 0) {
+                disc = "/proc/self/fd/" + std::to_string(discFd);
+                SDL_Log("gdul: %s's disc %s opened as %s", game.id.c_str(), game.iso.c_str(), disc.c_str());
+            } else {
+                SDL_Log("gdul: %s's disc %s cannot be opened: %s", game.id.c_str(), game.iso.c_str(), discError.c_str());
+                log.add("disc of " + game.id + " cannot be opened (" + game.iso + "): " + discError);
+            }
+        }
+        args.push_back(disc);
         for (const std::string& a : args) argv.push_back(a.c_str());
         argv.push_back(nullptr);
         saveDir = platform::saveDir();
@@ -118,6 +144,7 @@ struct HostSetup {
         host.save_dir = saveDir.c_str();
         host.log = &hostLogLine;
         host.log_user = &logUser;
+        host.flags = platform::isSteamDeck() ? GD_HOST_HANDHELD : 0u;
     }
 
     // The game's SDL_Log lines into logs/<file> in the save folder too.
@@ -162,6 +189,12 @@ GameRun runGameModule(SDL_Window* window, SDL_GLContext context, const Game& gam
         return run;
     }
     HostSetup setup(window, context, game, launcherVersion, log);
+    if (!setup.discError.empty()) {
+        run.error = "its disc image (" + platform::displayName(game.iso) + ") cannot be read: " + setup.discError +
+                    ". Choose it again with Load ISO.";
+        run.unloaded = platform::closeLibrary(lib, game.modulePath);
+        return run;
+    }
 
     // Hand over: no launcher input state left, the controllers announced, the
     // game's log captured.
@@ -198,6 +231,11 @@ int fetchUiSounds(SDL_Window* window, SDL_GLContext context, const Game& game, c
     int given = 0;
     if (auto entry = reinterpret_cast<GdGameUiSoundsFn>(platform::librarySymbol(lib, GD_GAME_UI_SOUNDS_SYMBOL))) {
         HostSetup setup(window, context, game, launcherVersion, log);
+        if (!setup.discError.empty()) {
+            error = "the disc cannot be read: " + setup.discError;
+            platform::closeLibrary(lib, game.modulePath);
+            return 0;
+        }
         setup.captureLog(game.id + "-sounds.log");
         given = entry(&setup.host, sound, user);
         setup.releaseLog();
@@ -240,6 +278,12 @@ bool ExploreSession::open(SDL_Window* window, SDL_GLContext context, const Game&
     state_ = std::make_unique<State>();
     state_->window = window, state_->context = context, state_->modulePath = game.modulePath, state_->lib = lib;
     state_->setup = std::make_unique<HostSetup>(window, context, game, launcherVersion, log);
+    if (!state_->setup->discError.empty()) {
+        error = "its disc image cannot be read: " + state_->setup->discError + ". Choose it again with Load ISO.";
+        state_.reset();
+        platform::closeLibrary(lib, game.modulePath);
+        return false;
+    }
     state_->setup->captureLog(game.id + "-explore.log");
     const GdExplorer* api = entry(&state_->setup->host);
     SDL_GL_MakeCurrent(window, context);
@@ -262,3 +306,5 @@ bool ExploreSession::close() {
     state_.reset();
     return unloaded;
 }
+
+void setExtraGameArgs(const std::vector<std::string>& args) { extraGameArgs() = args; }

@@ -21,3 +21,7 @@ class Venue;
 // The crowd, crowd audio and two-player / encore checks of one venue variant
 // (tests/venuetest_crowd.cpp): the failures; `report` gets the summary.
 int crowdRun(Venue& v, std::string& report);
+// The camera checks of one venue variant (tests/venuetest_camera.cpp): every
+// shot framed through its length is a proper camera, not upside down, not
+// under the venue, its targets at their screen offsets. The failing shots.
+int cameraRun(Venue& v, std::string& report);

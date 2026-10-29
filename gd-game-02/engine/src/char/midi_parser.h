@@ -56,7 +56,7 @@ struct Song;
 // - Queries (0x8233DB90): cur_length / cur_start / cur_end of the last sent
 //   event, next_start of the next one (1e30 when none), next_start_delta
 //   (next start - current start), num_events, idle_event.
-class MidiParser : public ScriptObject {
+class MidiParser : public ScriptObject, public SinkHolder {
 public:
     // `def` = the parser's array in the loaded midi_parsers tree (kept alive
     // by the caller); `name` its first element.
@@ -79,6 +79,7 @@ public:
     // Sinks: add_sink / remove_sink from scripts, or from C++.
     void addSink(ScriptObject* sink);
     void removeSink(ScriptObject* sink);
+    void sinkDestroyed(ScriptObject* sink) override { removeSink(sink); }  // a deleted sink leaves (SinkHolder)
     const std::vector<ScriptObject*>& sinks() const { return sinks_; }
 
     double nextStart() const;

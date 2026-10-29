@@ -4,6 +4,7 @@
 
 #include <functional>
 #include <memory>
+#include <vector>
 
 #include "render/camera.h"
 #include "render/scene_gpu.h"
@@ -39,6 +40,10 @@ public:
     // One character on its own (the --view character viewer).
     void drawCharacter(gfx::MaterialRenderer& mr, chr::Character& c, const gfx::Camera& camera, bool hdr);
 
+    // The meshes Character::DrawShowing draws now (its LOD, showing flags,
+    // no shadow group), in draw order; `pose`: the world's showing.
+    static std::vector<const scene::Mesh*> meshesToDraw(const chr::Character& c, const gfx::ScenePose* pose);
+
     int meshesDrawn() const { return meshes_; }
     // Materials also write alpha (the crowd's card textures, render/crowd_view.h).
     bool forceAlphaWrite = false;
@@ -47,7 +52,6 @@ public:
     void resetStats() { meshes_ = 0; }
 
 private:
-    void drawObject(gfx::MaterialRenderer& mr, chr::Character& c, const scene::Object* o, int depth);
     void drawMesh(gfx::MaterialRenderer& mr, chr::Character& c, const scene::Mesh& m);
 
     World* world_ = nullptr;

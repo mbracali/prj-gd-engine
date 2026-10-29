@@ -11,3 +11,9 @@ class GameData;
 // change in what the director or the presets pick shows up.
 // GD02_GOLDEN_LOG=<file> writes the log. Returns the failures (0 or 1).
 int runDirectorGolden(const GameData& data);
+
+// Part of --venuetest: every venue's camera (a song, the director, the band)
+// stepped at 60 and at 240 frames a second must pick the same shots and put
+// the camera in the same places (the camera follows the song's clock, not
+// the frame rate). GD02_CAMRATE_SECONDS=<s> (default 60). Returns the failures.
+int runCameraRateCheck(const GameData& data);

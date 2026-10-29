@@ -54,6 +54,11 @@ public:
     void setLefty(bool lefty) { lefty_ = lefty; }
     // The song is won (game.dta game_won_msg: {track_panel explode}).
     void explode(float nowMs);
+    // The scripts' animate on the track's extend anim (player.dta
+    // start_using: range 2000 2025 over 0.8 s, the Star Power bump; the
+    // barf cheat on every beat): frames from -> to from song time `nowMs`
+    // over `periodMs`, the last frame held after.
+    void animateExtend(float from, float to, float periodMs, float nowMs) { extendAnim_ = {from, to, periodMs, nowMs}; }
     bool exploded() const { return explodeMs_ > -1e8f; }
     // The player's events of this frame (hits start smash effects, passes
     // turn gems into misses, releases cut tails).
@@ -62,6 +67,13 @@ public:
     void draw(gfx::Renderer& r, gfx::SceneCache& cache, const Song& song, const Player& player, float nowMs, float trackSpeed);
     // Particles drawn last frame (statistics).
     int particlesDrawn() const { return particlesDrawn_; }
+    // Since reset (--walktest's star_phrase check): smash_star effects started
+    // (Star Power phrase gems hit) and star tails' glow lines drawn over
+    // their tails.
+    int starSmashes() const { return starSmashes_; }
+    int starGlowLines() const { return starGlowLines_; }
+    // Since reset: phrase_captured combo effects started (per slot).
+    int comboStarts() const { return comboStarts_; }
 
 private:
     // A smash view's copy for one slot (0x8269C968): normal, star or bonus.
@@ -99,6 +111,7 @@ private:
     void buildTail(const Gem& g, int gemIndex, int slot, const Player& player, float nowMs);
     void drawTails(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, const Player& player, float nowMs);
     void drawSmashers(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, const Player& player, float nowMs);
+    void drawCombo(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, float nowMs);
     void drawEffects(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, const Player& player, float nowMs);
     void drawParticles(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, const Player& player, float nowMs);
     void drawExplode(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, float nowMs);
@@ -142,14 +155,22 @@ private:
     std::array<float, 5> hitMs_{};    // last hit per slot (smasher hit anim)
     std::array<float, 5> missMs_{};   // last miss per slot (smasher pop anim)
     std::array<std::array<Smash, 3>, 5> smash_;
+    // The phrase_captured effects per slot (0x8269AB80 / 0x8269B058):
+    // combo1 smash_combo.view, combo2 smash_combo_lightning.view.
+    std::array<Smash, 5> combo1_, combo2_;
+    float combo2Angle_ = 12;  // track_graphics combo2_angle, degrees
     std::array<gfx::ParticleSet, 5> burn_;
     std::array<bool, 5> burnOn_{};
     std::unordered_map<int, TailSparks> tailSparks_;  // gem x 8 + slot
     gfx::ParticleSet explodeParts_;
     float explodeMs_ = -1e9f;
     float introStartMs_ = -1e9f;
+    struct ExtendAnim {
+        float from = 0, to = 0, periodMs = 0, startMs = -1e9f;
+    } extendAnim_;
     std::unique_ptr<gfx::ParticleRenderer> particles_;
     int particlesDrawn_ = 0;
+    int starSmashes_ = 0, starGlowLines_ = 0, comboStarts_ = 0;
     std::vector<GemState> gemState_;
     std::unordered_map<int, float> releaseClip_;  // released gem -> frozen tail start (relative y)
     float blowMs_ = -1e9f;

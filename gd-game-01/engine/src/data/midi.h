@@ -40,8 +40,14 @@ public:
     // Position in measures (0-based, fractional), as used for Star Power drain.
     double tickToMeasure(double tick) const;
     int division() const { return division_; }
+    // MeasureMap (FUN_00239718): the beat within its measure plus the tick
+    // within that beat / division, with the original's integer arithmetic
+    // (a measure is numerator * 4 * division / denominator ticks).
+    float measureBeat(double tick) const;
 
 private:
+    struct Measure { int tick, measure, ticksPerMeasure; };
+    std::vector<Measure> measures_;
     struct Tempo { double tick, ms, usPerBeat; };
     struct Signature { double tick, measure; int beatsPerMeasure; };
     std::vector<Tempo> tempos_;

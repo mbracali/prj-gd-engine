@@ -57,6 +57,24 @@ std::string originalAppBundle(const std::string& app);
 // modules lib<id>.so), with a trailing separator; "" elsewhere.
 std::string nativeLibDir();
 
+// Android: a disc image chosen in the file dialog is a document, a content://
+// URI, read where it is (never copied). isDocument: such a path (false
+// elsewhere). openDocument: a file descriptor to read it (the caller closes
+// it with closeDocument), or -1 and `error` says why (no permission any more,
+// not a file on the device). documentName: its name as the file dialog shows
+// it. displayName: that for a document, the file name for any other path.
+bool isDocument(const std::string& path);
+int openDocument(const std::string& uri, std::string& error);
+void closeDocument(int fd);
+std::string documentName(const std::string& uri);
+std::string displayName(const std::string& path);
+
+// A Steam Deck (or what the games treat as one, a handheld PC): the Steam
+// Deck download (built with GDUL_STEAM_DECK), SteamDeck=1 in the environment
+// (Steam sets it on the Deck, Gaming Mode and Desktop Mode alike), or the DMI
+// board name "Jupiter" (LCD) or "Galileo" (OLED). Always false on Android.
+bool isSteamDeck();
+
 // Shared libraries (the game modules).
 void* openLibrary(const std::string& path, std::string& error);
 void* librarySymbol(void* lib, const char* name);

@@ -12,6 +12,9 @@
 #   - gd01_module_entry.cpp is the module's gd_game_run, gd01_module_explore.cpp
 #     its gd_game_explore (the launcher's model explorer, with gd01's loaders),
 #     gd01_module_sounds.cpp its gd_game_ui_sounds (Guitar Hero's menu sounds).
+# On Android it is libgd-game-01.so in the launcher's APK, built as gd01's own
+# APK builds it (engine/CMakeLists.txt): OpenGL ES 3.0, the upscaler stub (no
+# Vulkan FSR / DLSS), SDL3 from the same source as the launcher's libSDL3.so.
 # Used by ../../scripts/build.sh.
 cmake_minimum_required(VERSION 3.24)
 project(gd01_module LANGUAGES C CXX)
@@ -40,7 +43,20 @@ if(NOT GD01_VERSION OR NOT gd01_srcs)
 endif()
 message(STATUS "gd01 module: gd01 ${GD01_VERSION}")
 
-find_package(SDL3 REQUIRED CONFIG)
+if(ANDROID)
+  # Linked against the launcher's libSDL3.so (built from this source in the
+  # APK); only libgd-game-01.so goes into the APK.
+  set(GD01_SDL3_SOURCE "" CACHE PATH "SDL3 source tree (Android)")
+  set(SDL_SHARED ON CACHE BOOL "" FORCE)
+  set(SDL_STATIC OFF CACHE BOOL "" FORCE)
+  set(SDL_TEST_LIBRARY OFF CACHE BOOL "" FORCE)
+  add_subdirectory(${GD01_SDL3_SOURCE} SDL3 EXCLUDE_FROM_ALL)
+  # gd01's Android sources: the upscaler stub, the disc picker of its own APK.
+  list(REMOVE_ITEM gd01_srcs "${GD01_ENGINE}/src/render/vk_upscaler.cpp")
+  list(APPEND gd01_srcs "${GD01_ENGINE}/src/render/vk_upscaler_stub.cpp" "${GD01_ENGINE}/src/platform/android_data.cpp")
+else()
+  find_package(SDL3 REQUIRED CONFIG)
+endif()
 add_library(gd01_module SHARED ${gd01_srcs} gd01_module_entry.cpp gd01_module_explore.cpp gd01_module_sounds.cpp ${GDUL_SDK}/gd_module_shim.cpp)
 target_include_directories(gd01_module PRIVATE ${GD01_ENGINE}/src ${GDUL_SDK})
 target_link_libraries(gd01_module PRIVATE SDL3::SDL3)
@@ -49,7 +65,11 @@ set_source_files_properties(${GD01_ENGINE}/src/main.cpp PROPERTIES COMPILE_DEFIN
 
 # The AI upscalers, as gd01 builds them: FSR 3.1 and volk always, DLSS where
 # its SDK is present (Linux x86-64; NGX finds its model library next to the
-# launcher, where scripts/build.sh puts it).
+# launcher, where scripts/build.sh puts it). None on Android.
+if(ANDROID)
+  target_compile_definitions(gd01_module PRIVATE GD01_DLSS=0)
+  target_link_libraries(gd01_module PRIVATE android log)
+else()
 add_subdirectory(${GD01_ENGINE}/third_party/fidelityfx fidelityfx)
 target_include_directories(gd01_module SYSTEM PRIVATE ${GD01_ENGINE}/third_party/vulkan ${GD01_ENGINE}/third_party/volk
                            ${GD01_ENGINE}/third_party/fidelityfx/include)
@@ -62,6 +82,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64
 else()
   target_compile_definitions(gd01_module PRIVATE GD01_DLSS=0)
 endif()
+endif()  # NOT ANDROID
 
 option(GD01_STEAM_DECK "Steam Deck build: handheld default settings" OFF)
 if(GD01_STEAM_DECK)
@@ -77,6 +98,12 @@ endif()
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   # Unique symbols would keep the library loaded after the launcher unloads it.
   target_compile_options(gd01_module PRIVATE -fno-gnu-unique)
+endif()
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 14)
+  # GCC 14 (the Steam Runtime's gcc-14, the Steam Deck download) warns wrongly
+  # about std::vector::insert in pss.cpp (-Wstringop-overflow, a known false
+  # positive of its inlined memmove); gd-game-01 itself is frozen.
+  set_source_files_properties(${GD01_ENGINE}/src/video/pss.cpp PROPERTIES COMPILE_OPTIONS -Wno-stringop-overflow)
 endif()
 if(MINGW)
   target_link_options(gd01_module PRIVATE -static-libgcc -static-libstdc++ -static $<$<CONFIG:Release>:-s>)
@@ -98,3 +125,6 @@ endforeach()
 
 set_target_properties(gd01_module PROPERTIES OUTPUT_NAME gd-game-01 PREFIX ""
   CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
+if(ANDROID)
+  set_target_properties(gd01_module PROPERTIES PREFIX "lib")  # an APK packs lib*.so only
+endif()

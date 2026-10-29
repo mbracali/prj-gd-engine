@@ -13,8 +13,8 @@
 namespace {
 
 constexpr int kRate = 44100;
-constexpr float kFadeSeconds = 0.25f;  // [I] replacing a stream fades instead of cutting
-constexpr double kCrowdAudioDelay = 1.0;  // config/sound.dta (crowd_audio_delay 1) [C data]
+constexpr double kCrowdAudioDelay = 1.0;  // config/sound.dta (crowd_audio_delay 1) [C data]; +0x34
+constexpr float kCrowdVolumeDb = -2.0f;   // config/sound.dta (crowd_volume -2) [C data]; +0x30
 
 const char* const kLevelNames[] = {"kExcitementBoot", "kExcitementBad", "kExcitementOkay", "kExcitementGreat", "kExcitementPeak"};
 
@@ -135,92 +135,92 @@ void SDLCALL CrowdAudio::callback(void* user, SDL_AudioStream* stream, int addit
     SDL_PutAudioStreamData(stream, self->scratch_.data(), frames * int(sizeof(float) * 2));
 }
 
-// Mixes the voices (linear resampling; a fade of kFadeSeconds between gains).
+// Mixes the stream (linear resampling).
 void CrowdAudio::mix(float* out, int frames) {
     std::lock_guard<std::mutex> g(lock_);
     if (paused_ || !decoded_.load()) return;
-    const float vol = volume_.load();
-    const float step = 1.0f / (kFadeSeconds * kRate);
-    for (Voice& v : voices_) {
-        if (v.stream < 0) continue;
-        const Pcm& p = pcm_[size_t(v.stream)];
-        if (!p.ok) {
+    Voice& v = voice_;
+    if (v.stream < 0) return;
+    const Pcm& p = pcm_[size_t(v.stream)];
+    if (!p.ok) {
+        v.stream = -1;
+        return;
+    }
+    const double total = double(p.frames.size() / 2);
+    const double inc = double(p.rate) / kRate;
+    const double loopStart = v.loopStart * p.rate / 1000.0, loopEnd = v.loopEnd * p.rate / 1000.0;
+    for (int i = 0; i < frames; ++i) {
+        if (v.loop && loopEnd > loopStart && v.pos >= loopEnd) v.pos = loopStart + std::fmod(v.pos - loopEnd, loopEnd - loopStart);
+        if (v.loop && v.pos >= total - 1) v.pos = loopEnd > loopStart ? loopStart : 0;
+        if (v.pos >= total - 1) {
             v.stream = -1;
-            continue;
+            playing_.store(kStreams);
+            break;
         }
-        const double total = double(p.frames.size() / 2);
-        const double inc = double(p.rate) / kRate;
-        const double loopStart = v.loopStart * p.rate / 1000.0, loopEnd = v.loopEnd * p.rate / 1000.0;
-        for (int i = 0; i < frames; ++i) {
-            if (v.gain < v.target) v.gain = std::min(v.target, v.gain + step);
-            else if (v.gain > v.target) v.gain = std::max(v.target, v.gain - step);
-            if (v.loop && loopEnd > loopStart && v.pos >= loopEnd) v.pos = loopStart + std::fmod(v.pos - loopEnd, loopEnd - loopStart);
-            if (v.loop && v.pos >= total - 1) v.pos = loopEnd > loopStart ? loopStart : 0;
-            if (v.pos >= total - 1 || (v.gain <= 0 && v.target <= 0)) {
-                v.stream = -1;
-                break;
-            }
-            const size_t k = size_t(v.pos);
-            const float t = float(v.pos - double(k));
-            const float l = p.frames[k * 2] + (p.frames[k * 2 + 2] - p.frames[k * 2]) * t;
-            const float r = p.frames[k * 2 + 1] + (p.frames[k * 2 + 3] - p.frames[k * 2 + 1]) * t;
-            out[i * 2] += l * v.gain * vol;
-            out[i * 2 + 1] += r * v.gain * vol;
-            v.pos += inc;
-        }
+        const size_t k = size_t(v.pos);
+        const float t = float(v.pos - double(k));
+        const float l = p.frames[k * 2] + (p.frames[k * 2 + 2] - p.frames[k * 2]) * t;
+        const float r = p.frames[k * 2 + 1] + (p.frames[k * 2 + 3] - p.frames[k * 2 + 1]) * t;
+        out[i * 2] += l * v.gain;
+        out[i * 2 + 1] += r * v.gain;
+        v.pos += inc;
     }
 }
 
-// The stream replaces what plays (0x822DFC10 [I: fade]); dB from the dta.
+// 0x822DF2F8: fx volume + crowd_volume + set_volume + the entry's dB.
+float CrowdAudio::gainOf(Stream s) const {
+    return std::pow(10.0f, (fxDb_ + kCrowdVolumeDb + volumeDb_ + entries_[size_t(s)].db) / 20.0f);
+}
+
+// 0x822DF860 [C]: while enabled, the old stream is deleted and the new one
+// starts (no cross-fade).
 void CrowdAudio::play(Stream s, bool loop) {
-    pendingAt_ = -1;
     const Entry& e = entries_[size_t(s)];
-    if (!enabled_ || e.file.empty()) return;
+    if (!enabled_) return;
     std::lock_guard<std::mutex> g(lock_);
-    // The current voice fades out in the second slot.
-    if (voices_[0].stream >= 0) {
-        voices_[1] = voices_[0];
-        voices_[1].target = 0;
-    }
-    Voice v;
-    v.stream = int(s);
-    v.loop = loop;
-    v.target = std::pow(10.0f, e.db / 20.0f);
-    v.gain = voices_[1].stream >= 0 ? 0 : v.target;
-    if (e.loopStartMs >= 0 && e.loopEndMs > e.loopStartMs) v.loopStart = e.loopStartMs, v.loopEnd = e.loopEndMs;
-    voices_[0] = v;
+    voice_ = Voice();
+    playing_.store(kStreams);
+    if (e.file.empty()) return;
+    voice_.stream = int(s);
+    voice_.loop = loop;
+    voice_.gain = gainOf(s);
+    if (e.loopStartMs >= 0 && e.loopEndMs > e.loopStartMs) voice_.loopStart = e.loopStartMs, voice_.loopEnd = e.loopEndMs;
     playing_.store(int(s));
 }
 
-void CrowdAudio::introStart(bool fast, bool encore) {
-    started_ = 0;
-    play(encore && !fast ? kEncoreIntro : kIntro, false);
-}
+void CrowdAudio::introStart(bool fast, bool encore) { play(encore && !fast ? kEncoreIntro : kIntro, false); }
 
-void CrowdAudio::musicStart(int excitement, double now) {
+std::string CrowdAudio::musicStart(int excitement, double now) {
     started_ = 1;
     level_ = 2;
-    this->excitement(excitement, now);
+    return this->excitement(excitement, now);
 }
 
-void CrowdAudio::excitement(int level, double now) {
-    if (level < 0 || level > 4) return;
+// 0x822DF590 [C].
+std::string CrowdAudio::excitement(int level, double now) {
+    if (!started_ || !enabled_ || level < 0 || level > 4) return {};
+    const std::string r = reaction(level_, level);
     level_ = level;
-    if (!started_ || !enabled_) return;
-    pendingAt_ = now + kCrowdAudioDelay;
+    pending_.push_back({now + kCrowdAudioDelay, level});
+    return r;
 }
 
 void CrowdAudio::update(double now) {
-    if (pendingAt_ >= 0 && now >= pendingAt_) play(Stream(kBoot + level_), true);
+    // excitement_loop (0x822DFD40): the level's loop, in message order.
+    while (!pending_.empty() && now >= pending_.front().first) {
+        const int level = pending_.front().second;
+        pending_.erase(pending_.begin());
+        play(Stream(kBoot + level), true);
+    }
 }
 
 void CrowdAudio::encoreOutro() { play(kEncoreOutro, true); }
 
+// 0x822DF0E8 [C]: only the stream goes (started, the level and the pending
+// excitement_loop messages stay).
 void CrowdAudio::turnOff() {
-    pendingAt_ = -1;
-    started_ = 0;
     std::lock_guard<std::mutex> g(lock_);
-    for (Voice& v : voices_) v.target = 0;
+    voice_ = Voice();
     playing_.store(kStreams);
 }
 
@@ -229,10 +229,21 @@ void CrowdAudio::setPaused(bool paused) {
     paused_ = paused;
 }
 
-void CrowdAudio::setEnabled(bool on) {
-    if (on == enabled_) return;
+// 0x822DF9D8 [C].
+std::string CrowdAudio::setEnabled(bool on, double now) {
     enabled_ = on;
-    if (!on) turnOff();
+    if (!on) {
+        turnOff();
+        return {};
+    }
+    return excitement(level_, now);
+}
+
+// set_volume (0x822DFD98 -> 0x822DF2F8): applied to the stream at once.
+void CrowdAudio::setVolumeDb(float db) {
+    volumeDb_ = db;
+    std::lock_guard<std::mutex> g(lock_);
+    if (voice_.stream >= 0) voice_.gain = gainOf(Stream(voice_.stream));
 }
 
 std::string CrowdAudio::reaction(int prev, int level) {

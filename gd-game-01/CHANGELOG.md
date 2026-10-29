@@ -6,6 +6,53 @@ matches the tag's version.
 
 ## [Unreleased]
 
+## [1.1.6] - 2026-10-28
+
+**The guitarist moves freely again, as in the original.**
+
+### Fixed
+- The lead guitarist is no longer pulled back to his spot. An extra
+  correction that the original does not have kept easing him back to the
+  walk spot every frame, and he jumped back to it at camera cuts, so a
+  spin or a walk could look like a force was dragging him to one point.
+  As in the original, he now stays where a walk ends, and only straightens
+  up when his next move is about to start.
+- Spins and other moves that turn around now finish the whole turn instead
+  of stopping part way.
+- Snapping a move to the beat no longer moves or turns the guitarist.
+- Walks pick their stop move the way the original does.
+- Face-off guitarists keep their spot the way the original does.
+
+## [1.1.5] - 2026-10-28
+
+**The band moves as in the original, and notes only count once the song starts.**
+
+### Fixed
+- Band movement, checked again against the original game:
+  - Each venue now only allows the moves the original allows there (some
+    Star Power, intro and win moves are left out in the basement, the small
+    clubs, the theatre, the festival or the arena), and only the moves of the
+    song's tempo; walking moves only where the venue allows walks.
+  - The guitarist plays his "doing badly" moves whenever the rock meter is
+    below 20%, even before he starts playing (face-off: when well behind the
+    other player), and no longer changes moves when a wail or a solo ends.
+  - The guitarist slows down and speeds up with the songs that ask for it
+    (7 songs), like the rest of the band.
+  - The drummer and keyboard player keep time with the bar, so in songs with
+    3/4, 5/4 or 7/4 bars they no longer drift off the beat.
+  - The career's final win plays its own celebration move again.
+  - Star Power moves no longer cut in while one is still blending out.
+  - Face-off: only the drummer is on stage with the two guitarists.
+- Strumming or fretting during the venue intro no longer plays miss sounds
+  or counts as a mistake: as in the original, the guitar is only read once
+  the song starts (the highway is fully out by then). Frets held at that
+  moment count.
+- The song clock now allows for the audio device's buffer (about 20 ms), so
+  notes heard and notes judged line up better; the hit window itself is the
+  original's (±100 ms strums, −40..+160 ms hammer-ons and pull-offs).
+- After the win explosion, the highway pieces disappear once the explosion
+  is over instead of staying on screen (wide screens).
+
 ## [1.1.4] - 2026-10-28
 
 ### Fixed

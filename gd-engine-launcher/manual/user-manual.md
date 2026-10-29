@@ -71,7 +71,11 @@ quit the game (or close the window), you are back in the list.
 list on the left, grouped (for Guitar Hero II: characters, crowd, guitars
 and basses, drum kits, venues, venue props; for Guitar Hero: guitarists, band,
 crowd, guitars, venues), and the chosen model on the right, slowly turning
-on a turntable. Characters play their animations (idle first). Click a
+on a turntable. Characters stand in their rest pose (Guitar Hero II's in a T-pose, arms
+out; Guitar Hero's with their arms down);
+**Next animation** plays each of their animations (idle first), then the
+rest pose again. A character with a guitar, bass or drum kit has a **Show
+instrument** checkbox under its name: untick it to see the character alone. Click a
 group's header (or press green on it) to close or open it; left and right
 on a header close and open it too. The buttons at the bottom (Show, Back,
 Reset view, Next animation, Turntable) can be clicked.
@@ -85,10 +89,37 @@ Reset view, Next animation, Turntable) can be clicked.
 | Move (pan) | | right or middle drag, Shift + drag | right shoulder + right stick | |
 | Reset the view | R | double-click | Y, right stick click | yellow fret |
 | Next animation | N, Tab | | X | blue fret |
+| Show instrument on / off | I | click the checkbox | left stick click | |
 | Turntable on / off | T | | left shoulder | orange fret |
 | Back to the list | Esc | right click on the list | B | red fret |
 
 Esc first clears the search; pressing it again goes back to the list.
+
+## Steam Deck
+
+Use the Steam Deck download (`gdul-<version>-steamdeck-x86_64.tar.gz`): its
+games start set up for the Deck (full screen at 1280 x 800, 60 FPS, lighter
+effects). In Desktop Mode extract it, put your discs in its `original_isos/`
+folder, then Steam > Games > Add a Non-Steam Game to My Library > Browse >
+choose `Guitar Dream Universal Launcher`. Play it from Gaming Mode; the Deck's
+buttons work as a gamepad. `STEAM-DECK.txt` in the download has the details
+and tips (the icon, the on-screen keyboard, starting a game straight from
+Steam). The other Linux download works on the Deck too and recognises it.
+
+## Starting a game from a terminal
+
+```
+"Guitar Dream Universal Launcher" --play gd-game-02                 # Guitar Hero II at once
+"Guitar Dream Universal Launcher" --play gd01 --iso ~/gh.iso --exit-after
+"Guitar Dream Universal Launcher" --explore gd-game-01              # its models
+"Guitar Dream Universal Launcher" --list                            # games, versions, discs found
+```
+
+After the game you are back in the list, unless you add `--exit-after`
+(then the launcher closes, with the game's exit code). `--iso` uses that disc
+for this run only. Anything after `--` goes to the game itself. `--help`
+lists every option; on Windows run it from a terminal (Command Prompt or
+PowerShell) to see the text.
 
 ## Your files
 
@@ -108,12 +139,13 @@ app to another folder with the Finder (Applications, say; take
 `original_isos/`) and open it again, or in Terminal run
 `xattr -dr com.apple.quarantine "/path/to/Guitar Dream Universal Launcher.app"`.
 If macOS asks whether the launcher may read your Downloads, Documents or
-Desktop folder, allow it when your discs are there. On **Android** use Load ISO: the
-launcher copies the disc image you pick into its folder
-(`Android/data/io.github.mbracali.gdul/files/original_isos/`, which takes a
-few minutes and as much space again; afterwards the file you picked is no longer needed) and
-says when it is ready. Only the games with an Android module can be played
-there (Guitar Hero II, gd-game-02).
+Desktop folder, allow it when your discs are there. On **Android** use Load ISO and pick
+your disc image wherever it is on the device (Downloads, an SD card...): the
+launcher reads it where it is, nothing is copied, and remembers it after a
+restart. Keep the file where it was; if you move or delete it, or Android
+withdraws the permission, Play says so: pick it again with Load ISO. A file
+on a cloud drive must be downloaded to the device first. Every ready game
+plays on Android (Guitar Hero and Guitar Hero II).
 
 `config.txt` remembers the disc image chosen for each game; `gdul.log` has
 one line per action (date, user, action); `logs/` the games' messages of

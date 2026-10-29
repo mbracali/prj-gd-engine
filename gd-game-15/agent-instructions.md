@@ -7,6 +7,7 @@ Read this before working in this folder. It applies to every AI coding agent (Cl
 - `game-info.yaml` describes the game (names, version, readiness). Keep `guitar_dream_version` equal to the engine's version.
 - The Guitar Dream Universal Launcher (`gd-engine-launcher/`) loads each ready game as a module (`gd_game_run`, optional `gd_game_explore`) into its own window, and is the project's only release (`docs/release-process.md`).
 - Behaviour comes from the original game's executable (Ghidra project in `ghidra/`, git-ignored). The goal is to match the original exactly; mark findings **[C]** (confirmed, with address) or **[I]** (inferred) in the docs.
+- Read the guidelines in `guidelines/` at the repository root before working (`general_guidelines.md`, `universal_launcher.md`: the GAMEPADS screen, Enhanced menu, mouse / Enter / touch and packaging, the same in every game, modelled on gd-game-01; `smilar_behaviors.md`), and the single backlog `gd-backlog.md` at the root (section of this game). Update the backlog at the start and at the end of every task.
 
 ## This folder
 **Guitar Hero: Van Halen** (Xbox 360): not started (Guitar Dream version 0.0.0, not ready to play). Before writing code, plan it with the owner and model the folder on `gd-game-02`.

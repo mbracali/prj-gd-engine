@@ -129,15 +129,34 @@ int crowdRun(Venue& v, std::string& report) {
     c.check(au.entry(CrowdAudio::kEncoreOutro).loopEndMs > au.entry(CrowdAudio::kEncoreOutro).loopStartMs, "crowd audio: encore loop_ms");
     au.introStart(false, false);
     c.check(au.playing() == CrowdAudio::kIntro, "crowd audio: intro");
-    au.musicStart(3, t);
+    // 0x822DF590: nothing before music_start; at music_start the reaction
+    // from Okay; every excitement message reacts (the same level too) and
+    // queues its own excitement_loop a crowd_audio_delay later.
+    c.check(au.started() || au.excitement(1, t).empty(), "crowd audio: no reaction before music_start");
+    c.check(au.musicStart(3, t) == "crowd_upto_good", "crowd audio: music_start reacts Okay -> Great");
     au.update(t + 0.5);
     c.check(au.playing() == CrowdAudio::kIntro, "crowd audio: the level waits crowd_audio_delay");
     au.update(t + 1.0);
     c.check(au.playing() == CrowdAudio::kGreat, "crowd audio: the Great loop");
+    c.check(au.excitement(3, t + 1.0) == "crowd_upto_good", "crowd audio: the same level reacts again");
+    c.check(au.excitement(1, t + 1.5) == "crowd_dnto_poor", "crowd audio: Great -> Bad reacts dnto_poor");
+    au.update(t + 2.1);
+    c.check(au.playing() == CrowdAudio::kGreat, "crowd audio: the first excitement_loop plays its own level");
+    au.update(t + 2.6);
+    c.check(au.playing() == CrowdAudio::kBad, "crowd audio: then the second one");
+    c.check(au.setEnabled(false, t + 3).empty() && au.playing() == CrowdAudio::kStreams, "crowd audio: set_enabled FALSE stops the stream");
+    c.check(au.excitement(2, t + 3).empty(), "crowd audio: no reaction while disabled");
+    c.check(au.setEnabled(true, t + 3) == "crowd_upto_poor", "crowd audio: set_enabled TRUE reacts to the last level");
+    au.update(t + 4);
+    c.check(au.playing() == CrowdAudio::kBad, "crowd audio: and plays its loop");
     au.introStart(false, true);
     c.check(au.playing() == CrowdAudio::kEncoreIntro, "crowd audio: encore intro");
     w.message("encore_outro");
     c.check(au.playing() == CrowdAudio::kEncoreOutro, "crowd audio: encore outro");
+    w.message("game_lost");
+    c.check(au.playing() == CrowdAudio::kEncoreOutro, "crowd audio: game_lost leaves the stream to lose.dta's turn_off");
+    w.interp().send(w.interp().findObject("crowd_audio"), "turn_off", {}, false);
+    c.check(au.playing() == CrowdAudio::kStreams, "crowd audio: turn_off");
 
     // ---- two players: the hides and the amps (the chain's RndDir types)
     int hidden = 0, hideErrors = 0, amps = 0;

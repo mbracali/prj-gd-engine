@@ -50,30 +50,34 @@ public:
 };
 
 // `crowd_audio` (GH2's CrowdAudio script object, 0x822DFD98): turn_off,
-// enabled, set_enabled, set_paused, set_volume, play_stream.
+// enabled, set_enabled, set_paused, set_volume, play_stream, excitement.
 class CrowdAudioObj : public ScriptObject {
 public:
-    CrowdAudioObj(CrowdAudio& a, World& w) : ScriptObject("crowd_audio", "CrowdAudio"), a_(a), w_(w) {}
+    CrowdAudioObj(CrowdAudio& a, World& w, std::function<void()> sync, std::function<void(const std::string&)> react)
+        : ScriptObject("crowd_audio", "CrowdAudio"), a_(a), w_(w), sync_(std::move(sync)), react_(std::move(react)) {}
     bool handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) override {
         r = Value::integer(0);
         auto num = [&](size_t k) { return k < args.size() ? in.evalValue(args[k]).number() : 0.0f; };
+        sync_();
         if (msg == "turn_off") return a_.turnOff(), true;
         if (msg == "enabled") return r = Value::integer(a_.enabled() ? 1 : 0), true;
-        if (msg == "set_enabled") return a_.setEnabled(num(0) != 0), true;
+        if (msg == "set_enabled") return react_(a_.setEnabled(num(0) != 0, w_.seconds())), true;
         if (msg == "set_paused") return a_.setPaused(num(0) != 0), true;
-        if (msg == "set_volume") return a_.setVolume(std::pow(10.0f, num(0) / 20.0f)), true;
+        if (msg == "set_volume") return a_.setVolumeDb(num(0)), true;
         if (msg == "play_stream") {
             // wingame (stone, after the game is beaten): not a venue level stream.
             in.onStub("crowd_audio", "play_stream " + (args.size() > 1 ? textOf(in, args[1]) : std::string()), r);
             return true;
         }
-        if (msg == "excitement") return a_.excitement(int(num(0)), w_.seconds()), true;
+        if (msg == "excitement") return react_(a_.excitement(int(num(0)), w_.seconds())), true;
         return false;
     }
 
 private:
     CrowdAudio& a_;
     World& w_;
+    std::function<void()> sync_;
+    std::function<void(const std::string&)> react_;
 };
 
 }  // namespace
@@ -121,7 +125,7 @@ private:
 class Crowd::PartObj : public ScriptObject {
 public:
     PartObj(Crowd& c, Actor& a, const std::string& scope, scene::Object* o)
-        : ScriptObject(ScriptObject::scoped(scope, o->name), o->cls), a_(a), o_(o) {
+        : ScriptObject(ScriptObject::scoped(scope, o->name), o->cls), c_(c), a_(a), o_(o) {
         drv_ = a.character->driver(o->name);
         random = &c.rng_;
     }
@@ -137,10 +141,17 @@ public:
         if (msg == "set" && args.size() >= 2 && textOf(in, args[0]) == "showing") return ch.setShowing(o_, in.evalValue(args[1]).truthy()), true;
         if (msg == "set_showing") return ch.setShowing(o_, !args.empty() && in.evalValue(args[0]).truthy()), true;
         if (msg == "showing") return r = Value::integer(ch.showing(o_) ? 1 : 0), true;
-        // lighter_flame (a RndDir: its MatAnim under a looping AnimFilter):
-        // start / stop (RndAnimatable StartAnim / EndAnim) [I: drawn while
-        // started, render/crowd_view.h].
-        if (o_->as<scene::DirObj>() && (msg == "start" || msg == "stop")) return a_.lighter = msg == "start", true;
+        // lighter_flame, a RndDir of type world_fx (rnd_objects.dta) [C data]:
+        // enter / exit {$this stop}; start {$this animate (range 0
+        // kHugeFloat)} {$this set_showing TRUE}; stop {$this stop_animation}
+        // {$this set_showing FALSE} (and frees its particles: it has none).
+        // So the flame shows only while started, its filter running from
+        // frame 0 at each start (render/crowd_view.h).
+        if (o_->as<scene::DirObj>() && (msg == "start" || msg == "stop")) {
+            a_.lighter = msg == "start";
+            if (a_.lighter) a_.lighterStart = c_.world_.seconds();
+            return true;
+        }
         in.onStub(name(), msg, r);
         return true;
     }
@@ -171,6 +182,7 @@ private:
         return true;
     }
 
+    Crowd& c_;
     Actor& a_;
     scene::Object* o_;
     chr::ClipDriver* drv_ = nullptr;
@@ -249,7 +261,8 @@ Crowd::Crowd(World& world) : world_(world) {
         owned_.push_back(std::move(rnd));
     }
     prevAudioObj_ = in.findObject("crowd_audio");
-    audioObj_ = std::make_unique<CrowdAudioObj>(*audio_, world);
+    audioObj_ = std::make_unique<CrowdAudioObj>(
+        *audio_, world, [this] { syncAudio(world_.interp()); }, [this](const std::string& r) { reactionSound(r); });
     in.registerAs("crowd_audio", audioObj_.get());
 }
 
@@ -352,6 +365,13 @@ Crowd::State* Crowd::find(const std::string& name) {
 
 void Crowd::enter() {
     Interp& in = world_.interp();
+    // CrowdAudio ctor 0x822E0928 -> set_enabled with the mode's crowd_audio
+    // (modes.dta: FALSE in practice and tutorial) [C].
+    if (ScriptObject* cfg = in.findObject("gamecfg")) {
+        std::vector<Value> key{Value::symbol("crowd_audio")};
+        Value on = Value::integer(1);
+        if (cfg->handleNative(in, "get", key, on)) audio_->setEnabled(in.evalValue(on).truthy(), world_.seconds());
+    }
     for (State& s : crowds_)
         if (s.script) in.send(s.script, "enter", {}, false);
     // The archetypes enter with the directory (Character Enter: the dta
@@ -535,39 +555,49 @@ void Crowd::reactionSound(const std::string& name) {
     if (!reaction_.empty()) world_.stopSound(reaction_);
     // At the options' sound effects volume, 0 dB in the attract mode
     // (0x822DF140, 0x822B0F08) [C].
-    world_.playSound(name, nullptr, attract_ || !world_.synth() ? 0.0f : world_.synth()->fxVolumeDb());
+    world_.playSound(name, nullptr, attract_ || !world_.synth() ? 0.0f : world_.synth()->fxVolumeDb());  // crowd_reactions: TRUE (config/sound.dta) [C data]
     reaction_ = name;
 }
 
-// World messages the crowd audio follows (GH2's CrowdAudio is a game sink).
-void Crowd::listen(Interp& in, const std::string& msg, const std::vector<Value>& args) {
-    auto arg = [&](size_t k) { return k < args.size() ? in.evalValue(args[k]) : Value::integer(0); };
-    const double now = world_.seconds();
+// The options' sound effects volume for the crowd streams and reactions:
+// 0 dB in the attract mode (0x822DF140, 0x822B0F08) [C].
+void Crowd::syncAudio(Interp& in) {
     if (ScriptObject* cfg = in.findObject("gamecfg")) {
         std::vector<Value> key{Value::symbol("mode")};
         Value mode;
         attract_ = cfg->handleNative(in, "get", key, mode) && mode.isText() && mode.s == "attract";
     }
+    audio_->setFxVolumeDb(attract_ || !world_.synth() ? 0.0f : world_.synth()->fxVolumeDb());
+}
+
+// World messages the crowd audio follows (GH2's CrowdAudio is a game sink:
+// intro_start_msg, music_start, game_won_msg, game_lost, excitement;
+// 0x822DF9D8).
+void Crowd::listen(Interp& in, const std::string& msg, const std::vector<Value>& args) {
+    auto arg = [&](size_t k) { return k < args.size() ? in.evalValue(args[k]) : Value::integer(0); };
+    const double now = world_.seconds();
+    syncAudio(in);
     if (msg == "intro_start_msg") {
+        // 0x822DFCA8 [C]: crowd_begin (+0x64) whatever $encore, then the stream.
         const bool fast = arg(0).truthy(), encore = arg(1).truthy();
+        reactionSound("crowd_begin");
         audio_->introStart(fast, encore);
-        if (!encore) reactionSound("crowd_begin");
         if (!in.findObject("game"))
             for (State& s : crowds_) setFullness(s, encore ? 1.0f : 0.5f, encore ? 1.0f : 0.5f);
     } else if (msg == "music_start") {
-        audio_->musicStart(excitement_, now);
+        reactionSound(audio_->musicStart(excitement_, now));
     } else if (msg == "excitement") {
         const int level = arg(0).integerValue();
-        if (level != excitement_) reactionSound(CrowdAudio::reaction(excitement_, level));
         excitement_ = level;
-        audio_->excitement(level, now);
+        reactionSound(audio_->excitement(level, now));
         if (!in.findObject("game"))
             for (State& s : crowds_) setFullness(s, fullnessFor(level), fullnessFor(level));
     } else if (msg == "game_won_msg") {
         reactionSound("crowd_win");
     } else if (msg == "game_lost") {
+        // Only the reaction (+0x6c) [C 0x822DFD98]: the stream plays on until
+        // lose.dta's {crowd_audio turn_off}.
         reactionSound("crowd_lose");
-        audio_->turnOff();
     } else if (msg == "encore_outro") {
         audio_->encoreOutro();
     }

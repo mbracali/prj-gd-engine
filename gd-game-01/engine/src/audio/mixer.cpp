@@ -22,6 +22,12 @@ bool Mixer::open(std::string& error) {
         error = SDL_GetError();
         return false;
     }
+    SDL_AudioSpec device{};
+    int deviceFrames = 0;
+    if (SDL_GetAudioDeviceFormat(SDL_GetAudioStreamDevice(stream_), &device, &deviceFrames) && device.freq > 0 && deviceFrames > 0)
+        outputLatencyMs_ = std::min(100.0, deviceFrames * 1000.0 / device.freq);
+    SDL_Log("audio: %s, device buffer %d frames at %d Hz (%.1f ms held back from the song clock)", SDL_GetCurrentAudioDriver(),
+            deviceFrames, device.freq, outputLatencyMs_);
     SDL_ResumeAudioStreamDevice(stream_);
     return true;
 }
@@ -44,6 +50,7 @@ void Mixer::play(std::unique_ptr<VgsStream> stream, std::vector<Track> tracks, d
         vgs_ = std::move(stream);
         leadInFrames_ = static_cast<int64_t>(leadInMs * rate_ / 1000.0);
         leadIn_ = leadInFrames_;
+        fixedT_ = -leadInMs;
         framesPushed_ = 0;
         songFrames_ = 0;
         for (GuitarCopy& g : copies_) {
@@ -85,6 +92,7 @@ void Mixer::setPaused(bool paused) {
 }
 
 double Mixer::songTimeMs(uint64_t ticksNs) const {
+    if (fixedStep_ > 0) return fixedT_;
     if (paused_) return pausedTimeMs_;
     if (ticksNs == 0) ticksNs = SDL_GetTicksNS();
     double elapsed = (double(ticksNs) - double(anchorNs_.load())) / 1e9;
@@ -93,6 +101,10 @@ double Mixer::songTimeMs(uint64_t ticksNs) const {
 }
 
 double Mixer::frameTimeMs() {
+    if (fixedStep_ > 0) {
+        if (!paused_) fixedT_ += fixedStep_;
+        return fixedT_;
+    }
     uint64_t now = SDL_GetTicksNS();
     double raw = songTimeMs(now);
     if (paused_ || !frameNs_) {
@@ -124,7 +136,7 @@ void SDLCALL Mixer::callback(void* user, SDL_AudioStream* stream, int additional
     if (!self->paused_) {
         self->songFrames_ += frames;
         int64_t queued = SDL_GetAudioStreamQueued(stream) / int(2 * sizeof(float));
-        self->anchorFrames_ = self->songFrames_ - queued;
+        self->anchorFrames_ = self->songFrames_ - queued - int64_t(self->outputLatencyMs_ * self->rate_ / 1000.0);
         self->anchorNs_ = SDL_GetTicksNS();
     }
 }

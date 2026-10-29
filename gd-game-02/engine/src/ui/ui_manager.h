@@ -2,6 +2,7 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <deque>
 #include <functional>
@@ -26,6 +27,7 @@ class SceneCache;
 class UiView;
 }  // namespace gfx
 namespace scene {
+class Object;
 class MiloLibrary;
 class UiStyles;
 class Locale;
@@ -85,12 +87,16 @@ public:
     // A game event for the game panel and its sinks (intro_start_msg,
     // game_won_msg, game_lost, game_outro_complete, star_power_ready...).
     void gameEvent(const std::string& msg, std::vector<Value> args = {});
+    // A message for the game panel's script alone (extend_track).
+    void gameScript(const std::string& msg, std::vector<Value> args = {});
 
     std::string currentScreen() const;
     bool inTransition() const;
     bool inSplashes() const { return splash_ >= 0; }
     // The game panel is up (the song is the UI's).
     bool inGame() const;
+    // Presses of a kPad button so far (the walk test).
+    int pressCount(int button) const { return button >= 0 && button < 16 ? presses_[size_t(button)] : 0; }
     // Screens entered so far, in order (the walk test).
     const std::vector<std::string>& history() const { return history_; }
     void gotoScreen(const std::string& name, bool back = false);
@@ -167,6 +173,16 @@ public:
     void drawView(gfx::UiView& v);
     // GHScreen backwards_anim: the next transition plays backwards.
     void setBackwardsAnim() { backwardsAnim_ = true; }
+    // The running (or last) transition goes back (GH2's direction flag,
+    // which picks ui_enter_back / ui_exit_back over the _forward events).
+    bool transitionBack() const { return back_; }
+    // The transition for the port's own screens (gd01's slide): phase 0
+    // none, 1 the current screen leaving, 2 it entering; t 0..1; back.
+    void transitionState(int& phase, float& t, bool& back) const {
+        phase = phase_ == Phase::Out ? 1 : phase_ == Phase::In ? 2 : 0;
+        t = phase ? float(std::clamp(phaseMs_ / std::max(1.0, phaseLen_), 0.0, 1.0)) : 1.0f;
+        back = back_;
+    }
     // {x foreach_player $p body...}: runs the body with $p = player0 / player1.
     Value foreachPlayer(const std::vector<Value>& args);
     // The help bar shows what the current screen's (helpbar ...) says.
@@ -177,6 +193,17 @@ public:
     // The cheats' names (cheat_* locale tokens) and whether each is on now,
     // as the scripts' variables say (the Enhanced Options' CHEATS section).
     bool cheatOn(const std::string& id) const;
+    // The yellow fret (any controller) on the main menu: GAMEPADS (yellowButton
+    // waits out the cheat codes; openGamepads opens it now).
+    void yellowButton();
+    void openGamepads();
+    // Mouse support (gd01's UiSystem::mouse): at (x, y) in menu units,
+    // hovering focuses the component under it (a list takes clicks only), a
+    // click selects it; the help bar's items act as their buttons; the
+    // port's screens hit-test their own rows. True when something was hit.
+    bool mouse(float x, float y, bool click);
+    // The wheel: one Up (-1) or Down (+1) press.
+    void wheel(int dir);
     // Turns a cheat on or off as its button code does (Enhanced Options).
     void setCheat(const std::string& id, bool on);
 
@@ -187,6 +214,7 @@ private:
     void beginTransition(ScreenObj* next, bool back);
     void switchScreens();
     void finishTransition();
+    void releaseSharedFrames();
     void updateTransition();
     void applyTransitionPose(float t);
     void updateAnims();
@@ -195,6 +223,7 @@ private:
     bool enterIsStart_ = false;  // the keyboard's Enter, pressed on a text entry: Start until released
     void setMetacamFrame(const std::string& group, float t);  // t 0..1 of the group, on every panel's metacam
     void resetMetacam();
+    void setViewFrame(PanelObj* p, const std::string& object, float frame);
     void routeButton(int button, int player);
     void enterPanel(PanelObj* p);
     void exitPanel(PanelObj* p);
@@ -234,6 +263,8 @@ private:
     std::vector<LongCheat> longCheats_;
     std::deque<int> cheatButtons_;
     double cheatLastMs_ = -1e9;
+    double gamepadsAtMs_ = -1;
+    std::array<int, 16> presses_{};  // yellowButton: GAMEPADS opens then (SDL ms), -1 none
 
     // screens
     ScreenObj* current_ = nullptr;
@@ -247,6 +278,9 @@ private:
     bool backwardsAnim_ = false;
     // The shared metacam's groups since its last reset, in order (frame 0..1).
     std::vector<std::pair<std::string, float>> metacam_{{"trans_in_forward.grp", 1.0f}};
+    // The last frame of each animation in a directory several panels share
+    // (setViewFrame), for views made later.
+    std::map<const scene::Object*, std::pair<std::string, float>> sharedFrames_;
     std::set<std::string> viewPanels_;  // the panels that have made a view
     std::vector<ScreenObj*> stack_;  // push_screen
     // GH2's PushScreen (0x8236B800) enters the new screen over the current

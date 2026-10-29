@@ -16,7 +16,11 @@
 // kEscape, k1, kUp) is a real keyboard key and "j<SDL gamepad button>"
 // (ja, jb, jstart, jdpup) a button of GD02_VIRTUAL_PAD's controller: both
 // go through the input layer (bindings, key repeat, the frets' menu
-// buttons), not straight to the menus; a "j" press is released 80 ms on.
+// buttons), not straight to the menus; a "j" press is released 80 ms on;
+// "j<SDL gamepad axis>=<value>" (jleftx=-20000, jrighttrigger=0; ja6=0 the
+// controller's own axis 6) moves an axis of that controller and leaves it there. "hover<x>_<y>" /
+// "click<x>_<y>" (menu units, 1280 x 720) move / left-click the mouse,
+// "rclick<x>_<y>" right-clicks, "wheelup" / "wheeldown" scroll (gd01's).
 class MenuKeys {
 public:
     struct Key {
@@ -26,6 +30,10 @@ public:
         int player;
         int keycode = 0;   // "k": an SDL_Keycode (button unused)
         int padButton = -1;  // "j": an SDL_GamepadButton (button unused)
+        int padAxis = -1;    // "j<axis>=<v>": an SDL_GamepadAxis set to axisValue
+        int axisValue = 0;
+        int mouse = 0;       // 1 hover, 2 click, 3 right click, 4 wheel up, 5 wheel down (at mx, my)
+        float mx = 0, my = 0;
     };
     MenuKeys() = default;
     explicit MenuKeys(const std::string& text);

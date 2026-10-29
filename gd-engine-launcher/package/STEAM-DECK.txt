@@ -1,0 +1,34 @@
+Guitar Dream Universal Launcher on the Steam Deck
+
+This is the Steam Deck download: the Linux launcher built in Valve's Steam
+Runtime, with every game already set up for the Deck (full screen at
+1280 x 800, 60 FPS, lighter effects, the Deck's own controls).
+
+1. In Desktop Mode, extract this folder somewhere in your home folder (for
+   example ~/Games/gdul-steamdeck), and copy your disc images (.iso) INTO its
+   original_isos/ folder. The launcher finds them there by itself (Gaming
+   Mode has no file picker for Load ISO).
+2. Steam > Games > Add a Non-Steam Game to My Library > Browse > choose the
+   file "Guitar Dream Universal Launcher" in this folder > Add Selected
+   Programs.
+3. Back in Gaming Mode, start "Guitar Dream Universal Launcher" from your
+   library (Non-Steam). Pick a game with the D-pad or the left stick, press A
+   to play. The games use the Deck's buttons as a gamepad (A green, B red,
+   Y yellow, X blue, L1 orange), or a guitar controller plugged in by USB.
+
+Tips for Gaming Mode
+- Icon: in Steam, the shortcut's Properties > the icon square > choose
+  "Guitar Dream Universal Launcher.png" from this folder.
+- Leave "Compatibility" off in the shortcut's Properties: it is a native
+  Linux program (no Proton).
+- Controller layout: the default "Gamepad" template is the right one. If the
+  launcher sees no controller, set Steam Input to "Gamepad" for the shortcut.
+- A keyboard on screen (a band name, the model search): press Steam + X.
+- Each game's Enhanced Options change any setting; "Apply Steam Deck
+  Settings" puts the Deck's back. Your own saved settings are always kept.
+- Start a game straight from Steam: in the shortcut's Properties > Launch
+  Options, write for example
+      --play gd-game-02 --exit-after
+  (Guitar Hero II at once, back to Steam when you quit it). "--help" lists
+  every option.
+- The launcher stays a window; in Gaming Mode Steam shows it full screen.

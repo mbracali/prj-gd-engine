@@ -4,6 +4,96 @@ All notable changes for players. Versions follow SemVer; release tags are
 `gd-game-02/vX.Y.Z`. The release workflow publishes the section whose heading
 matches the tag's version. Nothing is released yet.
 
+## [0.1.6] - 2026-10-28
+
+### Fixed
+- Song start as in Guitar Hero II: the venue plays its intro shot first, then
+  the fretboard extends with the original's sounds, then the music starts.
+- The venue intro camera moves from the first frame when a song is started
+  from the menus (it stood still until the fretboard appeared).
+- Venue cameras frame their shots as Guitar Hero II does: they look at the
+  band with the shot's own tilt and slide sideways to put it where the shot
+  wants it, and camera paths start from the shot's first keyframe. Stone
+  Henge's intro is no longer upside down (the crowd "hanging from the sky"),
+  the arena's intro no longer flies under the floor, and every other shot
+  frames the band where the original does.
+- Venue animations that move along curves (paper planes, flash pots, swinging
+  lights and more) follow their smooth paths instead of straight lines.
+- Star Power: completing a phrase sets off the lightning over the frets again,
+  and Star Power sustains glow blue again (the solid tails hid the glow).
+- Sustain tails are solid instead of translucent; a wrong note and Star Power
+  play their sounds.
+- Guitar and bass necks no longer have see-through parts (Gibson Flying V and
+  others).
+- Career: Strutter on Medium (and other songs) no longer crash; the career
+  screens are no longer darker than they should be.
+- Menus: a band name grows from left to right instead of piling up its
+  letters; Credits sits in its row; menu sounds are no longer silenced after
+  a song; the strum icon is no longer cut in half; the Enhanced menu always
+  shows the band.
+- Character select: the door starts closed and locked characters show as
+  locked, as in Guitar Hero II.
+- Setlist: a locked encore is listed without its name, as in Guitar Hero II,
+  so it no longer overlaps "Beat X/5 songs to continue".
+- The Glitches band has everything unlocked.
+
+## [0.1.5] - 2026-10-28
+
+### Fixed
+- Controllers no longer press left / right (or any direction) by themselves:
+  a D-pad that SDL reads from an axis (many adapters and guitars) is now
+  judged from that axis's resting value with hysteresis, a button held as the
+  controller connects counts only once released, and a controller that goes
+  away releases what it held. Before, the menus' key repeat kept moving.
+- GAMEPADS: a menu control waiting for its new binding takes only buttons and
+  keys, so a guitar's tilt or a drifting stick can no longer be bound to it.
+- The venue camera no longer speeds up on fast screens: its follow filter and
+  shake run in Guitar Hero II's 1/60 s steps at any frame rate (they ran once
+  a frame, so 2.4 times too fast at 144 Hz), and the frame rate no longer
+  changes which shots the director picks.
+- Band members no longer vanish when filmed from behind or from afar: the
+  lower-detail models (the behind-the-band shots ask for them) were never
+  drawn.
+- Guitars and basses: the guitar's shadow model was drawn over the neck,
+  hiding parts of it; outfits' detail and shadow groups now merge as in
+  Guitar Hero II.
+- Menus: going back plays Guitar Hero II's backward transition instead of
+  the forward entrance again, and screens no longer get darker after going
+  back and forth (the bricks' light comes back on).
+- A crash when a song ended with some outfits.
+- Windows: the game writes `gd02.log` in its save folder, with the address of
+  a crash, for bug reports.
+
+### Added
+- The mouse in every menu, as in Guitar Hero (gd-game-01): pointing at an
+  entry highlights it, a click chooses it (a list row too), a right click goes
+  back, the wheel scrolls; the help bar's items are clickable. The pointer
+  hides after a few seconds, on a key or button press and during a song.
+  Enhanced Options > Enable Mouse Selection turns it off. Taps on a touch
+  screen are clicks.
+- The main menu's yellow fret (or a gamepad's yellow Y button) opens
+  GAMEPADS again, with its item in the help bar; Guitar Hero II's cheat codes
+  still work (it opens once no other button follows within the codes' 750 ms).
+- `GD02_KEYS` mouse items (`hover<x>_<y>`, `click<x>_<y>`, `rclick<x>_<y>`,
+  `wheelup` / `wheeldown`) and axis items (`jleftx=-20000`, `ja6=0`);
+  `GD02_VIRTUAL_PAD=<vid>:<pid>:dpadaxis=<rest>`; `GD02_INPUTLOG=1`; walk
+  tests `mouse`, `gamepads` and `stickyaxis`.
+- `GD02_PERF=1`: a frame-time breakdown in the log every 2 s (update, draw,
+  present, GPU wait, draws and uploads per frame). `GD02_LOG=<file>` copies
+  the log to a file.
+
+### Changed
+- GAMEPADS has Guitar Hero (gd-game-01)'s layout, flow and mouse in Guitar
+  Hero II's menu font and colours (the rows no longer overlap; the mouse's
+  "x" clears a binding).
+- Enhanced Options looks and works like Guitar Hero's Enhanced Settings:
+  collapsible sections, check boxes, dropdowns (Screen Mode, In-Game Max FPS,
+  Internal Resolution), the explanation box and the mouse, over a still shot
+  of the venue with the band (it no longer plays live behind the menu).
+- macOS: uniforms and streamed vertices are written through unsynchronized
+  buffer mappings, the path Apple's OpenGL handles without stalls
+  (`GD02_GL_STREAM=map|subdata` chooses on any system).
+
 ## [0.1.4] - 2026-10-28
 
 ### Fixed

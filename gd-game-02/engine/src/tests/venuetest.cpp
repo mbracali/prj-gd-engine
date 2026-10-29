@@ -346,6 +346,10 @@ int runVenueTest(const std::string& dataPath) {
             const int crowdProblems = crowdRun(*v, crowdReport);
             std::printf("    crowd: %s\n", crowdReport.c_str());
             failures += crowdProblems;
+            std::string cameraReport;
+            const int cameraProblems = cameraRun(*v, cameraReport);
+            std::printf("    camera: %s\n", cameraReport.c_str());
+            failures += cameraProblems;
             failures += int(r.problems.size()) + r.undecoded + rawUnexpected + scriptProblems;
         }
         // Every language's star message (stone's geom names ../eng/starmessage.milo).
@@ -374,6 +378,7 @@ int runVenueTest(const std::string& dataPath) {
     failures += unexpectedUnused;
     // The director's and presets' golden log (tests/director_golden.h).
     failures += runDirectorGolden(*data);
+    failures += runCameraRateCheck(*data);
     std::printf("\nvenue test %s: %d failures, %zu world milos loaded, %zu unused\n", failures ? "FAILED" : "passed", failures,
                 loaded.size(), unused.size());
     return failures ? 1 : 0;

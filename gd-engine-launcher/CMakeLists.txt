@@ -47,6 +47,12 @@ target_sources(gdul PRIVATE
 target_include_directories(gdul PRIVATE src sdk)
 target_link_libraries(gdul PRIVATE SDL3::SDL3 ${CMAKE_DL_LIBS})
 target_compile_definitions(gdul PRIVATE GDUL_VERSION="${PROJECT_VERSION}")
+# The Steam Deck download (scripts/build.sh steamdeck): the Linux launcher,
+# always treating the machine as a Steam Deck (platform::isSteamDeck).
+option(GDUL_STEAM_DECK "Steam Deck build: the games get the handheld profile" OFF)
+if(GDUL_STEAM_DECK)
+  target_compile_definitions(gdul PRIVATE GDUL_STEAM_DECK=1)
+endif()
 if(ANDROID)
   set_target_properties(gdul PROPERTIES OUTPUT_NAME main)
   target_link_libraries(gdul PRIVATE android log)

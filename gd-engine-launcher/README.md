@@ -84,11 +84,64 @@ legend of these keys: its buttons say what they do.)
 
 **Menu sounds**: Guitar Hero's own (move, select, play, back, error), read at
 run time from the player's Guitar Hero disc by the gd-game-01 module
-(`gd_game_ui_sounds`, below) when that disc is known; silent otherwise. Never
-shipped: they live in memory only. The launcher's audio device is released
-before a game runs and opened again after. Quitting a game returns to
-the list in the same window (closing the window while a game runs also
-returns to the list).
+(`gd_game_ui_sounds`, below) when that disc is known. Never shipped: they
+live in memory only. Without that disc, the launcher's own built-in sounds
+(`ui_sounds.cpp`: plucked strings and a power-chord sting, synthesized at
+start, nothing taken from a game), at the same loudness. The launcher's audio
+device is released before a game runs and opened again after. Quitting a
+game returns to the list in the same window (closing the window while a game
+runs also returns to the list). The launcher is always a window: after a game
+that went full screen, maximized the window or hid the cursor, it leaves full
+screen (waiting for Windows and macOS to finish) and puts back the size and
+place it had. That holds on every desktop build, the Steam Deck's too (in
+Gaming Mode, gamescope shows the window full screen); Android has no window
+mode, and the launcher leaves its settings alone there.
+
+### Command line
+
+```
+"Guitar Dream Universal Launcher" [--play <game> | --explore <game>] [--iso <file>] [--exit-after] [-- <game args>]
+"Guitar Dream Universal Launcher" --list | --version | --help
+```
+
+- `--play <game>` starts that game once the window shows (`gd-game-02`,
+  `gd02` or `02`); `--explore <game>` opens its Explore models screen.
+- `--iso <file>` is the disc for this run only (not saved); without it, the
+  game's saved or found disc.
+- After the game (or the explorer) the list comes back, unless
+  `--exit-after`: then the launcher quits with the game's exit code (1 when
+  it did not start, 2 for a wrong command line).
+- `-- <args>` go to the game's own command line, before the disc image
+  (as `GDUL_GAME_ARGS`).
+- `--list` prints every game (id, name, version, ready, module, the disc
+  found) and the disc folders; `--version` and `--help` print and quit.
+
+Windows: the launcher is a window program; started from a terminal it writes
+to that terminal (`AttachConsole`); `start /wait` gives its exit code to
+cmd.exe. A problem (an unknown game, no disc, no module) is printed and shown
+in a dialog (with `--exit-after`: printed, exit code 1). Steam: put the
+options in the shortcut's Launch Options (`STEAM-DECK.txt`). Implemented in
+`src/main.cpp` and `Launcher::runCommandLine`.
+
+### Steam Deck
+
+The Steam Deck download (`gdul-<v>-steamdeck-x86_64.tar.gz`, `build.sh
+steamdeck`) is the Linux launcher built in Valve's Steam Runtime 3 "sniper"
+SDK, with `GDUL_STEAM_DECK=ON` and every module built with its Steam Deck
+option (`GD01_STEAM_DECK`, `GD02_STEAM_DECK`): the games start with their
+handheld defaults (gd01: gd-game-01/README.md's "Steam Deck" column; gd02:
+full screen, 60 FPS, 800 lines, no FPS counter). It ships `STEAM-DECK.txt`
+(adding it to Steam as a non-Steam game, Gaming Mode tips).
+
+Any launcher build also detects a Deck at run time (`platform::isSteamDeck`:
+`SteamDeck=1` in the environment, or the DMI board name `Jupiter` / `Galileo`)
+and hands the games `GD_HOST_HANDHELD` in `GdHost::flags` (gd02 then uses its
+Steam Deck defaults; gd01 only in the Deck download, where they are compiled
+in, or with its Enhanced Settings > Apply Steam Deck Settings). Saved
+settings always win; nothing is locked. Controls: Steam's virtual gamepad in
+Gaming Mode (`SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD`, one press seen
+from two pads acts once) and the Deck's own controls through SDL's Steam
+Deck HIDAPI driver when Steam does not own them (`SDL_HINT_JOYSTICK_HIDAPI_STEAMDECK`).
 
 ## Explore models
 
@@ -102,8 +155,17 @@ own loaders and renderer through the optional `gd_game_explore` entry point
 
 | Game | Models | How they are drawn |
 |---|---|---|
-| gd-game-02 | characters (24), crowd, guitars and basses, drum kits, venues (geometry, face-off variants), venue props | characters as `chr::Character` + `BandView` with their main driver's clips (idle first) and the venue outfits (guitar_sg, the arena kit); the rest as scenes through GH2's materials and standard shader, lit by their own Environ or a key light; guitars stood up |
-| gd-game-01 | guitarists, band (band_chars.dta), crowd, guitars, venues | guitarists and band as gd01's `Character` with every clip (idle first), the rest as `Scene` + `SceneRenderer` (the views no other view draws), a key light; guitars stood up |
+| gd-game-02 | characters (24), crowd, guitars and basses, drum kits, venues (geometry, face-off variants), venue props | characters as `chr::Character` + `BandView` in their rest pose, with their main driver's clips (idle first) and the venue outfits (guitar_sg, the arena kit; "Show instrument" off leaves them out); the rest as scenes through GH2's materials and standard shader, lit by their own Environ or a key light; guitars stood up |
+| gd-game-01 | guitarists, band (band_chars.dta), crowd, guitars, venues | guitarists and band as gd01's `Character` in their rest pose, with every clip (idle first; "Show instrument" off builds them without their guitar or bass), the rest as `Scene` + `SceneRenderer` (the views no other view draws), a key light; guitars stood up |
+
+Characters start in their **rest pose** (the bind pose: a T-pose for GH2's
+characters, arms down for GH1's; nothing through the body); **Next animation** plays each clip in turn and
+then the rest pose again (`GdExploreView::clip` -1; a module reloads the
+character to get it back). A character with a guitar, bass or drum kit shows
+a **Show instrument** checkbox under its card (a click, `I`, or the left
+stick's click; `GdExplorer::has_instrument` / `show_instrument`, gdul 0.1.6,
+read only when the module's `size` covers them); the choice stays for the
+next models.
 
 The list is grouped by kind; a group's header opens and closes it (click it,
 or green on it; left closes and right opens it; a search shows every match).
@@ -135,6 +197,7 @@ preference folder for `gd-engine/gdul`:
 - Linux: `~/.local/share/gd-engine/gdul/`
 - Windows: `%APPDATA%\gd-engine\gdul\`
 - macOS: `~/Library/Application Support/gd-engine/gdul/`
+- Android: the app's `files/gd-engine/gdul/` (internal storage)
 
 The same folder holds `config.txt` (`iso.<game id>=<path>`) and `logs/<game
 id>.log`, the game's own log lines of its last run. Moving between rows is not
@@ -156,7 +219,7 @@ iso_probe.*     disc identification: ISO 9660 (PVD, root folder, SYSTEM.CNF
 module_host.*   loads a game module and runs it in the window, or opens its
                 model explorer (below)
 explorer.cpp    the Explore models screen (list, groups, search, viewer, camera)
-ui_sounds.*     the menu sounds (a game's, from its disc) on SDL's audio device
+ui_sounds.*     the menu sounds (a game's, from its disc, or built-in) on SDL's audio device
 palette.h       the launcher's colours
 action_log.*    the action log
 platform.*      folders, user name, time, shared libraries per system
@@ -312,10 +375,14 @@ holds the signatures of games whose folder must not change (gd-game-01).
 ## Building
 
 ```
-gd-engine-launcher/scripts/build.sh [linux] [windows] [macos] [android] [all] [--force] [--previous <folder>]
+gd-engine-launcher/scripts/build.sh [linux] [steamdeck] [windows] [macos] [android] [all] [--force] [--previous <folder>]
 ```
 
-(macOS and Android: see [Other systems](#other-systems-macos-and-android).)
+(macOS and Android: see [Other systems](#other-systems-macos-and-android).
+Steam Deck: `steamdeck` runs `scripts/build_steamdeck.sh` in the
+`registry.gitlab.steamos.cloud/steamrt/sniper/sdk` container with podman or
+docker, into `local_builds/gdul-<v>-steamdeck-x86_64/`, checked by
+`verify_bundle.sh` as a Linux build plus its `STEAM-DECK.txt`.)
 
 Linux: cmake, ninja, a C++20 compiler and SDL3's development files (the
 gd-game-02 module also builds FFmpeg, as gd-game-02 does). Windows:
@@ -372,13 +439,14 @@ A new game needs a recipe in `scripts/build.sh` (`build_module_NN`): see
 
 | Variable | Effect |
 |---|---|
-| `GDUL_SCRIPT="<ms>:<cmd>[=<arg>];..."` | commands at those times since start: `up down left right green red yellow blue`, `drop=<file>` (a real drop event), `play=<game id>`, `explore=<game id>`, `shot=<file.bmp>`, `drag=1\|0` (the drop overlay), `toast=<text>`, `folders` (the disc folders dialog), `quit`; in the explorer also `collapse=<group text>\|all`, `expand=<group text>\|all`, `pick=<text>` (the first model whose name or path has it, shown at once), `search=<text>`, `orbit=<yaw>,<pitch>` (degrees), `zoom=<factor>`, `pan=<x>,<y>`, `clip=next`, `reset`, `turntable=0\|1` |
+| `GDUL_SCRIPT="<ms>:<cmd>[=<arg>];..."` | commands at those times since start: `up down left right green red yellow blue`, `drop=<file>` (a real drop event), `play=<game id>`, `explore=<game id>`, `shot=<file.bmp>`, `drag=1\|0` (the drop overlay), `toast=<text>`, `folders` (the disc folders dialog), `quit`; in the explorer also `collapse=<group text>\|all`, `expand=<group text>\|all`, `pick=<text>` (the first model whose name or path has it, shown at once), `search=<text>`, `orbit=<yaw>,<pitch>` (degrees), `zoom=<factor>`, `pan=<x>,<y>`, `clip=next`, `reset`, `turntable=0\|1`, `instrument=0\|1` (the Show instrument checkbox) |
 | `GDUL_WINDOW=<w>x<h>` | the starting window size |
 | `GDUL_GAME_QUIT_AFTER=<ms>` | quits each game that long after it starts |
 | `GDUL_GAME_ARGS="..."` | more arguments for the game, before the disc |
 | `GDUL_VIRTUAL_PAD=<vendor>:<product>` | plugs in a virtual gamepad (hex, e.g. `045e:028e`) |
 | `GDUL_GAMES_YAML=<file>` | another games.yaml |
 | `GDUL_SOUND_LOG=1` | logs each menu sound played (always on with `GDUL_SCRIPT`) |
+| `GDUL_BUILTIN_SOUNDS=1` | the launcher's built-in menu sounds even with a Guitar Hero disc |
 
 Headless: `SDL_VIDEO_DRIVER=offscreen SDL_AUDIO_DRIVER=dummy`. For example,
 play gd-game-02 from the list and come back:
@@ -450,18 +518,34 @@ gd02's Android build. The Gradle project is `android/` (applicationId
   `dlopen`, the folder being where its own `libmain.so` was loaded from.
   gd02's module is built by its CMakeLists.txt (`GD02_MODULE=ON`) with the
   NDK against the same SDL3 source, so it uses the launcher's `libSDL3.so`.
-  gd-game-01 (Vulkan, frozen, with its own APK) has no Android module: it is
-  listed only.
+  gd-game-01's module is built from `modules/gd01` as gd01's own APK builds
+  it: OpenGL ES 3.0, the upscaler stub (no Vulkan FSR / DLSS on Android).
+  Every ready game has its module in the APK, as on every system.
+  `GDUL_ABI=x86_64 scripts/build.sh android` builds an x86-64 APK
+  (`gdul-<version>-android-x86_64.apk`) for the emulator; it is not released.
 - **games.yaml, game-info.yaml, launcher-info.yaml, manifest.json** are APK
   assets under `gd-engine-games/` (SDL reads relative paths from the assets;
   `platform::baseDir()` is "" on Android). Licences and the manual are
   assets too.
 - **Discs**: Load ISO opens Android's file picker (a `content://` URI). The
-  launcher identifies it there (SDL reads such URIs), then copies it into
-  `Android/data/io.github.mbracali.gdul/files/original_isos/<game id>.iso`,
-  showing the progress, because the games open their disc with `fopen` (as
-  gd02's own Android build does). Discs put in that folder by hand are found
-  too.
+  launcher identifies the disc there (SDL reads such URIs) and saves the URI
+  itself; `GdulActivity` keeps the persistable read permission, so it still
+  works after a restart. Nothing is copied. When a game starts (or its
+  explorer, or its menu sounds) the launcher opens the document
+  (`ContentResolver.openFileDescriptor`, `GdulActivity.openDocument`) and
+  passes the game `/proc/self/fd/<n>`. Android 11+ refuses to open that path
+  again for a shared-storage file the app does not own (FUSE: EACCES), so the
+  module shim's `fopen` (`sdk/gd_module_shim.*`, Android only) reads such a
+  path through the descriptor (`pread`, one offset per `FILE`). A lost
+  permission or a document that is not a file on the device (a cloud drive)
+  is said in the Play error and logged. Discs put in
+  `Android/data/io.github.mbracali.gdul/files/original_isos/` by hand (USB)
+  are found too.
+- **Save folders**: Android's SDL gives every `SDL_GetPrefPath` caller the
+  app's `files/` folder. The launcher uses `files/gd-engine/gdul/` and the
+  shim gives each game `files/gd-engine/<game>/` (gd02's files from earlier
+  launchers are copied over once), so they no longer share `config.txt`,
+  `career.json` and `enhanced.json`.
 - **Signing**: the Android debug key (`~/.android/debug.keystore`, created if
   missing), or `GDUL_RELEASE_KEYSTORE` (+ `GDUL_RELEASE_KEYSTORE_PASSWORD`,
   `GDUL_RELEASE_KEY_ALIAS`, `GDUL_RELEASE_KEY_PASSWORD`). Releases use the

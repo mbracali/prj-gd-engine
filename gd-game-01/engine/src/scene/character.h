@@ -92,6 +92,30 @@ public:
     float clipEnd(int clip) const { return clips_[size_t(clip)].clip->endFrame(); }
     // Plays the least-recently-used clip carrying `flags` with an AnimDriver mode.
     void play(uint32_t flags, int mode);
+    // MyCharSys_v10 @0x280fc0 (after loading): which clips of the set may play
+    // in this song (the 0x80000000 "enabled" bit of each set entry). All are
+    // disabled, then those of the song's anim tempo (or of no tempo) enabled;
+    // a guitarist loses the walk clips where the venue has no walks (and in a
+    // face-off), kGuitarWin or kGuitarWinFinal by whether this is the career's
+    // final song, and in a face-off keeps one intro / lose / win clip; every
+    // clip whose (exclude_venues ...) names this venue is disabled. Once set,
+    // picks only consider enabled clips and a category with none plays nothing
+    // (FUN_0017e890 / FUN_0017fc28), as in the original.
+    struct ClipRules {
+        std::string venue;
+        int tempo = 1;
+        bool guitarist = false;
+        bool allowWalks = false;
+        int guitarists = 1;
+        bool finalSong = false;
+    };
+    void applyClipRules(const ClipRules& rules);
+    bool clipEnabled(int clip) const { return clips_[size_t(clip)].on; }
+    // The flags of the newest clip that has started blending in (FUN_00180710:
+    // the band's get_first_flags, the guitarist's kGuitarSpecial check).
+    uint32_t currentFlags() const;
+    // FUN_00180518: how much of the main clips' weight carries `flag`.
+    float flagWeight(uint32_t flag) const;
     // Starts the LRU clip of `flags` so its blend completes on `eventBeat`
     // (GuitarCharacter FUN_002856a0 / FUN_0017fd18).
     void playAt(uint32_t flags, float eventBeat);
@@ -100,6 +124,11 @@ public:
     // advance by the beat delta times the scale; only the phase target jumps
     // when the scale changes (realign absorbs that).
     void poll(float beat, float ms, float frameScale = 1);
+    // GameCharacter_v13 @0x283ac8: a character whose main.drv has (realign 1)
+    // phase-locks to the beat within the measure (MeasureMap: beat + tick / 480)
+    // instead of the song beat; frames still advance by the song beat's delta.
+    void poll(float beat, float ms, float frameScale, float measureBeat);
+    bool realigns() const { return realign_; }
     // main.drv (realign 1) (band_chars.dta: drummer, keyboard; AnimDriver_v0 @0x17ff18).
     void setRealign(bool on) { realign_ = on; }
 
@@ -130,6 +159,8 @@ public:
     void startAt(int clip, int mode, float frame);
     bool clipLoaded(int clip) const { return clip >= 0 && size_t(clip) < clips_.size() && clips_[size_t(clip)].clip; }
     bool rootMotion() const { return rootMotion_; }
+    // The last poll's beat delta times the frame scale (char+0x88).
+    float frameDBeat() const { return dBeat_; }
     // A clip change is queued or blending in.
     bool blending() const { return chain_.size() > 1; }
     // Hand drivers (guitarists, docs/guitarist_hands.md).
@@ -199,6 +230,8 @@ private:
         int set = 0;        // which clip set of the macro
         int index = -1;     // position in the clip set (the .acg numbering)
         uint64_t used = 0;  // LRU stamp
+        bool on = true;     // the set entry's enabled bit (applyClipRules)
+        std::vector<std::string> excludeVenues;
     };
     struct Edge {  // .acg: {dest_index, src_frame, dest_frame}
         int dest;
@@ -206,7 +239,10 @@ private:
     };
     struct Driver {  // AnimClipDriver
         int clip, mode;
-        float frame, delay, blend, dEff = 0;
+        // dStep: this poll's frame advance (+0x18, what the root motion and
+        // the blend use); dEff: the advance plus the phase snap (+0x20, what
+        // the next driver's delay counts down by).
+        float frame, delay, blend, dEff = 0, dStep = 0;
         int align = -1;  // the driver's copy of the beat-align nibble (-1: the clip's)
     };
     int select(uint32_t flags);
@@ -214,7 +250,6 @@ private:
     int handClip(const std::string& name) const;
     void pollChain(std::vector<Clip>& clips, std::vector<Driver>& chain, float beat, float dBeat, float dSec);
     void blendChain(const std::vector<Clip>& clips, const std::vector<Driver>& chain, float weight);
-    float flagWeight(uint32_t flag) const;
     void ik(const char* side, const std::string& dest, float frac);
     void updateSubtree(const std::string& name);
     void start(int clip, int mode);
@@ -264,8 +299,11 @@ private:
         float a2b2 = 0, inv2ab = 0;
     } ik_[2];
     uint64_t clock_ = 0;
-    float beat_ = 0, ms_ = 0, rawBeat_ = 0;
+    float beat_ = 0, ms_ = 0, rawBeat_ = 0, dBeat_ = 0;
     bool realign_ = false;
+    bool strict_ = false;  // applyClipRules ran: only enabled clips, no fallback
+    std::string model_;
+    std::vector<uint32_t> noClipLogged_;
     float realignLast_ = 1e30f;
     void realign(float beat);
     bool polled_ = false;
