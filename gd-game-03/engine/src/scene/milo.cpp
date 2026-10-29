@@ -2,6 +2,8 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "scene/milo.h"
 
+#include "devaids/audit.h"
+
 #include <algorithm>
 #include <cctype>
 #include <stdexcept>
@@ -186,7 +188,9 @@ Object* Directory::get(const std::string& name) const {
     if (index_.empty() && !objects.empty())
         for (const auto& o : objects) index_.emplace(o->name, o.get());
     auto it = index_.find(name);
-    return it == index_.end() ? nullptr : it->second;
+    if (it == index_.end()) return nullptr;
+    if (audit::enabled()) audit::touch(name);
+    return it->second;
 }
 
 Object* Directory::find(const std::string& name) const {
@@ -201,6 +205,7 @@ Object* Directory::find(const std::string& name) const {
 Object* Directory::resolve(const std::string& name) const {
     for (const Directory* d = this; d; d = d->parent)
         if (Object* o = d->find(name)) return o;
+    if (audit::enabled()) audit::miss(name);
     return nullptr;
 }
 

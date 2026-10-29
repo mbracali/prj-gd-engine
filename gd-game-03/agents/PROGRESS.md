@@ -26,7 +26,7 @@ PS2 textures, VGS, SPU ADPCM, PSS video), then walk the older class versions.
 Total to a playable, packaged module: about 24 hours of agent time; 100 %
 parity (every finding re-confirmed in SLUS_215.86) is longer.
 
-## 2026-10-28 23:00, M0 set-up
+## 2026-10-28 22:45, M0 set-up
 
 Done:
 - Disc ripped (`7z x` -> `extracted/iso`), ARK unpacked (1761 files, no
@@ -51,7 +51,7 @@ steps; adapted in M9.
 
 Next: M1 (directory v24 and the older class versions). Estimate unchanged.
 
-## 2026-10-28 23:40, M1 data layer (gate passed), M2 started
+## 2026-10-28 23:05, M1 data layer (gate passed), M2 started
 
 Done:
 - Directory v24; ObjectDir 16, RndDir 8, WorldDir 11, BandStarMeterDir 4, Mat 27,
@@ -76,7 +76,7 @@ Verified (fresh build, `ninja -C build/linux`: no warning or error lines):
 Next: M2 rule re-confirmation in SLUS_215.86 (Star Power, multiplier, rock
 meter), then M3 (scripts, UI, audit, walk).
 
-## 2026-10-29 00:30, M3 in progress (scripts, UI, boot flow)
+## 2026-10-28 23:12, M3 in progress (scripts, UI, boot flow)
 
 Done:
 - `memcard` object as the PS2's (0x0014c078): get_info, load_data /

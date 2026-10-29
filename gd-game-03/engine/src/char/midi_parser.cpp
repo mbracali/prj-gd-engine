@@ -432,6 +432,10 @@ bool MidiParser::handleNative(Interp& in, const std::string& msg, std::vector<Va
     if (msg == "cur_start") return r = Value::real(cur ? cur->start : 0.0f), true;
     if (msg == "cur_end") return r = Value::real(cur ? cur->end : 0.0f), true;
     if (msg == "next_start") return r = Value::real(float(nextStart())), true;
+    // This disc's MidiParser (handler 0x0023f550) answers debug_draw,
+    // num_events and next_event_beat: the next event's start in beats, or
+    // 1e30 past the last (0x002363b8) [C].
+    if (msg == "next_event_beat") return r = Value::real(m.next < m.events.size() ? m.events[m.next].start : 1e30f), true;
     if (msg == "next_start_delta") return r = Value::real(float(nextStart()) - (cur ? cur->start : 0.0f)), true;
     if (msg == "num_events") return r = Value::integer(int(m.events.size())), true;
     if (msg == "idle_event") return r = m.params.idleEvent ? in.toValue(m.params.idleEvent->children[1]) : Value::integer(0), true;

@@ -2,6 +2,8 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "script/script.h"
 
+#include "devaids/audit.h"
+
 #include <SDL3/SDL.h>
 
 #include <algorithm>
@@ -353,7 +355,7 @@ void Interp::unregisterName(const std::string& name, const ScriptObject* o) {
     if (auto it = objects_.find(name); it != objects_.end() && it->second == o) objects_.erase(it);
 }
 
-ScriptObject* Interp::findObject(const std::string& name) const {
+ScriptObject* Interp::findObjectImpl(const std::string& name) const {
     if (auto t = vars_.find("this"); t != vars_.end() && t->second.type == Value::Type::Object && t->second.object &&
                                       !t->second.object->nameScope.empty())
         if (auto s = objects_.find(ScriptObject::scoped(t->second.object->nameScope, name)); s != objects_.end()) return s->second;
@@ -365,6 +367,12 @@ ScriptObject* Interp::findObject(const std::string& name) const {
         if (resolver) return resolver(name.substr(c + 2));
     }
     return resolver && !name.empty() ? resolver(name) : nullptr;
+}
+
+ScriptObject* Interp::findObject(const std::string& name) const {
+    ScriptObject* o = findObjectImpl(name);
+    if (o && audit::enabled()) audit::touch(name);
+    return o;
 }
 
 ScriptObject* Interp::adopt(std::unique_ptr<ScriptObject> o) {

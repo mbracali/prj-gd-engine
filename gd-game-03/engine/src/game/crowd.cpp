@@ -147,7 +147,8 @@ public:
         // {$this set_showing FALSE} (and frees its particles: it has none).
         // So the flame shows only while started, its filter running from
         // frame 0 at each start (render/crowd_view.h).
-        if (o_->as<scene::DirObj>() && (msg == "start" || msg == "stop")) {
+        // On this disc the lighter is a WorldFx object (class revision 1).
+        if ((o_->as<scene::DirObj>() || o_->cls == "WorldFx") && (msg == "start" || msg == "stop")) {
             a_.lighter = msg == "start";
             if (a_.lighter) a_.lighterStart = c_.world_.seconds();
             return true;

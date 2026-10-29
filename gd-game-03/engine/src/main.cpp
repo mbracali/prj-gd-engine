@@ -30,6 +30,7 @@
 #include "tests/facefxtest.h"
 #include "tests/venuetest.h"
 #include "tests/chartest.h"
+#include "devaids/audit.h"
 #include "video/wmv_player.h"
 
 namespace {
@@ -191,6 +192,7 @@ int run(int argc, char** argv) {
         else if (a == "--sfxtest") sfxtest = true;
         else if (a == "--facefxtest") facefxtest = true;
         else if (a == "--walktest") opt.walk = value();
+        else if (a == "--audittest") opt.walk = value(), audit::enable();
         else if (a == "--view") viewPath = value();
         else if (a == "--playmovie") movie = value();
         else if (a == "--help" || a == "-h") { usage(); return 0; }

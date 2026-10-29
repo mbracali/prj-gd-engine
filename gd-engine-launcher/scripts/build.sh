@@ -122,6 +122,7 @@ arch_of() {
 # Vulkan only for its AI upscalers, which Android does not have).
 module_systems_01="linux steamdeck windows macos android"
 module_systems_02="linux steamdeck windows macos android"
+module_systems_03="linux steamdeck windows macos android"
 
 # module_inputs_hash <NN>: what a module takes from the launcher besides its
 # game's sources (the module SDK, modules/gdNN/); a module is reused only when
@@ -267,6 +268,29 @@ build_module_02() {
   esac
   cp "$engine/third_party/stb_vorbis/LICENSE.txt" "$dest/licenses/stb_vorbis-LICENSE.txt"
   (. "$engine/build_common.sh"; ship_ffmpeg_licence "$ffmpeg" "$dest")
+  cp "$engine/README.md" "$dest/README.md"
+}
+
+# gd-game-03 (Guitar Hero Encore: Rocks the 80s, PS2): gd02's engine with
+# the PS2 decoders; no FFmpeg (its own MPEG-2 / ADPCM decoders).
+build_module_03() {
+  local os="$1" work="$2" dest="$3" engine="$repo/gd-game-03/engine" sdl_arg="" deck=""
+  [ "$os" = steamdeck ] && deck="-DGD03_STEAM_DECK=ON"
+  [ "$os" = android ] && sdl_arg="-DGD03_SDL3_SOURCE=$SDL3_SRC"
+  # shellcheck disable=SC2046
+  cmake -S "$engine" -B "$work" -G Ninja -DCMAKE_BUILD_TYPE=Release -DGD03_MODULE=ON $sdl_arg $deck $(cmake_args "$os")
+  cmake --build "$work" --target gd03_module
+  mkdir -p "$dest/licenses"
+  case "$os" in
+    windows)
+      cp "$work/gd-game-03.dll" "$dest/"
+      (. "$engine/build_common.sh"; ship_winpthread "$dest" "$dest/licenses") ;;
+    macos) cp "$work/gd-game-03.dylib" "$dest/" && macos_fix_module "$dest" ;;
+    android)
+      cp "$work/libgd-game-03.so" "$dest/"
+      echo libgd-game-03.so > "$dest/native-libs.txt" ;;
+    *) cp "$work/gd-game-03.so" "$dest/" ;;
+  esac
   cp "$engine/README.md" "$dest/README.md"
 }
 

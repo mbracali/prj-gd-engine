@@ -230,6 +230,7 @@ public:
     void unregisterObject(ScriptObject* object);
     void unregisterName(const std::string& name, const ScriptObject* object);
     ScriptObject* findObject(const std::string& name) const;
+    ScriptObject* findObjectImpl(const std::string& name) const;
     // Interp-owned objects (made by `new`); {delete name} destroys them.
     ScriptObject* adopt(std::unique_ptr<ScriptObject> object);
     void destroyObject(ScriptObject* object);

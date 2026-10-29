@@ -55,6 +55,7 @@ target_sources(gd03 PRIVATE
   src/data/midi.cpp
   src/data/iso9660.cpp
   src/data/random_file.cpp
+  src/devaids/audit.cpp
   src/devaids/menu_keys.cpp
   src/devaids/screenshot.cpp
   src/game/camera_director.cpp

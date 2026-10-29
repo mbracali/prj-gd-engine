@@ -3,8 +3,7 @@
 # Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 # The Linux download: built on Ubuntu 22.04 (glibc 2.35) so it runs on any
 # distribution from 2022 on, with SDL3 built from source and shipped next to
-# the program (found through RPATH $ORIGIN), so nothing has to be installed;
-# the same for FFmpeg's libraries (the videos; build_common.sh's build_ffmpeg).
+# the program (found through RPATH $ORIGIN), so nothing has to be installed.
 # Run as root inside an ubuntu:22.04 container (the release workflow does);
 # the result is dist/gd03-linux-x86_64/.
 set -euo pipefail
@@ -36,17 +35,14 @@ else
   cp "build/portable/SDL3-$SDL3_VERSION/LICENSE.txt" build/portable/sdl3-prefix/LICENSE.txt
 fi
 
-build_ffmpeg build/portable/ffmpeg "Linux" --disable-x86asm --cc=gcc-12
-
 say "gd03: configuring (CMake)..."
 configure -S . -B build/portable/gd03 -G Ninja -DCMAKE_BUILD_TYPE=Release \
-  -DGD03_FFMPEG_DIR="$PWD/build/portable/ffmpeg/ffmpeg-prefix" \
   -DSDL3_DIR="$PWD/build/portable/sdl3-prefix/lib/cmake/SDL3" \
   -DCMAKE_BUILD_RPATH='$ORIGIN' -DCMAKE_INSTALL_RPATH='$ORIGIN' -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON \
   -DCMAKE_EXE_LINKER_FLAGS="-static-libstdc++ -static-libgcc"
 compile build/portable/gd03 gd03
 
-say "Assembling dist/gd03-linux-x86_64 (program, SDL3, FFmpeg, icon, licences)..."
+say "Assembling dist/gd03-linux-x86_64 (program, SDL3, icon, licences)..."
 d=dist/gd03-linux-x86_64
 rm -rf "$d" && mkdir -p "$d/licenses"
 cp build/portable/gd03/gd03 README.md ../../LICENSE ../../LICENSE-ADDITIONAL-TERMS.md "$d/"
@@ -54,7 +50,4 @@ strip "$d/gd03"
 cp res/gd03_icon_512.png "$d/gd03.png"
 cp -L build/portable/sdl3-prefix/lib/libSDL3.so.0 "$d/"
 cp build/portable/sdl3-prefix/LICENSE.txt "$d/licenses/SDL3-LICENSE.txt"
-cp third_party/stb_vorbis/LICENSE.txt "$d/licenses/stb_vorbis-LICENSE.txt"
-cp build/portable/gd03/libav*.so.[0-9]* "$d/"
-ship_ffmpeg_licence build/portable/ffmpeg/ffmpeg-prefix "$d"
 say "Ready: $d"

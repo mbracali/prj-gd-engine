@@ -2,6 +2,8 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "tests/walktest.h"
 
+#include "devaids/audit.h"
+
 #include <SDL3/SDL.h>
 
 #include <algorithm>
@@ -1342,5 +1344,10 @@ int WalkDriver::finish(ui::UiManager& ui) {
     }
     for (const std::string& e : in.errors()) std::printf("  FAIL script error: %s\n", e.c_str()), ok = false;
     std::printf("walktest %s: %s\n", scenario_.c_str(), ok ? "OK" : "FAILED");
+    // --audittest: the reference audit of this run (GD03_AUDIT: the report's path).
+    if (audit::enabled()) {
+        const char* out = SDL_getenv("GD03_AUDIT");
+        audit::writeReport(ui.data(), out && *out ? out : "audit.md", scenario_);
+    }
     return ok ? 0 : 1;
 }
