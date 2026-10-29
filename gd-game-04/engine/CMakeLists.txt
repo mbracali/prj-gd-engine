@@ -35,7 +35,9 @@ target_sources(gd04 PRIVATE
   src/audio/song_stream.cpp
   src/audio/xma_decoder.cpp
   src/audio/xma_stream.cpp
+  src/data/anim.cpp
   src/data/disc.cpp
+  src/data/font.cpp
   src/data/fsb.cpp
   src/data/inflate.cpp
   src/data/json.cpp

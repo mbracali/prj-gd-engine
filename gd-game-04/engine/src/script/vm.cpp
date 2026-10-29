@@ -274,7 +274,7 @@ struct Exec {
         case kMultiply: case kDivide: return 6;
         case kAdd: case kMinus: return 5;
         case kLessThan: case kLessThanEqual: case kGreaterThan: case kGreaterThanEqual: return 4;
-        case kSameAs: case kNotEqual: return 3;
+        case kSameAs: case kNotEqual: case kEquals: return 3;  // `=` in an expression is a comparison [C data]
         case kAnd: case kAnd2: return 2;
         case kOr: case kOr2: case kXor: return 1;
         default: return 0;
@@ -329,6 +329,7 @@ struct Exec {
         case kGreaterThan: return Vm::makeInt(a.number() > b.number());
         case kGreaterThanEqual: return Vm::makeInt(a.number() >= b.number());
         case kSameAs:
+        case kEquals:
         case kNotEqual: {
             bool eq;
             if (numeric(a) && numeric(b)) eq = a.number() == b.number();
@@ -337,7 +338,7 @@ struct Exec {
             else if (a.type == qb::Type::Key || a.type == qb::Type::KeyPtr) eq = a.key == b.key;
             else if (a.type == qb::Type::Vector || a.type == qb::Type::Pair) eq = a.f[0] == b.f[0] && a.f[1] == b.f[1] && a.f[2] == b.f[2];
             else eq = false;
-            return Vm::makeInt(op == kSameAs ? eq : !eq);
+            return Vm::makeInt(op != kNotEqual ? eq : !eq);
         }
         case kAnd:
         case kAnd2: return Vm::makeInt(Vm::truth(a) && Vm::truth(b));
@@ -383,7 +384,14 @@ struct Exec {
         if (k.op == kInlineStruct || k.op == kInlineStruct2 || k.op == kStartStruct) {
             qb::Value v = paramValue();
             if (v.st)
-                for (const qb::Item& it : vm.globals().expand(*v.st)) Vm::set(out, it.name, it.value);
+                for (qb::Item it : vm.globals().expand(*v.st)) {
+                    // `$name` inside an inline struct is a key reference: the
+                    // global's value at call time [I].
+                    if (it.value.type == qb::Type::KeyPtr)
+                        if (const qb::Value* gv = vm.global(it.value.key)) it.value = *gv;
+                    if (it.name) Vm::set(out, it.name, std::move(it.value));
+                    else out.items.push_back(std::move(it));
+                }
             return;
         }
         if (k.op == kName) {

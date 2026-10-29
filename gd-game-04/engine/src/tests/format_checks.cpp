@@ -3,10 +3,13 @@
 #include "tests/format_checks.h"
 
 #include <cstdio>
+#include <cstring>
 #include <exception>
 
 #include "data/qb.h"
 #include "data/qbkey.h"
+#include "data/anim.h"
+#include "data/font.h"
 #include "data/scene.h"
 
 namespace {
@@ -56,6 +59,47 @@ bool checkScene(const Pak& pak, const PakEntry& e, std::string& what) {
     }
 }
 
+uint32_t le32(const uint8_t* p) { return uint32_t(p[0]) | uint32_t(p[1]) << 8 | uint32_t(p[2]) << 16 | uint32_t(p[3]) << 24; }
+uint32_t be32(const uint8_t* p) { return uint32_t(p[0]) << 24 | uint32_t(p[1]) << 16 | uint32_t(p[2]) << 8 | p[3]; }
+
+// .wav: RIFF/WAVE (little-endian) with fmt (XMA, tag 0x165), data (2048-byte
+// packets) and seek chunks, read by FMOD's XMA codec [C data, docs/formats.md].
+bool checkWav(const uint8_t* d, size_t n, std::string& what) {
+    if (n < 12 || std::memcmp(d, "RIFF", 4) != 0 || std::memcmp(d + 8, "WAVE", 4) != 0) return what = "not RIFF/WAVE", false;
+    if (le32(d + 4) + 8 != n) return what = "RIFF size", false;
+    bool fmt = false, data = false;
+    for (size_t o = 12; o < n;) {
+        if (o + 8 > n) return what = "chunk header past the end", false;
+        const uint32_t size = le32(d + o + 4);
+        if (o + 8 + size > n) return what = "chunk past the end", false;
+        if (std::memcmp(d + o, "fmt ", 4) == 0) {
+            fmt = true;
+            if (size < 2 || (d[o + 8] | d[o + 9] << 8) != 0x165) return what = "fmt is not XMA (0x165)", false;
+        } else if (std::memcmp(d + o, "data", 4) == 0) {
+            data = true;
+            if (size % 2048) return what = "data is not whole 2048-byte packets", false;
+        } else if (std::memcmp(d + o, "seek", 4) != 0) {
+            return what = "unknown chunk", false;
+        }
+        o += 8 + size + (size & 1);
+    }
+    if (!fmt || !data) return what = "fmt or data chunk missing", false;
+    return true;
+}
+
+// .pfx: node-array prefix index: u32 node array key, u32 count, count x
+// {u32 prefix key, u32 offset, u32 count}, then the u16 node indices [C data].
+bool checkPfx(const uint8_t* d, size_t n, std::string& what) {
+    if (n < 8) return what = "too short", false;
+    const uint32_t count = be32(d + 4);
+    if (8 + size_t(count) * 12 > n) return what = "table past the end", false;
+    for (uint32_t i = 0; i < count; ++i) {
+        const uint8_t* e = d + 8 + 12 * size_t(i);
+        if (be32(e + 4) + size_t(be32(e + 8)) * 2 > n) return what = "indices past the end", false;
+    }
+    return true;
+}
+
 }  // namespace
 
 bool checkPakFile(const Pak& pak, const PakEntry& e, FormatStats& s, std::string& what) {
@@ -65,7 +109,46 @@ bool checkPakFile(const Pak& pak, const PakEntry& e, FormatStats& s, std::string
     else if (e.type == qbkey::key(".scn") || e.type == qbkey::key(".mdl") || e.type == qbkey::key(".skin") ||
              e.type == qbkey::key(".hkc"))
         ok = checkScene(pak, e, what);
-    else {
+    else if (e.type == qbkey::key(".rag")) {  // Havok packfile, like .hkc [C data]
+        auto [p, n] = pak.data(e);
+        try {
+            scene::parseHavok(p, n);
+        } catch (const std::exception& ex) {
+            what = ex.what(), ok = false;
+        }
+    } else if (e.type == qbkey::key(".ska") || e.type == qbkey::key(".ske") || e.type == qbkey::key(".fnt")) {
+        auto [p, n] = pak.data(e);
+        try {
+            if (e.type == qbkey::key(".ska")) anim::parseClip(p, n);
+            else if (e.type == qbkey::key(".ske")) anim::parseSkeleton(p, n);
+            else font::parseFont(p, n);
+        } catch (const std::exception& ex) {
+            what = ex.what(), ok = false;
+        }
+    } else if (e.type == qbkey::key(".nqb")) {  // zone node arrays: ordinary QB [C data]
+        auto [p, n] = pak.data(e);
+        size_t unused = 0;
+        try {
+            qb::decode(p, n, &unused);
+            if (unused) what = "unused bytes", ok = false;
+        } catch (const std::exception& ex) {
+            what = ex.what(), ok = false;
+        }
+    } else if (e.type == qbkey::key(".wav")) {
+        auto [p, n] = pak.data(e);
+        ok = checkWav(p, n, what);
+    } else if (e.type == qbkey::key(".pfx")) {
+        auto [p, n] = pak.data(e);
+        ok = checkPfx(p, n, what);
+    } else if (e.type == qbkey::key(".table")) {  // one u32, 0xE5F50254 in all 12 [C data; meaning I]
+        auto [p, n] = pak.data(e);
+        if (n != 4 || be32(p) != 0xE5F50254u) what = "unexpected .table", ok = false;
+    } else if (e.type == qbkey::key(".dbg")) {  // the debug name text (Disc::loadNames)
+        auto [p, n] = pak.data(e);
+        const std::string text(reinterpret_cast<const char*>(p), n);
+        if (text.find("[LineNumbers]") == std::string::npos && text.find("[Checksums]") == std::string::npos)
+            what = "not a debug text", ok = false;
+    } else {
         ++s.notDecoded[type];
         return true;
     }

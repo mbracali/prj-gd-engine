@@ -65,6 +65,11 @@ int runScriptTest(const std::string& discPath) {
     std::printf("boot: %llu lines, %llu calls (%llu native, %llu script), %zu scripts still running\n",
                 static_cast<unsigned long long>(st.lines), static_cast<unsigned long long>(st.calls),
                 static_cast<unsigned long long>(st.nativeCalls), static_cast<unsigned long long>(st.scriptCalls), vm.runs().size());
+    for (auto& r : vm.runs()) {
+        std::printf("still running: %s", qbkey::name(r->name).c_str());
+        for (auto& f : r->frames) std::printf(" > %s@%zu", qbkey::name(f.code->name).c_str(), f.pc);
+        std::printf(" (wait frames %d, until %.0f ms)\n", r->waitFrames, r->waitUntilMs);
+    }
     std::vector<std::string> names;
     for (uint32_t k : vm.unhandled()) names.push_back(qbkey::name(k));
     std::sort(names.begin(), names.end());
