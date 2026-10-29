@@ -201,7 +201,7 @@ void Player::nonStrumSwing(float t, int slot, bool hammer) {
     const bool noneAbove = (held_ >> (slot + 1)) == 0;  // lower frets may be held (anchoring) [C]
     if (chart_.gems[size_t(k)].frets == (1u << slot) && noneAbove) {
         watcherHit(t, slot, k, true);
-    } else if (hammer && noneAbove) {
+    } else if (hammer && noneAbove && !forgiving_) {
         lockedGem_ = k;  // a wrong hammer-on locks the gem for HOPO tries; a wrong pull-off does not [C]
     }
 }
@@ -396,6 +396,14 @@ void Player::update(float t) {
     }
     // 0x8234ef50 [C]: the HOPO forgiveness ends when that gem leaves the hit window.
     if (hopoHit_ >= 0 && !inWindow(hopoHit_, t)) hopoHit_ = -1;
+    // Enhanced Options > Forgiving Hammer-ons and Pull-offs [I: the port's]:
+    // a HOPO whose fret is already held when it arrives plays by itself.
+    if (forgiving_ && mode_ == ControllerMode::Guitar && held_ != 0 && !chart_.gems.empty()) {
+        const int n = static_cast<int>(chart_.gems.size());
+        int k = nearestGem(t + offset_);
+        if ((!owned(k) || hit_[size_t(k)]) && k + 1 < n) ++k;
+        if (!hit_[size_t(k)] && t + offset_ >= chart_.gems[size_t(k)].ms && hopoEligible(k)) nonStrumSwing(t, highestFret(held_), false);
+    }
     if (padChordGem_ >= 0 && t > padChordDeadline_) {  // joypad chord window ran out [I]
         const int gem = padChordGem_;
         padChordGem_ = -1;

@@ -242,7 +242,7 @@ PostFx::~PostFx() {
 }
 
 void PostFx::destroyTargets() {
-    for (TargetId* t : {&hdr_, &dofA_, &dofB_, &bloomHalf_, &bloomA_, &bloomB_}) {
+    for (TargetId* t : {&hdr_, &dofA_, &dofB_, &bloomHalf_, &bloomA_, &bloomB_, &ldr_}) {
         if (*t) device_.destroyTarget(*t);
         *t = {};
     }
@@ -400,6 +400,11 @@ bool PostFx::begin(const float clear[4]) {
     if (disabled_ || !triangle_) return false;
     int x, y, w, h;
     renderer_.pictureRect(x, y, w, h);
+    // The port's chain draws the world at its render scale (SSAA, FSR 1).
+    if (settings_.any() && !(enhanced_ && enhanced_->failed())) {
+        const float k = settings_.renderScale();
+        w = std::max(1, int(std::lround(float(w) * k))), h = std::max(1, int(std::lround(float(h) * k)));
+    }
     if (!ensureTargets(w, h) || !program(Pass::Composite, 0)) {
         disabled_ = true;
         return false;
@@ -414,7 +419,20 @@ bool PostFx::begin(const float clear[4]) {
 void PostFx::end() {
     if (!capturing_) return;
     capturing_ = false;
-    const bool dof = dof_.on && dof_.maxBlur > 0 && dof_.farPlane > dof_.nearPlane;
+    // Remove All Effects: none of GH2's own either (its default PostProc
+    // draws the world as it is). Bokeh: None skips GH2's depth of field,
+    // Stronger focuses nearer, blurs sooner and wider (gd01's).
+    const PostProcState saved = state_;
+    const DofState savedDof = dof_;
+    if (!settings_.original) state_ = PostProcState{};
+    float dofSpread = kDofSpread;
+    if (settings_.bokeh == 2) {
+        dof_.maxBlur = std::min(1.0f, dof_.maxBlur * 1.5f);
+        dof_.blurDepth = std::max(0.001f, dof_.blurDepth * 0.6f);
+        dof_.focusDistance *= 0.85f;
+        dofSpread *= 1.8f;
+    }
+    const bool dof = settings_.original && settings_.bokeh > 0 && dof_.on && dof_.maxBlur > 0 && dof_.farPlane > dof_.nearPlane;
     const bool bloom = state_.bloomOn();
     const int qw = std::max(1, w_ / 4), qh = std::max(1, h_ / 4);
     const SamplerState point{Filter::Nearest, Wrap::Clamp, 0}, linear{Filter::Linear, Wrap::Clamp, 0};
@@ -455,7 +473,7 @@ void PostFx::end() {
         quad(dofA_, program(Pass::Collapse, 0), &hdrTex, &linear, 1, &s, sizeof s);
         for (int pass = 0; pass < 2; ++pass) {
             for (int i = 0; i < 7; ++i) {
-                const float o = kDofTaps[i] * kDofSpread;
+                const float o = kDofTaps[i] * dofSpread;
                 s.taps[i][0] = pass == 0 ? o / kDofLowW : 0;
                 s.taps[i][1] = pass == 0 ? 0 : o / kDofLowH;
                 s.taps[i][2] = 1.0f / 7;
@@ -489,16 +507,33 @@ void PostFx::end() {
         }
     }
 
-    // The final pass into the picture.
-    device_.setTarget({});
+    // The final pass into the picture, or into the 8-bit buffer the port's
+    // chain takes (Enhanced Options) and draws into the picture.
     int x, y, pw, ph;
     renderer_.pictureRect(x, y, pw, ph);
-    device_.setViewport(x, y, pw, ph);
     const TextureId tex[6] = {hdrTex, device_.targetTexture(dofA_), device_.targetDepth(hdr_), device_.targetTexture(bloomA_),
                               state_.luminanceMap, state_.noiseMap ? state_.noiseMap : noise_};
     const SamplerState samp[6] = {point, linear, point, linear, linear, SamplerState{Filter::Linear, Wrap::Repeat, 0}};
-    const ProgramId p = debug_ ? program(Pass::Debug, postkey::All) : program(Pass::Composite, compositeKey(state_, dof));
-    quad({}, p, tex, samp, 6, &b, sizeof b);
+    lastKey_ = compositeKey(state_, dof), lastDof_ = dof;
+    const ProgramId p = debug_ ? program(Pass::Debug, postkey::All) : program(Pass::Composite, lastKey_);
+    state_ = saved, dof_ = savedDof;
+    bool chained = false;
+    if (settings_.any() && !debug_) {
+        if (!enhanced_) enhanced_ = std::make_unique<EnhancedFx>(device_);
+        std::string error;
+        if (!ldr_ && !enhanced_->failed()) ldr_ = device_.createTarget(TargetDesc{w_, h_, false, TargetFormat::RGBA8}, error);
+        if (ldr_ && !enhanced_->failed()) {
+            quad(ldr_, p, tex, samp, 6, &b, sizeof b);
+            chained = enhanced_->process(device_.targetTexture(ldr_), device_.targetDepth(hdr_), w_, h_, x, y, pw, ph, settings_, frame_);
+        }
+    }
+    if (!chained) {
+        device_.setTarget({});
+        device_.setViewport(x, y, pw, ph);
+        quad({}, p, tex, samp, 6, &b, sizeof b);
+    }
+    device_.setTarget({});
+    device_.setViewport(x, y, pw, ph);
 }
 
 }  // namespace gfx

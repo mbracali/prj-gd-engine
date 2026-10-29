@@ -22,6 +22,7 @@
 #include "script/tasks.h"
 #include "ui/campaign.h"
 #include "ui/char_select.h"
+#include "ui/enhanced_panel.h"
 #include "ui/natives.h"
 #include "ui/ui_objects.h"
 #include "ui/ui_host.h"
@@ -33,6 +34,7 @@ extern const std::size_t kUiStubsTxtSize;
 namespace {
 
 constexpr int kX = ui::kPad_X, kTri = ui::kPad_Tri, kStart = ui::kPad_Start, kUp = ui::kPad_DUp, kDown = ui::kPad_DDown;
+constexpr int kLeft = ui::kPad_DLeft, kRight = ui::kPad_DRight;
 // long_cheats.dta's frets (HX_XBOX): G_YELLOW, G_BLUE, G_ORANGE.
 constexpr int kYellow = ui::kPad_Circle, kBlue = ui::kPad_Square, kOrange = ui::kPad_L1;
 
@@ -432,17 +434,79 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         at("enhanced_options_screen");
         check("enhanced_default");
         check("backdrop_band");
-        // Gamepads (the focus) -> 4 controls -> the PERFORMANCE AND GRAPHICS
-        // section -> calibration -> Screen Mode -> Max FPS -> FPS Counter ->
-        // Internal Resolution; select opens its dropdown, down and select
-        // pick the next option.
-        for (int i = 0; i < 10; ++i) press(kDown), wait(120);
+        wait(500);  // a few frames through the default effects
+        check("enhanced_fx_default");
+        // Each Enhanced Option in turn (GDALL-015): toggled or stepped with
+        // the pad, saved, and its effect checked. A step: down, then a press.
+        auto row = [&](int button) { press(kDown), wait(120), press(button), wait(150); };
+        // CONTROLS AND GAMEPAD: Gamepads (the focus) -> Mouse (kept) ->
+        // Touch on, Rock Band on, XInput off.
+        press(kDown), wait(120);
+        row(kX), row(kX), row(kX);
+        check("enhanced_controls");
+        // PERFORMANCE AND GRAPHICS -> Audio / Video Calibration: 8 presses on
+        // the ticks (a beat every 750 ms after 1 s, 3 lead-in beats), then 8
+        // on the flashes (1.5 s later), then select closes the result.
+        press(kDown), wait(120), press(kDown), wait(120);
+        press(kX);
+        wait(2600);
+        for (int i = 0; i < 8; ++i) press(kX), wait(750);
+        wait(2350);
+        for (int i = 0; i < 8; ++i) press(kX), wait(750);
+        check("enhanced_calibrated");
+        press(kX), wait(200);
+        // -> Screen Mode -> Max FPS -> FPS Counter -> Internal Resolution;
+        // select opens its dropdown, down and select pick the next option.
+        for (int i = 0; i < 4; ++i) press(kDown), wait(120);
         press(kX);
         wait(200);
         press(kDown), wait(120);
-        press(kX);  // the window's own -> 448p (ps2)
+        press(kX);  // 1080p -> 1440p
         wait(300);
         check("enhanced_changed");
+        // From the original look (GD02-130): Sharper Text on and off again,
+        // FXAA, FSR 1 (Upscaling Quality appears) at Performance, Bokeh None,
+        // Particles off, Bloom Medium, Cinematic Color on, Color Grading
+        // Warm, Film Grain Strong, Chromatic Aberration on, Light Streaks
+        // on, Ambient Occlusion on, Sharpening High, Blur on Star Power
+        // Medium.
+        auto again = [&](int button) { press(button), wait(150); };
+        row(kX), again(kX), row(kRight), row(kRight), row(kRight), row(kLeft), row(kX), row(kRight), again(kRight), row(kX), row(kRight),
+            row(kRight), again(kRight), row(kX), row(kX), row(kX), row(kRight), again(kRight), row(kRight), again(kRight);
+        wait(500);
+        check("enhanced_graphics");
+        // Remove All Effects on: every effect off, GH2's own too; then off again.
+        row(kX);
+        wait(400);
+        check("enhanced_no_effects");
+        press(kX), wait(400);
+        check("enhanced_effects_back");
+        // ENHANCERS: the venue extras at their defaults (off), then Band
+        // Shadows on, More Lights Strong (Dust appears), Dust on, Fog Full,
+        // Shaky Camera off.
+        press(kDown), wait(120);
+        check("enhanced_lights_default");
+        row(kX), row(kRight), again(kRight), row(kX), row(kRight), again(kRight), row(kX);
+        wait(400);
+        check("enhanced_enhancers");
+        // Export User Files, Load User Settings, Load User Progress
+        // (GD02_DIALOG: the walk's folder).
+        row(kX);
+        wait(300);
+        check("enhanced_exported");
+        row(kX);
+        wait(300);
+        check("enhanced_settings_loaded");
+        row(kX);
+        wait(300);
+        check("enhanced_progress_loaded");
+        // CHEATS: Enable Cut Content (not built: stays off), No Fail Mode,
+        // Autoplay, Forgiving Hammer-ons and Pull-offs.
+        press(kDown), wait(120);
+        row(kX), row(kX), row(kX), row(kX);
+        check("enhanced_cheats");
+        // The port's cheats back off (the walk's own save; tidy).
+        press(kUp), wait(120), press(kX), wait(150), press(kUp), wait(120), press(kX), wait(150);
         press(kTri);
         at("options_screen");
         press(kX);  // Enhanced Options again (the focus): the band again
@@ -475,6 +539,15 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         mouseAt(480, 502, 1);
         wait(300);
         check("enhanced_fps_60");
+        // STEAM DECK MODE (the list's first row, collapsed): a click opens
+        // it, a click on Apply sets the Steam Deck column.
+        mouseAt(300, 190, 0);
+        mouseAt(300, 190, 1);
+        wait(200);
+        mouseAt(300, 229, 0);
+        mouseAt(300, 229, 1);
+        wait(300);
+        check("enhanced_deck");
         mouseAt(480, 592, 3);  // right click: back
         at("options_screen");
         wait(300);
@@ -519,7 +592,29 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         wait(900);  // more than 750 ms: the next press starts afresh
         code({kYellow, kBlue, kYellow, kOrange, kYellow, kBlue});  // Air Guitar again: off
         check("cheat_air_off");
-        expect_ = {"main_screen"};
+        // The same cheats in Enhanced Options > CHEATS (up from Gamepads
+        // wraps to the list's end): Monkey Head Crowd on, Eyeball Head Crowd
+        // on (one crowd head at a time), Flaming Head (not built: stays
+        // off), Hyper Speed Mode off again.
+        wait(900);
+        for (int i = 0; i < 4; ++i) press(kDown), wait(150);  // OPTIONS
+        press(kX);
+        at("options_screen");
+        press(kDown), wait(150), press(kDown), wait(150);
+        press(kX);
+        at("enhanced_options_screen");
+        for (int i = 0; i < 3; ++i) press(kUp), wait(120);
+        press(kX), wait(150);
+        check("cheat_menu_monkey");
+        press(kUp), wait(120), press(kX), wait(150);
+        press(kUp), wait(120), press(kX), wait(150);
+        press(kUp), wait(120), press(kX), wait(150);
+        check("cheat_menu_rest");
+        press(kTri);
+        at("options_screen");
+        press(kTri);
+        at("main_screen");
+        expect_ = {"main_screen", "options_screen", "enhanced_options_screen", "options_screen", "main_screen"};
     } else if (scenario == "coop" || scenario == "faceoff" || scenario == "proface") {
         endMs_ = 20000;
         at("splash_screen", 30000);
@@ -987,26 +1082,135 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         ++step_, stepStart_ = -1;
         return;
     }
-    // The Enhanced Options: Internal Resolution at its default (the
-    // window's own), then 448p after one select, saved in enhanced.json.
-    if (s.screen == "enhanced_default" || s.screen == "enhanced_changed") {
-        const std::string want = s.screen == "enhanced_default" ? "0" : "448";
-        const std::string got = ui.host().enhancedValue("internal_res");
-        std::printf("  enhanced: internal_res %s\n", got.c_str());
-        if (got != want) return fail("Internal Resolution is " + got + ", not " + want);
-        if (s.screen == "enhanced_changed") {
+    // The Enhanced Options (GDALL-015): each option's value as enhanced.json
+    // has it, and what the program put in effect (UiHost::enhancedState).
+    if (s.screen.rfind("enhanced_", 0) == 0 && s.screen != "enhanced_fps_60" && s.screen != "enhanced_deck") {
+        Json saved;
+        {
             std::ifstream f(std::filesystem::path(ui.savePath()).parent_path() / "enhanced.json");
             std::stringstream ss;
             ss << f.rdbuf();
-            std::string saved;
             try {
-                saved = Json::parse(ss.str())["internal_res"].str();
-            } catch (const std::exception& e) {
-                saved = e.what();
+                saved = Json::parse(ss.str());
+            } catch (const std::exception&) {
+                saved = Json::object();
             }
-            std::printf("  enhanced.json: internal_res %s\n", saved.c_str());
-            if (saved != want) return fail("enhanced.json does not have the change");
         }
+        std::string problems;
+        // Saved and in effect: each key's value.
+        auto want = [&](const char* key, const std::string& v) {
+            const std::string got = ui.host().enhancedValue(key), file = saved.has(key) ? saved[key].str() : "(unset)";
+            std::printf("  enhanced: %s %s (enhanced.json %s)\n", key, got.c_str(), file.c_str());
+            if (got != v || file != v) problems += std::string(problems.empty() ? "" : "; ") + key + " is " + got + " / " + file + ", not " + v;
+        };
+        auto state = [&](const char* key, int lo, int hi) {
+            const int v = ui.host().enhancedState(key);
+            std::printf("  enhanced state: %s %d\n", key, v);
+            if (v < lo || v > hi) problems += std::string(problems.empty() ? "" : "; ") + key + " is " + std::to_string(v);
+        };
+        auto status = [&](const char* prefix) {
+            const std::string st = ui.host().enhancedStatus();
+            std::printf("  enhanced status: %s\n", st.c_str());
+            if (st.rfind(prefix, 0) != 0) problems += std::string(problems.empty() ? "" : "; ") + "the status is \"" + st + "\", not " + prefix + "...";
+        };
+        constexpr int kMany = 1 << 30;
+        const std::string& w = s.screen;
+        if (w == "enhanced_default") {
+            const std::string def = ui::enhancedDefault("internal_res", false);
+            const std::string got = ui.host().enhancedValue("internal_res");
+            std::printf("  enhanced: internal_res %s (the build's default %s)\n", got.c_str(), def.c_str());
+            if (got != def) problems = "Internal Resolution is " + got + ", not " + def;
+        } else if (w == "enhanced_fx_default") {
+            // The defaults: the original look (GD02-130). GH2's own post
+            // (glow, depth of field), particles and shake; none of the
+            // port's effects, and the menus' textures as the original's.
+            for (const char* key : {"bokeh", "bloom", "cinematic_color", "film_grain", "chromatic", "ssao", "sharpening", "star_blur",
+                                    "shadows_all", "more_lights", "light_dust", "ground_fog", "sharp_ui", "fps_counter"}) {
+                const std::string got = ui.host().enhancedValue(key), def = ui::enhancedDefault(key, false);
+                const bool original = def == "off" || def == "none" || (std::string(key) == "bokeh" && def == "regular");
+                std::printf("  enhanced default: %s %s\n", key, got.c_str());
+                if (got != def || !original) problems += std::string(problems.empty() ? "" : "; ") + key + " is " + got + ", not the original's";
+            }
+            state("fx_on", 0, 0), state("post_original", 1, 1);
+            for (const char* pass : {"fx:down", "fx:up", "fx:ao", "fx:composite", "fx:finish"}) state(pass, 0, 0);
+            state("particles", 1, 1), state("shake", 1, 1), state("sharp_ui", 0, 0), state("xinput", 1, 1), state("rockband", 0, 0);
+        } else if (w == "enhanced_controls") {
+            want("touch", "on"), want("rockband", "on"), want("xinput", "off");
+            state("touch", 1, 1), state("rockband", 1, 1), state("xinput", 0, 0);
+        } else if (w == "enhanced_calibrated") {
+            // The presses came 0..30 ms after the ticks and flashes.
+            for (const char* key : {"audio_offset", "video_offset"}) {
+                const std::string v = saved.has(key) ? saved[key].str() : "";
+                std::printf("  enhanced: %s %s\n", key, v.c_str());
+                if (v.empty() || std::abs(std::atoi(v.c_str())) > 337) problems += std::string(problems.empty() ? "" : "; ") + key + " not calibrated (" + v + ")";
+            }
+            state("calibration_ms", -500, 300);
+        } else if (w == "enhanced_changed") {
+            want("internal_res", "1440");
+        } else if (w == "enhanced_graphics") {
+            want("sharp_ui", "off"), want("antialiasing", "fxaa"), want("ai_upscaling", "fsr1"), want("ai_upscaling_mode", "performance");
+            want("bokeh", "none"), want("particles", "off"), want("bloom", "medium"), want("cinematic_color", "on"), want("color_grade", "warm");
+            want("film_grain", "strong"), want("chromatic", "on"), want("light_streaks", "on"), want("ssao", "on"), want("sharpening", "high");
+            want("star_blur", "medium");
+            state("sharp_ui", 0, 0), state("particles", 0, 0), state("post_dof", 0, 0);
+            for (const char* pass : {"fx:down", "fx:up", "fx:ao", "fx:composite", "fx:fxaa", "fx:easu", "fx:rcas", "fx:finish"}) state(pass, 1, 1);
+            state("fx:taa", 0, 0), state("fx:downsample", 0, 0);
+        } else if (w == "enhanced_no_effects") {
+            want("no_effects", "on");
+            state("fx_on", 0, 0), state("post_original", 0, 0), state("post_key", 0, 0), state("post_dof", 0, 0), state("shake", 0, 0);
+        } else if (w == "enhanced_effects_back") {
+            want("no_effects", "off");
+            state("fx_on", 1, 1), state("post_original", 1, 1), state("shake", 1, 1);
+        } else if (w == "enhanced_lights_default") {
+            state("shadows", 0, 0), state("beams", 0, 0), state("motes", 0, 0);
+        } else if (w == "enhanced_enhancers") {
+            want("shadows_all", "on"), want("more_lights", "strong"), want("light_dust", "on"), want("ground_fog", "full"), want("no_shaky_cam", "on");
+            state("shadows", 1, kMany), state("beams", 1, kMany), state("motes", 1, kMany), state("shake", 0, 0);
+        } else if (w == "enhanced_exported") {
+            status("Exported to");
+            const char* dir = SDL_getenv("GD02_DIALOG");
+            const std::filesystem::path d = dir ? dir : "";
+            for (const char* f : {"GD02-user-settings.json", "GD02-user-progress.json"}) {
+                std::error_code ec;
+                const auto size = std::filesystem::file_size(d / f, ec);
+                std::printf("  exported %s: %s\n", f, ec ? "missing" : (std::to_string(size) + " bytes").c_str());
+                if (ec || size < 10) problems += std::string(problems.empty() ? "" : "; ") + f + " was not written";
+            }
+        } else if (w == "enhanced_settings_loaded") {
+            status("Settings loaded");
+            want("ground_fog", "full"), want("internal_res", "1440"), want("antialiasing", "fxaa");
+        } else if (w == "enhanced_progress_loaded") {
+            status("Progress loaded");
+        } else if (w == "enhanced_cheats") {
+            want("no_fail", "on"), want("autoplay", "on"), want("hopo_mode", "forgiving");
+            if (saved.has("cut_content")) problems += "Enable Cut Content (not built) was saved";
+        } else {
+            return fail("unknown check " + w);
+        }
+        if (!problems.empty()) return fail(problems);
+        return pass();
+    }
+    if (s.screen == "cheat_menu_monkey" || s.screen == "cheat_menu_rest") {
+        const bool monkey = ui.cheatOn("cheat_monkey_head_crowd"), eyeball = ui.cheatOn("cheat_eyeball_head_crowd");
+        const bool flaming = ui.cheatOn("cheat_flaming_head"), hyper = ui.cheatOn("cheat_hyper_speed_mode");
+        std::printf("  cheats (Enhanced Options): monkey %d, eyeball %d, flaming head %d, hyper speed %d\n", monkey, eyeball, flaming, hyper);
+        if (s.screen == "cheat_menu_monkey" && !monkey) return fail("Monkey Head Crowd did not turn on from the menu");
+        if (s.screen == "cheat_menu_rest" && (monkey || !eyeball)) return fail("Eyeball Head Crowd did not replace Monkey Head Crowd");
+        if (s.screen == "cheat_menu_rest" && flaming) return fail("Flaming Head (not built) turned on");
+        if (s.screen == "cheat_menu_rest" && hyper) return fail("Hyper Speed Mode did not turn off from the menu");
+        ++step_, stepStart_ = -1;
+        return;
+    }
+    if (s.screen == "enhanced_deck") {
+        // Apply Steam Deck Settings: the handheld column (gd01's profileValues(true)).
+        std::string problems;
+        for (const auto& [key, v] : ui::enhancedProfile(true)) {
+            const std::string got = ui.host().enhancedValue(key);
+            if (got != v) problems += (problems.empty() ? "" : "; ") + key + " is " + got + ", not " + v;
+        }
+        std::printf("  steam deck: internal_res %s, max_fps %s, bloom %s; %s\n", ui.host().enhancedValue("internal_res").c_str(),
+                    ui.host().enhancedValue("max_fps").c_str(), ui.host().enhancedValue("bloom").c_str(), ui.host().enhancedStatus().c_str());
+        if (!problems.empty()) return fail("Apply Steam Deck Settings: " + problems);
         ++step_, stepStart_ = -1;
         return;
     }

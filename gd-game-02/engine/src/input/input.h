@@ -147,6 +147,8 @@ public:
     // the Xbox guitar layout and tilt for Star Power. Xbox 360 guitars
     // (Guitar Hero and Rock Band) are always Xbox guitars.
     void setGamepadPlay(bool on) { gamepadPlay_ = on; }
+    bool gamepadPlay() const { return gamepadPlay_; }
+    bool rockBand() const { return rockBand_; }
     // Lefty flip per player: a joypad's frets take lefty_joypad_guitar's order
     // (A RT RB LB LT, green to orange) [C: beatmatch_controller.dta, picked by
     // 0x822b3c50 from the player's lefty flag]; a guitar keeps its frets (GH2
