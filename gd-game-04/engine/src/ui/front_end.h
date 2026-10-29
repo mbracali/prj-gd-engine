@@ -46,6 +46,10 @@ public:
         int difficulty = 3;
     } songRequest;
     bool songPlaying = false;
+    // Paused with Start in a song: GH3's pause menu runs over the frozen song
+    // (gh3_start_pressed); songKill: its quit / restart killed the gem scroller.
+    bool songPaused = false, songKill = false;
+    void startPressed();
     // A movie the scripts asked for (PlayMovie movie = 'atvi'): the app plays
     // it modally (video/movie_player.h).
     std::string movieRequest;

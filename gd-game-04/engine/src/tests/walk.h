@@ -62,7 +62,7 @@ private:
         Action a = Action::Confirm;
         std::string act;
         double delayMs = 300;
-        Op(Action x) : a(x) {}
+        Op(Action x, double d = 300) : a(x), delayMs(d) {}
         Op(const char* s, double d = 300) : act(s), delayMs(d) {}
     };
     struct Step {

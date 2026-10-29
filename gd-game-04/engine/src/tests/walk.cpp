@@ -64,6 +64,26 @@ Walk::Walk(const std::string& name) : name_(name) {
         steps_.push_back({"song_over", {}, 600000});
         steps_.push_back({"career_newspaper_fs", {C}, 30000});
         steps_.push_back({"career_setlist_fs", {}, 30000});
+    } else if (name == "pause" || name == "pausequit") {
+        // Start in the song -> GH3's pause menu (quickplay_pause_fs) -> RESUME
+        // and the song plays on; pausequit: QUIT -> its warning -> YES -> the menus.
+        steps_ = boot;
+        steps_.push_back({"main_menu_fs", {D, D, C}, 10000});
+        steps_.push_back({"quickplay_select_difficulty_fs", {C}, 20000});
+        steps_.push_back({"quickplay_setlist_fs", {C}, 20000});
+        steps_.push_back({"song", {Action::Start}, 30000});
+        if (name == "pause") {
+            steps_.push_back({"quickplay_pause_fs", {C}, 20000});
+            steps_.push_back({"song_over", {}, 600000});
+            steps_.push_back({"quickplay_win_song_fs", {}, 30000});
+        } else {
+            steps_.push_back({"quickplay_pause_fs", {D, D, D, D, C}, 20000});
+            steps_.push_back({"quickplay_quit_warning_fs", {D, C}, 20000});         // QUIT (not CANCEL)
+            // NEW SONG: kill_gem_scroller. The menu comes 3 s after the state
+            // (the quit's spawned_func waits first) [C script].
+            steps_.push_back({"quickplay_song_ended_fs", {Op(D, 4000), C}, 20000});
+            steps_.push_back({"quickplay_setlist_fs", {}, 30000});
+        }
     } else if (name == "glitches") {
         // The Glitches: band slot 5, everything unlocked (ui/glitches.h): its
         // name and cash, then chosen, its career's last tier complete.

@@ -65,6 +65,7 @@ private:
     bool loadData(const std::string& path);
     void handleEvent(const SDL_Event& e);
     void frame();
+    void songEvent(const InputEvent& ev);
     // -- the port's own screens and the mouse (ui/port_screens.h)
     // An action for the menus: the port's open screen, its entry keys on
     // GH3's main menu (yellow: GAMEPADS) and options (blue: ENHANCED), else
@@ -94,6 +95,8 @@ private:
     std::unique_ptr<FrontEnd> front_;
     std::unique_ptr<Walk> walk_;
     uint64_t lastFrameNs_ = 0;
+    bool pauseSeen_ = false;  // GH3's PauseGame came after Start
+    uint64_t pausedAtNs_ = 0;
     std::string message_;
     bool running_ = true;
     int exitCode_ = 0;
@@ -282,8 +285,8 @@ void App::handleEvent(const SDL_Event& e) {
     for (const InputEvent& ev : events) {
         if (walk_ && ev.down) walk_->countPress(ev.action);
         if (song_) {
-            if (ev.action == Action::Back && ev.down) running_ = false;  // pause comes with the menus (M3)
-            song_->handle(ev);
+            if (!front_ && ev.action == Action::Back && ev.down) running_ = false;  // --song alone: Back quits
+            songEvent(ev);
             continue;
         }
         if (front_) {
@@ -300,14 +303,57 @@ void App::handleEvent(const SDL_Event& e) {
     }
 }
 
+// A button in a song: Start opens GH3's pause menu (gh3_start_pressed),
+// which then has the buttons until it resumes.
+void App::songEvent(const InputEvent& ev) {
+    if (front_ && front_->songPaused) {
+        menuAction(ev);
+        return;
+    }
+    if (front_ && ev.action == Action::Start && ev.down) {
+        mixer_.setPaused(true);
+        front_->songPaused = true, pauseSeen_ = false, pausedAtNs_ = SDL_GetTicksNS();
+        front_->startPressed();
+        return;
+    }
+    song_->handle(ev);
+}
+
 void App::frame() {
     if (song_) {
         canvas_.begin(SDL_Color{0, 0, 0, 255});
         const bool more = song_->frame(canvas_, mixer_, textures_.get());
         if (front_) front_->songClockMs = song_->songMs();
+        if (front_ && front_->songPaused) {
+            // The pause menu over the frozen song.
+            const uint64_t nowNs = SDL_GetTicksNS();
+            const double dt = lastFrameNs_ ? double(nowNs - lastFrameNs_) / 1e6 : 0;
+            lastFrameNs_ = nowNs;
+            front_->frame(canvas_, dt);
+            pauseSeen_ = pauseSeen_ || front_->flow.paused;
+        } else {
+            lastFrameNs_ = SDL_GetTicksNS();
+        }
         overlay();
         captureMenuScreenshot(canvas_, double(SDL_GetTicksNS() - startNs_) / 1e6, song_->songMs());
         canvas_.end();
+        if (front_ && front_->songKill) {
+            // Quit or restart from the pause menu: the song is abandoned; a
+            // restart's start_gem_scroller follows as a new request.
+            front_->songKill = false, front_->songPaused = false, front_->songPlaying = false;
+            song_.reset();
+            mixer_.stop();
+            input_.setInGame(false);
+            if (walk_) ++walk_->songsEnded;
+            return;
+        }
+        if (front_ && front_->songPaused &&
+            ((pauseSeen_ && !front_->flow.paused) || (!pauseSeen_ && SDL_GetTicksNS() - pausedAtNs_ > 3000000000ull))) {
+            // Resumed (UnPauseGame), or the scripts never paused.
+            SDL_Log("song: resumed (%s)", pauseSeen_ ? "UnPauseGame" : "the scripts never paused");
+            front_->songPaused = false;
+            mixer_.setPaused(false);
+        }
         if (!more && front_) {
             // Back to GH3's own flow (results, setlist).
             FrontEnd::SongResult r;
@@ -532,7 +578,7 @@ int App::run() {
                                           ports_ ? ports_->current() : std::string()))
                 for (bool down : {true, false}) {
                     InputEvent ev{a, down, SDL_GetTicksNS(), ControllerMode::Guitar, 0};
-                    if (song_) song_->handle(ev);
+                    if (song_) songEvent(ev);
                     else menuAction(ev);
                 }
             if (walk_->done() || walk_->failed()) {

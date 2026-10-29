@@ -219,6 +219,7 @@ void Hud2D::update(const PlayerStats& st, double now) {
 }
 
 void Hud2D::draw(Canvas& c, const TextureCache& tex, double now) const {
+    if (!started_) return;  // nothing until the first game frame placed it (offscreen)
     std::vector<Item> items;
     items.reserve(64);
     const Xf root{0, 0, 0, kHudScale, kHudScale};

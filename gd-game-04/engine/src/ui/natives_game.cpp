@@ -91,6 +91,12 @@ void addGameNatives(FrontEnd& fe, const Disc& disc, TextureCache& textures) {
         fe.songRequest.difficulty = d;
         return true;
     });
+    // SongUnLoadFSBIfDownloaded: kill_gem_scroller's (quit / restart from the
+    // pause menu) -- the song is abandoned [C script kill_gem_scroller].
+    vm.addNative("SongUnLoadFSBIfDownloaded", [&fe](Vm&, ScriptRun&, qb::Struct&) {
+        if (fe.songPlaying && fe.songPaused) fe.songKill = true;
+        return true;
+    });
     // GetSongTimeMs [time_offset = n]: time = the song clock + the offset (ms) [C use: Transition_Play_Spawned].
     vm.addNative("GetSongTimeMs", [&fe](Vm&, ScriptRun& run, qb::Struct& p) {
         const double t = fe.songClockMs + Vm::number(Vm::param(p, K("time_offset")), 0);

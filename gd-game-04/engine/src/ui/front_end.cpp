@@ -76,6 +76,11 @@ void FrontEnd::handle(const InputEvent& e) {
     if (ev) ui_->padEvent(qbkey::key(ev), e.player);
 }
 
+void FrontEnd::startPressed() {
+    // Start in a song: GH3's gh3_start_pressed (the pause menu's flow action) [C script guitar_pause.qb].
+    vm_->spawn(qbkey::key("gh3_start_pressed"), qb::Struct{});
+}
+
 void FrontEnd::songEnded(const SongResult& r) {
     songPlaying = false;
     // player1_status as GH3's gem scroller leaves it [C data: the fields
@@ -123,7 +128,7 @@ void FrontEnd::frame(Canvas& c, double dtMs) {
         if (a && a->arr && !a->arr->values.empty() && a->arr->values[0].key == qbkey::key("main_menu_fs"))
             glitchesDone_ = true, ensureGlitches(*vm_);
     }
-    if (songPlaying) return;
+    if (songPlaying && !songPaused) return;
     accum_ += dtMs;
     int steps = 0;
     while (accum_ >= kStepMs && steps < 8) {
