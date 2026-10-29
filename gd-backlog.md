@@ -127,6 +127,7 @@ Items every game module shares. Each game tracks its own work in its section.
 | GDALL-027 | Enhancement | ➖ later | Samsung Tizen (WASM web app only; the ISO is out of reach): Emscripten launcher, TV spike, LAN asset server | [spikes/study_samsung_tv.md](spikes/study_samsung_tv.md), low priority | Spike 10-28 |
 | GDALL-028 | Enhancement | ➖ later | 3DS feasibility spike (only if the owner asks) | [spikes/study_3ds.md](spikes/study_3ds.md) | Spike 10-28 |
 | GDALL-029 | Enhancement | ✅ | Enhanced menus paired: every Enhanced feature of gd-game-01 that fits GH2 implemented in gd-game-02 (same layout, names, defaults, behaviour), and the parity table kept in the guideline | `guidelines/universal_launcher.md` "Enhanced options: parity" (6 had, 32 done, 6 N/A); GD02-097..129; gd02 walks enhanced / mouse / cheats check each option | Owner 10-28 |
+| GDALL-030 | Bugfix | ❌ | Run 0.1.7 on a real Windows PC, a Steam Deck, an Android device and macOS | PARITY_GAPS.md | 2026-10-29 |
 
 
 ## gd-game-01: Guitar Hero (PlayStation 2)
@@ -655,6 +656,11 @@ universal launcher, not released on its own.
 | GD03-015 | Original | ✅ | A hit lowers the "highest penalised gem" mark when the hit gem is below it (PS2 0x00111254) | selftest check "PS2: a hit below the highest penalised gem lowers that mark…" | Milestones M2 |
 | GD03-008 | Original | ✅ | PSS movies (VIDEOS/INTRO.PSS) through gd-game-01's own MPEG-2 / PSS decoders (video/movie_player.cpp): 4:3 pillarboxed, sound as the clock, fields blended; `--playmovie intro.pss`, `GD03_MOVIE_DUMP=1` decodes headless | world/shared/fest_1.ipu (an IPU stream) not used yet | Milestones M0 |
 | GD03-026 | Original | ❌ | Menu animations absent (owner 2026-10-29); likely cause, not yet checked: this disc's older animation classes are not loaded by the engine copied from gd-game-02 | PARITY_GAPS.md | Owner 2026-10-29 |
+| GD03-027 | Original | ❌ | Highway: gem sparkle and bonus burst missing | PARITY_GAPS.md | 2026-10-29 |
+| GD03-028 | Original | ❌ | Gameplay rules: the 2 of 67 rules still open after the SLUS_215.86 re-read | PARITY_GAPS.md | 2026-10-29 |
+| GD03-029 | Original | ❌ | Verify in the PS2 code: the SPU2 reverb maths (from hardware docs [I]), the track fade, the 9 rule fixes not re-read | PARITY_GAPS.md | 2026-10-29 |
+| GD03-030 | Original | ❌ | Class layouts: confirm with the PS2 loaders (now confirmed with the 360 executable's old revisions) | PARITY_GAPS.md | 2026-10-29 |
+| GD03-031 | Original | ❌ | Mono: the exact PS2 mono fold | PARITY_GAPS.md | 2026-10-29 |
 | GD03-016 | Enhancement | ✅ | Aspect ratio: 4:3 pillarboxed by default (as the PS2), 16:9 selectable in the Enhanced menu ("Widescreen (16:9)") | Renderer frameRect / pictureRect, cameras follow gfx::pictureAspect(); enhanced and mouse walks check both. Open: HUD not clipped to 4:3 in 16:9 | Owner 2026-10-29 |
 | GD03-017 | Enhancement | ✅ | MULTIPLAYER always enabled, also with one controller (the PS2 greys it out until pad 2) | Owner 2026-10-29 (D4 answered) | Owner 2026-10-29 |
 | GD03-018 | Original | ⛔ blocked | Reference captures: run the original in PCSX2 locally and compare visuals and timing with the port (goldens re-based on them) | Owner 2026-10-29: agents run the emulators. PCSX2 2.8.2 installed in ~/.local/opt/pcsx2; no PS2 BIOS on the machine: requested in gd-game-03/agents/OPEN_QUESTIONS.md Q5 | Owner 2026-10-29 |
@@ -700,6 +706,7 @@ universal launcher, not released on its own.
 | GD04-027 | Original | ✅ | Reference captures: the original runs in Xenia (xenia-canary 02d2cb5, Windows build under Proton's wine, Vulkan on the AMD iGPU; the NVIDIA GPU hangs at the first 3D scene); 66 captures (boot, menus, intro, highway / HUD / Star Power, venues, pause, results, store) in ~/.local/share/gd-engine/refcaps/gd04/ (INDEX.md), outside the repo; battle not captured (needs a second pad) | agents/CONTEXT.md | Owner 2026-10-29 |
 | GD04-028 | Original | 🟡 built only | Android reads the GH3 disc in place: in the launcher through /proc/self/fd/<n> (the module shim's fopen, as gd-game-01/02), standalone through the content:// URI with SDL's IO (data/random_file.cpp); the 8 GB copy is gone. Not run on a device | `engine/src/data/random_file.cpp`, `platform/disc_picker.cpp` | Owner 2026-10-29 |
 | GD04-029 | Enhancement | ✅ | Enhanced options default off (original look): every graphics enhancer off, Max FPS 60, no FPS counter; the platform rows only set the window and touch | `engine/src/ui/port_settings.cpp` | Owner 2026-10-29 |
+| GD04-030 | Original | 🟡 in progress | Menus: menu animations and composite menu objects (checkpoint 23d66cf) | PARITY_GAPS.md | 2026-10-29 |
 
 
 ## gd-game-05: Rock Band (Xbox 360)

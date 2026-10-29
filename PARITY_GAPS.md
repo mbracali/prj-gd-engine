@@ -1,6 +1,6 @@
 # Parity gaps: what is missing for a 100% match (2026-10-29)
 
-Only original behaviour is listed, no Enhanced items. "Unverified" means the port has the feature, but nothing has compared it with the original yet, because no reference captures exist (GD02-064, GD03-018, GD04-027). IDs are rows in `gd-backlog.md`. A "—" means the gap isn't in the backlog yet.
+Only original behaviour is listed, no Enhanced items. "Unverified" means the port has the feature, but nothing has compared it with the original yet, because no reference captures exist (GD02-064, GD03-018, GD04-027). IDs are rows in `gd-backlog.md`.
 
 ## gd-game-01: Guitar Hero (PS2)
 
@@ -39,21 +39,21 @@ Some of the older gd-game-01 rows may already be fixed but never marked; check t
 | Area | Missing or wrong | Backlog |
 |---|---|---|
 | **Menus** | **Menu animations absent (seen by the owner).** Likely cause, not yet checked: the engine copied from gd-game-02 doesn't load this disc's older animation classes. | GD03-026 |
-| Highway | Gem sparkle, bonus burst, the "highest penalised gem" mark | —, GD03-015 |
-| Gameplay rules | 2 of 67 rules still open | — |
+| Highway | Gem sparkle, bonus burst, the "highest penalised gem" mark | GD03-027, GD03-015 |
+| Gameplay rules | 2 of 67 rules still open | GD03-028 |
 | Tutorials / practice / career win | Tutorials 2 and 3 (wail / hammer-on / pull-off lessons, button_error sound), practice pitch correction, career-win walks: the code is in the stash (`gd03 WIP at stop 2026-10-29`), not in 0.1.7 | GD03-022..025 |
 | Audio | 9 sounds never played and ~100 never reached in the audit | GD03-011, -025 |
 | Stage director, band, crowd, MIDI | Run, but their goldens are the port's own baseline; unverified | GD03-018 |
-| Reverb, fade, rule fixes | Reverb maths from hardware docs [I]; only 1 of the 10 rule fixes re-read in the PS2 code | — |
-| Data | Class layouts confirmed with the 360 executable, not by reading the PS2 loaders | — |
-| Mono | Exact PS2 mono fold unknown | — |
+| Reverb, fade, rule fixes | Reverb maths from hardware docs [I]; only 1 of the 10 rule fixes re-read in the PS2 code | GD03-029 |
+| Data | Class layouts confirmed with the 360 executable, not by reading the PS2 loaders | GD03-030 |
+| Mono | Exact PS2 mono fold unknown | GD03-031 |
 | Reference | PCSX2 captures blocked (needs the owner's PS2 BIOS) | GD03-018 |
 
 ## gd-game-04: Guitar Hero III: Legends of Rock (Xbox 360)
 
 | Area | Missing or wrong | Backlog |
 |---|---|---|
-| Menus | Menu animations and composite menu objects (checkpoint in progress); 678 natives the scripts call are still missing | GD04-016, — |
+| Menus | Menu animations and composite menu objects (checkpoint in progress); 678 natives the scripts call are still missing | GD04-016, GD04-030 |
 | Song engine | The song runs on native code, not on GH3's gem-scroller scripts (events are now raised); the full move is open | GD04-021 |
 | Highway / HUD | Approximated: strings, Star Power glow, HUD easing (curves now [C]); the battle visuals, P2's highway and Lou's finish were added but are unverified | GD04-018, -019 |
 | Venues | One approximated shader for all venues; no crowd, light cones, particles or LODs | GD04-007 |
@@ -68,4 +68,4 @@ Some of the older gd-game-01 rows may already be fixed but never marked; check t
 | Area | Missing | Backlog |
 |---|---|---|
 | Verification | Side-by-side comparison with the original for every screen, venue and song (emulator captures) | GD02-064, GD03-018, GD04-027 |
-| Devices | Real Windows PC, Steam Deck, Android device and macOS runs for 0.1.7 | — |
+| Devices | Real Windows PC, Steam Deck, Android device and macOS runs for 0.1.7 | GDALL-030 |
