@@ -212,7 +212,8 @@ the venue, no back-face culling (hair cards) [I].
 
 Band_WalkToNode (walks, turns), intro / win / lose stances in the
 transitions, two-player layouts, the twist constraint bones, leg / drummer /
-singer IK, the ragdoll, star power and battle reactions, receiving dynamic shadows (they cast
+singer IK, the ragdoll (the accessory bones Bone_ACC_* that GH3 simulates
+with Havok from the `.rag` files, decoded: formats.md "Havok packfiles"), star power and battle reactions, receiving dynamic shadows (they cast
 them onto the venue: docs/venues.md "Dynamic shadows").
 
 ## 8. Test

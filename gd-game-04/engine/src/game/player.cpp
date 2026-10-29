@@ -55,6 +55,14 @@ void Player::changeHealth(bool good, double now) {
         else if (st_.health >= tu_.healthMediumGood) delta *= tu_.healthGreenMulti;
     }
     if (!good) {
+        // CrowdDecrease (0x82110570 -> 0x8210FD18) returns before any loss
+        // with cheat_nofail (outside p1_career / p2_career / p2_coop /
+        // p2_battle and network games), in tutorial and training, and with
+        // crowd_debug_mode / end_credits / use_character_debug_cam, besides
+        // the two rules below [C 0x8210FD18, globals cached by 0x821062A8].
+        // gd04's no-fail (the --no-fail flag, the Enhanced option) is
+        // cheat_nofail: the meter never goes down.
+        if (noFail_) return;
         // No loss once at 0 (co-op excepted) [C 0x8210FD18].
         if (st_.health <= 0 && !rules_.negativeHealth) return;
         // Invincibility: the first 20% (Easy) / 10% (Medium) of the song, no
@@ -107,7 +115,12 @@ void Player::miss(size_t i, double now) {
     ++st_.misses;
     resetRuns();
     lastHitMask_ = 0;
-    if (n.phrase >= 0) missedPhrase_[size_t(n.phrase)] = true;  // star_miss_note [C 0x8211F56C]
+    // A missed note with a gem still tagged `star` (its phrase not lost yet):
+    // star_power_sequence = 0; if the note's time is in [phrase time, time +
+    // length) the phrase is given up (the pointer moves to the next one) and
+    // star_miss_note turns the phrase's gems into normal gems [C 0x8211F56C,
+    // 0x8211E8B8, 0x82102830].
+    if (n.phrase >= 0) missedPhrase_[size_t(n.phrase)] = true;
     changeHealth(false, now);
     events_.push_back({PlayerEvent::Kind::Miss, int(i), now});
 }
@@ -208,6 +221,13 @@ void Player::updateSustain(double now, double dt, const FrameInput& in) {
 
 void Player::updateStarPower(double now, double dt, const FrameInput& in) {
     // Select (or tilt for star_power_trigger_frames frames) deploys at >= 50 [C 0x82112D7C, 0x82112F28].
+    // Tilt [C 0x82112EE0-0x82112F90, 0x822AFD90]: byte 1 of the pad record
+    // (right stick Y [I]), v = b - 128, as (v -/+ 50) / 77 (-1 .. 1; tilted
+    // = -1 [I]), counted while <= the player's star_tilt_threshold (the user
+    // option star_power_position_device_<n>, -1.0 by default, set by the
+    // tilt calibration screen to the held position clamped to <= 0);
+    // FrameInput carries Select and tilt as one flag, so both deploy at once
+    // here [I: the tilt's 3-frame wait is not modelled].
     triggerFrames_ = in.starPower ? triggerFrames_ + 1 : 0;
     // The trigger (a press): co-op's raise-axe prompt and battle's attacks (Match).
     if (in.starPower && !triggerHeld_) events_.push_back({PlayerEvent::Kind::Trigger, -1, now});

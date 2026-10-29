@@ -75,3 +75,47 @@ state, and saves always store the save's own state (ui/glitches.cpp). The
 quick play songs a finished career unlocks stay save-wide, as in GH3.
 Tests: --walktest glitches (bought for The Glitches), --walktest vault
 (band 1: for sale).
+
+## D10 Proposal (GD04-021): run GH3's own song scripts over the native core (2026-10-29, open)
+
+Status: a proposal for the owner, nothing changed yet. Findings:
+docs/FINDINGS.md "The song path: scripts vs C".
+
+In GH3 the song is scripts calling C: start_gem_scroller and gem_scroller
+set up and spawn the loops, the C functions (the gem iterators, the judge,
+the sustains, the fret buttons, Star Power, the score / meter, the band and
+light-show iterators) decide everything per frame and report by events,
+and the event hooks (GuitarEvent_*), the Star Power scripts and the song's
+event arrays produce the effects. gd04 replaces start_gem_scroller with a
+native that hands over to game/match + game/player (the C, reimplemented
+and [C]), render/highway2d, the HUDs, the venue and the band. That covers
+the gameplay, the highway, the HUD numbers, the song audio, the cameras,
+the light show and the band's performance, but none of GH3's song scripts
+runs, so the port lacks every in-song sound effect (bad notes, Star Power
+deploy / awarded / ready, multiplier loss, Star Power claps, crowd surges,
+battle sounds), the Star Power stage FX, camera switch and crowd animation,
+the 4x / first-gem / phrase-bonus particles, the stage divers and lighters,
+the venue reverb, the Star Power guitar echo and the whammy effect, and
+re-implements the rest by hand (each a place to drift from the original).
+
+Proposal: switch to GH3's own scripts. Keep start_gem_scroller,
+gem_scroller, the iterators, win_song and the hooks as scripts on the VM,
+and make the natives they call the port's core: gem_array_stepper_CFunc /
+FillInputArray -> Match::fill; Create2DGem / GemStep / Create2DFretbar /
+the gem mover -> Highway2D elements; GuitarInputLogicInit / PerFrame ->
+Player::frame (its events raised as GH3's: hit_notes, missed_note,
+unnecessary_note, star_*, whammy_*, multiplier_*, song_won / song_failed);
+CheckNoteHold*, ButtonChecker*, check_for_star_power_CFunc,
+UpdateScoreFast*, CrowdIncrease / CrowdDecrease, StarPowerOn, NoteFX,
+TimeMarkerReached*, LightShow_*, the band iterators -> the existing
+modules. Order: (1) the event hooks first (Player events -> GuitarEvent_*
+spawns, with natives for SoundEvent, Create2DParticleSystem,
+setsoundbusseffects, CameraCuts_SetArrayPrefix, Crowd_AllPlayAnim) - this
+alone brings the sounds and FX and touches nothing in the judge; (2) the
+song event arrays through event_iterator (stage divers, lighters, crowd
+listener); (3) start_gem_scroller / gem_scroller themselves once the 2D
+elements the scripts create (gems, HUD) are served by the screen-element
+system, retiring the native start_gem_scroller. Each step keeps
+--selftest / the walks green; gd04's own drawing of an effect is removed
+when the script's takes over. Undo: keep the native start_gem_scroller
+(today's path) and drop the hook spawns.

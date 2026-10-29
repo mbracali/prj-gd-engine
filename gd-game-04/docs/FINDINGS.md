@@ -158,9 +158,14 @@ player's `player_status` struct.
   gems, next phrase) [C 0x8211F938-0x8211F9EC]. total_notes unchanged.
 - Miss (0x8211F328): missed_note event (bum_note = a strum happened),
   CrowdDecrease, total_notes+1, current_run := 0 [C 0x8210C800]; if any gem of the
-  note is a star gem: star_power_sequence := 0, star_miss_note (remaining star gems
-  of the phrase become normal gems) [C 0x8211F56C-0x8211F5B0, 0x8211E8B8,
-  0x821195C0 star_miss_note branch].
+  note is still tagged `star` (0x3624A5EB; no earlier loss of its phrase),
+  0x8211E8B8(player, note time): change_stars_to_gems if star_power_used;
+  return there for player 2 when new_net_logic (online); star_power_sequence
+  := 0; **if phrase time <= note time < phrase time + length** (the
+  half-open range of the gem builder) the current phrase is given up (the
+  pointer moves to the next, 0x82102830); broadcast star_miss_note {array_entry,
+  song} and send it to the player's gems (they turn into normal gems) [C
+  0x8211F56C-0x8211F5B0, 0x8211E8B8-0x8211EA3C, 0x821195C0].
 - clear_history_on_hit=1: fret history wiped after every hit [C 0x821207F0].
 
 ### 4. Score
@@ -194,7 +199,15 @@ player's `player_status` struct.
 - Star whammy (script star_power_whammy): while a star sustain is held and the
   whammy moved > 0.03 within the last 5 frames, star_power_amount +=
   star_power_whammy_add (3.333; co-op 2.5) x dt / beat_time, i.e. 3.333 % per beat
-  [C script]. whammy_cutoff (1100) not located in code [unknown].
+  [C script].
+- whammy_cutoff (1100) [C 0x8210E750, the 2D gem / tail mover]: while a
+  sustain's element is `holding`, its head start time is reset each frame to
+  now - whammy_cutoff x T / N (T the travel time, N = gem_time_table512's
+  size, 1152), so the head sits at row whammy_cutoff x 1024 / 1152 = 977.8
+  (1P: 0.870 of the way down the highway through time_accum, above the
+  playline row 1024); the tail runs from there. The
+  port pins the head at the playline (render/highway2d.cpp, `vHead`): a
+  follow-up for the highway code (not in this item's files).
 
 ### 6. Star Power
 
@@ -214,6 +227,27 @@ player's `player_status` struct.
 - Co-op: amount is shared (both players set to the same value) [C 0x8210C5B8];
   activation needs both players within star_power_coop_trigger_ms (1000) [I from
   0x82112BC4 and show_coop_raise_axe_for_starpower].
+- Tilt units [C 0x82112EE0-0x82112F90, 0x822AFD90, scripts]: the value is
+  byte 1 of the controller's pad record (right stick Y [I]), v = b - 128,
+  as (v - 50) / 77 for v > 0, (v + 50) / 77 for v < 0 (-127 -> -1.0, +127
+  -> +1.0); a frame counts when it is <= the player's star_tilt_threshold,
+  which start_gem_scroller sets from the user option
+  star_power_position_device_<controller> (get_star_power_position; -1.0 by
+  default, the calibration screen stores the held `righty` clamped to <= 0;
+  guitar_tweaks' 16.0 is only the placeholder); star_power_trigger_frames
+  (3) consecutive frames fire, Select (0xB40D153F) at once. The port merges
+  tilt and Select into FrameInput::starPower (input/, game/player.h), so the
+  3-frame wait of the tilt is not modelled [I: a follow-up there].
+- Co-op raise-axe prompt [C 0x82112850 + script]: the trigger in p2_career /
+  p2_coop spawns show_coop_raise_axe_for_starpower with the **other**
+  player's status (player 1 triggers -> player2_status, player 2 ->
+  player1_status); the script places it at hud_screen_elements[10].pos
+  - (225, 60) for player_status.player = 1 (left, (415, 240)) and + (225,
+  -60) for player 2 (right, (865, 240)); so it shows on the side of the
+  player who has not raised yet. Not shown while that player's
+  star_power_used, showing_raise_axe, attract or performance mode. The port
+  always draws it at the left (render/hud2p.cpp): a follow-up for the HUD
+  (Match needs to say who triggered).
 
 ### 7. Rock meter
 
@@ -249,7 +283,14 @@ player's `player_status` struct.
   face-off: full chart, scale 1.0, one difficulty.
 - Battle / boss: `_StarBattleMode` phrases give cards (battlemode_powerups,
   a stack of 3), fired with the SP trigger (no 50 % gate) [C 0x8211E7B0,
-  0x82112D84]; attacks and their numbers in `modes.md`; Double Notes is the
+  0x82112D84]; the card roll [C 0x821217A0-0x82121B50, 0x8211E7B0-0x8211E890,
+  0x8211F034-0x8211F084]: PS.battlemode_creation_selection is rolled
+  (battlemode_select / bossbattle_select) when a phrase gem is made while
+  it is -1, every phrase gem carries the value as `battle_gem`, the hit of
+  the gem flagged `last` awards that gem's (battlemode_ready battle_gem = ..),
+  and it is set back to -1 by a gem made outside every phrase and by a
+  completed phrase (a phrase made while the one ahead is still on the
+  highway, with no plain gem between, keeps that one's card); attacks and their numbers in `modes.md`; Double Notes is the
   only lane change, at fill time [C 0x821044C8]; broken_string_mask is taken
   off the held frets [C 0x82100DA0]. KO: a player at 0 with the healths
   unequal; both alive at the end: sudden death (the song again, every new
@@ -278,10 +319,162 @@ player's `player_status` struct.
   start) x f, alpha and the four rgba bytes too (truncated to bytes) [C]. ui_system and the HUDs
   use these.
 
-### Unknown / not done
-- whammy_cutoff use; exact star_miss_note boundary; tilt units; the condition
-  that rolls a battle card (a gem in a StarBattleMode phrase assumed); which
-  side shows co-op's raise-axe prompt; CrowdDecrease's early-return flags.
+### GD04-004: the last unknowns, confirmed (2026-10-29)
+
+Read with Ghidra headless (DumpAsm.java, ReadF.java) and the analysis
+export; REA not used (it cannot open the XEX). All [C]:
+- whammy_cutoff: §5 (the held sustain's head row, 0x8210E750).
+- star_miss_note boundary: §3 Miss (phrase time <= t < time + length).
+- Tilt units: §6 (normalised -1 .. 1, threshold from the calibration).
+- The gem builder's phrase test (0x82102B70, called by the gem creator
+  0x82120C90): the phrase pointer advances past every phrase whose end <=
+  the note time (0x82102830; none left: start 10,000,000), then the note is
+  in the phrase iff start <= time < start + length; it counts the phrase's
+  distinct note times; `last` = end <= the note's input_array word 7 (the
+  next chart note's time, 7,200,000 at the end). Face-off keeps the full
+  chart's `last` (word 7 is read from the chart, not from the player's
+  sections), so a phrase whose last note is the other player's never
+  completes. game/note_track.cpp now keeps the full chart's flag in
+  faceOffTrack (it re-marked the last kept note before).
+- Battle card roll: §8 (battlemode_creation_selection); game/match.cpp now
+  rolls and resets it as the original does.
+- Co-op raise-axe side: §6 (the other player's side; HUD follow-up).
+- CrowdDecrease (0x82110570 -> 0x8210FD18) returns before any loss when:
+  player 2 with new_net_logic; cheat_nofail = 1 outside p1_career /
+  p2_career / p2_battle / p2_coop and not is_network_game; game_mode
+  tutorial or training; song time < PS.health_invincible_time and health
+  <= health_invincible_minimum x 0.02; health <= 0 outside co-op;
+  crowd_debug_mode, end_credits or use_character_debug_cam = 1 (globals
+  cached by 0x821062A8). game/player.cpp: gd04's no-fail now behaves as
+  cheat_nofail (no loss at all; it only clamped at 0 before).
+
+## The song path: scripts vs C (GD04-021, 2026-10-29)
+
+Read from qbscript.py dumps of qb.pak, a reachability walk of the scripts
+from start_gem_scroller, a tally of every song's event arrays, and the
+natives each script calls (ghidra/analysis/cfuncs.tsv); REA not used.
+
+**Split in the original** [C scripts, C addresses in flow.md §11]. The
+scripts own the setup and the timing loops; every per-frame decision is C:
+- Scripts: start_gem_scroller (setup, below), gem_scroller (per player:
+  setup_gemarrays, calc_health_invincible_time, the hit window x speed, and
+  the spawns), every iterator's loop (`X_CFunc_Setup; begin if X_CFunc
+  break; Wait 1 gameframe repeat; X_CFunc_Cleanup`), win_song, the event
+  hooks (GuitarEvent_*), the Star Power scripts, the crowd / band / camera /
+  light-show event handlers, the HUD's morphs.
+- C: the gem iterators (gem_array_stepper_CFunc: fill_input_array ->
+  FillInputArray 0x82104B90 with the face-off filter and Double Notes,
+  create_gem -> Create2DGem 0x82121C58 -> 0x82120C90 with the star / battle
+  tagging, GemStep 0x82122B10, the gem mover 0x8210E750), the fretbars
+  (fretbar_iterator_CFunc, Create2DFretbar), fretbar_update_tempo /
+  _hammer_on_tolerance, the judge (check_buttons_fast:
+  GuitarInputLogicInit / PerFrame 0x8211FA28 with hit / miss / overstrum,
+  scoring 0x8210BB40, health 0x8210FD18 / 0x8210F6A0, Star Power
+  0x8210C5B8 / 0x8211E4E8), button_checker (the fret buttons),
+  check_for_star_power_CFunc (trigger, co-op prompt), update_score_fast
+  (UpdateScoreFastPerFrame: the HUD's score / multiplier / meter values),
+  check_note_hold (sustains), CheckButtonsBoss / _bot, the band iterators
+  (Strum / FretFingers / FretPos / Drum, TimeMarkerReached), LightShow_*,
+  CrowdIncrease / CrowdDecrease, StarPowerOn, NoteFX, the
+  GuitarEvent_HitNotes_CFunc. C reports to the scripts by events
+  (hit_notes, missed_note, unnecessary_note, star_power_on, star_hit_note,
+  star_miss_note, star_sequence_bonus, whammy_on/off, multiplier changes,
+  crowd changes, song_won / song_failed) that gem_array_events /
+  event_spawner turn into GuitarEvent_* scripts.
+
+**What gd04 runs instead.** The native start_gem_scroller
+(ui/natives_game.cpp) reads the song / difficulties / mode / boss / lefty /
+lag and hands over to ui/song_screen + game/match + game/player (the C
+judge reimplemented, [C] in this file), render/highway2d (gems, fretbars,
+tails, buttons, flames, pulses), render/hud2d / hud2p, audio/song_stream,
+the venue (render/venue_*: cameras incl. the intro transition, light show
+from `_lightshow_notes`, crowd, particles) and the band (render/band_*:
+the performance array's Band_ChangeStance / PlayAnim / PlayFacialAnim /
+WalkToNode, the C hand / drum iterators). The song ends into GH3's own
+GuitarEvent_SongWon / GuitarEvent_SongFailed (front_end.cpp), so the end
+is the original's. **None of the GH3 song scripts below runs.**
+
+**Scripts not run, with an effect the port therefore lacks** (L) or
+re-implements natively (R) [C scripts]:
+- start_gem_scroller setup: load_songqpak (R), call_startup_scripts (the
+  song's startup_script / exit_script, gem / input offsets, hammer-on scale:
+  R for the offsets; the only startup scripts songs name, default_startup
+  and LS_SetupVenueLights, are empty: L none), GuitarEvent_EnterVenue (the venue's reverb on the sound busses: L),
+  GH3_Set_Guitar_Verb_And_Echo_to_Dry (L), Menu_Music_Off (R),
+  create_cameracuts / create_movie_viewport / create_crowd_models /
+  crowd_create_lighters / Crowd_StageDiver_Hide / create_band (R),
+  preload_song / begin_song_after_intro (R), reset_score / crowd_reset /
+  star_power_reset / difficulty_setup / calc_songscoreinfo (R),
+  setup_highway / generate_pos_table / move_highway_2d / setup_hud /
+  reset_hud (R), Transition_Play + GuitarEvent_Transition* (empty hooks;
+  the intro cameras R), battlemode_init / bossbattle_init (R),
+  practicemode_init (training: not supported), the boss intro audio
+  GH_SFX_Preload_Boss_Intro_Audio and the boss helper screen (L),
+  Progression_SetProgressionNodeFlags (node flags: R where venues need them).
+- gem_scroller's iterators: gem_iterator x4, fretbar_iterator x3,
+  check_buttons_fast, button_checker, check_for_star_power,
+  update_score_fast, check_note_hold, the band iterators, lightshow_iterator,
+  cameracuts_iterator, win_song, faceoff_init (R, as the C they call);
+  faceoff_volumes_init (the guitar track at 100 % for both, the face-off
+  volume switching by section: R in part, mixer guitar mute only);
+  event_iterator + notemap_startiterator x8 over `<song>_scripts`, `_anim`,
+  `_triggers`, `_cameras`, `_lightshow`, `_crowd`, `_drums`,
+  `_performance` (R for lightshow LightShow_SetTime, performance Band_*;
+  L for the rest: Crowd_StageDiver_Jump (29 songs), Crowd_StartLighters /
+  StopLighters (12 songs), GH3_Crowd_Event_Listener crowd surges / applause
+  (1 song, 15 events), Band_PlayChord* (1 song), dragonforce_hack_off;
+  the boss Death Drain (boss_battle_begin_deathlick) R in Match).
+- Event hooks: GuitarEvent_HitNote(_Spawned) -> hit_note_fx (flames, R);
+  GuitarEvent_MissedNote / _UnnecessaryNote -> Guitar_Wrong_Note_Sound_Logic
+  (**the bad-note sound**, guitar / bass / player 1 / player 2 variants: L),
+  guitar mute (R), highway_pulse_black (R), CrowdDecrease (R);
+  guitarevent_multiplier2x/3x/4xoff (UI_SFX_Lose_Multiplier_* and
+  Lose_Multiplier_Crowd sounds: L; highway_pulse_multiplier_loss: R);
+  multiplier4xon (the 4x particle system: L); GuitarEvent_StarSequenceBonus
+  (Star_Power_Awarded_SFX: L; the big bolts and star particles on the
+  buttons: L; sp_phrases_hit: R); GuitarEvent_StarPowerOn ->
+  GH_Star_Power_Verb_On (Star_Power_Deployed_SFX + _Cheer_SFX, the Star
+  Power buss set and a tempo-synced guitar echo / reverb: L),
+  Do_StarPower_StageFX (per-venue stage effects: shotgun, flamethrower,
+  hearts, bats, butterflies, peace, tesla particle FX: L), StarPowerOn (R);
+  star_power_activate_and_drain (drain R; hud_activated_star_power R;
+  LaunchGemEvent star_power_on R; Crowd_AllPlayAnim, the crowd's Star Power
+  animation: L; UpdateNixie: L); GuitarEvent_StarPowerOff (verb off L,
+  rock_meter_star_power_off R, Kill_StarPower_StageFX / Kill_StarPower_Camera:
+  L with the FX); do_starpower_camera (the Star Power camera array prefix: L);
+  show_star_power_ready (its SoundEvent: L; meter bulbs and lightning alert:
+  R); star_power_whammy (the gain R; MakeStarWhammy blue tails R);
+  GuitarEvent_PreFretbar (Crowd_Individual_Clap_To_Beat on every beat while
+  Star Power is on: L); GuitarEvent_Fretbar -> set_sidebar_flash (R);
+  GuitarEvent_FirstNote_Window_Open / check_first_note_formed (guitar
+  volume at the first note: R by the mixer); GuitarEvent_CreateFirstGem ->
+  first_gem_fx (L); GuitarEvent_Whammy On/Off -> WhammyFXOn/Off (C 0x8211C1A0 / 0x8211C390:
+  the whammy effect on the guitar stream [I: not read further]: L); GuitarEvent_BattleAttackFinished
+  (attack SFX, battle DSP reset: L) and the battle scripts' sounds
+  (Battle_Power_Awarded_SFX_P1/P2 and the attack sounds: L);
+  GuitarEvent_crowd_* (printf only); GuitarEvent_KillSong (stops SFX: n/a).
+- Debug-only hooks (Note_Window_Open / _Close, Fretbar_Early / _Late,
+  Debug_Audible_*): nothing to miss.
+
+So the visible / audible gaps are all on the script side: every in-song
+sound effect (bad notes, Star Power deploy / awarded / ready, multiplier
+loss, claps, crowd surges, battle sounds), the Star Power stage FX, camera
+switch and crowd animation, the 4x / first-gem / phrase-bonus particles,
+the stage divers and lighters, the venue reverb and the Star Power guitar
+echo, the whammy effect. The judge, highway, HUD numbers and song audio are
+reimplemented natively and match the C ([C] above). Also not modelled:
+end_credits (no health loss during the credits song) and tutorial /
+training (CrowdDecrease's early returns, §GD04-004).
+
+**Proposal** (agents/DECISIONS.md D10): run GH3's own song scripts
+(start_gem_scroller's real body, gem_scroller and everything it spawns, the
+event hooks) on the VM, with the port's core behind the natives the
+scripts call (gem_array_stepper_CFunc, FillInputArray, Create2DGem,
+GemStep, GuitarInputLogicPerFrame, CheckNoteHold*, ButtonChecker*,
+check_for_star_power_CFunc, UpdateScoreFast*, CrowdIncrease / Decrease,
+StarPowerOn, NoteFX, TimeMarkerReached, LightShow_*), keeping game/match
+and game/player as the C, and the highway / HUD as the renderer of the
+elements the scripts create.
 
 ## Venues, cameras, light show (M5; details in `venues.md`)
 

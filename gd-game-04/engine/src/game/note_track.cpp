@@ -90,8 +90,10 @@ NoteTrack buildTrack(const Chart& chart, Part part, int difficulty, const Tuning
             n.maxSustainPoints = int(std::lround(tr.beatsBetween(float(c.time), float(c.time + c.length)) * 25.0f));
         tr.notes.push_back(n);
     }
-    // Star Power phrases: the notes whose time lies in [time, time + length) [I: the
-    // phrase test of the gem builder]; the last such note carries the "last" flag.
+    // Star Power phrases: the notes whose time lies in [time, time + length), the
+    // phrase pointer moving on past every phrase that ends at or before the note
+    // [C 0x82102B70, 0x82102830]; "last" = the phrase ends at or before the next
+    // chart note (input_array word 7) [C 0x82102B70 end], i.e. its last note.
     for (size_t p = 0; p < tr.phrases.size(); ++p) {
         const ChartPhrase& ph = tr.phrases[p];
         int last = -1;
@@ -115,9 +117,10 @@ NoteTrack faceOffTrack(const NoteTrack& full, const std::vector<ChartPhrase>& se
                 break;
             }
     // Star Power phrases stay (face-off has Star Power: faceoff_hud_2d_elements
-    // carries the tubes [C data]); a phrase's last note is its last one kept [I].
-    for (TrackNote& n : t.notes) n.phraseLast = false;
-    for (size_t i = 0; i < t.notes.size(); ++i)
-        if (t.notes[i].phrase >= 0 && (i + 1 == t.notes.size() || t.notes[i + 1].phrase != t.notes[i].phrase)) t.notes[i].phraseLast = true;
+    // carries the tubes [C data]). "last" keeps the full chart's: a note's next
+    // time is the next chart note's, whichever player it belongs to [C
+    // 0x821044C8: the face-off filter skips the note, word 7 reads the chart
+    // 3 words on], so a phrase whose last note is the other player's never
+    // completes on this side.
     return t;
 }

@@ -277,8 +277,17 @@ void Match::fill(Side& s, int idx, double now) {
         if (n.time <= s.filledTo) continue;  // passed while another difficulty was read
         if (n.phrase >= 0) {
             n.phrase += s.phraseOffset[size_t(s.curDiff)];
-            // The phrase's card is rolled when its first gem is made [C 0x821217A0].
-            if (b.phraseCard[size_t(n.phrase)] < 0) b.phraseCard[size_t(n.phrase)] = select(idx);
+            // battlemode_creation_selection: a phrase gem made while it is -1
+            // rolls it (battlemode_select / bossbattle_select); every phrase
+            // gem carries it as battle_gem, and the hit of the last one awards
+            // the last one's. A gem outside the phrases and a completed phrase
+            // set it back to -1, so a phrase made before the one ahead of it
+            // completes keeps that one's card [C 0x821217A0-0x82121A98,
+            // 0x82121B40, 0x8211E870, 0x8211F074].
+            if (b.selection < 0) b.selection = select(idx);
+            b.phraseCard[size_t(n.phrase)] = b.selection;
+        } else {
+            b.selection = -1;
         }
         if (b.doubleUntil >= 0) {
             // Double Notes: HOPOs off, a fret added [C 0x821044C8].
@@ -666,6 +675,7 @@ void Match::frame(double now, double dt, const std::array<FrameInput, 2>& live) 
                 if (e.kind == PlayerEvent::Kind::BattlePhrase && e.note >= 0) {
                     const int ph = s.live.notes[size_t(e.note)].phrase;
                     if (ph >= 0) award(i, s.battle.phraseCard[size_t(ph)], now, false);
+                    s.battle.selection = -1;  // battlemode_creation_selection [C 0x8211E870]
                 } else if (e.kind == PlayerEvent::Kind::Trigger) {
                     fire(i, now);
                 }

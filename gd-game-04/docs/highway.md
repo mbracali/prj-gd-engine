@@ -238,8 +238,10 @@ removed and a flame shown (2.8) [I: GemStep / hit path not fully read].
 - Mover with whammy flag: same start/end positions, scale 1; elapsed + whammy_offset_tweak
   (-33 ms); length parameter L = sustain_s / T (fraction of the travel) [C 0x82121428-0x82121444].
 - Per frame: head row = e/T*1024 (as a gem); if the note is being held (`holding` = 1) the head
-  start time is reset so the head row stays at whammy_cutoff (1100, just below the playline row
-  1024) [C]. Tail row = (e_creation/T - L)*1024, clamped at 0 (top); tail beyond 1152 -> destroy
+  start time is reset to now - whammy_cutoff x T / N (N = gem_time_table512's size, 1152), so the
+  head row stays at whammy_cutoff x 1024 / 1152 = 977.8 (1P: 0.870 of the way down, above
+  the playline row 1024 [I: hidden by the fret buttons]) [C 0x8210E8D4-0x8210E910; gd04 pins it at the
+  playline, a follow-up]. Tail row = (e_creation/T - L)*1024, clamped at 0 (top); tail beyond 1152 -> destroy
   [C]. Sprite at the head position, y scale = (y_head - y_tail) / (texture height * cos(angle)),
   x scale 0.6 [C 0x8210EAxx: 1/f(pi/2 - rot); f = sin I].
 - Rendering: a strip mesh in 8-row steps (0x8238E338 / 0x8238ECF8): half width = whammy_top_width *

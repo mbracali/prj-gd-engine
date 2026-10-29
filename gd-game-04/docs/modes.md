@@ -53,8 +53,11 @@ fallback (the character's highway material: M6) [I].
   16.67 / measure. Activation: a trigger (>= 50) readies that player and
   starts the raise-axe prompt (`show_coop_raise_axe_for_starpower`, ~1.24
   s); both ready while it shows: SP for both [0x82112850, 0x821131E4]. The
-  1000 ms `star_power_coop_trigger_ms` is dead code [I]. The prompt is drawn
-  on P1's side [I: the script is spawned without a player].
+  1000 ms `star_power_coop_trigger_ms` is dead code [I]. The prompt is
+  spawned with the other player's status, so it shows on the side of the
+  player who has not raised: P1's trigger -> P2's side (865, 240), P2's ->
+  P1's (415, 240) [C 0x82112850, script; FINDINGS §6]. gd04 draws it on
+  P1's side always (render/hud2p.cpp: a follow-up).
 - Health per player (may go below 0); fail when (h1 + h2) / 2 <= 0
   [0x8210FD18]; invincibility: both easy 20 %, both <= medium 10 %
   [calc_health_invincible_time].
@@ -66,8 +69,10 @@ fallback (the character's highway material: M6) [I].
 - Face-off: only the notes inside the player's `<song>_faceoffp1 / p2`
   sections enter his input array, and the gems come from it: the other
   player's notes are neither drawn nor judged [0x82104558-0x821045CC]. Star
-  Power stays (the HUD has the tubes); a phrase's last kept note completes
-  it [I].
+  Power stays (the HUD has the tubes); a phrase completes on the note that
+  is its last in the full chart (input_array word 7 is the next chart
+  note's time), so a phrase that ends in the other player's section never
+  completes [C 0x82102B70, 0x821044C8].
 - Score scale: (sim_bot_score_p1 + sim_bot_score_p2) x 0.5 / own
   (sim_bot_score: the chart's points at a perfect run's multiplier) [0x8210B9A0];
   pro face-off 1.0.
@@ -77,10 +82,12 @@ fallback (the character's highway material: M6) [I].
 ## 5. Battle [C unless noted]
 
 - Phrases: `<song>_<part><Diff>_StarBattleMode`; no Star Power [0x8211E704].
-  A card is rolled when the phrase's first gem enters the input array
-  [0x821217A0; I: the phrase test] and given when the phrase completes
-  (battlemode_ready: a stack of `max_num_powerups` 3, a full hand loses its
-  top card) [0x8211E7B0].
+  A card (battlemode_creation_selection) is rolled when a phrase gem is
+  made while none is pending, carried by every phrase gem, and the last
+  gem's is given when the phrase completes; a gem outside the phrases and a
+  completed phrase clear it [0x821217A0-0x82121B50, 0x8211E870; phrase test
+  0x82102B70] (battlemode_ready: a stack of `max_num_powerups` 3, a full
+  hand loses its top card) [0x8211E7B0].
 - Choice (battlemode_select): health > 0.5: weight 10 each, except the last
   rolled and the top card (weight_low 0); <= 0.5: Steal / Lefty / Whammy
   only; no Difficulty Up against expert; Death Drain only in sudden death.

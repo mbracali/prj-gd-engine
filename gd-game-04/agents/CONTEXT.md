@@ -118,3 +118,13 @@ development aids.
   (hid = winkey). Captures: ~/.local/share/gd-engine/refcaps/gd04/INDEX.md.
   Never create a uinput virtual pad outside a capture session (it breaks
   other modules' input tests).
+Note (GD04-014 / -015 / -004 / -021, 2026-10-29): the volume texture's 3D
+tiling from Xenia's public texture_address.h (Tiled3D, cited in
+docs/formats.md), checked on the data (seamless slices); Havok packfiles
+decoded from their own __types__ reflection (`tools/havok.py check|dump|types|rag`,
+data/havok.cpp, both in --formattest); the GD04-004 rules with Ghidra
+headless (DumpAsm.java fn:0x8211E8B8 / 0x8211F328 / 0x82120C90 /
+0x821129D8 / 0x82112850 / 0x8210FD18, ReadF.java) and the analysis export;
+the song-path survey (GD04-021) from qbscript dumps (a reachability walk
+from start_gem_scroller, the songs' event arrays). REA was not used (it
+cannot open the XEX). Scratch: agents/scratch/asm_*.txt.

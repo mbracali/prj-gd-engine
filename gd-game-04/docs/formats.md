@@ -181,9 +181,31 @@ Loaders: 0x82415FD8 (.img fix-up), 0x82382970 / 0x82382D88 (.tex),
   pipe interleave); levels >= 1 are npot(w) >> i; the packed mip tail starts
   at the first level with min(w, h) <= 16 texels, laid out at (0, h) or
   (w, 0) in a tile of the base pitch [C data].
+- **Volume (3D) tiling** (GD04-014): the one volume on the disc
+  (`global_gfx.tex` #49, key 0x2E2E1ADF, DXT5 128x128x32, one level,
+  class byte 5, 0x80000 bytes = 32x32 blocks x 32 slices x 16) is laid out
+  by XGAddress3DTiledOffset, as Xenia writes it (`texture_address.h`
+  Tiled3D, github.com/xenia-project/xenia at 95a5c3e): pitch and height
+  aligned to 32 blocks, depth to 4; macro tiles of 32x16x4 blocks in x, y, z
+  order (`outer = ((z>>2) * (H>>4) + (y>>4)) * (P>>5) + (x>>5)`, x128
+  blocks); inside, `inner = (z&3)<<5 | ((y>>1)&3)<<3 | (x&7)`; bank = (y>>3
+  ^ z>>2) & 1, pipe = ((x>>3)&3) ^ bank<<1; the address interleave as in 2D
+  (bits 0-3 / 5 / 8-10 / 12+ from outer|inner scaled by the block size, y&1
+  at bit 4, pipe at 6-7, bank at 11). [C data: every slice decodes
+  seamless (block, micro- and macro-tile edges as smooth as the insides,
+  the 2D slice-by-slice guess is not); the slice order is the formula's
+  (the 32 slices are independent noise layers, no continuity in z to check
+  it against).] tools/img.py and texture.cpp decode it (FNV-1a of the slices
+  fe4c4c91 in both: `img.py check`, `gd04 --formattest`); the device has no
+  volume kind, so it stays unsupported for upload.
+- **What uses it**: only material 0xD2BFD967 of `global_gfx.scn` (template
+  `VolumeMap`: the pixel shader `tfetch3D`s the volume at the interpolated
+  position and writes its alpha as grey). No mesh, no particle system, no
+  QB script and no XEX constant names that material or the texture key
+  [C data: a search of every pak and the decompiled XEX], so nothing draws
+  it at runtime: a leftover test material.
 - Counts: DXT1 2874, DXT5 1553, DXN 1181, 8_8_8_8 cubes 134, DXT3 2,
-  8_8_8_8 1, 16_16_FLOAT 1, DXT5 volume 1. **Gaps**: the volume texture's
-  3D tiling is unsolved (returned unsupported); cube 1x1 levels are box-
+  8_8_8_8 1, 16_16_FLOAT 1, DXT5 volume 1. **Gaps**: cube 1x1 levels are box-
   filtered from 2x2 [I]; the class byte's meaning [I].
 
 ## Scenes, models, skins (.scn, .mdl, .skin), collision (.hkc, .rag) — `tools/scn.py`, `engine/src/data/scene.cpp`
@@ -199,8 +221,74 @@ with 0x7FFF restarts, vertex and skin blocks). Vertex declarations from the
 mesh flags as 0x823B9A28 builds them (positions, HEND3N normals / tangents,
 colours, blend weights / indices, texcoord sets as FLOAT or FLOAT16).
 Skins: groups of 1-3 bones, 32-byte vertices with two u16 weights.
-.hkc / .rag: Havok 4.6.0-r1 packfiles (`__classnames__`, `__data__`,
-`__types__`), validated, objects not decoded yet.
+.hkc / .rag: Havok 4.6.0-r1 packfiles, decoded (next section).
+
+## Havok packfiles (.hkc, .rag) — `tools/havok.py`, `engine/src/data/havok.cpp`
+
+[C data: 24 .hkc + 27 .rag, every object reached, every pointer fixup read
+by a reflected member, 0 problems (`havok.py check`, `gd04 --formattest`).]
+Loader strings in the XEX: hkPackfileReader (Havok 4.6.0-r1, also
+accepts 3.0.0 / 3.1.0 / 4.0.0-b1), `levels\%s\%s%s.hkc.%s` (0x8226B728).
+
+- **Header** (0x40): magic 57E0E057 10C0C010, u32 0x786E6B68 (user tag), u32
+  4 (version), layout rules 04 00 00 01 (4-byte pointers, big-endian, no
+  padding / empty base), u32 3 sections, contents section 1 / offset,
+  contents class name section 0 / offset, "Havok-4.6.0-r1" padded with FF,
+  two u32 -1. Then a 0x30-byte record per section: 19-byte name + FF, u32
+  start, then six offsets from it: data size (= local fixups), global
+  fixups, virtual fixups, exports, imports, end (exports / imports empty).
+- **Fixups**: local (u32 src, u32 dst: a pointer to the same section),
+  global (src, dst section, dst), virtual (src, 0, class name offset: an
+  object of that class starts at src); tables padded with -1 to 16 bytes.
+  Pointers are stored as 0 and set from these.
+- **`__classnames__`**: {u32 signature, u8 9, name, NUL} entries, FF padded.
+- **`__types__`** (the reflection, 37-68 classes per file): hkClass objects
+  (0x30: name, parent, u32 object size, u32 interfaces, enums, s32 enum
+  count, members, s32 member count, defaults (null on the disc), 3 words 0)
+  with their hkClassMember arrays (0x14: name, class, enum, u8 type, u8
+  subtype, s16 C-array size, u16 flags, u16 offset; enum storage in the flags
+  ENUM_8 / 16 / 32 = 8 / 16 / 32) and hkClassEnum records (0x0C: name,
+  items {s32 value, name}, count). Types: Havok 4.6's hkClassMember::Type
+  (REAL, VECTOR4, TRANSFORM, POINTER, ARRAY = {ptr, s32 size, u32 capacity |
+  0x80000000}, SIMPLEARRAY = {ptr, s32 size}, STRUCT, ENUM, CSTRING, ZERO =
+  runtime-only, ...). A member's offset is absolute in its class; a class's
+  members follow its parent's.
+- **`__data__`**: the objects, laid out by those classes; the contents is
+  an hkPhysicsData {worldCinfo, systems[]}; each hkPhysicsSystem holds
+  rigidBodies[], constraints[], actions[], phantoms[] (the last two empty).
+- **.rag** (27, `global.pak`: ragdoll_ped, ragdoll_<character>[_2],
+  ragdoll_male_singer / female_singer / bassist / drummer,
+  Ragdoll_DevilGirl): one system of 15 (ped), 10 (DevilGirl) or 35 rigid
+  bodies named after the skeleton's bones (Bone_Pelvis ... Bone_Ankle_R and
+  15 Bone_ACC_01..15 accessory bones), each an hkRigidBody (mass from
+  inertiaAndMassInv.w, MOTION_BOX / SPHERE_INERTIA, friction / restitution,
+  damping, motionState.transform = the bone's bind pose) with an
+  hkCapsuleShape or an hkConvexTranslateShape around an hkBoxShape (the
+  accessory bones: thin boxes); one constraint per body to its parent bone,
+  hkRagdollConstraintData (cone / twist / plane limits, the pivots in the
+  local transforms) or hkLimitedHingeConstraintData (forearms, knees), 873
+  in all; an hkSpatialRigidBodyDeactivator on 805 of the 903 bodies.
+- **.hkc** (24, every zone: `<zone>.hkc` and `<zone>_gfx.hkc`): 21 are an
+  empty world (two systems, no bodies); z_budokan_gfx, z_dive_gfx and
+  z_testlevel_peds hold one MOTION_FIXED body with an hkMoppBvTreeShape over
+  an hkNxStorageExtendedMeshShape (3 subparts of 2 triangles: 28 triangles
+  on the whole disc, a few floor quads).
+- **Use** [C scripts]: `create_guitarist` / the band's composite objects
+  get a `ragdoll` component (ragdollname = the profile's `ragdoll` /
+  `ragdoll2` for outfit 2, ragdollcollisiongroup =
+  RagdollCollisionGroups_<character>), the anim trees put a `ragdoll` node
+  over the animation (guitarist_static_tree), and `ragdoll_setaccessorybones
+  accessory_bones = $Guitarist_accessory_bones` (Bone_ACC_01..15;
+  DevilGirl_accessory_bones 03..06) makes those bones simulated: the hair,
+  coat tails and chains swing with Havok while the body bones follow the
+  animation (keyframed) as their collision; ragdoll_markforreset after
+  teleports. Ragdoll_budget = 20 ms [C data]. The .hkc collision has no
+  gameplay or camera use found (the cameras are scripted, docs/venues.md).
+- **The port**: decoded and checked, not simulated. Without them the
+  Bone_ACC bones only follow the animation clips, which is the visible
+  difference: no secondary motion of hair / accessories. A simulation (a small verlet / PBD chain per
+  accessory bone with the cone limits and the capsule / box bodies as
+  colliders) is enough to match it; the .hkc can be ignored.
 
 ## Material library (`DATA/FXFILES/MaterialLibrary.bin.xen`) — `tools/matlib.py`, `engine/src/data/matlib.cpp`
 
