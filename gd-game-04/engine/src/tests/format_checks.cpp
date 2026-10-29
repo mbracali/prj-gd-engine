@@ -11,6 +11,7 @@
 #include "data/anim.h"
 #include "data/font.h"
 #include "data/scene.h"
+#include "data/texture.h"
 
 namespace {
 
@@ -131,6 +132,14 @@ bool checkPakFile(const Pak& pak, const PakEntry& e, FormatStats& s, std::string
         try {
             qb::decode(p, n, &unused);
             if (unused) what = "unused bytes", ok = false;
+        } catch (const std::exception& ex) {
+            what = ex.what(), ok = false;
+        }
+    } else if (e.type == qbkey::key(".img") || e.type == qbkey::key(".tex")) {  // textures (data/texture.h)
+        auto [p, n] = pak.data(e);
+        try {
+            if (e.type == qbkey::key(".img")) gh3tex::decodeImg(p, n);
+            else gh3tex::decodeTexDict(p, n);
         } catch (const std::exception& ex) {
             what = ex.what(), ok = false;
         }

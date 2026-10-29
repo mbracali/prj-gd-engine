@@ -656,7 +656,7 @@ universal launcher, not released on its own.
 |---|---|---|---|---|---|
 | GD04-001 | Original | 🟡 in progress | Full reimplementation (decompile + recompile, 100% match), milestones M0–M10 of the kickoff; the agent adds one row per milestone and per finding | [GD-GAME-04_KICKOFF.md](GD-GAME-04_KICKOFF.md); progress in `gd-game-04/agents/PROGRESS.md` | Owner 10-28 |
 | GD04-002 | Original | ✅ | M0 set-up: rip, Ghidra project + export (32,998 functions), DumpAsm / ReadF, engine shell copied from gd-game-02's engine-independent layers (gd04), title ID 415607F7 | `gd-game-04/agents/CONTEXT.md`, `DECISIONS.md` | Kickoff M0 |
-| GD04-003 | Original | 🟡 in progress | M1 data layer: compressed files, PAK/PAB, QB keys + debug names, QB decoder done (`--formattest`, Python tools); textures, scenes, models, skins, animations, fonts, collision to do | `gd-game-04/docs/formats.md` | Kickoff M1 |
+| GD04-003 | Original | ✅ | M1 data layer: every pak type decodes to its end in Python and C++ (`--formattest`): QB, textures, scenes / models / skins, Havok, animations, skeletons, fonts, .wav, .nqb, .pfx, .table, .dbg; FMOD song banks (`--sfxtest`) | `gd-game-04/docs/formats.md` | Kickoff M1 |
 | GD04-004 | Original | ❌ | M2 songs, audio (FSB4 decryption, XMA stems), gameplay core, `--selftest` | | Kickoff M2 |
 | GD04-005 | Original | ❌ | M3 QScript VM, menus, asset audit (`--audittest`) | | Kickoff M3 |
 | GD04-006 | Original | ❌ | M4 highway and HUD | | Kickoff M4 |
@@ -667,6 +667,10 @@ universal launcher, not released on its own.
 | GD04-011 | Original | ❌ | M9 launcher module, packages (Android reads the disc in place through the picker's fd: the copied gd-game-02 picker still copies it) | | Kickoff M9 |
 | GD04-012 | Original | 🟡 approximated | Input layouts are gd-game-02's (GH2) until GH3's own controller tables are read | `gd-game-04/engine/src/game/controller_mode.h`, DECISIONS.md D4 | M0 |
 | GD04-013 | Original | ❌ | Online, leaderboards, achievements: stubbed and logged (not in the port) | | Kickoff |
+| GD04-014 | Original | ❌ | The one volume texture (global_gfx #49, DXT5 128x128x32): its 3D tiling is unsolved, so it is not decoded | `tools/img.py`, docs/formats.md "Textures" | M1 |
+| GD04-015 | Original | ❌ | Havok collision / ragdoll objects (.hkc, .rag) validated but not decoded (needs the `__types__` reflection) | docs/formats.md | M1 |
+| GD04-016 | Original | 🟡 in progress | QScript VM and natives: the boot script runs; 1,233 natives the scripts call are still missing (docs/audit.md) | `gd04 --scripttest`, `--audittest` | M3 |
+| GD04-017 | Original | 🟡 in progress | Bink movies play through FFmpeg (`--playmovie`); how GH3's scripts start / skip them is still to wire | `engine/src/video/movie_player.cpp` | M3 |
 
 
 ## gd-game-05: Rock Band (Xbox 360)

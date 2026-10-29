@@ -155,3 +155,68 @@ fast-if (u16 forward offset), `48` fast-else (u16), `27` elseif (two u16),
 default, `4a` an inline QB struct (u16 length, aligned to 4, the struct in
 the QB file layout), `00` a no-op between lines [I]. The semantics and the
 interpreter's addresses: M3, `docs/qscript.md`.
+
+## Textures (.img, .tex) — `tools/img.py`, `engine/src/data/texture.cpp`
+
+[C data: 1,117 files, 5,747 textures decode, every byte accounted for.]
+Loaders: 0x82415FD8 (.img fix-up), 0x82382970 / 0x82382D88 (.tex),
+0x82553C40 (resource base / mip addresses), type classes 0x821881E8 [C].
+
+- **Image header** (0x28 bytes): u16 0x0A28, u8 flags, u8 class, u32 name
+  key, u16 w / h / depth (twice), u8 levels, u8 bits per texel, u8
+  compression (0 none, 1 DXT1, 2 DXT3 (also on 22 DXT1 textures), 5 DXT5, 6
+  DXN), u8 0, then offsets: +0x18 mips, +0x1C D3D header (0x34 bytes ending
+  in the Xenos fetch constant), +0x20 size, +0x24 base.
+- **Fetch constant**: format (0x06 8_8_8_8, 0x12 DXT1, 0x13 DXT3, 0x14
+  DXT5, 0x1F 16_16_FLOAT, 0x31 DXN), endian swap (8in16 blocks, 8in32
+  texels), tiled bit, pitch, dimension (2D / 3D / cube), max mip, packed-mip
+  address. 8_8_8_8 is stored A,R,G,B with a ZYXW swizzle (B and R swap).
+- **.img**: data from 0x1000 (`(img + 0x105B) & ~0xFFF`), mips at 0x1000 +
+  the mip address. **.tex**: 0xFACECAA7, u8 1, u8 0x1C, u16 count, table
+  offset, runtime area, -1, hash bits, hash offset; image headers, then
+  their D3D headers; base / mip offsets are file offsets (textures share
+  each other's tile padding).
+- **Tiling**: Xenos 2D tiled addressing (32x32-block macro tiles, bank /
+  pipe interleave); levels >= 1 are npot(w) >> i; the packed mip tail starts
+  at the first level with min(w, h) <= 16 texels, laid out at (0, h) or
+  (w, 0) in a tile of the base pitch [C data].
+- Counts: DXT1 2874, DXT5 1553, DXN 1181, 8_8_8_8 cubes 134, DXT3 2,
+  8_8_8_8 1, 16_16_FLOAT 1, DXT5 volume 1. **Gaps**: the volume texture's
+  3D tiling is unsolved (returned unsupported); cube 1x1 levels are box-
+  filtered from 2x2 [I]; the class byte's meaning [I].
+
+## Scenes, models, skins (.scn, .mdl, .skin), collision (.hkc, .rag) — `tools/scn.py`, `engine/src/data/scene.cpp`
+
+[C data: 419 geometry files, 0 problems.] One format for the three: a file
+header (offset to the skin trailer, 0xFAAABACA x7), a material section
+(materials with their key, shader template key, two vec4 constant arrays
+and texture keys resolved in the parent .tex; walker 0x822B27E8), then the
+scene section after 0xBABEFACE (loader 0x822D7E78, relocation 0x822D6D48):
+a 0x90 header (bounds, mesh order, counts), sectors (0x60), geoms (0x60),
+meshes (0x80: material, vertex flags, index / vertex counts, triangle strips
+with 0x7FFF restarts, vertex and skin blocks). Vertex declarations from the
+mesh flags as 0x823B9A28 builds them (positions, HEND3N normals / tangents,
+colours, blend weights / indices, texcoord sets as FLOAT or FLOAT16).
+Skins: groups of 1-3 bones, 32-byte vertices with two u16 weights.
+.hkc / .rag: Havok 4.6.0-r1 packfiles (`__classnames__`, `__data__`,
+`__types__`), validated, objects not decoded yet.
+
+## Animation (.ska, .ske), fonts (.fnt), pak sounds (.wav) — `tools/anim.py`, `engine/src/data/{anim,font}.cpp`
+
+[C data: 19,114 files, 0 problems.]
+- **.ske**: u32 0x00010030, bone count, then tables of names, parents,
+  mirror names / indices, flags, inverse-bind matrices, translations,
+  rotations (script LoadSkeleton -> 0x8227C4E8).
+- **.ska**: header at 0x20 (flags, duration s, bones, key counts, offsets of
+  the Q and T data and per-bone sizes); times in frames at 60 fps. Q keys
+  (0x824213B8): u16 W; three s16 / 16384 (or unsigned bytes per flag bits
+  0x2000 / 0x1000 / 0x800), w = sqrt(1 - x^2 - y^2 - z^2). T keys
+  (0x82421840): a byte with a short time, three f32 at the next 16-aligned
+  file offset. Single-pose clips (flags 0x10000000) store plain floats; a
+  bone mask when flags 0x80000.
+- **.fnt**: vShift, bearing, tracking, line height; u16 charMap[65536];
+  u16 buttonMap[32]; glyphs of 0x24 bytes; an embedded .img (class 2,
+  linear) at the pointer at 0x200A0 (0x8232B458).
+- **.wav**: RIFF/WAVE with XMA fmt (tag 0x165), 2048-byte packets and a
+  seek chunk, read by FMOD's XMA codec (0x826F8FF8).
+- **.pfx**: node-array prefix index. **.table**: one u32 0xE5F50254 [I].
