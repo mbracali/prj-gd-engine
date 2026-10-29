@@ -157,7 +157,17 @@ void addFlowNatives(qs::Vm& vm, FlowState& st) {
         qb::Struct params;
         if (const qb::Value* ps = Vm::param(p, K("params")); ps && ps->st) params = *ps->st;
         auto c = v.code(s->key);
-        if (!c) return false;
+        if (!c && run.frames.back().locals) {
+            // A local naming the script (memcard_sequence_quit's `goto MemcardDoneScript`) [C data].
+            if (const qb::Value* lv = Vm::param(*run.frames.back().locals, s->key))
+                if (lv->type == qb::Type::Key || lv->type == qb::Type::KeyPtr) c = v.code(lv->key);
+        }
+        if (!c)
+            if (const qb::Value* gv = v.globals().find(s->key); gv && gv->type == qb::Type::Key) c = v.code(gv->key);
+        if (!c) {
+            v.logOnce("Goto: no script " + qbkey::name(s->key));
+            return false;
+        }
         qs::Frame f;
         f.code = c;
         f.locals = std::make_shared<qb::Struct>(params);

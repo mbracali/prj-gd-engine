@@ -544,6 +544,12 @@ std::shared_ptr<const CodeCache> Vm::code(uint32_t name) {
 
 bool Vm::callName(ScriptRun& run, uint32_t name, qb::Struct& params, bool& result) {
     ++stats_.calls;
+    // A global whose value is a key names the script to call
+    // (`change MemcardDoneScript = $memcard_sequence_generic_done`) [C data].
+    if (!natives_.count(name)) {
+        const qb::Value* g = g_.find(name);
+        if (g && g->type == qb::Type::Key && g->key != name) name = g->key;
+    }
     auto nat = natives_.find(name);
     if (nat != natives_.end()) {
         ++stats_.nativeCalls;
