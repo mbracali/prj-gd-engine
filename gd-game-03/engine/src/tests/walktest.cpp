@@ -131,14 +131,14 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         at("complete_screen");
         press(kX);  // the song list (comp_selsong.btn)
         at("meta_loading_screen");
-        at("saving_screen");
+        at("autosave");
         at("qp_selsong_screen");
         press(kTri);  // back
         at("main_screen");
         check("menu_sounds");  // game_outro_complete paused the game: menu sounds still play (GD03-073)
         expect_ = {"bootup_load", "bootup_create_save_check", "bootup_create_save", "cut_scene_screen",
                    "splash_screen", "main_screen", "qp_selsong_screen", "qp_diff_screen", "loading_screen", "game_screen",
-                   "post_show_screen", "endgame_screen", "highscore_screen", "complete_screen", "meta_loading_screen", "saving_screen",
+                   "post_show_screen", "endgame_screen", "highscore_screen", "complete_screen", "meta_loading_screen", "autosave",
                    "qp_selsong_screen", "main_screen"};
     } else if (scenario == "lose") {
         autoplay_ = false;
@@ -292,11 +292,11 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         press(kX);
         at("career_screen");
         expect_ = {"main_screen", "chooseprof_screen", "nameprof_screen", "sel_difficulty_screen", "sel_character_new_screen", "sel_guitar_new_screen",
-                   "tour_start_screen", "saving_screen", "career_screen"};
+                   "tour_start_screen", "autosave", "career_screen"};
         if (scenario == "career")
             expect_ = {"main_screen",          "chooseprof_screen",       "nameprof_screen",       "sel_difficulty_screen",
                        "chooseprof_screen",    "sel_difficulty_screen",   "sel_character_new_screen", "sel_guitar_new_screen",
-                       "tour_start_screen",    "saving_screen",           "career_screen"};
+                       "tour_start_screen",    "autosave",           "career_screen"};
         if (scenario == "career_song") {
             // One career song (GD03_WALK_SONG, default strutter) at
             // GD03_WALK_DIFF: every tier song before it passed with GH2's
@@ -594,14 +594,14 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         at("complete_screen", 20000);
         wait(600);
         press(kX);  // the song list again (comp_selsong.btn): co-op's record autosaved on the way
-        if (scenario == "coop") at("saving_screen", 20000);
+        if (scenario == "coop") at("autosave", 20000);
         const char* again = scenario == "coop" ? "multi_coop_selsong_screen" : scenario == "faceoff" ? "multi_vs_selsong_screen" : "multi_fo_selsong_screen";
         at(again, 30000);
         expect_ = {"main_screen", "multi_controller_select_screen", "multi_screen"};
         if (scenario == "coop")
             expect_.insert(expect_.end(), {"multi_coop_venue_screen", "multi_coop_selsong_screen", "selpart_screen", "multi_coop_seldiff_screen",
                                            "multi_sel_character_screen", "multi_sel_guitar_screen", "loading_screen", "game_screen",
-                                           "multi_compete_coop_screen", "multi_unlock_bass_screen", "complete_screen", "saving_screen", "multi_coop_selsong_screen"});
+                                           "multi_compete_coop_screen", "multi_unlock_bass_screen", "complete_screen", "autosave", "multi_coop_selsong_screen"});
         else if (scenario == "faceoff")
             expect_.insert(expect_.end(), {"multi_sel_character_screen", "multi_sel_guitar_screen", "multi_vs_venue_screen", "multi_vs_selsong_screen",
                                            "multi_vs_seldiff_screen", "loading_screen", "game_screen", "multi_compete_screen", "complete_screen", "multi_vs_selsong_screen"});
@@ -1306,8 +1306,16 @@ int WalkDriver::finish(ui::UiManager& ui) {
     // The endgame photo (quickplay): player 0's outfit, one of its four pictures, on the disc.
     if (scenario_ == "quickplay") {
         const auto& photos = ui.session().winnerPhotos;
-        const std::string outfit = ui.session().players[0].outfit;
+        // Player 0's outfit when the photo was taken: quick play gives player
+        // 0 the song's (quickplay (character_outfit X)) [C data] and the menus
+        // change it again afterwards, so the photo's own name says which, and
+        // that character must exist on the disc.
         const std::string p = photos.empty() ? std::string() : photos[0];
+        std::string outfit = ui.session().players[0].outfit;
+        if (p.size() > 26 && p.rfind("image/og/photo_", 0) == 0) {
+            const std::string o = p.substr(15, p.size() - 15 - 10);
+            if (ui.data().exists("char/" + o + "/og/gen/" + o + ".milo_ps2")) outfit = o;
+        }
         const std::string stem = "image/og/photo_" + outfit;
         const bool shape = photos.size() == 1 && p.size() == stem.size() + 10 && p.compare(0, stem.size(), stem) == 0 &&
                            p[stem.size()] >= '0' && p[stem.size()] <= '3' && p.compare(stem.size() + 1, 9, "_keep.bmp") == 0;

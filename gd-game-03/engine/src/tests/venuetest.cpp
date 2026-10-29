@@ -35,13 +35,15 @@ using namespace scene;
 // BandCharacter) decode since M9 (char/char_objects.h).
 const std::set<std::string> kRawClasses = {"FxSendReverb"};
 
-// World milos no venue loads [C data: nothing names them]: the old
-// face-off geometry (the _mp worlds load the full geom) and an unused prop.
+// World milos no venue loads [C data: no script or milo of this disc names
+// them]: work files left on the disc (the "attempt" and "export" scenes, a
+// test scene, a shadow variant) and the shared light can (its objects are
+// copied into fest_lighting).
 const std::set<std::string> kUnusedMilos = {
-    "world/arena/og/gen/arena_geom_mp.milo_ps2",     "world/battle/og/gen/battle_geom_mp.milo_ps2",
-    "world/battle/og/gen/vault_cola.milo_ps2",       "world/small1/og/gen/small1_geom_mp.milo_ps2",
-    "world/small2/og/gen/small2_geom_mp.milo_ps2",   "world/stone/og/gen/stone_geom_mp.milo_ps2",
-    "world/theatre/og/gen/theatre_geom_mp.milo_ps2", "world/stone/og/gen/language.milo_ps2",
+    "world/arena/og/gen/arena_attempt.milo_ps2",     "world/fest/og/gen/fest_attempt.milo_ps2",
+    "world/fest/og/gen/zombie_export.milo_ps2",      "world/shared/lightcan/gen/lightcan.milo_ps2",
+    "world/small1/og/gen/test.milo_ps2",             "world/theatre/og/gen/randall_export.milo_ps2",
+    "world/theatre/og/gen/rock_ball_export.milo_ps2", "world/theatre/og/gen/theatre_geom_shadow_town.milo_ps2",
 };
 
 // A reference from one object to another, by name.

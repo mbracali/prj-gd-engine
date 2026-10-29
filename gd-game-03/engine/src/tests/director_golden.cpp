@@ -45,8 +45,11 @@ constexpr const char* kVenue = "arena";
 // comes back).
 // 2026-10-28: the camera shake draws from its own stream (so the frame rate
 // no longer changes the picks); was 331 / 716ffdac.
-constexpr int kGoldenLines = 330;
-constexpr uint32_t kGoldenHash = 0x8c73c46cu;
+// gd03 (this disc: 18andlife in arena): the baseline taken 2026-10-28 when
+// the PS2 venues first ran (63 shots, 42 presets, 0 failed picks); not yet
+// compared shot by shot with the original.
+constexpr int kGoldenLines = 105;
+constexpr uint32_t kGoldenHash = 0x094b806au;
 
 uint32_t fnv(const std::string& s, uint32_t h) {
     for (unsigned char c : s) h = (h ^ c) * 16777619u;
@@ -203,6 +206,11 @@ int runCameraRateCheck(const GameData& data) {
                 ++shotDiffs;
                 continue;
             }
+            // A shot's first sample: the shot may have started on that very
+            // frame at 60 fps but up to three frames earlier at 240, and a
+            // path whose first key jumps (arena's flr_near_lft03, battle's
+            // balcony_rt02 on this disc) is then legitimately elsewhere.
+            if (i > 0 && (a[i - 1].shot != a[i].shot || b[i - 1].shot != b[i].shot)) continue;
             const float d = std::sqrt((a[i].pos[0] - b[i].pos[0]) * (a[i].pos[0] - b[i].pos[0]) + (a[i].pos[1] - b[i].pos[1]) * (a[i].pos[1] - b[i].pos[1]) +
                                       (a[i].pos[2] - b[i].pos[2]) * (a[i].pos[2] - b[i].pos[2]));
             if (d > worst) worst = d, worstShot = a[i].shot;

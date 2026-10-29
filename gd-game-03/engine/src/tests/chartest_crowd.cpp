@@ -31,8 +31,9 @@
 
 namespace {
 
-constexpr int kGoldenLines = 731;
-constexpr uint32_t kGoldenHash = 0x30897aacu;
+// gd03: this disc's baseline (2026-10-28), not yet compared with the original.
+constexpr int kGoldenLines = 453;
+constexpr uint32_t kGoldenHash = 0x266c768bu;
 
 uint32_t fnv(const std::string& s, uint32_t h) {
     for (unsigned char c : s) h = (h ^ c) * 16777619u;

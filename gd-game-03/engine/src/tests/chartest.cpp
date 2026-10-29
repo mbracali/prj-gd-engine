@@ -23,13 +23,13 @@ using namespace scene;
 // The character classes on the disc, by class (records; directory records
 // counted apart) [C data: every milo of the extracted disc].
 const std::pair<const char*, int> kCounts[] = {
-    {"CharClipSamples", 1994}, {"CharClipSet (dir)", 82}, {"CharClipGroup", 330}, {"CharClipFilter", 82},
-    {"CharBone", 5797},        {"Character (dir)", 107},  {"Character", 85},      {"BandCharacter (dir)", 19},
-    {"BandCharacter", 16},     {"CharDriver", 58},        {"CharDriverMidi", 38}, {"CharIKHand", 38},
-    {"CharIKMidi", 19},        {"CharHair", 92},          {"CharLookAt", 36},     {"CharEyes", 18},
-    {"CharWeightSetter", 38},  {"CharUpperTwist", 88},    {"CharForeTwist", 79},  {"CharServoBone", 57},
-    {"CharWalk", 19},          {"CharPosConstraint", 4},  {"CharIKRod", 4},       {"OutfitLoader", 20},
-    {"FaceFxLipSyncServo", 22},
+    {"CharClipSamples", 1105}, {"CharClipSet (dir)", 43}, {"CharClipGroup", 191}, {"CharClipFilter", 43},
+    {"CharBone", 2738},        {"Character (dir)", 100},  {"Character", 58},      {"BandCharacter (dir)", 14},
+    {"BandCharacter", 12},     {"CharDriver", 47},        {"CharDriverMidi", 28}, {"CharIKHand", 28},
+    {"CharIKMidi", 14},        {"CharHair", 33},          {"CharLookAt", 12},     {"CharEyes", 6},
+    {"CharWeightSetter", 28},  {"CharUpperTwist", 64},    {"CharForeTwist", 46},  {"CharServoBone", 45},
+    {"CharWalk", 14},          {"CharPosConstraint", 11}, {"CharIKRod", 6},       {"OutfitLoader", 16},
+    {"FaceFxLipSyncServo", 18},
 };
 
 // Golden poses: m9 reference parser (clips.py --pose <set> <clip> <frame>),

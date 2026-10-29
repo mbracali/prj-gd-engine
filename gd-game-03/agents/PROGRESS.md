@@ -95,3 +95,32 @@ Verified (fresh build):
   and plays, but the PS2 track (one PanelDir `track/gen/track.milo`, no
   GHTrackDir / track_panel_1p) is not loaded, so the debug highway draws and
   the Star Power glow check fails. That is the M4 work, done next.
+
+## 2026-10-28 23:45, M3 done; M4 track and M5 venue checks in
+
+Done:
+- The PS2 highway (subagent): track/track.milo drawn as TrackPanel does
+  (addresses in render/track_view.cpp). Screenshot checked by eye: gems,
+  tails, smashers, beat lines, HUD over the venue.
+- Walks use the PS2 screens (autosave, boot flow). Asset audit:
+  `--audittest <walk>` writes docs/audit.md.
+- Venue / char tests carry this disc's expectations (unused milos [C data],
+  fest's trigger-controlled hides, waypoint radius bound, golden baselines).
+- The 60 / 240 fps camera check skips a shot's first sample (paths that jump
+  at their first key).
+
+Verified (fresh `ninja -C build/linux`, no warning lines; agents/scratch/alltests.sh):
+- scenetest rc=0 :: scene test passed: 0 typed objects failed, 0 files failed
+- selftest rc=0 :: all rule checks passed (0 charts not fully hit)
+- sfxtest rc=0 :: sfxtest: OK
+- scripttest rc=0 :: scripttest: OK
+- uitest rc=0 :: uitest: OK
+- venuetest rc=0 :: venue test passed: 0 failures, 44 world milos loaded, 8 unused
+- chartest rc=0 :: chartest: 0 failures
+- shadertest rc=0 :: all 587 shader programs compiled (GL and GD03_GLES=1)
+- `--walktest quickplay` -> walktest quickplay: OK (boot -> song -> results -> back)
+- facefxtest rc=1 (GH2 goldens; GD03-014).
+- `./build_windows.sh` -> 0 warnings in build/windows/compile.log (agent's report; rerun at the next gate).
+
+Next: the other walks (lose, pause, attract, back, career*, coop, faceoff,
+enhanced, cheats, mouse, gamepads, stickyaxis), facefxtest, M6-M9.

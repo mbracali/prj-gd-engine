@@ -26,6 +26,7 @@
 #include "game/song_db.h"
 #include "game/song_setup.h"
 #include "game/venue.h"
+#include "scene/world_objects.h"
 #include "game/world.h"
 #include "game/world_driver.h"
 #include "render/band_view.h"
@@ -94,7 +95,7 @@ int drawListChecks(chr::Character& c, const std::string& what, bool wantGuitar) 
 }
 
 
-// The band's golden run: hangar18 in arena (the director golden's song),
+// The band's golden run: 18andlife in arena (the director golden's song),
 // the band's main clips per (beat, slot) and the drum kit's triggers.
 // A change in the drivers, the band scripts, the parsers or the director
 // moves them; check the log (GD03_BAND_LOG=<file>) and update both.
@@ -102,10 +103,11 @@ int drawListChecks(chr::Character& c, const std::string& what, bool wantGuitar) 
 // Band::Config::seed), so the world's, the crowd's and other scripts'
 // random numbers do not move it. M9.6 / M9.8: walks, interacts, the Star
 // Power task and the expression picks are in the run.
-constexpr const char* kSong = "hangar18";
+constexpr const char* kSong = "18andlife";
 constexpr const char* kVenue = "arena";
-constexpr int kGoldenLines = 607;
-constexpr uint32_t kGoldenHash = 0x342907f5u;
+// gd03: this disc's baseline (2026-10-28), not yet compared with the original.
+constexpr int kGoldenLines = 353;
+constexpr uint32_t kGoldenHash = 0xd8bf0829u;
 
 uint32_t fnv(const std::string& s, uint32_t h) {
     for (unsigned char c : s) h = (h ^ c) * 16777619u;
@@ -414,11 +416,17 @@ int bandRun(const GameData& data) {
     // walk, an interact; each walk ends near its waypoint (the plan moves
     // the target by up to its radius along the last leg, the servo then
     // regulates the rest).
-    float worst = 0;
+    float worst = 0, radius = 60;
     for (float d : band.walkArrivals()) worst = std::max(worst, d);
-    std::printf("chartest: band walks: %d started, %zu arrived (worst %.1f off), %d walking frames, %d interacts\n", band.walksStarted(),
-                band.walkArrivals().size(), double(worst), walkFrames, band.interactsStarted());
-    if (band.walksStarted() < 4 || band.walkArrivals().size() + 1 < size_t(band.walksStarted()) || worst > 60 || walkFrames < 600 ||
+    // The bound: the venue's largest waypoint radius (arena's on this disc
+    // exceeds GH2's 60) [C data].
+    for (const auto& part : venue.parts())
+        part.milo->root().forEach([&](scene::Object& o) {
+            if (const auto* w = o.as<scene::Waypoint>()) radius = std::max(radius, w->radius);
+        });
+    std::printf("chartest: band walks: %d started, %zu arrived (worst %.1f off, bound %.1f), %d walking frames, %d interacts\n",
+                band.walksStarted(), band.walkArrivals().size(), double(worst), double(radius), walkFrames, band.interactsStarted());
+    if (band.walksStarted() < 4 || band.walkArrivals().size() + 1 < size_t(band.walksStarted()) || worst > radius * 1.02f || walkFrames < 600 ||
         band.interactsStarted() < 1) {
         std::printf("chartest: band: walks wrong\n");
         ++failures;

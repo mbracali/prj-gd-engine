@@ -13,74 +13,91 @@
 #include "render/renderer.h"
 #include "scene/milo.h"
 
-// How GH2's track code (default.xex) places things; [C] read in the code at
-// the address, [I] inferred, [?] open.
+// How the PS2 TrackPanel (SLUS_215.86) places things; [C] read in the code
+// at the address, [I] inferred, [?] open. The panel loads one scene,
+// track/track.milo (ui/track_panel.dta), for every player.
 //
-// - Units: y = song ms x 0.06 x track_speed (0x82699D50) [C]; the track's
-//   y_per_second becomes 60 x track_speed at init (0x82363328 from
-//   0x826967B8) [C], track_speed being track_graphics.dtb's value for the
-//   difficulty (0x826932D0) [C]. TrackDir::Poll (0x823634D0) sets anim.grp
-//   to frame now_y (rig_movement.tnm moves the rig, the camera and the
-//   surface along; the surface texture scroll, the gem glow and the star
-//   spin are filters in anim.grp) [C]. Gems and tails stay at absolute y;
-//   here everything is drawn relative to the now bar (rig at rest), which
-//   is the same picture.
-// - Gems (0x826989A8) [C]: added while start_y < now_y + horizon_y (120),
-//   freed when end_y < now_y + remove_y (-15); a widget instance is dropped
-//   once y + base_length < now_y + bottom_y (TrackWidget poll 0x823662B0).
-//   One instance per fret at the slot's x (TrackDir slots), z 0. A hit gem's
-//   instance is removed at once (0x8269E2C8); a passed gem (gem-pass
-//   callback 0x822E2FD0 -> 0x82695AA0) shows the miss widget.
-// - Widget choice (0x826912E0) [C]: gem / hopo lists, index 5 (bonus) during
-//   Star Power, 6 (miss) when missed, else the slot; star / star_hopo lists
-//   for an intact Star Power phrase, index 5 (miss_star) when missed. HOPO
-//   look: the chart's HOPO flag and not the first gem (0x82699348) [C].
-//   Star: in a phrase whose "missed" latch is clear (0x82697620) [C]; Star
-//   Power re-types live, unmissed gems to bonus (set_bonus_gems 0x82697D30).
-// - Tails (template 0x826A0100, mesh 0x8269C2A0, rebuild 0x8269EAD0) [C]:
-//   tail02.mesh's cross-section, 30 segments of (horizon_y - remove_y) x
-//   1.01 / 30; the tail starts `clip` past the gem (2.0; while sustained
-//   now_y + nowbar_tail_clip - start; frozen at release) and ends at the
-//   gem's end or the horizon; the last row is the pointed tip. While held
-//   the whammy bends the width, the bend travelling 2 units a frame along
-//   the tail (a 100-entry history of whammy x -3.0) [C; the scale of the
-//   bar value is I]. Materials (0x8269E7F0 / 0x8269E2C8 / 0x8269E340):
-//   tail_<colour> (tail_bonus for bonus gems, tail_miss when missed or
-//   released); a glow line (line01) on the tail at z 0.16: shown while
-//   held (tail_glow_<colour> / _star / _bonus, width 1.5) and always on a
-//   Star Power tail (tail_glow_tight, width 0.7).
-// - Smashers (0x8269D110) [C]: per slot gem_smasher.mesh (gem_smasher.mat,
-//   gem_smasher_<colour>.mat while the fret is held) and smasher_rim.mesh
-//   (now_ring_<colour>.mat); gem_smasher_hit.tnm on a hit (0x8269CF00),
-//   gem_smasher.tnm on a miss with a fret (0x82697958); 30 fps.
-// - Hit effects (0x8269B058, 0x8269C968) [C]: per fret the smash view at the
-//   slot (smash_bonus in Star Power, smash_star for Star Power gems, else
-//   smash_normal) at 30 fps; while a sustain is held burn_tail.view, its
-//   state frame 10 (whammy on a Star Power tail) / 20 (bonus) / 0 (0x826A0868).
-//   Their particle systems run as per-slot copies (render/particles.h).
-// - Beat lines (0x82699F40, 0x8235C890) [C]: one every 240 ticks: half_beat
-//   between beats, beat_line on beats, bar_line on measures; none ahead
-//   before song time -2000 ms, ramping in until -1000 ms.
-// - Side rails (0x8269A2F8) [C]: state none / star (Star Power) / warning
-//   (rock meter warning) / warning_star, frame = song beats [mapping I].
-// - lightning.grp shows only during Star Power (0x82695AF8) [C].
-// - phrase_captured (0x822DC090 sets the phrase state 3 on the phrase's last
-//   gem; 0x8269B058 with that state) [C]: per slot of that gem combo1
-//   (smash_combo.view, its burst particles) and combo2
-//   (smash_combo_lightning.view, the lightning, its slot copy turned by
-//   (slot - 2) x combo2_angle, mirrored lefty,
-//   0x8269D8C8) start at the hit, at (now - hit) x 0.03; combo2 ends at its
-//   view's last frame (0x8269D758) [C].
-// - blow_streak N (0x82696560) [C]: surface_flash_Nx.mnm and
-//   track_shake_Nx.tnm when a streak of multiplier N (2..4) ends [I: event].
+// - Tree (panel init 0x0014faa8) [C]: a root group holds the camera
+//   (track.cam, its planes from track_graphics cam, 0x00150df0) and the
+//   track group (track.env; scaled by the two-player layout); in it, in draw
+//   order, track_surface5.mesh and track_lane_lines5.mesh (0x00154c08), the
+//   beat lines, track_side_rails5.mesh and the gems group (tails first, then
+//   the gem template's mesh copies). The panel draws (0x001511c0) the root,
+//   then the far-end fade (the venue strip at track_fade.trans saved before
+//   the track and laid back over it with track_fade.mat), then a second
+//   group: the smashers, the hit effects and lightning_track.view.
+// - Units: y = song ms x 0.06 x track_speed (0x001524c8) [C]; track_speed is
+//   the players' difficulties' track_graphics value averaged, x 1.5 with the
+//   Hyper Speed cheat (0x00153a48, 0x0014faa8) [C]. The beat line and gem
+//   groups move back by now_y each poll (0x00151670) [C]; here everything is
+//   drawn relative to the now bar, which is the same picture.
+// - Slots: x = (slot - 2) x 4, lefty: slot 4 - s (0x00152530, 0x00152500) [C].
+// - Surface: track_surface.filt (track_surface.mnm's texture scroll) at frame
+//   now_y (0x00151670 -> 0x00155470) [C]; track_anims.view (the gem glow,
+//   the bonus spin) at now ms x 0.03 (0x00153ea0) [C].
+// - Gems (manager poll 0x00156530) [C]: added while start_y < now_y +
+//   horizon_y (110), freed when end_y < now_y + remove_y (-15). Each gem
+//   (rep ctor 0x00158238, look 0x00158858, miss 0x00158c80, hit 0x00158cf8)
+//   is a set of mesh copies at (slot x, start y, 0), each composed after the
+//   mesh's own local transform (0x00158198): look normal: top (top.mesh, or
+//   <colour>_hopo.mesh on a HOPO), body (<colour>_gem.mesh), glow
+//   (glow.mesh); look bonus (Star Power): blue_hopo.mesh as the HOPO top,
+//   gem_bonus.mesh, gem_bonus2.mesh; look star (an intact Star Power
+//   phrase): star_base.mesh, <colour>_star.mesh, star2.mesh and the top
+//   (top_star_black.mesh, <colour>_top_star.mesh on a HOPO). A miss swaps the
+//   body for miss.mesh and the star for star_miss.mesh, the rest staying; a
+//   hit hides them all. HOPO look: the chart's HOPO flag, not the first gem,
+//   the previous gem the player's own (0x001562e8) [C].
+// - The template draws its copies grouped by mesh in a fixed order (0x00159e28
+//   builds them by part type 3, 4, 6, 0, 2, 1, 5) [C].
+// - Star spin (0x0015bae8) [C]: star.filt at now ms x 0.03; star.tnm's
+//   rotation replaces the rotation of star_base, star2 and the five
+//   <colour>_star meshes (not star_miss).
+// - Tails (template 0x0015bcf0, clip 0x00156970 / 0x00157e18) [C]:
+//   tail02.mesh's cross-section, 30 segments (20 with two players [I: the
+//   count]) of (horizon_y - remove_y) x 1.01 / segments; the tail starts
+//   `clip` past the gem (2.0; while sustained now_y + nowbar_tail_clip -
+//   start) and ends at the gem's end or the horizon. Materials (look
+//   0x00158858, hit 0x00158cf8): tail_<colour> (tail_bonus for bonus gems,
+//   tail_miss when missed); the glow line: tail_glow_tight (width
+//   tail_glow_tight_width) on a star gem, while held tail_glow_<colour> /
+//   tail_glow_star (width tail_glow_width); whammy as in GH2's other ports.
+// - Beat lines (0x00152690, 0x0015d5b8, 0x0015c990) [C]: one every 240
+//   ticks: half_beat_line5 between beats, beat_line5 on beats, bar_line5 on
+//   measures, as copies of the mesh's geometry at (0, y, 0).
+// - Smashers (0x0015caa0, 0x0015fd50) [C]: per slot a group at (slot x, 0,
+//   0) with gem_smasher.mesh (track_graphics smasher mats: gem_smasher,
+//   gem_smasher_<colour> while pressed) and smasher_rim.mesh (now_ring_
+//   <colour>), and copies of gem_smasher.tnm / gem_smasher_hit.tnm.
+// - Rails (0x0015dd70, poll 0x0015e190) [C]: side_rails_none.mnm /
+//   _warning / _star / _warning_star.filt at frame song ticks / 480.
+// - lightning_track.view (0x00150be8, poll 0x00151580) [C]: shown during
+//   Star Power at (now - its start) x 0.03.
+// - Effects (0x0015caa0) [C]: smash_normal / star / bonus views, combo1
+//   smash_combo.view and combo2 smash_combo_lightning.view, its slot copies
+//   turned by (slot - 2) x combo2_angle in one-player games only (0 with
+//   several players); with two players the views' particles are scaled by
+//   track_scale (0x0015d7c8).
+// - Two players (0x0014faa8, use_dual_perspective TRUE): the track group
+//   scaled by dual_perspective track_scale (0.76) and track.cam's screen
+//   rect the player's half (x = player / players, width 1 / players,
+//   0x00154b90) [C]; track_explode.cam for the explode, mirrored in x for the
+//   second player (here the data's track_explode_p2.cam) [C].
+// - blow_streak N: surface_flash_Nx.mnm and track_shake_Nx.tnm (on
+//   track.cam) when a streak of multiplier N (2..4) ends [I: event].
+// - Explode (0x00150ca8, poll 0x00151580) [C]: track_explode.filt at
+//   (now - explode) x 0.03.
+// Not drawn: the far-end fade (it needs the frame read back), the
+// character's track surface texture (track_surface_override), the song
+// start sparkle and the Star Power gem sparks (gem_bonus_spark1 / 2).
 namespace {
 
 using gfx::Mat4;
 using gfx::Vec3;
 
 constexpr float kFrameRate = 30;        // effect timers: ms x 0.03
-constexpr float kTailClip = 2.0f;       // gem record +0x14 default [C]
-constexpr float kWhammyBend = -3.0f;    // 0x8269EAD0 [C]
+constexpr float kTailClip = 2.0f;       // gem record +0x18 floor (0x00157e18) [C]
+constexpr float kWhammyBend = -3.0f;    // as GH2's other ports [I]
 constexpr float kGlowZ = 0.16f;
 
 }  // namespace
@@ -97,60 +114,91 @@ const scene::Mat* TrackView::slotMat(const char* format, int slot) const {
 }
 
 void TrackView::load(const GameData& data, scene::MiloLibrary& library, int player) {
-    // ui/track_panel.dta: one player uses track_panel_1p.milo, two players
-    // track_panel_2p.milo; each GHTrackDir there is a proxy of
-    // track_new.milo whose first field is its player (-1, 0, 1) [C data].
+    // ui/track_panel.dta: {new TrackPanel track_panel (file ../track/track.milo)}.
     player_ = player;
-    scene::Milo& panel = library.load(player < 0 ? "track/gen/track_panel_1p.milo_ps2" : "track/gen/track_panel_2p.milo_ps2");
-    scene::Milo* track = nullptr;
-    int index = 0;
-    for (const auto& o : panel.root().objects) {
-        if (o->cls != "GHTrackDir") continue;
-        const auto* d = o->as<scene::DirObj>();
-        const int owner = d && d->hasGHTrack ? d->ghTrack.unknown : index;
-        ++index;
-        if (player >= 0 && owner != player) continue;
-        if ((track = library.proxy(panel, *o))) break;
-    }
-    if (!track) throw std::runtime_error("track panel: no track directory for this player");
-    auto* self = track->root().self ? track->root().self->as<scene::DirObj>() : nullptr;
-    if (!self || !self->hasTrack || !self->hasGHTrack) throw std::runtime_error("track_new: not a GHTrackDir");
-    track_ = track;
-
-    const scene::TrackDirData& td = self->track;
-    yPerSecond_ = td.yPerSecond, bottomY_ = td.bottomY;
-    for (size_t i = 0; i < slotX_.size() && i < td.slots.size(); ++i) slotX_[i] = td.slots[i][0];
-    auto widgets = [&](const std::vector<std::string>& names) {
-        std::vector<const scene::TrackWidget*> v;
-        for (const std::string& n : names) v.push_back(get<scene::TrackWidget>(n));
-        return v;
-    };
-    gemW_ = widgets(self->ghTrack.gemWidgets);
-    hopoW_ = widgets(self->ghTrack.hopoWidgets);
-    starW_ = widgets(self->ghTrack.starWidgets);
-    starHopoW_ = widgets(self->ghTrack.starHopoWidgets);
-    barW_ = get<scene::TrackWidget>("bar_line.wid");
-    beatW_ = get<scene::TrackWidget>("beat_line.wid");
-    halfBeatW_ = get<scene::TrackWidget>("half_beat_line.wid");
+    track_ = nullptr;
+    scene::Milo& track = library.load("track/gen/track.milo_ps2");
+    track_ = &track;
 
     // config/track_graphics.dtb.
     const DataNode cfg = parseDtb(data.read("config/gen/track_graphics.dtb"));
     auto num = [&](const DataNode* parent, const char* key, float& out) {
         if (const DataNode* n = parent ? parent->find(key) : nullptr; n && n->children.size() > 1) out = n->floatAt(1);
     };
+    yPerSecond_ = 60;  // 0.06 units a ms per unit of track_speed [C]
     num(&cfg, "horizon_y", horizonY_);
     num(&cfg, "remove_y", removeY_);
+    bottomY_ = removeY_;
     num(&cfg, "nowbar_tail_clip", nowbarTailClip_);
     const DataNode* gem = cfg.find("gem");
     num(gem, "fps", gemFps_);
     num(gem, "tail_glow_width", tailGlowWidth_);
     num(gem, "tail_glow_tight_width", tailGlowTightWidth_);
     num(cfg.find("particles"), "combo2_angle", combo2Angle_);
+    // combo2_angle applies with one player only (0x0015caa0) [C].
+    if (player >= 0) combo2Angle_ = 0;
     if (const DataNode* sc = cfg.find("slot_colors"))
         for (size_t i = 0; i < 5 && i + 1 < sc->children.size(); ++i) slotColors_[i] = sc->textAt(i + 1);
 
-    // The tail template (0x826A0100): tail02.mesh's vertices sorted, the
-    // first half (one row) kept as the cross-section.
+    // The gem template (0x00159e28): per part of track_graphics gem parts,
+    // per gem of the guitar set, "<gem>_<part>.mesh", else "<part>.mesh",
+    // else the part's default type's mesh [C].
+    auto mesh = [&](const std::string& n) { return get<scene::Mesh>(n); };
+    std::array<std::string, 7> partNames{"gem", "glow", "miss", "top", "hopo", "star", "top_star"};
+    std::array<int, 7> partDefault{-1, -1, 0, -1, 3, 0, 3};
+    if (const DataNode* parts = gem ? gem->find("parts") : nullptr; parts && parts->children.size() > 1 && parts->children[1].isList()) {
+        static const std::array<std::pair<const char*, int>, 7> kTypes{
+            {{"kMeshGem", 0}, {"kMeshGemGlow", 1}, {"kMeshGemMiss", 2}, {"kMeshTop", 3}, {"kMeshHopoTop", 4}, {"kMeshStar", 5}, {"kMeshStarTop", 6}}};
+        auto typeOf = [&](const DataNode* n) {
+            // The macro's name, or its value (config/macros.dta).
+            if (!n || n->children.size() < 2) return -1;
+            if (n->children[1].type == DataNode::Type::Int) return n->children[1].i;
+            if (!n->children[1].isText()) return -1;
+            for (const auto& [name, v] : kTypes)
+                if (n->children[1].s == name) return v;
+            return -1;
+        };
+        for (const DataNode& p : parts->children[1].children) {
+            if (!p.isList() || p.children.empty()) continue;
+            const int t = typeOf(p.find("type"));
+            if (t < 0 || t > 6 || !p.children[0].isText()) continue;
+            partNames[size_t(t)] = p.textAt(0);
+            const int d = typeOf(p.find("default"));
+            partDefault[size_t(t)] = d >= 0 && d <= 6 ? d : -1;
+        }
+    }
+    for (size_t t = 0; t < 7; ++t)
+        for (size_t s = 0; s < 5; ++s) {
+            const scene::Mesh* m = mesh(slotColors_[s] + "_" + partNames[t] + ".mesh");
+            parts_[t][s] = m ? m : mesh(partNames[t] + ".mesh");
+        }
+    for (size_t t = 0; t < 7; ++t)
+        for (size_t s = 0; s < 5; ++s)
+            if (!parts_[t][s] && partDefault[t] >= 0) parts_[t][s] = parts_[size_t(partDefault[t])][s];
+    if (!parts_[0][0] || !parts_[3][0]) throw std::runtime_error("track.milo: no gem meshes");
+    bonusHopo_ = mesh("blue_hopo.mesh"), bonusGem_ = mesh("gem_bonus.mesh"), bonusGlow_ = mesh("gem_bonus2.mesh");
+    star2_ = mesh("star2.mesh"), starBase_ = mesh("star_base.mesh"), topStarBlack_ = mesh("top_star_black.mesh");
+    starMiss_ = mesh("star_miss.mesh");
+    // The copies' order: part types 3, 4, 6, 0, 2, 1, 5, each type's extra
+    // pieces after it [C 0x00159e28].
+    partOrder_.clear();
+    auto order = [&](const scene::Mesh* m) {
+        if (m && !partOrder_.count(m)) partOrder_[m] = int(partOrder_.size());
+    };
+    for (int t : {3, 4, 6, 0, 2, 1, 5}) {
+        for (size_t s = 0; s < 5; ++s) order(parts_[size_t(t)][s]);
+        if (t == 3) order(bonusHopo_), order(topStarBlack_);
+        if (t == 0) order(bonusGem_);
+        if (t == 1) order(bonusGlow_);
+        if (t == 5) order(star2_), order(starBase_), order(starMiss_);
+    }
+    beatMeshes_ = {mesh("quarter_beat_line5.mesh"), mesh("half_beat_line5.mesh"), mesh("beat_line5.mesh"), mesh("bar_line5.mesh")};
+    surface_ = mesh("track_surface5.mesh"), laneLines_ = mesh("track_lane_lines5.mesh"), rails_ = mesh("track_side_rails5.mesh");
+    if (!surface_) throw std::runtime_error("track.milo: no track_surface5.mesh");
+
+    // The tail template (0x0015bcf0): tail02.mesh's vertices sorted, the
+    // first half (one row) kept as the cross-section; 30 segments, fewer with
+    // several players.
     if (const scene::Mesh* t = get<scene::Mesh>("tail02.mesh"); t && t->verts.size() >= 4) {
         std::vector<scene::MeshVertex> v = t->verts;
         std::sort(v.begin(), v.end(), [](const scene::MeshVertex& a, const scene::MeshVertex& b) {
@@ -158,23 +206,28 @@ void TrackView::load(const GameData& data, scene::MiloLibrary& library, int play
         });
         tailRow_.assign(v.begin(), v.begin() + std::ptrdiff_t(v.size() / 2));
     }
+    tailSegments_ = player < 0 ? 30 : 20;
     tailSegLen_ = (horizonY_ - removeY_) * 1.01f / float(tailSegments_);
 
-    // The camera: the single-player one, or the player's of the
-    // multiplayer list (track_p1 / track_p2.cam, whose screen rects are the
-    // left and right halves) [C data; selection I]. Its planes come from
-    // track_graphics (cam (near_plane 50) (far_plane 200)) [C 0x82696330].
-    std::string camName = self->ghTrack.spCamera.empty() ? "track.cam" : self->ghTrack.spCamera;
-    if (player >= 0) camName = size_t(player) < self->ghTrack.mpCameras.size() ? self->ghTrack.mpCameras[size_t(player)]
-                                                                               : (player == 0 ? "track_p1.cam" : "track_p2.cam");
-    cam_ = get<scene::Cam>(camName);
-    if (!cam_) throw std::runtime_error("track_new: no track camera " + camName);
-    screenRect_ = cam_->screenRect;
+    // The camera: track.cam, its planes from track_graphics cam (0x00150df0).
+    cam_ = get<scene::Cam>("track.cam");
+    if (!cam_) throw std::runtime_error("track.milo: no track.cam");
     if (const DataNode* cam = cfg.find("cam")) {
         num(cam, "near_plane", nearPlane_);
         num(cam, "far_plane", farPlane_);
     }
-    trackEnv_ = envOf(get<scene::Group>("draw.grp"), nullptr);
+    // Two players, dual perspective (track_graphics multiplayer
+    // use_dual_perspective TRUE): the track scaled, the camera in the
+    // player's half (0x0014faa8, 0x00154b90) [C].
+    screenRect_ = {0, 0, 1, 1};
+    trackScale_ = 1;
+    if (player >= 0) {
+        screenRect_ = {float(player) * 0.5f, 0, 0.5f, 1};
+        trackScale_ = 0.76f;
+        if (const DataNode* mp = cfg.find("multiplayer"))
+            if (const DataNode* dp = mp->find("dual_perspective")) num(dp, "track_scale", trackScale_);
+    }
+    trackEnv_ = get<scene::Environ>("track.env");
     reset();
 }
 
@@ -190,7 +243,8 @@ void TrackView::reset(float introStartMs) {
     extendAnim_ = {};
     starSmashes_ = starGlowLines_ = comboStarts_ = 0;
     explodeMs_ = -1e9f;
-    // The effect copies (0x8269C968: one smash view of each kind per slot,
+    bonusStartMs_ = -1e9f;
+    // The effect copies (0x0015caa0 / 0x0015f340: one smash view of each kind per slot,
     // and the burn view), and the explode view's systems.
     static const char* const kViews[3] = {"smash_normal.view", "smash_star.view", "smash_bonus.view"};
     for (int f = 0; f < 5; ++f) {
@@ -229,7 +283,7 @@ void TrackView::onEvents(const std::vector<PlayerEvent>& events, const Player& p
                 if (g.frets & (1u << f)) {
                     hitMs_[size_t(f)] = nowMs;
                     // The slot's copy restarts from frame 0: its particles
-                    // born after frame 0 die on the next move [C 0x82212A48].
+                    // born after frame 0 die on the next move [C in GH2 360's particle code, 0x82212A48].
                     Smash& sm = smash_[size_t(f)][size_t(kind)];
                     sm.startMs = nowMs, sm.active = true;
                     if (kind == 1) ++starSmashes_;
@@ -255,7 +309,7 @@ void TrackView::onEvents(const std::vector<PlayerEvent>& events, const Player& p
                 if (player.heldFrets() & (1u << f)) missMs_[size_t(f)] = nowMs;
             break;
         case PlayerEvent::Kind::HeldNoteReleased:
-            // Released early (0x82697710): the tail turns to tail_miss and
+            // Released early (as GH2 360's 0x82697710) [I]: the tail turns to tail_miss and
             // its start freezes where it was.
             if (known && e.value < 1.0f) {
                 const Gem& g = gems[size_t(e.gem)];
@@ -289,71 +343,77 @@ const scene::Environ* TrackView::envOf(const scene::Group* g, const scene::Envir
     return inherited;
 }
 
-void TrackView::drawGroup(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, const scene::Group* g, const scene::Environ* env) {
-    if (!g || !pose_.showing(g) || !g->dir) return;
-    env = envOf(g, env);
-    for (const std::string& n : g->objects) {
-        const scene::Object* o = g->dir->resolve(n);
-        if (!o || o == g || !pose_.showing(o)) continue;
-        if (auto* m = o->as<scene::Mesh>()) {
-            setEnv(mr, cache, env);
-            gfx::drawMesh(mr, cache, *m, gfx::toMat4(pose_.world(m)), &pose_);
-        } else if (auto* sub = o->as<scene::Group>()) {
-            drawGroup(mr, cache, sub, env);
-        }
-    }
+// A mesh copy (0x00158198) [C]: the mesh's own local transform composed with
+// the copy's place (x, y, 0); the star spin replaces the local rotation.
+void TrackView::drawPart(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, const scene::Mesh* m, float x, float y, const scene::Xfm* rot) {
+    if (!m) return;
+    scene::Xfm l = m->trans.local;
+    if (rot) l.rot = rot->rot;
+    scene::Xfm at;
+    at.pos = {x, y, 0};
+    gfx::drawMesh(mr, cache, *m, gfx::toMat4(scene::compose(l, at)), &pose_);
 }
 
-// TrackWidget instances (0x82363A88) [C]: the widget's meshes at the
-// instance's position (identity rotation; the meshes' own transforms are
-// where they were modelled and are not used; widgets that allow rotation
-// keep the meshes' animated rotation, the star spin).
-void TrackView::drawWidget(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, const scene::TrackWidget* w, float x, float y) {
-    if (!w || !w->dir) return;
-    for (const std::string& n : w->meshes) {
-        const scene::Mesh* m = w->dir->resolve<scene::Mesh>(n);
-        if (!m || !pose_.showing(m)) continue;
-        scene::Xfm x0;
-        if (w->allowRotation) x0.rot = pose_.local(m).rot;
-        x0.pos = {x, y, 0};
-        gfx::drawMesh(mr, cache, *m, gfx::toMat4(x0), &pose_);
-    }
+// The surface and its lane lines (0x00154c08: parented to the track group,
+// in this order), the beat lines, then the rails (0x0014faa8).
+void TrackView::drawSurface(gfx::MaterialRenderer& mr, gfx::SceneCache& cache) {
+    setEnv(mr, cache, trackEnv_);
+    for (const scene::Mesh* m : {surface_, laneLines_})
+        if (m) gfx::drawMesh(mr, cache, *m, gfx::toMat4(pose_.local(m)), &pose_);
 }
 
 void TrackView::drawBeatLines(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, const Song& song, float nowMs) {
-    setEnv(mr, cache, envOf(get<scene::Group>("bar_widgets.grp"), trackEnv_));
-    // Look-ahead: none before -2000 ms, full from -1000 ms.
-    const float ramp = std::clamp((nowMs + 2000.0f) / 1000.0f, 0.0f, 1.0f);
-    const float aheadY = horizonY_ * ramp;
-    if (aheadY <= 0) return;
+    setEnv(mr, cache, trackEnv_);
+    // Added while y < now_y + horizon_y, removed when y < now_y + remove_y
+    // (0x00152a28) [C]; one every 240 ticks from tick 0 to the song's end
+    // (0x0015d5b8, kinds 0x0015d688: 1 half beat, 2 beat, 3 bar) [C].
     const int division = std::max(2, song.tempo.division());
     const long half = division / 2;
-    const double fromMs = nowMs + (bottomY_ - 1) / (yPerSecond_ * speed_) * 1000.0f;
-    const double toMs = nowMs + aheadY / (yPerSecond_ * speed_) * 1000.0f;
+    const double fromMs = nowMs + removeY_ / (yPerSecond_ * speed_) * 1000.0f;
+    const double toMs = nowMs + horizonY_ / (yPerSecond_ * speed_) * 1000.0f;
     long tick = std::max(0L, long(song.tempo.msToTick(std::max(0.0, fromMs))) / half * half);
     for (int guard = 0; guard < 4096; ++guard, tick += half) {
         const double ms = song.tempo.tickToMs(double(tick));
-        if (ms > toMs || ms > song.endMs + 1) break;
+        if (ms >= toMs || ms > song.endMs + 1) break;
         const float y = yOf(float(ms) - nowMs);
-        if (y + 1 < bottomY_) continue;
-        const scene::TrackWidget* w = halfBeatW_;
+        if (y < removeY_) continue;
+        int kind = 1;
         if (tick % division == 0) {
             const double m = song.tempo.tickToMeasure(double(tick));
-            w = std::abs(m - std::round(m)) < 1e-6 ? barW_ : beatW_;
+            kind = std::abs(m - std::round(m)) < 1e-6 ? 3 : 2;
         }
-        drawWidget(mr, cache, w, 0, y);
+        // A copy of the mesh's geometry at (0, y, 0) (0x0015c990) [C].
+        if (const scene::Mesh* m = beatMeshes_[size_t(kind)]) gfx::drawMesh(mr, cache, *m, Mat4::translation(0, y, 0), &pose_);
     }
+    if (rails_) gfx::drawMesh(mr, cache, *rails_, gfx::toMat4(pose_.local(rails_)), &pose_);
 }
 
 void TrackView::drawGems(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, const Player& player, float nowMs) {
-    setEnv(mr, cache, envOf(get<scene::Group>("gem_widgets.grp"), trackEnv_));
+    setEnv(mr, cache, trackEnv_);
     const auto& gems = player.chart().gems;
     const bool bonus = player.starPowerActive();
     const float aheadMs = horizonY_ / (yPerSecond_ * speed_) * 1000.0f;
-    const float behindMs = (bottomY_ - 1) / (yPerSecond_ * speed_) * 1000.0f;
+    const float behindMs = removeY_ / (yPerSecond_ * speed_) * 1000.0f;
     auto first = std::lower_bound(gems.begin(), gems.end(), nowMs + behindMs, [](const Gem& g, float v) { return g.ms < v; });
     auto last = std::lower_bound(first, gems.end(), nowMs + aheadMs, [](const Gem& g, float v) { return g.ms < v; });
-    // Far to near, so nearer gems draw over farther ones.
+    // The star spin: star.filt at now x 0.03, star.tnm's rotation (on
+    // star_base.mesh in the scene) given to the spinning parts (0x0015bae8).
+    pose_.setFrame(obj("star.filt"), nowMs * 0.001f * kFrameRate);
+    const scene::Xfm spin = starBase_ ? pose_.local(starBase_) : scene::Xfm{};
+    if (starBase_) pose_.resetLocal(starBase_);
+    struct Copy {
+        int order;
+        const scene::Mesh* mesh;
+        float x, y;
+        bool spin;
+    };
+    std::vector<Copy> copies;
+    auto add = [&](const scene::Mesh* m, float x, float y, bool spins = false) {
+        if (!m) return;
+        auto it = partOrder_.find(m);
+        copies.push_back({it == partOrder_.end() ? int(partOrder_.size()) : it->second, m, x, y, spins});
+    };
+    // Far to near within each mesh's copies.
     for (auto it = last; it != first;) {
         --it;
         const int i = int(it - gems.begin());
@@ -361,27 +421,33 @@ void TrackView::drawGems(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, cons
         if (player.gemHit(i) || !player.owned(i)) continue;
         const float y = yOf(g.ms - nowMs);
         const bool missed = size_t(i) < gemState_.size() && gemState_[size_t(i)] == GemState::Missed;
-        const bool hopo = g.hopo && i > 0;
+        const bool hopo = g.hopo && i > 0 && player.owned(i - 1);
+        // Looks (0x001568a0, set_bonus_gems, on_miss_phrase): bonus during
+        // Star Power, star in an intact phrase, else normal.
         const bool asBonus = bonus && !missed;
         const bool star = !asBonus && g.phrase >= 0 && player.phraseIntact(g.phrase);
         for (int f = 0; f < 5; ++f) {
             if (!(g.frets & (1u << f))) continue;
-            const scene::TrackWidget* w = nullptr;
+            const size_t s = size_t(f);
+            const float x = slotX(f);
             if (star) {
-                const auto& set = hopo ? starHopoW_ : starW_;
-                const size_t k = missed ? 5 : size_t(f);
-                w = k < set.size() ? set[k] : nullptr;
+                add(starBase_, x, y, true);
+                add(hopo ? parts_[6][s] : topStarBlack_, x, y);
+                if (missed) add(starMiss_, x, y);
+                else add(parts_[5][s], x, y, true);
+                add(star2_, x, y, true);
             } else {
-                const auto& set = hopo ? hopoW_ : gemW_;
-                const size_t k = asBonus ? 5 : missed ? 6 : size_t(f);
-                w = k < set.size() ? set[k] : nullptr;
+                add(!hopo ? parts_[3][s] : asBonus ? bonusHopo_ : parts_[4][s], x, y);
+                add(missed ? parts_[2][s] : asBonus ? bonusGem_ : parts_[0][s], x, y);
+                add(asBonus ? bonusGlow_ : parts_[1][s], x, y);
             }
-            drawWidget(mr, cache, w, slotX(f), y);
         }
     }
+    std::stable_sort(copies.begin(), copies.end(), [](const Copy& a, const Copy& b) { return a.order < b.order; });
+    for (const Copy& c : copies) drawPart(mr, cache, c.mesh, c.x, c.y, c.spin ? &spin : nullptr);
 }
 
-// One fret's tail of gem `gi` (0x8269EAD0): rows of the cross-section from
+// One fret's tail of gem `gi` (built in the gem poll 0x00158e50 as in GH2 360's 0x8269EAD0): rows of the cross-section from
 // the clip to the end, the last row the tip; then the glow line over it.
 void TrackView::buildTail(const Gem& g, int gi, int slot, const Player& player, float nowMs) {
     if (tailRow_.empty()) return;
@@ -490,7 +556,7 @@ void TrackView::buildTail(const Gem& g, int gi, int slot, const Player& player, 
             const float c[4] = {rgb[0], rgb[1], rgb[2], v.color[3]};
             vertex(x0 + v.pos[0] * row.sx, base + row.y, v.pos[2], v.normal, c, v.uv[0], v.uv[1]);
         }
-    // The faces as the template mesh 0x8269C2A0 builds them: (a, a+1, a+V)
+    // The faces as GH2 360's template mesh (0x8269C2A0) builds them: (a, a+1, a+V)
     // and (a+V, a+1, a+V+1) [C]. The other winding is culled: only the glow
     // line showed, which looked like a translucent tail.
     const int first = int(tailIndices_.size());
@@ -543,7 +609,7 @@ void TrackView::drawSmashers(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, 
     const scene::Object* hitAnim = obj("gem_smasher_hit.tnm");
     const scene::Object* popAnim = obj("gem_smasher.tnm");
     const float hitEnd = gfx::ScenePose::endFrame(hitAnim), popEnd = gfx::ScenePose::endFrame(popAnim);
-    setEnv(mr, cache, envOf(get<scene::Group>("track.view"), trackEnv_));
+    setEnv(mr, cache, trackEnv_);
     for (int s = 0; s < 5; ++s) {
         // The extend sequence pops the smashers one by one, 1.3 s + 0.1 s per
         // slot after it starts, and lights them (set_smasher_glowing) until
@@ -564,8 +630,8 @@ void TrackView::drawSmashers(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, 
         else if (sinceMiss >= 0 && sinceMiss < popEnd) pose_.setFrame(popAnim, sinceMiss);
         const Mat4 offset = Mat4::translation(slotX(s), 0, 0);
         const scene::Mat* body = held ? slotMat("gem_smasher_%s.mat", s) : get<scene::Mat>("gem_smasher.mat");
-        gfx::drawMesh(mr, cache, *smasher, offset * gfx::toMat4(pose_.world(smasher)), &pose_, body);
-        if (rim) gfx::drawMesh(mr, cache, *rim, offset * gfx::toMat4(pose_.world(rim)), &pose_, slotMat("now_ring_%s.mat", s));
+        gfx::drawMesh(mr, cache, *smasher, offset * gfx::toMat4(pose_.local(smasher)), &pose_, body);
+        if (rim) gfx::drawMesh(mr, cache, *rim, offset * gfx::toMat4(pose_.local(rim)), &pose_, slotMat("now_ring_%s.mat", s));
     }
     pose_.resetLocal(smasher);
 }
@@ -604,7 +670,7 @@ void TrackView::drawEffects(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, c
         b.setFrame(nowMs * 0.001f * kFrameRate);
     }
 
-    // Smash views (0x8269CD60): each slot's copy at frame (now - hit) x 0.03.
+    // Smash views (0x0015f340; GH2 360 0x8269CD60): each slot's copy at frame (now - hit) x 0.03.
     static const char* const kViews[3] = {"smash_normal.view", "smash_star.view", "smash_bonus.view"};
     for (int f = 0; f < 5; ++f)
         for (int k = 0; k < 3; ++k) {
@@ -676,7 +742,7 @@ void TrackView::drawParticles(gfx::MaterialRenderer& mr, gfx::SceneCache& cache,
         burn_[size_t(f)].update(pose_, at(slotX(f), nowY_), clock);
         burn_[size_t(f)].draw(*particles_, mr, cache, camera_, offset, &pose_);
     }
-    // tail_bonus.part on held Star Power tails (0x8269EAD0) [C]: a copy per
+    // tail_bonus.part on held Star Power tails (loaded by 0x00159e28; placed as GH2 360's 0x8269EAD0): a copy per
     // tail at the tail's start, emitting 2 x the whammy a frame while the
     // tail is whammied [I: the value is the tail's whammy blend], particles
     // past the tail's end removed.
@@ -742,7 +808,7 @@ void TrackView::drawParticles(gfx::MaterialRenderer& mr, gfx::SceneCache& cache,
     particlesDrawn_ = particles_->drawnParticles();
 }
 
-// track_explode.view (0x82695988, poll 0x82695C08) [C]: shown, parented
+// track_explode.view (0x00150ca8, poll 0x00151580) [C]: shown, parented
 // to the rig, and played by track_explode.filt at (now - explode) x 0.03;
 // the track and its gems are hidden.
 void TrackView::drawExplode(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, float nowMs) {
@@ -765,15 +831,31 @@ void TrackView::drawExplode(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, f
     particlesDrawn_ = particles_->drawnParticles();
 }
 
+// lightning_track.view (0x00150be8): its copy shown during Star Power, at
+// (now - Star Power's start) x 0.03 (0x00151580) [C].
+void TrackView::drawLightning(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, const Player& player, float nowMs) {
+    if (!player.starPowerActive()) {
+        bonusStartMs_ = -1e9f;
+        return;
+    }
+    if (bonusStartMs_ < -1e8f) bonusStartMs_ = nowMs;
+    const scene::Group* view = get<scene::Group>("lightning_track.view");
+    if (!view || !view->dir) return;
+    pose_.setFrame(view, (nowMs - bonusStartMs_) * 0.001f * kFrameRate);
+    setEnv(mr, cache, trackEnv_);
+    for (const std::string& n : view->objects)
+        if (const scene::Mesh* m = view->dir->resolve<scene::Mesh>(n)) gfx::drawMesh(mr, cache, *m, gfx::toMat4(pose_.world(m)), &pose_);
+}
+
 void TrackView::draw(gfx::Renderer& r, gfx::SceneCache& cache, const Song& song, const Player& player, float nowMs, float trackSpeed) {
     if (!track_) return;
     particlesDrawn_ = 0;
-    // game.dta game_lost: {track_panel set_showing FALSE} [C].
+    // game.dta game_lost: {track_panel set_showing FALSE} [C data].
     if (player.failed()) return;
     int vx, vy, vw, vh;
     r.pictureRect(vx, vy, vw, vh);
-    // The camera's screen rect (two players: each track in its half) [C data;
-    // the projection keeping the rect's own aspect is I].
+    // Two players: track.cam's screen rect is the player's half (0x00154b90)
+    // [C]; the projection keeping the rect's own aspect is [I].
     const bool sub = screenRect_ != std::array<float, 4>{0, 0, 1, 1};
     viewW_ = std::max(1, int(float(vw) * screenRect_[2])), viewH_ = std::max(1, int(float(vh) * screenRect_[3]));
     if (sub) r.device().setViewport(vx + int(float(vw) * screenRect_[0]), vy + int(float(vh) * screenRect_[1]), viewW_, viewH_);
@@ -783,13 +865,14 @@ void TrackView::draw(gfx::Renderer& r, gfx::SceneCache& cache, const Song& song,
     if (gemState_.size() != player.chart().gems.size()) gemState_.assign(player.chart().gems.size(), GemState::Live);
     gfx::MaterialRenderer& mr = r.materials();
 
-    // anim.grp at frame now_y (TrackDir::Poll); the rig itself stays at rest.
-    pose_.setFrame(obj("anim.grp"), nowY_);
-    for (const char* n : {"rig.grp", "cameras.grp", "track.cam"})
-        if (const scene::Object* o = obj(n)) pose_.resetLocal(o);
+    // The surface scroll at now_y, the gem anims at now x 0.03 (0x00151670,
+    // 0x00153ea0) [C].
+    pose_.setFrame(obj("track_surface.filt"), nowY_);
+    pose_.setFrame(obj("track_anims.view"), nowMs * 0.001f * kFrameRate);
+    pose_.resetLocal(cam_);
     // The extend sequence (track_panel.dta animate_track_out: the panel's
     // frame 0 -> TRACK_END_FRAME 1920 in a second; extend_track_normal.tnm
-    // brings the cameras in) [C data]; at rest it holds frame 1920.
+    // moves track.cam) [C data]; at rest it holds frame 1920.
     {
         float frame = 1920;
         if (introStartMs_ > -1e8f) frame = std::clamp((nowMs - introStartMs_) / 1000.0f * 1920.0f, 0.0f, 1920.0f);
@@ -814,46 +897,47 @@ void TrackView::draw(gfx::Renderer& r, gfx::SceneCache& cache, const Song& song,
         }
     }
 
-    // Star Power: the lightning and the Star Power surface light; the rails.
+    // The rails (0x0015e190): their state's anim at song ticks / 480.
     const bool star = player.starPowerActive();
-    if (const scene::Object* l = obj("lightning.grp")) pose_.setShowing(l, star);
-    if (const scene::Object* l = obj("wood_track_surface_starpower.lit")) pose_.setShowing(l, star);
     const bool warning = player.rockMeter() < player.warningLevel();
-    static const char* const kRails[4] = {"side_rails_none.mnm", "side_rails_star.filt", "side_rails_warning.filt",
+    static const char* const kRails[4] = {"side_rails_none.mnm", "side_rails_warning.filt", "side_rails_star.filt",
                                           "side_rails_warning_star.filt"};
-    const float beats = float(song.tempo.msToTick(std::max(0.0f, nowMs)) / std::max(1, song.tempo.division()));
-    pose_.setFrame(obj(kRails[(star ? 1 : 0) + (warning ? 2 : 0)]), beats);
+    const float beats = float(song.tempo.msToTick(std::max(0.0f, nowMs)) / 480.0);
+    pose_.setFrame(obj(kRails[(warning ? 1 : 0) + (star ? 2 : 0)]), beats);
 
-    camera_.world = gfx::toMat4(pose_.world(cam_));
-    camera_.yFov = cam_->yFov, camera_.nearPlane = nearPlane_, camera_.farPlane = farPlane_;
-    camera_.aspect = float(viewW_) / float(viewH_);
-    // Two players watch the explode through track_explode.cam (0x826967B8
-    // makes it for two players only, mirrored for the second player: the
-    // data's track_explode_p2.cam) [C; the _p2 cam standing in for the
+    const scene::Cam* cam = cam_;
+    // Two players watch the explode through track_explode.cam (0x0014faa8
+    // makes it for several players only, mirrored for the second player:
+    // the data's track_explode_p2.cam) [C; the _p2 cam standing in for the
     // mirror is I].
     if (exploded() && player_ >= 0)
-        if (const scene::Cam* ec = get<scene::Cam>(player_ == 1 ? "track_explode_p2.cam" : "track_explode.cam")) {
-            camera_.world = gfx::toMat4(pose_.world(ec));
-            camera_.yFov = ec->yFov;
-        }
+        if (const scene::Cam* ec = get<scene::Cam>(player_ == 1 ? "track_explode_p2.cam" : "track_explode.cam")) cam = ec;
+    camera_.world = gfx::toMat4(pose_.world(cam));
+    camera_.yFov = cam->yFov, camera_.nearPlane = nearPlane_, camera_.farPlane = farPlane_;
+    camera_.aspect = float(viewW_) / float(viewH_);
+    // The track group scaled by track_scale about the origin, the camera
+    // (outside it) not: the same picture as the camera's place and planes
+    // divided by the scale.
+    if (trackScale_ != 1 && trackScale_ > 0) {
+        const Vec3 p = camera_.world.translationPart();
+        camera_.world.at(0, 3) = p.x / trackScale_, camera_.world.at(1, 3) = p.y / trackScale_, camera_.world.at(2, 3) = p.z / trackScale_;
+        camera_.nearPlane /= trackScale_, camera_.farPlane /= trackScale_;
+    }
 
     if (exploded()) {
-        // 0x82695988: the gems and the track's own drawing are hidden, the
-        // explode view drawn (with the track camera in one player, 0x826957F0).
         drawExplode(mr, cache, nowMs);
     } else {
-        // draw.grp's order: surfaces, rails and lane lines, bar widgets, tails,
-        // gem widgets, lightning; then the smashers, effects and particles.
-        for (const char* g : {"wood_track_surface_starpower.grp", "wood_track_surface.grp", "track_surface.grp"})
-            drawGroup(mr, cache, get<scene::Group>(g), trackEnv_);
+        // The root: surface, lane lines, beat lines, rails, tails, gems;
+        // then the second group: smashers, effects, lightning.
+        drawSurface(mr, cache);
         drawBeatLines(mr, cache, song, nowMs);
         drawTails(mr, cache, player, nowMs);
         drawGems(mr, cache, player, nowMs);
-        drawGroup(mr, cache, get<scene::Group>("lightning.grp"), trackEnv_);
         drawSmashers(mr, cache, player, nowMs);
         drawEffects(mr, cache, player, nowMs);
         drawCombo(mr, cache, nowMs);
         drawParticles(mr, cache, player, nowMs);
+        drawLightning(mr, cache, player, nowMs);
     }
     if (sub) r.device().setViewport(vx, vy, vw, vh);
     viewW_ = vw, viewH_ = vh;

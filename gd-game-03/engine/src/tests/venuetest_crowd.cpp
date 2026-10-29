@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -160,18 +161,29 @@ int crowdRun(Venue& v, std::string& report) {
 
     // ---- two players: the hides and the amps (the chain's RndDir types)
     int hidden = 0, hideErrors = 0, amps = 0;
+    // Objects an EventTrigger also shows or hides (fest's zombie.grp hidden
+    // by start.trig until the encore, its bikers shown at excitement_great.trig
+    // [C data]) follow the triggers the run fired, not only the hide lists.
+    std::set<std::string> triggered;
+    for (const auto& p : v.parts())
+        p.milo->root().forEach([&](scene::Object& o) {
+            if (const auto* t = o.as<scene::EventTrigger>()) {
+                triggered.insert(t->shows.begin(), t->shows.end());
+                for (const auto& [n, d] : t->hideDelays) triggered.insert(n);
+            }
+        });
     for (const auto& p : v.parts()) {
         ScriptObject* d = dirScript(in, p.milo->root().name);
         if (!d) continue;
         for (const std::string& n : names(in, d, "multiplayer_hide_objects"))
-            if (const scene::Object* o = v.find(n)) {
+            if (const scene::Object* o = triggered.count(n) ? nullptr : v.find(n)) {
                 ++hidden;
-                if (w.pose().showing(o) == mp) ++hideErrors;
+                if (w.pose().showing(o) == mp) ++hideErrors, c.check(false, n + " (multiplayer_hide_objects) shows");
             }
         for (const std::string& n : names(in, d, "singleplayer_hide_objects"))
-            if (const scene::Object* o = v.find(n)) {
+            if (const scene::Object* o = triggered.count(n) ? nullptr : v.find(n)) {
                 ++hidden;
-                if (w.pose().showing(o) != mp) ++hideErrors;
+                if (w.pose().showing(o) != mp) ++hideErrors, c.check(false, n + " (singleplayer_hide_objects) shows");
             }
         // set_player1_bass: the bass amp shows, the guitar amp hides.
         const auto bass = names(in, d, "player1_bassamp_objects"), guitar = names(in, d, "player1_guitaramp_objects");
@@ -192,8 +204,9 @@ int crowdRun(Venue& v, std::string& report) {
     const World::Stats b2 = w.stats();
     w.message("drummer_explode");
     const int explodeCalls = w.stats().proxyCalls - b2.proxyCalls;
-    // The drummer explosion is in the one-player worlds only [C data: no proxy in _mp / _coop].
-    if ((v.name() == "battle" || v.name() == "small1") && !mp) c.check(explodeCalls > 0, "drummer_explode calls its proxy");
+    // The drummer explosion is in battle's one-player world only on this
+    // disc [C data: battle.milo's drummer_explode_PROXY; no proxy in _mp / _coop].
+    if (v.name() == "battle" && !mp) c.check(explodeCalls > 0, "drummer_explode calls its proxy");
     std::string extras;
     if (v.name() == "arena") {
         w.message("peak_on");

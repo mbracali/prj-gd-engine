@@ -23,8 +23,9 @@ namespace {
 // The expected log of the golden song: line count and FNV-1a hash. A change
 // in the parser rules or the scripts moves them; check the log
 // (GD03_MIDI_LOG=<file>) and update both.
-constexpr int kGoldenLines = 6630;
-constexpr uint32_t kGoldenHash = 0xa8e90ce2u;
+// gd03: 18andlife on this disc (2026-10-28 baseline).
+constexpr int kGoldenLines = 2268;
+constexpr uint32_t kGoldenHash = 0x539bfa4fu;
 
 const char* const kParsers[] = {"player0_fret",     "player0_strum",   "bass_strum",     "player0_fret_pos", "player0_parser",
                                 "bassist_parser",   "drummer_parser",  "singer_parser",  "keyboard_parser"};
@@ -99,7 +100,7 @@ int runMidiParserTest(const GameData& data) {
     }
     const SongInfo* info = &songs.front();
     for (const SongInfo& s : songs)
-        if (s.id == "hangar18") info = &s;
+        if (s.id == "18andlife") info = &s;
 
     // The hand clips the guitarists have (every <c>_fret / <c>_strum set).
     std::set<std::string> clips;
