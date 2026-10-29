@@ -38,6 +38,8 @@ public:
     // Frees finished voices (call once a frame).
     void update();
     bool has(uint32_t sample) const { return entries_.count(sample) != 0; }
+    // A sample's decoded audio (interleaved float), or false.
+    bool pcm(uint32_t sample, std::vector<float>& out, int& rate, int& channels);
     struct Stats {
         uint64_t plays = 0, decoded = 0, failures = 0, unknown = 0;
     };

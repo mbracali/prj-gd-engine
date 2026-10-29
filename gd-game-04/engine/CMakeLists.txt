@@ -233,7 +233,7 @@ if(GD04_MODULE)
       "The launcher's module SDK (gd_host.h, gd_module_shim.h/.cpp)")
   get_target_property(gd04_srcs gd04 SOURCES)
   list(FILTER gd04_srcs EXCLUDE REGEX "\\.(rc|icns)$")
-  add_library(gd04_module SHARED ${gd04_srcs} src/platform/module_entry.cpp
+  add_library(gd04_module SHARED ${gd04_srcs} src/platform/module_entry.cpp src/platform/module_sounds.cpp
               ${GD04_HOST_SDK}/gd_module_shim.cpp)
   foreach(prop INCLUDE_DIRECTORIES COMPILE_DEFINITIONS COMPILE_OPTIONS LINK_LIBRARIES LINK_OPTIONS)
     get_target_property(value gd04 ${prop})

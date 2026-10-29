@@ -167,3 +167,13 @@ void Sfx::update() {
                                  }),
                   voices_.end());
 }
+
+bool Sfx::pcm(uint32_t sample, std::vector<float>& out, int& rate, int& channels) {
+    auto it = entries_.find(sample);
+    if (it == entries_.end()) return false;
+    Entry& e = *it->second;
+    if (!e.decoded) decode(e);
+    if (e.bad || e.pcm.empty()) return false;
+    out = e.pcm, rate = e.rate, channels = e.channels;
+    return true;
+}
