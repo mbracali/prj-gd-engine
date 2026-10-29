@@ -57,3 +57,16 @@ rows are GD02-097..GD02-129.
   build, then polish.
 - Not tested for real: touch on a touch screen, Rock Band guitars, Blur on
   Star Power (the walks never deploy Star Power; it is gd01's pass as is).
+
+## Batch 2: Windows and packages (2026-10-28)
+
+- Done: the Windows build (`engine/dist/gd02-windows-x64/gd02.exe`) under
+  Proton Experimental's wine (own WINEPREFIX) opens Enhanced Options
+  (`GD02_SKIP_BOOT=1 GD02_SCREEN=enhanced_options_screen`, a screenshot at
+  12 s): the list, the backdrop with the band and the post chain render, at
+  the Windows default 1440p. `gd-engine-launcher/scripts/build.sh all
+  --force` under the shared lock: every bundle verified complete (Linux,
+  Steam Deck, Windows, Android; 2 modules each). GDALL-015 ✅.
+- Next (not in this pairing): GH2's own shadow pass (the band shadows'
+  silhouette), Flaming Head (GD02-043), a Vulkan upscaler for FSR 3.1 /
+  DLSS (GDALL-017), Remove All Effects in gd-game-01 (GDALL-002).

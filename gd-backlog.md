@@ -126,7 +126,7 @@ Items every game module shares. Each game tracks its own work in its section.
 | GDALL-026 | Enhancement | ❌ | gd02 audio-latency calibration screen (TVs) | study_lg_tv, 3–5 days | Spike 10-28 |
 | GDALL-027 | Enhancement | ➖ later | Samsung Tizen (WASM web app only; the ISO is out of reach): Emscripten launcher, TV spike, LAN asset server | [spikes/study_samsung_tv.md](spikes/study_samsung_tv.md), low priority | Spike 10-28 |
 | GDALL-028 | Enhancement | ➖ later | 3DS feasibility spike (only if the owner asks) | [spikes/study_3ds.md](spikes/study_3ds.md) | Spike 10-28 |
-| GDALL-015 | Enhancement | 🟡 in progress | Enhanced menus paired: every Enhanced feature of gd-game-01 that fits GH2 implemented in gd-game-02 (same layout, names, defaults, behaviour), and the parity table kept in the guideline | `guidelines/universal_launcher.md`; agent-owned, branch feature/20261028-gd-games-03-04 | Owner 10-28 |
+| GDALL-015 | Enhancement | ✅ | Enhanced menus paired: every Enhanced feature of gd-game-01 that fits GH2 implemented in gd-game-02 (same layout, names, defaults, behaviour), and the parity table kept in the guideline | `guidelines/universal_launcher.md` "Enhanced options: parity" (6 had, 32 done, 6 N/A); GD02-097..129; gd02 walks enhanced / mouse / cheats check each option | Owner 10-28 |
 
 
 ## gd-game-01: Guitar Hero (PlayStation 2)
