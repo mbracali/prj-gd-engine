@@ -350,6 +350,7 @@ private:
     std::unique_ptr<Song> song_;
     std::unique_ptr<Player> player_;
     std::unique_ptr<Autoplay> bot_;
+    std::string walkSaveDir_;  // the walk test's temporary save folder, removed at its end
     std::unique_ptr<VgsStream> pendingStream_;
     float bandVolume_ = 1, guitarVolume_ = 1;
     int syncOffsetMs_ = 0;
@@ -601,6 +602,12 @@ int App::run() {
     }
 
     if (walk_ && ui_) exitCode_ = walk_->finish(*ui_);
+    // The walk's own save folder goes with it (its checks have read it).
+    if (!walkSaveDir_.empty()) {
+        std::error_code ec;
+        std::filesystem::remove_all(walkSaveDir_, ec);
+        walkSaveDir_.clear();
+    }
     endSong();
     stopMusic();
     unloadVenue();
@@ -662,10 +669,9 @@ void App::startUi() {
     if (walk_) {
         // The walk test: no videos, a fresh save of its own, its song settings.
         SDL_setenv_unsafe("GD03_SKIP_MOVIES", "1", 1);
-        static std::string dir;
-        dir = (std::filesystem::temp_directory_path() / ("gd03-walk-" + std::to_string(SDL_GetTicksNS()))).string() + "/";
-        std::filesystem::create_directories(dir);
-        SDL_setenv_unsafe("GD03_SAVE_DIR", dir.c_str(), 1);
+        walkSaveDir_ = (std::filesystem::temp_directory_path() / ("gd03-walk-" + std::to_string(SDL_GetTicksNS()))).string() + "/";
+        std::filesystem::create_directories(walkSaveDir_);
+        SDL_setenv_unsafe("GD03_SAVE_DIR", walkSaveDir_.c_str(), 1);
     }
     loadEnhanced();
     // A save folder of its own (the walk test, development) holds controllers.json too.

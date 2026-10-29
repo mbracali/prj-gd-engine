@@ -8,8 +8,8 @@ launch: 2007-07-24
 platforms: [PlayStation 2]
 based_on: PlayStation 2
 guitar_dream_version: "0.0.1"
-ready_to_play: false
-completeness: 0
+ready_to_play: true
+completeness: 0.5
 iso_signatures:
   - format: iso9660
     ps2_boot: "SLUS_215.86"

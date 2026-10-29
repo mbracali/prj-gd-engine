@@ -33,3 +33,20 @@ Each entry: what, why, how to undo.
   players to any device (keyboard, pads, touch) in GAMEPADS, like gd02's
   `is_missing_controller`.
 - Undo: return whether `input` has fewer than two player devices (natives_game.cpp).
+
+## D5. Goldens are this disc's first baselines
+- What: the director (105 / 094b806a), band (353 / d8bf0829), crowd (453 /
+  266c768b) and MIDI parser (2268 / 539bfa4f) goldens were regenerated from
+  the port's own output on this disc; the facefx graph check keeps only the
+  guitarist / _blinktrack case (byte-identical files, reference values from
+  gd-game-02's research parser).
+- Why: the old ones were GH2 360 songs and venues; no reference for this
+  disc exists yet (OPEN_QUESTIONS Q3). They now guard against regressions.
+- Undo: recapture from an emulator run and replace the constants.
+
+## D6. gd03 is ready_to_play (completeness 0.5)
+- What: game-info.yaml ready_to_play true, so the launcher builds carry it.
+- Why: quick play, career, co-op / face-off / pro face-off, practice-free
+  menus and every walk pass on the disc; missing pieces are listed in the
+  backlog (movies, track fade, mono, rules not yet re-read in SLUS_215.86).
+- Undo: set ready_to_play false.
