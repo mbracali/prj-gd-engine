@@ -5,6 +5,7 @@
 #include <memory>
 #include <vector>
 
+#include "audio/sfx.h"
 #include "input/input.h"
 #include "script/vm.h"
 #include "ui/natives_flow.h"
@@ -35,6 +36,7 @@ public:
         int device = 0;
     } pad;
     FlowState flow;
+    Sfx sfx;
     // A song the scripts started (start_gem_scroller): the app plays it
     // with the native game core, then calls songEnded.
     struct SongRequest {

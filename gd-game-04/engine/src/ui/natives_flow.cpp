@@ -61,7 +61,7 @@ void addFlowNatives(qs::Vm& vm, FlowState& st) {
         vm.addNative(n, yes);
     for (const char* n : {"NetSessionFunc", "IsHost", "EnumContentFiles", "IsEnumContentFilesDamaged", "GetLatestContentIndexFile",
                           "GetContentFolderIndexFromFile", "French", "German", "Spanish", "Italian", "IsCreated", "CompositeObjectExists",
-                          "IsInNodeArray", "IsSoundEventPlaying", "IsSoundPlaying", "IsMovieInBuffer", "IsMoviePreLoaded", "GetGameProfileSetting"})
+                          "IsInNodeArray", "IsSoundPlaying", "IsMovieInBuffer", "IsMoviePreLoaded", "GetGameProfileSetting"})
         vm.addNative(n, no);
     vm.addNative("EnumContentFilesFinished", yes);
     // GetDisplaySettings: a 16:9 frame (widescreen = 1) [I].

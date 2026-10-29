@@ -32,6 +32,7 @@ target_sources(gd04 PRIVATE
   src/audio/audio_device.cpp
   src/audio/mixer.cpp
   src/audio/sfx_dsp.cpp
+  src/audio/sfx.cpp
   src/audio/song_stream.cpp
   src/audio/xma_decoder.cpp
   src/audio/xma_stream.cpp
@@ -83,6 +84,7 @@ target_sources(gd04 PRIVATE
   src/ui/front_end.cpp
   src/ui/natives_flow.cpp
   src/ui/natives_game.cpp
+  src/ui/natives_sound.cpp
   src/ui/ui_system.cpp
   src/video/movie_player.cpp
   src/tests/formattest.cpp

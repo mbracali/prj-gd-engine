@@ -11,6 +11,7 @@
 #include "script/globals.h"
 #include "script/natives_core.h"
 #include "ui/natives_game.h"
+#include "ui/natives_sound.h"
 
 namespace {
 constexpr double kStepMs = 1000.0 / 60.0;
@@ -24,6 +25,11 @@ FrontEnd::FrontEnd(const Disc& disc, Globals& globals, TextureCache& textures, g
     ui_->addNatives();
     addGameNatives(*this, disc_, textures);
     addFlowNatives(*vm_, flow);
+    std::string err;
+    if (!sfx.open(err)) SDL_Log("sfx: %s", err.c_str());
+    sfx.addPak(disc_, "DATA/COMPRESSED/ZONES/global_sfx.pak.xen");
+    sfx.addFsb(disc_, "DATA/STREAMS/streamall.fsb.xen", "DATA/STREAMS/streamall.dat.xen");
+    addSoundNatives(*vm_, sfx);
 }
 
 FrontEnd::~FrontEnd() {
@@ -75,6 +81,7 @@ void FrontEnd::songEnded(bool won) {
 }
 
 void FrontEnd::frame(Canvas& c, double dtMs) {
+    sfx.update();
     if (songPlaying) return;
     accum_ += dtMs;
     int steps = 0;
