@@ -3,10 +3,13 @@
 #include "render/band.h"
 
 #include <SDL3/SDL_log.h>
+#include <SDL3/SDL_stdinc.h>
 
+#include <algorithm>
 #include <exception>
 
 #include "data/disc.h"
+#include "data/havok.h"
 #include "data/pak.h"
 #include "data/qbkey.h"
 #include "data/venue.h"
@@ -99,12 +102,48 @@ bool Band::startWith(const Disc& disc, const Globals& g, const venue::Venue* v, 
         e.root = bandanim::matOf(root);
         for (int i = 0; i < 3; ++i)
             for (int j = 0; j < 3; ++j) e.root.m[i * 4 + j] *= m.scale;
+        // Gravity in model units: R^T (0, -9.81, 0) / scale^2.
+        {
+            const float s2 = std::max(1e-6f, m.scale * m.scale);
+            e.gravity = {e.root.m[4] * -9.81f / s2, e.root.m[5] * -9.81f / s2, e.root.m[6] * -9.81f / s2};
+        }
+        e.acc = accessorySim(disc, g, m, e.anim.rig(), globalPak_);
         // create_band_member: lightgroup band; the guitarist alt_band [C script; I: alt_band lights add to band's].
         e.lightGroups = {K("band")};
         if (m.role == band::Role::Guitarist) e.lightGroups.push_back(K("alt_band"));
         members_.push_back(std::move(e));
     }
     return true;
+}
+
+// The ragdoll: the profile's ragdoll (ragdoll2 for outfit 2) from
+// global.pak, its accessory bodies simulated (ragdoll_setaccessorybones
+// accessory_bones = $Guitarist_accessory_bones) [C scripts].
+std::unique_ptr<AccessorySim> Band::accessorySim(const Disc& disc, const Globals& g, const band::Member& m, const bandanim::Rig& rig,
+                                                 std::unique_ptr<Pak>& globalPak) {
+    if (!m.profile || SDL_getenv("GD04_NO_RAGDOLL")) return nullptr;
+    uint32_t ragKey = 0;
+    if (m.outfit == 2)
+        if (const qb::Value* r2 = m.profile->find(K("ragdoll2")); r2 && (r2->type == qb::Type::Key || r2->type == qb::Type::KeyPtr)) ragKey = r2->key;
+    if (!ragKey)
+        if (const qb::Value* r = m.profile->find(K("ragdoll")); r && (r->type == qb::Type::Key || r->type == qb::Type::KeyPtr)) ragKey = r->key;
+    std::vector<uint32_t> accBones;
+    if (const qb::Value* ab = g.find(K("Guitarist_accessory_bones")); ab && ab->type == qb::Type::Array && ab->arr)
+        for (const qb::Value& b : ab->arr->values) accBones.push_back(b.key);
+    if (ragKey && !accBones.empty()) {
+        try {
+            if (!globalPak) globalPak = std::make_unique<Pak>(Pak::load(disc, "DATA/COMPRESSED/ZONES/global.pak.xen"));
+            if (const PakEntry* re = globalPak->findType(ragKey, K(".rag"))) {
+                auto [rp, rs] = globalPak->data(*re);
+                const havok::Physics phys = havok::parse(rp, rs);
+                auto acc = std::make_unique<AccessorySim>();
+                if (acc->init(rig, phys, accBones)) return acc;
+            }
+        } catch (const std::exception& ex) {
+            SDL_Log("band: ragdoll %s: %s", qbkey::names().get(ragKey).c_str(), ex.what());
+        }
+    }
+    return nullptr;
 }
 
 bool Band::attach(gfx::RenderDevice& device, std::string& error) {
@@ -132,11 +171,22 @@ void Band::playerNote(double ms, bool hit) {
 }
 
 void Band::evaluate(double ms) {
-    for (Entry& e : members_) {
-        if (e.evaluatedAt == ms) continue;
-        e.anim.evaluate(ms, e.world, e.skin);
-        e.evaluatedAt = ms;
+    for (Entry& e : members_) evaluateEntry(e, ms);
+}
+
+void Band::evaluateEntry(Entry& e, double ms) {
+    if (e.evaluatedAt == ms) return;
+    e.anim.evaluate(ms, e.world, e.skin);
+    if (e.acc) {
+        const bandanim::Animator& an = e.anim;
+        e.acc->apply(ms, e.world, [&an](double t, std::vector<bandanim::Mat34>& w) {
+            std::vector<bandanim::Mat34> sk;
+            an.evaluate(t, w, sk);
+        }, e.gravity);
+        const bandanim::Rig& rig = e.anim.rig();
+        for (size_t b = 0; b < e.world.size() && b < rig.invBind.size(); ++b) e.skin[b] = bandanim::mmul(e.world[b], rig.invBind[b]);
     }
+    e.evaluatedAt = ms;
 }
 
 bool Band::bonePos(uint32_t member, uint32_t bone, venue::Vec3& out) const {

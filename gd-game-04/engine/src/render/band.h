@@ -9,6 +9,8 @@
 #include "data/band.h"
 #include "data/qb.h"
 #include "render/band_anim.h"
+#include "render/band_ragdoll.h"
+#include "data/pak.h"
 #include "render/band_view.h"
 #include "render/venue_camera.h"
 
@@ -55,14 +57,25 @@ public:
         std::vector<uint32_t> lightGroups;
         std::vector<bandanim::Mat34> world, skin;  // at the last evaluate
         double evaluatedAt = -1e18;
+        std::unique_ptr<AccessorySim> acc;  // the accessory bones' swing (render/band_ragdoll.h)
+        bandanim::Vec gravity{0, -9.81f, 0};  // in model space
     };
     const std::vector<Entry>& members() const { return members_; }
     std::vector<Entry>& members() { return members_; }
     const BandView* view() const { return view_.get(); }
+    // A member's accessory-bone ragdoll (null: none), as the band's members
+    // get it (shared with the menus' characters, ui/menu_objects.h);
+    // `globalPak`: ZONES/global.pak, loaded on first use.
+    static std::unique_ptr<AccessorySim> accessorySim(const Disc& disc, const Globals& g, const band::Member& m, const bandanim::Rig& rig,
+                                                      std::unique_ptr<Pak>& globalPak);
     // The skeletons and perm_anims clips (shared with the crowd, render/crowd.h).
     const band::Library& library() const { return lib_; }
+    // The song pak's .qb files (its <song>_performance array).
+    const std::vector<qb::File>& songFiles() const { return songFiles_; }
     // Evaluates every member's pose at `ms` (after advance).
     void evaluate(double ms);
+    // One member's pose at `ms` (its animation and accessory bones; after its advance).
+    static void evaluateEntry(Entry& e, double ms);
     // Draws the band's opaque meshes with a light's engine constants into
     // the bound (shadow) target; the next draw at the same `ms` reuses the
     // skinning.
@@ -71,6 +84,7 @@ public:
 
 private:
     band::Library lib_;
+    std::unique_ptr<Pak> globalPak_;  // the ragdolls' .rag files
     std::shared_ptr<const matlib::Library> shaderLib_;
     double skinnedAt_ = -1e18;  // the shadow pass's song time  // GH3's material library (render/gh3_shader.h)
     std::vector<Entry> members_;

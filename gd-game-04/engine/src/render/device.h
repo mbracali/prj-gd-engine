@@ -27,6 +27,7 @@ struct TextureId { uint32_t id = 0; explicit operator bool() const { return id !
 struct BufferId { uint32_t id = 0; explicit operator bool() const { return id != 0; } };
 struct ProgramId { uint32_t id = 0; explicit operator bool() const { return id != 0; } };
 struct TargetId { uint32_t id = 0; explicit operator bool() const { return id != 0; } };
+struct QueryId { uint32_t id = 0; explicit operator bool() const { return id != 0; } };
 
 // Texture formats. BC1/BC3/BC5 are GH2's DXT1, DXT5 and ATI2 (two-channel
 // normal maps); the data passed in is in PC block order (the Xbox 360's
@@ -68,6 +69,7 @@ struct TargetDesc {
     int width = 0, height = 0;
     bool depth = false;  // a depth buffer, sampled through targetDepth (nearest filtering only)
     TargetFormat format = TargetFormat::RGBA8;
+    bool stencil = false;  // with depth: an 8-bit stencil buffer too (D24S8)
 };
 
 enum class BlendFactor : uint8_t { Zero, One, SrcColor, InvSrcColor, SrcAlpha, InvSrcAlpha, DstColor, InvDstColor, DstAlpha, InvDstAlpha };
@@ -85,6 +87,13 @@ struct PipelineState {
     CompareFunc depthFunc = CompareFunc::LessEqual;
     Cull cull = Cull::None;
     bool colorWrite = true, alphaWrite = false;
+    // Stencil (targets made with `stencil`): test against `stencilRef`
+    // through `stencilMask`; `stencilReplace` writes the reference where
+    // the depth test passes (through `stencilWriteMask`).
+    bool stencilTest = false;
+    CompareFunc stencilFunc = CompareFunc::Always;
+    uint8_t stencilRef = 0, stencilMask = 0xFF, stencilWriteMask = 0;
+    bool stencilReplace = false;
 };
 
 enum class AttribType : uint8_t { Float, UNorm8 };
@@ -198,7 +207,7 @@ public:
     // into another target mid-frame (the crowd's cards).
     virtual TargetId currentTarget() const = 0;
     virtual void currentViewport(int& x, int& y, int& w, int& h) const = 0;
-    virtual void clear(const float* rgba, bool depth) = 0;
+    virtual void clear(const float* rgba, bool depth) = 0;  // depth: the stencil (to 0) too
     virtual void draw(const DrawCall& call) = 0;
     // Copies a uniform block for draws of this frame (until endFrame), so
     // shared blocks (camera, lights) are uploaded once.
@@ -217,6 +226,14 @@ public:
     // aspect), which drawableSize then reports, and scaled to the window as
     // it is presented. 0: straight to the window.
     virtual void setInternalHeight(int height) = 0;
+    // Occlusion queries: the samples that passed the depth test between
+    // beginQuery and endQuery (OpenGL ES: 1 when any did). queryResult does
+    // not wait: false while the GPU has not answered yet.
+    virtual QueryId createQuery() = 0;
+    virtual void destroyQuery(QueryId q) = 0;
+    virtual void beginQuery(QueryId q) = 0;
+    virtual void endQuery() = 0;
+    virtual bool queryResult(QueryId q, uint64_t& samples) = 0;
     // The counters since the last call, then cleared.
     virtual DevicePerf takePerf() = 0;
 };

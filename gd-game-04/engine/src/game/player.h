@@ -16,7 +16,8 @@
 struct FrameInput {
     uint8_t frets = 0;     // held, bit 0 green .. bit 4 orange
     bool strum = false;    // the strum bar moved this frame (a pad: any fret change)
-    bool starPower = false;  // Select / tilt held this frame (the trigger counts frames)
+    bool starPower = false;  // Select held this frame (deploys at once) [C 0x82112D7C]
+    bool tilt = false;       // the guitar tilted this frame (deploys after star_power_trigger_frames frames) [C 0x82112F28]
     float whammy = 0;      // 0 rest .. 1
 };
 
@@ -24,10 +25,15 @@ struct PlayerEvent {
     // Trigger: the Star Power trigger was pressed (Select / tilt) -- co-op's
     // raise-axe prompt and battle's attacks use it; BattlePhrase: a battle
     // star phrase completed (battlemode_ready) [C 0x8211E7B0].
-    enum class Kind { Hit, Miss, Overstrum, Hopo, StarPhrase, StarPowerOn, StarPowerOff, SustainDone, Failed, Trigger, BattlePhrase };
+    // StarHit: a note of an intact star phrase hit (star_hit_note); StarMiss:
+    // the phrase in progress lost (star_miss_note) [C 0x8211E4E8, 0x8211E8B8];
+    // SustainLost: a sustain released before its end (whammy_off finished = 0) [C 0x8211C9D0].
+    enum class Kind { Hit, Miss, Overstrum, Hopo, StarPhrase, StarPowerOn, StarPowerOff, SustainDone, Failed, Trigger, BattlePhrase,
+                      StarHit, StarMiss, SustainLost };
     Kind kind;
     int note = -1;
     double atMs = 0;
+    bool strum = false;  // a miss's bum_note: a strum since the last hit or miss [C 0x8211F328]
 };
 
 struct PlayerStats {
@@ -58,6 +64,9 @@ struct PlayerRules {
     bool coop = false;                // co-op Star Power rates; activation by both players (Match)
     float scoreScale = 1.0f;          // face-off: (base_p1 + base_p2) x 0.5 / base_p [C 0x8210B9A0]
     float invinciblePct = -1;         // the invincibility window in % of the song (-1: by own difficulty)
+    // end_credits = 1 (the credits song after Through the Fire and Flames):
+    // CrowdDecrease takes no health [C 0x8210FD18, globals cached by 0x821062A8].
+    bool endCredits = false;
 };
 
 class Player {
@@ -134,6 +143,7 @@ private:
     uint8_t tappedMask_ = 0;      // 0x829BD540
     std::vector<bool> missedPhrase_;  // a star note of the phrase was missed
     int triggerFrames_ = 0;
+    bool frameStrum_ = false;  // 0x829BA008: a strum since the last hit / miss
     struct Sustain {
         int note = -1;
         double start = 0, end = 0;

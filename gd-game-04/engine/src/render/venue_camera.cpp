@@ -140,6 +140,7 @@ void CameraDirector::setArrayPrefix(const qb::Struct* params, int length) {
     forceType_ = type;
     nextName_ = name;
     setDefaultCuts();
+    if (const qb::Value* ct = params ? params->find(K("changetime")) : nullptr) forceChange_ = ct->number();
     if (hasFlag(params, K("changenow"))) {
         if (length > 200) nextTimeMs_ = length;
         enabled_ = true, changeNow_ = true;
@@ -158,6 +159,7 @@ void CameraDirector::applyNote(const ChartEvent& e) {
         if (!note || int(note->number()) != e.note) continue;
         const uint32_t scr = keyOf(st->find(K("scr")));
         const qb::Struct* params = structOf(st->find(K("params")));
+        if (!allowNotes_) return;  // cameracuts_iterator skips the scripts [C]
         if (scr == K("CameraCuts_EnableChangeCam")) {
             enabled_ = params && keyOf(params->find(K("enable"))) == K("true");
             changeNow_ = true;
@@ -279,6 +281,13 @@ void CameraDirector::startShot(double t) {
     const uint32_t script = keyOf(e ? e->find(K("controlscript")) : nullptr);
     const qb::Struct* params = e && structOf(e->find(K("params"))) ? structOf(e->find(K("params"))) : e;
     shot_.script = script;
+    // CameraCuts_StartCallback: the dof of the entry's params, else of the
+    // entry; none: DOF_Off_TOD_Manager [C].
+    {
+        const qb::Value* d = params ? params->find(K("dof")) : nullptr;
+        if (!d && e) d = e->find(K("dof"));
+        shot_.dof = keyOf(d);
+    }
     auto cam = [&](const char* n) { return readCam(params ? structOf(params->find(K(n))) : nullptr); };
     if (!script || script == K("CameraCuts_StaticCamControl")) {
         keys_.push_back(readCam(e));
@@ -350,14 +359,47 @@ void CameraDirector::update(double ms, const PerfTimeline& perf) {
     double changeNowAt = now_;
     for (int guard = 0; guard < 100000; ++guard) {
         const double tNote = noteAt_ < notes_.size() ? double(notes_[noteAt_].time) : kNever;
+        const double tPend = pending_.empty() ? kNever : pending_.front().t;
+        // CameraCuts_WaitScript: ForceChangeTime ends the shot once it has
+        // lasted that long, whether changes are enabled or not [C].
+        const double tForce = forceChange_ > 0 ? shot_.start + forceChange_ + 1e-3 : kNever;
         const double tTrans = transitionDone_ ? kNever : transitionEnd_;
         double tCut = !enabled_ ? kNever : changeNow_ ? std::max(changeNowAt, now_) : changeTime_;
         // A timed cut within a game frame of a camera note is the note's own
         // cut (the original runs both in the same or the next frame) [I].
         if (!changeNow_ && tNote >= tCut && tNote - tCut < 1000.0 / 60.0) tCut = kNever;
-        const double t = std::min({tNote, tTrans, tCut});
+        const double t = std::min({tNote, tTrans, tCut, tPend, tForce});
         if (t > ms || t == kNever) break;
         now_ = std::max(now_, t);
+        if (t == tPend) {
+            const Pending pd = pending_.front();
+            pending_.erase(pending_.begin());
+            qb::Struct p;
+            qb::Value v;
+            v.type = qb::Type::String;
+            if (pd.what == 0) {
+                // CameraCuts_SetArrayPrefix prefix='cameras_starpower' changetime=2500 length=7000 [C].
+                allowNotes_ = false;
+                v.str = "cameras_starpower";
+                p.items.push_back({K("prefix"), v});
+                qb::Value ct;
+                ct.type = qb::Type::Float;
+                ct.f[0] = 2500;
+                p.items.push_back({K("changetime"), ct});
+            } else {
+                v.str = "cameras";
+                p.items.push_back({K("prefix"), v});
+                allowNotes_ = true;
+                spCamera_ = false;
+            }
+            setArrayPrefix(&p, 0);
+            continue;
+        }
+        if (t == tForce && t <= tNote && t <= tTrans) {
+            forceChange_ = 0;
+            startShot(now_);
+            continue;
+        }
         // At the same time: the transition's end, then the note, then the cut.
         if (t == tCut && t < tNote && t < tTrans) {
             startShot(now_);
@@ -384,6 +426,32 @@ void CameraDirector::update(double ms, const PerfTimeline& perf) {
         }
     }
     now_ = std::max(now_, ms);
+}
+
+void CameraDirector::starPower(double ms, bool on) {
+    if (on) {
+        // do_starpower_camera: not while a walk / Star Power camera runs; one
+        // game frame later the cameras_starpower prefix (notes off), 7 s later
+        // back to cameras (notes on) [C].
+        if (spCamera_) return;
+        spCamera_ = true;
+        const double t0 = std::max(ms, now_) + 1000.0 / 60.0;
+        pending_.push_back({t0, 0});
+        pending_.push_back({t0 + 7000.0, 1});
+        return;
+    }
+    // Kill_StarPower_Camera (changecamera = 1): prefix cameras, notes on [C].
+    if (!spCamera_) return;
+    if (perf_) update(ms, *perf_);
+    pending_.clear();
+    spCamera_ = false;
+    allowNotes_ = true;
+    qb::Struct p;
+    qb::Value v;
+    v.type = qb::Type::String;
+    v.str = "cameras";
+    p.items.push_back({K("prefix"), v});
+    setArrayPrefix(&p, 0);
 }
 
 CamPose CameraDirector::pose(double ms) const {

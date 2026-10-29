@@ -86,6 +86,7 @@ bool Highway2D::init(const Globals& g, int difficulty, int players, int player) 
     spFxScale_ = tw("starpower_fx_scale", 1.0f);
     neckSprite_ = num(g, "neck_sprite_size", 16);
     neckLipAdd_ = num(g, "neck_lip_add", 16);
+    whammyCutoff_ = num(g, "whammy_cutoff", 1100);
     neckLipBase_ = num(g, "neck_lip_base", 5);
     buttonUpPixels_ = num(g, "button_up_pixels", 20);
     buttonSinkMs_ = num(g, "button_sink_time", 0.1f) * 1000.0f;
@@ -137,6 +138,14 @@ void Highway2D::setStart(double startMs, double firstMs) {
 }
 
 void Highway2D::setContainerX(float x) { baseX_ = x; }
+
+float Highway2D::rowDepth(float r) const {
+    if (r < 0) return -1;
+    if (r >= float(kRows - 1)) return accum_.back() + 1;
+    const int i = int(r);
+    const float f = r - float(i);
+    return accum_[size_t(i)] + (d_[size_t(i + 1)] - d_[size_t(i)]) * f;
+}
 
 float Highway2D::depthOf(double noteMs, double nowMs) const {
     // e = (now - (note - gem_offset)) + T; row = e / T x 1024 [C 0x821190B8,
@@ -279,22 +288,36 @@ void Highway2D::step(const PlayerStats& st, double now, double dt, bool battleRu
 void Highway2D::draw(Canvas& c, const TextureCache& tex, const NoteTrack& track, const Player& player, double now, uint8_t held) {
     // The gem container's position: its x offset, the intro's rise, the
     // multiplier-loss shake and the battle push / bob move everything below.
-    float sx = 0, sy = 0;
-    {
-        const double t = now - shake_.start;
-        const int k = t >= 0 && t < 6 * shake_.stepMs ? int(t / shake_.stepMs) : 6;
-        if (k < 6) {
-            const float f = float((t - k * shake_.stepMs) / shake_.stepMs);
-            sx = shake_.x[size_t(k)] + (shake_.x[size_t(k + 1)] - shake_.x[size_t(k)]) * f;
-            sy = shake_.y[size_t(k)] + (shake_.y[size_t(k + 1)] - shake_.y[size_t(k)]) * f;
-        }
-    }
-    const float dx = baseX_ + fx_.dx + sx, dy = containerY_ + fx_.dy + sy;
+    float dx = 0, dy = 0;
+    containerPos(now, dx, dy);
     cx_ += dx, topY_ += dy, playline_ += dy;
     for (int k = 0; k < 5; ++k) startX_[size_t(k)] += dx, endX_[size_t(k)] += dx;
     drawAll(c, tex, track, player, now, held);
     cx_ -= dx, topY_ -= dy, playline_ -= dy;
     for (int k = 0; k < 5; ++k) startX_[size_t(k)] -= dx, endX_[size_t(k)] -= dx;
+}
+
+void Highway2D::containerPos(double now, float& x, float& y) const {
+    float sx = 0, sy = 0;
+    const double t = now - shake_.start;
+    const int k = t >= 0 && t < 6 * shake_.stepMs ? int(t / shake_.stepMs) : 6;
+    if (k < 6) {
+        const float f = float((t - k * shake_.stepMs) / shake_.stepMs);
+        sx = shake_.x[size_t(k)] + (shake_.x[size_t(k + 1)] - shake_.x[size_t(k)]) * f;
+        sy = shake_.y[size_t(k)] + (shake_.y[size_t(k + 1)] - shake_.y[size_t(k)]) * f;
+    }
+    x = baseX_ + fx_.dx + sx, y = containerY_ + fx_.dy + sy;
+}
+
+bool Highway2D::gemAt(int32_t noteMs, int fret, double now, float& x, float& y, float& scale) const {
+    const float v = depthOf(noteMs, now);
+    if (v < 0 || accum_.empty() || v > accum_.back()) return false;
+    const int lane = (lefty_ != fx_.leftyGems) ? 4 - fret : fret;
+    float dx = 0, dy = 0;
+    containerPos(now, dx, dy);
+    x = laneX(lane, v) + dx, y = yAt(v) + dy;
+    scale = gemStart_ + (gemEnd_ - gemStart_) * v;
+    return true;
 }
 
 void Highway2D::drawButtons(Canvas& c, const TextureCache& tex, uint8_t held, bool raised) const {
@@ -433,15 +456,22 @@ void Highway2D::drawAll(Canvas& c, const TextureCache& tex, const NoteTrack& tra
         for (size_t i = track.notes.size(); i-- > first;) {
             const TrackNote& n = track.notes[i];
             const float v = depthOf(n.time, now);
-            if (v < 0 || v > accum_.back()) continue;
+            // A sustain's element lives on past the last row while its tail
+            // is on the highway (held: its head pinned) [C 0x8210E750].
+            const bool tailOnly = pass == 0 && n.sustain && v > accum_.back() &&
+                                  (player.sustaining() == int(i) || depthOf(double(n.time) + n.holdMs, now) <= accum_.back());
+            if ((v < 0 || v > accum_.back()) && !tailOnly) continue;
             for (int l = 0; l < 5; ++l) {
                 if (!(n.frets & (1 << l))) continue;
                 const int lane = leftyGems ? 4 - l : l;  // lefthanded_gems: mirrored [C 0x82120D20]
                 if (pass == 0 && n.sustain) {
-                    // The tail: from the gem (pinned at the playline while held [I:
-                    // row 1100, whammy_cutoff]) to the end of the hold.
-                    float vHead = v;
-                    if (player.sustaining() == int(i)) vHead = std::min(v, 1.0f);
+                    // The tail: from the gem to the end of the hold. While held,
+                    // the head's start time is reset each frame to now -
+                    // whammy_cutoff x T / 1152, so the head sits at row
+                    // 1100 x 1024 / 1152 = 977.8 (above the playline row 1024,
+                    // under the fret buttons) [C 0x8210E8D4-0x8210E910].
+                    float vHead = std::min(v, accum_.back());
+                    if (player.sustaining() == int(i)) vHead = std::min(v, rowDepth(whammyCutoff_ * float(kRealRows) / 1152.0f));
                     const float vTail = depthOf(double(n.time) + n.holdMs, now);
                     if (vTail < 0 && vHead < 0) continue;
                     const uint32_t key = st.starPowerActive ? kWhammyStarPower : kWhammy[l];

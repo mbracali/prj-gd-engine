@@ -71,6 +71,7 @@ bool SongScreen::start(const Disc& disc, const Globals& g, const SongInfo& song,
     ms.hopoScale = scale;
     ms.noFail = noFail;
     ms.useCoopTracks = song.useCoopNotetracks;
+    ms.endCredits = setup.endCredits;
     ms.suddenDeath = setup.suddenDeath;
     ms.startHealth = setup.startHealth;
     ms.autoplayFires = setup.autoplayFires;
@@ -172,7 +173,9 @@ void SongScreen::handle(const InputEvent& e) {
     } else if (e.action == Action::Strum && e.down) {
         strum_[p] = true;
     } else if (e.action == Action::StarPower) {
-        star_[p] = e.down;
+        // Select at once, the tilt after its frames (Player) [C 0x82112F28].
+        (e.tilt ? tilt_ : star_)[p] = e.down;
+        if (!e.down) star_[p] = tilt_[p] = false;
     } else if (e.action == Action::Whammy) {
         whammy_[p] = e.down ? 1.0f : 0.0f;
     }
@@ -190,12 +193,13 @@ void SongScreen::tick(double nowMs, Mixer& mixer) {
             in[p].frets = held_[p];
             in[p].strum = strum_[p];
             in[p].starPower = star_[p];
+            in[p].tilt = tilt_[p];
             in[p].whammy = whammy_[p];
             strum_[p] = false;
         }
         match_->frame(stepMs_, kStepMs, in);
         for (int p = 0; p < match_->players(); ++p) shownHeld_[size_t(p)] = match_->shownInput(p).frets;
-        if (venue_) venue_->update(stepMs_, player_->stats().health);
+        if (venue_) venue_->update(stepMs_, player_->stats().health, match_->players() == 1 && player_->stats().starPowerActive);
         if (twoPlayers_) hud2p_.update(*match_, stepMs_);
         else hud_.update(player_->stats(), stepMs_);
         const GameMode mode = match_->mode();
@@ -207,7 +211,8 @@ void SongScreen::tick(double nowMs, Mixer& mixer) {
             const bool other = match_->mode() == GameMode::Coop || match_->mode() == GameMode::Boss;
             for (const PlayerEvent& ev : pl.events()) {
                 if (p == 0 && venue_ && ev.note >= 0 && (ev.kind == PlayerEvent::Kind::Hit || ev.kind == PlayerEvent::Kind::Miss))
-                    venue_->playerNote(stepMs_, ev.kind == PlayerEvent::Kind::Hit);
+                    venue_->playerNote(stepMs_, ev.kind == PlayerEvent::Kind::Hit,
+                                       size_t(ev.note) < match_->track(0).notes.size() ? uint8_t(match_->track(0).notes[size_t(ev.note)].frets) : 0);
                 const bool hit = ev.kind == PlayerEvent::Kind::Hit;
                 if (hit || ev.kind == PlayerEvent::Kind::Miss || ev.kind == PlayerEvent::Kind::Overstrum) {
                     if (p == 1 && other) mixer.setGuitar2Audible(hit);
@@ -221,6 +226,7 @@ void SongScreen::tick(double nowMs, Mixer& mixer) {
                     hw.noteHit(match_->track(p).notes[size_t(ev.note)].frets, shownHeld_[size_t(p)], stepMs_, pl.stats().starPowerActive);
             }
         }
+        if (onStep) onStep(*this, stepMs_);
         match_->clearEvents();
     }
 }

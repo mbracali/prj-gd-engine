@@ -3,6 +3,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -50,6 +51,12 @@ public:
     void drawVolumes(const venue::CamPose& cam, const venue::LightShow& show);
     // A viewport texture override (CreateViewportTextureOverride: the crowd's
     // renders on the cards); an empty id removes it.
+    // Moving level objects (render/particles.h nodeMotion): a node's world
+    // transform change, applied as the mesh's g_World.
+    void setNodeMotion(std::function<bool(uint32_t node, gfx::Mat4& delta)> f) { motion_ = std::move(f); }
+    // Script visibility of nodes (hide / Unhide: the crowd's lighters): 1
+    // shown, 0 hidden, -1 as created.
+    void setNodeVisibility(std::function<int(uint32_t node)> f) { visible_ = std::move(f); }
     void setOverride(uint32_t texture, gfx::TextureId id);
     // Engine constants of a camera (view and projection matrices, time) as
     // GH3's shaders read them (also the band's, render/band_view.cpp).
@@ -68,12 +75,14 @@ public:
     const Stats& stats() const { return stats_; }
 
 private:
-    enum class Mode : uint8_t { Opaque, Blend, Add, Subtract };
+    enum class Mode : uint8_t { Opaque, Blend, Add, Subtract, AddOne };
     struct Item {
         uint32_t first = 0, count = 0;
         gfx::TextureId diffuse, lightmap;
         Mode mode = Mode::Opaque;
         float alphaRef = 0, drawOrder = 0;
+        bool twoSided = false, noDepthWrite = false;  // +0xcc & 8 (cull none), & 0x20 (no z write) [C 823DC180]
+        int8_t stencil = -1;      // the material's stencil reference (+0xdc; -1: none, +0xcc & 0x80) [C 823DC180]
         bool unlit = false;
         const gh3shader::Program* gh3 = nullptr;  // the template's program (null: the approximation)
         int mat = -1;             // index into mats_
@@ -102,16 +111,27 @@ private:
     struct Mat {
         gh3shader::MaterialConstants consts;
         gfx::TextureId tex[16];
+        uint16_t clamp = 0;  // slots whose u and v clamp (+0xea + slot bits 0, 1) [C 823DC510]
     };
     std::vector<Mat> mats_;
     std::unordered_map<uint32_t, gfx::TextureId> overrides_;
     std::vector<int> cones_;  // nodes of the ConeImpostor housings
+    gfx::TextureId smoke_;    // the beams' smoke texture
+    struct Flare {
+        gfx::QueryId a, b;   // all pixels / depth-tested pixels of the occlusion quad
+        bool issued = false;
+        float scale = 1;     // the visible share, a frame late
+    };
+    std::unordered_map<const Item*, Flare> flares_;
+    void drawFlare(const Item& it, gfx::DrawCall gc, const venue::Vec3& centre, const venue::CamPose& cam);
     gfx::TextureId shadowTex_;
     gfx::Mat4 shadowVP_;
     int shadowSize_ = 1024;
     float shadowIntensity_ = 0.35f;
     gfx::BufferId coneVb_, coneIb_;
     gh3shader::Programs gh3_;
+    std::function<bool(uint32_t, gfx::Mat4&)> motion_;
+    std::function<int(uint32_t)> visible_;
     double seconds_ = 0;
     Stats stats_;
 public:

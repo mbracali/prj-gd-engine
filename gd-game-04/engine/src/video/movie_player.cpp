@@ -153,6 +153,8 @@ struct MoviePlayer::Impl {
     AVPacket* pkt = nullptr;
     AVFrame* frame = nullptr;
     bool decodeErrorLogged = false;
+    bool loop = false;                   // a texture-slot movie that loops
+    double loopBase = 0, lastMs = 0;     // its time offset per loop, its last picture's time
 
     // Between the decode thread and the player.
     std::mutex m;
@@ -249,7 +251,8 @@ struct MoviePlayer::Impl {
                 return false;
             }
             Frame f;
-            f.ms = toMs(frame->best_effort_timestamp, vIndex);
+            f.ms = toMs(frame->best_effort_timestamp, vIndex) + loopBase;
+            lastMs = f.ms;
             f.w = frame->width, f.h = frame->height;
             const int cw = (f.w + 1) / 2, ch = (f.h + 1) / 2;
             copyPlane(f.y, frame->data[0], frame->linesize[0], f.w, f.h);
@@ -298,6 +301,17 @@ struct MoviePlayer::Impl {
         bool more = true;
         while (more && !abort) {
             const int r = av_read_frame(fmt, pkt);
+            if (r < 0 && loop && lastMs > loopBase) {
+                // Once more from the start, a picture's time after the last one.
+                avcodec_send_packet(vctx, nullptr);
+                more = receiveVideo(sink);
+                const AVStream* vs = fmt->streams[vIndex];
+                const double rate = av_q2d(vs->avg_frame_rate.num ? vs->avg_frame_rate : vs->r_frame_rate);
+                loopBase = lastMs + (rate > 0 ? 1000.0 / rate : 33.3);
+                avcodec_flush_buffers(vctx);
+                if (av_seek_frame(fmt, vIndex, 0, AVSEEK_FLAG_BACKWARD) < 0) break;
+                continue;
+            }
             if (r < 0) break;
             if (pkt->stream_index == vIndex) {
                 if (const int s = avcodec_send_packet(vctx, pkt); s < 0) logDecodeError(s);
@@ -451,6 +465,51 @@ int MoviePlayer::dumpFrames(int count, std::FILE* out) {
     return done;
 }
 
+bool MoviePlayer::startStream(bool loop) {
+    Impl& d = *impl_;
+    if (!d.fmt || d.thread.joinable()) return false;
+    d.aIndex = -1;  // no sound: the pictures alone
+    d.loop = loop, d.loopBase = 0, d.lastMs = 0;
+    d.thread = std::thread([&d] { d.run(); });
+    return true;
+}
+
+bool MoviePlayer::takeFrame(double ms, std::vector<uint8_t>& rgba, int& w, int& h) {
+    Impl& d = *impl_;
+    std::optional<Frame> due;
+    {
+        std::lock_guard lock(d.m);
+        while (!d.frames.empty() && d.frames.front().ms <= ms) {
+            due = std::move(d.frames.front());
+            d.frames.pop_front();
+        }
+    }
+    d.cv.notify_all();
+    if (!due) return false;
+    // BT.601, limited range (the video shader's conversion, render/renderer.cpp).
+    w = due->w, h = due->h;
+    rgba.resize(size_t(w) * size_t(h) * 4);
+    const int cw = (w + 1) / 2;
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x) {
+            const float Y = (float(due->y[size_t(y) * size_t(w) + size_t(x)]) - 16.0f) * (255.0f / 219.0f);
+            const size_t ci = size_t(y / 2) * size_t(cw) + size_t(x / 2);
+            const float U = (float(due->u[ci]) - 128.0f) * (255.0f / 224.0f), V = (float(due->v[ci]) - 128.0f) * (255.0f / 224.0f);
+            uint8_t* o = &rgba[(size_t(y) * size_t(w) + size_t(x)) * 4];
+            o[0] = uint8_t(std::clamp(Y + 1.402f * V, 0.0f, 255.0f));
+            o[1] = uint8_t(std::clamp(Y - 0.344136f * U - 0.714136f * V, 0.0f, 255.0f));
+            o[2] = uint8_t(std::clamp(Y + 1.772f * U, 0.0f, 255.0f));
+            o[3] = 255;
+        }
+    return true;
+}
+
+bool MoviePlayer::streamEnded() {
+    Impl& d = *impl_;
+    std::lock_guard lock(d.m);
+    return d.videoEnded && d.frames.empty();
+}
+
 MoviePlayer::Result MoviePlayer::play(Canvas& canvas, Mixer& mixer, Input& input) {
     Impl& d = *impl_;
     if (!d.fmt) return Result::Failed;
@@ -599,6 +658,12 @@ bool MoviePlayer::open(const Disc&, const std::string&, std::string& error) {
 MoviePlayer::Result MoviePlayer::play(Canvas&, Mixer&, Input&) { return Result::Unavailable; }
 
 int MoviePlayer::dumpFrames(int, std::FILE*) { return -1; }
+
+bool MoviePlayer::startStream(bool) { return false; }
+
+bool MoviePlayer::takeFrame(double, std::vector<uint8_t>&, int&, int&) { return false; }
+
+bool MoviePlayer::streamEnded() { return true; }
 
 #endif  // GD04_VIDEO
 

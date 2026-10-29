@@ -64,6 +64,7 @@ struct MatchSetup {
     float hopoScale = 2.95f;
     bool noFail = false;
     bool useCoopTracks = false;                    // the song's use_coop_notetracks [C setup_gemarrays]
+    bool endCredits = false;                       // end_credits = 1: no health loss [C 0x8210FD18]
     // Battle: sudden death (every new card Death Drain), the saved health [C GuitarEvent_SongWon].
     bool suddenDeath = false;
     std::array<float, 2> startHealth{1.0f, 1.0f};
@@ -115,6 +116,9 @@ public:
     // -- co-op Star Power: the raise-axe prompt (show_coop_raise_axe_for_starpower) [C 0x82112850].
     double raiseAxeStart() const { return raiseAxeStart_; }
     bool raiseAxeShowing(double now) const { return raiseAxeStart_ >= 0 && now < raiseAxeStart_ + kRaiseAxeMs; }
+    // The player who raised first (0 / 1): the prompt shows on the other's
+    // side, P1 raising -> P2's (865,240), P2 -> P1's (415,240) [C 0x82112850].
+    int raiseAxeBy() const { return raiseAxeBy_; }
     static constexpr double kRaiseAxeMs = 1240;
 
     // -- battle state (the HUD and highway read it)
@@ -210,6 +214,7 @@ private:
     Outcome outcome_ = Outcome::None;
     double lastNoteEnd_ = 0;
     double raiseAxeStart_ = -1;
+    int raiseAxeBy_ = 0;
     std::array<bool, 2> starReady_{};
     std::mt19937 rng_;
     Counters counters_;

@@ -202,6 +202,7 @@ bool Match::start(const Chart& chart, const Tuning& tuning, const Globals* g, co
         // Face-off's score scale: (base_p1 + base_p2) x 0.5 / base_p [C 0x8210B9A0].
         if (setup.mode == GameMode::FaceOff && s.simBotScore > 0)
             r.scoreScale = float((sides_[0].simBotScore + sides_[1].simBotScore) * 0.5 / s.simBotScore);
+        r.endCredits = setup.endCredits;
         s.player->setRules(r);
         s.player->setSongLengthMs(lastNoteEnd_ + 3000.0);
         if (setup.mode == GameMode::Battle) s.player->setHealth(setup.startHealth[size_t(i)]);
@@ -658,7 +659,7 @@ void Match::frame(double now, double dt, const std::array<FrameInput, 2>& live) 
                 if (e.kind == PlayerEvent::Kind::Trigger && sides_[size_t(i)].player->stats().starPower >= 50.0f &&
                     !sides_[size_t(i)].player->stats().starPowerActive) {
                     starReady_[size_t(i)] = true;
-                    if (raiseAxeStart_ < 0) raiseAxeStart_ = now, ++counters_.raiseAxe;
+                    if (raiseAxeStart_ < 0) raiseAxeStart_ = now, raiseAxeBy_ = i, ++counters_.raiseAxe;
                 }
         if (starReady_[0] && starReady_[1] && raiseAxeStart_ >= 0) {
             sides_[0].player->activateStarPower(now);

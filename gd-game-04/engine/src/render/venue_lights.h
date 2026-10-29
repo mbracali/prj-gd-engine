@@ -26,6 +26,7 @@ struct LightState {
     Vec3 color{1, 1, 1};  // 0..1
     float intensity = 0, attenStart = 0, attenEnd = 1;
     float specular = 1;   // specularintensity
+    float shadow = 1;     // shadowintensity
 };
 
 // A light housing (a _gfx game object with lightvolumetype): where it

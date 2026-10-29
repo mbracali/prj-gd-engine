@@ -70,6 +70,7 @@ struct ScriptRun {
     bool returned = false;
     uint32_t type = 0;        // SpawnScriptNow ... id / type (for KillSpawnedScript)
     uint32_t object = 0;      // the object (screen element id) the script runs on, 0: none
+    bool handler = false;     // an event handler's run: it outlives its element (a pad_choose that destroys its menu)
     bool busy = false;        // executing now (a pump inside a condition skips it)
 };
 
@@ -90,7 +91,8 @@ public:
     // Runs a script to its end or its first wait, synchronously (a call from
     // the engine); returns false if `name` is not a script. Its run keeps
     // going on update() when it waits.
-    bool run(uint32_t name, const qb::Struct& params, bool* result = nullptr);
+    // `object`: the screen element it runs on (an event handler's element).
+    bool run(uint32_t name, const qb::Struct& params, bool* result = nullptr, uint32_t object = 0);
     // Starts a script as a spawned one (runs from the next update).
     uint32_t spawn(uint32_t name, const qb::Struct& params, uint32_t spawnedBy = 0);
     // Advances every spawned script by one game frame of `dtMs`.

@@ -51,6 +51,12 @@ public:
     // The texture replacing a card texture (textureasset key); empty if none.
     gfx::TextureId texture(uint32_t cardTexture) const;
     size_t size() const { return peds_.size(); }
+    // The song's Crowd_StartLighters .. Crowd_StopLighters spans (its
+    // performance array): crowd_monitor_performance holds the lighters up
+    // (right hand rhand_lighter, the anim set's `special`) while the crowd is
+    // not bad (call before advance) [C scripts guitar_crowd.qb].
+    void setLighterSpans(std::vector<std::pair<double, double>> spans) { lighterSpans_ = std::move(spans); }
+    bool lightersOn(double t) const;
 
 private:
     struct Ped {
@@ -66,7 +72,10 @@ private:
         bandanim::Mat34 root;
         venue::Vec3 pos{};
         std::vector<bandanim::Mat34> world, skin;
-        int view = -1;
+        int view = -1, lighterView = -1;
+        std::unique_ptr<band::Model> lighterModel;  // the same ped with the right hand's lighter
+        bool lighters = false;  // the state its anims follow
+        double checkedAt = -1e18;  // the last game frame crowd_monitor_performance looked at
         gfx::TargetId target;
     };
     const anim::Clip* pick(Ped& p, double t, float& blend);
@@ -81,6 +90,7 @@ private:
     float blendTempo_ = 0.67f, blendBad_ = 0.5f, blendSpecial_ = 0.4f, blendSlow_ = 0.6f, blendMed_ = 0.4f, blendFast_ = 0.2f;
     int width_ = 128, height_ = 256;  // the imposter viewport
     std::vector<Ped> peds_;
+    std::vector<std::pair<double, double>> lighterSpans_;
     gfx::RenderDevice* dev_ = nullptr;
     BandView view_;
 };

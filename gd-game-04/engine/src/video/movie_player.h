@@ -2,9 +2,11 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #pragma once
 
+#include <cstdint>
 #include <cstdio>
 #include <memory>
 #include <string>
+#include <vector>
 
 class Canvas;
 class Disc;
@@ -49,6 +51,17 @@ public:
     // writing each one's Y, U and V planes (yuv420p, no padding) to `out`;
     // returns the count decoded, -1 on error.
     int dumpFrames(int frames, std::FILE* out);
+
+    // Texture-slot playback (GH3's PlayMovieFromBuffer / StartPreLoadedMovie:
+    // a video drawn by the screen elements, the game going on): decodes the
+    // opened video on its own thread, without its sound, from the start
+    // (again at its end with `loop`).
+    bool startStream(bool loop);
+    // The newest picture due by `ms` (since the start) as RGBA rows; false
+    // if no new one is due.
+    bool takeFrame(double ms, std::vector<uint8_t>& rgba, int& w, int& h);
+    // Not looping and every picture shown.
+    bool streamEnded();
 
 private:
     struct Impl;

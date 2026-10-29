@@ -144,6 +144,7 @@ void Library::parse(const uint8_t* data, size_t size) {
     // The shaders: scan 4-byte aligned words for the two magics from the end
     // of the template records, validating each header.
     size_t o = base + 0x28 * size_t(count);
+    std::vector<size_t> shaderOffsets;
     while (o + 0x40 <= size) {
         const uint32_t w = v.u32(o);
         if (w != 0x102A1100 && w != 0x102A1101) {
@@ -171,9 +172,32 @@ void Library::parse(const uint8_t* data, size_t size) {
             if (slot < 0) slot = int(shaders_.size());
         }
         shaders_.push_back(std::move(s));
+        shaderOffsets.push_back(o);
         o += (len + 3) & ~size_t(3);
     }
     if (shaders_.empty()) fail("no shaders");
+    // The technique records (TechniqueRef) -> shader indices by file offset.
+    std::unordered_map<size_t, int> byOffset;
+    for (size_t i = 0; i < shaderOffsets.size(); ++i) byOffset[shaderOffsets[i]] = int(i);
+    const size_t shaderBase = base + v.u32(16);
+    for (uint32_t i = 0; i < count; ++i) {
+        const size_t e = base + 0x28 * size_t(i);
+        const uint32_t n = v.u32(e + 0x18), at = v.u32(e + 0x1c);
+        if (n > 512) fail(templates_[i].name + ": technique count");
+        for (uint32_t k = 0; k < n; ++k) {
+            const size_t t = base + at + 0x1b8 * size_t(k);
+            TechniqueRef r;
+            r.name = v.str(base + v.u32(t));
+            for (int sl = 0; sl < kTechniques; ++sl) {
+                const uint32_t vo = v.u32(t + 0x50 + 0x48 * size_t(sl) + 8), po = v.u32(t + 0x60 + 0x48 * size_t(sl) + 8);
+                if (vo != 0xFFFFFFFF)
+                    if (auto it = byOffset.find(shaderBase + vo); it != byOffset.end()) r.vs[sl] = it->second;
+                if (po != 0xFFFFFFFF)
+                    if (auto it = byOffset.find(shaderBase + po); it != byOffset.end()) r.ps[sl] = it->second;
+            }
+            templates_[i].techniques.push_back(std::move(r));
+        }
+    }
 }
 
 }  // namespace matlib

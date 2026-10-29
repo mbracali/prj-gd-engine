@@ -23,6 +23,26 @@ void TextureCache::size(uint32_t key, int& w, int& h) const {
     h = it == textures_.end() ? 0 : it->second.h;
 }
 
+bool TextureCache::loadImage(const Disc& disc, const std::string& path, uint32_t key) {
+    if (textures_.count(key)) return true;
+    try {
+        const gh3tex::Texture t = gh3tex::decodeImg(disc.read(path));
+        if (!t.supported || t.levels.empty()) return false;
+        std::string error;
+        auto levels = t.texLevels();
+        gfx::TextureId id = dev_.createTexture(t.desc(), levels.data(), error);
+        if (!id) {
+            SDL_Log("textures: %s: %s", path.c_str(), error.c_str());
+            return false;
+        }
+        textures_[key] = Entry{id, t.width, t.height, true};
+        return true;
+    } catch (const std::exception& ex) {
+        SDL_Log("textures: %s: %s", path.c_str(), ex.what());
+        return false;
+    }
+}
+
 int TextureCache::loadPak(const Disc& disc, const std::string& pakPath) {
     int n = 0;
     try {

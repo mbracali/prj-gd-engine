@@ -13,6 +13,7 @@
 #include "game/save.h"
 #include "script/natives_misc.h"
 #include "ui/glitches.h"
+#include "ui/menu_scene.h"
 #include "ui/natives_game.h"
 #include "ui/natives_sound.h"
 
@@ -36,6 +37,13 @@ FrontEnd::FrontEnd(const Disc& disc, Globals& globals, TextureCache& textures, g
     sfx.addPak(disc_, "DATA/COMPRESSED/ZONES/global_sfx.pak.xen");
     sfx.addFsb(disc_, "DATA/STREAMS/streamall.fsb.xen", "DATA/STREAMS/streamall.dat.xen");
     addSoundNatives(*vm_, sfx);
+    ui_->addMovieNatives();  // after the game natives' movie stubs
+    scene_ = std::make_unique<MenuScene>(disc_, globals_, *vm_, *ui_);
+    scene_->addNatives();  // after the flow natives' stubs (PlayIGCCam, KillCamAnim)
+}
+
+void FrontEnd::setZone(uint32_t zone) {
+    if (scene_) scene_->setZone(zone);
 }
 
 FrontEnd::~FrontEnd() {
@@ -165,15 +173,18 @@ void FrontEnd::frame(Canvas& c, double dtMs) {
     }
     // During a song GH3's scripts keep running (the attract mode's input
     // check, the end-of-song events) and their elements draw over it [C: one VM].
+    scene_->setSuspended(songPlaying);  // the menus' characters wait while the song's band plays
     accum_ += dtMs;
     int steps = 0;
     while (accum_ >= kStepMs && steps < 8) {
         accum_ -= kStepMs;
         vm_->update(kStepMs);
         ui_->update(kStepMs);
+        scene_->update(kStepMs);
         ++steps;
     }
     if (accum_ > kStepMs * 8) accum_ = 0;
+    if (!songPlaying) scene_->draw(c);
     ui_->draw(c);
 }
 

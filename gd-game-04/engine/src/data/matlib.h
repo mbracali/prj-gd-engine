@@ -67,11 +67,34 @@ struct Shader {
     std::vector<float> literals;
 };
 
+// A technique record of the effect (0x1b8 bytes, the template record's
+// +0x18 count, +0x1c offset from B): +0 its name (offset from B), then from
+// +0x50 one 0x48-byte slot per variant (Default, DepthOnly, AlphaOnly,
+// DynamicShadowReciever, ReducedLOD), each a vertex shader reference at +0
+// and a pixel shader one at +0x10 (u32 size, u32 kind, u32 offset from B +
+// the string base, -1: none) [C data: every slot of all 418 templates
+// resolves to a shader header]. Most templates hold one technique
+// ("Default"); the engine's filter templates (ImmediateMode,
+// ImmediateModeAlt, ImmediateModeFilter, Filters) hold their post-process
+// passes by name (_2D_Cutoff, _2D_ComposeBloom0, _2D_GaussianBlur7x7H, ...).
+struct TechniqueRef {
+    std::string name;
+    int vs[kTechniques] = {-1, -1, -1, -1, -1};
+    int ps[kTechniques] = {-1, -1, -1, -1, -1};
+};
+
 struct Template {
     uint32_t key = 0;
     std::string name;
     int vs[kTechniques] = {-1, -1, -1, -1, -1};
     int ps[kTechniques] = {-1, -1, -1, -1, -1};
+    std::vector<TechniqueRef> techniques;
+    // A named technique (nullptr: none).
+    const TechniqueRef* technique(const std::string& n) const {
+        for (const TechniqueRef& t : techniques)
+            if (t.name == n) return &t;
+        return nullptr;
+    }
 };
 
 class Library {

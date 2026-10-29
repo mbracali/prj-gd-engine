@@ -60,12 +60,18 @@ public:
     void update(double ms, const PerfTimeline& perf);
     // The camera at song time `ms` (>= the last update's time).
     CamPose pose(double ms) const;
+    // Star Power switched on / off at song time `ms` (>= the last update's
+    // time) in a one-player song: StarPowerOn spawns do_starpower_camera
+    // (current_num_players = 1), its end Kill_StarPower_Camera [C:
+    // Function_8211DA70, guitar_starpower.qb].
+    void starPower(double ms, bool on);
 
     struct Shot {
         double start = 0, end = 0;  // song ms; end: when CameraCuts_WaitScript lets it go
         uint32_t array = 0;         // the camera array's key
         int index = 0;
         uint32_t name = 0, type = 0, script = 0;
+        uint32_t dof = 0;  // its dof (a DOF_*_tod_manager global; 0: DOF_Off_TOD_Manager)
     };
     const Shot& shot() const { return shot_; }
     int cuts() const { return cuts_; }
@@ -115,6 +121,14 @@ private:
     uint32_t goodArray_ = 0, normalArray_ = 0, poorArray_ = 0;
     uint32_t forceType_ = 0, nextName_ = 0, lastType_ = 0;
     bool changeNow_ = false, enabled_ = true;
+    bool allowNotes_ = true;      // CameraCuts_AllowNoteScripts
+    double forceChange_ = 0;      // CameraCuts_ForceChangeTime (ms; 0: none)
+    bool spCamera_ = false;       // using_starpower_camera
+    struct Pending {              // do_starpower_camera's steps
+        double t;
+        int what;                 // 0: cameras_starpower, 1: back to cameras
+    };
+    std::vector<Pending> pending_;
     double nextTimeMs_ = 0;       // CameraCuts_NextTime
     double changeTime_ = 1e18;    // CameraCuts_ChangeTime
     double transitionEnd_ = 0;    // EndWithDefaultCamera / SyncWithNoteCameras at song time 0

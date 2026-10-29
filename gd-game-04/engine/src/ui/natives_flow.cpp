@@ -178,6 +178,20 @@ void addFlowNatives(qs::Vm& vm, FlowState& st) {
         if (qb::Struct* l = locals(run)) Vm::set(*l, K("new_string"), out);
         return true;
     });
+    // StringRemove Text = s remove = r new_string = <name>: s without r, in
+    // the local <name> [C use: store_do_guitar_load's meshname; I: every occurrence].
+    vm.addNative("StringRemove", [](Vm&, ScriptRun& run, qb::Struct& p) {
+        const qb::Value* s = Vm::param(p, K("Text"));
+        const qb::Value* r = Vm::param(p, K("remove"));
+        const qb::Value* n = Vm::param(p, K("new_string"));
+        if (!s || (s->type != qb::Type::String && s->type != qb::Type::WString)) return false;
+        qb::Value out = *s;
+        if (r && !r->str.empty())
+            for (size_t at; (at = out.str.find(r->str)) != std::string::npos;) out.str.erase(at, r->str.size());
+        const uint32_t name = n && (n->type == qb::Type::Key || n->type == qb::Type::KeyPtr) ? n->key : K("new_string");
+        if (qb::Struct* l = locals(run)) Vm::set(*l, name, out);
+        return true;
+    });
     // GetUpperCaseString <text> -> uppercasestring [C use: intro_song_info, the band-name date].
     vm.addNative("GetUpperCaseString", [](Vm&, ScriptRun& run, qb::Struct& p) {
         const qb::Value* s = firstUnnamed(p);

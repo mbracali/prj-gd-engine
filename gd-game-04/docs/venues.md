@@ -166,6 +166,18 @@ Hand-held sway: `CameraCuts_SetHandCamParams` (motionx amplitude 0.034,
 period base 0.013, multiples 1 3 4; motiony 0.04 / 0.017) [C data]; gd04
 turns it into a small yaw / pitch sway [I: units].
 
+### Star Power camera  [C: StarPowerOn Function_8211DA70, guitar_starpower.qb, guitar_cameras.qb]
+
+In a one-player song StarPowerOn spawns do_starpower_camera: one game frame
+later CameraCuts_AllowNoteScripts false (the camera notes are skipped) and
+CameraCuts_SetArrayPrefix prefix='cameras_starpower' changetime=2500
+(CameraCuts_ForceChangeTime: the shot playing ends once it has lasted 2.5 s,
+whether changes are enabled or not); 7 s later prefix 'cameras' and notes
+on again. Star Power's end runs Kill_StarPower_Camera (prefix 'cameras',
+notes on). The walk camera (start_walk_camera, cameras_walk, the same with
+max_walk_camera_cut_delay 1000) needs guitarist_walking (Band_WalkToNode),
+not done.
+
 ### gd04
 
 `CameraDirector` runs all of the above as a function of the song clock:
@@ -196,16 +208,16 @@ none]. `--venuetest` checks the result is the same at 60 and 240 fps.
   (blend time off; toggles between the strobe list's blackout and the saved
   snapshot at intensity 1.0).
 - A snapshot entry sets one light: `lightchecksum`, r g b (0..255),
-  `intensity`, `specularintensity`, `FarAttenStart/End`; others move light
+  `intensity`, `specularintensity`, `shadowintensity` (its
+  `FarAttenStart/End` are not applied: §5 "Lights" [C]); others move light
   housings (`housingchecksum`, pos, Quat, volume / projector colours) [C
   data]. gd04 blends each light from its current value over the blend time
   [I], cycles a list in order [I], mixes override colours by
   `lightshow_coloroverrideblend` 0.4 except `LightShow_ColorOverrideExcludeLights`
   [I: the meaning of 0.4].
 - Lights by group: geometry nodes have a `lightgroup` (none, band, Crowd,
-  Periph, Fuji, ...) and so do lights [C data]; gd04 lights a mesh with the
-  lights of its node's group [I]. `_VC_` lights look like the vertex-colour
-  bake's own lights and are not applied at run time [I].
+  Periph, Fuji, ...) and so do lights [C data]; which lights reach a mesh
+  is the light manager's (§5 "Lights") [C].
 
 ## 5. Shading: GH3's own shaders
 
@@ -239,26 +251,109 @@ lerp(1, shadow map, c178.w)); the "lightmap" is the material's last
 texture, m_sampShadowMap, sampled with texcoord set 1, a shadow term on the
 dynamic lights, not a light map.
 
-The light registers are the light manager's output (C code; its VMX128
-routines, e.g. Function_822B6E08, are not disassembled by Ghidra), so gd04
-fills them from the group's lights as the light show sets them [I]: the
-group's ambient lights summed (c176); the strongest directional or spot
-light reaching the mesh's centre the key light (g_dirLight0Dir = its
-direction of travel, Color, SpecColor = colour x specularintensity); the
-next three their specular colours (c181 / c183 / c185); every other light
-(and those three) projected onto L1 spherical harmonics as a clamped
-cosine (1/4 + n.l / 2) into c188..c191; point and spot lights fade linearly
-between their attenuation start and end, spots by hotspot / field.
-`specularintensity` comes from the node and the snapshots [C data].
+### Lights  [C: the light manager, read with a VMX128 decoder over Ghidra's `.word`s]
 
-Render state: blend mode from `+0xd8`, alpha test reference from `+0xe8`'s
-top byte, draw order `+0xd4`, blended when `+0xcc` bit 3 [I, as in M5; the
-templates' own render states are not decoded]. Back faces are culled
+The per-object registers c176..c191 are filled by 823DA990 (the object's
+light set) and uploaded by 823DB168 before each draw (Function_822B6E08
+only builds the shadow cascades c140..c148) [C]:
+
+- **A light** (822BE020; defaults 822B7998): `Type` point / spot / ambient
+  / PRT, anything else (`dir`, none) directional; `lightcolor` (0..1),
+  `intensity` (default 1), `specularintensity` (1), `shadowintensity`
+  (`shadowdensity`, 1), `attenstart` / `attenend` (7.5 / 15), `hotspot` /
+  `field` (45); it shines along rotationquat x (0, -1, 0) (z_dive's
+  Stage_Up lights below the stage point up); point and spot lights fade
+  as clamp((attenend^2 - (d^2 + 0.0001)) / (attenend^2 - attenstart^2 +
+  0.0001), 0, 1); flags `dynamic` (a candidate everywhere) and `shadow`
+  (ranked x 50000). Its box: directional and spot lights a cube of half
+  attenend around pos + dir x attenend / 2, the others attenend around
+  pos (`boxcenter` / `boxcorner` replace them). "_VC_" lights are lights
+  like the others.
+- **Candidates** of an object at P (a mesh: its bounding sphere's centre;
+  a model, i.e. a band member or ped: its origin): the lights whose box
+  holds P plus the dynamic ones, of the object's light group, `band`
+  lights for an `alt_band` object, and `defaultgroup` lights (no
+  `lightgroup`) everywhere; at most 32 (822BB680).
+- **Ranking**: luminance (0.299, 0.587, 0.114) . colour x intensity x
+  attenuation (x 50000 for shadow lights), stable, descending.
+- **Slots**: the first directional or point light is the key light
+  (g_dirLight0Dir = its direction, from the light to P for a point light;
+  g_dirLight0Color = colour x intensity, .w = shadowintensity;
+  SpecColor = colour x specularintensity; not in the SH); the next three
+  take g_dirLight1..3 (specular colour colour x specularintensity, the
+  direction for slots 2 and 3 the light's own) and also go into the SH;
+  further directional / point lights into the SH only. Slot colours are
+  not attenuated.
+- **SH** (823DA668): per light, with l the direction towards it, SH0 +=
+  C x 4/17, SH1..3 += C x 8/17 x l (C: colour x intensity, x attenuation
+  for point lights; spot lights always into the SH, x clamp((P - pos) . dir,
+  0, 1), no cone). **Ambient** lights sum into c176 (colour x intensity).
+- The light show's snapshots (light_setparams 821B4950) set r g b / 255,
+  intensity, specularintensity, shadowintensity; FarAttenStart / End are
+  not applied (ApplyLightFarAtten*Change are empty scripts) [C].
+- The TOD's lev_red / green / blue are not read by the executable [C].
+
+gd04 does exactly this (`gh3shader::lightObject`, `lightIn`,
+`groupLights`); light group intensities (SetLightGroupIntensity) and the
+model light fade (SetModelLightsFadeTime) are taken as 1 [I].
+
+
+Render state (823DC180, over the effect pass) [C]: blend from `+0xd8` (0
+ONE / ZERO, 1 SRC_ALPHA / ONE, 2 its reverse subtract, 3 SRC_ALPHA /
+ONE_MINUS_SRC_ALPHA, 4 ZERO / SRC_ALPHA, 5 DST_COLOR / ONE, 6 DST_COLOR /
+ZERO, 7 ONE / ONE, 8..12 colour-only variants; the zones use 0, 1, 3);
+`+0xcc`: 0x08 cull none, 0x10 ZFUNC ALWAYS, 0x20 no z write, 0x40 no alpha
+test (else the reference `+0xe8`'s top byte), 0x80 no stencil; draw order
+`+0xd4` [I]. The samplers clamp per `+0xea + slot` (bit 0 u, 1 v, 2 w) [C,
+applied when both u and v clamp]. Back faces are culled
 (Direct3D's default, counter-clockwise) [I: checked on all eight venues;
 this fixes the stage-rear cameras, e.g. z_dive's Stage_Rear01 stands behind
 the back wall at z = -10.2 and showed its back faces (M5 bug); GD04_CULL=0
 turns it off]. Templates that do not translate (loops: three water
-templates) fall back to the M5 approximation; GD04_GH3_SHADERS=0 forces it.
+templates, used by no scene on the disc [C data: all 1,300 zone materials and
+the characters']) fall back to the M5 approximation; GD04_GH3_SHADERS=0 forces it.
+Every scene material writes its stencil: func ALWAYS, z-pass REPLACE with
+the material's `+0xdc` (0 or 1) unless `+0xcc` & 0x80 [C 823DC180]; the
+bloom's material filter reads it (below).
+
+### Screen effects  [C: 823DE658, the ScreenFX classes; render/screen_fx.*]
+
+The venue viewport (bg_viewport) runs its ScreenFX instances in the order
+the scripts added them, each on the previous one's output, in its own
+A8R8G8B8 + D24S8 target (every pass clamps to 8 bits); the highway and HUD
+viewports never see them [C]. enable_bg_viewport_properties ->
+TOD_Proxim_Update_LightFX_Viewport: `venue_DOF` (the camera shot's `dof`,
+a DOF_*_tod_manager, else DOF_Off), then Default_TOD_Manager's screen_FX:
+`BnS` (bright_sat) and `sbloom` (simple_bloom) [C scripts].
+
+- **dof** (824440F8; on when strength > 0): the colour box-downsampled to a
+  quarter (_2D_DownSample4x: the mean of 16 texels), blurred by
+  _2D_GaussianBlur7x7 H then V (rho = sqrt(blurradius / 3), the centre and
+  three merged tap pairs, not normalised), then _2D_DepthOfFieldNear over
+  the scene with SRC_ALPHA / ONE_MINUS_SRC_ALPHA: a = strength x
+  saturate((z - frontdist x far) / ((backdist - frontdist) x far)), z the
+  linear depth (m_vInvProjMatT), far the camera's far clip [C; I: far =
+  camera_default_far_clip 500].
+- **bright_sat** (8243E5F0): out = Mix(b (k (Sat(Hue(rgb)) - 0.5) + 0.5)),
+  hue a rotation about (1,1,1) by hue x 2 pi, saturation with Haeberli's
+  weights (0.3086, 0.6094, 0.0820), alpha = the red result
+  (_2D_Tex_BS_NoViewport). The TOD's BnS has hue 1 (one turn): an identity
+  pass that always runs [C].
+- **simple_bloom** (8243D240), materialfilter 1 (the only use): the colour
+  where the stencil is 1 (the dc = 1 materials: neon, signs, light lenses
+  ...), box-downsampled to a quarter, blurred twice by _2D_GaussianBlur7x7H
+  / V (seven taps -3..3, rho 1, normalised, times falloff1 = 5 the first
+  time and 1 the second: a gain that saturates the halo, not a radius),
+  added with SRC_ALPHA, ONE as B x bloom1 (0.35) x strength / 255
+  (_2D_ComposeBloom0) [C]. materialfilter 0 would use _2D_Cutoff (the
+  16-texel mean where its rgb sum exceeds color / 255) instead.
+- ScreenFlash (z_prison only) and the luminance-adapted variants are not
+  done.
+
+gd04 runs those passes with GH3's own filter shaders (the ImmediateMode /
+ImmediateModeAlt / ImmediateModeFilter techniques of the material library,
+translated like the materials); GD04_NO_SCREENFX=1 turns them off. The
+Enhanced Options' Bloom / Bokeh rows are separate port enhancements.
 
 ### Dynamic shadows
 
@@ -314,9 +409,45 @@ entry, played to its end; blend Crowd_BlendTime_TempoChange (0.67 s) when
 the speed changed (and the first time), _Bad (0.5) when bad, else _Slow /
 _Med / _Fast (0.6 / 0.4 / 0.2) [C]. gd04 (`render/crowd.*`) runs this on
 the song clock with a per-ped seed [I: GetRandomValue's generator].
-Not done: the lighters / fists (Crowd_SetHand), the stage diver, the
-security and dancer stage peds (stagepeds/*.skin), 3D crowd members other
-than the imposters.
+**Lighters** [C scripts guitar_crowd.qb, the songs' `<song>_performance`]:
+12 songs (paintitblack, welcometothejungle, ...) call Crowd_StartLighters /
+Crowd_StopLighters; in between crowd_monitor_performance checks every game
+frame: not bad -> Crowd_AllSetHand right lighter (rhand_lighter: global.pak's
+Crowd_HandR_Lighter.skin instead of the clap), Crowd_AllPlayAnim special
+(each ped one game frame after the last: crowd_play_adjusting_random_anims
+with the anim set's `special`, blend Crowd_BlendTime_Special) and
+Crowd_ToggleLighters ON (unhide `<zone>_LIGHTER_Geo00..14`, the venue's
+lighter geometry, created hidden by crowd_create_lighters except in
+z_artdeco, moved by their trigger scripts); bad -> the clap, `idle`, OFF.
+gd04 does this on the 60 Hz grid of song time [I: the frame grid].
+
+### Stage peds and moving objects  [C scripts; render/stage_peds.*, render/particles.cpp]
+
+- The zones' gameobject nodes with a skinned `Model`, created at start
+  (StagePeds\SPed_*.skin: security guards, devil girls, the caged dancer,
+  the hoop girl; Venues\*\Ven_*.skin: the art deco dragon and knights, the
+  hell puppet and hammer) stand at their node on the skeleton of their
+  profile's creation params (`SkeletonName`), lit by the profile's
+  `lightgroup`. Their trigger scripts run on the node (gd04: the particles'
+  VM): GameObj_PlayAnim / GameObj_WaitAnimFinished, obj_spawnscriptnow
+  crowd_play_adjusting_random_anims (hero_get_skill_level_cfunc,
+  get_anim_speed_for_tempo_cfunc), Obj_SwitchScript, hide / Unhide [C].
+  The stage divers are hidden at the song's start (Crowd_StageDiver_Hide;
+  Crowd_StageDiver_Jump has no caller) [C]. gd04 draws a ped once a clip
+  played (blendduration -1: 0.3 s [I]).
+- Node trigger scripts and the performance scripts move level objects:
+  obj_rotx / roty / rotz {Speed degrees a second, angle}, obj_rotate
+  {absolute, time}, Obj_WaitRotate, obj_movetopos / obj_movetorelpos /
+  obj_setposition {time | Speed}, Obj_WaitMove, CallScriptOnNode {prefix,
+  callBack_Script} (z_dive's fans and hub caps by the crowd's performance,
+  z_party's globes, z_video's fans, z_hell's imps, z_prison's sirens, ...)
+  [C scripts; I: the units, the Euler order, the pivot = the node]; the
+  speakers' Venue_Pulse* scripts (AddPulseEvent on hitnote_<colour>) scale
+  them to `amount` (1.12) for a game frame on each hit note of those
+  colours, then back over `time` (0.1 s) [I: as Venue_PulseOnEvents' own
+  delayed branch]. gd04 evaluates every motion as a function of song time
+  (the scripts run on its 60 Hz steps) and draws the node's meshes with that
+  transform as g_World.
 
 ### Light housings, volumes, flares  [C data: the _gfx node arrays, the snapshots]
 
@@ -332,23 +463,39 @@ them like the lights [I].
 
 - Housings draw with their models' templates at the live transform (World
   per draw).
-- Flares: the Flare template's vertex shader builds a camera-facing quad
-  from POSITION0 (corner) and POSITION1 (centre) with m_vsSizeScale; its
-  occlusion pass (m_vsOcclusionPass, m_vsOcclusionSizeScale, the alpha
-  scales) is the engine's occlusion query, not done (flares always show)
-  [C: the microcode; I: the engine side]. gd04 tints the flare by the
+- Flares (823C0698) [C]: the Flare template builds a camera-facing quad
+  from POSITION0 (corner) and POSITION1 (centre) x m_vsSizeScale. Two
+  occlusion queries a flare, read the next frame: a small quad
+  (m_vsOcclusionPass 1: m_vsOcclusionSizeScale, 3..10 % of the flare) with
+  colour writes off, first with ZFUNC ALWAYS (A), then depth tested (B);
+  the flare is drawn without depth test at m_vsSizeScale = B / A (A = 0:
+  not drawn), hidden nearer than NDC z 0.91 and faded in up to 0.93 (x
+  sqrt((z - 0.91) x 50)). The occlusion scales the size, not the alpha.
+  gd04 does this with GL occlusion queries (OpenGL ES: any samples, 0 or
+  1) [I: the NDC cut with near 0.1, far 500], and tints the flare by the
   housing's volume colour (the snapshots' orange / green / red flares, 0 =
   off) [I].
-- Volumes (ConeImpostor): the _Cone_Impostor template on a camera-facing
-  quad from the lens along the housing's -z (the flare quads sit at -z):
-  vertex = g_SpotlightPosition - z x range x g_SpotlightDir + (x x start
-  radius + y x end radius) x g_Rotated_Vector; the pixel shader shapes the
-  beam by the chord through the cone at each pixel (sqrt(R^2 - side^2)),
-  three planar smoke lookups and g_ConeColor [C: the microcode]. The mesh
-  ((+-1, 0, 0, 1) near, (0, +-1, 1, 0) far), g_SpotlightInfo (inner
-  radius / end radius, 1), g_ConeColor (volume colour x density x 0.25),
-  the smoke (white) and its UV scroll are gd04's [I]. Not done: the
-  `volume` type (_Raytrace_cone templates), projectors.
+- Volumes (ConeImpostor, Function_823B4B68) [C]: `flareonly` housings have
+  none; a housing's beam starts at its position along its -z. Skipped
+  while the camera is within endradius of the beam's axis (the camera's
+  distance to the axis point P - D x |(P - C) . D|), faded in over the next
+  metre (dens = volumedensity x min(q - endradius, 1)). VS: g_ConeSize
+  (startradius, endradius, range, dens), g_SpotlightDir (the housing's
+  +z), g_SpotlightPosition, g_Rotated_Vector = normalize(P' - C) x D,
+  g_UVOffset = a fixed random offset per volume record, g_UVScale = 0 (no
+  data sets smoketexcoordscale / smokevelocity); PS: g_SpotlightInfo =
+  (innerradius, 1 - innerradius) (a share of the radius), g_ConeColor =
+  volumecolor x dens (alpha dens). The mesh: (+-1, 0, 0, 1) near, (0, +-1,
+  1, 0) far; the pixel shader: profile (1 - s, with a plateau inside the
+  inner share) x the far fade x the chord through the cone (2 sqrt(R^2 -
+  side^2), metres) x g_ConeColor x three planar lookups of the smoke
+  texture (global_gfx.tex 0xa500318e, 128 x 128 grey noise) weighted by
+  the camera z axis squared. Blend ONE / ONE, cull none, depth tested, no
+  z write; drawn after the scene and before the screen effects (so
+  bloomed). Defaults: density 0.5, start 0, end 10, inner 0, range 10.
+  gd04 does all of this. Not done: the `volume` / `normal` types
+  (_Raytrace_cone templates, a 20-segment circle mesh and the depth
+  buffer: 9 objects), projectors (_Projector_StageOnly).
 
 ### Particles and pyro  [C scripts; I: the emitter model]
 
@@ -372,18 +519,29 @@ speed in speedrange, constant force, size from sizerange's start to end
 (+ a random share of each's second number), colour = color x the
 particlecolor gradient over the life, camera-facing quads stretched back
 along the velocity over pathfollowtime with alignwithpath [I: the whole
-model]. Drawn with gd04's own textured, additive / blended program [I: the
-particlequickmaterial templates translate (414 of 417) but their engine
-constants (g_Particle_Vec / g_Particle_Tex) are not known]. Not done: bounce,
-spline knots, flipbook animation (quadanimationfps), `burn`, wind.
+model]. Drawn with gd04's own program in the quick
+material's state [C: 823B7768, 823DC180, the particlequickmaterial
+shaders, which read no particle constants: the CPU builds world-space
+quads; g_Particle_Vec / Tex belong to the GPU rain]: blendmode add 1,
+subtract 2, blend 3, modulate 4, brighten 5, else 0 (opaque) by the
+material blend table; `burn` = premultiplied (ONE / ONE_MINUS_SRC_ALPHA)
+with a' = (1 - burnvalue) a, rgb x a x a'; alphacutoff the alpha test;
+texturelayout 2x2 / 1x2 / 2x1 cells, cell = (int(age x quadanimationfps)
++ the particle's random) & mask (the random alone at 0 fps) [C 82427E08].
+Not done: bounce, spline knots, wind, the size / rotation maths of GH3's
+own quad builders (VMX128 code not decoded), lit quick materials.
 
 ### Not done yet
 
-Animated level objects (fans, hub caps, the doll: their trigger scripts),
-screen effects (`dof`, `ScreenFX_*`, bloom: the reference captures show
-both), the characters receiving shadows, the flares' occlusion queries, the light manager's own light selection (VMX128 code),
-the templates' render and sampler states, the encore / boss / win / lose
-transitions and their cameras, two-player arrays.
+The characters receiving shadows, the effect passes' own render and
+sampler states (gd04 uses the scene material's, which 823DC180 applies
+over them), the `volume` light type and projectors, the ReducedLOD
+technique [I: the venues fit inside lod_dist1, 150 m], the encore / boss / win / lose transitions
+and their cameras, two-player arrays, the drum pulses (drumkick events),
+ScreenFlash, the first branch of a `random(...)` of clip names (z_prison /
+z_artdeco security, the caged dancer: gd04's VM yields no value for it, so
+those peds wait for a later branch), walks (Band_WalkToNode, so no
+cameras_walk).
 
 ## 7. Test
 

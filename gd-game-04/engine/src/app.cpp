@@ -24,6 +24,7 @@
 #include "ui/port_screens.h"
 #include "ui/port_settings.h"
 #include "game/save.h"
+#include "ui/song_hooks.h"
 #include "ui/song_screen.h"
 #include "video/movie_player.h"
 #include "devaids/menu_keys.h"
@@ -94,6 +95,8 @@ private:
     std::unique_ptr<SongScreen> song_;
     std::unique_ptr<TextureCache> textures_;
     std::unique_ptr<FrontEnd> front_;
+    // GH3's song scripts over the native core (D10; GD04_NO_HOOKS=1: off, the earlier path).
+    std::unique_ptr<SongHooks> hooks_;
     std::unique_ptr<Walk> walk_;
     uint64_t lastFrameNs_ = 0;
     bool pauseSeen_ = false;  // GH3's PauseGame came after Start
@@ -330,12 +333,14 @@ void App::frame() {
         canvas_.begin(SDL_Color{0, 0, 0, 255});
         const bool more = song_->frame(canvas_, mixer_, textures_.get());
         if (front_) front_->songClockMs = song_->songMs();
+        if (hooks_) hooks_->setPaused(front_->songPaused), hooks_->frame(*song_, song_->songMs());
         if (front_) {
             // GH3's scripts and elements over the song (the pause menu over the frozen song).
             const uint64_t nowNs = SDL_GetTicksNS();
             const double dt = lastFrameNs_ ? double(nowNs - lastFrameNs_) / 1e6 : 0;
             lastFrameNs_ = nowNs;
             front_->frame(canvas_, dt);
+            if (hooks_) hooks_->draw(canvas_, song_->songMs());
             if (front_->songPaused) pauseSeen_ = pauseSeen_ || front_->flow.paused;
         }
         overlay();
@@ -345,6 +350,7 @@ void App::frame() {
             // Quit or restart from the pause menu: the song is abandoned; a
             // restart's start_gem_scroller follows as a new request.
             front_->songKill = false, front_->songPaused = false, front_->songPlaying = false;
+            if (hooks_) hooks_->end(true);
             song_.reset();
             mixer_.stop();
             input_.setInGame(false);
@@ -378,6 +384,7 @@ void App::frame() {
                 // Face-off and battle never fail (battle's KO goes through song_failed: battleKo) [C 0x8210FD18].
                 if (m.mode() == GameMode::FaceOff || m.mode() == GameMode::ProFaceOff || m.mode() == GameMode::Battle) r.won = true;
             }
+            if (hooks_) hooks_->end(false);
             song_.reset();
             mixer_.stop();
             input_.setInGame(false);
@@ -417,6 +424,7 @@ void App::frame() {
         setup.startMs = rq.startMs, setup.devilFinish = rq.devilFinish;
         setup.lefty = {rq.lefty[0], rq.lefty[1]};
         setup.lagMs = rq.lagMs;
+        setup.endCredits = rq.endCredits;
         // GD04_START_AT=<song ms>: start every song there (development aid; GH3's starttime).
         if (const char* at = SDL_getenv("GD04_START_AT")) setup.startMs = std::max(0.0, std::atof(at));
         if (setup.mode == GameMode::Boss) setup.difficulty[1] = rq.difficulty;  // the 1P menu sets both [C selected_difficulty]
@@ -437,6 +445,11 @@ void App::frame() {
             }
             front_->songPlaying = true;
             input_.setInGame(true);
+            if (hooks_) {
+                SongHooks* h = hooks_.get();
+                song_->onStep = [h](SongScreen& s, double ms) { h->step(s, ms); };
+                hooks_->begin(*song_);
+            }
             // The HUD's texts in GH3's fonts (num_a9, num_a7, text_a6): scale x the font's line height.
             ui::UiSystem* ui = &front_->ui();
             song_->setHudText(
@@ -581,6 +594,7 @@ int App::run() {
             front_.reset();
         } else {
             ports_ = std::make_unique<PortScreens>(input_, *front_, enhanced_, [this](const std::string& k) { applyEnhanced(k); });
+            if (!envOn("GD04_NO_HOOKS")) hooks_ = std::make_unique<SongHooks>(*front_, mixer_, *disc_, *textures_);
         }
     }
     if (walk_ && walk_->twoPlayers()) input_.setSplitKeyboard(true);  // two-player walks: player 2 on the keyboard's other half
@@ -624,7 +638,7 @@ int App::run() {
                 for (int edge : {1, -1}) {
                     if ((k.edge == 1 && edge == -1) || (k.edge == -1 && edge == 1)) continue;
                     InputEvent ev{a, edge == 1, SDL_GetTicksNS(), ControllerMode::Guitar, k.player};
-                    if (song_) song_->handle(ev);
+                    if (song_) songEvent(ev);  // as a walk's (Start pauses)
                     else if (front_) menuAction(ev);
                 }
             }
@@ -670,6 +684,7 @@ int App::run() {
     }
     song_.reset();
     ports_.reset();
+    hooks_.reset();
     front_.reset();
     textures_.reset();
     mixer_.stop();

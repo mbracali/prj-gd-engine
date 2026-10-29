@@ -550,12 +550,15 @@ void Hud2P::draw(Canvas& c, const TextureCache& tex, const Match& m, double now)
         hudalert::draw(c, text_, al.combo, K("text_a6"), b, now, 0x12);
         if (al.readyOn) hudalert::draw(c, text_, al.ready, K("text_a6"), "Star Power Ready", now, 0x12);
     }
-    // Co-op: the raise-axe prompt, P1 (415,240)/(415,270) [C show_coop_raise_axe_for_starpower; side I].
+    // Co-op: the raise-axe prompt on the side of the player who has not
+    // raised yet: P1 raised -> P2's (865,240)/(865,270), P2 -> P1's (415,..)
+    // [C show_coop_raise_axe_for_starpower, 0x82112850].
     if (mode_ == 0 && m.raiseAxeShowing(now)) {
         const float u = float((now - m.raiseAxeStart()) / 200.0);
         const float sc = std::min(1.0f, u);
-        text_(c, K("text_a6"), "Tilt guitar to trigger", 415, 240, 0.7f * sc, white, 0x22, Hud2D::TextStyle{});
-        text_(c, K("text_a6"), "Star Power", 415, 270, 1.0f * sc, std::array<uint8_t, 4>{190, 225, 255, 255}, 0x22, Hud2D::TextStyle{});
+        const float x = m.raiseAxeBy() == 0 ? 865.0f : 415.0f;
+        text_(c, K("text_a6"), "Tilt guitar to trigger", x, 240, 0.7f * sc, white, 0x22, Hud2D::TextStyle{});
+        text_(c, K("text_a6"), "Star Power", x, 270, 1.0f * sc, std::array<uint8_t, 4>{190, 225, 255, 255}, 0x22, Hud2D::TextStyle{});
     }
 }
 

@@ -107,6 +107,12 @@ void addGameNatives(FrontEnd& fe, const Disc& disc, TextureCache& textures) {
             if (song && song->key == K("bossdevil")) r.startMs = 0;
         }
         v.setGlobal(K("current_starttime"), Vm::makeInt(int32_t(r.startMs)));
+        // end_credits: cleared unless end_credits_restart = 1 or the song is
+        // thrufireandflames [C script start_gem_scroller]; with it set,
+        // CrowdDecrease takes no health [C 0x8210FD18].
+        if (Vm::number(Vm::param(p, K("end_credits_restart")), 0) != 1 && !(song && song->key == K("thrufireandflames")))
+            v.setGlobal(K("end_credits"), Vm::makeInt(0));
+        r.endCredits = Vm::number(v.global(K("end_credits")), 0) == 1;
         if (auto it = v.globalTags.find(K("user_options")); it != v.globalTags.end())
             for (int i = 0; i < 2; ++i)
                 if (const qb::Value* l = it->second.find(K(i ? "lefty_flip_p2" : "lefty_flip_p1"))) r.lefty[i] = l->number() != 0;
@@ -188,11 +194,12 @@ void addGameNatives(FrontEnd& fe, const Disc& disc, TextureCache& textures) {
     // current pak per map (zones: the venue). Setting it loads the zone's
     // pak (textures now; the venue itself is M5); loads finish at once.
     auto current = std::make_shared<std::unordered_map<uint32_t, uint32_t>>();
-    auto setCurrent = [&disc, &textures, current](Vm& v, ScriptRun&, qb::Struct& p) {
+    auto setCurrent = [&disc, &textures, &fe, current](Vm& v, ScriptRun&, qb::Struct& p) {
         const qb::Value* map = Vm::param(p, K("map"));
         const qb::Value* pak = Vm::param(p, K("pak"));
         if (!map || !pak) return false;
         (*current)[map->key] = pak->key;
+        if (map->key == K("zones")) fe.setZone(pak->key);
         if (pak->key == K("none")) return true;
         // Zone keys name the zone (z_budokan); its pak is ZONES/<zone>.pak.xen [C data].
         const std::string zone = qbkey::name(pak->key);

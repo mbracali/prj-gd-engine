@@ -67,6 +67,19 @@ public:
     float travelMs() const { return travelMs_; }
     // The gem container's y (the intro rise; 0 once up).
     float containerY() const { return containerY_; }
+    // gem_container<p>'s position at song time `now`: the x offset, the
+    // intro's rise, the multiplier-loss shake, the battle push / bob (the
+    // scripts' elements under it follow; ui/song_hooks.cpp).
+    void containerPos(double now, float& x, float& y) const;
+    // Lane k's x at the top and at the playline, the top's y and the
+    // playline's y in the container's space (generate_pos_table's gsx / gex
+    // .., startY, highway_playline) [C script].
+    void lane(int k, float& topX, float& endX, float& topY, float& playline) const {
+        topX = startX_[size_t(k)], endX = endX_[size_t(k)], topY = topY_, playline = playline_;
+    }
+    // A gem of fret `fret` (0 green .. 4 orange) of the note at `noteMs`: its
+    // screen centre and sprite scale at song time `now`; false off the highway.
+    bool gemAt(int32_t noteMs, int fret, double now, float& x, float& y, float& scale) const;
     // Battle attacks on this highway (Match::BattleSide) [C scripts
     // battle_lefty_notes, battle_lightning, hammer_highway]: gems drawn
     // mirrored, the fret buttons mirrored, gems hidden by Amp Overload's
@@ -84,6 +97,8 @@ public:
 private:
     void drawAll(Canvas& c, const TextureCache& tex, const NoteTrack& track, const Player& player, double nowMs, uint8_t held);
     float yAt(float v) const { return topY_ + height_ * v; }
+    // The normalised depth of perspective row `r` (0 .. 1152; 1024 the playline).
+    float rowDepth(float r) const;
     float laneX(int lane, float v) const { return startX_[size_t(lane)] + (endX_[size_t(lane)] - startX_[size_t(lane)]) * v; }
     float alphaAt(float y) const;
     void quad(Canvas& c, uint32_t texKey, const TextureCache& tex, float cx, float cy, float w, float h, float justY, SDL_Color col,
@@ -104,6 +119,7 @@ private:
     float nowScaleX_ = 0.8f, nowScaleY_ = 0.8f, stringScaleX_ = 0.65f, stringScaleY_ = 0.8f, spFxScale_ = 1;
     float neckSprite_ = 16, neckLipAdd_ = 16, neckLipBase_ = 5, buttonUpPixels_ = 20, buttonSinkMs_ = 100;
     float pulseMs_ = 200;  // highway_pulse_time
+    float whammyCutoff_ = 1100;  // whammy_cutoff [C data]
     float travelMs_ = 1500;  // scroll_time - destroy_time
     std::array<float, 5> startX_{}, endX_{};
     std::vector<float> d_, accum_;  // per-row heights (normalised) and their running sum

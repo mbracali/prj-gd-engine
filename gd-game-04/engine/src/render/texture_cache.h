@@ -19,6 +19,9 @@ public:
     ~TextureCache();
     // Uploads the textures of a pak; returns how many, -1 on error (logged).
     int loadPak(const Disc& disc, const std::string& pakPath);
+    // Uploads one loose image (an .img.xen, e.g. a loading screen) under
+    // `key`; true if it is there (loaded now or before).
+    bool loadImage(const Disc& disc, const std::string& path, uint32_t key);
     gfx::TextureId find(uint32_t key) const {
         auto it = textures_.find(key);
         return it == textures_.end() ? gfx::TextureId{} : it->second.id;

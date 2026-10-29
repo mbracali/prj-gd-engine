@@ -315,6 +315,7 @@ void Input::emit(std::vector<InputEvent>& out, Action a, bool down, uint64_t ts,
     // TODO(multiplayer): per player; gd04 plays one player, fed by every slot.
     lastMode_ = mode;
     out.push_back({a, down, ts, mode, player, a == Action::Whammy && curAnalog_, curJoypad_});
+    out.back().tilt = a == Action::StarPower && curTilt_;
 }
 
 // The keyboard's chosen player, else the lowest one no pad holds (none with two pads).
@@ -838,9 +839,17 @@ void Input::update(Pad& p, uint64_t ts, std::vector<InputEvent>& out) {
         if (Control(c) == C::Whammy && p.whammyAxis > 0.15f) now = true;
         p.down[c] = now;
     }
-    curGuitar_ = !joypad, curJoypad_ = joypad, curAnalog_ = p.analogWhammy;
+    // The tilt: Star Power held through an axis source alone (a release
+    // after a tilt keeps the flag, so the up edge matches its down).
+    bool tiltOn = false, buttonOn = false;
+    for (const Source& s : b[size_t(C::StarPower)]) {
+        const bool on = sourceActive(p, s, was[size_t(C::StarPower)]);
+        (s.kind == Kind::Button || s.kind == Kind::Key ? buttonOn : tiltOn) |= on;
+    }
+    if (p.down[size_t(C::StarPower)] != was[size_t(C::StarPower)]) p.tilt = p.down[size_t(C::StarPower)] ? tiltOn && !buttonOn : p.tilt;
+    curGuitar_ = !joypad, curJoypad_ = joypad, curAnalog_ = p.analogWhammy, curTilt_ = p.tilt;
     controlEdges(was, p.down, modeFor(joypad && gamepadPlay_), p.slot, joypad, ts, out);
-    curGuitar_ = curJoypad_ = curAnalog_ = false;
+    curGuitar_ = curJoypad_ = curAnalog_ = curTilt_ = false;
 }
 
 // The controls that changed. Select / Back bound to the green / red fret's

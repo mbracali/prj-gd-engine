@@ -2,6 +2,7 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #pragma once
 
+#include <functional>
 #include <memory>
 #include <string>
 
@@ -45,6 +46,7 @@ struct SongSetup {
     std::array<bool, 2> lefty{false, false};
     // user_options.lag_calibration (ms): input_offset = the song's - this [C script gem_scroller].
     double lagMs = 0;
+    bool endCredits = false;  // end_credits = 1 (the credits song) [C script start_gem_scroller]
 };
 
 class SongScreen {
@@ -76,6 +78,15 @@ public:
     double startMs() const { return startMs_; }
     const Match& match() const { return *match_; }
     const Hud2P& hud2p() const { return hud2p_; }
+    const Chart& chart() const { return chart_; }
+    const SongInfo& song() const { return song_; }
+    bool twoPlayers() const { return twoPlayers_; }
+    // Player p's guitar muted (guitar_volume 0) after its last judged note.
+    bool guitarMuted(int p) const { return muted_[size_t(p & 1)]; }
+    VenueStage* venue() { return venue_.get(); }
+    // Called on every 60 Hz judge step after the match ran, before its
+    // events are cleared: GH3's song scripts run from them (ui/song_hooks.h).
+    std::function<void(SongScreen&, double stepMs)> onStep;
 
 private:
     void tick(double nowMs, Mixer& mixer);
@@ -109,7 +120,7 @@ private:
     double lastMs_ = -1e9;
     // The live input between steps, per player.
     std::array<uint8_t, 2> held_{};
-    std::array<bool, 2> strum_{}, star_{};
+    std::array<bool, 2> strum_{}, star_{}, tilt_{};
     std::array<float, 2> whammy_{};
     double finishedAt_ = -1;
     bool forcedFail_ = false;

@@ -10,6 +10,8 @@
 #include "render/band.h"
 #include "render/crowd.h"
 #include "render/particles.h"
+#include "render/screen_fx.h"
+#include "render/stage_peds.h"
 #include "render/venue_camera.h"
 #include "render/venue_lights.h"
 #include "render/venue_view.h"
@@ -43,12 +45,15 @@ public:
     // `health`: the rock meter, 0..2 (the crowd's performance [I]), as the
     // 60 Hz step at `ms` set it; call it on every step and as often between
     // steps as wanted (the result does not depend on it).
-    void update(double ms, float health);
+    // `starPower`: Star Power is on in a one-player song (its camera).
+    void update(double ms, float health, bool starPower = false);
     // Advances to `ms` with the last step's performance (a frame between steps).
     void advance(double ms);
     // The player's judged note at step time `ms` (after update(ms)): the band's guitarist reacts.
-    void playerNote(double ms, bool hit) {
+    // `frets`: the hit note's frets (bit 0 green; the speakers' pulses).
+    void playerNote(double ms, bool hit, uint8_t frets = 0) {
         if (band_) band_->playerNote(ms, hit);
+        if (particles_ && hit) particles_->playerHit(ms, frets);
     }
     void draw(double ms);
 
@@ -72,9 +77,19 @@ private:
     venue::PerfTimeline perf_;
     std::unique_ptr<Band> band_;
     std::unique_ptr<Crowd> crowd_;  // the crowd's peds and their card renders (GD04_NO_CROWD=1: none)
+    std::unique_ptr<StagePeds> peds_;  // the stage peds and animated venue objects (GD04_NO_STAGEPEDS=1: none)
+    std::unique_ptr<band::Library> pedLib_;
     std::unique_ptr<Particles> particles_;  // the zone's particles and pyro (GD04_NO_PARTICLES=1: none)
     gfx::RenderDevice* device_ = nullptr;
     gfx::TargetId shadow_;  // the band's dynamic shadow map (GD04_NO_SHADOWS=1: none)
+    screenfx::ScreenFx fx_;    // GH3's screen effects (GD04_NO_SCREENFX=1: none)
+    bool fxReady_ = false;
+    bool starPower_ = false;
+    const Globals* globals_ = nullptr;
+    std::vector<std::pair<double, double>> lighterSpans_;  // Crowd_StartLighters .. StopLighters
+    std::vector<uint32_t> lighterNodes_;  // <zone>_LIGHTER_Geo00..14
+    bool lightersOn(double ms) const;
+    screenfx::Params fxParams_;  // Default_TOD_Manager's screen_FX
     void shadowPass(double ms);
 public:
     const Crowd* crowd() const { return crowd_.get(); }

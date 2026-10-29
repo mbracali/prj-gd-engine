@@ -99,6 +99,9 @@ struct GlTarget {
     int w = 0, h = 0;
 };
 
+GLuint compileStage(GLenum stage, const std::string& source, std::string& error);
+void displayGammaRamp(uint8_t out[256]);
+
 GLenum blendFactor(BlendFactor f) {
     switch (f) {
     case BlendFactor::Zero: return GL_ZERO;
@@ -162,6 +165,38 @@ public:
     TargetId currentTarget() const override { return target_; }
     void currentViewport(int& x, int& y, int& w, int& h) const override { x = vp_[0], y = vp_[1], w = vp_[2], h = vp_[3]; }
     void clear(const float* rgba, bool depth) override;
+    QueryId createQuery() override {
+        GLuint q = 0;
+        gl::glGenQueries(1, &q);
+        if (!q) return {};
+        queries_.push_back(q);
+        return {uint32_t(queries_.size())};
+    }
+    void destroyQuery(QueryId q) override {
+        if (!q.id || q.id > queries_.size() || !queries_[q.id - 1]) return;
+        gl::glDeleteQueries(1, &queries_[q.id - 1]);
+        queries_[q.id - 1] = 0;
+    }
+    void beginQuery(QueryId q) override {
+        if (!q.id || q.id > queries_.size() || !queries_[q.id - 1]) return;
+        gl::glBeginQuery(info_.es ? GL_ANY_SAMPLES_PASSED : GL_SAMPLES_PASSED, queries_[q.id - 1]);
+        queryOpen_ = true;
+    }
+    void endQuery() override {
+        if (!queryOpen_) return;
+        gl::glEndQuery(info_.es ? GL_ANY_SAMPLES_PASSED : GL_SAMPLES_PASSED);
+        queryOpen_ = false;
+    }
+    bool queryResult(QueryId q, uint64_t& samples) override {
+        if (!q.id || q.id > queries_.size() || !queries_[q.id - 1]) return false;
+        GLuint avail = 0;
+        gl::glGetQueryObjectuiv(queries_[q.id - 1], GL_QUERY_RESULT_AVAILABLE, &avail);
+        if (!avail) return false;
+        GLuint n = 0;
+        gl::glGetQueryObjectuiv(queries_[q.id - 1], GL_QUERY_RESULT, &n);
+        samples = n;
+        return true;
+    }
     void draw(const DrawCall& call) override;
     UniformData stageUniforms(const void* data, size_t size) override;
     void drawableSize(int& w, int& h) const override;
@@ -210,6 +245,8 @@ private:
     GLuint boundTex_[kMaxTextureSlots] = {};
     GLuint boundSampler_[kMaxTextureSlots] = {};
     std::vector<std::pair<SamplerState, GLuint>> samplers_;
+    std::vector<GLuint> queries_;  // occlusion queries (QueryId = index + 1)
+    bool queryOpen_ = false;
     int targetH_ = 0;
     TargetId target_;
     // The internal resolution's frame (setInternalHeight): made at the
@@ -218,6 +255,14 @@ private:
     TargetId frame_;
     bool frameOn_ = false;
     int vp_[4] = {};
+    // The 360's display gamma (displayGammaRamp): the frame is drawn into
+    // frame_ and endFrame maps it to the window through the ramp.
+    bool gamma_ = true;
+    GLuint gammaProg_ = 0;
+    TextureId gammaLut_;
+    uint8_t gammaRamp_[256] = {};
+    bool initGamma(std::string& error);
+    void presentGamma(const GlTarget& frame, int ww, int wh);
 
     // Frame pacing (gd01 lesson L7).
     GLsync fences_[2] = {};
@@ -230,11 +275,14 @@ GlDevice::~GlDevice() {
         if (f) gl::glDeleteSync(f), f = nullptr;
     textures_.forEach([](GlTexture& t) { gl::glDeleteTextures(1, &t.name); });
     buffers_.forEach([](GlBuffer& b) { gl::glDeleteBuffers(1, &b.name); });
+    for (GLuint q : queries_)
+        if (q) gl::glDeleteQueries(1, &q);
     programs_.forEach([](GLuint& p) { gl::glDeleteProgram(p); });
     targets_.forEach([](GlTarget& t) { gl::glDeleteFramebuffers(1, &t.fbo); });
     for (auto& s : samplers_) gl::glDeleteSamplers(1, &s.second);
     if (ubo_) gl::glDeleteBuffers(1, &ubo_);
     if (vao_) gl::glDeleteVertexArrays(1, &vao_);
+    if (gammaProg_) gl::glDeleteProgram(gammaProg_);
     SDL_GL_DestroyContext(context_);
 }
 
@@ -289,7 +337,89 @@ bool GlDevice::init(std::string& error) {
     applyState(state_, true);
     gl::glEnable(GL_SCISSOR_TEST);
     setFrameCap(60);
+    // GD04_GAMMA=0: no display gamma (development aid, the frame as drawn).
+    if (const char* g = SDL_getenv("GD04_GAMMA")) gamma_ = std::strcmp(g, "0") != 0;
+    if (gamma_) {
+        std::string gammaError;
+        if (!initGamma(gammaError)) SDL_Log("render: display gamma off: %s", gammaError.c_str()), gamma_ = false;
+    }
     return true;
+}
+
+bool GlDevice::initGamma(std::string& error) {
+    displayGammaRamp(gammaRamp_);
+    uint8_t lut[256 * 4];
+    for (int i = 0; i < 256; ++i) lut[i * 4] = lut[i * 4 + 1] = lut[i * 4 + 2] = gammaRamp_[i], lut[i * 4 + 3] = 255;
+    TexLevel level{lut, sizeof lut};
+    gammaLut_ = createTexture({256, 1, 1, TexFormat::RGBA8, TexKind::Tex2D}, &level, error);
+    if (!gammaLut_) return false;
+    const std::string header = info_.es ? "#version 300 es\nprecision highp float;\nprecision highp sampler2D;\n" : "#version 330 core\n";
+    // A full-screen triangle; the frame (linear filtered when scaled), each
+    // channel through the ramp (the 256 entries, interpolated).
+    const std::string vs = header +
+                           "out vec2 uv;\n"
+                           "void main() {\n"
+                           "    vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));\n"
+                           "    uv = p;\n"
+                           "    gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);\n"
+                           "}\n";
+    const std::string fs = header +
+                           "in vec2 uv;\n"
+                           "uniform sampler2D frame;\n"
+                           "uniform sampler2D ramp;\n"
+                           "out vec4 color;\n"
+                           "float lut(float v) { return texture(ramp, vec2(clamp(v, 0.0, 1.0) * (255.0 / 256.0) + 0.5 / 256.0, 0.5)).r; }\n"
+                           "void main() {\n"
+                           "    vec3 c = texture(frame, uv).rgb;\n"
+                           "    color = vec4(lut(c.r), lut(c.g), lut(c.b), 1.0);\n"
+                           "}\n";
+    GLuint v = compileStage(GL_VERTEX_SHADER, vs, error);
+    if (!v) return false;
+    GLuint f = compileStage(GL_FRAGMENT_SHADER, fs, error);
+    if (!f) return gl::glDeleteShader(v), false;
+    gammaProg_ = gl::glCreateProgram();
+    gl::glAttachShader(gammaProg_, v);
+    gl::glAttachShader(gammaProg_, f);
+    gl::glLinkProgram(gammaProg_);
+    gl::glDeleteShader(v);
+    gl::glDeleteShader(f);
+    GLint ok = 0;
+    gl::glGetProgramiv(gammaProg_, GL_LINK_STATUS, &ok);
+    if (!ok) {
+        error = "display gamma: link failed";
+        gl::glDeleteProgram(gammaProg_);
+        gammaProg_ = 0;
+        return false;
+    }
+    gl::glUseProgram(gammaProg_);
+    gl::glUniform1i(gl::glGetUniformLocation(gammaProg_, "frame"), 0);
+    gl::glUniform1i(gl::glGetUniformLocation(gammaProg_, "ramp"), 1);
+    gl::glUseProgram(program_);
+    return true;
+}
+
+void GlDevice::presentGamma(const GlTarget& frame, int ww, int wh) {
+    const GlTexture* src = textures_.get(frame.color.id);
+    const GlTexture* lut = textures_.get(gammaLut_.id);
+    if (!src || !lut) return;
+    PipelineState plain;
+    plain.depthTest = false, plain.depthWrite = false, plain.cull = Cull::None;
+    applyState(plain);
+    gl::glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    gl::glDisable(GL_SCISSOR_TEST);
+    gl::glViewport(0, 0, ww, wh);
+    gl::glUseProgram(program_ = gammaProg_);
+    const bool scaled = frame.w != ww || frame.h != wh;
+    gl::glActiveTexture(GL_TEXTURE0);
+    gl::glBindTexture(GL_TEXTURE_2D, src->name);
+    gl::glBindSampler(0, sampler({scaled ? Filter::Linear : Filter::Nearest, Wrap::Clamp}));
+    gl::glActiveTexture(GL_TEXTURE1);
+    gl::glBindTexture(GL_TEXTURE_2D, lut->name);
+    gl::glBindSampler(1, sampler({Filter::Linear, Wrap::Clamp}));
+    boundTex_[0] = boundTex_[1] = 0;  // draw() binds its own again
+    boundSampler_[0] = boundSampler_[1] = 0;
+    gl::glDrawArrays(GL_TRIANGLES, 0, 3);
+    gl::glEnable(GL_SCISSOR_TEST);
 }
 
 TextureId GlDevice::createTexture(const TextureDesc& desc, const TexLevel* levels, std::string& error) {
@@ -413,6 +543,28 @@ void GlDevice::destroyBuffer(BufferId id) {
     }
 }
 
+// The 360's output gamma [C: GH3 sets its gamma ramp once at start-up
+// (823BBA20 from 822CD240; 823BB830 builds ramp[i] = i x 256 x (brightness
+// 0.5 x 0.6 + 0.7) = i x 256, an identity) through D3DDevice_SetGammaRamp
+// (824C36B8), which converts it for the display (824D46C8 / 824D4538): each
+// entry is decoded as sRGB (824D43A0) and re-encoded for the display type
+// VdGetCurrentDisplayGamma reports; type 2 (BT.709, 824D4450: 4.5 x below
+// 0.018, else 1.099 x^0.45 - 0.099) is what the kernel reports (Xenia
+// reports type 2, the captures' console), so a pixel v leaves the console as
+// 709(sRGB^-1(v)), a 1024-entry 10-bit table looked up at 4 x v. Checked on
+// the press-any-button screen against 01_press_any_button.png: port 16 / 56
+// / 104 / 153 / 200 -> 6 / 43 / 92 / 145 / 193 on the 360, the ramp gives
+// 5.9 / 40.3 / 89.9 / 142.2 / 193.7.]
+void displayGammaRamp(uint8_t out[256]) {
+    for (int i = 0; i < 256; ++i) {
+        const double x = double(4 * i) / 1023.0;
+        const double lin = x > 0.04045 ? std::pow((x + 0.055) / 1.055, 2.4) : x / 12.92;
+        const double y = lin >= 0.018 ? 1.099 * std::pow(lin, 0.45) - 0.099 : 4.5 * lin;
+        const int t = std::clamp(int(y * 1023.0 + 0.5), 0, 1023);
+        out[i] = uint8_t((t * 255 + 511) / 1023);
+    }
+}
+
 GLuint compileStage(GLenum stage, const std::string& source, std::string& error) {
     GLuint s = gl::glCreateShader(stage);
     const char* text = source.c_str();
@@ -505,12 +657,14 @@ TargetId GlDevice::createTarget(const TargetDesc& desc, std::string& error) {
     else if (desc.format == TargetFormat::RGBA16F) t.color = makeTex(GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT);
     else t.color = makeTex(GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
     while (gl::glGetError() != GL_NO_ERROR) {}  // an unsupported format shows as an incomplete target below
-    if (depth) t.depth = makeTex(GL_DEPTH_COMPONENT24, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT);
+    if (depth && desc.stencil) t.depth = makeTex(GL_DEPTH24_STENCIL8, GL_DEPTH_STENCIL, GL_UNSIGNED_INT_24_8);
+    else if (depth) t.depth = makeTex(GL_DEPTH_COMPONENT24, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT);
     gl::glGenFramebuffers(1, &t.fbo);
     gl::glBindFramebuffer(GL_FRAMEBUFFER, t.fbo);
     gl::glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, textures_.get(t.color.id)->name, 0);
     if (depth)
-        gl::glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, textures_.get(t.depth.id)->name, 0);
+        gl::glFramebufferTexture2D(GL_FRAMEBUFFER, desc.stencil ? GL_DEPTH_STENCIL_ATTACHMENT : GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D,
+                                   textures_.get(t.depth.id)->name, 0);
     const bool complete = gl::glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
     gl::glBindFramebuffer(GL_FRAMEBUFFER, 0);
     targetH_ = 0;
@@ -546,10 +700,7 @@ void GlDevice::destroyTarget(TargetId id) {
 
 void GlDevice::drawableSize(int& w, int& h) const {
     SDL_GetWindowSizeInPixels(window_, &w, &h);
-    if (frameOn_ && h > 0) {
-        w = std::max(1, int(std::lround(double(w) * internalH_ / h)));
-        h = internalH_;
-    }
+    if (const GlTarget* f = frameOn_ ? targets_.get(frame_.id) : nullptr) w = f->w, h = f->h;
 }
 
 void GlDevice::beginFrame() {
@@ -559,14 +710,14 @@ void GlDevice::beginFrame() {
     frameOn_ = false;
     int ww = 0, wh = 0;
     SDL_GetWindowSizeInPixels(window_, &ww, &wh);
-    if (internalH_ > 0 && wh > 0 && internalH_ != wh) {
-        const int w = std::max(1, int(std::lround(double(ww) * internalH_ / wh))), h = internalH_;
+    if (wh > 0 && ww > 0 && ((internalH_ > 0 && internalH_ != wh) || gamma_)) {
+        const int h = internalH_ > 0 ? internalH_ : wh, w = std::max(1, int(std::lround(double(ww) * h / wh)));
         const GlTarget* f = targets_.get(frame_.id);
         if (!f || f->w != w || f->h != h) {
             if (f) destroyTarget(frame_);
             std::string error;
             frame_ = createTarget(TargetDesc{w, h, true, TargetFormat::RGBA8}, error);
-            if (!frame_) SDL_Log("render: internal resolution %dx%d: %s; drawing to the window", w, h, error.c_str()), internalH_ = 0;
+            if (!frame_) SDL_Log("render: frame %dx%d: %s; drawing to the window", w, h, error.c_str()), internalH_ = 0, gamma_ = false;
         }
         frameOn_ = bool(frame_);
     }
@@ -601,7 +752,9 @@ void GlDevice::clear(const float* rgba, bool depth) {
     }
     if (depth) {
         gl::glDepthMask(GL_TRUE);
-        bits |= GL_DEPTH_BUFFER_BIT;
+        gl::glStencilMask(0xFF);
+        gl::glClearStencil(0);
+        bits |= GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT;
     }
     gl::glClear(bits);
     applyState(state_, true);  // restore the masks
@@ -633,6 +786,11 @@ void GlDevice::applyState(const PipelineState& s, bool force) {
         const GLboolean c = s.colorWrite ? GL_TRUE : GL_FALSE;
         gl::glColorMask(c, c, c, s.alphaWrite ? GL_TRUE : GL_FALSE);
     }
+    if (force || s.stencilTest != o.stencilTest) (s.stencilTest ? gl::glEnable : gl::glDisable)(GL_STENCIL_TEST);
+    if (force || s.stencilFunc != o.stencilFunc || s.stencilRef != o.stencilRef || s.stencilMask != o.stencilMask)
+        gl::glStencilFunc(compareFunc(s.stencilFunc), GLint(s.stencilRef), GLuint(s.stencilMask));
+    if (force || s.stencilWriteMask != o.stencilWriteMask) gl::glStencilMask(GLuint(s.stencilWriteMask));
+    if (force || s.stencilReplace != o.stencilReplace) gl::glStencilOp(GL_KEEP, GL_KEEP, s.stencilReplace ? GL_REPLACE : GL_KEEP);
     state_ = s;
 }
 
@@ -756,6 +914,9 @@ SDL_Surface* GlDevice::readPixels(int x, int y, int w, int h) {
     gl::glReadPixels(x, dh - y - h, w, h, GL_RGBA, GL_UNSIGNED_BYTE, rows.data());
     SDL_Surface* s = SDL_CreateSurface(w, h, SDL_PIXELFORMAT_RGBA32);
     if (!s) return nullptr;
+    if (frame && gamma_)  // what the window shows: through the display gamma
+        for (size_t i = 0; i < rows.size(); ++i)
+            if ((i & 3) != 3) rows[i] = gammaRamp_[rows[i]];
     for (int r = 0; r < h; ++r)  // GL rows run bottom-up
         std::memcpy(static_cast<uint8_t*>(s->pixels) + size_t(r) * size_t(s->pitch), &rows[size_t(h - 1 - r) * size_t(w) * 4], size_t(w) * 4);
     return s;
@@ -787,11 +948,15 @@ void GlDevice::endFrame() {
     if (const GlTarget* frame = frameOn_ ? targets_.get(frame_.id) : nullptr) {
         int ww = 0, wh = 0;
         SDL_GetWindowSizeInPixels(window_, &ww, &wh);
-        gl::glBindFramebuffer(GL_READ_FRAMEBUFFER, frame->fbo);
-        gl::glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-        gl::glDisable(GL_SCISSOR_TEST);
-        gl::glBlitFramebuffer(0, 0, frame->w, frame->h, 0, 0, ww, wh, GL_COLOR_BUFFER_BIT, GL_LINEAR);
-        gl::glEnable(GL_SCISSOR_TEST);
+        if (gamma_) {
+            presentGamma(*frame, ww, wh);
+        } else {
+            gl::glBindFramebuffer(GL_READ_FRAMEBUFFER, frame->fbo);
+            gl::glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+            gl::glDisable(GL_SCISSOR_TEST);
+            gl::glBlitFramebuffer(0, 0, frame->w, frame->h, 0, 0, ww, wh, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+            gl::glEnable(GL_SCISSOR_TEST);
+        }
         gl::glBindFramebuffer(GL_FRAMEBUFFER, 0);
         target_ = {};
     }

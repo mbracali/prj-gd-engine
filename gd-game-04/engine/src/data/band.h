@@ -23,6 +23,8 @@ class Globals;
 // the body and instrument skins (.skin skinned to the profile's skeleton in
 // ZONES/global.pak), their textures, and the animation clips of the body's
 // anims pak, perm_anims.pak and the song's pak. Rendering-free.
+class Pak;
+
 namespace band {
 
 enum class Role : uint8_t { Guitarist, Bassist, Drummer, Vocalist };
@@ -49,6 +51,12 @@ struct Member {
 // the guitarist alone. Empty when $disable_band = 1.
 std::vector<Member> chooseBand(const Globals& g, const std::string& zone, uint32_t songKey);
 
+// A member from a profile struct as create_band_member gets it (the
+// Musician_Profiles entry with musician_body / musician_instrument desc_ids
+// and outfit; the menus' composite objects, ui/menu_objects.h): the role
+// from the object's name (else the profile's type). `profile` must outlive
+// the member; ids not in the desc arrays become 0.
+Member memberOf(const Globals& g, uint32_t object, const qb::Struct& profile);
 // A Musician_Profiles entry by name (case-insensitive), or null.
 const qb::Struct* findProfile(const Globals& g, const std::string& name);
 // The musician_body / musician_instrument entry with this desc_id, or null.
@@ -68,6 +76,9 @@ using ClipMap = std::unordered_map<uint32_t, std::shared_ptr<const anim::Clip>>;
 
 // What every member shares: the skeletons (ZONES/global.pak) and
 // perm_anims.pak's clips (hands, strums, the rig defaults).
+// The .ska clips of a pak, by short and full name key.
+ClipMap readPakClips(const Pak& pak);
+
 class Library {
 public:
     // Throws std::runtime_error.
@@ -105,7 +116,7 @@ struct Model {
     }
 };
 
-// Loads a member's paks. `song`: the song whose pak holds extra clips ("" none).
+// Loads a member's paks (body 0 with an instrument: the instrument alone). `song`: the song whose pak holds extra clips ("" none).
 // Null and `error` on failure.
 std::unique_ptr<Model> loadModel(const Disc& disc, const Globals& g, Library& lib, const Member& m, const std::string& song,
                                  std::string& error);

@@ -94,6 +94,8 @@ ClipMap readClips(const Pak& pak) {
 
 }  // namespace
 
+ClipMap readPakClips(const Pak& pak) { return readClips(pak); }
+
 const char* roleName(Role r) {
     switch (r) {
     case Role::Guitarist: return "guitarist";
@@ -205,6 +207,25 @@ std::vector<Member> chooseBand(const Globals& g, const std::string& zone, uint32
     if (!none)
         if (const qb::Struct* p = findProfile(g, singer)) out.push_back(makeMember(g, Role::Vocalist, K("vocalist"), p));
     return out;
+}
+
+Member memberOf(const Globals& g, uint32_t object, const qb::Struct& profile) {
+    const uint32_t type = keyOf(profile.find(K("type")));
+    const Role role = object == K("bassist") ? Role::Bassist : object == K("drummer") ? Role::Drummer
+                      : object == K("vocalist")                                     ? Role::Vocalist
+                      : object == K("guitarist")                                    ? Role::Guitarist
+                      : type == K("bassist")                                        ? Role::Bassist
+                      : type == K("drummer")                                        ? Role::Drummer
+                      : type == K("vocalist")                                       ? Role::Vocalist
+                                                                                    : Role::Guitarist;
+    Member m = makeMember(g, role, object, &profile);
+    m.outfit = std::max(1, intOf(profile.find(K("outfit")), 1));
+    // create_band_member: outfit 2 uses skeleton2 [C script].
+    if (m.outfit == 2)
+        if (const uint32_t s2 = keyOf(profile.find(K("skeleton2")))) m.skeleton = s2;
+    if (m.body && !bodyDesc(g, m.body)) m.body = 0;
+    if (m.instrument && !instrumentDesc(g, m.instrument)) m.instrument = 0;
+    return m;
 }
 
 std::vector<Member> everyBody(const Globals& g) {
@@ -340,18 +361,22 @@ std::unique_ptr<Model> loadModel(const Disc& disc, const Globals& g, Library& li
         }
         return true;
     };
-    const qb::Struct* body = bodyDesc(g, m.body);
-    if (!body) {
-        error = who + ": no musician_body " + qbkey::names().get(m.body);
-        return nullptr;
+    // No body: an instrument alone (the store's display guitar,
+    // store_do_guitar_load) [C script].
+    if (m.body || !m.instrument) {
+        const qb::Struct* body = bodyDesc(g, m.body);
+        if (!body) {
+            error = who + ": no musician_body " + qbkey::names().get(m.body);
+            return nullptr;
+        }
+        if (!loadPak(pakPath(strOf(body->find(K("pak")))), true, true)) return nullptr;
+        if (model->parts.empty()) {
+            error = who + ": the body pak has no skin";
+            return nullptr;
+        }
+        if (const std::string anims = strOf(body->find(K("anims_pak"))); !anims.empty() && !loadPak(pakPath(anims), false, true))
+            return nullptr;
     }
-    if (!loadPak(pakPath(strOf(body->find(K("pak")))), true, true)) return nullptr;
-    if (model->parts.empty()) {
-        error = who + ": the body pak has no skin";
-        return nullptr;
-    }
-    if (const std::string anims = strOf(body->find(K("anims_pak"))); !anims.empty() && !loadPak(pakPath(anims), false, true))
-        return nullptr;
     if (m.instrument) {
         const qb::Struct* inst = instrumentDesc(g, m.instrument);
         if (!inst) {

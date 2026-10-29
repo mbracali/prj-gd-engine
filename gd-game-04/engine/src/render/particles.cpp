@@ -68,6 +68,13 @@ out vec4 fragColor;
 void main() {
     vec4 c = texture(sTex, vUv) * vColor;
     if (c.a < uParams.x) discard;
+    // The burn (ParticleQuickMaterialNoLighting, m_Burn): a' = (1 - burn) a,
+    // rgb x a x a', drawn premultiplied [C].
+    if (uParams.y > 0.0) {
+        float a2 = (1.0 - uParams.y) * c.a;
+        c.rgb *= c.a * a2;
+        c.a = a2;
+    }
     fragColor = c;
 }
 )";
@@ -113,6 +120,7 @@ bool Particles::start(const Disc& disc, const Globals& g, const venue::Venue& v,
             for (const qb::Value& s : a->arr->values) perfScripts_.push_back(keyOf(&s));
     // LightShow_NoteMapping: note 56 runs LightShow_PyroEvent, lightshow_offset_ms early [C; I: the sign].
     offsetMs_ = qbNumber(g, K("lightshow_offset_ms"), 100);
+    fretbars_ = chart.fretbars;
     pyroTimes_.clear();
     for (const ChartEvent& e : chart.lightshow)
         if (e.note == 56) pyroTimes_.push_back(double(e.time) - offsetMs_);
@@ -139,14 +147,310 @@ bool Particles::start(const Disc& disc, const Globals& g, const venue::Venue& v,
         const venue::Node* node = n ? v_->node(keyOf(n)) : nullptr;
         return node && node->createdAtStart;
     });
-    for (const char* noop : {"CallScriptOnNode", "SpawnSound", "PlaySound", "Obj_PlaySound", "SoundEvent"})
+    addObjectNatives();
+    // The nodes' trigger scripts: a created node runs its triggerscript on
+    // itself [C data: e.g. z_party's globes (Z_Party_GlobeRot01Script),
+    // z_video's fans (Z_Video_G_RMM_fantop02Script); I: at the level's start].
+    size_t triggers = 0;
+    for (const venue::Node& n : v.nodes) {
+        if (!n.st) continue;
+        if (!n.createdAtStart) {
+            // crowd_create_lighters creates the lighter geometry at the song's start [C script].
+            std::string nm = qbkey::names().get(n.name);
+            std::transform(nm.begin(), nm.end(), nm.begin(), [](unsigned char c) { return char(std::tolower(c)); });
+            if (nm.find("_lighter_geo") == std::string::npos) continue;
+        }
+        const uint32_t ts = keyOf(n.st->find(K("triggerscript")));
+        if (!ts || !vm_->code(ts)) continue;
+        vm_->spawnOn(ts, qb::Struct{}, n.name);
+        ++triggers;
+    }
+    for (const char* noop : {"SpawnSound", "PlaySound", "Obj_PlaySound", "SoundEvent", "SetSpawnInstanceLimits", "RequireParams"})
         vm_->addNative(noop, [](qs::Vm&, qs::ScriptRun&, qb::Struct&) { return true; });
     using ull = unsigned long long;
     SDL_Log("particles %s: %llu pyro notes (%s), %llu performance scripts", v.zone.c_str(), ull(pyroTimes_.size()),
             pyroScript_ ? qbkey::names().get(pyroScript_).c_str() : "no pyro script", ull(perfScripts_.size()));
     if (std::getenv("GD04_PARTICLES_LOG"))
         for (double t : pyroTimes_) SDL_Log("particles: pyro at %.0f ms", t);
-    return pyroScript_ || !perfScripts_.empty();
+    if (triggers) SDL_Log("particles %s: %llu node trigger scripts", v.zone.c_str(), ull(triggers));
+    return pyroScript_ || !perfScripts_.empty() || triggers;
+}
+
+float Particles::Axis::at(double t) const {
+    if (rate == 0) return a0;
+    const float a = a0 + rate * float((t - t0) / 1000.0);
+    if (!target) return a;
+    return rate > 0 ? std::min(a, to) : std::max(a, to);
+}
+
+float Particles::Motion::scale(double t) const {
+    if (sDur <= 0 || t >= sT0 + sDur) return sTo;
+    const float u = float(std::max(0.0, (t - sT0) / sDur));
+    return s0 + (sTo - s0) * u;
+}
+
+void Particles::playerHit(double ms, uint8_t frets) {
+    if (frets) hits_.push_back({ms, frets});
+}
+
+float Particles::pulse(const Motion& m, double ms) const {
+    // AddPulseEvent: on the event the scale goes to amount for a game frame,
+    // then back over `time` [I: as Venue_PulseOnEvents' own delay branch:
+    // obj_applyscaling, Wait 1 gameframe, obj_morphscaling].
+    if (!m.pulseFrets) return 1;
+    for (auto it = hits_.rbegin(); it != hits_.rend(); ++it) {
+        if (ms - it->first > 1000.0) break;
+        if (it->first > ms || !(it->second & m.pulseFrets)) continue;
+        const double dt = ms - it->first;
+        if (dt < kStepMs) return m.pulseAmount;
+        const double back = m.pulseTime * 1000.0;
+        if (dt >= kStepMs + back) return 1;
+        return m.pulseAmount + (1 - m.pulseAmount) * float((dt - kStepMs) / back);
+    }
+    return 1;
+}
+
+bool Particles::Axis::done(double t) const { return !target || rate == 0 || at(t) == to; }
+
+venue::Vec3 Particles::Motion::pos(double t) const {
+    if (mDur <= 0 || t >= m0 + mDur) return to;
+    const float u = float(std::max(0.0, (t - m0) / mDur));
+    return {from[0] + (to[0] - from[0]) * u, from[1] + (to[1] - from[1]) * u, from[2] + (to[2] - from[2]) * u};
+}
+
+void Particles::addObjectNatives() {
+    auto setLocal = [](qs::ScriptRun& run, uint32_t name, qb::Value v) {
+        if (!run.frames.empty() && run.frames.back().locals) qs::Vm::set(*run.frames.back().locals, name, std::move(v));
+    };
+    // GameObj_PlayAnim {Anim blendduration} / GameObj_WaitAnimFinished on a
+    // stage ped (the scripts' anim_command degenerateblend_addbranch and
+    // timer_waitanimcomplete) [C scripts gameobj; I: the C anim tree].
+    vm_->addNative("GameObj_PlayAnim", [this](qs::Vm&, qs::ScriptRun& run, qb::Struct& p) {
+        if (!animHook_ || !run.object) return true;
+        const uint32_t anim = keyOf(qs::Vm::param(p, K("Anim")));
+        const double len = animHook_(run.object, anim, qs::Vm::number(qs::Vm::param(p, K("blendduration")), -1), vmTime_);
+        animEnd_[run.object] = vmTime_ + std::max(kStepMs, len);
+        return true;
+    });
+    vm_->addNative("GameObj_WaitAnimFinished", [this](qs::Vm&, qs::ScriptRun& run, qb::Struct&) {
+        const uint32_t obj = run.object;
+        if (!animEnd_.count(obj)) return true;
+        run.waitFor = [this, obj] { return vmTime_ >= animEnd_[obj]; };
+        return true;
+    });
+    vm_->addNative("obj_getid", [setLocal](qs::Vm&, qs::ScriptRun& run, qb::Struct&) {
+        setLocal(run, K("ObjID"), qs::Vm::makeKey(run.object));
+        return true;
+    });
+    // hero_get_skill_level_cfunc: skill bad / normal / good by the rock
+    // meter's bands [C: the crowd's script use; I: the bands, as the crowd's].
+    vm_->addNative("hero_get_skill_level_cfunc", [this, setLocal](qs::Vm&, qs::ScriptRun& run, qb::Struct&) {
+        const venue::Performance pf = perf_ ? perf_->at(vmTime_) : venue::Performance::Medium;
+        setLocal(run, K("skill"), qs::Vm::makeKey(K(pf == venue::Performance::Poor ? "bad" : pf == venue::Performance::Good ? "good" : "normal")));
+        return true;
+    });
+    // get_anim_speed_for_tempo_cfunc: slow / med / fast by the beat at the
+    // time against slow_tempo / med_tempo / fast_tempo [I: as render/crowd.cpp].
+    vm_->addNative("get_anim_speed_for_tempo_cfunc", [this, setLocal](qs::Vm& vm, qs::ScriptRun& run, qb::Struct&) {
+        double beat = 500;
+        if (fretbars_.size() >= 2) {
+            size_t i = size_t(std::upper_bound(fretbars_.begin(), fretbars_.end(), int32_t(vmTime_)) - fretbars_.begin());
+            i = std::clamp<size_t>(i, 1, fretbars_.size() - 1);
+            beat = std::max(1, fretbars_[i] - fretbars_[i - 1]);
+        }
+        const double bpm = 60000.0 / beat;
+        const float slow = qs::Vm::number(vm.global(K("slow_tempo")), 75), med = qs::Vm::number(vm.global(K("med_tempo")), 115),
+                    fast = qs::Vm::number(vm.global(K("fast_tempo")), 145);
+        setLocal(run, K("anim_speed"),
+                 qs::Vm::makeKey(K(bpm < (slow + med) * 0.5 ? "slow" : bpm < (med + fast) * 0.5 ? "med" : "fast")));
+        return true;
+    });
+    // CallScriptOnNode prefix=<name prefix> callBack_Script=<script> params={...}:
+    // the script once for every node whose name starts so, with nodeName [C
+    // script use, z_dive_performance_changed; I: the C side's order].
+    vm_->addNative("CallScriptOnNode", [this](qs::Vm& vm, qs::ScriptRun&, qb::Struct& p) {
+        const uint32_t cb = keyOf(qs::Vm::param(p, K("callBack_Script")));
+        const qb::Value* pre = qs::Vm::param(p, K("prefix"));
+        std::string prefix = pre ? (pre->type == qb::Type::String ? pre->str : qbkey::names().get(keyOf(pre))) : std::string();
+        if (!cb || prefix.empty()) return true;
+        std::transform(prefix.begin(), prefix.end(), prefix.begin(), [](unsigned char c) { return char(std::tolower(c)); });
+        qb::Struct base;
+        if (const qb::Struct* ps = structOf(qs::Vm::param(p, K("params")))) base = *ps;
+        for (const venue::Node& n : v_->nodes) {
+            std::string name = qbkey::names().get(n.name);
+            std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c) { return char(std::tolower(c)); });
+            if (name.compare(0, prefix.size(), prefix) != 0) continue;
+            qb::Struct args = base;
+            qs::Vm::set(args, K("nodeName"), qs::Vm::makeKey(n.name));
+            vm.run(cb, args);
+        }
+        return true;
+    });
+    // Object members on a node (`<node> : obj_rotz Speed = 300`, or in a
+    // node's trigger script): obj_rotx / roty / rotz {Speed (degrees a
+    // second), angle (a turn by, else for ever)}, obj_rotate {absolute (x, y,
+    // z) time}, obj_stoprotating, obj_movetopos (pos) {time | Speed},
+    // obj_setposition position, Obj_WaitRotate / Obj_WaitMove [C: the
+    // scripts' use; I: the units, the Euler order, the pivot = the node].
+    vm_->objectCall = [this](qs::Vm&, qs::ScriptRun& run, uint32_t obj, uint32_t method, qb::Struct& p, bool& handled) -> bool {
+        const venue::Node* node = v_->node(obj);
+        handled = node != nullptr;
+        if (!node) return false;
+        const double t = vmTime_;
+        Motion& m = motion_[obj];
+        if (!m.moved) m.from = m.to = node->pos;
+        auto rot = [&](int axis) {
+            Axis& a = m.rot[axis];
+            const float cur = a.at(t);
+            const float speed = qs::Vm::number(qs::Vm::param(p, K("Speed")), 0);
+            const qb::Value* ang = qs::Vm::param(p, K("angle"));
+            a = Axis{};
+            a.a0 = cur, a.t0 = t;
+            if (ang) {
+                const float by = qs::Vm::number(ang, 0);
+                a.target = true, a.to = cur + by;
+                a.rate = by == 0 ? 0 : (by > 0 ? std::fabs(speed) : -std::fabs(speed));
+            } else {
+                a.rate = speed;
+            }
+        };
+        if (method == K("obj_rotx")) rot(0);
+        else if (method == K("obj_roty")) rot(1);
+        else if (method == K("obj_rotz")) rot(2);
+        else if (method == K("obj_rotate")) {
+            const venue::Vec3 abs = vec(qs::Vm::param(p, K("absolute")), {});
+            const float time = qs::Vm::number(qs::Vm::param(p, K("time")), 0);
+            for (int k = 0; k < 3; ++k) {
+                Axis& a = m.rot[k];
+                const float cur = a.at(t);
+                a = Axis{};
+                a.t0 = t;
+                if (time <= 0) {
+                    a.a0 = abs[size_t(k)];
+                } else {
+                    a.a0 = cur, a.target = true, a.to = abs[size_t(k)];
+                    a.rate = (abs[size_t(k)] - cur) / time;
+                }
+            }
+        } else if (method == K("obj_stoprotating")) {
+            for (Axis& a : m.rot) a = Axis{a.at(t), t};
+        } else if (method == K("obj_movetorelpos")) {
+            // A move by an offset in the node's frame [I: as obj_movetopos, Speed m/s].
+            const qb::Value* pv = qs::Vm::positional(p);
+            if (!pv || (pv->type != qb::Type::Vector && pv->type != qb::Type::Pair)) return true;
+            const venue::Vec3 off = venue::rotate(node->rot, vec(pv, {}));
+            const venue::Vec3 cur = m.pos(t);
+            m.moved = true;
+            m.from = cur, m.to = {cur[0] + off[0], cur[1] + off[1], cur[2] + off[2]}, m.m0 = t;
+            const float speed = qs::Vm::number(qs::Vm::param(p, K("Speed")), 0), time = qs::Vm::number(qs::Vm::param(p, K("time")), 0);
+            const float dist = std::sqrt(off[0] * off[0] + off[1] * off[1] + off[2] * off[2]);
+            m.mDur = time > 0 ? time * 1000.0 : speed > 0 ? dist / speed * 1000.0 : 0.0;
+        } else if (method == K("obj_movetopos") || method == K("obj_setposition")) {
+            const qb::Value* pv = qs::Vm::param(p, K("position"));
+            if (!pv) pv = qs::Vm::positional(p);
+            if (!pv || (pv->type != qb::Type::Vector && pv->type != qb::Type::Pair)) return true;
+            const venue::Vec3 dst = vec(pv, node->pos);
+            const venue::Vec3 cur = m.pos(t);
+            m.moved = true;
+            m.from = cur, m.to = dst, m.m0 = t, m.mDur = 0;
+            if (method == K("obj_movetopos")) {
+                const float time = qs::Vm::number(qs::Vm::param(p, K("time")), 0);
+                const float speed = qs::Vm::number(qs::Vm::param(p, K("Speed")), 0);
+                const float dx = dst[0] - cur[0], dy = dst[1] - cur[1], dz = dst[2] - cur[2];
+                const float dist = std::sqrt(dx * dx + dy * dy + dz * dz);
+                m.mDur = time > 0 ? time * 1000.0 : speed > 0 ? dist / speed * 1000.0 : 0.0;
+            }
+        } else if (method == K("hide") || method == K("Unhide")) {
+            visibility_[obj] = method == K("hide") ? 0 : 1;
+        } else if (method == K("AddPulseEvent")) {
+            static const char* const kEv[5] = {"hitnote_green", "hitnote_red", "hitnote_yellow", "hitnote_blue", "hitnote_orange"};
+            m.pulseFrets = 0;
+            if (const qb::Value* ev = qs::Vm::param(p, K("events")); ev && ev->type == qb::Type::Array && ev->arr)
+                for (const qb::Value& e : ev->arr->values)
+                    for (int k = 0; k < 5; ++k)
+                        if (keyOf(&e) == K(kEv[k])) m.pulseFrets |= uint8_t(1 << k);
+            m.pulseAmount = qs::Vm::number(qs::Vm::param(p, K("amount")), 1.12f);
+            m.pulseTime = qs::Vm::number(qs::Vm::param(p, K("time")), 0.1f);
+        } else if (method == K("obj_enablescaling")) {
+        } else if (method == K("obj_getscaling")) {
+            if (!run.frames.empty() && run.frames.back().locals)
+                qs::Vm::set(*run.frames.back().locals, K("scaling"), qs::Vm::makeFloat(m.scale(t)));
+        } else if (method == K("obj_applyscaling")) {
+            m.s0 = m.sTo = qs::Vm::number(qs::Vm::param(p, K("scale")), 1), m.sDur = 0;
+        } else if (method == K("obj_morphscaling")) {
+            m.s0 = m.scale(t), m.sT0 = t;
+            m.sTo = qs::Vm::number(qs::Vm::param(p, K("target_scale")), 1);
+            m.sDur = qs::Vm::number(qs::Vm::param(p, K("blend_duration")), 0) * 1000.0;
+        } else if (method == K("obj_spawnscriptnow") || method == K("obj_spawnscriptlater") || method == K("Obj_SwitchScript")) {
+            // `{ $script params = {...} }`: the arguments inside one struct.
+            const qb::Struct* in = &p;
+            if (const qb::Struct* inner = structOf(qs::Vm::positional(p))) in = inner;
+            uint32_t scr = 0;
+            for (const qb::Item& it : in->items)
+                if (!it.name && (it.value.type == qb::Type::Key || it.value.type == qb::Type::KeyPtr) && !scr) scr = it.value.key;
+            if (SDL_getenv("GD04_OBJLOG")) {
+                std::string items;
+                for (const qb::Item& it : p.items) items += qbkey::names().get(it.name) + ":" + std::to_string(int(it.value.type)) + " ";
+                SDL_Log("objcall %s on %s: script %s; items %s", qbkey::names().get(method).c_str(), qbkey::names().get(obj).c_str(),
+                        qbkey::names().get(scr).c_str(), items.c_str());
+            }
+            if (!scr) return true;
+            qb::Struct args;
+            if (const qb::Struct* ps = structOf(qs::Vm::param(*in, K("params")))) args = *ps;
+            if (method == K("Obj_SwitchScript"))
+                for (auto& r : vm_->runs())
+                    if (r && r->object == obj && r.get() != &run) vm_->kill(r->id);
+            vm_->spawnOn(scr, args, obj);
+        } else if (method == K("obj_killspawnedscript")) {
+            const uint32_t nm = keyOf(qs::Vm::param(p, K("name")));
+            for (auto& r : vm_->runs())
+                if (r && r->object == obj && r->name == nm) vm_->kill(r->id);
+        } else if (method == K("obj_stopmoving")) {
+            m.to = m.pos(t), m.from = m.to, m.mDur = 0;
+        } else if (method == K("Obj_WaitRotate")) {
+            run.waitFor = [this, obj] {
+                const Motion& mm = motion_[obj];
+                for (const Axis& a : mm.rot)
+                    if (!a.done(vmTime_)) return false;
+                return true;
+            };
+        } else if (method == K("Obj_WaitMove")) {
+            run.waitFor = [this, obj] {
+                const Motion& mm = motion_[obj];
+                return mm.mDur <= 0 || vmTime_ >= mm.m0 + mm.mDur;
+            };
+        } else {
+            handled = false;
+            return false;
+        }
+        return true;
+    };
+}
+
+bool Particles::nodeMotion(uint32_t node, double ms, gfx::Mat4& delta) const {
+    auto it = motion_.find(node);
+    if (it == motion_.end() || !v_) return false;
+    const venue::Node* n = v_->node(node);
+    if (!n) return false;
+    const Motion& m = it->second;
+    constexpr float kDeg = 3.14159265f / 180.0f;
+    const venue::Vec3 extra{m.rot[0].at(ms) * kDeg, m.rot[1].at(ms) * kDeg, m.rot[2].at(ms) * kDeg};
+    const venue::Vec3 p = m.pos(ms);
+    // world' = T(p) R(node) R(extra) R(node)^-1 T(-node.pos) world [I].
+    auto rotM = [](const venue::Quat& q) {
+        gfx::Mat4 r;
+        const venue::Vec3 ax = venue::rotate(q, {1, 0, 0}), ay = venue::rotate(q, {0, 1, 0}), az = venue::rotate(q, {0, 0, 1});
+        for (int k = 0; k < 3; ++k) r.at(k, 0) = ax[size_t(k)], r.at(k, 1) = ay[size_t(k)], r.at(k, 2) = az[size_t(k)];
+        return r;
+    };
+    const gfx::Mat4 rn = rotM(n->rot);
+    gfx::Mat4 rnInv = rn.inverseAffine();
+    const float sc = m.scale(ms) * pulse(m, ms);
+    gfx::Mat4 sm;
+    sm.at(0, 0) = sm.at(1, 1) = sm.at(2, 2) = sc;
+    delta = gfx::Mat4::translation(p[0], p[1], p[2]) * rn * rotM(venue::quatFromAngles(extra)) * sm * rnInv *
+            gfx::Mat4::translation(-n->pos[0], -n->pos[1], -n->pos[2]);
+    return true;
 }
 
 bool Particles::attach(gfx::RenderDevice& dev, const Disc& disc, std::string& error) {
@@ -238,12 +542,23 @@ void Particles::create(const venue::Vec3& pos, const qb::Value* params, double t
     for (const qb::Item& it : st->items)
         if (it.name == 0 && it.value.type == qb::Type::Key && it.value.key == K("alignwithpath")) p.alignWithPath = true;
     p.pathTime = num(f("pathfollowtime"), 0.1f);
+    for (const qb::Item& it : st->items)
+        if (it.name == 0 && it.value.type == qb::Type::Key && it.value.key == K("burn")) p.burn = std::max(0.0f, num(f("burnvalue"), 0.0f));
+    {
+        const uint32_t tl = keyOf(f("texturelayout"));
+        p.layout = tl == K("layout2x2") ? 1 : tl == K("layout1x2") ? 2 : tl == K("layout2x1") ? 3 : 0;
+        p.animFps = num(f("quadanimationfps"), 0);
+    }
     if (const qb::Value* c = f("color"); c && c->type == qb::Type::Int) p.color = uint32_t(c->i);
     if (const qb::Value* pc = f("particlecolor"); pc && pc->type == qb::Type::Array && pc->arr)
         for (const qb::Value& c : pc->arr->values) p.gradient.push_back(uint32_t(c.i));
     if (const qb::Struct* qm = structOf(f("quickmaterial"))) {
         p.texture = keyOf(g_->field(*qm, K("diffusetexture")));
-        p.additive = keyOf(g_->field(*qm, K("blendmode"))) != K("blend");
+        // blendmode (FUN_823a5f18): add 1, subtract / sub 2, blend 3, modulate 4, brighten 5, else 0 [C].
+        const uint32_t bm = keyOf(g_->field(*qm, K("blendmode")));
+        p.blend = bm == K("add") ? 1 : (bm == K("subtract") || bm == K("sub")) ? 2 : bm == K("blend") ? 3 : bm == K("modulate") ? 4
+                  : bm == K("brighten") ? 5 : 0;
+        p.additive = p.blend == 1;
         p.alphaCut = num(g_->field(*qm, K("alphacutoff")), 0) / 255.0f;
     }
     System s;
@@ -311,6 +626,8 @@ void Particles::draw(const venue::CamPose& cam, double ms) {
     struct Batch {
         uint32_t texture = 0;
         bool additive = true;
+        int blend = 1;
+        float burn = 0;
         float alphaCut = 0;
         size_t first = 0, count = 0;
     };
@@ -320,7 +637,7 @@ void Particles::draw(const venue::CamPose& cam, double ms) {
         const Params& p = s.p;
         const double age = (ms - s.start) / 1000.0 - p.delay;
         if (age < 0) continue;
-        Batch b{p.texture, p.additive, p.alphaCut, verts.size(), 0};
+        Batch b{p.texture, p.additive, p.blend, p.burn, p.alphaCut, verts.size(), 0};
         // The burst at the start, then emit_rate a second for `lifetime` [I].
         const int continuous = int(std::floor(double(p.rate) * double(p.lifetime)));
         const int total = p.burst + continuous;
@@ -393,11 +710,22 @@ void Particles::draw(const venue::CamPose& cam, double ms) {
             }
             const float h = size * 0.5f;
             const float cx[4] = {-1, 1, 1, -1}, cy[4] = {-1, -1, 1, 1};
+            // The flipbook cell: (int(age x quadanimationfps) + the particle's
+            // random) & mask, or the random alone; 2x2 / 1x2 / 2x1 cells [C 82427E08].
+            float cu = 0, cv = 0, cw = 1, chh = 1;
+            if (p.layout) {
+                const int mask = p.layout == 1 ? 3 : 1;
+                const int r = int(rnd(s.seed, uint64_t(i), 9) * 65536.0f);
+                const int cell = (p.animFps > 0 ? int(float(a) * p.animFps) + r : r) & mask;
+                if (p.layout == 1) cw = chh = 0.5f, cu = 0.5f * float(cell & 1), cv = 0.5f * float(cell >> 1);
+                else if (p.layout == 2) cw = 0.5f, cu = 0.5f * float(cell);
+                else chh = 0.5f, cv = 0.5f * float(cell);
+            }
             PVtx q[4];
             for (int k = 0; k < 4; ++k) {
                 for (size_t j = 0; j < 3; ++j) q[k].pos[j] = centre[j] + (sx[j] * cx[k] + sy[j] * cy[k]) * h;
                 std::memcpy(q[k].col, c8, 4);
-                q[k].uv[0] = cx[k] * 0.5f + 0.5f, q[k].uv[1] = 0.5f - cy[k] * 0.5f;
+                q[k].uv[0] = (cx[k] * 0.5f + 0.5f) * cw + cu, q[k].uv[1] = (0.5f - cy[k] * 0.5f) * chh + cv;
             }
             for (int k : {0, 1, 2, 0, 2, 3}) verts.push_back(q[k]);
         }
@@ -434,12 +762,23 @@ void Particles::draw(const venue::CamPose& cam, double ms) {
             float params[4];
         } u{};
         std::memcpy(u.vp, vp.m, sizeof u.vp);
-        u.params[0] = b.alphaCut;
+        u.params[0] = b.alphaCut, u.params[1] = b.burn;
         c.uniforms[0] = {&u, sizeof u, 0};
         auto it = textures_.find(b.texture);
         c.textures[0] = it != textures_.end() ? it->second : white_;
-        c.state.src = gfx::BlendFactor::SrcAlpha;
-        c.state.dst = b.additive ? gfx::BlendFactor::One : gfx::BlendFactor::InvSrcAlpha;
+        // The material blend table (823DC180) by the system's blendmode; burn:
+        // mode 9, ONE / ONE_MINUS_SRC_ALPHA [C].
+        c.state.blend = true, c.state.op = gfx::BlendOp::Add;
+        using F = gfx::BlendFactor;
+        if (b.burn > 0) c.state.src = F::One, c.state.dst = F::InvSrcAlpha;
+        else switch (b.blend) {
+            case 0: c.state.blend = false; break;
+            case 1: c.state.src = F::SrcAlpha, c.state.dst = F::One; break;
+            case 2: c.state.src = F::SrcAlpha, c.state.dst = F::One, c.state.op = gfx::BlendOp::ReverseSubtract; break;
+            case 4: c.state.src = F::Zero, c.state.dst = F::SrcAlpha; break;
+            case 5: c.state.src = F::DstColor, c.state.dst = F::One; break;
+            default: c.state.src = F::SrcAlpha, c.state.dst = F::InvSrcAlpha; break;
+            }
         c.first = int(b.first), c.count = int(b.count);
         d.draw(c);
     }

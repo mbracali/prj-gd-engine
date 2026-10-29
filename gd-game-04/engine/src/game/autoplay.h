@@ -2,6 +2,8 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #pragma once
 
+#include <cstdlib>
+
 #include <cstddef>
 
 #include "game/note_track.h"
@@ -31,6 +33,9 @@ public:
             // strum within strum_before_forming would be a bum note.
             const bool taken = player.current() > next_;
             if (!taken && !(tap_ && tappable)) in.strum = true;
+            // GD04_AUTOPLAY_MISS=<n> (development aid, the song hooks' checks):
+            // every n-th note is strummed with no fret held (a bum note, then a miss).
+            if (missEvery() > 0 && next_ % size_t(missEvery()) == size_t(missEvery() - 1)) held_ = 0, holdUntil_ = 0, in.strum = true;
             ++next_;
             break;  // one note per frame (the judge hits one per frame)
         }
@@ -42,6 +47,13 @@ public:
         return in;
     }
     bool done() const { return next_ >= t_.notes.size(); }
+    static int missEvery() {
+        static const int n = [] {
+            const char* v = std::getenv("GD04_AUTOPLAY_MISS");
+            return v ? std::atoi(v) : 0;
+        }();
+        return n;
+    }
     // A mid-song start: begins at the first note at or after `ms`.
     void skipTo(double ms) {
         while (next_ < t_.notes.size() && double(t_.notes[next_].time) < ms) ++next_;

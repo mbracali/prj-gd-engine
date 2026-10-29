@@ -17,6 +17,10 @@
 // pick, randomness types not modelled yet].
 namespace {
 uint32_t K(const char* s) { return qbkey::key(s); }
+std::function<void(uint32_t)>& listener() {
+    static std::function<void(uint32_t)> f;
+    return f;
+}
 
 const qb::Value* firstUnnamed(const qb::Struct& p) {
     for (const qb::Item& it : p.items)
@@ -24,6 +28,8 @@ const qb::Value* firstUnnamed(const qb::Struct& p) {
     return nullptr;
 }
 }  // namespace
+
+void setSoundEventListener(std::function<void(uint32_t)> f) { listener() = std::move(f); }
 
 void addSoundNatives(qs::Vm& vm, Sfx& sfx) {
     using qs::ScriptRun;
@@ -34,6 +40,7 @@ void addSoundNatives(qs::Vm& vm, Sfx& sfx) {
         const qb::Value* ev = Vm::param(p, K("event"));
         if (!ev) ev = firstUnnamed(p);
         if (!ev || (ev->type != qb::Type::Key && ev->type != qb::Type::KeyPtr)) return false;
+        if (listener()) listener()(ev->key);
         const qb::Value* c = v.global(qbkey::key(qbkey::name(ev->key) + "_container"));
         if (!c || !c->st) {
             v.logOnce("SoundEvent: no container for " + qbkey::name(ev->key));

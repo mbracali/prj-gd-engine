@@ -180,7 +180,10 @@ Loaders: 0x82415FD8 (.img fix-up), 0x82382970 / 0x82382D88 (.tex),
 - **Tiling**: Xenos 2D tiled addressing (32x32-block macro tiles, bank /
   pipe interleave); levels >= 1 are npot(w) >> i; the packed mip tail starts
   at the first level with min(w, h) <= 16 texels, laid out at (0, h) or
-  (w, 0) in a tile of the base pitch [C data].
+  (w, 0) in a tile of the base pitch [C data]. A base under 16 texels sits
+  where a 16-texel first level would: its offsets are those of the level
+  scaled by 16 / npot(min(w, h)) (the 4x4 `white` at texel x 16; the 8x32,
+  8x128 and 32x8 UI textures likewise) [C data: their only non-zero blocks].
 - **Volume (3D) tiling** (GD04-014): the one volume on the disc
   (`global_gfx.tex` #49, key 0x2E2E1ADF, DXT5 128x128x32, one level,
   class byte 5, 0x80000 bytes = 32x32 blocks x 32 slices x 16) is laid out

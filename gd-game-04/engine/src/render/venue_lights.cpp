@@ -40,7 +40,7 @@ void LightShow::init(const Venue& v, const Globals& g, const Chart& chart) {
     lights_.resize(v.lights.size());
     for (size_t i = 0; i < v.lights.size(); ++i) {
         const Light& l = v.lights[i];
-        LightState s{l.color, l.intensity, l.attenStart, l.attenEnd, l.specular};
+        LightState s{l.color, l.intensity, l.attenStart, l.attenEnd, l.specular, l.shadow};
         lights_[i].from = lights_[i].to = s;
     }
     // The light housings: game objects with a lightvolumetype [C data: the _gfx node arrays].
@@ -113,13 +113,16 @@ LightState LightShow::at(size_t i, double t) const {
     r.attenStart = tg.from.attenStart + (tg.to.attenStart - tg.from.attenStart) * s;
     r.attenEnd = tg.from.attenEnd + (tg.to.attenEnd - tg.from.attenEnd) * s;
     r.specular = tg.from.specular + (tg.to.specular - tg.from.specular) * s;
+    r.shadow = tg.from.shadow + (tg.to.shadow - tg.from.shadow) * s;
     return r;
 }
 
 void LightShow::play(uint32_t snapshot, double t) {
     // LightShow_PlaySnapshot: each entry sets one light (lightchecksum) to
-    // r g b / 255, intensity, FarAttenStart / End, blended over the current
-    // time (LightShow_SetTime; 0 while disabled) [C data; I: the blend].
+    // light_setparams (821B4950): r g b / 255, intensity, specularintensity,
+    // shadowintensity; FarAttenStart / End are not applied (the scripts'
+    // ApplyLightFarAtten*Change are empty) [C]; blended over the current time
+    // (LightShow_SetTime; 0 while disabled) [I: the blend].
     if (!snapshots_) return;
     const qb::Value* list = snapshots_->find(snapshot);
     if (!list || list->type != qb::Type::Array || !list->arr) return;
@@ -161,11 +164,11 @@ void LightShow::play(uint32_t snapshot, double t) {
             if (v_->lights[i].name != light) continue;
             Target& tg = lights_[i];
             tg.from = at(i, t);
-            tg.to.color = {num(e->find(K("r")), 255) / 255.0f, num(e->find(K("g")), 255) / 255.0f, num(e->find(K("b")), 255) / 255.0f};
+            tg.to.color = {num(e->find(K("r")), tg.to.color[0] * 255) / 255.0f, num(e->find(K("g")), tg.to.color[1] * 255) / 255.0f,
+                           num(e->find(K("b")), tg.to.color[2] * 255) / 255.0f};
             tg.to.intensity = num(e->find(K("intensity")), tg.to.intensity);
-            tg.to.attenStart = num(e->find(K("FarAttenStart")), tg.to.attenStart);
-            tg.to.attenEnd = num(e->find(K("FarAttenEnd")), tg.to.attenEnd);
             tg.to.specular = num(e->find(K("specularintensity")), tg.to.specular);
+            tg.to.shadow = num(e->find(K("shadowintensity")), tg.to.shadow);
             if (strobeOn_ && mood_ == K("strobe")) tg.to.intensity = 1.0f;  // LightShow_AppendSnapshotParams intensity=1.0
             tg.start = t;
             tg.blend = timeEnabled_ ? blend_ : 0.0;

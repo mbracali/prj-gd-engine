@@ -13,6 +13,7 @@
 #include <mutex>
 
 #include "data/disc.h"
+#include "data/qbkey.h"
 
 namespace gh3shader {
 
@@ -75,11 +76,35 @@ void Programs::shutdown() {
     for (auto& [k, p] : programs_)
         if (p && p->id) dev_->destroyProgram(p->id);
     programs_.clear();
+    for (auto& [k, p] : named_)
+        if (p && p->id) dev_->destroyProgram(p->id);
+    named_.clear();
     if (white_) dev_->destroyTexture(white_);
     if (whiteCube_) dev_->destroyTexture(whiteCube_);
     white_ = {}, whiteCube_ = {};
     dev_ = nullptr;
     lib_.reset();
+}
+
+std::unique_ptr<Program> Programs::make(int vs, int ps, const std::string& name) {
+    std::unique_ptr<Program> out;
+    const xenos::Program x = xenos::translate(lib_->shader(vs), lib_->shader(ps));
+    if (!x.ok) {
+        SDL_Log("gh3 shader %s: not translated: %s", name.c_str(), x.error.c_str());
+        return out;
+    }
+    if (SDL_getenv("GD04_XENOS_DUMP")) SDL_Log("gh3 shader %s\n--- vertex\n%s\n--- pixel\n%s", name.c_str(), x.vertex.c_str(), x.fragment.c_str());
+    std::string err;
+    const gfx::ProgramId pid = dev_->createProgram(programDesc(x, name, dev_->info().clipDepthZeroToOne), err);
+    if (!pid) {
+        SDL_Log("gh3 shader %s: %s", name.c_str(), err.c_str());
+        return out;
+    }
+    out = std::make_unique<Program>();
+    out->id = pid;
+    out->samplers = x.samplers, out->cubes = x.cubes, out->attribs = x.attribs;
+    out->name = name;
+    return out;
 }
 
 const Program* Programs::get(uint32_t key, matlib::Technique t) {
@@ -89,27 +114,23 @@ const Program* Programs::get(uint32_t key, matlib::Technique t) {
     if (it != programs_.end()) return it->second.get();
     std::unique_ptr<Program> out;
     const matlib::Template* tp = lib_->find(key);
-    if (tp && tp->vs[t] >= 0 && tp->ps[t] >= 0) {
-        const xenos::Program x = xenos::translate(lib_->shader(tp->vs[t]), lib_->shader(tp->ps[t]));
-        if (!x.ok) {
-            SDL_Log("gh3 shader %s: not translated: %s", tp->name.c_str(), x.error.c_str());
-        } else {
-            if (SDL_getenv("GD04_XENOS_DUMP"))
-                SDL_Log("gh3 shader %s\n--- vertex\n%s\n--- pixel\n%s", tp->name.c_str(), x.vertex.c_str(), x.fragment.c_str());
-            std::string err;
-            const gfx::ProgramId pid = dev_->createProgram(programDesc(x, tp->name, dev_->info().clipDepthZeroToOne), err);
-            if (!pid) {
-                SDL_Log("gh3 shader %s: %s", tp->name.c_str(), err.c_str());
-            } else {
-                out = std::make_unique<Program>();
-                out->id = pid;
-                out->samplers = x.samplers, out->cubes = x.cubes, out->attribs = x.attribs;
-                out->name = tp->name;
-            }
-        }
-    }
+    if (tp && tp->vs[t] >= 0 && tp->ps[t] >= 0) out = make(tp->vs[t], tp->ps[t], tp->name);
     const Program* r = out.get();
     programs_[id] = std::move(out);
+    return r;
+}
+
+const Program* Programs::get(uint32_t key, const std::string& technique) {
+    if (!dev_ || !lib_) return nullptr;
+    const std::string id = std::to_string(key) + ":" + technique;
+    auto it = named_.find(id);
+    if (it != named_.end()) return it->second.get();
+    std::unique_ptr<Program> out;
+    const matlib::Template* tp = lib_->find(key);
+    const matlib::TechniqueRef* tr = tp ? tp->technique(technique) : nullptr;
+    if (tr && tr->vs[0] >= 0 && tr->ps[0] >= 0) out = make(tr->vs[0], tr->ps[0], tp->name + "." + technique);
+    const Program* r = out.get();
+    named_[id] = std::move(out);
     return r;
 }
 
@@ -123,88 +144,107 @@ void fillMaterialConstants(const scene::Material& m, float alphaRef, MaterialCon
     out.vs[63][0] = -1.0f;
 }
 
-void lightObject(const LightIn* lights, size_t count, const gfx::Vec3& center, ObjectConstants& out) {
-    for (int r = kRegAmbient; r < kRegAmbient + 16; ++r) out.set(r, 0, 0, 0, 0);
-    gfx::Vec3 amb{}, sh0{}, shx{}, shy{}, shz{};
-    // How much of a light reaches the object, and the direction to it.
-    auto reach = [&](const LightIn& l, gfx::Vec3& toLight) {
-        if (l.type == LightIn::Directional) {
-            toLight = l.dir * -1.0f;
-            return 1.0f;
-        }
-        gfx::Vec3 d = l.pos - center;
-        const float dist = std::sqrt(gfx::dot(d, d));
-        toLight = dist > 1e-4f ? d * (1.0f / dist) : gfx::Vec3{0, 1, 0};
-        float att = 1;
-        if (l.attenEnd > l.attenStart) att = std::clamp((l.attenEnd - dist) / (l.attenEnd - l.attenStart), 0.0f, 1.0f);
-        else if (dist > l.attenEnd) att = 0;
-        if (l.type == LightIn::Spot) {
-            const float c = -gfx::dot(toLight, l.dir);
-            const float lo = std::min(l.cosField, l.cosHotspot - 1e-4f);
-            att *= std::clamp((c - lo) / (l.cosHotspot - lo), 0.0f, 1.0f);
-        }
-        return att;
-    };
-    // The key light and the three specular-only lights: the strongest
-    // directional (or spot) lights reaching the object, in order [I].
-    struct Ranked {
-        int index;
-        float power, reach;
-        gfx::Vec3 toLight;
-    };
-    Ranked ranked[4];
-    int nRanked = 0;
-    for (size_t i = 0; i < count; ++i) {
-        const LightIn& l = lights[i];
-        if (l.type == LightIn::Ambient || l.type == LightIn::Point) continue;
-        gfx::Vec3 t;
-        const float a = reach(l, t);
-        const float p = a * (l.color.x + l.color.y + l.color.z);
-        if (p <= 0) continue;
-        int at = nRanked < 4 ? nRanked++ : 4;
-        while (at > 0 && ranked[at - 1].power < p) {
-            if (at < 4) ranked[at] = ranked[at - 1];
-            --at;
-        }
-        if (at < 4) ranked[at] = {int(i), p, a, t};
+LightIn lightIn(const venue::Light& l, const venue::LightState& s) {
+    LightIn li;
+    li.type = l.type == venue::LightType::Ambient ? LightIn::Ambient : l.type == venue::LightType::Directional ? LightIn::Directional
+              : l.type == venue::LightType::Point ? LightIn::Point : LightIn::Spot;
+    li.pos = {l.pos[0], l.pos[1], l.pos[2]};
+    li.dir = {l.dir[0], l.dir[1], l.dir[2]};
+    li.color = {s.color[0], s.color[1], s.color[2]};
+    li.intensity = s.intensity, li.specular = s.specular, li.shadow = s.shadow;
+    if (li.type == LightIn::Point || li.type == LightIn::Spot) {
+        // Linear in the squared distance between attenstart and attenend [C 822BE020].
+        li.attA = l.attenEnd * l.attenEnd;
+        li.attB = 1.0f / (l.attenEnd * l.attenEnd - l.attenStart * l.attenStart + 0.0001f);
     }
-    for (size_t i = 0; i < count; ++i) {
+    li.dynamic = l.dynamic, li.shadowLight = l.shadowLight;
+    li.boxCenter = {l.boxCenter[0], l.boxCenter[1], l.boxCenter[2]};
+    li.boxHalf = {l.boxHalf[0], l.boxHalf[1], l.boxHalf[2]};
+    return li;
+}
+
+bool groupLights(uint32_t lightGroup, uint32_t objectGroup) {
+    static const uint32_t kDefault = qbkey::key("defaultgroup"), kBand = qbkey::key("band"), kAlt = qbkey::key("alt_band");
+    if (!lightGroup) lightGroup = kDefault;
+    if (!objectGroup) objectGroup = kDefault;
+    return lightGroup == objectGroup || lightGroup == kDefault || (lightGroup == kBand && objectGroup == kAlt);
+}
+
+void lightObject(const LightIn* lights, size_t count, const gfx::Vec3& p, ObjectConstants& out) {
+    for (int r = kRegAmbient; r < kRegAmbient + 16; ++r) out.set(r, 0, 0, 0, 0);
+    struct Cand {
+        const LightIn* l;
+        float scale, inten, att, score;
+    };
+    Cand cand[32];
+    int n = 0;
+    for (size_t i = 0; i < count && n < 32; ++i) {
         const LightIn& l = lights[i];
-        if (l.type == LightIn::Ambient) {
-            amb = amb + l.color;
+        if (!l.dynamic && (std::fabs(p.x - l.boxCenter.x) > l.boxHalf.x || std::fabs(p.y - l.boxCenter.y) > l.boxHalf.y ||
+                           std::fabs(p.z - l.boxCenter.z) > l.boxHalf.z))
             continue;
+        const float a = l.groupScale;
+        const float inten = l.intensity * a;
+        const gfx::Vec3 d = l.pos - p;
+        const float att = std::clamp((l.attA - (gfx::dot(d, d) + 0.0001f)) * l.attB, 0.0f, 1.0f);
+        const float lum = l.color.x * 0.299f + l.color.y * 0.587f + l.color.z * 0.114f;
+        cand[n++] = {&l, a, inten, att, lum * inten * (l.shadowLight ? 50000.0f : 1.0f) * att};
+    }
+    std::stable_sort(cand, cand + n, [](const Cand& x, const Cand& y) { return x.score > y.score; });
+    gfx::Vec3 amb{}, sh[4]{};
+    const Cand* slot[4] = {};
+    int ndir = 0;
+    auto addSh = [&](const gfx::Vec3& c, const gfx::Vec3& travel) {
+        // 823DA668: SH0 += C x 4/17, SH1..3 += C x 8/17 x l (l = towards the light) [C].
+        const gfx::Vec3 l = travel * -1.0f;
+        sh[0] = sh[0] + c * (4.0f / 17.0f);
+        sh[1] = sh[1] + c * (8.0f / 17.0f * l.x);
+        sh[2] = sh[2] + c * (8.0f / 17.0f * l.y);
+        sh[3] = sh[3] + c * (8.0f / 17.0f * l.z);
+    };
+    auto norm = [](const gfx::Vec3& v) {
+        const float len = std::sqrt(gfx::dot(v, v));
+        return len > 0 ? v * (1.0f / len) : gfx::Vec3{0, 0, 0};
+    };
+    for (int i = 0; i < n; ++i) {
+        const Cand& c = cand[i];
+        const LightIn& l = *c.l;
+        switch (l.type) {
+        case LightIn::Directional:
+            if (ndir > 0) addSh(l.color * c.inten, norm(l.dir));
+            if (ndir < 4) slot[ndir++] = &c;
+            break;
+        case LightIn::Point:
+            if (ndir > 0) addSh(l.color * (c.inten * c.att), norm(p - l.pos));
+            if (ndir < 4) slot[ndir++] = &c;
+            break;
+        case LightIn::Spot: {
+            const float along = std::clamp(gfx::dot(p - l.pos, l.dir), 0.0f, 1.0f);
+            addSh(l.color * (c.inten * along), norm(p - l.pos));
+            break;
         }
-        int rank = -1;
-        for (int k = 0; k < nRanked; ++k)
-            if (ranked[k].index == int(i)) rank = k;
-        gfx::Vec3 t;
-        const float a = rank >= 0 ? ranked[rank].reach : reach(l, t);
-        if (rank >= 0) t = ranked[rank].toLight;
-        if (a <= 0) continue;
-        const gfx::Vec3 c = l.color * a;
-        const gfx::Vec3 sc = c * l.specular;
-        if (rank == 0) {
-            // g_dirLight0Dir is where the light travels (the shaders use N.-dir).
-            out.set(kRegDirLight0, -t.x, -t.y, -t.z, 0);
-            out.set(kRegDirLight0 + 1, c.x, c.y, c.z, 1.0f);
-            out.set(kRegDirLight0 + 2, sc.x, sc.y, sc.z, 0);
-            continue;
+        case LightIn::Ambient: amb = amb + l.color * c.inten; break;
         }
-        if (rank > 0) {
-            out.set(kRegDirLight0 + 1 + 2 * rank, -t.x, -t.y, -t.z, 0);
-            out.set(kRegDirLight0 + 2 + 2 * rank, sc.x, sc.y, sc.z, 0);
-        }
-        // L1 projection of a clamped cosine lobe: 1/4 + n.l / 2.
-        sh0 = sh0 + c * 0.25f;
-        shx = shx + c * (0.5f * t.x);
-        shy = shy + c * (0.5f * t.y);
-        shz = shz + c * (0.5f * t.z);
     }
     out.set(kRegAmbient, amb.x, amb.y, amb.z, 1);
-    out.set(kRegShLight0, sh0.x, sh0.y, sh0.z, 0);
-    out.set(kRegShLight0 + 1, shx.x, shx.y, shx.z, 0);
-    out.set(kRegShLight0 + 2, shy.x, shy.y, shy.z, 0);
-    out.set(kRegShLight0 + 3, shz.x, shz.y, shz.z, 0);
+    for (int k = 0; k < ndir; ++k) {
+        const LightIn& l = *slot[k]->l;
+        const float a = slot[k]->scale;
+        // Slots 0 and 1: a point light's direction from it to the object;
+        // slots 2 and 3 always the light's own direction (as coded) [C 823DB168].
+        const gfx::Vec3 dir = (k < 2 && l.type != LightIn::Directional) ? norm(p - l.pos) : l.dir;
+        const gfx::Vec3 spec = l.color * (l.specular * a);
+        if (k == 0) {
+            const gfx::Vec3 col = l.color * (l.intensity * a);
+            out.set(kRegDirLight0, dir.x, dir.y, dir.z, 0);
+            out.set(kRegDirLight0 + 1, col.x, col.y, col.z, l.shadow);
+            out.set(kRegDirLight0 + 2, spec.x, spec.y, spec.z, 0);
+        } else {
+            out.set(kRegDirLight0 + 1 + 2 * k, dir.x, dir.y, dir.z, 0);
+            out.set(kRegDirLight0 + 2 + 2 * k, spec.x, spec.y, spec.z, 0);
+        }
+    }
+    for (int k = 0; k < 4; ++k) out.set(kRegShLight0 + k, sh[k].x, sh[k].y, sh[k].z, 0);
 }
 
 const gfx::VertexLayout& vertexLayout() {

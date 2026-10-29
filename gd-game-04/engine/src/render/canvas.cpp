@@ -108,7 +108,8 @@ void Canvas::flush() {
     c.count = int(batch_.size());
     c.state.blend = batchBlend_ != Blend::Opaque;
     c.state.src = gfx::BlendFactor::SrcAlpha;
-    c.state.dst = batchBlend_ == Blend::Add ? gfx::BlendFactor::One : gfx::BlendFactor::InvSrcAlpha;
+    c.state.dst = batchBlend_ == Blend::Add || batchBlend_ == Blend::Sub ? gfx::BlendFactor::One : gfx::BlendFactor::InvSrcAlpha;
+    c.state.op = batchBlend_ == Blend::Sub ? gfx::BlendOp::ReverseSubtract : gfx::BlendOp::Add;
     c.textures[0] = gfx::TextureId{batchTexture_ ? batchTexture_ : atlas_.id};
     c.samplers[0] = {batchTexture_ ? gfx::Filter::Linear : gfx::Filter::Nearest, batchRepeat_ ? gfx::Wrap::Repeat : gfx::Wrap::Clamp, 0};
     const gfx::Mat4 proj = gfx::Mat4::ortho2D(0, kScreenW, 0, kScreenH);

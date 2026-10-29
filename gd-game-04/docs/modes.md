@@ -56,8 +56,8 @@ fallback (the character's highway material: M6) [I].
   1000 ms `star_power_coop_trigger_ms` is dead code [I]. The prompt is
   spawned with the other player's status, so it shows on the side of the
   player who has not raised: P1's trigger -> P2's side (865, 240), P2's ->
-  P1's (415, 240) [C 0x82112850, script; FINDINGS §6]. gd04 draws it on
-  P1's side always (render/hud2p.cpp: a follow-up).
+  P1's (415, 240) [C 0x82112850, script; FINDINGS §6]. gd04 draws it
+  there (Match::raiseAxeBy, render/hud2p.cpp).
 - Health per player (may go below 0); fail when (h1 + h2) / 2 <= 0
   [0x8210FD18]; invincibility: both easy 20 %, both <= medium 10 %
   [calc_health_invincible_time].
@@ -211,6 +211,11 @@ Not done / approximations:
   training, lefty flip's button slide), band attack / response animations,
   the battle alert frames (create_battle_alert_frames), attack_ready_text's
   exact motion.
-- Co-op's raise-axe prompt always on P1's side; time_in_lead is not kept.
+- Co-op's time_in_lead is not kept.
+- Battle / boss: the cards and attacks are the native Match's; GH3's
+  battle scripts give only their sounds (Battle_Power_Awarded_SFX_P<n>, the
+  crowd reaction, GH_BattleMode_Player<n>_SFX_*; ui/song_hooks.cpp,
+  FINDINGS "D10 done"); GuitarEvent_BattleAttackFinished (the battle DSP
+  reset, the attack-finished sound) is not raised.
 - Pro face-off and battle use the guitar part for both players [C menus set
   part = guitar].

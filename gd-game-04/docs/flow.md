@@ -66,7 +66,8 @@ x max_num_players, then (autolaunch_startnow = 0, skip_boot_menu = 0)
 then **busy-waits** `begin GetTrueElapsedTime starttime=<legal_start_time>;
 if elapsedtime >= 6000 { change legal_timer = 1; break } repeat` (no Wait in the
 loop: the VM must yield on its own or GetTrueElapsedTime must advance), then
-hideloadingscreen [C].
+hideloadingscreen [C]. The boot_legal picture (with the load_wheel) is drawn
+by the port over everything meanwhile (docs/ui.md §8; refcaps 00a matches).
 - `NotCD` (822873c8) must return **false** (retail): otherwise
   enable_button_cheats stays 1 (LaunchViewer, debug menu), movies are skipped
   (`show_movies = 0` in guitar.qb) and attract mode starts after 5 s [C].
@@ -271,6 +272,12 @@ runs first), `func = quickplay_start_song`, flow_state **quickplay_play_song_fs*
   LoadMovieIntoBuffer, `PlayMovieFromBuffer {buffer_slot textureslot=2 no_hold
   wait_until_rendered texturepri=4999}`; TextBlockElement tip; "LOADING" letters
   (split_text_into_array_elements, StringToCharArray) + jiggle script.
+  The port plays the movie on its texture slot behind the tip and holds the
+  script at `wait_until_rendered` until the first picture is drawn (docs/ui.md
+  §8) [I], so the 10a screen shows; it is then destroyed within a frame or two
+  (the port's pak loads finish at once) and the song's own load runs after it,
+  in one long frame of the app's - the 360 shows LOADING for about 2 s
+  (refcaps 10a at 1.0 s, 10b fly-by at 2.9 s).
 - `quickplay_start_song` [C]: cs_get_total_guitarists, GetRandomValue ->
   random guitarist (character_id, style 1, outfit 1); random guitar from
   Bonus_Guitars + Secret_Guitars with `unlocked_for_purchase` (GetGlobalTags,

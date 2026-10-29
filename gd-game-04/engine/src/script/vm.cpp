@@ -35,7 +35,10 @@ struct Exec {
     const Token& cur() const { return t[i]; }
     bool atEnd() const { return i >= t.size() || isEnd(t[i].op); }
     void skipNops() {
-        while (i < t.size() && t[i].op == kNop) ++i;
+        // Inside parentheses an expression goes on over line ends
+        // (create_detailed_stats_menu's `( $ game_mode = p2_career or` /
+        // `$ game_mode = p2_coop )`) [C data].
+        while (i < t.size() && (t[i].op == kNop || (parens > 0 && (t[i].op == kEndOfLine || t[i].op == kEndOfLineNumber)))) ++i;
     }
 
     // -- values ---------------------------------------------------------
@@ -59,7 +62,14 @@ struct Exec {
         qb::Value base = base0;
         if ((base.type == qb::Type::Key || base.type == qb::Type::KeyPtr) && vm.global(base.key)) base = *vm.global(base.key);
         if (base.type == qb::Type::Struct && base.st) {
-            if (const qb::Value* v = vm.globals().field(*base.st, field)) return *v;
+            if (const qb::Value* v = vm.globals().field(*base.st, field)) {
+                // A pointer field (`marker = <slowride_markers_text_e5fa3adf>`)
+                // reads the string global it points at [I: get_section_stats'
+                // section names].
+                if (v->type == qb::Type::KeyPtr)
+                    if (const qb::Value* g = vm.global(v->key); g && (g->type == qb::Type::String || g->type == qb::Type::WString)) return *g;
+                return *v;
+            }
         }
         return none();
     }
@@ -216,6 +226,13 @@ struct Exec {
             --parens;
             skipNops();
             if (i < t.size() && t[i].op == kCloseParen) ++i;
+            // `( <arg> column_just )`, a FormatText checksumName naming a global
+            // array or pair: its value (add_text_to_column) [I: only so is
+            // the detailed stats' layout right].
+            if (e.type == qb::Type::Key || e.type == qb::Type::KeyPtr)
+                if (const qb::Value* g = vm.global(e.key);
+                    g && (g->type == qb::Type::Array || g->type == qb::Type::Pair || g->type == qb::Type::Vector))
+                    return *g;
             return e;
         }
         case kStartStruct: return structLiteral();
@@ -274,15 +291,32 @@ struct Exec {
             }
             r -= w;
         }
-        // Offsets are relative to the end of the offset table [I].
-        const uint32_t target = uint32_t(int32_t(k.end) + k.offsets[pick]);
+        // Each offset counts from just after itself [C data: every random
+        // on the disc lands its branches on token starts so, e.g. the
+        // setlist's `random:((1,1,1),(8,24,40))` lines, 20 bytes apart].
+        const int32_t from = int32_t(k.end) - 4 * int32_t(k.offsets.size() - 1 - pick);
+        const uint32_t target = uint32_t(from + k.offsets[pick]);
         i = after;
         for (size_t n = after; n < t.size(); ++n)
             if (t[n].at == target) {
                 i = n;
                 break;
             }
-        return unary();
+        qb::Value v = unary();
+        // Each branch but the last ends with a jump past the others (its
+        // target is the token's end + the operand) [C data: every random on
+        // the disc]; without following it the next branch's value was read
+        // as one more item (the guards' first clip lost).
+        skipNops();
+        if (i < t.size() && t[i].op == kJump) {
+            const uint32_t to = t[i].end + t[i].u;
+            for (size_t n = i + 1; n < t.size(); ++n)
+                if (t[n].at >= to) {
+                    i = n;
+                    break;
+                }
+        }
+        return v;
     }
 
     qb::Value postfix() {
@@ -306,12 +340,22 @@ struct Exec {
                     continue;
                 }
                 if (i < t.size() && t[i].op == kName) v = member(v, t[i++].u, vm);
-                else if (i < t.size() && t[i].op == kArg) {
+                else if (i < t.size() && t[i].op == kOpenParen) {
+                    // `. ( $ target_store_camera_prop )`: the field a key expression names
+                    // (store_camera_script) [C data].
+                    const qb::Value key = primary();
+                    if (key.type == qb::Type::Key || key.type == qb::Type::KeyPtr) v = member(v, key.key, vm);
+                    else v = none();
+                } else if (i < t.size() && t[i].op == kArg) {
                     qb::Value key = primary();
                     v = member(v, key.key, vm);
                 }
                 continue;
             }
+            // A key naming a global array indexes that array (get_section_stats'
+            // `<arg> section_array [ i ]`, a checksumName 'slowride_markers') [I].
+            if (i < t.size() && t[i].op == kStartArray && (v.type == qb::Type::Key || v.type == qb::Type::KeyPtr))
+                if (const qb::Value* g = vm.global(v.key); g && g->type == qb::Type::Array) v = *g;
             if (i < t.size() && t[i].op == kStartArray && (v.type == qb::Type::Array || v.type == qb::Type::Pair || v.type == qb::Type::Vector)) {
                 ++i;
                 qb::Value idx = expression();
@@ -354,7 +398,20 @@ struct Exec {
         }
     }
 
-    qb::Value binary(Op op, const qb::Value& a, const qb::Value& b) {
+    qb::Value binary(Op op, const qb::Value& a0, const qb::Value& b0) {
+        // A key naming a global number / pair / vector stands for its value
+        // (`pair:(1.0, 0.0) * <arg> column_x`, column_x = FormatText's
+        // checksumName 'left_column_x') [I: add_text_to_column].
+        auto deref = [this](const qb::Value& v) -> const qb::Value& {
+            if (v.type == qb::Type::Key || v.type == qb::Type::KeyPtr)
+                if (const qb::Value* g = vm.global(v.key);
+                    g && (g->type == qb::Type::Int || g->type == qb::Type::Float || g->type == qb::Type::Pair || g->type == qb::Type::Vector))
+                    return *g;
+            return v;
+        };
+        const bool arith = op == kAdd || op == kMinus || op == kMultiply || op == kDivide;
+        const qb::Value& a = arith ? deref(a0) : a0;
+        const qb::Value& b = arith ? deref(b0) : b0;
         const bool anyFloat = a.type == qb::Type::Float || b.type == qb::Type::Float;
         auto numeric = [](const qb::Value& v) { return v.type == qb::Type::Int || v.type == qb::Type::Float; };
         switch (op) {
@@ -510,6 +567,34 @@ struct Exec {
 
 // -- Vm ------------------------------------------------------------------
 
+namespace {
+
+// A called script's parameters: an unnamed struct among them (`<arg>
+// create_params`, a flow state's `state_create_params`) gives its fields,
+// later ones replacing earlier [C data: ui_flow_manager_respond_to_action
+// passes create_pause_menu's for_options so].
+qb::Struct scriptParams(qb::Struct p) {
+    bool any = false;
+    for (const qb::Item& it : p.items) any = any || (it.name == 0 && it.value.type == qb::Type::Struct && it.value.st);
+    if (!any) return p;
+    qb::Struct out;
+    for (qb::Item& it : p.items) {
+        if (it.name == 0 && it.value.type == qb::Type::Struct && it.value.st) {
+            for (const qb::Item& sub : it.value.st->items) {
+                if (sub.name) Vm::set(out, sub.name, sub.value);
+                else out.items.push_back(sub);
+            }
+        } else if (it.name) {
+            Vm::set(out, it.name, std::move(it.value));
+        } else {
+            out.items.push_back(std::move(it));
+        }
+    }
+    return out;
+}
+
+}  // namespace
+
 Vm::Vm(Globals& globals) : g_(globals) {
     const char* v = SDL_getenv("GD04_UILOG");
     uiLog_ = v && *v && *v != '0';
@@ -644,7 +729,7 @@ bool Vm::callName(ScriptRun& run, uint32_t name, qb::Struct& params, bool& resul
         if (trace) SDL_Log("qscript: %.0f ms call %s (from %s)", clockMs_, qbkey::name(name).c_str(), qbkey::name(run.name).c_str());
         Frame f;
         f.code = std::move(c);
-        f.locals = std::make_shared<qb::Struct>(std::move(params));
+        f.locals = std::make_shared<qb::Struct>(scriptParams(std::move(params)));
         if (run.frames.size() > 200) {
             logOnce("script call depth over 200 at " + qbkey::name(name));
             result = false;
@@ -674,11 +759,12 @@ uint32_t Vm::spawnOn(uint32_t name, const qb::Struct& params, uint32_t object) {
     return id;
 }
 
-bool Vm::run(uint32_t name, const qb::Struct& params, bool* result) {
+bool Vm::run(uint32_t name, const qb::Struct& params, bool* result, uint32_t object) {
     auto c = code(name);
     if (!c) {
         if (natives_.count(name)) {
             ScriptRun tmp;
+            tmp.object = object;
             qb::Struct p = params;
             const bool r = natives_[name](*this, tmp, p);
             if (result) *result = r;
@@ -690,6 +776,8 @@ bool Vm::run(uint32_t name, const qb::Struct& params, bool* result) {
     auto r = std::make_unique<ScriptRun>();
     r->id = nextId_++;
     r->name = name;
+    r->object = object;
+    r->handler = object != 0;
     Frame f;
     f.code = c;
     f.locals = std::make_shared<qb::Struct>(params);
@@ -796,7 +884,7 @@ bool Vm::callForValue(ScriptRun& run, uint32_t name, qb::Struct& params) {
         sub.name = name;
         Frame f;
         f.code = std::move(c);
-        f.locals = std::make_shared<qb::Struct>(params);
+        f.locals = std::make_shared<qb::Struct>(scriptParams(params));
         sub.frames.push_back(std::move(f));
         // A wait inside it: the caller blocks while the scripts it spawned
         // run on, frame by frame, until it ends (LoadPakAsync waiting for its
@@ -1161,18 +1249,25 @@ bool Vm::step(ScriptRun& run, int budget) {
             fr.pc = ex.i;
             continue;
         }
-        if (first.op == kInlineStruct || first.op == kInlineStruct2) {
+        if (first.op == kInlineStruct || first.op == kInlineStruct2 || first.op == kStartStruct) {
             // A line that is only a struct: the script's default parameters,
-            // kept where the caller gave none [I: setup_setlisttags etc.].
+            // kept where the caller gave none [I: setup_setlisttags etc.];
+            // also written out over lines (`{` ... `}`: add_text_to_column) [C data].
             if (!fr.locals) fr.locals = std::make_shared<qb::Struct>();
-            for (qb::Item it : g_.expand(*first.st)) {
+            qb::Struct literal;
+            if (first.op == kStartStruct) {
+                const qb::Value v = ex.structLiteral();
+                if (v.st) literal = *v.st;
+            }
+            const qb::Struct& defaults = first.op == kStartStruct ? literal : *first.st;
+            for (qb::Item it : g_.expand(defaults)) {
                 if (it.value.type == qb::Type::KeyPtr)
                     if (const qb::Value* gv = global(it.value.key)) it.value = *gv;
                 if (it.name && param(*fr.locals, it.name)) continue;
                 if (it.name) set(*fr.locals, it.name, std::move(it.value));
                 else fr.locals->items.push_back(std::move(it));
             }
-            fr.pc = ex.i + 1;
+            fr.pc = first.op == kStartStruct ? ex.i : ex.i + 1;
             continue;
         }
         if (first.op == kName) {

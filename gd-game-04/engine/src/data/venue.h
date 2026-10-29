@@ -48,11 +48,15 @@ enum class LightType : uint8_t { Ambient, Directional, Point, Spot };
 struct Light {
     uint32_t name = 0, group = 0;
     LightType type = LightType::Point;
-    Vec3 pos{}, dir{0, 0, 1};        // dir: the light's local +z
+    Vec3 pos{}, dir{0, -1, 0};       // dir: where it shines, rotationquat x (0, -1, 0)
     Vec3 color{1, 1, 1};             // lightcolor (0..1)
-    float intensity = 0, attenStart = 0, attenEnd = 1, hotspot = 0, field = 0;
+    float intensity = 1, attenStart = 7.5f, attenEnd = 15, hotspot = 45, field = 45;
     float specular = 1;              // specularintensity
-    bool vertexBake = false;         // a "_VC_" light: baked into the vertex colours [I]
+    float shadow = 1;                // shadowintensity (shadowdensity)
+    bool dynamic = false;            // `dynamic`: lights every object (no box)
+    bool shadowLight = false;        // `shadow`: ranked x 50000
+    Vec3 boxCenter{}, boxHalf{};     // the box of the objects it may light
+    bool vertexBake = false;         // a "_VC_" light (its name; lit at run time like any other) [C: 822BE020 makes no difference]
     bool createdAtStart = false;
     uint32_t createdOn = 0;
 };

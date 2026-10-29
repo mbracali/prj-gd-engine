@@ -7,5 +7,11 @@ namespace qs {
 class Vm;
 }
 
+#include <cstdint>
+#include <functional>
+
 // SoundEventFast / PlaySound and the sound stubs (natives_sound.cpp).
 void addSoundNatives(qs::Vm& vm, Sfx& sfx);
+// Called with each sound event's key as SoundEventFast plays it (the song
+// hooks' counters); empty: none.
+void setSoundEventListener(std::function<void(uint32_t)> f);

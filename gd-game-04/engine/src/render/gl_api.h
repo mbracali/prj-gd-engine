@@ -43,6 +43,11 @@
     X(PFNGLGENBUFFERSPROC, glGenBuffers)                                        \
     X(PFNGLGENFRAMEBUFFERSPROC, glGenFramebuffers)                              \
     X(PFNGLGENSAMPLERSPROC, glGenSamplers)                                      \
+    X(PFNGLGENQUERIESPROC, glGenQueries)                                        \
+    X(PFNGLDELETEQUERIESPROC, glDeleteQueries)                                  \
+    X(PFNGLBEGINQUERYPROC, glBeginQuery)                                        \
+    X(PFNGLENDQUERYPROC, glEndQuery)                                            \
+    X(PFNGLGETQUERYOBJECTUIVPROC, glGetQueryObjectuiv)                          \
     X(PFNGLGENVERTEXARRAYSPROC, glGenVertexArrays)                              \
     X(PFNGLGETPROGRAMINFOLOGPROC, glGetProgramInfoLog)                          \
     X(PFNGLGETPROGRAMIVPROC, glGetProgramiv)                                    \
@@ -75,6 +80,10 @@
     X(decltype(&::glDeleteTextures), glDeleteTextures)                          \
     X(decltype(&::glDepthFunc), glDepthFunc)                                    \
     X(decltype(&::glDepthMask), glDepthMask)                                    \
+    X(decltype(&::glClearStencil), glClearStencil)                              \
+    X(decltype(&::glStencilFunc), glStencilFunc)                                \
+    X(decltype(&::glStencilMask), glStencilMask)                                \
+    X(decltype(&::glStencilOp), glStencilOp)                                    \
     X(decltype(&::glDisable), glDisable)                                        \
     X(decltype(&::glDrawArrays), glDrawArrays)                                  \
     X(decltype(&::glDrawElements), glDrawElements)                              \

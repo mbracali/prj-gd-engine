@@ -62,7 +62,7 @@ void Player::changeHealth(bool good, double now) {
         // the two rules below [C 0x8210FD18, globals cached by 0x821062A8].
         // gd04's no-fail (the --no-fail flag, the Enhanced option) is
         // cheat_nofail: the meter never goes down.
-        if (noFail_) return;
+        if (noFail_ || rules_.endCredits) return;
         // No loss once at 0 (co-op excepted) [C 0x8210FD18].
         if (st_.health <= 0 && !rules_.negativeHealth) return;
         // Invincibility: the first 20% (Easy) / 10% (Medium) of the song, no
@@ -120,22 +120,32 @@ void Player::miss(size_t i, double now) {
     // length) the phrase is given up (the pointer moves to the next one) and
     // star_miss_note turns the phrase's gems into normal gems [C 0x8211F56C,
     // 0x8211E8B8, 0x82102830].
+    const bool lost = n.phrase >= 0 && !missedPhrase_[size_t(n.phrase)];
     if (n.phrase >= 0) missedPhrase_[size_t(n.phrase)] = true;
     changeHealth(false, now);
-    events_.push_back({PlayerEvent::Kind::Miss, int(i), now});
+    // bum_note: a strum since the last hit or miss (0x829BA008: set by a
+    // strum, cleared by a hit and by a miss) [C 0x8211FF38, 0x8211EC6C, 0x8211F3DC].
+    events_.push_back({PlayerEvent::Kind::Miss, int(i), now, frameStrum_});
+    frameStrum_ = false;
+    if (lost) events_.push_back({PlayerEvent::Kind::StarMiss, int(i), now});
 }
 
 void Player::overstrum(double now) {
     ++st_.overstrums;
+    int lostPhrase = -1;
     resetRuns();
     lastHitMask_ = 0;
     // The phrase in progress is lost if the previous note was in it [C 0x8211F938].
     if (cur_ > 0 && cur_ < t_.notes.size()) {
         const int p = t_.notes[cur_ - 1].phrase;
-        if (p >= 0 && t_.notes[cur_].phrase == p) missedPhrase_[size_t(p)] = true;
+        if (p >= 0 && t_.notes[cur_].phrase == p && !missedPhrase_[size_t(p)]) {
+            missedPhrase_[size_t(p)] = true;
+            lostPhrase = int(cur_ - 1);
+        }
     }
     changeHealth(false, now);
-    events_.push_back({PlayerEvent::Kind::Overstrum, int(cur_), now});
+    events_.push_back({PlayerEvent::Kind::Overstrum, int(cur_), now, true});
+    if (lostPhrase >= 0) events_.push_back({PlayerEvent::Kind::StarMiss, lostPhrase, now});
 }
 
 void Player::hit(size_t i, double now, bool tap) {
@@ -161,7 +171,9 @@ void Player::hit(size_t i, double now, bool tap) {
         histMask_.fill(0);
         histTime_.fill(-1e18);
     }
-    events_.push_back({PlayerEvent::Kind::Hit, int(i), now});
+    events_.push_back({PlayerEvent::Kind::Hit, int(i), now, frameStrum_});
+    frameStrum_ = false;
+    if (n.phrase >= 0 && !missedPhrase_[size_t(n.phrase)]) events_.push_back({PlayerEvent::Kind::StarHit, int(i), now});
     // A sustained note's health gain waits for the end of its sustain [C 0x82110E8C].
     if (n.sustain) {
         sus_ = Sustain{int(i), double(n.time), double(n.time) + n.holdMs, 0, 0, now};
@@ -216,6 +228,7 @@ void Player::updateSustain(double now, double dt, const FrameInput& in) {
     const bool shortHold = hold < tu_.whammyMinHoldMuteMs;
     if (left <= hold * tu_.whammyMinHoldPct / 100.0 || (shortHold && left <= hold * tu_.whammyMinHoldPctShort / 100.0))
         changeHealth(true, now);
+    events_.push_back({PlayerEvent::Kind::SustainLost, sus_.note, now});
     sus_ = Sustain{};
 }
 
@@ -226,13 +239,17 @@ void Player::updateStarPower(double now, double dt, const FrameInput& in) {
     // = -1 [I]), counted while <= the player's star_tilt_threshold (the user
     // option star_power_position_device_<n>, -1.0 by default, set by the
     // tilt calibration screen to the held position clamped to <= 0);
-    // FrameInput carries Select and tilt as one flag, so both deploy at once
-    // here [I: the tilt's 3-frame wait is not modelled].
-    triggerFrames_ = in.starPower ? triggerFrames_ + 1 : 0;
+    // Select deploys at once; the tilt only once it has been held
+    // star_power_trigger_frames (3) game frames in a row [C 0x82112F28 -
+    // 0x82112F90]. The port's tilt is input/'s axis binding past its
+    // threshold (FrameInput::tilt) [I: the byte mapping against the
+    // calibrated threshold is not applied to SDL's axes].
+    triggerFrames_ = in.tilt ? triggerFrames_ + 1 : 0;
+    const bool fired = in.starPower || (in.tilt && triggerFrames_ >= std::max(1, tu_.starPowerTriggerFrames));
     // The trigger (a press): co-op's raise-axe prompt and battle's attacks (Match).
-    if (in.starPower && !triggerHeld_) events_.push_back({PlayerEvent::Kind::Trigger, -1, now});
-    triggerHeld_ = in.starPower;
-    if (rules_.starPower && !rules_.coop && !st_.starPowerActive && in.starPower && st_.starPower >= kStarPowerNeeded) activateStarPower(now);
+    if (fired && !triggerHeld_) events_.push_back({PlayerEvent::Kind::Trigger, -1, now});
+    triggerHeld_ = fired;
+    if (rules_.starPower && !rules_.coop && !st_.starPowerActive && fired && st_.starPower >= kStarPowerNeeded) activateStarPower(now);
     if (st_.starPowerActive) {
         // Drains star_power_drain_rate per measure (co-op: _coop) [C script star_power_activate_and_drain].
         const double measure = std::max(1.0f, t_.measureAt(float(now)));
@@ -284,6 +301,7 @@ void Player::frame(double now, double dt, const FrameInput& raw) {
     std::vector<uint8_t> shapes;
     bool strumActive = false;
     if (in.strum) {
+        frameStrum_ = true;
         shapesSince(now - tu_.formBeforeStrumming * 1000.0 - 1e-6, shapes);
         if (tu_.disallowToleranceStrums && pendingMs_ >= 0 && cur_ < n) {
             // A second strum while one is still forming: the note is missed [C 0x8211FF80].

@@ -34,6 +34,9 @@ public:
     void setLibrary(std::shared_ptr<const matlib::Library> lib) { lib_ = std::move(lib); }
     // Uploads one member's skins and textures; its index, or -1 and `error`.
     int add(gfx::RenderDevice& dev, const band::Model& m, std::string& error);
+    // Frees one member's buffers and textures (the menus' objects that die);
+    // its index stays, drawing nothing.
+    void remove(int member);
     // The song time in seconds for the shaders' g_Time (set before draw).
     void setTime(double seconds) { seconds_ = seconds; }
     // The target's aspect (width / height) and whether alpha is written
@@ -72,6 +75,7 @@ private:
         gfx::TextureId diffuse;
         Mode mode = Mode::Opaque;
         float alphaRef = 0;
+        int8_t stencil = -1;  // the material's stencil reference (+0xdc; -1: none) [C 823DC180]
         const gh3shader::Program* gh3 = nullptr;
         int mat = -1;  // index into mats_
     };

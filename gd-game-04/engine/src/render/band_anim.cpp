@@ -364,6 +364,7 @@ bool Animator::init(const Setup& s, std::string& error) {
     const qb::Struct* prof = model_->member.profile;
     stance_ = nextStance_ = prof ? keyOf(prof->find(K("stance"))) : K("stance_a");
     if (!stance_) stance_ = nextStance_ = K("stance_a");
+    if (s.stance) stance_ = nextStance_ = s.stance;
     currentAnim_ = K("idle");
     cycle_ = true;
     strumStyle_ = prof ? keyOf(prof->find(K("strum_anims"))) : 0;
@@ -441,6 +442,12 @@ bool Animator::init(const Setup& s, std::string& error) {
     if (role_ == band::Role::Drummer) {
         twistClip_ = clip(K("test_drum_bodytwist_d"));
         schedule(t0 + kFrameMs, Ev::Twist);
+    }
+    // create_guitarist (the menus' members): a front-end stance starts with
+    // both arms off at once (hero_toggle_arms num_arms = 0 blend_time = 0) [C script].
+    if (s.stance && guitarLike() && (stance_ == K("stance_frontend") || stance_ == K("stance_frontend_guitar"))) {
+        disableArms_ = armsDisabled_ = 2;
+        leftStrength_.set(0, t0, 0), rightStrength_.set(0, t0, 0);
     }
     bodyIteration(t0);
     facial(t0);

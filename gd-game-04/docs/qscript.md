@@ -41,6 +41,37 @@ optionally `default`.
   `return x = v` (merged into the caller's parameters).
 - Spawned scripts run once per game frame (60 Hz) until they end; `Wait n
   [seconds | gameframes]` suspends them.
+- `random_range pair:(a, b)` (0x30, 0x38 the same with the other generator):
+  whole-number ends give an integer in [min, max], else a float in [min,
+  max) [C 0x82190940] (glow_menu_element's `Wait random_range ...`).
+- `<arg> pos [ 0 ]` indexes a pair or vector [I: TileSpriteLoop's tiles];
+  `. ( expr )` reads the field a key expression names [C data:
+  `$ store_camera_props . ( $ target_store_camera_prop )`].
+- A called script's unnamed struct parameters give their fields, later ones
+  replacing earlier [C data: ui_flow_manager_respond_to_action's
+  `<create_func> player = .. <create_params> <state_create_params>`, the
+  pause menu's `for_options`].
+- An event handler runs with its element as the object (a plain `gettags`
+  in options_menu_hilight is that element's); it outlives the element (a
+  pad_choose that destroys its own menu goes on) [I].
+- `random(...)`: each branch offset counts from just after its own 4 bytes
+  in the table (not from the table's end) [C data: every random on the disc
+  then lands on a token start; `random:((1,1,1),(8,24,40))` branches are 20
+  bytes apart]. Before, most randoms took the first branch (or none).
+- Inside parentheses an expression goes on over line ends (`( $ game_mode
+  = p2_career or` / `$ game_mode = p2_coop )`); a default-parameter struct
+  may be written out over lines (`{` ... `}`, add_text_to_column) [C data].
+- A key naming a global (a FormatText checksumName such as
+  'left_column_x'): in arithmetic it is the global's number / pair; `[ i ]`
+  indexes the global array; `( <arg> key )` alone is the global array /
+  pair; FormatText `%d` prints the global number [I: the detailed stats'
+  columns rely on all four].
+- FormatText `usecommas` (thousands separators) [I: the name; scores,
+  cash]; a float prints as `%.<decimalplaces>f`, 3 places by default [C
+  0x82264F88 `li r26,3`, 0x822649F0 `"%%.%df"`] (the detailed stats' "1.478 X").
+- A struct field that points at a global (`marker =
+  <slowride_markers_text_e5fa3adf>`) reads that global's string [I:
+  get_section_stats' section names].
 
 ## Natives
 

@@ -31,6 +31,7 @@ target_sources(gd04 PRIVATE
   src/app.cpp
   src/audio/audio_device.cpp
   src/audio/mixer.cpp
+  src/audio/guitar_fx.cpp
   src/audio/sfx_dsp.cpp
   src/audio/sfx.cpp
   src/audio/song_stream.cpp
@@ -62,6 +63,7 @@ target_sources(gd04 PRIVATE
   src/platform/paths.cpp
   src/render/band.cpp
   src/render/band_anim.cpp
+  src/render/band_ragdoll.cpp
   src/render/band_view.cpp
   src/render/canvas.cpp
   src/render/crowd.cpp
@@ -73,6 +75,8 @@ target_sources(gd04 PRIVATE
   src/render/hud2p.cpp
   src/render/particles.cpp
   src/render/renderer.cpp
+  src/render/screen_fx.cpp
+  src/render/stage_peds.cpp
   src/render/shadertest.cpp
   src/render/texture_cache.cpp
   src/render/texture_codec.cpp
@@ -103,8 +107,13 @@ target_sources(gd04 PRIVATE
   src/tests/sfxtest.cpp
   src/tests/venuetest.cpp
   src/ui/song_screen.cpp
+  src/ui/song_hooks.cpp
+  src/ui/fx2d.cpp
   src/ui/front_end.cpp
   src/ui/glitches.cpp
+  src/ui/menu_objects.cpp
+  src/ui/menu_scene.cpp
+  src/ui/ui_movies.cpp
   src/ui/natives_flow.cpp
   src/ui/natives_game.cpp
   src/ui/natives_sound.cpp

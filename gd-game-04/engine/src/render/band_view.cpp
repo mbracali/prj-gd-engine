@@ -146,6 +146,15 @@ void BandView::shutdown() {
     dev_ = nullptr;
 }
 
+void BandView::remove(int member) {
+    if (!dev_ || member < 0 || size_t(member) >= members_.size()) return;
+    Member& m = members_[size_t(member)];
+    if (m.vb) dev_->destroyBuffer(m.vb);
+    if (m.ib) dev_->destroyBuffer(m.ib);
+    for (gfx::TextureId t : m.textures) dev_->destroyTexture(t);
+    m = Member{};
+}
+
 int BandView::add(gfx::RenderDevice& dev, const band::Model& model, std::string& error) {
     if (dev_ && dev_ != &dev) {
         error = "band view: another device";
@@ -221,7 +230,11 @@ int BandView::add(gfx::RenderDevice& dev, const band::Model& model, std::string&
                 }
                 if (!out.diffuse && !any && !mat->textures.empty()) ++stats_.missingTextures;
                 out.alphaRef = float(mat->e8 >> 24) / 255.0f;
-                out.mode = mat->d8 == 1 ? Mode::Add : (mat->d8 == 3 || (mat->cc & 8)) ? Mode::Blend : Mode::Opaque;
+                out.stencil = (mat->cc & 0x80) ? -1 : int8_t(mat->dc & 1);
+                // 823DC180: the blend from +0xd8 alone (+0xcc & 8 is cull none, which
+                // the band always is); +0xcc & 0x40 turns the alpha test off [C].
+                out.mode = mat->d8 == 1 ? Mode::Add : mat->d8 == 0 ? Mode::Opaque : Mode::Blend;
+                if (mat->cc & 0x40) out.alphaRef = 0;
                 // GH3's template: material constants and its textures in sampler order.
                 if (gh3_.ready())
                     if (const gh3shader::Program* gp = gh3_.get(mat->shader)) {
@@ -348,23 +361,11 @@ void BandView::draw(const venue::CamPose& cam, const std::vector<Instance>& inst
             std::vector<gh3shader::LightIn> lin;
             for (size_t i = 0; i < v.lights.size() && i < lights.size(); ++i) {
                 const venue::Light& l = v.lights[i];
-                const uint32_t grp = l.group ? l.group : K("none");
-                if (std::find(in.lightGroups.begin(), in.lightGroups.end(), grp) == in.lightGroups.end() || l.vertexBake) continue;
+                bool serves = false;
+                for (uint32_t gk : in.lightGroups) serves = serves || gh3shader::groupLights(l.group, gk);
+                if (!serves) continue;
                 if (!l.createdAtStart && !(l.createdOn && show.flag(l.createdOn))) continue;
-                const venue::LightState& s = lights[i];
-                if (s.intensity <= 0) continue;
-                gh3shader::LightIn li;
-                li.type = l.type == venue::LightType::Ambient ? gh3shader::LightIn::Ambient
-                          : l.type == venue::LightType::Directional ? gh3shader::LightIn::Directional
-                          : l.type == venue::LightType::Point ? gh3shader::LightIn::Point : gh3shader::LightIn::Spot;
-                li.pos = {l.pos[0], l.pos[1], l.pos[2]};
-                li.dir = {l.dir[0], l.dir[1], l.dir[2]};
-                li.color = gfx::Vec3{s.color[0], s.color[1], s.color[2]} * s.intensity;
-                li.attenStart = s.attenStart, li.attenEnd = s.attenEnd;
-                li.specular = s.specular;
-                li.cosHotspot = std::cos(l.hotspot * 0.5f * 3.14159265f / 180.0f);
-                li.cosField = std::cos(std::max(l.field, l.hotspot + 0.1f) * 0.5f * 3.14159265f / 180.0f);
-                lin.push_back(li);
+                lin.push_back(gh3shader::lightIn(l, lights[i]));
             }
             if (lin.empty()) {
                 // No venue (portraits): a neutral key light from the camera and an ambient fill.
@@ -383,7 +384,8 @@ void BandView::draw(const venue::CamPose& cam, const std::vector<Instance>& inst
                 std::memcpy(obj.reg(gh3shader::kRegWorldView + r), globals.reg(gh3shader::kRegView + r), 16);
                 std::memcpy(obj.reg(gh3shader::kRegWorldViewProj + r), globals.reg(gh3shader::kRegViewProj + r), 16);
             }
-            const bandanim::Vec centre = bandanim::xform(in.root, {0, 1.0f, 0});
+            // A model's query point: its origin (823E4F20: the world matrix's translation) [C].
+            const bandanim::Vec centre = bandanim::xform(in.root, {0, 0, 0});
             gh3shader::lightObject(lin.data(), lin.size(), {centre.x, centre.y, centre.z}, obj);
             objData = d.stageUniforms(&obj, sizeof obj);
         }
@@ -457,6 +459,11 @@ void BandView::draw(const venue::CamPose& cam, const std::vector<Instance>& inst
                 gc.state.depthTest = true;
                 gc.state.depthFunc = gfx::CompareFunc::LessEqual;
                 gc.state.alphaWrite = writeAlpha_;
+                gc.state.stencilTest = mesh.stencil >= 0 && !shadowPass_;
+                gc.state.stencilFunc = gfx::CompareFunc::Always;
+                gc.state.stencilRef = uint8_t(std::max<int>(0, mesh.stencil));
+                gc.state.stencilWriteMask = gc.state.stencilTest ? 0xFF : 0;
+                gc.state.stencilReplace = gc.state.stencilTest;
                 switch (mesh.mode) {
                 case Mode::Opaque: gc.state.blend = false, gc.state.depthWrite = true; break;
                 case Mode::Blend:

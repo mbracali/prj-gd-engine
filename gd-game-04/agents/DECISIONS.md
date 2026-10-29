@@ -76,10 +76,33 @@ quick play songs a finished career unlocks stay save-wide, as in GH3.
 Tests: --walktest glitches (bought for The Glitches), --walktest vault
 (band 1: for sale).
 
-## D10 Proposal (GD04-021): run GH3's own song scripts over the native core (2026-10-29, open)
+## D10 (GD04-021): run GH3's own song scripts over the native core (2026-10-29, steps 1 and 2 done; step 3 kept native)
 
-Status: a proposal for the owner, nothing changed yet. Findings:
-docs/FINDINGS.md "The song path: scripts vs C".
+Status: implemented as below (ui/song_hooks.cpp); the proposal text
+follows. Findings: docs/FINDINGS.md "The song path: scripts vs C" and "D10
+done".
+
+Done: (1) the native judge's events raise GH3's own events with the C's
+parameters (hit_notes, hit_note, missed_note with bum_note,
+unnecessary_note, star_hit_note, star_sequence_bonus, star_miss_note,
+whammy_on / _off, first_gem, firstnote_window_open) to create_guitar_events'
+handlers, and the scripts the C spawns run (the multiplier scripts,
+show_star_power_ready, star_power_activate_and_drain, the crowd's
+transition sounds, the fretbar functions, battle's sounds), with
+playerN_status / current_crowd / input_array<p> kept current every frame and
+the natives they call (sound busses -> audio/guitar_fx on the guitar
+tracks; 2D particle systems -> ui/fx2d; the C functions the native core
+already did, counted). (2) The song's event arrays and note maps run at
+their times through a native event_iterator / notemap_iterator (the band's
+performance clips and the boss's Death Drain, already played natively,
+skipped). (3) start_gem_scroller / gem_scroller stay native: their highway,
+gem and HUD elements need what the screen-element system cannot draw at
+the native renderers' fidelity (FINDINGS "D10 done"); their setup scripts
+that need no such element run (GuitarEvent_EnterVenue,
+GH3_Set_Guitar_Verb_And_Echo_to_Dry). Not shown yet: the 3D effects the
+scripts ask for (band-bone particles, the crowd's Star Power animation,
+stage divers, lighters), the crowd buss effects, LightShow_SetTime from
+<song>_lightshow, GuitarEvent_BattleAttackFinished. Undo: GD04_NO_HOOKS=1.
 
 In GH3 the song is scripts calling C: start_gem_scroller and gem_scroller
 set up and spawn the loops, the C functions (the gem iterators, the judge,

@@ -23,7 +23,7 @@ struct Vertex {
     uint8_t r, g, b, a;
 };
 
-enum class Blend { Opaque, Alpha, Add };
+enum class Blend { Opaque, Alpha, Add, Sub };  // Sub: destination - source x alpha
 
 class Canvas {
 public:

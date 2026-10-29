@@ -15,6 +15,7 @@
 #include "render/canvas.h"
 #include "render/texture_cache.h"
 #include "script/vm.h"
+#include "ui/ui_movies.h"
 
 namespace ui {
 
@@ -81,6 +82,14 @@ float ease(int motion, float t) {
     case 3: return 2 * t - t * t;        // ease_out
     default: return t;
     }
+}
+
+// A base-32 digit (0-9, a-v): button glyph and colour numbers [C 0x8228E0B0 writes them so].
+int digit32(char16_t c) {
+    if (c >= u'0' && c <= u'9') return c - u'0';
+    if (c >= u'a' && c <= u'v') return c - u'a' + 10;
+    if (c >= u'A' && c <= u'V') return c - u'A' + 10;
+    return -1;
 }
 
 int hexDigit(char16_t c) {
@@ -225,9 +234,18 @@ void UiSystem::applyProps(Element& e, const qb::Struct& p, bool create) {
     uint32_t newTexture = 0;
     bool haveScale = false;
     float scaleX = 1, scaleY = 1;
+    // Every props call sets the flips anew: flip_h / flip_v given, or kept
+    // with preserve_flip, else cleared [C 0x8221C790: flags 0x2000000 /
+    // 0x4000000] (the setlist's first page, flipped by displaySprite, is
+    // unflipped by its later z_priority call).
+    if (!qs::Vm::flag(p, K("preserve_flip"))) e.flipH = e.flipV = false;
     for (const qb::Item& it : p.items) {
         const qb::Value& v = it.value;
         const uint32_t n = it.name;
+        // An unset local passed on (displaySprite's `z_priority = <z>` without
+        // z) sets nothing: the element keeps its parent's z + 1 [I: only so is
+        // the select-difficulty highlight over its backdrop].
+        if (n != 0 && v.type == qb::Type::None) continue;
         if (n == 0) {
             if (v.type != qb::Type::Key) continue;
             const uint32_t f = v.key;
@@ -242,6 +260,8 @@ void UiSystem::applyProps(Element& e, const qb::Struct& p, bool create) {
             else if (f == K("allow_expansion")) e.allowExpansion = true;
             else if (f == K("dont_allow_wrap")) e.dontWrap = true;
             else if (f == K("preserve_local_orientation")) e.preserveOrientation = true;
+            else if (f == K("shadow")) e.shadow = true;
+            else if (f == K("no_shadow") || f == K("noshadow")) e.shadow = false;
             continue;
         }
         if (n == K("pos")) {
@@ -273,8 +293,17 @@ void UiSystem::applyProps(Element& e, const qb::Struct& p, bool create) {
         else if (n == K("rot_angle")) e.rot = v.number();
         else if (n == K("relative_rot_angle")) e.rot += v.number();
         else if (n == K("texture")) newTexture = v.key;
+        else if (n == K("blend") && (v.type == qb::Type::Key || v.type == qb::Type::KeyPtr))
+            e.blend = v.key == K("add") ? 1 : (v.key == K("subtract") || v.key == K("sub")) ? 2 : 0;
         else if (n == K("font")) e.font = v.key;
-        else if (n == K("text")) e.text = v.str;
+        else if (n == K("text")) e.text = setText(v.str);
+        else if (n == K("shadow_offs")) readPair(v, e.shadowX, e.shadowY);
+        else if (n == K("shadow_rgba") && v.type == qb::Type::Array && v.arr) {
+            for (size_t k = 0; k < 4 && k < v.arr->values.size(); ++k) e.shadowRgba[k] = uint8_t(std::clamp(int(v.arr->values[k].number()), 0, 255));
+        } else if (n == K("internal_scale")) {
+            float a = 1, b = 1;
+            if (readPair(v, a, b)) e.internalScale = a;
+        }
         else if (n == K("local_id")) e.localId = v.key;
         else if (n == K("exclusive_device")) {
             e.exclusiveMask = 0, e.exclusiveDevice = -1;
@@ -285,7 +314,7 @@ void UiSystem::applyProps(Element& e, const qb::Struct& p, bool create) {
                 e.exclusiveDevice = int(v.number());
             }
         }
-        else if (n == K("font_spacing")) e.fontSpacing = v.number();
+        else if (n == K("font_spacing")) e.fontSpacing = v.number(), e.fontSpacingGiven = true;
         else if (n == K("space_spacing")) e.spaceSpacing = v.number();
         else if (n == K("line_spacing")) e.lineSpacing = v.number();
         else if (n == K("regular_space_amount")) e.regularSpace = v.number();
@@ -324,7 +353,7 @@ void UiSystem::applyProps(Element& e, const qb::Struct& p, bool create) {
         }
     }
     if (newDimsW >= 0) {
-        e.w = newDimsW, e.h = newDimsH, e.dimsGiven = true;
+        e.w = newDimsW, e.h = newDimsH, e.givenH = newDimsH, e.dimsGiven = true;
         if (e.type == kSprite && e.texture && !newTexture) {
             // New dims on a textured sprite: dims are the on-screen size [C 0x82219C78].
             int tw = 0, th = 0;
@@ -338,37 +367,131 @@ void UiSystem::applyProps(Element& e, const qb::Struct& p, bool create) {
         if (e.type == kSprite && e.texture && newDimsW >= 0) e.sx *= scaleX, e.sy *= scaleY;
         else e.sx = scaleX, e.sy = scaleY;
     }
-    if (e.type == kText) measureText(e);
+    if (e.type == kText || e.type == kTextBlock) measureText(e);
 }
 
 float UiSystem::textWidth(const FontEntry& fe, const std::u16string& s, const Element& e) const {
+    // [C 0x8232ADF0]: a glyph adds its width - bearing, a space the font's
+    // space width; each then adds the tracking (font_spacing, if given,
+    // replaces the tracking and drops the bearing). Button glyphs
+    // ("\b<n>", "\s<n>") measure like glyphs; "\c", "\u" (3 chars) and
+    // "\L" (2) take no room.
     const font::Font& f = fe.f;
+    const FontEntry* buttons = nullptr;
+    if (auto it = fonts_.find(K("buttonsxenon")); it != fonts_.end()) buttons = &it->second;
+    const float bearing = e.fontSpacingGiven ? 0.0f : float(f.bearing);
+    const float track = e.fontSpacingGiven ? float(int(e.fontSpacing)) : float(f.tracking);
     float w = 0, best = 0;
     for (size_t i = 0; i < s.size(); ++i) {
-        const char16_t ch = s[i];
-        if (ch == u'\\' && i + 1 < s.size()) {
-            const char16_t code = s[++i];
-            if (code == u'n') {
-                best = std::max(best, w), w = 0;
+        const font::Glyph* g = nullptr;
+        if (s[i] == u'\\' && i + 1 < s.size() && s[i + 1] != u'\\') {
+            const char16_t code = s[i + 1];
+            if (code == u'n') {  // the port's line break (GH3 text elements have none)
+                best = std::max(best, w), w = 0, ++i;
                 continue;
             }
-            if (code == u'c' || code == u'b' || code == u'm' || code == u's') {
-                if (i + 1 < s.size()) ++i;
-                if (code != u'c') w += 32;  // a button glyph [I size]
+            if (code == u'c' || code == u'C' || code == u'u' || code == u'U') {
+                i += 2;
                 continue;
             }
-            if (code != u'\\') continue;
+            if (code == u'L') {
+                ++i;
+                continue;
+            }
+            if ((code == u'b' || code == u'B' || code == u's' || code == u'S') && i + 2 < s.size()) {
+                const int n = digit32(s[i + 2]);
+                i += 2;
+                const FontEntry* src = (code == u's' || code == u'S') ? &fe : buttons;
+                if (!src || n < 0 || n >= 32) continue;
+                g = &src->f.button(size_t(n));
+            } else {
+                ++i;  // an unknown code: the character after it is drawn
+            }
+        } else if (s[i] == u'\\' && i + 1 < s.size()) {
+            ++i;  // "\\\\": one backslash
         }
-        if (ch == u' ') w += f.spaceWidth + e.spaceSpacing;
-        else w += f.glyphFor(uint16_t(ch)).width + float(f.tracking) + e.fontSpacing;
+        if (!g && s[i] == u' ') w += f.spaceWidth + e.spaceSpacing + track;
+        else w += (g ? g->width : f.glyphFor(uint16_t(s[i])).width) - bearing + track;
     }
     return std::max(best, w);
 }
 
+std::vector<std::u16string> UiSystem::blockLines(const FontEntry& fe, const Element& e) const {
+    // Words (each with its trailing space) fill a line while it stays within
+    // the dims' width (unscaled, times internal_scale); "\n" breaks; a
+    // line's last space is dropped; a colour code carries over [C 0x8231B260].
+    std::vector<std::u16string> lines(1);
+    const std::u16string s = utf16(e.text);
+    float lineW = 0;
+    std::u16string colour;
+    size_t i = 0;
+    while (i < s.size()) {
+        if (s[i] == u'\\' && i + 1 < s.size() && s[i + 1] == u'n') {
+            lines.emplace_back(colour), lineW = 0, i += 2;
+            continue;
+        }
+        size_t j = i;
+        while (j < s.size() && s[j] != u' ' && !(s[j] == u'\\' && j + 1 < s.size() && s[j + 1] == u'n')) j += (s[j] == u'\\' && j + 1 < s.size()) ? 2 : 1;
+        while (j < s.size() && s[j] == u' ') ++j;
+        const std::u16string word = s.substr(i, j - i);
+        const float ww = textWidth(fe, word, e) * e.internalScale;
+        if (lineW > 0 && e.w > 0 && e.w < lineW + ww) {
+            if (!lines.back().empty() && lines.back().back() == u' ') lines.back().pop_back();
+            lines.emplace_back(colour), lineW = 0;
+        }
+        lines.back() += word, lineW += ww;
+        for (size_t k = 0; k + 2 < word.size(); ++k)
+            if (word[k] == u'\\' && (word[k + 1] == u'c' || word[k + 1] == u'C')) colour = word.substr(k, 3);
+        i = j;
+    }
+    if (!lines.back().empty() && lines.back().back() == u' ') lines.back().pop_back();
+    return lines;
+}
+
+std::string UiSystem::setText(const std::string& in) const {
+    if (in.find('\\') == std::string::npos) return in;
+    std::string out;
+    const qb::Value* map = vm_.global(K("meta_button_map"));
+    for (size_t i = 0; i < in.size(); ++i) {
+        if (in[i] != '\\' || i + 1 >= in.size()) {
+            out += in[i];
+            continue;
+        }
+        const char c = in[i + 1];
+        if (c == '\\') {
+            out += "\\\\", ++i;
+        } else if (c == '_') {
+            out += ' ', ++i;
+        } else if ((c == 'm' || c == 'M') && i + 2 < in.size()) {
+            // meta_button_map[n] = [ps2?, xenon] pairs: the second is the
+            // buttons font's glyph, written as a base-32 digit [C 0x8228E0B0].
+            const int n = digit32(char16_t(in[i + 2]));
+            int glyph = 0;
+            if (map && map->type == qb::Type::Array && map->arr && n >= 0 && size_t(n) < map->arr->values.size()) {
+                const qb::Value& p = map->arr->values[size_t(n)];
+                if (p.type == qb::Type::Array && p.arr && !p.arr->values.empty()) glyph = int(p.arr->values[p.arr->values.size() > 1 ? 1 : 0].number());
+            }
+            out += "\\b";
+            out += char(glyph < 10 ? '0' + glyph : 'a' + glyph - 10);
+            i += 2;
+        } else {
+            out += in[i];
+        }
+    }
+    return out;
+}
+
 void UiSystem::measureText(Element& e) const {
-    // Base dims = the measured text [C 0x8232ADF0].
+    // Base dims = the measured text [C 0x8232ADF0]; a text block keeps its
+    // dims, growing in height to its lines with allow_expansion [I].
     const FontEntry* fe = fontFor(e.font);
     if (!fe) return;
+    if (e.type == kTextBlock) {
+        if (!e.allowExpansion) return;
+        const float lh = fe->f.lineHeight * e.lineSpacing * e.internalScale;
+        e.h = std::max(e.givenH, lh * float(blockLines(*fe, e).size()));
+        return;
+    }
     e.w = textWidth(*fe, utf16(e.text), e);
     e.h = fe->f.lineHeight;
 }
@@ -380,7 +503,7 @@ void UiSystem::forget(Element* e) {
     }
     // Scripts running on the element die with it [I].
     for (auto& r : vm_.runs())
-        if (r->object == e->id) r->finished = true;
+        if (r->object == e->id && !r->handler) r->finished = true;
     for (auto& c : e->children) forget(c.get());
 }
 
@@ -443,8 +566,25 @@ void UiSystem::moveMenu(Element* m, int dir) {
     launch(m->children[size_t(next)].get(), K("focus"), d);
 }
 
+void UiSystem::resolvePendingFocus(uint32_t menuId) {
+    auto it = std::find(pendingFocus_.begin(), pendingFocus_.end(), menuId);
+    if (it == pendingFocus_.end()) return;
+    pendingFocus_.erase(it);
+    Element* m = find(menuId);
+    if (!m || !isMenu(*m) || !m->focused || m->selected >= 0) return;
+    for (size_t i = 0; i < m->children.size(); ++i) {
+        if (m->children[i]->notFocusable) continue;
+        m->selected = int(i);
+        qb::Struct d;
+        qs::Vm::set(d, K("controller"), qs::Vm::makeInt(m->controller));
+        launch(m->children[i].get(), K("focus"), d);
+        return;
+    }
+}
+
 bool UiSystem::launch(Element* target, uint32_t event, const qb::Struct& data) {
     if (!target) return false;
+    if (!pendingFocus_.empty() && isMenu(*target)) resolvePendingFocus(target->id);
     ++stats_.events;
     if (target->blockEvents) return false;
     bool handled = false;
@@ -455,12 +595,14 @@ bool UiSystem::launch(Element* target, uint32_t event, const qb::Struct& data) {
     for (const Element::Handler& h : hs) {
         if (h.event != event) continue;
         qb::Struct params = h.params;
-        qs::Vm::set(params, K("id"), qs::Vm::makeKey(id));
+        // The handler's own `id` param wins (the main menu's items name the
+        // text to recolour: `{focus retail_menu_focus params = {id = ...}}`) [C data].
+        if (!qs::Vm::param(params, K("id"))) qs::Vm::set(params, K("id"), qs::Vm::makeKey(id));
         for (const qb::Item& it : data.items) qs::Vm::set(params, it.name, it.value);
         ++stats_.handlersRun;
         handled = true;
         bool r = false;
-        vm_.run(h.script, params, &r);
+        vm_.run(h.script, params, &r, id);  // the element is the handler's object [I: options_menu_hilight's gettags]
         if (!find(id)) return true;  // destroyed by its handler
     }
     // Menus [C 0x823164E0].
@@ -588,6 +730,9 @@ void UiSystem::startMorph(Element& e, const qb::Struct& p) {
 }
 
 void UiSystem::update(double dtMs) {
+    if (loadingTex_) loadingMs_ += dtMs;
+    updateMovies(dtMs);
+    while (!pendingFocus_.empty()) resolvePendingFocus(pendingFocus_.front());
     std::vector<Element*> stack{root_.get()};
     while (!stack.empty()) {
         Element* e = stack.back();
@@ -661,6 +806,7 @@ void UiSystem::draw(Canvas& c) {
         float z;
         int depth;
         Clip clip;  // the enclosing window elements' rectangle
+        bool shadowPass = false;  // a text's shadow
     };
     struct Node {
         const Element* e;
@@ -693,6 +839,9 @@ void UiSystem::draw(Canvas& c) {
         // without a parent [C SetParent 0x8221D5F0 -> SetZTree 0x8221C160].
         const float z = e.zGiven ? e.z : (e.parent ? n.z + 1.0f : 0.0f);
         items.push_back({&e, cx, cy, wsx, wsy, wa, wrot, z, n.depth, n.clip});
+        // A text's shadow: pos + shadow_offs (screen px), z - 0.005 [C 0x8231A8C0].
+        if (e.shadow && (e.type == kText || e.type == kTextBlock) && !e.text.empty())
+            items.push_back({&e, cx + e.shadowX, cy + e.shadowY, wsx, wsy, wa, wrot, z - 0.005f, n.depth, n.clip, true});
         // A window element clips its children to its rectangle (its rotation
         // ignored) [I: the pause menu's scrolling tiles, the store's text].
         Clip clip = n.clip;
@@ -703,10 +852,25 @@ void UiSystem::draw(Canvas& c) {
         }
         for (size_t k = e.children.size(); k-- > 0;) stack.push_back({e.children[k].get(), cx, cy, wsx, wsy, wa, wrot, z, n.depth + 1, clip});
     }
+    // The texture-slot movies, full screen at their texturepri.
+    {
+        std::vector<const Element*> movies;
+        moviesToDraw(movies);
+        for (const Element* m : movies) items.push_back({m, 0, 0, m->sx, m->sy, 1, 0, m->z, 0, {}});
+    }
     // z_priority is one global key for sprites and texts (one list,
-    // 0x8238D7D0) [C]. Equal z: deeper elements over shallower ones, then
-    // tree order [I: the game draws the instance made visible last behind].
-    std::stable_sort(items.begin(), items.end(), [](const Item& l, const Item& r) { return l.z < r.z || (l.z == r.z && l.depth < r.depth); });
+    // 0x8238D7D0) [C]. Equal z: the one inserted last (made visible or given
+    // a new z last; in tree order within a frame, as the game updates its
+    // elements) is drawn behind [C insert before the first equal].
+    for (const Item& it : items) {
+        if (it.shadowPass) continue;
+        const Element& e = *it.e;
+        if (e.listSeq == 0 || e.listSeen + 1 != drawCount_ || e.listZ != it.z) e.listSeq = ++listSeq_;
+        e.listSeen = drawCount_, e.listZ = it.z;
+    }
+    std::stable_sort(items.begin(), items.end(), [](const Item& l, const Item& r) {
+        return l.z < r.z || (l.z == r.z && l.e->listSeq > r.e->listSeq);
+    });
     for (const Item& it : items) {
         const Element& e = *it.e;
         const uint8_t alpha = uint8_t(std::clamp(float(e.rgba[3]) * it.wa, 0.0f, 255.0f));
@@ -726,7 +890,8 @@ void UiSystem::draw(Canvas& c) {
             e.drawnIn = drawCount_;
         }
         if (e.type == kSprite && e.texture) {
-            const gfx::TextureId id = tex_.find(e.texture);
+            gfx::TextureId id = tex_.find(e.texture);
+            if (!id) id = movieTexture(e.texture);
             if (!id) continue;
             const float w = e.w * it.wsx, h = e.h * it.wsy;
             float u0 = 0, u1 = 1, v0 = 0, v1 = 1;
@@ -736,7 +901,15 @@ void UiSystem::draw(Canvas& c) {
             if (e.flipH) std::swap(v0, v1);
             const Vertex a = P(0, 0, u0, v0, e.rgba), b = P(w, 0, u1, v0, e.rgba), cc = P(w, h, u1, v1, e.rgba), d = P(0, h, u0, v1, e.rgba);
             const Vertex q[6] = {a, b, cc, a, cc, d};
-            c.draw(q, 6, int(id.id), Blend::Alpha);
+            c.draw(q, 6, int(id.id), e.blend == 1 ? Blend::Add : e.blend == 2 ? Blend::Sub : Blend::Alpha);
+            ++stats_.spritesDrawn;
+        } else if (e.type == kSprite && !e.texture && e.w > 0 && e.h > 0) {
+            // A sprite without a texture is a plain rectangle in its colour
+            // (the detailed stats' paper and row highlights) [I].
+            const float w = e.w * it.wsx, h = e.h * it.wsy;
+            const Vertex a = P(0, 0, 0, 0, e.rgba), b = P(w, 0, 0, 0, e.rgba), cc = P(w, h, 0, 0, e.rgba), d = P(0, h, 0, 0, e.rgba);
+            const Vertex q[6] = {a, b, cc, a, cc, d};
+            c.draw(q, 6, 0, e.blend == 1 ? Blend::Add : e.blend == 2 ? Blend::Sub : Blend::Alpha);
             ++stats_.spritesDrawn;
         } else if ((e.type == kText || e.type == kTextBlock) && !e.text.empty()) {
             const FontEntry* fe = fontFor(e.font);
@@ -744,63 +917,127 @@ void UiSystem::draw(Canvas& c) {
                 ++stats_.missingFonts;
                 continue;
             }
-            const font::Font& f = fe->f;
-            const std::u16string s = utf16(e.text);
-            const float lh = f.lineHeight;
-            std::vector<std::u16string> lines(1);
-            for (size_t i = 0; i < s.size(); ++i) {
-                if (s[i] == u'\\' && i + 1 < s.size() && s[i + 1] == u'n') {
-                    lines.emplace_back();
-                    ++i;
-                } else {
-                    lines.back().push_back(s[i]);
-                }
-            }
-            std::vector<Vertex> verts;
-            std::array<uint8_t, 4> col = e.rgba;
-            float lineY = 0;
-            for (const std::u16string& line : lines) {
-                const float lw = textWidth(*fe, line, e);
-                // Lines inside a text block placed by internal_just [I].
-                float pen = e.type == kTextBlock ? (e.w - lw) * (e.ijustX + 1) / 2 : 0;
-                const float baseY = lineY + (lh - float(f.vShift));
-                for (size_t i = 0; i < line.size(); ++i) {
-                    const char16_t ch = line[i];
-                    if (ch == u'\\' && i + 1 < line.size()) {
-                        const char16_t code = line[++i];
-                        if (code == u'c' && i + 1 < line.size()) {
-                            const int nidx = hexDigit(line[++i]);
-                            if (nidx <= 0) col = e.rgba;
-                            else if (size_t(nidx - 1) < colorTab_.size()) col = colorTab_[size_t(nidx - 1)], col[3] = e.rgba[3];
-                            continue;
-                        }
-                        if (code == u'b' || code == u'm' || code == u's') {
-                            if (i + 1 < line.size()) ++i;
-                            pen += 32;  // button glyphs are not drawn yet [approximation]
-                            continue;
-                        }
-                        if (code != u'\\') continue;
-                    }
-                    if (ch == u' ') {
-                        pen += f.spaceWidth + e.spaceSpacing;
-                        continue;
-                    }
-                    const font::Glyph& g = f.glyphFor(uint16_t(ch));
-                    // The glyph's "baseline" is its descent below the line's baseline [C data].
-                    const float gx = pen + float(g.xOffset), gy = baseY + g.baseline - g.height;
-                    const float sx = it.wsx, sy = it.wsy;
-                    const Vertex a = P(gx * sx, gy * sy, g.u0, g.v0, col), b = P((gx + g.width) * sx, gy * sy, g.u1, g.v0, col);
-                    const Vertex cc = P((gx + g.width) * sx, (gy + g.height) * sy, g.u1, g.v1, col), d = P(gx * sx, (gy + g.height) * sy, g.u0, g.v1, col);
-                    verts.insert(verts.end(), {a, b, cc, a, cc, d});
-                    pen += g.width + float(f.tracking) + e.fontSpacing;
-                }
-                lineY += lh * e.lineSpacing;
-            }
-            if (!verts.empty()) c.draw(verts.data(), verts.size(), int(fe->tex.id), Blend::Alpha);
+            drawElementText(c, e, *fe, it.cx, it.cy, it.wsx, it.wsy, it.wa, it.wrot, it.shadowPass);
             ++stats_.textDrawn;
         }
     }
     c.clearClip();
+    // The loading screen: its image stretched over the screen, the wheel
+    // (96 x 96 at spin_x, spin_y) turning [C 00a_boot_legal capture; I speed].
+    if (const gfx::TextureId lt = loadingTex_ ? tex_.find(loadingTex_) : gfx::TextureId{}) {
+        const std::array<uint8_t, 4> w{255, 255, 255, 255};
+        auto V = [&](float x, float y, float u, float v) { return Vertex{x, y, 0, u, v, w[0], w[1], w[2], w[3]}; };
+        const Vertex q[6] = {V(0, 0, 0, 0), V(1280, 0, 1, 0), V(1280, 720, 1, 1), V(0, 0, 0, 0), V(1280, 720, 1, 1), V(0, 720, 0, 1)};
+        c.draw(q, 6, int(lt.id), Blend::Alpha);
+        if (const gfx::TextureId st = loadingSpin_ ? tex_.find(loadingSpin_) : gfx::TextureId{}) {
+            const float a = float(loadingMs_ / 1000.0 * 2 * M_PI), cs = std::cos(a), sn = std::sin(a), h = 48;
+            const float cx = spinX_ + h, cy = spinY_ + h;
+            auto R = [&](float dx, float dy, float u, float v) { return V(cx + dx * cs - dy * sn, cy + dx * sn + dy * cs, u, v); };
+            const Vertex s[6] = {R(-h, -h, 0, 0), R(h, -h, 1, 0), R(h, h, 1, 1), R(-h, -h, 0, 0), R(h, h, 1, 1), R(-h, h, 0, 1)};
+            c.draw(s, 6, int(st.id), Blend::Alpha);
+        }
+    }
+    c.clearClip();
+}
+
+void UiSystem::drawElementText(Canvas& c, const Element& e, const FontEntry& fe, float cx, float cy, float wsx, float wsy, float wa, float wrot,
+                               bool shadowPass) const {
+    // [C 0x8232B5E8] per glyph: x0 = pen - x offset - bearing, x1 = x0 +
+    // width, next pen = x1 + advance adjust + tracking (font_spacing, if
+    // given, replaces the tracking and drops the bearing); top = line height
+    // - (height - baseline) - vShift, in the glyph's own font for buttons.
+    // A space moves the pen by its width - bearing + tracking.
+    const font::Font& f = fe.f;
+    const FontEntry* buttons = nullptr;
+    if (auto it = fonts_.find(K("buttonsxenon")); it != fonts_.end()) buttons = &it->second;
+    const float bearing = e.fontSpacingGiven ? 0.0f : float(f.bearing);
+    const float track = e.fontSpacingGiven ? float(int(e.fontSpacing)) : float(f.tracking);
+    const std::array<uint8_t, 4> base = shadowPass ? e.shadowRgba : e.rgba;
+    const uint8_t alpha = uint8_t(std::clamp(float(base[3]) * wa, 0.0f, 255.0f));
+    if (alpha == 0) return;
+    const float r = wrot * kDeg, cs = std::cos(r), sn = std::sin(r);
+    const bool block = e.type == kTextBlock;
+    const float is = block ? e.internalScale : 1.0f;
+    const float sx = wsx * is, sy = wsy * is;
+    auto P = [&](float lx, float ly, float u, float v, const std::array<uint8_t, 4>& col) {
+        return Vertex{cx + lx * cs - ly * sn, cy + lx * sn + ly * cs, 0, u, v, col[0], col[1], col[2], alpha};
+    };
+    std::vector<std::u16string> lines;
+    if (block) {
+        lines = blockLines(fe, e);
+    } else {
+        lines.emplace_back();
+        const std::u16string s = utf16(e.text);
+        for (size_t i = 0; i < s.size(); ++i) {
+            if (s[i] == u'\\' && i + 1 < s.size() && s[i + 1] == u'n') lines.emplace_back(), ++i;
+            else lines.back().push_back(s[i]);
+        }
+    }
+    const float lineH = f.lineHeight * e.lineSpacing;
+    // A block's lines sit inside its dims by internal_just [I].
+    float lineY = block ? std::max(0.0f, e.h / is - lineH * float(lines.size())) * (e.ijustY + 1) / 2 : 0;
+    std::vector<Vertex> verts;
+    std::array<uint8_t, 4> col = base;
+    auto quad = [&](std::vector<Vertex>& out, const font::Glyph& g, float x0, float y0, const std::array<uint8_t, 4>& cl) {
+        const Vertex a = P(x0 * sx, y0 * sy, g.u0, g.v0, cl), b = P((x0 + g.width) * sx, y0 * sy, g.u1, g.v0, cl);
+        const Vertex cc = P((x0 + g.width) * sx, (y0 + g.height) * sy, g.u1, g.v1, cl), d = P(x0 * sx, (y0 + g.height) * sy, g.u0, g.v1, cl);
+        out.insert(out.end(), {a, b, cc, a, cc, d});
+    };
+    for (const std::u16string& line : lines) {
+        float pen = block ? (e.w / is - textWidth(fe, line, e)) * (e.ijustX + 1) / 2 : 0;
+        for (size_t i = 0; i < line.size(); ++i) {
+            const FontEntry* gf = &fe;
+            const font::Glyph* g = nullptr;
+            bool button = false;  // "\\b": the buttons font's glyph, white
+            if (line[i] == u'\\' && i + 1 < line.size() && line[i + 1] != u'\\') {
+                const char16_t code = line[++i];
+                if ((code == u'c' || code == u'C') && i + 1 < line.size()) {
+                    const int n = digit32(line[++i]);
+                    if (shadowPass) continue;  // the shadow keeps its colour [C 0x8231A8C0]
+                    if (n <= 0) col = base;
+                    else if (size_t(n - 1) < colorTab_.size()) col = colorTab_[size_t(n - 1)], col[3] = base[3];
+                    continue;
+                }
+                if (code == u'u' || code == u'U') {
+                    ++i;
+                    continue;
+                }
+                if (code == u'L') continue;
+                if ((code == u'b' || code == u'B' || code == u's' || code == u'S') && i + 1 < line.size()) {
+                    const int n = digit32(line[++i]);
+                    button = code == u'b' || code == u'B';
+                    gf = button ? buttons : &fe;
+                    if (!gf || n < 0 || n >= 32) continue;
+                    g = &gf->f.button(size_t(n));
+                }
+            } else if (line[i] == u'\\' && i + 1 < line.size()) {
+                ++i;
+            }
+            if (!g && line[i] == u' ') {
+                pen += f.spaceWidth + e.spaceSpacing - bearing + track;
+                continue;
+            }
+            if (!g) g = &f.glyphFor(uint16_t(line[i]));
+            const font::Font& gff = gf->f;
+            const float x0 = pen - float(g->xOffset) - bearing;
+            const float y0 = lineY + gff.lineHeight - (g->height - g->baseline) - float(gff.vShift);
+            if (button) {
+                // A button glyph: its own texture, white unless the text is
+                // black (a shadow) [C 0x8232B5E8].
+                std::array<uint8_t, 4> bc = col;
+                if (bc[0] || bc[1] || bc[2]) bc = {255, 255, 255, col[3]};
+                std::vector<Vertex> q;
+                quad(q, *g, x0, y0, bc);
+                if (!verts.empty()) c.draw(verts.data(), verts.size(), int(fe.tex.id), Blend::Alpha), verts.clear();
+                c.draw(q.data(), q.size(), int(gf->tex.id), Blend::Alpha);
+            } else {
+                quad(verts, *g, x0, y0, col);
+            }
+            pen = x0 + g->width + float(g->advanceAdjust) + track;
+        }
+        lineY += lineH;
+    }
+    if (!verts.empty()) c.draw(verts.data(), verts.size(), int(fe.tex.id), Blend::Alpha);
 }
 
 // ---- the port's own screens and the mouse (not GH3's) ----
@@ -1012,8 +1249,12 @@ bool UiSystem::member(qs::ScriptRun& run, uint32_t obj, uint32_t method, qb::Str
     }
     if (method == K("GetTags")) {
         if (!e) return false;
-        if (qb::Struct* l = locals(run))
+        if (qb::Struct* l = locals(run)) {
+            // The element's id comes with its tags [I: retail_menu_focus
+            // without an id recolours `<id>` after its gettags].
+            if (!qs::Vm::param(e->tags, K("id"))) qs::Vm::set(*l, K("id"), qs::Vm::makeKey(e->id));
             for (const qb::Item& it : e->tags.items) qs::Vm::set(*l, it.name, it.value);
+        }
         return true;
     }
     if (method == K("GetSingleTag")) {
@@ -1039,6 +1280,8 @@ void UiSystem::addNatives() {
         static uint32_t anonymous = 0x80000000u;
         const qb::Value* type = Vm::param(p, K("type"));
         e->type = type ? type->key : K("containerelement");
+        // A window starts at just [left top], the screen's size [C ctor 0x82315138].
+        if (e->type == K("windowelement")) e->justX = e->justY = -1, e->w = 1280, e->h = 720;
         const qb::Value* id = Vm::param(p, K("id"));
         e->id = id && (id->type == qb::Type::Key || id->type == qb::Type::KeyPtr) ? id->key : anonymous++;
         Element* parent = resolve(Vm::param(p, K("parent")));
@@ -1051,14 +1294,37 @@ void UiSystem::addNatives() {
         applyProps(*raw, p, true);
         ++stats_.created;
         // new_menu focuses its menu before the items exist: the first
-        // focusable item added to a focused menu takes the focus [I].
-        if (isMenu(*parent) && parent->focused && parent->selected < 0 && !raw->notFocusable) {
-            parent->selected = int(parent->children.size()) - 1;
-            qb::Struct d;
-            Vm::set(d, K("controller"), Vm::makeInt(parent->controller));
-            launch(raw, K("focus"), d);
-        }
+        // focusable item added to a focused menu takes the focus, once the
+        // script has made its siblings too (the pause menu's items recolour
+        // a text made after them), i.e. at the menu's next update or event [I].
+        if (isMenu(*parent) && parent->focused && parent->selected < 0 && !raw->notFocusable &&
+            std::find(pendingFocus_.begin(), pendingFocus_.end(), parent->id) == pendingFocus_.end())
+            pendingFocus_.push_back(parent->id);
         if (qb::Struct* l = locals(run)) Vm::set(*l, K("id"), Vm::makeKey(raw->id));
+        return true;
+    });
+    // DisplayLoadingScreen '<name>' [spin_texture = '<img>' spin_x spin_y]
+    // [localized]: IMAGES/LOADINGSCREENS/<name>.img.xen over everything
+    // (the English disc's own names) [C 0x8218DDE8]; HideLoadingScreen
+    // takes it away [C 0x8218E0A0].
+    vm_.addNative("DisplayLoadingScreen", [this](Vm&, ScriptRun&, qb::Struct& p) {
+        const qb::Value* name = nullptr;
+        for (const qb::Item& it : p.items)
+            if (it.name == 0 && (it.value.type == qb::Type::String || it.value.type == qb::Type::WString)) name = &it.value;
+        if (!name) return false;
+        auto path = [](const std::string& n) { return "DATA/COMPRESSED/IMAGES/LOADINGSCREENS/" + n + ".img.xen"; };
+        const uint32_t key = qbkey::key("loadingscreen:" + name->str);
+        if (!tex_.loadImage(disc_, path(name->str), key)) return false;
+        loadingTex_ = key, loadingSpin_ = 0, loadingMs_ = 0;
+        if (const qb::Value* sp = Vm::param(p, K("spin_texture")); sp && !sp->str.empty()) {
+            const uint32_t sk = qbkey::key("loadingscreen:" + sp->str);
+            if (tex_.loadImage(disc_, path(sp->str), sk)) loadingSpin_ = sk;
+            spinX_ = Vm::number(Vm::param(p, K("spin_x")), 0), spinY_ = Vm::number(Vm::param(p, K("spin_y")), 0);
+        }
+        return true;
+    });
+    vm_.addNative("HideLoadingScreen", [this](Vm&, ScriptRun&, qb::Struct&) {
+        loadingTex_ = 0;
         return true;
     });
     vm_.addNative("DestroyScreenElement", [this](Vm&, ScriptRun&, qb::Struct& p) {
@@ -1177,7 +1443,7 @@ void UiSystem::addNatives() {
         Element* e = resolve(Vm::param(p, K("id")));
         if (!e) return false;
         for (auto& r : v.runs())
-            if (r->object == e->id) r->finished = true;
+            if (r->object == e->id && !r->handler) r->finished = true;
         return true;
     });
     // SetScreenElementLock id on|off: on suspends the menu relayout, off relayouts [C flag 0x4000].

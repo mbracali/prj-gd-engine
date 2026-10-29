@@ -199,21 +199,42 @@ D_N_S_Character_1SeperateChnl, ...): the normal map (DXN, class 1), the
 colour and specular maps in the material's sampler order, the skin
 shader's edge / transition / dark colours, the hair shader's two specular
 lobes along the rotated tangent (m_vsAngle) [C: the microcode]; the light
-registers come from the member's groups' lights at its chest
+registers come from GH3's light manager at the member's origin
 (`band`, plus `alt_band` for the guitarist: `create_band_member` gives the
-guitarist `alt_band` outside z_training / z_viewer [C]; I: that it adds to
-`band`'s lights; I: gd04's light manager, docs/venues.md). Without venue
+guitarist `alt_band` outside z_training / z_viewer; an alt_band object
+takes band lights [C: 822BB680, docs/venues.md "Lights"]). Without venue
 lights (the portraits of `--chartest`) a neutral key and ambient light.
 Without the material library (or GD04_GH3_SHADERS=0) one approximate
 program: colour map x (ambient + lights + `GD04_BAND_FILL`). Drawn after
 the venue, no back-face culling (hair cards) [I].
 
+## 6b. Accessory bones
+
+`ragdoll_setaccessorybones accessory_bones = $Guitarist_accessory_bones`
+(Bone_ACC_01..15) makes those bones of the member's ragdoll (the profile's
+`ragdoll`, `ragdoll2` for outfit 2: a `.rag` of global.pak) Havok bodies
+while the body bones follow the animation [C scripts; formats.md "Havok
+packfiles"]. gd04 (`render/band_ragdoll.*`) [I: the model]: each
+accessory body is a point mass at its bone's tip (the far end of its .rag
+shape: the boxes' translation doubled, along the bone's +x; the bodies sit
+at the bones' bind positions [C data]) on a rod from the bone's joint,
+under gravity with the body's damping (max of linear / angular, 0.05 on
+the disc), its swing held inside its ragdoll constraint's cone around the
+animated direction; the bone turns to the mass and its descendants follow.
+Stepped at 60 Hz of song time from the animated pose at each step (frame
+rate independent; a restart at rest after a jump of over 2 s);
+GD04_NO_RAGDOLL=1 turns it off.
+
+The light registers are GH3's light manager's (docs/venues.md "Lights"):
+a member's query point is its origin, its groups `band` (+ `alt_band` for
+the guitarist) and `defaultgroup` [C].
+
 ## 7. Gaps
 
 Band_WalkToNode (walks, turns), intro / win / lose stances in the
 transitions, two-player layouts, the twist constraint bones, leg / drummer /
-singer IK, the ragdoll (the accessory bones Bone_ACC_* that GH3 simulates
-with Havok from the `.rag` files, decoded: formats.md "Havok packfiles"), star power and battle reactions, receiving dynamic shadows (they cast
+singer IK, Havok's own solver for the accessory bones (gd04's model below),
+star power and battle reactions, receiving dynamic shadows (they cast
 them onto the venue: docs/venues.md "Dynamic shadows").
 
 ## 8. Test

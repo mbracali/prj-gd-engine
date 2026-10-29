@@ -240,8 +240,8 @@ removed and a flame shown (2.8) [I: GemStep / hit path not fully read].
 - Per frame: head row = e/T*1024 (as a gem); if the note is being held (`holding` = 1) the head
   start time is reset to now - whammy_cutoff x T / N (N = gem_time_table512's size, 1152), so the
   head row stays at whammy_cutoff x 1024 / 1152 = 977.8 (1P: 0.870 of the way down, above
-  the playline row 1024 [I: hidden by the fret buttons]) [C 0x8210E8D4-0x8210E910; gd04 pins it at the
-  playline, a follow-up]. Tail row = (e_creation/T - L)*1024, clamped at 0 (top); tail beyond 1152 -> destroy
+  the playline row 1024 [I: hidden by the fret buttons]) [C 0x8210E8D4-0x8210E910; gd04 draws it
+  there, render/highway2d.cpp rowDepth(977.8), the element kept past row 1152 while its tail shows]. Tail row = (e_creation/T - L)*1024, clamped at 0 (top); tail beyond 1152 -> destroy
   [C]. Sprite at the head position, y scale = (y_head - y_tail) / (texture height * cos(angle)),
   x scale 0.6 [C 0x8210EAxx: 1/f(pi/2 - rot); f = sin I].
 - Rendering: a strip mesh in 8-row steps (0x8238E338 / 0x8238ECF8): half width = whammy_top_width *
@@ -418,3 +418,24 @@ note_hit01 A38B2820, note_hit_blue_01 9E700D1C; Particle_Spark01 44E7B154; whamm
 - Hit path: where the gem is destroyed and which pos is passed to NoteFX (gem pos vs pos_2d) [I].
 - Blend enum confirmation (material d8 3 / 1) and fade shader math [I].
 - The 2D particle system's units (Create2DParticleSystem: velocity, friction) [I].
+
+## The song scripts' 2D effects (D10, ui/song_hooks.cpp, ui/fx2d.cpp)
+
+- `gem_container<p>` is a proxy container element at Highway2D::containerPos
+  (the x offset, the intro rise, the multiplier-loss shake, battle's push);
+  GH3's scripts create their highway elements under it [C script setup_highway].
+- button_up_models.<color>.pos_2d / left_pos_2d = (the lane's playline x,
+  highway_playline) and button_models.<color>.angle / left_angle =
+  Atan2(height, top x - playline x) of the lane / the mirrored lane, as
+  generate_pos_table's SetButtonData writes them (0x821059D0) [C script, C].
+- Create2DParticleSystem systems (first_gem_fx's lnzflare02 on the first
+  gem; GuitarEvent_StarSequenceBonus's Star01 / Star02 / Spark01 at the
+  buttons; WhammyFXOn's whammy_particle_params sparks while a sustain is held):
+  emit_rate s between particles, emit_dir / emit_spread degrees from up,
+  velocity x 60 px/s, friction's y x 60 px/s^2, colour / scale start -> end
+  over `time`, additive, relative to the parent element [params C; motion I].
+- The big bolts (big_bolt<p><n>, sys_Big_Bolt01): the material's 8-frame
+  flip-book at 15 fps, additive, the frame's size x star_power_bolt_scale (1,
+  1.5), just centre bottom, rot_angle = button_models' left_angle (the
+  script's choice) [C script; frame order I].
+

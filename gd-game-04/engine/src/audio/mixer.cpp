@@ -78,6 +78,7 @@ void Mixer::play(std::unique_ptr<AudioSource> stream, std::vector<Track> tracks,
     songFrames_ = 0;
     guitarGain_ = 1, guitarTarget_ = 1;
     guitar2Gain_ = 1, guitar2Target_ = 1;
+    guitarFx_.setRate(rate_);
     anchorFrames_ = 0;
     anchorNs_ = SDL_GetTicksNS();
     paused_ = false;
@@ -175,14 +176,19 @@ void Mixer::fill(int frames) {
         // ~8 ms ramp, no click (gd01) [I].
         guitarGain_ += (target - guitarGain_) * 0.003f;
         guitar2Gain_ += (target2 - guitar2Gain_) * 0.003f;
-        float l = 0, rr = 0;
+        float l = 0, rr = 0, gl = 0, gr = 0;
         for (size_t c = 0; c < tracks_.size(); ++c) {
             const Track& t = tracks_[c];
             float v = ring_[c][at] * t.volume * (t.guitar ? guitarGain_ : t.guitar2 ? guitar2Gain_ : 1.0f);
             // gd01's linear pan law: -1 = left only, 0 = both at full, 1 = right only [I].
-            l += v * std::clamp(1.0f - t.pan, 0.0f, 1.0f);
-            rr += v * std::clamp(1.0f + t.pan, 0.0f, 1.0f);
+            // The players' guitar tracks go through the guitar buss's effects.
+            float& L = (t.guitar || t.guitar2) ? gl : l;
+            float& R = (t.guitar || t.guitar2) ? gr : rr;
+            L += v * std::clamp(1.0f - t.pan, 0.0f, 1.0f);
+            R += v * std::clamp(1.0f + t.pan, 0.0f, 1.0f);
         }
+        guitarFx_.process(gl, gr);
+        l += gl, rr += gr;
         out_[size_t(silent + i) * 2] = std::clamp(l, -1.0f, 1.0f);
         out_[size_t(silent + i) * 2 + 1] = std::clamp(rr, -1.0f, 1.0f);
     }

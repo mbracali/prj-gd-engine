@@ -11,7 +11,7 @@
 #include <vector>
 
 #include "audio/audio_source.h"
-#include "audio/audio_source.h"
+#include "audio/guitar_fx.h"
 
 // Plays a song's multitrack audio and owns the song clock. The clock and
 // the per-channel volume / pan / guitar mute are gd01's mixer
@@ -55,6 +55,9 @@ public:
     // (GH2's set_music_speed: the failed song winding down, practice) [I for
     // the pitch]. The song clock is not corrected for it.
     void setSpeed(float speed);
+    // The guitar buss's echo / reverb / volume (GH3's setsoundbusseffects,
+    // SetSoundBussParams; ui/song_hooks.cpp): the guitar tracks pass through it.
+    GuitarFx& guitarFx() { return guitarFx_; }
 
     // Song time in ms at `ticksNs` (SDL_GetTicksNS clock), or now if 0.
     double songTimeMs(uint64_t ticksNs = 0) const;
@@ -94,6 +97,7 @@ private:
     float guitarGain_ = 1;  // audio thread only
     std::atomic<float> guitar2Target_{1};
     float guitar2Gain_ = 1;
+    GuitarFx guitarFx_;
 
     // Clock anchor: `anchorFrames_` frames had been played at `anchorNs_`.
     std::atomic<int64_t> anchorFrames_{0};

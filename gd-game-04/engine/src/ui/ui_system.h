@@ -15,6 +15,7 @@
 
 class Canvas;
 class Disc;
+class MoviePlayer;
 class TextureCache;
 namespace qs {
 class Vm;
@@ -47,6 +48,16 @@ struct Element {
     int exclusiveDevice = -1;
     uint32_t exclusiveMask = 0;  // exclusive_device as an array of devices (bit per device; 0: none) [C script create_select_difficulty_menu]
     float fontSpacing = 0, spaceSpacing = 0, lineSpacing = 1;
+    // font_spacing given: it replaces the font's tracking and drops its
+    // bearing (default -1 = the font's own) [C TextElement ctor 0x8231B788, 0x8232ADF0]
+    bool fontSpacingGiven = false;
+    // shadow: the text again at pos + shadow_offs (screen px), in
+    // shadow_rgba, z - 0.005, colour codes ignored [C 0x8231A8C0]
+    bool shadow = false;
+    float shadowX = 0, shadowY = 0;
+    std::array<uint8_t, 4> shadowRgba{0, 0, 0, 255};
+    float internalScale = 1, givenH = 0;
+    uint8_t blend = 0;  // a sprite's blend: 0 alpha, 1 add, 2 subtract (destination - source) [I: the setlist's shoeprints]  // text blocks: internal_scale, the dims' height before allow_expansion
     // Menus [C 0x82315AA0 / 0x82315B08]
     float regularSpace = 0, paddingScale = 1, spacingBetween = 0;
     bool dontWrap = false;
@@ -63,6 +74,11 @@ struct Element {
     // (UiSystem::drawCount): the mouse hit-tests what was drawn last.
     mutable float bx0 = 0, by0 = 0, bx1 = 0, by1 = 0;
     mutable uint64_t drawnIn = 0;
+    // Its place in GH3's one draw list: (re)inserted when it becomes
+    // visible or its z changes, in front of the older equals there, i.e.
+    // drawn behind them [C 0x8238D7D0, 0x8238F6F8].
+    mutable uint64_t listSeq = 0, listSeen = 0;
+    mutable float listZ = 0;
     struct Morph {
         bool active = false;
         double t = 0, duration = 0;
@@ -78,11 +94,15 @@ public:
     UiSystem(qs::Vm& vm, const Disc& disc, TextureCache& textures, gfx::RenderDevice& device);
     ~UiSystem();
     void addNatives();
+    // The texture-slot movies' natives (ui_movies.cpp), after the game's stubs.
+    void addMovieNatives();
     void update(double dtMs);
     void draw(Canvas& c);
     // A pad event (pad_choose, pad_back, pad_up ...) to every focused element.
     void padEvent(uint32_t event, int device);
     Element* find(uint32_t id) const;
+    // DisplayLoadingScreen's picture is up (over everything).
+    bool loadingScreenUp() const { return loadingTex_ != 0; }
     Element& root() { return *root_; }
     size_t count() const { return byId_.size(); }
     // The text of every visible text element (walk checks).
@@ -139,6 +159,15 @@ private:
     void setTexture(Element& e, uint32_t key);
     void measureText(Element& e) const;
     float textWidth(const FontEntry& fe, const std::u16string& s, const Element& e) const;
+    // A text block's lines, word-wrapped to its dims [C 0x8231B260].
+    std::vector<std::u16string> blockLines(const FontEntry& fe, const Element& e) const;
+    // SetText: "\m<n>" (a meta button) becomes "\b<glyph>" through
+    // meta_button_map, "\_" a space [C 0x8231A2C8, 0x8228E0B0].
+    std::string setText(const std::string& s) const;
+    // A text element's glyphs (its shadow with `shadowPass`) at the corner
+    // (cx, cy), world scale / alpha / rotation.
+    void drawElementText(Canvas& c, const Element& e, const FontEntry& fe, float cx, float cy, float wsx, float wsy, float wa, float wrot,
+                         bool shadowPass) const;
     void destroy(Element* e);
     void forget(Element* e);
     bool launch(Element* target, uint32_t event, const qb::Struct& data);
@@ -160,6 +189,23 @@ private:
     std::vector<std::array<uint8_t, 4>> colorTab_;  // Default_Font_Colors
     Stats stats_;
     uint64_t drawCount_ = 0;
+    uint64_t listSeq_ = 0;
+    // DisplayLoadingScreen's image (full screen) and spinning wheel, over
+    // everything until HideLoadingScreen [C 0x8218DDE8 / 0x8218E0A0].
+    uint32_t loadingTex_ = 0, loadingSpin_ = 0;
+    float spinX_ = 0, spinY_ = 0;
+    double loadingMs_ = 0;
+    // Texture-slot movies (PlayMovieFromBuffer, PreLoadMovie +
+    // StartPreLoadedMovie): drawn full screen at their texturepri in the
+    // elements' z order [C scripts create_loading_screen, win_song].
+    struct MovieSlot;
+    std::unordered_map<int, std::unique_ptr<MovieSlot>> movies_;
+    std::unordered_map<int, std::string> movieBuffers_;  // buffer_slot -> movie (LoadMovieIntoBuffer)
+    void updateMovies(double dtMs);
+    void moviesToDraw(std::vector<const Element*>& out);  // decodes due pictures; the slots to draw
+    gfx::TextureId movieTexture(uint32_t key) const;
+    std::vector<uint32_t> pendingFocus_;  // menus whose first item takes the focus at their next update
+    void resolvePendingFocus(uint32_t menuId);
     bool unionBounds(const Element& e, float& x0, float& y0, float& x1, float& y1) const;
 };
 

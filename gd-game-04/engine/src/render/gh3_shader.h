@@ -9,6 +9,8 @@
 
 #include "data/matlib.h"
 #include "data/scene.h"
+#include "data/venue.h"
+#include "render/venue_lights.h"
 #include "render/device.h"
 #include "render/rmath.h"
 #include "render/xenos_glsl.h"
@@ -69,23 +71,36 @@ enum : int {
     kRegInvView = 240, kRegViewProj = 244,
 };
 
-// A light as the light manager sees it for one object.
+// A light as the light manager sees it (the light record 822BE020 fills,
+// with the light show's live values) [C: docs/venues.md "Lights"].
 struct LightIn {
-    enum Type : uint8_t { Ambient, Directional, Point, Spot } type = Point;
-    gfx::Vec3 pos, dir{0, 0, 1};  // dir: where the light shines (its +z)
-    gfx::Vec3 color{1, 1, 1};     // colour x intensity
-    float specular = 1;           // specular intensity
-    float attenStart = 0, attenEnd = 1;
-    float cosHotspot = 1, cosField = 0;
+    enum Type : uint8_t { Ambient, Directional, Point, Spot } type = Directional;
+    gfx::Vec3 pos, dir{0, -1, 0};  // dir: where the light shines
+    gfx::Vec3 color{1, 1, 1};      // lightcolor (0..1), not scaled
+    float intensity = 1, specular = 1, shadow = 1;
+    float attA = 0, attB = -2000;  // point / spot: attenend^2, 1 / (attenend^2 - attenstart^2 + 0.0001)
+    bool dynamic = false;          // a candidate everywhere (no box)
+    bool shadowLight = false;      // ranked x 50000
+    gfx::Vec3 boxCenter, boxHalf{1e9f, 1e9f, 1e9f};
+    float groupScale = 1;          // the group's intensity x the fade weight x the modulation (1)
 };
-// The light registers (c176..c191) of an object at `center`: GH3's model
-// is one ambient colour, one key directional light (direction, colour,
-// specular colour) and the remaining lights as L1 spherical harmonics
-// (constant, x, y, z) [C: the pixel shaders, e.g. D_3ChkBox_Pass0:
-// colour = diffuse x vertex colour x (ambient + SH(n) x shadow +
-// N.L x dir colour x shadow)]. How GH3 picks the key light and folds the
-// others is the light manager's (C code, not reimplemented yet) [I].
-void lightObject(const LightIn* lights, size_t count, const gfx::Vec3& center, ObjectConstants& out);
+LightIn lightIn(const venue::Light& l, const venue::LightState& s);
+// The light group rule of the candidate query (822BB680): the object's
+// group, `band` lights for an `alt_band` object, and `defaultgroup` (a
+// light without a lightgroup) everywhere [C].
+bool groupLights(uint32_t lightGroup, uint32_t objectGroup);
+
+// The light registers (c176..c191) of an object at `p` (a mesh: its
+// bounding sphere's centre; a model: its origin): 823DA990's light set and
+// 823DB168's upload [C]. The candidates are the lights whose box holds `p`
+// (and the dynamic ones), at most 32 in order, ranked by luminance x
+// intensity x attenuation (x 50000 for shadow lights); the first
+// directional / point light is the key light (c177..c179, not in the SH),
+// the next three take the specular slots (c180..c185) and go into the L1
+// spherical harmonics (4/17, 8/17 l) with every other directional, point
+// (attenuated) and spot light (by the unnormalised axis distance); ambient
+// lights sum into c176.
+void lightObject(const LightIn* lights, size_t count, const gfx::Vec3& p, ObjectConstants& out);
 
 // One translated template.
 struct Program {
@@ -104,6 +119,10 @@ public:
     // The template's program for a technique (compiled on first use); null
     // when the template is unknown or its shaders cannot be translated.
     const Program* get(uint32_t templateKey, matlib::Technique t = matlib::Default);
+    // A named technique of a template (the filter templates' passes, e.g.
+    // ImmediateMode's "_2D_Cutoff"), its Default variant; null when missing
+    // or not translated.
+    const Program* get(uint32_t templateKey, const std::string& technique);
     const matlib::Library* library() const { return lib_.get(); }
     gfx::TextureId white() const { return white_; }
     gfx::TextureId whiteCube() const { return whiteCube_; }
@@ -112,6 +131,8 @@ private:
     gfx::RenderDevice* dev_ = nullptr;
     std::shared_ptr<const matlib::Library> lib_;
     std::unordered_map<uint64_t, std::unique_ptr<Program>> programs_;  // null entry: failed
+    std::unordered_map<std::string, std::unique_ptr<Program>> named_;
+    std::unique_ptr<Program> make(int vs, int ps, const std::string& name);
     gfx::TextureId white_, whiteCube_;
 };
 

@@ -1,5 +1,53 @@
 # gd-game-04 progress log
 
+## RESUME HERE (2026-10-29, stopped on the owner's order)
+
+**Done this run** (all pushed; last full suite: 18 walks, --selftest,
+--venuetest, --chartest, --shadertest <disc> passed on fd6ee66 / 3e73402;
+the final tree builds with 0 warnings and --walktest quickplay passes):
+GD04-026 Glitches' Vault scoped to their band; GD04-028 Android disc in place
+(built only); GD04-029 Enhanced defaults off; GD04-027 Xenia reference
+captures (~/.local/share/gd-engine/refcaps/gd04, 66 shots); GD04-012 GH3 pad
+layout; GH3's material shaders from MaterialLibrary (Xenos -> GLSL), light
+manager, screen FX (DOF, bloom), beams, flares, crowd, particles, stage peds,
+moving objects, lighters, accessory physics; gameplay visuals (highway
+parts, HUD curves/alerts, battle pieces, P2 highway, mid-song starts, Lou's
+finish); offsets / lag calibration; judge unknowns; volume texture and Havok
+decoded; menus matched to the captures (docs/ui.md §10); D10 steps 1-2
+(GH3's GuitarEvent_* hooks, song event arrays, in-song sounds, 2D particles,
+guitar echo/reverb); display gamma (BT.709 ramp, GD04_GAMMA=0 off); menu
+composite objects (half-done).
+
+**Not yet verified** (committed at the stop, only build + quickplay walk
+run): the display gamma ramp (render/gl_device.cpp), ui/menu_objects.*
+(menu 3D characters), the last D10 edits. First step next time: run the full
+suite (18 walks, --selftest, --venuetest, --chartest, --shadertest and
+--shadertest <disc> with and without GD04_GLES=1, MinGW build) and fix.
+
+**Next steps, in order:**
+1. Full suite on the current tree; fix anything the gamma / menu objects /
+   D10 edits broke.
+2. Menu 3D characters (ui/menu_objects.*): the hub character stands at the
+   left edge (character_hub_pos script stuck?), check the store guitar on
+   screen, load models lazily; store menu 20 px high, cheats rows 4-18 px,
+   Options' "V2" label (XEX).
+3. D10 leftovers: 3D effects the scripts ask for (4x finger flames, Star
+   Power stage FX on bones, crowd Star Power anims, stage divers), the crowd
+   buss echo / venue reverb, LightShow_SetTime from <song>_lightshow,
+   GuitarEvent_BattleAttackFinished; step 3 (start_gem_scroller) stays native
+   (FINDINGS "D10 done").
+4. Renderer: loading during GH3's loading screen (async song load),
+   p1_last_song_detailed_stats for More Stats, pause menu items 50 px high,
+   hair colour, raytraced beams / projectors, GH3's particle maths, ScreenFlash,
+   characters receiving shadows, drum-kick speaker pulses, Band_WalkToNode.
+5. Package builds under the flock lock, verify_bundle, Linux launcher run and
+   Wine run; update the backlog; the 40-line final report.
+
+**Open GD04 rows:** -001 (umbrella), -006..-011 (approximations listed in
+each row), -013 (online: out of scope), -015 (Havok accessory sim is the
+port's own solver), -016 (678 natives still missing, docs/audit.md), -018,
+-019 ([I] lists), -021 (D10 step 3 native), -028 (not run on a device).
+
 ## Final report, 2026-10-29 second session (read this first)
 
 **Milestones.** M0, M1, M2 done. M3 (GH3's own menus from boot through

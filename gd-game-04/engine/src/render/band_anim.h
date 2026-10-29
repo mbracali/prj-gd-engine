@@ -106,6 +106,9 @@ public:
         uint32_t seed = 1;
         double startMs = 0;  // when the member is created (the song's lead-in)
         bool guitarPart = true;  // the bassist plays the guitar part (song bassist Morello / Slash) [C script]
+        // The menus' members (ui/menu_objects.h): the stance of the member's
+        // info struct at its creation (0: the profile's) [C script create_guitarist].
+        uint32_t stance = 0;
     };
     bool init(const Setup& s, std::string& error);
     // Processes every event up to song time `ms` (monotonic).
@@ -114,6 +117,10 @@ public:
     // note plays Bad_Strums once until the next hit (handle_missed_note,
     // handle_hit_note_CFunc) [C script; I: the hit clears the flag].
     void playerNote(double ms, bool hit);
+    // handle_change_stance / handle_play_anim run on the member at `ms` (the
+    // menus' calls; a song's come from its performance array) [C scripts].
+    void changeStance(uint32_t stance, bool noWait, double ms) { changeStanceEvent(stance, noWait, ms); }
+    void playAnim(const qb::Struct& params, double ms) { playAnimEvent(params, ms); }
     // The pose at `ms` (>= the last advance): local transforms, then the
     // model-space bone matrices (`world`) and the skinning matrices
     // (world x inverse bind).

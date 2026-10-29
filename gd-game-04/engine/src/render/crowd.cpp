@@ -118,9 +118,17 @@ bool Crowd::start(const Disc& disc, const Globals& g, const venue::Venue& v, con
             p.model->skeleton = ske;
             if (!loadSkin(zone, modelKey(model), *p.model, error)) return false;
             // The clapping hands (switchonatomic lhand_clap / rhand_clap) [C script].
+            p.lighterModel = std::make_unique<band::Model>();
+            p.lighterModel->skeleton = ske;
+            if (!loadSkin(zone, modelKey(model), *p.lighterModel, error)) return false;
             for (const char* hand : {"Real_Crowd\\Crowd_HandL_Clap.skin", "Real_Crowd\\Crowd_HandR_Clap.skin"}) {
                 std::string herr;
                 if (!loadSkin(global, modelKey(hand), *p.model, herr)) SDL_Log("crowd: %s", herr.c_str());
+            }
+            // The lighter: Crowd_AllSetHand hand = right Type = lighter (rhand_lighter) [C script].
+            for (const char* hand : {"Real_Crowd\\Crowd_HandL_Clap.skin", "Real_Crowd\\Crowd_HandR_Lighter.skin"}) {
+                std::string herr;
+                if (!loadSkin(global, modelKey(hand), *p.lighterModel, herr)) SDL_Log("crowd: %s", herr.c_str());
             }
             for (const auto& [k, c] : lib_->permClips()) p.model->clips.emplace(k, c);
             p.rig.init(*ske);
@@ -154,6 +162,10 @@ bool Crowd::attach(gfx::RenderDevice& dev, std::shared_ptr<const matlib::Library
     for (Ped& p : peds_) {
         p.view = view_.add(dev, *p.model, error);
         if (p.view < 0) return false;
+        if (p.lighterModel) {
+            std::string lerr;
+            p.lighterView = view_.add(dev, *p.lighterModel, lerr);
+        }
         gfx::TargetDesc td;
         td.width = width_, td.height = height_;
         td.depth = true;
@@ -186,7 +198,7 @@ const anim::Clip* Crowd::pick(Ped& p, double t, float& blend) {
     }
     const double bpm = 60000.0 / beat;
     const uint32_t speed = bpm < (slowTempo_ + medTempo_) * 0.5 ? K("slow") : bpm < (medTempo_ + fastTempo_) * 0.5 ? K("med") : K("fast");
-    const qb::Struct* idle = structOf(g_->field(*p.animSet, K("idle")));
+    const qb::Struct* idle = structOf(g_->field(*p.animSet, p.lighters ? K("special") : K("idle")));
     const qb::Struct* bySkill = idle ? structOf(g_->field(*idle, skill)) : nullptr;
     const qb::Value* list = bySkill ? g_->field(*bySkill, speed) : nullptr;
     if (!list || list->type != qb::Type::Array || !list->arr || list->arr->values.empty()) return nullptr;
@@ -194,6 +206,7 @@ const anim::Clip* Crowd::pick(Ped& p, double t, float& blend) {
     if (p.first) blend = blendTempo_;  // old_speed undefined: the tempo change blend
     else if (speed != p.lastSpeed) blend = blendTempo_;
     else if (skill == K("bad")) blend = blendBad_;
+    else if (p.lighters) blend = blendSpecial_;
     else if (speed == K("slow")) blend = blendSlow_;
     else if (speed == K("med")) blend = blendMed_;
     else blend = blendFast_;
@@ -202,21 +215,47 @@ const anim::Clip* Crowd::pick(Ped& p, double t, float& blend) {
     return p.model->clip(key);
 }
 
+bool Crowd::lightersOn(double t) const {
+    bool span = false;
+    for (const auto& [a, b] : lighterSpans_) span = span || (t >= a && t < b);
+    return span && (!perf_ || perf_->at(t) != venue::Performance::Poor);
+}
+
 void Crowd::advance(double ms) {
-    for (Ped& p : peds_) {
-        int guard = 0;
-        while (p.nextAt <= ms && guard++ < 64) {
-            float blend = 0;
-            const anim::Clip* c = pick(p, p.nextAt, blend);
-            if (c) {
-                p.body.play(c, p.nextAt, std::max(0.0f, blend));
-                // Only the newest clips matter for the cross-fade.
-                if (p.body.plays.size() > 3) p.body.plays.erase(p.body.plays.begin(), p.body.plays.end() - 3);
-                p.nextAt += std::max(kFrameMs, double(c->duration) * 1000.0);  // GameObj_WaitAnimFinished
-            } else {
-                p.nextAt += kFrameMs;
+    for (size_t i = 0; i < peds_.size(); ++i) {
+        Ped& p = peds_[i];
+        auto playUntil = [&](double t) {
+            int guard = 0;
+            while (p.nextAt <= t && guard++ < 64) {
+                float blend = 0;
+                const anim::Clip* c = pick(p, p.nextAt, blend);
+                if (c) {
+                    p.body.play(c, p.nextAt, std::max(0.0f, blend));
+                    // Only the newest clips matter for the cross-fade.
+                    if (p.body.plays.size() > 3) p.body.plays.erase(p.body.plays.begin(), p.body.plays.end() - 3);
+                    p.nextAt += std::max(kFrameMs, double(c->duration) * 1000.0);  // GameObj_WaitAnimFinished
+                } else {
+                    p.nextAt += kFrameMs;
+                }
+            }
+        };
+        if (lighterSpans_.empty()) {
+            playUntil(ms);
+            continue;
+        }
+        // crowd_monitor_performance, every game frame: a change of the
+        // lighters restarts each ped's anims (Crowd_AllPlayAnim: one game
+        // frame apart, ped by ped) [C script; I: on the 60 Hz grid].
+        if (p.checkedAt < -1e17) p.checkedAt = std::floor(ms / kFrameMs) * kFrameMs - kFrameMs;
+        while (p.checkedAt + kFrameMs <= ms) {
+            p.checkedAt += kFrameMs;
+            playUntil(p.checkedAt);
+            if (lightersOn(p.checkedAt) != p.lighters) {
+                p.lighters = !p.lighters;
+                p.nextAt = p.checkedAt + kFrameMs * double(i + 1);
             }
         }
+        playUntil(ms);
     }
 }
 
@@ -275,7 +314,7 @@ void Crowd::render(double ms, const venue::CamPose& cam, const venue::Venue& v, 
         d.setViewport(0, 0, width_, height_);
         d.clear(clear, true);
         BandView::Instance in;
-        in.member = p.view;
+        in.member = p.lighters && p.lighterView >= 0 ? p.lighterView : p.view;
         in.skin = &p.skin;
         in.root = p.root;
         in.lightGroups = {K("Crowd")};  // lightgroup = Crowd [C script]

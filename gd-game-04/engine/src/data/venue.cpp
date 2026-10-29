@@ -63,21 +63,41 @@ void readNodes(Venue& v, const qb::Array& arr) {
         Light l;
         l.name = n.name;
         l.group = n.lightGroup;
+        // The light manager's light (822BE020; defaults 822B7998): Type point /
+        // spot / ambient, anything else directional; intensity 1, attenstart
+        // 7.5, attenend 15, hotspot / field 45; the direction it shines =
+        // rotationquat x (0, -1, 0) [C: docs/venues.md "Lights"].
         const uint32_t t = n.type;
-        l.type = t == K("ambient") ? LightType::Ambient : t == K("dir") ? LightType::Directional : t == K("spot") ? LightType::Spot
-                                                                                                                 : LightType::Point;
+        l.type = t == K("ambient") ? LightType::Ambient : t == K("point") ? LightType::Point : t == K("spot") ? LightType::Spot
+                                                                                                              : LightType::Directional;
         l.pos = n.pos;
         Quat q = n.rot;
         if (const qb::Value* rq = st.find(K("rotationquat")); rq && rq->type == qb::Type::Array && rq->arr && rq->arr->values.size() == 4)
             for (size_t i = 0; i < 4; ++i) q[i] = rq->arr->values[i].number();
-        l.dir = rotate(q, {0, 0, 1});
+        l.dir = rotate(q, {0, -1, 0});
         l.color = vec(st.find(K("lightcolor")), {1, 1, 1});
-        l.intensity = num(st.find(K("intensity")), 0);
-        l.attenStart = num(st.find(K("attenstart")), 0);
-        l.attenEnd = num(st.find(K("attenend")), 1);
-        l.hotspot = num(st.find(K("hotspot")), 0);
-        l.field = num(st.find(K("field")), 0);
+        l.intensity = num(st.find(K("intensity")), 1);
+        l.attenStart = num(st.find(K("attenstart")), 7.5f);
+        l.attenEnd = num(st.find(K("attenend")), 15);
+        l.hotspot = num(st.find(K("hotspot")), 45);
+        l.field = num(st.find(K("field")), 45);
         l.specular = num(st.find(K("specularintensity")), 1);
+        l.shadow = num(st.find(K("shadowintensity")), num(st.find(K("shadowdensity")), 1));
+        l.dynamic = hasFlag(st, K("dynamic"));
+        l.shadowLight = hasFlag(st, K("shadow"));
+        // The box (the candidate grid): directional and spot lights a cube of
+        // half attenend around pos + dir x attenend / 2, the others attenend
+        // around pos; boxcenter / boxcorner replace them [C].
+        if (l.type == LightType::Directional || l.type == LightType::Spot) {
+            const float h = l.attenEnd * 0.5f;
+            l.boxCenter = {l.pos[0] + l.dir[0] * h, l.pos[1] + l.dir[1] * h, l.pos[2] + l.dir[2] * h};
+            l.boxHalf = {h, h, h};
+        } else {
+            l.boxCenter = l.pos;
+            l.boxHalf = {l.attenEnd, l.attenEnd, l.attenEnd};
+        }
+        if (const qb::Value* bc = st.find(K("boxcenter")); bc && bc->type == qb::Type::Vector) l.boxCenter = vec(bc);
+        if (const qb::Value* bk = st.find(K("boxcorner")); bk && bk->type == qb::Type::Vector) l.boxHalf = vec(bk);
         const std::string& nm = qbkey::names().get(n.name);
         std::string lower;
         for (char c : nm) lower.push_back(char(c >= 'A' && c <= 'Z' ? c - 'A' + 'a' : c));

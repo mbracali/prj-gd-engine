@@ -4,6 +4,7 @@
 
 #include <SDL3/SDL_log.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <string>
 
@@ -22,7 +23,16 @@ uint32_t K(const char* s) { return qbkey::key(s); }
 // printf-style text with %s %d %f %i and %% from the params (FormatText,
 // printf): `%s` takes the next named param s, d, ... in order of the letters
 // QScript uses: s=, d=, f=, a=, b= ... [I].
-std::string format(const std::string& fmt, const qb::Struct& p) {
+std::string format(const std::string& fmt, const qb::Struct& p, Vm& vm) {
+    // usecommas: thousands separators (the scores, the cash) [I: the name];
+    // decimalplaces = n: floats with n decimals, 3 by default [C 0x82264F88].
+    const bool commas = Vm::flag(p, K("usecommas"));
+    const qb::Value* places = Vm::param(p, K("decimalplaces"));
+    auto withCommas = [](std::string d) {
+        const size_t start = !d.empty() && d[0] == '-' ? 1 : 0;
+        for (int at = int(d.size()) - 3; at > int(start); at -= 3) d.insert(size_t(at), ",");
+        return d;
+    };
     std::string out;
     for (size_t i = 0; i < fmt.size(); ++i) {
         if (fmt[i] != '%' || i + 1 >= fmt.size()) {
@@ -39,10 +49,21 @@ std::string format(const std::string& fmt, const qb::Struct& p) {
         const qb::Value* v = Vm::param(p, qbkey::key(std::string(1, c)));
         ++i;
         if (!v) continue;
+        // A key naming a global number prints the number (add_text_to_column's
+        // `d = <arg> column_elements`, a checksumName) [I].
+        if (v->type == qb::Type::Key || v->type == qb::Type::KeyPtr)
+            if (const qb::Value* g = vm.global(v->key); g && (g->type == qb::Type::Int || g->type == qb::Type::Float)) v = g;
         char buf[64];
         switch (v->type) {
-        case qb::Type::Int: std::snprintf(buf, sizeof buf, "%d", v->i), out += buf; break;
-        case qb::Type::Float: std::snprintf(buf, sizeof buf, "%g", double(v->f[0])), out += buf; break;
+        case qb::Type::Int:
+            std::snprintf(buf, sizeof buf, "%d", v->i);
+            out += commas ? withCommas(buf) : std::string(buf);
+            break;
+        case qb::Type::Float:
+            // "%.<decimalplaces>f", 3 places by default [C 0x82264F88: li r26,3; 0x822649F0 "%%.%df"].
+            std::snprintf(buf, sizeof buf, "%.*f", places ? std::clamp(int(Vm::number(places, 3)), 0, 9) : 3, double(v->f[0]));
+            out += buf;
+            break;
         case qb::Type::String:
         case qb::Type::WString: out += v->str; break;
         case qb::Type::Key:
@@ -98,7 +119,7 @@ void addCoreNatives(Vm& vm) {
     vm.addNative("printstruct", [](Vm&, ScriptRun&, qb::Struct&) { return true; });
     vm.addNative("ScriptAssert", [](Vm& v, ScriptRun& run, qb::Struct& p) {
         const qb::Value* s = first(p);
-        v.logOnce("ScriptAssert in " + qbkey::name(run.name) + ": " + (s ? format(s->str, p) : std::string()));
+        v.logOnce("ScriptAssert in " + qbkey::name(run.name) + ": " + (s ? format(s->str, p, v) : std::string()));
         return true;
     });
     // GetPlatform: platform = Xenon (the version this port follows).
@@ -177,12 +198,12 @@ void addCoreNatives(Vm& vm) {
         return true;
     });
     // FormatText checksumName = x / TextName = x 'fmt' params.
-    vm.addNative("FormatText", [](Vm&, ScriptRun& run, qb::Struct& p) {
+    vm.addNative("FormatText", [](Vm& v, ScriptRun& run, qb::Struct& p) {
         const qb::Value* f = nullptr;
         for (const qb::Item& it : p.items)
             if (it.name == 0 && (it.value.type == qb::Type::String || it.value.type == qb::Type::WString)) f = &it.value;
         if (!f || run.frames.empty()) return false;
-        const std::string text = format(f->str, p);
+        const std::string text = format(f->str, p, v);
         if (!run.frames.back().locals) run.frames.back().locals = std::make_shared<qb::Struct>();
         if (const qb::Value* c = Vm::param(p, K("checksumName"))) {
             qbkey::names().add(text);
@@ -225,6 +246,19 @@ void addCoreNatives(Vm& vm) {
         if (!n || run.frames.empty() || !run.frames.back().locals) return false;
         const float r = a + (b - a) * float(v.rng()() % 100000) / 100000.0f;
         Vm::set(*run.frames.back().locals, n->key, Vm::flag(p, K("integer")) ? Vm::makeInt(int32_t(r + 0.5f)) : Vm::makeFloat(r));
+        return true;
+    });
+    // PermuteArray array = a newarrayname = n: a shuffled copy of a as the
+    // local n (the gig money's deductions) [I: create_deductions_list reads it].
+    vm.addNative("PermuteArray", [](Vm& v, ScriptRun& run, qb::Struct& p) {
+        const qb::Value* a = Vm::param(p, K("array"));
+        const qb::Value* n = Vm::param(p, K("newarrayname"));
+        if (!a || !n || a->type != qb::Type::Array || !a->arr || run.frames.empty() || !run.frames.back().locals) return false;
+        qb::Value out = *a;
+        out.arr = std::make_shared<qb::Array>(*a->arr);
+        auto& vals = out.arr->values;
+        for (size_t i = vals.size(); i > 1; --i) std::swap(vals[i - 1], vals[size_t(v.rng()() % i)]);
+        Vm::set(*run.frames.back().locals, n->key, out);
         return true;
     });
     // SetArrayElement arrayname = a [globalarray] index = i newvalue = v: one

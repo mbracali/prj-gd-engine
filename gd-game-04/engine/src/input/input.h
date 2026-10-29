@@ -58,6 +58,9 @@ struct InputEvent {
     bool analog = false;   // Whammy from an analog bar (the value is whammyValue()), not a key or button
     bool joypad = false;   // from a joypad's layout (frets on the triggers, shoulders and A), not a guitar or the keyboard
     bool enterKey = false; // Confirm from the keyboard's Enter (Return or the keypad's): Start on a text entry
+    // StarPower from a tilt (an axis binding) with no button held: GH3 waits
+    // star_power_trigger_frames for it, Select deploys at once [C 0x82112F28].
+    bool tilt = false;
 };
 
 // For logs (GD04_INPUTLOG).
@@ -253,6 +256,7 @@ private:
         std::array<bool, size_t(Control::Count)> down{};
         float whammyAxis = 0;
         bool analogWhammy = false;  // its whammy is bound to an axis
+        bool tilt = false;          // Star Power is held by the tilt axis (no button)
         uint64_t settleNs = 0;  // until then (300 ms after connecting) its axes settle: rest re-read, no actions
         // Buttons held as it connected (or while it settled): their rest is
         // "down" (an adapter's stuck bit, a D-pad SDL reads from an axis
@@ -327,6 +331,7 @@ private:
     bool curGuitar_ = false;  // the device being read is a guitar (lefty strum)
     bool curJoypad_ = false;  // the device being read plays with the joypad layout (InputEvent::joypad)
     bool curAnalog_ = false;  // the device being read has an analog whammy
+    bool curTilt_ = false;    // the device's Star Power is held by its tilt axis only
     bool touch_ = true, gamepadPlay_ = true, rockBand_ = false, rbMappings_ = false;
     std::function<void(float, float, float&, float&)> toMenu_;
     std::array<TouchLanes, 2> lanes_;

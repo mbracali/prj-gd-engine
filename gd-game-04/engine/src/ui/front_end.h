@@ -17,6 +17,7 @@ class Canvas;
 class Disc;
 class Globals;
 class TextureCache;
+class MenuScene;
 
 // GH3's front end run from its own scripts (L1): the VM boots with
 // guitar_startup, the flow manager builds the screens with screen elements
@@ -73,6 +74,9 @@ public:
         bool lefty[2] = {false, false};
         // user_options.lag_calibration (ms; CALIBRATE LAG) [C script gem_scroller].
         double lagMs = 0;
+        // end_credits: kept by an end_credits_restart or for
+        // thrufireandflames, else cleared [C script start_gem_scroller].
+        bool endCredits = false;
     } songRequest;
     bool songPlaying = false;
     // Paused with Start in a song: GH3's pause menu runs over the frozen song
@@ -117,12 +121,15 @@ public:
     std::string flowState() const;
     // A GH3 sound event (SoundEvent event = <name>), for the port's screens.
     void soundEvent(const char* event);
+    // The zones map's current pak (SetPakManCurrentBlock map = zones), for the menus' 3D scene.
+    void setZone(uint32_t zone);
 
 private:
     const Disc& disc_;
     Globals& globals_;
     std::unique_ptr<qs::Vm> vm_;
     std::unique_ptr<ui::UiSystem> ui_;
+    std::unique_ptr<MenuScene> scene_;  // the menus' 3D background (ui/menu_scene.h)
     double accum_ = 0;
     uint32_t lastFlowState_ = 0;
     bool glitchesDone_ = false;

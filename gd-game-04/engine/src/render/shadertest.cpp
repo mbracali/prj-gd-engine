@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "data/disc.h"
+#include "data/qbkey.h"
 #include "render/gh3_shader.h"
 #include "render/renderer.h"
 #include "render/xenos_glsl.h"
@@ -62,6 +63,30 @@ int runShaderTest(const std::string& discPath) {
                 }
             }
             std::printf("material templates: %d not translated (control flow not supported)\n", untranslated);
+            // The screen effects' passes (render/screen_fx.cpp): named techniques of the filter templates.
+            const std::pair<const char*, const char*> fx[] = {
+                {"ImmediateMode", "_2D_Cutoff"}, {"ImmediateMode", "_2D_DepthOfFieldNear"}, {"ImmediateMode", "_2D_Tex_NoViewport"},
+                {"ImmediateModeAlt", "_2D_Tex_BS_NoViewport"}, {"ImmediateModeAlt", "_2D_ComposeBloom0"},
+                {"ImmediateModeAlt", "_2D_ComposeBloom01"}, {"ImmediateModeFilter", "_2D_DownSample4x"},
+                {"ImmediateModeFilter", "_2D_GaussianBlur7x7"}, {"ImmediateModeFilter", "_2D_GaussianBlur7x7H"},
+                {"ImmediateModeFilter", "_2D_GaussianBlur7x7V"}};
+            int fxCount = 0;
+            for (const auto& [tn, tech] : fx) {
+                const matlib::Template* t = lib->find(qbkey::key(tn));
+                const matlib::TechniqueRef* r = t ? t->technique(tech) : nullptr;
+                const std::string name = std::string(tn) + "." + tech;
+                if (!r || r->vs[0] < 0 || r->ps[0] < 0) {
+                    failed.push_back("gh3:" + name + " (missing)");
+                    continue;
+                }
+                const xenos::Program x = xenos::translate(lib->shader(r->vs[0]), lib->shader(r->ps[0]));
+                ++programs, ++fxCount;
+                std::string err;
+                const gfx::ProgramId p = x.ok ? renderer.device().createProgram(gh3shader::programDesc(x, name, info.clipDepthZeroToOne), err) : gfx::ProgramId{};
+                if (p) renderer.device().destroyProgram(p);
+                else SDL_Log("shader gh3:%s: %s", name.c_str(), x.ok ? err.c_str() : x.error.c_str()), failed.push_back("gh3:" + name);
+            }
+            std::printf("screen effects: %d filter techniques\n", fxCount);
         }
     }
     std::printf("%s on %s\n", info.version.c_str(), info.gpu.c_str());

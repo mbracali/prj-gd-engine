@@ -6,7 +6,9 @@
 #include <SDL3/SDL_stdinc.h>
 #include <SDL3/SDL_timer.h>
 
+#include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <exception>
 
@@ -16,8 +18,57 @@
 #include "script/globals.h"
 
 VenueStage::~VenueStage() {
+    fx_.shutdown();
     if (device_ && shadow_) device_->destroyTarget(shadow_);
 }
+
+namespace {
+
+float num(const qb::Struct& s, const char* name, float def) {
+    const qb::Value* v = s.find(qbkey::key(name));
+    return v && (v->type == qb::Type::Float || v->type == qb::Type::Int) ? v->number() : def;
+}
+
+// An [r, g, b] array of 0..255 as 0..1 (Function_8241BC20: x DAT_82007b38) [C].
+void rgb(const qb::Struct& s, const char* name, float out[3], float scale) {
+    const qb::Value* v = s.find(qbkey::key(name));
+    if (!v || v->type != qb::Type::Array || !v->arr) return;
+    for (size_t k = 0; k < 3 && k < v->arr->values.size(); ++k) out[k] = v->arr->values[k].number() * scale;
+}
+
+// One screen_FX entry into the effect parameters [C data tod_profiles.qb;
+// the field offsets: Function_8241BC20 (simple_bloom)].
+void readFx(const qb::Struct& e, screenfx::Params& p, int& brightSlot) {
+    const qb::Value* type = e.find(qbkey::key("Type"));
+    if (!type) return;
+    const bool on = num(e, "ON", 1) > 0;
+    if (type->key == qbkey::key("simple_bloom")) {
+        screenfx::Bloom& b = p.bloom;
+        b.on = on;
+        rgb(e, "color", b.cutoff, 1.0f / 255.0f);
+        rgb(e, "strength", b.strength, 1.0f / 255.0f);
+        b.bloom1 = num(e, "bloom1", 0), b.bloom2 = num(e, "bloom2", 0);
+        b.falloff1 = num(e, "falloff1", 0), b.falloff2 = num(e, "falloff2", 0);
+        b.materialFilter = num(e, "materialfilter", 0) > 0;
+        b.autoLuminance = num(e, "autoluminancemod", 0) > 0;
+        b.distanceMod = num(e, "distancemod", 0);
+    } else if (type->key == qbkey::key("dof")) {
+        screenfx::Dof& d = p.dof;
+        d.on = on;
+        d.backDist = num(e, "backdist", 1), d.frontDist = num(e, "frontdist", 0);
+        d.strength = num(e, "strength", 0), d.blurRadius = num(e, "blurradius", 0);
+        const qb::Value* r = e.find(qbkey::key("blurresolution"));
+        d.half = r && r->key == qbkey::key("half");
+    } else if (type->key == qbkey::key("bright_sat") && brightSlot < 2) {
+        screenfx::BrightSat& bs = p.brightSat[brightSlot++];
+        bs.on = on;
+        bs.contrast = num(e, "Contrast", 1), bs.brightness = num(e, "Brightness", 1);
+        bs.saturation = num(e, "saturation", 1), bs.hue = num(e, "hue", 1);
+        rgb(e, "red_mix", bs.mix[0], 1), rgb(e, "green_mix", bs.mix[1], 1), rgb(e, "blue_mix", bs.mix[2], 1);
+    }
+}
+
+}  // namespace
 
 std::string VenueStage::chooseZone(const Globals& g) {
     if (const char* env = SDL_getenv("GD04_VENUE")) return env;
@@ -82,6 +133,32 @@ bool VenueStage::start(const Disc& disc, const Globals& g, const std::string& zo
             crowd_.reset();
         }
     }
+    // The lighters: <song>_performance's Crowd_StartLighters / Crowd_StopLighters [C data, 12 songs].
+    lighterSpans_.clear();
+    if (band_)
+        for (const qb::File& f : band_->songFiles())
+            if (const qb::Value* pv = f.find(qbkey::key(chart.song + "_performance")); pv && pv->type == qb::Type::Array && pv->arr) {
+                double on = -1;
+                for (const qb::Value& e : pv->arr->values) {
+                    if (e.type != qb::Type::Struct || !e.st) continue;
+                    const qb::Value* scr = e.st->find(qbkey::key("scr"));
+                    const qb::Value* tm = e.st->find(qbkey::key("time"));
+                    if (!scr || !tm) continue;
+                    if (scr->key == qbkey::key("Crowd_StartLighters") && on < 0) on = tm->number();
+                    else if (scr->key == qbkey::key("Crowd_StopLighters") && on >= 0) lighterSpans_.push_back({on, tm->number()}), on = -1;
+                }
+                if (on >= 0) lighterSpans_.push_back({on, 1e18});
+            }
+    if (crowd_) crowd_->setLighterSpans(lighterSpans_);
+    // crowd_create_lighters: <zone>_LIGHTER_Geo00..14 created and hidden,
+    // shown by Crowd_ToggleLighters (not in z_artdeco) [C script].
+    lighterNodes_.clear();
+    if (zone != "z_artdeco")
+        for (int i = 0; i < 15; ++i) {
+            char nm[64];
+            std::snprintf(nm, sizeof nm, "%s_LIGHTER_Geo%02d", zone.c_str(), i);
+            if (venue_->node(qbkey::key(nm))) lighterNodes_.push_back(qbkey::key(nm));
+        }
     // The zone's particle systems (pyro notes, performance changes).
     particles_.reset();
     if (!SDL_getenv("GD04_NO_PARTICLES")) {
@@ -92,6 +169,44 @@ bool VenueStage::start(const Disc& disc, const Globals& g, const std::string& zo
             particles_.reset();
         }
     }
+    // The stage peds: their trigger scripts run on the zone VM (Particles).
+    peds_.reset();
+    if (particles_ && !SDL_getenv("GD04_NO_STAGEPEDS")) {
+        const band::Library* lib = band_ ? &band_->library() : nullptr;
+        std::string serr;
+        try {
+            if (!lib) {
+                pedLib_ = std::make_unique<band::Library>();
+                pedLib_->load(disc);
+                lib = pedLib_.get();
+            }
+            peds_ = std::make_unique<StagePeds>();
+            if (!peds_->start(disc, g, *venue_, *lib, serr)) {
+                if (!serr.empty()) SDL_Log("%s", serr.c_str());
+                peds_.reset();
+            }
+        } catch (const std::exception& ex) {
+            SDL_Log("stage peds: %s", ex.what());
+            peds_.reset();
+        }
+        if (peds_) {
+            StagePeds* sp = peds_.get();
+            particles_->setAnimHook([sp](uint32_t obj, uint32_t anim, float blend, double t) { return sp->play(obj, anim, blend, t); });
+        }
+    }
+    // The venue viewport's screen effects: enable_bg_viewport_properties ->
+    // TOD_Proxim_Update_LightFX_Viewport fxParam = Default_TOD_Manager (its
+    // screen_FX: bright_sat, simple_bloom) [C scripts tod_proxims.qb,
+    // guitar_*.qb]; global_brightness (bright_sat, Brightness 0.5 + 0.1 x
+    // SE_Brightness) is viewport 0's, not the venue's [C].
+    fxParams_ = {};
+    globals_ = &g;
+    if (const qb::Value* tod = g.find(qbkey::key("Default_TOD_Manager")); tod && tod->type == qb::Type::Struct && tod->st)
+        if (const qb::Value* fx = tod->st->find(qbkey::key("screen_FX")); fx && fx->type == qb::Type::Array && fx->arr) {
+            int slot = 0;
+            for (const qb::Value& e : fx->arr->values)
+                if (e.type == qb::Type::Struct && e.st) readFx(*e.st, fxParams_, slot);
+        }
     hide_.clear();
     const qb::Value* cm = g.find(qbkey::key(zone + "_crowd_models"));
     if (cm && cm->type == qb::Type::Array && cm->arr)
@@ -128,11 +243,20 @@ bool VenueStage::attach(gfx::RenderDevice& device, const Disc& disc, std::string
         shadow_ = device.createTarget(td, serr);
         if (!shadow_) SDL_Log("venue: no shadow map: %s", serr.c_str());
     }
+    fxReady_ = !SDL_getenv("GD04_NO_SCREENFX") && fx_.init(device, gh3shader::library(disc));
     if (particles_) {
         std::string perr;
         if (!particles_->attach(device, disc, perr)) {
             SDL_Log("particles: %s", perr.c_str());
             particles_.reset();
+        }
+    }
+    if (peds_) {
+        std::string perr;
+        if (!peds_->attach(device, gh3shader::library(disc), perr)) {
+            SDL_Log("stage peds: %s", perr.c_str());
+            peds_.reset();
+            if (particles_) particles_->setAnimHook(nullptr);
         }
     }
     if (crowd_) {
@@ -145,10 +269,21 @@ bool VenueStage::attach(gfx::RenderDevice& device, const Disc& disc, std::string
     return true;
 }
 
-void VenueStage::update(double ms, float health) {
+bool VenueStage::lightersOn(double ms) const {
+    if (crowd_) return crowd_->lightersOn(std::floor(ms / (1000.0 / 60.0)) * (1000.0 / 60.0));
+    bool span = false;
+    for (const auto& [a, b] : lighterSpans_) span = span || (ms >= a && ms < b);
+    return span && perf_.at(ms) != venue::Performance::Poor;
+}
+
+void VenueStage::update(double ms, float health, bool starPower) {
     if (!venue_) return;
     perf_.record(ms, performance(health));
     advance(ms);
+    if (starPower != starPower_) {
+        starPower_ = starPower;
+        cameras_.starPower(ms, starPower);
+    }
 }
 
 void VenueStage::advance(double ms) {
@@ -235,6 +370,7 @@ void VenueStage::shadowPass(double ms) {
 
 void VenueStage::draw(double ms) {
     if (!view_) return;
+    const bool fx = fxReady_ && fx_.begin();
     lights_.evaluate(ms, lightState_);
     const venue::CamPose cam = cameras_.pose(ms);
     shadowPass(ms);
@@ -243,8 +379,37 @@ void VenueStage::draw(double ms) {
         for (uint32_t card : hide_) view_->setOverride(card, crowd_->texture(card));
     }
     view_->setTime(ms / 1000.0);
+    {
+        const bool on = !lighterNodes_.empty() && lightersOn(ms);
+        const std::vector<uint32_t>* ln = &lighterNodes_;
+        const Particles* pt = particles_.get();
+        view_->setNodeVisibility([ln, on, pt](uint32_t node) {
+            if (std::find(ln->begin(), ln->end(), node) != ln->end()) return on ? 1 : 0;
+            return pt ? pt->visibility(node) : -1;
+        });
+    }
+    if (particles_) {
+        Particles* pt = particles_.get();
+        view_->setNodeMotion([pt, ms](uint32_t node, gfx::Mat4& d) { return pt->nodeMotion(node, ms, d); });
+    }
     view_->draw(cam, lightState_, lights_);
     if (band_) band_->draw(ms, cam, *venue_, lightState_, lights_);
+    if (peds_) peds_->draw(ms, cam, *venue_, lightState_, lights_, particles_.get());
     view_->drawVolumes(cam, lights_);
     if (particles_) particles_->draw(cam, ms);
+    if (fx) {
+        // venue_DOF: the shot's dof (a DOF_*_tod_manager's screen_FX[0]), else
+        // DOF_Off_TOD_Manager's, set when the cut starts [C CameraCuts_StartCallback].
+        screenfx::Params p = fxParams_;
+        const uint32_t dofKey = cameras_.shot().dof ? cameras_.shot().dof : qbkey::key("DOF_Off_TOD_Manager");
+        if (globals_)
+            if (const qb::Value* m = globals_->find(dofKey); m && m->type == qb::Type::Struct && m->st)
+                if (const qb::Value* fx = m->st->find(qbkey::key("screen_FX")); fx && fx->type == qb::Type::Array && fx->arr && !fx->arr->values.empty())
+                    if (const qb::Value& e = fx->arr->values.front(); e.type == qb::Type::Struct && e.st) {
+                        int slot = 2;
+                        readFx(*e.st, p, slot);
+                    }
+        p.nearZ = 0.05f, p.farZ = 4000.0f;  // VenueView::globals' projection
+        fx_.end(p);
+    }
 }

@@ -128,3 +128,22 @@ headless (DumpAsm.java fn:0x8211E8B8 / 0x8211F328 / 0x82120C90 /
 the song-path survey (GD04-021) from qbscript dumps (a reachability walk
 from start_gem_scroller, the songs' event arrays). REA was not used (it
 cannot open the XEX). Scratch: agents/scratch/asm_*.txt.
+- 2026-10-29 (light manager, screen effects, R2): the VMX128 code Ghidra
+  shows as `.word` is read with `tools/vmx128.py <Xenia ppc_opcode_table_gen.cc>
+  <DumpAsm listing>` (the opcode table is the public Xenia source, fetched,
+  not shipped). Read that way: the light manager (823DA990 / 823DB168 /
+  822BB680), the ScreenFX classes (dof 824440F8, bright_sat 8243E5F0,
+  simple_bloom 8243D240, their parse functions 8241BC20 / 8241C640 /
+  8241EE68), the material stencil (823DC180), StarPowerOn (8211DA70);
+  docs/venues.md "Lights", "Screen effects". REA was not used (it cannot
+  open the XEX). Development aids: GD04_NO_SCREENFX=1, GD04_NO_STAGEPEDS=1,
+  GD04_NO_RAGDOLL=1, GD04_RAGDOLL_LOG=1, GD04_STAGEPEDS_LOG=1, GD04_OBJLOG=1 (zone VM object
+  spawns).
+Note (D10, 2026-10-29): the C's gameplay events and spawns were read with
+Ghidra headless (`DumpAsm.java 0x820FF000:40000`, the LaunchEvent 0x821578E8
+call sites and their parameter builders; `ReadF.java 0x82919490:u32:64`, the
+per-player event key tables) and the analysis export; REA was not used (it
+cannot open the XEX). Test aids: `GD04_HOOKLOG=1` logs every hook event /
+spawn with its song time, `GD04_AUTOPLAY_MISS=<n>` makes autoplay miss every
+n-th note (bad notes, multiplier loss), `GD04_NO_HOOKS=1` turns the song
+hooks off; the song-end log line "song hooks: ..." has the counters.
