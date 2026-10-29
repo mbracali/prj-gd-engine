@@ -26,6 +26,10 @@ public:
     // Draws the highway, fretbars, sidebars, tails, gems and strike heads
     // at song time `nowMs` (ms). `held`: the frets held now.
     void draw(Canvas& c, const TextureCache& tex, const NoteTrack& track, const Player& player, double nowMs, uint8_t held);
+    // A note was hit on these frets at song time `nowMs`: a hit flame per fret.
+    void noteHit(uint8_t frets, double nowMs, bool starPower);
+    // Counters for the walk / self checks.
+    uint64_t flamesStarted = 0;
     // The screen position (y) of a note time at song time `nowMs`, and its
     // normalised depth v (0 top, 1 playline) — for the checks.
     float depthOf(double noteMs, double nowMs) const;
@@ -47,6 +51,11 @@ private:
     float travelMs_ = 1500;  // scroll_time - destroy_time
     std::array<float, 5> startX_{}, endX_{};
     std::vector<float> d_, accum_;
-    uint32_t surfaceTex_ = 0x2C0ED3FD;  // global fallback highway texture [C data]
+    uint32_t surfaceTex_ = 0x2C0ED3FD;
+    struct Flame {
+        double start = -1e9;
+        bool blue = false;
+    };
+    std::array<Flame, 5> flames_{};  // global fallback highway texture [C data]
     float tiling_ = 1.5f;              // gHighwayTiling1  // per-row heights (normalised) and their running sum
 };

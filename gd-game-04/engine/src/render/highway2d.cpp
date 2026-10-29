@@ -26,6 +26,8 @@ constexpr uint32_t kSidebar = 0x7F2DACD6;
 constexpr uint32_t kHead[5] = {0x42B576FB, 0x2A2FFBB4, 0x043BD094, 0xC9901DA2, 0x49DED95F};
 constexpr uint32_t kHeadDown[5] = {0x31966E14, 0x8EDDCCC9, 0xB59DF82A, 0x7AEAC67E, 0xB966061B};
 
+constexpr uint32_t kHitFlame = 0xA38B2820, kHitFlameBlue = 0x9E700D1C;  // sys_note_hit01 / _blue_01 [C data]
+
 constexpr int kRows = 1152, kRealRows = 1024;  // highway_lines, real_highway_lines [C data]
 
 float num(const Globals& g, const char* name, float fallback) { return qbNumber(g, qbkey::key(name), fallback); }
@@ -113,6 +115,14 @@ void Highway2D::quad(Canvas& c, uint32_t key, const TextureCache& tex, float cx,
     const Vertex cc{x1, y1, 0, u1, v1, col.r, col.g, col.b, col.a}, d{x0, y1, 0, u0, v1, col.r, col.g, col.b, col.a};
     const Vertex v[6] = {a, b, cc, a, cc, d};
     c.draw(v, 6, int(id.id), blend);
+}
+
+void Highway2D::noteHit(uint8_t frets, double now, bool starPower) {
+    for (int l = 0; l < 5; ++l)
+        if (frets & (1 << l)) {
+            flames_[size_t(l)] = Flame{now, starPower};
+            ++flamesStarted;
+        }
 }
 
 void Highway2D::draw(Canvas& c, const TextureCache& tex, const NoteTrack& track, const Player& player, double now, uint8_t held) {
@@ -222,8 +232,10 @@ void Highway2D::draw(Canvas& c, const TextureCache& tex, const NoteTrack& track,
                         const float wa = whammyTop_ * (1 + whammyOffset_ * va), wb = whammyTop_ * (1 + whammyOffset_ * vb);
                         const float xa = laneX(l, va), xb = laneX(l, vb), ya = yAt(va), yb = yAt(vb);
                         const auto A = uint8_t(255 * alphaAt(ya)), B = uint8_t(255 * alphaAt(yb));
-                        const Vertex p0{xa - wa, ya, 0, 0, 0, 255, 255, 255, A}, p1{xa + wa, ya, 0, 1, 0, 255, 255, 255, A};
-                        const Vertex p2{xb + wb, yb, 0, 1, 1, 255, 255, 255, B}, p3{xb - wb, yb, 0, 0, 1, 255, 255, 255, B};
+                        // V runs once along the whole tail, tail end (0) to head (1) [I].
+                        const float ta = float(s) / segs, tb = float(s + 1) / segs;
+                        const Vertex p0{xa - wa, ya, 0, 0, ta, 255, 255, 255, A}, p1{xa + wa, ya, 0, 1, ta, 255, 255, 255, A};
+                        const Vertex p2{xb + wb, yb, 0, 1, tb, 255, 255, 255, B}, p3{xb - wb, yb, 0, 0, tb, 255, 255, 255, B};
                         const Vertex q[6] = {p0, p1, p2, p0, p2, p3};
                         c.draw(q, 6, int(tex.find(key).id), Blend::Alpha);
                     }
@@ -251,6 +263,19 @@ void Highway2D::draw(Canvas& c, const TextureCache& tex, const NoteTrack& track,
                 }
             }
         }
+    }
+    // Hit flames: 16 frames of the 4x4 flip-book at 60 fps, additive, 20 px
+    // above the strike point, anchored at their bottom, z 10 [C 0x8211BCBC, script hit_note_fx].
+    for (int l = 0; l < 5; ++l) {
+        const Flame& f = flames_[size_t(l)];
+        const int frame = int((now - f.start) / (1000.0 / 60.0));
+        if (frame < 0 || frame >= 16) continue;
+        const uint32_t key = f.blue ? kHitFlameBlue : kHitFlame;
+        int tw = 512, th = 1024;
+        tex.size(key, tw, th);
+        const float u0 = float(frame % 4) / 4, v0 = float(frame / 4) / 4;
+        quad(c, key, tex, endX_[size_t(l)], playline_ - 20, float(tw) / 4, float(th) / 4, 1, SDL_Color{255, 255, 255, 255}, u0, v0,
+             u0 + 0.25f, v0 + 0.25f, Blend::Add);
     }
     // The strike heads at the playline: lit when held [C script setup_highway; scale I].
     for (int l = 0; l < 5; ++l) {

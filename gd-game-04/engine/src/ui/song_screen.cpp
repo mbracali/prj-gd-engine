@@ -102,7 +102,10 @@ void SongScreen::tick(double nowMs, Mixer& mixer) {
         shownHeld_ = in.frets;
         player_->frame(stepMs_, kStepMs, in);
         for (const PlayerEvent& ev : player_->events()) {
-            if (ev.kind == PlayerEvent::Kind::Hit) mixer.setGuitarAudible(true);
+            if (ev.kind == PlayerEvent::Kind::Hit) {
+                mixer.setGuitarAudible(true);
+                if (ev.note >= 0) highway_.noteHit(track_.notes[size_t(ev.note)].frets, stepMs_, player_->stats().starPowerActive);
+            }
             else if (ev.kind == PlayerEvent::Kind::Miss || ev.kind == PlayerEvent::Kind::Overstrum) mixer.setGuitarAudible(false);
         }
         player_->clearEvents();
