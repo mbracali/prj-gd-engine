@@ -41,3 +41,15 @@ struct Font {
 Font parseFont(const uint8_t* data, size_t size);
 
 }  // namespace font
+
+#include "data/texture.h"
+
+namespace font {
+
+// The font's embedded image as a texture: its header and D3D header copied
+// to the front of an .img-shaped buffer, the pixels (from the 4 KiB page
+// after the header, `pixelOffset`) at 0x1000, then decoded as an .img
+// (data/texture.h). Throws std::runtime_error.
+gh3tex::Texture decodeFontTexture(const Font& f, const uint8_t* data, size_t size);
+
+}  // namespace font

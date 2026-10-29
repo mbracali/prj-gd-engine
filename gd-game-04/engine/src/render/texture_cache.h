@@ -37,6 +37,7 @@ private:
     struct Entry {
         gfx::TextureId id;
         int w = 0, h = 0;
+        bool owner = true;  // false: a second key for a texture owned by another entry
     };
     gfx::RenderDevice& dev_;
     std::unordered_map<uint32_t, Entry> textures_;

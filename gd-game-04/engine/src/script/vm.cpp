@@ -552,6 +552,11 @@ bool Vm::callName(ScriptRun& run, uint32_t name, qb::Struct& params, bool& resul
     }
     if (auto c = code(name)) {
         ++stats_.scriptCalls;
+        static const bool trace = [] {
+            const char* v = SDL_getenv("GD04_VMTRACE");
+            return v && *v && *v != '0';
+        }();
+        if (trace) SDL_Log("qscript: %.0f ms call %s (from %s)", clockMs_, qbkey::name(name).c_str(), qbkey::name(run.name).c_str());
         Frame f;
         f.code = std::move(c);
         f.locals = std::make_shared<qb::Struct>(std::move(params));
@@ -599,6 +604,7 @@ bool Vm::run(uint32_t name, const qb::Struct& params, bool* result) {
 
 uint32_t Vm::spawn(uint32_t name, const qb::Struct& params, uint32_t spawnedBy) {
     auto c = code(name);
+    if (const char* v = SDL_getenv("GD04_VMTRACE"); v && *v && *v != '0') SDL_Log("qscript: %.0f ms spawn %s", clockMs_, qbkey::name(name).c_str());
     if (!c) {
         if (unhandledNames_.insert(name).second) logOnce("UNHANDLED spawn " + qbkey::name(name));
         return 0;

@@ -277,7 +277,8 @@ Texture readImage(const uint8_t* d, size_t size, size_t pos, bool img, size_t re
     const uint32_t mipOff = r.u32be(), hdr = r.u32be(), dataSize = r.u32be(), baseOff = r.u32be();
     if (ver != kImgVersion) fail("image version");
     if (img ? flags != 0x11 : (flags != 0x02 && flags != 0x12)) fail("image flags");
-    if ((img && usage) || usage > 5 || pad) fail("image class");
+    // Class 2: the images fonts embed (.fnt) [C data] are laid out like an .img.
+    if ((img && usage && usage != 2) || usage > 5 || pad) fail("image class");
     if (dims[0] != dims[3] || dims[1] != dims[4] || dims[2] != dims[5]) fail("size fields differ");
     if (size_t(hdr) + kD3dHeader > size || (img && hdr != kImgHeader)) fail("D3D header offset");
     r.seek(hdr);

@@ -17,6 +17,7 @@
 #include "data/qbkey.h"
 #include "game/song_db.h"
 #include "script/globals.h"
+#include "ui/front_end.h"
 #include "ui/song_screen.h"
 #include "devaids/menu_keys.h"
 #include "devaids/screenshot.h"
@@ -62,6 +63,8 @@ private:
     SongDb songs_;
     std::unique_ptr<SongScreen> song_;
     std::unique_ptr<TextureCache> textures_;
+    std::unique_ptr<FrontEnd> front_;
+    uint64_t lastFrameNs_ = 0;
     std::string message_;
     bool running_ = true;
     int exitCode_ = 0;
@@ -104,6 +107,10 @@ void App::handleEvent(const SDL_Event& e) {
             song_->handle(ev);
             continue;
         }
+        if (front_) {
+            front_->handle(ev);
+            continue;
+        }
         if (!ev.down) continue;
         if (ev.action == Action::Back) {
             if (++escapes_ >= 3) running_ = false;
@@ -127,6 +134,16 @@ void App::frame() {
             exitCode_ = s.failed ? 1 : 0;
             running_ = false;
         }
+        return;
+    }
+    if (front_) {
+        const uint64_t nowNs = SDL_GetTicksNS();
+        const double dt = lastFrameNs_ ? double(nowNs - lastFrameNs_) / 1e6 : 0;
+        lastFrameNs_ = nowNs;
+        canvas_.begin(SDL_Color{0, 0, 0, 255});
+        front_->frame(canvas_, dt);
+        captureMenuScreenshot(canvas_, double(nowNs - startNs_) / 1e6, -1);
+        canvas_.end();
         return;
     }
     canvas_.begin(SDL_Color{0, 0, 0, 255});
@@ -199,6 +216,13 @@ int App::run() {
         } else {
             input_.setInGame(true);
         }
+    } else if (disc_ && textures_ && !SDL_getenv("GD04_NO_FRONTEND")) {
+        // GH3's own front end, from its boot script.
+        front_ = std::make_unique<FrontEnd>(*disc_, *globals_, *textures_, canvas_.renderer().device());
+        if (!front_->start()) {
+            SDL_Log("front end: guitar_startup did not start");
+            front_.reset();
+        }
     }
     const bool stats = envOn("GD04_STATS");
     uint64_t statsStart = SDL_GetTicksNS();
@@ -232,6 +256,7 @@ int App::run() {
         }
     }
     song_.reset();
+    front_.reset();
     textures_.reset();
     mixer_.stop();
     input_.close();

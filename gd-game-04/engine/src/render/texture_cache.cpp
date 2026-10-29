@@ -13,7 +13,8 @@
 #include "data/texture.h"
 
 TextureCache::~TextureCache() {
-    for (auto& [k, e] : textures_) dev_.destroyTexture(e.id);
+    for (auto& [k, e] : textures_)
+        if (e.owner) dev_.destroyTexture(e.id);
 }
 
 void TextureCache::size(uint32_t key, int& w, int& h) const {
@@ -35,7 +36,7 @@ int TextureCache::loadPak(const Disc& disc, const std::string& pakPath) {
                 SDL_Log("textures: %s in %s: %s", qbkey::name(key).c_str(), pakPath.c_str(), error.c_str());
                 return;
             }
-            textures_[key] = Entry{id, t.width, t.height};
+            textures_[key] = Entry{id, t.width, t.height, true};
             ++n;
         };
         for (const PakEntry& e : pak.entries()) {
@@ -43,7 +44,10 @@ int TextureCache::loadPak(const Disc& disc, const std::string& pakPath) {
             if (e.type == qbkey::key(".tex")) {
                 for (const gh3tex::Texture& t : gh3tex::decodeTexDict(p, size)) upload(t.key, t);
             } else if (e.type == qbkey::key(".img")) {
-                upload(e.name, gh3tex::decodeImg(p, size));
+                upload(e.fullName, gh3tex::decodeImg(p, size));
+                // Scripts name an .img by its full name or its short one [C data].
+                if (e.name != e.fullName && textures_.count(e.fullName) && !textures_.count(e.name))
+                    textures_[e.name] = Entry{textures_[e.fullName].id, textures_[e.fullName].w, textures_[e.fullName].h, false};
             } else if (e.type == qbkey::key(".scn") || e.type == qbkey::key(".skin") || e.type == qbkey::key(".mdl")) {
                 const scene::Kind kind = e.type == qbkey::key(".skin") ? scene::Kind::Skin
                                          : e.type == qbkey::key(".mdl") ? scene::Kind::Mdl

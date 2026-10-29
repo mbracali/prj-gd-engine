@@ -119,6 +119,10 @@ public:
     const std::unordered_set<uint32_t>& unhandled() const { return unhandledNames_; }
     std::mt19937& rng() { return rng_; }
 
+    // GH3's global tags (GetGlobalTags / SetGlobalTags): the progress and
+    // options the save holds, by tag key.
+    std::unordered_map<uint32_t, qb::Struct> globalTags;
+
     // Code of a script global (tokenized once).
     std::shared_ptr<const CodeCache> code(uint32_t name);
 

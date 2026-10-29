@@ -122,7 +122,11 @@ bool checkPakFile(const Pak& pak, const PakEntry& e, FormatStats& s, std::string
         try {
             if (e.type == qbkey::key(".ska")) anim::parseClip(p, n);
             else if (e.type == qbkey::key(".ske")) anim::parseSkeleton(p, n);
-            else font::parseFont(p, n);
+            else {
+                const font::Font f = font::parseFont(p, n);
+                const gh3tex::Texture t = font::decodeFontTexture(f, p, n);  // its glyph page decodes too
+                if (t.width != f.texWidth || t.height != f.texHeight) throw std::runtime_error("font page size");
+            }
         } catch (const std::exception& ex) {
             what = ex.what(), ok = false;
         }

@@ -79,6 +79,9 @@ target_sources(gd04 PRIVATE
   src/tests/selftest_play.cpp
   src/tests/sfxtest.cpp
   src/ui/song_screen.cpp
+  src/ui/front_end.cpp
+  src/ui/natives_game.cpp
+  src/ui/ui_system.cpp
   src/video/movie_player.cpp
   src/tests/formattest.cpp
 )

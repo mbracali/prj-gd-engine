@@ -133,6 +133,8 @@ void addCoreNatives(Vm& vm) {
         const qb::Value* s = Vm::param(p, K("structure"));
         const qb::Value* n = Vm::param(p, K("name"));
         if (!n) n = first(p);
+        // A key names the global struct [C data: start_flow_manager passes the flow state's key].
+        if (s && (s->type == qb::Type::Key || s->type == qb::Type::KeyPtr)) s = v.global(s->key);
         if (!s || !n || s->type != qb::Type::Struct || !s->st) return false;
         return v.globals().field(*s->st, n->key) != nullptr;
     });
@@ -194,9 +196,105 @@ void addCoreNatives(Vm& vm) {
         Vm::set(*run.frames.back().locals, n->key, Vm::flag(p, K("integer")) ? Vm::makeInt(int32_t(r + 0.5f)) : Vm::makeFloat(r));
         return true;
     });
+    // SetArrayElement arrayname = a [globalarray] index = i newvalue = v: one
+    // element of a global (or the caller's local) array, copied on write [I].
+    vm.addNative("SetArrayElement", [](Vm& v, ScriptRun& run, qb::Struct& p) {
+        const qb::Value* name = Vm::param(p, K("arrayname"));
+        const qb::Value* idx = Vm::param(p, K("index"));
+        const qb::Value* nv = Vm::param(p, K("newvalue"));
+        if (!name || !idx || !nv) return false;
+        const int i = int(Vm::number(idx, -1));
+        qb::Value arr;
+        if (Vm::flag(p, K("globalarray"))) {
+            if (const qb::Value* g = v.global(name->key)) arr = *g;
+        } else if (!run.frames.empty() && run.frames.back().locals) {
+            if (const qb::Value* l = Vm::param(*run.frames.back().locals, name->key)) arr = *l;
+        }
+        if (arr.type != qb::Type::Array || !arr.arr || i < 0 || size_t(i) >= arr.arr->values.size()) return false;
+        arr.arr = std::make_shared<qb::Array>(*arr.arr);
+        arr.arr->values[size_t(i)] = *nv;
+        if (Vm::flag(p, K("globalarray"))) v.setGlobal(name->key, arr);
+        else Vm::set(*run.frames.back().locals, name->key, arr);
+        return true;
+    });
+    // GetGlobalTags <tag>: the tag's fields into the caller's parameters;
+    // false when the tag was never set. SetGlobalTags <tag> params = {...}.
+    vm.addNative("GetGlobalTags", [](Vm& v, ScriptRun& run, qb::Struct& p) {
+        const qb::Value* tag = first(p);
+        if (!tag) return false;
+        auto it = v.globalTags.find(tag->key);
+        if (it == v.globalTags.end()) return false;
+        if (!run.frames.empty()) {
+            if (!run.frames.back().locals) run.frames.back().locals = std::make_shared<qb::Struct>();
+            const qb::Value* only = Vm::param(p, K("param"));
+            for (const qb::Item& item : it->second.items)
+                if (!only || item.name == only->key) Vm::set(*run.frames.back().locals, item.name, item.value);
+        }
+        return true;
+    });
+    vm.addNative("SetGlobalTags", [](Vm& v, ScriptRun&, qb::Struct& p) {
+        const qb::Value* tag = first(p);
+        if (!tag) return false;
+        qb::Struct& t = v.globalTags[tag->key];
+        if (const qb::Value* ps = Vm::param(p, K("params")); ps && ps->st)
+            for (const qb::Item& item : v.globals().expand(*ps->st)) Vm::set(t, item.name, item.value);
+        return true;
+    });
+    vm.addNative("PushGlobalTags", [](Vm&, ScriptRun&, qb::Struct&) { return true; });  // a save section [I]
+    // AddParams <struct>: merged into the caller's parameters [I].
+    vm.addNative("AddParams", [](Vm& v, ScriptRun& run, qb::Struct& p) {
+        if (run.frames.empty()) return false;
+        if (!run.frames.back().locals) run.frames.back().locals = std::make_shared<qb::Struct>();
+        for (const qb::Item& it : p.items) {
+            if (it.name == 0 && it.value.type == qb::Type::Struct && it.value.st)
+                for (const qb::Item& s2 : v.globals().expand(*it.value.st)) Vm::set(*run.frames.back().locals, s2.name, s2.value);
+            else if (it.name)
+                Vm::set(*run.frames.back().locals, it.name, it.value);
+        }
+        return true;
+    });
+    // ExtendCRC <key> <text|int> out = name: the key's CRC continued with the
+    // text (QB keys are the running CRC, so this is the key of name + text) [I].
+    vm.addNative("ExtendCRC", [](Vm&, ScriptRun& run, qb::Struct& p) {
+        const qb::Value* base = nullptr;
+        std::string suffix;
+        for (const qb::Item& it : p.items) {
+            if (it.name) continue;
+            if (!base && (it.value.type == qb::Type::Key || it.value.type == qb::Type::KeyPtr)) base = &it.value;
+            else if (it.value.type == qb::Type::String || it.value.type == qb::Type::WString) suffix = it.value.str;
+            else if (it.value.type == qb::Type::Int) suffix = std::to_string(it.value.i);
+        }
+        const qb::Value* out = Vm::param(p, K("out"));
+        if (!base || !out || run.frames.empty()) return false;
+        uint32_t c = base->key;
+        for (char ch : suffix) c = qbkey::detail::kTable[(c ^ uint8_t(qbkey::detail::lower(ch))) & 0xFF] ^ (c >> 8);
+        if (!run.frames.back().locals) run.frames.back().locals = std::make_shared<qb::Struct>();
+        Vm::set(*run.frames.back().locals, out->key, Vm::makeKey(c));
+        return true;
+    });
+    vm.addNative("AppendSuffixToChecksum", [](Vm&, ScriptRun& run, qb::Struct& p) {
+        const qb::Value* base = Vm::param(p, K("base"));
+        const qb::Value* suf = Vm::param(p, K("suffixstring"));
+        if (!base || !suf || run.frames.empty()) return false;
+        uint32_t c = base->key;
+        for (char ch : suf->str) c = qbkey::detail::kTable[(c ^ uint8_t(qbkey::detail::lower(ch))) & 0xFF] ^ (c >> 8);
+        if (!run.frames.back().locals) run.frames.back().locals = std::make_shared<qb::Struct>();
+        Vm::set(*run.frames.back().locals, K("appended_id"), Vm::makeKey(c));
+        return true;
+    });
+    // Block: the script waits for an event that nothing sends yet [I].
+    vm.addNative("Block", [](Vm&, ScriptRun& run, qb::Struct&) {
+        run.waitFor = [] { return false; };
+        return true;
+    });
     // Memory and profiling calls of the console build: nothing to do on PC.
     for (const char* n : {"MemInitHeap", "PushMemProfile", "PopMemProfile", "StopRendering", "StartRendering",
-                          "MemPushContext", "MemPopContext", "AddToStringLookup"})
+                          "MemPushContext", "MemPopContext", "AddToStringLookup", "DisplayLoadingScreen", "hideloadingscreen",
+                          "SetButtonEventMappings", "ToggleMetrics", "SetScreenMode", "InitCOIM", "ProcessorMgr_Init", "PassMgr_Init",
+                          "RegisterProcessorGroupDesc", "RegisterPassGroupDesc", "RegisterCompositeObjectDesc", "InitAnimCompressTable",
+                          "InitAnimSystem", "InitLightManager", "engineconfig", "LaunchViewer", "AllocateDataBuffer", "InitAtoms",
+                          "ScreenElementSystemInit", "SetShadowRenderingFlags", "SetShadowMapParams", "SetShadowProjectionTexture",
+                          "SetDynamicShadowIntensity", "SetModelLightsFadeTime", "MemCardSystemInitialize", "AddEditableList"})
         vm.addNative(n, [](Vm&, ScriptRun&, qb::Struct&) { return true; });
 }
 

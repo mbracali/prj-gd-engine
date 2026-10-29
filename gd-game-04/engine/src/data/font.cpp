@@ -96,3 +96,17 @@ Font parseFont(const uint8_t* d, size_t size) {
 }
 
 }  // namespace font
+
+namespace font {
+
+gh3tex::Texture decodeFontTexture(const Font& f, const uint8_t* data, size_t size) {
+    constexpr size_t kHeaderBytes = 0x28 + 0x34, kData = 0x1000;
+    if (size_t(f.textureOffset) + kHeaderBytes > size || f.pixelOffset > size) throw std::runtime_error("font texture outside the file");
+    const size_t pixels = size - size_t(f.pixelOffset);
+    Bytes img(kData, 0);
+    std::copy(data + f.textureOffset, data + f.textureOffset + kHeaderBytes, img.begin());
+    img.insert(img.end(), data + f.pixelOffset, data + f.pixelOffset + pixels);
+    return gh3tex::decodeImg(img);
+}
+
+}  // namespace font
