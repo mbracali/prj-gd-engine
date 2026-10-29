@@ -25,6 +25,13 @@ float NoteTrack::beatAt(float t) const {
     return float(fretbars[i + 1] - fretbars[i]);
 }
 
+float NoteTrack::measureAt(float t) const {
+    int num = 4;
+    for (const TimeSig& ts : timesig)
+        if (float(ts.time) <= t && ts.num > 0) num = ts.num;
+    return float(num) * beatAt(t);
+}
+
 float NoteTrack::beatsBetween(float t0, float t1) const {
     if (fretbars.size() < 2 || t1 <= t0) return 0;
     float beats = 0;
@@ -54,6 +61,7 @@ float hopoTolerance(const Chart& c, float scale, float t) {
 NoteTrack buildTrack(const Chart& chart, Part part, int difficulty, const Tuning& tuning, float scale) {
     NoteTrack tr;
     tr.fretbars = chart.fretbars;
+    tr.timesig = chart.timesig;
     if (chart.fretbars.size() >= 2) tr.firstBeatMs = chart.fretbars[1] - chart.fretbars[0];
     const auto& src = chart.notes(part, difficulty);
     tr.phrases = chart.parts[size_t(part)].star[size_t(difficulty)];

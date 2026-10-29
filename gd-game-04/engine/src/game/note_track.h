@@ -30,9 +30,13 @@ struct NoteTrack {
     std::vector<TrackNote> notes;
     std::vector<ChartPhrase> phrases;
     std::vector<int32_t> fretbars;
+    std::vector<TimeSig> timesig;
     int32_t firstBeatMs = 500;  // fretbar[1] - fretbar[0] [C 0x829E3918]
     // Beat length (ms) of the fretbar interval holding `t`.
     float beatAt(float t) const;
+    // Length of the measure holding `t`: the time signature's numerator x
+    // the beat there (fretbars are beats) [I: the drain script's measure].
+    float measureAt(float t) const;
     // Beats (fretbar intervals) between t0 and t1.
     float beatsBetween(float t0, float t1) const;
 };

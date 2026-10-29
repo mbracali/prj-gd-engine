@@ -168,9 +168,8 @@ void Player::updateStarPower(double now, double dt, const FrameInput& in) {
         events_.push_back({PlayerEvent::Kind::StarPowerOn, -1, now});
     }
     if (st_.starPowerActive) {
-        // Drains star_power_drain_rate per measure [C script star_power_activate_and_drain];
-        // a measure as 4 beats here [I: the script's measure length].
-        const double measure = 4.0 * std::max(1.0f, t_.beatAt(float(now)));
+        // Drains star_power_drain_rate per measure [C script star_power_activate_and_drain].
+        const double measure = std::max(1.0f, t_.measureAt(float(now)));
         st_.starPower = float(std::max(0.0, double(st_.starPower) - tu_.starPowerDrainRate * dt / measure));
         if (st_.starPower <= 0) {
             st_.starPowerActive = false;
