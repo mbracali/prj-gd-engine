@@ -569,12 +569,24 @@ bool Vm::callName(ScriptRun& run, uint32_t name, qb::Struct& params, bool& resul
         result = true;
         return true;
     }
+    if (run.object && objectCall) {
+        bool handled = false;
+        result = objectCall(*this, run, run.object, name, params, handled);
+        if (handled) return true;
+    }
     if (unhandledNames_.insert(name).second) {
         stats_.unhandled = unhandledNames_.size();
         logOnce("UNHANDLED call " + qbkey::name(name));
     }
     result = false;
     return false;
+}
+
+uint32_t Vm::spawnOn(uint32_t name, const qb::Struct& params, uint32_t object) {
+    const uint32_t id = spawn(name, params);
+    for (auto& r : runs_)
+        if (r->id == id) r->object = object;
+    return id;
 }
 
 bool Vm::run(uint32_t name, const qb::Struct& params, bool* result) {
@@ -699,6 +711,42 @@ bool Vm::evalCondition(Exec& ex) {
     }
     bool value;
     const size_t at = ex.i;
+    {
+        // A member call as the condition (`<arg> id : GetSingleTag x`).
+        size_t j = at;
+        uint32_t objId = 0;
+        bool isObj = false;
+        if (j + 2 < ex.t.size() && ex.t[j].op == kArg && ex.t[j + 1].op == kName && ex.t[j + 2].op == kColon) {
+            const qb::Value* lv = ex.local(ex.t[j + 1].u);
+            objId = lv ? lv->key : 0;
+            j += 3, isObj = true;
+        } else if (j + 1 < ex.t.size() && ex.t[j].op == kName && ex.t[j + 1].op == kColon) {
+            objId = ex.t[j].u;
+            j += 2, isObj = true;
+        }
+        if (isObj && j < ex.t.size() && ex.t[j].op == kName && objectCall) {
+            const uint32_t method = ex.t[j].u;
+            ex.i = j + 1;
+            qb::Struct p = ex.params();
+            bool handled = false;
+            value = objId ? objectCall(*this, ex.run, objId, method, p, handled) : false;
+            while (ex.i < ex.t.size() && !isEnd(ex.t[ex.i].op)) ++ex.i;
+            return negate ? !value : value;
+        }
+        // A member name called plainly by a script running on an object.
+        if (at < ex.t.size() && ex.t[at].op == kName && ex.run.object && objectCall && !natives_.count(ex.t[at].u) &&
+            !(g_.find(ex.t[at].u) && g_.find(ex.t[at].u)->type == qb::Type::Script)) {
+            ex.i = at + 1;
+            qb::Struct p = ex.params();
+            bool handled = false;
+            value = objectCall(*this, ex.run, ex.run.object, ex.t[at].u, p, handled);
+            if (handled) {
+                while (ex.i < ex.t.size() && !isEnd(ex.t[ex.i].op)) ++ex.i;
+                return negate ? !value : value;
+            }
+            ex.i = at;
+        }
+    }
     if (at < ex.t.size() && ex.t[at].op == kName && (natives_.count(ex.t[at].u) || (g_.find(ex.t[at].u) &&
                                                      g_.find(ex.t[at].u)->type == qb::Type::Script))) {
         ++ex.i;
@@ -915,6 +963,34 @@ bool Vm::step(ScriptRun& run, int budget) {
         Exec ex(*this, run);
         ex.skipNops();
         const Token& first = t[ex.i];
+        {
+            // `<arg> id : Method params` / `name : Method params`: a member call on
+            // the object the id names (screen elements) [C data: ':' token 0x42].
+            size_t j = ex.i;
+            uint32_t objId = 0;
+            bool isObj = false;
+            if (t[j].op == kArg && j + 2 < t.size() && t[j + 1].op == kName && t[j + 2].op == kColon) {
+                const qb::Value* lv = ex.local(t[j + 1].u);
+                objId = lv && (lv->type == qb::Type::Key || lv->type == qb::Type::KeyPtr) ? lv->key : 0;
+                j += 3;
+                isObj = true;
+            } else if (t[j].op == kName && j + 1 < t.size() && t[j + 1].op == kColon) {
+                objId = t[j].u;
+                j += 2;
+                isObj = true;
+            }
+            if (isObj && j < t.size() && t[j].op == kName) {
+                const uint32_t method = t[j].u;
+                ex.i = j + 1;
+                qb::Struct p = ex.params();
+                while (ex.i < t.size() && !isEnd(t[ex.i].op)) ++ex.i;
+                fr.pc = ex.i;
+                bool handled = false;
+                if (objectCall && objId) objectCall(*this, run, objId, method, p, handled);
+                if (!handled) logOnce("UNHANDLED member call " + qbkey::name(method));
+                continue;
+            }
+        }
         if (first.op == kArg || (first.op == kName && ex.i + 1 < t.size() && t[ex.i + 1].op == kEquals)) {
             // <arg> x = value / x = value: sets a local.
             uint32_t name = 0;

@@ -67,7 +67,7 @@ struct ScriptRun {
     bool paused = false;
     uint32_t spawnedBy = 0;
     uint32_t type = 0;        // SpawnScriptNow ... id / type (for KillSpawnedScript)
-    void* object = nullptr;   // the object a script runs on (screen elements) [native-defined]
+    uint32_t object = 0;      // the object (screen element id) the script runs on, 0: none
 };
 
 struct VmStats {
@@ -118,6 +118,13 @@ public:
     const VmStats& stats() const { return stats_; }
     const std::unordered_set<uint32_t>& unhandled() const { return unhandledNames_; }
     std::mt19937& rng() { return rng_; }
+
+    // Object member calls (`<id>:DoMorph ...`, or `DoMorph ...` in a script
+    // running on an object): (vm, run, object id, method, params, handled)
+    // -> result. Set by the screen-element system.
+    std::function<bool(Vm&, ScriptRun&, uint32_t, uint32_t, qb::Struct&, bool&)> objectCall;
+    // A spawned script's object (RunScriptOnScreenElement).
+    uint32_t spawnOn(uint32_t name, const qb::Struct& params, uint32_t object);
 
     // GH3's global tags (GetGlobalTags / SetGlobalTags): the progress and
     // options the save holds, by tag key.

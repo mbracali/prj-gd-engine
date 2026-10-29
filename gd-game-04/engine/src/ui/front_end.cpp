@@ -28,6 +28,7 @@ FrontEnd::FrontEnd(const Disc& disc, Globals& globals, TextureCache& textures, g
 
 FrontEnd::~FrontEnd() {
     // GD04_UISTATS=1: where the front end stood (scripts running, elements).
+    if (const char* d = SDL_getenv("GD04_UIDUMP"); d && *d && *d != '0') ui_->dump();
     if (const char* v = SDL_getenv("GD04_UISTATS"); v && *v && *v != '0') {
         const auto& st = ui_->stats();
         SDL_Log("ui: %zu elements (%llu created, %llu destroyed), %llu events, %llu handlers, %llu sprites / %llu texts drawn, "
