@@ -139,8 +139,15 @@ void addCoreNatives(Vm& vm) {
         return v.globals().field(*s->st, n->key) != nullptr;
     });
     // GetArraySize <array> -> array_size.
-    vm.addNative("GetArraySize", [](Vm&, ScriptRun& run, qb::Struct& p) {
+    // GetArraySize <array> | <name> globalarray (a global array by its name,
+    // `{ $musician_instrument $globalarray }`) -> array_size [C use].
+    vm.addNative("GetArraySize", [](Vm& v, ScriptRun& run, qb::Struct& p) {
         const qb::Value* a = first(p);
+        if (a && (a->type == qb::Type::Key || a->type == qb::Type::KeyPtr) && a->key != K("globalarray")) {
+            const qb::Value* g = v.global(a->key);
+            if (!g && !run.frames.empty() && run.frames.back().locals) g = Vm::param(*run.frames.back().locals, a->key);
+            if (g) a = g;
+        }
         const int n = a && a->type == qb::Type::Array && a->arr ? int(a->arr->values.size()) : 0;
         if (!run.frames.empty() && run.frames.back().locals) Vm::set(*run.frames.back().locals, K("array_size"), Vm::makeInt(n));
         return true;
