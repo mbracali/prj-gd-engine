@@ -63,7 +63,7 @@ meter, career and store) were rebuilt from how the original behaves. It runs
 on Linux, Windows, macOS and Android.
 
 **Status:** alpha. Career, Quickplay, two-player and the tutorials play;
-see [docs/backlog.md](docs/backlog.md) for what is still missing.
+see [gd-backlog.md](../gd-backlog.md) (section gd-game-01) for what is still missing.
 
 ## Download
 
@@ -161,7 +161,7 @@ engine/dist/gd01-linux-x86_64/gd01 --selftest "path/to/Guitar Hero (USA).iso"
 |---|---|
 | `engine/` | The program (C++20, SDL3, OpenGL; Vulkan for the AI upscalers) |
 | `tools/` | Python readers for the game's formats, Ghidra scripts, `fetch_dlss.sh` |
-| `docs/` | Research notes: `FINDINGS.md` (rules and formats), one note per system, `backlog.md` |
+| `docs/` | Research notes: `FINDINGS.md` (rules and formats), one note per system (the backlog is `gd-backlog.md` at the repository root) |
 | `local_build.sh` | Builds the release downloads into `local_builds/` (`build_commands/`: double-click versions) |
 | `CHANGELOG.md` | What changed in each release |
 

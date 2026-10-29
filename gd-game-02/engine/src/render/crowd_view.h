@@ -36,20 +36,23 @@ class Character;
 //    archetype has them): u from min(x, 0.25) - 0.05 to max(x, 0.75) +
 //    0.05, v from min(y, 0.4) - 0.05 to max(y, 0.6) + 0.05, clamped to 0..1.
 //    The card quad (a RndMultiMesh of one mesh, 0x822490F8) spans that
-//    rectangle of a height / 2 x height plane in each placement's xz plane
-//    (x = u height / 2 - height / 4, z = height / 2 - v height), centred
-//    on the placement (the character's middle), with the placement's own
-//    rotation; its Mat (0x82249368): unlit (use_environ off), opaque with
-//    alpha_cut, clamped.
+//    rectangle of a height / 2 x height plane (x = u height / 2 - height /
+//    4, z = height / 2 - v height), centred on each placement (the
+//    character's middle) and turned like the camera: the mesh's
+//    FastBillboardXYZ constraint makes DxMultiMesh (0x8230F138) use
+//    multimesh.fx's BILLBOARD variant, which keeps only the instance's
+//    position. Its Mat (0x82249368): unlit (use_environ off), opaque (blend
+//    src) with alpha_cut, clamped, culled (the Mat default).
 // 2. The shot's 3D placements: the same Character drawn at each, turned as
 //    above, standing at z - height / 2.
 //
 // The texture is rendered every frame (all placements of an archetype show
 // the same pose: GH2 keeps one Character per archetype). [I] GH2 renders it
 // in the middle of the world's draw list; the port too, then binds the
-// world's target and viewport again. [I] The crowd Mats have alpha_write off
-// and how GH2's card texture gets its coverage alpha is not traced: the
-// port writes alpha in the card pass (cleared to 0).
+// world's target and viewport again. The card is cleared to 0 (camera
+// Select 0x82308DC8) and every draw writes alpha (the 360's Mat setup
+// ignores alpha_write), so the character's pixels carry their alpha and
+// alpha_cut (ALPHAREF 0, GREATER: 0x82303768) keeps alpha above 0 [C].
 class CrowdView {
 public:
     CrowdView(World& world, gfx::SceneCache& cache);

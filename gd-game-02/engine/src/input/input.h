@@ -60,6 +60,13 @@ struct InputEvent {
     bool enterKey = false; // Confirm from the keyboard's Enter (Return or the keypad's): Start on a text entry
 };
 
+// For logs (GD02_INPUTLOG).
+inline const char* actionName(Action a) {
+    static const char* const kNames[] = {"Fret0", "Fret1", "Fret2", "Fret3", "Fret4", "Strum", "StarPower", "Whammy",
+                                         "Up", "Down", "Left", "Right", "Confirm", "Back", "Start"};
+    return kNames[static_cast<int>(a)];
+}
+
 inline int fretOf(Action a) { return static_cast<int>(a) - static_cast<int>(Action::Fret0); }
 inline bool isFret(Action a) { return a >= Action::Fret0 && a <= Action::Fret4; }
 
@@ -126,6 +133,12 @@ public:
     bool padConnected(int slot) const;
     void setSplitKeyboard(bool on) { splitKeyboard_ = on; }
     bool anyPad() const { return !pads_.empty(); }
+    // The controller plays with the joypad layout (its Y face button, the
+    // yellow one, opens GAMEPADS on the main menu; App::handleEvent).
+    bool joypadDevice(SDL_JoystickID id) const {
+        auto it = pads_.find(id);
+        return it != pads_.end() && it->second.profile == Profile::Joypad;
+    }
 
     // Settings (gd01's Enhanced Settings). Gamepad play: a joypad plays the
     // game (GH2's joypad_guitar: LT LB RB RT A are the frets, each press also
@@ -180,7 +193,10 @@ public:
     bool writeReport() const;
     // Where controllers.json and the report go (default: the SDL pref dir;
     // the self-test uses its own folder). With a trailing separator.
-    void setSaveDir(std::string dir) { saveDir_ = std::move(dir), loaded_ = false; }
+    void setSaveDir(std::string dir) {
+        saveDir_ = std::move(dir), loaded_ = false;
+        overrides_.clear(), players_.clear(), types_.clear();
+    }
 
     // -- touch (SDL finger events). In the game, a finger on a lane of the
     // highway (from its far end down past the smashers) holds that fret and
@@ -238,7 +254,27 @@ private:
         float whammyAxis = 0;
         bool analogWhammy = false;  // its whammy is bound to an axis
         uint64_t settleNs = 0;  // until then (300 ms after connecting) its axes settle: rest re-read, no actions
+        // Buttons held as it connected (or while it settled): their rest is
+        // "down" (an adapter's stuck bit, a D-pad SDL reads from an axis
+        // resting off centre); ignored until they are seen released.
+        std::array<bool, SDL_GAMEPAD_BUTTON_COUNT> stuck{};
+        // Buttons SDL's mapping reads from an axis ("dpleft:-a6", common for
+        // adapters and guitars): pressed here past half way from that
+        // axis's rest, released below a third (SDL's own test is the middle
+        // of the range, whatever the rest, with no hysteresis).
+        struct AxisButton {
+            int button, axis, dir;
+        };
+        std::vector<AxisButton> axisButtons;
+        std::vector<int> joyAxes, joyRest;  // the joystick's own axes, for axisButtons
+        bool axisButton(int b) const {
+            for (const AxisButton& a : axisButtons)
+                if (a.button == b) return true;
+            return false;
+        }
     };
+    // Every control of `p` released (it went away, or its type changed).
+    void releaseAll(Pad& p, uint64_t ts, std::vector<InputEvent>& out);
     static Bindings defaults(Profile p);
     static const char* profileName(Profile p);
     static bool isGuitar(Profile p) { return p != Profile::Joypad && p != Profile::Keyboard; }

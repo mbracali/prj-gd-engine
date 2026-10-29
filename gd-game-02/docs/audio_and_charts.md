@@ -419,7 +419,12 @@ vtable `0x820D4CF4`, `SampleInst360` vtable `0x820D5C94`, `Voice`
 - **Script messages** (Synth::Handle `0x822EAB08`): `play_sequence <name>
   (volume dB) (pan p) (transpose t)` (`0x822E8A90`; the Sfx's `play` takes
   the same), `stop_all_sfx` (Sfx and sequences), `pause_all_sfx` (Sfx
-  instances), `set_master_vol <dB>` / `master_vol` (the master Fader,
+  instances: every Sfx pauses the instances it plays now, 0x822E7C68 ->
+  0x822ECB40; sounds started later play and the sequences go on [C]. Game
+  SetPaused (0x822CB340) calls it, and game_outro_complete pauses the game
+  for good: the port's Synth-wide pause kept the menus silent after every
+  song until a restart, GD02-073; `--walktest quickplay` / `pause` / `lose`
+  check a menu sound plays after the song), `set_master_vol <dB>` / `master_vol` (the master Fader,
   `0x822F7878`; the mute cheat uses kDbSilence), `toggle_limiter`,
   `toggle_hud` (debug), `set_fx` / `set_fx_vol` (PS2 only).
 - **The options' effects volume** is not a global gain: `{options
@@ -444,6 +449,29 @@ vtable `0x820D4CF4`, `SampleInst360` vtable `0x820D5C94`, `Voice`
 - The options' sound effects volume: `config/sound.dta (options_screen
   (slider -96 -28 -24 -20 -16 -12 -10 -8 -6 -4 -2 0))` dB per index
   [C data].
+
+### The game's sounds in a song (wave B #1, #5) [C]
+
+- The PlayerMatcher (vtable `0x8204a1ac`) takes gh2.dta's `(beatmatch
+  (player_matcher_handlers ...))` as its handlers (`0x822E44B0`). Its miss
+  sink (`0x822E2B10`: an overstrum or a wrong fret press) sends `miss
+  ($player_num)`: `play_game_sequence_player` of `miss_bass` on a bass track,
+  else `miss_gtr` (RandomGroupSeqs of the `miss_chink*` / `miss_bass*.cue`
+  Sfx), at the options' effects volume, panned −1 / 1 in two-player games;
+  the miss also mutes the player's track (`0x822E2348` with 0). The pass
+  sink (`0x822E2FD0`, a gem scrolled past unplayed) looks up `miss_whoosh`,
+  which no bank on the disc has, so a passed gem only mutes the track.
+  The handlers' `hit` (sp_gemhit on star gems) is never sent: the executable
+  has no "hit" symbol [C by absence].
+- The Player takes `(player (handlers ...))` (`0x822C9720`): phrase_captured
+  plays `sp_awarded` 0.2 s later, start_using `sp_deployed` (with the
+  world's `crowd_upto_good` and the track's bump), stop_using `sp_depleted`
+  (`_multi` versions with two players).
+- The intro's: `track_unfurl`, `nowbar_1..5`, `meter_slide`
+  (`highway_and_hud.md` "Song start timeline").
+- gd02 sends these to the scripts (`App::gameSounds`; without the menus it
+  plays them itself); `--walktest lose` checks two overstrums give two
+  `miss_gtr`. `GD02_SFXLOG=1` logs every sound played.
 
 ### In gd02
 

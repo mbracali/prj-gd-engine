@@ -90,8 +90,8 @@ undecoded.
   (+0xcc), its transform with animate_position_from_preset (+0xcd,
   0x822387E8).
 - Before the first shot (and in `--view`): the first INTRO shot's first
-  keyframe and the INTRO preset's first keyframe (the shot's parent and
-  path at frame 0 multiplied in, turned to its targets). In a song the
+  keyframe and the INTRO preset's first keyframe, framed as the director
+  frames it (CameraDirector::evaluate). In a song the
   camera director ("Camera director") plays the shots and the preset
   manager ("Lighting presets") the presets. The band slots draw their
   members where the slots sit in the draw list (`docs/band.md`); without a
@@ -156,6 +156,14 @@ The crowd: "Crowd" below. Venues are therefore darker than GH2's (theatre most).
   the drummer's clips (char_objects.dta) [C data] and wait for the band.
   With the menus, intro_start_msg / game_won_msg / game_lost reach the world
   as a game sink (`{game add_sink $this}` in WORLD_OBJECT_BASE enter).
+  Any world adds itself, also one loaded outside a game (the Enhanced
+  Options backdrop). GH2's AddSink (0x823262C8) takes a reference on the
+  sink (Hmx::Object AddRef 0x82317480; RemoveSink 0x823257C0 releases it
+  with 0x82316378) [C], so a deleted sink leaves its sources [I: the
+  deletion's replace]. In gd02, `SinkHolder` (script/script.h) does this for
+  GamePanel, WorldDir and MidiParser. Before bug-fix 5 the backdrop's freed
+  world stayed in `game`'s sinks, and the next song's intro_start_msg
+  crashed the game (the owner's "Strutter on Medium" career crash).
 
 ## Camera director (game/camera_director.h)
 
@@ -214,25 +222,63 @@ Playback (SetFrame 0x8222a068), 30 frames a second from the start [C]:
   to i + 1 (the last holds; looping wraps); t eased by the outgoing
   keyframe's blend_ease, a sigmoid from 0 to 1 (0x8226F988 / 0x8226F6E8:
   [-k, k] mapped through an odd function [I: tanh]).
-- A keyframe's transform (0x82226988): its xfm; the shot's path TransAnim
-  at end_frame x u, u = frame / length eased by path_ease (0: linear),
-  multiplied in; the parent (a band slot: its waypoint, a bone its height
-  above it [I]) added as a translation, or composed with
-  use_parent_rotation; parent and targets low-passed by `filter` (per
-  1/60 s [I: GH2 scales it by a screen-distance factor, 0x821D7030]);
-  clamp_height keeps it above a single target + clamp_height; then turned
-  so its targets' mean lands at screen_offset (-1..1, y up; 0x82224bd8 [I:
-  solved with world up, no roll]).
-- Apply (0x82227440): position lerp, rotation slerp; field of view lerped
-  plus zoom_fov lerped (zoom_fov is added after framing); near / far the
-  shot's; depth of field when use_depth_of_field: focus = |camera - focal
+- A keyframe's camera (0x82226988) [C]: its xfm; with a path, the path
+  TransAnim evaluated at end_frame x u (u = frame / length eased by
+  path_ease, 0: linear; RndTransAnim 0x821B6B00 into the shot's matrix:
+  position keys, trans_spline's Hermite 0x8226E560 / 0x8226E368, rotation
+  keys, scale keys scaling the rows; no keys: origin / identity) with the
+  FIRST keyframe's xfm multiplied in under it (0x8226A630 on keyframes[0]
+  +0x18: the other keyframes' xfms are not used); the parent (a band slot:
+  its waypoint, a bone its height above it [I]) added as a translation, or
+  multiplied in with use_parent_rotation; clamp_height (> 0, exactly one
+  target) keeps it above that target + clamp_height. The targets' mean
+  (0x82226800) and the parent's transform are low-passed per keyframe
+  (+0x8c / +0xac) by filter x min(d, 1) once a 60 Hz frame, d the screen
+  distance (0..1 across the picture) between where the current camera
+  shows the target (0x821D7030) and the keyframe's screen offset.
+- Framing (0x82227440) [C]: when the two keyframes aim at different
+  targets (0x822266F0), each keyframe's camera looks at its own filtered
+  target; then position lerp, rotation slerp (0x8226A980). When they aim at
+  the same targets the blended camera is turned to each keyframe's target
+  and those two slerped. The look-at (0x82224BD8 + 0x8214F7F0): forward =
+  target - position, the up hint the camera's own up row (the keyframe's:
+  shots roll as authored), right = forward x up, up = right x forward: the
+  target lands at the centre. The screen offset (-1..1, y up) is then a
+  move of the camera in its own plane, only with the same targets: by
+  (-so.x d tan(fov / 2) aspect, 0, -so.y d tan(fov / 2)) in camera space
+  (0x8214F950; the projection's +0xf4 = cot(fov / 2) h / w and +0x118 =
+  -cot(fov / 2), 0x821D75F8), d the distance to the target(s) and so the
+  offset, both lerped, fov without zoom_fov. Field of view lerped, then
+  zoom_fov lerped and added; near / far the shot's; depth of field (from
+  the moved camera) when use_depth_of_field: focus = |camera - focal
   target| x (1 + focus_blur_multiplier), blur_depth / max_blur lerped; only
   the outgoing keyframe with a focal target: max_blur x (1 - t), only the
   incoming one: x t; none: DOF off (Rnd vtable +0x70 / +0x74).
-- Shake (0x82224D18): per 1/60 s an impulse with probability noisefreq
-  (random direction, size noiseamp, y a third; angles within
-  +-shake_maxangle degrees about x and z, clamped), followed by springs
-  (0.02 x distance, velocity x 0.9) for the offset and the angles.
+- Shake (0x82224D18) [C]: per 1/60 s an impulse with probability noisefreq
+  (direction a random angle: x = sin(a + pi / 2), y a third of x, z =
+  sin(a), 0x8226E050 being GH2's table sine; size random x noiseamp;
+  angles within +-shake_maxangle degrees about x and z; past noiseamp the
+  offset is taken back to 2 amp - |v|), followed by springs (0.02 x
+  distance, velocity x 0.9). The offset is added in the camera's own axes
+  (0x8214F950); the angles turn it about its right and up [I: 0x8216DB48's
+  order].
+- Bug-fix GD02-092 (10-28): before, the look-at was solved with world up
+  and the screen offset as a turn, which flipped the camera over whenever
+  the target sat high above it (stone's intro: the picture upside down,
+  the crowd "hanging from the sky"); the path was multiplied under each
+  keyframe's own xfm, so arena's intro (Intro.tnm, its second keyframe's
+  xfm a world position) blended to twice the path's offset, about 300
+  units under the arena floor. `--venuetest` now frames every shot of
+  every variant through its length (tests/venuetest_camera.cpp).
+- Frame rate: GH2 runs the filter (one lerp a frame, 0x82122100) and the
+  shake once a 60 Hz frame [C: 0x82226988 / 0x82224D18 per SetFrame]. The
+  port takes the filter as (1 - filter)^(dt x 60) and runs the shake in
+  whole 1/60 s steps (the remainder carried), so 30, 60, 144 Hz or an
+  uncapped frame rate move the camera alike; the shake draws from its own
+  RNG stream, so how many steps it ran never changes the director's picks
+  (both draw from GH2's one RandomGen there, seeded by the clock) [I].
+  Before (bug-fix 4) both ran once a frame: 2.4x too fast at 144 Hz, 4x at
+  the 250 fps limiter, and the shots differed with the frame rate.
 
 ## Lighting presets (game/light_presets.h)
 
@@ -386,9 +432,13 @@ placement of it shows the same pose, and crowds naming the same archetype
 - Hands [C data]: the clips' events `{$dude set_hand clap|devil|fist|
   lighter}` run char_objects.dta's Character type crowd `set_hand` (enter:
   clap): the hand meshes shown / hidden, `lighter_flame start / stop`.
-  [I] lighter_flame (no RndDir start / stop handler found; its MatAnim is a
-  texture-scale flicker under a looping AnimFilter, never invisible) is
-  drawn while started, flickering at 30 frames a second.
+  lighter_flame is a RndDir of type `world_fx` (rnd_objects.dta) [C data]:
+  enter / exit `{$this stop}`; start `{$this animate (range 0 kHugeFloat)}
+  {$this set_showing TRUE}`; stop `{$this stop_animation} {$this
+  set_showing FALSE}` (and frees its particles: it has none). So the flame
+  shows only between a start and a stop, and its filter (a texture-scale
+  flicker looping on its MatAnim) runs from frame 0 at each start, 30
+  frames a second [I: the clock].
 - Random numbers: the shuffles, the drivers' clip picks and the scripts
   while an archetype is $this draw from the crowd's own RandomGen
   (Crowd::random, seed 0x43524F57), like the band's.
@@ -405,23 +455,41 @@ placement of it shows the same pose, and crowds naming the same archetype
   feet (the origin), spot_head, both spot_*-hand and (when there) both
   spot_*-forearm: u from min(x, .25) - .05 to max(x, .75) + .05, v from
   min(y, .4) - .05 to max(y, .6) + .05, clamped to 0..1; the quad (four
-  vertices, 0x822490F8) spans x = u h / 2 - h / 4, z = h / 2 - v h in the
-  card mesh's frame, and the RndMultiMesh draws it at every shown card
-  placement (the placement's own transform: cards are not turned to the
-  camera, a side view sees them edge-on). The card Mat (0x82249368):
-  use_environ off, blend src, alpha_cut, clamped. Then the same character is
-  drawn at each shown 3D placement (turned as above, at z - h / 2).
+  vertices, faces (0 1 2) (1 3 2), 0x822490F8) spans x = u h / 2 - h / 4,
+  z = h / 2 - v h in the card mesh's frame. The card mesh has the
+  FastBillboardXYZ constraint (8) on the card camera (0x822490F8 ->
+  SetTransConstraint 0x821AFAA0), so the RndMultiMesh draws it with
+  multimesh.fx's BILLBOARD variant (DxMultiMesh draw 0x8230F138: effect
+  0x13 when the mesh's constraint is 8; `multimesh_2400011` on the disc has
+  bit 25): each shown card placement keeps only its position and the quad
+  is turned like the camera (x its right, y its forward, z its up) [C; C
+  data multimesh.fx]. Cards always face the camera, never edge-on, and tilt
+  with its pitch. The card Mat (0x82249368, offsets from Mat SyncProperty
+  0x821ED930) [C]: use_environ (+0x40) and prelit (+0xa0) off, blend 1 =
+  src (+0x2c), alpha_cut (+0xa1), tex_wrap 0 = clamp (+0x50); cull keeps
+  the Mat default TRUE (Mat ctor 0x821ECC78, +0xb0), harmless as the
+  billboard shows its front. Then the same character is drawn at each shown
+  3D placement (turned as above, at z - h / 2).
+- The card's alpha [C]: the card camera's Select (0x82308DC8) clears a
+  rendered (type 2) texture's colour to 0x00000000 (and depth / stencil);
+  the 360's Mat setup (0x8230A358) never reads alpha_write (+0xa2), so every
+  draw writes alpha (D3D's default colour mask): the character's pixels
+  carry their shader alpha, the rest stays 0. alpha_cut only switches the
+  alpha test on (0x823BDA38); the device set it up once as ALPHAREF 0,
+  GREATER (0x82303768) for every Mat, so a card pixel shows when its alpha
+  is above 0 (the filtered edges included, darkened by the black clear).
+  gd02's alpha_cut threshold is 0 for every material (render/material.cpp).
 - The port (render/crowd_view.h) renders the card mid-draw as GH2 does and
   binds the world's target and viewport again (RenderDevice::
-  currentTarget / currentViewport); one card texture per character. [I]
-  The crowd Mats have alpha_write off; how GH2's card texture gets its
-  coverage alpha is not traced: the port clears it to alpha 0 and writes
-  alpha in the card pass. `GD02_CROWD=0` leaves the crowd out.
+  currentTarget / currentViewport); one card texture per character. It
+  clears the card to 0 and writes alpha in the card pass (forceAlphaWrite)
+  as the 360 does. `GD02_CROWD=0` leaves the crowd out.
 - "Crowd hanging from the ceiling" (arena intro, reported with the M8
-  renderer): not seen with the cards (arena intro02 and the song's intro
-  shots show the floor crowd; the upper placements are arena's stands)
-  [data]. Steep or side views make cards edge-on or stretched (battle) as
-  in the decompiled rule.
+  renderer; stone's intro the same): the camera, not the crowd. The old
+  look-at turned the camera upside down when the target was high above it
+  and the old path put arena's intro under the floor (Camera director,
+  bug-fix GD02-092); seen from below the floor the crowd hangs from the
+  ground. Cards face the camera from any view (the billboard above).
 - Without GH2's menus and without the director's `game` (the dev modes),
   intro_start_msg / excitement / a shot apply the same fullness natively.
 
@@ -430,36 +498,80 @@ For the camera director: `world.crowd().startShot(shot)` after the shot's
 `startShot(shot, true)` also runs the script part for a host that does not
 send start_shot (the viewer).
 
+### Crowd: what still differs or is not confirmed
+
+Checked against the code only: there is no capture of the original yet
+(backlog Q1), so nothing was compared frame by frame.
+
+- gfx_mode (FUN_82270c08): the port always runs mode 1 (a 256 x 512 32-bit
+  card per archetype); mode 0 (one shared 128 x 256 16-bit card) is not
+  reproduced. Which mode the retail 360 runs is set at start-up
+  (0x82270F48) [I: 1].
+- The card texture's sampling: linear, no mipmaps [I]; GH2's render target
+  is resolved from EDRAM (format and filtering not traced).
+- The crowd's random numbers come from its own generator (GH2 has one
+  global one), so the archetypes' shuffles and clip picks differ from the
+  original's sequence while following the same rules.
+- The level loops are taken to loop, and their pans (1, 3, 34) to be
+  plain stereo [I]; the excitement_loop delay and the flame's animation run
+  on the world's clock [I].
+- crowd_volume, crowd_audio_delay and crowd_reactions are config/sound.dta's
+  values as constants, not read from the file.
+- `crowd_audio play_stream 0.0 wingame` (stone's ending) is a logged stub.
+
 ## Crowd audio (audio/crowd_audio.h)
 
 GH2's `crowd_audio` (CrowdAudio ctor 0x822E0928, Handle 0x822DFD98) [C
-addresses; behaviour I unless noted]:
+unless noted]:
 
 - The streams: the venue type's `(sound (bank b) (crowd (intro dB file)
   (levels (kExcitementBoot dB file) ...) (encore_outro dB file (loop_ms a
   b)) (encore_intro dB file)))` [C data], files `world/<v>/streams/<file>
-  .mogg` ("world/%s/streams" 0x8204958c) [C]: plain Vorbis moggs, stereo,
+  .mogg` ("world/%s/streams" 0x8204958c): plain Vorbis moggs, stereo,
   22050 Hz (theatre 44100); Peak reuses Great's file. Played on their own
   SDL stream (SDL mixes it with the song's), decoded once on a worker
-  thread; one stream at a time, a new one fading the old out over 0.25 s
-  [I: GH2 replaces it, 0x822DFC10]; gain 10^(dB / 20); the pan modes
-  (1, 3, 34) are ignored.
-- intro_start_msg ($fast $encore) (0x822DFCA8) [C]: encore_intro when
-  $encore and not $fast, else intro; once.
-- music_start [C]: started, level Okay, then the game's excitement;
-  excitement (0x822DF590) [C]: after crowd_audio_delay (config/sound.dta: 1
-  s) the level's loop (excitement_loop), even when it is the same level.
-  Every chart has [music_start] [C data: 74 / 74].
-- encore_outro (0x822E1688) [C]: the encore_outro stream looping between
-  its loop_ms.
-- turn_off (ui lose.dta) [C data]; here also at game_lost [I]. set_paused
-  follows the game's pause.
-- Reaction sounds (0x822DF350, when the mode's crowd_reactions) [C]: at the
-  intro (+0x64 crowd_begin), at game_won_msg (+0x68 crowd_win), at
-  game_lost (+0x6c crowd_lose) and per level change (+0x70: index (level
-  + 14) x 2 + (previous <= level), `crowd_<dnto|upto>_<danger poor norm
-  good peak>`, 0x822DFAB0) [C]; a new one stops the last. They are the
-  bank's Sfx and play (docs/audio_and_charts.md "Sound effects").
+  thread. One stream at a time: a new one deletes the old (0x822DF860, no
+  cross-fade). The entries' `(pan n)` (1, 3, 34) set the two channels' pans
+  to -n / +n (0x822DF860) [I: clamped to full left / right, plain stereo].
+- Volume (0x822DF2F8): the entry's dB + set_volume's dB (+0x2c) +
+  crowd_volume (config/sound.dta: -2 dB, +0x30) + the options' sound
+  effects volume (0x822DF140: 0 dB in the attract mode), set when a stream
+  starts and on set_volume.
+- Enabled (+0x38): the mode's crowd_audio at construction (modes.dta: FALSE
+  in practice and tutorial; the port reads it at the world's enter);
+  set_enabled (0x822DF9D8): off deletes the stream, on runs the excitement
+  rule below with the last level.
+- intro_start_msg ($fast $encore) (0x822DFCA8): the crowd_begin reaction
+  (+0x64, encore or not), then encore_intro when $encore and not $fast,
+  else intro.
+- music_start: started (+0x3a), the last level (+0x40) = Okay, then the
+  excitement rule with the game's excitement (Game +0x338). Every chart has
+  [music_start] [C data: 74 / 74].
+- excitement (0x822DF590), only once started and while enabled: the
+  reaction for last -> level (also for the same level), the last level =
+  level, and an `excitement_loop <level>` message crowd_audio_delay later
+  (config/sound.dta: 1 s, +0x34); each such message plays its level's
+  loop (0x822DFD40), so two changes within a second play both loops in
+  turn. Game excitement (0x822CAAB0, set by 0x822CBAC8 when it changes,
+  polled 0x822CDEB8): the rock meter (a competitive mode's: the better of
+  the two players'; otherwise the performer's, co-op's band) under the
+  warning level (Game +0x340) -> Boot, < 0.33 Bad, < 0.66 Okay, else
+  Great; Peak (4) is never set by the game.
+- encore_outro (0x822E1688): the encore_outro stream looping between its
+  loop_ms.
+- turn_off (0x822DF0E8; ui lose.dta, endgame.dta, multiplayer.dta): only
+  the stream is deleted. game_lost plays crowd_lose and leaves the stream
+  (the music slows and stops, the crowd plays on until the lose screen's
+  turn_off). set_paused follows the game's pause.
+- Reaction sounds (0x822DF350, when crowd_reactions, config/sound.dta TRUE,
+  +0x39): +0x64 crowd_begin, +0x68 crowd_win at game_won_msg, +0x6c
+  crowd_lose at game_lost and per excitement +0x70: index (level + 14) x 2
+  + (previous <= level), `crowd_<dnto|upto>_<danger poor norm good peak>`
+  (0x822DFAB0); a new one stops the last. They are the bank's Sfx and play
+  (docs/audio_and_charts.md "Sound effects"); names a bank lacks are
+  silent.
+- [I] The level loops loop (their preloaded streams, +0x9c, 0x822DF860's
+  second path); the excitement_loop delay runs on the world's clock.
 
 ### The sound banks
 
@@ -543,6 +655,20 @@ the loaded venue.
   the world, the director and the presets with fixed seeds
   (tests/director_golden.h): the (beat, shot) / (beat, preset) log's line
   count and hash must match; `GD02_GOLDEN_LOG=<file>` writes it.
+- `--venuetest` camera (tests/venuetest_camera.cpp): every CamShot of
+  every variant framed (CameraDirector::evaluate: no filter, no shake, the
+  band slots at their waypoints) every 5 frames and at its end: a finite,
+  orthonormal camera, not upside down (up z >= -0.5), not under the venue
+  (more than 10 below the lowest waypoint and below every up-facing static
+  triangle over its spot), and with the same targets in both keyframes the
+  targets' mean at the lerped screen offset (within 0.02).
+- `--venuetest` camera rate (tests/director_golden.h): in each venue its
+  first song, the band and the director stepped at 60 and at 240 fps for
+  60 s (`GD02_CAMRATE_SECONDS`): the same shots and positions within 5
+  units every 1/12 s (`GD02_CAMRATE_LOG=1` prints both).
+- `GD02_FORCE_SHOT=<CamShot>`, `GD02_FACE_CAM=<member>[:<distance>[:<degrees>[:<bone>[:<height>]]]]`
+  (e.g. `bassist:40:180:bone_pelvis.mesh:10`, from behind) frame a shot or a
+  band member; `GD02_WORLDLOG=1` lists each shot's planes and hide list.
 - `GD02_SPOTS=<letters>` draws only some spotlight parts (c cans, f floor
   spots, b beams, l lenses, F flares); `GD02_SPOTS_LOG=1` logs the lit
   spotlights and flares once a second.
@@ -556,9 +682,10 @@ the loaded venue.
 - Animatable's first u32 (a float: 160.0 on CamShots).
 - RndDir::SetFrame on proxies (all its anims) [I].
 - TRIGGERS-track lighting texts; where Peak comes from natively.
-- Director: GH2's filter scale factor (0x821D7030's second result), the
-  ease function (tanh assumed), the shake's axes; the order of downbeat and
-  one_bar_to in one frame (two cuts in the same beat happen).
+- Director: the ease function (tanh assumed), the shake angles' axes
+  (0x8216DB48's order); the order of downbeat and one_bar_to in one frame
+  (two cuts in the same beat happen); TransAnim repeat_trans / follow_path
+  on camera paths (none on the disc).
 - Spotlights: GH2's beam shader (screen-space softness, fog), the floor
   spot's plane and shape, the lens orientation, damping_constant,
   target_shadow, additional_objects, xsection / cutouts (unused on the

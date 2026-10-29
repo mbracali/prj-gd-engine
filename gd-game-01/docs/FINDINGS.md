@@ -108,6 +108,35 @@ watcher constructor `FUN_00262d10`:
   `|t − gem − 60| ≤ slop`, i.e. −40..+160 ms (disassembly 0x263a70..0x263a84;
   the next-gem time fetched at 0x263a68 is discarded).
 
+**When input becomes live** (re-checked 2026-10-28, all [C]):
+- The PlayerMatcher constructor `FUN_00107e90` creates each beat-match
+  controller **disabled** (`JoypadController_v3` / GuitarController slot 3,
+  `+0x10 = 1`); while disabled, `FUN_0025b868` / `FUN_0025bea8` drop every
+  button (no strum, fret, Star Power or miss sound).
+- `FUN_001085d8`, run by every beat-match poll, enables it once the game
+  panel is neither time-paused (`+0x90`) nor on the intro clock (`+0x94`).
+- The intro clock: `FUN_00105b80` (intro_start) sets the song clock to
+  −(intro shot duration, 10 s) and `+0x94 = 1`; `GamePanel_v10 @0x105808`
+  hands over to the audio clock with `FUN_00105640` (starts the song stream,
+  `+0x94 = 0`, `click_start`) once the clock passes **−25 ms**. With
+  intro_skip, `FUN_00105640` runs at once.
+- On enabling, `FUN_0025c070` syncs the frets held at that moment (fret
+  down / up messages for each difference); nothing else from before counts.
+- So nothing is judged before the song starts: the highway (extend_track at
+  −2000 ms, out after 1000 ms, smashers by −300 ms) is always on screen
+  first. gd01 follows this (`App::controllerLive`).
+
+**Timing numbers** (2026-10-28, unchanged in gd01): strum window ±100 ms
+(`slop`), chord / wrong-fret grace 60 ms, HOPO −40..+160 ms, repeat strums
+within 52 ms ignored, overstrums within 50 ms count once, the pass deadline
+`min(gem + 100, midpoint to the next gem)`. The song clock is the stream's
+own timer (`StreamEE_v10 @0x21b758`: a CPU-count timer started with the
+playback, never earlier than its start offset), so on the PS2 the clock is
+what is being heard and there is no calibration. The PC mixer's clock counts
+the frames handed to the audio device; gd01 holds it back by the device's
+buffer (one SDL period, 1024 frames = 23 ms here) [I], plus the player's
+Audio / Video Calibration.
+
 ## Input judgment ("watcher") — confirmed, `0x263248`–`0x2647f0`
 
 Controller mappings come from `config/beatmatch_controller.dta`:

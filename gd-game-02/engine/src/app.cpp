@@ -56,9 +56,18 @@
 
 namespace {
 
-// Silence before the audio starts, so the first gems scroll in [I]: GH2's
-// own intro timing is not traced yet.
-constexpr double kLeadInMs = 2000;
+// GH2's song start (GamePanel start 0x822CCA60, poll 0x822CDEB8) [C]: the
+// song clock starts at minus the length of the INTRO shot GamePanel draws
+// from the world's picker (INTRO_ENCORE for an encore; a fast intro, the
+// restart from the pause menu, at track_extend_sec); `extend_track` runs at
+// song time track_extend_sec (game.dta (track_extend_sec -2): at once when
+// the clock starts later), and past -25 ms the intro clock hands over to the
+// song stream (0x822CB260) and the controllers come on (0x822CED30 /
+// 0x822E2510). Without a venue shot the clock starts at track_extend_sec
+// [I].
+constexpr double kTrackExtendMs = -2000;
+constexpr double kLeadInMs = -kTrackExtendMs;
+constexpr float kControllersLiveMs = -25;
 // How long the highway stays after the song's [end] before the song closes
 // (longer once the track explodes: track_explode.filt runs 160 frames).
 constexpr float kOutroMs = 2000;
@@ -211,6 +220,8 @@ public:
     }
     bool gamePaused() const override { return paused_; }
     double gameTimeMs() const override { return lastT_; }
+    std::vector<std::pair<std::string, double>> gameSfx() const override { return songSfx_; }
+    double introCameraTravel() const override { return introCamTravel_; }
     float gameBeat() const override {
         return song_ ? float(song_->tempo.msToTick(std::max(0.0f, lastT_)) / std::max(1, song_->tempo.division())) : 0.0f;
     }
@@ -253,9 +264,11 @@ public:
     void setEnhancedValue(const std::string& key, const std::string& value) override;
     void menuBackdrop(bool on) override;
     bool drawMenuBackdrop() override;
+    bool menuBackdropFramed() override;
     void pauseAllSfx(bool paused) override {
         if (synth_) synth_->setPaused(paused);
     }
+    int sfxLiveVoices() override { return synth_ ? synth_->liveVoices() : -1; }
 
 private:
     bool loadData(const std::string& path);
@@ -267,12 +280,27 @@ private:
     void endSong();
     void handleEvent(const SDL_Event& e);
     void handleAction(const InputEvent& a);
+    // Mouse support in the menus (gd01's): `button` 0 hover, 1 left click, 3
+    // right click (back); menu units. menuWheel: -1 up, +1 down. Both only
+    // while the menus have the screen (not during a song).
+    void menuMouse(float x, float y, int button);
+    void menuWheel(int dir);
+    bool menuMouseAllowed() const;
+    // The mouse pointer: shown while the mouse moves in the menus, hidden
+    // after 3 s without it, on a key or controller press and in a song.
+    void updateCursor();
+    bool cursorShown_ = true;
+    bool inputLog_ = false;  // GD02_INPUTLOG=1: every input action
+    double mouseMovedMs_ = -1e9;
     void playerAction(const InputEvent& a);
     void updateSong(float t);
+    void updateIntro(float t);
+    void gameSounds(int player, const std::vector<PlayerEvent>& events);
     float songClock();
     void frameSong();
     void frameUi();
     void drawSong(float t);
+    void logPerf(uint64_t periodNs, int frames, uint64_t maxNs, uint64_t limitNs);
     void drawWorld();
     bool loadVenue(const std::string& venue, VenueVariant variant);
     void unloadVenue();
@@ -326,6 +354,22 @@ private:
     float bandVolume_ = 1, guitarVolume_ = 1;
     int syncOffsetMs_ = 0;
     double leadInMs_ = kLeadInMs;
+    bool fastIntro_ = false;
+    // The intro (beginSong): extend_track's song time, sent yet; the
+    // controllers live yet, and the frets held while they were not (synced
+    // when they come on).
+    float extendAtMs_ = float(kTrackExtendMs);
+    bool extendSent_ = false, controllersLive_ = false;
+    std::array<uint32_t, 2> heldBeforeLive_{};
+    // Without the menus: track_panel.dta's intro sounds, played by the program.
+    int introSfx_ = 0;
+    std::vector<std::pair<std::string, double>> songSfx_;  // UiHost::gameSfx
+    // UiHost::introCameraTravel: the camera at the intro's first frame, and
+    // the distance from there by song time -2000 ms.
+    bool introCamSet_ = false;
+    gfx::Vec3 introCam0_{};
+    double introCamTravel_ = -1;
+    float pendingAwardMs_ = -1e9f;  // without the menus: sp_awarded's time
     // Two players (docs/multiplayer.md): the mode, per player the
     // difficulty, the part (instrument) and the pad (input slot) that plays
     // it; the co-op band and the shared Star Power meter.
@@ -397,19 +441,19 @@ private:
     bool encoreCheck_ = false, encoreFx_ = false, campaignFinal_ = false;  // GameSetup's encore state
     std::unique_ptr<LightPresets> lighting_;
     WorldDriver worldDriver_;
-    // The Enhanced Options' live backdrop (menuBackdrop): the second venue
-    // with the band playing a song of its tier, silently, on the wall clock,
-    // through a camera of its own.
+    // The Enhanced Options' backdrop (menuBackdrop): a still shot of the
+    // second venue with the band caught mid-song (gd01's: a posed band that
+    // does not move), through a camera of its own.
     struct Backdrop {
+        float simMs = 0;      // the song time run so far (fixed steps)
+        bool frozen = false;  // posed: nothing updates any more
         const SongInfo* info = nullptr;
         std::unique_ptr<Song> song;
         WorldDriver driver;
-        uint64_t startNs = 0;
         float fromMs = 0;
         bool framed = false;  // the shot's target and direction are set
         gfx::Vec3 target, dir;
-        float dist = 300, spread = 100, aim = 0;
-        uint64_t lastNs = 0;
+        float dist = 300, spread = 100;
         int lightPart = -1;
     };
     std::unique_ptr<Backdrop> backdrop_;
@@ -454,6 +498,7 @@ int App::run() {
     // Development aid: GD02_VIRTUAL_PAD=<vendor>:<product>[:guitar] (hex, e.g.
     // 1430:4748:guitar) plugs in a virtual controller, to test without hardware.
     if (const char* vp = SDL_getenv("GD02_VIRTUAL_PAD")) virtualPad_ = Input::attachVirtualPad(vp);
+    inputLog_ = envOn("GD02_INPUTLOG");
     SDL_WindowFlags flags = SDL_WINDOW_RESIZABLE | gfx::prepareWindow();  // OpenGL (render/device.h)
 #ifdef __ANDROID__
     flags |= SDL_WINDOW_FULLSCREEN;
@@ -472,6 +517,14 @@ int App::run() {
     window_ = SDL_CreateWindow(app::kWindowTitle, int(kScreenW), int(kScreenH), flags);
     setAppWindowIcon(window_);
     installDesktopEntry();
+    // Touch: window-normalised positions to menu units (the 16:9 picture).
+    input_.setTouchToMenu([this](float nx, float ny, float& mx, float& my) {
+        int ww = 0, wh = 0;
+        SDL_GetWindowSize(window_, &ww, &wh);
+        const float scale = std::max(1e-4f, std::min(float(ww) / 1280.0f, float(wh) / 720.0f));
+        mx = (nx * float(ww) - (float(ww) - 1280.0f * scale) * 0.5f) / scale;
+        my = (ny * float(wh) - (float(wh) - 720.0f * scale) * 0.5f) / scale;
+    });
     std::string error;
     if (!window_ || !canvas_.init(window_, error)) {
         std::fprintf(stderr, "%s: cannot open the window: %s\n", app::kProgram, window_ ? error.c_str() : SDL_GetError());
@@ -507,6 +560,14 @@ int App::run() {
         if (walk_ && !ui_) running_ = false, exitCode_ = 1;
     }
 
+    // GD02_PERF=1: a frame-time breakdown every 2 s (docs/renderer.md).
+    const bool perf = envOn("GD02_PERF");
+    uint64_t perfStart = SDL_GetTicksNS(), perfMaxNs = 0, perfLimitNs = 0;
+    int perfFrames = 0;
+    if (perf) {
+        const gfx::DeviceInfo& di = canvas_.renderer().device().info();
+        SDL_Log("perf: %s %s on %s, video driver %s", di.api.c_str(), di.version.c_str(), di.gpu.c_str(), SDL_GetCurrentVideoDriver());
+    }
     while (running_) {
         const uint64_t frameStart = SDL_GetTicksNS();
         SDL_Event e;
@@ -529,6 +590,14 @@ int App::run() {
         // with its renderer.
         const uint64_t spent = SDL_GetTicksNS() - frameStart;
         if (spent < kMinFrameNs) SDL_DelayNS(kMinFrameNs - spent);
+        if (perf) {
+            const uint64_t now = SDL_GetTicksNS();
+            perfMaxNs = std::max(perfMaxNs, now - frameStart);
+            perfLimitNs += now - frameStart - spent;
+            ++perfFrames;
+            if (now - perfStart >= 2'000'000'000ull && perfFrames > 0) logPerf(now - perfStart, perfFrames, perfMaxNs, perfLimitNs);
+            if (now - perfStart >= 2'000'000'000ull) perfStart = now, perfFrames = 0, perfMaxNs = perfLimitNs = 0;
+        }
     }
 
     if (walk_ && ui_) exitCode_ = walk_->finish(*ui_);
@@ -599,6 +668,12 @@ void App::startUi() {
         SDL_setenv_unsafe("GD02_SAVE_DIR", dir.c_str(), 1);
     }
     loadEnhanced();
+    // A save folder of its own (the walk test, development) holds controllers.json too.
+    if (const char* d = SDL_getenv("GD02_SAVE_DIR"); d && *d) {
+        std::string dir = d;
+        if (dir.back() != '/' && dir.back() != '\\') dir += '/';
+        input_.setSaveDir(dir);
+    }
     auto ui = std::make_unique<ui::UiManager>(*data_, canvas_, *this, input_);
     std::string error;
     if (!ui->init(error)) {
@@ -709,7 +784,7 @@ bool App::loadSong(const SongInfo& info, int difficulty, bool autoplay, float ba
         if (const char* l = SDL_getenv("GD02_LEFTY")) input_.setLefty(SDL_strchr(l, '1') != nullptr, SDL_strchr(l, '2') != nullptr);
         // GD02_KEYS: with the menus, only its "s<song ms>:" items play in the song.
         const char* k = SDL_getenv("GD02_KEYS");
-        keys_ = KeyScript(ui_ ? MenuKeys::songItems(k ? k : "") : (k ? k : ""));
+        keys_ = KeyScript(walk_ && !walk_->songKeys().empty() ? walk_->songKeys() : ui_ ? MenuKeys::songItems(k ? k : "") : (k ? k : ""));
         if (!keys_.valid()) SDL_Log("GD02_KEYS: some items were not understood and are ignored");
         SDL_Log("%s (%s): %d Hz, %d channels, %d %s gems, hopo_threshold %d", info.id.c_str(), info.name.c_str(),
                 pendingStream_->sampleRate(), pendingStream_->channels(), int(player_->chart().gems.size()),
@@ -727,8 +802,10 @@ bool App::loadSong(const SongInfo& info, int difficulty, bool autoplay, float ba
         return false;
     }
     bandVolume_ = band, guitarVolume_ = guitar;
-    // A restart from the pause menu skips most of the lead-in (game fast_intro) [I].
-    leadInMs_ = fastIntro ? 1000 : kLeadInMs;
+    // The lead-in until beginSong times GH2's intro clock.
+    fastIntro_ = fastIntro;
+    leadInMs_ = kLeadInMs;
+    extendAtMs_ = float(kTrackExtendMs);
     info_ = &info;
     begun_ = wonSent_ = lostSent_ = outroSent_ = spReadySent_ = false;
     musicPaused_ = false;
@@ -739,10 +816,10 @@ bool App::loadSong(const SongInfo& info, int difficulty, bool autoplay, float ba
     lastFrameMs_ = -leadInMs_;
     failMs_ = -1e9f;
     if (prepareTrack()) {
-        track_->reset(float(-leadInMs_));
+        track_->reset(extendAtMs_);
         track_->setLefty(input_.lefty(0));
-        if (track2_) track2_->reset(float(-leadInMs_)), track2_->setLefty(input_.lefty(1));
-        hud_->reset(float(-leadInMs_));
+        if (track2_) track2_->reset(extendAtMs_), track2_->setLefty(input_.lefty(1));
+        hud_->reset(extendAtMs_);
     }
     // The venue: without the menus the song's (its quickplay venue or career
     // tier, GD02_VENUE overrides); with them world_panel loads it (worldLoad).
@@ -761,6 +838,34 @@ bool App::loadSong(const SongInfo& info, int difficulty, bool autoplay, float ba
 
 void App::beginSong() {
     if (!pendingStream_ || !info_) return;
+    // GamePanel's start (0x822CCA60): the intro clock from the INTRO shot's
+    // length (CamShot +0xf0 = every keyframe's duration + blend, frames at
+    // 30 a second, 0x82226630) [C].
+    double startMs = kTrackExtendMs;
+    if (!fastIntro_ && director_)
+        if (const scene::CamShot* shot = director_->drawShot({encoreFx_ ? "INTRO_ENCORE" : "INTRO"}))
+            startMs = std::min(-double(shot->lengthFrames()) / 30.0 * 1000.0, 0.0);
+    leadInMs_ = -startMs;
+    extendAtMs_ = float(std::max(startMs, kTrackExtendMs));
+    extendSent_ = controllersLive_ = false;
+    heldBeforeLive_ = {};
+    introSfx_ = 0;
+    songSfx_.clear();
+    introCamSet_ = false;
+    introCamTravel_ = -1;
+    lastT_ = float(startMs);
+    lastFrameMs_ = startMs;
+    if (track_ && hud_) {
+        track_->reset(extendAtMs_);
+        if (track2_) track2_->reset(extendAtMs_);
+        hud_->reset(extendAtMs_);
+    }
+    worldDriver_.reset(float(startMs));
+    // The world's clock moves to the intro clock now: with the menus
+    // intro_start_msg follows at once and the world picks the INTRO shot,
+    // which must start at this time, not at the previous clock.
+    if (world_) world_->setClock(startMs / 1000.0, startMs / 500.0);
+    SDL_Log("intro: the song clock starts at %.0f ms, the track extends at %.0f ms", startMs, double(extendAtMs_));
     mixer_.setSpeed(1);
     const bool coop = mode_ == DevMode::Coop;
     const SongAudio& audio = coop && info_->coopAudio ? *info_->coopAudio : info_->audio;
@@ -870,8 +975,65 @@ void App::handleEvent(const SDL_Event& e) {
         ((e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.which != SDL_TOUCH_MOUSEID) || e.type == SDL_EVENT_FINGER_UP)) {
         ui_->buttonDown(ui::kPad_Start, 0);
         ui_->buttonUp(ui::kPad_Start, 0);
+    } else if (ui_ && (e.type == SDL_EVENT_MOUSE_MOTION || e.type == SDL_EVENT_MOUSE_BUTTON_DOWN) && e.motion.which != SDL_TOUCH_MOUSEID) {
+        // Mouse support (gd01's): hovering focuses (only while the window has
+        // the input focus), a left click selects, a right click goes back.
+        const bool click = e.type == SDL_EVENT_MOUSE_BUTTON_DOWN;
+        if (enhancedValue("mouse") == "off") return;  // Enhanced Options > Enable Mouse Selection
+        if (click && e.button.button != SDL_BUTTON_LEFT && e.button.button != SDL_BUTTON_RIGHT) return;
+        if (!click && !(SDL_GetWindowFlags(window_) & SDL_WINDOW_INPUT_FOCUS)) return;
+        const float wx = click ? e.button.x : e.motion.x, wy = click ? e.button.y : e.motion.y;
+        int ww = 0, wh = 0;
+        SDL_GetWindowSize(window_, &ww, &wh);
+        const float scale = std::min(float(ww) / 1280.0f, float(wh) / 720.0f);
+        if (scale <= 0) return;
+        const float mx = (wx - (float(ww) - 1280.0f * scale) * 0.5f) / scale, my = (wy - (float(wh) - 720.0f * scale) * 0.5f) / scale;
+        if (menuMouseAllowed()) mouseMovedMs_ = double(SDL_GetTicksNS()) / 1e6;
+        menuMouse(mx, my, !click ? 0 : e.button.button == SDL_BUTTON_LEFT ? 1 : 3);
+    } else if (ui_ && e.type == SDL_EVENT_MOUSE_WHEEL && e.wheel.which != SDL_TOUCH_MOUSEID && e.wheel.y != 0 && enhancedValue("mouse") != "off") {
+        if (menuMouseAllowed()) mouseMovedMs_ = double(SDL_GetTicksNS()) / 1e6;
+        menuWheel(e.wheel.y > 0 ? -1 : 1);
+    } else if (e.type == SDL_EVENT_KEY_DOWN || e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
+        mouseMovedMs_ = -1e9;  // a key or a button hides the pointer
+        // A gamepad's yellow Y button on the main menu: GAMEPADS (its yellow
+        // fret, RB, does it through the menus too).
+        if (ui_ && e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN && e.gbutton.button == SDL_GAMEPAD_BUTTON_NORTH && input_.joypadDevice(e.gbutton.which))
+            ui_->yellowButton();
     }
-    for (const InputEvent& a : actions_) handleAction(a);
+    // A tap in the menus is a click where it landed (Input::takeMenuTaps).
+    for (auto [tx, ty] : input_.takeMenuTaps()) menuMouse(tx, ty, 1);
+    for (const InputEvent& a : actions_) {
+        if (inputLog_) SDL_Log("input: %s %s player %d%s", actionName(a.action), a.down ? "down" : "up", a.player, a.joypad ? " (joypad)" : "");
+        handleAction(a);
+    }
+}
+
+bool App::menuMouseAllowed() const {
+    // Not while a song is being played (the pause menu takes it again).
+    return ui_ && !ui_->inSplashes() && !input_.inGame();
+}
+
+void App::menuMouse(float x, float y, int button) {
+    if (!menuMouseAllowed()) return;
+    if (button == 3) {  // right click: back, as the red fret
+        ui_->buttonDown(ui::kPad_Tri, 0);
+        ui_->buttonUp(ui::kPad_Tri, 0);
+        return;
+    }
+    ui_->mouse(x, y, button == 1);
+}
+
+void App::menuWheel(int dir) {
+    if (menuMouseAllowed()) ui_->wheel(dir);
+}
+
+void App::updateCursor() {
+    const double now = double(SDL_GetTicksNS()) / 1e6;
+    const bool show = menuMouseAllowed() && now - mouseMovedMs_ < 3000;
+    if (show == cursorShown_) return;
+    cursorShown_ = show;
+    if (show) SDL_ShowCursor();
+    else SDL_HideCursor();
 }
 
 // One input action. With the menus: the player's controller layer while
@@ -949,6 +1111,17 @@ void App::playerAction(const InputEvent& a) {
     Player* p = playerFor(a.player);
     if (!p || botFor(p)) return;  // autoplay owns that player's frets
     const float t = float(mixer_.songTimeMs(a.timestampNs));
+    // On the intro clock the beat-match controllers are off and drop every
+    // button (0x822CED30; on again in 0x822E2510 once the clock hands over)
+    // [C]: no strum, Star Power or miss before the track is up.
+    if (!controllersLive_) {
+        const size_t i = p == player2_.get() ? 1 : 0;
+        if (isFret(a.action)) {
+            const uint32_t bit = 1u << fretOf(a.action);
+            heldBeforeLive_[i] = a.down ? heldBeforeLive_[i] | bit : heldBeforeLive_[i] & ~bit;
+        }
+        return;
+    }
     p->update(t);
     if (isFret(a.action)) {
         if (a.down) p->fretDown(fretOf(a.action), t);
@@ -974,7 +1147,86 @@ float App::songClock() {
 
 // One frame of the song's rules: scripted and autoplay input, the players,
 // the track and HUD events, and (with the menus) GH2's game events.
+// The intro after beginSong: extend_track at its song time (game.dta runs
+// track_panel do_extend_sequence: track_unfurl, the smashers popping with
+// nowbar_1..5, then slide_meter_in with meter_slide; without the menus the
+// program plays those sounds at the scripts' times), then the controllers at
+// -25 ms, the frets held until then synced (fret downs, no strum) [I: the
+// sync follows GH1's FUN_0025c070].
+void App::updateIntro(float t) {
+    if (!begun_) return;
+    if (!extendSent_ && t >= extendAtMs_) {
+        extendSent_ = true;
+        if (ui_) ui_->gameScript("extend_track");
+    }
+    if (!ui_) {
+        // track_panel.dta do_extend_sequence and hud_panel.dta slide_meter_in [C data].
+        static const struct {
+            float atMs;
+            const char* sfx;
+        } kIntro[] = {{0, "track_unfurl"}, {1300, "nowbar_1"}, {1400, "nowbar_2"}, {1500, "nowbar_3"},
+                      {1600, "nowbar_4"},  {1700, "nowbar_5"}, {2050, "meter_slide"}};
+        while (introSfx_ < int(std::size(kIntro)) && t >= extendAtMs_ + kIntro[introSfx_].atMs)
+            playSfxArgs(kIntro[introSfx_++].sfx, fxVolumeDb_, 0, 0);
+    }
+    if (!controllersLive_ && t > kControllersLiveMs) {
+        controllersLive_ = true;
+        for (int p = 0; p < 2; ++p) {
+            Player* pl = p == 0 ? player_.get() : player2_.get();
+            if (!pl || botFor(pl)) continue;
+            for (int f = 0; f < 5; ++f)
+                if (heldBeforeLive_[size_t(p)] & (1u << f)) pl->fretDown(f, t);
+        }
+    }
+}
+
+// The players' events to their script handlers, which play the game's
+// sounds [C]: the PlayerMatcher's miss sink (0x822E2B10: an overstrum or a
+// wrong fret, not a passed gem) sends `miss` (player) to beatmatch.dta's
+// player_matcher_handlers: miss_gtr, or miss_bass on a bass track; the
+// pass sink (0x822E2FD0) looks up miss_whoosh, which no bank on the disc
+// has, so a passed gem is silent [C data]. No code sends the handlers'
+// `hit` (no "hit" symbol in the executable), so sp_gemhit never plays [C
+// by absence]. The Player sends player.dta's handlers phrase_captured
+// (sp_awarded 0.2 s later), start_using (sp_deployed, the crowd's
+// crowd_upto_good, the track's Star Power bump) and stop_using
+// (sp_depleted). Without the menus the program plays the same sounds.
+void App::gameSounds(int player, const std::vector<PlayerEvent>& events) {
+    const Player* pl = player == 0 ? player_.get() : player2_.get();
+    if (!pl) return;
+    const bool multi = player2_ != nullptr;
+    const float pan = multi ? (player == 0 ? -1.0f : 1.0f) : 0.0f;  // system_script.dta player_pan
+    const bool bass = multi && parts_[size_t(player)] == "bass";
+    for (const PlayerEvent& e : events) {
+        const char* matcher = nullptr;
+        const char* handler = nullptr;
+        if (e.kind == PlayerEvent::Kind::Miss) matcher = "miss";
+        else if (e.kind == PlayerEvent::Kind::PhraseCaptured) handler = "phrase_captured";
+        else if (e.kind == PlayerEvent::Kind::StarPowerStart) handler = "start_using";
+        else if (e.kind == PlayerEvent::Kind::StarPowerEnd) handler = "stop_using";
+        else continue;
+        if (ui_) {
+            const std::string obj = std::string(matcher ? "player_matcher" : "player") + std::to_string(player);
+            ui_->callScript(ui_->interp().findObject(obj), matcher ? matcher : handler, {Value::integer(player)});
+            continue;
+        }
+        if (matcher) playSfxArgs(bass ? "miss_bass" : "miss_gtr", fxVolumeDb_, pan, 0);
+        else if (e.kind == PlayerEvent::Kind::PhraseCaptured) pendingAwardMs_ = lastT_ + 200.0f;
+        else if (e.kind == PlayerEvent::Kind::StarPowerStart) {
+            playSfxArgs(multi ? "sp_deployed_multi" : "sp_deployed", fxVolumeDb_, pan, 0);
+            if (track_) track_->animateExtend(2000, 2025, 800, lastT_);
+        } else {
+            playSfxArgs(multi ? "sp_depleted_multi" : "sp_depleted", fxVolumeDb_, pan, 0);
+        }
+    }
+    if (!ui_ && pendingAwardMs_ > -1e8f && lastT_ >= pendingAwardMs_) {
+        pendingAwardMs_ = -1e9f;
+        playSfxArgs("sp_awarded", fxVolumeDb_, 0, 0);
+    }
+}
+
 void App::updateSong(float t) {
+    updateIntro(t);
     // The analog whammy bar, sampled every frame (Player's movement detection).
     if (!paused_) {
         if (!player2_) {
@@ -1048,6 +1300,8 @@ void App::updateSong(float t) {
         if (track2_ && player2_) track2_->onEvents(events2, *player2_, t), hud_->onEvents(events2, 1, t);
         if (coopBand_) hud_->onEvents(bandEvents, -1, t);
     }
+    gameSounds(0, events);
+    if (player2_) gameSounds(1, events2);
     if (!player2_) {
         mixer_.setGuitarAudible(player_->guitarAudible());
     } else if (parts_[0] != parts_[1]) {
@@ -1086,21 +1340,39 @@ void App::updateSong(float t) {
                 }
             if (director_->hasCamera()) venueView_->setCamera(director_->camera());
         }
-        // Development aid: GD02_FACE_CAM=<member>[:<distance>] (guitarist0, singer, ...) frames that
-        // member's head from the director camera's side, to check the faces.
+        if (begun_ && t <= float(kTrackExtendMs)) {
+            const gfx::Vec3 c = venueView_->camera().position();
+            if (!introCamSet_) introCamSet_ = true, introCam0_ = c;
+            const double dx = c.x - introCam0_.x, dy = c.y - introCam0_.y, dz = c.z - introCam0_.z;
+            introCamTravel_ = std::sqrt(dx * dx + dy * dy + dz * dz);
+        }
+        // Development aid: GD02_FACE_CAM=<member>[:<distance>[:<degrees>[:<bone>[:<height>]]]] (guitarist0,
+        // singer, ...) frames that member's head (or bone) from the director camera's side, turned
+        // <degrees> about it (180: from behind), <height> units above it, to check the faces.
         if (const char* fc = SDL_getenv("GD02_FACE_CAM"); fc && *fc && band_) {
-            const std::string spec = fc;
-            const size_t colon = spec.find(':');
-            const std::string who = spec.substr(0, colon);
-            const float dist = colon == std::string::npos ? 22.0f : std::strtof(spec.c_str() + colon + 1, nullptr);
+            std::vector<std::string> f;
+            for (std::string spec = fc;;) {
+                const size_t colon = spec.find(':');
+                f.push_back(spec.substr(0, colon));
+                if (colon == std::string::npos) break;
+                spec = spec.substr(colon + 1);
+            }
+            const std::string& who = f[0];
+            const float dist = f.size() > 1 ? std::strtof(f[1].c_str(), nullptr) : 22.0f;
+            const float turn = f.size() > 2 ? std::strtof(f[2].c_str(), nullptr) * 3.14159265f / 180 : 0.0f;
+            const float up = f.size() > 4 ? std::strtof(f[4].c_str(), nullptr) : 0.0f;
             scene::Xfm head;
-            if (band_->objectXfm(who, "bone_head.mesh", head) || band_->objectXfm(who, "bone_head.trans", head)) {
+            const bool found = f.size() > 3 && !f[3].empty() ? band_->objectXfm(who, f[3], head)
+                                                             : band_->objectXfm(who, "bone_head.mesh", head) || band_->objectXfm(who, "bone_head.trans", head);
+            if (found) {
                 const gfx::Vec3 target{head.pos[0], head.pos[1], head.pos[2]};
                 // From the side the director camera is on, level with the head.
                 gfx::Vec3 dir = venueView_->camera().position() - target;
                 dir.z = 0;
                 if (gfx::dot(dir, dir) < 1e-6f) dir = {0, -1, 0};
-                const gfx::Vec3 eye = target + gfx::normalize(dir) * dist;
+                dir = gfx::normalize(dir);
+                dir = {dir.x * std::cos(turn) - dir.y * std::sin(turn), dir.x * std::sin(turn) + dir.y * std::cos(turn), 0};
+                const gfx::Vec3 eye = target + dir * dist + gfx::Vec3{0, 0, up};
                 gfx::Camera cam = gfx::Camera::lookAt(eye, target);
                 cam.yFov = 0.6f;
                 venueView_->setCamera(cam);
@@ -1174,6 +1446,7 @@ void App::frameSong() {
 // track and HUD are its game panels).
 void App::frameUi() {
     const double now = double(SDL_GetTicksNS()) / 1e6 - uiStartMs_;
+    updateCursor();
     actions_.clear();
     input_.poll(SDL_GetTicksNS(), actions_);
     for (const InputEvent& a : actions_) handleAction(a);
@@ -1189,6 +1462,14 @@ void App::frameUi() {
                 e.key.down = edge > 0;
                 SDL_PushEvent(&e);
             }
+        } else if (k.mouse) {  // the mouse, as its events would (menu units)
+            if (k.mouse >= 4) menuWheel(k.mouse == 4 ? -1 : 1);
+            else menuMouse(k.mx, k.my, k.mouse == 2 ? 1 : k.mouse == 3 ? 3 : 0);
+        } else if (k.padAxis >= 0) {
+            if (SDL_Joystick* j = virtualPad_ ? SDL_GetJoystickFromID(virtualPad_) : nullptr)
+                SDL_SetJoystickVirtualAxis(j, k.padAxis, Sint16(std::clamp(k.axisValue, -32768, 32767)));
+            else
+                SDL_Log("GD02_KEYS: a \"j\" item needs GD02_VIRTUAL_PAD");
         } else if (k.padButton >= 0) {
             if (SDL_Joystick* j = virtualPad_ ? SDL_GetJoystickFromID(virtualPad_) : nullptr)
                 SDL_SetJoystickVirtualButton(j, k.padButton, k.edge > 0);
@@ -1290,11 +1571,36 @@ int App::gameCounter(int player, const std::string& key) const {
         const Player* pl = gamePlayer(p);
         return pl ? int(pl->chart().gems.size()) : 0;
     }
+    // The track's Star Power phrase effects (--walktest star_phrase).
+    if (const TrackView* tv = p == 1 ? track2_.get() : track_.get()) {
+        if (key == "star_smashes") return tv->starSmashes();
+        if (key == "star_glow_lines") return tv->starGlowLines();
+        if (key == "star_combos") return tv->comboStarts();
+    }
     return 0;
 }
 
 void App::trackCommand(const std::string& msg, const std::vector<Value>& args) {
-    (void)args;
+    // A player's extend anim (player.dta start_using's Star Power bump) or
+    // the panel's (game.dta beat with the barf cheat): animate (range a b)
+    // (period s) [(units u)]; the panel's own range 0..1920 is the extend
+    // sequence the track view times itself (render/track_view.h).
+    if (msg == "player_animate" || msg == "animate") {
+        float from = -1, to = -1, period = 0;
+        for (size_t k = msg == "animate" ? 0 : 1; k < args.size(); ++k) {
+            const Value& v = args[k];
+            if (v.type != Value::Type::Array || !v.array || v.array->empty()) continue;
+            const std::vector<Value>& l = *v.array;
+            const std::string key = l[0].str();
+            if (key == "range" && l.size() >= 3) from = l[1].number(), to = l[2].number();
+            if (key == "period" && l.size() >= 2) period = l[1].number();
+        }
+        if (from < 1920 || to < from) return;
+        const int p = msg == "animate" ? -1 : args.empty() ? 0 : args[0].integerValue();
+        if (track_ && p != 1) track_->animateExtend(from, to, period * 1000.0f, lastT_);
+        if (track2_ && p != 0) track2_->animateExtend(from, to, period * 1000.0f, lastT_);
+        return;
+    }
     // The track view keeps its own intro, extend and smasher animations
     // (render/track_view.h); explode is the scripts' (game_won_msg).
     if (msg == "explode" && !exploded_) {
@@ -1420,6 +1726,10 @@ void App::unloadVenue() {
 // GH2's play_sfx / synth play_sequence: the game's banks, then the venue's
 // (crowd_win, encore_yes... from the UI's scripts).
 bool App::playSfxArgs(const std::string& name, float volumeDb, float pan, float transpose) {
+    if (begun_ && player_ && songSfx_.size() < 256) songSfx_.emplace_back(name, double(lastT_));
+    // Development aid: GD02_SFXLOG=1 logs every sound the scripts or the game play.
+    static const bool sfxLog = envOn("GD02_SFXLOG");
+    if (sfxLog) SDL_Log("sfx: %s (%.1f dB, pan %.2f)%s", name.c_str(), double(volumeDb), double(pan), begun_ && player_ ? (" at song " + std::to_string(int(lastT_)) + " ms").c_str() : "");
     if (!synth_) return false;
     if (synth_->play(name, volumeDb, pan, transpose)) return true;
     return world_ && world_->venue().find(name) && world_->playSound(name, nullptr, volumeDb, pan, transpose);
@@ -1655,12 +1965,32 @@ void App::loadEnhanced() {
     applyEnhanced();
 }
 
+// The Steam Deck defaults (gd01's "Steam Deck" column, gd-game-01/README.md):
+// full screen, 60 FPS, no FPS counter, 800 lines; the Steam Deck download
+// (-DGD02_STEAM_DECK=ON) and a launcher that sees a Deck (GD02_HANDHELD=1,
+// module_entry.cpp). Saved settings still win.
+static const char* deckDefault(const std::string& key) {
+#if defined(GD02_STEAM_DECK)
+    const bool deck = true;
+#else
+    const char* h = SDL_getenv("GD02_HANDHELD");
+    const bool deck = h && h[0] == '1';
+#endif
+    if (!deck) return nullptr;
+    if (key == "screen_mode") return "fullscreen";
+    if (key == "max_fps") return "60";
+    if (key == "fps_counter") return "off";
+    if (key == "internal_res") return "800";
+    return nullptr;
+}
+
 std::string App::enhancedValue(const std::string& key) {
     const ui::EnhancedSetting* e = enhancedSetting(key);
     if (!e) return {};
     const std::string& v = enhanced_[key].str();
     for (const char* ok : e->values)
         if (v == ok) return v;
+    if (const char* d = deckDefault(key)) return d;
     return e->values.front();  // unset or not valid: the default
 }
 
@@ -1733,8 +2063,8 @@ void App::drawFpsCounter() {
     t.draw(canvas_.renderer().materials(), "helveticablack.font", buf, 23, 695, 22, {0.2f, 1, 0.3f, 1}, 0x41);
 }
 
-// The live backdrop: the second venue (venues::names()[1], small1) with the
-// band playing the first song of its tier, without sound, looping.
+// The backdrop: the second venue (venues::names()[1], small1) with the band
+// caught a quarter into the first song of its tier, silent and still.
 void App::menuBackdrop(bool on) {
     if (!on) {
         if (!backdrop_) return;
@@ -1761,12 +2091,32 @@ void App::menuBackdrop(bool on) {
     }
     b->fromMs = b->song->endMs * 0.25f;
     b->driver.reset(b->fromMs);
-    b->startNs = SDL_GetTicksNS();
     backdrop_ = std::move(b);
     // The band first: it enters with the world (World::start), as in a song.
     startBand(*backdrop_->info, *backdrop_->song, true);
     world_->start(false, false);
     world_->message("excitement", {Value::integer(3)});
+    // About 1.5 s of the song in fixed steps poses the band and frames the
+    // shot; then nothing moves again (gd01's backdrop). A band that has not
+    // shown its singer yet gets up to 5 s more: the backdrop must always
+    // show the band (GD02-074).
+    for (int i = 0; backdrop_ && (i < 45 || (!backdrop_->framed && i < 195)); ++i) updateBackdrop();
+    if (!band_) SDL_Log("enhanced options: backdrop %s has no band", venue.c_str());
+    else if (backdrop_ && !backdrop_->framed) SDL_Log("enhanced options: backdrop %s: the singer never showed", venue.c_str());
+    if (backdrop_) backdrop_->frozen = true;
+}
+
+// The backdrop's band is there, the camera on its singer, and the singer's
+// head in the right half of the picture (the Enhanced walk's check).
+bool App::menuBackdropFramed() {
+    if (!backdrop_ || !backdrop_->framed || !band_ || !venueView_) return false;
+    scene::Xfm head;
+    if (!band_->objectXfm("singer", "bone_head.mesh", head)) return false;
+    const gfx::Camera& cam = venueView_->camera();
+    const gfx::Mat4 vp = cam.viewProj(false);
+    float c[4];
+    for (int r = 0; r < 4; ++r) c[r] = vp.at(r, 0) * head.pos[0] + vp.at(r, 1) * head.pos[1] + vp.at(r, 2) * head.pos[2] + vp.at(r, 3);
+    return c[3] > 0 && c[0] / c[3] > 0 && c[0] / c[3] < 1 && std::fabs(c[1] / c[3]) < 1;
 }
 
 bool App::drawMenuBackdrop() {
@@ -1777,21 +2127,15 @@ bool App::drawMenuBackdrop() {
 
 void App::updateBackdrop() {
     Backdrop& b = *backdrop_;
-    if (!world_ || !venueView_) return;
-    float ms = b.fromMs + float(double(SDL_GetTicksNS() - b.startNs) / 1e6);
-    if (ms > b.song->endMs - 3000) {  // around again
-        b.startNs = SDL_GetTicksNS();
-        b.driver.reset(b.fromMs);
-        b.lightPart = -1;
-        ms = b.fromMs;
-        startBand(*b.info, *b.song, true);
-    }
+    if (!world_ || !venueView_ || b.frozen) return;
+    b.simMs += 33;
+    const float ms = b.fromMs + b.simMs;
     b.driver.update(*world_, *b.song, ms, nullptr, {}, nullptr, {});
     world_->update();
     // The lights: the venue's chorus and verse presets in turn, 20 s each,
     // not the song's cues (their blackouts left the band in the dark).
     if (lighting_) {
-        const int part = int(double(SDL_GetTicksNS() - b.startNs) / 20e9);
+        const int part = 0;
         if (part != b.lightPart) {
             b.lightPart = part;
             lighting_->ignoreEvents(true);
@@ -1805,12 +2149,14 @@ void App::updateBackdrop() {
         const std::array<float, 3> cam{c.x, c.y, c.z};
         band_->update(world_->seconds(), world_->beats(), &cam);
     }
-    // The shot: from the audience's side, on the singer's chest, wide enough
-    // for the guitarist and the drummer, swaying slowly from side to side.
+    // The shot (guidelines/universal_launcher.md, gd01's Enhanced pose): a
+    // still close-up of the singer, on the right of the picture beside the
+    // options' box, from the audience's side a little to one flank so the
+    // rest of the band stands behind and beside them.
     if (!b.framed && band_) {
         scene::Xfm singer, other;
         if (band_->objectXfm("singer", "bone_head.mesh", singer)) {
-            b.target = {singer.pos[0], singer.pos[1], singer.pos[2] - 14};
+            b.target = {singer.pos[0], singer.pos[1], singer.pos[2] - 4};
             // The stage's front: from the drummer (at the back) to the
             // singer; else towards the venue's first shot.
             gfx::Vec3 dir = venueView_->camera().position() - b.target;
@@ -1826,36 +2172,38 @@ void App::updateBackdrop() {
                     const gfx::Vec3 p{other.pos[0], other.pos[1], other.pos[2]};
                     spread = std::max(spread, std::fabs(gfx::dot(p - b.target, side)));
                 }
-            // Wide enough for the band; the camera then looks a little to
-            // the singer's left so the band stands right of the list.
             b.spread = spread;
-            b.dist = (spread + 34) / 0.45f;  // tan(yFov / 2) x 16:9 = 0.45 at yFov 0.5
-            // No farther than the venue's own first shot (the audience's
-            // fences and rigging stand behind it).
+            // Close on the singer, with the band behind: about two of the
+            // band's half widths away [I: the port's framing].
+            b.dist = std::clamp(spread * 2.6f, 140.0f, 220.0f);
             const gfx::Vec3 shot = venueView_->camera().position() - b.target;
-            b.dist = std::min(b.dist, 0.8f * std::sqrt(shot.x * shot.x + shot.y * shot.y));
-            b.aim = 0.32f * 0.45f * b.dist;  // looking that far to the singer's left: the band on the right
+            // No farther than the venue's shot of the moment (the audience's
+            // fences and rigging stand behind it), but never into the band:
+            // a close shot at that moment put the camera inside the singer
+            // and the backdrop showed no one.
+            b.dist = std::max(110.0f, std::min(b.dist, 0.8f * std::sqrt(shot.x * shot.x + shot.y * shot.y)));
             SDL_Log("enhanced options: backdrop on %s, spread %.0f, distance %.0f", b.info->id.c_str(), spread, b.dist);
             b.framed = true;
         }
     }
     if (b.framed) {
-        // Following the singer as they move about the stage, smoothly.
-        if (scene::Xfm singer; band_ && band_->objectXfm("singer", "bone_head.mesh", singer)) {
-            const gfx::Vec3 now{singer.pos[0], singer.pos[1], singer.pos[2] - 14};
-            const uint64_t ns = SDL_GetTicksNS();
-            const float dt = b.lastNs ? float(double(ns - b.lastNs) / 1e9) : 0.0f;
-            b.lastNs = ns;
-            b.target = b.target + (now - b.target) * (1 - std::exp(-std::min(dt, 0.25f) / 1.2f));
-        }
-        const float t = float(double(SDL_GetTicksNS() - b.startNs) / 1e9);
-        const float a = 0.14f * std::sin(t * 6.2831853f / 26.0f);
-        const gfx::Vec3 d{b.dir.x * std::cos(a) - b.dir.y * std::sin(a), b.dir.x * std::sin(a) + b.dir.y * std::cos(a), 0};
+        // Following the singer while the band poses (then frozen).
+        if (scene::Xfm singer; band_ && band_->objectXfm("singer", "bone_head.mesh", singer))
+            b.target = b.target + (gfx::Vec3{singer.pos[0], singer.pos[1], singer.pos[2] - 4} - b.target) * (1 - std::exp(-0.033f / 0.3f));
+        constexpr float kYaw = -0.3f;                 // the camera this far round to the singer's side (radians)
+        constexpr float kFocusX = 0.3f, kFocusY = 0.25f;  // where the singer's face lands, in NDC (right, up)
+        constexpr float kFov = 0.6f;
+        const gfx::Vec3 d{b.dir.x * std::cos(kYaw) - b.dir.y * std::sin(kYaw), b.dir.x * std::sin(kYaw) + b.dir.y * std::cos(kYaw), 0};
         gfx::Vec3 eye = b.target + d * b.dist;
-        eye.z = b.target.z + b.dist * 0.12f + 3 * std::sin(t * 0.37f);  // above the crowd's heads
-        const gfx::Vec3 side{-d.y, d.x, 0};
-        gfx::Camera cam = gfx::Camera::lookAt(eye, b.target - side * b.aim + gfx::Vec3{0, 0, 6});
-        cam.yFov = 0.5f;
+        eye.z = b.target.z + b.dist * 0.06f;
+        // Look to the left of and below the singer so the face sits at the focus.
+        const float t = std::tan(kFov * 0.5f), aspect = 16.0f / 9.0f;
+        const gfx::Vec3 fwd = gfx::normalize(b.target - eye);
+        const gfx::Vec3 right = gfx::normalize(gfx::cross(fwd, gfx::Vec3{0, 0, 1}));
+        const gfx::Vec3 up = gfx::cross(right, fwd);
+        const float range = std::sqrt(gfx::dot(b.target - eye, b.target - eye));
+        gfx::Camera cam = gfx::Camera::lookAt(eye, b.target - right * (kFocusX * range * t * aspect) - up * (kFocusY * range * t));
+        cam.yFov = kFov;
         venueView_->setCamera(cam);
     }
     venueView_->update();
@@ -1863,6 +2211,32 @@ void App::updateBackdrop() {
 
 // One frame of the song screen without the menus (--song, the debug list):
 // GH2's track and HUD (or the debug highway), then the 2D text on top.
+// GD02_PERF=1 (to measure on the Mac): per frame on average over the
+// period, where the time goes: update (input, the song, the world, the band,
+// the menus' scripts; what is left), draw (building and issuing the draws on
+// the CPU), present (the internal frame's blit, the pacing's sleep and
+// SDL_GL_SwapWindow, where a driver waits for the GPU or the display) and
+// gpu wait (the fence on the frame before last: the GPU is the bottleneck).
+void App::logPerf(uint64_t periodNs, int frames, uint64_t maxNs, uint64_t limitNs) {
+    gfx::RenderDevice& dev = canvas_.renderer().device();
+    const gfx::DevicePerf p = dev.takePerf();
+    const double f = double(std::max(frames, 1)), ms = 1e-6;
+    const double frameMs = double(periodNs) * ms / f;
+    const double drawMs = double(canvas_.drawNs) * ms / f, presentMs = double(p.presentNs) * ms / f, fenceMs = double(p.fenceNs) * ms / f;
+    const double limitMs = double(limitNs) * ms / f;
+    const double updateMs = std::max(0.0, frameMs - drawMs - presentMs - fenceMs - limitMs);
+    int pw = 0, ph = 0, dw = 0, dh = 0;
+    SDL_GetWindowSizeInPixels(window_, &pw, &ph);
+    dev.drawableSize(dw, dh);
+    const double pf = double(std::max(p.frames, 1));
+    SDL_Log("perf: %.1f fps (frame %.2f ms, worst %.1f) | update %.2f ms | draw %.2f ms: %.0f draws, %.0f KB uniforms, %.0f KB vertices, "
+            "%.0f KB textures, %.1f created | present %.2f ms (pacing %.2f) | gpu wait %.2f ms | window %dx%d px, drawn at %dx%d, display scale %.2f",
+            f * 1e9 / double(periodNs), frameMs, double(maxNs) * ms, updateMs, drawMs, double(p.draws) / pf, double(p.uniformBytes) / pf / 1024,
+            double(p.bufferBytes) / pf / 1024, double(p.textureBytes) / pf / 1024, double(p.created) / pf, presentMs, double(p.paceNs) * ms / f, fenceMs, pw, ph, dw, dh,
+            double(SDL_GetWindowDisplayScale(window_)));
+    canvas_.drawNs = 0, canvas_.drawnFrames = 0;
+}
+
 void App::drawSong(float t) {
     const bool gh2 = track_ && hud_ && !debugHighway_;
     canvas_.begin(gh2 ? SDL_Color{0, 0, 0, 255} : SDL_Color{12, 10, 16, 255});

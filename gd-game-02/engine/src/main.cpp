@@ -1,13 +1,25 @@
 // SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
+#include <SDL3/SDL_log.h>
 #include <SDL3/SDL_main.h>
 
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
 
 #include "app.h"
 #include "app_ids.h"
+#include "platform/paths.h"
 #include "render/scene_view.h"
 #include "render/shadertest.h"
 #include "scene/scenetest.h"
@@ -49,7 +61,7 @@ void usage() {
         "  --venuetest          load the 8 venues (one player, face-off, co-op): their milos, classes, references and\n"
         "                       scripts, headlessly\n"
         "  --walktest <walk>    play through the menus with scripted buttons and check them: quickplay, lose, pause,\n"
-        "                       attract, career, career_full, back, enhanced, cheats, coop, faceoff, proface (headless: SDL_VIDEO_DRIVER=offscreen SDL_AUDIO_DRIVER=dummy)\n"
+        "                       attract, career, career_full, career_song, back, enhanced, cheats, coop, faceoff, proface (headless: SDL_VIDEO_DRIVER=offscreen SDL_AUDIO_DRIVER=dummy)\n"
         "Environment: GD02_KEYS=\"<ms>:<key>,...,s<song ms>:<key>,...\" scripted input: menu keys at wall-clock ms\n"
         "  (confirm back up down left right start select green red yellow blue orange; +key / -key hold / release),\n"
         "  song keys at song times (+green/-green .. orange, strum, starpower, whammy=<0..1>); menu items k<key name>\n"
@@ -63,7 +75,8 @@ void usage() {
         "  instead of GH2's track and HUD; GD02_HUD=0 hides the HUD, GD02_TRACK=0 the track. GD02_MODE=faceoff|proface|coop|practice\n"
         "  plays that mode (without the menus) with a second autoplaying player (GD02_DIFF2=0..3 its difficulty,\n"
         "  GD02_PARTS=guitar,bass the co-op parts); GD02_LEFTY=1|2|12 lefty flip;\n"
-        "  GD02_FAIL_AT=<ms> fails the song then, GD02_END_AT=<ms> ends (wins) it then; GD02_STATS=1 logs fps.\n"
+        "  GD02_FAIL_AT=<ms> fails the song then, GD02_END_AT=<ms> ends (wins) it then; GD02_STATS=1 logs fps; GD02_SFXLOG=1 logs every sound played.\n"
+        "  GD02_LOG=<file> also writes the log to that file (Windows: gd02.log in the save folder); GD02_PERF=1 logs a frame-time breakdown every 2 s.\n"
         "  GD02_FACE_CAM=<member>[:<distance>] (guitarist0, singer, ...) frames that band member's head.\n"
         "  GD02_POST=0 draws the venue without GH2's post-process; GD02_POST_DEBUG=bloom|dof|lum|doflow shows its\n"
         "  buffers (--view: GD02_VIEW_POST=<milo>[:<PostProc>], GD02_VIEW_DOF=<focus>,<blur_depth>,<max_blur>).\n"
@@ -75,11 +88,83 @@ void usage() {
         app::kProgram, app::kVersion, app::kProgram);
 }
 
+// GD02_LOG=<file>: every SDL_Log line also goes to that file (the Windows
+// build is a GUI program, so its log otherwise only reaches a debugger).
+SDL_LogOutputFunction gDefaultLog = nullptr;
+void* gDefaultLogData = nullptr;
+std::FILE* gLogFile = nullptr;
+
+void logToFile(void*, int category, SDL_LogPriority priority, const char* message) {
+    if (gLogFile) {
+        std::fprintf(gLogFile, "%s\n", message);
+        std::fflush(gLogFile);
+    }
+    if (gDefaultLog) gDefaultLog(gDefaultLogData, category, priority, message);
+}
+
+#ifdef _WIN32
+LPTOP_LEVEL_EXCEPTION_FILTER gPrevFilter = nullptr;
+
+// A crash on Windows: its code and address (as an offset into gd02.exe or the
+// module) in the log before the program ends, for bug reports.
+LONG WINAPI logCrash(EXCEPTION_POINTERS* e) {
+    const void* at = e && e->ExceptionRecord ? e->ExceptionRecord->ExceptionAddress : nullptr;
+    HMODULE mod = nullptr;
+    char name[MAX_PATH] = "?";
+    if (at && GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                                 static_cast<LPCSTR>(at), &mod))
+        GetModuleFileNameA(mod, name, MAX_PATH);
+    SDL_Log("crash: exception 0x%08lx at %s+0x%llx", e && e->ExceptionRecord ? e->ExceptionRecord->ExceptionCode : 0ul, name,
+            static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(at) - reinterpret_cast<uintptr_t>(mod)));
+    if (gLogFile) std::fflush(gLogFile);
+    return gPrevFilter ? gPrevFilter(e) : EXCEPTION_CONTINUE_SEARCH;
+}
+#endif
+
+// Windows has no console for it: without GD02_LOG the log goes to gd02.log
+// in the save folder, for bug reports.
+void openLogFile() {
+    const char* env = std::getenv("GD02_LOG");
+    std::string path = env ? env : "";
+#ifdef _WIN32
+    if (!env) path = prefDir().empty() ? "" : prefDir() + "gd02.log";
+    gPrevFilter = SetUnhandledExceptionFilter(logCrash);
+#endif
+    if (path.empty() || gLogFile) return;
+    gLogFile = std::fopen(path.c_str(), "w");
+    if (!gLogFile) return;
+    SDL_GetLogOutputFunction(&gDefaultLog, &gDefaultLogData);
+    SDL_SetLogOutputFunction(logToFile, nullptr);
+}
+
+// The log back to SDL's own, the file closed (the launcher module returns
+// to the launcher, which keeps logging).
+void closeLogFile() {
+#ifdef _WIN32
+    SetUnhandledExceptionFilter(gPrevFilter);  // the launcher may unload this module
+#endif
+    if (!gLogFile) return;
+    SDL_SetLogOutputFunction(gDefaultLog, gDefaultLogData);
+    std::fclose(gLogFile);
+    gLogFile = nullptr;
+}
+
+int run(int argc, char** argv);
+
 }  // namespace
 
 // The program: main() below, or the launcher module's gd_game_run
 // (platform/module_entry.cpp) in the Guitar Dream Universal Launcher.
 int gd02Main(int argc, char** argv) {
+    openLogFile();
+    const int rc = run(argc, argv);
+    closeLogFile();
+    return rc;
+}
+
+namespace {
+
+int run(int argc, char** argv) {
     Options opt;
     bool selftest = false, scenetest = false, shadertest = false, scripttest = false, uitest = false, venuetest = false, sfxtest = false, facefxtest = false, chartest = false;
     std::string viewPath, movie;
@@ -128,6 +213,8 @@ int gd02Main(int argc, char** argv) {
     if (!movie.empty()) return runPlayMovie(opt.dataPath, movie);
     return selftest ? runSelfTest(opt.dataPath) : runApp(opt);
 }
+
+}  // namespace
 
 #ifndef GD02_MODULE
 int main(int argc, char** argv) { return gd02Main(argc, argv); }

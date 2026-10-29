@@ -25,11 +25,12 @@ struct Game {
 
     std::string modulePath;  // gd-engine-games/<id>/<id>.so|.dll
     bool hasModule = false;
-    // The build's gd-engine-games/manifest.json lists this game's module but
-    // the file is not there: an incomplete download.
+    // A ready game whose module is not there (in a launcher build, which
+    // must carry every ready game's module): an incomplete download.
     bool moduleMissing = false;
 
     std::string iso;        // the disc image to play, or ""
+    std::string isoName;    // its name to show (platform::displayName)
     enum class IsoSource { None, Saved, Found } isoSource = IsoSource::None;
 
     std::string title() const { return nick.empty() ? name : nick; }
@@ -53,12 +54,11 @@ public:
     // The game whose signature matches the disc, or nullptr.
     Game* identify(const DiscInfo& disc);
 
-    // A content:// URI (Android's file dialog) is copied into the app's
-    // original_isos/ first (the games read files), then saved; see pollCopy.
+    // The disc image of a game, saved in config.txt. On Android a disc chosen
+    // in the file dialog is its content:// URI (with the permission to read
+    // it kept across restarts, GdulActivity.java): read where it is, never
+    // copied (module_host.cpp hands the game /proc/self/fd/<n>).
     void saveIso(const std::string& id, const std::string& path);
-    // That copy's progress, about once a second, then its result; "" when
-    // there is nothing new (and always on desktops).
-    std::string pollCopy();
     const std::vector<std::string>& discDirs() const { return discDirs_; }
     // Where disc images are looked for, and what was there at the last scan.
     struct DiscDir {
@@ -80,9 +80,6 @@ public:
 private:
     void readConfig();
     void writeConfig();
-    struct DiscCopy;
-    std::shared_ptr<DiscCopy> copy_;  // shared_ptr: DiscCopy is complete in catalog.cpp only
-    void startCopy(const std::string& id, const std::string& uri);
     std::vector<Game> games_;
     std::vector<std::string> discDirs_;
     std::vector<DiscDir> discDirInfo_;

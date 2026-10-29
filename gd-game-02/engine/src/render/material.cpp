@@ -173,8 +173,11 @@ void MaterialRenderer::draw(const GpuMesh& mesh, const Mat4* bones, const Materi
     // The fade-out's target colour: white for multiply (no darkening), else transparent black.
     const float fadeTo = m.blend == MatBlend::Multiply ? 1.0f : 0.0f;
     put4(mb.fadeColor, fadeTo, fadeTo, fadeTo, fadeTo);
-    // [I] The threshold of alpha_cut is not traced yet.
-    put4(mb.alphaTest, m.alphaCut ? 1.0f : 0.0f, 0.5f, 0, 0);
+    // alpha_cut (Mat +0xa1) only turns the alpha test on (0x8230A358 ->
+    // 0x823BDA38, RB_COLORCONTROL bit 3); the device set it up once as
+    // ALPHAREF 0 / GREATER (0x82303768: 0x823BDE98 0, 0x823BDF00 4) [C]: a
+    // pixel is kept when its alpha is above 0 (the shader discards alpha <= y).
+    put4(mb.alphaTest, m.alphaCut ? 1.0f : 0.0f, 0.0f, 0, 0);
 
     StdObjectBlock ob{};
     const int n = std::clamp(ctx.bones, 1, 4);

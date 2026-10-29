@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 
 #include "data/bitmap.h"
 #include "data/dta.h"
@@ -180,6 +181,8 @@ void TrackRenderer::setSmasherGlowing(int fret, bool on) {
 void TrackRenderer::reset() {
     for (int f = 0; f < 5; ++f) glow_[f] = false, popAt_[f] = hitAt_[f] = -1e9f;
     explodeAt_ = -1;
+    showPieces(true);
+    explodeDone_ = false;
     stopHitEffects();
     comboMask_ = 0;
 }
@@ -188,6 +191,56 @@ void TrackRenderer::reset() {
 void TrackRenderer::explode() {
     explodeAt_ = float(SDL_GetTicks());
     if (SceneObject* v = scene_->find("track_explode.view"); v && v->view) v->view->draw.showing = true;
+    // The pieces: every TransAnim target below the view's anims, with its child meshes.
+    showPieces(true);
+    explodePieces_.clear();
+    std::function<void(const std::string&, int)> addTree = [&](const std::string& name, int depth) {
+        SceneObject* o = scene_->find(name);
+        if (!o || depth > 8 || std::find(explodePieces_.begin(), explodePieces_.end(), o) != explodePieces_.end()) return;
+        if (o->mesh) explodePieces_.push_back(o);
+        if (o->transformable())
+            for (const std::string& c : o->transformable()->children) addTree(c, depth + 1);
+    };
+    std::function<void(const std::string&, int)> walk = [&](const std::string& name, int depth) {
+        SceneObject* o = scene_->find(name);
+        if (!o || depth > 16) return;
+        if (o->anim && o->anim->kind == AnimObj::Kind::Trans) addTree(o->anim->target, 0);
+        const Animatable* a = o->anim ? &o->anim->anim : o->view ? &o->view->anim : nullptr;
+        if (a)
+            for (const std::string& c : a->anims)
+                if (c != name) walk(c, depth + 1);
+    };
+    walk("track_explode.view", 0);
+    // And every mesh the view draws (pieces without keys of their own included).
+    std::function<void(const std::string&, int)> draws = [&](const std::string& name, int depth) {
+        SceneObject* o = scene_->find(name);
+        if (!o || depth > 16) return;
+        if (o->mesh) addTree(name, 0);
+        if (const Drawable* d = o->drawable(); d && !o->mesh)
+            for (const std::string& c : d->draws)
+                if (c != name) draws(c, depth + 1);
+    };
+    draws("track_explode.view", 0);
+    explodeDone_ = false;
+}
+
+void TrackRenderer::showPieces(bool on) {
+    for (SceneObject* o : explodePieces_)
+        if (Drawable* d = o->drawable()) d->showing = on;
+}
+
+// Whether every TransAnim below `anim` has reached its last key at `frame`
+// (each level's own filters applied, as AnimPlayer::setFrame does).
+bool TrackRenderer::explodeFinished(const std::string& anim, float frame, int depth) {
+    SceneObject* o = scene_->find(anim);
+    if (!o || depth > 16) return true;
+    frame = anims_->filter(anim, frame);
+    if (o->anim && o->anim->kind == AnimObj::Kind::Trans && frame < anims_->endFrame(anim)) return false;
+    const Animatable* a = o->anim ? &o->anim->anim : o->view ? &o->view->anim : nullptr;
+    if (a)
+        for (const std::string& c : a->anims)
+            if (c != anim && !explodeFinished(c, frame, depth + 1)) return false;
+    return true;
 }
 
 bool TrackRenderer::laneScreen(int fret, float along, float& mx, float& my) const {
@@ -218,8 +271,14 @@ void TrackRenderer::draw(const Player& player, float nowMs, float trackSpeed, fl
     if (const SceneObject* cam = scene_->find("track.cam"); cam && cam->cam) sr_->setCamera(cam->cam->trans.world);
     if (explodeAt_ >= 0) {
         // The pieces carry the track surface; ScaleOffset x2.5 on the view: ~1.33 s.
-        anims_->setFrame("track_explode.view", (wall - explodeAt_) * 0.03f);
+        const float frame = (wall - explodeAt_) * 0.03f;
+        anims_->setFrame("track_explode.view", frame);
         anims_->updateTransforms();
+        if (!explodeDone_ && explodeFinished("track_explode.view", frame, 0)) {
+            explodeDone_ = true;
+            showPieces(false);  // the animation is over: no piece stays on screen
+            if (SDL_getenv("GD01_UILOG")) SDL_Log("ui: track explosion pieces hidden after %.0f ms", wall - explodeAt_);
+        }
         sr_->draw("track_explode.view", vp);
         return;
     }

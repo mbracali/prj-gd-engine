@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstring>
 #include <ctime>
+#include <unordered_set>
 
 #include "data/game_data.h"
 #include "input/input.h"
@@ -18,6 +19,7 @@
 #include "scene/ui_objects.h"
 #include "scene/ui_styles.h"
 #include "script/tasks.h"
+#include "ui/campaign.h"
 #include "ui/char_select.h"
 #include "ui/natives.h"
 #include "ui/screen_text.h"
@@ -69,6 +71,7 @@ void UiManager::logOnce(const std::string& what) {
 }
 
 std::string UiManager::localize(const std::string& token) const {
+    if (token == "port_gamepads") return "GAMEPADS";  // the port's main-menu help item
     return locale_ ? locale_->text(token) : token;
 }
 
@@ -147,6 +150,19 @@ bool UiManager::init(std::string& error, bool headless) {
     }
     macros_ = loader_->macros;
     modes_ = boot_->find("modes");
+    // The players' and their matchers' handlers: gh2.dta (player (handlers
+    // ...)) (Player, 0x822C9720) and (beatmatch (player_matcher_handlers
+    // ...)) (PlayerMatcher, 0x822E44B0) [C].
+    {
+        const DataNode* player = boot_->find("player");
+        const DataNode* ph = player ? player->find("handlers") : nullptr;
+        const DataNode* beat = boot_->find("beatmatch");
+        const DataNode* mh = beat ? beat->find("player_matcher_handlers") : nullptr;
+        for (int p = 0; p < 2; ++p) {
+            if (ScriptObject* o = interp_.findObject("player" + std::to_string(p)); o && ph) o->addHandlers(*ph, 1);
+            if (ScriptObject* o = interp_.findObject("player_matcher" + std::to_string(p)); o && mh) o->addHandlers(*mh, 1);
+        }
+    }
     if (const DataNode* j = boot_->find("joypad")) {
         if (const DataNode* h = j->find("hold_ms")) holdMs_ = h->floatAt(1);
         if (const DataNode* r = j->find("repeat_ms")) repeatMs_ = r->floatAt(1);
@@ -184,6 +200,8 @@ bool UiManager::init(std::string& error, bool headless) {
         chars::validate(*this, cfg);
         career_.glitchesLook = {cfg.character, cfg.outfit, cfg.guitar, cfg.skin};
         career_.clear();
+        campaign::unlockGlitches(*this);  // everything unlocked (a fresh save's default: not marked)
+        career_.needsSave = false;
     }
     if (firstScreen_.empty()) firstScreen_ = interp_.var("first_screen").str();
     lastWall_ = double(SDL_GetTicksNS()) / 1e6;
@@ -245,7 +263,11 @@ void UiManager::portPanelLoaded(PanelObj* p) {
     // Options gets Enhanced Options (the port's own entry; [I] not in GH2)
     // after Video Settings, as a copy of its button. GH2's six buttons keep
     // their order and their staggered x; the seven share the six's column
-    // down to a row below Credits, each scaled to the closer rows.
+    // down to a row below Credits, each scaled to the closer rows. The rows
+    // keep options.milo's own gaps (audio 42, video 12.5, data -20, memory
+    // card -52, bonus -84, credits -109 [C data]: Credits sits 25 below
+    // Bonus Videos, not 32); Enhanced Options takes a copy of the video ->
+    // data gap.
     if (p->name() != "options_panel" || !p->view || !p->view->milo()) return;
     scene::Directory& root = p->view->milo()->root();
     if (root.get("port_enhanced.btn")) return;
@@ -262,16 +284,28 @@ void UiManager::portPanelLoaded(PanelObj* p) {
     b->trans.local.pos[0] = 30;
     b->navDown = video->navDown;
     video->navDown = b->name;
+    const float enhancedGap = video->trans.local.pos[2] - data->trans.local.pos[2];
     root.add(std::move(b));
     const char* const order[] = {"op_audio.btn", "video_settings.btn", "port_enhanced.btn", "op_data.btn",
                                  "memory_card.btn",  "op_bonus.btn", "op_credit.btn"};
-    const float top = audio->trans.local.pos[2] + 4, bottom = credit->trans.local.pos[2] - 26;
-    const float step = (top - bottom) / 6, scale = 0.8f * std::min(1.0f, step / 31.5f);  // GH2's rows are 31.5 apart
-    int i = 0;
+    // Each row's distance below Audio Settings in GH2's layout.
+    std::vector<std::pair<scene::BandButton*, float>> rows;
+    float at = 0, prev = audio->trans.local.pos[2];
     for (const char* n : order) {
         scene::BandButton* bb = button(n);
         if (!bb) continue;
-        bb->trans.local.pos[2] = top - step * float(i++);
+        if (bb != audio) {
+            const bool port = std::string(n) == "port_enhanced.btn";
+            at += port ? enhancedGap : prev - bb->trans.local.pos[2];
+            if (!port) prev = bb->trans.local.pos[2];
+        }
+        rows.push_back({bb, at});
+    }
+    const float top = audio->trans.local.pos[2] + 4, bottom = credit->trans.local.pos[2] - 26;
+    const float fit = at > 0 ? (top - bottom) / at : 1;
+    const float step = (top - bottom) / 6, scale = 0.8f * std::min(1.0f, step / 31.5f);  // GH2's rows are 31.5 apart
+    for (auto& [bb, d] : rows) {
+        bb->trans.local.pos[2] = top - d * fit;
         bb->band.width *= scale, bb->band.height *= scale, bb->band.textSize *= scale;
     }
 }
@@ -416,6 +450,60 @@ void UiManager::panelViewLoaded(PanelObj* p) {
     // It joins the shared metacam where it is (setMetacamFrame).
     viewPanels_.insert(p->name());
     for (const auto& [group, t] : metacam_) p->view->setFrame(group, t * p->view->endFrame(group));
+    // And the shared directories' animations where they are.
+    for (const auto& [o, nf] : sharedFrames_)
+        if (p->view->find(nf.first) == o) p->view->setFrame(nf.first, nf.second);
+}
+
+// One animation frame on a panel's view. GH2 loads a milo once (ObjDirPtr
+// reuses a loaded directory), so the subdirectories panels share, such as
+// meta_bricks.milo under main, options, training and most menus, are one
+// object: its meta_light_off.mnm (ui_exit_back) darkens every panel that
+// shows the bricks until a ui_enter_back plays meta_light_on.mnm. The port's
+// views pose their own copies, so the frame goes to every view showing the
+// same object (before, a panel left by Back kept its own copy dark and came
+// back darker the next time).
+void UiManager::setViewFrame(PanelObj* p, const std::string& object, float frame) {
+    if (!p || !p->view) return;
+    p->view->setFrame(object, frame);
+    const scene::Object* o = p->view->find(object);
+    if (!o || o->dir == (p->view->milo() ? &p->view->milo()->root() : nullptr)) return;  // the panel's own
+    sharedFrames_[o] = {object, frame};
+    for (const std::string& name : viewPanels_)
+        if (PanelObj* q = panel(name); q && q != p && q->view && q->view->find(object) == o) q->view->setFrame(object, frame);
+}
+
+// GH2 counts each panel's screens (0x823768E0): a panel no screen holds
+// unloads (UIPanel Unload 0x82376C90 frees its directory), and with it the
+// last reference to a shared subdirectory such as meta_bricks.milo; the next
+// panel that loads it gets the file's state again, its light on. The port
+// keeps its panels loaded, so once a transition is over, a shared object no
+// panel of the current (or a pushed) screen shows forgets its frames: the
+// career's difficulty screen, left with Back (meta_light_off) for Choose
+// Band, came back dark until a later Back played meta_light_on
+// (gd-backlog GD02-077 / GD02-081) [C: refcounts; I: the moment, the end
+// of the transition].
+void UiManager::releaseSharedFrames() {
+    if (sharedFrames_.empty() || !current_) return;
+    std::vector<ScreenObj*> held(stack_.begin(), stack_.end());
+    held.push_back(current_);
+    for (auto it = sharedFrames_.begin(); it != sharedFrames_.end();) {
+        const scene::Object* o = it->first;
+        bool shown = false;
+        for (ScreenObj* s : held)
+            for (PanelObj* p : s->panels()) shown = shown || (p->view && p->view->find(it->second.first) == o);
+        if (shown) {
+            ++it;
+            continue;
+        }
+        std::unordered_set<const scene::Object*> objects;
+        if (o->dir)
+            for (const auto& x : o->dir->objects) objects.insert(x.get());
+        objects.insert(o);
+        for (const std::string& name : viewPanels_)
+            if (PanelObj* q = panel(name); q && q->view && q->view->find(it->second.first) == o) q->view->pose().forget(objects);
+        it = sharedFrames_.erase(it);
+    }
 }
 
 void UiManager::enterPanel(PanelObj* p) {
@@ -427,7 +515,7 @@ void UiManager::exitPanel(PanelObj* p) {
     if (!p->up) return;
     for (const char* ev : {"ui_exit", back_ ? "ui_exit_back" : "ui_exit_forward"})
         if (p->view)
-            for (const gfx::UiView::Trigger& t : p->view->triggers(ev)) p->view->setFrame(t.anim->name, t.endFrame);
+            for (const gfx::UiView::Trigger& t : p->view->triggers(ev)) setViewFrame(p, t.anim->name, t.endFrame);
     p->exit();
 }
 
@@ -526,6 +614,7 @@ void UiManager::finishTransition() {
     ScreenObj* to = current_;
     phase_ = Phase::Idle;
     resetMetacam();
+    releaseSharedFrames();
     next_ = nullptr;
     if (!to) return;
     // TRANSITION_COMPLETE_MSG to the screen and its panels.
@@ -609,6 +698,16 @@ void UiManager::updateHelpbar() {
         }
         if (pick) display = interp_.toValue(pick->children[1]);
     }
+    // The port's main menu also offers GAMEPADS on the yellow fret, before
+    // the strum bar, as gd01's does (not in GH2).
+    if (current_->name() == "main_screen" && display.type == Value::Type::Array && display.array) {
+        std::vector<Value> items = *display.array;
+        auto strum = std::find_if(items.begin(), items.end(), [](const Value& e) {
+            return e.type == Value::Type::Array && e.array && !e.array->empty() && (*e.array)[0].str() == "strum";
+        });
+        items.insert(strum, Value::list({Value::symbol("fret3"), Value::symbol("port_gamepads")}));
+        display = Value::list(std::move(items));
+    }
     setHelpbarDisplay(*this, display);
 }
 
@@ -635,9 +734,9 @@ double UiManager::taskSeconds() const {
 void UiManager::animate(PanelObj* panel, const std::string& object, float from, float to, float seconds, int units, const std::string& task) {
     stopAnimation(panel, object);
     if (!panel || !panel->view) return;
-    panel->view->setFrame(object, from);
+    setViewFrame(panel, object, from);
     if (seconds <= 0) {
-        panel->view->setFrame(object, to);
+        setViewFrame(panel, object, to);
         return;
     }
     anims_.push_back({panel, object, from, to, clockSeconds(units), double(seconds), units, task});
@@ -672,7 +771,7 @@ void UiManager::updateAnims() {
     for (size_t i = 0; i < anims_.size();) {
         Anim& a = anims_[i];
         const double t = std::clamp((clockSeconds(a.units) - a.start) / a.length, 0.0, 1.0);
-        if (a.panel->view) a.panel->view->setFrame(a.object, a.from + float(t) * (a.to - a.from));
+        setViewFrame(a.panel, a.object, a.from + float(t) * (a.to - a.from));
         if (t >= 1) {
             const std::string task = a.task;
             anims_.erase(anims_.begin() + long(i));
@@ -689,6 +788,7 @@ void UiManager::update() {
     lastWall_ = wall;
     uiMs_ += frameDt_;
     if (!(host_.gameLoaded() && host_.gamePaused())) secondsMs_ += frameDt_;
+    if (gamepadsAtMs_ > 0 && wall >= gamepadsAtMs_) openGamepads();
     if (splash_ >= 0) {
         splashMs_ += frameDt_;
         if (splashMs_ >= 3000) {
@@ -742,6 +842,8 @@ void UiManager::updateRepeat(double dtMs) {
 // ---------------------------------------------------------------- input
 
 void UiManager::action(const InputEvent& e) {
+    // The yellow fret on the main menu opens GAMEPADS (gd01's help item).
+    if (e.action == Action::Fret2 && e.down) yellowButton();
     int pad = -1;
     switch (e.action) {
     case Action::Up: pad = kPad_DUp; break;
@@ -774,6 +876,7 @@ void UiManager::action(const InputEvent& e) {
     // (long_cheats.dta's G_YELLOW / G_BLUE / G_ORANGE).
     if (pad < 0 && e.down && splash_ < 0 && e.action >= Action::Fret2 && e.action <= Action::Fret4)
         feedCheats(e.action == Action::Fret2 ? kPad_Circle : e.action == Action::Fret3 ? kPad_Square : kPad_L1);
+
     if (pad < 0) return;
     // Two players: the scripts' $player_num is the player whose pad acted
     // (gamecfg set_player), except on the controller select itself, where
@@ -797,6 +900,7 @@ bool UiManager::textEntryFocused() {
 
 void UiManager::buttonDown(int button, int player) {
     player = std::clamp(player, 0, 1);
+    if (button >= 0 && button < 16) ++presses_[size_t(button)];
     if (isDirection(button)) held_[size_t(player)] = {button, 0, false};
     if (splash_ < 0) feedCheats(button);
     if (splash_ >= 0) {
@@ -815,6 +919,7 @@ void UiManager::buttonDown(int button, int player) {
 // buttons start afresh.
 void UiManager::feedCheats(int button) {
     const double now = double(SDL_GetTicksNS()) / 1e6;
+    if (button != kPad_Circle) gamepadsAtMs_ = -1;  // another button: a cheat's code, not GAMEPADS
     bool fresh = false;
     if (!cheatButtons_.empty() && now - cheatLastMs_ > 750) cheatButtons_.clear(), fresh = true;
     cheatLastMs_ = now;
@@ -825,6 +930,7 @@ void UiManager::feedCheats(int button) {
         if (c.buttons.size() > cheatButtons_.size()) continue;
         if (!std::equal(c.buttons.begin(), c.buttons.end(), cheatButtons_.end() - std::ptrdiff_t(c.buttons.size()))) continue;
         cheatButtons_.clear();
+        gamepadsAtMs_ = -1;
         try {
             interp_.eval(*c.script);
         } catch (const std::exception& e) {
@@ -868,6 +974,44 @@ void UiManager::setCheat(const std::string& id, bool on) {
     playSfx(on ? "cheat" : "cheat_off");
 }
 
+// The port's GAMEPADS on the main menu's yellow fret. GH2's cheat codes are
+// entered there with the same frets (CheatsManager), so it opens once no
+// other button follows within the codes' 750 ms; a code that completes, or
+// any other button, cancels it. The help bar's item (a click) opens it at once.
+void UiManager::yellowButton() {
+    if (splash_ >= 0 || phase_ != Phase::Idle || currentScreen() != "main_screen") return;
+    gamepadsAtMs_ = double(SDL_GetTicksNS()) / 1e6 + 750;
+}
+
+void UiManager::openGamepads() {
+    gamepadsAtMs_ = -1;
+    if (splash_ >= 0 || phase_ != Phase::Idle || !pending_.empty() || currentScreen() != "main_screen") return;
+    playSfx("button_select");
+    // Back returns to the main menu (which allows no back of its own, so the
+    // screen would not take it as its back screen).
+    if (ScreenObj* g = screen("gamepads_screen")) g->back = current_;
+    gotoScreen("gamepads_screen");
+}
+
+bool UiManager::mouse(float x, float y, bool click) {
+    if (splash_ >= 0) {
+        if (click) skipSplashes();
+        return click;
+    }
+    if (!current_ || phase_ != Phase::Idle || !pending_.empty()) return false;
+    for (PanelObj* p : current_->panels())
+        if (p->up && p->helpMouse(x, y, click)) return true;
+    PanelObj* fp = current_->focusPanel();
+    return fp && fp->up && fp->mouse(x, y, click);
+}
+
+void UiManager::wheel(int dir) {
+    if (splash_ >= 0 || !current_ || phase_ != Phase::Idle || !pending_.empty()) return;
+    const int b = dir < 0 ? kPad_DUp : kPad_DDown;
+    buttonDown(b, 0);
+    buttonUp(b, 0);
+}
+
 void UiManager::skipSplashes() {
     splash_ = -1, splashMs_ = 0;
     splashViews_.clear();
@@ -905,6 +1049,7 @@ void UiManager::buttonUp(int button, int player) {
 }
 
 void UiManager::gameEvent(const std::string& msg, std::vector<Value> args) { gameEventImpl(*this, msg, std::move(args)); }
+void UiManager::gameScript(const std::string& msg, std::vector<Value> args) { gameScriptImpl(*this, msg, std::move(args)); }
 
 // ---------------------------------------------------------------- drawing
 
@@ -981,6 +1126,7 @@ void UiManager::draw() {
 bool UiManager::loadSave(int& result) {
     bool corrupt = false;
     if (save_->read(career_, corrupt)) {
+        campaign::unlockGlitches(*this);  // an older Glitches band (or one just added) gets everything
         result = 0;
         return true;
     }

@@ -183,6 +183,38 @@ bloom buffer, the DOF blend, the luminance factor (× ½) or the DOF buffer;
 `--view` takes `GD02_VIEW_POST=<milo>[:<PostProc>]` and
 `GD02_VIEW_DOF=<focus>,<blur_depth>,<max_blur>`.
 
+## Performance (GD02_PERF) and macOS
+
+`GD02_PERF=1` logs, every 2 s, the average frame split into: **update**
+(input, the song, world, band and menu scripts: what is left of the frame),
+**draw** (from `Canvas::begin` to the present: building and issuing the
+draws on the CPU, with draws, uniform / vertex / texture KB and GPU objects
+created per frame), **present** (the internal frame's blit, the frame cap's
+sleep, shown as *pacing*, and `SDL_GL_SwapWindow`) and **gpu wait** (the fence
+on the frame before last: high means the GPU is the bottleneck), plus the
+window's and the drawn frame's pixel sizes and the display scale. On this
+Linux machine (RTX 3060, 1280x720, yyz in a venue): 60 fps, update 0.3 ms,
+draw 2.7 ms for ~625 draws and ~270 KB of uniforms, gpu wait 0.01 ms.
+
+Apple's OpenGL runs on Metal. `glBufferSubData` into a buffer the GPU may
+still read makes that driver wait or copy, and the device streamed every
+draw's uniforms that way (two writes a draw into one 12 MB buffer). On macOS
+those writes (and the vertices the canvas appends) now go through
+`glMapBufferRange(... WRITE | INVALIDATE_RANGE | UNSYNCHRONIZED)`, safe because
+the uniform regions rotate behind the two-frame fence and appended vertices
+were never drawn from. `GD02_GL_STREAM=map | subdata` picks either path
+anywhere; both draw identical frames here (subdata is faster on NVIDIA).
+
+To measure on the Mac (M4 Pro, ~20 fps reported):
+1. `GD02_PERF=1 GD02_LOG=perf.txt ./gd02.app/Contents/MacOS/gd02 <iso>` in a song, and in the menus.
+2. The same with `GD02_GL_STREAM=subdata` (the old path): if *draw* falls a lot
+   with `map`, uniform streaming was the cause.
+3. A high *gpu wait*: fill rate; try Enhanced Options' internal resolution
+   (the Retina window is drawn at its pixel size, e.g. 3456x2234, with the
+   whole post-process chain) and `GD02_POST=0`.
+4. A high *present* with little *pacing*: the swap waits for the display or
+   the compositor (vsync / ProMotion); compare a windowed and a full-screen run.
+
 ## Open / inferred
 
 - Tangents are generated at load [I]. Environment maps: a Mat's

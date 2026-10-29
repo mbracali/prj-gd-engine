@@ -1,18 +1,21 @@
 // SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 // The port's Enhanced Options: gd01's Enhanced Settings list
-// (gd-game-01/engine/src/ui/select_panels.cpp, EnhancedPanel), drawn in
-// GH2's menu font and colours over a live venue.
+// (gd-game-01/engine/src/ui/select_panels.cpp, EnhancedPanel): its
+// sections, rows, check boxes, dropdowns, explanation box and mouse, in
+// GH2's menu font and colours (PortDraw) over a still shot of a venue
+// (guidelines/universal_launcher.md).
 #include "ui/enhanced_panel.h"
 
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <map>
 #include <string>
 #include <vector>
 
 #include "render/canvas.h"
-#include "ui/screen_text.h"
+#include "ui/port_draw.h"
 #include "ui/ui_host.h"
 #include "ui/ui_manager.h"
 #include "ui/ui_objects.h"
@@ -24,6 +27,7 @@ const std::vector<EnhancedSetting>& enhancedSettings() {
         {"screen_mode", {"windowed", "fullscreen", "borderless"}},
         {"max_fps", {"60", "120", "240"}},
         {"fps_counter", {"off", "on"}},
+        {"mouse", {"on", "off"}},
         {"internal_res", {"0", "448", "480", "720", "800", "900", "1080", "1440", "2160"}},
     };
     return k;
@@ -31,7 +35,7 @@ const std::vector<EnhancedSetting>& enhancedSettings() {
 
 namespace {
 
-enum class Kind { Section, Check, Choice, Button, Cheat };
+enum class Kind { Section, Separator, Check, Choice, Button, Cheat };
 struct Option {
     const char* value;
     const char* label;
@@ -49,16 +53,19 @@ struct Item {
 // cheats are GH2's (config/long_cheats.dta), with their button codes.
 const std::vector<Item>& items() {
     static const std::vector<Item> k = {
-        {Kind::Section, "deck", "STEAM DECK MODE", true, ""},
+        {Kind::Section, "deck", "STEAM DECK MODE", true, "Settings for handheld PCs such as the Steam Deck."},
         {Kind::Button, "steam_deck", "Apply Steam Deck Settings", false,
          "Sets every option to what runs best on a handheld PC such as the Steam Deck: full screen at 60 FPS, a 1280 x 800 "
          "internal resolution and lighter effects."},
-        {Kind::Section, "controls", "CONTROLS AND GAMEPAD", true, ""},
+        {Kind::Separator, "", "", true, ""},
+        {Kind::Section, "controls", "CONTROLS AND GAMEPAD", true, "Gamepads, mouse, touch and guitars."},
         {Kind::Button, "gamepads", "Gamepads", true,
          "The connected guitars, gamepads and the keyboard: which player each one is, its buttons lit as you press them, "
          "and new buttons for any of them."},
-        {Kind::Check, "mouse", "Enable Mouse Selection", false,
-         "Point at a menu entry to highlight it and click to choose it; the mouse wheel scrolls lists."},
+        {Kind::Check, "mouse", "Enable Mouse Selection", true,
+         "Point at a menu entry to highlight it and click to choose it; a right click goes back and the mouse wheel "
+         "scrolls lists. The help bar's items are clickable too. Hovering works only while the game window has focus; "
+         "the pointer hides after a few seconds, when a key or a button is pressed, and during a song."},
         {Kind::Check, "touch", "Enable Touch Controls", false,
          "Play on a touch screen: touch a lane at the bottom of the highway when its note arrives."},
         {Kind::Check, "rockband", "Enable Rock Band Guitars", false,
@@ -66,7 +73,8 @@ const std::vector<Item>& items() {
          "bar and tilt."},
         {Kind::Check, "xinput", "Enable XInput Controllers", false,
          "Any XInput gamepad plays like the original game's gamepad mode."},
-        {Kind::Section, "graphics", "PERFORMANCE AND GRAPHICS", true, ""},
+        {Kind::Separator, "", "", true, ""},
+        {Kind::Section, "graphics", "PERFORMANCE AND GRAPHICS", true, "Timing, window, frame rate and image quality."},
         {Kind::Button, "calibrate", "Audio / Video Calibration", false,
          "Measures your setup's delay so notes are judged and drawn in time."},
         {Kind::Choice, "screen_mode", "Screen Mode", true,
@@ -107,19 +115,22 @@ const std::vector<Item>& items() {
         {Kind::Choice, "sharpening", "Sharpening", false, "Contrast-adaptive sharpening of the venue.", {{"off", "Off"}}},
         {Kind::Choice, "star_blur", "Blur on Star Power", false,
          "While Star Power is on, the venue and the band blur with the camera's motion.", {{"none", "None"}}},
-        {Kind::Section, "enhancers", "ENHANCERS", true, ""},
+        {Kind::Separator, "", "", true, ""},
+        {Kind::Section, "enhancers", "ENHANCERS", true, "Additions to the venues and the camera, and your files."},
         {Kind::Check, "shadows_all", "All Band Mates Cast Shadows", false,
          "Every band mate gets a spotlight from above and casts a shadow on the stage floor."},
         {Kind::Choice, "more_lights", "More Lights on Venues", false,
          "Richer stage lighting: brighter light cones and floor pools, following the venue's own light cues.",
          {{"off", "Off"}}},
+        {Kind::Check, "light_dust", "Dust in Light Beams", false, "Fine dust drifting in the stage lights' beams."},
         {Kind::Choice, "ground_fog", "Add Fog to the Ground (Experimental)", false,
          "A low fog over the stage floor where the band plays.", {{"none", "None"}}},
         {Kind::Check, "no_shaky_cam", "Disable Shaky Camera", false, "Steady close-ups of the band."},
         {Kind::Button, "export", "Export User Files", false, "Saves your settings and your bands to a folder of your choice."},
         {Kind::Button, "load_settings", "Load User Settings", false, "Loads settings saved with Export User Files."},
         {Kind::Button, "load_progress", "Load User Progress", false, "Loads bands saved with Export User Files."},
-        {Kind::Section, "cheats", "CHEATS", true, ""},
+        {Kind::Separator, "", "", true, ""},
+        {Kind::Section, "cheats", "CHEATS", true, "The original game's cheats, and the port's."},
         {Kind::Check, "cut_content", "Enable Cut Content", false, "Loads content left unused on the original disc."},
         {Kind::Check, "no_fail", "No Fail Mode", false, "The rock meter cannot fail you: every song plays to the end."},
         {Kind::Check, "autoplay", "Autoplay", false, "The game plays every note of a song by itself, without a miss."},
@@ -154,22 +165,26 @@ const std::vector<Item>& items() {
 
 class EnhancedPanelObj : public PanelObj {
 public:
-    EnhancedPanelObj(UiManager& ui, const std::string& name) : PanelObj(ui, name, "EnhancedPanel") {}
+    EnhancedPanelObj(UiManager& ui, const std::string& name) : PanelObj(ui, name, "EnhancedPanel"), d_(ui) {}
 
     std::string fileName() override { return ""; }
     bool drawsSomething() const override { return true; }
 
     void enter() override {
-        if (focus_ < 0 || !focusable(focus_)) {  // the first setting gd02 has
-            focus_ = next(-1, 1);
-            for (int i = 0; i < int(items().size()); ++i)
-                if (focusable(i) && items()[size_t(i)].ready) {
-                    focus_ = i;
+        rebuild();
+        // The first setting gd02 has (Gamepads), as the screen opens.
+        if (!entered_) {
+            for (size_t r = 0; r < rows_.size(); ++r)
+                if (item(int(r)).ready && item(int(r)).kind != Kind::Section && item(int(r)).kind != Kind::Separator) {
+                    focus_ = int(r);
                     break;
                 }
+            entered_ = true;
         }
+        dropdown_ = -1;
         scroll_ = scrollTarget_ = 0;
-        keepVisible(true);
+        keepVisible();
+        scroll_ = scrollTarget_;
         ui.host().menuBackdrop(true);
         PanelObj::enter();
     }
@@ -180,231 +195,336 @@ public:
 
     bool buttonDown(int button, int player) override {
         (void)player;
+        if (rows_.empty()) return false;
+        const Item& it = item(focus_);
+        if (dropdown_ >= 0) {  // the open dropdown takes the input
+            const int n = int(it.options.size());
+            if (button == kPad_DUp || button == kPad_DDown) {
+                ddFocus_ = (ddFocus_ + (button == kPad_DDown ? 1 : n - 1)) % n;
+                ui.playSfx("button_toggle");
+            } else if (button == kPad_X) {
+                setValue(it, it.options[size_t(ddFocus_)].value);
+                dropdown_ = -1;
+            } else if (button == kPad_Tri) {
+                dropdown_ = -1;
+                ui.playSfx("button_back");
+            }
+            return true;
+        }
         if (button == kPad_DUp || button == kPad_DDown) {
-            focus_ = next(focus_, button == kPad_DDown ? 1 : -1);
-            keepVisible(false);
-            ui.playSfx("button_toggle");
+            moveFocus(button == kPad_DDown ? 1 : -1);
             return true;
         }
-        const Item& it = items()[size_t(focus_)];
         if (button == kPad_DLeft || button == kPad_DRight) {
-            if (it.kind == Kind::Choice || it.kind == Kind::Check || it.kind == Kind::Cheat) change(it, button == kPad_DRight ? 1 : -1);
+            const int dir = button == kPad_DRight ? 1 : -1;
+            if (it.kind == Kind::Choice) {
+                if (!it.ready) return ui.playSfx("button_error"), true;
+                const int n = int(it.options.size());
+                setValue(it, it.options[size_t((optionIndex(it) + dir + n) % n)].value);
+            } else if (it.kind == Kind::Check || it.kind == Kind::Cheat) {
+                if (isOn(it) != (dir > 0)) activate();
+            }
             return true;
         }
-        if (button == kPad_X) return change(it, 1), true;
+        if (button == kPad_X) return activate(), true;
         return false;  // back: the screen's auto back
+    }
+
+    bool mouse(float x, float y, bool click) override {
+        if (rows_.empty()) return false;
+        x -= d_.offset();
+        // The open dropdown: its options, or a click anywhere else closes it.
+        if (dropdown_ >= 0) {
+            const Item& it = item(focus_);
+            for (size_t k = 0; k < it.options.size(); ++k) {
+                const float oy = ddTop_ + float(k) * kDdRow;
+                if (x < kDdPopX0 || x > kCtrlX1 || y < oy || y > oy + kDdRow) continue;
+                if (int(k) != ddFocus_) ddFocus_ = int(k), ui.playSfx("button_toggle");
+                if (click) setValue(it, it.options[k].value), dropdown_ = -1;
+                return true;
+            }
+            if (click) dropdown_ = -1, ui.playSfx("button_back");
+            return true;
+        }
+        for (size_t r = 0; r < rows_.size(); ++r) {
+            const float top = rowY(int(r)), h = rowHeight(item(int(r)));
+            if (item(int(r)).kind == Kind::Separator || top < kListTop - 1 || top + h > kListBottom + 1) continue;
+            if (x < kListX0 - 6 || x > kCtrlX1 + 12 || y < top || y > top + h) continue;
+            // Hovering focuses (without scrolling the list) and shows the explanation.
+            if (int(r) != focus_) focus_ = int(r), ui.playSfx("button_toggle");
+            if (click) activate();
+            return true;
+        }
+        return false;
     }
 
     void poll(double dtMs) override {
         PanelObj::poll(dtMs);
+        // The list eases toward its scroll target.
         const float k = 1 - std::exp(-std::max(float(dtMs), 0.0f) / 70.0f);
         scroll_ += (scrollTarget_ - scroll_) * k;
         if (std::fabs(scrollTarget_ - scroll_) < 0.3f) scroll_ = scrollTarget_;
-        timeMs_ += dtMs;
     }
 
     void draw() override {
         if (ui.headless()) return;
-        const bool live = ui.host().drawMenuBackdrop();
-        pass_ = 0;
-        if (!live) quad(0, 0, kScreenW, kScreenH, {0.02f, 0.02f, 0.03f, 1});
-        drawAll(live);
-        ui.canvas().flush();
-        ui.screenText().begin(ui.canvas().renderer());
-        pass_ = 1;
-        drawAll(live);
+        d_.updateTransition();
+        // The still venue behind (App::menuBackdrop), else a black page.
+        const bool still = ui.host().drawMenuBackdrop();
+        for (int pass : {0, 1}) {
+            d_.begin(pass);
+            if (pass == 0) {
+                if (!still) d_.quad(0, 0, kScreenW, kScreenH, {0, 0, 0, 1});
+                else d_.quad(0, 0, kScreenW, kScreenH, {0, 0, 0, 0.25f});  // the venue a little darker, as gd01's blurred one reads
+            }
+            drawAll();
+        }
+        // The open dropdown over everything (its own quads, then its texts).
+        if (dropdown_ >= 0)
+            for (int pass : {0, 1}) d_.begin(pass), drawDropdown();
     }
 
 private:
-    static constexpr float kBoxX0 = 40, kBoxX1 = 600, kBoxY0 = 26, kBoxY1 = 640;
-    static constexpr float kListX0 = 66, kListX1 = 574, kListTop = 150, kListBottom = 624, kRow = 32, kSectionRow = 42;
-    static constexpr float kHelpX0 = 876, kHelpX1 = 1240, kHelpY1 = 640;
-    // GH2's options colours: the gold of a button, white when focused, the
-    // red-orange of the posters' titles.
-    static constexpr std::array<float, 4> kGold{0.96f, 0.76f, 0.26f, 1}, kWhite{1, 1, 1, 1}, kTitle{0.93f, 0.33f, 0.16f, 1},
-        kDim{0.5f, 0.5f, 0.52f, 1}, kSoft{0.82f, 0.8f, 0.76f, 1}, kOn{1, 0.84f, 0.3f, 1};
-    static constexpr const char* kFont = "helveticablack.font";
+    // gd01's layout (menu units): the options box on the left, the
+    // explanation bottom right (bottom-aligned with the box).
+    static constexpr float kListTop = 168, kListBottom = 612, kListX0 = 80, kNameX = 118, kCtrlX1 = 612;
+    static constexpr float kBoxX0 = 56, kBoxY0 = 22, kBoxX1 = 640, kBoxY1 = 640;
+    static constexpr float kDdX0 = 360, kDdPopX0 = 300, kDdRow = 30, kPopX0 = 700, kPopX1 = 1224;
+    using Color = PortDraw::Color;
+    static constexpr Color kTitle = PortDraw::kTitle, kFocused = PortDraw::kFocused, kNormal = PortDraw::kNormal,
+                           kDim = PortDraw::kDim, kAccent = PortDraw::kAccent, kGold = PortDraw::kGold, kWarn = PortDraw::kWarn;
 
-    bool focusable(int i) const { return i >= 0 && i < int(items().size()) && items()[size_t(i)].kind != Kind::Section; }
-    int next(int from, int dir) const {
-        const int n = int(items().size());
-        int i = from;
-        for (int k = 0; k < n; ++k) {
-            i = (i + dir + n) % n;
-            if (focusable(i)) return i;
+    // -- the rows shown (sections collapse; separators stay)
+    void rebuild() {
+        const int keep = rows_.empty() ? -1 : rows_[size_t(std::clamp(focus_, 0, int(rows_.size()) - 1))];
+        rows_.clear();
+        bool hidden = false;
+        for (size_t i = 0; i < items().size(); ++i) {
+            const Item& it = items()[i];
+            if (it.kind == Kind::Section) hidden = collapsed(it.key);
+            if (it.kind == Kind::Separator) hidden = false;
+            if (it.kind != Kind::Section && it.kind != Kind::Separator && hidden) continue;
+            rows_.push_back(int(i));
         }
-        return std::max(from, 0);
+        focus_ = 0;
+        for (size_t r = 0; r < rows_.size(); ++r)
+            if (rows_[r] == keep) focus_ = int(r);
+        scrollTarget_ = std::clamp(scrollTarget_, 0.0f, maxScroll());
     }
-    float rowHeight(const Item& it) const { return it.kind == Kind::Section ? kSectionRow : kRow; }
-    float rowTop(int i) const {  // in list units, from the list's top
-        float y = 0;
-        for (int k = 0; k < i; ++k) y += rowHeight(items()[size_t(k)]);
+    const Item& item(int row) const { return items()[size_t(rows_[size_t(row)])]; }
+    bool collapsed(const std::string& section) const {
+        auto it = collapsed_.find(section);
+        return it == collapsed_.end() ? section == "deck" : it->second;  // Steam Deck starts collapsed (gd01)
+    }
+    static float rowHeight(const Item& it) { return it.kind == Kind::Section ? 44 : it.kind == Kind::Separator ? 18 : 34; }
+    float rowY(int row) const {
+        float y = kListTop - scroll_;
+        for (int r = 0; r < row; ++r) y += rowHeight(item(r));
         return y;
     }
-    void keepVisible(bool jump) {
-        const float top = rowTop(focus_), h = rowHeight(items()[size_t(focus_)]), view = kListBottom - kListTop;
-        // The section header above the first row of a section stays in view with it.
-        const float want = focus_ > 0 && items()[size_t(focus_ - 1)].kind == Kind::Section ? top - kSectionRow : top;
-        if (want < scrollTarget_) scrollTarget_ = want;
-        if (top + h > scrollTarget_ + view) scrollTarget_ = top + h - view;
-        const float total = rowTop(int(items().size()));
-        scrollTarget_ = std::clamp(scrollTarget_, 0.0f, std::max(0.0f, total - view));
-        if (jump) scroll_ = scrollTarget_;
+    float contentHeight() const {
+        float h = 0;
+        for (size_t r = 0; r < rows_.size(); ++r) h += rowHeight(item(int(r)));
+        return h;
+    }
+    float maxScroll() const { return std::max(0.0f, contentHeight() - (kListBottom - kListTop)); }
+    // Keep the focus in view, with the section title above a first row.
+    void keepVisible() {
+        const float top = rowY(focus_) + scroll_ - kListTop, h = rowHeight(item(focus_));
+        if (top < scrollTarget_ + 4) scrollTarget_ = top - (focus_ > 0 ? 8 : 0);
+        if (top + h > scrollTarget_ + (kListBottom - kListTop) - 4) scrollTarget_ = top + h - (kListBottom - kListTop) + 8;
+        scrollTarget_ = std::clamp(scrollTarget_, 0.0f, maxScroll());
+    }
+    void moveFocus(int dir) {
+        const int n = int(rows_.size());
+        for (int k = 0; k < n; ++k) {
+            focus_ = (focus_ + dir + n) % n;
+            if (item(focus_).kind != Kind::Separator) break;
+        }
+        keepVisible();
+        ui.playSfx("button_toggle");
     }
 
-    bool ready(const Item& it) const { return it.ready; }
+    // -- values
     std::string name(const Item& it) const { return it.kind == Kind::Cheat ? ui.localize(it.key) : it.name; }
     bool isOn(const Item& it) const {
         if (it.kind == Kind::Cheat) return ui.cheatOn(it.key);
-        return ui.host().enhancedValue(it.key) == "on";
+        return it.ready && ui.host().enhancedValue(it.key) == "on";
     }
-    std::string value(const Item& it) const {
-        if (!ready(it)) return "";
-        if (it.kind == Kind::Check || it.kind == Kind::Cheat) return isOn(it) ? "ON" : "OFF";
-        if (it.kind == Kind::Choice) {
-            const std::string v = ui.host().enhancedValue(it.key);
-            for (const Option& o : it.options)
-                if (v == o.value) return o.label;
-            return it.options.empty() ? "" : it.options[0].label;
+    // A choice of exactly two values is shown and used as a check box (gd01).
+    static bool isToggle(const Item& it) { return it.kind == Kind::Choice && it.options.size() == 2; }
+    int optionIndex(const Item& it) const {
+        const std::string v = it.ready ? ui.host().enhancedValue(it.key) : std::string();
+        for (size_t k = 0; k < it.options.size(); ++k)
+            if (v == it.options[k].value) return int(k);
+        return 0;
+    }
+    void setValue(const Item& it, const std::string& v) {
+        if (!it.ready) return ui.playSfx("button_error");
+        ui.host().setEnhancedValue(it.key, v);
+        ui.playSfx("button_select");
+    }
+    void activate() {
+        const Item& it = item(focus_);
+        switch (it.kind) {
+        case Kind::Section:
+            collapsed_[it.key] = !collapsed(it.key);
+            rebuild();
+            ui.playSfx("button_select");
+            return;
+        case Kind::Separator: return;
+        case Kind::Check:
+            if (!it.ready) return ui.playSfx("button_error");
+            ui.host().setEnhancedValue(it.key, isOn(it) ? "off" : "on");
+            ui.playSfx("button_select");
+            return;
+        case Kind::Cheat:
+            if (!it.ready) return ui.playSfx("button_error");
+            ui.setCheat(it.key, !isOn(it));
+            return;
+        case Kind::Choice:
+            if (!it.ready) return ui.playSfx("button_error");
+            if (isToggle(it)) return setValue(it, it.options[optionIndex(it) == 1 ? 0 : 1].value);
+            dropdown_ = focus_;
+            ddFocus_ = optionIndex(it);
+            ui.playSfx("button_select");
+            return;
+        case Kind::Button:
+            if (!it.ready) return ui.playSfx("button_error");
+            ui.playSfx("button_select");
+            if (std::string(it.key) == "gamepads") ui.gotoScreen("gamepads_screen");
+            return;
         }
-        return "";
     }
 
-    void change(const Item& it, int dir) {
-        if (!ready(it)) return ui.playSfx("button_error");
-        switch (it.kind) {
-        case Kind::Check: ui.host().setEnhancedValue(it.key, isOn(it) ? "off" : "on"), ui.playSfx("button_select"); break;
-        case Kind::Cheat: ui.setCheat(it.key, !isOn(it)); break;
+    // -- drawing
+    void drawAll() {
+        const float o = d_.offset();
+        d_.quad(kBoxX0 + o, kBoxY0, kBoxX1 + o, kBoxY1, PortDraw::kBox);
+        d_.frame(kBoxX0 + o, kBoxY0, kBoxX1 + o, kBoxY1, 1.5f, PortDraw::kEdge);
+        d_.quad(kBoxX0 + o, kBoxY0, kBoxX1 + o, kBoxY0 + 4, kTitle);
+        d_.text("ENHANCED OPTIONS", 90 + o, 44, 62, kTitle, 0x11);
+        d_.text("Features of this PC version, beyond the original game", 92 + o, 112, 20, kDim, 0x11);
+        for (size_t r = 0; r < rows_.size(); ++r) drawRow(int(r));
+        // More above / below.
+        if (scroll_ > 1) d_.arrow(kListX0 + 270 + o, kListTop - 10, true, kDim);
+        if (contentHeight() - scroll_ > kListBottom - kListTop + 1) d_.arrow(kListX0 + 270 + o, kListBottom + 8, false, kDim);
+        drawHelp();
+    }
+
+    void drawRow(int r) {
+        const Item& it = item(r);
+        const float h = rowHeight(it), top = rowY(r), cy = top + h * 0.5f, o = d_.offset();
+        if (top < kListTop - 1 || top + h > kListBottom + 1) return;
+        const bool f = r == focus_;
+        if (it.kind == Kind::Separator) {
+            d_.quad(kListX0 + o, cy - 1, kCtrlX1 + 8 + o, cy + 1, {0.3f, 0.3f, 0.34f, 1});
+            return;
+        }
+        if (f) {
+            d_.quad(kListX0 - 6 + o, top + 2, kCtrlX1 + 12 + o, top + h - 2, PortDraw::kFocusBar);
+            d_.quad(kListX0 - 6 + o, top + 2, kListX0 - 2 + o, top + h - 2, it.ready ? kGold : kDim);
+        }
+        if (it.kind == Kind::Section) {
+            const float ax = kListX0 + 8 + o;
+            const Color c = f ? kFocused : kAccent;
+            if (collapsed(it.key)) d_.triangle(ax - 4, cy - 8, ax - 4, cy + 8, ax + 8, cy, c);
+            else d_.triangle(ax - 7, cy - 5, ax + 7, cy - 5, ax, cy + 7, c);
+            d_.text(it.name, kListX0 + 26 + o, cy + 1, 27, c, 0x21);
+            return;
+        }
+        const bool locked = !it.ready;
+        const Color nameC = f ? kFocused : locked ? kDim : kNormal;
+        const std::string n = name(it);
+        // A long name next to a dropdown is drawn smaller to fit before it.
+        float nameH = 23;
+        const float room = (it.kind == Kind::Choice && !isToggle(it) ? kDdX0 : kCtrlX1 - (it.kind == Kind::Button ? 130 : 40)) - kNameX - 14;
+        if (const float w = d_.width(n, 23); w > room - (locked ? 30 : 0)) nameH = std::max(15.0f, 23 * (room - (locked ? 30 : 0)) / w);
+        d_.text(n, kNameX + o, cy + 1, nameH, nameC, 0x21);
+        if (locked) d_.warning(kNameX + o + d_.width(n, nameH) + 10, cy);
+        const Color ctrl = locked ? kDim : f ? kFocused : kNormal;
+        const Kind shown = isToggle(it) ? Kind::Check : it.kind == Kind::Cheat ? Kind::Check : it.kind;
+        switch (shown) {
+        case Kind::Check:
+            d_.checkBox(kCtrlX1 + o, cy, isToggle(it) ? optionIndex(it) == 1 : isOn(it), ctrl, locked ? kDim : kGold);
+            break;
         case Kind::Choice: {
-            const std::string v = ui.host().enhancedValue(it.key);
-            const int n = int(it.options.size());
-            int i = 0;
-            for (int k = 0; k < n; ++k)
-                if (v == it.options[size_t(k)].value) i = k;
-            i = (i + dir + n) % n;
-            ui.host().setEnhancedValue(it.key, it.options[size_t(i)].value);
-            ui.playSfx("button_select");
+            const float x1 = kCtrlX1 + o, x0 = kDdX0 + o;
+            d_.frame(x0, cy - 13, x1, cy + 13, 2, locked ? kDim : Color{0.5f, 0.5f, 0.55f, 1});
+            const std::string label = it.options.empty() ? "" : it.options[size_t(optionIndex(it))].label;
+            d_.text(d_.fit(label, 20, x1 - x0 - 40), x0 + 10, cy + 1, 20, ctrl, 0x21);
+            d_.triangle(x1 - 22, cy - 4, x1 - 8, cy - 4, x1 - 15, cy + 5, ctrl);
             break;
         }
-        case Kind::Button:
-            if (dir < 0) return;
-            if (std::string(it.key) == "gamepads") {
-                ui.playSfx("button_select");
-                ui.gotoScreen("gamepads_screen");
-            }
+        case Kind::Button: {
+            const float x1 = kCtrlX1 + o, x0 = x1 - 120;
+            d_.frame(x0, cy - 13, x1, cy + 13, 2, ctrl);
+            d_.text(buttonLabel(it.key), (x0 + x1) * 0.5f, cy + 1, 20, ctrl, 0x22);
             break;
+        }
         default: break;
         }
     }
 
-    void drawAll(bool live) {
-        // The list's box: a dark glass over the venue's left side, a soft
-        // shadow to the right of it so the stage reads behind.
-        if (live) {
-            quad(kBoxX0, kBoxY0, kBoxX1, kBoxY1, {0, 0, 0, 0.8f});
-            for (int i = 0; i < 12; ++i) quad(kBoxX1 + float(i) * 3, kBoxY0, kBoxX1 + float(i + 1) * 3, kBoxY1, {0, 0, 0, 0.3f * (1 - float(i) / 12)});
-        }
-        quad(kBoxX0, kBoxY0, kBoxX1, kBoxY0 + 3, kTitle);
-        text("ENHANCED OPTIONS", kListX0, 48, 44, kTitle, 0x11);
-        text("Features of this PC version, beyond the original game", kListX0 + 2, 100, 16, kSoft, 0x11);
-        // The rows (clipped to the list's band).
-        const auto& list = items();
-        float y = kListTop - scroll_;
-        for (int i = 0; i < int(list.size()); ++i) {
-            const Item& it = list[size_t(i)];
-            const float h = rowHeight(it);
-            if (y + h > kListTop - 0.5f && y < kListBottom + 0.5f && y >= kListTop - 0.5f && y + h <= kListBottom + 0.5f) drawRow(it, i, y, h);
-            y += h;
-        }
-        // More above / below.
-        if (scroll_ > 1) arrow(kListX1 + 13, kListTop + 8, true);
-        if (rowTop(int(list.size())) - scroll_ > kListBottom - kListTop + 1) arrow(kListX1 + 13, kListBottom - 8, false);
-        drawHelp(list[size_t(focus_)]);
+    // A button's label (gd01's).
+    static const char* buttonLabel(const std::string& key) {
+        if (key == "gamepads") return "Open...";
+        if (key == "calibrate") return "Calibrate...";
+        if (key == "export") return "Export...";
+        if (key == "load_settings" || key == "load_progress") return "Load...";
+        return "Apply";
     }
 
-    void drawRow(const Item& it, int i, float y, float h) {
-        if (it.kind == Kind::Section) {
-            text(it.name, kListX0, y + h - 9, 21, kTitle, 0x41);
-            quad(kListX0, y + h - 5, kListX1, y + h - 3, {kTitle[0], kTitle[1], kTitle[2], 0.55f});
-            return;
+    void drawDropdown() {
+        const Item& it = item(dropdown_);
+        const float rowTop = rowY(dropdown_), h = rowHeight(it), n = float(it.options.size());
+        ddTop_ = rowTop + h - 2;
+        if (ddTop_ + n * kDdRow > kScreenH - 70) ddTop_ = rowTop + 2 - n * kDdRow;  // no room below: open upward
+        const float o = d_.offset(), x0 = kDdPopX0 + o, x1 = kCtrlX1 + o;
+        d_.quad(x0, ddTop_, x1, ddTop_ + n * kDdRow, {0.08f, 0.07f, 0.06f, 0.97f});
+        d_.frame(x0, ddTop_, x1, ddTop_ + n * kDdRow, 2, kAccent);
+        const int cur = optionIndex(it);
+        for (size_t k = 0; k < it.options.size(); ++k) {
+            const float oy = ddTop_ + float(k) * kDdRow;
+            const bool hot = int(k) == ddFocus_;
+            if (hot) d_.quad(x0 + 2, oy + 2, x1 - 2, oy + kDdRow - 2, PortDraw::kFocusBar);
+            d_.text(it.options[k].label, x0 + 12, oy + kDdRow * 0.5f + 1, 20, hot ? kFocused : kNormal, 0x21);
+            if (int(k) == cur) d_.line(x1 - 26, oy + 15, x1 - 21, oy + 20, 3, kGold), d_.line(x1 - 21, oy + 20, x1 - 12, oy + 9, 3, kGold);
         }
-        const bool f = i == focus_, ok = ready(it);
-        const float mid = y + h * 0.5f;
-        if (f) {
-            quad(kListX0 - 10, y + 1, kListX1 + 8, y + h - 1, {1, 0.8f, 0.3f, ok ? 0.2f : 0.1f});
-            quad(kListX0 - 10, y + 1, kListX0 - 6, y + h - 1, ok ? kGold : kDim);
-        }
-        const std::array<float, 4> c = !ok ? kDim : f ? kWhite : kGold;
-        std::string v = ok ? value(it) : std::string("NOT AVAILABLE YET");
-        if (it.kind == Kind::Button && ok) v = f ? "OPEN  >" : "OPEN";
-        if ((it.kind == Kind::Choice) && ok && f && !v.empty()) v = "<  " + v + "  >";
-        const float vh = ok ? 18 : 14;
-        // The name shrinks to leave room for the value.
+    }
+
+    // The focused option's explanation, in its box on the right.
+    void drawHelp() {
+        const Item& it = item(focus_);
+        if (it.kind == Kind::Separator) return;
+        const float o = d_.offset(), x0 = kPopX0 + o, x1 = kPopX1 + o, pad = 24, bodyH = 22, lineH = 30;
+        const std::vector<std::string> lines = d_.wrap(it.help, x1 - x0 - 2 * pad, bodyH);
+        const bool notYet = !it.ready && it.kind != Kind::Section;
+        const float height = pad + 46 + float(lines.size()) * lineH + (notYet ? 42 : 0) + pad;
+        const float top = kBoxY1 - height;  // bottom-aligned with the options box
+        float y = top + pad;
+        d_.quad(x0, top, x1, kBoxY1, {0, 0, 0, 0.72f});
+        d_.frame(x0, top, x1, kBoxY1, 1.5f, PortDraw::kEdge);
+        d_.quad(x0, top, x1, top + 5, kAccent);
         const std::string n = name(it);
-        const float room = kListX1 - (v.empty() ? 0 : measure(v, vh) + 18) - (kListX0 + 6);
-        float nh = 20;
-        if (const float w = measure(n, nh); w > room && w > 0) nh = std::max(13.0f, nh * room / w);
-        text(n, kListX0 + 6, mid + 1, nh, c, 0x21);
-        if (v.empty()) return;
-        std::array<float, 4> vc = !ok ? kDim : (it.kind == Kind::Check || it.kind == Kind::Cheat) && isOn(it) ? kOn : f ? kWhite : kSoft;
-        text(v, kListX1, mid + 1, vh, vc, 0x24);
-    }
-
-    // The focused setting's explanation, bottom right over the venue.
-    void drawHelp(const Item& it) {
-        std::vector<std::string> lines;
-        wrap(it.help, 17, kHelpX1 - kHelpX0 - 36, lines);
-        const float lineH = 23, top = kHelpY1 - 70 - float(lines.size()) * lineH;
-        quad(kHelpX0, top, kHelpX1, kHelpY1, {0, 0, 0, 0.78f});
-        quad(kHelpX0, top, kHelpX1, top + 3, ready(it) ? kGold : kDim);
-        const std::string n = name(it);
-        float th = 22;
-        if (const float w = measure(n, th), room = kHelpX1 - kHelpX0 - 36; w > room) th = std::max(14.0f, th * room / w);
-        text(n, kHelpX0 + 18, top + 16 + (22 - th) * 0.5f, th, ready(it) ? kGold : kDim, 0x11);
-        float ly = top + 52;
-        for (const std::string& l : lines) text(l, kHelpX0 + 18, ly, 17, kSoft, 0x11), ly += lineH;
-        if (!ready(it)) text("Not available in this version yet.", kHelpX0 + 18, ly + 2, 15, kDim, 0x11);
-    }
-    void wrap(const std::string& s, float h, float width, std::vector<std::string>& out) {
-        std::string line, word;
-        auto flush = [&] {
-            if (word.empty()) return;
-            const std::string tryLine = line.empty() ? word : line + " " + word;
-            if (!line.empty() && measure(tryLine, h) > width) out.push_back(line), line = word;
-            else line = tryLine;
-            word.clear();
-        };
-        for (char ch : s) {
-            if (ch == ' ') flush();
-            else word += ch;
+        float th = 30;
+        if (const float w = d_.width(n, th), room = x1 - x0 - 2 * pad; w > room) th = std::max(18.0f, th * room / w);
+        d_.text(n, x0 + pad, y + 2 + (30 - th) * 0.5f, th, kGold, 0x11);
+        y += 46;
+        for (const std::string& l : lines) d_.text(l, x0 + pad, y, bodyH, kNormal, 0x11), y += lineH;
+        if (notYet) {
+            y += 6;
+            d_.warning(x0 + pad, y + 12);
+            d_.text("Not available yet", x0 + pad + 30, y + 13, 21, kWarn, 0x21);
         }
-        flush();
-        if (!line.empty()) out.push_back(line);
-    }
-    float measure(const std::string& s, float h) { return ui.headless() ? float(s.size()) * h * 0.5f : ui.screenText().width(kFont, s, h); }
-
-    void arrow(float x, float y, bool up) {
-        if (pass_ != 0) return;
-        const uint8_t a = 200;
-        const float d = up ? -1.0f : 1.0f;
-        const Vertex v[3] = {{x - 8, y - 4 * d, 0, 0, 0, 245, 194, 66, a}, {x + 8, y - 4 * d, 0, 0, 0, 245, 194, 66, a},
-                             {x, y + 5 * d, 0, 0, 0, 245, 194, 66, a}};
-        ui.canvas().draw(v, 3, 0, Blend::Alpha);
-    }
-    void text(const std::string& s, float x, float y, float h, const std::array<float, 4>& c, uint32_t align) {
-        if (pass_ == 1) ui.screenText().draw(ui.canvas().renderer().materials(), kFont, s, x, y, h, c, align);
-    }
-    void quad(float x0, float y0, float x1, float y1, const std::array<float, 4>& c) {
-        if (pass_ != 0) return;
-        const uint8_t r = uint8_t(c[0] * 255), g = uint8_t(c[1] * 255), bl = uint8_t(c[2] * 255), a = uint8_t(c[3] * 255);
-        const Vertex v[6] = {{x0, y0, 0, 0, 0, r, g, bl, a}, {x1, y0, 0, 0, 0, r, g, bl, a}, {x1, y1, 0, 0, 0, r, g, bl, a},
-                             {x0, y0, 0, 0, 0, r, g, bl, a}, {x1, y1, 0, 0, 0, r, g, bl, a}, {x0, y1, 0, 0, 0, r, g, bl, a}};
-        ui.canvas().draw(v, 6, 0, Blend::Alpha);
     }
 
-    int focus_ = -1, pass_ = 0;
-    float scroll_ = 0, scrollTarget_ = 0;
-    double timeMs_ = 0;
+    PortDraw d_;
+    std::vector<int> rows_;  // indexes into items() of the rows shown
+    std::map<std::string, bool> collapsed_;
+    int focus_ = 0, dropdown_ = -1, ddFocus_ = 0;
+    bool entered_ = false;
+    float scroll_ = 0, scrollTarget_ = 0, ddTop_ = 0;
 };
 
 }  // namespace

@@ -234,8 +234,11 @@ public:
     std::string anim;  // the filtered animation
     float scale = 1, offset = 0, start = 0, end = 0, period = 0;
     int type = 0;      // Q: enum (later Harmonix code: 0 Range, 1 Loop, 2 Shuttle)
-    // The filtered frame for `frame` (Q: follows the later Harmonix code).
-    float filter(float frame) const;
+    // The filtered frame for `frame` (0x822079B0); `framesPerUnit` of the
+    // filter's rate, for a period.
+    float filter(float frame, float framesPerUnit = 30) const;
+    float scaleOf(float framesPerUnit = 30) const;
+    float endFrame(float framesPerUnit = 30) const;
 };
 
 // RndParticleSys v30 (Load @ 0x82216ad0). Ranges are (low, high) pairs a

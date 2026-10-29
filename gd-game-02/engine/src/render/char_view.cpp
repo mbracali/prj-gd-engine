@@ -74,7 +74,10 @@ int runCharView(const std::string& dataPath, const std::string& character) {
             // The outfits a venue gives (guitar_sg for guitarists, the arena kit for drummers).
             auto probe = std::make_unique<chr::Character>(*data, path, clips);
             std::map<std::string, std::string> outfits;
-            if (probe->dir().get("guitar.outfit")) outfits["guitar.outfit"] = "char/ng/guitars/gen/guitar_sg.milo_xbox";
+            // GD02_VIEW_GUITAR=<outfit> (flyingv_v2, xplorer...) another guitar.
+            const char* gv = SDL_getenv("GD02_VIEW_GUITAR");
+            if (probe->dir().get("guitar.outfit"))
+                outfits["guitar.outfit"] = std::string("char/ng/guitars/gen/") + (gv && *gv ? gv : "guitar_sg") + ".milo_xbox";
             if (probe->dir().get("drums.outfit")) outfits["drums.outfit"] = "char/ng/drums/gen/dw_arena_drums.milo_xbox";
             probe.reset();
             c = std::make_unique<chr::Character>(*data, path, clips, outfits);

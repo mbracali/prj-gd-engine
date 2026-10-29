@@ -38,6 +38,11 @@ pull requests or branches, no bots).
      Latest) with:
      - `gdul-<v>-linux-x86_64.tar.gz` (Ubuntu 22.04, SDL3 included:
        `gd-engine-launcher/scripts/build_linux_portable.sh`)
+     - `gdul-<v>-steamdeck-x86_64.tar.gz` (the Steam Deck download: built in
+       Valve's Steam Runtime 3 "sniper" SDK container,
+       `gd-engine-launcher/scripts/build_steamdeck.sh`, every module with
+       its Steam Deck defaults, `STEAM-DECK.txt` inside; the site's Steam
+       Deck button picks the asset with "steamdeck" in its name)
      - `gdul-<v>-windows-x86_64.zip` (MinGW-w64)
      - `gdul-<v>-macos-arm64.zip` (when that build succeeds; ad-hoc signed)
      - `gdul-<v>-android-arm64.apk` (signed with the gdul release key)
@@ -56,6 +61,7 @@ history; no new ones are made.
 gd-game-01/local_build.sh                 # the build for your system
 gd-game-01/local_build.sh steamdeck       # or any of: linux steamdeck windows macos android all
 gd-game-01/local_build.sh linux --native  # Linux without a container (uses your SDL3)
+gd-engine-launcher/scripts/build.sh linux steamdeck windows android   # the launcher downloads (steamdeck: in the sniper container)
 ```
 
 Or double-click the file for a build in `gd-game-01/build_commands/`
@@ -90,15 +96,15 @@ folder per platform and the same file a release would publish.
   `inherit_errexit`): any failing command fails the step and the build.
 - `scripts/verify_bundle.sh` runs on every build `build.sh` assembles and, in
   the release workflow, on every archive (`.tar.gz`, `.zip`, `.apk`) before it
-  is uploaded. For each game in `games.yaml` with `ready_to_play: true` and a
-  module for that system (`module_systems_NN` in `build.sh`) it requires the
+  is uploaded. For each game in `games.yaml` with `ready_to_play: true` (on
+  every system, no exemption) it requires the
   module, non-empty, exporting `gd_game_run` (objdump / nm), its libraries
   (gd02: FFmpeg's avformat, avcodec, avutil and the LGPL licence; gd01 on
   Linux: the DLSS library), and the entry in `gd-engine-games/manifest.json`.
 - The Windows job installs `gcc`. A failing job uploads `logs-<os>` (the
   launcher's `logs/` and FFmpeg's `ffmpeg-build.log`) as an artifact.
-- The launcher says at start when the download lacks a module its manifest
-  lists ("This download is incomplete ... please download again") and logs it.
+- The launcher says at start when the download lacks a ready game's module
+  ("This download is incomplete ... please download again") and logs it.
 
 **If verify fails.** Do not publish. Read the lines it prints (what is missing),
 then the step log it points to: `gd-engine-launcher/logs/<os>-<game>.log`
@@ -120,6 +126,35 @@ carried, so Windows refused to load the game ("LoadLibrary failed (error
 - Before calling a Windows build good, load each module for real: Steam's
   Proton has a `wine` (`files/bin/wine`) that runs a 10-line
   `LoadLibraryExW` test program against the download.
+
+Third case (gdul 0.1.5, Android): the APK had no gd01 module ("This launcher
+build has no gd-game-01 module"). `build.sh` built gd01 for `linux windows
+macos` only (`module_systems_01`: "gd01 has its own APK; in the launcher's APK
+it is listed only"), and `verify_bundle.sh` skipped a ready game a system had
+no recipe for, so the check passed. Now:
+
+- **Every launcher, on every system, carries every ready game's module.**
+  `module_systems_NN` lists all four systems; a ready game without a recipe
+  or without the system fails the build ("every build must carry it").
+  `verify_bundle.sh` has no exemption at all: each `ready_to_play` game's
+  module is required on every system (macOS too), and in CI (`CI=true`) a
+  module whose exports cannot be checked fails as well.
+- gd01 on Android is built from the launcher's side (`modules/gd01`, OpenGL
+  ES 3.0 and the upscaler stub, as gd01's own APK).
+- The launcher's start-up check uses `games.yaml`: in any build (a
+  `manifest.json` is there) a ready game without its module is an
+  incomplete download, whatever the manifest lists.
+- Android 15 could not open a disc image chosen with Load ISO: the launcher
+  copied it into its own folder (7 GB for Guitar Hero II; the "Open folder"
+  button pointed at that private folder, which no app can show: "Cannot open
+  /data/data/io.github.mbracali.gdul/files/original_isos"), and a game cannot
+  reopen the descriptor's `/proc/self/fd/<n>` path (FUSE: EACCES). Now the
+  launcher keeps the document's `content://` URI (persistable permission),
+  opens it with `ContentResolver.openFileDescriptor` when a game starts and
+  hands the game `/proc/self/fd/<n>`; the module shim's `fopen` reads such a
+  path through the descriptor (`pread`). Test it on the x86-64 emulator:
+  `GDUL_ABI=x86_64 scripts/build.sh android`, `adb push` the discs to
+  `/sdcard/Download`, Load ISO, start each game.
 
 ## Test builds on GitHub (by hand)
 

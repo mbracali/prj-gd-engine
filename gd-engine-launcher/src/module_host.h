@@ -9,6 +9,7 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "catalog.h"
 #include "gd_host.h"
@@ -22,6 +23,10 @@ struct GameRun {
     double seconds = 0;     // how long the game ran
     bool unloaded = false;  // the library left the process (its globals start fresh next time)
 };
+
+// Arguments for the games' own command lines, after the program name and
+// before the disc image (the launcher's `-- <game args>`, main.cpp).
+void setExtraGameArgs(const std::vector<std::string>& args);
 
 GameRun runGameModule(SDL_Window* window, SDL_GLContext context, const Game& game, const std::string& launcherVersion,
                       ActionLog& log);

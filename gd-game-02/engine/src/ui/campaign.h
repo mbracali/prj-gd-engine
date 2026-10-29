@@ -135,5 +135,17 @@ void setCareerSong(UiManager& ui);
 // GamePanel want_encore_fx (0x822CA5D0) without force_encore.
 bool wantEncoreFx(UiManager& ui);
 
+// The port's band (Career::kGlitches, not in GH2) has everything a band can
+// unlock, written into its own records as GH2's rules would leave them after
+// the tour is won at every difficulty: every tier venue unlocked and
+// completed, every tier song and store song unlocked, every item of the
+// unlock table bought (guitars, finishes, characters, outfits, videos),
+// cash to spare; and the save's pro face-off (a tour won). Its encores are
+// unlocked at every difficulty, Easy too (unlockedAt). Idempotent: run on
+// every fresh save and every save read, so an older Glitches band is
+// upgraded (the save is marked when anything changed). True if it changed.
+bool isGlitches(const Career::Profile& p);
+bool unlockGlitches(UiManager& ui);
+
 }  // namespace campaign
 }  // namespace ui

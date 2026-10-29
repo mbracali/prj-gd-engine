@@ -85,6 +85,10 @@ public:
     // eased toward the audio position, so the per-callback re-anchoring of the
     // audio clock never shows up as uneven scrolling. Main thread only.
     double frameTimeMs();
+    // Development aid (GD01_FIXED_CLOCK=<ms>): the song clock advances by a
+    // fixed step each frame, whatever the audio or the frame rate do, so a
+    // headless run is the same every time (the character golden logs).
+    void setFixedClock(double stepMs) { fixedStep_ = stepMs; }
     bool playing() const { return stream_ != nullptr && vgs_ != nullptr; }
 
 private:
@@ -122,9 +126,15 @@ private:
     std::atomic<int64_t> anchorFrames_{0};
     std::atomic<uint64_t> anchorNs_{0};
     std::atomic<int64_t> leadIn_{0};
+    // [I] The device's buffer (SDL sample frames), in ms: the frames handed
+    // over in a callback are heard one device buffer later. The PS2's stream
+    // clock (StreamEE_v10 @0x21b758, a timer started with the playback) has no
+    // such lead, so the song clock is held back by it.
+    double outputLatencyMs_ = 0;
     std::atomic<bool> paused_{false};
     double pausedTimeMs_ = 0;
     double frameMs_ = 0;
+    double fixedStep_ = 0, fixedT_ = 0;
     uint64_t frameNs_ = 0;
 
     struct Stream {

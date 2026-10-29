@@ -111,7 +111,7 @@ MidiParser::MidiParser(std::string name, const DataNode& def) : ScriptObject(std
     m.params = m.base;
 }
 
-MidiParser::~MidiParser() = default;
+MidiParser::~MidiParser() { stopHolding(); }
 
 void MidiParser::reset() {
     impl_->next = 0;
@@ -367,7 +367,8 @@ void MidiParser::poll(Interp& in, double beat) {
     Impl& m = *impl_;
     auto toSinks = [&](const std::string& msg, const std::vector<Value>& args) {
         const std::vector<ScriptObject*> sinks = sinks_;
-        for (ScriptObject* s : sinks) in.send(s, msg, args);
+        for (ScriptObject* s : sinks)
+            if (std::find(sinks_.begin(), sinks_.end(), s) != sinks_.end()) in.send(s, msg, args);
     };
     auto runCode = [&](const DataNode& code) {
         ScriptObject* prev = in.var("this").object;

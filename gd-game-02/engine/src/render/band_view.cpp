@@ -50,6 +50,31 @@ void BandView::drawCharacter(gfx::MaterialRenderer& mr, chr::Character& c, const
     hdr_ = hdr;
     // Character::DrawShowing 0x82153090: the LOD, then the directory.
     c.updateLod(screenSize(camera, c.worldSphere()));
+    for (const scene::Mesh* m : meshesToDraw(c, world_ ? &world_->pose() : nullptr)) drawMesh(mr, c, *m);
+}
+
+namespace {
+
+void collect(const chr::Character& c, const gfx::ScenePose* pose, const scene::Object* o, int depth, std::vector<const scene::Mesh*>& out) {
+    // The character's own showing (Character::DrawShowing: its LOD switch
+    // sets the group's flag, 0x82151DE0) wins over the world pose's, which
+    // only knows the saved flag (lod1.grp is saved hidden): otherwise a
+    // lower LOD (set_min_lod 1 in the band_POV shots, or distance) drew
+    // nothing and the band vanished, filmed from behind.
+    if (!o || depth > 16 || !c.showing(o)) return;
+    if (pose && !c.showingSet(o) && !pose->showing(o)) return;
+    if (auto* m = o->as<scene::Mesh>()) {
+        out.push_back(m);
+    } else if (auto* g = o->as<scene::Group>()) {
+        if (g == c.shadowGroup()) return;
+        for (const std::string& n : g->objects)
+            if (const scene::Object* x = c.dir().get(n); x && x != g) collect(c, pose, x, depth + 1, out);
+    }
+}
+
+}  // namespace
+
+std::vector<const scene::Mesh*> BandView::meshesToDraw(const chr::Character& c, const gfx::ScenePose* pose) {
     const scene::Directory& d = c.dir();
     std::set<const scene::Object*> children;
     std::vector<const scene::Object*> roots;
@@ -68,18 +93,9 @@ void BandView::drawCharacter(gfx::MaterialRenderer& mr, chr::Character& c, const
         const scene::Draw* db = gfx::drawOf(b);
         return (da ? da->order : 0) < (db ? db->order : 0);
     });
-    for (const scene::Object* o : roots) drawObject(mr, c, o, 0);
-}
-
-void BandView::drawObject(gfx::MaterialRenderer& mr, chr::Character& c, const scene::Object* o, int depth) {
-    if (!o || depth > 16 || !c.showing(o) || (world_ && !world_->pose().showing(o))) return;
-    if (auto* m = o->as<scene::Mesh>()) {
-        drawMesh(mr, c, *m);
-    } else if (auto* g = o->as<scene::Group>()) {
-        if (g == c.shadowGroup()) return;
-        for (const std::string& n : g->objects)
-            if (const scene::Object* x = c.dir().get(n); x && x != g) drawObject(mr, c, x, depth + 1);
-    }
+    std::vector<const scene::Mesh*> out;
+    for (const scene::Object* o : roots) collect(c, pose, o, 0, out);
+    return out;
 }
 
 void BandView::drawMesh(gfx::MaterialRenderer& mr, chr::Character& c, const scene::Mesh& m) {

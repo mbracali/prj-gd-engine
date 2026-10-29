@@ -9,8 +9,10 @@
 # A merge without a new launcher_version does nothing (one quick check); if it
 # bumps a game's version, the check warns that launcher_version needs a bump
 # too for the game to ship. Builds Linux x86_64, Windows x86_64, macOS arm64
-# and Android arm64 with gd-engine-launcher/scripts/build.sh and publishes
-# gdul-<v>-<os>-<arch> (.tar.gz, .zip, .apk) and SHA256SUMS.txt.
+# and Android arm64 with gd-engine-launcher/scripts/build.sh, and the Steam
+# Deck download (Linux built in the Steam Runtime "sniper" SDK), and publishes
+# gdul-<v>-<os>-<arch> (.tar.gz, .zip, .apk; os: linux, steamdeck, windows,
+# macos, android) and SHA256SUMS.txt.
 # See docs/release-process.md.
 name: gdul release
 
@@ -156,6 +158,63 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: release-linux
+          path: out/
+          retention-days: 3
+
+  steamdeck:
+    # Valve's Steam Runtime 3 "sniper" SDK (what Steam runs games in), as
+    # gd01's and gd02's own Steam Deck downloads were: gcc-14, the C++ runtime
+    # linked in, the runtime's SDL3 next to the program; every game module
+    # with its Steam Deck defaults. The site's Steam Deck button finds it
+    # ("steamdeck" in the asset's name).
+    name: Steam Deck
+    needs: [check, previous]
+    if: ${{ !cancelled() && needs.check.outputs.new == 'true' }}
+    runs-on: ubuntu-latest
+    container: registry.gitlab.steamos.cloud/steamrt/sniper/sdk:latest
+    timeout-minutes: 60
+    env:
+      V: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/cache@v6
+        with:
+          path: gd-game-02/engine/build/ffmpeg/steamdeck/ffmpeg-prefix
+          key: ffmpeg-gdul-sniper-${{ hashFiles('gd-game-02/engine/build_common.sh', 'gd-engine-launcher/scripts/build.sh') }}
+      - uses: actions/download-artifact@v8
+        if: needs.previous.result == 'success'
+        with:
+          name: previous
+          path: ${{ runner.temp }}/previous-all
+      - name: Unpack the previous Steam Deck download
+        run: |
+          mkdir -p "$RUNNER_TEMP/previous"
+          for f in "$RUNNER_TEMP"/previous-all/gdul-*-steamdeck-x86_64.tar.gz; do
+            [ -f "$f" ] && tar -xzf "$f" -C "$RUNNER_TEMP/previous"
+          done
+          ls "$RUNNER_TEMP/previous"
+      - name: Fetch the DLSS SDK (gd-game-01's module)
+        run: gd-game-01/tools/fetch_dlss.sh
+      - run: gd-engine-launcher/scripts/build_steamdeck.sh --previous "$RUNNER_TEMP/previous"
+      - name: Package
+        run: |
+          mkdir -p out
+          tar -C gd-engine-launcher/local_builds -czf "out/gdul-$V-steamdeck-x86_64.tar.gz" "gdul-$V-steamdeck-x86_64"
+      - name: Verify the download (every ready game's module and libraries, STEAM-DECK.txt)
+        run: gd-engine-launcher/scripts/verify_bundle.sh "out/gdul-$V-steamdeck-x86_64.tar.gz" steamdeck
+      - name: Build logs (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: logs-steamdeck
+          path: |
+            gd-engine-launcher/logs/
+            gd-game-02/engine/build/ffmpeg/**/ffmpeg-build.log
+          if-no-files-found: ignore
+          retention-days: 7
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-steamdeck
           path: out/
           retention-days: 3
 
@@ -350,11 +409,12 @@ jobs:
 
   publish:
     name: Publish the release
-    needs: [check, guard, linux, windows, macos, android]
+    needs: [check, guard, linux, steamdeck, windows, macos, android]
     # macOS may fail (continue-on-error): published without it then.
     if: >-
       ${{ !cancelled() && needs.check.result == 'success' && needs.guard.result == 'success' &&
-      needs.linux.result == 'success' && needs.windows.result == 'success' && needs.android.result == 'success' }}
+      needs.linux.result == 'success' && needs.steamdeck.result == 'success' && needs.windows.result == 'success' &&
+      needs.android.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -384,10 +444,11 @@ jobs:
             echo "|---|---|---|"
             echo "| **Windows** 10/11 | \`gdul-$V-windows-x86_64.zip\` | Extract it and run \`Guitar Dream Universal Launcher.exe\`. |"
             echo "| **Linux** (any distribution from 2022 on) | \`gdul-$V-linux-x86_64.tar.gz\` | Extract it and run \`Guitar Dream Universal Launcher\`. |"
+            echo "| **Steam Deck** | \`gdul-$V-steamdeck-x86_64.tar.gz\` | In Desktop Mode, extract it, put your discs in \`original_isos/\`, add \`Guitar Dream Universal Launcher\` to Steam as a non-Steam game, play in Gaming Mode (see \`STEAM-DECK.txt\`). The games start with the Deck's settings. |"
             if [ -f "dist/gdul-$V-macos-arm64.zip" ]; then
               echo "| **macOS** (Apple silicon) | \`gdul-$V-macos-arm64.zip\` | Extract it, move the extracted folder out of Downloads with the Finder (so macOS runs the app where it is and finds \`original_isos/\`), then right-click \`Guitar Dream Universal Launcher.app\` > Open (it is not notarised). |"
             fi
-            echo "| **Android** 7+ (arm64) | \`gdul-$V-android-arm64.apk\` | Install it, open \"Guitar Dream Universal Launcher\" and load your disc image (the launcher copies it into its own folder). |"
+            echo "| **Android** 7+ (arm64) | \`gdul-$V-android-arm64.apk\` | Install it, open \"Guitar Dream Universal Launcher\" and choose your disc image with Load ISO (it is read where it is, nothing is copied). |"
             echo
             echo "Put your disc images in \`original_isos/\` next to the launcher, or use **Load ISO**. See \`manual/user-manual.md\` in the download."
             echo

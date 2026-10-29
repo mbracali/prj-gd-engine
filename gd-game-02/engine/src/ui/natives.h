@@ -103,6 +103,9 @@ void setHelpbarDisplay(UiManager& ui, const Value& display);
 // A game event (UiManager::gameEvent): the game panel's script and native
 // handler, then the sinks that asked for it (game add_sink / add_sinks).
 void gameEventImpl(UiManager& ui, const std::string& msg, std::vector<Value> args);
+// A message to the game panel's script only (extend_track: game.dta handles
+// it, so nothing goes on to the sinks).
+void gameScriptImpl(UiManager& ui, const std::string& msg, std::vector<Value> args);
 
 // The headline generator (EndGamePanel, 0x82291428): fills a headline
 // token's $adj / $noun / $verb... slots.

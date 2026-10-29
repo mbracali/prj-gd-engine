@@ -76,6 +76,7 @@ void Canvas::shutdown() {
 }
 
 void Canvas::begin(SDL_Color clear) {
+    beginNs_ = SDL_GetTicksNS();
     const float c[4] = {clear.r / 255.0f, clear.g / 255.0f, clear.b / 255.0f, 1};
     renderer_.beginFrame(c);
     batch_.clear();
@@ -84,6 +85,8 @@ void Canvas::begin(SDL_Color clear) {
 
 void Canvas::end() {
     flush();
+    drawNs += SDL_GetTicksNS() - beginNs_;
+    ++drawnFrames;
     renderer_.endFrame();
 }
 

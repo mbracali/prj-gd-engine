@@ -59,6 +59,7 @@ id = `gd-game-02`
 - Start `gd02` and click the window (or press Enter, or tap on Android) to pick the `.iso`, or drop it onto the window. It is remembered (`config.txt` in the save folder `gd-engine/gd02/`); an `.iso` next to the program is found by itself.
 - Command line: `gd02 [--song <id>] [--difficulty 0-3] [--autoplay] [--no-fail] [disc.iso | game folder]`.
 - `gd02 --selftest <disc.iso>` checks the data, auto-plays every chart and checks the rules without a window.
+- Bug reports: on Windows the log is `gd02.log` in the save folder (with a crash's address); elsewhere it goes to the terminal, or to a file with `GD02_LOG=<file>`. `GD02_PERF=1` adds a frame-time breakdown every 2 s.
 - Developers: keep the disc image in the repo root's `original_isos/` (git-ignored), e.g. `engine/build/linux/gd02 "../original_isos/Guitar Hero II (USA) (Rev1) (X360).iso" --selftest` from `gd-game-02/`.
 
 

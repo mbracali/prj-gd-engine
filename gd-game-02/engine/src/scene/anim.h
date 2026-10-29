@@ -41,6 +41,32 @@ template <size_t N> bool sampleLinear(const std::vector<Key<N>>& keys, float fra
     return true;
 }
 
+// Position keys as RndTransAnim reads them (0x8226E560) [C]: linear, or
+// with trans_spline a cubic Hermite between the two keys around `frame`
+// (t their fraction) whose tangents (0x8226E368) are p1 - p0 for two keys,
+// (p[i+1] - p[i-1]) / 2 inside, and 1.5 (p1 - p0) - 0.25 (p2 - p0) at the
+// first key (the mirror at the last). Clamps outside the keys' range.
+template <size_t N> bool sampleTrans(const std::vector<Key<N>>& keys, float frame, bool spline, std::array<float, N>& out) {
+    if (!spline || keys.size() < 2 || frame <= keys.front().frame || frame >= keys.back().frame) return sampleLinear(keys, frame, out);
+    size_t i = 1;
+    while (i < keys.size() && keys[i].frame < frame) ++i;
+    const auto& a = keys[i - 1];
+    const auto& b = keys[i];
+    const float span = b.frame - a.frame;
+    const float t = span > 0 ? (frame - a.frame) / span : 0;
+    const size_t n = keys.size();
+    auto tangent = [&](size_t j, size_t c) {
+        if (n == 2) return keys[1].v[c] - keys[0].v[c];
+        if (j == 0) return 1.5f * (keys[1].v[c] - keys[0].v[c]) - 0.25f * (keys[2].v[c] - keys[0].v[c]);
+        if (j == n - 1) return 1.5f * (keys[n - 1].v[c] - keys[n - 2].v[c]) - 0.25f * (keys[n - 1].v[c] - keys[n - 3].v[c]);
+        return 0.5f * (keys[j + 1].v[c] - keys[j - 1].v[c]);
+    };
+    const float t2 = t * t, t3 = t2 * t;
+    const float h00 = 2 * t3 - 3 * t2 + 1, h10 = t3 - 2 * t2 + t, h01 = 3 * t2 - 2 * t3, h11 = t3 - t2;
+    for (size_t c = 0; c < N; ++c) out[c] = a.v[c] * h00 + tangent(i - 1, c) * h10 + b.v[c] * h01 + tangent(i, c) * h11;
+    return true;
+}
+
 // The key in effect at `frame` (the last one at or before it): for texture
 // keys and stepped channels.
 template <class K> const K* sampleStep(const std::vector<K>& keys, float frame) {

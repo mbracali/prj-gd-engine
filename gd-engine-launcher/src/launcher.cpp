@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 
 #include "module_host.h"
@@ -66,6 +67,13 @@ float Launcher::measure(FontId f, float px, const std::string& t, float tracking
 
 bool Launcher::init() {
     SDL_SetAppMetadata(kTitle, "", "io.github.mbracali.gdul");
+    // Steam Deck Gaming Mode (and Steam Input on desktops): Steam hides the
+    // real controller behind its virtual one; SDL ignores that one unless told
+    // (read from the environment, as gd01 and gd02 set it).
+    SDL_setenv_unsafe("SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD", "1", 0);
+    // The Deck's own controls when Steam does not own them (Desktop Mode
+    // without Steam, a terminal): SDL's Steam Deck HIDAPI driver.
+    SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_STEAMDECK, "1");
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD | SDL_INIT_EVENTS)) {
         SDL_Log("gdul: cannot start SDL: %s", SDL_GetError());
         return false;
@@ -98,7 +106,9 @@ bool Launcher::init() {
         SDL_Log("gdul: cannot open the window: %s", SDL_GetError());
         return false;
     }
+#if !defined(__ANDROID__)
     SDL_SetWindowMinimumSize(window_, 960, 540);
+#endif
     int iw = 0, ih = 0, n = 0;
     if (unsigned char* px = stbi_load_from_memory(kGdulIconPng, int(kGdulIconPngSize), &iw, &ih, &n, 4)) {
         if (SDL_Surface* s = SDL_CreateSurfaceFrom(iw, ih, SDL_PIXELFORMAT_RGBA32, px, iw * 4)) {
@@ -114,6 +124,7 @@ bool Launcher::init() {
         return false;
     }
     restoreWindow();
+    rememberWindow();
     // Development aid: GDUL_VIRTUAL_PAD=<vendor>:<product> (hex, e.g. 045e:028e)
     // plugs in a virtual gamepad, to test the controller hand-over without hardware.
     if (const char* vp = SDL_getenv("GDUL_VIRTUAL_PAD")) {
@@ -131,7 +142,8 @@ bool Launcher::init() {
     openGamepads();
 
     log_.add("launcher started (gdul " + catalog_.launcherVersion() + ", " + platform::kOs + "-" + platform::kArch + ", " +
-             std::to_string(catalog_.games().size()) + " games, " + std::to_string(catalog_.discsFound()) + " disc images found)");
+             std::to_string(catalog_.games().size()) + " games, " + std::to_string(catalog_.discsFound()) + " disc images found" +
+             (platform::isSteamDeck() ? ", Steam Deck: the games get their handheld settings" : "") + ")");
     for (const Catalog::DiscDir& d : catalog_.discDirInfo())
         log_.add("disc folder " + d.path + " (" + d.what + "): " +
                  (d.problem.empty() ? std::to_string(d.isos) + " .iso, " + std::to_string(d.known) + " known" : d.problem));
@@ -193,12 +205,77 @@ void Launcher::shutdown() {
     SDL_Quit();
 }
 
-// After a game: the launcher's title, icon and app id again.
+// The launcher's window as it is (windowed), to put back after a game.
+void Launcher::rememberWindow() {
+#if !defined(__ANDROID__)  // Android has no window mode: its own settings stay as they are
+    const SDL_WindowFlags f = SDL_GetWindowFlags(window_);
+    if (f & (SDL_WINDOW_FULLSCREEN | SDL_WINDOW_MINIMIZED)) return;
+    saved_.maximized = (f & SDL_WINDOW_MAXIMIZED) != 0;
+    if (!saved_.maximized) {
+        SDL_GetWindowPosition(window_, &saved_.x, &saved_.y);
+        SDL_GetWindowSize(window_, &saved_.w, &saved_.h);
+    }
+    saved_.valid = true;
+#endif
+}
+
+// After a game (and at start): the launcher's title, icon and app id again,
+// and always a window, never full screen, at the size and place it had.
 void Launcher::restoreWindow() {
     SDL_SetAppMetadata(kTitle, catalog_.launcherVersion().c_str(), "io.github.mbracali.gdul");
     SDL_SetWindowTitle(window_, kTitle);
     if (icon_) SDL_SetWindowIcon(window_, icon_);
     SDL_GL_SetSwapInterval(1);
+#if !defined(__ANDROID__)  // Android has no window mode: its settings are left alone
+    leaveFullscreen();
+    SDL_SetWindowBordered(window_, true);
+    SDL_SetWindowResizable(window_, true);
+    SDL_SetWindowAlwaysOnTop(window_, false);
+    SDL_SetWindowMouseGrab(window_, false);
+    SDL_SetWindowKeyboardGrab(window_, false);
+    SDL_SetWindowRelativeMouseMode(window_, false);
+    SDL_SetWindowMinimumSize(window_, 960, 540);
+    SDL_ShowCursor();
+    const SDL_WindowFlags f = SDL_GetWindowFlags(window_);
+    if (f & SDL_WINDOW_MINIMIZED) SDL_RestoreWindow(window_);
+    if (saved_.valid) {
+        if (saved_.maximized) {
+            if (!(f & SDL_WINDOW_MAXIMIZED)) SDL_MaximizeWindow(window_);
+        } else {
+            if (f & SDL_WINDOW_MAXIMIZED) SDL_RestoreWindow(window_);
+            SDL_SetWindowSize(window_, saved_.w, saved_.h);
+            SDL_SetWindowPosition(window_, saved_.x, saved_.y);
+        }
+    }
+    SDL_SyncWindow(window_);
+    SDL_ShowWindow(window_);
+    SDL_RaiseWindow(window_);
+#else
+    SDL_ShowCursor();
+#endif
+    // The transitions above came as events: the launcher's input starts clean.
+    SDL_FlushEvents(SDL_EVENT_WINDOW_FIRST, SDL_EVENT_WINDOW_LAST);
+    SDL_FlushEvents(SDL_EVENT_KEY_DOWN, SDL_EVENT_MOUSE_REMOVED);
+    SDL_GetWindowSizeInPixels(window_, &pw_, &ph_);
+    SDL_Log("gdul: window %s %dx%d", (SDL_GetWindowFlags(window_) & SDL_WINDOW_FULLSCREEN) ? "fullscreen" : "windowed", pw_, ph_);
+}
+
+// Out of full screen (a game's, or the window manager's), waiting for it: on
+// Windows and macOS the change is asynchronous.
+void Launcher::leaveFullscreen() {
+    SDL_SetWindowFullscreenMode(window_, nullptr);  // no exclusive mode left over from a game
+    if (!(SDL_GetWindowFlags(window_) & SDL_WINDOW_FULLSCREEN)) return;
+    SDL_SetWindowFullscreen(window_, false);
+    if (!SDL_SyncWindow(window_)) {
+        // Timed out (SDL waits a while): pump until the window says it left, at most 2 s.
+        for (const Uint64 end = SDL_GetTicks() + 2000; SDL_GetTicks() < end;) {
+            SDL_PumpEvents();
+            if (!(SDL_GetWindowFlags(window_) & SDL_WINDOW_FULLSCREEN)) break;
+            SDL_Delay(10);
+        }
+    }
+    log_.add(std::string("window: left full screen") +
+             ((SDL_GetWindowFlags(window_) & SDL_WINDOW_FULLSCREEN) ? " (the system did not confirm it)" : ""));
 }
 
 void Launcher::openGamepads() {
@@ -215,6 +292,25 @@ void Launcher::closeGamepads() {
     for (auto& [id, p] : pads_) SDL_CloseGamepad(p);
     pads_.clear();
     heldDir_ = 0;
+}
+
+// One press seen from two controllers at once acts once: a Steam Deck in
+// Gaming Mode is both its own controller and Steam's virtual one (as gd01's
+// menus filter it: the same button from another device within 80 ms).
+bool Launcher::duplicatePress(const SDL_Event& e) {
+    constexpr Uint64 kSameNs = 80000000;
+    if (e.type != SDL_EVENT_GAMEPAD_BUTTON_DOWN && e.type != SDL_EVENT_GAMEPAD_BUTTON_UP) return false;
+    const int b = e.gbutton.button;
+    if (b < 0 || b >= SDL_GAMEPAD_BUTTON_COUNT) return false;
+    const std::pair<SDL_JoystickID, int> key{e.gbutton.which, b};
+    if (e.type == SDL_EVENT_GAMEPAD_BUTTON_UP) return dropped_.erase(key) > 0;
+    RecentPress& r = recentPress_[size_t(b)];
+    if (r.ns && e.gbutton.timestamp >= r.ns && e.gbutton.timestamp - r.ns < kSameNs && r.device != e.gbutton.which) {
+        dropped_.insert(key);
+        return true;
+    }
+    r = {e.gbutton.timestamp, e.gbutton.which};
+    return false;
 }
 
 int Launcher::run() {
@@ -235,7 +331,62 @@ int Launcher::run() {
     }
     log_.add("launcher closed");
     shutdown();
-    return 0;
+    return exitCode_;
+}
+
+// ---- The command line (main.cpp): --play / --explore <game> [--iso <disc>] [--exit-after] ----
+
+void Launcher::cliFail(const std::string& why) {
+    std::fprintf(stderr, "Guitar Dream Universal Launcher: %s\n", why.c_str());
+    std::fflush(stderr);
+    log_.add("command line: " + why);
+    if (cli_.exitAfter) {
+        exitCode_ = 1;
+        running_ = false;
+        return;
+    }
+    sounds_.play(UiSound::Error);
+    showDialog("We can't rock this! Sorry...", why, {{"OK", Fret::Green, nullptr}});
+}
+
+void Launcher::runCommandLine() {
+    cliPending_ = false;
+    const bool explore = cli_.play.empty();
+    const std::string id = explore ? cli_.explore : cli_.play;
+    log_.add("command line: " + std::string(explore ? "explore " : "play ") + id + (cli_.iso.empty() ? "" : " with " + cli_.iso) +
+             (cli_.exitAfter ? ", then exit" : ""));
+    Game* g = catalog_.find(id);
+    if (!g) {
+        std::string ids;
+        for (const Game& x : catalog_.games()) ids += (ids.empty() ? "" : ", ") + x.id;
+        cliFail("There is no game " + id + " (the games: " + ids + "; --list shows them).");
+        return;
+    }
+    for (size_t i = 0; i < catalog_.games().size(); ++i)
+        if (&catalog_.games()[i] == g) focusRow_ = int(i), focusCol_ = explore ? kExplore : kPlay;
+    if (!cli_.iso.empty()) {
+        if (!platform::isFile(cli_.iso)) {
+            cliFail("The disc image " + cli_.iso + " is not there.");
+            return;
+        }
+        g->iso = cli_.iso;  // for this run only (Load ISO saves a disc)
+        g->isoName = platform::displayName(cli_.iso);
+    }
+    if (!g->ready) return cliFail(g->title() + " (" + g->id + ") is not playable yet. Coming soon!");
+    if (!g->hasModule) return cliFail(noModuleText(*g));
+    if (g->iso.empty())
+        return cliFail("No " + g->title() + " disc image: give one with --iso <file>, or put it in original_isos/ next to the launcher.");
+    if (explore) {
+        exploreOpen(*g);
+        cliExplore_ = cli_.exitAfter && explore_ != nullptr;
+        if (cli_.exitAfter && !explore_) exitCode_ = 1, running_ = false;
+        return;
+    }
+    play(*g);
+    if (cli_.exitAfter) {
+        exitCode_ = lastExit_;
+        running_ = false;
+    }
 }
 
 void Launcher::frame() {
@@ -246,11 +397,16 @@ void Launcher::frame() {
         picked.swap(picked_);
     }
     for (auto& [id, path] : picked) {
-        if (path.empty()) log_.add("load disc for " + id + ": cancelled");
-        else handleDisc(path, id);
+        if (path.empty()) {
+            log_.add("load disc for " + id + ": cancelled");
+        } else if (path[0] == '\x01') {
+            log_.add("load disc for " + id + ": the file dialog failed: " + path.substr(1));
+            sounds_.play(UiSound::Error);
+            toast("The file dialog did not open: " + path.substr(1));
+        } else {
+            handleDisc(path, id);
+        }
     }
-    // Android: how the copy of a chosen disc into the app's folder is going.
-    if (std::string copying = catalog_.pollCopy(); !copying.empty()) toast(copying);
     // Gamepad direction repeat.
     if (heldDir_ && now_ >= repeatAt_) {
         repeatAt_ = now_ + 0.09;
@@ -269,9 +425,17 @@ void Launcher::frame() {
         missingModules_.clear();
         startupNotice_ = false;  // one dialog at a time
     }
-    if (startupNotice_ && framesDrawn_ > 2) {
+    if (startupNotice_ && framesDrawn_ > 2 && !cliPending_) {
         startupNotice_ = false;
         showDiscFolders("Where are your discs?");
+    }
+    if (cliPending_ && framesDrawn_ > 2) {
+        runCommandLine();
+        if (!running_) return;
+    }
+    if (cliExplore_ && !explore_) {  // --explore --exit-after: the explorer closed
+        running_ = false;
+        return;
     }
     if (explore_) {
         exploreFrame();
@@ -329,10 +493,16 @@ void Launcher::screenshot(const std::string& path) {
 // ---- Input ----
 
 void Launcher::handle(const SDL_Event& e) {
+    if (duplicatePress(e)) return;
     if (explore_ && exploreHandle(e)) return;
     switch (e.type) {
     case SDL_EVENT_QUIT:
         running_ = false;
+        break;
+    case SDL_EVENT_WINDOW_ENTER_FULLSCREEN:  // the launcher is always a window (desktops; Android has no window mode)
+#if !defined(__ANDROID__)
+        SDL_SetWindowFullscreen(window_, false);
+#endif
         break;
     case SDL_EVENT_DROP_BEGIN:
         dragging_ = true;
@@ -576,12 +746,15 @@ void Launcher::play(Game& g) {
     }
     sounds_.close();
     closeGamepads();
+    rememberWindow();
     GameRun r = runGameModule(window_, context_, g, catalog_.launcherVersion(), log_);
     restoreWindow();
     openGamepads();
     sounds_.open();
     dragging_ = false;
+    lastExit_ = r.started ? r.exitCode : 1;
     if (!r.started) {
+        std::fprintf(stderr, "Guitar Dream Universal Launcher: %s did not start: %s\n", g.id.c_str(), r.error.c_str());
         sounds_.play(UiSound::Error);
         log_.add("play " + g.id + " failed: " + r.error);
         showDialog("We can't rock this! Sorry...", g.title() + " did not start: " + r.error, {{"OK", Fret::Green, nullptr}});
@@ -602,7 +775,8 @@ struct PickRequest {
 };
 void SDLCALL onPicked(void* user, const char* const* files, int) {
     auto* req = static_cast<PickRequest*>(user);
-    std::string path = files && files[0] ? files[0] : "";
+    // "" cancelled; a failed dialog as "\x01<SDL's error>".
+    std::string path = !files ? std::string("\x01") + SDL_GetError() : files[0] ? files[0] : "";
     {
         std::lock_guard<std::mutex> g(*req->lock);
         req->out->emplace_back(req->id, path);
@@ -625,7 +799,7 @@ void Launcher::pickDisc(Game& g) {
 void Launcher::handleDisc(const std::string& path, const std::string& wantedId) {
     const DiscInfo disc = probeDisc(path);
     Game* g = catalog_.identify(disc);
-    const std::string file = platform::fileName(path);
+    const std::string file = platform::displayName(path);
     log_.add("identify " + path + ": " + disc.describe() + " -> " + (g ? g->id : std::string("unknown")));
     Game* wanted = wantedId.empty() ? nullptr : catalog_.find(wantedId);
     if (!g) {
@@ -717,6 +891,18 @@ void Launcher::showDiscFolders(const std::string& title) {
                 "so the original_isos folder next to it may not be seen. Move the app to another folder with the "
                 "Finder and open it again, or run in Terminal:\nxattr -dr com.apple.quarantine \"" + app + "\"\n";
     }
+#ifdef __ANDROID__
+    // No file manager can open the app's own folders (an app's private
+    // folder cannot be shown to another app: "Cannot open
+    // /data/data/io.github.mbracali.gdul/files/original_isos"): Load ISO
+    // reads a disc from anywhere on the device instead, where it is.
+    body += "\nUse Load ISO to choose your disc image anywhere on this device (Downloads, an SD card...): "
+            "the launcher reads it where it is, nothing is copied.";
+    std::vector<Button> buttons;
+    buttons.push_back({"Load ISO", Fret::Yellow, [this] {
+                           if (focusRow_ >= 0 && focusRow_ < int(catalog_.games().size())) pickDisc(catalog_.games()[size_t(focusRow_)]);
+                       }});
+#else
     body += "\nPut your .iso files in one of these folders, use Load ISO, or drop one on this window.";
     std::vector<Button> buttons;
     const std::string mine = platform::join(platform::saveDir(), "original_isos");
@@ -729,6 +915,7 @@ void Launcher::showDiscFolders(const std::string& title) {
                            if (!SDL_OpenURL(url.c_str())) toast("Cannot open " + mine);
                            log_.add("disc folder opened: " + mine);
                        }});
+#endif
     buttons.push_back({"Look again", Fret::Blue, [this] {
                            catalog_.rescanDiscs();
                            log_.add("disc folders scanned again: " + std::to_string(catalog_.discsFound()) + " disc images found");
@@ -744,31 +931,38 @@ void Launcher::showDiscFolders(const std::string& title) {
 // from its disc). Silent while no such disc is known.
 void Launcher::loadSounds() {
     soundsTried_ = true;
-    if (sounds_.count() > 0) return;
+    if (sounds_.count() > 0 && !sounds_.builtIn()) return;
+    sounds_.clear();
     struct Sink {
         UiSounds* sounds;
     } sink{&sounds_};
     auto add = [](void* user, const char* role, const float* stereo, int frames, int rate) {
         if (role) static_cast<Sink*>(user)->sounds->add(role, stereo, frames, rate);
     };
+    // Development aid: GDUL_BUILTIN_SOUNDS=1 uses the built-in ones even with a disc.
+    const bool builtInOnly = SDL_getenv("GDUL_BUILTIN_SOUNDS") != nullptr;
     for (const Game& g : catalog_.games()) {
-        if (!g.hasModule || g.iso.empty()) continue;
+        if (builtInOnly || !g.hasModule || g.iso.empty()) continue;
         std::string error;
         const Uint64 t0 = SDL_GetTicks();
         const int n = fetchUiSounds(window_, context_, g, catalog_.launcherVersion(), log_, add, &sink, error);
         if (n > 0) {
             log_.add("menu sounds: " + std::to_string(sounds_.count()) + " from " + g.id + " (" + g.title() + ", " +
-                     platform::fileName(g.iso) + ", " + std::to_string(SDL_GetTicks() - t0) + " ms)");
+                     g.isoName + ", " + std::to_string(SDL_GetTicks() - t0) + " ms)");
             sounds_.open();
             return;
         }
         SDL_Log("gdul: menu sounds from %s: %s", g.id.c_str(), error.c_str());
     }
-    log_.add("menu sounds: none (no disc of a game that has them, such as Guitar Hero)");
+    // No such disc: the launcher's own (synthesized, nothing from a game).
+    sounds_.addBuiltIn();
+    sounds_.open();
+    log_.add("menu sounds: " + std::to_string(sounds_.count()) + " built-in" +
+             (builtInOnly ? " (GDUL_BUILTIN_SOUNDS)" : " (no disc of a game that has them, such as Guitar Hero)"));
 }
 
 void Launcher::discsChanged() {
-    if (sounds_.count() == 0) soundsTried_ = false;
+    if (sounds_.count() == 0 || sounds_.builtIn()) soundsTried_ = false;
 }
 
 void Launcher::askQuit() {
@@ -944,7 +1138,7 @@ void Launcher::drawRow(int index, float y) {
     std::string details = g.basedOn.empty() ? g.platforms : g.basedOn;
     details += kDot + year(g.launch) + kDot + "v" + g.version;
     if (!g.iso.empty())
-        details += kDot + platform::fileName(g.iso) + (g.isoSource == Game::IsoSource::Saved ? " (saved)" : " (found)");
+        details += kDot + g.isoName + (g.isoSource == Game::IsoSource::Saved ? " (saved)" : " (found)");
     else if (g.ready) details += kDot + "no disc yet: load one or drop it here";
     else details += kDot + "coming soon";
     if (g.ready && !g.hasModule) details += kDot + "module not built";
@@ -1082,7 +1276,7 @@ void Launcher::drawLoading(const Game& g, const std::string& what) {
         gfx_.image(gfx_.icon(), R((W_ - size) / 2, H_ / 2 - 200, size, size));
         const std::string t = what + " " + g.title() + "\xE2\x80\xA6";
         text(FontId::Title, 52, (W_ - measure(FontId::Title, 52, t)) / 2, H_ / 2 + 40, t, kCream);
-        const std::string sub = g.id + kDot + platform::fileName(g.iso);
+        const std::string sub = g.id + kDot + g.isoName;
         text(FontId::Regular, 18, (W_ - measure(FontId::Regular, 18, sub)) / 2, H_ / 2 + 112, sub, kSand);
         gfx_.end();
         SDL_GL_SwapWindow(window_);

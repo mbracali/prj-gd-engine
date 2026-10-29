@@ -131,6 +131,7 @@ static int campaignChecks(ui::UiManager& ui) {
     Career saved = ui.career();
     ui::Session& s = ui.session();
     const ui::Session keep = s;
+    ui.career().profiles = {};  // GH2's rules on a save without the port's band
     Career::Profile& p = ui.career().profiles[0];
     p = Career::Profile{};
     p.inUse = true, p.name = "T", p.cash = 50;
@@ -202,6 +203,48 @@ static int campaignChecks(ui::UiManager& ui) {
           "three stars on one song: bass_sg_mahogany (songs 1, stars 3)");
     s.mode = "multi_vs";
     check(in.send("game", "multiplayer_vs", {}).truthy(), "face-off is multiplayer_vs");
+    // GD02-090: The Glitches (the port's band) has everything unlocked: an
+    // older save's band (GH2's defaults only, read back from career.json)
+    // is upgraded when the save is read, once (idempotent).
+    {
+        Career old;
+        old.profiles = {};
+        old.glitchesLook = ui.career().glitchesLook;
+        old.ensureGlitches();
+        ui.career().fromJson(old.toJson());
+        ui.career().needsSave = false;
+        const bool upgraded = cp::unlockGlitches(ui) && ui.career().needsSave;
+        check(upgraded && !cp::unlockGlitches(ui), "an older Glitches band upgraded once");
+        int slot = -1;
+        for (int i = 0; i < Career::kProfiles; ++i)
+            if (cp::isGlitches(ui.career().profiles[size_t(i)])) slot = i;
+        s.profileSlot = slot, s.mode = "career", s.venue = "battle", s.allAccess = false;
+        const cp::Config& cfg = cp::config(ui);
+        int locked = 0;
+        std::string first;
+        for (int d = 0; d < Career::kDifficulties && slot >= 0; ++d) {
+            s.players[0].difficulty = d;
+            const auto list = cp::careerSongs(ui, false);
+            const auto miss = [&](const std::string& sym, bool inList) {
+                const bool ok = cp::isUnlocked(ui, sym) && (!inList || std::find(list.begin(), list.end(), sym) != list.end());
+                if (!ok && first.empty()) first = sym + " at difficulty " + std::to_string(d);
+                locked += ok ? 0 : 1;
+            };
+            for (int v = 0; v < cp::numTiers(ui, d); ++v) {
+                miss(cfg.tiers[size_t(v)].first, false);
+                for (const std::string& song : cfg.tiers[size_t(v)].second) miss(song, true);
+            }
+            for (const std::string& song : cfg.storeSongs) miss(song, true);
+            for (const auto& [item, sold] : cfg.tableItems)
+                if (!cp::isCoopReward(ui, item)) miss(item, false);  // co-op's basses: the save's, not a band's
+            if (cp::status(ui, ui.career().profiles[size_t(slot)], d) < cp::numTiers(ui, d)) locked += 1, first = "the tour not won";
+        }
+        check(slot >= 0 && locked == 0 && cp::isUnlocked(ui, "multi_fo"), "The Glitches has everything unlocked (first locked: " + first + ")");
+        s.mode = "quickplay";
+        const auto all = cp::quickplaySongs(ui);
+        check(std::find(all.begin(), all.end(), "carryonwayward") != all.end() && std::find(all.begin(), all.end(), "rawdog") != all.end(),
+              "quick play offers The Glitches' songs");
+    }
     std::printf("uitest: campaign: %d checks, %d failed\n", n, fails);
     ui.career() = saved;
     s = keep;

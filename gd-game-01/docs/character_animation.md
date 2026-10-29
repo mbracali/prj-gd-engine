@@ -84,7 +84,7 @@ Every animated bone has unit scale in the bind pose; only `bone_hair03` has scal
 ### 1.4 `bone_facing` and `use_delta` (root motion; nothing to do with bind or delta poses)
 
 - `use_delta` (+0x78) only selects how the `bone_facing` channels are used. Bone channels are always replaced.
-- **Clip side (`FUN_0017bb90`, AnimClipSamples_v1).** Each Apply also computes, from the clip's `bone_facing.pos` / `.rotz` samples at t (now) and tPrev (`frame − dFrame`):
+- **Clip side (`FUN_0017bb90`, AnimClipSamples_v1).** Each Apply also computes, from the clip's `bone_facing.pos` / `.rotz` samples at t (now) and tPrev (`frame − dFrame`, both clamped to the clip). dFrame is the driver's +0x18 (`AnimClipDriver_v1 @0x18a870`): this poll's advance `dBeat·speed` **without** the phase snap (+0x20 = advance + snap only counts down the next driver's delay), so snapping a clip to the beat never moves the root:
   - `Δθ = wrapPi(θ(t) − θ(tPrev))`, accumulated as `+= w·Δθ` into `bone_facing_delta.rotz`.
   - `Δp = P(t) − P(tPrev)`, rotated by **−θ(t)**: `x' = x·cosθ + y·sinθ`, `y' = −x·sinθ + y·cosθ`. It is accumulated as `+= w·Δp'` into `bone_facing_delta.pos`.
 - **Servo side.** The servo zeroes both `facing_delta` slots at the start of every frame.
@@ -306,7 +306,7 @@ Self-edges exist; e.g. drummer clip 0: `0→0 @11.65 → 1.65`. `src − dest` i
 - `{drv play <flags|symbol|clip> <mode>}`: the default mode is 4 if omitted (`FUN_00180a10`).
 - Selection (`FUN_0017e9a0` / `FUN_0017e890`): candidates are entries with `(entry.flags & (wanted|restrict|0x80000000)) == that`.
 - The pick is **least-recently-used**: the smallest `entry+0x18` timestamp, with ties going to the first in dta order. The timestamp is updated on pick. This is deterministic, not random.
-- (inf) `restrict_flags` carries the song's `anim_tempo` (kTempoMedium 1 / Fast 2); FINDINGS already matches tempo.
+- `restrict_flags` is only used by the crowd (C_MALE1 ...). The song's `anim_tempo` acts through the set entries' enabled bit (0x80000000), which `MyCharSys_v10` sets per song and venue (§5.1).
 
 ### 3.6 Who plays what
 
@@ -335,16 +335,17 @@ Self-edges exist; e.g. drummer clip 0: `0→0 @11.65 → 1.65`. `src − dest` i
 **Guitarist** (`GuitarCharacter_v1 @0x285978` handlers, `guitarist.dta`). State +0x108: 0 idle, 1 playing, 2 wail, 3 solo, 4 game over.
 
 Mood flags (`FUN_00285440`):
-- if the script `is_doing_badly` is true → `kGuitarBad` (0x4000). Single player: `crowd_rating < 0.2`. Multiplayer: behind the other player by more than max_score/15.
+- if the script `is_doing_badly` is true → `kGuitarBad` (0x4000), **in any state, idle included**. Single player: `crowd_rating < 0.2`. Multiplayer: the other player's score minus this one's above `score_diff` = `{beatmatch base_max_score 0} / 15` (charbase.dta `reset`).
 - else by state: idle `kGuitarIdle`, playing `kGuitarNormal`, wail `kGuitarExtreme`, solo `kGuitarSolo`.
 
 Handlers:
-- `upcoming_gtr_on/off $upcoming_beat` → `set_playing`. `upcoming_wail_*` → `set_wail` (on → state 2; off → back to 1). `upcoming_solo_*` → `set_solo` (on → 3; off → 1 and walk bookkeeping). After each, `FUN_002856a0(upcomingBeat)`:
-  - If the current clip is kGuitarSpecial (0x2000000): only re-queue.
+- `upcoming_gtr_on/off $upcoming_beat` → `set_playing` (`FUN_00284ef8`: state 1 / 0). `upcoming_wail_*` → `set_wail` (`FUN_00284f18`: on → state 2; off → 1, only from 2). `upcoming_solo_*` → `set_solo` (`FUN_00284f60`: on → 3; off → 1, only from 3, plus walk bookkeeping). `FUN_002856a0(upcomingBeat)` runs after set_playing (both ways) and after wail / solo **on** only; the ends start no clip (the per-frame queue below picks the next one):
+  - If the newest *started* clip (`FUN_00180710`) is kGuitarSpecial (0x2000000): only `FUN_002855f8` (queue the mood with kAnimLongest when no blend is in progress).
   - Otherwise: `clip = select(mood)`; create a ClipDriver with `frame = clip.start` and `delay = upcomingBeat − clip.blend_width − beat` (`FUN_0017fd18`), mode 0. The blend starts `blend_width` beats before the event and is complete **on the event beat**, then phase-snaps.
 - **Every frame** (`GuitarCharacter_v13 @0x284390`): if no blend is in progress and the character is not walking or game over, `FUN_002855f8` → `main.drv play <mood flags> kAnimLongest`. The next LRU clip of the mood is queued as soon as the previous one has fully blended in; it takes over at the Longest graph edge near the end, which avoids holding the last frame.
 - `play_intro`: `kGuitarIntro kAnimReset`, then `kGuitarIdle kAnimLongest`. `play_idle`: `kGuitarIdle kAnimReset`. Both also start the hand sets with `0x103`.
-- `start_starpower`: if no Special clip is playing, `kGuitarSpecial kAnimFirst`.
+- `start_starpower` (`FUN_002858c8`): with the walk idle (CharWalk state 0 or 3), no kGuitarSpecial weight in the main clips (`FUN_00285888` = `FUN_00180518(0x2000000) > 0`) and not game over: `kGuitarSpecial kAnimFirst`.
+- `gtr_half_tempo` / `gtr_double_tempo` / `gtr_normal_tempo` (guitarist.dta) → `set_frame_scale` 0.5 / 2 / 1 on the guitarists too (7 songs use them).
 - `set_game_over`: `kGuitarWinFinal`, or `kGuitarWin` / `kGuitarLose`, or `kGuitarLoseWalk` while walking.
 - **Excitement does not choose body clips.** It only drives face poses (`excitement_poses`) and the venue lighting. Bad comes from `is_doing_badly`.
 - Hands: `hand_events` in charsys.dta, `(40 60) fret_pos` and the strum/finger notes, are handled in `FUN_002867b8` / `FUN_002868c8`. (inf) `bone_fret` is placed at an eased (`S`) lerp between `spot_neck_fret<N>` world positions, and the hand drivers play finger/strum clips. These are the IK targets (not traced further).
@@ -359,3 +360,51 @@ Handlers:
 4. **Servos after clip application and a world update:** IK R, IK L (frac = IK-flag weight, stretch, align_quat), then foreTwist L/R (offset ±90°), then upperTwist L/R. For the band: upperTwist only.
 5. `.rotx` = rows `(1,0,0)(0,c,s)(0,−s,c)`; `.roty` = `(c,0,−s)(0,1,0)(s,0,c)`.
 6. Root motion (`use_delta`) only for walk clips; can wait.
+
+---
+
+## 5. Second pass (2026-10-28): what still differed
+
+All [C] unless marked. Checked against the decompile of `MyCharSys_v10`, the
+GuitarCharacter handlers and GameCharacter_v13; reproduced by the golden log
+(§5.6).
+
+### 5.1 Which clips may play: `MyCharSys_v10 @0x280fc0`
+
+After the stage characters are created, for every character of CharMan (the
+guitarists first, then the band) on its main.drv set:
+
+1. `FUN_0017e060(set, -1, 0)`: every entry disabled (bit 0x80000000 of the entry flags cleared).
+2. `FUN_0017e138(set, anim_tempo, 3, 1)`: enabled when `(flags & 3) == 0 || (flags & anim_tempo)`. A clip of the other tempo is never picked (no fallback).
+3. Guitarists only:
+   - venue `(allow_walks FALSE)` → `FUN_0017e060(set, 0x3fe0, 0)`: every walk / turn / stop clip off.
+   - one guitarist: `FUN_00282870` (final_win: the career's final song) → kGuitarWin (0x200000) off, else kGuitarWinFinal (0x4000000) off.
+   - two guitarists: walk clips off; `FUN_0017e2a8(set, 1, f)` for kGuitarIntro, kGuitarLose and kGuitarWin keeps one (it disables the least recently used, ties the first in dta order, so the last one stays); kGuitarWinFinal off.
+4. Every entry: `(exclude_venues ...)` naming the current venue (`FUN_0018f0a0` against `DAT_003637a8`) → off. This is the per-venue restriction: e.g. hair / grim / nu_metal / alterna special (Star Power) clips are off in basement and the small clubs, metal_special_01 in small_club_multi, classic_win_01 in arena, several win / intro clips in theatre / fest / basement / big_club.
+
+A pick (`FUN_0017e890`) needs `(flags & (want | 0x80000000)) == (want | 0x80000000)`; with no candidate `FUN_0017fc28` logs and plays **nothing** (the current clip goes on). gd01 had no enabled bit: it picked across tempos and venues and fell back to other categories.
+
+Data: a clip entry may name a list macro of config/macros.dta, `(metal_win_final WIN_FINAL)`; the reader expands it (flags `kGuitarWinFinal kTempoMediumFast`, realtime, the final-win enter_event). gd01 read no flags for it, so the final-win clip could never be picked.
+
+With two guitarists `MyCharSys_v10` creates only the **drummer** of the band (`strcmp(role, "drummer") == 0`).
+
+### 5.2 The realign characters follow the measure: `GameCharacter_v13 @0x283ac8`
+
+If main.drv has `realign` (drummer, keyboard) and the game runs on the song clock, the beat passed to the character is `beatInMeasure + tickInBeat / 480` from the song-position struct (`0x344258` [8], [9]), filled by `FUN_002617a0` through the MeasureMap `FUN_00239718`: ticks per measure `= num · 1920 / den`, `beat = (tick − measureStart) mod measureLen / 480` (integers). dBeat stays the song's. So a drummer's clips phase-lock to the bar, and AnimDriver realign (§3.2) fires where a bar breaks the clip's alignment (odd bars such as 7/4, 5/4, 3/4; also 2/4 and 6/4 for the align-4 `*_half` clips). 18 of the 58 song MIDIs have bars other than 4/4. gd01 used the song beat, so in those songs the drummer drifted off the bar.
+
+### 5.3 Guitarist handlers
+
+See §3.6 (corrected): set_wail / set_solo **off** only change the state, `is_doing_badly` applies in every state, the Special test uses the newest started clip, start_starpower uses the Special weight and the walk state, the gtr_*_tempo events scale the guitarist. `FUN_002856a0` measures its delay from the unscaled song beat (`DAT_00344268`).
+
+### 5.4 Band
+
+`band_changeup` tests `main.drv get_first_flags` = `AnimDriver_v1 @0x180740` → `FUN_00180ad8` → the newest *started* clip's flags (`FUN_00180710`), not a queued one.
+
+### 5.5 Load-time tempo events
+
+`FUN_00281610` sends the EVENTS at tick ≤ 0 containing `_half_tempo` / `_double_tempo` to the arena while loading, so a song that starts at half tempo has the scale from the first frame.
+
+### 5.6 Golden log (development aid)
+
+`GD01_FIXED_CLOCK=<ms per frame>` makes the song clock advance a fixed step per frame (and seeds the walk), `GD01_ANIMLOG=1` logs every clip a character queues (`anim <model> beat <b> play <clip> mode|at`), `GD01_CLIPLOG=1` the enabled bit of every clip after §5.1. `tools/anim_golden.sh <iso> <song> [ms]` runs a song headless with both and compares the log with the previous run's (`agents/scratch/anim_golden/`, git-ignored): two runs of the same build must match exactly.
+

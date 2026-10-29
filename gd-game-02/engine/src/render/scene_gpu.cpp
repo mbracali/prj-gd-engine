@@ -99,6 +99,16 @@ void ScenePose::clear() {
     lights_.clear();
 }
 
+void ScenePose::forget(const std::unordered_set<const scene::Object*>& objects) {
+    if (objects.empty()) return;
+    auto drop = [&](auto& map) {
+        for (auto it = map.begin(); it != map.end();) it = objects.count(it->first) ? map.erase(it) : std::next(it);
+    };
+    drop(local_), drop(mats_), drop(showing_), drop(animFrames_), drop(envs_), drop(lights_);
+    for (auto it = meshAnims_.begin(); it != meshAnims_.end();)
+        it = objects.count(it->first) || objects.count(it->second.anim) ? meshAnims_.erase(it) : std::next(it);
+}
+
 const ScenePose::EnvState* ScenePose::env(const scene::Environ* e) const {
     auto it = envs_.find(e);
     return it == envs_.end() ? nullptr : &it->second;
@@ -152,7 +162,7 @@ float ScenePose::endFrame(const scene::Object* anim) {
         if (!k->texKeys.empty()) f = std::max(f, k->texKeys.back().frame);
         return f;
     }
-    if (auto* f = anim->as<scene::AnimFilter>()) return f->end;
+    if (auto* f = anim->as<scene::AnimFilter>()) return f->dir && f->dir->resolve(f->anim) ? f->endFrame() : 0.0f;
     if (auto* l = anim->as<scene::LightAnim>()) return scene::lastFrame(keysOf(*l)->colorKeys);
     if (auto* e = anim->as<scene::EnvAnim>()) {
         const scene::EnvAnim* k = keysOf(*e);
@@ -174,7 +184,7 @@ void ScenePose::setFrame(const scene::Object* anim, float frame) {
     } else if (auto* m = anim->as<scene::MatAnim>()) {
         matAnim(*m, frame);
     } else if (auto* f = anim->as<scene::AnimFilter>()) {
-        if (const scene::Object* a = f->dir ? f->dir->resolve(f->anim) : nullptr; a && a != f) setFrame(a, f->filter(frame));
+        if (const scene::Object* a = f->dir ? f->dir->resolve(f->anim) : nullptr; a && a != f) setFrame(a, f->filter(frame, f->animatable.rate == 1 ? 480.0f : f->animatable.rate == 3 ? 1.0f : 30.0f));
     } else if (auto* g = anim->as<scene::Group>()) {
         for (const std::string& n : g->objects)
             if (const scene::Object* o = g->dir ? g->dir->resolve(n) : nullptr; o && o != g) setFrame(o, frame);
@@ -240,7 +250,8 @@ std::vector<float> meshAnimVertices(const scene::Mesh& geometry, const scene::Me
     return v;
 }
 
-// RndTransAnim::SetFrame [I: GH1's order, same fields in GH2]: rotation keys
+// RndTransAnim::SetFrame [I: GH1's order, same fields in GH2; the splines
+// [C] 0x821B6B00]: rotation keys
 // replace the rotation (scale keys then scale it), scale keys alone rescale
 // the normalised rotation, position keys replace the position.
 void ScenePose::transAnim(const scene::TransAnim& a, float frame) {
@@ -249,7 +260,7 @@ void ScenePose::transAnim(const scene::TransAnim& a, float frame) {
     const scene::TransAnim& k = *keysOf(a);
     scene::Xfm x = local(target);
     std::array<float, 3> s{1, 1, 1};
-    const bool hasScale = scene::sampleLinear(k.scaleKeys, frame, s);
+    const bool hasScale = scene::sampleTrans(k.scaleKeys, frame, k.scaleSpline, s);
     scene::Quat q;
     if (scene::sampleRotation(k.rotKeys, frame, k.rotSlerp, q)) {
         scene::quatToRot(q, x.rot);
@@ -259,7 +270,7 @@ void ScenePose::transAnim(const scene::TransAnim& a, float frame) {
         scaleRows(x.rot, s);
     }
     std::array<float, 3> p;
-    if (scene::sampleLinear(k.transKeys, frame, p)) x.pos = p;
+    if (scene::sampleTrans(k.transKeys, frame, k.transSpline, p)) x.pos = p;  // trans_spline: 0x8226E560
     local_[target] = x;
 }
 

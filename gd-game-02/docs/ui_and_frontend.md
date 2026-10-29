@@ -71,6 +71,38 @@ turns them into GH2's kPad buttons, the way gd01's `App::uiButton` does:
 - In a song, Back (Esc, a joypad's B) pauses like Start (gd01); game_screen
   pauses on kPad_Start, pause_screen resumes on it (`pause.dta`).
 - Esc three times in a row on the main menu quits (gd01).
+- The main menu's yellow fret (any controller's; a joypad's RB, and its
+  yellow Y button) opens GAMEPADS, gd01's main-menu item (the port's; the
+  help bar shows a yellow GAMEPADS item before the strum bar). GH2 enters its
+  cheat codes there with the same frets, so it opens once no other button
+  follows within the codes' 750 ms; a completed code or any other button
+  cancels it (`UiManager::yellowButton`). Clicking the help item opens it at
+  once. GAMEPADS' back returns to the main menu.
+- The mouse (gd01's, `guidelines/universal_launcher.md` at the repository root):
+  every panel's view records where it drew each button, list row, slider,
+  check box, picture and text entry last frame, projected to menu units
+  (`gfx::UiView::hits`). `PanelObj::mouse` focuses the component under the
+  pointer, the nearest centre first, as the pad would (`component_focus`, the
+  help bar updates). Only components the navigation reaches count. A list
+  takes clicks only: the selection moves to the row with Up / Down presses,
+  then select. A click selects. A screen with nothing to choose from
+  continues on a click. The help bar's items act as their buttons. A right
+  click is back (kPad_Tri) and the wheel is Up / Down. The port's own screens
+  test their own rows. The pointer shows while it moves (only while the
+  window has focus), hides 3 s later, on a key or button press and during a
+  song (`App::updateCursor`). Enhanced Options > Enable Mouse Selection turns
+  it off. Touch taps are clicks.
+- The input layer (`Input`, gd01's) never presses by itself:
+  - A D-pad that SDL's mapping reads from an axis (`dpleft:-a6`, common for
+    adapters and guitars) is judged against that axis's rest, read as the
+    controller connects and for 300 ms after, with hysteresis (half way to
+    press, a third to release). SDL's own test is the middle of the range,
+    whatever the rest. An axis resting off centre held left (or chattered)
+    for good, and the menus' key repeat (hold 1000 ms, repeat 80 ms) moved
+    sideways by itself.
+  - A button held as the controller connects counts once released.
+  - A controller that goes away releases what it held.
+  - The menu controls' rebinding takes buttons and keys only.
 - Two players (M10.2, `docs/multiplayer.md`): each controller is a pad slot;
   after the controller select a pad's buttons are its player's. Without a
   second controller the keyboard splits: player 2 on H J K L ; (frets), N / M
@@ -93,6 +125,41 @@ transition. (Before, only the outgoing / incoming panels were posed and
 nothing was reset: going back, the main menu kept its forward exit's camera
 under the backward entrance and came back off to one side.)
 
+The backward groups hold AnimFilters on the forward TransAnims
+(`in_backward.filt` -> `meta_cam_right_out.tnm`, `out_backward.filt` ->
+`meta_cam_right_in.tnm`) with start 500, end 0. RndAnimFilter (Scale
+0x822078D8, SetFrame 0x822079B0, Start / EndFrame 0x82207AF8 / 0x82207B80)
+[C]: without a period the scale is negated when end < start, and the frame
+is scale x frame + offset + (start - end), kept in the range: those filters
+play the forward moves backwards. Before bug-fix 4 the port ignored the
+reversal, so going back played the forward exit / entrance again.
+
+Panel triggers: UIPanel Enter (0x82373EB8 -> 0x823737F0) sends `ui_enter`
+and then `ui_enter_forward` or `ui_enter_back` (the transition's direction),
+Exit (0x82374010) `ui_exit` and `ui_exit_forward` / `ui_exit_back` [C]. The
+data uses the directional ones only in `meta_bricks.milo` /
+`meta_bricks_on.milo`: `meta_light_off.mnm` on ui_exit_back,
+`meta_light_on.mnm` on ui_enter_back. meta_bricks is a subdirectory of
+main, options, training and most menus, and GH2 loads it once (ObjDirPtr
+reuses a loaded directory), so its light is one state for all of them; the
+port's views pose their own copies, so `UiManager::setViewFrame` gives an
+animation of a shared subdirectory to every view showing the same object
+(and to views made later). Before, options or training left with Back kept
+their copy dark and came back darker (`--walktest back` checks the bricks'
+light).
+
+GH2 counts each panel's screens (0x823768E0); a panel no screen holds
+unloads (UIPanel Unload 0x82376C90 deletes its directory) and with it the
+last reference to meta_bricks, so the next panel that loads it starts from
+the file's state, its light on [C]. The port keeps its panels loaded: once
+a transition is over, a shared object no panel of the current (or a pushed)
+screen shows forgets its frames (`UiManager::releaseSharedFrames`) [I: the
+moment]. Before, the career's difficulty screen left with Back (light off)
+for Choose Band came back dark, and so did every bricks screen reached
+without a Back on the way (Play Live Show, the store...), until a later
+Back turned the light on for a few seconds (gd-backlog GD02-077 / 081;
+`--walktest career` checks the light).
+
 ### Confirmed
 
 - Quick play list (`0x82287600` / `0x822C5A68`): the first two tiers' songs
@@ -113,12 +180,33 @@ under the backward entrance and came back off to one side.)
 - Back (`0x8229EED0`): kPad_Tri after the focus panel declines, to the
   screen we came from if it allows back (`0x822A0408`).
 - Text entry (`0x821433B0`): X adds, Tri removes, up / down picks, Start
-  finishes.
+  finishes. Its two Texts copy the type's template and are aligned middle
+  left (0x21, Update 0x82144558) whatever the template's (entry_profile.txt
+  is centred): the name grows left to right. Each change moves the picked
+  character and both arrows by the entered text's change of width
+  (0x821424B0); the arrows keep their x and sit arrow_offset above
+  (char_back) / below (char_next) the picked character's extent scaled by
+  text_scale (0x82142218), the picked character scaled by text_scale
+  (0x82142120). GH2 also takes typed keys (backspace, 0x20..0x7E,
+  0x82143880; not in the port). `--walktest career` checks the name's
+  start stays put and the picked character follows it.
 - High score defaults (`0x822A4988`): 5 per song and difficulty, 50000 down
   to 10000, names from `highscore_dummy_N`.
 - Headline tokens `0x82291428`; `is_any_button` = buttons below 16.
 - Credits rows `0x8229B590`, music `0x8229B310`. Help bar `0x8229A8C0` /
-  `0x8229A818` / `0x82299CD8` (partly).
+  `0x8229A818` / `0x82299CD8` (partly): each item is a Copy of
+  help_bar.mesh / help_bar_strum.mesh (0x82299950, 0x82299778) with its own
+  transform (the strum bar is 2 wide, 64 units; drawn at the pen's own
+  transform it was half as wide, "broken in half"), and help_bar.txt
+  (0x822994F0), placed along the pen; the background box (help_box_left /
+  mid / right) is drawn only around the items (0x822998D0, 0x82299698):
+  the port does not draw it yet and hides the box meshes (left showing
+  they stood in the middle of every screen). The port lays the items out
+  in the help bar's own space (helpbar.view, on the metacam's camera), so
+  they keep together while a transition turns the camera (they drifted
+  against their icons by a few pixels on every screen change) [I: GH2
+  sets the items' world places from the start meshes' (0x82299CD8);
+  whether its help bar slides with the transition is not confirmed].
 
 ### Inferred
 
@@ -154,10 +242,23 @@ docs/career_and_store.md.
 The Glitches (the port's, as gd01's): every save has a band named "The
 Glitches" (`Career::ensureGlitches`): a fresh save in its last slot, a save
 without one in its last free slot (when all eight are taken it is not
-added), each time the save is read. It is a band like any other, $50 to
-start, with GH2's default look at every difficulty (main.dta's
-reset_player_settings: punk1, the first guitar and skin), so its career
-starts at the venue list.
+added), each time the save is read. It has GH2's default look at every
+difficulty (main.dta's reset_player_settings: punk1, the first guitar and
+skin) and **everything unlocked** (`campaign::unlockGlitches`, GD02-090),
+written into its records as GH2's rules leave a band that won the tour at
+every difficulty: every tier venue unlocked and completed (Easy's seven),
+every tier song and store song unlocked, every item the store sells bought
+(guitars with the tour rewards, finishes, characters, outfits, videos),
+$1,000,000, and the save's pro face-off (a tour won). Its encores are
+unlocked at every difficulty, Easy's too (a port rule for this band only;
+GH2 never unlocks Easy's). It runs on the fresh save and on every save
+read (shared code, every platform), so an older Glitches band is upgraded
+and the save marked. Quick play then offers every song, as GH2 offers any
+band's unlocked songs. Not included: co-op's bass rewards (the save's,
+Campaign +0x4c, not a band's: presetting them would remove co-op's award
+flow from every save; owner's call). Checks: `--uitest` campaign (an older
+band upgraded once, everything unlocked at every difficulty) and the
+walktests' career.json check.
 
 ## Port additions
 
@@ -168,7 +269,11 @@ starts at the venue list.
   port's **Enhanced Options** after Video Settings: a copy of Manage Band's
   button (the flattest), and the seven share the six's column down to a row
   below Credits, scaled to the closer rows (`UiManager::portPanelLoaded`).
-  Options shows GH2's own help bar (its `(helpbar ...)`).
+  The rows keep options.milo's own gaps (audio 42, video 12.5, data -20,
+  memory card -52, bonus -84, credits -109 [C data]: Credits is 25 below
+  Bonus Videos, the others about 32 apart), Enhanced Options taking a copy
+  of the video / data gap; spaced evenly before, Credits sat a few pixels
+  low (GD02-069). Options shows GH2's own help bar (its `(helpbar ...)`).
 - Audio Settings' help bar: audio_settings_panel shows it from its
   FOCUS_MSG (`update_help_display`); the port now sends a panel's own
   component_focus for the focus it enters with [I: UIPanel Enter sets the
@@ -183,10 +288,17 @@ starts at the venue list.
   titles) on a dark glass box, with the focused setting's explanation
   bottom right and GH2's help bar (select, back, up / down). Select (or
   left / right) changes the focused setting; a guitar needs only the frets
-  and the strum bar. Working: Screen Mode (windowed / full screen / no
-  border), In-Game Max FPS (60 / 120 / 240), Show FPS Counter, Internal
-  Resolution (the window's own, 448p (ps2), 480p, 720p (x360), 800p ...
-  4K), and Gamepads (opens the GAMEPADS screen). The PS2's GH2 drew 640 ×
+  and the strum bar. Its layout, widgets and flow are gd01's Enhanced
+  Settings: collapsible sections (Steam Deck starts collapsed), separators,
+  check boxes, dropdowns, framed buttons, the warning sign on rows not built
+  yet, the explanation box bottom right, the mouse, and the page sliding with
+  the transition (`ui/port_draw.*`;
+  `guidelines/universal_launcher.md` at the repository root). The names keep "AND",
+  since helveticablack has no `&`. Working: Gamepads (opens the GAMEPADS
+  screen), Enable Mouse Selection, Screen Mode (dropdown: windowed / full
+  screen / no border), In-Game Max FPS (dropdown: 60 / 120 / 240), Show FPS
+  Counter (check box), and Internal Resolution (dropdown: the window's own,
+  448p (ps2), 480p, 720p (x360), 800p ... 4K). The PS2's GH2 drew 640 ×
   448 (gd01's docs); the 360's draws 1280 × 720 (0x823032C8 sets the back
   buffer 720 tall, 1280 or 960 wide [C]). Every other entry is greyed, "NOT
   AVAILABLE YET", and cannot be chosen. Values are saved in
@@ -194,21 +306,28 @@ starts at the venue list.
   at once (`App::applyEnhanced`); Internal Resolution draws every frame
   into an off-screen target of that height and scales it to the window as
   it is presented (`RenderDevice::setInternalHeight`).
-- The live backdrop (`App::menuBackdrop`): the second venue (small1) loads
-  when the screen enters, with the band playing the first song of its tier
-  silently on the wall clock (the song's MIDI, beats and events; the venue's
-  chorus / verse light presets in turn every 20 s instead of the song's
-  cues, whose blackouts left the band in the dark). The camera stands in
-  front of the stage (from the drummer towards the singer), on the singer's
-  chest, far enough for the guitarist and the drummer, above the crowd's
-  heads, swaying slowly and following the singer; it looks a little to the
-  singer's left so the band is on the right of the list. The venue unloads
-  when the screen exits.
-- GAMEPADS screen: gd01's panel, reached only from Enhanced Options
-  (CONTROLS AND GAMEPAD > Gamepads); back returns there. It is no longer in
-  Options or on the main menu's help bar. The help bar keeps its recoloured
-  fret3 icon (the disc's `hb_fret3.tex` is an unused placeholder without
-  alpha) for any fret3 item, though none is shown now.
+- The still backdrop (`App::menuBackdrop`, gd01's posed band): the second
+  venue (small1) loads when the screen enters. Its band runs 45 fixed 33 ms
+  steps (1.5 s), from a quarter into the first song of its tier, silent, under
+  the venue's chorus light preset, and then nothing updates again (up to 5 s
+  more while the singer has not shown). The camera (the owner's rule in
+  `guidelines/universal_launcher.md`, gd01's pose as the model) is a still
+  close-up of the singer's head, put right of the list's box (0.3 of the
+  half width right of the centre, 0.25 up), from the audience's side 0.3
+  rad round to one flank, 2.6 x the band's half width away (140..220
+  units, never under 110: a close director shot at that moment put the
+  camera inside the singer and the shot showed no one, GD02-074), so the
+  drummer and the guitarist stand behind and beside the singer [I: the
+  port's framing]. The panel darkens the shot slightly. The venue unloads
+  when the screen exits. `--walktest enhanced` (twice) and `lose` (after a
+  song) check the singer is in the right half of the shot.
+- GAMEPADS screen: gd01's panel (layout, rows, flow, live highlight,
+  rebinding, per-controller type, the mouse and its "x" that clears a
+  binding), in GH2's menu font and colours (`ui/port_draw.*`). It opens with
+  the main menu's yellow fret (above) or Enhanced Options > Gamepads; back
+  returns where it came from. The help bar's yellow icon is the green one
+  recoloured: the disc's `hb_fret3.tex` is an unused placeholder without
+  alpha.
 
 ### Cheats
 
@@ -228,7 +347,7 @@ The codes (G_* = the 360 guitar's frets):
 | Air Guitar | Y B Y O Y B | works: `$cheat_guitar` is every guitarist's guitar (0x822B6250 [C]), `air_guitar.milo` |
 | Performance Mode | B B Y B B O B B | works: the track's and HUD's scripts hide them (the HUD's `on_reset` now runs after its reset, 0x8268E440) |
 | Hyper Speed | B O Y O B O Y Y | works: track_speed × 1.5 (0x826967B8 [C]) |
-| Flaming Head | Y O Y Y O Y Y O | the code works, nothing burns: the band's particles are STUBs (backlog) |
+| Flaming Head | Y O Y Y O Y Y O | the code works, nothing burns: the band's particles are STUBs (`gd-backlog.md`) |
 | Eyeball Head Crowd | Y O B B B O Y | works (char_objects.dta's crowd `enter`) |
 | Monkey Head Crowd | O Y B B Y O B B | works |
 
@@ -264,7 +383,7 @@ next to it to start.
 
 - `--uitest`: 237 `new` objects, 82 panel milos, 357 component names checked
   in reachable handlers.
-- `--walktest quickplay|lose|pause|attract|career|career_full|back|enhanced|cheats`: drives the menus
+- `--walktest quickplay|lose|pause|attract|career|career_full|career_song|back|enhanced|cheats|mouse|gamepads|stickyaxis`: drives the menus
   with scripted input and checks the screen order, the score in
   `career.json` and the endgame photo (quickplay), the band's look in
   `career.json` (career: Choose Band > NEW BAND, character / outfit / guitar / skin
@@ -278,7 +397,17 @@ next to it to start.
   enters Air Guitar and Hyper Speed's codes at the main menu (on), then Air
   Guitar's again after a pause (off); quickplay and career check the fresh
   `career.json` has The Glitches.
-  Not covered: held keys, the GAMEPADS screen, volume sliders, lefty,
+  mouse goes main → Options → Enhanced Options with the mouse alone
+  (hover, clicks, a dropdown option, right click, the help bar's BACK);
+  gamepads opens GAMEPADS with the keyboard's yellow fret, rebinds the
+  keyboard's Whammy to E (saved in `controllers.json`), goes back, then
+  clicks the help bar's GAMEPADS; stickyaxis plugs in a virtual adapter
+  whose D-pad is an axis resting at -32768 (no left / right press in 2 s;
+  moved, one right press). Wave B adds: quickplay / pause / lose check a
+  menu sound plays after the song; career checks the band name grows left
+  to right, the difficulty screen comes back lit after Back -> Choose Band
+  -> the band, and the locked portraits; enhanced (twice) and lose (after
+  the song) check the backdrop's band. Not covered: held keys, volume sliders, lefty,
   the credits ending, bonus videos.
 - `GD02_UILOG=1`, `GD02_SCREEN=<screen>`, `GD02_SKIP_BOOT=1`,
   `GD02_SKIP_MOVIES=1`, `GD02_DEBUG_MENU=1` (the old song list),
@@ -287,7 +416,13 @@ next to it to start.
   `s<ms>:…`; `<ms>:k<SDL key name>` (`kTab`, `kReturn`, `k1`) is a real
   key and `<ms>:j<SDL button>` (`ja`, `jstart`, `jdpup`) a button of
   `GD02_VIRTUAL_PAD`'s controller, both through the input layer (bindings,
-  the frets' menu buttons) instead of straight to the menus.
+  the frets' menu buttons) instead of straight to the menus;
+  `<ms>:j<axis>=<v>` (`jleftx=-20000`, `ja6=0` the controller's own axis 6)
+  moves one of its axes; `hover<x>_<y>`, `click<x>_<y>`, `rclick<x>_<y>`
+  (menu units), `wheelup` / `wheeldown` are the mouse.
+  `GD02_VIRTUAL_PAD=<vid>:<pid>:dpadaxis=<rest>` is a pad whose D-pad is its
+  axes 6 / 7, axis 6 resting at `<rest>`. `GD02_INPUTLOG=1` logs every input
+  action. `GD02_SAVE_DIR` also holds `controllers.json`.
 
 ## Not done
 
@@ -299,8 +434,7 @@ next to it to start.
 - Volume sliders apply from the next song or preview.
 - Tutorial and practice screens are generic panels (M10 /
   M11). The career and the store: docs/career_and_store.md.
-- Help bar background boxes; GAMEPADS font sizes approximate.
-- gd01's mouse in the menus (hover focuses, click selects) is not ported.
+- Help bar background boxes.
 - The main menu's words are stacked tightly (re-checked in bug-fix 3: rows
   14 units apart, each `fit_text` 1 into 9 units tall against size 30 ×
   leading 0.7 (Text +0x11c × +0x100, 0x821CFF08), not the glyphs' height):

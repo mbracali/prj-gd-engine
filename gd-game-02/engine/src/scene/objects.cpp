@@ -578,10 +578,23 @@ const std::map<std::string, Decoder>& decoders() {
 
 }  // namespace
 
-float AnimFilter::filter(float frame) const {
-    float f = frame * scale + offset;
-    float lo = std::min(start, end), hi = std::max(start, end);
-    float len = hi - lo;
+// RndAnimFilter::Scale (0x822078D8) [C]: without a period the scale, negated
+// when the range runs backwards (end < start: metacam's in_backward.filt
+// plays meta_cam_right_out.tnm from 500 down to 0); with one, the range over
+// the period.
+float AnimFilter::scaleOf(float framesPerUnit) const {
+    if (period == 0) return end < start ? -scale : scale;
+    return (end - start) / (framesPerUnit * period);
+}
+
+// RndAnimFilter::SetFrame (0x822079B0) [C]: scale x frame + offset (+ the
+// range's length when it runs backwards), then kept in the range (0), looped
+// (1) or shuttled (2 [I: the later Harmonix code's]).
+float AnimFilter::filter(float frame, float framesPerUnit) const {
+    const float base = offset + (end < start ? start - end : 0.0f);
+    float f = scaleOf(framesPerUnit) * frame + base;
+    const float lo = std::min(start, end), hi = std::max(start, end);
+    const float len = hi - lo;
     switch (type) {
         case 1:  // loop
             if (len > 0) f = lo + std::fmod(std::fmod(f - lo, len) + len, len);
@@ -597,6 +610,14 @@ float AnimFilter::filter(float frame) const {
             break;
     }
     return f;
+}
+
+// RndAnimFilter::EndFrame (0x82207B80) [C].
+float AnimFilter::endFrame(float framesPerUnit) const {
+    float sc = scaleOf(framesPerUnit);
+    if (sc == 0) sc = 1;
+    const float f = (end - (offset + (end < start ? start - end : 0.0f))) / sc;
+    return type == 2 ? f * 2 : f;
 }
 
 namespace {

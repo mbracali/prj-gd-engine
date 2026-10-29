@@ -78,8 +78,11 @@ public:
     void stop(VoiceId id);
     // Releases every voice.
     void stopAll();
-    // Voices hold their place while paused (SampleInst360 pause 0x8268A018);
-    // the sends' reverb tails go on.
+    // Pauses (or resumes) the voices playing now: they hold their place
+    // (SampleInst360 pause 0x8268A018) and the sends' reverb tails go on.
+    // Voices started later play: GH2's pause_all_sfx / Game::SetPaused
+    // pause each Sfx's current instances (0x822E7C68 -> 0x822ECB40), not
+    // the Synth, so the menus after a song keep their sounds [C].
     void setPaused(bool paused);
     // `synth set_master_vol` (dB, -96 = silent): the Synth's master Fader,
     // in every Sfx's fader group (Sfx ctor 0x822EE190) [C].
@@ -87,6 +90,7 @@ public:
     float masterDb() const { return masterDb_.load(); }
     bool playing(VoiceId id) const;
     int voices() const;
+    int liveVoices() const;  // the voices not paused
     uint64_t started() const { return started_.load(); }
 
     // Mixes `frames` stereo frames into `out` (overwrites) without a device
@@ -112,13 +116,13 @@ private:
         std::array<float, 5> sendGains{};
         sfxdsp::Envelope env;
         bool ended = false;
+        bool paused = false;
     };
     SDL_AudioStream* stream_ = nullptr;
     mutable std::mutex lock_;
     std::vector<Voice> voices_;
     std::vector<std::weak_ptr<Bus>> buses_;
     VoiceId next_ = 1;
-    bool paused_ = false;
     std::atomic<float> masterDb_{0};
     std::atomic<uint64_t> started_{0};
     float master_[6][sfxdsp::kBlock] = {};

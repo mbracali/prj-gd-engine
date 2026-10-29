@@ -146,6 +146,16 @@ struct DeviceInfo {
     bool clipDepthZeroToOne = false;  // projection: depth 0..1 instead of -1..1
 };
 
+// GD02_PERF=1: what the device did since the last read (perfStats).
+struct DevicePerf {
+    uint64_t draws = 0, uniformBytes = 0, bufferBytes = 0, textureBytes = 0;
+    uint64_t created = 0;    // textures, buffers, targets and programs made (each one a driver allocation)
+    uint64_t presentNs = 0;  // the blit to the window, pacing and SDL_GL_SwapWindow
+    uint64_t fenceNs = 0;    // waiting for the frame before last
+    uint64_t paceNs = 0;     // of presentNs: the software pacing's sleep
+    int frames = 0;
+};
+
 class RenderDevice {
 public:
     virtual ~RenderDevice() = default;
@@ -204,6 +214,8 @@ public:
     // aspect), which drawableSize then reports, and scaled to the window as
     // it is presented. 0: straight to the window.
     virtual void setInternalHeight(int height) = 0;
+    // The counters since the last call, then cleared.
+    virtual DevicePerf takePerf() = 0;
 };
 
 // The window flags and GL attributes the device needs: call before

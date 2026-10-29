@@ -12,13 +12,32 @@
 class Character;
 struct SongEvent;
 
+// The pose hold (char+0xd8, FUN_002b0838; every Character has one, it acts
+// with bone.servo use_delta only): a position and a facing (each optional,
+// 1e30 = none). While a clip waits to start (FUN_001958b0) the root is eased
+// so that, when it starts, the guitarist stands at the hold position facing
+// the hold yaw. Set by the placement (GuitarCharacter_v7 @0x284eb8: the start
+// spot, the lose teleport) and where a walk ends (FUN_00197388 state 3);
+// cleared when a walk starts steering, at game over and on reset.
+struct PoseHold {
+    bool hasPos = false, hasYaw = false;
+    std::array<float, 3> pos{};
+    float yaw = 0;
+    float tolerance = 0, gain = 1;  // +0x20 / +0x24 (FUN_002b0868): no data changes them
+
+    void set(const Xfm& x);  // FUN_00195878
+    void clear() { *this = PoseHold{}; }
+    // FUN_001958b0, once per frame after the character poll (Character_v13).
+    void apply(Character& c) const;
+};
+
 // The guitarist's walks between the venue's walk spots (CharWalk at
 // char+0xdc and GuitarCharacter_v13; docs/camera_walk_crowd_lighting.md §2,
 // docs/character_polish_plan.md §4). The last spot is a hub every walk passes
 // through. A walk is a turn clip, walk-cycle loops and a stop clip, laid out
 // in 2-beat steps to cover the path (with a speed correction for the rest);
 // the clips' bone_facing root motion moves the guitarist, steering keeps him
-// on the path, and a pose hold keeps where he stopped across mood clips.
+// on the path, and the pose hold keeps where he stopped across mood clips.
 class GuitarWalk {
 public:
     struct Config {
@@ -51,9 +70,11 @@ public:
     int nearestSpot(const std::array<float, 3>& pos, bool withHub = true) const;
     // FUN_001971e8: stops a walk (and drops its unstarted queued clip).
     void cancel(Character& c);
-    // lose_teleport (arena_game.dta, the lose01 shot): within 72 units of the
-    // singer's pelvis, snap to the nearest non-hub spot.
+    // lose_teleport (arena_game.dta, the lose01 shot; FUN_00283610): within 72
+    // units of the singer's pelvis, placed on the nearest non-hub spot.
     void loseTeleport(Character& c, const std::array<float, 3>& singerPelvis);
+    // GuitarCharacter_v7: placed on a spot (sets the hold too).
+    void place(Character& c, const Xfm& spot);
 
 private:
     using V3 = std::array<float, 3>;
@@ -65,13 +86,9 @@ private:
     bool startWalkTo(Character& c, int dest, int excitement, int mode);
     bool layout(Character& c);
     void steer(Character& c, float dBeat);
-    void hold(Character& c, float dBeat);
-    void guard(Character& c, float dBeat);
 
 public:
     int state() const { return state_; }
-    // Puts a standing guitarist exactly back on his spot; true when he moved.
-    bool snapHome(Character& c);
 
 private:
     void setSegment(int seg);
@@ -95,18 +112,7 @@ private:
     int k_ = 0, seg_ = 1, planClip_ = -1;
     V3 dir_{0, 1, 0};
     float corr_ = 0, destYaw_ = 0;
-    // The pose hold (char+0xd8): position and facing kept across mood clips.
-    struct Hold {
-        bool hasPos = false, hasYaw = false;
-        V3 pos{};
-        float yaw = 0;
-    } hold_;
-    float lastBeat_ = 0;
-    bool polled_ = false, gameOver_ = false;
+    PoseHold hold_;  // char+0xd8
+    bool gameOver_ = false;
     float busyBeats_ = 0;  // beats spent in a walk (the watchdog)
 };
-
-// [I] The port's standing guard: eases a character's root back to `pos` /
-// `yaw` (a spot) and never lets it be more than 60 degrees or 15 units off,
-// so the clips' root motion cannot turn a standing guitarist around.
-void standGuard(Character& c, const std::array<float, 3>& pos, float yaw, float dBeat);

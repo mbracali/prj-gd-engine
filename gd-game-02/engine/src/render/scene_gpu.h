@@ -39,6 +39,9 @@ public:
     };
 
     void clear();
+    // Drops every state kept for these objects (an unloaded milo's: a new
+    // object at a freed one's address must not inherit it).
+    void forget(const std::unordered_set<const scene::Object*>& objects);
     // Plays `anim` at `frame`: TransAnim (its Trans), MatAnim (its Mat),
     // AnimFilter (the filtered anim at the filtered frame), Group (every
     // member, as RndGroup::SetFrame does), MeshAnim, LightAnim (its Light's

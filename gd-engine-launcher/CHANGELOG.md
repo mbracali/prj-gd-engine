@@ -1,5 +1,84 @@
 # Guitar Dream Universal Launcher: changes
 
+## 0.1.6
+
+Fixes
+- Android: the launcher no longer touches the window mode (no window mode
+  there: leaving full screen, sizes and the minimum size are desktop-only).
+- Android: Guitar Hero (gd-game-01) is in the APK ("This launcher build has
+  no gd-game-01 module" is gone). It runs with OpenGL ES 3.0, as its own APK
+  does; its AI upscalers (Vulkan FSR / DLSS) are not available on Android.
+- Android 15: a disc image chosen with Load ISO could not be used ("Cannot
+  open /data/data/io.github.mbracali.gdul/files/original_isos", "Cannot open
+  /proc/self/fd/..."). The launcher no longer copies the disc into its own
+  folder (a 7 GB copy that could fail for lack of space): it reads the disc
+  where it is, through the file the file dialog gave, and keeps the right to
+  read it after a restart. If that right is lost or the file is not on the
+  device (a cloud drive), it says so and asks to choose the disc again.
+- Android: the launcher, Guitar Hero and Guitar Hero II each keep their own
+  settings and saves (they shared one folder, so one game could overwrite
+  the launcher's disc choices); Guitar Hero II's earlier saves come along.
+- Android: "Where we look for discs" offers Load ISO instead of an "Open
+  folder" button no app on Android can open.
+
+Downloads
+- Every launcher download, on every system, carries the module of every
+  ready game; a build without one fails (scripts/build.sh, verify_bundle.sh),
+  and the launcher says at start when a ready game's module is missing,
+  whatever its manifest lists.
+- Steam Deck is back: gdul-<version>-steamdeck-x86_64.tar.gz, built in
+  Valve's Steam Runtime 3 ("sniper"), with every game set up for the Deck
+  out of the box (Guitar Hero and Guitar Hero II: full screen at 1280 x 800,
+  60 FPS, lighter effects; your saved settings still win) and STEAM-DECK.txt
+  (adding it to Steam as a non-Steam game, Gaming Mode tips).
+
+New
+- Steam Deck: the launcher recognises a Deck (also the plain Linux download:
+  SteamDeck=1, or the Deck's board) and tells the games, which then start
+  with their Steam Deck settings; the Deck's built-in controls work in
+  Gaming Mode (Steam's virtual controller) and without Steam (SDL's Steam
+  Deck driver).
+- Command line: --play <game> and --explore <game> start a game or its
+  models at once (--iso <file> for this run's disc, -- <args> for the game,
+  --exit-after to quit afterwards with the game's exit code; otherwise the
+  list comes back), --list (games, versions, ready, discs found), --version,
+  --help. On Windows the text goes to the terminal the launcher was started
+  from.
+- Explore models: characters start in their rest pose (Guitar Hero II's in a
+  T-pose), so no arm or hand goes through the body; Next animation plays
+  the clips, then the rest pose again. A "Show instrument" checkbox (click,
+  I, or the left stick's click) shows or hides a character's guitar, bass or
+  drum kit.
+
+Games
+- Guitar Hero (gd-game-01) 1.1.6 and Guitar Hero II (gd-game-02) 0.1.6 (see
+  their changelogs). Guitar Hero II shows 79% complete.
+
+## 0.1.5
+
+New
+- Guitar Hero II 0.1.5: the mouse in its menus, the GAMEPADS screen and the
+  Enhanced Options laid out as in Guitar Hero, and controllers that no longer
+  press left / right by themselves.
+
+## 0.1.4
+
+Fixes
+- The launcher is always a window: after a game that ran full screen (or
+  maximized it, hid the cursor or grabbed the mouse), it leaves full screen,
+  waits for the system to finish (Windows and macOS do it asynchronously) and
+  puts its window back at the size and place it had. It never goes full
+  screen by itself.
+- Steam Deck (Gaming Mode) and Steam Input: the list sees Steam's virtual
+  controller, as the games do, and one press seen from two controllers at
+  once acts once.
+
+New
+- Menu sounds without a Guitar Hero disc: the launcher's own, made at start
+  (plucked strings and a small power-chord sting, nothing taken from a game),
+  at the same loudness as the disc's. With a Guitar Hero disc it still uses
+  the game's own.
+
 ## 0.1.3
 
 Fixes

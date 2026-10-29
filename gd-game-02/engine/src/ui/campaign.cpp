@@ -238,7 +238,8 @@ bool unlockedAt(UiManager& ui, Career::Profile& p, int d, const std::string& sym
         auto it = rec.find(sym);
         return it != rec.end() && it->second.unlocked;
     }
-    if (d == 0) return false;  // easy has no encores
+    if (isGlitches(p)) return true;  // the port's band: every encore, Easy's too
+    if (d == 0) return false;        // easy has no encores
     return encoreUnlocked(ui, p, d, sym);
 }
 
@@ -542,6 +543,37 @@ void setCareerSong(UiManager& ui) {
         if (!(p && passed(ui, *p, d, songs[i]))) break;
     }
     s.song = songs[pick];
+}
+
+bool isGlitches(const Career::Profile& p) { return p.inUse && p.name == Career::kGlitches; }
+
+bool unlockGlitches(UiManager& ui) {
+    constexpr int kCash = 1000000;
+    const Config& c = config(ui);
+    Career& career = ui.career();
+    bool changed = false;
+    const auto set = [&](bool& flag) {
+        if (!flag) flag = true, changed = true;
+    };
+    for (Career::Profile& p : career.profiles) {
+        if (!isGlitches(p)) continue;
+        for (int d = 0; d < Career::kDifficulties; ++d) {
+            auto& rec = record(ui, p, d);
+            // The difficulty's tiers (Easy has no Stonehenge, 0x822A2BC8).
+            for (int v = 0; v < numTiers(ui, d) && v < int(c.tiers.size()); ++v) {
+                Career::Entry& ve = rec[c.tiers[size_t(v)].first];
+                set(ve.unlocked), set(ve.completed);
+                for (const std::string& s : c.tiers[size_t(v)].second) set(rec[s].unlocked);
+            }
+            for (const std::string& s : c.storeSongs) set(rec[s].unlocked);  // buy_item: every record
+        }
+        for (const auto& [item, sold] : c.tableItems)
+            if (sold) set(p.items[item]);
+        if (p.cash < kCash) p.cash = kCash, changed = true;
+        set(career.proFaceOff);  // a tour won (0x82286C28)
+    }
+    if (changed) career.touch();
+    return changed;
 }
 
 bool wantEncoreFx(UiManager& ui) {

@@ -82,6 +82,7 @@ public:
     bool stop(const std::string& name);
     void stopAll();
     void setPaused(bool paused);
+    int liveVoices() const { return player_.liveVoices(); }  // sample voices playing, not paused
     // Advances the sequences (waits, serial groups); every frame.
     void update();
     // `synth set_master_vol <dB>` / `master_vol` (the master Fader,
@@ -138,6 +139,4 @@ private:
     std::minstd_rand rng_;
     Stats stats_;
     float fxVolumeDb_ = 0;
-    bool paused_ = false;
-    double pausedAt_ = 0, pausedTotal_ = 0;
 };

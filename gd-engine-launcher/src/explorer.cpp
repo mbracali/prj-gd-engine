@@ -73,7 +73,10 @@ struct Launcher::Explore {
     bool ok = false;
     std::string info;
     std::vector<std::string> clips;
-    int clip = -1;
+    int clip = -1;  // -1: the rest pose (a T-pose for GH's characters), the default
+    // "Show instrument" (a character's guitar, bass or drum kit): the module has it, its state.
+    bool hasInstrument = false, showInstrument = true;
+    Rect instrumentBox;  // the checkbox, inside the viewer (window pixels; empty: not shown)
     double shownAt = 0;
 
     // The camera: targets and the smoothed values drawn.
@@ -296,9 +299,9 @@ void Launcher::explorePress(Fret f) {
         // The shortest way back to the front.
         ex.cYaw = std::remainder(ex.cYaw, 2 * kPi);
         break;
-    case Fret::Blue:  // the next animation
+    case Fret::Blue:  // the next animation: the rest pose, then each clip, then the rest pose again
         if (!ex.clips.empty()) {
-            ex.clip = (ex.clip + 1) % int(ex.clips.size());
+            ex.clip = ex.clip + 1 >= int(ex.clips.size()) ? -1 : ex.clip + 1;
             ex.shownAt = now_;
             sounds_.play(UiSound::Select);
         } else {
@@ -311,6 +314,22 @@ void Launcher::explorePress(Fret f) {
         ex.turntable = !ex.turntable;
         break;
     }
+}
+
+// The "Show instrument" checkbox (I, the left stick's click, a click on it).
+void Launcher::exploreToggleInstrument() {
+    Explore& ex = *explore_;
+    const GdExplorer* api = ex.session.api();
+    if (!ex.hasInstrument || !api || !GD_EXPLORER_HAS(api, show_instrument)) {
+        sounds_.play(UiSound::Error);
+        toast("This model has no instrument.");
+        return;
+    }
+    ex.showInstrument = !ex.showInstrument;
+    sounds_.play(UiSound::Select);
+    api->show_instrument(api->self, ex.showInstrument ? 1 : 0);
+    SDL_GL_MakeCurrent(window_, context_);
+    log_.add("explore " + ex.gameId + ": instrument " + (ex.showInstrument ? "shown" : "hidden"));
 }
 
 Rect Launcher::exploreViewRect() const { return R(kMargin + kPanelW + 16, kTop, W_ - 2 * kMargin - kPanelW - 16, H_ - kFooterH - 14 - kTop); }
@@ -363,6 +382,7 @@ bool Launcher::exploreHandle(const SDL_Event& e) {
         case SDLK_R: explorePress(Fret::Yellow); return true;
         case SDLK_N: case SDLK_TAB: explorePress(Fret::Blue); return true;
         case SDLK_T: case SDLK_O: explorePress(Fret::Orange); return true;
+        case SDLK_I: exploreToggleInstrument(); return true;
         case SDLK_LEFT: case SDLK_A: exploreMove(0, -1); return true;  // also on key repeat
         case SDLK_RIGHT: case SDLK_D: exploreMove(0, 1); return true;
         case SDLK_UP: case SDLK_W: exploreMove(-1, 0); return true;
@@ -375,6 +395,10 @@ bool Launcher::exploreHandle(const SDL_Event& e) {
         const float density = SDL_GetWindowPixelDensity(window_);
         const float mx = e.button.x * density, my = e.button.y * density;
         const Rect view = exploreViewRect();
+        if (e.button.button == SDL_BUTTON_LEFT && ex.instrumentBox.w > 0 && ex.instrumentBox.contains(mx, my)) {
+            exploreToggleInstrument();
+            return true;
+        }
         if (view.contains(mx, my)) {
             const bool shift = (SDL_GetModState() & SDL_KMOD_SHIFT) != 0;
             ex.drag = e.button.button == SDL_BUTTON_LEFT && !shift ? 1 : 2;
@@ -452,6 +476,7 @@ bool Launcher::exploreHandle(const SDL_Event& e) {
         case SDL_GAMEPAD_BUTTON_LEFT_SHOULDER: explorePress(Fret::Orange); return true;  // a guitar's orange fret
         case SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER: ex.panHeld = true; return true;
         case SDL_GAMEPAD_BUTTON_RIGHT_STICK: explorePress(Fret::Yellow); return true;
+        case SDL_GAMEPAD_BUTTON_LEFT_STICK: exploreToggleInstrument(); return true;
         default: return false;
         }
     case SDL_EVENT_GAMEPAD_BUTTON_UP:
@@ -465,7 +490,8 @@ bool Launcher::exploreHandle(const SDL_Event& e) {
 // Development aid (GDUL_SCRIPT): explore=<game id> opens a game's explorer;
 // while it is open orbit=<yaw>,<pitch> (degrees), zoom=<factor>, pan=<x>,<y>
 // (model radii), search=<text>, pick=<text> (the first model whose name or
-// path has it, shown at once), clip=next, reset, turntable=0|1.
+// path has it, shown at once), clip=next, reset, turntable=0|1,
+// instrument=0|1 (the "Show instrument" checkbox).
 bool Launcher::exploreScript(const std::string& cmd, const std::string& arg) {
     if (cmd == "explore") {
         auto& games = catalog_.games();
@@ -507,6 +533,8 @@ bool Launcher::exploreScript(const std::string& cmd, const std::string& arg) {
         explorePress(Fret::Blue);
     } else if (cmd == "reset") {
         explorePress(Fret::Yellow);
+    } else if (cmd == "instrument") {
+        if ((arg != "0") != ex.showInstrument) exploreToggleInstrument();
     } else if (cmd == "turntable") {
         ex.turntable = arg != "0";
     } else if (cmd == "collapse" || cmd == "expand") {  // a group (its name has <arg>), or "all"
@@ -544,7 +572,9 @@ void Launcher::exploreLoad() {
             ex.clips.push_back(c ? c : "");
         }
     }
-    ex.clip = ex.clips.empty() ? -1 : 0;
+    ex.clip = -1;  // the rest pose first: arms out, nothing through the body (Next animation plays the clips)
+    ex.hasInstrument = ex.ok && GD_EXPLORER_HAS(api, has_instrument) && GD_EXPLORER_HAS(api, show_instrument) &&
+                       api->has_instrument(api->self) != 0;
     ex.shownAt = double(SDL_GetTicksNS() - startNs_) / 1e9;
     const Explore::Item& it = ex.items[size_t(item)];
     char secs[32];
@@ -794,6 +824,29 @@ void Launcher::exploreDrawViewer(const Rect& viewPx) {
             text(FontId::Regular, 14, vx + 26, vy + 86, inf, kDim);
         }
     }
+    // "Show instrument": a checkbox (an on/off choice, guidelines/universal_launcher.md),
+    // under the model's card, for a character with a guitar, bass or drum kit.
+    ex.instrumentBox = {};
+    if (ex.shown >= 0 && ex.ok && ex.hasInstrument && !loading) {
+        float mx = -1, my = -1;
+        SDL_GetMouseState(&mx, &my);
+        const float density = SDL_GetWindowPixelDensity(window_);
+        const std::string label = "Show instrument";
+        const float bx = vx + 26, by = vy + 112, lw = measure(FontId::SemiBold, 16, label);
+        const Rect hit = R(bx - 6, by - 6, 22 + 10 + lw + 12, 34);
+        const bool hover = hit.contains(mx * density, my * density);
+        const Color accent = fretColor(Fret::Green);
+        gfx_.rect(hit, rgb(0x0e0d10, hover ? 0.9f : 0.7f), 10 * s_);
+        const Rect box = R(bx, by, 22, 22);
+        gfx_.rect(box, ex.showInstrument ? accent : rgb(0x1f1b23, 0.95f), 5 * s_);
+        gfx_.ring(box, ex.showInstrument ? withAlpha(accent, 0.95f) : withAlpha(kCream, hover ? 0.6f : 0.35f), 5 * s_, 1.5f * s_);
+        if (ex.showInstrument) {  // the tick: a short and a long stroke
+            for (int i = 0; i < 5; ++i) gfx_.circle((bx + 5 + float(i) * 1.3f) * s_, (by + 11 + float(i) * 1.3f) * s_, 1.6f * s_, kInk);
+            for (int i = 0; i < 9; ++i) gfx_.circle((bx + 10.2f + float(i) * 1.25f) * s_, (by + 16.2f - float(i) * 1.45f) * s_, 1.6f * s_, kInk);
+        }
+        text(FontId::SemiBold, 16, bx + 32, by + 1, label, hover ? kCream : kSand);
+        ex.instrumentBox = hit;
+    }
     if (ex.shown >= 0 && !ex.ok && !loading) {
         // What went wrong, in the middle.
         const float cw = std::min(520.f, vw - 60);
@@ -830,8 +883,9 @@ void Launcher::exploreDrawViewer(const Rect& viewPx) {
     }
     if (ex.shown >= 0 && ex.ok && !ex.clips.empty()) {
         // The animation, bottom centre of the viewer.
-        const std::string label = ex.clips[size_t(std::max(0, ex.clip))];
-        const std::string pos = std::to_string(ex.clip + 1) + "/" + std::to_string(ex.clips.size());
+        const std::string label = ex.clip < 0 ? std::string("Rest pose") : ex.clips[size_t(ex.clip)];
+        const std::string pos = ex.clip < 0 ? std::to_string(ex.clips.size()) + " animations"
+                                            : std::to_string(ex.clip + 1) + "/" + std::to_string(ex.clips.size());
         const float lw = std::min(vw - 60, measure(FontId::SemiBold, 16, label) + measure(FontId::Regular, 14, pos) +
                                                measure(FontId::SemiBold, 13, "ANIMATION", 1.8f) + 90);
         const Rect pill = R(vx + (vw - lw) / 2, vy + vh - 56, lw, 38);
