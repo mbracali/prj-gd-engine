@@ -646,7 +646,7 @@ universal launcher, not released on its own.
 | GD03-006 | Original | ❌ | M4 highway and HUD; M5 venues and cameras; M6 band | | Milestones M4-M6 |
 | GD03-007 | Original | ❌ | M7 modes, career, saves, The Glitches; M8 port extras; M9 launcher module and packages | | Milestones M7-M9 |
 | GD03-009 | Original | ❌ | SPU2 reverb for the sound effects (Sfx maps pick an fx_core; the 360's XAudio reverb code is still in sfx_dsp). Approximation: no reverb | `docs/formats.md` SynthSample | Milestones M1 |
-| GD03-010 | Original | ❌ | `tools/milo.py` splits records on embedded end-marker bytes (ui/gen/endgame): make it byte-exact like the engine's retry | | Milestones M1 |
+| GD03-010 | Original | ✅ | `tools/milo.py` splits records on embedded end-marker bytes (ui/gen/endgame): make it byte-exact like the engine's retry | `milo.py scan`: 430 files parsed, 0 failed | Milestones M1 |
 | GD03-011 | Original | ❌ | Work down `gd-game-03/docs/audit.md`: names and sounds the quickplay run never resolves (most belong to screens the run does not visit; walk the others) | | Milestones M3 |
 | GD03-012 | Original | 🟡 in progress | M4 highway: the PS2 track (`track/track.milo`, TrackPanel 0x0014faa8..0x00160000) drawn as the original: gems, HOPO / star looks, tails, beat lines, rails, smashers, lightning, two-player halves | Missing: the far-end fade (needs a frame copy), the per-character surface override, the gem sparkle / bonus burst | Milestones M4 |
 | GD03-013 | Original | 🟡 in progress | M5 venues: all six venues load (sp / mp / coop), every camera shot checked, 60 vs 240 fps identical; director, band and crowd goldens are this disc's first baselines (not yet checked shot by shot against the original) | `--venuetest`, `--chartest` | Milestones M5 |

@@ -114,6 +114,14 @@ def _inline_header_at(d, q, end):
         return False
 
 
+# Records whose data contains the end-marker bytes (a PS2 texture's texels in
+# ui/gen/endgame): the object counter -> how many extra markers it spans. Set by
+# parse() when a first pass leaves trailing bytes (the engine's typed
+# decoders find the true end instead, scene/milo.cpp).
+_EXTRA = {}
+_COUNTER = [0]
+
+
 def _read_object(d, pos, cls, name, out, depth):
     """One object's data starting at pos, through its end marker.
 
@@ -122,8 +130,13 @@ def _read_object(d, pos, cls, name, out, depth):
     depth + 1, before this object). Returns the position after the marker.
     """
     start = pos
+    index = _COUNTER[0]
+    _COUNTER[0] += 1
+    skip = _EXTRA.get(index, 0)
     while True:
         end = d.find(MARKER, pos)
+        while end >= 0 and skip > 0:
+            end, skip = d.find(MARKER, end + 4), skip - 1
         if end < 0:
             raise ValueError(f"{cls} {name}: no end marker")
         q = d.find(struct.pack("<I", VERSION), pos, end)
@@ -156,10 +169,40 @@ def parse(data):
     at depth + 1, just before it, followed by an '(inline)' summary row.
     """
     stream, info = decompress(data)
+    _EXTRA.clear()
+    _COUNTER[0] = 0
     out = []
     h, pos = _read_dir(stream, 0, out)
     if pos != len(stream):
-        raise ValueError(f"{len(stream) - pos} trailing bytes")
+        # Some record holds marker bytes: find the one whose extension by one
+        # more marker makes the whole stream parse exactly.
+        # Several extensions can parse to the end (every record after the
+        # right one just shifts): keep the one whose records' first u32 (the
+        # class revision) agrees most with the other records of their class.
+        n = _COUNTER[0]
+        best = None
+        for k in range(n):
+            _EXTRA.clear()
+            _EXTRA[k] = 1
+            _COUNTER[0] = 0
+            cand = []
+            try:
+                hk, pk = _read_dir(stream, 0, cand)
+            except (ValueError, struct.error):
+                continue
+            if pk != len(stream):
+                continue
+            versions = {}
+            for c, _, _, rec in cand:
+                if len(rec) >= 4:
+                    versions.setdefault(c, []).append(struct.unpack_from("<I", rec, 0)[0])
+            score = sum(max(v.count(x) for x in set(v)) for v in versions.values())
+            if best is None or score > best[0]:
+                best = (score, hk, pk, cand)
+        _EXTRA.clear()
+        if best is None:
+            raise ValueError(f"{len(stream) - pos} trailing bytes")
+        _, h, pos, out = best
     info["stream"] = len(stream)
     return info, h, out
 
