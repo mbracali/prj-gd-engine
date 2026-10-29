@@ -1,5 +1,44 @@
 # gd-game-04 progress log
 
+## Final report of the 2026-10-28/29 session (read this first)
+
+**Milestones.** M0 done. M1 done (gate: every file of every pak type parses).
+M2 core done (audio, charts, the single-player rules, "all charts fully
+hit"); co-op / battle / boss rules open. M3 started (VM runs the boot
+script; menus not yet). M4 started (GH3's own 2D highway draws; HUD not yet).
+M5-M10 not started. Version 0.0.1, not ready to play.
+
+**What works** (verified, commands in the entries below):
+- Disc image or folder; every pak type decodes in Python and C++
+  (`--formattest`); 41,012 debug names.
+- Song audio: FSB3 decrypted, XMA1 stems decoded (`--sfxtest`: 718 samples,
+  18.2 h); Bink movies decode (`--playmovie`).
+- Song list (89) and charts; GH3's judge (windows, HOPO with the 0x20 flip,
+  taps, chords, sustains, score, Star Power, rock meter) with addresses in
+  docs/FINDINGS.md; `--selftest`: all charts fully hit, face-off splits too.
+- `--song <id> [--autoplay]`: plays with the stems, the judge, GH3's 2D
+  highway (gems, tails, fretbars, sidebars, strike heads from global_gfx).
+- QScript tokenizer and VM: all 16,552 scripts tokenize; guitar_startup runs.
+- `--audittest` writes docs/audit.md (1,233 natives the scripts call are
+  missing).
+
+**Approximate** (labelled in code and backlog): the highway surface (a dark
+stand-in for the character's texture), plain-number HUD, no -66 ms offsets
+on PC (D7), Star Power co-op, input layouts from gd-game-02 (D4).
+
+**Missing**: menus / UI (M3), venues, cameras, lighting (M5), the band (M6),
+career, modes, store, saves (M7), the port's extras (M8), the launcher
+module's packaging (M9: `build_module_04` exists, module not ready_to_play,
+so packages do not carry it yet), the walk tests.
+
+**Confidence per OS**: Linux 🟢 (all tests pass on a fresh binary); Windows
+🟡 (MinGW 0 warnings; tests and a 25 s song run pass under Proton's wine; no
+real Windows run); Android 🟡 (APK builds; never run on a device); Steam Deck
+🔴 (not built this session); macOS 🔴 (no toolchain).
+
+**Leftover processes**: none of mine (checked with pgrep).
+
+
 **Overall estimate (start, 2026-10-28 22:30):** M0-M10 of the kickoff total
 about 30 h of focused work; this session covers M0 and as much of M1-M2 as
 fits. Revised per milestone below.

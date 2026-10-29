@@ -59,7 +59,8 @@ bool SongScreen::start(const Disc& disc, const Globals& g, const SongInfo& song,
     tracks[0].guitar = tracks[1].guitar = true;
     mixer.play(std::move(stream), std::move(tracks), kLeadInMs);
     stepMs_ = -kLeadInMs;
-    SDL_Log("song %s (%s, %s): %zu notes", song.name.c_str(), song.title.c_str(), difficultyName(difficulty_), track_.notes.size());
+    SDL_Log("song %s (%s, %s): %llu notes", song.name.c_str(), song.title.c_str(), difficultyName(difficulty_),
+            static_cast<unsigned long long>(track_.notes.size()));
     return true;
 }
 
