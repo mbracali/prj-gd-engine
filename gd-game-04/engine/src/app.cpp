@@ -5,6 +5,7 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <exception>
 #include <cstdio>
 #include <memory>
 #include <string>
@@ -14,6 +15,9 @@
 #include "audio/mixer.h"
 #include "data/disc.h"
 #include "data/qbkey.h"
+#include "game/song_db.h"
+#include "script/globals.h"
+#include "ui/song_screen.h"
 #include "devaids/menu_keys.h"
 #include "devaids/screenshot.h"
 #include "input/input.h"
@@ -53,6 +57,9 @@ private:
     Input input_;
     DiscPicker picker_;
     std::unique_ptr<Disc> disc_;
+    std::unique_ptr<Globals> globals_;
+    SongDb songs_;
+    std::unique_ptr<SongScreen> song_;
     std::string message_;
     bool running_ = true;
     int exitCode_ = 0;
@@ -70,8 +77,17 @@ bool App::loadData(const std::string& path) {
         return false;
     }
     disc_->loadNames();
+    try {
+        globals_ = std::make_unique<Globals>();
+        globals_->load(*disc_);
+        songs_.load(*globals_);
+    } catch (const std::exception& e) {
+        message_ = std::string("cannot read the scripts: ") + e.what();
+        disc_.reset();
+        return false;
+    }
     rememberPath(path);
-    message_ = "Guitar Hero III disc: " + std::to_string(qbkey::names().size()) + " names";
+    message_ = "Guitar Hero III disc: " + std::to_string(songs_.songs().size()) + " songs";
     SDL_Log("disc: %s (%s)", path.c_str(), message_.c_str());
     return true;
 }
@@ -81,6 +97,11 @@ void App::handleEvent(const SDL_Event& e) {
     std::vector<InputEvent> events;
     input_.handle(e, events);
     for (const InputEvent& ev : events) {
+        if (song_) {
+            if (ev.action == Action::Back && ev.down) running_ = false;  // pause comes with the menus (M3)
+            song_->handle(ev);
+            continue;
+        }
         if (!ev.down) continue;
         if (ev.action == Action::Back) {
             if (++escapes_ >= 3) running_ = false;
@@ -92,6 +113,20 @@ void App::handleEvent(const SDL_Event& e) {
 }
 
 void App::frame() {
+    if (song_) {
+        canvas_.begin(SDL_Color{0, 0, 0, 255});
+        const bool more = song_->frame(canvas_, mixer_);
+        captureMenuScreenshot(canvas_, double(SDL_GetTicksNS() - startNs_) / 1e6, song_->songMs());
+        canvas_.end();
+        if (!more) {
+            const PlayerStats& s = song_->stats();
+            std::printf("song: %s, score %lld, %d / %d notes hit, best streak %d\n", s.failed ? "failed" : "complete",
+                        static_cast<long long>(s.score), s.notesHit, s.totalNotes, s.bestRun);
+            exitCode_ = s.failed ? 1 : 0;
+            running_ = false;
+        }
+        return;
+    }
     canvas_.begin(SDL_Color{0, 0, 0, 255});
     const SDL_Color white{255, 255, 255, 255}, grey{160, 160, 160, 255};
     canvas_.textCentered(640, 300, 3, white, "Guitar Hero III: Legends of Rock");
@@ -136,9 +171,24 @@ int App::run() {
     if ((!options_.song.empty() || !options_.walk.empty()) && !disc_) {
         std::fprintf(stderr, "%s: %s\n", app::kProgram, message_.empty() ? "no disc image given" : message_.c_str());
         running_ = false, exitCode_ = 2;
-    } else if (!options_.song.empty() || !options_.walk.empty()) {
-        std::fprintf(stderr, "%s: songs and walks are not implemented yet (M2 / M3)\n", app::kProgram);
+    } else if (!options_.walk.empty()) {
+        std::fprintf(stderr, "%s: walks are not implemented yet (M3)\n", app::kProgram);
         running_ = false, exitCode_ = 2;
+    } else if (!options_.song.empty()) {
+        const SongInfo* s = songs_.find(options_.song);
+        song_ = std::make_unique<SongScreen>();
+        std::string err;
+        if (!s) {
+            std::fprintf(stderr, "%s: no song '%s'\n", app::kProgram, options_.song.c_str());
+            running_ = false, exitCode_ = 2;
+            song_.reset();
+        } else if (!song_->start(*disc_, *globals_, *s, options_.difficulty, options_.autoplay, options_.noFail, mixer_, err)) {
+            std::fprintf(stderr, "%s: %s\n", app::kProgram, err.c_str());
+            running_ = false, exitCode_ = 2;
+            song_.reset();
+        } else {
+            input_.setInGame(true);
+        }
     }
     const bool stats = envOn("GD04_STATS");
     uint64_t statsStart = SDL_GetTicksNS();
@@ -171,6 +221,8 @@ int App::run() {
             }
         }
     }
+    song_.reset();
+    mixer_.stop();
     input_.close();
     mixer_.close();
     canvas_.shutdown();
