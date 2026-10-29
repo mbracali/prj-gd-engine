@@ -338,9 +338,10 @@ bool VenueView::init(gfx::RenderDevice& dev, const Disc& disc, const venue::Venu
         if (ta != tb) return !ta;
         return ta && a.drawOrder < b.drawOrder;
     });
-    SDL_Log("venue %s: %zu meshes, %zu triangles, %zu textures (%zu missing), %zu lights, %zu local sectors without a node, "
-            "%zu crowd-card meshes hidden", v.zone.c_str(), stats_.meshes, stats_.triangles, stats_.textures, stats_.missingTextures,
-            v.lights.size(), stats_.hiddenSectors, stats_.hiddenMeshes);
+    using ull = unsigned long long;  // (MinGW's SDL_Log has no %zu)
+    SDL_Log("venue %s: %llu meshes, %llu triangles, %llu textures (%llu missing), %llu lights, %llu local sectors without a node, "
+            "%llu crowd-card meshes hidden", v.zone.c_str(), ull(stats_.meshes), ull(stats_.triangles), ull(stats_.textures),
+            ull(stats_.missingTextures), ull(v.lights.size()), ull(stats_.hiddenSectors), ull(stats_.hiddenMeshes));
     return true;
 }
 
