@@ -1575,6 +1575,7 @@ int App::gameCounter(int player, const std::string& key) const {
     if (const TrackView* tv = p == 1 ? track2_.get() : track_.get()) {
         if (key == "star_smashes") return tv->starSmashes();
         if (key == "star_glow_lines") return tv->starGlowLines();
+        if (key == "star_combos") return tv->comboStarts();
     }
     return 0;
 }

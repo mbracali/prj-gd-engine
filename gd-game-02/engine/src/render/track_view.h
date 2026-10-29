@@ -72,6 +72,8 @@ public:
     // their tails.
     int starSmashes() const { return starSmashes_; }
     int starGlowLines() const { return starGlowLines_; }
+    // Since reset: phrase_captured combo effects started (per slot).
+    int comboStarts() const { return comboStarts_; }
 
 private:
     // A smash view's copy for one slot (0x8269C968): normal, star or bonus.
@@ -109,6 +111,7 @@ private:
     void buildTail(const Gem& g, int gemIndex, int slot, const Player& player, float nowMs);
     void drawTails(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, const Player& player, float nowMs);
     void drawSmashers(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, const Player& player, float nowMs);
+    void drawCombo(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, float nowMs);
     void drawEffects(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, const Player& player, float nowMs);
     void drawParticles(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, const Player& player, float nowMs);
     void drawExplode(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, float nowMs);
@@ -152,6 +155,10 @@ private:
     std::array<float, 5> hitMs_{};    // last hit per slot (smasher hit anim)
     std::array<float, 5> missMs_{};   // last miss per slot (smasher pop anim)
     std::array<std::array<Smash, 3>, 5> smash_;
+    // The phrase_captured effects per slot (0x8269AB80 / 0x8269B058):
+    // combo1 smash_combo.view, combo2 smash_combo_lightning.view.
+    std::array<Smash, 5> combo1_, combo2_;
+    float combo2Angle_ = 12;  // track_graphics combo2_angle, degrees
     std::array<gfx::ParticleSet, 5> burn_;
     std::array<bool, 5> burnOn_{};
     std::unordered_map<int, TailSparks> tailSparks_;  // gem x 8 + slot
@@ -163,7 +170,7 @@ private:
     } extendAnim_;
     std::unique_ptr<gfx::ParticleRenderer> particles_;
     int particlesDrawn_ = 0;
-    int starSmashes_ = 0, starGlowLines_ = 0;
+    int starSmashes_ = 0, starGlowLines_ = 0, comboStarts_ = 0;
     std::vector<GemState> gemState_;
     std::unordered_map<int, float> releaseClip_;  // released gem -> frozen tail start (relative y)
     float blowMs_ = -1e9f;

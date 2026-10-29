@@ -4,9 +4,13 @@ All notable changes for players. Versions follow SemVer; release tags are
 `gd-game-02/vX.Y.Z`. The release workflow publishes the section whose heading
 matches the tag's version. Nothing is released yet.
 
-## [0.1.5] - 2026-10-28
+## [0.1.6] - 2026-10-28
 
 ### Fixed
+- Song start as in Guitar Hero II: the venue plays its intro shot first, then
+  the fretboard extends with the original's sounds, then the music starts.
+- The venue intro camera moves from the first frame when a song is started
+  from the menus (it stood still until the fretboard appeared).
 - Venue cameras frame their shots as Guitar Hero II does: they look at the
   band with the shot's own tilt and slide sideways to put it where the shot
   wants it, and camera paths start from the shot's first keyframe. Stone
@@ -15,6 +19,27 @@ matches the tag's version. Nothing is released yet.
   frames the band where the original does.
 - Venue animations that move along curves (paper planes, flash pots, swinging
   lights and more) follow their smooth paths instead of straight lines.
+- Star Power: completing a phrase sets off the lightning over the frets again,
+  and Star Power sustains glow blue again (the solid tails hid the glow).
+- Sustain tails are solid instead of translucent; a wrong note and Star Power
+  play their sounds.
+- Guitar and bass necks no longer have see-through parts (Gibson Flying V and
+  others).
+- Career: Strutter on Medium (and other songs) no longer crash; the career
+  screens are no longer darker than they should be.
+- Menus: a band name grows from left to right instead of piling up its
+  letters; Credits sits in its row; menu sounds are no longer silenced after
+  a song; the strum icon is no longer cut in half; the Enhanced menu always
+  shows the band.
+- Character select: the door starts closed and locked characters show as
+  locked, as in Guitar Hero II.
+- Setlist: a locked encore is listed without its name, as in Guitar Hero II,
+  so it no longer overlaps "Beat X/5 songs to continue".
+- The Glitches band has everything unlocked.
+
+## [0.1.5] - 2026-10-28
+
+### Fixed
 - Controllers no longer press left / right (or any direction) by themselves:
   a D-pad that SDL reads from an axis (many adapters and guitars) is now
   judged from that axis's resting value with hysteresis, a button held as the

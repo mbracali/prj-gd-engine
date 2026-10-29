@@ -50,6 +50,10 @@ New
   I, or the left stick's click) shows or hides a character's guitar, bass or
   drum kit.
 
+Games
+- Guitar Hero (gd-game-01) 1.1.6 and Guitar Hero II (gd-game-02) 0.1.6 (see
+  their changelogs). Guitar Hero II shows 79% complete.
+
 ## 0.1.5
 
 New

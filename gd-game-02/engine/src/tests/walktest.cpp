@@ -928,7 +928,8 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         // A Star Power phrase played through (autoplay): player.dta's
         // phrase_captured plays sp_awarded, the star meter fills, its gems
         // started smash_star and the star tails' glow lines drew over their
-        // tails (hidden under the solid tails once, owner 10-28).
+        // tails (hidden under the solid tails once, owner 10-28) and its last gem
+        // started the phrase_captured lightning (missing once, owner 10-28).
         const Player* pl = ui.host().gamePlayer(0);
         const int phrases = ui.host().gameCounter(0, "sp_phrases");
         const int smashes = ui.host().gameCounter(0, "star_smashes"), glows = ui.host().gameCounter(0, "star_glow_lines");
@@ -942,10 +943,12 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
             return;
         }
         const float meter = pl ? pl->starMeter() : 0.0f;
-        std::printf("  star phrase: %d captured, sp_awarded at %.0f ms, star meter %.2f, %d smash_star, %d star glow lines\n", phrases, awardedAt,
-                    double(meter), smashes, glows);
+        const int combos = ui.host().gameCounter(0, "star_combos");
+        std::printf("  star phrase: %d captured, sp_awarded at %.0f ms, star meter %.2f, %d smash_star, %d star glow lines, %d phrase lightning\n", phrases,
+                    awardedAt, double(meter), smashes, glows, combos);
         if (meter <= 0) return fail("a captured Star Power phrase did not fill the star meter");
         if (smashes < 1) return fail("the Star Power phrase's gems started no smash_star effect");
+        if (combos < 1) return fail("the captured phrase's last gem started no smash_combo lightning (owner 10-28)");
         ++step_, stepStart_ = -1;
         return;
     }

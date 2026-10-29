@@ -64,6 +64,13 @@
 // - Side rails (0x8269A2F8) [C]: state none / star (Star Power) / warning
 //   (rock meter warning) / warning_star, frame = song beats [mapping I].
 // - lightning.grp shows only during Star Power (0x82695AF8) [C].
+// - phrase_captured (0x822DC090 sets the phrase state 3 on the phrase's last
+//   gem; 0x8269B058 with that state) [C]: per slot of that gem combo1
+//   (smash_combo.view, its burst particles) and combo2
+//   (smash_combo_lightning.view, the lightning, its slot copy turned by
+//   (slot - 2) x combo2_angle, mirrored lefty,
+//   0x8269D8C8) start at the hit, at (now - hit) x 0.03; combo2 ends at its
+//   view's last frame (0x8269D758) [C].
 // - blow_streak N (0x82696560) [C]: surface_flash_Nx.mnm and
 //   track_shake_Nx.tnm when a streak of multiplier N (2..4) ends [I: event].
 namespace {
@@ -138,6 +145,7 @@ void TrackView::load(const GameData& data, scene::MiloLibrary& library, int play
     num(gem, "fps", gemFps_);
     num(gem, "tail_glow_width", tailGlowWidth_);
     num(gem, "tail_glow_tight_width", tailGlowTightWidth_);
+    num(cfg.find("particles"), "combo2_angle", combo2Angle_);
     if (const DataNode* sc = cfg.find("slot_colors"))
         for (size_t i = 0; i < 5 && i + 1 < sc->children.size(); ++i) slotColors_[i] = sc->textAt(i + 1);
 
@@ -180,7 +188,7 @@ void TrackView::reset(float introStartMs) {
     blowMs_ = -1e9f, blowLevel_ = 0;
     introStartMs_ = introStartMs;
     extendAnim_ = {};
-    starSmashes_ = starGlowLines_ = 0;
+    starSmashes_ = starGlowLines_ = comboStarts_ = 0;
     explodeMs_ = -1e9f;
     // The effect copies (0x8269C968: one smash view of each kind per slot,
     // and the burn view), and the explode view's systems.
@@ -192,6 +200,9 @@ void TrackView::reset(float introStartMs) {
             sm.parts.build(obj(kViews[k]), uint32_t(f * 3 + k + 1));
         }
         burn_[size_t(f)].build(obj("burn_tail.view"), uint32_t(100 + f));
+        for (Smash* c : {&combo1_[size_t(f)], &combo2_[size_t(f)]}) c->active = false, c->startMs = -1e9f;
+        combo1_[size_t(f)].parts.build(obj("smash_combo.view"), uint32_t(400 + f));
+        combo2_[size_t(f)].parts.build(obj("smash_combo_lightning.view"), uint32_t(410 + f));
         burnOn_[size_t(f)] = false;
     }
     tailSparks_.clear();
@@ -222,6 +233,16 @@ void TrackView::onEvents(const std::vector<PlayerEvent>& events, const Player& p
                     Smash& sm = smash_[size_t(f)][size_t(kind)];
                     sm.startMs = nowMs, sm.active = true;
                     if (kind == 1) ++starSmashes_;
+                }
+            break;
+        }
+        case PlayerEvent::Kind::PhraseCaptured: {
+            if (!known) break;
+            const Gem& g = gems[size_t(e.gem)];
+            for (int f = 0; f < 5; ++f)
+                if (g.frets & (1u << f)) {
+                    for (Smash* c : {&combo1_[size_t(f)], &combo2_[size_t(f)]}) c->startMs = nowMs, c->active = true;
+                    ++comboStarts_;
                 }
             break;
         }
@@ -602,6 +623,38 @@ void TrackView::drawEffects(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, c
         }
 }
 
+// The phrase_captured lightning (combo2): the bolts stand up from the
+// smashers, each slot's copy leaning out by (slot - 2) x combo2_angle
+// (about the track's forward axis) [I: the axis; C: the angle].
+void TrackView::drawCombo(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, float nowMs) {
+    const scene::Group* view = get<scene::Group>("smash_combo_lightning.view");
+    const scene::Group* burst = get<scene::Group>("smash_combo.view");
+    const float end = gfx::ScenePose::endFrame(view);
+    for (int f = 0; f < 5; ++f) {
+        Smash& c1 = combo1_[size_t(f)];
+        if (c1.active && burst) {
+            pose_.setFrame(burst, std::max(0.0f, (nowMs - c1.startMs) * 0.001f * kFrameRate));
+            c1.parts.sync(pose_);
+        }
+        Smash& c = combo2_[size_t(f)];
+        if (!c.active || !view) continue;
+        const float frame = std::max(0.0f, (nowMs - c.startMs) * 0.001f * kFrameRate);
+        if (frame > end) {
+            c.active = false;
+            continue;
+        }
+        pose_.setFrame(view, frame);
+        const float a = float(f - 2) * combo2Angle_ * 0.017453292f * (lefty_ ? -1.0f : 1.0f);
+        Mat4 rot;
+        rot.at(0, 0) = std::cos(a), rot.at(0, 2) = std::sin(a);
+        rot.at(2, 0) = -std::sin(a), rot.at(2, 2) = std::cos(a);
+        const Mat4 offset = Mat4::translation(slotX(f), 0, 0) * rot;
+        for (const std::string& n : view->objects)
+            if (const scene::Mesh* m = view->dir->resolve<scene::Mesh>(n))
+                gfx::drawMesh(mr, cache, *m, offset * gfx::toMat4(pose_.world(m)), &pose_);
+    }
+}
+
 // The track's particles, simulated in the game's track space (the rig, and
 // with it the smashers, moving forward by now_y: world-space particles stay
 // on the track and scroll towards the player, as in the game) and drawn
@@ -668,6 +721,14 @@ void TrackView::drawParticles(gfx::MaterialRenderer& mr, gfx::SceneCache& cache,
         }
         t.parts.draw(*particles_, mr, cache, camera_, offset, nullptr);
         ++it;
+    }
+    // The phrase_captured burst (combo1).
+    for (int f = 0; f < 5; ++f) {
+        Smash& c = combo1_[size_t(f)];
+        if (!c.active) continue;
+        c.parts.update(pose_, at(slotX(f), nowY_), clock);
+        c.parts.draw(*particles_, mr, cache, camera_, offset, &pose_);
+        if ((nowMs - c.startMs) > 3000 && c.parts.count() == 0) c.active = false;
     }
     // Smash sparks.
     for (int f = 0; f < 5; ++f)
@@ -791,6 +852,7 @@ void TrackView::draw(gfx::Renderer& r, gfx::SceneCache& cache, const Song& song,
         drawGroup(mr, cache, get<scene::Group>("lightning.grp"), trackEnv_);
         drawSmashers(mr, cache, player, nowMs);
         drawEffects(mr, cache, player, nowMs);
+        drawCombo(mr, cache, nowMs);
         drawParticles(mr, cache, player, nowMs);
     }
     if (sub) r.device().setViewport(vx, vy, vw, vh);

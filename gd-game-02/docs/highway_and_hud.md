@@ -37,7 +37,16 @@ The scenes themselves are listed in `milo_and_textures.md`.
   its tail]: drawn first, the solid tail hid it, and the star tails lost
   their cyan core and the held star tail its blue glow (owner 10-28;
   `--walktest quickplay` star_phrase counts the star glow lines and the
-  smash_star effects, and checks sp_awarded and the meter). The vertices
+  smash_star effects, and checks sp_awarded and the meter).
+  The phrase's last gem (phrase_captured, `0x822DC090` sets the phrase
+  state 3; `0x8269B058` with that state) starts, per fret of that gem,
+  smash_combo.view (its burst particles) and smash_combo_lightning.view (the
+  bolts standing up from the smasher, each fret's copy leaning out by
+  (fret - 2) x combo2_angle 12, mirrored lefty, `0x8269D8C8`), at
+  (now - hit) x 0.03; the lightning ends at its view's last frame
+  (`0x8269D758`) [C; I: the lean's axis]. It was never drawn before
+  (owner 10-28: "the thunder effect when we got special"); star_phrase
+  checks it started. The vertices
   (`0x8269E44C`) take the colour (rgb) and keep the template's alpha: 0 on
   the two outer edge vertices, 1 inside, so only the edges fade; the tail
   materials are prelit, blend src_alpha, z_mode normal, the sphere-mapped
