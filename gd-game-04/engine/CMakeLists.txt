@@ -66,6 +66,7 @@ target_sources(gd04 PRIVATE
   src/script/globals.cpp
   src/script/natives_core.cpp
   src/script/vm.cpp
+  src/tests/audittest.cpp
   src/tests/format_checks.cpp
   src/tests/scripttest.cpp
   src/tests/selftest.cpp

@@ -21,6 +21,7 @@
 #include "app_ids.h"
 #include "platform/paths.h"
 #include "render/shadertest.h"
+#include "tests/audittest.h"
 #include "tests/formattest.h"
 #include "tests/scripttest.h"
 #include "tests/selftest.h"
@@ -38,6 +39,7 @@ void usage() {
         "  --no-fail            the rock meter cannot fail you\n"
         "  --formattest         parse every pak on the disc and every file in it to its end\n"
         "  --selftest           check the data (song list, every chart), auto-play every chart\n"
+        "  --audittest [--out f] the asset / reference audit: names the scripts call and pak types the engine lacks\n"
         "  --scripttest         tokenize every script; run the boot script against the natives (GD04_UILOG=1 logs\n"
         "                       every unhandled call once)\n"
         "  --sfxtest            decode every sound of every FMOD bank (GD04_SFXTEST_LIMIT=<n>: the first n)\n"
@@ -128,7 +130,7 @@ namespace {
 
 int run(int argc, char** argv) {
     Options opt;
-    bool formattest = false, shadertest = false, selftest = false, sfxtest = false, scripttest = false;
+    bool audittest = false, formattest = false, shadertest = false, selftest = false, sfxtest = false, scripttest = false;
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
         auto value = [&]() -> std::string {
@@ -146,6 +148,8 @@ int run(int argc, char** argv) {
         else if (a == "--selftest") selftest = true;
         else if (a == "--sfxtest") sfxtest = true;
         else if (a == "--scripttest") scripttest = true;
+        else if (a == "--audittest") audittest = true;
+        else if (a == "--out") opt.out = value();
         else if (a == "--shadertest") shadertest = true;
         else if (a == "--walktest") opt.walk = value();
         else if (a == "--help" || a == "-h") { usage(); return 0; }
@@ -153,7 +157,7 @@ int run(int argc, char** argv) {
         else if (a.rfind("-psn_", 0) != 0) opt.dataPath = a;
     }
     if (shadertest) return runShaderTest();
-    if ((formattest || selftest || sfxtest || scripttest || !opt.walk.empty()) && opt.dataPath.empty()) {
+    if ((audittest || formattest || selftest || sfxtest || scripttest || !opt.walk.empty()) && opt.dataPath.empty()) {
         usage();
         return 2;
     }
@@ -161,6 +165,7 @@ int run(int argc, char** argv) {
     if (selftest) return runSelfTest(opt.dataPath);
     if (sfxtest) return runSfxTest(opt.dataPath);
     if (scripttest) return runScriptTest(opt.dataPath);
+    if (audittest) return runAuditTest(opt.dataPath, opt.out);
     return runApp(opt);
 }
 

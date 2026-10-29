@@ -10,6 +10,7 @@ struct Options {
     int difficulty = 3;    // 0 Easy .. 3 Expert
     bool autoplay = false;
     bool noFail = false;
+    std::string out;       // --out <file> (--audittest)
     std::string walk;      // --walktest <scenario> (tests/walktest.h)
 };
 
