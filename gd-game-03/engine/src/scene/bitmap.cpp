@@ -3,6 +3,7 @@
 #include "scene/bitmap.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <stdexcept>
 
@@ -66,6 +67,67 @@ void channelBlock(const uint8_t* b, uint8_t out[16]) {
     for (int i = 0; i < 16; ++i) out[i] = uint8_t(pal[(bits >> (3 * i)) & 7]);
 }
 
+// The PS2 layouts (gd-game-01's data/bitmap.cpp; the GS's texel formats):
+// 4- and 8-bit indices into an RGBA palette whose alpha runs 0..0x80 (0x80 =
+// opaque), 8-bit palettes in CSM1 order (entries 8..15 and 16..23 of each 32
+// swapped), 4-bit texels low nibble first; 16-bit RGBA5551; 24-bit RGB;
+// 32-bit RGBA with the same 0..0x80 alpha. Every level becomes RGBA8.
+void toRgba8(Bitmap& b, const Bytes& palette) {
+    std::vector<std::array<uint8_t, 4>> pal;
+    if (b.bpp <= 8) {
+        const size_t colors = size_t(1) << b.bpp;
+        pal.resize(colors);
+        for (size_t i = 0; i < colors && i * 4 + 3 < palette.size(); ++i) {
+            size_t dst = i;
+            if (b.bpp == 8 && (i & 0x18) == 0x08) dst = i + 8;
+            else if (b.bpp == 8 && (i & 0x18) == 0x10) dst = i - 8;
+            pal[dst] = {palette[i * 4], palette[i * 4 + 1], palette[i * 4 + 2],
+                        uint8_t(std::min(255, palette[i * 4 + 3] * 2))};
+        }
+    } else if (b.bpp != 16 && b.bpp != 24 && b.bpp != 32) {
+        return;  // unknown: left as is (format Other)
+    }
+    Bytes out;
+    std::vector<Bitmap::Level> levels;
+    for (const auto& lv : b.levels) {
+        const size_t bpl = lv.height ? lv.size / size_t(lv.height) : 0;
+        Bitmap::Level n{lv.width, lv.height, out.size(), size_t(lv.width) * size_t(lv.height) * 4};
+        out.resize(out.size() + n.size);
+        uint8_t* dst = out.data() + n.offset;
+        const uint8_t* src = b.data.data() + lv.offset;
+        for (int y = 0; y < lv.height; ++y) {
+            const uint8_t* row = src + size_t(y) * bpl;
+            for (int x = 0; x < lv.width; ++x, dst += 4) {
+                switch (b.bpp) {
+                    case 4: {
+                        const int idx = x & 1 ? row[x >> 1] >> 4 : row[x >> 1] & 0x0F;
+                        std::copy_n(pal[size_t(idx)].data(), 4, dst);
+                        break;
+                    }
+                    case 8: std::copy_n(pal[row[x]].data(), 4, dst); break;
+                    case 16: {
+                        const int v = row[x * 2] | row[x * 2 + 1] << 8;
+                        dst[0] = uint8_t((v & 31) << 3), dst[1] = uint8_t((v >> 5 & 31) << 3);
+                        dst[2] = uint8_t((v >> 10 & 31) << 3), dst[3] = v & 0x8000 ? 255 : 0;
+                        break;
+                    }
+                    case 24: dst[0] = row[x * 3], dst[1] = row[x * 3 + 1], dst[2] = row[x * 3 + 2], dst[3] = 255; break;
+                    default:
+                        dst[0] = row[x * 4], dst[1] = row[x * 4 + 1], dst[2] = row[x * 4 + 2];
+                        dst[3] = uint8_t(std::min(255, row[x * 4 + 3] * 2));
+                        break;
+                }
+            }
+        }
+        levels.push_back(n);
+    }
+    b.levels = std::move(levels);
+    b.data = std::move(out);
+    b.format = Bitmap::Format::RGBA8;
+    b.bpp = 32;
+    b.bytesPerLine = b.width * 4;
+}
+
 }  // namespace
 
 size_t bitmapLevelSize(Bitmap::Format format, int bpp, int w, int h) {
@@ -89,8 +151,13 @@ Bitmap readBitmap(ByteReader& r) {
     b.bytesPerLine = r.u16le();
     r.skip(b.version != 0 ? 19 : 6);
     b.format = formatOf(b.encoding);
-    // A palette only for paletted encodings (bpp <= 8, no 0x38 bits): never in GH2.
-    if (b.bpp <= 8 && (b.encoding & 0x38) == 0) r.skip(size_t(4) << b.bpp);
+    // A palette for paletted encodings (bpp <= 8, no 0x38 bits): every 4- and
+    // 8-bit texture of the PS2 disc (encoding 3) [C data].
+    Bytes palette;
+    if (b.bpp <= 8 && (b.encoding & 0x38) == 0) {
+        palette.assign(r.ptr(), r.ptr() + std::min(r.remaining(), size_t(4) << b.bpp));
+        r.skip(size_t(4) << b.bpp);
+    }
     if (b.width == 0 || b.height == 0) return b;  // runtime placeholder (render targets, photos)
 
     // Level 0 is bytesPerLine x height bytes; each smaller level is
@@ -110,6 +177,7 @@ Bitmap readBitmap(ByteReader& r) {
     r.skip(total);
     if (b.format == Bitmap::Format::DXT1 || b.format == Bitmap::Format::DXT5 || b.format == Bitmap::Format::ATI2)
         for (size_t i = 0; i + 1 < b.data.size(); i += 2) std::swap(b.data[i], b.data[i + 1]);
+    else if (b.format != Bitmap::Format::RGBA8) toRgba8(b, palette);
     return b;
 }
 

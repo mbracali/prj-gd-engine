@@ -14,7 +14,8 @@
 namespace venues {
 
 const std::vector<std::string>& names() {
-    static const std::vector<std::string> v = {"battle", "small1", "small2", "big", "theatre", "fest", "arena", "stone"};
+    // config/gh2.dta (venues battle small1 small2 theatre fest arena) [C data].
+    static const std::vector<std::string> v = {"battle", "small1", "small2", "theatre", "fest", "arena"};
     return v;
 }
 

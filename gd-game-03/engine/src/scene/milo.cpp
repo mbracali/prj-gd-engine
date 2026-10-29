@@ -15,7 +15,7 @@ namespace {
 
 constexpr uint32_t kMagicDeflate = 0xCBBEDEAF;  // the only kind in GH2's data
 constexpr uint32_t kMagicStored = 0xCABEDEAF;   // same table, blocks stored as is
-constexpr uint32_t kDirVersion = 25;
+constexpr uint32_t kDirVersion = 24;  // this disc's ObjectDir stream (GH2 360: 25)
 const uint8_t kMarker[4] = {0xAD, 0xDE, 0xAD, 0xDE};
 
 uint32_t le32(const uint8_t* p) {
@@ -39,7 +39,7 @@ size_t readHeader(const Bytes& d, size_t pos, Header& h) {
     ByteReader r(d.data(), d.size());
     r.seek(pos);
     uint32_t v = r.u32le();
-    if (v != kDirVersion) throw std::runtime_error("directory version " + std::to_string(v) + ", expected 25");
+    if (v != kDirVersion) throw std::runtime_error("directory version " + std::to_string(v) + ", expected 24");
     auto str = [&](size_t limit) {
         uint32_t n = r.u32le();
         if (n > limit || n > r.remaining()) throw std::runtime_error("bad string in directory header");
@@ -161,6 +161,16 @@ private:
             if (o->record.size() >= 4) o->version = le32(o->record.data());
         } else {
             o = decodeObject(cls, name, d_.data() + start, end - start);
+            // A record whose data happens to contain the end-marker bytes
+            // (a PS2 texture's texels in ui/gen/endgame) is split there by the
+            // marker search: when the typed decoder fails, try the following
+            // markers and keep the first span that decodes exactly.
+            for (size_t e = end, tries = 0; o->typed && !o->decoded && tries < 4; ++tries) {
+                e = findMarker(d_, e + 4);
+                if (e == std::string::npos) break;
+                auto longer = decodeObject(cls, name, d_.data() + start, e - start);
+                if (longer->decoded) o = std::move(longer), end = e;
+            }
         }
         o->dir = &owner;
         pos = end + 4;

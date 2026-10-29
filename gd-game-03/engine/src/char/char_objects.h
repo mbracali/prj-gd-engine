@@ -60,7 +60,7 @@ struct CharBonesSamples {
     static int typeOf(const std::string& channel);  // 0x8215D520
 };
 
-// CharClipSamples v11 (0x82162C68) = CharClip v5 (0x821A0BF0) + three bone
+// CharClipSamples v11 on GH2 360 / v10 on the PS2 disc (0x82162C68) = CharClip v5 (0x821A0BF0) + three bone
 // sets. Frames are beats at the authored tempo for beat clips; realtime
 // clips run frames_per_sec frames a second.
 class CharClipSamples : public Object {
@@ -97,13 +97,13 @@ public:
 // around t (n - 1); quats normalised. Channel name -> 3 / 4 / 1 floats.
 std::map<std::string, std::vector<float>> referencePose(const CharClipSamples& clip, float frame);
 
-// CharBone v3 (0x8215FDF0): a clip set's skeleton entry ("bone_x.trans").
+// CharBone v3 / PS2 v2, no weight (0x8215FDF0): a clip set's skeleton entry ("bone_x.trans").
 class CharBone : public Object {
 public:
     Trans trans;
     bool position = false, scale = false;  // Q: names
     uint32_t rotation = 0, deltaRotation = 9;  // channel types (9 none); Q: names
-    float weight = 0;
+    float weight = 1;  // rev 2: not stored, 1.0
 };
 
 // CharClipGroup v1 (0x821775A8): a named list of clips.
@@ -116,7 +116,7 @@ public:
 // CharClipFilter (0x82163F20): object header only.
 class CharClipFilter : public Object {};
 
-// The CharClipSet directory's own record (PreLoad 0x82167468: u32 16 +
+// The CharClipSet directory's own record (PreLoad 0x82167468: u32 16, PS2 14 +
 // ObjectDir v17 PreLoad; PostLoad 0x82168E08: ObjectDir PostLoad, hdr, then
 // these). Decoded from Directory::self by decodeClipSetDir (the per-clip
 // entries need the directory's clip count).
@@ -148,7 +148,7 @@ CharClipSetData decodeClipSetDir(const Object& self, size_t clipCount);
 
 // ---- characters ---------------------------------------------------------
 
-// Character v10 (PreLoad 0x82153CF8, PostLoad 0x82157678) and BandCharacter
+// Character v10 / PS2 v9, no CharacterTest block (PreLoad 0x82153CF8, PostLoad 0x82157678) and BandCharacter
 // v1 (PreLoad 0x82126048, then Character's): a character directory. Its own
 // record (char/<c>/og/gen/<c>.milo) carries the RndDir data, LODs, shadow and
 // the editor's CharacterTest block; a band slot in a venue's <v>_chars milo
@@ -179,7 +179,7 @@ public:
 // of a char milo, which the milo parser keeps raw). Throws on malformed data.
 std::unique_ptr<CharacterObj> decodeCharacterDir(const Object& self);
 
-// CharDriver v5 (Load 0x8216A728, PreLoad 0x8216BE80, PostLoad 0x8216C800).
+// CharDriver v5 / PS2 v3 (Load 0x8216A728, PreLoad 0x8216BE80, PostLoad 0x8216C800).
 class CharDriver : public Object {
 public:
     CharWeightable weightable;
@@ -196,7 +196,7 @@ public:
     std::string inactiveClip;     // ObjPtr<CharClip> (Q: name; set_inactive_clip)
 };
 
-// CharIKHand v5 (0x82174470).
+// CharIKHand v5 / PS2 v2: one target, no finger (0x82174470).
 class CharIKHand : public Object {
 public:
     CharWeightable weightable;
@@ -232,16 +232,16 @@ public:
     bool simulate = false;
 };
 
-// CharLookAt v3 (0x8216EBB0).
+// CharLookAt v3 / PS2 v2, allowRoll true (0x8216EBB0).
 class CharLookAt : public Object {
 public:
     CharWeightable weightable;
     std::string source, pivot, dest;
     std::array<float, 8> values{};  // Q: half_time, min/max yaw, min/max pitch, then 3 more
-    bool allowRoll = false;         // Q: name
+    bool allowRoll = true;          // Q: name; rev < 3 (PS2): true
 };
 
-// CharEyes v4 (0x82172708).
+// CharEyes v4 / PS2 v3, no interests (0x82172708).
 class CharEyes : public Object {
 public:
     std::vector<std::string> eyes;  // CharLookAt names
@@ -249,7 +249,7 @@ public:
     std::vector<std::pair<std::string, uint32_t>> interests;  // none on the disc
 };
 
-// CharWeightSetter v3 (0x8218DFC0).
+// CharWeightSetter v3 / PS2 v2, invert false (0x8218DFC0).
 class CharWeightSetter : public Object {
 public:
     CharWeightable weightable;
@@ -294,7 +294,7 @@ public:
     std::array<float, 12> xfm{};
 };
 
-// OutfitLoader v2 (PreLoad 0x8215B528, Load 0x82157CC8).
+// OutfitLoader v2 / PS2 v1, no category names (PreLoad 0x8215B528, Load 0x82157CC8).
 class OutfitLoader : public Object {
 public:
     std::string path;               // base folder ("../../../ng")

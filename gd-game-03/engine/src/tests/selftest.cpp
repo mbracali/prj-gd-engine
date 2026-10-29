@@ -319,10 +319,10 @@ int runTwoPlayerChecks(const Rules& rules) {
         check("pro face-off: a player whose meter empties does not fail (competitive, 0x822B37F8)",
               r->p[0]->rockMeter() == 0 && !r->p[0]->failed() && !r->p[1]->failed() && r->count(0, K::Failed) == 0);
     }
-    {  // The band's stars (0x822CE5D8): badreputation's max_scores (30243 48406 74261 95811).
+    {  // The band's stars (0x822CE5D8): 18andlife's max_scores (31933 43128 59640 66462) on this disc.
         check("co-op stars: 4 at 2.0 x max_scores[1], 5 at 2.0 x max_scores[3], a song without max_scores 5",
-              rules.coopStars("badreputation", 96811) == 3 && rules.coopStars("badreputation", 96812) == 4 &&
-                  rules.coopStars("badreputation", 191621) == 4 && rules.coopStars("badreputation", 191622) == 5 &&
+              rules.coopStars("18andlife", 86255) == 3 && rules.coopStars("18andlife", 86256) == 4 &&
+                  rules.coopStars("18andlife", 132923) == 4 && rules.coopStars("18andlife", 132924) == 5 &&
                   rules.coopStars("nosuchsong", 0) == 5);
     }
     return failures;
@@ -577,7 +577,15 @@ int runSelfTest(const std::string& dataPath) {
                         for (const PlayerEvent& e : s.takeEvents()) strumHopos += e.kind == PlayerEvent::Kind::Hopo;
                     }
                     const int total = static_cast<int>(p.chart().gems.size());
-                    const bool ok = p.notesHit() == total && !p.failed() && s.notesHit() == total && !s.failed();
+                    // The strum-only run may drop gems that follow the previous
+                    // one by 52 ms or less: the original drops such strums
+                    // (0x002356f8, "last + 52 < now") [C], so only hammer-ons
+                    // reach them (ballroomblitz's expert run at 48.7 ms).
+                    bool strumOk = !s.failed();
+                    for (int i = 0; i < total && strumOk; ++i)
+                        if (!s.gemHit(i) && !(i > 0 && p.chart().gems[size_t(i)].ms - p.chart().gems[size_t(i) - 1].ms <= 52.5f))
+                            strumOk = false;
+                    const bool ok = p.notesHit() == total && !p.failed() && strumOk;
                     PartTotals& pt2 = totals[part];
                     ++pt2.charts, pt2.gems += total, pt2.failed += !ok;
                     chartFailures += !ok;
@@ -587,6 +595,11 @@ int runSelfTest(const std::string& dataPath) {
                     if (s.notesHit() != total) std::fprintf(stderr, "  %s %s %s strummed only: %d/%d\n", info.id.c_str(),
                                                             partTrackName(pt), difficultyName(diff), s.notesHit(), total);
                     const auto& gems = p.chart().gems;
+                    for (int i = 0, shown = 0; i < total && shown < 6; ++i)
+                        if (!s.gemHit(i))
+                            ++shown, std::fprintf(stderr, "    strum missed gem %d at %.1f ms, frets %02x%s, gap %.1f ms\n", i,
+                                                  gems[size_t(i)].ms, gems[size_t(i)].frets, gems[size_t(i)].hopo ? " hopo" : "",
+                                                  i ? gems[size_t(i)].ms - gems[size_t(i) - 1].ms : 0.0f);
                     for (int i = 0; i < total; ++i) {
                         if (p.gemHit(i)) continue;
                         std::fprintf(stderr, "  missed %s %s %s gem %d at %.1f ms, frets %02x%s, gap %.1f ms\n",

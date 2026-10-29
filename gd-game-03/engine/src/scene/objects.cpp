@@ -194,8 +194,10 @@ void readTex(In& in, Tex& t) {
     t.bitmap = readBitmap(in.raw());
 }
 
+// Revision 27 on this disc: the same fields without the stencil mode (read
+// from revision 28 on, 360 0x821eebb8 "rev > 27") [C 360 + data].
 void readMat(In& in, Mat& m) {
-    expectVersion(m.version, 28, "Mat");
+    if (m.version != 27) expectVersion(m.version, 28, "Mat");
     m.header = readObjectHeader(in);
     m.blend = in.i32();
     in.fs(m.color);
@@ -221,7 +223,7 @@ void readMat(In& in, Mat& m) {
     m.environMap = in.str();
     m.perPixelLit = in.b();
     m.normalize = in.b();
-    m.stencilMode = in.i32();
+    if (m.version >= 28) m.stencilMode = in.i32();
 }
 
 // The mesh's BSP tree (@ 0x8226ab80): u8 present, plane (4 f32), front, back.
@@ -271,7 +273,16 @@ void readMesh(In& in, Mesh& m) {
         while (!m.bones.empty() && m.bones.back().name.empty()) m.bones.pop_back();
     }
     // A per-group vertex/index block follows only for meshes the loader keeps
-    // in a platform-specific form (FUN_821bd000); GH2's data never has it.
+    // in a platform-specific form (360 FUN_821bd000 and the loop after it):
+    // per group u32 n, u32 m, n u32 and m u16. GH2 360's data never has it;
+    // the PS2 disc's does (EXPERIMENT: checked against the end marker).
+    if (in.remaining() > 0) {
+        for (size_t g = 0; g < m.groupSizes.size(); ++g) {
+            const uint32_t n = in.u32(), k = in.u32();
+            if (n > in.remaining() / 4 || k > in.remaining() / 2) bad("implausible group block");
+            in.raw().skip(size_t(n) * 4 + size_t(k) * 2);
+        }
+    }
 }
 
 void readGroup(In& in, Group& g) {
@@ -313,8 +324,12 @@ void readEnviron(In& in, Environ& e) {
     e.fadeEnd = in.f();
 }
 
+// Revision 6 on this disc (360 Load 0x8220c3e8 branches) [C 360 + data]:
+// header, transform, colour, range, type and the two animate-from-preset
+// flags only; the spot radii / softness / displacement come with 7, the
+// projected texture and shadow casters with 8 / 9.
 void readLight(In& in, Light& l) {
-    expectVersion(l.version, 9, "Light");
+    if (l.version != 6) expectVersion(l.version, 9, "Light");
     l.header = readObjectHeader(in);
     readTrans(in, l.trans);
     in.fs(l.color);
@@ -322,6 +337,7 @@ void readLight(In& in, Light& l) {
     l.type = in.i32();
     l.animateColorFromPreset = in.b();
     l.animatePositionFromPreset = in.b();
+    if (l.version < 7) return;
     l.topRadius = in.f();
     l.botRadius = in.f();
     l.softness = in.f();
@@ -392,10 +408,13 @@ void readAnimFilter(In& in, AnimFilter& a) {
     a.period = in.f();
 }
 
+// Revision 27 on this disc (360 Load 0x82216ad0 branches) [C 360 + data]:
+// one object header (the second comes with 28), no spin / damping / drag
+// (30), frame_drive defaults on and pre_spawn off (stored from 28 / 29).
 void readParticleSys(In& in, ParticleSys& p) {
-    expectVersion(p.version, 30, "ParticleSys");
+    if (p.version != 27) expectVersion(p.version, 30, "ParticleSys");
     p.header = readObjectHeader(in);
-    readObjectHeader(in);  // v28+ reads the object block a second time (0x82216b38)
+    if (p.version >= 28) readObjectHeader(in);  // v28+ reads the object block a second time (0x82216b38)
     readAnimatable(in, p.anim);
     readTrans(in, p.trans);
     readDraw(in, p.draw);
@@ -425,15 +444,17 @@ void readParticleSys(In& in, ParticleSys& p) {
     in.fs(p.bubblePeriod);
     in.fs(p.bubbleSize);
     p.bubble = in.b();
-    p.spin = in.b();
-    in.fs(p.spinSpeed);
-    p.spinDamping = in.f();
-    p.drag = in.f();
+    if (p.version >= 30) {
+        p.spin = in.b();
+        in.fs(p.spinSpeed);
+        p.spinDamping = in.f();
+        p.drag = in.f();
+    }
     p.relativeMotion = in.f();
     p.relativeParent = in.str();
     p.mesh = in.str();
-    p.frameDrive = in.b();
-    p.preSpawn = in.b();
+    p.frameDrive = p.version >= 28 ? in.b() : true;
+    p.preSpawn = p.version >= 29 ? in.b() : false;
     if (in.b()) {  // preserved particles (@ 0x82212708): pos, colour, size
         uint32_t n = in.u32();
         if (n > in.remaining() / 32) bad("implausible particle count");
@@ -626,9 +647,15 @@ namespace {
 
 constexpr uint32_t kObjectDirRev = 17, kRndDirRev = 9, kPanelDirRev = 2, kTrackDirRev = 5, kGHTrackDirRev = 3, kWorldDirRev = 12;
 
+// ObjectDir PreLoad: revision 17 (GH2 360) or 16 (this disc). Revisions 2..16
+// read the Hmx::Object header here, before the viewports (360 PreLoad
+// 0x82322598, the "rev - 2 < 15" branch) [C 360 + data: every v16 record
+// ends at its marker]; 17 reads it in PostLoad.
 void objectDirPre(In& in, DirObj& d) {
-    expectVersion(in.u32(), kObjectDirRev, "ObjectDir");
     auto& o = d.objectDir;
+    o.revision = in.u32();
+    if (o.revision != 16) expectVersion(o.revision, kObjectDirRev, "ObjectDir");
+    if (o.revision <= 16) d.header = readObjectHeader(in);
     uint32_t n = in.u32();  // viewports (@ 0x82322530): Transform + u32 each (@ 0x8231dec8)
     if (n > in.remaining() / 52) bad("implausible viewport count");
     o.viewports.resize(n);
@@ -645,15 +672,22 @@ void objectDirPre(In& in, DirObj& d) {
 void objectDirPost(In& in, DirObj& d) {
     d.objectDir.postRef0 = in.str();
     d.objectDir.postRef1 = in.str();
-    d.header = readObjectHeader(in);
+    if (d.objectDir.revision > 16) d.header = readObjectHeader(in);
 }
 
+// RndDir PostLoad (360 0x821ba4c8): ObjectDir's, Animatable, Drawable,
+// Transformable, the environ; revisions 3..8 then carry one string and
+// 4..8 two more, read and dropped [C 360; data: the PS2 disc's v8 records
+// end at their markers].
 void rndDirPost(In& in, DirObj& d) {
     objectDirPost(in, d);
     readAnimatable(in, d.rnd.anim);
     readDraw(in, d.rnd.draw);
     readTrans(in, d.rnd.trans);
     d.rnd.environment = in.str();
+    const uint32_t rev = d.rnd.revision;
+    if (rev >= 3 && rev <= 8) d.rnd.oldStrings.push_back(in.str());
+    if (rev >= 4 && rev <= 8) d.rnd.oldStrings.push_back(in.str()), d.rnd.oldStrings.push_back(in.str());
     d.hasRnd = true;
 }
 
@@ -666,12 +700,15 @@ void panelDirPost(In& in, DirObj& d) {
 }
 
 // WorldDir PostLoad (0x8224de60): PanelDir's, then (own record) the default
-// camera, the sub-directory hides and bitmaps (pairs of names).
+// camera, the sub-directory hides and bitmaps (pairs of names; revision 12).
 void worldDirPost(In& in, DirObj& d) {
     panelDirPost(in, d);
     if (!d.own) return;
     auto& w = d.world;
     in.xfm(w.camXfm);
+    // Revision 11 (this disc) stops after the camera; the hides and bitmaps
+    // come from 12 on (360 0x8224de60, "rev > 11") [C 360 + data].
+    if (d.version < 12) return;
     w.subdirHides = in.strList();
     uint32_t n = in.u32();
     if (n > in.remaining() / 8) bad("implausible bitmap count");
@@ -725,9 +762,15 @@ bool hudPre(In& in, DirObj& d, bool own) {
         u32();
         u32();
     } else if (cls == "BandStarMeterDir") {
-        expectVersion(d.version, 5, cls.c_str());
-        if (own)
-            for (int i = 0; i < 6; ++i) ref();
+        // Revision 4 on this disc: the sixth name (a group, read from
+        // revision 5 on, 360 0x821321a8) is absent and kept empty [C 360 +
+        // data].
+        if (d.version != 4) expectVersion(d.version, 5, cls.c_str());
+        if (own) {
+            for (int i = 0; i < 5; ++i) ref();
+            if (d.version >= 5) ref();
+            else h.refs.push_back("");
+        }
         u32();
         u32();
         u8();
@@ -798,7 +841,7 @@ std::unique_ptr<DirObj> decodeDir(const std::string& cls, const std::string& nam
     }
     if (cls == "WorldDir") {
         // WorldDir PreLoad (0x8224e5c0): its fields, then PanelDir's chain.
-        expectVersion(d->version, kWorldDirRev, "WorldDir");
+        if (d->version != 11) expectVersion(d->version, kWorldDirRev, "WorldDir");  // 11 on this disc
         d->world.unknown0 = in.u32();
         d->world.unknown1 = in.u32();
         d->world.hudFile = in.str();
@@ -810,8 +853,9 @@ std::unique_ptr<DirObj> decodeDir(const std::string& cls, const std::string& nam
         else expectVersion(in.u32(), kPanelDirRev, "PanelDir");
     }
     if (cls != "ObjectDir") {
-        if (cls == "RndDir") expectVersion(d->version, kRndDirRev, "RndDir");  // HUD dirs: RndDir follows their fields
-        else expectVersion(in.u32(), kRndDirRev, "RndDir");
+        // HUD dirs: RndDir follows their fields. Revision 8 on this disc.
+        d->rnd.revision = cls == "RndDir" ? d->version : in.u32();
+        if (d->rnd.revision != 8) expectVersion(d->rnd.revision, kRndDirRev, "RndDir");
         objectDirPre(in, *d);
     } else {
         in.seek(start);

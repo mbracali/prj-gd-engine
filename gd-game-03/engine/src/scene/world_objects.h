@@ -30,7 +30,7 @@ struct CamTarget {
     std::string object, subpart;
 };
 
-// CamShot v27 (Load @ 0x8222de20): a camera shot of the venue's director.
+// CamShot v27 (Load @ 0x8222de20; also reads the PS2 disc's v20): a camera shot of the venue's director.
 // Frames run at 30 a second. The object header's type is "band" and its
 // properties are the director's flags (camshot.dta: distance, facing, solo,
 // special, walk_ok, starpower_ok, postprocess, next_shot...).
@@ -50,7 +50,7 @@ public:
         bool useParentRotation = false;
         float shakeNoiseAmp = 0, shakeNoiseFreq = 0;
         std::array<float, 2> shakeMaxAngle{};
-        float zoomFov = 0;
+        float zoomFov = 0;       // rev >= 22
     };
     Animatable anim;
     std::vector<Keyframe> keyframes;
@@ -77,7 +77,7 @@ public:
     std::string flag(const std::string& key) const;
 };
 
-// LightPreset v9 (Load @ 0x82243660): a lighting look, keyframes of every
+// LightPreset v9 (Load @ 0x82243660; also reads the PS2 disc's v8): a lighting look, keyframes of every
 // spotlight, environment and light of its lists.
 class LightPreset : public Object {
 public:
@@ -120,7 +120,7 @@ public:
     bool manual = false, locked = false;
 };
 
-// Spotlight v25 (Load @ 0x82238098): a stage light with its beam, floor
+// Spotlight v25 (Load @ 0x82238098; the PS2's v20 @ 0x002737f0): a stage light with its beam, floor
 // spot, flare and lens.
 class Spotlight : public Object {
 public:
@@ -134,11 +134,13 @@ public:
         std::string material;
         float offset = 0;
         std::array<float, 2> angleOffset{};
-        float brighten = 0;
+        float brighten = 0;  // rev < 21: 1
         std::string xsection;
         float expand = 0;
         std::vector<std::string> cutouts;
-    } beam;
+    } beam;                  // rev < 23: the first of `beams`
+    std::vector<Beam> beams; // rev < 23 (the PS2's v20): every beam
+
     std::string lightCan, target;
     float lightCanOffset = 0;
     std::array<float, 4> color{};
@@ -176,7 +178,7 @@ public:
     bool show3dOnly = false;
 };
 
-// EventTrigger v10 (Load @ 0x8225d708): what a venue event (hit_p0_fret1,
+// EventTrigger v10 (Load @ 0x8225d708; also reads the PS2 disc's v8): what a venue event (hit_p0_fret1,
 // chorus, game_won...) starts.
 class EventTrigger : public Object {
 public:
@@ -185,7 +187,7 @@ public:
         float blend = 0;
         bool wait = false;   // Q: u8 / f32 order
         float delay = 0;
-        bool enable = false; // the filter below is used
+        bool enable = false; // the filter below is used (rev < 10: never)
         uint32_t rate = 0;
         float start = 0, end = 0, scale = 1;
         std::string type;    // range / loop / shuttle
@@ -194,7 +196,7 @@ public:
     std::vector<std::string> triggerEvents;
     std::vector<AnimEntry> anims;
     std::vector<std::string> sounds, shows;
-    std::vector<std::pair<std::string, float>> hideDelays;  // object, delay (seconds)
+    std::vector<std::pair<std::string, float>> hideDelays;  // object, delay (seconds; rev < 9: 0)
     std::vector<std::string> enableEvents, disableEvents, waitForEvents;
     std::string nextRandom;
     std::vector<std::pair<std::string, std::string>> proxyCalls;  // proxy dir, message

@@ -102,8 +102,9 @@ void readAdsr(Rd& r, Adsr& a) {
 
 // Sfx::Load @ 0x822EE8B0 (rev 5): Hmx::Object, the maps (u32 count; each
 // @ 0x822FF580: sample name, f32 volume, pan, transpose, i32 fx core,
-// ADSR), the send (an FxSend name) and f32 send_volume [C].
-void readSfx(Rd& r, Sfx& s) {
+// ADSR), the send (an FxSend name) and f32 send_volume [C]. The PS2 disc's
+// are rev 4: no send and send_volume (rev > 4), which keep their defaults [C].
+void readSfx(Rd& r, Sfx& s, uint32_t v) {
     s.header = r.header();
     s.maps.resize(r.count(20));
     for (auto& m : s.maps) {
@@ -114,8 +115,10 @@ void readSfx(Rd& r, Sfx& s) {
         m.fxCore = r.i32();
         readAdsr(r, m.adsr);
     }
-    s.send = r.str();
-    s.sendVolume = r.f();
+    if (v > 4) {
+        s.send = r.str();
+        s.sendVolume = r.f();
+    }
 }
 
 // Sequence::Load @ 0x822EFB30 (rev 1): avg_volume, volume_spread,
@@ -153,7 +156,7 @@ template <class T> SynthDecoder dec(uint32_t version, void (*fn)(Rd&, T&)) {
 const std::map<std::string, SynthDecoder>& synthDecoders() {
     static const std::map<std::string, SynthDecoder> m = {
         {"SynthSample", dec<SynthSample>(5, readSynthSample)},
-        {"Sfx", dec<Sfx>(5, readSfx)},
+        {"Sfx", dec<Sfx>(5, [](Rd& r, Sfx& s) { readSfx(r, s, s.version); })},
         // SfxSeq::Load @ 0x822F1280 (rev 3): Sequence, the child (ObjPtr).
         {"SfxSeq", dec<SfxSeq>(3, [](Rd& r, SfxSeq& s) {
              readSequence(r, s.params);
@@ -199,7 +202,8 @@ std::unique_ptr<Object> makeSynthObject(const std::string& cls) {
 void readSynthObject(Object& o, const Bytes& record, size_t& pos) {
     auto it = synthDecoders().find(o.cls);
     if (it == synthDecoders().end()) bad("no sound decoder for " + o.cls);
-    if (o.version != it->second.version)
+    // Sfx also reads the PS2's rev 4.
+    if (o.version != it->second.version && !(o.cls == "Sfx" && o.version == 4))
         bad(o.cls + " version " + std::to_string(o.version) + " (decoder reads " + std::to_string(it->second.version) + ")");
     Rd r(record, pos);
     it->second.read(r, o);

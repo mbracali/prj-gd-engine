@@ -2,6 +2,7 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "char/char_objects.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <functional>
@@ -95,10 +96,15 @@ CharWeightable weightable(Rd& r) {
     return w;
 }
 
-// ObjectDir PreLoad 0x82322598 (v17) / PostLoad 0x8231ff08; RndDir v9
-// (PreLoad 0x821ba438, PostLoad 0x821ba4c8): mirrors scene/objects.cpp.
-void objectDirPre(Rd& r, ObjectDirData& o) {
-    r.version({17}, "ObjectDir");
+// ObjectDir PreLoad 0x82322598 / PostLoad 0x8231ff08; RndDir PreLoad
+// 0x821ba438, PostLoad 0x821ba4c8: mirrors scene/objects.cpp. ObjectDir is
+// v17 on GH2 360 and v16 on this disc: revisions 2..16 read the Hmx::Object
+// header in PreLoad, before the viewports, and PostLoad then has none; 17
+// reads it at the end of PostLoad [C 360 0x82322598 / 0x8231ff08; data: every
+// v16 character / clip-set record ends at its marker].
+void objectDirPre(Rd& r, ObjectDirData& o, ObjectHeader& h) {
+    o.revision = r.version({16, 17}, "ObjectDir");
+    if (o.revision <= 16) h = r.header();
     uint32_t n = r.count(52);
     o.viewports.resize(n);
     for (auto& v : o.viewports) {
@@ -114,7 +120,13 @@ void objectDirPre(Rd& r, ObjectDirData& o) {
 void objectDirPost(Rd& r, ObjectDirData& o, ObjectHeader& h) {
     o.postRef0 = r.str();
     o.postRef1 = r.str();
-    h = r.header();
+    if (o.revision > 16) h = r.header();
+}
+
+// RndDir PreLoad 0x821ba438: its revision (9 on GH2 360, 8 on this disc), then ObjectDir's.
+void rndDirPre(Rd& r, ObjectDirData& o, ObjectHeader& h, RndDirData& d) {
+    d.revision = r.version({8, 9}, "RndDir");
+    objectDirPre(r, o, h);
 }
 
 void rndDirPost(Rd& r, ObjectDirData& o, ObjectHeader& h, RndDirData& d) {
@@ -125,24 +137,36 @@ void rndDirPost(Rd& r, ObjectDirData& o, ObjectHeader& h, RndDirData& d) {
     r.draw(d.draw);
     r.trans(d.trans);
     d.environment = r.str();
+    // Revisions 3..8 carry one more string and 4..8 two more, which the 360
+    // PostLoad reads and drops [C 360 0x821ba4c8; data: "start" x3 on the
+    // PS2 characters].
+    if (d.revision >= 3 && d.revision <= 8) d.oldStrings.push_back(r.str());
+    if (d.revision >= 4 && d.revision <= 8) d.oldStrings.push_back(r.str()), d.oldStrings.push_back(r.str());
 }
 
-// Character PreLoad 0x82153CF8 (rev 10; BandCharacter PreLoad 0x82126048 first: u32 1).
-void characterPre(Rd& r, CharacterObj& c, bool readBandVersion) {
+// Character PreLoad 0x82153CF8 (rev 10 on GH2 360, 9 on this disc; both
+// >= 2 go straight to RndDir's PreLoad); BandCharacter PreLoad 0x82126048
+// first reads its own u32 1. Returns the Character revision.
+uint32_t characterPre(Rd& r, CharacterObj& c, bool readBandVersion) {
     if (readBandVersion) r.version({1}, "BandCharacter");
-    r.version({10}, "Character");
-    r.version({9}, "RndDir");
-    objectDirPre(r, c.objectDir);
+    const uint32_t rev = r.version({9, 10}, "Character");
+    rndDirPre(r, c.objectDir, c.header, c.rnd);
+    return rev;
 }
 
 // ---- clips
 
-void bonesHeader(Rd& r, CharBonesSamples& s) {
-    uint32_t n = r.count(8);
+// CharBonesSamples header 0x821A3030, under the CharClipSamples revision
+// (0x821A14F0 hands it over): rev >= 11 stores name + weight per channel,
+// rev 10 (this disc) the name only, the weight staying 1.0 (the default
+// element 0x821A3030 resizes with) [C 360 0x821A3030; data]. Revisions >= 10
+// then read the ten offsets, the compression and the count alike.
+void bonesHeader(Rd& r, CharBonesSamples& s, uint32_t clipSamplesRev) {
+    uint32_t n = r.count(4);
     s.bones.resize(n);
     for (auto& b : s.bones) {
         b.name = r.str();
-        b.weight = r.f();
+        b.weight = clipSamplesRev >= 11 ? r.f() : 1.0f;
         b.type = CharBonesSamples::typeOf(b.name);
     }
     for (auto& o : s.offs) o = r.u32();
@@ -218,91 +242,105 @@ void charClip(Rd& r, CharClipSamples& k) {
 void readClipSamples(Rd& r, CharClipSamples& k) {
     charClip(r, k);
     CharBonesSamples* sets[3] = {&k.full, &k.one, &k.third};
-    for (auto* s : sets) bonesHeader(r, *s);
+    for (auto* s : sets) bonesHeader(r, *s, k.version);
     for (auto* s : sets) bonesData(r, *s);
 }
 
-void readCharDriverBody(Rd& r, CharDriver& d) {
-    r.version({5}, "CharDriver");
+// CharDriver after its revision: PreLoad 0x8216BE80 then PostLoad 0x8216C800.
+// Rev 3 (this disc) has no unknown55 (rev >= 5, else false) and no starved
+// clip (PostLoad rev >= 4, else none); rev < 3 would carry a dropped u32 after
+// the weightable and rev < 2 no realign [C 360 0x8216BE80 / 0x8216C800; data].
+void charDriverFields(Rd& r, CharDriver& d, uint32_t rev) {
     d.header = r.header();
     d.weightable = weightable(r);
     d.bones = r.str();
     d.clips = r.str();
     d.realign = r.b();
-    d.unknown55 = r.b();
-    d.starvedClip = r.str();
+    d.unknown55 = rev >= 5 ? r.b() : false;
+    d.starvedClip = rev >= 4 ? r.str() : std::string();
 }
 
+// CharIKHand::Load 0x82174470: rev 5 on GH2 360, 2 on this disc. Rev < 5 has
+// no finger (empty); rev < 3 stores one target ObjPtr, not a list; rev < 2
+// no scaleX (false); rev < 4 no moveElbow (true) [C 360 0x82174470; data].
 void readIKHand(Rd& r, CharIKHand& h) {
+    const uint32_t rev = h.version;
     h.header = r.header();
     h.weightable = weightable(r);
     h.hand = r.str();
-    h.finger = r.str();
-    h.targets = r.strs();
+    h.finger = rev >= 5 ? r.str() : std::string();
+    if (rev >= 3) {
+        h.targets = r.strs();
+    } else {
+        // [I] an empty name adds no target (the list holds objects); every
+        // v2 record on the disc names one.
+        std::string t = r.str();
+        h.targets.clear();
+        if (!t.empty()) h.targets.push_back(t);
+    }
     h.orient = r.b();
     h.stretch = r.b();
-    h.scaleX = r.b();
-    h.moveElbow = r.b();
+    h.scaleX = rev >= 2 ? r.b() : false;
+    h.moveElbow = rev >= 4 ? r.b() : true;
 }
 
+// The revisions a decoder reads: GH2 360's and, where they differ, this disc's.
 struct Decoder {
-    uint32_t version;
+    std::vector<uint32_t> versions;
     std::function<std::unique_ptr<Object>()> make;
     std::function<void(Rd&, Object&)> read;
 };
 
-template <class T> Decoder dec(uint32_t version, std::function<void(Rd&, T&)> fn) {
-    return {version, [] { return std::make_unique<T>(); }, [fn](Rd& r, Object& o) { fn(r, static_cast<T&>(o)); }};
+template <class T> Decoder dec(std::initializer_list<uint32_t> versions, std::function<void(Rd&, T&)> fn) {
+    return {versions, [] { return std::make_unique<T>(); }, [fn](Rd& r, Object& o) { fn(r, static_cast<T&>(o)); }};
 }
 
 const std::map<std::string, Decoder>& charDecoders() {
     static const std::map<std::string, Decoder> m = {
-        // CharClipSamples::Load 0x82162C68 (rev 11).
-        {"CharClipSamples", dec<CharClipSamples>(11, readClipSamples)},
-        // CharBone::Load 0x8215FDF0 (rev 3).
-        {"CharBone", dec<CharBone>(3, [](Rd& r, CharBone& b) {
+        // CharClipSamples::Load 0x82162C68: rev 11 on GH2 360, 10 on this disc
+        // (the difference is in the bone-set headers, see bonesHeader); both
+        // carry the third set (rev > 7) [C 360 0x82162C68; data].
+        {"CharClipSamples", dec<CharClipSamples>({10, 11}, readClipSamples)},
+        // CharBone::Load 0x8215FDF0: rev 3 on GH2 360, 2 on this disc. Rev 2
+        // has no weight (1.0); rev < 2 would also lack scale and bump both
+        // channel types [C 360 0x8215FDF0; data].
+        {"CharBone", dec<CharBone>({2, 3}, [](Rd& r, CharBone& b) {
              b.header = r.header();
              r.trans(b.trans);
              b.position = r.b();
              b.scale = r.b();
              b.rotation = r.u32();
              b.deltaRotation = r.u32();
-             b.weight = r.f();
+             b.weight = b.version >= 3 ? r.f() : 1.0f;
          })},
         // CharClipGroup::Load 0x821775A8 (rev 1).
-        {"CharClipGroup", dec<CharClipGroup>(1, [](Rd& r, CharClipGroup& g) {
+        {"CharClipGroup", dec<CharClipGroup>({1}, [](Rd& r, CharClipGroup& g) {
              g.header = r.header();
              g.clips = r.strs();
              g.flags = r.u32();
          })},
         // CharClipFilter 0x82163F20: the object header only (its u32 1 is the header's revision).
-        {"CharClipFilter", {1, [] { return std::make_unique<CharClipFilter>(); }, [](Rd&, Object&) {}}},
-        // CharDriver Load 0x8216A728 / PreLoad 0x8216BE80 / PostLoad 0x8216C800 (rev 5).
-        {"CharDriver", {5, [] { return std::make_unique<CharDriver>(); }, [](Rd& r, Object& o) {
-             // The version was read by the dispatcher: re-read the body from it.
-             auto& d = static_cast<CharDriver&>(o);
-             d.header = r.header();
-             d.weightable = weightable(r);
-             d.bones = r.str();
-             d.clips = r.str();
-             d.realign = r.b();
-             d.unknown55 = r.b();
-             d.starvedClip = r.str();
-         }}},
-        // CharDriverMidi Pre 0x82185590 (u32 3, CharDriver Pre), Post 0x82185600 (CharDriver Post, ObjPtr<CharClip>).
-        {"CharDriverMidi", dec<CharDriverMidi>(3, [](Rd& r, CharDriverMidi& d) {
-             readCharDriverBody(r, d);
+        {"CharClipFilter", {{1}, [] { return std::make_unique<CharClipFilter>(); }, [](Rd&, Object&) {}}},
+        // CharDriver Load 0x8216A728 / PreLoad 0x8216BE80 / PostLoad 0x8216C800:
+        // rev 5 on GH2 360, 3 on this disc (the version was read by the dispatcher).
+        {"CharDriver", dec<CharDriver>({3, 5}, [](Rd& r, CharDriver& d) { charDriverFields(r, d, d.version); })},
+        // CharDriverMidi Pre 0x82185590 (u32 3, then CharDriver's PreLoad with its
+        // own revision: 5 on GH2 360, 3 on this disc), Post 0x82185600
+        // (CharDriver's PostLoad, then ObjPtr<CharClip>; a midi rev 2 would add a
+        // dropped string) [C 360; data].
+        {"CharDriverMidi", dec<CharDriverMidi>({3}, [](Rd& r, CharDriverMidi& d) {
+             const uint32_t rev = r.version({3, 5}, "CharDriver");
+             charDriverFields(r, d, rev);
              d.inactiveClip = r.str();
          })},
-        // CharIKHand::Load 0x82174470 (rev 5).
-        {"CharIKHand", dec<CharIKHand>(5, readIKHand)},
+        {"CharIKHand", dec<CharIKHand>({2, 5}, readIKHand)},
         // CharIKMidi::Load 0x82184950 (rev 4).
-        {"CharIKMidi", dec<CharIKMidi>(4, [](Rd& r, CharIKMidi& k) {
+        {"CharIKMidi", dec<CharIKMidi>({4}, [](Rd& r, CharIKMidi& k) {
              k.header = r.header();
              k.bone = r.str();
          })},
         // CharHair::Load 0x8217FAF0 (rev 2).
-        {"CharHair", dec<CharHair>(2, [](Rd& r, CharHair& h) {
+        {"CharHair", dec<CharHair>({2}, [](Rd& r, CharHair& h) {
              h.header = r.header();
              r.fs(h.params);
              h.strands.resize(r.count(8));
@@ -324,54 +362,61 @@ const std::map<std::string, Decoder>& charDecoders() {
              }
              h.simulate = r.b();
          })},
-        // CharLookAt::Load 0x8216EBB0 (rev 3).
-        {"CharLookAt", dec<CharLookAt>(3, [](Rd& r, CharLookAt& l) {
+        // CharLookAt::Load 0x8216EBB0: rev 3 on GH2 360, 2 on this disc. Rev 2
+        // has all eight floats (rev > 1) but no allowRoll, which is then true
+        // [C 360 0x8216EBB0; data].
+        {"CharLookAt", dec<CharLookAt>({2, 3}, [](Rd& r, CharLookAt& l) {
              l.header = r.header();
              l.weightable = weightable(r);
              l.source = r.str();
              l.pivot = r.str();
              l.dest = r.str();
              r.fs(l.values);
-             l.allowRoll = r.b();
+             l.allowRoll = l.version >= 3 ? r.b() : true;
          })},
-        // CharEyes::Load 0x82172708 (rev 4).
-        {"CharEyes", dec<CharEyes>(4, [](Rd& r, CharEyes& e) {
+        // CharEyes::Load 0x82172708: rev 4 on GH2 360, 3 on this disc. Rev 3
+        // stores no interests (rev >= 4); viewDirection is there (rev > 2)
+        // [C 360 0x82172708; data].
+        {"CharEyes", dec<CharEyes>({3, 4}, [](Rd& r, CharEyes& e) {
              e.header = r.header();
              e.eyes = r.strs();
              e.viewDirection = r.str();
+             if (e.version < 4) return;
              e.interests.resize(r.count(8));
              for (auto& i : e.interests) {
                  i.first = r.str();
                  i.second = r.u32();
              }
          })},
-        // CharWeightSetter::Load 0x8218DFC0 (rev 3).
-        {"CharWeightSetter", dec<CharWeightSetter>(3, [](Rd& r, CharWeightSetter& w) {
+        // CharWeightSetter::Load 0x8218DFC0: rev 3 on GH2 360, 2 on this disc.
+        // Rev 2 has the weightable (rev > 1) but no invert (false)
+        // [C 360 0x8218DFC0; data].
+        {"CharWeightSetter", dec<CharWeightSetter>({2, 3}, [](Rd& r, CharWeightSetter& w) {
              w.header = r.header();
              w.weightable = weightable(r);
              w.driver = r.str();
              w.flags = r.u32();
-             w.invert = r.b();
+             w.invert = w.version >= 3 ? r.b() : false;
          })},
         // CharUpperTwist::Load 0x82182C00 (rev 1).
-        {"CharUpperTwist", dec<CharUpperTwist>(1, [](Rd& r, CharUpperTwist& t) {
+        {"CharUpperTwist", dec<CharUpperTwist>({1}, [](Rd& r, CharUpperTwist& t) {
              t.header = r.header();
              t.upperArm = r.str();
              t.twist1 = r.str();
              t.twist2 = r.str();
          })},
         // CharForeTwist::Load 0x82182018 (rev 1).
-        {"CharForeTwist", dec<CharForeTwist>(1, [](Rd& r, CharForeTwist& t) {
+        {"CharForeTwist", dec<CharForeTwist>({1}, [](Rd& r, CharForeTwist& t) {
              t.header = r.header();
              t.offset = r.f();
              t.hand = r.str();
              t.twist2 = r.str();
          })},
         // CharServoBone::Load 0x82188870, CharWalk::Load 0x82189F80 (rev 1): header only.
-        {"CharServoBone", dec<CharServoBone>(1, [](Rd& r, CharServoBone& s) { s.header = r.header(); })},
-        {"CharWalk", dec<CharWalk>(1, [](Rd& r, CharWalk& s) { s.header = r.header(); })},
+        {"CharServoBone", dec<CharServoBone>({1}, [](Rd& r, CharServoBone& s) { s.header = r.header(); })},
+        {"CharWalk", dec<CharWalk>({1}, [](Rd& r, CharWalk& s) { s.header = r.header(); })},
         // CharPosConstraint::Load 0x82179178 (rev 2).
-        {"CharPosConstraint", dec<CharPosConstraint>(2, [](Rd& r, CharPosConstraint& c) {
+        {"CharPosConstraint", dec<CharPosConstraint>({2}, [](Rd& r, CharPosConstraint& c) {
              c.header = r.header();
              c.targets = r.strs();
              c.src = r.str();
@@ -379,7 +424,7 @@ const std::map<std::string, Decoder>& charDecoders() {
              r.fs(c.boxMax);
          })},
         // CharIKRod::Load 0x821806F8 (rev 2).
-        {"CharIKRod", dec<CharIKRod>(2, [](Rd& r, CharIKRod& k) {
+        {"CharIKRod", dec<CharIKRod>({2}, [](Rd& r, CharIKRod& k) {
              k.header = r.header();
              k.leftEnd = r.str();
              k.rightEnd = r.str();
@@ -389,21 +434,27 @@ const std::map<std::string, Decoder>& charDecoders() {
              k.dest = r.str();
              r.fs(k.xfm);
          })},
-        // OutfitLoader PreLoad 0x8215B528 (rev 2).
-        {"OutfitLoader", dec<OutfitLoader>(2, [](Rd& r, OutfitLoader& o) {
+        // OutfitLoader PreLoad 0x8215B528: rev 2 on GH2 360, 1 on this disc.
+        // Rev 1 stores no category name (the 360 sets the string at
+        // 0x820023A0, [I] empty) and one more byte before each item's two,
+        // read and dropped [C 360 0x8215B528; data].
+        {"OutfitLoader", dec<OutfitLoader>({1, 2}, [](Rd& r, OutfitLoader& o) {
              o.header = r.header();
              o.path = r.str();
              o.categories.resize(r.u16());
              for (auto& c : o.categories) {
                  c.current = r.u8();
                  c.next = r.u8();
-                 c.name = r.str();
+                 if (o.version >= 2) c.name = r.str();
                  c.items.resize(r.u16());
-                 for (auto& i : c.items) i.first = r.u8(), i.second = r.u8();
+                 for (auto& i : c.items) {
+                     if (o.version < 2) r.u8();
+                     i.first = r.u8(), i.second = r.u8();
+                 }
              }
          })},
         // FaceFxLipSyncServo v5 (Load 0x8218E378, PreLoad 0x8218FAF0, PostLoad 0x82192470).
-        {"FaceFxLipSyncServo", dec<FaceFxLipSyncServo>(5, [](Rd& r, FaceFxLipSyncServo& s) {
+        {"FaceFxLipSyncServo", dec<FaceFxLipSyncServo>({5}, [](Rd& r, FaceFxLipSyncServo& s) {
              s.header = r.header();
              s.weightable = weightable(r);
              s.faceGraph = r.str();
@@ -416,17 +467,17 @@ const std::map<std::string, Decoder>& charDecoders() {
              }
          })},
         // Character / BandCharacter in a venue's <v>_chars milo: Pre + RndDir PostLoad
-        // (Character PostLoad 0x82157678 reads its own fields only for its own record).
-        {"Character", dec<CharacterObj>(10, [](Rd& r, CharacterObj& c) {
-             r.version({9}, "RndDir");
-             objectDirPre(r, c.objectDir);
+        // (Character PostLoad 0x82157678 reads its own fields only for its own
+        // record). Character is v10 on GH2 360, v9 on this disc; both read the
+        // same here.
+        {"Character", dec<CharacterObj>({9, 10}, [](Rd& r, CharacterObj& c) {
+             rndDirPre(r, c.objectDir, c.header, c.rnd);
              rndDirPost(r, c.objectDir, c.header, c.rnd);
          })},
-        {"BandCharacter", dec<CharacterObj>(1, [](Rd& r, CharacterObj& c) {
+        {"BandCharacter", dec<CharacterObj>({1}, [](Rd& r, CharacterObj& c) {
              c.band = true;
-             r.version({10}, "Character");
-             r.version({9}, "RndDir");
-             objectDirPre(r, c.objectDir);
+             r.version({9, 10}, "Character");
+             rndDirPre(r, c.objectDir, c.header, c.rnd);
              rndDirPost(r, c.objectDir, c.header, c.rnd);
          })},
     };
@@ -454,12 +505,15 @@ CharClipSetData decodeClipSetDir(const Object& self, size_t clipCount) {
     try {
         size_t pos = 0;
         Rd r(self.record, pos);
-        r.version({16}, "CharClipSet");
-        objectDirPre(r, s.objectDir);
+        // PreLoad 0x82167468 / PostLoad 0x82168E08: rev 16 on GH2 360, 14 on
+        // this disc. Rev < 15 has no defaultFlags (0); rev 14 is the first with
+        // moveSelf (older ones a symbol list) [C 360 0x82168E08; data].
+        const uint32_t rev = r.version({14, 15, 16}, "CharClipSet");
+        objectDirPre(r, s.objectDir, s.header);
         objectDirPost(r, s.objectDir, s.header);
         s.blendWidth = r.f();
         s.playFlags = r.u32();
-        s.defaultFlags = r.u32();
+        s.defaultFlags = rev >= 15 ? r.u32() : 0;
         s.clips.resize(clipCount);
         for (auto& e : s.clips) {
             e.name = r.str();
@@ -491,8 +545,13 @@ std::unique_ptr<CharacterObj> decodeCharacterDir(const Object& self) {
     c->band = self.cls == "BandCharacter";
     size_t pos = 0;
     Rd r(c->record, pos);
-    characterPre(r, *c, c->band);
+    const uint32_t rev = characterPre(r, *c, c->band);
     rndDirPost(r, c->objectDir, c->header, c->rnd);
+    // PostLoad 0x82157678, own record: revisions >= 9 store the LOD list
+    // directly (0x82156F50; older ones a list of lists), then shadow,
+    // selfShadow (rev >= 3), sphereBase (rev >= 5); only rev > 9 adds the
+    // CharacterTest block [C 360 0x82157678; data: the PS2 v9 records end
+    // after sphereBase].
     c->lods.resize(r.count(8));
     for (auto& l : c->lods) {
         l.screenSize = r.f();
@@ -501,6 +560,11 @@ std::unique_ptr<CharacterObj> decodeCharacterDir(const Object& self) {
     c->shadow = r.str();
     c->selfShadow = r.b();
     c->sphereBase = r.str();
+    if (rev < 10) {
+        if (r.left() != 0) bad(std::to_string(r.left()) + " bytes left in the Character record");
+        c->decoded = true;
+        return c;
+    }
     // CharacterTest::Load 0x8219B7E0 (rev 6), the editor's block.
     auto& t = c->test;
     r.version({6}, "CharacterTest");
@@ -580,8 +644,12 @@ void readCharObject(Object& o, const Bytes& record, size_t& pos) {
         o.header = readObjectHeaderAt(record, pos);
         return;
     }
-    if (o.version != it->second.version)
-        bad(o.cls + " version " + std::to_string(o.version) + " (decoder reads " + std::to_string(it->second.version) + ")");
+    const auto& vs = it->second.versions;
+    if (std::find(vs.begin(), vs.end(), o.version) == vs.end()) {
+        std::string list;
+        for (uint32_t v : vs) list += (list.empty() ? "" : "/") + std::to_string(v);
+        bad(o.cls + " version " + std::to_string(o.version) + " (decoder reads " + list + ")");
+    }
     Rd r(record, pos);
     it->second.read(r, o);
 }

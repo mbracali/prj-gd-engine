@@ -355,6 +355,7 @@ struct ObjectDirData {
     // right after this PreLoad data (the crowd lighters).
     uint32_t inlineProxy = 0;
     std::string postRef0, postRef1;  // Q: two object names PostLoad resolves (e.g. "anim.grp", "track.cam")
+    uint32_t revision = 17;          // 16 on the PS2 disc: the Object header comes first (PreLoad)
 };
 // RndDir v9 (PreLoad @ 0x821ba438, PostLoad @ 0x821ba4c8).
 struct RndDirData {
@@ -362,6 +363,8 @@ struct RndDirData {
     Draw draw;
     Trans trans;
     std::string environment;  // "environ"
+    uint32_t revision = 9;    // 8 on the PS2 disc
+    std::vector<std::string> oldStrings;  // revisions 3..8: strings the 360 PostLoad reads and drops
 };
 // PanelDir v2 (PreLoad @ 0x82374378, PostLoad @ 0x823743f0); own record only.
 struct PanelDirData {

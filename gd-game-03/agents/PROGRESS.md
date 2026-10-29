@@ -50,3 +50,28 @@ Not yet: the full `./build.sh` (Windows, Android) still carries gd02's FFmpeg
 steps; adapted in M9.
 
 Next: M1 (directory v24 and the older class versions). Estimate unchanged.
+
+## 2026-10-28 23:40, M1 data layer (gate passed), M2 started
+
+Done:
+- Directory v24; ObjectDir 16, RndDir 8, WorldDir 11, BandStarMeterDir 4, Mat 27,
+  Mesh 28 + the PS2 per-group block, Light 6, ParticleSys 27 (me); Character
+  family (subagent); CamShot, Spotlight, LightPreset, EventTrigger, Sfx
+  (subagent). Layouts: docs/formats.md. PS2 textures (4/8-bit palettes, CSM1,
+  alpha x2, 16/24/32-bit) to RGBA8. Records with embedded marker bytes retried.
+- VGS songs, menu loops (synth.dta's list), crowd streams; ADPCM sound effects
+  trimmed to their sample count. Venue list from config/gh2.dta.
+- 52 ms strum filter confirmed at 0x002356f8; selftest's strum-only bot
+  allows the misses that filter forces.
+
+Verified (fresh build, `ninja -C build/linux`: no warning or error lines):
+- `build/linux/gd03 "$ISO" --scenetest` -> `430 milo files parsed, 0 failed`,
+  `scene test passed: 0 typed objects failed, 0 files failed`
+- `build/linux/gd03 "$ISO" --sfxtest` -> `274 decoded to exactly their sample count`, `sfxtest: OK`
+- `build/linux/gd03 "$ISO" --selftest` -> exit 0; `187 .dtb scripts decoded, 0 failed`,
+  `PART GUITAR 156 charts, 67007 gems, 0 not fully hit`, `PART BASS 120 charts, 73749 gems, 0 not fully hit`,
+  `all input checks passed`
+- `repo_guard.py` -> 0 problems.
+
+Next: M2 rule re-confirmation in SLUS_215.86 (Star Power, multiplier, rock
+meter), then M3 (scripts, UI, audit, walk).

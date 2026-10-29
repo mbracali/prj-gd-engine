@@ -321,10 +321,12 @@ int runSceneTest(const std::string& dataPath) {
         for (const auto& m : tokenProblems) std::printf("  %s\n", m.c_str());
         // The venue classes (M8): every object on the disc, by class
         // (docs/venues.md); a different count means a file or class went missing.
+        // This disc's counts (equal to tools/milo.py scan's, an independent
+        // parser; GH80s has no PostProc, Flare or CubeTex objects).
         static const std::pair<const char*, int> kVenueCounts[] = {
-            {"CamShot", 440}, {"LightPreset", 174}, {"Spotlight", 341}, {"EventTrigger", 344}, {"WorldDir (own)", 24},
-            {"WorldCrowd", 15}, {"PostProc", 28}, {"Flare", 23}, {"LightAnim", 9}, {"EnvAnim", 34}, {"Set", 50},
-            {"CubeTex", 60}, {"Waypoint", 68}, {"CamAnim", 2}};
+            {"CamShot", 326}, {"LightPreset", 120}, {"Spotlight", 209}, {"EventTrigger", 214}, {"WorldDir (own)", 18},
+            {"WorldCrowd", 8}, {"PostProc", 0}, {"Flare", 0}, {"LightAnim", 4}, {"EnvAnim", 28}, {"Set", 26},
+            {"CubeTex", 0}, {"Waypoint", 48}, {"CamAnim", 2}};
         int countFailures = 0;
         std::string counts;
         for (const auto& [cls, want] : kVenueCounts) {
@@ -340,12 +342,12 @@ int runSceneTest(const std::string& dataPath) {
         // The character classes (M9, char/char_objects.h; their directory
         // records are --chartest's): every object on the disc, by class.
         static const std::pair<const char*, int> kCharCounts[] = {
-            {"CharClipSamples", 1994}, {"CharClipGroup", 330},   {"CharClipFilter", 82},    {"CharBone", 5797},
-            {"Character", 85},         {"BandCharacter", 16},    {"CharDriver", 58},        {"CharDriverMidi", 38},
-            {"CharIKHand", 38},        {"CharIKMidi", 19},       {"CharHair", 92},          {"CharLookAt", 36},
-            {"CharEyes", 18},          {"CharWeightSetter", 38}, {"CharUpperTwist", 88},    {"CharForeTwist", 79},
-            {"CharServoBone", 57},     {"CharWalk", 19},         {"CharPosConstraint", 4},  {"CharIKRod", 4},
-            {"OutfitLoader", 20},      {"FaceFxLipSyncServo", 22}};
+            {"CharClipSamples", 1105}, {"CharClipGroup", 191},   {"CharClipFilter", 43},    {"CharBone", 2738},
+            {"Character", 58},         {"BandCharacter", 12},    {"CharDriver", 47},        {"CharDriverMidi", 28},
+            {"CharIKHand", 28},        {"CharIKMidi", 14},       {"CharHair", 33},          {"CharLookAt", 12},
+            {"CharEyes", 6},           {"CharWeightSetter", 28}, {"CharUpperTwist", 64},    {"CharForeTwist", 46},
+            {"CharServoBone", 45},     {"CharWalk", 14},         {"CharPosConstraint", 11}, {"CharIKRod", 6},
+            {"OutfitLoader", 16},      {"FaceFxLipSyncServo", 18}};
         const int venueCountFailures = countFailures;
         counts.clear();
         for (const auto& [cls, want] : kCharCounts) {

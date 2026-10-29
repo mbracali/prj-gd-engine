@@ -23,10 +23,11 @@ namespace scene {
 // SampleData v11 (Load @ 0x823005F8): the sample's audio.
 struct SampleData {
     enum Format : uint32_t { kPcm16 = 0, kPcm16b = 1, kVag = 2, kXma = 3 };  // Q: names (sizes @ 0x82300790)
-    uint32_t format = 0;       // 3 (XMA) for every sample on the disc
+    uint32_t format = 0;       // 360 disc: 3 (XMA); PS2 disc: 2 (SPU ADPCM / VAG) for every sample
     uint32_t sampleCount = 0;  // frames after decoding
     uint32_t rate = 0;         // 44100 / 22050 / 16000
-    uint32_t size = 0;         // bytes of `data`
+    uint32_t size = 0;         // bytes of `data` (PS2 VAG: whole 16-byte blocks padded to 64 bytes, so
+                               // up to 3 blocks past sampleCount; every block's flag byte is 2, no end flag)
     bool hasData = false;      // the u8 before the data (rev > 10; always 1)
     size_t dataOffset = 0;     // where the data starts in the record
 };
@@ -53,7 +54,7 @@ struct Adsr {
     uint32_t attackMode = 0, sustainMode = 0, releaseMode = 0;
 };
 
-// Sfx v5 (Load @ 0x822EE8B0; names from SyncProperty @ 0x822EE598): plays
+// Sfx v5 (Load @ 0x822EE8B0, also the PS2 disc's v4 without the send; names from SyncProperty @ 0x822EE598): plays
 // its sample maps together (a stereo sound is two mono maps panned -1 / 1).
 class Sfx : public Object {
 public:

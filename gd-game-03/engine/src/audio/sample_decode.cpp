@@ -4,15 +4,21 @@
 
 #include "audio/adpcm.h"
 
+#include <algorithm>
+
 bool decodeSampleData(const scene::SynthSample& s, std::vector<float>& pcm, std::string& error, uint32_t* frames) {
     const scene::SampleData& d = s.sample;
     pcm.clear();
     if (!d.hasData) return error = "no sample data", false;
     switch (d.format) {
         case scene::SampleData::kVag: {
+            // The disc's blocks never carry the end flag and the data is
+            // padded to 64 bytes [C data]: the sample count says where the
+            // sound ends.
             const AdpcmSample a = decodeAdpcm(s.data(), d.size);
-            pcm.reserve(a.pcm.size());
-            for (int16_t v : a.pcm) pcm.push_back(float(v) * (1.0f / 32768.0f));
+            const size_t n = std::min<size_t>(a.pcm.size(), d.sampleCount ? d.sampleCount : a.pcm.size());
+            pcm.reserve(n);
+            for (size_t i = 0; i < n; ++i) pcm.push_back(float(a.pcm[i]) * (1.0f / 32768.0f));
             break;
         }
         case scene::SampleData::kPcm16:

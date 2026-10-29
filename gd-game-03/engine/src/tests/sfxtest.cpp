@@ -377,7 +377,10 @@ int runSfxTest(const std::string& dataPath) {
         std::printf("sfxtest: peak %.3f, rms %.3f..%.3f, %llu samples at full scale; %d Sfx, %d sequences, %d references, %d unresolved\n",
                     peakMax, rmsMin, rmsMax, (unsigned long long)clipped, sfx, seqs, refs, unresolved);
         std::printf("sfxtest: %d FxSendReverbs (environments known), %d Sfx send to one\n", reverbs, sends);
-        if (reverbs == 0 || sends == 0) fail("no reverb sends found");
+        // The PS2 banks have no FxSendReverb: their Sfx maps pick an SPU2
+        // core (fx_core) whose reverb the console applies (GD03 backlog:
+        // the SPU reverb is not emulated yet).
+        if (reverbs != 0) fail("unexpected FxSendReverb objects on the PS2 disc");
 
         // The game's banks and the names the scripts play.
         Synth synth;

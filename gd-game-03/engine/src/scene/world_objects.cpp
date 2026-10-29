@@ -105,10 +105,13 @@ CamTarget camTarget(Rd& r) {
     return t;
 }
 
-// CamShot::Load @ 0x8222de20; keyframe @ 0x8222a5b8 (the field offsets in
-// comments are the keyframe's in memory).
+// CamShot::Load @ 0x8222de20 (360, v27); keyframe @ 0x8222bda0 (the field
+// offsets in comments are the keyframe's in memory). The PS2 disc's shots are
+// v20; the 360 Load's old-revision branches say what v20 lacks and what it
+// sets instead [C]. Revisions below 13 used a different layout (not on the disc).
 void readCamShot(Rd& r, CamShot& c) {
-    checkVersion(c.version, "CamShot", 27);
+    const uint32_t v = c.version;
+    if (v < 13 || v > 27) checkVersion(v, "CamShot", 27);
     c.header = r.header();
     r.anim(c.anim);
     c.keyframes.resize(r.count(100));
@@ -120,23 +123,34 @@ void readCamShot(Rd& r, CamShot& c) {
         r.xfm(k.xfm);              // +0x18
         r.fs(k.screenOffset);      // +0x58
         k.blurDepth = r.f();       // +0x70
-        k.maxBlur = r.f();         // +0x74 (rev >= 24)
-        k.focusBlurMultiplier = r.f();  // +0x78 (rev >= 21)
+        if (v < 23) {
+            // rev < 23: stored as 1 - depth, then an f32 that is dropped [C 360 0x8222bda0]
+            k.blurDepth = 1 - k.blurDepth;
+            r.f();
+        }
+        k.maxBlur = v >= 24 ? r.f() : 1.0f;  // +0x74 [C 360 0x8222bda0]
+        if (v < 26) k.blurDepth = k.maxBlur = 0.5f;  // rev < 26 resets both [C 360 0x8222bda0]
+        k.focusBlurMultiplier = v >= 21 ? r.f() : 0.0f;  // +0x78
+        if (v < 23) r.f();              // a second dropped f32 [C 360 0x8222bda0]
         k.targets.resize(r.count(12));  // +0x7c
         for (auto& t : k.targets) t = camTarget(r);
-        k.focalTarget = camTarget(r);   // +0xec (rev >= 27)
+        if (v >= 27) k.focalTarget = camTarget(r);  // +0xec
+        else if (!k.targets.empty()) k.focalTarget = k.targets[0];  // rev < 27: the first target [C 360 0x8222bda0]
         k.parent = camTarget(r);        // +0x9c
         k.useParentRotation = r.b();    // +0xfc
-        k.shakeNoiseAmp = r.f();        // +0x64
-        k.shakeNoiseFreq = r.f();       // +0x60
-        r.fs(k.shakeMaxAngle);          // +0x68
-        k.zoomFov = r.f();              // +0x14 (rev >= 22)
+        if (v >= 18) {                  // [C 360 0x8222bda0]
+            k.shakeNoiseAmp = r.f();    // +0x64
+            k.shakeNoiseFreq = r.f();   // +0x60
+            r.fs(k.shakeMaxAngle);      // +0x68
+        }
+        if (v >= 22) k.zoomFov = r.f();  // +0x14
     }
     c.looping = r.b();
     c.pathEase = r.f();
     c.nearPlane = r.f();
     c.farPlane = r.f();
     c.useDepthOfField = r.b();
+    if (v < 26) c.useDepthOfField = true;  // [C 360 0x8222de20]
     c.filter = r.f();
     c.clampHeight = r.f();
     c.path = r.str();
@@ -148,11 +162,15 @@ void readCamShot(Rd& r, CamShot& c) {
     c.unused = r.u32();
     c.hideList = r.strs();         // @ 0x82227ad8
     c.crowd = r.str();             // @ 0x82225e68
-    c.glowSpot = r.str();          // @ 0x82225ef0
+    if (v >= 20) c.glowSpot = r.str();  // @ 0x82225ef0
 }
 
+// LightPreset::Load @ 0x82243660 (360, v9); keyframe @ 0x82241170, spot entry
+// @ 0x8223ade8. The PS2 disc's are v8, which differs only in a dropped f32
+// after each spot entry's flare flag (rev 2..8) [C 360 0x8223ade8].
 void readLightPreset(Rd& r, LightPreset& p) {
-    checkVersion(p.version, "LightPreset", 9);
+    const uint32_t v = p.version;
+    if (v < 7 || v > 9) checkVersion(v, "LightPreset", 9);
     p.header = r.header();
     r.anim(p.anim);
     p.keyframes.resize(r.count(16));
@@ -167,6 +185,7 @@ void readLightPreset(Rd& r, LightPreset& p) {
             s.target = r.str();
             s.subpart = r.str();
             s.flare = r.b();
+            if (v < 9) r.f();  // [C 360 0x8223ade8]
         }
         k.environs.resize(r.count(41));
         for (auto& e : k.environs) {
@@ -200,14 +219,8 @@ void readLightPreset(Rd& r, LightPreset& p) {
     p.locked = r.b();
 }
 
-void readSpotlight(Rd& r, Spotlight& s) {
-    checkVersion(s.version, "Spotlight", 25);
-    s.header = r.header();
-    r.draw(s.draw);
-    r.trans(s.trans);
-    s.spotScale = r.f();
-    s.spotHeight = r.f();
-    auto& b = s.beam;
+// One beam (360 @ 0x82233108; PS2 @ 0x00274220 for the v20 list entries).
+void readBeam(Rd& r, Spotlight::Beam& b, uint32_t v) {
     b.isCone = r.b();
     b.length = r.f();
     b.bottomRadius = r.f();
@@ -216,33 +229,72 @@ void readSpotlight(Rd& r, Spotlight& s) {
     b.bottomSideBorder = r.f();
     b.bottomBorder = r.f();
     b.material = r.str();
+    if (v == 18) r.str();  // rev 18 only: a dropped name [C 360 0x82233108, PS2 0x00274220]
     b.offset = r.f();
+    if (v < 10) {          // a dropped colour [C PS2 0x00274220]
+        std::array<float, 4> c{};
+        r.fs(c);
+    }
     r.fs(b.angleOffset);
-    b.brighten = r.f();
-    b.xsection = r.str();
-    b.expand = r.f();
-    b.cutouts = r.strs();
-    s.lightCan = r.str();
+    if (v >= 21) {
+        b.brighten = r.f();
+        b.xsection = r.str();
+    } else {
+        b.brighten = 1;    // no brighten before rev 21: drawn unscaled [I]
+    }
+    if (v >= 24) b.expand = r.f();
+    if (v >= 25) b.cutouts = r.strs();
+}
+
+// Spotlight::Load: 360 @ 0x82238098 (revisions 9..25), PS2 @ 0x002737f0
+// (revisions 9..20; the disc's are 20). The two read the same fields up to
+// rev 20, except that the 360 drops a rev < 23 beam list (and zeroes the beam
+// length) while the PS2 keeps it as its beams [C].
+void readSpotlight(Rd& r, Spotlight& s) {
+    const uint32_t v = s.version;
+    if (v < 9 || v > 25) checkVersion(v, "Spotlight", 25);
+    s.header = r.header();
+    r.draw(s.draw);
+    r.trans(s.trans);
+    s.spotScale = r.f();
+    s.spotHeight = r.f();
+    if (v >= 23) {
+        readBeam(r, s.beam, v);
+    } else {
+        // rev < 23: a list of beams [C PS2 0x003aadd0, 360 0x82238030]
+        s.beams.resize(r.count(29));
+        for (auto& b : s.beams) readBeam(r, b, v);
+        if (!s.beams.empty()) s.beam = s.beams.front();
+    }
+    s.lightCan = r.str();  // rev < 22: the 360 reads and drops it; the PS2 keeps it [C PS2 0x0032c5c8]
     s.target = r.str();
     s.lightCanOffset = r.f();
     r.fs(s.color);
-    s.intensity = r.f();
+    s.color[3] = 1;        // alpha forced to 1 after the read [C 360 0x82238098, PS2 0x002737f0]
+    if (v >= 10) s.intensity = r.f();
     s.spotMaterial = r.str();
+    if (v == 18) r.str();  // [C]
     s.dampingConstant = r.f();
     s.targetSubpart = r.str();
-    s.flareMaterial = r.str();
-    r.fs(s.flareSize);
-    r.fs(s.flareRange);
-    s.flareSteps = r.u32();
-    s.flareOffset = r.f();
-    s.flareEnabled = r.b();
-    s.flareVisibilityTest = r.b();
-    s.lensSize = r.f();
-    s.lensOffset = r.f();
-    s.lensMaterial = r.str();
-    s.additionalObjects = r.strs();
-    s.targetShadow = r.b();
-    s.animateFromPreset = r.b();
+    if (v >= 11) {
+        s.flareMaterial = r.str();
+        if (v == 18) r.str();  // [C]
+        r.fs(s.flareSize);
+        r.fs(s.flareRange);
+        s.flareSteps = r.u32();
+        s.flareOffset = r.f();
+    }
+    if (v >= 14) s.flareEnabled = r.b();
+    if (v >= 15) s.flareVisibilityTest = r.b();
+    if (v >= 12) {
+        s.lensSize = r.f();
+        s.lensOffset = r.f();
+        s.lensMaterial = r.str();
+    }
+    if (v == 18) r.str();  // [C]
+    if (v >= 13) s.additionalObjects = r.strs();
+    if (v >= 16) s.targetShadow = r.b();
+    if (v >= 17) s.animateFromPreset = r.b();
 }
 
 void readWorldCrowd(Rd& r, WorldCrowd& c) {
@@ -267,16 +319,28 @@ void readWorldCrowd(Rd& r, WorldCrowd& c) {
     c.header = r.header();  // the object block comes last in this class
 }
 
+// EventTrigger::Load @ 0x8225d708 (360, v10); anim entry @ 0x82257810. The PS2
+// disc's are v8 [C 360 0x8225d708]: one trigger event symbol instead of a list
+// (added when not empty), anim entries without their filter (rev < 10 fills
+// rate / range from the anim at load, 0x82256b30, and leaves `enable` off),
+// hide delays as a plain object list, and empty symbols dropped from the
+// enable / disable / wait-for lists. Revisions below 7 are not on the disc.
 void readEventTrigger(Rd& r, EventTrigger& e) {
-    checkVersion(e.version, "EventTrigger", 10);
+    const uint32_t v = e.version;
+    if (v < 7 || v > 10) checkVersion(v, "EventTrigger", 10);
     e.header = r.header();
-    e.triggerEvents = r.strs();
-    e.anims.resize(r.count(30));
+    if (v >= 10) {
+        e.triggerEvents = r.strs();
+    } else if (std::string t = r.str(); !t.empty()) {
+        e.triggerEvents.push_back(t);
+    }
+    e.anims.resize(r.count(v >= 10 ? 30 : 13));
     for (auto& a : e.anims) {
         a.anim = r.str();
         a.blend = r.f();
         a.wait = r.b();
         a.delay = r.f();
+        if (v < 10) continue;
         a.enable = r.b();
         a.rate = r.u32();
         a.start = r.f();
@@ -287,14 +351,24 @@ void readEventTrigger(Rd& r, EventTrigger& e) {
     }
     e.sounds = r.strs();
     e.shows = r.strs();
-    e.hideDelays.resize(r.count(8));
-    for (auto& h : e.hideDelays) h.first = r.str(), h.second = r.f();
+    if (v >= 9) {
+        e.hideDelays.resize(r.count(8));
+        for (auto& h : e.hideDelays) h.first = r.str(), h.second = r.f();
+    } else {
+        for (auto& o : r.strs()) e.hideDelays.emplace_back(o, 0.0f);  // delay 0 [I: the node's default]
+    }
     e.enableEvents = r.strs();
     e.disableEvents = r.strs();
     e.waitForEvents = r.strs();
+    if (v < 10) {  // empty symbols removed (0x822594e8) [C]
+        for (auto* l : {&e.enableEvents, &e.disableEvents, &e.waitForEvents})
+            std::erase(*l, std::string());
+    }
     e.nextRandom = r.str();
-    e.proxyCalls.resize(r.count(8));
-    for (auto& p : e.proxyCalls) p.first = r.str(), p.second = r.str();
+    if (v >= 8) {
+        e.proxyCalls.resize(r.count(8));
+        for (auto& p : e.proxyCalls) p.first = r.str(), p.second = r.str();
+    }
 }
 
 void readPostProc(Rd& r, PostProc& p) {
