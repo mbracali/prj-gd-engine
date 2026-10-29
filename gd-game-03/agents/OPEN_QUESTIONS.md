@@ -18,4 +18,5 @@ The director, band, crowd and MIDI goldens are this disc's first baselines
 from an emulator (PCSX2) wanted to verify them?
 
 ## Q4. Mono
-The audio settings' stereo / mono choice is saved but output stays stereo.
+The audio settings' mono folds left and right at half each after the mix
+(the console's exact fold is not traced).

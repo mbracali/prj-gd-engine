@@ -15,11 +15,22 @@ std::mutex g_lock;
 SDL_AudioDeviceID g_device = 0;
 int g_streams = 0;
 std::atomic<bool> g_limiterOn{true};
+std::atomic<bool> g_mono{false};
 sfxdsp::Limiter g_limiter;  // the device thread only
 int g_limiterRate = 0;
 
 void SDLCALL postmix(void*, const SDL_AudioSpec* spec, float* buffer, int bytes) {
-    if (!g_limiterOn.load() || !spec || spec->channels <= 0) return;
+    if (!spec || spec->channels <= 0) return;
+    // The audio settings' mono: left and right summed at half each (the
+    // console's stereo / mono output switch [I: its exact fold]).
+    if (g_mono.load() && spec->channels >= 2) {
+        const int frames = bytes / int(sizeof(float)) / spec->channels;
+        for (int i = 0; i < frames; ++i) {
+            float* f = buffer + size_t(i) * size_t(spec->channels);
+            f[0] = f[1] = 0.5f * (f[0] + f[1]);
+        }
+    }
+    if (!g_limiterOn.load()) return;
     if (spec->freq != g_limiterRate) {
         g_limiterRate = spec->freq;
         g_limiter.configure(1, 50, -2, spec->freq);  // default.dta synth limiter [C data]
@@ -62,5 +73,7 @@ void closeStream(SDL_AudioStream* stream) {
 void toggleLimiter() { g_limiterOn.store(!g_limiterOn.load()); }
 
 bool limiterEnabled() { return g_limiterOn.load(); }
+
+void setMono(bool mono) { g_mono.store(mono); }
 
 }  // namespace audiodev

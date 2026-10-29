@@ -26,5 +26,8 @@ void closeStream(SDL_AudioStream* stream);
 // the mastering voice) [C].
 void toggleLimiter();
 bool limiterEnabled();
+// The options' stereo / mono choice (this disc's audio settings): mono folds
+// the final mix's left and right together.
+void setMono(bool mono);
 
 }  // namespace audiodev

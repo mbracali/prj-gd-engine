@@ -2,6 +2,8 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "ui/ui_manager.h"
 
+#include "audio/audio_device.h"
+
 #include <SDL3/SDL.h>
 
 #include <algorithm>
@@ -316,6 +318,7 @@ void UiManager::applyOptions() {
     const Career::Options& o = career_.options;
     const auto v = [](int idx) { return float(std::clamp(idx, 0, 11)) / 11.0f; };
     host_.applyOptions(v(o.bandVolumeIdx), v(o.guitarVolumeIdx), v(o.fxVolumeIdx), o.lefty[0], o.lefty[1], o.syncOffsetMs);
+    audiodev::setMono(!o.stereo);
 }
 
 // ---------------------------------------------------------------- objects

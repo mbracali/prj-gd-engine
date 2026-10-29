@@ -72,7 +72,7 @@ public:
         // full-scale index for all three].
         int bandVolumeIdx = 11, guitarVolumeIdx = 11, fxVolumeIdx = 11;
         int syncOffsetMs = 0;  // options set_sync_offset (the lag screen stores -lag)
-        bool stereo = true;    // this disc's audio settings (stereo.chk); mono output: GD03 backlog
+        bool stereo = true;    // this disc's audio settings (stereo.chk); mono folds the mix (audio/audio_device.h)
     };
 
     Career() { clear(); }
