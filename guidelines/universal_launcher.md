@@ -302,3 +302,71 @@ rules above:
 
 gd-game-02's are `--walktest mouse`, `--walktest gamepads` and
 `--walktest stickyaxis`.
+
+### Enhanced options: parity
+
+gd-game-01's Enhanced Settings (`EnhancedPanel::items` in
+`gd-game-01/engine/src/ui/select_panels.cpp`, the defaults in
+`profileValues` / `enhancedDefaults` in its `app.cpp`) against gd-game-02's
+Enhanced Options (`gd-game-02/engine/src/ui/enhanced_panel.cpp`). Backlog
+GDALL-015; one row per option to implement (GD02-097..GD02-129). Status:
+**has** (gd02 had it), **done** (implemented for this pairing), **N/A** (cannot
+apply to GH2, with the reason). Defaults are gd-game-01's desktop column
+(`profileValues(false)`); Steam Deck and Android follow its other columns.
+
+| Section | Name (key) | Type | Default (desktop) | What it does | gd-game-02 |
+|---|---|---|---|---|---|
+| STEAM DECK MODE | Apply Steam Deck Settings (`steam_deck`) | button | - | Sets the handheld column of the profile table once; nothing is locked | to implement (GD02-097) |
+| CONTROLS & GAMEPAD | Enable Mouse Selection (`mouse`) | check | on | Hover focuses, click selects, wheel scrolls | has |
+| CONTROLS & GAMEPAD | Enable Touch Controls (`touch`) | check | off (Android: on, locked) | Taps are clicks; in a song, lanes at the bottom of the highway play | to implement (GD02-098) |
+| CONTROLS & GAMEPAD | Enable Rock Band Guitars (`rockband`) | check | off | HID Rock Band guitars play | to implement (GD02-099) |
+| CONTROLS & GAMEPAD | Enable XInput Controllers (`xinput`) | check | on | Gamepads play (frets on shoulders / face buttons, note and strum at once) | to implement (GD02-100) |
+| PERFORMANCE & GRAPHICS | Audio / Video Calibration (`calibrate`, `audio_offset`, `video_offset`) | button | 0 / 0 ms | 8 taps on heard ticks, 8 on seen flashes; the medians move the judging and the drawing | to implement (GD02-101) |
+| PERFORMANCE & GRAPHICS | Screen Mode (`screen_mode`) | dropdown | Windowed | Windowed / Full Screen / Full Screen (No Border) | has |
+| PERFORMANCE & GRAPHICS | In-Game Max FPS (`max_fps`) | dropdown | 120 | 60 / 120 / 240 | has (default from the table: GD02-128) |
+| PERFORMANCE & GRAPHICS | Show FPS Counter (`fps_counter`) | check | on | Frames a second, bottom left | has (default from the table: GD02-128) |
+| PERFORMANCE & GRAPHICS | Internal Resolution (`internal_res`) | dropdown | 1080p (Windows, macOS 1440p) | The 3D picture's height; gd02 keeps its extra "Window" value and labels 720p (x360) | has (default from the table: GD02-128) |
+| PERFORMANCE & GRAPHICS | Sharper Text & Sprites (`sharp_ui`) | check | on | Menu art and fonts upscaled with a sharper filter | to implement (GD02-102) |
+| PERFORMANCE & GRAPHICS | Anti-Aliasing (`antialiasing`) | dropdown | None | None / FXAA / SSAA / TAA | to implement (GD02-103) |
+| PERFORMANCE & GRAPHICS | AI Upscaling (`ai_upscaling`) | dropdown | None | None / FSR 1 / FSR 3.1 / DLSS 4 / DLSS 5 | FSR 1 to implement (GD02-104); FSR 3.1 and DLSS 4 N/A: gd01 runs them through its Vulkan interop upscaler (`render/vk_upscaler`, NVIDIA's library), gd02 is OpenGL / GLES only (GDALL-017); greyed "not available yet" in the dropdown, as gd01's DLSS 5 |
+| PERFORMANCE & GRAPHICS | Upscaling Quality (`ai_upscaling_mode`) | dropdown, shown with AI Upscaling | Quality | Performance / Balanced / Quality (2x / 1.7x / 1.5x) | to implement (GD02-105) |
+| PERFORMANCE & GRAPHICS | Bokeh Effect (`bokeh`) | dropdown | Stronger | None / Regular (GH2's own depth of field) / Stronger | to implement (GD02-106) |
+| PERFORMANCE & GRAPHICS | Enable Particles FX (`particles`) | check | on | Sparks, smoke, the highway's hit effects | to implement (GD02-107) |
+| PERFORMANCE & GRAPHICS | Bloom (`bloom`) | dropdown | High (Deck, Android: Medium) | The port's glow over the brightest lights, on top of GH2's own per-shot bloom (always as the original) | to implement (GD02-108) |
+| PERFORMANCE & GRAPHICS | Cinematic Color (`cinematic_color`) | check | on | Filmic curve, grade, vignette | to implement (GD02-109) |
+| PERFORMANCE & GRAPHICS | Color Grading (`color_grade`) | dropdown | Off | Off / Warm / Cold / Vintage / Noir / Neon | to implement (GD02-110) |
+| PERFORMANCE & GRAPHICS | Film Grain (`film_grain`) | dropdown | Light (Deck, Android: Off) | Off / Light / Strong | to implement (GD02-111) |
+| PERFORMANCE & GRAPHICS | Chromatic Aberration (`chromatic`) | check | on | Lens colour fringes | to implement (GD02-112) |
+| PERFORMANCE & GRAPHICS | Anamorphic Light Streaks (`light_streaks`) | check | off | Horizontal streaks from the brightest lights | to implement (GD02-113) |
+| PERFORMANCE & GRAPHICS | Ambient Occlusion (`ssao`) | check | on (Deck, Android: off) | Contact shadows from the depth buffer | to implement (GD02-114) |
+| PERFORMANCE & GRAPHICS | Sharpening (`sharpening`) | dropdown | Low (Deck: Off) | Off / Low / High (CAS) | to implement (GD02-115) |
+| PERFORMANCE & GRAPHICS | Blur on Star Power (`star_blur`) | dropdown | High (Deck: Medium, Android: Light) | Camera motion blur and trails while Star Power is on | to implement (GD02-116) |
+| ENHANCERS | All Band Mates Cast Shadows (`shadows_all`) | check | on (Deck, Android: off) | A light above each band member and a shadow on the floor | to implement (GD02-117) |
+| ENHANCERS | More Lights on Venues (`more_lights`) | dropdown | Subtle | Off / Subtle / Strong: fill on the band, brighter additive lights, soft beams | to implement (GD02-118) |
+| ENHANCERS | Dust in Light Beams (`light_dust`) | check, shown with More Lights | on (Deck, Android: off) | Motes drifting in the beams | to implement (GD02-119) |
+| ENHANCERS | Add Fog to the Ground (Experimental) (`ground_fog`) | dropdown | Low (Deck, Android: None) | None / Low / Full / Super Fog | to implement (GD02-120) |
+| ENHANCERS | Disable Shaky Camera (`no_shaky_cam`) | check | off | GH2's camera shake (CamShot shake keys) off | to implement (GD02-121) |
+| ENHANCERS | Export User Files (`export`) | button | - | A folder: GD02-user-settings.json and GD02-user-progress.json | to implement (GD02-122) |
+| ENHANCERS | Load User Settings (`load_settings`) | button | - | A file; every value checked, anything odd keeps its default | to implement (GD02-123) |
+| ENHANCERS | Load User Progress (`load_progress`) | button | - | A file; replaces the career save, checked as the save loader does | to implement (GD02-124) |
+| CHEATS | Enable Cut Content (`cut_content`) | check | off | Not built in gd01 either (greyed there): stays greyed | N/A: gd01 has no implementation to pair |
+| CHEATS | No Fail Mode (`no_fail`) | check | off | The rock meter cannot fail | to implement (GD02-125) |
+| CHEATS | Autoplay (`autoplay`) | check | off | The game plays every note | to implement (GD02-126) |
+| CHEATS | Forgiving Hammer-ons & Pull-offs (`hopo_mode`) | two-value choice (check box) | Original | Forgiving: no strum or held fret needed after a hit note, a wrong fret can be corrected | to implement (GD02-127) |
+| CHEATS | Air Guitar (`cheat_air_guitar`) | check | off | GH1's cheat | has: GH2's own Air Guitar |
+| CHEATS | Guitar Hero Controller Guitar (`cheat_gh_guitar`) | check | off | GH1's cheat | N/A: not a GH2 cheat (long_cheats.dta) |
+| CHEATS | Unlock Everything (`cheat_unlock_all`) | check | off | GH1's cheat | has: GH2's own Unlock All |
+| CHEATS | Locked Full Rock Meter (`cheat_full_meter`) | check | off | GH1's cheat | N/A: not a GH2 cheat |
+| CHEATS | No Venue (`cheat_no_venue`) | check | off | GH1's cheat | N/A: not a GH2 cheat (GH2's Performance Mode is its own) |
+| CHEATS | Monkey Head Crowd (`cheat_monkey_crowd`) | check | off | GH1's cheat | has: GH2's own Monkey Head Crowd |
+| CHEATS | Skull Head Crowd (`cheat_skull_crowd`) | check | off | GH1's cheat | N/A: not a GH2 cheat (GH2 has Eyeball Head Crowd) |
+| (table) | Per-platform defaults (`profileValues`) | - | - | Desktop / Steam Deck / Android columns in one table | to implement (GD02-128) |
+
+gd-game-02 rows gd-game-01 does not have (they stay):
+
+| Section | Name (key) | Type | What it does |
+|---|---|---|---|
+| CONTROLS AND GAMEPAD | Gamepads (`gamepads`) | button | Opens the GAMEPADS screen (the guideline's "in games that have it here") |
+| PERFORMANCE AND GRAPHICS | Remove All Effects (`no_effects`) | check | GDALL-002: every effect off at once (GH2's own bloom, depth of field, noise and colour transform, the port's post chain, camera shake), whatever the rows below say (GD02-129) |
+| PERFORMANCE AND GRAPHICS | Internal Resolution "Window" | value | The window's own height (the first value) |
+| CHEATS | Performance Mode, Hyper Speed Mode, Flaming Head, Eyeball Head Crowd | check | GH2's own cheats with their names and button codes (Flaming Head still greyed: GD02-043) |

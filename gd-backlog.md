@@ -533,7 +533,7 @@ universal launcher, not released on its own.
 | GD02-038 | Original | ❌ | Modes: Practice track surface (rosewood) and practice UI pieces | Two-player rules: see below | Milestones M10 |
 | GD02-039 | Enhancement | ❌ | UI: Touch lanes for the new renderer | Input API ready | Milestones M7 |
 | GD02-041 | Original | 🟡 | UI: Main menu words stacked tightly: matches BandButton's fit code (re-checked in bug-fix 3: rows 14 units apart, `fit_text` 1 into 9 units against size 30 × leading 0.7, 0x8214C7B0 / 0x821CFF08), compare with a capture of the original | Q1; `docs/ui_and_frontend.md` "Not done" | Milestones M7 |
-| GD02-042 | Enhancement | ❌ | UI: Enhanced Options not built yet: Steam Deck settings, touch, Rock Band guitars, XInput, calibration, sharper text, anti-aliasing, AI upscaling, bokeh, particles, bloom, cinematic colour, colour grading, film grain, chromatic aberration, light streaks, ambient occlusion, sharpening, Star Power blur, band shadows, more lights, ground fog, shaky camera, user files export / load, cut content, no fail, autoplay, forgiving HOPOs | Listed greyed in Enhanced Options (gd01's list); L20 | Milestones M7 |
+| GD02-042 | Enhancement | ❌ | UI: Enhanced Options not built yet: Steam Deck settings, touch, Rock Band guitars, XInput, calibration, sharper text, anti-aliasing, AI upscaling, bokeh, particles, bloom, cinematic colour, colour grading, film grain, chromatic aberration, light streaks, ambient occlusion, sharpening, Star Power blur, band shadows, more lights, ground fog, shaky camera, user files export / load, cut content, no fail, autoplay, forgiving HOPOs | Listed greyed in Enhanced Options (gd01's list); L20. Split into GD02-097..GD02-129 (GDALL-015) | Milestones M7 |
 | GD02-043 | Original | ❌ | Cheats: Flaming Head: the code works (its message, `$cheat_enabled_flaming_head`) but the band's particle systems (`cheat_headflames start`, hand flames) are STUBs, so nothing burns | Listed "not available yet" in Enhanced Options | Milestones M9 |
 | GD02-045 | Original | ❌ | Cheats: `quick_cheats` (`config/cheats.dta`, the debug keyboard's `set_key_cheats_enabled`): not wired (development cheats, not the players') |  | Milestones M7 |
 | GD02-046 | Original | ❌ | UI: Endgame receipt lighting (`turn_off_ambient`), live volume sliders, help bar boxes, progress export / import | `docs/ui_and_frontend.md` "Not done" | Milestones M7 |
@@ -548,6 +548,39 @@ universal launcher, not released on its own.
 | GD02-062 | Bugfix | 🟡 | macOS: ~20 fps on an M4 Pro: to measure with `GD02_PERF=1` (and `GD02_GL_STREAM=subdata` against the default `map`) | `docs/renderer.md` "Performance" | Bug-fix 4 open |
 | GD02-064 | Original | Decide later (user) | Reference captures from the original: Xenia or a real Xbox 360 |  | Owner questions Q1 |
 | GD02-066 | Original | ❌ | Achievements, leaderboards and the DLC sample package (`xboxlive/gh2xp0001`) |  | Owner questions Q3 |
+| GD02-097 | Enhancement | ❌ | Enhanced Options pairing: Apply Steam Deck Settings: the handheld column once, nothing locked | GDALL-015; parity table in guidelines/universal_launcher.md | Owner 10-28 |
+| GD02-098 | Enhancement | ❌ | Enhanced Options pairing: Enable Touch Controls: taps are clicks, in-song lanes at the bottom of the highway, on-screen buttons (GD02-039) | GDALL-015; parity table in guidelines/universal_launcher.md | Owner 10-28 |
+| GD02-099 | Enhancement | ❌ | Enhanced Options pairing: Enable Rock Band Guitars (Input::setRockBand) | GDALL-015; parity table in guidelines/universal_launcher.md | Owner 10-28 |
+| GD02-100 | Enhancement | ❌ | Enhanced Options pairing: Enable XInput Controllers (gamepads play) | GDALL-015; parity table in guidelines/universal_launcher.md | Owner 10-28 |
+| GD02-101 | Enhancement | ❌ | Enhanced Options pairing: Audio / Video Calibration (audio_offset, video_offset applied to judging and drawing) | GDALL-015; parity table in guidelines/universal_launcher.md | Owner 10-28 |
+| GD02-102 | Enhancement | ❌ | Enhanced Options pairing: Sharper Text and Sprites (menu and font textures upscaled) | GDALL-015; parity table in guidelines/universal_launcher.md | Owner 10-28 |
+| GD02-103 | Enhancement | ❌ | Enhanced Options pairing: Anti-Aliasing: FXAA, SSAA, TAA | GDALL-015; parity table in guidelines/universal_launcher.md | Owner 10-28 |
+| GD02-104 | Enhancement | ❌ | Enhanced Options pairing: AI Upscaling: FSR 1 (FSR 3.1 / DLSS 4 N/A in GL: greyed options) | GDALL-015; parity table in guidelines/universal_launcher.md | Owner 10-28 |
+| GD02-105 | Enhancement | ❌ | Enhanced Options pairing: Upscaling Quality (shown with AI Upscaling) | GDALL-015; parity table in guidelines/universal_launcher.md | Owner 10-28 |
+| GD02-106 | Enhancement | ❌ | Enhanced Options pairing: Bokeh Effect: None / Regular (GH2's DOF) / Stronger | GDALL-015; parity table in guidelines/universal_launcher.md | Owner 10-28 |
+| GD02-107 | Enhancement | ❌ | Enhanced Options pairing: Enable Particles FX | GDALL-015; parity table in guidelines/universal_launcher.md | Owner 10-28 |
+| GD02-108 | Enhancement | ❌ | Enhanced Options pairing: Bloom: Off / Low / Medium / High (the port's, over GH2's own) | GDALL-015; parity table in guidelines/universal_launcher.md | Owner 10-28 |
+| GD02-109 | Enhancement | ❌ | Enhanced Options pairing: Cinematic Color | GDALL-015; parity table in guidelines/universal_launcher.md | Owner 10-28 |
+| GD02-110 | Enhancement | ❌ | Enhanced Options pairing: Color Grading: Warm / Cold / Vintage / Noir / Neon | GDALL-015; parity table in guidelines/universal_launcher.md | Owner 10-28 |
+| GD02-111 | Enhancement | ❌ | Enhanced Options pairing: Film Grain | GDALL-015; parity table in guidelines/universal_launcher.md | Owner 10-28 |
+| GD02-112 | Enhancement | ❌ | Enhanced Options pairing: Chromatic Aberration | GDALL-015; parity table in guidelines/universal_launcher.md | Owner 10-28 |
+| GD02-113 | Enhancement | ❌ | Enhanced Options pairing: Anamorphic Light Streaks | GDALL-015; parity table in guidelines/universal_launcher.md | Owner 10-28 |
+| GD02-114 | Enhancement | ❌ | Enhanced Options pairing: Ambient Occlusion | GDALL-015; parity table in guidelines/universal_launcher.md | Owner 10-28 |
+| GD02-115 | Enhancement | ❌ | Enhanced Options pairing: Sharpening (CAS) | GDALL-015; parity table in guidelines/universal_launcher.md | Owner 10-28 |
+| GD02-116 | Enhancement | ❌ | Enhanced Options pairing: Blur on Star Power | GDALL-015; parity table in guidelines/universal_launcher.md | Owner 10-28 |
+| GD02-117 | Enhancement | ❌ | Enhanced Options pairing: All Band Mates Cast Shadows | GDALL-015; parity table in guidelines/universal_launcher.md | Owner 10-28 |
+| GD02-118 | Enhancement | ❌ | Enhanced Options pairing: More Lights on Venues | GDALL-015; parity table in guidelines/universal_launcher.md | Owner 10-28 |
+| GD02-119 | Enhancement | ❌ | Enhanced Options pairing: Dust in Light Beams (shown with More Lights) | GDALL-015; parity table in guidelines/universal_launcher.md | Owner 10-28 |
+| GD02-120 | Enhancement | ❌ | Enhanced Options pairing: Add Fog to the Ground (Experimental): Low / Full / Super Fog | GDALL-015; parity table in guidelines/universal_launcher.md | Owner 10-28 |
+| GD02-121 | Enhancement | ❌ | Enhanced Options pairing: Disable Shaky Camera (GH2's CamShot shake) | GDALL-015; parity table in guidelines/universal_launcher.md | Owner 10-28 |
+| GD02-122 | Enhancement | ❌ | Enhanced Options pairing: Export User Files (GD02-user-settings.json, GD02-user-progress.json) | GDALL-015; parity table in guidelines/universal_launcher.md | Owner 10-28 |
+| GD02-123 | Enhancement | ❌ | Enhanced Options pairing: Load User Settings (checked value by value) | GDALL-015; parity table in guidelines/universal_launcher.md | Owner 10-28 |
+| GD02-124 | Enhancement | ❌ | Enhanced Options pairing: Load User Progress (replaces the career save) | GDALL-015; parity table in guidelines/universal_launcher.md | Owner 10-28 |
+| GD02-125 | Enhancement | ❌ | Enhanced Options pairing: Cheat: No Fail Mode | GDALL-015; parity table in guidelines/universal_launcher.md | Owner 10-28 |
+| GD02-126 | Enhancement | ❌ | Enhanced Options pairing: Cheat: Autoplay | GDALL-015; parity table in guidelines/universal_launcher.md | Owner 10-28 |
+| GD02-127 | Enhancement | ❌ | Enhanced Options pairing: Cheat: Forgiving Hammer-ons and Pull-offs | GDALL-015; parity table in guidelines/universal_launcher.md | Owner 10-28 |
+| GD02-128 | Enhancement | ❌ | Enhanced Options pairing: Per-platform defaults in one table (gd01's profileValues: desktop, Steam Deck, Android) | GDALL-015; parity table in guidelines/universal_launcher.md | Owner 10-28 |
+| GD02-129 | Enhancement | ❌ | Enhanced Options pairing: Remove All Effects (GDALL-002): every effect off at once | GDALL-015; parity table in guidelines/universal_launcher.md | Owner 10-28 |
 
 
 ### Done (history)
