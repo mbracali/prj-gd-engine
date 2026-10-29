@@ -481,3 +481,13 @@ At the very end, also:
   - what's missing;
   - a confidence level per OS, each with 🟢 / 🟡 / 🔴.
 - Set `game-info.yaml` `completeness` and `ready_to_play` honestly.
+
+
+## Owner's answers (2026-10-29)
+- Reference captures: the agents run the emulators themselves (PCSX2 for gd-game-03, Xenia for gd-game-04) with the owner's ISOs from `original_isos/`. Emulators and their captures stay outside the repo (scratch or `~/.local/opt`); never commit captures. A PS2 BIOS is the owner's: if none is found locally, write the request into OPEN_QUESTIONS.md and keep working.
+- gd-game-03 aspect: 4:3 pillarboxed by default; 16:9 selectable in the Enhanced menu.
+- gd-game-03 MULTIPLAYER: always enabled, also with one controller.
+- gd-game-04 The Glitches: Vault purchases scoped to The Glitches' band only.
+- Enhanced options in every module default off (original look).
+- gd-game-04 on Android: read the disc in place, no copy.
+- When done: commit and push, rebuild the local packages; no PR until the owner asks.
