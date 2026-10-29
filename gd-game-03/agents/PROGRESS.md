@@ -1,5 +1,34 @@
 # gd-game-03 progress log
 
+## Final report of this run (2026-10-29, read this first)
+
+**What works** (verified on the disc with the commands in the entries below):
+quick play, career (tiers, encores, cash, store), co-op / face-off / pro
+face-off, the PS2 boot and memory-card flow on career.json, the intro movie
+(PSS, own MPEG-2 decoder), the PS2 highway with its far-end fade, HUD, all six
+venues with cameras and lighting, the band and crowd, sound effects with the
+SPU2 echo / reverb, cheats with the PS2 codes, Enhanced Options / GAMEPADS /
+mouse from gd02. Every headless test and all 17 walks pass; 67 gameplay
+rules were re-read in SLUS_215.86 (55 matched, 10 fixed, 2 open). The
+launcher carries gd03 on Linux, Steam Deck, Windows and Android; it played
+25 s from the Linux launcher and under Proton Wine (exit 0).
+
+**Approximate** ([I] in code and backlog): the reverb network maths (hardware
+docs), the mono fold, the 2-player tail segment count, several golden
+baselines (director, band, crowd, MIDI) taken from the port itself (D5),
+class layouts confirmed by the 360's old-revision branches plus exact
+parsing rather than the PS2 loaders (docs/formats.md).
+
+**Missing**: per-character track surface, gem sparkle / bonus burst, the
+penalised-gem mark (GD03-015), fest_1.ipu, a shot-by-shot comparison with
+the original (OPEN_QUESTIONS Q3), 4:3 option (Q1). See gd-backlog.md GD03-*.
+
+**Confidence per OS**: Linux 🟢 (all tests, launcher run) · Windows 🟡
+(launcher run under Proton Wine, not on real Windows) · Steam Deck 🟡
+(package built and verified, not run on a Deck) · Android 🟡 (APK built and
+verified, not run on a device) · macOS 🔴 (not built: no toolchain).
+
+
 Guitar Hero Encore: Rocks the 80s (PS2) -> `gd03`. Kickoff:
 `GD-GAME-03_KICKOFF.md` (repository root). Newest entries at the bottom.
 "Verified" lines quote the command and its output; "built only" and "not
@@ -153,3 +182,16 @@ Verified (fresh build/linux binary; agents/scratch/alltests.sh, 0 warnings):
 Not tested: Steam Deck and Android packages (built by build.sh all, next).
 Left behind: 64 /tmp/gd03-walk-* folders from walks run before the cleanup fix
 (deleting them was refused by the permission classifier; the owner can).
+
+## 2026-10-29 01:47, gate: rules re-read, fade, SPU2 reverb, movie; packages
+
+Verified on the fresh build/linux binary (agents/scratch/alltests.sh):
+scenetest, selftest ("all rule checks passed", 0 charts not fully hit),
+sfxtest, scripttest, uitest, venuetest, chartest, facefxtest: all rc=0 and
+OK; shadertest GL / GLES: all 587 programs compiled; all 17 walks:
+"walktest <name>: OK". `--playmovie intro.pss` with GD03_MOVIE_DUMP=1:
+"decoded 300 pictures". `flock ... build.sh all --force`: gd-game-03 module
+built with 0 compiler warnings and verify "complete" on linux, steamdeck,
+windows, android-arm64. Linux launcher `--play gd03 --exit-after`
+(GDUL_GAME_QUIT_AFTER=25000): "exit code 0 after 25.0 s". The Wine run is the
+earlier one (00:45, before the fade / reverb / rules commits).
