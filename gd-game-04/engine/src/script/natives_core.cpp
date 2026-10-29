@@ -173,6 +173,12 @@ void addCoreNatives(Vm& vm) {
             Vm::set(*run.frames.back().locals, K("starttime"), Vm::makeInt(int32_t(v.clockMs())));
         return true;
     });
+    vm.addNative("GetTrueElapsedTime", [](Vm& v, ScriptRun& run, qb::Struct& p) {
+        const float start = Vm::number(Vm::param(p, K("starttime")), 0);
+        if (!run.frames.empty() && run.frames.back().locals)
+            Vm::set(*run.frames.back().locals, K("elapsedtime"), Vm::makeInt(int32_t(v.clockMs() - start)));
+        return true;
+    });
     vm.addNative("GetElapsedTime", [](Vm& v, ScriptRun& run, qb::Struct& p) {
         const float start = Vm::number(Vm::param(p, K("starttime")), 0);
         if (!run.frames.empty() && run.frames.back().locals)

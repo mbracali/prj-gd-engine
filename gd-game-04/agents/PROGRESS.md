@@ -33,3 +33,41 @@ Built only: nothing else. Not tested: Windows, Steam Deck, Android builds
 Next: M1 (textures, scenes, models, skins, animations, fonts; their Python
 tools and `--formattest` coverage; XEX addresses for the key hash, pak
 reader and LZSS). Estimate left: ~28 h.
+
+## 2026-10-29 00:40: M1 nearly done, M2 and M3 started
+
+Done since M0:
+- Every pak type but the textures decodes in Python and C++ (`--formattest`):
+  QB, scenes / models / skins / Havok collision (agent, verified), animations,
+  skeletons, fonts, .wav (FMOD XMA RIFF), .nqb, .pfx, .rag, .table, .dbg
+  (agent, verified). Textures: agent still working.
+- Song audio: FSB3 banks decrypted (key from the script SongLoadFSB), XMA1
+  stems decoded through FFmpeg, streaming song source.
+- Song list (89 songs) and charts (664 part/difficulty charts) load.
+- The C-function map (1,392 natives, `ghidra/analysis/cfuncs.tsv`), the HOPO
+  tolerance rule (0x82107590), the tuning globals (FINDINGS.md).
+- QScript: tokenizer (Python + C++), the VM's first cut (expressions, params,
+  if/elseif/else, loops, switch, spawn, waits), core natives;
+  `guitar_startup` runs to its end against 75 still-unwritten natives.
+
+Verified (fresh binary, `$ISO` = the disc image):
+- `gd04 --formattest "$ISO"` -> `formattest: all files parse` (decoded: .dbg
+  1356, .fnt 16, .hkc 24, .mdl 11, .nqb 24, .pfx 24, .qb 2731, .rag 27, .scn 99,
+  .ska 18747, .ske 35, .skin 285, .table 12, .wav 227; not decoded yet: .img
+  712, .tex 396)
+- `gd04 --sfxtest "$ISO"` -> `banks: 92, samples decoded: 718, 18.2 hours of
+  audio`, `sfxtest: every sound decodes`
+- `gd04 --selftest "$ISO"` -> `songs: 89`, `charts: 664, notes: 416881`,
+  `selftest: data checks passed (no gameplay rules yet)`
+- `gd04 --scripttest "$ISO"` -> `scripts: 16552 tokenized`, `scripttest: every
+  script tokenizes; boot ran (75 natives to write)`
+- `python3 -I gd-game-04/tools/scn.py check gd-game-04/extracted` -> `scn 99,
+  mdl 11, skin 285, hkc 24, col 0, with problems: 0`
+- `python3 -I gd-game-04/tools/anim.py check gd-game-04/extracted` -> `files:
+  19114, with problems: 0`
+- `python3 -I gd-game-04/tools/fsb.py check gd-game-04/extracted` -> `banks:
+  92, samples: 718, with problems: 0`
+
+Not yet: the gameplay rules (agent researching the input logic in the XEX),
+"all charts fully hit", Windows / Android builds of this code.
+Next: textures (M1 gate), then the rules and the autoplayed self-test (M2).

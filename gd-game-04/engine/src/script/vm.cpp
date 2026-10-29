@@ -798,6 +798,11 @@ bool Vm::step(ScriptRun& run, int budget) {
             if (!ex.atEnd()) {
                 qb::Value v = ex.expression();
                 if (v.type == qb::Type::Int || v.type == qb::Type::Float) count = int64_t(v.number());
+                else {
+                    // A count that is not a number ends the loop [I].
+                    logOnce("repeat count is not a number in " + qbkey::name(fr.code->name));
+                    count = 1;
+                }
             }
             if (fr.loops.empty()) {
                 fr.pc = ex.i;
@@ -922,6 +927,20 @@ bool Vm::step(ScriptRun& run, int budget) {
             }
             while (ex.i < t.size() && !isEnd(t[ex.i].op)) ++ex.i;
             fr.pc = ex.i;
+            continue;
+        }
+        if (first.op == kInlineStruct || first.op == kInlineStruct2) {
+            // A line that is only a struct: the script's default parameters,
+            // kept where the caller gave none [I: setup_setlisttags etc.].
+            if (!fr.locals) fr.locals = std::make_shared<qb::Struct>();
+            for (qb::Item it : g_.expand(*first.st)) {
+                if (it.value.type == qb::Type::KeyPtr)
+                    if (const qb::Value* gv = global(it.value.key)) it.value = *gv;
+                if (it.name && param(*fr.locals, it.name)) continue;
+                if (it.name) set(*fr.locals, it.name, std::move(it.value));
+                else fr.locals->items.push_back(std::move(it));
+            }
+            fr.pc = ex.i + 1;
             continue;
         }
         if (first.op == kName) {
