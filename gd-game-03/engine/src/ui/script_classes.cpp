@@ -260,6 +260,7 @@ bool ComponentObj::handleNative(Interp& in, const std::string& msg, std::vector<
     // UIList (0x8237B540)
     if (msg == "set_provider") {
         provider = !args.empty() && args[0].type == Value::Type::Object ? args[0].object : in.findObject(argStr(0));
+        if (auto* p = dynamic_cast<ListProvider*>(provider)) p->initData();
         if (auto* p = dynamic_cast<ListProvider*>(provider)) selected = std::clamp(selected, 0, std::max(0, p->numData() - 1));
         refreshList();
         return true;

@@ -268,33 +268,29 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
             wait(900);
             check("confirm_on sel_guitar_new_screen");
         } else {
+        // This disc: one outfit per character (config/gh2.dta characters),
+        // a new band owns each guitar's first skin only.
         press(kDown);  // Punk -> Alterna (Judy Nails)
         wait(300);
-        press(kX);  // two outfits (alterna2 bought): pick one
-        wait(800);
-        press(kDown);  // outfit1.btn -> outfit2.btn (alterna2)
-        wait(800);
         press(kX);
+        wait(800);
         at("sel_guitar_new_screen");
-        press(kDown);  // Les Paul -> SG
-        wait(300);
-        press(kX);  // two skins (sg_white bought): pick one
-        wait(600);
-        press(kDown);  // sg_cherry -> sg_white
+        press(kDown);  // the second guitar
         wait(300);
         press(kX);
+        wait(600);
         }
         at("tour_start_screen");
         press(kX);
         at("career_screen");
-        expect_ = {"main_screen", "chooseprof_screen", "nameprof_screen", "sel_difficulty_screen", "sel_character_new_screen", "sel_guitar_new_screen",
-                   "tour_start_screen", "autosave", "career_screen"};
+        expect_ = {"main_screen", "chooseprof_screen", "nameprof_screen", "autosave", "sel_difficulty_screen", "sel_character_new_screen",
+                   "sel_guitar_new_screen", "tour_start_screen", "autosave", "career_screen"};
         if (scenario == "career")
-            expect_ = {"main_screen",          "chooseprof_screen",       "nameprof_screen",       "sel_difficulty_screen",
-                       "chooseprof_screen",    "sel_difficulty_screen",   "sel_character_new_screen", "sel_guitar_new_screen",
-                       "tour_start_screen",    "autosave",           "career_screen"};
+            expect_ = {"main_screen",           "chooseprof_screen",        "nameprof_screen",       "autosave",
+                       "sel_difficulty_screen", "chooseprof_screen",        "sel_difficulty_screen", "sel_character_new_screen",
+                       "sel_guitar_new_screen", "tour_start_screen",        "autosave",              "career_screen"};
         if (scenario == "career_song") {
-            // One career song (GD03_WALK_SONG, default strutter) at
+            // One career song (GD03_WALK_SONG, default ballstothewall) at
             // GD03_WALK_DIFF: every tier song before it passed with GH2's
             // cheat_beat_song (its venue unlocked), set_career_venue /
             // set_career_song offer it, it is played (autoplay; GD03_WALK_END
@@ -339,7 +335,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
             press(kX);  // the venue (set_career_venue: the newest unlocked)
             at("sel_song_screen");
             wait(900);
-            check("career_song_salvation");
+            check("career_song_iran");
             check("setlist_encore");
             press(kX);
             at("loading_screen");
@@ -528,9 +524,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         press(kDown);  // QUICK PLAY -> MULTIPLAYER
         wait(150);
         press(kX);
-        at("multi_controller_select_screen");
-        pressP(kUp, 0), wait(150), pressP(kX, 0), wait(150);    // pad 0 to P1
-        pressP(kDown, 1), wait(150), pressP(kX, 1);              // pad 1 to P2
+        // This disc has no controller select: pad 0 is P1, pad 1 is P2.
         at("multi_screen");
         wait(300);
         const int modeDowns = scenario == "coop" ? 0 : scenario == "faceoff" ? 1 : 2;
@@ -557,7 +551,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
             press(kX);
             at(song);
             wait(600);
-            press(kX);  // the first song: surrender
+            press(kX);  // the first song
         };
         if (scenario == "coop") {
             venueAndSong("multi_coop_venue_screen", "multi_coop_selsong_screen");
@@ -595,7 +589,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         if (scenario == "coop") at("autosave", 20000);
         const char* again = scenario == "coop" ? "multi_coop_selsong_screen" : scenario == "faceoff" ? "multi_vs_selsong_screen" : "multi_fo_selsong_screen";
         at(again, 30000);
-        expect_ = {"main_screen", "multi_controller_select_screen", "multi_screen"};
+        expect_ = {"main_screen", "multi_screen"};
         if (scenario == "coop")
             expect_.insert(expect_.end(), {"multi_coop_venue_screen", "multi_coop_selsong_screen", "selpart_screen", "multi_coop_seldiff_screen",
                                            "multi_sel_character_screen", "multi_sel_guitar_screen", "loading_screen", "game_screen",
@@ -764,7 +758,7 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         ui::PanelObj* p = ui.panel("sel_character_panel");
         if (!p || !p->view) return fail("no sel_character_panel view");
         int locked = 0;
-        for (const char* c : {"punk", "alterna", "glam", "goth", "metal", "rockabill", "rock", "deathmetal", "classic", "funk1", "grim"}) {
+        for (const char* c : {"punk", "alterna", "glam", "goth", "metal", "grim"}) {  // config/gh2.dta characters
             const bool open = ui::campaign::isUnlocked(ui, c);
             const std::string mat = p->view->meshMat(std::string("char_") + c + ".mesh");
             const std::string want = open ? std::string("char_") + c + ".mat" : "char_locked.mat";
@@ -1081,7 +1075,7 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         return;
     }
     if (s.screen == "career_seed") {
-        for (const char* song : {"surrender", "possum", "heartshapedbox"})
+        for (const char* song : {"bangyourhead", "wegotthebeat"})  // this disc's battle: two passed, iran played
             ui.interp().send("campaign", "cheat_beat_song", {Value::symbol(song), Value::integer(1)});
         ++step_, stepStart_ = -1;
         return;
@@ -1094,7 +1088,7 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
     }
     if (s.screen == "career_target" || s.screen == "career_song_target") {
         const char* w = SDL_getenv("GD03_WALK_SONG");
-        const std::string target = w ? w : "strutter";
+        const std::string target = w ? w : "ballstothewall";  // battle's last song before its encore
         if (s.screen == "career_target") {
             // The tiers' songs in order up to the target, at this difficulty.
             const int d = ui::campaign::difficulty(ui);
@@ -1117,10 +1111,10 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         ++step_, stepStart_ = -1;
         return;
     }
-    if (s.screen == "career_song_salvation") {
+    if (s.screen == "career_song_iran") {
         // set_career_song (0x822B89B8): the venue's first unlocked song not passed yet.
         std::printf("  career: venue %s, song %s\n", ui.session().venue.c_str(), ui.session().song.c_str());
-        if (ui.session().venue != "battle" || ui.session().song != "salvation") return fail("the career did not offer battle's salvation");
+        if (ui.session().venue != "battle" || ui.session().song != "iran") return fail("the career did not offer battle's iran");
         ++step_, stepStart_ = -1;
         return;
     }
@@ -1133,8 +1127,8 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         std::vector<gfx::UiView::ListRow> rows;
         int sel = 0;
         sp->rows(rows, 0, sel);
-        const int e = sp->indexOf("shoutatthedevil");
-        if (e < 1 || e >= int(rows.size())) return fail("the setlist has no locked encore row");
+        const int e = sp->indexOf("18andlife");
+        if (e < 1 || e >= int(rows.size())) return fail("the setlist has no locked encore row (index " + std::to_string(e) + " of " + std::to_string(rows.size()) + " rows)");
         const auto& er = rows[size_t(e)];
         const auto& pr = rows[size_t(e - 1)];
         const auto text = [](const gfx::UiView::ListRow& r, const char* k) {
@@ -1156,24 +1150,26 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
     }
     if (s.screen == "career_tier" || s.screen == "career_bought") {
         // The tour at Medium (ui/campaign.h): battle complete with its
-        // encore, small1 unlocked, status 1; the cash: 50 to start, 150 per
-        // three-star song (salvation, the encore), 100 for status 1; then
+        // encore, small1 unlocked, status 1; the cash on this disc: 50 to
+        // start, 100 per three-star song (iran, the encore), 100 for status 1; then
         // the first finish of the store (lp_cayenne, 250) bought and on the
         // Les Paul's finishes.
         Interp& in = ui.interp();
         const int cash = in.send("campaign", "cash", {}).integerValue();
         const int status = in.send("campaign", "status", {}).integerValue();
         const bool small1 = in.send("campaign", "is_unlocked", {Value::symbol("small1")}).truthy();
-        const bool battle = in.send("campaign", "is_song_passed", {Value::symbol("shoutatthedevil")}).truthy();
+        const bool battle = in.send("campaign", "is_song_passed", {Value::symbol("18andlife")}).truthy();
         std::printf("  career: status %d, cash %d, small1 %s, encore passed %s\n", status, cash, small1 ? "unlocked" : "locked", battle ? "yes" : "no");
         if (s.screen == "career_tier") {
-            if (status != 1 || cash != 450 || !small1 || !battle) return fail("the first tier is not complete as GH2's rules say (status 1, $450)");
+            if (status != 1 || cash != 350 || !small1 || !battle) return fail("the first tier is not complete as the rules say (status 1, $350)");
         } else {
-            const auto skins = ui::chars::skins(ui, "lespaul");
-            const bool on = std::find(skins.begin(), skins.end(), "lp_cayenne") != skins.end();
+            // The store's first finish on this disc is the Flying V's fv_v2
+            // ($250; the finishes are listed by guitars.dta's guitar order).
+            const auto skins = ui::chars::skins(ui, "flying_v");
+            const bool on = std::find(skins.begin(), skins.end(), "fv_v2") != skins.end();
             const int spent = in.send("campaign", "cash_spent", {}).integerValue();
-            std::printf("  store: lp_cayenne %s, cash %d, spent %d\n", on ? "bought" : "not bought", cash, spent);
-            if (!on || cash != 200 || spent != 250) return fail("the store did not sell lp_cayenne for $250");
+            std::printf("  store: fv_v2 %s, cash %d, spent %d\n", on ? "bought" : "not bought", cash, spent);
+            if (!on || cash != 100 || spent != 250) return fail("the store did not sell fv_v2 for $250");
         }
         ++step_, stepStart_ = -1;
         return;
@@ -1282,7 +1278,7 @@ int WalkDriver::finish(ui::UiManager& ui) {
         }
         const ui::Session::PlayerCfg& p = ui.session().players[0];
         const std::string cfg = p.character + " " + p.outfit + " " + p.guitar + " " + p.skin;
-        const std::string want = "alterna alterna2 sg sg_white";
+        const std::string want = "alterna alterna1 lespaul lp_cherry";  // this disc: one outfit, the second guitar's first skin
         std::printf("  look: career.json %s, player 0 %s\n", got.c_str(), cfg.c_str());
         if (got != want || cfg != want) std::printf("  FAIL the look is not %s\n", want.c_str()), ok = false;
     }
@@ -1296,15 +1292,15 @@ int WalkDriver::finish(ui::UiManager& ui) {
             const Json p = Json::parse(ss.str())["profiles"].a.at(0);
             const Json& med = p["tour"].a.at(1);
             char buf[256];
-            std::snprintf(buf, sizeof buf, "cash %d spent %d battle %s small1 %s salvation %d* encore %d* lp_cayenne %s", int(p["cash"].num()),
+            std::snprintf(buf, sizeof buf, "cash %d spent %d battle %s small1 %s iran %d* encore %d* fv_v2 %s", int(p["cash"].num()),
                           int(p["cash_spent"].num()), med["battle"]["completed"].truthy() ? "completed" : "-",
-                          med["small1"]["unlocked"].truthy() ? "unlocked" : "-", int(med["salvation"]["stars"].num()),
-                          int(med["shoutatthedevil"]["stars"].num()), p["items"]["lp_cayenne"].truthy() ? "bought" : "-");
+                          med["small1"]["unlocked"].truthy() ? "unlocked" : "-", int(med["iran"]["stars"].num()),
+                          int(med["18andlife"]["stars"].num()), p["items"]["fv_v2"].truthy() ? "bought" : "-");
             got = buf;
         } catch (const std::exception& e) {
             got = e.what();
         }
-        const std::string want = "cash 200 spent 250 battle completed small1 unlocked salvation 3* encore 3* lp_cayenne bought";
+        const std::string want = "cash 100 spent 250 battle completed small1 unlocked iran 3* encore 3* fv_v2 bought";
         std::printf("  career.json: %s\n", got.c_str());
         if (got != want) std::printf("  FAIL career.json is not: %s\n", want.c_str()), ok = false;
     }
@@ -1338,11 +1334,11 @@ int WalkDriver::finish(ui::UiManager& ui) {
         bool award = false;
         try {
             const Json j = Json::parse(ss.str());
-            score = int(j["coop"]["surrender"]["score"].num());
+            score = int(j["coop"]["bangyourhead"]["score"].num());  // the first co-op song on this disc
             award = j["coop_awards"]["bass_sg_mahogany"].truthy();
         } catch (const std::exception&) {
         }
-        std::printf("  career.json: co-op surrender %d, bass_sg_mahogany %s\n", score, award ? "awarded" : "-");
+        std::printf("  career.json: co-op bangyourhead %d, bass_sg_mahogany %s\n", score, award ? "awarded" : "-");
         if (score <= 0 || !award) std::printf("  FAIL career.json does not keep co-op's record\n"), ok = false;
     }
     // The script reports.

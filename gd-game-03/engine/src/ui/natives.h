@@ -24,6 +24,10 @@ class ListProvider : public ScriptObject {
 public:
     using ScriptObject::ScriptObject;
     virtual int numData() = 0;
+    // Called when a list takes the provider (UIList set_provider): the data
+    // is read again then [I: UIListProvider::InitData; this disc's career
+    // song list has no other refresh call].
+    virtual void initData() {}
     virtual std::string symbol(int index) = 0;
     virtual int indexOf(const std::string& sym);
     // UIListProvider::IsActive: an inactive row is drawn disabled and cannot be chosen.
@@ -54,6 +58,9 @@ struct Session {
         int track = 0;
     };
     std::array<PlayerCfg, 2> players;
+    // The PS2 has no controller select: player n plays the pad in port n
+    // (this disc's scripts never send gamecfg set_player) [C data].
+    Session() { players[1].padnum = 1; }
     bool allAccess = false;  // campaign set_all_access (the cheat): every item unlocked
     int profileSlot = -1;    // campaign profile_slot (Campaign +0x48): the band chosen
     // The guitars a tour just awarded (Campaign +0x7c, 0x822A8078), shown

@@ -82,11 +82,12 @@ int runFaceFxTest(const std::string& dataPath) {
         }
         std::printf("facefxtest: %zu .voc parsed to their end (%zu under songs/), %zu keys (%zu under songs/), SDK 1500 x%d / 1200 x%d\n",
                     anims.size(), songVocs, keys, songKeys, sdk[1500], sdk[1200]);
-        check(vocs.size() == 70 && anims.size() == 70, "70 .voc files (69 songs/ + xboxlive rodgort)");
-        check(songVocs == 69, "69 .voc under songs/");
-        check(keys == 201109 && songKeys == 199000, "key totals 201109 / 199000");
-        check(sdk[1500] == 69 && sdk[1200] == 1, "SDK versions");
-        check(with25 == 70 && hermite == 70 * 25 && blendOk == 70, "25 Hermite curves and 0.16 / 0.22 in every .voc");
+        check(vocs.size() == 33 && anims.size() == 33, "33 .voc files, all under songs/ (this disc)");
+        check(songVocs == 33, "33 .voc under songs/");
+        check(keys == 100325 && songKeys == 100325, "key totals 100325 / 100325");
+        check(sdk[1500] == 32 && sdk[1200] == 1, "SDK versions (1500 x32, 1200 x1)");
+        std::printf("facefxtest: %d .voc with 25 curves, %d Hermite curves, %d with blend 0.16 / 0.22\n", with25, hermite, blendOk);
+        check(with25 == 33 && hermite == 33 * 25 && blendOk == 33, "25 Hermite curves and 0.16 / 0.22 in every .voc");
         const Anim* blink = anims.count(kBlinkTrackPath) ? &anims[kBlinkTrackPath] : nullptr;
         if (blink) {
             const int b = blink->find("Blink");
@@ -116,7 +117,7 @@ int runFaceFxTest(const std::string& dataPath) {
         };
         size_t gn, gb, gl, gp, sn, sb, sl, sp;
         graphStats("char/guitarist.fac", gn, gb, gl, gp);
-        graphStats("char/metal_singer/ng/metal_singer.fac", sn, sb, sl, sp);
+        graphStats("char/metal_singer/og/metal_singer.fac", sn, sb, sl, sp);
         std::printf("facefxtest: %zu .fac parsed: guitarist %zu nodes (%zu pose, %zu bones, %zu links), metal_singer %zu nodes (%zu pose, %zu bones, %zu links)\n",
                     graphs.size(), gn, gp, gb, gl, sn, sp, sb, sl);
         check(facs.size() == 2 && graphs.size() == 2, "2 .fac files");
@@ -124,7 +125,7 @@ int runFaceFxTest(const std::string& dataPath) {
         check(sn == 16 && sp == 16 && sb == 16 && sl == 0, "metal_singer.fac counts");
         if (graphs.size() != 2 || !blink) throw std::runtime_error("archives missing");
         const FaceGraph& guitarist = graphs["char/guitarist.fac"];
-        const FaceGraph& singer = graphs["char/metal_singer/ng/metal_singer.fac"];
+        const FaceGraph& singer = graphs["char/metal_singer/og/metal_singer.fac"];
         check(guitarist.header.sdk == 1500 && singer.header.sdk == 1200, ".fac SDK versions");
 
         // ---- 2. dta lists and paths
@@ -140,15 +141,15 @@ int runFaceFxTest(const std::string& dataPath) {
         check(resolveFacePath(data, "char/alterna1/og/gen/alterna1.milo_ps2", "../../../guitarist.fac") == "char/guitarist.fac",
               "guitarist .fac path");
         check(resolveFacePath(data, "char/female_singer/og/gen/female_singer.milo_ps2", "../../../metal_singer/og/metal_singer.fac") ==
-                  "char/metal_singer/ng/metal_singer.fac",
-              "female_singer .fac path (og -> ng)");
+                  "char/metal_singer/og/metal_singer.fac",
+              "female_singer .fac path");
         check(resolveFacePath(data, "char/metal_singer/og/gen/metal_singer.milo_ps2", "../metal_singer.fac") ==
-                  "char/metal_singer/ng/metal_singer.fac",
+                  "char/metal_singer/og/metal_singer.fac",
               "metal_singer .fac path");
         // The singer's .voc for every song of songs.dta: only the 6 instrumentals have none.
         {
             DataNode songs = parseDtb(data.read("config/gen/songs.dtb"));
-            resolveConditionals(songs, {"HX_XBOX", "_SHIP"});
+            resolveConditionals(songs, {"HX_EE", "_SHIP"});
             int found = 0, total = 0;
             std::set<std::string> missing;
             for (const DataNode& s : songs.children) {
@@ -163,7 +164,7 @@ int runFaceFxTest(const std::string& dataPath) {
             std::string m;
             for (const auto& s : missing) m += (m.empty() ? "" : " ") + s;
             std::printf("facefxtest: songs.dta: %d / %d songs have their singer .voc; none (tutorials aside): %s\n", found, total, m.c_str());
-            check(missing == std::set<std::string>{"gemini", "jessica", "jordan", "misirlou", "soybomb", "yyz"}, "songs without .voc");
+            check(missing.empty(), "every song has its singer .voc (tutorials aside)");
             check(singerVocPath("songs/badreputation/badreputation.mid") == "songs/badreputation/badreputation.voc" &&
                       unknownSongVocPath("trogdor") == "songs/trogdor/trogdor.voc",
                   "voc path formats");
@@ -201,7 +202,7 @@ int runFaceFxTest(const std::string& dataPath) {
         }
         std::printf("facefxtest: graph evaluation: %d rows, %d node values (%d non-zero), %d differ from the reference\n", rows, values, nonzero,
                     bad);
-        check(rows == 96 && bad == 0, "graph values match facefx.py");
+        check(rows == 16 && bad == 0, "graph values match facefx.py (the guitarist case)");
 
         // ---- 4. servo runtime (GH2 semantics, char/facefx.h)
         {
@@ -266,24 +267,31 @@ int runFaceFxTest(const std::string& dataPath) {
             check(ls.poll(-3.0f, 50.0f, eyes, 4, pose) && ls.poll(-2.9f, 50.0f + tb, eyes, 4, pose), "negative song time plays on the UI clock");
             check(pose.frames.size() >= 1 && weightOf(9) > 0.0f, "UI-clock anim time reaches the first blink");
 
-            // Singer: badreputation weights -> visemes frames 1..15.
-            LipSync sg;
+            // Singer (this disc: 18andlife.voc on metal_singer.fac): the servo's
+            // viseme weights at 16 times equal the graph's own evaluation
+            // (the graph itself is checked against the reference above).
+            LipSync sg, ref;
             sg.setup(singer, visemes, {});
-            sg.play(std::make_shared<Anim>(anims["songs/badreputation/badreputation.voc"]));
-            const GoldenCase& gc = kGolden[1];
+            ref.setup(singer, visemes, {});
+            const auto singerAnim = std::make_shared<Anim>(anims["songs/18andlife/18andlife.voc"]);
+            sg.play(singerAnim);
+            ref.play(singerAnim);
+            struct { int rows = 16; } gc;
             int matched = 0;
             for (int r = 0; r < gc.rows; ++r) {
-                if (!sg.poll(gc.row[r].t, 0.0f, nullptr, 0, pose)) break;
+                const float t = 1.0f + 10.0f * float(r);
+                if (!sg.poll(t, 0.0f, nullptr, 0, pose)) break;
+                const std::vector<float> w = ref.evaluate(t);
                 float sum = 0;
-                bool ok = true;
-                for (int i = 0; i < 16; ++i) {
-                    float w = weightOf(i);
-                    ok = ok && near(w, gc.row[r].w[i]);
-                    sum += gc.row[r].w[i];
+                bool ok = w.size() >= 16;
+                for (int i = 0; i < 16 && ok; ++i) {
+                    ok = near(weightOf(i), w[size_t(i)]);
+                    sum += w[size_t(i)];
                 }
                 ok = ok && near(pose.residual, 1.0f - sum);
                 matched += ok;
             }
+            sg.poll(singerAnim->endTime + 2.0f, 0.0f, nullptr, 0, pose);
             check(matched >= gc.rows - 1 && !sg.playing(), "singer pose weights; stopped past the end");
             std::printf("facefxtest: servo runtime: blink %.3f, eyes +0.2, cross-fade 0.5 / 0.25+0.375, stop after %.2f s; singer %d / %d rows\n",
                         double(wb), double(blink->endTime), matched, gc.rows);

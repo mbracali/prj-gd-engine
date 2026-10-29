@@ -61,6 +61,7 @@ public:
     // first two tiers' songs, every song a band has unlocked, bought songs
     // and downloads (0x82287600); in campaign order, a header before each
     // venue's songs, the store's and the downloads'.
+    void initData() override { build(); }
     void build() {
         data_.clear();
         headers_.clear();
