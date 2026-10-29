@@ -164,6 +164,11 @@ public:
         r = Value::integer(0);
         if (msg == "set_mode") return mode = intArg(args, 0), build(), true;
         if (msg == "get_mode") return r = Value::integer(mode), true;
+        // This disc's scripts (ui/career.dta) switch the list with
+        // set_quickplay TRUE / FALSE and read get_quickplay: the 360's modes
+        // 1 (quick play) and 0 (career).
+        if (msg == "set_quickplay") return mode = !args.empty() && args[0].truthy() ? 1 : 0, build(), true;
+        if (msg == "get_quickplay") return r = Value::integer(mode == 1 ? 1 : 0), true;
         if (msg == "init_data") return build(), true;
         if (msg == "set_store_mode") return storeMode_ = !args.empty() && args[0].truthy(), true;
         if (msg == "num_headers") return r = Value::integer(numHeaders(intArg(args, 0))), true;
@@ -457,37 +462,60 @@ private:
     bool skipTutorials_ = false, tutorialAccess_ = false;  // +0x6c, +0x6b
 };
 
-// memcard: the save device. Results come back as memcard_result
-// (MEMCARD_RESULT_MSG) on the next frame, as the 360's async calls do.
+// memcard: the PS2 memory card (Memcard handler 0x0014c078 [C]), backed by
+// the port's career.json. Results come back as memcard_result ($result
+// $space_free) on the next frame (the console's calls are asynchronous):
+//   get_info -> kMCNoError (a card is always there);
+//   load_data -> kMCNoError after loading career.json, or kMCGeneralError
+//     when there is none yet [I: the original's "no save file" code], which
+//     the scripts treat as "create a save?";
+//   save_data / format -> kMCNoError (or kMCGeneralError if writing fails);
+//   check_save_game -> 0;
+//   space_needed -> 0x3ac00 bytes [C 0x0014c078]; space_available -> 8 MB;
+//   localize token -> the locale string "<token>_ps2" (sprintf "%s_%s"
+//     0x0014c658 [C]) with {SLOT} -> "1" (0x0014bff0: "1-A" with a multitap)
+//     and {REQ_SPACE} -> "235KB" ("%dKB", 0xeb, 0x0014c588 [C]).
 class MemcardObj : public ScriptObject {
 public:
     explicit MemcardObj(UiManager& ui) : ScriptObject("memcard", "Memcard"), ui_(ui) {}
     void result(int code) {
-        ui_.defer([this, code] { ui_.route("memcard_result", {Value::integer(code)}); });
+        ui_.defer([this, code] { ui_.route("memcard_result", {Value::integer(code), Value::integer(kSpaceAvailable)}); });
     }
     bool handleNative(Interp&, const std::string& msg, std::vector<Value>& args, Value& r) override {
         r = Value::integer(0);
-        const int kNoError = ui_.macroInt("kMCNoError", 0), kExists = ui_.macroInt("kMCFileExists", -120),
-                  kNotFound = ui_.macroInt("kMCFileNotFound", -301), kGeneral = ui_.macroInt("kMCGeneralError", -110);
-        if (msg == "auto_load" || msg == "device_selector") return result(ui_.saveFile().exists() ? kExists : kNotFound), true;
-        if (msg == "is_storage_device_valid") return r = Value::integer(ui_.saveFile().writable() ? 1 : 0), true;
-        if (msg == "load_game") {
+        const int kNoError = ui_.macroInt("kMCNoError", 0), kGeneral = ui_.macroInt("kMCGeneralError", -110);
+        if (msg == "get_info" || msg == "check_save_game") return true;
+        if (msg == "space_needed") return r = Value::integer(0x3ac00), true;
+        if (msg == "space_available") return r = Value::integer(kSpaceAvailable), true;
+        if (msg == "load_data") {
+            if (!ui_.saveFile().exists()) return result(kGeneral), true;
             int code = 0;
             ui_.loadSave(code);
             ui_.applyOptions();
             return result(code == 0 ? kNoError : code), true;
         }
-        if (msg == "save_game") {
+        if (msg == "save_data" || msg == "format") {
             std::string error;
             const bool ok = ui_.saveFile().write(ui_.career(), error);
             if (!ok) SDL_Log("save: %s", error.c_str());
-            (void)args;
             return result(ok ? kNoError : kGeneral), true;
+        }
+        if (msg == "localize") {
+            const std::string token = args.empty() ? std::string() : args[0].str();
+            std::string text = ui_.localize(token + "_ps2");
+            auto replace = [&](const std::string& key, const std::string& with) {
+                for (size_t at = text.find(key); at != std::string::npos; at = text.find(key, at + with.size()))
+                    text.replace(at, key.size(), with);
+            };
+            replace("{SLOT}", "1");
+            replace("{REQ_SPACE}", "235KB");
+            return r = Value::string(text), true;
         }
         return false;
     }
 
 private:
+    static constexpr int kSpaceAvailable = 8 * 1024 * 1024;
     UiManager& ui_;
 };
 

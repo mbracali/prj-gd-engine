@@ -75,3 +75,23 @@ Verified (fresh build, `ninja -C build/linux`: no warning or error lines):
 
 Next: M2 rule re-confirmation in SLUS_215.86 (Star Power, multiplier, rock
 meter), then M3 (scripts, UI, audit, walk).
+
+## 2026-10-29 00:30, M3 in progress (scripts, UI, boot flow)
+
+Done:
+- `memcard` object as the PS2's (0x0014c078): get_info, load_data /
+  save_data / format on career.json, space_needed 0x3ac00, localize
+  `<token>_ps2` with {SLOT} / {REQ_SPACE}. Boot flow is the PS2's:
+  bootup_load -> bootup_create_save_check -> bootup_create_save ->
+  cut_scene_screen -> splash_screen -> main_screen.
+- song_provider set_quickplay / get_quickplay; is_missing_multi_controller (D4).
+- uitest's campaign checks rewritten for this disc's campaign.dta (6 tiers,
+  Easy 5 via 0x00130c58, required songs 0x001313d8).
+
+Verified (fresh build):
+- `build/linux/gd03 "$ISO" --scripttest` -> `scripttest: OK`
+- `SDL_VIDEO_DRIVER=offscreen SDL_AUDIO_DRIVER=dummy build/linux/gd03 "$ISO" --uitest` -> `uitest: campaign: 26 checks, 0 failed`, `uitest: OK`
+- `--walktest quickplay` -> FAILED: boots through the menus into ballstothewall
+  and plays, but the PS2 track (one PanelDir `track/gen/track.milo`, no
+  GHTrackDir / track_panel_1p) is not loaded, so the debug highway draws and
+  the Star Power glow check fails. That is the M4 work, done next.

@@ -136,67 +136,81 @@ static int campaignChecks(ui::UiManager& ui) {
     p = Career::Profile{};
     p.inUse = true, p.name = "T", p.cash = 50;
     s.profileSlot = 0, s.mode = "career", s.players[0].difficulty = 2, s.venue = "battle", s.allAccess = false;
-    check(cp::numTiers(ui, 0) == 7 && cp::numTiers(ui, 1) == 8, "easy has 7 tiers, the others 8");
-    check(cp::requiredSongs(ui, 1, "battle") == 5 && cp::requiredSongs(ui, 1, "stone") == 6 && cp::requiredSongs(ui, 0, "arena") == 5,
-          "required songs (campaign.dta)");
-    check(cp::encoreOf(ui, "battle") == "shoutatthedevil" && cp::isEncore(ui, "freebird"), "the encores are the tiers' last songs");
-    check(cp::isUnlocked(ui, "surrender") && !cp::isUnlocked(ui, "shoutatthedevil") && !cp::isUnlocked(ui, "small1"), "a new tour");
+    // This disc's campaign.dta: six tiers of five songs (the last the
+    // encore), required songs Easy 3/4, Medium 4/5, Hard and Expert 5/5,
+    // star awards 100 150 200 at Medium..Expert (0 at Easy), status awards
+    // 100 300 ...; Easy plays one tier less (0x00130c58) [C].
+    check(cp::numTiers(ui, 0) == 5 && cp::numTiers(ui, 1) == 6, "easy has 5 tiers, the others 6");
+    check(cp::requiredSongs(ui, 1, "battle") == 4 && cp::requiredSongs(ui, 1, "arena") == 5 && cp::requiredSongs(ui, 0, "fest") == 4 &&
+              cp::requiredSongs(ui, 0, "battle") == 3,
+          "required songs (campaign.dta; the last tier's second value, 0x001313d8)");
+    check(cp::encoreOf(ui, "battle") == "18andlife" && cp::isEncore(ui, "playwithme"), "the encores are the tiers' last songs");
+    check(cp::isUnlocked(ui, "bangyourhead") && !cp::isUnlocked(ui, "18andlife") && !cp::isUnlocked(ui, "small1"), "a new tour");
     auto play = [&](const std::string& song, int stars) {
         s.song = song;
         return cp::finishSong(ui, 1000, stars, 50);
     };
-    cp::FinishResult r = play("surrender", 5);
-    check(r.cash == 1200 && r.cashReason == "award_5_star", "five stars at Hard: 150+200+250 at Hard and Medium, 0 at Easy (got " +
-                                                                 std::to_string(r.cash) + ")");
-    for (const char* song : {"possum", "heartshapedbox", "salvation"}) play(song, 3);
-    s.song = "strutter";
-    check(ui.interp().send("campaign", "encore_unlock_potential", {}).truthy(), "the fifth song may unlock the encore at Hard");
-    r = play("strutter", 3);
-    check(r.cash == 300 && r.newStatus == 0 && r.newVenue.empty(), "three stars: 150 at Hard and Medium; no venue before the encore");
-    check(cp::isUnlocked(ui, "shoutatthedevil") && !cp::unlockedAt(ui, p, 0, "shoutatthedevil"), "the encore unlocked (never at Easy)");
-    r = play("shoutatthedevil", 3);
+    cp::FinishResult r = play("bangyourhead", 5);
+    check(r.cash == 900 && r.cashReason == "award_5_star", "five stars at Hard: 100+150+200 at Hard and Medium, 0 at Easy (got " +
+                                                                std::to_string(r.cash) + ")");
+    for (const char* song : {"wegotthebeat", "iran"}) play(song, 3);
+    s.song = "ballstothewall";
+    check(ui.interp().send("campaign", "encore_unlock_potential", {}).truthy(), "the fourth song may unlock the encore at Hard");
+    r = play("ballstothewall", 3);
+    check(r.cash == 200 && r.newStatus == 0 && r.newVenue.empty(), "three stars: 100 at Hard and Medium; no venue before the encore");
+    check(cp::isUnlocked(ui, "18andlife") && !cp::unlockedAt(ui, p, 0, "18andlife"), "the encore unlocked (never at Easy)");
+    r = play("18andlife", 3);
     check(r.newVenue == "small1" && r.newStatus == 1 && r.statusAward == 200,
           "the encore completes battle: small1, status 1, $100 at Hard + $100 at Medium (got " + std::to_string(r.statusAward) + ")");
-    check(p.cash == 50 + 1200 + 3 * 300 + 300 + 300 + 200 && cp::status(ui, p, 2) == 1, "the band's cash and status");
-    check(cp::isUnlocked(ui, "possum") && !cp::isUnlocked(ui, "rawdog") && !cp::isUnlocked(ui, "classic") && cp::isUnlocked(ui, "lespaul") &&
+    check(p.cash == 50 + 900 + 2 * 200 + 200 + 200 + 200 && cp::status(ui, p, 2) == 1, "the band's cash and status");
+    check(cp::isUnlocked(ui, "wegotthebeat") && !cp::isUnlocked(ui, "explorer") && !cp::isUnlocked(ui, "grim") && cp::isUnlocked(ui, "lespaul") &&
               !cp::isUnlocked(ui, "fish_reward"),
           "the store's items are locked, the others not");
     const int cash = p.cash;
-    cp::buyItem(ui, "rawdog", 550);
-    cp::buyItem(ui, "classic", 5000);
-    check(cp::isUnlocked(ui, "rawdog") && p.cash == cash - 550 && p.cashSpent == 550 && !cp::isUnlocked(ui, "classic"),
-          "a song bought (all four records), a character too dear");
+    cp::buyItem(ui, "explorer", 700);
+    cp::buyItem(ui, "grim", 4000);
+    check(cp::isUnlocked(ui, "explorer") && p.cash == cash - 700 && p.cashSpent == 700 && !cp::isUnlocked(ui, "grim"),
+          "a guitar bought, a character too dear");
+    // The newest venue's songs only show once that venue is chosen (0x822AA3F8 [C 360]).
     const auto career = cp::careerSongs(ui, false);
-    check(std::find(career.begin(), career.end(), "rawdog") != career.end(), "the bought song in the career list");
+    s.venue = "small1";
+    const auto career1 = cp::careerSongs(ui, false);
+    s.venue = "battle";
+    check(std::find(career.begin(), career.end(), "noonelikeyou") == career.end() &&
+              std::find(career1.begin(), career1.end(), "noonelikeyou") != career1.end() &&
+              std::find(career1.begin(), career1.end(), "holydiver") == career1.end(),
+          "the career list: the unlocked tiers' songs, the newest venue's when chosen");
     s.mode = "quickplay";
     const auto qp = cp::quickplaySongs(ui);
-    check(std::find(qp.begin(), qp.end(), "rawdog") != qp.end() && std::find(qp.begin(), qp.end(), "mother") != qp.end() &&
-              std::find(qp.begin(), qp.end(), "carryonwayward") == qp.end(),
-          "quick play: the first two tiers and the bought song");
+    check(std::find(qp.begin(), qp.end(), "noonelikeyou") != qp.end() && std::find(qp.begin(), qp.end(), "holydiver") == qp.end(),
+          "quick play: the first two tiers");
     // The save keeps it.
     Career back;
     back.fromJson(ui.career().toJson());
     const auto& e = back.profiles[0].entries[2];
-    check(back.profiles[0].cashSpent == 550 && e.at("battle").completed && e.at("small1").unlocked && e.at("surrender").stars == 5 &&
-              e.at("rawdog").unlocked && back.profiles[0].entries[1].at("surrender").maxStars == 5,
+    check(back.profiles[0].cashSpent == 700 && e.at("battle").completed && e.at("small1").unlocked && e.at("bangyourhead").stars == 5 &&
+              back.profiles[0].items.count("explorer") && back.profiles[0].entries[1].at("bangyourhead").maxStars == 5,
           "career.json keeps the tour");
     // Co-op (docs/multiplayer.md): the song's instruments from the mode's
     // song_block, set_track's track type, the record and its bass awards.
     Interp& in = ui.interp();
-    s.mode = "multi_coop", s.cfgSet.clear(), s.song = "strutter";
-    check(in.send("song_provider", "get_instrument", {Value::symbol("strutter"), Value::integer(1)}).str() == "rhythm" &&
-              in.send("song_provider", "has_instrument", {Value::symbol("surrender"), Value::symbol("bass")}).truthy() &&
-              !in.send("song_provider", "has_instrument", {Value::symbol("strutter"), Value::symbol("bass")}).truthy(),
-          "co-op's instruments: song_coop's (strutter: rhythm), else song's (surrender: bass)");
+    // This disc has no song_coop blocks or rhythm parts: co-op plays the
+    // song's guitar and bass.
+    s.mode = "multi_coop", s.cfgSet.clear(), s.song = "18andlife";
+    const std::string inst = in.send("song_provider", "get_instrument", {Value::symbol("18andlife"), Value::integer(1)}).str();
+    check(inst == "bass" && in.send("song_provider", "has_instrument", {Value::symbol("18andlife"), Value::symbol("bass")}).truthy() &&
+              !in.send("song_provider", "has_instrument", {Value::symbol("18andlife"), Value::symbol("rhythm")}).truthy(),
+          "co-op's instruments: the song's (18andlife: bass, no rhythm; got " + inst + ")");
     in.send("gamecfg", "set_track", {Value::integer(1), Value::integer(1)});
-    check(s.players[1].trackType == 1 && in.send("gamecfg", "get_track_sym", {Value::integer(1)}).str() == "rhythm", "set_track 1 1: rhythm");
+    const std::string trackSym = in.send("gamecfg", "get_track_sym", {Value::integer(1)}).str();
+    check(s.players[1].trackType == 0 && trackSym == "bass", "set_track 1 1: the song's second instrument, bass (got " + trackSym + ")");
     check(!in.send("game", "multiplayer_vs", {}).truthy() && in.send("game", "multiplayer", {}).truthy(), "co-op is multiplayer, not multiplayer_vs");
     ui.career().coop.clear(), ui.career().coopAwards.clear();
     check(!cp::isUnlocked(ui, "bass_sg_mahogany") && cp::isUnlocked(ui, "bass_musicman"), "co-op's basses locked until awarded");
     cp::finishCoopSong(ui, 1000, 2, 90, 90, 3, 3);
-    check(s.guitarAwards.empty() && ui.career().coop["strutter"].score == 1000, "two stars: a record, no bass");
+    check(s.guitarAwards.empty() && ui.career().coop["18andlife"].score == 1000, "two stars: a record, no bass");
     cp::finishCoopSong(ui, 900, 4, 100, 100, 3, 3);
-    check(ui.career().coop["strutter"].score == 1000 && ui.career().coop["strutter"].stars == 2 && ui.career().coop["strutter"].perfect,
+    check(ui.career().coop["18andlife"].score == 1000 && ui.career().coop["18andlife"].stars == 2 && ui.career().coop["18andlife"].perfect,
           "a lower score keeps the record; 100 % on Expert by both: gold");
     cp::finishCoopSong(ui, 2000, 3, 50, 50, 1, 1);
     check(s.guitarAwards.size() == 1 && s.guitarAwards[0] == "bass_sg_mahogany" && cp::isUnlocked(ui, "bass_sg_mahogany"),
@@ -242,7 +256,7 @@ static int campaignChecks(ui::UiManager& ui) {
         check(slot >= 0 && locked == 0 && cp::isUnlocked(ui, "multi_fo"), "The Glitches has everything unlocked (first locked: " + first + ")");
         s.mode = "quickplay";
         const auto all = cp::quickplaySongs(ui);
-        check(std::find(all.begin(), all.end(), "carryonwayward") != all.end() && std::find(all.begin(), all.end(), "rawdog") != all.end(),
+        check(std::find(all.begin(), all.end(), "holydiver") != all.end() && std::find(all.begin(), all.end(), "playwithme") != all.end(),
               "quick play offers The Glitches' songs");
     }
     std::printf("uitest: campaign: %d checks, %d failed\n", n, fails);

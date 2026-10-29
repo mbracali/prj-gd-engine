@@ -347,6 +347,9 @@ public:
             return r = Value::symbol(guitar ? "guitar" : "joypad"), true;
         }
         if (msg == "is_missing_controller") return true;  // keyboards and controllers come and go freely in the port
+        // PS2: true greys out MULTIPLAYER when pad 2 is missing; the port
+        // assigns players in GAMEPADS, so it is never missing (DECISIONS D4).
+        if (msg == "is_missing_multi_controller") return true;
         if (msg == "set_paused") {
             const bool p = !args.empty() && args[0].truthy();
             paused = p;

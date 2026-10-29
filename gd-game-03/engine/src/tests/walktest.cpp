@@ -82,6 +82,18 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         screen(s, timeout);
         wait(400);
     };
+    // The PS2 boot (ui/mem_card.dta, splash.dta): no save yet -> "create a
+    // save?" (yes is the focus) -> saved -> the intro movie's screen -> the
+    // title screen (campaign num_profiles > 0: the port's The Glitches is
+    // always there, so the guitar help is skipped) -> any button.
+    auto bootToMain = [&] {
+        at("bootup_create_save_check", 30000);
+        press(kX);
+        at("bootup_create_save");
+        at("cut_scene_screen", 20000);
+        at("splash_screen");
+        press(kX);
+    };
     auto quickplaySong = [&](int downs) {
         at("main_screen");
         press(kX);  // QUICK PLAY (main_quickspin.btn, the focus)
@@ -100,13 +112,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         wait(300);
         press(kX);  // skips the three splashes (9 s otherwise)
         check("splashes_skipped", 1000);
-        at("splash_screen", 30000);
-        press(kX);  // any button
-        at("startup_create_save_screen");
-        press(kX);  // choose a device (create the save)
-        at("saving_screen");
-        at("guitar_help_screen");
-        press(kX);
+        bootToMain();
         quickplaySong(3);
         wait(3000);
         check("task_clock_song");
@@ -128,8 +134,8 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         press(kTri);  // back
         at("main_screen");
         check("menu_sounds");  // game_outro_complete paused the game: menu sounds still play (GD03-073)
-        expect_ = {"cut_scene_screen", "splash_screen", "startup_load_finder_screen", "startup_create_save_screen", "saving_screen",
-                   "guitar_help_screen", "main_screen", "qp_selsong_screen", "qp_diff_screen", "loading_screen", "game_screen",
+        expect_ = {"bootup_load", "bootup_create_save_check", "bootup_create_save", "cut_scene_screen",
+                   "splash_screen", "main_screen", "qp_selsong_screen", "qp_diff_screen", "loading_screen", "game_screen",
                    "post_show_screen", "endgame_screen", "highscore_screen", "complete_screen", "meta_loading_screen", "saving_screen",
                    "qp_selsong_screen", "main_screen"};
     } else if (scenario == "lose") {
@@ -190,13 +196,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
                    "game_screen", "pause_screen", "pause_confirm_restart_screen", "game_screen", "pause_screen",
                    "pause_confirm_quit_screen", "meta_loading_screen", "qp_selsong_screen"};
     } else if (scenario == "career" || scenario == "career_full" || scenario == "career_song") {
-        at("splash_screen", 30000);
-        press(kX);
-        at("startup_create_save_screen");
-        press(kX);
-        at("saving_screen");
-        at("guitar_help_screen");
-        press(kX);
+        bootToMain();
         at("main_screen");
         if (scenario == "career_song" && SDL_getenv("GD03_WALK_ENHANCED")) {
             // Enhanced Options first (its backdrop loads a venue, then frees it).
@@ -522,13 +522,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         expect_ = {"main_screen"};
     } else if (scenario == "coop" || scenario == "faceoff" || scenario == "proface") {
         endMs_ = 20000;
-        at("splash_screen", 30000);
-        press(kX);
-        at("startup_create_save_screen");
-        press(kX);
-        at("saving_screen");
-        at("guitar_help_screen");
-        press(kX);
+        bootToMain();
         at("main_screen");
         if (scenario == "proface") check("proface_seed");
         press(kDown);  // QUICK PLAY -> MULTIPLAYER
@@ -1260,7 +1254,8 @@ int WalkDriver::finish(ui::UiManager& ui) {
             }
             if (!save["pro_faceoff"].truthy()) ++missing;
             std::printf("  The Glitches: %d of %d unlocks missing\n", missing, entries);
-            if (missing || entries < 300) std::printf("  FAIL The Glitches does not have everything unlocked\n"), ok = false;
+            // 190 entries on this disc (GH2 360: over 300).
+            if (missing || entries < 190) std::printf("  FAIL The Glitches does not have everything unlocked\n"), ok = false;
         } catch (const std::exception& e) {
             std::printf("  FAIL career.json: %s\n", e.what()), ok = false;
         }

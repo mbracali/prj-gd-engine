@@ -26,3 +26,10 @@ Each entry: what, why, how to undo.
 - Why: nothing on the PS2 disc needs FFmpeg (no WMV, no XMA); smaller packages
   and no LGPL shipping.
 - Undo: copy gd-game-02's `build_common.sh` FFmpeg part back.
+
+## D4. `game is_missing_multi_controller` is always false
+- What: the main menu's MULTIPLAYER (and pause's) stay enabled with one controller.
+- Why: the PS2 greys them out without a pad in port 2; the port assigns
+  players to any device (keyboard, pads, touch) in GAMEPADS, like gd02's
+  `is_missing_controller`.
+- Undo: return whether `input` has fewer than two player devices (natives_game.cpp).
