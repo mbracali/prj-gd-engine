@@ -44,6 +44,7 @@ bool Highway2D::init(const Globals& g, int difficulty) {
     topWidth_ = num(g, "highway_top_width1", 160);
     widthOffset_ = num(g, "widthOffsetFactor1", 2.2f);
     fade_ = num(g, "highway_fade1", 30);
+    tiling_ = num(g, "gHighwayTiling1", 1.5f);
     gemStart_ = num(g, "gem_start_scale1", 0.25f);
     gemEnd_ = gemStart_ * (1 + widthOffset_);
     starScale_ = num(g, "gem_star_scale1", 1.3f);
@@ -116,23 +117,26 @@ void Highway2D::quad(Canvas& c, uint32_t key, const TextureCache& tex, float cx,
 
 void Highway2D::draw(Canvas& c, const TextureCache& tex, const NoteTrack& track, const Player& player, double now, uint8_t held) {
     const PlayerStats& st = player.stats();
-    // The highway surface. GH3 draws the character's highway texture
-    // (e.g. sys_axel_1_highway) as row strips scrolling with the gems [C
-    // 0x8238DE48]; the character paks are not loaded yet, so a dark surface
-    // stands in [approximation, backlog GD04-018].
+    // The highway surface: one strip per 8 rows, width top_width x (1 +
+    // widthOffsetFactor x depth), texture V = row x tiling / 1024 scrolling
+    // with the gems (m_velocityV = -tiling / T) [C 0x8238DE48, script Set2DHighwaySpeed].
     {
-        const SDL_Color base = st.starPowerActive ? SDL_Color{20, 70, 90, 255} : SDL_Color{28, 28, 34, 255};
-        const int strips = 32;
-        for (int s = 0; s < strips; ++s) {
-            const float va = float(s) / strips * 1.6f, vb = float(s + 1) / strips * 1.6f;
-            const float ya = yAt(va), yb = yAt(vb);
+        const SDL_Color tint = st.starPowerActive ? SDL_Color{64, 255, 255, 255} : SDL_Color{255, 255, 255, 255};  // highway_starpower [C data]
+        const double scroll = now / travelMs_ * kRealRows;  // rows moved since song time 0
+        const int texId = int(tex.find(surfaceTex_).id);
+        float ya = topY_, va = 0;
+        for (int r = 0; r < kRows - 8; r += 8) {
+            const float vb = accum_[size_t(r + 8)];
+            const float yb = yAt(vb);
             if (ya > 720) break;
             const float wa = topWidth_ * (1 + widthOffset_ * va), wb = topWidth_ * (1 + widthOffset_ * vb);
+            const float ta = float((r - scroll) * tiling_ / kRealRows), tb = float((r + 8 - scroll) * tiling_ / kRealRows);
             const auto A = uint8_t(255 * alphaAt(ya)), B = uint8_t(255 * alphaAt(yb));
-            const Vertex p0{640 - wa / 2, ya, 0, 0, 0, base.r, base.g, base.b, A}, p1{640 + wa / 2, ya, 0, 0, 0, base.r, base.g, base.b, A};
-            const Vertex p2{640 + wb / 2, yb, 0, 0, 0, base.r, base.g, base.b, B}, p3{640 - wb / 2, yb, 0, 0, 0, base.r, base.g, base.b, B};
+            const Vertex p0{640 - wa / 2, ya, 0, 0, -ta, tint.r, tint.g, tint.b, A}, p1{640 + wa / 2, ya, 0, 1, -ta, tint.r, tint.g, tint.b, A};
+            const Vertex p2{640 + wb / 2, yb, 0, 1, -tb, tint.r, tint.g, tint.b, B}, p3{640 - wb / 2, yb, 0, 0, -tb, tint.r, tint.g, tint.b, B};
             const Vertex v[6] = {p0, p1, p2, p0, p2, p3};
-            c.draw(v, 6, 0, Blend::Alpha);
+            c.draw(v, 6, texId, Blend::Alpha, true);
+            ya = yb, va = vb;
         }
     }
     // Sidebars: sys_sidebar2D, scale (sidebar_x_scale, sidebar_y_scale), at

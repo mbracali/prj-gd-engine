@@ -29,6 +29,9 @@ public:
     // The screen position (y) of a note time at song time `nowMs`, and its
     // normalised depth v (0 top, 1 playline) — for the checks.
     float depthOf(double noteMs, double nowMs) const;
+    // The highway surface's texture (the guitarist's highway material's, else
+    // the global fallback) [C data].
+    void setSurfaceTexture(uint32_t key) { surfaceTex_ = key; }
 
 private:
     float yAt(float v) const { return topY_ + height_ * v; }
@@ -43,5 +46,7 @@ private:
     float sidebarXScale_ = 0.3f, sidebarYScale_ = 1, sidebarXOffset_ = 4;
     float travelMs_ = 1500;  // scroll_time - destroy_time
     std::array<float, 5> startX_{}, endX_{};
-    std::vector<float> d_, accum_;  // per-row heights (normalised) and their running sum
+    std::vector<float> d_, accum_;
+    uint32_t surfaceTex_ = 0x2C0ED3FD;  // global fallback highway texture [C data]
+    float tiling_ = 1.5f;              // gHighwayTiling1  // per-row heights (normalised) and their running sum
 };

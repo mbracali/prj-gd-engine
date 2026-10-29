@@ -23,6 +23,12 @@ public:
         auto it = textures_.find(key);
         return it == textures_.end() ? gfx::TextureId{} : it->second.id;
     }
+    // The first texture of a material (scene files' materials, recorded by
+    // loadPak), or 0.
+    uint32_t materialTexture(uint32_t materialKey) const {
+        auto it = materials_.find(materialKey);
+        return it == materials_.end() ? 0 : it->second;
+    }
     // Size of a texture (0 x 0 if unknown).
     void size(uint32_t key, int& w, int& h) const;
     size_t count() const { return textures_.size(); }
@@ -34,4 +40,5 @@ private:
     };
     gfx::RenderDevice& dev_;
     std::unordered_map<uint32_t, Entry> textures_;
+    std::unordered_map<uint32_t, uint32_t> materials_;
 };

@@ -28,7 +28,7 @@ class TextureCache;
 class SongScreen {
 public:
     bool start(const Disc& disc, const Globals& g, const SongInfo& song, int difficulty, bool autoplay, bool noFail, Mixer& mixer,
-               std::string& error);
+               std::string& error, const TextureCache* textures = nullptr);
     void handle(const InputEvent& e);
     // Advances and draws one frame; false once the song is over.
     bool frame(Canvas& canvas, Mixer& mixer, const TextureCache* textures);
@@ -48,6 +48,7 @@ private:
     std::unique_ptr<Autoplay> autoplay_;
     Highway2D highway_;
     bool highwayOk_ = false;
+    const TextureCache* textures_ = nullptr;
     uint8_t shownHeld_ = 0;
     double endMs_ = 0;
     double stepMs_ = 0;      // the judge's own clock (60 Hz steps)

@@ -25,7 +25,8 @@ const SDL_Color kFretColors[5] = {{40, 200, 60, 255}, {220, 40, 40, 255}, {230, 
 }  // namespace
 
 bool SongScreen::start(const Disc& disc, const Globals& g, const SongInfo& song, int difficulty, bool autoplay, bool noFail,
-                       Mixer& mixer, std::string& error) {
+                       Mixer& mixer, std::string& error, const TextureCache* textures) {
+    textures_ = textures;
     song_ = song;
     difficulty_ = std::clamp(difficulty, 0, 3);
     try {
@@ -49,6 +50,10 @@ bool SongScreen::start(const Disc& disc, const Globals& g, const SongInfo& song,
     player_->setSongLengthMs(endMs_);
     if (autoplay) autoplay_ = std::make_unique<Autoplay>(track_, true);
     highwayOk_ = highway_.init(g, difficulty_);
+    // The guitarist's highway: sys_axel_1_highway (Axel until the character
+    // select runs, M6) [C data: material 0x89A130C2 in axel_1.pak].
+    if (textures_)
+        if (uint32_t t = textures_->materialTexture(0x89A130C2)) highway_.setSurfaceTexture(t);
     if (!highwayOk_) SDL_Log("highway: the 2D highway's tables are missing; the debug highway is drawn");
     auto stream = SongStream::open(disc, song.name, error);
     if (!stream) return false;

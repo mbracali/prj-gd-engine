@@ -175,7 +175,8 @@ int App::run() {
         textures_ = std::make_unique<TextureCache>(canvas_.renderer().device());
         const uint64_t t0 = SDL_GetTicksNS();
         const int n = textures_->loadPak(*disc_, "DATA/COMPRESSED/ZONES/global.pak.xen");
-        SDL_Log("textures: %d from global.pak (%.0f ms)", n, double(SDL_GetTicksNS() - t0) / 1e6);
+        const int a = textures_->loadPak(*disc_, "DATA/COMPRESSED/PAK/axel_1.pak.xen");  // the default guitarist [I]
+        SDL_Log("textures: %d from global.pak, %d from axel_1.pak (%.0f ms)", n, a, double(SDL_GetTicksNS() - t0) / 1e6);
     }
     if ((!options_.song.empty() || !options_.walk.empty()) && !disc_) {
         std::fprintf(stderr, "%s: %s\n", app::kProgram, message_.empty() ? "no disc image given" : message_.c_str());
@@ -191,7 +192,7 @@ int App::run() {
             std::fprintf(stderr, "%s: no song '%s'\n", app::kProgram, options_.song.c_str());
             running_ = false, exitCode_ = 2;
             song_.reset();
-        } else if (!song_->start(*disc_, *globals_, *s, options_.difficulty, options_.autoplay, options_.noFail, mixer_, err)) {
+        } else if (!song_->start(*disc_, *globals_, *s, options_.difficulty, options_.autoplay, options_.noFail, mixer_, err, textures_.get())) {
             std::fprintf(stderr, "%s: %s\n", app::kProgram, err.c_str());
             running_ = false, exitCode_ = 2;
             song_.reset();

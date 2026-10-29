@@ -9,6 +9,7 @@
 #include "data/disc.h"
 #include "data/pak.h"
 #include "data/qbkey.h"
+#include "data/scene.h"
 #include "data/texture.h"
 
 TextureCache::~TextureCache() {
@@ -43,6 +44,12 @@ int TextureCache::loadPak(const Disc& disc, const std::string& pakPath) {
                 for (const gh3tex::Texture& t : gh3tex::decodeTexDict(p, size)) upload(t.key, t);
             } else if (e.type == qbkey::key(".img")) {
                 upload(e.name, gh3tex::decodeImg(p, size));
+            } else if (e.type == qbkey::key(".scn") || e.type == qbkey::key(".skin") || e.type == qbkey::key(".mdl")) {
+                const scene::Kind kind = e.type == qbkey::key(".skin") ? scene::Kind::Skin
+                                         : e.type == qbkey::key(".mdl") ? scene::Kind::Mdl
+                                                                        : scene::Kind::Scn;
+                for (const scene::Material& m : scene::parse(p, size, kind).materials)
+                    if (m.key && !m.textures.empty()) materials_.emplace(m.key, m.textures.front());
             }
         }
     } catch (const std::exception& ex) {

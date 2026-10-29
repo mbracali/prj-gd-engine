@@ -193,8 +193,13 @@ def disassemble(code, names):
             line.append(repr(val))
         elif op in (0x47, 0x48, 0x49):
             line.append("%s(+%d)" % (name, val))
-        elif op == 0x4A:
-            line.append("{qbstruct %d bytes}" % len(val))
+        elif op in (0x4A, 0x4E):
+            try:
+                r = qb.Reader(val)
+                items = r.struct(0)
+                line.append(qb.fmt(items, names).replace("\n", " "))
+            except Exception:
+                line.append("{qbstruct %d bytes}" % len(val))
         elif val is not None:
             line.append("%s:%r" % (name, val))
         else:

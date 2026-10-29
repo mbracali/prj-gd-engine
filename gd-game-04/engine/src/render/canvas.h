@@ -42,7 +42,8 @@ public:
 
     // Triangles (three vertices each). `texture` is a gfx::TextureId's id,
     // 0 for plain colour (the vertices' uv are then ignored).
-    void draw(const Vertex* v, size_t count, int texture, Blend blend);
+    // `repeat`: the texture wraps (scrolling surfaces) instead of clamping.
+    void draw(const Vertex* v, size_t count, int texture, Blend blend, bool repeat = false);
     void fillRect(float x, float y, float w, float h, SDL_Color c);
     // Text in the 8x8 debug font, `scale` times its size (non-ASCII shows as '?').
     void text(float x, float y, float scale, SDL_Color c, const std::string& s);
@@ -66,4 +67,5 @@ private:
     std::vector<Vertex> batch_;
     uint32_t batchTexture_ = 0;
     Blend batchBlend_ = Blend::Alpha;
+    bool batchRepeat_ = false;
 };

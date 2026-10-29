@@ -54,7 +54,11 @@ struct Exec {
         return none();
     }
 
-    static qb::Value member(const qb::Value& base, uint32_t field, Vm& vm) {
+    static qb::Value member(const qb::Value& base0, uint32_t field, Vm& vm) {
+        // `.field` on a key reads the global struct the key names [C data:
+        // start_flow_manager's `<arg> current_flow_state . Create`].
+        qb::Value base = base0;
+        if ((base.type == qb::Type::Key || base.type == qb::Type::KeyPtr) && vm.global(base.key)) base = *vm.global(base.key);
         if (base.type == qb::Type::Struct && base.st) {
             if (const qb::Value* v = vm.globals().field(*base.st, field)) return *v;
         }
@@ -922,8 +926,22 @@ bool Vm::step(ScriptRun& run, int budget) {
                 qb::Value v = ex.expression();
                 if (!fr.locals) fr.locals = std::make_shared<qb::Struct>();
                 set(*fr.locals, name, std::move(v));
+            } else if (first.op == kArg) {
+                // `<arg> f params...`: calls the script / native the local names
+                // [C data: start_flow_manager's `<arg> create_func player = ...`].
+                const qb::Value* fn = ex.local(name);
+                if (fn && (fn->type == qb::Type::Key || fn->type == qb::Type::KeyPtr)) {
+                    const uint32_t callee = fn->key;
+                    qb::Struct p = ex.params();
+                    while (ex.i < t.size() && !isEnd(t[ex.i].op)) ++ex.i;
+                    fr.pc = ex.i;
+                    bool result = false;
+                    callName(run, callee, p, result);
+                    continue;
+                }
+                logOnce("UNHANDLED call through a non-key local in " + qbkey::name(fr.code->name));
             } else {
-                logOnce("UNHANDLED statement starting with <arg> in " + qbkey::name(fr.code->name));
+                logOnce("UNHANDLED statement in " + qbkey::name(fr.code->name));
             }
             while (ex.i < t.size() && !isEnd(t[ex.i].op)) ++ex.i;
             fr.pc = ex.i;

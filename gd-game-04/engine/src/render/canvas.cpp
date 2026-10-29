@@ -108,7 +108,7 @@ void Canvas::flush() {
     c.state.src = gfx::BlendFactor::SrcAlpha;
     c.state.dst = batchBlend_ == Blend::Add ? gfx::BlendFactor::One : gfx::BlendFactor::InvSrcAlpha;
     c.textures[0] = gfx::TextureId{batchTexture_ ? batchTexture_ : atlas_.id};
-    c.samplers[0] = {batchTexture_ ? gfx::Filter::Linear : gfx::Filter::Nearest, gfx::Wrap::Clamp, 0};
+    c.samplers[0] = {batchTexture_ ? gfx::Filter::Linear : gfx::Filter::Nearest, batchRepeat_ ? gfx::Wrap::Repeat : gfx::Wrap::Clamp, 0};
     const gfx::Mat4 proj = gfx::Mat4::ortho2D(0, kScreenW, 0, kScreenH);
     c.uniforms[0] = {proj.m, sizeof proj.m};
     d.draw(c);
@@ -117,11 +117,11 @@ void Canvas::flush() {
     batch_.clear();
 }
 
-void Canvas::draw(const Vertex* v, size_t count, int texture, Blend blend) {
+void Canvas::draw(const Vertex* v, size_t count, int texture, Blend blend, bool repeat) {
     if (count == 0) return;
     const uint32_t tex = uint32_t(texture);
-    if (!batch_.empty() && (tex != batchTexture_ || blend != batchBlend_)) flush();
-    batchTexture_ = tex, batchBlend_ = blend;
+    if (!batch_.empty() && (tex != batchTexture_ || blend != batchBlend_ || repeat != batchRepeat_)) flush();
+    batchTexture_ = tex, batchBlend_ = blend, batchRepeat_ = repeat;
     const size_t at = batch_.size();
     batch_.insert(batch_.end(), v, v + count);
     if (tex == 0)
@@ -153,8 +153,8 @@ void Canvas::text(float x, float y, float scale, SDL_Color c, const std::string&
     }
     if (quads.empty()) return;
     // The font lives in the atlas, which is also what plain colour uses.
-    if (!batch_.empty() && (batchTexture_ != 0 || batchBlend_ != Blend::Alpha)) flush();
-    batchTexture_ = 0, batchBlend_ = Blend::Alpha;
+    if (!batch_.empty() && (batchTexture_ != 0 || batchBlend_ != Blend::Alpha || batchRepeat_)) flush();
+    batchTexture_ = 0, batchBlend_ = Blend::Alpha, batchRepeat_ = false;
     batch_.insert(batch_.end(), quads.begin(), quads.end());
 }
 
