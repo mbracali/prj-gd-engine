@@ -32,8 +32,11 @@ target_sources(gd04 PRIVATE
   src/audio/audio_device.cpp
   src/audio/mixer.cpp
   src/audio/sfx_dsp.cpp
+  src/audio/song_stream.cpp
   src/audio/xma_decoder.cpp
+  src/audio/xma_stream.cpp
   src/data/disc.cpp
+  src/data/fsb.cpp
   src/data/inflate.cpp
   src/data/json.cpp
   src/data/pak.cpp
@@ -54,7 +57,13 @@ target_sources(gd04 PRIVATE
   src/render/renderer.cpp
   src/render/shadertest.cpp
   src/render/texture_codec.cpp
+  src/game/chart.cpp
+  src/game/song_db.cpp
+  src/script/globals.cpp
   src/tests/format_checks.cpp
+  src/tests/selftest.cpp
+  src/tests/selftest_play.cpp
+  src/tests/sfxtest.cpp
   src/tests/formattest.cpp
 )
 target_include_directories(gd04 PRIVATE src)

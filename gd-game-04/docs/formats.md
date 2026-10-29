@@ -14,8 +14,8 @@ XDVDFS game partition at 0xFD90000 (XGD2) [C]. 660 files:
 | `default.xex` | the executable (XEX2, title ID 415607F7) |
 | `DATA/COMPRESSED/{PAK,SONGS,ZONES,FONTS,FXFILES,IMAGES}/*.xen` | compressed archives and images (below) |
 | `DATA/COMPRESSED/compress.toc.xen`, `compress.toc.lst.xen` | the table of the compressed files (binary and a text listing) |
-| `DATA/MUSIC/<song>.fsb.xen` + `<song>.dat.xen` | the song audio (FSB4, encrypted; M2) |
-| `DATA/STREAMS/streamall.fsb.xen` + `.dat.xen` | streamed sounds (plain FSB3) |
+| `DATA/MUSIC/<song>.fsb.xen` + `<song>.dat.xen` | the song audio (FSB3, encrypted; "Audio" below) |
+| `DATA/STREAMS/streamall.fsb.xen` + `.dat.xen` | streamed sounds (plain FSB3, 367 samples) |
 | `DATA/MOVIES/BIK/*.bik.xen` | Bink 1 videos (`BIKi`) |
 | `DATA/SCRIPTS/ENGINE/engine_params.qb.xen` | a loose QB file (not compressed) |
 | `DATA/ANIMS/standardkey{Q,T}.bin.xen`, `DATA/FXFILES/MaterialLibrary.bin.xen` | loose binaries (M5 / M6) |
@@ -108,3 +108,50 @@ Arrays per song (`<id>_...`), times in ms [C data, slowride]:
   {time, scr, params} (`performance`).
 
 The meaning of each fret-mask bit, HOPO flags and the rest: M2.
+
+## Audio (FMOD Ex 4.06.12 banks)
+
+The XEX links FMOD Ex 4.06.12 (`C:\nxcommon_gh3\fmod\src\fmodexsrc40612_xbox360\...`
+source paths in its strings) [C].
+
+**Encryption.** `DATA/MUSIC/<song>.fsb.xen` is stored as
+`bitreverse(plain) XOR key[i % 10]`, i.e. plain = bitreverse(stored XOR key),
+`i` the byte's offset in the file, key `5atu6w4zaw` [C: the script
+`SongLoadFSB` (`scripts\guitar\guitar_song.qb`) passes this string to the
+bank loader; all 91 song banks then read "FSB3"]. The transform itself is
+FMOD's (XEX address of FMOD's decryption: TODO).
+
+**FSB3** (little-endian): `"FSB3"`, u32 samples, u32 sample-header bytes,
+u32 data bytes, u32 version 0x00030001, u32 mode; per sample: u16 header
+size, char name[30], u32 length (frames), u32 stored bytes, u32 loop start,
+u32 loop end, u32 mode (0x01100040 for the stems), s32 rate (44100), u16
+volume, s16 pan, u16 priority, u16 channels (2), f32 min / max distance, then
+header size - 80 bytes of XMA seek table; zeros pad the headers to a 16-byte
+boundary; the sample data follows back to back (24 + headers + data = file
+size) [C: all 92 banks, 718 samples].
+
+**Codec.** XMA1 (2048-byte packets whose header starts with a 4-bit sequence
+number) [C data: FFmpeg's xma1 decoder decodes all 718 samples to at least
+their header length, 18.2 hours; `gd04 --sfxtest`].
+
+**Stems.** Each song bank holds `<song>_guitar`, `<song>_rhythm`,
+`<song>_song` and (most) `<song>_preview`, stereo 44.1 kHz. There are no
+co-op banks: co-op plays the guitar and rhythm stems [C data].
+
+**.dat** (big-endian): u32 count, u32 size of the .fsb, then 20-byte entries:
+u32 QB key of the stem name, u32 sample index, 12 zero bytes [C data].
+
+## QScript bytecode
+
+`tools/qbscript.py` (opcode table; `check` tokenizes every script: all
+16,552 do, every byte accounted for). Numbers in the bytecode are
+little-endian. Highlights [C data unless noted]: `01` end of line, `16` name
+(u32 key), `17` int, `1a` float, `1b` string (u32 length incl. NUL), `1e`
+vector, `1f` pair, `07` `=`, `08` `.`, `0e` / `0f` `(` `)`, `03` / `04`
+`{` `}`, `05` / `06` `[` `]`, `2d` `<arg>`, `2c` `<...>`, `4b` `$` (global
+value), `20` begin, `21` repeat, `22` break, `24` end of script, `47`
+fast-if (u16 forward offset), `48` fast-else (u16), `27` elseif (two u16),
+`28` endif, `49` short jump (u16), `3c`..`3f` switch / endswitch / case /
+default, `4a` an inline QB struct (u16 length, aligned to 4, the struct in
+the QB file layout), `00` a no-op between lines [I]. The semantics and the
+interpreter's addresses: M3, `docs/qscript.md`.

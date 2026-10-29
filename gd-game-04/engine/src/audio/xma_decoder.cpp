@@ -44,12 +44,14 @@ struct FrameFree {
 
 bool available() { return avcodec_find_decoder(AV_CODEC_ID_XMA2) != nullptr; }
 
-bool decode(const uint8_t* data, size_t size, int rate, int channels, uint32_t frames, std::vector<float>& out,
-            std::string& error, uint32_t* decodedFrames) {
+namespace {
+
+bool decodeAny(int version, const uint8_t* data, size_t size, int rate, int channels, uint32_t frames, std::vector<float>& out,
+               std::string& error, uint32_t* decodedFrames) {
     out.clear();
     if (decodedFrames) *decodedFrames = 0;
-    const AVCodec* codec = avcodec_find_decoder(AV_CODEC_ID_XMA2);
-    if (!codec) return error = "this FFmpeg has no xma2 decoder", false;
+    const AVCodec* codec = avcodec_find_decoder(version == 1 ? AV_CODEC_ID_XMA1 : AV_CODEC_ID_XMA2);
+    if (!codec) return error = version == 1 ? "this FFmpeg has no xma1 decoder" : "this FFmpeg has no xma2 decoder", false;
     if (channels < 1 || channels > 2 || rate <= 0) return error = "unsupported XMA layout", false;
     std::unique_ptr<AVCodecContext, CodecFree> ctx(avcodec_alloc_context3(codec));
     if (!ctx) return error = "out of memory", false;
@@ -59,14 +61,24 @@ bool decode(const uint8_t* data, size_t size, int rate, int channels, uint32_t f
     av_channel_layout_default(&ctx->ch_layout, channels);
     // The XMA2WAVEFORMATEX extension (after cbSize, 34 bytes): one stream,
     // its channel mask; the rest (sample counts, block size) is not needed.
-    ctx->extradata = static_cast<uint8_t*>(av_mallocz(34 + AV_INPUT_BUFFER_PADDING_SIZE));
-    if (!ctx->extradata) return error = "out of memory", false;
-    ctx->extradata_size = 34;
-    put16(ctx->extradata, 1);
-    put32(ctx->extradata + 2, channels == 1 ? AV_CH_FRONT_CENTER : AV_CH_FRONT_LEFT | AV_CH_FRONT_RIGHT);
-    put32(ctx->extradata + 10, kPacket * 16);  // BytesPerBlock (XMA2's default block)
-    put16(ctx->extradata + 32, uint32_t((size + kPacket - 1) / kPacket));
-    if (int e = avcodec_open2(ctx.get(), codec, nullptr); e < 0) return error = "xma2: " + avError(e), false;
+    if (version == 1) {
+        // XMAWAVEFORMAT (FFmpeg reads the stream count at 4 and each
+        // 20-byte stream entry's channel count at +17): one stream.
+        ctx->extradata = static_cast<uint8_t*>(av_mallocz(28 + AV_INPUT_BUFFER_PADDING_SIZE));
+        if (!ctx->extradata) return error = "out of memory", false;
+        ctx->extradata_size = 28;
+        ctx->extradata[4] = 1;
+        ctx->extradata[8 + 17] = uint8_t(channels);
+    } else {
+        ctx->extradata = static_cast<uint8_t*>(av_mallocz(34 + AV_INPUT_BUFFER_PADDING_SIZE));
+        if (!ctx->extradata) return error = "out of memory", false;
+        ctx->extradata_size = 34;
+        put16(ctx->extradata, 1);
+        put32(ctx->extradata + 2, channels == 1 ? AV_CH_FRONT_CENTER : AV_CH_FRONT_LEFT | AV_CH_FRONT_RIGHT);
+        put32(ctx->extradata + 10, kPacket * 16);  // BytesPerBlock (XMA2's default block)
+        put16(ctx->extradata + 32, uint32_t((size + kPacket - 1) / kPacket));
+    }
+    if (int e = avcodec_open2(ctx.get(), codec, nullptr); e < 0) return error = "xma: " + avError(e), false;
 
     std::unique_ptr<AVPacket, PacketFree> pkt(av_packet_alloc());
     std::unique_ptr<AVFrame, FrameFree> frame(av_frame_alloc());
@@ -76,9 +88,9 @@ bool decode(const uint8_t* data, size_t size, int rate, int channels, uint32_t f
         for (;;) {
             int e = avcodec_receive_frame(ctx.get(), frame.get());
             if (e == AVERROR(EAGAIN) || e == AVERROR_EOF) return true;
-            if (e < 0) return error = "xma2: " + avError(e), false;
+            if (e < 0) return error = "xma: " + avError(e), false;
             const int n = frame->nb_samples, ch = frame->ch_layout.nb_channels;
-            if (frame->format != AV_SAMPLE_FMT_FLTP || ch != channels) return error = "xma2: unexpected output format", false;
+            if (frame->format != AV_SAMPLE_FMT_FLTP || ch != channels) return error = "xma: unexpected output format", false;
             const size_t at = out.size();
             out.resize(at + size_t(n) * size_t(ch));
             for (int i = 0; i < n; ++i)
@@ -95,15 +107,27 @@ bool decode(const uint8_t* data, size_t size, int rate, int channels, uint32_t f
         pkt->pts = pkt->dts = int64_t(out.size() / size_t(channels));
         int e = avcodec_send_packet(ctx.get(), pkt.get());
         av_packet_unref(pkt.get());
-        if (e < 0) return error = "xma2: " + avError(e) + " at packet " + std::to_string(at / kPacket), false;
+        if (e < 0) return error = "xma: " + avError(e) + " at packet " + std::to_string(at / kPacket), false;
         if (!drain()) return false;
     }
-    if (int e = avcodec_send_packet(ctx.get(), nullptr); e < 0 && e != AVERROR_EOF) return error = "xma2: " + avError(e), false;
+    if (int e = avcodec_send_packet(ctx.get(), nullptr); e < 0 && e != AVERROR_EOF) return error = "xma: " + avError(e), false;
     if (!drain()) return false;
     const size_t got = out.size() / size_t(channels);
     if (decodedFrames) *decodedFrames = uint32_t(got);
     if (frames) out.resize(size_t(frames) * size_t(channels), 0.0f);
     return true;
+}
+
+}  // namespace
+
+bool decode(const uint8_t* data, size_t size, int rate, int channels, uint32_t frames, std::vector<float>& out,
+            std::string& error, uint32_t* decodedFrames) {
+    return decodeAny(2, data, size, rate, channels, frames, out, error, decodedFrames);
+}
+
+bool decodeXma1(const uint8_t* data, size_t size, int rate, int channels, uint32_t frames, std::vector<float>& out,
+                std::string& error, uint32_t* decodedFrames) {
+    return decodeAny(1, data, size, rate, channels, frames, out, error, decodedFrames);
 }
 
 }  // namespace xma
@@ -119,6 +143,10 @@ bool decode(const uint8_t*, size_t, int, int, uint32_t, std::vector<float>& out,
     if (decodedFrames) *decodedFrames = 0;
     error = "built without FFmpeg (GD04_VIDEO OFF): no XMA decoder";
     return false;
+}
+
+bool decodeXma1(const uint8_t* d, size_t s, int r, int c, uint32_t f, std::vector<float>& out, std::string& error, uint32_t* df) {
+    return decode(d, s, r, c, f, out, error, df);
 }
 
 }  // namespace xma
