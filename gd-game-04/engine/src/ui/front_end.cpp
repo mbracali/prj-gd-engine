@@ -11,6 +11,7 @@
 #include "script/globals.h"
 #include "script/natives_core.h"
 #include "game/save.h"
+#include "ui/glitches.h"
 #include "ui/natives_game.h"
 #include "ui/natives_sound.h"
 
@@ -115,6 +116,12 @@ void FrontEnd::frame(Canvas& c, double dtMs) {
         const qb::Value* a = vm_->global(qbkey::key("ui_flow_manager_state"));
         const uint32_t st = a && a->arr && !a->arr->values.empty() ? a->arr->values[0].key : 0;
         if (st != lastFlowState_) lastFlowState_ = st, SDL_Log("flow: %s", qbkey::name(st).c_str());
+    }
+    // The Glitches, once the boot has loaded or created the save (the first main menu).
+    if (!glitchesDone_) {
+        const qb::Value* a = vm_->global(qbkey::key("ui_flow_manager_state"));
+        if (a && a->arr && !a->arr->values.empty() && a->arr->values[0].key == qbkey::key("main_menu_fs"))
+            glitchesDone_ = true, ensureGlitches(*vm_);
     }
     if (songPlaying) return;
     accum_ += dtMs;

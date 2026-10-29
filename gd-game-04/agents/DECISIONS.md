@@ -55,3 +55,16 @@ GH3's scripts wait (ui/port_screens.*). The main menu's "GAMEPADS" item
 before it, so GH3's own centred pills stay as the scripts lay them out.
 Undo: remove PortScreens::drawItems / itemAt and the Fret2 / Fret3 checks in
 App::menuAction.
+
+## D9 The Glitches unlock GH3's save-wide items save-wide (2026-10-29)
+
+Kickoff rule 11: The Glitches band has everything unlocked. GH3 keeps a
+band's career (tiers, songs, stars, cash) in its own global-tag sections
+(push_bandtags / pop_bandtags), but guitars, finishes, characters, outfits,
+styles, videos and the quick play / bonus song lists are save-wide tags. So
+the port names band slot 5 "The Glitches" (solo and co-op, unless the player
+already uses that slot), completes its career at every difficulty in its
+sections as GH3's own debug unlock does (playday_unlockall ->
+GlobalTags_UnlockAll), gives it $1,000,000, and unlocks the save-wide items
+for the whole save (ui/glitches.cpp, run at the first main menu). Undo:
+drop the save-wide loop in ensureGlitches. Test: --walktest glitches.

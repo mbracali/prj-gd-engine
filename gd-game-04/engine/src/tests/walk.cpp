@@ -64,6 +64,14 @@ Walk::Walk(const std::string& name) : name_(name) {
         steps_.push_back({"song_over", {}, 600000});
         steps_.push_back({"career_newspaper_fs", {C}, 30000});
         steps_.push_back({"career_setlist_fs", {}, 30000});
+    } else if (name == "glitches") {
+        // The Glitches: band slot 5, everything unlocked (ui/glitches.h): its
+        // name and cash, then chosen, its career's last tier complete.
+        steps_ = boot;
+        steps_.push_back({"main_menu_fs", {"check:tag:band5_info_p1_career.cash=1000000", C}, 10000});
+        steps_.push_back({"career_choose_band_fs", {D, D, D, D, C}, 20000});
+        steps_.push_back({"career_select_difficulty_fs", {Action::Down, Action::Down, Action::Down, C}, 20000});
+        steps_.push_back({"career_character_hub_fs", {"check:tag:careertier8.complete=1", "check:tag:career_song1_tier8.stars=5"}, 20000});
     } else if (name == "back") {
         steps_ = boot;
         steps_.push_back({"main_menu_fs", {D, D, C}, 10000});
@@ -261,6 +269,18 @@ bool Walk::act(const std::string& what, FrontEnd& fe, WalkHost& host) {
                 }
         }
         return fail("hovering did not focus " + rest("check:selected:"));
+    }
+    if (starts("check:tag:")) {
+        // check:tag:<tag>.<field>=<int>: a live global tag's field.
+        const std::string kv = rest("check:tag:");
+        const size_t dot = kv.find('.'), eq = kv.find('=');
+        const std::string tag = kv.substr(0, dot), field = kv.substr(dot + 1, eq - dot - 1);
+        const int want = std::atoi(kv.c_str() + eq + 1);
+        auto it = fe.vm().globalTags.find(qbkey::key(tag.c_str()));
+        const qb::Value* v = it == fe.vm().globalTags.end() ? nullptr : qs::Vm::param(it->second, qbkey::key(field.c_str()));
+        const int got = v ? int(v->type == qb::Type::Float ? v->f[0] : float(v->i)) : -999;
+        std::printf("  tags: %s.%s = %d\n", tag.c_str(), field.c_str(), got);
+        return got == want ? true : fail("tag " + kv + " is " + std::to_string(got));
     }
     if (starts("check:enhanced:")) {
         const std::string kv = rest("check:enhanced:");

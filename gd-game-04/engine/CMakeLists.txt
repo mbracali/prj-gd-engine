@@ -90,6 +90,7 @@ target_sources(gd04 PRIVATE
   src/tests/venuetest.cpp
   src/ui/song_screen.cpp
   src/ui/front_end.cpp
+  src/ui/glitches.cpp
   src/ui/natives_flow.cpp
   src/ui/natives_game.cpp
   src/ui/natives_sound.cpp

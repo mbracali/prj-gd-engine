@@ -76,4 +76,5 @@ private:
     std::unique_ptr<ui::UiSystem> ui_;
     double accum_ = 0;
     uint32_t lastFlowState_ = 0;
+    bool glitchesDone_ = false;
 };
