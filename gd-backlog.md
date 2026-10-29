@@ -126,6 +126,7 @@ Items every game module shares. Each game tracks its own work in its section.
 | GDALL-026 | Enhancement | ❌ | gd02 audio-latency calibration screen (TVs) | study_lg_tv, 3–5 days | Spike 10-28 |
 | GDALL-027 | Enhancement | ➖ later | Samsung Tizen (WASM web app only; the ISO is out of reach): Emscripten launcher, TV spike, LAN asset server | [spikes/study_samsung_tv.md](spikes/study_samsung_tv.md), low priority | Spike 10-28 |
 | GDALL-028 | Enhancement | ➖ later | 3DS feasibility spike (only if the owner asks) | [spikes/study_3ds.md](spikes/study_3ds.md) | Spike 10-28 |
+| GDALL-015 | Enhancement | 🟡 in progress | Enhanced menus paired: every Enhanced feature of gd-game-01 that fits GH2 implemented in gd-game-02 (same layout, names, defaults, behaviour), and the parity table kept in the guideline | `guidelines/universal_launcher.md`; agent-owned, branch feature/20261028-gd-games-03-04 | Owner 10-28 |
 
 
 ## gd-game-01: Guitar Hero (PlayStation 2)
@@ -604,14 +605,14 @@ universal launcher, not released on its own.
 
 | ID | Class | Status | Item | Notes | From |
 |---|---|---|---|---|---|
-| GD03-001 | Original | ❌ | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-03/agent-instructions.md`, [docs/adding-a-game.md](docs/adding-a-game.md) | New 10-28 |
+| GD03-001 | Original | 🟡 in progress | Full reimplementation (decompile + recompile, 100% match), milestones M0–M10 of the kickoff; the agent adds one row per milestone and per finding | [GD-GAME-03_KICKOFF.md](GD-GAME-03_KICKOFF.md); progress in `gd-game-03/agents/PROGRESS.md` | Owner 10-28 |
 
 
 ## gd-game-04: Guitar Hero III: Legends of Rock (Xbox 360)
 
 | ID | Class | Status | Item | Notes | From |
 |---|---|---|---|---|---|
-| GD04-001 | Original | ❌ | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-04/agent-instructions.md`, [docs/adding-a-game.md](docs/adding-a-game.md) | New 10-28 |
+| GD04-001 | Original | 🟡 in progress | Full reimplementation (decompile + recompile, 100% match), milestones M0–M10 of the kickoff; the agent adds one row per milestone and per finding | [GD-GAME-04_KICKOFF.md](GD-GAME-04_KICKOFF.md); progress in `gd-game-04/agents/PROGRESS.md` | Owner 10-28 |
 
 
 ## gd-game-05: Rock Band (Xbox 360)
