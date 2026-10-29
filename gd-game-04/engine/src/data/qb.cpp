@@ -222,6 +222,11 @@ Bytes lzss(const uint8_t* src, size_t n, size_t outSize) {
     return out;
 }
 
+std::shared_ptr<Struct> decodeStruct(const uint8_t* data, size_t size) {
+    Reader r(data, size);
+    return r.structAt(0);
+}
+
 File decode(const uint8_t* data, size_t size, size_t* unusedBytes) {
     if (size < 28) throw std::runtime_error("qb: too short");
     Reader r(data, size);

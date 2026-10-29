@@ -43,6 +43,7 @@ target_sources(gd04 PRIVATE
   src/data/qb.cpp
   src/data/qbkey.cpp
   src/data/random_file.cpp
+  src/data/scene.cpp
   src/data/xdvdfs.cpp
   src/devaids/menu_keys.cpp
   src/devaids/screenshot.cpp
@@ -59,8 +60,12 @@ target_sources(gd04 PRIVATE
   src/render/texture_codec.cpp
   src/game/chart.cpp
   src/game/song_db.cpp
+  src/script/bytecode.cpp
   src/script/globals.cpp
+  src/script/natives_core.cpp
+  src/script/vm.cpp
   src/tests/format_checks.cpp
+  src/tests/scripttest.cpp
   src/tests/selftest.cpp
   src/tests/selftest_play.cpp
   src/tests/sfxtest.cpp

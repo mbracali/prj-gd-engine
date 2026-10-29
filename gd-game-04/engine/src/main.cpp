@@ -22,6 +22,7 @@
 #include "platform/paths.h"
 #include "render/shadertest.h"
 #include "tests/formattest.h"
+#include "tests/scripttest.h"
 #include "tests/selftest.h"
 #include "tests/sfxtest.h"
 
@@ -37,6 +38,8 @@ void usage() {
         "  --no-fail            the rock meter cannot fail you\n"
         "  --formattest         parse every pak on the disc and every file in it to its end\n"
         "  --selftest           check the data (song list, every chart), auto-play every chart\n"
+        "  --scripttest         tokenize every script; run the boot script against the natives (GD04_UILOG=1 logs\n"
+        "                       every unhandled call once)\n"
         "  --sfxtest            decode every sound of every FMOD bank (GD04_SFXTEST_LIMIT=<n>: the first n)\n"
         "  --shadertest         compile every shader on this GPU and report (no game data; GD04_GLES=1: OpenGL ES)\n"
         "Environment: GD04_KEYS=\"<ms>:<key>,...\" scripted menu keys; GD04_SCREENSHOT=<file.bmp> with\n"
@@ -125,7 +128,7 @@ namespace {
 
 int run(int argc, char** argv) {
     Options opt;
-    bool formattest = false, shadertest = false, selftest = false, sfxtest = false;
+    bool formattest = false, shadertest = false, selftest = false, sfxtest = false, scripttest = false;
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
         auto value = [&]() -> std::string {
@@ -142,6 +145,7 @@ int run(int argc, char** argv) {
         else if (a == "--formattest") formattest = true;
         else if (a == "--selftest") selftest = true;
         else if (a == "--sfxtest") sfxtest = true;
+        else if (a == "--scripttest") scripttest = true;
         else if (a == "--shadertest") shadertest = true;
         else if (a == "--walktest") opt.walk = value();
         else if (a == "--help" || a == "-h") { usage(); return 0; }
@@ -149,13 +153,14 @@ int run(int argc, char** argv) {
         else if (a.rfind("-psn_", 0) != 0) opt.dataPath = a;
     }
     if (shadertest) return runShaderTest();
-    if ((formattest || selftest || sfxtest || !opt.walk.empty()) && opt.dataPath.empty()) {
+    if ((formattest || selftest || sfxtest || scripttest || !opt.walk.empty()) && opt.dataPath.empty()) {
         usage();
         return 2;
     }
     if (formattest) return runFormatTest(opt.dataPath);
     if (selftest) return runSelfTest(opt.dataPath);
     if (sfxtest) return runSfxTest(opt.dataPath);
+    if (scripttest) return runScriptTest(opt.dataPath);
     return runApp(opt);
 }
 

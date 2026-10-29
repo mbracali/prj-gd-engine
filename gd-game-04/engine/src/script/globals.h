@@ -27,6 +27,8 @@ public:
         auto it = values_.find(name);
         return it == values_.end() ? nullptr : &it->second;
     }
+    // The global `name`, created (empty) if missing: writes by `change`.
+    qb::Value* ensure(uint32_t name) { return &values_[name]; }
     size_t size() const { return values_.size(); }
     size_t files() const { return files_; }
 

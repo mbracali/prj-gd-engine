@@ -92,6 +92,10 @@ struct File {
 // (the format tests require 0).
 File decode(const uint8_t* data, size_t size, size_t* unusedBytes = nullptr);
 
+// A struct in the QB layout at the start of `data` (offsets relative to
+// it): the scripts' inline structs. Throws std::runtime_error.
+std::shared_ptr<Struct> decodeStruct(const uint8_t* data, size_t size);
+
 // Neversoft's LZSS, as the scripts are stored (qb.py lzss).
 Bytes lzss(const uint8_t* src, size_t size, size_t outSize);
 

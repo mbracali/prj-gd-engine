@@ -7,6 +7,7 @@
 
 #include "data/qb.h"
 #include "data/qbkey.h"
+#include "data/scene.h"
 
 namespace {
 
@@ -39,12 +40,31 @@ bool checkQb(const Pak& pak, const PakEntry& e, FormatStats& s, std::string& wha
     }
 }
 
+// Scenes, models, skins (one format) and Havok collision (data/scene.h).
+bool checkScene(const Pak& pak, const PakEntry& e, std::string& what) {
+    auto [p, n] = pak.data(e);
+    try {
+        if (e.type == qbkey::key(".hkc")) scene::parseHavok(p, n);
+        else
+            scene::parse(p, n, e.type == qbkey::key(".skin") ? scene::Kind::Skin
+                               : e.type == qbkey::key(".mdl") ? scene::Kind::Mdl
+                                                              : scene::Kind::Scn);
+        return true;
+    } catch (const std::exception& ex) {
+        what = ex.what();
+        return false;
+    }
+}
+
 }  // namespace
 
 bool checkPakFile(const Pak& pak, const PakEntry& e, FormatStats& s, std::string& what) {
     const std::string type = qbkey::name(e.type);
     bool ok = true;
     if (e.type == kQb || e.type == kMqb || e.type == kSqb) ok = checkQb(pak, e, s, what);
+    else if (e.type == qbkey::key(".scn") || e.type == qbkey::key(".mdl") || e.type == qbkey::key(".skin") ||
+             e.type == qbkey::key(".hkc"))
+        ok = checkScene(pak, e, what);
     else {
         ++s.notDecoded[type];
         return true;
