@@ -80,3 +80,8 @@ Only one so far: the wall clock (`SDL_GetTicksNS`), used by `GD04_KEYS`,
 `GD04_SCREENSHOT_AT` and `GD04_QUIT_AFTER` (ms since the main loop
 started). The song clock, the audio clock and the sfx log arrive with M2;
 each one's offset is documented here and in `docs/` when it does.
+
+Note (z-order research, 2026-10-29): screen-element z_priority rules were read
+with Ghidra headless (`DumpAsm.java`, `ReadF.java`) plus the existing
+`ghidra/analysis/decomp` export; REA was not used (it cannot open the XEX).
+Notes in `agents/scratch/zorder_spec.md`.

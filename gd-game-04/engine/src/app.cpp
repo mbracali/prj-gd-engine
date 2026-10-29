@@ -5,6 +5,8 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <cmath>
+#include <filesystem>
 #include <exception>
 #include <cstdio>
 #include <memory>
@@ -19,6 +21,8 @@
 #include "script/globals.h"
 #include "tests/walk.h"
 #include "ui/front_end.h"
+#include "ui/port_screens.h"
+#include "ui/port_settings.h"
 #include "ui/song_screen.h"
 #include "video/movie_player.h"
 #include "devaids/menu_keys.h"
@@ -44,15 +48,37 @@ bool envOn(const char* name) {
     return v && *v && std::string(v) != "0";
 }
 
-class App {
+class App : public WalkHost {
 public:
     explicit App(const Options& o) : options_(o) {}
     int run();
+
+    // WalkHost (the port's walks).
+    void walkMouse(float x, float y, int button) override { menuMouse(x, y, button); }
+    void walkKey(int keycode) override;
+    PortScreens* walkPorts() override { return ports_.get(); }
+    Input& walkInput() override { return input_; }
+    std::string walkSaveDir() override { return saveDir_; }
+    std::string walkEnhanced(const std::string& key) override { return enhanced_.get(key); }
 
 private:
     bool loadData(const std::string& path);
     void handleEvent(const SDL_Event& e);
     void frame();
+    // -- the port's own screens and the mouse (ui/port_screens.h)
+    // An action for the menus: the port's open screen, its entry keys on
+    // GH3's main menu (yellow: GAMEPADS) and options (blue: ENHANCED), else
+    // GH3's front end.
+    void menuAction(const InputEvent& ev);
+    // The mouse in menu units: button 0 a move, 1 a left click, 3 a right click.
+    void menuMouse(float x, float y, int button);
+    bool menuMouseAllowed() const;
+    void updatePointer();
+    // An Enhanced setting changed ("" : all of them, at start): applied at once.
+    void applyEnhanced(const std::string& key);
+    // Drawn over every frame: the FPS counter (Enhanced > Show FPS Counter).
+    void overlay();
+    bool windowToMenu(float wx, float wy, float& mx, float& my) const;
 
     Options options_;
     SDL_Window* window_ = nullptr;
@@ -74,7 +100,129 @@ private:
     int escapes_ = 0;  // Esc three times on the first screen quits (guidelines)
     uint64_t startNs_ = 0;
     std::unique_ptr<MenuKeys> keys_;
+    EnhancedStore enhanced_;
+    std::unique_ptr<PortScreens> ports_;
+    std::string saveDir_;               // enhanced.json and controllers.json ("" : the pref dir)
+    double mouseMovedMs_ = -1e9;        // the pointer shows for 3 s after the mouse moves
+    bool pointerShown_ = true;
+    uint64_t fpsStart_ = 0;
+    int fpsFrames_ = 0;
+    double fps_ = 0;
 };
+
+void App::walkKey(int keycode) {
+    // A real key through the input layer (bindings, capture), as SDL would send it.
+    for (bool down : {true, false}) {
+        SDL_Event e{};
+        e.type = down ? SDL_EVENT_KEY_DOWN : SDL_EVENT_KEY_UP;
+        e.key.timestamp = SDL_GetTicksNS();
+        e.key.key = SDL_Keycode(keycode);
+        e.key.down = down;
+        e.key.windowID = SDL_GetWindowID(window_);
+        handleEvent(e);
+    }
+}
+
+bool App::windowToMenu(float wx, float wy, float& mx, float& my) const {
+    int x, y, w, h;
+    const_cast<Canvas&>(canvas_).renderer().pictureRect(x, y, w, h);
+    const float density = SDL_GetWindowPixelDensity(window_);
+    mx = (wx * density - float(x)) / float(w) * kScreenW;
+    my = (wy * density - float(y)) / float(h) * kScreenH;
+    return mx >= 0 && my >= 0 && mx <= kScreenW && my <= kScreenH;
+}
+
+bool App::menuMouseAllowed() const {
+    // Enhanced > Enable Mouse Selection; the menus only (a song takes no mouse).
+    return front_ && !song_ && !front_->songPlaying && enhanced_.get("mouse") != "off";
+}
+
+void App::menuMouse(float x, float y, int button) {
+    if (!menuMouseAllowed()) return;
+    if (ports_ && ports_->isOpen()) return ports_->mouse(x, y, button);
+    const std::string state = front_->flowState();
+    if (button == 3) return menuAction(InputEvent{Action::Back, true, SDL_GetTicksNS(), ControllerMode::Guitar, 0});
+    if (ports_) {
+        const std::string item = ports_->itemAt(x, y, state);
+        if (!item.empty()) {
+            if (button == 1) ports_->open(item == "gamepads" ? PortScreens::Id::Gamepads : PortScreens::Id::Enhanced), front_->soundEvent("ui_sfx_select");
+            return;
+        }
+    }
+    // GH3's help bar: SELECT and BACK are clickable.
+    const std::string help = front_->ui().helperAt(x, y);
+    if (!help.empty()) {
+        if (button == 1 && (help == "SELECT" || help == "BACK"))
+            menuAction(InputEvent{help == "BACK" ? Action::Back : Action::Confirm, true, SDL_GetTicksNS(), ControllerMode::Guitar, 0});
+        return;
+    }
+    // GH3's menus: a hover focuses (not on a list, which takes clicks only),
+    // a click focuses and selects.
+    bool list = false;
+    if (!front_->ui().menuAt(x, y, false, &list)) return;
+    if (button == 1 || !list) front_->ui().menuAt(x, y, true);
+    if (button == 1) front_->handle(InputEvent{Action::Confirm, true, SDL_GetTicksNS(), ControllerMode::Guitar, 0});
+}
+
+void App::menuAction(const InputEvent& ev) {
+    if (ports_ && ports_->isOpen()) return ports_->handle(ev);
+    if (ports_ && ev.down) {
+        const std::string state = front_->flowState();
+        // The port's screens from GH3's (guidelines/universal_launcher.md;
+        // agents/DECISIONS.md): yellow on the main menu, blue on the options.
+        if (state == "main_menu_fs" && ev.action == Action::Fret2) {
+            front_->soundEvent("ui_sfx_select");
+            return ports_->open(PortScreens::Id::Gamepads);
+        }
+        if (state == "options_select_option_fs" && ev.action == Action::Fret3) {
+            front_->soundEvent("ui_sfx_select");
+            return ports_->open(PortScreens::Id::Enhanced);
+        }
+    }
+    front_->handle(ev);
+}
+
+void App::updatePointer() {
+    // The pointer shows when the mouse moves, hides after 3 s without
+    // movement, on a key or a button, and in a song.
+    const bool show = menuMouseAllowed() && double(SDL_GetTicksNS()) / 1e6 - mouseMovedMs_ < 3000;
+    if (show != pointerShown_) {
+        if (show) SDL_ShowCursor();
+        else SDL_HideCursor();
+        pointerShown_ = show;
+    }
+}
+
+void App::applyEnhanced(const std::string& key) {
+    auto is = [&](const char* k) { return key.empty() || key == k; };
+    if (is("screen_mode") && window_) {
+        const std::string m = enhanced_.get("screen_mode");
+        if (m == "windowed") {
+            SDL_SetWindowFullscreen(window_, false);
+        } else {
+            // Full Screen: the desktop's mode, exclusive; No Border: a window covering the screen.
+            const SDL_DisplayMode* dm = m == "fullscreen" ? SDL_GetDesktopDisplayMode(SDL_GetDisplayForWindow(window_)) : nullptr;
+            SDL_SetWindowFullscreenMode(window_, dm);
+            SDL_SetWindowFullscreen(window_, true);
+        }
+    }
+    if (is("rockband")) input_.setRockBand(enhanced_.on("rockband"));
+    if (is("xinput")) input_.setGamepadPlay(enhanced_.on("xinput"));
+    if (is("touch")) input_.setTouch(false);  // touch controls are not built yet (greyed in Enhanced)
+    if (is("mouse")) mouseMovedMs_ = -1e9;
+}
+
+void App::overlay() {
+    const uint64_t now = SDL_GetTicksNS();
+    ++fpsFrames_;
+    if (!fpsStart_) fpsStart_ = now;
+    if (now - fpsStart_ >= 500'000'000ull) fps_ = fpsFrames_ * 1e9 / double(now - fpsStart_), fpsStart_ = now, fpsFrames_ = 0;
+    if (enhanced_.on("fps_counter") && fps_ > 0) {
+        const std::string t = std::to_string(int(std::lround(fps_))) + " FPS";
+        canvas_.fillRect(8, kScreenH - 30, float(t.size()) * 16 + 12, 24, SDL_Color{0, 0, 0, 150});
+        canvas_.text(14, kScreenH - 26, 2, SDL_Color{120, 255, 120, 255}, t);
+    }
+}
 
 bool App::loadData(const std::string& path) {
     std::string error;
@@ -102,16 +250,44 @@ bool App::loadData(const std::string& path) {
 
 void App::handleEvent(const SDL_Event& e) {
     if (e.type == SDL_EVENT_QUIT) running_ = false;
+    // The mouse in the menus (gd01's): hovering focuses (only while the window
+    // has focus), a left click selects, a right click is Back, the wheel moves.
+    if (front_ && (e.type == SDL_EVENT_MOUSE_MOTION || e.type == SDL_EVENT_MOUSE_BUTTON_DOWN) &&
+        (e.type == SDL_EVENT_MOUSE_MOTION ? e.motion.which : e.button.which) != SDL_TOUCH_MOUSEID) {
+        const bool click = e.type == SDL_EVENT_MOUSE_BUTTON_DOWN;
+        float mx, my;
+        const bool inside = windowToMenu(click ? e.button.x : e.motion.x, click ? e.button.y : e.motion.y, mx, my);
+        if (menuMouseAllowed()) mouseMovedMs_ = double(SDL_GetTicksNS()) / 1e6;
+        const bool focused = (SDL_GetWindowFlags(window_) & SDL_WINDOW_INPUT_FOCUS) != 0;
+        if (inside && (click || focused) && (!click || e.button.button == SDL_BUTTON_LEFT || e.button.button == SDL_BUTTON_RIGHT))
+            menuMouse(mx, my, !click ? 0 : e.button.button == SDL_BUTTON_LEFT ? 1 : 3);
+    } else if (front_ && e.type == SDL_EVENT_MOUSE_WHEEL && e.wheel.which != SDL_TOUCH_MOUSEID && e.wheel.y != 0 && menuMouseAllowed()) {
+        mouseMovedMs_ = double(SDL_GetTicksNS()) / 1e6;
+        menuAction(InputEvent{e.wheel.y > 0 ? Action::Up : Action::Down, true, SDL_GetTicksNS(), ControllerMode::Guitar, 0});
+    } else if (e.type == SDL_EVENT_KEY_DOWN || e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
+        mouseMovedMs_ = -1e9;  // a key or a button hides the pointer
+    }
+    // A joypad's Y (its yellow face button) opens GAMEPADS on the main menu.
+    if (front_ && ports_ && !song_ && !ports_->isOpen() && e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN &&
+        e.gbutton.button == SDL_GAMEPAD_BUTTON_NORTH && input_.joypadDevice(e.gbutton.which) && front_->flowState() == "main_menu_fs" &&
+        !input_.capturing()) {
+        front_->soundEvent("ui_sfx_select");
+        ports_->open(PortScreens::Id::Gamepads);
+        std::vector<InputEvent> drop;
+        input_.handle(e, drop);  // the input layer still sees it (its state), the menus do not
+        return;
+    }
     std::vector<InputEvent> events;
     input_.handle(e, events);
     for (const InputEvent& ev : events) {
+        if (walk_ && ev.down) walk_->countPress(ev.action);
         if (song_) {
             if (ev.action == Action::Back && ev.down) running_ = false;  // pause comes with the menus (M3)
             song_->handle(ev);
             continue;
         }
         if (front_) {
-            front_->handle(ev);
+            menuAction(ev);
             continue;
         }
         if (!ev.down) continue;
@@ -128,15 +304,21 @@ void App::frame() {
     if (song_) {
         canvas_.begin(SDL_Color{0, 0, 0, 255});
         const bool more = song_->frame(canvas_, mixer_, textures_.get());
+        if (front_) front_->songClockMs = song_->songMs();
+        overlay();
         captureMenuScreenshot(canvas_, double(SDL_GetTicksNS() - startNs_) / 1e6, song_->songMs());
         canvas_.end();
         if (!more && front_) {
             // Back to GH3's own flow (results, setlist).
-            const bool won = !song_->failed();
+            FrontEnd::SongResult r;
+            const PlayerStats& st = song_->stats();
+            r.won = !song_->failed(), r.score = st.score, r.notesHit = st.notesHit, r.totalNotes = st.totalNotes;
+            r.bestRun = st.bestRun, r.phrasesHit = st.phrasesCaptured, r.phrasesTotal = song_->phraseCount();
+            r.baseScore = song_->baseScore(), r.health = st.health, r.starPower = st.starPower;
             song_.reset();
             mixer_.stop();
             input_.setInGame(false);
-            front_->songEnded(won);
+            front_->songEnded(r);
             if (walk_) ++walk_->songsEnded;
             return;
         }
@@ -156,11 +338,13 @@ void App::frame() {
             if (s.checksum == front_->songRequest.song) info = &s;
         std::string err;
         song_ = std::make_unique<SongScreen>();
-        if (!info || !song_->start(*disc_, *globals_, *info, front_->songRequest.difficulty, options_.autoplay || walk_ ||
-                                   SDL_getenv("GD04_AUTOPLAY"), options_.noFail, mixer_, err, textures_.get())) {
+        // Enhanced > CHEATS: Autoplay and No Fail Mode (as --autoplay / --no-fail).
+        const bool autoplay = options_.autoplay || walk_ || SDL_getenv("GD04_AUTOPLAY") || enhanced_.on("autoplay");
+        const bool noFail = options_.noFail || enhanced_.on("no_fail");
+        if (!info || !song_->start(*disc_, *globals_, *info, front_->songRequest.difficulty, autoplay, noFail, mixer_, err, textures_.get())) {
             SDL_Log("song: cannot start %s: %s", qbkey::name(front_->songRequest.song).c_str(), err.c_str());
             song_.reset();
-            front_->songEnded(false);
+            front_->songEnded(FrontEnd::SongResult{});
         } else {
             if (walk_) {
                 song_->walkEndMs_ = options_.walk == "lose" ? -1 : 20000.0;
@@ -189,7 +373,16 @@ void App::frame() {
         const double dt = lastFrameNs_ ? double(nowNs - lastFrameNs_) / 1e6 : 0;
         lastFrameNs_ = nowNs;
         canvas_.begin(SDL_Color{0, 0, 0, 255});
-        front_->frame(canvas_, dt);
+        if (ports_ && ports_->isOpen()) {
+            // The port's screen instead of GH3's, whose scripts wait meanwhile.
+            ports_->update(dt);
+            ports_->draw(canvas_);
+            front_->sfx.update();
+        } else {
+            front_->frame(canvas_, dt);
+            if (ports_) ports_->drawItems(canvas_, front_->flowState());
+        }
+        overlay();
         captureMenuScreenshot(canvas_, double(nowNs - startNs_) / 1e6, -1);
         canvas_.end();
         return;
@@ -232,6 +425,18 @@ int App::run() {
     }
     if (!mixer_.open(error)) SDL_Log("audio: %s (continuing without sound)", error.c_str());
     if (const char* k = SDL_getenv("GD04_KEYS")) keys_ = std::make_unique<MenuKeys>(k);
+    // Walks keep their own settings (enhanced.json, controllers.json), fresh
+    // each run, out of the player's.
+    if (!options_.walk.empty() && !prefDir().empty()) {
+        saveDir_ = prefDir() + "walktest/";
+        std::error_code ec;
+        std::filesystem::remove(saveDir_ + "enhanced.json", ec);
+        std::filesystem::remove(saveDir_ + "controllers.json", ec);
+        std::filesystem::create_directories(saveDir_, ec);
+        input_.setSaveDir(saveDir_);
+    }
+    enhanced_.load(saveDir_.empty() ? prefDir() : saveDir_);
+    applyEnhanced("");
 
     const std::string path = options_.dataPath.empty() ? loadRememberedPath() : options_.dataPath;
     if (!path.empty()) loadData(path);
@@ -247,7 +452,8 @@ int App::run() {
         std::fprintf(stderr, "%s: %s\n", app::kProgram, message_.empty() ? "no disc image given" : message_.c_str());
         running_ = false, exitCode_ = 2;
     } else if (!options_.walk.empty() && !(walk_ = std::make_unique<Walk>(options_.walk))->known()) {
-        std::fprintf(stderr, "%s: unknown walk '%s' (quickplay, lose, back, boot)\n", app::kProgram, options_.walk.c_str());
+        std::fprintf(stderr, "%s: unknown walk '%s' (quickplay, lose, back, boot, mouse, gamepads, stickyaxis)\n", app::kProgram,
+                     options_.walk.c_str());
         running_ = false, exitCode_ = 2;
     } else if (!options_.song.empty()) {
         const SongInfo* s = songs_.find(options_.song);
@@ -270,6 +476,8 @@ int App::run() {
         if (!front_->start()) {
             SDL_Log("front end: guitar_startup did not start");
             front_.reset();
+        } else {
+            ports_ = std::make_unique<PortScreens>(input_, *front_, enhanced_, [this](const std::string& k) { applyEnhanced(k); });
         }
     }
     const bool stats = envOn("GD04_STATS");
@@ -285,6 +493,15 @@ int App::run() {
         if (keys_) {
             for (const MenuKeys::Key& k : keys_->due(double(frameStart - startNs_) / 1e6)) {
                 // GD04_KEYS: a scripted button as the input layer would report it.
+                if (k.mouse) {  // the mouse, as its events would (menu units)
+                    if (k.mouse >= 4) menuAction(InputEvent{k.mouse == 4 ? Action::Up : Action::Down, true, SDL_GetTicksNS(), ControllerMode::Guitar, 0});
+                    else menuMouse(k.mx, k.my, k.mouse == 2 ? 1 : k.mouse == 3 ? 3 : 0);
+                    continue;
+                }
+                if (k.keycode) {  // a real key through the input layer
+                    walkKey(k.keycode);
+                    continue;
+                }
                 Action a;
                 switch (k.button) {
                 case 6: a = Action::Confirm; break;
@@ -304,18 +521,19 @@ int App::run() {
                     if ((k.edge == 1 && edge == -1) || (k.edge == -1 && edge == 1)) continue;
                     InputEvent ev{a, edge == 1, SDL_GetTicksNS(), ControllerMode::Guitar, k.player};
                     if (song_) song_->handle(ev);
-                    else if (front_) front_->handle(ev);
+                    else if (front_) menuAction(ev);
                 }
             }
         }
         if (!disc_)
             if (std::string picked = picker_.takePicked(); !picked.empty()) loadData(picked);
         if (walk_ && front_) {
-            for (Action a : walk_->update(*front_, front_->songPlaying, double(frameStart - startNs_) / 1e6))
+            for (Action a : walk_->update(*front_, front_->songPlaying, double(frameStart - startNs_) / 1e6, this,
+                                          ports_ ? ports_->current() : std::string()))
                 for (bool down : {true, false}) {
                     InputEvent ev{a, down, SDL_GetTicksNS(), ControllerMode::Guitar, 0};
                     if (song_) song_->handle(ev);
-                    else front_->handle(ev);
+                    else menuAction(ev);
                 }
             if (walk_->done() || walk_->failed()) {
                 exitCode_ = walk_->finish(*front_);
@@ -325,8 +543,11 @@ int App::run() {
         if (!running_) break;
         frame();
         if (quitAfter && double(SDL_GetTicksNS() - startNs_) / 1e6 >= std::atof(quitAfter)) running_ = false;
+        updatePointer();
+        // Enhanced > In-Game Max FPS (the menus keep the engine's own cap).
+        const uint64_t minNs = song_ ? uint64_t(1e9 / std::max(30.0, std::atof(enhanced_.get("max_fps").c_str()))) : kMinFrameNs;
         const uint64_t spent = SDL_GetTicksNS() - frameStart;
-        if (spent < kMinFrameNs) SDL_DelayNS(kMinFrameNs - spent);
+        if (spent < minNs) SDL_DelayNS(minNs - spent);
         if (stats) {
             ++statsFrames;
             const uint64_t now = SDL_GetTicksNS();
@@ -337,6 +558,7 @@ int App::run() {
         }
     }
     song_.reset();
+    ports_.reset();
     front_.reset();
     textures_.reset();
     mixer_.stop();

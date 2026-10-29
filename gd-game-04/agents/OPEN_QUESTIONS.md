@@ -14,3 +14,6 @@
    0x20: the id 0x20d40671 came out 0x00d40671 (and 1079 of 16552 scripts
    differed, mostly `begin` read as `end`). The element lookup compares all
    32 bits (0x820EC088) [C Ghidra].
+5. **Stars.** GH3 fills player1_status.stars in C; the port gives 3 / 4 / 5
+   stars at score / base score < 2.0 / >= 2.0 / >= 2.8 and base score = 50
+   per gem [I]. Needs the XEX's rule (and how sustains count in base_score).

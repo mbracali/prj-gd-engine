@@ -75,15 +75,40 @@ void FrontEnd::handle(const InputEvent& e) {
     if (ev) ui_->padEvent(qbkey::key(ev), e.player);
 }
 
-void FrontEnd::songEnded(bool won) {
+void FrontEnd::songEnded(const SongResult& r) {
     songPlaying = false;
-    qb::Struct p;
-    qs::Vm::set(p, qbkey::key("action"), qs::Vm::makeKey(qbkey::key(won ? "win_song" : "fail_song")));
-    vm_->spawn(qbkey::key("ui_flow_manager_respond_to_action"), p);
+    // player1_status as GH3's gem scroller leaves it [C data: the fields
+    // GuitarEvent_SongWon_Spawned and Progression_SongWon read]; stars by the
+    // score over the base score [I: thresholds, OPEN_QUESTIONS].
+    const uint32_t ps = qbkey::key("player1_status");
+    if (const qb::Value* cur = vm_->global(ps); cur && cur->st) {
+        qb::Value v = *cur;
+        v.st = std::make_shared<qb::Struct>(*cur->st);
+        const double ratio = r.baseScore > 0 ? double(r.score) / r.baseScore : 0;
+        const int stars = ratio >= 2.8 ? 5 : ratio >= 2.0 ? 4 : 3;
+        using qs::Vm;
+        Vm::set(*v.st, qbkey::key("score"), Vm::makeFloat(float(r.score)));
+        Vm::set(*v.st, qbkey::key("notes_hit"), Vm::makeInt(r.notesHit));
+        Vm::set(*v.st, qbkey::key("total_notes"), Vm::makeInt(r.totalNotes));
+        Vm::set(*v.st, qbkey::key("max_notes"), Vm::makeInt(r.totalNotes));
+        Vm::set(*v.st, qbkey::key("best_run"), Vm::makeInt(r.bestRun));
+        Vm::set(*v.st, qbkey::key("base_score"), Vm::makeFloat(float(r.baseScore)));
+        Vm::set(*v.st, qbkey::key("stars"), Vm::makeInt(r.won ? stars : 0));
+        Vm::set(*v.st, qbkey::key("sp_phrases_hit"), Vm::makeInt(r.phrasesHit));
+        Vm::set(*v.st, qbkey::key("sp_phrases_total"), Vm::makeInt(r.phrasesTotal));
+        Vm::set(*v.st, qbkey::key("current_health"), Vm::makeFloat(r.health));
+        Vm::set(*v.st, qbkey::key("star_power_amount"), Vm::makeFloat(r.starPower));
+        vm_->setGlobal(ps, v);
+    }
+    // GH3's own end of song: You Rock / Song Failed, progression (scores,
+    // stars, unlocks, encores, bosses), then the flow's action [C scripts
+    // GuitarEvent_SongWon / GuitarEvent_SongFailed].
+    vm_->spawn(qbkey::key(r.won ? "GuitarEvent_SongWon" : "GuitarEvent_SongFailed"), qb::Struct{});
 }
 
 void FrontEnd::frame(Canvas& c, double dtMs) {
     sfx.update();
+    if (!songPlaying && !flow.paused) songClockMs += dtMs;
     // GD04_FLOWLOG=1: each flow state player 1 enters (ui_flow_manager_state[0]).
     static const bool flowLog = SDL_getenv("GD04_FLOWLOG") != nullptr;
     if (flowLog) {
@@ -102,4 +127,16 @@ void FrontEnd::frame(Canvas& c, double dtMs) {
     }
     if (accum_ > kStepMs * 8) accum_ = 0;
     ui_->draw(c);
+}
+
+std::string FrontEnd::flowState() const {
+    const qb::Value* a = vm_->global(qbkey::key("ui_flow_manager_state"));
+    if (!a || a->type != qb::Type::Array || !a->arr || a->arr->values.empty()) return "";
+    return qbkey::name(a->arr->values[0].key);
+}
+
+void FrontEnd::soundEvent(const char* event) {
+    qb::Struct p;
+    qs::Vm::set(p, qbkey::key("event"), qs::Vm::makeKey(qbkey::key(event)));
+    vm_->run(qbkey::key("SoundEvent"), p);
 }

@@ -113,12 +113,8 @@ bool exists() {
     return !p.empty() && std::filesystem::exists(fsPath(p), ec);
 }
 
-bool write(const std::unordered_map<uint32_t, qb::Struct>& tags, std::string& error) {
-    const std::string p = path();
-    if (p.empty()) return error = "no save folder", false;
-    Json root = Json::object();
-    root.set("format", Json::string(kFormat));
-    root.set("version", Json::number(kVersion));
+namespace {
+Json tagsJson(const Tags& tags) {
     Json t = Json::object();
     for (const auto& [k, st] : tags) {
         qb::Value v;
@@ -128,7 +124,33 @@ bool write(const std::unordered_map<uint32_t, qb::Struct>& tags, std::string& er
         if (const std::string* n = qbkey::names().find(k)) e.set("name", Json::string(*n));
         t.set(hex(k), e);
     }
-    root.set("tags", t);
+    return t;
+}
+bool tagsFrom(const Json& j, Tags& out, std::string& error) {
+    for (const auto& [k, e] : j.o) {
+        const qb::Value v = fromJson(e);
+        if (v.type != qb::Type::Struct || !v.st) return error = "a tag is not a struct", false;
+        out[parseHex(k)] = *v.st;
+    }
+    return true;
+}
+}  // namespace
+
+bool write(const Tags& tags, const Sections& sections, std::string& error) {
+    const std::string p = path();
+    if (p.empty()) return error = "no save folder", false;
+    Json root = Json::object();
+    root.set("format", Json::string(kFormat));
+    root.set("version", Json::number(kVersion));
+    root.set("tags", tagsJson(tags));
+    Json secs = Json::object();
+    for (const auto& [k, t] : sections) {
+        Json e = Json::object();
+        if (const std::string* n = qbkey::names().find(k)) e.set("name", Json::string(*n));
+        e.set("tags", tagsJson(t));
+        secs.set(hex(k), e);
+    }
+    root.set("sections", secs);
     const std::string tmp = p + ".tmp";
     {
         std::ofstream f(fsPath(tmp), std::ios::binary);
@@ -144,7 +166,7 @@ bool write(const std::unordered_map<uint32_t, qb::Struct>& tags, std::string& er
     return true;
 }
 
-bool read(std::unordered_map<uint32_t, qb::Struct>& tags, std::string& error) {
+bool read(Tags& tags, Sections& sections, std::string& error) {
     const std::string p = path();
     std::ifstream f(fsPath(p), std::ios::binary);
     if (!f) return error = "no save", false;
@@ -154,13 +176,13 @@ bool read(std::unordered_map<uint32_t, qb::Struct>& tags, std::string& error) {
         const Json root = Json::parse(ss.str());
         if (root["format"].str() != kFormat) return error = "not a gd04 save", false;
         if (root["version"].num() > kVersion) return error = "a newer save version", false;
-        std::unordered_map<uint32_t, qb::Struct> out;
-        for (const auto& [k, e] : root["tags"].o) {
-            const qb::Value v = fromJson(e);
-            if (v.type != qb::Type::Struct || !v.st) return error = "a tag is not a struct", false;
-            out[parseHex(k)] = *v.st;
-        }
+        Tags out;
+        if (!tagsFrom(root["tags"], out, error)) return false;
+        Sections secs;
+        for (const auto& [k, e] : root["sections"].o)
+            if (!tagsFrom(e["tags"], secs[parseHex(k)], error)) return false;
         tags = std::move(out);
+        sections = std::move(secs);
         return true;
     } catch (const std::exception& ex) {
         error = ex.what();

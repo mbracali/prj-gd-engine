@@ -258,6 +258,19 @@ struct Exec {
             if (i < t.size() && t[i].op == kDot) {
                 ++i;
                 skipNops();
+                // Between two pairs / vectors `.` is their dot product
+                // ("<arg> dims . pair:(1.0, 0.0)" takes the x: fit_text_in_rectangle,
+                // user_control_build_pills) [I: the results only make sense so].
+                auto vec = [](const qb::Value& x) { return x.type == qb::Type::Pair || x.type == qb::Type::Vector; };
+                if (vec(v) && i < t.size() && t[i].op != kName) {
+                    const qb::Value w = primary();
+                    if (vec(w)) {
+                        v = Vm::makeFloat(v.f[0] * w.f[0] + v.f[1] * w.f[1] + (v.type == qb::Type::Vector && w.type == qb::Type::Vector ? v.f[2] * w.f[2] : 0));
+                        continue;
+                    }
+                    if (w.type == qb::Type::Key || w.type == qb::Type::KeyPtr) v = member(v, w.key, vm);
+                    continue;
+                }
                 if (i < t.size() && t[i].op == kName) v = member(v, t[i++].u, vm);
                 else if (i < t.size() && t[i].op == kArg) {
                     qb::Value key = primary();
@@ -382,6 +395,16 @@ struct Exec {
             if (i >= t.size()) break;
             const Op op = t[i].op;
             const int p = prec(op);
+            // A negative number straight after an operand inside parentheses
+            // ("( <arg> old_height -24.0 )" in create_main_menu, GH3's
+            // compiler's "x - 24.0") is a subtraction [I: only so do the main
+            // menu's XBOX LIVE and OPTIONS sit under TRAINING].
+            if (p == 0 && parens > 0 && minPrec <= prec(kAdd) &&
+                ((op == kInteger && t[i].i() < 0) || (op == kFloat && t[i].f[0] < 0))) {
+                qb::Value right = expression(prec(kAdd) + 1);
+                left = binary(kAdd, left, right);
+                continue;
+            }
             if (p < minPrec || p == 0) break;
             ++i;
             qb::Value right = expression(p + 1);

@@ -58,6 +58,10 @@ struct Element {
     };
     std::vector<Handler> handlers;
     qb::Struct tags;
+    // Where it was drawn (screen units, axis-aligned) and in which draw
+    // (UiSystem::drawCount): the mouse hit-tests what was drawn last.
+    mutable float bx0 = 0, by0 = 0, bx1 = 0, by1 = 0;
+    mutable uint64_t drawnIn = 0;
     struct Morph {
         bool active = false;
         double t = 0, duration = 0;
@@ -84,6 +88,26 @@ public:
     std::vector<std::string> visibleTexts() const;
     // GD04_UIDUMP: the element tree, one line per element.
     void dump() const;
+    // -- the port's own screens and the mouse (ui/port_*.cpp; not GH3's)
+    // Text in one of GH3's fonts (by its key, e.g. fontgrid_title_gh3),
+    // outside the element tree: `h` the line height in screen units,
+    // `align` 0x11 top left .. 0x22 centre .. 0x44 bottom right (high
+    // nibble vertical, low horizontal). \bN (hex) is the buttons font's
+    // glyph N, as in GH3's own texts.
+    void drawText(Canvas& c, uint32_t font, const std::string& s, float x, float y, float h, const std::array<uint8_t, 4>& rgba,
+                  uint32_t align) const;
+    float textWidth(uint32_t font, const std::string& s, float h) const;
+    // The mouse over GH3's menus: the focused menus' items, hit-tested at
+    // their last drawn bounds (an item that draws nothing itself stands for
+    // the element its focus handler names, as the main menu's do). `focus`
+    // moves the selection there (a hover). Returns whether one was hit.
+    bool menuAt(float x, float y, bool focus, bool* isList = nullptr);
+    // The help bar's item (user_control_container) at (x, y): its text, upper
+    // case ("SELECT", "BACK"), or "".
+    std::string helperAt(float x, float y) const;
+    // The drawn bounds of an element (false: not drawn in the last frame).
+    bool drawnBounds(uint32_t id, float& x0, float& y0, float& x1, float& y1) const;
+    uint64_t drawCount() const { return drawCount_; }
     struct Stats {
         uint64_t created = 0, destroyed = 0, morphs = 0, events = 0, handlersRun = 0, textDrawn = 0, spritesDrawn = 0;
         uint64_t missingTextures = 0, missingFonts = 0, memberCalls = 0;
@@ -121,6 +145,8 @@ private:
     std::unordered_map<uint32_t, FontEntry> fonts_;
     std::vector<std::array<uint8_t, 4>> colorTab_;  // Default_Font_Colors
     Stats stats_;
+    uint64_t drawCount_ = 0;
+    bool unionBounds(const Element& e, float& x0, float& y0, float& x1, float& y1) const;
 };
 
 }  // namespace ui

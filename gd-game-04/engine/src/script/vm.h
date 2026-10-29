@@ -131,6 +131,8 @@ public:
     // GH3's global tags (GetGlobalTags / SetGlobalTags): the progress and
     // options the save holds, by tag key.
     std::unordered_map<uint32_t, qb::Struct> globalTags;
+    // PushGlobalTags / PopGlobalTags sections (a band's career, by section key).
+    std::unordered_map<uint32_t, std::unordered_map<uint32_t, qb::Struct>> globalTagSections;
 
     // Code of a script global (tokenized once).
     std::shared_ptr<const CodeCache> code(uint32_t name);

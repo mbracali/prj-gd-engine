@@ -5,6 +5,7 @@
 #include <SDL3/SDL_log.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <exception>
 
@@ -652,6 +653,7 @@ void UiSystem::draw(Canvas& c) {
     };
     std::vector<Item> items;
     std::vector<Node> stack;
+    ++drawCount_;
     for (size_t k = root_->children.size(); k-- > 0;) stack.push_back({root_->children[k].get(), 0, 0, 1, 1, 1, 0, 0, 1});
     while (!stack.empty()) {
         const Node n = stack.back();
@@ -669,12 +671,15 @@ void UiSystem::draw(Canvas& c) {
         const float jx = (e.justX + 1) / 2 * e.w * wsx, jy = (e.justY + 1) / 2 * e.h * wsy;
         const float r = wrot * kDeg;
         const float cx = wposX - (jx * std::cos(r) - jy * std::sin(r)), cy = wposY - (jx * std::sin(r) + jy * std::cos(r));
-        const float z = e.zGiven ? e.z : n.z;
+        // z: the explicit z_priority (it sticks), else the parent's z + 1, 0
+        // without a parent [C SetParent 0x8221D5F0 -> SetZTree 0x8221C160].
+        const float z = e.zGiven ? e.z : (e.parent ? n.z + 1.0f : 0.0f);
         items.push_back({&e, cx, cy, wsx, wsy, wa, wrot, z, n.depth});
         for (size_t k = e.children.size(); k-- > 0;) stack.push_back({e.children[k].get(), cx, cy, wsx, wsy, wa, wrot, z, n.depth + 1});
     }
-    // z_priority is a global key; equal z in tree order [I].
-    // Equal z: deeper elements over shallower ones, then tree order [I].
+    // z_priority is one global key for sprites and texts (one list,
+    // 0x8238D7D0) [C]. Equal z: deeper elements over shallower ones, then
+    // tree order [I: the game draws the instance made visible last behind].
     std::stable_sort(items.begin(), items.end(), [](const Item& l, const Item& r) { return l.z < r.z || (l.z == r.z && l.depth < r.depth); });
     for (const Item& it : items) {
         const Element& e = *it.e;
@@ -684,6 +689,14 @@ void UiSystem::draw(Canvas& c) {
         auto P = [&](float lx, float ly, float u, float v, const std::array<uint8_t, 4>& col) {
             return Vertex{it.cx + lx * cs - ly * sn, it.cy + lx * sn + ly * cs, 0, u, v, col[0], col[1], col[2], alpha};
         };
+        // The drawn bounds, for the mouse (port addition, not GH3's).
+        if ((e.type == kSprite && e.texture) || ((e.type == kText || e.type == kTextBlock) && !e.text.empty())) {
+            const float w = e.w * it.wsx, h = e.h * it.wsy;
+            const Vertex q[4] = {P(0, 0, 0, 0, e.rgba), P(w, 0, 0, 0, e.rgba), P(w, h, 0, 0, e.rgba), P(0, h, 0, 0, e.rgba)};
+            e.bx0 = e.bx1 = q[0].x, e.by0 = e.by1 = q[0].y;
+            for (const Vertex& v : q) e.bx0 = std::min(e.bx0, v.x), e.bx1 = std::max(e.bx1, v.x), e.by0 = std::min(e.by0, v.y), e.by1 = std::max(e.by1, v.y);
+            e.drawnIn = drawCount_;
+        }
         if (e.type == kSprite && e.texture) {
             const gfx::TextureId id = tex_.find(e.texture);
             if (!id) continue;
@@ -759,6 +772,161 @@ void UiSystem::draw(Canvas& c) {
             ++stats_.textDrawn;
         }
     }
+}
+
+// ---- the port's own screens and the mouse (not GH3's) ----
+
+void UiSystem::drawText(Canvas& c, uint32_t font, const std::string& text, float x, float y, float h, const std::array<uint8_t, 4>& rgba,
+                        uint32_t align) const {
+    const FontEntry* fe = fontFor(font);
+    if (!fe || text.empty() || h <= 0) return;
+    const FontEntry* buttons = nullptr;
+    if (auto it = fonts_.find(K("buttonsxenon")); it != fonts_.end()) buttons = &it->second;
+    const font::Font& f = fe->f;
+    const float k = h / std::max(1.0f, f.lineHeight), w = textWidth(font, text, h);
+    const uint32_t ha = align & 0xF, va = align >> 4;
+    float pen = (ha == 2 ? x - w * 0.5f : ha == 4 ? x - w : x) / k;
+    const float top = (va == 2 ? y - h * 0.5f : va == 4 ? y - h : y) / k;
+    const float baseY = top + (f.lineHeight - float(f.vShift));
+    const std::u16string s = utf16(text);
+    std::vector<Vertex> verts;
+    auto glyph = [&](const font::Glyph& g, float gy) {
+        const float gx = pen + float(g.xOffset);
+        const Vertex a{gx * k, gy * k, 0, g.u0, g.v0, rgba[0], rgba[1], rgba[2], rgba[3]};
+        const Vertex b{(gx + g.width) * k, gy * k, 0, g.u1, g.v0, rgba[0], rgba[1], rgba[2], rgba[3]};
+        const Vertex cc{(gx + g.width) * k, (gy + g.height) * k, 0, g.u1, g.v1, rgba[0], rgba[1], rgba[2], rgba[3]};
+        const Vertex d{gx * k, (gy + g.height) * k, 0, g.u0, g.v1, rgba[0], rgba[1], rgba[2], rgba[3]};
+        verts.insert(verts.end(), {a, b, cc, a, cc, d});
+    };
+    for (size_t i = 0; i < s.size(); ++i) {
+        const char16_t ch = s[i];
+        if (ch == u'\\' && i + 2 < s.size() && s[i + 1] == u'b') {  // a button glyph: its own font, white, a line high [I]
+            const int n = hexDigit(s[i + 2]);
+            i += 2;
+            if (!buttons || n < 0) continue;
+            const font::Font& bf = buttons->f;
+            const font::Glyph& g = bf.button(size_t(n));
+            if (!verts.empty()) c.draw(verts.data(), verts.size(), int(fe->tex.id), Blend::Alpha), verts.clear();
+            const float bk = h / std::max(1.0f, bf.lineHeight), x0 = pen * k, y0 = top * k;
+            const Vertex a{x0, y0, 0, g.u0, g.v0, 255, 255, 255, rgba[3]}, b{x0 + g.width * bk, y0, 0, g.u1, g.v0, 255, 255, 255, rgba[3]};
+            const Vertex cc{x0 + g.width * bk, y0 + g.height * bk, 0, g.u1, g.v1, 255, 255, 255, rgba[3]};
+            const Vertex d{x0, y0 + g.height * bk, 0, g.u0, g.v1, 255, 255, 255, rgba[3]};
+            const Vertex q[6] = {a, b, cc, a, cc, d};
+            c.draw(q, 6, int(buttons->tex.id), Blend::Alpha);
+            pen += g.width * bk / k;
+            continue;
+        }
+        if (ch == u' ') {
+            pen += f.spaceWidth;
+            continue;
+        }
+        const font::Glyph& g = f.glyphFor(uint16_t(ch));
+        glyph(g, baseY + g.baseline - g.height);
+        pen += g.width + float(f.tracking);
+    }
+    if (!verts.empty()) c.draw(verts.data(), verts.size(), int(fe->tex.id), Blend::Alpha);
+}
+
+float UiSystem::textWidth(uint32_t font, const std::string& text, float h) const {
+    const FontEntry* fe = fontFor(font);
+    if (!fe || text.empty()) return 0;
+    const font::Font& f = fe->f;
+    const float k = h / std::max(1.0f, f.lineHeight);
+    const FontEntry* buttons = nullptr;
+    if (auto it = fonts_.find(K("buttonsxenon")); it != fonts_.end()) buttons = &it->second;
+    const std::u16string s = utf16(text);
+    float w = 0;
+    for (size_t i = 0; i < s.size(); ++i) {
+        if (s[i] == u'\\' && i + 2 < s.size() && s[i + 1] == u'b') {
+            const int n = hexDigit(s[i + 2]);
+            i += 2;
+            if (buttons && n >= 0) w += buttons->f.button(size_t(n)).width * h / std::max(1.0f, buttons->f.lineHeight);
+            continue;
+        }
+        w += (s[i] == u' ' ? f.spaceWidth : f.glyphFor(uint16_t(s[i])).width + float(f.tracking)) * k;
+    }
+    return w;
+}
+
+bool UiSystem::unionBounds(const Element& e, float& x0, float& y0, float& x1, float& y1) const {
+    bool any = false;
+    std::vector<const Element*> stack{&e};
+    while (!stack.empty()) {
+        const Element* n = stack.back();
+        stack.pop_back();
+        if (n->hidden) continue;
+        if (n->drawnIn == drawCount_ && drawCount_) {
+            if (!any) x0 = n->bx0, y0 = n->by0, x1 = n->bx1, y1 = n->by1;
+            else x0 = std::min(x0, n->bx0), y0 = std::min(y0, n->by0), x1 = std::max(x1, n->bx1), y1 = std::max(y1, n->by1);
+            any = true;
+        }
+        for (auto& c : n->children) stack.push_back(c.get());
+    }
+    return any;
+}
+
+bool UiSystem::drawnBounds(uint32_t id, float& x0, float& y0, float& x1, float& y1) const {
+    const Element* e = find(id);
+    return e && unionBounds(*e, x0, y0, x1, y1);
+}
+
+bool UiSystem::menuAt(float x, float y, bool focus, bool* isList) {
+    Element* bestMenu = nullptr;
+    int best = -1;
+    float bestD = 1e30f;
+    for (Element* m : focusedElements()) {
+        if (!isMenu(*m) || m->hidden) continue;
+        for (size_t i = 0; i < m->children.size(); ++i) {
+            const Element& ch = *m->children[i];
+            if (ch.notFocusable || ch.hidden) continue;
+            float x0, y0, x1, y1;
+            bool got = unionBounds(ch, x0, y0, x1, y1);
+            // An item that draws nothing itself: the element its focus
+            // handler highlights (the main menu's empty items name their
+            // texts: {focus retail_menu_focus params = {id = ...}}) [C data; I use].
+            for (const Element::Handler& h : ch.handlers) {
+                if (got) break;
+                if (h.event != K("focus")) continue;
+                for (const char* name : {"id", "text_id"})
+                    if (const qb::Value* v = qs::Vm::param(h.params, K(name)); v && v->type == qb::Type::Key && !got)
+                        if (const Element* t = find(v->key); t && t != &ch) got = unionBounds(*t, x0, y0, x1, y1);
+            }
+            if (!got || x < x0 - 4 || x > x1 + 4 || y < y0 - 4 || y > y1 + 4) continue;
+            // Overlapping entries: the one whose centre is nearest wins.
+            const float dx = x - (x0 + x1) * 0.5f, dy = y - (y0 + y1) * 0.5f, d = dx * dx + dy * dy;
+            if (d < bestD) bestD = d, best = int(i), bestMenu = m;
+        }
+    }
+    if (!bestMenu) return false;
+    // A list that scrolls (the setlist) takes clicks only: a hover would
+    // scroll it. Every GH3 menu sits in a VScrollingMenu (new_menu), so a
+    // long one counts as a list [I: more than 12 items].
+    const bool list = bestMenu->parent && bestMenu->parent->type == kVScrollingMenu && bestMenu->children.size() > 12;
+    if (isList) *isList = list;
+    if (focus && best != bestMenu->selected) {
+        if (bestMenu->selected >= 0 && size_t(bestMenu->selected) < bestMenu->children.size())
+            launch(bestMenu->children[size_t(bestMenu->selected)].get(), K("unfocus"), qb::Struct{});
+        bestMenu->selected = best;
+        qb::Struct d;
+        qs::Vm::set(d, K("controller"), qs::Vm::makeInt(bestMenu->controller));
+        launch(bestMenu->children[size_t(best)].get(), K("focus"), d);
+        vm_.run(K("generic_menu_up_or_down_sound"), qb::Struct{});
+    }
+    return true;
+}
+
+std::string UiSystem::helperAt(float x, float y) const {
+    const Element* box = find(K("user_control_container"));
+    if (!box) return {};
+    for (const auto& c : box->children) {
+        if (c->type != kText || c->text.empty() || c->drawnIn != drawCount_ || c->text[0] == '\\') continue;
+        // The text and its button glyph on the left [I].
+        if (x < c->bx0 - 40 || x > c->bx1 + 8 || y < c->by0 - 8 || y > c->by1 + 8) continue;
+        std::string t = c->text;
+        for (char& ch : t) ch = char(std::toupper(static_cast<unsigned char>(ch)));
+        return t;
+    }
+    return {};
 }
 
 bool UiSystem::member(qs::ScriptRun& run, uint32_t obj, uint32_t method, qb::Struct& p, bool& handled) {

@@ -3,6 +3,7 @@
 #pragma once
 
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "audio/sfx.h"
@@ -50,7 +51,23 @@ public:
     std::string movieRequest;
     // The song is over: the flow goes on with win_song / fail_song [C data:
     // GuitarEvent_SongWon_Spawned / GuitarEvent_SongFailed_Spawned].
-    void songEnded(bool won);
+    // The song's result, as GH3 keeps it in player1_status [C data guitar.qb].
+    struct SongResult {
+        bool won = false;
+        int64_t score = 0;
+        int notesHit = 0, totalNotes = 0, bestRun = 0, phrasesHit = 0, phrasesTotal = 0;
+        double baseScore = 0;
+        float health = 1, starPower = 0;
+    };
+    void songEnded(const SongResult& r);
+    // GetSongTimeMs: the song's time while it plays (set by the app), then
+    // running on with the game unless paused (the end-of-song transitions wait on it).
+    double songClockMs = 0;
+    // The flow state player 1 is in (ui_flow_manager_state[0]), e.g.
+    // main_menu_fs; "" before the flow manager starts.
+    std::string flowState() const;
+    // A GH3 sound event (SoundEvent event = <name>), for the port's screens.
+    void soundEvent(const char* event);
 
 private:
     const Disc& disc_;

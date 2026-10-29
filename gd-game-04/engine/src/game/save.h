@@ -20,8 +20,10 @@ constexpr int kVersion = 1;
 std::string path();  // <save folder>/save.json ("" if no save folder)
 bool exists();
 // Writes the tags; false and `error` on failure.
-bool write(const std::unordered_map<uint32_t, qb::Struct>& tags, std::string& error);
+using Tags = std::unordered_map<uint32_t, qb::Struct>;
+using Sections = std::unordered_map<uint32_t, Tags>;
+bool write(const Tags& tags, const Sections& sections, std::string& error);
 // Reads them; false and `error` when missing or malformed (type and range checked).
-bool read(std::unordered_map<uint32_t, qb::Struct>& tags, std::string& error);
+bool read(Tags& tags, Sections& sections, std::string& error);
 
 }  // namespace save

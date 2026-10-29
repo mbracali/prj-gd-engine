@@ -36,6 +36,9 @@ public:
     const PlayerStats& stats() const { return player_->stats(); }
     double songMs() const { return lastMs_; }
     Hud2D& hud() { return hud_; }
+    // The base score (50 a gem, no multiplier) and the Star Power phrases [I: GH3's base_score].
+    double baseScore() const;
+    int phraseCount() const;
     const Highway2D& highway() const { return highway_; }
 
 private:

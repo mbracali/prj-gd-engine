@@ -88,6 +88,11 @@ target_sources(gd04 PRIVATE
   src/ui/natives_game.cpp
   src/ui/natives_sound.cpp
   src/ui/ui_system.cpp
+  src/ui/port_draw.cpp
+  src/ui/port_enhanced.cpp
+  src/ui/port_gamepads.cpp
+  src/ui/port_screens.cpp
+  src/ui/port_settings.cpp
   src/video/movie_player.cpp
   src/tests/formattest.cpp
 )

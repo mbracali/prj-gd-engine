@@ -81,7 +81,7 @@ void addFlowNatives(qs::Vm& vm, FlowState& st) {
     // in the save folder (game/save.h); result = 1 on success [I: result use from the memcard scripts].
     vm.addNative("SaveToMemoryCard", [&st](Vm& v, ScriptRun& run, qb::Struct&) {
         std::string err;
-        const bool ok = save::write(v.globalTags, err);
+        const bool ok = save::write(v.globalTags, v.globalTagSections, err);
         if (!ok) SDL_Log("save: %s", err.c_str());
         else st.saveExists = true, ++st.saves;
         if (qb::Struct* l = locals(run)) Vm::set(*l, K("result"), Vm::makeInt(ok ? 1 : 0));
@@ -89,10 +89,12 @@ void addFlowNatives(qs::Vm& vm, FlowState& st) {
     });
     vm.addNative("LoadFromMemoryCard", [&st](Vm& v, ScriptRun& run, qb::Struct&) {
         std::string err;
-        std::unordered_map<uint32_t, qb::Struct> tags;
-        const bool ok = save::read(tags, err);
+        save::Tags tags;
+        save::Sections sections;
+        const bool ok = save::read(tags, sections, err);
         if (ok) {
             for (auto& [k, t] : tags) v.globalTags[k] = std::move(t);
+            for (auto& [k, t] : sections) v.globalTagSections[k] = std::move(t);
             ++st.loads;
         } else {
             SDL_Log("save: %s", err.c_str());

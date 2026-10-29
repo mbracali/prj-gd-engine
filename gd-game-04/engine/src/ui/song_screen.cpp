@@ -141,6 +141,19 @@ bool SongScreen::frame(Canvas& canvas, Mixer& mixer, const TextureCache* texture
     return more;
 }
 
+double SongScreen::baseScore() const {
+    double b = 0;
+    for (const TrackNote& n : track_.notes) b += 50.0 * __builtin_popcount(unsigned(n.frets));
+    return b;
+}
+
+int SongScreen::phraseCount() const {
+    int last = -1, count = 0;
+    for (const TrackNote& n : track_.notes)
+        if (n.phrase >= 0 && n.phrase != last) last = n.phrase, ++count;
+    return count;
+}
+
 void SongScreen::draw(Canvas& c, double now, const TextureCache* textures) {
     const PlayerStats& st = player_->stats();
     char text[160];

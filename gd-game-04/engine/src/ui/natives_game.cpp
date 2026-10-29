@@ -91,6 +91,15 @@ void addGameNatives(FrontEnd& fe, const Disc& disc, TextureCache& textures) {
         fe.songRequest.difficulty = d;
         return true;
     });
+    // GetSongTimeMs [time_offset = n]: time = the song clock + the offset (ms) [C use: Transition_Play_Spawned].
+    vm.addNative("GetSongTimeMs", [&fe](Vm&, ScriptRun& run, qb::Struct& p) {
+        const double t = fe.songClockMs + Vm::number(Vm::param(p, K("time_offset")), 0);
+        if (!run.frames.empty()) {
+            if (!run.frames.back().locals) run.frames.back().locals = std::make_shared<qb::Struct>();
+            Vm::set(*run.frames.back().locals, K("time"), Vm::makeFloat(float(t)));
+        }
+        return true;
+    });
     // The pak manager (0x82182D18 / 0x82182AF8 / 0x82182DF8 / 0x821844A0): one
     // current pak per map (zones: the venue). Setting it loads the zone's
     // pak (textures now; the venue itself is M5); loads finish at once.

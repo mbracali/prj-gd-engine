@@ -120,10 +120,13 @@ GetScreenElementDims returns width = dims.x*scale.x, height = dims.y*scale.y
 using the element's own (not world) scale, truncated to int [C 0x82172310].
 GetScreenElementPosition returns ScreenElementPos = parent-local corner
 (default), `absolute` = screen corner, `local` = pos [C 0x82172408].
-Draw order: z_priority is a global key, not relative to the parent — scripts
-give children z = container z + 1 (create_pause_menu_frame) [I]; second key is
-a 3D depth for pos3d elements [C 0x8221BAF0]; equal z -> tree/creation order
-[I]. Hidden element hides its subtree [I].
+Draw order: z_priority is one global key for sprites and texts (one list,
+insert 0x8238D7D0, ascending; no separate text pass) [C]. An element without
+z_priority gets **its parent's z + 1** (0 without a parent) when attached
+(SetParent 0x8221D5F0 -> SetZTree 0x8221C160, recursive for unset children);
+an explicit z (flag 0x8000) sticks [C]. Text shadows draw at z - 0.005 [C].
+Ties: the game draws the instance made visible last behind; the port uses
+depth then tree order [I]. Hidden element hides its subtree [I].
 
 ## 4. Morphs [C SetMorph 0x8221CEC8, step 0x8221BC28, ease 0x822A6B28, parse 0x822A7318]
 

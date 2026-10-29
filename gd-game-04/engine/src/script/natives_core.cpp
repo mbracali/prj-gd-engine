@@ -240,7 +240,26 @@ void addCoreNatives(Vm& vm) {
             for (const qb::Item& item : v.globals().expand(*ps->st)) Vm::set(t, item.name, item.value);
         return true;
     });
-    vm.addNative("PushGlobalTags", [](Vm&, ScriptRun&, qb::Struct&) { return true; });  // a save section [I]
+    // PushGlobalTags <tag> section = S: the tag's current fields kept in
+    // section S; PopGlobalTags section = S: every tag kept there restored
+    // (push_bandtags / pop_bandtags swap a band's career in and out)
+    // [I: from the scripts; natives 0x821239D0 / 0x82123A98].
+    vm.addNative("PushGlobalTags", [](Vm& v, ScriptRun&, qb::Struct& p) {
+        const qb::Value* tag = first(p);
+        const qb::Value* sec = Vm::param(p, K("section"));
+        if (!tag || !sec) return false;
+        auto it = v.globalTags.find(tag->key);
+        v.globalTagSections[sec->key][tag->key] = it == v.globalTags.end() ? qb::Struct{} : it->second;
+        return true;
+    });
+    vm.addNative("PopGlobalTags", [](Vm& v, ScriptRun&, qb::Struct& p) {
+        const qb::Value* sec = Vm::param(p, K("section"));
+        if (!sec) return false;
+        auto it = v.globalTagSections.find(sec->key);
+        if (it == v.globalTagSections.end()) return false;
+        for (const auto& [k, st] : it->second) v.globalTags[k] = st;
+        return true;
+    });
     // AddParams <struct>: merged into the caller's parameters [I].
     vm.addNative("AddParams", [](Vm& v, ScriptRun& run, qb::Struct& p) {
         if (run.frames.empty()) return false;

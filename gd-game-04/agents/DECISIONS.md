@@ -43,3 +43,15 @@ by xenon_gem_offset / xenon_input_offset (-66 ms) to cover the console's
 video and controller latency. The PC port draws and judges at the chart's
 times, and leaves latency to a calibration option (as the original's lag
 calibration). Undo: pass the offsets to Player and Highway2D::depthOf.
+
+**D8. Enhanced Options' entry: a help-bar item on GH3's Options.** GH3's
+Options menu (options_select_option_fs, create_options_menu) is a QScript
+menu; adding a scripted item would mean patching its bytecode. Instead the
+port adds an "ENHANCED" item (a blue fret square) after GH3's own help-bar
+items on that screen: the blue fret (a guitar's, the keyboard's 4, a joypad's RT) or a
+click on it opens Enhanced Options, a native page drawn by the app while
+GH3's scripts wait (ui/port_screens.*). The main menu's "GAMEPADS" item
+(yellow) works the same way; it sits after GH3's UP/DOWN pill rather than
+before it, so GH3's own centred pills stay as the scripts lay them out.
+Undo: remove PortScreens::drawItems / itemAt and the Fret2 / Fret3 checks in
+App::menuAction.
