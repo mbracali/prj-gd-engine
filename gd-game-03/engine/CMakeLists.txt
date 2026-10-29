@@ -140,7 +140,9 @@ target_sources(gd03 PRIVATE
   src/tests/chartest_band.cpp
   src/tests/chartest_crowd.cpp
   src/tests/miditest.cpp
-  src/video/wmv_player.cpp
+  src/video/movie_player.cpp
+  src/video/mpeg2.cpp
+  src/video/pss.cpp
 )
 target_include_directories(gd03 PRIVATE src)
 target_link_libraries(gd03 PRIVATE SDL3::SDL3)

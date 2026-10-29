@@ -124,3 +124,32 @@ Verified (fresh `ninja -C build/linux`, no warning lines; agents/scratch/alltest
 
 Next: the other walks (lose, pause, attract, back, career*, coop, faceoff,
 enhanced, cheats, mouse, gamepads, stickyaxis), facefxtest, M6-M9.
+
+## 2026-10-29 00:45, every walk passes; launcher Linux + Wine
+
+Done:
+- Walks rewritten for this disc's menus (boot / memory card, main menu
+  order, pause without confirms, no controller select, PS2 cheat codes,
+  this disc's characters, songs, store, co-op songs). Song list refreshed on
+  set_provider; stereo option; walks delete their temporary save folder.
+- facefxtest on this disc's files (the guitarist / _blinktrack reference case
+  kept; the singer checked against the graph's own evaluation).
+- gd03 ready_to_play (D6); launcher build_module_03.
+
+Verified (fresh build/linux binary; agents/scratch/alltests.sh, 0 warnings):
+- scenetest, selftest, sfxtest, scripttest, uitest, venuetest, chartest: rc=0 (lines as the previous entry)
+- facefxtest -> facefxtest: OK
+- shadertest -> all 587 shader programs compiled (GL and GD03_GLES=1)
+- --walktest quickplay lose pause attract back career career_song career_full
+  coop faceoff proface enhanced cheats mouse gamepads stickyaxis -> every one "walktest <name>: OK"
+- `flock ... gd-engine-launcher/scripts/build.sh linux` -> gd-game-03 0.0.1: module built (0 compiler warnings); verify: complete (3 game module(s))
+- `flock ... build.sh windows` -> the same for windows
+- Linux launcher: `GDUL_GAME_QUIT_AFTER=25000 "Guitar Dream Universal Launcher" --play gd03 --exit-after` (no --iso):
+  gdul.log "play gd-game-03 (Guitar Hero 80s 0.0.1) with .../Guitar Hero Encore - Rocks the 80s (USA) (PS2).iso",
+  "back from gd-game-03: exit code 0 after 25.0 s"
+- Proton Experimental wine, own WINEPREFIX: the Windows launcher --play gd03 --iso Z:\... --exit-after:
+  gdul.log "back from gd-game-03: exit code 0 after 25.0 s (module unloaded)"
+
+Not tested: Steam Deck and Android packages (built by build.sh all, next).
+Left behind: 64 /tmp/gd03-walk-* folders from walks run before the cleanup fix
+(deleting them was refused by the permission classifier; the owner can).

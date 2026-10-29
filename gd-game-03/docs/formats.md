@@ -80,4 +80,4 @@ instance on the disc decodes exactly to its end), [I] inferred.
 - Sound effects: SynthSample records in the banks (`sfx/gen/*_bank`), SPU ADPCM.
 
 ## Movies
-- `VIDEOS/INTRO.PSS` (MPEG-2 program stream): not played yet (GD03-008).
+- `VIDEOS/INTRO.PSS`: MPEG-2 program stream, 16-bit stereo PCM 48 kHz in private stream 1 (SShd type 1, 0x200-byte interleave) [C data]; played by video/movie_player.cpp with gd-game-01's decoders.

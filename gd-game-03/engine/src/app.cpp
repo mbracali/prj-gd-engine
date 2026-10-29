@@ -52,7 +52,7 @@
 #include "ui/screen_text.h"
 #include "ui/ui_host.h"
 #include "ui/ui_manager.h"
-#include "video/wmv_player.h"
+#include "video/movie_player.h"
 
 namespace {
 
@@ -1922,7 +1922,7 @@ void App::creditsMusic(bool on) {
 void App::playMovie(const std::string& name) {
     stopMusic();
     if (name.empty() || !data_) return;
-    if (::playMovie(*data_, name, canvas_, mixer_, input_) == WmvPlayer::Result::Quit) running_ = false;
+    if (::playMovie(*data_, name, canvas_, mixer_, input_) == MoviePlayer::Result::Quit) running_ = false;
     mixer_.stop();
 }
 

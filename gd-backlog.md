@@ -651,7 +651,7 @@ universal launcher, not released on its own.
 | GD03-012 | Original | 🟡 in progress | M4 highway: the PS2 track (`track/track.milo`, TrackPanel 0x0014faa8..0x00160000) drawn as the original: gems, HOPO / star looks, tails, beat lines, rails, smashers, lightning, two-player halves | Missing: the far-end fade (needs a frame copy), the per-character surface override, the gem sparkle / bonus burst | Milestones M4 |
 | GD03-013 | Original | 🟡 in progress | M5 venues: all six venues load (sp / mp / coop), every camera shot checked, 60 vs 240 fps identical; director, band and crowd goldens are this disc's first baselines (not yet checked shot by shot against the original) | `--venuetest`, `--chartest` | Milestones M5 |
 | GD03-014 | Original | ❌ | `--facefxtest` still carries GH2 360's goldens (songs, SDK versions, metal_singer counts): rewrite for this disc's `.voc` / `.fac` | | Milestones M6 |
-| GD03-008 | Original | ❌ | PSS movies (VIDEOS/INTRO.PSS and the in-archive ones) through gd-game-01's MPEG-2 decoder; until then movies are skipped | Approximation: skipped | Milestones M0 |
+| GD03-008 | Original | ✅ | PSS movies (VIDEOS/INTRO.PSS) through gd-game-01's own MPEG-2 / PSS decoders (video/movie_player.cpp): 4:3 pillarboxed, sound as the clock, fields blended; `--playmovie intro.pss`, `GD03_MOVIE_DUMP=1` decodes headless | world/shared/fest_1.ipu (an IPU stream) not used yet | Milestones M0 |
 
 
 ## gd-game-04: Guitar Hero III: Legends of Rock (Xbox 360)

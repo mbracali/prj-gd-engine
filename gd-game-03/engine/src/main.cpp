@@ -31,7 +31,7 @@
 #include "tests/venuetest.h"
 #include "tests/chartest.h"
 #include "devaids/audit.h"
-#include "video/wmv_player.h"
+#include "video/movie_player.h"
 
 namespace {
 
@@ -54,7 +54,7 @@ void usage() {
         "  --view <milo>        draw one scene, e.g. world/stone/gen/stone.milo_ps2 (development viewer); a UI\n"
         "                       panel (ui/gen/main.milo_ps2) draws with its components and texts (GD03_VIEW_LANG=\n"
         "                       eng|fre|deu|ita|esl, GD03_VIEW_FOCUS=<button>, GD03_VIEW_UI=0 plain scene)\n"
-        "  --playmovie <name>   play one of the disc's videos (intro.wmv, hmx.wmv, wg.wmv), then quit\n"
+        "  --playmovie <name>   play one of the disc's movies (intro.pss), then quit\n"
         "  --uitest             run GH2's menu scripts headlessly: every screen and panel, their milos and components;\n"
         "                       GH2's career rules on a scratch band\n"
         "  --chartest           decode every character class on the disc (clips, rigs, band slots), check the counts\n"
