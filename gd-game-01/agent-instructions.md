@@ -10,7 +10,7 @@ Read this before working in this folder. It applies to every AI coding agent (Cl
 - Read the guidelines in `guidelines/` at the repository root before working (`general_guidelines.md`, `universal_launcher.md`: the GAMEPADS screen, Enhanced menu, mouse / Enter / touch and packaging, the same in every game, modelled on gd-game-01; `smilar_behaviors.md`), and the single backlog `gd-backlog.md` at the root (section of this game). Update the backlog at the start and at the end of every task.
 
 ## This folder
-**Guitar Hero** (PlayStation 2), Guitar Dream version 1.1.6, playable and released. This folder is **frozen**: do not change anything in it unless the owner explicitly asks for that change.
+**Guitar Hero** (PlayStation 2), Guitar Dream version 1.1.7, playable and released. This folder is **frozen**: do not change anything in it unless the owner explicitly asks for that change.
 
 See `README.md` and `docs/` here (older layout: `engine/`, `local_build.sh`, `build_commands/`).
 

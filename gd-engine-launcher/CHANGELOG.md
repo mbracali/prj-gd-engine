@@ -1,5 +1,20 @@
 # Guitar Dream Universal Launcher: changes
 
+## 0.1.8
+
+Games
+- Guitar Hero (gd-game-01) 1.1.7: the universal menus. A new GAMEPADS
+  screen (four player boxes, instrument and device per player, two buttons
+  per control, Save / Discard, Export / Import, Generic MIDI on Linux,
+  Windows and macOS), a new Enhanced Settings menu with Modes presets and
+  finer effect levels, new default controls with no double inputs, and
+  every logo, movie and credit screen skippable with any button, a click or
+  a tap. See universal_mechanisms.md.
+
+Downloads
+- The licence of RtMidi (MIT), used by Guitar Hero's MIDI input, is in the
+  licenses folder of every desktop download.
+
 ## 0.1.7
 
 Games

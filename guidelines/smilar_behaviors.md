@@ -36,8 +36,9 @@ mouse, touch) are in [universal_launcher.md](universal_launcher.md).
   score names); Esc / Back cancels.
 - Names typed in a text entry grow **left to right** from the entry's anchor,
   as in the original (gd-game-01 B64; gd-game-02 wave B #2).
-- **Esc three times** in a row on the main menu quits. Logos, splashes and
-  videos skip with Enter / Esc / Start (and Green / X).
+- **Esc three times** in a row on the main menu quits. Logos, splashes,
+  videos and credits skip with green, red, Enter, Esc, Start, a left click
+  or a tap ([universal_mechanisms.md](../universal_mechanisms.md) 1.1.1).
 - **Held directions repeat** with the original's hold and repeat times; key
   repeat resets on screen transitions (gd-game-01 B80).
 - **Menu sounds never go silent.** Every volume or mute a screen changes is
