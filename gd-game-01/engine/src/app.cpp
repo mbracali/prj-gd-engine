@@ -2541,8 +2541,84 @@ int App::run() {
 
 int runApp(const Options& options) { return App(options).run(); }
 
+namespace {
+// The universal controls' rules (universal_mechanisms.md 1.1.4 / 1.2.1),
+// on the keyboard's default bindings: no double inputs where two controls
+// share a key, none missed, the keyboard's Start selects in the menus, and
+// 1.1.6 Enhanced Settings take the new values. Returns the failures.
+int inputSelfTest() {
+    int failures = 0, checks = 0;
+    auto check = [&](bool ok, const char* what) {
+        ++checks;
+        if (!ok) ++failures, std::printf("input self-test FAILED: %s\n", what);
+    };
+    Input in;
+    in.testMode();
+    std::vector<InputEvent> out;
+    auto key = [&](SDL_Keycode k, bool down) {
+        SDL_Event e{};
+        e.type = down ? SDL_EVENT_KEY_DOWN : SDL_EVENT_KEY_UP;
+        e.key.key = k, e.key.down = down, e.key.timestamp = SDL_GetTicksNS() + 200000000ull * uint64_t(checks + 1);
+        in.handle(e, out);
+    };
+    auto count = [&](Action a, bool down) { return std::count_if(out.begin(), out.end(), [&](const InputEvent& e) { return e.action == a && e.down == down; }); };
+    // Up: menu Up and Strum Up on one key: one Up and one strum, then one release each.
+    key(SDLK_UP, true);
+    check(count(Action::Up, true) == 1 && count(Action::Strum, true) == 1 && out.size() == 2, "Up arrow: Up and Strum once");
+    out.clear();
+    key(SDLK_UP, false);
+    check(count(Action::Up, false) == 1 && count(Action::Strum, false) == 1 && out.size() == 2, "Up arrow released once");
+    out.clear();
+    // Enter: both Starts; in the menus one select from the Start key.
+    key(SDLK_RETURN, true);
+    check(out.size() == 1 && out[0].action == Action::Confirm && out[0].startKey, "Enter: one select (Start key)");
+    out.clear();
+    key(SDLK_RETURN, false);
+    out.clear();
+    // Green on 1 and F1: pressed once, released only when both are up.
+    key(SDLK_1, true), key(SDLK_F1, true);
+    check(count(Action::Fret0, true) == 1 && out.size() == 1, "1 + F1: green pressed once");
+    out.clear();
+    key(SDLK_1, false);
+    check(out.empty(), "1 released, F1 held: green stays");
+    key(SDLK_F1, false);
+    check(count(Action::Fret0, false) == 1, "F1 released: green released");
+    out.clear();
+    // Tab: Select, Select and the gyro trigger: Star Power once.
+    key(SDLK_TAB, true);
+    check(count(Action::StarPower, true) == 1 && out.size() == 1, "Tab: Star Power once");
+    key(SDLK_TAB, false);
+    out.clear();
+    // Up held, then Down: each strum control strums (none missed).
+    key(SDLK_UP, true), key(SDLK_DOWN, true);
+    check(count(Action::Strum, true) == 2 && count(Action::Down, true) == 1, "Up then Down: two strums");
+    key(SDLK_UP, false), key(SDLK_DOWN, false);
+    check(count(Action::Strum, false) == 2 && count(Action::Up, false) == 1 && count(Action::Down, false) == 1, "both released");
+    out.clear();
+    // Esc and Backspace stay back; mouse buttons are no source kind at all.
+    key(SDLK_BACKSPACE, true);
+    check(count(Action::Back, true) == 1, "Backspace: back");
+    key(SDLK_BACKSPACE, false);
+    out.clear();
+    // 1.1.6 Enhanced Settings take the new values.
+    Json old = Json::parse(R"({"bloom":"high","chromatic":true,"particles":false,"ssao":true,"more_lights":"subtle",)"
+                           R"("light_dust":true,"ground_fog":"super","bokeh":"regular","star_blur":"high","xinput":false,"rockband":true})");
+    migrateEnhanced(old);
+    check(old["bloom"].str() == "3x" && old["chromatic"].str() == "medium" && old["particles"].str() == "none" &&
+              old["ssao"].str() == "medium" && old["more_lights"].str() == "1.5x" && old["light_dust"].str() == "1.5x" &&
+              old["ground_fog"].str() == "2.5x" && old["bokeh"].str() == "medium" && old["star_blur"].str() == "strong" &&
+              !old.has("xinput") && !old.has("rockband"),
+          "1.1.6 enhanced.json migrated");
+    for (const auto& [k, v] : old.o)
+        if (auto c = enhancedChoices().find(k); c != enhancedChoices().end()) check(v.type == Json::Type::String && c->second.count(v.s), "migrated value valid");
+    std::printf(failures ? "input self-test: %d of %d checks failed\n" : "input self-test: all %d checks passed\n", failures ? failures : checks, checks);
+    return failures;
+}
+}  // namespace
+
 int runSelfTest(const Options& options) {
     std::string path = options.dataPath.empty() ? loadRememberedPath() : options.dataPath;
+    if (inputSelfTest()) return 1;
     try {
         GameData data(path);
         Rules rules = loadRules(data);

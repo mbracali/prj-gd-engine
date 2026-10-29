@@ -84,7 +84,8 @@ void MidiIn::refresh() {
         for (unsigned i = 0; i < n; ++i) {
             std::string name = impl_->probe->getPortName(i);
             // Our own ports (RtMidi's clients on ALSA) are not instruments.
-            if (!name.empty() && name.find("RtMidi") == std::string::npos && !now.count(name)) now[name] = i;
+            // ALSA's "Midi Through" is a loopback, not an instrument.
+            if (!name.empty() && name.find("RtMidi") == std::string::npos && name.rfind("Midi Through", 0) != 0 && !now.count(name)) now[name] = i;
         }
     } catch (const RtMidiError& e) {
         SDL_Log("MIDI: %s", e.what());

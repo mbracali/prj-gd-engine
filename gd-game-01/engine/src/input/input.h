@@ -88,6 +88,8 @@ public:
 
     Input();
     ~Input();
+    // The self-test: the built-in defaults only, nothing read or written.
+    void testMode() { loaded_ = true, saveHeld_ = true; }
     // Closes all controllers; must run before SDL_Quit().
     void close();
     void handle(const SDL_Event& e, std::vector<InputEvent>& out);
