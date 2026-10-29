@@ -12,11 +12,13 @@
 #include "game/song_db.h"
 #include "game/tuning.h"
 #include "input/input.h"
+#include "render/highway2d.h"
 
 class Canvas;
 class Disc;
 class Globals;
 class Mixer;
+class TextureCache;
 
 // One song played directly (`--song <id>`, the development shortcut, L6):
 // the song's stems through the mixer, the player's judge (game/player.h) on
@@ -29,13 +31,13 @@ public:
                std::string& error);
     void handle(const InputEvent& e);
     // Advances and draws one frame; false once the song is over.
-    bool frame(Canvas& canvas, Mixer& mixer);
+    bool frame(Canvas& canvas, Mixer& mixer, const TextureCache* textures);
     const PlayerStats& stats() const { return player_->stats(); }
     double songMs() const { return lastMs_; }
 
 private:
     void tick(double nowMs, Mixer& mixer);
-    void draw(Canvas& canvas, double nowMs);
+    void draw(Canvas& canvas, double nowMs, const TextureCache* textures);
 
     SongInfo song_;
     int difficulty_ = 3;
@@ -44,6 +46,9 @@ private:
     NoteTrack track_;
     std::unique_ptr<Player> player_;
     std::unique_ptr<Autoplay> autoplay_;
+    Highway2D highway_;
+    bool highwayOk_ = false;
+    uint8_t shownHeld_ = 0;
     double endMs_ = 0;
     double stepMs_ = 0;      // the judge's own clock (60 Hz steps)
     double lastMs_ = -1e9;

@@ -37,3 +37,9 @@ before. Undo: `FFMPEG_CONFIGURE` in `engine/build_common.sh`.
 PowerPC (agents/CONTEXT.md); every XEX finding comes from Ghidra headless
 with XEXLoaderWV. Undo: if a later REA release supports PowerPC / XEX,
 re-check findings with it.
+
+**D7. No -66 ms gem / input offset on PC.** GH3 (360) shifts gems and input
+by xenon_gem_offset / xenon_input_offset (-66 ms) to cover the console's
+video and controller latency. The PC port draws and judges at the chart's
+times, and leaves latency to a calibration option (as the original's lag
+calibration). Undo: pass the offsets to Player and Highway2D::depthOf.

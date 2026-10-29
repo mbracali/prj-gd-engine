@@ -675,6 +675,9 @@ universal launcher, not released on its own.
 | GD04-015 | Original | ❌ | Havok collision / ragdoll objects (.hkc, .rag) validated but not decoded (needs the `__types__` reflection) | docs/formats.md | M1 |
 | GD04-016 | Original | 🟡 in progress | QScript VM and natives: the boot script runs; 1,233 natives the scripts call are still missing (docs/audit.md) | `gd04 --scripttest`, `--audittest` | M3 |
 | GD04-017 | Original | 🟡 in progress | Bink movies play through FFmpeg (`--playmovie`); how GH3's scripts start / skip them is still to wire | `engine/src/video/movie_player.cpp` | M3 |
+| GD04-018 | Original | 🟡 approximated | M4 highway: GH3's 2D perspective rows, lanes, gems (normal / HOPO / star flip-books / Star Power), tails, fretbars, sidebars and strike heads from global_gfx are drawn; still to do: the character's highway texture (a dark surface stands in), strings, the strike-head lip / neck / mid parts and their raise / sink, hit flames and sparks, lightning, the miss pulse and multiplier-loss shake, lefty | `docs/highway.md`, `engine/src/render/highway2d.cpp` | M4 |
+| GD04-019 | Original | ❌ | M4 HUD: GH3's career_hud_2d_elements (rock meter, score panel, multiplier lights, Star Power tubes, streak counter) through the screen-element natives; plain numbers stand in | `docs/highway.md` "HUD" | M4 |
+| GD04-020 | Original | 🟡 approximated | The 360's gem and input offsets (-66 ms) are left out on PC; calibration (lag) to come with the options | DECISIONS.md D7 | M4 |
 
 
 ## gd-game-05: Rock Band (Xbox 360)

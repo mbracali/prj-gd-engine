@@ -117,7 +117,7 @@ void App::handleEvent(const SDL_Event& e) {
 void App::frame() {
     if (song_) {
         canvas_.begin(SDL_Color{0, 0, 0, 255});
-        const bool more = song_->frame(canvas_, mixer_);
+        const bool more = song_->frame(canvas_, mixer_, textures_.get());
         captureMenuScreenshot(canvas_, double(SDL_GetTicksNS() - startNs_) / 1e6, song_->songMs());
         canvas_.end();
         if (!more) {

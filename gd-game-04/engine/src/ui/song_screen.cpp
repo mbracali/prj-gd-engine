@@ -6,12 +6,14 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <exception>
 
 #include "audio/mixer.h"
 #include "audio/song_stream.h"
 #include "data/disc.h"
 #include "render/canvas.h"
+#include "render/texture_cache.h"
 #include "script/globals.h"
 
 namespace {
@@ -46,6 +48,8 @@ bool SongScreen::start(const Disc& disc, const Globals& g, const SongInfo& song,
     player_ = std::make_unique<Player>(track_, tuning_, difficulty_, noFail);
     player_->setSongLengthMs(endMs_);
     if (autoplay) autoplay_ = std::make_unique<Autoplay>(track_, true);
+    highwayOk_ = highway_.init(g, difficulty_);
+    if (!highwayOk_) SDL_Log("highway: the 2D highway's tables are missing; the debug highway is drawn");
     auto stream = SongStream::open(disc, song.name, error);
     if (!stream) return false;
     endMs_ = std::max(endMs_, double(stream->length()) * 1000.0 / std::max(1, stream->sampleRate()));
@@ -89,6 +93,7 @@ void SongScreen::tick(double nowMs, Mixer& mixer) {
             in.whammy = whammy_;
             strum_ = false;
         }
+        shownHeld_ = in.frets;
         player_->frame(stepMs_, kStepMs, in);
         for (const PlayerEvent& ev : player_->events()) {
             if (ev.kind == PlayerEvent::Kind::Hit) mixer.setGuitarAudible(true);
@@ -98,18 +103,34 @@ void SongScreen::tick(double nowMs, Mixer& mixer) {
     }
 }
 
-bool SongScreen::frame(Canvas& canvas, Mixer& mixer) {
+bool SongScreen::frame(Canvas& canvas, Mixer& mixer, const TextureCache* textures) {
     const double now = mixer.frameTimeMs() - kLeadInMs;
     lastMs_ = now;
     tick(now, mixer);
-    draw(canvas, now);
+    draw(canvas, now, textures);
     if (now >= endMs_ || (player_->stats().failed && finishedAt_ < 0)) {
         if (finishedAt_ < 0) finishedAt_ = now;
     }
     return finishedAt_ < 0 || now < finishedAt_ + 2000.0;
 }
 
-void SongScreen::draw(Canvas& c, double now) {
+void SongScreen::draw(Canvas& c, double now, const TextureCache* textures) {
+    const PlayerStats& st = player_->stats();
+    char text[160];
+    if (highwayOk_ && textures && !std::getenv("GD04_DEBUG_HIGHWAY")) {
+        highway_.draw(c, *textures, track_, *player_, now, shownHeld_);
+        // The HUD numbers (GH3's own HUD, create_2d_hud_elements, comes with the screen elements) [approximation].
+        std::snprintf(text, sizeof text, "%lld   x%d   streak %d", static_cast<long long>(st.score), st.multiplier(), st.currentRun);
+        c.text(40, 680, 2, SDL_Color{255, 255, 255, 255}, text);
+        std::snprintf(text, sizeof text, "rock %.2f  star %.0f%s", double(st.health), double(st.starPower), st.starPowerActive ? " ON" : "");
+        c.text(1000, 680, 2, SDL_Color{255, 255, 255, 255}, text);
+        c.text(40, 20, 2, SDL_Color{200, 200, 200, 255}, song_.title + " - " + song_.artist);
+        if (finishedAt_ >= 0) {
+            std::snprintf(text, sizeof text, "%s  %d / %d notes", st.failed ? "SONG FAILED" : "SONG COMPLETE", st.notesHit, int(track_.notes.size()));
+            c.textCentered(640, 200, 3, SDL_Color{255, 255, 255, 255}, text);
+        }
+        return;
+    }
     // The debug highway (development aid until M4): five lanes, gems
     // scrolling down to the strike line over 1.5 s.
     const float x0 = 440, laneW = 80, top = 60, strike = 620;
