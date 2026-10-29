@@ -309,7 +309,7 @@ gd-game-01's Enhanced Settings (`EnhancedPanel::items` in
 `gd-game-01/engine/src/ui/select_panels.cpp`, the defaults in
 `profileValues` / `enhancedDefaults` in its `app.cpp`) against gd-game-02's
 Enhanced Options (`gd-game-02/engine/src/ui/enhanced_panel.cpp`). Backlog
-GDALL-015; one row per option to implement (GD02-097..GD02-129). Status:
+GDALL-029; one row per option to implement (GD02-097..GD02-129). Status:
 **has** (gd02 had it), **done** (implemented for this pairing), **N/A** (cannot
 apply to GH2, with the reason). Defaults are gd-game-01's desktop column
 (`profileValues(false)`); Steam Deck and Android follow its other columns.

@@ -1,4 +1,4 @@
-# Enhanced Options pairing: progress (GDALL-015)
+# Enhanced Options pairing: progress (GDALL-029)
 
 The Enhanced-menu developer's log for pairing gd-game-02's Enhanced Options
 with gd-game-01's Enhanced Settings. The parity table is in
@@ -66,7 +66,7 @@ rows are GD02-097..GD02-129.
   12 s): the list, the backdrop with the band and the post chain render, at
   the Windows default 1440p. `gd-engine-launcher/scripts/build.sh all
   --force` under the shared lock: every bundle verified complete (Linux,
-  Steam Deck, Windows, Android; 2 modules each). GDALL-015 ✅.
+  Steam Deck, Windows, Android; 2 modules each). GDALL-029 ✅.
 - Next (not in this pairing): GH2's own shadow pass (the band shadows'
   silhouette), Flaming Head (GD02-043), a Vulkan upscaler for FSR 3.1 /
   DLSS (GDALL-017), Remove All Effects in gd-game-01 (GDALL-002).
