@@ -276,7 +276,15 @@ void UiSystem::applyProps(Element& e, const qb::Struct& p, bool create) {
         else if (n == K("font")) e.font = v.key;
         else if (n == K("text")) e.text = v.str;
         else if (n == K("local_id")) e.localId = v.key;
-        else if (n == K("exclusive_device")) e.exclusiveDevice = int(v.number());
+        else if (n == K("exclusive_device")) {
+            e.exclusiveMask = 0, e.exclusiveDevice = -1;
+            if (v.type == qb::Type::Array && v.arr) {
+                for (const qb::Value& d : v.arr->values)
+                    if (int i = int(d.number()); i >= 0 && i < 32) e.exclusiveMask |= 1u << i;
+            } else {
+                e.exclusiveDevice = int(v.number());
+            }
+        }
         else if (n == K("font_spacing")) e.fontSpacing = v.number();
         else if (n == K("space_spacing")) e.spaceSpacing = v.number();
         else if (n == K("line_spacing")) e.lineSpacing = v.number();
@@ -484,12 +492,16 @@ void UiSystem::padEvent(uint32_t event, int device) {
     // To every focused element (a menu and its selected child) [I].
     std::vector<uint32_t> ids;
     for (Element* e : focusedElements())
-        if (e->exclusiveDevice < 0 || e->exclusiveDevice == device) ids.push_back(e->id);
+        if (e->exclusiveMask ? (device >= 0 && device < 32 && (e->exclusiveMask >> device & 1)) : (e->exclusiveDevice < 0 || e->exclusiveDevice == device))
+            ids.push_back(e->id);
     // root_window gets pad_start (the pause handler lives there) [C data].
     if (event == K("pad_start") && std::find(ids.begin(), ids.end(), kRootWindow) == ids.end()) ids.push_back(kRootWindow);
     if (const char* v = SDL_getenv("GD04_UILOG"); v && *v && *v != '0') {
         std::string who;
-        for (uint32_t id : ids) who += " " + qbkey::name(id);
+        for (uint32_t id : ids) {
+            who += " " + qbkey::name(id);
+            if (const Element* e = find(id); e && !e->handlers.empty()) who += "(" + std::to_string(e->handlers.size()) + " handlers)";
+        }
         SDL_Log("ui: %s (device %d) ->%s", qbkey::name(event).c_str(), device, who.c_str());
     }
     for (uint32_t id : ids)
@@ -639,22 +651,28 @@ void UiSystem::draw(Canvas& c) {
             for (auto& ch : e->children) stack.push_back(ch.get());
         }
     }
+    struct Clip {
+        bool on = false;
+        float x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+    };
     struct Item {
         const Element* e;
         float cx, cy, wsx, wsy, wa, wrot;  // top-left corner, world scale, alpha, rotation (deg)
         float z;
         int depth;
+        Clip clip;  // the enclosing window elements' rectangle
     };
     struct Node {
         const Element* e;
         float cx, cy, wsx, wsy, wa, wrot;
         float z;  // the parent's effective z
         int depth;
+        Clip clip;
     };
     std::vector<Item> items;
     std::vector<Node> stack;
     ++drawCount_;
-    for (size_t k = root_->children.size(); k-- > 0;) stack.push_back({root_->children[k].get(), 0, 0, 1, 1, 1, 0, 0, 1});
+    for (size_t k = root_->children.size(); k-- > 0;) stack.push_back({root_->children[k].get(), 0, 0, 1, 1, 1, 0, 0, 1, {}});
     while (!stack.empty()) {
         const Node n = stack.back();
         stack.pop_back();
@@ -674,8 +692,16 @@ void UiSystem::draw(Canvas& c) {
         // z: the explicit z_priority (it sticks), else the parent's z + 1, 0
         // without a parent [C SetParent 0x8221D5F0 -> SetZTree 0x8221C160].
         const float z = e.zGiven ? e.z : (e.parent ? n.z + 1.0f : 0.0f);
-        items.push_back({&e, cx, cy, wsx, wsy, wa, wrot, z, n.depth});
-        for (size_t k = e.children.size(); k-- > 0;) stack.push_back({e.children[k].get(), cx, cy, wsx, wsy, wa, wrot, z, n.depth + 1});
+        items.push_back({&e, cx, cy, wsx, wsy, wa, wrot, z, n.depth, n.clip});
+        // A window element clips its children to its rectangle (its rotation
+        // ignored) [I: the pause menu's scrolling tiles, the store's text].
+        Clip clip = n.clip;
+        if (e.type == K("windowelement") && e.w > 0 && e.h > 0) {
+            const float x0 = cx, y0 = cy, x1 = cx + e.w * wsx, y1 = cy + e.h * wsy;
+            if (!clip.on) clip = Clip{true, x0, y0, x1, y1};
+            else clip = Clip{true, std::max(clip.x0, x0), std::max(clip.y0, y0), std::min(clip.x1, x1), std::min(clip.y1, y1)};
+        }
+        for (size_t k = e.children.size(); k-- > 0;) stack.push_back({e.children[k].get(), cx, cy, wsx, wsy, wa, wrot, z, n.depth + 1, clip});
     }
     // z_priority is one global key for sprites and texts (one list,
     // 0x8238D7D0) [C]. Equal z: deeper elements over shallower ones, then
@@ -685,6 +711,8 @@ void UiSystem::draw(Canvas& c) {
         const Element& e = *it.e;
         const uint8_t alpha = uint8_t(std::clamp(float(e.rgba[3]) * it.wa, 0.0f, 255.0f));
         if (alpha == 0) continue;
+        if (it.clip.on) c.setClip(it.clip.x0, it.clip.y0, it.clip.x1, it.clip.y1);
+        else c.clearClip();
         const float r = it.wrot * kDeg, cs = std::cos(r), sn = std::sin(r);
         auto P = [&](float lx, float ly, float u, float v, const std::array<uint8_t, 4>& col) {
             return Vertex{it.cx + lx * cs - ly * sn, it.cy + lx * sn + ly * cs, 0, u, v, col[0], col[1], col[2], alpha};
@@ -772,6 +800,7 @@ void UiSystem::draw(Canvas& c) {
             ++stats_.textDrawn;
         }
     }
+    c.clearClip();
 }
 
 // ---- the port's own screens and the mouse (not GH3's) ----
@@ -825,6 +854,11 @@ void UiSystem::drawText(Canvas& c, uint32_t font, const std::string& text, float
         pen += g.width + float(f.tracking);
     }
     if (!verts.empty()) c.draw(verts.data(), verts.size(), int(fe->tex.id), Blend::Alpha);
+}
+
+float UiSystem::fontLineHeight(uint32_t font) const {
+    const FontEntry* fe = fontFor(font);
+    return fe ? fe->f.lineHeight : 0.0f;
 }
 
 float UiSystem::textWidth(uint32_t font, const std::string& text, float h) const {

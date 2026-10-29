@@ -29,7 +29,8 @@ bool matches(uint8_t shape, const TrackNote& n) {
 }  // namespace
 
 int PlayerStats::multiplier() const {
-    const int m = currentRun < 10 ? 1 : currentRun < 20 ? 2 : currentRun < 30 ? 3 : 4;  // [C 0x8210BB40]
+    const int r = multiplierRun;
+    const int m = r < 10 ? 1 : r < 20 ? 2 : r < 30 ? 3 : 4;  // [C 0x8210BB40, 0x8210A748]
     return starPowerActive ? m * 2 : m;
 }
 
@@ -41,31 +42,70 @@ Player::Player(const NoteTrack& track, const Tuning& tuning, int difficulty, boo
 
 void Player::changeHealth(bool good, double now) {
     const size_t d = size_t(diff_);
-    float delta = good ? (st_.starPowerActive ? tu_.healthStar[d] : tu_.healthGood[d]) : tu_.healthBad[d];
-    // x1.35 in the red, x0.85 in the green [C 0x821062A8, 0x8210F6A0].
-    if (st_.health <= tu_.healthPoorMedium) delta *= tu_.healthRedMulti;
-    else if (st_.health >= tu_.healthMediumGood) delta *= tu_.healthGreenMulti;
+    float delta;
+    if (rules_.boss) {
+        // The boss: its props' gain / loss per note, no multiplier [C 0x8210F6A0, 0x8210FD18].
+        delta = good ? rules_.bossGain : -rules_.bossLoss;
+    } else {
+        if (rules_.health == HealthMode::Battle) delta = good ? tu_.healthGoodBattle[d] : tu_.healthBadBattle[d];
+        else if (rules_.health == HealthMode::Boss) delta = good ? tu_.healthGoodBoss[d] : tu_.healthBadBoss[d];
+        else delta = good ? (st_.starPowerActive ? tu_.healthStar[d] : tu_.healthGood[d]) : tu_.healthBad[d];
+        // x1.35 in the red, x0.85 in the green [C 0x821062A8, 0x8210F6A0].
+        if (st_.health <= tu_.healthPoorMedium) delta *= tu_.healthRedMulti;
+        else if (st_.health >= tu_.healthMediumGood) delta *= tu_.healthGreenMulti;
+    }
     if (!good) {
+        // No loss once at 0 (co-op excepted) [C 0x8210FD18].
+        if (st_.health <= 0 && !rules_.negativeHealth) return;
         // Invincibility: the first 20% (Easy) / 10% (Medium) of the song, no
         // loss once at or below health_invincible_minimum x 0.02 [C 0x8210FD18].
-        const float pct = diff_ == 0 ? tu_.healthInvincibleEasy : diff_ == 1 ? tu_.healthInvincibleMedium : 0;
-        if (pct > 0 && now < songLengthMs_ * pct / 100.0 && st_.health <= tu_.healthInvincibleMinimum * 0.02f) return;
+        const float pct = rules_.invinciblePct >= 0 ? rules_.invinciblePct
+                          : diff_ == 0                ? tu_.healthInvincibleEasy
+                          : diff_ == 1                ? tu_.healthInvincibleMedium
+                                                      : 0;
+        if (!rules_.boss && pct > 0 && now < songLengthMs_ * pct / 100.0 && st_.health <= tu_.healthInvincibleMinimum * 0.02f) return;
     }
     st_.health = std::min(kHealthMax, st_.health + delta);
-    if (st_.health <= 0 && !noFail_ && !st_.failed) {
+    if (st_.health <= 0 && rules_.canFail && !noFail_ && !st_.failed) {
         st_.failed = true;
         events_.push_back({PlayerEvent::Kind::Failed, -1, now});
     }
-    if (noFail_) st_.health = std::max(st_.health, 0.0f);
+    if (noFail_ || (!rules_.negativeHealth && rules_.canFail)) st_.health = std::max(st_.health, 0.0f);
 }
 
-void Player::addStarPower(float amount) { st_.starPower = std::clamp(st_.starPower + amount, 0.0f, 100.0f); }
+void Player::addStarPower(float amount) {
+    st_.starPower = std::clamp(st_.starPower + amount, 0.0f, 100.0f);
+    // Co-op: every gain goes to both players [C script increase_star_power].
+    if (rules_.coop && partner_) partner_->st_.starPower = std::clamp(partner_->st_.starPower + amount, 0.0f, 100.0f);
+}
+
+void Player::syncMultiplierRun() {
+    // Co-op: the multiplier counts both players' runs [C 0x8210A748].
+    const int r = st_.currentRun + (rules_.coop && partner_ ? partner_->st_.currentRun : 0);
+    st_.multiplierRun = r;
+    if (rules_.coop && partner_) partner_->st_.multiplierRun = r;
+}
+
+void Player::resetRuns() {
+    // A miss or an overstrum ends the run (co-op: both runs) [C 0x8210C800, 0x8210CB10].
+    st_.currentRun = 0;
+    if (rules_.coop && partner_) partner_->st_.currentRun = 0;
+    syncMultiplierRun();
+}
+
+void Player::activateStarPower(double now) {
+    if (st_.starPowerActive || st_.starPower <= 0) return;
+    st_.starPowerActive = true;
+    ++st_.starPowerUses;
+    events_.push_back({PlayerEvent::Kind::StarPowerOn, -1, now});
+}
 
 void Player::miss(size_t i, double now) {
     const TrackNote& n = t_.notes[i];
     ++st_.totalNotes;
+    if (rules_.coop && partner_) ++partner_->st_.totalNotes;  // co-op: both count [C 0x8210C800]
     ++st_.misses;
-    st_.currentRun = 0;
+    resetRuns();
     lastHitMask_ = 0;
     if (n.phrase >= 0) missedPhrase_[size_t(n.phrase)] = true;  // star_miss_note [C 0x8211F56C]
     changeHealth(false, now);
@@ -74,7 +114,7 @@ void Player::miss(size_t i, double now) {
 
 void Player::overstrum(double now) {
     ++st_.overstrums;
-    st_.currentRun = 0;
+    resetRuns();
     lastHitMask_ = 0;
     // The phrase in progress is lost if the previous note was in it [C 0x8211F938].
     if (cur_ > 0 && cur_ < t_.notes.size()) {
@@ -90,10 +130,12 @@ void Player::hit(size_t i, double now, bool tap) {
     while (cur_ < i) miss(cur_++, now);
     const TrackNote& n = t_.notes[i];
     ++st_.currentRun;
+    syncMultiplierRun();
     st_.bestRun = std::max(st_.bestRun, st_.currentRun);
     ++st_.notesHit;
     ++st_.totalNotes;
-    st_.score += int64_t(kPointsPerNote) * st_.multiplier() * n.fretCount();  // [C 0x8210BB40]
+    if (rules_.coop && partner_) ++partner_->st_.notesHit, ++partner_->st_.totalNotes;  // co-op: both count [C 0x8210BB40]
+    addScore(double(kPointsPerNote) * st_.multiplier() * n.fretCount());  // [C 0x8210BB40]
     lastHitMask_ = n.frets;
     pendingMs_ = -1;
     if (tap) {
@@ -116,8 +158,13 @@ void Player::hit(size_t i, double now, bool tap) {
     // Star Power phrase: its last note hit with no star note missed [C 0x8211E4E8].
     if (n.phrase >= 0 && n.phraseLast && !missedPhrase_[size_t(n.phrase)]) {
         ++st_.phrasesCaptured;
-        if (!st_.starPowerActive) addStarPower(tu_.starPowerSequenceBonus);
-        events_.push_back({PlayerEvent::Kind::StarPhrase, int(i), now});
+        if (!rules_.starPower) {
+            // Battle / boss: the phrase gives its card (battlemode_ready) [C 0x8211E7B0].
+            events_.push_back({PlayerEvent::Kind::BattlePhrase, int(i), now});
+        } else {
+            if (!st_.starPowerActive) addStarPower(tu_.starPowerSequenceBonus);
+            events_.push_back({PlayerEvent::Kind::StarPhrase, int(i), now});
+        }
     }
     cur_ = i + 1;
 }
@@ -130,7 +177,7 @@ void Player::updateSustain(double now, double dt, const FrameInput& in) {
     const int mult = st_.multiplier();
     if (now >= sus_.end) {
         // Held to the end: the rest of the note's points [C 0x82106B98].
-        if (n.maxSustainPoints > sus_.awarded) st_.score += int64_t(n.maxSustainPoints - sus_.awarded) * mult;
+        if (n.maxSustainPoints > sus_.awarded) addScore(double(n.maxSustainPoints - sus_.awarded) * mult);
         changeHealth(true, now);
         events_.push_back({PlayerEvent::Kind::SustainDone, sus_.note, now});
         sus_ = Sustain{};
@@ -142,13 +189,13 @@ void Player::updateSustain(double now, double dt, const FrameInput& in) {
         const int due = int(std::floor(sus_.units)) - sus_.awarded;
         if (due >= 2) {  // paid in chunks of at least 2 [C 0x82106B98]
             const int pay = std::min(due, std::max(0, n.maxSustainPoints - sus_.awarded));
-            st_.score += int64_t(pay) * mult;
+            addScore(double(pay) * mult);
             sus_.awarded += pay;
         }
         // Star whammy: a star sustain held with the whammy moving adds
         // star_power_whammy_add per beat, not while Star Power is on [C script star_power_whammy].
-        if (n.phrase >= 0 && !missedPhrase_[size_t(n.phrase)] && !st_.starPowerActive && in.whammy > 0.03f)
-            addStarPower(float(tu_.starPowerWhammyAdd * dt / std::max(1.0f, t_.beatAt(float(now)))));
+        if (rules_.starPower && n.phrase >= 0 && !missedPhrase_[size_t(n.phrase)] && !st_.starPowerActive && in.whammy > 0.03f)
+            addStarPower(float((rules_.coop ? tu_.starPowerWhammyAddCoop : tu_.starPowerWhammyAdd) * dt / std::max(1.0f, t_.beatAt(float(now)))));
         return;
     }
     // Released early: complete if little was left [C 0x8211C9D0].
@@ -162,15 +209,15 @@ void Player::updateSustain(double now, double dt, const FrameInput& in) {
 void Player::updateStarPower(double now, double dt, const FrameInput& in) {
     // Select (or tilt for star_power_trigger_frames frames) deploys at >= 50 [C 0x82112D7C, 0x82112F28].
     triggerFrames_ = in.starPower ? triggerFrames_ + 1 : 0;
-    if (!st_.starPowerActive && in.starPower && st_.starPower >= kStarPowerNeeded) {
-        st_.starPowerActive = true;
-        ++st_.starPowerUses;
-        events_.push_back({PlayerEvent::Kind::StarPowerOn, -1, now});
-    }
+    // The trigger (a press): co-op's raise-axe prompt and battle's attacks (Match).
+    if (in.starPower && !triggerHeld_) events_.push_back({PlayerEvent::Kind::Trigger, -1, now});
+    triggerHeld_ = in.starPower;
+    if (rules_.starPower && !rules_.coop && !st_.starPowerActive && in.starPower && st_.starPower >= kStarPowerNeeded) activateStarPower(now);
     if (st_.starPowerActive) {
-        // Drains star_power_drain_rate per measure [C script star_power_activate_and_drain].
+        // Drains star_power_drain_rate per measure (co-op: _coop) [C script star_power_activate_and_drain].
         const double measure = std::max(1.0f, t_.measureAt(float(now)));
-        st_.starPower = float(std::max(0.0, double(st_.starPower) - tu_.starPowerDrainRate * dt / measure));
+        const double rate = rules_.coop ? tu_.starPowerDrainRateCoop : tu_.starPowerDrainRate;
+        st_.starPower = float(std::max(0.0, double(st_.starPower) - rate * dt / measure));
         if (st_.starPower <= 0) {
             st_.starPowerActive = false;
             events_.push_back({PlayerEvent::Kind::StarPowerOff, -1, now});
@@ -178,7 +225,10 @@ void Player::updateStarPower(double now, double dt, const FrameInput& in) {
     }
 }
 
-void Player::frame(double now, double dt, const FrameInput& in) {
+void Player::frame(double now, double dt, const FrameInput& raw) {
+    // Dead frets (broken_string_mask) are not seen by the judge [C 0x82100DA0].
+    FrameInput in = raw;
+    in.frets = uint8_t(in.frets & ~dead_);
     const auto& notes = t_.notes;
     const size_t n = notes.size();
     if (pendingMs_ >= 0) pendingMs_ -= dt;

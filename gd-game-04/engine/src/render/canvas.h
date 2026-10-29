@@ -45,6 +45,10 @@ public:
     // `repeat`: the texture wraps (scrolling surfaces) instead of clamping.
     void draw(const Vertex* v, size_t count, int texture, Blend blend, bool repeat = false);
     void fillRect(float x, float y, float w, float h, SDL_Color c);
+    // Triangles drawn while a clip rectangle is set are cut to it (screen
+    // units; UVs and colours interpolated) -- GH3's window elements.
+    void setClip(float x0, float y0, float x1, float y1) { clip_ = true, cx0_ = x0, cy0_ = y0, cx1_ = x1, cy1_ = y1; }
+    void clearClip() { clip_ = false; }
     // Text in the 8x8 debug font, `scale` times its size (non-ASCII shows as '?').
     void text(float x, float y, float scale, SDL_Color c, const std::string& s);
     void textCentered(float cx, float y, float scale, SDL_Color c, const std::string& s);
@@ -68,4 +72,7 @@ private:
     uint32_t batchTexture_ = 0;
     Blend batchBlend_ = Blend::Alpha;
     bool batchRepeat_ = false;
+    bool clip_ = false;
+    float cx0_ = 0, cy0_ = 0, cx1_ = 0, cy1_ = 0;
+    std::vector<Vertex> clipped_;
 };

@@ -57,6 +57,11 @@ FrontEnd::~FrontEnd() {
 bool FrontEnd::start() { return vm_->run(qbkey::key("guitar_startup"), qb::Struct{}); }
 
 void FrontEnd::handle(const InputEvent& e) {
+    // The held frets as GH3's patterns (green 0x10000 .. orange 0x1) for GetHeldPattern.
+    if (isFret(e.action)) {
+        const uint32_t bit = 0x10000u >> (4 * fretOf(e.action));
+        heldPattern = e.down ? (heldPattern | bit) : (heldPattern & ~bit);
+    }
     if (!e.down) return;
     ++pad.makes;
     pad.device = e.player;
@@ -76,6 +81,11 @@ void FrontEnd::handle(const InputEvent& e) {
     if (ev) ui_->padEvent(qbkey::key(ev), e.player);
 }
 
+bool FrontEnd::attractMode() const {
+    const qb::Value* a = vm_->global(qbkey::key("is_attract_mode"));
+    return a && a->type == qb::Type::Int && a->i == 1;
+}
+
 void FrontEnd::startPressed() {
     // Start in a song: GH3's gh3_start_pressed (the pause menu's flow action) [C script guitar_pause.qb].
     vm_->spawn(qbkey::key("gh3_start_pressed"), qb::Struct{});
@@ -83,33 +93,55 @@ void FrontEnd::startPressed() {
 
 void FrontEnd::songEnded(const SongResult& r) {
     songPlaying = false;
-    // player1_status as GH3's gem scroller leaves it [C data: the fields
-    // GuitarEvent_SongWon_Spawned and Progression_SongWon read]; stars by the
-    // score over the base score [I: thresholds, OPEN_QUESTIONS].
-    const uint32_t ps = qbkey::key("player1_status");
-    if (const qb::Value* cur = vm_->global(ps); cur && cur->st) {
+    using qs::Vm;
+    // playerN_status as GH3's gem scroller leaves it [C data: the fields
+    // GuitarEvent_SongWon_Spawned, Progression_SongWon and the newspaper
+    // read]. stars: GH3's Progression_SongWon computes them from score and
+    // base_score [C script; agents/scratch/stars_spec.md].
+    auto fill = [&](const char* name, const SongResultPlayer& p, int finalBlow, int cards) {
+        const uint32_t ps = qbkey::key(name);
+        const qb::Value* cur = vm_->global(ps);
+        if (!cur || !cur->st) return;
         qb::Value v = *cur;
         v.st = std::make_shared<qb::Struct>(*cur->st);
-        const double ratio = r.baseScore > 0 ? double(r.score) / r.baseScore : 0;
-        const int stars = ratio >= 2.8 ? 5 : ratio >= 2.0 ? 4 : 3;
-        using qs::Vm;
-        Vm::set(*v.st, qbkey::key("score"), Vm::makeFloat(float(r.score)));
-        Vm::set(*v.st, qbkey::key("notes_hit"), Vm::makeInt(r.notesHit));
-        Vm::set(*v.st, qbkey::key("total_notes"), Vm::makeInt(r.totalNotes));
-        Vm::set(*v.st, qbkey::key("max_notes"), Vm::makeInt(r.totalNotes));
-        Vm::set(*v.st, qbkey::key("best_run"), Vm::makeInt(r.bestRun));
-        Vm::set(*v.st, qbkey::key("base_score"), Vm::makeFloat(float(r.baseScore)));
-        Vm::set(*v.st, qbkey::key("stars"), Vm::makeInt(r.won ? stars : 0));
-        Vm::set(*v.st, qbkey::key("sp_phrases_hit"), Vm::makeInt(r.phrasesHit));
-        Vm::set(*v.st, qbkey::key("sp_phrases_total"), Vm::makeInt(r.phrasesTotal));
-        Vm::set(*v.st, qbkey::key("current_health"), Vm::makeFloat(r.health));
-        Vm::set(*v.st, qbkey::key("star_power_amount"), Vm::makeFloat(r.starPower));
+        Vm::set(*v.st, qbkey::key("score"), Vm::makeFloat(float(p.score)));
+        Vm::set(*v.st, qbkey::key("notes_hit"), Vm::makeInt(p.notesHit));
+        Vm::set(*v.st, qbkey::key("total_notes"), Vm::makeInt(p.totalNotes));
+        Vm::set(*v.st, qbkey::key("max_notes"), Vm::makeInt(p.maxNotes));
+        Vm::set(*v.st, qbkey::key("best_run"), Vm::makeInt(p.bestRun));
+        Vm::set(*v.st, qbkey::key("base_score"), Vm::makeFloat(float(p.baseScore)));
+        Vm::set(*v.st, qbkey::key("sp_phrases_hit"), Vm::makeInt(p.phrasesHit));
+        Vm::set(*v.st, qbkey::key("sp_phrases_total"), Vm::makeInt(p.phrasesTotal));
+        Vm::set(*v.st, qbkey::key("current_health"), Vm::makeFloat(p.health));
+        Vm::set(*v.st, qbkey::key("star_power_amount"), Vm::makeFloat(p.starPower));
+        if (r.twoPlayers) {
+            Vm::set(*v.st, qbkey::key("final_blow_powerup"), Vm::makeInt(finalBlow));
+            Vm::set(*v.st, qbkey::key("current_num_powerups"), Vm::makeInt(cards));
+        }
         vm_->setGlobal(ps, v);
+    };
+    SongResultPlayer p1;
+    p1.score = r.score, p1.notesHit = r.notesHit, p1.totalNotes = r.totalNotes, p1.bestRun = r.bestRun, p1.phrasesHit = r.phrasesHit;
+    p1.phrasesTotal = r.phrasesTotal, p1.baseScore = r.baseScore, p1.health = r.health, p1.starPower = r.starPower, p1.maxNotes = r.maxNotes;
+    fill("player1_status", p1, r.finalBlow[0], int(r.cards[0].size()));
+    if (r.twoPlayers) {
+        fill("player2_status", r.p2, r.finalBlow[1], int(r.cards[1].size()));
+        // The hands (current_powerups_p1 / _p2, three slots) [C data guitar_battle.qb].
+        for (int p = 0; p < 2; ++p) {
+            qb::Value a;
+            a.type = qb::Type::Array;
+            a.arr = std::make_shared<qb::Array>();
+            for (size_t i = 0; i < 3; ++i) a.arr->values.push_back(Vm::makeInt(i < r.cards[size_t(p)].size() ? r.cards[size_t(p)][i] : 0));
+            vm_->setGlobal(qbkey::key(p ? "current_powerups_p2" : "current_powerups_p1"), a);
+        }
     }
     // GH3's own end of song: You Rock / Song Failed, progression (scores,
     // stars, unlocks, encores, bosses), then the flow's action [C scripts
-    // GuitarEvent_SongWon / GuitarEvent_SongFailed].
-    vm_->spawn(qbkey::key(r.won ? "GuitarEvent_SongWon" : "GuitarEvent_SongFailed"), qb::Struct{});
+    // GuitarEvent_SongWon / GuitarEvent_SongFailed]. A battle KO goes the
+    // way the C code sends it, song_failed (the script then calls
+    // GuitarEvent_SongWon battle_win = 1); a battle at the song's end,
+    // SongWon (sudden death) [C 0x8210FD18, GuitarEvent_SongFailed].
+    vm_->spawn(qbkey::key(r.won && !r.battleKo ? "GuitarEvent_SongWon" : "GuitarEvent_SongFailed"), qb::Struct{});
 }
 
 void FrontEnd::frame(Canvas& c, double dtMs) {
@@ -126,9 +158,10 @@ void FrontEnd::frame(Canvas& c, double dtMs) {
     if (!glitchesDone_) {
         const qb::Value* a = vm_->global(qbkey::key("ui_flow_manager_state"));
         if (a && a->arr && !a->arr->values.empty() && a->arr->values[0].key == qbkey::key("main_menu_fs"))
-            glitchesDone_ = true, ensureGlitches(*vm_);
+            glitchesDone_ = true, (SDL_getenv("GD04_NO_GLITCHES") ? false : ensureGlitches(*vm_));  // (development aid: off)
     }
-    if (songPlaying && !songPaused) return;
+    // During a song GH3's scripts keep running (the attract mode's input
+    // check, the end-of-song events) and their elements draw over it [C: one VM].
     accum_ += dtMs;
     int steps = 0;
     while (accum_ >= kStepMs && steps < 8) {

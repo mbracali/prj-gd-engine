@@ -2,6 +2,7 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #pragma once
 
+#include <array>
 #include <memory>
 #include <string>
 #include <vector>
@@ -38,30 +39,64 @@ public:
     } pad;
     FlowState flow;
     Sfx sfx;
+    // The controllers (device numbers 0..3) the scripts see as connected
+    // (GetActiveControllers, a bit each; the app keeps it current) and
+    // those that are guitars (IsGuitarController).
+    uint32_t activeControllers = 1, guitarControllers = 0xF;
     // A song the scripts started (start_gem_scroller): the app plays it
     // with the native game core, then calls songEnded.
     struct SongRequest {
         bool pending = false;
         uint32_t song = 0;
         int difficulty = 3;
+        // Two players (start_gem_scroller's globals) [C script start_gem_scroller]:
+        // game_mode (p1_quickplay, p2_career, p2_coop, p2_faceoff,
+        // p2_pro_faceoff, p2_battle, ...), current_num_players,
+        // current_difficulty2, playerN_status.part (guitar / rhythm), and a
+        // boss song's current_boss (boss_battle = 1).
+        uint32_t gameMode = 0;
+        int players = 1;
+        int difficulty2 = 3;
+        bool part2Rhythm[2] = {false, false};
+        uint32_t boss = 0;  // the boss props struct's name (boss_tom_props ...), 0: none
+        // Battle's sudden death: battle_sudden_death and the saved health
+        // (GuitarEvent_SongWon) [C script].
+        bool suddenDeath = false;
+        float saveHealth[2] = {1.0f, 1.0f};
     } songRequest;
     bool songPlaying = false;
     // Paused with Start in a song: GH3's pause menu runs over the frozen song
     // (gh3_start_pressed); songKill: its quit / restart killed the gem scroller.
     bool songPaused = false, songKill = false;
+    uint32_t heldPattern = 0;  // frets held in the menus (GetHeldPattern)
     void startPressed();
+    // is_attract_mode = 1 (the demo after 110 s on "press any button").
+    bool attractMode() const;
     // A movie the scripts asked for (PlayMovie movie = 'atvi'): the app plays
     // it modally (video/movie_player.h).
     std::string movieRequest;
+    struct SongResultPlayer {
+        int64_t score = 0;
+        int notesHit = 0, totalNotes = 0, bestRun = 0, phrasesHit = 0, phrasesTotal = 0, maxNotes = 0;
+        double baseScore = 0;
+        float health = 1, starPower = 0;
+    };
     // The song is over: the flow goes on with win_song / fail_song [C data:
     // GuitarEvent_SongWon_Spawned / GuitarEvent_SongFailed_Spawned].
     // The song's result, as GH3 keeps it in player1_status [C data guitar.qb].
     struct SongResult {
         bool won = false;
         int64_t score = 0;
-        int notesHit = 0, totalNotes = 0, bestRun = 0, phrasesHit = 0, phrasesTotal = 0;
+        int notesHit = 0, totalNotes = 0, bestRun = 0, phrasesHit = 0, phrasesTotal = 0, maxNotes = 0;
         double baseScore = 0;
         float health = 1, starPower = 0;
+        // Two players: player 2's numbers (player2_status) and battle's.
+        bool twoPlayers = false;
+        SongResultPlayer p2;
+        // Battle: a KO (song_failed -> GuitarEvent_SongWon battle_win = 1) [C GuitarEvent_SongFailed].
+        bool battleKo = false;
+        std::array<int, 2> finalBlow{-1, -1};
+        std::array<std::vector<int>, 2> cards;
     };
     void songEnded(const SongResult& r);
     // GetSongTimeMs: the song's time while it plays (set by the app), then

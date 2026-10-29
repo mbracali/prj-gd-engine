@@ -135,3 +135,37 @@ rules, the Star Power measure length (4 beats [I]), the input offset (0 on
 PC [I]), menus (the VM runs the boot script; 1,233 natives missing).
 Next: GH3's 2D highway and HUD (agent researching the sprites), then the
 screen-element natives for menus (M3). Estimate left: ~20 h.
+
+## 2026-10-29 (second session): M3, M4, M5, M6, M8 gates; M7 most walks
+
+Gates passed (commands from `gd-game-04/engine`, fresh `build/dev` binary,
+`ISO=<the GH3 ISO>`, `SDL_VIDEO_DRIVER=offscreen SDL_AUDIO_DRIVER=dummy`):
+- M3 (menus from boot to song to results, through GH3's own scripts):
+  `--walktest quickplay|lose|back|pause|pausequit|attract` -> "passed";
+  `--uitest` starts every flow state; movies (PlayMovie), menu sounds and
+  music (sound events, streamall), GH3's end of song (GuitarEvent_SongWon /
+  SongFailed with player1_status filled).
+- M4: GH3's highway with the character texture, hit flames, the HUD from
+  the disc (career_hud_2d_elements + UpdateScoreFastPerFrame's rules; score
+  in GH3's digits). Counters in the song-end "hud:" log line.
+- M5: `--venuetest` -> "venuetest: all 8 venues drawn; cameras and lights
+  frame-rate independent" (1016 checkpoints identical at 60 / 240 fps).
+- M6: `--chartest` -> "chartest: 82 bodies and 113 instruments skinned and
+  animated; the band in 8 venues frame-rate independent and on screen";
+  golden poses 8 of 8.
+- M7 so far: `--walktest career|glitches|vault|cheats` -> "passed"; saves as
+  versioned JSON with each band's tag sections; The Glitches (D9).
+- M8: `--walktest mouse|gamepads|stickyaxis|cheats` -> "passed".
+- `--selftest` -> "selftest: all charts fully hit"; `--shadertest` -> "all 4
+  shader programs compiled"; `--scripttest` passes.
+
+VM fixes found by the walks (each a real behaviour of GH3's scripts):
+LZSS ring filled with spaces (1079 scripts decoded wrongly before);
+z_priority default = parent + 1 (SetZTree); struct includes (unnamed
+structs, key-named globals); `change structurename / globalname`; unset
+`<name>` reads the global; a name after a comparison is a key; scripts used
+as conditions may wait; PushGlobalTags / PopGlobalTags sections;
+GetArraySize by global name; window elements clip.
+
+Built only / not run here: Windows and Android of this state (the packages
+are rebuilt at M9).

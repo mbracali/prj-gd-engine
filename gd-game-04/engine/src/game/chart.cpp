@@ -120,6 +120,14 @@ Chart loadChart(const Disc& disc, const std::string& song) {
             c.markers.push_back(m);
         }
     }
+    if (const qb::Value* v = f.find(qbkey::key(song + "_scripts")); v && v->type == qb::Type::Array && v->arr)
+        for (const qb::Value& e : v->arr->values) {
+            if (e.type != qb::Type::Struct || !e.st) continue;
+            Chart::TimedScript ts;
+            if (const qb::Value* t = e.st->find(qbkey::key("time"))) ts.time = intOf(*t);
+            if (const qb::Value* t = e.st->find(qbkey::key("scr"))) ts.script = t->key;
+            c.scripts.push_back(ts);
+        }
     c.cameras = events(f, song + "_cameras_notes");
     c.lightshow = events(f, song + "_lightshow_notes");
     c.crowd = events(f, song + "_crowd_notes");

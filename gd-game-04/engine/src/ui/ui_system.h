@@ -45,6 +45,7 @@ struct Element {
     bool hidden = false, flipH = false, flipV = false, notFocusable = false, blockEvents = false;
     bool allowExpansion = false, locked = false, preserveOrientation = false;
     int exclusiveDevice = -1;
+    uint32_t exclusiveMask = 0;  // exclusive_device as an array of devices (bit per device; 0: none) [C script create_select_difficulty_menu]
     float fontSpacing = 0, spaceSpacing = 0, lineSpacing = 1;
     // Menus [C 0x82315AA0 / 0x82315B08]
     float regularSpace = 0, paddingScale = 1, spacingBetween = 0;
@@ -97,6 +98,8 @@ public:
     void drawText(Canvas& c, uint32_t font, const std::string& s, float x, float y, float h, const std::array<uint8_t, 4>& rgba,
                   uint32_t align) const;
     float textWidth(uint32_t font, const std::string& s, float h) const;
+    // A font's line height in its own units (0 if the font is not loaded).
+    float fontLineHeight(uint32_t font) const;
     // The mouse over GH3's menus: the focused menus' items, hit-tested at
     // their last drawn bounds (an item that draws nothing itself stands for
     // the element its focus handler names, as the main menu's do). `focus`

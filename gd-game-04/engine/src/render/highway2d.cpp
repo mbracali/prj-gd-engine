@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <string>
 
 #include "data/qbkey.h"
 #include "game/note_track.h"
@@ -39,31 +40,37 @@ const qb::Value* arrayGlobal(const Globals& g, const char* name) {
 
 }  // namespace
 
-bool Highway2D::init(const Globals& g, int difficulty) {
-    // One player: the "...1" tweaks (generate_pos_table) [C script].
-    playline_ = num(g, "highway_playline1", 655);
-    height_ = num(g, "highway_height1", 350);
-    topWidth_ = num(g, "highway_top_width1", 160);
-    widthOffset_ = num(g, "widthOffsetFactor1", 2.2f);
-    fade_ = num(g, "highway_fade1", 30);
-    tiling_ = num(g, "gHighwayTiling1", 1.5f);
-    gemStart_ = num(g, "gem_start_scale1", 0.25f);
+bool Highway2D::init(const Globals& g, int difficulty, int players, int player) {
+    // One player: the "...1" tweaks; two players: the "...2" ones, each
+    // highway's container moved by x_offset_p2 left (player 1) or right
+    // (player 2) (generate_pos_table, setup_highway) [C script].
+    const bool two = players == 2;
+    auto tw = [&](const char* name, float fallback) { return num(g, (std::string(name) + (two ? "2" : "1")).c_str(), fallback); };
+    playline_ = tw("highway_playline", 655);
+    height_ = tw("highway_height", 350);
+    topWidth_ = tw("highway_top_width", 160);
+    widthOffset_ = tw("widthOffsetFactor", 2.2f);
+    fade_ = tw("highway_fade", 30);
+    tiling_ = tw("gHighwayTiling", 1.5f);
+    gemStart_ = tw("gem_start_scale", 0.25f);
     gemEnd_ = gemStart_ * (1 + widthOffset_);
-    starScale_ = num(g, "gem_star_scale1", 1.3f);
-    gemJust_ = num(g, "gem_y_just1", 0.83f);
-    starJust_ = num(g, "star_y_just1", 0.5f);
-    fretbarStart_ = num(g, "fretbar_start_scale1", 0.15f);
+    starScale_ = tw("gem_star_scale", 1.3f);
+    gemJust_ = tw("gem_y_just", 0.83f);
+    starJust_ = tw("star_y_just", 0.5f);
+    fretbarStart_ = tw("fretbar_start_scale", 0.15f);
     fretbarEnd_ = fretbarStart_ * (1 + widthOffset_);
-    whammyTop_ = num(g, "whammy_top_width1", 10);
-    whammyOffset_ = num(g, "whammy_width_offset1", 1.8f);
-    sidebarXScale_ = num(g, "sidebar_x_scale1", 0.3f);
-    sidebarYScale_ = num(g, "sidebar_y_scale1", 1);
-    sidebarXOffset_ = num(g, "sidebar_x_offset1", 4);
+    whammyTop_ = tw("whammy_top_width", 10);
+    whammyOffset_ = tw("whammy_width_offset", 1.8f);
+    sidebarXScale_ = tw("sidebar_x_scale", 0.3f);
+    sidebarYScale_ = tw("sidebar_y_scale", 1);
+    sidebarXOffset_ = tw("sidebar_x_offset", 4);
+    cx_ = 640;
+    if (two) cx_ += (player == 0 ? -1.0f : 1.0f) * num(g, "x_offset_p2", 225);
     topY_ = playline_ - height_;
     const float bottomW = topWidth_ * (1 + widthOffset_);
     for (int k = 0; k < 5; ++k) {
-        startX_[size_t(k)] = 640 - topWidth_ / 2 + topWidth_ / 5 * (float(k) + 0.5f);
-        endX_[size_t(k)] = 640 - bottomW / 2 + bottomW / 5 * (float(k) + 0.5f);
+        startX_[size_t(k)] = cx_ - topWidth_ / 2 + topWidth_ / 5 * (float(k) + 0.5f);
+        endX_[size_t(k)] = cx_ - bottomW / 2 + bottomW / 5 * (float(k) + 0.5f);
     }
     // Travel time: scroll_time (difficulty_list_props) - destroy_time [C script setup_highway].
     static const char* const kDiff[4] = {"easy", "medium", "hard", "expert"};
@@ -71,6 +78,8 @@ bool Highway2D::init(const Globals& g, int difficulty) {
     if (const qb::Value* props = g.find(qbkey::key("difficulty_list_props")); props && props->st)
         if (const qb::Value* d = g.field(*props->st, qbkey::key(kDiff[std::clamp(difficulty, 0, 3)])); d && d->st)
             if (const qb::Value* s = d->st->find(qbkey::key("scroll_time"))) scroll = s->number();
+    // Two players: scroll_time x p2_scroll_time_factor [C script difficulty_setup].
+    if (two) scroll *= num(g, "p2_scroll_time_factor", 0.8f);
     travelMs_ = (scroll - num(g, "destroy_time", 1.0f)) * 1000.0f;
     // The perspective rows [C script generate_pos_table].
     const qb::Value* ft = arrayGlobal(g, "heightPerspFactTable");
@@ -126,6 +135,16 @@ void Highway2D::noteHit(uint8_t frets, double now, bool starPower) {
 }
 
 void Highway2D::draw(Canvas& c, const TextureCache& tex, const NoteTrack& track, const Player& player, double now, uint8_t held) {
+    // The battle push / shake moves everything drawn below.
+    const float dx = fx_.dx, dy = fx_.dy;
+    cx_ += dx, topY_ += dy, playline_ += dy;
+    for (int k = 0; k < 5; ++k) startX_[size_t(k)] += dx, endX_[size_t(k)] += dx;
+    drawAll(c, tex, track, player, now, held);
+    cx_ -= dx, topY_ -= dy, playline_ -= dy;
+    for (int k = 0; k < 5; ++k) startX_[size_t(k)] -= dx, endX_[size_t(k)] -= dx;
+}
+
+void Highway2D::drawAll(Canvas& c, const TextureCache& tex, const NoteTrack& track, const Player& player, double now, uint8_t held) {
     const PlayerStats& st = player.stats();
     // The highway surface: one strip per 8 rows, width top_width x (1 +
     // widthOffsetFactor x depth), texture V = row x tiling / 1024 scrolling
@@ -142,8 +161,8 @@ void Highway2D::draw(Canvas& c, const TextureCache& tex, const NoteTrack& track,
             const float wa = topWidth_ * (1 + widthOffset_ * va), wb = topWidth_ * (1 + widthOffset_ * vb);
             const float ta = float((r - scroll) * tiling_ / kRealRows), tb = float((r + 8 - scroll) * tiling_ / kRealRows);
             const auto A = uint8_t(255 * alphaAt(ya)), B = uint8_t(255 * alphaAt(yb));
-            const Vertex p0{640 - wa / 2, ya, 0, 0, -ta, tint.r, tint.g, tint.b, A}, p1{640 + wa / 2, ya, 0, 1, -ta, tint.r, tint.g, tint.b, A};
-            const Vertex p2{640 + wb / 2, yb, 0, 1, -tb, tint.r, tint.g, tint.b, B}, p3{640 - wb / 2, yb, 0, 0, -tb, tint.r, tint.g, tint.b, B};
+            const Vertex p0{cx_ - wa / 2, ya, 0, 0, -ta, tint.r, tint.g, tint.b, A}, p1{cx_ + wa / 2, ya, 0, 1, -ta, tint.r, tint.g, tint.b, A};
+            const Vertex p2{cx_ + wb / 2, yb, 0, 1, -tb, tint.r, tint.g, tint.b, B}, p3{cx_ - wb / 2, yb, 0, 0, -tb, tint.r, tint.g, tint.b, B};
             const Vertex v[6] = {p0, p1, p2, p0, p2, p3};
             c.draw(v, 6, texId, Blend::Alpha, true);
             ya = yb, va = vb;
@@ -163,14 +182,14 @@ void Highway2D::draw(Canvas& c, const TextureCache& tex, const NoteTrack& track,
         int tw = 32, th = 512;
         tex.size(kSidebar, tw, th);
         const float bottomW = topWidth_ * (1 + widthOffset_);
-        const float stx = 640 - topWidth_ / 2, sbx = 640 - bottomW / 2;
+        const float stx = cx_ - topWidth_ / 2, sbx = cx_ - bottomW / 2;
         const float sx = sbx + (sbx - stx) * 0.25f - sidebarXOffset_, sy = playline_ + height_ * 0.25f;
         const float ang = std::atan2(height_, stx - sbx);  // from the x axis
         const float w = float(tw) * sidebarXScale_, h = float(th) * sidebarYScale_;
         for (int side = 0; side < 2; ++side) {
             const float dirx = std::cos(ang) * (side ? -1.0f : 1.0f), diry = -std::sin(ang);  // up the edge
             const float nx = -diry, ny = dirx;  // across
-            const float cx = side ? 1280 - sx : sx;
+            const float cx = side ? 2 * cx_ - sx : sx;
             auto P = [&](float a, float b, float u, float v) {
                 return Vertex{cx + dirx * a + nx * b, sy + diry * a + ny * b, 0, u, v, col.r, col.g, col.b,
                               uint8_t(255 * alphaAt(sy + diry * a))};
@@ -202,7 +221,7 @@ void Highway2D::draw(Canvas& c, const TextureCache& tex, const NoteTrack& track,
             tex.size(key, tw, th);
             const float s = fretbarStart_ + (fretbarEnd_ - fretbarStart_) * v;
             const float y = yAt(v);
-            quad(c, key, tex, 640, y, float(tw) * s, float(th) * s, 0, SDL_Color{255, 255, 255, uint8_t(255 * alphaAt(y))});
+            quad(c, key, tex, cx_, y, float(tw) * s, float(th) * s, 0, SDL_Color{255, 255, 255, uint8_t(255 * alphaAt(y))});
         }
     }
     // Sustain tails, then gems, back to front [C z: tails 4.0, gems 4.1].
@@ -217,6 +236,7 @@ void Highway2D::draw(Canvas& c, const TextureCache& tex, const NoteTrack& track,
             (void)missed;
             for (int l = 0; l < 5; ++l) {
                 if (!(n.frets & (1 << l))) continue;
+                const int lane = fx_.leftyGems ? 4 - l : l;  // lefthanded_gems: mirrored [C 0x82120D20]
                 if (pass == 0 && n.sustain) {
                     // The tail: from the gem (pinned at the playline while held [I:
                     // row 1100, whammy_cutoff]) to the end of the hold.
@@ -230,7 +250,7 @@ void Highway2D::draw(Canvas& c, const TextureCache& tex, const NoteTrack& track,
                     for (int s = 0; s < segs; ++s) {
                         const float va = a0 + (a1 - a0) * float(s) / segs, vb = a0 + (a1 - a0) * float(s + 1) / segs;
                         const float wa = whammyTop_ * (1 + whammyOffset_ * va), wb = whammyTop_ * (1 + whammyOffset_ * vb);
-                        const float xa = laneX(l, va), xb = laneX(l, vb), ya = yAt(va), yb = yAt(vb);
+                        const float xa = laneX(lane, va), xb = laneX(lane, vb), ya = yAt(va), yb = yAt(vb);
                         const auto A = uint8_t(255 * alphaAt(ya)), B = uint8_t(255 * alphaAt(yb));
                         // V runs once along the whole tail, tail end (0) to head (1) [I].
                         const float ta = float(s) / segs, tb = float(s + 1) / segs;
@@ -240,7 +260,7 @@ void Highway2D::draw(Canvas& c, const TextureCache& tex, const NoteTrack& track,
                         c.draw(q, 6, int(tex.find(key).id), Blend::Alpha);
                     }
                 }
-                if (pass == 1 && i >= player.current()) {
+                if (pass == 1 && i >= player.current() && !(fx_.hidden && fx_.hidden(i))) {
                     // The gem sprite [C 0x82120C90]: Star Power / star / normal,
                     // hammer variants for HOPOs; star sprites are 4x4 flip-books [C data].
                     const bool star = n.phrase >= 0;
@@ -258,7 +278,7 @@ void Highway2D::draw(Canvas& c, const TextureCache& tex, const NoteTrack& track,
                     tex.size(key, tw, th);
                     const float fw = float(tw) * (u1 - u0), fh = float(th) * (v1 - v0);
                     const float y = yAt(v);
-                    quad(c, key, tex, laneX(l, v), y, fw * scale, fh * scale, just, SDL_Color{255, 255, 255, uint8_t(255 * alphaAt(y))},
+                    quad(c, key, tex, laneX(lane, v), y, fw * scale, fh * scale, just, SDL_Color{255, 255, 255, uint8_t(255 * alphaAt(y))},
                          u0, v0, u1, v1);
                 }
             }
@@ -274,7 +294,7 @@ void Highway2D::draw(Canvas& c, const TextureCache& tex, const NoteTrack& track,
         int tw = 512, th = 1024;
         tex.size(key, tw, th);
         const float u0 = float(frame % 4) / 4, v0 = float(frame / 4) / 4;
-        quad(c, key, tex, endX_[size_t(l)], playline_ - 20, float(tw) / 4, float(th) / 4, 1, SDL_Color{255, 255, 255, 255}, u0, v0,
+        quad(c, key, tex, endX_[size_t(fx_.leftyGems ? 4 - l : l)], playline_ - 20, float(tw) / 4, float(th) / 4, 1, SDL_Color{255, 255, 255, 255}, u0, v0,
              u0 + 0.25f, v0 + 0.25f, Blend::Add);
     }
     // The strike heads at the playline: lit when held [C script setup_highway; scale I].
@@ -282,6 +302,7 @@ void Highway2D::draw(Canvas& c, const TextureCache& tex, const NoteTrack& track,
         const uint32_t key = (held & (1 << l)) ? kHeadDown[l] : kHead[l];
         int tw = 128, th = 64;
         tex.size(key, tw, th);
-        quad(c, key, tex, endX_[size_t(l)], playline_, float(tw) * gemEnd_, float(th) * gemEnd_, gemJust_, SDL_Color{255, 255, 255, 255});
+        const int at = fx_.leftyButtons ? 4 - l : l;  // lefthanded_button_ups
+        quad(c, key, tex, endX_[size_t(at)], playline_, float(tw) * gemEnd_, float(th) * gemEnd_, gemJust_, SDL_Color{255, 255, 255, 255});
     }
 }

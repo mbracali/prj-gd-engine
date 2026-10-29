@@ -306,6 +306,11 @@ void App::handleEvent(const SDL_Event& e) {
 // A button in a song: Start opens GH3's pause menu (gh3_start_pressed),
 // which then has the buttons until it resumes.
 void App::songEvent(const InputEvent& ev) {
+    // The attract mode: any button goes to GH3's check_for_attract_mode_input.
+    if (front_ && front_->attractMode()) {
+        menuAction(ev);
+        return;
+    }
     if (front_ && front_->songPaused) {
         menuAction(ev);
         return;
@@ -324,15 +329,13 @@ void App::frame() {
         canvas_.begin(SDL_Color{0, 0, 0, 255});
         const bool more = song_->frame(canvas_, mixer_, textures_.get());
         if (front_) front_->songClockMs = song_->songMs();
-        if (front_ && front_->songPaused) {
-            // The pause menu over the frozen song.
+        if (front_) {
+            // GH3's scripts and elements over the song (the pause menu over the frozen song).
             const uint64_t nowNs = SDL_GetTicksNS();
             const double dt = lastFrameNs_ ? double(nowNs - lastFrameNs_) / 1e6 : 0;
             lastFrameNs_ = nowNs;
             front_->frame(canvas_, dt);
-            pauseSeen_ = pauseSeen_ || front_->flow.paused;
-        } else {
-            lastFrameNs_ = SDL_GetTicksNS();
+            if (front_->songPaused) pauseSeen_ = pauseSeen_ || front_->flow.paused;
         }
         overlay();
         captureMenuScreenshot(canvas_, double(SDL_GetTicksNS() - startNs_) / 1e6, song_->songMs());
@@ -361,6 +364,19 @@ void App::frame() {
             r.won = !song_->failed(), r.score = st.score, r.notesHit = st.notesHit, r.totalNotes = st.totalNotes;
             r.bestRun = st.bestRun, r.phrasesHit = st.phrasesCaptured, r.phrasesTotal = song_->phraseCount();
             r.baseScore = song_->baseScore(), r.health = st.health, r.starPower = st.starPower;
+            const Match& m = song_->match();
+            r.maxNotes = m.maxNotes(0);
+            if (m.players() == 2) {
+                const PlayerStats& s2 = m.player(1).stats();
+                r.twoPlayers = true;
+                r.p2.score = s2.score, r.p2.notesHit = s2.notesHit, r.p2.totalNotes = s2.totalNotes, r.p2.bestRun = s2.bestRun;
+                r.p2.phrasesHit = s2.phrasesCaptured, r.p2.phrasesTotal = m.phraseCount(1), r.p2.baseScore = m.baseScore(1);
+                r.p2.health = s2.health, r.p2.starPower = s2.starPower, r.p2.maxNotes = m.maxNotes(1);
+                r.battleKo = m.mode() == GameMode::Battle && (m.outcome() == Match::Outcome::P1Wins || m.outcome() == Match::Outcome::P2Wins);
+                for (int p = 0; p < 2; ++p) r.finalBlow[size_t(p)] = m.battle(p).finalBlow, r.cards[size_t(p)] = m.battle(p).cards;
+                // Face-off and battle never fail (battle's KO goes through song_failed: battleKo) [C 0x8210FD18].
+                if (m.mode() == GameMode::FaceOff || m.mode() == GameMode::ProFaceOff || m.mode() == GameMode::Battle) r.won = true;
+            }
             song_.reset();
             mixer_.stop();
             input_.setInGame(false);
@@ -385,9 +401,22 @@ void App::frame() {
         std::string err;
         song_ = std::make_unique<SongScreen>();
         // Enhanced > CHEATS: Autoplay and No Fail Mode (as --autoplay / --no-fail).
-        const bool autoplay = options_.autoplay || walk_ || SDL_getenv("GD04_AUTOPLAY") || enhanced_.on("autoplay");
+        // The attract mode plays itself (player1_status.bot_play) [C script create_attract_mode].
+        const bool autoplay = options_.autoplay || walk_ || SDL_getenv("GD04_AUTOPLAY") || enhanced_.on("autoplay") || front_->attractMode();
         const bool noFail = options_.noFail || enhanced_.on("no_fail");
-        if (!info || !song_->start(*disc_, *globals_, *info, front_->songRequest.difficulty, autoplay, noFail, mixer_, err, textures_.get())) {
+        // The mode and the two players (start_gem_scroller's globals).
+        const FrontEnd::SongRequest& rq = front_->songRequest;
+        SongSetup setup;
+        setup.mode = rq.players == 2 || rq.boss ? gameModeFromKey(rq.gameMode, rq.boss != 0) : GameMode::Solo;
+        setup.difficulty = {rq.difficulty, rq.difficulty2};
+        setup.rhythm = {rq.part2Rhythm[0], rq.part2Rhythm[1]};
+        setup.bossProps = rq.boss;
+        setup.suddenDeath = rq.suddenDeath;
+        if (rq.suddenDeath) setup.startHealth = {rq.saveHealth[0], rq.saveHealth[1]};
+        if (setup.mode == GameMode::Boss) setup.difficulty[1] = rq.difficulty;  // the 1P menu sets both [C selected_difficulty]
+        // A walk's sudden death ends: player 2's autoplay keeps its Death Drains.
+        if (walk_ && rq.suddenDeath) setup.autoplayFires[1] = false;
+        if (!info || !song_->start(*disc_, *globals_, *info, setup, autoplay, noFail, mixer_, err, textures_.get())) {
             SDL_Log("song: cannot start %s: %s", qbkey::name(front_->songRequest.song).c_str(), err.c_str());
             song_.reset();
             front_->songEnded(FrontEnd::SongResult{});
@@ -395,9 +424,19 @@ void App::frame() {
             if (walk_) {
                 song_->walkEndMs_ = options_.walk == "lose" ? -1 : 20000.0;
                 song_->walkFailMs_ = options_.walk == "lose" ? 10000.0 : -1;
+                // Battle and boss walks play long enough for cards and attacks;
+                // sudden death (and a boss) plays on to the KO.
+                if (setup.mode == GameMode::Battle) song_->walkEndMs_ = setup.suddenDeath ? -1 : 60000.0;
+                if (setup.mode == GameMode::Boss) song_->walkEndMs_ = -1;
             }
             front_->songPlaying = true;
             input_.setInGame(true);
+            // The HUD's texts in GH3's fonts (num_a9, num_a7, text_a6): scale x the font's line height.
+            ui::UiSystem* ui = &front_->ui();
+            song_->setHudText(
+                [ui](Canvas& c, uint32_t font, const std::string& t, float x, float y, float scale, const std::array<uint8_t, 4>& rgba,
+                     uint32_t align) { ui->drawText(c, font, t, x, y, scale * ui->fontLineHeight(font), rgba, align); },
+                [ui](uint32_t font, const std::string& t, float scale) { return ui->textWidth(font, t, scale * ui->fontLineHeight(font)); });
             if (walk_) ++walk_->songsStarted;
         }
         return;
@@ -498,7 +537,7 @@ int App::run() {
         std::fprintf(stderr, "%s: %s\n", app::kProgram, message_.empty() ? "no disc image given" : message_.c_str());
         running_ = false, exitCode_ = 2;
     } else if (!options_.walk.empty() && !(walk_ = std::make_unique<Walk>(options_.walk))->known()) {
-        std::fprintf(stderr, "%s: unknown walk '%s' (quickplay, lose, back, boot, mouse, gamepads, stickyaxis)\n", app::kProgram,
+        std::fprintf(stderr, "%s: unknown walk '%s' (quickplay, lose, back, career, pause, glitches, coop, faceoff, proface, battle, boss, boot, mouse, gamepads, stickyaxis)\n", app::kProgram,
                      options_.walk.c_str());
         running_ = false, exitCode_ = 2;
     } else if (!options_.song.empty()) {
@@ -526,6 +565,7 @@ int App::run() {
             ports_ = std::make_unique<PortScreens>(input_, *front_, enhanced_, [this](const std::string& k) { applyEnhanced(k); });
         }
     }
+    if (walk_ && walk_->twoPlayers()) input_.setSplitKeyboard(true);  // two-player walks: player 2 on the keyboard's other half
     const bool stats = envOn("GD04_STATS");
     uint64_t statsStart = SDL_GetTicksNS();
     int statsFrames = 0;
@@ -574,10 +614,10 @@ int App::run() {
         if (!disc_)
             if (std::string picked = picker_.takePicked(); !picked.empty()) loadData(picked);
         if (walk_ && front_) {
-            for (Action a : walk_->update(*front_, front_->songPlaying, double(frameStart - startNs_) / 1e6, this,
-                                          ports_ ? ports_->current() : std::string()))
+            for (const Walk::Press& p : walk_->update(*front_, front_->songPlaying, double(frameStart - startNs_) / 1e6, this,
+                                                     ports_ ? ports_->current() : std::string()))
                 for (bool down : {true, false}) {
-                    InputEvent ev{a, down, SDL_GetTicksNS(), ControllerMode::Guitar, 0};
+                    InputEvent ev{p.a, down, SDL_GetTicksNS(), ControllerMode::Guitar, p.player};
                     if (song_) songEvent(ev);
                     else menuAction(ev);
                 }
@@ -587,6 +627,13 @@ int App::run() {
             }
         }
         if (!running_) break;
+        if (front_) {
+            // The controllers the scripts see (GetActiveControllers): the player slots with a device.
+            uint32_t m = 1;
+            for (int i = 1; i < 4; ++i)
+                if (input_.padConnected(i)) m |= 1u << i;
+            front_->activeControllers = m;
+        }
         frame();
         if (quitAfter && double(SDL_GetTicksNS() - startNs_) / 1e6 >= std::atof(quitAfter)) running_ = false;
         updatePointer();

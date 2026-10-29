@@ -14,6 +14,11 @@
    0x20: the id 0x20d40671 came out 0x00d40671 (and 1079 of 16552 scripts
    differed, mostly `begin` read as `end`). The element lookup compares all
    32 bits (0x820EC088) [C Ghidra].
-5. **Stars.** GH3 fills player1_status.stars in C; the port gives 3 / 4 / 5
-   stars at score / base score < 2.0 / >= 2.0 / >= 2.8 and base score = 50
-   per gem [I]. Needs the XEX's rule (and how sustains count in base_score).
+5. ~~**Stars.**~~ Answered (2026-10-29): GH3's script Progression_SongWon
+   gives 3, 4 at score >= 2 x base_score, 5 at >= 2.8 x (a boss song 5);
+   base_score comes from CalcSongScoreInfo 0x8210AF70 (50 a fret plus the
+   sustains' 25 a beat) [C Ghidra + script]. The port leaves stars to the
+   script and fills base_score that way.
+6. **The Glitches and the store.** GH3's purchases are save-wide, so with
+   The Glitches (everything bought, D9) every band's Vault shows SOLD. Keep
+   that, or limit the save-wide unlocks? (Owner.)

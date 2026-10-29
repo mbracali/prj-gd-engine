@@ -70,6 +70,7 @@ struct ScriptRun {
     bool returned = false;
     uint32_t type = 0;        // SpawnScriptNow ... id / type (for KillSpawnedScript)
     uint32_t object = 0;      // the object (screen element id) the script runs on, 0: none
+    bool busy = false;        // executing now (a pump inside a condition skips it)
 };
 
 struct VmStats {
@@ -145,6 +146,11 @@ public:
 private:
     friend struct Exec;
     bool step(ScriptRun& run, int budget);  // runs until wait / end; false: ended
+    // One frame for the runs spawned since run id `fromId` (a condition's
+    // script waiting for what it started, e.g. a load's callback).
+    void pump(double dtMs, uint32_t fromId);
+    // Whether a waiting run may go on now (its wait over); clears the wait.
+    bool ready(ScriptRun& r);
     bool callName(ScriptRun& run, uint32_t name, qb::Struct& params, bool& result);
     // An if / elseif condition: `[not]... <call with params>` or an expression.
     bool evalCondition(Exec& ex);

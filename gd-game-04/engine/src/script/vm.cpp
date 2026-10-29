@@ -149,6 +149,16 @@ struct Exec {
             const Op next = i + 1 < t.size() ? t[i + 1].op : kEndOfLine;
             const bool operandFollows = next == kName || next == kArg || next == kStartStruct || next == kInlineStruct ||
                                         next == kInlineStruct2 || next == kAllArgs;
+            // Right after a comparison it is the operand, a key (`<arg> mode = restart_song`,
+            // a script's name too) [C data: create_loading_screen].
+            size_t pj = i;
+            while (pj > 0 && t[pj - 1].op == kNop) --pj;
+            const Op prev = pj > 0 ? t[pj - 1].op : kEndOfLine;
+            if (prev == kEquals || prev == kNotEqual || prev == kSameAs || prev == kLessThan || prev == kLessThanEqual ||
+                prev == kGreaterThan || prev == kGreaterThanEqual) {
+                ++i;
+                return Vm::makeKey(n);
+            }
             if (parens > 0 && callable && operandFollows) {
                 ++i;
                 qb::Struct p = params();
@@ -169,6 +179,9 @@ struct Exec {
             if (i < t.size() && t[i].op == kName) {
                 const uint32_t n = t[i++].u;
                 if (const qb::Value* lv = local(n)) return *lv;
+                // An unset <name> reads the global of that name
+                // (`GetArraySize { <guitar_hero_cheats> }`, `<Bonus_Guitars>`) [I: the scripts rely on it].
+                if (const qb::Value* gv = vm.global(n)) return *gv;
                 return none();
             }
             return none();
@@ -652,6 +665,7 @@ bool Vm::run(uint32_t name, const qb::Struct& params, bool* result) {
         }
         return false;
     }
+    if (const char* v = SDL_getenv("GD04_VMTRACE"); v && *v && *v != '0') SDL_Log("qscript: %.0f ms run %s", clockMs_, qbkey::name(name).c_str());
     auto r = std::make_unique<ScriptRun>();
     r->id = nextId_++;
     r->name = name;
@@ -691,23 +705,43 @@ void Vm::update(double dtMs) {
     const size_t n = runs_.size();
     for (size_t k = 0; k < n && k < runs_.size(); ++k) {
         ScriptRun& r = *runs_[k];
-        if (r.finished || r.paused) continue;
-        if (r.waitFrames > 0) {
-            --r.waitFrames;
-            if (r.waitFrames > 0) continue;
-        }
-        if (r.waitUntilMs >= 0) {
-            if (clockMs_ < r.waitUntilMs) continue;
-            r.waitUntilMs = -1;
-        }
-        if (r.waitFor) {
-            if (!r.waitFor()) continue;
-            r.waitFor = nullptr;
-        }
+        if (r.finished || r.paused || r.busy) continue;
+        if (!ready(r)) continue;
+        r.busy = true;
         if (!step(r, 100000)) r.finished = true;
+        r.busy = false;
     }
     runs_.erase(std::remove_if(runs_.begin(), runs_.end(), [](const std::unique_ptr<ScriptRun>& r) { return r->finished; }),
                 runs_.end());
+}
+
+bool Vm::ready(ScriptRun& r) {
+    if (r.waitFrames > 0) {
+        --r.waitFrames;
+        if (r.waitFrames > 0) return false;
+    }
+    if (r.waitUntilMs >= 0) {
+        if (clockMs_ < r.waitUntilMs) return false;
+        r.waitUntilMs = -1;
+    }
+    if (r.waitFor) {
+        if (!r.waitFor()) return false;
+        r.waitFor = nullptr;
+    }
+    return true;
+}
+
+void Vm::pump(double dtMs, uint32_t fromId) {
+    clockMs_ += dtMs;
+    const size_t n = runs_.size();
+    for (size_t k = 0; k < n && k < runs_.size(); ++k) {
+        ScriptRun& r = *runs_[k];
+        if (r.finished || r.paused || r.busy || r.id < fromId) continue;
+        if (!ready(r)) continue;
+        r.busy = true;
+        if (!step(r, 100000)) r.finished = true;
+        r.busy = false;
+    }
 }
 
 void Vm::kill(uint32_t id) {
@@ -742,7 +776,18 @@ bool Vm::callForValue(ScriptRun& run, uint32_t name, qb::Struct& params) {
         f.code = std::move(c);
         f.locals = std::make_shared<qb::Struct>(params);
         sub.frames.push_back(std::move(f));
-        if (step(sub, 1 << 16)) logOnce("WAIT inside a script used as a condition: " + qbkey::name(name));
+        // A wait inside it: the caller blocks while the scripts it spawned
+        // run on, frame by frame, until it ends (LoadPakAsync waiting for its
+        // load's callback), at most 10 s of game time [I: GH3 runs it to its
+        // end; the other scripts' order is kept].
+        const uint32_t fromId = nextId_;
+        sub.busy = true;
+        bool alive = step(sub, 1 << 16);
+        for (int frames = 0; alive && frames < 600; ++frames) {
+            pump(1000.0 / 60.0, fromId);
+            if (ready(sub)) alive = step(sub, 1 << 16);
+        }
+        if (alive) logOnce("WAIT inside a script used as a condition did not end: " + qbkey::name(name));
         // A script's value: whether it returned the flag `true` [C data:
         // get_valid_character_index's `return index = x true`]; its other
         // returned parameters reach the caller.

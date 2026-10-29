@@ -48,7 +48,9 @@ struct NoteTrack {
 // iterator that runs ahead with the gem scroller].
 float hopoTolerance(const Chart& c, float measureScale, float t);
 
-NoteTrack buildTrack(const Chart& chart, Part part, int difficulty, const Tuning& tuning, float hammerOnMeasureScale);
+// `battle`: the battle star phrases (_StarBattleMode) instead of Star Power's
+// (battle and boss battles) [C script reset_star_array].
+NoteTrack buildTrack(const Chart& chart, Part part, int difficulty, const Tuning& tuning, float hammerOnMeasureScale, bool battle = false);
 
 // Face-off: only the notes inside the player's sections (FaceOffP1 / P2:
 // time, length) enter its input array (gem_filler_enabled_time_on / off,

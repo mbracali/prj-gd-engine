@@ -21,7 +21,10 @@ struct FrameInput {
 };
 
 struct PlayerEvent {
-    enum class Kind { Hit, Miss, Overstrum, Hopo, StarPhrase, StarPowerOn, StarPowerOff, SustainDone, Failed };
+    // Trigger: the Star Power trigger was pressed (Select / tilt) -- co-op's
+    // raise-axe prompt and battle's attacks use it; BattlePhrase: a battle
+    // star phrase completed (battlemode_ready) [C 0x8211E7B0].
+    enum class Kind { Hit, Miss, Overstrum, Hopo, StarPhrase, StarPowerOn, StarPowerOff, SustainDone, Failed, Trigger, BattlePhrase };
     Kind kind;
     int note = -1;
     double atMs = 0;
@@ -35,7 +38,26 @@ struct PlayerStats {
     float starPower = 0;          // 0 .. 100 [C 0x8210C5B8]
     bool starPowerActive = false;
     bool failed = false;
+    // The run the multiplier is read from: current_run, in co-op both
+    // players' runs added [C 0x8210A748].
+    int multiplierRun = 0;
+    double scoreExact = 0;        // the score as GH3 keeps it (a float, scaled in face-off)
     int multiplier() const;
+};
+
+// What changes with the game mode (docs/modes.md) [C addresses there].
+struct PlayerRules {
+    HealthMode health = HealthMode::Normal;  // the health_change_* table: normal, _battle, _boss
+    // A boss (the bot in a boss battle): + gainpernote x 0.02 a hit, -
+    // losspernote x 0.02 a miss, no red / green multiplier [C 0x8210F6A0, 0x8210FD18].
+    bool boss = false;
+    float bossGain = 0, bossLoss = 0;
+    bool canFail = true;              // face-off and pro face-off never fail [C 0x8210FD18]
+    bool negativeHealth = false;      // co-op: a player's health may go below 0
+    bool starPower = true;            // battle / boss: star phrases give cards instead [C 0x8211E704]
+    bool coop = false;                // co-op Star Power rates; activation by both players (Match)
+    float scoreScale = 1.0f;          // face-off: (base_p1 + base_p2) x 0.5 / base_p [C 0x8210B9A0]
+    float invinciblePct = -1;         // the invincibility window in % of the song (-1: by own difficulty)
 };
 
 class Player {
@@ -54,6 +76,21 @@ public:
     int sustaining() const { return sus_.note; }
     // Song length for the invincibility window (health_invincible_time).
     void setSongLengthMs(double ms) { songLengthMs_ = ms; }
+    void setRules(const PlayerRules& r) { rules_ = r; }
+    const PlayerRules& rules() const { return rules_; }
+    // Co-op: the other player (shared run for the multiplier, shared Star Power).
+    void setPartner(Player* p) { partner_ = p; }
+    // Frets that do not count (broken_string_mask: battle's Broken String /
+    // Whammy attacks) [C 0x82100DA0].
+    void setDeadFrets(uint8_t mask) { dead_ = mask; }
+    uint8_t deadFrets() const { return dead_; }
+    // One miss's worth of health loss (CrowdDecrease: Death Drain) [C 0x8210FD18].
+    void damage(double now) { changeHealth(false, now); }
+    void setHealth(float h) { st_.health = h; }
+    // Co-op: Star Power switched on by both players' triggers (Match).
+    void activateStarPower(double now);
+    // Sets the shared Star Power amount (co-op).
+    void setStarPowerAmount(float a) { st_.starPower = a; }
 
 private:
     void hit(size_t i, double now, bool tap);
@@ -61,11 +98,21 @@ private:
     void overstrum(double now);
     void changeHealth(bool good, double now);
     void addStarPower(float amount);
+    void addScore(double points) {
+        st_.scoreExact += points * rules_.scoreScale;
+        st_.score = int64_t(st_.scoreExact);
+    }
     void updateSustain(double now, double dt, const FrameInput& in);
     void updateStarPower(double now, double dt, const FrameInput& in);
 
     const NoteTrack& t_;
     const Tuning& tu_;
+    PlayerRules rules_;
+    Player* partner_ = nullptr;
+    uint8_t dead_ = 0;
+    bool triggerHeld_ = false;
+    void resetRuns();
+    void syncMultiplierRun();
     int diff_;
     bool noFail_;
     float offsetMs_;

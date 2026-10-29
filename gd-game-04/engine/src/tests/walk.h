@@ -42,10 +42,17 @@ class Walk {
 public:
     explicit Walk(const std::string& name);
     bool known() const { return !steps_.empty(); }
+    // A two-player walk (player 2 on the keyboard's other half).
+    bool twoPlayers() const { return twoPlayers_; }
+    // A button and the player (controller) pressing it.
+    struct Press {
+        Action a;
+        int player = 0;
+    };
     // Called every frame: the buttons to press now. `port`: the port's open
     // screen ("port_gamepads", "port_enhanced"), which stands for the flow
     // state while open.
-    std::vector<Action> update(FrontEnd& fe, bool songPlaying, double nowMs, WalkHost* host = nullptr, const std::string& port = "");
+    std::vector<Press> update(FrontEnd& fe, bool songPlaying, double nowMs, WalkHost* host = nullptr, const std::string& port = "");
     // Every action the menus got (the app counts them; stickyaxis checks them).
     void countPress(Action a) { ++presses_[size_t(a)]; }
     bool done() const { return step_ >= steps_.size(); }
@@ -62,8 +69,14 @@ private:
         Action a = Action::Confirm;
         std::string act;
         double delayMs = 300;
+        int player = 0;  // the controller pressing it (1: player 2's)
         Op(Action x, double d = 300) : a(x), delayMs(d) {}
         Op(const char* s, double d = 300) : act(s), delayMs(d) {}
+        static Op p2(Action x, double d = 300) {
+            Op o(x, d);
+            o.player = 1;
+            return o;
+        }
     };
     struct Step {
         std::string state;          // flow state to wait for ("song" / "song_over": the song)
@@ -72,6 +85,7 @@ private:
         bool optional = false;      // skipped when the next step's state comes first
     };
     std::string name_;
+    bool twoPlayers_ = false;
     std::vector<Step> steps_;
     size_t step_ = 0;
     size_t key_ = 0;
@@ -92,5 +106,6 @@ private:
     bool act(const std::string& what, FrontEnd& fe, WalkHost& host);
     std::array<int, size_t(Action::Start) + 1> presses_{};
     int sideBase_ = 0, rightBase_ = 0;
+    int seek_ = 0;  // setlist:<song> presses so far
     unsigned adapter_ = 0;  // stickyaxis: the virtual adapter (SDL_JoystickID)
 };

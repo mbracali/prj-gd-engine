@@ -66,6 +66,7 @@ target_sources(gd04 PRIVATE
   src/render/gl_device.cpp
   src/render/highway2d.cpp
   src/render/hud2d.cpp
+  src/render/hud2p.cpp
   src/render/renderer.cpp
   src/render/shadertest.cpp
   src/render/texture_cache.cpp
@@ -77,6 +78,7 @@ target_sources(gd04 PRIVATE
   src/game/chart.cpp
   src/game/note_track.cpp
   src/game/player.cpp
+  src/game/match.cpp
   src/game/save.cpp
   src/game/song_db.cpp
   src/game/tuning.cpp

@@ -4,6 +4,7 @@
 
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <vector>
 
 #include "render/canvas.h"
@@ -22,7 +23,8 @@ class Player;
 class Highway2D {
 public:
     // Reads the tweaks and builds the row tables; false if data is missing.
-    bool init(const Globals& g, int difficulty);
+    // `players` 1 or 2 (two highways side by side; `player` 0 left, 1 right).
+    bool init(const Globals& g, int difficulty, int players = 1, int player = 0);
     // Draws the highway, fretbars, sidebars, tails, gems and strike heads
     // at song time `nowMs` (ms). `held`: the frets held now.
     void draw(Canvas& c, const TextureCache& tex, const NoteTrack& track, const Player& player, double nowMs, uint8_t held);
@@ -36,8 +38,21 @@ public:
     // The highway surface's texture (the guitarist's highway material's, else
     // the global fallback) [C data].
     void setSurfaceTexture(uint32_t key) { surfaceTex_ = key; }
+    // A gem's time on screen: scroll_time - destroy_time (ms).
+    float travelMs() const { return travelMs_; }
+    // Battle attacks on this highway (Match::BattleSide) [C scripts
+    // battle_lefty_notes, battle_lightning, hammer_highway]: gems drawn
+    // mirrored, the fret buttons mirrored, gems hidden by Amp Overload's
+    // flicker, the highway moved (shake / the hit's push).
+    struct Effects {
+        bool leftyGems = false, leftyButtons = false;
+        std::function<bool(size_t)> hidden;
+        float dx = 0, dy = 0;
+    };
+    void setEffects(Effects e) { fx_ = std::move(e); }
 
 private:
+    void drawAll(Canvas& c, const TextureCache& tex, const NoteTrack& track, const Player& player, double nowMs, uint8_t held);
     float yAt(float v) const { return topY_ + height_ * v; }
     float laneX(int lane, float v) const { return startX_[size_t(lane)] + (endX_[size_t(lane)] - startX_[size_t(lane)]) * v; }
     float alphaAt(float y) const;
@@ -45,6 +60,8 @@ private:
               float u0 = 0, float v0 = 0, float u1 = 1, float v1 = 1, Blend blend = Blend::Alpha) const;
 
     float playline_ = 655, height_ = 350, topWidth_ = 160, widthOffset_ = 2.2f, fade_ = 30;
+    float cx_ = 640;  // the highway's centre (x)
+    Effects fx_;
     float topY_ = 305, gemStart_ = 0.25f, gemEnd_ = 0.8f, starScale_ = 1.3f, gemJust_ = 0.83f, starJust_ = 0.5f;
     float fretbarStart_ = 0.15f, fretbarEnd_ = 0.48f, whammyTop_ = 10, whammyOffset_ = 1.8f;
     float sidebarXScale_ = 0.3f, sidebarYScale_ = 1, sidebarXOffset_ = 4;

@@ -58,13 +58,13 @@ float hopoTolerance(const Chart& c, float scale, float t) {
     return float(fb[i + 1] - fb[i]) / scale * float(den / 4);
 }
 
-NoteTrack buildTrack(const Chart& chart, Part part, int difficulty, const Tuning& tuning, float scale) {
+NoteTrack buildTrack(const Chart& chart, Part part, int difficulty, const Tuning& tuning, float scale, bool battle) {
     NoteTrack tr;
     tr.fretbars = chart.fretbars;
     tr.timesig = chart.timesig;
     if (chart.fretbars.size() >= 2) tr.firstBeatMs = chart.fretbars[1] - chart.fretbars[0];
     const auto& src = chart.notes(part, difficulty);
-    tr.phrases = chart.parts[size_t(part)].star[size_t(difficulty)];
+    tr.phrases = battle ? chart.parts[size_t(part)].starBattle[size_t(difficulty)] : chart.parts[size_t(part)].star[size_t(difficulty)];
     tr.notes.reserve(src.size());
     const float first = float(tr.firstBeatMs);
     for (size_t i = 0; i < src.size(); ++i) {
@@ -114,8 +114,10 @@ NoteTrack faceOffTrack(const NoteTrack& full, const std::vector<ChartPhrase>& se
                 t.notes.push_back(n);
                 break;
             }
-    // Star Power phrases do not apply in face-off [I: no SP in face-off].
-    for (TrackNote& n : t.notes) n.phrase = -1, n.phraseLast = false;
-    t.phrases.clear();
+    // Star Power phrases stay (face-off has Star Power: faceoff_hud_2d_elements
+    // carries the tubes [C data]); a phrase's last note is its last one kept [I].
+    for (TrackNote& n : t.notes) n.phraseLast = false;
+    for (size_t i = 0; i < t.notes.size(); ++i)
+        if (t.notes[i].phrase >= 0 && (i + 1 == t.notes.size() || t.notes[i + 1].phrase != t.notes[i].phrase)) t.notes[i].phraseLast = true;
     return t;
 }

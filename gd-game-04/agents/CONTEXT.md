@@ -95,3 +95,4 @@ the clips and skins with `anim.py` / `scn.py` helpers there; the C functions
 compute_desired_drummer_twist 0x82107F48) with Ghidra headless (`DumpAsm.java`
 fn:<addr>) and the `analysis/decomp` export. REA was not used (it cannot open
 the XEX). Test: `gd04 --chartest <disc>` (docs/band.md "Test").
+Note (stars/base_score, 2026-10-29): read with qbscript.py dis plus Ghidra headless (`DumpAsm.java` fn:0x8210AF70, `ReadF.java`); REA not used. Notes in `agents/scratch/stars_spec.md`.

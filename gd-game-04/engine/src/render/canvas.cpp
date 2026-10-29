@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "render/canvas.h"
+
+#include <cmath>
 #include "render/rmath.h"
 
 #include <cstddef>
@@ -117,8 +119,43 @@ void Canvas::flush() {
     batch_.clear();
 }
 
+namespace {
+Vertex lerpV(const Vertex& a, const Vertex& b, float t) {
+    auto l = [t](float x, float y) { return x + (y - x) * t; };
+    auto lb = [t](uint8_t x, uint8_t y) { return uint8_t(std::lround(float(x) + (float(y) - float(x)) * t)); };
+    return Vertex{l(a.x, b.x), l(a.y, b.y), l(a.z, b.z), l(a.u, b.u), l(a.v, b.v), lb(a.r, b.r), lb(a.g, b.g), lb(a.b, b.b), lb(a.a, b.a)};
+}
+// Sutherland-Hodgman against one edge: keep where dist >= 0.
+template <class F>
+void clipEdge(std::vector<Vertex>& poly, F dist) {
+    std::vector<Vertex> out;
+    for (size_t i = 0; i < poly.size(); ++i) {
+        const Vertex& a = poly[i];
+        const Vertex& b = poly[(i + 1) % poly.size()];
+        const float da = dist(a), db = dist(b);
+        if (da >= 0) out.push_back(a);
+        if ((da >= 0) != (db >= 0)) out.push_back(lerpV(a, b, da / (da - db)));
+    }
+    poly.swap(out);
+}
+}  // namespace
+
 void Canvas::draw(const Vertex* v, size_t count, int texture, Blend blend, bool repeat) {
     if (count == 0) return;
+    if (clip_) {
+        clipped_.clear();
+        std::vector<Vertex> poly;
+        for (size_t t = 0; t + 2 < count; t += 3) {
+            poly.assign(v + t, v + t + 3);
+            clipEdge(poly, [&](const Vertex& p) { return p.x - cx0_; });
+            clipEdge(poly, [&](const Vertex& p) { return cx1_ - p.x; });
+            clipEdge(poly, [&](const Vertex& p) { return p.y - cy0_; });
+            clipEdge(poly, [&](const Vertex& p) { return cy1_ - p.y; });
+            for (size_t k = 1; k + 1 < poly.size(); ++k) clipped_.insert(clipped_.end(), {poly[0], poly[k], poly[k + 1]});
+        }
+        if (clipped_.empty()) return;
+        v = clipped_.data(), count = clipped_.size();
+    }
     const uint32_t tex = uint32_t(texture);
     if (!batch_.empty() && (tex != batchTexture_ || blend != batchBlend_ || repeat != batchRepeat_)) flush();
     batchTexture_ = tex, batchBlend_ = blend, batchRepeat_ = repeat;

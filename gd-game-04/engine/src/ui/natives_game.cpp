@@ -77,24 +77,75 @@ void addGameNatives(FrontEnd& fe, const Disc& disc, TextureCache& textures) {
     // native game core (game/player.h, ui/song_screen.h) on $current_song at
     // $current_difficulty [approximation: GH3's own gem scroller scripts and
     // their C functions are replaced as one unit; backlog GD04-021].
-    vm.addNative("start_gem_scroller", [&fe](Vm& v, ScriptRun&, qb::Struct&) {
-        const qb::Value* song = v.global(K("current_song"));
-        const qb::Value* diff = v.global(K("current_difficulty"));
-        fe.songRequest.pending = true;
-        fe.songRequest.song = song ? song->key : 0;
-        int d = 3;
-        if (diff) {
-            if (diff->key == K("easy")) d = 0;
-            else if (diff->key == K("medium")) d = 1;
-            else if (diff->key == K("hard")) d = 2;
+    vm.addNative("start_gem_scroller", [&fe](Vm& v, ScriptRun&, qb::Struct& p) {
+        auto diffOf = [](const qb::Value* diff) {
+            if (diff) {
+                if (diff->key == K("easy")) return 0;
+                if (diff->key == K("medium")) return 1;
+                if (diff->key == K("hard")) return 2;
+            }
+            return 3;
+        };
+        // The script's song_name / difficulty / difficulty2 params, else the globals.
+        const qb::Value* song = Vm::param(p, K("song_name"));
+        if (!song) song = v.global(K("current_song"));
+        const qb::Value* diff = Vm::param(p, K("difficulty"));
+        if (!diff) diff = v.global(K("current_difficulty"));
+        const qb::Value* diff2 = Vm::param(p, K("difficulty2"));
+        if (!diff2) diff2 = v.global(K("current_difficulty2"));
+        FrontEnd::SongRequest& r = fe.songRequest;
+        r = FrontEnd::SongRequest{};
+        r.pending = true;
+        r.song = song ? song->key : 0;
+        r.difficulty = diffOf(diff);
+        r.difficulty2 = diffOf(diff2);
+        if (song) v.setGlobal(K("current_song"), Vm::makeKey(song->key));
+        if (diff) v.setGlobal(K("current_difficulty"), Vm::makeKey(diff->key));
+        if (diff2) v.setGlobal(K("current_difficulty2"), Vm::makeKey(diff2->key));
+        // A boss song (its props carry `boss`): boss_battle = 1, current_boss,
+        // two players, player 2 the bot (GetInputHandlerBotIndex player = 2)
+        // playing the rhythm part (bossbattle_init) [C scripts start_gem_scroller, bossbattle_init].
+        v.setGlobal(K("boss_battle"), Vm::makeInt(0));
+        if (const qb::Value* props = v.global(K("gh3_songlist_props")); props && props->st && song)
+            if (const qb::Value* ss = v.globals().field(*props->st, song->key); ss && ss->st)
+                if (const qb::Value* boss = ss->st->find(K("boss"))) {
+                    r.boss = boss->key;
+                    v.setGlobal(K("current_boss"), *boss);
+                    v.setGlobal(K("boss_battle"), Vm::makeInt(1));
+                    v.setGlobal(K("current_num_players"), Vm::makeInt(2));
+                }
+        const qb::Value* mode = v.global(K("game_mode"));
+        r.gameMode = mode ? mode->key : 0;
+        r.players = int(Vm::number(v.global(K("current_num_players")), 1)) >= 2 ? 2 : 1;
+        for (int i = 0; i < 2; ++i) {
+            const qb::Value* ps = v.global(K(i ? "player2_status" : "player1_status"));
+            const qb::Value* part = ps && ps->st ? v.globals().field(*ps->st, K("part")) : nullptr;
+            r.part2Rhythm[i] = part && part->key == K("rhythm");
         }
-        fe.songRequest.difficulty = d;
+        if (r.boss) r.part2Rhythm[1] = true;
+        // Battle's sudden death: the saved health carries over [C scripts GuitarEvent_SongWon, restart_song].
+        r.suddenDeath = r.gameMode == K("p2_battle") && Vm::number(v.global(K("battle_sudden_death")), 0) != 0;
+        if (r.suddenDeath)
+            for (int i = 0; i < 2; ++i) {
+                const qb::Value* ps = v.global(K(i ? "player2_status" : "player1_status"));
+                const qb::Value* h = ps && ps->st ? v.globals().field(*ps->st, K("save_health")) : nullptr;
+                r.saveHealth[i] = h ? h->number() : 1.0f;
+            }
         return true;
     });
     // SongUnLoadFSBIfDownloaded: kill_gem_scroller's (quit / restart from the
-    // pause menu) -- the song is abandoned [C script kill_gem_scroller].
+    // pause menu, the attract mode's end) -- a playing song is abandoned [C script kill_gem_scroller].
     vm.addNative("SongUnLoadFSBIfDownloaded", [&fe](Vm&, ScriptRun&, qb::Struct&) {
-        if (fe.songPlaying && fe.songPaused) fe.songKill = true;
+        if (fe.songPlaying) fe.songKill = true;
+        return true;
+    });
+    // GetHeldPattern [controller = n] -> hold_pattern: the frets held, green
+    // 0x10000 .. orange 0x1 [C use: the cheat entry, create_cheat_guitar_strum].
+    vm.addNative("GetHeldPattern", [&fe](Vm&, ScriptRun& run, qb::Struct&) {
+        if (!run.frames.empty()) {
+            if (!run.frames.back().locals) run.frames.back().locals = std::make_shared<qb::Struct>();
+            Vm::set(*run.frames.back().locals, K("hold_pattern"), Vm::makeInt(int32_t(fe.heldPattern)));
+        }
         return true;
     });
     // GetSongTimeMs [time_offset = n]: time = the song clock + the offset (ms) [C use: Transition_Play_Spawned].
@@ -155,6 +206,59 @@ void addGameNatives(FrontEnd& fe, const Disc& disc, TextureCache& textures) {
     for (const char* n : {"IsMoviePlaying", "KillMovie", "PreLoadMovie", "AllocateMovieBuffer", "FreeMovieBuffer", "LoadMovieIntoBuffer",
                           "PauseMovie", "ResumeMovie"})
         vm.addNative(n, [](Vm&, ScriptRun&, qb::Struct&) { return false; });
+    // StringToCharArray string = s: char_array = its characters as strings
+    // (split_text_into_array_elements: "You Rock!", "Player One Rocks!", "TIE!") [C 0x82268BF0; I: one string per character].
+    vm.addNative("StringToCharArray", [](Vm&, ScriptRun& run, qb::Struct& p) {
+        const qb::Value* str = Vm::param(p, K("string"));
+        if (!str) return false;
+        qb::Value a;
+        a.type = qb::Type::Array;
+        a.arr = std::make_shared<qb::Array>();
+        for (char ch : str->str) a.arr->values.push_back(Vm::makeString(std::string(1, ch)));
+        if (qb::Struct* l = locals(run)) Vm::set(*l, K("char_array"), a);
+        return true;
+    });
+    // ArrayContains array = a contains = x: whether a holds x [C 0x82267808; I: compares keys / numbers].
+    vm.addNative("ArrayContains", [](Vm&, ScriptRun&, qb::Struct& p) {
+        const qb::Value* a = Vm::param(p, K("array"));
+        const qb::Value* x = Vm::param(p, K("contains"));
+        if (!a || !x || a->type != qb::Type::Array || !a->arr) return false;
+        for (const qb::Value& e : a->arr->values) {
+            if ((e.type == qb::Type::Key || e.type == qb::Type::KeyPtr) && (x->type == qb::Type::Key || x->type == qb::Type::KeyPtr)) {
+                if (e.key == x->key) return true;
+            } else if ((e.type == qb::Type::Int || e.type == qb::Type::Float) && (x->type == qb::Type::Int || x->type == qb::Type::Float)) {
+                if (e.number() == x->number()) return true;
+            }
+        }
+        return false;
+    });
+    // GetActiveControllers: active_controllers = 4 flags, 1 for a connected
+    // controller [C 0x82103AC8]. The port's controllers are its player slots.
+    vm.addNative("GetActiveControllers", [&fe](Vm&, ScriptRun& run, qb::Struct&) {
+        if (qb::Struct* l = locals(run)) {
+            qb::Value a;
+            a.type = qb::Type::Array;
+            a.arr = std::make_shared<qb::Array>();
+            for (int i = 0; i < 4; ++i) a.arr->values.push_back(Vm::makeInt((fe.activeControllers >> i) & 1));
+            Vm::set(*l, K("active_controllers"), a);
+        }
+        return true;
+    });
+    // GetInputHandlerBotIndex {player = n}: controller = n - 1 + 4, the bot's
+    // input handler (after the four pads) [C 0x82104468, 0x820E7D08].
+    vm.addNative("GetInputHandlerBotIndex", [](Vm&, ScriptRun& run, qb::Struct& p) {
+        const int player = int(Vm::number(Vm::param(p, K("player")), 1));
+        if (qb::Struct* l = locals(run)) Vm::set(*l, K("controller"), Vm::makeInt(player - 1 + 4));
+        return true;
+    });
+    // IsGuitarController {controller = n}: a bot (n > 3) is; a pad is when
+    // its type is a guitar [C 0x82100D00]. The port: by the slot's device.
+    vm.addNative("IsGuitarController", [&fe](Vm&, ScriptRun&, qb::Struct& p) {
+        const qb::Value* c = Vm::param(p, K("controller"));
+        if (!c) return false;
+        const int i = int(c->number());
+        return i > 3 || (i >= 0 && ((fe.guitarControllers >> i) & 1));
+    });
     // GetButtonsPressed: makes = buttons pressed since the last call, device_num [I].
     vm.addNative("GetButtonsPressed", [&fe](Vm&, ScriptRun& run, qb::Struct&) {
         if (qb::Struct* l = locals(run)) {

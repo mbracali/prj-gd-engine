@@ -72,7 +72,24 @@ void addCoreNatives(Vm& vm) {
         return true;
     });
     // change <global> = value [C: the scripts' `change name = value`].
+    // Also `change structurename = S field = v ...` (fields of the global
+    // struct S) and `change globalname = G newvalue = v` (the global G
+    // named by a key) [C use: player_status, unlock_cheat].
     vm.addNative("change", [](Vm& v, ScriptRun&, qb::Struct& p) {
+        if (const qb::Value* sn = Vm::param(p, K("structurename"))) {
+            const qb::Value* cur = v.global(sn->key);
+            qb::Value st;
+            st.type = qb::Type::Struct;
+            st.st = cur && cur->st ? std::make_shared<qb::Struct>(*cur->st) : std::make_shared<qb::Struct>();
+            for (const qb::Item& it : p.items)
+                if (it.name && it.name != K("structurename")) Vm::set(*st.st, it.name, it.value);
+            v.setGlobal(sn->key, st);
+            return true;
+        }
+        if (const qb::Value* gn = Vm::param(p, K("globalname"))) {
+            if (const qb::Value* nv = Vm::param(p, K("newvalue"))) v.setGlobal(gn->key, *nv);
+            return true;
+        }
         for (const qb::Item& it : p.items)
             if (it.name) v.setGlobal(it.name, it.value);
         return true;
@@ -100,6 +117,13 @@ void addCoreNatives(Vm& vm) {
         if (!s || s->type != qb::Type::Key) return false;
         qb::Struct params;
         if (const qb::Value* ps = Vm::param(p, K("params")); ps && ps->st) params = *ps->st;
+        // GD04_SPAWNLOG=<script>: who spawns it (development aid).
+        static const char* spawnLog = SDL_getenv("GD04_SPAWNLOG");
+        if (spawnLog && qbkey::key(spawnLog) == s->key) {
+            std::string w;
+            for (auto& f : run.frames) w += " > " + qbkey::name(f.code->name);
+            SDL_Log("spawn %s by%s", spawnLog, w.c_str());
+        }
         const uint32_t id = v.spawn(s->key, params, run.id);
         if (const qb::Value* sid = Vm::param(p, K("id")))
             for (auto& r : v.runs())
@@ -249,9 +273,12 @@ void addCoreNatives(Vm& vm) {
         }
         return true;
     });
-    vm.addNative("SetGlobalTags", [](Vm& v, ScriptRun&, qb::Struct& p) {
+    vm.addNative("SetGlobalTags", [](Vm& v, ScriptRun& run, qb::Struct& p) {
         const qb::Value* tag = first(p);
         if (!tag) return false;
+        static const char* tagLog = SDL_getenv("GD04_TAGLOG");  // and its writes, with the script
+        if (tagLog && qbkey::key(tagLog) == tag->key)
+            SDL_Log("tag %s set by %s", tagLog, run.frames.empty() ? "?" : qbkey::name(run.frames.back().code->name).c_str());
         qb::Struct& t = v.globalTags[tag->key];
         if (const qb::Value* ps = Vm::param(p, K("params")); ps && ps->st)
             for (const qb::Item& item : v.globals().expand(*ps->st)) Vm::set(t, item.name, item.value);

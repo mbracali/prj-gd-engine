@@ -226,19 +226,40 @@ player's `player_status` struct.
   calc_health_invincible_time, 0x8210FD18]. No loss with cheat_nofail (non-career),
   tutorial, training.
 
-### 8. Modes
+### 8. Modes (details, per mode, in `modes.md`)
 
-- Co-op: parts guitarcoop_/rhythmcoop_ note tracks when the song has
-  use_coop_notetracks [C setup_gemarrays]; shared streak, SP, averaged fail.
-- Battle: phrase completion -> battlemode_ready (power-up from battlemode_powerups,
-  weights/drain_time in guitar_battle.qb) [C 0x8211E7B0]; attacks fired via the SP
-  trigger path [I].
-- Face-off: '%s_faceoffp1/p2' section arrays; gem_filler_enabled_time_on/off limit
-  which notes enter a player's input array [C faceoff_init, 0x82104558-0x821045CC].
+- Co-op (p2_career; p2_coop is online only: the local MULTIPLAYER menu has
+  FACE-OFF / PRO FACE-OFF / BATTLE [C create_mp_select_mode_menu]): the parts
+  from the part menu (guitar / rhythm), guitarcoop_ / rhythmcoop_ with
+  use_coop_notetracks [C setup_gemarrays]; multiplier from p1.run + p2.run
+  [C 0x8210A748]; a miss resets both runs; notes_hit / total_notes rise for
+  both; every SP gain to both (increase_star_power), whammy 2.5 / beat, drain
+  16.67 / measure; activation: both triggers while the raise-axe prompt
+  (~1.24 s) shows [C 0x82112850, 0x821131E4]; health may go below 0, fail
+  when (h1 + h2) / 2 <= 0 [C 0x8210FD18].
+- Face-off: only the notes in the player's `<song>_faceoffp1/p2` sections
+  enter (and show on) his highway [C 0x82104558]; score scale (sim_p1 +
+  sim_p2) x 0.5 / sim_p (sim_bot_score) [C 0x8210B9A0]; never fails; the
+  centre needle = clamp(-0.0065 x (p1 - p2), +-65) [C 0x82116AC4]. Pro
+  face-off: full chart, scale 1.0, one difficulty.
+- Battle / boss: `_StarBattleMode` phrases give cards (battlemode_powerups,
+  a stack of 3), fired with the SP trigger (no 50 % gate) [C 0x8211E7B0,
+  0x82112D84]; attacks and their numbers in `modes.md`; Double Notes is the
+  only lane change, at fill time [C 0x821044C8]; broken_string_mask is taken
+  off the held frets [C 0x82100DA0]. KO: a player at 0 with the healths
+  unequal; both alive at the end: sudden death (the song again, every new
+  card Death Drain) [C GuitarEvent_SongWon]. Boss: plays the rhythm chart,
+  a perfect bot except gems marked by ApplyBossBattleGemMisses and dead
+  frets [C 0x821096E8, 0x82103EB8], fires its first card after 100 frames
+  [C 0x82108948], health by its props x 0.02.
+- `ArrayContains` (0x82267808) was missing: Is_LevelZone_Downloaded then
+  failed and `setup_generalvenuetags` locked every venue after each load (the
+  face-off venue list was empty) [C script, fixed].
 
 ### Unknown / not done
-- whammy_cutoff use; exact star_miss_note boundary; tilt units; coop trigger flow;
-  battle attack effects; boss AI (CheckButtonsBoss 0x821096E8).
+- whammy_cutoff use; exact star_miss_note boundary; tilt units; the condition
+  that rolls a battle card (a gem in a StarBattleMode phrase assumed); which
+  side shows co-op's raise-axe prompt; CrowdDecrease's early-return flags.
 
 ## Venues, cameras, light show (M5; details in `venues.md`)
 

@@ -17,6 +17,9 @@ struct PlayTotals {
     bool tuningLoaded = false;
     size_t charts = 0, notes = 0, chords = 0, sustains = 0, hopos = 0, hopoNotes = 0, flagged = 0, phrases = 0;
     size_t phrasesCaptured = 0, failedCharts = 0, faceOffNotes = 0;
+    // Two players (game/match.h): co-op charts both autoplayed, their Star
+    // Power raised together; battles autoplayed with attacks.
+    size_t coopCharts = 0, coopNotes = 0, coopStarPower = 0, battles = 0, battleAttacks = 0, battleKos = 0;
     long long score = 0;
 };
 

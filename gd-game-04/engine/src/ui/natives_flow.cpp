@@ -120,11 +120,20 @@ void addFlowNatives(qs::Vm& vm, FlowState& st) {
         return v.clockMs() - st.timerMs >= double(Vm::number(Vm::positional(p), 0)) * 1000.0;
     });
     // Pause state (0x820EABD8 / 0x820EAC20 / 0x820EAC50).
-    vm.addNative("PauseGame", [&st](Vm&, ScriptRun&, qb::Struct&) {
+    // GD04_PAUSELOG=1: who pauses and unpauses (development aid).
+    static const bool pauseLog = SDL_getenv("GD04_PAUSELOG") != nullptr;
+    auto who = [](ScriptRun& r) {
+        std::string w;
+        for (auto& f : r.frames) w += " > " + qbkey::name(f.code->name);
+        return w;
+    };
+    vm.addNative("PauseGame", [&st, who](Vm&, ScriptRun& r, qb::Struct&) {
+        if (pauseLog) SDL_Log("PauseGame%s", who(r).c_str());
         st.paused = true;
         return true;
     });
-    vm.addNative("UnPauseGame", [&st](Vm&, ScriptRun&, qb::Struct&) {
+    vm.addNative("UnPauseGame", [&st, who](Vm&, ScriptRun& r, qb::Struct&) {
+        if (pauseLog) SDL_Log("UnPauseGame%s", who(r).c_str());
         st.paused = false;
         return true;
     });

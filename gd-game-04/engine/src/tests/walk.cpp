@@ -63,6 +63,8 @@ Walk::Walk(const std::string& name) : name_(name) {
         steps_.push_back({"song", {}, 30000});
         steps_.push_back({"song_over", {}, 600000});
         steps_.push_back({"career_newspaper_fs", {C}, 30000});
+        steps_.push_back({"career_cash_reward_fs", {C}, 30000, true});  // the song's cash (Progression_AwardCash)
+        steps_.push_back({"career_unlock_1_fs", {C}, 30000, true});
         steps_.push_back({"career_setlist_fs", {}, 30000});
     } else if (name == "pause" || name == "pausequit") {
         // Start in the song -> GH3's pause menu (quickplay_pause_fs) -> RESUME
@@ -84,6 +86,44 @@ Walk::Walk(const std::string& name) : name_(name) {
             steps_.push_back({"quickplay_song_ended_fs", {Op(D, 4000), C}, 20000});
             steps_.push_back({"quickplay_setlist_fs", {}, 30000});
         }
+    } else if (name == "attract") {
+        // Idle on "press any button": after 110 s the attract mode plays a
+        // song by itself; a button ends it [C scripts attract_mode_spawner,
+        // check_for_attract_mode_input].
+        steps_ = {{"bootup_press_any_button_fs", {}, 30000},
+                  {"bootup_attract_mode_fs", {}, 150000},
+                  {"song", {Op(C, 8000)}, 60000},
+                  {"bootup_press_any_button_fs", {}, 60000}};
+    } else if (name == "vault") {
+        // The Vault: career band 1 -> character hub -> THE STORE -> guitars ->
+        // back -> back to the hub [C: career_character_hub_fs, store_fs].
+        steps_ = boot;
+        steps_.push_back({"main_menu_fs", {C}, 10000});
+        steps_.push_back({"career_choose_band_fs", {C}, 20000, true});
+        steps_.push_back({"career_enter_band_name_fs", {C, C, C, Action::Start}, 20000, true});
+        steps_.push_back({"career_select_difficulty_fs", {C}, 20000});
+        steps_.push_back({"career_select_character_fs", {C}, 20000, true});
+        steps_.push_back({"career_character_hub_fs", {D, D, D, D, C}, 20000});  // VISIT STORE
+        steps_.push_back({"store_fs", {C}, 20000});
+        steps_.push_back({"store_guitars_fs", {B}, 20000});  // the first category
+        steps_.push_back({"store_fs", {B}, 20000});
+        steps_.push_back({"career_character_hub_fs", {}, 20000});
+    } else if (name == "cheats") {
+        // Options -> CHEATS -> ENTER NEW CHEAT -> Performance Mode's chords,
+        // strummed (GH3's guitar_hero_cheats unlock_pattern) -> Start.
+        steps_ = boot;
+        steps_.push_back({"main_menu_fs", {"click:menu:main_menu_options_text"}, 10000});
+        steps_.push_back({"options_select_option_fs", {D, D, D, D, D, D, D, D, C}, 20000});  // CHEATS
+        steps_.push_back({"options_cheats_fs", {D, D, D, D, D, D, D, C}, 20000});              // ENTER CHEAT
+        std::vector<Op> chords;
+        for (const char* f : {"1100", "1010", "1001", "1010", "1100", "10010", "1100", "1010"}) {
+            chords.push_back(Op(("frets:" + std::string(f)).c_str()));
+            chords.push_back(D);  // strum
+            chords.push_back(Op("frets:0"));
+        }
+        chords.push_back(Action::Start);
+        steps_.push_back({"options_enter_new_cheat_fs", chords, 20000});
+        steps_.push_back({"options_cheats_fs", {"check:text:Cheat_PerformanceMode_Text!=locked"}, 20000});
     } else if (name == "glitches") {
         // The Glitches: band slot 5, everything unlocked (ui/glitches.h): its
         // name and cash, then chosen, its career's last tier complete.
@@ -92,6 +132,21 @@ Walk::Walk(const std::string& name) : name_(name) {
         steps_.push_back({"career_choose_band_fs", {D, D, D, D, C}, 20000});
         steps_.push_back({"career_select_difficulty_fs", {Action::Down, Action::Down, Action::Down, C}, 20000});
         steps_.push_back({"career_character_hub_fs", {"check:tag:careertier8.complete=1", "check:tag:career_song1_tier8.stars=5"}, 20000});
+    } else if (name == "boss") {
+        // A career boss battle: The Glitches (everything unlocked) -> EASY ->
+        // venue -> the setlist's tier-2 boss, Tom Morello (bosstom) [C data
+        // GH3_Career_Songs] -> GH3's battle help -> the battle -> the result.
+        steps_ = boot;
+        steps_.push_back({"main_menu_fs", {C}, 10000});
+        steps_.push_back({"career_choose_band_fs", {D, D, D, D, C}, 20000});
+        steps_.push_back({"career_select_difficulty_fs", {C}, 20000});
+        steps_.push_back({"career_character_hub_fs", {C}, 20000});
+        steps_.push_back({"career_select_venue_fs", {C}, 20000});
+        steps_.push_back({"career_setlist_fs", {"setlist:bosstom", C}, 20000});
+        steps_.push_back({"career_battle_help_fs", {C}, 20000});  // "MORELLO CHALLENGES YOU!": BATTLE
+        steps_.push_back({"song", {}, 60000});
+        steps_.push_back({"song_over", {}, 900000});
+        steps_.push_back({"career_newspaper_fs", {}, 60000});
     } else if (name == "back") {
         steps_ = boot;
         steps_.push_back({"main_menu_fs", {D, D, C}, 10000});
@@ -129,6 +184,53 @@ Walk::Walk(const std::string& name) : name_(name) {
         // left / right press in 2 s; moved, one right press.
         steps_ = boot;
         steps_.push_back({"main_menu_fs", {"adapter_attach", Walk::Op("check:no_sideways", 2000), "adapter_move", "check:one_right"}, 10000});
+    } else if (name == "coop") {
+        // Co-op career: CO-OP CAREER -> both controllers to their sides and
+        // ready (player 2 moves down, then each chooses) [C script
+        // menu_select_controller_*] -> ...
+        twoPlayers_ = true;
+        const Op P2D = Op::p2(D), P2C = Op::p2(C);
+        steps_ = boot;
+        steps_.push_back({"main_menu_fs", {D, C}, 10000});
+        steps_.push_back({"coop_career_select_controllers_fs", {Op(C, 1500), P2D, P2C}, 20000});
+        steps_.push_back({"coop_career_choose_band_fs", {C}, 20000, true});
+        steps_.push_back({"coop_career_enter_band_name_fs", {C, C, C, Action::Start}, 20000, true});
+        steps_.push_back({"coop_career_select_difficulty_fs", {C, P2C}, 20000});
+        steps_.push_back({"coop_career_character_select_fs", {C, P2C}, 20000, true});  // first play
+        steps_.push_back({"coop_career_character_hub_fs", {C, P2C}, 20000});
+        steps_.push_back({"coop_career_select_venue_fs", {C}, 20000});
+        steps_.push_back({"coop_career_setlist_fs", {C}, 20000});
+        // Player 1 GUITAR, player 2 moved to BASS / RHYTHM [C choose_part_menu_select_part].
+        steps_.push_back({"coop_career_choose_part_fs", {C, P2C}, 20000});
+        steps_.push_back({"song", {}, 30000});
+        steps_.push_back({"song_over", {}, 600000});
+        steps_.push_back({"coop_career_newspaper_fs", {}, 30000});
+    } else if (name == "faceoff" || name == "proface" || name == "battle") {
+        // MULTIPLAYER -> controllers (as co-op) -> the mode [C script
+        // create_mp_select_mode_menu: FACE-OFF, PRO FACE-OFF, BATTLE; CO-OP
+        // only online] -> each player's character and hub -> venue ->
+        // setlist -> difficulty (pro face-off: one shared) -> the song ->
+        // the results.
+        twoPlayers_ = true;
+        const Op P2D = Op::p2(D), P2C = Op::p2(C);
+        const int modeIdx = name == "faceoff" ? 0 : name == "proface" ? 1 : 2;
+        steps_ = boot;
+        steps_.push_back({"main_menu_fs", {D, D, D, C}, 10000});
+        steps_.push_back({"mp_select_controller_fs", {Op(C, 1500), P2D, P2C}, 20000});
+        std::vector<Op> mode;
+        for (int i = 0; i < modeIdx; ++i) mode.push_back(D);
+        mode.push_back(C);
+        steps_.push_back({"mp_select_mode_fs", mode, 20000});
+        steps_.push_back({"mp_faceoff_character_select_fs", {C, P2C}, 20000});
+        steps_.push_back({"mp_faceoff_character_hub_fs", {C, P2C}, 20000});
+        steps_.push_back({"mp_faceoff_select_venue_fs", {C}, 20000});
+        steps_.push_back({"mp_faceoff_setlist_fs", {C}, 20000});
+        steps_.push_back({"mp_faceoff_battle_help_fs", {C}, 20000, true});  // battle: GH3's battle help
+        if (name == "proface") steps_.push_back({"mp_faceoff_select_difficulty_fs", {C}, 20000});
+        else steps_.push_back({"mp_faceoff_select_difficulty_fs", {C, P2C}, 20000});
+        steps_.push_back({"song", {}, 30000});
+        steps_.push_back({"song_over", {}, 900000});
+        steps_.push_back({"mp_faceoff_newspaper_fs", {}, 120000});
     } else if (name == "boot") {
         steps_ = boot;
     } else if (name == "uitest") {
@@ -166,8 +268,8 @@ void Walk::uiStep(FrontEnd& fe, double now) {
     stateAt_ = now;
 }
 
-std::vector<Action> Walk::update(FrontEnd& fe, bool songPlaying, double now, WalkHost* host, const std::string& port) {
-    std::vector<Action> out;
+std::vector<Walk::Press> Walk::update(FrontEnd& fe, bool songPlaying, double now, WalkHost* host, const std::string& port) {
+    std::vector<Press> out;
     if (uitest_ && step_ >= steps_.size() - 1 && reachedAt_ >= 0) {
         if (!done()) uiStep(fe, now);
         return out;
@@ -179,7 +281,14 @@ std::vector<Action> Walk::update(FrontEnd& fe, bool songPlaying, double now, Wal
         if (s.state == "song") reached = songPlaying;
         else if (s.state == "song_over") reached = !songPlaying && songsEnded > 0;
         else reached = (port.empty() ? flowState(fe) : port) == s.state;
-        if (!reached && s.optional && step_ + 1 < steps_.size() && flowState(fe) == steps_[step_ + 1].state) {
+        // An optional step is skipped when a later step's state comes first
+        // (looking past the optional steps that follow it).
+        size_t later = step_ + 1;
+        if (!reached && s.optional) {
+            const std::string cur = flowState(fe);
+            while (later < steps_.size() && steps_[later].state != cur && steps_[later].optional) ++later;
+        }
+        if (!reached && s.optional && later < steps_.size() && flowState(fe) == steps_[later].state) {
             log_.push_back("(" + s.state + " skipped)");
             ++step_;
             stepStart_ = now;
@@ -205,8 +314,33 @@ std::vector<Action> Walk::update(FrontEnd& fe, bool songPlaying, double now, Wal
         if (now - lastKey_ >= (key_ == 0 ? std::max(1000.0, op.delayMs) : op.delayMs)) {
             ++key_;
             lastKey_ = now;
-            if (op.act.empty()) {
-                out.push_back(op.a);
+            if (op.act.rfind("setlist:", 0) == 0) {
+                // Down until the setlist's cursor (setlist_selection_tier /
+                // _song, set by the items' focus handlers) is on the song.
+                const qb::Value* sl = fe.vm().global(qbkey::key("g_gh3_setlist"));
+                if (sl && !sl->st) sl = fe.vm().globals().find(sl->key);  // it names the tier global (GH3_Career_Songs)
+                const int tier = int(qs::Vm::number(fe.vm().global(qbkey::key("setlist_selection_tier")), 1));
+                const int song = int(qs::Vm::number(fe.vm().global(qbkey::key("setlist_selection_song")), 0));
+                uint32_t at = 0;
+                if (sl && sl->st)
+                    if (const qb::Value* t = fe.vm().globals().field(*sl->st, qbkey::key(("tier" + std::to_string(tier)).c_str())); t && t->st)
+                        if (const qb::Value* songs = fe.vm().globals().field(*t->st, qbkey::key("songs")); songs && songs->arr &&
+                            song >= 0 && size_t(song) < songs->arr->values.size())
+                            at = songs->arr->values[size_t(song)].key;
+                if (at != qbkey::key(op.act.substr(8).c_str())) {
+                    if (++seek_ > 80) {
+                        failed_ = true, failure_ = "the setlist has no " + op.act.substr(8);
+                        SDL_Log("walk: FAILED: %s", failure_.c_str());
+                        return out;
+                    }
+                    if (SDL_getenv("GD04_WALKLOG")) SDL_Log("walk: setlist at tier %d song %d (%s)", tier, song, qbkey::name(at).c_str());
+                    --key_;  // again next time
+                    out.push_back(Press{Action::Down, op.player});
+                } else {
+                    SDL_Log("walk: setlist on %s (tier %d, song %d)", op.act.substr(8).c_str(), tier, song);
+                }
+            } else if (op.act.empty()) {
+                out.push_back(Press{op.a, op.player});
             } else if (!host || !act(op.act, fe, *host)) {
                 if (failure_.empty()) failure_ = op.act + ": no host";
                 failed_ = true;
@@ -265,6 +399,18 @@ bool Walk::act(const std::string& what, FrontEnd& fe, WalkHost& host) {
         return true;
     }
     if (what == "rclick") return host.walkMouse(640, 360, 3), true;
+    if (starts("check:text:")) {  // check:text:<element id>!=<text>: the element's text is not that
+        const std::string kv = rest("check:text:");
+        const size_t ne = kv.find("!=");
+        const ui::Element* e = fe.ui().find(qbkey::key(kv.substr(0, ne).c_str()));
+        const std::string got = e ? e->text : "(no element)";
+        std::printf("  text: %s = \"%s\"\n", kv.substr(0, ne).c_str(), got.c_str());
+        return e && got != kv.substr(ne + 2) ? true : fail("text " + kv + ": " + got);
+    }
+    if (starts("frets:")) {  // frets:<hex pattern>: hold these frets (GetHeldPattern) until the next frets:
+        fe.heldPattern = uint32_t(std::stoul(rest("frets:"), nullptr, 16));
+        return true;
+    }
     if (starts("key:")) {
         const SDL_Keycode k = SDL_GetKeyFromName(rest("key:").c_str());
         if (k == SDLK_UNKNOWN) return fail("no key " + rest("key:"));

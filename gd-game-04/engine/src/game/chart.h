@@ -61,6 +61,13 @@ struct Chart {
     // The event arrays by their suffix (scripts, anim, triggers, cameras,
     // lightshow, crowd, drums, performance).
     std::vector<ChartEvent> cameras, lightshow, crowd, drums, anim, scriptsNotes, triggers, performanceNotes;
+    // <song>_scripts: scripts run at a time ({time, scr}), e.g. the boss
+    // songs' boss_battle_begin_deathlick [C data].
+    struct TimedScript {
+        int32_t time = 0;
+        uint32_t script = 0;
+    };
+    std::vector<TimedScript> scripts;
 
     const std::vector<ChartNote>& notes(Part p, int diff) const { return parts[size_t(p)].notes[size_t(diff)]; }
 };
