@@ -30,7 +30,7 @@ struct CrowdRules {
 // units here (seconds); the game stores min_length and whammy_timeout × 1000
 // and whammy_speed × 0.01 [C].
 struct StarPowerRules {
-    float rechargeRate = 0;       // [0] no reader of a refill over time found [I: unused]
+    float rechargeRate = 0;       // [0] the PS2 reads it (0x0011e1e0, via 0x00112118: added to the meter while not deployed) [C]; 0.0 in scoring.dta, so left out
     float deployRate = 0.125f;    // [1] meter lost per measure while deployed
     float phrase = 0.25f;         // [2] star_phrase: meter per captured phrase
     float whammyRate = 0.034f;    // [3] meter per beat of whammy

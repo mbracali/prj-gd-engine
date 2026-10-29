@@ -71,15 +71,11 @@ void BandPerformer::crowdUpdate(float target, float weight, float t) {
     }
 }
 
-// Performer poll 0x822DD298 [C]: eight_x once the total multiplier reaches 8
-// (the band's +0x4c is TRUE, 0x8234E1E0).
-void BandPerformer::poll(float t) {
-    (void)t;
-    if (!eightX_ && multiplier() == 8) {
-        eightX_ = true;
-        events_.push_back({PlayerEvent::Kind::EightX, -1, 0});
-    }
-}
+// Performer poll. The 360's poll (0x822DD298) also sent eight_x when the
+// total multiplier reached 8; the PS2's (0x0010f910) only keeps the time and
+// a time-weighted multiplier sum for the stats, and the executable has no
+// eight_x string, so this game sends nothing here [C].
+void BandPerformer::poll(float t) { (void)t; }
 
 void BandPerformer::forceFail() {
     if (failed_) return;

@@ -54,7 +54,7 @@ public:
     // The band's stars (0x822DCDF0 -> 0x822CE5D8) [C].
     int stars() const { return rules_.coopStars(songId_, score()); }
     PerformerState state() const;
-    // build_streak, eight_x, Failed.
+    // build_streak, Failed.
     std::vector<PlayerEvent> takeEvents();
 
 private:
@@ -72,7 +72,6 @@ private:
     int streak_ = 0, longest_ = 0;
     float raw_ = 0, rating_ = 0.5f;
     bool failed_ = false;
-    bool eightX_ = false;
     std::vector<PlayerEvent> events_;
 };
 

@@ -19,11 +19,11 @@ struct PlayerEvent {
     // whether or not it was penalised) and the game's sink events:
     // Hopo (hit by a hammer-on / pull-off), SwingAtHopo (a strum forgiven
     // after one), HeldNoteReleased (value = fraction of the tail kept),
-    // BuildStreak / EndStreak, EightX, StarGemHit, PhraseCaptured,
+    // BuildStreak / EndStreak, StarGemHit, PhraseCaptured,
     // PhraseMissed, StarPowerReady, StarPowerStart, StarPowerEnd,
     // WhammyStart / WhammyEnd, Failed, StarPowerEngage (value 1 / 0: the
     // sp_engage message).
-    enum class Kind { Hit, Miss, Pass, Hopo, SwingAtHopo, HeldNoteReleased, BuildStreak, EndStreak, EightX,
+    enum class Kind { Hit, Miss, Pass, Hopo, SwingAtHopo, HeldNoteReleased, BuildStreak, EndStreak,
                       StarGemHit, PhraseCaptured, PhraseMissed, StarPowerReady, StarPowerStart, StarPowerEnd,
                       WhammyStart, WhammyEnd, Failed, StarPowerEngage };
     Kind kind;
@@ -134,6 +134,9 @@ public:
     // the track bends sustained tails with it.
     float whammyBar() const { return whammyKey_ ? 1.0f : whammyValue_; }
     bool phraseIntact(int phrase) const;
+    // The Star Power phrase state (+0x58 of the PS2's Star Power object):
+    // 0 none, 1 broken, 2 armed, 3 captured.
+    int spPhraseState() const { return spState_; }
     bool failed() const { return failed_; }
     // Development aid (GD03_FAIL_AT): fails the song now, as an empty rock
     // meter does (the Failed event; no-fail does not stop it).
@@ -161,6 +164,7 @@ private:
     void watcherHit(float t, int slot, int gem, bool hopo);
     void watcherMiss(float t, int slot, int gem);
     void endSustain(float t, bool early);
+    void sustainReleased(float t, int gem);
     void sweep(float t);
     void clearPending() { pending_ = {}; }
 
@@ -231,9 +235,12 @@ private:
         bool afterHopo = false;
     } pending_;
     // Joypad watcher: a chord being completed within joypadChordMs (0x8234e350).
+    // PS2 joypad watcher +0x88 gem / +0x8c frets so far / +0x90 slot / +0x94 deadline.
     int padChordGem_ = -1;
     uint32_t padChordGot_ = 0;
+    int padChordSlot_ = -1;
     float padChordDeadline_ = 0;
+    void clearPadChord() { padChordGem_ = -1, padChordGot_ = 0, padChordSlot_ = -1, padChordDeadline_ = 0; }
 
     // Player.
     float score_ = 0;
@@ -259,6 +266,7 @@ private:
     StarMeter* meter_ = &ownMeter_;
     bool spReady_ = false, spActive_ = false;
     int spState_ = 0;  // 0 none, 1 broken, 2 armed, 3 captured
+    int armedPhrase_ = -1;  // drawing: the phrase that state 2 refers to
     std::vector<uint8_t> phraseBroken_;  // drawing: the phrase can no longer be captured
     double spLastBeat_ = 0, spLastMeasure_ = 0;
     bool spPolled_ = false;

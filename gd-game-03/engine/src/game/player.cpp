@@ -99,12 +99,15 @@ void Player::strum(float t) {
 // controller's +0x48 byte is never read [C].
 void Player::fretDown(int fret, float t) {
     if (failed_ || fret < 0 || fret > 4) return;
-    const bool noneAbove = held_ < (1u << fret);
-    watcherFretDown(fret, t);
     if (mode_ == ControllerMode::Joypad) {
+        // The joypad watcher's press (PS2 0x0024e050) has its own sustain
+        // rule and no pending strum; the held mask is kept for drawing.
+        held_ |= 1u << fret;
         joypadPress(fret, t);
         return;
     }
+    const bool noneAbove = held_ < (1u << fret);
+    watcherFretDown(fret, t);
     if (noneAbove) nonStrumSwing(t, fret, true);
 }
 
@@ -177,7 +180,10 @@ void Player::swing(float t, int slot, bool isStrum) {
         }
         if (isStrum || g.fretCount() > 1) {
             // 60 ms for the frets to come right (watcher +0xa8 = 60.0, 0x82002af8) [C].
-            pending_ = {j, slot, t + rules_.pendingStrumMs, hopoHit_ >= 0 && j - 1 == hopoHit_};
+            // The after-HOPO flag is just "the HOPO-hit gem is j - 1" (PS2
+            // 0x0024d560) [C]: with no HOPO hit (-1) a wrong strum on gem 0
+            // also counts, so it expires silently and only the pass penalises.
+            pending_ = {j, slot, t + rules_.pendingStrumMs, j - 1 == hopoHit_};
             return;
         }
     }
@@ -254,28 +260,23 @@ void Player::fretChange(float t, int pressed) {
     }
 }
 
-// Joypad watcher 0x8234e498 / 0x8234e350 [C]: every fret press is a Swing
-// for that fret. Single gem: hit when the fret matches, else an overstrum.
-// Chord: the first correct fret opens a 50 ms window (+0x84 = 50.0) for the
-// rest of the chord; a wrong fret is a miss. A window that runs out is a
-// miss [I]. No 52 ms strum filter (it would block chords) [I].
+// Joypad watcher press, PS2 0x0024e050 / 0x0024e2d0 [C]: every fret press
+// is a swing for that fret.
+//  1. any press ends the held sustain (a release, whatever the fret);
+//  2. the target gem: the nearest, or the next one when that is hit or not
+//     this player's; none before the first playable gem;
+//  3. a chord waiting for its other frets (+0x88): when it is the target the
+//     press continues it with no deadline test (a fret outside the chord is
+//     a miss of the chord, the full chord a hit); otherwise the waiting chord
+//     is dropped with a miss (its slot, the target gem) and the press goes on;
+//  4. outside the hit window: a miss. A single gem: hit when the fret is its
+//     fret, else a miss. A chord: a fret of the chord opens a 50 ms window
+//     (+0x84 = 50.0) for the rest, any other fret misses.
+// The window running out is a miss in the poll (0x0024e450). No 52 ms strum
+// filter (it would block chords) [I].
 void Player::joypadPress(int slot, float t) {
     const uint32_t bit = 1u << slot;
-    if (padChordGem_ >= 0) {
-        const int gem = padChordGem_;
-        const Gem& g = chart_.gems[size_t(gem)];
-        if (t <= padChordDeadline_ && !hit_[size_t(gem)]) {
-            if (g.frets & bit) {
-                padChordGot_ |= bit;
-                if (padChordGot_ == g.frets) padChordGem_ = -1, watcherHit(t, slot, gem, false);
-            } else {
-                padChordGem_ = -1;
-                watcherMiss(t, slot, gem);
-            }
-            return;
-        }
-        padChordGem_ = -1;
-    }
+    endSustain(t, true);
     const int n = static_cast<int>(chart_.gems.size());
     if (n == 0) {
         watcherMiss(t, slot, -1);
@@ -285,6 +286,25 @@ void Player::joypadPress(int slot, float t) {
     int j = i;
     if ((!owned(i) || hit_[size_t(i)]) && i + 1 < n) j = i + 1;
     if (j < firstPlayable_) return;
+    if (padChordGem_ >= 0) {
+        if (padChordGem_ == j) {
+            const int gem = padChordGem_;
+            const Gem& g = chart_.gems[size_t(gem)];
+            if (!(g.frets & bit)) {
+                clearPadChord();
+                watcherMiss(t, slot, gem);
+            } else if ((padChordGot_ | bit) == g.frets) {
+                clearPadChord();
+                watcherHit(t, slot, gem, false);
+            } else {
+                padChordGot_ |= bit;
+            }
+            return;
+        }
+        const int padSlot = padChordSlot_;
+        clearPadChord();
+        watcherMiss(t, padSlot, j);
+    }
     if (inWindow(j, t) && !hit_[size_t(j)] && owned(j)) {
         const Gem& g = chart_.gems[size_t(j)];
         if (g.fretCount() == 1) {
@@ -293,7 +313,7 @@ void Player::joypadPress(int slot, float t) {
             return;
         }
         if (g.frets & bit) {
-            padChordGem_ = j, padChordGot_ = bit, padChordDeadline_ = t + rules_.joypadChordMs;
+            padChordGem_ = j, padChordGot_ = bit, padChordSlot_ = slot, padChordDeadline_ = t + rules_.joypadChordMs;
             return;
         }
     }
@@ -301,9 +321,12 @@ void Player::joypadPress(int slot, float t) {
 }
 
 // OnHit -> 0x8234fe20 [C]: marks the gem hit, sets the last hit gem (and
-// the HOPO-hit gem +0x88), notifies the player, and tracks the sustain
-// (flag 0x40 clear) until start_ms + duration_ms. The previous sustain is
-// finished by the player (its step 3), after the streak update.
+// the HOPO-hit gem +0x88), notifies the player, and tracks the gem as the
+// held note until start_ms + duration_ms. The watcher's previous held note is
+// dropped without a release (PS2 0x002490f8). The PS2 (0x00248910) tracks
+// every gem whose duration_ms is not 0, which the parser never clears for
+// short notes (0x00236428): a note of 160 ticks or less is held too, only
+// its points have no tail [C].
 void Player::watcherHit(float t, int slot, int gem, bool hopo) {
     (void)slot;
     sustainGem_ = -1;
@@ -315,10 +338,11 @@ void Player::watcherHit(float t, int slot, int gem, bool hopo) {
     if (hopo) hopoHit_ = gem;
     lastHopoTryMs_ = t;
     clearPending();
+    clearPadChord();
     playerHit(t, gem);
     if (hopo) emit(PlayerEvent::Kind::Hopo, gem);
     const Gem& g = chart_.gems[size_t(gem)];
-    if (!g.noSustain) {
+    if (g.durationMs != 0) {
         sustainGem_ = gem;
         sustainEndMs_ = g.ms + g.durationMs;
     }
@@ -341,16 +365,37 @@ void Player::watcherMiss(float t, int slot, int gem) {
     playerMiss(t, gem);
 }
 
-// The watcher's sustain ends: at its end time, on a release (early:
-// sustain_released(remaining), 0x82350128) or with a miss. The player's
-// sustain record is finished at that time [C]. A release with time left also
-// silences the guitar track (GH1's UnmuteBeatMatchAudio) [I for GH2].
+// The watcher's held note ends. At its end time or with a miss it is just
+// dropped (PS2 0x00248c80 / 0x002495d8 -> 0x002490f8): the player's record
+// then completes in its poll or is finished by the penalty [C]. A release
+// (`early`: a fret let go or pressed, PS2 0x00249038) tells the player
+// (sustain_released, 0x00116f28 -> 0x00111810). A release of a real sustain
+// with time left also silences the guitar track (GH1's UnmuteBeatMatchAudio)
+// [I: the PS2 release only reaches the player and the highway, so short
+// notes, now released too, keep the guitar on].
 void Player::endSustain(float t, bool early) {
     if (sustainGem_ < 0) return;
-    const Gem& g = chart_.gems[size_t(sustainGem_)];
-    if (early && g.ms + g.durationMs - t > 0) guitarAudible_ = false;
+    const int gem = sustainGem_;
+    const Gem& g = chart_.gems[size_t(gem)];
     sustainGem_ = -1;
     sustainEndMs_ = 0;
+    if (!early) return;
+    if (!g.noSustain && g.ms + g.durationMs - t > 0) guitarAudible_ = false;
+    sustainReleased(t, gem);
+}
+
+// The player's "sustain released" (PS2 0x00111810) [C]: when the open record
+// is the released gem's, its points are brought up to now and it is
+// finished; a record of another gem (a short note was released while an
+// earlier sustain still accrued) is thrown away: no more points, no crowd
+// update.
+void Player::sustainReleased(float t, int gem) {
+    if (tail_.gem < 0) return;
+    if (tail_.gem != gem) {
+        tail_ = {};
+        return;
+    }
+    accrueSustain(t);
     finishSustain(t);
 }
 
@@ -384,22 +429,25 @@ void Player::sweep(float t) {
 // own poll: sustain points and Star Power.
 void Player::update(float t) {
     if (failed_) return;
-    if (sustainGem_ >= 0 && t >= sustainEndMs_) endSustain(t, false);
+    if (sustainGem_ >= 0 && sustainEndMs_ < t) endSustain(t, false);  // `end < now` (PS2 0x00248c80) [C]
     sweep(t);
     whammyPoll(t);
     // 0x8234e968 [C]: a pending strum past its deadline is a miss, unless it
-    // was set right after a HOPO hit; then it is dropped silently.
-    if (pending_.gem >= 0 && t >= pending_.deadline) {
+    // was set right after a HOPO hit; then it is dropped silently. Past means
+    // `deadline < now` (PS2 0x0024de90) [C].
+    if (pending_.gem >= 0 && pending_.deadline < t) {
         const Pending p = pending_;
         clearPending();
         if (!p.afterHopo) watcherMiss(t, p.slot, p.gem);
     }
     // 0x8234ef50 [C]: the HOPO forgiveness ends when that gem leaves the hit window.
     if (hopoHit_ >= 0 && !inWindow(hopoHit_, t)) hopoHit_ = -1;
-    if (padChordGem_ >= 0 && t > padChordDeadline_) {  // joypad chord window ran out [I]
-        const int gem = padChordGem_;
-        padChordGem_ = -1;
-        if (!hit_[size_t(gem)]) watcherMiss(t, -1, gem);
+    // The joypad chord window ran out (`deadline < now`, PS2 0x0024e450) [C]:
+    // a miss with the slot that opened it.
+    if (padChordGem_ >= 0 && padChordDeadline_ < t) {
+        const int gem = padChordGem_, slot = padChordSlot_;
+        clearPadChord();
+        watcherMiss(t, slot, gem);
     }
     if (failed_) return;
     accrueSustain(t);
@@ -430,24 +478,29 @@ void Player::endStreak() {
     if (band_) band_->endStreak();
 }
 
-// Streak and multiplier (0x822ddf70, 0x822d66b0, 0x822dd298) [C]:
-// build_streak when the multiplier goes up, eight_x on reaching 8× total.
+// Streak and multiplier (0x822ddf70, 0x822d66b0) [C]: build_streak when the
+// multiplier goes up. The 360's eight_x (0x822dd298) is not in the PS2: its
+// performer hit (0x0010fa98) only sends build_streak and the executable has
+// no eight_x string [C].
 void Player::setStreak(int streak) {
-    const int oldBase = baseMultiplier_, oldTotal = multiplier();
+    const int oldBase = baseMultiplier_;
     streak_ = streak;
     longestStreak_ = std::max(longestStreak_, streak_);
     baseMultiplier_ = rules_.multiplierForStreak(streak_);
     if (baseMultiplier_ > oldBase) emit(PlayerEvent::Kind::BuildStreak, -1, float(baseMultiplier_));
-    if (multiplier() >= 8 && oldTotal < 8) emit(PlayerEvent::Kind::EightX, -1);
 }
 
 // Hit 0x822c9338 [C], in this order:
 //  1. gems outside the practice range [+0xf0, +0xf4) are ignored;
 //  2. streak += 1, hits += 1 (0x822ddf70 / 0x822dcaa8), build_streak;
-//  3. the previous sustain's accrual is finished;
+//  3. the open sustain record accrues up to the new gem's start_ms and is
+//     finished only if that completes it (PS2 0x001111d0 -> 0x00112280, the
+//     time passed is the gem's start) [C];
 //  4. head points popcount × 50 with the current (new) multiplier
 //     (0x822c6b18 -> 0x822c6a58): the 10th note already scores at 2×;
-//  5. a gem with sustain opens a sustain record, otherwise rock meter target 1.0;
+//  5. a gem with sustain opens a sustain record, replacing an unfinished one
+//     with no crowd update and no more points (PS2 0x0012a0e0) [C]; otherwise
+//     rock meter target 1.0 and the open record keeps accruing in the poll;
 //  6. Star Power gem hit.
 void Player::playerHit(float t, int gem) {
     if (!inPractice(gem)) return;
@@ -460,7 +513,7 @@ void Player::playerHit(float t, int gem) {
     const float err = std::abs(t + offset_ - g.ms);
     if (err <= float(rules_.perfectMs)) ++perfect_;
     else if (err <= float(rules_.goodMs)) ++good_;
-    finishSustain(t);
+    accrueSustain(g.ms);
     addScore(g.fretCount() * rules_.headPoints);
     if (g.noSustain) {
         crowdUpdate(1.0f, t);
@@ -483,17 +536,22 @@ void Player::playerMiss(float t, int gem) {
 
 // Pass 0x822c9498 [C]: counts the pass and penalises only when the gem was
 // not already penalised by an overstrum (+0xac). No re-attribution of early
-// misses (GH1's 500 ms rule is not in GH2's player).
+// misses (GH1's 500 ms rule is not in GH2's player). Then, for a phrase's
+// first gem (which the penalty skips), the Star Power phrase miss (PS2
+// 0x00111358 -> 0x0011e6a8) [C]: an unhit first gem breaks the phrase state.
 void Player::playerPass(float t, int gem) {
     if (!inPractice(gem)) return;
     ++passes_;
     emit(PlayerEvent::Kind::Pass, gem);
     if (gem > penalisedGem_) penalise(t, gem);
+    const int phrase = chart_.gems[size_t(gem)].phrase;
+    if (phrase >= 0 && chart_.phrases[size_t(phrase)].firstGem == gem) spPhraseMiss(gem);
 }
 
 // 0x822c8d40 [C]: end_streak, streak reset (the longest kept, 0x822dc518),
 // rock meter target 0.0, Star Power phrase miss (not for a phrase's first
-// gem), the sustain ended.
+// gem), the sustain ended. The record is finished with the points of the
+// last poll, not brought up to now (PS2 0x001114c0 -> 0x00112348) [C].
 void Player::penalise(float t, int gem) {
     emit(PlayerEvent::Kind::EndStreak, gem, float(streak_));
     endStreak();
@@ -510,25 +568,25 @@ void Player::penalise(float t, int gem) {
 // Sustain points (0x822de310, 0x822de428, 0x822d62b0) [C]: every poll
 // earned = round_half_away(clamp((t - start_ms) / duration_ms, 0, 1) × max_tail),
 // the difference added with the current multiplier; at max the note is
-// finished at once.
+// finished at once (PS2 0x00112280 / 0x0012a168 / 0x0012a150). The PS2 adds
+// the signed difference: an accrual at an earlier time (a hit's, step 3)
+// can take points back [C].
 void Player::accrueSustain(float t) {
     if (tail_.gem < 0) return;
     const Gem& g = chart_.gems[size_t(tail_.gem)];
     const float frac = g.durationMs > 0 ? std::clamp((t - g.ms) / g.durationMs, 0.0f, 1.0f) : 1.0f;
     const int earned = roundHalfAway(double(frac) * tail_.max);
-    if (earned > tail_.earned) addScore(earned - tail_.earned), tail_.earned = earned;
-    if (tail_.earned >= tail_.max) finishSustain(t);
+    if (earned != tail_.earned) addScore(earned - tail_.earned), tail_.earned = earned;
+    if (tail_.earned == tail_.max) finishSustain(t);
 }
 
 // Sustain end 0x822c86f8 [C]: rock meter target (earned + 50) / (max + 50).
 // TODO: blew_big_note (earned / max < 0.1 on a MIDI 110 big note) only plays
 // a crowd sound (ui/gen/game.dta) and has no gameplay effect [C].
+// It uses the points earned so far and accrues nothing itself (PS2
+// 0x00112348); callers that bring the record up to now do so first.
 void Player::finishSustain(float t) {
     if (tail_.gem < 0) return;
-    const Gem& g = chart_.gems[size_t(tail_.gem)];
-    const float frac = g.durationMs > 0 ? std::clamp((t - g.ms) / g.durationMs, 0.0f, 1.0f) : 1.0f;
-    const int earned = roundHalfAway(double(frac) * tail_.max);
-    if (earned > tail_.earned) addScore(earned - tail_.earned), tail_.earned = earned;
     const Tail done = tail_;
     tail_ = {};
     const float head = float(rules_.headPoints);
@@ -614,13 +672,15 @@ void Player::spGemHit(int gem) {
         return;
     }
     if (spActive_) {
+        // PS2 0x0011e2b8 [C]: phrase_miss unless the state is already broken.
+        if (spState_ != 1) emit(PlayerEvent::Kind::PhraseMissed, gem);
         spState_ = 1;
         phraseBroken_[size_t(p)] = 1;
         return;
     }
     emit(PlayerEvent::Kind::StarGemHit, gem);
     const StarPhrase& ph = chart_.phrases[size_t(p)];
-    if (gem == ph.firstGem) spState_ = 2;
+    if (gem == ph.firstGem) spState_ = 2, armedPhrase_ = p;
     if (spState_ == 2 && gem == ph.lastGem) {
         spAdd(sp_.phrase);
         spState_ = 3;
@@ -628,18 +688,30 @@ void Player::spGemHit(int gem) {
     }
 }
 
-// Phrase miss 0x822dc368 [C]: a miss on a phrase gem breaks the phrase
-// (phrase_miss); an overstrum with no gem breaks an armed phrase.
+// Phrase miss 0x822dc368, PS2 0x0011e6a8 -> 0x0011e7c8 phrase_miss [C]:
+//  - no gem: phrase_miss only when a phrase is armed (state 2);
+//  - a phrase gem: phrase_miss (state 1) when it is the first gem or the
+//    state is not broken already; then, on the phrase's last gem, state 0;
+//  - a gem outside every phrase: state 0.
+// PhraseMissed is sent each time phrase_miss runs.
 void Player::spPhraseMiss(int gem) {
+    auto phraseMiss = [&](int p) {
+        spState_ = 1;
+        emit(PlayerEvent::Kind::PhraseMissed, gem);
+        if (p >= 0) phraseBroken_[size_t(p)] = 1;
+    };
     if (gem < 0) {
-        if (spState_ == 2) spState_ = 1;
+        if (spState_ == 2) phraseMiss(armedPhrase_);
         return;
     }
     const int p = chart_.gems[size_t(gem)].phrase;
-    if (p < 0) return;  // a miss outside a phrase leaves the state alone [I]
-    spState_ = 1;
-    if (!phraseBroken_[size_t(p)]) emit(PlayerEvent::Kind::PhraseMissed, gem);
-    phraseBroken_[size_t(p)] = 1;
+    if (p >= 0) {
+        const StarPhrase& ph = chart_.phrases[size_t(p)];
+        if (gem == ph.firstGem || spState_ != 1) phraseMiss(p);
+        phraseBroken_[size_t(p)] = 1;  // drawing: a missed gem means it cannot be captured any more
+        if (gem != ph.lastGem) return;
+    }
+    spState_ = 0;
 }
 
 // Engage 0x822c80f8 [C]: +0xbc = the state; on TRUE, with the ready flag
@@ -674,8 +746,9 @@ void Player::spStart(bool on) {
 // depleted, the ready flag cleared); otherwise, while the whammy flag is on,
 // it gains whammy_rate per beat. Then star_power_ready once the meter
 // reaches ready_level. Each co-op player's poll drains the shared meter, so
-// with both deployed it empties twice as fast [C]. recharge_rate (0) has no
-// reader [C: no other term in the poll].
+// with both deployed it empties twice as fast [C]. recharge_rate does have a
+// reader on the PS2 (0x0011e1e0 adds it while not deployed), but it is 0.0 in
+// both score configs of scoring.dta, so it is left out.
 void Player::spPoll(float t) {
     const double tick = song_.tempo.msToTick(t);
     const double beat = tick / song_.tempo.division();

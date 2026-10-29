@@ -393,14 +393,23 @@ int runRuleChecks(const Rules& rules) {
         for (const PlayerEvent& e : r3.ev) missAt1020 |= e.kind == K::Miss && e.gem == 0;
         check("wrong strum: a non-matching press misses at once; the pass is not penalised again",
               missAt1020 && !r3.p->gemHit(0) && r3.p->penalties() == 1 && r3.p->passes() == 1);
-        Play r4 = play(s, rules, "990:+red,1000:strum", 1059);
-        Play r5 = play(s, rules, "990:+red,1000:strum", 1061);
-        check("wrong strum: the miss comes when the 60 ms run out", r4.count(K::Miss) == 0 && r5.count(K::Miss, 0) == 1);
+        // On gem 1: a wrong strum on gem 0 with no HOPO hit expires silently (see below).
+        Song s1 = makeSong({{1000, G}, {2000, G}, {4000, G}});
+        const std::string late = "999:+green,1000:strum,1100:-green,1990:+red,2000:strum";
+        Play r4 = play(s1, rules, late, 2060);
+        Play r5 = play(s1, rules, late, 2061);
+        check("wrong strum: the miss comes once the 60 ms are past (deadline < now, PS2 0x0024de90)",
+              r4.count(K::Miss) == 0 && r5.count(K::Miss, 1) == 1);
+        Play r4b = play(s, rules, "990:+red,1000:strum", 1200);
+        check("wrong strum on gem 0 with no HOPO hit expires silently; the pass penalises (+0xa4 = (+0x88 == j-1), PS2 0x0024d560)",
+              r4b.count(K::Miss) == 0 && r4b.count(K::Pass, 0) == 1 && r4b.p->penalties() == 1);
         Play r6 = play(s, rules, "999:+green,1000:strum,1040:strum,1100:strum", 2000);
         check("a strum <= 52 ms after the last one is dropped", r6.p->gemHit(0) && r6.count(K::Miss) == 1);
         Song tie = makeSong({{1000, G}, {1200, R}});
+        // The wrong strum waits on gem 0; with no HOPO hit it then expires silently (PS2 0x0024d560) and gem 0 passes.
         Play r7 = play(tie, rules, "1090:+red,1100:strum", 1300);
-        check("nearest gem: a tie goes to the earlier gem", r7.count(K::Miss, 0) == 1 && r7.count(K::Miss, 1) == 0);
+        check("nearest gem: a tie goes to the earlier gem",
+              r7.count(K::Pass, 0) == 1 && !r7.p->gemHit(1) && r7.count(K::Miss) == 0 && r7.p->penalties() == 1);
         Song hold = makeSong({{1000, R}, {4000, G | R}});
         Play r8 = play(hold, rules, "990:+green,990:+red,1000:strum,3990:+yellow,4000:strum", 4200);
         check("anchoring: a lower fret may be held on a single note; a chord needs the exact frets",
@@ -530,6 +539,72 @@ int runRuleChecks(const Rules& rules) {
         }
         std::printf("      (rock meter: failed after %d passes, expected %d)\n", r2.p->penalties(), expect);
         check("rock meter: the song fails once the rating drops below lose_level", r2.p->failed() && r2.p->penalties() == expect);
+    }
+    {  // Rules re-confirmed on the PS2 (SLUS_215.86).
+        // The watcher holds every gem with a length (duration_ms != 0, 0x00248910), short notes too.
+        Song s = makeSong({{1000, G}, {4000, G}});
+        Play r = play(s, rules, "999:+green,1000:strum", 1050);
+        Play r2 = play(s, rules, "999:+green,1000:strum,1030:-green", 1200);
+        check("PS2: the watcher holds a short note to its end (duration_ms != 0, 0x00248910); letting go early keeps the guitar on",
+              r.p->sustainGem() == 0 && r2.p->sustainGem() == -1 && r2.p->guitarAudible() && r2.p->score() == 50 &&
+                  r2.count(K::HeldNoteReleased) == 0);
+    }
+    {
+        // A red sustain (1000..1960) and a short red note at 1500 inside it (patched in: MIDI cannot overlap one pitch).
+        Song s = makeSong({{1000, R, 960}, {1500, G}, {5000, G}});
+        s.charts[size_t(Part::Guitar)][size_t(Difficulty::Expert)].gems[1].frets = R;
+        // The hit at 1500 brings gem 0's record to round(500/960 x 50) = 26 at 1500 and keeps it open.
+        Play held = play(s, rules, "999:+red,1000:strum,1500:strum,2500:-red", 3000);
+        check("PS2: a hit only accrues the open sustain record (at the new gem's start) and keeps it open (0x001111d0 -> 0x00112280)",
+              held.p->score() == 150 && held.count(K::HeldNoteReleased, 0) == 1);
+        // Let go at 1550: the record has round(550/960 x 50) = 29 from the poll and gets nothing more (150 if kept).
+        Play let = play(s, rules, "999:+red,1000:strum,1500:strum,1550:-red", 3000);
+        check("PS2: releasing a gem other than the record's throws the record away (no points, no crowd, 0x00111810)",
+              let.p->score() == 129 && let.count(K::HeldNoteReleased) == 0);
+    }
+    {
+        // A penalty finishes the record with the last poll's points: polled to 1105 (5 of 50), overstrummed at 1106
+        // (round(106/960 x 50) = 6 had it accrued).
+        Song s = makeSong({{1000, G, 960}, {5000, G}});
+        Player p(s, Part::Guitar, Difficulty::Expert, rules, ControllerMode::Guitar, false);
+        p.fretDown(0, 999);
+        for (int t = 999; t <= 1105; ++t) {
+            if (t == 1000) p.strum(1000);
+            p.update(float(t));
+        }
+        p.strum(1106.0f);
+        p.update(1106.0f);
+        check("PS2: a penalty finishes the sustain with the points of the last poll, no accrual (0x001114c0 -> 0x00112348)",
+              p.score() == 55 && p.penalties() == 1);
+    }
+    {
+        // Phrase A captured (state 3), phrase B's first gem (3000) passes, its sustain (3300) is whammied.
+        Song s = makeSong({{1000, G}, {1300, G}, {3000, G}, {3300, G, 960}, {6000, G}}, {{1000, 1400}, {3000, 3400}});
+        std::string keys = "500:+green,1000:strum,1300:strum,3300:strum,5000:-green";
+        for (int t = 3400, k = 0; t <= 4200; t += 20, ++k) keys += "," + std::to_string(t) + ":whammy=" + (k % 2 ? "0.5" : "0");
+        Play r = play(s, rules, keys, 4500);
+        check("PS2: an unhit first gem's pass is a phrase miss, so a later sustain of that phrase fills no Star Power (0x00111358)",
+              r.count(K::PhraseMissed, 2) == 1 && r.count(K::WhammyStart) == 0 && std::abs(r.p->starMeter() - 0.25f) < 1e-6f);
+    }
+    {
+        Song s = makeSong({{1000, G}, {1300, G}, {2000, G}, {3000, G}, {3300, G}, {5000, G}}, {{1000, 1400}, {3000, 3400}});
+        Play a = play(s, rules, "500:+green,1000:strum,1300:strum", 2200);
+        Play b = play(s, rules, "500:+green,1000:strum,1300:strum,2000:strum,3000:strum", 3600);
+        check("PS2: a miss outside every phrase or on a phrase's last gem resets the phrase state to 0 (0x0011e6a8)",
+              a.count(K::PhraseCaptured) == 1 && a.count(K::Pass, 2) == 1 && a.p->spPhraseState() == 0 &&
+                  b.count(K::PhraseMissed, 4) == 1 && b.p->spPhraseState() == 0);
+    }
+    {
+        // Joypad: a yellow sustain (1000..1960), then a green note at 1500.
+        Song s = makeSong({{1000, Y, 960}, {1500, G}, {5000, G}});
+        Play r = play(s, rules, "1000:+yellow,1500:+green", 3000, ControllerMode::Joypad);
+        check("PS2 joypad: any fret press releases the held sustain, a lower one too (0x0024e050)",
+              r.p->gemHit(1) && r.p->score() == 126 && r.count(K::HeldNoteReleased, 0) == 1);
+        // A chord waiting for its second fret when a press is nearer the next gem: a miss, then that press plays on.
+        Song c = makeSong({{1000, G | R}, {1060, Y}, {5000, G}});
+        Play r2 = play(c, rules, "1000:+green,1040:+yellow", 1300, ControllerMode::Joypad);
+        check("PS2 joypad: a press for another gem drops the waiting chord with a miss and is then judged itself (0x0024e050)",
+              !r2.p->gemHit(0) && r2.p->gemHit(1) && r2.count(K::Miss, 1) == 1);
     }
     return failures;
 }

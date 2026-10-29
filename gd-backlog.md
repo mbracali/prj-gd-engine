@@ -641,7 +641,7 @@ universal launcher, not released on its own.
 | GD03-001 | Original | 🟡 in progress | Full reimplementation (decompile + recompile, 100% match), milestones M0–M10 of the kickoff; the agent adds one row per milestone and per finding | [GD-GAME-03_KICKOFF.md](GD-GAME-03_KICKOFF.md); progress in `gd-game-03/agents/PROGRESS.md` | Owner 10-28 |
 | GD03-002 | Original | ✅ | M0 set-up: folder layout, engine = gd-game-02's renamed with the PS2 layers (ISO 9660, ARK v3, dtb cipher, VGS, SPU ADPCM) from gd-game-01; Ghidra headless project and exports; REA tried (opens the ELF, no MIPS analysis) | `gd-game-03/agents/CONTEXT.md`, `DECISIONS.md` D1-D3 | Milestones M0 |
 | GD03-003 | Original | ✅ | M1 data layer: milo directory v24 and the ~30 classes older than GH2 360's, PS2 textures, every milo / texture / dtb decodes (`--scenetest`) | `gd-game-03/docs/formats.md`; most layouts from the 360 Load's old-revision branches + every record ending at its marker, few re-read in SLUS_215.86 | Milestones M1 |
-| GD03-004 | Original | 🟡 in progress | M2 songs (VGS), charts, gameplay rules re-confirmed in SLUS_215.86 (`--selftest`, `--sfxtest`) | | Milestones M2 |
+| GD03-004 | Original | ✅ | M2 songs (VGS), charts, gameplay rules re-confirmed in SLUS_215.86 (`--selftest`, `--sfxtest`) | | Milestones M2 |
 | GD03-005 | Original | ✅ | M3 scripts, UI, asset audit (`--scripttest`, `--uitest`, `--audittest`, `--walktest quickplay`) | PS2 memory-card flow (`memcard` 0x0014c078), boot screens, `docs/audit.md` | Milestones M3 | Milestones M3 |
 | GD03-006 | Original | ❌ | M4 highway and HUD; M5 venues and cameras; M6 band | | Milestones M4-M6 |
 | GD03-007 | Original | ❌ | M7 modes, career, saves, The Glitches; M8 port extras; M9 launcher module and packages | | Milestones M7-M9 |
@@ -651,6 +651,7 @@ universal launcher, not released on its own.
 | GD03-012 | Original | 🟡 in progress | M4 highway: the PS2 track (`track/track.milo`, TrackPanel 0x0014faa8..0x00160000) drawn as the original: gems, HOPO / star looks, tails, beat lines, rails, smashers, lightning, two-player halves | Far-end fade done (0x001511c0 / 0x001a0da8 strips; `TrackView::fadeDraws`). Missing: the per-character surface override, the gem sparkle / bonus burst | Milestones M4 |
 | GD03-013 | Original | 🟡 in progress | M5 venues: all six venues load (sp / mp / coop), every camera shot checked, 60 vs 240 fps identical; director, band and crowd goldens are this disc's first baselines (not yet checked shot by shot against the original) | `--venuetest`, `--chartest` | Milestones M5 |
 | GD03-014 | Original | ❌ | `--facefxtest` still carries GH2 360's goldens (songs, SDK versions, metal_singer counts): rewrite for this disc's `.voc` / `.fac` | | Milestones M6 |
+| GD03-015 | Original | ❌ | A hit lowers the "highest penalised gem" mark when the hit gem is below it (PS2 asm 0x00111254); not in the engine | `docs/FINDINGS.md` | Milestones M2 |
 | GD03-008 | Original | ✅ | PSS movies (VIDEOS/INTRO.PSS) through gd-game-01's own MPEG-2 / PSS decoders (video/movie_player.cpp): 4:3 pillarboxed, sound as the clock, fields blended; `--playmovie intro.pss`, `GD03_MOVIE_DUMP=1` decodes headless | world/shared/fest_1.ipu (an IPU stream) not used yet | Milestones M0 |
 
 
