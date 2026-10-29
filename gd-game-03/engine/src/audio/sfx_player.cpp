@@ -7,27 +7,8 @@
 #include <cstring>
 
 #include "audio/audio_device.h"
-#include "audio/xaudio_reverb.h"
 
 using sfxdsp::kBlock;
-
-// An FxSendReverb's three submix voices (FxSend360 0x826861D0 / 0x826863D0:
-// front 2 channels, centre 1, rear 2, 48000 Hz, each with the reverb effect
-// and its I3DL2 environment, 0x826848A0) [C]. The reverb turns each into a
-// 5.1 voice whose FL FR SL SR it writes (wet only: GH2 never sets the wet
-// parameter); the submix voices' output maps (no next_send in the data)
-// take input channels 0 (/ 1): front -> master FL FR, centre -> C, rear ->
-// RL RR [C: 0x826861D0]. So each voice's reverb FL (FR) is what returns and
-// its SL SR are not routed [I: that XAudio applies the map to the effect's
-// output channels].
-class SfxPlayer::Bus {
-public:
-    explicit Bus(const I3DL2Params& p) : front(2, sfxdsp::kRate), centre(1, sfxdsp::kRate), rear(2, sfxdsp::kRate) {
-        front.setI3DL2(p), centre.setI3DL2(p), rear.setI3DL2(p);
-    }
-    XAudioReverb front, centre, rear;
-    float inFront[2 * kBlock] = {}, inCentre[kBlock] = {}, inRear[2 * kBlock] = {};
-};
 
 SfxPlayer::SfxPlayer() = default;
 
@@ -52,12 +33,10 @@ void SfxPlayer::close() {
     voices_.clear();
 }
 
-std::shared_ptr<SfxPlayer::Bus> SfxPlayer::reverbBus(const I3DL2Params& params) {
-    auto b = std::make_shared<Bus>(params);
+void SfxPlayer::setFx(const spu2::FxConfig& fx) {
     std::lock_guard<std::mutex> g(lock_);
-    buses_.erase(std::remove_if(buses_.begin(), buses_.end(), [](const std::weak_ptr<Bus>& w) { return w.expired(); }), buses_.end());
-    buses_.push_back(b);
-    return b;
+    fx_ = fx;
+    for (size_t c = 0; c < cores_.size(); ++c) cores_[c].configure(fx.core[c]);
 }
 
 SfxPlayer::VoiceId SfxPlayer::play(std::shared_ptr<const SfxPcm> pcm, const Params& p) {
@@ -76,9 +55,10 @@ SfxPlayer::VoiceId SfxPlayer::play(std::shared_ptr<const SfxPcm> pcm, const Para
     }
     v.gain = p.gain;
     v.pan = sfxdsp::panGains(sfxdsp::wrapPan(p.pan));
-    if (p.send) {
-        v.send = p.send;
-        v.sendGains = sfxdsp::sendGains(v.pan, std::min(std::max(p.sendVolume, 0.0001f), 5.0f), true);
+    if (p.fxCore == 0 || p.fxCore == 1) {
+        v.fxCore = p.fxCore;
+        v.fxL = v.pan[sfxdsp::kFL] + sfxdsp::kDownmixCentre * v.pan[sfxdsp::kC] + sfxdsp::kDownmixRear * v.pan[sfxdsp::kRL];
+        v.fxR = v.pan[sfxdsp::kFR] + sfxdsp::kDownmixCentre * v.pan[sfxdsp::kC] + sfxdsp::kDownmixRear * v.pan[sfxdsp::kRR];
     }
     v.env = sfxdsp::Envelope(p.attack, p.release);
     ++started_;
@@ -158,13 +138,7 @@ void SfxPlayer::render(float* out, int frames, std::vector<float>* out51) {
 
 void SfxPlayer::mixBlock() {
     std::memset(master_, 0, sizeof(master_));
-    std::vector<std::shared_ptr<Bus>> buses;
-    for (const auto& w : buses_)
-        if (auto b = w.lock()) {
-            std::memset(b->inFront, 0, sizeof(b->inFront)), std::memset(b->inCentre, 0, sizeof(b->inCentre));
-            std::memset(b->inRear, 0, sizeof(b->inRear));
-            buses.push_back(std::move(b));
-        }
+    std::memset(coreIn_, 0, sizeof(coreIn_));
     const float fader = sfxdsp::dbToLin(masterDb_.load());
     for (Voice& v : voices_) {
         if (v.paused) continue;
@@ -197,28 +171,22 @@ void SfxPlayer::mixBlock() {
             if (g == 0.0f) continue;
             for (int i = 0; i < kBlock; ++i) master_[c][i] += mono_[i] * g;
         }
-        if (v.send) {
-            Bus& b = *v.send;
-            const auto& sg = v.sendGains;
-            for (int i = 0; i < kBlock; ++i) {
-                const float x = mono_[i];
-                b.inFront[2 * i] += x * sg[0], b.inFront[2 * i + 1] += x * sg[1];
-                b.inCentre[i] += x * sg[2];
-                b.inRear[2 * i] += x * sg[3], b.inRear[2 * i + 1] += x * sg[4];
-            }
+        // The core's effect input (VMIXEL / VMIXER): the voice after its volume and pan.
+        if (v.fxCore >= 0) {
+            float* in = coreIn_[v.fxCore];
+            const float gl = v.fxL * vol, gr = v.fxR * vol;
+            for (int i = 0; i < kBlock; ++i) in[2 * i] += mono_[i] * gl, in[2 * i + 1] += mono_[i] * gr;
         }
     }
     voices_.erase(std::remove_if(voices_.begin(), voices_.end(), [](const Voice& v) { return v.ended; }), voices_.end());
-    // The sends' submix voices, then back into the master.
-    for (auto& b : buses) {
-        b->front.process(b->inFront, kBlock);
-        b->centre.process(b->inCentre, kBlock);
-        b->rear.process(b->inRear, kBlock);
-        for (int i = 0; i < kBlock; ++i) {
-            master_[sfxdsp::kFL][i] += b->inFront[2 * i], master_[sfxdsp::kFR][i] += b->inFront[2 * i + 1];
-            master_[sfxdsp::kC][i] += b->inCentre[i];
-            master_[sfxdsp::kRL][i] += b->inRear[2 * i], master_[sfxdsp::kRR][i] += b->inRear[2 * i + 1];
-        }
+    // The cores' effects (core 0 first: its output reaches core 1), back
+    // into the master's front pair.
+    for (size_t c = 0; c < cores_.size(); ++c) {
+        std::memset(coreOut_, 0, sizeof(coreOut_));
+        cores_[c].process(coreIn_[c], coreOut_, kBlock);
+        if (c == 0 && fx_.chain)
+            for (int i = 0; i < 2 * kBlock; ++i) coreIn_[1][i] += coreOut_[i];
+        for (int i = 0; i < kBlock; ++i) master_[sfxdsp::kFL][i] += coreOut_[2 * i], master_[sfxdsp::kFR][i] += coreOut_[2 * i + 1];
     }
     const float* ch[6] = {master_[0], master_[1], master_[2], master_[3], master_[4], master_[5]};
     sfxdsp::downmix51(ch, block_, kBlock);

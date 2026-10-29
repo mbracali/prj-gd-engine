@@ -35,16 +35,6 @@ Gains51 panGains(float p) {
     return g;
 }
 
-std::array<float, 5> sendGains(const Gains51& pan, float v, bool reverb) {
-    float fl = v * pan[kFL], fr = v * pan[kFR], c = v * pan[kC], rl = v * pan[kRL], rr = v * pan[kRR];
-    if (reverb) {
-        rl = rl + fl;
-        rr = rr + fr;
-        c = fr * 0.5f + fl * 0.5f + c;
-    }
-    return {fl, fr, c, rl, rr};
-}
-
 void downmix51(const float* const ch[6], float* stereo, int frames) {
     for (int i = 0; i < frames; ++i) {
         const float c = ch[kC][i] * kDownmixCentre;

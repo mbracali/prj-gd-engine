@@ -162,6 +162,7 @@ public:
     TargetId currentTarget() const override { return target_; }
     void currentViewport(int& x, int& y, int& w, int& h) const override { x = vp_[0], y = vp_[1], w = vp_[2], h = vp_[3]; }
     void clear(const float* rgba, bool depth) override;
+    void copyToTarget(int x, int y, int w, int h, TargetId dst) override;
     void draw(const DrawCall& call) override;
     UniformData stageUniforms(const void* data, size_t size) override;
     void drawableSize(int& w, int& h) const override;
@@ -504,6 +505,7 @@ TargetId GlDevice::createTarget(const TargetDesc& desc, std::string& error) {
     if (desc.format == TargetFormat::RGB10A2) t.color = makeTex(GL_RGB10_A2, GL_RGBA, GL_UNSIGNED_INT_2_10_10_10_REV);
     else if (desc.format == TargetFormat::RGBA16F) t.color = makeTex(GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT);
     else t.color = makeTex(GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
+    if (desc.opaque) gl::glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_A, GL_ONE);
     while (gl::glGetError() != GL_NO_ERROR) {}  // an unsupported format shows as an incomplete target below
     if (depth) t.depth = makeTex(GL_DEPTH_COMPONENT24, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT);
     gl::glGenFramebuffers(1, &t.fbo);
@@ -604,6 +606,33 @@ void GlDevice::clear(const float* rgba, bool depth) {
         bits |= GL_DEPTH_BUFFER_BIT;
     }
     gl::glClear(bits);
+    applyState(state_, true);  // restore the masks
+}
+
+// A framebuffer blit (OpenGL 3.3 and ES 3.0 alike; formats convert, no
+// multisampling is involved), flipped so the copy's first row is the
+// rectangle's top. Blits obey the scissor test, so it is off meanwhile.
+void GlDevice::copyToTarget(int x, int y, int w, int h, TargetId dst) {
+    const GlTarget* d = targets_.get(dst.id);
+    if (!d || w <= 0 || h <= 0) return;
+    const GlTarget* t = targets_.get(target_.id);
+    const GlTarget* frame = frameOn_ ? targets_.get(frame_.id) : nullptr;
+    const GLuint src = t ? t->fbo : frame ? frame->fbo : 0;
+    int sw = 0, sh = targetH_;
+    if (t) sw = t->w;
+    else drawableSize(sw, sh);
+    // The part inside both the source and the destination.
+    const int x0 = std::max({x, 0}), y0 = std::max({y, 0});
+    const int x1 = std::min({x + w, sw, x + d->w}), y1 = std::min({y + h, sh, y + d->h});
+    if (x1 <= x0 || y1 <= y0) return;
+    gl::glBindFramebuffer(GL_READ_FRAMEBUFFER, src);
+    gl::glBindFramebuffer(GL_DRAW_FRAMEBUFFER, d->fbo);
+    gl::glDisable(GL_SCISSOR_TEST);
+    gl::glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    const int dx0 = x0 - x, dy0 = y0 - y, dy1 = y1 - y;
+    gl::glBlitFramebuffer(x0, sh - y1, x1, sh - y0, dx0, dy1, dx0 + (x1 - x0), dy0, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    gl::glBindFramebuffer(GL_FRAMEBUFFER, src);
+    gl::glEnable(GL_SCISSOR_TEST);
     applyState(state_, true);  // restore the masks
 }
 

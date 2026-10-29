@@ -38,7 +38,7 @@ target_sources(gd03 PRIVATE
   src/audio/vgs_stream.cpp
   src/audio/adpcm.cpp
   src/audio/sample_decode.cpp
-  src/audio/xaudio_reverb.cpp
+  src/audio/spu_reverb.cpp
   src/char/char_objects.cpp
   src/char/facefx.cpp
   src/char/midi_parser.cpp

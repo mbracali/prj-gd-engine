@@ -68,6 +68,9 @@ struct TargetDesc {
     int width = 0, height = 0;
     bool depth = false;  // a depth buffer, sampled through targetDepth (nearest filtering only)
     TargetFormat format = TargetFormat::RGBA8;
+    // Its colour samples with alpha 1 (copyToTarget's copies of the frame,
+    // whose alpha channel is not part of the picture).
+    bool opaque = false;
 };
 
 enum class BlendFactor : uint8_t { Zero, One, SrcColor, InvSrcColor, SrcAlpha, InvSrcAlpha, DstColor, InvDstColor, DstAlpha, InvDstAlpha };
@@ -196,6 +199,13 @@ public:
     virtual TargetId currentTarget() const = 0;
     virtual void currentViewport(int& x, int& y, int& w, int& h) const = 0;
     virtual void clear(const float* rgba, bool depth) = 0;
+    // Copies the w x h rectangle at (x, y) (origin top-left) of what is
+    // being drawn (the bound target, else the frame) into `dst` at its
+    // top-left, with the rows kept top-down as in an uploaded image (v = 0
+    // samples the rectangle's top row). Pixels outside the source read as
+    // nothing (the part of `dst` they would fill is left as it was). The
+    // bound target and viewport stay as they were.
+    virtual void copyToTarget(int x, int y, int w, int h, TargetId dst) = 0;
     virtual void draw(const DrawCall& call) = 0;
     // Copies a uniform block for draws of this frame (until endFrame), so
     // shared blocks (camera, lights) are uploaded once.

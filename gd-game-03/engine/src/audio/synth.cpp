@@ -9,7 +9,7 @@
 #include <limits>
 
 #include "audio/sfx_dsp.h"
-#include "audio/xaudio_reverb.h"
+#include "audio/spu_reverb.h"
 #include "audio/sample_decode.h"
 #include "data/dta.h"
 #include "data/game_data.h"
@@ -74,6 +74,9 @@ DataNode soundConfig(const GameData& data) {
 
 std::vector<std::string> Synth::loadBanks(const GameData& data) {
     std::vector<std::string> problems;
+    spu2::FxConfig fx;
+    if (!spu2::loadFxConfig(data, fx)) problems.push_back("config/synth.dta: unreadable, the default fx");
+    player_.setFx(fx);
     try {
         const DataNode root = soundConfig(data);
         const DataNode* banks = root.find("banks");
@@ -147,7 +150,6 @@ void Synth::forget(const scene::Directory& dir) {
     }
     dir.forEach([&](scene::Object& o) {
         if (auto* s = o.as<scene::SynthSample>()) cache_.erase(s);
-        buses_.erase(&o);
     });
     banks_.erase(std::remove_if(banks_.begin(), banks_.end(), [&](const auto& b) { return b.second == &dir; }), banks_.end());
 }
@@ -192,18 +194,6 @@ std::vector<int> Synth::randomGroupPick(int count, uint32_t numSimul, const std:
     return picked;
 }
 
-std::shared_ptr<SfxPlayer::Bus> Synth::bus(const scene::Object& send) {
-    if (auto it = buses_.find(&send); it != buses_.end()) return it->second;
-    std::shared_ptr<SfxPlayer::Bus> b;
-    if (const auto* r = send.as<scene::FxSendReverb>()) {
-        I3DL2Params p{};
-        i3dl2Preset(r->environment, p);
-        b = player_.reverbBus(p);
-    }
-    buses_[&send] = b;
-    return b;
-}
-
 const scene::Object* Synth::find(const std::string& name) const {
     for (const auto& b : banks_)
         if (const scene::Object* o = b.second->find(name)) return o;
@@ -230,10 +220,6 @@ bool Synth::play(const scene::Object& o, float volumeDb, float pan, float transp
 void Synth::start(Inst& in, double t) {
     const scene::Object& o = *in.obj;
     if (const auto* sfx = o.as<scene::Sfx>()) {
-        // The send: an FxSend360 (only FxSendReverbs are in the data) [C].
-        std::shared_ptr<SfxPlayer::Bus> send;
-        if (const scene::Object* so = resolveIn(o, sfx->send)) send = bus(*so);
-        else if (!sfx->send.empty()) ++stats_.unresolved;
         for (const auto& m : sfx->maps) {
             const auto* s = dynamic_cast<const scene::SynthSample*>(resolveIn(o, m.sample));
             if (!s) {
@@ -248,8 +234,7 @@ void Synth::start(Inst& in, double t) {
             pp.speed = transposeRatio(in.transpose) * transposeRatio(m.transpose);
             pp.attack = m.adsr.attackRate;
             pp.release = m.adsr.releaseRate;
-            pp.send = send;
-            pp.sendVolume = sfx->sendVolume;
+            pp.fxCore = m.fxCore;
             if (SfxPlayer::VoiceId id = player_.play(p, pp)) {
                 in.voices.push_back(id);
                 ++stats_.voices;

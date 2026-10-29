@@ -13,9 +13,7 @@
 #include <vector>
 
 #include "audio/sfx_dsp.h"
-
-struct I3DL2Params;
-class XAudioReverb;
+#include "audio/spu_reverb.h"
 
 // A decoded mono sample (a SynthSample, audio/synth.h).
 struct SfxPcm {
@@ -40,9 +38,14 @@ struct SfxPcm {
 //     volume, clamped to 0 .. 1 (0x8268A078) [C], times the master fader
 //     (`synth set_master_vol`, applied with the volume before the clamp:
 //     SampleInst 0x822FF8D8) [C];
-//   - a voice with a send also feeds the send's three submix voices (front,
-//     centre, rear) at sfxdsp::sendGains, whose reverb (XAudio's, id 3,
-//     audio/xaudio_reverb.h) returns to the master's same speakers [C];
+//   - the PS2 disc has no FxSends: a voice whose SfxMap picks an SPU2 core
+//     (fx_core 0 / 1) also feeds that core's effect unit (audio/
+//     spu_reverb.h) with its own volume and pan, VMIXEL / VMIXER, as the
+//     IOP's key-on does (SYNTH_S.IRX 0x0D04) [C]; kFXCoreNone stays dry.
+//     The stereo the core gets is the voice's 5.1 gains folded like the
+//     master (sfxdsp::downmix51) [I: the 360 pan model this player keeps];
+//     each core's wet output (EVOL) returns to the master's FL / FR, core
+//     0's also into core 1's effect when (fx (chain TRUE)) [I: MMIX bits];
 //   - the 5.1 master folds to stereo (sfxdsp::downmix51) [I].
 // The stream is 48000 Hz stereo float; SDL converts it to the device. A
 // failed voice start (over kMaxVoices) plays nothing: GH2 sets no voice
@@ -59,9 +62,10 @@ public:
     void close();
     bool isOpen() const { return stream_ != nullptr; }
 
-    // An FxSend's submix voices (one per FxSendReverb object).
-    class Bus;
-    std::shared_ptr<Bus> reverbBus(const I3DL2Params& params);
+    // The two SPU2 cores' effects (config/synth.dta's fx; SynthPS2 init
+    // 0x002276D8 -> 0x00225D50): each core's unit set up and cleared.
+    void setFx(const spu2::FxConfig& fx);
+    const spu2::FxConfig& fx() const { return fx_; }
 
     struct Params {
         float gain = 1;           // linear, before the master fader and the 0..1 clamp
@@ -69,8 +73,7 @@ public:
         float speed = 1;          // playback-rate ratio
         float attack = 0.001f;    // ADSR attack_rate / release_rate (s)
         float release = 0.005f;
-        std::shared_ptr<Bus> send;
-        float sendVolume = 1;     // clamped to 0.0001 .. 5 (0x8268A168) [C]
+        int fxCore = -1;          // SfxMap fx_core: -1 dry, 0 / 1 that SPU2 core's effect
     };
     using VoiceId = uint64_t;
     VoiceId play(std::shared_ptr<const SfxPcm> pcm, const Params& p);
@@ -79,7 +82,7 @@ public:
     // Releases every voice.
     void stopAll();
     // Pauses (or resumes) the voices playing now: they hold their place
-    // (SampleInst360 pause 0x8268A018) and the sends' reverb tails go on.
+    // (SampleInst360 pause 0x8268A018) and the cores' reverb tails go on.
     // Voices started later play: GH2's pause_all_sfx / Game::SetPaused
     // pause each Sfx's current instances (0x822E7C68 -> 0x822ECB40), not
     // the Synth, so the menus after a song keep their sounds [C].
@@ -112,8 +115,8 @@ private:
         double loopStart = 0, loopEnd = 0;
         float gain = 1;
         sfxdsp::Gains51 pan{};
-        std::shared_ptr<Bus> send;
-        std::array<float, 5> sendGains{};
+        int fxCore = -1;
+        float fxL = 0, fxR = 0;  // the pan's stereo fold (the core's input gains before the volume)
         sfxdsp::Envelope env;
         bool ended = false;
         bool paused = false;
@@ -121,7 +124,9 @@ private:
     SDL_AudioStream* stream_ = nullptr;
     mutable std::mutex lock_;
     std::vector<Voice> voices_;
-    std::vector<std::weak_ptr<Bus>> buses_;
+    spu2::FxConfig fx_{};
+    std::array<spu2::SpuReverb, 2> cores_{};
+    float coreIn_[2][2 * sfxdsp::kBlock] = {}, coreOut_[2 * sfxdsp::kBlock] = {};
     VoiceId next_ = 1;
     std::atomic<float> masterDb_{0};
     std::atomic<uint64_t> started_{0};

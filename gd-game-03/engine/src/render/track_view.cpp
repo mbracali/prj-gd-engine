@@ -87,9 +87,8 @@
 //   track.cam) when a streak of multiplier N (2..4) ends [I: event].
 // - Explode (0x00150ca8, poll 0x00151580) [C]: track_explode.filt at
 //   (now - explode) x 0.03.
-// Not drawn: the far-end fade (it needs the frame read back), the
-// character's track surface texture (track_surface_override), the song
-// start sparkle and the Star Power gem sparks (gem_bonus_spark1 / 2).
+// Not drawn: the character's track surface texture (track_surface_override),
+// the song start sparkle and the Star Power gem sparks (gem_bonus_spark1 / 2).
 namespace {
 
 using gfx::Mat4;
@@ -103,7 +102,11 @@ constexpr float kGlowZ = 0.16f;
 }  // namespace
 
 TrackView::TrackView() = default;
-TrackView::~TrackView() = default;
+TrackView::~TrackView() {
+    if (fadeDevice_)
+        for (FadeStrip& f : fade_)
+            if (f.copy) fadeDevice_->destroyTarget(f.copy);
+}
 
 const scene::Object* TrackView::obj(const std::string& name) const { return track_ ? track_->find(name) : nullptr; }
 
@@ -242,6 +245,7 @@ void TrackView::reset(float introStartMs) {
     introStartMs_ = introStartMs;
     extendAnim_ = {};
     starSmashes_ = starGlowLines_ = comboStarts_ = 0;
+    fadeDraws_ = 0;
     explodeMs_ = -1e9f;
     bonusStartMs_ = -1e9f;
     // The effect copies (0x0015caa0 / 0x0015f340: one smash view of each kind per slot,
@@ -847,6 +851,136 @@ void TrackView::drawLightning(gfx::MaterialRenderer& mr, gfx::SceneCache& cache,
         if (const scene::Mesh* m = view->dir->resolve<scene::Mesh>(n)) gfx::drawMesh(mr, cache, *m, gfx::toMat4(pose_.world(m)), &pose_);
 }
 
+// The far-end fade (TrackPanel draw 0x001511c0) [C unless marked]. While the
+// track shows, track_fade.trans (y = 120 on track_surface5.view: the
+// horizon) is projected through track.cam (0x00154fe8, always the normal
+// camera, not the explode one) to a point in the camera's screen rect, in
+// the PS2's 640 x 480 frame (Rnd defaults 0x001d4af8; width > 512 picks
+// track_fade_hires.tex, 0x00150850). Two strips are copied from the frame,
+// venue only, with a GS local-to-local transfer (0x001a0da8): the size of
+// track_fade(_hires).tex (256 x 32) from (x - 128, y - 2), and the size of
+// track_fade2.tex (128 x 16) just above it, ending at y - 2. Both are skipped
+// when the lower strip would reach the frame's bottom. After the root is
+// drawn, each strip goes back at its place through Rnd's rect draw
+// (0x0019b090): the lower one with track_fade.mat, its corners white, the
+// bottom ones with alpha 0 (the venue opaque at the horizon, fading to the
+// track below it), the upper one with track_fade2.mat in full; each one
+// then gets track_add.mat (add blend, colour 0.02) over it. The rect draw
+// takes the corner colours only for prelit materials and the material's
+// colour otherwise [I: the flag it tests at +0x9c is taken to be prelit,
+// which both fade materials set and track_add.mat does not].
+// Here the strips scale with the picture's height (480 PS2 lines) [I], and
+// the frame's alpha is not used (the copies sample opaque) [I: the PS2's
+// frame alpha is not known].
+bool TrackView::fadeSave(gfx::Renderer& r) {
+    const scene::TransObj* at = get<scene::TransObj>("track_fade.trans");
+    if (!at || !cam_) return false;
+    // The point through track.cam (camera_ holds the explode camera while
+    // two players see the explode).
+    gfx::Camera c = camera_;
+    if (exploded() && player_ >= 0) {
+        c.world = gfx::toMat4(pose_.world(cam_));
+        if (trackScale_ != 1 && trackScale_ > 0) {
+            const Vec3 p = c.world.translationPart();
+            c.world.at(0, 3) = p.x / trackScale_, c.world.at(1, 3) = p.y / trackScale_, c.world.at(2, 3) = p.z / trackScale_;
+        }
+    }
+    const scene::Xfm w = pose_.world(at);
+    const Vec3 eye = c.view().transformPoint({w.pos[0], w.pos[1], w.pos[2]});
+    if (eye.y <= 0) return false;  // behind the camera (Rnd camera space looks down +y)
+    const float t = std::tan(c.yFov * 0.5f);
+    const float nx = eye.x / (eye.y * t * c.aspect), ny = eye.z / (eye.y * t);
+    int px, py, pw, ph;
+    r.pictureRect(px, py, pw, ph);
+    if (ph <= 0) return false;
+    const float s = float(ph) / 480.0f;  // our pixels per PS2 line
+    // In PS2 pixels, from the picture's top-left, truncated as the PS2 does.
+    const int x = int((float(viewX_ - px) + (nx + 1) * 0.5f * float(viewW_)) / s);
+    const int y = int((float(viewY_ - py) + (1 - ny) * 0.5f * float(viewH_)) / s);
+    const int hires[2] = {256, 32}, top[2] = {128, 16};
+    const int lowY = y - 2;
+    if (lowY + hires[1] >= 480) return false;
+    const int rects[2][4] = {{x - hires[0] / 2, lowY, hires[0], hires[1]}, {x - top[0] / 2, lowY - top[1], top[0], top[1]}};
+    gfx::RenderDevice& dev = r.device();
+    fadeDevice_ = &dev;
+    const gfx::TargetId prev = dev.currentTarget();
+    int vx, vy, vw, vh;
+    dev.currentViewport(vx, vy, vw, vh);
+    bool rebind = false;
+    for (size_t i = 0; i < 2; ++i) {
+        FadeStrip& f = fade_[i];
+        const int x0 = px + int(std::lround(float(rects[i][0]) * s)), y0 = py + int(std::lround(float(rects[i][1]) * s));
+        const int x1 = px + int(std::lround(float(rects[i][0] + rects[i][2]) * s)), y1 = py + int(std::lround(float(rects[i][1] + rects[i][3]) * s));
+        f.x = x0, f.y = y0, f.w = std::max(1, x1 - x0), f.h = std::max(1, y1 - y0);
+        if (!f.copy || f.copyW != f.w || f.copyH != f.h) {
+            // Making a target unbinds the frame: bound again below.
+            if (f.copy) dev.destroyTarget(f.copy);
+            std::string error;
+            gfx::TargetDesc d;
+            d.width = f.w, d.height = f.h, d.opaque = true;
+            f.copy = dev.createTarget(d, error);
+            f.copyW = f.w, f.copyH = f.h;
+            rebind = true;
+            if (!f.copy) SDL_Log("track: fade strip %dx%d: %s", f.w, f.h, error.c_str());
+        }
+    }
+    if (rebind) {
+        dev.setTarget(prev);
+        dev.setViewport(vx, vy, vw, vh);
+    }
+    if (!fade_[0].copy || !fade_[1].copy) return false;
+    for (const FadeStrip& f : fade_) dev.copyToTarget(f.x, f.y, f.w, f.h, f.copy);
+    return true;
+}
+
+void TrackView::fadeDraw(gfx::MaterialRenderer& mr, gfx::SceneCache& cache) {
+    const scene::Mat* add = get<scene::Mat>("track_add.mat");
+    const scene::Mat* mats[2] = {get<scene::Mat>("track_fade.mat"), get<scene::Mat>("track_fade2.mat")};
+    // Each rect as a quad in front of the camera covering its pixels (the
+    // camera's viewport, so the planes and aspect are the track's own).
+    std::vector<float> verts;
+    std::vector<uint16_t> indices;
+    const float d = camera_.nearPlane * 2;
+    const float t = std::tan(camera_.yFov * 0.5f);
+    for (size_t i = 0; i < 2; ++i) {
+        const FadeStrip& f = fade_[i];
+        auto corner = [&](int qx, int qy, float u, float v, float alpha) {
+            const float nx = 2.0f * float(qx - viewX_) / float(viewW_) - 1, ny = 1 - 2.0f * float(qy - viewY_) / float(viewH_);
+            const Vec3 p = camera_.world.transformPoint({nx * d * t * camera_.aspect, d, ny * d * t});
+            verts.insert(verts.end(), {p.x, p.y, p.z, 0, 0, 1, 1, 1, 1, alpha, u, v, 1, 0, 0, 1});
+        };
+        const uint16_t b = uint16_t(i * 4);
+        // The lower strip's bottom corners are clear (Rnd's rect draw: its
+        // last colour argument for the bottom row).
+        const float bottomAlpha = i == 0 ? 0.0f : 1.0f;
+        corner(f.x, f.y, 0, 0, 1);
+        corner(f.x, f.y + f.h, 0, 1, bottomAlpha);
+        corner(f.x + f.w, f.y, 1, 0, 1);
+        corner(f.x + f.w, f.y + f.h, 1, 1, bottomAlpha);
+        indices.insert(indices.end(), {b, uint16_t(b + 1), uint16_t(b + 2), uint16_t(b + 2), uint16_t(b + 1), uint16_t(b + 3)});
+    }
+    if (!fadeMesh_) fadeMesh_ = std::make_unique<gfx::DynamicMesh>(cache.device());
+    const gfx::GpuMesh all = fadeMesh_->upload(verts, indices);
+    // A 2D rect: no environ, no depth.
+    mr.setFrame(camera_, gfx::LightEnv{}, viewW_, viewH_);
+    frameSet_ = false;
+    const Mat4 bones[1] = {Mat4::identity()};
+    for (size_t i = 0; i < 2; ++i) {
+        gfx::GpuMesh part = all;
+        part.firstIndex = int(i * 6), part.indexCount = 6;
+        for (const scene::Mat* mat : {mats[i], add}) {
+            if (!mat) continue;
+            gfx::Material m = cache.material(*mat, &pose_);
+            if (mat != add) m.diffuseTex = cache.device().targetTexture(fade_[i].copy);
+            m.zMode = gfx::ZMode::Disable;
+            m.cull = false;
+            m.texWrap = gfx::TexWrap::Clamp;
+            mr.draw(part, bones, m, {1});
+        }
+    }
+    ++fadeDraws_;
+}
+
 void TrackView::draw(gfx::Renderer& r, gfx::SceneCache& cache, const Song& song, const Player& player, float nowMs, float trackSpeed) {
     if (!track_) return;
     particlesDrawn_ = 0;
@@ -858,7 +992,8 @@ void TrackView::draw(gfx::Renderer& r, gfx::SceneCache& cache, const Song& song,
     // [C]; the projection keeping the rect's own aspect is [I].
     const bool sub = screenRect_ != std::array<float, 4>{0, 0, 1, 1};
     viewW_ = std::max(1, int(float(vw) * screenRect_[2])), viewH_ = std::max(1, int(float(vh) * screenRect_[3]));
-    if (sub) r.device().setViewport(vx + int(float(vw) * screenRect_[0]), vy + int(float(vh) * screenRect_[1]), viewW_, viewH_);
+    viewX_ = vx + int(float(vw) * screenRect_[0]), viewY_ = vy + int(float(vh) * screenRect_[1]);
+    if (sub) r.device().setViewport(viewX_, viewY_, viewW_, viewH_);
     frameSet_ = false;
     speed_ = trackSpeed;
     nowY_ = yOf(nowMs);
@@ -924,15 +1059,20 @@ void TrackView::draw(gfx::Renderer& r, gfx::SceneCache& cache, const Song& song,
         camera_.nearPlane /= trackScale_, camera_.farPlane /= trackScale_;
     }
 
+    // The far-end fade's strips are saved before the root draws and laid
+    // back after it, under the second group (0x001511c0) [C].
+    const bool fade = fadeSave(r);
     if (exploded()) {
         drawExplode(mr, cache, nowMs);
+        if (fade) fadeDraw(mr, cache);
     } else {
         // The root: surface, lane lines, beat lines, rails, tails, gems;
-        // then the second group: smashers, effects, lightning.
+        // then the fade, then the second group: smashers, effects, lightning.
         drawSurface(mr, cache);
         drawBeatLines(mr, cache, song, nowMs);
         drawTails(mr, cache, player, nowMs);
         drawGems(mr, cache, player, nowMs);
+        if (fade) fadeDraw(mr, cache);
         drawSmashers(mr, cache, player, nowMs);
         drawEffects(mr, cache, player, nowMs);
         drawCombo(mr, cache, nowMs);

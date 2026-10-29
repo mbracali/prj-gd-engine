@@ -6,9 +6,12 @@ SLUS_215.86 (render/track_view.cpp; addresses there) [C unless marked]:
 - Panel init 0x0014faa8: track.cam; the track group lit by track.env draws
   track_surface5, track_lane_lines5 (0x00154c08), the beat lines,
   track_side_rails5, then the gems (tails first).
-- Draw 0x001511c0: the track, then the far-end fade over it (track_fade.trans,
-  track_fade.mat / track_add.mat) - NOT DONE (needs a frame copy), then the
-  smashers, hit effects and lightning_track.view.
+- Draw 0x001511c0: the track, then the far-end fade: before the track two
+  strips of the venue at track_fade.trans's projection (0x00154fe8, 0x001b12b0)
+  are copied (0x001a0da8: 256x32 and 128x16 PS2 pixels) and laid back after
+  it with track_fade.mat (opaque at the horizon, fading down the track),
+  track_fade2.mat and track_add.mat (0x0019b090); then the smashers, hit
+  effects and lightning_track.view. `TrackView::fadeDraws()` counts it.
 - y = ms x 0.06 x track_speed (0x001524c8); track_speed = the players'
   difficulty values averaged, x 1.5 with Hyper Speed (0x00153a48).
 - Slot x = (slot - 2) x 4; lefty slot 4 - s (0x00152530 / 0x00152500).
@@ -27,7 +30,7 @@ SLUS_215.86 (render/track_view.cpp; addresses there) [C unless marked]:
   smashers per slot (0x0015fd50); combo2_angle one-player only (0x0015caa0).
 - Two players: track scaled 0.76, track.cam's rect the player's half
   (0x00154b90); explode with track_explode.cam, mirrored for P2.
-- Missing: far-end fade, per-character surface override
+- Missing: per-character surface override
   (track/surfaces/%s_keep.bmp), the song-start gem sparkle and the Star Power
   gem_bonus_spark bursts.
 

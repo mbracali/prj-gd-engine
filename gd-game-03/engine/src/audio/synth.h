@@ -28,8 +28,9 @@ class SynthSample;
 //     (0x822ED458): volume = the caller's dB x the map's dB (x the master
 //     fader), pan = caller's + map's, speed = 2^(caller's transpose / 12) x
 //     2^(map's / 12) (0x822FFAB8), the map's ADSR (attack / release only on
-//     the 360) and the Sfx's send / send_volume. fx_core does nothing on the
-//     360 (SampleInst360's slot is empty) [C].
+//     the 360) [C]. On this PS2 disc the Sfx has no send: each map's fx_core
+//     goes to its SampleInst (ctor 0x00222E68 -> SetFXCore 0x0022E3B8) and
+//     routes the voice into that SPU2 core's effect (audio/spu_reverb.h) [C].
 //   SfxSeq: its child; SerialGroupSeq: its children one after another;
 //     RandomGroupSeq (0x822F4F18): min(num_simul, children) of them, one
 //     uniformly at random when 1, else by selection sampling (each child in
@@ -55,7 +56,9 @@ public:
     SfxPlayer& player() { return player_; }
 
     // Loads config/sound.dta's banks (game, meta, tutorial), decodes their
-    // samples and adds them (in that file's order). Returns the problems.
+    // samples and adds them (in that file's order); also sets the SPU2
+    // cores' effects from config/synth.dta's fx, as SynthPS2's init does
+    // (0x002276D8). Returns the problems.
     std::vector<std::string> loadBanks(const GameData& data);
     // config/sound.dta (options_screen (slider -96 ... 0)): the options'
     // volume index (0..11) in dB [C data].
@@ -99,8 +102,6 @@ public:
 
     // A SynthSample decoded (cached), or nullptr with `error`.
     std::shared_ptr<const SfxPcm> pcm(const scene::SynthSample& s, std::string* error = nullptr);
-    // The submix voices of an FxSendReverb (made once per object).
-    std::shared_ptr<SfxPlayer::Bus> bus(const scene::Object& send);
 
     // RandomGroupSeq's choice (0x822F4F18): the children (indices) it
     // plays, in order. One: randomInt(0, count); more: selection sampling,
@@ -134,7 +135,6 @@ private:
     std::vector<std::unique_ptr<scene::Milo>> milos_;  // the loaded banks
     std::vector<std::pair<std::string, const scene::Directory*>> banks_;
     std::map<const scene::SynthSample*, std::shared_ptr<const SfxPcm>> cache_;
-    std::map<const scene::Object*, std::shared_ptr<SfxPlayer::Bus>> buses_;
     std::vector<std::unique_ptr<Inst>> playing_;
     std::minstd_rand rng_;
     Stats stats_;

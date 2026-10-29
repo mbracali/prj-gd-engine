@@ -74,6 +74,9 @@ public:
     int starGlowLines() const { return starGlowLines_; }
     // Since reset: phrase_captured combo effects started (per slot).
     int comboStarts() const { return comboStarts_; }
+    // Since reset: frames whose far-end fade was laid over the track (the
+    // venue strips saved before it, 0x001511c0).
+    int fadeDraws() const { return fadeDraws_; }
 
 private:
     // A smash view's copy for one slot (0x8269C968): normal, star or bonus.
@@ -119,6 +122,24 @@ private:
     void drawLightning(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, const Player& player, float nowMs);
     void drawExplode(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, float nowMs);
     float slotX(int slot) const { return slotX_[size_t(lefty_ ? 4 - slot : slot)]; }
+    // The far-end fade (0x001511c0): fadeSave copies the picture's strips
+    // around track_fade.trans before the track is drawn (false: none this
+    // frame), fadeDraw lays them back over it.
+    bool fadeSave(gfx::Renderer& r);
+    void fadeDraw(gfx::MaterialRenderer& mr, gfx::SceneCache& cache);
+
+    // A strip of the fade: its rectangle in the bound picture's pixels and
+    // the target holding its copy.
+    struct FadeStrip {
+        int x = 0, y = 0, w = 0, h = 0;
+        gfx::TargetId copy;
+        int copyW = 0, copyH = 0;
+    };
+    std::array<FadeStrip, 2> fade_;  // track_fade.tex below the point, track_fade2.tex above it
+    gfx::RenderDevice* fadeDevice_ = nullptr;
+    std::unique_ptr<gfx::DynamicMesh> fadeMesh_;
+    int fadeDraws_ = 0;
+    int viewX_ = 0, viewY_ = 0;  // the camera's viewport origin (picture pixels)
 
     scene::Milo* track_ = nullptr;
     int player_ = -1;

@@ -19,7 +19,7 @@
 #include "audio/crowd_audio.h"
 #include "audio/sfx_dsp.h"
 #include "audio/sfx_player.h"
-#include "audio/xaudio_reverb.h"
+#include "audio/spu_reverb.h"
 #include "audio/synth.h"
 #include "audio/sample_decode.h"
 #include "data/game_data.h"
@@ -70,7 +70,7 @@ std::string safe(std::string s) {
 bool near(double a, double b, double eps) { return std::fabs(a - b) <= eps; }
 
 // The voice DSP against the rules confirmed in GH2's code (numbers only, no
-// game data): envelope (0x826844C8), pan (0x826898C8), sends, the stereo
+// game data): envelope (0x826844C8), pan (0x826898C8), the SPU2 cores' effects, the stereo
 // fold, the limiter (0x82682958), the voice's rate and length (0x82689768),
 // RandomGroupSeq's choice (0x822F4F18), the master fader and release on stop.
 void dspChecks(const std::function<void(const std::string&)>& fail) {
@@ -128,10 +128,6 @@ void dspChecks(const std::function<void(const std::string&)>& fail) {
         g = panGains(-3.0f);
         check(g[kRL] == 1.0f, "pan -3 = rear left");
         check(near(wrapPan(4.5f), -3.5f, 1e-6) && near(wrapPan(-4.25f), 3.75f, 1e-6) && wrapPan(1.0f) == 1.0f, "pan wraps mod 8");
-        const auto sg = sendGains(panGains(-1.0f), 0.5f, true);
-        check(sg[0] == 0.5f && sg[1] == 0.0f && near(sg[2], 0.25, 1e-7) && sg[3] == 0.5f && sg[4] == 0.0f, "reverb send fold");
-        const auto sp = sendGains(panGains(-1.0f), 0.5f, false);
-        check(sp[2] == 0.0f && sp[3] == 0.0f, "plain send has no fold");
         float fl = 1, fr = 0, c = 1, lfe = 1, rl = 0, rr = 1, st[2];
         const float* ch[6] = {&fl, &fr, &c, &lfe, &rl, &rr};
         downmix51(ch, st, 1);
@@ -181,69 +177,94 @@ void dspChecks(const std::function<void(const std::string&)>& fail) {
         pl.render(out.data(), 256);
         check(out[0] == 0.0f, "set_master_vol kDbSilence mutes");
     }
-    // A send: the voice's volume 0 (dry silent), the send at full: the
-    // reverb's front comes back on FL / FR, the centre voice (half of each
-    // front) on C, the rear voice (front folded in) on RL / RR; nothing on LFE.
+    // The SPU2 cores' effects (audio/spu_reverb.h).
     {
-        I3DL2Params plate{};
-        check(i3dl2Preset("plate", plate) && plate.decayTime > 1.2f && plate.decayTime < 1.4f, "plate preset");
+        using namespace spu2;
+        // The game's conversions of the dta values (0x0022CE28 / CF48 / CFF0).
+        check(fxDepth(-9.0f) == 11626 && fxDepth(-8.5f) == 12315 && fxDepth(0.0f) == 32767 && fxDepth(-96.0f) == 0 && fxDepth(6.0f) == 32767,
+              "fx volume -> EVOL");
+        check(fxDelay(0.5f) == 64 && fxDelay(0.6000000238418579f) == 76 && fxDelay(0.0f) == 0, "fx delay -> 0..127");
+        check(fxFeedback(-96.0f) == 0 && fxFeedback(0.0f) == 127 && fxFeedback(-19.0f) == 14, "fx feedback -> 0..127");
+        // libsd's Echo row is its delay-127 form: the rewrite at 127 gives the row back.
+        SpuReverb e;
+        e.configure(kFXModeEcho, 127, 0, 0x7fff, 0x7fff);
+        bool same = true;
+        for (int k = 0; k < 32; ++k)
+            if (k != 7) same = same && e.registers()[size_t(k)] == preset(kFXModeEcho)[size_t(k)];
+        check(same && e.registers()[7] == 0, "echo delay 127 = libsd's row, feedback 0 = no wall");
+        e.configure(kFXModeEcho, 64, 127, 0x7fff, 0x7fff);
+        check(e.registers()[10] == 64 * 65 - 3 && e.registers()[11] == 32 * 65 - 3 && e.registers()[16] == 9 + 32 * 65 &&
+                  e.registers()[7] == 127 * 258,
+              "echo delay 64 / feedback 127 registers");
+        // An impulse through a core: frames of the first output above a
+        // floor, the energy per second, the peak.
+        struct Run {
+            int first = -1;
+            double e[4] = {}, peak = 0;
+            bool finite = true;
+        };
+        auto impulse = [](int mode, int delay, int feedback) {
+            SpuReverb r;
+            r.configure(mode, delay, feedback, 0x7fff, 0x7fff);
+            std::vector<float> in(2 * 48000 * 4, 0.0f), out(2 * 48000 * 4, 0.0f);
+            in[0] = in[1] = 0.5f;
+            r.process(in.data(), out.data(), 48000 * 4);
+            Run res;
+            for (int i = 0; i < 48000 * 4; ++i)
+                for (int c = 0; c < 2; ++c) {
+                    const double y = out[size_t(2 * i + c)];
+                    res.finite = res.finite && std::isfinite(y);
+                    res.e[i / 48000] += y * y;
+                    res.peak = std::max(res.peak, std::fabs(y));
+                    if (res.first < 0 && std::fabs(y) > 1e-3) res.first = i;
+                }
+            return res;
+        };
+        bool decays = true;
+        std::string bad;
+        for (int m = kFXModeRoom; m <= kFXModePipe; ++m) {
+            if (m == kFXModeEcho || m == kFXModeDelay) continue;
+            const Run r = impulse(m, 0, 0);
+            const bool ok = r.finite && r.e[0] > 1e-4 && r.peak < 1.0 && r.e[3] < r.e[0] * 0.05 && r.first > 0;
+            if (!ok) bad += " " + std::to_string(m);
+            decays = decays && ok;
+        }
+        check(decays, "reverb modes: a finite tail that decays (bad:" + bad + ")");
+        // Echo 0.5 (64): one repeat 128 x 65 - 24 = 8296 half-rate ticks
+        // (0.3457 s) after the impulse, plus the two filters' 38 frames;
+        // then only the IIR's last bit (the hardware's floor rounding).
+        const Run echo = impulse(kFXModeEcho, 64, 0);
+        check(echo.finite && echo.first >= 2 * 8296 && echo.first <= 2 * 8296 + 60 && echo.e[1] < 1e-4 && echo.e[2] < 1e-4,
+              "echo 0.5: one repeat at 0.346 s, no feedback (first frame " + std::to_string(echo.first) + ")");
+        const Run fed = impulse(kFXModeEcho, 64, 64);
+        check(fed.finite && fed.first == echo.first && fed.e[1] > 1e-3 && fed.e[3] < fed.e[1] * 0.1, "echo feedback 64: repeats that fade");
+        const Run off = impulse(kFXModeOff, 0, 0);
+        check(off.first < 0 && off.e[0] == 0.0, "mode off: silent");
+        // Routing: kFXCoreNone stays dry, fx_core 0 adds the echo.
         auto pcm = std::make_shared<SfxPcm>();
         pcm->rate = 48000;
-        pcm->samples.assign(4800, 0.0f);
-        pcm->samples[0] = 1.0f;
-        SfxPlayer pl;
-        SfxPlayer::Params p;
-        p.gain = 0, p.pan = -1, p.attack = 0;
-        p.send = pl.reverbBus(plate);
-        auto run = [&](float sendVolume) {
-            p.sendVolume = sendVolume;
-            SfxPlayer fresh;
-            p.send = fresh.reverbBus(plate);
-            fresh.play(pcm, p);
-            std::vector<float> st(2 * 48000), m;
-            fresh.render(st.data(), 48000, &m);
-            std::array<double, 6> e{};
-            for (int c = 0; c < 6; ++c)
-                for (int i = 0; i < 48000; ++i) e[size_t(c)] += double(m[size_t(c) * 48000 + size_t(i)]) * m[size_t(c) * 48000 + size_t(i)];
-            return e;
+        pcm->samples.assign(2400, 0.0f);
+        for (int i = 0; i < 2400; ++i) pcm->samples[size_t(i)] = float(std::sin(i * 0.05));
+        FxConfig fx;
+        fx.core[0] = {kFXModeEcho, 0.0f, 0.5f, -96.0f};
+        fx.core[1] = {kFXModeLargeStudio, 0.0f, 0.0f, -96.0f};
+        auto render = [&](bool withFx, int core) {
+            SfxPlayer pl;
+            if (withFx) pl.setFx(fx);
+            SfxPlayer::Params p;
+            p.pan = -1.0f, p.fxCore = core;
+            pl.play(pcm, p);
+            std::vector<float> o(2 * 48000);
+            pl.render(o.data(), 48000);
+            return o;
         };
-        const auto e1 = run(1.0f), e2 = run(0.5f);
-        check(e1[kFL] > 1e-4 && e1[kFR] > 1e-6 && e1[kC] > 1e-6 && e1[kRL] > 1e-4 && e1[kLFE] == 0.0, "send reaches front, centre, rears");
-        check(near(e2[kFL] / e1[kFL], 0.25, 1e-3) && near(e2[kRL] / e1[kRL], 0.25, 1e-3), "send energy follows send_volume^2");
-        check(near(e1[kRL], e1[kFL], e1[kFL] * 1e-3), "rear voice = front voice (pan -1: RL gets FL folded)");
-    }
-    // XAudio's reverb (audio/xaudio_reverb.h), checked bit-exact against the
-    // original PowerPC code: an impulse's energy per output channel over 1 s.
-    {
-        struct Vec {
-            const char* env;
-            int ch;
-            double fl, fr, sl, sr;
-        };
-        const Vec vecs[] = {{"plate", 2, 0.0129503979, 0.00573494756, 0.00416357051, 0.00216193242},
-                            {"plate", 1, 0.0189575645, 0.0191079021, 0.00646199684, 0.00627867755},
-                            {"small_room", 2, 0.0106911439, 0.00382208813, 0.0078954201, 0.00297681728},
-                            {"small_room", 1, 0.0147344038, 0.0141741088, 0.0109683839, 0.00966638129}};
-        for (const Vec& v : vecs) {
-            I3DL2Params pr{};
-            i3dl2Preset(v.env, pr);
-            XAudioReverb r(v.ch);
-            r.setI3DL2(pr);
-            std::vector<float> in(size_t(48000 * v.ch), 0.0f), out(48000 * 6);
-            in[0] = 1.0f;
-            r.process6(in.data(), out.data(), 48000);
-            double e[6] = {};
-            int first = -1;
-            for (int i = 0; i < 48000; ++i)
-                for (int c = 0; c < 6; ++c) {
-                    const double y = out[size_t(i) * 6 + size_t(c)];
-                    e[c] += y * y;
-                    if (y != 0 && first < 0) first = i;
-                }
-            auto rel = [](double a, double b) { return std::fabs(a - b) <= 1e-8 * b; };
-            check(rel(e[0], v.fl) && rel(e[1], v.fr) && rel(e[4], v.sl) && rel(e[5], v.sr) && e[2] == 0 && e[3] == 0 && first == 303,
-                  std::string("reverb ") + v.env + (v.ch == 2 ? " stereo" : " mono") + " impulse energy");
-        }
+        const auto dry = render(false, -1), none = render(true, -1), core0 = render(true, 0), core1 = render(true, 1);
+        check(none == dry, "kFXCoreNone stays dry");
+        double late0 = 0, late1 = 0, lateDry = 0;
+        for (size_t i = 2 * 16000; i < 2 * 48000; ++i) late0 += double(core0[i]) * core0[i], late1 += double(core1[i]) * core1[i],
+                                                       lateDry += double(dry[i]) * dry[i];
+        check(lateDry == 0.0 && late0 > 1.0 && late1 > 1e-2 && std::equal(core0.begin(), core0.begin() + 2 * 2400, dry.begin()),
+              "fx_core 0 / 1 add their core's tail after the dry sound");
     }
     // RandomGroupSeq: 1 -> uniform pick; n -> n distinct in order; 0 -> none.
     {
@@ -264,7 +285,7 @@ void dspChecks(const std::function<void(const std::string&)>& fail) {
                   Synth::randomGroupPick(4, 1, r01, ri).size() == 1,
               "num_simul 0 / beyond / 1");
     }
-    std::printf("sfxtest: voice DSP: %d checks (envelope, 5.1 pan, sends, reverb routing, XAudio reverb vectors, stereo fold, limiter, voice rate, fader, RandomGroupSeq)\n", checks);
+    std::printf("sfxtest: voice DSP: %d checks (envelope, 5.1 pan, stereo fold, limiter, voice rate, fader, SPU2 fx: dta conversions, echo registers, 8 reverb modes decay, echo 0.5 = 0.346 s, feedback, off, fx_core routing, RandomGroupSeq)\n", checks);
 }
 
 }  // namespace
@@ -280,6 +301,7 @@ int runSfxTest(const std::string& dataPath) {
 
         int failures = 0, reverbs = 0, sends = 0, samples = 0, exact = 0, loops = 0, sfx = 0, seqs = 0, refs = 0, unresolved = 0, banks = 0;
         std::map<uint32_t, int> rates;
+        std::map<int32_t, int> fxCores;  // SfxMaps per fx_core
         double seconds = 0, decodeMs = 0, peakMax = 0, rmsMin = 1e9, rmsMax = 0;
         uint64_t clipped = 0;
         auto fail = [&](const std::string& what) {
@@ -295,13 +317,7 @@ int runSfxTest(const std::string& dataPath) {
             }
             bool bank = false;
             milo->root().forEach([&](Object& o) {
-                if (auto* fx = o.as<FxSendReverb>()) {
-                    ++reverbs;
-                    I3DL2Params pr{};
-                    if (!o.decoded) return fail(p + ": " + o.name + ": " + o.error);
-                    if (!i3dl2Preset(fx->environment, pr)) fail(p + ": " + o.name + ": unknown environment " + fx->environment);
-                    return;
-                }
+                if (o.as<FxSendReverb>()) return void(++reverbs);
                 if (!o.as<SynthSample>() && !o.as<Sfx>() && !o.as<SequenceObj>()) return;
                 bank = true;
                 if (!o.decoded) return fail(p + ": " + o.name + ": " + o.error);
@@ -314,7 +330,10 @@ int runSfxTest(const std::string& dataPath) {
                 };
                 if (auto* x = o.as<Sfx>()) {
                     ++sfx;
-                    for (const auto& m : x->maps) resolves(m.sample, true);
+                    for (const auto& m : x->maps) {
+                        resolves(m.sample, true);
+                        ++fxCores[m.fxCore];
+                    }
                     if (!x->send.empty()) {
                         const Object* t = o.dir ? o.dir->resolve(x->send) : nullptr;
                         if (t && t->as<FxSendReverb>()) ++sends;
@@ -376,11 +395,24 @@ int runSfxTest(const std::string& dataPath) {
                     banks, samples, rateList.c_str(), exact, seconds, decodeMs, loops);
         std::printf("sfxtest: peak %.3f, rms %.3f..%.3f, %llu samples at full scale; %d Sfx, %d sequences, %d references, %d unresolved\n",
                     peakMax, rmsMin, rmsMax, (unsigned long long)clipped, sfx, seqs, refs, unresolved);
-        std::printf("sfxtest: %d FxSendReverbs (environments known), %d Sfx send to one\n", reverbs, sends);
         // The PS2 banks have no FxSendReverb: their Sfx maps pick an SPU2
-        // core (fx_core) whose reverb the console applies (GD03 backlog:
-        // the SPU reverb is not emulated yet).
-        if (reverbs != 0) fail("unexpected FxSendReverb objects on the PS2 disc");
+        // core (fx_core) whose effect config/synth.dta sets up.
+        if (reverbs != 0 || sends != 0) fail("unexpected FxSendReverb objects / sends on the PS2 disc");
+        for (const auto& [core, n] : fxCores)
+            if (core < -1 || core > 1) fail("fx_core " + std::to_string(core) + " on " + std::to_string(n) + " SfxMaps");
+        spu2::FxConfig fx;
+        if (!spu2::loadFxConfig(data, fx)) fail("config/synth.dta unreadable");
+        const auto& c0 = fx.core[0];
+        const auto& c1 = fx.core[1];
+        // (fx (chain FALSE) (core_0 (mode kFXModeEcho) (volume -9.0) (delay 0.5) (feedback -96))
+        //     (core_1 (mode kFXModeLargeStudio) (volume -8.5) (delay 0.0) (feedback -96))) [C data]
+        if (fx.chain || c0.mode != spu2::kFXModeEcho || c0.volumeDb != -9.0f || c0.delay != 0.5f || c0.feedbackDb != -96.0f ||
+            c1.mode != spu2::kFXModeLargeStudio || c1.volumeDb != -8.5f || c1.delay != 0.0f || c1.feedbackDb != -96.0f)
+            fail("config/synth.dta fx not as on the disc");
+        std::printf("sfxtest: SfxMaps by fx_core: %d dry, %d core 0, %d core 1; fx chain %d, core 0 mode %d %.1f dB delay %.2f (%d) "
+                    "feedback %d, core 1 mode %d %.1f dB\n",
+                    fxCores[-1], fxCores[0], fxCores[1], int(fx.chain), c0.mode, double(c0.volumeDb), double(c0.delay),
+                    spu2::fxDelay(c0.delay), spu2::fxFeedback(c0.feedbackDb), c1.mode, double(c1.volumeDb));
 
         // The game's banks and the names the scripts play.
         Synth synth;

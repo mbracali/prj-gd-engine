@@ -31,13 +31,6 @@ enum Speaker { kFL = 0, kFR = 1, kC = 2, kLFE = 3, kRL = 4, kRR = 5 };
 using Gains51 = std::array<float, 6>;
 Gains51 panGains(float pan);
 
-// The send of a voice (0x826898C8) [C]: the send volume times the pan
-// gains (not the voice's volume); for an FxSendReverb the front is also
-// folded into the centre (+ half of each front) and the rears (+ their
-// side's front). Returned in the order the FxSend's three submix voices
-// take them: front L, front R, centre, rear L, rear R.
-std::array<float, 5> sendGains(const Gains51& pan, float sendVolume, bool reverb);
-
 // The stereo fold-down of the 5.1 master when the console's output is
 // stereo. This happens in the 360's system software, not in GH2: gd03 uses
 // the ITU-R BS.775 Lo/Ro fold (L = FL + 0.7071 C + 0.7071 RL, R = FR +
