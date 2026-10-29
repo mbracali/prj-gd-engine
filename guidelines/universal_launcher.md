@@ -76,6 +76,16 @@ incomplete bundles".
 
 ## GAMEPADS screen, Enhanced menu and mouse: the same in every game
 
+> **Since 2026-10-29 the reference is [universal_mechanisms.md](../universal_mechanisms.md)**
+> at the repository root: the owner's universal mechanisms (skips, band
+> naming, Universal Access Buttons, default mappings) and the universal
+> Gamepad menu (1.2.1) and Enhanced menu (1.2.2), with their mockups.
+> gd-game-01 1.1.7 implements them; where this section differs (the old
+> GAMEPADS layout, the STEAM DECK MODE / ENHANCERS / CHEATS sections, the
+> XInput and Rock Band switches), universal_mechanisms.md wins, and the
+> rest of this section is kept for gd-game-02's current screens until they
+> are ported.
+
 Every gd-game has two screens of its own that are not in the original game:
 the **GAMEPADS** screen and the **Enhanced** menu. A player who knows them in
 one game must find them the same in every other game. **gd-game-01 is the

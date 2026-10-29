@@ -44,6 +44,7 @@ prj-gd-engine/
   .github/                   workflows and the repo guard
   gd-backlog.md              THE single backlog (every game, the launcher, releases, the site)
   guidelines/                the rules for every task (read before working)
+  universal_mechanisms.md    the menus and mechanisms every game has (the owner's reference)
   spikes/                    studies and spikes (platforms, signing, stores, HDR...)
   docs/                      the official codebase documentation
   gd-engine-docs/            the engine codebase (shared engine documentation)
@@ -64,7 +65,9 @@ Guitar Dream version, whether it is ready to play and how complete it is.
 # Before you work
 
 Read [guidelines/](guidelines/README.md) (general guidelines, the universal
-launcher rules and the behaviours every game shares) and the single backlog
+launcher rules and the behaviours every game shares),
+[universal_mechanisms.md](universal_mechanisms.md) (the menus and mechanisms
+every game has) and the single backlog
 [gd-backlog.md](gd-backlog.md). Update the backlog at the start and at the end
 of every task. Studies and spikes are in [spikes/](spikes/README.md).
 
