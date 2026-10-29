@@ -59,6 +59,9 @@ bool SongDb::load(const Globals& g) {
         s.guitarVolume = num(g, *p->st, "guitar_playback_volume", 0);
         s.singer = key(g, *p->st, "singer");
         s.keyboard = key(g, *p->st, "keyboard") == qbkey::key("true");
+        s.hammerOnMeasureScale = num(g, *p->st, "hammer_on_measure_scale", 0);
+        for (const qb::Item& it : p->st->items)
+            if (it.name == 0 && it.value.type == qb::Type::Key && it.value.key == qbkey::key("use_coop_notetracks")) s.useCoopNotetracks = true;
         if (s.name.empty()) continue;
         songs_.push_back(std::move(s));
     }

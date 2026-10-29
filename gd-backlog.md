@@ -657,7 +657,7 @@ universal launcher, not released on its own.
 | GD04-001 | Original | 🟡 in progress | Full reimplementation (decompile + recompile, 100% match), milestones M0–M10 of the kickoff; the agent adds one row per milestone and per finding | [GD-GAME-04_KICKOFF.md](GD-GAME-04_KICKOFF.md); progress in `gd-game-04/agents/PROGRESS.md` | Owner 10-28 |
 | GD04-002 | Original | ✅ | M0 set-up: rip, Ghidra project + export (32,998 functions), DumpAsm / ReadF, engine shell copied from gd-game-02's engine-independent layers (gd04), title ID 415607F7 | `gd-game-04/agents/CONTEXT.md`, `DECISIONS.md` | Kickoff M0 |
 | GD04-003 | Original | ✅ | M1 data layer: every pak type decodes to its end in Python and C++ (`--formattest`): QB, textures, scenes / models / skins, Havok, animations, skeletons, fonts, .wav, .nqb, .pfx, .table, .dbg; FMOD song banks (`--sfxtest`) | `gd-game-04/docs/formats.md` | Kickoff M1 |
-| GD04-004 | Original | ❌ | M2 songs, audio (FSB4 decryption, XMA stems), gameplay core, `--selftest` | | Kickoff M2 |
+| GD04-004 | Original | 🟡 in progress | M2: song audio (FSB decryption, XMA1 stems, `--sfxtest`) ✅; song list and charts ✅; the single-player judge (windows, HOPO with the 0x20 flip, taps, chords, overstrum, sustains, score, Star Power, rock meter) ✅ with `--selftest` "all charts fully hit"; to do: co-op, face-off / pro face-off, battle, boss rules, the Star Power measure length, whammy_cutoff | `gd-game-04/docs/FINDINGS.md` "Gameplay rules" | Kickoff M2 |
 | GD04-005 | Original | ❌ | M3 QScript VM, menus, asset audit (`--audittest`) | | Kickoff M3 |
 | GD04-006 | Original | ❌ | M4 highway and HUD | | Kickoff M4 |
 | GD04-007 | Original | ❌ | M5 venues, cameras, lighting | | Kickoff M5 |

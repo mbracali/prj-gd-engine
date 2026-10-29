@@ -3,6 +3,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <string>
 
 class Globals;
@@ -13,7 +14,10 @@ struct Chart;
 // show up in diffs; lesson L4).
 struct PlayTotals {
     bool rulesImplemented = false;
-    size_t charts = 0, notes = 0, chords = 0, sustains = 0, hopos = 0, flagged = 0, phrases = 0;
+    bool tuningLoaded = false;
+    size_t charts = 0, notes = 0, chords = 0, sustains = 0, hopos = 0, hopoNotes = 0, flagged = 0, phrases = 0;
+    size_t phrasesCaptured = 0, failedCharts = 0;
+    long long score = 0;
 };
 
 // Plays every part and difficulty of a chart with the autoplayer; false and

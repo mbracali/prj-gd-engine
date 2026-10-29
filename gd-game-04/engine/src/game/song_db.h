@@ -20,6 +20,8 @@ struct SongInfo {
     float bandVolume = 0, guitarVolume = 0;  // "band_playback_volume", "guitar_playback_volume" (dB?) [I]
     uint32_t singer = 0;     // $male / $female / $none ...
     bool keyboard = false;
+    float hammerOnMeasureScale = 0;  // the song's own (0: default_hammer_on_measure_scale) [C script call_startup_scripts]
+    bool useCoopNotetracks = false;  // flag use_coop_notetracks [C script setup_gemarrays]
 };
 
 class SongDb {
