@@ -25,13 +25,22 @@ std::vector<qb::Item> Globals::expand(const qb::Struct& st) const {
     std::vector<qb::Item> out;
     out.reserve(st.items.size());
     for (const qb::Item& it : st.items) {
-        if (it.name == 0 && it.value.type == qb::Type::KeyPtr) {
+        // `$name`, or an evaluated key (`( <arg> default_topscores )`, setup_songtags),
+        // naming a global struct: its fields [C data; I: plain keys too].
+        if (it.name == 0 && (it.value.type == qb::Type::KeyPtr || it.value.type == qb::Type::Key)) {
             const qb::Value* inc = find(it.value.key);
             if (inc && inc->type == qb::Type::Struct && inc->st) {
                 std::vector<qb::Item> sub = expand(*inc->st);
                 out.insert(out.end(), sub.begin(), sub.end());
                 continue;
             }
+        }
+        // An unnamed struct (`{ ( $ default_bandtags ) }`) is included the
+        // same way [C data: setup_bandtags' band info tags; I: the rule].
+        if (it.name == 0 && it.value.type == qb::Type::Struct && it.value.st) {
+            std::vector<qb::Item> sub = expand(*it.value.st);
+            out.insert(out.end(), sub.begin(), sub.end());
+            continue;
         }
         out.push_back(it);
     }

@@ -84,6 +84,13 @@ void FrontEnd::songEnded(bool won) {
 
 void FrontEnd::frame(Canvas& c, double dtMs) {
     sfx.update();
+    // GD04_FLOWLOG=1: each flow state player 1 enters (ui_flow_manager_state[0]).
+    static const bool flowLog = SDL_getenv("GD04_FLOWLOG") != nullptr;
+    if (flowLog) {
+        const qb::Value* a = vm_->global(qbkey::key("ui_flow_manager_state"));
+        const uint32_t st = a && a->arr && !a->arr->values.empty() ? a->arr->values[0].key : 0;
+        if (st != lastFlowState_) lastFlowState_ = st, SDL_Log("flow: %s", qbkey::name(st).c_str());
+    }
     if (songPlaying) return;
     accum_ += dtMs;
     int steps = 0;

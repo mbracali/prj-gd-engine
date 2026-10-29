@@ -178,7 +178,8 @@ void App::frame() {
         // Walks skip the movies (GD04_WALK_MOVIES=1 plays them).
         // A quit during the movie (the window closed, the launcher's
         // GDUL_GAME_QUIT_AFTER) quits the game too.
-        if (!walk_ || SDL_getenv("GD04_WALK_MOVIES"))
+        // GD04_NO_MOVIES=1 skips them outside walks too (development aid).
+        if ((!walk_ && !SDL_getenv("GD04_NO_MOVIES")) || SDL_getenv("GD04_WALK_MOVIES"))
             if (playMovie(*disc_, movie, canvas_, mixer_, input_) == MoviePlayer::Result::Quit) running_ = false;
         lastFrameNs_ = SDL_GetTicksNS();
         return;
