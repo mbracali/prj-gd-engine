@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
 # Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
-"""Guitar Hero II (Xbox 360) scene files: .milo_ps2 object directories.
+"""Guitar Hero Encore: Rocks the 80s (PS2) scene files: .milo_ps2 object directories
+(gd-game-02's tool for GH2 360, with this disc's directory version 24).
 
     milo.py list   <file>             class, name and record size of every object
     milo.py unpack <file> <out dir>   decompressed stream + one blob per object
@@ -10,17 +11,17 @@
                                       records (checks each ends at its marker)
 
 Container (all little-endian, recovered by inspection; see
-docs/milo_and_textures.md):
+docs/formats.md):
     u32 0xCBBEDEAF  (bytes AF DE BE CB)
-    u32 header size (offset of the first block; 0x810 in every file)
+    u32 header size (offset of the first block; 0x210 on this disc, 0x810 on GH2 360)
     u32 block count
     u32 largest inflated block size
     u32 compressed size of each block, then zero padding up to header size
     blocks: raw deflate streams (no zlib header); concatenated, they give the
     directory stream below.
 
-Directory stream (version 25 in every file):
-    u32 version (25)
+Directory stream (version 24 on this disc, 25 on GH2 360):
+    u32 version (24)
     string directory class (ObjectDir, RndDir, PanelDir, Character, ...)
     string directory name
     u32 string-table count, u32 string-table size (allocation hints)
