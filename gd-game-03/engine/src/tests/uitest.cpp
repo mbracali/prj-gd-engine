@@ -41,6 +41,7 @@ public:
     float gameBeat() const override { return 0; }
     float songDurationMs() const override { return 0; }
     const Player* gamePlayer(int) const override { return nullptr; }
+    void setPlayerSwitch(int, const std::string&, bool) override {}
     int gameCounter(int, const std::string&) const override { return 0; }
     void setMusicSpeed(float) override {}
     void setMusicPaused(bool) override {}

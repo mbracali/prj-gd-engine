@@ -492,7 +492,8 @@ void Player::setStreak(int streak) {
 
 // Hit 0x822c9338 [C], in this order:
 //  1. gems outside the practice range [+0xf0, +0xf4) are ignored;
-//  2. streak += 1, hits += 1 (0x822ddf70 / 0x822dcaa8), build_streak;
+//  2. streak += 1, hits += 1 (0x822ddf70 / 0x822dcaa8), build_streak; then
+//     the penalised-gem mark drops to this gem when it is above it (PS2);
 //  3. the open sustain record accrues up to the new gem's start_ms and is
 //     finished only if that completes it (PS2 0x001111d0 -> 0x00112280, the
 //     time passed is the gem's start) [C];
@@ -508,6 +509,10 @@ void Player::playerHit(float t, int gem) {
     ++notesHit_;
     setStreak(streak_ + 1);
     if (band_) band_->hit();  // 0x822DEBA8 [C]
+    // A hit below the highest penalised gem lowers that mark to the hit gem
+    // (PS2 0x00111254..0x00111264, after the streak update, before the
+    // sustain accrual) [C], so the gems after it can be penalised again.
+    if (gem < penalisedGem_) penalisedGem_ = gem;
     // Timing class 0x822d6260: computed on every hit by 0x822e2748, which
     // drops the result [C] (counted here for the stats only).
     const float err = std::abs(t + offset_ - g.ms);
@@ -628,9 +633,9 @@ void Player::ownCrowdUpdate(float target, float t) {
     if (rating <= crowd_.warningLevel && progress <= crowd_.freeRide) return;
     raw_ = raw;
     rating_ = rating;
-    // 0x822DD3E0 [C]: only a performer that can end the game fails
-    // (0x822C6B98: one player and not competitive; the co-op band, never
-    // a co-op player: their callers pass noFail), never in competitive modes.
+    // PS2 0x0010fc78 -> 0x0010fe30 [C]: only a performer that may end the
+    // game fails (Player::mayFail: the solo player, the co-op band; never a
+    // co-op or face-off player), so callers pass noFail for the others.
     if (rating_ < crowd_.loseLevel && !noFail_) {
         failed_ = true;
         emit(PlayerEvent::Kind::Failed, -1);
@@ -719,19 +724,22 @@ void Player::spPhraseMiss(int gem) {
 // only when the other player is engaged too, and then for both. Every call
 // sends sp_engage (player, state) to the game (multi_coop's handler plays
 // sp_deploystart.cue).
+// PS2 0x00111940 [C]: the engaged flag (+0xc4) is stored first; with the
+// mercury switch off (+0xb8, the tutorials' set_mercuryswitchenabled FALSE)
+// nothing deploys. Otherwise an engage while ready and not active deploys
+// (co-op: both, once the partner is engaged too). The sp_engage message then
+// carries "mercury on, engaged, not active and ready" worked out after any
+// deploy, so co-op's waiting first player gets 1 and a deploy gets 0.
 void Player::starPowerEngage(bool engaged, float t) {
     (void)t;
     if (failed_) return;
     engaged_ = engaged;
-    emit(PlayerEvent::Kind::StarPowerEngage, -1, engaged ? 1.0f : 0.0f);
-    if (!engaged || spActive_ || !spReady_) return;
-    if (!partner_) {
-        spStart(true);
-        return;
+    if (mercuryEnabled_ && engaged && !spActive_ && spReady_) {
+        if (!partner_) spStart(true);
+        else if (partner_->engaged_) spStart(true), partner_->spStart(true);
     }
-    if (!partner_->engaged_) return;
-    spStart(true);
-    partner_->spStart(true);
+    const bool waiting = mercuryEnabled_ && engaged && !spActive_ && spReady_;
+    emit(PlayerEvent::Kind::StarPowerEngage, -1, waiting ? 1.0f : 0.0f);
 }
 
 // 0x822DBA90 [C]: start_using / stop_using.
@@ -786,8 +794,11 @@ void Player::setWhammyValue(float value, float t) {
 
 // Whammy flag 0x822c8438 [C]: only while holding a sustain whose phrase is
 // armed or captured (state 2 / 3), and while the bar moved within the last
-// whammy_timeout (500 ms). Sends whammy_start / whammy_end.
+// whammy_timeout (500 ms). Sends whammy_start / whammy_end. With the
+// whammy gate (+0xbc) off the PS2 poll only notes the bar's value and time
+// and leaves the flag as it is (0x00111d88) [C].
 void Player::whammyPoll(float t) {
+    if (!whammyStarPowerEnabled_) return;
     bool eligible = false;
     if (sustainGem_ >= 0 && tail_.gem == sustainGem_) {
         const int p = chart_.gems[size_t(sustainGem_)].phrase;

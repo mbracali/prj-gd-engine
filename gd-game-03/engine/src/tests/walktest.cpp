@@ -18,12 +18,14 @@
 #include "data/json.h"
 #include "game/player.h"
 #include "input/input.h"
+#include "render/camera.h"
 #include "render/scene_gpu.h"
 #include "render/ui_view.h"
 #include "scene/milo.h"
 #include "script/tasks.h"
 #include "ui/campaign.h"
 #include "ui/char_select.h"
+#include "ui/enhanced_panel.h"
 #include "ui/natives.h"
 #include "ui/ui_objects.h"
 #include "ui/ui_host.h"
@@ -122,6 +124,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         check("intro_sequence");
         check("intro_camera");
         check("star_phrase");
+        check("track_surface");
         at("endgame_screen", 90000);
         wait(600);
         press(kX);  // CONTINUE (me_continue.btn)
@@ -425,7 +428,10 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         press(kX);
         at("enhanced_options_screen");
         check("enhanced_default");
+        check("enhanced_all_off");
         check("backdrop_band");
+        wait(300);
+        check("aspect_43");
         // Gamepads (the focus) -> 4 controls -> the PERFORMANCE AND GRAPHICS
         // section -> calibration -> Screen Mode -> Max FPS -> FPS Counter ->
         // Internal Resolution; select opens its dropdown, down and select
@@ -437,6 +443,15 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         press(kX);  // the window's own -> 448p (ps2)
         wait(300);
         check("enhanced_changed");
+        // Widescreen (16:9), the next row: on (the picture fills the
+        // frame), then off again (4:3 with its bars).
+        press(kDown), wait(120);
+        press(kX);
+        wait(400);
+        check("aspect_169");
+        press(kX);
+        wait(400);
+        check("aspect_43");
         press(kTri);
         at("options_screen");
         press(kX);  // Enhanced Options again (the focus): the band again
@@ -454,6 +469,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         mouseOn("main_options.btn", 0);
         wait(200);
         check("focus_main_options");
+        check("options_hit");  // where OPTIONS is drawn in the 4:3 picture
         mouseOn("main_options.btn", 1);
         at("options_screen");
         wait(300);
@@ -469,11 +485,24 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         mouseAt(480, 502, 1);
         wait(300);
         check("enhanced_fps_60");
+        // The wheel three rows down to Widescreen (16:9), the list scrolled
+        // to keep it in view (its row then 570..604), and its box clicked.
+        for (int i = 0; i < 3; ++i) mouseAt(480, 592, 5), wait(120);
+        wait(600);
+        mouseAt(480, 587, 0);
+        mouseAt(480, 587, 1);
+        wait(300);
+        check("widescreen_on");
         mouseAt(480, 592, 3);  // right click: back
         at("options_screen");
         wait(300);
-        check("click_help1");  // the help bar's BACK
+        check("click_help1");  // the help bar's BACK, drawn in the 16:9 picture now
         at("main_screen");
+        wait(300);
+        check("options_hit");  // OPTIONS is where it was: the hits follow the picture
+        mouseOn("main_options.btn", 0);
+        wait(200);
+        check("focus_main_options");
         expect_ = {"main_screen", "options_screen", "enhanced_options_screen", "options_screen", "main_screen"};
     } else if (scenario == "gamepads") {
         at("main_screen");
@@ -791,6 +820,30 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         std::printf("  mouse: the hover focused %s\n", fp ? fp->focus.c_str() : "nothing");
         return fp && fp->focus == "main_options.btn" ? pass() : fail("hovering OPTIONS did not focus it");
     }
+    if (s.screen == "widescreen_on") {
+        const std::string v = ui.host().enhancedValue("widescreen");
+        std::printf("  mouse: Widescreen %s, the picture %.3f\n", v.c_str(), double(gfx::pictureAspect()));
+        return v == "on" ? pass() : fail("clicking Widescreen's check box did not turn it on");
+    }
+    // GD03-016: the main menu's OPTIONS is drawn at the same place of the
+    // window in 4:3 and 16:9 (the menu camera keeps its height), so its
+    // hit box in menu units must be the same in both, and over the poster's
+    // middle (where it is drawn) rather than spread to the 16:9 width.
+    if (s.screen == "options_hit") {
+        ui::PanelObj* fp = ui.focusPanel();
+        const gfx::UiView::Hit* hit = nullptr;
+        if (fp && fp->view)
+            for (const gfx::UiView::Hit& h : fp->view->hits())
+                if (h.key == "main_options.btn") hit = &h;
+        if (!hit) return fail("OPTIONS was not drawn");
+        const float cx = (hit->x0 + hit->x1) * 0.5f, cy = (hit->y0 + hit->y1) * 0.5f;
+        std::printf("  mouse: OPTIONS at %.0f..%.0f x %.0f..%.0f (picture %.3f)\n", double(hit->x0), double(hit->x1), double(hit->y0),
+                    double(hit->y1), double(gfx::pictureAspect()));
+        if (cx < 560 || cx > 720) return fail("OPTIONS' hit box is not where the button is drawn");
+        if (optionsHit_[0] < 0) optionsHit_ = {cx, cy};
+        else if (std::fabs(cx - optionsHit_[0]) > 2 || std::fabs(cy - optionsHit_[1]) > 2) return fail("OPTIONS' hit box moved with the aspect");
+        return pass();
+    }
     if (s.screen == "enhanced_fps_60") {
         const std::string v = ui.host().enhancedValue("max_fps");
         std::printf("  mouse: In-Game Max FPS %s\n", v.c_str());
@@ -919,6 +972,15 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         ++step_, stepStart_ = -1;
         return;
     }
+    if (s.screen == "track_surface") {
+        // The track's surface is the player's character's
+        // track/surfaces/<outfit>_keep.bmp (TrackPanel 0x001536e0 / 0x00155078).
+        const int frames = ui.host().gameCounter(0, "surface_overrides");
+        std::printf("  track surface: %d frames with the character's surface texture\n", frames);
+        if (frames < 1) return fail("the track did not draw the character's surface texture (track/surfaces/<outfit>_keep.bmp)");
+        ++step_, stepStart_ = -1;
+        return;
+    }
     if (s.screen == "star_phrase") {
         // A Star Power phrase played through (autoplay): player.dta's
         // phrase_captured plays sp_awarded, the star meter fills, its gems
@@ -981,6 +1043,57 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         if (!ui.host().gameLoaded() || std::fabs(task - song) > 0.05) return fail("kTaskSeconds does not follow the song in the game");
         ++step_, stepStart_ = -1;
         return;
+    }
+    // GD03-019: every Enhanced option starts at the original game's look.
+    // The mouse is a control (on in every gd-game); the rest are off, the
+    // PS2's 60 FPS, the window's own resolution and the 4:3 picture. The
+    // rows gd03 does not have yet show off (greyed); the cheats are off.
+    if (s.screen == "enhanced_all_off") {
+        const std::vector<std::pair<const char*, const char*>> want = {
+            {"screen_mode", "windowed"}, {"max_fps", "60"}, {"fps_counter", "off"}, {"mouse", "on"},
+            {"internal_res", "0"},       {"widescreen", "off"}};
+        for (const auto& [k, v] : want) {
+            const std::string got = ui.host().enhancedValue(k);
+            if (got != v) return fail(std::string("Enhanced Options ") + k + " starts " + got + ", not " + v);
+        }
+        if (ui::enhancedSettings().size() != want.size()) return fail("an Enhanced setting without its default in the walk");
+        for (const char* c : {"cheat_unlock_all", "cheat_air_guitar", "cheat_performance_mode", "cheat_hyper_speed_mode",
+                              "cheat_flaming_head", "cheat_eyeball_head_crowd", "cheat_monkey_head_crowd"})
+            if (ui.cheatOn(c)) return fail(std::string("the cheat ") + c + " starts on");
+        std::printf("  enhanced: every option at the original look (mouse on)\n");
+        return pass();
+    }
+    // GD03-016: the picture is 4:3 between black bars by default, the whole
+    // 16:9 frame with Widescreen on. The frame read back: its outer 3% each
+    // side is black only with the bars (the venue backdrop shows there in 16:9).
+    if (s.screen == "aspect_43" || s.screen == "aspect_169") {
+        const bool wide = s.screen == "aspect_169";
+        const float aspect = gfx::pictureAspect(), want = wide ? 16.0f / 9.0f : 4.0f / 3.0f;
+        const std::string shot = (std::filesystem::path(ui.savePath()).parent_path() / "walk_aspect.bmp").string();
+        bool barsBlack = true, read = false;
+        if (ui.host().saveScreenshot(shot))
+            if (SDL_Surface* raw = SDL_LoadBMP(shot.c_str())) {
+                if (SDL_Surface* px = SDL_ConvertSurface(raw, SDL_PIXELFORMAT_RGBA32)) {
+                    read = true;
+                    const int band = std::max(1, px->w * 3 / 100);
+                    for (int y = 0; y < px->h && barsBlack; ++y)
+                        for (int x : {0, px->w - band})
+                            for (int i = 0; i < band; ++i) {
+                                const Uint8* c = static_cast<const Uint8*>(px->pixels) + size_t(y) * size_t(px->pitch) + size_t(x + i) * 4;
+                                if (std::max({c[0], c[1], c[2]}) > 12) barsBlack = false;
+                            }
+                    SDL_DestroySurface(px);
+                }
+                SDL_DestroySurface(raw);
+            }
+        std::error_code ec;
+        std::filesystem::remove(shot, ec);
+        std::printf("  aspect: the picture %.3f (%s), the frame's sides %s\n", double(aspect), wide ? "16:9 wanted" : "4:3 wanted",
+                    !read ? "not read" : barsBlack ? "black bars" : "drawn");
+        if (std::fabs(aspect - want) > 0.01f) return fail(wide ? "Widescreen on did not make the picture 16:9" : "the picture is not 4:3");
+        if (!read) return fail("the frame could not be read back");
+        if (barsBlack == wide) return fail(wide ? "16:9: the frame's sides are still black" : "4:3: no black bars at the sides");
+        return pass();
     }
     // The Enhanced Options: Internal Resolution at its default (the
     // window's own), then 448p after one select, saved in enhanced.json.

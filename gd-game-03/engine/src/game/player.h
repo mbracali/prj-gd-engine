@@ -96,6 +96,14 @@ public:
     // A digital whammy (a key): counts as a moving bar while held. Engine
     // convenience for keyboards; GH2 only has the analog bar [I].
     void setWhammy(bool held) { whammyKey_ = held; }
+    // Player +0xbc, the whammy gate of the whammy poll (PS2 0x00111d88): on
+    // from the constructor (0x001107d8) and changed only by the script
+    // method set_whammystarpowerenabled (0x001131a0 -> 0x00111cd8), which
+    // only tutorial_22_star_combos uses (FALSE) [C]. While it is off the
+    // poll leaves the whammy flag as it is.
+    void setWhammyStarPowerEnabled(bool on) { whammyStarPowerEnabled_ = on; }
+    // set_mercuryswitchenabled (+0xb8, 1 at construction; PS2 0x00111ce0).
+    void setMercurySwitchEnabled(bool on) { mercuryEnabled_ = on; }
     // Watcher +0x2c: added to the input time (the player's lag setting) [C].
     void setCalibrationMs(float ms) { offset_ = ms; }
     // Practice: gems before `firstGem` are skipped (watcher +0x1c) and the
@@ -118,6 +126,8 @@ public:
     int notesHit() const { return notesHit_; }
     int passes() const { return passes_; }
     int penalties() const { return penalties_; }
+    // +0xac: the highest gem already penalised (-1 none).
+    int penalisedGem() const { return penalisedGem_; }
     int perfectHits() const { return perfect_; }
     int goodHits() const { return good_; }
     float rockMeter() const { return rating_; }
@@ -127,6 +137,18 @@ public:
     float warningLevel() const { return crowd_.warningLevel; }
     float starMeter() const { return meter_->value; }
     PerformerState state() const;
+    // Whether a player may fail the song, PS2 0x0010fc78: the crowd fails
+    // only when the mode is not "multiplayer and competitive" (0x001260a8)
+    // and the performer's vtable +0xa4 allows it. For a player (and a co-op
+    // player) that is 0x00112890: competitive ? player number == 0 :
+    // num_players == 1 [C, the same as GH2's 0x822C6B98]. So only the solo
+    // player fails; co-op players and both face-off players never do. (The
+    // co-op band is a plain Performer whose +0xa4, 0x0010f310, is TRUE: it
+    // fails.) Callers pass !mayFail(...) as noFail.
+    static bool mayFail(int numPlayers, bool competitive, int number) {
+        if (numPlayers > 1 && competitive) return false;
+        return competitive ? number == 0 : numPlayers == 1;
+    }
     bool starPowerReady() const { return spReady_ && !spActive_; }
     bool starPowerActive() const { return spActive_; }
     bool whammying() const;
@@ -207,7 +229,8 @@ private:
     BandPerformer* band_ = nullptr;
     float bandA_ = 0, bandB_ = 1, bandW_ = 1;
     Player* partner_ = nullptr;
-    bool engaged_ = false;  // +0xbc
+    bool mercuryEnabled_ = true;  // +0xb8
+    bool engaged_ = false;  // +0xc4 on the PS2 (0x00111940)
     std::vector<uint8_t> hit_;
     std::vector<PlayerEvent> events_;
     int baseScore_ = 0;
@@ -273,4 +296,5 @@ private:
     bool whammyKey_ = false, whammyOn_ = false;
     float whammyValue_ = 0, whammyLastMs_ = -1e9f, whammyMovedMs_ = -1e9f;
     bool whammyValueSeen_ = false;
+    bool whammyStarPowerEnabled_ = true;  // +0xbc
 };

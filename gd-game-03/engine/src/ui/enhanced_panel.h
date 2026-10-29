@@ -25,8 +25,10 @@ class UiManager;
 std::unique_ptr<ScriptObject> makeEnhancedPanel(UiManager& ui, const std::string& name);
 
 // The settings the panel lists that gd03 puts in effect, with their values
-// (the first one the default): screen_mode, max_fps, fps_counter (off / on),
-// internal_res (0: the window's own, else a height in lines).
+// (the first one the default, the original game's look): screen_mode,
+// max_fps, fps_counter (off / on), mouse (on / off), internal_res (0: the
+// window's own, else a height in lines), widescreen (off: the PS2's 4:3
+// picture pillarboxed; on: 16:9).
 struct EnhancedSetting {
     const char* key;
     std::vector<const char*> values;

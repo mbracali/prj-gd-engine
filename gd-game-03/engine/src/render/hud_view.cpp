@@ -461,7 +461,8 @@ void HudView::drawMessage(Canvas& canvas, const scene::Text* text, const scene::
         const float cy = vp.at(1, 0) * p.x + vp.at(1, 1) * p.y + vp.at(1, 2) * p.z + vp.at(1, 3);
         const float cw = vp.at(3, 0) * p.x + vp.at(3, 1) * p.y + vp.at(3, 2) * p.z + vp.at(3, 3);
         if (cw <= 0.01f) return false;
-        v.x = (cx / cw * 0.5f + 0.5f) * kScreenW;
+        // Into the picture's part of the logical screen (4:3 or 16:9).
+        v.x = canvas.pictureX0() + (cx / cw * 0.5f + 0.5f) * canvas.pictureW();
         v.y = (0.5f - cy / cw * 0.5f) * kScreenH;
         v.z = 0;
         return true;
@@ -500,6 +501,7 @@ void HudView::draw(gfx::Renderer& r, gfx::SceneCache& cache, Canvas& canvas, con
     cache_ = &cache;
     int vx, vy;
     r.pictureRect(vx, vy, viewW_, viewH_);
+    camera_.aspect = float(viewW_) / float(std::max(1, viewH_));  // the picture's (4:3 or 16:9)
     drive(players, band, nowMs);
     // The HUD draws over everything (the UI camera's depth range 0..0.02).
     r.device().clear(nullptr, true);

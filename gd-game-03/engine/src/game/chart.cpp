@@ -43,9 +43,15 @@ const MidiTrack* findTrack(const MidiFile& midi, const std::string& name) {
 //            && new.tick - prev.tick < hopo_threshold   (strict: blt at 0x8234dd38)
 // The threshold is the song's, else beatmatcher's (0x823341d0) [C]; it does
 // not depend on the difficulty [C]. GH2 has no forced HOPO notes [C].
-// TODO(face-off): the game keeps one gem list per player (0x8233fe50 ->
-// 0x8234e0f0), so "prev" may be the previous gem of that player's list; with
-// one list for every player (single player) this is exact.
+// Face-off: the PS2 keeps one gem list per difficulty and track, not per
+// player. Each new track adds a list to every difficulty (0x002447a8); the
+// parser hands each gem to the sink with its difficulty index (0x00245f28,
+// from the pitch through 0x00246668), and the sink picks the difficulty's
+// lists (0x002448d0) and then the gem's track (gem +0, 0x0024bba8). Every gem
+// goes into the list, whatever its player bits, and the HOPO test
+// (0x0024d3a0) never reads them [C]. Both face-off players play the same
+// track, so "prev" is the previous gem of the whole chart, including the
+// other player's gems, which is what this does.
 void markHopos(Chart& chart, int hopoTicks) {
     for (size_t i = 0; i < chart.gems.size(); ++i) {
         Gem& g = chart.gems[i];

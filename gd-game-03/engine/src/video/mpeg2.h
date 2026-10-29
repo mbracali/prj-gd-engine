@@ -44,6 +44,14 @@ public:
     // Drops buffered data and references (e.g. before restarting a stream).
     void reset();
 
+    // One PS2 IPU IDEC picture (the .ipu movies, video/ipu.h): raster order
+    // intra macroblocks with no headers, decoded with the IPU's state
+    // (default intra matrix, initial quantiser code 1). `flags` is the
+    // movie frame's IPU_CTRL byte (IDP, DTD, AS, IVF, QST; MP1 throws).
+    // `usedBits` receives the bits read. The frame stays valid until the
+    // next call; throws std::runtime_error on a malformed picture.
+    const Mpeg2Frame& decodeIdec(const uint8_t* data, size_t size, int width, int height, unsigned flags, size_t& usedBits);
+
     int width() const;
     int height() const;
     double frameRate() const;  // from the sequence header, 0 before it

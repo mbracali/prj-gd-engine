@@ -77,6 +77,16 @@ public:
     // Since reset: frames whose far-end fade was laid over the track (the
     // venue strips saved before it, 0x001511c0).
     int fadeDraws() const { return fadeDraws_; }
+    // The player's track surface (0x001536e0, 0x00153888, 0x00155078):
+    // track/surfaces/<name>_keep.bmp as track_surface.mat's texture, <name>
+    // the mode's track_surface_override (config/modes.dta: rosewood in
+    // practice and the tutorial) or else the player's character (outfit
+    // name, alterna1...; empty: the song's quickplay one). `mode`: gamecfg's
+    // mode (quickplay, practice...).
+    void setSurface(const GameData& data, const std::string& mode, const std::string& character, const std::string& songId);
+    const std::string& surfaceName() const { return surfaceName_; }
+    // Since reset: frames whose surface drew with that texture.
+    int surfaceOverrides() const { return surfaceOverrides_; }
 
 private:
     // A smash view's copy for one slot (0x8269C968): normal, star or bonus.
@@ -177,6 +187,10 @@ private:
     // Beat line meshes: quarter, half beat, beat, bar (0x0015c4a0).
     std::array<const scene::Mesh*, 4> beatMeshes_{};
     const scene::Mesh *surface_ = nullptr, *laneLines_ = nullptr, *rails_ = nullptr;
+    // The surface texture (setSurface); null: the scene's own track_surface.tex.
+    const scene::Tex* surfaceTex_ = nullptr;
+    std::string surfaceName_;
+    int surfaceOverrides_ = 0;
     float bonusStartMs_ = -1e9f;  // Star Power's start (the lightning flipbook)
 
     // The tail template: tail02.mesh's cross-section (sorted by x).

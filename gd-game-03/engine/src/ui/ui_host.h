@@ -74,6 +74,9 @@ public:
     virtual float gameBeat() const = 0;        // the song position in beats
     virtual float songDurationMs() const = 0;  // to the song's end
     virtual const Player* gamePlayer(int index) const = 0;
+    // The tutorials' player switches (set_whammystarpowerenabled /
+    // set_mercuryswitchenabled) on the song's player `index`.
+    virtual void setPlayerSwitch(int index, const std::string& name, bool on) = 0;
     // The co-op band (game/band_performer.h): its score, streak, stars and
     // meter; nullptr outside co-op.
     virtual const BandPerformer* gameBand() const { return nullptr; }

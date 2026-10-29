@@ -225,7 +225,8 @@ MoviePlayer::Result MoviePlayer::play(Canvas& canvas, Mixer& mixer, Input& input
         canvas.begin(SDL_Color{0, 0, 0, 255});
         canvas.flush();
         if (shown) {
-            // 4:3 inside the 1280x720 picture: 960x720, pillarboxed.
+            // 4:3 in the middle of the 1280x720 frame: 960x720, pillarboxed
+            // (the whole picture when it is 4:3).
             constexpr float w = kScreenH * 4 / 3, x0 = (kScreenW - w) / 2, x1 = x0 + w, y1 = kScreenH;
             const Vertex a{x0, 0, 0, 0, 0, 255, 255, 255, 255}, b{x1, 0, 0, 1, 0, 255, 255, 255, 255};
             const Vertex c{x1, y1, 0, 1, 1, 255, 255, 255, 255}, e2{x0, y1, 0, 0, 1, 255, 255, 255, 255};
@@ -237,7 +238,7 @@ MoviePlayer::Result MoviePlayer::play(Canvas& canvas, Mixer& mixer, Input& input
             call.vertices = vbuf;
             call.count = 6;
             for (int i = 0; i < 3; ++i) call.textures[i] = planes[i], call.samplers[i] = {gfx::Filter::Linear, gfx::Wrap::Clamp, 0};
-            const gfx::Mat4 proj = gfx::Mat4::ortho2D(0, kScreenW, 0, kScreenH);
+            const gfx::Mat4 proj = canvas.projection();
             call.uniforms[0] = {proj.m, sizeof proj.m};
             dev.draw(call);
             if (captureDebugScreenshot(canvas, true, now)) result = Result::Quit, running = false;

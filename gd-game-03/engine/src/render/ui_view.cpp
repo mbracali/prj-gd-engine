@@ -345,7 +345,9 @@ void UiView::draw(MaterialRenderer& r) {
     masks_.clear();
     hits_.clear();
     if (!milo_) return;
-    viewProj_ = camera().viewProj(false);
+    const Camera cam = camera();
+    viewProj_ = cam.viewProj(false);
+    hitAspect_ = cam.aspect;
     const scene::Directory& root = milo_->root();
     // The drawables no group of the panel holds, by draw order.
     std::set<std::string> held;
@@ -378,7 +380,8 @@ void UiView::addHit(const std::string& key, const float lo[3], const float hi[3]
         const float cy = m.at(1, 0) * p.x + m.at(1, 1) * p.y + m.at(1, 2) * p.z + m.at(1, 3);
         const float cw = m.at(3, 0) * p.x + m.at(3, 1) * p.y + m.at(3, 2) * p.z + m.at(3, 3);
         if (cw <= 1e-4f) return;  // behind the camera
-        const float sx = (cx / cw + 1) * 640.0f, sy = (1 - cy / cw) * 360.0f;
+        // Menu units of the 16:9 frame: the picture (4:3 or 16:9) is centred in it.
+        const float sx = 640.0f + cx / cw * 360.0f * hitAspect_, sy = (1 - cy / cw) * 360.0f;
         x0 = std::min(x0, sx), x1 = std::max(x1, sx), y0 = std::min(y0, sy), y1 = std::max(y1, sy);
     }
     if (x1 > x0 && y1 > y0) hits_.push_back({key, x0, y0, x1, y1});

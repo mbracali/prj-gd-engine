@@ -45,16 +45,21 @@ class UiManager;
 //              passed with cheat_beat_song, the song offered and played,
 //              its endgame followed; GD03_WALK_END / _FAIL / _CHAR / _GUITAR
 //              / _ENHANCED (docs/career_and_store.md "Tests").
-//   enhanced   main -> Options -> Enhanced Options -> Internal Resolution
-//              changed (the window's own -> 448p) and saved in enhanced.json
-//              -> back -> back -> main; Enhanced Options again; both times
-//              the backdrop shows the band, its singer on the right.
+//   enhanced   main -> Options -> Enhanced Options (every option at the
+//              original look; the picture 4:3 between black bars) ->
+//              Internal Resolution changed (the window's own -> 448p) and
+//              saved in enhanced.json -> Widescreen on (16:9, no bars) and
+//              off (4:3 again) -> back -> back -> main; Enhanced Options
+//              again; both times the backdrop shows the band, its singer on
+//              the right.
 //   cheats     at the main menu, GH2's Air Guitar and Hyper Speed codes turn
 //              them on; Air Guitar's again, after a pause, turns it off.
 //   mouse      the mouse alone: hover OPTIONS on the main menu (focused), click
 //              it -> Options -> click Enhanced Options -> In-Game Max FPS's
-//              dropdown clicked open, 60 clicked -> right click -> Options ->
-//              the help bar's BACK clicked -> main.
+//              dropdown clicked open, 60 clicked -> the wheel down to
+//              Widescreen, its box clicked (16:9) -> right click -> Options
+//              -> the help bar's BACK clicked -> main; OPTIONS' hit box the
+//              same in 4:3 and 16:9, and hovering it focuses it again.
 //   gamepads   the keyboard's yellow fret on the main menu -> GAMEPADS (once
 //              the cheat codes' 750 ms are over) -> the keyboard's Whammy
 //              rebound to E (a real key) and saved in controllers.json ->
@@ -125,6 +130,7 @@ private:
     unsigned adapter_ = 0;           // the stickyaxis walk's virtual adapter (SDL_JoystickID)
     int sideBase_ = 0, rightBase_ = 0;
     float nameX0_ = 0;               // the career walk's band name: where it starts
+    std::array<float, 2> optionsHit_{-1, -1};  // the mouse walk: OPTIONS' hit centre in 4:3
 
     void runCheck(ui::UiManager& ui, const Step& s, double nowMs);
 };

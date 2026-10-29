@@ -1067,7 +1067,9 @@ static void fillMask(Canvas& canvas_, const gfx::UiView::MaskDraw& m) {
     if (m.blend == 0) return;  // kBlendDest: nothing written
     const Uint8 c[4] = {Uint8(std::clamp(m.rgba[0], 0.0f, 1.0f) * 255), Uint8(std::clamp(m.rgba[1], 0.0f, 1.0f) * 255),
                         Uint8(std::clamp(m.rgba[2], 0.0f, 1.0f) * 255), Uint8(std::clamp(m.rgba[3], 0.0f, 1.0f) * 255)};
-    const float x = m.rect[0] * kScreenW, y = m.rect[1] * kScreenH, w = m.rect[2] * kScreenW, h = m.rect[3] * kScreenH;
+    // The rect is a fraction of the picture (4:3 or 16:9 in the frame).
+    const float px = canvas_.pictureX0(), pw = canvas_.pictureW();
+    const float x = px + m.rect[0] * pw, y = m.rect[1] * kScreenH, w = m.rect[2] * pw, h = m.rect[3] * kScreenH;
     const Vertex q[6] = {{x, y, 0, 0, 0, c[0], c[1], c[2], c[3]},         {x + w, y, 0, 1, 0, c[0], c[1], c[2], c[3]},
                          {x + w, y + h, 0, 1, 1, c[0], c[1], c[2], c[3]}, {x, y, 0, 0, 0, c[0], c[1], c[2], c[3]},
                          {x + w, y + h, 0, 1, 1, c[0], c[1], c[2], c[3]}, {x, y + h, 0, 0, 1, c[0], c[1], c[2], c[3]}};

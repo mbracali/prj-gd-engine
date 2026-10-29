@@ -128,6 +128,7 @@ public:
     void draw() override {
         if (!input_ || ui.headless()) return;
         d_.updateTransition();
+        const PortDraw::FullFrame frame(ui);  // the 16:9 frame in either aspect
         for (int pass : {0, 1}) {
             d_.begin(pass);
             if (pass == 0) d_.quad(0, 0, kScreenW, kScreenH, {0, 0, 0, 1});

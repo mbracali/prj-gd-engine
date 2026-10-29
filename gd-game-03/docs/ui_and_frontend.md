@@ -44,3 +44,49 @@ interpreter, gd-game-02/docs/ui_and_frontend.md). What this disc changes:
   kPad_Circle, G_YELLOW kPad_Tri, G_BLUE kPad_X, G_ORANGE kPad_Square. The
   port feeds the cheat matcher with those codes for the frets (whatever menu
   button a fret also is) (ui/ui_manager.cpp action()).
+
+## The picture: 4:3 or 16:9 (GD03-016)
+- The PS2 drew a 4:3 picture, so that is the default: the menus, the
+  highway, the HUD, the venues and the movies are drawn in the middle 4:3 of
+  the 16:9 frame, between black bars. Enhanced Options > Performance and
+  Graphics > Widescreen (16:9), a check box after Internal Resolution, gives
+  the whole 16:9 frame instead. Nothing is stretched: every camera keeps its
+  vertical field of view and gets the picture's aspect, so 16:9 shows more of
+  the scene at the sides (the menus' posters stay where they are).
+- How: `gfx::Renderer` keeps the 16:9 frame (`frameRect`, the 1280 x 720
+  logical screen letterboxed in the window) and the picture in it
+  (`pictureRect`: the centred 4:3 part, or the frame); every 3D view takes
+  its viewport and aspect from the picture, and `gfx::pictureAspect()`
+  (render/camera.h) is the default aspect of every camera made, the menus'
+  too. The 2D canvas stays in frame units: its projection spans only the
+  picture's part of them (160..1120 in 4:3), so what lies outside is cut off
+  as the bars. The menus' screen masks, the HUD's messages and the mouse's
+  hit boxes (`UiView::addHit`: 640 + x * 360 * aspect) are placed in the
+  picture's part of the frame, so the mouse and touch (window -> frame units,
+  unchanged) hit the components in both modes (`--walktest mouse` checks
+  OPTIONS' hit box in 4:3 and 16:9).
+- The port's own screens (Enhanced Options, GAMEPADS) are laid out on the
+  whole 16:9 frame (gd-game-01's coordinates) in either mode
+  (`PortDraw::FullFrame`); the Enhanced Options' venue backdrop is the
+  game's picture, so the aspect change shows on it at once. The help bars
+  below them are the game's panels, in the picture.
+- Screenshots (GD03_SCREENSHOT, the walk's shots) are the whole frame, bars
+  included. The development viewers without the menus (--view) stay 16:9;
+  `--song` reads the Enhanced Options as the menus do.
+
+## Enhanced Options defaults (GD03-019) and layout (M8)
+- Every option starts at the original game's look: windowed, In-Game Max
+  FPS 60, no FPS counter, Internal Resolution "Window", Widescreen off, the
+  greyed (not yet built) effects off, the cheats off. Enable Mouse Selection
+  starts on: it is a control, and every gd-game works with the mouse
+  (guidelines/universal_launcher.md). `--walktest enhanced` checks them, the
+  4:3 picture with its bars, and 16:9 after Widescreen is switched on.
+- The page follows gd-game-01's Enhanced Settings (ui/enhanced_panel.cpp):
+  the options box on the left, the still close-up of the singer with the
+  band on the right, the explanation box bottom right; dropdowns for the
+  multiple choices (every greyed one lists gd-game-01's values), check boxes
+  for on / off and for the two-value choices (Forgiving Hammer-ons and
+  Pull-offs), Upscaling Quality and Dust in Light Beams shown only with the
+  row they depend on, the "on" tick green. GAMEPADS opens from the main
+  menu's yellow fret (after the cheat codes' 750 ms), the help bar's
+  GAMEPADS and the Gamepads row.

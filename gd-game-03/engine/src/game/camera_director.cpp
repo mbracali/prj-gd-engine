@@ -618,7 +618,7 @@ void CameraDirector::keyframeXfm(const World& world, const scene::CamShot& shot,
         const V3 d = sub(raw, c.pos);
         const float x = dot3(d, {c.rot[0], c.rot[1], c.rot[2]}), y = dot3(d, {c.rot[3], c.rot[4], c.rot[5]}),
                     z = dot3(d, {c.rot[6], c.rot[7], c.rot[8]});
-        const float cot = 1.0f / std::tan(prev->fov * 0.5f), aspect = float(gfx::kLogicalW) / float(gfx::kLogicalH);
+        const float cot = 1.0f / std::tan(prev->fov * 0.5f), aspect = gfx::pictureAspect();  // the picture's (4:3 or 16:9)
         float sx = x * cot / aspect, sy = z * cot;
         if (y != 0) sx /= y, sy /= y;
         const float ex = 0.5f * (sx - kf.screenOffset[0]), ey = 0.5f * (sy - kf.screenOffset[1]);
@@ -739,7 +739,7 @@ void CameraDirector::frameShot(const World& world, const scene::CamShot& shot, S
             d = len(sub(cb.target, x.pos)), so = kb.screenOffset;
         }
         if (same) {
-            const float th = std::tan(std::clamp(fov0, 0.05f, 2.8f) * 0.5f), aspect = float(gfx::kLogicalW) / float(gfx::kLogicalH);
+            const float th = std::tan(std::clamp(fov0, 0.05f, 2.8f) * 0.5f), aspect = gfx::pictureAspect();  // the picture's (4:3 or 16:9)
             const float ox = -so[0] * d * th * aspect, oz = -so[1] * d * th;
             for (int c = 0; c < 3; ++c) x.pos[size_t(c)] += ox * x.rot[size_t(c)] + oz * x.rot[size_t(6 + c)];
         }

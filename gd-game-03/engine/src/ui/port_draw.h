@@ -25,6 +25,21 @@ public:
     using Color = std::array<float, 4>;
     explicit PortDraw(UiManager& ui) : ui_(ui) {}
 
+    // The port's screens are laid out on the whole 16:9 frame, whatever
+    // the picture's aspect (4:3 pillarboxed or 16:9): while one of these
+    // lives, the canvas and the menu font draw on the frame.
+    class FullFrame {
+    public:
+        explicit FullFrame(UiManager& ui);
+        ~FullFrame();
+        FullFrame(const FullFrame&) = delete;
+        FullFrame& operator=(const FullFrame&) = delete;
+
+    private:
+        UiManager& ui_;
+        bool was_;
+    };
+
     // The transition's slide (offset) and fade, from the UI manager.
     void updateTransition();
     float offset() const { return offset_; }

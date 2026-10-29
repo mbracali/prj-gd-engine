@@ -227,6 +227,12 @@ public:
     }
     float songDurationMs() const override { return song_ ? song_->endMs : 0.0f; }
     const Player* gamePlayer(int index) const override { return index == 0 ? player_.get() : player2_.get(); }
+    void setPlayerSwitch(int index, const std::string& name, bool on) override {
+        Player* p = index == 0 ? player_.get() : player2_.get();
+        if (!p) return;
+        if (name == "whammy_star_power") p->setWhammyStarPowerEnabled(on);
+        else if (name == "mercury_switch") p->setMercurySwitchEnabled(on);
+    }
     const BandPerformer* gameBand() const override { return coopBand_.get(); }
     int gameCounter(int player, const std::string& key) const override;
     void setMusicSpeed(float speed) override { mixer_.setSpeed(std::max(0.0f, speed)); }
@@ -265,6 +271,7 @@ public:
     void menuBackdrop(bool on) override;
     bool drawMenuBackdrop() override;
     bool menuBackdropFramed() override;
+    void aimBackdrop();
     void pauseAllSfx(bool paused) override {
         if (synth_) synth_->setPaused(paused);
     }
@@ -548,6 +555,7 @@ int App::run() {
         std::fprintf(stderr, "%s: %s\n", app::kProgram, dataMessage_.empty() ? "no disc image given" : dataMessage_.c_str());
         running_ = false, exitCode_ = 2;
     } else if (!options_.song.empty()) {
+        loadEnhanced();  // the picture's aspect and the rest, as with the menus
         auto it = std::find_if(songs_.begin(), songs_.end(), [&](const SongInfo& s) { return s.id == options_.song; });
         if (it == songs_.end()) {
             std::fprintf(stderr, "%s: no song '%s' (see the song list without --song)\n", app::kProgram, options_.song.c_str());
@@ -826,6 +834,11 @@ bool App::loadSong(const SongInfo& info, int difficulty, bool autoplay, float ba
         track_->setLefty(input_.lefty(0));
         if (track2_) track2_->reset(extendAtMs_), track2_->setLefty(input_.lefty(1));
         hud_->reset(extendAtMs_);
+        // The players' track surfaces (render/track_view.h setSurface); gameLoad
+        // gives the menus' mode.
+        const char* surfaceMode = mode_ == DevMode::Practice ? "practice" : mode_ == DevMode::Coop ? "multi_coop" : mode_ == DevMode::FaceOff ? "multi_vs" : mode_ == DevMode::ProFaceOff ? "multi_fo" : "quickplay";
+        track_->setSurface(*data_, surfaceMode, bandOutfit_[0], info.id);
+        if (track2_) track2_->setSurface(*data_, surfaceMode, bandOutfit_[1], info.id);
     }
     // The venue: without the menus the song's (its quickplay venue or career
     // tier, GD03_VENUE overrides); with them world_panel loads it (worldLoad).
@@ -1556,6 +1569,8 @@ bool App::gameLoad(const GameSetup& setup, std::string& error) {
     }
     if (track_) track_->setLefty(setup.lefty || setup.leftys[0]);
     if (track2_) track2_->setLefty(setup.leftys[1]);
+    if (track_) track_->setSurface(*data_, setup.mode, setup.outfit[0], setup.song);
+    if (track2_) track2_->setSurface(*data_, setup.mode, setup.outfit[1], setup.song);
     overNs_ = 0;
     return true;
 }
@@ -1582,6 +1597,7 @@ int App::gameCounter(int player, const std::string& key) const {
         if (key == "star_smashes") return tv->starSmashes();
         if (key == "star_glow_lines") return tv->starGlowLines();
         if (key == "star_combos") return tv->comboStarts();
+        if (key == "surface_overrides") return tv->surfaceOverrides();
     }
     return 0;
 }
@@ -2020,6 +2036,13 @@ void App::setEnhancedValue(const std::string& key, const std::string& value) {
 // Puts the Enhanced Options in effect (at start and on every change), as gd01's App::applyEnhanced.
 void App::applyEnhanced() {
     fpsCounter_ = enhancedValue("fps_counter") == "on";
+    // The picture: the PS2's 4:3 pillarboxed, or 16:9 (GD03-016); the
+    // still backdrop is aimed again for the new width.
+    const bool wide = enhancedValue("widescreen") == "on";
+    if (wide != canvas_.renderer().widescreen()) {
+        canvas_.renderer().setWidescreen(wide);
+        if (backdrop_ && backdrop_->framed) aimBackdrop();
+    }
     gfx::RenderDevice& dev = canvas_.renderer().device();
     dev.setInternalHeight(std::clamp(std::atoi(enhancedValue("internal_res").c_str()), 0, 4320));
     if (!SDL_getenv("GD03_FPS")) dev.setFrameCap(std::clamp(std::atoi(enhancedValue("max_fps").c_str()), 30, 1000));
@@ -2196,6 +2219,16 @@ void App::updateBackdrop() {
         // Following the singer while the band poses (then frozen).
         if (scene::Xfm singer; band_ && band_->objectXfm("singer", "bone_head.mesh", singer))
             b.target = b.target + (gfx::Vec3{singer.pos[0], singer.pos[1], singer.pos[2] - 4} - b.target) * (1 - std::exp(-0.033f / 0.3f));
+        aimBackdrop();
+    }
+    venueView_->update();
+}
+
+// The backdrop's camera on its singer, for the picture's aspect (4:3 or 16:9).
+void App::aimBackdrop() {
+    Backdrop& b = *backdrop_;
+    if (!venueView_) return;
+    {
         constexpr float kYaw = -0.3f;                 // the camera this far round to the singer's side (radians)
         constexpr float kFocusX = 0.3f, kFocusY = 0.25f;  // where the singer's face lands, in NDC (right, up)
         constexpr float kFov = 0.6f;
@@ -2203,7 +2236,7 @@ void App::updateBackdrop() {
         gfx::Vec3 eye = b.target + d * b.dist;
         eye.z = b.target.z + b.dist * 0.06f;
         // Look to the left of and below the singer so the face sits at the focus.
-        const float t = std::tan(kFov * 0.5f), aspect = 16.0f / 9.0f;
+        const float t = std::tan(kFov * 0.5f), aspect = canvas_.renderer().widescreen() ? 16.0f / 9.0f : 4.0f / 3.0f;
         const gfx::Vec3 fwd = gfx::normalize(b.target - eye);
         const gfx::Vec3 right = gfx::normalize(gfx::cross(fwd, gfx::Vec3{0, 0, 1}));
         const gfx::Vec3 up = gfx::cross(right, fwd);
@@ -2212,7 +2245,6 @@ void App::updateBackdrop() {
         cam.yFov = kFov;
         venueView_->setCamera(cam);
     }
-    venueView_->update();
 }
 
 // One frame of the song screen without the menus (--song, the debug list):

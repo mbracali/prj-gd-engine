@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cmath>
 #include <exception>
+#include <functional>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -149,9 +150,10 @@ struct Play {
 };
 
 Play play(const Song& song, const Rules& rules, const std::string& script, float untilMs = 0,
-          ControllerMode mode = ControllerMode::Guitar) {
+          ControllerMode mode = ControllerMode::Guitar, const std::function<void(Player&)>& setup = {}) {
     Play r;
-    r.p = std::make_unique<Player>(song, Part::Guitar, Difficulty::Expert, rules, mode, false);
+    r.p = std::make_unique<Player>(song, Part::Guitar, Difficulty::Expert, rules, mode, !Player::mayFail(1, false, 0));
+    if (setup) setup(*r.p);
     KeyScript keys(script);
     if (!keys.valid()) throw std::runtime_error("bad key script: " + script);
     if (untilMs <= 0) untilMs = song.endMs;
@@ -187,9 +189,11 @@ std::unique_ptr<Play2> play2(const Song& song, const Rules& rules, TwoMode mode,
     auto r = std::make_unique<Play2>();
     const bool coop = mode == TwoMode::Coop, faceOff = mode == TwoMode::FaceOff;
     const ScoreConfig* config = coop ? &rules.coop : &rules.solo;
-    r->p[0] = std::make_unique<Player>(song, Part::Guitar, d0, rules, ControllerMode::Guitar, true, faceOff ? 0 : -1, config);
-    r->p[1] = std::make_unique<Player>(song, coop ? Part::Bass : Part::Guitar, d1, rules, ControllerMode::Guitar, true,
-                                       faceOff ? 1 : -1, config);
+    const bool competitive = !coop;  // multi_vs / multi_fo (config/modes.dta)
+    r->p[0] = std::make_unique<Player>(song, Part::Guitar, d0, rules, ControllerMode::Guitar, !Player::mayFail(2, competitive, 0),
+                                       faceOff ? 0 : -1, config);
+    r->p[1] = std::make_unique<Player>(song, coop ? Part::Bass : Part::Guitar, d1, rules, ControllerMode::Guitar,
+                                       !Player::mayFail(2, competitive, 1), faceOff ? 1 : -1, config);
     r->p[1]->setNumber(1);
     normaliseScores(*r->p[0], *r->p[1]);
     if (coop) {
@@ -237,6 +241,10 @@ int runTwoPlayerChecks(const Rules& rules) {
               std::abs(a->meter.value - 0.5f) < 1e-6f && a->count(0, K::StarPowerReady) == 1 && a->count(1, K::StarPowerReady) == 1);
         check("co-op: one player engaging alone does not deploy (0x822C80F8)",
               a->count(0, K::StarPowerStart) == 0 && a->count(1, K::StarPowerStart) == 0);
+        // sp_engage's value (PS2 0x00111940): 1 for the player left waiting (engaged, ready, not active).
+        bool waiting = false;
+        for (const auto& e : a->ev[0]) waiting |= e.kind == K::StarPowerEngage && e.value == 1.0f;
+        check("PS2: co-op's waiting engage reports 1 (mercury on, engaged, ready, not active)", waiting);
         auto b = play2(s, rules, TwoMode::Coop, k0, k1 + ",3500:starpower", 9250);
         auto c = play2(s, rules, TwoMode::Coop, k0, k1 + ",3500:starpower", 9280);
         // Both deployed drain 2 × 0.0833 a measure: 0.5 lasts 3.0 measures = 5762 ms from 3500.
@@ -498,6 +506,10 @@ int runRuleChecks(const Rules& rules) {
         check("Star Power: two phrases (0.25 each) make it ready; a phrase during Star Power is not captured",
               captured == 2 && ready && r.count(K::StarPowerStart) == 1);
         check("Star Power: x2 score while deployed (4 x 50 + 3 x 100 + 50 = 550)", r.p->score() == 550);
+        // The mercury switch off (set_mercuryswitchenabled FALSE, +0xb8): the engage deploys nothing (PS2 0x00111940).
+        Play rm = play(s, rules, keys, 6000, ControllerMode::Guitar, [](Player& p) { p.setMercurySwitchEnabled(false); });
+        check("PS2: with the mercury switch off an engage deploys nothing (0x00111940)",
+              rm.count(K::StarPowerReady) == 1 && rm.count(K::StarPowerStart) == 0);
         // Drain: 0.5 at 0.125 a measure = 4 measures = 7680 ms after 3000.
         Play r2 = play(s, rules, keys, 10670);
         Play r3 = play(s, rules, keys, 10700);
@@ -606,6 +618,38 @@ int runRuleChecks(const Rules& rules) {
         check("PS2 joypad: a press for another gem drops the waiting chord with a miss and is then judged itself (0x0024e050)",
               !r2.p->gemHit(0) && r2.p->gemHit(1) && r2.count(K::Miss, 1) == 1);
     }
+    {
+        // Face-off HOPOs: one list per difficulty and track (0x002448d0 -> 0x0024bba8 -> 0x0024d130), so player 1's red
+        // gem 100 ms after player 0's green one is a HOPO against it.
+        Song s = makeSong({{1000, G}, {1100, R}, {3000, G}}, {}, 170, {}, {}, {{900, 1050, 0}, {1050, 1200, 1}});
+        const auto& g = s.chart(Part::Guitar, Difficulty::Expert).gems;
+        check("PS2 face-off: a player's HOPO test looks at the previous gem of the whole chart, the other player's too (0x0024d3a0)",
+              g.size() == 3 && g[0].players == 1 && g[1].players == 2 && g[1].hopo && !g[2].hopo);
+    }
+    {
+        // Face-off, player 0: a wrong strum on its green gem 0 (pending); a strum near player 1's gem 1 overstrums onto
+        // gem 2 (mark 2) and keeps the pending strum; green then hits gem 0, which lowers the mark to 0 (0x00111254), so
+        // gem 2's pass is penalised again (once only without the lowering).
+        Song s = makeSong({{1000, G}, {1050, R}, {3000, G}}, {}, 170, {}, {}, {{900, 1040, 0}, {1040, 1100, 1}});
+        const std::string k0 = "100:+red,1000:strum,1055:strum,1057:+green";
+        auto a = play2(s, rules, TwoMode::FaceOff, k0, "", 2000);
+        auto b = play2(s, rules, TwoMode::FaceOff, k0, "", 3500);
+        check("PS2: a hit below the highest penalised gem lowers that mark, so a later pass is penalised again (0x00111254)",
+              a->p[0]->gemHit(0) && a->p[0]->penalisedGem() == 0 && a->p[0]->penalties() == 1 && b->p[0]->penalties() == 2 &&
+                  b->p[0]->penalisedGem() == 2);
+    }
+    {
+        // The whammy gate (+0xbc, set_whammystarpowerenabled): the captured phrase's sustain whammied with it off.
+        Song s = makeSong({{1000, G, 1920}, {5000, R}}, {{1000, 1100}});
+        std::string keys = "999:+green,1000:strum,4000:-green";
+        for (int t = 1100, k = 0; t <= 2900; t += 20, ++k) keys += "," + std::to_string(t) + ":whammy=" + (k % 2 ? "0.5" : "0");
+        Play r = play(s, rules, keys, 3500, ControllerMode::Guitar, [](Player& p) { p.setWhammyStarPowerEnabled(false); });
+        check("PS2: with the whammy gate off (+0xbc, 0x00111d88) whammy fills no Star Power",
+              r.count(K::PhraseCaptured) == 1 && r.count(K::WhammyStart) == 0 && std::abs(r.p->starMeter() - 0.25f) < 1e-6f);
+    }
+    check("PS2: only the solo player may fail; co-op and face-off players never (0x0010fc78, 0x001260a8, 0x00112890)",
+          Player::mayFail(1, false, 0) && !Player::mayFail(2, false, 0) && !Player::mayFail(2, false, 1) &&
+              !Player::mayFail(2, true, 0) && !Player::mayFail(2, true, 1));
     return failures;
 }
 

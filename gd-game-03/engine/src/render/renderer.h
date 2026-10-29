@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "render/camera.h"
 #include "render/device.h"
 #include "render/material.h"
 #include "render/post_fx.h"
@@ -15,7 +16,9 @@
 
 // GD03's renderer, built from GH2's own rendering: a render device (OpenGL
 // now, swappable for Vulkan), GH2's standard material shader and material
-// rules, and the 16:9 frame (1280x720 logical, letterboxed in the window).
+// rules, and the frame: 16:9 (1280x720 logical, letterboxed in the window),
+// with the game's picture in it 4:3 pillarboxed (the PS2's own screen, the
+// default) or the whole 16:9 frame (Enhanced Options > Widescreen).
 namespace gfx {
 
 class Renderer {
@@ -32,14 +35,30 @@ public:
     // GH2's post-process of the world (render/post_fx.h).
     PostFx& post() { return *post_; }
 
-    // Starts a frame: black bars around the 16:9 picture, which is cleared
-    // to `clear` (rgba 0..1) with its depth; the picture's viewport is bound.
+    // Starts a frame: black bars around the picture, which is cleared to
+    // `clear` (rgba 0..1) with its depth; the picture's viewport is bound.
     void beginFrame(const float clear[4]);
     // Presents (frame cap, at most two frames in flight).
     void endFrame();
-    // The 16:9 picture in window pixels (origin top-left).
+    // The 16:9 frame in window pixels (origin top-left): what the window
+    // shows of the game, the logical 1280x720 screen.
+    void frameRect(int& x, int& y, int& w, int& h) const;
+    // The game's picture in window pixels (origin top-left): the centred
+    // 4:3 part of the frame, or the whole frame when widescreen (or while
+    // fullFrame is on).
     void pictureRect(int& x, int& y, int& w, int& h) const;
-    // The picture as an RGBA32 surface (screenshots; synchronous).
+    // The picture's width over its height (pictureAspect() in camera.h).
+    float aspect() const { return wide() ? kLogicalW / kLogicalH : 4.0f / 3.0f; }
+    // 16:9 (true) or 4:3 pillarboxed (false, the PS2's picture). Set by
+    // the Enhanced Options; the viewers without the menus keep 16:9.
+    void setWidescreen(bool on);
+    bool widescreen() const { return wide_; }
+    // The port's own screens (Enhanced Options, GAMEPADS) are laid out on
+    // the whole 16:9 frame in either mode: while on, the picture is the
+    // frame and its viewport is bound. Returns what it was. beginFrame
+    // turns it off.
+    bool setFullFrame(bool on);
+    // The frame as an RGBA32 surface, bars included (screenshots; synchronous).
     SDL_Surface* readPixels();
 
     // Compiles every program the renderer can build on this driver; returns
@@ -55,6 +74,9 @@ public:
     static ProgramDesc videoProgramDesc();
 
 private:
+    bool wide() const { return wide_ || fullFrame_; }
+    void publishAspect() const;
+    bool wide_ = true, fullFrame_ = false;
     SDL_Window* window_ = nullptr;
     std::unique_ptr<RenderDevice> device_;
     std::unique_ptr<StandardShaders> shaders_;

@@ -3,6 +3,7 @@
 #include "render/renderer.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 
 #include "render/camera.h"
@@ -108,7 +109,7 @@ void Renderer::shutdown() {
     device_.reset();
 }
 
-void Renderer::pictureRect(int& x, int& y, int& w, int& h) const {
+void Renderer::frameRect(int& x, int& y, int& w, int& h) const {
     int ww = 0, wh = 0;
     device_->drawableSize(ww, wh);
     const float scale = std::min(ww / kLogicalW, wh / kLogicalH);
@@ -118,7 +119,38 @@ void Renderer::pictureRect(int& x, int& y, int& w, int& h) const {
     y = (wh - h) / 2;
 }
 
+void Renderer::pictureRect(int& x, int& y, int& w, int& h) const {
+    frameRect(x, y, w, h);
+    if (wide()) return;
+    // The 4:3 middle of the frame, the bars on either side.
+    const int pw = std::max(1, int(std::lround(float(h) * 4.0f / 3.0f)));
+    x += (w - pw) / 2;
+    w = pw;
+}
+
+void Renderer::publishAspect() const { pictureAspectRef() = aspect(); }
+
+void Renderer::setWidescreen(bool on) {
+    wide_ = on;
+    publishAspect();
+}
+
+bool Renderer::setFullFrame(bool on) {
+    const bool was = fullFrame_;
+    if (on == was) return was;
+    fullFrame_ = on;
+    publishAspect();
+    if (device_) {
+        int x, y, w, h;
+        pictureRect(x, y, w, h);
+        device_->setViewport(x, y, w, h);
+    }
+    return was;
+}
+
 void Renderer::beginFrame(const float clear[4]) {
+    fullFrame_ = false;
+    publishAspect();
     device_->beginFrame();
     const float black[4] = {0, 0, 0, 1};
     device_->clear(black, true);
@@ -132,7 +164,7 @@ void Renderer::endFrame() { device_->endFrame(); }
 
 SDL_Surface* Renderer::readPixels() {
     int x, y, w, h;
-    pictureRect(x, y, w, h);
+    frameRect(x, y, w, h);
     return device_->readPixels(x, y, w, h);
 }
 

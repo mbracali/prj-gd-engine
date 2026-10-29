@@ -11,10 +11,13 @@
 #include "render/renderer.h"
 
 // The app's drawing surface: it owns the renderer (render/renderer.h) and
-// draws 2D on a fixed 1280x720 logical screen (GH2's native 16:9 720p),
-// letterboxed in the window: coloured or textured triangles, rectangles and
-// text in an 8x8 debug font. The debug highway, HUD text and the menus use
-// it; 3D scenes draw through renderer() before the 2D on top.
+// draws 2D on a fixed 1280x720 logical screen (the 16:9 frame, letterboxed
+// in the window): coloured or textured triangles, rectangles and text in an
+// 8x8 debug font. The debug highway, HUD text and the menus use it; 3D
+// scenes draw through renderer() before the 2D on top. The game's picture
+// is the frame's middle 960 units (4:3, the PS2's) or all of it (16:9):
+// drawing outside the picture is cut off, unless the renderer's full frame
+// is on (the port's own screens).
 constexpr float kScreenW = 1280, kScreenH = 720;
 
 struct Vertex {
@@ -50,6 +53,13 @@ public:
 
     // The last frame drawn, before end() presents it; for screenshots.
     SDL_Surface* readPixels();
+
+    // The picture's left edge and width in logical units (0 and 1280 when
+    // widescreen, 160 and 960 when 4:3).
+    float pictureX0() const;
+    float pictureW() const;
+    // Logical units to clip space over the picture's viewport.
+    gfx::Mat4 projection() const;
 
     gfx::Renderer& renderer() { return renderer_; }
     // Draws what is batched so far (call before drawing 3D in between).

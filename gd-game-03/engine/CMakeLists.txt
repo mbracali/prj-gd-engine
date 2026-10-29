@@ -140,6 +140,7 @@ target_sources(gd03 PRIVATE
   src/tests/chartest_band.cpp
   src/tests/chartest_crowd.cpp
   src/tests/miditest.cpp
+  src/video/ipu.cpp
   src/video/movie_player.cpp
   src/video/mpeg2.cpp
   src/video/pss.cpp

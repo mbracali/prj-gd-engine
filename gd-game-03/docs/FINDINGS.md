@@ -49,6 +49,44 @@ Checked against SLUS_215.86 where the GH2 (360) port differed; each is a
   the window expires in the poll [C 0x0024e050, 0x0024e2d0, 0x0024e450].
 - No eight_x on the PS2 [C: 0x0010f910 / 0x0010fa98, no string].
   recharge_rate is read (0x0011e1e0) but 0.0 in scoring.dta.
-- Not changed: a hit on a gem below the highest penalised one lowers that
-  mark (+0xac = gem when gem < +0xac, 0x00111254) [C]; the engine does not
-  do this yet.
+- A hit on a gem below the highest penalised one lowers that mark (+0xac =
+  gem when gem < +0xac, 0x00111254) [C], so a later gem already penalised by
+  an overstrum is penalised again when it passes.
+- Face-off HOPOs: the gem lists are per difficulty and track, not per player.
+  A new track adds a list to every difficulty [C 0x002447a8]; the parser
+  sends each gem with its difficulty index [C 0x00245f28, 0x00246668]; the
+  sink takes that difficulty's lists, then the gem's track (gem +0)
+  [C 0x002448d0, 0x0024bba8]; every gem is appended whatever its player
+  bits, and the HOPO test never reads them [C 0x0024d130, 0x0024d3a0]. So a
+  face-off player's HOPO looks at the previous gem of the whole chart, the
+  other player's gems included (the engine already did this).
+- Who may fail: the crowd update fails a performer only when the game is not
+  "num_players > 1 and competitive" [C 0x0010fc78, 0x001260a8, 0x00126098]
+  and its vtable +0xa4 allows it [C 0x0010fe30]. Player and co-op player
+  (vtables 0x003e1918 / 0x003e28c8): `competitive ? number == 0 :
+  num_players == 1` [C 0x00112890, the same as 360 0x822C6B98]; the co-op
+  band is a plain Performer (0x001103c8 -> 0x0010ee90, vtable 0x003e17c0),
+  whose +0xa4 is TRUE [C 0x0010f310]. So the solo player and the co-op band
+  can fail; co-op players and both face-off players never can (the engine's
+  callers already pass no-fail for them; `Player::mayFail`). The crowd must
+  also be active (+0x44 [C], which looks like crowd_rating_active, FALSE in
+  practice and the tutorials [I]).
+- The whammy gate +0xbc: 1 from the player constructor [C 0x001107d8]; only
+  the script method set_whammystarpowerenabled changes it
+  [C 0x001131a0 -> 0x00111cd8], and only tutorial_22_star_combos calls it
+  (FALSE). With it off the whammy poll leaves the Star Power whammy flag
+  alone [C 0x00111d88]. Its neighbour +0xb8 (set_mercuryswitchenabled,
+  0x00111ce0, the tutorials 22-24) gates deploying in engage [C 0x00111940].
+  The engine's player has the +0xbc gate; the script call is not routed to
+  it yet (ui/natives_game.cpp), and +0xb8 is not modelled.
+
+## Tutorial switches and the engage message
+- `set_whammystarpowerenabled` (+0xbc) and `set_mercuryswitchenabled` (+0xb8),
+  both 1 at construction (0x001107d8), set through 0x001131a0 -> 0x00111cd8 /
+  0x00111ce0 [C]; tutorials 22-24 turn them off. With the mercury switch off an
+  engage stores the engaged flag but deploys nothing (0x00111940) [C].
+- `sp_engage`'s value is "mercury on, engaged, not active and ready", computed
+  after any deploy (0x00111940) [C]: co-op's first engage reports 1 while the
+  partner is awaited; a deploy reports 0.
+- Still open: practice turns the crowd (rock meter) off on the PS2 (modes.dta);
+  the port gives every non-solo mode no-fail but keeps the meter drawn.

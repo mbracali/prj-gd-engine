@@ -23,12 +23,17 @@
 namespace ui {
 
 const std::vector<EnhancedSetting>& enhancedSettings() {
+    // Every one starts at the original game's look (GD03-019): windowed, the
+    // PS2's 60 frames a second, no counter, the window's own resolution and
+    // the PS2's 4:3 picture (GD03-016). The mouse is a control, not a look:
+    // it starts on, as in every gd-game (guidelines/universal_launcher.md).
     static const std::vector<EnhancedSetting> k = {
         {"screen_mode", {"windowed", "fullscreen", "borderless"}},
         {"max_fps", {"60", "120", "240"}},
         {"fps_counter", {"off", "on"}},
         {"mouse", {"on", "off"}},
         {"internal_res", {"0", "448", "480", "720", "800", "900", "1080", "1440", "2160"}},
+        {"widescreen", {"off", "on"}},
     };
     return k;
 }
@@ -47,6 +52,7 @@ struct Item {
     bool ready;        // false: not in gd03 yet (greyed, cannot be chosen)
     const char* help;
     std::vector<Option> options = {};
+    const char* needs = nullptr;  // shown only while this setting is on (gd01's dependent rows)
 };
 
 // gd01's list, in its sections and order; what gd03 has is ready. The
@@ -92,39 +98,54 @@ const std::vector<Item>& items() {
          "the window's own size it also smooths the edges. The Xbox 360 drew 1280 x 720 (x360), the PS2 640 x 448 (ps2).",
          {{"0", "Window"}, {"448", "448p (ps2)"}, {"480", "480p"}, {"720", "720p (x360)"}, {"800", "800p"},
           {"900", "900p"}, {"1080", "1080p"}, {"1440", "1440p"}, {"2160", "4K (2160p)"}}},
+        {Kind::Check, "widescreen", "Widescreen (16:9)", true,
+         "Off (as on the PS2): the game's picture is 4:3, with black bars at the sides of a wide screen. On: the menus, "
+         "the highway and the venues fill a 16:9 screen and show more of the scene at the sides; nothing is stretched. "
+         "The port's own screens, such as this one, always use the whole screen."},
         {Kind::Check, "sharp_ui", "Sharper Text and Sprites", false,
          "Upscales the menu art and the game's fonts with a sharper filter, so text stays crisp on large screens."},
         {Kind::Choice, "antialiasing", "Anti-Aliasing", false, "Smooths jagged edges: FXAA, SSAA or TAA.",
-         {{"none", "None"}}},
+         {{"none", "None"}, {"fxaa", "FXAA"}, {"ssaa", "SSAA"}, {"taa", "TAA"}}},
         {Kind::Choice, "ai_upscaling", "AI Upscaling", false,
-         "Draws the 3D scene below your screen's resolution and upscales it (FSR 1, FSR 3.1, DLSS 4).", {{"none", "None"}}},
-        {Kind::Choice, "bokeh", "Bokeh Effect", false, "The depth-of-field blur of the close shots.", {{"regular", "Regular"}}},
+         "Draws the 3D scene below your screen's resolution and upscales it (FSR 1, FSR 3.1, DLSS 4).",
+         {{"none", "None"}, {"fsr1", "FSR 1 (Spatial)"}, {"fsr31", "FSR 3.1"}, {"dlss4", "DLSS 4"}}},
+        {Kind::Choice, "ai_upscaling_mode", "Upscaling Quality", false,
+         "How far below the screen's resolution the scene is drawn: Quality (1.5x), Balanced (1.7x) or Performance (2x).",
+         {{"quality", "Quality"}, {"balanced", "Balanced"}, {"performance", "Performance"}}, "ai_upscaling"},
+        {Kind::Choice, "bokeh", "Bokeh Effect", false,
+         "The depth-of-field blur of the close shots. Regular: as the original game. None: always sharp. Stronger: a "
+         "wider blur.",
+         {{"regular", "Regular"}, {"none", "None"}, {"stronger", "Stronger"}}},
         {Kind::Check, "particles", "Enable Particles FX", false, "Sparks, smoke, dust and the highway's hit effects."},
         {Kind::Choice, "bloom", "Bloom", false, "A soft glow around the brightest lights of the venue, like a camera lens.",
-         {{"regular", "Regular"}}},
+         {{"off", "Off"}, {"low", "Low"}, {"medium", "Medium"}, {"high", "High"}}},
         {Kind::Check, "cinematic_color", "Cinematic Color", false,
          "A filmic colour curve with a gentle grade and vignette on the venue."},
         {Kind::Choice, "color_grade", "Color Grading", false, "A colour look for the venue, like a film's grade.",
-         {{"off", "Off"}}},
+         {{"off", "Off"}, {"warm", "Warm"}, {"cold", "Cold"}, {"vintage", "Vintage"}, {"noir", "Noir"}, {"neon", "Neon"}}},
         {Kind::Choice, "film_grain", "Film Grain", false, "Fine animated grain over the venue, like a concert shot on film.",
-         {{"off", "Off"}}},
+         {{"off", "Off"}, {"light", "Light"}, {"strong", "Strong"}}},
         {Kind::Check, "chromatic", "Chromatic Aberration", false, "A camera lens's colour fringes towards the corners."},
         {Kind::Check, "light_streaks", "Anamorphic Light Streaks", false,
          "The brightest stage lights flare into long horizontal streaks, like a cinema lens."},
         {Kind::Check, "ssao", "Ambient Occlusion", false, "Soft contact shadows where surfaces meet, for more depth."},
-        {Kind::Choice, "sharpening", "Sharpening", false, "Contrast-adaptive sharpening of the venue.", {{"off", "Off"}}},
+        {Kind::Choice, "sharpening", "Sharpening", false, "Contrast-adaptive sharpening of the venue.",
+         {{"off", "Off"}, {"low", "Low"}, {"high", "High"}}},
         {Kind::Choice, "star_blur", "Blur on Star Power", false,
-         "While Star Power is on, the venue and the band blur with the camera's motion.", {{"none", "None"}}},
+         "While Star Power is on, the venue and the band blur with the camera's motion.",
+         {{"none", "None"}, {"light", "Light"}, {"medium", "Medium"}, {"high", "High"}}},
         {Kind::Separator, "", "", true, ""},
         {Kind::Section, "enhancers", "ENHANCERS", true, "Additions to the venues and the camera, and your files."},
         {Kind::Check, "shadows_all", "All Band Mates Cast Shadows", false,
          "Every band mate gets a spotlight from above and casts a shadow on the stage floor."},
         {Kind::Choice, "more_lights", "More Lights on Venues", false,
          "Richer stage lighting: brighter light cones and floor pools, following the venue's own light cues.",
-         {{"off", "Off"}}},
-        {Kind::Check, "light_dust", "Dust in Light Beams", false, "Fine dust drifting in the stage lights' beams."},
+         {{"off", "Off"}, {"subtle", "Subtle"}, {"strong", "Strong"}}},
+        {Kind::Check, "light_dust", "Dust in Light Beams", false, "With More Lights on Venues: fine dust drifting in the beams.",
+         {}, "more_lights"},
         {Kind::Choice, "ground_fog", "Add Fog to the Ground (Experimental)", false,
-         "A low fog over the stage floor where the band plays.", {{"none", "None"}}},
+         "A low fog over the stage floor where the band plays.",
+         {{"none", "None"}, {"low", "Low"}, {"full", "Full"}, {"super", "Super Fog"}}},
         {Kind::Check, "no_shaky_cam", "Disable Shaky Camera", false, "Steady close-ups of the band."},
         {Kind::Button, "export", "Export User Files", false, "Saves your settings and your bands to a folder of your choice."},
         {Kind::Button, "load_settings", "Load User Settings", false, "Loads settings saved with Export User Files."},
@@ -136,7 +157,7 @@ const std::vector<Item>& items() {
         {Kind::Check, "autoplay", "Autoplay", false, "The game plays every note of a song by itself, without a miss."},
         {Kind::Choice, "hopo_mode", "Forgiving Hammer-ons and Pull-offs", false,
          "Notes with a coloured top can be played without strumming, more forgivingly than the original.",
-         {{"original", "Original"}}},
+         {{"original", "Original"}, {"forgiving", "Forgiving"}}},
         {Kind::Cheat, "cheat_unlock_all", "", true,
          "The original cheat: every song, venue, character and guitar is open. Saving and the career are off while it "
          "is on. Code at the main menu: Blue, Yellow, Orange, Red, Yellow, Orange, Blue, Yellow, Blue, Yellow, Blue, "
@@ -269,8 +290,11 @@ public:
     void draw() override {
         if (ui.headless()) return;
         d_.updateTransition();
-        // The still venue behind (App::menuBackdrop), else a black page.
+        // The still venue behind (App::menuBackdrop), else a black page. It
+        // is the game's picture, 4:3 or 16:9 as the Widescreen row says, so
+        // the change shows at once; the page itself is on the whole frame.
         const bool still = ui.host().drawMenuBackdrop();
+        const PortDraw::FullFrame frame(ui);
         for (int pass : {0, 1}) {
             d_.begin(pass);
             if (pass == 0) {
@@ -304,6 +328,7 @@ private:
             if (it.kind == Kind::Section) hidden = collapsed(it.key);
             if (it.kind == Kind::Separator) hidden = false;
             if (it.kind != Kind::Section && it.kind != Kind::Separator && hidden) continue;
+            if (it.needs && !settingOn(it.needs)) continue;
             rows_.push_back(int(i));
         }
         focus_ = 0;
@@ -346,6 +371,11 @@ private:
     }
 
     // -- values
+    // A setting another row depends on is on: a check on, a choice not none / off.
+    bool settingOn(const char* key) const {
+        const std::string v = ui.host().enhancedValue(key);
+        return !v.empty() && v != "off" && v != "none";
+    }
     std::string name(const Item& it) const { return it.kind == Kind::Cheat ? ui.localize(it.key) : it.name; }
     bool isOn(const Item& it) const {
         if (it.kind == Kind::Cheat) return ui.cheatOn(it.key);
@@ -362,6 +392,7 @@ private:
     void setValue(const Item& it, const std::string& v) {
         if (!it.ready) return ui.playSfx("button_error");
         ui.host().setEnhancedValue(it.key, v);
+        rebuild();  // a dependent row may show or hide
         ui.playSfx("button_select");
     }
     void activate() {
@@ -376,6 +407,7 @@ private:
         case Kind::Check:
             if (!it.ready) return ui.playSfx("button_error");
             ui.host().setEnhancedValue(it.key, isOn(it) ? "off" : "on");
+            rebuild();  // a dependent row may show or hide
             ui.playSfx("button_select");
             return;
         case Kind::Cheat:
@@ -446,7 +478,7 @@ private:
         const Kind shown = isToggle(it) ? Kind::Check : it.kind == Kind::Cheat ? Kind::Check : it.kind;
         switch (shown) {
         case Kind::Check:
-            d_.checkBox(kCtrlX1 + o, cy, isToggle(it) ? optionIndex(it) == 1 : isOn(it), ctrl, locked ? kDim : kGold);
+            d_.checkBox(kCtrlX1 + o, cy, isToggle(it) ? optionIndex(it) == 1 : isOn(it), ctrl, locked ? kDim : PortDraw::kOn);  // "on" is green (gd01)
             break;
         case Kind::Choice: {
             const float x1 = kCtrlX1 + o, x0 = kDdX0 + o;

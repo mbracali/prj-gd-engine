@@ -2,6 +2,7 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "render/canvas.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstring>
 
@@ -108,12 +109,33 @@ void Canvas::flush() {
     c.state.dst = batchBlend_ == Blend::Add ? gfx::BlendFactor::One : gfx::BlendFactor::InvSrcAlpha;
     c.textures[0] = gfx::TextureId{batchTexture_ ? batchTexture_ : atlas_.id};
     c.samplers[0] = {batchTexture_ ? gfx::Filter::Linear : gfx::Filter::Nearest, gfx::Wrap::Clamp, 0};
-    const gfx::Mat4 proj = gfx::Mat4::ortho2D(0, kScreenW, 0, kScreenH);
+    const gfx::Mat4 proj = projection();
     c.uniforms[0] = {proj.m, sizeof proj.m};
     d.draw(c);
 
     bufferUsed_ += bytes;
     batch_.clear();
+}
+
+float Canvas::pictureW() const {
+    int fx, fy, fw, fh, px, py, pw, ph;
+    renderer_.frameRect(fx, fy, fw, fh);
+    renderer_.pictureRect(px, py, pw, ph);
+    return kScreenW * float(pw) / float(std::max(1, fw));
+}
+
+float Canvas::pictureX0() const {
+    int fx, fy, fw, fh, px, py, pw, ph;
+    renderer_.frameRect(fx, fy, fw, fh);
+    renderer_.pictureRect(px, py, pw, ph);
+    return kScreenW * float(px - fx) / float(std::max(1, fw));
+}
+
+gfx::Mat4 Canvas::projection() const {
+    // The viewport is the picture: its logical span, not 0..1280, so the
+    // frame's units land where they would in the whole frame.
+    const float x0 = pictureX0();
+    return gfx::Mat4::ortho2D(x0, x0 + pictureW(), 0, kScreenH);
 }
 
 void Canvas::draw(const Vertex* v, size_t count, int texture, Blend blend) {

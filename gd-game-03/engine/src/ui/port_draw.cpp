@@ -17,6 +17,16 @@ constexpr float kLineToCap = 1.45f;
 
 }  // namespace
 
+PortDraw::FullFrame::FullFrame(UiManager& ui) : ui_(ui) {
+    ui_.canvas().flush();
+    was_ = ui_.canvas().renderer().setFullFrame(true);
+}
+
+PortDraw::FullFrame::~FullFrame() {
+    ui_.canvas().flush();
+    ui_.canvas().renderer().setFullFrame(was_);
+}
+
 void PortDraw::updateTransition() {
     int phase = 0;
     float t = 1;

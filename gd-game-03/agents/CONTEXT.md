@@ -58,3 +58,12 @@ Inherited from gd02 (gd-game-02/docs/audio_and_charts.md): the song clock is
 the mixer's (audio frames played), the track clock follows it; the sfx log and
 screenshot timestamps are wall clock. Re-checked per milestone; offsets go in
 `docs/audio_and_charts.md`.
+
+## Test scripts and the emulator
+- `tools/run_tests.sh "$ISO" quickplay lose pause attract back career career_song career_full coop faceoff proface enhanced cheats mouse gamepads stickyaxis`:
+  every headless test and walk, one result line each (logs in
+  engine/build/test-logs/). With `GD03_AUDIT=<file.md>` the walks run as
+  `--audittest` and accumulate one report (docs/audit.md is such a report;
+  never commit its .names file).
+- PCSX2 2.8.2: `~/.local/opt/pcsx2/pcsx2.AppImage -datapath ~/.local/opt/pcsx2/data -batch -nogui -fastboot -- "$ISO"`.
+  Needs the owner's PS2 BIOS in `~/.local/opt/pcsx2/data/bios/` (OPEN_QUESTIONS Q5).

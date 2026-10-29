@@ -21,8 +21,10 @@
 #include "game/light_presets.h"
 #include "game/world.h"
 #include "tests/director_golden.h"
+#include "video/ipu.h"
 #include "script/script.h"
 #include "scene/milo.h"
+#include "scene/ui_styles.h"
 #include "scene/synth_objects.h"
 #include "scene/world_objects.h"
 
@@ -298,6 +300,90 @@ int scriptRun(Venue& v, std::string& summary) {
     return problems;
 }
 
+// Objects that could show an IPU movie: a Movie (RndMovie), a VideoScreen
+// (its default / blend movies) or a Tex made from a .ipu file.
+int movieObjects(const Venue& v) {
+    int n = 0;
+    v.forEach([&](Object& o) {
+        if (o.cls == "Movie" || o.cls == "TexMovie" || o.cls == "VideoScreen") ++n;
+        else if (auto* t = o.as<Tex>(); t && t->file.size() > 4 && t->file.compare(t->file.size() - 4, 4, ".ipu") == 0) ++n;
+    });
+    return n;
+}
+
+// The venue type list (song_movie fest_1) names in fest.dta, recursively.
+const ::DataNode* findKey(const ::DataNode& n, const std::string& key) {
+    if (!n.isList()) return nullptr;
+    if (n.children.size() >= 2 && n.children[0].isText() && n.children[0].s == key) return &n;
+    for (const auto& c : n.children)
+        if (const ::DataNode* r = findKey(c, key)) return r;
+    return nullptr;
+}
+
+// fest_1.ipu (docs/venues.md "fest_1.ipu"): fest.dta's (song_movie fest_1)
+// names it, but SLUS_215.86 never reads song_movie and no scene has a Movie,
+// so the original never shows it [C]. Checks that it stays that way (no
+// object of the venues could draw it: drawn 0), that every frame decodes
+// and the pictures change, the decode against tools/ipu.py's hash, and the
+// PS2 Movie's forward-only SetFrame on a 30 fps song clock.
+int ipuRun(const GameData& data, int venueMovieObjects, std::string& report) {
+    int problems = 0;
+    std::string name;
+    try {
+        const ::DataNode fest = scene::loadPlainDta(data, "world/fest/fest.dta");
+        if (const ::DataNode* k = findKey(fest, "song_movie")) name = k->children[1].s;
+    } catch (const std::exception& e) {
+        report = std::string("fest.dta: ") + e.what();
+        return 1;
+    }
+    if (name != "fest_1") ++problems;
+    const std::string path = "world/shared/" + name + ".ipu";
+    if (!data.exists(path)) {
+        report = "song_movie '" + name + "': no " + path;
+        return problems + 1;
+    }
+    try {
+        IpuMovie movie(data.read(path));
+        std::vector<uint8_t> rgba;
+        uint64_t all = ipuHash(nullptr, 0), prev = 0;
+        int same = 0;
+        for (int i = 0; i < movie.frameCount(); ++i) {
+            movie.decodeRgba(i, rgba);
+            all = ipuHash(rgba.data(), rgba.size(), all);
+            const uint64_t h = ipuHash(rgba.data(), rgba.size());
+            if (i && h == prev) ++same;
+            prev = h;
+        }
+        // tools/ipu.py extracted/ark/world/shared/fest_1.ipu: "all frames rgba fnv".
+        constexpr uint64_t kGolden = 0xa98f1be53bddb31dull;
+        const bool golden = all == kGolden;
+        // GH1's Movies are driven by the song in ms through a 0.03 ScaleOffset
+        // filter (30 fps, gd-game-01 docs/video.md 4.3) [I for this disc: no
+        // Movie exists]; 3.2 s at 60 Hz, looping.
+        IpuPlayer player(movie, true);
+        const int steps = 192;
+        for (int k = 0; k <= steps; ++k) player.setFrame(float(k * 1000.0 / 60.0 * 0.03));
+        const int expectFrame = int(steps * 1000.0 / 60.0 * 0.03) % movie.frameCount();
+        const bool advanced = player.current() == expectFrame && player.decodes() >= 90 && player.rewinds() == 3;  // the first call (current = n) and two wraps
+        char buf[320];
+        std::snprintf(buf, sizeof buf,
+                      "%s %dx%d, %d frames decoded (flags 0x%02x, %zu..%zu bytes), %d unchanged, fnv %016llx%s; "
+                      "player %llu decodes, %llu rewinds, at %d%s; venue movie objects %d, drawn 0",
+                      path.c_str(), movie.width(), movie.height(), movie.frameCount(), movie.frameFlags(0), movie.frameBytes(0),
+                      movie.frameBytes(movie.frameCount() - 1), same, static_cast<unsigned long long>(all),
+                      golden ? "" : " (NOT the tools/ipu.py hash)", static_cast<unsigned long long>(player.decodes()),
+                      static_cast<unsigned long long>(player.rewinds()), player.current(), advanced ? "" : " (WRONG)",
+                      venueMovieObjects);
+        report = buf;
+        problems += (movie.frameCount() != 45) + (movie.width() != 256) + (movie.height() != 256) + same + !golden + !advanced +
+                    venueMovieObjects;
+    } catch (const std::exception& e) {
+        report = path + ": " + e.what();
+        ++problems;
+    }
+    return problems;
+}
+
 }  // namespace
 
 int runVenueTest(const std::string& dataPath) {
@@ -310,6 +396,7 @@ int runVenueTest(const std::string& dataPath) {
     }
     int failures = 0;
     std::set<std::string> loaded;
+    int venueMovieObjects = 0;
     const VenueVariant variants[] = {VenueVariant::Single, VenueVariant::Mp, VenueVariant::Coop};
     for (const std::string& name : venues::names()) {
         for (VenueVariant var : variants) {
@@ -324,6 +411,7 @@ int runVenueTest(const std::string& dataPath) {
             }
             const double ms = double(SDL_GetTicksNS() - t0) / 1e6;
             VariantResult r = checkVariant(*v, loaded);
+            venueMovieObjects += movieObjects(*v);
             std::string raw;
             int rawUnexpected = 0;
             for (const auto& [cls, n] : r.raw) {
@@ -378,6 +466,11 @@ int runVenueTest(const std::string& dataPath) {
             ++unexpectedUnused;
         }
     failures += unexpectedUnused;
+    // The fest venue's song_movie (video/ipu.h).
+    std::string ipuReport;
+    const int ipuProblems = ipuRun(*data, venueMovieObjects, ipuReport);
+    std::printf("ipu movie: %s\n", ipuReport.c_str());
+    failures += ipuProblems;
     // The director's and presets' golden log (tests/director_golden.h).
     failures += runDirectorGolden(*data);
     failures += runCameraRateCheck(*data);

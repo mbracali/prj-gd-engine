@@ -6,16 +6,25 @@
 
 // A camera as GH2's Cam objects describe it: a world transform (Rnd axes:
 // the camera looks down its +y, with +z up and +x right), a vertical field
-// of view, near and far planes. The frame is 16:9 (GH2 renders 1280x720).
+// of view, near and far planes. The logical frame is 16:9 (1280x720); the
+// picture in it is 4:3 or 16:9 (Renderer::setWidescreen).
 namespace gfx {
 
 constexpr float kLogicalW = 1280, kLogicalH = 720;
+
+// The picture's aspect, as the renderer last set it (16:9 until it does):
+// the cameras made from now on take it.
+inline float& pictureAspectRef() {
+    static float aspect = kLogicalW / kLogicalH;
+    return aspect;
+}
+inline float pictureAspect() { return pictureAspectRef(); }
 
 struct Camera {
     Mat4 world;
     float yFov = 0.8f;  // radians
     float nearPlane = 1, farPlane = 10000;
-    float aspect = kLogicalW / kLogicalH;
+    float aspect = pictureAspect();
 
     Vec3 position() const { return world.translationPart(); }
     Mat4 view() const { return world.inverseAffine(); }

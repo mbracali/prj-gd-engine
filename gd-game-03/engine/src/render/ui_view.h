@@ -237,6 +237,7 @@ private:
     std::vector<MaskDraw> masks_;
     std::vector<Hit> hits_;
     Mat4 viewProj_;  // the frame's camera, for the hits
+    float hitAspect_ = 16.0f / 9.0f;  // its picture's aspect (the hits' half width: 360 x this)
     void addLayoutHit(const std::string& key, const TextLayout& layout, const Mat4& world);
     int textsDrawn_ = 0, meshesDrawn_ = 0;
     std::vector<std::string> problems_;

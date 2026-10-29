@@ -30,9 +30,18 @@ SLUS_215.86 (render/track_view.cpp; addresses there) [C unless marked]:
   smashers per slot (0x0015fd50); combo2_angle one-player only (0x0015caa0).
 - Two players: track scaled 0.76, track.cam's rect the player's half
   (0x00154b90); explode with track_explode.cam, mirrored for P2.
-- Missing: per-character surface override
-  (track/surfaces/%s_keep.bmp), the song-start gem sparkle and the Star Power
-  gem_bonus_spark bursts.
+- Surface texture (load 0x001536e0, post-load 0x00153888, surface
+  0x00155078): per player track/surfaces/<s>_keep.bmp on copies of
+  track_surface.tex / .mat; <s> = gamecfg track_surface_override (modes.dta:
+  '' by default, rosewood in practice and the tutorial), else the player
+  config's character (+0x3c, the outfit name: alterna1, goth2...).
+  `TrackView::setSurface`, counted by `surfaceOverrides()` (walk key
+  surface_overrides, quickplay step track_surface). A name without a
+  bitmap on the disc keeps the scene's texture [I].
+- gem_sparkle and gem_bonus_spark1/2: the gem template (0x00159e28) copies
+  their meshes, materials and anims but nothing outside its constructor and
+  destructor (0x0015b590) uses the copies; the originals sit in
+  gem_hide.grp. The PS2 never draws them, so the port does not either.
 
 HUD: hud/hud_sp|vs|coop|practice.milo as GH2 (render/hud_view.cpp);
 BandStarMeterDir revision 4 has five names (docs/formats.md).

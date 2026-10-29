@@ -20,3 +20,12 @@ from an emulator (PCSX2) wanted to verify them?
 ## Q4. Mono
 The audio settings' mono folds left and right at half each after the mix
 (the console's exact fold is not traced).
+
+## Q5. PS2 BIOS for the PCSX2 reference captures (GD03-018) - BLOCKING that row only
+No PS2 BIOS is on this machine (searched the whole home and system disks for
+scph*/bios images). PCSX2 2.8.2 is installed outside the repo at
+`~/.local/opt/pcsx2/pcsx2.AppImage` (data folder `~/.local/opt/pcsx2/data`).
+Please put your own BIOS dump (e.g. SCPH-39001 / 70012, .bin) into
+`~/.local/opt/pcsx2/data/bios/`; then the captures run with
+`~/.local/opt/pcsx2/pcsx2.AppImage -datapath ~/.local/opt/pcsx2/data -batch -nogui -fastboot -- "<ISO>"`
+(see agents/CONTEXT.md). Until then the goldens stay the port's baselines (D5).

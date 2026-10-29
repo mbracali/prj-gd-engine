@@ -42,6 +42,7 @@ public:
         if (pos_ > bits_ + 64) throw std::runtime_error("MPEG-2 bitstream overrun");
     }
     bool atEnd() const { return pos_ >= bits_; }
+    size_t pos() const { return pos_; }
 
 private:
     const uint8_t* data_;
@@ -528,6 +529,69 @@ struct Mpeg2Decoder::Impl {
 
     // ---- headers ----
 
+    void setSize(int w, int h) {
+        if (w == width && h == height) return;
+        width = w;
+        height = h;
+        mbWidth = (w + 15) / 16;
+        mbHeight = (h + 15) / 16;
+        for (Mpeg2Frame& f : frames) {
+            f.width = w;
+            f.height = h;
+            f.lumaStride = mbWidth * 16;
+            f.chromaStride = mbWidth * 8;
+            f.y.assign(size_t(mbWidth) * 16 * mbHeight * 16, 16);
+            f.cb.assign(size_t(mbWidth) * 8 * mbHeight * 8, 128);
+            f.cr.assign(size_t(mbWidth) * 8 * mbHeight * 8, 128);
+        }
+        fwdRef = bwdRef = -1;
+        bwdPending = false;
+    }
+
+    // ---- PS2 IPU IDEC pictures (decodeIdec in mpeg2.h) ----
+
+    const Mpeg2Frame& decodeIdec(const uint8_t* data, size_t size, int w, int h, unsigned ctrl, size_t& usedBits) {
+        if (w <= 0 || h <= 0) throw std::runtime_error("IPU picture with empty size");
+        if (ctrl & 0x80) throw std::runtime_error("IPU picture with MPEG-1 coefficients (MP1) is not supported");
+        setSize(w, h);
+        // The IPU's quantiser matrices: sceIpuInit loads the default intra
+        // matrix and flat non-intra (gd-game-01 docs/video.md 4.2) [C].
+        std::memcpy(intraQ, kDefaultIntra, 64);
+        std::memset(nonIntraQ, 16, 64);
+        // IPU_CTRL picture fields from the flags byte: IDP bits 0-1, DTD bit 2
+        // (sent in the IDEC command), AS bit 4, IVF bit 5, QST bit 6.
+        codingType = 1;
+        dcPrecision = static_cast<int>(ctrl & 3);
+        framePredFrameDct = !(ctrl & 4);
+        altScan = (ctrl & 0x10) != 0;
+        intraVlc = (ctrl & 0x20) != 0;
+        qScaleType = (ctrl & 0x40) != 0;
+        concealment = false;
+        cur = 0;
+        Mpeg2Frame& f = frames[cur];
+        f.type = 'I';
+        f.progressive = true;
+        f.index = 0;
+        unit.assign(data, data + size);
+        unit.resize(unit.size() + kPadding, 0);
+        BitReader br(unit.data(), size);
+        // IDEC: QSC=1 in the command, DC predictors reset once, then every
+        // macroblock in raster order with no slice headers; each one after
+        // the first starts with its address increment.
+        const Tables& t = tables();
+        qscale = qscaleFromCode(1);
+        resetDc();
+        const int count = mbWidth * mbHeight;
+        for (int addr = 0; addr < count; ++addr) {
+            if (addr && t.mba.decode(br) != 1) throw std::runtime_error("IPU picture skips macroblocks");
+            macroblock(br, addr % mbWidth, addr / mbWidth);
+            br.check();
+        }
+        if (br.pos() > size * 8) throw std::runtime_error("IPU picture runs past its data");
+        usedBits = br.pos();
+        return f;
+    }
+
     void parseSequenceHeader(BitReader& br) {
         int w = static_cast<int>(br.read(12)), h = static_cast<int>(br.read(12));
         br.skip(4);  // aspect_ratio_information
@@ -538,23 +602,7 @@ struct Mpeg2Decoder::Impl {
         if (br.bit()) for (int i = 0; i < 64; ++i) nonIntraQ[kScan[0][i]] = static_cast<uint8_t>(br.read(8));
         else std::memset(nonIntraQ, 16, 64);
         if (w <= 0 || h <= 0) throw std::runtime_error("MPEG-2 sequence header with empty picture size");
-        if (w != width || h != height) {
-            width = w;
-            height = h;
-            mbWidth = (w + 15) / 16;
-            mbHeight = (h + 15) / 16;
-            for (Mpeg2Frame& f : frames) {
-                f.width = w;
-                f.height = h;
-                f.lumaStride = mbWidth * 16;
-                f.chromaStride = mbWidth * 8;
-                f.y.assign(size_t(mbWidth) * 16 * mbHeight * 16, 16);
-                f.cb.assign(size_t(mbWidth) * 8 * mbHeight * 8, 128);
-                f.cr.assign(size_t(mbWidth) * 8 * mbHeight * 8, 128);
-            }
-            fwdRef = bwdRef = -1;
-            bwdPending = false;
-        }
+        setSize(w, h);
         haveSequence = true;
         haveExtension = false;
     }
@@ -970,6 +1018,10 @@ int Mpeg2Decoder::height() const { return impl_->height; }
 double Mpeg2Decoder::frameRate() const { return kFrameRates[impl_->frameRateCode & 15]; }
 uint64_t Mpeg2Decoder::sliceErrors() const { return impl_->sliceErrors; }
 uint64_t Mpeg2Decoder::dualPrimeMacroblocks() const { return impl_->dualPrime; }
+const Mpeg2Frame& Mpeg2Decoder::decodeIdec(const uint8_t* data, size_t size, int width, int height, unsigned flags,
+                                           size_t& usedBits) {
+    return impl_->decodeIdec(data, size, width, height, flags, usedBits);
+}
 
 void mpeg2ToRgba(const Mpeg2Frame& f, uint8_t* dst, size_t dstStride, bool deinterlace) {
     // BT.601 limited range, 16.16 fixed point.

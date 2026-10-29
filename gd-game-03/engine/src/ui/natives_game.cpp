@@ -589,8 +589,14 @@ private:
         if (msg == "win") return r = Value::integer(p && !p->failed() ? 1 : 0), true;
         if (msg == "failed") return r = Value::integer(p && p->failed() ? 1 : 0), true;
         if (msg == "add_sink" || msg == "remove_sink" || msg == "set_crowd_rating" || msg == "set_crowd_rating_active" ||
-            msg == "set_mercuryswitchenabled" || msg == "on_downbeat" || msg == "on_game_over" || msg == "load")
+            msg == "on_downbeat" || msg == "on_game_over" || msg == "load")
             return true;
+        // The tutorials' switches (PS2 0x001131a0 -> 0x00111cd8 / 0x00111ce0) [C].
+        if (msg == "set_whammystarpowerenabled" || msg == "set_mercuryswitchenabled") {
+            ui_.host().setPlayerSwitch(index, msg == "set_whammystarpowerenabled" ? "whammy_star_power" : "mercury_switch",
+                                       !args.empty() && args[0].truthy());
+            return true;
+        }
         (void)args;
         return false;
     }
