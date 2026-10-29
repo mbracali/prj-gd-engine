@@ -154,6 +154,11 @@ public:
     void resetStats() { drawn_ = 0; }
     // Draws into the post-process's HDR buffer (DrawContext::hdr).
     void setHdr(bool on) { hdr_ = on; }
+    // Every particle system drawn or none (Enhanced Options > Enable
+    // Particles FX; they still run, so turning them on again shows them as
+    // they are).
+    static void setEnabled(bool on) { enabled_ = on; }
+    static bool enabled() { return enabled_; }
 
 private:
     DynamicMesh mesh_;
@@ -161,6 +166,7 @@ private:
     std::vector<uint16_t> indices_;
     int drawn_ = 0;
     bool hdr_ = false;
+    static bool enabled_;
 };
 
 // The particle systems of a view (a Group and its sub-groups) with the

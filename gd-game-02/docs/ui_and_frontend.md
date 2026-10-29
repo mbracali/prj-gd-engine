@@ -294,18 +294,54 @@ walktests' career.json check.
   yet, the explanation box bottom right, the mouse, and the page sliding with
   the transition (`ui/port_draw.*`;
   `guidelines/universal_launcher.md` at the repository root). The names keep "AND",
-  since helveticablack has no `&`. Working: Gamepads (opens the GAMEPADS
-  screen), Enable Mouse Selection, Screen Mode (dropdown: windowed / full
-  screen / no border), In-Game Max FPS (dropdown: 60 / 120 / 240), Show FPS
-  Counter (check box), and Internal Resolution (dropdown: the window's own,
-  448p (ps2), 480p, 720p (x360), 800p ... 4K). The PS2's GH2 drew 640 ×
-  448 (gd01's docs); the 360's draws 1280 × 720 (0x823032C8 sets the back
-  buffer 720 tall, 1280 or 960 wide [C]). Every other entry is greyed, "NOT
-  AVAILABLE YET", and cannot be chosen. Values are saved in
-  `enhanced.json` (format `gd02-enhanced`) next to `career.json` and applied
-  at once (`App::applyEnhanced`); Internal Resolution draws every frame
-  into an off-screen target of that height and scales it to the window as
-  it is presented (`RenderDevice::setInternalHeight`).
+  since helveticablack has no `&`. Every gd01 Enhanced Setting that fits
+  GH2 works (GDALL-015; the parity table is in
+  `guidelines/universal_launcher.md` "Enhanced options: parity"), with
+  gd01's explanations, `needs` rows (Upscaling Quality with AI Upscaling,
+  Dust with More Lights), dropdown options gd02 lacks shown "(not available
+  yet)" (FSR 3.1, DLSS: gd01's Vulkan upscaler), the status line under the
+  title and gd01's calibration overlay. Values are saved in `enhanced.json`
+  (format `gd02-enhanced`, every value a string) next to `career.json` and
+  applied at once (`App::applyEnhanced`, `App::applyEnhancedLook`):
+  - **Defaults** (`ui::enhancedProfile`, gd01's `profileValues`): one table
+    with the desktop, Steam Deck (`-DGD02_STEAM_DECK=ON`, or a launcher on a
+    Deck: `GD02_HANDHELD=1`) and Android columns; Apply Steam Deck Settings
+    writes the Deck column once.
+  - **Controls**: Touch (`Input::setTouch`; always on on Android; the
+    track's lanes on the screen for the fingers, `TrackView::lanes` ->
+    `Input::setTouchLanes`; the on-screen buttons, `App::drawTouchButtons`),
+    Rock Band guitars (`Input::setRockBand`), XInput gamepads that play
+    (`Input::setGamepadPlay`).
+  - **Audio / Video Calibration** (gd01's): `audio_offset` is subtracted
+    from the watcher's input offset (with GH2's own sync offset),
+    `video_offset` draws the track that much ahead.
+  - **Picture**: Internal Resolution draws every frame into an off-screen
+    target of that height (`RenderDevice::setInternalHeight`); Sharper Text
+    and Sprites decodes and upscales the menus' textures made after it is
+    on (`render/image_enhance.*`, `SceneCache::setEnhance`); Particles FX
+    (`ParticleRenderer::setEnabled`); Bokeh (None skips GH2's depth of
+    field, Stronger focuses nearer and blurs wider, `PostFx::end`); the
+    port's post chain after GH2's own (`render/enhanced_fx.*`: bloom,
+    cinematic colour, grading, grain, chromatic aberration, light streaks,
+    ambient occlusion, sharpening, Blur on Star Power, ground fog and Super
+    Fog, FXAA / SSAA / TAA (the camera jittered, `Camera::jitterX`), FSR 1);
+    Remove All Effects (gd02's own row, GDALL-002) turns all of them off,
+    GH2's bloom, depth of field, noise and colour transform too, and the
+    camera shake.
+  - **Enhancers**: band shadows, More Lights' pools, beams and fill, Dust
+    (`render/enhanced_lights.*`, drawn after the venue's list; the shadow is
+    a soft blob until GH2's shadow pass exists, GD02-050), Disable Shaky
+    Camera (`CameraDirector::setShake`: the shake still runs, unseen).
+  - **User files**: Export (a folder: `GD02-user-settings.json`,
+    `GD02-user-progress.json`), Load User Settings (each value checked),
+    Load User Progress (`Career::fromJson`, then written); SDL's dialogs, or
+    `GD02_DIALOG=<path>` (a folder answers the loads with its files).
+  - **Cheats**: No Fail Mode and Autoplay (as `--no-fail` / `--autoplay`),
+    Forgiving Hammer-ons and Pull-offs (`Player::setForgivingHopos`: no
+    lock after a wrong hammer-on, a HOPO whose fret is held plays itself
+    [I: the port's]); Enable Cut Content stays greyed (gd01 has none).
+  The PS2's GH2 drew 640 × 448 (gd01's docs); the 360's draws 1280 × 720
+  (0x823032C8 sets the back buffer 720 tall, 1280 or 960 wide [C]).
 - The still backdrop (`App::menuBackdrop`, gd01's posed band): the second
   venue (small1) loads when the screen enters. Its band runs 45 fixed 33 ms
   steps (1.5 s), from a quarter into the first song of its tier, silent, under
@@ -392,13 +428,18 @@ next to it to start.
   is whitelisted. quickplay also skips the splashes with a button, pause
   resumes with Start once, back goes main → Options → Audio Settings →
   back → back and checks the main menu's camera and scene are where they
-  were. enhanced goes main → Options → Enhanced Options, changes Internal
-  Resolution and checks it and `enhanced.json`, then back → back; cheats
+  were. enhanced goes main → Options → Enhanced Options and changes every
+  option with the pad (calibration with timed presses, Export / Load with
+  `GD02_DIALOG`), checking each one's value, `enhanced.json` and what is in
+  effect (`UiHost::enhancedState`: the post chain's passes, particles,
+  shake, input, the venue extras' counts), then back → back; cheats
   enters Air Guitar and Hyper Speed's codes at the main menu (on), then Air
-  Guitar's again after a pause (off); quickplay and career check the fresh
+  Guitar's again after a pause (off), then sets GH2's cheats from Enhanced
+  Options > CHEATS; quickplay and career check the fresh
   `career.json` has The Glitches.
   mouse goes main → Options → Enhanced Options with the mouse alone
-  (hover, clicks, a dropdown option, right click, the help bar's BACK);
+  (hover, clicks, a dropdown option, Apply Steam Deck Settings, right
+  click, the help bar's BACK);
   gamepads opens GAMEPADS with the keyboard's yellow fret, rebinds the
   keyboard's Whammy to E (saved in `controllers.json`), goes back, then
   clicks the help bar's GAMEPADS; stickyaxis plugs in a virtual adapter

@@ -4,6 +4,24 @@ All notable changes for players. Versions follow SemVer; release tags are
 `gd-game-02/vX.Y.Z`. The release workflow publishes the section whose heading
 matches the tag's version. Nothing is released yet.
 
+## [Unreleased]
+
+### Added
+- Enhanced Options now has every Guitar Hero (gd-game-01) Enhanced Setting
+  that fits Guitar Hero II: Apply Steam Deck Settings, touch controls (lanes
+  on the highway and on-screen buttons), Rock Band guitars, XInput
+  gamepads, Audio / Video Calibration, Sharper Text and Sprites,
+  anti-aliasing (FXAA, SSAA, TAA), FSR 1 upscaling, Bokeh, particles,
+  bloom, Cinematic Color, Color Grading, film grain, chromatic aberration,
+  light streaks, ambient occlusion, sharpening, Blur on Star Power, band
+  shadows, More Lights on Venues, dust in the light beams, ground fog (Low,
+  Full, Super Fog), Disable Shaky Camera, Export / Load User Files, and the
+  No Fail, Autoplay and Forgiving Hammer-ons cheats.
+- Remove All Effects: one switch that turns every effect off, the original
+  game's own glow, depth of field and filters too.
+- Each download starts with its system's settings (desktop, Steam Deck,
+  Android), the same table as Guitar Hero's.
+
 ## [0.1.6] - 2026-10-28
 
 ### Fixed

@@ -4,6 +4,7 @@
 
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "script/script.h"
@@ -24,13 +25,27 @@ class UiManager;
 // DTA (ui/port_screens.cpp) as {new EnhancedPanel ...}.
 std::unique_ptr<ScriptObject> makeEnhancedPanel(UiManager& ui, const std::string& name);
 
-// The settings the panel lists that gd02 puts in effect, with their values
-// (the first one the default): screen_mode, max_fps, fps_counter (off / on),
-// internal_res (0: the window's own, else a height in lines).
+// The settings the panel lists (enhanced.json, gd01's keys), with their
+// values: a choice's, "off" / "on" for a check box, or none for a number
+// (ms) from `lo` to `hi` (the calibration's offsets). The first value is the
+// setting's base default (gd01's enhancedDefaults); the build's profile
+// (enhancedDefault) wins over it.
 struct EnhancedSetting {
     const char* key;
     std::vector<const char*> values;
+    int lo = 0, hi = 0;
 };
 const std::vector<EnhancedSetting>& enhancedSettings();
+const EnhancedSetting* enhancedSetting(const std::string& key);
+// Whether `value` is one the setting takes.
+bool enhancedValid(const EnhancedSetting& s, const std::string& value);
+
+// The graphics, enhancer and control defaults each download ships with, in
+// one table (gd01's profileValues, gd-game-01/README.md "Default
+// settings"): desktop Linux, Windows and macOS; the Steam Deck build (and
+// Apply Steam Deck Settings: `deck`); Android. Only the profile's keys.
+std::vector<std::pair<std::string, std::string>> enhancedProfile(bool deck);
+// A setting's default in this build: the profile's, else the base default.
+std::string enhancedDefault(const std::string& key, bool deck);
 
 }  // namespace ui

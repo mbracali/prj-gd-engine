@@ -54,6 +54,39 @@ id = `gd-game-02`
 - Mods support
 
 
+**Default settings**: each download starts with Enhanced Options tuned
+for its system, the same table as gd-game-01's (change them in Options >
+Enhanced Options; your changes are kept). "Apply Steam Deck Settings" sets
+the Steam Deck column on any PC; "Remove All Effects" turns every effect
+off.
+
+| Setting | Linux | Steam Deck | Windows | macOS | Android |
+|---|---|---|---|---|---|
+| Screen Mode | Windowed | Full Screen | Windowed | Windowed | Full Screen |
+| In-Game Max FPS | 120 | 60 | 120 | 120 | 60 |
+| Show FPS Counter | on | off | on | on | off |
+| Internal Resolution | 1080p | 800p | 1440p | 1440p | 900p |
+| Sharper Text and Sprites | on | on | on | on | off |
+| Anti-Aliasing / AI Upscaling | None | None | None | None | None |
+| Bokeh Effect | Stronger | Stronger | Stronger | Stronger | Stronger |
+| Particles FX | on | on | on | on | on |
+| Bloom | High | Medium | High | High | Medium |
+| Cinematic Color | on | on | on | on | on |
+| Color Grading | Off | Off | Off | Off | Off |
+| Film Grain | Light | Off | Light | Light | Off |
+| Chromatic Aberration | on | on | on | on | on |
+| Anamorphic Light Streaks | off | off | off | off | off |
+| Ambient Occlusion | on | off | on | on | off |
+| Sharpening | Low | Off | Low | Low | Low |
+| Blur on Star Power | High | Medium | High | High | Light |
+| All Band Mates Cast Shadows | on | off | on | on | off |
+| More Lights on Venues | Subtle | Subtle | Subtle | Subtle | Subtle |
+| Dust in Light Beams | on | off | on | on | off |
+| Add Fog to the Ground | Low | None | Low | Low | None |
+| Disable Shaky Camera | off | off | off | off | off |
+| Touch Controls | off | off | off | off | on |
+
+
 **Running** (`engine/README.md` has the details, it ships in every download):
 - You need your own Guitar Hero II (Xbox 360) disc image (`.iso`). No game data is included.
 - Start `gd02` and click the window (or press Enter, or tap on Android) to pick the `.iso`, or drop it onto the window. It is remembered (`config.txt` in the save folder `gd-engine/gd02/`); an `.iso` next to the program is found by itself.
