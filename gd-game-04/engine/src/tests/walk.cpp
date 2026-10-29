@@ -27,7 +27,7 @@ Walk::Walk(const std::string& name) : name_(name) {
     // difficulty -> setlist -> song -> results [C: flow_path.md].
     std::vector<Step> boot = {
         {"bootup_press_any_button_fs", {C}, 30000},
-        {"bootup_using_guitar_controller_fs", {C}, 60000},
+        {"bootup_using_guitar_controller_fs", {C}, 60000, true},  // only without a save [C data: flow_path.md]
         {"main_menu_fs", {}, 60000},
     };
     if (name == "quickplay" || name == "lose") {
@@ -93,6 +93,12 @@ std::vector<Action> Walk::update(FrontEnd& fe, bool songPlaying, double now) {
         if (s.state == "song") reached = songPlaying;
         else if (s.state == "song_over") reached = !songPlaying && songsEnded > 0;
         else reached = flowState(fe) == s.state;
+        if (!reached && s.optional && step_ + 1 < steps_.size() && flowState(fe) == steps_[step_ + 1].state) {
+            log_.push_back("(" + s.state + " skipped)");
+            ++step_;
+            stepStart_ = now;
+            return out;
+        }
         if (reached) {
             reachedAt_ = now;
             lastKey_ = now;

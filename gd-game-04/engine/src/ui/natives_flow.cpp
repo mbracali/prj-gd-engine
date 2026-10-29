@@ -7,8 +7,10 @@
 
 #include <algorithm>
 #include <string>
+#include <unordered_map>
 
 #include "data/qbkey.h"
+#include "game/save.h"
 #include "script/globals.h"
 #include "script/vm.h"
 
@@ -75,8 +77,30 @@ void addFlowNatives(qs::Vm& vm, FlowState& st) {
     vm.addNative("NewShowStorageSelector", yes);
     vm.addNative("StorageSelectorFinished", yes);
     vm.addNative("MC_WaitAsyncOpsFinished", yes);
-    for (const char* n : {"MC_EnumerateFolders", "MC_SetActiveFolder", "MC_LoadTOCInActiveFolder", "MC_CreateFolder", "SaveToMemoryCard",
-                          "LoadFromMemoryCard", "MC_DeleteFolder"})
+    // SaveToMemoryCard / LoadFromMemoryCard: the global tags as save.json
+    // in the save folder (game/save.h); result = 1 on success [I: result use from the memcard scripts].
+    vm.addNative("SaveToMemoryCard", [&st](Vm& v, ScriptRun& run, qb::Struct&) {
+        std::string err;
+        const bool ok = save::write(v.globalTags, err);
+        if (!ok) SDL_Log("save: %s", err.c_str());
+        else st.saveExists = true, ++st.saves;
+        if (qb::Struct* l = locals(run)) Vm::set(*l, K("result"), Vm::makeInt(ok ? 1 : 0));
+        return ok;
+    });
+    vm.addNative("LoadFromMemoryCard", [&st](Vm& v, ScriptRun& run, qb::Struct&) {
+        std::string err;
+        std::unordered_map<uint32_t, qb::Struct> tags;
+        const bool ok = save::read(tags, err);
+        if (ok) {
+            for (auto& [k, t] : tags) v.globalTags[k] = std::move(t);
+            ++st.loads;
+        } else {
+            SDL_Log("save: %s", err.c_str());
+        }
+        if (qb::Struct* l = locals(run)) Vm::set(*l, K("result"), Vm::makeInt(ok ? 1 : 0));
+        return ok;
+    });
+    for (const char* n : {"MC_EnumerateFolders", "MC_SetActiveFolder", "MC_LoadTOCInActiveFolder", "MC_CreateFolder", "MC_DeleteFolder"})
         vm.addNative(n, [](Vm&, ScriptRun& run, qb::Struct&) {
             if (qb::Struct* l = locals(run)) Vm::set(*l, K("result"), Vm::makeInt(1));
             return true;

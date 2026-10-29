@@ -10,6 +10,7 @@
 #include "render/canvas.h"
 #include "script/globals.h"
 #include "script/natives_core.h"
+#include "game/save.h"
 #include "ui/natives_game.h"
 #include "ui/natives_sound.h"
 
@@ -24,6 +25,7 @@ FrontEnd::FrontEnd(const Disc& disc, Globals& globals, TextureCache& textures, g
     ui_ = std::make_unique<ui::UiSystem>(*vm_, disc_, textures, device);
     ui_->addNatives();
     addGameNatives(*this, disc_, textures);
+    flow.saveExists = save::exists();
     addFlowNatives(*vm_, flow);
     std::string err;
     if (!sfx.open(err)) SDL_Log("sfx: %s", err.c_str());

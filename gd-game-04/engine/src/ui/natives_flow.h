@@ -22,7 +22,7 @@ struct FlowState {
         qb::Struct params;
     };
     std::vector<Handler> handlers;
-    uint64_t broadcasts = 0;
+    uint64_t broadcasts = 0, saves = 0, loads = 0;
     uint32_t lastBroadcast = 0;
     std::function<void(uint32_t)> onBroadcast;
 };

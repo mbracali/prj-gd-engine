@@ -33,6 +33,7 @@ private:
         std::string state;          // flow state to wait for ("song" / "song_over": the song)
         std::vector<Action> keys;   // pressed one per 300 ms once reached
         double timeoutMs = 60000;
+        bool optional = false;      // skipped when the next step's state comes first
     };
     std::string name_;
     std::vector<Step> steps_;
