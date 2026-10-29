@@ -187,7 +187,8 @@ bool UiSystem::launch(Element* target, uint32_t event, const qb::Struct& data) {
             qb::Struct params = h.params;
             for (const qb::Item& it : data.items) qs::Vm::set(params, it.name, it.value);
             ++stats_.handlersRun;
-            vm_.spawn(h.script, params, 0);
+            // Handlers run at once, inside LaunchEvent (the flow manager relies on it) [I, flow_path.md].
+            vm_.run(h.script, params);
             return true;
         }
         // Menus move their focus between their children [I until docs/ui.md].

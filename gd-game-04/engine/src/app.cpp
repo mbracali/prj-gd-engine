@@ -236,7 +236,28 @@ int App::run() {
         while (SDL_PollEvent(&e)) handleEvent(e);
         if (keys_) {
             for (const MenuKeys::Key& k : keys_->due(double(frameStart - startNs_) / 1e6)) {
-                (void)k;  // the menus come with M3; the keys are parsed (and validated) already
+                // GD04_KEYS: a scripted button as the input layer would report it.
+                Action a;
+                switch (k.button) {
+                case 6: a = Action::Confirm; break;
+                case 4: a = Action::Back; break;
+                case 5: a = Action::Fret2; break;
+                case 7: a = Action::Fret3; break;
+                case 2: a = Action::Fret4; break;
+                case 11: a = Action::Start; break;
+                case 8: a = Action::StarPower; break;
+                case 12: a = Action::Up; break;
+                case 13: a = Action::Right; break;
+                case 14: a = Action::Down; break;
+                case 15: a = Action::Left; break;
+                default: continue;
+                }
+                for (int edge : {1, -1}) {
+                    if ((k.edge == 1 && edge == -1) || (k.edge == -1 && edge == 1)) continue;
+                    InputEvent ev{a, edge == 1, SDL_GetTicksNS(), ControllerMode::Guitar, k.player};
+                    if (song_) song_->handle(ev);
+                    else if (front_) front_->handle(ev);
+                }
             }
         }
         if (!disc_)

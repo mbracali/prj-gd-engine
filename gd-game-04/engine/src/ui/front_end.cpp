@@ -23,6 +23,7 @@ FrontEnd::FrontEnd(const Disc& disc, Globals& globals, TextureCache& textures, g
     ui_ = std::make_unique<ui::UiSystem>(*vm_, disc_, textures, device);
     ui_->addNatives();
     addGameNatives(*this, disc_, textures);
+    addFlowNatives(*vm_, flow);
 }
 
 FrontEnd::~FrontEnd() {

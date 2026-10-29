@@ -7,6 +7,7 @@
 
 #include "input/input.h"
 #include "script/vm.h"
+#include "ui/natives_flow.h"
 #include "ui/ui_system.h"
 
 class Canvas;
@@ -33,6 +34,7 @@ public:
         int makes = 0;
         int device = 0;
     } pad;
+    FlowState flow;
 
 private:
     const Disc& disc_;
