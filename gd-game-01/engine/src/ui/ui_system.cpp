@@ -416,6 +416,7 @@ public:
     // Layout per FUN_00149d88 / the HBElement draws (docs/boot_profiles_memcard.md §4).
     void drawHelpbar();
     std::vector<std::pair<std::string, std::string>> helpItems();
+    void addAccessButtons(std::vector<std::pair<std::string, std::string>>& out);
     std::vector<std::pair<std::string, Panel::Hit>> helpElems_;  // mouse: each help bar element's rectangle
     Panel::Hit helpHit_;
     bool hasOverride_ = false;
@@ -1368,7 +1369,34 @@ std::vector<std::pair<std::string, std::string>> UiSystem::PanelObj::helpItems()
         auto strumAt = std::find_if(out.begin(), out.end(), [](const auto& e) { return e.first == "strum"; });
         out.insert(strumAt, {{"fret4", "GAMEPADS"}, {"fret5", "MODS"}});
     }
+    addAccessButtons(out);
     return out;
+}
+
+// [I] Port: the Universal Access Buttons (universal_mechanisms.md 1.1.3).
+// Where the screen's own help bar leaves one out, the pills a mouse or touch
+// user needs are added in the original's style and order (fret1, fret2,
+// Start, then the strum bar): CONFIRM (green) when something can be chosen,
+// BACK (red) when the screen goes back, UP / DOWN when the focus panel has a
+// list to move through, START on a text entry (it accepts the name). A
+// screen whose help bar is empty (progress messages) stays empty.
+void UiSystem::PanelObj::addAccessButtons(std::vector<std::pair<std::string, std::string>>& out) {
+    if (out.empty() || !ui_.current_) return;
+    auto has = [&](const char* e) { return std::any_of(out.begin(), out.end(), [&](const auto& i) { return i.first == e; }); };
+    auto strumAt = [&] { return std::find_if(out.begin(), out.end(), [](const auto& e) { return e.first == "strum"; }); };
+    PanelObj* fp = ui_.focusPanel();
+    ComponentObj* focus = fp ? fp->component(fp->focus_) : nullptr;
+    const bool entry = focus && focus->kind() == UiObj::Kind::TextEntry;
+    const bool navigable = fp && (fp->native_ || fp->vertical_.size() + fp->horizontal_.size() > 1 || entry ||
+                                  (focus && focus->kind() == UiObj::Kind::List));
+    if (!has("fret1") && fp && (fp->native_ || !fp->vertical_.empty() || !fp->horizontal_.empty() || entry))
+        out.insert(out.begin(), {"fret1", "help_select"});
+    if (!has("fret2") && ui_.current_->flag("allow_back", true) && ui_.current_->back_) {
+        auto at = std::find_if(out.begin(), out.end(), [](const auto& e) { return e.first != "fret1"; });
+        out.insert(at, {"fret2", "help_back"});
+    }
+    if (!has("start") && entry) out.insert(strumAt(), {"start", "gd_uab_start"});
+    if (!has("strum") && navigable) out.push_back({"strum", "help_updown"});
 }
 
 void UiSystem::PanelObj::drawHelpbar() {
@@ -1408,7 +1436,9 @@ void UiSystem::PanelObj::drawHelpbar() {
     // strum bar's fixed spot: there the strum bar follows the row, every gap
     // twice text_spacing.
     const auto items = helpItems();
-    const bool flowStrum = std::any_of(items.begin(), items.end(), [](const auto& i) { return i.first == "fret3" || i.first == "fret4"; });
+    const bool flowStrum = std::any_of(items.begin(), items.end(), [](const auto& i) { return i.first == "fret3" || i.first == "fret4"; }) ||
+                           (std::any_of(items.begin(), items.end(), [](const auto& i) { return i.second == "gd_uab_start"; }) &&
+                            std::count_if(items.begin(), items.end(), [](const auto& i) { return i.first != "strum"; }) >= 3);
     const float gap = flowStrum ? textSpacing * 2 : textSpacing;
     int k = 0;
     // Button / strum element (ButtonHBElement_v5): box, then the icon.
@@ -1686,12 +1716,12 @@ bool UiSystem::ComponentObj::button(int b) {
         // splash.dta's help text: strum cycles the letter, fret1 takes it and
         // moves on, fret2 deletes, START accepts (TEXT_ENTRY_MSG).
         if (done_) return false;
-        // The port's: keyboard Enter always finishes the name, like START (on
-        // the keyboard START is Tab, which nobody guesses); fret1 / X still
-        // take the letter.
+        // The port's (universal_mechanisms.md 1.1.2): the keyboard's Start
+        // key (Enter) and keyboard Enter always finish the name, like START;
+        // fret1 (green) / X still take the letter; any up / down changes it.
         if (select) {
             const bool* keys = SDL_GetKeyboardState(nullptr);
-            if (keys && (keys[SDL_SCANCODE_RETURN] || keys[SDL_SCANCODE_KP_ENTER])) b = Start, select = false;
+            if (ui_.startKey_ || (keys && (keys[SDL_SCANCODE_RETURN] || keys[SDL_SCANCODE_KP_ENTER]))) b = Start, select = false;
         }
         const UiObj* u = panel_.scene_ ? panel_.scene_->scene().find(name())->ui.get() : nullptr;
         const UiResources::Style& st = ui_.res_->style("textentry", u ? u->style : "");
@@ -2586,7 +2616,8 @@ void UiSystem::buttonDown(int button, bool guitar, int player) {
     if (button == Up || button == Down || button == Left || button == Right) held_[size_t(player & 1)] = {button, 0, false};
     if (!logos_.empty()) {
         // The original's logos are not skippable; the port skips them all on
-        // select / back (Enter, Esc) or Start.
+        // green, red, select / back (Enter, Esc), Start, a click or a tap
+        // (universal_mechanisms.md 1.1.1).
         if (button == Cross || button == R2 || button == Circle || button == Triangle || button == Start) {
             logos_.clear();
             logoMs_ = 0;
@@ -2628,8 +2659,9 @@ bool UiSystem::mouse(float x, float y, bool click) {
     if (PanelObj* hb = panel("helpbar"); hb && hb->up_)
         for (const auto& [elem, h] : hb->helpElems_)
             if (inside(h, 4)) {
+                // The strum bar's pill: its upper half is Up, its lower half Down (UAB).
                 int b = elem == "fret1" ? select : elem == "fret2" ? (guitar_ ? Circle : Triangle) : elem == "start" ? Start
-                        : elem == "fret3" ? L1 : -1;
+                        : elem == "fret3" ? L1 : elem == "strum" ? (y < (h.y0 + h.y1) * 0.5f ? Up : Down) : -1;
                 if (click && b >= 0) press(b);
                 if (click && elem == "fret4") gotoScreen("gamepads");  // the main menu's GAMEPADS
                 return true;

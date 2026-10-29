@@ -52,6 +52,7 @@ cp -L build/portable/sdl3-prefix/lib/libSDL3.so.0 "$d/"
 cp build/portable/sdl3-prefix/LICENSE.txt "$d/licenses/SDL3-LICENSE.txt"
 cp third_party/fidelityfx/LICENSE.txt "$d/licenses/FidelityFX-SDK-LICENSE.txt"
 cp third_party/volk/LICENSE.md "$d/licenses/volk-LICENSE.md"
+cp third_party/rtmidi/LICENSE "$d/licenses/RtMidi-LICENSE.txt"
 cp third_party/vulkan/LICENSE.md "$d/licenses/Vulkan-Headers-LICENSE.md"
 if ls third_party/dlss/lib/Linux_x86_64/libnvidia-ngx-dlss.so.* >/dev/null 2>&1; then
   cp third_party/dlss/lib/Linux_x86_64/libnvidia-ngx-dlss.so.* "$d/"

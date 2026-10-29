@@ -159,6 +159,7 @@ build_linux() {
     [ -n "$sdl" ] && cp -L "$sdl" "$d/"
     cp "$engine/third_party/fidelityfx/LICENSE.txt" "$d/licenses/FidelityFX-SDK-LICENSE.txt"
     cp "$engine/third_party/volk/LICENSE.md" "$d/licenses/volk-LICENSE.md"
+    cp "$engine/third_party/rtmidi/LICENSE" "$d/licenses/RtMidi-LICENSE.txt"
     cp "$engine/third_party/vulkan/LICENSE.md" "$d/licenses/Vulkan-Headers-LICENSE.md"
     if ls "$engine"/third_party/dlss/lib/Linux_x86_64/libnvidia-ngx-dlss.so.* >/dev/null 2>&1; then
       cp "$engine"/third_party/dlss/lib/Linux_x86_64/libnvidia-ngx-dlss.so.* "$d/"

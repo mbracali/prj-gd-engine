@@ -23,6 +23,8 @@ const char* const kPcStrings[][2] = {
     {"delete_confirm", "Are you sure you want to permanently delete this band?"},
     {"BAND_NAME_EXPLAIN", "This is also your SAVE GAME name."},
     {"HOW_TO_EDIT", "You can edit this name later from Data Settings in the Options menu."},
+    // The Universal Access Buttons' START pill (help bar, universal_mechanisms.md 1.1.3).
+    {"gd_uab_start", "START"},
     // Only when saving fails on PC.
     {"save_error", "SAVE ERROR: Data was not saved successfully. Retry or Continue without saving?"},
     {"mc_nodata_error", "No GD-Engine data found. Do you want to create and try loading again?"},

@@ -442,7 +442,8 @@ void VenueRenderer::draw() {
     EnvironObj filled;
     if (moreLights_ > 0 && env) {
         filled = *env;
-        const float gain = moreLights_ == 2 ? 1.3f : 1.15f, lift = moreLights_ == 2 ? 0.07f : 0.035f;
+        static constexpr float kGain[4] = {1, 1.15f, 1.3f, 1.45f}, kLift[4] = {0, 0.035f, 0.07f, 0.1f};
+        const float gain = kGain[moreLights_], lift = kLift[moreLights_];
         for (int k = 0; k < 3; ++k) filled.ambient[size_t(k)] = std::min(1.0f, env->ambient[size_t(k)] * gain + lift);
         env = &filled;
     }
@@ -459,7 +460,7 @@ void VenueRenderer::draw() {
     }
     if (guitarist2_) guitarist2_->draw(vp, env);
     for (Member& m : band_) m.character->draw(vp, env);
-    const std::vector<LitChar> lit = bandShadows_ || moreLights_ > 0 ? litCharacters() : std::vector<LitChar>{};
+    const std::vector<LitChar> lit = bandShadows_ || moreLights_ > 0 || lightDust_ > 0 ? litCharacters() : std::vector<LitChar>{};
     // [I] All Band Mates Cast Shadows: each silhouette (depth only) before the glows it cuts.
     if (bandShadows_)
         for (const LitChar& l : lit) {
@@ -531,8 +532,9 @@ bool VenueRenderer::floorSpotFor(const std::array<float, 3>& L, const std::array
 }
 
 void VenueRenderer::setMoreLights(int level) {
-    moreLights_ = std::clamp(level, 0, 2);
-    for (Section& s : sections_) s.renderer->setAdditiveGain(moreLights_ == 2 ? 1.45f : moreLights_ == 1 ? 1.2f : 1.0f);
+    moreLights_ = std::clamp(level, 0, 3);
+    static constexpr float kAdd[4] = {1, 1.2f, 1.45f, 1.7f};  // none, 1.5x, 2x, 2.5x
+    for (Section& s : sections_) s.renderer->setAdditiveGain(kAdd[moreLights_]);
 }
 
 // [I] The guitarist under the venue's spotlight; every other band member under
@@ -587,11 +589,12 @@ void VenueRenderer::drawEnhancedLights(const Mat4& vp, const Xfm& cam, const std
             SceneRenderer::MeshOptions opt;
             opt.material = "floorspot_glow.mat";
             opt.useWorld = false;
-            float a = bandShadows_ ? 1.0f : moreLights_ == 2 ? 0.8f : 0.5f;
+            if (!bandShadows_ && moreLights_ == 0) continue;  // dust only: no pools
+            float a = bandShadows_ ? 1.0f : moreLights_ >= 2 ? 0.8f : 0.5f;
             opt.tint[0] = opt.tint[1] = opt.tint[2] = a;
             fxRenderer_->drawMesh("floorspot_char.mesh", vp, Mat4::fromRowXfm(pool.rot, pool.pos), opt);
         }
-    if (moreLights_ == 0 || !renderer_) return;
+    if ((moreLights_ == 0 && lightDust_ == 0) || !renderer_) return;
     std::vector<Vertex> v;
     std::vector<uint32_t> idx;
     auto rgba = [&](float a) {
@@ -611,8 +614,11 @@ void VenueRenderer::drawEnhancedLights(const Mat4& vp, const Xfm& cam, const std
     auto cross = [](const std::array<float, 3>& a, const std::array<float, 3>& b) {
         return std::array<float, 3>{a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]};
     };
-    const float beamA = moreLights_ == 2 ? 0.32f : 0.16f;
-    const int motes = lightDust_ ? (moreLights_ == 2 ? 70 : 35) : 0;
+    // More Lights none / 1.5x / 2x / 2.5x: the beam's strength; Dust none / 1.5x / 2x / 2.5x: the motes per beam.
+    static constexpr float kBeam[4] = {0, 0.16f, 0.32f, 0.42f};
+    static constexpr int kMotes[4] = {0, 35, 50, 70};
+    const float beamA = kBeam[moreLights_];
+    const int motes = kMotes[std::clamp(lightDust_, 0, 3)];
     const std::array<float, 3> camRight{cam.rot[0], cam.rot[1], cam.rot[2]}, camUp{cam.rot[6], cam.rot[7], cam.rot[8]};
     for (size_t li = 0; li < lit.size(); ++li) {
         const LitChar& l = lit[li];
@@ -650,7 +656,7 @@ void VenueRenderer::drawEnhancedLights(const Mat4& vp, const Xfm& cam, const std
             // Motes right in front of the lens would be big blobs: they fade out near the camera.
             std::array<float, 3> toCam = sub(P, cam.pos);
             float dist = std::sqrt(toCam[0] * toCam[0] + toCam[1] * toCam[1] + toCam[2] * toCam[2]);
-            float a = (moreLights_ == 2 ? 0.6f : 0.4f) * twinkle * (1 - u * 0.6f) * std::clamp((dist - 40) / 80, 0.0f, 1.0f);
+            float a = (lightDust_ >= 3 ? 0.6f : lightDust_ == 2 ? 0.5f : 0.4f) * twinkle * (1 - u * 0.6f) * std::clamp((dist - 40) / 80, 0.0f, 1.0f);
             if (a <= 0.01f) continue;
             // A soft diamond: bright centre, transparent tips.
             const float sz = 0.5f;

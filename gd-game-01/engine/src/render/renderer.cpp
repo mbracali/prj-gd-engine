@@ -358,6 +358,11 @@ void Renderer::createFontTexture() {
 // with a 120 cap, 144 Hz with 120) vsync is off and endFrame paces alone.
 // Headless drivers are not paced.
 void Renderer::setFrameCap(int fps) {
+    if (fps <= 0) {  // Enhanced > Max FPS "Unlimited": no vsync, no pacing
+        SDL_GL_SetSwapInterval(0);
+        paceNs_ = 0, nextFrameNs_ = 0;
+        return;
+    }
     fps = std::max(fps, 30);
     int interval = 0;
     if (const SDL_DisplayMode* m = SDL_GetCurrentDisplayMode(SDL_GetDisplayForWindow(window_)); m && m->refresh_rate > 0) {

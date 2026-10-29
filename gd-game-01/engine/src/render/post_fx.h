@@ -40,13 +40,14 @@ struct PostSettings {
     bool cinematic = false; // filmic curve, grade and vignette
     int fog = 0;            // ground fog: 0 none, 1 low, 2 full, 3 super (volumetric, light shafts)
     // Colour grading after the cinematic curve: 0 off, 1 warm, 2 cold, 3 vintage, 4 noir, 5 neon.
+    // 6 sepia (Enhanced > Modes > Good old days only).
     int grade = 0;
-    int grain = 0;          // film grain: 0 off, 1 light, 2 strong
-    bool chromatic = false; // chromatic aberration (lens fringes towards the edges)
-    bool streaks = false;   // anamorphic light streaks from the brightest lights
-    bool ssao = false;      // screen-space ambient occlusion
+    int grain = 0;          // film grain: 0 none, 1 light, 2 medium, 3 strong, 4 stronger
+    int chromatic = 0;      // chromatic aberration (lens fringes towards the edges): 0 none, 1 light, 2 medium, 3 strong
+    int streaks = 0;        // anamorphic light streaks from the brightest lights: 0 none, 1 very light, 2 light, 3 medium
+    int ssao = 0;           // screen-space ambient occlusion: 0 none, 1 light, 2 medium, 3 strong, 4 stronger
     int sharpen = 0;        // contrast-adaptive sharpening: 0 off, 1 low, 2 high
-    int starBlur = 0;       // motion blur during Star Power: 0 none, 1 light, 2 medium, 3 high
+    int starBlur = 0;       // motion blur during Star Power: 0 none, 1 light, 2 medium, 3 strong, 4 stronger
     bool temporalUpscaler() const { return upscaler == Upscaler::Fsr31 || upscaler == Upscaler::Dlss4; }
     // The scene's size relative to the viewport (SSAA does not combine with a temporal upscaler).
     float renderScale() const {

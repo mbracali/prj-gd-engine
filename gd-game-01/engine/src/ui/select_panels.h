@@ -90,6 +90,8 @@ public:
     virtual void setEnhancedValue(const std::string& key, const std::string& v) { (void)key, (void)v; }
     // Enhanced Settings' user files: opens the export / load dialog; the last result to show.
     virtual void userFiles(const std::string& action) { (void)action; }
+    // A click on a port screen's own Back button: as the back button (the screen's auto-back).
+    virtual void pressBack() {}
     // Enhanced Settings' backdrop (the still venue close-up): wanted while the
     // screen is up; drawMenuBackdrop draws it now, false when there is none.
     virtual void menuBackdrop(bool on) { (void)on; }

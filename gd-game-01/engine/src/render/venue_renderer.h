@@ -105,12 +105,13 @@ public:
     // the guitarist's treatment, a spotlight overhead with its floor glow and the
     // flattened depth-only silhouette that cuts the glow.
     void setBandShadows(bool on) { bandShadows_ = on; }
-    // [I] Enhanced Settings > More Lights on Venues: 0 off, 1 subtle, 2 strong.
+    // [I] Enhanced Settings > More Lights on Venues: 0 none, 1 1.5x, 2 2x, 3 2.5x.
     // Brighter light cones and glows, a soft beam and floor pool on each band
     // member in the stage spotlight's colour, a little fill on the band.
     void setMoreLights(int level);
-    // [I] Enhanced Settings > Dust in Light Beams (with More Lights): motes drifting in the beams.
-    void setLightDust(bool on) { lightDust_ = on; }
+    // [I] Enhanced Settings > Dust in Light Beams: motes drifting in the band's beams
+    // (0 none, 1 1.5x, 2 2x, 3 2.5x; with More Lights none only the motes show).
+    void setLightDust(int level) { lightDust_ = level; }
     // The guitarist's hand events for this song and chart (GuitarAnimInfo).
     void setSong(const Song& song, const Chart& chart);
     // game_outro: the guitarist's game-over clip reached its last frame.
@@ -165,7 +166,8 @@ private:
     };
     std::vector<LitChar> litCharacters();
     void drawEnhancedLights(const Mat4& vp, const Xfm& cam, const std::vector<LitChar>& lit);
-    bool bandShadows_ = false, lightDust_ = true;
+    bool bandShadows_ = false;
+    int lightDust_ = 0;
     int moreLights_ = 0;
     std::unique_ptr<Scene> shadowMatScene_;  // charsys_shadow.mat when the guitarist has none
     const MatObj* shadowMat_ = nullptr;

@@ -30,6 +30,7 @@ cp -L "$sdl" "$d/libSDL3.so.0"
 cp /usr/share/doc/libsdl3-0/copyright "$d/licenses/SDL3-LICENSE.txt" 2>/dev/null || true
 cp third_party/fidelityfx/LICENSE.txt "$d/licenses/FidelityFX-SDK-LICENSE.txt"
 cp third_party/volk/LICENSE.md "$d/licenses/volk-LICENSE.md"
+cp third_party/rtmidi/LICENSE "$d/licenses/RtMidi-LICENSE.txt"
 cp third_party/vulkan/LICENSE.md "$d/licenses/Vulkan-Headers-LICENSE.md"
 cat > "$d/STEAM-DECK.txt" <<'TXT'
 gd01 on the Steam Deck

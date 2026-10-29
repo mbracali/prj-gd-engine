@@ -67,7 +67,7 @@ void update(ParticleSysObj& p, float dt, float now, const Xfm& space) {
 
 // FUN_001d0060 (+ FUN_001d0990).
 void emit(ParticleSysObj& p, float dt, float now, const Xfm& spawn) {
-    p.accum += rnd(p, p.emitRate[0], p.emitRate[1]) * dt;
+    p.accum += rnd(p, p.emitRate[0], p.emitRate[1]) * dt * particleRate();
     while (p.accum >= 1) {
         if (int(p.live.size()) >= p.maxParticles) {
             p.accum = 0;
@@ -130,6 +130,11 @@ bool gParticlesEnabled = true;
 }  // namespace
 
 void setParticlesEnabled(bool on) { gParticlesEnabled = on; }
+namespace {
+float gParticleRate = 1;
+}  // namespace
+void setParticleRate(float rate) { gParticleRate = std::max(rate, 0.0f); }
+float particleRate() { return gParticleRate; }
 bool particlesEnabled() { return gParticlesEnabled; }
 
 void particleSetFrame(ParticleSysObj& p, float frame, const Xfm& emitter) {

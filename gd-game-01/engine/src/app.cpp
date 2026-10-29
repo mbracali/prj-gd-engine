@@ -81,36 +81,69 @@ std::string enhancedPath() {
     return prefDir().empty() ? std::string("enhanced.json") : prefDir() + "enhanced.json";
 }
 
-// The graphics, enhancer and control settings each download ships with
+// Enhanced Settings (enhanced.json), laid out as universal_mechanisms.md
+// 1.2.2 at the repository root. Every visual effect defaults to the original
+// look (the "Original feel" mode); only the window, the frame rate, the
+// internal resolution, the FPS counter and touch follow the build
 // (gd-game-01/README.md, "Default settings"): desktop Linux, Windows and
 // macOS; the Steam Deck build (Linux built with -DGD01_STEAM_DECK=ON); Android.
-// Steam Deck is also what Enhanced Settings > Apply Steam Deck Settings sets.
+
+// The Modes buttons (Enhanced > MODES): each sets every value it names at
+// once; anything it leaves out keeps its value. "original" is also the
+// defaults' look.
+std::map<std::string, Json> enhancedPreset(const std::string& mode) {
+    auto b = [](bool v) { return Json::boolean(v); };
+    auto t = [](const char* v) { return Json::string(v); };
+    // Every effect at its lowest, its original and its highest.
+    const std::map<std::string, Json> none = {
+        {"bokeh", t("none")},        {"particles", t("none")},   {"bloom", t("none")},       {"cinematic_color", b(false)},
+        {"film_grain", t("none")},   {"chromatic", t("none")},   {"light_streaks", t("none")}, {"ssao", t("none")},
+        {"star_blur", t("none")},    {"shadows_all", b(false)},  {"more_lights", t("none")}, {"light_dust", t("none")},
+        {"ground_fog", t("none")},   {"color_grade", t("off")},  {"sharpening", t("off")},   {"antialiasing", t("none")},
+        {"ai_upscaling", t("none")}, {"sharp_ui", b(false)}};
+    std::map<std::string, Json> original = none;
+    original["bokeh"] = t("medium");  // the original's own depth of field
+    original["particles"] = t("original");
+    std::map<std::string, Json> max = {
+        {"bokeh", t("stronger")},  {"particles", t("2x")},      {"bloom", t("3x")},          {"cinematic_color", b(true)},
+        {"film_grain", t("stronger")}, {"chromatic", t("strong")}, {"light_streaks", t("medium")}, {"ssao", t("stronger")},
+        {"star_blur", t("stronger")}, {"shadows_all", b(true)}, {"more_lights", t("2.5x")},  {"light_dust", t("2.5x")},
+        {"ground_fog", t("2.5x")}, {"color_grade", t("off")},   {"sharpening", t("low")},    {"antialiasing", t("taa")},
+        {"ai_upscaling", t("none")}, {"sharp_ui", b(true)}};
+    auto with = [](std::map<std::string, Json> m, std::map<std::string, Json> over) {
+        for (auto& [k, v] : over) m[k] = v;
+        return m;
+    };
+    if (mode == "steam_deck")  // light effects that hold 60 FPS on a handheld
+        return with(original, {{"screen_mode", t("fullscreen")}, {"max_fps", t("60")}, {"internal_res", t("800")},
+                               {"bloom", t("original")}, {"cinematic_color", b(true)}, {"star_blur", t("light")},
+                               {"antialiasing", t("fxaa")}, {"sharp_ui", b(true)}, {"fps_counter", b(false)}});
+    if (mode == "original") return with(original, {{"max_fps", t("60")}});
+    if (mode == "clean")  // no effects, a sharp full HD picture
+        return with(none, {{"internal_res", t("1080")}, {"max_fps", t("120")}, {"particles", t("original")},
+                           {"antialiasing", t("fxaa")}, {"sharp_ui", b(true)}});
+    if (mode == "max_hd") return with(max, {{"internal_res", t("1080")}, {"max_fps", t("240")}});
+    if (mode == "max_4k") return with(max, {{"internal_res", t("2160")}, {"max_fps", t("240")}});
+    if (mode == "budget") return with(none, {{"max_fps", t("60")}, {"internal_res", t("720")}});
+    if (mode == "good_old_days")  // every effect, in sepia, at the PS2's resolution
+        return with(max, {{"color_grade", t("sepia")}, {"internal_res", t("448")}, {"max_fps", t("60")}, {"antialiasing", t("none")}});
+    return {};
+}
+
+// The window, frame rate, resolution and touch of each build; Steam Deck is
+// also what the Steam Deck mode sets.
 std::map<std::string, Json> profileValues(bool deck) {
     auto b = [](bool v) { return Json::boolean(v); };
     auto t = [](const char* v) { return Json::string(v); };
-    std::map<std::string, Json> d = {
-        // Every build.
-        {"antialiasing", t("none")}, {"ai_upscaling", t("none")}, {"bokeh", t("stronger")}, {"particles", b(true)},
-        {"cinematic_color", b(true)}, {"color_grade", t("off")}, {"chromatic", b(true)}, {"light_streaks", b(false)},
-        {"more_lights", t("subtle")}, {"no_shaky_cam", b(false)},
-        // Desktop: Linux, Windows, macOS.
-        {"screen_mode", t("windowed")}, {"max_fps", t("120")}, {"fps_counter", b(true)}, {"internal_res", t("1080")},
-        {"sharp_ui", b(true)}, {"bloom", t("high")}, {"film_grain", t("light")}, {"ssao", b(true)},
-        {"sharpening", t("low")}, {"star_blur", t("high")}, {"shadows_all", b(true)}, {"light_dust", b(true)},
-        {"ground_fog", t("low")}, {"touch", b(false)},
-    };
-    auto handheld = [&] {
-        for (auto& [k, v] : std::map<std::string, Json>{
-                 {"screen_mode", t("fullscreen")}, {"max_fps", t("60")}, {"fps_counter", b(false)}, {"bloom", t("medium")},
-                 {"film_grain", t("off")}, {"ssao", b(false)}, {"shadows_all", b(false)}, {"light_dust", b(false)},
-                 {"ground_fog", t("none")}})
-            d[k] = v;
-    };
+    std::map<std::string, Json> d = enhancedPreset("original");
+    // Desktop: Linux, Windows, macOS.
+    for (auto& [k, v] : std::map<std::string, Json>{{"screen_mode", t("windowed")}, {"max_fps", t("120")}, {"fps_counter", b(false)},
+                                                    {"internal_res", t("1080")}, {"touch", b(false)}})
+        d[k] = v;
 #if defined(__ANDROID__)
     (void)deck;
-    handheld();
-    for (auto& [k, v] : std::map<std::string, Json>{{"internal_res", t("900")}, {"sharp_ui", b(false)},
-                                                     {"sharpening", t("low")}, {"star_blur", t("light")}, {"touch", b(true)}})
+    for (auto& [k, v] : std::map<std::string, Json>{{"screen_mode", t("fullscreen")}, {"max_fps", t("60")}, {"internal_res", t("900")},
+                                                    {"touch", b(true)}})
         d[k] = v;
 #else
 #if defined(GD01_STEAM_DECK)
@@ -120,36 +153,26 @@ std::map<std::string, Json> profileValues(bool deck) {
     d["internal_res"] = t("1440");
 #endif
     if (deck) {
-        handheld();
-        for (auto& [k, v] : std::map<std::string, Json>{{"internal_res", t("800")}, {"sharpening", t("off")}, {"star_blur", t("medium")}})
-            d[k] = v;
+        for (auto& [k, v] : enhancedPreset("steam_deck")) d[k] = v;
+        d["touch"] = b(true);  // touch is on by default on Steam Deck and Android only
     }
 #endif
     return d;
 }
 
 // Enhanced Settings defaults (keys of enhanced.json): the build's profile
-// over the rest.
+// over the rest. XInput controllers and Rock Band guitars are always on (no
+// setting since 1.1.7).
 const std::map<std::string, Json>& enhancedDefaults() {
     static const std::map<std::string, Json> d = [] {
         std::map<std::string, Json> m = {
-        {"mouse", Json::boolean(true)},
-        {"touch", Json::boolean(true)},           {"rockband", Json::boolean(false)},
-        {"xinput", Json::boolean(true)},          {"screen_mode", Json::string("windowed")},
+        {"mouse", Json::boolean(true)},           {"touch", Json::boolean(false)},
+        {"screen_mode", Json::string("windowed")},
         {"max_fps", Json::string("120")},         {"fps_counter", Json::boolean(false)},
-        {"internal_res", Json::string("1080")},   {"sharp_ui", Json::boolean(true)},
-        {"antialiasing", Json::string("none")},   {"ai_upscaling", Json::string("none")},
-        {"ai_upscaling_mode", Json::string("quality")}, {"shadows_all", Json::boolean(false)},
-        {"more_lights", Json::string("off")},     {"bokeh", Json::string("stronger")},
-        {"particles", Json::boolean(true)},       {"ground_fog", Json::string("none")},
-        {"light_dust", Json::boolean(true)},
-        {"bloom", Json::string("off")},           {"cinematic_color", Json::boolean(false)},
-        {"color_grade", Json::string("off")},     {"film_grain", Json::string("off")},
-        {"chromatic", Json::boolean(false)},      {"light_streaks", Json::boolean(false)},
-        {"ssao", Json::boolean(false)},           {"sharpening", Json::string("off")},
-        {"star_blur", Json::string("none")},      {"hopo_mode", Json::string("original")},
+        {"internal_res", Json::string("1080")},   {"ai_upscaling_mode", Json::string("quality")},
+        {"hopo_mode", Json::string("original")},  {"no_shaky_cam", Json::boolean(false)},
         {"cut_content", Json::boolean(false)},    {"no_fail", Json::boolean(false)},
-        {"autoplay", Json::boolean(false)},       {"no_shaky_cam", Json::boolean(false)},
+        {"autoplay", Json::boolean(false)},
         {"cheat_air_guitar", Json::boolean(false)}, {"cheat_gh_guitar", Json::boolean(false)},
         {"cheat_unlock_all", Json::boolean(false)}, {"cheat_full_meter", Json::boolean(false)},
         {"cheat_no_venue", Json::boolean(false)},   {"cheat_monkey_crowd", Json::boolean(false)},
@@ -165,21 +188,73 @@ const std::map<std::string, Json>& enhancedDefaults() {
 const std::map<std::string, std::set<std::string>>& enhancedChoices() {
     static const std::map<std::string, std::set<std::string>> c = {
         {"screen_mode", {"windowed", "fullscreen", "borderless"}},
-        {"max_fps", {"60", "120", "240"}},
+        {"max_fps", {"60", "120", "240", "unlimited"}},
         {"internal_res", {"448", "480", "720", "800", "900", "1080", "1440", "2160"}},
         {"antialiasing", {"none", "fxaa", "ssaa", "taa"}},
         {"ai_upscaling", {"none", "fsr1", "fsr31", "dlss4", "dlss5"}},  // a saved "fsr4" (removed) loads as none
         {"ai_upscaling_mode", {"performance", "balanced", "quality"}},
-        {"more_lights", {"off", "subtle", "strong"}},
-        {"bokeh", {"none", "regular", "stronger"}},
-        {"ground_fog", {"none", "low", "full", "super"}},
-        {"color_grade", {"off", "warm", "cold", "vintage", "noir", "neon"}},
-        {"film_grain", {"off", "light", "strong"}},
+        {"bokeh", {"none", "light", "medium", "strong", "stronger"}},
+        {"particles", {"none", "original", "2x"}},
+        {"bloom", {"none", "original", "2x", "3x"}},
+        {"film_grain", {"none", "light", "medium", "strong", "stronger"}},
+        {"chromatic", {"none", "light", "medium", "strong"}},
+        {"light_streaks", {"none", "very_light", "light", "medium"}},
+        {"ssao", {"none", "light", "medium", "strong", "stronger"}},
+        {"star_blur", {"none", "light", "medium", "strong", "stronger"}},
+        {"more_lights", {"none", "1.5x", "2x", "2.5x"}},
+        {"light_dust", {"none", "1.5x", "2x", "2.5x"}},
+        {"ground_fog", {"none", "1.5x", "2x", "2.5x"}},
+        {"color_grade", {"off", "warm", "cold", "vintage", "noir", "neon", "sepia"}},
         {"sharpening", {"off", "low", "high"}},
-        {"star_blur", {"none", "light", "medium", "high"}},
-        {"hopo_mode", {"original", "forgiving"}},
-        {"bloom", {"off", "low", "medium", "high"}}};
+        {"hopo_mode", {"original", "forgiving"}}};
     return c;
+}
+// The ranged choices in order, weakest first (enhancedLevel).
+const std::map<std::string, std::vector<std::string>>& enhancedLevels() {
+    static const std::map<std::string, std::vector<std::string>> l = {
+        {"bloom", {"none", "original", "2x", "3x"}},
+        {"film_grain", {"none", "light", "medium", "strong", "stronger"}},
+        {"chromatic", {"none", "light", "medium", "strong"}},
+        {"light_streaks", {"none", "very_light", "light", "medium"}},
+        {"ssao", {"none", "light", "medium", "strong", "stronger"}},
+        {"star_blur", {"none", "light", "medium", "strong", "stronger"}},
+        {"more_lights", {"none", "1.5x", "2x", "2.5x"}},
+        {"light_dust", {"none", "1.5x", "2x", "2.5x"}},
+        {"ground_fog", {"none", "1.5x", "2x", "2.5x"}},
+        {"bokeh", {"none", "light", "medium", "strong", "stronger"}}};
+    return l;
+}
+// Settings saved by 1.1.6 and older take the new values (universal menus,
+// 1.1.7): check boxes that became ranges, renamed levels. Unknown values are
+// left for the validation (they fall back to the default).
+void migrateEnhanced(Json& e) {
+    if (e.type != Json::Type::Object) return;
+    auto map = [&](const char* key, std::initializer_list<std::pair<const char*, const char*>> m) {
+        if (!e.has(key)) return;
+        const Json& v = e[key];
+        std::string from = v.type == Json::Type::Bool ? (v.truthy() ? "true" : "false") : v.type == Json::Type::String ? v.s : "";
+        for (const auto& [a, b] : m)
+            if (from == a) {
+                e.set(key, Json::string(b));
+                return;
+            }
+    };
+    map("bokeh", {{"regular", "medium"}});
+    map("particles", {{"true", "original"}, {"false", "none"}});
+    map("bloom", {{"off", "none"}, {"low", "original"}, {"medium", "2x"}, {"high", "3x"}});
+    map("film_grain", {{"off", "none"}});
+    map("chromatic", {{"true", "medium"}, {"false", "none"}});
+    map("light_streaks", {{"true", "medium"}, {"false", "none"}});
+    map("ssao", {{"true", "medium"}, {"false", "none"}});
+    map("star_blur", {{"high", "strong"}});
+    map("more_lights", {{"off", "none"}, {"subtle", "1.5x"}, {"strong", "2x"}});
+    map("light_dust", {{"true", "1.5x"}, {"false", "none"}});
+    map("ground_fog", {{"low", "1.5x"}, {"full", "2x"}, {"super", "2.5x"}});
+    // XInput and Rock Band guitars are always on now.
+    Json kept = Json::object();
+    for (const auto& [k, v] : e.o)
+        if (k != "xinput" && k != "rockband") kept.set(k, v);
+    e = std::move(kept);
 }
 // Number settings (as strings, ms) and their range.
 const std::map<std::string, std::pair<int, int>>& enhancedRanges() {
@@ -338,6 +413,8 @@ private:
     // --av-offset plus the calibrated audio delay (Enhanced Settings).
     double avOffsetMs() const { return opt_.avOffsetMs + enhancedInt("audio_offset"); }
     int enhancedInt(const std::string& key) const { return std::atoi(enhanced(key).str().c_str()); }
+    // A ranged choice's level: its place in enhancedLevels (0 none .. the strongest).
+    int enhancedLevel(const std::string& key) const;
     void setEnhanced(const std::string& key, Json value);
     void saveEnhanced();
     void applyEnhanced();
@@ -415,6 +492,7 @@ private:
         Image frame;
     };
     std::unique_ptr<Movie> movie_;
+    SDL_Joystick* virtualPad_ = nullptr;  // GD01_VIRTUAL_PAD (development aid)
     void startMovie(const std::string& file);
     void movieFrame();
     void endMovie();
@@ -644,7 +722,7 @@ void App::tryLoadData(const std::string& path) {
                 backdrop_.reset();
                 if (!on || !data_) return;
                 try {
-                    backdrop_ = std::make_unique<VenueRenderer>(renderer_, *data_, "basement",
+                    backdrop_ = std::make_unique<VenueRenderer>(renderer_, *data_, "big_club",  // a medium venue (1.2.2)
                                                                 VenueRenderer::Band{"metal", "gibson_sg", 1, "", ""});
                     // About a second at 120 BPM poses everyone, then nothing moves again.
                     VenueFrame f;
@@ -779,7 +857,7 @@ void App::startSong(size_t index, ControllerMode mode) {
                     renderer_, *data_, info.venue,
                     VenueRenderer::Band{info.character, guitar1, info.animTempo, character2, guitar2, info.band, finalSong});
                 venue_->setSong(*song_, song_->charts[size_t(difficulty_)]);
-                venue_->setStrongerBokeh(enhanced("bokeh").str() == "stronger");
+                venue_->setStrongerBokeh(enhancedLevel("bokeh") >= 3);
                 venue_->setShakyCamera(!enhancedOn("no_shaky_cam"));
                 applyVenueLights(*venue_);
             } catch (const std::exception& ex) {
@@ -1070,6 +1148,8 @@ void App::injectDebugKeys(std::vector<InputEvent>& out) {
         int player;
         float mx = -1, my = -1;  // "hoverX_Y" / "clickX_Y": the mouse at menu units (edge 2 = hover, 3 = click;
                                  // "touchX_Y": 4 finger down, 5 up, 6 tap)
+        char device = 0;         // 'k': "key<Name>" a real key event (SDL key name); 'v': "vpad<n>" the virtual pad's button n
+        int code = 0;
     };
     static std::vector<Key> keys, songKeys;  // songKeys: "s<song ms>:<key>", played as a guitar
     static bool parsed = false;
@@ -1099,6 +1179,14 @@ void App::injectDebugKeys(std::vector<InputEvent>& out) {
                     else if (name.rfind("hover", 0) == 0 || name.rfind("click", 0) == 0) {
                         Key k{std::atof(item.substr(0, colon).c_str()), Action::Confirm, name[0] == 'h' ? 2 : 3, 0};
                         std::sscanf(name.c_str() + 5, "%f_%f", &k.mx, &k.my);
+                        keys.push_back(k);
+                    } else if (name.rfind("key", 0) == 0 || name.rfind("vpad", 0) == 0) {
+                        // "keyReturn", "+keyUp" / "-keyUp": through Input as the keyboard would;
+                        // "vpad0": a button of GD01_VIRTUAL_PAD (SDL_GamepadButton numbers).
+                        const bool isKey = name[0] == 'k';
+                        Key k{std::atof(item.substr(0, colon).c_str()), Action::Confirm, edge, 0};
+                        k.device = isKey ? 'k' : 'v';
+                        k.code = isKey ? int(SDL_GetKeyFromName(name.substr(3).c_str())) : std::atoi(name.c_str() + 4);
                         keys.push_back(k);
                     } else if (name.rfind("touch", 0) == 0) {  // "touchX_Y" taps, "+touchX_Y" / "-touchX_Y" hold / lift
                         Key k{std::atof(item.substr(0, colon).c_str()), Action::Confirm, edge == 1 ? 4 : edge == -1 ? 5 : 6, 0};
@@ -1144,6 +1232,25 @@ void App::injectDebugKeys(std::vector<InputEvent>& out) {
             if (key.edge == 6) {  // a tap lifts 80 ms later
                 Key up = key;
                 up.edge = 5, up.at = now + 80;
+                keys.insert(std::upper_bound(keys.begin(), keys.end(), up, [](const Key& a, const Key& b) { return a.at < b.at; }), up);
+            }
+            continue;
+        }
+        if (key.device) {
+            const bool down = key.edge >= 0;
+            if (key.device == 'k') {
+                SDL_Event ev{};
+                ev.type = down ? SDL_EVENT_KEY_DOWN : SDL_EVENT_KEY_UP;
+                ev.key.timestamp = SDL_GetTicksNS();
+                ev.key.key = SDL_Keycode(key.code);
+                ev.key.down = down;
+                input_.handle(ev, out);
+            } else if (virtualPad_) {
+                SDL_SetJoystickVirtualButton(virtualPad_, key.code, down);
+            }
+            if (key.edge == 0) {  // a tap: released 60 ms later
+                Key up = key;
+                up.edge = -1, up.at = now + 60;
                 keys.insert(std::upper_bound(keys.begin(), keys.end(), up, [](const Key& a, const Key& b) { return a.at < b.at; }), up);
             }
             continue;
@@ -1436,8 +1543,10 @@ void App::uiButton(const InputEvent& e) {
     default: break;
     }
     if (b < 0) return;
+    ui_->setStartKey(e.startKey);
     if (e.down) ui_->buttonDown(b, guitar, e.player);
     else ui_->buttonUp(b, e.player);
+    ui_->setStartKey(false);
 }
 
 void App::setEnhanced(const std::string& key, Json value) {
@@ -1468,13 +1577,30 @@ void App::applyCheats(const std::string& only) {
     if (campaign_ && is("cheat_unlock_all")) campaign_->allAccess = enhancedOn("cheat_unlock_all");
 }
 
-// A three-quarter close-up from the audience's side (the stage faces -Y), the
-// microphone placed in the frame's upper right, clear of the settings boxes.
+// The band shot (universal_mechanisms.md 1.2.2): from the audience's side
+// (the stage faces -Y) in big_club, a medium venue, the lead vocalist in
+// focus in the frame's upper right, clear of the settings boxes, with the
+// guitarist and the drummer behind him in view.
+int App::enhancedLevel(const std::string& key) const {
+    auto l = enhancedLevels().find(key);
+    if (l == enhancedLevels().end()) return 0;
+    auto it = std::find(l->second.begin(), l->second.end(), enhanced(key).str());
+    return it == l->second.end() ? 0 : int(it - l->second.begin());
+}
+
+namespace {
+// Bokeh Effect none / light / medium (the original's) / strong / stronger: the depth-of-field taps' size.
+constexpr float kBokehBlur[5] = {0, 2.0f, 3.0f, 4.0f, 4.8f};
+}  // namespace
+
 bool App::drawMenuBackdrop(float& focusX, float& focusY) {
     if (!backdrop_) return false;
     const auto& m = backdropMic_;
     // Wide enough to show the band's lights, shadows and the fog around the singer.
-    const std::array<float, 3> eye{m[0] - 32, m[1] - 80, m[2] + 4}, target{m[0] + 3, m[1], m[2] - 6};
+    // GD01_BACKDROP_CAM="dx dy dz tx ty tz" (development aid): the eye and target offsets from the microphone.
+    std::array<float, 6> k{22, -215, 32, -38, 32, -6};
+    if (const char* c = SDL_getenv("GD01_BACKDROP_CAM")) std::sscanf(c, "%f %f %f %f %f %f", &k[0], &k[1], &k[2], &k[3], &k[4], &k[5]);
+    const std::array<float, 3> eye{m[0] + k[0], m[1] + k[1], m[2] + k[2]}, target{m[0] + k[3], m[1] + k[4], m[2] + k[5]};
     std::array<float, 3> f{target[0] - eye[0], target[1] - eye[1], target[2] - eye[2]};
     float fl = std::sqrt(f[0] * f[0] + f[1] * f[1] + f[2] * f[2]);
     for (float& v : f) v /= fl;
@@ -1498,15 +1624,15 @@ bool App::drawMenuBackdrop(float& focusX, float& focusY) {
     const bool post = renderer_.beginScene();
     renderer_.clearDepth();
     backdrop_->draw();
-    if (enhanced("bokeh").str() != "none") {
-        // As the shots' focus (VenueCamera::setFocusScale): 2x the subject distance, 1.3x when stronger.
-        bool stronger = enhanced("bokeh").str() == "stronger";
+    if (enhancedLevel("bokeh") > 0) {
+        // As the shots' focus (VenueCamera::setFocusScale): 2x the subject distance, 1.3x when strong or stronger.
+        bool stronger = enhancedLevel("bokeh") >= 3;
         const float k = stronger ? 1.3f : 2.0f;
         const std::array<float, 3> p{eye[0] + (m[0] - eye[0]) * k, eye[1] + (m[1] - eye[1]) * k, eye[2] + (m[2] - eye[2]) * k};
         const auto& c = vp.m;
         float cz = c[2] * p[0] + c[6] * p[1] + c[10] * p[2] + c[14], cw = c[3] * p[0] + c[7] * p[1] + c[11] * p[2] + c[15];
         float depth = cw > 1e-4f ? std::clamp(cz / cw * 0.5f + 0.5f, 0.0f, 1.0f) : 0;
-        renderer_.depthBlur(depth, (stronger ? 4.8f : 3.0f) * renderer_.viewportHeight() / 448.0f);
+        renderer_.depthBlur(depth, kBokehBlur[enhancedLevel("bokeh")] * renderer_.viewportHeight() / 448.0f);
     }
     if (post) {
         PostFrame pf;
@@ -1566,11 +1692,12 @@ void SDLCALL dialogDone(void* user, const char* const* files, int) {
 
 void App::userFiles(const std::string& action) {
     userFilesStatus_.clear();
-    if (action == "steam_deck") {  // Apply Steam Deck Settings: the handheld profile, once; every option stays editable
-        for (auto& [key, value] : profileValues(true)) enhanced_.set(key, value);
+    if (action.rfind("mode_", 0) == 0) {  // Enhanced > MODES: a preset, once; every option stays editable
+        auto preset = enhancedPreset(action.substr(5));
+        for (auto& [key, value] : preset) enhanced_.set(key, value);
         saveEnhanced();
         applyEnhanced();
-        userFilesStatus_ = "Steam Deck settings applied";
+        userFilesStatus_ = preset.empty() ? "" : "Mode applied";
         return;
     }
     // Development aid: GD01_DIALOG=<path> answers the dialog at once (headless tests).
@@ -1580,7 +1707,7 @@ void App::userFiles(const std::string& action) {
         return;
     }
     auto* req = new DialogRequest{&dialogMutex_, &dialogResults_, action};
-    if (action == "export") {
+    if (action == "export" || action == "export_controllers") {
         SDL_ShowOpenFolderDialog(dialogDone, req, window_, nullptr, false);
     } else if (action == "locate_iso") {
         // The first screen: pick the disc image instead of dropping it on the window.
@@ -1602,6 +1729,14 @@ void App::pollUserFiles() {
         if (path.empty()) continue;  // cancelled
         if (action == "locate_iso") tryLoadData(path);
         else if (action == "export") exportUserFiles(path);
+        else if (action == "export_controllers") {  // the Gamepad menu's Export
+            std::string f = path;
+            if (!f.empty() && f.back() != '/' && f.back() != '\\') f += '/';
+            f += "GD01-controllers.json";
+            userFilesStatus_ = input_.exportTo(f) ? "Exported to " + f : "Could not write " + f;
+        } else if (action == "import_controllers") {  // the Gamepad menu's Import
+            userFilesStatus_ = input_.importFrom(path) ? "Controllers loaded" : "Could not load that controllers file";
+        }
         else if (action == "load_settings") userFilesStatus_ = importSettings(path) ? "Settings loaded" : "Could not load that settings file";
         else if (action == "load_progress") userFilesStatus_ = importProgress(path) ? "Progress loaded" : "Could not load that progress file";
     }
@@ -1636,6 +1771,7 @@ bool App::importSettings(const std::string& file) {
         return false;
     }
     if (j.type != Json::Type::Object) return false;
+    migrateEnhanced(j);  // a file exported by 1.1.6 or older
     Json next = Json::object();
     for (const auto& [key, def] : enhancedDefaults()) {
         if (!j.has(key)) continue;
@@ -1685,16 +1821,16 @@ bool App::importProgress(const std::string& file) {
 // Enhanced Settings for a venue's lighting (at its creation and on every change).
 void App::applyVenueLights(VenueRenderer& venue) {
     venue.setBandShadows(enhancedOn("shadows_all"));
-    const std::string more = enhanced("more_lights").str();
-    venue.setMoreLights(more == "strong" ? 2 : more == "subtle" ? 1 : 0);
-    venue.setLightDust(enhancedOn("light_dust"));
+    venue.setMoreLights(enhancedLevel("more_lights"));
+    venue.setLightDust(enhancedLevel("light_dust"));
 }
 
 void App::applyEnhanced() {
-    setParticlesEnabled(enhancedOn("particles"));
+    setParticlesEnabled(enhanced("particles").str() != "none");
+    setParticleRate(enhanced("particles").str() == "2x" ? 2.0f : 1.0f);
     renderer_.setUiEnhance(enhancedOn("sharp_ui"));
     renderer_.setInternalHeight(std::clamp(enhancedInt("internal_res"), 0, 4320));
-    renderer_.setFrameCap(std::clamp(enhancedInt("max_fps"), 30, 1000));
+    renderer_.setFrameCap(enhanced("max_fps").str() == "unlimited" ? 0 : std::clamp(enhancedInt("max_fps"), 30, 1000));
     // Post-processing of the 3D game frame (render/post_fx.h). FSR 3.1 and
     // DLSS 4 run in Vulkan next to the GL renderer (render/vk_upscaler.h) and
     // fall back to FSR 1; DLSS 5 is not available. Upscalers output at the
@@ -1709,27 +1845,27 @@ void App::applyEnhanced() {
                                         : PostSettings::Upscaler::None;
         post.quality = mode == "performance" ? 0 : mode == "balanced" ? 1 : 2;
         post.fsrScale = mode == "performance" ? 1 / 2.0f : mode == "balanced" ? 1 / 1.7f : 1 / 1.5f;
-        post.bloom = enhanced("bloom").str() == "high" ? 3 : enhanced("bloom").str() == "medium" ? 2 : enhanced("bloom").str() == "low" ? 1 : 0;
+        post.bloom = enhancedLevel("bloom");
         post.cinematic = enhancedOn("cinematic_color");
-        const std::string fog = enhanced("ground_fog").str(), grade = enhanced("color_grade").str();
-        post.fog = fog == "super" ? 3 : fog == "full" ? 2 : fog == "low" ? 1 : 0;
-        post.grade = grade == "warm" ? 1 : grade == "cold" ? 2 : grade == "vintage" ? 3 : grade == "noir" ? 4 : grade == "neon" ? 5 : 0;
-        post.grain = enhanced("film_grain").str() == "strong" ? 2 : enhanced("film_grain").str() == "light" ? 1 : 0;
-        post.chromatic = enhancedOn("chromatic");
-        post.streaks = enhancedOn("light_streaks");
-        post.ssao = enhancedOn("ssao");
+        const std::string grade = enhanced("color_grade").str();
+        post.fog = enhancedLevel("ground_fog");
+        post.grade = grade == "warm" ? 1 : grade == "cold" ? 2 : grade == "vintage" ? 3 : grade == "noir" ? 4 : grade == "neon" ? 5
+                     : grade == "sepia" ? 6 : 0;
+        post.grain = enhancedLevel("film_grain");
+        post.chromatic = enhancedLevel("chromatic");
+        post.streaks = enhancedLevel("light_streaks");
+        post.ssao = enhancedLevel("ssao");
         post.sharpen = enhanced("sharpening").str() == "high" ? 2 : enhanced("sharpening").str() == "low" ? 1 : 0;
-        const std::string blur = enhanced("star_blur").str();
-        post.starBlur = blur == "high" ? 3 : blur == "medium" ? 2 : blur == "light" ? 1 : 0;
+        post.starBlur = enhancedLevel("star_blur");
         renderer_.setPost(post);
     }
     // Controls: touch (SDL's touch-made mouse events only while it is off), XInput joypads, Rock Band guitars.
     input_.setTouch(enhancedOn("touch"));
     SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, enhancedOn("touch") ? "0" : "1");
-    input_.setGamepadPlay(enhancedOn("xinput"));
-    input_.setRockBand(enhancedOn("rockband"));
+    input_.setGamepadPlay(true);  // XInput controllers and Rock Band guitars are always on
+    input_.setRockBand(true);
     if (venue_) {
-        venue_->setStrongerBokeh(enhanced("bokeh").str() == "stronger");
+        venue_->setStrongerBokeh(enhancedLevel("bokeh") >= 3);
         venue_->setShakyCamera(!enhancedOn("no_shaky_cam"));
         applyVenueLights(*venue_);
     }
@@ -1757,7 +1893,7 @@ void App::applyEnhanced() {
         }
         if (!ok) SDL_Log("enhanced settings: screen mode %s: %s", mode.c_str(), SDL_GetError());
         screenModeApplied_ = mode;
-        renderer_.setFrameCap(std::clamp(enhancedInt("max_fps"), 30, 1000));  // the new display mode's refresh rate
+        renderer_.setFrameCap(enhanced("max_fps").str() == "unlimited" ? 0 : std::clamp(enhancedInt("max_fps"), 30, 1000));  // the new display mode's refresh rate
     }
 }
 
@@ -2154,8 +2290,8 @@ void App::frame() {
                 venue_->draw();
                 // The 3 px taps were sized for the PS2's 448 lines.
                 // Enhanced Settings > Bokeh Effect: None skips the depth-of-field blur.
-                if (enhanced("bokeh").str() != "none")
-                    renderer_.depthBlur(venue_->dofDepth(), (venue_->strongerBokeh() ? 4.8f : 3.0f) * renderer_.viewportHeight() / 448.0f);
+                if (enhancedLevel("bokeh") > 0)
+                    renderer_.depthBlur(venue_->dofDepth(), kBokehBlur[enhancedLevel("bokeh")] * renderer_.viewportHeight() / 448.0f);
                 if (post) {
                     PostFrame pf;
                     pf.viewProj = venue_->viewProj().m;
@@ -2242,6 +2378,7 @@ int App::run() {
         std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
         try {
             enhanced_ = Json::parse(text);
+            migrateEnhanced(enhanced_);  // 1.1.6 and older values
         } catch (const std::exception& ex) {
             SDL_Log("enhanced settings: %s: %s", enhancedPath().c_str(), ex.what());
         }
@@ -2275,7 +2412,8 @@ int App::run() {
         desc.vendor_id = Uint16(vendor), desc.product_id = Uint16(product);
         desc.naxes = SDL_GAMEPAD_AXIS_COUNT, desc.nbuttons = SDL_GAMEPAD_BUTTON_COUNT;
         desc.name = "PLAYSTATION(R)3 Controller (virtual)";
-        if (!SDL_AttachVirtualJoystick(&desc)) SDL_Log("virtual pad: %s", SDL_GetError());
+        if (SDL_JoystickID vid = SDL_AttachVirtualJoystick(&desc); !vid) SDL_Log("virtual pad: %s", SDL_GetError());
+        else virtualPad_ = SDL_OpenJoystick(vid);  // GD01_KEYS "vpad<n>" presses its buttons
     }
     input_.setSplitKeyboard(opt_.splitKeyboard || SDL_getenv("GD01_KB2P"));
     input_.setTouchToMenu([this](float nx, float ny, float& mx, float& my) {
@@ -2346,6 +2484,9 @@ int App::run() {
             else if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_LEFT && screen_ == Screen::NeedData)
                 userFiles("locate_iso");
 #endif
+            // A left click skips a movie (1.1.1), like a button.
+            else if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_LEFT && movie_ && enhancedOn("mouse"))
+                endMovie();
             // Mouse support: hover focuses menu entries (only while the window has
             // focus), a left click selects, the wheel scrolls.
             else if ((e.type == SDL_EVENT_MOUSE_MOTION || e.type == SDL_EVENT_MOUSE_WHEEL ||
@@ -2370,7 +2511,9 @@ int App::run() {
         injectDebugKeys(actions);
         if (movie_) {
             for (const InputEvent& a : actions)
-                if (a.down && (a.action == Action::Confirm || a.action == Action::Back || a.action == Action::Start || a.action == Action::Fret0)) endMovie();
+                // Skippable with green, red, Enter, Start, Esc (universal_mechanisms.md 1.1.1).
+                if (a.down && (a.action == Action::Confirm || a.action == Action::Back || a.action == Action::Start || a.action == Action::Fret0 ||
+                               a.action == Action::Fret1)) endMovie();
         } else {
             for (const InputEvent& a : actions) onAction(a);
         }

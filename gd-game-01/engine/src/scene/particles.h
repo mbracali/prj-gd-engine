@@ -14,4 +14,7 @@ void particleSetFrame(ParticleSysObj& p, float frame, const Xfm& emitter);
 // [I] Enhanced Settings > Enable Particles FX: off, no system simulates or
 // draws (low-end hardware); gameplay is unaffected.
 void setParticlesEnabled(bool on);
+// Enhanced Settings > Enable Particles FX "2x": every emitter's rate times this (1 = the original).
+void setParticleRate(float rate);
+float particleRate();
 bool particlesEnabled();

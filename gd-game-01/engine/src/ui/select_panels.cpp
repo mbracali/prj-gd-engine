@@ -698,6 +698,24 @@ public:
     }
     void exit() override { host_.creditsMusic(false); }
 
+    // [I] Port (universal_mechanisms.md 1.1.1): the original credits only
+    // leave with back; here green, select, Start (Enter), a click or a tap
+    // leave them too (red / back reach the screen's auto-back).
+    bool buttonDown(int button, int player) override {
+        (void)player;
+        if (done_ || !(host_.isSelectButton(button) || button == kStart || button == kR2 || button == kCross)) return false;
+        done_ = true;
+        host_.route("go_back", {});
+        return true;
+    }
+    bool mouse(float x, float y, bool click) override {
+        (void)x, (void)y;
+        if (!click || done_) return click;
+        done_ = true;
+        host_.route("go_back", {});
+        return true;
+    }
+
     // FUN_0012f9e8 at 60 Hz: a row takes 56 polls.
     void poll(float dtMs) override {
         ticks_ += dtMs;
@@ -744,7 +762,7 @@ public:
     }
 
 private:
-    static constexpr int kDisplay = 15, kFade = 2;
+    static constexpr int kDisplay = 15, kFade = 2, kStart = 11, kR2 = 1, kCross = 6;
     static constexpr float kMaxStep = 0.018f;
 
     // One poll of the scroll (FUN_0012f9e8), then go_back at the last page.
@@ -843,6 +861,27 @@ public:
             return true;
         }
         x -= offset_;
+        if (dropdown_ < 0) {
+            // Back / Export / Import.
+            for (int b = 0; b < 3; ++b) {
+                float x0, x1;
+                bottomButton(b, x0, x1);
+                if (x < x0 || x > x1 || y < kBtnY0 || y > kBtnY1) continue;
+                if (hoverButton_ != b) hoverButton_ = b, sound("button_toggle");
+                if (click) {
+                    sound(b == 0 ? "button_back" : "button_select");
+                    if (b == 0) host_.pressBack();
+                    else host_.userFiles(b == 1 ? "export" : "load_settings");
+                }
+                return true;
+            }
+            hoverButton_ = -1;
+            // The scrollbar: a click on its track scrolls there.
+            if (x >= kBarX - 10 && x <= kBarX + 10 && y >= kListTop && y <= kListBottom) {
+                if (click) scrollTarget_ = std::clamp((y - kListTop) / (kListBottom - kListTop) * maxScroll(), 0.0f, maxScroll()), sound("button_toggle");
+                return true;
+            }
+        }
         // The open dropdown: its options, or a click anywhere else closes it.
         if (dropdown_ >= 0) {
             const Item& it = item(focus_);
@@ -924,9 +963,16 @@ public:
             text("impactor.font", status_, 92 + o, 134, 18, c, 0x11);
         }
         for (size_t r = 0; r < rows_.size(); ++r) drawRow(int(r));
-        // More above / below.
+        // More above / below, and the scrollbar.
         if (scroll_ > 1) arrow(kListX0 + 270 + o, kListTop - 10, true);
         if (contentHeight() - scroll_ > kListBottom - kListTop + 1) arrow(kListX0 + 270 + o, kListBottom + 8, false);
+        {
+            const float h = kListBottom - kListTop, content = std::max(contentHeight(), h), thumb = std::max(24.0f, h * h / content);
+            const float t0 = kListTop + (h - thumb) * (maxScroll() > 0 ? std::clamp(scroll_ / maxScroll(), 0.0f, 1.0f) : 0.0f);
+            quad(kBarX - 3 + o, kListTop, kBarX + 3 + o, kListBottom, {1, 1, 1, 0.1f});
+            quad(kBarX - 4 + o, t0, kBarX + 4 + o, t0 + thumb, {1, 1, 1, 0.45f});
+        }
+        for (int b = 0; b < 3; ++b) drawBottomButton(b);
         drawHelp();
         if (dropdown_ >= 0) drawDropdown();
         if (cal_.phase != 0) drawCalib();
@@ -950,52 +996,63 @@ private:
     };
     static const std::vector<Item>& items() {
         static const std::vector<Item> k = {
-            {Kind::Section, "deck", "STEAM DECK MODE", true,
-             "Settings for handheld PCs such as the Steam Deck."},
-            {Kind::Button, "steam_deck", "Apply Steam Deck Settings", true,
-             "Sets every option to what runs best on a handheld PC such as the Steam Deck: full screen at 60 FPS, a "
-             "1280 x 800 internal resolution, and lighter effects (medium bloom, no ambient occlusion, film grain, "
-             "fog or extra shadows). You can still change any option afterwards. The Steam Deck download starts "
-             "with these settings.",
+            // universal_mechanisms.md 1.2.2: MODES, CONTROLS, PERFORMANCE &
+            // GRAPHICS, CHEATS & ENHANCERS, in the doc's order. Modes are
+            // presets (App enhancedPreset): one click sets every value they name.
+            {Kind::Section, "modes", "MODES", true, "Presets: one click sets every option below at once."},
+            {Kind::Button, "mode_steam_deck", "Steam Deck", true,
+             "Sets the options to run best on a handheld PC such as the Steam Deck: full screen at 60 FPS, an 800p "
+             "internal resolution and light effects (bloom, cinematic colour, a light Star Power blur, FXAA). You can "
+             "still change any option afterwards. The Steam Deck download starts with these settings.",
+             {{"", "Apply"}}},
+            {Kind::Button, "mode_original", "Original Feel", true,
+             "Looks like the original PlayStation 2 game: every enhanced effect off, the original depth of field and "
+             "particles, 60 FPS. This is how the game starts.",
+             {{"", "Apply"}}},
+            {Kind::Button, "mode_clean", "Clean Image", true,
+             "Removes every enhanced effect for a clean, sharp picture: full HD (1080p) internal resolution, FXAA, "
+             "sharper text and sprites, 120 FPS.",
+             {{"", "Apply"}}},
+            {Kind::Button, "mode_max_hd", "Max Out (Full HD)", true,
+             "Every effect at its strongest at a full HD (1080p) internal resolution, up to 240 FPS. Needs a strong GPU.",
+             {{"", "Apply"}}},
+            {Kind::Button, "mode_max_4k", "Max Out (4K)", true,
+             "Every effect at its strongest at a 4K (2160p) internal resolution, up to 240 FPS. Needs a very strong GPU.",
+             {{"", "Apply"}}},
+            {Kind::Button, "mode_budget", "Rocking on a Budget", true,
+             "Every effect at its lowest (even the original particles and depth of field are off) at 720p and 60 FPS, "
+             "for slow computers.",
+             {{"", "Apply"}}},
+            {Kind::Button, "mode_good_old_days", "Good Old Days", true,
+             "Every effect at its strongest, in sepia, at the PlayStation 2's own resolution (448p), 60 FPS.",
              {{"", "Apply"}}},
             {Kind::Separator, "", "", true, ""},
-            {Kind::Section, "controls", "CONTROLS & GAMEPAD", true, "Mouse, touch, guitars and gamepads."},
+            {Kind::Section, "controls", "CONTROLS", true, "Mouse, touch and your setup's delay."},
             {Kind::Check, "mouse", "Enable Mouse Selection", true,
-             "Point at a menu entry to highlight it and click to choose it; the mouse wheel scrolls lists. CONTINUE and "
-             "BACK in the help bar are clickable too. Hovering works only while the game window has focus."},
+             "Point at a menu entry to highlight it and click to choose it; the mouse wheel scrolls lists. The help "
+             "bar's buttons (CONFIRM, BACK, START, UP / DOWN) are clickable too. Hovering works only while the game "
+             "window has focus. Mouse buttons are never used as game buttons."},
             {Kind::Check, "touch", "Enable Touch Controls", true,
-             "Play on a touch screen. In the menus a tap is a click. In a song, touch a lane at the bottom of the "
-             "highway when its note arrives: it plays the fret and the strum at once (hold the finger for long notes, "
-             "several fingers for chords). Two fingers above the highway deploy Star Power; the top corner pauses. "
-             "On-screen Up / Down / Start buttons appear once you touch the screen; two-finger swipes move up and "
-             "down. Set the buttons, swipes and pause corner in GAMEPADS > Touch Screen. Always on in the Android app."},
-            {Kind::Check, "rockband", "Enable Rock Band Guitars", true,
-             "Plays with the USB Rock Band guitars for Xbox 360 and PlayStation 3 / 4: the five frets (the solo frets "
-             "too), the strum bar, the whammy bar, and tilt or Select for Star Power."},
-            {Kind::Check, "xinput", "Enable XInput Controllers", true,
-             "Any XInput gamepad plays like the original game's gamepad mode: the shoulder buttons and X / A are the "
-             "frets, the analog sticks bend the whammy, and pressing a button plays the note and the strum at once."},
-            {Kind::Separator, "", "", true, ""},
-            {Kind::Section, "graphics", "PERFORMANCE & GRAPHICS", true, "Timing, window, frame rate and image quality."},
+             "Play on a touch screen; also shows the on-screen buttons. In the menus a tap is a click. In a song, "
+             "touch a lane at the bottom of the highway when its note arrives: it plays the fret and the strum at once "
+             "(hold the finger for long notes, several fingers for chords). Two fingers above the highway deploy Star "
+             "Power; the top corner pauses. On by default on the Steam Deck and Android (always on in the Android "
+             "app). Its settings are in GAMEPADS > Player 1 > Customize inputs."},
             {Kind::Button, "calibrate", "Audio / Video Calibration", true,
              "Measures your setup's delay so notes are judged and drawn in time. First strum (or press green) on each "
              "tick you HEAR, then on each flash you SEE, 8 times each. Back cancels.",
              {{"", "Calibrate..."}}},
+            {Kind::Separator, "", "", true, ""},
+            {Kind::Section, "graphics", "PERFORMANCE & GRAPHICS", true, "Window, frame rate and image quality."},
             {Kind::Choice, "screen_mode", "Screen Mode", true,
              "Windowed; full screen at the desktop's resolution; or full screen without a border (a window covering "
              "the screen, the quickest to switch away from).",
              {{"windowed", "Windowed"}, {"fullscreen", "Full Screen"}, {"borderless", "Full Screen (No Border)"}}},
-            {Kind::Choice, "max_fps", "In-Game Max FPS", true,
-             "The highest frame rate the game draws at; the original ran at 60. The game never draws faster than this, "
-             "whatever the display's refresh rate.",
-             {{"60", "60"}, {"120", "120"}, {"240", "240"}}},
-            {Kind::Check, "fps_counter", "Show FPS Counter", true,
-             "Shows the frames drawn per second in the bottom-left corner of the screen."},
-            {Kind::Choice, "internal_res", "Internal Resolution", true,
+            {Kind::Choice, "internal_res", "Resolution", true,
              "The resolution the game draws at before it is scaled to the window. Higher is sharper and costs more; "
              "above the window's own size it also smooths the edges (supersampling). The PS2 drew 640 x 448. "
              "With AI Upscaling on, the screen's resolution is used instead (or this one, when higher).",
-             {{"448", "PS2 (448p)"}, {"480", "480p"}, {"720", "720p"}, {"800", "800p (Steam Deck)"}, {"900", "900p"},
+             {{"448", "448p (ps2)"}, {"480", "480p"}, {"720", "720p"}, {"800", "800p (Steam Deck)"}, {"900", "900p"},
               {"1080", "1080p"}, {"1440", "1440p"}, {"2160", "4K (2160p)"}}},
             {Kind::Check, "sharp_ui", "Sharper Text & Sprites", true,
              "Upscales the menu art and the game's fonts with a sharper filter, so text and sprites stay crisp on "
@@ -1016,75 +1073,73 @@ private:
              "How far below the screen's resolution the scene is drawn: Quality (1.5x upscale, the sharpest), "
              "Balanced (1.7x) or Performance (2x, the fastest). On a 1440p screen: 960p, 847p, 720p.",
              {{"performance", "Performance"}, {"balanced", "Balanced"}, {"quality", "Quality"}}, "ai_upscaling"},
+            {Kind::Choice, "max_fps", "Max FPS", true,
+             "The highest frame rate the game draws at; the original ran at 60. Unlimited draws as fast as the "
+             "computer can (no vertical sync).",
+             {{"60", "60"}, {"120", "120"}, {"240", "240"}, {"unlimited", "Unlimited"}}},
+            {Kind::Check, "fps_counter", "Show FPS Counter", true,
+             "Shows the frames drawn per second in the bottom-left corner of the screen."},
             {Kind::Choice, "bokeh", "Bokeh Effect", true,
-             "The depth-of-field blur of the close shots. None: always sharp. Regular: as the original game. "
-             "Stronger: the focus starts nearer the guitarist and the blur is wider.",
-             {{"none", "None"}, {"regular", "Regular"}, {"stronger", "Stronger"}}},
-            {Kind::Check, "particles", "Enable Particles FX", true,
-             "Sparks, smoke, dust and the highway's hit effects. Turn them off to save power on low-end hardware; "
-             "the gameplay is the same."},
+             "The depth-of-field blur of the close shots. None: always sharp. Medium: as the original game. Light is "
+             "softer; Strong and Stronger start the focus nearer the subject and blur wider.",
+             {{"none", "None"}, {"light", "Light"}, {"medium", "Medium (original)"}, {"strong", "Strong"}, {"stronger", "Stronger"}}},
+            {Kind::Choice, "particles", "Enable Particles FX", true,
+             "Sparks, smoke, dust and the highway's hit effects. None turns them off to save power (the gameplay is the "
+             "same); 2x emits twice as many.",
+             {{"none", "None"}, {"original", "Original"}, {"2x", "2x"}}},
             {Kind::Choice, "bloom", "Bloom", true,
-             "A soft glow around the brightest lights of the venue, like a camera lens.",
-             {{"off", "Off"}, {"low", "Low"}, {"medium", "Medium"}, {"high", "High"}}},
+             "A soft glow around the brightest lights of the venue, like a camera lens. Original is a gentle glow; 2x "
+             "and 3x are stronger.",
+             {{"none", "None"}, {"original", "Original"}, {"2x", "2x"}, {"3x", "3x"}}},
             {Kind::Check, "cinematic_color", "Cinematic Color", true,
              "A filmic colour curve with a gentle grade and vignette on the venue, for a richer, more cinematic image."},
-            {Kind::Choice, "color_grade", "Color Grading", true,
-             "A colour look for the venue, like a film's grade (with or without Cinematic Color). Warm: golden stage "
-             "light. Cold: steel blue. Vintage: faded 70s film. Noir: high-contrast black and white. Neon: punchy "
-             "purples and cyans.",
-             {{"off", "Off"}, {"warm", "Warm"}, {"cold", "Cold"}, {"vintage", "Vintage"}, {"noir", "Noir"}, {"neon", "Neon"}}},
             {Kind::Choice, "film_grain", "Film Grain", true,
-             "Fine animated grain over the venue, like a concert shot on film. Light is barely there; Strong is "
+             "Fine animated grain over the venue, like a concert shot on film. Light is barely there; Stronger is "
              "clearly visible.",
-             {{"off", "Off"}, {"light", "Light"}, {"strong", "Strong"}}},
-            {Kind::Check, "chromatic", "Chromatic Aberration", true,
-             "A camera lens's colour fringes: red and blue edges pull apart towards the corners of the venue."},
-            {Kind::Check, "light_streaks", "Anamorphic Light Streaks", true,
-             "The brightest stage lights flare into long blue-white horizontal streaks, like a cinema lens."},
-            {Kind::Check, "ssao", "Ambient Occlusion", true,
+             {{"none", "None"}, {"light", "Light"}, {"medium", "Medium"}, {"strong", "Strong"}, {"stronger", "Stronger"}}},
+            {Kind::Choice, "chromatic", "Chromatic Aberration", true,
+             "A camera lens's colour fringes: red and blue edges pull apart towards the corners of the venue.",
+             {{"none", "None"}, {"light", "Light"}, {"medium", "Medium"}, {"strong", "Strong"}}},
+            {Kind::Choice, "light_streaks", "Anamorphic Light Streaks", true,
+             "The brightest stage lights flare into long blue-white horizontal streaks, like a cinema lens.",
+             {{"none", "None"}, {"very_light", "Very Light"}, {"light", "Light"}, {"medium", "Medium"}}},
+            {Kind::Choice, "ssao", "Ambient Occlusion", true,
              "Soft contact shadows where surfaces meet: under the band's feet, in the folds of clothes, in the "
-             "corners of the stage, for more depth. Costs some performance."},
-            {Kind::Choice, "sharpening", "Sharpening", true,
-             "Contrast-adaptive sharpening of the venue (AMD CAS): crisper detail without halos, good with TAA or "
-             "an upscaler.",
-             {{"off", "Off"}, {"low", "Low"}, {"high", "High"}}},
+             "corners of the stage, for more depth. Costs some performance.",
+             {{"none", "None"}, {"light", "Light"}, {"medium", "Medium"}, {"strong", "Strong"}, {"stronger", "Stronger"}}},
             {Kind::Choice, "star_blur", "Blur on Star Power", true,
              "While Star Power is on, the venue and the band blur with the camera's motion and leave light trails; "
              "it fades out when Star Power ends. The highway always stays sharp.",
-             {{"none", "None"}, {"light", "Light"}, {"medium", "Medium"}, {"high", "High"}}},
-            {Kind::Separator, "", "", true, ""},
-            {Kind::Section, "enhancers", "ENHANCERS", true, "Visual extras beyond the original game, and your user files."},
+             {{"none", "None"}, {"light", "Light"}, {"medium", "Medium"}, {"strong", "Strong"}, {"stronger", "Stronger"}}},
             {Kind::Check, "shadows_all", "All Band Mates Cast Shadows", true,
              "Every band mate gets a spotlight from above and casts a shadow on the stage floor, like the guitarist."},
             {Kind::Choice, "more_lights", "More Lights on Venues", true,
-             "Richer stage lighting: brighter light cones and floor pools, dust in the beams and a rim light on the "
-             "band, following the venue's own light cues.",
-             {{"off", "Off"}, {"subtle", "Subtle"}, {"strong", "Strong"}}},
-            {Kind::Check, "light_dust", "Dust in Light Beams", true,
-             "With More Lights on Venues: fine dust drifting and twinkling in the light beams.", {}, "more_lights"},
+             "Richer stage lighting: brighter light cones and floor pools, a soft beam and a rim light on the band, "
+             "following the venue's own light cues.",
+             {{"none", "None"}, {"1.5x", "1.5x"}, {"2x", "2x"}, {"2.5x", "2.5x"}}},
+            {Kind::Choice, "light_dust", "Dust in Light Beams", true,
+             "Fine dust drifting and twinkling in the light beams over the band (with or without More Lights).",
+             {{"none", "None"}, {"1.5x", "1.5x"}, {"2x", "2x"}, {"2.5x", "2.5x"}}},
             {Kind::Choice, "ground_fog", "Add Fog to the Ground (Experimental)", true,
-             "A low fog over the stage floor where the band plays, for more depth. Low is a thin haze; Full a thick "
-             "stage-fog layer. Super Fog: a volumetric fog with light shafts from the stage lights and a haze in "
-             "the air, glowing as you look into the lights (costs more on slower GPUs).",
-             {{"none", "None"}, {"low", "Low"}, {"full", "Full"}, {"super", "Super Fog"}}},
-            {Kind::Check, "no_shaky_cam", "Disable Shaky Camera", true,
-             "The original game shakes the camera on its close-up shots of the band, like a handheld camera. Turn this "
-             "on for steady close-ups."},
+             "A low fog over the stage floor where the band plays, for more depth. 1.5x is a thin haze; 2x a thick "
+             "stage-fog layer; 2.5x a volumetric fog with light shafts from the stage lights and a haze in the air "
+             "(costs more on slower GPUs).",
+             {{"none", "None"}, {"1.5x", "1.5x"}, {"2x", "2x"}, {"2.5x", "2.5x"}}},
+            {Kind::Separator, "", "", true, ""},
+            {Kind::Section, "cheats", "CHEATS & ENHANCERS", true, "Your user files, the original game's cheats and more ways to bend the rules."},
             {Kind::Button, "export", "Export User Files", true,
              "Choose a folder to save two files in: GD01-user-settings.json with every Enhanced Setting, and "
              "GD01-user-progress.json with all your bands and their progress. Use them as a backup or to move to "
              "another computer.",
              {{"", "Export..."}}},
             {Kind::Button, "load_settings", "Load User Settings", true,
-             "Choose a GD01-user-settings.json file to load. The settings take effect at once; any setting in the "
-             "file that is missing or not valid keeps its default.",
+             "Choose a GD01-user-settings.json file to load (files from older versions too). The settings take "
+             "effect at once; any setting in the file that is missing or not valid keeps its default.",
              {{"", "Browse..."}}},
             {Kind::Button, "load_progress", "Load User Progress", true,
              "Choose a GD01-user-progress.json file to load. It replaces your bands and their progress and is saved "
              "at once; any value in the file that is missing or not valid keeps its default.",
              {{"", "Browse..."}}},
-            {Kind::Separator, "", "", true, ""},
-            {Kind::Section, "cheats", "CHEATS", true, "The original game's cheats and more ways to bend the rules."},
             {Kind::Check, "cut_content", "Enable Cut Content", false,
              "Loads content left unused on the original disc into the game."},
             {Kind::Check, "no_fail", "No Fail Mode", true, "The rock meter cannot fail you: every song plays to the end."},
@@ -1118,12 +1173,33 @@ private:
     }
 
     static constexpr int kUp = 12, kDown = 14, kLeft = 15, kRight = 13, kCross = 6;
-    static constexpr float kListTop = 168, kListBottom = 612, kListX0 = 80, kNameX = 118, kCtrlX1 = 612;
+    static constexpr float kListTop = 168, kListBottom = 572, kListX0 = 80, kNameX = 118, kCtrlX1 = 612;
+    // The mockup's scrollbar (left of the list) and its Back / Export / Import buttons (the box's bottom).
+    static constexpr float kBarX = 66, kBtnY0 = 590, kBtnY1 = 626, kBtnW = 150;
     static constexpr float kBoxX0 = 56, kBoxY0 = 22, kBoxX1 = 640, kBoxY1 = 640;
     static constexpr float kDdX0 = 360, kDdPopX0 = 300, kDdRow = 30, kPopX0 = 700, kPopX1 = 1224;  // kDdPopX0: the open list
     static constexpr std::array<float, 4> kTitle{0.95f, 0.95f, 0.95f, 1}, kFocused{1, 0.86f, 0.2f, 1},
         kNormal{0.85f, 0.85f, 0.88f, 1}, kDim{0.5f, 0.5f, 0.55f, 1}, kAccent{1, 0.55f, 0.15f, 1}, kOn{0.3f, 1, 0.35f, 1},
         kWarn{1, 0.78f, 0.1f, 1};
+
+    // -- Back / Export / Import under the list (the mockup)
+    static void bottomButton(int b, float& x0, float& x1) {
+        const float step = (kBoxX1 - kBoxX0 - 40 - kBtnW) / 2;
+        x0 = kBoxX0 + 20 + float(b) * step, x1 = x0 + kBtnW;
+    }
+    void drawBottomButton(int b) {
+        const float o = offset_;
+        float x0, x1;
+        bottomButton(b, x0, x1);
+        const std::array<float, 4> c = b == 0 ? std::array<float, 4>{1, 0.45f, 0.45f, 1} : b == 1 ? std::array<float, 4>{1, 0.86f, 0.35f, 1}
+                                                                                              : std::array<float, 4>{0.45f, 0.95f, 0.5f, 1};
+        const bool h = hoverButton_ == b;
+        quad(x0 + o, kBtnY0, x1 + o, kBtnY1, {c[0], c[1], c[2], h ? 0.4f : 0.2f});
+        frame(x0 + o, kBtnY0, x1 + o, kBtnY1, h ? 3.0f : 1.5f, c);
+        text("impactor.font", b == 0 ? "< Back" : b == 1 ? "Export" : "Import", (x0 + x1) * 0.5f + o, (kBtnY0 + kBtnY1) * 0.5f + 1, 21,
+             h ? kFocused : kTitle, 0x22);
+    }
+    int hoverButton_ = -1;
 
     // -- the rows shown (sections collapse; separators stay)
     void rebuild() {
@@ -1146,7 +1222,7 @@ private:
     const Item& item(int row) const { return items()[size_t(rows_[size_t(row)])]; }
     bool collapsed(const std::string& section) const {
         auto it = collapsed_.find(section);
-        return it == collapsed_.end() ? section == "deck" : it->second;  // Steam Deck starts collapsed
+        return it == collapsed_.end() ? false : it->second;  // every section starts open
     }
     static float rowHeight(const Item& it) { return it.kind == Kind::Section ? 44 : it.kind == Kind::Separator ? 18 : 34; }
     float rowY(int row) const {

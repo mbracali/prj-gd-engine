@@ -76,6 +76,7 @@ uniform mat4 uInvViewProj;
 uniform float uFloorZ, uFogHeight, uFogDensity, uFogMax, uTime;
 uniform float uBloom;      // 0 off
 uniform float uStreaks;    // 0 off
+uniform float uAoK;        // the occlusion's exponent: light 0.5 .. stronger 1.5
 uniform vec2 uTexel, uTexelMid;  // uTexelMid: uStreakSrc's texel
 uniform int uCinematic;
 out vec4 fragColor;
@@ -112,6 +113,8 @@ vec3 grade(vec3 c, int g) {
         c = saturation(c, 1.4);
         c += mix(vec3(0.05, -0.01, 0.07), vec3(-0.02, 0.03, 0.04), smoothstep(0.2, 0.8, l)) * 0.8;
         c = mix(c, c * c * (3.0 - 2.0 * c), 0.25);
+    } else if (g == 6) {  // sepia: old photographs (the "Good old days" mode)
+        c = vec3(l) * vec3(1.07, 0.9, 0.68) + vec3(0.04, 0.025, 0.0);
     }
     return c;
 }
@@ -128,7 +131,7 @@ void main() {
                 float w = 1.0 / (1.0 + abs(a.y - a0.y) * 0.25);
                 sum += a.x * w, wsum += w;
             }
-        c *= sum / wsum;
+        c *= pow(sum / wsum, uAoK);
     }
     if (uFog == 3) {
         // Super Fog: the half-resolution volume (light shafts, glow and the ground layer).
@@ -909,6 +912,8 @@ unsigned PostFx::process(unsigned color, unsigned depth, int sw, int sh, int ow,
         const int fog = f.hasCamera ? s.fog : 0;
         gl::glUniform1i(uniform(pComposite_, "uFog"), fog);
         gl::glUniform1i(uniform(pComposite_, "uSsao"), ssao ? 1 : 0);
+        static constexpr float kAoK[5] = {0, 0.5f, 0.8f, 1.1f, 1.5f};  // none, light, medium, strong, stronger
+        gl::glUniform1f(uniform(pComposite_, "uAoK"), kAoK[std::clamp(s.ssao, 0, 4)]);
         gl::glUniformMatrix4fv(uniform(pComposite_, "uInvViewProj"), 1, GL_FALSE, inv.data());
         // Low: knee-high wisps; full: a thicker layer to the waist (rockers are ~80 units tall).
         gl::glUniform1f(uniform(pComposite_, "uFloorZ"), f.floorZ);
@@ -917,7 +922,8 @@ unsigned PostFx::process(unsigned color, unsigned depth, int sw, int sh, int ow,
         gl::glUniform1f(uniform(pComposite_, "uFogMax"), s.fog >= 2 ? 0.88f : 0.68f);
         gl::glUniform1f(uniform(pComposite_, "uTime"), f.timeSec);
         gl::glUniform1f(uniform(pComposite_, "uBloom"), !pyramid ? 0.0f : s.bloom >= 3 ? 0.9f : s.bloom == 2 ? 0.68f : s.bloom == 1 ? 0.45f : 0.0f);
-        gl::glUniform1f(uniform(pComposite_, "uStreaks"), s.streaks && pyramid ? 1.1f : 0.0f);
+        static constexpr float kStreaks[4] = {0, 0.4f, 0.7f, 1.1f};  // none, very light, light, medium
+        gl::glUniform1f(uniform(pComposite_, "uStreaks"), pyramid ? kStreaks[std::clamp(s.streaks, 0, 3)] : 0.0f);
         gl::glUniform2f(uniform(pComposite_, "uTexel"), 1.0f / float(sw), 1.0f / float(sh));
         gl::glUniform2f(uniform(pComposite_, "uTexelMid"), pyramid ? 1.0f / float(down_[0].w) : 0.0f, pyramid ? 1.0f / float(down_[0].h) : 0.0f);
         gl::glUniform1i(uniform(pComposite_, "uCinematic"), s.cinematic ? 1 : 0);
@@ -936,10 +942,10 @@ unsigned PostFx::process(unsigned color, unsigned depth, int sw, int sh, int ow,
         float diff = 0, norm = 0;
         for (int k = 0; k < 16; ++k) diff += std::fabs(f.viewProj[size_t(k)] - starPrevViewProj_[size_t(k)]), norm += std::fabs(f.viewProj[size_t(k)]);
         const bool valid = starValid_ && !resized && diff <= 0.15f * norm;  // not across a camera cut
-        // Light, medium, high: the motion smear's gain, the zoom and the trail.
-        static constexpr float kScale[4] = {0, 2.0f, 3.5f, 5.0f}, kRadial[4] = {0, 0.008f, 0.016f, 0.026f},
-                               kFeedback[4] = {0, 0.35f, 0.55f, 0.7f};
-        const int lv = std::clamp(s.starBlur, 1, 3);
+        // Light, medium, strong, stronger: the motion smear's gain, the zoom and the trail.
+        static constexpr float kScale[5] = {0, 2.0f, 3.5f, 5.0f, 6.5f}, kRadial[5] = {0, 0.008f, 0.016f, 0.026f, 0.036f},
+                               kFeedback[5] = {0, 0.35f, 0.55f, 0.7f, 0.8f};
+        const int lv = std::clamp(s.starBlur, 1, 4);
         bindTarget(next);
         gl::glUseProgram(pStarBlur_);
         gl::glUniform1i(uniform(pStarBlur_, "uTex"), 0);
@@ -1089,8 +1095,10 @@ unsigned PostFx::finish(unsigned cur, int ow, int oh, const PostSettings& s, con
     gl::glUniform1i(gl::glGetUniformLocation(pFinish_, "uTex"), 0);
     gl::glUniform2f(gl::glGetUniformLocation(pFinish_, "uTexel"), 1.0f / float(ow), 1.0f / float(oh));
     gl::glUniform1f(gl::glGetUniformLocation(pFinish_, "uSharp"), s.sharpen >= 2 ? 1.0f : s.sharpen == 1 ? 0.45f : 0.0f);
-    gl::glUniform1f(gl::glGetUniformLocation(pFinish_, "uCa"), s.chromatic ? 0.012f : 0.0f);
-    gl::glUniform1f(gl::glGetUniformLocation(pFinish_, "uGrain"), s.grain >= 2 ? 0.09f : s.grain == 1 ? 0.045f : 0.0f);
+    static constexpr float kCa[4] = {0, 0.006f, 0.012f, 0.02f};                // none, light, medium, strong
+    static constexpr float kGrain[5] = {0, 0.03f, 0.045f, 0.07f, 0.095f};     // none, light, medium, strong, stronger
+    gl::glUniform1f(gl::glGetUniformLocation(pFinish_, "uCa"), kCa[std::clamp(s.chromatic, 0, 3)]);
+    gl::glUniform1f(gl::glGetUniformLocation(pFinish_, "uGrain"), kGrain[std::clamp(s.grain, 0, 4)]);
     gl::glUniform1f(gl::glGetUniformLocation(pFinish_, "uTime"), f.timeSec);
     drawQuad();
     return fin_.tex;
