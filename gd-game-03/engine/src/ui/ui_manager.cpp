@@ -872,10 +872,16 @@ void UiManager::action(const InputEvent& e) {
     case Action::StarPower: pad = kPad_Select; break;
     default: break;  // strum comes as Up / Down
     }
-    // A joypad's yellow / blue / orange still enter the cheats' codes
-    // (long_cheats.dta's G_YELLOW / G_BLUE / G_ORANGE).
-    if (pad < 0 && e.down && splash_ < 0 && e.action >= Action::Fret2 && e.action <= Action::Fret4)
-        feedCheats(e.action == Action::Fret2 ? kPad_Circle : e.action == Action::Fret3 ? kPad_Square : kPad_L1);
+    // The frets enter the cheats' codes as the PS2 guitar's buttons
+    // (long_cheats.dta: G_GREEN kPad_R2, G_RED kPad_Circle, G_YELLOW
+    // kPad_Tri, G_BLUE kPad_X, G_ORANGE kPad_Square [C data]), whatever
+    // menu button the fret also is; the menu button then feeds nothing.
+    fretFedCheat_ = false;
+    if (e.down && splash_ < 0 && e.action >= Action::Fret0 && e.action <= Action::Fret4) {
+        static constexpr int kFretPads[5] = {kPad_R2, kPad_Circle, kPad_Tri, kPad_X, kPad_Square};
+        feedCheats(kFretPads[int(e.action) - int(Action::Fret0)]);
+        fretFedCheat_ = true;
+    }
 
     if (pad < 0) return;
     // Two players: the scripts' $player_num is the player whose pad acted
@@ -902,7 +908,8 @@ void UiManager::buttonDown(int button, int player) {
     player = std::clamp(player, 0, 1);
     if (button >= 0 && button < 16) ++presses_[size_t(button)];
     if (isDirection(button)) held_[size_t(player)] = {button, 0, false};
-    if (splash_ < 0) feedCheats(button);
+    if (splash_ < 0 && !fretFedCheat_) feedCheats(button);
+    fretFedCheat_ = false;
     if (splash_ >= 0) {
         // The original's splashes can't be skipped [I]; the port skips them
         // all on select, back or Start, as gd01 skips its boot logos.
@@ -919,7 +926,7 @@ void UiManager::buttonDown(int button, int player) {
 // buttons start afresh.
 void UiManager::feedCheats(int button) {
     const double now = double(SDL_GetTicksNS()) / 1e6;
-    if (button != kPad_Circle) gamepadsAtMs_ = -1;  // another button: a cheat's code, not GAMEPADS
+    if (button != kPad_Tri) gamepadsAtMs_ = -1;  // another button (yellow feeds kPad_Tri): a cheat's code, not GAMEPADS
     bool fresh = false;
     if (!cheatButtons_.empty() && now - cheatLastMs_ > 750) cheatButtons_.clear(), fresh = true;
     cheatLastMs_ = now;

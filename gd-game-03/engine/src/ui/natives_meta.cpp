@@ -579,6 +579,9 @@ public:
         if (msg == "get_guitar_volume") return r = Value::real(db(o.guitarVolumeIdx)), true;
         if (msg == "get_fx_volume") return r = Value::real(db(o.fxVolumeIdx)), true;
         if (msg == "set_mute_fx") return true;
+        // This disc's stereo / mono setting (ui/options.dta stereo.chk).
+        if (msg == "get_stereo") return r = Value::integer(o.stereo ? 1 : 0), true;
+        if (msg == "set_stereo") return o.stereo = !args.empty() && args[0].truthy(), changed(), true;
         return false;
     }
     void changed() {

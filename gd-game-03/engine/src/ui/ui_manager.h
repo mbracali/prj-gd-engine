@@ -260,6 +260,7 @@ private:
         std::vector<int> buttons;
         const DataNode* script = nullptr;
     };
+    bool fretFedCheat_ = false;  // this press came from a fret, already fed to the cheats
     std::vector<LongCheat> longCheats_;
     std::deque<int> cheatButtons_;
     double cheatLastMs_ = -1e9;

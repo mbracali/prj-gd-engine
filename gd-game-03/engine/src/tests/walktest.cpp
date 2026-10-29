@@ -35,8 +35,9 @@ extern const std::size_t kUiStubsTxtSize;
 namespace {
 
 constexpr int kX = ui::kPad_X, kTri = ui::kPad_Tri, kStart = ui::kPad_Start, kUp = ui::kPad_DUp, kDown = ui::kPad_DDown;
-// long_cheats.dta's frets (HX_XBOX): G_YELLOW, G_BLUE, G_ORANGE.
-constexpr int kYellow = ui::kPad_Circle, kBlue = ui::kPad_Square, kOrange = ui::kPad_L1;
+// long_cheats.dta's frets on this disc (the PS2 guitar): G_YELLOW kPad_Tri,
+// G_BLUE kPad_X, G_ORANGE kPad_Square [C data].
+constexpr int kYellow = ui::kPad_Tri, kBlue = ui::kPad_X, kOrange = ui::kPad_Square;
 
 // The STUB whitelist (tests/ui_stubs.txt): prefixes, `*` at the end matches anything.
 std::vector<std::string> whitelist() {
@@ -154,7 +155,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         check("menu_sounds");
         // After a song, Enhanced Options' backdrop still shows the band (GD03-074).
         wait(2000);  // the main menu's entrance (a press during it is lost)
-        for (int i = 0; i < 4; ++i) press(kDown), wait(150);  // OPTIONS
+        for (int i = 0; i < 3; ++i) press(kDown), wait(150);  // OPTIONS (this disc: CAREER, QUICK PLAY, MULTIPLAYER, TRAINING, OPTIONS)
         press(kX);
         at("options_screen");
         press(kDown), wait(150), press(kDown), wait(150);
@@ -177,32 +178,27 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         wait(1500);
         press(kStart);
         at("pause_screen");
-        press(kDown);  // RESTART
+        press(kDown);  // RESTART (this disc restarts at once: no confirm screen, ui/pause.dta)
         wait(150);
         press(kX);
-        at("pause_confirm_restart_screen");
-        press(kX);  // restart.btn
         at("game_screen");
         wait(2500);
         press(kStart);
         at("pause_screen");
-        press(kUp);  // QUIT (up from RESUME)
+        press(kUp);  // QUIT (up from RESUME; quits at once)
         wait(150);
         press(kX);
-        at("pause_confirm_quit_screen");
-        press(kX);  // quit.btn
         at("meta_loading_screen");
         at("qp_selsong_screen");
         check("menu_sounds");
         expect_ = {"main_screen", "qp_selsong_screen", "qp_diff_screen", "loading_screen", "game_screen", "pause_screen",
-                   "game_screen", "pause_screen", "pause_confirm_restart_screen", "game_screen", "pause_screen",
-                   "pause_confirm_quit_screen", "meta_loading_screen", "qp_selsong_screen"};
+                   "game_screen", "pause_screen", "game_screen", "pause_screen", "meta_loading_screen", "qp_selsong_screen"};
     } else if (scenario == "career" || scenario == "career_full" || scenario == "career_song") {
         bootToMain();
         at("main_screen");
         if (scenario == "career_song" && SDL_getenv("GD03_WALK_ENHANCED")) {
             // Enhanced Options first (its backdrop loads a venue, then frees it).
-            for (int i = 0; i < 4; ++i) press(kDown), wait(150);  // OPTIONS
+            for (int i = 0; i < 3; ++i) press(kDown), wait(150);  // OPTIONS (this disc: CAREER, QUICK PLAY, MULTIPLAYER, TRAINING, OPTIONS)
             press(kX);
             at("options_screen");
             press(kDown), wait(150), press(kDown), wait(150);
@@ -214,7 +210,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
             press(kTri);
             at("main_screen");
             wait(2000);  // the main menu's entrance (a press during it is lost)
-            for (int i = 0; i < 6; ++i) press(kUp), wait(400);  // OPTIONS -> QUICK PLAY
+            for (int i = 0; i < 3; ++i) press(kUp), wait(400);  // OPTIONS -> QUICK PLAY
         }
         press(kUp);  // CAREER (main_career.btn)
         wait(150);
@@ -401,7 +397,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
     } else if (scenario == "back") {
         at("main_screen");
         check("camera_record");
-        for (int i = 0; i < 4; ++i) press(kDown), wait(150);  // QUICK PLAY -> MULTIPLAYER -> TRAINING -> LEADERBOARDS -> OPTIONS
+        for (int i = 0; i < 3; ++i) press(kDown), wait(150);  // QUICK PLAY -> MULTIPLAYER -> TRAINING -> OPTIONS
         press(kX);
         at("options_screen");
         wait(800);
@@ -416,7 +412,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         // The options again: the bricks' light as the first time (meta_bricks
         // is one directory: main's ui_enter_back turns it on again for every
         // panel showing it after options' ui_exit_back turned it off).
-        for (int i = 0; i < 4; ++i) press(kDown), wait(150);
+        for (int i = 0; i < 3; ++i) press(kDown), wait(150);
         press(kX);
         at("options_screen");
         wait(800);
@@ -426,7 +422,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         expect_ = {"main_screen", "options_screen", "audio_settings_screen", "options_screen", "main_screen", "options_screen", "main_screen"};
     } else if (scenario == "enhanced") {
         at("main_screen");
-        for (int i = 0; i < 4; ++i) press(kDown), wait(150);  // OPTIONS (past MULTIPLAYER)
+        for (int i = 0; i < 3; ++i) press(kDown), wait(150);  // OPTIONS (past MULTIPLAYER)
         press(kX);
         at("options_screen");
         press(kDown), wait(150), press(kDown), wait(150);  // Audio Settings -> Video Settings -> Enhanced Options
@@ -509,17 +505,19 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         check("one_right");
         expect_ = {"main_screen"};
     } else if (scenario == "cheats") {
-        // GH2's codes at the main menu (config/long_cheats.dta), a press every 120 ms.
+        // The codes at the main menu (config/long_cheats.dta), a press every 120 ms.
+        // Entered with the keyboard's frets (1..5) through the input layer,
+        // as a player does: yellow 3, blue 4, orange 5.
         auto code = [&](std::initializer_list<int> buttons) {
-            for (int b : buttons) press(b), wait(120);
+            for (int b : buttons) key(b == kYellow ? SDLK_3 : b == kBlue ? SDLK_4 : SDLK_5), wait(120);
         };
         at("main_screen");
-        code({kYellow, kBlue, kYellow, kOrange, kYellow, kBlue});  // Air Guitar
+        code({kYellow, kBlue, kYellow, kOrange, kBlue, kBlue});  // Air Guitar (this disc's config/long_cheats.dta)
         check("cheat_air_on");
-        code({kBlue, kOrange, kYellow, kOrange, kBlue, kOrange, kYellow, kYellow});  // Hyper Speed
+        code({kYellow, kBlue, kOrange, kOrange, kBlue, kYellow, kYellow, kOrange});  // Hyper Speed (this disc's)
         check("cheat_hyper_on");
         wait(900);  // more than 750 ms: the next press starts afresh
-        code({kYellow, kBlue, kYellow, kOrange, kYellow, kBlue});  // Air Guitar again: off
+        code({kYellow, kBlue, kYellow, kOrange, kBlue, kBlue});  // Air Guitar again: off
         check("cheat_air_off");
         expect_ = {"main_screen"};
     } else if (scenario == "coop" || scenario == "faceoff" || scenario == "proface") {
@@ -864,7 +862,14 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
     }
     if (s.screen == "bricks_record" || s.screen == "bricks_same") {
         std::array<float, 4> c{};
-        if (!bricksLight(ui, c)) return fail(ui.currentScreen() + " shows no meta_bricks");
+        // GH2's meta_bricks backdrop (its meta_light_on.mnm) is not on this
+        // disc: the menus' backdrop is each panel's own scene, so there is
+        // no shared light to compare [C data: no ui milo has it].
+        if (!bricksLight(ui, c)) {
+            std::printf("  bricks: %s has no meta_light_on (none on this disc)\n", ui.currentScreen().c_str());
+            ++step_, stepStart_ = -1;
+            return;
+        }
         if (s.screen == "bricks_record") {
             bricks_ = c;
         } else {
