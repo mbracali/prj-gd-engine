@@ -239,3 +239,31 @@ player's `player_status` struct.
 ### Unknown / not done
 - whammy_cutoff use; exact star_miss_note boundary; tilt units; coop trigger flow;
   battle attack effects; boss AI (CheckButtonsBoss 0x821096E8).
+
+## Venues, cameras, light show (M5; details in `venues.md`)
+
+- Venue = `LevelZones.<current_level>.zone` -> `ZONES/<zone>.pak.xen`
+  (`Load_Venue`); quickplay picks a random unlocked venue
+  (`quickplay_start_song`), career the tier's `level` [C scripts].
+- Zone pak: `<zone>.scn` + node array `<zone>_NodeArray` (.nqb), `_gfx`
+  scene + nodes (lights), `<zone>_cameras*`, `<zone>_snapshots`,
+  `<zone>_lightshow_mapping` [C data].
+- Sector flag 0x20 = vertices local to the node of the sector's name;
+  node rotation `qy * qz * qx` of `angles` [C data: matches every light's
+  `rotationquat`]; y up; cameras and lights look down local +z, screen right
+  = local -x [C data: camera quats project their look-at targets to their
+  `screenoffset`]; FOV horizontal [C viewer `sethfov`; I for cuts].
+- Camera cuts: `<song>_cameras_notes` through `CameraCuts_NoteMapping`
+  (77..117: enable / disable, array prefix, forced type or name, length = shot
+  length); otherwise 3..8 s to the next lightshow note 58 (downbeat); the
+  intro transition cuts to `cameras_fastintro` / `cameras_intro` [C scripts
+  `guitar_cameras.qb`, `guitar_transitions.qb`]. Performance arrays chosen by
+  C code [I: rock meter bands].
+- Light show: `<song>_lightshow_notes` (moods 70..76, colour overrides 61..69,
+  snapshot change 57 / 58, strobe 60, blend time 39..53) step through the
+  zone's snapshots (per light: colour, intensity, far attenuation); 100 ms
+  offset; default blend 0.15 s [C scripts `lightshow.qb`].
+- Materials [I]: `+0xe8` top byte alpha cut-off, `+0xd8` blend mode, `+0xd4`
+  draw order; last texture = lightmap (2048x2048 single-level DXT1) [C data];
+  crowd cards = `tw_billboard0N` placeholders replaced by crowd renders [C
+  `create_crowd_models`].

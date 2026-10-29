@@ -20,6 +20,7 @@ class Disc;
 class Globals;
 class Mixer;
 class TextureCache;
+class VenueStage;
 
 // One song played directly (`--song <id>`, the development shortcut, L6):
 // the song's stems through the mixer, the player's judge (game/player.h) on
@@ -28,6 +29,8 @@ class TextureCache;
 // reimplemented: a labelled development aid, not GH3's look.
 class SongScreen {
 public:
+    SongScreen();
+    ~SongScreen();
     bool start(const Disc& disc, const Globals& g, const SongInfo& song, int difficulty, bool autoplay, bool noFail, Mixer& mixer,
                std::string& error, const TextureCache* textures = nullptr);
     void handle(const InputEvent& e);
@@ -66,6 +69,9 @@ private:
     float whammy_ = 0;
     double finishedAt_ = -1;
     bool forcedFail_ = false;
+    // The venue behind the highway (render/venue_stage.h; GD04_NO_VENUE=1: none).
+    std::unique_ptr<VenueStage> venue_;
+    const Disc* disc_ = nullptr;
 
 public:
     // Walk tests end the song early (ms of song time; -1: play it all).

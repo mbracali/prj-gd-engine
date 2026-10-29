@@ -54,6 +54,7 @@ A test that prints the usage text has not run.
 | Ghidra 12.1.4 headless + XEXLoaderWV | Imports and analyses the XEX (`PowerPC:BE:64:A2ALT-32addr`); `FixXexFunctions.java` then `ExportAnalysisXex.java`: 32,998 functions, all decompiled, 8,705 strings, 85,859 data refs. |
 | Ghidra scripts `DumpAsm.java`, `ReadF.java` | Assembly ranges / whole functions (`fn:<addr>`) and data reads (floats, ints, strings): `tools/ghidra_scripts/`. |
 | Python (`tools/`) | Our own decoders, validated over the whole disc (L21). |
+| Python, M5 (venues) | `qb.py` / `qbscript.py` dumps of qb.pak and the eight zone paks (incl. the .nqb node arrays) into `agents/scratch/m5/`; fits on the data (light `rotationquat` vs `angles`, camera quats vs look-at targets): every venue / camera / light-show finding in `docs/venues.md`. No Ghidra or REA needed. |
 
 So: Ghidra for everything in the XEX; REA stays the first choice for any
 non-PowerPC artefact (none so far). Headless Ghidra invocation (the project

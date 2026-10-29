@@ -12,8 +12,10 @@
 #include "audio/mixer.h"
 #include "audio/song_stream.h"
 #include "data/disc.h"
+#include "data/qbkey.h"
 #include "render/canvas.h"
 #include "render/texture_cache.h"
+#include "render/venue_stage.h"
 #include "script/globals.h"
 
 namespace {
@@ -24,6 +26,9 @@ constexpr double kLeadInMs = 3000.0;
 const SDL_Color kFretColors[5] = {{40, 200, 60, 255}, {220, 40, 40, 255}, {230, 210, 40, 255}, {40, 100, 230, 255}, {240, 130, 30, 255}};
 
 }  // namespace
+
+SongScreen::SongScreen() = default;
+SongScreen::~SongScreen() = default;
 
 bool SongScreen::start(const Disc& disc, const Globals& g, const SongInfo& song, int difficulty, bool autoplay, bool noFail,
                        Mixer& mixer, std::string& error, const TextureCache* textures) {
@@ -64,6 +69,17 @@ bool SongScreen::start(const Disc& disc, const Globals& g, const SongInfo& song,
     for (int i = 0; i < 6; ++i) tracks[size_t(i)].pan = (i % 2) ? 1.0f : -1.0f;
     tracks[0].guitar = tracks[1].guitar = true;
     mixer.play(std::move(stream), std::move(tracks), kLeadInMs);
+    // The venue: its scene, cameras and light show (uploaded on the first frame).
+    if (!SDL_getenv("GD04_NO_VENUE")) {
+        disc_ = &disc;
+        venue_ = std::make_unique<VenueStage>();
+        std::string verr;
+        const std::string zone = VenueStage::chooseZone(g);
+        if (!venue_->start(disc, g, zone, chart_, qbkey::key(song.name), kLeadInMs, nullptr, verr)) {
+            SDL_Log("venue: %s", verr.c_str());
+            venue_.reset();
+        }
+    }
     stepMs_ = -kLeadInMs;
     SDL_Log("song %s (%s, %s): %llu notes", song.name.c_str(), song.title.c_str(), difficultyName(difficulty_),
             static_cast<unsigned long long>(track_.notes.size()));
@@ -102,6 +118,7 @@ void SongScreen::tick(double nowMs, Mixer& mixer) {
         }
         shownHeld_ = in.frets;
         player_->frame(stepMs_, kStepMs, in);
+        if (venue_) venue_->update(stepMs_, player_->stats().health);
         hud_.update(player_->stats(), stepMs_);
         for (const PlayerEvent& ev : player_->events()) {
             if (ev.kind == PlayerEvent::Kind::Hit) {
@@ -155,6 +172,18 @@ int SongScreen::phraseCount() const {
 }
 
 void SongScreen::draw(Canvas& c, double now, const TextureCache* textures) {
+    if (venue_) {
+        // The venue first, under the 2D highway and HUD.
+        std::string verr;
+        if (!venue_->view() && !venue_->attach(c.renderer().device(), *disc_, verr)) {
+            SDL_Log("venue: %s", verr.c_str());
+            venue_.reset();
+        } else {
+            c.flush();
+            venue_->advance(now);
+            venue_->draw(now);
+        }
+    }
     const PlayerStats& st = player_->stats();
     char text[160];
     if (highwayOk_ && textures && !std::getenv("GD04_DEBUG_HIGHWAY")) {

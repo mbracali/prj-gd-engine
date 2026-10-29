@@ -48,6 +48,7 @@ target_sources(gd04 PRIVATE
   src/data/random_file.cpp
   src/data/scene.cpp
   src/data/texture.cpp
+  src/data/venue.cpp
   src/data/xdvdfs.cpp
   src/devaids/menu_keys.cpp
   src/devaids/screenshot.cpp
@@ -65,6 +66,10 @@ target_sources(gd04 PRIVATE
   src/render/shadertest.cpp
   src/render/texture_cache.cpp
   src/render/texture_codec.cpp
+  src/render/venue_camera.cpp
+  src/render/venue_lights.cpp
+  src/render/venue_stage.cpp
+  src/render/venue_view.cpp
   src/game/chart.cpp
   src/game/note_track.cpp
   src/game/player.cpp
@@ -82,6 +87,7 @@ target_sources(gd04 PRIVATE
   src/tests/walk.cpp
   src/tests/selftest_play.cpp
   src/tests/sfxtest.cpp
+  src/tests/venuetest.cpp
   src/ui/song_screen.cpp
   src/ui/front_end.cpp
   src/ui/natives_flow.cpp
