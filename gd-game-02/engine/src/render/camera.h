@@ -16,12 +16,15 @@ struct Camera {
     float yFov = 0.8f;  // radians
     float nearPlane = 1, farPlane = 10000;
     float aspect = kLogicalW / kLogicalH;
+    // TAA's sub-pixel offset of the picture (NDC), 0 otherwise (render/enhanced_fx.h).
+    float jitterX = 0, jitterY = 0;
 
     Vec3 position() const { return world.translationPart(); }
     Mat4 view() const { return world.inverseAffine(); }
     // Rnd camera space -> clip space. `zeroToOne`: the device's clip depth.
     Mat4 projection(bool zeroToOne) const {
-        return Mat4::perspective(yFov, aspect, nearPlane, farPlane, zeroToOne) * Mat4::rndToEye();
+        const Mat4 p = Mat4::perspective(yFov, aspect, nearPlane, farPlane, zeroToOne) * Mat4::rndToEye();
+        return jitterX == 0 && jitterY == 0 ? p : Mat4::translation(jitterX, jitterY, 0) * p;
     }
     Mat4 viewProj(bool zeroToOne) const { return projection(zeroToOne) * view(); }
 

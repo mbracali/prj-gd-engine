@@ -8,7 +8,10 @@
 #include <unordered_map>
 #include <vector>
 
+#include <memory>
+
 #include "render/device.h"
+#include "render/enhanced_fx.h"
 
 namespace scene {
 class PostProc;
@@ -111,6 +114,19 @@ public:
     void setDof(const DofState& d) { dof_ = d; }
     void clearDof() { dof_ = {}; }
 
+    // The Enhanced Options' effects (render/enhanced_fx.h) and what this
+    // frame's need from the venue (set before end()).
+    void setSettings(const PostSettings& s) { settings_ = s; }
+    const PostSettings& settings() const { return settings_; }
+    void setFrame(const PostFrame& f) { frame_ = f; }
+    // TAA's sub-pixel jitter for this frame's world (NDC; 0 when off).
+    std::array<float, 2> jitter() { return capturing_ && enhanced_ && settings_.any() ? enhanced_->jitter(settings_, w_, h_) : std::array<float, 2>{0, 0}; }
+    // The port's chain (tests: frames run, the last frame's passes); nullptr before the first.
+    const EnhancedFx* enhanced() const { return enhanced_.get(); }
+    // The composite program this frame used (tests: which of GH2's effects ran).
+    uint32_t lastKey() const { return lastKey_; }
+    bool lastDof() const { return lastDof_; }
+
     // Starts drawing the world into the HDR buffer (sized to the picture),
     // cleared to `clear` (rgba 0..1, stored / 4) with its depth. Returns
     // false when post-processing is off (GD02_POST=0, or the driver cannot
@@ -151,6 +167,12 @@ private:
     bool capturing_ = false;
     int w_ = 0, h_ = 0;
     TargetId hdr_, dofA_, dofB_, bloomHalf_, bloomA_, bloomB_;
+    TargetId ldr_;  // GH2's pass's result when the port's chain follows
+    PostSettings settings_;
+    PostFrame frame_;
+    std::unique_ptr<EnhancedFx> enhanced_;
+    uint32_t lastKey_ = 0;
+    bool lastDof_ = false;
     bool hdr10_ = true;
     BufferId triangle_;
     TextureId noise_;

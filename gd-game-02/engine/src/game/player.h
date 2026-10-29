@@ -98,6 +98,11 @@ public:
     void setWhammy(bool held) { whammyKey_ = held; }
     // Watcher +0x2c: added to the input time (the player's lag setting) [C].
     void setCalibrationMs(float ms) { offset_ = ms; }
+    // Enhanced Options > Forgiving Hammer-ons and Pull-offs [I: the port's]:
+    // no lock after a wrong hammer-on, and a HOPO whose fret is held when it
+    // arrives plays by itself.
+    void setForgivingHopos(bool on) { forgiving_ = on; }
+    bool forgivingHopos() const { return forgiving_; }
     // Practice: gems before `firstGem` are skipped (watcher +0x1c) and the
     // player counts only gems with ticks in [startTick, endTick) (+0xf0/+0xf4) [C].
     void setPracticeRange(int firstGem, int startTick, int endTick);
@@ -213,6 +218,7 @@ private:
 
     // Watcher fields (offsets of the guitar watcher, FINDINGS "Watcher fields").
     float offset_ = 0;            // +0x2c calibration
+    bool forgiving_ = false;
     int lastHit_ = -1;            // +0x18
     int firstPlayable_ = 0;       // +0x1c
     int sustainGem_ = -1;         // +0x24

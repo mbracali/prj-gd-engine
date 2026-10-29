@@ -133,6 +133,18 @@ public:
     // The last frame drawn as a .bmp (the walk test's shots); false if none.
     virtual bool saveScreenshot(const std::string& /*path*/) { return false; }
     virtual void setEnhancedValue(const std::string& /*key*/, const std::string& /*value*/) {}
+    // An Enhanced Options button: steam_deck (the Steam Deck profile, once),
+    // export (a folder dialog), load_settings / load_progress (a file
+    // dialog). enhancedStatus: the last one's result ("" none), shown a few
+    // seconds by the panel.
+    virtual void enhancedAction(const std::string& /*action*/) {}
+    virtual std::string enhancedStatus() { return {}; }
+    // What the Enhanced Options put in effect, for the walk tests (-1:
+    // unknown): "particles", "shake", "touch", "rockband", "xinput",
+    // "sharp_ui", "post_original", "post_dof", "post_key", "fx_frames",
+    // "fx:<pass>" (the port's chain ran that pass last frame), "shadows",
+    // "beams", "motes" (the venue extras last frame), "calibration_ms".
+    virtual int enhancedState(const std::string& /*key*/) { return -1; }
     // The Enhanced Options' backdrop: a still shot of the second venue with
     // the band posed, while the screen is up; drawMenuBackdrop draws it
     // (false when there is none).

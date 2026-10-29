@@ -6,6 +6,7 @@
 #include <cstdlib>
 
 #include "render/camera.h"
+#include "render/enhanced_lights.h"
 #include "render/spotlight_view.h"
 
 namespace gfx {
@@ -167,8 +168,12 @@ std::vector<std::string> Renderer::compileAll(int& programs) {
         if (ProgramId p = device_->createProgram(d, error)) device_->destroyProgram(p);
         else SDL_Log("shader %s: %s", d.name.c_str(), error.c_str()), failed.push_back(d.name);
     }
-    // The post-process passes (render/post_fx.h).
-    for (const ProgramDesc& d : PostFx::allPrograms()) {
+    // The post-process passes (render/post_fx.h), the Enhanced Options' chain
+    // (render/enhanced_fx.h) and venue extras (render/enhanced_lights.h).
+    std::vector<ProgramDesc> post = PostFx::allPrograms();
+    for (const ProgramDesc& d : EnhancedFx::allPrograms()) post.push_back(d);
+    post.push_back(EnhancedLights::programDesc());
+    for (const ProgramDesc& d : post) {
         ++programs;
         error.clear();
         if (ProgramId p = device_->createProgram(d, error)) device_->destroyProgram(p);

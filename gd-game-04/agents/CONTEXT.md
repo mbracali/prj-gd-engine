@@ -1,0 +1,149 @@
+# gd-game-04: working context (build, test, run, tools, clocks)
+
+Read this first in a new session, then `PROGRESS.md`, `DECISIONS.md`,
+`OPEN_QUESTIONS.md` and the backlog's gd-game-04 section.
+
+## Paths (relative to the repository root)
+
+| What | Where |
+|---|---|
+| Disc image | `original_isos/Guitar Hero III - Legends of Rock (USA) (Rev 1) (X360).iso` (git-ignored) |
+| Rip | `gd-game-04/extracted/` (`tools/xdvdfs.py extract <iso> gd-game-04/extracted`; 660 files, 3.6 GB) |
+| Name table | `gd-game-04/extracted/names.tsv` (`tools/qbkey.py --table gd-game-04/extracted/names.tsv`) |
+| Ghidra project | `gd-game-04/ghidra/gh3.gpr` (program `default.xex`) |
+| Ghidra export | `gd-game-04/ghidra/analysis/` (`functions.tsv`, `strings.tsv`, `refs.tsv`, `decomp/*.c`) |
+
+Both `extracted/` and `ghidra/` are git-ignored: never commit them, never paste
+decompiler output into tracked files.
+
+## Build
+
+```sh
+# development build (no FFmpeg), fastest
+cmake -S gd-game-04/engine -B gd-game-04/engine/build/dev -G Ninja -DCMAKE_BUILD_TYPE=Release -DGD04_VIDEO=OFF
+ninja -C gd-game-04/engine/build/dev
+# release-shaped builds (packages in gd-game-04/local_builds/)
+gd-game-04/local_build.sh linux|steamdeck|windows|android|all [--force]
+```
+
+Check the binary is newer than your edits (`ls -la .../gd04`) before any test
+(kickoff rule 4.2).
+
+## Tests (each takes the disc image or the rip folder as its argument)
+
+```sh
+ISO="$PWD/original_isos/Guitar Hero III - Legends of Rock (USA) (Rev 1) (X360).iso"
+B=gd-game-04/engine/build/dev/gd04
+$B --formattest "$ISO"     # ends with "formattest: all files parse"
+$B --shadertest            # "all N shader programs compiled"; GD04_GLES=1 for OpenGL ES
+SDL_VIDEO_DRIVER=offscreen SDL_AUDIO_DRIVER=dummy GD04_QUIT_AFTER=1500 \
+  GD04_SCREENSHOT=/tmp/x.bmp GD04_SCREENSHOT_AT=1000 timeout 30 $B "$ISO"   # headless smoke run
+python3 -I gd-game-04/tools/pak.py check gd-game-04/extracted    # "paks: 400, files: 24726, with problems: 0"
+python3 -I gd-game-04/tools/qb.py check gd-game-04/extracted     # "qb files: 2731, ... with problems: 0"
+```
+
+A test that prints the usage text has not run.
+
+## Reverse-engineering tools: which did what
+
+| Tool | Result |
+|---|---|
+| REA (`mcp__rea__open_binary`) on `default.xex` | Rejected: "unsupported binary format" (no XEX2 / PowerPC support). |
+| REA on the Ghidra project (`gh3.gpr`) | Rejected: "truncated or unsupported binary header". |
+| REA `raw-binary` mode | Offers 6502 / x86 / x86_64 / ARM / ARM64 / m68k only: no PowerPC. |
+| Ghidra 12.1.4 headless + XEXLoaderWV | Imports and analyses the XEX (`PowerPC:BE:64:A2ALT-32addr`); `FixXexFunctions.java` then `ExportAnalysisXex.java`: 32,998 functions, all decompiled, 8,705 strings, 85,859 data refs. |
+| Ghidra scripts `DumpAsm.java`, `ReadF.java` | Assembly ranges / whole functions (`fn:<addr>`) and data reads (floats, ints, strings): `tools/ghidra_scripts/`. |
+| Python (`tools/`) | Our own decoders, validated over the whole disc (L21). |
+| Python, M5 (venues) | `qb.py` / `qbscript.py` dumps of qb.pak and the eight zone paks (incl. the .nqb node arrays) into `agents/scratch/m5/`; fits on the data (light `rotationquat` vs `angles`, camera quats vs look-at targets): every venue / camera / light-show finding in `docs/venues.md`. No Ghidra or REA needed. |
+
+So: Ghidra for everything in the XEX; REA stays the first choice for any
+non-PowerPC artefact (none so far). Headless Ghidra invocation (the project
+path must be absolute, no `.` element):
+
+```sh
+export JAVA_HOME=~/.local/opt/jdk-21.0.12.1+1
+G=~/.local/opt/ghidra_12.1.4_PUBLIC/support/analyzeHeadless
+P=$PWD/gd-game-04/ghidra
+$G $P gh3 -process default.xex -readOnly -noanalysis -scriptPath $PWD/gd-game-04/tools/ghidra_scripts \
+   -postScript DumpAsm.java fn:0x82300000 0x82300000:40
+$G $P gh3 -process default.xex -readOnly -noanalysis -scriptPath $PWD/gd-game-04/tools/ghidra_scripts \
+   -postScript ReadF.java 0x82001234:f:4 0x82005678:str
+```
+
+## The executable
+
+- `default.xex`: XEX2, title ID **415607F7**, media ID 43048167, version 4,
+  base address 0x82000000, entry 0x82136AC8 [C: XEX optional headers].
+
+## Clocks (kickoff rule 5)
+
+Only one so far: the wall clock (`SDL_GetTicksNS`), used by `GD04_KEYS`,
+`GD04_SCREENSHOT_AT` and `GD04_QUIT_AFTER` (ms since the main loop
+started). The song clock, the audio clock and the sfx log arrive with M2;
+each one's offset is documented here and in `docs/` when it does.
+
+Note (z-order research, 2026-10-29): screen-element z_priority rules were read
+with Ghidra headless (`DumpAsm.java`, `ReadF.java`) plus the existing
+`ghidra/analysis/decomp` export; REA was not used (it cannot open the XEX).
+Notes in `agents/scratch/zorder_spec.md`.
+
+Note (band, M6, 2026-10-29): the band's scripts and data were read from
+`qbscript.py` / `qb.py` dumps of qb.pak and the song paks (`agents/scratch/m6/`),
+the clips and skins with `anim.py` / `scn.py` helpers there; the C functions
+(hero_play_tempo_anim_cfunc 0x821090B0 -> 0x82108E58, skill 0x82108C90, tempo
+0x82108B60 / 0x82108A38, FretFingers 0x821119F8, Drum_iterator 0x821121D8,
+compute_desired_drummer_twist 0x82107F48) with Ghidra headless (`DumpAsm.java`
+fn:<addr>) and the `analysis/decomp` export. REA was not used (it cannot open
+the XEX). Test: `gd04 --chartest <disc>` (docs/band.md "Test").
+Note (stars/base_score, 2026-10-29): read with qbscript.py dis plus Ghidra headless (`DumpAsm.java` fn:0x8210AF70, `ReadF.java`); REA not used. Notes in `agents/scratch/stars_spec.md`.
+Note (GH3 shaders, crowd, housings, particles, 2026-10-29): the material
+library was decoded from the data (`tools/matlib.py list|dump|check`, the
+D3D constant tables against the scene materials) and the XEX with the
+existing `ghidra/analysis` decomp export (Function_82383768,
+Function_823A5768, Function_822B18C8, Function_824B6698 / 824B6780) and
+Ghidra headless `DumpAsm.java fn:0x822B6E08` (the light manager: VMX128,
+mostly `.word` in Ghidra's listing, so not reimplemented). REA was not used
+(it cannot open the XEX). Xenos microcode layout: the public Xenia ucode.h
+description, checked on the library. Tests: `gd04 --shadertest <disc>`
+compiles every translated template (GD04_SHADERTEST_VERBOSE=1 lists the
+untranslated ones); `GD04_XENOS_DUMP=1` logs each program's GLSL;
+`GD04_GH3_SHADERS=0` / `GD04_CULL=0` / `GD04_NO_CROWD=1` /
+`GD04_NO_PARTICLES=1` / `GD04_NO_SHADOWS=1` / `GD04_SHADOW_INTENSITY=<i>` /
+`GD04_SHADOW_LOG=1` / `GD04_CROWD_DEBUG=1` / `GD04_PARTICLES_LOG=1` are
+development aids.
+- 2026-10-29: the original in Xenia (GD04-027): xenia-canary 02d2cb5 Windows
+  build under Proton Experimental's wine in ~/.local/opt/xenia (prefix,
+  config, driving scripts in tools/), nested Xwayland :5, Vulkan on the AMD
+  iGPU (vulkan_device = 0; the NVIDIA one hangs), keyboard as the pad
+  (hid = winkey). Captures: ~/.local/share/gd-engine/refcaps/gd04/INDEX.md.
+  Never create a uinput virtual pad outside a capture session (it breaks
+  other modules' input tests).
+Note (GD04-014 / -015 / -004 / -021, 2026-10-29): the volume texture's 3D
+tiling from Xenia's public texture_address.h (Tiled3D, cited in
+docs/formats.md), checked on the data (seamless slices); Havok packfiles
+decoded from their own __types__ reflection (`tools/havok.py check|dump|types|rag`,
+data/havok.cpp, both in --formattest); the GD04-004 rules with Ghidra
+headless (DumpAsm.java fn:0x8211E8B8 / 0x8211F328 / 0x82120C90 /
+0x821129D8 / 0x82112850 / 0x8210FD18, ReadF.java) and the analysis export;
+the song-path survey (GD04-021) from qbscript dumps (a reachability walk
+from start_gem_scroller, the songs' event arrays). REA was not used (it
+cannot open the XEX). Scratch: agents/scratch/asm_*.txt.
+- 2026-10-29 (light manager, screen effects, R2): the VMX128 code Ghidra
+  shows as `.word` is read with `tools/vmx128.py <Xenia ppc_opcode_table_gen.cc>
+  <DumpAsm listing>` (the opcode table is the public Xenia source, fetched,
+  not shipped). Read that way: the light manager (823DA990 / 823DB168 /
+  822BB680), the ScreenFX classes (dof 824440F8, bright_sat 8243E5F0,
+  simple_bloom 8243D240, their parse functions 8241BC20 / 8241C640 /
+  8241EE68), the material stencil (823DC180), StarPowerOn (8211DA70);
+  docs/venues.md "Lights", "Screen effects". REA was not used (it cannot
+  open the XEX). Development aids: GD04_NO_SCREENFX=1, GD04_NO_STAGEPEDS=1,
+  GD04_NO_RAGDOLL=1, GD04_RAGDOLL_LOG=1, GD04_STAGEPEDS_LOG=1, GD04_OBJLOG=1 (zone VM object
+  spawns).
+Note (D10, 2026-10-29): the C's gameplay events and spawns were read with
+Ghidra headless (`DumpAsm.java 0x820FF000:40000`, the LaunchEvent 0x821578E8
+call sites and their parameter builders; `ReadF.java 0x82919490:u32:64`, the
+per-player event key tables) and the analysis export; REA was not used (it
+cannot open the XEX). Test aids: `GD04_HOOKLOG=1` logs every hook event /
+spawn with its song time, `GD04_AUTOPLAY_MISS=<n>` makes autoplay miss every
+n-th note (bad notes, multiplier loss), `GD04_NO_HOOKS=1` turns the song
+hooks off; the song-end log line "song hooks: ..." has the counters.

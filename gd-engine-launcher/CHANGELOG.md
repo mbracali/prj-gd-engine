@@ -1,5 +1,14 @@
 # Guitar Dream Universal Launcher: changes
 
+## 0.1.7
+
+Games
+- New: Guitar Hero Encore: Rocks the 80s (gd-game-03, PS2) and Guitar Hero III:
+  Legends of Rock (gd-game-04, Xbox 360), both 0.0.1 and playable from the
+  launcher. Every build carries all four game modules.
+- Guitar Hero II (gd-game-02) 0.1.7: Enhanced options start off (the original
+  look).
+
 ## 0.1.6
 
 Fixes

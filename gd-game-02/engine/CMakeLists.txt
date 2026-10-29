@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
 # Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 cmake_minimum_required(VERSION 3.24)
-project(gd02 VERSION 0.1.6 LANGUAGES C CXX)
+project(gd02 VERSION 0.1.7 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -82,9 +82,12 @@ target_sources(gd02 PRIVATE
   src/render/gl_api.cpp
   src/render/gl_device.cpp
   src/render/highway.cpp
+  src/render/image_enhance.cpp
   src/render/hud_view.cpp
   src/render/material.cpp
   src/render/particles.cpp
+  src/render/enhanced_fx.cpp
+  src/render/enhanced_lights.cpp
   src/render/post_fx.cpp
   src/render/renderer.cpp
   src/render/scene_gpu.cpp

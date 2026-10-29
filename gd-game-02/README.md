@@ -54,6 +54,26 @@ id = `gd-game-02`
 - Mods support
 
 
+**Default settings**: every download starts with the original Guitar Hero II
+look: every effect the port adds is off (Sharper Text and Sprites,
+anti-aliasing, AI upscaling, bloom, Cinematic Color, Color Grading, film
+grain, chromatic aberration, light streaks, ambient occlusion, sharpening,
+Blur on Star Power, band shadows, More Lights on Venues, dust, ground fog,
+the FPS counter), Bokeh is Regular (the original's own depth of field), and
+particles and the camera shake are as the original. Turn the effects on in
+Options > Enhanced Options; your changes are kept. Only the window, frame
+rate, resolution and touch differ per system. "Apply Steam Deck Settings"
+sets the Steam Deck column on any PC; "Remove All Effects" also turns the
+original game's own effects off.
+
+| Setting | Linux | Steam Deck | Windows | macOS | Android |
+|---|---|---|---|---|---|
+| Screen Mode | Windowed | Full Screen | Windowed | Windowed | Full Screen |
+| In-Game Max FPS | 120 | 60 | 120 | 120 | 60 |
+| Internal Resolution | 1080p | 800p | 1440p | 1440p | 900p |
+| Touch Controls | off | off | off | off | on |
+
+
 **Running** (`engine/README.md` has the details, it ships in every download):
 - You need your own Guitar Hero II (Xbox 360) disc image (`.iso`). No game data is included.
 - Start `gd02` and click the window (or press Enter, or tap on Android) to pick the `.iso`, or drop it onto the window. It is remembered (`config.txt` in the save folder `gd-engine/gd02/`); an `.iso` next to the program is found by itself.

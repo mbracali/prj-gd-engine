@@ -871,10 +871,12 @@ void CameraDirector::play(const scene::CamShot& shot, ShotState& st, float f, fl
             st.shakeAngVel[c] *= 0.9f;
         }
     }
-    // The offset in the camera's own axes (0x8214F950).
-    for (int c = 0; c < 3; ++c)
-        x.pos[size_t(c)] += st.shakePos[0] * x.rot[size_t(c)] + st.shakePos[1] * x.rot[size_t(3 + c)] + st.shakePos[2] * x.rot[size_t(6 + c)];
-    {
+    // The offset in the camera's own axes (0x8214F950). Enhanced Options >
+    // Disable Shaky Camera: the shake still runs (the same draws), unseen.
+    if (shake_)
+        for (int c = 0; c < 3; ++c)
+            x.pos[size_t(c)] += st.shakePos[0] * x.rot[size_t(c)] + st.shakePos[1] * x.rot[size_t(3 + c)] + st.shakePos[2] * x.rot[size_t(6 + c)];
+    if (shake_) {
         // Pitch about the camera's right axis, then roll / yaw about its up.
         scene::Xfm r;
         const float cx = std::cos(st.shakeAng[0]), sx = std::sin(st.shakeAng[0]);
