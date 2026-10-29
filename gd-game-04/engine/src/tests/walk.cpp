@@ -4,6 +4,7 @@
 
 #include <SDL3/SDL_log.h>
 
+#include <algorithm>
 #include <cstdio>
 
 #include "data/qbkey.h"
@@ -44,11 +45,47 @@ Walk::Walk(const std::string& name) : name_(name) {
         steps_.push_back({"main_menu_fs", {}, 20000});
     } else if (name == "boot") {
         steps_ = boot;
+    } else if (name == "uitest") {
+        steps_ = boot;
+        uitest_ = true;
     }
+}
+
+void Walk::uiStep(FrontEnd& fe, double now) {
+    if (states_.empty() && stateIdx_ == 0) {
+        // Every global struct ending in _fs with a Create script [C data].
+        for (const auto& name : fe.vm().globals().names()) {
+            const std::string n = qbkey::name(name);
+            if (n.size() < 4 || n.compare(n.size() - 3, 3, "_fs") != 0) continue;
+            const qb::Value* v = fe.vm().globals().find(name);
+            if (!v || !v->st || !v->st->find(qbkey::key("Create"))) continue;
+            states_.push_back(name);
+        }
+        std::sort(states_.begin(), states_.end(), [](uint32_t a, uint32_t b) { return qbkey::name(a) < qbkey::name(b); });
+    }
+    if (stateAt_ >= 0 && now - stateAt_ < 500) return;
+    if (stateAt_ >= 0) {
+        const size_t made = size_t(fe.ui().stats().created) - created0_;
+        if (made == 0) ++empty_, emptyStates_.push_back(qbkey::name(states_[stateIdx_ - 1]));
+    }
+    if (stateIdx_ >= states_.size()) {
+        step_ = steps_.size();  // done
+        return;
+    }
+    const uint32_t st = states_[stateIdx_++];
+    created0_ = size_t(fe.ui().stats().created);
+    qb::Struct p;
+    qs::Vm::set(p, qbkey::key("flow_state"), qs::Vm::makeKey(st));
+    fe.vm().spawn(qbkey::key("start_flow_manager"), p);
+    stateAt_ = now;
 }
 
 std::vector<Action> Walk::update(FrontEnd& fe, bool songPlaying, double now) {
     std::vector<Action> out;
+    if (uitest_ && step_ >= steps_.size() - 1 && reachedAt_ >= 0) {
+        if (!done()) uiStep(fe, now);
+        return out;
+    }
     if (done() || failed_) return out;
     const Step& s = steps_[step_];
     if (reachedAt_ < 0) {
@@ -94,6 +131,12 @@ int Walk::finish(FrontEnd& fe) const {
         std::printf("walktest %s: FAILED (%s); reached: %s\n", name_.c_str(),
                     failure_.empty() ? "did not finish in time" : failure_.c_str(), path.c_str());
         return 1;
+    }
+    if (uitest_) {
+        std::printf("uitest: %zu flow states started, %d built no element:", states_.size(), empty_);
+        for (const std::string& n : emptyStates_) std::printf(" %s", n.c_str());
+        std::printf("\nuitest: every screen was started through the flow manager\n");
+        return 0;
     }
     std::printf("walktest %s: passed (%s); songs started %d, ended %d\n", name_.c_str(), path.c_str(), songsStarted, songsEnded);
     return 0;

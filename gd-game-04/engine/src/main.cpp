@@ -40,6 +40,9 @@ void usage() {
         "  --no-fail            the rock meter cannot fail you\n"
         "  --formattest         parse every pak on the disc and every file in it to its end\n"
         "  --selftest           check the data (song list, every chart), auto-play every chart\n"
+        "  --uitest             boot through the menus, then start every flow state's screen in turn (headless)\n"
+        "  --walktest <walk>    play through GH3's own menus: quickplay, lose, back, boot (headless:\n"
+        "                       SDL_VIDEO_DRIVER=offscreen SDL_AUDIO_DRIVER=dummy)\n"
         "  --audittest [--out f] the asset / reference audit: names the scripts call and pak types the engine lacks\n"
         "  --scripttest         tokenize every script; run the boot script against the natives (GD04_UILOG=1 logs\n"
         "                       every unhandled call once)\n"
@@ -156,6 +159,7 @@ int run(int argc, char** argv) {
         else if (a == "--out") opt.out = value();
         else if (a == "--shadertest") shadertest = true;
         else if (a == "--walktest") opt.walk = value();
+        else if (a == "--uitest") opt.walk = "uitest";
         else if (a == "--playmovie") movie = value();
         else if (a == "--help" || a == "-h") { usage(); return 0; }
         else if (!a.empty() && a[0] == '-' && a.rfind("-psn_", 0) != 0) { usage(); return 2; }  // -psn_: macOS Finder

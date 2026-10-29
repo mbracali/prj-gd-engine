@@ -42,4 +42,13 @@ private:
     bool failed_ = false;
     std::string failure_;
     std::vector<std::string> log_;
+    // uitest: every flow state with a Create script, started in turn.
+    bool uitest_ = false;
+    std::vector<uint32_t> states_;
+    size_t stateIdx_ = 0;
+    double stateAt_ = -1;
+    size_t created0_ = 0;
+    int empty_ = 0;
+    std::vector<std::string> emptyStates_;
+    void uiStep(FrontEnd& fe, double now);
 };

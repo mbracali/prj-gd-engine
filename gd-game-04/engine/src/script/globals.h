@@ -30,6 +30,12 @@ public:
     // The global `name`, created (empty) if missing: writes by `change`.
     qb::Value* ensure(uint32_t name) { return &values_[name]; }
     size_t size() const { return values_.size(); }
+    // Every global's name key.
+    std::vector<uint32_t> names() const {
+        std::vector<uint32_t> out;
+        for (const auto& [k, v] : values_) out.push_back(k);
+        return out;
+    }
     size_t files() const { return files_; }
 
     // A struct's items with its unnamed key references expanded: an unnamed
