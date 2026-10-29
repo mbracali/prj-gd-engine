@@ -4,8 +4,10 @@ How a song's venue is chosen, what a zone pak holds, how GH3 cuts its
 cameras and runs its light show, and how gd04 draws it (M5). **[C]**
 confirmed in the data or the disassembled scripts (file named), **[I]**
 inferred. Code: `engine/src/data/venue.*` (the zone), `render/venue_camera.*`
-(cuts), `render/venue_lights.*` (light show), `render/venue_view.*` (drawing),
-`render/venue_stage.*` (the three for a song), `tests/venuetest.*`.
+(cuts), `render/venue_lights.*` (light show, housings), `render/venue_view.*`
+(drawing, housings, volumes), `render/gh3_shader.*` + `render/xenos_glsl.*` +
+`data/matlib.*` (GH3's shaders), `render/crowd.*`, `render/particles.*`,
+`render/venue_stage.*` (all of it for a song), `tests/venuetest.*`.
 
 Sources: the QB scripts (`tools/qb.py` / `tools/qbscript.py` dumps of
 `qb.pak.xen` and the eight zone paks) and the zone data; no executable
@@ -205,43 +207,183 @@ none]. `--venuetest` checks the result is the same at 60 and 240 fps.
   lights of its node's group [I]. `_VC_` lights look like the vertex-colour
   bake's own lights and are not applied at run time [I].
 
-## 5. Shading (approximate)
+## 5. Shading: GH3's own shaders
 
-GH3's materials name a shader template (`+0xa0`, e.g. 0xe0ab9772 on 160 of
-the venues' materials, 0x1f7a935a, 0xa17d40ed) with texture slots that
-differ per template [C data]. gd04 draws them all with one program
-(`VenueView::programDesc`, uniform blocks GdVenueFrame / GdVenueLights /
-GdVenueMat):
+Each scene material names its template (`+0xa0` = qbkey of the template's
+name, e.g. D_3ChkBox_Pass0 on 58 of z_dive's materials, D_N_S_4ChkBox,
+D_1VertexColorOnly, Billboard_Fast, Wibble_Pos_Simple, Flare; the band's
+SkinShader, HairShader, D_N_S_Character_1SeperateChnl) in the material
+library (docs/formats.md "Material library") [C data]. gd04 draws every
+material with that template's Default technique: the Xenos microcode
+translated to GLSL (`render/xenos_glsl.cpp`, `render/gh3_shader.cpp`), with
 
-- diffuse = the material's first colour texture (class byte 0; some
-  templates put a DXN normal map, class 1, first) [C data: the class byte;
-  I: the slot choice];
-- lightmap = the material's last texture, sampled with the mesh's last
-  texture coordinate set, when the mesh has two sets [C data: 2048x2048
-  single-level DXT1 maps, or a white 32x32 placeholder];
-- colour = diffuse x lightmap x (vertex colour + 0.6 x the group's lights
-  (ambient; directional, point and spot with N.L and a linear fall-off
-  between attenuation start and end; spot cone from hotspot / field)) [I:
-  the formula and the 0.6; GD04_VENUE_VC / GD04_VENUE_DYN scale them];
-- material words [I]: `+0xe8` top byte = alpha cut-off (0x64, 0x80, 0xc8 ...);
-  `+0xd8` = blend mode (0 opaque, 1 additive, 2 subtract, 3 blend), `+0xd4`
-  the draw order (0..3), `+0xcc` bit 3 = blended; additive surfaces unlit.
-- No culling (strip winding not checked), no fog, bloom, depth of field or
-  shadows.
-- `global_ad_tex.pak` holds the `ad_*` sign textures [C data].
-- The crowd's cards (`<zone>_crowd_models[].textureasset`, the
-  `tw_billboard0N` placeholders that `CreateViewportTextureOverride`
-  replaces with a render of the crowd models, `create_crowd_models` in
-  `guitar_crowd.qb`) [C] are hidden until the crowd exists.
+- the material's constsA / constsB as the vertex / pixel shader's c0.. and
+  its textures as samplers s0.. in order [C data: the constant tables];
+- the engine constants c128..c255 at GH3's registers: the D3D-convention
+  matrices (view space x right, y up, z = the camera's +z; projection depth
+  0..1, converted to OpenGL's clip depth when the shader exports it),
+  g_Time, g_viewport [C: the registers; I: g_distanceLODScaler (1, 0, 0, 0)
+  = full detail, g_shLightShadowIntensity 1];
+- vertex inputs by their D3D semantics: the meshes declare the shadow
+  map's coordinates as TEXCOORD4 or TEXCOORD5 (z_dive: 124 meshes
+  texc0 + texc5, 92 texc0 + texc4) and the templates fetch them by that
+  index [C data: the declarations (0x823B9A28) and the shaders' fetch
+  tables];
+- textures GH3 binds itself (g_sampShadowProjection, the smoke of the light
+  volumes) white [I].
 
-## 6. Not done yet
+What the shaders do is then GH3's [C: the microcode], e.g. D_3ChkBox_Pass0:
+colour = diffuse x m_psPass0MaterialColor x vertex colour x (ambient
+(c176) + SH(n) x lerp(1, shadow map, c137) + N.L x key colour (c178) x
+lerp(1, shadow map, c178.w)); the "lightmap" is the material's last
+texture, m_sampShadowMap, sampled with texcoord set 1, a shadow term on the
+dynamic lights, not a light map.
 
-The band is M6 (docs/band.md); the crowd (3D peds
-and the cards), light volumes, flares and housings (the `_gfx` game
-objects), particles and pyro, animated level objects (fans, hub caps, the
-doll: their trigger scripts), screen effects (`dof`, `ScreenFX_*`), the
-encore / boss / win / lose transitions and their cameras, two-player arrays,
-LODs.
+The light registers are the light manager's output (C code; its VMX128
+routines, e.g. Function_822B6E08, are not disassembled by Ghidra), so gd04
+fills them from the group's lights as the light show sets them [I]: the
+group's ambient lights summed (c176); the strongest directional or spot
+light reaching the mesh's centre the key light (g_dirLight0Dir = its
+direction of travel, Color, SpecColor = colour x specularintensity); the
+next three their specular colours (c181 / c183 / c185); every other light
+(and those three) projected onto L1 spherical harmonics as a clamped
+cosine (1/4 + n.l / 2) into c188..c191; point and spot lights fade linearly
+between their attenuation start and end, spots by hotspot / field.
+`specularintensity` comes from the node and the snapshots [C data].
+
+Render state: blend mode from `+0xd8`, alpha test reference from `+0xe8`'s
+top byte, draw order `+0xd4`, blended when `+0xcc` bit 3 [I, as in M5; the
+templates' own render states are not decoded]. Back faces are culled
+(Direct3D's default, counter-clockwise) [I: checked on all eight venues;
+this fixes the stage-rear cameras, e.g. z_dive's Stage_Rear01 stands behind
+the back wall at z = -10.2 and showed its back faces (M5 bug); GD04_CULL=0
+turns it off]. Templates that do not translate (loops: three water
+templates) fall back to the M5 approximation; GD04_GH3_SHADERS=0 forces it.
+
+### Dynamic shadows
+
+The band casts shadows onto the venue: opaque venue meshes draw with
+their template's DynamicShadowReciever technique, whose vertex shader
+projects the view-space position with g_ViewToLightProjection0 / 1
+(c144 / c148, two cascades) and whose pixel shader takes four taps of
+g_sampShadowMap0 / 1 (s14 / s15) around the pixel, blends the "not
+deeper than the map" results bilinearly (g_shadowMapSize c143 = the maps'
+sizes), fades between the cascades by the camera distance
+(g_shadowMapConstants c141.zw), maps the result with g_shadowLevel
+(c142.zw) and keeps the darker of it and the static shadow map [C: the
+microcode]. Sizes: shadow_map_size (1024, 512), styles shadow_big 1024 x
+1024 / shadow_small 512 x 512 depth only; SetDynamicShadowIntensity 0.35
+[C data tod_profiles.qb, tod_manager.qb]. gd04 [I]: one 1024 x 1024 map
+for both cascades, orthographic (14 m square, 60 m deep) around the band
+from the band group's strongest directional light pointing down, the
+band's opaque meshes as casters, light = 0.35 + 0.65 x lit (as dark as the
+reference captures' shadows); the characters do not receive.
+GD04_NO_SHADOWS=1 turns it off.
+
+### LOD
+
+Every node carries `lod_dist1` / `lod_dist2`: 150 / 151 m or 400 / 401 m in
+all eight venues [C data]; gd04 does not draw a node's meshes beyond
+lod_dist2 from the camera [I: the band between is a fade or a lower LOD;
+no venue geometry is that far]. The ReducedLOD techniques are not used [I].
+
+## 6. Crowd, light housings, volumes, flares, particles
+
+### Crowd  [C scripts `create_crowd_models`, `update_crowd_model_cam`, `crowd_play_adjusting_random_anims`]
+
+`<zone>_crowd_models` lists a few peds (Model `Real_Crowd\Crowd_Ped_01.skin`
+= the zone pak entry qbkey("models\Real_Crowd\Crowd_Ped_01.skin"), on the
+GH3_Ped skeleton, `obj_security_creation_params`), each created at (-500,
+-200 - 100 x index, 0), facing -z (Quat (0, 1, 0)) or `roty`, in light group
+Crowd (the zones' Crowd lights sit at x = -500), with the clapping hands
+(global.pak's Crowd_HandL/R_Clap.skin). Each has a camera (hfov 20) into a
+viewport (style imposter_rendering, 128 x 256 with mipmaps, or
+imposter_rendering_highres, 256 x 512, for at most six peds on Xenon
+[C: tod_profiles.qb Default_TOD_Manager.styles]) whose texture replaces
+the 64 x 64 card texture `textureasset` (tw_billboard0N, CreateViewportTextureOverride): all
+of the venue's crowd card quads (Billboard_Fast) show these renders. The
+camera: the venue camera's direction turned about y by 25 x its x
+component, 3.5 m from the ped's position + (0, 1, 0), every frame [C; I:
+it stands on the venue camera's side looking along that direction; the
+render is drawn upside down as Direct3D's texture v runs down].
+
+The peds dance `Crowd_Profiles.<name>.anim_set.idle.<skill>.<speed>`
+(perm_anims.pak's GH3_crowd_* clips): skill from the rock meter (bad /
+normal / good), speed from the tempo (the band's thresholds), a random
+entry, played to its end; blend Crowd_BlendTime_TempoChange (0.67 s) when
+the speed changed (and the first time), _Bad (0.5) when bad, else _Slow /
+_Med / _Fast (0.6 / 0.4 / 0.2) [C]. gd04 (`render/crowd.*`) runs this on
+the song clock with a per-ped seed [I: GetRandomValue's generator].
+Not done: the lighters / fists (Crowd_SetHand), the stage diver, the
+security and dancer stage peds (stagepeds/*.skin), 3D crowd members other
+than the imposters.
+
+### Light housings, volumes, flares  [C data: the _gfx node arrays, the snapshots]
+
+Game objects with a `lightvolumetype` (ConeImpostor 149, flareonly 68,
+volume 9 over the eight venues) carry a Model in ZONES/global.pak
+(`LightHousings\GO_LightHousing02\GO_LightHousing02.mdl`: the housing, its
+lens and a Flare quad), `startradius`, `endradius`, `innerradius`, `range`,
+`volumedensity`, `volumecolor`, `projectorcolor`, `projectortype`. The
+snapshots move them (`housingchecksum`, pos, Quat in the same convention as
+the nodes' angles [C: z_dive LH_HotSpot01's Quat equals its angles'
+quaternion]) and set the radii, range, density and colours [C]; gd04 blends
+them like the lights [I].
+
+- Housings draw with their models' templates at the live transform (World
+  per draw).
+- Flares: the Flare template's vertex shader builds a camera-facing quad
+  from POSITION0 (corner) and POSITION1 (centre) with m_vsSizeScale; its
+  occlusion pass (m_vsOcclusionPass, m_vsOcclusionSizeScale, the alpha
+  scales) is the engine's occlusion query, not done (flares always show)
+  [C: the microcode; I: the engine side]. gd04 tints the flare by the
+  housing's volume colour (the snapshots' orange / green / red flares, 0 =
+  off) [I].
+- Volumes (ConeImpostor): the _Cone_Impostor template on a camera-facing
+  quad from the lens along the housing's -z (the flare quads sit at -z):
+  vertex = g_SpotlightPosition - z x range x g_SpotlightDir + (x x start
+  radius + y x end radius) x g_Rotated_Vector; the pixel shader shapes the
+  beam by the chord through the cone at each pixel (sqrt(R^2 - side^2)),
+  three planar smoke lookups and g_ConeColor [C: the microcode]. The mesh
+  ((+-1, 0, 0, 1) near, (0, +-1, 1, 0) far), g_SpotlightInfo (inner
+  radius / end radius, 1), g_ConeColor (volume colour x density x 0.25),
+  the smoke (white) and its UV scroll are gd04's [I]. Not done: the
+  `volume` type (_Raytrace_cone templates), projectors.
+
+### Particles and pyro  [C scripts; I: the emitter model]
+
+Particle systems come from the zone's scripts: `CreateParticleSystem_fast
+pos params_script` with a GP_* struct (scripts\fx\particles\*.qb:
+emitrangedims, emit_target, anglespread, force, liferange, emit_rate,
+lifetime, emitnum, emitdelaystart, sizerange, speedrange, alignwithpath /
+pathfollowtime, color (RGBA word), particlecolor (a gradient), the quick
+material's diffusetexture (an .img of ZONES/global.pak), blendmode,
+alphacutoff) [C data]. Triggers [C scripts]: the light show's note 56
+(LightShow_PyroEvent: `<zone>_lightshow_mapping.pyro_script performance =
+...`, e.g. z_artdeco_pyro's six spark pots when good), and the performance
+changes (`<zone>_lightshow_mapping.transitions.performance`, e.g.
+z_dive_performance_changed spawning Z_Dive_Create_GoodParticles: the
+cobra and dancer sparks every 1-3 s while good). gd04 (`render/particles.*`)
+runs those scripts on its QScript VM stepped at 60 Hz of song time and
+draws each particle as a function of its system's start and seed: a burst
+of emitnum, then emit_rate a second for `lifetime` seconds; start in the
+emitter box (half extents), direction within anglespread of emit_target,
+speed in speedrange, constant force, size from sizerange's start to end
+(+ a random share of each's second number), colour = color x the
+particlecolor gradient over the life, camera-facing quads stretched back
+along the velocity over pathfollowtime with alignwithpath [I: the whole
+model]. Drawn with gd04's own textured, additive / blended program [I: the
+particlequickmaterial templates translate (414 of 417) but their engine
+constants (g_Particle_Vec / g_Particle_Tex) are not known]. Not done: bounce,
+spline knots, flipbook animation (quadanimationfps), `burn`, wind.
+
+### Not done yet
+
+Animated level objects (fans, hub caps, the doll: their trigger scripts),
+screen effects (`dof`, `ScreenFX_*`, bloom: the reference captures show
+both), the characters receiving shadows, the flares' occlusion queries, the light manager's own light selection (VMX128 code),
+the templates' render and sampler states, the encore / boss / win / lose
+transitions and their cameras, two-player arrays.
 
 ## 7. Test
 

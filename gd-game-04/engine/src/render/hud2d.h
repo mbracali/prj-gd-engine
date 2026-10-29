@@ -14,6 +14,37 @@
 class TextureCache;
 struct PlayerStats;
 
+// A screen element's props as DoScreenElementMorph / <id>:DoMorph change
+// them: each step sets some props, interpolated from their values at the
+// step's start over its time by its motion (GH3's 0x822A6B28: 0 linear,
+// 1 smooth 3t^2 - 2t^3, 2 ease_in t^2, 3 ease_out 2t - t^2; values =
+// start + (target - start) x f, step 0x8221BC28) [C]; the steps follow one
+// another as the scripts' blocking DoMorph calls do (`wait`: the next step's
+// delay, default its time) [C scripts].
+struct HudAnim {
+    struct Props {
+        float x = 0, y = 0, sx = 1, sy = 1, rot = 0, alpha = 1;
+        std::array<float, 4> rgba{255, 255, 255, 255};
+    };
+    enum Field : uint32_t { Pos = 1, Scale = 2, Rot = 4, Alpha = 8, Rgba = 16 };
+    struct Step {
+        double dur = 0, wait = 0;
+        int motion = 0;
+        uint32_t set = 0;
+        Props to;
+    };
+    double start = -1e18;
+    Props init;
+    std::vector<Step> steps;
+    static float ease(int motion, float t);
+    void begin(double t, const Props& p) { start = t, init = p, steps.clear(); }
+    // A step of `durMs`; `waitMs` < 0: the next starts when this one ends.
+    HudAnim& then(double durMs, int motion, uint32_t set, const Props& to, double waitMs = -1);
+    double length() const;
+    bool running(double t) const { return t >= start && t < start + length(); }
+    Props at(double t) const;
+};
+
 // GH3's one-player HUD (career_hud_2d_elements in HUD_2D_Container, scale
 // 0.7): the rock meter (backgrounds, lights, needle, the six Star Power
 // tubes), the score body (score text, multiplier lights and nixies, flash)
@@ -27,11 +58,17 @@ class Hud2D {
 public:
     // Text in one of GH3's fonts (ui/ui_system.h drawText): `scale` times the
     // font's line height, `align` 0x11 top left .. 0x44 bottom right.
+    // `style`: rotation (degrees, about the anchor), horizontal scale, font spacing (ui_system.h TextStyle).
+    struct TextStyle {
+        float rot = 0, sx = 1, spacing = 0;
+    };
     using TextFn = std::function<void(Canvas&, uint32_t font, const std::string&, float x, float y, float scale,
-                                      const std::array<uint8_t, 4>& rgba, uint32_t align)>;
-    using WidthFn = std::function<float(uint32_t font, const std::string&, float scale)>;
+                                      const std::array<uint8_t, 4>& rgba, uint32_t align, const TextStyle& style)>;
+    using WidthFn = std::function<float(uint32_t font, const std::string&, float scale, float spacing)>;
     void setText(TextFn text, WidthFn width) { text_ = std::move(text), width_ = std::move(width); }
 
+    // The song's start (current_starttime, ms): the intro's times count from it.
+    void setStart(double startMs) { startMs_ = startMs; }
     // One game frame's state at song time `nowMs` (the driver: runs only on changes).
     void update(const PlayerStats& st, double nowMs);
     void draw(Canvas& c, const TextureCache& tex, double nowMs) const;
@@ -76,7 +113,7 @@ private:
     bool barShown_ = false;
     // Applied state.
     std::string scoreText_;
-    float scoreSquash_ = 1;
+    float scoreSquash_ = 0;  // > 0: the score's x scale (squeezed), y 1.0
     float needleAngle_ = 0, bgGreen_ = 0, bgYellow_ = 1;
     int light_ = 1;  // 0 red, 1 yellow, 2 green
     bool danger_ = false;
@@ -89,8 +126,14 @@ private:
     std::array<int, 4> digits_{};
     int flipDial_ = 0;
     double flipStart_ = -1e18;
-    double comboStart_ = -1e18;
     int combo_ = 0;
+    // The alerts: "<n> Note Streak!" (+ its glow burst), "Star Power Ready"
+    // (+ its lightning) [C scripts hud_show_note_streak_combo,
+    // hud_glowburst_alert, show_star_power_ready, hud_lightning_alert].
+    HudAnim comboText_, glowburst_, readyText_;
+    double lightningStart_ = -1e18;
+    double startMs_ = 0;
+    void drawAlert(Canvas& c, const HudAnim& a, uint32_t font, const std::string& s, double now, uint32_t align) const;
     // Star Power look.
     bool ready_ = false, active_ = false;
     double readyStart_ = -1e18, activeStart_ = -1e18, offStart_ = -1e18;
@@ -99,4 +142,31 @@ private:
     Track rock_, score_, note_;
     std::array<Track, 3> bigTube_;  // tubes 4..6: initial (0,0) -> final (0,-170)
     bool started_ = false;
+};
+
+// The HUD alerts' scripts, shared by both HUDs [C scripts hud_show_note_streak_combo,
+// hud_glowburst_alert, show_star_power_ready]: they fill the animations.
+namespace hudalert {
+// "<n> Note Streak!" at (x, y), base scale, wobble `sw`; its glow burst at (gx, gy), scales x gk.
+void combo(HudAnim& text, HudAnim& glow, double at, float x, float y, float base, float sw, float gx, float gy, float gk);
+// "Star Power Ready" at (x, y), base scale, the big scale's multiplier.
+void ready(HudAnim& text, double at, float x, float y, float base, float mult);
+// Draws an alert's text (shadow (2,2) black).
+void draw(Canvas& c, const Hud2D::TextFn& text, const HudAnim& a, uint32_t font, const std::string& s, double now, uint32_t align);
+}  // namespace hudalert
+
+// The song's intro texts (setup_sprites' intro_song_info_text,
+// intro_performed_by_text, intro_artist_info_text in text_a10, run by
+// intro_song_info): the title, 'performed by' and the artist, upper case,
+// moved to current_intro's positions, faded in over song_title_fade_time,
+// held song_title_on_time, faded out [C scripts; fastintro props].
+class IntroText {
+public:
+    // `firstMs`: the song time the scroller starts at (the script's first frame).
+    void setup(const std::string& title, const std::string& by, const std::string& artist, double startMs, double firstMs);
+    void draw(Canvas& c, const Hud2D::TextFn& text, double nowMs) const;
+
+private:
+    std::string title_, by_, artist_;
+    double at_ = -1e18;  // the fade-in's start
 };

@@ -43,6 +43,23 @@ std::unique_ptr<SongStream> SongStream::open(const Disc& disc, const std::string
     return s;
 }
 
+bool SongStream::seek(double ms) {
+    const uint64_t target = uint64_t(std::max(0.0, ms) * rate_ / 1000.0);
+    for (StemState& s : stems_) {
+        if (!s.sample || s.ended) continue;
+        // The bank's XMA seek table: the frames before each packet; start at
+        // the last packet at or before the target, drop the frames up to it.
+        const std::vector<uint32_t>& t = s.sample->seek;
+        size_t k = 0;
+        while (k + 1 < t.size() && t[k + 1] <= target && uint64_t(k + 1) * kPacket < s.sample->stored) ++k;
+        const uint64_t at = t.empty() ? 0 : t[k];
+        s.next = uint64_t(k) * kPacket;
+        s.produced = uint32_t(std::min<uint64_t>(at, s.sample->length));
+        s.skip = uint32_t(target > at ? target - at : 0);
+    }
+    return true;
+}
+
 bool SongStream::refill(StemState& s, size_t frames) {
     std::vector<uint8_t> packet(kPacket);
     while (!s.ended && (s.pending.size() - s.pendingAt) / 2 < frames) {
@@ -80,7 +97,12 @@ int SongStream::decode(float* const* out, int frames) {
         float* r = out[2 * i + 1];
         int got = 0;
         if (s.sample) {
-            refill(s, size_t(frames));
+            refill(s, size_t(frames) + s.skip);
+            if (s.skip) {  // a seek's samples before the start
+                const size_t drop = std::min<size_t>(s.skip, (s.pending.size() - s.pendingAt) / 2);
+                s.pendingAt += drop * 2, s.skip -= uint32_t(drop), s.produced += uint32_t(drop);
+                refill(s, size_t(frames));
+            }
             const size_t avail = (s.pending.size() - s.pendingAt) / 2;
             // Never past the stem's length (the decoder's last packet pads).
             const size_t left = s.produced < s.sample->length ? size_t(s.sample->length - s.produced) : 0;

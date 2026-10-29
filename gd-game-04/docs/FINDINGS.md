@@ -98,6 +98,11 @@ player's `player_status` struct.
   * Miss: if time[cur] < T-(E+L)*1000 the note is missed and cur advances
     (one note per frame) [C 0x8211FD40-0x8211FDC0].
 - Hit offset reported to scripts (off_note) = n - now_ms [C 0x821207BC].
+- In the port (GD04-020): input_offset = the song's `input_offset` - user_options.lag_calibration
+  (read from the global tag at the song's start), passed to the judge; gem_offset = the song's
+  `gem_offset`, shifting gems and fretbars on the highway; the 360's -66 ms defaults stay out
+  (D7) [C scripts gem_scroller, call_startup_scripts]. The practice pitch-shift offset is not
+  applied (no slowed practice yet).
 
 ### 2. HOPO
 
@@ -256,6 +261,23 @@ player's `player_status` struct.
   failed and `setup_generalvenuetags` locked every venue after each load (the
   face-off venue list was empty) [C script, fixed].
 
+### Mid-song starts (starttime)
+- start_gem_scroller's `starttime` (current_starttime, ms) [C script]: the song clock starts at
+  starttime - the transition's time, the gem iterators begin at starttime (earlier notes never
+  exist), the intro's times count from it; Lou's finish restarts at `<song>_markers[37].time`
+  with devil_finish_restart = 1 (any other start clears devil_finish, BossDevil then at 0)
+  [C scripts start_devil_finish, start_gem_scroller]. Port: Match / Player / Autoplay skip the
+  notes before it (their phrases cannot complete), the song's timed scripts before it are not
+  run (the boss Death Drain), and the audio starts there.
+- Audio: the FSB3 XMA sample header's codec data is a seek table: 24 bytes, then one u32 (LE)
+  per 2048-byte packet = the frames decoded before that packet [C data; checked: a stream
+  started at packet k with the table's frame count matches a from-0 decode sample for sample].
+  XMA1 packet headers carry no frame count (4-bit sequence number first) [C data].
+- Motions (0x822A6B28): 1 smooth = 3t^2 - 2t^3 (written (t - 1.5) t^2 x -2), 2 ease_in = t^2,
+  3 ease_out = 2t - t^2, else linear; the step (0x8221BC28) sets each prop to start + (target -
+  start) x f, alpha and the four rgba bytes too (truncated to bytes) [C]. ui_system and the HUDs
+  use these.
+
 ### Unknown / not done
 - whammy_cutoff use; exact star_miss_note boundary; tilt units; the condition
   that rolls a battle card (a gem in a StarBattleMode phrase assumed); which
@@ -288,6 +310,42 @@ player's `player_status` struct.
   draw order; last texture = lightmap (2048x2048 single-level DXT1) [C data];
   crowd cards = `tw_billboard0N` placeholders replaced by crowd renders [C
   `create_crowd_models`].
+
+## Rendering: GH3's shaders (GD04-007 / GD04-008; details in `venues.md`, `formats.md`)
+
+- The material templates and their compiled Xenos shaders are one file,
+  `fxfiles\MaterialLibrary.bin.xen` (Function_82384668 -> loader
+  Function_82383768): 418 templates (key = qbkey(name), the scene
+  material's +0xa0), 4,981 shaders, a vertex + pixel pair per technique
+  [C data].
+- A material's constsA / constsB are the template's vertex / pixel c0..,
+  its textures the samplers in order; Function_822B18C8 / 822B1818 set a
+  material parameter by name (+0xa4 the template, +0xac / +0xb4 the two
+  constant arrays, flag 1 vertex / 2 pixel); Function_823A5768 uploads a
+  pass: the constant ranges, the render states (device table +0x40), the
+  sampler states (+0x1d4) [C].
+- Engine constants: one register layout for both stages, set with
+  Function_824B6698 (SetVertexShaderConstantF, dirty mask at device+0) and
+  Function_824B6780 (pixel, device+8): c216 (World, WorldView,
+  WorldViewProj, 12 regs), c232 View, c236 Projection, c240 InvView, c244
+  ViewProj (Function_823A6190, 823A61F8, 823A6320); the device's constant shadow: vertex c_n at
+  device + 0x780 + 16n, pixel at + 0x1780 + 16n [C].
+- Lighting model (from the microcode) [C]: ambient c176, one key
+  directional light (dir c177 = direction of travel, colour c178, w =
+  the shadow map's weight on it, spec c179), the specular colours of three
+  more (c181, c183, c185), L1 spherical harmonics c188..c191 (constant, x,
+  y, z), g_shLightShadowIntensity c137 = the shadow map's weight on the SH;
+  the venue's "lightmap" texture is m_sampShadowMap. Which lights the light
+  manager puts there is VMX128 code Ghidra does not disassemble
+  (Function_822B6E08) [I: gd04's choice, venues.md].
+- Vertex semantics: venue meshes declare their shadow-map coordinates as
+  TEXCOORD4 / 5 and the templates fetch that index [C].
+- Dynamic shadows: the DynamicShadowReciever technique (cascades
+  c144 / c148, maps s14 / s15, 4-tap bilinear PCF, c141..c143), shadow map
+  sizes 1024 / 512 and SetDynamicShadowIntensity 0.35 from tod_profiles.qb /
+  tod_manager.qb [C]; the light and the matrices are gd04's [I].
+- Back-face culling fixes the M5 stage-rear cameras (they stand behind
+  walls) [I: Direct3D's default CCW, the templates' own states not decoded].
 
 ## The band (M6; details in `band.md`)
 

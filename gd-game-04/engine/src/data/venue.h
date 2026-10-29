@@ -51,6 +51,7 @@ struct Light {
     Vec3 pos{}, dir{0, 0, 1};        // dir: the light's local +z
     Vec3 color{1, 1, 1};             // lightcolor (0..1)
     float intensity = 0, attenStart = 0, attenEnd = 1, hotspot = 0, field = 0;
+    float specular = 1;              // specularintensity
     bool vertexBake = false;         // a "_VC_" light: baked into the vertex colours [I]
     bool createdAtStart = false;
     uint32_t createdOn = 0;

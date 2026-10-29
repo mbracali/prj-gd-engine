@@ -43,10 +43,12 @@ target_sources(gd04 PRIVATE
   src/data/fsb.cpp
   src/data/inflate.cpp
   src/data/json.cpp
+  src/data/matlib.cpp
   src/data/pak.cpp
   src/data/qb.cpp
   src/data/qbkey.cpp
   src/data/random_file.cpp
+  src/data/havok.cpp
   src/data/scene.cpp
   src/data/texture.cpp
   src/data/venue.cpp
@@ -62,11 +64,14 @@ target_sources(gd04 PRIVATE
   src/render/band_anim.cpp
   src/render/band_view.cpp
   src/render/canvas.cpp
+  src/render/crowd.cpp
   src/render/gl_api.cpp
+  src/render/gh3_shader.cpp
   src/render/gl_device.cpp
   src/render/highway2d.cpp
   src/render/hud2d.cpp
   src/render/hud2p.cpp
+  src/render/particles.cpp
   src/render/renderer.cpp
   src/render/shadertest.cpp
   src/render/texture_cache.cpp
@@ -75,6 +80,7 @@ target_sources(gd04 PRIVATE
   src/render/venue_lights.cpp
   src/render/venue_stage.cpp
   src/render/venue_view.cpp
+  src/render/xenos_glsl.cpp
   src/game/chart.cpp
   src/game/note_track.cpp
   src/game/player.cpp

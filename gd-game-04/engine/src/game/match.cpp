@@ -163,7 +163,8 @@ bool Match::start(const Chart& chart, const Tuning& tuning, const Globals* g, co
             err = std::string(partName(part)) + " " + difficultyName(s.diff) + " has no notes";
             return false;
         }
-        s.player = std::make_unique<Player>(s.live, tuning, s.diff, setup.noFail && !(setup.mode == GameMode::Boss && i == 1));
+        s.player = std::make_unique<Player>(s.live, tuning, s.diff, setup.noFail && !(setup.mode == GameMode::Boss && i == 1),
+                                            setup.inputOffsetMs);
     }
     // The rules per mode.
     for (int i = 0; i < n_; ++i) {
@@ -210,7 +211,16 @@ bool Match::start(const Chart& chart, const Tuning& tuning, const Globals* g, co
     for (int i = 0; i < n_; ++i) sides_[size_t(i)].player->setSongLengthMs(lastNoteEnd_ + 3000.0);
     if (setup.mode == GameMode::Boss)
         for (const Chart::TimedScript& t : chart.scripts)
-            if (t.script == K("boss_battle_begin_deathlick")) deathLickAt_ = t.time;
+            if (t.script == K("boss_battle_begin_deathlick") && t.time >= setup.startMs) deathLickAt_ = t.time;
+    // A mid-song start: the notes before it are not in play (the fill starts
+    // there; the judge and autoplay skip them) [C gem_iterator starttime].
+    if (setup.startMs > 0)
+        for (int i = 0; i < n_; ++i) {
+            Side& s = sides_[size_t(i)];
+            if (s.incremental) s.filledTo = setup.startMs - 0.5;
+            else s.player->startAt(setup.startMs);
+            if (s.autoplay) s.autoplay->skipTo(setup.startMs);
+        }
     return true;
 }
 
@@ -338,6 +348,9 @@ void Match::fire(int who, double now) {
     const int drain = data_.powerups[size_t(card)].drainMs + (setup_.mode == GameMode::Boss ? 0 : data_.drainOffset[size_t(vdiff)]);
     b.finalBlow = card;
     ++b.attacks;
+    // attack_bolt: fire_bolt cards (60 deg), Death Drain's own (80 deg) [C scripts battle_trigger_on, battle_death_lick].
+    if (data_.powerups[size_t(card)].fireBolt) b.boltAt = now, b.boltAngle = 60;
+    if (card == kDeathLick) b.boltAt = now, b.boltAngle = 80;
     ++counters_.fired[size_t(who)];
     ++counters_.byAttack[size_t(who)][size_t(card)];
     startAttack(victim, card, drain, now);
@@ -351,7 +364,7 @@ void Match::startAttack(int v, int card, int drain, double now) {
     const BattlePowerup& p = data_.powerups[size_t(card)];
     ++b.received;
     ++counters_.received[size_t(v)];
-    if (p.fireBolt) b.highwayPushAt = now;  // hammer_highway
+    b.highwayPushAt = now;  // hammer_highway: every attack [C script battle_trigger_on]
     const double L = setup_.travelMs[size_t(v)];
     auto extend = [&](double& until) { until = until > now ? until + drain : now + drain; };
     switch (card) {
@@ -396,7 +409,7 @@ void Match::startAttack(int v, int card, int drain, double now) {
         else if (b.whammyLeft < 15) b.whammyLeft += p.repair[size_t(d)];
         break;
     case kDeathLick:  // [C battle_death_lick]
-        if (b.deathLickRate < 0) b.deathLickRate = p.killRate[size_t(d)], b.deathLickNext = now;
+        if (b.deathLickRate < 0) b.deathLickRate = p.killRate[size_t(d)], b.deathLickNext = now, b.deathAt = now;
         else b.deathLickRate *= 0.5;
         break;
     default: break;
@@ -590,7 +603,8 @@ void Match::battleFrame(double now, double dt, std::array<FrameInput, 2>& in) {
         // The boss song's scripted Death Drain on the player (0.1 s) [C boss_battle_begin_deathlick].
         if (deathLickAt_ >= 0 && now >= deathLickAt_) {
             BattleSide& b = sides_[0].battle;
-            if (b.deathLickRate < 0) b.deathLickRate = 0.1, b.deathLickNext = now;
+            if (b.deathLickRate < 0) b.deathLickRate = 0.1, b.deathLickNext = now, b.deathAt = now;
+            sides_[1].battle.boltAt = now, sides_[1].battle.boltAngle = 80;
             deathLickAt_ = -1;
         }
         applyBossMisses(now);

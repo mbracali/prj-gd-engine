@@ -6,5 +6,10 @@
 // renderer can build (the 2D program and every GH2 standard-shader
 // permutation in StandardShaders::testKeys) on this driver, with no game
 // data. OpenGL 3.3 core by default, OpenGL ES 3.0 with GD04_GLES=1.
+// With a disc (`gd04 --shadertest <disc>`) also every GH3 material
+// template's Default technique, translated from its Xenos microcode
+// (render/xenos_glsl.h); templates whose control flow is not supported
+// (loops, jumps: particles, water) are listed and not counted.
 // Returns 0 when all compile, 1 when any fails, 2 without a context.
-int runShaderTest();
+#include <string>
+int runShaderTest(const std::string& disc = std::string());

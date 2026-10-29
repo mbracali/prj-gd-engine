@@ -3,6 +3,7 @@
 #pragma once
 
 #include <cstdint>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -24,6 +25,17 @@ namespace venue {
 struct LightState {
     Vec3 color{1, 1, 1};  // 0..1
     float intensity = 0, attenStart = 0, attenEnd = 1;
+    float specular = 1;   // specularintensity
+};
+
+// A light housing (a _gfx game object with lightvolumetype): where it
+// points and its volume, as the node sets them and snapshots move them.
+struct HousingState {
+    Vec3 pos{};
+    Quat rot{0, 0, 0, 1};
+    Vec3 volumeColor{1, 1, 1};  // volumecolor / 255
+    Vec3 projectorColor{0, 0, 0};
+    float startRadius = 0, endRadius = 0, innerRadius = 0, range = 0, density = 0;
 };
 
 class LightShow {
@@ -37,6 +49,8 @@ public:
     // A node flag (createdonprogress / createdfromvariable): LS_ALWAYS, the
     // LS_*_PRE progression flags and the performance / mood state flags.
     bool flag(uint32_t f) const { return flags_.count(f) != 0; }
+    // A light housing node's state at song time `ms` (false: not a housing).
+    bool housing(uint32_t node, double ms, HousingState& out) const;
     uint32_t mood() const { return mood_; }
     int snapshotChanges() const { return changes_; }
     uint32_t snapshot() const { return snapshot_; }
@@ -72,6 +86,12 @@ private:
     bool strobeOn_ = false;
     int changes_ = 0;
     std::vector<Target> lights_;
+    struct HousingTarget {
+        HousingState from, to;
+        double start = 0, blend = 0;
+    };
+    std::unordered_map<uint32_t, HousingTarget> housings_;
+    HousingState housingAt(const HousingTarget& h, double t) const;
     std::unordered_set<uint32_t> flags_;
     const qb::Struct* mapping_ = nullptr;
     const qb::Struct* snapshots_ = nullptr;

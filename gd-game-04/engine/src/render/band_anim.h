@@ -90,6 +90,11 @@ struct Ramp {
     void set(float target, double t, double seconds);
 };
 
+// A degenerateblend node's pose over the bind pose (crowd peds, render/crowd.cpp).
+void evalBody(const Rig& rig, const Node& n, double t, Pose& pose);
+// Model-space bone matrices of a local pose.
+void worldMatrices(const Rig& rig, const Pose& pose, std::vector<Mat34>& world);
+
 class Animator {
 public:
     struct Setup {

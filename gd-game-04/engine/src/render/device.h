@@ -96,7 +96,7 @@ struct VertexAttrib {
 };
 struct VertexLayout {
     uint16_t stride = 0;
-    VertexAttrib attribs[8];
+    VertexAttrib attribs[16];
 };
 
 // Vertex attribute locations shared by every program.

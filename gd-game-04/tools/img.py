@@ -170,9 +170,14 @@ def tail_offset(w, h, wide):
 
 
 class Level:
-    __slots__ = ("level", "face", "w", "h", "wb", "hb", "addr", "pitch", "tiled", "ox", "oy", "src")
+    __slots__ = ("level", "face", "w", "h", "wb", "hb", "addr", "pitch", "tiled", "ox", "oy", "src", "vol")
 
     def blocks(self, bpb):
+        if self.vol is not None:  # (slice, aligned height) of a 3D tiled volume
+            z, height = self.vol
+            lb = bpb.bit_length() - 1
+            return [self.addr + tiled3d_offset(x, y, z, self.pitch, height, lb)
+                    for y in range(self.hb) for x in range(self.wb)]
         return [self.addr + o for o in offsets(self.wb, self.hb, self.pitch, bpb, self.tiled, self.ox, self.oy)]
 
 
@@ -196,9 +201,12 @@ def layout(f, base, mips):
             if tail is None:
                 p = align(wb, 32)
                 tail = (base if i == 0 else addr, p, align(p * align(hb, 32) * bpb, 4096))
+                # a base under 16 texels sits where a 16-texel level would
+                # (the 4x4 "white" at x = 16) [C data]
+                tail_k = max(1, 16 // npot(min(w, h)))
                 foot.extend((tail[0] + k * tail[2], tail[2]) for k in range(faces))
             if faces == 1:
-                ox, oy = tail_offset(w, h, f.width > f.height)
+                ox, oy = tail_offset(w * tail_k, h * tail_k, f.width > f.height)
                 lv.append(_level(i, 0, w, h, wb, hb, tail[0], tail[1], 1, ox // bw, oy // bw))
             else:
                 # a cube's tail holds each level as its six faces stacked
@@ -240,6 +248,7 @@ def layout(f, base, mips):
 def _level(i, face, w, h, wb, hb, addr, pitch, tiled, ox, oy):
     L = Level()
     L.level, L.face, L.w, L.h, L.wb, L.hb, L.addr, L.pitch, L.tiled, L.ox, L.oy = i, face, w, h, wb, hb, addr, pitch, tiled, ox, oy
+    L.vol = None
     L.src = None  # "shared": blocks also used by another level; "derived": not stored, box-filtered from the level above
     return L
 
@@ -446,35 +455,63 @@ def box_filter(rgba, w, h, w2, h2):
     return bytes(out)
 
 
-def volume_size(f):
+def tiled3d_offset(x, y, z, pitch, height, log_bpb):
+    """Byte offset of block (x, y, z) in a Xenos-tiled volume `pitch` x `height`
+    blocks per slice (both multiples of 32): 32x16x4-block macro tiles laid out
+    x, then y, then z; inside, 8x8x4-block micro tiles with the bank flipped by
+    z bit 2 (XGAddress3DTiledOffset; the formula as Xenia's texture_address.h
+    Tiled3D writes it, github.com/xenia-project/xenia src/xenia/gpu/
+    texture_address.h at 95a5c3e) [C data: the volume's 32 slices decode as one
+    continuous pattern, see docs/formats.md]."""
+    outer = ((((z >> 2) * (height >> 4) + (y >> 4)) * (pitch >> 5)) + (x >> 5)) << 7
+    inner = ((z & 3) << 5) | (((y >> 1) & 3) << 3) | (x & 7)
+    oib = (outer | inner) << log_bpb
+    bank = ((y >> 3) ^ (z >> 2)) & 1
+    pipe = ((x >> 3) & 3) ^ (bank << 1)
+    return ((y & 1) << 4) | (pipe << 6) | (bank << 11) | (oib & 15) | (((oib >> 4) & 1) << 5) \
+        | (((oib >> 5) & 7) << 8) | ((oib >> 8) << 12)
+
+
+def volume_dims(f):
     name, bw, bpb, _, _ = FORMATS[f.fmt]
     wb, hb = (f.width + bw - 1) // bw, (f.height + bw - 1) // bw
-    return align(align(wb, 32) * align(hb, 32) * bpb, 4096) * f.depth
+    return wb, hb, align(wb, 32), align(hb, 32), align(f.depth, 4), bpb
+
+
+def volume_size(f):
+    """Level 0 of a volume: the slices padded to 32x32 blocks, the depth to 4,
+    in 4 KiB pages."""
+    wb, hb, pitch, height, depth, bpb = volume_dims(f)
+    return align(pitch * height * depth * bpb, 4096)
+
+
+def volume_slice_offsets(f, z):
+    wb, hb, pitch, height, depth, bpb = volume_dims(f)
+    lb = bpb.bit_length() - 1
+    return [tiled3d_offset(x, y, z, pitch, height, lb) for y in range(hb) for x in range(wb)]
 
 
 def volume_blocks(im):
-    """A volume texture's blocks, slice-major: each slice a 2D tiled surface
-    [I: the only volume on the disc, see docs]."""
+    """A volume texture's blocks (level 0 only: the one volume on the disc has
+    one level), slice by slice in 3D tiled order."""
     f = im.fetch
-    name, bw, bpb, _, _ = FORMATS[f.fmt]
-    wb, hb = (f.width + bw - 1) // bw, (f.height + bw - 1) // bw
-    pitch = align(wb, 32)
-    ssize = align(pitch * align(hb, 32) * bpb, 4096)
+    if f.levels != 1 or not f.tiled:
+        raise TexError("volume with %d levels / linear" % f.levels)
     res = []
     for z in range(f.depth):
-        res.extend(im.base + z * ssize + o for o in offsets(wb, hb, pitch, bpb, 1))
+        res.extend(im.base + o for o in volume_slice_offsets(f, z))
     return res
 
 
 def decode_volume(d, im, level):
     f = im.fetch
-    name, bw, bpb, _, _ = FORMATS[f.fmt]
-    wb, hb = (f.width + bw - 1) // bw, (f.height + bw - 1) // bw
-    pitch = align(wb, 32)
-    ssize = align(pitch * align(hb, 32) * bpb, 4096)
+    if level != 0 or f.levels != 1 or not f.tiled:
+        raise TexError("volume level %d of %d" % (level, f.levels))
+    wb, hb, pitch, height, depth, bpb = volume_dims(f)
     res = []
     for z in range(f.depth):
-        L = _level(0, z, f.width, f.height, wb, hb, im.base + z * ssize, pitch, 1, 0, 0)
+        L = _level(0, z, f.width, f.height, wb, hb, im.base, pitch, 1, 0, 0)
+        L.vol = (z, height)
         res.append(decode_level(d, L, f.fmt, f.swizzle))
     return res
 
@@ -595,9 +632,9 @@ def check_one(job):
             meta = [(0, IMG_HEADER, None), (IMG_HEADER, D3D_HEADER, None)]
             probs = account(d, meta, [im], decode)
             probs += img_size_problems(d, im)
-            out.append((os.path.basename(path), [(im.format, im.fetch.dim)], probs))
+            out.append((os.path.basename(path), [(im.format, im.fetch.dim)], probs, []))
         except (TexError, struct.error) as e:
-            out.append((os.path.basename(path), [], [str(e)]))
+            out.append((os.path.basename(path), [], [str(e)], []))
         return out
     p = Pak.open(path)
     names = default_table()
@@ -620,10 +657,21 @@ def check_one(job):
                 keys = [im.key for im in ims]
                 if len(set(keys)) != len(keys):
                     probs.append("duplicate texture keys")
-            out.append((label, [(im.format, im.fetch.dim) for im in ims], probs))
+            notes = ["%s #%d volume %dx%dx%d FNV-1a %08x" % (label, i, im.w, im.h, im.depth, volume_hash(d, im))
+                     for i, im in enumerate(ims) if decode and im.fetch.dim == DIM_3D]
+            out.append((label, [(im.format, im.fetch.dim) for im in ims], probs, notes))
         except (TexError, struct.error) as ex:
-            out.append((label, [], [str(ex)]))
+            out.append((label, [], [str(ex)], []))
     return out
+
+
+def volume_hash(d, im):
+    """FNV-1a of a volume's slices as PC-order blocks (gd04 --formattest prints the same)."""
+    h = 0x811C9DC5
+    for pc, _ in decode_volume(d, im, 0):
+        for c in pc:
+            h = ((h ^ c) * 0x01000193) & 0xFFFFFFFF
+    return h
 
 
 def check(rip, decode=True):
@@ -634,9 +682,11 @@ def check(rip, decode=True):
                 jobs.append(("loose", os.path.join(root, f), decode))
     counts = {}
     files = bad = 0
+    notes = []
     with Pool() as pool:
         for res in pool.imap_unordered(check_one, jobs):
-            for label, fmts, probs in res:
+            for label, fmts, probs, note in res:
+                notes.extend(note)
                 files += 1
                 for k in fmts:
                     counts[k] = counts.get(k, 0) + 1
@@ -646,6 +696,8 @@ def check(rip, decode=True):
     dims = {DIM_2D: "", DIM_3D: " volume", DIM_CUBE: " cube"}
     for (fmt, dim), n in sorted(counts.items()):
         print("  %-12s %5d" % (fmt + dims[dim], n))
+    for n in sorted(notes):
+        print(n)
     print("files: %d, textures: %d, with problems: %d" % (files, sum(counts.values()), bad))
     return 1 if bad else 0
 

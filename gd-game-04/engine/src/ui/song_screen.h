@@ -38,16 +38,24 @@ struct SongSetup {
     bool suddenDeath = false;
     std::array<float, 2> startHealth{1.0f, 1.0f};
     std::array<bool, 2> autoplayFires{true, true};
+    // starttime (ms): a mid-song start; Lou's finish (devil_finish: player 2's
+    // highway and HUD off screen); the players' lefty flip [C start_gem_scroller].
+    double startMs = 0;
+    bool devilFinish = false;
+    std::array<bool, 2> lefty{false, false};
+    // user_options.lag_calibration (ms): input_offset = the song's - this [C script gem_scroller].
+    double lagMs = 0;
 };
 
 class SongScreen {
 public:
     SongScreen();
     ~SongScreen();
+    // `textures`: the players' highway textures are loaded into it (their body paks).
     bool start(const Disc& disc, const Globals& g, const SongInfo& song, int difficulty, bool autoplay, bool noFail, Mixer& mixer,
-               std::string& error, const TextureCache* textures = nullptr);
+               std::string& error, TextureCache* textures = nullptr);
     bool start(const Disc& disc, const Globals& g, const SongInfo& song, const SongSetup& setup, bool autoplay, bool noFail, Mixer& mixer,
-               std::string& error, const TextureCache* textures = nullptr);
+               std::string& error, TextureCache* textures = nullptr);
     void handle(const InputEvent& e);
     // Advances and draws one frame; false once the song is over.
     bool frame(Canvas& canvas, Mixer& mixer, const TextureCache* textures);
@@ -57,12 +65,15 @@ public:
     // The HUD texts' font functions (both HUDs).
     void setHudText(Hud2D::TextFn text, Hud2D::WidthFn width) {
         hud_.setText(text, width);
+        introText_ = text;
         hud2p_.setText(std::move(text), std::move(width));
     }
     // The base score (50 a gem, no multiplier) and the Star Power phrases [I: GH3's base_score].
     double baseScore() const { return match_->baseScore(0); }
     int phraseCount() const { return match_->phraseCount(0); }
     const Highway2D& highway() const { return highway_; }
+    const Highway2D& highway2() const { return highway2_; }
+    double startMs() const { return startMs_; }
     const Match& match() const { return *match_; }
     const Hud2P& hud2p() const { return hud2p_; }
 
@@ -71,6 +82,9 @@ private:
     void draw(Canvas& canvas, double nowMs, const TextureCache* textures);
 
     Highway2D::Effects effects(int player, double now) const;
+    // The highway texture of player `p` (0 / 1): its character's
+    // sys_<name>_1_highway material, its body pak loaded first [C script create_guitarist].
+    uint32_t highwayTexture(const Disc& disc, const Globals& g, TextureCache& tex, int p, uint32_t bossProps) const;
 
     SongInfo song_;
     int difficulty_ = 3;
@@ -81,6 +95,11 @@ private:
     Highway2D highway_, highway2_;
     Hud2D hud_;
     Hud2P hud2p_;
+    IntroText intro_;
+    Hud2D::TextFn introText_;
+    double startMs_ = 0;      // current_starttime
+    bool devilFinish_ = false;
+    std::array<bool, 2> muted_{true, true};  // guitar_volume = 0 (a miss then pulses the highway)
     bool twoPlayers_ = false, hud2pOk_ = false;
     bool highwayOk_ = false;
     const TextureCache* textures_ = nullptr;

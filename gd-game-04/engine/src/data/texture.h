@@ -29,8 +29,9 @@ struct Texture {
     gfx::TexKind kind = gfx::TexKind::Tex2D;
     std::string sourceFormat;  // "DXT1", "DXT3", "DXT5", "DXN", "8_8_8_8", "16_16_FLOAT"
     uint8_t usage = 0;         // image header byte 3 (0 colour, 1 normal map, 3, 4 cube/env, 5 volume) [I]
-    bool supported = true;     // false: a volume texture (no device kind yet); `levels` empty
-    // levels[face * mips + level], PC order (BC1/BC3/BC5 blocks or RGBA8 texels)
+    bool supported = true;     // false: a volume texture (no device kind yet); `levels` holds its slices
+    // levels[face * mips + level], PC order (BC1/BC3/BC5 blocks or RGBA8 texels);
+    // a volume: levels[slice] of its one level
     std::vector<Bytes> levels;
 
     gfx::TextureDesc desc() const { return {width, height, mips, format, kind}; }

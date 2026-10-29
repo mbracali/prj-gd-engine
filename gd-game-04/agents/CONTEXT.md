@@ -108,7 +108,8 @@ description, checked on the library. Tests: `gd04 --shadertest <disc>`
 compiles every translated template (GD04_SHADERTEST_VERBOSE=1 lists the
 untranslated ones); `GD04_XENOS_DUMP=1` logs each program's GLSL;
 `GD04_GH3_SHADERS=0` / `GD04_CULL=0` / `GD04_NO_CROWD=1` /
-`GD04_NO_PARTICLES=1` / `GD04_CROWD_DEBUG=1` / `GD04_PARTICLES_LOG=1` are
+`GD04_NO_PARTICLES=1` / `GD04_NO_SHADOWS=1` / `GD04_SHADOW_INTENSITY=<i>` /
+`GD04_SHADOW_LOG=1` / `GD04_CROWD_DEBUG=1` / `GD04_PARTICLES_LOG=1` are
 development aids.
 - 2026-10-29: the original in Xenia (GD04-027): xenia-canary 02d2cb5 Windows
   build under Proton Experimental's wine in ~/.local/opt/xenia (prefix,

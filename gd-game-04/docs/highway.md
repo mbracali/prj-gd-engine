@@ -272,8 +272,13 @@ negated), just [center bottom]:
   each frame pixels -= 20 * dt / 0.1 (sinks in 0.1 s), clamped at 0 [C 0x8211B1E0].
 - Head material: fret not held (and string not broken) -> head; held and pixels <= 0 -> down;
   held and pixels > 0 -> lit (`..L`) [C 0x8211B9xx; which table is which name I].
-- pixels set to 20 when the lane's note is hit [I]; the intro ripple raises them one by one
-  (`button_ripple`) [C script].
+- pixels set to button_up_pixels when a note is hit, for the frets of the note that are held: a
+  chord raises every held fret of it; a single note raises the held frets from its fret towards
+  orange (the pattern masked with 0x11111 >> ...) [C 0x8211C9D0: `button_up_pixels` (0x829E39E0)
+  into the player's pixel array, FUN_82226C78]; the intro ripple raises them one by one
+  (`intro_buttonup_ripple`: from button_ripple_start_time -800, one button per 100 ms, green
+  first) [C script]. Draw order follows z: resting buttons (3.6..3.9) under the tails (4.0) and
+  gems (4.1), raised ones (4.6..4.9) over them; the lip (x.9) is drawn over the head (x.8) [C values].
 
 ### 2.8 Hit flame and sparks [C 0x8211BAE8, script hit_note_fx]
 
@@ -330,8 +335,25 @@ SpriteElement (texture, pos_off, zoff -> z_priority, just default [left top], al
   until shown; body HUD_counter_body z 9, drum HUD_counter_drum (4,40) z 8, icon (44,40) z 26;
   4 digit texts font num_a7 at (222 - 37*i, 78), i = 1..4, first rgba [15,15,70,200], others
   [230,230,230,200].
-- Who drives needle / lights / tubes each frame: not read (C UpdateNixie and HUD scripts such as
-  rock_meter_star_power_on, pulsate_star_power_bulb) [open].
+- Who drives needle / lights / tubes each frame: UpdateScoreFastPerFrame 0x821167B0 and the HUD
+  scripts (agents/scratch/hud_spec.md §1.3, §1.4) [C].
+- Port (render/hud2d.cpp, render/hud2p.cpp): the morphs use GH3's motions (0x822A6B28: smooth
+  3t^2 - 2t^3, ease_in t^2, ease_out 2t - t^2; values start + (target - start) x f) [C], so the
+  HUD's slides, settles, tube moves and pulses are exact in shape; the scripts' random pulse
+  times (pulsate_star_power_bulb) come from our own generator [I: GH3's RNG not reproduced].
+- Texts (ui_system drawText with a TextStyle: rot_angle about the anchor, x / y scale,
+  font_spacing): the score num_a9 with font_spacing 5, squeezed past 5 digits to scale
+  (score_frame_width / width, 1.0) [C 0x82116884; the width read unscaled I]; "<n> Note Streak!"
+  and "Star Power Ready" with their rotation wobble, glow burst (Char_Select_Hilite1) and
+  lightning (HUD_lightning_01/03/05/07, 800x100, each 0.2 s in / out) [C scripts
+  hud_show_note_streak_combo, hud_glowburst_alert, show_star_power_ready, hud_lightning_alert];
+  the two-player positions as the scripts give them (face-off (415|865, 170/180), co-op /
+  p2_career player 1's only) [C]. The shadow offset turning with the text is [I].
+- The song intro (intro_song_info): title (scale 1.23, [210 210 210 250]), artist_text ('by' /
+  'as made famous by', scale (1, 0.5), [230 205 160 255]), artist (1.0, [255 190 70 255]), upper
+  case, text_a10, at (255,75) / (255,135) / (255,150), shadow (1,1); fade 0.7 s in, 3 s on, 0.7 s
+  out from song_title_start_time (fastintro: the scroller's first frame) [C scripts setup_sprites,
+  intro_song_info; data fastintro_sequence_props].
 
 ## 5. Texture keys (global_gfx.tex.xen unless noted) [C data]
 
@@ -351,11 +373,46 @@ Y 6A87F755, B 7DCDB59B, O 6AA1B221; Mid2 G 8DA374D1, R E539F99E, Y CB2DD2BE, B 0
 O 86C8DB75; Down G 31966E14, R 8EDDCCC9, Y B59DF82A, B 7AEAC67E, O B966061B.
 note_hit01 A38B2820, note_hit_blue_01 9E700D1C; Particle_Spark01 44E7B154; whammy_hold01 736906DE.
 
-## 6. Open
+## 6. Implemented (engine/src/render/highway2d.cpp)
+
+- Intro: `move_highway_2d` (released by move_highway_camera_to_default at highway_start_time,
+  fastintro -2000 ms after current_starttime): the gem container's y starts at 720; each game
+  frame y += v dt, v *= k, k -= 0.00044 (v from -720 px/s, k from 1.0), snapped to 0 at y <= 0
+  [C script] — at 60 fps it is up after 129 frames (~+150 ms). Run on the judge's 60 Hz step.
+- Strings, sidebars, SP glow + bolts, buttons (lip / mid / neck / head with the pixel raise and
+  sink), hit flames as in 2.2, 2.3, 2.7, 2.8 [C]. The lightning frame order (frame =
+  song time x 15 fps mod 8) and the bolt dims being one frame (128x512) are [I].
+- The highway's rgba: StarPowerOn -> highway_starpower, GuitarEvent_StarPowerOff -> highway_normal
+  (set instantly); highway_pulse_black (GuitarEvent_MissedNote with silent_miss when the guitar
+  is already muted, `guitar_volume = 0`; start_gem_scroller starts muted) morphs to highway_pulse
+  [0 0 0 255] over highway_pulse_time / 2 and back to highway_normal — so a pulse in Star Power
+  leaves the highway untinted until the next StarPowerOn, as GH3's scripts do [C scripts].
+- Multiplier-loss shake (guitarevent_multiplier2x/3x/4xoff -> highway_pulse_multiplier_loss,
+  not in battle / boss): pushes (0,4) / (0,10) / (0,15) for losing 2x / 3x / 4x (x0.6 in face-off,
+  pro face-off, p2_career, p2_coop), 0.1 s steps (0.11 s for 4x), random x +-7 / +-7 / +-5 / +-5
+  / +-3, then back [C script]. (The script's guard reads highway_pulse_p1 but sets highway_pulse,
+  so it never blocks [C script].)
+- Lefty flip: user_options.lefty_flip_p1 / _p2 -> lefthanded_gems and lefthanded_button_ups at
+  start_gem_scroller [C script]; battle's Lefty Flip toggles on top of it.
+- Gem offset: gem_offset = default (the 360's -66 ms left out on PC, D7) + the song's
+  `gem_offset`; gems and fretbars reach the playline gem_offset ms later [C script gem_scroller].
+- Battle star gems: sys_BattleGEM_<C>01 / _Hammer_ (2x4 flip-book, 30 fps) with a child
+  `<gem>_battle_icon`: texture = the phrase card's card_texture, scale 1.2, alpha 0.5 [C
+  0x821218A8..0x821219D0: CreateScreenElement with pos (130,100), scale (1.2,1.2), then alpha
+  0.5]; drawn centred at the gem's (130,100)/(256,256) point [I: the parent's dims].
+- Hit sparks: hit_particle_params / star_hit_particle_params per hit fret for 6 game frames
+  (hit_note_fx), one spark per emit_rate 0.02 s, within emit_spread 160 deg of up, life 0.25 s,
+  start -> end colour and scale, additive [C data]; the speed (velocity 10 read as px per frame)
+  and friction (0,50) read as a downward pull are [I] (Create2DParticleSystem's C not read).
+- P2's highway: its character's sys_<name>_1_highway (player2_status.character_id; a boss: its
+  character_profile), its body pak loaded first; devil_finish puts player 2's container at x 1000
+  [C scripts create_guitarist, setup_highway].
+
+## 7. Open
 
 - Exact flip-book frame selection (start frame / loop) and Star2D spin (star_spin_rate -2.5 unused
   here?) [I].
 - Whammy wibble displacement amount and SetNewWhammyValue index formula [I].
 - Hit path: where the gem is destroyed and which pos is passed to NoteFX (gem pos vs pos_2d) [I].
 - Blend enum confirmation (material d8 3 / 1) and fade shader math [I].
-- HUD per-frame drivers [open].
+- The 2D particle system's units (Create2DParticleSystem: velocity, friction) [I].

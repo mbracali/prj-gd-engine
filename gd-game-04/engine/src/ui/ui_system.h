@@ -96,8 +96,19 @@ public:
     // nibble vertical, low horizontal). \bN (hex) is the buttons font's
     // glyph N, as in GH3's own texts.
     void drawText(Canvas& c, uint32_t font, const std::string& s, float x, float y, float h, const std::array<uint8_t, 4>& rgba,
-                  uint32_t align) const;
-    float textWidth(uint32_t font, const std::string& s, float h) const;
+                  uint32_t align) const {
+        drawText(c, font, s, x, y, h, rgba, align, TextStyle{});
+    }
+    // A text element's other props: rot_angle (degrees, clockwise, about the
+    // (x, y) anchor), a horizontal scale (a scale pair's x / y: the score's
+    // squeeze) and font_spacing (font units between glyphs) [C: TextElement
+    // props; pivot I].
+    struct TextStyle {
+        float rot = 0, sx = 1, spacing = 0;
+    };
+    void drawText(Canvas& c, uint32_t font, const std::string& s, float x, float y, float h, const std::array<uint8_t, 4>& rgba,
+                  uint32_t align, const TextStyle& style) const;
+    float textWidth(uint32_t font, const std::string& s, float h, float spacing = 0) const;
     // A font's line height in its own units (0 if the font is not loaded).
     float fontLineHeight(uint32_t font) const;
     // The mouse over GH3's menus: the focused menus' items, hit-tested at

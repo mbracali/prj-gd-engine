@@ -27,8 +27,18 @@ One player (`current_num_players = 1`):
 | `vocalist` | the song's `singer`: `none` (no singer), `female`, `bret`, else male -> `singer`, `singer_female`, `singer_bret`; `_alt` (another microphone) in z_wikker, z_budokan, z_hell; `Cheat_BretMichaels` | |
 
 `z_credits`: the guitarist alone. `$disable_band = 1`: nobody.
-gd04 `band::chooseBand`. Two-player arrangements (guitarist_player1/2
-waypoints, the bassist as player 2) are not done.
+gd04 `band::chooseBand`.
+
+Two players (`current_num_players = 2`) [C scripts `create_band`,
+`create_guitarist_profile`]: `Guitarist` and `Bassist` both through
+create_guitarist_profile (body `Guitarist_<name>_Outfit<o>_Style<s>`, the
+player's instrument_id): Guitarist = player 1, Bassist = player 2 (co-op /
+p2_career with player 1 not on guitar: swapped); the drummer; no vocalist. A
+boss battle's player 2 is the boss (start_gem_scroller sets
+player2_status.character_id = the boss props' character_profile, outfit 1,
+style 1), so Morello / Slash / Lou stand at the Bassist's spot. Whether the
+guitarist_player1/2 waypoints replace the usual start nodes in two-player
+venues is not checked here (render/band*).
 
 ## 2. What a member is made of  [C data]
 
@@ -52,8 +62,8 @@ waypoints, the bassist as player 2) are not done.
   skins: every bone index < the skeleton's bone count).
 - Materials of the character templates (0x852105c8, 0x6f3f03f3, ...): a
   normal map (class 1), the colour map (class 0), a class-3 map; `+0xd8` 3 on
-  hair / lashes (blended), `+0xe8` top byte the alpha cut-off. gd04 draws the
-  first class-0 texture [I: the template's shading is not reproduced].
+  hair / lashes (blended), `+0xe8` top byte the alpha cut-off. The textures
+  are the template's samplers in order, the constants its c0.. (section 6).
 
 ## 3. Placement  [C scripts `create_band_member`, `get_start_node_id`]
 
@@ -179,23 +189,31 @@ member's start waypoint (members do not walk). The authored quaternions
 already frame the start position this way (docs/venues.md "Conventions").
 GH3's smoothing of the tracking, if any, is unknown.
 
-## 6. Drawing  [I]
+## 6. Drawing
 
-CPU skinning (up to three bones a vertex, `scene::Mesh` blend data) into a
-dynamic vertex buffer per member; one program (`BandView::programDesc`):
-colour map x (the group's ambient + its lights as the venue applies them +
-a small fill, `GD04_BAND_FILL` 0.25), alpha cut-off and blended hair.
-Light groups: `band`, plus `alt_band` for the guitarist
-(`create_band_member` gives the guitarist `alt_band` outside z_training /
-z_viewer [C]; I: that it adds to `band`'s lights). Drawn after the venue.
+CPU skinning (up to three bones a vertex, `scene::Mesh` blend data; the
+tangents and binormals too) into a dynamic vertex buffer per member, in
+world space. Each material draws with its GH3 template's own shaders
+(docs/venues.md "Shading"; SkinShader, HairShader,
+D_N_S_Character_1SeperateChnl, ...): the normal map (DXN, class 1), the
+colour and specular maps in the material's sampler order, the skin
+shader's edge / transition / dark colours, the hair shader's two specular
+lobes along the rotated tangent (m_vsAngle) [C: the microcode]; the light
+registers come from the member's groups' lights at its chest
+(`band`, plus `alt_band` for the guitarist: `create_band_member` gives the
+guitarist `alt_band` outside z_training / z_viewer [C]; I: that it adds to
+`band`'s lights; I: gd04's light manager, docs/venues.md). Without venue
+lights (the portraits of `--chartest`) a neutral key and ambient light.
+Without the material library (or GD04_GH3_SHADERS=0) one approximate
+program: colour map x (ambient + lights + `GD04_BAND_FILL`). Drawn after
+the venue, no back-face culling (hair cards) [I].
 
 ## 7. Gaps
 
 Band_WalkToNode (walks, turns), intro / win / lose stances in the
 transitions, two-player layouts, the twist constraint bones, leg / drummer /
-singer IK, the ragdoll, star power and battle reactions, the normal and
-specular maps, shadows. The venue's stage-rear cameras look at the back
-wall (M5; not band related).
+singer IK, the ragdoll, star power and battle reactions, receiving dynamic shadows (they cast
+them onto the venue: docs/venues.md "Dynamic shadows").
 
 ## 8. Test
 

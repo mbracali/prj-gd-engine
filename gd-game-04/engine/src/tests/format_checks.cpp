@@ -5,11 +5,14 @@
 #include <cstdio>
 #include <cstring>
 #include <exception>
+#include <stdexcept>
+#include <vector>
 
 #include "data/qb.h"
 #include "data/qbkey.h"
 #include "data/anim.h"
 #include "data/font.h"
+#include "data/havok.h"
 #include "data/scene.h"
 #include "data/texture.h"
 
@@ -44,11 +47,23 @@ bool checkQb(const Pak& pak, const PakEntry& e, FormatStats& s, std::string& wha
     }
 }
 
+// Havok packfiles (.hkc, .rag): the packfile checks (data/scene.h) and the
+// reflection decode (data/havok.h, GD04-015).
+void checkHavok(const uint8_t* p, size_t n, FormatStats& s) {
+    scene::parseHavok(p, n);
+    const havok::Physics ph = havok::parse(p, n);
+    s.havokBodies += ph.bodies.size();
+    s.havokConstraints += ph.constraints.size();
+    for (const havok::Body& b : ph.bodies)
+        if (b.name.compare(0, 8, "Bone_ACC") == 0) ++s.havokAccessoryBodies;
+        else if (b.shape.kind == havok::Shape::MoppMesh) s.havokTriangles += b.shape.triangles;
+}
+
 // Scenes, models, skins (one format) and Havok collision (data/scene.h).
-bool checkScene(const Pak& pak, const PakEntry& e, std::string& what) {
+bool checkScene(const Pak& pak, const PakEntry& e, FormatStats& st, std::string& what) {
     auto [p, n] = pak.data(e);
     try {
-        if (e.type == qbkey::key(".hkc")) scene::parseHavok(p, n);
+        if (e.type == qbkey::key(".hkc")) checkHavok(p, n, st);
         else
             scene::parse(p, n, e.type == qbkey::key(".skin") ? scene::Kind::Skin
                                : e.type == qbkey::key(".mdl") ? scene::Kind::Mdl
@@ -109,11 +124,11 @@ bool checkPakFile(const Pak& pak, const PakEntry& e, FormatStats& s, std::string
     if (e.type == kQb || e.type == kMqb || e.type == kSqb) ok = checkQb(pak, e, s, what);
     else if (e.type == qbkey::key(".scn") || e.type == qbkey::key(".mdl") || e.type == qbkey::key(".skin") ||
              e.type == qbkey::key(".hkc"))
-        ok = checkScene(pak, e, what);
+        ok = checkScene(pak, e, s, what);
     else if (e.type == qbkey::key(".rag")) {  // Havok packfile, like .hkc [C data]
         auto [p, n] = pak.data(e);
         try {
-            scene::parseHavok(p, n);
+            checkHavok(p, n, s);
         } catch (const std::exception& ex) {
             what = ex.what(), ok = false;
         }
@@ -142,8 +157,19 @@ bool checkPakFile(const Pak& pak, const PakEntry& e, FormatStats& s, std::string
     } else if (e.type == qbkey::key(".img") || e.type == qbkey::key(".tex")) {  // textures (data/texture.h)
         auto [p, n] = pak.data(e);
         try {
-            if (e.type == qbkey::key(".img")) gh3tex::decodeImg(p, n);
-            else gh3tex::decodeTexDict(p, n);
+            std::vector<gh3tex::Texture> ts;
+            if (e.type == qbkey::key(".img")) ts.push_back(gh3tex::decodeImg(p, n));
+            else ts = gh3tex::decodeTexDict(p, n);
+            for (const gh3tex::Texture& t : ts) {
+                if (t.depth <= 1) continue;  // volumes: every slice untiled (3D tiling, GD04-014)
+                if (int(t.levels.size()) != t.depth) throw std::runtime_error("volume slices");
+                for (const Bytes& sl : t.levels) {
+                    if (sl.size() != size_t((t.width + 3) / 4) * size_t((t.height + 3) / 4) * 16) throw std::runtime_error("volume slice size");
+                    for (uint8_t c : sl) s.volumeHash = (s.volumeHash ^ c) * 0x01000193u;  // FNV-1a, vs tools/img.py
+                }
+                ++s.volumes;
+                s.volumeSlices += size_t(t.depth);
+            }
         } catch (const std::exception& ex) {
             what = ex.what(), ok = false;
         }
@@ -171,5 +197,8 @@ bool checkPakFile(const Pak& pak, const PakEntry& e, FormatStats& s, std::string
 
 void printFormatStats(const FormatStats& s) {
     for (auto& [t, n] : s.decoded) std::printf("decoded      %-8s %6zu\n", t.c_str(), n);
+    std::printf("havok: %zu rigid bodies (%zu accessory bones), %zu constraints, %zu collision triangles\n", s.havokBodies,
+                s.havokAccessoryBodies, s.havokConstraints, s.havokTriangles);
+    std::printf("volume textures %zu (%zu slices, 3D tiled, FNV-1a %08x)\n", s.volumes, s.volumeSlices, unsigned(s.volumeHash));
     for (auto& [t, n] : s.notDecoded) std::printf("not decoded  %-8s %6zu (no decoder yet)\n", t.c_str(), n);
 }

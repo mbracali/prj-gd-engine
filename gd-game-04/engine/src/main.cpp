@@ -52,7 +52,7 @@ void usage() {
         "  --sfxtest            decode every sound of every FMOD bank (GD04_SFXTEST_LIMIT=<n>: the first n)\n"
         "  --playmovie <name>   play one video (atvi, ns_logo, GH3_Intro, ...), then quit; GD04_MOVIE_DUMP=<f.yuv>\n"
         "                       decodes GD04_MOVIE_FRAMES (120) pictures headless; GD04_SKIP_MOVIES=1 skips videos\n"
-        "  --shadertest         compile every shader on this GPU and report (no game data; GD04_GLES=1: OpenGL ES)\n"
+        "  --shadertest [disc]  compile every shader on this GPU and report (with a disc: also GH3's material shaders; GD04_GLES=1: OpenGL ES)\n"
         "  --venuetest          draw every venue with a song's camera cuts and light show; check they are the\n"
         "                       same at 60 and 240 fps (GD04_VENUE=<zone>, GD04_VENUETEST_SONG / _FRAMES / _SHOTS=<dir>);\n"
         "                       in a song GD04_VENUE=<zone> picks the venue, GD04_NO_VENUE=1 draws none\n"
@@ -176,7 +176,7 @@ int run(int argc, char** argv) {
         else if (!a.empty() && a[0] == '-' && a.rfind("-psn_", 0) != 0) { usage(); return 2; }  // -psn_: macOS Finder
         else if (a.rfind("-psn_", 0) != 0) opt.dataPath = a;
     }
-    if (shadertest) return runShaderTest();
+    if (shadertest) return runShaderTest(opt.dataPath);
     if ((!movie.empty() || audittest || formattest || selftest || sfxtest || scripttest || venuetest || chartest || !opt.walk.empty()) &&
         opt.dataPath.empty()) {
         usage();

@@ -40,8 +40,26 @@ void LightShow::init(const Venue& v, const Globals& g, const Chart& chart) {
     lights_.resize(v.lights.size());
     for (size_t i = 0; i < v.lights.size(); ++i) {
         const Light& l = v.lights[i];
-        LightState s{l.color, l.intensity, l.attenStart, l.attenEnd};
+        LightState s{l.color, l.intensity, l.attenStart, l.attenEnd, l.specular};
         lights_[i].from = lights_[i].to = s;
+    }
+    // The light housings: game objects with a lightvolumetype [C data: the _gfx node arrays].
+    housings_.clear();
+    for (const Node& n : v.nodes) {
+        if (!n.st || !n.st->find(K("lightvolumetype"))) continue;
+        HousingState h;
+        h.pos = n.pos, h.rot = n.rot;
+        auto rgb = [&](uint32_t key, Vec3 fallback) {
+            const qb::Value* c = n.st->find(key);
+            if (!c || c->type != qb::Type::Array || !c->arr || c->arr->values.size() < 3) return fallback;
+            return Vec3{c->arr->values[0].number() / 255.0f, c->arr->values[1].number() / 255.0f, c->arr->values[2].number() / 255.0f};
+        };
+        h.volumeColor = rgb(K("volumecolor"), {1, 1, 1});
+        h.projectorColor = rgb(K("projectorcolor"), {0, 0, 0});
+        h.startRadius = num(n.st->find(K("startradius")), 0), h.endRadius = num(n.st->find(K("endradius")), 0);
+        h.innerRadius = num(n.st->find(K("innerradius")), 0), h.range = num(n.st->find(K("range")), 0);
+        h.density = num(n.st->find(K("volumedensity")), 0);
+        housings_[n.name] = HousingTarget{h, h, 0, 0};
     }
     // Progression_SetProgressionNodeFlags outside an encore / the 3.5 tier
     // change: LS_ALWAYS, LS_3_5_PRE and LS_ENCORE_PRE on [C scripts; I: the
@@ -94,6 +112,7 @@ LightState LightShow::at(size_t i, double t) const {
     r.intensity = tg.from.intensity + (tg.to.intensity - tg.from.intensity) * s;
     r.attenStart = tg.from.attenStart + (tg.to.attenStart - tg.from.attenStart) * s;
     r.attenEnd = tg.from.attenEnd + (tg.to.attenEnd - tg.from.attenEnd) * s;
+    r.specular = tg.from.specular + (tg.to.specular - tg.from.specular) * s;
     return r;
 }
 
@@ -109,6 +128,33 @@ void LightShow::play(uint32_t snapshot, double t) {
     for (const qb::Value& ev : list->arr->values) {
         const qb::Struct* e = structOf(&ev);
         if (!e) continue;
+        // A housing entry: pos, Quat, radii, range, volume and projector
+        // colours (0..255) [C data: the zones' snapshots; I: blended like the lights].
+        if (const uint32_t hs = keyOf(e->find(K("housingchecksum")))) {
+            auto it = housings_.find(hs);
+            if (it == housings_.end()) continue;
+            HousingTarget& h = it->second;
+            h.from = housingAt(h, t);
+            if (const qb::Value* p = e->find(K("pos")); p && p->type == qb::Type::Vector) h.to.pos = {p->f[0], p->f[1], p->f[2]};
+            if (const qb::Value* q = e->find(K("Quat")); q && q->type == qb::Type::Vector) {
+                const float w2 = 1.0f - q->f[0] * q->f[0] - q->f[1] * q->f[1] - q->f[2] * q->f[2];
+                h.to.rot = {q->f[0], q->f[1], q->f[2], std::sqrt(std::max(0.0f, w2))};
+            }
+            h.to.startRadius = num(e->find(K("startradius")), h.to.startRadius);
+            h.to.endRadius = num(e->find(K("endradius")), h.to.endRadius);
+            h.to.innerRadius = num(e->find(K("innerradius")), h.to.innerRadius);
+            h.to.range = num(e->find(K("range")), h.to.range);
+            h.to.density = num(e->find(K("volumedensity")), h.to.density);
+            h.to.volumeColor = {num(e->find(K("volumecolorred")), h.to.volumeColor[0] * 255) / 255.0f,
+                                num(e->find(K("volumecolorgreen")), h.to.volumeColor[1] * 255) / 255.0f,
+                                num(e->find(K("volumecolorblue")), h.to.volumeColor[2] * 255) / 255.0f};
+            h.to.projectorColor = {num(e->find(K("projectorcolorred")), h.to.projectorColor[0] * 255) / 255.0f,
+                                   num(e->find(K("projectorcolorgreen")), h.to.projectorColor[1] * 255) / 255.0f,
+                                   num(e->find(K("projectorcolorblue")), h.to.projectorColor[2] * 255) / 255.0f};
+            h.start = t;
+            h.blend = timeEnabled_ ? blend_ : 0.0;
+            continue;
+        }
         const uint32_t light = keyOf(e->find(K("lightchecksum")));
         if (!light) continue;
         for (size_t i = 0; i < v_->lights.size(); ++i) {
@@ -119,6 +165,7 @@ void LightShow::play(uint32_t snapshot, double t) {
             tg.to.intensity = num(e->find(K("intensity")), tg.to.intensity);
             tg.to.attenStart = num(e->find(K("FarAttenStart")), tg.to.attenStart);
             tg.to.attenEnd = num(e->find(K("FarAttenEnd")), tg.to.attenEnd);
+            tg.to.specular = num(e->find(K("specularintensity")), tg.to.specular);
             if (strobeOn_ && mood_ == K("strobe")) tg.to.intensity = 1.0f;  // LightShow_AppendSnapshotParams intensity=1.0
             tg.start = t;
             tg.blend = timeEnabled_ ? blend_ : 0.0;
@@ -225,6 +272,37 @@ void LightShow::update(double ms, const PerfTimeline& perf) {
         }
     }
     now_ = std::max(now_, ms);
+}
+
+HousingState LightShow::housingAt(const HousingTarget& h, double t) const {
+    if (h.blend <= 0 || t >= h.start + h.blend * 1000.0) return h.to;
+    const float s = float(std::clamp((t - h.start) / (h.blend * 1000.0), 0.0, 1.0));
+    auto mix = [s](float a, float b) { return a + (b - a) * s; };
+    HousingState r = h.to;
+    for (size_t k = 0; k < 3; ++k) {
+        r.pos[k] = mix(h.from.pos[k], h.to.pos[k]);
+        r.volumeColor[k] = mix(h.from.volumeColor[k], h.to.volumeColor[k]);
+        r.projectorColor[k] = mix(h.from.projectorColor[k], h.to.projectorColor[k]);
+    }
+    // nlerp of the rotation (shortest way).
+    Quat a = h.from.rot, b = h.to.rot;
+    const float d = a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3];
+    if (d < 0) b = {-b[0], -b[1], -b[2], -b[3]};
+    float len = 0;
+    for (size_t k = 0; k < 4; ++k) r.rot[k] = mix(a[k], b[k]), len += r.rot[k] * r.rot[k];
+    len = std::sqrt(std::max(len, 1e-12f));
+    for (float& c : r.rot) c /= len;
+    r.startRadius = mix(h.from.startRadius, h.to.startRadius), r.endRadius = mix(h.from.endRadius, h.to.endRadius);
+    r.innerRadius = mix(h.from.innerRadius, h.to.innerRadius), r.range = mix(h.from.range, h.to.range);
+    r.density = mix(h.from.density, h.to.density);
+    return r;
+}
+
+bool LightShow::housing(uint32_t node, double ms, HousingState& out) const {
+    auto it = housings_.find(node);
+    if (it == housings_.end()) return false;
+    out = housingAt(it->second, ms);
+    return true;
 }
 
 void LightShow::evaluate(double ms, std::vector<LightState>& out) const {

@@ -18,7 +18,7 @@ XDVDFS game partition at 0xFD90000 (XGD2) [C]. 660 files:
 | `DATA/STREAMS/streamall.fsb.xen` + `.dat.xen` | streamed sounds (plain FSB3, 367 samples) |
 | `DATA/MOVIES/BIK/*.bik.xen` | Bink 1 videos (`BIKi`) |
 | `DATA/SCRIPTS/ENGINE/engine_params.qb.xen` | a loose QB file (not compressed) |
-| `DATA/ANIMS/standardkey{Q,T}.bin.xen`, `DATA/FXFILES/MaterialLibrary.bin.xen` | loose binaries (M5 / M6) |
+| `DATA/ANIMS/standardkey{Q,T}.bin.xen`, `DATA/FXFILES/MaterialLibrary.bin.xen` | loose binaries (M5 / M6; the material library: "Material library" below) |
 
 ## Compressed files
 
@@ -201,6 +201,65 @@ colours, blend weights / indices, texcoord sets as FLOAT or FLOAT16).
 Skins: groups of 1-3 bones, 32-byte vertices with two u16 weights.
 .hkc / .rag: Havok 4.6.0-r1 packfiles (`__classnames__`, `__data__`,
 `__types__`), validated, objects not decoded yet.
+
+## Material library (`DATA/FXFILES/MaterialLibrary.bin.xen`) — `tools/matlib.py`, `engine/src/data/matlib.cpp`
+
+[C data: 418 templates, 4,981 shaders, 0 problems; the loader is
+Function_82383768, called with "fxfiles\\MaterialLibrary.bin.xen" by
+Function_82384668.] A compressed copy is under `DATA/COMPRESSED/FXFILES`.
+
+- Header: "MATL", u32 2, u32 count (418), u32 0, u32 string base, u32 0,
+  u32 offsets[count]; then B = the template records, 0x28 bytes each:
+  u32 0, u32 name (offset from B), u32 key = qbkey(name) (the key a
+  scene material holds at +0xa0), then the relocated effect (techniques of
+  0x1b8 bytes, passes of 0xa8 with their render-state and sampler-state
+  lists (sampler, state, value), parameters with their annotations: UIName,
+  UIMin, ParamID, FlagValue, EntryVertexShader, EntryPixelShader). The
+  effect is read by Function_823A5768 (material constants by ranges,
+  render states through the device's table, sampler states) [C]; gd04
+  does not decode it yet (render states come from the scene material).
+- The shaders: XDK-compiled Xenos microcode, magic 0x102A1101 (vertex) /
+  0x102A1100 (pixel), one pair per technique (Default, DepthOnly, AlphaOnly,
+  DynamicShadowReciever, ReducedLOD), named by their debug path
+  `..._Intermediate\Xbox360\Updb\<template>_<technique>.updb`. Header words:
+  +0x04 region offset, +0x08 region size (the next shader follows), +0x0c
+  0x24, +0x10 the D3DXSHADER_CONSTANTTABLE's size word (the big-endian
+  table follows: names, register set 0 bool / 2 float4 / 3 sampler,
+  register, count), +0x14 the literal ranges or 0, +0x18 the shader info;
+  +0x24 hash, +0x28 path length, path.
+- Shader info: u32 offset of the microcode in the region (after the
+  literal floats), u32 its size; vertex shaders: [7] fetch count, [8] patch
+  count, from [10] one word per vertex fetch (instruction address | usage
+  << 12 | usage index << 16; D3DDECLUSAGE), one per export (semantic byte
+  | register << 8 | mask << 12 | first patch << 16) and the patch list (the
+  ALU instructions writing each export); pixel shaders: from [8] one word
+  per input register (semantic | register << 8 | mask << 12). A pixel input
+  takes the vertex export of the same semantic (0x50 = TEXCOORD0) [C data:
+  the pairs' tables agree].
+- Literals: pairs (register << 16 | float count, byte offset in the
+  region's prefix), register 252.. for vertex, 0x1fc (pixel bank 256+252)..
+  for pixel shaders: c252..c255 hold the compiler's constants [C: e.g.
+  D_3ChkBox_Pass0's pixel c255 = (1, -1, 0, 0)].
+- Microcode: the Xenos format (control flow pairs of 48-bit instructions,
+  then 96-bit ALU / fetch instructions), as the Xenia emulator documents it
+  (ucode.h); decoded and translated to GLSL by `render/xenos_glsl.cpp`: 412
+  of the 415 templates with a Default pair (3 water templates use loops;
+  DepthOnly and DepthOnly_Fixed have no Default technique).
+- A scene material feeds its template: constsA = vertex c0.., constsB =
+  pixel c0.., textures = samplers s0.. in order [C data: the constant tables
+  of the venue and character templates against their materials, e.g.
+  D_N_S_1SeperateChnl: c0 m_psSpecularPower 64, c1 bumpiness 2, c2 colour,
+  c3 specular colour; samplers normal, diffuse, spec, shadow map]. The
+  engine's own constants are c128..c255 (one layout for both stages:
+  g_World 216, g_WorldView 220, g_WorldViewProj 224, g_View 232,
+  g_Projection 236, g_InvView 240, g_ViewProj 244, g_Time 155, lights
+  176..191: g_ambientLightColor 176, g_dirLight0Dir / Color / SpecColor
+  177..179, the spec colours of dirLight1..3 181 / 183 / 185, g_shLight0..3Color
+  188..191 (L1 spherical harmonics: constant, x, y, z), shadow terms
+  137..143) [C: the constant tables; Function_823A5768 and the matrix
+  uploads at 0x823A3xxx (Function_824B6698 vertex / Function_824B6780
+  pixel SetShaderConstantF in Function_823A6190 / 823A61F8 / 823A6320:
+  c216 x12, c224, c220, c232, c240, c244)].
 
 ## Animation (.ska, .ske), fonts (.fnt), pak sounds (.wav) — `tools/anim.py`, `engine/src/data/{anim,font}.cpp`
 

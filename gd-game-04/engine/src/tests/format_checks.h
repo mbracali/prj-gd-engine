@@ -3,6 +3,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <map>
 #include <string>
 
@@ -15,6 +16,9 @@
 // them).
 struct FormatStats {
     size_t qbFiles = 0, qbSections = 0, qbScripts = 0, qbUnused = 0;
+    size_t volumes = 0, volumeSlices = 0;      // volume textures decoded slice by slice
+    uint32_t volumeHash = 0x811C9DC5u;         // FNV-1a of their PC-order blocks (img.py check prints the same)
+    size_t havokBodies = 0, havokAccessoryBodies = 0, havokConstraints = 0, havokTriangles = 0;
     std::map<std::string, size_t> decoded;     // per type: decoded to the end
     std::map<std::string, size_t> notDecoded;  // per type: no decoder yet
 };

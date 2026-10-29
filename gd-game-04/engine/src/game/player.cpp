@@ -321,3 +321,11 @@ void Player::frame(double now, double dt, const FrameInput& raw) {
     updateSustain(now, dt, in);
     updateStarPower(now, dt, in);
 }
+
+void Player::startAt(double ms) {
+    while (cur_ < t_.notes.size() && double(t_.notes[cur_].time) < ms) {
+        const TrackNote& n = t_.notes[cur_];
+        if (n.phrase >= 0 && size_t(n.phrase) < missedPhrase_.size()) missedPhrase_[size_t(n.phrase)] = true;
+        ++cur_;
+    }
+}

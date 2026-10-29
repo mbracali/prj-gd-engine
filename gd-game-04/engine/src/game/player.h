@@ -74,6 +74,9 @@ public:
     size_t current() const { return cur_; }
     // The note index whose sustain is held, or -1.
     int sustaining() const { return sus_.note; }
+    // A mid-song start: the notes before `ms` are passed over (not judged;
+    // their Star Power phrases cannot be completed).
+    void startAt(double ms);
     // Song length for the invincibility window (health_invincible_time).
     void setSongLengthMs(double ms) { songLengthMs_ = ms; }
     void setRules(const PlayerRules& r) { rules_ = r; }

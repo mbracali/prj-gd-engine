@@ -28,6 +28,11 @@ public:
     int decode(float* const* channelBuffers, int frames) override;
     // Frames of the longest stem.
     uint32_t length() const { return length_; }
+    // Starts the stems at song time `ms` instead of 0 (a mid-song start:
+    // GH3's starttime) before the first decode: each stem from the packet
+    // holding that time (an XMA packet header counts the frames, 512 samples
+    // each, that begin in it), the samples before it skipped.
+    bool seek(double ms);
     const std::string& error() const { return error_; }
 
 private:
@@ -39,6 +44,7 @@ private:
         size_t pendingAt = 0;
         bool ended = false;
         uint32_t produced = 0;       // frames handed out
+        uint32_t skip = 0;           // decoded frames still to drop (seek)
     };
     bool refill(StemState& s, size_t frames);
 

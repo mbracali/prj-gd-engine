@@ -63,6 +63,16 @@ public:
         // (GuitarEvent_SongWon) [C script].
         bool suddenDeath = false;
         float saveHealth[2] = {1.0f, 1.0f};
+        // starttime (ms; current_starttime): a mid-song start (practice,
+        // Lou's finish at marker 37); devil_finish kept by a
+        // devil_finish_restart [C script start_gem_scroller].
+        double startMs = 0;
+        bool devilFinish = false;
+        // The user_options tags' lefty_flip_p1 / _p2 -> lefthanded_gems and
+        // lefthanded_button_ups [C script start_gem_scroller].
+        bool lefty[2] = {false, false};
+        // user_options.lag_calibration (ms; CALIBRATE LAG) [C script gem_scroller].
+        double lagMs = 0;
     } songRequest;
     bool songPlaying = false;
     // Paused with Start in a song: GH3's pause menu runs over the frozen song

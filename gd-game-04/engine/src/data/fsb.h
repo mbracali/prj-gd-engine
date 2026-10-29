@@ -20,6 +20,10 @@ struct FsbSample {
     uint32_t mode = 0;
     int rate = 0, channels = 0;
     uint64_t offset = 0;    // of the data in the file
+    // XMA: the codec data's seek table (after its 24-byte head, one u32 LE a
+    // 2048-byte packet): the frames decoded before each packet [C data: one
+    // entry a packet, the last near the length; meaning I].
+    std::vector<uint32_t> seek;
 };
 
 struct FsbBank {

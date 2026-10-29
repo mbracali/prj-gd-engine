@@ -72,6 +72,8 @@ FsbBank loadFsb(const Disc& disc, const std::string& fsbPath, const std::string&
         sm.offset = pos;
         pos += sm.stored;
         if (size < 80) throw std::runtime_error(fsbPath + ": short sample header");
+        if (size >= 80 + 24 && o + size <= h.size())
+            for (size_t k = 80 + 24; k + 4 <= size; k += 4) sm.seek.push_back(le32(s + k));
         o += size;
         bank.samples.push_back(std::move(sm));
     }

@@ -414,6 +414,11 @@ void App::frame() {
         setup.bossProps = rq.boss;
         setup.suddenDeath = rq.suddenDeath;
         if (rq.suddenDeath) setup.startHealth = {rq.saveHealth[0], rq.saveHealth[1]};
+        setup.startMs = rq.startMs, setup.devilFinish = rq.devilFinish;
+        setup.lefty = {rq.lefty[0], rq.lefty[1]};
+        setup.lagMs = rq.lagMs;
+        // GD04_START_AT=<song ms>: start every song there (development aid; GH3's starttime).
+        if (const char* at = SDL_getenv("GD04_START_AT")) setup.startMs = std::max(0.0, std::atof(at));
         if (setup.mode == GameMode::Boss) setup.difficulty[1] = rq.difficulty;  // the 1P menu sets both [C selected_difficulty]
         // A walk's sudden death ends: player 2's autoplay keeps its Death Drains.
         if (walk_ && rq.suddenDeath) setup.autoplayFires[1] = false;
@@ -436,8 +441,12 @@ void App::frame() {
             ui::UiSystem* ui = &front_->ui();
             song_->setHudText(
                 [ui](Canvas& c, uint32_t font, const std::string& t, float x, float y, float scale, const std::array<uint8_t, 4>& rgba,
-                     uint32_t align) { ui->drawText(c, font, t, x, y, scale * ui->fontLineHeight(font), rgba, align); },
-                [ui](uint32_t font, const std::string& t, float scale) { return ui->textWidth(font, t, scale * ui->fontLineHeight(font)); });
+                     uint32_t align, const Hud2D::TextStyle& st) {
+                    ui->drawText(c, font, t, x, y, scale * ui->fontLineHeight(font), rgba, align, ui::UiSystem::TextStyle{st.rot, st.sx, st.spacing});
+                },
+                [ui](uint32_t font, const std::string& t, float scale, float spacing) {
+                    return ui->textWidth(font, t, scale * ui->fontLineHeight(font), spacing);
+                });
             if (walk_) ++walk_->songsStarted;
         }
         return;
@@ -469,7 +478,7 @@ void App::frame() {
             if (ports_) ports_->drawItems(canvas_, front_->flowState());
         }
         overlay();
-        captureMenuScreenshot(canvas_, double(nowNs - startNs_) / 1e6, -1);
+        captureMenuScreenshot(canvas_, double(nowNs - startNs_) / 1e6, -1e9);  // no song
         canvas_.end();
         return;
     }
@@ -484,7 +493,7 @@ void App::frame() {
     }
     canvas_.textCentered(640, 680, 1, grey, std::string(app::kDisplayName) + " " + app::kVersion);
     const double wallMs = double(SDL_GetTicksNS() - startNs_) / 1e6;
-    captureMenuScreenshot(canvas_, wallMs, -1);
+    captureMenuScreenshot(canvas_, wallMs, -1e9);  // no song
     canvas_.end();
 }
 
@@ -555,7 +564,9 @@ int App::run() {
             std::fprintf(stderr, "%s: no song '%s'\n", app::kProgram, options_.song.c_str());
             running_ = false, exitCode_ = 2;
             song_.reset();
-        } else if (!song_->start(*disc_, *globals_, *s, options_.difficulty, options_.autoplay, options_.noFail, mixer_, err, textures_.get())) {
+        } else if (SongSetup one; one.difficulty = {options_.difficulty, options_.difficulty},
+                   one.startMs = SDL_getenv("GD04_START_AT") ? std::max(0.0, std::atof(SDL_getenv("GD04_START_AT"))) : 0.0,
+                   !song_->start(*disc_, *globals_, *s, one, options_.autoplay, options_.noFail, mixer_, err, textures_.get())) {
             std::fprintf(stderr, "%s: %s\n", app::kProgram, err.c_str());
             running_ = false, exitCode_ = 2;
             song_.reset();

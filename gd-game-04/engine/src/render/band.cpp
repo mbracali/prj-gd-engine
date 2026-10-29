@@ -43,6 +43,7 @@ bool Band::startWith(const Disc& disc, const Globals& g, const venue::Venue* v, 
     songFiles_.clear();
     try {
         lib_.load(disc);
+        shaderLib_ = gh3shader::library(disc);
     } catch (const std::exception& e) {
         error = std::string("band: ") + e.what();
         return false;
@@ -109,6 +110,7 @@ bool Band::startWith(const Disc& disc, const Globals& g, const venue::Venue* v, 
 bool Band::attach(gfx::RenderDevice& device, std::string& error) {
     if (view_) return true;
     view_ = std::make_unique<BandView>();
+    view_->setLibrary(shaderLib_);
     for (Entry& e : members_) {
         e.view = view_->add(device, *e.model, error);
         if (e.view < 0) {
@@ -149,8 +151,8 @@ bool Band::bonePos(uint32_t member, uint32_t bone, venue::Vec3& out) const {
     return false;
 }
 
-void Band::draw(double ms, const venue::CamPose& cam, const venue::Venue& v, const std::vector<venue::LightState>& lights,
-                const venue::LightShow& show) {
+void Band::drawShadow(double ms, const gh3shader::Globals& light, const venue::Venue& v, const std::vector<venue::LightState>& lights,
+                      const venue::LightShow& show) {
     if (!view_) return;
     evaluate(ms);
     std::vector<BandView::Instance> inst;
@@ -163,5 +165,28 @@ void Band::draw(double ms, const venue::CamPose& cam, const venue::Venue& v, con
         i.lightGroups = e.lightGroups;
         inst.push_back(std::move(i));
     }
+    view_->setShadowPass(&light);
+    view_->draw(venue::CamPose{}, inst, v, lights, show);
+    view_->setShadowPass(nullptr);
+    skinnedAt_ = ms;
+}
+
+void Band::draw(double ms, const venue::CamPose& cam, const venue::Venue& v, const std::vector<venue::LightState>& lights,
+                const venue::LightShow& show) {
+    if (!view_) return;
+    evaluate(ms);
+    view_->setReuseSkinning(skinnedAt_ == ms);
+    std::vector<BandView::Instance> inst;
+    for (const Entry& e : members_) {
+        if (!e.placed) continue;
+        BandView::Instance i;
+        i.member = e.view;
+        i.skin = &e.skin;
+        i.root = e.root;
+        i.lightGroups = e.lightGroups;
+        inst.push_back(std::move(i));
+    }
+    view_->setTime(ms / 1000.0);
     view_->draw(cam, inst, v, lights, show);
+    view_->setReuseSkinning(false);
 }

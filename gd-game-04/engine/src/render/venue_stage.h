@@ -8,6 +8,8 @@
 
 #include "data/venue.h"
 #include "render/band.h"
+#include "render/crowd.h"
+#include "render/particles.h"
 #include "render/venue_camera.h"
 #include "render/venue_lights.h"
 #include "render/venue_view.h"
@@ -23,6 +25,10 @@ class RenderDevice;
 // driven by the song clock, drawn behind the highway (ui/song_screen.cpp).
 class VenueStage {
 public:
+    VenueStage() = default;
+    ~VenueStage();
+    VenueStage(const VenueStage&) = delete;
+    VenueStage& operator=(const VenueStage&) = delete;
     // The zone for the song: GD04_VENUE=<zone> (development aid), else the
     // level the scripts chose ($current_level: quickplay_start_song's random
     // venue, the career tier's venue), else the first listed venue.
@@ -65,4 +71,12 @@ private:
     std::vector<uint32_t> hide_;  // the crowd cards' textures
     venue::PerfTimeline perf_;
     std::unique_ptr<Band> band_;
+    std::unique_ptr<Crowd> crowd_;  // the crowd's peds and their card renders (GD04_NO_CROWD=1: none)
+    std::unique_ptr<Particles> particles_;  // the zone's particles and pyro (GD04_NO_PARTICLES=1: none)
+    gfx::RenderDevice* device_ = nullptr;
+    gfx::TargetId shadow_;  // the band's dynamic shadow map (GD04_NO_SHADOWS=1: none)
+    void shadowPass(double ms);
+public:
+    const Crowd* crowd() const { return crowd_.get(); }
+    const Particles* particles() const { return particles_.get(); }
 };

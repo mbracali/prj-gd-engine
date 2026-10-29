@@ -10,6 +10,7 @@
 
 #include <SDL3/SDL_log.h>
 
+#include <algorithm>
 #include <cctype>
 #include <exception>
 #include <set>
@@ -96,6 +97,21 @@ void addGameNatives(FrontEnd& fe, const Disc& disc, TextureCache& textures) {
         FrontEnd::SongRequest& r = fe.songRequest;
         r = FrontEnd::SongRequest{};
         r.pending = true;
+        // starttime; devil_finish_restart keeps devil_finish, any other start
+        // clears it (and BossDevil then starts at 0) [C script start_gem_scroller].
+        r.startMs = std::max(0.0, double(Vm::number(Vm::param(p, K("starttime")), 0)));
+        if (Vm::number(Vm::param(p, K("devil_finish_restart")), 0) == 1) {
+            r.devilFinish = Vm::number(v.global(K("devil_finish")), 0) != 0;
+        } else {
+            v.setGlobal(K("devil_finish"), Vm::makeInt(0));
+            if (song && song->key == K("bossdevil")) r.startMs = 0;
+        }
+        v.setGlobal(K("current_starttime"), Vm::makeInt(int32_t(r.startMs)));
+        if (auto it = v.globalTags.find(K("user_options")); it != v.globalTags.end())
+            for (int i = 0; i < 2; ++i)
+                if (const qb::Value* l = it->second.find(K(i ? "lefty_flip_p2" : "lefty_flip_p1"))) r.lefty[i] = l->number() != 0;
+        if (auto it = v.globalTags.find(K("user_options")); it != v.globalTags.end())
+            if (const qb::Value* l = it->second.find(K("lag_calibration"))) r.lagMs = l->number();
         r.song = song ? song->key : 0;
         r.difficulty = diffOf(diff);
         r.difficulty2 = diffOf(diff2);
@@ -113,6 +129,17 @@ void addGameNatives(FrontEnd& fe, const Disc& disc, TextureCache& textures) {
                     v.setGlobal(K("current_boss"), *boss);
                     v.setGlobal(K("boss_battle"), Vm::makeInt(1));
                     v.setGlobal(K("current_num_players"), Vm::makeInt(2));
+                    // player2_status.character_id = the boss's character_profile, outfit 1, style 1 [C script].
+                    const qb::Value* bs = v.global(boss->key);
+                    const qb::Value* cp = bs && bs->st ? v.globals().field(*bs->st, K("character_profile")) : nullptr;
+                    if (const qb::Value* p2 = v.global(K("player2_status")); cp && p2 && p2->st) {
+                        qb::Value nv = *p2;
+                        nv.st = std::make_shared<qb::Struct>(*p2->st);
+                        Vm::set(*nv.st, K("character_id"), *cp);
+                        Vm::set(*nv.st, K("outfit"), Vm::makeInt(1));
+                        Vm::set(*nv.st, K("style"), Vm::makeInt(1));
+                        v.setGlobal(K("player2_status"), nv);
+                    }
                 }
         const qb::Value* mode = v.global(K("game_mode"));
         r.gameMode = mode ? mode->key : 0;

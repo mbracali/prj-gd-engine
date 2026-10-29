@@ -123,35 +123,55 @@ const qb::Struct* instrumentDesc(const Globals& g, uint32_t id) { return findDes
 std::vector<Member> chooseBand(const Globals& g, const std::string& zone, uint32_t songKey) {
     std::vector<Member> out;
     if (const qb::Value* d = g.find(K("disable_band")); intOf(d, 0) == 1) return out;
-    const qb::Struct* ps = globalStruct(g, K("player1_status"));
-
-    // The guitarist: player1_status.character_id (find_profile_by_id: the
-    // profile whose name's key is the id; else Axel), outfit, style ->
-    // body 'Guitarist_%n_Outfit%o_Style%s'; the instrument from instrument_id
-    // [C script create_guitarist_profile].
-    const qb::Struct* gp = nullptr;
-    const uint32_t charId = ps ? keyOf(ps->find(K("character_id"))) : 0;
-    if (const qb::Array* a = globalArray(g, K("musician_profiles")))
-        for (const qb::Value& e : a->values)
-            if (e.type == qb::Type::Struct && e.st && qbkey::key(strOf(e.st->find(K("name")))) == charId) {
-                gp = e.st.get();
-                break;
-            }
-    if (!gp) gp = findProfile(g, "axel");
-    if (gp) {
-        Member m = makeMember(g, Role::Guitarist, K("guitarist"), gp);
-        m.outfit = std::max(1, ps ? intOf(ps->find(K("outfit")), 1) : 1);
-        m.style = std::max(1, ps ? intOf(ps->find(K("style")), 1) : 1);
-        char body[160];
-        std::snprintf(body, sizeof body, "Guitarist_%s_Outfit%d_Style%d", m.profileName.c_str(), m.outfit, m.style);
-        if (bodyDesc(g, qbkey::key(body))) m.body = qbkey::key(body);
-        if (const uint32_t inst = ps ? keyOf(ps->find(K("instrument_id"))) : 0; inst && instrumentDesc(g, inst)) m.instrument = inst;
-        if (intOf(g.find(K("cheat_airguitar")), 0) == 1) m.instrument = 0;
-        // create_band_member: outfit 2 uses skeleton2 [C script].
-        if (m.outfit == 2)
-            if (const uint32_t s2 = keyOf(gp->find(K("skeleton2")))) m.skeleton = s2;
-        out.push_back(m);
+    // Two players (create_band, current_num_players = 2): Guitarist from the
+    // lead player (player 1; co-op: player 2 when player 1 plays rhythm),
+    // Bassist from the other, both through create_guitarist_profile; the
+    // drummer; no vocalist [C scripts create_band, create_guitarist_profile].
+    // A boss battle's player 2 is the boss's character_profile (start_gem_scroller).
+    const bool two = intOf(g.find(K("current_num_players")), 1) == 2;
+    bool p2Lead = false;
+    if (two) {
+        const uint32_t mode = keyOf(g.find(K("game_mode")));
+        if (mode == K("p2_career") || mode == K("p2_coop"))
+            if (const qb::Struct* p1 = globalStruct(g, K("player1_status")); p1 && keyOf(p1->find(K("part"))) != K("guitar")) p2Lead = true;
     }
+    auto guitarist = [&](const qb::Struct* ps, Role role, uint32_t object) {
+
+        // The guitarist: player1_status.character_id (find_profile_by_id: the
+        // profile whose name's key is the id; else Axel), outfit, style ->
+        // body 'Guitarist_%n_Outfit%o_Style%s'; the instrument from instrument_id
+        // [C script create_guitarist_profile].
+        const qb::Struct* gp = nullptr;
+        const uint32_t charId = ps ? keyOf(ps->find(K("character_id"))) : 0;
+        if (const qb::Array* a = globalArray(g, K("musician_profiles")))
+            for (const qb::Value& e : a->values)
+                if (e.type == qb::Type::Struct && e.st && qbkey::key(strOf(e.st->find(K("name")))) == charId) {
+                    gp = e.st.get();
+                    break;
+                }
+        if (!gp) gp = findProfile(g, "axel");
+        if (gp) {
+            Member m = makeMember(g, role, object, gp);
+            m.outfit = std::max(1, ps ? intOf(ps->find(K("outfit")), 1) : 1);
+            m.style = std::max(1, ps ? intOf(ps->find(K("style")), 1) : 1);
+            char body[160];
+            std::snprintf(body, sizeof body, "Guitarist_%s_Outfit%d_Style%d", m.profileName.c_str(), m.outfit, m.style);
+            if (bodyDesc(g, qbkey::key(body))) m.body = qbkey::key(body);
+            if (const uint32_t inst = ps ? keyOf(ps->find(K("instrument_id"))) : 0; inst && instrumentDesc(g, inst)) m.instrument = inst;
+            if (intOf(g.find(K("cheat_airguitar")), 0) == 1) m.instrument = 0;
+            // create_band_member: outfit 2 uses skeleton2 [C script].
+            if (m.outfit == 2)
+                if (const uint32_t s2 = keyOf(gp->find(K("skeleton2")))) m.skeleton = s2;
+            out.push_back(m);
+        }
+    };
+    if (two && zone != "z_credits") {
+        guitarist(globalStruct(g, K(p2Lead ? "player2_status" : "player1_status")), Role::Guitarist, K("guitarist"));
+        guitarist(globalStruct(g, K(p2Lead ? "player1_status" : "player2_status")), Role::Bassist, K("bassist"));
+        if (const qb::Struct* p = findProfile(g, "drummer")) out.push_back(makeMember(g, Role::Drummer, K("drummer"), p));
+        return out;
+    }
+    guitarist(globalStruct(g, K("player1_status")), Role::Guitarist, K("guitarist"));
     if (zone == "z_credits") return out;
 
     if (const qb::Struct* p = findProfile(g, "drummer")) out.push_back(makeMember(g, Role::Drummer, K("drummer"), p));

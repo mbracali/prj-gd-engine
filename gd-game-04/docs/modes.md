@@ -152,17 +152,58 @@ current_powerups_p1 / _p2; GH3's scripts take it from there (GuitarEvent_SongWon
 / _SongFailed, the winner text, the newspaper, sudden death's restart).
 `stars` is left to Progression_SongWon.
 
-## 9. Not done / approximations
+## 9. Drawn, and not done / approximations
 
-- Lou's finish (devil_finish: "Now Finish Him!", the restart at marker 37):
-  the scripts' restart reaches the native gem scroller, which has no
-  mid-song start (`starttime`), so the song plays again from its start [I: not walked].
+Drawn (render/hud2p.cpp, render/highway2d.cpp, data/band.cpp):
+- Battle star gems: sys_BattleGEM_* flip-books with the phrase card's icon
+  (`<gem>_battle_icon`: card_texture, scale 1.2, alpha 0.5) [C 0x821218A8].
+- The hand: battlecard_<i>_<p> in battlemode_container (screen space) at
+  rock_pos + card_1_off (64x64), the older cards + card_2_off at
+  medium_scale 0.55 / + card_3_off at small_scale 0.4; a new card flies from
+  its last hit lane's pos_2d - (0,90) (-/+225) in 0.3 s, alpha 0.5 -> 1; the
+  others slide 0.3 s [C scripts battlemode_ready, update_battlecards_add /
+  _remove]. Which lane counts as "last_hit_note" for a chord (the lowest
+  fret here) is [I].
+- attack_bolt (fire_bolt cards; Death Drain's own at 80 deg):
+  sys_Big_Bolt01_Red at (640,230) -/+ (330,0), turned -/+ 60, P1 mirrored,
+  8 game frames [C script; the red material's tint and the bolt's sparks I /
+  not drawn]. hammer_highway now follows every attack, as battle_trigger_on
+  spawns it unconditionally [C script].
+- Death Drain: the death icon (icon_attack_deth_128; boss songs their own)
+  at the victim's side pulsing alpha 0.95 / 0.1 every 0.15 s; the "DEATH
+  DRAIN" alert (battle_alert_death + wings + text_a10) at (640 -/+ 225, 430),
+  scale 0.9 + 0.3 (1 - health), 220 (1 - health) px lower, turning to a
+  random -7..7 deg and flapping every 4 game frames [C scripts
+  battle_death_lick, animate_death_icon, death_text, death_text_wing_flap;
+  relative_scale read as absolute 1.1 / 1.2 I; the bite sparks and the
+  highway's bite push not drawn].
+- The attacks in force on a player (add_battle_text: hud_screen_elements'
+  texts, text_a6 0.7) at (380,35) / (890,35), older ones lower [C script;
+  their order and the x shift of older texts I].
+- Boss battles: the death meter (create_battle_death_meter at the HUD's
+  move-in, not with devil_finish): slides up to (648,500), its marker
+  climbs 150 px and the wings close 40 deg until the song's death-drain time
+  (bossdevil 321466, bossslash 226504, bosstom 197733), the marker pulsing
+  green / white [C scripts].
+- Two players' band (create_band with current_num_players 2): Guitarist =
+  the lead player, Bassist = the other through create_guitarist_profile, a
+  drummer, no singer; a boss's player 2 is its character_profile, outfit 1,
+  style 1 (so the boss stands at the bassist's spot) [C scripts create_band,
+  create_guitarist_profile, start_gem_scroller].
+- P2's highway: its character's sys_<name>_1_highway (the boss's own) [C].
+- Lou's finish: start_gem_scroller's starttime / devil_finish_restart reach
+  the native scroller (a mid-song start; FINDINGS "Mid-song starts"); with
+  devil_finish player 2's gem container is at x 1000 and its HUD stays off
+  screen, no death meter [C scripts setup_highway,
+  move_2d_elements_to_default] — not walked (no Lou walk).
+
+Not done / approximations:
 - The boss helper popup before a boss from the previous song's win
   (show_boss_helper_screen) is not reached by the native gem scroller [I].
-- Battle cards are drawn as plain star gems (GH3 draws the card's texture on
-  them); attack animations (bolts, card flights, band reactions), the
-  sudden-death and attack texts beyond the card name, the death meter, the
-  boss's character are not drawn.
+- Card animations beyond the flight (the steal hand, the whammy bar
+  training, lefty flip's button slide), band attack / response animations,
+  the battle alert frames (create_battle_alert_frames), attack_ready_text's
+  exact motion.
 - Co-op's raise-axe prompt always on P1's side; time_in_lead is not kept.
 - Pro face-off and battle use the guitar part for both players [C menus set
   part = guitar].

@@ -77,6 +77,7 @@ void readNodes(Venue& v, const qb::Array& arr) {
         l.attenEnd = num(st.find(K("attenend")), 1);
         l.hotspot = num(st.find(K("hotspot")), 0);
         l.field = num(st.find(K("field")), 0);
+        l.specular = num(st.find(K("specularintensity")), 1);
         const std::string& nm = qbkey::names().get(n.name);
         std::string lower;
         for (char c : nm) lower.push_back(char(c >= 'A' && c <= 'Z' ? c - 'A' + 'a' : c));

@@ -67,6 +67,11 @@ struct MatchSetup {
     // Battle: sudden death (every new card Death Drain), the saved health [C GuitarEvent_SongWon].
     bool suddenDeath = false;
     std::array<float, 2> startHealth{1.0f, 1.0f};
+    // A mid-song start (current_starttime, ms): the gem iterators begin
+    // there, so earlier notes are never made [C script start_gem_scroller].
+    double startMs = 0;
+    // The judge's input offset (ms): time_input_offset - lag_calibration [C script gem_scroller].
+    float inputOffsetMs = 0;
     uint32_t seed = 0x47483307;
 };
 
@@ -135,6 +140,12 @@ public:
         int selection = -1;
         uint8_t lastRaw = 0;
         double highwayPushAt = -1e9;  // hammer_highway (the attack hit)
+        // The HUD's battle pieces [C scripts attack_bolt, battle_death_lick]:
+        // this player's last bolt (fire_bolt cards: 60 deg; Death Drain: 80),
+        // the Death Drain on this player since `deathAt`.
+        double boltAt = -1e9;
+        float boltAngle = 60;
+        double deathAt = -1e9;
         std::string text;             // the attack name shown
         double textAt = -1e9;
     };

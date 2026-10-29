@@ -69,6 +69,11 @@ struct Exec {
             const int k = int(Vm::number(&idx, -1));
             if (k >= 0 && size_t(k) < base.arr->values.size()) return base.arr->values[size_t(k)];
         }
+        // A pair's / vector's component (`<arg> pos [ 0 ]`: TileSpriteLoop) [I: only so do its tiles scroll].
+        if (base.type == qb::Type::Pair || base.type == qb::Type::Vector) {
+            const int k = int(Vm::number(&idx, -1));
+            if (k >= 0 && k < (base.type == qb::Type::Pair ? 2 : 3)) return Vm::makeFloat(base.f[k]);
+        }
         return none();
     }
 
@@ -225,9 +230,25 @@ struct Exec {
         case kRandom2:
         case kRandomNoRepeat:
         case kRandomPermute: return randomChoice();
+        case kRandomRange:
+        case kRandomRange2: {
+            // random_range pair:(a, b): whole-number ends give an integer in
+            // [min, max]; otherwise a float in [min, max) [C 0x82190940].
+            ++i;
+            skipNops();
+            if (i >= t.size() || t[i].op != kPair) return none();
+            const float a = t[i].f[0], b = t[i].f[1];
+            ++i;
+            const float lo = std::min(a, b), hi = std::max(a, b);
+            if (std::fabs(lo - std::round(lo)) <= 1e-5f && std::fabs(hi - std::round(hi)) <= 1e-5f) {
+                const int32_t il = int32_t(std::lround(lo)), ih = int32_t(std::lround(hi));
+                return Vm::makeInt(il + int32_t(vm.rng()() % uint32_t(ih - il + 1)));
+            }
+            return Vm::makeFloat(lo + float(vm.rng()() % 0x7ff9u) * (hi - lo) * 3.0525032e-05f);
+        }
         default:
             ++i;
-            vm.logOnce(std::string("UNHANDLED token ") + std::to_string(int(k.op)) + " in an expression");
+            vm.logOnce(std::string("UNHANDLED token ") + std::to_string(int(k.op)) + " in an expression (" + qbkey::name(fr->code->name) + ")");
             return none();
         }
     }
@@ -291,7 +312,7 @@ struct Exec {
                 }
                 continue;
             }
-            if (i < t.size() && t[i].op == kStartArray && (v.type == qb::Type::Array)) {
+            if (i < t.size() && t[i].op == kStartArray && (v.type == qb::Type::Array || v.type == qb::Type::Pair || v.type == qb::Type::Vector)) {
                 ++i;
                 qb::Value idx = expression();
                 skipNops();
@@ -363,7 +384,7 @@ struct Exec {
                 return r;
             }
             if (!numeric(a) || !numeric(b)) {
-                vm.logOnce(std::string("UNHANDLED arithmetic on ") + qb::typeName(a.type) + " and " + qb::typeName(b.type));
+                vm.logOnce(std::string("UNHANDLED arithmetic on ") + qb::typeName(a.type) + " and " + qb::typeName(b.type) + " (" + qbkey::name(fr->code->name) + ")");
                 return none();
             }
             if (anyFloat || op == kDivide) {
@@ -640,7 +661,7 @@ bool Vm::callName(ScriptRun& run, uint32_t name, qb::Struct& params, bool& resul
     }
     if (unhandledNames_.insert(name).second) {
         stats_.unhandled = unhandledNames_.size();
-        logOnce("UNHANDLED call " + qbkey::name(name));
+        logOnce("UNHANDLED call " + qbkey::name(name) + " (in " + qbkey::name(run.frames.empty() ? run.name : run.frames.back().code->name) + ")");
     }
     result = false;
     return false;

@@ -806,25 +806,34 @@ void UiSystem::draw(Canvas& c) {
 // ---- the port's own screens and the mouse (not GH3's) ----
 
 void UiSystem::drawText(Canvas& c, uint32_t font, const std::string& text, float x, float y, float h, const std::array<uint8_t, 4>& rgba,
-                        uint32_t align) const {
+                        uint32_t align, const TextStyle& style) const {
     const FontEntry* fe = fontFor(font);
     if (!fe || text.empty() || h <= 0) return;
     const FontEntry* buttons = nullptr;
     if (auto it = fonts_.find(K("buttonsxenon")); it != fonts_.end()) buttons = &it->second;
     const font::Font& f = fe->f;
-    const float k = h / std::max(1.0f, f.lineHeight), w = textWidth(font, text, h);
+    // Laid out unscaled in x about the anchor, then squeezed by sx and
+    // turned by rot about (x, y).
+    const float k = h / std::max(1.0f, f.lineHeight), w = textWidth(font, text, h, style.spacing);
     const uint32_t ha = align & 0xF, va = align >> 4;
     float pen = (ha == 2 ? x - w * 0.5f : ha == 4 ? x - w : x) / k;
     const float top = (va == 2 ? y - h * 0.5f : va == 4 ? y - h : y) / k;
     const float baseY = top + (f.lineHeight - float(f.vShift));
     const std::u16string s = utf16(text);
     std::vector<Vertex> verts;
+    const float ra = style.rot * float(M_PI) / 180, rc = std::cos(ra), rs = std::sin(ra);
+    const bool plain = style.rot == 0 && style.sx == 1;
+    auto V = [&](float px, float py, float u, float v, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
+        if (plain) return Vertex{px, py, 0, u, v, r, g, b, a};
+        const float lx = (px - x) * style.sx, ly = py - y;
+        return Vertex{x + lx * rc - ly * rs, y + lx * rs + ly * rc, 0, u, v, r, g, b, a};
+    };
     auto glyph = [&](const font::Glyph& g, float gy) {
         const float gx = pen + float(g.xOffset);
-        const Vertex a{gx * k, gy * k, 0, g.u0, g.v0, rgba[0], rgba[1], rgba[2], rgba[3]};
-        const Vertex b{(gx + g.width) * k, gy * k, 0, g.u1, g.v0, rgba[0], rgba[1], rgba[2], rgba[3]};
-        const Vertex cc{(gx + g.width) * k, (gy + g.height) * k, 0, g.u1, g.v1, rgba[0], rgba[1], rgba[2], rgba[3]};
-        const Vertex d{gx * k, (gy + g.height) * k, 0, g.u0, g.v1, rgba[0], rgba[1], rgba[2], rgba[3]};
+        const Vertex a = V(gx * k, gy * k, g.u0, g.v0, rgba[0], rgba[1], rgba[2], rgba[3]);
+        const Vertex b = V((gx + g.width) * k, gy * k, g.u1, g.v0, rgba[0], rgba[1], rgba[2], rgba[3]);
+        const Vertex cc = V((gx + g.width) * k, (gy + g.height) * k, g.u1, g.v1, rgba[0], rgba[1], rgba[2], rgba[3]);
+        const Vertex d = V(gx * k, (gy + g.height) * k, g.u0, g.v1, rgba[0], rgba[1], rgba[2], rgba[3]);
         verts.insert(verts.end(), {a, b, cc, a, cc, d});
     };
     for (size_t i = 0; i < s.size(); ++i) {
@@ -837,9 +846,9 @@ void UiSystem::drawText(Canvas& c, uint32_t font, const std::string& text, float
             const font::Glyph& g = bf.button(size_t(n));
             if (!verts.empty()) c.draw(verts.data(), verts.size(), int(fe->tex.id), Blend::Alpha), verts.clear();
             const float bk = h / std::max(1.0f, bf.lineHeight), x0 = pen * k, y0 = top * k;
-            const Vertex a{x0, y0, 0, g.u0, g.v0, 255, 255, 255, rgba[3]}, b{x0 + g.width * bk, y0, 0, g.u1, g.v0, 255, 255, 255, rgba[3]};
-            const Vertex cc{x0 + g.width * bk, y0 + g.height * bk, 0, g.u1, g.v1, 255, 255, 255, rgba[3]};
-            const Vertex d{x0, y0 + g.height * bk, 0, g.u0, g.v1, 255, 255, 255, rgba[3]};
+            const Vertex a = V(x0, y0, g.u0, g.v0, 255, 255, 255, rgba[3]), b = V(x0 + g.width * bk, y0, g.u1, g.v0, 255, 255, 255, rgba[3]);
+            const Vertex cc = V(x0 + g.width * bk, y0 + g.height * bk, g.u1, g.v1, 255, 255, 255, rgba[3]);
+            const Vertex d = V(x0, y0 + g.height * bk, g.u0, g.v1, 255, 255, 255, rgba[3]);
             const Vertex q[6] = {a, b, cc, a, cc, d};
             c.draw(q, 6, int(buttons->tex.id), Blend::Alpha);
             pen += g.width * bk / k;
@@ -851,7 +860,7 @@ void UiSystem::drawText(Canvas& c, uint32_t font, const std::string& text, float
         }
         const font::Glyph& g = f.glyphFor(uint16_t(ch));
         glyph(g, baseY + g.baseline - g.height);
-        pen += g.width + float(f.tracking);
+        pen += g.width + float(f.tracking) + style.spacing;
     }
     if (!verts.empty()) c.draw(verts.data(), verts.size(), int(fe->tex.id), Blend::Alpha);
 }
@@ -861,7 +870,7 @@ float UiSystem::fontLineHeight(uint32_t font) const {
     return fe ? fe->f.lineHeight : 0.0f;
 }
 
-float UiSystem::textWidth(uint32_t font, const std::string& text, float h) const {
+float UiSystem::textWidth(uint32_t font, const std::string& text, float h, float spacing) const {
     const FontEntry* fe = fontFor(font);
     if (!fe || text.empty()) return 0;
     const font::Font& f = fe->f;
@@ -877,7 +886,7 @@ float UiSystem::textWidth(uint32_t font, const std::string& text, float h) const
             if (buttons && n >= 0) w += buttons->f.button(size_t(n)).width * h / std::max(1.0f, buttons->f.lineHeight);
             continue;
         }
-        w += (s[i] == u' ' ? f.spaceWidth : f.glyphFor(uint16_t(s[i])).width + float(f.tracking)) * k;
+        w += (s[i] == u' ' ? f.spaceWidth : f.glyphFor(uint16_t(s[i])).width + float(f.tracking) + spacing) * k;
     }
     return w;
 }

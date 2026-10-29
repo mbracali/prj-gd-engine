@@ -5,6 +5,7 @@
 #include <array>
 #include <cstdint>
 #include <string>
+#include <random>
 #include <unordered_map>
 #include <vector>
 
@@ -25,6 +26,12 @@ public:
     // false when the mode's table is missing.
     bool init(const Globals& g, const Match& m);
     void setText(Hud2D::TextFn text, Hud2D::WidthFn width) { text_ = std::move(text), width_ = std::move(width); }
+    // The song's start (current_starttime): the intro's HUD move counts from it.
+    void setStart(double startMs) { startMs_ = startMs; }
+    // devil_finish: player 2's rock meter off screen, no death meter [C script setup_hud].
+    void setDevilFinish(bool on) { devilFinish_ = on; }
+    // The song (current_song): the boss's death icon and death meter end time.
+    void setSong(uint32_t songKey) { song_ = songKey; }
     void update(const Match& m, double nowMs);
     void draw(Canvas& c, const TextureCache& tex, const Match& m, double nowMs) const;
 
@@ -88,5 +95,47 @@ private:
     Hud2D::TextFn text_;
     Hud2D::WidthFn width_;
     Counters n_;
+    uint64_t combos_ = 0, readies_ = 0;
+
+public:
+    uint64_t alertCombos() const { return combos_; }
+    uint64_t alertReadies() const { return readies_; }
+
+private:
     bool started_ = false;
+    double startMs_ = 0;
+    uint32_t song_ = 0;
+    // Battle pieces drawn over the HUD (battlemode_container) [C scripts
+    // attack_bolt, battle_death_lick, death_text, death_text_wing_flap,
+    // add_battle_text, create_battle_death_meter].
+    void drawBattle(Canvas& c, const TextureCache& tex, const Match& m, double now) const;
+    struct Flap {
+        int count = 0, rot = 0;
+        bool up = false;
+    };
+    std::array<Flap, 2> flap_{};
+    // The hand's cards (battlecard_<i>_<p>): a new card flies from above the
+    // last hit lane to the top slot in 0.3 s at alpha 0.5 -> 1, the others
+    // move down a slot (scale 0.55, 0.4) [C scripts battlemode_ready, update_battlecards_add / _remove].
+    struct Hand {
+        std::vector<int> cards;
+        std::vector<int> prevRank;  // by stack index, before the last change (-1: new)
+        double at = -1e9;
+        bool flew = false;
+        float flyX = 0, flyY = 0;
+    };
+    std::array<Hand, 2> hand_{};
+    // The alerts (co-op / p2_career: one, player 1's; face-off: per player at
+    // (415 | 865, ...)) [C scripts hud_show_note_streak_combo, show_star_power_ready].
+    struct Alerts {
+        HudAnim combo, glow, ready;
+        double lightning = -1e18;
+        int lastRun = -1, comboN = 0;
+        float lastSp = 0;
+        bool readyOn = false, spOn = false;
+    };
+    std::array<Alerts, 2> alerts_{};
+    bool career2_ = false;  // game_mode p2_career (centred alerts)
+    std::mt19937 rng_{0x47483305};
+    bool devilFinish_ = false;
 };

@@ -208,6 +208,13 @@ void worldOf(const Rig& rig, const Pose& pose, std::vector<Mat34>& world) {
 
 }  // namespace
 
+void evalBody(const Rig& rig, const Node& n, double t, Pose& pose) {
+    std::vector<anim::BonePose> tmp;
+    evalNode(rig, n, t, pose, true, tmp);
+}
+
+void worldMatrices(const Rig& rig, const Pose& pose, std::vector<Mat34>& world) { worldOf(rig, pose, world); }
+
 Quat qmul(const Quat& a, const Quat& b) {
     return {a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y, a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
             a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w, a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z};

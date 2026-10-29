@@ -94,6 +94,22 @@ uint32_t tiledOffset(uint32_t x, uint32_t y, uint32_t pitch, uint32_t lb) {
            (((((y & 8) >> 2) + (x >> 3)) & 3) << 6);
 }
 
+// Byte offset of block (x, y, z) in a Xenos-tiled volume of `pitch` x `height`
+// blocks per slice (multiples of 32): 32x16x4-block macro tiles laid out x,
+// then y, then z; 8x8x4-block micro tiles inside, the bank flipped by z bit 2
+// (XGAddress3DTiledOffset as Xenia's texture_address.h Tiled3D writes it,
+// github.com/xenia-project/xenia src/xenia/gpu/texture_address.h at 95a5c3e;
+// checked on the disc's one volume: its 32 slices decode seamless) [C data].
+uint32_t tiled3dOffset(uint32_t x, uint32_t y, uint32_t z, uint32_t pitch, uint32_t height, uint32_t lb) {
+    const uint32_t outer = ((((z >> 2) * (height >> 4) + (y >> 4)) * (pitch >> 5)) + (x >> 5)) << 7;
+    const uint32_t inner = ((z & 3) << 5) | (((y >> 1) & 3) << 3) | (x & 7);
+    const uint32_t oib = (outer | inner) << lb;
+    const uint32_t bank = ((y >> 3) ^ (z >> 2)) & 1;
+    const uint32_t pipe = ((x >> 3) & 3) ^ (bank << 1);
+    return ((y & 1) << 4) | (pipe << 6) | (bank << 11) | (oib & 15) | (((oib >> 4) & 1) << 5) | (((oib >> 5) & 7) << 8) |
+           ((oib >> 8) << 12);
+}
+
 struct Level {
     int w = 0, h = 0, wb = 0, hb = 0;
     size_t addr = 0;
@@ -101,6 +117,8 @@ struct Level {
     bool tiled = true;
     int ox = 0, oy = 0;  // blocks, inside the packed tail
     bool derived = false;  // cube 1x1: not stored, box-filtered from 2x2
+    int z = -1;            // a volume's slice (3D tiled), -1 for 2D / cube levels
+    int height3d = 0;      // a volume's slice height in blocks, aligned to 32
 };
 
 // Level offsets in the packed mip tail (texels): wide textures stack down, the
@@ -123,6 +141,7 @@ std::vector<Level> layout(const Fetch& f, size_t base, size_t mips) {
     bool haveTail = false;
     size_t tailAddr = 0;
     int tailPitch = 0;
+    int tailK = 1;  // the tail's levels sit where a 16-texel first level's would [C data: white, 4x4 at x 16]
     for (int i = 0; i < f.levels; ++i) {
         const int w = i == 0 ? f.width : std::max(1, npot(f.width) >> i);
         const int h = i == 0 ? f.height : std::max(1, npot(f.height) >> i);
@@ -133,11 +152,12 @@ std::vector<Level> layout(const Fetch& f, size_t base, size_t mips) {
                 haveTail = true;
                 tailAddr = i == 0 ? base : addr;
                 tailPitch = int(align(size_t(wb), 32));
+                tailK = std::max(1, 16 / npot(std::min(w, h)));
             }
             for (int face = 0; face < faces; ++face) {
                 Level L{w, h, wb, hb, tailAddr, tailPitch, true, 0, 0, false};
                 if (faces == 1) {
-                    tailOffset(w, h, f.width > f.height, L.ox, L.oy);
+                    tailOffset(w * tailK, h * tailK, f.width > f.height, L.ox, L.oy);
                     L.ox /= bw, L.oy /= bw;
                 } else {
                     // cube tails: each level's faces stacked down one column;
@@ -184,8 +204,10 @@ Bytes readLevel(const uint8_t* d, size_t size, const Level& L, const Fetch& f, g
     Bytes raw(size_t(L.wb) * size_t(L.hb) * bpb);
     for (int y = 0; y < L.hb; ++y)
         for (int x = 0; x < L.wb; ++x) {
-            const size_t o = L.addr + (L.tiled ? tiledOffset(uint32_t(x + L.ox), uint32_t(y + L.oy), uint32_t(L.pitch), lb)
-                                               : (size_t(y + L.oy) * size_t(L.pitch) + size_t(x + L.ox)) * bpb);
+            const size_t o =
+                L.addr + (L.z >= 0 ? tiled3dOffset(uint32_t(x), uint32_t(y), uint32_t(L.z), uint32_t(L.pitch), uint32_t(L.height3d), lb)
+                          : L.tiled ? tiledOffset(uint32_t(x + L.ox), uint32_t(y + L.oy), uint32_t(L.pitch), lb)
+                                    : (size_t(y + L.oy) * size_t(L.pitch) + size_t(x + L.ox)) * bpb);
             if (o + bpb > size) fail("texel data outside the file");
             uint8_t* dst = &raw[(size_t(y) * size_t(L.wb) + size_t(x)) * bpb];
             if (fi.blockW == 4)  // 16-bit big-endian words
@@ -313,8 +335,19 @@ Texture readImage(const uint8_t* d, size_t size, size_t pos, bool img, size_t re
     t.sourceFormat = fi.name;
     t.usage = usage;
     if (f.dim == Dim3D) {
+        // The disc's one volume (global_gfx.tex #49, DXT5 128x128x32, one
+        // level, VolumeMap material only): its slices, 3D tiled. The device
+        // has no volume kind, so it stays unsupported for upload.
+        if (!f.tiled || f.levels != 1) fail("volume layout");
         t.depth = f.depth;
-        t.supported = false;  // layout of Xenos volumes not pinned down (one texture on the disc)
+        t.supported = false;
+        const int wb = (f.width + fi.blockW - 1) / fi.blockW, hb = (f.height + fi.blockW - 1) / fi.blockW;
+        for (int z = 0; z < f.depth; ++z) {
+            Level L{f.width, f.height, wb, hb, base, int(align(size_t(wb), 32)), true, 0, 0, false, z, int(align(size_t(hb), 32))};
+            gfx::TexFormat fmt;
+            t.levels.push_back(readLevel(d, size, L, f, fmt));
+            t.format = fmt;
+        }
         return t;
     }
     t.kind = f.dim == DimCube ? gfx::TexKind::Cube : gfx::TexKind::Tex2D;

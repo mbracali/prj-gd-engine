@@ -42,6 +42,10 @@ public:
         return in;
     }
     bool done() const { return next_ >= t_.notes.size(); }
+    // A mid-song start: begins at the first note at or after `ms`.
+    void skipTo(double ms) {
+        while (next_ < t_.notes.size() && double(t_.notes[next_].time) < ms) ++next_;
+    }
 
 private:
     const NoteTrack& t_;

@@ -11,6 +11,7 @@
 
 #include "audio/mixer.h"
 #include "audio/song_stream.h"
+#include "data/band.h"
 #include "data/disc.h"
 #include "data/qbkey.h"
 #include "render/canvas.h"
@@ -31,16 +32,18 @@ SongScreen::SongScreen() = default;
 SongScreen::~SongScreen() = default;
 
 bool SongScreen::start(const Disc& disc, const Globals& g, const SongInfo& song, int difficulty, bool autoplay, bool noFail,
-                       Mixer& mixer, std::string& error, const TextureCache* textures) {
+                       Mixer& mixer, std::string& error, TextureCache* textures) {
     SongSetup one;
     one.difficulty = {difficulty, difficulty};
     return start(disc, g, song, one, autoplay, noFail, mixer, error, textures);
 }
 
 bool SongScreen::start(const Disc& disc, const Globals& g, const SongInfo& song, const SongSetup& setup, bool autoplay, bool noFail,
-                       Mixer& mixer, std::string& error, const TextureCache* textures) {
+                       Mixer& mixer, std::string& error, TextureCache* textures) {
     textures_ = textures;
     song_ = song;
+    startMs_ = setup.startMs;
+    devilFinish_ = setup.devilFinish;
     difficulty_ = std::clamp(setup.difficulty[0], 0, 3);
     twoPlayers_ = setup.mode != GameMode::Solo;
     try {
@@ -71,6 +74,10 @@ bool SongScreen::start(const Disc& disc, const Globals& g, const SongInfo& song,
     ms.suddenDeath = setup.suddenDeath;
     ms.startHealth = setup.startHealth;
     ms.autoplayFires = setup.autoplayFires;
+    ms.startMs = startMs_;
+    // input_offset = time_input_offset (the song's input_offset; the 360's
+    // default -66 ms is left out, D7) - lag_calibration [C script gem_scroller].
+    ms.inputOffsetMs = float(song.inputOffset - setup.lagMs);
     match_ = std::make_unique<Match>();
     if (!match_->start(chart_, tuning_, &g, ms, setup.bossProps, error)) return false;
     player_ = &match_->player(0);
@@ -80,13 +87,48 @@ bool SongScreen::start(const Disc& disc, const Globals& g, const SongInfo& song,
     }
     endMs_ = match_->lastNoteEndMs() + 3000.0;
     if (twoPlayers_) hud2pOk_ = hud2p_.init(g, *match_);
-    // The guitarist's highway: sys_axel_1_highway (Axel until the character
-    // select runs, M6) [C data: material 0x89A130C2 in axel_1.pak].
-    if (textures_)
-        if (uint32_t t = textures_->materialTexture(0x89A130C2)) highway_.setSurfaceTexture(t);
+    // Each player's highway: its character's sys_<name>_1_highway material
+    // (player_status.highway_material, set by create_guitarist), else the
+    // global fallback [C scripts create_guitarist, setup_highway].
+    if (textures) {
+        if (uint32_t t = highwayTexture(disc, g, *textures, 0, setup.bossProps)) highway_.setSurfaceTexture(t);
+        if (twoPlayers_)
+            if (uint32_t t = highwayTexture(disc, g, *textures, 1, setup.bossProps)) highway2_.setSurfaceTexture(t);
+    }
+    // The intro counts from current_starttime; the scroller's first frame is
+    // the transition's time (fastintro 3000 ms) before it [C start_gem_scroller].
+    const double first = startMs_ - kLeadInMs;
+    hud_.setStart(startMs_);
+    hud2p_.setStart(startMs_);
+    for (int p = 0; p < players; ++p) {
+        Highway2D& hw = p == 0 ? highway_ : highway2_;
+        hw.setStart(startMs_, first);
+        hw.setLefty(setup.lefty[size_t(p)] && !(setup.mode == GameMode::Boss && p == 1));
+        hw.setGemOffset(song.gemOffset);  // gem_offset = default (0 on PC, D7) + the song's [C script gem_scroller]
+    }
+    // devil_finish: player 2's gem container at x 1000 (off screen) [C script setup_highway].
+    if (devilFinish_ && twoPlayers_) highway2_.setContainerX(1000);
+    hud2p_.setDevilFinish(devilFinish_);
+    hud2p_.setSong(qbkey::key(song.name));
+    {
+        // get_song_artist_text: the songlist's artist_text ($artist_text_by ...) [C scripts].
+        std::string by = "by";
+        if (const qb::Value* props = g.find(qbkey::key("gh3_songlist_props")); props && props->st)
+            if (const qb::Value* ss = g.field(*props->st, qbkey::key(song.name)); ss && ss->st)
+                if (const qb::Value* at = g.field(*ss->st, qbkey::key("artist_text"))) {
+                    if (at->type == qb::Type::String || at->type == qb::Type::WString) by = at->str;
+                    else if (const qb::Value* gs = g.find(at->key); gs && (gs->type == qb::Type::String || gs->type == qb::Type::WString))
+                        by = gs->str;
+                }
+        intro_.setup(song.title, by, song.artist, startMs_, first);
+    }
     if (!highwayOk_) SDL_Log("highway: the 2D highway's tables are missing; the debug highway is drawn");
     auto stream = SongStream::open(disc, song.name, error);
     if (!stream) return false;
+    if (startMs_ > 0 && !stream->seek(startMs_)) {
+        error = song.name + ": cannot start the audio at " + std::to_string(int(startMs_)) + " ms";
+        return false;
+    }
     endMs_ = std::max(endMs_, double(stream->length()) * 1000.0 / std::max(1, stream->sampleRate()));
     // Six channels: guitar L R (muted on a miss), rhythm L R, song L R.
     std::vector<Mixer::Track> tracks(6);
@@ -110,7 +152,7 @@ bool SongScreen::start(const Disc& disc, const Globals& g, const SongInfo& song,
             venue_.reset();
         }
     }
-    stepMs_ = -kLeadInMs;
+    stepMs_ = startMs_ - kLeadInMs;
     if (twoPlayers_)
         SDL_Log("song %s (%s): %s, %s / %s%s", song.name.c_str(), song.title.c_str(), gameModeName(setup.mode), difficultyName(difficulty_),
                 difficultyName(setup.difficulty[1]), setup.suddenDeath ? ", sudden death" : "");
@@ -156,9 +198,12 @@ void SongScreen::tick(double nowMs, Mixer& mixer) {
         if (venue_) venue_->update(stepMs_, player_->stats().health);
         if (twoPlayers_) hud2p_.update(*match_, stepMs_);
         else hud_.update(player_->stats(), stepMs_);
+        const GameMode mode = match_->mode();
+        const bool twoModes = mode == GameMode::Coop || mode == GameMode::FaceOff || mode == GameMode::ProFaceOff;
         for (int p = 0; p < match_->players(); ++p) {
             Player& pl = match_->player(p);
             Highway2D& hw = p == 0 ? highway_ : highway2_;
+            hw.step(pl.stats(), stepMs_, kStepMs, match_->battleMode(), twoModes);
             const bool other = match_->mode() == GameMode::Coop || match_->mode() == GameMode::Boss;
             for (const PlayerEvent& ev : pl.events()) {
                 if (p == 0 && venue_ && ev.note >= 0 && (ev.kind == PlayerEvent::Kind::Hit || ev.kind == PlayerEvent::Kind::Miss))
@@ -168,7 +213,12 @@ void SongScreen::tick(double nowMs, Mixer& mixer) {
                     if (p == 1 && other) mixer.setGuitar2Audible(hit);
                     else mixer.setGuitarAudible(hit);
                 }
-                if (hit && ev.note >= 0) hw.noteHit(match_->track(p).notes[size_t(ev.note)].frets, stepMs_, pl.stats().starPowerActive);
+                // GuitarEvent_MissedNote: a passing note missed with the guitar already
+                // muted pulses the highway black; else the guitar mutes [C script].
+                if (ev.kind == PlayerEvent::Kind::Miss && muted_[size_t(p)]) hw.missPulse(stepMs_);
+                if (hit || ev.kind == PlayerEvent::Kind::Miss || ev.kind == PlayerEvent::Kind::Overstrum) muted_[size_t(p)] = !hit;
+                if (hit && ev.note >= 0)
+                    hw.noteHit(match_->track(p).notes[size_t(ev.note)].frets, shownHeld_[size_t(p)], stepMs_, pl.stats().starPowerActive);
             }
         }
         match_->clearEvents();
@@ -176,7 +226,7 @@ void SongScreen::tick(double nowMs, Mixer& mixer) {
 }
 
 bool SongScreen::frame(Canvas& canvas, Mixer& mixer, const TextureCache* textures) {
-    const double now = mixer.frameTimeMs() - kLeadInMs;
+    const double now = mixer.frameTimeMs() - kLeadInMs + startMs_;
     lastMs_ = now;
     tick(now, mixer);
     draw(canvas, now, textures);
@@ -225,6 +275,16 @@ Highway2D::Effects SongScreen::effects(int p, double now) const {
     fx.leftyGems = b.leftyGems, fx.leftyButtons = b.leftyButtons;
     const Match* m = match_.get();
     fx.hidden = [m, p](size_t n) { return m->gemHidden(p, n); };
+    // Star gems: sys_BattleGEM_*, with the phrase's card icon (rolled when its first gem was made) [C 0x82120C90, 0x821217A0].
+    fx.battle = true;
+    fx.card = [m, p](size_t n) -> uint32_t {
+        const NoteTrack& t = m->track(p);
+        if (n >= t.notes.size() || t.notes[n].phrase < 0) return 0;
+        const std::vector<int>& pc = m->battle(p).phraseCard;
+        const size_t ph = size_t(t.notes[n].phrase);
+        const int card = ph < pc.size() ? pc[ph] : -1;
+        return card >= 0 && card < int(m->battleData().powerups.size()) ? m->battleData().powerups[size_t(card)].cardTexture : 0;
+    };
     // Amp Overload bobs the highway +-8 px every 0.05 s [C battle_lightning].
     if (b.shakeUntil > now) fx.dy = (int(now / 50.0) % 2) ? 8.0f : -8.0f;
     // hammer_highway: pushed (-70,50) / (70,50) over 0.1 s and back [C script].
@@ -259,12 +319,14 @@ void SongScreen::draw(Canvas& c, double now, const TextureCache* textures) {
             hw.draw(c, *textures, match_->track(p), match_->player(p), now, shownHeld_[size_t(p)]);
         }
         if (hud2pOk_) hud2p_.draw(c, *textures, *match_, now);
+        intro_.draw(c, introText_, now);
         return;
     }
     const NoteTrack& track_ = match_->track(0);
     if (highwayOk_ && textures && !std::getenv("GD04_DEBUG_HIGHWAY")) {
         highway_.draw(c, *textures, track_, *player_, now, shownHeld_[0]);
         hud_.draw(c, *textures, now);
+        intro_.draw(c, introText_, now);
         if (std::getenv("GD04_HUD_NUMBERS")) {  // development aid: the numbers behind the HUD
             std::snprintf(text, sizeof text, "%lld   x%d   streak %d", static_cast<long long>(st.score), st.multiplier(), st.currentRun);
             c.text(40, 680, 2, SDL_Color{255, 255, 255, 255}, text);
@@ -310,4 +372,50 @@ void SongScreen::draw(Canvas& c, double now, const TextureCache* textures) {
         std::snprintf(line, sizeof line, "%s  %d / %d notes", s.failed ? "SONG FAILED" : "SONG COMPLETE", s.notesHit, int(track_.notes.size()));
         c.textCentered(640, 340, 3, SDL_Color{255, 255, 255, 255}, line);
     }
+}
+
+uint32_t SongScreen::highwayTexture(const Disc& disc, const Globals& g, TextureCache& tex, int p, uint32_t bossProps) const {
+    // player_status.character_id -> the musician profile (find_profile_by_id:
+    // the profile whose name's key is the id), outfit / style -> the body
+    // Guitarist_<name>_Outfit<o>_Style<s>, whose pak holds the material
+    // sys_<name>_1_highway; a boss's player 2 is its character_profile, outfit
+    // 1 style 1 [C scripts create_guitarist, start_gem_scroller].
+    auto structOf = [&g](uint32_t k) -> const qb::Struct* {
+        const qb::Value* v = g.find(k);
+        return v && v->st ? v->st.get() : nullptr;
+    };
+    auto keyOf = [](const qb::Value* v) -> uint32_t {
+        if (!v) return 0;
+        if (v->type == qb::Type::String || v->type == qb::Type::WString) return qbkey::key(v->str);
+        return v->key;
+    };
+    auto numOf = [](const qb::Value* v) { return v && (v->type == qb::Type::Int || v->type == qb::Type::Float) ? v->number() : 1.0f; };
+    const qb::Struct* ps = structOf(qbkey::key(p ? "player2_status" : "player1_status"));
+    uint32_t charId = ps ? keyOf(g.field(*ps, qbkey::key("character_id"))) : 0;
+    int outfit = ps ? std::max(1, int(numOf(g.field(*ps, qbkey::key("outfit"))))) : 1;
+    int style = ps ? std::max(1, int(numOf(g.field(*ps, qbkey::key("style"))))) : 1;
+    if (p == 1 && bossProps)
+        if (const qb::Struct* b = structOf(bossProps))
+            if (const qb::Value* cp = g.field(*b, qbkey::key("character_profile"))) charId = keyOf(cp), outfit = style = 1;
+    const qb::Struct* prof = nullptr;
+    if (const qb::Value* a = g.find(qbkey::key("musician_profiles")); a && a->arr)
+        for (const qb::Value& e : a->arr->values)
+            if (e.st)
+                if (const qb::Value* n = e.st->find(qbkey::key("name")); n && keyOf(n) == charId) prof = e.st.get();
+    if (!prof) prof = band::findProfile(g, "axel");
+    if (!prof) return 0;
+    const qb::Value* nv = prof->find(qbkey::key("name"));
+    const std::string name = nv && (nv->type == qb::Type::String || nv->type == qb::Type::WString) ? nv->str : "axel";
+    const uint32_t material = qbkey::key("sys_" + name + "_1_highway_sys_" + name + "_1_highway");
+    if (uint32_t t = tex.materialTexture(material)) return t;
+    char body[160];
+    std::snprintf(body, sizeof body, "Guitarist_%s_Outfit%d_Style%d", name.c_str(), outfit, style);
+    if (const qb::Struct* bd = band::bodyDesc(g, qbkey::key(body)))
+        if (const qb::Value* pk = bd->find(qbkey::key("pak")); pk && (pk->type == qb::Type::String || pk->type == qb::Type::WString)) {
+            const std::string path = band::pakPath(pk->str);
+            if (disc.exists(path)) tex.loadPak(disc, path);
+        }
+    const uint32_t t = tex.materialTexture(material);
+    if (!t) SDL_Log("highway: no %s highway material for player %d (the global highway)", name.c_str(), p + 1);
+    return t;
 }

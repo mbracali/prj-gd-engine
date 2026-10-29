@@ -2,7 +2,10 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "render/hud2d.h"
 
+#include <SDL3/SDL_log.h>
+
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 
@@ -30,13 +33,8 @@ constexpr double kHudIn = -400, kHudMove = 200;
 
 uint32_t K(const char* s) { return qbkey::key(s); }
 
-float ease(float u, int e) {
-    u = std::clamp(u, 0.0f, 1.0f);
-    // GH3's ease_in / ease_out motions; the exact curves are not decoded [I].
-    if (e == 1) return u * u;
-    if (e == 2) return 1 - (1 - u) * (1 - u);
-    return u;
-}
+// GH3's motions (0x822A6B28): 1 smooth, 2 ease_in, 3 ease_out, else linear [C].
+float ease(float u, int e) { return HudAnim::ease(e, u); }
 
 struct Xf {
     float x = 0, y = 0, rot = 0, sx = 1, sy = 1;
@@ -60,6 +58,47 @@ struct Item {
 };
 
 }  // namespace
+
+float HudAnim::ease(int motion, float t) {
+    t = std::clamp(t, 0.0f, 1.0f);
+    switch (motion) {
+    case 1: return (t - 1.5f) * t * t * -2.0f;  // smooth: 3t^2 - 2t^3
+    case 2: return t * t;                       // ease_in
+    case 3: return t * 2.0f - t * t;            // ease_out
+    default: return t;
+    }
+}
+
+HudAnim& HudAnim::then(double dur, int motion, uint32_t set, const Props& to, double wait) {
+    steps.push_back(Step{dur, wait < 0 ? dur : wait, motion, set, to});
+    return *this;
+}
+
+double HudAnim::length() const {
+    double t = 0, end = 0;
+    for (const Step& s : steps) end = std::max(end, t + s.dur), t += s.wait;
+    return std::max(end, t);
+}
+
+HudAnim::Props HudAnim::at(double t) const {
+    Props p = init;
+    double t0 = start;
+    for (const Step& s : steps) {
+        if (t < t0) break;
+        const float f = s.dur > 0 ? ease(s.motion, float((t - t0) / s.dur)) : 1.0f;
+        auto mix = [f](float a, float b) { return a + (b - a) * f; };
+        Props q = p;
+        if (s.set & Pos) q.x = mix(p.x, s.to.x), q.y = mix(p.y, s.to.y);
+        if (s.set & Scale) q.sx = mix(p.sx, s.to.sx), q.sy = mix(p.sy, s.to.sy);
+        if (s.set & Rot) q.rot = mix(p.rot, s.to.rot);
+        if (s.set & Alpha) q.alpha = mix(p.alpha, s.to.alpha);
+        if (s.set & Rgba)
+            for (size_t i = 0; i < 4; ++i) q.rgba[i] = mix(p.rgba[i], s.to.rgba[i]);
+        p = q;
+        t0 += s.wait;
+    }
+    return p;
+}
 
 void Hud2D::Track::at(double t, V2& p, float& rot, float& scale) const {
     p = rest, rot = 0, scale = 1;
@@ -93,14 +132,16 @@ void Hud2D::update(const PlayerStats& st, double now) {
         note_.rest = V2{kCounterX, kCounterY + kCounterOff};
         for (auto& t : bigTube_) t.rest = V2{0, 0};
         // move_2d_elements_to_default, then the settle [C script intro_hud_move].
-        rock_.add(kHudIn, kHudMove, V2{kRockX, kRockY}, 0, 1, 0, now);
-        score_.add(kHudIn, kHudMove, V2{kScoreX, kScoreY}, 0, 1, 0, now);
-        rock_.add(-200, 100, V2{kRockX - 50, kRockY}, -5, 1, 0, now);
-        score_.add(-200, 100, V2{kScoreX + 50, kScoreY}, 0, 1, 0, now);
-        rock_.add(-100, 125, V2{kRockX + 25, kRockY}, 5, 1, 0, now);
-        score_.add(-100, 125, V2{kScoreX - 25, kScoreY}, 0, 1, 0, now);
-        rock_.add(25, 100, V2{kRockX, kRockY}, 0, 1, 0, now);
-        score_.add(25, 100, V2{kScoreX, kScoreY}, 0, 1, 0, now);
+        // (current_intro times count from current_starttime.)
+        const double t0 = startMs_;
+        rock_.add(t0 + kHudIn, kHudMove, V2{kRockX, kRockY}, 0, 1, 0, now);
+        score_.add(t0 + kHudIn, kHudMove, V2{kScoreX, kScoreY}, 0, 1, 0, now);
+        rock_.add(t0 - 200, 100, V2{kRockX - 50, kRockY}, -5, 1, 0, now);
+        score_.add(t0 - 200, 100, V2{kScoreX + 50, kScoreY}, 0, 1, 0, now);
+        rock_.add(t0 - 100, 125, V2{kRockX + 25, kRockY}, 5, 1, 0, now);
+        score_.add(t0 - 100, 125, V2{kScoreX - 25, kScoreY}, 0, 1, 0, now);
+        rock_.add(t0 + 25, 100, V2{kRockX, kRockY}, 0, 1, 0, now);
+        score_.add(t0 + 25, 100, V2{kScoreX, kScoreY}, 0, 1, 0, now);
     }
 
     // Score text [C 0x82116884].
@@ -110,9 +151,9 @@ void Hud2D::update(const PlayerStats& st, double now) {
         char b[32];
         std::snprintf(b, sizeof b, "%lld", static_cast<long long>(s));
         scoreText_ = b;
-        scoreSquash_ = 1;
+        // Past 5 characters: scale (score_frame_width / width, 1.0).
         if (scoreText_.size() > 5 && width_) {
-            const float w = width_(K("num_a9"), scoreText_, 1.1f);
+            const float w = width_(K("num_a9"), scoreText_, 1.0f, 5);
             if (w > 0) scoreSquash_ = kScoreFrameWidth / w;
         }
         ++n_.scoreChanges;
@@ -164,8 +205,13 @@ void Hud2D::update(const PlayerStats& st, double now) {
     // Star Power look [C scripts show_star_power_ready, rock_meter_star_power_on / off, hud_activated_star_power].
     if (!active_ && !ready_ && a >= 50 && lastAmount_ < 50) {
         ready_ = true, readyStart_ = now, ++n_.starReady;
-        rock_.add(now, 150, V2{kRockX, kRockY - 50}, 10, 1.5f, 1, now);
-        rock_.add(now + 150, 150, V2{kRockX, kRockY + 25}, -15, 0.5f, 1, now);
+        // show_star_power_ready: waits for a showing combo alert, then (not in
+        // Star Power) the text from (640,230) - (0,20) at scale 4, alpha 0,
+        // rot 3, with the lightning; base scale 1.2, x1.5 [C script].
+        const double at = comboText_.running(now) ? comboText_.start + comboText_.length() : now;
+        if (!st.starPowerActive) hudalert::ready(readyText_, at, 640, 210, 1.2f, 1.5f), lightningStart_ = at;
+        rock_.add(now, 150, V2{kRockX, kRockY - 50}, 10, 1.5f, 2, now);
+        rock_.add(now + 150, 150, V2{kRockX, kRockY + 25}, -15, 0.5f, 2, now);
         rock_.add(now + 300, 150, V2{kRockX, kRockY}, 0, 1, 0, now);
         for (size_t i = 0; i < 3; ++i) bigTube_[i].add(now + 200.0 * double(i), 400, V2{0, -170}, 0, 1, 0, now);
         std::uniform_real_distribution<double> r(100, 500);
@@ -196,19 +242,26 @@ void Hud2D::update(const PlayerStats& st, double now) {
         if (lastRun_ >= 0) {  // (an UpdateNixie re-apply does not move the bar)
             if (run < 25 && barShown_) {
                 barShown_ = false, ++n_.streakBarOuts;
-                note_.add(now, 250, V2{kCounterX, kCounterY - 60}, 0, 1, 2, now);
+                note_.add(now, 250, V2{kCounterX, kCounterY - 60}, 0, 1, 3, now);
                 note_.add(now + 750, 500, V2{kCounterX, kCounterY + kCounterOff}, 0, 1, 0, now);
             } else if (run >= 25 && !barShown_) {
                 barShown_ = true, ++n_.streakBarIns;
-                note_.add(now, 500, V2{kCounterX, kCounterY - 60}, 0, 1, 2, now);
-                note_.add(now + 500, 500.0 / 3, V2{kCounterX, kCounterY}, 0, 1, 1, now);
-                note_.add(now + 500 + 500.0 / 3, 100, V2{kCounterX, kCounterY + 10}, 0, 1, 2, now);
-                note_.add(now + 600 + 500.0 / 3, 100, V2{kCounterX, kCounterY}, 0, 1, 1, now);
+                note_.add(now, 500, V2{kCounterX, kCounterY - 60}, 0, 1, 3, now);
+                note_.add(now + 500, 500.0 / 3, V2{kCounterX, kCounterY}, 0, 1, 2, now);
+                note_.add(now + 500 + 500.0 / 3, 100, V2{kCounterX, kCounterY + 10}, 0, 1, 3, now);
+                note_.add(now + 600 + 500.0 / 3, 100, V2{kCounterX, kCounterY}, 0, 1, 2, now);
             } else if (run >= 25 && barShown_ && run > lastRun_) {
                 flipDial_ = run % 1000 == 0 ? 4 : run % 100 == 0 ? 3 : run % 10 == 0 ? 2 : 1;
                 flipStart_ = now, ++n_.dialFlips;
             }
-            if (run == 50 || (run > 50 && run % 100 == 0)) comboStart_ = now, combo_ = run, ++n_.combos;
+            // hud_show_note_streak_combo (not while one shows; after a showing
+            // "Star Power Ready"): "<n> Note Streak!" at (640,211), scale 3 ->
+            // 1, the wobble (s = 0.8), up 230 px; the glow burst after 0.2 s [C scripts].
+            if ((run == 50 || (run > 50 && run % 100 == 0)) && !comboText_.running(now)) {
+                combo_ = run, ++n_.combos;
+                const double at = readyText_.running(now) ? readyText_.start + readyText_.length() : now;
+                hudalert::combo(comboText_, glowburst_, at, 640, 211, 1, 0.8f, 640, 237, 1);
+            }
         }
         digits_ = {run % 10, run / 10 % 10, run / 100 % 10, run / 1000};
         if (m != lastMult_ || sp != multSp_) ++n_.multiplierChanges;
@@ -254,7 +307,7 @@ void Hud2D::draw(Canvas& c, const TextureCache& tex, double now) const {
     if (ready_ && !active_) {
         const double p = std::fmod(now - readyStart_, 2000.0);
         const float u = float(p < 1000 ? p / 1000 : (p - 1000) / 1000);
-        glow = p < 1000 ? 1 - ease(u, 1) : ease(u, 2);
+        glow = p < 1000 ? 1 - ease(u, 2) : ease(u, 3);
         const float k = p < 1000 ? u : 1 - u;
         glowRgba = {uint8_t(255 - 160 * k), uint8_t(255 - 50 * k), 255, 255};
     }
@@ -288,8 +341,8 @@ void Hud2D::draw(Canvas& c, const TextureCache& tex, double now) const {
             const double p = std::fmod(now - readyStart_, per);
             const float o = oldAlpha_[k];
             const float lo = 0.3f;
-            const float v = p < pulsePhase_[k] ? o + (lo - o) * ease(float(p / pulsePhase_[k]), 1)
-                                               : lo + (o - lo) * ease(float((p - pulsePhase_[k]) / pulsePeriod_[k]), 2);
+            const float v = p < pulsePhase_[k] ? o + (lo - o) * ease(float(p / pulsePhase_[k]), 2)
+                                               : lo + (o - lo) * ease(float((p - pulsePhase_[k]) / pulsePeriod_[k]), 3);
             pulse = o > 0 ? v / o : 1;
             fa = v;
         }
@@ -350,6 +403,26 @@ void Hud2D::draw(Canvas& c, const TextureCache& tex, double now) const {
     sprite("HUD_counter_drum", note.child(4, 40), -1, -1, 8);
     if (digits_[3] == 0) sprite("HUD_counter_drum_icon", note.child(44, 40), -1, -1, 26);
 
+    // The alerts' sprites, in hud_destroygroup (screen space): the glow burst
+    // (z 50) and the four lightning frames (800x100 at the text - (0,20), z 45,
+    // each fading in over 0.2 s as the one before fades out) [C scripts
+    // hud_glowburst_alert, hud_lightning_alert].
+    if (glowburst_.running(now)) {
+        const HudAnim::Props g = glowburst_.at(now);
+        const std::array<uint8_t, 4> rgba{uint8_t(g.rgba[0]), uint8_t(g.rgba[1]), uint8_t(g.rgba[2]), uint8_t(g.rgba[3])};
+        sprite("Char_Select_Hilite1", Xf{g.x, g.y, 0, g.sx, g.sy}, 0, 0, 50, g.alpha, rgba);
+    }
+    {
+        const double t = now - lightningStart_;
+        static const char* const kBolt[4] = {"HUD_lightning_01", "HUD_lightning_03", "HUD_lightning_05", "HUD_lightning_07"};
+        if (t >= 0 && t < 1000)
+            for (int i = 0; i < 4; ++i) {
+                const double a = t - 200.0 * i;  // in over [0, 200], out over [200, 400]
+                const float al = a < 0 || a >= 400 ? 0.0f : a < 200 ? float(a / 200) : float(1 - (a - 200) / 200);
+                sprite(kBolt[i], Xf{640, 190}, 0, -1, 45, al, {255, 255, 255, 255}, 800, 100);
+            }
+    }
+
     std::stable_sort(items.begin(), items.end(), [](const Item& x, const Item& y) { return x.z < y.z; });
     std::vector<Vertex> v;
     for (const Item& it : items) {
@@ -379,13 +452,17 @@ void Hud2D::draw(Canvas& c, const TextureCache& tex, double now) const {
 
     if (!text_) return;
     // Score text: num_a9, (222,70) in the score body, scale 1.1, right bottom, z 20,
-    // shadow (3,3) black; squeezed to the 175 frame past 5 digits [C setup_hud, 0x82116884;
-    // the squeeze is horizontal in GH3, uniform here: approximation].
+    // font_spacing 5, shadow (3,3) black; past 5 digits the scale becomes
+    // (score_frame_width / text width, 1.0) [C setup_hud, 0x82116884; the
+    // width read unscaled I].
     {
         const Xf p = score.child(222, 70);
-        const float k = 1.1f * kHudScale * ss * std::min(1.0f, scoreSquash_);
-        text_(c, K("num_a9"), scoreText_, p.x + 3 * kHudScale, p.y + 3 * kHudScale, k, {0, 0, 0, 255}, 0x44);
-        text_(c, K("num_a9"), scoreText_, p.x, p.y, k, {255, 255, 255, 255}, 0x44);
+        Hud2D::TextStyle ts;
+        ts.spacing = 5;
+        float k = 1.1f * kHudScale * ss;
+        if (scoreSquash_ > 0) k = 1.0f * kHudScale * ss, ts.sx = scoreSquash_;
+        text_(c, K("num_a9"), scoreText_, p.x + 3 * kHudScale, p.y + 3 * kHudScale, k, {0, 0, 0, 255}, 0x44, ts);
+        text_(c, K("num_a9"), scoreText_, p.x, p.y, k, {255, 255, 255, 255}, 0x44, ts);
     }
     // Streak digits: num_a7 at (222 - 37 i, 78), centred; dial 1 dark blue [C setup_hud].
     for (int i = 1; i <= 4; ++i) {
@@ -398,66 +475,139 @@ void Hud2D::draw(Canvas& c, const TextureCache& tex, double now) const {
         }
         const std::array<uint8_t, 4> col = i == 1 ? std::array<uint8_t, 4>{15, 15, 70, uint8_t(al)}
                                                   : std::array<uint8_t, 4>{230, 230, 230, uint8_t(al)};
-        text_(c, K("num_a7"), std::to_string(digits_[size_t(i - 1)]), p.x, p.y, kHudScale, col, 0x22);
+        text_(c, K("num_a7"), std::to_string(digits_[size_t(i - 1)]), p.x, p.y, kHudScale, col, 0x22, Hud2D::TextStyle{});
     }
-    // "<n> Note Streak!" [C script hud_show_note_streak_combo; rotation not drawn: approximation].
-    {
-        const double t = now - comboStart_;
-        if (t >= 0 && t < 2550) {
-            static const float kScale[8] = {1.8f, 1, 1.5333f, 1, 1.4f, 1, 1.32f, 1};
-            static const double kDur[8] = {400, 400, 300, 300, 200, 200, 100, 100};
-            float scale = 1, alpha = 1, y = 211;
-            std::array<uint8_t, 4> col{245, 255, 120, 255};
-            if (t < 200) {
-                const float u = ease(float(t / 200), 1);
-                scale = 3 + (1 - 3) * u, alpha = u, col = {223, 223, 223, 255};
-            } else if (t < 2200) {
-                double q = t - 200, from = 1;
-                for (int i = 0; i < 8; ++i) {
-                    if (q < kDur[i]) {
-                        const float u = ease(float(q / kDur[i]), i % 2 == 0 ? 2 : 1);
-                        scale = float(from) + (kScale[i] - float(from)) * u;
-                        col = i % 2 == 0 ? std::array<uint8_t, 4>{245, 255, 160, 255} : std::array<uint8_t, 4>{245, 255, 120, 255};
-                        break;
-                    }
-                    q -= kDur[i], from = kScale[i];
-                }
-            } else {
-                const float u = ease(float((t - 2200) / 350), 1);
-                y = 211 - 230 * u, scale = 1 + (0.8f - 1) * u;
-            }
-            col[3] = uint8_t(255 * alpha);
-            char b[48];
-            std::snprintf(b, sizeof b, "%d Note Streak!", combo_);
-            text_(c, K("text_a6"), b, 642, y + 2, scale, {0, 0, 0, uint8_t(255 * alpha)}, 0x12);
-            text_(c, K("text_a6"), b, 640, y, scale, col, 0x12);
-        }
+    // "<n> Note Streak!" and "Star Power Ready" (text_a6, just center top,
+    // shadow (2,2) black) [C scripts].
+    if (comboText_.running(now)) {
+        char b[48];
+        std::snprintf(b, sizeof b, "%d Note Streak!", combo_);
+        drawAlert(c, comboText_, K("text_a6"), b, now, 0x12);
     }
-    // "Star Power Ready" [C script show_star_power_ready; rotation not drawn: approximation].
-    {
-        const double t = now - readyStart_;
-        if (t >= 0 && t < 2160 && ready_) {
-            float scale = 1.2f, alpha = 1, y = 210;
-            std::array<uint8_t, 4> col{190, 225, 255, 250};
-            if (t < 300) {
-                const float u = ease(float(t / 300), 1);
-                scale = 4 + (1.2f - 4) * u, alpha = u;
-            } else if (t < 600) {
-                scale = 1.2f + 0.6f * ease(float((t - 300) / 300), 2);
-            } else if (t < 900) {
-                const float u = float((t - 600) / 300);
-                scale = 1.8f - 0.6f * u;
-                col = {uint8_t(190 - 45 * u), uint8_t(225 - 10 * u), uint8_t(255 - 20 * u), 250};
-            } else if (t < 1860) {
-                col = {145, 215, 235, 250};
-            } else {
-                const float u = float((t - 1860) / 300);
-                y = 210 - 230 * u, scale = 1.2f - 0.6f * u, alpha = 1 - u;
-                col = {145, 215, 235, 250};
-            }
-            col[3] = uint8_t(250 * alpha);
-            text_(c, K("text_a6"), "Star Power Ready", 642, y + 2, scale, {0, 0, 0, uint8_t(250 * alpha)}, 0x22);
-            text_(c, K("text_a6"), "Star Power Ready", 640, y, scale, col, 0x22);
-        }
+    if (readyText_.running(now) && ready_) drawAlert(c, readyText_, K("text_a6"), "Star Power Ready", now, 0x12);
+}
+
+void Hud2D::drawAlert(Canvas& c, const HudAnim& a, uint32_t font, const std::string& s, double now, uint32_t align) const {
+    hudalert::draw(c, text_, a, font, s, now, align);
+}
+
+namespace hudalert {
+
+void combo(HudAnim& text, HudAnim& glow, double at, float x, float y, float base, float sw, float gx, float gy, float gk) {
+    // hud_show_note_streak_combo: scale base x 3, alpha 0 -> base, alpha 1
+    // (0.2 s ease_in); the glow burst; the wobble (s = sw); rot 0; up 230 px
+    // at scale base x 0.8 (0.35 s ease_in) [C script].
+    using A = HudAnim;
+    A::Props p;
+    p.x = x, p.y = y, p.sx = p.sy = base * 3, p.alpha = 0, p.rgba = {223, 223, 223, 255};
+    text.begin(at, p);
+    auto P = [](float sc, float rot, bool c1) {
+        A::Props q;
+        q.sx = q.sy = sc, q.rot = rot;
+        q.rgba = c1 ? std::array<float, 4>{245, 255, 160, 255} : std::array<float, 4>{245, 255, 120, 255};
+        q.alpha = 1;
+        return q;
+    };
+    const float b = base;
+    text.then(200, 2, A::Scale | A::Alpha, P(b, 0, false));
+    text.then(400, 3, A::Scale | A::Rgba | A::Rot, P(b + sw, 3, true));
+    text.then(400, 2, A::Scale | A::Rgba | A::Rot, P(b, 2, false));
+    text.then(300, 3, A::Scale | A::Rgba | A::Rot, P(b + sw / 1.5f, -2, true));
+    text.then(300, 2, A::Scale | A::Rgba | A::Rot, P(b, -1, false));
+    text.then(200, 3, A::Scale | A::Rgba | A::Rot, P(b + sw / 2, 2, true));
+    text.then(200, 2, A::Scale | A::Rgba | A::Rot, P(b, 1, false));
+    text.then(100, 3, A::Scale | A::Rgba | A::Rot, P(b + sw / 2.5f, -1, true));
+    text.then(100, 2, A::Scale | A::Rgba | A::Rot, P(b, 1, false));
+    text.then(0, 0, A::Scale | A::Rot, P(b, 0, false));
+    A::Props up = P(b * 0.8f, 0, false);
+    up.x = x, up.y = y - 230;
+    text.then(350, 2, A::Pos | A::Scale, up);
+    // hud_glowburst_alert: Char_Select_Hilite1, scale (15,1) -> (20,5) a 0.5
+    // -> (15,0.5) [245 255 160] -> (80,0) a 0 (face-off: halved, gk 0.5) [C script].
+    A::Props g;
+    g.x = gx, g.y = gy, g.sx = 15 * gk, g.sy = 1 * gk, g.rgba = {245, 255, 200, 255};
+    glow.begin(at + 200, g);
+    g.sx = 20 * gk, g.sy = 5 * gk, g.alpha = 0.5f;
+    glow.then(100, 3, A::Scale | A::Alpha, g);
+    g.sx = 15 * gk, g.sy = 0.5f * gk, g.rgba = {245, 255, 160, 255};
+    glow.then(100, 3, A::Scale | A::Alpha | A::Rgba, g);
+    g.sx = 80 * gk, g.sy = 0, g.alpha = 0;
+    glow.then(800, 2, A::Scale | A::Alpha, g);
+}
+
+void ready(HudAnim& text, double at, float x, float y, float base, float mult) {
+    // show_star_power_ready: at the position, scale 4, rgba [190 225 255 250],
+    // alpha 0, rot 3; -> base a 1 rot -3 (0.3 ease_in); base x mult rot 4 (0.3
+    // ease_out); base rot -5 [145 215 235 250] (0.3 ease_in); 12 x rot x -0.7
+    // from 10 (0.08 ease_out); rot 0; up 230 at base x 0.5, alpha 0 (0.3 ease_in) [C script].
+    using A = HudAnim;
+    A::Props p;
+    p.x = x, p.y = y, p.sx = p.sy = 4, p.rot = 3, p.alpha = 0, p.rgba = {190, 225, 255, 250};
+    text.begin(at, p);
+    auto P = [x, y](float sc, float rot, float alpha) {
+        A::Props q;
+        q.sx = q.sy = sc, q.rot = rot, q.alpha = alpha, q.rgba = {145, 215, 235, 250}, q.x = x, q.y = y;
+        return q;
+    };
+    text.then(300, 2, A::Scale | A::Alpha | A::Rot, P(base, -3, 1));
+    text.then(300, 3, A::Scale | A::Rot, P(base * mult, 4, 1));
+    text.then(300, 2, A::Scale | A::Rot | A::Rgba, P(base, -5, 1));
+    float r = 10;
+    for (int i = 0; i < 12; ++i) {
+        r *= -0.7f;
+        text.then(80, 3, A::Rot | A::Alpha, P(base, r, 1));
     }
+    text.then(0, 3, A::Rot, P(base, 0, 1));
+    A::Props out = P(base * 0.5f, 0, 0);
+    out.y = y - 230;
+    text.then(300, 2, A::Pos | A::Scale | A::Alpha, out);
+}
+
+void draw(Canvas& c, const Hud2D::TextFn& text, const HudAnim& a, uint32_t font, const std::string& s, double now, uint32_t align) {
+    if (!text || !a.running(now)) return;
+    const HudAnim::Props p = a.at(now);
+    if (p.alpha <= 0.002f) return;
+    Hud2D::TextStyle ts;
+    ts.rot = p.rot, ts.sx = p.sy > 0 ? p.sx / p.sy : 1;
+    // shadow_offs (2,2) black, turning with the text [I].
+    const float r = p.rot * float(M_PI) / 180, ox = 2 * p.sy, oy = 2 * p.sy;
+    const auto al = uint8_t(std::clamp(p.rgba[3] * p.alpha, 0.0f, 255.0f));
+    text(c, font, s, p.x + ox * std::cos(r) - oy * std::sin(r), p.y + ox * std::sin(r) + oy * std::cos(r), p.sy, {0, 0, 0, uint8_t(255 * p.alpha)}, align,
+         ts);
+    text(c, font, s, p.x, p.y, p.sy, {uint8_t(p.rgba[0]), uint8_t(p.rgba[1]), uint8_t(p.rgba[2]), al}, align, ts);
+}
+
+}  // namespace hudalert
+
+void IntroText::setup(const std::string& title, const std::string& by, const std::string& artist, double startMs, double firstMs) {
+    auto upper = [](std::string t) {
+        for (char& ch : t) ch = char(std::toupper(static_cast<unsigned char>(ch)));
+        return t;
+    };
+    title_ = upper(title), by_ = upper(by), artist_ = upper(artist);
+    // fastintro: song_title_start_time -6700 after current_starttime, so at
+    // the scroller's first frame [C data fastintro_sequence_props].
+    at_ = std::max(firstMs, startMs - 6700.0);
+}
+
+void IntroText::draw(Canvas& c, const Hud2D::TextFn& text, double now) const {
+    if (!text) return;
+    // Fade 700 ms in, 3000 ms on, 700 ms out (song_title_fade_time / on_time) [C data].
+    const double t = now - at_;
+    if (t < 0 || t >= 4400) return;
+    const float a = t < 700 ? float(t / 700) : t < 3700 ? 1.0f : float(1 - (t - 3700) / 700);
+    const uint32_t font = K("text_a10");
+    const Hud2D::TextStyle plain;
+    Hud2D::TextStyle half;
+    half.sx = 2;  // scale (1.0, 0.5): half height, full width
+    auto draw = [&](const std::string& s, float x, float y, float h, const std::array<uint8_t, 4>& rgba, const Hud2D::TextStyle& st) {
+        if (s.empty()) return;
+        text(c, font, s, x + 1, y + 1, h, {0, 0, 0, uint8_t(255 * a)}, 0x11, st);  // shadow_offs (1,1) [C]
+        text(c, font, s, x, y, h, {rgba[0], rgba[1], rgba[2], uint8_t(float(rgba[3]) * a)}, 0x11, st);
+    };
+    // Positions: song_title_pos (255,75), performed_by_pos (255,135), song_artist_pos (255,150);
+    // title scale 1.23 rgba [210 210 210 250], by (1, 0.5) [230 205 160 255], artist 1.0 [255 190 70 255] [C].
+    draw(title_, 255, 75, 1.23f, {210, 210, 210, 250}, plain);
+    draw(by_, 255, 135, 0.5f, {230, 205, 160, 255}, half);
+    draw(artist_, 255, 150, 1.0f, {255, 190, 70, 255}, plain);
 }

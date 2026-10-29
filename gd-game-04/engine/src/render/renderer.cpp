@@ -2,6 +2,7 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "render/renderer.h"
 #include "render/band_view.h"
+#include "render/particles.h"
 #include "render/venue_view.h"
 #include "render/camera.h"
 
@@ -152,6 +153,11 @@ std::vector<std::string> Renderer::compileAll(int& programs) {
     error.clear();
     if (ProgramId p = device_->createProgram(BandView::programDesc(), error)) device_->destroyProgram(p);
     else SDL_Log("shader band: %s", error.c_str()), failed.push_back("band");
+    // The venue particles' program (render/particles.cpp).
+    ++programs;
+    error.clear();
+    if (ProgramId p = device_->createProgram(Particles::programDesc(), error)) device_->destroyProgram(p);
+    else SDL_Log("shader particles: %s", error.c_str()), failed.push_back("particles");
     return failed;
 }
 
