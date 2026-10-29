@@ -2,7 +2,9 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "render/venue_stage.h"
 
+#include <SDL3/SDL_log.h>
 #include <SDL3/SDL_stdinc.h>
+#include <SDL3/SDL_timer.h>
 
 #include <exception>
 
@@ -39,6 +41,28 @@ bool VenueStage::start(const Disc& disc, const Globals& g, const std::string& zo
     lights_ = {};
     cameras_.init(*venue_, g, chart, songKey ^ venue_->zoneKey, leadInMs);
     lights_.init(*venue_, g, chart);
+    // The band (create_band, at the song's start: the gem scroller's lead-in) [C script].
+    band_.reset();
+    if (!SDL_getenv("GD04_NO_BAND")) {
+        band_ = std::make_unique<Band>();
+        std::string berr;
+        const uint64_t t0 = SDL_GetTicks();
+        if (!band_->start(disc, g, *venue_, chart, songKey, &perf_, -leadInMs, berr)) {
+            SDL_Log("band: %s", berr.c_str());
+            band_.reset();
+        } else {
+            std::string who;
+            for (const Band::Entry& e : band_->members()) who += (who.empty() ? "" : ", ") + e.model->member.profileName;
+            SDL_Log("band: %s (%llu ms)", who.c_str(), static_cast<unsigned long long>(SDL_GetTicks() - t0));
+        }
+    }
+    if (band_) {
+        Band* b = band_.get();
+        cameras_.setBoneLookup([b](uint32_t member, uint32_t bone, double ms, venue::Vec3& out) {
+            b->evaluate(ms);
+            return b->bonePos(member, bone, out);
+        });
+    }
     // The crowd's cards: textures the crowd cameras' renders replace
     // (<zone>_crowd_models[].textureasset, CreateViewportTextureOverride) [C
     // script create_crowd_models]; no crowd yet (M6), so they are hidden.
@@ -60,6 +84,10 @@ bool VenueStage::attach(gfx::RenderDevice& device, const Disc& disc, std::string
         view_.reset();
         return false;
     }
+    if (band_) {
+        std::string berr;
+        if (!band_->attach(device, berr)) SDL_Log("band: %s", berr.c_str());
+    }
     return true;
 }
 
@@ -71,6 +99,7 @@ void VenueStage::update(double ms, float health) {
 
 void VenueStage::advance(double ms) {
     if (!venue_) return;
+    if (band_) band_->advance(ms);
     cameras_.update(ms, perf_);
     lights_.update(ms, perf_);
 }
@@ -78,5 +107,7 @@ void VenueStage::advance(double ms) {
 void VenueStage::draw(double ms) {
     if (!view_) return;
     lights_.evaluate(ms, lightState_);
-    view_->draw(cameras_.pose(ms), lightState_, lights_);
+    const venue::CamPose cam = cameras_.pose(ms);
+    view_->draw(cam, lightState_, lights_);
+    if (band_) band_->draw(ms, cam, *venue_, lightState_, lights_);
 }

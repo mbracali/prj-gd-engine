@@ -3,6 +3,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -69,6 +70,13 @@ public:
     const Shot& shot() const { return shot_; }
     int cuts() const { return cuts_; }
     const std::vector<Shot>& history() const { return history_; }
+    // Where a band member's bone is at a song time (render/band.h): the
+    // cameras' lookat / lookatbone aim at it. Unset: the authored Quat.
+    using BoneLookup = std::function<bool(uint32_t member, uint32_t bone, double ms, Vec3& out)>;
+    void setBoneLookup(BoneLookup f) { lookup_ = std::move(f); }
+    // The member and bone the shot playing frames (lookat / lookatbone of its first camera; 0: none).
+    uint32_t lookatMember() const { return keys_.empty() ? 0 : keys_.front().lookat; }
+    uint32_t lookatBone() const { return keys_.empty() ? 0 : keys_.front().lookatBone; }
 
 private:
     struct Keyed {  // a camera position: pos / Quat / FOV in the frame of LockTo
@@ -76,8 +84,11 @@ private:
         Quat rot{0, 0, 0, 1};
         float fov = 72;
         uint32_t lockTo = 0;
+        uint32_t lookat = 0, lookatBone = 0;  // lookat / lookatbone (0: none)
+        float screenOffset[2] = {0, 0};       // screenoffset: where the bone sits on screen
         bool valid = false;
     };
+    CamPose aim(const CamPose& p, const Keyed& k0, const Keyed& k1, float mix, double ms) const;
     Keyed readCam(const qb::Struct* st) const;
     CamPose world(const Keyed& k) const;
     uint32_t findArray(const std::string& prefix, const char* perf) const;
@@ -120,6 +131,7 @@ private:
     float zoomFov_ = 0;           // HandCam's random zoom target (0: none)
     float orbitRad_ = 0;          // total orbit angle
     bool orbit1_ = true, orbit2_ = true, handCam_ = false;
+    BoneLookup lookup_;
 };
 
 }  // namespace venue

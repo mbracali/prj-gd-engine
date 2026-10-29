@@ -267,3 +267,34 @@ player's `player_status` struct.
   draw order; last texture = lightmap (2048x2048 single-level DXT1) [C data];
   crowd cards = `tw_billboard0N` placeholders replaced by crowd renders [C
   `create_crowd_models`].
+
+## The band (M6; details in `band.md`)
+
+- `create_band` (one player): guitarist from `player1_status`
+  (character_id, outfit, style -> `Guitarist_<name>_Outfit<o>_Style<s>`,
+  instrument_id), drummer, the song's `bassist` (else 'bassist'), the song's
+  `singer` (none / female / bret; `_alt` microphones in z_wikker, z_budokan,
+  z_hell); placed at `<zone>_TRG_Waypoint_<member>_start` [C scripts].
+- Members are `Musician_Profiles` entries; bodies / instruments are
+  `musician_body` / `musician_instrument` descs naming `PAK/<x>.pak.xen`;
+  every skin (body, guitar, bass, mic, drum set) is skinned to the member's
+  skeleton in `ZONES/global.pak` [C data: 193 skins].
+- Clips: rotations absolute, compressed translations are offsets from the
+  bind translation, single-pose clips absolute, flags 0x200 = difference
+  clip (the hands' `_D` anims) [C data; I: the composition order]. Body clips
+  leave the arms to IK onto `Bone_IK_Hand_Guitar_L/R`, which the fret
+  (`BONE_GUITAR_FRET_POS`), strum and chord clips move [C data].
+- Body anims: `anim_set.<stance>.<anim>.<skill>.<speed>`, random without
+  repeating the last; skill by player 1's health (0.66 / 1.33), speed by
+  tempo against the means of slow/med/fast_tempo (95 / 130 bpm) [C
+  0x82108E58, 0x82108C90, 0x82108B60]. Stances and anims from the song's
+  `<song>_performance` (Band_ChangeStance, Band_PlayAnim,
+  Band_PlayFacialAnim, Band_WalkToNode) [C data].
+- Hands: strums on every expert gem 250 ms early (Short < 150 ms < med <
+  600 ms < Long), fret positions from `<song>_anim_notes` 118..127 / 101..110,
+  chords from the gem's colours released 10 ms after the gem [C scripts,
+  FretFingers 0x821119F8]. Drummer: drums_notes 37..45 / 49..57 arms 150 ms
+  early, cymbals 41..45 / 53..57, body twist toward the mean of the arms'
+  factors at 0.05 a frame [C 0x821121D8, 0x82107F48].
+- Cameras with `lookat` / `lookatbone` / `screenoffset` now aim at the live
+  bone [I: GH3's tracking and smoothing].

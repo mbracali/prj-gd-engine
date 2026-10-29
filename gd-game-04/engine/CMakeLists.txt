@@ -37,6 +37,7 @@ target_sources(gd04 PRIVATE
   src/audio/xma_decoder.cpp
   src/audio/xma_stream.cpp
   src/data/anim.cpp
+  src/data/band.cpp
   src/data/disc.cpp
   src/data/font.cpp
   src/data/fsb.cpp
@@ -57,6 +58,9 @@ target_sources(gd04 PRIVATE
   src/platform/app_icon.cpp
   src/platform/disc_picker.cpp
   src/platform/paths.cpp
+  src/render/band.cpp
+  src/render/band_anim.cpp
+  src/render/band_view.cpp
   src/render/canvas.cpp
   src/render/gl_api.cpp
   src/render/gl_device.cpp
@@ -81,6 +85,7 @@ target_sources(gd04 PRIVATE
   src/script/natives_core.cpp
   src/script/vm.cpp
   src/tests/audittest.cpp
+  src/tests/chartest.cpp
   src/tests/format_checks.cpp
   src/tests/scripttest.cpp
   src/tests/selftest.cpp

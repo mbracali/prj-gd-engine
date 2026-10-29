@@ -97,8 +97,9 @@ class more (lights: `rotationquat`, `lightcolor`, `intensity`, `attenstart`,
   member's frame (its start waypoint's position and angles) [C data: the
   same projection test holds for LockTo cameras]. `lookat` /
   `lookatbone` / `screenoffset` keep the member framed (`screenoffset.y`
-  is screen-down positive) [C data]; gd04 has no characters yet, so it uses
-  the authored `Quat` (the framing as authored) [I].
+  is screen-down positive) [C data]; gd04 turns the authored `Quat` so the
+  live bone of the band member sits at the screen offset (M6, docs/band.md
+  "Cameras") [I].
 
 ### Arrays
 
@@ -235,7 +236,7 @@ GdVenueMat):
 
 ## 6. Not done yet
 
-Band members and their animation (the look-at targets), the crowd (3D peds
+The band is M6 (docs/band.md); the crowd (3D peds
 and the cards), light volumes, flares and housings (the `_gfx` game
 objects), particles and pyro, animated level objects (fans, hub caps, the
 doll: their trigger scripts), screen effects (`dof`, `ScreenFX_*`), the

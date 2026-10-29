@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "data/venue.h"
+#include "render/band.h"
 #include "render/venue_camera.h"
 #include "render/venue_lights.h"
 #include "render/venue_view.h"
@@ -39,6 +40,10 @@ public:
     void update(double ms, float health);
     // Advances to `ms` with the last step's performance (a frame between steps).
     void advance(double ms);
+    // The player's judged note at step time `ms` (after update(ms)): the band's guitarist reacts.
+    void playerNote(double ms, bool hit) {
+        if (band_) band_->playerNote(ms, hit);
+    }
     void draw(double ms);
 
     venue::CamPose camera(double ms) const { return cameras_.pose(ms); }
@@ -46,6 +51,9 @@ public:
     const venue::LightShow& lights() const { return lights_; }
     const venue::Venue& venue() const { return *venue_; }
     const VenueView* view() const { return view_.get(); }
+    // The band on the stage (render/band.h; GD04_NO_BAND=1: none); null if it could not load.
+    const Band* band() const { return band_.get(); }
+    Band* band() { return band_.get(); }
     static venue::Performance performance(float health);
 
 private:
@@ -56,4 +64,5 @@ private:
     std::vector<venue::LightState> lightState_;
     std::vector<uint32_t> hide_;  // the crowd cards' textures
     venue::PerfTimeline perf_;
+    std::unique_ptr<Band> band_;
 };

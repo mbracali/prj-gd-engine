@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "render/renderer.h"
+#include "render/band_view.h"
 #include "render/venue_view.h"
 #include "render/camera.h"
 
@@ -146,6 +147,11 @@ std::vector<std::string> Renderer::compileAll(int& programs) {
     error.clear();
     if (ProgramId p = device_->createProgram(VenueView::programDesc(), error)) device_->destroyProgram(p);
     else SDL_Log("shader venue: %s", error.c_str()), failed.push_back("venue");
+    // The band program (render/band_view.cpp).
+    ++programs;
+    error.clear();
+    if (ProgramId p = device_->createProgram(BandView::programDesc(), error)) device_->destroyProgram(p);
+    else SDL_Log("shader band: %s", error.c_str()), failed.push_back("band");
     return failed;
 }
 

@@ -121,6 +121,8 @@ void SongScreen::tick(double nowMs, Mixer& mixer) {
         if (venue_) venue_->update(stepMs_, player_->stats().health);
         hud_.update(player_->stats(), stepMs_);
         for (const PlayerEvent& ev : player_->events()) {
+            if (venue_ && ev.note >= 0 && (ev.kind == PlayerEvent::Kind::Hit || ev.kind == PlayerEvent::Kind::Miss))
+                venue_->playerNote(stepMs_, ev.kind == PlayerEvent::Kind::Hit);
             if (ev.kind == PlayerEvent::Kind::Hit) {
                 mixer.setGuitarAudible(true);
                 if (ev.note >= 0) highway_.noteHit(track_.notes[size_t(ev.note)].frets, stepMs_, player_->stats().starPowerActive);

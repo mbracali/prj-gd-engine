@@ -200,6 +200,10 @@ CameraDirector::Keyed CameraDirector::readCam(const qb::Struct* st) const {
     if (const qb::Value* f = st->find(K("fov"))) k.fov = f->number();
     k.lockTo = keyOf(st->find(K("lockto")));
     if (k.lockTo == K("world")) k.lockTo = 0;
+    k.lookat = keyOf(st->find(K("lookat")));
+    k.lookatBone = keyOf(st->find(K("lookatbone")));
+    if (const qb::Value* so = st->find(K("screenoffset")); so && (so->type == qb::Type::Pair || so->type == qb::Type::Vector))
+        k.screenOffset[0] = so->f[0], k.screenOffset[1] = so->f[1];
     k.valid = true;
     return k;
 }
@@ -390,9 +394,10 @@ CamPose CameraDirector::pose(double ms) const {
     const Keyed& k0 = keys_.front();
     const Keyed& k1 = keys_.size() > 1 ? keys_[1] : k0;
     CamPose p;
+    float mix = 0;  // how much of k1's lookat framing the pose has
     switch (ctl_) {
     case Ctl::Static: p = world(k0); break;
-    case Ctl::TwoCam: p = blend(world(k0), world(k1), smooth(s)); break;
+    case Ctl::TwoCam: p = blend(world(k0), world(k1), mix = smooth(s)); break;
     case Ctl::HandCam:
         p = world(k0);
         if (zoomFov_ > 0) p.fov = k0.fov + (zoomFov_ - k0.fov) * smooth(s);
@@ -408,8 +413,8 @@ CamPose CameraDirector::pose(double ms) const {
         else p.fov = seg(2.98, 0.3, 53, 51);
         break;
     }
-    case Ctl::QuickZoom: p = blend(world(k0), world(k1), smooth(float(std::clamp((since - 2.0) / 0.75, 0.0, 1.0)))); break;
-    case Ctl::Pan: p = blend(world(k0), world(k1), smooth(float(std::clamp((since - 2.0) / 1.0, 0.0, 1.0)))); break;
+    case Ctl::QuickZoom: p = blend(world(k0), world(k1), mix = smooth(float(std::clamp((since - 2.0) / 0.75, 0.0, 1.0)))); break;
+    case Ctl::Pan: p = blend(world(k0), world(k1), mix = smooth(float(std::clamp((since - 2.0) / 1.0, 0.0, 1.0)))); break;
     case Ctl::Orbit:
     case Ctl::OrbitMorph: {
         // ccam_orbit axis=(0,1,0) speed=angle/camera_time about the LockTo
@@ -423,7 +428,7 @@ CamPose CameraDirector::pose(double ms) const {
             return k;
         };
         if (ctl_ == Ctl::Orbit) p = world(orbit(k0, true));
-        else p = blend(world(orbit(k0, orbit1_)), world(orbit(k1, orbit2_)), smooth(s));
+        else p = blend(world(orbit(k0, orbit1_)), world(orbit(k1, orbit2_)), mix = smooth(s));
         break;
     }
     case Ctl::Spline: {
@@ -443,9 +448,11 @@ CamPose CameraDirector::pose(double ms) const {
                                (-a.pos[j] + 3 * b.pos[j] - 3 * c.pos[j] + d.pos[j]) * u * u * u);
         p.rot = slerp(b.rot, c.rot, u);
         p.fov = b.fov + (c.fov - b.fov) * u;
+        p = aim(p, keys_[i], keys_[i + 1], u, ms);
         break;
     }
     }
+    if (ctl_ != Ctl::Spline) p = aim(p, k0, k1, mix, ms);
     if (handCam_) {
         // CameraCuts_SetHandCamParams: motionx / motiony, amplitude 0.034 /
         // 0.04, period base 0.013 / 0.017 per frame with multiples 1, 3, 4 [C
@@ -460,6 +467,41 @@ CamPose CameraDirector::pose(double ms) const {
         p.rot = mul(p.rot, mul(yRot(yaw), Quat{std::sin(pitch * 0.5f), 0, 0, std::cos(pitch * 0.5f)}));
     }
     return p;
+}
+
+// lookat / lookatbone / screenoffset: the camera turns (the least rotation
+// from its authored orientation) so the member's bone lands at the screen
+// offset, every frame [C data: the authored Quat frames the member's start
+// position this way (docs/venues.md "Conventions"); I: GH3's own tracking,
+// its smoothing and the roll it keeps]. x right, y down, in half-screens.
+CamPose CameraDirector::aim(const CamPose& p, const Keyed& k0, const Keyed& k1, float mix, double ms) const {
+    if (!lookup_) return p;
+    const Keyed& k = mix < 0.5f || !k1.lookat ? k0 : k1;
+    if (!k.lookat || !k.lookatBone) return p;
+    Vec3 target;
+    if (!lookup_(k.lookat, k.lookatBone, ms, target)) return p;
+    float so[2] = {k.screenOffset[0], k.screenOffset[1]};
+    if (k0.lookat && k1.lookat && &k0 != &k1)
+        for (int i = 0; i < 2; ++i) so[i] = k0.screenOffset[i] + (k1.screenOffset[i] - k0.screenOffset[i]) * mix;
+    const float th = std::tan(p.fov * 0.5f * 3.14159265f / 180.0f), tv = th / (16.0f / 9.0f);
+    // The wanted direction in the camera's local axes (screen right is local -x).
+    Vec3 local{-so[0] * th, -so[1] * tv, 1.0f};
+    const Vec3 have = rotate(p.rot, local);
+    const Vec3 want{target[0] - p.pos[0], target[1] - p.pos[1], target[2] - p.pos[2]};
+    auto norm = [](Vec3 v) {
+        const float l = std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+        return l > 1e-9f ? Vec3{v[0] / l, v[1] / l, v[2] / l} : v;
+    };
+    const Vec3 a = norm(have), b = norm(want);
+    const float d = a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    if (d < 0.2f) return p;  // behind or far off: keep the authored framing
+    const Vec3 c{a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]};
+    Quat r{c[0], c[1], c[2], 1 + d};
+    const float n = std::sqrt(r[0] * r[0] + r[1] * r[1] + r[2] * r[2] + r[3] * r[3]);
+    for (float& x : r) x /= n;
+    CamPose out = p;
+    out.rot = mul(r, p.rot);
+    return out;
 }
 
 }  // namespace venue

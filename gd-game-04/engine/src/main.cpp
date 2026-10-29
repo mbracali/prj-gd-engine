@@ -25,6 +25,7 @@
 #include "tests/formattest.h"
 #include "tests/scripttest.h"
 #include "tests/selftest.h"
+#include "tests/chartest.h"
 #include "tests/venuetest.h"
 #include "video/movie_player.h"
 #include "tests/sfxtest.h"
@@ -55,6 +56,8 @@ void usage() {
         "  --venuetest          draw every venue with a song's camera cuts and light show; check they are the\n"
         "                       same at 60 and 240 fps (GD04_VENUE=<zone>, GD04_VENUETEST_SONG / _FRAMES / _SHOTS=<dir>);\n"
         "                       in a song GD04_VENUE=<zone> picks the venue, GD04_NO_VENUE=1 draws none\n"
+        "  --chartest           load, skin and animate every character, outfit and instrument; the band in every\n"
+        "                       venue (60 vs 240 fps, framed by its cameras); GD04_CHARTEST_SHOTS=<dir> saves grids\n"
         "Environment: GD04_KEYS=\"<ms>:<key>,...\" scripted menu keys; GD04_SCREENSHOT=<file.bmp> with\n"
         "  GD04_SCREENSHOT_AT=<ms>[,<ms>...] saves frames; GD04_LOG=<file> also writes the log to that file\n"
         "  (Windows: gd04.log in the save folder); GD04_STATS=1 logs fps; GD04_PERF=1 a frame-time breakdown.\n"
@@ -143,7 +146,7 @@ int run(int argc, char** argv) {
     Options opt;
     std::string movie;
     bool audittest = false, formattest = false, shadertest = false, selftest = false, sfxtest = false, scripttest = false;
-    bool venuetest = false;
+    bool venuetest = false, chartest = false;
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
         auto value = [&]() -> std::string {
@@ -160,6 +163,7 @@ int run(int argc, char** argv) {
         else if (a == "--formattest") formattest = true;
         else if (a == "--selftest") selftest = true;
         else if (a == "--venuetest") venuetest = true;
+        else if (a == "--chartest") chartest = true;
         else if (a == "--sfxtest") sfxtest = true;
         else if (a == "--scripttest") scripttest = true;
         else if (a == "--audittest") audittest = true;
@@ -173,7 +177,7 @@ int run(int argc, char** argv) {
         else if (a.rfind("-psn_", 0) != 0) opt.dataPath = a;
     }
     if (shadertest) return runShaderTest();
-    if ((!movie.empty() || audittest || formattest || selftest || sfxtest || scripttest || venuetest || !opt.walk.empty()) &&
+    if ((!movie.empty() || audittest || formattest || selftest || sfxtest || scripttest || venuetest || chartest || !opt.walk.empty()) &&
         opt.dataPath.empty()) {
         usage();
         return 2;
@@ -182,6 +186,7 @@ int run(int argc, char** argv) {
     if (formattest) return runFormatTest(opt.dataPath);
     if (selftest) return runSelfTest(opt.dataPath);
     if (venuetest) return runVenueTest(opt.dataPath);
+    if (chartest) return runCharTest(opt.dataPath);
     if (sfxtest) return runSfxTest(opt.dataPath);
     if (scripttest) return runScriptTest(opt.dataPath);
     if (audittest) return runAuditTest(opt.dataPath, opt.out);

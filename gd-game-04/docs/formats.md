@@ -214,7 +214,9 @@ Skins: groups of 1-3 bones, 32-byte vertices with two u16 weights.
   0x2000 / 0x1000 / 0x800), w = sqrt(1 - x^2 - y^2 - z^2). T keys
   (0x82421840): a byte with a short time, three f32 at the next 16-aligned
   file offset. Single-pose clips (flags 0x10000000) store plain floats; a
-  bone mask when flags 0x80000.
+  bone mask when flags 0x80000. Compressed translations are offsets from the
+  bone's bind translation, single-pose ones absolute; flags 0x200 marks a
+  difference clip (the hands' `_D` anims) [C data; docs/band.md "Clips"].
 - **.fnt**: vShift, bearing, tracking, line height; u16 charMap[65536];
   u16 buttonMap[32]; glyphs of 0x24 bytes; an embedded .img (class 2,
   linear) at the pointer at 0x200A0 (0x8232B458).

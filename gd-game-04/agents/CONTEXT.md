@@ -86,3 +86,12 @@ Note (z-order research, 2026-10-29): screen-element z_priority rules were read
 with Ghidra headless (`DumpAsm.java`, `ReadF.java`) plus the existing
 `ghidra/analysis/decomp` export; REA was not used (it cannot open the XEX).
 Notes in `agents/scratch/zorder_spec.md`.
+
+Note (band, M6, 2026-10-29): the band's scripts and data were read from
+`qbscript.py` / `qb.py` dumps of qb.pak and the song paks (`agents/scratch/m6/`),
+the clips and skins with `anim.py` / `scn.py` helpers there; the C functions
+(hero_play_tempo_anim_cfunc 0x821090B0 -> 0x82108E58, skill 0x82108C90, tempo
+0x82108B60 / 0x82108A38, FretFingers 0x821119F8, Drum_iterator 0x821121D8,
+compute_desired_drummer_twist 0x82107F48) with Ghidra headless (`DumpAsm.java`
+fn:<addr>) and the `analysis/decomp` export. REA was not used (it cannot open
+the XEX). Test: `gd04 --chartest <disc>` (docs/band.md "Test").
