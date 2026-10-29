@@ -96,3 +96,24 @@ compute_desired_drummer_twist 0x82107F48) with Ghidra headless (`DumpAsm.java`
 fn:<addr>) and the `analysis/decomp` export. REA was not used (it cannot open
 the XEX). Test: `gd04 --chartest <disc>` (docs/band.md "Test").
 Note (stars/base_score, 2026-10-29): read with qbscript.py dis plus Ghidra headless (`DumpAsm.java` fn:0x8210AF70, `ReadF.java`); REA not used. Notes in `agents/scratch/stars_spec.md`.
+Note (GH3 shaders, crowd, housings, particles, 2026-10-29): the material
+library was decoded from the data (`tools/matlib.py list|dump|check`, the
+D3D constant tables against the scene materials) and the XEX with the
+existing `ghidra/analysis` decomp export (Function_82383768,
+Function_823A5768, Function_822B18C8, Function_824B6698 / 824B6780) and
+Ghidra headless `DumpAsm.java fn:0x822B6E08` (the light manager: VMX128,
+mostly `.word` in Ghidra's listing, so not reimplemented). REA was not used
+(it cannot open the XEX). Xenos microcode layout: the public Xenia ucode.h
+description, checked on the library. Tests: `gd04 --shadertest <disc>`
+compiles every translated template (GD04_SHADERTEST_VERBOSE=1 lists the
+untranslated ones); `GD04_XENOS_DUMP=1` logs each program's GLSL;
+`GD04_GH3_SHADERS=0` / `GD04_CULL=0` / `GD04_NO_CROWD=1` /
+`GD04_NO_PARTICLES=1` / `GD04_CROWD_DEBUG=1` / `GD04_PARTICLES_LOG=1` are
+development aids.
+- 2026-10-29: the original in Xenia (GD04-027): xenia-canary 02d2cb5 Windows
+  build under Proton Experimental's wine in ~/.local/opt/xenia (prefix,
+  config, driving scripts in tools/), nested Xwayland :5, Vulkan on the AMD
+  iGPU (vulkan_device = 0; the NVIDIA one hangs), keyboard as the pad
+  (hid = winkey). Captures: ~/.local/share/gd-engine/refcaps/gd04/INDEX.md.
+  Never create a uinput virtual pad outside a capture session (it breaks
+  other modules' input tests).

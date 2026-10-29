@@ -2,10 +2,9 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #pragma once
 
-// How a controller plays: a guitar strums, a joypad's fret press is a strum.
-// [I] for GH3: the guitar / pad split is the port's input layer (copied from
-// gd-game-02); GH3's own rule for pads is to be confirmed in the XEX
-// (OPEN_QUESTIONS.md).
+// How a controller plays. In GH3 a gamepad strums as a guitar does (the
+// D-pad / left stick), its frets on LT LB RB RT A [C: the original in Xenia];
+// Joypad marks the keyboard's "frets also strum" option (the port's).
 enum class ControllerMode {
     Guitar,
     Joypad,

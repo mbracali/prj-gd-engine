@@ -24,9 +24,11 @@ entry. Removed from the copies: GH2's material shaders, post FX and
 spotlights (the renderer), the `.mogg` / Vorbis path, the WMV player, the
 Milo / DTA layers. Undo: delete the files.
 
-**D4. Input layouts are gd-game-02's for now.** GH3's own controller tables
-(QB) replace them once read (M3 / M8). Labelled [I] in
-`game/controller_mode.h`; backlog row. Undo: n/a.
+**D4. Input layouts: GH3's (2026-10-29).** The guitar layout is the Xbox
+guitar's; the gamepad plays as in the original (frets LT LB RB RT A, strum
+with the D-pad / left stick, A selects, B goes back), confirmed by running
+the original in Xenia (GD04-027). The input layer itself (rebinding,
+controllers.json) is gd-game-02's. Undo: n/a.
 
 **D5. FFmpeg build: Bink instead of ASF/WMV.** GH3's movies are Bink 1
 (`BIKi`), so the minimal LGPL build enables the `bink` demuxer and the

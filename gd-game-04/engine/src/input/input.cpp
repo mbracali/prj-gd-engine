@@ -184,9 +184,9 @@ Input::Bindings Input::defaults(Profile p) {
         set(C::MenuRight, {btn(SDL_GAMEPAD_BUTTON_DPAD_RIGHT)});
         break;
     case Profile::Joypad:
-        // joypad_guitar: kPad_L2 kPad_L1 kPad_R1 kPad_R2 kPad_X = LT LB RB RT
-        // A [C: beatmatch_controller.dta], every fret press a strum (the
-        // joypad watcher). The frets play only with gamepad play on.
+        // GH3 on a gamepad: frets LT LB RB RT A, strum with the D-pad or the
+        // left stick, Select A, Back B [C: the original in Xenia, reference
+        // captures 2026-10-29; GetHeldPattern 0x82100FC0's pad branch].
         set(C::Green, {axis(Kind::AxisPos, SDL_GAMEPAD_AXIS_LEFT_TRIGGER)});
         set(C::Red, {btn(SDL_GAMEPAD_BUTTON_LEFT_SHOULDER)});
         set(C::Yellow, {btn(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER)});
@@ -196,12 +196,10 @@ Input::Bindings Input::defaults(Profile p) {
         set(C::Whammy, {axis(Kind::AxisAny, SDL_GAMEPAD_AXIS_LEFTX), axis(Kind::AxisAny, SDL_GAMEPAD_AXIS_RIGHTX)});
         set(C::StarPower, {btn(SDL_GAMEPAD_BUTTON_BACK)});  // force_mercury kPad_Select [C]
         set(C::Start, {btn(SDL_GAMEPAD_BUTTON_START)});
-        // Menus: A selects, B goes back, the D-pad moves [I]
-        // (dpad_for_navigation FALSE: the D-pad is not a fret in the song [I]).
+        // Menus: A selects, B goes back; the strum (D-pad up / down) moves [C capture].
         set(C::Select, {btn(SDL_GAMEPAD_BUTTON_SOUTH)});
         set(C::Back, {btn(SDL_GAMEPAD_BUTTON_EAST)});
-        set(C::MenuUp, {btn(SDL_GAMEPAD_BUTTON_DPAD_UP)});
-        set(C::MenuDown, {btn(SDL_GAMEPAD_BUTTON_DPAD_DOWN)});
+        strum();
         set(C::MenuLeft, {btn(SDL_GAMEPAD_BUTTON_DPAD_LEFT)});
         set(C::MenuRight, {btn(SDL_GAMEPAD_BUTTON_DPAD_RIGHT)});
         break;
