@@ -131,6 +131,8 @@ public:
 
     // GH3's global tags (GetGlobalTags / SetGlobalTags): the progress and
     // options the save holds, by tag key.
+    // The last update's frame time (GetDeltaTime).
+    double frameMs() const { return frameMs_; }
     std::unordered_map<uint32_t, qb::Struct> globalTags;
     // PushGlobalTags / PopGlobalTags sections (a band's career, by section key).
     std::unordered_map<uint32_t, std::unordered_map<uint32_t, qb::Struct>> globalTagSections;
@@ -169,6 +171,7 @@ private:
     std::unordered_set<std::string> logged_;
     uint32_t nextId_ = 1;
     double clockMs_ = 0;
+    double frameMs_ = 1000.0 / 60.0;
     VmStats stats_;
     bool uiLog_ = false;
     std::mt19937 rng_{12345};

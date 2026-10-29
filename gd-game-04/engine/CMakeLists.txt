@@ -85,6 +85,7 @@ target_sources(gd04 PRIVATE
   src/script/bytecode.cpp
   src/script/globals.cpp
   src/script/natives_core.cpp
+  src/script/natives_misc.cpp
   src/script/vm.cpp
   src/tests/audittest.cpp
   src/tests/chartest.cpp

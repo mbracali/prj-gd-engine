@@ -701,6 +701,7 @@ uint32_t Vm::spawn(uint32_t name, const qb::Struct& params, uint32_t spawnedBy) 
 
 void Vm::update(double dtMs) {
     clockMs_ += dtMs;
+    if (dtMs > 0) frameMs_ = dtMs;
     // Scripts spawned during this update start next frame (the list grows).
     const size_t n = runs_.size();
     for (size_t k = 0; k < n && k < runs_.size(); ++k) {

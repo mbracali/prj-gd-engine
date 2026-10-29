@@ -18,6 +18,12 @@
 #include "script/natives_core.h"
 #include "script/vm.h"
 #include "tests/format_checks.h"
+#include "render/renderer.h"
+#include "render/texture_cache.h"
+#include "ui/front_end.h"
+
+#include <SDL3/SDL.h>
+#include <memory>
 
 int runAuditTest(const std::string& discPath, const std::string& outPath) {
     std::string error;
@@ -47,8 +53,11 @@ int runAuditTest(const std::string& discPath, const std::string& outPath) {
                 if (s.value.type != qb::Type::Script) continue;
                 auto toks = qs::tokenize(s.value.script->code.data(), s.value.script->code.size());
                 bool lineStart = true;
+                int depth = 0;  // inside a multi-line struct / array literal: flags and values, not calls
                 for (size_t i = 0; i < toks.size(); ++i) {
                     const qs::Op op = toks[i].op;
+                    if (op == qs::kStartStruct || op == qs::kStartArray) ++depth;
+                    else if ((op == qs::kEndStruct || op == qs::kEndArray) && depth > 0) --depth;
                     if (op == qs::kEndOfLine || op == qs::kEndOfLineNumber) {
                         lineStart = true;
                         continue;
@@ -56,14 +65,36 @@ int runAuditTest(const std::string& discPath, const std::string& outPath) {
                     if (op == qs::kNop) continue;
                     // A call: a name at the start of a line (not `x = ...`), or
                     // right after if / elseif / not.
-                    if (op == qs::kName && lineStart && !(i + 1 < toks.size() && toks[i + 1].op == qs::kEquals)) ++calls[toks[i].u];
+                    // (A member call `x : Name` is the object's, not a native.)
+                    // (`Bassist : obj_x` names the object, not a native.)
+                    const bool member = (i > 0 && toks[i - 1].op == qs::kColon) || (i + 1 < toks.size() && toks[i + 1].op == qs::kColon);
+                    if (op == qs::kName && lineStart && depth == 0 && !member && !(i + 1 < toks.size() && toks[i + 1].op == qs::kEquals))
+                        ++calls[toks[i].u];
                     lineStart = (op == qs::kFastIf || op == qs::kElseIf || op == qs::kNot);
                 }
             }
         }
     }
-    qs::Vm vm(g);
-    qs::addCoreNatives(vm);
+    // The natives as the game registers them: a front end on a hidden window
+    // (the screen elements, flow, game and sound natives); a bare VM's core
+    // natives if no renderer can start.
+    qs::Vm bare(g);
+    qs::addCoreNatives(bare);
+    std::unique_ptr<FrontEnd> fe;
+    std::unique_ptr<TextureCache> tex;
+    gfx::Renderer renderer;
+    SDL_Window* window = nullptr;
+    if (SDL_Init(SDL_INIT_VIDEO)) {
+        window = SDL_CreateWindow("gd04 audit", 1280, 720, gfx::prepareWindow() | SDL_WINDOW_HIDDEN);
+        std::string rerr;
+        if (window && renderer.init(window, rerr)) {
+            tex = std::make_unique<TextureCache>(renderer.device());
+            fe = std::make_unique<FrontEnd>(*disc, g, *tex, renderer.device());
+        } else {
+            std::printf("audittest: no renderer (%s); counting the core natives only\n", rerr.c_str());
+        }
+    }
+    qs::Vm& vm = fe ? fe->vm() : bare;
     std::vector<std::pair<size_t, std::string>> missing;
     size_t scripts = 0, natives = 0;
     for (auto& [k, n] : calls) {
@@ -90,5 +121,10 @@ int runAuditTest(const std::string& discPath, const std::string& outPath) {
     if (out != stdout) std::fclose(out);
     std::printf("audittest: %zu called names, %zu scripts, %zu natives, %zu natives missing\n", calls.size(), scripts, natives,
                 missing.size());
+    fe.reset();
+    tex.reset();
+    renderer.shutdown();
+    if (window) SDL_DestroyWindow(window);
+    SDL_Quit();
     return 0;
 }

@@ -11,6 +11,7 @@
 #include "script/globals.h"
 #include "script/natives_core.h"
 #include "game/save.h"
+#include "script/natives_misc.h"
 #include "ui/glitches.h"
 #include "ui/natives_game.h"
 #include "ui/natives_sound.h"
@@ -23,6 +24,7 @@ FrontEnd::FrontEnd(const Disc& disc, Globals& globals, TextureCache& textures, g
     : disc_(disc), globals_(globals) {
     vm_ = std::make_unique<qs::Vm>(globals_);
     qs::addCoreNatives(*vm_);
+    addMiscNatives(*vm_);
     ui_ = std::make_unique<ui::UiSystem>(*vm_, disc_, textures, device);
     ui_->addNatives();
     addGameNatives(*this, disc_, textures);
