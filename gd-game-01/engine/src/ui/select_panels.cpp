@@ -1093,6 +1093,11 @@ private:
              {{"none", "None"}, {"original", "Original"}, {"2x", "2x"}, {"3x", "3x"}}},
             {Kind::Check, "cinematic_color", "Cinematic Color", true,
              "A filmic colour curve with a gentle grade and vignette on the venue, for a richer, more cinematic image."},
+            {Kind::Choice, "color_grade", "Color Grading", true,
+             "A colour look for the venue, like a film's grade (with or without Cinematic Color). Warm: golden stage "
+             "light. Cold: steel blue. Vintage: faded 70s film. Noir: high-contrast black and white. Neon: punchy "
+             "purples and cyans. Sepia: an old photograph.",
+             {{"off", "Off"}, {"warm", "Warm"}, {"cold", "Cold"}, {"vintage", "Vintage"}, {"noir", "Noir"}, {"neon", "Neon"}, {"sepia", "Sepia"}}},
             {Kind::Choice, "film_grain", "Film Grain", true,
              "Fine animated grain over the venue, like a concert shot on film. Light is barely there; Stronger is "
              "clearly visible.",
@@ -1107,6 +1112,10 @@ private:
              "Soft contact shadows where surfaces meet: under the band's feet, in the folds of clothes, in the "
              "corners of the stage, for more depth. Costs some performance.",
              {{"none", "None"}, {"light", "Light"}, {"medium", "Medium"}, {"strong", "Strong"}, {"stronger", "Stronger"}}},
+            {Kind::Choice, "sharpening", "Sharpening", true,
+             "Contrast-adaptive sharpening of the venue (AMD CAS): crisper detail without halos, good with TAA or "
+             "an upscaler.",
+             {{"off", "Off"}, {"low", "Low"}, {"high", "High"}}},
             {Kind::Choice, "star_blur", "Blur on Star Power", true,
              "While Star Power is on, the venue and the band blur with the camera's motion and leave light trails; "
              "it fades out when Star Power ends. The highway always stays sharp.",
@@ -1125,6 +1134,9 @@ private:
              "stage-fog layer; 2.5x a volumetric fog with light shafts from the stage lights and a haze in the air "
              "(costs more on slower GPUs).",
              {{"none", "None"}, {"1.5x", "1.5x"}, {"2x", "2x"}, {"2.5x", "2.5x"}}},
+            {Kind::Check, "no_shaky_cam", "Disable Shaky Camera", true,
+             "The original game shakes the camera on its close-up shots of the band, like a handheld camera. Turn this "
+             "on for steady close-ups."},
             {Kind::Separator, "", "", true, ""},
             {Kind::Section, "cheats", "CHEATS & ENHANCERS", true, "Your user files, the original game's cheats and more ways to bend the rules."},
             {Kind::Button, "export", "Export User Files", true,

@@ -123,7 +123,7 @@ changes the letter, green takes it, Start or Enter accepts the name.
 Esc / Backspace go back and the arrows move in every menu, whatever the
 bindings. A key bound to two controls (Up is menu Up and Strum Up) acts once.
 
-**GAMEPADS** (the blue fret or the GAMEPADS button in the main menu): four
+**GAMEPADS** (the yellow fret or the GAMEPADS button in the main menu): four
 player boxes (Guitar Hero has two players; 3 and 4 are shown unavailable).
 Click "Player 2" to turn player 2 on or off. Each player has an
 **Instrument** (5 Fret Guitar, Gamepad, Generic MIDI) and **Bind to:** any

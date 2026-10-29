@@ -117,7 +117,7 @@ walk_enhanced() {
 walk_gamepads() {
   needs_band
   mkdir -p "$work/export"
-  run gamepads 9500 "1500:keyF4,3500:keyDown,3700:keyDown,3900:keyDown,4100:keyReturn,4500:keyDown,4600:keyDown,4700:keyDown,4800:keyDown,4900:keyDown,5000:keyDown,5100:keyDown,5200:keyDown,5400:keyRight,5600:keyReturn,5900:keyG,6800:click1005_614,7500:click120_238,8300:click280_616" \
+  run gamepads 9500 "1500:keyF3,3500:keyDown,3700:keyDown,3900:keyDown,4100:keyReturn,4500:keyDown,4600:keyDown,4700:keyDown,4800:keyDown,4900:keyDown,5000:keyDown,5100:keyDown,5200:keyDown,5400:keyRight,5600:keyReturn,5900:keyG,6800:click1005_614,7500:click120_238,8300:click280_616" \
     GD01_SKIP_BOOT=1 GD01_DIALOG="$work/export"
   local f
   f="$(save gamepads)/controllers.json"
@@ -129,7 +129,7 @@ walk_gamepads() {
 # button: the pad becomes player 2 and the keyboard takes player 1.
 walk_gamepads_pad() {
   needs_band
-  run gamepads_pad 7500 "3000:keyF4,5000:click400_256,5600:click400_398,6200:vpad0" GD01_SKIP_BOOT=1 GD01_VIRTUAL_PAD=054c:0268
+  run gamepads_pad 7500 "3000:keyF3,5000:click400_256,5600:click400_398,6200:vpad0" GD01_SKIP_BOOT=1 GD01_VIRTUAL_PAD=054c:0268
   result gamepads_pad "$(json "$(save gamepads_pad)/controllers.json" "d['devices']['keyboard']['player'] == 0 and [v['player'] for k, v in d['devices'].items() if k != 'keyboard'] == [1]")" \
     "Detect binds the pad to Player 2"
 }

@@ -442,7 +442,7 @@ public:
     // (FUN_00153018): the band name or the character's name, through the token's %s.
     void fillStatus();
 
-    // The port's main-menu help items GAMEPADS (blue) and MODS (orange): the
+    // The port's main-menu help items GAMEPADS (yellow) and MODS (orange): the
     // disc has only the green and red help icons, so hb_fret4 / hb_fret5 are
     // the green one recoloured.
     void addFretIcons() {
@@ -1364,10 +1364,10 @@ std::vector<std::pair<std::string, std::string>> UiSystem::PanelObj::helpItems()
     if (list.type != Value::Type::Array) return out;
     for (const Value& e : *list.array)
         if (e.type == Value::Type::Array && e.array->size() >= 2) out.push_back({(*e.array)[0].str(), (*e.array)[1].str()});
-    // The port's main menu also offers GAMEPADS (blue) and MODS (orange), before the strum bar.
+    // The port's main menu also offers GAMEPADS (yellow, as every game: guidelines/universal_launcher.md) and MODS (orange), before the strum bar.
     if (!hasOverride_ && ui_.current_ && ui_.current_->name() == "main") {
         auto strumAt = std::find_if(out.begin(), out.end(), [](const auto& e) { return e.first == "strum"; });
-        out.insert(strumAt, {{"fret4", "GAMEPADS"}, {"fret5", "MODS"}});
+        out.insert(strumAt, {{"fret3", "GAMEPADS"}, {"fret5", "MODS"}});
     }
     addAccessButtons(out);
     return out;

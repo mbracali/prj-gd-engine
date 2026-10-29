@@ -1525,8 +1525,8 @@ void App::backToMenu() {
 // Cross and Triangle.
 void App::uiButton(const InputEvent& e) {
     bool guitar = e.mode == ControllerMode::Guitar;
-    // The main menu's GAMEPADS help item: the blue fret opens the Gamepads screen.
-    if (e.action == Action::Fret3 && e.down && ui_->currentScreen() == "main") return ui_->gotoScreen("gamepads");
+    // The main menu's GAMEPADS help item: the yellow fret opens the Gamepads screen (as in every game).
+    if (e.action == Action::Fret2 && e.down && ui_->currentScreen() == "main") return ui_->gotoScreen("gamepads");
     if (e.player == 1) mode2_ = e.mode;
     else uiMode_ = e.mode;
     int b = -1;

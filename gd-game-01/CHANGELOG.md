@@ -11,6 +11,11 @@ matches the tag's version.
 **Universal menus: a new GAMEPADS screen, a new Enhanced Settings menu, and
 every screen works with any controller, the mouse and touch.**
 
+### Changed
+- GAMEPADS now opens with the yellow fret on the main menu, as in every game.
+- Color Grading (now with Sepia), Sharpening and Disable Shaky Camera are back
+  in Enhanced Settings.
+
 ### Added
 - GAMEPADS is rebuilt as the universal Gamepad menu: four player boxes
   (Guitar Hero has two players; 3 and 4 are shown unavailable). Click
