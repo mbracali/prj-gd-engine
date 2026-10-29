@@ -176,7 +176,10 @@ void App::frame() {
         const std::string movie = front_->movieRequest;
         front_->movieRequest.clear();
         // Walks skip the movies (GD04_WALK_MOVIES=1 plays them).
-        if (!walk_ || SDL_getenv("GD04_WALK_MOVIES")) playMovie(*disc_, movie, canvas_, mixer_, input_);
+        // A quit during the movie (the window closed, the launcher's
+        // GDUL_GAME_QUIT_AFTER) quits the game too.
+        if (!walk_ || SDL_getenv("GD04_WALK_MOVIES"))
+            if (playMovie(*disc_, movie, canvas_, mixer_, input_) == MoviePlayer::Result::Quit) running_ = false;
         lastFrameNs_ = SDL_GetTicksNS();
         return;
     }
