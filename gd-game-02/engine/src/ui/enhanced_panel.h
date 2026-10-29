@@ -41,9 +41,11 @@ const EnhancedSetting* enhancedSetting(const std::string& key);
 bool enhancedValid(const EnhancedSetting& s, const std::string& value);
 
 // The graphics, enhancer and control defaults each download ships with, in
-// one table (gd01's profileValues, gd-game-01/README.md "Default
-// settings"): desktop Linux, Windows and macOS; the Steam Deck build (and
-// Apply Steam Deck Settings: `deck`); Android. Only the profile's keys.
+// one table (laid out as gd01's profileValues): desktop Linux, Windows and
+// macOS; the Steam Deck build (and Apply Steam Deck Settings: `deck`);
+// Android. Every visual effect is off in every column, the original look
+// (GD02-130); only the window, frame rate, resolution and touch differ.
+// Only the profile's keys.
 std::vector<std::pair<std::string, std::string>> enhancedProfile(bool deck);
 // A setting's default in this build: the profile's, else the base default.
 std::string enhancedDefault(const std::string& key, bool deck);

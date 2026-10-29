@@ -19,7 +19,9 @@ rows are GD02-097..GD02-129.
   default to the original, but gd-game-01's `profileValues` (the reference
   the brief asks to copy) ships bloom, cinematic colour, grain, AO... on for
   every desktop build. gd02 follows gd01's table; the owner may want gd02's
-  defaults at the original instead (one table to change).
+  defaults at the original instead (one table to change). **Answered
+  (2026-10-29, GD02-130):** every effect defaults off, the original look;
+  `ui::enhancedProfile` changed, gd01 unchanged.
 - **macOS performance.** gd01's table gives macOS 1440p and every desktop
   effect; gd02 already runs ~20 fps on an M4 Pro (GD02-062). The owner may
   want a lighter macOS column.

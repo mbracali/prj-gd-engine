@@ -36,12 +36,12 @@ const std::vector<EnhancedSetting>& enhancedSettings() {
         {"max_fps", {"120", "60", "240"}},
         {"fps_counter", {"off", "on"}},
         {"internal_res", {"1080", "0", "448", "480", "720", "800", "900", "1440", "2160"}},
-        {"sharp_ui", {"on", "off"}},
+        {"sharp_ui", {"off", "on"}},
         {"antialiasing", {"none", "fxaa", "ssaa", "taa"}},
         // FSR 3.1 and DLSS run through gd01's Vulkan upscaler, not in gd02 (GL): a saved one loads as none.
         {"ai_upscaling", {"none", "fsr1"}},
         {"ai_upscaling_mode", {"quality", "balanced", "performance"}},
-        {"bokeh", {"stronger", "none", "regular"}},
+        {"bokeh", {"regular", "none", "stronger"}},
         {"particles", {"on", "off"}},
         {"bloom", {"off", "low", "medium", "high"}},
         {"cinematic_color", {"off", "on"}},
@@ -55,7 +55,7 @@ const std::vector<EnhancedSetting>& enhancedSettings() {
         {"no_effects", {"off", "on"}},
         {"shadows_all", {"off", "on"}},
         {"more_lights", {"off", "subtle", "strong"}},
-        {"light_dust", {"on", "off"}},
+        {"light_dust", {"off", "on"}},
         {"ground_fog", {"none", "low", "full", "super"}},
         {"no_shaky_cam", {"off", "on"}},
         {"no_fail", {"off", "on"}},
@@ -85,26 +85,28 @@ bool enhancedValid(const EnhancedSetting& s, const std::string& value) {
 }
 
 std::vector<std::pair<std::string, std::string>> enhancedProfile(bool deck) {
+    // Every effect starts off, at the original game's look (GD02-130): GH2's
+    // own depth of field (Bokeh Regular), particles and camera shake stay as
+    // the original; the port's extras (gd01's effects) are turned on in the
+    // menu. The columns differ only in the window, frame rate, resolution
+    // and touch.
     std::map<std::string, std::string> d = {
-        // Every build.
-        {"antialiasing", "none"}, {"ai_upscaling", "none"}, {"bokeh", "stronger"}, {"particles", "on"}, {"cinematic_color", "on"},
-        {"color_grade", "off"}, {"chromatic", "on"}, {"light_streaks", "off"}, {"more_lights", "subtle"}, {"no_shaky_cam", "off"},
+        // Every build: the original look.
+        {"sharp_ui", "off"}, {"antialiasing", "none"}, {"ai_upscaling", "none"}, {"bokeh", "regular"}, {"particles", "on"},
+        {"bloom", "off"}, {"cinematic_color", "off"}, {"color_grade", "off"}, {"film_grain", "off"}, {"chromatic", "off"},
+        {"light_streaks", "off"}, {"ssao", "off"}, {"sharpening", "off"}, {"star_blur", "none"}, {"shadows_all", "off"},
+        {"more_lights", "off"}, {"light_dust", "off"}, {"ground_fog", "none"}, {"no_shaky_cam", "off"}, {"fps_counter", "off"},
         // Desktop: Linux, Windows, macOS.
-        {"screen_mode", "windowed"}, {"max_fps", "120"}, {"fps_counter", "on"}, {"internal_res", "1080"}, {"sharp_ui", "on"},
-        {"bloom", "high"}, {"film_grain", "light"}, {"ssao", "on"}, {"sharpening", "low"}, {"star_blur", "high"},
-        {"shadows_all", "on"}, {"light_dust", "on"}, {"ground_fog", "low"}, {"touch", "off"},
+        {"screen_mode", "windowed"}, {"max_fps", "120"}, {"internal_res", "1080"}, {"touch", "off"},
     };
     auto set = [&](std::initializer_list<std::pair<const char*, const char*>> kv) {
         for (const auto& [k, v] : kv) d[k] = v;
     };
-    auto handheld = [&] {
-        set({{"screen_mode", "fullscreen"}, {"max_fps", "60"}, {"fps_counter", "off"}, {"bloom", "medium"}, {"film_grain", "off"},
-             {"ssao", "off"}, {"shadows_all", "off"}, {"light_dust", "off"}, {"ground_fog", "none"}});
-    };
+    auto handheld = [&] { set({{"screen_mode", "fullscreen"}, {"max_fps", "60"}}); };
 #if defined(__ANDROID__)
     (void)deck;
     handheld();
-    set({{"internal_res", "900"}, {"sharp_ui", "off"}, {"sharpening", "low"}, {"star_blur", "light"}, {"touch", "on"}});
+    set({{"internal_res", "900"}, {"touch", "on"}});
 #else
 #if defined(GD02_STEAM_DECK)
     deck = true;
@@ -114,7 +116,7 @@ std::vector<std::pair<std::string, std::string>> enhancedProfile(bool deck) {
 #endif
     if (deck) {
         handheld();
-        set({{"internal_res", "800"}, {"sharpening", "off"}, {"star_blur", "medium"}});
+        d["internal_res"] = "800";
     }
 #endif
     return {d.begin(), d.end()};
@@ -156,8 +158,8 @@ const std::vector<Item>& items() {
         {Kind::Section, "deck", "STEAM DECK MODE", true, "Settings for handheld PCs such as the Steam Deck."},
         {Kind::Button, "steam_deck", "Apply Steam Deck Settings", true,
          "Sets every option to what runs best on a handheld PC such as the Steam Deck: full screen at 60 FPS, a 1280 x 800 "
-         "internal resolution, and lighter effects (medium bloom, no ambient occlusion, film grain, fog or extra shadows). "
-         "You can still change any option afterwards. The Steam Deck download starts with these settings."},
+         "internal resolution, and the original game's look (the extra effects off). You can still change any option "
+         "afterwards. The Steam Deck download starts with these settings."},
         {Kind::Separator, "", "", true, ""},
         {Kind::Section, "controls", "CONTROLS AND GAMEPAD", true, "Gamepads, mouse, touch and guitars."},
         {Kind::Button, "gamepads", "Gamepads", true,

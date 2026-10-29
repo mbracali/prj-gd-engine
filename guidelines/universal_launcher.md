@@ -311,8 +311,11 @@ gd-game-01's Enhanced Settings (`EnhancedPanel::items` in
 Enhanced Options (`gd-game-02/engine/src/ui/enhanced_panel.cpp`). Backlog
 GDALL-029; one row per option to implement (GD02-097..GD02-129). Status:
 **has** (gd02 had it), **done** (implemented for this pairing), **N/A** (cannot
-apply to GH2, with the reason). Defaults are gd-game-01's desktop column
-(`profileValues(false)`); Steam Deck and Android follow its other columns.
+apply to GH2, with the reason). The Default column is gd-game-01's desktop
+column (`profileValues(false)`). gd-game-02 differs on purpose (GD02-130):
+every visual effect defaults off there, the original GH2 look (Bokeh
+Regular, Sharper Text and the FPS counter off); only its window, frame
+rate, resolution and touch follow gd-game-01's columns.
 
 | Section | Name (key) | Type | Default (desktop) | What it does | gd-game-02 |
 |---|---|---|---|---|---|

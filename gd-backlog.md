@@ -581,7 +581,7 @@ universal launcher, not released on its own.
 | GD02-127 | Enhancement | ✅ | Enhanced Options pairing: Cheat: Forgiving Hammer-ons and Pull-offs | Player::setForgivingHopos [I]: no lock after a wrong hammer-on, a held fret plays its HOPO; GDALL-015 | Owner 10-28 |
 | GD02-128 | Enhancement | ✅ | Enhanced Options pairing: Per-platform defaults in one table (gd01's profileValues: desktop, Steam Deck, Android) | ui::enhancedProfile (desktop / Steam Deck / Android, Windows and macOS 1440p); GDALL-015 | Owner 10-28 |
 | GD02-129 | Enhancement | ✅ | Enhanced Options pairing: Remove All Effects (GDALL-002): every effect off at once | gd02's row: GH2's own bloom / DOF / noise / colour transform, the port's chain and the shake off; GDALL-015 | Owner 10-28 |
-| GD02-130 | Enhancement | ❌ | Enhanced defaults: every effect paired from gd-game-01 defaults off (original look); users turn them on | Owner 2026-10-29 | Owner 2026-10-29 |
+| GD02-130 | Enhancement | ✅ | Enhanced defaults: every effect paired from gd-game-01 defaults off (original look); users turn them on | `ui::enhancedProfile` (every column: effects off, Bokeh Regular, Sharper Text and FPS counter off; window / FPS / resolution / touch kept); a saved enhanced.json keeps its values; walk enhanced checks the original look then turns each effect on | Owner 2026-10-29 |
 
 
 ### Done (history)

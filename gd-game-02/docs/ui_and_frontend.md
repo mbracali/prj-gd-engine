@@ -303,10 +303,16 @@ walktests' career.json check.
   title and gd01's calibration overlay. Values are saved in `enhanced.json`
   (format `gd02-enhanced`, every value a string) next to `career.json` and
   applied at once (`App::applyEnhanced`, `App::applyEnhancedLook`):
-  - **Defaults** (`ui::enhancedProfile`, gd01's `profileValues`): one table
-    with the desktop, Steam Deck (`-DGD02_STEAM_DECK=ON`, or a launcher on a
-    Deck: `GD02_HANDHELD=1`) and Android columns; Apply Steam Deck Settings
-    writes the Deck column once.
+  - **Defaults** (`ui::enhancedProfile`, laid out as gd01's
+    `profileValues`): one table with the desktop, Steam Deck
+    (`-DGD02_STEAM_DECK=ON`, or a launcher on a Deck: `GD02_HANDHELD=1`) and
+    Android columns; Apply Steam Deck Settings writes the Deck column once.
+    Every visual effect defaults off in every column, the original look
+    (GD02-130): Bokeh Regular (GH2's own depth of field), particles on,
+    shake on, every port effect, Sharper Text and the FPS counter off; the
+    columns differ only in window, frame rate, resolution and touch. A saved
+    `enhanced.json` keeps its values (only unset or invalid keys take the
+    defaults).
   - **Controls**: Touch (`Input::setTouch`; always on on Android; the
     track's lanes on the screen for the fingers, `TrackView::lanes` ->
     `Input::setTouchLanes`; the on-screen buttons, `App::drawTouchButtons`),

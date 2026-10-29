@@ -20,7 +20,14 @@ matches the tag's version. Nothing is released yet.
 - Remove All Effects: one switch that turns every effect off, the original
   game's own glow, depth of field and filters too.
 - Each download starts with its system's settings (desktop, Steam Deck,
-  Android), the same table as Guitar Hero's.
+  Android): window, frame rate, resolution and touch.
+
+### Changed
+- Enhanced Options start with the original Guitar Hero II look: every added
+  effect (bloom, Cinematic Color, film grain, chromatic aberration, ambient
+  occlusion, sharpening, Blur on Star Power, band shadows, More Lights,
+  dust, ground fog, Sharper Text, the FPS counter) is off and Bokeh is
+  Regular; turn them on in Enhanced Options. Settings you saved are kept.
 
 ## [0.1.6] - 2026-10-28
 

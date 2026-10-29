@@ -54,36 +54,23 @@ id = `gd-game-02`
 - Mods support
 
 
-**Default settings**: each download starts with Enhanced Options tuned
-for its system, the same table as gd-game-01's (change them in Options >
-Enhanced Options; your changes are kept). "Apply Steam Deck Settings" sets
-the Steam Deck column on any PC; "Remove All Effects" turns every effect
-off.
+**Default settings**: every download starts with the original Guitar Hero II
+look: every effect the port adds is off (Sharper Text and Sprites,
+anti-aliasing, AI upscaling, bloom, Cinematic Color, Color Grading, film
+grain, chromatic aberration, light streaks, ambient occlusion, sharpening,
+Blur on Star Power, band shadows, More Lights on Venues, dust, ground fog,
+the FPS counter), Bokeh is Regular (the original's own depth of field), and
+particles and the camera shake are as the original. Turn the effects on in
+Options > Enhanced Options; your changes are kept. Only the window, frame
+rate, resolution and touch differ per system. "Apply Steam Deck Settings"
+sets the Steam Deck column on any PC; "Remove All Effects" also turns the
+original game's own effects off.
 
 | Setting | Linux | Steam Deck | Windows | macOS | Android |
 |---|---|---|---|---|---|
 | Screen Mode | Windowed | Full Screen | Windowed | Windowed | Full Screen |
 | In-Game Max FPS | 120 | 60 | 120 | 120 | 60 |
-| Show FPS Counter | on | off | on | on | off |
 | Internal Resolution | 1080p | 800p | 1440p | 1440p | 900p |
-| Sharper Text and Sprites | on | on | on | on | off |
-| Anti-Aliasing / AI Upscaling | None | None | None | None | None |
-| Bokeh Effect | Stronger | Stronger | Stronger | Stronger | Stronger |
-| Particles FX | on | on | on | on | on |
-| Bloom | High | Medium | High | High | Medium |
-| Cinematic Color | on | on | on | on | on |
-| Color Grading | Off | Off | Off | Off | Off |
-| Film Grain | Light | Off | Light | Light | Off |
-| Chromatic Aberration | on | on | on | on | on |
-| Anamorphic Light Streaks | off | off | off | off | off |
-| Ambient Occlusion | on | off | on | on | off |
-| Sharpening | Low | Off | Low | Low | Low |
-| Blur on Star Power | High | Medium | High | High | Light |
-| All Band Mates Cast Shadows | on | off | on | on | off |
-| More Lights on Venues | Subtle | Subtle | Subtle | Subtle | Subtle |
-| Dust in Light Beams | on | off | on | on | off |
-| Add Fog to the Ground | Low | None | Low | Low | None |
-| Disable Shaky Camera | off | off | off | off | off |
 | Touch Controls | off | off | off | off | on |
 
 

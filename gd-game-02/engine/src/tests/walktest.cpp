@@ -464,13 +464,15 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         press(kX);  // 1080p -> 1440p
         wait(300);
         check("enhanced_changed");
-        // Sharper Text off, FXAA, FSR 1 (Upscaling Quality appears) at
-        // Performance, Bokeh None, Particles off, Bloom Medium, Cinematic
-        // Color off, Color Grading Warm, Film Grain Strong, Chromatic
-        // Aberration off, Light Streaks on, Ambient Occlusion off and on
-        // again, Sharpening High, Blur on Star Power Medium.
-        row(kX), row(kRight), row(kRight), row(kRight), row(kRight), row(kX), row(kLeft), row(kX), row(kRight), row(kRight), row(kX),
-            row(kX), row(kX), press(kX), wait(150), row(kRight), row(kLeft);
+        // From the original look (GD02-130): Sharper Text on and off again,
+        // FXAA, FSR 1 (Upscaling Quality appears) at Performance, Bokeh None,
+        // Particles off, Bloom Medium, Cinematic Color on, Color Grading
+        // Warm, Film Grain Strong, Chromatic Aberration on, Light Streaks
+        // on, Ambient Occlusion on, Sharpening High, Blur on Star Power
+        // Medium.
+        auto again = [&](int button) { press(button), wait(150); };
+        row(kX), again(kX), row(kRight), row(kRight), row(kRight), row(kLeft), row(kX), row(kRight), again(kRight), row(kX), row(kRight),
+            row(kRight), again(kRight), row(kX), row(kX), row(kX), row(kRight), again(kRight), row(kRight), again(kRight);
         wait(500);
         check("enhanced_graphics");
         // Remove All Effects on: every effect off, GH2's own too; then off again.
@@ -479,11 +481,12 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         check("enhanced_no_effects");
         press(kX), wait(400);
         check("enhanced_effects_back");
-        // ENHANCERS: the venue extras at their defaults, then Band Shadows
-        // off, More Lights Strong, Dust off, Fog Full, Shaky Camera off.
+        // ENHANCERS: the venue extras at their defaults (off), then Band
+        // Shadows on, More Lights Strong (Dust appears), Dust on, Fog Full,
+        // Shaky Camera off.
         press(kDown), wait(120);
         check("enhanced_lights_default");
-        row(kX), row(kRight), row(kX), row(kRight), row(kX);
+        row(kX), row(kRight), again(kRight), row(kX), row(kRight), again(kRight), row(kX);
         wait(400);
         check("enhanced_enhancers");
         // Export User Files, Load User Settings, Load User Progress
@@ -1118,11 +1121,19 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
             std::printf("  enhanced: internal_res %s (the build's default %s)\n", got.c_str(), def.c_str());
             if (got != def) problems = "Internal Resolution is " + got + ", not " + def;
         } else if (w == "enhanced_fx_default") {
-            // The desktop defaults: the port's chain runs with bloom, AO,
-            // cinematic colour and the finish (grain, aberration, sharpening).
-            state("fx_on", 1, 1), state("fx_frames", 1, kMany), state("post_original", 1, 1);
-            for (const char* pass : {"fx:down", "fx:up", "fx:ao", "fx:composite", "fx:finish"}) state(pass, 1, 1);
-            state("particles", 1, 1), state("shake", 1, 1), state("sharp_ui", 1, 1), state("xinput", 1, 1), state("rockband", 0, 0);
+            // The defaults: the original look (GD02-130). GH2's own post
+            // (glow, depth of field), particles and shake; none of the
+            // port's effects, and the menus' textures as the original's.
+            for (const char* key : {"bokeh", "bloom", "cinematic_color", "film_grain", "chromatic", "ssao", "sharpening", "star_blur",
+                                    "shadows_all", "more_lights", "light_dust", "ground_fog", "sharp_ui", "fps_counter"}) {
+                const std::string got = ui.host().enhancedValue(key), def = ui::enhancedDefault(key, false);
+                const bool original = def == "off" || def == "none" || (std::string(key) == "bokeh" && def == "regular");
+                std::printf("  enhanced default: %s %s\n", key, got.c_str());
+                if (got != def || !original) problems += std::string(problems.empty() ? "" : "; ") + key + " is " + got + ", not the original's";
+            }
+            state("fx_on", 0, 0), state("post_original", 1, 1);
+            for (const char* pass : {"fx:down", "fx:up", "fx:ao", "fx:composite", "fx:finish"}) state(pass, 0, 0);
+            state("particles", 1, 1), state("shake", 1, 1), state("sharp_ui", 0, 0), state("xinput", 1, 1), state("rockband", 0, 0);
         } else if (w == "enhanced_controls") {
             want("touch", "on"), want("rockband", "on"), want("xinput", "off");
             state("touch", 1, 1), state("rockband", 1, 1), state("xinput", 0, 0);
@@ -1138,8 +1149,8 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
             want("internal_res", "1440");
         } else if (w == "enhanced_graphics") {
             want("sharp_ui", "off"), want("antialiasing", "fxaa"), want("ai_upscaling", "fsr1"), want("ai_upscaling_mode", "performance");
-            want("bokeh", "none"), want("particles", "off"), want("bloom", "medium"), want("cinematic_color", "off"), want("color_grade", "warm");
-            want("film_grain", "strong"), want("chromatic", "off"), want("light_streaks", "on"), want("ssao", "on"), want("sharpening", "high");
+            want("bokeh", "none"), want("particles", "off"), want("bloom", "medium"), want("cinematic_color", "on"), want("color_grade", "warm");
+            want("film_grain", "strong"), want("chromatic", "on"), want("light_streaks", "on"), want("ssao", "on"), want("sharpening", "high");
             want("star_blur", "medium");
             state("sharp_ui", 0, 0), state("particles", 0, 0), state("post_dof", 0, 0);
             for (const char* pass : {"fx:down", "fx:up", "fx:ao", "fx:composite", "fx:fxaa", "fx:easu", "fx:rcas", "fx:finish"}) state(pass, 1, 1);
@@ -1151,10 +1162,10 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
             want("no_effects", "off");
             state("fx_on", 1, 1), state("post_original", 1, 1), state("shake", 1, 1);
         } else if (w == "enhanced_lights_default") {
-            state("shadows", 1, kMany), state("beams", 1, kMany), state("motes", 1, kMany);
+            state("shadows", 0, 0), state("beams", 0, 0), state("motes", 0, 0);
         } else if (w == "enhanced_enhancers") {
-            want("shadows_all", "off"), want("more_lights", "strong"), want("light_dust", "off"), want("ground_fog", "full"), want("no_shaky_cam", "on");
-            state("shadows", 0, 0), state("beams", 1, kMany), state("motes", 0, 0), state("shake", 0, 0);
+            want("shadows_all", "on"), want("more_lights", "strong"), want("light_dust", "on"), want("ground_fog", "full"), want("no_shaky_cam", "on");
+            state("shadows", 1, kMany), state("beams", 1, kMany), state("motes", 1, kMany), state("shake", 0, 0);
         } else if (w == "enhanced_exported") {
             status("Exported to");
             const char* dir = SDL_getenv("GD02_DIALOG");
