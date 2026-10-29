@@ -126,6 +126,20 @@ void addGameNatives(FrontEnd& fe, const Disc& disc, TextureCache& textures) {
     vm.addNative("GetPakManCurrent", getCurrent);
     vm.addNative("GetPakManCurrentName", getCurrent);
     for (const char* n : {"ResetWaypoints", "ResetPulseEvents"}) vm.addNative(n, [](Vm&, ScriptRun&, qb::Struct&) { return true; });
+    // PlayMovie {movie = 'atvi' ...}: played by the app at once (modal,
+    // skippable), so IsMoviePlaying is false afterwards [I: GH3 plays
+    // movies asynchronously; PlayMovieAndWait polls IsMoviePlaying].
+    vm.addNative("PlayMovie", [&fe](Vm&, ScriptRun&, qb::Struct& p) {
+        const qb::Value* m = Vm::param(p, K("movie"));
+        if (!m) return false;
+        fe.movieRequest = m->str;
+        return true;
+    });
+    for (const char* n : {"PlayMovieFromBuffer", "StartPreLoadedMovie"})
+        vm.addNative(n, [](Vm&, ScriptRun&, qb::Struct&) { return true; });
+    for (const char* n : {"IsMoviePlaying", "KillMovie", "PreLoadMovie", "AllocateMovieBuffer", "FreeMovieBuffer", "LoadMovieIntoBuffer",
+                          "PauseMovie", "ResumeMovie"})
+        vm.addNative(n, [](Vm&, ScriptRun&, qb::Struct&) { return false; });
     // GetButtonsPressed: makes = buttons pressed since the last call, device_num [I].
     vm.addNative("GetButtonsPressed", [&fe](Vm&, ScriptRun& run, qb::Struct&) {
         if (qb::Struct* l = locals(run)) {

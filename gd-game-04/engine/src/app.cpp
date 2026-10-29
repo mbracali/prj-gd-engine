@@ -20,6 +20,7 @@
 #include "tests/walk.h"
 #include "ui/front_end.h"
 #include "ui/song_screen.h"
+#include "video/movie_player.h"
 #include "devaids/menu_keys.h"
 #include "devaids/screenshot.h"
 #include "input/input.h"
@@ -169,6 +170,14 @@ void App::frame() {
             input_.setInGame(true);
             if (walk_) ++walk_->songsStarted;
         }
+        return;
+    }
+    if (front_ && !front_->movieRequest.empty()) {
+        const std::string movie = front_->movieRequest;
+        front_->movieRequest.clear();
+        // Walks skip the movies (GD04_WALK_MOVIES=1 plays them).
+        if (!walk_ || SDL_getenv("GD04_WALK_MOVIES")) playMovie(*disc_, movie, canvas_, mixer_, input_);
+        lastFrameNs_ = SDL_GetTicksNS();
         return;
     }
     if (front_ && !front_->songPlaying) {

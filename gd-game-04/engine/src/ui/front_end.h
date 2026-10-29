@@ -45,6 +45,9 @@ public:
         int difficulty = 3;
     } songRequest;
     bool songPlaying = false;
+    // A movie the scripts asked for (PlayMovie movie = 'atvi'): the app plays
+    // it modally (video/movie_player.h).
+    std::string movieRequest;
     // The song is over: the flow goes on with win_song / fail_song [C data:
     // GuitarEvent_SongWon_Spawned / GuitarEvent_SongFailed_Spawned].
     void songEnded(bool won);
