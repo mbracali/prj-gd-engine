@@ -43,6 +43,11 @@ configure() {
 FFMPEG_VERSION=7.1.5
 FFMPEG_SHA256=de668509caf9e35e3cd162473441fdb29538c6d96ed080292b3cf9e6fc5d558f
 FFMPEG_URL="https://ffmpeg.org/releases/ffmpeg-$FFMPEG_VERSION.tar.xz"
+# Where the tarball is fetched from, in order: FFmpeg's site, then the same
+# file kept as an asset of this repository's "deps" release (the pinned
+# SHA-256 is checked whichever one answers).
+FFMPEG_URLS=("$FFMPEG_URL"
+  "https://github.com/mbracali/prj-gd-engine/releases/download/deps/ffmpeg-$FFMPEG_VERSION.tar.xz")
 FFMPEG_CONFIGURE=(--disable-everything --disable-programs --disable-doc --disable-network --disable-autodetect
   --disable-avdevice --disable-avfilter --disable-swscale --disable-swresample --disable-debug
   --enable-shared --disable-static --enable-pic
@@ -85,12 +90,23 @@ build_ffmpeg() {
     fi
   fi
   if [ ! -f "$tarball" ] || [ "$(sha256_of "$tarball")" != "$FFMPEG_SHA256" ]; then
-    say "FFmpeg $FFMPEG_VERSION: downloading the source ($FFMPEG_URL)..."
-    if command -v curl >/dev/null; then curl -fsSL --retry 3 -o "$tarball.part" "$FFMPEG_URL"
-    else wget -q -O "$tarball.part" "$FFMPEG_URL"; fi
-    if [ "$(sha256_of "$tarball.part")" != "$FFMPEG_SHA256" ]; then
+    # A dropped connection (a reset, a timeout) is retried, then the next
+    # source is tried: one failing server must not fail a release.
+    local url got=0
+    for url in "${FFMPEG_URLS[@]}"; do
+      say "FFmpeg $FFMPEG_VERSION: downloading the source ($url)..."
       rm -f "$tarball.part"
-      say "FFmpeg: the download's SHA-256 is not the pinned one; stopping"
+      if command -v curl >/dev/null; then
+        curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 --connect-timeout 30 -o "$tarball.part" "$url" || continue
+      else
+        wget -q --tries=5 --waitretry=5 --timeout=30 -O "$tarball.part" "$url" || continue
+      fi
+      if [ "$(sha256_of "$tarball.part")" = "$FFMPEG_SHA256" ]; then got=1; break; fi
+      say "FFmpeg: the download from $url is not the pinned SHA-256; trying the next source"
+    done
+    if [ "$got" != 1 ]; then
+      rm -f "$tarball.part"
+      say "FFmpeg: no source gave the pinned tarball; stopping"
       return 1
     fi
     mv "$tarball.part" "$tarball"
