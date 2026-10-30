@@ -3,6 +3,7 @@
 | Folder | What | Version | Licence |
 |---|---|---|---|
 | `stb_vorbis/` | Sean Barrett's single-file Ogg Vorbis decoder: decodes the `.mogg` song audio (`src/audio/vorbis_stream.cpp`) | v1.22 | Public domain (Unlicense) or MIT, at your choice (`stb_vorbis/LICENSE.txt`; the same text closes `stb_vorbis.c`) |
+| `rtmidi/` | RtMidi (MIDI input: ALSA, WinMM, CoreMIDI), unchanged, copied from gd-game-01; built by its own `CMakeLists.txt`; the Generic MIDI input of the Gamepad menu (`src/input/midi_in.cpp`) | 6.0.0 | MIT (`rtmidi/LICENSE`) |
 | (not in the repo) FFmpeg | The videos' decoder (`src/video/wmv_player.cpp`): ASF demuxer, WMV3 and WMA v2 decoders only | 7.1.5 | LGPL 2.1 or later |
 
 ## FFmpeg: downloaded and built by the build scripts

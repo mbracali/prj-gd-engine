@@ -40,6 +40,7 @@ d=dist/gd02-windows-x64
 rm -rf "$d" && mkdir -p "$d/licenses"
 cp build/windows/gd02.exe "$sdl_dll" README.md ../../LICENSE ../../LICENSE-ADDITIONAL-TERMS.md "$d/"
 cp third_party/stb_vorbis/LICENSE.txt "$d/licenses/stb_vorbis-LICENSE.txt"
+cp third_party/rtmidi/LICENSE "$d/licenses/RtMidi-LICENSE.txt"
 if [ "${GD02_VIDEO:-1}" != 0 ]; then
   cp "$ffmpeg"/bin/av*.dll "$d/"
   ship_winpthread "$d" "$d/licenses"
