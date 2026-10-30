@@ -81,6 +81,7 @@ Builds, bundles, signing and stores. The process is [docs/release-process.md](do
 | GDREL-005 | Enhancement | ❌ | Windows code signing (OV cloud certificate, later) | [spikes/study_windows_trust.md](spikes/study_windows_trust.md): keep unsigned for now | New 10-28 |
 | GDREL-006 | Enhancement | ❌ | Google Play: AAB, Play App Signing, 12 testers for 14 days; register for developer verification | [spikes/study_google_play.md](spikes/study_google_play.md); main risk is IP | New 10-28 |
 | GDREL-007 | Enhancement | ❌ | Flathub listing (later) | [spikes/study_steam_deck.md](spikes/study_steam_deck.md) | New 10-28 |
+| GDREL-008 | Bugfix | ✅ | The 0.1.8 release failed on Windows: ffmpeg.org reset the connection while gd-game-02 downloaded the FFmpeg source, and `curl --retry 3` does not retry a reset. Must never fail a release again | Done 10-30: `build_common.sh` (gd-game-02, gd-game-04) retries every error (`--retry 5 --retry-all-errors`, 30 s connect timeout) and falls back to the same tarball on this repository's `deps` release, SHA-256 checked for each source; `gdul-release.yml` caches the source tarball (`ffmpeg-src-7.1.5`) in every job, independent of script changes. Tested locally: a dead first URL is skipped, a ffmpeg.org timeout is retried | Owner 10-30 |
 
 
 ## Site
