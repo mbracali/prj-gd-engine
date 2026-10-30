@@ -666,6 +666,14 @@ float UiManager::metacamFrame(const std::string& anim) const {
     return -1;
 }
 
+std::map<std::string, float> UiManager::upPanelFrames() {
+    std::map<std::string, float> out;
+    for (const std::string& name : viewPanels_)
+        if (PanelObj* p = panel(name); p && p->up && p->view)
+            for (const auto& [o, f] : p->view->frames()) out[name + " " + o] = f;
+    return out;
+}
+
 // After every transition (and at boot) the metacam rests at
 // meta_cam_right_in.tnm's end (PS2 0x001460c0: frame 500).
 void UiManager::resetMetacam() {
@@ -756,15 +764,19 @@ double UiManager::taskSeconds() const {
     return host_.gameLoaded() ? host_.gameTimeMs() / 1000.0 : secondsMs_ / 1000.0;
 }
 
-void UiManager::animate(PanelObj* panel, const std::string& object, float from, float to, float seconds, int units, const std::string& task) {
+void UiManager::animate(PanelObj* panel, const std::string& object, float from, float to, float seconds, int units, const std::string& task,
+                        bool loop) {
     stopAnimation(panel, object);
     if (!panel || !panel->view) return;
+    if (const char* l = SDL_getenv("GD03_UILOG"); l && *l && *l != '0')
+        SDL_Log("ui: animate %s %s %g -> %g over %g s (units %d)%s%s", panel->name().c_str(), object.c_str(), from, to, seconds, units,
+                loop ? " looping" : "", panel->view->find(object) ? "" : " (not in the panel)");
     setViewFrame(panel, object, from);
     if (seconds <= 0) {
         setViewFrame(panel, object, to);
         return;
     }
-    anims_.push_back({panel, object, from, to, clockSeconds(units), double(seconds), units, task});
+    anims_.push_back({panel, object, from, to, clockSeconds(units), double(seconds), units, task, loop});
     // A named task is an object while it runs ({exists unlock_anim}, unlock_venue_panel's poll).
     if (!task.empty() && !namedTasks_.count(task)) {
         auto o = std::make_unique<ScriptObject>(task, "Task");
@@ -795,7 +807,9 @@ void UiManager::stopAnimation(PanelObj* panel, const std::string& object) {
 void UiManager::updateAnims() {
     for (size_t i = 0; i < anims_.size();) {
         Anim& a = anims_[i];
-        const double t = std::clamp((clockSeconds(a.units) - a.start) / a.length, 0.0, 1.0);
+        double t = std::max((clockSeconds(a.units) - a.start) / a.length, 0.0);
+        if (a.loop) t -= std::floor(t);  // the AnimTask's loop: back to `from` after `to`
+        else t = std::min(t, 1.0);
         setViewFrame(a.panel, a.object, a.from + float(t) * (a.to - a.from));
         if (t >= 1) {
             const std::string task = a.task;

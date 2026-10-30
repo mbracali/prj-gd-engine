@@ -72,6 +72,8 @@ void dumpObject(const Object& o, int indent) {
     } else if (auto* f = o.as<AnimFilter>()) {
         std::printf("%sanim '%s' scale %.2f offset %.2f start %.1f end %.1f type %d period %.1f\n", pad.c_str(), f->anim.c_str(),
                     f->scale, f->offset, f->start, f->end, f->type, f->period);
+    } else if (auto* t = o.as<UITrigger>()) {
+        std::printf("%sevent '%s' anim '%s' block_transition %d\n", pad.c_str(), t->event.c_str(), t->anim.c_str(), t->blockTransition);
     } else if (auto* c = o.as<Cam>()) {
         std::printf("%snear %.2f far %.1f yfov %.3f\n", pad.c_str(), c->nearPlane, c->farPlane, c->yFov);
     } else if (auto* l = o.as<Light>()) {

@@ -36,6 +36,9 @@ original.**
   menus' shared camera out of the old screen and into the new one (going
   back, the other way), and a button that gets the focus grows to its focused size
   over a tenth of a second (a pressed button is a little bigger still).
+- The menus' looping animations the scripts loop: the character select's
+  flickering highlight and the store's spinning video case; the band name
+  screen zooms to the name's length as you type.
 
 ### Changed
 - New default controls, the same in every game: keyboard frets 1-5 (or

@@ -94,6 +94,9 @@ public:
     bool inTransition() const;
     // The shared metacam anim's frame last set (-1: not since the last reset; tests).
     float metacamFrame(const std::string& anim) const;
+    // The frames of every up panel's objects, "panel object" -> frame (the
+    // walks: a looping animation advances).
+    std::map<std::string, float> upPanelFrames();
     bool inSplashes() const { return splash_ >= 0; }
     // The game panel is up (the song is the UI's).
     bool inGame() const;
@@ -134,7 +137,10 @@ public:
     // Plays an anim / group of a panel over time: frames from..to over
     // `seconds` (units: kTaskUISeconds, kTaskSeconds...); looping by the data.
     // `task`: the task's (name ...), an object `exists` finds while it runs.
-    void animate(PanelObj* panel, const std::string& object, float from, float to, float seconds, int units, const std::string& task = "");
+    // `loop`: (loop a b), the frames wrap from b back to a until stopped or
+    // replaced (RndAnimatable Animate, PS2 0x001abf40) [C].
+    void animate(PanelObj* panel, const std::string& object, float from, float to, float seconds, int units, const std::string& task = "",
+                 bool loop = false);
     void stopAnimation(PanelObj* panel, const std::string& object);
     // A task clock in seconds (kTaskSeconds: game time, paused with the
     // game; kTaskUISeconds: the menus'; kTaskBeats: the song's beats).
@@ -322,6 +328,7 @@ private:
         double start, length;  // in the units' clock (s)
         int units;
         std::string task;  // (name ...): registered while it runs
+        bool loop = false;
     };
     std::vector<Anim> anims_;
     std::map<std::string, std::unique_ptr<ScriptObject>> namedTasks_;

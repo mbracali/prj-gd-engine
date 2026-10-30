@@ -67,7 +67,10 @@ bool whitelisted(const std::string& key, const std::vector<std::string>& wl) {
 
 }  // namespace
 
-WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
+WalkDriver::WalkDriver(const std::string& name)
+    : scenario_(name == "menu_anim_loops" ? "career_full" : name), loops_(name == "menu_anim_loops") {
+    // menu_anim_loops: career_full with the looping-animation checks.
+    const std::string scenario = scenario_;
     using S = Step;
     auto screen = [&](const char* s, double timeout = 20000) { steps_.push_back({S::Screen, s, 0, timeout}); };
     auto press = [&](int b) { steps_.push_back({S::Press, "", b, 0}); };
@@ -269,6 +272,13 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         at("sel_character_new_screen");
         check("locked_portraits");
         wait(1500);  // the character opens the door
+        if (loops_) {
+            // GD03-042: animate_forever_30fps sel_character.view, and
+            // char_highlight.mnm (loop 0 3) (period 0.25) (career.dta enter).
+            check("loop_record");
+            wait(400);
+            check("loop_advances|sel_character_panel sel_character.view|sel_character_panel char_highlight.mnm");
+        }
         if (scenario == "career_song" && SDL_getenv("GD03_WALK_CHAR")) {
             // GD03_WALK_CHAR=<downs> from Punk, GD03_WALK_GUITAR=<downs> from
             // the Les Paul; the first outfit / skin when there are two.
@@ -292,6 +302,12 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         at("sel_guitar_new_screen");
         press(kDown);  // the second guitar
         wait(300);
+        if (loops_) {
+            // The guitar's turn: GuitarDisplayPanel show_guitar ... guitar_single.filt.
+            check("loop_record");
+            wait(400);
+            check("loop_advances|sel_guitar_panel guitar_single.filt");
+        }
         press(kX);
         wait(600);
         }
@@ -394,6 +410,12 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
             wait(1000);
             press(kX);
             at("unlock_venue_screen");  // the next venue (its 3 s animation, then on)
+            if (loops_) {
+                // endgame.dta: unlock_anim.grp animate (range 0 200) (period 3) on TRANSITION_COMPLETE_MSG.
+                check("loop_record");
+                wait(300);
+                check("loop_advances|unlock_venue_panel unlock_anim.grp");
+            }
             wait(1600);
             check("shot_unlock_venue");
             at("complete_screen", 20000);
@@ -409,6 +431,12 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
             press(kX);
             wait(1500);
             check("shot_store_item");
+            if (loops_) {
+                // The finish's guitar turning (store_guitar_display_panel show_guitar ... guitar_single.filt).
+                check("loop_record");
+                wait(400);
+                check("loop_advances|store_panel guitar_single.filt");
+            }
             press(kX);  // buy the first finish
             at("store_bought_screen");
             wait(900);
@@ -1077,6 +1105,28 @@ static bool mainCamera(ui::UiManager& ui, std::array<float, 3>& pos) {
 void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
     auto fail = [&](const std::string& e) { error_ = e, failed_ = done_ = true; };
     auto pass = [&] { ++step_, stepStart_ = -1; };
+    if (s.screen == "loop_record") {
+        loops0_ = ui.upPanelFrames();
+        return pass();
+    }
+    if (s.screen.rfind("loop_advances|", 0) == 0) {
+        // "loop_advances|<panel> <object>|...": each one's frame moved since
+        // loop_record (a looping animation of the screen still plays).
+        const std::map<std::string, float> now = ui.upPanelFrames();
+        size_t at = s.screen.find('|');
+        while (at != std::string::npos) {
+            const size_t next = s.screen.find('|', at + 1);
+            const std::string key = s.screen.substr(at + 1, next == std::string::npos ? std::string::npos : next - at - 1);
+            at = next;
+            auto a = loops0_.find(key);
+            auto b = now.find(key);
+            std::printf("  loop %s: %.2f -> %.2f\n", key.c_str(), a == loops0_.end() ? -1.0 : double(a->second),
+                        b == now.end() ? -1.0 : double(b->second));
+            if (b == now.end()) return fail(key + " never animated");
+            if (a != loops0_.end() && a->second == b->second) return fail(key + " stopped");
+        }
+        return pass();
+    }
     if (s.screen == "name_entry_1" || s.screen == "name_entry_2") {
         // BandTextEntry's Texts are aligned middle left (0x82144558): the
         // entered text starts at the same x whatever its length and the
@@ -1090,7 +1140,10 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
             }
         if (!entered || !picking) return fail("the name entry drew no entered text or picked character");
         std::printf("  name entry: entered %.1f..%.1f, picking %.1f..%.1f\n", entered->x0, entered->x1, picking->x0, picking->x1);
-        if (picking->x0 < entered->x1 - 1) return fail("the picked character overlaps the entered name");
+        // The glyphs' boxes may touch: allow 10% of the name's width (the
+        // camera zooms in on a short name: zoom_tnm animates to its length).
+        if (picking->x0 < entered->x1 - std::max(1.0f, 0.1f * (entered->x1 - entered->x0)))
+            return fail("the picked character overlaps the entered name");
         if (s.screen == "name_entry_1") nameX0_ = entered->x0;
         else if (std::fabs(entered->x0 - nameX0_) > 1) return fail("the name does not grow left to right (its start moved)");
         return pass();

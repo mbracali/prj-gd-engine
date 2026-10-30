@@ -81,6 +81,8 @@ public:
     float endFrame(const std::string& object) const;
     // The frame last set on it (0 before any).
     float frame(const std::string& object) const;
+    // Every object's frame set so far (the walks' looping-animation checks).
+    const std::map<std::string, float>& frames() const { return frames_; }
     void setShowing(const std::string& object, bool showing);
     bool showing(const std::string& object) const;
     // set_local_pos / set_local_scale: replace one part of the object's local transform.

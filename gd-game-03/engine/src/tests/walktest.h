@@ -3,6 +3,7 @@
 #pragma once
 
 #include <array>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -87,6 +88,10 @@ class UiManager;
 //              exit (meta_cam_pause_right_out.tnm) and entrance
 //              (meta_cam_right_in.tnm) play, then rest -> back: right_in
 //              reversed out, then (the exit over, forward again) right_in in.
+//   menu_anim_loops  career_full, and on sel_character (its view, the
+//              char_highlight.mnm loop), sel_guitar and the store (the
+//              guitar's turn) and unlock_venue (unlock_anim.grp) a frame
+//              advances over 0.3-0.4 s (GD03-042).
 //   stickyaxis an adapter whose D-pad is an axis resting off centre (a
 //              virtual pad, 0079:0006:dpadaxis=-32768) plugged in at the main
 //              menu: no left / right press in 2 s; moved, one right press.
@@ -159,6 +164,7 @@ private:
         float x = 0, y = 0;
     };
     std::string scenario_;
+    bool loops_ = false;  // menu_anim_loops
     bool seeded_ = false;
     std::vector<Step> steps_;
     std::vector<std::string> expect_;  // screens that must be entered, in order
@@ -173,6 +179,7 @@ private:
     unsigned adapter_ = 0;           // the stickyaxis walk's virtual adapter (SDL_JoystickID)
     int sideBase_ = 0, rightBase_ = 0;
     float focusScale0_ = 1;          // menu_anim: the button's scale as focus came
+    std::map<std::string, float> loops0_;  // menu_anim_loops: the up panels' frames at loop_record
     float nameX0_ = 0;               // the career walk's band name: where it starts
     std::array<float, 2> optionsHit_{-1, -1};  // the mouse walk: OPTIONS' hit centre in 4:3
     std::array<double, 2> practiceClock_{-1, 0};  // the practice walk: (wall ms, song ms) first seen
