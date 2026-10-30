@@ -15,7 +15,8 @@ in [guidelines/universal_launcher.md](guidelines/universal_launcher.md).
   starting point for every game.
 - Where a game cannot do something, it says so in its own docs and backlog.
 
-Implemented so far: **gd-game-01** (1.1.7) and **gd-game-02** (0.1.8). The
+Implemented so far: **gd-game-01** (1.1.7), **gd-game-02** (0.1.8) and
+**gd-game-03** (0.0.2). The
 reference components are gd-game-01's: `engine/src/input/input.*` (the
 universal controls and their bindings), `engine/src/input/midi_in.*`
 (Generic MIDI through RtMidi), `engine/src/ui/gamepad_panel.cpp` (1.2.1),
@@ -26,7 +27,11 @@ walks in `tools/walks.sh`. gd-game-02 copies them: the same `input.*` and
 `midi_in.*`, `ui/gamepad_panel.cpp`, `ui/enhanced_panel.cpp`
 (`enhancedPreset`, `migrateEnhanced`), the access buttons in `HelpBarPanel`
 (`ui/panels.cpp`), and its `--walktest` walks (gamepads, gamepads_pad,
-enhanced, mouse, cheats, band, logo_skip).
+enhanced, mouse, cheats, band, logo_skip). gd-game-03 copies gd-game-02's (its engine
+came from gd-game-02): the same `input.*`, `midi_in.*` and
+`ui/gamepad_panel.cpp`, `ui/enhanced_panel.cpp` limited to what gd-game-03
+has, the access buttons, and the walks gamepads, gamepads_pad, enhanced,
+mouse, band and logo_skip.
 
 ## 1.1 Universal behaviours
 
@@ -494,3 +499,25 @@ unrelated and stay.)
   menus and pauses a song; unbound, Enter still strums in a song.
 - 0.1.7 `enhanced.json` and `controllers.json` files still load, mapped to
   the new values as gd-game-01's 1.1.6 files are.
+
+## Decisions taken for gd-game-03 (2026-10-30)
+
+- The same behaviour, layout, names and defaults as gd-game-02 0.1.8, in
+  Guitar Hero Encore's menus, font and colours. Two players (3 and 4
+  unavailable); the Instrument dropdown offers 5 Fret Guitar, Gamepad and
+  Generic MIDI; a pad's Controller Type row is kept, as in gd-game-02.
+- The Enhanced menu lists every option of the table, in its order, but
+  gd-game-03 does not have the visual effects, touch, calibration, Sharper
+  Text, anti-aliasing or upscaling yet: those rows are greyed ("not
+  available yet"), and the Modes set only what gd-game-03 has (Original
+  Feel: effects off + 60 FPS; the window, resolution and aspect kept).
+  Kept from gd-game-03's own menu: **Widescreen (16:9)** after Resolution
+  (4:3 is the default, as on the PS2), Color Grading, Sharpening and Disable
+  Shaky Camera (greyed). Ground Fog and Light Streaks are not there.
+- The port's universal menus open without a transition (also skipping the
+  old screen's exit); the game's own screens without a transition still
+  see the old screen's exit, as on the PS2 (gd-game-03 marks its universal
+  menus `port_universal_menu`; gd-game-02 skips the exit for any screen
+  without a transition).
+- 0.0.1 `enhanced.json` and `controllers.json` files still load (the XInput /
+  Rock Band switches are dropped).

@@ -80,7 +80,7 @@ incomplete bundles".
 > at the repository root: the owner's universal mechanisms (skips, band
 > naming, Universal Access Buttons, default mappings) and the universal
 > Gamepad menu (1.2.1) and Enhanced menu (1.2.2), with their mockups.
-> gd-game-01 1.1.7 and gd-game-02 0.1.8 implement them; where this section
+> gd-game-01 1.1.7, gd-game-02 0.1.8 and gd-game-03 0.0.2 implement them; where this section
 > differs (the old GAMEPADS layout, the STEAM DECK MODE / ENHANCERS / CHEATS
 > sections, the XInput and Rock Band switches), universal_mechanisms.md
 > wins. The rest of this section (fonts, colours, widgets, the parity table

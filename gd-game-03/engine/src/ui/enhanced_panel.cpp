@@ -96,7 +96,8 @@ struct Item {
 };
 
 // gd02's list (gd01's), in the doc's sections and order, with its
-// explanations (the console's names changed); gd03's own Widescreen (16:9)
+// explanations (the console's names changed; the cheats' codes are this
+// disc's, config/long_cheats.dta); gd03's own Widescreen (16:9)
 // after Resolution, and the rows gd03 had before 0.0.2 (Gamepads, Color
 // Grading, Sharpening, Disable Shaky Camera) where gd02 has them. Ground Fog
 // and Light Streaks are not here (removed from every game, 10-30).
@@ -224,26 +225,26 @@ const std::vector<Item>& items() {
          {{"original", "Original"}, {"forgiving", "Forgiving"}}},
         {Kind::Cheat, "cheat_unlock_all", "", true,
          "The original cheat: every song, venue, character and guitar is open. Saving and the career are off while it "
-         "is on. Code at the main menu: Blue, Yellow, Orange, Red, Yellow, Orange, Blue, Yellow, Blue, Yellow, Blue, "
-         "Yellow, Blue, Yellow, Blue, Yellow."},
+         "is on. Code at the main menu: Blue, Orange, Yellow, Red, Orange, Yellow, Blue, Yellow, Red, Yellow, Blue, "
+         "Yellow, Red, Yellow, Blue, Yellow."},
         {Kind::Cheat, "cheat_air_guitar", "", true,
          "The original cheat: the guitarists play without a guitar. Code at the main menu: Yellow, Blue, Yellow, "
-         "Orange, Yellow, Blue."},
+         "Orange, Blue, Blue."},
         {Kind::Cheat, "cheat_performance_mode", "", true,
          "The original cheat: no highway and no meters, only the band and the venue. Code at the main menu: Blue, "
-         "Blue, Yellow, Blue, Blue, Orange, Blue, Blue."},
+         "Blue, Orange, Yellow, Yellow, Blue, Orange, Blue."},
         {Kind::Cheat, "cheat_hyper_speed_mode", "", true,
          "The original cheat: the notes come down the highway one and a half times as fast. Code at the main menu: "
-         "Blue, Orange, Yellow, Orange, Blue, Orange, Yellow, Yellow."},
+         "Yellow, Blue, Orange, Orange, Blue, Yellow, Yellow, Orange."},
         {Kind::Cheat, "cheat_flaming_head", "", false,
          "The original cheat: the guitarist's head is on fire (the band's flames do not burn yet in this version). "
-         "Code at the main menu: Yellow, Orange, Yellow, Yellow, Orange, Yellow, Yellow, Orange."},
+         "Code at the main menu: Yellow, Orange, Yellow, Orange, Yellow, Orange, Blue, Orange."},
         {Kind::Cheat, "cheat_eyeball_head_crowd", "", true,
          "The original cheat: everyone in the crowd has a giant eyeball for a head. Code at the main menu: Yellow, "
-         "Orange, Blue, Blue, Blue, Orange, Yellow."},
+         "Blue, Orange, Orange, Orange, Blue, Yellow."},
         {Kind::Cheat, "cheat_monkey_head_crowd", "", true,
-         "The original cheat: everyone in the crowd wears a monkey head. Code at the main menu: Orange, Yellow, "
-         "Blue, Blue, Yellow, Orange, Blue, Blue."},
+         "The original cheat: everyone in the crowd wears a monkey head. Code at the main menu: Blue, Blue, "
+         "Orange, Yellow, Blue, Blue, Orange, Yellow."},
     };
     return k;
 }

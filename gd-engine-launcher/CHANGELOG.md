@@ -15,10 +15,17 @@ Games
   (Modes presets, finer effect levels, scrollbar, Back / Export / Import),
   the same default controls, Generic MIDI, skippable movies and credits, and
   the help bar's access buttons.
+- Guitar Hero Encore: Rocks the 80s (gd-game-03) 0.0.2: the same universal
+  menus (GAMEPADS on the yellow fret, the Enhanced Options with Modes,
+  scrollbar and Back / Export / Import, the default controls, Generic MIDI,
+  skippable movies and credits, the help bar's access buttons), and the
+  menus' original animations (the screens' camera transitions, the buttons'
+  focus growth).
 
 Downloads
-- The licence of RtMidi (MIT), used by the MIDI input of Guitar Hero and
-  Guitar Hero II, is in the licenses folder of every desktop download.
+- The licence of RtMidi (MIT), used by the MIDI input of Guitar Hero,
+  Guitar Hero II and Guitar Hero Encore: Rocks the 80s, is in the licenses
+  folder of every desktop download.
 
 ## 0.1.7
 
