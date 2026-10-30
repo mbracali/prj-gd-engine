@@ -18,6 +18,7 @@ Games
   (Modes presets, finer effect levels, scrollbar, Back / Export / Import),
   the same default controls, Generic MIDI, skippable movies and credits, and
   the help bar's access buttons.
+  Enhanced Options has the new HDR option too.
 - Guitar Hero Encore: Rocks the 80s (gd-game-03) 0.0.2: the same universal
   menus (GAMEPADS on the yellow fret, the Enhanced Options with Modes,
   scrollbar and Back / Export / Import, the default controls, Generic MIDI,

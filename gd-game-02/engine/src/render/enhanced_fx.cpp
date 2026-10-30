@@ -23,7 +23,8 @@ struct EnhBlock {
     float size[4];    // xy the source's size, zw the output's
     float fx[4];      // x bloom, z cinematic, w grade
     float ao[4];      // x the occlusion's exponent (0 off), y its radius
-    float pass[4];    // per pass (star blur, TAA, finish, RCAS, downsample)
+    float pass[4];    // per pass (star blur, TAA, finish, RCAS, downsample, luminance, exposure)
+    float hdr[4];     // HDR: x the display's headroom (linear, 1 = SDR), y the encoded white (1, above with True HDR)
 };
 
 const char* kVertex = R"(
@@ -47,12 +48,18 @@ layout(std140) uniform GdEnh {
     vec4 uFx;
     vec4 uAo;
     vec4 uPass;
+    vec4 uHdr;
 };
 vec3 world(vec2 uv, float d) {
     vec4 p = uInvViewProj * vec4(uv * 2.0 - 1.0, d * 2.0 - 1.0, 1.0);
     return p.xyz / p.w;
 }
 float luma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
+#if GD_HDR || PASS_LUM
+// The sRGB-encoded values and linear light (extended above 1.0).
+vec3 toLinear(vec3 c) { c = max(c, 0.0); return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c)); }
+vec3 toSrgb(vec3 c) { c = max(c, 0.0); return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c)); }
+#endif
 
 #if PASS_DOWN
 // Dual Kawase down: 5 taps around the destination texel (Marius Bjorge, SIGGRAPH 2015).
@@ -133,6 +140,19 @@ uniform sampler2D sTex;
 uniform sampler2D sBlur;       // the pyramid's top (1/2)
 uniform sampler2D sBlurLo;     // 1/8
 uniform sampler2D sAo;
+#if GD_HDR  // Enhanced > HDR: the Emulated / True HDR variant
+uniform sampler2D sExposure;   // the auto exposure (1x1, r)
+// ACES filmic (Krzysztof Narkowicz's fit of the RRT + ODT) to SDR.
+vec3 aces(vec3 x) { return clamp(x * (2.51 * x + 0.03) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0); }
+// HDR output: the same curve up to 0.5, then an exponential shoulder of the
+// same slope that reaches the display's peak (uHdr.x) instead of 1.0.
+vec3 acesHdr(vec3 x) {
+    const float a = 0.61631, s = 0.65105;  // aces(0.5) and its slope there
+    float r = uHdr.x - a;
+    vec3 hi = a + r * (1.0 - exp(-max(x - 0.5, 0.0) * s / r));
+    return mix(aces(x), hi, step(0.5, x));
+}
+#endif
 vec3 saturation(vec3 c, float s) { return mix(vec3(luma(c)), c, s); }
 vec3 grade(vec3 c, int g) {
     float l = luma(c);
@@ -180,18 +200,43 @@ void main() {
         float kw = smoothstep(0.55, 0.85, lw) * max(lw - 0.55, 0.0) / max(lw, 1e-3);
         c += (b * kb * 2.2 + wide * kw * 1.6) * uFx.x;
     }
+#if GD_HDR
+    // Exposure and tone map in linear light, back to the display's encoding.
+    vec3 lin = toLinear(min(c, vec3(64.0))) * texture(sExposure, vec2(0.5)).r;
+    c = toSrgb(uHdr.x > 1.0 ? acesHdr(lin) : aces(lin));
+    // HDR output: the colour looks below apply to the SDR range; highlights above it ride along.
+    vec3 over = vec3(0.0);
+#endif
     if (uFx.z > 0.5) {
+#if GD_HDR
+        if (uHdr.x > 1.0) over = max(c - 1.0, 0.0), c -= over;
+#endif
         float l = luma(c);
         c = mix(vec3(l), c, 1.12);
         c = clamp(c, 0.0, 1.0);
         c = mix(c, c * c * (3.0 - 2.0 * c), 0.4);
         c += vec3(0.025, 0.006, -0.02) * l - vec3(0.012, -0.004, -0.022) * (1.0 - l) * 0.6;
         float v = length((vUv - 0.5) * vec2(1.25, 1.0));
+#if GD_HDR
+        float vig = mix(1.0, 0.7, smoothstep(0.35, 0.9, v));
+        c *= vig;
+        if (uHdr.x > 1.0) c += over * vig;
+#else
         c *= mix(1.0, 0.7, smoothstep(0.35, 0.9, v));
+#endif
     }
     int g = int(uFx.w + 0.5);
+#if GD_HDR
+    if (g != 0) {
+        if (uHdr.x > 1.0) over = max(c - 1.0, 0.0);
+        c = grade(clamp(c, 0.0, 1.0), g);
+        if (uHdr.x > 1.0) c += g == 4 || g == 6 ? vec3(luma(over)) : over;
+    }
+    fragColor = vec4(clamp(c, 0.0, uHdr.y), 1.0);
+#else
     if (g != 0) c = grade(clamp(c, 0.0, 1.0), g);
     fragColor = vec4(clamp(c, 0.0, 1.0), 1.0);
+#endif
 }
 #elif PASS_STARBLUR
 // Blur on Star Power: the frame smeared along the camera's motion (the depth
@@ -404,7 +449,11 @@ void main() {
     vec3 f = texture(sTex, vUv + vec2(tx.x, 0)).rgb, h = texture(sTex, vUv + vec2(0, tx.y)).rgb;
     vec3 mn4 = min(min(b, d), min(f, h)), mx4 = max(max(b, d), max(f, h));
     vec3 hitMin = mn4 / max(4.0 * mx4, 1e-4);
+#if GD_HDR
+    vec3 hitMax = (uHdr.y - mx4) / min(4.0 * mn4 - 4.0 * uHdr.y, -1e-4);  // True HDR: the encoded white above 1
+#else
     vec3 hitMax = (1.0 - mx4) / min(4.0 * mn4 - 4.0, -1e-4);
+#endif
     vec3 lobeRGB = max(-hitMin, hitMax);
     float lobe = max(-0.1875, min(max(lobeRGB.r, max(lobeRGB.g, lobeRGB.b)), 0.0)) * uPass.x;
     fragColor = vec4((lobe * (b + d + f + h) + e) / (4.0 * lobe + 1.0), 1.0);
@@ -414,6 +463,11 @@ void main() {
 // chromatic aberration and animated film grain (strongest in mid-tones).
 uniform sampler2D sTex;
 float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+#if GD_HDR
+#define PEAK uHdr.y  // True HDR: the encoded white, above 1
+#else
+#define PEAK 1.0
+#endif
 void main() {
     vec2 tx = uTexel.xy;
     vec3 e = texture(sTex, vUv).rgb;
@@ -423,9 +477,9 @@ void main() {
         vec3 b = texture(sTex, vUv + vec2(0, -tx.y)).rgb, dd = texture(sTex, vUv + vec2(-tx.x, 0)).rgb;
         vec3 f = texture(sTex, vUv + vec2(tx.x, 0)).rgb, h = texture(sTex, vUv + vec2(0, tx.y)).rgb;
         vec3 mn = min(e, min(min(b, dd), min(f, h))), mx = max(e, max(max(b, dd), max(f, h)));
-        vec3 amp = sqrt(clamp(min(mn, 1.0 - mx) / max(mx, 1e-4), 0.0, 1.0));
+        vec3 amp = sqrt(clamp(min(mn, PEAK - mx) / max(mx, 1e-4), 0.0, 1.0));
         vec3 w = amp * (-1.0 / mix(8.0, 5.0, sharp));
-        c = clamp((e + (b + dd + f + h) * w) / (1.0 + 4.0 * w), 0.0, 1.0);
+        c = clamp((e + (b + dd + f + h) * w) / (1.0 + 4.0 * w), 0.0, PEAK);
     }
     if (ca > 0.0) {
         vec2 off = (vUv - 0.5) * ca * length(vUv - 0.5);
@@ -434,11 +488,43 @@ void main() {
     }
     if (grain > 0.0) {
         float l = luma(c);
+#if GD_HDR
+        l = min(l, 1.0);
+#endif
         vec2 px = floor(vUv * uSize.zw);
         float n = hash(px + fract(time * 7.31) * 413.0) + hash(px * 1.37 - fract(time * 3.17) * 211.0) - 1.0;
         c += n * grain * (0.35 + 2.6 * l * (1.0 - l));
     }
-    fragColor = vec4(clamp(c, 0.0, 1.0), 1.0);
+    fragColor = vec4(clamp(c, 0.0, PEAK), 1.0);
+}
+#elif PASS_LUM
+// HDR auto exposure, 1: 4 taps a quarter of the output texel apart. From the
+// world (uPass.x 0): the mean log luminance; then (1) 4x4 boxes of it, down
+// to 1x1.
+uniform sampler2D sTex;
+float tap(vec2 uv) {
+    vec3 c = texture(sTex, uv).rgb;
+    if (uPass.x > 0.5) return c.r;
+    return log(max(luma(toLinear(min(c, vec3(64.0)))), 1e-4));
+}
+void main() {
+    vec2 q = uTexel.zw * 0.25;
+    float l = tap(vUv - q) + tap(vUv + vec2(q.x, -q.y)) + tap(vUv + vec2(-q.x, q.y)) + tap(vUv + q);
+    fragColor = vec4(l * 0.25, 0.0, 0.0, 1.0);
+}
+#elif PASS_ADAPT
+// HDR auto exposure, 2: the key is the venues' typical log-average (about
+// 0.012: dark stages with bright lights), so an average shot keeps the
+// original's exposure; darker shots open up to +0.5 stop, brighter ones close
+// down to -0.5, each by half the difference; eased from the last frame's
+// (uPass.x: the blend, 1 without history).
+uniform sampler2D sLum;
+uniform sampler2D sPrev;
+void main() {
+    float avg = exp(texture(sLum, vec2(0.5)).r);
+    float target = exp2(clamp(0.5 * log2(0.012 / max(avg, 1e-4)), -0.5, 0.5));
+    float prev = texture(sPrev, vec2(0.5)).r;
+    fragColor = vec4(mix(prev, target, uPass.x), 0.0, 0.0, 1.0);
 }
 #else
 uniform sampler2D sTex;
@@ -511,7 +597,8 @@ EnhancedFx::EnhancedFx(RenderDevice& device) : device_(device) {
 }
 
 EnhancedFx::~EnhancedFx() {
-    for (Target* t : {&a_, &b_, &ao_, &star_[0], &star_[1], &history_[0], &history_[1], &out_, &out2_})
+    for (Target* t : {&a_, &b_, &ao_, &star_[0], &star_[1], &history_[0], &history_[1], &out_, &out2_, &lum_[0], &lum_[1], &lum_[2], &lum_[3],
+                      &expo_[0], &expo_[1]})
         if (t->id) device_.destroyTarget(t->id);
     for (int l = 0; l < kLevels; ++l) {
         if (down_[l].id) device_.destroyTarget(down_[l].id);
@@ -523,22 +610,30 @@ EnhancedFx::~EnhancedFx() {
 }
 
 ProgramDesc EnhancedFx::describe(Pass p) {
-    static const char* kNames[] = {"enh_down", "enh_up", "enh_ao", "enh_composite", "enh_starblur", "enh_taa",
-                                   "enh_fxaa", "enh_downsample", "enh_easu", "enh_rcas", "enh_finish", "enh_copy"};
-    static const char* kDefines[] = {"PASS_DOWN", "PASS_UP", "PASS_AO", "PASS_COMPOSITE", "PASS_STARBLUR", "PASS_TAA",
-                                     "PASS_FXAA", "PASS_DOWNSAMPLE", "PASS_EASU", "PASS_RCAS", "PASS_FINISH"};
+    static const char* kNames[] = {"enh_down",  "enh_up",    "enh_ao",           "enh_composite",  "enh_starblur", "enh_taa",
+                                   "enh_fxaa",  "enh_downsample", "enh_easu",  "enh_rcas",       "enh_finish",   "enh_copy",
+                                   "enh_lum",   "enh_adapt", "enh_composite_hdr", "enh_finish_hdr", "enh_rcas_hdr"};
+    static const char* kDefines[] = {"PASS_DOWN", "PASS_UP",   "PASS_AO",   "PASS_COMPOSITE", "PASS_STARBLUR", "PASS_TAA",
+                                     "PASS_FXAA", "PASS_DOWNSAMPLE", "PASS_EASU", "PASS_RCAS", "PASS_FINISH", nullptr /* copy: #else */,
+                                     "PASS_LUM",  "PASS_ADAPT"};
+    // The HDR variants are their SDR pass with GD_HDR 1 (without it the source is the SDR chain's own).
+    const Pass base = p == Pass::CompositeHdr ? Pass::Composite : p == Pass::FinishHdr ? Pass::Finish : p == Pass::RcasHdr ? Pass::Rcas : p;
     ProgramDesc d;
     d.name = kNames[int(p)];
     d.vertex = kVertex;
     d.fragment = kFragment;
     d.uniformBlocks = {"GdEnh"};
     // Every switch is defined (OpenGL ES rejects undefined names in #if).
-    for (int i = 0; i < int(Pass::Copy); ++i) d.defines += std::string("#define ") + kDefines[i] + (i == int(p) ? " 1\n" : " 0\n");
+    for (int i = 0; i <= int(Pass::Adapt); ++i)
+        if (kDefines[i]) d.defines += std::string("#define ") + kDefines[i] + (i == int(base) ? " 1\n" : " 0\n");
+    d.defines += base != p ? "#define GD_HDR 1\n" : "#define GD_HDR 0\n";
     switch (p) {
     case Pass::Down: d.samplers = {"sSrc"}; break;
     case Pass::Up: d.samplers = {"sSrc", "sSkip"}; break;
     case Pass::Ao: d.samplers = {"sDepth"}; break;
     case Pass::Composite: d.samplers = {"sTex", "sBlur", "sBlurLo", "sAo"}; break;
+    case Pass::CompositeHdr: d.samplers = {"sTex", "sBlur", "sBlurLo", "sAo", "sExposure"}; break;
+    case Pass::Adapt: d.samplers = {"sLum", "sPrev"}; break;
     case Pass::StarBlur: d.samplers = {"sTex", "sDepth", "sAccum"}; break;
     case Pass::Taa: d.samplers = {"sTex", "sDepth", "sHistory"}; break;
     default: d.samplers = {"sTex"}; break;
@@ -606,6 +701,34 @@ void EnhancedFx::pass(Pass p, Target* dst, const TextureId* tex, int slots, cons
     lastPasses_.push_back(name);
 }
 
+// HDR auto exposure: the world's mean log luminance (a 64 x 64 log map
+// reduced in 4x4 boxes to 1x1 on the GPU, no read-back) and the exposure
+// eased towards it (about a second), in a 1x1 target the composite reads.
+bool EnhancedFx::autoExposure(TextureId color, int sw, int sh) {
+    (void)sw, (void)sh;
+    EnhBlock k{};
+    TextureId src = color;
+    for (int i = 0, size = 64; i < 4; ++i, size /= 4) {
+        if (!ensure(lum_[i], size, size, true)) return false;
+        k.texel[2] = 1.0f / float(size), k.texel[3] = 1.0f / float(size);
+        k.pass[0] = i == 0 ? 0.0f : 1.0f;
+        pass(Pass::Lum, &lum_[i], &src, 1, &k, sizeof k, "lum");
+        src = device_.targetTexture(lum_[i].id);
+    }
+    const uint64_t now = SDL_GetTicksNS();
+    const float dt = expoValid_ ? std::clamp(float(now - expoNs_) / 1e9f, 0.0f, 0.25f) : 0.0f;
+    expoNs_ = now;
+    Target& prev = expo_[expoIndex_];
+    Target& next = expo_[expoIndex_ ^ 1];
+    if (!ensure(prev, 1, 1, true) || !ensure(next, 1, 1, true)) return false;
+    k.pass[0] = expoValid_ ? 1.0f - std::exp(-dt * 1.5f) : 1.0f;
+    const TextureId t[2] = {src, device_.targetTexture(prev.id)};
+    pass(Pass::Adapt, &next, t, 2, &k, sizeof k, "adapt");
+    expoIndex_ ^= 1;
+    expoValid_ = true;
+    return !failed_;
+}
+
 std::array<float, 2> EnhancedFx::jitter(const PostSettings& s, int sw, int sh) {
     if (s.aa != PostSettings::AA::Taa || sw <= 0 || sh <= 0) return {0, 0};
     const unsigned i = (frame_ % 8) + 1;
@@ -623,6 +746,13 @@ bool EnhancedFx::process(TextureId color, TextureId depth, int sw, int sh, int x
     b.texel[0] = 1.0f / float(sw), b.texel[1] = 1.0f / float(sh);
     b.size[0] = float(sw), b.size[1] = float(sh), b.size[2] = float(ow), b.size[3] = float(oh);
     TextureId cur = color;
+    // HDR: the pyramid keeps lights above 1.0; True HDR (a peak above 1) keeps
+    // the steps after the composite in RGBA16F.
+    const bool hdr = s.hdr != 0;
+    const float peak = hdr && s.hdrPeak > 1.0f ? std::min(s.hdrPeak, 64.0f) : 1.0f;
+    const bool wide = peak > 1.0f;
+    b.hdr[0] = peak;
+    b.hdr[1] = wide ? 1.055f * std::pow(peak, 1 / 2.4f) - 0.055f : 1.0f;  // the encoded white
 
     // 1. The blur pyramid (dual Kawase) for bloom.
     const bool pyramid = s.bloom != 0;
@@ -633,12 +763,12 @@ bool EnhancedFx::process(TextureId color, TextureId depth, int sw, int sh, int x
             EnhBlock k = b;
             k.texel[0] = 0.5f / float(w), k.texel[1] = 0.5f / float(h);
             w = std::max(1, w / 2), h = std::max(1, h / 2);
-            if (!ensure(down_[l], w, h, false)) return false;
+            if (!ensure(down_[l], w, h, hdr)) return false;
             pass(Pass::Down, &down_[l], &src, 1, &k, sizeof k, "down");
             src = device_.targetTexture(down_[l].id);
         }
         for (int l = kLevels - 2; l >= 0; --l) {
-            if (!ensure(up_[l], down_[l].w, down_[l].h, false)) return false;
+            if (!ensure(up_[l], down_[l].w, down_[l].h, hdr)) return false;
             EnhBlock k = b;
             k.texel[0] = 1.0f / float(down_[l + 1].w), k.texel[1] = 1.0f / float(down_[l + 1].h);
             const TextureId t[2] = {src, device_.targetTexture(down_[l].id)};
@@ -656,16 +786,18 @@ bool EnhancedFx::process(TextureId color, TextureId depth, int sw, int sh, int x
     }
     // 2. Ambient occlusion, bloom, colour.
     static constexpr float kAoK[5] = {0, 0.5f, 0.8f, 1.1f, 1.5f};  // the occlusion's exponent: none, light, medium, strong, stronger
-    if (pyramid || ssao || s.cinematic || s.grade) {
-        if (!ensure(a_, sw, sh, false)) return false;
+    if (hdr && !autoExposure(color, sw, sh)) return false;
+    if (pyramid || ssao || s.cinematic || s.grade || hdr) {
+        if (!ensure(a_, sw, sh, wide)) return false;
         EnhBlock k = b;
         k.fx[0] = !pyramid ? 0.0f : s.bloom >= 3 ? 0.9f : s.bloom == 2 ? 0.68f : s.bloom == 1 ? 0.45f : 0.0f;
         k.fx[2] = s.cinematic ? 1.0f : 0.0f;
         k.fx[3] = float(s.grade);
         k.ao[0] = ssao ? kAoK[std::clamp(s.ssao, 0, 4)] : 0.0f;
-        const TextureId t[4] = {color, pyramid ? device_.targetTexture(up_[0].id) : color,
-                                pyramid ? device_.targetTexture(up_[2].id) : color, ssao ? device_.targetTexture(ao_.id) : color};
-        pass(Pass::Composite, &a_, t, 4, &k, sizeof k, "composite");
+        const TextureId t[5] = {color, pyramid ? device_.targetTexture(up_[0].id) : color,
+                                pyramid ? device_.targetTexture(up_[2].id) : color, ssao ? device_.targetTexture(ao_.id) : color,
+                                hdr ? device_.targetTexture(expo_[expoIndex_].id) : color};
+        pass(hdr ? Pass::CompositeHdr : Pass::Composite, &a_, t, hdr ? 5 : 4, &k, sizeof k, "composite");
         cur = device_.targetTexture(a_.id);
     }
 
@@ -716,26 +848,26 @@ bool EnhancedFx::process(TextureId color, TextureId depth, int sw, int sh, int x
     }
     if (s.aa == PostSettings::AA::Fxaa) {
         Target& dst = a_.id && cur.id == device_.targetTexture(a_.id).id ? b_ : a_;
-        if (!ensure(dst, sw, sh, false)) return false;
+        if (!ensure(dst, sw, sh, wide)) return false;
         pass(Pass::Fxaa, &dst, &cur, 1, &b, sizeof b, "fxaa");
         cur = device_.targetTexture(dst.id);
     }
 
     // 4. To the picture's size.
     if (sw > ow || sh > oh) {  // SSAA
-        if (!ensure(out_, ow, oh, false)) return false;
+        if (!ensure(out_, ow, oh, wide)) return false;
         EnhBlock k = b;
         k.pass[0] = float(sw) / float(ow), k.pass[1] = float(sh) / float(oh);
         pass(Pass::Downsample, &out_, &cur, 1, &k, sizeof k, "downsample");
         cur = device_.targetTexture(out_.id);
     } else if (sw < ow || sh < oh) {  // FSR 1: EASU then RCAS
-        if (!ensure(out_, ow, oh, false) || !ensure(out2_, ow, oh, false)) return false;
+        if (!ensure(out_, ow, oh, wide) || !ensure(out2_, ow, oh, wide)) return false;
         pass(Pass::Easu, &out_, &cur, 1, &b, sizeof b, "easu");
         EnhBlock k = b;
         k.texel[0] = 1.0f / float(ow), k.texel[1] = 1.0f / float(oh);
         k.pass[0] = std::exp2(-0.2f);  // FSR's default 0.2 stops
         const TextureId up = device_.targetTexture(out_.id);
-        pass(Pass::Rcas, &out2_, &up, 1, &k, sizeof k, "rcas");
+        pass(wide ? Pass::RcasHdr : Pass::Rcas, &out2_, &up, 1, &k, sizeof k, "rcas");
         cur = device_.targetTexture(out2_.id);
     }
     if (failed_) return false;
@@ -751,7 +883,7 @@ bool EnhancedFx::process(TextureId color, TextureId depth, int sw, int sh, int x
     k.pass[1] = kCa[std::clamp(s.chromatic, 0, 3)];
     k.pass[2] = kGrain[std::clamp(s.grain, 0, 4)];
     k.pass[3] = f.timeSec;
-    pass(s.sharpen || s.chromatic || s.grain ? Pass::Finish : Pass::Copy, nullptr, &cur, 1, &k, sizeof k,
+    pass(s.sharpen || s.chromatic || s.grain ? (wide ? Pass::FinishHdr : Pass::Finish) : Pass::Copy, nullptr, &cur, 1, &k, sizeof k,
          s.sharpen || s.chromatic || s.grain ? "finish" : "copy");
     ++frame_;
     ++frames_;

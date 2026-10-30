@@ -490,6 +490,15 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         // Medium.
         row(kX), again(kX), row(kRight), row(kRight), row(kRight);
         press(kDown), wait(120), press(kDown), wait(120);
+        // HDR (universal_mechanisms.md "HDR"): Emulated, True HDR (the window
+        // was made without an HDR surface: the documented fallback to
+        // Emulated, with why), None.
+        row(kRight), wait(400);
+        check("enhanced_hdr_emulated");
+        again(kRight), wait(400);
+        check("enhanced_hdr_true");
+        again(kRight), wait(400);
+        check("enhanced_hdr_none");
         row(kLeft), again(kLeft), row(kLeft), row(kRight), again(kRight), row(kX), row(kRight), row(kRight), again(kRight), row(kRight),
             row(kRight), again(kRight), row(kRight), again(kRight), row(kRight), again(kRight);
         wait(500);
@@ -1281,6 +1290,19 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
             status("Mode applied");
             if (w == "enhanced_mode_original") want("internal_res", "800"), want("screen_mode", "fullscreen");  // Steam Deck's, kept
             if (w == "enhanced_mode_old_days") state("fx_on", 1, 1), state("particle_rate", 20, 20);
+        } else if (w == "enhanced_hdr_emulated" || w == "enhanced_hdr_true" || w == "enhanced_hdr_none") {
+            const std::string mode = w == "enhanced_hdr_emulated" ? "emulated" : w == "enhanced_hdr_true" ? "true" : "none";
+            want("hdr", mode);
+            const int level = mode == "none" ? 0 : mode == "emulated" ? 1 : 2;
+            state("hdr", level, level);
+            // The HDR passes (exposure, tone map) run with Emulated and True HDR only.
+            state("fx:lum", level ? 1 : 0, level ? 1 : 0), state("fx:adapt", level ? 1 : 0, level ? 1 : 0);
+            const std::string st = ui.host().enhancedValue("hdr_status");
+            std::printf("  enhanced hdr status: %s\n", st.c_str());
+            // True HDR chosen in the menu: the surface is made at start, so Emulated until then (or unavailable).
+            const char* prefix = mode == "none" ? "" : mode == "emulated" ? "Emulated" : "True HDR ";
+            if (st.rfind(prefix, 0) != 0 || (mode == "true" && st.find("Using Emulated") == std::string::npos) || (mode == "none" && !st.empty()))
+                problems += std::string(problems.empty() ? "" : "; ") + "the HDR status is \"" + st + "\"";
         } else if (w == "enhanced_res_720") {
             want("internal_res", "720");
         } else if (w == "enhanced_controls") {

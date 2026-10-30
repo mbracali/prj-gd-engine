@@ -474,7 +474,8 @@ log says which path was taken (`hdr: scRGB surface`, `hdr: unavailable
 an 8-bit image, so with one the highlights are tone mapped to SDR.
 
 Modes: Original Feel, Steam Deck, Clean Image, Rocking on a Budget and Good
-Old Days set None; Max Out (Full HD) and Max Out (4K) set Emulated. An
+Old Days set None; Max Out (Full HD) and Max Out (4K) set Emulated (gd-game-02's
+Remove All Effects turns HDR off with every other effect). An
 `enhanced.json` or settings file without `hdr` loads as None; Export, Load
 User Settings and the value checks include it.
 

@@ -71,13 +71,19 @@ controls are in `engine/README.md`.
 look (the "Original Feel" mode): every effect the port adds is off (Sharper
 Text and Sprites, anti-aliasing, AI upscaling, bloom, Cinematic Color, Color
 Grading, film grain, chromatic aberration, ambient occlusion, sharpening,
-Blur on Star Power, band shadows, More Lights on Venues, dust, the FPS
+Blur on Star Power, band shadows, More Lights on Venues, dust, HDR, the FPS
 counter), Bokeh is Medium (the original's own depth of
 field), and particles and the camera shake are as the original. Turn the
 effects on in Options > Enhanced Options, one by one or with a MODES button;
 your changes are kept. Only the window, frame rate, resolution and touch
 differ per system; "Remove All Effects" also turns the original game's own
 effects off.
+
+**HDR** (Performance & Graphics): None (the default, the original image),
+Emulated (high dynamic range tone mapped to any screen) or True HDR (an HDR
+display on Windows, or on a Linux Wayland desktop whose driver offers an
+scRGB / PQ surface; it starts with the game, and falls back to Emulated
+with the reason in the help box where it cannot run).
 
 | Setting | Linux | Steam Deck | Windows | macOS | Android |
 |---|---|---|---|---|---|

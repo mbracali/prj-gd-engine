@@ -215,6 +215,18 @@ public:
     // aspect), which drawableSize then reports, and scaled to the window as
     // it is presented. 0: straight to the window.
     virtual void setInternalHeight(int height) = 0;
+    // Enhanced > HDR > True HDR (render/hdr_output.h): the window's surface
+    // (hdr::Surface: 0 SDR, 1 scRGB, 2 PQ). With one, every frame is drawn
+    // into an RGBA16F target and endFrame converts it for the surface (the
+    // UI at the display's paper white, highlights above 1.0 up to its
+    // headroom), re-reading the window's HDR state after hdrStateChanged
+    // (SDL_EVENT_WINDOW_HDR_STATE_CHANGED).
+    virtual void setHdrSurface(int surface) { (void)surface; }
+    virtual void hdrStateChanged() {}
+    // The display's headroom in paper whites while it shows HDR on the surface (1: SDR).
+    virtual float hdrHeadroom() const { return 1; }
+    // What True HDR outputs, or "off: <why>".
+    virtual std::string hdrStatus() const { return "off: no HDR surface"; }
     // The counters since the last call, then cleared.
     virtual DevicePerf takePerf() = 0;
 };

@@ -3,6 +3,7 @@
 #pragma once
 
 #include <array>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -25,6 +26,15 @@
 //   4. the resample to the picture: SSAA's 2x2 downsample, FSR 1 (EASU +
 //      RCAS) below scale 1, or a copy;
 //   5. at the picture's size: sharpening (CAS), chromatic aberration, grain.
+// HDR (Enhanced > HDR; universal_mechanisms.md "HDR"): with Emulated or True
+// HDR, GH2's world buffer, its depth-of-field buffers and the buffer GH2's
+// pass writes for this chain are RGBA16F (GH2's pass no longer clamps at
+// 1.0), the pyramid too; an auto exposure (the world's log-average
+// luminance, reduced on the GPU to 1x1 and eased over time) and the ACES
+// filmic tone map run in step 2, after ambient occlusion and bloom and
+// before cinematic colour and grading. Emulated tone maps to SDR; True HDR
+// keeps highlights up to the display's headroom (hdrPeak) and runs the
+// later steps on RGBA16F. With HDR None nothing of this runs.
 // The track, HUD and menus are drawn afterwards, untouched. Any program that
 // does not compile turns the chain off (logged once): the world is copied
 // as GH2's pass left it (lesson L5).
@@ -47,11 +57,13 @@ struct PostSettings {
     int ssao = 0;           // 0 none, 1 light, 2 medium, 3 strong, 4 stronger
     int sharpen = 0;        // 0 off, 1 low, 2 high
     int starBlur = 0;       // 0 none, 1 light, 2 medium, 3 strong, 4 stronger
+    int hdr = 0;            // 0 none (the original look), 1 emulated (tone mapped to SDR), 2 HDR output
+    float hdrPeak = 1;      // True HDR: the display's headroom in paper whites (1: tone mapped as Emulated); set by PostFx
     // The world's size against the picture (SSAA 2x, FSR 1 below 1).
     float renderScale() const { return (fsr1 ? fsrScale : 1.0f) * (aa == AA::Ssaa ? 2.0f : 1.0f); }
     // Whether the port's chain runs at all.
     bool any() const {
-        return aa != AA::None || fsr1 || bloom || cinematic || grade || grain || chromatic || ssao || sharpen || starBlur;
+        return aa != AA::None || fsr1 || bloom || cinematic || grade || grain || chromatic || ssao || sharpen || starBlur || hdr;
     }
 };
 
@@ -88,7 +100,9 @@ public:
     const std::vector<std::string>& lastPasses() const { return lastPasses_; }
 
 private:
-    enum class Pass : uint8_t { Down, Up, Ao, Composite, StarBlur, Taa, Fxaa, Downsample, Easu, Rcas, Finish, Copy, Count };
+    // Lum / Adapt: HDR auto exposure; the *Hdr passes are HDR variants (GD_HDR 1) of the SDR chain's.
+    enum class Pass : uint8_t { Down, Up, Ao, Composite, StarBlur, Taa, Fxaa, Downsample, Easu, Rcas, Finish, Copy, Lum, Adapt,
+                                CompositeHdr, FinishHdr, RcasHdr, Count };
     static ProgramDesc describe(Pass p);
     ProgramId program(Pass p);
     struct Target {
@@ -106,6 +120,12 @@ private:
     bool tried_[int(Pass::Count)] = {};
     static constexpr int kLevels = 5;
     Target down_[kLevels], up_[kLevels], a_, b_, ao_, star_[2], history_[2], out_, out2_;
+    // HDR auto exposure: the log-luminance map reduced 64 -> 16 -> 4 -> 1, and the eased exposure (ping-pong 1x1).
+    Target lum_[4], expo_[2];
+    int expoIndex_ = 0;
+    bool expoValid_ = false;
+    uint64_t expoNs_ = 0;
+    bool autoExposure(TextureId color, int sw, int sh);
     int starIndex_ = 0, historyIndex_ = 0;
     bool starValid_ = false, historyValid_ = false;
     Mat4 starPrev_, taaPrev_;

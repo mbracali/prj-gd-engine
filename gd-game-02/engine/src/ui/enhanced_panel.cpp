@@ -34,6 +34,7 @@ const std::vector<EnhancedSetting>& enhancedSettings() {
         {"screen_mode", {"windowed", "fullscreen", "borderless"}},
         {"max_fps", {"120", "60", "240", "unlimited"}},
         {"fps_counter", {"off", "on"}},
+        {"hdr", {"none", "emulated", "true"}},
         {"internal_res", {"1080", "0", "448", "480", "720", "800", "900", "1440", "2160"}},
         {"sharp_ui", {"off", "on"}},
         {"antialiasing", {"none", "fxaa", "ssaa", "taa"}},
@@ -91,7 +92,7 @@ const Values& lowest() {
         {"film_grain", "none"},   {"chromatic", "none"},   {"ssao", "none"},
         {"star_blur", "none"},    {"shadows_all", "off"},  {"more_lights", "none"},    {"light_dust", "none"},
         {"color_grade", "off"},  {"sharpening", "off"},      {"antialiasing", "none"},
-        {"ai_upscaling", "none"}, {"sharp_ui", "off"},     {"no_effects", "off"}};
+        {"ai_upscaling", "none"}, {"sharp_ui", "off"},     {"no_effects", "off"},       {"hdr", "none"}};
     return v;
 }
 Values originalLook() {
@@ -106,7 +107,7 @@ const Values& highest() {
         {"film_grain", "stronger"}, {"chromatic", "strong"}, {"ssao", "stronger"},
         {"star_blur", "stronger"}, {"shadows_all", "on"},    {"more_lights", "2.5x"},    {"light_dust", "2.5x"},
         {"color_grade", "off"},   {"sharpening", "low"},      {"antialiasing", "taa"},
-        {"ai_upscaling", "none"},  {"sharp_ui", "on"},       {"no_effects", "off"}};
+        {"ai_upscaling", "none"},  {"sharp_ui", "on"},       {"no_effects", "off"},      {"hdr", "emulated"}};
     return v;
 }
 std::vector<std::pair<std::string, std::string>> with(Values base, std::initializer_list<std::pair<const char*, const char*>> over) {
@@ -128,7 +129,7 @@ std::vector<std::pair<std::string, std::string>> enhancedPreset(const std::strin
     if (mode == "max_4k") return with(highest(), {{"internal_res", "2160"}, {"max_fps", "240"}});
     if (mode == "budget") return with(lowest(), {{"max_fps", "60"}, {"internal_res", "720"}});
     if (mode == "good_old_days")  // every effect, in sepia, at the PS2's resolution (gd01's)
-        return with(highest(), {{"color_grade", "sepia"}, {"internal_res", "448"}, {"max_fps", "60"}, {"antialiasing", "none"}});
+        return with(highest(), {{"color_grade", "sepia"}, {"internal_res", "448"}, {"max_fps", "60"}, {"antialiasing", "none"}, {"hdr", "none"}});
     return {};
 }
 
@@ -307,6 +308,13 @@ const std::vector<Item>& items() {
          {{"60", "60"}, {"120", "120"}, {"240", "240"}, {"unlimited", "Unlimited"}}},
         {Kind::Check, "fps_counter", "Show FPS Counter", true,
          "Shows the frames drawn per second in the bottom-left corner of the screen."},
+        {Kind::Choice, "hdr", "HDR", true,
+         "High dynamic range for the venue and the band. None: the original image. Emulated: lights and glows keep "
+         "their full brightness, an automatic exposure follows the stage and a filmic curve brings it to any screen. "
+         "True HDR: the same, shown on an HDR display (Windows, or a Linux Wayland desktop, with HDR on), brighter "
+         "highlights, menus at the screen's paper white; it starts with the game, and where it cannot run Emulated is "
+         "used. Menus and the HUD keep their colours.",
+         {{"none", "None"}, {"emulated", "Emulated"}, {"true", "True HDR"}}},
         {Kind::Choice, "bokeh", "Bokeh Effect", true,
          "The depth-of-field blur of the close shots. None: always sharp. Medium: as the original game. Light is softer; "
          "Strong and Stronger start the focus nearer the band and blur wider.",
@@ -840,7 +848,14 @@ private:
         const bool notYet = !it.ready && it.kind != Kind::Section;
         const bool locked = it.kind == Kind::Check && it.ready && !editable(it);
         const bool calib = std::string(it.key) == "calibrate";  // its status line
-        const float height = pad + 46 + float(lines.size()) * lineH + (notYet || locked || calib ? 42 : 0) + pad;
+        // HDR's status ("Now: ..."), which can take two lines.
+        std::vector<std::string> status;
+        if (std::string(it.key) == "hdr") {
+            const std::string st = ui.host().enhancedValue("hdr_status");
+            status = d_.wrap("Now: " + (st.empty() ? std::string("off") : st), x1 - x0 - 2 * pad, 19);
+        }
+        const float height = pad + 46 + float(lines.size()) * lineH + (notYet || locked || calib || !status.empty() ? 42 : 0) +
+                             float(status.size() > 1 ? status.size() - 1 : 0) * 26 + pad;
         const float top = kBoxY1 - height;  // bottom-aligned with the options box
         float y = top + pad;
         d_.quad(x0, top, x1, kBoxY1, {0, 0, 0, 0.72f});
@@ -852,7 +867,10 @@ private:
         d_.text(n, x0 + pad, y + 2 + (30 - th) * 0.5f, th, kGold, 0x11);
         y += 46;
         for (const std::string& l : lines) d_.text(l, x0 + pad, y, bodyH, kNormal, 0x11), y += lineH;
-        if (calib) {
+        if (!status.empty()) {
+            y += 6;
+            for (const std::string& l : status) d_.text(l, x0 + pad, y + 13, 19, PortDraw::kOn, 0x21), y += 26;
+        } else if (calib) {
             y += 6;
             d_.text("Now: audio " + signedMs(ui.host().enhancedValue("audio_offset")) + ", video " +
                         signedMs(ui.host().enhancedValue("video_offset")),

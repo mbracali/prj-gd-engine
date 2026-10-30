@@ -3,6 +3,7 @@
 // The OpenGL 3.3 core / OpenGL ES 3.0 back end of render/device.h.
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <vector>
 
@@ -169,6 +170,10 @@ public:
     void endFrame() override;
     void setFrameCap(int fps) override;
     void setInternalHeight(int height) override { internalH_ = std::max(0, height); }
+    void setHdrSurface(int surface) override { hdrSurface_ = surface, hdrDirty_ = true; }
+    void hdrStateChanged() override { hdrDirty_ = true; }
+    float hdrHeadroom() const override { return hdrSurface_ && hdrOn_ ? hdrHeadroom_ : 1.0f; }
+    std::string hdrStatus() const override;
 
 private:
     void applyState(const PipelineState& s, bool force = false);
@@ -217,6 +222,18 @@ private:
     int internalH_ = 0;
     TargetId frame_;
     bool frameOn_ = false;
+    bool frameF16_ = false;   // the frame is RGBA16F (an HDR surface)
+    int frameW_ = 0, frameH_ = 0;
+    // True HDR output (setHdrSurface): the window's state and the conversion pass.
+    int hdrSurface_ = 0;
+    bool hdrDirty_ = true, hdrOn_ = false;
+    float hdrWhite_ = 1, hdrHeadroom_ = 1;  // scRGB units (1 = 80 nits); headroom in paper whites
+    std::string hdrLogged_;
+    ProgramId hdrProgram_;
+    BufferId hdrTriangle_;
+    bool hdrTried_ = false;
+    void updateHdr();
+    void outputHdr(int ww, int wh);
     int vp_[4] = {};
 
     // Frame pacing (gd01 lesson L7).
@@ -546,10 +563,7 @@ void GlDevice::destroyTarget(TargetId id) {
 
 void GlDevice::drawableSize(int& w, int& h) const {
     SDL_GetWindowSizeInPixels(window_, &w, &h);
-    if (frameOn_ && h > 0) {
-        w = std::max(1, int(std::lround(double(w) * internalH_ / h)));
-        h = internalH_;
-    }
+    if (frameOn_ && h > 0) w = frameW_, h = frameH_;
 }
 
 void GlDevice::beginFrame() {
@@ -559,15 +573,21 @@ void GlDevice::beginFrame() {
     frameOn_ = false;
     int ww = 0, wh = 0;
     SDL_GetWindowSizeInPixels(window_, &ww, &wh);
-    if (internalH_ > 0 && wh > 0 && internalH_ != wh) {
-        const int w = std::max(1, int(std::lround(double(ww) * internalH_ / wh))), h = internalH_;
+    // An HDR surface: the frame always draws off screen (RGBA16F), endFrame converts it.
+    if (hdrSurface_) updateHdr();
+    const bool f16 = hdrSurface_ != 0;
+    if ((internalH_ > 0 && wh > 0 && internalH_ != wh) || (f16 && wh > 0)) {
+        const bool scaled = internalH_ > 0 && internalH_ != wh;
+        const int w = scaled ? std::max(1, int(std::lround(double(ww) * internalH_ / wh))) : ww, h = scaled ? internalH_ : wh;
         const GlTarget* f = targets_.get(frame_.id);
-        if (!f || f->w != w || f->h != h) {
+        if (!f || f->w != w || f->h != h || frameF16_ != f16) {
             if (f) destroyTarget(frame_);
             std::string error;
-            frame_ = createTarget(TargetDesc{w, h, true, TargetFormat::RGBA8}, error);
+            frame_ = createTarget(TargetDesc{w, h, true, f16 ? TargetFormat::RGBA16F : TargetFormat::RGBA8}, error);
+            frameF16_ = f16;
             if (!frame_) SDL_Log("render: internal resolution %dx%d: %s; drawing to the window", w, h, error.c_str()), internalH_ = 0;
         }
+        frameW_ = w, frameH_ = h;
         frameOn_ = bool(frame_);
     }
     setTarget({});
@@ -789,8 +809,12 @@ void GlDevice::setFrameCap(int fps) {
 
 void GlDevice::endFrame() {
     const uint64_t start = SDL_GetTicksNS();
-    // The internal resolution's frame, scaled to the window.
-    if (const GlTarget* frame = frameOn_ ? targets_.get(frame_.id) : nullptr) {
+    // True HDR: the frame converted for the HDR surface.
+    if (frameOn_ && frameF16_ && targets_.get(frame_.id)) {
+        int ww = 0, wh = 0;
+        SDL_GetWindowSizeInPixels(window_, &ww, &wh);
+        outputHdr(ww, wh);
+    } else if (const GlTarget* frame = frameOn_ ? targets_.get(frame_.id) : nullptr) {  // the internal resolution's frame, scaled to the window
         int ww = 0, wh = 0;
         SDL_GetWindowSizeInPixels(window_, &ww, &wh);
         gl::glBindFramebuffer(GL_READ_FRAMEBUFFER, frame->fbo);
@@ -821,6 +845,112 @@ void GlDevice::endFrame() {
     ++perf_.frames;
     fences_[1] = fences_[0];
     fences_[0] = gl::glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+}
+
+// ---- True HDR output
+
+// The frame (sRGB-encoded, paper white at 1.0, True HDR highlights above it)
+// to the surface: linear scRGB (1.0 = 80 nits) scaled to the display's paper
+// white, or BT.2020 PQ.
+const char* kHdrVertex = R"(
+layout(location = 0) in vec2 aPos;
+out vec2 vUv;
+void main() {
+    vUv = aPos * 0.5 + 0.5;
+    gl_Position = vec4(aPos, 0.0, 1.0);
+}
+)";
+const char* kHdrFragment = R"(
+in vec2 vUv;
+out vec4 fragColor;
+layout(std140) uniform GdHdr {
+    vec4 uHdr;  // x paper white (scRGB units), y 1: PQ
+};
+uniform sampler2D sTex;
+void main() {
+    vec3 c = max(texture(sTex, vUv).rgb, 0.0);
+    vec3 lin = mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c)) * uHdr.x;
+    if (uHdr.y > 0.5) {
+        const mat3 toBt2020 = mat3(0.6274, 0.0691, 0.0164, 0.3293, 0.9195, 0.0880, 0.0433, 0.0114, 0.8956);
+        vec3 y = clamp(toBt2020 * lin * (80.0 / 10000.0), 0.0, 1.0);
+        vec3 p = pow(y, vec3(0.1593017578125));
+        lin = pow((0.8359375 + 18.8515625 * p) / (1.0 + 18.6875 * p), vec3(78.84375));
+    }
+    fragColor = vec4(lin, 1.0);
+}
+)";
+
+void GlDevice::updateHdr() {
+    if (!hdrDirty_) return;
+    hdrDirty_ = false;
+    const SDL_PropertiesID props = SDL_GetWindowProperties(window_);
+    hdrOn_ = SDL_GetBooleanProperty(props, SDL_PROP_WINDOW_HDR_ENABLED_BOOLEAN, false);
+    hdrWhite_ = std::max(1.0f, SDL_GetFloatProperty(props, SDL_PROP_WINDOW_SDR_WHITE_LEVEL_FLOAT, 1.0f));
+    hdrHeadroom_ = std::max(1.0f, SDL_GetFloatProperty(props, SDL_PROP_WINDOW_HDR_HEADROOM_FLOAT, 1.0f));
+    if (!hdrOn_ || hdrHeadroom_ <= 1.0f) {
+        hdrOn_ = false, hdrHeadroom_ = 1;
+        if (hdrSurface_ == 2) hdrWhite_ = 203.0f / 80.0f;  // a PQ surface is absolute: SDR white at BT.2408's 203 nits
+    }
+    const std::string st = hdrStatus();
+    if (st != hdrLogged_) SDL_Log("hdr: %s", (hdrLogged_ = st).c_str());
+}
+
+std::string GlDevice::hdrStatus() const {
+    if (!hdrSurface_) return "off: no HDR surface";
+    if (!hdrOn_) return "off: HDR is off for this display (turn it on in the system's display settings)";
+    char buf[160];
+    std::snprintf(buf, sizeof buf, "%s output, paper white %.0f nits, peak %.0f nits", hdrSurface_ == 2 ? "PQ (BT.2020)" : "scRGB",
+                  double(hdrWhite_ * 80), double(hdrWhite_ * hdrHeadroom_ * 80));
+    return buf;
+}
+
+void GlDevice::outputHdr(int ww, int wh) {
+    if (!hdrTried_) {
+        hdrTried_ = true;
+        ProgramDesc d;
+        d.name = "hdr_output";
+        d.vertex = kHdrVertex, d.fragment = kHdrFragment;
+        d.uniformBlocks = {"GdHdr"};
+        d.samplers = {"sTex"};
+        std::string error;
+        hdrProgram_ = createProgram(d, error);
+        const float tri[6] = {-1, -1, 3, -1, -1, 3};
+        hdrTriangle_ = createBuffer(BufferKind::Vertex, sizeof tri, tri, false);
+        if (!hdrProgram_ || !hdrTriangle_) SDL_Log("hdr: output shader: %s; showing the frame unconverted", error.c_str());
+    }
+    const GlTarget* frame = targets_.get(frame_.id);
+    frameOn_ = false;  // the window itself from here
+    if (!hdrProgram_ || !hdrTriangle_ || !frame) {  // never a black window
+        if (frame) {
+            gl::glBindFramebuffer(GL_READ_FRAMEBUFFER, frame->fbo);
+            gl::glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+            gl::glDisable(GL_SCISSOR_TEST);
+            gl::glBlitFramebuffer(0, 0, frame->w, frame->h, 0, 0, ww, wh, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+            gl::glEnable(GL_SCISSOR_TEST);
+        }
+        gl::glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        target_ = {};
+        return;
+    }
+    setTarget({});
+    setViewport(0, 0, ww, wh);
+    static VertexLayout layout = [] {
+        VertexLayout l;
+        l.stride = 8;
+        l.attribs[0] = {0, 2, AttribType::Float, 0};
+        return l;
+    }();
+    const float block[4] = {hdrWhite_, hdrSurface_ == 2 ? 1.0f : 0.0f, 0, 0};
+    DrawCall c;
+    c.program = hdrProgram_;
+    c.state.alphaWrite = true;
+    c.layout = &layout;
+    c.vertices = hdrTriangle_;
+    c.count = 3;
+    c.textures[0] = targetTexture(frame_);
+    c.samplers[0] = SamplerState{Filter::Linear, Wrap::Clamp, 0};
+    c.uniforms[0] = UniformData{block, sizeof block, 0};
+    draw(c);
 }
 
 }  // namespace

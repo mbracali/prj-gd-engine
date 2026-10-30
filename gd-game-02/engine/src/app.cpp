@@ -41,6 +41,7 @@
 #include "platform/disc_picker.h"
 #include "platform/paths.h"
 #include "render/canvas.h"
+#include "render/hdr_output.h"
 #include "render/highway.h"
 #include "render/hud_view.h"
 #include "render/scene_gpu.h"
@@ -491,6 +492,11 @@ private:
     // The Enhanced Options (enhanced.json in the save folder), what is in
     // effect, and the FPS counter's average.
     Json enhanced_ = Json::object();
+    // Enhanced > HDR > True HDR: the window's surface (chosen at start) and why it is SDR when it is.
+    hdr::Surface hdrSurface_ = hdr::Surface::Sdr;
+    std::string hdrReason_, hdrApplied_;
+    std::string hdrStatus();
+    std::string savedHdrMode();  // enhanced.json's HDR before the window exists
     std::string screenModeApplied_;
     // Export / Load User Files: the dialogs' answers (queued from SDL's
     // callback) and the last result shown by the panel.
@@ -550,7 +556,33 @@ int App::run() {
         }
         debugMenu_ = false;
     }
+    // Enhanced > HDR > True HDR: the window's surface is chosen now (render/hdr_output.h).
+    // A window or surface that cannot be made with it is made again without (Emulated).
+    hdrReason_ = hdr::unsupportedReason();
+    const bool trueHdr = savedHdrMode() == "true";
+    const bool wantHdr = trueHdr && hdr::request();
     window_ = SDL_CreateWindow(app::kWindowTitle, int(kScreenW), int(kScreenH), flags);
+    if (wantHdr) {
+        if (window_) {
+            if (SDL_GLContext probe = SDL_GL_CreateContext(window_)) {
+                hdrSurface_ = hdr::obtained(hdrReason_);
+                SDL_GL_DestroyContext(probe);
+            } else {
+                hdrReason_ = hdr::failure("no OpenGL context on an HDR surface", SDL_GetError());
+            }
+        } else {
+            hdrReason_ = hdr::failure("no window with an HDR surface", SDL_GetError());
+        }
+        if (hdrSurface_ == hdr::Surface::Sdr) {
+            if (window_) SDL_DestroyWindow(window_);
+            hdr::cancel();
+            window_ = SDL_CreateWindow(app::kWindowTitle, int(kScreenW), int(kScreenH), flags);
+        }
+    }
+    if (trueHdr)
+        SDL_Log("hdr: %s", hdrSurface_ == hdr::Surface::ScRgb ? "scRGB surface (linear, RGBA16F)"
+                           : hdrSurface_ == hdr::Surface::Pq  ? "BT.2020 PQ surface"
+                                                              : ("unavailable (" + hdrReason_ + "), using Emulated").c_str());
     setAppWindowIcon(window_);
     installDesktopEntry();
     // Touch: window-normalised positions to menu units (the 16:9 picture).
@@ -567,6 +599,7 @@ int App::run() {
         SDL_Quit();
         return 2;
     }
+    canvas_.renderer().device().setHdrSurface(int(hdrSurface_));
     if (!mixer_.open(error)) {
         std::fprintf(stderr, "%s: cannot open the audio device: %s\n", app::kProgram, error.c_str());
         canvas_.shutdown();
@@ -997,6 +1030,10 @@ void App::endSong() {
 void App::handleEvent(const SDL_Event& e) {
     if (e.type == SDL_EVENT_QUIT) {
         running_ = false;
+        return;
+    }
+    if (e.type == SDL_EVENT_WINDOW_HDR_STATE_CHANGED && canvas_.renderer().ready()) {  // HDR on / off, paper white, headroom
+        canvas_.renderer().device().hdrStateChanged();
         return;
     }
     actions_.clear();
@@ -2076,7 +2113,43 @@ void App::loadEnhanced() {
     applyEnhanced();
 }
 
+// enhanced.json's HDR value, read before the window exists (True HDR picks its surface then).
+std::string App::savedHdrMode() {
+    std::ifstream f(enhancedPath(), std::ios::binary);
+    if (!f) return "none";
+    std::stringstream ss;
+    ss << f.rdbuf();
+    try {
+        Json j = Json::parse(ss.str());
+        if (j.type != Json::Type::Object || j["format"].str() != "gd02-enhanced") return "none";
+        const ui::EnhancedSetting* e = ui::enhancedSetting("hdr");
+        const std::string v = j.has("hdr") ? j["hdr"].str() : "none";
+        return e && ui::enhancedValid(*e, v) ? v : "none";
+    } catch (const std::exception&) {
+        return "none";
+    }
+}
+
+// Enhanced > HDR's "Now:" line: what the image is doing, and why True HDR
+// fell back to Emulated when it did (universal_mechanisms.md "HDR").
+std::string App::hdrStatus() {
+    const std::string mode = enhancedValue("hdr");
+    if (enhancedValue("no_effects") == "on" && mode != "none") return "off: Remove All Effects is on";
+    if (mode == "emulated") return "Emulated: HDR rendering tone mapped to your screen";
+    if (mode != "true") return "";
+    std::string why;
+    if (hdrSurface_ == hdr::Surface::Sdr) {
+        why = !hdrReason_.empty() ? "unavailable: " + hdrReason_ : "takes effect the next time the game starts";
+    } else {
+        const std::string live = canvas_.renderer().device().hdrStatus();
+        if (live.rfind("off:", 0) != 0) return "True HDR: " + live;
+        why = live.substr(5);
+    }
+    return "True HDR " + why + ". Using Emulated.";
+}
+
 std::string App::enhancedValue(const std::string& key) {
+    if (key == "hdr_status") return hdrStatus();  // read-only, for the HDR help
     const ui::EnhancedSetting* e = ui::enhancedSetting(key);
     if (!e) return {};
     if (enhanced_.has(key))
@@ -2318,10 +2391,17 @@ void App::applyEnhancedLook() {
         p.ssao = level("ssao", {"none", "light", "medium", "strong", "stronger"});
         p.sharpen = level("sharpening", {"off", "low", "high"});
         p.starBlur = level("star_blur", {"none", "light", "medium", "strong", "stronger"});
+        // HDR: True HDR needs the window's HDR surface (made at start); without it, Emulated.
+        p.hdr = level("hdr", {"none", "emulated", "true"});
     } else {
         p.original = false, p.bokeh = 0;
     }
     canvas_.renderer().post().setSettings(p);
+    if (const std::string mode = none ? "none" : v("hdr"); mode != hdrApplied_) {
+        hdrApplied_ = mode;
+        const std::string st = hdrStatus();
+        SDL_Log("hdr: mode %s%s", mode.c_str(), st.empty() ? "" : (" - " + st).c_str());
+    }
     gfx::ParticleRenderer::setEnabled(v("particles") != "none");
     gfx::ParticleRenderer::setRate(v("particles") == "2x" ? 2.0f : 1.0f);
     if (director_) director_->setShake(!on("no_shaky_cam") && !none);
@@ -2399,6 +2479,7 @@ int App::enhancedState(const std::string& key) {
     if (key == "sharp_ui") return ui_ && ui_->sceneCache() ? (ui_->sceneCache()->enhancing() ? 1 : 0) : -1;
     if (key == "post_original") return post.settings().original ? 1 : 0;
     if (key == "fx_on") return post.settings().any() ? 1 : 0;
+    if (key == "hdr") return post.settings().hdr;
     if (key == "post_dof") return post.lastDof() ? 1 : 0;
     if (key == "post_key") return int(post.lastKey());
     if (key == "fx_frames") return fx ? fx->frames() : 0;

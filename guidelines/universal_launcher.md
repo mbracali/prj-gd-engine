@@ -239,6 +239,7 @@ Reference code:
        Border));
      - In-Game Max FPS (dropdown: 60 / 120 / 240);
      - Show FPS Counter (check box);
+     - HDR (dropdown: None / Emulated / True HDR; universal_mechanisms.md "HDR");
      - Internal Resolution (dropdown). The original console's own height is
        labelled, for example "448p (ps2)" or "720p (x360)".
      - Sharper Text & Sprites;
@@ -342,6 +343,7 @@ rate, resolution and touch follow gd-game-01's columns.
 | PERFORMANCE & GRAPHICS | Screen Mode (`screen_mode`) | dropdown | Windowed | Windowed / Full Screen / Full Screen (No Border) | has |
 | PERFORMANCE & GRAPHICS | In-Game Max FPS (`max_fps`) | dropdown | 120 | 60 / 120 / 240 | has (default from the table: GD02-128) |
 | PERFORMANCE & GRAPHICS | Show FPS Counter (`fps_counter`) | check | on | Frames a second, bottom left | has (default from the table: GD02-128) |
+| PERFORMANCE & GRAPHICS | HDR (`hdr`) | dropdown | None | None / Emulated / True HDR: float world, auto exposure and ACES tone map; True HDR on a Windows / Wayland HDR surface, else Emulated with the reason (universal_mechanisms.md "HDR") | done (GD02-141; gd01 GD01-303) |
 | PERFORMANCE & GRAPHICS | Internal Resolution (`internal_res`) | dropdown | 1080p (Windows, macOS 1440p) | The 3D picture's height; gd02 keeps its extra "Window" value and labels 720p (x360) | has (default from the table: GD02-128) |
 | PERFORMANCE & GRAPHICS | Sharper Text & Sprites (`sharp_ui`) | check | on | Menu art and fonts upscaled with a sharper filter | done (GD02-102) |
 | PERFORMANCE & GRAPHICS | Anti-Aliasing (`antialiasing`) | dropdown | None | None / FXAA / SSAA / TAA | done (GD02-103) |

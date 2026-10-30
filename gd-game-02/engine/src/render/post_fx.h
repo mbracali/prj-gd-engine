@@ -96,6 +96,7 @@ constexpr uint32_t BlendPrevious = 1u << 5;  // not built (see PostProcState)
 constexpr uint32_t CopyPrevious = 1u << 6;   // not built
 constexpr int NumTapsShift = 14;             // blur.fx: taps - 1
 constexpr uint32_t LumMap = 1u << 20;
+constexpr uint32_t HdrOut = 1u << 21;  // the port's: Enhanced > HDR, no clamp at 1.0 (not GH2's)
 constexpr uint32_t All = ColorXfm | Noise | Dof | Bloom | LumMap;
 }  // namespace postkey
 
@@ -168,6 +169,7 @@ private:
     int w_ = 0, h_ = 0;
     TargetId hdr_, dofA_, dofB_, bloomHalf_, bloomA_, bloomB_;
     TargetId ldr_;  // GH2's pass's result when the port's chain follows
+    bool ldrF16_ = false, worldF16_ = false;  // Enhanced > HDR: RGBA16F
     PostSettings settings_;
     PostFrame frame_;
     std::unique_ptr<EnhancedFx> enhanced_;

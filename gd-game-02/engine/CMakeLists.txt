@@ -88,6 +88,7 @@ target_sources(gd02 PRIVATE
   src/render/material.cpp
   src/render/particles.cpp
   src/render/enhanced_fx.cpp
+  src/render/hdr_output.cpp
   src/render/enhanced_lights.cpp
   src/render/post_fx.cpp
   src/render/renderer.cpp
