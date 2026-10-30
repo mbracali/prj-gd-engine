@@ -179,6 +179,13 @@ public:
     // The last frame drawn as a .bmp (the walk test's shots); false if none.
     virtual bool saveScreenshot(const std::string& /*path*/) { return false; }
     virtual void setEnhancedValue(const std::string& /*key*/, const std::string& /*value*/) {}
+    // An Enhanced Options button: mode_<preset> (a MODES preset, once),
+    // export (a folder dialog), load_settings / load_progress (a file
+    // dialog); the Gamepad menu's export_controllers / import_controllers.
+    // enhancedStatus: the last one's result ("" none), shown a few seconds by
+    // the panel.
+    virtual void enhancedAction(const std::string& /*action*/) {}
+    virtual std::string enhancedStatus() { return {}; }
     // The Enhanced Options' backdrop: a still shot of the second venue with
     // the band posed, while the screen is up; drawMenuBackdrop draws it
     // (false when there is none).

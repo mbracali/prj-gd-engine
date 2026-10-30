@@ -464,20 +464,32 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         press(kDown), wait(150), press(kDown), wait(150);  // Audio Settings -> Video Settings -> Enhanced Options
         press(kX);
         at("enhanced_options_screen");
+        check("menu_instant");  // no transition: on the next frame (universal_mechanisms.md 1.2)
         check("enhanced_default");
         check("enhanced_all_off");
         check("backdrop_band");
         wait(300);
         check("aspect_43");
-        // Gamepads (the focus) -> 4 controls -> the PERFORMANCE AND GRAPHICS
-        // section -> calibration -> Screen Mode -> Max FPS -> FPS Counter ->
-        // Internal Resolution; select opens its dropdown, down and select
-        // pick the next option.
-        for (int i = 0; i < 10; ++i) press(kDown), wait(120);
+        // MODES (universal_mechanisms.md 1.2.2): Steam Deck (the focus),
+        // Original Feel (the window and the resolution kept), Good Old Days,
+        // then Original Feel again.
+        press(kX), wait(400);
+        check("enhanced_mode_deck");
+        press(kDown), wait(120), press(kX), wait(300);
+        check("enhanced_mode_original");
+        for (int i = 0; i < 5; ++i) press(kDown), wait(120);  // Clean, Max HD, Max 4K, Budget, Good Old Days
+        press(kX), wait(400);
+        check("enhanced_mode_old_days");
+        for (int i = 0; i < 5; ++i) press(kUp), wait(120);
+        press(kX), wait(300);
+        // Past the modes, CONTROLS (Gamepads, Mouse, Touch, Calibration) and
+        // PERFORMANCE & GRAPHICS' Screen Mode to Resolution; select opens
+        // its dropdown, down and select pick the next option.
+        for (int i = 0; i < 13; ++i) press(kDown), wait(120);
         press(kX);
         wait(200);
         press(kDown), wait(120);
-        press(kX);  // the window's own -> 448p (ps2)
+        press(kX);  // 448p (Good Old Days') -> 480p
         wait(300);
         check("enhanced_changed");
         // Widescreen (16:9), the next row: on (the picture fills the
@@ -489,6 +501,22 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         press(kX);
         wait(400);
         check("aspect_43");
+        // Max FPS, past the four rows gd03 does not have yet: Unlimited
+        // (up from 60 wraps), then 60 again.
+        for (int i = 0; i < 5; ++i) press(kDown), wait(120);
+        press(kX), wait(150), press(kUp), wait(120), press(kX), wait(300);
+        check("enhanced_fps_unlimited");
+        press(kX), wait(150), press(kDown), wait(120), press(kX), wait(300);
+        check("enhanced_fps_60");
+        // CHEATS & ENHANCERS: Export User Files, Load User Settings, Load
+        // User Progress (GD03_DIALOG: the walk's folder).
+        for (int i = 0; i < 17; ++i) press(kDown), wait(100);
+        press(kX), wait(300);
+        check("enhanced_exported");
+        press(kDown), wait(120), press(kX), wait(300);
+        check("enhanced_settings_loaded");
+        press(kDown), wait(120), press(kX), wait(300);
+        check("enhanced_progress_loaded");
         press(kTri);
         at("options_screen");
         press(kX);  // Enhanced Options again (the focus): the band again
@@ -513,24 +541,40 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         mouseOn("port_enhanced.btn", 1);
         at("enhanced_options_screen");
         wait(300);
-        // In-Game Max FPS (the list's 13th row; its dropdown opens upward):
-        // 60 is its first option, 85 units above the row.
-        mouseAt(480, 592, 0);
-        mouseAt(480, 592, 1);
-        wait(200);
-        mouseAt(480, 502, 0);
-        mouseAt(480, 502, 1);
+        // MODES > Clean Image (the list's 4th row, every section open).
+        mouseAt(300, 297, 0);
+        mouseAt(300, 297, 1);
         wait(300);
-        check("enhanced_fps_60");
-        // The wheel three rows down to Widescreen (16:9), the list scrolled
-        // to keep it in view (its row then 570..604), and its box clicked.
-        for (int i = 0; i < 3; ++i) mouseAt(480, 592, 5), wait(120);
-        wait(600);
-        mouseAt(480, 587, 0);
-        mouseAt(480, 587, 1);
+        check("enhanced_mode_clean");
+        // MODES collapsed (a click on its title): Resolution is the list's
+        // 11th row; its dropdown opens upward, 720p 180 units above the row.
+        mouseAt(300, 190, 0);
+        mouseAt(300, 190, 1);
+        wait(300);
+        mouseAt(480, 523, 0);
+        mouseAt(480, 523, 1);
+        wait(200);
+        mouseAt(480, 343, 0);
+        mouseAt(480, 343, 1);
+        wait(300);
+        check("enhanced_res_720");
+        // Widescreen (16:9), the next row, clicked.
+        mouseAt(480, 557, 0);
+        mouseAt(480, 557, 1);
         wait(300);
         check("widescreen_on");
-        mouseAt(480, 592, 3);  // right click: back
+        // The scrollbar's bottom: the list's end, Monkey Head Crowd clicked on, then off.
+        mouseAt(66, 572, 1);
+        wait(800);
+        mouseAt(300, 555, 0);
+        mouseAt(300, 555, 1);
+        wait(200);
+        check("cheat_menu_monkey");
+        mouseAt(300, 555, 1);
+        wait(200);
+        // The Back button under the list.
+        mouseAt(150, 608, 0);
+        mouseAt(150, 608, 1);
         at("options_screen");
         wait(300);
         check("click_help1");  // the help bar's BACK, drawn in the 16:9 picture now
@@ -543,13 +587,24 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         expect_ = {"main_screen", "options_screen", "enhanced_options_screen", "options_screen", "main_screen"};
     } else if (scenario == "gamepads") {
         at("main_screen");
+        check("gp_p1_keyboard");  // the keyboard is player 1 (whatever pads this machine has)
         key(SDLK_3);  // the keyboard's yellow fret
         at("gamepads_screen", 3000);
-        for (int i = 0; i < 11; ++i) press(kUp), wait(80);  // up from the keyboard wraps to its rows: Whammy
+        check("menu_instant");  // no transition: on the next frame (universal_mechanisms.md 1.2)
+        // The Gamepad menu (universal_mechanisms.md 1.2.1): Player 1 ->
+        // Instrument -> Bind to -> Customize inputs, then INPUTS MAPPING.
+        for (int i = 0; i < 3; ++i) press(kDown), wait(80);
+        press(kX), wait(200);
+        check("gp_editing");
+        for (int i = 0; i < 13; ++i) press(kDown), wait(60);  // Start .. Whammy (the headings are skipped)
+        press(ui::kPad_DRight), wait(80);  // Key 2
         press(kX);  // waits for a key
         wait(200);
         key(SDLK_E);
         wait(300);
+        check("whammy_e_unsaved");  // works at once, written only on Save
+        for (int i = 0; i < 4; ++i) press(kDown), wait(60);  // Gyro, Require Strum, Reset, Save
+        press(kX), wait(300);
         check("whammy_is_e");
         press(kTri);
         at("main_screen");
@@ -557,6 +612,25 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         check("click_help1");  // the help bar's GAMEPADS
         at("gamepads_screen", 3000);
         expect_ = {"main_screen", "gamepads_screen", "main_screen", "gamepads_screen"};
+    } else if (scenario == "gamepads_pad") {
+        // A pad plugged in takes player 1 (the keyboard player 2); Player 2's
+        // Bind to > Detect, then the pad's A: the pad is player 2.
+        at("main_screen");
+        check("vpad_attach");
+        wait(600);
+        key(SDLK_3);
+        at("gamepads_screen", 3000);
+        for (int i = 0; i < 6; ++i) press(kDown), wait(80);  // Player 2's Bind to
+        press(kX), wait(150);  // its dropdown (on the keyboard)
+        press(kUp), wait(80), press(kUp), wait(80);  // None, then round to Detect
+        press(kX), wait(150);
+        check("gp_detecting");
+        check("vpad_press");
+        wait(300);
+        check("pad_is_p2");
+        press(kTri);
+        at("main_screen");
+        expect_ = {"main_screen", "gamepads_screen", "main_screen"};
     } else if (scenario == "stickyaxis") {
         at("main_screen");
         check("adapter_attach");
@@ -799,7 +873,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
 
 std::string WalkDriver::startScreen() const {
     if (scenario_ == "lose" || scenario_ == "pause" || scenario_ == "back" || scenario_ == "enhanced" || scenario_ == "cheats" ||
-        scenario_ == "mouse" || scenario_ == "gamepads" || scenario_ == "stickyaxis" || scenario_ == "practice" || scenario_ == "tutorial" ||
+        scenario_ == "mouse" || scenario_ == "gamepads" || scenario_ == "gamepads_pad" || scenario_ == "stickyaxis" || scenario_ == "practice" || scenario_ == "tutorial" ||
         scenario_ == "options")
         return "main_screen";
     if (scenario_ == "attract") return "splash_screen";
@@ -1017,10 +1091,34 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
                 }
         return fail("the help bar's second item was not drawn");
     }
-    if (s.screen == "whammy_is_e") {
-        bool bound = false;
-        for (const Input::Source& src : ui.input().bindings("keyboard")[size_t(Input::Control::Whammy)])
-            bound = bound || (src.kind == Input::Source::Kind::Key && src.index == int(SDLK_E));
+    if (s.screen == "menu_instant") return !ui.inTransition() ? pass() : fail("a universal menu opened through a screen transition");
+    if (s.screen == "gp_p1_keyboard") {
+        ui.input().setPlayer("keyboard", 0);
+        return pass();
+    }
+    if (s.screen == "gp_editing") return ui.input().editing() ? pass() : fail("Customize inputs did not start an edit");
+    if (s.screen == "gp_detecting") return ui.input().detecting() ? pass() : fail("Bind to > Detect did not wait for a device");
+    if (s.screen == "vpad_attach") {
+        adapter_ = Input::attachVirtualPad("045e:028e");
+        return adapter_ ? pass() : fail("no virtual pad");
+    }
+    if (s.screen == "vpad_press") {
+        SDL_Joystick* j = SDL_GetJoystickFromID(adapter_);
+        if (!j) return fail("the virtual pad is not open");
+        SDL_SetJoystickVirtualButton(j, SDL_GAMEPAD_BUTTON_SOUTH, true);
+        return pass();
+    }
+    if (s.screen == "pad_is_p2") {
+        if (SDL_Joystick* j = SDL_GetJoystickFromID(adapter_)) SDL_SetJoystickVirtualButton(j, SDL_GAMEPAD_BUTTON_SOUTH, false);
+        const std::string p2 = ui.input().playerDevice(1), p1 = ui.input().playerDevice(0);
+        std::printf("  gamepads: player 1 %s, player 2 %s\n", p1.c_str(), p2.c_str());
+        return p2 == "pad:" + std::to_string(adapter_) && p1 == "keyboard" && !ui.input().detecting()
+                   ? pass() : fail("Detect did not bind the pad pressed to player 2 (the keyboard to player 1)");
+    }
+    if (s.screen == "whammy_is_e" || s.screen == "whammy_e_unsaved") {
+        // Key 2 of the keyboard's Whammy is E, Key 1 (Shift) kept.
+        const auto& w = ui.input().bindings("keyboard")[size_t(Input::Control::Whammy)];
+        const bool bound = w.size() == 2 && w[0].index == int(SDLK_LSHIFT) && w[1].kind == Input::Source::Kind::Key && w[1].index == int(SDLK_E);
         const char* dir = SDL_getenv("GD03_SAVE_DIR");
         std::ifstream f(std::filesystem::path(dir ? dir : "") / "controllers.json");
         std::stringstream ss;
@@ -1032,8 +1130,87 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
                 saved = saved || (j["kind"].str() == "key" && int(j["index"].num()) == int(SDLK_E));
         } catch (const std::exception&) {
         }
-        std::printf("  gamepads: Whammy %s, controllers.json %s\n", bound ? "on E" : "not on E", saved ? "has it" : "does not");
-        return bound && saved ? pass() : fail("the rebinding of the keyboard's Whammy to E did not take or was not saved");
+        std::printf("  gamepads: Whammy %s, controllers.json %s\n", bound ? "on Shift / E" : "not on Shift / E", saved ? "has it" : "does not");
+        if (s.screen == "whammy_e_unsaved")
+            return bound && !saved && ui.input().editing() ? pass() : fail("Key 2 of Whammy did not take at once, or was saved before Save");
+        return bound && saved && !ui.input().editing() ? pass() : fail("the rebinding of the keyboard's Whammy to E did not take or was not saved");
+    }
+    if (s.screen == "cheat_menu_monkey") {
+        const bool monkey = ui.cheatOn("cheat_monkey_head_crowd");
+        std::printf("  cheats (Enhanced Options): monkey %d\n", monkey);
+        return monkey ? pass() : fail("Monkey Head Crowd did not turn on from the menu");
+    }
+    if (s.screen.rfind("enhanced_mode_", 0) == 0 || s.screen == "enhanced_res_720" || s.screen == "enhanced_fps_unlimited" ||
+        s.screen == "enhanced_exported" || s.screen == "enhanced_settings_loaded" || s.screen == "enhanced_progress_loaded") {
+        // The universal Enhanced menu (universal_mechanisms.md 1.2.2): what
+        // is in effect, in enhanced.json and the panel's status line.
+        Json saved = Json::object();
+        {
+            std::ifstream f(std::filesystem::path(ui.savePath()).parent_path() / "enhanced.json");
+            std::stringstream ss;
+            ss << f.rdbuf();
+            try {
+                saved = Json::parse(ss.str());
+            } catch (const std::exception&) {
+            }
+        }
+        std::string problems;
+        auto add = [&](const std::string& p) { problems += (problems.empty() ? "" : "; ") + p; };
+        auto want = [&](const char* key, const std::string& v) {
+            const std::string got = ui.host().enhancedValue(key), file = saved.has(key) ? saved[key].str() : "(unset)";
+            std::printf("  enhanced: %s %s (enhanced.json %s)\n", key, got.c_str(), file.c_str());
+            if (got != v || file != v) add(std::string(key) + " is " + got + " / " + file + ", not " + v);
+        };
+        auto status = [&](const char* prefix) {
+            const std::string st = ui.host().enhancedStatus();
+            std::printf("  enhanced status: %s\n", st.c_str());
+            if (st.rfind(prefix, 0) != 0) add("the status is \"" + st + "\", not " + prefix + "...");
+        };
+        const std::string& w = s.screen;
+        const char* dir = SDL_getenv("GD03_DIALOG");
+        const std::filesystem::path d = dir ? dir : "";
+        if (w.rfind("enhanced_mode_", 0) == 0) {
+            const std::string mode = w == "enhanced_mode_deck" ? "steam_deck" : w == "enhanced_mode_old_days" ? "good_old_days" : w.substr(14);
+            const auto preset = ui::enhancedPreset(mode);
+            if (preset.empty()) add("no mode " + mode);
+            for (const auto& [key, v] : preset) want(key.c_str(), v);
+            status("Mode applied");
+            if (w == "enhanced_mode_original") want("internal_res", "800"), want("screen_mode", "fullscreen");  // Steam Deck's, kept
+        } else if (w == "enhanced_res_720") {
+            want("internal_res", "720");
+        } else if (w == "enhanced_fps_unlimited") {
+            want("max_fps", "unlimited");
+        } else if (w == "enhanced_exported") {
+            status("Exported to");
+            for (const char* f : {"GD03-user-settings.json", "GD03-user-progress.json"}) {
+                std::error_code ec;
+                const auto size = std::filesystem::file_size(d / f, ec);
+                std::printf("  exported %s: %s\n", f, ec ? "missing" : (std::to_string(size) + " bytes").c_str());
+                if (ec || size < 10) add(std::string(f) + " was not written");
+            }
+            // Options removed from every game (Ground Fog, Light Streaks) and
+            // 0.0.1's XInput switch in the file to load next: ignored. The
+            // resolution changed in the file: loaded.
+            try {
+                std::ifstream in(d / "GD03-user-settings.json");
+                std::stringstream ss;
+                ss << in.rdbuf();
+                Json j = Json::parse(ss.str());
+                j.set("ground_fog", Json::string("full")), j.set("light_streaks", Json::string("on")), j.set("xinput", Json::string("off"));
+                j.set("internal_res", Json::string("720"));
+                std::ofstream(d / "GD03-user-settings.json") << j.dump(2);
+            } catch (const std::exception&) {
+                add("GD03-user-settings.json does not parse");
+            }
+        } else if (w == "enhanced_settings_loaded") {
+            status("Settings loaded");
+            want("internal_res", "720"), want("max_fps", "60");
+            for (const char* gone : {"ground_fog", "light_streaks", "xinput"})
+                if (saved.has(gone)) add(std::string(gone) + " (removed) was loaded");
+        } else if (w == "enhanced_progress_loaded") {
+            status("Progress loaded");
+        }
+        return problems.empty() ? pass() : fail(problems);
     }
     if (s.screen == "adapter_attach") {
         adapter_ = Input::attachVirtualPad("0079:0006:dpadaxis=-32768");
@@ -1262,10 +1439,10 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         if (barsBlack == wide) return fail(wide ? "16:9: the frame's sides are still black" : "4:3: no black bars at the sides");
         return pass();
     }
-    // The Enhanced Options: Internal Resolution at its default (the
-    // window's own), then 448p after one select, saved in enhanced.json.
+    // The Enhanced Options: Resolution at its default (the window's own),
+    // then 480p (one down from Good Old Days' 448p), saved in enhanced.json.
     if (s.screen == "enhanced_default" || s.screen == "enhanced_changed") {
-        const std::string want = s.screen == "enhanced_default" ? "0" : "448";
+        const std::string want = s.screen == "enhanced_default" ? "0" : "480";
         const std::string got = ui.host().enhancedValue("internal_res");
         std::printf("  enhanced: internal_res %s\n", got.c_str());
         if (got != want) return fail("Internal Resolution is " + got + ", not " + want);
