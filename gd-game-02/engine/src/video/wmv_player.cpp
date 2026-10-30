@@ -477,14 +477,21 @@ WmvPlayer::Result WmvPlayer::play(Canvas& canvas, Mixer& mixer, Input& input) {
         const uint64_t frameStart = SDL_GetTicksNS();
         SDL_Event e;
         actions.clear();
+        bool click = false;
         while (SDL_PollEvent(&e)) {
             if (e.type == SDL_EVENT_QUIT) result = Result::Quit, running = false;
+            // A left click skips (universal_mechanisms.md 1.1.1); a tap does through takeMenuTaps.
+            if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_LEFT && e.button.which != SDL_TOUCH_MOUSEID) click = true;
             input.handle(e, actions);
         }
         input.poll(SDL_GetTicksNS(), actions);
+        if (!input.takeMenuTaps().empty()) click = true;
+        // Skippable with green, red, Enter, Start, Esc, a click or a tap (universal_mechanisms.md 1.1.1, as gd01).
         for (const InputEvent& a : actions)
-            if (a.down && (a.action == Action::Start || a.action == Action::Confirm || a.action == Action::Back || a.action == Action::Fret0))
-                result = Result::Skipped, running = false;  // as gd01 skips its videos
+            if (a.down && (a.action == Action::Start || a.action == Action::Confirm || a.action == Action::Back || a.action == Action::Fret0 ||
+                           a.action == Action::Fret1))
+                click = true;
+        if (click && running) result = Result::Skipped, running = false;
         if (!running) break;
 
         // The newest picture due by the sound's clock.

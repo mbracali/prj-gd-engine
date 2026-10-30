@@ -72,6 +72,7 @@ void UiManager::logOnce(const std::string& what) {
 
 std::string UiManager::localize(const std::string& token) const {
     if (token == "port_gamepads") return "GAMEPADS";  // the port's main-menu help item
+    if (token == "gd_uab_start") return "START";      // the help bar's START access button (universal_mechanisms.md 1.1.3)
     return locale_ ? locale_->text(token) : token;
 }
 

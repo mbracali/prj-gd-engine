@@ -621,6 +621,68 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         press(kTri);
         at("main_screen");
         expect_ = {"main_screen", "gamepads_screen", "main_screen"};
+    } else if (scenario == "band") {
+        // Band naming with real keys (universal_mechanisms.md 1.1.2): the
+        // arrows change the letter (each one step: menu Up / Down and the
+        // strum are one key, no double input), green (1) takes it, Enter
+        // (Start) finishes the name.
+        at("splash_screen", 30000);
+        key(SDLK_RETURN);  // any button
+        at("startup_create_save_screen");
+        press(kX);
+        at("saving_screen");
+        at("guitar_help_screen");
+        press(kX);
+        at("main_screen");
+        press(kUp);  // CAREER
+        wait(150);
+        press(kX);
+        at("chooseprof_screen");
+        press(kX);  // NEW BAND
+        at("nameprof_screen");
+        wait(600);
+        key(SDLK_DOWN), wait(250), key(SDLK_DOWN), wait(250);  // A -> C
+        key(SDLK_1), wait(250);                                // "C"
+        key(SDLK_DOWN), wait(250);                             // D
+        key(SDLK_1), wait(250);                                // "CD"
+        key(SDLK_RETURN);
+        at("sel_difficulty_screen");
+        check("band_named_CD");
+        expect_ = {"splash_screen", "startup_load_finder_screen", "startup_create_save_screen", "saving_screen", "guitar_help_screen",
+                   "main_screen", "chooseprof_screen", "nameprof_screen", "sel_difficulty_screen"};
+    } else if (scenario == "logo_skip") {
+        // Logos and credits skip (universal_mechanisms.md 1.1.1): the boot
+        // splashes by the red fret (2), the credits by the green fret (1),
+        // then again by a click.
+        wait(300);
+        key(SDLK_2);
+        check("splashes_skipped", 1000);
+        at("splash_screen", 30000);
+        press(kX);
+        at("startup_create_save_screen");
+        press(kX);
+        at("saving_screen");
+        at("guitar_help_screen");
+        press(kX);
+        at("main_screen");
+        for (int i = 0; i < 4; ++i) press(kDown), wait(150);  // OPTIONS
+        press(kX);
+        at("options_screen");
+        wait(300);
+        mouseOn("op_credit.btn", 1);
+        at("credits_screen");
+        wait(1500);
+        key(SDLK_1);
+        at("options_screen");
+        wait(300);
+        mouseOn("op_credit.btn", 1);
+        at("credits_screen");
+        wait(1500);
+        mouseAt(640, 360, 1);
+        at("options_screen");
+        expect_ = {"cut_scene_screen", "splash_screen", "startup_load_finder_screen", "startup_create_save_screen", "saving_screen",
+                   "guitar_help_screen", "main_screen", "options_screen", "credits_screen", "options_screen", "credits_screen",
+                   "options_screen"};
     } else if (scenario == "stickyaxis") {
         at("main_screen");
         check("adapter_attach");
@@ -1339,6 +1401,14 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         if (it->second.score <= 0) return fail("the co-op record has no score");
         // One song with three stars or more: guitars.dta's (require (songs 1) (stars 3)) bass.
         if (it->second.stars >= 3 && awards != " bass_sg_mahogany") return fail("co-op did not award bass_sg_mahogany (only)");
+        ++step_, stepStart_ = -1;
+        return;
+    }
+    if (s.screen == "band_named_CD") {
+        const int slot = ui.session().profileSlot;
+        const std::string name = slot < 0 ? "" : ui.career().profiles[size_t(slot)].name;
+        std::printf("  band: new band \"%s\"\n", name.c_str());
+        if (name != "CD") return fail("the band's name is \"" + name + "\", not \"CD\" (arrows, green, Enter)");
         ++step_, stepStart_ = -1;
         return;
     }
