@@ -124,6 +124,14 @@ jobs:
         with:
           path: gd-game-02/engine/build/ffmpeg/linux/ffmpeg-prefix
           key: ffmpeg-gdul-ubuntu2204-${{ hashFiles('gd-game-02/engine/build_common.sh', 'gd-engine-launcher/scripts/build.sh') }}
+      # The FFmpeg source tarball, kept across script changes so a release
+      # doesn't depend on ffmpeg.org answering (its SHA-256 is checked on use).
+      - uses: actions/cache@v6
+        with:
+          path: |
+            gd-game-02/engine/build/ffmpeg-src
+            gd-game-04/engine/build/ffmpeg-src
+          key: ffmpeg-src-7.1.5
       - uses: actions/download-artifact@v8
         if: needs.previous.result == 'success'
         with:
@@ -181,6 +189,14 @@ jobs:
         with:
           path: gd-game-02/engine/build/ffmpeg/steamdeck/ffmpeg-prefix
           key: ffmpeg-gdul-sniper-${{ hashFiles('gd-game-02/engine/build_common.sh', 'gd-engine-launcher/scripts/build.sh') }}
+      # The FFmpeg source tarball, kept across script changes so a release
+      # doesn't depend on ffmpeg.org answering (its SHA-256 is checked on use).
+      - uses: actions/cache@v6
+        with:
+          path: |
+            gd-game-02/engine/build/ffmpeg-src
+            gd-game-04/engine/build/ffmpeg-src
+          key: ffmpeg-src-7.1.5
       - uses: actions/download-artifact@v8
         if: needs.previous.result == 'success'
         with:
@@ -240,6 +256,14 @@ jobs:
         with:
           path: gd-game-02/engine/build/ffmpeg/windows/ffmpeg-prefix
           key: ffmpeg-gdul-mingw-${{ hashFiles('gd-game-02/engine/build_common.sh', 'gd-engine-launcher/scripts/build.sh') }}
+      # The FFmpeg source tarball, kept across script changes so a release
+      # doesn't depend on ffmpeg.org answering (its SHA-256 is checked on use).
+      - uses: actions/cache@v6
+        with:
+          path: |
+            gd-game-02/engine/build/ffmpeg-src
+            gd-game-04/engine/build/ffmpeg-src
+          key: ffmpeg-src-7.1.5
       - uses: actions/download-artifact@v8
         if: needs.previous.result == 'success'
         with:
@@ -291,6 +315,14 @@ jobs:
         with:
           path: gd-game-02/engine/build/ffmpeg/macos/ffmpeg-prefix
           key: ffmpeg-gdul-macos-${{ hashFiles('gd-game-02/engine/build_common.sh', 'gd-engine-launcher/scripts/build.sh') }}
+      # The FFmpeg source tarball, kept across script changes so a release
+      # doesn't depend on ffmpeg.org answering (its SHA-256 is checked on use).
+      - uses: actions/cache@v6
+        with:
+          path: |
+            gd-game-02/engine/build/ffmpeg-src
+            gd-game-04/engine/build/ffmpeg-src
+          key: ffmpeg-src-7.1.5
       - uses: actions/download-artifact@v8
         if: needs.previous.result == 'success'
         with:
@@ -354,6 +386,14 @@ jobs:
         with:
           path: gd-game-02/engine/build/ffmpeg/android/*/ffmpeg-prefix
           key: ffmpeg-gdul-android-${{ hashFiles('gd-game-02/engine/build_common.sh', 'gd-engine-launcher/scripts/build.sh') }}
+      # The FFmpeg source tarball, kept across script changes so a release
+      # doesn't depend on ffmpeg.org answering (its SHA-256 is checked on use).
+      - uses: actions/cache@v6
+        with:
+          path: |
+            gd-game-02/engine/build/ffmpeg-src
+            gd-game-04/engine/build/ffmpeg-src
+          key: ffmpeg-src-7.1.5
       - uses: actions/download-artifact@v8
         if: needs.previous.result == 'success'
         with:
