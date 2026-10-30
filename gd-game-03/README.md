@@ -73,7 +73,9 @@ in Light Beams, Disable Shaky Camera and Remove All Effects, with Sharper
 Text & Sprites, FXAA / SSAA / TAA, FSR 1, touch controls, Audio / Video
 Calibration, No Fail, Autoplay and Forgiving HOPOs; they work in 4:3 and
 16:9. Every download starts with the original look (Original Feel: every
-effect off, HDR None). Still greyed: Enable Cut Content, FSR 3.1 / DLSS.
+effect off, HDR None). The cheats include Encore's own Horse Head and a
+burning Flaming Head (0.0.3). Still greyed: Enable Cut Content (this disc
+has nothing unused to restore), FSR 3.1 / DLSS.
 The default controls are in `engine/README.md`.
 
 **Menu animations**: as on the PS2, each screen change moves the menus'
@@ -82,3 +84,11 @@ each; going back, the other way) while the screen fades through black, the
 focused button grows to its focused size over a tenth of a second and its
 letters jiggle, and the screens' looping animations (the character
 select's highlight, the store's spinning video case) loop.
+
+**0.0.3**: held sustain tails swell with the whammy bar as on the PS2 (up
+to four times as wide, the bulges running down the tail); tutorials 2 and 3
+complete (the hammer-on / pull-off trainer); career tour wins; practice
+pitch correction; the crowd meter holds where the mode turns it off; mono
+as the PS2 (every sound panned to the centre). Status per area:
+[PARITY_GAPS.md](../PARITY_GAPS.md); walks: `engine/src/tests/walktest.h`
+(`whammy_tail`, `flaming_head`, `tutorial2`, `tutorial3`, `career_win` ...).
