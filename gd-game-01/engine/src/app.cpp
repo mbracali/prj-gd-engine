@@ -29,6 +29,7 @@
 #include "game/rules.h"
 #include "game/song_db.h"
 #include "input/input.h"
+#include "render/hdr_output.h"
 #include "render/highway.h"
 #include "render/scene_renderer.h"
 #include "render/track_renderer.h"
@@ -81,36 +82,70 @@ std::string enhancedPath() {
     return prefDir().empty() ? std::string("enhanced.json") : prefDir() + "enhanced.json";
 }
 
-// The graphics, enhancer and control settings each download ships with
+// Enhanced Settings (enhanced.json), laid out as universal_mechanisms.md
+// 1.2.2 at the repository root. Every visual effect defaults to the original
+// look (the "Original feel" mode); only the window, the frame rate, the
+// internal resolution, the FPS counter and touch follow the build
 // (gd-game-01/README.md, "Default settings"): desktop Linux, Windows and
 // macOS; the Steam Deck build (Linux built with -DGD01_STEAM_DECK=ON); Android.
-// Steam Deck is also what Enhanced Settings > Apply Steam Deck Settings sets.
+
+// The Modes buttons (Enhanced > MODES): each sets every value it names at
+// once; anything it leaves out keeps its value. "original" is also the
+// defaults' look.
+std::map<std::string, Json> enhancedPreset(const std::string& mode) {
+    auto b = [](bool v) { return Json::boolean(v); };
+    auto t = [](const char* v) { return Json::string(v); };
+    // Every effect at its lowest, its original and its highest.
+    const std::map<std::string, Json> none = {
+        {"bokeh", t("none")},        {"particles", t("none")},   {"bloom", t("none")},       {"cinematic_color", b(false)},
+        {"film_grain", t("none")},   {"chromatic", t("none")},   {"ssao", t("none")},
+        {"star_blur", t("none")},    {"shadows_all", b(false)},  {"more_lights", t("none")}, {"light_dust", t("none")},
+        {"color_grade", t("off")},  {"sharpening", t("off")},   {"antialiasing", t("none")},
+        {"ai_upscaling", t("none")}, {"sharp_ui", b(false)},    {"hdr", t("none")}};
+    std::map<std::string, Json> original = none;
+    original["bokeh"] = t("medium");  // the original's own depth of field
+    original["particles"] = t("original");
+    std::map<std::string, Json> max = {
+        {"bokeh", t("stronger")},  {"particles", t("2x")},      {"bloom", t("3x")},          {"cinematic_color", b(true)},
+        {"film_grain", t("stronger")}, {"chromatic", t("strong")}, {"ssao", t("stronger")},
+        {"star_blur", t("stronger")}, {"shadows_all", b(true)}, {"more_lights", t("2.5x")},  {"light_dust", t("2.5x")},
+        {"color_grade", t("off")},   {"sharpening", t("low")},    {"antialiasing", t("taa")},
+        {"ai_upscaling", t("none")}, {"sharp_ui", b(true)},      {"hdr", t("emulated")}};
+    auto with = [](std::map<std::string, Json> m, std::map<std::string, Json> over) {
+        for (auto& [k, v] : over) m[k] = v;
+        return m;
+    };
+    if (mode == "steam_deck")  // light effects that hold 60 FPS on a handheld
+        return with(original, {{"screen_mode", t("fullscreen")}, {"max_fps", t("60")}, {"internal_res", t("800")},
+                               {"bloom", t("original")}, {"cinematic_color", b(true)}, {"star_blur", t("light")},
+                               {"antialiasing", t("fxaa")}, {"sharp_ui", b(true)}, {"fps_counter", b(false)}});
+    if (mode == "original") return with(original, {{"max_fps", t("60")}});
+    if (mode == "clean")  // no effects, a sharp full HD picture
+        return with(none, {{"internal_res", t("1080")}, {"max_fps", t("120")}, {"particles", t("original")},
+                           {"antialiasing", t("fxaa")}, {"sharp_ui", b(true)}});
+    if (mode == "max_hd") return with(max, {{"internal_res", t("1080")}, {"max_fps", t("240")}});
+    if (mode == "max_4k") return with(max, {{"internal_res", t("2160")}, {"max_fps", t("240")}});
+    if (mode == "budget") return with(none, {{"max_fps", t("60")}, {"internal_res", t("720")}});
+    if (mode == "good_old_days")  // every effect, in sepia, at the PS2's resolution
+        return with(max, {{"color_grade", t("sepia")}, {"internal_res", t("448")}, {"max_fps", t("60")}, {"antialiasing", t("none")},
+                          {"hdr", t("none")}});
+    return {};
+}
+
+// The window, frame rate, resolution and touch of each build; Steam Deck is
+// also what the Steam Deck mode sets.
 std::map<std::string, Json> profileValues(bool deck) {
     auto b = [](bool v) { return Json::boolean(v); };
     auto t = [](const char* v) { return Json::string(v); };
-    std::map<std::string, Json> d = {
-        // Every build.
-        {"antialiasing", t("none")}, {"ai_upscaling", t("none")}, {"bokeh", t("stronger")}, {"particles", b(true)},
-        {"cinematic_color", b(true)}, {"color_grade", t("off")}, {"chromatic", b(true)}, {"light_streaks", b(false)},
-        {"more_lights", t("subtle")}, {"no_shaky_cam", b(false)},
-        // Desktop: Linux, Windows, macOS.
-        {"screen_mode", t("windowed")}, {"max_fps", t("120")}, {"fps_counter", b(true)}, {"internal_res", t("1080")},
-        {"sharp_ui", b(true)}, {"bloom", t("high")}, {"film_grain", t("light")}, {"ssao", b(true)},
-        {"sharpening", t("low")}, {"star_blur", t("high")}, {"shadows_all", b(true)}, {"light_dust", b(true)},
-        {"ground_fog", t("low")}, {"touch", b(false)},
-    };
-    auto handheld = [&] {
-        for (auto& [k, v] : std::map<std::string, Json>{
-                 {"screen_mode", t("fullscreen")}, {"max_fps", t("60")}, {"fps_counter", b(false)}, {"bloom", t("medium")},
-                 {"film_grain", t("off")}, {"ssao", b(false)}, {"shadows_all", b(false)}, {"light_dust", b(false)},
-                 {"ground_fog", t("none")}})
-            d[k] = v;
-    };
+    std::map<std::string, Json> d = enhancedPreset("original");
+    // Desktop: Linux, Windows, macOS.
+    for (auto& [k, v] : std::map<std::string, Json>{{"screen_mode", t("windowed")}, {"max_fps", t("120")}, {"fps_counter", b(false)},
+                                                    {"internal_res", t("1080")}, {"touch", b(false)}})
+        d[k] = v;
 #if defined(__ANDROID__)
     (void)deck;
-    handheld();
-    for (auto& [k, v] : std::map<std::string, Json>{{"internal_res", t("900")}, {"sharp_ui", b(false)},
-                                                     {"sharpening", t("low")}, {"star_blur", t("light")}, {"touch", b(true)}})
+    for (auto& [k, v] : std::map<std::string, Json>{{"screen_mode", t("fullscreen")}, {"max_fps", t("60")}, {"internal_res", t("900")},
+                                                    {"touch", b(true)}})
         d[k] = v;
 #else
 #if defined(GD01_STEAM_DECK)
@@ -120,36 +155,26 @@ std::map<std::string, Json> profileValues(bool deck) {
     d["internal_res"] = t("1440");
 #endif
     if (deck) {
-        handheld();
-        for (auto& [k, v] : std::map<std::string, Json>{{"internal_res", t("800")}, {"sharpening", t("off")}, {"star_blur", t("medium")}})
-            d[k] = v;
+        for (auto& [k, v] : enhancedPreset("steam_deck")) d[k] = v;
+        d["touch"] = b(true);  // touch is on by default on Steam Deck and Android only
     }
 #endif
     return d;
 }
 
 // Enhanced Settings defaults (keys of enhanced.json): the build's profile
-// over the rest.
+// over the rest. XInput controllers and Rock Band guitars are always on (no
+// setting since 1.1.7).
 const std::map<std::string, Json>& enhancedDefaults() {
     static const std::map<std::string, Json> d = [] {
         std::map<std::string, Json> m = {
-        {"mouse", Json::boolean(true)},
-        {"touch", Json::boolean(true)},           {"rockband", Json::boolean(false)},
-        {"xinput", Json::boolean(true)},          {"screen_mode", Json::string("windowed")},
+        {"mouse", Json::boolean(true)},           {"touch", Json::boolean(false)},
+        {"screen_mode", Json::string("windowed")},
         {"max_fps", Json::string("120")},         {"fps_counter", Json::boolean(false)},
-        {"internal_res", Json::string("1080")},   {"sharp_ui", Json::boolean(true)},
-        {"antialiasing", Json::string("none")},   {"ai_upscaling", Json::string("none")},
-        {"ai_upscaling_mode", Json::string("quality")}, {"shadows_all", Json::boolean(false)},
-        {"more_lights", Json::string("off")},     {"bokeh", Json::string("stronger")},
-        {"particles", Json::boolean(true)},       {"ground_fog", Json::string("none")},
-        {"light_dust", Json::boolean(true)},
-        {"bloom", Json::string("off")},           {"cinematic_color", Json::boolean(false)},
-        {"color_grade", Json::string("off")},     {"film_grain", Json::string("off")},
-        {"chromatic", Json::boolean(false)},      {"light_streaks", Json::boolean(false)},
-        {"ssao", Json::boolean(false)},           {"sharpening", Json::string("off")},
-        {"star_blur", Json::string("none")},      {"hopo_mode", Json::string("original")},
+        {"internal_res", Json::string("1080")},   {"ai_upscaling_mode", Json::string("quality")},
+        {"hopo_mode", Json::string("original")},  {"no_shaky_cam", Json::boolean(false)},
         {"cut_content", Json::boolean(false)},    {"no_fail", Json::boolean(false)},
-        {"autoplay", Json::boolean(false)},       {"no_shaky_cam", Json::boolean(false)},
+        {"autoplay", Json::boolean(false)},
         {"cheat_air_guitar", Json::boolean(false)}, {"cheat_gh_guitar", Json::boolean(false)},
         {"cheat_unlock_all", Json::boolean(false)}, {"cheat_full_meter", Json::boolean(false)},
         {"cheat_no_venue", Json::boolean(false)},   {"cheat_monkey_crowd", Json::boolean(false)},
@@ -165,21 +190,69 @@ const std::map<std::string, Json>& enhancedDefaults() {
 const std::map<std::string, std::set<std::string>>& enhancedChoices() {
     static const std::map<std::string, std::set<std::string>> c = {
         {"screen_mode", {"windowed", "fullscreen", "borderless"}},
-        {"max_fps", {"60", "120", "240"}},
+        {"max_fps", {"60", "120", "240", "unlimited"}},
         {"internal_res", {"448", "480", "720", "800", "900", "1080", "1440", "2160"}},
         {"antialiasing", {"none", "fxaa", "ssaa", "taa"}},
         {"ai_upscaling", {"none", "fsr1", "fsr31", "dlss4", "dlss5"}},  // a saved "fsr4" (removed) loads as none
         {"ai_upscaling_mode", {"performance", "balanced", "quality"}},
-        {"more_lights", {"off", "subtle", "strong"}},
-        {"bokeh", {"none", "regular", "stronger"}},
-        {"ground_fog", {"none", "low", "full", "super"}},
-        {"color_grade", {"off", "warm", "cold", "vintage", "noir", "neon"}},
-        {"film_grain", {"off", "light", "strong"}},
+        {"bokeh", {"none", "light", "medium", "strong", "stronger"}},
+        {"particles", {"none", "original", "2x"}},
+        {"bloom", {"none", "original", "2x", "3x"}},
+        {"film_grain", {"none", "light", "medium", "strong", "stronger"}},
+        {"chromatic", {"none", "light", "medium", "strong"}},
+        {"ssao", {"none", "light", "medium", "strong", "stronger"}},
+        {"star_blur", {"none", "light", "medium", "strong", "stronger"}},
+        {"more_lights", {"none", "1.5x", "2x", "2.5x"}},
+        {"light_dust", {"none", "1.5x", "2x", "2.5x"}},
+        {"color_grade", {"off", "warm", "cold", "vintage", "noir", "neon", "sepia"}},
         {"sharpening", {"off", "low", "high"}},
-        {"star_blur", {"none", "light", "medium", "high"}},
-        {"hopo_mode", {"original", "forgiving"}},
-        {"bloom", {"off", "low", "medium", "high"}}};
+        {"hdr", {"none", "emulated", "true"}},
+        {"hopo_mode", {"original", "forgiving"}}};
     return c;
+}
+// The ranged choices in order, weakest first (enhancedLevel).
+const std::map<std::string, std::vector<std::string>>& enhancedLevels() {
+    static const std::map<std::string, std::vector<std::string>> l = {
+        {"bloom", {"none", "original", "2x", "3x"}},
+        {"film_grain", {"none", "light", "medium", "strong", "stronger"}},
+        {"chromatic", {"none", "light", "medium", "strong"}},
+        {"ssao", {"none", "light", "medium", "strong", "stronger"}},
+        {"star_blur", {"none", "light", "medium", "strong", "stronger"}},
+        {"more_lights", {"none", "1.5x", "2x", "2.5x"}},
+        {"light_dust", {"none", "1.5x", "2x", "2.5x"}},
+        {"bokeh", {"none", "light", "medium", "strong", "stronger"}}};
+    return l;
+}
+// Settings saved by 1.1.6 and older take the new values (universal menus,
+// 1.1.7): check boxes that became ranges, renamed levels. Unknown values are
+// left for the validation (they fall back to the default).
+void migrateEnhanced(Json& e) {
+    if (e.type != Json::Type::Object) return;
+    auto map = [&](const char* key, std::initializer_list<std::pair<const char*, const char*>> m) {
+        if (!e.has(key)) return;
+        const Json& v = e[key];
+        std::string from = v.type == Json::Type::Bool ? (v.truthy() ? "true" : "false") : v.type == Json::Type::String ? v.s : "";
+        for (const auto& [a, b] : m)
+            if (from == a) {
+                e.set(key, Json::string(b));
+                return;
+            }
+    };
+    map("bokeh", {{"regular", "medium"}});
+    map("particles", {{"true", "original"}, {"false", "none"}});
+    map("bloom", {{"off", "none"}, {"low", "original"}, {"medium", "2x"}, {"high", "3x"}});
+    map("film_grain", {{"off", "none"}});
+    map("chromatic", {{"true", "medium"}, {"false", "none"}});
+    map("ssao", {{"true", "medium"}, {"false", "none"}});
+    map("star_blur", {{"high", "strong"}});
+    map("more_lights", {{"off", "none"}, {"subtle", "1.5x"}, {"strong", "2x"}});
+    map("light_dust", {{"true", "1.5x"}, {"false", "none"}});
+    // XInput and Rock Band guitars are always on now; Ground Fog and Light
+    // Streaks were removed (1.1.7): their saved values are dropped.
+    Json kept = Json::object();
+    for (const auto& [k, v] : e.o)
+        if (k != "xinput" && k != "rockband" && k != "ground_fog" && k != "light_streaks") kept.set(k, v);
+    e = std::move(kept);
 }
 // Number settings (as strings, ms) and their range.
 const std::map<std::string, std::pair<int, int>>& enhancedRanges() {
@@ -286,9 +359,12 @@ private:
     Highway highway_;
     std::unique_ptr<TrackRenderer> track_;  // the original highway, when its scene loads
     std::unique_ptr<VenueRenderer> venue_;  // the song's venue, when it loads
-    // [I] Enhanced Settings' backdrop: the first venue (basement) posed once and
-    // frozen, filmed close on the singer's microphone.
+    // [I] Enhanced Settings' backdrop: a medium venue (big_club) posed once and
+    // frozen, filmed close on the singer's microphone. Loaded at startup and
+    // kept, so the menu opens on the next frame (universal_mechanisms.md).
     std::unique_ptr<VenueRenderer> backdrop_;
+    bool backdropShown_ = false, backdropTried_ = false;
+    void loadBackdrop();
 #ifdef __ANDROID__
     AndroidIsoImport isoImport_;
 #endif
@@ -325,6 +401,11 @@ private:
     std::unique_ptr<Scene> viewScene_;
     std::unique_ptr<UiSystem> ui_;  // the original menus (ghui scripts)
     Json enhanced_ = Json::object();  // Enhanced Settings (enhanced.json)
+    // Enhanced > HDR > True HDR: the window's surface (chosen at start) and why it is SDR when it is.
+    hdr::Surface hdrSurface_ = hdr::Surface::Sdr;
+    std::string hdrReason_;
+    std::string hdrStatus() const;
+    std::string hdrApplied_;  // the mode last applied (logged on change)
     // A setting's value in effect: saved, else its default.
     Json enhanced(const std::string& key) const {
 #ifdef __ANDROID__
@@ -338,10 +419,12 @@ private:
     // --av-offset plus the calibrated audio delay (Enhanced Settings).
     double avOffsetMs() const { return opt_.avOffsetMs + enhancedInt("audio_offset"); }
     int enhancedInt(const std::string& key) const { return std::atoi(enhanced(key).str().c_str()); }
+    // A ranged choice's level: its place in enhancedLevels (0 none .. the strongest).
+    int enhancedLevel(const std::string& key) const;
     void setEnhanced(const std::string& key, Json value);
     void saveEnhanced();
     void applyEnhanced();
-    void postFrameExtras(PostFrame& pf, VenueRenderer& venue, bool song);
+    void postFrameExtras(PostFrame& pf, bool song);
     float starBlurFade_ = 0, starBlurTime_ = -1;
     void applyVenueLights(VenueRenderer& venue);
     void applyCheats(const std::string& only = "");
@@ -415,6 +498,7 @@ private:
         Image frame;
     };
     std::unique_ptr<Movie> movie_;
+    SDL_Joystick* virtualPad_ = nullptr;  // GD01_VIRTUAL_PAD (development aid)
     void startMovie(const std::string& file);
     void movieFrame();
     void endMovie();
@@ -635,31 +719,15 @@ void App::tryLoadData(const std::string& path) {
             hooks.setEnhancedSetting = [this](const std::string& key, bool on) { setEnhanced(key, Json::boolean(on)); };
             hooks.enhancedValue = [this](const std::string& key) {
                 if (key == "upscaler_status") return renderer_.upscalerStatus();  // read-only, for the AI Upscaling help
+                if (key == "hdr_status") return hdrStatus();                      // read-only, for the HDR help
                 return enhanced(key).str();
             };
             hooks.setEnhancedValue = [this](const std::string& key, const std::string& v) { setEnhanced(key, Json::string(v)); };
             hooks.userFiles = [this](const std::string& action) { userFiles(action); };
             hooks.userFilesStatus = [this] { return userFilesStatus_; };
             hooks.menuBackdrop = [this](bool on) {
-                backdrop_.reset();
-                if (!on || !data_) return;
-                try {
-                    backdrop_ = std::make_unique<VenueRenderer>(renderer_, *data_, "basement",
-                                                                VenueRenderer::Band{"metal", "gibson_sg", 1, "", ""});
-                    // About a second at 120 BPM poses everyone, then nothing moves again.
-                    VenueFrame f;
-                    applyVenueLights(*backdrop_);
-                    for (int i = 0; i <= 30; ++i) f.ms = float(i) * 33, f.ticks = f.ms * 480 / 500, backdrop_->update(f);
-                    // The stand rises from bone_pos_mic; the microphone itself is at the singer's mouth.
-                    std::array<float, 3> head;
-                    if (!backdrop_->singerMicPos(backdropMic_) || !backdrop_->singerBonePos("bone_head.mesh", head)) backdrop_.reset();
-                    else  // the stand leans toward the singer: its microphone is a third of the way to him, at mouth height
-                        backdropMic_ = {backdropMic_[0] + (head[0] - backdropMic_[0]) * 0.35f,
-                                        backdropMic_[1] + (head[1] - backdropMic_[1]) * 0.35f, head[2] + 3};
-                } catch (const std::exception& ex) {
-                    SDL_Log("enhanced settings backdrop: %s", ex.what());
-                    backdrop_.reset();
-                }
+                backdropShown_ = on;
+                if (on) loadBackdrop();  // normally done at startup
             };
             hooks.drawMenuBackdrop = [this](float& x, float& y) { return drawMenuBackdrop(x, y); };
             hooks.playerStat = [this](const std::string& stat, int p) { return playerStat(stat, p); };
@@ -697,6 +765,7 @@ void App::tryLoadData(const std::string& path) {
             };
             ui_ = std::make_unique<UiSystem>(renderer_, *data_, hooks);
             applyCheats();
+            loadBackdrop();  // Enhanced Settings' backdrop, ready before the menu opens
             bool skipBoot = opt_.skipBoot || SDL_getenv("GD01_SKIP_BOOT");
             if (skipBoot && campaign_) {
                 // Development path: straight to the main menu with the saved profiles
@@ -779,7 +848,7 @@ void App::startSong(size_t index, ControllerMode mode) {
                     renderer_, *data_, info.venue,
                     VenueRenderer::Band{info.character, guitar1, info.animTempo, character2, guitar2, info.band, finalSong});
                 venue_->setSong(*song_, song_->charts[size_t(difficulty_)]);
-                venue_->setStrongerBokeh(enhanced("bokeh").str() == "stronger");
+                venue_->setStrongerBokeh(enhancedLevel("bokeh") >= 3);
                 venue_->setShakyCamera(!enhancedOn("no_shaky_cam"));
                 applyVenueLights(*venue_);
             } catch (const std::exception& ex) {
@@ -953,6 +1022,24 @@ void App::tutorialStart(bool skipIntro, bool startPaused) {
 // saves one frame and quits (works with SDL_VIDEO_DRIVER=offscreen).
 // GD01_SCREENSHOT_WALL=<ms>[,<ms>...]: wait that long after start (menus);
 // with several times, each shot is saved as <file>_<ms>.bmp and the last one quits.
+// Enhanced > HDR's "Now:" line: what the image is doing, and why True HDR
+// fell back to Emulated when it did (universal_mechanisms.md 1.2.2).
+std::string App::hdrStatus() const {
+    const std::string mode = enhanced("hdr").str();
+    if (mode == "emulated") return "Emulated: HDR rendering tone mapped to your screen";
+    if (mode != "true") return "";
+    std::string why;
+    if (hdrSurface_ == hdr::Surface::Sdr) {
+        if (!hdrReason_.empty()) why = "unavailable: " + hdrReason_;
+        else why = "takes effect the next time the game starts";
+    } else {
+        std::string live = renderer_.hdrStatus();
+        if (live.rfind("off:", 0) != 0) return "True HDR: " + live;
+        why = live.substr(5);
+    }
+    return "True HDR " + why + ". Using Emulated.";
+}
+
 void App::captureDebugScreenshot() {
     const char* file = SDL_getenv("GD01_SCREENSHOT");
     if (!file) return;
@@ -1070,6 +1157,8 @@ void App::injectDebugKeys(std::vector<InputEvent>& out) {
         int player;
         float mx = -1, my = -1;  // "hoverX_Y" / "clickX_Y": the mouse at menu units (edge 2 = hover, 3 = click;
                                  // "touchX_Y": 4 finger down, 5 up, 6 tap)
+        char device = 0;         // 'k': "key<Name>" a real key event (SDL key name); 'v': "vpad<n>" the virtual pad's button n
+        int code = 0;
     };
     static std::vector<Key> keys, songKeys;  // songKeys: "s<song ms>:<key>", played as a guitar
     static bool parsed = false;
@@ -1099,6 +1188,14 @@ void App::injectDebugKeys(std::vector<InputEvent>& out) {
                     else if (name.rfind("hover", 0) == 0 || name.rfind("click", 0) == 0) {
                         Key k{std::atof(item.substr(0, colon).c_str()), Action::Confirm, name[0] == 'h' ? 2 : 3, 0};
                         std::sscanf(name.c_str() + 5, "%f_%f", &k.mx, &k.my);
+                        keys.push_back(k);
+                    } else if (name.rfind("key", 0) == 0 || name.rfind("vpad", 0) == 0) {
+                        // "keyReturn", "+keyUp" / "-keyUp": through Input as the keyboard would;
+                        // "vpad0": a button of GD01_VIRTUAL_PAD (SDL_GamepadButton numbers).
+                        const bool isKey = name[0] == 'k';
+                        Key k{std::atof(item.substr(0, colon).c_str()), Action::Confirm, edge, 0};
+                        k.device = isKey ? 'k' : 'v';
+                        k.code = isKey ? int(SDL_GetKeyFromName(name.substr(3).c_str())) : std::atoi(name.c_str() + 4);
                         keys.push_back(k);
                     } else if (name.rfind("touch", 0) == 0) {  // "touchX_Y" taps, "+touchX_Y" / "-touchX_Y" hold / lift
                         Key k{std::atof(item.substr(0, colon).c_str()), Action::Confirm, edge == 1 ? 4 : edge == -1 ? 5 : 6, 0};
@@ -1144,6 +1241,25 @@ void App::injectDebugKeys(std::vector<InputEvent>& out) {
             if (key.edge == 6) {  // a tap lifts 80 ms later
                 Key up = key;
                 up.edge = 5, up.at = now + 80;
+                keys.insert(std::upper_bound(keys.begin(), keys.end(), up, [](const Key& a, const Key& b) { return a.at < b.at; }), up);
+            }
+            continue;
+        }
+        if (key.device) {
+            const bool down = key.edge >= 0;
+            if (key.device == 'k') {
+                SDL_Event ev{};
+                ev.type = down ? SDL_EVENT_KEY_DOWN : SDL_EVENT_KEY_UP;
+                ev.key.timestamp = SDL_GetTicksNS();
+                ev.key.key = SDL_Keycode(key.code);
+                ev.key.down = down;
+                input_.handle(ev, out);
+            } else if (virtualPad_) {
+                SDL_SetJoystickVirtualButton(virtualPad_, key.code, down);
+            }
+            if (key.edge == 0) {  // a tap: released 60 ms later
+                Key up = key;
+                up.edge = -1, up.at = now + 60;
                 keys.insert(std::upper_bound(keys.begin(), keys.end(), up, [](const Key& a, const Key& b) { return a.at < b.at; }), up);
             }
             continue;
@@ -1418,8 +1534,8 @@ void App::backToMenu() {
 // Cross and Triangle.
 void App::uiButton(const InputEvent& e) {
     bool guitar = e.mode == ControllerMode::Guitar;
-    // The main menu's GAMEPADS help item: the blue fret opens the Gamepads screen.
-    if (e.action == Action::Fret3 && e.down && ui_->currentScreen() == "main") return ui_->gotoScreen("gamepads");
+    // The main menu's GAMEPADS help item: the yellow fret opens the Gamepads screen (as in every game).
+    if (e.action == Action::Fret2 && e.down && ui_->currentScreen() == "main") return ui_->gotoScreen("gamepads");
     if (e.player == 1) mode2_ = e.mode;
     else uiMode_ = e.mode;
     int b = -1;
@@ -1436,8 +1552,10 @@ void App::uiButton(const InputEvent& e) {
     default: break;
     }
     if (b < 0) return;
+    ui_->setStartKey(e.startKey);
     if (e.down) ui_->buttonDown(b, guitar, e.player);
     else ui_->buttonUp(b, e.player);
+    ui_->setStartKey(false);
 }
 
 void App::setEnhanced(const std::string& key, Json value) {
@@ -1468,13 +1586,57 @@ void App::applyCheats(const std::string& only) {
     if (campaign_ && is("cheat_unlock_all")) campaign_->allAccess = enhancedOn("cheat_unlock_all");
 }
 
-// A three-quarter close-up from the audience's side (the stage faces -Y), the
-// microphone placed in the frame's upper right, clear of the settings boxes.
+// The band shot (universal_mechanisms.md 1.2.2): from the audience's side
+// (the stage faces -Y) in big_club, a medium venue, the lead vocalist in
+// focus in the frame's upper right, clear of the settings boxes, with the
+// guitarist and the drummer behind him in view.
+int App::enhancedLevel(const std::string& key) const {
+    auto l = enhancedLevels().find(key);
+    if (l == enhancedLevels().end()) return 0;
+    auto it = std::find(l->second.begin(), l->second.end(), enhanced(key).str());
+    return it == l->second.end() ? 0 : int(it - l->second.begin());
+}
+
+namespace {
+// Bokeh Effect none / light / medium (the original's) / strong / stronger: the depth-of-field taps' size.
+constexpr float kBokehBlur[5] = {0, 2.0f, 3.0f, 4.0f, 4.8f};
+}  // namespace
+
+// Enhanced Settings' backdrop, once (startup): a VenueRenderer needs the GL
+// context, so it cannot load on another thread; loading it before the menus
+// lets the screen open on the next frame instead of ~0.2 s later.
+void App::loadBackdrop() {
+    if (backdropTried_ || !data_) return;
+    backdropTried_ = true;
+    const uint64_t t0 = SDL_GetTicksNS();
+    try {
+        backdrop_ = std::make_unique<VenueRenderer>(renderer_, *data_, "big_club",  // a medium venue (1.2.2)
+                                                    VenueRenderer::Band{"metal", "gibson_sg", 1, "", ""});
+        // About a second at 120 BPM poses everyone, then nothing moves again.
+        VenueFrame f;
+        applyVenueLights(*backdrop_);
+        for (int i = 0; i <= 30; ++i) f.ms = float(i) * 33, f.ticks = f.ms * 480 / 500, backdrop_->update(f);
+        // The stand rises from bone_pos_mic; the microphone itself is at the singer's mouth.
+        std::array<float, 3> head;
+        if (!backdrop_->singerMicPos(backdropMic_) || !backdrop_->singerBonePos("bone_head.mesh", head)) backdrop_.reset();
+        else  // the stand leans toward the singer: its microphone is a third of the way to him, at mouth height
+            backdropMic_ = {backdropMic_[0] + (head[0] - backdropMic_[0]) * 0.35f,
+                            backdropMic_[1] + (head[1] - backdropMic_[1]) * 0.35f, head[2] + 3};
+    } catch (const std::exception& ex) {
+        SDL_Log("enhanced settings backdrop: %s", ex.what());
+        backdrop_.reset();
+    }
+    if (SDL_getenv("GD01_UILOG")) SDL_Log("ui: menu backdrop loaded in %.1f ms", double(SDL_GetTicksNS() - t0) / 1e6);
+}
+
 bool App::drawMenuBackdrop(float& focusX, float& focusY) {
-    if (!backdrop_) return false;
+    if (!backdrop_ || !backdropShown_) return false;
     const auto& m = backdropMic_;
-    // Wide enough to show the band's lights, shadows and the fog around the singer.
-    const std::array<float, 3> eye{m[0] - 32, m[1] - 80, m[2] + 4}, target{m[0] + 3, m[1], m[2] - 6};
+    // Wide enough to show the band's lights and shadows around the singer.
+    // GD01_BACKDROP_CAM="dx dy dz tx ty tz" (development aid): the eye and target offsets from the microphone.
+    std::array<float, 6> k{22, -215, 32, -38, 32, -6};
+    if (const char* c = SDL_getenv("GD01_BACKDROP_CAM")) std::sscanf(c, "%f %f %f %f %f %f", &k[0], &k[1], &k[2], &k[3], &k[4], &k[5]);
+    const std::array<float, 3> eye{m[0] + k[0], m[1] + k[1], m[2] + k[2]}, target{m[0] + k[3], m[1] + k[4], m[2] + k[5]};
     std::array<float, 3> f{target[0] - eye[0], target[1] - eye[1], target[2] - eye[2]};
     float fl = std::sqrt(f[0] * f[0] + f[1] * f[1] + f[2] * f[2]);
     for (float& v : f) v /= fl;
@@ -1498,23 +1660,22 @@ bool App::drawMenuBackdrop(float& focusX, float& focusY) {
     const bool post = renderer_.beginScene();
     renderer_.clearDepth();
     backdrop_->draw();
-    if (enhanced("bokeh").str() != "none") {
-        // As the shots' focus (VenueCamera::setFocusScale): 2x the subject distance, 1.3x when stronger.
-        bool stronger = enhanced("bokeh").str() == "stronger";
+    if (enhancedLevel("bokeh") > 0) {
+        // As the shots' focus (VenueCamera::setFocusScale): 2x the subject distance, 1.3x when strong or stronger.
+        bool stronger = enhancedLevel("bokeh") >= 3;
         const float k = stronger ? 1.3f : 2.0f;
         const std::array<float, 3> p{eye[0] + (m[0] - eye[0]) * k, eye[1] + (m[1] - eye[1]) * k, eye[2] + (m[2] - eye[2]) * k};
         const auto& c = vp.m;
         float cz = c[2] * p[0] + c[6] * p[1] + c[10] * p[2] + c[14], cw = c[3] * p[0] + c[7] * p[1] + c[11] * p[2] + c[15];
         float depth = cw > 1e-4f ? std::clamp(cz / cw * 0.5f + 0.5f, 0.0f, 1.0f) : 0;
-        renderer_.depthBlur(depth, (stronger ? 4.8f : 3.0f) * renderer_.viewportHeight() / 448.0f);
+        renderer_.depthBlur(depth, kBokehBlur[enhancedLevel("bokeh")] * renderer_.viewportHeight() / 448.0f);
     }
     if (post) {
         PostFrame pf;
         pf.viewProj = vp.m;
         pf.hasCamera = true;
-        if (!backdrop_->stageFloorZ(pf.floorZ)) pf.floorZ = 0;
         pf.timeSec = float(SDL_GetTicksNS() / 1000000) / 1000.0f;
-        postFrameExtras(pf, *backdrop_, false);
+        postFrameExtras(pf, false);
         renderer_.endScene(pf);
     }
     renderer_.endWide();
@@ -1523,12 +1684,9 @@ bool App::drawMenuBackdrop(float& focusX, float& focusY) {
     return true;
 }
 
-// The venue's part of the post-processing frame: Super Fog's light cones and
-// Blur on Star Power's fade (in over 0.25 s while any player's Star Power is
-// on, out over 0.5 s after it ends; GD01_STARBLUR=1 forces it, a development aid).
-void App::postFrameExtras(PostFrame& pf, VenueRenderer& venue, bool song) {
-    if (renderer_.post().fog >= 3)
-        for (const auto& l : venue.beamLights()) pf.lights.push_back({{l[0], l[1], l[2]}, {l[3], l[4], l[5]}, {l[6], l[7], l[8]}});
+// The venue's part of the post-processing frame: Blur on Star Power's fade
+// (in over 0.25 s while any player's Star Power is on, out over 0.5 s after it ends; GD01_STARBLUR=1 forces it, a development aid).
+void App::postFrameExtras(PostFrame& pf, bool song) {
     const float now = pf.timeSec, dt = starBlurTime_ >= 0 ? std::clamp(now - starBlurTime_, 0.0f, 0.1f) : 0.0f;
     starBlurTime_ = now;
     bool on = false;
@@ -1566,11 +1724,12 @@ void SDLCALL dialogDone(void* user, const char* const* files, int) {
 
 void App::userFiles(const std::string& action) {
     userFilesStatus_.clear();
-    if (action == "steam_deck") {  // Apply Steam Deck Settings: the handheld profile, once; every option stays editable
-        for (auto& [key, value] : profileValues(true)) enhanced_.set(key, value);
+    if (action.rfind("mode_", 0) == 0) {  // Enhanced > MODES: a preset, once; every option stays editable
+        auto preset = enhancedPreset(action.substr(5));
+        for (auto& [key, value] : preset) enhanced_.set(key, value);
         saveEnhanced();
         applyEnhanced();
-        userFilesStatus_ = "Steam Deck settings applied";
+        userFilesStatus_ = preset.empty() ? "" : "Mode applied";
         return;
     }
     // Development aid: GD01_DIALOG=<path> answers the dialog at once (headless tests).
@@ -1580,7 +1739,7 @@ void App::userFiles(const std::string& action) {
         return;
     }
     auto* req = new DialogRequest{&dialogMutex_, &dialogResults_, action};
-    if (action == "export") {
+    if (action == "export" || action == "export_controllers") {
         SDL_ShowOpenFolderDialog(dialogDone, req, window_, nullptr, false);
     } else if (action == "locate_iso") {
         // The first screen: pick the disc image instead of dropping it on the window.
@@ -1602,6 +1761,14 @@ void App::pollUserFiles() {
         if (path.empty()) continue;  // cancelled
         if (action == "locate_iso") tryLoadData(path);
         else if (action == "export") exportUserFiles(path);
+        else if (action == "export_controllers") {  // the Gamepad menu's Export
+            std::string f = path;
+            if (!f.empty() && f.back() != '/' && f.back() != '\\') f += '/';
+            f += "GD01-controllers.json";
+            userFilesStatus_ = input_.exportTo(f) ? "Exported to " + f : "Could not write " + f;
+        } else if (action == "import_controllers") {  // the Gamepad menu's Import
+            userFilesStatus_ = input_.importFrom(path) ? "Controllers loaded" : "Could not load that controllers file";
+        }
         else if (action == "load_settings") userFilesStatus_ = importSettings(path) ? "Settings loaded" : "Could not load that settings file";
         else if (action == "load_progress") userFilesStatus_ = importProgress(path) ? "Progress loaded" : "Could not load that progress file";
     }
@@ -1636,6 +1803,7 @@ bool App::importSettings(const std::string& file) {
         return false;
     }
     if (j.type != Json::Type::Object) return false;
+    migrateEnhanced(j);  // a file exported by 1.1.6 or older
     Json next = Json::object();
     for (const auto& [key, def] : enhancedDefaults()) {
         if (!j.has(key)) continue;
@@ -1685,16 +1853,16 @@ bool App::importProgress(const std::string& file) {
 // Enhanced Settings for a venue's lighting (at its creation and on every change).
 void App::applyVenueLights(VenueRenderer& venue) {
     venue.setBandShadows(enhancedOn("shadows_all"));
-    const std::string more = enhanced("more_lights").str();
-    venue.setMoreLights(more == "strong" ? 2 : more == "subtle" ? 1 : 0);
-    venue.setLightDust(enhancedOn("light_dust"));
+    venue.setMoreLights(enhancedLevel("more_lights"));
+    venue.setLightDust(enhancedLevel("light_dust"));
 }
 
 void App::applyEnhanced() {
-    setParticlesEnabled(enhancedOn("particles"));
+    setParticlesEnabled(enhanced("particles").str() != "none");
+    setParticleRate(enhanced("particles").str() == "2x" ? 2.0f : 1.0f);
     renderer_.setUiEnhance(enhancedOn("sharp_ui"));
     renderer_.setInternalHeight(std::clamp(enhancedInt("internal_res"), 0, 4320));
-    renderer_.setFrameCap(std::clamp(enhancedInt("max_fps"), 30, 1000));
+    renderer_.setFrameCap(enhanced("max_fps").str() == "unlimited" ? 0 : std::clamp(enhancedInt("max_fps"), 30, 1000));
     // Post-processing of the 3D game frame (render/post_fx.h). FSR 3.1 and
     // DLSS 4 run in Vulkan next to the GL renderer (render/vk_upscaler.h) and
     // fall back to FSR 1; DLSS 5 is not available. Upscalers output at the
@@ -1709,27 +1877,33 @@ void App::applyEnhanced() {
                                         : PostSettings::Upscaler::None;
         post.quality = mode == "performance" ? 0 : mode == "balanced" ? 1 : 2;
         post.fsrScale = mode == "performance" ? 1 / 2.0f : mode == "balanced" ? 1 / 1.7f : 1 / 1.5f;
-        post.bloom = enhanced("bloom").str() == "high" ? 3 : enhanced("bloom").str() == "medium" ? 2 : enhanced("bloom").str() == "low" ? 1 : 0;
+        post.bloom = enhancedLevel("bloom");
         post.cinematic = enhancedOn("cinematic_color");
-        const std::string fog = enhanced("ground_fog").str(), grade = enhanced("color_grade").str();
-        post.fog = fog == "super" ? 3 : fog == "full" ? 2 : fog == "low" ? 1 : 0;
-        post.grade = grade == "warm" ? 1 : grade == "cold" ? 2 : grade == "vintage" ? 3 : grade == "noir" ? 4 : grade == "neon" ? 5 : 0;
-        post.grain = enhanced("film_grain").str() == "strong" ? 2 : enhanced("film_grain").str() == "light" ? 1 : 0;
-        post.chromatic = enhancedOn("chromatic");
-        post.streaks = enhancedOn("light_streaks");
-        post.ssao = enhancedOn("ssao");
+        const std::string grade = enhanced("color_grade").str();
+        post.grade = grade == "warm" ? 1 : grade == "cold" ? 2 : grade == "vintage" ? 3 : grade == "noir" ? 4 : grade == "neon" ? 5
+                     : grade == "sepia" ? 6 : 0;
+        post.grain = enhancedLevel("film_grain");
+        post.chromatic = enhancedLevel("chromatic");
+        post.ssao = enhancedLevel("ssao");
         post.sharpen = enhanced("sharpening").str() == "high" ? 2 : enhanced("sharpening").str() == "low" ? 1 : 0;
-        const std::string blur = enhanced("star_blur").str();
-        post.starBlur = blur == "high" ? 3 : blur == "medium" ? 2 : blur == "light" ? 1 : 0;
+        post.starBlur = enhancedLevel("star_blur");
+        // HDR: True HDR needs the window's HDR surface (made at start); without it, Emulated.
+        const std::string hdrMode = enhanced("hdr").str();
+        post.hdr = hdrMode == "true" ? 2 : hdrMode == "emulated" ? 1 : 0;
         renderer_.setPost(post);
+        if (hdrMode != hdrApplied_) {
+            hdrApplied_ = hdrMode;
+            const std::string st = hdrStatus();
+            SDL_Log("hdr: mode %s%s", hdrMode.c_str(), st.empty() ? "" : (" - " + st).c_str());
+        }
     }
     // Controls: touch (SDL's touch-made mouse events only while it is off), XInput joypads, Rock Band guitars.
     input_.setTouch(enhancedOn("touch"));
     SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, enhancedOn("touch") ? "0" : "1");
-    input_.setGamepadPlay(enhancedOn("xinput"));
-    input_.setRockBand(enhancedOn("rockband"));
+    input_.setGamepadPlay(true);  // XInput controllers and Rock Band guitars are always on
+    input_.setRockBand(true);
     if (venue_) {
-        venue_->setStrongerBokeh(enhanced("bokeh").str() == "stronger");
+        venue_->setStrongerBokeh(enhancedLevel("bokeh") >= 3);
         venue_->setShakyCamera(!enhancedOn("no_shaky_cam"));
         applyVenueLights(*venue_);
     }
@@ -1757,7 +1931,7 @@ void App::applyEnhanced() {
         }
         if (!ok) SDL_Log("enhanced settings: screen mode %s: %s", mode.c_str(), SDL_GetError());
         screenModeApplied_ = mode;
-        renderer_.setFrameCap(std::clamp(enhancedInt("max_fps"), 30, 1000));  // the new display mode's refresh rate
+        renderer_.setFrameCap(enhanced("max_fps").str() == "unlimited" ? 0 : std::clamp(enhancedInt("max_fps"), 30, 1000));  // the new display mode's refresh rate
     }
 }
 
@@ -2154,15 +2328,14 @@ void App::frame() {
                 venue_->draw();
                 // The 3 px taps were sized for the PS2's 448 lines.
                 // Enhanced Settings > Bokeh Effect: None skips the depth-of-field blur.
-                if (enhanced("bokeh").str() != "none")
-                    renderer_.depthBlur(venue_->dofDepth(), (venue_->strongerBokeh() ? 4.8f : 3.0f) * renderer_.viewportHeight() / 448.0f);
+                if (enhancedLevel("bokeh") > 0)
+                    renderer_.depthBlur(venue_->dofDepth(), kBokehBlur[enhancedLevel("bokeh")] * renderer_.viewportHeight() / 448.0f);
                 if (post) {
                     PostFrame pf;
                     pf.viewProj = venue_->viewProj().m;
                     pf.hasCamera = true;
-                    if (!venue_->stageFloorZ(pf.floorZ)) pf.floorZ = 0;
                     pf.timeSec = float(SDL_GetTicksNS() / 1000000) / 1000.0f;
-                    postFrameExtras(pf, *venue_, true);
+                    postFrameExtras(pf, true);
                     renderer_.endScene(pf);
                 }
                 renderer_.endWide();
@@ -2242,6 +2415,7 @@ int App::run() {
         std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
         try {
             enhanced_ = Json::parse(text);
+            migrateEnhanced(enhanced_);  // 1.1.6 and older values
         } catch (const std::exception& ex) {
             SDL_Log("enhanced settings: %s: %s", enhancedPath().c_str(), ex.what());
         }
@@ -2275,7 +2449,8 @@ int App::run() {
         desc.vendor_id = Uint16(vendor), desc.product_id = Uint16(product);
         desc.naxes = SDL_GAMEPAD_AXIS_COUNT, desc.nbuttons = SDL_GAMEPAD_BUTTON_COUNT;
         desc.name = "PLAYSTATION(R)3 Controller (virtual)";
-        if (!SDL_AttachVirtualJoystick(&desc)) SDL_Log("virtual pad: %s", SDL_GetError());
+        if (SDL_JoystickID vid = SDL_AttachVirtualJoystick(&desc); !vid) SDL_Log("virtual pad: %s", SDL_GetError());
+        else virtualPad_ = SDL_OpenJoystick(vid);  // GD01_KEYS "vpad<n>" presses its buttons
     }
     input_.setSplitKeyboard(opt_.splitKeyboard || SDL_getenv("GD01_KB2P"));
     input_.setTouchToMenu([this](float nx, float ny, float& mx, float& my) {
@@ -2287,16 +2462,43 @@ int App::run() {
     // Development aid: GD01_WINDOW=<w>x<h> sets the starting window size (e.g. ultrawide tests).
     int winW = int(kScreenW), winH = int(kScreenH);
     if (const char* ws = SDL_getenv("GD01_WINDOW")) std::sscanf(ws, "%dx%d", &winW, &winH);
-    window_ = SDL_CreateWindow(kAppTitle, winW, winH,
-                               SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY
+    const SDL_WindowFlags winFlags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY
 #ifdef __ANDROID__
-                                   | SDL_WINDOW_FULLSCREEN
+                                     | SDL_WINDOW_FULLSCREEN
 #endif
-    );
+        ;
+    // Enhanced > HDR > True HDR: the window's surface is chosen now (render/hdr_output.h).
+    // A window or surface that cannot be made with it is made again without (Emulated).
+    hdrSurface_ = hdr::Surface::Sdr;
+    hdrReason_ = hdr::unsupportedReason();
+    const bool wantHdr = enhanced("hdr").str() == "true" && hdr::request();
+    window_ = SDL_CreateWindow(kAppTitle, winW, winH, winFlags);
+    if (wantHdr) {
+        if (window_) {
+            if (SDL_GLContext probe = SDL_GL_CreateContext(window_)) {
+                hdrSurface_ = hdr::obtained(hdrReason_);
+                SDL_GL_DestroyContext(probe);
+            } else {
+                hdrReason_ = hdr::failure("no OpenGL context on an HDR surface", SDL_GetError());
+            }
+        } else {
+            hdrReason_ = hdr::failure("no window with an HDR surface", SDL_GetError());
+        }
+        if (hdrSurface_ == hdr::Surface::Sdr) {
+            if (window_) SDL_DestroyWindow(window_);
+            hdr::cancel();
+            window_ = SDL_CreateWindow(kAppTitle, winW, winH, winFlags);
+        }
+    }
+    if (enhanced("hdr").str() == "true")
+        SDL_Log("hdr: %s", hdrSurface_ == hdr::Surface::ScRgb ? "scRGB surface (linear, RGBA16F)"
+                           : hdrSurface_ == hdr::Surface::Pq  ? "BT.2020 PQ surface"
+                                                              : ("unavailable (" + hdrReason_ + "), using Emulated").c_str());
     setAppWindowIcon(window_);
     installDesktopEntry();
     std::string glError;
     bool glOk = window_ && renderer_.init(window_, glError);
+    if (glOk) renderer_.setHdrSurface(int(hdrSurface_));
     gpu::started(glOk, renderer_.gpuName());
     if (!glOk) {
         std::string msg = "Cannot start graphics: " + (window_ ? glError : std::string(SDL_GetError()));
@@ -2339,6 +2541,7 @@ int App::run() {
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
             if (e.type == SDL_EVENT_QUIT) running_ = false;
+            else if (e.type == SDL_EVENT_WINDOW_HDR_STATE_CHANGED) renderer_.hdrStateChanged();  // HDR on / off, paper white, headroom
             else if (e.type == SDL_EVENT_DROP_FILE && e.drop.data && screen_ != Screen::Playing) tryLoadData(e.drop.data);
 #ifdef __ANDROID__
             else if (e.type == SDL_EVENT_FINGER_UP && screen_ == Screen::NeedData) isoImport_.pick(window_);
@@ -2346,6 +2549,9 @@ int App::run() {
             else if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_LEFT && screen_ == Screen::NeedData)
                 userFiles("locate_iso");
 #endif
+            // A left click skips a movie (1.1.1), like a button.
+            else if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_LEFT && movie_ && enhancedOn("mouse"))
+                endMovie();
             // Mouse support: hover focuses menu entries (only while the window has
             // focus), a left click selects, the wheel scrolls.
             else if ((e.type == SDL_EVENT_MOUSE_MOTION || e.type == SDL_EVENT_MOUSE_WHEEL ||
@@ -2370,7 +2576,9 @@ int App::run() {
         injectDebugKeys(actions);
         if (movie_) {
             for (const InputEvent& a : actions)
-                if (a.down && (a.action == Action::Confirm || a.action == Action::Back || a.action == Action::Start || a.action == Action::Fret0)) endMovie();
+                // Skippable with green, red, Enter, Start, Esc (universal_mechanisms.md 1.1.1).
+                if (a.down && (a.action == Action::Confirm || a.action == Action::Back || a.action == Action::Start || a.action == Action::Fret0 ||
+                               a.action == Action::Fret1)) endMovie();
         } else {
             for (const InputEvent& a : actions) onAction(a);
         }
@@ -2398,8 +2606,84 @@ int App::run() {
 
 int runApp(const Options& options) { return App(options).run(); }
 
+namespace {
+// The universal controls' rules (universal_mechanisms.md 1.1.4 / 1.2.1),
+// on the keyboard's default bindings: no double inputs where two controls
+// share a key, none missed, the keyboard's Start selects in the menus, and
+// 1.1.6 Enhanced Settings take the new values. Returns the failures.
+int inputSelfTest() {
+    int failures = 0, checks = 0;
+    auto check = [&](bool ok, const char* what) {
+        ++checks;
+        if (!ok) ++failures, std::printf("input self-test FAILED: %s\n", what);
+    };
+    Input in;
+    in.testMode();
+    std::vector<InputEvent> out;
+    auto key = [&](SDL_Keycode k, bool down) {
+        SDL_Event e{};
+        e.type = down ? SDL_EVENT_KEY_DOWN : SDL_EVENT_KEY_UP;
+        e.key.key = k, e.key.down = down, e.key.timestamp = SDL_GetTicksNS() + 200000000ull * uint64_t(checks + 1);
+        in.handle(e, out);
+    };
+    auto count = [&](Action a, bool down) { return std::count_if(out.begin(), out.end(), [&](const InputEvent& e) { return e.action == a && e.down == down; }); };
+    // Up: menu Up and Strum Up on one key: one Up and one strum, then one release each.
+    key(SDLK_UP, true);
+    check(count(Action::Up, true) == 1 && count(Action::Strum, true) == 1 && out.size() == 2, "Up arrow: Up and Strum once");
+    out.clear();
+    key(SDLK_UP, false);
+    check(count(Action::Up, false) == 1 && count(Action::Strum, false) == 1 && out.size() == 2, "Up arrow released once");
+    out.clear();
+    // Enter: both Starts; in the menus one select from the Start key.
+    key(SDLK_RETURN, true);
+    check(out.size() == 1 && out[0].action == Action::Confirm && out[0].startKey, "Enter: one select (Start key)");
+    out.clear();
+    key(SDLK_RETURN, false);
+    out.clear();
+    // Green on 1 and F1: pressed once, released only when both are up.
+    key(SDLK_1, true), key(SDLK_F1, true);
+    check(count(Action::Fret0, true) == 1 && out.size() == 1, "1 + F1: green pressed once");
+    out.clear();
+    key(SDLK_1, false);
+    check(out.empty(), "1 released, F1 held: green stays");
+    key(SDLK_F1, false);
+    check(count(Action::Fret0, false) == 1, "F1 released: green released");
+    out.clear();
+    // Tab: Select, Select and the gyro trigger: Star Power once.
+    key(SDLK_TAB, true);
+    check(count(Action::StarPower, true) == 1 && out.size() == 1, "Tab: Star Power once");
+    key(SDLK_TAB, false);
+    out.clear();
+    // Up held, then Down: each strum control strums (none missed).
+    key(SDLK_UP, true), key(SDLK_DOWN, true);
+    check(count(Action::Strum, true) == 2 && count(Action::Down, true) == 1, "Up then Down: two strums");
+    key(SDLK_UP, false), key(SDLK_DOWN, false);
+    check(count(Action::Strum, false) == 2 && count(Action::Up, false) == 1 && count(Action::Down, false) == 1, "both released");
+    out.clear();
+    // Esc and Backspace stay back; mouse buttons are no source kind at all.
+    key(SDLK_BACKSPACE, true);
+    check(count(Action::Back, true) == 1, "Backspace: back");
+    key(SDLK_BACKSPACE, false);
+    out.clear();
+    // 1.1.6 Enhanced Settings take the new values.
+    Json old = Json::parse(R"({"bloom":"high","chromatic":true,"particles":false,"ssao":true,"more_lights":"subtle",)"
+                           R"("light_dust":true,"ground_fog":"super","light_streaks":true,"bokeh":"regular","star_blur":"high","xinput":false,"rockband":true})");
+    migrateEnhanced(old);
+    check(old["bloom"].str() == "3x" && old["chromatic"].str() == "medium" && old["particles"].str() == "none" &&
+              old["ssao"].str() == "medium" && old["more_lights"].str() == "1.5x" && old["light_dust"].str() == "1.5x" &&
+              !old.has("ground_fog") && !old.has("light_streaks") && old["bokeh"].str() == "medium" && old["star_blur"].str() == "strong" &&
+              !old.has("xinput") && !old.has("rockband"),
+          "1.1.6 enhanced.json migrated");
+    for (const auto& [k, v] : old.o)
+        if (auto c = enhancedChoices().find(k); c != enhancedChoices().end()) check(v.type == Json::Type::String && c->second.count(v.s), "migrated value valid");
+    std::printf(failures ? "input self-test: %d of %d checks failed\n" : "input self-test: all %d checks passed\n", failures ? failures : checks, checks);
+    return failures;
+}
+}  // namespace
+
 int runSelfTest(const Options& options) {
     std::string path = options.dataPath.empty() ? loadRememberedPath() : options.dataPath;
+    if (inputSelfTest()) return 1;
     try {
         GameData data(path);
         Rules rules = loadRules(data);

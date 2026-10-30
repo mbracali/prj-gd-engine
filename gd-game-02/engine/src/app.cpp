@@ -41,6 +41,7 @@
 #include "platform/disc_picker.h"
 #include "platform/paths.h"
 #include "render/canvas.h"
+#include "render/hdr_output.h"
 #include "render/highway.h"
 #include "render/hud_view.h"
 #include "render/scene_gpu.h"
@@ -483,9 +484,19 @@ private:
         int lightPart = -1;
     };
     std::unique_ptr<Backdrop> backdrop_;
+    // Shown by Enhanced Options; loaded at startup and kept in the menus (a
+    // song's venue replaces it), so the screen opens on the next frame.
+    bool backdropShown_ = false, backdropDue_ = false;
+    bool backdropWarm_ = false;  // drawn once unseen (its textures and programs reach the GPU)
+    void loadBackdrop();
     // The Enhanced Options (enhanced.json in the save folder), what is in
     // effect, and the FPS counter's average.
     Json enhanced_ = Json::object();
+    // Enhanced > HDR > True HDR: the window's surface (chosen at start) and why it is SDR when it is.
+    hdr::Surface hdrSurface_ = hdr::Surface::Sdr;
+    std::string hdrReason_, hdrApplied_;
+    std::string hdrStatus();
+    std::string savedHdrMode();  // enhanced.json's HDR before the window exists
     std::string screenModeApplied_;
     // Export / Load User Files: the dialogs' answers (queued from SDL's
     // callback) and the last result shown by the panel.
@@ -539,13 +550,39 @@ int App::run() {
     if (!options_.walk.empty()) {
         walk_ = std::make_unique<WalkDriver>(options_.walk);
         if (!walk_->known()) {
-            std::fprintf(stderr, "%s: unknown walk test '%s' (quickplay, lose, pause, attract, career, back, enhanced, cheats)\n", app::kProgram, options_.walk.c_str());
+            std::fprintf(stderr, "%s: unknown walk test '%s' (quickplay, lose, pause, attract, career, back, enhanced, cheats, mouse, gamepads, gamepads_pad, ...)\n", app::kProgram, options_.walk.c_str());
             SDL_Quit();
             return 2;
         }
         debugMenu_ = false;
     }
+    // Enhanced > HDR > True HDR: the window's surface is chosen now (render/hdr_output.h).
+    // A window or surface that cannot be made with it is made again without (Emulated).
+    hdrReason_ = hdr::unsupportedReason();
+    const bool trueHdr = savedHdrMode() == "true";
+    const bool wantHdr = trueHdr && hdr::request();
     window_ = SDL_CreateWindow(app::kWindowTitle, int(kScreenW), int(kScreenH), flags);
+    if (wantHdr) {
+        if (window_) {
+            if (SDL_GLContext probe = SDL_GL_CreateContext(window_)) {
+                hdrSurface_ = hdr::obtained(hdrReason_);
+                SDL_GL_DestroyContext(probe);
+            } else {
+                hdrReason_ = hdr::failure("no OpenGL context on an HDR surface", SDL_GetError());
+            }
+        } else {
+            hdrReason_ = hdr::failure("no window with an HDR surface", SDL_GetError());
+        }
+        if (hdrSurface_ == hdr::Surface::Sdr) {
+            if (window_) SDL_DestroyWindow(window_);
+            hdr::cancel();
+            window_ = SDL_CreateWindow(app::kWindowTitle, int(kScreenW), int(kScreenH), flags);
+        }
+    }
+    if (trueHdr)
+        SDL_Log("hdr: %s", hdrSurface_ == hdr::Surface::ScRgb ? "scRGB surface (linear, RGBA16F)"
+                           : hdrSurface_ == hdr::Surface::Pq  ? "BT.2020 PQ surface"
+                                                              : ("unavailable (" + hdrReason_ + "), using Emulated").c_str());
     setAppWindowIcon(window_);
     installDesktopEntry();
     // Touch: window-normalised positions to menu units (the 16:9 picture).
@@ -562,6 +599,7 @@ int App::run() {
         SDL_Quit();
         return 2;
     }
+    canvas_.renderer().device().setHdrSurface(int(hdrSurface_));
     if (!mixer_.open(error)) {
         std::fprintf(stderr, "%s: cannot open the audio device: %s\n", app::kProgram, error.c_str());
         canvas_.shutdown();
@@ -732,6 +770,7 @@ void App::startUi() {
     const bool skip = envOn("GD02_SKIP_BOOT") || !screen.empty();
     if (envOn("GD02_SKIP_BOOT") && screen.empty()) screen = "splash_screen";
     ui_->start(skip, screen);
+    loadBackdrop();  // Enhanced Options' backdrop, ready before the menus show
     uiStartMs_ = double(SDL_GetTicksNS()) / 1e6;
 }
 
@@ -991,6 +1030,10 @@ void App::endSong() {
 void App::handleEvent(const SDL_Event& e) {
     if (e.type == SDL_EVENT_QUIT) {
         running_ = false;
+        return;
+    }
+    if (e.type == SDL_EVENT_WINDOW_HDR_STATE_CHANGED && canvas_.renderer().ready()) {  // HDR on / off, paper white, headroom
+        canvas_.renderer().device().hdrStateChanged();
         return;
     }
     actions_.clear();
@@ -1529,6 +1572,12 @@ void App::frameUi() {
         walk_->poll(*ui_, now);
         if (walk_->done()) running_ = false;
     }
+    // Enhanced Options opened after a song (the backdrop went with the song's
+    // venue): the screen has drawn once without it; it loads now and fades in.
+    if (backdropDue_) {
+        backdropDue_ = false;
+        if (backdropShown_) loadBackdrop();
+    }
     ui_->update();
     if (!running_) return;
     // The menus get the guitar's green / red as Confirm / Back when no song is being played.
@@ -1541,6 +1590,18 @@ void App::frameUi() {
         updateBackdrop();
     }
     canvas_.begin({0, 0, 0, 255});
+    if (backdropWarm_) {
+        // The preloaded backdrop's first draw (~70 ms: uploads, programs)
+        // here, under black, not on the frame Enhanced Options opens.
+        backdropWarm_ = false;
+        if (backdrop_ && worldDraw_) {
+            const uint64_t t0 = SDL_GetTicksNS();
+            drawWorld();
+            canvas_.fillRect(0, 0, 1e5f, 1e5f, {0, 0, 0, 255});
+            if (const char* l = SDL_getenv("GD02_UILOG"); l && *l && *l != '0')
+                SDL_Log("ui: menu backdrop warmed in %.1f ms", double(SDL_GetTicksNS() - t0) / 1e6);
+        }
+    }
     ui_->draw();
     drawTouchButtons();
     drawFpsCounter();
@@ -1771,6 +1832,7 @@ bool App::loadVenue(const std::string& venue, VenueVariant variant) {
 }
 
 void App::unloadVenue() {
+    backdrop_.reset();  // it lives in the venue's world
     band_.reset();
     worldDraw_ = nullptr;
     director_.reset();
@@ -1851,6 +1913,7 @@ void App::startBand(const SongInfo& info, const Song& song, bool backdrop) {
 
 // world_panel's milo: ../world/<v>/<v>[_mp|_coop].milo (GD02_VENUE replaces the venue).
 void App::worldLoad(const std::string& path) {
+    if (backdrop_) unloadVenue();  // a song: a fresh world, even in the backdrop's venue
     for (const std::string& v : venues::names())
         for (VenueVariant var : {VenueVariant::Single, VenueVariant::Mp, VenueVariant::Coop})
             if (venues::worldMilo(v, var) == path) {
@@ -2014,6 +2077,8 @@ bool handheldHost() {
 // Export User Files' names (gd01's GD01-user-*.json).
 constexpr const char* kSettingsFile = "GD02-user-settings.json";
 constexpr const char* kProgressFile = "GD02-user-progress.json";
+// The Gamepad menu's Export / Import (gd01's GD01-controllers.json).
+constexpr const char* kControllersFile = "GD02-controllers.json";
 
 // A file dialog's answer (SDL_DialogFileCallback may run on another thread).
 struct DialogRequest {
@@ -2037,7 +2102,10 @@ void App::loadEnhanced() {
         ss << f.rdbuf();
         try {
             Json j = Json::parse(ss.str());
-            if (j.type == Json::Type::Object && j["format"].str() == "gd02-enhanced") enhanced_ = j;
+            if (j.type == Json::Type::Object && j["format"].str() == "gd02-enhanced") {
+                ui::migrateEnhanced(j);  // 0.1.7 and older values
+                enhanced_ = j;
+            }
         } catch (const std::exception& e) {
             SDL_Log("enhanced options: %s: %s (the defaults are used)", enhancedPath().c_str(), e.what());
         }
@@ -2045,7 +2113,43 @@ void App::loadEnhanced() {
     applyEnhanced();
 }
 
+// enhanced.json's HDR value, read before the window exists (True HDR picks its surface then).
+std::string App::savedHdrMode() {
+    std::ifstream f(enhancedPath(), std::ios::binary);
+    if (!f) return "none";
+    std::stringstream ss;
+    ss << f.rdbuf();
+    try {
+        Json j = Json::parse(ss.str());
+        if (j.type != Json::Type::Object || j["format"].str() != "gd02-enhanced") return "none";
+        const ui::EnhancedSetting* e = ui::enhancedSetting("hdr");
+        const std::string v = j.has("hdr") ? j["hdr"].str() : "none";
+        return e && ui::enhancedValid(*e, v) ? v : "none";
+    } catch (const std::exception&) {
+        return "none";
+    }
+}
+
+// Enhanced > HDR's "Now:" line: what the image is doing, and why True HDR
+// fell back to Emulated when it did (universal_mechanisms.md "HDR").
+std::string App::hdrStatus() {
+    const std::string mode = enhancedValue("hdr");
+    if (enhancedValue("no_effects") == "on" && mode != "none") return "off: Remove All Effects is on";
+    if (mode == "emulated") return "Emulated: HDR rendering tone mapped to your screen";
+    if (mode != "true") return "";
+    std::string why;
+    if (hdrSurface_ == hdr::Surface::Sdr) {
+        why = !hdrReason_.empty() ? "unavailable: " + hdrReason_ : "takes effect the next time the game starts";
+    } else {
+        const std::string live = canvas_.renderer().device().hdrStatus();
+        if (live.rfind("off:", 0) != 0) return "True HDR: " + live;
+        why = live.substr(5);
+    }
+    return "True HDR " + why + ". Using Emulated.";
+}
+
 std::string App::enhancedValue(const std::string& key) {
+    if (key == "hdr_status") return hdrStatus();  // read-only, for the HDR help
     const ui::EnhancedSetting* e = ui::enhancedSetting(key);
     if (!e) return {};
     if (enhanced_.has(key))
@@ -2075,32 +2179,36 @@ void App::saveEnhanced() {
     if (ec) SDL_Log("enhanced options: cannot write %s: %s", path.c_str(), ec.message().c_str());
 }
 
-// Apply Steam Deck Settings (the handheld profile, once; every option stays
-// editable) and Export / Load User Files (gd01's App::userFiles).
+// Enhanced > MODES (a preset, once; every option stays editable), Export /
+// Load User Files and the Gamepad menu's Export / Import (gd01's App::userFiles).
 void App::enhancedAction(const std::string& action) {
     userFilesStatus_.clear();
-    if (action == "steam_deck") {
-        for (const auto& [key, value] : ui::enhancedProfile(true)) enhanced_.set(key, Json::string(value));
+    if (action.rfind("mode_", 0) == 0) {
+        const auto preset = ui::enhancedPreset(action.substr(5));
+        for (const auto& [key, value] : preset) enhanced_.set(key, Json::string(value));
         saveEnhanced();
         applyEnhanced();
-        userFilesStatus_ = "Steam Deck settings applied";
-        SDL_Log("enhanced options: %s", userFilesStatus_.c_str());
+        userFilesStatus_ = preset.empty() ? "" : "Mode applied";
+        SDL_Log("enhanced options: %s %s", action.c_str(), userFilesStatus_.c_str());
         return;
     }
-    if (action != "export" && action != "load_settings" && action != "load_progress") return;
+    if (action != "export" && action != "load_settings" && action != "load_progress" && action != "export_controllers" &&
+        action != "import_controllers")
+        return;
     // Development aid: GD02_DIALOG=<path> answers the dialog at once (the
     // walk tests); a folder answers the load dialogs with its exported file.
     if (const char* forced = SDL_getenv("GD02_DIALOG")) {
         std::string path = forced;
         std::error_code ec;
-        if (action != "export" && std::filesystem::is_directory(path, ec))
-            path = (std::filesystem::path(path) / (action == "load_settings" ? kSettingsFile : kProgressFile)).string();
+        if (action != "export" && action != "export_controllers" && std::filesystem::is_directory(path, ec))
+            path = (std::filesystem::path(path) / (action == "load_settings" ? kSettingsFile : action == "import_controllers" ? kControllersFile
+                                                                                                                         : kProgressFile)).string();
         std::lock_guard<std::mutex> lock(dialogMutex_);
         dialogResults_.push_back({action, path});
         return;
     }
     auto* req = new DialogRequest{&dialogMutex_, &dialogResults_, action};
-    if (action == "export") {
+    if (action == "export" || action == "export_controllers") {
         SDL_ShowOpenFolderDialog(dialogDone, req, window_, nullptr, false);
     } else {
         static const SDL_DialogFileFilter kJson[] = {{"GD02 user files", "json"}};
@@ -2117,6 +2225,11 @@ void App::pollUserFiles() {
     for (const auto& [action, path] : done) {
         if (path.empty()) continue;  // cancelled
         if (action == "export") exportUserFiles(path);
+        else if (action == "export_controllers")  // the Gamepad menu's Export
+            userFilesStatus_ = input_.exportTo((std::filesystem::path(path) / kControllersFile).string()) ? std::string("Exported to ") + kControllersFile
+                                                                                                         : "Could not write the controllers file";
+        else if (action == "import_controllers")  // the Gamepad menu's Import
+            userFilesStatus_ = input_.importFrom(path) ? "Controllers loaded" : "Could not load that controllers file";
         else if (action == "load_settings") userFilesStatus_ = importSettings(path) ? "Settings loaded" : "Could not load that settings file";
         else if (action == "load_progress") userFilesStatus_ = importProgress(path) ? "Progress loaded" : "Could not load that progress file";
         SDL_Log("enhanced options: %s: %s", action.c_str(), userFilesStatus_.c_str());
@@ -2158,6 +2271,7 @@ bool App::importSettings(const std::string& file) {
         return false;
     }
     if (j.type != Json::Type::Object) return false;
+    ui::migrateEnhanced(j);  // a file exported by 0.1.7 or older
     Json next = Json::object();
     for (const ui::EnhancedSetting& e : ui::enhancedSettings()) {
         if (!j.has(e.key)) continue;
@@ -2202,15 +2316,17 @@ void App::applyEnhanced() {
     if (player2_) player2_->setCalibrationMs(calibrationMs());
     gfx::RenderDevice& dev = canvas_.renderer().device();
     dev.setInternalHeight(std::clamp(std::atoi(enhancedValue("internal_res").c_str()), 0, 4320));
-    if (!SDL_getenv("GD02_FPS")) dev.setFrameCap(std::clamp(std::atoi(enhancedValue("max_fps").c_str()), 30, 1000));
-    // Controls: touch (always on on Android), Rock Band guitars, gamepads that play.
+    auto frameCap = [&] { return enhancedValue("max_fps") == "unlimited" ? 0 : std::clamp(std::atoi(enhancedValue("max_fps").c_str()), 30, 1000); };
+    if (!SDL_getenv("GD02_FPS")) dev.setFrameCap(frameCap());
+    // Controls: touch (always on on Android); Rock Band guitars and gamepads
+    // always play (universal_mechanisms.md: no switches since 0.1.8).
 #ifdef __ANDROID__
     input_.setTouch(true);
 #else
     input_.setTouch(on("touch"));
 #endif
-    input_.setRockBand(on("rockband"));
-    input_.setGamepadPlay(on("xinput"));
+    input_.setRockBand(true);
+    input_.setGamepadPlay(true);
     // Sharper Text and Sprites: the menus' textures made from now on.
     if (ui_ && ui_->sceneCache()) ui_->sceneCache()->setEnhance(on("sharp_ui"));
     applyEnhancedLook();
@@ -2238,7 +2354,7 @@ void App::applyEnhanced() {
         if (!ok) SDL_Log("enhanced options: screen mode %s: %s", mode.c_str(), SDL_GetError());
         // The first time only when not windowed (the window opens windowed).
         screenModeApplied_ = mode;
-        if (!SDL_getenv("GD02_FPS")) dev.setFrameCap(std::clamp(std::atoi(enhancedValue("max_fps").c_str()), 30, 1000));  // the new mode's refresh rate
+        if (!SDL_getenv("GD02_FPS")) dev.setFrameCap(frameCap());  // the new mode's refresh rate
     }
 }
 
@@ -2259,38 +2375,44 @@ void App::applyEnhancedLook() {
     const bool none = on("no_effects");  // Remove All Effects
     gfx::PostSettings p;
     if (!none) {
-        p.bokeh = level("bokeh", {"none", "regular", "stronger"});
+        p.bokeh = level("bokeh", {"none", "light", "medium", "strong", "stronger"});
         const std::string aa = v("antialiasing");
         p.aa = aa == "fxaa" ? gfx::PostSettings::AA::Fxaa : aa == "ssaa" ? gfx::PostSettings::AA::Ssaa : aa == "taa" ? gfx::PostSettings::AA::Taa : gfx::PostSettings::AA::None;
         p.fsr1 = v("ai_upscaling") == "fsr1";
         const std::string q = v("ai_upscaling_mode");
         p.fsrScale = q == "performance" ? 0.5f : q == "balanced" ? 1 / 1.7f : 1 / 1.5f;
         if (p.fsr1 && p.aa == gfx::PostSettings::AA::Ssaa) p.aa = gfx::PostSettings::AA::None;  // SSAA does not combine with an upscaler (gd01)
-        p.bloom = level("bloom", {"off", "low", "medium", "high"});
+        // The doc's ranges (universal_mechanisms.md 1.2.2), weakest first.
+        p.bloom = level("bloom", {"none", "original", "2x", "3x"});
         p.cinematic = on("cinematic_color");
-        p.fog = level("ground_fog", {"none", "low", "full", "super"});
-        p.grade = level("color_grade", {"off", "warm", "cold", "vintage", "noir", "neon"});
-        p.grain = level("film_grain", {"off", "light", "strong"});
-        p.chromatic = on("chromatic");
-        p.streaks = on("light_streaks");
-        p.ssao = on("ssao");
+        p.grade = level("color_grade", {"off", "warm", "cold", "vintage", "noir", "neon", "sepia"});
+        p.grain = level("film_grain", {"none", "light", "medium", "strong", "stronger"});
+        p.chromatic = level("chromatic", {"none", "light", "medium", "strong"});
+        p.ssao = level("ssao", {"none", "light", "medium", "strong", "stronger"});
         p.sharpen = level("sharpening", {"off", "low", "high"});
-        p.starBlur = level("star_blur", {"none", "light", "medium", "high"});
+        p.starBlur = level("star_blur", {"none", "light", "medium", "strong", "stronger"});
+        // HDR: True HDR needs the window's HDR surface (made at start); without it, Emulated.
+        p.hdr = level("hdr", {"none", "emulated", "true"});
     } else {
         p.original = false, p.bokeh = 0;
     }
     canvas_.renderer().post().setSettings(p);
-    gfx::ParticleRenderer::setEnabled(on("particles"));
+    if (const std::string mode = none ? "none" : v("hdr"); mode != hdrApplied_) {
+        hdrApplied_ = mode;
+        const std::string st = hdrStatus();
+        SDL_Log("hdr: mode %s%s", mode.c_str(), st.empty() ? "" : (" - " + st).c_str());
+    }
+    gfx::ParticleRenderer::setEnabled(v("particles") != "none");
+    gfx::ParticleRenderer::setRate(v("particles") == "2x" ? 2.0f : 1.0f);
     if (director_) director_->setShake(!on("no_shaky_cam") && !none);
     enhancedLook_.shadowsAll = on("shadows_all");
-    enhancedLook_.moreLights = level("more_lights", {"off", "subtle", "strong"});
-    enhancedLook_.lightDust = on("light_dust");
+    enhancedLook_.moreLights = level("more_lights", {"none", "1.5x", "2x", "2.5x"});
+    enhancedLook_.lightDust = level("light_dust", {"none", "1.5x", "2x", "2.5x"});
     if (venueView_) venueView_->setEnhancedLook(enhancedLook_);
 }
 
 // What this frame's port effects need from the venue (render/enhanced_fx.h):
-// the camera, the stage floor (the band's lowest member), the time, Star
-// Power's blur (eased in and out) and the band's lights for Super Fog.
+// the camera, the time and Star Power's blur (eased in and out).
 void App::enhancedFrame(gfx::Renderer& r) {
     gfx::PostFrame f;
     if (venueView_) {
@@ -2299,14 +2421,6 @@ void App::enhancedFrame(gfx::Renderer& r) {
         f.viewProj = c.viewProj(false);
         f.hasCamera = true;
     }
-    float floorZ = 1e9f;
-    if (band_)
-        for (const auto& m : band_->members())
-            if (scene::Xfm x; band_->objectXfm(m->slot, "", x)) {
-                floorZ = std::min(floorZ, x.pos[2]);
-                if (venueView_) f.lights.push_back({gfx::Vec3{x.pos[0] + 10, x.pos[1] - 70, x.pos[2] + 210}, gfx::Vec3{x.pos[0], x.pos[1], x.pos[2]}, {1, 0.93f, 0.8f}});
-            }
-    f.floorZ = floorZ < 1e8f ? floorZ : 0;
     f.timeSec = float(double(SDL_GetTicksNS()) / 1e9);
     const bool sp = !backdrop_ && ((player_ && player_->starPowerActive()) || (player2_ && player2_->starPowerActive()));
     const double now = double(SDL_GetTicksNS()) / 1e9;
@@ -2357,6 +2471,7 @@ int App::enhancedState(const std::string& key) {
     const gfx::EnhancedFx* fx = post.enhanced();
     const gfx::EnhancedLights* lights = venueView_ ? venueView_->enhancedLights() : nullptr;
     if (key == "particles") return gfx::ParticleRenderer::enabled() ? 1 : 0;
+    if (key == "particle_rate") return int(gfx::ParticleRenderer::rate() * 10 + 0.5f);  // x10
     if (key == "shake") return director_ ? (director_->shake() ? 1 : 0) : -1;
     if (key == "touch") return input_.touch() ? 1 : 0;
     if (key == "rockband") return input_.rockBand() ? 1 : 0;
@@ -2364,6 +2479,7 @@ int App::enhancedState(const std::string& key) {
     if (key == "sharp_ui") return ui_ && ui_->sceneCache() ? (ui_->sceneCache()->enhancing() ? 1 : 0) : -1;
     if (key == "post_original") return post.settings().original ? 1 : 0;
     if (key == "fx_on") return post.settings().any() ? 1 : 0;
+    if (key == "hdr") return post.settings().hdr;
     if (key == "post_dof") return post.lastDof() ? 1 : 0;
     if (key == "post_key") return int(post.lastKey());
     if (key == "fx_frames") return fx ? fx->frames() : 0;
@@ -2400,13 +2516,16 @@ void App::drawFpsCounter() {
 // The backdrop: the second venue (venues::names()[1], small1) with the band
 // caught a quarter into the first song of its tier, silent and still.
 void App::menuBackdrop(bool on) {
-    if (!on) {
-        if (!backdrop_) return;
-        backdrop_.reset();
-        if (!player_) unloadVenue();
-        return;
-    }
-    if (backdrop_ || player_ || !data_ || songs_.empty() || ui_->headless()) return;
+    backdropShown_ = on;
+    backdropDue_ = on && !backdrop_;  // normally loaded at startup (loadBackdrop)
+}
+
+// The backdrop's venue, band and shot. It needs the GL context and the
+// game's one world, so it loads on the main thread: at startup, before the
+// menus, and again (the next frame, behind the open screen) after a song.
+void App::loadBackdrop() {
+    if (backdrop_ || player_ || !data_ || songs_.empty() || !ui_ || ui_->headless()) return;
+    const uint64_t t0 = SDL_GetTicksNS();
     const std::string venue = venues::names()[1];
     auto b = std::make_unique<Backdrop>();
     for (const SongInfo& s : songs_)
@@ -2437,7 +2556,9 @@ void App::menuBackdrop(bool on) {
     for (int i = 0; backdrop_ && (i < 45 || (!backdrop_->framed && i < 195)); ++i) updateBackdrop();
     if (!band_) SDL_Log("enhanced options: backdrop %s has no band", venue.c_str());
     else if (backdrop_ && !backdrop_->framed) SDL_Log("enhanced options: backdrop %s: the singer never showed", venue.c_str());
-    if (backdrop_) backdrop_->frozen = true;
+    if (backdrop_) backdrop_->frozen = true, backdropWarm_ = !backdropShown_;
+    if (const char* l = SDL_getenv("GD02_UILOG"); l && *l && *l != '0')
+        SDL_Log("ui: menu backdrop loaded in %.1f ms", double(SDL_GetTicksNS() - t0) / 1e6);
 }
 
 // The backdrop's band is there, the camera on its singer, and the singer's
@@ -2454,7 +2575,7 @@ bool App::menuBackdropFramed() {
 }
 
 bool App::drawMenuBackdrop() {
-    if (!backdrop_ || !worldDraw_) return false;
+    if (!backdrop_ || !backdropShown_ || !worldDraw_) return false;
     drawWorld();
     return true;
 }

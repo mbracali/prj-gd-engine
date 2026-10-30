@@ -33,6 +33,7 @@ sdl="$(ldd build/steamdeck/gd02 | awk '/libSDL3\.so/ {print $3}')"
 cp -L "$sdl" "$d/libSDL3.so.0"
 cp /usr/share/doc/libsdl3-0/copyright "$d/licenses/SDL3-LICENSE.txt" 2>/dev/null || true
 cp third_party/stb_vorbis/LICENSE.txt "$d/licenses/stb_vorbis-LICENSE.txt"
+cp third_party/rtmidi/LICENSE "$d/licenses/RtMidi-LICENSE.txt"
 cp build/steamdeck/libav*.so.[0-9]* "$d/"
 ship_ffmpeg_licence build/ffmpeg/steamdeck/ffmpeg-prefix "$d"
 cat > "$d/STEAM-DECK.txt" <<'TXT'

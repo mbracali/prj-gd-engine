@@ -32,9 +32,9 @@ public:
 
     struct Settings {
         bool shadowsAll = false;
-        int moreLights = 0;  // 0 off, 1 subtle, 2 strong
-        bool lightDust = true;
-        bool any() const { return shadowsAll || moreLights > 0; }
+        int moreLights = 0;  // 0 none, 1 1.5x, 2 2x, 3 2.5x
+        int lightDust = 0;   // 0 none, 1 1.5x, 2 2x, 3 2.5x (with or without More Lights)
+        bool any() const { return shadowsAll || moreLights > 0 || lightDust > 0; }
     };
     // The band members' feet (world), for this frame.
     void draw(const Settings& s, const std::vector<Vec3>& members, const Camera& camera, bool hdr, float timeSec);

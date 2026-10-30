@@ -138,7 +138,7 @@ public:
     void endRenderTarget();
 
     // Enhanced Settings post-processing (render/post_fx.h): anti-aliasing,
-    // FSR 1, bloom, cinematic colour, ground fog. Between beginScene and
+    // FSR 1, bloom, cinematic colour. Between beginScene and
     // endScene (inside beginWide / endWide) the 3D game frame draws off
     // screen at the chain's render scale; endScene runs the effects and lays
     // the result into the viewport. beginScene returns false (and draws go
@@ -150,6 +150,14 @@ public:
     const PostSettings& post() const { return post_; }
     bool beginScene();
     void endScene(const PostFrame& frame);
+    // Enhanced > HDR > True HDR (render/hdr_output.h): the window's surface
+    // (hdr::Surface: 0 SDR, 1 scRGB, 2 PQ). With one, the frame draws into an
+    // RGBA16F target and endFrame converts it (paper white from the window's
+    // HDR properties, re-read on SDL_EVENT_WINDOW_HDR_STATE_CHANGED).
+    void setHdrSurface(int surface) { hdrSurface_ = surface, hdrDirty_ = true; }
+    void hdrStateChanged() { hdrDirty_ = true; }
+    // What True HDR outputs now, or "off: <why>" when the display shows SDR.
+    std::string hdrStatus() const;
 
     // Reads back the current frame as RGBA (for screenshots).
     Image readPixels();
@@ -168,6 +176,7 @@ private:
     struct SceneTarget {
         unsigned fbo = 0, color = 0, depth = 0;
         int w = 0, h = 0;
+        bool f16 = false;  // HDR: RGBA16F
     } scene_;
     bool sceneActive_ = false;
     int sceneSaved_[4] = {0, 0, 0, 0};
@@ -198,8 +207,17 @@ private:
     struct MainTarget {
         unsigned fbo = 0, color = 0, depth = 0;
         int w = 0, h = 0;
+        bool f16 = false;  // RGBA16F (an HDR surface)
     } main_;
     bool mainBound_ = false;
+    // True HDR output (setHdrSurface): the window's state and the conversion pass.
+    int hdrSurface_ = 0;
+    bool hdrDirty_ = true, hdrOn_ = false;
+    float hdrWhite_ = 1, hdrHeadroom_ = 1;  // scRGB units (1 = 80 nits); headroom in paper whites
+    std::string hdrLogged_;
+    unsigned hdrProgram_ = 0;
+    void updateHdr();
+    void outputHdr(int ww, int wh);
     void frameSize(int& w, int& h) const;  // the drawn frame's pixels (window or internal)
     int internalHeight(int windowH) const;  // the internal target's height, 0 for none
     void bindMain();                        // the frame's framebuffer (main_ or the window's)

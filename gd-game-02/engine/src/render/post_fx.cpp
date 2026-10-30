@@ -153,7 +153,11 @@ void main() {
         c = texture(sDofLow, vUv);
     }
 #endif
+#if HDR_OUT
+    fragColor = vec4(max(c.rgb, 0.0), 1.0);  // Enhanced > HDR: highlights above 1.0 go on to the port's tone map
+#else
     fragColor = vec4(clamp(c.rgb, 0.0, 1.0), 1.0);
+#endif
 }
 #endif
 )";
@@ -250,12 +254,20 @@ void PostFx::destroyTargets() {
 }
 
 bool PostFx::ensureTargets(int w, int h) {
-    if (hdr_ && w == w_ && h == h_) return true;
+    const bool f16 = settings_.hdr != 0;
+    if (hdr_ && w == w_ && h == h_ && f16 == worldF16_) return true;
     destroyTargets();
     std::string error;
+    // Enhanced > HDR: the world and depth-of-field buffers in floating point
+    // (the same colours / 4, kept above 1.0 and finer).
+    worldF16_ = f16;
+    if (f16) {
+        hdr_ = device_.createTarget(TargetDesc{w, h, true, TargetFormat::RGBA16F}, error);
+        if (!hdr_) SDL_Log("post: no RGBA16F world buffer for HDR (%s); using GH2's", error.c_str());
+    }
     // GH2's buffer is 2:10:10:10 [C] (colours / 4 by the HDR key); RGBA8
     // keeps the same scale where 10-bit targets fail.
-    hdr_ = device_.createTarget(TargetDesc{w, h, true, TargetFormat::RGB10A2}, error);
+    if (!hdr_) hdr_ = device_.createTarget(TargetDesc{w, h, true, TargetFormat::RGB10A2}, error);
     hdr10_ = bool(hdr_);
     if (!hdr_) {
         SDL_Log("post: no 10-bit HDR buffer (%s); using 8 bits", error.c_str());
@@ -263,8 +275,15 @@ bool PostFx::ensureTargets(int w, int h) {
     }
     const int hw = std::max(1, w / 2), hh = std::max(1, h / 2), qw = std::max(1, w / 4), qh = std::max(1, h / 4);
     // The DOF and bloom buffers are 8-bit in GH2 (the screen's format, 0x821D5E30) [I]: they clamp at 1.
-    dofA_ = device_.createTarget(TargetDesc{hw, hh, false, TargetFormat::RGBA8}, error);
-    dofB_ = device_.createTarget(TargetDesc{hw, hh, false, TargetFormat::RGBA8}, error);
+    const TargetFormat dofFormat = f16 ? TargetFormat::RGBA16F : TargetFormat::RGBA8;
+    dofA_ = device_.createTarget(TargetDesc{hw, hh, false, dofFormat}, error);
+    dofB_ = device_.createTarget(TargetDesc{hw, hh, false, dofFormat}, error);
+    if (f16 && (!dofA_ || !dofB_)) {
+        if (dofA_) device_.destroyTarget(dofA_);
+        if (dofB_) device_.destroyTarget(dofB_);
+        dofA_ = device_.createTarget(TargetDesc{hw, hh, false, TargetFormat::RGBA8}, error);
+        dofB_ = device_.createTarget(TargetDesc{hw, hh, false, TargetFormat::RGBA8}, error);
+    }
     bloomHalf_ = device_.createTarget(TargetDesc{hw, hh, false, TargetFormat::RGBA8}, error);
     bloomA_ = device_.createTarget(TargetDesc{qw, qh, false, TargetFormat::RGBA8}, error);
     bloomB_ = device_.createTarget(TargetDesc{qw, qh, false, TargetFormat::RGBA8}, error);
@@ -322,6 +341,7 @@ ProgramDesc PostFx::describe(Pass pass, uint32_t key) {
     def("BLOOM", (key & postkey::Bloom) ? 1 : 0);
     def("LUMMAP", (key & postkey::LumMap) ? 1 : 0);
     def("DEBUG", pass == Pass::Debug ? 1 : 0);
+    def("HDR_OUT", (key & postkey::HdrOut) ? 1 : 0);
     d.samplers = {"sHdr", "sDofLow", "sDepth", "sBloom", "sLum", "sNoise"};
     return d;
 }
@@ -350,10 +370,10 @@ uint32_t PostFx::compositeKey(const PostProcState& s, bool dof) {
 std::vector<ProgramDesc> PostFx::allPrograms() {
     std::vector<ProgramDesc> all;
     for (Pass p : {Pass::Collapse, Pass::Bright, Pass::Downsample, Pass::Blur7, Pass::Blur15, Pass::Debug}) all.push_back(describe(p, postkey::All));
-    const uint32_t bits[5] = {postkey::ColorXfm, postkey::Noise, postkey::Dof, postkey::Bloom, postkey::LumMap};
-    for (uint32_t m = 0; m < 32; ++m) {
+    const uint32_t bits[6] = {postkey::ColorXfm, postkey::Noise, postkey::Dof, postkey::Bloom, postkey::LumMap, postkey::HdrOut};
+    for (uint32_t m = 0; m < 64; ++m) {
         uint32_t key = 0;
-        for (int b = 0; b < 5; ++b)
+        for (int b = 0; b < 6; ++b)
             if (m & (1u << b)) key |= bits[b];
         all.push_back(describe(Pass::Composite, key));
     }
@@ -420,17 +440,21 @@ void PostFx::end() {
     if (!capturing_) return;
     capturing_ = false;
     // Remove All Effects: none of GH2's own either (its default PostProc
-    // draws the world as it is). Bokeh: None skips GH2's depth of field,
-    // Stronger focuses nearer, blurs sooner and wider (gd01's).
+    // draws the world as it is). Bokeh: None skips GH2's depth of field;
+    // Medium is the original; Light blurs less; Strong and Stronger focus
+    // nearer, blur sooner and wider (gd01's levels).
     const PostProcState saved = state_;
     const DofState savedDof = dof_;
     if (!settings_.original) state_ = PostProcState{};
     float dofSpread = kDofSpread;
-    if (settings_.bokeh == 2) {
-        dof_.maxBlur = std::min(1.0f, dof_.maxBlur * 1.5f);
-        dof_.blurDepth = std::max(0.001f, dof_.blurDepth * 0.6f);
-        dof_.focusDistance *= 0.85f;
-        dofSpread *= 1.8f;
+    if (settings_.bokeh != 2) {
+        static constexpr float kBlur[5] = {1, 0.65f, 1, 1.25f, 1.5f}, kDepth[5] = {1, 1.3f, 1, 0.8f, 0.6f}, kFocus[5] = {1, 1, 1, 0.92f, 0.85f},
+                               kSpread[5] = {1, 0.7f, 1, 1.4f, 1.8f};
+        const size_t lv = size_t(std::clamp(settings_.bokeh, 0, 4));
+        dof_.maxBlur = std::min(1.0f, dof_.maxBlur * kBlur[lv]);
+        dof_.blurDepth = std::max(0.001f, dof_.blurDepth * kDepth[lv]);
+        dof_.focusDistance *= kFocus[lv];
+        dofSpread *= kSpread[lv];
     }
     const bool dof = settings_.original && settings_.bokeh > 0 && dof_.on && dof_.maxBlur > 0 && dof_.farPlane > dof_.nearPlane;
     const bool bloom = state_.bloomOn();
@@ -521,10 +545,21 @@ void PostFx::end() {
     if (settings_.any() && !debug_) {
         if (!enhanced_) enhanced_ = std::make_unique<EnhancedFx>(device_);
         std::string error;
-        if (!ldr_ && !enhanced_->failed()) ldr_ = device_.createTarget(TargetDesc{w_, h_, false, TargetFormat::RGBA8}, error);
+        // Enhanced > HDR: GH2's pass writes RGBA16F, unclamped (HDR_OUT), for the port's tone map.
+        const bool hdr = settings_.hdr != 0;
+        if (ldr_ && ldrF16_ != hdr) device_.destroyTarget(ldr_), ldr_ = {};
+        if (!ldr_ && !enhanced_->failed()) {
+            if (hdr) ldr_ = device_.createTarget(TargetDesc{w_, h_, false, TargetFormat::RGBA16F}, error);
+            ldrF16_ = bool(ldr_) && hdr;
+            if (!ldr_) ldr_ = device_.createTarget(TargetDesc{w_, h_, false, TargetFormat::RGBA8}, error);
+        }
         if (ldr_ && !enhanced_->failed()) {
-            quad(ldr_, p, tex, samp, 6, &b, sizeof b);
-            chained = enhanced_->process(device_.targetTexture(ldr_), device_.targetDepth(hdr_), w_, h_, x, y, pw, ph, settings_, frame_);
+            const ProgramId pc = ldrF16_ && !debug_ ? program(Pass::Composite, lastKey_ | postkey::HdrOut) : p;
+            quad(ldr_, pc ? pc : p, tex, samp, 6, &b, sizeof b);
+            // True HDR: the display's headroom while it shows HDR (else tone mapped as Emulated).
+            PostSettings ps = settings_;
+            ps.hdrPeak = ps.hdr == 2 ? device_.hdrHeadroom() : 1.0f;
+            chained = enhanced_->process(device_.targetTexture(ldr_), device_.targetDepth(hdr_), w_, h_, x, y, pw, ph, ps, frame_);
         }
     }
     if (!chained) {

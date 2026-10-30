@@ -20,4 +20,5 @@ app="$d/gd03.app"
 dylibbundler -od -b -x "$app/Contents/MacOS/gd03" -d "$app/Contents/Frameworks/" -p @executable_path/../Frameworks/ >/dev/null
 codesign --force --deep --sign - "$app"
 cp README.md ../../LICENSE ../../LICENSE-ADDITIONAL-TERMS.md "$d/"
+cp third_party/rtmidi/LICENSE "$d/licenses/RtMidi-LICENSE.txt"
 say "Ready: $d"

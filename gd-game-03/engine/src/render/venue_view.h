@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "render/camera.h"
+#include "render/enhanced_lights.h"
 #include "render/particles.h"
 #include "render/scene_gpu.h"
 #include "render/spotlight_view.h"
@@ -59,6 +60,13 @@ public:
     size_t roots() const { return roots_.size(); }
     const CrowdView& crowdView() const { return *crowdView_; }
     BandView& bandView() { return *bandView_; }
+    // The Enhanced Options' venue extras (render/enhanced_lights.h): the
+    // settings, and the band members' feet this frame (set before draw).
+    using EnhancedLook = gfx::EnhancedLights::Settings;
+    void setEnhancedLook(const EnhancedLook& look) { look_ = look; }
+    void setBandFeet(std::vector<gfx::Vec3> feet) { feet_ = std::move(feet); }
+    void setTimeSec(float t) { timeSec_ = t; }
+    const gfx::EnhancedLights* enhancedLights() const { return lights_.get(); }
 
 private:
     struct Root {
@@ -85,6 +93,11 @@ private:
     std::unique_ptr<gfx::SpotlightView> spotlights_;
     std::unique_ptr<CrowdView> crowdView_;
     std::unique_ptr<BandView> bandView_;
+    std::unique_ptr<gfx::EnhancedLights> lights_;
+    EnhancedLook look_;
+    std::vector<gfx::Vec3> feet_;
+    float timeSec_ = 0;
+    bool filling_ = false;  // drawing the band with More Lights' fill
     const scene::Environ* currentEnv_ = nullptr;
     bool envSet_ = false;
     bool hdr_ = false;

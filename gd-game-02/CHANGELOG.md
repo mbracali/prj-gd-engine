@@ -4,6 +4,77 @@ All notable changes for players. Versions follow SemVer; release tags are
 `gd-game-02/vX.Y.Z`. The release workflow publishes the section whose heading
 matches the tag's version. Nothing is released yet.
 
+## [0.1.8] - 2026-10-29
+
+**Universal menus: a new GAMEPADS screen, a new Enhanced Options menu, and
+every screen works with any controller, the mouse and touch.**
+
+### Added
+- GAMEPADS is rebuilt as the universal Gamepad menu (the yellow fret on the
+  main menu, or Enhanced Options > Gamepads): four player boxes (Guitar Hero
+  II has two players; 3 and 4 are shown unavailable). Click "Player 2" to
+  turn player 2 on or off. Each player picks an **Instrument** (5 Fret
+  Guitar, Gamepad, Generic MIDI) and the device it is **bound to** (the
+  keyboard, any gamepad or guitar, any MIDI device, or "Detect": press a
+  button on the device you want). **Customize inputs** shows the device's
+  buttons in two slots each, with Require Strum, the controller type (Xbox
+  360 guitar, old Xbox layout, PS2 adapter, Rock Band, gamepad) and Reset;
+  **Save** or **Discard** finishes. **Export** / **Import** save and load all
+  your controller settings as a file.
+- Generic MIDI input (Linux, Windows, macOS): any MIDI keyboard, drum pad or
+  MIDI guitar can play once you bind its notes. Not on Android yet.
+- Enhanced Options is rebuilt as the universal Enhanced menu: **Modes**
+  buttons set many options at once (Steam Deck, Original Feel, Clean Image,
+  Max Out (Full HD), Max Out (4K), Rocking on a Budget, Good Old Days, in
+  sepia at the PS2's resolution); finer levels for the effects (Bokeh in
+  five levels; Bloom Original / 2x / 3x; Film Grain, Ambient Occlusion and
+  Blur on Star Power up to Stronger; Chromatic Aberration in levels; More
+  Lights and Dust at 1.5x / 2x / 2.5x; Particles 2x; Max FPS Unlimited; Color Grading Sepia); every section can be folded;
+  a scrollbar; Back, Export and Import buttons.
+- The help bar adds the buttons a screen is missing (SELECT, BACK, START on
+  the band name, UP / DOWN) in the original's style; all of them are
+  clickable (the UP / DOWN button: its upper half is up, its lower half
+  down).
+- Enhanced Options > HDR (None, Emulated, True HDR; None is the default and
+  the original image, unchanged), as in Guitar Hero 1.1.7. Emulated keeps
+  the world in floating point (Guitar Hero II's own HDR buffer, its depth of
+  field and its pass's result no longer clamp at 1.0), with an automatic
+  exposure and a filmic (ACES) tone map for any screen; True HDR shows the
+  same on an HDR display (Windows; Linux on a Wayland desktop whose graphics
+  driver offers an scRGB or PQ surface), menus and the HUD at the screen's
+  paper white. True HDR takes effect when the game starts; where it cannot
+  run (macOS, Android, X11, the Steam Deck, HDR off on the display),
+  Emulated is used and the help box says why. Max Out sets Emulated; Remove
+  All Effects turns it off.
+
+### Changed
+- New default controls. Keyboard: frets 1-5 (or F1-F5), arrows for menus and
+  strumming, Enter is Start (it still selects in the menus and pauses a
+  song), Tab is Select and Star Power, Shift is the whammy. Gamepad: LT / LB
+  / RB / RT / A, d-pad, either stick for the whammy, A selects and B goes
+  back in the menus. A key or button bound to two things (Up is menu Up and
+  Strum Up) acts once, never twice and never missed. Esc / Backspace and the
+  arrows always work the menus. Your own bindings from 0.1.7 are kept.
+- XInput gamepads and Rock Band guitars always play: their switches are
+  gone. Touch is on by default only on the Steam Deck and Android.
+- Every enhanced effect still starts off (the original look); settings saved
+  by 0.1.7 keep their meaning in the new levels.
+- Enhanced Options and GAMEPADS open at once: no screen transition, and the
+  venue shot behind Enhanced Options is loaded at startup (after a song it
+  fades in a moment after the menu appears). They used to take about a
+  second to appear.
+
+### Removed
+- Add Fog to the Ground (Experimental) and Anamorphic Light Streaks are gone
+  from Enhanced Options. Saved or imported settings that still have them
+  load normally.
+
+### Fixed
+- Movies and the credits skip with green, red, Enter, Start, a click or a
+  tap (the credits used to need Back; movies ignored red and the mouse).
+- NAME YOUR BAND: any up / down (arrows, d-pad, strum bar) changes the
+  letter once, green takes it, and Start or Enter always accepts the name.
+
 ## [0.1.7] - 2026-10-29
 
 ### Added

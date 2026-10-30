@@ -27,6 +27,7 @@ cp build/linux/gd02 README.md "$d/"
 # The project licence, and the third-party licences.
 cp ../../LICENSE ../../LICENSE-ADDITIONAL-TERMS.md "$d/"
 cp third_party/stb_vorbis/LICENSE.txt "$d/licenses/stb_vorbis-LICENSE.txt"
+cp third_party/rtmidi/LICENSE "$d/licenses/RtMidi-LICENSE.txt"
 if [ "${GD02_VIDEO:-1}" != 0 ]; then
   cp build/linux/libav*.so.[0-9]* "$d/"
   ship_ffmpeg_licence build/ffmpeg/linux/ffmpeg-prefix "$d"

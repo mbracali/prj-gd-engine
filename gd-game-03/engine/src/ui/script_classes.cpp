@@ -34,11 +34,6 @@ const Value* option(const std::vector<Value>& args, const char* key) {
     return nullptr;
 }
 
-float optionNumber(const std::vector<Value>& args, const char* key, size_t idx, float def) {
-    const Value* o = option(args, key);
-    return o && o->array->size() > idx && (*o->array)[idx].isNumber() ? (*o->array)[idx].number() : def;
-}
-
 }  // namespace
 
 // ---------------------------------------------------------------- components
@@ -245,17 +240,29 @@ bool ComponentObj::handleNative(Interp& in, const std::string& msg, std::vector<
     if (msg == "animate") {
         // RndAnimatable Animate (0x821E9D00): (range a b) (period s) (dest d)
         // (units u); without a period, 30 frames a second.
+        // The PS2's (0x001abf40) [C]: (range a b) plays once, (loop a b) wraps
+        // (AnimTask loop flag), (dest b) from the current frame, (period s)
+        // makes the rate |b - a| / s. An option's elements are evaluated
+        // (store_video's (loop 0 {store_video.view end_frame})).
         if (!v) return true;
+        const auto num = [&](const char* key, size_t idx, float def) {
+            const Value* o = option(args, key);
+            if (!o || o->array->size() <= idx) return def;
+            const Value e = ui.interp().evalValue((*o->array)[idx]);
+            return e.isNumber() ? e.number() : def;
+        };
         const float end = v->endFrame(name());
-        float from = optionNumber(args, "range", 1, 0), to = optionNumber(args, "range", 2, end);
-        if (option(args, "dest")) from = v->frame(name()), to = optionNumber(args, "dest", 1, end);
-        const float period = optionNumber(args, "period", 1, -1);
-        const int units = int(optionNumber(args, "units", 1, float(kTaskUISeconds)));
+        float from = num("range", 1, 0), to = num("range", 2, end);
+        const bool loop = option(args, "loop") != nullptr;
+        if (loop) from = num("loop", 1, 0), to = num("loop", 2, end);
+        if (option(args, "dest")) from = v->frame(name()), to = num("dest", 1, end);
+        const float period = num("period", 1, -1);
+        const int units = int(num("units", 1, float(kTaskUISeconds)));
         const float seconds = period > 0 ? period : std::fabs(to - from) / 30.0f;
         const Value* task = option(args, "name");
         std::string taskName;
         if (task && task->array->size() > 1) taskName = (*task->array)[1].str();
-        ui.animate(panel, name(), from, to, seconds, units, taskName);
+        ui.animate(panel, name(), from, to, seconds, units, taskName, loop);
         return true;
     }
     if (msg == "stop_animation") return ui.stopAnimation(panel, name()), true;
@@ -526,6 +533,18 @@ void PanelObj::disable(const std::string& name, int navButton) {
     applyStates();
 }
 
+bool PanelObj::navigable() {
+    if (!view) return drawsSomething();  // the port's own panels move their own focus
+    ComponentObj* f = focused();
+    if (!f) return false;
+    if (f->isTextEntry() || f->isList()) return true;
+    const auto* c = view->find(focus) ? view->find(focus)->as<scene::UIComponent>() : nullptr;
+    if (c && (!c->navDown.empty() || !c->navRight.empty())) return true;
+    for (const scene::UIComponent* o : view->milo()->root().all<scene::UIComponent>())
+        if (o->navDown == focus || o->navRight == focus) return true;
+    return false;
+}
+
 void PanelObj::navigate(int button) {
     // 0x82374160 / 0x82373A08 [C]: down / right follow nav_down / nav_right,
     // up / left the component that names this one; disabled ones are skipped.
@@ -776,7 +795,11 @@ bool ScreenObj::nativeButtonDown(int button, int player) {
 bool ScreenObj::handleNative(Interp&, const std::string& msg, std::vector<Value>& args, Value& r) {
     r = Value::integer(0);
     if (msg == "backwards_anim") return ui.setBackwardsAnim(), true;
-    if (msg == "reset_ambient" || msg == "turn_off_ambient" || msg == "wait_for_sfx") return true;
+    // GHScreen (PS2 0x00146a38 / 0x00146a40) [C]: the black overlay's alpha
+    // (UiManager::screenFade; a running fade sets it again).
+    if (msg == "reset_ambient") return ambient = 0, true;
+    if (msg == "turn_off_ambient") return ambient = 1, true;
+    if (msg == "wait_for_sfx") return true;
     if (msg == "enable" || msg == "disable") {
         if (!args.empty() && args[0].type == Value::Type::Object)
             if (auto* c = dynamic_cast<ComponentObj*>(args[0].object)) {

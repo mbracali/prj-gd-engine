@@ -1,5 +1,38 @@
 # Guitar Dream Universal Launcher: changes
 
+## 0.1.8
+
+Games
+- Guitar Hero (gd-game-01) 1.1.7: the universal menus. A new GAMEPADS
+  screen (four player boxes, instrument and device per player, two buttons
+  per control, Save / Discard, Export / Import, Generic MIDI on Linux,
+  Windows and macOS), a new Enhanced Settings menu with Modes presets and
+  finer effect levels, new default controls with no double inputs, and
+  every logo, movie and credit screen skippable with any button, a click or
+  a tap. See universal_mechanisms.md.
+  Enhanced Settings has a new HDR option: None (the original image),
+  Emulated (HDR rendering tone mapped to any screen) or True HDR (an HDR
+  display on Windows or a Linux Wayland desktop).
+- Guitar Hero II (gd-game-02) 0.1.8: the same universal menus. The new
+  GAMEPADS screen (yellow fret on the main menu), the new Enhanced Options
+  (Modes presets, finer effect levels, scrollbar, Back / Export / Import),
+  the same default controls, Generic MIDI, skippable movies and credits, and
+  the help bar's access buttons.
+  Enhanced Options has the new HDR option too.
+- Guitar Hero Encore: Rocks the 80s (gd-game-03) 0.0.2: the same universal
+  menus (GAMEPADS on the yellow fret, the Enhanced Options with Modes,
+  scrollbar and Back / Export / Import, the default controls, Generic MIDI,
+  skippable movies and credits, the help bar's access buttons), Guitar Hero
+  II's Enhanced effects, HDR, touch and calibration (every effect off by
+  default), and the menus' original animations (the screens' camera
+  transitions and fades, the buttons' focus growth and jiggling letters,
+  the looping animations).
+
+Downloads
+- The licence of RtMidi (MIT), used by the MIDI input of Guitar Hero,
+  Guitar Hero II and Guitar Hero Encore: Rocks the 80s, is in the licenses
+  folder of every desktop download.
+
 ## 0.1.7
 
 Games

@@ -54,6 +54,8 @@ public:
     UiStyle style(const std::string& cls, const std::string& type) const;
     // A type's property (e.g. "focus_scale"), or nullptr.
     const ::DataNode* typeProperty(const std::string& cls, const std::string& type, const std::string& key) const;
+    // A class's own property's value (e.g. BandButton's focus_anim_duration), or nullptr.
+    const ::DataNode* classProperty(const std::string& cls, const std::string& key) const;
 
     // BandButton's text colour for a state (@ 0x82122920): the property
     // normal_color / focus_color / disabled_color / selecting_color of the
@@ -62,6 +64,12 @@ public:
     std::array<float, 3> buttonColor(const Object& panelDir, UiState state) const;
     // focus_scale of the button's directory (1 when unset).
     float focusScale(const Object& panelDir) const;
+    // focus_jitter_interval of the button's directory (0 when unset: no
+    // re-jitter; BandButton poll, PS2 0x0028bc68 reads it).
+    float focusJitterInterval(const Object& panelDir) const;
+    // A float property of a directory: its own property array, then its
+    // PanelDir type's (ui_objects.dta), else `def`.
+    float dirFloat(const Object& panelDir, const std::string& key, float def) const;
 
     // The archive path of a resource file named in ui_objects.dta
     // ("impactor.milo" -> "ui/gen/impactor.milo_ps2"): relative to ui/.

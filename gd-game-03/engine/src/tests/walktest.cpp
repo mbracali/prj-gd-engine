@@ -38,6 +38,7 @@ extern const std::size_t kUiStubsTxtSize;
 namespace {
 
 constexpr int kX = ui::kPad_X, kTri = ui::kPad_Tri, kStart = ui::kPad_Start, kUp = ui::kPad_DUp, kDown = ui::kPad_DDown;
+constexpr int kLeft = ui::kPad_DLeft, kRight = ui::kPad_DRight;
 // long_cheats.dta's frets on this disc (the PS2 guitar): G_YELLOW kPad_Tri,
 // G_BLUE kPad_X, G_ORANGE kPad_Square [C data].
 constexpr int kYellow = ui::kPad_Tri, kBlue = ui::kPad_X, kOrange = ui::kPad_Square;
@@ -67,7 +68,10 @@ bool whitelisted(const std::string& key, const std::vector<std::string>& wl) {
 
 }  // namespace
 
-WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
+WalkDriver::WalkDriver(const std::string& name)
+    : scenario_(name == "menu_anim_loops" ? "career_full" : name), loops_(name == "menu_anim_loops") {
+    // menu_anim_loops: career_full with the looping-animation checks.
+    const std::string scenario = scenario_;
     using S = Step;
     auto screen = [&](const char* s, double timeout = 20000) { steps_.push_back({S::Screen, s, 0, timeout}); };
     auto press = [&](int b) { steps_.push_back({S::Press, "", b, 0}); };
@@ -82,6 +86,9 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         steps_.push_back(st);
     };
     auto check = [&](const char* what, double timeout = 0) { steps_.push_back({S::Check, what, 0, timeout}); };
+    // A beat-fixed wait: "until" waits for `ms` after the last "mark".
+    auto mark = [&] { steps_.push_back({S::Wait, "mark", 0, 0}); };
+    auto until = [&](double ms) { steps_.push_back({S::Wait, "until", 0, ms}); };
     // The mouse (UiManager::mouse): at a point, or on a component of the focus panel.
     auto mouseAt = [&](float x, float y, int button) {
         Step st{S::Mouse, "", button, 0};
@@ -269,6 +276,13 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         at("sel_character_new_screen");
         check("locked_portraits");
         wait(1500);  // the character opens the door
+        if (loops_) {
+            // GD03-042: animate_forever_30fps sel_character.view, and
+            // char_highlight.mnm (loop 0 3) (period 0.25) (career.dta enter).
+            check("loop_record");
+            wait(400);
+            check("loop_advances|sel_character_panel sel_character.view|sel_character_panel char_highlight.mnm");
+        }
         if (scenario == "career_song" && SDL_getenv("GD03_WALK_CHAR")) {
             // GD03_WALK_CHAR=<downs> from Punk, GD03_WALK_GUITAR=<downs> from
             // the Les Paul; the first outfit / skin when there are two.
@@ -292,6 +306,12 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         at("sel_guitar_new_screen");
         press(kDown);  // the second guitar
         wait(300);
+        if (loops_) {
+            // The guitar's turn: GuitarDisplayPanel show_guitar ... guitar_single.filt.
+            check("loop_record");
+            wait(400);
+            check("loop_advances|sel_guitar_panel guitar_single.filt");
+        }
         press(kX);
         wait(600);
         }
@@ -394,6 +414,12 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
             wait(1000);
             press(kX);
             at("unlock_venue_screen");  // the next venue (its 3 s animation, then on)
+            if (loops_) {
+                // endgame.dta: unlock_anim.grp animate (range 0 200) (period 3) on TRANSITION_COMPLETE_MSG.
+                check("loop_record");
+                wait(300);
+                check("loop_advances|unlock_venue_panel unlock_anim.grp");
+            }
             wait(1600);
             check("shot_unlock_venue");
             at("complete_screen", 20000);
@@ -409,6 +435,12 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
             press(kX);
             wait(1500);
             check("shot_store_item");
+            if (loops_) {
+                // The finish's guitar turning (store_guitar_display_panel show_guitar ... guitar_single.filt).
+                check("loop_record");
+                wait(400);
+                check("loop_advances|store_panel guitar_single.filt");
+            }
             press(kX);  // buy the first finish
             at("store_bought_screen");
             wait(900);
@@ -464,31 +496,126 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         press(kDown), wait(150), press(kDown), wait(150);  // Audio Settings -> Video Settings -> Enhanced Options
         press(kX);
         at("enhanced_options_screen");
+        check("menu_instant");  // no transition: on the next frame (universal_mechanisms.md 1.2)
         check("enhanced_default");
         check("enhanced_all_off");
         check("backdrop_band");
-        wait(300);
+        wait(500);  // a few frames through the default look
         check("aspect_43");
-        // Gamepads (the focus) -> 4 controls -> the PERFORMANCE AND GRAPHICS
-        // section -> calibration -> Screen Mode -> Max FPS -> FPS Counter ->
-        // Internal Resolution; select opens its dropdown, down and select
-        // pick the next option.
-        for (int i = 0; i < 10; ++i) press(kDown), wait(120);
+        check("enhanced_fx_default");
+        // GD03-043 / -047: HDR None with every effect off draws the venue
+        // exactly as before the effects were ported (the old build's frame,
+        // compared once by hand; here: the frame back to identical after
+        // HDR Emulated and Bloom 2x, which change it).
+        check("frame_record");
+        check("fx_set_on");
+        wait(400);
+        check("frame_differs");
+        check("fx_set_off");
+        wait(400);
+        check("frame_same");
+        // Each Enhanced Option in turn (universal_mechanisms.md 1.2.2, as
+        // gd02's walk): toggled or stepped with the pad, saved, and its
+        // effect checked. A step: down, then a press.
+        auto row = [&](int button) { press(kDown), wait(120), press(button), wait(150); };
+        auto again = [&](int button) { press(button), wait(150); };
+        // MODES: Steam Deck (the focus), Original Feel (the window and the
+        // resolution kept), Good Old Days, then Original Feel again.
+        press(kX), wait(400);
+        check("enhanced_mode_deck");
+        row(kX), wait(300);
+        check("enhanced_mode_original");
+        for (int i = 0; i < 5; ++i) press(kDown), wait(120);  // Clean, Max HD, Max 4K, Budget, Good Old Days
+        press(kX), wait(800);
+        check("enhanced_mode_old_days");
+        for (int i = 0; i < 5; ++i) press(kUp), wait(120);
+        press(kX), wait(300);
+        // CONTROLS: past the modes -> Gamepads -> Mouse (kept) -> Touch on.
+        for (int i = 0; i < 9; ++i) press(kDown), wait(120);
+        press(kX), wait(150);
+        check("enhanced_controls");
+        // Audio / Video Calibration: 8 presses on the ticks (a beat every
+        // 750 ms after 1 s, 3 lead-in beats), then 8 on the flashes (1.5 s
+        // later), then select closes the result.
+        press(kDown), wait(120);
+        press(kX), mark();
+        for (int i = 0; i < 8; ++i) until(2600 + i * 750.0), press(kX);
+        mark();
+        for (int i = 0; i < 8; ++i) until(3100 + i * 750.0), press(kX);
+        wait(750);
+        check("enhanced_calibrated");
+        press(kX), wait(200);
+        // PERFORMANCE & GRAPHICS -> Screen Mode -> Resolution; select opens
+        // its dropdown, down and select pick the next option.
+        for (int i = 0; i < 3; ++i) press(kDown), wait(120);
         press(kX);
         wait(200);
         press(kDown), wait(120);
-        press(kX);  // the window's own -> 448p (ps2)
+        press(kX);  // 448p (Good Old Days') -> 480p
         wait(300);
         check("enhanced_changed");
-        // Widescreen (16:9), the next row: on (the picture fills the
-        // frame), then off again (4:3 with its bars).
-        press(kDown), wait(120);
-        press(kX);
-        wait(400);
+        // Widescreen (16:9): on (the picture fills the frame), then off
+        // again (4:3 with its bars).
+        row(kX), wait(300);
         check("aspect_169");
-        press(kX);
-        wait(400);
+        again(kX), wait(300);
         check("aspect_43");
+        // From the original look: Sharper Text on and off again, FXAA, FSR 1
+        // (Upscaling Quality appears) at Performance.
+        row(kX), again(kX), row(kRight), row(kRight), row(kRight);
+        // Max FPS: Unlimited (up from 60 wraps), then 60 again; FPS Counter kept.
+        press(kDown), wait(120);
+        press(kX), wait(150), press(kUp), wait(120), press(kX), wait(300);
+        check("enhanced_fps_unlimited");
+        press(kX), wait(150), press(kDown), wait(120), press(kX), wait(300);
+        check("enhanced_fps_60");
+        press(kDown), wait(120);
+        // HDR (universal_mechanisms.md "HDR"): Emulated, True HDR (the window
+        // was made without an HDR surface: the documented fallback to
+        // Emulated, with why), None.
+        row(kRight), wait(400);
+        check("enhanced_hdr_emulated");
+        again(kRight), wait(400);
+        check("enhanced_hdr_true");
+        again(kRight), wait(400);
+        check("enhanced_hdr_none");
+        // Bokeh None, Particles None, Bloom 2x, Cinematic Color on, Color
+        // Grading Warm, Film Grain Medium, Chromatic Aberration Light, Ambient
+        // Occlusion Medium, Sharpening High, Blur on Star Power Medium.
+        row(kLeft), again(kLeft), row(kLeft), row(kRight), again(kRight), row(kX), row(kRight), row(kRight), again(kRight), row(kRight),
+            row(kRight), again(kRight), row(kRight), again(kRight), row(kRight), again(kRight);
+        wait(500);
+        check("enhanced_graphics");
+        // The venue extras at their defaults (off), then Band Shadows on, More
+        // Lights 2x, Dust 1.5x, Shaky Camera off.
+        check("enhanced_lights_default");
+        row(kX), row(kRight), again(kRight), row(kRight), row(kX);
+        wait(400);
+        check("enhanced_enhancers");
+        // Remove All Effects on: every effect off, the game's own too; then off again.
+        row(kX);
+        wait(400);
+        check("enhanced_no_effects");
+        press(kX), wait(400);
+        check("enhanced_effects_back");
+        // CHEATS & ENHANCERS: Export User Files, Load User Settings, Load
+        // User Progress (GD03_DIALOG: the walk's folder).
+        press(kDown), wait(120);
+        row(kX);
+        wait(300);
+        check("enhanced_exported");
+        row(kX);
+        wait(300);
+        check("enhanced_settings_loaded");
+        row(kX);
+        wait(300);
+        check("enhanced_progress_loaded");
+        // Enable Cut Content (not built: stays off), No Fail Mode, Autoplay,
+        // Forgiving Hammer-ons and Pull-offs.
+        row(kX), row(kX), row(kX), row(kX);
+        check("enhanced_cheats");
+        // The port's cheats back off (the walk's own save; tidy).
+        press(kUp), wait(120), press(kX), wait(150), press(kUp), wait(120), press(kX), wait(150);
         press(kTri);
         at("options_screen");
         press(kX);  // Enhanced Options again (the focus): the band again
@@ -513,24 +640,43 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         mouseOn("port_enhanced.btn", 1);
         at("enhanced_options_screen");
         wait(300);
-        // In-Game Max FPS (the list's 13th row; its dropdown opens upward):
-        // 60 is its first option, 85 units above the row.
-        mouseAt(480, 592, 0);
-        mouseAt(480, 592, 1);
-        wait(200);
-        mouseAt(480, 502, 0);
-        mouseAt(480, 502, 1);
+        // MODES > Clean Image (the list's 4th row, every section open).
+        mouseAt(300, 297, 0);
+        mouseAt(300, 297, 1);
         wait(300);
-        check("enhanced_fps_60");
-        // The wheel three rows down to Widescreen (16:9), the list scrolled
-        // to keep it in view (its row then 570..604), and its box clicked.
-        for (int i = 0; i < 3; ++i) mouseAt(480, 592, 5), wait(120);
+        check("enhanced_mode_clean");
+        // MODES collapsed (a click on its title): Resolution is the list's
+        // 11th row; its dropdown opens upward, 720p 180 units above the row.
+        mouseAt(300, 190, 0);
+        mouseAt(300, 190, 1);
+        wait(300);
+        mouseAt(480, 523, 0);
+        mouseAt(480, 523, 1);
+        wait(200);
+        mouseAt(480, 343, 0);
+        mouseAt(480, 343, 1);
+        wait(300);
+        check("enhanced_res_720");
+        // Widescreen (16:9), the next row (cut off at the list's bottom): the
+        // wheel down one row scrolls it into view (row 530..564), then clicked.
+        mouseAt(480, 523, 5);
         wait(600);
-        mouseAt(480, 587, 0);
-        mouseAt(480, 587, 1);
+        mouseAt(480, 547, 0);
+        mouseAt(480, 547, 1);
         wait(300);
         check("widescreen_on");
-        mouseAt(480, 592, 3);  // right click: back
+        // The scrollbar's bottom: the list's end, Monkey Head Crowd clicked on, then off.
+        mouseAt(66, 572, 1);
+        wait(800);
+        mouseAt(300, 555, 0);
+        mouseAt(300, 555, 1);
+        wait(200);
+        check("cheat_menu_monkey");
+        mouseAt(300, 555, 1);
+        wait(200);
+        // The Back button under the list.
+        mouseAt(150, 608, 0);
+        mouseAt(150, 608, 1);
         at("options_screen");
         wait(300);
         check("click_help1");  // the help bar's BACK, drawn in the 16:9 picture now
@@ -543,13 +689,24 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         expect_ = {"main_screen", "options_screen", "enhanced_options_screen", "options_screen", "main_screen"};
     } else if (scenario == "gamepads") {
         at("main_screen");
+        check("gp_p1_keyboard");  // the keyboard is player 1 (whatever pads this machine has)
         key(SDLK_3);  // the keyboard's yellow fret
         at("gamepads_screen", 3000);
-        for (int i = 0; i < 11; ++i) press(kUp), wait(80);  // up from the keyboard wraps to its rows: Whammy
+        check("menu_instant");  // no transition: on the next frame (universal_mechanisms.md 1.2)
+        // The Gamepad menu (universal_mechanisms.md 1.2.1): Player 1 ->
+        // Instrument -> Bind to -> Customize inputs, then INPUTS MAPPING.
+        for (int i = 0; i < 3; ++i) press(kDown), wait(80);
+        press(kX), wait(200);
+        check("gp_editing");
+        for (int i = 0; i < 13; ++i) press(kDown), wait(60);  // Start .. Whammy (the headings are skipped)
+        press(ui::kPad_DRight), wait(80);  // Key 2
         press(kX);  // waits for a key
         wait(200);
         key(SDLK_E);
         wait(300);
+        check("whammy_e_unsaved");  // works at once, written only on Save
+        for (int i = 0; i < 4; ++i) press(kDown), wait(60);  // Gyro, Require Strum, Reset, Save
+        press(kX), wait(300);
         check("whammy_is_e");
         press(kTri);
         at("main_screen");
@@ -557,6 +714,114 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         check("click_help1");  // the help bar's GAMEPADS
         at("gamepads_screen", 3000);
         expect_ = {"main_screen", "gamepads_screen", "main_screen", "gamepads_screen"};
+    } else if (scenario == "gamepads_pad") {
+        // A pad plugged in takes player 1 (the keyboard player 2); Player 2's
+        // Bind to > Detect, then the pad's A: the pad is player 2.
+        at("main_screen");
+        check("vpad_attach");
+        wait(600);
+        key(SDLK_3);
+        at("gamepads_screen", 3000);
+        for (int i = 0; i < 6; ++i) press(kDown), wait(80);  // Player 2's Bind to
+        press(kX), wait(150);  // its dropdown (on the keyboard)
+        press(kUp), wait(80), press(kUp), wait(80);  // None, then round to Detect
+        press(kX), wait(150);
+        check("gp_detecting");
+        check("vpad_press");
+        wait(300);
+        check("pad_is_p2");
+        press(kTri);
+        at("main_screen");
+        expect_ = {"main_screen", "gamepads_screen", "main_screen"};
+    } else if (scenario == "band") {
+        // Band naming with real keys (universal_mechanisms.md 1.1.2): the
+        // arrows change the letter (each one step: menu Up / Down and the
+        // strum are one key, no double input), green (1) takes it, Enter
+        // (Start) finishes the name.
+        bootToMain();
+        at("main_screen");
+        press(kUp);  // CAREER
+        wait(150);
+        press(kX);
+        at("chooseprof_screen");
+        press(kX);  // NEW BAND
+        at("nameprof_screen");
+        wait(600);
+        key(SDLK_DOWN), wait(250), key(SDLK_DOWN), wait(250);  // A -> C
+        key(SDLK_1), wait(250);                                // "C"
+        key(SDLK_DOWN), wait(250);                             // D
+        key(SDLK_1), wait(250);                                // "CD"
+        key(SDLK_RETURN);
+        at("sel_difficulty_screen");
+        check("band_named_CD");
+        expect_ = {"bootup_load", "bootup_create_save_check", "bootup_create_save", "cut_scene_screen", "splash_screen", "main_screen",
+                   "chooseprof_screen", "nameprof_screen", "sel_difficulty_screen"};
+    } else if (scenario == "logo_skip") {
+        // Logos and credits skip (universal_mechanisms.md 1.1.1): the boot
+        // splashes by the red fret (2), the credits by the green fret (1),
+        // then again by a click.
+        wait(300);
+        key(SDLK_2);
+        check("splashes_skipped", 1000);
+        bootToMain();
+        at("main_screen");
+        for (int i = 0; i < 3; ++i) press(kDown), wait(150);  // OPTIONS (past MULTIPLAYER)
+        press(kX);
+        at("options_screen");
+        wait(300);
+        mouseOn("op_credit.btn", 1);
+        at("credits_screen");
+        wait(1500);
+        key(SDLK_1);
+        at("options_screen");
+        wait(300);
+        mouseOn("op_credit.btn", 1);
+        at("credits_screen");
+        wait(1500);
+        mouseAt(640, 360, 1);
+        at("options_screen");
+        expect_ = {"bootup_load", "bootup_create_save_check", "bootup_create_save", "cut_scene_screen", "splash_screen", "main_screen",
+                   "options_screen", "credits_screen", "options_screen", "credits_screen", "options_screen"};
+    } else if (scenario == "menu_anim") {
+        // The menus' own animations (GD03-026, Encore's code): a button that
+        // gains focus grows to the panel's focus_scale over 0.1 s
+        // (button.tnm), and a screen change turns the shared metacam
+        // (meta_cam_pause_right_out.tnm out, meta_cam_right_in.tnm in, 0.5 s
+        // each; back: right_in and right_out reversed).
+        at("main_screen");
+        wait(2500);  // the main menu's entrance over
+        press(kDown);  // QUICK PLAY -> MULTIPLAYER
+        check("focus_anim_start");
+        wait(300);
+        check("focus_anim_end");
+        // GD03-044: main.milo's focus_jitter_interval 0.1: the focused
+        // button's letters jitter anew every 0.1 s once it has grown.
+        check("jitter_record");
+        wait(350);
+        check("jitter_advances");
+        press(kDown), wait(150), press(kDown), wait(300);  // TRAINING, OPTIONS
+        press(kX);
+        wait(200);
+        check("metacam_out_forward");
+        check("fade_mid");  // GHScreen's exit fade to black (0 -> 1 over 0.5 s)
+        wait(500);  // the entrance's first half
+        check("metacam_in_forward");
+        check("fade_mid");  // the entrance's fade from black
+        at("options_screen");
+        wait(300);
+        check("metacam_rest");
+        check("fade_clear");
+        press(kTri);
+        wait(200);
+        check("metacam_out_back");
+        check("fade_mid");
+        wait(500);
+        check("metacam_in_back");
+        at("main_screen");
+        wait(300);
+        check("metacam_rest");
+        check("fade_clear");  // main's enter turn_off_ambient, then its entrance's fade to 0
+        expect_ = {"main_screen", "options_screen", "main_screen"};
     } else if (scenario == "stickyaxis") {
         at("main_screen");
         check("adapter_attach");
@@ -799,7 +1064,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
 
 std::string WalkDriver::startScreen() const {
     if (scenario_ == "lose" || scenario_ == "pause" || scenario_ == "back" || scenario_ == "enhanced" || scenario_ == "cheats" ||
-        scenario_ == "mouse" || scenario_ == "gamepads" || scenario_ == "stickyaxis" || scenario_ == "practice" || scenario_ == "tutorial" ||
+        scenario_ == "mouse" || scenario_ == "gamepads" || scenario_ == "gamepads_pad" || scenario_ == "menu_anim" || scenario_ == "stickyaxis" || scenario_ == "practice" || scenario_ == "tutorial" ||
         scenario_ == "options")
         return "main_screen";
     if (scenario_ == "attract") return "splash_screen";
@@ -876,7 +1141,8 @@ void WalkDriver::poll(ui::UiManager& ui, double nowMs) {
     }
     case Step::Wait:
     case Step::Hold:
-        if (nowMs - stepStart_ >= s.ms) ++step_, stepStart_ = -1;
+        if (s.kind == Step::Wait && s.screen == "mark") markMs_ = nowMs;
+        if (nowMs - (s.kind == Step::Wait && s.screen == "until" ? markMs_ : stepStart_) >= s.ms) ++step_, stepStart_ = -1;
         return;
     }
 }
@@ -921,6 +1187,42 @@ static bool mainCamera(ui::UiManager& ui, std::array<float, 3>& pos) {
 void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
     auto fail = [&](const std::string& e) { error_ = e, failed_ = done_ = true; };
     auto pass = [&] { ++step_, stepStart_ = -1; };
+    if (s.screen == "jitter_record" || s.screen == "jitter_advances") {
+        ui::PanelObj* fp = ui.focusPanel();
+        if (!fp || !fp->view) return fail("no focus panel with a view");
+        const uint32_t n = fp->view->buttonJitter(fp->focus);
+        std::printf("  focus jitter: %s re-jittered %u times\n", fp->focus.c_str(), n);
+        if (s.screen == "jitter_record") return jitter0_ = n, pass();
+        return n >= jitter0_ + 2 ? pass() : fail("the focused button's letters did not re-jitter every focus_jitter_interval");
+    }
+    if (s.screen == "fade_mid" || s.screen == "fade_clear") {
+        const float f = ui.screenFade();
+        std::printf("  screen fade (%s): %.2f\n", ui.currentScreen().c_str(), double(f));
+        if (s.screen == "fade_mid") return f > 0.05f && f < 0.95f ? pass() : fail("no fade to / from black under way");
+        return f == 0 ? pass() : fail("the screen is still dimmed");
+    }
+    if (s.screen == "loop_record") {
+        loops0_ = ui.upPanelFrames();
+        return pass();
+    }
+    if (s.screen.rfind("loop_advances|", 0) == 0) {
+        // "loop_advances|<panel> <object>|...": each one's frame moved since
+        // loop_record (a looping animation of the screen still plays).
+        const std::map<std::string, float> now = ui.upPanelFrames();
+        size_t at = s.screen.find('|');
+        while (at != std::string::npos) {
+            const size_t next = s.screen.find('|', at + 1);
+            const std::string key = s.screen.substr(at + 1, next == std::string::npos ? std::string::npos : next - at - 1);
+            at = next;
+            auto a = loops0_.find(key);
+            auto b = now.find(key);
+            std::printf("  loop %s: %.2f -> %.2f\n", key.c_str(), a == loops0_.end() ? -1.0 : double(a->second),
+                        b == now.end() ? -1.0 : double(b->second));
+            if (b == now.end()) return fail(key + " never animated");
+            if (a != loops0_.end() && a->second == b->second) return fail(key + " stopped");
+        }
+        return pass();
+    }
     if (s.screen == "name_entry_1" || s.screen == "name_entry_2") {
         // BandTextEntry's Texts are aligned middle left (0x82144558): the
         // entered text starts at the same x whatever its length and the
@@ -934,7 +1236,10 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
             }
         if (!entered || !picking) return fail("the name entry drew no entered text or picked character");
         std::printf("  name entry: entered %.1f..%.1f, picking %.1f..%.1f\n", entered->x0, entered->x1, picking->x0, picking->x1);
-        if (picking->x0 < entered->x1 - 1) return fail("the picked character overlaps the entered name");
+        // The glyphs' boxes may touch: allow 10% of the name's width (the
+        // camera zooms in on a short name: zoom_tnm animates to its length).
+        if (picking->x0 < entered->x1 - std::max(1.0f, 0.1f * (entered->x1 - entered->x0)))
+            return fail("the picked character overlaps the entered name");
         if (s.screen == "name_entry_1") nameX0_ = entered->x0;
         else if (std::fabs(entered->x0 - nameX0_) > 1) return fail("the name does not grow left to right (its start moved)");
         return pass();
@@ -1017,10 +1322,60 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
                 }
         return fail("the help bar's second item was not drawn");
     }
-    if (s.screen == "whammy_is_e") {
-        bool bound = false;
-        for (const Input::Source& src : ui.input().bindings("keyboard")[size_t(Input::Control::Whammy)])
-            bound = bound || (src.kind == Input::Source::Kind::Key && src.index == int(SDLK_E));
+    if (s.screen == "focus_anim_start" || s.screen == "focus_anim_end") {
+        ui::PanelObj* fp = ui.focusPanel();
+        if (!fp || !fp->view) return fail("no focus panel with a view");
+        const float scale = fp->view->buttonScaleNow(fp->focus);
+        std::printf("  menu anim: %s at %.4f\n", fp->focus.c_str(), double(scale));
+        if (s.screen == "focus_anim_start") {
+            focusScale0_ = scale;
+            return scale >= 0.999f && scale < 1.04f ? pass() : fail("the newly focused button did not start its grow from 1");
+        }
+        return scale > focusScale0_ + 0.01f && scale > 1.01f ? pass() : fail("the focused button did not grow to its focus scale");
+    }
+    if (s.screen.rfind("metacam_", 0) == 0) {
+        const float out = ui.metacamFrame("meta_cam_pause_right_out.tnm"), in = ui.metacamFrame("meta_cam_right_in.tnm"),
+                    back = ui.metacamFrame("meta_cam_right_out.tnm");
+        std::printf("  metacam: pause_right_out %.0f, right_in %.0f, right_out %.0f, in transition %d\n", double(out), double(in), double(back),
+                    ui.inTransition());
+        const auto mid = [](float f) { return f > 0 && f < 500; };
+        if (s.screen == "metacam_out_forward") return mid(out) ? pass() : fail("no forward exit (meta_cam_pause_right_out.tnm) under way");
+        if (s.screen == "metacam_in_forward") return mid(in) ? pass() : fail("no forward entrance (meta_cam_right_in.tnm) under way");
+        if (s.screen == "metacam_out_back") return mid(in) ? pass() : fail("no backward exit (meta_cam_right_in.tnm reversed) under way");
+        if (s.screen == "metacam_in_back") return mid(in) ? pass() : fail("no entrance after the backward exit (meta_cam_right_in.tnm) under way");
+        return !ui.inTransition() && in == 500 && out < 0 && back < 0 ? pass() : fail("the metacam is not at rest (meta_cam_right_in.tnm 500)");
+    }
+    if (s.screen == "menu_instant") return !ui.inTransition() ? pass() : fail("a universal menu opened through a screen transition");
+    if (s.screen == "gp_p1_keyboard") {
+        ui.input().setPlayer("keyboard", 0);
+        // Touch off (the desktop default, whatever the walk's save says), so
+        // the keyboard's rows end as on a desktop (no TOUCH SCREEN section).
+        ui.input().setTouch(false);
+        return pass();
+    }
+    if (s.screen == "gp_editing") return ui.input().editing() ? pass() : fail("Customize inputs did not start an edit");
+    if (s.screen == "gp_detecting") return ui.input().detecting() ? pass() : fail("Bind to > Detect did not wait for a device");
+    if (s.screen == "vpad_attach") {
+        adapter_ = Input::attachVirtualPad("045e:028e");
+        return adapter_ ? pass() : fail("no virtual pad");
+    }
+    if (s.screen == "vpad_press") {
+        SDL_Joystick* j = SDL_GetJoystickFromID(adapter_);
+        if (!j) return fail("the virtual pad is not open");
+        SDL_SetJoystickVirtualButton(j, SDL_GAMEPAD_BUTTON_SOUTH, true);
+        return pass();
+    }
+    if (s.screen == "pad_is_p2") {
+        if (SDL_Joystick* j = SDL_GetJoystickFromID(adapter_)) SDL_SetJoystickVirtualButton(j, SDL_GAMEPAD_BUTTON_SOUTH, false);
+        const std::string p2 = ui.input().playerDevice(1), p1 = ui.input().playerDevice(0);
+        std::printf("  gamepads: player 1 %s, player 2 %s\n", p1.c_str(), p2.c_str());
+        return p2 == "pad:" + std::to_string(adapter_) && p1 == "keyboard" && !ui.input().detecting()
+                   ? pass() : fail("Detect did not bind the pad pressed to player 2 (the keyboard to player 1)");
+    }
+    if (s.screen == "whammy_is_e" || s.screen == "whammy_e_unsaved") {
+        // Key 2 of the keyboard's Whammy is E, Key 1 (Shift) kept.
+        const auto& w = ui.input().bindings("keyboard")[size_t(Input::Control::Whammy)];
+        const bool bound = w.size() == 2 && w[0].index == int(SDLK_LSHIFT) && w[1].kind == Input::Source::Kind::Key && w[1].index == int(SDLK_E);
         const char* dir = SDL_getenv("GD03_SAVE_DIR");
         std::ifstream f(std::filesystem::path(dir ? dir : "") / "controllers.json");
         std::stringstream ss;
@@ -1032,8 +1387,94 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
                 saved = saved || (j["kind"].str() == "key" && int(j["index"].num()) == int(SDLK_E));
         } catch (const std::exception&) {
         }
-        std::printf("  gamepads: Whammy %s, controllers.json %s\n", bound ? "on E" : "not on E", saved ? "has it" : "does not");
-        return bound && saved ? pass() : fail("the rebinding of the keyboard's Whammy to E did not take or was not saved");
+        std::printf("  gamepads: Whammy %s, controllers.json %s\n", bound ? "on Shift / E" : "not on Shift / E", saved ? "has it" : "does not");
+        if (s.screen == "whammy_e_unsaved")
+            return bound && !saved && ui.input().editing() ? pass() : fail("Key 2 of Whammy did not take at once, or was saved before Save");
+        return bound && saved && !ui.input().editing() ? pass() : fail("the rebinding of the keyboard's Whammy to E did not take or was not saved");
+    }
+    if (s.screen == "cheat_menu_monkey") {
+        const bool monkey = ui.cheatOn("cheat_monkey_head_crowd");
+        std::printf("  cheats (Enhanced Options): monkey %d\n", monkey);
+        return monkey ? pass() : fail("Monkey Head Crowd did not turn on from the menu");
+    }
+    if (s.screen.rfind("enhanced_mode_", 0) == 0 || s.screen == "enhanced_res_720" || s.screen == "enhanced_fps_unlimited" ||
+        s.screen == "enhanced_exported" || s.screen == "enhanced_settings_loaded" || s.screen == "enhanced_progress_loaded") {
+        // The universal Enhanced menu (universal_mechanisms.md 1.2.2): what
+        // is in effect, in enhanced.json and the panel's status line.
+        Json saved = Json::object();
+        {
+            std::ifstream f(std::filesystem::path(ui.savePath()).parent_path() / "enhanced.json");
+            std::stringstream ss;
+            ss << f.rdbuf();
+            try {
+                saved = Json::parse(ss.str());
+            } catch (const std::exception&) {
+            }
+        }
+        std::string problems;
+        auto add = [&](const std::string& p) { problems += (problems.empty() ? "" : "; ") + p; };
+        auto want = [&](const char* key, const std::string& v) {
+            const std::string got = ui.host().enhancedValue(key), file = saved.has(key) ? saved[key].str() : "(unset)";
+            std::printf("  enhanced: %s %s (enhanced.json %s)\n", key, got.c_str(), file.c_str());
+            if (got != v || file != v) add(std::string(key) + " is " + got + " / " + file + ", not " + v);
+        };
+        auto status = [&](const char* prefix) {
+            const std::string st = ui.host().enhancedStatus();
+            std::printf("  enhanced status: %s\n", st.c_str());
+            if (st.rfind(prefix, 0) != 0) add("the status is \"" + st + "\", not " + prefix + "...");
+        };
+        const std::string& w = s.screen;
+        const char* dir = SDL_getenv("GD03_DIALOG");
+        const std::filesystem::path d = dir ? dir : "";
+        if (w.rfind("enhanced_mode_", 0) == 0) {
+            const std::string mode = w == "enhanced_mode_deck" ? "steam_deck" : w == "enhanced_mode_old_days" ? "good_old_days" : w.substr(14);
+            const auto preset = ui::enhancedPreset(mode);
+            if (preset.empty()) add("no mode " + mode);
+            for (const auto& [key, v] : preset) want(key.c_str(), v);
+            status("Mode applied");
+            if (w == "enhanced_mode_original") want("internal_res", "800"), want("screen_mode", "fullscreen");  // Steam Deck's, kept
+            if (w == "enhanced_mode_old_days") {
+                for (const auto& [key, lo] : {std::pair{"fx_on", 1}, std::pair{"particle_rate", 20}}) {
+                    const int v = ui.host().enhancedState(key);
+                    std::printf("  enhanced state: %s %d\n", key, v);
+                    if (v != lo) add(std::string(key) + " is " + std::to_string(v));
+                }
+            }
+        } else if (w == "enhanced_res_720") {
+            want("internal_res", "720");
+        } else if (w == "enhanced_fps_unlimited") {
+            want("max_fps", "unlimited");
+        } else if (w == "enhanced_exported") {
+            status("Exported to");
+            for (const char* f : {"GD03-user-settings.json", "GD03-user-progress.json"}) {
+                std::error_code ec;
+                const auto size = std::filesystem::file_size(d / f, ec);
+                std::printf("  exported %s: %s\n", f, ec ? "missing" : (std::to_string(size) + " bytes").c_str());
+                if (ec || size < 10) add(std::string(f) + " was not written");
+            }
+            // Options removed from every game (Ground Fog, Light Streaks) and
+            // 0.0.1's XInput switch in the file to load next: ignored. The
+            // resolution changed in the file: loaded.
+            try {
+                std::ifstream in(d / "GD03-user-settings.json");
+                std::stringstream ss;
+                ss << in.rdbuf();
+                Json j = Json::parse(ss.str());
+                j.set("ground_fog", Json::string("full")), j.set("light_streaks", Json::string("on")), j.set("xinput", Json::string("off"));
+                j.set("internal_res", Json::string("720"));
+                std::ofstream(d / "GD03-user-settings.json") << j.dump(2);
+            } catch (const std::exception&) {
+                add("GD03-user-settings.json does not parse");
+            }
+        } else if (w == "enhanced_settings_loaded") {
+            status("Settings loaded");
+            want("internal_res", "720"), want("max_fps", "60");
+            for (const char* gone : {"ground_fog", "light_streaks", "xinput"})
+                if (saved.has(gone)) add(std::string(gone) + " (removed) was loaded");
+        } else if (w == "enhanced_progress_loaded") {
+            status("Progress loaded");
+        }
+        return problems.empty() ? pass() : fail(problems);
     }
     if (s.screen == "adapter_attach") {
         adapter_ = Input::attachVirtualPad("0079:0006:dpadaxis=-32768");
@@ -1215,15 +1656,144 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
     // The mouse is a control (on in every gd-game); the rest are off, the
     // PS2's 60 FPS, the window's own resolution and the 4:3 picture. The
     // rows gd03 does not have yet show off (greyed); the cheats are off.
+    if (s.screen == "fx_set_on" || s.screen == "fx_set_off") {
+        const bool on = s.screen == "fx_set_on";
+        ui.host().setEnhancedValue("hdr", on ? "emulated" : "none");
+        ui.host().setEnhancedValue("bloom", on ? "2x" : "none");
+        return pass();
+    }
+    if (s.screen == "frame_record" || s.screen == "frame_differs" || s.screen == "frame_same") {
+        // The backdrop's top right (clear of the panel's list and help box):
+        // a hash of its pixels in a screenshot.
+        const std::string shot = (std::filesystem::path(ui.savePath()).parent_path() / "walk_frame.bmp").string();
+        uint64_t hash = 1469598103934665603ull;
+        bool read = false;
+        if (ui.host().saveScreenshot(shot))
+            if (SDL_Surface* raw = SDL_LoadBMP(shot.c_str())) {
+                if (SDL_Surface* px = SDL_ConvertSurface(raw, SDL_PIXELFORMAT_RGBA32)) {
+                    read = true;
+                    for (int y = px->h * 90 / 720; y < px->h * 350 / 720; ++y)
+                        for (int x = px->w * 660 / 1280; x < px->w * 1270 / 1280; ++x) {
+                            const Uint8* c = static_cast<const Uint8*>(px->pixels) + size_t(y) * size_t(px->pitch) + size_t(x) * 4;
+                            for (int k = 0; k < 3; ++k) hash = (hash ^ c[k]) * 1099511628211ull;
+                        }
+                    SDL_DestroySurface(px);
+                }
+                SDL_DestroySurface(raw);
+            }
+        std::error_code ec;
+        std::filesystem::remove(shot, ec);
+        std::printf("  frame (%s): %016llx\n", s.screen.c_str(), static_cast<unsigned long long>(hash));
+        if (!read) return fail("the frame could not be read back");
+        if (s.screen == "frame_record") return frameHash_ = hash, pass();
+        if (s.screen == "frame_differs") return hash != frameHash_ ? pass() : fail("HDR Emulated and Bloom 2x left the frame as it was");
+        return hash == frameHash_ ? pass() : fail("HDR None with the effects off does not draw the frame as before");
+    }
+    if (s.screen == "enhanced_fx_default" || s.screen == "enhanced_controls" || s.screen == "enhanced_calibrated" ||
+        s.screen.rfind("enhanced_hdr_", 0) == 0 || s.screen == "enhanced_graphics" || s.screen == "enhanced_no_effects" ||
+        s.screen == "enhanced_effects_back" || s.screen == "enhanced_lights_default" || s.screen == "enhanced_enhancers" ||
+        s.screen == "enhanced_cheats") {
+        // The Enhanced Options' effects (GD03-043, gd02's walk): saved, in
+        // effect (UiHost::enhancedState) and run by the port's chain.
+        Json saved;
+        {
+            std::ifstream f(std::filesystem::path(ui.savePath()).parent_path() / "enhanced.json");
+            std::stringstream ss;
+            ss << f.rdbuf();
+            try {
+                saved = Json::parse(ss.str());
+            } catch (const std::exception&) {
+                saved = Json::object();
+            }
+        }
+        std::string problems;
+        auto add = [&](const std::string& p) { problems += (problems.empty() ? "" : "; ") + p; };
+        auto want = [&](const char* key, const std::string& v) {
+            const std::string got = ui.host().enhancedValue(key), file = saved.has(key) ? saved[key].str() : "(unset)";
+            std::printf("  enhanced: %s %s (enhanced.json %s)\n", key, got.c_str(), file.c_str());
+            if (got != v || file != v) add(std::string(key) + " is " + got + " / " + file + ", not " + v);
+        };
+        auto state = [&](const char* key, int lo, int hi) {
+            const int v = ui.host().enhancedState(key);
+            std::printf("  enhanced state: %s %d\n", key, v);
+            if (v < lo || v > hi) add(std::string(key) + " is " + std::to_string(v));
+        };
+        constexpr int kMany = 1 << 30;
+        const std::string& w = s.screen;
+        if (w == "enhanced_fx_default") {
+            // The original look: the game's own depth of field, particles and
+            // shake; none of the port's effects, the menus' textures as the
+            // original's, and the frame drawn exactly as before (no chain).
+            state("fx_on", 0, 0), state("post_original", 1, 1);
+            for (const char* pass : {"fx:down", "fx:up", "fx:ao", "fx:composite", "fx:finish"}) state(pass, 0, 0);
+            state("particles", 1, 1), state("particle_rate", 10, 10), state("shake", 1, 1), state("sharp_ui", 0, 0), state("hdr", 0, 0);
+            state("xinput", 1, 1), state("rockband", 1, 1);  // always on (no switches since 0.0.2)
+        } else if (w.rfind("enhanced_hdr_", 0) == 0) {
+            const std::string mode = w == "enhanced_hdr_emulated" ? "emulated" : w == "enhanced_hdr_true" ? "true" : "none";
+            want("hdr", mode);
+            const int level = mode == "none" ? 0 : mode == "emulated" ? 1 : 2;
+            state("hdr", level, level);
+            // The HDR passes (exposure, tone map) run with Emulated and True HDR only.
+            state("fx:lum", level ? 1 : 0, level ? 1 : 0), state("fx:adapt", level ? 1 : 0, level ? 1 : 0);
+            const std::string st = ui.host().enhancedValue("hdr_status");
+            std::printf("  enhanced hdr status: %s\n", st.c_str());
+            // True HDR chosen in the menu: the surface is made at start, so Emulated until then (or unavailable).
+            const char* prefix = mode == "none" ? "" : mode == "emulated" ? "Emulated" : "True HDR ";
+            if (st.rfind(prefix, 0) != 0 || (mode == "true" && st.find("Using Emulated") == std::string::npos) || (mode == "none" && !st.empty()))
+                add("the HDR status is \"" + st + "\"");
+        } else if (w == "enhanced_controls") {
+            want("touch", "on");
+            state("touch", 1, 1), state("rockband", 1, 1), state("xinput", 1, 1);
+        } else if (w == "enhanced_calibrated") {
+            // The presses came 0..30 ms after the ticks and flashes.
+            for (const char* key : {"audio_offset", "video_offset"}) {
+                const std::string v = saved.has(key) ? saved[key].str() : "";
+                std::printf("  enhanced: %s %s\n", key, v.c_str());
+                if (v.empty() || std::abs(std::atoi(v.c_str())) > 337) add(std::string(key) + " not calibrated (" + v + ")");
+            }
+            state("calibration_ms", -500, 300);
+        } else if (w == "enhanced_graphics") {
+            want("sharp_ui", "off"), want("antialiasing", "fxaa"), want("ai_upscaling", "fsr1"), want("ai_upscaling_mode", "performance");
+            want("bokeh", "none"), want("particles", "none"), want("bloom", "2x"), want("cinematic_color", "on"), want("color_grade", "warm");
+            want("film_grain", "medium"), want("chromatic", "light"), want("ssao", "medium");
+            want("sharpening", "high"), want("star_blur", "medium");
+            state("sharp_ui", 0, 0), state("particles", 0, 0), state("post_dof", 0, 0);
+            for (const char* pass : {"fx:down", "fx:up", "fx:ao", "fx:composite", "fx:fxaa", "fx:easu", "fx:rcas", "fx:finish"}) state(pass, 1, 1);
+            state("fx:taa", 0, 0), state("fx:downsample", 0, 0);
+        } else if (w == "enhanced_no_effects") {
+            want("no_effects", "on");
+            state("fx_on", 0, 0), state("post_original", 0, 0), state("post_key", 0, 0), state("post_dof", 0, 0), state("shake", 0, 0);
+        } else if (w == "enhanced_effects_back") {
+            want("no_effects", "off");
+            state("fx_on", 1, 1), state("post_original", 1, 1), state("shake", 0, 0);  // Disable Shaky Camera is on
+        } else if (w == "enhanced_lights_default") {
+            state("shadows", 0, 0), state("beams", 0, 0), state("motes", 0, 0);
+        } else if (w == "enhanced_enhancers") {
+            want("shadows_all", "on"), want("more_lights", "2x"), want("light_dust", "1.5x"), want("no_shaky_cam", "on");
+            state("shadows", 1, kMany), state("beams", 1, kMany), state("motes", 1, kMany), state("shake", 0, 0);
+        } else if (w == "enhanced_cheats") {
+            want("no_fail", "on"), want("autoplay", "on"), want("hopo_mode", "forgiving");
+            if (saved.has("cut_content")) add("Enable Cut Content (not built) was saved");
+        }
+        return problems.empty() ? pass() : fail(problems);
+    }
     if (s.screen == "enhanced_all_off") {
+        // Every effect off (GD03-043): Bokeh Medium and Particles Original are
+        // the game's own, HDR None; touch off on a desktop.
         const std::vector<std::pair<const char*, const char*>> want = {
-            {"screen_mode", "windowed"}, {"max_fps", "60"}, {"fps_counter", "off"}, {"mouse", "on"},
-            {"internal_res", "0"},       {"widescreen", "off"}};
+            {"screen_mode", "windowed"}, {"max_fps", "60"},      {"fps_counter", "off"},    {"mouse", "on"},         {"internal_res", "0"},
+            {"widescreen", "off"},       {"touch", "off"},       {"hdr", "none"},           {"sharp_ui", "off"},     {"antialiasing", "none"},
+            {"ai_upscaling", "none"},    {"bokeh", "medium"},    {"particles", "original"}, {"bloom", "none"},       {"cinematic_color", "off"},
+            {"color_grade", "off"},      {"film_grain", "none"}, {"chromatic", "none"},     {"ssao", "none"},        {"sharpening", "off"},
+            {"star_blur", "none"},       {"no_effects", "off"},  {"shadows_all", "off"},    {"more_lights", "none"}, {"light_dust", "none"},
+            {"no_shaky_cam", "off"},     {"no_fail", "off"},     {"autoplay", "off"},       {"hopo_mode", "original"}};
         for (const auto& [k, v] : want) {
             const std::string got = ui.host().enhancedValue(k);
             if (got != v) return fail(std::string("Enhanced Options ") + k + " starts " + got + ", not " + v);
         }
-        if (ui::enhancedSettings().size() != want.size()) return fail("an Enhanced setting without its default in the walk");
+        for (const ui::EnhancedSetting& e : ui::enhancedSettings())
+            if (!e.values.empty() && ui.host().enhancedValue(e.key) != e.values.front())
+                return fail(std::string("Enhanced Options ") + e.key + " does not start at its first value");
         for (const char* c : {"cheat_unlock_all", "cheat_air_guitar", "cheat_performance_mode", "cheat_hyper_speed_mode",
                               "cheat_flaming_head", "cheat_eyeball_head_crowd", "cheat_monkey_head_crowd"})
             if (ui.cheatOn(c)) return fail(std::string("the cheat ") + c + " starts on");
@@ -1262,10 +1832,10 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         if (barsBlack == wide) return fail(wide ? "16:9: the frame's sides are still black" : "4:3: no black bars at the sides");
         return pass();
     }
-    // The Enhanced Options: Internal Resolution at its default (the
-    // window's own), then 448p after one select, saved in enhanced.json.
+    // The Enhanced Options: Resolution at its default (the window's own),
+    // then 480p (one down from Good Old Days' 448p), saved in enhanced.json.
     if (s.screen == "enhanced_default" || s.screen == "enhanced_changed") {
-        const std::string want = s.screen == "enhanced_default" ? "0" : "448";
+        const std::string want = s.screen == "enhanced_default" ? "0" : "480";
         const std::string got = ui.host().enhancedValue("internal_res");
         std::printf("  enhanced: internal_res %s\n", got.c_str());
         if (got != want) return fail("Internal Resolution is " + got + ", not " + want);
@@ -1342,6 +1912,14 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         if (it->second.score <= 0) return fail("the co-op record has no score");
         // One song with three stars or more: guitars.dta's (require (songs 1) (stars 3)) bass.
         if (it->second.stars >= 3 && awards != " bass_sg_mahogany") return fail("co-op did not award bass_sg_mahogany (only)");
+        ++step_, stepStart_ = -1;
+        return;
+    }
+    if (s.screen == "band_named_CD") {
+        const int slot = ui.session().profileSlot;
+        const std::string name = slot < 0 ? "" : ui.career().profiles[size_t(slot)].name;
+        std::printf("  band: new band \"%s\"\n", name.c_str());
+        if (name != "CD") return fail("the band's name is \"" + name + "\", not \"CD\" (arrows, green, Enter)");
         ++step_, stepStart_ = -1;
         return;
     }

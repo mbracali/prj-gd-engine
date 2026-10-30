@@ -122,6 +122,11 @@ public:
     bool handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) override;
     Value getProp(Interp& in, const std::string& key) override;
 
+    // The focus can move (up / down or left / right), or the panel moves
+    // its own (the port's GAMEPADS and Enhanced Options): the help bar's UP /
+    // DOWN access button (universal_mechanisms.md 1.1.3).
+    bool navigable();
+
     void selectStart(ComponentObj* c, int button, int player);
     void pollSelect();
     void navigate(int button);
@@ -142,6 +147,13 @@ public:
     ScreenObj* back = nullptr;
     bool backSet = false;
     PanelObj* focusOverride = nullptr;  // set_focus_panel (cleared as the screen enters)
+    // GHScreen's black overlay (PS2 draw 0x00146198) [C]: `ambient` its alpha
+    // (+0x68: reset_ambient 0, turn_off_ambient 1); an animated exit fades
+    // it 0 -> 1 and an animated entrance 1 -> 0 over 0.5 s (0x00145e50:
+    // +0x60 start, +0x50 end, +0x64 entrance), then it keeps the end value.
+    float ambient = 0;
+    double fadeStartMs = -1;  // -1: no fade (+0x60 = 1e30)
+    bool fadeIn = false;
     std::vector<PanelObj*> panels() const;
     PanelObj* focusPanel() const;
     bool flag(const std::string& key, bool def) const;

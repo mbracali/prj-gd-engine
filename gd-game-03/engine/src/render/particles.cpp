@@ -284,7 +284,7 @@ void ParticleSystem::removeIf(const std::function<bool(const Vec3&)>& pred) {
 
 void ParticleSystem::emit(float frame, float dt) {
     if (!(dt > 0) || !emitting_) return;
-    emitCount_ += random(params_.emitRate) * dt;
+    emitCount_ += random(params_.emitRate) * dt * ParticleRenderer::rate();
     while (emitCount_ >= 1) {
         if (free_.empty()) {
             emitCount_ = 0;
@@ -374,9 +374,13 @@ void ParticleSystem::appendQuads(Vec3 camRight, Vec3 camUp, std::vector<float>& 
 
 // ---- ParticleRenderer ---------------------------------------------------
 
+bool ParticleRenderer::enabled_ = true;
+float ParticleRenderer::rate_ = 1;
+
 void ParticleRenderer::draw(MaterialRenderer& mr, SceneCache& cache, const ParticleSystem& sys, const Camera& camera,
                             const Mat4& offset, const ScenePose* pose) {
     verts_.clear(), indices_.clear();
+    if (!enabled_) return;  // Enhanced Options > Enable Particles FX off
     // The camera's right (x) and up (z) axes in world space.
     const Vec3 right{camera.world.at(0, 0), camera.world.at(1, 0), camera.world.at(2, 0)};
     const Vec3 up{camera.world.at(0, 2), camera.world.at(1, 2), camera.world.at(2, 2)};

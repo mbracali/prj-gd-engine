@@ -14,100 +14,148 @@
 
 namespace {
 
-// [I] Not in the original game. One focus runs down the controllers (left)
-// and then the selected controller's bindings, the keyboard's "Frets also
-// strum" and Reset (right). On a controller, Left / Right (or Select) changes
-// its player (none, P1, P2; one controller per player); on a binding, Select
-// waits for the new button, axis or key (Esc cancels, Delete or the row's
-// mouse "x" leaves it unbound, 10 s timeout). The touch screen (listed while
-// touch controls are on) plays as P1 and has its settings instead of
-// bindings: Select / Left / Right change them.
+// [I] Not in the original game: the universal Gamepad menu
+// (universal_mechanisms.md 1.2.1 at the repository root, its mockup as an
+// ASCII layout there). Self-contained so the other games can copy it: it
+// only needs SelectHost (drawing, sounds, dialogs) and Input.
+//
+//   Left: four player boxes. "Player N" turns the player on or off (player 1
+//   is always on; players 3 and 4 are listed but unavailable, Guitar Hero
+//   has two). Each box has an Instrument dropdown (what GH1 supports: 5 fret
+//   guitar, gamepad, generic MIDI), a "Bind to:" dropdown with every
+//   connected device (the keyboard, each pad or guitar, each MIDI port) and
+//   "Detect...", which binds the next device pressed, and "Customize inputs".
+//   Below: Back, Export and Import (controllers.json to / from a file).
+//
+//   Right: INPUTS MAPPING, empty until "Customize inputs": the player's
+//   device's bindings in the doc's sections (General control bindings, 5
+//   fret guitar bindings; the doc's Rock Band, drum and vocal sections do not
+//   apply to GH1), two slots per control, Require Strum and Reset, the touch
+//   screen's settings for player 1 when touch is on, and Save / Discard at
+//   the bottom. Everything on the left is locked until Save or Discard.
+//
+// Keys and pads: Up / Down move the focus, Left / Right change a dropdown's
+// value (or a binding's slot), Select opens / presses, Back closes a
+// dropdown, discards an edit, else leaves the screen. Mouse: every field and
+// button clicks; a click outside an open dropdown closes it.
 class GamepadPanel : public NativePanel {
 public:
     GamepadPanel(SelectHost& host, Input* input) : host_(host), input_(input) {}
 
     void enter() override {
-        focus_ = 0, selected_ = 0;
+        focus_ = 0, rfocus_ = 0, slot_ = 0, scroll_ = 0;
+        dropdown_ = -1, editPlayer_ = -1;
         captureMs_ = 0;
+        status_.clear(), statusMs_ = 0;
         if (input_) input_->writeReport();
     }
     void exit() override {
-        if (input_) input_->cancelCapture(), input_->writeReport();  // with what was pressed here
+        if (!input_) return;
+        input_->cancelCapture();
+        input_->cancelDetect();
+        if (input_->editing()) input_->discardEdit();  // leaving without Save discards
+        editPlayer_ = -1;
+        input_->writeReport();  // with what was pressed here
     }
 
     bool buttonDown(int button, int player) override {
         (void)player;
         if (!input_) return false;
-        if (input_->capturing()) return true;  // other devices wait while one is being bound
-        const auto devs = input_->devices();
-        clamp(devs);
-        const int rows = rowCount(devs);
+        if (input_->capturing() || input_->detecting()) return true;  // the devices wait while one is being bound
+        const bool select = host_.isSelectButton(button), back = host_.isBackButton(button);
+        if (dropdown_ >= 0) return dropdownButton(button, select, back), true;
+        if (editPlayer_ >= 0) return editButton(button, select, back), true;
+        const auto items = leftItems();
+        const int n = int(items.size());
+        focus_ = std::clamp(focus_, 0, n - 1);
         if (button == kUp || button == kDown) {
-            focus_ = (focus_ + (button == kDown ? 1 : rows - 1)) % rows;
-            if (focus_ < int(devs.size())) selected_ = focus_;
+            focus_ = (focus_ + (button == kDown ? 1 : n - 1)) % n;
             sound("button_toggle");
             return true;
         }
-        if (focus_ < int(devs.size()) && (button == kLeft || button == kRight)) {
-            setPlayer(devs[size_t(focus_)], std::clamp(devs[size_t(focus_)].player + (button == kRight ? 1 : -1), -1, 1));
+        const Item it = items[size_t(focus_)];
+        if ((button == kLeft || button == kRight) && (it.kind == Field::Instrument || it.kind == Field::BindTo)) {
+            stepField(it, button == kRight ? 1 : -1);
             return true;
         }
-        if (isPad(devs) && focus_ - int(devs.size()) == resetRow() + 1 && (button == kLeft || button == kRight)) {
-            input_->cycleDeviceType(devs[size_t(selected_)].id, button == kRight ? 1 : -1);
-            sound("button_select");
-            return true;
-        }
-        if (isTouch(devs) && focus_ >= int(devs.size()) && (button == kLeft || button == kRight)) {
-            const int c = focus_ - int(devs.size());
-            if (c < Input::kTouchOptions) input_->cycleTouchOption(c, button == kRight ? 1 : -1), sound("button_select");
-            return true;
-        }
-        if (host_.isSelectButton(button)) return activate(devs), true;
+        if (select) return activate(it), true;
         return false;  // back: the screen's auto-back
     }
 
     bool mouse(float x, float y, bool click) override {
         if (!input_) return false;
         x -= offset_;
-        if (input_->capturing()) {
-            if (click) input_->cancelCapture(), sound("button_back");
+        if (input_->capturing() || input_->detecting()) {
+            if (click) input_->cancelCapture(), input_->cancelDetect(), sound("button_back");
             return true;
         }
-        const auto devs = input_->devices();
-        clamp(devs);
-        for (int r = 0; r < rowCount(devs); ++r) {
-            float x0, y0, x1, y1;
-            rowRect(r, int(devs.size()), x0, y0, x1, y1, isTouch(devs));
-            if (x < x0 || x > x1 || y < y0 || y > y1) continue;
-            const int c = r - int(devs.size());
-            if (click && !isTouch(devs) && c >= 0 && c < int(Input::Control::Count) && x >= x1 - kClearW) {
-                focus_ = r;
-                input_->clearBinding(devs[size_t(selected_)].id, Input::Control(c));
-                sound("button_back");
+        if (dropdown_ >= 0) {  // its options, or a click anywhere else closes it
+            const auto opts = options(dropItem_);
+            for (size_t k = 0; k < opts.size(); ++k) {
+                float y0 = ddY_ + float(k) * kDdRow;
+                if (x < ddX0_ || x > ddX1_ || y < y0 || y > y0 + kDdRow) continue;
+                if (int(k) != ddFocus_) ddFocus_ = int(k), sound("button_toggle");
+                if (click) choose(dropItem_, opts[k]);
                 return true;
             }
-            if (r != focus_) {
-                focus_ = r;
-                if (r < int(devs.size())) selected_ = r;
-                sound("button_toggle");
+            if (click) dropdown_ = -1, sound("button_back");
+            return true;
+        }
+        // The bottom buttons and the player boxes (locked while editing).
+        const auto items = leftItems();
+        for (size_t i = 0; i < items.size(); ++i) {
+            float x0, y0, x1, y1;
+            rect(items[i], x0, y0, x1, y1);
+            if (x < x0 || x > x1 || y < y0 || y > y1) continue;
+            if (editPlayer_ >= 0) {
+                if (click) sound("button_error");
+                return true;
             }
-            if (click) activate(devs);
+            if (int(i) != focus_) focus_ = int(i), sound("button_toggle");
+            if (click) activate(items[i]);
+            return true;
+        }
+        for (int p = kGamePlayers; p < kBoxes; ++p) {  // players 3 and 4: not in this game
+            float bx0, by0, bx1, by1;
+            boxRect(p, bx0, by0, bx1, by1);
+            if (click && x >= bx0 && x <= bx1 && y >= by0 && y <= by1) return sound("button_error"), true;
+        }
+        if (editPlayer_ < 0) return false;
+        const auto rows = rightRows();
+        for (size_t r = 0; r < rows.size(); ++r) {
+            const RRow& row = rows[r];
+            if (row.kind == RKind::Heading) continue;
+            float x0, y0, x1, y1;
+            if (!rrect(int(r), x0, y0, x1, y1)) continue;
+            if (x < x0 || x > x1 || y < y0 || y > y1) continue;
+            int slot = slot_;
+            if (row.kind == RKind::Binding) {
+                if (x < kSlot1X0) continue;
+                slot = x < kSlot2X0 ? 0 : 1;
+            }
+            if (int(r) != rfocus_ || slot != slot_) rfocus_ = int(r), slot_ = slot, sound("button_toggle");
+            if (click) activateRow(row);
             return true;
         }
         return false;
     }
 
     void poll(float dtMs) override {
-        if (input_ && input_->devices().size() != reportedDevices_) {  // a controller came or went: a fresh report
+        if (!input_) return;
+        if (input_->devices().size() != reportedDevices_) {  // a controller came or went: a fresh report
             reportedDevices_ = input_->devices().size();
             input_->writeReport();
         }
-        if (input_ && input_->capturing()) {
+        if (input_->capturing() || input_->detecting()) {
             captureMs_ += dtMs;
-            if (captureMs_ > 10000) input_->cancelCapture(), sound("button_back");
+            if (captureMs_ > 10000) input_->cancelCapture(), input_->cancelDetect(), sound("button_back");
         } else {
             captureMs_ = 0;
         }
+        if (editPlayer_ >= 0 && !input_->editing()) editPlayer_ = -1;  // e.g. the device went away
+        std::string st = host_.userFilesStatus();
+        if (st != status_) status_ = st, statusMs_ = st.empty() ? 0 : 5000;
+        statusMs_ = std::max(0.0f, statusMs_ - dtMs);
     }
 
     void drawBefore() override {
@@ -118,198 +166,474 @@ public:
     void drawAfter() override {
         if (!input_) return;
         const float o = offset_;
-        const auto devs = input_->devices();
-        clamp(devs);
-        text("rokk.font", "GAMEPADS", 90 + o, 40, 62, kTitle, 0x11);
-        text("impactor.font", "Controllers, their players and their buttons", 92 + o, 110, 20, kDim, 0x11);
-        text("impactor.font", "Report for bug reports: " + fit(input_->reportPath(), 15, 760), 92 + o, 136, 15, kDim, 0x11);
-        // Left: the controllers.
-        quad(kLeftX0 + o, kTop - 16, kLeftX1 + o, kBottom, {1, 1, 1, 0.05f});
-        text("impactor.font", "CONTROLLERS", kLeftX0 + 16 + o, kTop - 2, 22, kAccent, 0x11);
-        for (size_t d = 0; d < devs.size(); ++d) {
-            float x0, y0, x1, y1;
-            rowRect(int(d), int(devs.size()), x0, y0, x1, y1);
-            const bool f = int(d) == focus_, sel = int(d) == selected_;
-            if (f) quad(x0 + o, y0, x1 + o, y1, {1, 0.86f, 0.2f, 0.14f});
-            else if (sel) quad(x0 + o, y0, x1 + o, y1, {1, 1, 1, 0.06f});
-            const float h = y1 - y0;  // rows shrink when many controllers are connected
-            if (h >= 50) {
-                text("impactor.font", fit(devs[d].name, 21, x1 - x0 - 120), x0 + 14 + o, y0 + 18, 21, f ? kFocused : kNormal, 0x21);
-                text("impactor.font", fit(devs[d].profile, 16, x1 - x0 - 120), x0 + 14 + o, y0 + 42, 16, kDim, 0x21);
-            } else {
-                text("impactor.font", fit(devs[d].name, 19, x1 - x0 - 120), x0 + 14 + o, (y0 + y1) * 0.5f + 1, 19, f ? kFocused : kNormal, 0x21);
-            }
-            const int pn = devs[d].player;
-            const std::string pl = pn < 0 ? "--" : pn == 0 ? "P1" : "P2";
-            const bool fixed = devs[d].id == "touch";
-            text("impactor.font", f && !fixed ? "< " + pl + " >" : pl, x1 - 44 + o, (y0 + y1) * 0.5f, 22, pn < 0 ? kDim : pn == 0 ? kP1 : kP2, 0x22);
+        text("rokk.font", "GAMEPADS", kLeftX0 + o, 12, 44, kTitle, 0x11);
+        if (statusMs_ > 0) {
+            auto c = kOn;
+            c[3] = std::min(1.0f, statusMs_ / 500);
+            text("impactor.font", fit(status_, 16, 300), kLeftX1 + o, 34, 16, c, 0x31);
         }
-        // The selected controller's raw input, live.
-        const std::string& id = devs[size_t(selected_)].id;
-        float ry = kBottom - 150;
-        text("impactor.font", "LIVE INPUT", kLeftX0 + 16 + o, ry, 18, kAccent, 0x11);
-        std::string pressed;
-        for (const std::string& n : input_->rawPressed(id)) pressed += (pressed.empty() ? "" : "  ") + n;
-        text("impactor.font", id == "touch" ? "(touch the screen)" : pressed.empty() ? "(press something)" : fit(pressed, 18, 420),
-             kLeftX0 + 16 + o, ry + 26, 18, pressed.empty() ? kDim : kOn, 0x11);
-        const auto axes = input_->rawAxes(id);
-        for (size_t a = 0; a < axes.size(); ++a) {
-            const float ax = kLeftX0 + 16 + float(a % 2) * 215 + o, ay = ry + 56 + float(a / 2) * 26;
-            text("impactor.font", axes[a].first, ax, ay + 9, 14, kDim, 0x21);
-            const float bx0 = ax + 96, bx1 = ax + 196, mid = (bx0 + bx1) * 0.5f, v = std::clamp(axes[a].second, -1.0f, 1.0f);
-            quad(bx0, ay + 4, bx1, ay + 14, {1, 1, 1, 0.12f});
-            quad(std::min(mid, mid + v * 50), ay + 4, std::max(mid, mid + v * 50), ay + 14, kOn);
-        }
-        // Right: the bindings.
-        quad(kRightX0 + o, kTop - 16, kRightX1 + o, kBottom, {1, 1, 1, 0.05f});
-        text("impactor.font", "BUTTONS: " + fit(devs[size_t(selected_)].name, 22, 420), kRightX0 + 16 + o, kTop - 2, 22, kAccent, 0x11);
-        const Input::Bindings& b = input_->bindings(id);
-        const bool capturing = input_->capturing();
-        if (isTouch(devs)) {  // the touch screen's settings, then Reset
-            for (int c = 0; c <= Input::kTouchOptions; ++c) {
-                const int r = int(devs.size()) + c;
-                float x0, y0, x1, y1;
-                rowRect(r, int(devs.size()), x0, y0, x1, y1, true);
-                const bool f = r == focus_;
-                if (f) quad(x0 + o, y0, x1 + o, y1, {1, 0.86f, 0.2f, 0.14f});
-                const float cy = (y0 + y1) * 0.5f + 1;
-                if (c == Input::kTouchOptions) {
-                    text("impactor.font", "Reset to Defaults", (x0 + x1) * 0.5f + o, cy, 20, f ? kFocused : kNormal, 0x22);
-                    continue;
-                }
-                text("impactor.font", Input::touchOptionName(c), x0 + 16 + o, cy, 19, f ? kFocused : kNormal, 0x21);
-                const std::string v = input_->touchOptionValue(c);
-                text("impactor.font", f ? "< " + v + " >" : v, x1 - 110 + o, cy, 19, f ? kFocused : kOn, 0x22);
-            }
-            text("impactor.font", "Taps click; a finger on a lane plays it; two fingers swipe; buttons show at the right edge.",
-                 kRightX0 + 16 + o, kTop + 24 + float(Input::kTouchOptions + 1) * kTouchRow + 20, 16, kDim, 0x11);
-            return;
-        }
-        for (int c = 0; c < extraRow(devs) + 1; ++c) {
-            const int r = int(devs.size()) + c;
-            float x0, y0, x1, y1;
-            rowRect(r, int(devs.size()), x0, y0, x1, y1);
-            const bool f = r == focus_;
-            if (c == resetRow()) {  // Reset to defaults
-                if (f) quad(x0 + o, y0, x1 + o, y1, {1, 0.86f, 0.2f, 0.14f});
-                text("impactor.font", "Reset to Defaults", (x0 + x1) * 0.5f + o, (y0 + y1) * 0.5f + 1, 20, f ? kFocused : kNormal, 0x22);
-                continue;
-            }
-            if (c > resetRow() && isPad(devs)) {  // the controller's type
-                if (f) quad(x0 + o, y0, x1 + o, y1, {1, 0.86f, 0.2f, 0.14f});
-                const std::string t = input_->deviceType(id);
-                text("impactor.font", "Type: " + (f ? "< " + t + " >" : t), x0 + 12 + o, (y0 + y1) * 0.5f + 1, 18,
-                     f ? kFocused : kNormal, 0x21);
-                continue;
-            }
-            if (c > resetRow()) {  // the keyboard's Frets also strum
-                const bool on = input_->keyboardFretsStrum();
-                if (f) quad(x0 + o, y0, x1 + o, y1, {1, 0.86f, 0.2f, 0.14f});
-                const float cy = (y0 + y1) * 0.5f;
-                quad(x0 + 10 + o, cy - 9, x0 + 28 + o, cy + 9, {1, 1, 1, 0.25f});
-                if (on) quad(x0 + 13 + o, cy - 6, x0 + 25 + o, cy + 6, kOn);
-                text("impactor.font", "Frets also strum (like a PlayStation pad)", x0 + 38 + o, cy + 1, 18, f ? kFocused : kNormal, 0x21);
-                continue;
-            }
-            const auto ctrl = Input::Control(c);
-            const bool live = input_->controlDown(id, ctrl);
-            if (live) quad(x0 + o, y0, x1 + o, y1, {0.3f, 1, 0.35f, 0.22f});
-            else if (f) quad(x0 + o, y0, x1 + o, y1, {1, 0.86f, 0.2f, 0.14f});
-            if (c < 5) quad(x0 + 8 + o, y0 + 7, x0 + 16 + o, y1 - 7, kFretColors[size_t(c)]);
-            text("impactor.font", Input::controlName(ctrl), x0 + 26 + o, (y0 + y1) * 0.5f + 1, 18, f ? kFocused : kNormal, 0x21);
-            std::string what;
-            if (capturing && f) {
-                what = "Press a button or move an axis  (Esc: cancel, Del: none)";
-            } else {
-                for (const Input::Source& s : b[size_t(c)]) what += (what.empty() ? "" : ", ") + input_->sourceName(id, s);
-                if (what.empty()) what = "-";
-            }
-            text("impactor.font", fit(what, 18, x1 - x0 - 250 - kClearW), x0 + 236 + o, (y0 + y1) * 0.5f + 1, 18,
-                 capturing && f ? kAccent : live ? kOn : kDim, 0x21);
-            if (!b[size_t(c)].empty() && !(capturing && f))  // the mouse's clear button
-                text("impactor.font", "x", x1 - kClearW * 0.5f + o, (y0 + y1) * 0.5f + 1, 18, f ? kFocused : kDim, 0x22);
-        }
+        const auto items = leftItems();
+        for (int p = 0; p < kBoxes; ++p) drawBox(p, items);
+        for (size_t i = 0; i < items.size(); ++i)
+            if (items[i].kind == Field::Back || items[i].kind == Field::Export || items[i].kind == Field::Import) drawBottom(items[i], int(i) == focus_);
+        drawRight();
+        if (dropdown_ >= 0) drawDropdown();
     }
 
 private:
+    // -- layout (1280 x 720 menu units)
     static constexpr int kUp = 12, kDown = 14, kLeft = 15, kRight = 13;
-    static constexpr float kTop = 168, kBottom = 640, kLeftX0 = 56, kLeftX1 = 520, kRightX0 = 548, kRightX1 = 1224;
-    static constexpr float kDevRow = 60, kBindRow = 25.5f, kClearW = 28, kTouchRow = 46;
+    static constexpr int kBoxes = 4, kGamePlayers = Input::kPlayers;
+    // Everything above the help bar (y 650 and below).
+    static constexpr float kLeftX0 = 40, kLeftX1 = 520, kBoxTop = 62, kBoxH = 124, kBoxGap = 8;
+    static constexpr float kRightX0 = 540, kRightX1 = 1240, kRightY0 = 20, kRightY1 = 642;
+    static constexpr float kBottomY0 = 598, kBottomY1 = 634, kDdRow = 28;
+    static constexpr float kRowH = 24, kRowsTop = 88, kRowsBottom = 586, kNameX = 566, kSlot1X0 = 830, kSlot2X0 = 1030, kSlotW = 190;
     static constexpr std::array<float, 4> kTitle{0.95f, 0.95f, 0.95f, 1}, kFocused{1, 0.86f, 0.2f, 1},
-        kNormal{0.85f, 0.85f, 0.88f, 1}, kDim{0.55f, 0.55f, 0.6f, 1}, kAccent{1, 0.55f, 0.15f, 1}, kOn{0.3f, 1, 0.35f, 1},
-        kP1{0.45f, 0.75f, 1, 1}, kP2{1, 0.5f, 0.45f, 1};
+        kNormal{0.85f, 0.85f, 0.88f, 1}, kDim{0.5f, 0.5f, 0.55f, 1}, kAccent{1, 0.55f, 0.15f, 1}, kOn{0.3f, 1, 0.35f, 1},
+        kWarn{1, 0.78f, 0.1f, 1};
+    // The mockup's box colours: player 1 blue, 2 green, 3 red, 4 orange.
+    static constexpr std::array<std::array<float, 4>, 4> kPlayerColors = {
+        std::array<float, 4>{0.3f, 0.55f, 1, 1}, {0.3f, 0.85f, 0.35f, 1}, {0.95f, 0.3f, 0.3f, 1}, {1, 0.6f, 0.15f, 1}};
     static constexpr std::array<std::array<float, 4>, 5> kFretColors = {
         std::array<float, 4>{0.2f, 0.85f, 0.25f, 1}, {0.9f, 0.2f, 0.2f, 1}, {0.95f, 0.85f, 0.2f, 1}, {0.25f, 0.45f, 0.95f, 1},
         {0.95f, 0.55f, 0.15f, 1}};
 
-    // The right column after the controls: Reset, then (keyboard) Frets also
-    // strum. The touch screen: its settings, then Reset.
-    static int resetRow() { return int(Input::Control::Count); }
-    bool isTouch(const std::vector<Input::Device>& devs) const { return devs[size_t(selected_)].id == "touch"; }
-    bool isPad(const std::vector<Input::Device>& devs) const { return devs[size_t(selected_)].id.rfind("pad:", 0) == 0; }
-    // After Reset: the keyboard's Frets also strum, or a controller's type.
-    int extraRow(const std::vector<Input::Device>& devs) const {
-        if (isTouch(devs)) return Input::kTouchOptions;
-        return resetRow() + (devs[size_t(selected_)].id == "keyboard" || isPad(devs) ? 1 : 0);
+    // -- the left side's focusable fields
+    enum class Field { Toggle, Instrument, BindTo, Customize, Back, Export, Import };
+    struct Item {
+        Field kind;
+        int player = 0;
+    };
+    std::vector<Item> leftItems() const {
+        std::vector<Item> v;
+        for (int p = 0; p < kGamePlayers; ++p) {
+            v.push_back({Field::Toggle, p});
+            if (!input_->playerEnabled(p)) continue;
+            v.push_back({Field::Instrument, p});
+            v.push_back({Field::BindTo, p});
+            v.push_back({Field::Customize, p});
+        }
+        v.push_back({Field::Back}), v.push_back({Field::Export}), v.push_back({Field::Import});
+        return v;
     }
-    int rowCount(const std::vector<Input::Device>& devs) const { return int(devs.size()) + extraRow(devs) + 1; }
-    void clamp(const std::vector<Input::Device>& devs) {  // devices come and go
-        selected_ = std::clamp(selected_, 0, int(devs.size()) - 1);
-        focus_ = std::clamp(focus_, 0, rowCount(devs) - 1);
+    static void boxRect(int p, float& x0, float& y0, float& x1, float& y1) {
+        x0 = kLeftX0, x1 = kLeftX1, y0 = kBoxTop + float(p) * (kBoxH + kBoxGap), y1 = y0 + kBoxH;
     }
-    // Row r: a controller (left column) or a binding / Reset (right column).
-    static void rowRect(int r, int devs, float& x0, float& y0, float& x1, float& y1, bool touch = false) {
-        if (r < devs) {
-            // Up to the live input box (kBottom - 150): 60 units a row, less with many controllers.
-            const float row = std::min(kDevRow, (kBottom - 160 - (kTop + 22)) / float(std::max(devs, 1)));
-            x0 = kLeftX0 + 8, x1 = kLeftX1 - 8, y0 = kTop + 22 + float(r) * row, y1 = y0 + row - 4;
-        } else if (touch) {  // the touch screen's settings, then Reset
-            r -= devs;
-            x0 = kRightX0 + 8, x1 = kRightX1 - 8;
-            if (r == Input::kTouchOptions) y0 = kTop + 24 + float(r) * kTouchRow + 6, y1 = y0 + 30, x0 = kRightX1 - 260;
-            else y0 = kTop + 24 + float(r) * kTouchRow, y1 = y0 + kTouchRow - 4;
+    static void rect(const Item& it, float& x0, float& y0, float& x1, float& y1) {
+        float bx0, by0, bx1, by1;
+        boxRect(it.player, bx0, by0, bx1, by1);
+        x0 = bx0, y0 = by0, x1 = bx1, y1 = by1;
+        switch (it.kind) {
+        case Field::Toggle: x0 = bx0 + 10, y0 = by0 + 8, x1 = bx0 + 150, y1 = by0 + 80; return;
+        case Field::Instrument: x0 = bx0 + 284, y0 = by0 + 10, x1 = bx1 - 12, y1 = by0 + 38; return;
+        case Field::BindTo: x0 = bx0 + 284, y0 = by0 + 48, x1 = bx1 - 12, y1 = by0 + 76; return;
+        case Field::Customize: x0 = bx0 + 10, y0 = by0 + 88, x1 = bx1 - 10, y1 = by0 + 116; return;
+        case Field::Back: x0 = kLeftX0, x1 = kLeftX0 + 130; break;
+        case Field::Export: x0 = (kLeftX0 + kLeftX1) * 0.5f - 65, x1 = x0 + 130; break;
+        case Field::Import: x0 = kLeftX1 - 130, x1 = kLeftX1; break;
+        }
+        y0 = kBottomY0, y1 = kBottomY1;
+    }
+
+    // -- dropdown values
+    struct Opt {
+        std::string value, label;
+        bool ok = true;
+    };
+    std::vector<Opt> options(const Item& it) const {
+        std::vector<Opt> v;
+        const std::string dev = input_->playerDevice(it.player);
+        if (it.kind == Field::Instrument) {
+            if (dev.empty()) return v;
+            for (Input::Instrument i : input_->instruments(dev)) v.push_back({std::to_string(int(i)), Input::instrumentName(i)});
+            return v;
+        }
+        v.push_back({"", "None"});
+        for (const Input::Device& d : input_->devices())
+            if (d.id != "touch") v.push_back({d.id, deviceLabel(d)});
+        if (!input_->midiAvailable()) v.push_back({"midi", "MIDI: " + input_->midiBackend(), false});
+        v.push_back({"detect", "Detect (press a button)..."});
+        return v;
+    }
+    static std::string deviceLabel(const Input::Device& d) {
+        if (d.id.rfind("midi:", 0) == 0) return "MIDI: " + d.name;
+        return d.name;
+    }
+    std::string value(const Item& it) const {
+        const std::string dev = input_->playerDevice(it.player);
+        if (it.kind == Field::Instrument) return dev.empty() ? "" : std::to_string(int(input_->instrument(dev)));
+        return dev;
+    }
+    std::string label(const Item& it) const {
+        const std::string v = value(it);
+        for (const Opt& o : options(it))
+            if (o.value == v) return o.label;
+        return it.kind == Field::Instrument ? "--" : "None";
+    }
+    void choose(const Item& it, const Opt& o) {
+        dropdown_ = -1;
+        if (!o.ok) return sound("button_error");
+        if (it.kind == Field::Instrument) {
+            input_->setInstrument(input_->playerDevice(it.player), Input::Instrument(std::atoi(o.value.c_str())));
+        } else if (o.value == "detect") {
+            input_->beginDetect(it.player);
+            captureMs_ = 0;
+        } else if (o.value.empty()) {
+            if (!input_->playerDevice(it.player).empty()) input_->setPlayer(input_->playerDevice(it.player), -1);
         } else {
-            r -= devs;
-            x0 = kRightX0 + 8, x1 = kRightX1 - 8, y0 = kTop + 24 + float(r) * kBindRow, y1 = y0 + kBindRow - 1;
-            if (r == resetRow()) y0 += 6, y1 = y0 + 30, x0 = kRightX1 - 260;
-            if (r > resetRow()) y0 = kTop + 24 + float(resetRow()) * kBindRow + 6, y1 = y0 + 30, x1 = kRightX1 - 272;
+            input_->setPlayer(o.value, it.player);
         }
-    }
-    void setPlayer(const Input::Device& d, int player) {
-        if (d.player == player || d.id == "touch") return sound("button_error");  // at the end of none, P1, P2; touch is P1
-        input_->setPlayer(d.id, player);
         sound("button_select");
     }
-    void activate(const std::vector<Input::Device>& devs) {
-        const int n = int(devs.size());
-        if (focus_ < n) return setPlayer(devs[size_t(focus_)], devs[size_t(focus_)].player == 1 ? -1 : devs[size_t(focus_)].player + 1);
-        const int c = focus_ - n;
-        const std::string& id = devs[size_t(selected_)].id;
-        if (isTouch(devs)) {
-            if (c < Input::kTouchOptions) input_->cycleTouchOption(c, 1);
-            else input_->resetTouchOptions();
-            sound("button_select");
-            return;
-        }
-        if (c == resetRow()) {
-            input_->resetBindings(id);
-            sound("button_select");
-            return;
-        }
-        if (c > resetRow() && isPad(devs)) {
-            input_->cycleDeviceType(id, 1);
-            sound("button_select");
-            return;
-        }
-        if (c > resetRow()) {
-            input_->setKeyboardFretsStrum(!input_->keyboardFretsStrum());
-            sound("button_select");
-            return;
-        }
-        input_->beginCapture(id, Input::Control(c));
-        captureMs_ = 0;
+    // Left / Right on a closed dropdown: the next usable value (not Detect).
+    void stepField(const Item& it, int dir) {
+        auto opts = options(it);
+        opts.erase(std::remove_if(opts.begin(), opts.end(), [](const Opt& o) { return !o.ok || o.value == "detect"; }), opts.end());
+        if (opts.size() < 2) return sound("button_error");
+        int i = 0;
+        for (size_t k = 0; k < opts.size(); ++k)
+            if (opts[k].value == value(it)) i = int(k);
+        choose(it, opts[size_t((i + dir + int(opts.size())) % int(opts.size()))]);
+    }
+    void openDropdown(const Item& it) {
+        const auto opts = options(it);
+        if (opts.empty()) return sound("button_error");
+        float x0, y0, x1, y1;
+        rect(it, x0, y0, x1, y1);
+        dropItem_ = it, dropdown_ = 1;
+        ddX0_ = x0, ddX1_ = std::max(x1, x0 + 260);
+        const float h = float(opts.size()) * kDdRow;
+        ddY_ = y1 + h + 4 < kScreenH - 8 ? y1 + 2 : y0 - h - 2;  // below, or above when there is no room
+        ddFocus_ = 0;
+        for (size_t k = 0; k < opts.size(); ++k)
+            if (opts[k].value == value(it)) ddFocus_ = int(k);
         sound("button_select");
     }
+    void dropdownButton(int button, bool select, bool back) {
+        const auto opts = options(dropItem_);
+        const int n = int(opts.size());
+        if (n == 0 || back) {
+            dropdown_ = -1;
+            return sound("button_back");
+        }
+        if (button == kUp || button == kDown) ddFocus_ = (ddFocus_ + (button == kDown ? 1 : n - 1)) % n, sound("button_toggle");
+        else if (select) choose(dropItem_, opts[size_t(std::clamp(ddFocus_, 0, n - 1))]);
+    }
+
+    void activate(const Item& it) {
+        switch (it.kind) {
+        case Field::Toggle:
+            if (it.player == 0) return sound("button_error");  // player 1 is always on
+            input_->setPlayerEnabled(it.player, !input_->playerEnabled(it.player));
+            return sound("button_select");
+        case Field::Instrument:
+        case Field::BindTo: return openDropdown(it);
+        case Field::Customize: {
+            const std::string dev = input_->playerDevice(it.player);
+            if (dev.empty()) return sound("button_error");
+            input_->beginEdit(dev);
+            editPlayer_ = it.player, editDevice_ = dev;
+            rfocus_ = 1, slot_ = 0, scroll_ = 0;
+            return sound("button_select");
+        }
+        case Field::Back:
+            sound("button_back");
+            host_.pressBack();
+            return;
+        case Field::Export: sound("button_select"); return host_.userFiles("export_controllers");
+        case Field::Import: sound("button_select"); return host_.userFiles("import_controllers");
+        }
+    }
+
+    // -- the right side (Customize inputs)
+    enum class RKind { Heading, Binding, RequireStrum, Reset, Touch, Save, Discard };
+    struct RRow {
+        RKind kind;
+        std::string text;
+        int index = 0;  // the control, or the touch option
+    };
+    std::vector<RRow> rightRows() const {
+        std::vector<RRow> v;
+        using C = Input::Control;
+        v.push_back({RKind::Heading, "GENERAL CONTROL BINDINGS"});
+        for (C c : {C::Start, C::Select, C::MenuUp, C::MenuDown}) v.push_back({RKind::Binding, Input::controlName(c), int(c)});
+        // 5 fret guitar: every GH1 instrument plays the guitar part (a gamepad too).
+        v.push_back({RKind::Heading, "5 FRET GUITAR BINDINGS"});
+        for (C c : {C::GuitarStart, C::GuitarSelect, C::StrumUp, C::StrumDown, C::Green, C::Red, C::Yellow, C::Blue, C::Orange,
+                    C::Whammy, C::Gyro})
+            v.push_back({RKind::Binding, Input::controlName(c), int(c)});
+        v.push_back({RKind::Heading, "OPTIONS"});
+        v.push_back({RKind::RequireStrum, "Require Strum"});
+        v.push_back({RKind::Reset, "Reset to Defaults"});
+        if (editPlayer_ == 0 && input_->touch()) {  // the touch screen plays as player 1
+            v.push_back({RKind::Heading, "TOUCH SCREEN (PLAYER 1)"});
+            for (int i = 0; i < Input::kTouchOptions; ++i) v.push_back({RKind::Touch, Input::touchOptionName(i), i});
+        }
+        v.push_back({RKind::Save, "Save"});
+        v.push_back({RKind::Discard, "Discard"});
+        return v;
+    }
+    // A row's rectangle (Save / Discard sit at the bottom); false: scrolled out of view.
+    bool rrect(int r, float& x0, float& y0, float& x1, float& y1) const {
+        const auto rows = rightRows();
+        const RRow& row = rows[size_t(r)];
+        if (row.kind == RKind::Save || row.kind == RKind::Discard) {
+            const bool save = row.kind == RKind::Save;
+            x0 = save ? kRightX1 - 300 : kRightX1 - 150, x1 = x0 + 130, y0 = kBottomY0, y1 = kBottomY1 - 4;
+            return true;
+        }
+        y0 = kRowsTop + float(r) * kRowH - scroll_, y1 = y0 + kRowH - 2;
+        x0 = kRightX0 + 12, x1 = kRightX1 - 12;
+        return y0 >= kRowsTop - 1 && y1 <= kRowsBottom + 1;
+    }
+    void keepInView() {
+        const auto rows = rightRows();
+        const RRow& row = rows[size_t(rfocus_)];
+        if (row.kind == RKind::Save || row.kind == RKind::Discard) return;
+        float top = float(rfocus_) * kRowH, room = kRowsBottom - kRowsTop;
+        if (top - (rfocus_ > 0 && rows[size_t(rfocus_ - 1)].kind == RKind::Heading ? kRowH : 0) < scroll_)
+            scroll_ = std::max(0.0f, top - (rfocus_ > 0 && rows[size_t(rfocus_ - 1)].kind == RKind::Heading ? kRowH : 0));
+        if (top + kRowH > scroll_ + room) scroll_ = top + kRowH - room;
+    }
+    void editButton(int button, bool select, bool back) {
+        const auto rows = rightRows();
+        const int n = int(rows.size());
+        rfocus_ = std::clamp(rfocus_, 0, n - 1);
+        if (back) {
+            finishEdit(false);
+            return;
+        }
+        if (button == kUp || button == kDown) {
+            for (int k = 0; k < n; ++k) {
+                rfocus_ = (rfocus_ + (button == kDown ? 1 : n - 1)) % n;
+                if (rows[size_t(rfocus_)].kind != RKind::Heading) break;
+            }
+            keepInView();
+            return sound("button_toggle");
+        }
+        const RRow& row = rows[size_t(rfocus_)];
+        if (button == kLeft || button == kRight) {
+            if (row.kind == RKind::Binding) slot_ = button == kRight ? 1 : 0, sound("button_toggle");
+            else if (row.kind == RKind::Touch) input_->cycleTouchOption(row.index, button == kRight ? 1 : -1), sound("button_select");
+            else if (row.kind == RKind::RequireStrum) input_->setRequireStrum(editDevice_, button == kRight), sound("button_select");
+            else if (row.kind == RKind::Save || row.kind == RKind::Discard) rfocus_ = button == kRight ? n - 1 : n - 2, sound("button_toggle");
+            return;
+        }
+        if (select) activateRow(row);
+    }
+    void activateRow(const RRow& row) {
+        switch (row.kind) {
+        case RKind::Heading: return;
+        case RKind::Binding:
+            input_->beginCapture(editDevice_, Input::Control(row.index), size_t(slot_));
+            captureMs_ = 0;
+            return sound("button_select");
+        case RKind::RequireStrum:
+            input_->setRequireStrum(editDevice_, !input_->requireStrum(editDevice_));
+            return sound("button_select");
+        case RKind::Reset: input_->resetBindings(editDevice_); return sound("button_select");
+        case RKind::Touch: input_->cycleTouchOption(row.index, 1); return sound("button_select");
+        case RKind::Save: return finishEdit(true);
+        case RKind::Discard: return finishEdit(false);
+        }
+    }
+    void finishEdit(bool save) {
+        if (save) input_->commitEdit(), sound("button_select");
+        else input_->discardEdit(), sound("button_back");
+        editPlayer_ = -1;
+    }
+
+    // -- drawing
+    void drawBox(int p, const std::vector<Item>& items) {
+        const float o = offset_;
+        float x0, y0, x1, y1;
+        boxRect(p, x0, y0, x1, y1);
+        const bool available = p < kGamePlayers, on = available && input_->playerEnabled(p), locked = editPlayer_ >= 0 && editPlayer_ != p;
+        auto pc = kPlayerColors[size_t(p)];
+        if (!on) pc[3] = 0.35f;
+        if (editPlayer_ == p) quad(x0 + o, y0, x1 + o, y1, {pc[0], pc[1], pc[2], 0.1f});
+        frame(x0 + o, y0, x1 + o, y1, 2, pc);
+        auto focusOf = [&](Field f) {
+            for (size_t i = 0; i < items.size(); ++i)
+                if (items[i].kind == f && items[i].player == p) return editPlayer_ < 0 && int(i) == focus_;
+            return false;
+        };
+        // "Player N": the on / off switch.
+        float tx0, ty0, tx1, ty1;
+        rect({Field::Toggle, p}, tx0, ty0, tx1, ty1);
+        const bool tf = focusOf(Field::Toggle);
+        if (tf) quad(tx0 + o, ty0, tx1 + o, ty1, {1, 0.86f, 0.2f, 0.16f});
+        frame(tx0 + o, ty0, tx1 + o, ty1, 3, on ? (tf ? kFocused : kTitle) : kDim);
+        text("impactor.font", "Player " + std::to_string(p + 1), (tx0 + tx1) * 0.5f + o, (ty0 + ty1) * 0.5f - 6, 30,
+             on ? (tf ? kFocused : kTitle) : kDim, 0x22);
+        text("impactor.font", !available ? "NOT IN THIS GAME" : on ? (p == 0 ? "ALWAYS ON" : "ON") : "OFF", (tx0 + tx1) * 0.5f + o,
+             ty1 - 13, 13, on ? kOn : kDim, 0x22);
+        if (!available) {
+            text("impactor.font", "Guitar Hero has 2 players: players 3 and 4", x0 + 166 + o, y0 + 34, 16, kDim, 0x21);
+            text("impactor.font", "are not available in this game.", x0 + 166 + o, y0 + 56, 16, kDim, 0x21);
+            warning(x0 + 166 + o, y0 + 96);
+            text("impactor.font", "Not available", x0 + 194 + o, y0 + 97, 16, kWarn, 0x21);
+            return;
+        }
+        const std::array<float, 4> lab = on && !locked ? kNormal : kDim;
+        text("impactor.font", "Instrument", x0 + 166 + o, y0 + 25, 19, lab, 0x21);
+        text("impactor.font", "Bind to:", x0 + 166 + o, y0 + 63, 19, lab, 0x21);
+        for (Field f : {Field::Instrument, Field::BindTo}) {
+            float fx0, fy0, fx1, fy1;
+            rect({f, p}, fx0, fy0, fx1, fy1);
+            const bool ff = focusOf(f);
+            const bool detecting = f == Field::BindTo && input_->detecting();
+            std::string v = !on ? "--" : detecting ? "Press a button..." : label({f, p});
+            dropField(fx0 + o, fy0, fx1 + o, fy1, fit(v, 16, fx1 - fx0 - 34), ff, !on || locked);
+        }
+        float cx0, cy0, cx1, cy1;
+        rect({Field::Customize, p}, cx0, cy0, cx1, cy1);
+        const bool cf = focusOf(Field::Customize), canEdit = on && !input_->playerDevice(p).empty();
+        button(cx0 + o, cy0, cx1 + o, cy1, editPlayer_ == p ? "Customizing inputs..." : "Customize inputs", cf, !canEdit || locked);
+    }
+    void drawBottom(const Item& it, bool f) {
+        const float o = offset_;
+        float x0, y0, x1, y1;
+        rect(it, x0, y0, x1, y1);
+        // The mockup's colours: Back red, Export yellow, Import green.
+        const std::array<float, 4> c = it.kind == Field::Back ? std::array<float, 4>{1, 0.45f, 0.45f, 1}
+                                       : it.kind == Field::Export ? std::array<float, 4>{1, 0.86f, 0.35f, 1}
+                                                                  : std::array<float, 4>{0.45f, 0.95f, 0.5f, 1};
+        const bool locked = editPlayer_ >= 0;
+        quad(x0 + o, y0, x1 + o, y1, {c[0], c[1], c[2], locked ? 0.08f : f ? 0.4f : 0.2f});
+        frame(x0 + o, y0, x1 + o, y1, f && !locked ? 3.0f : 1.5f, locked ? kDim : c);
+        const char* t = it.kind == Field::Back ? "< Back" : it.kind == Field::Export ? "Export" : "Import";
+        text("impactor.font", t, (x0 + x1) * 0.5f + o, (y0 + y1) * 0.5f + 1, 21, locked ? kDim : f ? kFocused : kTitle, 0x22);
+    }
+    void drawRight() {
+        const float o = offset_;
+        frame(kRightX0 + o, kRightY0, kRightX1 + o, kRightY1, 2, {1, 1, 1, 0.5f});
+        quad(kRightX0 + o, kRightY0, kRightX1 + o, kRightY1, {1, 1, 1, 0.03f});
+        if (editPlayer_ < 0) {
+            text("rokk.font", "INPUTS MAPPING", (kRightX0 + kRightX1) * 0.5f + o, 300, 46, kDim, 0x22);
+            text("impactor.font", "Choose \"Customize inputs\" on a player to see and change its buttons.", (kRightX0 + kRightX1) * 0.5f + o,
+                 352, 18, kDim, 0x22);
+            text("impactor.font", "Report for bug reports: " + fit(input_->reportPath(), 14, 480), (kRightX0 + kRightX1) * 0.5f + o, 612,
+                 14, kDim, 0x22);
+            return;
+        }
+        std::string dev;
+        for (const Input::Device& d : input_->devices())
+            if (d.id == editDevice_) dev = deviceLabel(d);
+        text("impactor.font", "INPUTS MAPPING: PLAYER " + std::to_string(editPlayer_ + 1) + " - " + fit(dev, 22, 420), kRightX0 + 20 + o, 50,
+             22, kAccent, 0x21);
+        text("impactor.font", "KEY 1", kSlot1X0 + kSlotW * 0.5f + o, 78, 14, kDim, 0x22);
+        text("impactor.font", "KEY 2", kSlot2X0 + kSlotW * 0.5f + o, 78, 14, kDim, 0x22);
+        const auto rows = rightRows();
+        const Input::Bindings& b = input_->bindings(editDevice_);
+        for (size_t r = 0; r < rows.size(); ++r) {
+            const RRow& row = rows[r];
+            float x0, y0, x1, y1;
+            if (!rrect(int(r), x0, y0, x1, y1)) continue;
+            const bool f = int(r) == rfocus_;
+            const float cy = (y0 + y1) * 0.5f + 1;
+            switch (row.kind) {
+            case RKind::Heading:
+                text("impactor.font", row.text, x0 + o, cy, 18, kAccent, 0x21);
+                break;
+            case RKind::Binding: {
+                const auto c = Input::Control(row.index);
+                const bool live = input_->controlDown(editDevice_, c);
+                if (live) quad(x0 + o, y0, x1 + o, y1, {0.3f, 1, 0.35f, 0.2f});
+                const int fret = row.index - int(Input::Control::Green);
+                if (fret >= 0 && fret < 5) quad(x0 + 6 + o, y0 + 6, x0 + 14 + o, y1 - 6, kFretColors[size_t(fret)]);
+                text("impactor.font", row.text, kNameX + o, cy, 18, f ? kFocused : kNormal, 0x21);
+                for (size_t s = 0; s < Input::kSlots; ++s) {
+                    const float sx0 = s == 0 ? kSlot1X0 : kSlot2X0;
+                    const bool sf = f && int(s) == slot_, cap = input_->capturingSlot(editDevice_, c, s);
+                    std::string v = cap ? "Press... (Esc, Del)" : s < b[size_t(row.index)].size() ? input_->sourceName(editDevice_, b[size_t(row.index)][s]) : "--";
+                    if (sf) quad(sx0 + o, y0 + 1, sx0 + kSlotW + o, y1 - 1, {1, 0.86f, 0.2f, 0.18f});
+                    frame(sx0 + o, y0 + 1, sx0 + kSlotW + o, y1 - 1, 1.5f, sf ? kFocused : kDim);
+                    text("impactor.font", fit(v, 15, kSlotW - 12), sx0 + kSlotW * 0.5f + o, cy, 15, cap ? kAccent : live ? kOn : sf ? kFocused : kNormal, 0x22);
+                }
+                break;
+            }
+            case RKind::RequireStrum: {
+                if (f) quad(x0 + o, y0, x1 + o, y1, {1, 0.86f, 0.2f, 0.14f});
+                text("impactor.font", row.text, kNameX + o, cy, 18, f ? kFocused : kNormal, 0x21);
+                check(kSlot1X0 + o, cy, input_->requireStrum(editDevice_), f);
+                text("impactor.font", "Off: a fret press also strums", kSlot1X0 + 34 + o, cy, 15, kDim, 0x21);
+                break;
+            }
+            case RKind::Reset:
+                button(kSlot1X0 + o, y0 + 1, kSlot1X0 + kSlotW + o, y1 - 1, row.text, f, false);
+                break;
+            case RKind::Touch: {
+                if (f) quad(x0 + o, y0, x1 + o, y1, {1, 0.86f, 0.2f, 0.14f});
+                text("impactor.font", row.text, kNameX + o, cy, 17, f ? kFocused : kNormal, 0x21);
+                const std::string v = input_->touchOptionValue(row.index);
+                text("impactor.font", f ? "< " + v + " >" : v, kSlot2X0 + o, cy, 16, f ? kFocused : kOn, 0x22);
+                break;
+            }
+            case RKind::Save:
+            case RKind::Discard: {
+                const bool save = row.kind == RKind::Save;
+                const std::array<float, 4> c = save ? std::array<float, 4>{0.45f, 0.95f, 0.5f, 1} : std::array<float, 4>{1, 0.45f, 0.45f, 1};
+                quad(x0 + o, y0, x1 + o, y1, {c[0], c[1], c[2], f ? 0.4f : 0.2f});
+                frame(x0 + o, y0, x1 + o, y1, f ? 3.0f : 1.5f, c);
+                text("impactor.font", row.text, (x0 + x1) * 0.5f + o, cy, 21, f ? kFocused : kTitle, 0x22);
+                break;
+            }
+            }
+        }
+        // More rows above / below.
+        float content = 0;
+        for (const RRow& row : rows)
+            if (row.kind != RKind::Save && row.kind != RKind::Discard) content += kRowH;
+        if (content > kRowsBottom - kRowsTop) {
+            const float tx = kRightX1 - 8 + o, h = kRowsBottom - kRowsTop, thumb = h * h / content;
+            quad(tx - 2, kRowsTop, tx + 2, kRowsBottom, {1, 1, 1, 0.12f});
+            const float t0 = kRowsTop + (h - thumb) * std::clamp(scroll_ / std::max(1.0f, content - h), 0.0f, 1.0f);
+            quad(tx - 3, t0, tx + 3, t0 + thumb, {1, 1, 1, 0.45f});
+        }
+        text("impactor.font", "Choose a slot, then press the new button, key or MIDI note.", kRightX0 + 20 + o, 606, 14, kDim, 0x21);
+        text("impactor.font", "Esc cancels, Delete empties the slot.", kRightX0 + 20 + o, 624, 14, kDim, 0x21);
+    }
+    void drawDropdown() {
+        const auto opts = options(dropItem_);
+        const float o = offset_, h = float(opts.size()) * kDdRow;
+        quad(ddX0_ + o, ddY_, ddX1_ + o, ddY_ + h, {0.06f, 0.06f, 0.08f, 0.97f});
+        frame(ddX0_ + o, ddY_, ddX1_ + o, ddY_ + h, 1.5f, kAccent);
+        const std::string cur = value(dropItem_);
+        for (size_t k = 0; k < opts.size(); ++k) {
+            const float y0 = ddY_ + float(k) * kDdRow, cy = y0 + kDdRow * 0.5f + 1;
+            const bool f = int(k) == ddFocus_;
+            if (f) quad(ddX0_ + 2 + o, y0 + 1, ddX1_ - 2 + o, y0 + kDdRow - 1, {1, 0.86f, 0.2f, 0.2f});
+            if (opts[k].value == cur && opts[k].ok) tick(ddX0_ + 8 + o, cy, kOn);
+            text("impactor.font", fit(opts[k].label, 16, ddX1_ - ddX0_ - 40), ddX0_ + 30 + o, cy, 16, !opts[k].ok ? kDim : f ? kFocused : kNormal, 0x21);
+        }
+    }
+    void dropField(float x0, float y0, float x1, float y1, const std::string& v, bool f, bool locked) {
+        if (f && !locked) quad(x0, y0, x1, y1, {1, 0.86f, 0.2f, 0.16f});
+        frame(x0, y0, x1, y1, 1.5f, locked ? kDim : f ? kFocused : kNormal);
+        text("impactor.font", v, x0 + 8, (y0 + y1) * 0.5f + 1, 16, locked ? kDim : f ? kFocused : kNormal, 0x21);
+        const float ax = x1 - 14, ay = (y0 + y1) * 0.5f;
+        triangle(ax - 6, ay - 3, ax + 6, ay - 3, ax, ay + 4, locked ? kDim : f ? kFocused : kNormal);
+    }
+    void button(float x0, float y0, float x1, float y1, const std::string& t, bool f, bool locked) {
+        if (f && !locked) quad(x0, y0, x1, y1, {1, 0.86f, 0.2f, 0.16f});
+        frame(x0, y0, x1, y1, f && !locked ? 2.5f : 1.5f, locked ? kDim : f ? kFocused : kNormal);
+        text("impactor.font", t, (x0 + x1) * 0.5f, (y0 + y1) * 0.5f + 1, 17, locked ? kDim : f ? kFocused : kNormal, 0x22);
+    }
+    void check(float x0, float cy, bool on, bool f) {
+        frame(x0, cy - 11, x0 + 22, cy + 11, 2.5f, f ? kFocused : kNormal);
+        if (on) tick(x0 + 3, cy, kOn);
+    }
+    void tick(float x, float cy, const std::array<float, 4>& c) {
+        line(x + 2, cy + 1, x + 7, cy + 6, 3.5f, c);
+        line(x + 7, cy + 6, x + 16, cy - 6, 3.5f, c);
+    }
+    void warning(float x, float cy) {  // the yellow warning sign: not available
+        triangle(x, cy + 9, x + 20, cy + 9, x + 10, cy - 9, kWarn);
+        text("impactor.font", "!", x + 10, cy + 1, 15, {0, 0, 0, 1}, 0x22);
+    }
+
     void sound(const char* seq) { host_.sendTo("synth", "play_sequence", {Value::symbol(seq)}); }
     // Shortened with "..." to `width` at line height `h`.
     std::string fit(std::string s, float h, float width) {
@@ -317,7 +641,6 @@ private:
         while (s.size() > 1 && host_.textWidth("impactor.font", s + "...", h) > width) s.pop_back();
         return s + "...";
     }
-
     void updateTransition() {
         int phase = 0;
         float t = 1;
@@ -339,11 +662,34 @@ private:
                              {x0, y0, 0, 0, 0, r, g, bl, a}, {x1, y1, 0, 0, 0, r, g, bl, a}, {x0, y1, 0, 0, 0, r, g, bl, a}};
         host_.renderer().draw(v, 6, 0, Blend::Alpha);
     }
+    void frame(float x0, float y0, float x1, float y1, float t, const std::array<float, 4>& c) {
+        quad(x0, y0, x1, y0 + t, c), quad(x0, y1 - t, x1, y1, c), quad(x0, y0 + t, x0 + t, y1 - t, c), quad(x1 - t, y0 + t, x1, y1 - t, c);
+    }
+    void line(float x0, float y0, float x1, float y1, float w, const std::array<float, 4>& c) {
+        float dx = x1 - x0, dy = y1 - y0, l = std::hypot(dx, dy);
+        if (l <= 0) return;
+        float nx = -dy / l * w * 0.5f, ny = dx / l * w * 0.5f;
+        auto f = faded(c);
+        uint8_t r = uint8_t(f[0] * 255), g = uint8_t(f[1] * 255), b = uint8_t(f[2] * 255), a = uint8_t(f[3] * 255);
+        const Vertex v[6] = {{x0 + nx, y0 + ny, 0, 0, 0, r, g, b, a}, {x1 + nx, y1 + ny, 0, 0, 0, r, g, b, a},
+                             {x1 - nx, y1 - ny, 0, 0, 0, r, g, b, a}, {x0 + nx, y0 + ny, 0, 0, 0, r, g, b, a},
+                             {x1 - nx, y1 - ny, 0, 0, 0, r, g, b, a}, {x0 - nx, y0 - ny, 0, 0, 0, r, g, b, a}};
+        host_.renderer().draw(v, 6, 0, Blend::Alpha);
+    }
+    void triangle(float ax, float ay, float bx, float by, float cx, float cy, const std::array<float, 4>& c) {
+        auto f = faded(c);
+        uint8_t r = uint8_t(f[0] * 255), g = uint8_t(f[1] * 255), b = uint8_t(f[2] * 255), a = uint8_t(f[3] * 255);
+        const Vertex v[3] = {{ax, ay, 0, 0, 0, r, g, b, a}, {bx, by, 0, 0, 0, r, g, b, a}, {cx, cy, 0, 0, 0, r, g, b, a}};
+        host_.renderer().draw(v, 3, 0, Blend::Alpha);
+    }
 
     SelectHost& host_;
     Input* input_;
-    int focus_ = 0, selected_ = 0;
-    float captureMs_ = 0, offset_ = 0, fade_ = 1;
+    int focus_ = 0, rfocus_ = 0, slot_ = 0, dropdown_ = -1, ddFocus_ = 0, editPlayer_ = -1;
+    Item dropItem_{Field::Toggle};
+    std::string editDevice_, status_;
+    float ddX0_ = 0, ddX1_ = 0, ddY_ = 0, scroll_ = 0;
+    float captureMs_ = 0, statusMs_ = 0, offset_ = 0, fade_ = 1;
     size_t reportedDevices_ = 0;
 };
 

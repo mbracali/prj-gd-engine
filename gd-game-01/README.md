@@ -84,51 +84,69 @@ the earlier name (`gh1re`) are copied over on the first start.
 
 ## Default settings
 
-Each download starts with Enhanced Settings tuned for its system (change
-them in Options > Enhanced Settings; your changes are kept).
-"Apply Steam Deck Settings" sets the Steam Deck column on any PC.
+Every enhanced effect starts off: the game looks like the original. Change
+them in Options > Enhanced Settings (your changes are kept); the **Modes**
+buttons set many at once (Steam Deck, Original Feel, Clean Image, Max Out
+(Full HD), Max Out (4K), Rocking on a Budget, Good Old Days). Only the window,
+frame rate, resolution and touch follow the system:
 
 | Setting | Linux | Steam Deck | Windows | macOS | Android |
 |---|---|---|---|---|---|
 | Screen Mode | Windowed | Full Screen | Windowed | Windowed | Full Screen |
-| In-Game Max FPS | 120 | 60 | 120 | 120 | 60 |
-| Show FPS Counter | on | off | on | on | off |
-| Internal Resolution | 1080p | 800p | 1440p | 1440p | 900p |
-| Sharper Text & Sprites | on | on | on | on | off |
-| Anti-Aliasing / AI Upscaling | None | None | None | None | None |
-| Bokeh Effect | Stronger | Stronger | Stronger | Stronger | Stronger |
-| Particles FX | on | on | on | on | on |
-| Bloom | High | Medium | High | High | Medium |
-| Cinematic Color | on | on | on | on | on |
-| Color Grading | Off | Off | Off | Off | Off |
-| Film Grain | Light | Off | Light | Light | Off |
-| Chromatic Aberration | on | on | on | on | on |
-| Anamorphic Light Streaks | off | off | off | off | off |
-| Ambient Occlusion | on | off | on | on | off |
-| Sharpening | Low | Off | Low | Low | Low |
-| Blur on Star Power | High | Medium | High | High | Light |
-| All Band Mates Cast Shadows | on | off | on | on | off |
-| More Lights on Venues | Subtle | Subtle | Subtle | Subtle | Subtle |
-| Dust in Light Beams | on | off | on | on | off |
-| Add Fog to the Ground | Low | None | Low | Low | None |
-| Disable Shaky Camera | off | off | off | off | off |
-| Controls | Keyboard (touch off) | Keyboard (touch off) | Keyboard (touch off) | Keyboard (touch off) | Touch |
+| Max FPS | 120 | 60 | 120 | 120 | 60 |
+| Resolution | 1080p | 800p | 1440p | 1440p | 900p |
+| Enable Touch Controls | off | on | off | off | on (always) |
+| Bokeh Effect / Particles FX | Medium (original) / Original | the Steam Deck mode | as Linux | as Linux | as Linux |
+| Every other effect | None / off | the Steam Deck mode (light bloom, cinematic colour, light Star Power blur, FXAA) | None / off | None / off | None / off |
 
-In the menus every controller works: any gamepad, guitar or keyboard
-navigates and selects, and on a screen with nothing to choose ("press any
-button") a click or a tap continues.
+**HDR** (Performance & Graphics): None (the default, the original image),
+Emulated (high dynamic range tone mapped to any screen) or True HDR (an HDR
+display on Windows, or on a Linux Wayland desktop whose driver offers an
+scRGB / PQ surface; it starts with the game, and falls back to Emulated
+with the reason in the help box where it cannot run).
+
+Settings saved by 1.1.6 and older keep their meaning (for example Bloom High
+is now 3x, Chromatic Aberration on is Medium). XInput gamepads and Rock Band
+guitars always play (their switches are gone); mouse selection is on.
+
+In the menus every controller works: any gamepad, guitar, keyboard, mouse or
+touch screen navigates and selects; logos, the intro movie and the credits
+skip with green, red, Enter, Start, a click or a tap; the help bar's buttons
+(CONFIRM, BACK, START, UP / DOWN) are clickable. NAME YOUR BAND: any up / down
+changes the letter, green takes it, Start or Enter accepts the name.
+
+**Default controls** (universal_mechanisms.md at the repository root):
+
+| Control | Keyboard | Gamepad (PS2 layout) |
+|---|---|---|
+| Green / Red / Yellow / Blue / Orange fret | 1 / 2 / 3 / 4 / 5 and F1 to F5 | L2 / L1 / R1 / R2 / Cross (A) |
+| Up / Down, Strum Up / Strum Down | Up / Down arrows | D-pad up / down |
+| Start | Enter | Start |
+| Select, Gyro (Star Power) | Tab | Select |
+| Whammy | Shift | either analog stick |
+| Require Strum | on | off (a fret press also strums) |
+
+Esc / Backspace go back and the arrows move in every menu, whatever the
+bindings. A key bound to two controls (Up is menu Up and Strum Up) acts once.
+
+**GAMEPADS** (the yellow fret or the GAMEPADS button in the main menu): four
+player boxes (Guitar Hero has two players; 3 and 4 are shown unavailable).
+Click "Player 2" to turn player 2 on or off. Each player has an
+**Instrument** (5 Fret Guitar, Gamepad, Generic MIDI) and **Bind to:** any
+connected keyboard, gamepad, guitar or MIDI device, or "Detect", which takes
+the next device you press. **Customize inputs** shows that device's buttons
+(two per control) and Require Strum; **Save** or **Discard** finishes.
+**Export** / **Import** save and load all controller settings as a file.
+Generic MIDI (Linux, Windows, macOS; not on Android yet) starts with nothing
+bound: bind the notes you want. A PS2 guitar on an adapter that calls itself
+a PlayStation 3 pad plays as a guitar once its instrument is 5 Fret Guitar.
 
 **Touch** (always on in the Android app; Enhanced Settings > Enable Touch
 Controls elsewhere): tap to click; in a song a finger on a lane plays it;
 on-screen Up / Down / START buttons (menus) and a pause button (songs) show
 once you touch the screen; two-finger swipes move up / down (in a song: Star
 Power / pause). Set the buttons, swipes and pause corner in GAMEPADS >
-Touch Screen.
-
-**Controllers:** GAMEPADS lists every connected controller. Each one has a
-**Type** (Auto, Gamepad, PS2 guitar (adapter), Xbox guitar, Rock Band guitar):
-a PS2 guitar on an adapter that calls itself a PlayStation 3 pad plays as a
-guitar once its type is "PS2 guitar (adapter)". For a bug report, attach
+Player 1 > Customize inputs. For a bug report, attach
 `controllers-report.txt` from the save folder (GAMEPADS shows its path).
 
 ## Building
@@ -153,7 +171,12 @@ sudo dnf install gcc-c++ cmake ninja-build SDL3-devel mingw64-gcc-c++ mingw64-SD
 tools/fetch_dlss.sh          # optional: NVIDIA DLSS (downloaded from NVIDIA, 57 MB)
 engine/build.sh              # Linux + Windows (+ Android when its SDK is installed)
 engine/dist/gd01-linux-x86_64/gd01 --selftest "path/to/Guitar Hero (USA).iso"
+tools/walks.sh engine/build/linux/gd01 "path/to/Guitar Hero (USA).iso"   # the headless menu walks
 ```
+
+Generic MIDI on Linux needs the ALSA headers to build (`alsa-lib-devel` on
+Fedora, `libasound2-dev` on Debian / Ubuntu); without them the game builds
+and shows MIDI as unavailable.
 
 ## Folder
 

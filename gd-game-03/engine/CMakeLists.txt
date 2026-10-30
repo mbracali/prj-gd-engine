@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
 # Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 cmake_minimum_required(VERSION 3.24)
-project(gd03 VERSION 0.0.1 LANGUAGES C CXX)
+project(gd03 VERSION 0.0.2 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -73,6 +73,7 @@ target_sources(gd03 PRIVATE
   src/game/world_driver.cpp
   src/input/input.cpp
   src/input/input_selftest.cpp
+  src/input/midi_in.cpp
   src/platform/app_icon.cpp
   src/platform/disc_picker.cpp
   src/platform/paths.cpp
@@ -83,9 +84,13 @@ target_sources(gd03 PRIVATE
   src/render/gl_api.cpp
   src/render/gl_device.cpp
   src/render/highway.cpp
+  src/render/image_enhance.cpp
   src/render/hud_view.cpp
   src/render/material.cpp
   src/render/particles.cpp
+  src/render/enhanced_fx.cpp
+  src/render/hdr_output.cpp
+  src/render/enhanced_lights.cpp
   src/render/post_fx.cpp
   src/render/renderer.cpp
   src/render/scene_gpu.cpp
@@ -154,6 +159,12 @@ endif()
 
 find_package(Threads REQUIRED)
 target_link_libraries(gd03 PRIVATE Threads::Threads)
+
+# Generic MIDI input (src/input/midi_in.cpp): RtMidi (third_party/rtmidi), desktop only.
+if(NOT ANDROID)
+  add_subdirectory(third_party/rtmidi)
+  target_link_libraries(gd03 PRIVATE gd_rtmidi)
+endif()
 
 target_compile_definitions(gd03 PRIVATE GD03_VERSION="${PROJECT_VERSION}")
 

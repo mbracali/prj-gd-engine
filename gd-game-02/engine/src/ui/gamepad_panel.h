@@ -11,11 +11,13 @@ namespace ui {
 
 class UiManager;
 
-// The port's Gamepads screen (gd01's gamepad_panel, as is, over gd02's
-// input layer): the connected controllers and the keyboard, each one's
-// player, its bindings lit live while pressed, and remapping. Defined in
-// the port's own DTA (ui/port_screens.cpp) as {new GamepadPanel ...};
-// reached from Enhanced Options (CONTROLS AND GAMEPAD > Gamepads).
+// The port's Gamepad menu (universal_mechanisms.md 1.2.1, gd01's
+// gamepad_panel over gd02's input layer): four player boxes with their
+// instrument and device, and each device's bindings (two per control) lit
+// live while pressed, saved or discarded as a whole. Defined in the port's
+// own DTA (ui/port_screens.cpp) as {new GamepadPanel ...}; reached from the
+// main menu (the yellow fret / the help bar's GAMEPADS) and Enhanced Options
+// (CONTROLS > Gamepads).
 std::unique_ptr<ScriptObject> makeGamepadPanel(UiManager& ui, const std::string& name);
 
 }  // namespace ui

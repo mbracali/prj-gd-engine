@@ -28,4 +28,5 @@ d=dist/gd03-windows-x64
 rm -rf "$d" && mkdir -p "$d/licenses"
 cp build/windows/gd03.exe "$sdl_dll" README.md ../../LICENSE ../../LICENSE-ADDITIONAL-TERMS.md "$d/"
 ship_winpthread "$d" "$d/licenses"
+cp third_party/rtmidi/LICENSE "$d/licenses/RtMidi-LICENSE.txt"
 say "Ready: $d"

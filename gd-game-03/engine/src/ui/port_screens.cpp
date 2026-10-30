@@ -3,7 +3,8 @@
 // The port's own screens (Enhanced Options and the Gamepads screen it
 // opens), in GH2's script language, run after the game's
 // ui.dta (UiManager::runPortScripts). (port_patches (<object> <handlers>...))
-// adds handlers to the game's objects; later handlers win.
+// adds handlers to the game's objects; later handlers win. Both screens have
+// no transition: universal menus open on the next frame (universal_mechanisms.md).
 
 namespace ui {
 
@@ -14,6 +15,8 @@ const char* const kPortScreens = R"DTA(
 {new
    GHScreen
    gamepads_screen
+   (animate_transition FALSE)
+   (port_universal_menu TRUE)
    (panels gamepads_panel helpbar)
    (focus gamepads_panel)
    (helpbar (default ((fret1 help_select) (fret2 help_back) (strum help_updown))))
@@ -22,6 +25,8 @@ const char* const kPortScreens = R"DTA(
 {new
    GHScreen
    enhanced_options_screen
+   (animate_transition FALSE)
+   (port_universal_menu TRUE)
    (panels enhanced_panel helpbar)
    (focus enhanced_panel)
    (helpbar (default ((fret1 help_select) (fret2 help_back) (strum help_updown))))

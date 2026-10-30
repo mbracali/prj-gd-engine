@@ -6,6 +6,79 @@ matches the tag's version.
 
 ## [Unreleased]
 
+## [1.1.7] - 2026-10-29
+
+**Universal menus: a new GAMEPADS screen, a new Enhanced Settings menu, and
+every screen works with any controller, the mouse and touch.**
+
+### Changed
+- GAMEPADS now opens with the yellow fret on the main menu, as in every game.
+- Color Grading (now with Sepia), Sharpening and Disable Shaky Camera are back
+  in Enhanced Settings.
+
+### Added
+- GAMEPADS is rebuilt as the universal Gamepad menu: four player boxes
+  (Guitar Hero has two players; 3 and 4 are shown unavailable). Click
+  "Player 2" to turn player 2 on or off. Each player picks an
+  **Instrument** (5 Fret Guitar, Gamepad, Generic MIDI) and the device it is
+  **bound to** (the keyboard, any gamepad or guitar, any MIDI device, or
+  "Detect": press a button on the device you want). **Customize inputs**
+  shows the device's buttons in two slots each, with Require Strum and Reset;
+  **Save** or **Discard** finishes. **Export** / **Import** save and load all
+  your controller settings as a file.
+- Generic MIDI input (Linux, Windows, macOS): any MIDI keyboard, drum pad or
+  MIDI guitar can play once you bind its notes. Not on Android yet.
+- Enhanced Settings is rebuilt as the universal Enhanced menu: **Modes**
+  buttons set many options at once (Steam Deck, Original Feel, Clean Image,
+  Max Out (Full HD), Max Out (4K), Rocking on a Budget, Good Old Days, in
+  sepia at the PS2's resolution); finer levels for the effects (Bloom
+  Original / 2x / 3x; Film Grain, Ambient Occlusion and Blur on Star Power up
+  to Stronger; Chromatic Aberration in levels; More Lights and Dust at
+  1.5x / 2x / 2.5x; Particles 2x; Max FPS Unlimited); a scrollbar; Back, Export and Import buttons; the band shot in
+  a medium venue with the singer in focus and the guitarist and drummer
+  behind him, showing every change at once.
+- The help bar adds the buttons a screen is missing (CONFIRM, BACK, START on
+  the band name, UP / DOWN) in the original's style; all of them are
+  clickable (the UP / DOWN button: its upper half is up, its lower half
+  down).
+- Enhanced Settings > HDR (None, Emulated, True HDR; None is the default and
+  the original image, unchanged). Emulated renders the venue and the band in
+  floating point, so lights and glows keep their full brightness, with an
+  automatic exposure and a filmic (ACES) tone map for any screen; True HDR
+  shows the same on an HDR display (Windows; Linux on a Wayland desktop whose
+  graphics driver offers an scRGB or PQ surface), menus and the HUD at the
+  screen's paper white. True HDR takes effect when the game starts; where it
+  cannot run (macOS, Android, X11, the Steam Deck, HDR off on the display),
+  Emulated is used and the help box says why. Max Out sets Emulated.
+
+### Changed
+- New default controls. Keyboard: frets 1-5 (or F1-F5), arrows for menus and
+  strumming, Enter is Start (and still selects in the menus), Tab is Select
+  and Star Power, Shift is the whammy. Gamepad: L2 / L1 / R1 / R2 / Cross,
+  d-pad, either stick for the whammy. A key or button bound to two things
+  (Up is menu Up and Strum Up) acts once, never twice and never missed.
+  Esc / Backspace and the arrows always work the menus. Your own bindings
+  from 1.1.6 are kept.
+- XInput gamepads and Rock Band guitars always play: their switches are
+  gone. Touch is on by default only on the Steam Deck and Android.
+- Every enhanced effect now starts off (the original look); settings saved
+  by 1.1.6 keep their meaning in the new levels.
+- Enhanced Settings and GAMEPADS open at once: no screen transition, and the
+  band shot behind Enhanced Settings is loaded at startup. They used to take
+  about a second to appear.
+
+### Removed
+- Add Fog to the Ground (Experimental) and Anamorphic Light Streaks are gone
+  from Enhanced Settings. Saved or imported settings that still have them
+  load normally.
+
+### Fixed
+- Logos, the intro movie and the credits skip with green, red, Enter, Start,
+  a click or a tap (the credits used to need Back; the movie ignored red and
+  the mouse).
+- NAME YOUR BAND: any up / down (arrows, d-pad, strum bar) changes the
+  letter, green takes it, and Start or Enter always accepts the name.
+
 ## [1.1.6] - 2026-10-28
 
 **The guitarist moves freely again, as in the original.**

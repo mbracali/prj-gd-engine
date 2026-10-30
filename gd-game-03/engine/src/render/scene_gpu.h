@@ -134,6 +134,11 @@ public:
 
     RenderDevice& device() { return device_; }
     int skippedTextures() const { return skippedTextures_; }
+    // Enhanced Options > Sharper Text and Sprites: textures made from now on
+    // are upscaled with a sharper filter (render/image_enhance.h); how many were.
+    void setEnhance(bool on) { enhance_ = on; }
+    bool enhancing() const { return enhance_; }
+    int enhancedTextures() const { return enhancedTextures_; }
     size_t textureCount() const { return textures_.size(); }
 
 private:
@@ -143,6 +148,8 @@ private:
     std::map<const scene::Mesh*, std::unique_ptr<GpuMesh>> meshes_;
     std::vector<BufferId> buffers_;
     int skippedTextures_ = 0;
+    bool enhance_ = false;
+    int enhancedTextures_ = 0;
 };
 
 // The texture-coordinate transform GH2 derives from a Mat's tex_xfm for its
