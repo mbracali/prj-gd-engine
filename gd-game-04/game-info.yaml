@@ -9,7 +9,7 @@ platforms: [Xbox 360, PlayStation 3, Wii, PlayStation 2, Windows, macOS]
 based_on: Xbox 360
 guitar_dream_version: "0.0.1"
 ready_to_play: true
-completeness: 0.25
+completeness: 0.47
 iso_signatures:
   - format: xdvdfs            # USA Rev 1 (read from default.xex's execution info)
     xex_title_id: "415607F7"

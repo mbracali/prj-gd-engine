@@ -9,7 +9,7 @@ platforms: [PlayStation 2, Xbox 360]
 based_on: Xbox 360
 guitar_dream_version: "0.1.8"
 ready_to_play: true
-completeness: 0.79
+completeness: 0.88
 # How the launcher recognises this game's disc image (by content, not name).
 iso_signatures:
   - format: xdvdfs          # Xbox 360 disc
