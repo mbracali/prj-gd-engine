@@ -44,17 +44,24 @@ a frame-time breakdown every 2 s.
 
 ## Controls
 
-| Action | Keyboard |
-|---|---|
-| Frets green..orange | 1–5 |
-| Strum | Up / Down / Enter |
-| Star Power | Space |
-| Whammy | hold W |
-| Back / quit | Esc |
+The default controls (universal_mechanisms.md 1.1.4 at the repository root):
 
-In the menus: arrows move, Enter (or green / 1) confirms, Esc (or red / 2)
-goes back, Tab is Start (pause in a song). Guitars and gamepads work too; the
-GAMEPADS screen (yellow on the main menu, or Options) sets them up.
+| Action | Keyboard | Gamepad (XInput) |
+|---|---|---|
+| Frets green..orange | 1–5 or F1–F5 | LT, LB, RB, RT, A |
+| Strum up / down (and menu up / down) | Up / Down | D-pad up / down |
+| Start (pause in a song) | Enter | Start |
+| Select / Star Power (gyro trigger) | Tab | Back |
+| Whammy | hold Shift | either stick |
+| Back | Esc / Backspace | B |
+
+In the menus: arrows move, Enter (or green / 1) confirms, Esc, Backspace (or
+red / 2) goes back; a gamepad's A selects and B goes back. A key bound to two
+things (Up: menu Up and Strum Up) acts once. Guitars, gamepads and MIDI
+devices work too; the GAMEPADS screen (the yellow fret on the main menu, or
+Enhanced Options > Gamepads) gives each player an instrument and a device and
+changes their buttons (two per control). XInput gamepads and Rock Band
+guitars always play.
 `GD02_DEBUG_MENU=1` shows the old debug song list instead of the game's menus.
 
 ## Building

@@ -54,24 +54,37 @@ id = `gd-game-02`
 - Mods support
 
 
+**Universal menus** ([universal_mechanisms.md](../universal_mechanisms.md),
+as gd-game-01): the GAMEPADS screen (the yellow fret on the main menu, or
+Enhanced Options > Gamepads) with four player boxes (Guitar Hero II has two),
+each player's instrument (5 Fret Guitar, Gamepad, Generic MIDI) and device,
+and Customize inputs (two buttons per control, Require Strum, the controller
+type, Save / Discard, Export / Import); Enhanced Options with MODES presets
+(Steam Deck, Original Feel, Clean Image, Max Out (Full HD / 4K), Rocking on a
+Budget, Good Old Days), CONTROLS, PERFORMANCE & GRAPHICS and CHEATS &
+ENHANCERS, a scrollbar and Back / Export / Import; the help bar's access
+buttons (SELECT, BACK, START, UP / DOWN, all clickable); every logo, movie and
+the credits skip with green, red, Enter, Start, a click or a tap. The default
+controls are in `engine/README.md`.
+
 **Default settings**: every download starts with the original Guitar Hero II
-look: every effect the port adds is off (Sharper Text and Sprites,
-anti-aliasing, AI upscaling, bloom, Cinematic Color, Color Grading, film
-grain, chromatic aberration, light streaks, ambient occlusion, sharpening,
-Blur on Star Power, band shadows, More Lights on Venues, dust, ground fog,
-the FPS counter), Bokeh is Regular (the original's own depth of field), and
-particles and the camera shake are as the original. Turn the effects on in
-Options > Enhanced Options; your changes are kept. Only the window, frame
-rate, resolution and touch differ per system. "Apply Steam Deck Settings"
-sets the Steam Deck column on any PC; "Remove All Effects" also turns the
-original game's own effects off.
+look (the "Original Feel" mode): every effect the port adds is off (Sharper
+Text and Sprites, anti-aliasing, AI upscaling, bloom, Cinematic Color, Color
+Grading, film grain, chromatic aberration, light streaks, ambient occlusion,
+sharpening, Blur on Star Power, band shadows, More Lights on Venues, dust,
+ground fog, the FPS counter), Bokeh is Medium (the original's own depth of
+field), and particles and the camera shake are as the original. Turn the
+effects on in Options > Enhanced Options, one by one or with a MODES button;
+your changes are kept. Only the window, frame rate, resolution and touch
+differ per system; "Remove All Effects" also turns the original game's own
+effects off.
 
 | Setting | Linux | Steam Deck | Windows | macOS | Android |
 |---|---|---|---|---|---|
 | Screen Mode | Windowed | Full Screen | Windowed | Windowed | Full Screen |
-| In-Game Max FPS | 120 | 60 | 120 | 120 | 60 |
-| Internal Resolution | 1080p | 800p | 1440p | 1440p | 900p |
-| Touch Controls | off | off | off | off | on |
+| Max FPS | 120 | 60 | 120 | 120 | 60 |
+| Resolution | 1080p | 800p | 1440p | 1440p | 900p |
+| Touch Controls | off | on | off | off | on |
 
 
 **Running** (`engine/README.md` has the details, it ships in every download):

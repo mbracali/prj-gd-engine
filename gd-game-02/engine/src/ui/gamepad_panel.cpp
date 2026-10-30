@@ -69,7 +69,7 @@ public:
         if (input_) {
             input_->cancelCapture();
             input_->cancelDetect();
-            if (input_->editing()) finishEdit(false);  // leaving without Save discards
+            if (input_->editing()) finishEdit(false, true);  // leaving without Save discards
             editPlayer_ = -1;
             input_->writeReport();  // with what was pressed here
         }
@@ -471,14 +471,16 @@ private:
         case RKind::Discard: return finishEdit(false);
         }
     }
-    void finishEdit(bool save) {
+    void finishEdit(bool save, bool quiet = false) {
         if (save) {
-            input_->commitEdit(), sound("button_select");
+            input_->commitEdit();
+            if (!quiet) sound("button_select");
         } else {
             // The controller type chosen during the edit goes back too (Auto + 5 types).
             for (int k = 0; k < 6 && editDevice_.rfind("pad:", 0) == 0 && input_->deviceType(editDevice_) != editType_; ++k)
                 input_->cycleDeviceType(editDevice_, 1);
-            input_->discardEdit(), sound("button_back");
+            input_->discardEdit();
+            if (!quiet) sound("button_back");
         }
         editPlayer_ = -1;
     }

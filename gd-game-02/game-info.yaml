@@ -7,7 +7,7 @@ nick_name: "Guitar Hero II"
 launch: 2007-04-03
 platforms: [PlayStation 2, Xbox 360]
 based_on: Xbox 360
-guitar_dream_version: "0.1.7"
+guitar_dream_version: "0.1.8"
 ready_to_play: true
 completeness: 0.79
 # How the launcher recognises this game's disc image (by content, not name).

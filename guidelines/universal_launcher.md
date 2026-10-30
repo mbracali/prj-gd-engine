@@ -80,11 +80,11 @@ incomplete bundles".
 > at the repository root: the owner's universal mechanisms (skips, band
 > naming, Universal Access Buttons, default mappings) and the universal
 > Gamepad menu (1.2.1) and Enhanced menu (1.2.2), with their mockups.
-> gd-game-01 1.1.7 implements them; where this section differs (the old
-> GAMEPADS layout, the STEAM DECK MODE / ENHANCERS / CHEATS sections, the
-> XInput and Rock Band switches), universal_mechanisms.md wins, and the
-> rest of this section is kept for gd-game-02's current screens until they
-> are ported.
+> gd-game-01 1.1.7 and gd-game-02 0.1.8 implement them; where this section
+> differs (the old GAMEPADS layout, the STEAM DECK MODE / ENHANCERS / CHEATS
+> sections, the XInput and Rock Band switches), universal_mechanisms.md
+> wins. The rest of this section (fonts, colours, widgets, the parity table
+> of gd-game-02 0.1.7) still holds for the games not ported yet.
 
 Every gd-game has two screens of its own that are not in the original game:
 the **GAMEPADS** screen and the **Enhanced** menu. A player who knows them in
@@ -310,8 +310,9 @@ rules above:
 - a virtual pad whose D-pad is an axis resting off centre, which must give
   no left / right press while it rests.
 
-gd-game-02's are `--walktest mouse`, `--walktest gamepads` and
-`--walktest stickyaxis`.
+gd-game-02's are `--walktest mouse`, `--walktest gamepads`,
+`--walktest gamepads_pad`, `--walktest enhanced`, `--walktest band`,
+`--walktest logo_skip` and `--walktest stickyaxis`.
 
 ### Enhanced options: parity
 

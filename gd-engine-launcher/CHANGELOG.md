@@ -10,10 +10,15 @@ Games
   finer effect levels, new default controls with no double inputs, and
   every logo, movie and credit screen skippable with any button, a click or
   a tap. See universal_mechanisms.md.
+- Guitar Hero II (gd-game-02) 0.1.8: the same universal menus. The new
+  GAMEPADS screen (yellow fret on the main menu), the new Enhanced Options
+  (Modes presets, finer effect levels, scrollbar, Back / Export / Import),
+  the same default controls, Generic MIDI, skippable movies and credits, and
+  the help bar's access buttons.
 
 Downloads
-- The licence of RtMidi (MIT), used by Guitar Hero's MIDI input, is in the
-  licenses folder of every desktop download.
+- The licence of RtMidi (MIT), used by the MIDI input of Guitar Hero and
+  Guitar Hero II, is in the licenses folder of every desktop download.
 
 ## 0.1.7
 

@@ -15,14 +15,18 @@ in [guidelines/universal_launcher.md](guidelines/universal_launcher.md).
   starting point for every game.
 - Where a game cannot do something, it says so in its own docs and backlog.
 
-Implemented so far: **gd-game-01** (1.1.7). gd-game-02 copies its components
-next: `engine/src/input/input.*` (the universal controls and their
-bindings), `engine/src/input/midi_in.*` (Generic MIDI through RtMidi),
-`engine/src/ui/gamepad_panel.cpp` (1.2.1), `EnhancedPanel` in
-`engine/src/ui/select_panels.cpp` with `enhancedPreset` / `migrateEnhanced`
-in `engine/src/app.cpp` (1.2.2), the help bar's Universal Access Buttons
-(`addAccessButtons` in `engine/src/ui/ui_system.cpp`), and the walks in
-`tools/walks.sh`.
+Implemented so far: **gd-game-01** (1.1.7) and **gd-game-02** (0.1.8). The
+reference components are gd-game-01's: `engine/src/input/input.*` (the
+universal controls and their bindings), `engine/src/input/midi_in.*`
+(Generic MIDI through RtMidi), `engine/src/ui/gamepad_panel.cpp` (1.2.1),
+`EnhancedPanel` in `engine/src/ui/select_panels.cpp` with `enhancedPreset` /
+`migrateEnhanced` in `engine/src/app.cpp` (1.2.2), the help bar's Universal
+Access Buttons (`addAccessButtons` in `engine/src/ui/ui_system.cpp`), and the
+walks in `tools/walks.sh`. gd-game-02 copies them: the same `input.*` and
+`midi_in.*`, `ui/gamepad_panel.cpp`, `ui/enhanced_panel.cpp`
+(`enhancedPreset`, `migrateEnhanced`), the access buttons in `HelpBarPanel`
+(`ui/panels.cpp`), and its `--walktest` walks (gamepads, gamepads_pad,
+enhanced, mouse, cheats, band, logo_skip).
 
 ## 1.1 Universal behaviours
 
@@ -427,8 +431,8 @@ to be redeveloped, adapted or improved for that.
 
 ## Decisions taken for gd-game-01 (2026-10-29)
 
-- Only gd-game-01 implements this so far; gd-game-02 copies its components
-  next.
+- gd-game-01 implemented this first; gd-game-02 (0.1.8) copies its
+  components. gd-game-03 and gd-game-04 are next.
 - **Enhanced visual effects still default to off** (the original look, the
   "Original feel" mode), as decided earlier for every module; the Modes are
   presets that set many options at once.
@@ -447,3 +451,19 @@ to be redeveloped, adapted or improved for that.
 - 1.1.6 and older `enhanced.json` and `controllers.json` files still load:
   their values are mapped to the new ones (for example Bloom High is 3x,
   Chromatic Aberration on is Medium, Fog Full is 2x).
+
+## Decisions taken for gd-game-02 (2026-10-29)
+
+- The same behaviour, layout, names and defaults as gd-game-01, in Guitar
+  Hero II's menus, font and colours. Guitar Hero II has **two players**:
+  players 3 and 4 are listed as unavailable; the Instrument dropdown offers
+  5 Fret Guitar, Gamepad and Generic MIDI.
+- Kept from gd-game-02's own menus: a pad's **Controller Type** row in
+  Customize inputs (Guitar Hero II's Xbox 360, old Xbox, PS2-adapter, Rock
+  Band and gamepad layouts), and **Remove All Effects** (the last row of
+  Performance & graphics), with Color Grading (and Sepia), Sharpening and
+  Disable Shaky Camera.
+- The keyboard's Enter is Start (the keyboard table): it selects in the
+  menus and pauses a song; unbound, Enter still strums in a song.
+- 0.1.7 `enhanced.json` and `controllers.json` files still load, mapped to
+  the new values as gd-game-01's 1.1.6 files are.
