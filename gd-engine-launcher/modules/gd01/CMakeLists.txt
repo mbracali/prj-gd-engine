@@ -70,6 +70,9 @@ if(ANDROID)
   target_compile_definitions(gd01_module PRIVATE GD01_DLSS=0)
   target_link_libraries(gd01_module PRIVATE android log)
 else()
+# Generic MIDI input (gd01's src/input/midi_in.cpp): RtMidi, desktop only.
+add_subdirectory(${GD01_ENGINE}/third_party/rtmidi rtmidi)
+target_link_libraries(gd01_module PRIVATE gd_rtmidi)
 add_subdirectory(${GD01_ENGINE}/third_party/fidelityfx fidelityfx)
 target_include_directories(gd01_module SYSTEM PRIVATE ${GD01_ENGINE}/third_party/vulkan ${GD01_ENGINE}/third_party/volk
                            ${GD01_ENGINE}/third_party/fidelityfx/include)

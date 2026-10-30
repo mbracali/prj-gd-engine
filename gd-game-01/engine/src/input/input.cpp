@@ -12,6 +12,7 @@
 #include <string>
 
 #include "data/json.h"
+#include "input/midi_in.h"
 #include "platform/paths.h"
 
 namespace {
@@ -25,7 +26,6 @@ std::string lower(const char* s) {
     return n;
 }
 
-ControllerMode modeFor(bool joypad) { return joypad ? ControllerMode::Joypad : ControllerMode::Guitar; }
 
 // Xbox-style guitars: the Xbox 360 Guitar Hero (RedOctane 0x1430) and Rock
 // Band (Harmonix 0x1bad) guitars, or anything SDL types as a guitar. On Linux
@@ -85,9 +85,20 @@ constexpr float kSwipe = 60;              // a two-finger swipe moves both finge
 constexpr float kButtonX = 1246, kButtonR = 30, kPauseR = 28;
 constexpr uint64_t kSameNs = 80000000;    // the same press from two devices (menus)
 
-const char* const kControlKeys[] = {"green", "red", "yellow", "blue", "orange", "strum_up", "strum_down", "whammy",
-                                    "star_power", "start", "select", "back", "menu_up", "menu_down", "menu_left", "menu_right"};
-const char* const kKindKeys[] = {"button", "axis_pos", "axis_neg", "axis_any", "key"};
+// controllers.json, version 2 (1.1.7, the universal controls) by Input::Control.
+const char* const kControlKeys[] = {"start", "select", "menu_up", "menu_down", "guitar_start", "guitar_select", "strum_up",
+                                    "strum_down", "green", "red", "yellow", "blue", "orange", "whammy", "gyro"};
+// Version 1 (1.1.6 and older) keys that carry over: star_power is the gyro
+// trigger, its start both Starts. Its "select" was the menus' confirm, its
+// "back" / "menu_left" / "menu_right" are the built-in helpers now: dropped.
+const std::pair<const char*, Input::Control> kLegacyKeys[] = {
+    {"green", Input::Control::Green},       {"red", Input::Control::Red},         {"yellow", Input::Control::Yellow},
+    {"blue", Input::Control::Blue},         {"orange", Input::Control::Orange},   {"strum_up", Input::Control::StrumUp},
+    {"strum_down", Input::Control::StrumDown}, {"whammy", Input::Control::Whammy}, {"star_power", Input::Control::Gyro},
+    {"start", Input::Control::Start},       {"start", Input::Control::GuitarStart}, {"menu_up", Input::Control::MenuUp},
+    {"menu_down", Input::Control::MenuDown}};
+const char* const kKindKeys[] = {"button", "axis_pos", "axis_neg", "axis_any", "key", "midi_note", "midi_cc"};
+constexpr size_t kKinds = 7;
 // controllers.json "type" values, by Input::Profile (Keyboard is not a choice).
 const char* const kTypeKeys[] = {"ps2_guitar", "xbox_guitar", "rock_band", "gamepad"};
 constexpr size_t kRawEvents = 400;
@@ -103,10 +114,19 @@ Input::Source key(SDL_Keycode k) { return {Kind::Key, int(k)}; }
 }  // namespace
 
 const char* Input::controlName(Control c) {
-    static const char* const kNames[] = {"Green Fret", "Red Fret", "Yellow Fret", "Blue Fret", "Orange Fret", "Strum Up",
-                                         "Strum Down", "Whammy", "Star Power", "Start (Pause)", "Select / Confirm", "Back",
-                                         "Menu Up", "Menu Down", "Menu Left", "Menu Right"};
+    static const char* const kNames[] = {"Start", "Select", "Up", "Down", "Start", "Select", "Strum Up", "Strum Down",
+                                         "Green Fret", "Red Fret", "Yellow Fret", "Blue Fret", "Orange Fret", "Whammy",
+                                         "Gyro Special Trigger"};
     return kNames[size_t(c)];
+}
+
+const char* Input::instrumentName(Instrument i) {
+    switch (i) {
+    case Instrument::Guitar: return "5 Fret Guitar";
+    case Instrument::Gamepad: return "Gamepad";
+    case Instrument::Midi: return "Generic MIDI";
+    }
+    return "";
 }
 
 const char* Input::profileName(Profile p) {
@@ -116,80 +136,81 @@ const char* Input::profileName(Profile p) {
     case Profile::RockBand: return "Rock Band guitar";
     case Profile::Joypad: return "Gamepad";
     case Profile::Keyboard: return "Keyboard";
+    case Profile::Midi: return "Generic MIDI";
     }
     return "";
 }
 
+// The default bindings (universal_mechanisms.md 1.1.4): the doc's keyboard
+// and XInput (PS2 layout) tables; the guitars as the original's
+// beatmatch_controller.dta; Generic MIDI starts empty (the player binds it).
+// Select and the gyro trigger are Star Power in a song, as the PS2's Select.
 Input::Bindings Input::defaults(Profile p) {
     Bindings b;
     auto set = [&](Control c, std::vector<Source> s) { b[size_t(c)] = std::move(s); };
+    // Start, Select, the menu directions and the strum bar of a pad: the same buttons in both sections.
+    auto padCommon = [&](std::vector<Source> select) {
+        set(C::Start, {btn(SDL_GAMEPAD_BUTTON_START)});
+        set(C::GuitarStart, {btn(SDL_GAMEPAD_BUTTON_START)});
+        set(C::Select, select);
+        set(C::GuitarSelect, select);
+        set(C::MenuUp, {btn(SDL_GAMEPAD_BUTTON_DPAD_UP)});
+        set(C::MenuDown, {btn(SDL_GAMEPAD_BUTTON_DPAD_DOWN)});
+        set(C::StrumUp, {btn(SDL_GAMEPAD_BUTTON_DPAD_UP)});
+        set(C::StrumDown, {btn(SDL_GAMEPAD_BUTTON_DPAD_DOWN)});
+    };
     switch (p) {
     case Profile::RockBand:
     case Profile::XboxGuitar:
-        // The guitars select and go back with the green and red frets only
-        // (App::uiButton), so Select / Back stay unbound.
+        padCommon({btn(SDL_GAMEPAD_BUTTON_BACK)});
         set(C::Green, {btn(SDL_GAMEPAD_BUTTON_SOUTH)});
         set(C::Red, {btn(SDL_GAMEPAD_BUTTON_EAST)});
         set(C::Yellow, {btn(SDL_GAMEPAD_BUTTON_NORTH)});
         set(C::Blue, {btn(SDL_GAMEPAD_BUTTON_WEST)});
         set(C::Orange, {btn(SDL_GAMEPAD_BUTTON_LEFT_SHOULDER)});
-        set(C::StrumUp, {btn(SDL_GAMEPAD_BUTTON_DPAD_UP)});
-        set(C::StrumDown, {btn(SDL_GAMEPAD_BUTTON_DPAD_DOWN)});
         set(C::Whammy, {axis(Kind::AxisAny, SDL_GAMEPAD_AXIS_RIGHTX)});
         // The HID guitars' tilt bit is the right shoulder.
-        if (p == Profile::RockBand)
-            set(C::StarPower, {btn(SDL_GAMEPAD_BUTTON_BACK), btn(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER)});
-        else
-            set(C::StarPower, {btn(SDL_GAMEPAD_BUTTON_BACK)});
-        set(C::Start, {btn(SDL_GAMEPAD_BUTTON_START)});
-        set(C::MenuLeft, {btn(SDL_GAMEPAD_BUTTON_DPAD_LEFT)});
-        set(C::MenuRight, {btn(SDL_GAMEPAD_BUTTON_DPAD_RIGHT)});
+        if (p == Profile::RockBand) set(C::Gyro, {btn(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER), btn(SDL_GAMEPAD_BUTTON_BACK)});
+        else set(C::Gyro, {btn(SDL_GAMEPAD_BUTTON_BACK)});
         break;
     case Profile::Ps2Guitar:  // green is R2 (a trigger axis)
+        padCommon({btn(SDL_GAMEPAD_BUTTON_BACK)});
         set(C::Green, {axis(Kind::AxisPos, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER)});
         set(C::Red, {btn(SDL_GAMEPAD_BUTTON_EAST)});
         set(C::Yellow, {btn(SDL_GAMEPAD_BUTTON_NORTH)});
         set(C::Blue, {btn(SDL_GAMEPAD_BUTTON_SOUTH)});
         set(C::Orange, {btn(SDL_GAMEPAD_BUTTON_WEST)});
-        set(C::StrumUp, {btn(SDL_GAMEPAD_BUTTON_DPAD_UP)});
-        set(C::StrumDown, {btn(SDL_GAMEPAD_BUTTON_DPAD_DOWN)});
         set(C::Whammy, {axis(Kind::AxisAny, SDL_GAMEPAD_AXIS_RIGHTX), axis(Kind::AxisAny, SDL_GAMEPAD_AXIS_LEFTX)});
-        set(C::StarPower, {btn(SDL_GAMEPAD_BUTTON_BACK)});
-        set(C::Start, {btn(SDL_GAMEPAD_BUTTON_START)});
-        set(C::MenuLeft, {btn(SDL_GAMEPAD_BUTTON_DPAD_LEFT)});
-        set(C::MenuRight, {btn(SDL_GAMEPAD_BUTTON_DPAD_RIGHT)});
+        set(C::Gyro, {btn(SDL_GAMEPAD_BUTTON_BACK)});
         break;
-    case Profile::Joypad:  // L2 L1 R1 R2 Cross; the frets play only with XInput Controllers on
+    case Profile::Joypad:  // the doc's XInput table: L2 L1 R1 R2 X, whammy on either stick
+        padCommon({btn(SDL_GAMEPAD_BUTTON_BACK)});
         set(C::Green, {axis(Kind::AxisPos, SDL_GAMEPAD_AXIS_LEFT_TRIGGER)});
         set(C::Red, {btn(SDL_GAMEPAD_BUTTON_LEFT_SHOULDER)});
         set(C::Yellow, {btn(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER)});
         set(C::Blue, {axis(Kind::AxisPos, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER)});
         set(C::Orange, {btn(SDL_GAMEPAD_BUTTON_SOUTH)});
         set(C::Whammy, {axis(Kind::AxisAny, SDL_GAMEPAD_AXIS_LEFTX), axis(Kind::AxisAny, SDL_GAMEPAD_AXIS_RIGHTX)});
-        set(C::StarPower, {btn(SDL_GAMEPAD_BUTTON_BACK)});
-        set(C::Start, {btn(SDL_GAMEPAD_BUTTON_START)});
-        set(C::Select, {btn(SDL_GAMEPAD_BUTTON_SOUTH)});
-        set(C::Back, {btn(SDL_GAMEPAD_BUTTON_EAST)});
-        set(C::MenuUp, {btn(SDL_GAMEPAD_BUTTON_DPAD_UP)});
-        set(C::MenuDown, {btn(SDL_GAMEPAD_BUTTON_DPAD_DOWN)});
-        set(C::MenuLeft, {btn(SDL_GAMEPAD_BUTTON_DPAD_LEFT)});
-        set(C::MenuRight, {btn(SDL_GAMEPAD_BUTTON_DPAD_RIGHT)});
+        set(C::Gyro, {btn(SDL_GAMEPAD_BUTTON_BACK)});
         break;
-    case Profile::Keyboard:  // Esc, Enter and the arrows also always work the menus (keyEvent)
-        set(C::Green, {key(SDLK_1)});
-        set(C::Red, {key(SDLK_2)});
-        set(C::Yellow, {key(SDLK_3)});
-        set(C::Blue, {key(SDLK_4)});
-        set(C::Orange, {key(SDLK_5)});
+    case Profile::Keyboard:  // the doc's keyboard table; Esc / Backspace, Enter and the arrows also always work the menus
+        set(C::Start, {key(SDLK_RETURN)});
+        set(C::GuitarStart, {key(SDLK_RETURN)});
+        set(C::Select, {key(SDLK_TAB)});
+        set(C::GuitarSelect, {key(SDLK_TAB)});
+        set(C::MenuUp, {key(SDLK_UP)});
+        set(C::MenuDown, {key(SDLK_DOWN)});
         set(C::StrumUp, {key(SDLK_UP)});
         set(C::StrumDown, {key(SDLK_DOWN)});
-        set(C::Whammy, {key(SDLK_W)});
-        set(C::StarPower, {key(SDLK_SPACE)});
-        set(C::Start, {key(SDLK_TAB)});
-        set(C::Select, {key(SDLK_RETURN)});
-        set(C::Back, {key(SDLK_BACKSPACE)});
-        set(C::MenuLeft, {key(SDLK_LEFT)});
-        set(C::MenuRight, {key(SDLK_RIGHT)});
+        set(C::Green, {key(SDLK_1), key(SDLK_F1)});
+        set(C::Red, {key(SDLK_2), key(SDLK_F2)});
+        set(C::Yellow, {key(SDLK_3), key(SDLK_F3)});
+        set(C::Blue, {key(SDLK_4), key(SDLK_F4)});
+        set(C::Orange, {key(SDLK_5), key(SDLK_F5)});
+        set(C::Whammy, {key(SDLK_LSHIFT), key(SDLK_RSHIFT)});
+        set(C::Gyro, {key(SDLK_TAB)});
+        break;
+    case Profile::Midi:  // nothing pre-selected
         break;
     }
     return b;
@@ -204,12 +225,17 @@ void Input::setRockBand(bool on) {
     }
 }
 
+Input::Input() = default;
+Input::~Input() { close(); }
+
 void Input::close() {
     for (auto& [id, p] : pads_) SDL_CloseGamepad(p.pad);
     pads_.clear();
+    midiDevs_.clear();
+    midi_.reset();
 }
 
-void Input::emit(std::vector<InputEvent>& out, Action a, bool down, uint64_t ts, ControllerMode mode, int player) {
+void Input::emit(std::vector<InputEvent>& out, Action a, bool down, uint64_t ts, ControllerMode mode, int player, bool startKey) {
     if (!inGame()) {  // the menus: one press from two devices at once acts once
         const int k = int(a);
         if (down) {
@@ -224,33 +250,66 @@ void Input::emit(std::vector<InputEvent>& out, Action a, bool down, uint64_t ts,
         }
     }
     if (player == 0) lastMode_ = mode;
-    out.push_back({a, down, ts, mode, player});
+    out.push_back({a, down, ts, mode, player, startKey});
 }
 
 // The keyboard's chosen player, else the lowest one no pad holds (none with two pads).
 int Input::keyboardSlot() const {
-    if (auto it = players_.find("keyboard"); it != players_.end()) return it->second;
-    for (int s = 0; s < 2; ++s) {
+    if (auto it = players_.find("keyboard"); it != players_.end()) return playerEnabled(it->second) ? it->second : -1;
+    for (int s = 0; s < kPlayers; ++s) {
+        if (!playerEnabled(s)) continue;
         bool taken = false;
         for (const auto& [id, p] : pads_) taken = taken || p.slot == s;
+        for (const auto& [id, m] : midiDevs_) taken = taken || m.slot == s;
         if (!taken) return s;
     }
     return -1;
 }
 
-// Held by another connected pad, or chosen for the keyboard.
+// Held by another connected pad or MIDI port, or chosen for the keyboard.
 bool Input::slotTaken(int slot, const Pad* except) const {
     for (const auto& [id, p] : pads_)
         if (&p != except && p.slot == slot) return true;
+    for (const auto& [id, m] : midiDevs_)
+        if (m.slot == slot) return true;
     auto kb = players_.find("keyboard");
     return kb != players_.end() && kb->second == slot;
 }
 
 bool Input::padConnected(int slot) const {
     if (splitKeyboard_ && slot < 2) return true;
+    if (!playerEnabled(slot)) return false;
     for (const auto& [id, p] : pads_)
         if (p.slot == slot) return true;
+    for (const auto& [id, m] : midiDevs_)
+        if (m.slot == slot) return true;
     return keyboardSlot() == slot;
+}
+
+void Input::setPlayerEnabled(int player, bool on) {
+    if (player != 1 || p2Enabled_ == on) return;  // player 1 is always on
+    p2Enabled_ = on;
+    // Player 2's device works the menus only while it is off; it comes back when it is on.
+    for (auto& [jid, p] : pads_)
+        if (p.slot == 1 && !on) p.slot = -1;
+    for (auto& [mid, m] : midiDevs_)
+        if (m.slot == 1 && !on) m.slot = -1;
+    if (on) {
+        for (auto& [jid, p] : pads_)
+            if (auto it = players_.find(p.guid); p.slot < 0 && it != players_.end() && it->second == 1 && !slotTaken(1, &p)) p.slot = 1;
+        for (auto& [mid, m] : midiDevs_)
+            if (auto it = players_.find(m.guid); m.slot < 0 && it != players_.end() && it->second == 1 && !slotTaken(1, nullptr)) m.slot = 1;
+        for (auto& [jid, p] : pads_)  // else a pad without a player takes it, as when it connected
+            if (p.slot < 0 && !p.chosenSlot && !slotTaken(1, &p)) p.slot = 1;
+    }
+    save();
+}
+
+std::string Input::playerDevice(int player) const {
+    if (!playerEnabled(player)) return "";
+    for (const Device& d : devices())
+        if (d.player == player && d.id != "touch") return d.id;
+    return "";
 }
 
 // ----------------------------------------------------------- persistence
@@ -266,48 +325,69 @@ void Input::load() {
         SDL_Log("controllers.json: %s", ex.what());
         return;
     }
+    const bool v2 = root["version"].num() >= 2;
     const Json& t = root["touch"];
     const char* const kTouchKeys[] = {"buttons", "swipe_up", "swipe_down", "pause_corner"};
     for (int i = 0; i < kTouchOptions; ++i)
         if (t[kTouchKeys[i]].type == Json::Type::Number) touchOpt_[size_t(i)] = std::clamp(int(t[kTouchKeys[i]].n), 0, 2);
+    if (root["player2"].type == Json::Type::Bool) p2Enabled_ = root["player2"].b;
     for (const auto& [guid, d] : root["devices"].o) {
         if (d["player"].type == Json::Type::Number) players_[guid] = std::clamp(int(d["player"].n), -1, 1);
-        if (guid == "keyboard") kbFretsStrum_ = d["frets_strum"].truthy();
+        if (d["require_strum"].type == Json::Type::Bool) requireStrum_[guid] = d["require_strum"].b;
+        else if (guid == "keyboard" && d["frets_strum"].truthy()) requireStrum_[guid] = false;  // version 1
         for (int t = 0; t < 4; ++t)
             if (d["type"].str() == kTypeKeys[t]) types_[guid] = Profile(t);
         if (d["bindings"].type != Json::Type::Object) continue;
         // A control saved empty stays unbound; one missing takes the default.
-        const Bindings def = defaults(Profile::Keyboard);
+        // The defaults by the device's type are not known before it connects:
+        // a missing control of a pad is unbound (the Gamepad menu saves all).
+        const Bindings def = defaults(guid == "keyboard" ? Profile::Keyboard : Profile::Midi);
         Bindings b;
-        for (size_t c = 0; c < size_t(Control::Count); ++c) {
-            const Json& list = d["bindings"][kControlKeys[c]];
-            if (list.type != Json::Type::Array) {
-                if (guid == "keyboard") b[c] = def[c];
-                continue;
-            }
+        auto readList = [&](const Json& list, Control c) {
             for (const Json& j : list.a)
-                for (size_t k = 0; k < 5; ++k)
-                    if (j["kind"].str() == kKindKeys[k] && j["index"].type == Json::Type::Number)
-                        b[c].push_back({Kind(k), int(j["index"].n)});
+                for (size_t k = 0; k < kKinds; ++k)
+                    if (j["kind"].str() == kKindKeys[k] && j["index"].type == Json::Type::Number && b[size_t(c)].size() < kSlots)
+                        b[size_t(c)].push_back({Kind(k), int(j["index"].n)});
+        };
+        const Json& bj = d["bindings"];
+        if (v2) {
+            for (size_t c = 0; c < size_t(Control::Count); ++c) {
+                const Json& list = bj[kControlKeys[c]];
+                if (list.type == Json::Type::Array) readList(list, Control(c));
+                else b[c] = def[c];
+            }
+        } else {
+            b = def;  // version 1: what carries over replaces the defaults
+            for (const auto& [k, c] : kLegacyKeys)
+                if (bj[k].type == Json::Type::Array) b[size_t(c)].clear();
+            for (const auto& [k, c] : kLegacyKeys)
+                if (bj[k].type == Json::Type::Array) readList(bj[k], c);
+            // The old menu up / down were bound on pads only; strum up / down moved the menus too.
+            if (bj["menu_up"].type != Json::Type::Array) b[size_t(C::MenuUp)] = b[size_t(C::StrumUp)];
+            if (bj["menu_down"].type != Json::Type::Array) b[size_t(C::MenuDown)] = b[size_t(C::StrumDown)];
+            b[size_t(C::GuitarSelect)] = b[size_t(C::Select)] = b[size_t(C::Gyro)];
         }
         overrides_[guid] = b;
     }
 }
 
 void Input::save() const {
+    if (saveHeld_) return;  // Customize inputs: written on Save
     Json devs = Json::object();
     std::set<std::string> ids;
     for (const auto& [g, b] : overrides_) ids.insert(g);
     for (const auto& [g, p] : players_) ids.insert(g);
     for (const auto& [g, t] : types_) ids.insert(g);
-    if (kbFretsStrum_) ids.insert("keyboard");
+    for (const auto& [g, t] : requireStrum_) ids.insert(g);
     for (const std::string& g : ids) {
         Json d = Json::object();
-        if (g == "keyboard" && kbFretsStrum_) d.set("frets_strum", Json::boolean(true));
+        if (auto it = requireStrum_.find(g); it != requireStrum_.end()) d.set("require_strum", Json::boolean(it->second));
         if (auto it = players_.find(g); it != players_.end()) d.set("player", Json::number(it->second));
         if (auto it = types_.find(g); it != types_.end()) d.set("type", Json::string(kTypeKeys[size_t(it->second)]));
         for (const auto& [id, p] : pads_)
             if (p.guid == g) d.set("name", Json::string(p.name));
+        for (const auto& [id, m] : midiDevs_)
+            if (m.guid == g) d.set("name", Json::string(m.name));
         if (auto it = overrides_.find(g); it != overrides_.end()) {
             Json bj = Json::object();
             for (size_t c = 0; c < size_t(Control::Count); ++c) {
@@ -325,6 +405,8 @@ void Input::save() const {
         devs.set(g, d);
     }
     Json root = Json::object();
+    root.set("version", Json::number(2));
+    root.set("player2", Json::boolean(p2Enabled_));
     root.set("devices", devs);
     Json t = Json::object();
     const char* const kTouchKeys[] = {"buttons", "swipe_up", "swipe_down", "pause_corner"};
@@ -337,9 +419,9 @@ void Input::save() const {
 
 const Input::Bindings& Input::bindingsFor(const std::string& guid, Profile p) const {
     if (auto it = overrides_.find(guid); it != overrides_.end()) return it->second;
-    static const std::array<Bindings, 5> kDefaults = {defaults(Profile::Ps2Guitar), defaults(Profile::XboxGuitar),
+    static const std::array<Bindings, 6> kDefaults = {defaults(Profile::Ps2Guitar), defaults(Profile::XboxGuitar),
                                                       defaults(Profile::RockBand), defaults(Profile::Joypad),
-                                                      defaults(Profile::Keyboard)};
+                                                      defaults(Profile::Keyboard), defaults(Profile::Midi)};
     return kDefaults[size_t(p)];
 }
 
@@ -398,11 +480,11 @@ void Input::handle(const SDL_Event& e, std::vector<InputEvent>& out) {
         // lowest free one, else none (a third pad works the menus only).
         np.slot = -1;
         auto chosen = players_.find(np.guid);
-        if (chosen != players_.end() && (chosen->second < 0 || !slotTaken(chosen->second, nullptr)))
+        if (chosen != players_.end() && (chosen->second < 0 || (!slotTaken(chosen->second, nullptr) && playerEnabled(chosen->second))))
             np.slot = chosen->second, np.chosenSlot = true;
         else
-            for (int s = 0; s < 2 && np.slot < 0; ++s)
-                if (!slotTaken(s, nullptr)) np.slot = s;
+            for (int s = 0; s < kPlayers && np.slot < 0; ++s)
+                if (!slotTaken(s, nullptr) && playerEnabled(s)) np.slot = s;
         pads_[id] = np;
         SDL_Log("Controller connected: %s (%04x:%04x, %s, %s)", np.name.c_str(), SDL_GetGamepadVendorForID(id),
                 SDL_GetGamepadProductForID(id), profileName(profile), np.slot < 0 ? "no player" : np.slot == 0 ? "player 1" : "player 2");
@@ -421,6 +503,7 @@ void Input::handle(const SDL_Event& e, std::vector<InputEvent>& out) {
             p.buttons[e.gbutton.button] = e.gbutton.down;
             device_ = int64_t(it->first);
             if (e.gbutton.down) touchUsed_ = false;
+            if (e.gbutton.down && detectFrom("pad:" + std::to_string(it->first))) break;
             if (e.gbutton.down && captureFrom("pad:" + std::to_string(it->first), btn(SDL_GamepadButton(e.gbutton.button)))) break;
             if (capturing_ && captureId_ == "pad:" + std::to_string(it->first)) break;
             update(p, e.gbutton.timestamp, out);
@@ -436,8 +519,8 @@ void Input::handle(const SDL_Event& e, std::vector<InputEvent>& out) {
             if (capturing_ && captureId_ == id) {
                 int d = int(e.gaxis.value) - int(captureRest_[size_t(a)]);
                 if (std::abs(d) > 20000) {
-                    // The whammy and Star Power (tilt) take the axis either way; the others its direction.
-                    Kind k = captureControl_ == C::Whammy || captureControl_ == C::StarPower ? Kind::AxisAny : d > 0 ? Kind::AxisPos : Kind::AxisNeg;
+                    // The whammy and the gyro (tilt) take the axis either way; the others its direction.
+                    Kind k = captureControl_ == C::Whammy || captureControl_ == C::Gyro ? Kind::AxisAny : d > 0 ? Kind::AxisPos : Kind::AxisNeg;
                     captureFrom(id, axis(k, SDL_GamepadAxis(a)));
                 }
                 break;
@@ -497,7 +580,11 @@ bool Input::writeReport() const {
         << "System: " << SDL_GetPlatform() << ", SDL " << SDL_VERSIONNUM_MAJOR(v) << "." << SDL_VERSIONNUM_MINOR(v) << "."
         << SDL_VERSIONNUM_MICRO(v) << "\nTouch controls: " << (touch_ ? "on" : "off") << ", XInput play: "
         << (gamepadPlay_ ? "on" : "off") << ", Rock Band guitars: " << (rockBand_ ? "on" : "off") << "\n\n";
-    out << "Keyboard: player " << keyboardSlot() + 1 << (kbFretsStrum_ ? ", frets also strum" : "") << "\n\n";
+    out << "Keyboard: player " << keyboardSlot() + 1 << (requireStrum("keyboard") ? "" : ", frets also strum") << "\n";
+    out << "Player 2: " << (p2Enabled_ ? "on" : "off") << "\nMIDI: " << midiBackend() << "\n";
+    for (const auto& [id, m] : midiDevs_)
+        out << "  MIDI " << m.name << ", player " << (m.slot < 0 ? std::string("none") : std::to_string(m.slot + 1)) << "\n";
+    out << "\n";
     auto hex4 = [](unsigned x) {
         char b[8];
         std::snprintf(b, sizeof b, "%04x", x & 0xffff);
@@ -543,13 +630,18 @@ bool Input::writeReport() const {
 void Input::keyEvent(const SDL_KeyboardEvent& k, std::vector<InputEvent>& out) {
     const bool down = k.down;
     const uint64_t ts = k.timestamp;
+    if (detect_ >= 0 && down) {  // Bind to: Detect... (Esc cancels)
+        if (k.key == SDLK_ESCAPE) detect_ = -1;
+        else detectFrom("keyboard");
+        return;
+    }
     if (capturing_) {
         if (down && k.key == SDLK_ESCAPE) {  // Esc cancels any capture
             capturing_ = false;
             return;
         }
-        if (down && k.key == SDLK_DELETE) {  // Delete leaves the control unbound
-            clearBinding(captureId_, captureControl_);
+        if (down && k.key == SDLK_DELETE) {  // Delete leaves the slot empty
+            clearBinding(captureId_, captureControl_, captureSlot_);
             return;
         }
         if (captureId_ == "keyboard") {
@@ -589,15 +681,15 @@ void Input::keyEvent(const SDL_KeyboardEvent& k, std::vector<InputEvent>& out) {
         }
         keyControls_[c] = now;
     }
-    // "Frets also strum": the keyboard plays like the original's joypad.
-    const ControllerMode mode = kbFretsStrum_ ? ControllerMode::Joypad : ControllerMode::Guitar;
+    // Require Strum off: the keyboard plays like the original's joypad (frets also strum).
+    const ControllerMode mode = requireStrum("keyboard") ? ControllerMode::Guitar : ControllerMode::Joypad;
     controlEdges(was, keyControls_, mode, kb, false, ts, out);
     if (bound) return;
-    // Esc, Enter and the arrows work the menus whatever the bindings (or the
-    // keyboard's player) are, unless bound to something else.
+    // Esc / Backspace, Enter and the arrows work the menus whatever the
+    // bindings (or the keyboard's player) are, unless bound to something else.
     Action a;
     switch (k.key) {
-    case SDLK_ESCAPE: case SDLK_AC_BACK: a = Action::Back; break;  // AC_BACK: Android's back button
+    case SDLK_ESCAPE: case SDLK_BACKSPACE: case SDLK_AC_BACK: a = Action::Back; break;  // AC_BACK: Android's back button
     case SDLK_RETURN: case SDLK_KP_ENTER: a = Action::Confirm; break;
     case SDLK_UP: a = Action::Up; break;
     case SDLK_DOWN: a = Action::Down; break;
@@ -642,50 +734,75 @@ void Input::update(Pad& p, uint64_t ts, std::vector<InputEvent>& out) {
         p.down[c] = now;
     }
     curGuitar_ = !joypad;
-    controlEdges(was, p.down, modeFor(joypad), p.slot, joypad, ts, out);
+    controlEdges(was, p.down, requireStrum("pad:" + std::to_string(SDL_GetGamepadID(p.pad))) ? ControllerMode::Guitar : ControllerMode::Joypad,
+                 p.slot, joypad, ts, out);
     curGuitar_ = false;
+    // The built-in menu helpers: d-pad left / right; a gamepad's south (select) and east (back).
+    const std::array<bool, 4> help = {p.buttons[SDL_GAMEPAD_BUTTON_DPAD_LEFT], p.buttons[SDL_GAMEPAD_BUTTON_DPAD_RIGHT],
+                                      joypad && p.buttons[SDL_GAMEPAD_BUTTON_SOUTH], joypad && p.buttons[SDL_GAMEPAD_BUTTON_EAST]};
+    static constexpr Action kHelp[4] = {Action::Left, Action::Right, Action::Confirm, Action::Back};
+    for (size_t k = 0; k < 4; ++k)
+        if (help[k] != p.helper[k]) {
+            p.helper[k] = help[k];
+            if (p.slot >= 0 || !inGame() || kHelp[k] == Action::Back) emit(out, kHelp[k], help[k], ts, ControllerMode::Joypad, std::max(p.slot, 0));
+        }
 }
 
-// The controls that changed. Select / Back bound to the green / red fret's
-// button would select twice (the frets already do on guitars): the fret wins.
+// The actions a device's held controls give, each at most once: a guitar's
+// strum also moves the menus (the other way round when lefty); Select and
+// the gyro are Star Power; a gamepad's frets take the lefty_joypad order.
 // A device without a player works the menus as player 1, and only pauses in a song.
+Input::ActionSet Input::actionsOf(const std::array<bool, size_t(Control::Count)>& held, bool joypad, int player) const {
+    ActionSet a;
+    const bool lefty = lefty_[size_t(std::max(player, 0) & 1)];
+    const bool play = !joypad || gamepadPlay_;
+    for (size_t c = 0; c < size_t(Control::Count); ++c) {
+        if (!held[c]) continue;
+        if (player < 0 && inGame() && C(c) != C::Start && C(c) != C::GuitarStart) continue;
+        auto on = [&](Action x) { a.on[size_t(x)] = true; };
+        switch (C(c)) {
+        case C::Green: case C::Red: case C::Yellow: case C::Blue: case C::Orange: {
+            int fret = int(c) - int(C::Green);
+            if (lefty && joypad) fret = 4 - fret;  // lefty_joypad: X R2 R1 L1 L2
+            if (play) on(Action(int(Action::Fret0) + fret));
+            break;
+        }
+        case C::StrumUp: on(lefty && curGuitar_ ? Action::Down : Action::Up), on(Action::Strum), ++a.strums; break;
+        case C::StrumDown: on(lefty && curGuitar_ ? Action::Up : Action::Down), on(Action::Strum), ++a.strums; break;
+        case C::Whammy: if (play) on(Action::Whammy); break;
+        case C::Select: case C::GuitarSelect: case C::Gyro: on(Action::StarPower); break;
+        case C::Start: case C::GuitarStart: on(Action::Start); break;
+        case C::MenuUp: on(Action::Up); break;
+        case C::MenuDown: on(Action::Down); break;
+        case C::Count: break;
+        }
+    }
+    return a;
+}
+
+// The actions that changed between two states of one device's controls: an
+// action goes down when the first control giving it is pressed and up when
+// the last is let go (never twice for one press). Strum is a pulse per strum
+// control pressed. The keyboard's Start in the menus is select (startKey).
 void Input::controlEdges(const std::array<bool, size_t(Control::Count)>& was, const std::array<bool, size_t(Control::Count)>& now,
                          ControllerMode mode, int player, bool joypad, uint64_t ts, std::vector<InputEvent>& out) {
-    auto changed = [&](C c) { return was[size_t(c)] != now[size_t(c)]; };
-    for (size_t c = 0; c < size_t(Control::Count); ++c) {
-        if (was[c] == now[c]) continue;
-        if (C(c) == C::Select && changed(C::Green) && now[size_t(C::Green)] == now[c]) continue;
-        if (C(c) == C::Back && changed(C::Red) && now[size_t(C::Red)] == now[c]) continue;
-        if (player < 0 && inGame() && C(c) != C::Start && C(c) != C::Back && C(c) != C::Select) continue;
-        controlEdge(C(c), now[c], mode, std::max(player, 0), joypad, ts, out);
+    const ActionSet before = actionsOf(was, joypad, player), after = actionsOf(now, joypad, player);
+    const int pl = std::max(player, 0);
+    const bool keyboardStart = device_ == -1 && !inGame();
+    for (size_t k = 0; k < after.on.size(); ++k) {
+        const Action a = Action(k);
+        if (a == Action::Strum) continue;
+        if (before.on[k] == after.on[k]) continue;
+        if (a == Action::Start && keyboardStart) emit(out, Action::Confirm, after.on[k], ts, mode, pl, true);
+        else emit(out, a, after.on[k], ts, mode, pl);
     }
-}
-
-// A control's game actions: a guitar's strum also moves the menus; a
-// joypad's frets and whammy play only with XInput Controllers on.
-void Input::controlEdge(Control c, bool down, ControllerMode mode, int player, bool joypad, uint64_t ts, std::vector<InputEvent>& out) {
-    auto act = [&](Action a) { emit(out, a, down, ts, mode, player); };
-    const bool play = !joypad || gamepadPlay_;
-    const bool lefty = lefty_[size_t(player & 1)];
-    switch (c) {
-    case C::Green: case C::Red: case C::Yellow: case C::Blue: case C::Orange: {
-        int fret = int(c);
-        if (lefty && joypad) fret = 4 - fret;  // lefty_joypad: X R2 R1 L1 L2
-        if (play) act(Action(int(Action::Fret0) + fret));
-        break;
-    }
-    case C::StrumUp: act(lefty && curGuitar_ ? Action::Down : Action::Up), act(Action::Strum); break;
-    case C::StrumDown: act(lefty && curGuitar_ ? Action::Up : Action::Down), act(Action::Strum); break;
-    case C::Whammy: if (play) act(Action::Whammy); break;
-    case C::StarPower: act(Action::StarPower); break;
-    case C::Start: act(Action::Start); break;
-    case C::Select: act(Action::Confirm); break;
-    case C::Back: act(Action::Back); break;
-    case C::MenuUp: act(Action::Up); break;
-    case C::MenuDown: act(Action::Down); break;
-    case C::MenuLeft: act(Action::Left); break;
-    case C::MenuRight: act(Action::Right); break;
-    case C::Count: break;
+    // Strum: one more strum control held strums again (release first if one was already down).
+    const size_t s = size_t(Action::Strum);
+    if (after.strums > before.strums) {
+        if (before.on[s]) emit(out, Action::Strum, false, ts, mode, pl);
+        emit(out, Action::Strum, true, ts, mode, pl);
+    } else if (before.on[s] && !after.on[s]) {
+        emit(out, Action::Strum, false, ts, mode, pl);
     }
 }
 
@@ -693,10 +810,12 @@ float Input::whammyValue(int player) const {
     float w = 0;
     for (const auto& [id, p] : pads_)
         if (p.slot == player) w = std::max(w, p.whammyAxis);
+    for (const auto& [id, m] : midiDevs_)
+        if (m.slot == player) w = std::max(w, m.whammyAxis);
     return w;
 }
 
-// ----------------------------------------------------------- the Gamepads screen
+// ----------------------------------------------------------- the Gamepad menu
 
 Input::Pad* Input::padById(const std::string& id) {
     if (id.rfind("pad:", 0) != 0) return nullptr;
@@ -705,6 +824,20 @@ Input::Pad* Input::padById(const std::string& id) {
 }
 
 const Input::Pad* Input::padById(const std::string& id) const { return const_cast<Input*>(this)->padById(id); }
+
+Input::MidiDev* Input::midiById(const std::string& id) {
+    auto it = midiDevs_.find(id);
+    return it == midiDevs_.end() ? nullptr : &it->second;
+}
+
+const Input::MidiDev* Input::midiById(const std::string& id) const { return const_cast<Input*>(this)->midiById(id); }
+
+// The device's model, which its saved settings are kept by.
+std::string Input::guidOf(const std::string& id) const {
+    if (const Pad* p = padById(id)) return p->guid;
+    if (const MidiDev* m = midiById(id)) return m->guid;
+    return id == "keyboard" || id == "touch" ? id : "";
+}
 
 std::vector<Input::Device> Input::devices() const {
     std::vector<Device> d;
@@ -717,43 +850,76 @@ std::vector<Input::Device> Input::devices() const {
         const Pad& p = pads_.at(id);
         d.push_back({"pad:" + std::to_string(id), p.name, profileName(p.profile), p.slot});
     }
+    for (const auto& [id, m] : midiDevs_) d.push_back({id, m.name, profileName(Profile::Midi), m.slot});
     return d;
 }
 
 void Input::setPlayer(const std::string& id, int player) {
     if (id == "touch") return;  // the touch screen always plays as player 1
-    player = std::clamp(player, -1, 1);
+    player = std::clamp(player, -1, kPlayers - 1);
+    if (player >= 0 && !playerEnabled(player)) return;
     Pad* mine = padById(id);
-    if (!mine && id != "keyboard") return;
+    MidiDev* midi = midiById(id);
+    if (!mine && !midi && id != "keyboard") return;
     if (player >= 0) {  // one device per player: the one that had it swaps to this one's old player
-        const int old = mine ? mine->slot : keyboardSlot();
+        const int old = mine ? mine->slot : midi ? midi->slot : keyboardSlot();
         if (id != "keyboard" && keyboardSlot() == player) players_["keyboard"] = old;
         for (auto& [jid, p] : pads_)
             if (&p != mine && p.slot == player) p.slot = old, p.chosenSlot = true, players_[p.guid] = old;
+        for (auto& [mid, m] : midiDevs_)
+            if (&m != midi && m.slot == player) m.slot = old, players_[m.guid] = old;
         // Disconnected devices saved with it choose again when they come back.
         for (auto it = players_.begin(); it != players_.end();) {
             bool connected = it->first == "keyboard";
             for (const auto& [jid, p] : pads_) connected = connected || p.guid == it->first;
+            for (const auto& [mid, m] : midiDevs_) connected = connected || m.guid == it->first;
             it = !connected && it->second == player ? players_.erase(it) : std::next(it);
         }
     }
     if (mine) mine->slot = player, mine->chosenSlot = true, players_[mine->guid] = player;
+    else if (midi) midi->slot = player, players_[midi->guid] = player;
     else players_["keyboard"] = player;
     save();
 }
 
-void Input::setKeyboardFretsStrum(bool on) {
-    kbFretsStrum_ = on;
+// Bind to: Detect... — the device whose button, key or note this is takes the player.
+bool Input::detectFrom(const std::string& id) {
+    if (detect_ < 0) return false;
+    const int player = detect_;
+    detect_ = -1;
+    SDL_Log("Gamepad menu: %s detected for player %d", id.c_str(), player + 1);
+    setPlayer(id, player);
+    return true;
+}
+
+bool Input::requireStrum(const std::string& id) const {
+    const std::string g = guidOf(id);
+    if (auto it = requireStrum_.find(g); it != requireStrum_.end()) return it->second;
+    if (id == "keyboard") return true;
+    if (const Pad* p = padById(id)) return p->profile != Profile::Joypad;  // guitars strum; gamepads' frets also strum
+    return false;  // touch and MIDI
+}
+
+void Input::setRequireStrum(const std::string& id, bool on) {
+    const std::string g = guidOf(id);
+    if (g.empty()) return;
+    requireStrum_[g] = on;
     save();
 }
 
 const Input::Bindings& Input::bindings(const std::string& id) const {
     if (const Pad* p = padById(id)) return bindingsFor(p->guid, p->profile);
+    if (const MidiDev* m = midiById(id)) return bindingsFor(m->guid, Profile::Midi);
     return bindingsFor("keyboard", Profile::Keyboard);
 }
 
 std::string Input::sourceName(const std::string& id, const Source& s) const {
     if (s.kind == Kind::Key) return SDL_GetKeyName(SDL_Keycode(s.index));
+    if (s.kind == Kind::MidiNote) {
+        static const char* const kNotes[] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
+        return std::string("Note ") + kNotes[size_t(s.index % 12)] + std::to_string(s.index / 12 - 1) + " (" + std::to_string(s.index) + ")";
+    }
+    if (s.kind == Kind::MidiCc) return "CC " + std::to_string(s.index);
     if (s.kind == Kind::Button) {
         static const char* const kButtons[] = {"A", "B", "X", "Y", "Back", "Guide", "Start", "Left Stick", "Right Stick",
                                                "LB", "RB", "D-Pad Up", "D-Pad Down", "D-Pad Left", "D-Pad Right", "Misc",
@@ -777,6 +943,7 @@ std::string Input::sourceName(const std::string& id, const Source& s) const {
 
 bool Input::controlDown(const std::string& id, Control c) const {
     if (const Pad* p = padById(id)) return p->down[size_t(c)];
+    if (const MidiDev* m = midiById(id)) return m->down[size_t(c)];
     return id == "keyboard" && keyControls_[size_t(c)];
 }
 
@@ -785,6 +952,9 @@ std::vector<std::string> Input::rawPressed(const std::string& id) const {
     if (const Pad* p = padById(id)) {
         for (int b = 0; b < SDL_GAMEPAD_BUTTON_COUNT; ++b)
             if (p->buttons[size_t(b)]) v.push_back(sourceName(id, btn(SDL_GamepadButton(b))));
+    } else if (const MidiDev* m = midiById(id)) {
+        for (int n = 0; n < 128; ++n)
+            if (m->notes[size_t(n)]) v.push_back(sourceName(id, {Kind::MidiNote, n}));
     } else if (id == "keyboard") {
         for (SDL_Keycode k : keysDown_) v.push_back(SDL_GetKeyName(k));
     }
@@ -796,21 +966,42 @@ std::vector<std::pair<std::string, float>> Input::rawAxes(const std::string& id)
     if (const Pad* p = padById(id))
         for (int a = 0; a < SDL_GAMEPAD_AXIS_COUNT; ++a)
             v.push_back({sourceName(id, axis(Kind::AxisAny, SDL_GamepadAxis(a))), float(p->axes[size_t(a)]) / 32767.0f});
+    if (const MidiDev* m = midiById(id))
+        for (int c = 0; c < 128; ++c)
+            if (m->cc[size_t(c)]) v.push_back({sourceName(id, {Kind::MidiCc, c}), float(m->cc[size_t(c)]) / 127.0f});
     return v;
 }
 
-void Input::beginCapture(const std::string& id, Control c) {
+void Input::beginCapture(const std::string& id, Control c, size_t slot) {
     capturing_ = true;
     captureId_ = id;
     captureControl_ = c;
+    captureSlot_ = std::min(slot, kSlots - 1);
     if (const Pad* p = padById(id)) captureRest_ = p->axes;
 }
 
 bool Input::captureFrom(const std::string& id, const Source& s) {
     if (!capturing_ || id != captureId_) return false;
     capturing_ = false;
-    setBinding(id, captureControl_, {s});
+    std::vector<Source> list = bindings(id)[size_t(captureControl_)];
+    list.resize(kSlots, Source{Kind::Key, int(SDLK_UNKNOWN)});
+    list[captureSlot_] = s;
+    // The other slot keeps its source unless it is the same one.
+    const size_t other = captureSlot_ ^ 1;
+    if (list[other] == s) list[other] = Source{Kind::Key, int(SDLK_UNKNOWN)};
+    std::vector<Source> kept;
+    for (const Source& x : list)
+        if (!(x.kind == Kind::Key && x.index == int(SDLK_UNKNOWN))) kept.push_back(x);
+    // Slot 2 alone moves to slot 1 when slot 1 is empty (the list has no holes).
+    setBinding(id, captureControl_, kept);
     return true;
+}
+
+void Input::clearBinding(const std::string& id, Control c, size_t slot) {
+    if (capturing_ && captureId_ == id && captureControl_ == c) capturing_ = false;
+    std::vector<Source> list = bindings(id)[size_t(c)];
+    if (slot < list.size()) list.erase(list.begin() + long(slot));
+    setBinding(id, c, list);
 }
 
 void Input::clearBinding(const std::string& id, Control c) {
@@ -822,8 +1013,10 @@ void Input::setBinding(const std::string& id, Control c, std::vector<Source> s) 
     std::string guid = "keyboard";
     Profile profile = Profile::Keyboard;
     if (const Pad* p = padById(id)) guid = p->guid, profile = p->profile;
+    else if (const MidiDev* m = midiById(id)) guid = m->guid, profile = Profile::Midi;
     else if (id != "keyboard") return;
     Bindings b = bindingsFor(guid, profile);
+    if (s.size() > kSlots) s.resize(kSlots);
     b[size_t(c)] = std::move(s);
     overrides_[guid] = b;
     save();
@@ -839,6 +1032,8 @@ void Input::resync(const std::string& id) {
             for (const Source& x : b[c]) now = now || sourceActive(*p, x, p->down[c]);
             p->down[c] = now;
         }
+    } else if (MidiDev* m = midiById(id)) {
+        m->down = {};
     } else if (id == "keyboard") {
         const Bindings& b = bindingsFor("keyboard", Profile::Keyboard);
         for (size_t c = 0; c < size_t(Control::Count); ++c) {
@@ -850,11 +1045,107 @@ void Input::resync(const std::string& id) {
 }
 
 void Input::resetBindings(const std::string& id) {
-    if (const Pad* p = padById(id)) overrides_.erase(p->guid);
-    else if (id == "keyboard") overrides_.erase("keyboard");
+    const std::string g = guidOf(id);
+    overrides_.erase(g);
+    requireStrum_.erase(g);
     resync(id);
     save();
 }
+
+void Input::beginEdit(const std::string& id) {
+    if (editing()) commitEdit();
+    editId_ = id, editGuid_ = guidOf(id);
+    auto o = overrides_.find(editGuid_);
+    auto r = requireStrum_.find(editGuid_);
+    edit_ = {o != overrides_.end(), r != requireStrum_.end(), r != requireStrum_.end() && r->second, o != overrides_.end() ? o->second : Bindings{}};
+    saveHeld_ = true;
+}
+
+void Input::commitEdit() {
+    if (!editing()) return;
+    capturing_ = false;
+    saveHeld_ = false;
+    editId_.clear();
+    save();
+}
+
+void Input::discardEdit() {
+    if (!editing()) return;
+    capturing_ = false;
+    if (edit_.hadOverride) overrides_[editGuid_] = edit_.bindings;
+    else overrides_.erase(editGuid_);
+    if (edit_.hadStrum) requireStrum_[editGuid_] = edit_.strum;
+    else requireStrum_.erase(editGuid_);
+    resync(editId_);
+    saveHeld_ = false;
+    editId_.clear();
+}
+
+Input::Instrument Input::instrument(const std::string& id) const {
+    if (midiById(id)) return Instrument::Midi;
+    if (const Pad* p = padById(id)) return p->profile == Profile::Joypad ? Instrument::Gamepad : Instrument::Guitar;
+    return Instrument::Guitar;  // the keyboard and touch play the guitar part
+}
+
+std::vector<Input::Instrument> Input::instruments(const std::string& id) const {
+    if (midiById(id)) return {Instrument::Midi};
+    if (padById(id)) return {Instrument::Guitar, Instrument::Gamepad};
+    return {Instrument::Guitar};
+}
+
+void Input::setInstrument(const std::string& id, Instrument i) {
+    Pad* p = padById(id);
+    if (!p || i == Instrument::Midi || instrument(id) == i) return;
+    // A guitar: the detected guitar type, else a PS2 guitar (adapter); the
+    // exact guitar type stays a choice (deviceType / cycleDeviceType).
+    Profile to = i == Instrument::Gamepad ? Profile::Joypad : p->detected != Profile::Joypad ? p->detected : Profile::Ps2Guitar;
+    if (to == p->detected) types_.erase(p->guid);
+    else types_[p->guid] = to;
+    p->profile = to;
+    p->down = {};
+    resync(id);
+    save();
+}
+
+bool Input::exportTo(const std::string& file) const {
+    std::ifstream in(prefPath("controllers.json"));
+    std::string text = in ? std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>()) : "{}\n";
+    std::ofstream out(file);
+    out << text;
+    return bool(out);
+}
+
+bool Input::importFrom(const std::string& file) {
+    std::ifstream in(file);
+    if (!in) return false;
+    std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    try {
+        if (Json::parse(text).type != Json::Type::Object) return false;
+    } catch (const std::exception& ex) {
+        SDL_Log("import controllers %s: %s", file.c_str(), ex.what());
+        return false;
+    }
+    {
+        std::ofstream out(prefPath("controllers.json"));
+        out << text;
+        if (!out) return false;
+    }
+    overrides_.clear(), players_.clear(), types_.clear(), requireStrum_.clear();
+    p2Enabled_ = true;
+    load();
+    for (auto& [jid, p] : pads_) {  // the connected pads take their imported type and player
+        auto t = types_.find(p.guid);
+        p.profile = t != types_.end() ? t->second : p.detected;
+        if (auto pl = players_.find(p.guid); pl != players_.end()) p.slot = playerEnabled(pl->second) ? pl->second : -1, p.chosenSlot = true;
+        p.down = {};
+    }
+    for (auto& [mid, m] : midiDevs_)
+        if (auto pl = players_.find(m.guid); pl != players_.end()) m.slot = playerEnabled(pl->second) ? pl->second : -1;
+    return true;
+}
+
+bool Input::midiAvailable() const { return midi_ && midi_->available(); }
+std::string Input::midiBackend() const { return midi_ ? midi_->backend() : MidiIn().backend(); }
 
 void Input::addGenericMapping(SDL_JoystickID id) {
     SDL_Joystick* j = SDL_OpenJoystick(id);
@@ -1035,7 +1326,81 @@ void Input::touchEvent(const SDL_TouchFingerEvent& f, bool down, std::vector<Inp
     fingers_[f.fingerID] = fg;
 }
 
+// MIDI: the ports are looked for every 2 s; each one is a device like a pad
+// (its id "midi:<port>", its model the port's name without ALSA's client
+// numbers). A note is a button; a controller is pressed past half way and
+// gives the whammy its value.
+void Input::pollMidi(uint64_t nowNs, std::vector<InputEvent>& out) {
+#ifdef __ANDROID__
+    (void)nowNs, (void)out;
+#else
+    if (!midi_) midi_ = std::make_unique<MidiIn>();
+    if (!midi_->available()) return;
+    if (nowNs >= midiRefreshNs_) {
+        midiRefreshNs_ = nowNs + 2000000000ull;
+        midi_->refresh();
+        const auto ports = midi_->ports();
+        for (auto it = midiDevs_.begin(); it != midiDevs_.end();) {
+            if (std::find(ports.begin(), ports.end(), it->second.name) != ports.end()) {
+                ++it;
+                continue;
+            }
+            std::array<bool, size_t(Control::Count)> none{};  // gone: it releases everything it held
+            device_ = int64_t(std::hash<std::string>{}(it->first) | 1);
+            controlEdges(it->second.down, none, ControllerMode::Guitar, it->second.slot, false, nowNs, out);
+            it = midiDevs_.erase(it);
+        }
+        for (const std::string& name : ports) {
+            const std::string id = "midi:" + name;
+            if (midiDevs_.count(id)) continue;
+            MidiDev m;
+            m.id = id, m.name = name, m.guid = "midi:" + name;
+            // ALSA names end with the client and port numbers ("... 20:0"), which change.
+            if (size_t sp = m.guid.find_last_of(' '); sp != std::string::npos && m.guid.find(':', sp) != std::string::npos) m.guid.resize(sp);
+            if (auto pl = players_.find(m.guid); pl != players_.end() && pl->second >= 0 && playerEnabled(pl->second) && !slotTaken(pl->second, nullptr))
+                m.slot = pl->second;
+            midiDevs_[id] = m;
+        }
+    }
+    for (const MidiIn::Event& e : midi_->take()) {
+        MidiDev* m = midiById("midi:" + e.port);
+        if (!m) continue;
+        const std::string id = m->id;
+        device_ = int64_t(std::hash<std::string>{}(id) | 1);
+        if (e.note) m->notes[size_t(e.index)] = uint8_t(e.value);
+        else m->cc[size_t(e.index)] = uint8_t(e.value);
+        const bool press = e.note ? e.value > 0 : e.value >= 64;
+        if (press && detectFrom(id)) continue;
+        if (capturing_ && captureId_ == id) {
+            if (press) captureFrom(id, {e.note ? Kind::MidiNote : Kind::MidiCc, e.index});
+            continue;
+        }
+        if (press) touchUsed_ = false;
+        updateMidi(*m, e.ns, out);
+    }
+#endif
+}
+
+void Input::updateMidi(MidiDev& m, uint64_t ts, std::vector<InputEvent>& out) {
+    const Bindings& b = bindingsFor(m.guid, Profile::Midi);
+    m.whammyAxis = 0;
+    for (const Source& s : b[size_t(C::Whammy)])
+        if (s.kind == Kind::MidiCc) m.whammyAxis = std::max(m.whammyAxis, float(m.cc[size_t(s.index & 127)]) / 127.0f);
+    auto was = m.down;
+    for (size_t c = 0; c < size_t(Control::Count); ++c) {
+        bool now = false;
+        for (const Source& s : b[c]) {
+            if (s.kind == Kind::MidiNote) now = now || m.notes[size_t(s.index & 127)] > 0;
+            if (s.kind == Kind::MidiCc) now = now || m.cc[size_t(s.index & 127)] >= (was[c] ? 40 : 64);
+        }
+        if (Control(c) == C::Whammy && m.whammyAxis > 0.15f) now = true;
+        m.down[c] = now;
+    }
+    controlEdges(was, m.down, requireStrum(m.id) ? ControllerMode::Guitar : ControllerMode::Joypad, m.slot, false, ts, out);
+}
+
 void Input::poll(uint64_t nowNs, std::vector<InputEvent>& out) {
+    pollMidi(nowNs, out);
     for (int p = 0; p < 2; ++p) {
         PendingStrum& s = strum_[size_t(p)];
         if (!s.on || nowNs < s.dueNs) continue;

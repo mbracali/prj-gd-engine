@@ -141,6 +141,9 @@ public:
     void wheel(int dir);
     // `player`: the pad slot (player_num in the scripts).
     void buttonDown(int button, bool guitar, int player = 0);
+    // The next buttonDown comes from the keyboard's Start key (Enter): a select
+    // that a text entry takes as START (universal_mechanisms.md 1.1.2).
+    void setStartKey(bool on) { startKey_ = on; }
     void buttonUp(int button, int player = 0);
     // game set_multiplayer (the face-off setup).
     bool multiplayer() const override;
@@ -256,6 +259,11 @@ private:
         if (hooks_.userFiles) hooks_.userFiles(action);
     }
     std::string userFilesStatus() override { return hooks_.userFilesStatus ? hooks_.userFilesStatus() : ""; }
+    void pressBack() override {
+        const int b = guitar_ ? Circle : Triangle;
+        buttonDown(b, guitar_, 0);
+        buttonUp(b, 0);
+    }
     void menuBackdrop(bool on) override {
         if (hooks_.menuBackdrop) hooks_.menuBackdrop(on);
     }
@@ -316,6 +324,7 @@ private:
     std::map<std::string, std::unique_ptr<ScriptObject>> commonObjects_;
     float frameMs_ = 0;
     bool guitar_ = false;
+    bool startKey_ = false;
     // Menu key repeat (JoypadClient, FUN_00221bd0): a held direction sends
     // button_down again after hold_ms, then every repeat_ms (gh.dta joypad
     // 1000 / 80; a panel's (joypad (hold_ms) (repeat_ms)) overrides it while

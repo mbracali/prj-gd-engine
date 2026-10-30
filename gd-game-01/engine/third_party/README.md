@@ -1,14 +1,17 @@
-# Third-party code (AI upscaling)
+# Third-party code
 
-Used by `src/render/vk_upscaler.cpp` (Enhanced Settings > AI Upscaling). None of
+`vulkan/`, `volk/`, `fidelityfx/` and `dlss/` are used by
+`src/render/vk_upscaler.cpp` (Enhanced Settings > AI Upscaling). None of
 it is needed to play; the game falls back to its own FSR 1 when any piece is
-missing at run time.
+missing at run time. `rtmidi/` is the Generic MIDI input of the Gamepad menu
+(`src/input/midi_in.cpp`; desktop builds only).
 
 | Folder | What | Version | Licence |
 |---|---|---|---|
 | `vulkan/` | Khronos Vulkan-Headers (C headers only) | 1.4.350 | Apache-2.0 / MIT (`vulkan/LICENSE.md`) |
 | `volk/` | Vulkan meta-loader (Vulkan is loaded at run time; no SDK needed to build) | 1.4.350 | MIT (`volk/LICENSE.md`) |
 | `fidelityfx/` | AMD FidelityFX SDK: the FSR 3.1 upscaler and its Vulkan backend only | 1.1.4 | MIT (`fidelityfx/LICENSE.txt`) |
+| `rtmidi/` | RtMidi (MIDI input: ALSA, WinMM, CoreMIDI), unchanged; built by its own `CMakeLists.txt` | 6.0.0 | MIT (`rtmidi/LICENSE`) |
 | `dlss/` | NVIDIA DLSS SDK: NGX headers, the Linux NGX static library and the DLSS model library. **Not in the repo:** `../tools/fetch_dlss.sh` downloads it (pinned, SHA-256 checked) | 310.9.16 | NVIDIA RTX SDKs licence (`dlss/LICENSE.txt`, downloaded with it) |
 
 ## Changes to the FidelityFX SDK (marked `[I] gd01`)

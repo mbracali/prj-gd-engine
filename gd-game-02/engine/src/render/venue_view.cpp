@@ -156,7 +156,9 @@ void VenueView::selectEnv(gfx::MaterialRenderer& mr, const scene::Environ* env) 
     gfx::LightEnv le;
     if (env) le = cache_.lightEnv(*env, &world_.pose());
     if (filling_) {
-        const float gain = look_.moreLights == 2 ? 1.3f : 1.15f, lift = look_.moreLights == 2 ? 0.07f : 0.035f;
+        static constexpr float kGain[4] = {1, 1.15f, 1.3f, 1.45f}, kLift[4] = {0, 0.035f, 0.07f, 0.1f};  // none, 1.5x, 2x, 2.5x
+        const size_t ml = size_t(std::clamp(look_.moreLights, 0, 3));
+        const float gain = kGain[ml], lift = kLift[ml];
         for (float* c : {&le.envAmbient.x, &le.envAmbient.y, &le.envAmbient.z}) *c = std::min(1.0f, *c * gain + lift);
         currentEnv_ = nullptr;  // the next unfilled draw selects it again
     }

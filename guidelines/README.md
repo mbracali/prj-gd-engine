@@ -8,6 +8,7 @@ the start and at the end of every task).
 |---|---|
 | [general_guidelines.md](general_guidelines.md) | The owner's general rules: branching, backlog, questions, tests, versions, local packages, the recurrent bugs that must never come back |
 | [universal_launcher.md](universal_launcher.md) | The launcher and the screens every game shares: Enhanced menu, GAMEPADS, mouse / Enter / touch, and "never forget a package" (every platform carries every ready module, `verify_bundle.sh`, local builds) |
+| [../universal_mechanisms.md](../universal_mechanisms.md) | The owner's universal mechanisms and menus (2026-10-29): skips, band naming, Universal Access Buttons, default mappings, the Gamepad menu and the Enhanced menu every game has |
 | [smilar_behaviors.md](smilar_behaviors.md) | Patterns every game shares: input only when the fretboard is live, Enter finishes text entry, Back pauses, frame-rate independence, logs, The Glitches, cheats in Enhanced, saves and version files |
 
 Studies and spikes are in [../spikes/](../spikes/README.md); the official

@@ -94,18 +94,20 @@ public:
     }
 
     // The items act as their buttons (gd01's help bar): select, back, Start,
-    // and the main menu's GAMEPADS; each label's rectangle grown left over its icon.
+    // up / down (the strum bar's upper half up, its lower half down) and the
+    // main menu's GAMEPADS; each label's rectangle grown left over its icon.
     bool helpMouse(float x, float y, bool click) override {
         if (!view || !showing) return false;
         for (const gfx::UiView::Hit& h : view->hits()) {
             if (h.key.rfind("hb", 0) != 0) continue;
             const size_t k = size_t(std::atoi(h.key.c_str() + 2));
-            if (k >= items_.size()) continue;
-            const std::string& kind = items_[k].first;
+            if (k >= shown_.size()) continue;
+            const std::string& kind = shown_[k].first;
             const float icon = kind == "strum" ? (h.y1 - h.y0) * 3.2f : (h.y1 - h.y0) * 1.8f;
             if (x < h.x0 - icon || x > h.x1 + 6 || y < h.y0 - 8 || y > h.y1 + 8) continue;
             if (!click) return true;
-            const int b = kind == "fret1" ? kPad_X : kind == "fret2" ? kPad_Tri : kind == "start" ? kPad_Start : -1;
+            const int b = kind == "fret1" ? kPad_X : kind == "fret2" ? kPad_Tri : kind == "start" ? kPad_Start
+                          : kind == "strum" ? (y < (h.y0 + h.y1) * 0.5f ? kPad_DUp : kPad_DDown) : -1;
             if (kind == "fret3" && ui.currentScreen() == "main_screen") ui.openGamepads();
             else if (b >= 0) ui.buttonDown(b, 0), ui.buttonUp(b, 0);
             return true;
@@ -114,6 +116,33 @@ public:
     }
 
 private:
+    // [I] Port: the Universal Access Buttons (universal_mechanisms.md 1.1.3,
+    // gd01's addAccessButtons). Where the screen's own help bar leaves one
+    // out, the pills a mouse or touch user needs are added in GH2's style and
+    // order (fret1, fret2, Start, then the strum bar): SELECT (green) when
+    // something can be chosen, BACK (red) when the screen goes back, UP / DOWN
+    // when the focus can move, START on a text entry (it accepts the name). A
+    // screen whose help bar is empty (progress messages) stays empty.
+    std::vector<std::pair<std::string, std::string>> shown() {
+        std::vector<std::pair<std::string, std::string>> out = items_;
+        ScreenObj* screen = ui.screen(ui.currentScreen());
+        if (out.empty() || !screen) return out;
+        auto has = [&](const char* e) { return std::any_of(out.begin(), out.end(), [&](const auto& i) { return i.first == e; }); };
+        auto strumAt = [&] { return std::find_if(out.begin(), out.end(), [](const auto& e) { return e.first == "strum"; }); };
+        PanelObj* fp = ui.focusPanel();
+        ComponentObj* focus = fp ? fp->focused() : nullptr;
+        const bool entry = focus && focus->isTextEntry();
+        const bool navigable = fp && fp->navigable();
+        if (!has("fret1") && fp && (focus || !fp->view) && fp->drawsSomething()) out.insert(out.begin(), {"fret1", "help_select"});
+        if (!has("fret2") && screen->flag("allow_back", true) && screen->back) {
+            auto at = std::find_if(out.begin(), out.end(), [](const auto& e) { return e.first != "fret1"; });
+            out.insert(at, {"fret2", "help_back"});
+        }
+        if (!has("start") && entry) out.insert(strumAt(), {"start", "gd_uab_start"});
+        if (!has("strum") && navigable) out.push_back({"strum", "help_updown"});
+        return out;
+    }
+
     // GH2's help items use only fret1 (green), fret2 (red) and strum; the
     // disc's hb_fret3.tex is an unused placeholder without alpha (a yellow
     // shape on black with white bars). A fret3 item (none of GH2's screens
@@ -144,7 +173,8 @@ private:
     }
 
     void drawItems(gfx::MaterialRenderer& r) {
-        if (!view || items_.empty()) return;
+        shown_ = shown();
+        if (!view || shown_.empty()) return;
         const auto* start = view->find("help_bar_starting.mesh");
         const auto* strumStart = view->find("help_bar_strumbar.mesh");
         const auto* icon = view->find("help_bar.mesh") ? view->find("help_bar.mesh")->as<scene::Mesh>() : nullptr;
@@ -170,7 +200,7 @@ private:
         scene::Xfm strumPen = strumStart ? pose.local(strumStart) : pen;
         const scene::Xfm textLocal = pose.local(text);
         int k = 0;
-        for (const auto& [kind, token] : items_) {
+        for (const auto& [kind, token] : shown_) {
             scene::Xfm& p = kind == "strum" ? strumPen : pen;
             const bool button = kind == "fret1" || kind == "fret2" || kind == "fret3" || kind == "start";
             if (button || kind == "strum") {
@@ -195,6 +225,7 @@ private:
     }
 
     std::vector<std::pair<std::string, std::string>> items_;
+    std::vector<std::pair<std::string, std::string>> shown_;  // with the access buttons, as last drawn
 };
 
 // SelSongPanel (sel_song_panel): the song list's panel.
@@ -368,9 +399,27 @@ public:
         ui.host().creditsMusic(false);
         PanelObj::exit();
     }
+    // [I] Port (universal_mechanisms.md 1.1.1): the original credits only
+    // leave with back (red); here green, select, Start (Enter), a click or a
+    // tap leave them too, as back does (the next poll, outside the routing).
+    bool buttonDown(int button, int player) override {
+        if (button == kPad_X || button == kPad_Start || button == kPad_Circle) return leave_ = true;
+        return PanelObj::buttonDown(button, player);
+    }
+    bool mouse(float x, float y, bool click) override {
+        (void)x, (void)y;
+        if (click) leave_ = true;
+        return click;
+    }
     void poll(double dtMs) override {
         PanelObj::poll(dtMs);
         if (!up) return;
+        if (leave_) {
+            leave_ = false;
+            ui.buttonDown(kPad_Tri, 0);
+            ui.buttonUp(kPad_Tri, 0);
+            return;
+        }
         const int before = int(pos_);
         pos_ = std::min(pos_ + float(dtMs / 1000.0), float(std::max<size_t>(1, lines_.size()) - 1));
         if (ComponentObj* l = component("credits.lst"); l && int(pos_) != before) {
@@ -402,6 +451,7 @@ private:
     }
     std::vector<std::vector<std::string>> lines_;
     float pos_ = 0;
+    bool leave_ = false;
 };
 
 // Screens: GHScreen and its relatives.

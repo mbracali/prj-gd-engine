@@ -284,7 +284,7 @@ void ParticleSystem::removeIf(const std::function<bool(const Vec3&)>& pred) {
 
 void ParticleSystem::emit(float frame, float dt) {
     if (!(dt > 0) || !emitting_) return;
-    emitCount_ += random(params_.emitRate) * dt;
+    emitCount_ += random(params_.emitRate) * dt * ParticleRenderer::rate();
     while (emitCount_ >= 1) {
         if (free_.empty()) {
             emitCount_ = 0;
@@ -375,6 +375,7 @@ void ParticleSystem::appendQuads(Vec3 camRight, Vec3 camUp, std::vector<float>& 
 // ---- ParticleRenderer ---------------------------------------------------
 
 bool ParticleRenderer::enabled_ = true;
+float ParticleRenderer::rate_ = 1;
 
 void ParticleRenderer::draw(MaterialRenderer& mr, SceneCache& cache, const ParticleSystem& sys, const Camera& camera,
                             const Mat4& offset, const ScenePose* pose) {

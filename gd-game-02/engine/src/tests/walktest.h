@@ -45,20 +45,38 @@ class UiManager;
 //              passed with cheat_beat_song, the song offered and played,
 //              its endgame followed; GD02_WALK_END / _FAIL / _CHAR / _GUITAR
 //              / _ENHANCED (docs/career_and_store.md "Tests").
-//   enhanced   main -> Options -> Enhanced Options -> Internal Resolution
-//              changed (the window's own -> 448p) and saved in enhanced.json
-//              -> back -> back -> main; Enhanced Options again; both times
-//              the backdrop shows the band, its singer on the right.
+//   enhanced   main -> Options -> Enhanced Options (universal_mechanisms.md
+//              1.2.2): the defaults (the original look), MODES Steam Deck,
+//              Original Feel (window and resolution kept), Good Old Days,
+//              Original Feel; then every option in the doc's order stepped
+//              with the pad, saved in enhanced.json and checked in effect
+//              (calibration, Resolution 448p -> 480p, the ranges, Remove All
+//              Effects, user files, cheats) -> back; Enhanced Options again;
+//              both times the backdrop shows the band, its singer on the right.
 //   cheats     at the main menu, GH2's Air Guitar and Hyper Speed codes turn
-//              them on; Air Guitar's again, after a pause, turns it off.
+//              them on; Air Guitar's again, after a pause, turns it off; then
+//              the same cheats in Enhanced Options > CHEATS & ENHANCERS.
 //   mouse      the mouse alone: hover OPTIONS on the main menu (focused), click
-//              it -> Options -> click Enhanced Options -> In-Game Max FPS's
-//              dropdown clicked open, 60 clicked -> right click -> Options ->
-//              the help bar's BACK clicked -> main.
-//   gamepads   the keyboard's yellow fret on the main menu -> GAMEPADS (once
-//              the cheat codes' 750 ms are over) -> the keyboard's Whammy
-//              rebound to E (a real key) and saved in controllers.json ->
-//              back -> main; then the help bar's GAMEPADS clicked -> GAMEPADS.
+//              it -> Options -> click Enhanced Options -> MODES > Clean Image
+//              clicked -> MODES collapsed -> Resolution's dropdown clicked
+//              open, 720p clicked -> the scrollbar's bottom clicked (the
+//              list's end) -> Monkey Head Crowd clicked on and off -> the
+//              Back button -> Options -> the help bar's BACK clicked -> main.
+//   gamepads   the keyboard's yellow fret on the main menu -> the Gamepad menu
+//              (once the cheat codes' 750 ms are over) -> Player 1 > Customize
+//              inputs -> Key 2 of the keyboard's Whammy bound to E (a real
+//              key), working at once, written to controllers.json only on
+//              Save -> back -> main; then the help bar's GAMEPADS clicked.
+//   gamepads_pad  a virtual Xbox 360 pad plugged in at the main menu (player
+//              1, the keyboard player 2) -> the Gamepad menu -> Player 2's
+//              Bind to > Detect -> the pad's A: the pad is player 2, the
+//              keyboard player 1.
+//   band       boot -> main -> Career -> NEW BAND -> the name with real keys:
+//              Down Down (A -> C), 1 (green: takes it), Down, 1, Enter ->
+//              the difficulty screen; the band is "CD" (universal_mechanisms.md 1.1.2).
+//   logo_skip  the boot splashes skipped by the red fret (2) -> main ->
+//              Options -> Credits (clicked) left by the green fret (1) ->
+//              Credits again, left by a click (universal_mechanisms.md 1.1.1).
 //   stickyaxis an adapter whose D-pad is an axis resting off centre (a
 //              virtual pad, 0079:0006:dpadaxis=-32768) plugged in at the main
 //              menu: no left / right press in 2 s; moved, one right press.
@@ -116,6 +134,7 @@ private:
     std::vector<std::string> expect_;  // screens that must be entered, in order
     size_t step_ = 0;
     double stepStart_ = -1;
+    double markMs_ = 0;  // a "mark" wait's time, for "until" waits (steps on a fixed beat)
     bool done_ = false, failed_ = false, autoplay_ = true;
     float endMs_ = 1e30f, failMs_ = 1e30f;
     std::string songKeys_;

@@ -72,6 +72,7 @@ void UiManager::logOnce(const std::string& what) {
 
 std::string UiManager::localize(const std::string& token) const {
     if (token == "port_gamepads") return "GAMEPADS";  // the port's main-menu help item
+    if (token == "gd_uab_start") return "START";      // the help bar's START access button (universal_mechanisms.md 1.1.3)
     return locale_ ? locale_->text(token) : token;
 }
 
@@ -526,7 +527,9 @@ void UiManager::beginTransition(ScreenObj* next, bool back) {
     backwardsAnim_ = false;
     history_.push_back(next->name());
     if (const char* l = SDL_getenv("GD02_UILOG"); l && *l && *l != '0') SDL_Log("ui: goto_screen %s%s", next->name().c_str(), back_ ? " (back)" : "");
-    const bool animOut = current_ && current_->flag("animate_transition", true) && !headless_;
+    // [I] A screen without a transition of its own (the port's universal
+    // menus) also skips the outgoing screen's: it opens on the next frame.
+    const bool animOut = current_ && current_->flag("animate_transition", true) && next->flag("animate_transition", true) && !headless_;
     if (animOut) {
         // The outgoing panels' ui_exit triggers.
         for (PanelObj* p : current_->panels())

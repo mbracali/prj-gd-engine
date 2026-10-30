@@ -19,16 +19,12 @@ struct EnhBlock {
     float invViewProj[16];
     float viewProj[16];
     float prevViewProj[16];
-    float texel[4];   // xy the source's texel, zw a second texel (the streaks' source)
+    float texel[4];   // xy the source's texel
     float size[4];    // xy the source's size, zw the output's
-    float fx[4];      // x bloom, y streaks, z cinematic, w grade
-    float fog[4];     // x mode, y floor z, z height, w density
-    float fog2[4];    // x max, y time, z ssao, w ao radius
-    float pass[4];    // per pass (star blur, TAA, finish, RCAS, downsample)
-    float lightPos[8][4];  // [0].w: the number of lights
-    float lightDir[8][4];
-    float lightCol[8][4];
-    float lightCone[8][4];
+    float fx[4];      // x bloom, z cinematic, w grade
+    float ao[4];      // x the occlusion's exponent (0 off), y its radius
+    float pass[4];    // per pass (star blur, TAA, finish, RCAS, downsample, luminance, exposure)
+    float hdr[4];     // HDR: x the display's headroom (linear, 1 = SDR), y the encoded white (1, above with True HDR)
 };
 
 const char* kVertex = R"(
@@ -50,19 +46,20 @@ layout(std140) uniform GdEnh {
     vec4 uTexel;
     vec4 uSize;
     vec4 uFx;
-    vec4 uFog;
-    vec4 uFog2;
+    vec4 uAo;
     vec4 uPass;
-    vec4 uLightPos[8];
-    vec4 uLightDir[8];
-    vec4 uLightCol[8];
-    vec4 uLightCone[8];
+    vec4 uHdr;
 };
 vec3 world(vec2 uv, float d) {
     vec4 p = uInvViewProj * vec4(uv * 2.0 - 1.0, d * 2.0 - 1.0, 1.0);
     return p.xyz / p.w;
 }
 float luma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
+#if GD_HDR || PASS_LUM
+// The sRGB-encoded values and linear light (extended above 1.0).
+vec3 toLinear(vec3 c) { c = max(c, 0.0); return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c)); }
+vec3 toSrgb(vec3 c) { c = max(c, 0.0); return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c)); }
+#endif
 
 #if PASS_DOWN
 // Dual Kawase down: 5 taps around the destination texel (Marius Bjorge, SIGGRAPH 2015).
@@ -116,7 +113,7 @@ void main() {
     vec3 t = normalize(cross(n, abs(n.z) < 0.9 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0)));
     vec3 b = cross(n, t);
     float rot = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715)))) * 6.2831853;
-    float radius = uFog2.w;
+    float radius = uAo.y;
     float occ = 0.0;
     for (int i = 0; i < 12; ++i) {
         float fi = (float(i) + 0.5) / 12.0;
@@ -137,83 +134,25 @@ void main() {
     // The eye distance in thousands (an 8-bit target keeps it for the blur's weights).
     fragColor = vec4(1.0 - 0.85 * occ / 12.0, clamp(length(eye - p) / 4000.0, 0.0, 1.0), 0.0, 1.0);
 }
-#elif PASS_FOGVOL
-// Super Fog (half resolution): the view ray marched through a ground fog
-// layer and a thin haze, stirred by animated 3D noise, lit by the stage's
-// light cones (forward scattering) and the frame's own light. Out: the
-// in-scattered light and the transmittance.
-uniform sampler2D sDepth;
-uniform sampler2D sBlurLo;
-// Not "noise3": GLSL reserves noise1..noise4 (lesson L5).
-float hash3(vec3 p) {
-    p = fract(p * 0.1031);
-    p += dot(p, p.zyx + 31.32);
-    return fract((p.x + p.y) * p.z);
-}
-float fogNoise3(vec3 p) {
-    vec3 i = floor(p), f = fract(p);
-    vec3 u = f * f * (3.0 - 2.0 * f);
-    return mix(mix(mix(hash3(i), hash3(i + vec3(1, 0, 0)), u.x), mix(hash3(i + vec3(0, 1, 0)), hash3(i + vec3(1, 1, 0)), u.x), u.y),
-               mix(mix(hash3(i + vec3(0, 0, 1)), hash3(i + vec3(1, 0, 1)), u.x), mix(hash3(i + vec3(0, 1, 1)), hash3(i + vec3(1, 1, 1)), u.x), u.y),
-               u.z);
-}
-void main() {
-    float d = min(texture(sDepth, vUv).r, 0.99999);
-    vec3 o = world(vUv, 0.0), p = world(vUv, d);
-    vec3 ray = p - o;
-    float dist = min(length(ray), 2500.0);
-    vec3 dir = normalize(ray);
-    float stepLen = dist / 24.0;
-    float t = stepLen * fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
-    float time = uFog2.y, floorZ = uFog.y;
-    vec3 ambient = vec3(0.07, 0.07, 0.085) + texture(sBlurLo, vUv).rgb * 1.5;
-    vec3 inScatter = vec3(0.0);
-    float trans = 1.0;
-    const float g = 0.55;
-    int lights = int(uLightPos[0].w + 0.5);
-    for (int i = 0; i < 24; ++i) {
-        vec3 q = o + dir * t;
-        float h = max(q.z - floorZ, 0.0);
-        vec3 nq = q * 0.011 + vec3(time * 0.05, time * 0.02, -time * 0.03);
-        float n = h < 80.0 ? fogNoise3(nq) * 0.6 + fogNoise3(nq * 2.6 + 7.3) * 0.4 : fogNoise3(nq);
-        float dens = 0.009 * exp(-h / 26.0) * mix(0.25, 1.9, n) + 0.00055 * mix(0.6, 1.4, n);
-        vec3 li = ambient;
-        float near = smoothstep(40.0, 220.0, t);
-        for (int k = 0; k < 8; ++k) {
-            if (k >= lights) break;
-            vec3 v = q - uLightPos[k].xyz;
-            float dl = length(v);
-            vec3 lv = v / max(dl, 1e-3);
-            float cone = smoothstep(uLightCone[k].y, uLightCone[k].x, dot(lv, uLightDir[k].xyz));
-            if (cone <= 0.0) continue;
-            float mu = dot(lv, -dir);
-            float phase = (1.0 - g * g) / pow(1.0 + g * g - 2.0 * g * mu, 1.5) * 0.25;
-            li += uLightCol[k].rgb * cone * phase * 40.0 * near / (1.0 + dl * dl * 1.5e-5);
-        }
-        float sigma = dens * stepLen;
-        inScatter += trans * li * sigma;
-        trans *= exp(-sigma);
-        t += stepLen;
-    }
-    inScatter = inScatter / (1.0 + max(max(inScatter.r, inScatter.g), inScatter.b) * 0.7);
-    fragColor = vec4(inScatter, max(trans, 0.3));
-}
 #elif PASS_COMPOSITE
-// Ambient occlusion, fog, bloom, light streaks and colour in one pass.
+// Ambient occlusion, bloom and colour in one pass.
 uniform sampler2D sTex;
-uniform sampler2D sDepth;
 uniform sampler2D sBlur;       // the pyramid's top (1/2)
-uniform sampler2D sBlurMid;    // 1/4
-uniform sampler2D sStreakSrc;  // the first 1/2 step down
-uniform sampler2D sBlurLo;     // 1/8: the fog's light
+uniform sampler2D sBlurLo;     // 1/8
 uniform sampler2D sAo;
-uniform sampler2D sFogVol;
-float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
-float vnoise(vec2 p) {
-    vec2 i = floor(p), f = fract(p);
-    vec2 u = f * f * (3.0 - 2.0 * f);
-    return mix(mix(hash(i), hash(i + vec2(1, 0)), u.x), mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), u.x), u.y);
+#if GD_HDR  // Enhanced > HDR: the Emulated / True HDR variant
+uniform sampler2D sExposure;   // the auto exposure (1x1, r)
+// ACES filmic (Krzysztof Narkowicz's fit of the RRT + ODT) to SDR.
+vec3 aces(vec3 x) { return clamp(x * (2.51 * x + 0.03) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0); }
+// HDR output: the same curve up to 0.5, then an exponential shoulder of the
+// same slope that reaches the display's peak (uHdr.x) instead of 1.0.
+vec3 acesHdr(vec3 x) {
+    const float a = 0.61631, s = 0.65105;  // aces(0.5) and its slope there
+    float r = uHdr.x - a;
+    vec3 hi = a + r * (1.0 - exp(-max(x - 0.5, 0.0) * s / r));
+    return mix(aces(x), hi, step(0.5, x));
 }
+#endif
 vec3 saturation(vec3 c, float s) { return mix(vec3(luma(c)), c, s); }
 vec3 grade(vec3 c, int g) {
     float l = luma(c);
@@ -233,13 +172,14 @@ vec3 grade(vec3 c, int g) {
         c = saturation(c, 1.4);
         c += mix(vec3(0.05, -0.01, 0.07), vec3(-0.02, 0.03, 0.04), smoothstep(0.2, 0.8, l)) * 0.8;
         c = mix(c, c * c * (3.0 - 2.0 * c), 0.25);
+    } else if (g == 6) {  // sepia: old photographs (the "Good old days" mode)
+        c = vec3(l) * vec3(1.07, 0.9, 0.68) + vec3(0.04, 0.025, 0.0);
     }
     return c;
 }
 void main() {
     vec3 c = texture(sTex, vUv).rgb;
-    int fog = int(uFog.x + 0.5);
-    if (uFog2.z > 0.5) {
+    if (uAo.x > 0.0) {
         // A 3x3 blur of the occlusion that keeps to surfaces at the same distance.
         vec2 a0 = texture(sAo, vUv).rg;
         float sum = 0.0, wsum = 0.0;
@@ -249,30 +189,7 @@ void main() {
                 float w = 1.0 / (1.0 + abs(a.y - a0.y) * 1000.0);
                 sum += a.x * w, wsum += w;
             }
-        c *= sum / wsum;
-    }
-    if (fog == 3) {
-        vec4 v = texture(sFogVol, vUv);
-        c = c * v.a + v.rgb;
-    } else if (fog != 0) {
-        // Exponential height fog on the stage floor along the view ray.
-        float d = min(texture(sDepth, vUv).r, 0.99999);
-        vec3 o = world(vUv, 0.0), p = world(vUv, d);
-        vec3 ray = p - o;
-        float dist = min(length(ray), 3000.0);
-        p = o + normalize(ray) * dist;
-        float h0 = max(o.z - uFog.y, 0.0) / uFog.z, h1 = max(p.z - uFog.y, 0.0) / uFog.z;
-        float k = abs(h1 - h0) < 1e-3 ? exp(-h0) : (exp(-h0) - exp(-h1)) / (h1 - h0);
-        float time = uFog2.y;
-        vec2 q = p.xy * 0.012 + time * vec2(0.035, 0.012);
-        vec2 warp = vec2(vnoise(q * 0.7 + 3.1), vnoise(q * 0.7 - 1.7)) - 0.5;
-        q += warp * 1.4;
-        float n = vnoise(q) * 0.55 + vnoise(q * 2.3 - time * vec2(0.02, 0.05)) * 0.3 + vnoise(q * 5.1 + time * 0.04) * 0.15;
-        float amount = uFog.w * dist * k * mix(0.35, 1.7, n);
-        float f = (1.0 - exp(-amount)) * uFog2.x;
-        vec3 light = texture(sBlurLo, vUv).rgb;
-        vec3 glow = max(texture(sBlurMid, vUv).rgb - 0.35, 0.0);
-        c = mix(c, vec3(0.09, 0.09, 0.11) + light * 1.3 + glow * 1.2, f);
+        c *= pow(sum / wsum, uAo.x);  // the occlusion's exponent: light 0.5 .. stronger 1.5 (gd01's)
     }
     if (uFx.x > 0.0) {
         // The bright parts of the blurred frame, on luminance with a soft knee.
@@ -283,28 +200,43 @@ void main() {
         float kw = smoothstep(0.55, 0.85, lw) * max(lw - 0.55, 0.0) / max(lw, 1e-3);
         c += (b * kb * 2.2 + wide * kw * 1.6) * uFx.x;
     }
-    if (uFx.y > 0.0) {
-        // Anamorphic streaks: the brightest lights smeared sideways, blue-tinted.
-        vec3 s = vec3(0.0);
-        for (int i = -24; i <= 24; ++i) {
-            vec3 t = texture(sStreakSrc, vUv + vec2(float(i) * uTexel.z, 0.0)).rgb;
-            float m = max(t.r, max(t.g, t.b));
-            s += t * (max(m - 0.8, 0.0) / max(m, 1e-3)) * exp(-abs(float(i)) * 0.09);
-        }
-        c += (s * 0.5 + vec3(luma(s)) * vec3(0.55, 0.8, 1.3) * 0.7) * uFx.y;
-    }
+#if GD_HDR
+    // Exposure and tone map in linear light, back to the display's encoding.
+    vec3 lin = toLinear(min(c, vec3(64.0))) * texture(sExposure, vec2(0.5)).r;
+    c = toSrgb(uHdr.x > 1.0 ? acesHdr(lin) : aces(lin));
+    // HDR output: the colour looks below apply to the SDR range; highlights above it ride along.
+    vec3 over = vec3(0.0);
+#endif
     if (uFx.z > 0.5) {
+#if GD_HDR
+        if (uHdr.x > 1.0) over = max(c - 1.0, 0.0), c -= over;
+#endif
         float l = luma(c);
         c = mix(vec3(l), c, 1.12);
         c = clamp(c, 0.0, 1.0);
         c = mix(c, c * c * (3.0 - 2.0 * c), 0.4);
         c += vec3(0.025, 0.006, -0.02) * l - vec3(0.012, -0.004, -0.022) * (1.0 - l) * 0.6;
         float v = length((vUv - 0.5) * vec2(1.25, 1.0));
+#if GD_HDR
+        float vig = mix(1.0, 0.7, smoothstep(0.35, 0.9, v));
+        c *= vig;
+        if (uHdr.x > 1.0) c += over * vig;
+#else
         c *= mix(1.0, 0.7, smoothstep(0.35, 0.9, v));
+#endif
     }
     int g = int(uFx.w + 0.5);
+#if GD_HDR
+    if (g != 0) {
+        if (uHdr.x > 1.0) over = max(c - 1.0, 0.0);
+        c = grade(clamp(c, 0.0, 1.0), g);
+        if (uHdr.x > 1.0) c += g == 4 || g == 6 ? vec3(luma(over)) : over;
+    }
+    fragColor = vec4(clamp(c, 0.0, uHdr.y), 1.0);
+#else
     if (g != 0) c = grade(clamp(c, 0.0, 1.0), g);
     fragColor = vec4(clamp(c, 0.0, 1.0), 1.0);
+#endif
 }
 #elif PASS_STARBLUR
 // Blur on Star Power: the frame smeared along the camera's motion (the depth
@@ -517,7 +449,11 @@ void main() {
     vec3 f = texture(sTex, vUv + vec2(tx.x, 0)).rgb, h = texture(sTex, vUv + vec2(0, tx.y)).rgb;
     vec3 mn4 = min(min(b, d), min(f, h)), mx4 = max(max(b, d), max(f, h));
     vec3 hitMin = mn4 / max(4.0 * mx4, 1e-4);
+#if GD_HDR
+    vec3 hitMax = (uHdr.y - mx4) / min(4.0 * mn4 - 4.0 * uHdr.y, -1e-4);  // True HDR: the encoded white above 1
+#else
     vec3 hitMax = (1.0 - mx4) / min(4.0 * mn4 - 4.0, -1e-4);
+#endif
     vec3 lobeRGB = max(-hitMin, hitMax);
     float lobe = max(-0.1875, min(max(lobeRGB.r, max(lobeRGB.g, lobeRGB.b)), 0.0)) * uPass.x;
     fragColor = vec4((lobe * (b + d + f + h) + e) / (4.0 * lobe + 1.0), 1.0);
@@ -527,6 +463,11 @@ void main() {
 // chromatic aberration and animated film grain (strongest in mid-tones).
 uniform sampler2D sTex;
 float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+#if GD_HDR
+#define PEAK uHdr.y  // True HDR: the encoded white, above 1
+#else
+#define PEAK 1.0
+#endif
 void main() {
     vec2 tx = uTexel.xy;
     vec3 e = texture(sTex, vUv).rgb;
@@ -536,9 +477,9 @@ void main() {
         vec3 b = texture(sTex, vUv + vec2(0, -tx.y)).rgb, dd = texture(sTex, vUv + vec2(-tx.x, 0)).rgb;
         vec3 f = texture(sTex, vUv + vec2(tx.x, 0)).rgb, h = texture(sTex, vUv + vec2(0, tx.y)).rgb;
         vec3 mn = min(e, min(min(b, dd), min(f, h))), mx = max(e, max(max(b, dd), max(f, h)));
-        vec3 amp = sqrt(clamp(min(mn, 1.0 - mx) / max(mx, 1e-4), 0.0, 1.0));
+        vec3 amp = sqrt(clamp(min(mn, PEAK - mx) / max(mx, 1e-4), 0.0, 1.0));
         vec3 w = amp * (-1.0 / mix(8.0, 5.0, sharp));
-        c = clamp((e + (b + dd + f + h) * w) / (1.0 + 4.0 * w), 0.0, 1.0);
+        c = clamp((e + (b + dd + f + h) * w) / (1.0 + 4.0 * w), 0.0, PEAK);
     }
     if (ca > 0.0) {
         vec2 off = (vUv - 0.5) * ca * length(vUv - 0.5);
@@ -547,11 +488,43 @@ void main() {
     }
     if (grain > 0.0) {
         float l = luma(c);
+#if GD_HDR
+        l = min(l, 1.0);
+#endif
         vec2 px = floor(vUv * uSize.zw);
         float n = hash(px + fract(time * 7.31) * 413.0) + hash(px * 1.37 - fract(time * 3.17) * 211.0) - 1.0;
         c += n * grain * (0.35 + 2.6 * l * (1.0 - l));
     }
-    fragColor = vec4(clamp(c, 0.0, 1.0), 1.0);
+    fragColor = vec4(clamp(c, 0.0, PEAK), 1.0);
+}
+#elif PASS_LUM
+// HDR auto exposure, 1: 4 taps a quarter of the output texel apart. From the
+// world (uPass.x 0): the mean log luminance; then (1) 4x4 boxes of it, down
+// to 1x1.
+uniform sampler2D sTex;
+float tap(vec2 uv) {
+    vec3 c = texture(sTex, uv).rgb;
+    if (uPass.x > 0.5) return c.r;
+    return log(max(luma(toLinear(min(c, vec3(64.0)))), 1e-4));
+}
+void main() {
+    vec2 q = uTexel.zw * 0.25;
+    float l = tap(vUv - q) + tap(vUv + vec2(q.x, -q.y)) + tap(vUv + vec2(-q.x, q.y)) + tap(vUv + q);
+    fragColor = vec4(l * 0.25, 0.0, 0.0, 1.0);
+}
+#elif PASS_ADAPT
+// HDR auto exposure, 2: the key is the venues' typical log-average (about
+// 0.012: dark stages with bright lights), so an average shot keeps the
+// original's exposure; darker shots open up to +0.5 stop, brighter ones close
+// down to -0.5, each by half the difference; eased from the last frame's
+// (uPass.x: the blend, 1 without history).
+uniform sampler2D sLum;
+uniform sampler2D sPrev;
+void main() {
+    float avg = exp(texture(sLum, vec2(0.5)).r);
+    float target = exp2(clamp(0.5 * log2(0.012 / max(avg, 1e-4)), -0.5, 0.5));
+    float prev = texture(sPrev, vec2(0.5)).r;
+    fragColor = vec4(mix(prev, target, uPass.x), 0.0, 0.0, 1.0);
 }
 #else
 uniform sampler2D sTex;
@@ -624,7 +597,8 @@ EnhancedFx::EnhancedFx(RenderDevice& device) : device_(device) {
 }
 
 EnhancedFx::~EnhancedFx() {
-    for (Target* t : {&a_, &b_, &ao_, &fogVol_, &star_[0], &star_[1], &history_[0], &history_[1], &out_, &out2_})
+    for (Target* t : {&a_, &b_, &ao_, &star_[0], &star_[1], &history_[0], &history_[1], &out_, &out2_, &lum_[0], &lum_[1], &lum_[2], &lum_[3],
+                      &expo_[0], &expo_[1]})
         if (t->id) device_.destroyTarget(t->id);
     for (int l = 0; l < kLevels; ++l) {
         if (down_[l].id) device_.destroyTarget(down_[l].id);
@@ -636,23 +610,30 @@ EnhancedFx::~EnhancedFx() {
 }
 
 ProgramDesc EnhancedFx::describe(Pass p) {
-    static const char* kNames[] = {"enh_down", "enh_up", "enh_ao", "enh_fogvol", "enh_composite", "enh_starblur", "enh_taa",
-                                   "enh_fxaa", "enh_downsample", "enh_easu", "enh_rcas", "enh_finish", "enh_copy"};
-    static const char* kDefines[] = {"PASS_DOWN", "PASS_UP", "PASS_AO", "PASS_FOGVOL", "PASS_COMPOSITE", "PASS_STARBLUR", "PASS_TAA",
-                                     "PASS_FXAA", "PASS_DOWNSAMPLE", "PASS_EASU", "PASS_RCAS", "PASS_FINISH"};
+    static const char* kNames[] = {"enh_down",  "enh_up",    "enh_ao",           "enh_composite",  "enh_starblur", "enh_taa",
+                                   "enh_fxaa",  "enh_downsample", "enh_easu",  "enh_rcas",       "enh_finish",   "enh_copy",
+                                   "enh_lum",   "enh_adapt", "enh_composite_hdr", "enh_finish_hdr", "enh_rcas_hdr"};
+    static const char* kDefines[] = {"PASS_DOWN", "PASS_UP",   "PASS_AO",   "PASS_COMPOSITE", "PASS_STARBLUR", "PASS_TAA",
+                                     "PASS_FXAA", "PASS_DOWNSAMPLE", "PASS_EASU", "PASS_RCAS", "PASS_FINISH", nullptr /* copy: #else */,
+                                     "PASS_LUM",  "PASS_ADAPT"};
+    // The HDR variants are their SDR pass with GD_HDR 1 (without it the source is the SDR chain's own).
+    const Pass base = p == Pass::CompositeHdr ? Pass::Composite : p == Pass::FinishHdr ? Pass::Finish : p == Pass::RcasHdr ? Pass::Rcas : p;
     ProgramDesc d;
     d.name = kNames[int(p)];
     d.vertex = kVertex;
     d.fragment = kFragment;
     d.uniformBlocks = {"GdEnh"};
     // Every switch is defined (OpenGL ES rejects undefined names in #if).
-    for (int i = 0; i < int(Pass::Copy); ++i) d.defines += std::string("#define ") + kDefines[i] + (i == int(p) ? " 1\n" : " 0\n");
+    for (int i = 0; i <= int(Pass::Adapt); ++i)
+        if (kDefines[i]) d.defines += std::string("#define ") + kDefines[i] + (i == int(base) ? " 1\n" : " 0\n");
+    d.defines += base != p ? "#define GD_HDR 1\n" : "#define GD_HDR 0\n";
     switch (p) {
     case Pass::Down: d.samplers = {"sSrc"}; break;
     case Pass::Up: d.samplers = {"sSrc", "sSkip"}; break;
     case Pass::Ao: d.samplers = {"sDepth"}; break;
-    case Pass::FogVol: d.samplers = {"sDepth", "sBlurLo"}; break;
-    case Pass::Composite: d.samplers = {"sTex", "sDepth", "sBlur", "sBlurMid", "sStreakSrc", "sBlurLo", "sAo", "sFogVol"}; break;
+    case Pass::Composite: d.samplers = {"sTex", "sBlur", "sBlurLo", "sAo"}; break;
+    case Pass::CompositeHdr: d.samplers = {"sTex", "sBlur", "sBlurLo", "sAo", "sExposure"}; break;
+    case Pass::Adapt: d.samplers = {"sLum", "sPrev"}; break;
     case Pass::StarBlur: d.samplers = {"sTex", "sDepth", "sAccum"}; break;
     case Pass::Taa: d.samplers = {"sTex", "sDepth", "sHistory"}; break;
     default: d.samplers = {"sTex"}; break;
@@ -720,6 +701,34 @@ void EnhancedFx::pass(Pass p, Target* dst, const TextureId* tex, int slots, cons
     lastPasses_.push_back(name);
 }
 
+// HDR auto exposure: the world's mean log luminance (a 64 x 64 log map
+// reduced in 4x4 boxes to 1x1 on the GPU, no read-back) and the exposure
+// eased towards it (about a second), in a 1x1 target the composite reads.
+bool EnhancedFx::autoExposure(TextureId color, int sw, int sh) {
+    (void)sw, (void)sh;
+    EnhBlock k{};
+    TextureId src = color;
+    for (int i = 0, size = 64; i < 4; ++i, size /= 4) {
+        if (!ensure(lum_[i], size, size, true)) return false;
+        k.texel[2] = 1.0f / float(size), k.texel[3] = 1.0f / float(size);
+        k.pass[0] = i == 0 ? 0.0f : 1.0f;
+        pass(Pass::Lum, &lum_[i], &src, 1, &k, sizeof k, "lum");
+        src = device_.targetTexture(lum_[i].id);
+    }
+    const uint64_t now = SDL_GetTicksNS();
+    const float dt = expoValid_ ? std::clamp(float(now - expoNs_) / 1e9f, 0.0f, 0.25f) : 0.0f;
+    expoNs_ = now;
+    Target& prev = expo_[expoIndex_];
+    Target& next = expo_[expoIndex_ ^ 1];
+    if (!ensure(prev, 1, 1, true) || !ensure(next, 1, 1, true)) return false;
+    k.pass[0] = expoValid_ ? 1.0f - std::exp(-dt * 1.5f) : 1.0f;
+    const TextureId t[2] = {src, device_.targetTexture(prev.id)};
+    pass(Pass::Adapt, &next, t, 2, &k, sizeof k, "adapt");
+    expoIndex_ ^= 1;
+    expoValid_ = true;
+    return !failed_;
+}
+
 std::array<float, 2> EnhancedFx::jitter(const PostSettings& s, int sw, int sh) {
     if (s.aa != PostSettings::AA::Taa || sw <= 0 || sh <= 0) return {0, 0};
     const unsigned i = (frame_ % 8) + 1;
@@ -737,9 +746,16 @@ bool EnhancedFx::process(TextureId color, TextureId depth, int sw, int sh, int x
     b.texel[0] = 1.0f / float(sw), b.texel[1] = 1.0f / float(sh);
     b.size[0] = float(sw), b.size[1] = float(sh), b.size[2] = float(ow), b.size[3] = float(oh);
     TextureId cur = color;
+    // HDR: the pyramid keeps lights above 1.0; True HDR (a peak above 1) keeps
+    // the steps after the composite in RGBA16F.
+    const bool hdr = s.hdr != 0;
+    const float peak = hdr && s.hdrPeak > 1.0f ? std::min(s.hdrPeak, 64.0f) : 1.0f;
+    const bool wide = peak > 1.0f;
+    b.hdr[0] = peak;
+    b.hdr[1] = wide ? 1.055f * std::pow(peak, 1 / 2.4f) - 0.055f : 1.0f;  // the encoded white
 
-    // 1. The blur pyramid (dual Kawase) for bloom, the fog's light and the light streaks.
-    const bool pyramid = s.bloom || s.streaks || (s.fog && f.hasCamera);
+    // 1. The blur pyramid (dual Kawase) for bloom.
+    const bool pyramid = s.bloom != 0;
     if (pyramid) {
         int w = sw, h = sh;
         TextureId src = color;
@@ -747,12 +763,12 @@ bool EnhancedFx::process(TextureId color, TextureId depth, int sw, int sh, int x
             EnhBlock k = b;
             k.texel[0] = 0.5f / float(w), k.texel[1] = 0.5f / float(h);
             w = std::max(1, w / 2), h = std::max(1, h / 2);
-            if (!ensure(down_[l], w, h, false)) return false;
+            if (!ensure(down_[l], w, h, hdr)) return false;
             pass(Pass::Down, &down_[l], &src, 1, &k, sizeof k, "down");
             src = device_.targetTexture(down_[l].id);
         }
         for (int l = kLevels - 2; l >= 0; --l) {
-            if (!ensure(up_[l], down_[l].w, down_[l].h, false)) return false;
+            if (!ensure(up_[l], down_[l].w, down_[l].h, hdr)) return false;
             EnhBlock k = b;
             k.texel[0] = 1.0f / float(down_[l + 1].w), k.texel[1] = 1.0f / float(down_[l + 1].h);
             const TextureId t[2] = {src, device_.targetTexture(down_[l].id)};
@@ -765,56 +781,23 @@ bool EnhancedFx::process(TextureId color, TextureId depth, int sw, int sh, int x
     if (ssao) {
         if (!ensure(ao_, sw, sh, false)) return false;
         EnhBlock k = b;
-        k.fog2[3] = 14.0f;  // world units; a rocker is ~80 tall (gd01's)
+        k.ao[1] = 14.0f;  // world units; a rocker is ~80 tall (gd01's)
         pass(Pass::Ao, &ao_, &depth, 1, &k, sizeof k, "ao");
     }
-    // Super Fog's volume at half resolution.
-    const bool superFog = s.fog >= 3 && f.hasCamera && depth && pyramid;
-    if (superFog) {
-        if (!ensure(fogVol_, sw / 2, sh / 2, true)) return false;
+    // 2. Ambient occlusion, bloom, colour.
+    static constexpr float kAoK[5] = {0, 0.5f, 0.8f, 1.1f, 1.5f};  // the occlusion's exponent: none, light, medium, strong, stronger
+    if (hdr && !autoExposure(color, sw, sh)) return false;
+    if (pyramid || ssao || s.cinematic || s.grade || hdr) {
+        if (!ensure(a_, sw, sh, wide)) return false;
         EnhBlock k = b;
-        k.fog[1] = f.floorZ, k.fog2[1] = f.timeSec;
-        int n = 0;
-        for (const PostFrame::Light& l : f.lights) {
-            if (n == 8) break;
-            const Vec3 d = l.target - l.pos;
-            const float len = std::sqrt(dot(d, d));
-            if (len < 1) continue;
-            k.lightPos[n][0] = l.pos.x, k.lightPos[n][1] = l.pos.y, k.lightPos[n][2] = l.pos.z;
-            k.lightDir[n][0] = d.x / len, k.lightDir[n][1] = d.y / len, k.lightDir[n][2] = d.z / len;
-            k.lightCol[n][0] = l.color.x, k.lightCol[n][1] = l.color.y, k.lightCol[n][2] = l.color.z;
-            const float half = std::atan(60.0f / len);  // a pool ~60 units across where it lands
-            k.lightCone[n][0] = std::cos(half * 0.55f), k.lightCone[n][1] = std::cos(half);
-            ++n;
-        }
-        k.lightPos[0][3] = float(n);
-        const TextureId t[2] = {depth, device_.targetTexture(up_[2].id)};
-        pass(Pass::FogVol, &fogVol_, t, 2, &k, sizeof k, "fogvol");
-    }
-
-    // 2. Ambient occlusion, fog, bloom, light streaks, colour.
-    if (pyramid || ssao || s.cinematic || s.grade) {
-        if (!ensure(a_, sw, sh, false)) return false;
-        EnhBlock k = b;
-        const int fog = f.hasCamera && depth ? s.fog : 0;
         k.fx[0] = !pyramid ? 0.0f : s.bloom >= 3 ? 0.9f : s.bloom == 2 ? 0.68f : s.bloom == 1 ? 0.45f : 0.0f;
-        k.fx[1] = s.streaks && pyramid ? 1.1f : 0.0f;
         k.fx[2] = s.cinematic ? 1.0f : 0.0f;
         k.fx[3] = float(s.grade);
-        // Low: knee-high wisps; full: a thicker layer to the waist (a rocker is ~80 units tall).
-        k.fog[0] = float(superFog ? 3 : std::min(fog, 2));
-        k.fog[1] = f.floorZ, k.fog[2] = fog >= 2 ? 24.0f : 13.0f, k.fog[3] = fog >= 2 ? 0.0065f : 0.004f;
-        k.fog2[0] = fog >= 2 ? 0.88f : 0.68f, k.fog2[1] = f.timeSec, k.fog2[2] = ssao ? 1.0f : 0.0f;
-        if (pyramid) k.texel[2] = 1.0f / float(down_[0].w), k.texel[3] = 1.0f / float(down_[0].h);
-        const TextureId t[8] = {color,
-                                depth ? depth : color,
-                                pyramid ? device_.targetTexture(up_[0].id) : color,
-                                pyramid ? device_.targetTexture(up_[1].id) : color,
-                                pyramid ? device_.targetTexture(down_[0].id) : color,
-                                pyramid ? device_.targetTexture(up_[2].id) : color,
-                                ssao ? device_.targetTexture(ao_.id) : color,
-                                superFog ? device_.targetTexture(fogVol_.id) : color};
-        pass(Pass::Composite, &a_, t, 8, &k, sizeof k, "composite");
+        k.ao[0] = ssao ? kAoK[std::clamp(s.ssao, 0, 4)] : 0.0f;
+        const TextureId t[5] = {color, pyramid ? device_.targetTexture(up_[0].id) : color,
+                                pyramid ? device_.targetTexture(up_[2].id) : color, ssao ? device_.targetTexture(ao_.id) : color,
+                                hdr ? device_.targetTexture(expo_[expoIndex_].id) : color};
+        pass(hdr ? Pass::CompositeHdr : Pass::Composite, &a_, t, hdr ? 5 : 4, &k, sizeof k, "composite");
         cur = device_.targetTexture(a_.id);
     }
 
@@ -825,9 +808,10 @@ bool EnhancedFx::process(TextureId color, TextureId depth, int sw, int sh, int x
         const bool resized = prev.w != sw || prev.h != sh;
         if (!ensure(next, sw, sh, true) || !ensure(prev, sw, sh, true)) return false;
         const bool valid = starValid_ && !resized && !cut(f.viewProj, starPrev_);
-        // Light, medium, high: the motion smear's gain, the zoom and the trail (gd01's).
-        static constexpr float kScale[4] = {0, 2.0f, 3.5f, 5.0f}, kRadial[4] = {0, 0.008f, 0.016f, 0.026f}, kFeedback[4] = {0, 0.35f, 0.55f, 0.7f};
-        const int lv = std::clamp(s.starBlur, 1, 3);
+        // Light, medium, strong, stronger: the motion smear's gain, the zoom and the trail (gd01's).
+        static constexpr float kScale[5] = {0, 2.0f, 3.5f, 5.0f, 6.5f}, kRadial[5] = {0, 0.008f, 0.016f, 0.026f, 0.036f},
+                               kFeedback[5] = {0, 0.35f, 0.55f, 0.7f, 0.8f};
+        const int lv = std::clamp(s.starBlur, 1, 4);
         EnhBlock k = b;
         put(k.prevViewProj, starPrev_);
         k.pass[0] = kScale[lv] * f.starBlur, k.pass[1] = kRadial[lv] * f.starBlur, k.pass[2] = kFeedback[lv] * f.starBlur;
@@ -864,26 +848,26 @@ bool EnhancedFx::process(TextureId color, TextureId depth, int sw, int sh, int x
     }
     if (s.aa == PostSettings::AA::Fxaa) {
         Target& dst = a_.id && cur.id == device_.targetTexture(a_.id).id ? b_ : a_;
-        if (!ensure(dst, sw, sh, false)) return false;
+        if (!ensure(dst, sw, sh, wide)) return false;
         pass(Pass::Fxaa, &dst, &cur, 1, &b, sizeof b, "fxaa");
         cur = device_.targetTexture(dst.id);
     }
 
     // 4. To the picture's size.
     if (sw > ow || sh > oh) {  // SSAA
-        if (!ensure(out_, ow, oh, false)) return false;
+        if (!ensure(out_, ow, oh, wide)) return false;
         EnhBlock k = b;
         k.pass[0] = float(sw) / float(ow), k.pass[1] = float(sh) / float(oh);
         pass(Pass::Downsample, &out_, &cur, 1, &k, sizeof k, "downsample");
         cur = device_.targetTexture(out_.id);
     } else if (sw < ow || sh < oh) {  // FSR 1: EASU then RCAS
-        if (!ensure(out_, ow, oh, false) || !ensure(out2_, ow, oh, false)) return false;
+        if (!ensure(out_, ow, oh, wide) || !ensure(out2_, ow, oh, wide)) return false;
         pass(Pass::Easu, &out_, &cur, 1, &b, sizeof b, "easu");
         EnhBlock k = b;
         k.texel[0] = 1.0f / float(ow), k.texel[1] = 1.0f / float(oh);
         k.pass[0] = std::exp2(-0.2f);  // FSR's default 0.2 stops
         const TextureId up = device_.targetTexture(out_.id);
-        pass(Pass::Rcas, &out2_, &up, 1, &k, sizeof k, "rcas");
+        pass(wide ? Pass::RcasHdr : Pass::Rcas, &out2_, &up, 1, &k, sizeof k, "rcas");
         cur = device_.targetTexture(out2_.id);
     }
     if (failed_) return false;
@@ -894,10 +878,12 @@ bool EnhancedFx::process(TextureId color, TextureId depth, int sw, int sh, int x
     EnhBlock k = b;
     k.texel[0] = 1.0f / float(ow), k.texel[1] = 1.0f / float(oh);
     k.pass[0] = s.sharpen >= 2 ? 1.0f : s.sharpen == 1 ? 0.45f : 0.0f;
-    k.pass[1] = s.chromatic ? 0.012f : 0.0f;
-    k.pass[2] = s.grain >= 2 ? 0.09f : s.grain == 1 ? 0.045f : 0.0f;
+    static constexpr float kCa[4] = {0, 0.006f, 0.012f, 0.02f};             // none, light, medium, strong
+    static constexpr float kGrain[5] = {0, 0.03f, 0.045f, 0.07f, 0.095f};  // none, light, medium, strong, stronger
+    k.pass[1] = kCa[std::clamp(s.chromatic, 0, 3)];
+    k.pass[2] = kGrain[std::clamp(s.grain, 0, 4)];
     k.pass[3] = f.timeSec;
-    pass(s.sharpen || s.chromatic || s.grain ? Pass::Finish : Pass::Copy, nullptr, &cur, 1, &k, sizeof k,
+    pass(s.sharpen || s.chromatic || s.grain ? (wide ? Pass::FinishHdr : Pass::Finish) : Pass::Copy, nullptr, &cur, 1, &k, sizeof k,
          s.sharpen || s.chromatic || s.grain ? "finish" : "copy");
     ++frame_;
     ++frames_;

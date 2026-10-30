@@ -55,6 +55,7 @@ bool rgbOf(const ::DataNode* n, float out[3]) {
 // A label's laid-out text, kept until its string changes.
 struct UiView::LabelText {
     std::string str;
+    uint32_t seed = 0;  // the jitter seed the layout was made with
     const scene::Font* font = nullptr;
     TextLayout layout;
     std::array<float, 2> fit{1, 1};
@@ -290,6 +291,80 @@ void UiView::setLocalScale(const std::string& object, float x, float y, float z)
 
 void UiView::setState(const std::string& component, scene::UiState state) { states_[component] = state; }
 
+namespace {
+double g_uiSeconds = 0;
+}
+
+void UiView::setUiSeconds(double seconds) { g_uiSeconds = seconds; }
+
+// Encore's BandButton (PS2: class init 0x0028ade8, draw 0x0028bc68, SetState
+// 0x0028cc38) [C]: the class's resource ui/button.milo holds button.tnm, whose
+// scale keys at frames 0 / 1 / 2 / 3 / 4 are the states' text scales; the
+// draw writes the panel's focus_scale into the keys at frames 2 and 4, then
+// plays the copy at the state's frame: disabled 0, normal 1, selecting 3,
+// focused 1 -> 2 over the class's focus_anim_duration (ui_objects.dta,
+// 0.1 s) from the moment focus came (not when it comes back from
+// selecting), then 2. GH2 (gd02) has no button.tnm: there the focused and
+// selecting buttons take focus_scale at once, as before.
+float UiView::buttonScale(const scene::UILabel& l, scene::UiState st, const scene::Object& panel) {
+    ButtonAnim& a = buttonAnims_[l.name];
+    if (st != a.last) {
+        if (st == scene::UiState::Focused && a.last != scene::UiState::Selecting) a.focusAt = g_uiSeconds;
+        a.last = st;
+    }
+    const float focus = styles_.focusScale(panel);
+    const scene::UiStyle style = styles_.style(l.cls, l.header.type);
+    scene::Milo* res = style.classResourceFile.empty() ? nullptr : resource(style.classResourceFile);
+    const scene::TransAnim* tnm = res ? res->find<scene::TransAnim>("button.tnm") : nullptr;
+    if (!tnm || tnm->scaleKeys.empty())
+        return st == scene::UiState::Focused || st == scene::UiState::Selecting ? focus : 1.0f;
+    float frame = 1;
+    switch (st) {
+    case scene::UiState::Disabled: frame = 0; break;
+    case scene::UiState::Selecting: frame = 3; break;
+    case scene::UiState::Focused: {
+        frame = 2;
+        static const float duration = [&] {
+            const ::DataNode* d = styles_.classProperty("BandButton", "focus_anim_duration");
+            return !d ? 0.0f : d->type == ::DataNode::Type::Float ? d->f : d->type == ::DataNode::Type::Int ? float(d->i) : 0.0f;
+        }();
+        if (a.focusAt >= 0 && duration > 0) {
+            const double t = (g_uiSeconds - a.focusAt) / double(duration);
+            if (t < 1) frame = 1 + float(std::max(0.0, t));
+            else a.focusAt = -1;
+        }
+        // Once grown, the focused button's letters jitter anew every
+        // focus_jitter_interval (the panel's property; 0.1 s on main,
+        // options, pause... 0 by default): the text's jitter seed + 1, laid
+        // out again (PS2 0x0028bc68 -> 0x0029b4d8) [C].
+        if (a.focusAt < 0)
+            if (const float interval = styles_.focusJitterInterval(panel); interval != 0 && interval < g_uiSeconds - a.jitterAt)
+                ++a.jitter, a.jitterAt = g_uiSeconds;
+        break;
+    }
+    default: break;
+    }
+    // The keys' x scale (z the same), linear between keys, focus_scale at 2 and 4.
+    auto keyScale = [&](const scene::Key<3>& k) { return k.frame == 2 || k.frame == 4 ? focus : k.v[0]; };
+    const auto& keys = tnm->scaleKeys;
+    if (frame <= keys.front().frame) return keyScale(keys.front());
+    for (size_t i = 1; i < keys.size(); ++i)
+        if (frame <= keys[i].frame) {
+            const float f0 = keys[i - 1].frame, f1 = keys[i].frame;
+            const float u = f1 > f0 ? (frame - f0) / (f1 - f0) : 1;
+            return keyScale(keys[i - 1]) + (keyScale(keys[i]) - keyScale(keys[i - 1])) * u;
+        }
+    return keyScale(keys.back());
+}
+
+float UiView::buttonScaleNow(const std::string& component) {
+    const scene::Object* o = find(component);
+    const auto* l = o ? o->as<scene::BandButton>() : nullptr;
+    const scene::Object* panel = milo_ ? milo_->root().self.get() : nullptr;
+    if (!l || !panel) return 1;
+    return buttonScale(*l, state(component), *panel);
+}
+
 scene::UiState UiView::state(const std::string& component) const {
     auto it = states_.find(component);
     if (it != states_.end()) return it->second;
@@ -494,10 +569,19 @@ void UiView::drawLabel(MaterialRenderer& r, const scene::UILabel& l, const scene
     const std::string str = labelString(l);
     if (str.empty()) return;
 
+    // A button's state first: its scale, and its letters' re-jitter (buttonScale).
+    float buttonScaleNowValue = 1;
+    scene::UiState buttonState = scene::UiState::Normal;
+    const scene::Object* panel = milo_->root().self.get();
+    const auto* asButton = l.as<scene::BandButton>();
+    if (asButton && panel) buttonState = state(l.name), buttonScaleNowValue = buttonScale(l, buttonState, *panel);
+    const uint32_t seed = band ? band->jitterSeed + (asButton ? buttonAnims_[l.name].jitter : 0u) : 0u;
+
     auto& lt = labels_[&l];
-    if (!lt || lt->str != str) {
+    if (!lt || lt->str != str || lt->seed != seed) {
         if (!lt) lt = std::make_unique<LabelText>();
         lt->str = str;
+        lt->seed = seed;
         lt->font = nullptr;
         // The template Text of the component's type (ui_styles.h).
         const scene::UiStyle style = styles_.style(l.cls, l.header.type);
@@ -525,7 +609,7 @@ void UiView::drawLabel(MaterialRenderer& r, const scene::UILabel& l, const scene
         }
         lt->layout = layoutText(&fm, str, st);
         if (band) {
-            jitterText(lt->layout, band->jitterSeed, band->deltaX, band->deltaZ, band->deltaRot);
+            jitterText(lt->layout, seed, band->deltaX, band->deltaZ, band->deltaRot);
             lt->fit = fitScale(lt->layout, st, band->fitText, band->width, band->height);
         }
         lt->font = font;
@@ -536,16 +620,11 @@ void UiView::drawLabel(MaterialRenderer& r, const scene::UILabel& l, const scene
     scene::Xfm local = pose_.local(&l);
     float color[3] = {1, 1, 1};
     const float* matColor = labelColor;
-    const scene::Object* panel = milo_->root().self.get();
-    if (const auto* b = l.as<scene::BandButton>(); b && panel) {
-        const scene::UiState st = state(l.name);
-        const auto c = styles_.buttonColor(*panel, st);
+    if (asButton && panel) {
+        const auto c = styles_.buttonColor(*panel, buttonState);
         color[0] = c[0], color[1] = c[1], color[2] = c[2];
         matColor = color;
-        if (st == scene::UiState::Focused || st == scene::UiState::Selecting) {
-            const float s = styles_.focusScale(*panel);
-            local = scene::compose(scaleXfm(s, 1, s), local);
-        }
+        if (buttonScaleNowValue != 1) local = scene::compose(scaleXfm(buttonScaleNowValue, 1, buttonScaleNowValue), local);
     }
     scene::Xfm world = local;
     {

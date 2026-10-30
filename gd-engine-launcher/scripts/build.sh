@@ -378,6 +378,7 @@ build_module_01() {
   if [ "$os" != android ]; then  # the AI upscalers (none on Android)
     cp "$engine/third_party/fidelityfx/LICENSE.txt" "$dest/licenses/FidelityFX-SDK-LICENSE.txt"
     cp "$engine/third_party/volk/LICENSE.md" "$dest/licenses/volk-LICENSE.md"
+    cp "$engine/third_party/rtmidi/LICENSE" "$dest/licenses/RtMidi-LICENSE.txt"  # Generic MIDI (none on Android)
     cp "$engine/third_party/vulkan/LICENSE.md" "$dest/licenses/Vulkan-Headers-LICENSE.md"
   fi
   if { [ "$os" = linux ] || [ "$os" = steamdeck ]; } && ls "$engine"/third_party/dlss/lib/Linux_x86_64/libnvidia-ngx-dlss.so.* >/dev/null 2>&1; then

@@ -358,6 +358,11 @@ void Renderer::createFontTexture() {
 // with a 120 cap, 144 Hz with 120) vsync is off and endFrame paces alone.
 // Headless drivers are not paced.
 void Renderer::setFrameCap(int fps) {
+    if (fps <= 0) {  // Enhanced > Max FPS "Unlimited": no vsync, no pacing
+        SDL_GL_SetSwapInterval(0);
+        paceNs_ = 0, nextFrameNs_ = 0;
+        return;
+    }
     fps = std::max(fps, 30);
     int interval = 0;
     if (const SDL_DisplayMode* m = SDL_GetCurrentDisplayMode(SDL_GetDisplayForWindow(window_)); m && m->refresh_rate > 0) {
@@ -408,13 +413,16 @@ void Renderer::beginFrame(SDL_Color clear) {
     // The internal resolution: an off-screen colour + depth target of that size.
     int windowW = 0, windowH = 0;
     SDL_GetWindowSizeInPixels(window_, &windowW, &windowH);
-    mainBound_ = internalHeight(windowH) > 0;
-    if (mainBound_ && (main_.w != w || main_.h != h || !main_.fbo)) {
+    // An HDR surface: the frame always draws off screen (RGBA16F), endFrame converts it.
+    if (hdrSurface_) updateHdr();
+    const bool f16 = hdrSurface_ != 0;
+    mainBound_ = internalHeight(windowH) > 0 || f16;
+    if (mainBound_ && (main_.w != w || main_.h != h || !main_.fbo || main_.f16 != f16)) {
         if (main_.fbo) gl::glDeleteFramebuffers(1, &main_.fbo), gl::glDeleteTextures(1, &main_.color), gl::glDeleteRenderbuffers(1, &main_.depth);
         main_ = {};
         gl::glGenTextures(1, &main_.color);
         gl::glBindTexture(GL_TEXTURE_2D, main_.color);
-        gl::glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+        gl::glTexImage2D(GL_TEXTURE_2D, 0, f16 ? GL_RGBA16F : GL_RGBA8, w, h, 0, GL_RGBA, f16 ? GL_FLOAT : GL_UNSIGNED_BYTE, nullptr);
         gl::glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
         gl::glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
         gl::glGenFramebuffers(1, &main_.fbo);
@@ -430,7 +438,7 @@ void Renderer::beginFrame(SDL_Color clear) {
             mainBound_ = false;
             SDL_GetWindowSizeInPixels(window_, &w, &h);
         } else {
-            main_.w = w, main_.h = h;
+            main_.w = w, main_.h = h, main_.f16 = f16;
         }
     }
     bindMain();
@@ -466,7 +474,11 @@ void Renderer::beginFrame(SDL_Color clear) {
 // texture upload then waits for all of them.
 void Renderer::endFrame() {
     gpuTimer.mark(GpuTimer::FrameEnd);
-    if (mainBound_) {  // the internal resolution, scaled to the window
+    if (mainBound_ && main_.f16) {  // True HDR: converted for the HDR surface
+        int ww = 0, wh = 0;
+        SDL_GetWindowSizeInPixels(window_, &ww, &wh);
+        outputHdr(ww, wh);
+    } else if (mainBound_) {  // the internal resolution, scaled to the window
         int ww = 0, wh = 0;
         SDL_GetWindowSizeInPixels(window_, &ww, &wh);
         gl::glBindFramebuffer(GL_READ_FRAMEBUFFER, main_.fbo);
@@ -988,6 +1000,8 @@ void Renderer::setJitter(float x, float y) {
 }
 
 bool Renderer::beginScene() {
+    // True HDR: the display's headroom, when the surface and the display show HDR (else tone mapped to SDR).
+    post_.hdrPeak = post_.hdr == 2 && hdrSurface_ && hdrOn_ ? hdrHeadroom_ : 1.0f;
     if (!post_.any() || sceneActive_) return false;
     // A shader the driver rejects (logged by PostFx) turns the effects off:
     // the scene then draws straight to the frame, as with every effect off,
@@ -1001,14 +1015,17 @@ bool Renderer::beginScene() {
     const int vw = viewport_[2], vh = viewport_[3];
     const float scale = post_.renderScale();
     const int sw = std::max(1, int(std::lround(vw * scale))), sh = std::max(1, int(std::lround(vh * scale)));
-    if (!scene_.fbo || scene_.w != sw || scene_.h != sh) {
+    const bool sceneF16 = post_.hdr != 0;
+    if (!scene_.fbo || scene_.w != sw || scene_.h != sh || scene_.f16 != sceneF16) {
         if (!scene_.fbo) {
             gl::glGenFramebuffers(1, &scene_.fbo);
             gl::glGenTextures(1, &scene_.color);
             gl::glGenTextures(1, &scene_.depth);
         }
         gl::glBindTexture(GL_TEXTURE_2D, scene_.color);
-        gl::glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, sw, sh, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+        // HDR (Emulated / True): floating point, so lights and additive effects keep values above 1.0.
+        if (sceneF16) gl::glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, sw, sh, 0, GL_RGBA, GL_FLOAT, nullptr);
+        else gl::glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, sw, sh, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
         gl::glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
         gl::glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
         gl::glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -1027,7 +1044,7 @@ bool Renderer::beginScene() {
             bindMain();
             return false;
         }
-        scene_.w = sw, scene_.h = sh;
+        scene_.w = sw, scene_.h = sh, scene_.f16 = sceneF16;
     }
     for (int k = 0; k < 4; ++k) sceneSaved_[k] = viewport_[k];
     sceneActive_ = true;
@@ -1066,4 +1083,110 @@ void Renderer::endScene(const PostFrame& frame) {
     gl::glUseProgram(program_);
     gl::glBindVertexArray(vao_);
     gl::glActiveTexture(GL_TEXTURE0);
+}
+
+// ---------------------------------------------------------------- True HDR output
+
+namespace {
+// The frame (sRGB-encoded, paper white at 1.0, True HDR highlights above it)
+// to the surface: linear scRGB (1.0 = 80 nits) scaled to the display's paper
+// white, or BT.2020 PQ.
+const char* kHdrVertex = R"(#version 330 core
+out vec2 vUv;
+void main() {
+    vec2 p = vec2(float((gl_VertexID & 1) << 2) - 1.0, float((gl_VertexID & 2) << 1) - 1.0);
+    vUv = p * 0.5 + 0.5;
+    gl_Position = vec4(p, 0.0, 1.0);
+}
+)";
+const char* kHdrFragment = R"(#version 330 core
+in vec2 vUv;
+uniform sampler2D uTex;
+uniform float uWhite;  // paper white in scRGB units
+uniform int uPq;
+out vec4 fragColor;
+void main() {
+    vec3 c = max(texture(uTex, vUv).rgb, 0.0);
+    vec3 lin = mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c)) * uWhite;
+    if (uPq != 0) {
+        const mat3 toBt2020 = mat3(0.6274, 0.0691, 0.0164, 0.3293, 0.9195, 0.0880, 0.0433, 0.0114, 0.8956);
+        vec3 y = clamp(toBt2020 * lin * (80.0 / 10000.0), 0.0, 1.0);
+        vec3 p = pow(y, vec3(0.1593017578125));
+        lin = pow((0.8359375 + 18.8515625 * p) / (1.0 + 18.6875 * p), vec3(78.84375));
+    }
+    fragColor = vec4(lin, 1.0);
+}
+)";
+}  // namespace
+
+void Renderer::updateHdr() {
+    if (!hdrDirty_) return;
+    hdrDirty_ = false;
+    const SDL_PropertiesID props = SDL_GetWindowProperties(window_);
+    hdrOn_ = SDL_GetBooleanProperty(props, SDL_PROP_WINDOW_HDR_ENABLED_BOOLEAN, false);
+    hdrWhite_ = std::max(1.0f, SDL_GetFloatProperty(props, SDL_PROP_WINDOW_SDR_WHITE_LEVEL_FLOAT, 1.0f));
+    hdrHeadroom_ = std::max(1.0f, SDL_GetFloatProperty(props, SDL_PROP_WINDOW_HDR_HEADROOM_FLOAT, 1.0f));
+    if (!hdrOn_ || hdrHeadroom_ <= 1.0f) {
+        hdrOn_ = false, hdrHeadroom_ = 1;
+        // A PQ surface is absolute: SDR white at BT.2408's 203 nits.
+        if (hdrSurface_ == 2) hdrWhite_ = 203.0f / 80.0f;
+    }
+    const std::string st = hdrStatus();
+    if (st != hdrLogged_) SDL_Log("hdr: %s", (hdrLogged_ = st).c_str());
+}
+
+std::string Renderer::hdrStatus() const {
+    if (!hdrSurface_) return "off: no HDR surface";
+    if (!hdrOn_) return "off: HDR is off for this display (turn it on in the system's display settings)";
+    char buf[160];
+    std::snprintf(buf, sizeof buf, "%s output, paper white %.0f nits, peak %.0f nits", hdrSurface_ == 2 ? "PQ (BT.2020)" : "scRGB",
+                  double(hdrWhite_ * 80), double(hdrWhite_ * hdrHeadroom_ * 80));
+    std::string s = buf;
+    if (post_.temporalUpscaler()) s += " (highlights in SDR while FSR 3.1 / DLSS runs)";
+    return s;
+}
+
+void Renderer::outputHdr(int ww, int wh) {
+    if (!hdrProgram_) {
+        std::string error;
+        unsigned vs = compile(GL_VERTEX_SHADER, kHdrVertex, error);
+        unsigned fs = vs ? compile(GL_FRAGMENT_SHADER, kHdrFragment, error) : 0;
+        if (fs) {
+            hdrProgram_ = gl::glCreateProgram();
+            gl::glAttachShader(hdrProgram_, vs);
+            gl::glAttachShader(hdrProgram_, fs);
+            gl::glLinkProgram(hdrProgram_);
+            GLint ok = 0;
+            gl::glGetProgramiv(hdrProgram_, GL_LINK_STATUS, &ok);
+            if (!ok) gl::glDeleteProgram(hdrProgram_), hdrProgram_ = 0, error = "link failed";
+        }
+        if (vs) gl::glDeleteShader(vs);
+        if (fs) gl::glDeleteShader(fs);
+        if (!hdrProgram_) {
+            SDL_Log("hdr: output shader: %s; showing the frame unconverted", error.c_str());
+            hdrProgram_ = ~0u;
+        }
+    }
+    gl::glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    gl::glDisable(GL_SCISSOR_TEST);
+    if (hdrProgram_ == ~0u) {  // never a black window
+        gl::glBindFramebuffer(GL_READ_FRAMEBUFFER, main_.fbo);
+        gl::glBlitFramebuffer(0, 0, main_.w, main_.h, 0, 0, ww, wh, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+    } else {
+        gl::glViewport(0, 0, ww, wh);
+        gl::glDisable(GL_BLEND);
+        gl::glDisable(GL_DEPTH_TEST);
+        gl::glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+        gl::glUseProgram(hdrProgram_);
+        gl::glActiveTexture(GL_TEXTURE0);
+        gl::glBindTexture(GL_TEXTURE_2D, main_.color);
+        gl::glUniform1i(gl::glGetUniformLocation(hdrProgram_, "uTex"), 0);
+        gl::glUniform1f(gl::glGetUniformLocation(hdrProgram_, "uWhite"), hdrWhite_);
+        gl::glUniform1i(gl::glGetUniformLocation(hdrProgram_, "uPq"), hdrSurface_ == 2 ? 1 : 0);
+        gl::glBindVertexArray(vao_);
+        gl::glDrawArrays(GL_TRIANGLES, 0, 3);
+        gl::glUseProgram(program_);
+    }
+    gl::glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    gl::glEnable(GL_SCISSOR_TEST);
 }

@@ -20,6 +20,7 @@ mkdir -p "$d/licenses"
 cp ../../LICENSE ../../LICENSE-ADDITIONAL-TERMS.md "$d/"
 cp third_party/fidelityfx/LICENSE.txt "$d/licenses/FidelityFX-SDK-LICENSE.txt"
 cp third_party/volk/LICENSE.md "$d/licenses/volk-LICENSE.md"
+cp third_party/rtmidi/LICENSE "$d/licenses/RtMidi-LICENSE.txt"
 cp third_party/vulkan/LICENSE.md "$d/licenses/Vulkan-Headers-LICENSE.md"
 # AI upscaling: the DLSS model library next to the Linux executable (NGX looks
 # there), when ../tools/fetch_dlss.sh has downloaded the DLSS SDK.

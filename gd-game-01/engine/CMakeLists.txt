@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(gd01 VERSION 1.1.6 LANGUAGES C CXX)
+project(gd01 VERSION 1.1.7 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -42,10 +42,12 @@ target_sources(gd01 PRIVATE
   src/game/rules.cpp
   src/game/song_db.cpp
   src/input/input.cpp
+  src/input/midi_in.cpp
   src/render/crowd_renderer.cpp
   src/render/gl.cpp
   src/render/highway.cpp
   src/render/post_fx.cpp
+  src/render/hdr_output.cpp
   src/render/vk_upscaler.cpp
   src/render/renderer.cpp
   src/render/scene_renderer.cpp
@@ -97,6 +99,9 @@ if(ANDROID)
   target_compile_definitions(gd01 PRIVATE GD01_DLSS=0)
   target_link_libraries(gd01 PRIVATE android log)
 else()
+# Generic MIDI input (src/input/midi_in.cpp): RtMidi, desktop only.
+add_subdirectory(third_party/rtmidi)
+target_link_libraries(gd01 PRIVATE gd_rtmidi)
 add_subdirectory(third_party/fidelityfx)
 target_include_directories(gd01 SYSTEM PRIVATE third_party/vulkan third_party/volk third_party/fidelityfx/include)
 target_link_libraries(gd01 PRIVATE ffx_fsr3 volk ${CMAKE_DL_LIBS})

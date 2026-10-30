@@ -2,6 +2,7 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #pragma once
 
+#include <cstdint>
 #include <functional>
 #include <map>
 #include <memory>
@@ -68,6 +69,12 @@ public:
     void setFocus(const std::string& component) { focus_ = component; }
 
     // ---- driven by the UI manager
+    // The UI clock (TaskMgr ui seconds), for the buttons' focus animation;
+    // set by the UI manager every frame.
+    static void setUiSeconds(double seconds);
+    // A BandButton's text scale now (its button.tnm at the state's frame,
+    // buttonScale below); 1 for anything else (tests).
+    float buttonScaleNow(const std::string& component);
     ScenePose& pose() { return pose_; }
     // Plays an anim object (TransAnim, MatAnim, AnimFilter, Group / view) at `frame`.
     void setFrame(const std::string& object, float frame);
@@ -75,6 +82,13 @@ public:
     float endFrame(const std::string& object) const;
     // The frame last set on it (0 before any).
     float frame(const std::string& object) const;
+    // A button's letter re-jitters so far (focus_jitter_interval; the walks).
+    uint32_t buttonJitter(const std::string& component) const {
+        auto it = buttonAnims_.find(component);
+        return it == buttonAnims_.end() ? 0u : it->second.jitter;
+    }
+    // Every object's frame set so far (the walks' looping-animation checks).
+    const std::map<std::string, float>& frames() const { return frames_; }
     void setShowing(const std::string& object, bool showing);
     bool showing(const std::string& object) const;
     // set_local_pos / set_local_scale: replace one part of the object's local transform.
@@ -224,6 +238,16 @@ private:
     std::map<std::string, std::string> overrides_;
     std::string focus_;
     std::map<std::string, scene::UiState> states_;
+    // BandButton focus animation (Encore's BandButton::SetState, PS2
+    // 0x0028cc38): the state last drawn and when focus came (UI seconds).
+    struct ButtonAnim {
+        scene::UiState last = scene::UiState::Normal;
+        double focusAt = -1;
+        uint32_t jitter = 0;   // re-jitters so far (added to the text's jitter seed)
+        double jitterAt = 0;   // the last one (UI seconds)
+    };
+    std::map<std::string, ButtonAnim> buttonAnims_;
+    float buttonScale(const scene::UILabel& l, scene::UiState st, const scene::Object& panel);
     std::map<std::string, bool> checks_;
     std::map<std::string, std::pair<int, int>> sliders_;
     std::map<std::string, std::string> pictureTex_;

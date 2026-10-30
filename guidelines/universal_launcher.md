@@ -76,6 +76,16 @@ incomplete bundles".
 
 ## GAMEPADS screen, Enhanced menu and mouse: the same in every game
 
+> **Since 2026-10-29 the reference is [universal_mechanisms.md](../universal_mechanisms.md)**
+> at the repository root: the owner's universal mechanisms (skips, band
+> naming, Universal Access Buttons, default mappings) and the universal
+> Gamepad menu (1.2.1) and Enhanced menu (1.2.2), with their mockups.
+> gd-game-01 1.1.7, gd-game-02 0.1.8 and gd-game-03 0.0.2 implement them; where this section
+> differs (the old GAMEPADS layout, the STEAM DECK MODE / ENHANCERS / CHEATS
+> sections, the XInput and Rock Band switches), universal_mechanisms.md
+> wins. The rest of this section (fonts, colours, widgets, the parity table
+> of gd-game-02 0.1.7) still holds for the games not ported yet.
+
 Every gd-game has two screens of its own that are not in the original game:
 the **GAMEPADS** screen and the **Enhanced** menu. A player who knows them in
 one game must find them the same in every other game. **gd-game-01 is the
@@ -123,8 +133,10 @@ Reference code:
     heading; Select collapses or expands the section;
   - a separator line between sections;
   - up and down arrows when the list scrolls.
-- **Transition.** The page slides 0.6 screen widths and fades with the
-  screen transition, forwards or backwards, as in gd-game-01.
+- **Transition.** None: the universal menus (this page and GAMEPADS) open
+  on the next frame, without their own or the outgoing screen's transition
+  (owner, 2026-10-30; universal_mechanisms.md 1.2). Anything heavy they
+  need is preloaded or asynchronous; only a part still loading may fade in.
 - **Help bar.** Use the game's own help bar: select, back and up / down.
 
 ### The GAMEPADS screen
@@ -199,7 +211,10 @@ Reference code:
   character is a bug. Every option changed on the left is rendered at once
   on this shot (it goes through the same post chain as a song). The venue is
   a little darker behind the box. If the game cannot draw a venue yet, use a
-  black page. Never use a live, moving band.
+  black page. Never use a live, moving band. Load it (and draw it once,
+  unseen) at startup so the menu opens at once; if it had to be unloaded
+  (a song's venue replaced it), the menu still opens at once and the shot
+  fades in when it is ready.
 - **Layout** (gd-game-01's coordinates):
   - On the left, a dark box (black at about 0.65) with a thin light edge and
     a top bar in the title colour. In it: the title (gd-game-01:
@@ -224,6 +239,7 @@ Reference code:
        Border));
      - In-Game Max FPS (dropdown: 60 / 120 / 240);
      - Show FPS Counter (check box);
+     - HDR (dropdown: None / Emulated / True HDR; universal_mechanisms.md "HDR");
      - Internal Resolution (dropdown). The original console's own height is
        labelled, for example "448p (ps2)" or "720p (x360)".
      - Sharper Text & Sprites;
@@ -236,7 +252,6 @@ Reference code:
      - Color Grading;
      - Film Grain;
      - Chromatic Aberration;
-     - Anamorphic Light Streaks;
      - Ambient Occlusion;
      - Sharpening;
      - Blur on Star Power.
@@ -244,7 +259,6 @@ Reference code:
      - All Band Mates Cast Shadows;
      - More Lights on Venues;
      - Dust in Light Beams;
-     - Add Fog to the Ground (Experimental);
      - Disable Shaky Camera;
      - Export User Files;
      - Load User Settings;
@@ -300,8 +314,9 @@ rules above:
 - a virtual pad whose D-pad is an axis resting off centre, which must give
   no left / right press while it rests.
 
-gd-game-02's are `--walktest mouse`, `--walktest gamepads` and
-`--walktest stickyaxis`.
+gd-game-02's are `--walktest mouse`, `--walktest gamepads`,
+`--walktest gamepads_pad`, `--walktest enhanced`, `--walktest band`,
+`--walktest logo_skip` and `--walktest stickyaxis`.
 
 ### Enhanced options: parity
 
@@ -328,6 +343,7 @@ rate, resolution and touch follow gd-game-01's columns.
 | PERFORMANCE & GRAPHICS | Screen Mode (`screen_mode`) | dropdown | Windowed | Windowed / Full Screen / Full Screen (No Border) | has |
 | PERFORMANCE & GRAPHICS | In-Game Max FPS (`max_fps`) | dropdown | 120 | 60 / 120 / 240 | has (default from the table: GD02-128) |
 | PERFORMANCE & GRAPHICS | Show FPS Counter (`fps_counter`) | check | on | Frames a second, bottom left | has (default from the table: GD02-128) |
+| PERFORMANCE & GRAPHICS | HDR (`hdr`) | dropdown | None | None / Emulated / True HDR: float world, auto exposure and ACES tone map; True HDR on a Windows / Wayland HDR surface, else Emulated with the reason (universal_mechanisms.md "HDR") | done (GD02-141; gd01 GD01-303) |
 | PERFORMANCE & GRAPHICS | Internal Resolution (`internal_res`) | dropdown | 1080p (Windows, macOS 1440p) | The 3D picture's height; gd02 keeps its extra "Window" value and labels 720p (x360) | has (default from the table: GD02-128) |
 | PERFORMANCE & GRAPHICS | Sharper Text & Sprites (`sharp_ui`) | check | on | Menu art and fonts upscaled with a sharper filter | done (GD02-102) |
 | PERFORMANCE & GRAPHICS | Anti-Aliasing (`antialiasing`) | dropdown | None | None / FXAA / SSAA / TAA | done (GD02-103) |
@@ -340,14 +356,12 @@ rate, resolution and touch follow gd-game-01's columns.
 | PERFORMANCE & GRAPHICS | Color Grading (`color_grade`) | dropdown | Off | Off / Warm / Cold / Vintage / Noir / Neon | done (GD02-110) |
 | PERFORMANCE & GRAPHICS | Film Grain (`film_grain`) | dropdown | Light (Deck, Android: Off) | Off / Light / Strong | done (GD02-111) |
 | PERFORMANCE & GRAPHICS | Chromatic Aberration (`chromatic`) | check | on | Lens colour fringes | done (GD02-112) |
-| PERFORMANCE & GRAPHICS | Anamorphic Light Streaks (`light_streaks`) | check | off | Horizontal streaks from the brightest lights | done (GD02-113) |
 | PERFORMANCE & GRAPHICS | Ambient Occlusion (`ssao`) | check | on (Deck, Android: off) | Contact shadows from the depth buffer | done (GD02-114) |
 | PERFORMANCE & GRAPHICS | Sharpening (`sharpening`) | dropdown | Low (Deck: Off) | Off / Low / High (CAS) | done (GD02-115) |
 | PERFORMANCE & GRAPHICS | Blur on Star Power (`star_blur`) | dropdown | High (Deck: Medium, Android: Light) | Camera motion blur and trails while Star Power is on | done (GD02-116) |
 | ENHANCERS | All Band Mates Cast Shadows (`shadows_all`) | check | on (Deck, Android: off) | A light above each band member and a shadow on the floor | done (GD02-117) |
 | ENHANCERS | More Lights on Venues (`more_lights`) | dropdown | Subtle | Off / Subtle / Strong: fill on the band, brighter additive lights, soft beams | done (GD02-118) |
 | ENHANCERS | Dust in Light Beams (`light_dust`) | check, shown with More Lights | on (Deck, Android: off) | Motes drifting in the beams | done (GD02-119) |
-| ENHANCERS | Add Fog to the Ground (Experimental) (`ground_fog`) | dropdown | Low (Deck, Android: None) | None / Low / Full / Super Fog | done (GD02-120) |
 | ENHANCERS | Disable Shaky Camera (`no_shaky_cam`) | check | off | GH2's camera shake (CamShot shake keys) off | done (GD02-121) |
 | ENHANCERS | Export User Files (`export`) | button | - | A folder: GD02-user-settings.json and GD02-user-progress.json | done (GD02-122) |
 | ENHANCERS | Load User Settings (`load_settings`) | button | - | A file; every value checked, anything odd keeps its default | done (GD02-123) |

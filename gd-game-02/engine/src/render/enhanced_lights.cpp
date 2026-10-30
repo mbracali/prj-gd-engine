@@ -138,8 +138,12 @@ void EnhancedLights::draw(const Settings& s, const std::vector<Vec3>& members, c
     const Vec3 camPos = camera.position();
     const Vec3 camRight{camera.world.at(0, 0), camera.world.at(1, 0), camera.world.at(2, 0)};
     const Vec3 camUp{camera.world.at(0, 2), camera.world.at(1, 2), camera.world.at(2, 2)};
-    const float beamA = s.moreLights == 2 ? 0.32f : 0.16f;
-    const int motes = s.lightDust && s.moreLights > 0 ? (s.moreLights == 2 ? 70 : 35) : 0;
+    // More Lights none / 1.5x / 2x / 2.5x: the beam's strength; Dust none / 1.5x / 2x / 2.5x: the motes per beam (gd01's).
+    static constexpr float kBeam[4] = {0, 0.16f, 0.32f, 0.42f}, kPool[4] = {0.16f, 0.16f, 0.26f, 0.32f};
+    static constexpr int kMotes[4] = {0, 35, 50, 70};
+    const int ml = std::clamp(s.moreLights, 0, 3), dl = std::clamp(s.lightDust, 0, 3);
+    const float beamA = kBeam[ml];
+    const int motes = kMotes[dl];
     for (size_t li = 0; li < members.size(); ++li) {
         const Vec3 t = members[li];
         // gd01's light per member: straight above and a little toward the audience.
@@ -153,25 +157,27 @@ void EnhancedLights::draw(const Settings& s, const std::vector<Vec3>& members, c
             disc(v, idx, floor + away * 12, 26, away, 1.5f, {0, 0, 0}, 0.55f);
             ++shadows_;
         }
-        disc(va, idxa, floor + away * 6, 52, away, 1.25f, colour, s.shadowsAll ? 0.32f : s.moreLights == 2 ? 0.26f : 0.16f);
-        if (s.moreLights == 0) continue;
+        if (s.shadowsAll || ml > 0) disc(va, idxa, floor + away * 6, 52, away, 1.25f, colour, s.shadowsAll ? 0.32f : kPool[ml]);  // dust only: no pools
+        if (ml == 0 && dl == 0) continue;
         // The beam: from 25 % of the way down (the lamp is out of shot) to the floor.
         const Vec3 A = light + (t - light) * 0.25f, B{t.x, t.y, t.z + 1};
         const Vec3 axis = B - A, mid = (A + B) * 0.5f;
         const Vec3 side = normalize(cross(axis, camPos - mid));
         const float rTop = 10, rBot = 46;
         const uint16_t base = uint16_t(va.size());
-        for (int row = 0; row < 2; ++row) {
+        for (int row = 0; row < 2 && ml > 0; ++row) {
             const Vec3 P = row == 0 ? A : B;
             const float r = row == 0 ? rTop : rBot, a = row == 0 ? beamA : beamA * 0.35f;
             push(va, P - side * r, colour, 0);
             push(va, P, colour, a);
             push(va, P + side * r, colour, 0);
         }
-        for (uint16_t c = 0; c < 2; ++c)
-            idxa.insert(idxa.end(), {uint16_t(base + c), uint16_t(base + c + 1), uint16_t(base + 3 + c), uint16_t(base + c + 1), uint16_t(base + 4 + c),
-                                     uint16_t(base + 3 + c)});
-        ++beams_;
+        if (ml > 0) {
+            for (uint16_t c = 0; c < 2; ++c)
+                idxa.insert(idxa.end(), {uint16_t(base + c), uint16_t(base + c + 1), uint16_t(base + 3 + c), uint16_t(base + c + 1),
+                                         uint16_t(base + 4 + c), uint16_t(base + 3 + c)});
+            ++beams_;
+        }
         // Dust: each mote drifts on its own slow orbit inside the beam (gd01's).
         for (int k = 0; k < motes; ++k) {
             float h1 = std::fabs(std::fmod(std::sin(float(k * 37 + int(li) * 101) * 12.9898f) * 43758.5453f, 1.0f));
@@ -183,7 +189,7 @@ void EnhancedLights::draw(const Settings& s, const std::vector<Vec3>& members, c
             const float twinkle = 0.5f + 0.5f * std::sin(timeSec * (1.5f + 3 * h2) + h1 * 20);
             const Vec3 toCam = P - camPos;
             const float dist = std::sqrt(dot(toCam, toCam));
-            const float a = (s.moreLights == 2 ? 0.6f : 0.4f) * twinkle * (1 - u * 0.6f) * std::clamp((dist - 40) / 80, 0.0f, 1.0f);
+            const float a = (dl >= 3 ? 0.6f : dl == 2 ? 0.5f : 0.4f) * twinkle * (1 - u * 0.6f) * std::clamp((dist - 40) / 80, 0.0f, 1.0f);
             if (a <= 0.01f || va.size() > 60000) continue;
             const float sz = 0.5f;
             const uint16_t b = push(va, P, colour, a);

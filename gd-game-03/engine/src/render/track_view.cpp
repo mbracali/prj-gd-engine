@@ -247,6 +247,7 @@ void TrackView::load(const GameData& data, scene::MiloLibrary& library, int play
 
 void TrackView::reset(float introStartMs) {
     pose_.clear();
+    lanesSet_ = false;
     hitMs_.fill(-1e9f);
     missMs_.fill(-1e9f);
     gemState_.clear();
@@ -1177,6 +1178,34 @@ void TrackView::draw(gfx::Renderer& r, gfx::SceneCache& cache, const Song& song,
         drawParticles(mr, cache, player, nowMs);
         drawLightning(mr, cache, player, nowMs);
     }
+    // The lanes on the screen for the touch controls: each slot's line at
+    // the strike line and at the horizon, through the track camera, in the
+    // picture's menu units (the frame's 1280 x 720: in 4:3 the picture is its
+    // middle 960).
+    lanesSet_ = !exploded();
+    if (lanesSet_) {
+        const Mat4 vp = camera_.viewProj(false);
+        int fx, fy, fw, fh;
+        r.frameRect(fx, fy, fw, fh);
+        const float picX0 = 1280.0f * float(vx - fx) / float(std::max(1, fw)), picW = 1280.0f * float(vw) / float(std::max(1, fw));
+        auto toMenu = [&](float x, float y, float& mx, float& my) {
+            const float c[4] = {vp.at(0, 0) * x + vp.at(0, 1) * y + vp.at(0, 3), vp.at(1, 0) * x + vp.at(1, 1) * y + vp.at(1, 3), 0,
+                                vp.at(3, 0) * x + vp.at(3, 1) * y + vp.at(3, 3)};
+            const float w = std::max(c[3], 1e-4f);
+            mx = picX0 + (screenRect_[0] + screenRect_[2] * (c[0] / w * 0.5f + 0.5f)) * picW;
+            my = (screenRect_[1] + screenRect_[3] * (0.5f - c[1] / w * 0.5f)) * 720.0f;
+        };
+        for (int f = 0; f < 5; ++f) {
+            toMenu(slotX(f), 0, lanes_[size_t(f)], lanes_[size_t(5 + f)]);
+            toMenu(slotX(f), horizonY_, lanes_[size_t(10 + f)], lanes_[size_t(15 + f)]);
+        }
+    }
     if (sub) r.device().setViewport(vx, vy, vw, vh);
     viewW_ = vw, viewH_ = vh;
+}
+
+bool TrackView::lanes(std::array<float, 5>& nearX, std::array<float, 5>& nearY, std::array<float, 5>& farX, std::array<float, 5>& farY) const {
+    if (!lanesSet_) return false;
+    for (size_t f = 0; f < 5; ++f) nearX[f] = lanes_[f], nearY[f] = lanes_[5 + f], farX[f] = lanes_[10 + f], farY[f] = lanes_[15 + f];
+    return true;
 }

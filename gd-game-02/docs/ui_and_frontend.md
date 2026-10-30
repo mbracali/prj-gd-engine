@@ -328,9 +328,8 @@ walktests' career.json check.
     (`ParticleRenderer::setEnabled`); Bokeh (None skips GH2's depth of
     field, Stronger focuses nearer and blurs wider, `PostFx::end`); the
     port's post chain after GH2's own (`render/enhanced_fx.*`: bloom,
-    cinematic colour, grading, grain, chromatic aberration, light streaks,
-    ambient occlusion, sharpening, Blur on Star Power, ground fog and Super
-    Fog, FXAA / SSAA / TAA (the camera jittered, `Camera::jitterX`), FSR 1);
+    cinematic colour, grading, grain, chromatic aberration, ambient
+    occlusion, sharpening, Blur on Star Power, FXAA / SSAA / TAA (the camera jittered, `Camera::jitterX`), FSR 1);
     Remove All Effects (gd02's own row, GDALL-002) turns all of them off,
     GH2's bloom, depth of field, noise and colour transform too, and the
     camera shake.

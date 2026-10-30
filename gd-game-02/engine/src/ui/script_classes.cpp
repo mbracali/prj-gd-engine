@@ -505,6 +505,18 @@ void PanelObj::disable(const std::string& name, int navButton) {
     applyStates();
 }
 
+bool PanelObj::navigable() {
+    if (!view) return drawsSomething();  // the port's own panels move their own focus
+    ComponentObj* f = focused();
+    if (!f) return false;
+    if (f->isTextEntry() || f->isList()) return true;
+    const auto* c = view->find(focus) ? view->find(focus)->as<scene::UIComponent>() : nullptr;
+    if (c && (!c->navDown.empty() || !c->navRight.empty())) return true;
+    for (const scene::UIComponent* o : view->milo()->root().all<scene::UIComponent>())
+        if (o->navDown == focus || o->navRight == focus) return true;
+    return false;
+}
+
 void PanelObj::navigate(int button) {
     // 0x82374160 / 0x82373A08 [C]: down / right follow nav_down / nav_right,
     // up / left the component that names this one; disabled ones are skipped.

@@ -1,15 +1,20 @@
 // SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
-// The port's Enhanced Options: gd01's Enhanced Settings list
-// (gd-game-01/engine/src/ui/select_panels.cpp, EnhancedPanel): its
-// sections, rows, check boxes, dropdowns, explanation box and mouse, in
-// GH2's menu font and colours (PortDraw) over a still shot of a venue
-// (guidelines/universal_launcher.md).
+// The port's Enhanced Options: the universal Enhanced menu
+// (universal_mechanisms.md 1.2.2) as gd02 0.1.8 has it (gd-game-02/engine/
+// src/ui/enhanced_panel.cpp, itself gd01's EnhancedPanel): its sections,
+// rows, check boxes, dropdowns, scrollbar, Back / Export / Import,
+// explanation box and mouse, in the game's menu font and colours (PortDraw)
+// over a still shot of a venue (guidelines/universal_launcher.md).
 #include "ui/enhanced_panel.h"
+
+#include <SDL3/SDL.h>
 
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
+#include <cstdlib>
 #include <map>
 #include <string>
 #include <vector>
@@ -23,19 +28,146 @@
 namespace ui {
 
 const std::vector<EnhancedSetting>& enhancedSettings() {
-    // Every one starts at the original game's look (GD03-019): windowed, the
-    // PS2's 60 frames a second, no counter, the window's own resolution and
-    // the PS2's 4:3 picture (GD03-016). The mouse is a control, not a look:
-    // it starts on, as in every gd-game (guidelines/universal_launcher.md).
+    // The doc's ranges (universal_mechanisms.md 1.2.2). The first value is
+    // the default, the original game's look (GD03-019): windowed, the PS2's
+    // 60 frames a second, no counter, the window's own resolution, the PS2's
+    // 4:3 picture (GD03-016), every effect off (Bokeh Medium and Particles
+    // Original are the game's own), HDR None. The mouse is a control, not a
+    // look: it starts on, as in every gd-game. The Steam Deck's and
+    // Android's differ (App's deckDefault).
     static const std::vector<EnhancedSetting> k = {
-        {"screen_mode", {"windowed", "fullscreen", "borderless"}},
-        {"max_fps", {"60", "120", "240"}},
-        {"fps_counter", {"off", "on"}},
         {"mouse", {"on", "off"}},
+        {"touch", {"off", "on"}},
+        {"screen_mode", {"windowed", "fullscreen", "borderless"}},
+        {"max_fps", {"60", "120", "240", "unlimited"}},
+        {"fps_counter", {"off", "on"}},
+        {"hdr", {"none", "emulated", "true"}},
         {"internal_res", {"0", "448", "480", "720", "800", "900", "1080", "1440", "2160"}},
         {"widescreen", {"off", "on"}},
+        {"sharp_ui", {"off", "on"}},
+        {"antialiasing", {"none", "fxaa", "ssaa", "taa"}},
+        // FSR 3.1 and DLSS run through gd01's Vulkan upscaler, not in gd03 (GL): a saved one loads as none.
+        {"ai_upscaling", {"none", "fsr1"}},
+        {"ai_upscaling_mode", {"quality", "balanced", "performance"}},
+        {"bokeh", {"medium", "none", "light", "strong", "stronger"}},
+        {"particles", {"original", "none", "2x"}},
+        {"bloom", {"none", "original", "2x", "3x"}},
+        {"cinematic_color", {"off", "on"}},
+        {"color_grade", {"off", "warm", "cold", "vintage", "noir", "neon", "sepia"}},
+        {"film_grain", {"none", "light", "medium", "strong", "stronger"}},
+        {"chromatic", {"none", "light", "medium", "strong"}},
+        {"ssao", {"none", "light", "medium", "strong", "stronger"}},
+        {"sharpening", {"off", "low", "high"}},
+        {"star_blur", {"none", "light", "medium", "strong", "stronger"}},
+        {"no_effects", {"off", "on"}},
+        {"shadows_all", {"off", "on"}},
+        {"more_lights", {"none", "1.5x", "2x", "2.5x"}},
+        {"light_dust", {"none", "1.5x", "2x", "2.5x"}},
+        {"no_shaky_cam", {"off", "on"}},
+        {"no_fail", {"off", "on"}},
+        {"autoplay", {"off", "on"}},
+        {"hopo_mode", {"original", "forgiving"}},
+        {"audio_offset", {}, -300, 500},
+        {"video_offset", {}, -300, 500},
     };
     return k;
+}
+
+const EnhancedSetting* enhancedSetting(const std::string& key) {
+    for (const EnhancedSetting& e : enhancedSettings())
+        if (key == e.key) return &e;
+    return nullptr;
+}
+
+bool enhancedValid(const EnhancedSetting& s, const std::string& value) {
+    if (s.values.empty()) {
+        char* end = nullptr;
+        const long ms = std::strtol(value.c_str(), &end, 10);
+        return !value.empty() && end && *end == 0 && ms >= s.lo && ms <= s.hi;
+    }
+    for (const char* v : s.values)
+        if (value == v) return true;
+    return false;
+}
+
+namespace {
+using Values = std::map<std::string, std::string>;
+// Every effect at its lowest, at the original's look and at its highest
+// (gd01's enhancedPreset); Remove All Effects off in each.
+const Values& lowest() {
+    static const Values v = {
+        {"bokeh", "none"},        {"particles", "none"},   {"bloom", "none"},          {"cinematic_color", "off"},
+        {"film_grain", "none"},   {"chromatic", "none"},   {"ssao", "none"},
+        {"star_blur", "none"},    {"shadows_all", "off"},  {"more_lights", "none"},    {"light_dust", "none"},
+        {"color_grade", "off"},  {"sharpening", "off"},      {"antialiasing", "none"},
+        {"ai_upscaling", "none"}, {"sharp_ui", "off"},     {"no_effects", "off"},       {"hdr", "none"}};
+    return v;
+}
+Values originalLook() {
+    Values v = lowest();
+    v["bokeh"] = "medium";  // the game's own depth of field (its camera shots')
+    v["particles"] = "original";
+    return v;
+}
+const Values& highest() {
+    static const Values v = {
+        {"bokeh", "stronger"},     {"particles", "2x"},      {"bloom", "3x"},            {"cinematic_color", "on"},
+        {"film_grain", "stronger"}, {"chromatic", "strong"}, {"ssao", "stronger"},
+        {"star_blur", "stronger"}, {"shadows_all", "on"},    {"more_lights", "2.5x"},    {"light_dust", "2.5x"},
+        {"color_grade", "off"},   {"sharpening", "low"},      {"antialiasing", "taa"},
+        {"ai_upscaling", "none"},  {"sharp_ui", "on"},       {"no_effects", "off"},      {"hdr", "emulated"}};
+    return v;
+}
+std::vector<std::pair<std::string, std::string>> with(Values base, std::initializer_list<std::pair<const char*, const char*>> over) {
+    for (const auto& [k, v] : over) base[k] = v;
+    return {base.begin(), base.end()};
+}
+}  // namespace
+
+std::vector<std::pair<std::string, std::string>> enhancedPreset(const std::string& mode) {
+    if (mode == "steam_deck")  // light effects that hold 60 FPS on a handheld (gd01's)
+        return with(originalLook(), {{"screen_mode", "fullscreen"}, {"max_fps", "60"}, {"internal_res", "800"}, {"bloom", "original"},
+                                     {"cinematic_color", "on"}, {"star_blur", "light"}, {"antialiasing", "fxaa"}, {"sharp_ui", "on"},
+                                     {"fps_counter", "off"}});
+    // The original's look at 60 FPS; the window and the resolution stay.
+    if (mode == "original") return with(originalLook(), {{"max_fps", "60"}});
+    if (mode == "clean")  // no effects, a sharp full HD picture
+        return with(lowest(), {{"internal_res", "1080"}, {"max_fps", "120"}, {"particles", "original"}, {"antialiasing", "fxaa"}, {"sharp_ui", "on"}});
+    if (mode == "max_hd") return with(highest(), {{"internal_res", "1080"}, {"max_fps", "240"}});
+    if (mode == "max_4k") return with(highest(), {{"internal_res", "2160"}, {"max_fps", "240"}});
+    if (mode == "budget") return with(lowest(), {{"max_fps", "60"}, {"internal_res", "720"}});
+    if (mode == "good_old_days")  // every effect, in sepia, at the PS2's resolution (gd01's)
+        return with(highest(), {{"color_grade", "sepia"}, {"internal_res", "448"}, {"max_fps", "60"}, {"antialiasing", "none"}, {"hdr", "none"}});
+    return {};
+}
+
+void migrateEnhanced(Json& e) {
+    // gd02 0.1.7's values (a settings file brought over from it), as gd02 maps them.
+    if (e.type != Json::Type::Object) return;
+    auto map = [&](const char* key, std::initializer_list<std::pair<const char*, const char*>> m) {
+        if (!e.has(key)) return;
+        const std::string from = e[key].str();
+        for (const auto& [a, b] : m)
+            if (from == a) {
+                e.set(key, Json::string(b));
+                return;
+            }
+    };
+    map("bokeh", {{"regular", "medium"}});
+    map("particles", {{"on", "original"}, {"off", "none"}});
+    map("bloom", {{"off", "none"}, {"low", "original"}, {"medium", "2x"}, {"high", "3x"}});
+    map("film_grain", {{"off", "none"}});
+    map("chromatic", {{"on", "medium"}, {"off", "none"}});
+    map("ssao", {{"on", "medium"}, {"off", "none"}});
+    map("star_blur", {{"high", "strong"}});
+    map("more_lights", {{"off", "none"}, {"subtle", "1.5x"}, {"strong", "2x"}});
+    map("light_dust", {{"on", "1.5x"}, {"off", "none"}});
+    // XInput and Rock Band guitars are always on; Ground Fog and Light
+    // Streaks were removed from every game (0.0.2): their values are dropped.
+    Json kept = Json::object();
+    for (const auto& [k, v] : e.o)
+        if (k != "xinput" && k != "rockband" && k != "ground_fog" && k != "light_streaks") kept.set(k, v);
+    e = std::move(kept);
 }
 
 namespace {
@@ -44,142 +176,209 @@ enum class Kind { Section, Separator, Check, Choice, Button, Cheat };
 struct Option {
     const char* value;
     const char* label;
+    bool ok = true;  // false: not in gd03 (shown, cannot be chosen)
 };
 struct Item {
     Kind kind;
     const char* key;   // the setting (enhanced.json), the button's action, or the cheat (its locale token)
-    const char* name;  // "" for a cheat: GH2's own name (its locale token)
+    const char* name;  // "" for a cheat: the game's own name (its locale token)
     bool ready;        // false: not in gd03 yet (greyed, cannot be chosen)
     const char* help;
     std::vector<Option> options = {};
-    const char* needs = nullptr;  // shown only while this setting is on (gd01's dependent rows)
+    const char* needs = nullptr;  // shown only while this setting is on (a check) or not none / off (a choice)
 };
 
-// gd01's list, in its sections and order; what gd03 has is ready. The
-// cheats are GH2's (config/long_cheats.dta), with their button codes.
+// gd02's list (gd01's), in the doc's sections and order, with its
+// explanations (the console's names changed; the cheats' codes are this
+// disc's, config/long_cheats.dta); gd03's own Widescreen (16:9)
+// after Resolution, and gd02's rows otherwise. Ground Fog
+// and Light Streaks are not here (removed from every game, 10-30).
 const std::vector<Item>& items() {
     static const std::vector<Item> k = {
-        {Kind::Section, "deck", "STEAM DECK MODE", true, "Settings for handheld PCs such as the Steam Deck."},
-        {Kind::Button, "steam_deck", "Apply Steam Deck Settings", false,
-         "Sets every option to what runs best on a handheld PC such as the Steam Deck: full screen at 60 FPS, a 1280 x 800 "
-         "internal resolution and lighter effects."},
+        // universal_mechanisms.md 1.2.2: MODES, CONTROLS, PERFORMANCE &
+        // GRAPHICS, CHEATS & ENHANCERS, in the doc's order (gd01's list).
+        // Modes are presets (enhancedPreset): one click sets every value they name.
+        {Kind::Section, "modes", "MODES", true, "Presets: one click sets many options below at once."},
+        {Kind::Button, "mode_steam_deck", "Steam Deck", true,
+         "Sets the options to run best on a handheld PC such as the Steam Deck: full screen at 60 FPS, an 800p internal "
+         "resolution and light effects (original bloom, cinematic colour, a light Star Power blur, FXAA). You can still "
+         "change any option afterwards."},
+        {Kind::Button, "mode_original", "Original Feel", true,
+         "Looks like the original PS2 game: every enhanced effect off, the original depth of field and particles, 60 "
+         "FPS. The window, the resolution and the picture's shape stay as they are. This is how the game starts."},
+        {Kind::Button, "mode_clean", "Clean Image", true,
+         "Removes every enhanced effect for a clean, sharp picture: full HD (1080p) internal resolution, FXAA, sharper "
+         "text and sprites, 120 FPS."},
+        {Kind::Button, "mode_max_hd", "Max Out (Full HD)", true,
+         "Every effect at its strongest at a full HD (1080p) internal resolution, up to 240 FPS. Needs a strong GPU."},
+        {Kind::Button, "mode_max_4k", "Max Out (4K)", true,
+         "Every effect at its strongest at a 4K (2160p) internal resolution, up to 240 FPS. Needs a very strong GPU."},
+        {Kind::Button, "mode_budget", "Rocking on a Budget", true,
+         "Every effect at its lowest (even the original particles and depth of field are off) at 720p and 60 FPS, for "
+         "slow computers."},
+        {Kind::Button, "mode_good_old_days", "Good Old Days", true,
+         "Every effect at its strongest, in sepia, at the PlayStation 2's resolution (448p), 60 FPS."},
         {Kind::Separator, "", "", true, ""},
-        {Kind::Section, "controls", "CONTROLS AND GAMEPAD", true, "Gamepads, mouse, touch and guitars."},
+        {Kind::Section, "controls", "CONTROLS", true, "Gamepads, mouse, touch and your setup's delay."},
         {Kind::Button, "gamepads", "Gamepads", true,
-         "The connected guitars, gamepads and the keyboard: which player each one is, its buttons lit as you press them, "
-         "and new buttons for any of them."},
+         "The Gamepad menu: each player's instrument and device, and every device's buttons (two per control), lit as "
+         "you press them. Also on the main menu's yellow fret."},
         {Kind::Check, "mouse", "Enable Mouse Selection", true,
          "Point at a menu entry to highlight it and click to choose it; a right click goes back and the mouse wheel "
-         "scrolls lists. The help bar's items are clickable too. Hovering works only while the game window has focus; "
-         "the pointer hides after a few seconds, when a key or a button is pressed, and during a song."},
-        {Kind::Check, "touch", "Enable Touch Controls", false,
-         "Play on a touch screen: touch a lane at the bottom of the highway when its note arrives."},
-        {Kind::Check, "rockband", "Enable Rock Band Guitars", false,
-         "Plays with the USB Rock Band guitars for Xbox 360 and PlayStation 3 / 4: the frets, the strum bar, the whammy "
-         "bar and tilt."},
-        {Kind::Check, "xinput", "Enable XInput Controllers", false,
-         "Any XInput gamepad plays like the original game's gamepad mode."},
+         "scrolls lists. The help bar's buttons (SELECT, BACK, START, UP / DOWN) are clickable too. Hovering works only "
+         "while the game window has focus; the pointer hides after a few seconds, when a key or a button is pressed, and "
+         "during a song. Mouse buttons are never used as game buttons."},
+        {Kind::Check, "touch", "Enable Touch Controls", true,
+         "Play on a touch screen; also shows the on-screen buttons. In the menus a tap is a click. In a song, touch a "
+         "lane at the bottom of the highway when its note arrives: it plays the fret and the strum at once (hold the "
+         "finger for long notes, several fingers for chords). Two fingers above the highway deploy Star Power; the top "
+         "corner pauses. On by default on the Steam Deck and Android (always on in the Android app). Its settings are in "
+         "Gamepads > Player 1 > Customize inputs."},
+        {Kind::Button, "calibrate", "Audio / Video Calibration", true,
+         "Measures your setup's delay so notes are judged and drawn in time. First strum (or press green) on each tick "
+         "you HEAR, then on each flash you SEE, 8 times each. Back cancels."},
         {Kind::Separator, "", "", true, ""},
-        {Kind::Section, "graphics", "PERFORMANCE AND GRAPHICS", true, "Timing, window, frame rate and image quality."},
-        {Kind::Button, "calibrate", "Audio / Video Calibration", false,
-         "Measures your setup's delay so notes are judged and drawn in time."},
+        {Kind::Section, "graphics", "PERFORMANCE & GRAPHICS", true, "Window, frame rate, image quality and the venue's effects."},
         {Kind::Choice, "screen_mode", "Screen Mode", true,
          "Windowed; full screen at the desktop's resolution; or full screen without a border (a window covering the "
          "screen, the quickest to switch away from).",
          {{"windowed", "Windowed"}, {"fullscreen", "Full Screen"}, {"borderless", "Full Screen (No Border)"}}},
-        {Kind::Choice, "max_fps", "In-Game Max FPS", true,
-         "The highest frame rate the game draws at; the original ran at 60. The game never draws faster than this, "
-         "whatever the display's refresh rate.",
-         {{"60", "60"}, {"120", "120"}, {"240", "240"}}},
-        {Kind::Check, "fps_counter", "Show FPS Counter", true,
-         "Shows the frames drawn per second in the bottom-left corner of the screen."},
-        {Kind::Choice, "internal_res", "Internal Resolution", true,
+        {Kind::Choice, "internal_res", "Resolution", true,
          "The resolution the game draws at before it is scaled to the window. Higher is sharper and costs more; above "
-         "the window's own size it also smooths the edges. The Xbox 360 drew 1280 x 720 (x360), the PS2 640 x 448 (ps2).",
-         {{"0", "Window"}, {"448", "448p (ps2)"}, {"480", "480p"}, {"720", "720p (x360)"}, {"800", "800p"},
+         "the window's own size it also smooths the edges. The PS2 drew 640 x 448 (ps2). "
+         "With AI Upscaling on, the window's resolution is used instead (or this one, when higher).",
+         {{"0", "Window"}, {"448", "448p (ps2)"}, {"480", "480p"}, {"720", "720p"}, {"800", "800p (Steam Deck)"},
           {"900", "900p"}, {"1080", "1080p"}, {"1440", "1440p"}, {"2160", "4K (2160p)"}}},
         {Kind::Check, "widescreen", "Widescreen (16:9)", true,
          "Off (as on the PS2): the game's picture is 4:3, with black bars at the sides of a wide screen. On: the menus, "
          "the highway and the venues fill a 16:9 screen and show more of the scene at the sides; nothing is stretched. "
-         "The port's own screens, such as this one, always use the whole screen."},
-        {Kind::Check, "sharp_ui", "Sharper Text and Sprites", false,
-         "Upscales the menu art and the game's fonts with a sharper filter, so text stays crisp on large screens."},
-        {Kind::Choice, "antialiasing", "Anti-Aliasing", false, "Smooths jagged edges: FXAA, SSAA or TAA.",
+         "The port's own screens, such as this one, always use the whole screen. The effects work in both."},
+        {Kind::Check, "sharp_ui", "Sharper Text & Sprites", true,
+         "Upscales the menu art and the game's fonts with a sharper filter, so text and sprites stay crisp on large "
+         "screens. Screens opened after the change use it."},
+        {Kind::Choice, "antialiasing", "Anti-Aliasing", true,
+         "Smooths jagged edges. FXAA: a fast filter over the image. SSAA: draws the game at twice the resolution and "
+         "scales it down, the sharpest and the most costly. TAA: blends each frame with the last ones for very smooth "
+         "edges, with a little softness in motion.",
          {{"none", "None"}, {"fxaa", "FXAA"}, {"ssaa", "SSAA"}, {"taa", "TAA"}}},
-        {Kind::Choice, "ai_upscaling", "AI Upscaling", false,
-         "Draws the 3D scene below your screen's resolution and upscales it (FSR 1, FSR 3.1, DLSS 4).",
-         {{"none", "None"}, {"fsr1", "FSR 1 (Spatial)"}, {"fsr31", "FSR 3.1"}, {"dlss4", "DLSS 4"}}},
-        {Kind::Choice, "ai_upscaling_mode", "Upscaling Quality", false,
-         "How far below the screen's resolution the scene is drawn: Quality (1.5x), Balanced (1.7x) or Performance (2x).",
-         {{"quality", "Quality"}, {"balanced", "Balanced"}, {"performance", "Performance"}}, "ai_upscaling"},
-        {Kind::Choice, "bokeh", "Bokeh Effect", false,
-         "The depth-of-field blur of the close shots. Regular: as the original game. None: always sharp. Stronger: a "
-         "wider blur.",
-         {{"regular", "Regular"}, {"none", "None"}, {"stronger", "Stronger"}}},
-        {Kind::Check, "particles", "Enable Particles FX", false, "Sparks, smoke, dust and the highway's hit effects."},
-        {Kind::Choice, "bloom", "Bloom", false, "A soft glow around the brightest lights of the venue, like a camera lens.",
-         {{"off", "Off"}, {"low", "Low"}, {"medium", "Medium"}, {"high", "High"}}},
-        {Kind::Check, "cinematic_color", "Cinematic Color", false,
-         "A filmic colour curve with a gentle grade and vignette on the venue."},
-        {Kind::Choice, "color_grade", "Color Grading", false, "A colour look for the venue, like a film's grade.",
-         {{"off", "Off"}, {"warm", "Warm"}, {"cold", "Cold"}, {"vintage", "Vintage"}, {"noir", "Noir"}, {"neon", "Neon"}}},
-        {Kind::Choice, "film_grain", "Film Grain", false, "Fine animated grain over the venue, like a concert shot on film.",
-         {{"off", "Off"}, {"light", "Light"}, {"strong", "Strong"}}},
-        {Kind::Check, "chromatic", "Chromatic Aberration", false, "A camera lens's colour fringes towards the corners."},
-        {Kind::Check, "light_streaks", "Anamorphic Light Streaks", false,
-         "The brightest stage lights flare into long horizontal streaks, like a cinema lens."},
-        {Kind::Check, "ssao", "Ambient Occlusion", false, "Soft contact shadows where surfaces meet, for more depth."},
-        {Kind::Choice, "sharpening", "Sharpening", false, "Contrast-adaptive sharpening of the venue.",
+        {Kind::Choice, "ai_upscaling", "AI Upscaling", true,
+         "Draws the 3D scene below your screen's resolution and upscales it to the screen (menus and the highway stay "
+         "sharp), for higher frame rates. FSR 1: spatial, any GPU. FSR 3.1 and DLSS need the Vulkan upscaler, not in "
+         "this version.",
+         {{"none", "None"}, {"fsr1", "FSR 1 (Spatial)"}, {"fsr31", "FSR 3.1", false}, {"dlss4", "DLSS 4", false},
+          {"dlss5", "DLSS 5", false}}},
+        {Kind::Choice, "ai_upscaling_mode", "Upscaling Quality", true,
+         "How far below the screen's resolution the scene is drawn: Quality (1.5x upscale, the sharpest), Balanced (1.7x) "
+         "or Performance (2x, the fastest). On a 1440p screen: 960p, 847p, 720p.",
+         {{"performance", "Performance"}, {"balanced", "Balanced"}, {"quality", "Quality"}}, "ai_upscaling"},
+        {Kind::Choice, "max_fps", "Max FPS", true,
+         "The highest frame rate the game draws at; the original ran at 60. Unlimited draws as fast as the computer can "
+         "(no vertical sync).",
+         {{"60", "60"}, {"120", "120"}, {"240", "240"}, {"unlimited", "Unlimited"}}},
+        {Kind::Check, "fps_counter", "Show FPS Counter", true,
+         "Shows the frames drawn per second in the bottom-left corner of the screen."},
+        {Kind::Choice, "hdr", "HDR", true,
+         "High dynamic range for the venue and the band. None: the original image. Emulated: lights and glows keep "
+         "their full brightness, an automatic exposure follows the stage and a filmic curve brings it to any screen. "
+         "True HDR: the same, shown on an HDR display (Windows, or a Linux Wayland desktop, with HDR on), brighter "
+         "highlights, menus at the screen's paper white; it starts with the game, and where it cannot run Emulated is "
+         "used. Menus and the HUD keep their colours.",
+         {{"none", "None"}, {"emulated", "Emulated"}, {"true", "True HDR"}}},
+        {Kind::Choice, "bokeh", "Bokeh Effect", true,
+         "The depth-of-field blur of the close shots. None: always sharp. Medium: as the original game. Light is softer; "
+         "Strong and Stronger start the focus nearer the band and blur wider.",
+         {{"none", "None"}, {"light", "Light"}, {"medium", "Medium (original)"}, {"strong", "Strong"}, {"stronger", "Stronger"}}},
+        {Kind::Choice, "particles", "Enable Particles FX", true,
+         "Sparks, smoke, fire, confetti and the highway's hit effects. None turns them off to save power (the gameplay is "
+         "the same); 2x emits twice as many.",
+         {{"none", "None"}, {"original", "Original"}, {"2x", "2x"}}},
+        {Kind::Choice, "bloom", "Bloom", true,
+         "A soft glow around the brightest lights of the venue, like a camera lens (the PS2 game has no glow of its "
+         "own). Original is a gentle glow; 2x and 3x are stronger.",
+         {{"none", "None"}, {"original", "Original"}, {"2x", "2x"}, {"3x", "3x"}}},
+        {Kind::Check, "cinematic_color", "Cinematic Color", true,
+         "A filmic colour curve with a gentle grade and vignette on the venue, for a richer, more cinematic image."},
+        {Kind::Choice, "color_grade", "Color Grading", true,
+         "A colour look for the venue, like a film's grade (with or without Cinematic Color). Warm: golden stage light. "
+         "Cold: steel blue. Vintage: faded 70s film. Noir: high-contrast black and white. Neon: punchy purples and cyans. "
+         "Sepia: an old photograph.",
+         {{"off", "Off"}, {"warm", "Warm"}, {"cold", "Cold"}, {"vintage", "Vintage"}, {"noir", "Noir"}, {"neon", "Neon"}, {"sepia", "Sepia"}}},
+        {Kind::Choice, "film_grain", "Film Grain", true,
+         "Fine animated grain over the venue, like a concert shot on film. Light is barely there; Stronger is clearly visible.",
+         {{"none", "None"}, {"light", "Light"}, {"medium", "Medium"}, {"strong", "Strong"}, {"stronger", "Stronger"}}},
+        {Kind::Choice, "chromatic", "Chromatic Aberration", true,
+         "A camera lens's colour fringes: red and blue edges pull apart towards the corners of the venue.",
+         {{"none", "None"}, {"light", "Light"}, {"medium", "Medium"}, {"strong", "Strong"}}},
+        {Kind::Choice, "ssao", "Ambient Occlusion", true,
+         "Soft contact shadows where surfaces meet: under the band's feet, in the folds of clothes, in the corners of the "
+         "stage, for more depth. Costs some performance.",
+         {{"none", "None"}, {"light", "Light"}, {"medium", "Medium"}, {"strong", "Strong"}, {"stronger", "Stronger"}}},
+        {Kind::Choice, "sharpening", "Sharpening", true,
+         "Contrast-adaptive sharpening of the venue (AMD CAS): crisper detail without halos, good with TAA or an upscaler.",
          {{"off", "Off"}, {"low", "Low"}, {"high", "High"}}},
-        {Kind::Choice, "star_blur", "Blur on Star Power", false,
-         "While Star Power is on, the venue and the band blur with the camera's motion.",
-         {{"none", "None"}, {"light", "Light"}, {"medium", "Medium"}, {"high", "High"}}},
-        {Kind::Separator, "", "", true, ""},
-        {Kind::Section, "enhancers", "ENHANCERS", true, "Additions to the venues and the camera, and your files."},
-        {Kind::Check, "shadows_all", "All Band Mates Cast Shadows", false,
+        {Kind::Choice, "star_blur", "Blur on Star Power", true,
+         "While Star Power is on, the venue and the band blur with the camera's motion and leave light trails; it fades "
+         "out when Star Power ends. The highway always stays sharp.",
+         {{"none", "None"}, {"light", "Light"}, {"medium", "Medium"}, {"strong", "Strong"}, {"stronger", "Stronger"}}},
+        {Kind::Check, "shadows_all", "All Band Mates Cast Shadows", true,
          "Every band mate gets a spotlight from above and casts a shadow on the stage floor."},
-        {Kind::Choice, "more_lights", "More Lights on Venues", false,
-         "Richer stage lighting: brighter light cones and floor pools, following the venue's own light cues.",
-         {{"off", "Off"}, {"subtle", "Subtle"}, {"strong", "Strong"}}},
-        {Kind::Check, "light_dust", "Dust in Light Beams", false, "With More Lights on Venues: fine dust drifting in the beams.",
-         {}, "more_lights"},
-        {Kind::Choice, "ground_fog", "Add Fog to the Ground (Experimental)", false,
-         "A low fog over the stage floor where the band plays.",
-         {{"none", "None"}, {"low", "Low"}, {"full", "Full"}, {"super", "Super Fog"}}},
-        {Kind::Check, "no_shaky_cam", "Disable Shaky Camera", false, "Steady close-ups of the band."},
-        {Kind::Button, "export", "Export User Files", false, "Saves your settings and your bands to a folder of your choice."},
-        {Kind::Button, "load_settings", "Load User Settings", false, "Loads settings saved with Export User Files."},
-        {Kind::Button, "load_progress", "Load User Progress", false, "Loads bands saved with Export User Files."},
+        {Kind::Choice, "more_lights", "More Lights on Venues", true,
+         "Richer stage lighting: brighter light cones and floor pools, a soft beam and a fill light on the band, "
+         "following the venue's own light cues.",
+         {{"none", "None"}, {"1.5x", "1.5x"}, {"2x", "2x"}, {"2.5x", "2.5x"}}},
+        {Kind::Choice, "light_dust", "Dust in Light Beams", true,
+         "Fine dust drifting and twinkling in the light beams over the band (with or without More Lights).",
+         {{"none", "None"}, {"1.5x", "1.5x"}, {"2x", "2x"}, {"2.5x", "2.5x"}}},
+        {Kind::Check, "no_shaky_cam", "Disable Shaky Camera", true,
+         "The original game shakes the camera on some of its shots of the band, like a handheld camera. Turn this on for "
+         "steady shots."},
+        {Kind::Check, "no_effects", "Remove All Effects", true,
+         "Turns every effect off at once, the original game's own too: its depth of field, every effect above and the "
+         "camera's shake. The options above keep their values for when you turn "
+         "this off."},
         {Kind::Separator, "", "", true, ""},
-        {Kind::Section, "cheats", "CHEATS", true, "The original game's cheats, and the port's."},
-        {Kind::Check, "cut_content", "Enable Cut Content", false, "Loads content left unused on the original disc."},
-        {Kind::Check, "no_fail", "No Fail Mode", false, "The rock meter cannot fail you: every song plays to the end."},
-        {Kind::Check, "autoplay", "Autoplay", false, "The game plays every note of a song by itself, without a miss."},
-        {Kind::Choice, "hopo_mode", "Forgiving Hammer-ons and Pull-offs", false,
-         "Notes with a coloured top can be played without strumming, more forgivingly than the original.",
+        {Kind::Section, "cheats", "CHEATS & ENHANCERS", true, "Your user files, the original game's cheats and more ways to bend the rules."},
+        {Kind::Button, "export", "Export User Files", true,
+         "Choose a folder to save two files in: GD03-user-settings.json with every Enhanced Option, and "
+         "GD03-user-progress.json with all your bands and their progress. Use them as a backup or to move to another "
+         "computer."},
+        {Kind::Button, "load_settings", "Load User Settings", true,
+         "Choose a GD03-user-settings.json file to load (files from older versions too). The settings take effect at "
+         "once; any setting in the file that is missing or not valid keeps its default."},
+        {Kind::Button, "load_progress", "Load User Progress", true,
+         "Choose a GD03-user-progress.json file to load. It replaces your bands and their progress and is saved at once; "
+         "a file that is not a gd03 save is refused."},
+        {Kind::Check, "cut_content", "Enable Cut Content", false, "Loads content left unused on the original disc into the game."},
+        {Kind::Check, "no_fail", "No Fail Mode", true, "The rock meter cannot fail you: every song plays to the end."},
+        {Kind::Check, "autoplay", "Autoplay", true, "The game plays every note of a song by itself, without a miss."},
+        {Kind::Choice, "hopo_mode", "Forgiving Hammer-ons and Pull-offs", true,
+         "Notes with a coloured top can be played without strumming. Off (as on the PS2): the original game's rules, "
+         "where a wrong hammer-on locks the note out. On "
+         "(forgiving): a wrong fret can be corrected, and a note whose fret is already held when it arrives plays by "
+         "itself.",
          {{"original", "Original"}, {"forgiving", "Forgiving"}}},
         {Kind::Cheat, "cheat_unlock_all", "", true,
          "The original cheat: every song, venue, character and guitar is open. Saving and the career are off while it "
-         "is on. Code at the main menu: Blue, Yellow, Orange, Red, Yellow, Orange, Blue, Yellow, Blue, Yellow, Blue, "
-         "Yellow, Blue, Yellow, Blue, Yellow."},
+         "is on. Code at the main menu: Blue, Orange, Yellow, Red, Orange, Yellow, Blue, Yellow, Red, Yellow, Blue, "
+         "Yellow, Red, Yellow, Blue, Yellow."},
         {Kind::Cheat, "cheat_air_guitar", "", true,
          "The original cheat: the guitarists play without a guitar. Code at the main menu: Yellow, Blue, Yellow, "
-         "Orange, Yellow, Blue."},
+         "Orange, Blue, Blue."},
         {Kind::Cheat, "cheat_performance_mode", "", true,
          "The original cheat: no highway and no meters, only the band and the venue. Code at the main menu: Blue, "
-         "Blue, Yellow, Blue, Blue, Orange, Blue, Blue."},
+         "Blue, Orange, Yellow, Yellow, Blue, Orange, Blue."},
         {Kind::Cheat, "cheat_hyper_speed_mode", "", true,
          "The original cheat: the notes come down the highway one and a half times as fast. Code at the main menu: "
-         "Blue, Orange, Yellow, Orange, Blue, Orange, Yellow, Yellow."},
+         "Yellow, Blue, Orange, Orange, Blue, Yellow, Yellow, Orange."},
         {Kind::Cheat, "cheat_flaming_head", "", false,
          "The original cheat: the guitarist's head is on fire (the band's flames do not burn yet in this version). "
-         "Code at the main menu: Yellow, Orange, Yellow, Yellow, Orange, Yellow, Yellow, Orange."},
+         "Code at the main menu: Yellow, Orange, Yellow, Orange, Yellow, Orange, Blue, Orange."},
         {Kind::Cheat, "cheat_eyeball_head_crowd", "", true,
          "The original cheat: everyone in the crowd has a giant eyeball for a head. Code at the main menu: Yellow, "
-         "Orange, Blue, Blue, Blue, Orange, Yellow."},
+         "Blue, Orange, Orange, Orange, Blue, Yellow."},
         {Kind::Cheat, "cheat_monkey_head_crowd", "", true,
-         "The original cheat: everyone in the crowd wears a monkey head. Code at the main menu: Orange, Yellow, "
-         "Blue, Blue, Yellow, Orange, Blue, Blue."},
+         "The original cheat: everyone in the crowd wears a monkey head. Code at the main menu: Blue, Blue, "
+         "Orange, Yellow, Blue, Blue, Orange, Yellow."},
     };
     return k;
 }
@@ -193,7 +392,7 @@ public:
 
     void enter() override {
         rebuild();
-        // The first setting gd03 has (Gamepads), as the screen opens.
+        // The first setting gd03 has (MODES > Steam Deck), as the screen opens.
         if (!entered_) {
             for (size_t r = 0; r < rows_.size(); ++r)
                 if (item(int(r)).ready && item(int(r)).kind != Kind::Section && item(int(r)).kind != Kind::Separator) {
@@ -203,9 +402,11 @@ public:
             entered_ = true;
         }
         dropdown_ = -1;
+        cal_ = Calib{};
         scroll_ = scrollTarget_ = 0;
         keepVisible();
         scroll_ = scrollTarget_;
+        backdropMissed_ = false, backdropFromMs_ = -1;
         ui.host().menuBackdrop(true);
         PanelObj::enter();
     }
@@ -217,6 +418,7 @@ public:
     bool buttonDown(int button, int player) override {
         (void)player;
         if (rows_.empty()) return false;
+        if (cal_.phase != 0) return calibButton(button), true;
         const Item& it = item(focus_);
         if (dropdown_ >= 0) {  // the open dropdown takes the input
             const int n = int(it.options.size());
@@ -224,8 +426,9 @@ public:
                 ddFocus_ = (ddFocus_ + (button == kPad_DDown ? 1 : n - 1)) % n;
                 ui.playSfx("button_toggle");
             } else if (button == kPad_X) {
-                setValue(it, it.options[size_t(ddFocus_)].value);
+                if (!it.options[size_t(ddFocus_)].ok) return ui.playSfx("button_error"), true;
                 dropdown_ = -1;
+                setValue(it, it.options[size_t(ddFocus_)].value);
             } else if (button == kPad_Tri) {
                 dropdown_ = -1;
                 ui.playSfx("button_back");
@@ -239,9 +442,14 @@ public:
         if (button == kPad_DLeft || button == kPad_DRight) {
             const int dir = button == kPad_DRight ? 1 : -1;
             if (it.kind == Kind::Choice) {
-                if (!it.ready) return ui.playSfx("button_error"), true;
+                if (!editable(it)) return ui.playSfx("button_error"), true;
                 const int n = int(it.options.size());
-                setValue(it, it.options[size_t((optionIndex(it) + dir + n) % n)].value);
+                int i = optionIndex(it);
+                for (int k = 0; k < n; ++k) {  // the next option gd03 has
+                    i = (i + dir + n) % n;
+                    if (it.options[size_t(i)].ok) break;
+                }
+                setValue(it, it.options[size_t(i)].value);
             } else if (it.kind == Kind::Check || it.kind == Kind::Cheat) {
                 if (isOn(it) != (dir > 0)) activate();
             }
@@ -253,7 +461,29 @@ public:
 
     bool mouse(float x, float y, bool click) override {
         if (rows_.empty()) return false;
+        if (cal_.phase != 0) {  // a click is a press
+            if (click) calibButton(kPad_X);
+            return true;
+        }
         x -= d_.offset();
+        if (dropdown_ < 0) {
+            // Back / Export / Import under the list (the mockup).
+            for (int b = 0; b < 3; ++b) {
+                float x0, x1;
+                bottomButton(b, x0, x1);
+                if (x < x0 || x > x1 || y < kBtnY0 || y > kBtnY1) continue;
+                if (hoverButton_ != b) hoverButton_ = b, ui.playSfx("button_toggle");
+                if (click && b == 0) ui.buttonDown(kPad_Tri, 0), ui.buttonUp(kPad_Tri, 0);  // as the back button
+                else if (click) ui.playSfx("button_select"), ui.host().enhancedAction(b == 1 ? "export" : "load_settings");
+                return true;
+            }
+            hoverButton_ = -1;
+            // The scrollbar: a click on its track scrolls there.
+            if (x >= kBarX - 10 && x <= kBarX + 10 && y >= kListTop && y <= kListBottom) {
+                if (click) scrollTarget_ = std::clamp((y - kListTop) / (kListBottom - kListTop) * maxScroll(), 0.0f, maxScroll()), ui.playSfx("button_toggle");
+                return true;
+            }
+        }
         // The open dropdown: its options, or a click anywhere else closes it.
         if (dropdown_ >= 0) {
             const Item& it = item(focus_);
@@ -261,7 +491,8 @@ public:
                 const float oy = ddTop_ + float(k) * kDdRow;
                 if (x < kDdPopX0 || x > kCtrlX1 || y < oy || y > oy + kDdRow) continue;
                 if (int(k) != ddFocus_) ddFocus_ = int(k), ui.playSfx("button_toggle");
-                if (click) setValue(it, it.options[k].value), dropdown_ = -1;
+                if (click && !it.options[k].ok) ui.playSfx("button_error");
+                else if (click) dropdown_ = -1, setValue(it, it.options[k].value);
                 return true;
             }
             if (click) dropdown_ = -1, ui.playSfx("button_back");
@@ -285,33 +516,47 @@ public:
         const float k = 1 - std::exp(-std::max(float(dtMs), 0.0f) / 70.0f);
         scroll_ += (scrollTarget_ - scroll_) * k;
         if (std::fabs(scrollTarget_ - scroll_) < 0.3f) scroll_ = scrollTarget_;
+        // The user files' (or a mode's) result shows for a few seconds.
+        const std::string st = ui.host().enhancedStatus();
+        if (st != status_) status_ = st, statusMs_ = st.empty() ? 0 : 5000;
+        statusMs_ = std::max(0.0f, statusMs_ - float(dtMs));
+        calibPoll();
     }
 
     void draw() override {
         if (ui.headless()) return;
         d_.updateTransition();
-        // The still venue behind (App::menuBackdrop), else a black page. It
-        // is the game's picture, 4:3 or 16:9 as the Widescreen row says, so
-        // the change shows at once; the page itself is on the whole frame.
+        // The still venue behind (App::menuBackdrop), else a black page.
+        // It is the game's picture, 4:3 or 16:9 as the Widescreen row says,
+        // so the change shows at once; the page itself is on the whole frame.
         const bool still = ui.host().drawMenuBackdrop();
         const PortDraw::FullFrame frame(ui);
         for (int pass : {0, 1}) {
             d_.begin(pass);
             if (pass == 0) {
-                if (!still) d_.quad(0, 0, kScreenW, kScreenH, {0, 0, 0, 1});
-                else d_.quad(0, 0, kScreenW, kScreenH, {0, 0, 0, 0.25f});  // the venue a little darker, as gd01's blurred one reads
+                // The venue a little darker, as gd01's blurred one reads; one
+                // that arrives after the screen opened fades in over 0.3 s.
+                const double now = double(SDL_GetTicksNS()) / 1e6;
+                if (!still) backdropMissed_ = true;
+                else if (backdropMissed_ && backdropFromMs_ < 0) backdropFromMs_ = now;
+                const float in = backdropFromMs_ < 0 ? 1.0f : float(std::clamp((now - backdropFromMs_) / 300.0, 0.0, 1.0));
+                d_.quad(0, 0, kScreenW, kScreenH, {0, 0, 0, still ? 1.0f - 0.75f * in : 1.0f});
             }
             drawAll();
         }
         // The open dropdown over everything (its own quads, then its texts).
         if (dropdown_ >= 0)
             for (int pass : {0, 1}) d_.begin(pass), drawDropdown();
+        if (cal_.phase != 0)
+            for (int pass : {0, 1}) d_.begin(pass), drawCalib();
     }
 
 private:
     // gd01's layout (menu units): the options box on the left, the
     // explanation bottom right (bottom-aligned with the box).
-    static constexpr float kListTop = 168, kListBottom = 612, kListX0 = 80, kNameX = 118, kCtrlX1 = 612;
+    static constexpr float kListTop = 168, kListBottom = 572, kListX0 = 80, kNameX = 118, kCtrlX1 = 612;
+    // The mockup's scrollbar (left of the list) and its Back / Export / Import buttons (the box's bottom).
+    static constexpr float kBarX = 66, kBtnY0 = 590, kBtnY1 = 626, kBtnW = 150;
     static constexpr float kBoxX0 = 56, kBoxY0 = 22, kBoxX1 = 640, kBoxY1 = 640;
     static constexpr float kDdX0 = 360, kDdPopX0 = 300, kDdRow = 30, kPopX0 = 700, kPopX1 = 1224;
     using Color = PortDraw::Color;
@@ -339,7 +584,7 @@ private:
     const Item& item(int row) const { return items()[size_t(rows_[size_t(row)])]; }
     bool collapsed(const std::string& section) const {
         auto it = collapsed_.find(section);
-        return it == collapsed_.end() ? section == "deck" : it->second;  // Steam Deck starts collapsed (gd01)
+        return it == collapsed_.end() ? false : it->second;  // every section starts open (gd01)
     }
     static float rowHeight(const Item& it) { return it.kind == Kind::Section ? 44 : it.kind == Kind::Separator ? 18 : 34; }
     float rowY(int row) const {
@@ -371,12 +616,17 @@ private:
     }
 
     // -- values
-    // A setting another row depends on is on: a check on, a choice not none / off.
+    std::string name(const Item& it) const { return it.kind == Kind::Cheat ? ui.localize(it.key) : it.name; }
     bool settingOn(const char* key) const {
         const std::string v = ui.host().enhancedValue(key);
-        return !v.empty() && v != "off" && v != "none";
+        return !v.empty() && v != "none" && v != "off";
     }
-    std::string name(const Item& it) const { return it.kind == Kind::Cheat ? ui.localize(it.key) : it.name; }
+    bool editable(const Item& it) const {
+#ifdef __ANDROID__
+        if (std::string(it.key) == "touch") return false;  // always on: a phone may have no other control (gd01)
+#endif
+        return it.ready;
+    }
     bool isOn(const Item& it) const {
         if (it.kind == Kind::Cheat) return ui.cheatOn(it.key);
         return it.ready && ui.host().enhancedValue(it.key) == "on";
@@ -390,9 +640,11 @@ private:
         return 0;
     }
     void setValue(const Item& it, const std::string& v) {
-        if (!it.ready) return ui.playSfx("button_error");
+        if (!editable(it)) return ui.playSfx("button_error");
+        for (const Option& o : it.options)
+            if (v == o.value && !o.ok) return ui.playSfx("button_error");
         ui.host().setEnhancedValue(it.key, v);
-        rebuild();  // a dependent row may show or hide
+        rebuild();  // a choice may show or hide its dependent row
         ui.playSfx("button_select");
     }
     void activate() {
@@ -405,9 +657,9 @@ private:
             return;
         case Kind::Separator: return;
         case Kind::Check:
-            if (!it.ready) return ui.playSfx("button_error");
+            if (!editable(it)) return ui.playSfx("button_error");
             ui.host().setEnhancedValue(it.key, isOn(it) ? "off" : "on");
-            rebuild();  // a dependent row may show or hide
+            rebuild();  // a check may show or hide its dependent row
             ui.playSfx("button_select");
             return;
         case Kind::Cheat:
@@ -415,7 +667,7 @@ private:
             ui.setCheat(it.key, !isOn(it));
             return;
         case Kind::Choice:
-            if (!it.ready) return ui.playSfx("button_error");
+            if (!editable(it)) return ui.playSfx("button_error");
             if (isToggle(it)) return setValue(it, it.options[optionIndex(it) == 1 ? 0 : 1].value);
             dropdown_ = focus_;
             ddFocus_ = optionIndex(it);
@@ -424,7 +676,10 @@ private:
         case Kind::Button:
             if (!it.ready) return ui.playSfx("button_error");
             ui.playSfx("button_select");
-            if (std::string(it.key) == "gamepads") ui.gotoScreen("gamepads_screen");
+            if (std::string(it.key) == "gamepads") return ui.gotoScreen("gamepads_screen");
+            if (std::string(it.key) == "calibrate") return calibStart();
+            ui.host().enhancedAction(it.key);  // a mode, Export / Load User Files
+            rebuild();
             return;
         }
     }
@@ -437,11 +692,40 @@ private:
         d_.quad(kBoxX0 + o, kBoxY0, kBoxX1 + o, kBoxY0 + 4, kTitle);
         d_.text("ENHANCED OPTIONS", 90 + o, 44, 62, kTitle, 0x11);
         d_.text("Features of this PC version, beyond the original game", 92 + o, 112, 20, kDim, 0x11);
+        // The user files' (or a mode's) result for a few seconds.
+        if (statusMs_ > 0) {
+            Color c = PortDraw::kOn;
+            c[3] = std::min(1.0f, statusMs_ / 500);
+            d_.text(d_.fit(status_, 18, kBoxX1 - kBoxX0 - 60), 92 + o, 138, 18, c, 0x11);
+        }
         for (size_t r = 0; r < rows_.size(); ++r) drawRow(int(r));
-        // More above / below.
+        // More above / below, and the scrollbar.
         if (scroll_ > 1) d_.arrow(kListX0 + 270 + o, kListTop - 10, true, kDim);
         if (contentHeight() - scroll_ > kListBottom - kListTop + 1) d_.arrow(kListX0 + 270 + o, kListBottom + 8, false, kDim);
+        {
+            const float h = kListBottom - kListTop, content = std::max(contentHeight(), h), thumb = std::max(24.0f, h * h / content);
+            const float t0 = kListTop + (h - thumb) * (maxScroll() > 0 ? std::clamp(scroll_ / maxScroll(), 0.0f, 1.0f) : 0.0f);
+            d_.quad(kBarX - 3 + o, kListTop, kBarX + 3 + o, kListBottom, {1, 1, 1, 0.1f});
+            d_.quad(kBarX - 4 + o, t0, kBarX + 4 + o, t0 + thumb, {1, 1, 1, 0.45f});
+        }
+        for (int b = 0; b < 3; ++b) drawBottomButton(b);
         drawHelp();
+    }
+
+    // -- Back / Export / Import under the list (the mockup's colours: red, yellow, green)
+    static void bottomButton(int b, float& x0, float& x1) {
+        const float step = (kBoxX1 - kBoxX0 - 40 - kBtnW) / 2;
+        x0 = kBoxX0 + 20 + float(b) * step, x1 = x0 + kBtnW;
+    }
+    void drawBottomButton(int b) {
+        const float o = d_.offset();
+        float x0, x1;
+        bottomButton(b, x0, x1);
+        const Color c = b == 0 ? Color{1, 0.45f, 0.45f, 1} : b == 1 ? Color{1, 0.86f, 0.35f, 1} : Color{0.45f, 0.95f, 0.5f, 1};
+        const bool h = hoverButton_ == b;
+        d_.quad(x0 + o, kBtnY0, x1 + o, kBtnY1, {c[0], c[1], c[2], h ? 0.4f : 0.2f});
+        d_.frame(x0 + o, kBtnY0, x1 + o, kBtnY1, h ? 3.0f : 1.5f, c);
+        d_.text(b == 0 ? "< Back" : b == 1 ? "Export" : "Import", (x0 + x1) * 0.5f + o, (kBtnY0 + kBtnY1) * 0.5f + 1, 21, h ? kFocused : kNormal, 0x22);
     }
 
     void drawRow(int r) {
@@ -465,7 +749,7 @@ private:
             d_.text(it.name, kListX0 + 26 + o, cy + 1, 27, c, 0x21);
             return;
         }
-        const bool locked = !it.ready;
+        const bool locked = it.kind == Kind::Button || it.kind == Kind::Cheat ? !it.ready : !editable(it);
         const Color nameC = f ? kFocused : locked ? kDim : kNormal;
         const std::string n = name(it);
         // A long name next to a dropdown is drawn smaller to fit before it.
@@ -473,12 +757,12 @@ private:
         const float room = (it.kind == Kind::Choice && !isToggle(it) ? kDdX0 : kCtrlX1 - (it.kind == Kind::Button ? 130 : 40)) - kNameX - 14;
         if (const float w = d_.width(n, 23); w > room - (locked ? 30 : 0)) nameH = std::max(15.0f, 23 * (room - (locked ? 30 : 0)) / w);
         d_.text(n, kNameX + o, cy + 1, nameH, nameC, 0x21);
-        if (locked) d_.warning(kNameX + o + d_.width(n, nameH) + 10, cy);
+        if (!it.ready) d_.warning(kNameX + o + d_.width(n, nameH) + 10, cy);
         const Color ctrl = locked ? kDim : f ? kFocused : kNormal;
         const Kind shown = isToggle(it) ? Kind::Check : it.kind == Kind::Cheat ? Kind::Check : it.kind;
         switch (shown) {
         case Kind::Check:
-            d_.checkBox(kCtrlX1 + o, cy, isToggle(it) ? optionIndex(it) == 1 : isOn(it), ctrl, locked ? kDim : PortDraw::kOn);  // "on" is green (gd01)
+            d_.checkBox(kCtrlX1 + o, cy, isToggle(it) ? optionIndex(it) == 1 : isOn(it), ctrl, locked ? kDim : kGold);
             break;
         case Kind::Choice: {
             const float x1 = kCtrlX1 + o, x0 = kDdX0 + o;
@@ -520,7 +804,9 @@ private:
             const float oy = ddTop_ + float(k) * kDdRow;
             const bool hot = int(k) == ddFocus_;
             if (hot) d_.quad(x0 + 2, oy + 2, x1 - 2, oy + kDdRow - 2, PortDraw::kFocusBar);
-            d_.text(it.options[k].label, x0 + 12, oy + kDdRow * 0.5f + 1, 20, hot ? kFocused : kNormal, 0x21);
+            const bool ok = it.options[k].ok;
+            d_.text(ok ? std::string(it.options[k].label) : std::string(it.options[k].label) + " (not available yet)", x0 + 12,
+                    oy + kDdRow * 0.5f + 1, 20, !ok ? kDim : hot ? kFocused : kNormal, 0x21);
             if (int(k) == cur) d_.line(x1 - 26, oy + 15, x1 - 21, oy + 20, 3, kGold), d_.line(x1 - 21, oy + 20, x1 - 12, oy + 9, 3, kGold);
         }
     }
@@ -532,7 +818,16 @@ private:
         const float o = d_.offset(), x0 = kPopX0 + o, x1 = kPopX1 + o, pad = 24, bodyH = 22, lineH = 30;
         const std::vector<std::string> lines = d_.wrap(it.help, x1 - x0 - 2 * pad, bodyH);
         const bool notYet = !it.ready && it.kind != Kind::Section;
-        const float height = pad + 46 + float(lines.size()) * lineH + (notYet ? 42 : 0) + pad;
+        const bool locked = it.kind == Kind::Check && it.ready && !editable(it);
+        const bool calib = std::string(it.key) == "calibrate";  // its status line
+        // HDR's status ("Now: ..."), which can take two lines.
+        std::vector<std::string> status;
+        if (std::string(it.key) == "hdr") {
+            const std::string st = ui.host().enhancedValue("hdr_status");
+            status = d_.wrap("Now: " + (st.empty() ? std::string("off") : st), x1 - x0 - 2 * pad, 19);
+        }
+        const float height = pad + 46 + float(lines.size()) * lineH + (notYet || locked || calib || !status.empty() ? 42 : 0) +
+                             float(status.size() > 1 ? status.size() - 1 : 0) * 26 + pad;
         const float top = kBoxY1 - height;  // bottom-aligned with the options box
         float y = top + pad;
         d_.quad(x0, top, x1, kBoxY1, {0, 0, 0, 0.72f});
@@ -544,18 +839,136 @@ private:
         d_.text(n, x0 + pad, y + 2 + (30 - th) * 0.5f, th, kGold, 0x11);
         y += 46;
         for (const std::string& l : lines) d_.text(l, x0 + pad, y, bodyH, kNormal, 0x11), y += lineH;
-        if (notYet) {
+        if (!status.empty()) {
+            y += 6;
+            for (const std::string& l : status) d_.text(l, x0 + pad, y + 13, 19, PortDraw::kOn, 0x21), y += 26;
+        } else if (calib) {
+            y += 6;
+            d_.text("Now: audio " + signedMs(ui.host().enhancedValue("audio_offset")) + ", video " +
+                        signedMs(ui.host().enhancedValue("video_offset")),
+                    x0 + pad, y + 13, 21, PortDraw::kOn, 0x21);
+        } else if (notYet) {
             y += 6;
             d_.warning(x0 + pad, y + 12);
             d_.text("Not available yet", x0 + pad + 30, y + 13, 21, kWarn, 0x21);
+        } else if (locked) {
+            y += 6;
+            d_.text("Always on in the Android app", x0 + pad, y + 13, 21, kAccent, 0x21);
         }
     }
 
+    // -- Audio / Video Calibration (gd01's; the original had none). A beat
+    // every 750 ms: the audio step plays a tick, the video step flashes a
+    // ring silently. After 3 lead-in beats, each press is matched to the
+    // nearest beat; the median of 8 is the step's offset. audio_offset
+    // (heard + input delay) moves the judging, video_offset (seen + input)
+    // draws the highway ahead (app.cpp).
+    static constexpr uint64_t kBeatNs = 750000000ull;
+    static constexpr int kLeadIn = 3, kSamples = 8;
+    struct Calib {
+        int phase = 0;  // 0 off, 1 audio, 2 video, 3 done
+        uint64_t nextTick = 0, flashNs = 0;
+        std::vector<uint64_t> ticks;
+        std::vector<float> samples;
+        float audio = 0, video = 0;
+    };
+    static std::string signedMs(const std::string& v) {
+        const int ms = std::atoi(v.c_str());
+        return (ms > 0 ? "+" : "") + std::to_string(ms) + " ms";
+    }
+    void calibStart() {
+        cal_ = Calib{};
+        cal_.phase = 1;
+        cal_.nextTick = SDL_GetTicksNS() + 1000000000ull;
+    }
+    void calibPoll() {
+        if (cal_.phase != 1 && cal_.phase != 2) return;
+        const uint64_t now = SDL_GetTicksNS();
+        if (now < cal_.nextTick) return;
+        if (cal_.phase == 1) ui.playSfx("button_toggle");
+        else cal_.flashNs = now;
+        cal_.ticks.push_back(now);
+        cal_.nextTick += kBeatNs;
+        if (cal_.nextTick < now) cal_.nextTick = now + kBeatNs;  // a stall: no burst of ticks
+    }
+    void calibButton(int button) {
+        if (button == kPad_Tri) {  // cancel (or close the result)
+            cal_.phase = 0;
+            ui.playSfx("button_back");
+            return;
+        }
+        if (cal_.phase == 3) {
+            if (button == kPad_X) cal_.phase = 0, ui.playSfx("button_select");
+            return;
+        }
+        if (button != kPad_X && button != kPad_DUp && button != kPad_DDown) return;  // green, Enter or the strum bar
+        if (int(cal_.ticks.size()) < kLeadIn) return;
+        const uint64_t now = SDL_GetTicksNS();
+        float best = 1e9f;
+        for (uint64_t t : cal_.ticks)
+            if (std::fabs(float(int64_t(now - t)) / 1e6f) < std::fabs(best)) best = float(int64_t(now - t)) / 1e6f;
+        if (const float d = float(int64_t(now - cal_.nextTick)) / 1e6f; std::fabs(d) < std::fabs(best)) best = d;  // early for the next
+        if (std::fabs(best) > float(kBeatNs) / 1e6f * 0.45f) return;
+        cal_.samples.push_back(best);
+        if (int(cal_.samples.size()) < kSamples) return;
+        std::vector<float> s = cal_.samples;
+        std::nth_element(s.begin(), s.begin() + long(s.size() / 2), s.end());
+        const float median = std::clamp(s[s.size() / 2], -300.0f, 500.0f);
+        if (cal_.phase == 1) {
+            cal_.audio = median;
+            cal_.phase = 2;
+            cal_.ticks.clear(), cal_.samples.clear();
+            cal_.nextTick = now + 1500000000ull;
+        } else {
+            cal_.video = median;
+            cal_.phase = 3;
+            ui.host().setEnhancedValue("audio_offset", std::to_string(std::lround(cal_.audio)));
+            ui.host().setEnhancedValue("video_offset", std::to_string(std::lround(cal_.video)));
+        }
+    }
+    void drawCalib() {
+        const float o = d_.offset(), cx = kScreenW * 0.5f + o, cy = 360;
+        d_.quad(o, 0, kScreenW + o, kScreenH, {0, 0, 0, 0.88f});
+        d_.text("CALIBRATION", cx, 110, 56, kTitle, 0x22);
+        if (cal_.phase == 3) {
+            d_.text("Audio " + signedMs(std::to_string(std::lround(cal_.audio))) + "   Video " + signedMs(std::to_string(std::lround(cal_.video))), cx,
+                    cy, 34, PortDraw::kOn, 0x22);
+            d_.text("Saved. Press green to close.", cx, cy + 60, 22, kNormal, 0x22);
+            return;
+        }
+        const bool audio = cal_.phase == 1;
+        d_.text(audio ? "Step 1 of 2: AUDIO" : "Step 2 of 2: VIDEO", cx, 200, 30, kAccent, 0x22);
+        d_.text(audio ? "Strum or press green on each tick you HEAR" : "Strum or press green on each flash you SEE", cx, 245, 24, kNormal, 0x22);
+        if (!audio) {  // the ring, lit for 120 ms on each beat
+            const float lit = cal_.flashNs ? std::max(0.0f, 1 - float(SDL_GetTicksNS() - cal_.flashNs) / 120e6f) : 0;
+            for (int i = 0; i < 48; ++i) {
+                const float a0 = float(i) / 48 * 6.2831853f, a1 = float(i + 1) / 48 * 6.2831853f;
+                d_.line(cx + 70 * std::cos(a0), cy + 70 * std::sin(a0), cx + 70 * std::cos(a1), cy + 70 * std::sin(a1), 6,
+                        {0.4f + 0.6f * lit, 0.4f + 0.46f * lit, 0.45f - 0.25f * lit, 1});
+                if (lit > 0)
+                    d_.triangle(cx, cy, cx + 62 * std::cos(a0), cy + 62 * std::sin(a0), cx + 62 * std::cos(a1), cy + 62 * std::sin(a1),
+                                {1, 0.86f, 0.2f, lit});
+            }
+        }
+        // Progress: one dot per press taken.
+        for (int k = 0; k < kSamples; ++k) {
+            const float x = cx + (float(k) - (kSamples - 1) * 0.5f) * 34;
+            d_.quad(x - 9, cy + 130, x + 9, cy + 148, k < int(cal_.samples.size()) ? PortDraw::kOn : Color{0.3f, 0.3f, 0.34f, 1});
+        }
+        if (int(cal_.ticks.size()) < kLeadIn) d_.text("Get ready...", cx, cy + 190, 22, kDim, 0x22);
+        d_.text("Back cancels", cx, cy + 230, 18, kDim, 0x22);
+    }
+
     PortDraw d_;
+    Calib cal_;
+    std::string status_;
+    float statusMs_ = 0;
     std::vector<int> rows_;  // indexes into items() of the rows shown
     std::map<std::string, bool> collapsed_;
-    int focus_ = 0, dropdown_ = -1, ddFocus_ = 0;
+    int focus_ = 0, dropdown_ = -1, ddFocus_ = 0, hoverButton_ = -1;
     bool entered_ = false;
+    bool backdropMissed_ = false;  // drawn without the backdrop since entering (it fades in when it comes)
+    double backdropFromMs_ = -1;
     float scroll_ = 0, scrollTarget_ = 0, ddTop_ = 0;
 };
 

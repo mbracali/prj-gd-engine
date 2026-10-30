@@ -8,7 +8,8 @@
 
 class Input;
 
-// The port's Gamepads screen (main menu, the blue fret / GAMEPADS): the
-// connected controllers and the keyboard, each one's player, its bindings
-// lit live while pressed, and remapping (Input's binding tables).
+// The port's Gamepad menu (universal_mechanisms.md 1.2.1; main menu, the
+// blue fret / GAMEPADS help item, Enhanced > Controls): four player boxes
+// with their instrument and device, and each device's bindings (two per
+// control) lit live while pressed, saved or discarded as a whole.
 std::unique_ptr<NativePanel> makeGamepadPanel(SelectHost& host, Input* input);

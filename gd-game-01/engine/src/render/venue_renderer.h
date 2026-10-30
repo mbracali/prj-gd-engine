@@ -105,12 +105,13 @@ public:
     // the guitarist's treatment, a spotlight overhead with its floor glow and the
     // flattened depth-only silhouette that cuts the glow.
     void setBandShadows(bool on) { bandShadows_ = on; }
-    // [I] Enhanced Settings > More Lights on Venues: 0 off, 1 subtle, 2 strong.
+    // [I] Enhanced Settings > More Lights on Venues: 0 none, 1 1.5x, 2 2x, 3 2.5x.
     // Brighter light cones and glows, a soft beam and floor pool on each band
     // member in the stage spotlight's colour, a little fill on the band.
     void setMoreLights(int level);
-    // [I] Enhanced Settings > Dust in Light Beams (with More Lights): motes drifting in the beams.
-    void setLightDust(bool on) { lightDust_ = on; }
+    // [I] Enhanced Settings > Dust in Light Beams: motes drifting in the band's beams
+    // (0 none, 1 1.5x, 2 2x, 3 2.5x; with More Lights none only the motes show).
+    void setLightDust(int level) { lightDust_ = level; }
     // The guitarist's hand events for this song and chart (GuitarAnimInfo).
     void setSong(const Song& song, const Chart& chart);
     // game_outro: the guitarist's game-over clip reached its last frame.
@@ -123,18 +124,8 @@ public:
     // [I] A fixed view replacing the shots (the Enhanced Settings backdrop).
     // `camera` (rows X, Y forward, Z up; at the eye) faces the billboards and the crowd.
     void setStillView(const Mat4& viewProj, const Xfm& camera) { stillVp_ = viewProj, stillCam_ = camera, still_ = true; }
-    // For the post-processing (ground fog, TAA): the view-projection drawn
-    // last, and the stage floor's height (the guitarist's root), false without one.
+    // For the post-processing (TAA, Blur on Star Power): the view-projection drawn last.
     const Mat4& viewProj() const { return vp_; }
-    bool stageFloorZ(float& z) const {
-        if (!guitarist_) return false;
-        z = guitarist_->placement().pos[2];
-        return true;
-    }
-    // [I] For Super Fog's light shafts: each lit band member's light (the
-    // guitarist's is the venue's spotlight), as its position, the member's
-    // feet and the stage spotlight's colour (0..1), 9 floats each.
-    std::vector<std::array<float, 9>> beamLights();
     void draw();
 
 private:
@@ -165,7 +156,8 @@ private:
     };
     std::vector<LitChar> litCharacters();
     void drawEnhancedLights(const Mat4& vp, const Xfm& cam, const std::vector<LitChar>& lit);
-    bool bandShadows_ = false, lightDust_ = true;
+    bool bandShadows_ = false;
+    int lightDust_ = 0;
     int moreLights_ = 0;
     std::unique_ptr<Scene> shadowMatScene_;  // charsys_shadow.mat when the guitarist has none
     const MatObj* shadowMat_ = nullptr;
