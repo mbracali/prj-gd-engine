@@ -91,6 +91,8 @@ public:
     virtual bool playVoice(const std::string& /*path*/, float /*volumeDb*/) { return false; }
     virtual bool voicePlaying() { return false; }
     virtual void stopVoice() {}
+    // The voice-over held (tut_pause_screen's {tutorial set_paused TRUE}) or let go on.
+    virtual void pauseVoice(bool /*paused*/) {}
     // A player's guitar as the tutorial's tuner reads it (PS2 0x0014d6d8
     // reads pad 0): the frets held (bit 0 green) and the strums so far.
     virtual unsigned playerFrets(int /*player*/) { return 0; }
@@ -102,6 +104,8 @@ public:
     virtual bool gameLoaded() const = 0;
     virtual void gameSetPaused(bool paused) = 0;
     virtual bool gamePaused() const = 0;
+    // The beatmatch's pause (beatmatch set_paused, and game set_paused with a song loaded).
+    virtual bool musicPaused() const { return gamePaused(); }
     virtual double gameTimeMs() const = 0;     // the song clock (negative in the lead-in)
     // The sounds played since the song began, with their song times (the
     // first 256; --walktest checks the intro's).
@@ -117,6 +121,9 @@ public:
     // The tutorials' player switches (set_whammystarpowerenabled /
     // set_mercuryswitchenabled) on the song's player `index`.
     virtual void setPlayerSwitch(int index, const std::string& name, bool on) = 0;
+    // The tutorials' Star Power natives on the song's player `index`:
+    // "meter" (fill / empty / set_star_power), "deploy_rate", "phrase_boost".
+    virtual void setPlayerStarPower(int /*index*/, const std::string& /*what*/, float /*value*/) {}
     // The co-op band (game/band_performer.h): its score, streak, stars and
     // meter; nullptr outside co-op.
     virtual const BandPerformer* gameBand() const { return nullptr; }

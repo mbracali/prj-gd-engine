@@ -95,11 +95,13 @@ void Mixer::setVolumeDb(float db, float fadeMs) {
 }
 
 void Mixer::setSpeed(float speed) {
+    speed_.store(speed);
     if (stream_) SDL_SetAudioStreamFrequencyRatio(stream_, std::clamp(speed, 0.01f, 100.0f));
 }
 
 void Mixer::stop() {
     clockScale_ = 1, clockOffsetMs_ = 0;
+    pitch_ = {}, grainStart_ = -1;
     if (!stream_) return;
     stopWorker();
     SDL_LockAudioStream(stream_);
@@ -179,8 +181,29 @@ void Mixer::fill(int frames) {
 
     const float target = guitarTarget_.load(), target2 = guitar2Target_.load();
     const float vTarget = volumeTarget_.load(), vStep = volumeStep_.load();
+    // Pitch correction: the stream frames a slice / attack / release of real
+    // time take at this speed.
+    const double speed = speed_.load();
+    const bool correct = pitch_.on && speed > 0.01 && std::fabs(speed - 1.0) > 1e-4;
+    const double toFrames = double(rate_) * speed / 1000.0;
+    const double slice = std::max(1.0, pitch_.sliceMs * toFrames), attack = std::max(1.0, pitch_.attackMs * toFrames),
+                 release = std::max(1.0, pitch_.releaseMs * toFrames);
+    const int64_t written = written_.load(std::memory_order_acquire);
     for (int i = 0; i < n; ++i) {
         size_t at = size_t((r + i) & (kRing - 1));
+        // The grains of the player's part: a new one from this frame every slice.
+        float wNew = 1, wOld = 0;
+        if (correct) {
+            if (grainStart_ < 0 || grainAge_ >= slice) {
+                oldStart_ = grainStart_, oldAge_ = grainAge_;
+                grainStart_ = r + i, grainAge_ = 0, fadeAge_ = 0;
+            }
+            if (oldStart_ >= 0 && fadeAge_ < std::max(attack, release)) {
+                // Exponential curves to about 1 % at their ends (5 time constants) [I].
+                wNew = float(1.0 - std::exp(-5.0 * fadeAge_ / attack));
+                wOld = float(std::exp(-5.0 * fadeAge_ / release));
+            }
+        }
         volumeGain_ = volumeGain_ < vTarget ? std::min(vTarget, volumeGain_ + vStep) : std::max(vTarget, volumeGain_ - vStep);
         // ~8 ms ramp, no click (gd01) [I].
         guitarGain_ += (target - guitarGain_) * 0.003f;
@@ -188,13 +211,28 @@ void Mixer::fill(int frames) {
         float l = 0, rr = 0;
         for (size_t c = 0; c < tracks_.size(); ++c) {
             const Track& t = tracks_[c];
-            float v = ring_[c][at] * t.volume * volumeGain_ * (t.guitar ? guitarGain_ : t.guitar2 ? guitar2Gain_ : 1.0f);
+            float x = ring_[c][at];
+            if (correct && t.guitar) {
+                x = wNew * partSample(c, double(grainStart_) + grainAge_ / speed, written);
+                if (wOld > 0) x += wOld * partSample(c, double(oldStart_) + oldAge_ / speed, written);
+            }
+            float v = x * t.volume * volumeGain_ * (t.guitar ? guitarGain_ : t.guitar2 ? guitar2Gain_ : 1.0f);
             // gd01's linear pan law: -1 = left only, 0 = both at full, 1 = right only [I].
             l += v * std::clamp(1.0f - t.pan, 0.0f, 1.0f);
             rr += v * std::clamp(1.0f + t.pan, 0.0f, 1.0f);
         }
+        if (correct) grainAge_ += 1, oldAge_ += 1, fadeAge_ += 1;
         out_[size_t(silent + i) * 2] = std::clamp(l, -1.0f, 1.0f);
         out_[size_t(silent + i) * 2 + 1] = std::clamp(rr, -1.0f, 1.0f);
     }
     read_.store(r + n, std::memory_order_release);
+}
+
+// The player's part read ahead of the stream (pitch correction), between
+// two frames linearly; silence where the decoder has not got to yet.
+float Mixer::partSample(size_t channel, double pos, int64_t written) const {
+    const int64_t f = int64_t(pos);
+    if (f < 0 || f + 1 >= written) return 0.0f;
+    const float k = float(pos - double(f));
+    return ring_[channel][size_t(f & (kRing - 1))] * (1 - k) + ring_[channel][size_t((f + 1) & (kRing - 1))] * k;
 }

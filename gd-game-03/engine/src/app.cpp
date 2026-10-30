@@ -5,6 +5,7 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
@@ -223,6 +224,7 @@ public:
         if (synth_) synth_->setPaused(paused);
     }
     bool gamePaused() const override { return paused_; }
+    bool musicPaused() const override { return musicPaused_; }
     double gameTimeMs() const override { return lastT_; }
     std::vector<std::pair<std::string, double>> gameSfx() const override { return songSfx_; }
     std::vector<std::string> sfxHistory() const override { return sfxHistory_; }
@@ -236,6 +238,7 @@ public:
     bool playVoice(const std::string& path, float volumeDb) override;
     bool voicePlaying() override;
     void stopVoice() override;
+    void pauseVoice(bool paused) override;
     unsigned playerFrets(int player) override { return player >= 0 && player < 2 ? padFrets_[size_t(player)] : 0u; }
     int playerStrums(int player) override { return player >= 0 && player < 2 ? padStrums_[size_t(player)] : 0; }
     const Player* gamePlayer(int index) const override { return index == 0 ? player_.get() : player2_.get(); }
@@ -244,6 +247,13 @@ public:
         if (!p) return;
         if (name == "whammy_star_power") p->setWhammyStarPowerEnabled(on);
         else if (name == "mercury_switch") p->setMercurySwitchEnabled(on);
+    }
+    void setPlayerStarPower(int index, const std::string& what, float value) override {
+        Player* p = index == 0 ? player_.get() : player2_.get();
+        if (!p) return;
+        if (what == "meter") p->setStarMeter(value);
+        else if (what == "deploy_rate") p->setDeployRate(value);
+        else if (what == "phrase_boost") p->setPhraseBoost(value);
     }
     const BandPerformer* gameBand() const override { return coopBand_.get(); }
     int gameCounter(int player, const std::string& key) const override;
@@ -299,6 +309,7 @@ private:
     void frameNeedData();
     bool loadSong(const SongInfo& info, int difficulty, bool autoplay, float band, float guitar, bool fastIntro);
     void beginSong();
+    Mixer::PitchCorrect pitchCorrect() const;
     bool startSong(size_t index);
     void endSong();
     void setupPractice();
@@ -323,6 +334,7 @@ private:
     void updateSong(float t);
     void updateIntro(float t);
     void gameSounds(int player, const std::vector<PlayerEvent>& events);
+    void gameCallbacks(int player, const std::vector<PlayerEvent>& events, size_t k);
     float songClock();
     void frameSong();
     void frameUi();
@@ -1009,6 +1021,7 @@ bool App::playVoice(const std::string& path, float volumeDb) {
         voiceEndMs_ = double(SDL_GetTicksNS()) / 1e6 + double(pcm->samples.size()) * 1000.0 / std::max(1, pcm->rate);
         SfxPlayer::Params p;
         p.gain = volumeDb <= -96.0f ? 0.0f : std::pow(10.0f, volumeDb / 20.0f);
+        p.stream = true;  // a stream: the game's pause leaves it (tutorial_32 / _33 end paused on their voice-over)
         voice_ = synth_->player().isOpen() ? synth_->player().play(pcm, p) : 0;
         return true;
     } catch (const std::exception& e) {
@@ -1020,6 +1033,10 @@ bool App::playVoice(const std::string& path, float volumeDb) {
 bool App::voicePlaying() {
     if (synth_ && synth_->player().isOpen()) return voice_ && synth_->player().playing(voice_);
     return double(SDL_GetTicksNS()) / 1e6 < voiceEndMs_;
+}
+
+void App::pauseVoice(bool paused) {
+    if (voice_ && synth_) synth_->player().setVoicePaused(voice_, paused);
 }
 
 void App::stopVoice() {
@@ -1120,6 +1137,23 @@ void App::loadGameParsers(const SongAudio& audio) {
     }
 }
 
+// sound.dta (practice_mode (pitch_correct (slice_frames 3) (attack_ms 5)
+// (release_ms 5) ...)), read by 0x00121378 [C]; the slice in 60 Hz frames [I].
+Mixer::PitchCorrect App::pitchCorrect() const {
+    Mixer::PitchCorrect p;
+    p.on = true;
+    const DataNode* snd = ui_ && ui_->bootTree() ? ui_->bootTree()->find("sound") : nullptr;
+    const DataNode* pm = snd ? snd->find("practice_mode") : nullptr;
+    const DataNode* pc = pm ? pm->find("pitch_correct") : nullptr;
+    const auto num = [&](const char* key, double def) {
+        const DataNode* n = pc ? pc->find(key) : nullptr;
+        return n && n->children.size() > 1 ? double(n->floatAt(1)) : def;
+    };
+    p.sliceMs = num("slice_frames", 3) * 1000.0 / 60.0;
+    p.attackMs = num("attack_ms", 5), p.releaseMs = num("release_ms", 5);
+    return p;
+}
+
 void App::beginSong() {
     if (!pendingStream_ || !info_) return;
     // GamePanel's start (0x822CCA60): the intro clock from the INTRO shot's
@@ -1163,8 +1197,10 @@ void App::beginSong() {
     // The slowed audio (_p85 / _p65 / _p50) is as long as the song at its
     // header's rate and is played at the speed x that rate (about 11 kHz
     // for all three: bangyourhead's 13235 / 17308 / 22050 Hz) [C data;
-    // I: the playback rate]; without one the song's own audio is slowed
-    // (lower) [I: the PS2 pitch-corrects it, sound.dta pitch_correct].
+    // I: the playback rate]. A song with no practice_speeds (none of the
+    // disc's 30: only songs added to it) plays its own audio slowed, with
+    // the player's part pitch-corrected (Mixer::setPitchCorrect, sound.dta
+    // practice_mode pitch_correct) [C].
     const double speed = practice ? double(practiceSpeed_) : 1.0;
     if (startMs > 0) pendingStream_->seek(uint64_t(startMs / 1000.0 * pendingStream_->sampleRate()));
     // Practice's audio marks no core channels: the part played is muted on a miss [I].
@@ -1173,6 +1209,7 @@ void App::beginSong() {
                 mixerTracks(audio, bandVolume_, guitarVolume_, player2_ ? &parts_ : practice ? &practicePart : nullptr), leadInMs_);
     mixer_.setSpeed(float(speed));
     mixer_.setClock(speed, std::max(0.0, startMs));
+    mixer_.setPitchCorrect(practice && info_->practiceSpeeds.empty() ? pitchCorrect() : Mixer::PitchCorrect{});
     // beatmatch set_paused before the game began (the tutorials' lessons
     // start with it paused: tut_script enters after the game panel).
     if (musicPaused_ || paused_) mixer_.setPaused(true);
@@ -1527,19 +1564,17 @@ void App::gameSounds(int player, const std::vector<PlayerEvent>& events) {
     const bool multi = player2_ != nullptr;
     const float pan = multi ? (player == 0 ? -1.0f : 1.0f) : 0.0f;  // system_script.dta player_pan
     const bool bass = multi && parts_[size_t(player)] == "bass";
-    for (const PlayerEvent& e : events) {
-        const char* matcher = nullptr;
-        const char* handler = nullptr;
-        if (e.kind == PlayerEvent::Kind::Miss) matcher = "miss";
-        else if (e.kind == PlayerEvent::Kind::PhraseCaptured) handler = "phrase_captured";
-        else if (e.kind == PlayerEvent::Kind::StarPowerStart) handler = "start_using";
-        else if (e.kind == PlayerEvent::Kind::StarPowerEnd) handler = "stop_using";
-        else continue;
+    for (size_t k = 0; k < events.size(); ++k) {
+        const PlayerEvent& e = events[k];
         if (ui_) {
-            const std::string obj = std::string(matcher ? "player_matcher" : "player") + std::to_string(player);
-            ui_->callScript(ui_->interp().findObject(obj), matcher ? matcher : handler, {Value::integer(player)});
+            gameCallbacks(player, events, k);
             continue;
         }
+        const char* matcher = nullptr;
+        if (e.kind == PlayerEvent::Kind::Miss) matcher = "miss";
+        else if (e.kind != PlayerEvent::Kind::PhraseCaptured && e.kind != PlayerEvent::Kind::StarPowerStart &&
+                 e.kind != PlayerEvent::Kind::StarPowerEnd)
+            continue;
         if (matcher) playSfxArgs(bass ? "miss_bass" : "miss_gtr", fxVolumeDb_, pan, 0);
         else if (e.kind == PlayerEvent::Kind::PhraseCaptured) pendingAwardMs_ = lastT_ + 200.0f;
         else if (e.kind == PlayerEvent::Kind::StarPowerStart) {
@@ -1552,6 +1587,57 @@ void App::gameSounds(int player, const std::vector<PlayerEvent>& events) {
     if (!ui_ && pendingAwardMs_ > -1e8f && lastT_ >= pendingAwardMs_) {
         pendingAwardMs_ = -1e9f;
         playSfxArgs("sp_awarded", fxVolumeDb_, 0, 0);
+    }
+}
+
+// One player event to the menus' scripts: the matcher's handlers (miss,
+// hopo, swingAtHopo: beatmatch.dta) and the player's (phrase_captured,
+// phrase_miss, start_using, stop_using, whammy_start, whammy_end,
+// star_gem_hit: player.dta), whose {handle ($this x_callback)} reaches
+// the object's sinks; and what the PS2 sends the sinks itself [C]:
+// gem_hit_callback $slot $hopoable $hopoed (the matcher, 0x00115c40: the
+// gem's lowest fret, its HOPO flag, hit as a HOPO), gem_miss_callback
+// $slot_hit $real_slot $timing_error (0x00116160), gem_pass_callback
+// (0x00116778), held_note_released_callback $fraction (the player,
+// 0x00112348). The miss's slots and timing are not kept by the port's
+// player: the gem's lowest fret (or -1) and 0 [I].
+void App::gameCallbacks(int player, const std::vector<PlayerEvent>& events, size_t k) {
+    const PlayerEvent& e = events[k];
+    const Player* pl = player == 0 ? player_.get() : player2_.get();
+    Interp& in = ui_->interp();
+    ScriptObject* matcher = in.findObject("player_matcher" + std::to_string(player));
+    ScriptObject* perf = in.findObject("player" + std::to_string(player));
+    const Value num = Value::integer(player);
+    const auto slot = [&](int gem) {
+        if (!pl || gem < 0 || gem >= int(pl->chart().gems.size())) return -1;
+        const unsigned f = pl->chart().gems[size_t(gem)].frets;
+        return f ? std::countr_zero(f) : -1;
+    };
+    using K = PlayerEvent::Kind;
+    switch (e.kind) {
+    case K::Miss:
+        ui_->callScript(matcher, "miss", {num});
+        in.send(matcher, "gem_miss_callback", {Value::integer(slot(e.gem)), Value::integer(slot(e.gem)), Value::real(0)}, false);
+        break;
+    case K::Hit: {
+        bool hopoed = false;
+        for (size_t j = k + 1; j < events.size() && !hopoed; ++j) hopoed = events[j].kind == K::Hopo && events[j].gem == e.gem;
+        const bool hopoable = pl && e.gem >= 0 && pl->chart().gems[size_t(e.gem)].hopo;
+        in.send(matcher, "gem_hit_callback", {Value::integer(slot(e.gem)), Value::integer(hopoable ? 1 : 0), Value::integer(hopoed ? 1 : 0)}, false);
+        break;
+    }
+    case K::Pass: in.send(matcher, "gem_pass_callback", {}, false); break;
+    case K::Hopo: ui_->callScript(matcher, "hopo", {}); break;
+    case K::SwingAtHopo: ui_->callScript(matcher, "swingAtHopo", {}); break;
+    case K::HeldNoteReleased: in.send(perf, "held_note_released_callback", {Value::real(e.value)}, false); break;
+    case K::PhraseCaptured: ui_->callScript(perf, "phrase_captured", {num}); break;
+    case K::PhraseMissed: ui_->callScript(perf, "phrase_miss", {Value::integer(e.gem)}); break;
+    case K::StarPowerStart: ui_->callScript(perf, "start_using", {num}); break;
+    case K::StarPowerEnd: ui_->callScript(perf, "stop_using", {num}); break;
+    case K::WhammyStart: ui_->callScript(perf, "whammy_start", {}); break;
+    case K::WhammyEnd: ui_->callScript(perf, "whammy_end", {}); break;
+    case K::StarGemHit: ui_->callScript(perf, "star_gem_hit", {}); break;
+    default: break;
     }
 }
 

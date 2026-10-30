@@ -111,6 +111,21 @@ class UiManager;
 //              difficulties -> the song -> multi_compete_screen -> complete.
 //   proface    pro face-off unlocked in the save first (a tour won), then PRO FACE-OFF
 //              (multi_fo): one difficulty for both -> the song -> multi_compete_fo_screen.
+//   career_win  career at Easy: every tier song before the tour's last
+//              (fest's losangeles: Easy has no arena and no encores) passed
+//              with cheat_beat_song, the last one played -> win_game_screen
+//              (beat_easy, crowd_win) -> the results.
+//   career_win_medium  the same at Medium (the last song arena's encore
+//              playwithme): beat_other, then pro face-off unlocked.
+//   career_practice  a career song lost -> PRACTICE (the lose screen's
+//              career buttons) -> a section at 100% -> the pause's career
+//              buttons: CHANGE SPEED and back, QUIT -> the career menu.
+//   tutorial2  the second tutorial (Star Power), unlocked by starting the
+//              first: the phrase, the whammy, the wail (button_error before
+//              it), to its end (s19901 / s19902) -> main.
+//   tutorial3  the third (hammer-ons, pull-offs): the hopo trainer played
+//              three times each way with the keyboard, the track's HOPOs on
+//              autoplay, to its end -> main.
 //   career_encore  career's first tier to its encore offer (iran played),
 //              declined: the venue's encore_no, then the results.
 //   practice   main -> TRAINING -> PRACTICE -> the first song -> the bass ->
@@ -120,6 +135,9 @@ class UiManager;
 //              section, the metronome (click_parser) and one overstrum's
 //              miss_bass -> practice_end -> the end screen (the section's
 //              gems) -> EXIT -> main.
+//   practice_menus  practice's pause: Start pauses and resumes; CHANGE
+//              SPEED (65%: _p65), CHANGE SECTION (the second at 85%: _p85),
+//              NEW SONG -> the song list.
 //   tutorial   main -> TRAINING -> TUTORIALS -> the first tutorial: its
 //              voice-over to the tuning, each fret held and strummed three
 //              times (the keyboard), tuning_complete, the next lesson ->
@@ -195,7 +213,8 @@ private:
     std::array<int, 3> volumes_{};                 // the options walk: the volumes before the sliders
     double lastNavMs_ = -1e9;                      // focus_to: the last press
     int lagStrikes_ = 0;                           // the options walk: strums on the lag clicks
-    bool encoreDeclined_ = false;                  // career_song: NO on the encore offer
+    bool encoreDeclined_ = false;
+    std::string winTarget_;                        // career_win: the tour's last song                  // career_song: NO on the encore offer
 
     void runCheck(ui::UiManager& ui, const Step& s, double nowMs);
 };

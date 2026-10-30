@@ -7,7 +7,21 @@ All notable changes for players. Versions follow SemVer; release tags are
 
 ## [0.0.3] - 2026-10-30
 
+### Added
+- Tutorials 2 (Star Power) and 3 (hammer-ons and pull-offs) play through
+  to the end: the hammer-on / pull-off trainer off the track, the lessons
+  hearing every hit, miss, HOPO, whammy and Star Power, their pauses and
+  their voice-overs.
+- Winning a career tour shows its win screen (beating Easy, or the other
+  difficulties) with the crowd's cheer before the results.
+- Practice: the guitar keeps its pitch at slower speeds as on the PS2, and
+  the metronome follows the music volume.
+
 ### Fixed
+- A tutorial voice-over asked for while the one before is still loading
+  now replaces it, as on the PS2 (it was dropped).
+- Career practice and pause menus' buttons, and a material's texture set
+  by script, now act as the original.
 - Whammying a held sustain now makes its tail swell, as on the PS2: the
   tail widens up to four times as the bar goes down and the bulges run down
   the tail as you wave it, then it settles back once you let go. The tail

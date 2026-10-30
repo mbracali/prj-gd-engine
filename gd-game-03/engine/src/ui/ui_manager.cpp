@@ -830,6 +830,11 @@ void UiManager::update() {
     uiMs_ += frameDt_;
     gfx::UiView::setUiSeconds(uiMs_ / 1000.0);
     if (!(host_.gameLoaded() && host_.gamePaused())) secondsMs_ += frameDt_;
+    // kTaskTutorialSeconds: TutorialPanel's own timer, run by its poll
+    // while the panel is not paused (0x0013fb00 -> tutorial_seconds), so a
+    // lesson's sleeps go on with the game paused (tutorial_33's ending) and
+    // stop under tut_pause_screen (tutorial set_paused) [C].
+    if (PanelObj* t = panel("tutorial"); !t || !t->paused) tutorialMs_ += frameDt_;
     if (gamepadsAtMs_ > 0 && wall >= gamepadsAtMs_) openGamepads();
     if (splash_ >= 0) {
         splashMs_ += frameDt_;
@@ -842,7 +847,7 @@ void UiManager::update() {
     TaskMgr& tm = interp_.tasks();
     tm.setTime(kTaskUISeconds, uiMs_ / 1000.0);
     tm.setTime(kTaskSeconds, taskSeconds());
-    tm.setTime(kTaskTutorialSeconds, secondsMs_ / 1000.0);
+    tm.setTime(kTaskTutorialSeconds, tutorialMs_ / 1000.0);
     tm.setTime(kTaskBeats, host_.gameLoaded() ? host_.gameBeat() : 0.0);
     tm.poll();
     if (!deferred_.empty()) {

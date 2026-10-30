@@ -61,6 +61,7 @@ SfxPlayer::VoiceId SfxPlayer::play(std::shared_ptr<const SfxPcm> pcm, const Para
         v.fxR = v.pan[sfxdsp::kFR] + sfxdsp::kDownmixCentre * v.pan[sfxdsp::kC] + sfxdsp::kDownmixRear * v.pan[sfxdsp::kRR];
     }
     v.env = sfxdsp::Envelope(p.attack, p.release);
+    v.stream = p.stream;
     ++started_;
     std::lock_guard<std::mutex> g(lock_);
     if (voices_.size() >= kMaxVoices) return 0;
@@ -82,7 +83,14 @@ void SfxPlayer::stopAll() {
 
 void SfxPlayer::setPaused(bool paused) {
     std::lock_guard<std::mutex> g(lock_);
-    for (Voice& v : voices_) v.paused = paused;
+    for (Voice& v : voices_)
+        if (!v.stream) v.paused = paused;
+}
+
+void SfxPlayer::setVoicePaused(VoiceId id, bool paused) {
+    std::lock_guard<std::mutex> g(lock_);
+    for (Voice& v : voices_)
+        if (v.id == id) v.paused = paused;
 }
 
 void SfxPlayer::setMasterDb(float db) { masterDb_.store(db); }

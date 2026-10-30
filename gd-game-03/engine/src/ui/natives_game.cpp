@@ -238,7 +238,16 @@ public:
 
     std::string fileName() override { return ""; }
 
+    // GamePanel enter: the song loads (unless load_song loaded it already),
+    // then the panel enters and the intro waits for the screen.
     void enter() override {
+        if (!preloaded_) loadGame();
+        preloaded_ = false;
+        pendingBegin_ = true;
+        PanelObj::enter();
+    }
+
+    void loadGame() {
         Session& s = ui.session();
         props["won"] = Value::integer(0);
         props["game_over"] = Value::integer(0);
@@ -303,11 +312,12 @@ public:
         }
         skipIntro_ = setup.skipIntro;
         props["fast_intro"] = Value::integer(0);
+        clearPlayerSinks();
+        resetFaders();  // music_fader back at 0 dB with the music (the mixer's volume at load)
         std::string error;
         if (!ui.host().gameLoad(setup, error)) SDL_Log("game: %s", error.c_str());
-        pendingBegin_ = true;
-        PanelObj::enter();
     }
+    void clearPlayerSinks();
 
     void exit() override {
         PanelObj::exit();
@@ -447,6 +457,11 @@ public:
             const bool p = !args.empty() && args[0].truthy();
             paused = p;
             host.gameSetPaused(p);
+            // GamePanel's SetPaused (0x00107b90) with a song loaded sets the
+            // beatmatch's pause too (0x00122310, the flag beatmatch
+            // set_paused sets, 0x001231c8) [C]: tutorial_32's {game
+            // set_paused FALSE} starts the song the lesson before paused.
+            if (host.gameLoaded()) host.setMusicPaused(p);
             ui.gameEvent("on_set_paused", {Value::integer(p ? 1 : 0)});
             return true;
         }
@@ -471,6 +486,10 @@ public:
         if (msg == "get_bank_loader") return r = Value::obj(bank_.get()), true;
         if (msg == "video_provider") return r = Value::obj(video_.get()), true;
         if (msg == "add_sink" || msg == "add_sinks") {
+            // The sink as an object ({game add_sink $this}) or by name
+            // (tutorial_24's {game add_sink tut_24_callback star_power_start}).
+            if (!args.empty() && args[0].type != Value::Type::Object)
+                if (ScriptObject* o = in.findObject(args[0].str())) args[0] = Value::obj(o);
             if (args.empty() || args[0].type != Value::Type::Object) return true;
             // A second add_sinks adds messages to the same sink (hud's peak_on / peak_off).
             std::set<std::string> msgs;
@@ -485,6 +504,8 @@ public:
             return true;
         }
         if (msg == "remove_sink") {
+            if (!args.empty() && args[0].type != Value::Type::Object)
+                if (ScriptObject* o = in.findObject(args[0].str())) args[0] = Value::obj(o);
             if (!args.empty() && args[0].type == Value::Type::Object) removeSink(args[0].object);
             return true;
         }
@@ -492,8 +513,16 @@ public:
         if (msg == "foreach_player") return r = ui.foreachPlayer(args), true;  // GameConfig's, on the game (game.dta beat)
         // player.dta's {handle (game star_power_start / stop $player_num)}:
         // the HUD and the world get Star Power from the program (HudView,
-        // WorldDriver), so nothing goes on to the sinks here.
-        if (msg == "star_power_start" || msg == "star_power_stop") return true;
+        // WorldDriver), so it goes on only to the sinks that named it
+        // (tutorial_24's {game add_sink tut_24_callback star_power_start})
+        // [C: MsgSource 0x002c01f8; I: the all-message sinks left out].
+        if (msg == "star_power_start" || msg == "star_power_stop") {
+            const auto sinks = sinks_;
+            for (const auto& [o, msgs] : sinks)
+                if (msgs.count(msg) && std::any_of(sinks_.begin(), sinks_.end(), [o = o](const auto& p) { return p.first == o; }))
+                    in.send(o, msg, args, false);
+            return true;
+        }
         // practice_section_provider (0x001275f0): GameConfig's section provider
         // (+0x20c); load_practice_sections (0x0011b818) loads it again.
         if (msg == "practice_section_provider" || msg == "load_practice_sections") {
@@ -501,7 +530,16 @@ public:
             if (sp && msg == "load_practice_sections") sp->load();
             return r = Value::obj(sp), true;
         }
-        if (msg == "load_song" || msg == "loaded") return r = Value::integer(host.gameLoaded() ? 1 : 0), true;
+        // load_song <song> (0x00109210 -> 0x00107f40): the game config's
+        // song set, then the song loaded; the tutorials' switch_to_song
+        // (game exit, load_song, wait for loaded, game enter) [C].
+        if (msg == "load_song") {
+            if (!args.empty()) s.song = argStr(0);
+            loadGame();
+            preloaded_ = true;
+            return true;
+        }
+        if (msg == "loaded") return r = Value::integer(host.gameLoaded() ? 1 : 0), true;
         if (PanelObj::handleNative(in, msg, args, r)) return true;
         // What the game's script and natives leave goes on to the sinks:
         // game.dta's {handle ($this slide_meter_in)} reaches hud_panel,
@@ -525,6 +563,7 @@ private:
     std::unique_ptr<SmallObj> bank_, video_;
     std::vector<std::pair<ScriptObject*, std::set<std::string>>> sinks_;
     bool pendingBegin_ = false;
+    bool preloaded_ = false;  // load_song loaded the song: enter does not load it again
 };
 
 // TrackPanel / HudPanel: GH2's track and HUD panels, drawn by the program
@@ -689,23 +728,79 @@ private:
         if (msg == "crowd_rating_active") return r = Value::integer(1), true;
         if (msg == "win") return r = Value::integer(p && !p->failed() ? 1 : 0), true;
         if (msg == "failed") return r = Value::integer(p && p->failed() ? 1 : 0), true;
-        if (msg == "add_sink" || msg == "remove_sink" || msg == "set_crowd_rating" || msg == "set_crowd_rating_active" ||
-            msg == "on_downbeat" || msg == "on_game_over" || msg == "load")
+        if (sinks_.handle(ui_.interp(), msg, args)) return true;
+        if (msg == "set_crowd_rating" || msg == "set_crowd_rating_active" || msg == "on_downbeat" || msg == "on_game_over" || msg == "load")
             return true;
+        // The Star Power natives the tutorials use (0x001131a0) [C]:
+        // fill_star_power / empty_star_power / set_star_power <n> set the
+        // meter (0x0011ef18, clamped to 0..1); set_star_power_deploy_rate
+        // and set_star_power_phrase_boost replace the meter lost per measure
+        // while deployed (Star Power +0x50, 0x0011dd30) and the meter a
+        // captured phrase adds (+0x54, 0x0011e2b8) for this song.
+        if (msg == "fill_star_power" || msg == "empty_star_power" || msg == "set_star_power") {
+            const float v = msg == "fill_star_power" ? 1.0f : msg == "empty_star_power" ? 0.0f : args.empty() ? 0.0f : args[0].number();
+            ui_.host().setPlayerStarPower(index, "meter", v);
+            return true;
+        }
+        if (msg == "set_star_power_deploy_rate" || msg == "set_star_power_phrase_boost") {
+            ui_.host().setPlayerStarPower(index, msg == "set_star_power_deploy_rate" ? "deploy_rate" : "phrase_boost",
+                                          args.empty() ? 0.0f : args[0].number());
+            return true;
+        }
         // The tutorials' switches (PS2 0x001131a0 -> 0x00111cd8 / 0x00111ce0) [C].
         if (msg == "set_whammystarpowerenabled" || msg == "set_mercuryswitchenabled") {
             ui_.host().setPlayerSwitch(index, msg == "set_whammystarpowerenabled" ? "whammy_star_power" : "mercury_switch",
                                        !args.empty() && args[0].truthy());
             return true;
         }
-        (void)args;
+        // What the player's handlers leave (player.dta's {handle ($this
+        // whammy_start_callback)}...) and its own held_note_released_callback
+        // (0x00112348) go to its sinks (MsgSource) [C].
+        if (msg.size() > 9 && msg.compare(msg.size() - 9, 9, "_callback") == 0) {
+            sinks_.send(ui_.interp(), msg, args);
+            return true;
+        }
         return false;
     }
+
+public:
+    // A new song: the PS2 makes its players with the game, so no sink stays [C: 0x001107d8].
+    void clearSinks() { sinks_.clear(); }
 
 private:
     UiManager& ui_;
     int i_;
     TrackDirObj track_;
+    MsgSinks sinks_;
+};
+
+// player_matcher0 / 1 (vtable 0x8204a1ac's role on this disc): the
+// handlers are beatmatch.dta's player_matcher_handlers; the gameplay's
+// gem_hit_callback ($slot $hopoable $hopoed, 0x00115c40),
+// gem_miss_callback (0x00116160), gem_pass_callback (0x00116778) and what
+// the hopo / swingAtHopo handlers pass on (hopo_callback,
+// swingAtHopo_callback) go to the sinks [C]. on_start_starpower /
+// on_stop_starpower tell the player's character, which the program's band
+// does on the Star Power events (game/world_driver.cpp).
+class MatcherObj : public ScriptObject {
+public:
+    explicit MatcherObj(const std::string& name) : ScriptObject(name, "PlayerMatcher") {}
+    bool handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) override {
+        r = Value::integer(0);
+        if (sinks_.handle(in, msg, args)) return true;
+        if (msg == "auto_solo" || msg == "set_auto_solo" || msg == "on_start_starpower" || msg == "on_stop_starpower" ||
+            msg == "refresh_track_buttons")
+            return true;
+        if (msg.size() > 9 && msg.compare(msg.size() - 9, 9, "_callback") == 0) {
+            sinks_.send(in, msg, args);
+            return true;
+        }
+        return false;
+    }
+    void clearSinks() { sinks_.clear(); }
+
+private:
+    MsgSinks sinks_;
 };
 
 // gamecfg: GameConfig's mode table (config/modes.dta) and players.
@@ -802,7 +897,7 @@ public:
     bool handleNative(Interp&, const std::string& msg, std::vector<Value>& args, Value& r) override {
         r = Value::integer(0);
         if (msg == "set_paused") return ui_.host().setMusicPaused(!args.empty() && args[0].truthy()), true;
-        if (msg == "paused") return r = Value::integer(ui_.host().gamePaused() ? 1 : 0), true;
+        if (msg == "paused") return r = Value::integer(ui_.host().musicPaused() ? 1 : 0), true;
         if (msg == "set_music_speed") return ui_.host().setMusicSpeed(args.empty() ? 1.0f : args[0].number()), true;
         if (msg == "set_volume") return ui_.host().setMusicVolume(args.empty() ? 0.0f : args[0].number(), 0), true;
         if (msg == "update_practice_speed" || msg == "jump" || msg == "set_shuttle") return true;
@@ -813,6 +908,16 @@ public:
 private:
     UiManager& ui_;
 };
+
+// The PS2 makes its players and matchers with each game (0x001107d8), so
+// a new song starts with no sinks on them [C].
+void GamePanelObj::clearPlayerSinks() {
+    Interp& in = ui.interp();
+    for (const char* n : {"player0", "player1"})
+        if (auto* p = dynamic_cast<PlayerObj*>(in.findObject(n))) p->clearSinks();
+    for (const char* n : {"player_matcher0", "player_matcher1"})
+        if (auto* m = dynamic_cast<MatcherObj*>(in.findObject(n))) m->clearSinks();
+}
 
 }  // namespace
 
@@ -832,9 +937,44 @@ void installGameNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<S
     add(std::make_unique<GameCfgObj>(ui));
     add(std::make_unique<PlayerObj>(ui, "player0", 0));
     add(std::make_unique<PlayerObj>(ui, "player1", 1));
+    add(std::make_unique<MatcherObj>("player_matcher0"));
+    add(std::make_unique<MatcherObj>("player_matcher1"));
     add(std::make_unique<PlayerObj>(ui, "band", -1));
     add(std::make_unique<BeatmatchObj>(ui));
     add(std::make_unique<SectionProviderObj>(ui));
+}
+
+bool MsgSinks::handle(Interp& in, const std::string& msg, const std::vector<Value>& args) {
+    if (msg != "add_sink" && msg != "remove_sink") return false;
+    ScriptObject* o = args.empty() ? nullptr : args[0].type == Value::Type::Object ? args[0].object : in.findObject(args[0].str());
+    if (!o) return true;
+    if (msg == "remove_sink") {
+        sinkDestroyed(o);
+        return true;
+    }
+    std::vector<std::string> msgs;
+    for (size_t k = 1; k < args.size(); ++k) msgs.push_back(args[k].str());
+    for (auto& [s, m] : sinks_)
+        if (s == o) {
+            if (msgs.empty() || m.empty()) m.clear();
+            else m.insert(m.end(), msgs.begin(), msgs.end());
+            return true;
+        }
+    sinks_.push_back({o, msgs});
+    return true;
+}
+
+void MsgSinks::send(Interp& in, const std::string& msg, const std::vector<Value>& args) {
+    const auto sinks = sinks_;
+    for (const auto& [o, msgs] : sinks) {
+        if (!msgs.empty() && std::find(msgs.begin(), msgs.end(), msg) == msgs.end()) continue;
+        if (std::none_of(sinks_.begin(), sinks_.end(), [o = o](const auto& p) { return p.first == o; })) continue;
+        in.send(o, msg, args, false);
+    }
+}
+
+void MsgSinks::sinkDestroyed(ScriptObject* sink) {
+    sinks_.erase(std::remove_if(sinks_.begin(), sinks_.end(), [&](const auto& p) { return p.first == sink; }), sinks_.end());
 }
 
 void gameEventImpl(UiManager&, const std::string& msg, std::vector<Value> args) {

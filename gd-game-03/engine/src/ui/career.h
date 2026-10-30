@@ -90,7 +90,7 @@ public:
     bool ensureGlitches();  // true when it was added
 
     std::array<Profile, kProfiles> profiles;
-    bool proFaceOff = false;            // Campaign +0x68: pro face-off unlocked (a tour won, saved after the high scores)
+    bool proFaceOff = false;            // pro face-off unlocked: a tour of all six tiers won (PS2 Campaign +0x78, 0x0012f130; GH2 +0x68), saved after the high scores
     // Co-op's record (Campaign +0x4c, one for the whole save, updated by
     // campaign finish_coop_song 0x822861A8 -> 0x822A6848) [C]: per song the
     // band's best score (+0x8, kept when higher), its stars (+0xc & 0x7f)

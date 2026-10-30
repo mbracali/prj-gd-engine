@@ -55,6 +55,22 @@ public:
     // (GH2's set_music_speed: the failed song winding down, practice) [I for
     // the pitch]. The song clock is not corrected for it.
     void setSpeed(float speed);
+    // Practice without pre-slowed audio (PS2: the beatmatch's correction is
+    // on only for a song with no practice_speeds, 0x00120f48): the whole
+    // stream plays at the speed (pitch down), but the player's part (the
+    // Track::guitar channels) is read 1 / speed faster from the stream
+    // position, so it keeps its pitch, and is snapped back to the stream
+    // position every slice (sound.dta practice_mode pitch_correct
+    // slice_frames: the frame poll 0x00121ce0 -> 0x002399f8 / 0x0023a9d8),
+    // the new grain coming in over attack_ms as the old one goes over
+    // release_ms (the ADSR 0x00121378 gives the channels) [C]. The slice is
+    // counted in 60 Hz frames, the curves are exponential (linear_attack /
+    // linear_release FALSE) [I: their shape]. Set after play(); stop() ends it.
+    struct PitchCorrect {
+        bool on = false;
+        double sliceMs = 50, attackMs = 5, releaseMs = 5;
+    };
+    void setPitchCorrect(const PitchCorrect& p) { pitch_ = p, grainStart_ = -1; }
     // The music's volume (dB, -96 silent), reached over `fadeMs` (GH2's
     // beatmatch set_volume, music_fader fade). Kept across play().
     void setVolumeDb(float db, float fadeMs = 0);
@@ -113,6 +129,14 @@ private:
     std::atomic<int64_t> leadIn_{0};
     std::atomic<bool> paused_{false};
     double clockScale_ = 1, clockOffsetMs_ = 0;
+    std::atomic<float> speed_{1};
+    // Pitch correction (setPitchCorrect): set before the callback reads it
+    // (play / setClock time, under the stream's start); the grains are the
+    // audio thread's.
+    PitchCorrect pitch_;
+    int64_t grainStart_ = -1, oldStart_ = -1;
+    double grainAge_ = 0, oldAge_ = 0, fadeAge_ = 0;
+    float partSample(size_t channel, double pos, int64_t written) const;
     double pausedTimeMs_ = 0;
     double frameMs_ = 0;
     uint64_t frameNs_ = 0;

@@ -319,7 +319,7 @@ private:
     std::string firstScreen_;
 
     // clocks (ms)
-    double uiMs_ = 0, secondsMs_ = 0, lastWall_ = 0, frameDt_ = 0;
+    double uiMs_ = 0, secondsMs_ = 0, tutorialMs_ = 0, lastWall_ = 0, frameDt_ = 0;
     std::vector<PanelObj*> entered_;
     std::vector<ScriptObject*> made_;
     std::vector<std::function<void()>> deferred_;  // panels the current transition entered

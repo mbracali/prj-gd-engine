@@ -51,6 +51,7 @@ public:
     int selected = 0;  // provider data index
     void refreshList();
     // UISlider
+    std::vector<std::string> faders;  // an Sfx's faders (add_fader)
     int current = 0, steps = 10;
     bool sliderSelected = false;
     // CheckBox
@@ -96,6 +97,12 @@ public:
     void enable(const std::string& name);
     void disable(const std::string& name, int navButton);
     bool isDisabled(const std::string& name) const { return disabled.count(name) != 0; }
+    // {panel enter} / {panel exit} from a script: UIPanel's Enter / Exit
+    // (the panel's enter / exit below, which call its script handlers):
+    // tutorials.dta's {game exit} ... {game enter} reloads the song,
+    // endgame.dta's {unlock_guitar_panel exit} {... enter} the next award
+    // [I: the dispatch order; the scripts expect the panel reloaded].
+    bool nativeFirst(const std::string& msg) const override { return msg == "enter" || msg == "exit"; }
 
     // The milo to load: the (file ...) value, evaluated ("" for none).
     virtual std::string fileName();

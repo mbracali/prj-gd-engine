@@ -134,6 +134,10 @@ public:
 
     // Native messages; return true when handled (result in `r`).
     virtual bool handleNative(Interp&, const std::string& /*msg*/, std::vector<Value>& /*args*/, Value& /*r*/) { return false; }
+    // Messages the object's native code takes before its script handlers
+    // (a panel's enter / exit: UIPanel's Enter / Exit run the script's own
+    // enter / exit handler themselves).
+    virtual bool nativeFirst(const std::string& /*msg*/) const { return false; }
     // Properties: [name], {o get name}, {o set name v}. Natives override to
     // expose their state; the defaults use `props` then the definition.
     virtual Value getProp(Interp& in, const std::string& key);

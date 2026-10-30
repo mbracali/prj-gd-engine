@@ -104,6 +104,13 @@ public:
     void setWhammyStarPowerEnabled(bool on) { whammyStarPowerEnabled_ = on; }
     // set_mercuryswitchenabled (+0xb8, 1 at construction; PS2 0x00111ce0).
     void setMercurySwitchEnabled(bool on) { mercuryEnabled_ = on; }
+    // The tutorials' Star Power natives (PS2 0x001131a0): the meter set,
+    // clamped to 0..1 (0x0011ef18); the meter lost per measure while
+    // deployed (Star Power +0x50) and the meter a captured phrase adds
+    // (+0x54) replaced for this song [C].
+    void setStarMeter(float v) { meter_->value = v < 0 ? 0.0f : v > 1 ? 1.0f : v; }
+    void setDeployRate(float r) { sp_.deployRate = r; }
+    void setPhraseBoost(float b) { sp_.phrase = b; }
     // Watcher +0x2c: added to the input time (the player's lag setting) [C].
     void setCalibrationMs(float ms) { offset_ = ms; }
     // Enhanced Options > Forgiving Hammer-ons and Pull-offs [I: the port's]:

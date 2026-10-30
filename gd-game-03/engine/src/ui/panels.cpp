@@ -360,8 +360,16 @@ public:
 // 0x0013fb00) [C]:
 // - play_vo <event>: config/sound.dta (tutorial (streaming_vo (volume dB)
 //   (dir d) (events (<event> <file>...)))) -> d/<file>.vgs, the event's
-//   files in turn (0x00140888); dropped while another plays (0x001407f0);
-//   is_vo_playing, reset_vo (stops it).
+//   files in turn (0x00140888). The VO player (0x0014cab0..0x0014cdc8):
+//   play_vo is dropped only while the current stream is playing
+//   (0x001407f0 -> 0x0014cc38, the stream's IsPlaying); otherwise the
+//   current one (still loading, or paused) is stopped and replaced
+//   (0x0014cb60 -> 0x0014caf8). The panel's poll (0x0013fb00 -> 0x00140910
+//   -> 0x0014cc80), when neither panel nor VO is paused, starts a stream
+//   that is ready and frees one that has played out. is_vo_playing is
+//   "a stream exists" (0x0014cc70): loading, playing or paused. A stream is
+//   ready on the poll after its request [I: the disc read's time].
+//   reset_vo stops it.
 // - start_tuning_mode <callback> / end_tuning_mode / is_tuning: the tuner
 //   (0x0014cf88 .. 0x0014d6d8) reads player 0's guitar each poll: each fret
 //   held lights t1_fret<n>.view (frame 1, else 0); a strum with one fret
@@ -372,7 +380,25 @@ public:
 //   counted three times ends the tuning (the frets' views back to 0).
 // - is_missing_guitar: the port's controllers always play as a guitar, so
 //   never [I: as game is_missing_controller].
-// The hopo training (tutorial_33) is not done yet.
+// - start_hopo_train <mode> <callback> / end_hopo_train / is_hopo_training
+//   (0x0013fe88, the trainer at +0xf8: start 0x0014dd80, poll 0x0014e550,
+//   called from the panel's poll while on) [C]: tutorial_33's pull-offs
+//   off the track. The sequence is green, red, yellow for kHammerOnTutorial
+//   (1), yellow, red, green otherwise (kPullOffTutorial 2). Each poll the
+//   held frets light t1_fret<n>.view (0x0014dfb0) and the highest held one
+//   is the note. A strum on a held fret starts a try at its note; then,
+//   within 1000 ms of the last note, a pull-off (the highest held fret
+//   dropping below the note; mode 1: a hammer-on above it) plays the next
+//   note, and in mode 2 a fret above the note ends the try. Each note
+//   (0x0014e480 -> 0x0014e0b8) sends fret_played <n> to the callback, stops
+//   the trainer's sounds and plays s2060<n>; while the try is good and the
+//   note is the sequence's next, t1_fretcheck<n>.view shows (0x0014e300),
+//   else the try is spoiled. A try's end fades the shown checks out
+//   (t1_fret_check<n>.mnm frame + 4 per poll to 100, then hidden,
+//   0x0014e370 / 0x0014e3a8). The whole sequence played counts a try:
+//   hopo_hit to the callback; three (the sequence's length) end the
+//   training with the frets' views back to 0. end_hopo_train stops the
+//   sounds (0x0014dd28).
 class TutorialPanelObj : public PanelObj {
 public:
     TutorialPanelObj(UiManager& ui, const std::string& name) : PanelObj(ui, name, "TutorialPanel") {}
@@ -380,11 +406,16 @@ public:
         PanelObj::enter();
         tuning_ = false, callback_ = nullptr;
         counts_ = {};
+        hopo_ = false, hopoCb_ = nullptr;
+        vo_ = Vo::None;
         loadVo();
     }
     void poll(double dtMs) override {
         PanelObj::poll(dtMs);
-        if (paused || !tuning_) return;
+        if (paused) return;
+        voPoll();
+        if (hopo_) hopoPoll(dtMs);
+        if (!tuning_) return;
         const unsigned frets = ui.host().playerFrets(0);
         const int strums = ui.host().playerStrums(0);
         int held = 0, fret = -1;
@@ -406,8 +437,15 @@ public:
     bool handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) override {
         r = Value::integer(0);
         if (msg == "play_vo") return playVo(args.empty() ? std::string() : args[0].str()), true;
-        if (msg == "is_vo_playing") return r = Value::integer(ui.host().voicePlaying() ? 1 : 0), true;
-        if (msg == "reset_vo") return ui.host().stopVoice(), true;
+        // set_paused (tut_pause_screen's pause / resume): the voice-over
+        // holds with the lesson [I: VoiceMgr paused with its panel].
+        if (msg == "set_paused") {
+            PanelObj::handleNative(in, msg, args, r);
+            ui.host().pauseVoice(paused);
+            return true;
+        }
+        if (msg == "is_vo_playing") return r = Value::integer(vo_ != Vo::None ? 1 : 0), true;
+        if (msg == "reset_vo") return ui.host().stopVoice(), vo_ = Vo::None, true;
         if (msg == "start_tuning_mode") {
             if (!tuning_) lastStrums_ = ui.host().playerStrums(0);
             callback_ = !args.empty() && args[0].type == Value::Type::Object ? args[0].object : args.empty() ? nullptr : in.findObject(args[0].str());
@@ -415,6 +453,19 @@ public:
         }
         if (msg == "end_tuning_mode") return tuning_ = false, callback_ = nullptr, true;
         if (msg == "is_tuning") return r = Value::integer(tuning_ ? 1 : 0), true;
+        if (msg == "start_hopo_train") {
+            const int mode = args.empty() ? 0 : args[0].integerValue();
+            ScriptObject* cb = args.size() > 1 ? (args[1].type == Value::Type::Object ? args[1].object : in.findObject(args[1].str())) : nullptr;
+            if (!hopo_) hopoStart(mode);
+            hopoCb_ = cb;
+            return hopo_ = true, true;
+        }
+        if (msg == "end_hopo_train") {
+            if (hopo_) hopoStopSounds();
+            hopoCb_ = nullptr;
+            return hopo_ = false, true;
+        }
+        if (msg == "is_hopo_training") return r = Value::integer(hopo_ ? 1 : 0), true;
         if (msg == "is_missing_guitar") return true;
         return PanelObj::handleNative(in, msg, args, r);
     }
@@ -438,14 +489,28 @@ private:
             }
     }
     void playVo(const std::string& name) {
-        if (ui.host().voicePlaying()) return ui.logOnce("tutorial: dropping voice over " + name);
+        if (vo_ == Vo::Playing && !paused && ui.host().voicePlaying()) {
+            ui.session().voiceDropped.push_back(name);
+            return ui.logOnce("tutorial: dropping voice over " + name);
+        }
         auto it = events_.find(name);
         if (it == events_.end() || it->second.files.empty()) return ui.logOnce("tutorial: no voice-over " + name);
         Event& e = it->second;
         e.next = (e.next + 1) % int(e.files.size());
         std::string file = e.files[size_t(e.next)];
         std::transform(file.begin(), file.end(), file.begin(), [](unsigned char c) { return char(std::tolower(c)); });
-        ui.host().playVoice(dir_ + "/" + file + ".vgs", volumeDb_);
+        if (vo_ != Vo::None) ui.logOnce("tutorial: voice over " + voName_ + " replaced before it played by " + name);
+        ui.host().stopVoice();
+        vo_ = Vo::Loading, voName_ = name, voPath_ = dir_ + "/" + file + ".vgs";
+    }
+    // 0x0014cc80: a loading stream starts, a finished one is freed.
+    void voPoll() {
+        if (vo_ == Vo::Loading) {
+            vo_ = ui.host().playVoice(voPath_, volumeDb_) ? Vo::Playing : Vo::None;
+            if (vo_ == Vo::Playing) ui.session().voiceEvents.push_back(voName_);
+        } else if (vo_ == Vo::Playing && !ui.host().voicePlaying()) {
+            vo_ = Vo::None;
+        }
     }
     void hit(int fret) {
         int& c = counts_[size_t(fret)];
@@ -458,6 +523,104 @@ private:
             playVo("tuning_hit_vo");
         }
         c = std::min(c, 3);
+    }
+    // The hopo trainer (0x0014dd80 / 0x0014e550, see above).
+    void hopoStart(int mode) {
+        hopoDone_ = 0;
+        hopoMode_ = mode;
+        hopoSeq_ = mode == 1 ? std::vector<int>{0, 1, 2} : std::vector<int>{2, 1, 0};
+        hopoStrums_ = ui.host().playerStrums(0);
+    }
+    void hopoPoll(double dtMs) {
+        const unsigned frets = ui.host().playerFrets(0);
+        const int strums = ui.host().playerStrums(0);
+        int top = -1;
+        for (int f = 0; f < 5; ++f) {
+            const bool on = (frets >> f) & 1u;
+            setFrame("t1_fret" + std::to_string(f + 1) + ".view", on ? 1.0f : 0.0f);
+            if (on) top = f;
+        }
+        hopoTimerMs_ += dtMs;
+        if (strums != hopoStrums_) {
+            if (hopoValid_) hopoFadeShown();
+            if (top < 0) {
+                hopoTrying_ = hopoValid_ = false;
+            } else {
+                hopoNext_ = 0, hopoValid_ = hopoTrying_ = true;
+                hopoNote(top);
+            }
+            hopoTimerMs_ = 0;
+        } else if (hopoTrying_) {
+            if (hopoTimerMs_ > 1000) {
+                hopoTrying_ = false;
+                hopoSpoil();
+            } else if (hopoMode_ == 1) {
+                if (hopoNote_ < top) hopoNote(top);
+            } else if (top >= 0 && top < hopoNote_) {
+                hopoNote(top);
+            } else if (hopoNote_ < top) {
+                hopoTrying_ = false;
+                hopoSpoil();
+            }
+        }
+        hopoStrums_ = strums;
+        // The checks fading out: + 4 frames per PS2 poll (60 Hz) [I: the poll rate].
+        for (int f = 0; f < 5; ++f) {
+            if (!hopoFading_[size_t(f)]) continue;
+            const std::string mnm = "t1_fret_check" + std::to_string(f + 1) + ".mnm";
+            const float frame = frameOf(mnm) + float(4.0 * dtMs / (1000.0 / 60.0));
+            if (frame > 100) {
+                hopoFading_[size_t(f)] = false;
+                showCheck(f, false);
+                setFrame(mnm, 0);
+            } else {
+                setFrame(mnm, frame);
+            }
+        }
+        if (hopoValid_ && hopoNext_ == int(hopoSeq_.size())) {
+            ++hopoDone_;
+            hopoFadeShown();
+            hopoValid_ = false;
+            if (hopoCb_) ui.interp().send(hopoCb_, "hopo_hit", {});
+        }
+        if (hopoDone_ == int(hopoSeq_.size())) {
+            for (int f = 0; f < 5; ++f) setFrame("t1_fret" + std::to_string(f + 1) + ".view", 0);
+            hopo_ = false;
+        }
+    }
+    void hopoNote(int fret) {
+        hopoNote_ = fret;
+        if (hopoCb_) ui.interp().send(hopoCb_, "fret_played", {Value::integer(fret + 1)});
+        hopoStopSounds();
+        ui.playSfx("s2060" + std::to_string(fret + 1));
+        hopoTimerMs_ = 0;
+        if (hopoValid_ && hopoNext_ < int(hopoSeq_.size()) && fret == hopoSeq_[size_t(hopoNext_)]) {
+            setFrame("t1_fret_check" + std::to_string(fret + 1) + ".mnm", 0);
+            showCheck(fret, true);
+            hopoFading_[size_t(fret)] = false;
+            ++hopoNext_;
+        } else {
+            hopoSpoil();
+        }
+    }
+    void hopoSpoil() {
+        hopoValid_ = false;
+        hopoFadeShown();
+    }
+    void hopoFadeShown() {
+        PanelObj* p = ui.panel("tut_script");
+        for (int f = 0; f < 5; ++f)
+            if (p && p->view && p->view->showing("t1_fretcheck" + std::to_string(f + 1) + ".view")) hopoFading_[size_t(f)] = true;
+    }
+    void hopoStopSounds() {
+        for (int f = 1; f <= 5; ++f) ui.host().stopSfx("s2060" + std::to_string(f));
+    }
+    void showCheck(int fret, bool on) {
+        if (PanelObj* p = ui.panel("tut_script"); p && p->view) p->view->setShowing("t1_fretcheck" + std::to_string(fret + 1) + ".view", on);
+    }
+    float frameOf(const std::string& obj) {
+        PanelObj* p = ui.panel("tut_script");
+        return p && p->view ? p->view->frame(obj) : 0.0f;
     }
     static std::string sound(int fret, int level) {
         char b[16];
@@ -473,11 +636,23 @@ private:
     };
     std::map<std::string, Event> events_;
     std::string dir_;
+    enum class Vo { None, Loading, Playing } vo_ = Vo::None;  // the VO player's stream (+0x3c)
+    std::string voName_, voPath_;
     float volumeDb_ = 0;
     bool tuning_ = false;
     ScriptObject* callback_ = nullptr;
     std::array<int, 5> counts_{};
     int lastStrums_ = 0;
+    // The hopo trainer: on (panel +0xf0), mode, sequence, callback (+0x1f4),
+    // a try going (+0x68) and still good (+0x6c), its note (+0x70), next
+    // sequence step (+0x74), tries done (+0x78), the time since the last
+    // note (+0x88), the checks fading (+0xc4).
+    bool hopo_ = false, hopoTrying_ = false, hopoValid_ = false;
+    int hopoMode_ = 0, hopoNote_ = -1, hopoNext_ = 0, hopoDone_ = 0, hopoStrums_ = 0;
+    std::vector<int> hopoSeq_;
+    ScriptObject* hopoCb_ = nullptr;
+    double hopoTimerMs_ = 0;
+    std::array<bool, 5> hopoFading_{};
 };
 
 // StatsProvider: the endgame stats' practice sections list (none in

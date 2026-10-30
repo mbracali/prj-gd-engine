@@ -340,13 +340,21 @@ bool ComponentObj::handleNative(Interp& in, const std::string& msg, std::vector<
         if (v) v->setPictureTex(name(), argStr(0));
         return true;
     }
-    // An Sfx under a fader ({practice_snare add_fader music_fader}): the
-    // sound is not faded with the fader [I: the port fades the music only].
-    if (msg == "add_fader" || msg == "remove_fader") return true;
+    // An Sfx under a fader ({practice_snare add_fader music_fader},
+    // practice.dta): it plays at the faders' levels (ui/natives.h faderDb).
+    if (msg == "add_fader" || msg == "remove_fader") {
+        const std::string f = args.empty() ? std::string() : nameOf(args[0]);
+        faders.erase(std::remove(faders.begin(), faders.end(), f), faders.end());
+        if (msg == "add_fader" && !f.empty()) faders.push_back(f);
+        return true;
+    }
     // A sound cue in a panel ({sync_click.cue play}) or another sound object.
     if (msg == "play") {
         const SfxArgs a = sfxArgs(in, args, 0);
-        return ui.playSfx(name(), a.volume, a.pan, a.transpose), true;
+        float db = a.volume;
+        for (const std::string& f : faders) db += faderDb(f);
+        if (db <= -96.0f) return true;  // faded out
+        return ui.playSfx(name(), db, a.pan, a.transpose), true;
     }
     // A mesh's set_mat (RndMesh SetMat): the character select's locked
     // portraits draw with char_locked.mat (career.dta) [C data]; it was a
@@ -376,7 +384,22 @@ void ComponentObj::setProp(Interp& in, const std::string& key, const Value& v) {
         setText(s.empty() ? std::string() : panel->ui.localize(s));
         return;
     }
-    if (key == "diffuse_tex" || key == "color") return;  // .mat set (Mat properties; not drawn yet)
+    // {<mat> set diffuse_tex <tex>} (tutorial_31 / _33: t1_guitar_1.mat,
+    // t1_guitar_3.mat): the material draws with that texture from now on,
+    // the texture looked up by name in the panel's milo as the Mat's own
+    // (RndMat's diffuse_tex property: an object pointer resolved in the
+    // directory) [I: Mat property set].
+    if (key == "diffuse_tex") {
+        const scene::Mat* mat = object ? object->as<scene::Mat>() : nullptr;
+        if (!mat || !panel->view) return;
+        const std::string t = nameOf(v);
+        const scene::Object* o = t.empty() ? nullptr : panel->view->find(t);
+        const scene::Tex* tex = o ? o->as<scene::Tex>() : nullptr;
+        if (!t.empty() && !tex) return panel->ui.logOnce("mat set diffuse_tex: no texture " + t);
+        panel->view->pose().matState(mat).tex = tex;
+        return;
+    }
+    if (key == "color") return;  // .mat set color (not drawn yet)
     ScriptObject::setProp(in, key, v);
 }
 
