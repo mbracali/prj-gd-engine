@@ -425,6 +425,7 @@ components: we will.
 | Performance & graphics | Upscaling Quality | Quality, Balanced, Performance | Dropdown |
 | Performance & graphics | Max FPS | 60, 120, 240 or unlimited | Dropdown |
 | Performance & graphics | Show FPS Counter | FPS counter in the bottom-left corner | Check box |
+| Performance & graphics | HDR | None, Emulated, True HDR (`hdr`: `none` / `emulated` / `true`) | Dropdown, default None. See "HDR" below |
 | Performance & graphics | Bokeh Effect | None, light, medium, strong, stronger | Dropdown |
 | Performance & graphics | Enable Particles FX | None, original, 2x | Dropdown |
 | Performance & graphics | Bloom | None, original, 2x, 3x | Dropdown |
@@ -445,6 +446,37 @@ components: we will.
 One key difference from older versions, which had switches to enable the
 guitars and XInput: here **everything is on by default**. Some code may need
 to be redeveloped, adapted or improved for that.
+
+## HDR (2026-10-30)
+
+One Enhanced option, **HDR** (`hdr`), in Performance & graphics after Show
+FPS Counter; no other HDR settings (no sliders: paper white and headroom
+come from the system). Every game copies it (gd-game-01 1.1.7, gd-game-02
+0.1.8 first; gd-game-03 and later port it from gd-game-02).
+
+| Value | Behaviour |
+|---|---|
+| **None** (`none`, the default) | The original image, unchanged: the SDR chain draws exactly the same pixels as without the option |
+| **Emulated** (`emulated`) | The 3D scene (venue, band, their effects) draws into an RGBA16F target, so lights, additive effects and bloom keep values above 1.0. After ambient occlusion and bloom, an auto exposure (the scene's log-average luminance, mip-reduced on the GPU, eased over about a second, half the difference to the key and within -0.5 .. +0.5 stop, so dark venues and menus do not pump) and the ACES filmic tone map (Narkowicz's fit) bring it to SDR; cinematic colour, grading, anti-aliasing, upscaling, sharpening, aberration and grain then run as before. The highway, HUD and menus are drawn after it, untouched |
+| **True HDR** (`true`) | The same, output to an HDR display: the frame draws into an RGBA16F target and is converted at the end for the window's HDR surface, the UI at the display's paper white (SDL's `SDL_PROP_WINDOW_SDR_WHITE_LEVEL_FLOAT`), the scene's highlights up to its headroom (`SDL_PROP_WINDOW_HDR_HEADROOM_FLOAT`; the tone map's shoulder reaches it), re-read on `SDL_EVENT_WINDOW_HDR_STATE_CHANGED`. Windows: a floating-point (WGL RGBA16F) pixel format, composed as scRGB (linear, 1.0 = 80 nits). Linux: Wayland only, an EGL RGBA16F surface with `EGL_EXT_gl_colorspace_scrgb_linear`, else `EGL_EXT_gl_colorspace_bt2020_pq` (+ `EGL_EXT_surface_SMPTE2086_metadata`) |
+
+Fallback (one behaviour for every game): **True HDR is always selectable and
+never greyed**; where it cannot run, the game uses **Emulated** and the help
+box's "Now:" line says why (macOS and Android: no OpenGL HDR path; X11 and
+the Steam Deck's game mode: no HDR surface; no scRGB / PQ colour space in
+the driver's EGL; no floating-point window; HDR off for the display). The
+surface is chosen when the window is made, so choosing True HDR takes effect
+the next time the game starts (until then: Emulated, and the help says so);
+leaving it is immediate. A window or context that cannot be made with the
+HDR surface is made again without it: never a crash or a black window. The
+log says which path was taken (`hdr: scRGB surface`, `hdr: unavailable
+(<reason>), using Emulated`). A temporal AI upscaler (FSR 3.1 / DLSS) takes
+an 8-bit image, so with one the highlights are tone mapped to SDR.
+
+Modes: Original Feel, Steam Deck, Clean Image, Rocking on a Budget and Good
+Old Days set None; Max Out (Full HD) and Max Out (4K) set Emulated. An
+`enhanced.json` or settings file without `hdr` loads as None; Export, Load
+User Settings and the value checks include it.
 
 ## Decisions taken for gd-game-01 (2026-10-29)
 

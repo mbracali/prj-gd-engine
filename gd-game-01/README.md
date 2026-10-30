@@ -99,6 +99,12 @@ frame rate, resolution and touch follow the system:
 | Bokeh Effect / Particles FX | Medium (original) / Original | the Steam Deck mode | as Linux | as Linux | as Linux |
 | Every other effect | None / off | the Steam Deck mode (light bloom, cinematic colour, light Star Power blur, FXAA) | None / off | None / off | None / off |
 
+**HDR** (Performance & Graphics): None (the default, the original image),
+Emulated (high dynamic range tone mapped to any screen) or True HDR (an HDR
+display on Windows, or on a Linux Wayland desktop whose driver offers an
+scRGB / PQ surface; it starts with the game, and falls back to Emulated
+with the reason in the help box where it cannot run).
+
 Settings saved by 1.1.6 and older keep their meaning (for example Bloom High
 is now 3x, Chromatic Aberration on is Medium). XInput gamepads and Rock Band
 guitars always play (their switches are gone); mouse selection is on.

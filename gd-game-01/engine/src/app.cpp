@@ -29,6 +29,7 @@
 #include "game/rules.h"
 #include "game/song_db.h"
 #include "input/input.h"
+#include "render/hdr_output.h"
 #include "render/highway.h"
 #include "render/scene_renderer.h"
 #include "render/track_renderer.h"
@@ -100,7 +101,7 @@ std::map<std::string, Json> enhancedPreset(const std::string& mode) {
         {"film_grain", t("none")},   {"chromatic", t("none")},   {"ssao", t("none")},
         {"star_blur", t("none")},    {"shadows_all", b(false)},  {"more_lights", t("none")}, {"light_dust", t("none")},
         {"color_grade", t("off")},  {"sharpening", t("off")},   {"antialiasing", t("none")},
-        {"ai_upscaling", t("none")}, {"sharp_ui", b(false)}};
+        {"ai_upscaling", t("none")}, {"sharp_ui", b(false)},    {"hdr", t("none")}};
     std::map<std::string, Json> original = none;
     original["bokeh"] = t("medium");  // the original's own depth of field
     original["particles"] = t("original");
@@ -109,7 +110,7 @@ std::map<std::string, Json> enhancedPreset(const std::string& mode) {
         {"film_grain", t("stronger")}, {"chromatic", t("strong")}, {"ssao", t("stronger")},
         {"star_blur", t("stronger")}, {"shadows_all", b(true)}, {"more_lights", t("2.5x")},  {"light_dust", t("2.5x")},
         {"color_grade", t("off")},   {"sharpening", t("low")},    {"antialiasing", t("taa")},
-        {"ai_upscaling", t("none")}, {"sharp_ui", b(true)}};
+        {"ai_upscaling", t("none")}, {"sharp_ui", b(true)},      {"hdr", t("emulated")}};
     auto with = [](std::map<std::string, Json> m, std::map<std::string, Json> over) {
         for (auto& [k, v] : over) m[k] = v;
         return m;
@@ -126,7 +127,8 @@ std::map<std::string, Json> enhancedPreset(const std::string& mode) {
     if (mode == "max_4k") return with(max, {{"internal_res", t("2160")}, {"max_fps", t("240")}});
     if (mode == "budget") return with(none, {{"max_fps", t("60")}, {"internal_res", t("720")}});
     if (mode == "good_old_days")  // every effect, in sepia, at the PS2's resolution
-        return with(max, {{"color_grade", t("sepia")}, {"internal_res", t("448")}, {"max_fps", t("60")}, {"antialiasing", t("none")}});
+        return with(max, {{"color_grade", t("sepia")}, {"internal_res", t("448")}, {"max_fps", t("60")}, {"antialiasing", t("none")},
+                          {"hdr", t("none")}});
     return {};
 }
 
@@ -204,6 +206,7 @@ const std::map<std::string, std::set<std::string>>& enhancedChoices() {
         {"light_dust", {"none", "1.5x", "2x", "2.5x"}},
         {"color_grade", {"off", "warm", "cold", "vintage", "noir", "neon", "sepia"}},
         {"sharpening", {"off", "low", "high"}},
+        {"hdr", {"none", "emulated", "true"}},
         {"hopo_mode", {"original", "forgiving"}}};
     return c;
 }
@@ -398,6 +401,11 @@ private:
     std::unique_ptr<Scene> viewScene_;
     std::unique_ptr<UiSystem> ui_;  // the original menus (ghui scripts)
     Json enhanced_ = Json::object();  // Enhanced Settings (enhanced.json)
+    // Enhanced > HDR > True HDR: the window's surface (chosen at start) and why it is SDR when it is.
+    hdr::Surface hdrSurface_ = hdr::Surface::Sdr;
+    std::string hdrReason_;
+    std::string hdrStatus() const;
+    std::string hdrApplied_;  // the mode last applied (logged on change)
     // A setting's value in effect: saved, else its default.
     Json enhanced(const std::string& key) const {
 #ifdef __ANDROID__
@@ -711,6 +719,7 @@ void App::tryLoadData(const std::string& path) {
             hooks.setEnhancedSetting = [this](const std::string& key, bool on) { setEnhanced(key, Json::boolean(on)); };
             hooks.enhancedValue = [this](const std::string& key) {
                 if (key == "upscaler_status") return renderer_.upscalerStatus();  // read-only, for the AI Upscaling help
+                if (key == "hdr_status") return hdrStatus();                      // read-only, for the HDR help
                 return enhanced(key).str();
             };
             hooks.setEnhancedValue = [this](const std::string& key, const std::string& v) { setEnhanced(key, Json::string(v)); };
@@ -1013,6 +1022,24 @@ void App::tutorialStart(bool skipIntro, bool startPaused) {
 // saves one frame and quits (works with SDL_VIDEO_DRIVER=offscreen).
 // GD01_SCREENSHOT_WALL=<ms>[,<ms>...]: wait that long after start (menus);
 // with several times, each shot is saved as <file>_<ms>.bmp and the last one quits.
+// Enhanced > HDR's "Now:" line: what the image is doing, and why True HDR
+// fell back to Emulated when it did (universal_mechanisms.md 1.2.2).
+std::string App::hdrStatus() const {
+    const std::string mode = enhanced("hdr").str();
+    if (mode == "emulated") return "Emulated: HDR rendering tone mapped to your screen";
+    if (mode != "true") return "";
+    std::string why;
+    if (hdrSurface_ == hdr::Surface::Sdr) {
+        if (!hdrReason_.empty()) why = "unavailable: " + hdrReason_;
+        else why = "takes effect the next time the game starts";
+    } else {
+        std::string live = renderer_.hdrStatus();
+        if (live.rfind("off:", 0) != 0) return "True HDR: " + live;
+        why = live.substr(5);
+    }
+    return "True HDR " + why + ". Using Emulated.";
+}
+
 void App::captureDebugScreenshot() {
     const char* file = SDL_getenv("GD01_SCREENSHOT");
     if (!file) return;
@@ -1860,7 +1887,15 @@ void App::applyEnhanced() {
         post.ssao = enhancedLevel("ssao");
         post.sharpen = enhanced("sharpening").str() == "high" ? 2 : enhanced("sharpening").str() == "low" ? 1 : 0;
         post.starBlur = enhancedLevel("star_blur");
+        // HDR: True HDR needs the window's HDR surface (made at start); without it, Emulated.
+        const std::string hdrMode = enhanced("hdr").str();
+        post.hdr = hdrMode == "true" ? 2 : hdrMode == "emulated" ? 1 : 0;
         renderer_.setPost(post);
+        if (hdrMode != hdrApplied_) {
+            hdrApplied_ = hdrMode;
+            const std::string st = hdrStatus();
+            SDL_Log("hdr: mode %s%s", hdrMode.c_str(), st.empty() ? "" : (" - " + st).c_str());
+        }
     }
     // Controls: touch (SDL's touch-made mouse events only while it is off), XInput joypads, Rock Band guitars.
     input_.setTouch(enhancedOn("touch"));
@@ -2427,16 +2462,43 @@ int App::run() {
     // Development aid: GD01_WINDOW=<w>x<h> sets the starting window size (e.g. ultrawide tests).
     int winW = int(kScreenW), winH = int(kScreenH);
     if (const char* ws = SDL_getenv("GD01_WINDOW")) std::sscanf(ws, "%dx%d", &winW, &winH);
-    window_ = SDL_CreateWindow(kAppTitle, winW, winH,
-                               SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY
+    const SDL_WindowFlags winFlags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY
 #ifdef __ANDROID__
-                                   | SDL_WINDOW_FULLSCREEN
+                                     | SDL_WINDOW_FULLSCREEN
 #endif
-    );
+        ;
+    // Enhanced > HDR > True HDR: the window's surface is chosen now (render/hdr_output.h).
+    // A window or surface that cannot be made with it is made again without (Emulated).
+    hdrSurface_ = hdr::Surface::Sdr;
+    hdrReason_ = hdr::unsupportedReason();
+    const bool wantHdr = enhanced("hdr").str() == "true" && hdr::request();
+    window_ = SDL_CreateWindow(kAppTitle, winW, winH, winFlags);
+    if (wantHdr) {
+        if (window_) {
+            if (SDL_GLContext probe = SDL_GL_CreateContext(window_)) {
+                hdrSurface_ = hdr::obtained(hdrReason_);
+                SDL_GL_DestroyContext(probe);
+            } else {
+                hdrReason_ = hdr::failure("no OpenGL context on an HDR surface", SDL_GetError());
+            }
+        } else {
+            hdrReason_ = hdr::failure("no window with an HDR surface", SDL_GetError());
+        }
+        if (hdrSurface_ == hdr::Surface::Sdr) {
+            if (window_) SDL_DestroyWindow(window_);
+            hdr::cancel();
+            window_ = SDL_CreateWindow(kAppTitle, winW, winH, winFlags);
+        }
+    }
+    if (enhanced("hdr").str() == "true")
+        SDL_Log("hdr: %s", hdrSurface_ == hdr::Surface::ScRgb ? "scRGB surface (linear, RGBA16F)"
+                           : hdrSurface_ == hdr::Surface::Pq  ? "BT.2020 PQ surface"
+                                                              : ("unavailable (" + hdrReason_ + "), using Emulated").c_str());
     setAppWindowIcon(window_);
     installDesktopEntry();
     std::string glError;
     bool glOk = window_ && renderer_.init(window_, glError);
+    if (glOk) renderer_.setHdrSurface(int(hdrSurface_));
     gpu::started(glOk, renderer_.gpuName());
     if (!glOk) {
         std::string msg = "Cannot start graphics: " + (window_ ? glError : std::string(SDL_GetError()));
@@ -2479,6 +2541,7 @@ int App::run() {
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
             if (e.type == SDL_EVENT_QUIT) running_ = false;
+            else if (e.type == SDL_EVENT_WINDOW_HDR_STATE_CHANGED) renderer_.hdrStateChanged();  // HDR on / off, paper white, headroom
             else if (e.type == SDL_EVENT_DROP_FILE && e.drop.data && screen_ != Screen::Playing) tryLoadData(e.drop.data);
 #ifdef __ANDROID__
             else if (e.type == SDL_EVENT_FINGER_UP && screen_ == Screen::NeedData) isoImport_.pick(window_);

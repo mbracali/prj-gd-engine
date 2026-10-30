@@ -16,7 +16,7 @@
 # gamepads gamepads_pad. "band" runs first when another walk needs its save.
 # The universal menus (universal_mechanisms.md) are covered by: logo_skip and
 # band (1.1.1 skips, 1.1.2 band naming), mouse (1.1.3, credits skip),
-# enhanced (1.2.2 Modes, old enhanced.json), gamepads / gamepads_pad (1.2.1).
+# enhanced (1.2.2 Modes, old enhanced.json, HDR), gamepads / gamepads_pad (1.2.1).
 set -uo pipefail
 bin="$(realpath "$1")"
 iso="$(realpath "$2")"
@@ -108,8 +108,36 @@ walk_enhanced() {
   seed="$s"
   run enhanced 6000 "3000:keyDown,3150:keyDown,3300:keyDown,3450:keyDown,3600:keyDown,3750:keyDown,3900:keyDown,4200:keyReturn" GD01_SKIP_BOOT=1 GD01_SCREEN=enhanced_settings
   seed="$keep"
-  result enhanced "$(json "$(save enhanced)/enhanced.json" "d['color_grade'] == 'sepia' and d['internal_res'] == '448' and d['bloom'] == '3x' and d['fps_counter'] is True and 'rockband' not in d and 'xinput' not in d")" \
+  result enhanced "$(json "$(save enhanced)/enhanced.json" "d['color_grade'] == 'sepia' and d['internal_res'] == '448' and d['bloom'] == '3x' and d['fps_counter'] is True and 'rockband' not in d and 'xinput' not in d and d['hdr'] == 'none'")" \
     "Good Old Days preset applied over a migrated 1.1.6 file"
+  walk_enhanced_hdr
+}
+
+# Enhanced > HDR (universal_mechanisms.md 1.2.2): from a file without the key
+# (None), Right steps the row through Emulated, True HDR (offscreen has no HDR
+# surface: the logged fallback to Emulated), None and Emulated again, each
+# applied and saved. Then the Enhanced screen's backdrop at a fixed time:
+# HDR None draws the same pixels as a file without the key, Emulated does not.
+walk_enhanced_hdr() {
+  local s keys keep="$seed" i
+  s="$work/enhanced_hdr_seed" && rm -rf "$s" && cp -r "$seed" "$s"
+  printf '{"bloom":"original"}\n' > "$s/gd-engine/gd01/enhanced.json"
+  seed="$s"
+  keys=""
+  for i in $(seq 0 19); do keys+="$((2500 + i * 100)):keyDown,"; done  # down to the HDR row
+  run enhanced_hdr 9000 "${keys}5000:keyRight,5800:keyRight,6600:keyRight,7400:keyRight" GD01_SKIP_BOOT=1 GD01_SCREEN=enhanced_settings
+  result enhanced_hdr "$(( $(json "$(save enhanced_hdr)/enhanced.json" "d['hdr'] == 'emulated'") && $(has enhanced_hdr "hdr: mode none") && \
+    $(has enhanced_hdr "hdr: mode emulated - Emulated") && $(has enhanced_hdr "hdr: mode true - True HDR unavailable.*Using Emulated") ))" \
+    "HDR row: None > Emulated > True HDR (fallback logged) > None > Emulated, saved"
+  local hashes=() j
+  for j in '{"bloom":"original"}' '{"bloom":"original","hdr":"none"}' '{"bloom":"original","hdr":"emulated"}'; do
+    printf '%s\n' "$j" > "$s/gd-engine/gd01/enhanced.json"
+    run enhanced_frame 5000 "" GD01_SKIP_BOOT=1 GD01_SCREEN=enhanced_settings GD01_FIXED_CLOCK=16.6667
+    hashes+=("$(md5sum < "$work/enhanced_frame/shot.bmp" | cut -c1-32)")
+  done
+  seed="$keep"
+  result enhanced_hdr_frame "$([ "${hashes[0]}" = "${hashes[1]}" ] && [ "${hashes[0]}" != "${hashes[2]}" ] && echo 1 || echo 0)" \
+    "fixed frame: HDR None identical to no HDR key, Emulated differs"
 }
 
 # GAMEPADS (blue / F4): Player 1 (keyboard) > Customize inputs, Green Fret

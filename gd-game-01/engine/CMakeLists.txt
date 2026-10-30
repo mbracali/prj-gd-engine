@@ -47,6 +47,7 @@ target_sources(gd01 PRIVATE
   src/render/gl.cpp
   src/render/highway.cpp
   src/render/post_fx.cpp
+  src/render/hdr_output.cpp
   src/render/vk_upscaler.cpp
   src/render/renderer.cpp
   src/render/scene_renderer.cpp

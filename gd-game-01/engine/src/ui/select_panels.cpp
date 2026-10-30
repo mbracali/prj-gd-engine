@@ -1079,6 +1079,13 @@ private:
              {{"60", "60"}, {"120", "120"}, {"240", "240"}, {"unlimited", "Unlimited"}}},
             {Kind::Check, "fps_counter", "Show FPS Counter", true,
              "Shows the frames drawn per second in the bottom-left corner of the screen."},
+            {Kind::Choice, "hdr", "HDR", true,
+             "High dynamic range for the venue and the band. None: the original image. Emulated: lights and glows "
+             "keep their full brightness, an automatic exposure follows the stage and a filmic curve brings it to "
+             "any screen. True HDR: the same, shown on an HDR display (Windows, or a Linux Wayland desktop, with HDR "
+             "on), brighter highlights, menus at the screen's paper white; it starts with the game, and where it "
+             "cannot run Emulated is used. Menus and the HUD keep their colours.",
+             {{"none", "None"}, {"emulated", "Emulated"}, {"true", "True HDR"}}},
             {Kind::Choice, "bokeh", "Bokeh Effect", true,
              "The depth-of-field blur of the close shots. None: always sharp. Medium: as the original game. Light is "
              "softer; Strong and Stronger start the focus nearer the subject and blur wider.",
@@ -1456,11 +1463,12 @@ private:
         const float o = offset_, x0 = kPopX0 + o, x1 = kPopX1 + o, pad = 24, bodyH = 22, lineH = 30;
         std::vector<std::string> lines = wrap(it.help, x1 - x0 - 2 * pad, bodyH);
         const bool locked = it.kind != Kind::Section && it.kind != Kind::Button && it.ready && !editable(it);
-        const bool calib = std::string(it.key) == "calibrate" || std::string(it.key) == "ai_upscaling";  // a status line
-        // The upscaler's status (what runs, its resolutions and cost) can take two lines.
+        const bool calib = std::string(it.key) == "calibrate" || std::string(it.key) == "ai_upscaling" ||
+                           std::string(it.key) == "hdr";  // a status line
+        // The upscaler's (what runs, its resolutions and cost) and HDR's status can take two lines.
         std::vector<std::string> status;
-        if (std::string(it.key) == "ai_upscaling") {
-            const std::string st = host_.enhancedValue("upscaler_status");
+        if (std::string(it.key) == "ai_upscaling" || std::string(it.key) == "hdr") {
+            const std::string st = host_.enhancedValue(std::string(it.key) == "hdr" ? "hdr_status" : "upscaler_status");
             status = wrap("Now: " + (st.empty() ? std::string("off") : st), x1 - x0 - 2 * pad, 19);
         }
         float height = pad + 46 + float(lines.size()) * lineH + (!it.ready || locked || calib ? 42 : 0) +
@@ -1474,7 +1482,7 @@ private:
         text("impactor.font", it.name, x0 + pad, y + 2, 30, kFocused, 0x11);
         y += 46;
         for (const std::string& l : lines) text("impactor.font", l, x0 + pad, y, bodyH, kNormal, 0x11), y += lineH;
-        if (std::string(it.key) == "ai_upscaling") {
+        if (std::string(it.key) == "ai_upscaling" || std::string(it.key) == "hdr") {
             y += 6;
             for (const std::string& l : status) text("impactor.font", l, x0 + pad, y + 13, 19, kOn, 0x21), y += 26;
         } else if (std::string(it.key) == "calibrate") {

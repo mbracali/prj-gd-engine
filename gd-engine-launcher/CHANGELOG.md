@@ -10,6 +10,9 @@ Games
   finer effect levels, new default controls with no double inputs, and
   every logo, movie and credit screen skippable with any button, a click or
   a tap. See universal_mechanisms.md.
+  Enhanced Settings has a new HDR option: None (the original image),
+  Emulated (HDR rendering tone mapped to any screen) or True HDR (an HDR
+  display on Windows or a Linux Wayland desktop).
 - Guitar Hero II (gd-game-02) 0.1.8: the same universal menus. The new
   GAMEPADS screen (yellow fret on the main menu), the new Enhanced Options
   (Modes presets, finer effect levels, scrollbar, Back / Export / Import),

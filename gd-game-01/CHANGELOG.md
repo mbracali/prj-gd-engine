@@ -41,6 +41,15 @@ every screen works with any controller, the mouse and touch.**
   the band name, UP / DOWN) in the original's style; all of them are
   clickable (the UP / DOWN button: its upper half is up, its lower half
   down).
+- Enhanced Settings > HDR (None, Emulated, True HDR; None is the default and
+  the original image, unchanged). Emulated renders the venue and the band in
+  floating point, so lights and glows keep their full brightness, with an
+  automatic exposure and a filmic (ACES) tone map for any screen; True HDR
+  shows the same on an HDR display (Windows; Linux on a Wayland desktop whose
+  graphics driver offers an scRGB or PQ surface), menus and the HUD at the
+  screen's paper white. True HDR takes effect when the game starts; where it
+  cannot run (macOS, Android, X11, the Steam Deck, HDR off on the display),
+  Emulated is used and the help box says why. Max Out sets Emulated.
 
 ### Changed
 - New default controls. Keyboard: frets 1-5 (or F1-F5), arrows for menus and
