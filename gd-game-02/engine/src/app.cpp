@@ -539,7 +539,7 @@ int App::run() {
     if (!options_.walk.empty()) {
         walk_ = std::make_unique<WalkDriver>(options_.walk);
         if (!walk_->known()) {
-            std::fprintf(stderr, "%s: unknown walk test '%s' (quickplay, lose, pause, attract, career, back, enhanced, cheats)\n", app::kProgram, options_.walk.c_str());
+            std::fprintf(stderr, "%s: unknown walk test '%s' (quickplay, lose, pause, attract, career, back, enhanced, cheats, mouse, gamepads, gamepads_pad, ...)\n", app::kProgram, options_.walk.c_str());
             SDL_Quit();
             return 2;
         }
@@ -2014,6 +2014,8 @@ bool handheldHost() {
 // Export User Files' names (gd01's GD01-user-*.json).
 constexpr const char* kSettingsFile = "GD02-user-settings.json";
 constexpr const char* kProgressFile = "GD02-user-progress.json";
+// The Gamepad menu's Export / Import (gd01's GD01-controllers.json).
+constexpr const char* kControllersFile = "GD02-controllers.json";
 
 // A file dialog's answer (SDL_DialogFileCallback may run on another thread).
 struct DialogRequest {
@@ -2087,20 +2089,23 @@ void App::enhancedAction(const std::string& action) {
         SDL_Log("enhanced options: %s", userFilesStatus_.c_str());
         return;
     }
-    if (action != "export" && action != "load_settings" && action != "load_progress") return;
+    if (action != "export" && action != "load_settings" && action != "load_progress" && action != "export_controllers" &&
+        action != "import_controllers")
+        return;
     // Development aid: GD02_DIALOG=<path> answers the dialog at once (the
     // walk tests); a folder answers the load dialogs with its exported file.
     if (const char* forced = SDL_getenv("GD02_DIALOG")) {
         std::string path = forced;
         std::error_code ec;
-        if (action != "export" && std::filesystem::is_directory(path, ec))
-            path = (std::filesystem::path(path) / (action == "load_settings" ? kSettingsFile : kProgressFile)).string();
+        if (action != "export" && action != "export_controllers" && std::filesystem::is_directory(path, ec))
+            path = (std::filesystem::path(path) / (action == "load_settings" ? kSettingsFile : action == "import_controllers" ? kControllersFile
+                                                                                                                         : kProgressFile)).string();
         std::lock_guard<std::mutex> lock(dialogMutex_);
         dialogResults_.push_back({action, path});
         return;
     }
     auto* req = new DialogRequest{&dialogMutex_, &dialogResults_, action};
-    if (action == "export") {
+    if (action == "export" || action == "export_controllers") {
         SDL_ShowOpenFolderDialog(dialogDone, req, window_, nullptr, false);
     } else {
         static const SDL_DialogFileFilter kJson[] = {{"GD02 user files", "json"}};
@@ -2117,6 +2122,11 @@ void App::pollUserFiles() {
     for (const auto& [action, path] : done) {
         if (path.empty()) continue;  // cancelled
         if (action == "export") exportUserFiles(path);
+        else if (action == "export_controllers")  // the Gamepad menu's Export
+            userFilesStatus_ = input_.exportTo((std::filesystem::path(path) / kControllersFile).string()) ? std::string("Exported to ") + kControllersFile
+                                                                                                         : "Could not write the controllers file";
+        else if (action == "import_controllers")  // the Gamepad menu's Import
+            userFilesStatus_ = input_.importFrom(path) ? "Controllers loaded" : "Could not load that controllers file";
         else if (action == "load_settings") userFilesStatus_ = importSettings(path) ? "Settings loaded" : "Could not load that settings file";
         else if (action == "load_progress") userFilesStatus_ = importProgress(path) ? "Progress loaded" : "Could not load that progress file";
         SDL_Log("enhanced options: %s: %s", action.c_str(), userFilesStatus_.c_str());

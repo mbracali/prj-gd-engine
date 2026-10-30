@@ -556,13 +556,23 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         expect_ = {"main_screen", "options_screen", "enhanced_options_screen", "options_screen", "main_screen"};
     } else if (scenario == "gamepads") {
         at("main_screen");
+        check("gp_p1_keyboard");  // the keyboard is player 1 (whatever pads this machine has)
         key(SDLK_3);  // the keyboard's yellow fret
         at("gamepads_screen", 3000);
-        for (int i = 0; i < 11; ++i) press(kUp), wait(80);  // up from the keyboard wraps to its rows: Whammy
+        // The Gamepad menu (universal_mechanisms.md 1.2.1): Player 1 ->
+        // Instrument -> Bind to -> Customize inputs, then INPUTS MAPPING.
+        for (int i = 0; i < 3; ++i) press(kDown), wait(80);
+        press(kX), wait(200);
+        check("gp_editing");
+        for (int i = 0; i < 13; ++i) press(kDown), wait(60);  // Start .. Whammy (the headings are skipped)
+        press(kRight), wait(80);  // Key 2
         press(kX);  // waits for a key
         wait(200);
         key(SDLK_E);
         wait(300);
+        check("whammy_e_unsaved");  // works at once, written only on Save
+        for (int i = 0; i < 4; ++i) press(kDown), wait(60);  // Gyro, Require Strum, Reset, Save
+        press(kX), wait(300);
         check("whammy_is_e");
         press(kTri);
         at("main_screen");
@@ -570,6 +580,25 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         check("click_help1");  // the help bar's GAMEPADS
         at("gamepads_screen", 3000);
         expect_ = {"main_screen", "gamepads_screen", "main_screen", "gamepads_screen"};
+    } else if (scenario == "gamepads_pad") {
+        // A pad plugged in takes player 1 (the keyboard player 2); Player 2's
+        // Bind to > Detect, then the pad's A: the pad is player 2.
+        at("main_screen");
+        check("vpad_attach");
+        wait(600);
+        key(SDLK_3);
+        at("gamepads_screen", 3000);
+        for (int i = 0; i < 6; ++i) press(kDown), wait(80);  // Player 2's Bind to
+        press(kX), wait(150);  // its dropdown (on the keyboard)
+        press(kUp), wait(80), press(kUp), wait(80);  // None, then round to Detect
+        press(kX), wait(150);
+        check("gp_detecting");
+        check("vpad_press");
+        wait(300);
+        check("pad_is_p2");
+        press(kTri);
+        at("main_screen");
+        expect_ = {"main_screen", "gamepads_screen", "main_screen"};
     } else if (scenario == "stickyaxis") {
         at("main_screen");
         check("adapter_attach");
@@ -721,7 +750,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
 
 std::string WalkDriver::startScreen() const {
     if (scenario_ == "lose" || scenario_ == "pause" || scenario_ == "back" || scenario_ == "enhanced" || scenario_ == "cheats" ||
-        scenario_ == "mouse" || scenario_ == "gamepads" || scenario_ == "stickyaxis")
+        scenario_ == "mouse" || scenario_ == "gamepads" || scenario_ == "gamepads_pad" || scenario_ == "stickyaxis")
         return "main_screen";
     if (scenario_ == "attract") return "splash_screen";
     return "";
@@ -913,10 +942,33 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
                 }
         return fail("the help bar's second item was not drawn");
     }
-    if (s.screen == "whammy_is_e") {
-        bool bound = false;
-        for (const Input::Source& src : ui.input().bindings("keyboard")[size_t(Input::Control::Whammy)])
-            bound = bound || (src.kind == Input::Source::Kind::Key && src.index == int(SDLK_E));
+    if (s.screen == "gp_p1_keyboard") {
+        ui.input().setPlayer("keyboard", 0);
+        return pass();
+    }
+    if (s.screen == "gp_editing") return ui.input().editing() ? pass() : fail("Customize inputs did not start an edit");
+    if (s.screen == "gp_detecting") return ui.input().detecting() ? pass() : fail("Bind to > Detect did not wait for a device");
+    if (s.screen == "vpad_attach") {
+        adapter_ = Input::attachVirtualPad("045e:028e");
+        return adapter_ ? pass() : fail("no virtual pad");
+    }
+    if (s.screen == "vpad_press") {
+        SDL_Joystick* j = SDL_GetJoystickFromID(adapter_);
+        if (!j) return fail("the virtual pad is not open");
+        SDL_SetJoystickVirtualButton(j, SDL_GAMEPAD_BUTTON_SOUTH, true);
+        return pass();
+    }
+    if (s.screen == "pad_is_p2") {
+        if (SDL_Joystick* j = SDL_GetJoystickFromID(adapter_)) SDL_SetJoystickVirtualButton(j, SDL_GAMEPAD_BUTTON_SOUTH, false);
+        const std::string p2 = ui.input().playerDevice(1), p1 = ui.input().playerDevice(0);
+        std::printf("  gamepads: player 1 %s, player 2 %s\n", p1.c_str(), p2.c_str());
+        return p2 == "pad:" + std::to_string(adapter_) && p1 == "keyboard" && !ui.input().detecting()
+                   ? pass() : fail("Detect did not bind the pad pressed to player 2 (the keyboard to player 1)");
+    }
+    if (s.screen == "whammy_is_e" || s.screen == "whammy_e_unsaved") {
+        // Key 2 of the keyboard's Whammy is E, Key 1 (Shift) kept.
+        const auto& w = ui.input().bindings("keyboard")[size_t(Input::Control::Whammy)];
+        const bool bound = w.size() == 2 && w[0].index == int(SDLK_LSHIFT) && w[1].kind == Input::Source::Kind::Key && w[1].index == int(SDLK_E);
         const char* dir = SDL_getenv("GD02_SAVE_DIR");
         std::ifstream f(std::filesystem::path(dir ? dir : "") / "controllers.json");
         std::stringstream ss;
@@ -928,8 +980,10 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
                 saved = saved || (j["kind"].str() == "key" && int(j["index"].num()) == int(SDLK_E));
         } catch (const std::exception&) {
         }
-        std::printf("  gamepads: Whammy %s, controllers.json %s\n", bound ? "on E" : "not on E", saved ? "has it" : "does not");
-        return bound && saved ? pass() : fail("the rebinding of the keyboard's Whammy to E did not take or was not saved");
+        std::printf("  gamepads: Whammy %s, controllers.json %s\n", bound ? "on Shift / E" : "not on Shift / E", saved ? "has it" : "does not");
+        if (s.screen == "whammy_e_unsaved")
+            return bound && !saved && ui.input().editing() ? pass() : fail("Key 2 of Whammy did not take at once, or was saved before Save");
+        return bound && saved && !ui.input().editing() ? pass() : fail("the rebinding of the keyboard's Whammy to E did not take or was not saved");
     }
     if (s.screen == "adapter_attach") {
         adapter_ = Input::attachVirtualPad("0079:0006:dpadaxis=-32768");

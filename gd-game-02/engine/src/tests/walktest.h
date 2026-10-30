@@ -55,10 +55,15 @@ class UiManager;
 //              it -> Options -> click Enhanced Options -> In-Game Max FPS's
 //              dropdown clicked open, 60 clicked -> right click -> Options ->
 //              the help bar's BACK clicked -> main.
-//   gamepads   the keyboard's yellow fret on the main menu -> GAMEPADS (once
-//              the cheat codes' 750 ms are over) -> the keyboard's Whammy
-//              rebound to E (a real key) and saved in controllers.json ->
-//              back -> main; then the help bar's GAMEPADS clicked -> GAMEPADS.
+//   gamepads   the keyboard's yellow fret on the main menu -> the Gamepad menu
+//              (once the cheat codes' 750 ms are over) -> Player 1 > Customize
+//              inputs -> Key 2 of the keyboard's Whammy bound to E (a real
+//              key), working at once, written to controllers.json only on
+//              Save -> back -> main; then the help bar's GAMEPADS clicked.
+//   gamepads_pad  a virtual Xbox 360 pad plugged in at the main menu (player
+//              1, the keyboard player 2) -> the Gamepad menu -> Player 2's
+//              Bind to > Detect -> the pad's A: the pad is player 2, the
+//              keyboard player 1.
 //   stickyaxis an adapter whose D-pad is an axis resting off centre (a
 //              virtual pad, 0079:0006:dpadaxis=-32768) plugged in at the main
 //              menu: no left / right press in 2 s; moved, one right press.
