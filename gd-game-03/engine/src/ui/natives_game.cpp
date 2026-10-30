@@ -725,11 +725,18 @@ private:
         if (msg == "in_star_mode") return r = Value::integer(p && p->starPowerActive() ? 1 : 0), true;
         if (msg == "star_power_ready") return r = Value::integer(p && p->starPowerReady() ? 1 : 0), true;
         if (msg == "crowd_rating") return r = Value::real(p ? p->rockMeter() : 0.5f), true;
-        if (msg == "crowd_rating_active") return r = Value::integer(1), true;
+        if (msg == "crowd_rating_active") return r = Value::integer(p && p->crowdActive() ? 1 : 0), true;
+        // set_crowd_rating / set_crowd_rating_active (0x0010fe90) [C]: the
+        // tutorials' interface lesson and the cheats' crowd meter toggle.
+        if (msg == "set_crowd_rating" || msg == "set_crowd_rating_active") {
+            ui_.host().setPlayerStarPower(index, msg == "set_crowd_rating" ? "crowd_rating" : "crowd_rating_active",
+                                          args.empty() ? 0.0f : msg == "set_crowd_rating" ? args[0].number() : args[0].truthy() ? 1.0f : 0.0f);
+            return true;
+        }
         if (msg == "win") return r = Value::integer(p && !p->failed() ? 1 : 0), true;
         if (msg == "failed") return r = Value::integer(p && p->failed() ? 1 : 0), true;
         if (sinks_.handle(ui_.interp(), msg, args)) return true;
-        if (msg == "set_crowd_rating" || msg == "set_crowd_rating_active" || msg == "on_downbeat" || msg == "on_game_over" || msg == "load")
+        if (msg == "on_downbeat" || msg == "on_game_over" || msg == "load")
             return true;
         // The Star Power natives the tutorials use (0x001131a0) [C]:
         // fill_star_power / empty_star_power / set_star_power <n> set the

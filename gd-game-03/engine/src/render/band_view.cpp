@@ -43,7 +43,50 @@ bool BandView::draw(gfx::MaterialRenderer& mr, const scene::Object* slot, const 
     if (!c.visible) return true;
     selectEnv(c.slotEnviron ? c.slotEnviron : fallback);
     drawCharacter(mr, c, camera, hdr);
+    if (!m->fx.empty()) drawFx(mr, c, m, camera);
     return true;
+}
+
+void BandView::drawFx(gfx::MaterialRenderer& mr, chr::Character& c, const void* member, const gfx::Camera& camera) {
+    const auto* m = static_cast<const Band::Member*>(member);
+    if (!particles_) particles_ = std::make_unique<gfx::ParticleRenderer>(cache_.device());
+    particles_->setHdr(hdr_);
+    const double now = world_ ? world_->seconds() : 0.0;
+    for (const auto& [name, f] : m->fx) {
+        if (!f || !f->obj || !f->milo) continue;
+        FxState& st = fx_[f.get()];
+        if (st.parts.empty()) {
+            uint32_t seed = 11;
+            for (const auto& o : f->milo->root().objects)
+                if (o->as<scene::ParticleSys>() || o->as<scene::ParticleSysAnim>()) st.parts.add(o.get(), seed++);
+            if (st.parts.empty()) continue;
+        }
+        // Its animatables (the AnimFilters over the MatAnims, the particle
+        // systems) from frame 0 at each start: RndDir's animate (range 0
+        // kHugeFloat), as the crowd's lighter_flame.
+        // The time since the start on the world clock's forward steps (the
+        // band enters before a song resets that clock).
+        if (st.start != f->start) st.start = f->start, st.elapsed = 0, st.last = now;
+        if (now > st.last && now - st.last < 1.0) st.elapsed += now - st.last;
+        st.last = now;
+        const float frame = float(st.elapsed * 30.0);
+        // The MatAnims run through their AnimFilters (cheat_headflames_0n.filt
+        // over .mnm) when the effect has filters [I: the filters' targets].
+        bool filters = false;
+        for (const auto& o : f->milo->root().objects) filters = filters || o->cls == "AnimFilter";
+        for (const auto& o : f->milo->root().objects)
+            if (o->cls == "AnimFilter" || (!filters && o->as<scene::MatAnim>()) || o->as<scene::ParticleSysAnim>() || o->as<scene::ParticleSys>())
+                st.pose.setFrame(o.get(), frame);
+        scene::Xfm parent;
+        if (!c.worldOf(f->obj->rnd.trans.parent, parent)) continue;
+        const scene::Xfm base = scene::compose(f->obj->rnd.trans.local, parent);
+        st.parts.sync(st.pose);
+        st.parts.setEmitting(f->on);
+        st.parts.update(st.pose, base, float(now * 30.0));
+        const int before = particles_->drawnParticles();
+        st.parts.draw(*particles_, mr, cache_, camera, Mat4::identity(), &st.pose);
+        fxParticles_ += particles_->drawnParticles() - before;
+    }
 }
 
 void BandView::drawCharacter(gfx::MaterialRenderer& mr, chr::Character& c, const gfx::Camera& camera, bool hdr) {

@@ -153,6 +153,12 @@ public:
     // The crowd's SetRating (0x822DE530): the rating clamped to 0..1, raw
     // at that point of the range (GamePanel sets 1 for an encore, 0x822CCA60).
     void setCrowdRating(float rating);
+    // Performer +0x44 (crowd_rating_active): the mode's (modes.dta) at the
+    // start, script set_crowd_rating_active after; while off the crowd
+    // update does nothing, so the meter holds and nobody fails
+    // (0x0010fc78, 0x0010fe90) [C].
+    void setCrowdActive(bool on) { crowdActive_ = on; }
+    bool crowdActive() const { return crowdActive_; }
     float warningLevel() const { return crowd_.warningLevel; }
     float starMeter() const { return meter_->value; }
     PerformerState state() const;
@@ -245,6 +251,7 @@ private:
     Difficulty difficulty_;
     ControllerMode mode_;
     bool noFail_;
+    bool crowdActive_ = true;
     int index_;
     int number_ = 0;
     float norm_ = 1;

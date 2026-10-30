@@ -215,6 +215,44 @@ WalkDriver::WalkDriver(const std::string& name)
         check("menu_sounds");
         expect_ = {"main_screen", "qp_selsong_screen", "qp_diff_screen", "loading_screen", "game_screen", "pause_screen",
                    "game_screen", "pause_screen", "game_screen", "pause_screen", "meta_loading_screen", "qp_selsong_screen"};
+    } else if (scenario == "flaming_head") {
+        // GD03-048 / GD03-045: the Flaming Head code at the main menu, a
+        // song: the guitarist's cheat_headflames (char/shared/og) burns;
+        // then the Horse Head code and a song: the band wear their
+        // <char>_horse.milo (which have no cheat_headflames: no flames).
+        auto code = [&](std::initializer_list<int> buttons) {
+            for (int b : buttons) key(b == kYellow ? SDLK_3 : b == kBlue ? SDLK_4 : SDLK_5), wait(120);
+        };
+        auto quit = [&] {
+            press(kStart);
+            at("pause_screen");
+            press(kUp);  // QUIT
+            wait(150);
+            press(kX);
+            at("meta_loading_screen");
+            at("qp_selsong_screen");
+        };
+        at("main_screen");
+        code({kYellow, kOrange, kYellow, kOrange, kYellow, kOrange, kBlue, kOrange});  // Flaming Head
+        wait(2000);
+        quickplaySong(0);
+        wait(3000);
+        check("band_flames");
+        check("shot_flaming_head");  // GD03_WALK_SHOTS=<dir>: the burning head
+        quit();
+        press(kTri);
+        at("main_screen");
+        wait(2000);
+        code({kBlue, kOrange, kOrange, kBlue, kYellow, kBlue, kOrange, kOrange, kBlue, kYellow});  // Horse Head
+        check("cheat_horse_on");
+        wait(2000);
+        quickplaySong(0);
+        wait(3000);
+        check("band_horse");
+        quit();
+        expect_ = {"main_screen", "qp_selsong_screen", "qp_diff_screen", "loading_screen", "game_screen", "pause_screen",
+                   "meta_loading_screen", "qp_selsong_screen", "main_screen", "qp_selsong_screen", "qp_diff_screen",
+                   "loading_screen", "game_screen", "pause_screen", "meta_loading_screen", "qp_selsong_screen"};
     } else if (scenario == "whammy_tail") {
         // A held sustain's tail swells with the whammy bar and goes back when
         // it is let go (0x00158e50, Owner 10-30): the analog bar (the value
@@ -948,6 +986,9 @@ WalkDriver::WalkDriver(const std::string& name)
         wait(900);  // more than 750 ms: the next press starts afresh
         code({kYellow, kBlue, kYellow, kOrange, kBlue, kBlue});  // Air Guitar again: off
         check("cheat_air_off");
+        wait(900);
+        code({kBlue, kOrange, kOrange, kBlue, kYellow, kBlue, kOrange, kOrange, kBlue, kYellow});  // Horse Head (Encore's own)
+        check("cheat_horse_on");
         expect_ = {"main_screen"};
     } else if (scenario == "coop" || scenario == "faceoff" || scenario == "proface") {
         endMs_ = 20000;
@@ -1350,7 +1391,8 @@ WalkDriver::WalkDriver(const std::string& name)
 std::string WalkDriver::startScreen() const {
     if (scenario_ == "lose" || scenario_ == "pause" || scenario_ == "back" || scenario_ == "enhanced" || scenario_ == "cheats" ||
         scenario_ == "mouse" || scenario_ == "gamepads" || scenario_ == "gamepads_pad" || scenario_ == "menu_anim" || scenario_ == "stickyaxis" || scenario_ == "practice" ||
-        scenario_ == "practice_menus" || scenario_ == "tutorial" || scenario_ == "tutorial2" || scenario_ == "tutorial3" || scenario_ == "options" || scenario_ == "whammy_tail")
+        scenario_ == "practice_menus" || scenario_ == "tutorial" || scenario_ == "tutorial2" || scenario_ == "tutorial3" || scenario_ == "options" || scenario_ == "whammy_tail" ||
+        scenario_ == "flaming_head")
         return "main_screen";
     if (scenario_ == "attract") return "splash_screen";
     return "";
@@ -2099,7 +2141,7 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
             if (!e.values.empty() && ui.host().enhancedValue(e.key) != e.values.front())
                 return fail(std::string("Enhanced Options ") + e.key + " does not start at its first value");
         for (const char* c : {"cheat_unlock_all", "cheat_air_guitar", "cheat_performance_mode", "cheat_hyper_speed_mode",
-                              "cheat_flaming_head", "cheat_eyeball_head_crowd", "cheat_monkey_head_crowd"})
+                              "cheat_flaming_head", "cheat_horse_head_mode", "cheat_eyeball_head_crowd", "cheat_monkey_head_crowd"})
             if (ui.cheatOn(c)) return fail(std::string("the cheat ") + c + " starts on");
         std::printf("  enhanced: every option at the original look (mouse on)\n");
         return pass();
@@ -2156,6 +2198,28 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
             std::printf("  enhanced.json: internal_res %s\n", saved.c_str());
             if (saved != want) return fail("enhanced.json does not have the change");
         }
+        ++step_, stepStart_ = -1;
+        return;
+    }
+    if (s.screen == "band_horse" || s.screen == "band_flames") {
+        const int horses = ui.host().gameCounter(0, "band_horse_members"), flames = ui.host().gameCounter(0, "band_fx_particles");
+        const bool ok = s.screen == "band_horse" ? horses > 0 : flames > 0;
+        if (!ok) {
+            if (nowMs - stepStart_ > 20000)
+                return fail(s.screen == "band_horse" ? "no band member loaded its _horse.milo" : "the band's cheat_headflames drew no particles");
+            return;
+        }
+        std::printf("  %s: %d members with horse heads, %d flame particles drawn\n", s.screen.c_str(), horses, flames);
+        ++step_, stepStart_ = -1;
+        return;
+    }
+    if (s.screen == "cheat_horse_on") {
+        // GD03-045: long_cheats.dta's Horse Head code sets
+        // $cheat_enabled_horse_head_mode; the band then loads every
+        // character's <char>_horse.milo (0x00128778).
+        const bool horse = ui.cheatOn("cheat_horse_head_mode");
+        std::printf("  cheats: horse head %s\n", horse ? "on" : "off");
+        if (!horse) return fail("the Horse Head code did not turn it on");
         ++step_, stepStart_ = -1;
         return;
     }

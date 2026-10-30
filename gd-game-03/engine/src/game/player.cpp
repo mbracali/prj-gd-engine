@@ -638,7 +638,7 @@ void Player::crowdUpdate(float target, float t) {
 }
 
 void Player::ownCrowdUpdate(float target, float t) {
-    if (failed_) return;
+    if (failed_ || !crowdActive_) return;  // 0x0010fc78: +0x44 off, no update [C]
     const float k = (target > raw_ && spActive_) ? sp_.crowdBoost : 1.0f;
     const float w = crowd_.noteWeight * k;
     const float raw = std::clamp((1 - w) * raw_ + w * target, 0.0f, 1.0f);

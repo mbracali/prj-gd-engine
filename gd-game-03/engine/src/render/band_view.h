@@ -3,13 +3,16 @@
 #pragma once
 
 #include <functional>
+#include <map>
 #include <memory>
 #include <vector>
 
 #include "render/camera.h"
+#include "render/particles.h"
 #include "render/scene_gpu.h"
 
 class World;
+class Band;
 namespace chr {
 class Character;
 }
@@ -45,14 +48,28 @@ public:
     static std::vector<const scene::Mesh*> meshesToDraw(const chr::Character& c, const gfx::ScenePose* pose);
 
     int meshesDrawn() const { return meshes_; }
+    // Particles the members' started WorldFx drew last frame (cheat_headflames...).
+    int fxParticles() const { return fxParticles_; }
     // Materials also write alpha (the crowd's card textures, render/crowd_view.h).
     bool forceAlphaWrite = false;
     // A ScenePose for the materials' animations (the crowd's lighter flame); null: the world's.
     const gfx::ScenePose* matPose = nullptr;
-    void resetStats() { meshes_ = 0; }
+    void resetStats() { meshes_ = 0, fxParticles_ = 0; }
 
 private:
     void drawMesh(gfx::MaterialRenderer& mr, chr::Character& c, const scene::Mesh& m);
+    // The member's started WorldFx effects (game/band.h Member::fx): the
+    // proxied milo's particle systems placed at the object's transform
+    // under its parent bone, its anims at (now - start) x 30.
+    void drawFx(gfx::MaterialRenderer& mr, chr::Character& c, const void* member, const gfx::Camera& camera);
+    struct FxState {
+        gfx::ParticleSet parts;
+        gfx::ScenePose pose;
+        double start = -1, elapsed = 0, last = 0;
+    };
+    std::map<const void*, FxState> fx_;
+    std::unique_ptr<gfx::ParticleRenderer> particles_;
+    int fxParticles_ = 0;
 
     World* world_ = nullptr;
     gfx::SceneCache& cache_;

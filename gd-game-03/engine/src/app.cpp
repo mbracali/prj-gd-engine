@@ -49,10 +49,12 @@
 #include "render/hud_view.h"
 #include "render/scene_gpu.h"
 #include "render/track_view.h"
+#include "render/band_view.h"
 #include "render/venue_view.h"
 #include "scene/milo.h"
 #include "script/script.h"
 #include "tests/walktest.h"
+#include "ui/natives.h"
 #include "ui/enhanced_panel.h"
 #include "ui/screen_text.h"
 #include "ui/ui_host.h"
@@ -254,6 +256,8 @@ public:
         if (what == "meter") p->setStarMeter(value);
         else if (what == "deploy_rate") p->setDeployRate(value);
         else if (what == "phrase_boost") p->setPhraseBoost(value);
+        else if (what == "crowd_rating") p->setCrowdRating(value);
+        else if (what == "crowd_rating_active") p->setCrowdActive(value != 0);
     }
     const BandPerformer* gameBand() const override { return coopBand_.get(); }
     int gameCounter(int player, const std::string& key) const override;
@@ -908,6 +912,10 @@ bool App::loadSong(const SongInfo& info, int difficulty, bool autoplay, float ba
         player_->setCalibrationMs(calibrationMs());
         player_->setForgivingHopos(enhancedValue("hopo_mode") == "forgiving");
         player_->setBigNotes(song_->bigNotes[size_t(part0)]);
+        // The mode's crowd_rating_active (modes.dta: FALSE in practice and
+        // the tutorials) is the performers' +0x44 (0x001107d8) [C].
+        const bool crowdActive = !ui_ || ui::gameCfgValue(*ui_, "crowd_rating_active").truthy();
+        player_->setCrowdActive(crowdActive);
         bot_ = autoplay ? std::make_unique<Autoplay>(player_->chart(), faceOff ? 0 : -1) : nullptr;
         player2_.reset(), bot2_.reset(), coopBand_.reset();
         sharedMeter_ = {};
@@ -920,6 +928,7 @@ bool App::loadSong(const SongInfo& info, int difficulty, bool autoplay, float ba
             player2_->setCalibrationMs(calibrationMs());
             player2_->setForgivingHopos(enhancedValue("hopo_mode") == "forgiving");
             player2_->setBigNotes(song_->bigNotes[size_t(part1)]);
+            player2_->setCrowdActive(crowdActive);
             // Without the menus the second player always autoplays.
             if (autoplay || !ui_) bot2_ = std::make_unique<Autoplay>(player2_->chart(), faceOff ? 1 : -1);
             normaliseScores(*player_, *player2_);
@@ -2046,6 +2055,13 @@ int App::gameCounter(int player, const std::string& key) const {
         if (key == "star_glow_lines") return tv->starGlowLines();
         if (key == "star_combos") return tv->comboStarts();
         if (key == "surface_overrides") return tv->surfaceOverrides();
+        if (key == "band_fx_particles") return venueView_ ? venueView_->bandView().fxParticles() : 0;
+        if (key == "band_horse_members") {
+            int n = 0;
+            if (band_)
+                for (const auto& m : band_->members()) n += m->character && m->miloPath.find("_horse") != std::string::npos;
+            return n;
+        }
         if (key == "held_tail_width") return int(std::lround(tv->heldTailWidest() * 1000));
         if (key == "held_glow_scale") return int(std::lround(tv->heldGlowScale() * 1000));
         if (key == "tail_now_ms") return int(tv->tailNowMs());
@@ -2260,6 +2276,7 @@ void App::startBand(const SongInfo& info, const Song& song, bool backdrop) {
     if (ui_)
         if (const Value g = ui_->interp().var("cheat_guitar"); g.type == Value::Type::Symbol && !g.s.empty())
             for (int p = 0; p < cfg.players; ++p) cfg.guitar[size_t(p)] = g.s, cfg.skin[size_t(p)].clear();
+    cfg.horseHead = ui_ && ui_->interp().var("cheat_enabled_horse_head_mode").truthy();
     const DataNode* objects = ui_ && ui_->bootTree() ? ui_->bootTree()->find("objects") : nullptr;
     try {
         band_ = std::make_unique<Band>(*world_, *data_, info, cfg, objects);

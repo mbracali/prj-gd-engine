@@ -16,12 +16,21 @@ All notable changes for players. Versions follow SemVer; release tags are
   difficulties) with the crowd's cheer before the results.
 - Practice: the guitar keeps its pitch at slower speeds as on the PS2, and
   the metronome follows the music volume.
+- The Horse Head cheat (Encore's own, code Blue, Orange, Orange, Blue,
+  Yellow, Blue, Orange, Orange, Blue, Yellow): the band wear horse heads.
+  Also in Enhanced Options > Cheats.
+- The Flaming Head cheat now sets the guitarist's head on fire, and the
+  band's other effects (hand flames, god particles) burn when the songs
+  start them. Flaming Head is now available in Enhanced Options.
 
 ### Fixed
 - A tutorial voice-over asked for while the one before is still loading
   now replaces it, as on the PS2 (it was dropped).
 - Career practice and pause menus' buttons, and a material's texture set
   by script, now act as the original.
+- With the crowd meter off (practice, the tutorials, the crowd meter
+  cheat) the meter now holds still instead of moving with your playing; the
+  interface tutorial's meter shows the values it sets.
 - Whammying a held sustain now makes its tail swell, as on the PS2: the
   tail widens up to four times as the bar goes down and the bulges run down
   the tail as you wave it, then it settles back once you let go. The tail

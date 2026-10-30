@@ -77,8 +77,8 @@ Checked against SLUS_215.86 where the GH2 (360) port differed; each is a
   (FALSE). With it off the whammy poll leaves the Star Power whammy flag
   alone [C 0x00111d88]. Its neighbour +0xb8 (set_mercuryswitchenabled,
   0x00111ce0, the tutorials 22-24) gates deploying in engage [C 0x00111940].
-  The engine's player has the +0xbc gate; the script call is not routed to
-  it yet (ui/natives_game.cpp), and +0xb8 is not modelled.
+  The engine's player has both gates, routed from the script
+  (ui/natives_game.cpp -> UiHost::setPlayerSwitch).
 
 ## Tutorial switches and the engage message
 - `set_whammystarpowerenabled` (+0xbc) and `set_mercuryswitchenabled` (+0xb8),
@@ -88,5 +88,12 @@ Checked against SLUS_215.86 where the GH2 (360) port differed; each is a
 - `sp_engage`'s value is "mercury on, engaged, not active and ready", computed
   after any deploy (0x00111940) [C]: co-op's first engage reports 1 while the
   partner is awaited; a deploy reports 0.
-- Still open: practice turns the crowd (rock meter) off on the PS2 (modes.dta);
-  the port gives every non-solo mode no-fail but keeps the meter drawn.
+- crowd_rating_active (GD03-028): the performer's +0x44 is the mode's
+  crowd_rating_active at construction (0x001107d8; modes.dta FALSE in
+  practice and the tutorials) and the script's set_crowd_rating_active
+  (0x0010fe90, the cheats' crowd meter toggle and shuttle). While it is off
+  the crowd update does nothing at all (0x0010fc78): the meter holds and
+  nobody fails [C]. set_crowd_rating sets the meter (tutorial_16) [C]. The
+  port: Player::setCrowdActive / crowdActive, selftest "PS2: with
+  crowd_rating_active off ...". Practice's HUD (hud_practice.milo) has no
+  meter.
