@@ -95,6 +95,9 @@ class UiManager;
 //              char_highlight.mnm loop), sel_guitar and the store (the
 //              guitar's turn) and unlock_venue (unlock_anim.grp) a frame
 //              advances over 0.3-0.4 s (GD03-042).
+//   whammy_tail quick play, autoplay holding the sustains: the analog bar fully
+//              down swells the held tail to 4x (glow line wider), up again it
+//              goes back to 1x; the same with a digital whammy (a key) held.
 //   stickyaxis an adapter whose D-pad is an axis resting off centre (a
 //              virtual pad, 0079:0006:dpadaxis=-32768) plugged in at the main
 //              menu: no left / right press in 2 s; moved, one right press.

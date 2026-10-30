@@ -215,6 +215,26 @@ WalkDriver::WalkDriver(const std::string& name)
         check("menu_sounds");
         expect_ = {"main_screen", "qp_selsong_screen", "qp_diff_screen", "loading_screen", "game_screen", "pause_screen",
                    "game_screen", "pause_screen", "game_screen", "pause_screen", "meta_loading_screen", "qp_selsong_screen"};
+    } else if (scenario == "whammy_tail") {
+        // A held sustain's tail swells with the whammy bar and goes back when
+        // it is let go (0x00158e50, Owner 10-30): the analog bar (the value
+        // fully down) from 1 s, up at 16 s, then a digital whammy (a key or
+        // button) held from 26 s to 42 s, autoplay holding the sustains.
+        songKeys_ = "1000:whammy=1,16000:whammy=0,26000:+whammykey,42000:-whammykey";
+        quickplaySong(0);
+        check("whammy_tail_fat");
+        check("whammy_tail_back");
+        check("whammy_tail_key");
+        check("whammy_tail_key_back");
+        press(kStart);
+        at("pause_screen");
+        press(kUp);  // QUIT
+        wait(150);
+        press(kX);
+        at("meta_loading_screen");
+        at("qp_selsong_screen");
+        expect_ = {"main_screen", "qp_selsong_screen", "qp_diff_screen", "loading_screen", "game_screen", "pause_screen",
+                   "meta_loading_screen", "qp_selsong_screen"};
     } else if (scenario == "career" || scenario == "career_full" || scenario == "career_song" || scenario == "career_encore") {
         bootToMain();
         at("main_screen");
@@ -1065,7 +1085,7 @@ WalkDriver::WalkDriver(const std::string& name)
 std::string WalkDriver::startScreen() const {
     if (scenario_ == "lose" || scenario_ == "pause" || scenario_ == "back" || scenario_ == "enhanced" || scenario_ == "cheats" ||
         scenario_ == "mouse" || scenario_ == "gamepads" || scenario_ == "gamepads_pad" || scenario_ == "menu_anim" || scenario_ == "stickyaxis" || scenario_ == "practice" || scenario_ == "tutorial" ||
-        scenario_ == "options")
+        scenario_ == "options" || scenario_ == "whammy_tail")
         return "main_screen";
     if (scenario_ == "attract") return "splash_screen";
     return "";
@@ -1568,6 +1588,24 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         const double travel = ui.host().introCameraTravel();
         std::printf("  intro camera travelled %.1f units before -2000 ms\n", travel);
         if (travel < 5) return fail("the intro camera did not move before the track extends");
+        ++step_, stepStart_ = -1;
+        return;
+    }
+    if (s.screen.rfind("whammy_tail", 0) == 0) {
+        // The held tail's widest row and its glow line's scale (TrackView,
+        // 0x00158e50): 1 + 3 x the bar, so 4 with the bar fully down; 1 once
+        // the bar is up again and the bulges have run off (100 polls).
+        const int w = ui.host().gameCounter(0, "held_tail_width"), g = ui.host().gameCounter(0, "held_glow_scale");
+        const int t = ui.host().gameCounter(0, "tail_now_ms");
+        const bool fat = s.screen == "whammy_tail_fat" || s.screen == "whammy_tail_key";
+        const int after = s.screen == "whammy_tail_fat" ? 1000 : s.screen == "whammy_tail_back" ? 18000 : s.screen == "whammy_tail_key" ? 26000 : 44000;
+        const bool ok = t >= after && w > 0 && (fat ? w >= 3900 && g > 1100 : w <= 1001 && g <= 1001);
+        if (!ok) {
+            if (nowMs - stepStart_ > 40000)
+                return fail(s.screen + ": held tail width x1000 " + std::to_string(w) + ", glow " + std::to_string(g) + " at " + std::to_string(t) + " ms");
+            return;
+        }
+        std::printf("  %s: held tail width x1000 %d, glow scale x1000 %d at song %d ms\n", s.screen.c_str(), w, g, t);
         ++step_, stepStart_ = -1;
         return;
     }

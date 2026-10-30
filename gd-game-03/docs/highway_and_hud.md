@@ -25,6 +25,18 @@ SLUS_215.86 (render/track_view.cpp; addresses there) [C unless marked]:
   Star spin from star.tnm (0x0015bae8). Window: added below now_y + 110,
   freed below now_y - 15 (0x00156530).
 - Tails 0x0015bcf0: 30 segments (20 in multiplayer [I]).
+- Tail whammy 0x00158e50 (GD03-091) [C]: per tail 100 samples (zeroed at
+  set-up 0x00158ab0), one per poll while hit (state 2 held, 3 released) =
+  bar × −3.0 (`lui 0xc040` at 0x00158ed0); the bar is the guitar's axis
+  clamped to ≤ 0 (0x00236758: rest 0, full −1). A row at distance d is
+  (1 + sample d / 2 polls old) wide, so up to 4×; rows: max(1, 30 − k) at
+  the start, r, r + segment, ..., a row 3 units past the last step (half its
+  sample), the tip. Glow line width eased × 0.2 a poll to
+  tail_glow_width × (1 + (widest − 1) / 2) while hit, else 1; on a star tail
+  its colour is tail_glow_star's → tail_glow_whammy's and the tail's →
+  tail_star's by the panel blend (+0x2fc, ±0.1 a poll toward the player's
+  whammy flag, 0x00156530), alpha × 0.99; tail_bonus.part emits 2 × blend.
+  60 polls a second [I: NTSC frame rate].
 - Beat lines every 240 ticks (0x0015d5b8 / 0x0015c990); rails by state
   (0x0015e190); lightning at (now - Star Power start) x 0.03 (0x00151580);
   smashers per slot (0x0015fd50); combo2_angle one-player only (0x0015caa0).

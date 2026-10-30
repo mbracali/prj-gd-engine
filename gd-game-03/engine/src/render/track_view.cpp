@@ -62,7 +62,20 @@
 //   0x00158858, hit 0x00158cf8): tail_<colour> (tail_bonus for bonus gems,
 //   tail_miss when missed); the glow line: tail_glow_tight (width
 //   tail_glow_tight_width) on a star gem, while held tail_glow_<colour> /
-//   tail_glow_star (width tail_glow_width); whammy as in GH2's other ports.
+//   tail_glow_star (width tail_glow_width).
+// - Tail whammy (0x00158e50, the same in GH2 360's 0x8269EAD0) [C]: each
+//   tail keeps 100 whammy samples (zeroed when it is set up, 0x00158ab0);
+//   every poll while the tail is hit (state 2 held, 3 released) the next one
+//   is the bar's value x -3.0. The bar is the guitar's axis clamped to <= 0
+//   (0x00236758: rest 0, full press -1), so a sample is 0 .. 3 and a row at
+//   distance d from the tail's start is (1 + sample[d / 2 polls ago]) wide:
+//   the tail swells as the bar goes down and the bulges run down the tail.
+//   The row 3 units before the tip takes half its sample. The glow line's
+//   width eases (x 0.2 a poll) to tail_glow_width x (1 + (widest - 1) / 2)
+//   while hit, 1 otherwise. A Star Power phrase's tail blends its colour to
+//   tail_star's and its glow from tail_glow_star's to tail_glow_whammy's by
+//   the panel's whammy blend (+-0.1 a poll toward the player's whammy flag,
+//   0x00156530); tail_bonus.part emits 2 x that blend.
 // - Beat lines (0x00152690, 0x0015d5b8, 0x0015c990) [C]: one every 240
 //   ticks: half_beat_line5 between beats, beat_line5 on beats, bar_line5 on
 //   measures, as copies of the mesh's geometry at (0, y, 0).
@@ -107,7 +120,8 @@ using gfx::Vec3;
 
 constexpr float kFrameRate = 30;        // effect timers: ms x 0.03
 constexpr float kTailClip = 2.0f;       // gem record +0x18 floor (0x00157e18) [C]
-constexpr float kWhammyBend = -3.0f;    // as GH2's other ports [I]
+constexpr float kWhammyScale = -3.0f;   // 0x00158ed0: lui 0xc040, sample = bar x -3.0 [C]
+constexpr float kPollMs = 1000.0f / 60.0f;  // the game's poll (one a frame at 60 Hz) [I: NTSC rate]
 constexpr float kGlowZ = 0.16f;
 
 }  // namespace
@@ -252,7 +266,8 @@ void TrackView::reset(float introStartMs) {
     missMs_.fill(-1e9f);
     gemState_.clear();
     releaseClip_.clear();
-    whammyHist_.fill(0);
+    tailWhammy_.clear();
+    whammyPolls_ = 0, whammyClockMs_ = -1e9f, starWhammyBlend_ = 0;
     blowMs_ = -1e9f, blowLevel_ = 0;
     introStartMs_ = introStartMs;
     extendAnim_ = {};
@@ -581,10 +596,22 @@ void TrackView::buildTail(const Gem& g, int gi, int slot, const Player& player, 
     const scene::Mat* mat = dead ? get<scene::Mat>("tail_miss.mat") : bonusGem ? get<scene::Mat>("tail_bonus.mat") : slotMat("tail_%s.mat", slot);
     if (!mat) return;
     float rgb[3] = {mat->color[0], mat->color[1], mat->color[2]};
-    // A held Star Power tail turns to tail_star's colour while whammied [C].
-    if (held && starGem && player.whammying())
+    // A hit Star Power tail blends to tail_star's colour by the whammy blend
+    // (0x00158e50: (1 - blend) x colour + blend x tail_star) [C].
+    if (hit && starGem && starWhammyBlend_ > 0)
         if (const scene::Mat* st = get<scene::Mat>("tail_star.mat"))
-            for (int k = 0; k < 3; ++k) rgb[k] = st->color[size_t(k)];
+            for (int k = 0; k < 3; ++k) rgb[k] += (st->color[size_t(k)] - rgb[k]) * starWhammyBlend_;
+    // The tail's whammy history: advanced while hit (held or released) [C].
+    TailWhammy* tw = nullptr;
+    if (hit) {
+        tw = &tailWhammy_[gi * 8 + slot];
+        tw->seen = true;
+        const float sample = -std::clamp(player.whammyBar(), 0.0f, 1.0f) * kWhammyScale;
+        for (int k = 0; k < whammyPolls_; ++k) {
+            tw->index = (tw->index + 1) % 100;
+            tw->hist[size_t(tw->index)] = sample;
+        }
+    }
 
     auto vertex = [&](float x, float y, float z, const float* n, const float* c, float u, float v) {
         tailVerts_.insert(tailVerts_.end(), {x, y, z, n[0], n[1], n[2], c[0], c[1], c[2], c[3], u, v, 1, 0, 0, 1});
@@ -597,8 +624,6 @@ void TrackView::buildTail(const Gem& g, int gi, int slot, const Player& player, 
         if (held) {
             glow = bonusGem ? get<scene::Mat>("tail_glow_bonus.mat") : starGem ? get<scene::Mat>("tail_glow_star.mat") : slotMat("tail_glow_%s.mat", slot);
             width = tailGlowWidth_;
-            if (starGem && player.whammying())
-                if (const scene::Mat* w = get<scene::Mat>("tail_glow_whammy.mat")) glow = w;
         } else if (starGem) {
             glow = get<scene::Mat>("tail_glow_tight.mat");
             if (!glow) glow = get<scene::Mat>("tail_glow_star.mat");
@@ -609,12 +634,24 @@ void TrackView::buildTail(const Gem& g, int gi, int slot, const Player& player, 
     // drawn first, the solid tail (wave B #4) hid it, and with it the star
     // tails' cyan core and the held star tail's blue glow [I: the order, as
     // GH1's RndLine over its tail (FUN_001609b0); the line exists to show].
-    const float glowEnd = std::min(e, horizonY_ - startRel - 4 * width);
+    // The line ends 4 x its width (last poll's, 0x00158b98) before the horizon.
+    const float glowEnd = std::min(e, horizonY_ - startRel - 4 * width * (tw ? tw->glowScale : 1.0f));
     int bodyRange = -1;  // this tail's faces in tailRanges_, once pushed
     auto glowLine = [&] {
         if (!glow || glowEnd <= s || tailVerts_.size() / 16 + 4 >= 65000) return;
         const uint16_t b = uint16_t(tailVerts_.size() / 16);
-        const float n[3] = {0, 0, 1}, c[4] = {glow->color[0], glow->color[1], glow->color[2], 1};
+        // The line's colour (0x00158e50) [C]: on a star tail tail_glow_star's
+        // blended to tail_glow_whammy's by the whammy blend, else its own
+        // material's; the alpha x 0.99.
+        std::array<float, 4> lc = glow->color;
+        if (starGem) {
+            const scene::Mat* gs = get<scene::Mat>("tail_glow_star.mat");
+            const scene::Mat* gw = get<scene::Mat>("tail_glow_whammy.mat");
+            if (gs) lc = gs->color;
+            if (gs && gw)
+                for (size_t k = 0; k < 4; ++k) lc[k] += (gw->color[k] - lc[k]) * starWhammyBlend_;
+        }
+        const float n[3] = {0, 0, 1}, c[4] = {lc[0], lc[1], lc[2], lc[3] * 0.99f};
         const float hw = width * 0.5f, y0 = startRel + s, y1 = startRel + glowEnd;
         // [I] RndLine's uv: u across the line, the middle row of the
         // texture (line01's soft blob) all along it.
@@ -629,26 +666,45 @@ void TrackView::buildTail(const Gem& g, int gi, int slot, const Player& player, 
         tailRanges_.push_back({glow, first, 6});
     };
 
-    // Rows: the start, then every segment from the remainder r, a row 3
-    // units on, and the tip (width 0).
+    // Rows as 0x00158e50 builds them [C]: k = int(L / segment), r = L - k x
+    // segment; max(1, segments - k) rows at the start, then rows at r, r +
+    // segment, ... up to segments - 1 rows in all, a row 3 units past the
+    // next step (half its whammy sample) and the tip (width 0) one segment on.
+    // Each row is (1 + its whammy sample) wide, the sample y / 2 polls old.
     const int V = int(tailRow_.size());
-    const int n = int(L / tailSegLen_);
-    const float r = L - float(n) * tailSegLen_;
+    const int N = tailSegments_;
+    const int k = std::max(0, int(L / tailSegLen_));
     struct Row {
         float y, sx;
     };
     std::vector<Row> rows;
-    auto bend = [&](float y, float k) {
-        if (!held) return 1.0f;
-        const int idx = ((whammyIndex_ - int(y * 0.5f)) % 100 + 100) % 100;
-        return 1 + k * whammyHist_[size_t(idx)];
+    auto sample = [&](float y) {
+        if (!tw) return 0.0f;
+        const int idx = ((tw->index - int(y * 0.5f)) % 100 + 100) % 100;
+        return tw->hist[size_t(idx)];
     };
-    rows.push_back({0, bend(0, 1)});
-    float y = r;
-    for (int k = 0; k < n; ++k, y += tailSegLen_)
-        if (y > 0.01f && y < L) rows.push_back({y, bend(y, 1)});
-    if (rows.back().y + 3.0f < L) rows.push_back({rows.back().y + 3.0f, bend(rows.back().y + 3.0f, 0.5f)});
-    rows.push_back({L, 0});
+    rows.push_back({0, 1 + sample(0)});
+    float widest = rows.back().sx;
+    float y = L - float(k) * tailSegLen_;
+    int i = std::max(1, N - k);
+    while (i < N - 1) {
+        ++i;
+        rows.push_back({y, 1 + sample(y)});
+        widest = std::max(widest, rows.back().sx);
+        y += tailSegLen_;
+    }
+    float tip = y;
+    if (i < N) {
+        rows.push_back({y + 3.0f, 1 + 0.5f * sample(y)});
+        tip = y + tailSegLen_;
+    }
+    rows.push_back({tip, 0});
+    // The glow line's width: eased toward (1 + (widest - 1) / 2) while hit.
+    if (tw) {
+        for (int p = 0; p < whammyPolls_; ++p) tw->glowScale += ((widest - 1) * 0.5f + 1 - tw->glowScale) * 0.2f;
+        width *= tw->glowScale;
+    }
+    if (held) heldTailWidest_ = std::max(heldTailWidest_, widest), heldGlowScale_ = tw ? tw->glowScale : 1.0f;
     if (tailVerts_.size() / 16 + rows.size() * size_t(V) >= 65000) {
         glowLine();
         return;
@@ -676,11 +732,15 @@ void TrackView::buildTail(const Gem& g, int gi, int slot, const Player& player, 
 
 void TrackView::drawTails(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, const Player& player, float nowMs) {
     tailVerts_.clear(), tailIndices_.clear(), tailRanges_.clear();
-    // The whammy history, one entry per frame while a sustain is held.
-    if (player.sustainGem() >= 0) {
-        whammyIndex_ = (whammyIndex_ + 1) % 100;
-        whammyHist_[size_t(whammyIndex_)] = std::clamp(player.whammyBar(), 0.0f, 1.0f) * kWhammyBend * 0.2f;
-    }
+    // The polls since the last frame (60 Hz on the song clock), and the
+    // whammy blend's step per poll toward the player's whammy flag [C].
+    if (nowMs < whammyClockMs_ || nowMs - whammyClockMs_ > 100 * kPollMs) whammyClockMs_ = nowMs - kPollMs;
+    whammyPolls_ = 0;
+    while (nowMs - whammyClockMs_ >= kPollMs) whammyClockMs_ += kPollMs, ++whammyPolls_;
+    for (int p = 0; p < whammyPolls_; ++p)
+        starWhammyBlend_ = player.whammying() ? std::min(1.0f, starWhammyBlend_ + 0.1f) : std::max(0.0f, starWhammyBlend_ - 0.1f);
+    for (auto& [key, t] : tailWhammy_) t.seen = false;
+    heldTailWidest_ = heldGlowScale_ = 0, tailNowMs_ = nowMs;
     const auto& gems = player.chart().gems;
     const float aheadMs = horizonY_ / (yPerSecond_ * speed_) * 1000.0f;
     auto last = std::lower_bound(gems.begin(), gems.end(), nowMs + aheadMs, [](const Gem& g, float v) { return g.ms < v; });
@@ -693,6 +753,8 @@ void TrackView::drawTails(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, con
         for (int f = 0; f < 5; ++f)
             if (g.frets & (1u << f)) buildTail(g, i, f, player, nowMs);
     }
+    // A tail no longer drawn is gone; a new one starts from a zeroed history.
+    for (auto it = tailWhammy_.begin(); it != tailWhammy_.end();) it = it->second.seen ? std::next(it) : tailWhammy_.erase(it);
     const scene::Mesh* tmpl = get<scene::Mesh>("tail02.mesh");
     if (tailRanges_.empty() || !tmpl) return;
     if (!tailMesh_) tailMesh_ = std::make_unique<gfx::DynamicMesh>(cache.device());
@@ -846,8 +908,8 @@ void TrackView::drawParticles(gfx::MaterialRenderer& mr, gfx::SceneCache& cache,
         burn_[size_t(f)].draw(*particles_, mr, cache, camera_, offset, &pose_);
     }
     // tail_bonus.part on held Star Power tails (loaded by 0x00159e28; placed as GH2 360's 0x8269EAD0): a copy per
-    // tail at the tail's start, emitting 2 x the whammy a frame while the
-    // tail is whammied [I: the value is the tail's whammy blend], particles
+    // tail at the tail's start, emitting 2 x the panel's whammy blend
+    // (0x00158e50: param blend + blend at +0x178 / +0x17c) [C], particles
     // past the tail's end removed.
     const auto& gems = player.chart().gems;
     const int sg = player.sustainGem();
@@ -864,7 +926,7 @@ void TrackView::drawParticles(gfx::MaterialRenderer& mr, gfx::SceneCache& cache,
                 const float gemY = yOf(g.ms);
                 t.startY = std::max(gemY + kTailClip, nowY_ + nowbarTailClip_);
                 t.endY = std::min(yOf(g.ms + g.durationMs), nowY_ + horizonY_);
-                const float w = player.whammying() ? std::clamp(player.whammyBar(), 0.0f, 1.0f) : 0.0f;
+                const float w = starWhammyBlend_;
                 for (gfx::ParticleSystem& ps : t.parts.systems()) ps.params().emitRate = {w * 2, w * 2};
             }
     }

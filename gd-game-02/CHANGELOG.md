@@ -4,6 +4,20 @@ All notable changes for players. Versions follow SemVer; release tags are
 `gd-game-02/vX.Y.Z`. The release workflow publishes the section whose heading
 matches the tag's version. Nothing is released yet.
 
+## [0.1.9] - 2026-10-30
+
+**The whammy bar fattens sustain tails again, as in the original.**
+
+### Fixed
+- Whammying a held sustain now makes its tail swell, as on the Xbox 360:
+  the tail widens up to four times as the bar goes down and the bulges run
+  down the tail as you wave it, then it settles back once you let go. The
+  tail used to get thinner instead. A Star Power phrase's tail and its glow
+  line fade to their whammy colours (and its sparks grow) over a few frames,
+  as the original, instead of switching at once. This works the same with
+  an analog whammy bar, a gamepad stick, a MIDI controller and a whammy key
+  or button.
+
 ## [0.1.8] - 2026-10-29
 
 **Universal menus: a new GAMEPADS screen, a new Enhanced Options menu, and

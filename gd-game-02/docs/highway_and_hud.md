@@ -28,7 +28,14 @@ The scenes themselves are listed in `milo_and_textures.md`.
 - **Sustain tails** [C]: template `0x826A0100` (30 segments of
   (120 + 15) × 1.01 / 30), mesh `0x8269C2A0`, rebuild `0x8269EAD0`. Clip 2.0;
   while held, now + 1.5 − start; frozen on release (`0x82697710`). Whammy
-  history entry = bar × −3.0, moving 2 units per frame. Materials and glow:
+  (GD02-142): per tail 100 samples, one per poll while hit (held or
+  released) = value × −3.0 with the value 0 at rest .. −1 fully down (the
+  pitch bend `0x8234ff18` measures (value − rest) / (rest + 1)) [C]; a row at
+  distance d is (1 + sample d / 2 polls old) wide (up to 4×), the row 3
+  units past the last step half its sample; the glow line eases (× 0.2 a
+  poll) to its width × (1 + (widest − 1) / 2); star tails blend to
+  `tail_star` / `tail_glow_whammy` by the panel's ±0.1-a-poll blend [C].
+  60 polls a second [I]. Materials and glow:
   `0x8269E7F0`, `0x8269E2C8`, `0x8269E340` (`tail_white` / `tail_purple` are
   never used). Faces (`0x8269C2A0`): per segment (a, a+1, a+V) and (a+V,
   a+1, a+V+1) — the other winding is culled and left only the additive glow
@@ -87,7 +94,7 @@ The scenes themselves are listed in `milo_and_textures.md`.
 - Not done: the intro gem sparkle, `peak_on` (rock meter peak flames), the
   track-fail explode, the far-end fade (`track_fade.tex` is a runtime render
   target).
-- Whammy bend scaled by a further 0.2 [I]; miss pop on the held frets [I];
+- Miss pop on the held frets [I];
   side-rail animation indices [I]; sphere tex_gen skips the camera half-angle
   step [I]; MatAnim / TransAnim SetFrame semantics follow GH1 [I].
 - Two-player tracks (`0x82334628`, `0x822B37D8`) not read yet.
@@ -121,7 +128,7 @@ The scenes themselves are listed in `milo_and_textures.md`.
 ### Track effects
 - Smash views play at frame (now − hit) × 0.03 (`0x8269CD60`) [C].
 - `tail_bonus.part`: one copy at the start of a held Star Power tail, emitting
-  2 × the whammy value a frame; particles past the tail's end are removed
+  2 × the panel's whammy blend (`+0x15c` / `+0x160`); particles past the tail's end are removed
   (`0x8269EAD0`) [C]. Tail type 1 = Star Power, 2 = bonus (`0x8269E7F0`) [C].
 - Peak: `peak_on` / `peak_off` when the multiplier without Star Power is 4 and
   the rating is above 0.66 (`0x822DCE80`, `0x822DCEF0`) [C]; `crowd_meter`

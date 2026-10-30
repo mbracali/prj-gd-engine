@@ -5,6 +5,18 @@ All notable changes for players. Versions follow SemVer; release tags are
 
 ## [Unreleased]
 
+## [0.0.3] - 2026-10-30
+
+### Fixed
+- Whammying a held sustain now makes its tail swell, as on the PS2: the
+  tail widens up to four times as the bar goes down and the bulges run down
+  the tail as you wave it, then it settles back once you let go. The tail
+  used to get thinner instead. A Star Power phrase's tail and its glow line
+  fade to their whammy colours (and its sparks grow) over a few frames, as
+  the original, instead of switching at once. This works the same with an
+  analog whammy bar, a gamepad stick, a MIDI controller and a whammy key or
+  button.
+
 ## [0.0.2] - 2026-10-30
 
 **Universal menus (as Guitar Hero II 0.1.8), and the menus move again: the
