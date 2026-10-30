@@ -3,6 +3,7 @@
 #pragma once
 
 #include <array>
+#include <cstdint>
 #include <map>
 #include <string>
 #include <vector>
@@ -87,7 +88,9 @@ class UiManager;
 //              to focus_scale over 0.1 s (button.tnm) -> OPTIONS: the metacam
 //              exit (meta_cam_pause_right_out.tnm) and entrance
 //              (meta_cam_right_in.tnm) play, then rest -> back: right_in
-//              reversed out, then (the exit over, forward again) right_in in.
+//              reversed out, then (the exit over, forward again) right_in in;
+//              the focused button's letters re-jitter every 0.1 s and each
+//              exit / entrance fades to / from black (GD03-044).
 //   menu_anim_loops  career_full, and on sel_character (its view, the
 //              char_highlight.mnm loop), sel_guitar and the store (the
 //              guitar's turn) and unlock_venue (unlock_anim.grp) a frame
@@ -179,6 +182,7 @@ private:
     unsigned adapter_ = 0;           // the stickyaxis walk's virtual adapter (SDL_JoystickID)
     int sideBase_ = 0, rightBase_ = 0;
     float focusScale0_ = 1;          // menu_anim: the button's scale as focus came
+    uint32_t jitter0_ = 0;           // menu_anim: the focused button's re-jitters at jitter_record
     std::map<std::string, float> loops0_;  // menu_anim_loops: the up panels' frames at loop_record
     float nameX0_ = 0;               // the career walk's band name: where it starts
     std::array<float, 2> optionsHit_{-1, -1};  // the mouse walk: OPTIONS' hit centre in 4:3

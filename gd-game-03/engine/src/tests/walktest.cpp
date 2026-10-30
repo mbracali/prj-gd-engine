@@ -723,23 +723,33 @@ WalkDriver::WalkDriver(const std::string& name)
         check("focus_anim_start");
         wait(300);
         check("focus_anim_end");
+        // GD03-044: main.milo's focus_jitter_interval 0.1: the focused
+        // button's letters jitter anew every 0.1 s once it has grown.
+        check("jitter_record");
+        wait(350);
+        check("jitter_advances");
         press(kDown), wait(150), press(kDown), wait(300);  // TRAINING, OPTIONS
         press(kX);
         wait(200);
         check("metacam_out_forward");
+        check("fade_mid");  // GHScreen's exit fade to black (0 -> 1 over 0.5 s)
         wait(500);  // the entrance's first half
         check("metacam_in_forward");
+        check("fade_mid");  // the entrance's fade from black
         at("options_screen");
         wait(300);
         check("metacam_rest");
+        check("fade_clear");
         press(kTri);
         wait(200);
         check("metacam_out_back");
+        check("fade_mid");
         wait(500);
         check("metacam_in_back");
         at("main_screen");
         wait(300);
         check("metacam_rest");
+        check("fade_clear");  // main's enter turn_off_ambient, then its entrance's fade to 0
         expect_ = {"main_screen", "options_screen", "main_screen"};
     } else if (scenario == "stickyaxis") {
         at("main_screen");
@@ -1105,6 +1115,20 @@ static bool mainCamera(ui::UiManager& ui, std::array<float, 3>& pos) {
 void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
     auto fail = [&](const std::string& e) { error_ = e, failed_ = done_ = true; };
     auto pass = [&] { ++step_, stepStart_ = -1; };
+    if (s.screen == "jitter_record" || s.screen == "jitter_advances") {
+        ui::PanelObj* fp = ui.focusPanel();
+        if (!fp || !fp->view) return fail("no focus panel with a view");
+        const uint32_t n = fp->view->buttonJitter(fp->focus);
+        std::printf("  focus jitter: %s re-jittered %u times\n", fp->focus.c_str(), n);
+        if (s.screen == "jitter_record") return jitter0_ = n, pass();
+        return n >= jitter0_ + 2 ? pass() : fail("the focused button's letters did not re-jitter every focus_jitter_interval");
+    }
+    if (s.screen == "fade_mid" || s.screen == "fade_clear") {
+        const float f = ui.screenFade();
+        std::printf("  screen fade (%s): %.2f\n", ui.currentScreen().c_str(), double(f));
+        if (s.screen == "fade_mid") return f > 0.05f && f < 0.95f ? pass() : fail("no fade to / from black under way");
+        return f == 0 ? pass() : fail("the screen is still dimmed");
+    }
     if (s.screen == "loop_record") {
         loops0_ = ui.upPanelFrames();
         return pass();

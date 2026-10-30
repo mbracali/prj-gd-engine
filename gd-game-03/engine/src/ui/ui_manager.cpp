@@ -551,6 +551,7 @@ void UiManager::beginTransition(ScreenObj* next, bool back) {
         // back meta_cam_right_in 500 -> 0.
         transitionAnim_ = forwardAnim_ ? "meta_cam_pause_right_out.tnm" : "meta_cam_right_in.tnm";
         transitionReverse_ = !forwardAnim_;
+        startScreenFade(current_, false);
         phase_ = Phase::Out;
         phaseMs_ = 0;
         phaseLen_ = transitionMs_;
@@ -622,6 +623,7 @@ void UiManager::switchScreens() {
         // meta_cam_right_out 500 -> 0.
         transitionAnim_ = forwardAnim_ ? "meta_cam_right_in.tnm" : "meta_cam_right_out.tnm";
         transitionReverse_ = !forwardAnim_;
+        startScreenFade(to, true);  // after the enter script (its turn_off_ambient), as GHScreen Enter's end
         phase_ = Phase::In;
         phaseMs_ = 0;
         phaseLen_ = transitionMs_;
@@ -1161,12 +1163,40 @@ void UiManager::drawPanels(ScreenObj* s, bool outgoing) {
     }
 }
 
+void UiManager::startScreenFade(ScreenObj* s, bool in) {
+    if (!s) return;
+    s->fadeStartMs = uiMs_;
+    s->fadeIn = in;
+}
+
+// GHScreen draw (0x00146198) [C]: while a fade runs, t = (now - start) / 0.5 s,
+// the alpha t (exit) or 1 - t (entrance); past either end it stops there.
+float UiManager::screenFade() {
+    ScreenObj* s = current_;
+    if (!s) return 0;
+    if (s->fadeStartMs >= 0) {
+        const double t = (uiMs_ - s->fadeStartMs) / 500.0;
+        s->ambient = float(s->fadeIn ? 1 - t : t);
+        if (s->ambient > 1 || s->ambient < 0) s->ambient = s->ambient > 1 ? 1.0f : 0.0f, s->fadeStartMs = -1;
+    }
+    return s->ambient;
+}
+
+// Then a black rect over the whole screen at that alpha, over the panels.
+void UiManager::drawScreenFade(ScreenObj* s) {
+    if (!s || s != current_) return;
+    const float a = screenFade();
+    if (a <= 0) return;
+    canvas_.fillRect(canvas_.pictureX0(), 0, canvas_.pictureW(), kScreenH, SDL_Color{0, 0, 0, Uint8(std::lround(std::min(a, 1.0f) * 255))});
+}
+
 void UiManager::draw() {
     if (headless_) return;
     if (splash_ >= 0) {
         drawSplash();
     } else {
         drawPanels(current_, phase_ == Phase::Out);
+        drawScreenFade(current_);
     }
     canvas_.flush();
     if (text_) text_->collect();

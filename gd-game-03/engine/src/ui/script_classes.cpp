@@ -795,7 +795,11 @@ bool ScreenObj::nativeButtonDown(int button, int player) {
 bool ScreenObj::handleNative(Interp&, const std::string& msg, std::vector<Value>& args, Value& r) {
     r = Value::integer(0);
     if (msg == "backwards_anim") return ui.setBackwardsAnim(), true;
-    if (msg == "reset_ambient" || msg == "turn_off_ambient" || msg == "wait_for_sfx") return true;
+    // GHScreen (PS2 0x00146a38 / 0x00146a40) [C]: the black overlay's alpha
+    // (UiManager::screenFade; a running fade sets it again).
+    if (msg == "reset_ambient") return ambient = 0, true;
+    if (msg == "turn_off_ambient") return ambient = 1, true;
+    if (msg == "wait_for_sfx") return true;
     if (msg == "enable" || msg == "disable") {
         if (!args.empty() && args[0].type == Value::Type::Object)
             if (auto* c = dynamic_cast<ComponentObj*>(args[0].object)) {

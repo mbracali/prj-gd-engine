@@ -2,6 +2,7 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #pragma once
 
+#include <cstdint>
 #include <functional>
 #include <map>
 #include <memory>
@@ -81,6 +82,11 @@ public:
     float endFrame(const std::string& object) const;
     // The frame last set on it (0 before any).
     float frame(const std::string& object) const;
+    // A button's letter re-jitters so far (focus_jitter_interval; the walks).
+    uint32_t buttonJitter(const std::string& component) const {
+        auto it = buttonAnims_.find(component);
+        return it == buttonAnims_.end() ? 0u : it->second.jitter;
+    }
     // Every object's frame set so far (the walks' looping-animation checks).
     const std::map<std::string, float>& frames() const { return frames_; }
     void setShowing(const std::string& object, bool showing);
@@ -237,6 +243,8 @@ private:
     struct ButtonAnim {
         scene::UiState last = scene::UiState::Normal;
         double focusAt = -1;
+        uint32_t jitter = 0;   // re-jitters so far (added to the text's jitter seed)
+        double jitterAt = 0;   // the last one (UI seconds)
     };
     std::map<std::string, ButtonAnim> buttonAnims_;
     float buttonScale(const scene::UILabel& l, scene::UiState st, const scene::Object& panel);

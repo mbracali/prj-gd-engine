@@ -215,15 +215,19 @@ std::array<float, 3> UiStyles::buttonColor(const Object& dir, UiState state) con
     return {1, 1, 1};
 }
 
-float UiStyles::focusScale(const Object& dir) const {
+float UiStyles::dirFloat(const Object& dir, const std::string& key, float def) const {
     if (dir.header.hasProps)
-        if (const DataNode* v = propValue(dir.header.props, "focus_scale"); v && (v->type == 0 || v->type == 1)) return v->asFloat();
-    if (const ::DataNode* v = dirTypeProperty(dir, "focus_scale")) {
+        if (const DataNode* v = propValue(dir.header.props, key); v && (v->type == 0 || v->type == 1)) return v->asFloat();
+    if (const ::DataNode* v = dirTypeProperty(dir, key)) {
         if (v->type == ::DataNode::Type::Float) return v->f;
         if (v->type == ::DataNode::Type::Int) return float(v->i);
     }
-    return 1;
+    return def;
 }
+
+float UiStyles::focusScale(const Object& dir) const { return dirFloat(dir, "focus_scale", 1); }
+
+float UiStyles::focusJitterInterval(const Object& dir) const { return dirFloat(dir, "focus_jitter_interval", 0); }
 
 std::string UiStyles::resourcePath(const GameData& data, const std::string& rel) {
     return findMiloRelative(data, "ui/x.milo", rel);

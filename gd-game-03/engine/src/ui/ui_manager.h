@@ -94,6 +94,8 @@ public:
     bool inTransition() const;
     // The shared metacam anim's frame last set (-1: not since the last reset; tests).
     float metacamFrame(const std::string& anim) const;
+    // The current screen's black overlay alpha now (GHScreen +0x68; walks).
+    float screenFade();
     // The frames of every up panel's objects, "panel object" -> frame (the
     // walks: a looping animation advances).
     std::map<std::string, float> upPanelFrames();
@@ -237,6 +239,8 @@ private:
     void exitPanel(PanelObj* p);
     void loadPanel(PanelObj* p);
     void drawPanels(ScreenObj* s, bool outgoing);
+    void startScreenFade(ScreenObj* s, bool in);
+    void drawScreenFade(ScreenObj* s);
     void drawSplash();
     void drawMasks(const gfx::UiView& v);
 

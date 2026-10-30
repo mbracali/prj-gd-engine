@@ -55,6 +55,7 @@ bool rgbOf(const ::DataNode* n, float out[3]) {
 // A label's laid-out text, kept until its string changes.
 struct UiView::LabelText {
     std::string str;
+    uint32_t seed = 0;  // the jitter seed the layout was made with
     const scene::Font* font = nullptr;
     TextLayout layout;
     std::array<float, 2> fit{1, 1};
@@ -332,6 +333,13 @@ float UiView::buttonScale(const scene::UILabel& l, scene::UiState st, const scen
             if (t < 1) frame = 1 + float(std::max(0.0, t));
             else a.focusAt = -1;
         }
+        // Once grown, the focused button's letters jitter anew every
+        // focus_jitter_interval (the panel's property; 0.1 s on main,
+        // options, pause... 0 by default): the text's jitter seed + 1, laid
+        // out again (PS2 0x0028bc68 -> 0x0029b4d8) [C].
+        if (a.focusAt < 0)
+            if (const float interval = styles_.focusJitterInterval(panel); interval != 0 && interval < g_uiSeconds - a.jitterAt)
+                ++a.jitter, a.jitterAt = g_uiSeconds;
         break;
     }
     default: break;
@@ -561,10 +569,19 @@ void UiView::drawLabel(MaterialRenderer& r, const scene::UILabel& l, const scene
     const std::string str = labelString(l);
     if (str.empty()) return;
 
+    // A button's state first: its scale, and its letters' re-jitter (buttonScale).
+    float buttonScaleNowValue = 1;
+    scene::UiState buttonState = scene::UiState::Normal;
+    const scene::Object* panel = milo_->root().self.get();
+    const auto* asButton = l.as<scene::BandButton>();
+    if (asButton && panel) buttonState = state(l.name), buttonScaleNowValue = buttonScale(l, buttonState, *panel);
+    const uint32_t seed = band ? band->jitterSeed + (asButton ? buttonAnims_[l.name].jitter : 0u) : 0u;
+
     auto& lt = labels_[&l];
-    if (!lt || lt->str != str) {
+    if (!lt || lt->str != str || lt->seed != seed) {
         if (!lt) lt = std::make_unique<LabelText>();
         lt->str = str;
+        lt->seed = seed;
         lt->font = nullptr;
         // The template Text of the component's type (ui_styles.h).
         const scene::UiStyle style = styles_.style(l.cls, l.header.type);
@@ -592,7 +609,7 @@ void UiView::drawLabel(MaterialRenderer& r, const scene::UILabel& l, const scene
         }
         lt->layout = layoutText(&fm, str, st);
         if (band) {
-            jitterText(lt->layout, band->jitterSeed, band->deltaX, band->deltaZ, band->deltaRot);
+            jitterText(lt->layout, seed, band->deltaX, band->deltaZ, band->deltaRot);
             lt->fit = fitScale(lt->layout, st, band->fitText, band->width, band->height);
         }
         lt->font = font;
@@ -603,13 +620,11 @@ void UiView::drawLabel(MaterialRenderer& r, const scene::UILabel& l, const scene
     scene::Xfm local = pose_.local(&l);
     float color[3] = {1, 1, 1};
     const float* matColor = labelColor;
-    const scene::Object* panel = milo_->root().self.get();
-    if (const auto* b = l.as<scene::BandButton>(); b && panel) {
-        const scene::UiState st = state(l.name);
-        const auto c = styles_.buttonColor(*panel, st);
+    if (asButton && panel) {
+        const auto c = styles_.buttonColor(*panel, buttonState);
         color[0] = c[0], color[1] = c[1], color[2] = c[2];
         matColor = color;
-        if (const float s = buttonScale(l, st, *panel); s != 1) local = scene::compose(scaleXfm(s, 1, s), local);
+        if (buttonScaleNowValue != 1) local = scene::compose(scaleXfm(buttonScaleNowValue, 1, buttonScaleNowValue), local);
     }
     scene::Xfm world = local;
     {
