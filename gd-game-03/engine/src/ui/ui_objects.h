@@ -122,6 +122,11 @@ public:
     bool handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) override;
     Value getProp(Interp& in, const std::string& key) override;
 
+    // The focus can move (up / down or left / right), or the panel moves
+    // its own (the port's GAMEPADS and Enhanced Options): the help bar's UP /
+    // DOWN access button (universal_mechanisms.md 1.1.3).
+    bool navigable();
+
     void selectStart(ComponentObj* c, int button, int player);
     void pollSelect();
     void navigate(int button);

@@ -76,6 +76,12 @@ class UiManager;
 //              1, the keyboard player 2) -> the Gamepad menu -> Player 2's
 //              Bind to > Detect -> the pad's A: the pad is player 2, the
 //              keyboard player 1.
+//   band       boot -> main -> Career -> NEW BAND -> the name with real keys:
+//              Down Down (A -> C), 1 (green: takes it), Down, 1, Enter ->
+//              the difficulty screen; the band is "CD" (universal_mechanisms.md 1.1.2).
+//   logo_skip  the boot splashes skipped by the red fret (2) -> main ->
+//              Options -> Credits (clicked) left by the green fret (1) ->
+//              Credits again, left by a click (universal_mechanisms.md 1.1.1).
 //   stickyaxis an adapter whose D-pad is an axis resting off centre (a
 //              virtual pad, 0079:0006:dpadaxis=-32768) plugged in at the main
 //              menu: no left / right press in 2 s; moved, one right press.
