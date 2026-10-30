@@ -483,6 +483,11 @@ private:
         int lightPart = -1;
     };
     std::unique_ptr<Backdrop> backdrop_;
+    // Shown by Enhanced Options; loaded at startup and kept in the menus (a
+    // song's venue replaces it), so the screen opens on the next frame.
+    bool backdropShown_ = false, backdropDue_ = false;
+    bool backdropWarm_ = false;  // drawn once unseen (its textures and programs reach the GPU)
+    void loadBackdrop();
     // The Enhanced Options (enhanced.json in the save folder), what is in
     // effect, and the FPS counter's average.
     Json enhanced_ = Json::object();
@@ -732,6 +737,7 @@ void App::startUi() {
     const bool skip = envOn("GD02_SKIP_BOOT") || !screen.empty();
     if (envOn("GD02_SKIP_BOOT") && screen.empty()) screen = "splash_screen";
     ui_->start(skip, screen);
+    loadBackdrop();  // Enhanced Options' backdrop, ready before the menus show
     uiStartMs_ = double(SDL_GetTicksNS()) / 1e6;
 }
 
@@ -1529,6 +1535,12 @@ void App::frameUi() {
         walk_->poll(*ui_, now);
         if (walk_->done()) running_ = false;
     }
+    // Enhanced Options opened after a song (the backdrop went with the song's
+    // venue): the screen has drawn once without it; it loads now and fades in.
+    if (backdropDue_) {
+        backdropDue_ = false;
+        if (backdropShown_) loadBackdrop();
+    }
     ui_->update();
     if (!running_) return;
     // The menus get the guitar's green / red as Confirm / Back when no song is being played.
@@ -1541,6 +1553,18 @@ void App::frameUi() {
         updateBackdrop();
     }
     canvas_.begin({0, 0, 0, 255});
+    if (backdropWarm_) {
+        // The preloaded backdrop's first draw (~70 ms: uploads, programs)
+        // here, under black, not on the frame Enhanced Options opens.
+        backdropWarm_ = false;
+        if (backdrop_ && worldDraw_) {
+            const uint64_t t0 = SDL_GetTicksNS();
+            drawWorld();
+            canvas_.fillRect(0, 0, 1e5f, 1e5f, {0, 0, 0, 255});
+            if (const char* l = SDL_getenv("GD02_UILOG"); l && *l && *l != '0')
+                SDL_Log("ui: menu backdrop warmed in %.1f ms", double(SDL_GetTicksNS() - t0) / 1e6);
+        }
+    }
     ui_->draw();
     drawTouchButtons();
     drawFpsCounter();
@@ -1771,6 +1795,7 @@ bool App::loadVenue(const std::string& venue, VenueVariant variant) {
 }
 
 void App::unloadVenue() {
+    backdrop_.reset();  // it lives in the venue's world
     band_.reset();
     worldDraw_ = nullptr;
     director_.reset();
@@ -1851,6 +1876,7 @@ void App::startBand(const SongInfo& info, const Song& song, bool backdrop) {
 
 // world_panel's milo: ../world/<v>/<v>[_mp|_coop].milo (GD02_VENUE replaces the venue).
 void App::worldLoad(const std::string& path) {
+    if (backdrop_) unloadVenue();  // a song: a fresh world, even in the backdrop's venue
     for (const std::string& v : venues::names())
         for (VenueVariant var : {VenueVariant::Single, VenueVariant::Mp, VenueVariant::Coop})
             if (venues::worldMilo(v, var) == path) {
@@ -2286,11 +2312,9 @@ void App::applyEnhancedLook() {
         // The doc's ranges (universal_mechanisms.md 1.2.2), weakest first.
         p.bloom = level("bloom", {"none", "original", "2x", "3x"});
         p.cinematic = on("cinematic_color");
-        p.fog = level("ground_fog", {"none", "1.5x", "2x", "2.5x"});
         p.grade = level("color_grade", {"off", "warm", "cold", "vintage", "noir", "neon", "sepia"});
         p.grain = level("film_grain", {"none", "light", "medium", "strong", "stronger"});
         p.chromatic = level("chromatic", {"none", "light", "medium", "strong"});
-        p.streaks = level("light_streaks", {"none", "very_light", "light", "medium"});
         p.ssao = level("ssao", {"none", "light", "medium", "strong", "stronger"});
         p.sharpen = level("sharpening", {"off", "low", "high"});
         p.starBlur = level("star_blur", {"none", "light", "medium", "strong", "stronger"});
@@ -2308,8 +2332,7 @@ void App::applyEnhancedLook() {
 }
 
 // What this frame's port effects need from the venue (render/enhanced_fx.h):
-// the camera, the stage floor (the band's lowest member), the time, Star
-// Power's blur (eased in and out) and the band's lights for Super Fog.
+// the camera, the time and Star Power's blur (eased in and out).
 void App::enhancedFrame(gfx::Renderer& r) {
     gfx::PostFrame f;
     if (venueView_) {
@@ -2318,14 +2341,6 @@ void App::enhancedFrame(gfx::Renderer& r) {
         f.viewProj = c.viewProj(false);
         f.hasCamera = true;
     }
-    float floorZ = 1e9f;
-    if (band_)
-        for (const auto& m : band_->members())
-            if (scene::Xfm x; band_->objectXfm(m->slot, "", x)) {
-                floorZ = std::min(floorZ, x.pos[2]);
-                if (venueView_) f.lights.push_back({gfx::Vec3{x.pos[0] + 10, x.pos[1] - 70, x.pos[2] + 210}, gfx::Vec3{x.pos[0], x.pos[1], x.pos[2]}, {1, 0.93f, 0.8f}});
-            }
-    f.floorZ = floorZ < 1e8f ? floorZ : 0;
     f.timeSec = float(double(SDL_GetTicksNS()) / 1e9);
     const bool sp = !backdrop_ && ((player_ && player_->starPowerActive()) || (player2_ && player2_->starPowerActive()));
     const double now = double(SDL_GetTicksNS()) / 1e9;
@@ -2420,13 +2435,16 @@ void App::drawFpsCounter() {
 // The backdrop: the second venue (venues::names()[1], small1) with the band
 // caught a quarter into the first song of its tier, silent and still.
 void App::menuBackdrop(bool on) {
-    if (!on) {
-        if (!backdrop_) return;
-        backdrop_.reset();
-        if (!player_) unloadVenue();
-        return;
-    }
-    if (backdrop_ || player_ || !data_ || songs_.empty() || ui_->headless()) return;
+    backdropShown_ = on;
+    backdropDue_ = on && !backdrop_;  // normally loaded at startup (loadBackdrop)
+}
+
+// The backdrop's venue, band and shot. It needs the GL context and the
+// game's one world, so it loads on the main thread: at startup, before the
+// menus, and again (the next frame, behind the open screen) after a song.
+void App::loadBackdrop() {
+    if (backdrop_ || player_ || !data_ || songs_.empty() || !ui_ || ui_->headless()) return;
+    const uint64_t t0 = SDL_GetTicksNS();
     const std::string venue = venues::names()[1];
     auto b = std::make_unique<Backdrop>();
     for (const SongInfo& s : songs_)
@@ -2457,7 +2475,9 @@ void App::menuBackdrop(bool on) {
     for (int i = 0; backdrop_ && (i < 45 || (!backdrop_->framed && i < 195)); ++i) updateBackdrop();
     if (!band_) SDL_Log("enhanced options: backdrop %s has no band", venue.c_str());
     else if (backdrop_ && !backdrop_->framed) SDL_Log("enhanced options: backdrop %s: the singer never showed", venue.c_str());
-    if (backdrop_) backdrop_->frozen = true;
+    if (backdrop_) backdrop_->frozen = true, backdropWarm_ = !backdropShown_;
+    if (const char* l = SDL_getenv("GD02_UILOG"); l && *l && *l != '0')
+        SDL_Log("ui: menu backdrop loaded in %.1f ms", double(SDL_GetTicksNS() - t0) / 1e6);
 }
 
 // The backdrop's band is there, the camera on its singer, and the singer's
@@ -2474,7 +2494,7 @@ bool App::menuBackdropFramed() {
 }
 
 bool App::drawMenuBackdrop() {
-    if (!backdrop_ || !worldDraw_) return false;
+    if (!backdrop_ || !backdropShown_ || !worldDraw_) return false;
     drawWorld();
     return true;
 }

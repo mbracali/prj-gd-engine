@@ -2030,11 +2030,13 @@ UiSystem::UiSystem(Renderer& renderer, const GameData& data, Hooks hooks)
         scripts_.push_back(parseDtaText(R"dta(
             {new_enhanced_panel enhanced_settings (rnd_file "")}
             {new_gh_screen enhanced_settings
+                (animate_transition 0)
                 (panels meta enhanced_settings helpbar)
                 (focus enhanced_settings)
                 (helpbar (default ((fret1 help_select) (fret2 help_back) (strum help_updown))))}
             {new_gamepad_panel gamepads (rnd_file "")}
             {new_gh_screen gamepads
+                (animate_transition 0)
                 (panels meta gamepads helpbar)
                 (focus gamepads)
                 (helpbar (default ((fret1 help_select) (fret2 help_back) (strum help_updown))))}
@@ -2284,7 +2286,9 @@ void UiSystem::gotoScreen(const std::string& name) {
     for (ScreenObj* s = cur ? cur->back_ : nullptr; s && !goingBack_; s = s->back_) goingBack_ = s == next;
     route("screen_change", {{"new_screen", Value::obj(next)}, {"old_screen", Value::obj(cur)}});
     if (cur) exitScreen(cur, next);
-    if (cur && cur->flag("animate_transition", true)) {
+    // [I] The port's universal menus (Enhanced Settings, GAMEPADS) have no
+    // transition: they open on the next frame (universal_mechanisms.md).
+    if (cur && cur->flag("animate_transition", true) && next->flag("animate_transition", true)) {
         // Out-anim (FUN_00143290): forward exits play meta_cam_pause_right_out,
         // backward ones meta_cam_right_in reversed; the ambient fades out.
         phase_ = Phase::Out;
@@ -2850,3 +2854,4 @@ void UiSystem::drawText(const std::string& font, const std::string& text, float 
     std::copy_n(rgba.data(), 4, st.tint);
     renderer_.drawMesh(c.mesh, m.m.data(), st);
 }
+

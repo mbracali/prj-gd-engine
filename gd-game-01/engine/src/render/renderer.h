@@ -138,7 +138,7 @@ public:
     void endRenderTarget();
 
     // Enhanced Settings post-processing (render/post_fx.h): anti-aliasing,
-    // FSR 1, bloom, cinematic colour, ground fog. Between beginScene and
+    // FSR 1, bloom, cinematic colour. Between beginScene and
     // endScene (inside beginWide / endWide) the 3D game frame draws off
     // screen at the chain's render scale; endScene runs the effects and lays
     // the result into the viewport. beginScene returns false (and draws go

@@ -33,9 +33,8 @@ every screen works with any controller, the mouse and touch.**
   Max Out (Full HD), Max Out (4K), Rocking on a Budget, Good Old Days, in
   sepia at the PS2's resolution); finer levels for the effects (Bloom
   Original / 2x / 3x; Film Grain, Ambient Occlusion and Blur on Star Power up
-  to Stronger; Chromatic Aberration and Light Streaks in levels; More
-  Lights, Dust and Ground Fog at 1.5x / 2x / 2.5x; Particles 2x; Max FPS
-  Unlimited); a scrollbar; Back, Export and Import buttons; the band shot in
+  to Stronger; Chromatic Aberration in levels; More Lights and Dust at
+  1.5x / 2x / 2.5x; Particles 2x; Max FPS Unlimited); a scrollbar; Back, Export and Import buttons; the band shot in
   a medium venue with the singer in focus and the guitarist and drummer
   behind him, showing every change at once.
 - The help bar adds the buttons a screen is missing (CONFIRM, BACK, START on
@@ -55,6 +54,14 @@ every screen works with any controller, the mouse and touch.**
   gone. Touch is on by default only on the Steam Deck and Android.
 - Every enhanced effect now starts off (the original look); settings saved
   by 1.1.6 keep their meaning in the new levels.
+- Enhanced Settings and GAMEPADS open at once: no screen transition, and the
+  band shot behind Enhanced Settings is loaded at startup. They used to take
+  about a second to appear.
+
+### Removed
+- Add Fog to the Ground (Experimental) and Anamorphic Light Streaks are gone
+  from Enhanced Settings. Saved or imported settings that still have them
+  load normally.
 
 ### Fixed
 - Logos, the intro movie and the credits skip with green, red, Enter, Start,

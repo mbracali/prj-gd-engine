@@ -47,7 +47,6 @@ const std::vector<EnhancedSetting>& enhancedSettings() {
         {"color_grade", {"off", "warm", "cold", "vintage", "noir", "neon", "sepia"}},
         {"film_grain", {"none", "light", "medium", "strong", "stronger"}},
         {"chromatic", {"none", "light", "medium", "strong"}},
-        {"light_streaks", {"none", "very_light", "light", "medium"}},
         {"ssao", {"none", "light", "medium", "strong", "stronger"}},
         {"sharpening", {"off", "low", "high"}},
         {"star_blur", {"none", "light", "medium", "strong", "stronger"}},
@@ -55,7 +54,6 @@ const std::vector<EnhancedSetting>& enhancedSettings() {
         {"shadows_all", {"off", "on"}},
         {"more_lights", {"none", "1.5x", "2x", "2.5x"}},
         {"light_dust", {"none", "1.5x", "2x", "2.5x"}},
-        {"ground_fog", {"none", "1.5x", "2x", "2.5x"}},
         {"no_shaky_cam", {"off", "on"}},
         {"no_fail", {"off", "on"}},
         {"autoplay", {"off", "on"}},
@@ -90,9 +88,9 @@ using Values = std::map<std::string, std::string>;
 const Values& lowest() {
     static const Values v = {
         {"bokeh", "none"},        {"particles", "none"},   {"bloom", "none"},          {"cinematic_color", "off"},
-        {"film_grain", "none"},   {"chromatic", "none"},   {"light_streaks", "none"},  {"ssao", "none"},
+        {"film_grain", "none"},   {"chromatic", "none"},   {"ssao", "none"},
         {"star_blur", "none"},    {"shadows_all", "off"},  {"more_lights", "none"},    {"light_dust", "none"},
-        {"ground_fog", "none"},   {"color_grade", "off"},  {"sharpening", "off"},      {"antialiasing", "none"},
+        {"color_grade", "off"},  {"sharpening", "off"},      {"antialiasing", "none"},
         {"ai_upscaling", "none"}, {"sharp_ui", "off"},     {"no_effects", "off"}};
     return v;
 }
@@ -105,9 +103,9 @@ Values originalLook() {
 const Values& highest() {
     static const Values v = {
         {"bokeh", "stronger"},     {"particles", "2x"},      {"bloom", "3x"},            {"cinematic_color", "on"},
-        {"film_grain", "stronger"}, {"chromatic", "strong"}, {"light_streaks", "medium"}, {"ssao", "stronger"},
+        {"film_grain", "stronger"}, {"chromatic", "strong"}, {"ssao", "stronger"},
         {"star_blur", "stronger"}, {"shadows_all", "on"},    {"more_lights", "2.5x"},    {"light_dust", "2.5x"},
-        {"ground_fog", "2.5x"},    {"color_grade", "off"},   {"sharpening", "low"},      {"antialiasing", "taa"},
+        {"color_grade", "off"},   {"sharpening", "low"},      {"antialiasing", "taa"},
         {"ai_upscaling", "none"},  {"sharp_ui", "on"},       {"no_effects", "off"}};
     return v;
 }
@@ -150,16 +148,15 @@ void migrateEnhanced(Json& e) {
     map("bloom", {{"off", "none"}, {"low", "original"}, {"medium", "2x"}, {"high", "3x"}});
     map("film_grain", {{"off", "none"}});
     map("chromatic", {{"on", "medium"}, {"off", "none"}});
-    map("light_streaks", {{"on", "medium"}, {"off", "none"}});
     map("ssao", {{"on", "medium"}, {"off", "none"}});
     map("star_blur", {{"high", "strong"}});
     map("more_lights", {{"off", "none"}, {"subtle", "1.5x"}, {"strong", "2x"}});
     map("light_dust", {{"on", "1.5x"}, {"off", "none"}});
-    map("ground_fog", {{"low", "1.5x"}, {"full", "2x"}, {"super", "2.5x"}});
-    // XInput and Rock Band guitars are always on now.
+    // XInput and Rock Band guitars are always on now; Ground Fog and Light
+    // Streaks were removed (0.1.8): their saved values are dropped.
     Json kept = Json::object();
     for (const auto& [k, v] : e.o)
-        if (k != "xinput" && k != "rockband") kept.set(k, v);
+        if (k != "xinput" && k != "rockband" && k != "ground_fog" && k != "light_streaks") kept.set(k, v);
     e = std::move(kept);
 }
 
@@ -335,9 +332,6 @@ const std::vector<Item>& items() {
         {Kind::Choice, "chromatic", "Chromatic Aberration", true,
          "A camera lens's colour fringes: red and blue edges pull apart towards the corners of the venue.",
          {{"none", "None"}, {"light", "Light"}, {"medium", "Medium"}, {"strong", "Strong"}}},
-        {Kind::Choice, "light_streaks", "Anamorphic Light Streaks", true,
-         "The brightest stage lights flare into long blue-white horizontal streaks, like a cinema lens.",
-         {{"none", "None"}, {"very_light", "Very Light"}, {"light", "Light"}, {"medium", "Medium"}}},
         {Kind::Choice, "ssao", "Ambient Occlusion", true,
          "Soft contact shadows where surfaces meet: under the band's feet, in the folds of clothes, in the corners of the "
          "stage, for more depth. Costs some performance.",
@@ -357,11 +351,6 @@ const std::vector<Item>& items() {
          {{"none", "None"}, {"1.5x", "1.5x"}, {"2x", "2x"}, {"2.5x", "2.5x"}}},
         {Kind::Choice, "light_dust", "Dust in Light Beams", true,
          "Fine dust drifting and twinkling in the light beams over the band (with or without More Lights).",
-         {{"none", "None"}, {"1.5x", "1.5x"}, {"2x", "2x"}, {"2.5x", "2.5x"}}},
-        {Kind::Choice, "ground_fog", "Add Fog to the Ground (Experimental)", true,
-         "A low fog over the stage floor where the band plays, for more depth. 1.5x is a thin haze; 2x a thick stage-fog "
-         "layer; 2.5x a volumetric fog with light shafts from the stage lights and a haze in the air (costs more on "
-         "slower GPUs).",
          {{"none", "None"}, {"1.5x", "1.5x"}, {"2x", "2x"}, {"2.5x", "2.5x"}}},
         {Kind::Check, "no_shaky_cam", "Disable Shaky Camera", true,
          "The original game shakes the camera on some of its shots of the band, like a handheld camera. Turn this on for "
@@ -440,6 +429,7 @@ public:
         scroll_ = scrollTarget_ = 0;
         keepVisible();
         scroll_ = scrollTarget_;
+        backdropMissed_ = false, backdropFromMs_ = -1;
         ui.host().menuBackdrop(true);
         PanelObj::enter();
     }
@@ -564,8 +554,13 @@ public:
         for (int pass : {0, 1}) {
             d_.begin(pass);
             if (pass == 0) {
-                if (!still) d_.quad(0, 0, kScreenW, kScreenH, {0, 0, 0, 1});
-                else d_.quad(0, 0, kScreenW, kScreenH, {0, 0, 0, 0.25f});  // the venue a little darker, as gd01's blurred one reads
+                // The venue a little darker, as gd01's blurred one reads; one
+                // that arrives after the screen opened fades in over 0.3 s.
+                const double now = double(SDL_GetTicksNS()) / 1e6;
+                if (!still) backdropMissed_ = true;
+                else if (backdropMissed_ && backdropFromMs_ < 0) backdropFromMs_ = now;
+                const float in = backdropFromMs_ < 0 ? 1.0f : float(std::clamp((now - backdropFromMs_) / 300.0, 0.0, 1.0));
+                d_.quad(0, 0, kScreenW, kScreenH, {0, 0, 0, still ? 1.0f - 0.75f * in : 1.0f});
             }
             drawAll();
         }
@@ -982,6 +977,8 @@ private:
     std::map<std::string, bool> collapsed_;
     int focus_ = 0, dropdown_ = -1, ddFocus_ = 0, hoverButton_ = -1;
     bool entered_ = false;
+    bool backdropMissed_ = false;  // drawn without the backdrop since entering (it fades in when it comes)
+    double backdropFromMs_ = -1;
     float scroll_ = 0, scrollTarget_ = 0, ddTop_ = 0;
 };
 

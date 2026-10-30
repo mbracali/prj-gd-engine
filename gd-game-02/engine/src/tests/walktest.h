@@ -134,6 +134,7 @@ private:
     std::vector<std::string> expect_;  // screens that must be entered, in order
     size_t step_ = 0;
     double stepStart_ = -1;
+    double markMs_ = 0;  // a "mark" wait's time, for "until" waits (steps on a fixed beat)
     bool done_ = false, failed_ = false, autoplay_ = true;
     float endMs_ = 1e30f, failMs_ = 1e30f;
     std::string songKeys_;

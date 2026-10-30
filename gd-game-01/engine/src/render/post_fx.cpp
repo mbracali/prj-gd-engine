@@ -60,37 +60,20 @@ void main() {
 }
 )";
 
-// Ambient occlusion, fog, bloom, light streaks and colour in one pass at render resolution.
+// Ambient occlusion, bloom and colour in one pass at render resolution.
 const char* kComposite = R"(#version 330 core
 in vec2 vUv;
 uniform sampler2D uTex;    // the scene
-uniform sampler2D uDepth;
 uniform sampler2D uBlur;   // the blur pyramid's top (1/2 res)
-uniform sampler2D uBlurMid; // 1/4 res
-uniform sampler2D uStreakSrc; // the first 1/2 res step down: the light streaks' source
-uniform sampler2D uBlurLo; // a wide level (1/8 res): the fog's light
+uniform sampler2D uBlurLo; // a wide level (1/8 res)
 uniform sampler2D uAo;     // ambient occlusion (r) and the eye distance (g)
-uniform sampler2D uFogVol; // Super Fog: in-scattered light (rgb), transmittance (a)
-uniform int uFog, uSsao, uGrade;
-uniform mat4 uInvViewProj;
-uniform float uFloorZ, uFogHeight, uFogDensity, uFogMax, uTime;
+uniform int uSsao, uGrade;
 uniform float uBloom;      // 0 off
-uniform float uStreaks;    // 0 off
 uniform float uAoK;        // the occlusion's exponent: light 0.5 .. stronger 1.5
-uniform vec2 uTexel, uTexelMid;  // uTexelMid: uStreakSrc's texel
+uniform vec2 uTexel;
 uniform int uCinematic;
 out vec4 fragColor;
 
-float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
-float noise(vec2 p) {
-    vec2 i = floor(p), f = fract(p);
-    vec2 u = f * f * (3.0 - 2.0 * f);
-    return mix(mix(hash(i), hash(i + vec2(1, 0)), u.x), mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), u.x), u.y);
-}
-vec3 world(vec2 uv, float d) {
-    vec4 p = uInvViewProj * vec4(uv * 2.0 - 1.0, d * 2.0 - 1.0, 1.0);
-    return p.xyz / p.w;
-}
 float luma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
 vec3 saturation(vec3 c, float s) { return mix(vec3(luma(c)), c, s); }
 
@@ -133,36 +116,8 @@ void main() {
             }
         c *= pow(sum / wsum, uAoK);
     }
-    if (uFog == 3) {
-        // Super Fog: the half-resolution volume (light shafts, glow and the ground layer).
-        vec4 v = texture(uFogVol, vUv);
-        c = c * v.a + v.rgb;
-    } else if (uFog != 0) {
-        // Exponential height fog on the stage floor, integrated along the
-        // view ray from the near plane (heights clamped at the floor, so the
-        // pit in front of the stage holds the floor's density).
-        float d = min(texture(uDepth, vUv).r, 0.99999);
-        vec3 o = world(vUv, 0.0), p = world(vUv, d);
-        vec3 ray = p - o;
-        float dist = min(length(ray), 3000.0);
-        p = o + normalize(ray) * dist;
-        float h0 = max(o.z - uFloorZ, 0.0) / uFogHeight, h1 = max(p.z - uFloorZ, 0.0) / uFogHeight;
-        float k = abs(h1 - h0) < 1e-3 ? exp(-h0) : (exp(-h0) - exp(-h1)) / (h1 - h0);
-        // Rolling density: three octaves of domain-warped value noise on the floor plane.
-        vec2 q = p.xy * 0.012 + uTime * vec2(0.035, 0.012);
-        vec2 warp = vec2(noise(q * 0.7 + 3.1), noise(q * 0.7 - 1.7)) - 0.5;
-        q += warp * 1.4;
-        float n = noise(q) * 0.55 + noise(q * 2.3 - uTime * vec2(0.02, 0.05)) * 0.3 + noise(q * 5.1 + uTime * 0.04) * 0.15;
-        float amount = uFogDensity * dist * k * mix(0.35, 1.7, n);
-        float f = (1.0 - exp(-amount)) * uFogMax;
-        // Lit by the stage: the wide blur of the frame there, the bright lights glowing through it.
-        vec3 light = texture(uBlurLo, vUv).rgb;
-        vec3 glow = max(texture(uBlurMid, vUv).rgb - 0.35, 0.0);
-        vec3 fogColor = vec3(0.09, 0.09, 0.11) + light * 1.3 + glow * 1.2;
-        c = mix(c, fogColor, f);
-    }
     if (uBloom > 0.0) {
-        // Bright parts of the blurred frame (threshold after the blur: shares the fog's pyramid).
+        // Bright parts of the blurred frame (thresholded after the blur).
         // Thresholded on luminance with a soft knee, keeping the light's colour: a per-channel
         // threshold made broad, saturated surfaces glow (Toxic's teal stage floor blew out to
         // white in close-ups), where only the lights themselves should.
@@ -173,17 +128,6 @@ void main() {
         float kw = smoothstep(0.55, 0.85, lw) * max(lw - 0.55, 0.0) / max(lw, 1e-3);
         vec3 glow = b * kb * 2.2 + wide * kw * 1.6;
         c += glow * uBloom;
-    }
-    if (uStreaks > 0.0) {
-        // Anamorphic streaks: the brightest lights smeared sideways, blue-tinted.
-        vec3 s = vec3(0.0);
-        for (int i = -24; i <= 24; ++i) {
-            vec3 t = texture(uStreakSrc, vUv + vec2(float(i) * uTexelMid.x, 0.0)).rgb;
-            float m = max(t.r, max(t.g, t.b));
-            s += t * (max(m - 0.8, 0.0) / max(m, 1e-3)) * exp(-abs(float(i)) * 0.09);  // only the lights themselves, not lit skin
-        }
-        // Half the light's own colour, half a cool blue-white.
-        c += (s * 0.5 + vec3(luma(s)) * vec3(0.55, 0.8, 1.3) * 0.7) * uStreaks;
     }
     if (uCinematic != 0) {
         float l = luma(c);
@@ -252,85 +196,6 @@ void main() {
         }
     }
     fragColor = vec4(1.0 - 0.85 * occ / float(kSamples), length(eye - p), 0.0, 1.0);
-}
-)";
-
-// Super Fog (half resolution): the view ray marched to the scene through a
-// ground fog layer and a thin room haze, both stirred by animated 3D noise,
-// lit by the stage's light cones (Henyey-Greenstein forward scattering, so
-// the beams glow looking into the lights) and by the frame's own light.
-// Out: the in-scattered light and the transmittance.
-const char* kFogVol = R"(#version 330 core
-in vec2 vUv;
-uniform sampler2D uDepth;
-uniform sampler2D uBlurLo;
-uniform mat4 uInvViewProj;
-uniform float uFloorZ, uTime;
-uniform int uLights;
-uniform vec3 uLightPos[8], uLightDir[8], uLightCol[8];
-uniform vec2 uLightCone[8];  // cos of the inner and outer half-angles
-out vec4 fragColor;
-vec3 world(vec2 uv, float d) {
-    vec4 p = uInvViewProj * vec4(uv * 2.0 - 1.0, d * 2.0 - 1.0, 1.0);
-    return p.xyz / p.w;
-}
-// Dave Hoskins' hash without sine (cheap: the march calls it 8 times per octave per step).
-float hash3(vec3 p) {
-    p = fract(p * 0.1031);
-    p += dot(p, p.zyx + 31.32);
-    return fract((p.x + p.y) * p.z);
-}
-// Not "noise3": GLSL reserves noise1..noise4 as built-ins (vec3 noise3(genType)),
-// and Apple's compiler rejects a redeclaration with another return type.
-float fogNoise3(vec3 p) {
-    vec3 i = floor(p), f = fract(p);
-    vec3 u = f * f * (3.0 - 2.0 * f);
-    return mix(mix(mix(hash3(i), hash3(i + vec3(1, 0, 0)), u.x), mix(hash3(i + vec3(0, 1, 0)), hash3(i + vec3(1, 1, 0)), u.x), u.y),
-               mix(mix(hash3(i + vec3(0, 0, 1)), hash3(i + vec3(1, 0, 1)), u.x), mix(hash3(i + vec3(0, 1, 1)), hash3(i + vec3(1, 1, 1)), u.x), u.y),
-               u.z);
-}
-void main() {
-    float d = min(texture(uDepth, vUv).r, 0.99999);
-    vec3 o = world(vUv, 0.0), p = world(vUv, d);
-    vec3 ray = p - o;
-    float dist = min(length(ray), 2500.0);
-    vec3 dir = normalize(ray);
-    const int kSteps = 24;  // with the per-pixel jitter, enough for soft shafts
-    float stepLen = dist / float(kSteps);
-    float t = stepLen * fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
-    vec3 ambient = vec3(0.07, 0.07, 0.085) + texture(uBlurLo, vUv).rgb * 1.5;
-    vec3 inScatter = vec3(0.0);
-    float trans = 1.0;
-    const float g = 0.55;  // forward scattering
-    for (int i = 0; i < kSteps; ++i, t += stepLen) {
-        vec3 q = o + dir * t;
-        float h = max(q.z - uFloorZ, 0.0);
-        vec3 nq = q * 0.011 + vec3(uTime * 0.05, uTime * 0.02, -uTime * 0.03);
-        // The second octave only in the ground layer, where the billows show.
-        float n = h < 80.0 ? fogNoise3(nq) * 0.6 + fogNoise3(nq * 2.6 + 7.3) * 0.4 : fogNoise3(nq);
-        float ground = 0.009 * exp(-h / 26.0) * mix(0.25, 1.9, n);
-        float haze = 0.00055 * mix(0.6, 1.4, n);
-        float dens = ground + haze;
-        vec3 li = ambient;
-        float near = smoothstep(40.0, 220.0, t);  // no beam glare right at the lens (close-ups inside a cone)
-        for (int k = 0; k < 8; ++k) {
-            if (k >= uLights) break;
-            vec3 v = q - uLightPos[k];
-            float dl = length(v);
-            vec3 lv = v / max(dl, 1e-3);
-            float cone = smoothstep(uLightCone[k].y, uLightCone[k].x, dot(lv, uLightDir[k]));
-            if (cone <= 0.0) continue;
-            float mu = dot(lv, -dir);
-            float phase = (1.0 - g * g) / pow(1.0 + g * g - 2.0 * g * mu, 1.5) * 0.25;
-            li += uLightCol[k] * cone * phase * 40.0 * near / (1.0 + dl * dl * 1.5e-5);
-        }
-        float sigma = dens * stepLen;
-        inScatter += trans * li * sigma;
-        trans *= exp(-sigma);
-    }
-    // Keep the band readable: a soft limit on the glow, and never fully fogged.
-    inScatter = inScatter / (1.0 + max(max(inScatter.r, inScatter.g), inScatter.b) * 0.7);
-    fragColor = vec4(inScatter, max(trans, 0.3));
 }
 )";
 
@@ -736,11 +601,10 @@ bool PostFx::init() {
     pRcas_ = program(kRcas, "FSR RCAS");
     pCopy_ = program(kCopy, "copy");
     pAo_ = program(kAo, "ambient occlusion");
-    pFogVol_ = program(kFogVol, "super fog");
     pStarBlur_ = program(kStarBlur, "star power blur");
     pFinish_ = program(kFinish, "finish");
-    failed_ = !(pDown_ && pUp_ && pComposite_ && pTaa_ && pFxaa_ && pDownsample_ && pEasu_ && pRcas_ && pCopy_ && pAo_ && pFogVol_ &&
-                pStarBlur_ && pFinish_);
+    failed_ = !(pDown_ && pUp_ && pComposite_ && pTaa_ && pFxaa_ && pDownsample_ && pEasu_ && pRcas_ && pCopy_ && pAo_ && pStarBlur_ &&
+                pFinish_);
     ready_ = !failed_;
     return ready_;
 }
@@ -811,8 +675,8 @@ unsigned PostFx::process(unsigned color, unsigned depth, int sw, int sh, int ow,
     const std::array<float, 16> inv = f.hasCamera ? inverse(f.viewProj) : std::array<float, 16>{};
     unsigned cur = color;
 
-    // 1. The blur pyramid (dual Kawase) for bloom, the fog's light and the light streaks.
-    const bool pyramid = s.bloom || s.streaks || (s.fog && f.hasCamera);
+    // 1. The blur pyramid (dual Kawase) for bloom.
+    const bool pyramid = s.bloom != 0;
     if (pyramid) {
         int w = sw, h = sh;
         unsigned src = color;
@@ -854,78 +718,24 @@ unsigned PostFx::process(unsigned color, unsigned depth, int sw, int sh, int ow,
         gl::glUniform1f(uniform(pAo_, "uRadius"), 14.0f);  // world units; a rocker is ~80 tall
         drawQuad();
     }
-    // Super Fog's volume at half resolution (16-bit: the transmittance in alpha).
-    const bool superFog = s.fog >= 3 && f.hasCamera;
-    if (superFog) {
-        ensure(fogVol_, std::max(1, sw / 2), std::max(1, sh / 2), true);
-        bindTarget(fogVol_);
-        gl::glUseProgram(pFogVol_);
-        gl::glUniform1i(uniform(pFogVol_, "uDepth"), 0);
-        gl::glUniform1i(uniform(pFogVol_, "uBlurLo"), 1);
-        bindTex(0, depth);
-        bindTex(1, up_[2].tex);
-        gl::glUniformMatrix4fv(uniform(pFogVol_, "uInvViewProj"), 1, GL_FALSE, inv.data());
-        gl::glUniform1f(uniform(pFogVol_, "uFloorZ"), f.floorZ);
-        gl::glUniform1f(uniform(pFogVol_, "uTime"), f.timeSec);
-        float pos[24] = {}, dir[24] = {}, col[24] = {}, cone[16] = {};
-        int n = 0;
-        for (const PostFrame::Light& l : f.lights) {
-            if (n == 8) break;
-            float d[3] = {l.target[0] - l.pos[0], l.target[1] - l.pos[1], l.target[2] - l.pos[2]};
-            float len = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
-            if (len < 1) continue;
-            for (int k = 0; k < 3; ++k) pos[n * 3 + k] = l.pos[size_t(k)], dir[n * 3 + k] = d[k] / len, col[n * 3 + k] = l.color[size_t(k)];
-            // A pool ~60 units across where it lands, as the floor spots.
-            float half = std::atan(60.0f / len);
-            cone[n * 2] = std::cos(half * 0.55f), cone[n * 2 + 1] = std::cos(half);
-            ++n;
-        }
-        gl::glUniform1i(uniform(pFogVol_, "uLights"), n);
-        gl::glUniform3fv(uniform(pFogVol_, "uLightPos"), 8, pos);
-        gl::glUniform3fv(uniform(pFogVol_, "uLightDir"), 8, dir);
-        gl::glUniform3fv(uniform(pFogVol_, "uLightCol"), 8, col);
-        gl::glUniform2fv(uniform(pFogVol_, "uLightCone"), 8, cone);
-        drawQuad();
-    }
-
-    // 2. Ambient occlusion, fog, bloom, light streaks, colour.
+    // 2. Ambient occlusion, bloom, colour.
     if (pyramid || ssao || s.cinematic || s.grade) {
         ensure(a_, sw, sh, false);
         bindTarget(a_);
         gl::glUseProgram(pComposite_);
         gl::glUniform1i(uniform(pComposite_, "uTex"), 0);
-        gl::glUniform1i(uniform(pComposite_, "uDepth"), 1);
-        gl::glUniform1i(uniform(pComposite_, "uBlur"), 2);
-        gl::glUniform1i(uniform(pComposite_, "uBlurLo"), 3);
-        gl::glUniform1i(uniform(pComposite_, "uBlurMid"), 4);
-        gl::glUniform1i(uniform(pComposite_, "uAo"), 5);
-        gl::glUniform1i(uniform(pComposite_, "uFogVol"), 6);
-        gl::glUniform1i(uniform(pComposite_, "uStreakSrc"), 7);
+        gl::glUniform1i(uniform(pComposite_, "uBlur"), 1);
+        gl::glUniform1i(uniform(pComposite_, "uBlurLo"), 2);
+        gl::glUniform1i(uniform(pComposite_, "uAo"), 3);
         bindTex(0, color);
-        bindTex(1, depth);
-        bindTex(2, pyramid ? up_[0].tex : color);
-        bindTex(3, pyramid ? up_[2].tex : color);
-        bindTex(4, pyramid ? up_[1].tex : color);
-        bindTex(5, ssao ? ao_.tex : color);
-        bindTex(6, superFog ? fogVol_.tex : color);
-        bindTex(7, pyramid ? down_[0].tex : color);
-        const int fog = f.hasCamera ? s.fog : 0;
-        gl::glUniform1i(uniform(pComposite_, "uFog"), fog);
+        bindTex(1, pyramid ? up_[0].tex : color);
+        bindTex(2, pyramid ? up_[2].tex : color);
+        bindTex(3, ssao ? ao_.tex : color);
         gl::glUniform1i(uniform(pComposite_, "uSsao"), ssao ? 1 : 0);
         static constexpr float kAoK[5] = {0, 0.5f, 0.8f, 1.1f, 1.5f};  // none, light, medium, strong, stronger
         gl::glUniform1f(uniform(pComposite_, "uAoK"), kAoK[std::clamp(s.ssao, 0, 4)]);
-        gl::glUniformMatrix4fv(uniform(pComposite_, "uInvViewProj"), 1, GL_FALSE, inv.data());
-        // Low: knee-high wisps; full: a thicker layer to the waist (rockers are ~80 units tall).
-        gl::glUniform1f(uniform(pComposite_, "uFloorZ"), f.floorZ);
-        gl::glUniform1f(uniform(pComposite_, "uFogHeight"), s.fog >= 2 ? 24.0f : 13.0f);
-        gl::glUniform1f(uniform(pComposite_, "uFogDensity"), s.fog >= 2 ? 0.0065f : 0.004f);
-        gl::glUniform1f(uniform(pComposite_, "uFogMax"), s.fog >= 2 ? 0.88f : 0.68f);
-        gl::glUniform1f(uniform(pComposite_, "uTime"), f.timeSec);
         gl::glUniform1f(uniform(pComposite_, "uBloom"), !pyramid ? 0.0f : s.bloom >= 3 ? 0.9f : s.bloom == 2 ? 0.68f : s.bloom == 1 ? 0.45f : 0.0f);
-        static constexpr float kStreaks[4] = {0, 0.4f, 0.7f, 1.1f};  // none, very light, light, medium
-        gl::glUniform1f(uniform(pComposite_, "uStreaks"), pyramid ? kStreaks[std::clamp(s.streaks, 0, 3)] : 0.0f);
         gl::glUniform2f(uniform(pComposite_, "uTexel"), 1.0f / float(sw), 1.0f / float(sh));
-        gl::glUniform2f(uniform(pComposite_, "uTexelMid"), pyramid ? 1.0f / float(down_[0].w) : 0.0f, pyramid ? 1.0f / float(down_[0].h) : 0.0f);
         gl::glUniform1i(uniform(pComposite_, "uCinematic"), s.cinematic ? 1 : 0);
         gl::glUniform1i(uniform(pComposite_, "uGrade"), s.grade);
         drawQuad();

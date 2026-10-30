@@ -11,12 +11,9 @@
 // not in the original game). The venue draws into an off-screen colour +
 // depth target at the chain's render scale (Renderer::beginScene); endScene
 // runs, in order:
-//   1. the blur pyramid (dual Kawase, 1/2 .. 1/32), when bloom, fog or the
-//      light streaks are on; ambient occlusion (from the depth buffer);
-//      Super Fog's volume (half resolution, ray marched through the stage's
-//      light cones);
-//   2. one composite pass at render resolution: ambient occlusion, ground
-//      fog (world height from the depth buffer), bloom, light streaks,
+//   1. the blur pyramid (dual Kawase, 1/2 .. 1/32), when bloom is on;
+//      ambient occlusion (from the depth buffer);
+//   2. one composite pass at render resolution: ambient occlusion, bloom,
 //      cinematic colour, colour grading;
 //   2b. Blur on Star Power: camera motion blur plus frame accumulation, only
 //      while a player's Star Power is on;
@@ -38,13 +35,11 @@ struct PostSettings {
     int quality = 2;        // the upscaler's mode: 0 performance, 1 balanced, 2 quality
     int bloom = 0;          // 0 off, 1 low, 2 medium, 3 high
     bool cinematic = false; // filmic curve, grade and vignette
-    int fog = 0;            // ground fog: 0 none, 1 low, 2 full, 3 super (volumetric, light shafts)
     // Colour grading after the cinematic curve: 0 off, 1 warm, 2 cold, 3 vintage, 4 noir, 5 neon.
     // 6 sepia (Enhanced > Modes > Good old days only).
     int grade = 0;
     int grain = 0;          // film grain: 0 none, 1 light, 2 medium, 3 strong, 4 stronger
     int chromatic = 0;      // chromatic aberration (lens fringes towards the edges): 0 none, 1 light, 2 medium, 3 strong
-    int streaks = 0;        // anamorphic light streaks from the brightest lights: 0 none, 1 very light, 2 light, 3 medium
     int ssao = 0;           // screen-space ambient occlusion: 0 none, 1 light, 2 medium, 3 strong, 4 stronger
     int sharpen = 0;        // contrast-adaptive sharpening: 0 off, 1 low, 2 high
     int starBlur = 0;       // motion blur during Star Power: 0 none, 1 light, 2 medium, 3 strong, 4 stronger
@@ -55,8 +50,8 @@ struct PostSettings {
         return (upscaler == Upscaler::Fsr1 ? fsrScale : 1.0f) * (aa == AA::Ssaa ? 2.0f : 1.0f);
     }
     bool any() const {
-        return aa != AA::None || upscaler != Upscaler::None || bloom || cinematic || fog || grade || grain || chromatic ||
-               streaks || ssao || sharpen || starBlur;
+        return aa != AA::None || upscaler != Upscaler::None || bloom || cinematic || grade || grain || chromatic || ssao ||
+               sharpen || starBlur;
     }
 };
 
@@ -64,16 +59,9 @@ struct PostSettings {
 struct PostFrame {
     std::array<float, 16> viewProj{};  // column-major, without the TAA jitter
     bool hasCamera = false;
-    float floorZ = 0;                  // the stage floor (world Z, Z-up)
     float timeSec = 0;
     // Blur on Star Power: how much of it this frame (0 off .. 1 full; the caller fades it in and out).
     float starBlur = 0;
-    // Super Fog's light cones: a light's position, the point it aims at (a
-    // band member's feet) and its colour (0..1).
-    struct Light {
-        std::array<float, 3> pos, target, color;
-    };
-    std::vector<Light> lights;
 };
 
 class VkUpscaler;
@@ -97,7 +85,7 @@ public:
     // Compiles every shader of the chain now (normally on first use); false when
     // any failed (then the chain stays off and failedPrograms() names them).
     bool ready() { return init(); }
-    static constexpr int kPrograms = 13;  // built by init()
+    static constexpr int kPrograms = 12;  // built by init()
     const std::vector<std::string>& failedPrograms() const { return failedPrograms_; }
 
 private:
@@ -116,13 +104,13 @@ private:
     std::vector<std::string> failedPrograms_;
     unsigned vao_ = 0;
     unsigned pDown_ = 0, pUp_ = 0, pComposite_ = 0, pTaa_ = 0, pFxaa_ = 0, pDownsample_ = 0, pEasu_ = 0, pRcas_ = 0, pCopy_ = 0;
-    unsigned pAo_ = 0, pFogVol_ = 0, pStarBlur_ = 0, pFinish_ = 0;
+    unsigned pAo_ = 0, pStarBlur_ = 0, pFinish_ = 0;
     // The output-size pass (sharpening, chromatic aberration, grain) on `cur`; returns its result.
     unsigned finish(unsigned cur, int ow, int oh, const PostSettings& s, const PostFrame& f);
     static constexpr int kLevels = 5;
     Target down_[kLevels], up_[kLevels];
     Target a_, b_, history_[2], out_, out2_;
-    Target ao_, fogVol_, starAccum_[2], fin_;
+    Target ao_, starAccum_[2], fin_;
     int starIndex_ = 0;
     bool starValid_ = false;
     std::array<float, 16> starPrevViewProj_{};

@@ -124,18 +124,8 @@ public:
     // [I] A fixed view replacing the shots (the Enhanced Settings backdrop).
     // `camera` (rows X, Y forward, Z up; at the eye) faces the billboards and the crowd.
     void setStillView(const Mat4& viewProj, const Xfm& camera) { stillVp_ = viewProj, stillCam_ = camera, still_ = true; }
-    // For the post-processing (ground fog, TAA): the view-projection drawn
-    // last, and the stage floor's height (the guitarist's root), false without one.
+    // For the post-processing (TAA, Blur on Star Power): the view-projection drawn last.
     const Mat4& viewProj() const { return vp_; }
-    bool stageFloorZ(float& z) const {
-        if (!guitarist_) return false;
-        z = guitarist_->placement().pos[2];
-        return true;
-    }
-    // [I] For Super Fog's light shafts: each lit band member's light (the
-    // guitarist's is the venue's spotlight), as its position, the member's
-    // feet and the stage spotlight's colour (0..1), 9 floats each.
-    std::vector<std::array<float, 9>> beamLights();
     void draw();
 
 private:

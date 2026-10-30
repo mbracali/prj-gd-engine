@@ -69,6 +69,10 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
     auto press = [&](int b) { steps_.push_back({S::Press, "", b, 0}); };
     auto pressP = [&](int b, int player) { steps_.push_back({S::Press, "", b, 0, player}); };
     auto wait = [&](double ms) { steps_.push_back({S::Wait, "", 0, ms}); };
+    // Waits measured from a mark, not from the step before: presses on a
+    // beat that do not drift by a frame or two each (the calibration).
+    auto mark = [&] { steps_.push_back({S::Wait, "mark", 0, 0}); };
+    auto until = [&](double ms) { steps_.push_back({S::Wait, "until", 0, ms}); };
     // A real key press, through SDL's events and the input layer (as GD02_KEYS' kReturn).
     auto key = [&](SDL_Keycode k) { steps_.push_back({S::Key, "", int(k), 0}); };
     auto check = [&](const char* what, double timeout = 0) { steps_.push_back({S::Check, what, 0, timeout}); };
@@ -154,6 +158,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         press(kDown), wait(150), press(kDown), wait(150);
         press(kX);
         at("enhanced_options_screen");
+        wait(300);  // after a song the backdrop loads on the screen's second frame (and fades in)
         check("backdrop_band");
         press(kTri);
         at("options_screen");
@@ -461,11 +466,11 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         // 750 ms after 1 s, 3 lead-in beats), then 8 on the flashes (1.5 s
         // later), then select closes the result.
         press(kDown), wait(120);
-        press(kX);
-        wait(2600);
-        for (int i = 0; i < 8; ++i) press(kX), wait(750);
-        wait(2350);
-        for (int i = 0; i < 8; ++i) press(kX), wait(750);
+        press(kX), mark();
+        for (int i = 0; i < 8; ++i) until(2600 + i * 750.0), press(kX);
+        mark();
+        for (int i = 0; i < 8; ++i) until(3100 + i * 750.0), press(kX);
+        wait(750);
         check("enhanced_calibrated");
         press(kX), wait(200);
         // PERFORMANCE & GRAPHICS -> Screen Mode -> Resolution; select opens
@@ -481,18 +486,18 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         // (Upscaling Quality appears) at Performance, (Max FPS, FPS Counter
         // kept), Bokeh None, Particles None, Bloom 2x, Cinematic Color on,
         // Color Grading Warm, Film Grain Medium, Chromatic Aberration Light,
-        // Light Streaks Very Light, Ambient Occlusion Medium, Sharpening
-        // High, Blur on Star Power Medium.
+        // Ambient Occlusion Medium, Sharpening High, Blur on Star Power
+        // Medium.
         row(kX), again(kX), row(kRight), row(kRight), row(kRight);
         press(kDown), wait(120), press(kDown), wait(120);
         row(kLeft), again(kLeft), row(kLeft), row(kRight), again(kRight), row(kX), row(kRight), row(kRight), again(kRight), row(kRight),
-            row(kRight), row(kRight), again(kRight), row(kRight), again(kRight), row(kRight), again(kRight);
+            row(kRight), again(kRight), row(kRight), again(kRight), row(kRight), again(kRight);
         wait(500);
         check("enhanced_graphics");
         // The venue extras at their defaults (off), then Band Shadows on, More
-        // Lights 2x, Dust 1.5x, Fog 2x, Shaky Camera off.
+        // Lights 2x, Dust 1.5x, Shaky Camera off.
         check("enhanced_lights_default");
-        row(kX), row(kRight), again(kRight), row(kRight), row(kRight), again(kRight), row(kX);
+        row(kX), row(kRight), again(kRight), row(kRight), row(kX);
         wait(400);
         check("enhanced_enhancers");
         // Remove All Effects on: every effect off, GH2's own too; then off again.
@@ -909,7 +914,8 @@ void WalkDriver::poll(ui::UiManager& ui, double nowMs) {
     }
     case Step::Wait:
     case Step::Hold:
-        if (nowMs - stepStart_ >= s.ms) ++step_, stepStart_ = -1;
+        if (s.kind == Step::Wait && s.screen == "mark") markMs_ = nowMs;
+        if (nowMs - (s.kind == Step::Wait && s.screen == "until" ? markMs_ : stepStart_) >= s.ms) ++step_, stepStart_ = -1;
         return;
     }
 }
@@ -1258,7 +1264,7 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
             // (glow, depth of field), particles and shake; none of the
             // port's effects, and the menus' textures as the original's.
             for (const char* key : {"bokeh", "bloom", "cinematic_color", "film_grain", "chromatic", "ssao", "sharpening", "star_blur",
-                                    "shadows_all", "more_lights", "light_dust", "ground_fog", "sharp_ui", "fps_counter"}) {
+                                    "shadows_all", "more_lights", "light_dust", "sharp_ui", "fps_counter"}) {
                 const std::string got = ui.host().enhancedValue(key), def = ui::enhancedDefault(key, false);
                 const bool original = def == "off" || def == "none" || (std::string(key) == "bokeh" && def == "medium");
                 std::printf("  enhanced default: %s %s\n", key, got.c_str());
@@ -1293,7 +1299,7 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         } else if (w == "enhanced_graphics") {
             want("sharp_ui", "off"), want("antialiasing", "fxaa"), want("ai_upscaling", "fsr1"), want("ai_upscaling_mode", "performance");
             want("bokeh", "none"), want("particles", "none"), want("bloom", "2x"), want("cinematic_color", "on"), want("color_grade", "warm");
-            want("film_grain", "medium"), want("chromatic", "light"), want("light_streaks", "very_light"), want("ssao", "medium");
+            want("film_grain", "medium"), want("chromatic", "light"), want("ssao", "medium");
             want("sharpening", "high"), want("star_blur", "medium");
             state("sharp_ui", 0, 0), state("particles", 0, 0), state("post_dof", 0, 0);
             for (const char* pass : {"fx:down", "fx:up", "fx:ao", "fx:composite", "fx:fxaa", "fx:easu", "fx:rcas", "fx:finish"}) state(pass, 1, 1);
@@ -1307,7 +1313,7 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         } else if (w == "enhanced_lights_default") {
             state("shadows", 0, 0), state("beams", 0, 0), state("motes", 0, 0);
         } else if (w == "enhanced_enhancers") {
-            want("shadows_all", "on"), want("more_lights", "2x"), want("light_dust", "1.5x"), want("ground_fog", "2x"), want("no_shaky_cam", "on");
+            want("shadows_all", "on"), want("more_lights", "2x"), want("light_dust", "1.5x"), want("no_shaky_cam", "on");
             state("shadows", 1, kMany), state("beams", 1, kMany), state("motes", 1, kMany), state("shake", 0, 0);
         } else if (w == "enhanced_exported") {
             status("Exported to");
@@ -1319,9 +1325,23 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
                 std::printf("  exported %s: %s\n", f, ec ? "missing" : (std::to_string(size) + " bytes").c_str());
                 if (ec || size < 10) problems += std::string(problems.empty() ? "" : "; ") + f + " was not written";
             }
+            // Options removed in 0.1.8 (Ground Fog, Light Streaks) in the
+            // file to load next: Load User Settings ignores them.
+            try {
+                std::ifstream in(d / "GD02-user-settings.json");
+                std::stringstream ss;
+                ss << in.rdbuf();
+                Json j = Json::parse(ss.str());
+                j.set("ground_fog", Json::string("2x")), j.set("light_streaks", Json::string("medium"));
+                std::ofstream(d / "GD02-user-settings.json") << j.dump(2);
+            } catch (const std::exception&) {
+                problems += std::string(problems.empty() ? "" : "; ") + "GD02-user-settings.json does not parse";
+            }
         } else if (w == "enhanced_settings_loaded") {
             status("Settings loaded");
-            want("ground_fog", "2x"), want("internal_res", "480"), want("antialiasing", "fxaa");
+            want("more_lights", "2x"), want("internal_res", "480"), want("antialiasing", "fxaa");
+            for (const char* gone : {"ground_fog", "light_streaks"})
+                if (saved.has(gone)) problems += std::string(problems.empty() ? "" : "; ") + gone + " (removed) was loaded";
         } else if (w == "enhanced_progress_loaded") {
             status("Progress loaded");
         } else if (w == "enhanced_cheats") {

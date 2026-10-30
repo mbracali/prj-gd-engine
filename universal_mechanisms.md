@@ -225,6 +225,20 @@ option is a must here too.
 
 Build them as reusable components: every game reuses them.
 
+**They open on the next frame, with no visible delay** (owner, 2026-10-30).
+Clicking or selecting GAMEPADS / the Gamepad menu or Enhanced Options shows
+the menu at once:
+
+- No screen transition into a universal menu: neither the menu's own
+  entrance nor the outgoing screen's exit animation plays before it.
+- Heavy work is never done when the menu opens: asset and band preview
+  loads (the Enhanced backdrop's venue and band), MIDI port scans, file
+  I/O, shader compiles and first-draw texture uploads are preloaded at
+  startup (and the backdrop drawn once unseen) or done asynchronously.
+- A fade-in is allowed only for a part that is still loading when the menu
+  opens (for example the backdrop after a song unloaded it); the menu
+  itself is never held back for it.
+
 ### 1.2.1 Gamepad menu
 
 A central part of our enhanced ports.
@@ -412,13 +426,11 @@ components: we will.
 | Performance & graphics | Cinematic Color | True or false | Check box |
 | Performance & graphics | Film Grain | None, light, medium, strong, stronger | Dropdown |
 | Performance & graphics | Chromatic Aberration | None, light, medium, strong | Dropdown |
-| Performance & graphics | Anamorphic Light Streaks | None, very light, light, medium | Dropdown |
 | Performance & graphics | Ambient Occlusion | None, light, medium, strong, stronger | Dropdown |
 | Performance & graphics | Blur on Star Power | None, light, medium, strong, stronger | Dropdown |
 | Performance & graphics | All Band Mates Cast Shadows | True or false | Check box |
 | Performance & graphics | More Lights on Venues | None, 1.5x, 2x, 2.5x | Dropdown |
 | Performance & graphics | Dust in Light Beams | None, 1.5x, 2x, 2.5x | Dropdown (always available) |
-| Performance & graphics | Add Fog to the Ground (Experimental) | None, 1.5x, 2x, 2.5x | Dropdown |
 | *(space)* | | | |
 | Cheats & enhancers | Export User Files | Exports the user's settings and progress as JSON files | Button |
 | Cheats & enhancers | Load User Settings | Loads a user settings JSON file | Button |
@@ -450,7 +462,22 @@ to be redeveloped, adapted or improved for that.
   drum and vocal sections of 1.2.1.2 are not shown.
 - 1.1.6 and older `enhanced.json` and `controllers.json` files still load:
   their values are mapped to the new ones (for example Bloom High is 3x,
-  Chromatic Aberration on is Medium, Fog Full is 2x).
+  Chromatic Aberration on is Medium).
+
+## Removed from every game's Enhanced menu (2026-10-30)
+
+The owner removed two options from the Enhanced menu of every game; they
+**must not be added to future games** (gd-game-03, gd-game-04 and later):
+
+- **Add Fog to the Ground (Experimental)** (`ground_fog`), with its height
+  fog and the volumetric Super Fog (light shafts);
+- **Anamorphic Light Streaks** (`light_streaks`).
+
+Their code, shaders, presets and tests are gone from gd-game-01 (1.1.7)
+and gd-game-02 (0.1.8). An `enhanced.json` or an imported settings file
+that still has these keys loads normally: the keys are ignored and dropped.
+(The original games' own environment fog, and note streaks in gameplay, are
+unrelated and stay.)
 
 ## Decisions taken for gd-game-02 (2026-10-29)
 

@@ -14,11 +14,10 @@
 // on gd02's device layer. GH2's own post-process (render/post_fx.h) runs
 // first, into an 8-bit buffer at the render scale, with the world's depth;
 // then, in order:
-//   1. the blur pyramid (dual Kawase, 1/2 .. 1/32) when bloom, fog or the
-//      light streaks are on; ambient occlusion (from the depth buffer);
-//      Super Fog's volume (half resolution, marched through light cones);
-//   2. one composite pass: ambient occlusion, ground fog, bloom, light
-//      streaks, cinematic colour, colour grading;
+//   1. the blur pyramid (dual Kawase, 1/2 .. 1/32) when bloom is on;
+//      ambient occlusion (from the depth buffer);
+//   2. one composite pass: ambient occlusion, bloom, cinematic colour,
+//      colour grading;
 //   2b. Blur on Star Power: camera motion blur and frame accumulation, only
 //      while a player's Star Power is on;
 //   3. anti-aliasing at render resolution: TAA (jittered projection, history
@@ -42,11 +41,9 @@ struct PostSettings {
     float fsrScale = 1;     // its render scale: 1 / 1.5, 1 / 1.7, 1 / 2
     int bloom = 0;          // 0 none, 1 original, 2 2x, 3 3x
     bool cinematic = false; // filmic curve, grade and vignette
-    int fog = 0;            // ground fog: 0 none, 1 1.5x, 2 2x, 3 2.5x (volumetric, light shafts)
     int grade = 0;          // 0 off, 1 warm, 2 cold, 3 vintage, 4 noir, 5 neon, 6 sepia
     int grain = 0;          // 0 none, 1 light, 2 medium, 3 strong, 4 stronger
     int chromatic = 0;      // 0 none, 1 light, 2 medium, 3 strong
-    int streaks = 0;        // 0 none, 1 very light, 2 light, 3 medium
     int ssao = 0;           // 0 none, 1 light, 2 medium, 3 strong, 4 stronger
     int sharpen = 0;        // 0 off, 1 low, 2 high
     int starBlur = 0;       // 0 none, 1 light, 2 medium, 3 strong, 4 stronger
@@ -54,7 +51,7 @@ struct PostSettings {
     float renderScale() const { return (fsr1 ? fsrScale : 1.0f) * (aa == AA::Ssaa ? 2.0f : 1.0f); }
     // Whether the port's chain runs at all.
     bool any() const {
-        return aa != AA::None || fsr1 || bloom || cinematic || fog || grade || grain || chromatic || streaks || ssao || sharpen || starBlur;
+        return aa != AA::None || fsr1 || bloom || cinematic || grade || grain || chromatic || ssao || sharpen || starBlur;
     }
 };
 
@@ -62,14 +59,8 @@ struct PostSettings {
 struct PostFrame {
     Mat4 viewProj;           // the camera's, without the TAA jitter (GL clip depth)
     bool hasCamera = false;
-    float floorZ = 0;        // the stage floor (world z)
     float timeSec = 0;
     float starBlur = 0;      // Blur on Star Power this frame (0 off .. 1 full; the caller fades it)
-    // Super Fog's light cones: a light's position, the point it aims at and its colour (0..1).
-    struct Light {
-        Vec3 pos, target, color;
-    };
-    std::vector<Light> lights;
 };
 
 // The general 4x4 inverse (cofactors); identity when singular.
@@ -97,7 +88,7 @@ public:
     const std::vector<std::string>& lastPasses() const { return lastPasses_; }
 
 private:
-    enum class Pass : uint8_t { Down, Up, Ao, FogVol, Composite, StarBlur, Taa, Fxaa, Downsample, Easu, Rcas, Finish, Copy, Count };
+    enum class Pass : uint8_t { Down, Up, Ao, Composite, StarBlur, Taa, Fxaa, Downsample, Easu, Rcas, Finish, Copy, Count };
     static ProgramDesc describe(Pass p);
     ProgramId program(Pass p);
     struct Target {
@@ -114,7 +105,7 @@ private:
     ProgramId programs_[int(Pass::Count)];
     bool tried_[int(Pass::Count)] = {};
     static constexpr int kLevels = 5;
-    Target down_[kLevels], up_[kLevels], a_, b_, ao_, fogVol_, star_[2], history_[2], out_, out2_;
+    Target down_[kLevels], up_[kLevels], a_, b_, ao_, star_[2], history_[2], out_, out2_;
     int starIndex_ = 0, historyIndex_ = 0;
     bool starValid_ = false, historyValid_ = false;
     Mat4 starPrev_, taaPrev_;

@@ -554,22 +554,6 @@ std::vector<VenueRenderer::LitChar> VenueRenderer::litCharacters() {
     return out;
 }
 
-std::vector<std::array<float, 9>> VenueRenderer::beamLights() {
-    std::array<float, 3> colour{1, 0.93f, 0.8f};
-    if (const SceneObject* l = anims_ ? anims_->find(spotLight_) : nullptr; l && l->light) {
-        float peak = std::max({l->light->color[0], l->light->color[1], l->light->color[2]});
-        if (peak >= 0.25f)
-            for (int k = 0; k < 3; ++k) colour[size_t(k)] = std::clamp(l->light->color[size_t(k)] / peak, 0.0f, 1.0f);
-    }
-    std::vector<std::array<float, 9>> out;
-    if (!anims_) return out;
-    for (const LitChar& l : litCharacters()) {
-        const auto& p = l.character->placement().pos;
-        out.push_back({l.light[0], l.light[1], l.light[2], p[0], p[1], p[2], colour[0], colour[1], colour[2]});
-    }
-    return out;
-}
-
 // The band members' floor glows (with shadows or More Lights) and, with More
 // Lights, a soft beam from each light to its pool and dust in the beams, all
 // in the stage spotlight's (animated) colour, as one additive mesh.

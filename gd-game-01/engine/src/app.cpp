@@ -97,18 +97,18 @@ std::map<std::string, Json> enhancedPreset(const std::string& mode) {
     // Every effect at its lowest, its original and its highest.
     const std::map<std::string, Json> none = {
         {"bokeh", t("none")},        {"particles", t("none")},   {"bloom", t("none")},       {"cinematic_color", b(false)},
-        {"film_grain", t("none")},   {"chromatic", t("none")},   {"light_streaks", t("none")}, {"ssao", t("none")},
+        {"film_grain", t("none")},   {"chromatic", t("none")},   {"ssao", t("none")},
         {"star_blur", t("none")},    {"shadows_all", b(false)},  {"more_lights", t("none")}, {"light_dust", t("none")},
-        {"ground_fog", t("none")},   {"color_grade", t("off")},  {"sharpening", t("off")},   {"antialiasing", t("none")},
+        {"color_grade", t("off")},  {"sharpening", t("off")},   {"antialiasing", t("none")},
         {"ai_upscaling", t("none")}, {"sharp_ui", b(false)}};
     std::map<std::string, Json> original = none;
     original["bokeh"] = t("medium");  // the original's own depth of field
     original["particles"] = t("original");
     std::map<std::string, Json> max = {
         {"bokeh", t("stronger")},  {"particles", t("2x")},      {"bloom", t("3x")},          {"cinematic_color", b(true)},
-        {"film_grain", t("stronger")}, {"chromatic", t("strong")}, {"light_streaks", t("medium")}, {"ssao", t("stronger")},
+        {"film_grain", t("stronger")}, {"chromatic", t("strong")}, {"ssao", t("stronger")},
         {"star_blur", t("stronger")}, {"shadows_all", b(true)}, {"more_lights", t("2.5x")},  {"light_dust", t("2.5x")},
-        {"ground_fog", t("2.5x")}, {"color_grade", t("off")},   {"sharpening", t("low")},    {"antialiasing", t("taa")},
+        {"color_grade", t("off")},   {"sharpening", t("low")},    {"antialiasing", t("taa")},
         {"ai_upscaling", t("none")}, {"sharp_ui", b(true)}};
     auto with = [](std::map<std::string, Json> m, std::map<std::string, Json> over) {
         for (auto& [k, v] : over) m[k] = v;
@@ -198,12 +198,10 @@ const std::map<std::string, std::set<std::string>>& enhancedChoices() {
         {"bloom", {"none", "original", "2x", "3x"}},
         {"film_grain", {"none", "light", "medium", "strong", "stronger"}},
         {"chromatic", {"none", "light", "medium", "strong"}},
-        {"light_streaks", {"none", "very_light", "light", "medium"}},
         {"ssao", {"none", "light", "medium", "strong", "stronger"}},
         {"star_blur", {"none", "light", "medium", "strong", "stronger"}},
         {"more_lights", {"none", "1.5x", "2x", "2.5x"}},
         {"light_dust", {"none", "1.5x", "2x", "2.5x"}},
-        {"ground_fog", {"none", "1.5x", "2x", "2.5x"}},
         {"color_grade", {"off", "warm", "cold", "vintage", "noir", "neon", "sepia"}},
         {"sharpening", {"off", "low", "high"}},
         {"hopo_mode", {"original", "forgiving"}}};
@@ -215,12 +213,10 @@ const std::map<std::string, std::vector<std::string>>& enhancedLevels() {
         {"bloom", {"none", "original", "2x", "3x"}},
         {"film_grain", {"none", "light", "medium", "strong", "stronger"}},
         {"chromatic", {"none", "light", "medium", "strong"}},
-        {"light_streaks", {"none", "very_light", "light", "medium"}},
         {"ssao", {"none", "light", "medium", "strong", "stronger"}},
         {"star_blur", {"none", "light", "medium", "strong", "stronger"}},
         {"more_lights", {"none", "1.5x", "2x", "2.5x"}},
         {"light_dust", {"none", "1.5x", "2x", "2.5x"}},
-        {"ground_fog", {"none", "1.5x", "2x", "2.5x"}},
         {"bokeh", {"none", "light", "medium", "strong", "stronger"}}};
     return l;
 }
@@ -244,16 +240,15 @@ void migrateEnhanced(Json& e) {
     map("bloom", {{"off", "none"}, {"low", "original"}, {"medium", "2x"}, {"high", "3x"}});
     map("film_grain", {{"off", "none"}});
     map("chromatic", {{"true", "medium"}, {"false", "none"}});
-    map("light_streaks", {{"true", "medium"}, {"false", "none"}});
     map("ssao", {{"true", "medium"}, {"false", "none"}});
     map("star_blur", {{"high", "strong"}});
     map("more_lights", {{"off", "none"}, {"subtle", "1.5x"}, {"strong", "2x"}});
     map("light_dust", {{"true", "1.5x"}, {"false", "none"}});
-    map("ground_fog", {{"low", "1.5x"}, {"full", "2x"}, {"super", "2.5x"}});
-    // XInput and Rock Band guitars are always on now.
+    // XInput and Rock Band guitars are always on now; Ground Fog and Light
+    // Streaks were removed (1.1.7): their saved values are dropped.
     Json kept = Json::object();
     for (const auto& [k, v] : e.o)
-        if (k != "xinput" && k != "rockband") kept.set(k, v);
+        if (k != "xinput" && k != "rockband" && k != "ground_fog" && k != "light_streaks") kept.set(k, v);
     e = std::move(kept);
 }
 // Number settings (as strings, ms) and their range.
@@ -361,9 +356,12 @@ private:
     Highway highway_;
     std::unique_ptr<TrackRenderer> track_;  // the original highway, when its scene loads
     std::unique_ptr<VenueRenderer> venue_;  // the song's venue, when it loads
-    // [I] Enhanced Settings' backdrop: the first venue (basement) posed once and
-    // frozen, filmed close on the singer's microphone.
+    // [I] Enhanced Settings' backdrop: a medium venue (big_club) posed once and
+    // frozen, filmed close on the singer's microphone. Loaded at startup and
+    // kept, so the menu opens on the next frame (universal_mechanisms.md).
     std::unique_ptr<VenueRenderer> backdrop_;
+    bool backdropShown_ = false, backdropTried_ = false;
+    void loadBackdrop();
 #ifdef __ANDROID__
     AndroidIsoImport isoImport_;
 #endif
@@ -418,7 +416,7 @@ private:
     void setEnhanced(const std::string& key, Json value);
     void saveEnhanced();
     void applyEnhanced();
-    void postFrameExtras(PostFrame& pf, VenueRenderer& venue, bool song);
+    void postFrameExtras(PostFrame& pf, bool song);
     float starBlurFade_ = 0, starBlurTime_ = -1;
     void applyVenueLights(VenueRenderer& venue);
     void applyCheats(const std::string& only = "");
@@ -719,25 +717,8 @@ void App::tryLoadData(const std::string& path) {
             hooks.userFiles = [this](const std::string& action) { userFiles(action); };
             hooks.userFilesStatus = [this] { return userFilesStatus_; };
             hooks.menuBackdrop = [this](bool on) {
-                backdrop_.reset();
-                if (!on || !data_) return;
-                try {
-                    backdrop_ = std::make_unique<VenueRenderer>(renderer_, *data_, "big_club",  // a medium venue (1.2.2)
-                                                                VenueRenderer::Band{"metal", "gibson_sg", 1, "", ""});
-                    // About a second at 120 BPM poses everyone, then nothing moves again.
-                    VenueFrame f;
-                    applyVenueLights(*backdrop_);
-                    for (int i = 0; i <= 30; ++i) f.ms = float(i) * 33, f.ticks = f.ms * 480 / 500, backdrop_->update(f);
-                    // The stand rises from bone_pos_mic; the microphone itself is at the singer's mouth.
-                    std::array<float, 3> head;
-                    if (!backdrop_->singerMicPos(backdropMic_) || !backdrop_->singerBonePos("bone_head.mesh", head)) backdrop_.reset();
-                    else  // the stand leans toward the singer: its microphone is a third of the way to him, at mouth height
-                        backdropMic_ = {backdropMic_[0] + (head[0] - backdropMic_[0]) * 0.35f,
-                                        backdropMic_[1] + (head[1] - backdropMic_[1]) * 0.35f, head[2] + 3};
-                } catch (const std::exception& ex) {
-                    SDL_Log("enhanced settings backdrop: %s", ex.what());
-                    backdrop_.reset();
-                }
+                backdropShown_ = on;
+                if (on) loadBackdrop();  // normally done at startup
             };
             hooks.drawMenuBackdrop = [this](float& x, float& y) { return drawMenuBackdrop(x, y); };
             hooks.playerStat = [this](const std::string& stat, int p) { return playerStat(stat, p); };
@@ -775,6 +756,7 @@ void App::tryLoadData(const std::string& path) {
             };
             ui_ = std::make_unique<UiSystem>(renderer_, *data_, hooks);
             applyCheats();
+            loadBackdrop();  // Enhanced Settings' backdrop, ready before the menu opens
             bool skipBoot = opt_.skipBoot || SDL_getenv("GD01_SKIP_BOOT");
             if (skipBoot && campaign_) {
                 // Development path: straight to the main menu with the saved profiles
@@ -1593,10 +1575,37 @@ namespace {
 constexpr float kBokehBlur[5] = {0, 2.0f, 3.0f, 4.0f, 4.8f};
 }  // namespace
 
+// Enhanced Settings' backdrop, once (startup): a VenueRenderer needs the GL
+// context, so it cannot load on another thread; loading it before the menus
+// lets the screen open on the next frame instead of ~0.2 s later.
+void App::loadBackdrop() {
+    if (backdropTried_ || !data_) return;
+    backdropTried_ = true;
+    const uint64_t t0 = SDL_GetTicksNS();
+    try {
+        backdrop_ = std::make_unique<VenueRenderer>(renderer_, *data_, "big_club",  // a medium venue (1.2.2)
+                                                    VenueRenderer::Band{"metal", "gibson_sg", 1, "", ""});
+        // About a second at 120 BPM poses everyone, then nothing moves again.
+        VenueFrame f;
+        applyVenueLights(*backdrop_);
+        for (int i = 0; i <= 30; ++i) f.ms = float(i) * 33, f.ticks = f.ms * 480 / 500, backdrop_->update(f);
+        // The stand rises from bone_pos_mic; the microphone itself is at the singer's mouth.
+        std::array<float, 3> head;
+        if (!backdrop_->singerMicPos(backdropMic_) || !backdrop_->singerBonePos("bone_head.mesh", head)) backdrop_.reset();
+        else  // the stand leans toward the singer: its microphone is a third of the way to him, at mouth height
+            backdropMic_ = {backdropMic_[0] + (head[0] - backdropMic_[0]) * 0.35f,
+                            backdropMic_[1] + (head[1] - backdropMic_[1]) * 0.35f, head[2] + 3};
+    } catch (const std::exception& ex) {
+        SDL_Log("enhanced settings backdrop: %s", ex.what());
+        backdrop_.reset();
+    }
+    if (SDL_getenv("GD01_UILOG")) SDL_Log("ui: menu backdrop loaded in %.1f ms", double(SDL_GetTicksNS() - t0) / 1e6);
+}
+
 bool App::drawMenuBackdrop(float& focusX, float& focusY) {
-    if (!backdrop_) return false;
+    if (!backdrop_ || !backdropShown_) return false;
     const auto& m = backdropMic_;
-    // Wide enough to show the band's lights, shadows and the fog around the singer.
+    // Wide enough to show the band's lights and shadows around the singer.
     // GD01_BACKDROP_CAM="dx dy dz tx ty tz" (development aid): the eye and target offsets from the microphone.
     std::array<float, 6> k{22, -215, 32, -38, 32, -6};
     if (const char* c = SDL_getenv("GD01_BACKDROP_CAM")) std::sscanf(c, "%f %f %f %f %f %f", &k[0], &k[1], &k[2], &k[3], &k[4], &k[5]);
@@ -1638,9 +1647,8 @@ bool App::drawMenuBackdrop(float& focusX, float& focusY) {
         PostFrame pf;
         pf.viewProj = vp.m;
         pf.hasCamera = true;
-        if (!backdrop_->stageFloorZ(pf.floorZ)) pf.floorZ = 0;
         pf.timeSec = float(SDL_GetTicksNS() / 1000000) / 1000.0f;
-        postFrameExtras(pf, *backdrop_, false);
+        postFrameExtras(pf, false);
         renderer_.endScene(pf);
     }
     renderer_.endWide();
@@ -1649,12 +1657,9 @@ bool App::drawMenuBackdrop(float& focusX, float& focusY) {
     return true;
 }
 
-// The venue's part of the post-processing frame: Super Fog's light cones and
-// Blur on Star Power's fade (in over 0.25 s while any player's Star Power is
-// on, out over 0.5 s after it ends; GD01_STARBLUR=1 forces it, a development aid).
-void App::postFrameExtras(PostFrame& pf, VenueRenderer& venue, bool song) {
-    if (renderer_.post().fog >= 3)
-        for (const auto& l : venue.beamLights()) pf.lights.push_back({{l[0], l[1], l[2]}, {l[3], l[4], l[5]}, {l[6], l[7], l[8]}});
+// The venue's part of the post-processing frame: Blur on Star Power's fade
+// (in over 0.25 s while any player's Star Power is on, out over 0.5 s after it ends; GD01_STARBLUR=1 forces it, a development aid).
+void App::postFrameExtras(PostFrame& pf, bool song) {
     const float now = pf.timeSec, dt = starBlurTime_ >= 0 ? std::clamp(now - starBlurTime_, 0.0f, 0.1f) : 0.0f;
     starBlurTime_ = now;
     bool on = false;
@@ -1848,12 +1853,10 @@ void App::applyEnhanced() {
         post.bloom = enhancedLevel("bloom");
         post.cinematic = enhancedOn("cinematic_color");
         const std::string grade = enhanced("color_grade").str();
-        post.fog = enhancedLevel("ground_fog");
         post.grade = grade == "warm" ? 1 : grade == "cold" ? 2 : grade == "vintage" ? 3 : grade == "noir" ? 4 : grade == "neon" ? 5
                      : grade == "sepia" ? 6 : 0;
         post.grain = enhancedLevel("film_grain");
         post.chromatic = enhancedLevel("chromatic");
-        post.streaks = enhancedLevel("light_streaks");
         post.ssao = enhancedLevel("ssao");
         post.sharpen = enhanced("sharpening").str() == "high" ? 2 : enhanced("sharpening").str() == "low" ? 1 : 0;
         post.starBlur = enhancedLevel("star_blur");
@@ -2296,9 +2299,8 @@ void App::frame() {
                     PostFrame pf;
                     pf.viewProj = venue_->viewProj().m;
                     pf.hasCamera = true;
-                    if (!venue_->stageFloorZ(pf.floorZ)) pf.floorZ = 0;
                     pf.timeSec = float(SDL_GetTicksNS() / 1000000) / 1000.0f;
-                    postFrameExtras(pf, *venue_, true);
+                    postFrameExtras(pf, true);
                     renderer_.endScene(pf);
                 }
                 renderer_.endWide();
@@ -2602,11 +2604,11 @@ int inputSelfTest() {
     out.clear();
     // 1.1.6 Enhanced Settings take the new values.
     Json old = Json::parse(R"({"bloom":"high","chromatic":true,"particles":false,"ssao":true,"more_lights":"subtle",)"
-                           R"("light_dust":true,"ground_fog":"super","bokeh":"regular","star_blur":"high","xinput":false,"rockband":true})");
+                           R"("light_dust":true,"ground_fog":"super","light_streaks":true,"bokeh":"regular","star_blur":"high","xinput":false,"rockband":true})");
     migrateEnhanced(old);
     check(old["bloom"].str() == "3x" && old["chromatic"].str() == "medium" && old["particles"].str() == "none" &&
               old["ssao"].str() == "medium" && old["more_lights"].str() == "1.5x" && old["light_dust"].str() == "1.5x" &&
-              old["ground_fog"].str() == "2.5x" && old["bokeh"].str() == "medium" && old["star_blur"].str() == "strong" &&
+              !old.has("ground_fog") && !old.has("light_streaks") && old["bokeh"].str() == "medium" && old["star_blur"].str() == "strong" &&
               !old.has("xinput") && !old.has("rockband"),
           "1.1.6 enhanced.json migrated");
     for (const auto& [k, v] : old.o)

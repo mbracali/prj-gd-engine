@@ -133,8 +133,10 @@ Reference code:
     heading; Select collapses or expands the section;
   - a separator line between sections;
   - up and down arrows when the list scrolls.
-- **Transition.** The page slides 0.6 screen widths and fades with the
-  screen transition, forwards or backwards, as in gd-game-01.
+- **Transition.** None: the universal menus (this page and GAMEPADS) open
+  on the next frame, without their own or the outgoing screen's transition
+  (owner, 2026-10-30; universal_mechanisms.md 1.2). Anything heavy they
+  need is preloaded or asynchronous; only a part still loading may fade in.
 - **Help bar.** Use the game's own help bar: select, back and up / down.
 
 ### The GAMEPADS screen
@@ -209,7 +211,10 @@ Reference code:
   character is a bug. Every option changed on the left is rendered at once
   on this shot (it goes through the same post chain as a song). The venue is
   a little darker behind the box. If the game cannot draw a venue yet, use a
-  black page. Never use a live, moving band.
+  black page. Never use a live, moving band. Load it (and draw it once,
+  unseen) at startup so the menu opens at once; if it had to be unloaded
+  (a song's venue replaced it), the menu still opens at once and the shot
+  fades in when it is ready.
 - **Layout** (gd-game-01's coordinates):
   - On the left, a dark box (black at about 0.65) with a thin light edge and
     a top bar in the title colour. In it: the title (gd-game-01:
@@ -246,7 +251,6 @@ Reference code:
      - Color Grading;
      - Film Grain;
      - Chromatic Aberration;
-     - Anamorphic Light Streaks;
      - Ambient Occlusion;
      - Sharpening;
      - Blur on Star Power.
@@ -254,7 +258,6 @@ Reference code:
      - All Band Mates Cast Shadows;
      - More Lights on Venues;
      - Dust in Light Beams;
-     - Add Fog to the Ground (Experimental);
      - Disable Shaky Camera;
      - Export User Files;
      - Load User Settings;
@@ -351,14 +354,12 @@ rate, resolution and touch follow gd-game-01's columns.
 | PERFORMANCE & GRAPHICS | Color Grading (`color_grade`) | dropdown | Off | Off / Warm / Cold / Vintage / Noir / Neon | done (GD02-110) |
 | PERFORMANCE & GRAPHICS | Film Grain (`film_grain`) | dropdown | Light (Deck, Android: Off) | Off / Light / Strong | done (GD02-111) |
 | PERFORMANCE & GRAPHICS | Chromatic Aberration (`chromatic`) | check | on | Lens colour fringes | done (GD02-112) |
-| PERFORMANCE & GRAPHICS | Anamorphic Light Streaks (`light_streaks`) | check | off | Horizontal streaks from the brightest lights | done (GD02-113) |
 | PERFORMANCE & GRAPHICS | Ambient Occlusion (`ssao`) | check | on (Deck, Android: off) | Contact shadows from the depth buffer | done (GD02-114) |
 | PERFORMANCE & GRAPHICS | Sharpening (`sharpening`) | dropdown | Low (Deck: Off) | Off / Low / High (CAS) | done (GD02-115) |
 | PERFORMANCE & GRAPHICS | Blur on Star Power (`star_blur`) | dropdown | High (Deck: Medium, Android: Light) | Camera motion blur and trails while Star Power is on | done (GD02-116) |
 | ENHANCERS | All Band Mates Cast Shadows (`shadows_all`) | check | on (Deck, Android: off) | A light above each band member and a shadow on the floor | done (GD02-117) |
 | ENHANCERS | More Lights on Venues (`more_lights`) | dropdown | Subtle | Off / Subtle / Strong: fill on the band, brighter additive lights, soft beams | done (GD02-118) |
 | ENHANCERS | Dust in Light Beams (`light_dust`) | check, shown with More Lights | on (Deck, Android: off) | Motes drifting in the beams | done (GD02-119) |
-| ENHANCERS | Add Fog to the Ground (Experimental) (`ground_fog`) | dropdown | Low (Deck, Android: None) | None / Low / Full / Super Fog | done (GD02-120) |
 | ENHANCERS | Disable Shaky Camera (`no_shaky_cam`) | check | off | GH2's camera shake (CamShot shake keys) off | done (GD02-121) |
 | ENHANCERS | Export User Files (`export`) | button | - | A folder: GD02-user-settings.json and GD02-user-progress.json | done (GD02-122) |
 | ENHANCERS | Load User Settings (`load_settings`) | button | - | A file; every value checked, anything odd keeps its default | done (GD02-123) |

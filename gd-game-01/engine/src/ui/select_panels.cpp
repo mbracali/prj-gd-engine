@@ -1105,9 +1105,6 @@ private:
             {Kind::Choice, "chromatic", "Chromatic Aberration", true,
              "A camera lens's colour fringes: red and blue edges pull apart towards the corners of the venue.",
              {{"none", "None"}, {"light", "Light"}, {"medium", "Medium"}, {"strong", "Strong"}}},
-            {Kind::Choice, "light_streaks", "Anamorphic Light Streaks", true,
-             "The brightest stage lights flare into long blue-white horizontal streaks, like a cinema lens.",
-             {{"none", "None"}, {"very_light", "Very Light"}, {"light", "Light"}, {"medium", "Medium"}}},
             {Kind::Choice, "ssao", "Ambient Occlusion", true,
              "Soft contact shadows where surfaces meet: under the band's feet, in the folds of clothes, in the "
              "corners of the stage, for more depth. Costs some performance.",
@@ -1128,11 +1125,6 @@ private:
              {{"none", "None"}, {"1.5x", "1.5x"}, {"2x", "2x"}, {"2.5x", "2.5x"}}},
             {Kind::Choice, "light_dust", "Dust in Light Beams", true,
              "Fine dust drifting and twinkling in the light beams over the band (with or without More Lights).",
-             {{"none", "None"}, {"1.5x", "1.5x"}, {"2x", "2x"}, {"2.5x", "2.5x"}}},
-            {Kind::Choice, "ground_fog", "Add Fog to the Ground (Experimental)", true,
-             "A low fog over the stage floor where the band plays, for more depth. 1.5x is a thin haze; 2x a thick "
-             "stage-fog layer; 2.5x a volumetric fog with light shafts from the stage lights and a haze in the air "
-             "(costs more on slower GPUs).",
              {{"none", "None"}, {"1.5x", "1.5x"}, {"2x", "2x"}, {"2.5x", "2.5x"}}},
             {Kind::Check, "no_shaky_cam", "Disable Shaky Camera", true,
              "The original game shakes the camera on its close-up shots of the band, like a handheld camera. Turn this "
