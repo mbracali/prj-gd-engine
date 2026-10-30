@@ -45,16 +45,23 @@ class UiManager;
 //              passed with cheat_beat_song, the song offered and played,
 //              its endgame followed; GD02_WALK_END / _FAIL / _CHAR / _GUITAR
 //              / _ENHANCED (docs/career_and_store.md "Tests").
-//   enhanced   main -> Options -> Enhanced Options -> Internal Resolution
-//              changed (the window's own -> 448p) and saved in enhanced.json
-//              -> back -> back -> main; Enhanced Options again; both times
-//              the backdrop shows the band, its singer on the right.
+//   enhanced   main -> Options -> Enhanced Options (universal_mechanisms.md
+//              1.2.2): the defaults (the original look), MODES Steam Deck,
+//              Original Feel (window and resolution kept), Good Old Days,
+//              Original Feel; then every option in the doc's order stepped
+//              with the pad, saved in enhanced.json and checked in effect
+//              (calibration, Resolution 448p -> 480p, the ranges, Remove All
+//              Effects, user files, cheats) -> back; Enhanced Options again;
+//              both times the backdrop shows the band, its singer on the right.
 //   cheats     at the main menu, GH2's Air Guitar and Hyper Speed codes turn
-//              them on; Air Guitar's again, after a pause, turns it off.
+//              them on; Air Guitar's again, after a pause, turns it off; then
+//              the same cheats in Enhanced Options > CHEATS & ENHANCERS.
 //   mouse      the mouse alone: hover OPTIONS on the main menu (focused), click
-//              it -> Options -> click Enhanced Options -> In-Game Max FPS's
-//              dropdown clicked open, 60 clicked -> right click -> Options ->
-//              the help bar's BACK clicked -> main.
+//              it -> Options -> click Enhanced Options -> MODES > Clean Image
+//              clicked -> MODES collapsed -> Resolution's dropdown clicked
+//              open, 720p clicked -> the scrollbar's bottom clicked (the
+//              list's end) -> Monkey Head Crowd clicked on and off -> the
+//              Back button -> Options -> the help bar's BACK clicked -> main.
 //   gamepads   the keyboard's yellow fret on the main menu -> the Gamepad menu
 //              (once the cheat codes' 750 ms are over) -> Player 1 > Customize
 //              inputs -> Key 2 of the keyboard's Whammy bound to E (a real

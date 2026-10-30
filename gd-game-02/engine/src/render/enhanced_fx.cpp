@@ -233,13 +233,15 @@ vec3 grade(vec3 c, int g) {
         c = saturation(c, 1.4);
         c += mix(vec3(0.05, -0.01, 0.07), vec3(-0.02, 0.03, 0.04), smoothstep(0.2, 0.8, l)) * 0.8;
         c = mix(c, c * c * (3.0 - 2.0 * c), 0.25);
+    } else if (g == 6) {  // sepia: old photographs (the "Good old days" mode)
+        c = vec3(l) * vec3(1.07, 0.9, 0.68) + vec3(0.04, 0.025, 0.0);
     }
     return c;
 }
 void main() {
     vec3 c = texture(sTex, vUv).rgb;
     int fog = int(uFog.x + 0.5);
-    if (uFog2.z > 0.5) {
+    if (uFog2.z > 0.0) {
         // A 3x3 blur of the occlusion that keeps to surfaces at the same distance.
         vec2 a0 = texture(sAo, vUv).rg;
         float sum = 0.0, wsum = 0.0;
@@ -249,7 +251,7 @@ void main() {
                 float w = 1.0 / (1.0 + abs(a.y - a0.y) * 1000.0);
                 sum += a.x * w, wsum += w;
             }
-        c *= sum / wsum;
+        c *= pow(sum / wsum, uFog2.z);  // the occlusion's exponent: light 0.5 .. stronger 1.5 (gd01's)
     }
     if (fog == 3) {
         vec4 v = texture(sFogVol, vUv);
@@ -793,18 +795,20 @@ bool EnhancedFx::process(TextureId color, TextureId depth, int sw, int sh, int x
     }
 
     // 2. Ambient occlusion, fog, bloom, light streaks, colour.
+    static constexpr float kAoK[5] = {0, 0.5f, 0.8f, 1.1f, 1.5f};  // the occlusion's exponent: none, light, medium, strong, stronger
     if (pyramid || ssao || s.cinematic || s.grade) {
         if (!ensure(a_, sw, sh, false)) return false;
         EnhBlock k = b;
         const int fog = f.hasCamera && depth ? s.fog : 0;
         k.fx[0] = !pyramid ? 0.0f : s.bloom >= 3 ? 0.9f : s.bloom == 2 ? 0.68f : s.bloom == 1 ? 0.45f : 0.0f;
-        k.fx[1] = s.streaks && pyramid ? 1.1f : 0.0f;
+        static constexpr float kStreaks[4] = {0, 0.4f, 0.7f, 1.1f};  // none, very light, light, medium
+        k.fx[1] = pyramid ? kStreaks[std::clamp(s.streaks, 0, 3)] : 0.0f;
         k.fx[2] = s.cinematic ? 1.0f : 0.0f;
         k.fx[3] = float(s.grade);
         // Low: knee-high wisps; full: a thicker layer to the waist (a rocker is ~80 units tall).
         k.fog[0] = float(superFog ? 3 : std::min(fog, 2));
         k.fog[1] = f.floorZ, k.fog[2] = fog >= 2 ? 24.0f : 13.0f, k.fog[3] = fog >= 2 ? 0.0065f : 0.004f;
-        k.fog2[0] = fog >= 2 ? 0.88f : 0.68f, k.fog2[1] = f.timeSec, k.fog2[2] = ssao ? 1.0f : 0.0f;
+        k.fog2[0] = fog >= 2 ? 0.88f : 0.68f, k.fog2[1] = f.timeSec, k.fog2[2] = ssao ? kAoK[std::clamp(s.ssao, 0, 4)] : 0.0f;
         if (pyramid) k.texel[2] = 1.0f / float(down_[0].w), k.texel[3] = 1.0f / float(down_[0].h);
         const TextureId t[8] = {color,
                                 depth ? depth : color,
@@ -825,9 +829,10 @@ bool EnhancedFx::process(TextureId color, TextureId depth, int sw, int sh, int x
         const bool resized = prev.w != sw || prev.h != sh;
         if (!ensure(next, sw, sh, true) || !ensure(prev, sw, sh, true)) return false;
         const bool valid = starValid_ && !resized && !cut(f.viewProj, starPrev_);
-        // Light, medium, high: the motion smear's gain, the zoom and the trail (gd01's).
-        static constexpr float kScale[4] = {0, 2.0f, 3.5f, 5.0f}, kRadial[4] = {0, 0.008f, 0.016f, 0.026f}, kFeedback[4] = {0, 0.35f, 0.55f, 0.7f};
-        const int lv = std::clamp(s.starBlur, 1, 3);
+        // Light, medium, strong, stronger: the motion smear's gain, the zoom and the trail (gd01's).
+        static constexpr float kScale[5] = {0, 2.0f, 3.5f, 5.0f, 6.5f}, kRadial[5] = {0, 0.008f, 0.016f, 0.026f, 0.036f},
+                               kFeedback[5] = {0, 0.35f, 0.55f, 0.7f, 0.8f};
+        const int lv = std::clamp(s.starBlur, 1, 4);
         EnhBlock k = b;
         put(k.prevViewProj, starPrev_);
         k.pass[0] = kScale[lv] * f.starBlur, k.pass[1] = kRadial[lv] * f.starBlur, k.pass[2] = kFeedback[lv] * f.starBlur;
@@ -894,8 +899,10 @@ bool EnhancedFx::process(TextureId color, TextureId depth, int sw, int sh, int x
     EnhBlock k = b;
     k.texel[0] = 1.0f / float(ow), k.texel[1] = 1.0f / float(oh);
     k.pass[0] = s.sharpen >= 2 ? 1.0f : s.sharpen == 1 ? 0.45f : 0.0f;
-    k.pass[1] = s.chromatic ? 0.012f : 0.0f;
-    k.pass[2] = s.grain >= 2 ? 0.09f : s.grain == 1 ? 0.045f : 0.0f;
+    static constexpr float kCa[4] = {0, 0.006f, 0.012f, 0.02f};             // none, light, medium, strong
+    static constexpr float kGrain[5] = {0, 0.03f, 0.045f, 0.07f, 0.095f};  // none, light, medium, strong, stronger
+    k.pass[1] = kCa[std::clamp(s.chromatic, 0, 3)];
+    k.pass[2] = kGrain[std::clamp(s.grain, 0, 4)];
     k.pass[3] = f.timeSec;
     pass(s.sharpen || s.chromatic || s.grain ? Pass::Finish : Pass::Copy, nullptr, &cur, 1, &k, sizeof k,
          s.sharpen || s.chromatic || s.grain ? "finish" : "copy");

@@ -159,6 +159,9 @@ public:
     // they are).
     static void setEnabled(bool on) { enabled_ = on; }
     static bool enabled() { return enabled_; }
+    // Enhanced Options > Enable Particles FX 2x: every system emits that many times as many.
+    static void setRate(float rate) { rate_ = rate > 0 ? rate : 0; }
+    static float rate() { return rate_; }
 
 private:
     DynamicMesh mesh_;
@@ -167,6 +170,7 @@ private:
     int drawn_ = 0;
     bool hdr_ = false;
     static bool enabled_;
+    static float rate_;
 };
 
 // The particle systems of a view (a Group and its sub-groups) with the

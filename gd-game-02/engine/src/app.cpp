@@ -2039,7 +2039,10 @@ void App::loadEnhanced() {
         ss << f.rdbuf();
         try {
             Json j = Json::parse(ss.str());
-            if (j.type == Json::Type::Object && j["format"].str() == "gd02-enhanced") enhanced_ = j;
+            if (j.type == Json::Type::Object && j["format"].str() == "gd02-enhanced") {
+                ui::migrateEnhanced(j);  // 0.1.7 and older values
+                enhanced_ = j;
+            }
         } catch (const std::exception& e) {
             SDL_Log("enhanced options: %s: %s (the defaults are used)", enhancedPath().c_str(), e.what());
         }
@@ -2077,16 +2080,17 @@ void App::saveEnhanced() {
     if (ec) SDL_Log("enhanced options: cannot write %s: %s", path.c_str(), ec.message().c_str());
 }
 
-// Apply Steam Deck Settings (the handheld profile, once; every option stays
-// editable) and Export / Load User Files (gd01's App::userFiles).
+// Enhanced > MODES (a preset, once; every option stays editable), Export /
+// Load User Files and the Gamepad menu's Export / Import (gd01's App::userFiles).
 void App::enhancedAction(const std::string& action) {
     userFilesStatus_.clear();
-    if (action == "steam_deck") {
-        for (const auto& [key, value] : ui::enhancedProfile(true)) enhanced_.set(key, Json::string(value));
+    if (action.rfind("mode_", 0) == 0) {
+        const auto preset = ui::enhancedPreset(action.substr(5));
+        for (const auto& [key, value] : preset) enhanced_.set(key, Json::string(value));
         saveEnhanced();
         applyEnhanced();
-        userFilesStatus_ = "Steam Deck settings applied";
-        SDL_Log("enhanced options: %s", userFilesStatus_.c_str());
+        userFilesStatus_ = preset.empty() ? "" : "Mode applied";
+        SDL_Log("enhanced options: %s %s", action.c_str(), userFilesStatus_.c_str());
         return;
     }
     if (action != "export" && action != "load_settings" && action != "load_progress" && action != "export_controllers" &&
@@ -2168,6 +2172,7 @@ bool App::importSettings(const std::string& file) {
         return false;
     }
     if (j.type != Json::Type::Object) return false;
+    ui::migrateEnhanced(j);  // a file exported by 0.1.7 or older
     Json next = Json::object();
     for (const ui::EnhancedSetting& e : ui::enhancedSettings()) {
         if (!j.has(e.key)) continue;
@@ -2212,15 +2217,17 @@ void App::applyEnhanced() {
     if (player2_) player2_->setCalibrationMs(calibrationMs());
     gfx::RenderDevice& dev = canvas_.renderer().device();
     dev.setInternalHeight(std::clamp(std::atoi(enhancedValue("internal_res").c_str()), 0, 4320));
-    if (!SDL_getenv("GD02_FPS")) dev.setFrameCap(std::clamp(std::atoi(enhancedValue("max_fps").c_str()), 30, 1000));
-    // Controls: touch (always on on Android), Rock Band guitars, gamepads that play.
+    auto frameCap = [&] { return enhancedValue("max_fps") == "unlimited" ? 0 : std::clamp(std::atoi(enhancedValue("max_fps").c_str()), 30, 1000); };
+    if (!SDL_getenv("GD02_FPS")) dev.setFrameCap(frameCap());
+    // Controls: touch (always on on Android); Rock Band guitars and gamepads
+    // always play (universal_mechanisms.md: no switches since 0.1.8).
 #ifdef __ANDROID__
     input_.setTouch(true);
 #else
     input_.setTouch(on("touch"));
 #endif
-    input_.setRockBand(on("rockband"));
-    input_.setGamepadPlay(on("xinput"));
+    input_.setRockBand(true);
+    input_.setGamepadPlay(true);
     // Sharper Text and Sprites: the menus' textures made from now on.
     if (ui_ && ui_->sceneCache()) ui_->sceneCache()->setEnhance(on("sharp_ui"));
     applyEnhancedLook();
@@ -2248,7 +2255,7 @@ void App::applyEnhanced() {
         if (!ok) SDL_Log("enhanced options: screen mode %s: %s", mode.c_str(), SDL_GetError());
         // The first time only when not windowed (the window opens windowed).
         screenModeApplied_ = mode;
-        if (!SDL_getenv("GD02_FPS")) dev.setFrameCap(std::clamp(std::atoi(enhancedValue("max_fps").c_str()), 30, 1000));  // the new mode's refresh rate
+        if (!SDL_getenv("GD02_FPS")) dev.setFrameCap(frameCap());  // the new mode's refresh rate
     }
 }
 
@@ -2269,32 +2276,34 @@ void App::applyEnhancedLook() {
     const bool none = on("no_effects");  // Remove All Effects
     gfx::PostSettings p;
     if (!none) {
-        p.bokeh = level("bokeh", {"none", "regular", "stronger"});
+        p.bokeh = level("bokeh", {"none", "light", "medium", "strong", "stronger"});
         const std::string aa = v("antialiasing");
         p.aa = aa == "fxaa" ? gfx::PostSettings::AA::Fxaa : aa == "ssaa" ? gfx::PostSettings::AA::Ssaa : aa == "taa" ? gfx::PostSettings::AA::Taa : gfx::PostSettings::AA::None;
         p.fsr1 = v("ai_upscaling") == "fsr1";
         const std::string q = v("ai_upscaling_mode");
         p.fsrScale = q == "performance" ? 0.5f : q == "balanced" ? 1 / 1.7f : 1 / 1.5f;
         if (p.fsr1 && p.aa == gfx::PostSettings::AA::Ssaa) p.aa = gfx::PostSettings::AA::None;  // SSAA does not combine with an upscaler (gd01)
-        p.bloom = level("bloom", {"off", "low", "medium", "high"});
+        // The doc's ranges (universal_mechanisms.md 1.2.2), weakest first.
+        p.bloom = level("bloom", {"none", "original", "2x", "3x"});
         p.cinematic = on("cinematic_color");
-        p.fog = level("ground_fog", {"none", "low", "full", "super"});
-        p.grade = level("color_grade", {"off", "warm", "cold", "vintage", "noir", "neon"});
-        p.grain = level("film_grain", {"off", "light", "strong"});
-        p.chromatic = on("chromatic");
-        p.streaks = on("light_streaks");
-        p.ssao = on("ssao");
+        p.fog = level("ground_fog", {"none", "1.5x", "2x", "2.5x"});
+        p.grade = level("color_grade", {"off", "warm", "cold", "vintage", "noir", "neon", "sepia"});
+        p.grain = level("film_grain", {"none", "light", "medium", "strong", "stronger"});
+        p.chromatic = level("chromatic", {"none", "light", "medium", "strong"});
+        p.streaks = level("light_streaks", {"none", "very_light", "light", "medium"});
+        p.ssao = level("ssao", {"none", "light", "medium", "strong", "stronger"});
         p.sharpen = level("sharpening", {"off", "low", "high"});
-        p.starBlur = level("star_blur", {"none", "light", "medium", "high"});
+        p.starBlur = level("star_blur", {"none", "light", "medium", "strong", "stronger"});
     } else {
         p.original = false, p.bokeh = 0;
     }
     canvas_.renderer().post().setSettings(p);
-    gfx::ParticleRenderer::setEnabled(on("particles"));
+    gfx::ParticleRenderer::setEnabled(v("particles") != "none");
+    gfx::ParticleRenderer::setRate(v("particles") == "2x" ? 2.0f : 1.0f);
     if (director_) director_->setShake(!on("no_shaky_cam") && !none);
     enhancedLook_.shadowsAll = on("shadows_all");
-    enhancedLook_.moreLights = level("more_lights", {"off", "subtle", "strong"});
-    enhancedLook_.lightDust = on("light_dust");
+    enhancedLook_.moreLights = level("more_lights", {"none", "1.5x", "2x", "2.5x"});
+    enhancedLook_.lightDust = level("light_dust", {"none", "1.5x", "2x", "2.5x"});
     if (venueView_) venueView_->setEnhancedLook(enhancedLook_);
 }
 
@@ -2367,6 +2376,7 @@ int App::enhancedState(const std::string& key) {
     const gfx::EnhancedFx* fx = post.enhanced();
     const gfx::EnhancedLights* lights = venueView_ ? venueView_->enhancedLights() : nullptr;
     if (key == "particles") return gfx::ParticleRenderer::enabled() ? 1 : 0;
+    if (key == "particle_rate") return int(gfx::ParticleRenderer::rate() * 10 + 0.5f);  // x10
     if (key == "shake") return director_ ? (director_->shake() ? 1 : 0) : -1;
     if (key == "touch") return input_.touch() ? 1 : 0;
     if (key == "rockband") return input_.rockBand() ? 1 : 0;

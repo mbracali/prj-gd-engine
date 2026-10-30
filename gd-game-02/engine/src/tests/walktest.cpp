@@ -436,18 +436,31 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         check("backdrop_band");
         wait(500);  // a few frames through the default effects
         check("enhanced_fx_default");
-        // Each Enhanced Option in turn (GDALL-015): toggled or stepped with
-        // the pad, saved, and its effect checked. A step: down, then a press.
+        // Each Enhanced Option in turn (GDALL-015, universal_mechanisms.md
+        // 1.2.2): toggled or stepped with the pad, saved, and its effect
+        // checked. A step: down, then a press.
         auto row = [&](int button) { press(kDown), wait(120), press(button), wait(150); };
-        // CONTROLS AND GAMEPAD: Gamepads (the focus) -> Mouse (kept) ->
-        // Touch on, Rock Band on, XInput off.
-        press(kDown), wait(120);
-        row(kX), row(kX), row(kX);
+        auto again = [&](int button) { press(button), wait(150); };
+        // MODES: Steam Deck (the focus), Original Feel (the window and the
+        // resolution kept), Good Old Days, then Original Feel again.
+        press(kX), wait(400);
+        check("enhanced_mode_deck");
+        row(kX), wait(300);
+        check("enhanced_mode_original");
+        for (int i = 0; i < 5; ++i) press(kDown), wait(120);  // Clean, Max HD, Max 4K, Budget, Good Old Days
+        press(kX), wait(800);
+        check("enhanced_mode_old_days");
+        for (int i = 0; i < 5; ++i) press(kUp), wait(120);
+        press(kX), wait(300);
+        // CONTROLS: past the modes -> Gamepads -> Mouse (kept) -> Touch on
+        // (XInput and Rock Band guitars: always on, no rows).
+        for (int i = 0; i < 9; ++i) press(kDown), wait(120);
+        press(kX), wait(150);
         check("enhanced_controls");
-        // PERFORMANCE AND GRAPHICS -> Audio / Video Calibration: 8 presses on
-        // the ticks (a beat every 750 ms after 1 s, 3 lead-in beats), then 8
-        // on the flashes (1.5 s later), then select closes the result.
-        press(kDown), wait(120), press(kDown), wait(120);
+        // Audio / Video Calibration: 8 presses on the ticks (a beat every
+        // 750 ms after 1 s, 3 lead-in beats), then 8 on the flashes (1.5 s
+        // later), then select closes the result.
+        press(kDown), wait(120);
         press(kX);
         wait(2600);
         for (int i = 0; i < 8; ++i) press(kX), wait(750);
@@ -455,42 +468,42 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         for (int i = 0; i < 8; ++i) press(kX), wait(750);
         check("enhanced_calibrated");
         press(kX), wait(200);
-        // -> Screen Mode -> Max FPS -> FPS Counter -> Internal Resolution;
-        // select opens its dropdown, down and select pick the next option.
-        for (int i = 0; i < 4; ++i) press(kDown), wait(120);
+        // PERFORMANCE & GRAPHICS -> Screen Mode -> Resolution; select opens
+        // its dropdown, down and select pick the next option.
+        for (int i = 0; i < 3; ++i) press(kDown), wait(120);
         press(kX);
         wait(200);
         press(kDown), wait(120);
-        press(kX);  // 1080p -> 1440p
+        press(kX);  // 448p (Good Old Days') -> 480p
         wait(300);
         check("enhanced_changed");
-        // From the original look (GD02-130): Sharper Text on and off again,
-        // FXAA, FSR 1 (Upscaling Quality appears) at Performance, Bokeh None,
-        // Particles off, Bloom Medium, Cinematic Color on, Color Grading
-        // Warm, Film Grain Strong, Chromatic Aberration on, Light Streaks
-        // on, Ambient Occlusion on, Sharpening High, Blur on Star Power
-        // Medium.
-        auto again = [&](int button) { press(button), wait(150); };
-        row(kX), again(kX), row(kRight), row(kRight), row(kRight), row(kLeft), row(kX), row(kRight), again(kRight), row(kX), row(kRight),
-            row(kRight), again(kRight), row(kX), row(kX), row(kX), row(kRight), again(kRight), row(kRight), again(kRight);
+        // From the original look: Sharper Text on and off again, FXAA, FSR 1
+        // (Upscaling Quality appears) at Performance, (Max FPS, FPS Counter
+        // kept), Bokeh None, Particles None, Bloom 2x, Cinematic Color on,
+        // Color Grading Warm, Film Grain Medium, Chromatic Aberration Light,
+        // Light Streaks Very Light, Ambient Occlusion Medium, Sharpening
+        // High, Blur on Star Power Medium.
+        row(kX), again(kX), row(kRight), row(kRight), row(kRight);
+        press(kDown), wait(120), press(kDown), wait(120);
+        row(kLeft), again(kLeft), row(kLeft), row(kRight), again(kRight), row(kX), row(kRight), row(kRight), again(kRight), row(kRight),
+            row(kRight), row(kRight), again(kRight), row(kRight), again(kRight), row(kRight), again(kRight);
         wait(500);
         check("enhanced_graphics");
+        // The venue extras at their defaults (off), then Band Shadows on, More
+        // Lights 2x, Dust 1.5x, Fog 2x, Shaky Camera off.
+        check("enhanced_lights_default");
+        row(kX), row(kRight), again(kRight), row(kRight), row(kRight), again(kRight), row(kX);
+        wait(400);
+        check("enhanced_enhancers");
         // Remove All Effects on: every effect off, GH2's own too; then off again.
         row(kX);
         wait(400);
         check("enhanced_no_effects");
         press(kX), wait(400);
         check("enhanced_effects_back");
-        // ENHANCERS: the venue extras at their defaults (off), then Band
-        // Shadows on, More Lights Strong (Dust appears), Dust on, Fog Full,
-        // Shaky Camera off.
+        // CHEATS & ENHANCERS: Export User Files, Load User Settings, Load
+        // User Progress (GD02_DIALOG: the walk's folder).
         press(kDown), wait(120);
-        check("enhanced_lights_default");
-        row(kX), row(kRight), again(kRight), row(kX), row(kRight), again(kRight), row(kX);
-        wait(400);
-        check("enhanced_enhancers");
-        // Export User Files, Load User Settings, Load User Progress
-        // (GD02_DIALOG: the walk's folder).
         row(kX);
         wait(300);
         check("enhanced_exported");
@@ -500,9 +513,8 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         row(kX);
         wait(300);
         check("enhanced_progress_loaded");
-        // CHEATS: Enable Cut Content (not built: stays off), No Fail Mode,
-        // Autoplay, Forgiving Hammer-ons and Pull-offs.
-        press(kDown), wait(120);
+        // Enable Cut Content (not built: stays off), No Fail Mode, Autoplay,
+        // Forgiving Hammer-ons and Pull-offs.
         row(kX), row(kX), row(kX), row(kX);
         check("enhanced_cheats");
         // The port's cheats back off (the walk's own save; tidy).
@@ -530,25 +542,35 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         mouseOn("port_enhanced.btn", 1);
         at("enhanced_options_screen");
         wait(300);
-        // In-Game Max FPS (the list's 13th row; its dropdown opens upward):
-        // 60 is its first option, 85 units above the row.
-        mouseAt(480, 592, 0);
-        mouseAt(480, 592, 1);
-        wait(200);
-        mouseAt(480, 502, 0);
-        mouseAt(480, 502, 1);
+        // MODES > Clean Image (the list's 4th row, every section open).
+        mouseAt(300, 297, 0);
+        mouseAt(300, 297, 1);
         wait(300);
-        check("enhanced_fps_60");
-        // STEAM DECK MODE (the list's first row, collapsed): a click opens
-        // it, a click on Apply sets the Steam Deck column.
+        check("enhanced_mode_clean");
+        // MODES collapsed (a click on its title): Resolution is the list's
+        // 11th row; its dropdown opens upward, 720p 180 units above the row.
         mouseAt(300, 190, 0);
         mouseAt(300, 190, 1);
-        wait(200);
-        mouseAt(300, 229, 0);
-        mouseAt(300, 229, 1);
         wait(300);
-        check("enhanced_deck");
-        mouseAt(480, 592, 3);  // right click: back
+        mouseAt(480, 523, 0);
+        mouseAt(480, 523, 1);
+        wait(200);
+        mouseAt(480, 343, 0);
+        mouseAt(480, 343, 1);
+        wait(300);
+        check("enhanced_res_720");
+        // The scrollbar's bottom: the list's end, Monkey Head Crowd clicked on, then off.
+        mouseAt(66, 572, 1);
+        wait(800);
+        mouseAt(300, 555, 0);
+        mouseAt(300, 555, 1);
+        wait(200);
+        check("cheat_menu_monkey");
+        mouseAt(300, 555, 1);
+        wait(200);
+        // The Back button under the list.
+        mouseAt(150, 608, 0);
+        mouseAt(150, 608, 1);
         at("options_screen");
         wait(300);
         check("click_help1");  // the help bar's BACK
@@ -632,7 +654,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         press(kDown), wait(150), press(kDown), wait(150);
         press(kX);
         at("enhanced_options_screen");
-        for (int i = 0; i < 3; ++i) press(kUp), wait(120);
+        for (int i = 0; i < 2; ++i) press(kUp), wait(120);  // MODES, then round to the list's end
         press(kX), wait(150);
         check("cheat_menu_monkey");
         press(kUp), wait(120), press(kX), wait(150);
@@ -927,11 +949,6 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         std::printf("  mouse: the hover focused %s\n", fp ? fp->focus.c_str() : "nothing");
         return fp && fp->focus == "main_options.btn" ? pass() : fail("hovering OPTIONS did not focus it");
     }
-    if (s.screen == "enhanced_fps_60") {
-        const std::string v = ui.host().enhancedValue("max_fps");
-        std::printf("  mouse: In-Game Max FPS %s\n", v.c_str());
-        return v == "60" ? pass() : fail("clicking the dropdown's 60 did not set In-Game Max FPS");
-    }
     if (s.screen == "click_help1") {  // the help bar's second item, clicked
         ui::PanelObj* hb = ui.panel("helpbar");
         if (hb && hb->view)
@@ -1138,7 +1155,7 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
     }
     // The Enhanced Options (GDALL-015): each option's value as enhanced.json
     // has it, and what the program put in effect (UiHost::enhancedState).
-    if (s.screen.rfind("enhanced_", 0) == 0 && s.screen != "enhanced_fps_60" && s.screen != "enhanced_deck") {
+    if (s.screen.rfind("enhanced_", 0) == 0) {
         Json saved;
         {
             std::ifstream f(std::filesystem::path(ui.savePath()).parent_path() / "enhanced.json");
@@ -1181,16 +1198,26 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
             for (const char* key : {"bokeh", "bloom", "cinematic_color", "film_grain", "chromatic", "ssao", "sharpening", "star_blur",
                                     "shadows_all", "more_lights", "light_dust", "ground_fog", "sharp_ui", "fps_counter"}) {
                 const std::string got = ui.host().enhancedValue(key), def = ui::enhancedDefault(key, false);
-                const bool original = def == "off" || def == "none" || (std::string(key) == "bokeh" && def == "regular");
+                const bool original = def == "off" || def == "none" || (std::string(key) == "bokeh" && def == "medium");
                 std::printf("  enhanced default: %s %s\n", key, got.c_str());
                 if (got != def || !original) problems += std::string(problems.empty() ? "" : "; ") + key + " is " + got + ", not the original's";
             }
             state("fx_on", 0, 0), state("post_original", 1, 1);
             for (const char* pass : {"fx:down", "fx:up", "fx:ao", "fx:composite", "fx:finish"}) state(pass, 0, 0);
-            state("particles", 1, 1), state("shake", 1, 1), state("sharp_ui", 0, 0), state("xinput", 1, 1), state("rockband", 0, 0);
+            state("particles", 1, 1), state("particle_rate", 10, 10), state("shake", 1, 1), state("sharp_ui", 0, 0);
+            state("xinput", 1, 1), state("rockband", 1, 1);  // always on (no switches since 0.1.8)
+        } else if (w == "enhanced_mode_deck" || w == "enhanced_mode_original" || w == "enhanced_mode_old_days" || w == "enhanced_mode_clean") {
+            const char* mode = w == "enhanced_mode_deck" ? "steam_deck" : w == "enhanced_mode_original" ? "original"
+                               : w == "enhanced_mode_clean" ? "clean" : "good_old_days";
+            for (const auto& [key, v] : ui::enhancedPreset(mode)) want(key.c_str(), v);
+            status("Mode applied");
+            if (w == "enhanced_mode_original") want("internal_res", "800"), want("screen_mode", "fullscreen");  // Steam Deck's, kept
+            if (w == "enhanced_mode_old_days") state("fx_on", 1, 1), state("particle_rate", 20, 20);
+        } else if (w == "enhanced_res_720") {
+            want("internal_res", "720");
         } else if (w == "enhanced_controls") {
-            want("touch", "on"), want("rockband", "on"), want("xinput", "off");
-            state("touch", 1, 1), state("rockband", 1, 1), state("xinput", 0, 0);
+            want("touch", "on");
+            state("touch", 1, 1), state("rockband", 1, 1), state("xinput", 1, 1);
         } else if (w == "enhanced_calibrated") {
             // The presses came 0..30 ms after the ticks and flashes.
             for (const char* key : {"audio_offset", "video_offset"}) {
@@ -1200,12 +1227,12 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
             }
             state("calibration_ms", -500, 300);
         } else if (w == "enhanced_changed") {
-            want("internal_res", "1440");
+            want("internal_res", "480");
         } else if (w == "enhanced_graphics") {
             want("sharp_ui", "off"), want("antialiasing", "fxaa"), want("ai_upscaling", "fsr1"), want("ai_upscaling_mode", "performance");
-            want("bokeh", "none"), want("particles", "off"), want("bloom", "medium"), want("cinematic_color", "on"), want("color_grade", "warm");
-            want("film_grain", "strong"), want("chromatic", "on"), want("light_streaks", "on"), want("ssao", "on"), want("sharpening", "high");
-            want("star_blur", "medium");
+            want("bokeh", "none"), want("particles", "none"), want("bloom", "2x"), want("cinematic_color", "on"), want("color_grade", "warm");
+            want("film_grain", "medium"), want("chromatic", "light"), want("light_streaks", "very_light"), want("ssao", "medium");
+            want("sharpening", "high"), want("star_blur", "medium");
             state("sharp_ui", 0, 0), state("particles", 0, 0), state("post_dof", 0, 0);
             for (const char* pass : {"fx:down", "fx:up", "fx:ao", "fx:composite", "fx:fxaa", "fx:easu", "fx:rcas", "fx:finish"}) state(pass, 1, 1);
             state("fx:taa", 0, 0), state("fx:downsample", 0, 0);
@@ -1214,11 +1241,11 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
             state("fx_on", 0, 0), state("post_original", 0, 0), state("post_key", 0, 0), state("post_dof", 0, 0), state("shake", 0, 0);
         } else if (w == "enhanced_effects_back") {
             want("no_effects", "off");
-            state("fx_on", 1, 1), state("post_original", 1, 1), state("shake", 1, 1);
+            state("fx_on", 1, 1), state("post_original", 1, 1), state("shake", 0, 0);  // Disable Shaky Camera is on
         } else if (w == "enhanced_lights_default") {
             state("shadows", 0, 0), state("beams", 0, 0), state("motes", 0, 0);
         } else if (w == "enhanced_enhancers") {
-            want("shadows_all", "on"), want("more_lights", "strong"), want("light_dust", "on"), want("ground_fog", "full"), want("no_shaky_cam", "on");
+            want("shadows_all", "on"), want("more_lights", "2x"), want("light_dust", "1.5x"), want("ground_fog", "2x"), want("no_shaky_cam", "on");
             state("shadows", 1, kMany), state("beams", 1, kMany), state("motes", 1, kMany), state("shake", 0, 0);
         } else if (w == "enhanced_exported") {
             status("Exported to");
@@ -1232,7 +1259,7 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
             }
         } else if (w == "enhanced_settings_loaded") {
             status("Settings loaded");
-            want("ground_fog", "full"), want("internal_res", "1440"), want("antialiasing", "fxaa");
+            want("ground_fog", "2x"), want("internal_res", "480"), want("antialiasing", "fxaa");
         } else if (w == "enhanced_progress_loaded") {
             status("Progress loaded");
         } else if (w == "enhanced_cheats") {
@@ -1252,19 +1279,6 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         if (s.screen == "cheat_menu_rest" && (monkey || !eyeball)) return fail("Eyeball Head Crowd did not replace Monkey Head Crowd");
         if (s.screen == "cheat_menu_rest" && flaming) return fail("Flaming Head (not built) turned on");
         if (s.screen == "cheat_menu_rest" && hyper) return fail("Hyper Speed Mode did not turn off from the menu");
-        ++step_, stepStart_ = -1;
-        return;
-    }
-    if (s.screen == "enhanced_deck") {
-        // Apply Steam Deck Settings: the handheld column (gd01's profileValues(true)).
-        std::string problems;
-        for (const auto& [key, v] : ui::enhancedProfile(true)) {
-            const std::string got = ui.host().enhancedValue(key);
-            if (got != v) problems += (problems.empty() ? "" : "; ") + key + " is " + got + ", not " + v;
-        }
-        std::printf("  steam deck: internal_res %s, max_fps %s, bloom %s; %s\n", ui.host().enhancedValue("internal_res").c_str(),
-                    ui.host().enhancedValue("max_fps").c_str(), ui.host().enhancedValue("bloom").c_str(), ui.host().enhancedStatus().c_str());
-        if (!problems.empty()) return fail("Apply Steam Deck Settings: " + problems);
         ++step_, stepStart_ = -1;
         return;
     }

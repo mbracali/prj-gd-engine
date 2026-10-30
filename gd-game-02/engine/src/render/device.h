@@ -208,6 +208,7 @@ public:
     // Presents, keeping to the frame cap (vsync where the display's rate
     // matches it, otherwise paced in software; headless is not paced).
     virtual void endFrame() = 0;
+    // 0 or less: unlimited (no vertical sync, no pacing).
     virtual void setFrameCap(int fps) = 0;
     // The internal resolution (Enhanced Options): every frame is drawn into
     // an off-screen colour + depth target `height` lines tall (the window's

@@ -36,20 +36,20 @@ struct PostSettings {
     // GH2's own bloom, depth of field, noise, colour transform and tone
     // curve (Remove All Effects turns them off with everything else).
     bool original = true;
-    int bokeh = 1;          // GH2's depth of field: 0 none, 1 as the original, 2 stronger
+    int bokeh = 2;          // GH2's depth of field: 0 none, 1 light, 2 medium (the original), 3 strong, 4 stronger
     AA aa = AA::None;
     bool fsr1 = false;      // AI Upscaling: FSR 1
     float fsrScale = 1;     // its render scale: 1 / 1.5, 1 / 1.7, 1 / 2
-    int bloom = 0;          // 0 off, 1 low, 2 medium, 3 high
+    int bloom = 0;          // 0 none, 1 original, 2 2x, 3 3x
     bool cinematic = false; // filmic curve, grade and vignette
-    int fog = 0;            // ground fog: 0 none, 1 low, 2 full, 3 super
-    int grade = 0;          // 0 off, 1 warm, 2 cold, 3 vintage, 4 noir, 5 neon
-    int grain = 0;          // 0 off, 1 light, 2 strong
-    bool chromatic = false;
-    bool streaks = false;
-    bool ssao = false;
+    int fog = 0;            // ground fog: 0 none, 1 1.5x, 2 2x, 3 2.5x (volumetric, light shafts)
+    int grade = 0;          // 0 off, 1 warm, 2 cold, 3 vintage, 4 noir, 5 neon, 6 sepia
+    int grain = 0;          // 0 none, 1 light, 2 medium, 3 strong, 4 stronger
+    int chromatic = 0;      // 0 none, 1 light, 2 medium, 3 strong
+    int streaks = 0;        // 0 none, 1 very light, 2 light, 3 medium
+    int ssao = 0;           // 0 none, 1 light, 2 medium, 3 strong, 4 stronger
     int sharpen = 0;        // 0 off, 1 low, 2 high
-    int starBlur = 0;       // 0 none, 1 light, 2 medium, 3 high
+    int starBlur = 0;       // 0 none, 1 light, 2 medium, 3 strong, 4 stronger
     // The world's size against the picture (SSAA 2x, FSR 1 below 1).
     float renderScale() const { return (fsr1 ? fsrScale : 1.0f) * (aa == AA::Ssaa ? 2.0f : 1.0f); }
     // Whether the port's chain runs at all.

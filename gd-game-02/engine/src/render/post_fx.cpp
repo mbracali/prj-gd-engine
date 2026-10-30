@@ -420,17 +420,21 @@ void PostFx::end() {
     if (!capturing_) return;
     capturing_ = false;
     // Remove All Effects: none of GH2's own either (its default PostProc
-    // draws the world as it is). Bokeh: None skips GH2's depth of field,
-    // Stronger focuses nearer, blurs sooner and wider (gd01's).
+    // draws the world as it is). Bokeh: None skips GH2's depth of field;
+    // Medium is the original; Light blurs less; Strong and Stronger focus
+    // nearer, blur sooner and wider (gd01's levels).
     const PostProcState saved = state_;
     const DofState savedDof = dof_;
     if (!settings_.original) state_ = PostProcState{};
     float dofSpread = kDofSpread;
-    if (settings_.bokeh == 2) {
-        dof_.maxBlur = std::min(1.0f, dof_.maxBlur * 1.5f);
-        dof_.blurDepth = std::max(0.001f, dof_.blurDepth * 0.6f);
-        dof_.focusDistance *= 0.85f;
-        dofSpread *= 1.8f;
+    if (settings_.bokeh != 2) {
+        static constexpr float kBlur[5] = {1, 0.65f, 1, 1.25f, 1.5f}, kDepth[5] = {1, 1.3f, 1, 0.8f, 0.6f}, kFocus[5] = {1, 1, 1, 0.92f, 0.85f},
+                               kSpread[5] = {1, 0.7f, 1, 1.4f, 1.8f};
+        const size_t lv = size_t(std::clamp(settings_.bokeh, 0, 4));
+        dof_.maxBlur = std::min(1.0f, dof_.maxBlur * kBlur[lv]);
+        dof_.blurDepth = std::max(0.001f, dof_.blurDepth * kDepth[lv]);
+        dof_.focusDistance *= kFocus[lv];
+        dofSpread *= kSpread[lv];
     }
     const bool dof = settings_.original && settings_.bokeh > 0 && dof_.on && dof_.maxBlur > 0 && dof_.farPlane > dof_.nearPlane;
     const bool bloom = state_.bloomOn();
