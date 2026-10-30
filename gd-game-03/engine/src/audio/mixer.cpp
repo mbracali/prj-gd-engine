@@ -209,6 +209,7 @@ void Mixer::fill(int frames) {
         guitarGain_ += (target - guitarGain_) * 0.003f;
         guitar2Gain_ += (target2 - guitar2Gain_) * 0.003f;
         float l = 0, rr = 0;
+        const bool mono = audiodev::mono();
         for (size_t c = 0; c < tracks_.size(); ++c) {
             const Track& t = tracks_[c];
             float x = ring_[c][at];
@@ -217,9 +218,11 @@ void Mixer::fill(int frames) {
                 if (wOld > 0) x += wOld * partSample(c, double(oldStart_) + oldAge_ / speed, written);
             }
             float v = x * t.volume * volumeGain_ * (t.guitar ? guitarGain_ : t.guitar2 ? guitar2Gain_ : 1.0f);
-            // gd01's linear pan law: -1 = left only, 0 = both at full, 1 = right only [I].
-            l += v * std::clamp(1.0f - t.pan, 0.0f, 1.0f);
-            rr += v * std::clamp(1.0f + t.pan, 0.0f, 1.0f);
+            // gd01's linear pan law: -1 = left only, 0 = both at full, 1 = right only [I];
+            // mono pans every channel to the centre (0x0023ab90) [C].
+            const float pan = mono ? 0.0f : t.pan;
+            l += v * std::clamp(1.0f - pan, 0.0f, 1.0f);
+            rr += v * std::clamp(1.0f + pan, 0.0f, 1.0f);
         }
         if (correct) grainAge_ += 1, oldAge_ += 1, fadeAge_ += 1;
         out_[size_t(silent + i) * 2] = std::clamp(l, -1.0f, 1.0f);

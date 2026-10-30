@@ -28,6 +28,9 @@ All notable changes for players. Versions follow SemVer; release tags are
   now replaces it, as on the PS2 (it was dropped).
 - Career practice and pause menus' buttons, and a material's texture set
   by script, now act as the original.
+- Mono sound (Options) now plays every sound and the song from the centre,
+  as the PS2 does, instead of averaging left and right (songs were 6 dB too
+  quiet in mono).
 - With the crowd meter off (practice, the tutorials, the crowd meter
   cheat) the meter now holds still instead of moving with your playing; the
   interface tutorial's meter shows the values it sets.

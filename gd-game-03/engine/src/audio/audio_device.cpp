@@ -21,15 +21,6 @@ int g_limiterRate = 0;
 
 void SDLCALL postmix(void*, const SDL_AudioSpec* spec, float* buffer, int bytes) {
     if (!spec || spec->channels <= 0) return;
-    // The audio settings' mono: left and right summed at half each (the
-    // console's stereo / mono output switch [I: its exact fold]).
-    if (g_mono.load() && spec->channels >= 2) {
-        const int frames = bytes / int(sizeof(float)) / spec->channels;
-        for (int i = 0; i < frames; ++i) {
-            float* f = buffer + size_t(i) * size_t(spec->channels);
-            f[0] = f[1] = 0.5f * (f[0] + f[1]);
-        }
-    }
     if (!g_limiterOn.load()) return;
     if (spec->freq != g_limiterRate) {
         g_limiterRate = spec->freq;
@@ -75,5 +66,6 @@ void toggleLimiter() { g_limiterOn.store(!g_limiterOn.load()); }
 bool limiterEnabled() { return g_limiterOn.load(); }
 
 void setMono(bool mono) { g_mono.store(mono); }
+bool mono() { return g_mono.load(); }
 
 }  // namespace audiodev

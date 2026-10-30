@@ -24,7 +24,11 @@ whammy accrual, face-off and co-op rules: see gd-game-02/docs/FINDINGS.md.
 
 ## Rules re-confirmed on the PS2
 Checked against SLUS_215.86 where the GH2 (360) port differed; each is a
-`--selftest` rule check ("PS2: ...").
+`--selftest` rule check ("PS2: ..."). Re-read in assembly (GD03-029, 0.0.3):
+the strum expiry (0x0024deb0: `c.lt.s deadline, now`), the signed accrual
+(0x0012a168: progress clamped to 1 x points, rounded half away, stored at
++8, the difference returned) and the penalised-gem mark (GD03-015); the
+others are read from the decompiler.
 - Held notes: the watcher holds every gem whose duration_ms is not 0, short
   notes (160 ticks or less) too [C 0x00248910; the parser never clears the
   length, 0x00236428]. Its end time, a miss or a new hit drop it silently
@@ -97,3 +101,20 @@ Checked against SLUS_215.86 where the GH2 (360) port differed; each is a
   port: Player::setCrowdActive / crowdActive, selftest "PS2: with
   crowd_rating_active off ...". Practice's HUD (hud_practice.milo) has no
   meter.
+
+## Audio options and effects (GD03-029 / GD03-031, 0.0.3)
+- Stereo / mono (options set_stereo 0x0010dbc0 -> 0x0010dc00) [C]: mono is
+  not a fold of the mix. The synth gets the mono pan mode (0x00225cd8 ->
+  0x0021e490: stored, every voice marked to be panned again) and the song's
+  channels are panned to 0 instead of their own pan (0x00123110 ->
+  0x0023a4c0 -> 0x0023ab90, vtable +0x8c with `stereo ? pan : 0`). So every
+  source plays from the centre, at the centre gains of the pan laws (the
+  song's: gd01's law, 0 = both sides at full [I: the IOP side, LGAUD /
+  SDRDRV.IRX, not read]). The port did "(L + R) / 2" on the output, 6 dB
+  low for a stereo song's hard-panned pair; now audio/mixer.cpp and
+  audio/sfx_player.cpp pan to the centre while audiodev::mono().
+- SPU2 reverb: what the code holds is [C]: the presets (LIBSD.IRX .data
+  0x4DE0), the work areas, depth, delay and feedback through SynthPS2's
+  conversions (0x00225D50, 0x0022CDD8..0x0022D100). The reverb network
+  itself is the SPU2 chip's, in no code on the disc, so it stays from the
+  hardware documentation [I by nature].

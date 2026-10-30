@@ -1028,8 +1028,10 @@ void TrackView::drawLightning(gfx::MaterialRenderer& mr, gfx::SceneCache& cache,
 // track below it), the upper one with track_fade2.mat in full; each one
 // then gets track_add.mat (add blend, colour 0.02) over it. The rect draw
 // takes the corner colours only for prelit materials and the material's
-// colour otherwise [I: the flag it tests at +0x9c is taken to be prelit,
-// which both fade materials set and track_add.mat does not].
+// colour otherwise (the flag it tests, Mat +0x9c, is prelit: RndMat::Load
+// 0x001bfc40 reads use_environ to +0x40 then prelit to +0x9c, and the
+// property handler 0x001c13c8 maps "prelit" to +0x9c) [C]; both fade
+// materials set it and track_add.mat does not.
 // Here the strips scale with the picture's height (480 PS2 lines) [I], and
 // the frame's alpha is not used (the copies sample opaque) [I: the PS2's
 // frame alpha is not known].

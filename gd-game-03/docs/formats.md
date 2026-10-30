@@ -44,7 +44,7 @@ instance on the disc decodes exactly to its end), [I] inferred.
 | WorldDir | 11 | 12 | PostLoad ends after the camera transform (no hides / bitmaps) [C 360 0x8224de60 + data] |
 | WorldFx | 1 | - | Its revision word, then a RndDir (revision 8): a proxy (ObjectDir proxy file, e.g. `../../../shared/og/cheat_headflames.milo`, not inline) trans-parented to a bone; world_objects.dta: superclass RndDir [D; data: all 80 records on the disc end at their markers] |
 | BandStarMeterDir | 4 | 5 | five names (the sixth group from 5) [C 360 0x821321a8 + data] |
-| Mat | 27 | 28 | no stencil mode [C 360 0x821eebb8 + data] |
+| Mat | 27 | 28 | No stencil mode (360 0x821eebb8 "rev > 27") [C 360 + data]; the PS2 RndMat::Load (0x001bfc40) reads blend to +0x2c, the colour to +0x30..+0x3c, use_environ to +0x40 and prelit to +0x9c in that order [C] |
 | Mesh | 28 | 28 | plus a per-group block: u32 n, u32 m, n u32, m u16 (the platform mesh form the 360 Load reads when it keeps one) [C data; 360 0x821c2b60] |
 | Light | 6 | 9 | no spot radii, softness, displacement, texture, shadow casters [C 360 0x8220c3e8 + data] |
 | ParticleSys | 27 | 30 | one object header; no spin / damping / drag; frame_drive on, pre_spawn off [C 360 0x82216ad0 + data] |
