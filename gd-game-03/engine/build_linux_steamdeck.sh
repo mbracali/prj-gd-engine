@@ -28,6 +28,7 @@ cp res/gd03_icon_512.png "$d/gd03.png"
 sdl="$(ldd build/steamdeck/gd03 | awk '/libSDL3\.so/ {print $3}')"
 cp -L "$sdl" "$d/libSDL3.so.0"
 cp /usr/share/doc/libsdl3-0/copyright "$d/licenses/SDL3-LICENSE.txt" 2>/dev/null || true
+cp third_party/rtmidi/LICENSE "$d/licenses/RtMidi-LICENSE.txt"
 cat > "$d/STEAM-DECK.txt" <<'TXT'
 gd03 on the Steam Deck
 

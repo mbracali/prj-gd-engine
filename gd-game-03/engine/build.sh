@@ -19,6 +19,7 @@ mkdir -p "$d/licenses"
 cp build/linux/gd03 README.md "$d/"
 # The project licence.
 cp ../../LICENSE ../../LICENSE-ADDITIONAL-TERMS.md "$d/"
+cp third_party/rtmidi/LICENSE "$d/licenses/RtMidi-LICENSE.txt"
 
 if command -v x86_64-w64-mingw32-g++ >/dev/null || [ -n "${MSYSTEM:-}" ]; then
   ./build_windows.sh

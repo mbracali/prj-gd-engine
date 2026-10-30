@@ -73,6 +73,7 @@ target_sources(gd03 PRIVATE
   src/game/world_driver.cpp
   src/input/input.cpp
   src/input/input_selftest.cpp
+  src/input/midi_in.cpp
   src/platform/app_icon.cpp
   src/platform/disc_picker.cpp
   src/platform/paths.cpp
@@ -154,6 +155,12 @@ endif()
 
 find_package(Threads REQUIRED)
 target_link_libraries(gd03 PRIVATE Threads::Threads)
+
+# Generic MIDI input (src/input/midi_in.cpp): RtMidi (third_party/rtmidi), desktop only.
+if(NOT ANDROID)
+  add_subdirectory(third_party/rtmidi)
+  target_link_libraries(gd03 PRIVATE gd_rtmidi)
+endif()
 
 target_compile_definitions(gd03 PRIVATE GD03_VERSION="${PROJECT_VERSION}")
 
