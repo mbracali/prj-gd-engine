@@ -457,7 +457,7 @@ void UiManager::loadPanel(PanelObj* p) {
 void UiManager::panelViewLoaded(PanelObj* p) {
     // It joins the shared metacam where it is (setMetacamFrame).
     viewPanels_.insert(p->name());
-    for (const auto& [group, t] : metacam_) p->view->setFrame(group, t * p->view->endFrame(group));
+    for (const auto& [anim, frame] : metacam_) p->view->setFrame(anim, frame);
     // And the shared directories' animations where they are.
     for (const auto& [o, nf] : sharedFrames_)
         if (p->view->find(nf.first) == o) p->view->setFrame(nf.first, nf.second);
@@ -531,12 +531,15 @@ void UiManager::beginTransition(ScreenObj* next, bool back) {
     previous_ = current_;
     next_ = next;
     back_ = back || backwardsAnim_ || (current_ && current_->inBackChain(next));
+    if (back || backwardsAnim_) forwardAnim_ = false;  // screen_back / backwards_anim (PS2 0x00146378 / 0x00146a50)
     backwardsAnim_ = false;
     history_.push_back(next->name());
     if (const char* l = SDL_getenv("GD03_UILOG"); l && *l && *l != '0') SDL_Log("ui: goto_screen %s%s", next->name().c_str(), back_ ? " (back)" : "");
-    // [I] A screen without a transition of its own (the port's universal
-    // menus) also skips the outgoing screen's: it opens on the next frame.
-    const bool animOut = current_ && current_->flag("animate_transition", true) && next->flag("animate_transition", true) && !headless_;
+    // [I] The port's universal menus (port_universal_menu) also skip the
+    // outgoing screen's transition: they open on the next frame. The game's
+    // own screens without a transition still see the old one's exit, as on
+    // the PS2 (GHScreen Exit 0x00145fb8 looks only at its own flag).
+    const bool animOut = current_ && current_->flag("animate_transition", true) && !next->flag("port_universal_menu", false) && !headless_;
     if (animOut) {
         // The outgoing panels' ui_exit triggers.
         for (PanelObj* p : current_->panels())
@@ -544,6 +547,10 @@ void UiManager::beginTransition(ScreenObj* next, bool back) {
                 for (const char* ev : {"ui_exit", back_ ? "ui_exit_back" : "ui_exit_forward"})
                     for (const gfx::UiView::Trigger& t : p->view->triggers(ev))
                         animate(p, t.anim->name, 0, t.endFrame, float(transitionMs_ / 1000.0), kTaskUISeconds);
+        // The metacam's exit: forward meta_cam_pause_right_out 0 -> 500,
+        // back meta_cam_right_in 500 -> 0.
+        transitionAnim_ = forwardAnim_ ? "meta_cam_pause_right_out.tnm" : "meta_cam_right_in.tnm";
+        transitionReverse_ = !forwardAnim_;
         phase_ = Phase::Out;
         phaseMs_ = 0;
         phaseLen_ = transitionMs_;
@@ -611,6 +618,10 @@ void UiManager::switchScreens() {
     callScript(to, "enter");
     route("screen_change", {Value::obj(to), Value::obj(from), Value::integer(back_ ? 1 : 0)});
     if (animIn) {
+        // The metacam's entrance: forward meta_cam_right_in 0 -> 500, back
+        // meta_cam_right_out 500 -> 0.
+        transitionAnim_ = forwardAnim_ ? "meta_cam_right_in.tnm" : "meta_cam_right_out.tnm";
+        transitionReverse_ = !forwardAnim_;
         phase_ = Phase::In;
         phaseMs_ = 0;
         phaseLen_ = transitionMs_;
@@ -636,33 +647,37 @@ void UiManager::finishTransition() {
             if (p->up) callScript(p, "transition_complete", args);
 }
 
-// GH2 keeps one metacam (ui/metacam.milo, loaded once by 0x822A1070) that
-// every panel's camera and bricks hang from; the port's panel views each
-// pose their own copy, so the metacam's frames go to all of them. Posing
-// only some copies left the others where their last transition put them:
-// going back, the main menu came back with the camera of its forward exit
-// still applied (off to one side) under the backward entrance.
-void UiManager::setMetacamFrame(const std::string& group, float t) {
-    auto it = std::find_if(metacam_.begin(), metacam_.end(), [&](const auto& g) { return g.first == group; });
+// The game keeps one metacam (ui/metacam.milo, loaded once: PS2 0x00145668)
+// that every panel's camera hangs from (meta.cam); the port's panel views
+// each pose their own copy, so the metacam's frames go to all of them.
+// Posing only some copies left the others where their last transition put
+// them.
+void UiManager::setMetacamFrame(const std::string& anim, float frame) {
+    auto it = std::find_if(metacam_.begin(), metacam_.end(), [&](const auto& g) { return g.first == anim; });
     if (it != metacam_.end()) metacam_.erase(it);
-    metacam_.emplace_back(group, t);
+    metacam_.emplace_back(anim, frame);
     for (const std::string& name : viewPanels_)
-        if (PanelObj* p = panel(name); p && p->view) p->view->setFrame(group, t * p->view->endFrame(group));
+        if (PanelObj* p = panel(name); p && p->view) p->view->setFrame(anim, frame);
 }
 
-// After every transition (and at boot) GH2 sets trans_in_forward.grp to its
-// end, the metacam's resting pose (0x8229FC98 / 0x822A1070).
+float UiManager::metacamFrame(const std::string& anim) const {
+    for (const auto& [a, f] : metacam_)
+        if (a == anim) return f;
+    return -1;
+}
+
+// After every transition (and at boot) the metacam rests at
+// meta_cam_right_in.tnm's end (PS2 0x001460c0: frame 500).
 void UiManager::resetMetacam() {
     metacam_.clear();
-    setMetacamFrame("trans_in_forward.grp", 1);
+    setMetacamFrame("meta_cam_right_in.tnm", 500);
 }
 
+// The phase's metacam anim at t (0..1) of the transition: frames 0..500
+// over 0.5 s (PS2 0x00145e50), reversed going back.
 void UiManager::applyTransitionPose(float t) {
-    // GHScreen's metacam groups (0x8229FB20): one group per phase,
-    // trans_out_* leaving the old screen, trans_in_* entering the new one.
-    const std::string dir = back_ ? "backward" : "forward";
-    if (phase_ == Phase::Out && current_) setMetacamFrame("trans_out_" + dir + ".grp", t);
-    else if (phase_ == Phase::In && current_) setMetacamFrame("trans_in_" + dir + ".grp", t);
+    if ((phase_ != Phase::Out && phase_ != Phase::In) || !current_ || transitionAnim_.empty()) return;
+    setMetacamFrame(transitionAnim_, 500 * (transitionReverse_ ? 1 - t : t));
 }
 
 void UiManager::updateTransition() {
@@ -671,7 +686,7 @@ void UiManager::updateTransition() {
         const float t = float(std::clamp(phaseMs_ / std::max(1.0, phaseLen_), 0.0, 1.0));
         applyTransitionPose(t);
         if (phaseMs_ >= phaseLen_) {
-            if (phase_ == Phase::Out) switchScreens();
+            if (phase_ == Phase::Out) forwardAnim_ = true, switchScreens();  // the exit is over (PS2 0x00146050)
             else phase_ = Phase::Complete;
         }
         return;
@@ -797,6 +812,7 @@ void UiManager::update() {
     frameDt_ = std::clamp(wall - lastWall_, 0.0, 100.0);
     lastWall_ = wall;
     uiMs_ += frameDt_;
+    gfx::UiView::setUiSeconds(uiMs_ / 1000.0);
     if (!(host_.gameLoaded() && host_.gamePaused())) secondsMs_ += frameDt_;
     if (gamepadsAtMs_ > 0 && wall >= gamepadsAtMs_) openGamepads();
     if (splash_ >= 0) {

@@ -92,6 +92,8 @@ public:
 
     std::string currentScreen() const;
     bool inTransition() const;
+    // The shared metacam anim's frame last set (-1: not since the last reset; tests).
+    float metacamFrame(const std::string& anim) const;
     bool inSplashes() const { return splash_ >= 0; }
     // The game panel is up (the song is the UI's).
     bool inGame() const;
@@ -221,7 +223,7 @@ private:
     void updateRepeat(double dtMs);
     void skipSplashes();  // the splashes are over: the first screen
     bool enterIsStart_ = false;  // the keyboard's Enter, pressed on a text entry: Start until released
-    void setMetacamFrame(const std::string& group, float t);  // t 0..1 of the group, on every panel's metacam
+    void setMetacamFrame(const std::string& anim, float frame);  // on every panel's metacam
     void resetMetacam();
     void setViewFrame(PanelObj* p, const std::string& object, float frame);
     void routeButton(int button, int player);
@@ -277,8 +279,17 @@ private:
     enum class Phase { Idle, Out, In, Complete } phase_ = Phase::Idle;
     double phaseMs_ = 0, phaseLen_ = 500;
     bool backwardsAnim_ = false;
-    // The shared metacam's groups since its last reset, in order (frame 0..1).
-    std::vector<std::pair<std::string, float>> metacam_{{"trans_in_forward.grp", 1.0f}};
+    // The shared metacam's anims since its last reset, in order, at their
+    // frames (Encore's ui/metacam.milo: meta_cam_right_in, meta_cam_right_out
+    // and meta_cam_pause_right_out.tnm, frames 0..500; the rest pose
+    // meta_cam_right_in.tnm at 500).
+    std::vector<std::pair<std::string, float>> metacam_{{"meta_cam_right_in.tnm", 500.0f}};
+    // Encore's GHScreen transition (PS2 0x00145e50) [C]: the anim the
+    // current phase plays and its direction; forwardAnim_ is the game's
+    // direction flag (0x003d86cc: starts set, cleared by the back button and
+    // backwards_anim, set again once an animated exit is over).
+    std::string transitionAnim_;
+    bool transitionReverse_ = false, forwardAnim_ = true;
     // The last frame of each animation in a directory several panels share
     // (setViewFrame), for views made later.
     std::map<const scene::Object*, std::pair<std::string, float>> sharedFrames_;

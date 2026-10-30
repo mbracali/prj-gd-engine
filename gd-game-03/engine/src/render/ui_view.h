@@ -68,6 +68,12 @@ public:
     void setFocus(const std::string& component) { focus_ = component; }
 
     // ---- driven by the UI manager
+    // The UI clock (TaskMgr ui seconds), for the buttons' focus animation;
+    // set by the UI manager every frame.
+    static void setUiSeconds(double seconds);
+    // A BandButton's text scale now (its button.tnm at the state's frame,
+    // buttonScale below); 1 for anything else (tests).
+    float buttonScaleNow(const std::string& component);
     ScenePose& pose() { return pose_; }
     // Plays an anim object (TransAnim, MatAnim, AnimFilter, Group / view) at `frame`.
     void setFrame(const std::string& object, float frame);
@@ -224,6 +230,14 @@ private:
     std::map<std::string, std::string> overrides_;
     std::string focus_;
     std::map<std::string, scene::UiState> states_;
+    // BandButton focus animation (Encore's BandButton::SetState, PS2
+    // 0x0028cc38): the state last drawn and when focus came (UI seconds).
+    struct ButtonAnim {
+        scene::UiState last = scene::UiState::Normal;
+        double focusAt = -1;
+    };
+    std::map<std::string, ButtonAnim> buttonAnims_;
+    float buttonScale(const scene::UILabel& l, scene::UiState st, const scene::Object& panel);
     std::map<std::string, bool> checks_;
     std::map<std::string, std::pair<int, int>> sliders_;
     std::map<std::string, std::string> pictureTex_;

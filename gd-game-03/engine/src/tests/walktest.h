@@ -62,7 +62,7 @@ class UiManager;
 //              it -> Options -> click Enhanced Options -> MODES > Clean
 //              Image clicked -> MODES folded (its title clicked) ->
 //              Resolution's dropdown clicked open, 720p clicked ->
-//              Widescreen's row clicked (16:9) -> the scrollbar's bottom
+//              the wheel to Widescreen, its row clicked (16:9) -> the scrollbar's bottom
 //              clicked, Monkey Head Crowd on and off -> the Back button ->
 //              Options -> the help bar's BACK clicked -> main; OPTIONS' hit
 //              box the same in 4:3 and 16:9, and hovering it focuses it again.
@@ -82,6 +82,11 @@ class UiManager;
 //   logo_skip  the boot splashes skipped by the red fret (2) -> main ->
 //              Options -> Credits (clicked) left by the green fret (1) ->
 //              Credits again, left by a click (universal_mechanisms.md 1.1.1).
+//   menu_anim  the main menu: down -> the newly focused button grows from 1
+//              to focus_scale over 0.1 s (button.tnm) -> OPTIONS: the metacam
+//              exit (meta_cam_pause_right_out.tnm) and entrance
+//              (meta_cam_right_in.tnm) play, then rest -> back: right_in
+//              reversed out, then (the exit over, forward again) right_in in.
 //   stickyaxis an adapter whose D-pad is an axis resting off centre (a
 //              virtual pad, 0079:0006:dpadaxis=-32768) plugged in at the main
 //              menu: no left / right press in 2 s; moved, one right press.
@@ -167,6 +172,7 @@ private:
     std::array<float, 4> bricks_{};  // the options' bricks light (the back walk)
     unsigned adapter_ = 0;           // the stickyaxis walk's virtual adapter (SDL_JoystickID)
     int sideBase_ = 0, rightBase_ = 0;
+    float focusScale0_ = 1;          // menu_anim: the button's scale as focus came
     float nameX0_ = 0;               // the career walk's band name: where it starts
     std::array<float, 2> optionsHit_{-1, -1};  // the mouse walk: OPTIONS' hit centre in 4:3
     std::array<double, 2> practiceClock_{-1, 0};  // the practice walk: (wall ms, song ms) first seen

@@ -54,6 +54,8 @@ public:
     UiStyle style(const std::string& cls, const std::string& type) const;
     // A type's property (e.g. "focus_scale"), or nullptr.
     const ::DataNode* typeProperty(const std::string& cls, const std::string& type, const std::string& key) const;
+    // A class's own property's value (e.g. BandButton's focus_anim_duration), or nullptr.
+    const ::DataNode* classProperty(const std::string& cls, const std::string& key) const;
 
     // BandButton's text colour for a state (@ 0x82122920): the property
     // normal_color / focus_color / disabled_color / selecting_color of the

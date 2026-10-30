@@ -189,6 +189,12 @@ UiStyle UiStyles::style(const std::string& cls, const std::string& typeIn) const
     return s;
 }
 
+const ::DataNode* UiStyles::classProperty(const std::string& cls, const std::string& key) const {
+    const ::DataNode* c = classNode(cls);
+    const ::DataNode* n = c ? c->find(key) : nullptr;
+    return n && n->children.size() > 1 ? &n->children[1] : nullptr;
+}
+
 const ::DataNode* UiStyles::typeProperty(const std::string& cls, const std::string& type, const std::string& key) const {
     UiStyle s = style(cls, type);
     return s.node ? s.node->find(key) : nullptr;

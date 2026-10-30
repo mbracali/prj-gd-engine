@@ -558,9 +558,12 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         mouseAt(480, 343, 1);
         wait(300);
         check("enhanced_res_720");
-        // Widescreen (16:9), the next row, clicked.
-        mouseAt(480, 557, 0);
-        mouseAt(480, 557, 1);
+        // Widescreen (16:9), the next row (cut off at the list's bottom): the
+        // wheel down one row scrolls it into view (row 530..564), then clicked.
+        mouseAt(480, 523, 5);
+        wait(600);
+        mouseAt(480, 547, 0);
+        mouseAt(480, 547, 1);
         wait(300);
         check("widescreen_on");
         // The scrollbar's bottom: the list's end, Monkey Head Crowd clicked on, then off.
@@ -680,6 +683,36 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         at("options_screen");
         expect_ = {"bootup_load", "bootup_create_save_check", "bootup_create_save", "cut_scene_screen", "splash_screen", "main_screen",
                    "options_screen", "credits_screen", "options_screen", "credits_screen", "options_screen"};
+    } else if (scenario == "menu_anim") {
+        // The menus' own animations (GD03-026, Encore's code): a button that
+        // gains focus grows to the panel's focus_scale over 0.1 s
+        // (button.tnm), and a screen change turns the shared metacam
+        // (meta_cam_pause_right_out.tnm out, meta_cam_right_in.tnm in, 0.5 s
+        // each; back: right_in and right_out reversed).
+        at("main_screen");
+        wait(2500);  // the main menu's entrance over
+        press(kDown);  // QUICK PLAY -> MULTIPLAYER
+        check("focus_anim_start");
+        wait(300);
+        check("focus_anim_end");
+        press(kDown), wait(150), press(kDown), wait(300);  // TRAINING, OPTIONS
+        press(kX);
+        wait(200);
+        check("metacam_out_forward");
+        wait(500);  // the entrance's first half
+        check("metacam_in_forward");
+        at("options_screen");
+        wait(300);
+        check("metacam_rest");
+        press(kTri);
+        wait(200);
+        check("metacam_out_back");
+        wait(500);
+        check("metacam_in_back");
+        at("main_screen");
+        wait(300);
+        check("metacam_rest");
+        expect_ = {"main_screen", "options_screen", "main_screen"};
     } else if (scenario == "stickyaxis") {
         at("main_screen");
         check("adapter_attach");
@@ -922,7 +955,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
 
 std::string WalkDriver::startScreen() const {
     if (scenario_ == "lose" || scenario_ == "pause" || scenario_ == "back" || scenario_ == "enhanced" || scenario_ == "cheats" ||
-        scenario_ == "mouse" || scenario_ == "gamepads" || scenario_ == "gamepads_pad" || scenario_ == "stickyaxis" || scenario_ == "practice" || scenario_ == "tutorial" ||
+        scenario_ == "mouse" || scenario_ == "gamepads" || scenario_ == "gamepads_pad" || scenario_ == "menu_anim" || scenario_ == "stickyaxis" || scenario_ == "practice" || scenario_ == "tutorial" ||
         scenario_ == "options")
         return "main_screen";
     if (scenario_ == "attract") return "splash_screen";
@@ -1140,9 +1173,35 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
                 }
         return fail("the help bar's second item was not drawn");
     }
+    if (s.screen == "focus_anim_start" || s.screen == "focus_anim_end") {
+        ui::PanelObj* fp = ui.focusPanel();
+        if (!fp || !fp->view) return fail("no focus panel with a view");
+        const float scale = fp->view->buttonScaleNow(fp->focus);
+        std::printf("  menu anim: %s at %.4f\n", fp->focus.c_str(), double(scale));
+        if (s.screen == "focus_anim_start") {
+            focusScale0_ = scale;
+            return scale >= 0.999f && scale < 1.04f ? pass() : fail("the newly focused button did not start its grow from 1");
+        }
+        return scale > focusScale0_ + 0.01f && scale > 1.01f ? pass() : fail("the focused button did not grow to its focus scale");
+    }
+    if (s.screen.rfind("metacam_", 0) == 0) {
+        const float out = ui.metacamFrame("meta_cam_pause_right_out.tnm"), in = ui.metacamFrame("meta_cam_right_in.tnm"),
+                    back = ui.metacamFrame("meta_cam_right_out.tnm");
+        std::printf("  metacam: pause_right_out %.0f, right_in %.0f, right_out %.0f, in transition %d\n", double(out), double(in), double(back),
+                    ui.inTransition());
+        const auto mid = [](float f) { return f > 0 && f < 500; };
+        if (s.screen == "metacam_out_forward") return mid(out) ? pass() : fail("no forward exit (meta_cam_pause_right_out.tnm) under way");
+        if (s.screen == "metacam_in_forward") return mid(in) ? pass() : fail("no forward entrance (meta_cam_right_in.tnm) under way");
+        if (s.screen == "metacam_out_back") return mid(in) ? pass() : fail("no backward exit (meta_cam_right_in.tnm reversed) under way");
+        if (s.screen == "metacam_in_back") return mid(in) ? pass() : fail("no entrance after the backward exit (meta_cam_right_in.tnm) under way");
+        return !ui.inTransition() && in == 500 && out < 0 && back < 0 ? pass() : fail("the metacam is not at rest (meta_cam_right_in.tnm 500)");
+    }
     if (s.screen == "menu_instant") return !ui.inTransition() ? pass() : fail("a universal menu opened through a screen transition");
     if (s.screen == "gp_p1_keyboard") {
         ui.input().setPlayer("keyboard", 0);
+        // gd03 has no touch setting yet (touch stays on): off here, so the
+        // keyboard's rows end as on a desktop (no TOUCH SCREEN section).
+        ui.input().setTouch(false);
         return pass();
     }
     if (s.screen == "gp_editing") return ui.input().editing() ? pass() : fail("Customize inputs did not start an edit");

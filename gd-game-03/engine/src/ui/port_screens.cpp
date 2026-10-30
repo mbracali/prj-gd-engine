@@ -16,6 +16,7 @@ const char* const kPortScreens = R"DTA(
    GHScreen
    gamepads_screen
    (animate_transition FALSE)
+   (port_universal_menu TRUE)
    (panels gamepads_panel helpbar)
    (focus gamepads_panel)
    (helpbar (default ((fret1 help_select) (fret2 help_back) (strum help_updown))))
@@ -25,6 +26,7 @@ const char* const kPortScreens = R"DTA(
    GHScreen
    enhanced_options_screen
    (animate_transition FALSE)
+   (port_universal_menu TRUE)
    (panels enhanced_panel helpbar)
    (focus enhanced_panel)
    (helpbar (default ((fret1 help_select) (fret2 help_back) (strum help_updown))))
