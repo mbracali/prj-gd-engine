@@ -155,12 +155,22 @@ void VenueView::selectEnv(gfx::MaterialRenderer& mr, const scene::Environ* env) 
     currentEnv_ = env;
     gfx::LightEnv le;
     if (env) le = cache_.lightEnv(*env, &world_.pose());
+    if (filling_) {
+        static constexpr float kGain[4] = {1, 1.15f, 1.3f, 1.45f}, kLift[4] = {0, 0.035f, 0.07f, 0.1f};  // none, 1.5x, 2x, 2.5x
+        const size_t ml = size_t(std::clamp(look_.moreLights, 0, 3));
+        const float gain = kGain[ml], lift = kLift[ml];
+        for (float* c : {&le.envAmbient.x, &le.envAmbient.y, &le.envAmbient.z}) *c = std::min(1.0f, *c * gain + lift);
+        currentEnv_ = nullptr;  // the next unfilled draw selects it again
+    }
     mr.setFrame(camera_, le, viewW_, viewH_);
 }
 
 void VenueView::draw(gfx::Renderer& r, int viewW, int viewH, bool hdr) {
     viewW_ = std::max(1, viewW), viewH_ = std::max(1, viewH);
     camera_.aspect = float(viewW_) / float(viewH_);
+    // TAA moves the picture by a sub-pixel each frame (Enhanced Options).
+    const std::array<float, 2> j = hdr ? r.post().jitter() : std::array<float, 2>{0, 0};
+    camera_.jitterX = j[0], camera_.jitterY = j[1];
     hdr_ = hdr;
     envSet_ = false;
     meshes_ = particles_ = 0;
@@ -170,6 +180,13 @@ void VenueView::draw(gfx::Renderer& r, int viewW, int viewH, bool hdr) {
     gfx::MaterialRenderer& mr = r.materials();
     for (const Root& root : roots_) drawObject(mr, root.object, root.env, nullptr, 0);
     particles_ = particleRenderer_->drawnParticles();
+    // The Enhanced Options' shadows, pools, beams and dust (after the list, before GH2's beams).
+    if (look_.any()) {
+        if (!lights_) lights_ = std::make_unique<gfx::EnhancedLights>(cache_.device());
+        lights_->draw(look_, feet_, camera_, hdr, timeSec_);
+    } else if (lights_) {
+        lights_->draw(look_, {}, camera_, hdr, timeSec_);  // clears its counts
+    }
     // Spotlights (cans, floor spots, beams, lenses) and flares after the list.
     spotlights_->draw(mr, camera_, viewW_, viewH_, hdr, hdr ? r.post().worldTarget() : gfx::TargetId{},
                       hdr ? r.post().worldDepth() : gfx::TextureId{});
@@ -191,7 +208,12 @@ void VenueView::drawObject(gfx::MaterialRenderer& mr, const scene::Object* o, co
             if (const scene::Object* c = g->dir ? g->dir->resolve(n) : nullptr; c && c != g) drawObject(mr, c, env, base, depth + 1);
     } else if (o->as<scene::CharacterObj>()) {
         // A band slot: its member, when the band is loaded.
+        // More Lights on Venues: a fill on the band (its Environ's ambient raised, gd01's).
+        filling_ = look_.moreLights > 0;
+        if (filling_) envSet_ = false;
         bandView_->draw(mr, o, env, camera_, hdr_, [&](const scene::Environ* e) { selectEnv(mr, e); });
+        if (filling_) envSet_ = false;
+        filling_ = false;
     } else if (auto* c = o->as<scene::WorldCrowd>()) {
         // The audience (render/crowd_view.h); GD03_CROWD=0 leaves it out.
         static const bool noCrowd = [] {

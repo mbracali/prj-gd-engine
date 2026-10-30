@@ -37,7 +37,7 @@ Only original behaviour is listed, no Enhanced items. "Unverified" means the por
 
 | Area | Missing or wrong | Backlog |
 |---|---|---|
-| Menus | Screen transitions (the metacam's meta_cam_*.tnm) and the buttons' focus growth (button.tnm) now play as on the PS2 (0.0.2; the engine drove GH2 360's trans_*.grp groups, which this disc does not have). Still to check: the UI AnimFilters (loading, store, unlock, sponsorship, character / guitar select screens), focus_jitter_interval, the ui.env ambient (reset_ambient / turn_off_ambient) and the Horse Head cheat | GD03-026, GD03-042, GD03-044, GD03-045 |
+| Menus | Screen transitions (the metacam's meta_cam_*.tnm with GHScreen's fade through black), the buttons' focus growth (button.tnm) and letter re-jitter (focus_jitter_interval), and the scripts' looping animations ((loop a b)) now play as on the PS2 (0.0.2). Still missing: the Horse Head cheat; Animate's (blend) / (delay) / (wait) options (no menu uses them) | GD03-026, GD03-042, GD03-044, GD03-045 |
 | Highway | Gem sparkle, bonus burst, the "highest penalised gem" mark | GD03-027, GD03-015 |
 | Gameplay rules | 2 of 67 rules still open | GD03-028 |
 | Tutorials / practice / career win | Tutorials 2 and 3 (wail / hammer-on / pull-off lessons, button_error sound), practice pitch correction, career-win walks: the code is in the stash (`gd03 WIP at stop 2026-10-29`), not in 0.1.7 | GD03-022..025 |

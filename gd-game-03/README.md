@@ -65,12 +65,20 @@ with MODES presets (Steam Deck, Original Feel, Clean Image, Max Out (Full HD /
 CHEATS & ENHANCERS, a scrollbar and Back / Export / Import; both open at once.
 The help bar's access buttons (SELECT, BACK, START, UP / DOWN, all
 clickable); every logo, movie and the credits skip with green, red, Enter,
-Start, a click or a tap. The visual effects of the other games are listed
-but not in this version yet (greyed); every download starts with the
-original look (Original Feel). The default controls are in
-`engine/README.md`.
+Start, a click or a tap. The visual effects are gd-game-02's: HDR (None /
+Emulated / True HDR), Bokeh, Particles, Bloom, Cinematic Color, Color
+Grading (Sepia among the looks), Film Grain, Chromatic Aberration, Ambient
+Occlusion, Sharpening, Blur on Star Power, Band Shadows, More Lights, Dust
+in Light Beams, Disable Shaky Camera and Remove All Effects, with Sharper
+Text & Sprites, FXAA / SSAA / TAA, FSR 1, touch controls, Audio / Video
+Calibration, No Fail, Autoplay and Forgiving HOPOs; they work in 4:3 and
+16:9. Every download starts with the original look (Original Feel: every
+effect off, HDR None). Still greyed: Enable Cut Content, FSR 3.1 / DLSS.
+The default controls are in `engine/README.md`.
 
 **Menu animations**: as on the PS2, each screen change moves the menus'
 shared camera out of the old screen and into the new one (half a second
-each; going back, the other way), and the focused button grows to its
-focused size over a tenth of a second.
+each; going back, the other way) while the screen fades through black, the
+focused button grows to its focused size over a tenth of a second and its
+letters jiggle, and the screens' looping animations (the character
+select's highlight, the store's spinning video case) loop.

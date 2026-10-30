@@ -22,36 +22,36 @@ class UiManager;
 // boxes and dropdowns, over a still shot of the second venue with the band
 // posed (UiHost::menuBackdrop), the focused setting's explanation in a box on
 // the right (guidelines/universal_launcher.md). Every change is saved and
-// applies at once. Settings gd03 does not have yet (the port's visual
-// effects among them) are listed greyed, "not available yet", and cannot be
-// chosen. CHEATS & ENHANCERS has the game's own cheats (the main menu's
-// button codes). Defined in the port's DTA (ui/port_screens.cpp) as
-// {new EnhancedPanel ...}; it opens on the next frame (no transition).
+// applies at once. Settings gd03 does not have yet are listed greyed, "not
+// available yet", and cannot be chosen. CHEATS & ENHANCERS has the game's
+// own cheats (the main menu's button codes, config/long_cheats.dta). Defined
+// in the port's DTA (ui/port_screens.cpp) as {new EnhancedPanel ...}; it
+// opens on the next frame (no transition).
 std::unique_ptr<ScriptObject> makeEnhancedPanel(UiManager& ui, const std::string& name);
 
-// The settings gd03 puts in effect (enhanced.json), with their values (the
-// first one the default, the original game's look, GD03-019): mouse (on /
-// off), screen_mode, internal_res (0: the window's own, else a height in
-// lines), widescreen (off: the PS2's 4:3 pillarboxed, GD03-016), max_fps
-// (60, 120, 240, unlimited), fps_counter (off / on).
+// The settings the panel lists (enhanced.json, gd01's keys), with their
+// values: a choice's, "off" / "on" for a check box, or none for a number
+// (ms) from `lo` to `hi` (the calibration's offsets). The first value is the
+// default, the original game's look (GD03-019); the Steam Deck's / Android's
+// (App's deckDefault) win over it.
 struct EnhancedSetting {
     const char* key;
     std::vector<const char*> values;
+    int lo = 0, hi = 0;
 };
 const std::vector<EnhancedSetting>& enhancedSettings();
 const EnhancedSetting* enhancedSetting(const std::string& key);
 // Whether `value` is one the setting takes.
 bool enhancedValid(const EnhancedSetting& s, const std::string& value);
 
-// Enhanced > MODES (gd01's / gd02's enhancedPreset): the values one mode
-// sets at once (steam_deck, original, clean, max_hd, max_4k, budget,
-// good_old_days), limited to the settings gd03 has (its effects are not in
-// gd03 yet, so every mode keeps them off); anything a mode leaves out keeps
-// its value. Empty for an unknown mode.
+// Enhanced > MODES (gd01's enhancedPreset): the values one mode sets at once
+// (steam_deck, original, clean, max_hd, max_4k, budget, good_old_days);
+// anything it leaves out keeps its value. Empty for an unknown mode.
 std::vector<std::pair<std::string, std::string>> enhancedPreset(const std::string& mode);
-// enhanced.json (or a user settings file) from 0.0.1: the removed XInput /
-// Rock Band switches (always on) and Ground Fog / Light Streaks (removed
-// from every game) are dropped; unknown keys and values are left for the
+// enhanced.json (or a user settings file) from 0.0.1, or gd02 0.1.7's values,
+// takes the new values (check boxes that became ranges, renamed levels); the
+// removed XInput / Rock Band switches and Ground Fog / Light Streaks are
+// dropped. Unknown values are left for the
 // validation (they fall back to the default).
 void migrateEnhanced(Json& e);
 

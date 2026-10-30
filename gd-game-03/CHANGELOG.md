@@ -29,7 +29,7 @@ original.**
   Cheats & Enhancers), each can be folded; a scrollbar; Back, Export and
   Import buttons; Max FPS Unlimited. **Export User Files**, **Load User
   Settings** and **Load User Progress** now work. Options this version does
-  not have yet (the visual effects among them) stay listed, greyed.
+  not have yet (Enable Cut Content, FSR 3.1 / DLSS) stay listed, greyed.
 - The help bar adds the buttons a screen is missing (SELECT, BACK, START on
   the band name, UP / DOWN) in the original's style; all are clickable.
 - Menu animations, as the original plays them: every screen change moves the
@@ -39,6 +39,16 @@ original.**
 - The menus' looping animations the scripts loop: the character select's
   flickering highlight and the store's spinning video case; the band name
   screen zooms to the name's length as you type.
+- The Enhanced Options' effects, as in Guitar Hero II: **HDR** (None,
+  Emulated, True HDR), Bokeh, Particles, Bloom, Cinematic Color, Color
+  Grading (Warm, Cold, Vintage, Noir, Neon, Sepia), Film Grain, Chromatic
+  Aberration, Ambient Occlusion, Sharpening, Blur on Star Power, All Band
+  Mates Cast Shadows, More Lights, Dust in Light Beams, Disable Shaky Camera
+  and Remove All Effects; Sharper Text & Sprites, Anti-Aliasing (FXAA, SSAA,
+  TAA) and FSR 1 upscaling; touch controls; Audio / Video Calibration; No
+  Fail, Autoplay and Forgiving Hammer-ons and Pull-offs. They work in 4:3
+  and 16:9; the Modes set them (Max Out turns HDR to Emulated). Every effect
+  starts off: the game looks as the original until you turn one on.
 - The focused button's letters jiggle as in the original (a new jitter every
   tenth of a second), and the menus fade through black on every animated
   screen change, as the original's screens do.

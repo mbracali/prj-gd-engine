@@ -7,6 +7,8 @@
 #include <algorithm>
 #include <cmath>
 
+#include "render/image_enhance.h"
+#include "render/texture_codec.h"
 #include "scene/milo.h"
 #include "scene/ui_objects.h"
 
@@ -388,7 +390,20 @@ TextureId SceneCache::texture(const scene::Tex* tex) {
     case scene::Bitmap::Format::RGBA8: format = TexFormat::RGBA8; break;
     default: known = false; break;
     }
-    if (known && !b.empty()) {
+    std::vector<uint8_t> sharp;
+    int sw = b.width, sh = b.height;
+    // Enhanced Options > Sharper Text and Sprites (the menus' cache): the
+    // texture decoded, upscaled (render/image_enhance.h) and mipmapped anew.
+    if (known && !b.empty() && enhance_ && format != TexFormat::BC5 && decodeToRgba8(format, b.level(0), b.levels[0].size, b.width, b.height, sharp) &&
+        enhanceImage(sharp, sw, sh)) {
+        const std::vector<std::vector<uint8_t>> mips = mipChain(sharp, sw, sh);
+        std::vector<TexLevel> levels{{sharp.data(), sharp.size()}};
+        for (const auto& m : mips) levels.push_back({m.data(), m.size()});
+        std::string error;
+        id = device_.createTexture({sw, sh, int(levels.size()), TexFormat::RGBA8, TexKind::Tex2D}, levels.data(), error);
+        if (id) ++enhancedTextures_;
+    }
+    if (!id && known && !b.empty()) {
         std::vector<TexLevel> levels;
         for (size_t i = 0; i < b.levels.size(); ++i) levels.push_back({b.level(i), b.levels[i].size});
         std::string error;

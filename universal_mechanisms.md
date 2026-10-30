@@ -29,9 +29,11 @@ walks in `tools/walks.sh`. gd-game-02 copies them: the same `input.*` and
 (`ui/panels.cpp`), and its `--walktest` walks (gamepads, gamepads_pad,
 enhanced, mouse, cheats, band, logo_skip). gd-game-03 copies gd-game-02's (its engine
 came from gd-game-02): the same `input.*`, `midi_in.*` and
-`ui/gamepad_panel.cpp`, `ui/enhanced_panel.cpp` limited to what gd-game-03
-has, the access buttons, and the walks gamepads, gamepads_pad, enhanced,
-mouse, band and logo_skip.
+`ui/gamepad_panel.cpp`, `ui/enhanced_panel.cpp` with gd-game-02's effects
+chain (`render/enhanced_fx`, `enhanced_lights`, `hdr_output`,
+`image_enhance`, the post chain's hooks) and calibration, the access
+buttons, and the walks gamepads, gamepads_pad, enhanced, mouse, band and
+logo_skip.
 
 ## 1.1 Universal behaviours
 
@@ -452,7 +454,8 @@ to be redeveloped, adapted or improved for that.
 One Enhanced option, **HDR** (`hdr`), in Performance & graphics after Show
 FPS Counter; no other HDR settings (no sliders: paper white and headroom
 come from the system). Every game copies it (gd-game-01 1.1.7, gd-game-02
-0.1.8 first; gd-game-03 and later port it from gd-game-02).
+0.1.8 first; gd-game-03 0.0.2 ported it from gd-game-02; later games port it
+from gd-game-02).
 
 | Value | Behaviour |
 |---|---|
@@ -539,14 +542,16 @@ unrelated and stay.)
   Guitar Hero Encore's menus, font and colours. Two players (3 and 4
   unavailable); the Instrument dropdown offers 5 Fret Guitar, Gamepad and
   Generic MIDI; a pad's Controller Type row is kept, as in gd-game-02.
-- The Enhanced menu lists every option of the table, in its order, but
-  gd-game-03 does not have the visual effects, touch, calibration, Sharper
-  Text, anti-aliasing or upscaling yet: those rows are greyed ("not
-  available yet"), and the Modes set only what gd-game-03 has (Original
-  Feel: effects off + 60 FPS; the window, resolution and aspect kept).
-  Kept from gd-game-03's own menu: **Widescreen (16:9)** after Resolution
-  (4:3 is the default, as on the PS2), Color Grading, Sharpening and Disable
-  Shaky Camera (greyed). Ground Fog and Light Streaks are not there.
+- The Enhanced menu lists every option of the table, in its order, with
+  gd-game-02's effects ported (GD03-043 / GD03-047): touch, calibration,
+  Sharper Text, anti-aliasing, FSR 1, HDR, the visual effects, the venue
+  extras, Remove All Effects, No Fail, Autoplay and Forgiving HOPOs; the
+  Modes set them as gd-game-02's do. Every effect is off by default (Bokeh
+  Medium and Particles Original are the game's own), HDR None; the effects
+  work in 4:3 and 16:9. Still greyed: Enable Cut Content, FSR 3.1 / DLSS
+  (gd-game-01's Vulkan upscaler) and the Flaming Head cheat. Kept from
+  gd-game-03's own menu: **Widescreen (16:9)** after Resolution (4:3 is the
+  default, as on the PS2). Ground Fog and Light Streaks are not there.
 - The port's universal menus open without a transition (also skipping the
   old screen's exit); the game's own screens without a transition still
   see the old screen's exit, as on the PS2 (gd-game-03 marks its universal

@@ -84,9 +84,13 @@ target_sources(gd03 PRIVATE
   src/render/gl_api.cpp
   src/render/gl_device.cpp
   src/render/highway.cpp
+  src/render/image_enhance.cpp
   src/render/hud_view.cpp
   src/render/material.cpp
   src/render/particles.cpp
+  src/render/enhanced_fx.cpp
+  src/render/hdr_output.cpp
+  src/render/enhanced_lights.cpp
   src/render/post_fx.cpp
   src/render/renderer.cpp
   src/render/scene_gpu.cpp

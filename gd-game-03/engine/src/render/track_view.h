@@ -87,6 +87,11 @@ public:
     const std::string& surfaceName() const { return surfaceName_; }
     // Since reset: frames whose surface drew with that texture.
     int surfaceOverrides() const { return surfaceOverrides_; }
+    // Where each lane was on the screen in the last frame drawn (menu units,
+    // 1280 x 720): at the strike line and at the track's far end, for the
+    // touch controls (input/input.h TouchLanes). False before a frame or
+    // while the track is hidden.
+    bool lanes(std::array<float, 5>& nearX, std::array<float, 5>& nearY, std::array<float, 5>& farX, std::array<float, 5>& farY) const;
 
 private:
     // A smash view's copy for one slot (0x8269C968): normal, star or bonus.
@@ -168,6 +173,8 @@ private:
     // track_graphics.dtb values.
     float yPerSecond_ = 60, bottomY_ = -10, horizonY_ = 120, removeY_ = -15;
     float nowbarTailClip_ = 1.5f;
+    std::array<float, 20> lanes_{};  // lanes(): near x / y, far x / y per slot
+    bool lanesSet_ = false;
     float tailGlowWidth_ = 1.5f, tailGlowTightWidth_ = 0.7f;
     float gemFps_ = 30;
     std::array<float, 5> slotX_{-8, -4, 0, 4, 8};  // (slot - 2) x 4 (0x00152530)

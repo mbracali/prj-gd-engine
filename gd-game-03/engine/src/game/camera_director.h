@@ -74,6 +74,9 @@ public:
 
     // What the band would answer (M9): player 0's Star Power.
     void setStarPower(bool on) { starPower_ = on; }
+    // The shots' camera shake shown (Enhanced Options > Disable Shaky Camera turns it off).
+    void setShake(bool on) { shake_ = on; }
+    bool shake() const { return shake_; }
     bool starPower() const { return starPower_; }
 
     // Once a frame after World::update: plays the current shot.
@@ -167,6 +170,7 @@ private:
     bool hasCamera_ = false;
     Dof dof_;
     bool starPower_ = false;
+    bool shake_ = true;
     bool pickEnabled_ = true, freeCam_ = false;
     std::vector<const scene::CamShot*> sequence_;
     double nearestBeat_ = -1e30;               // cam_check_shot's nearest walk spot, once per beat
