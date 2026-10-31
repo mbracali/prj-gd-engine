@@ -70,6 +70,7 @@ VenueView::VenueView(World& world, gfx::SceneCache& cache) : world_(world), cach
     spotlights_ = std::make_unique<gfx::SpotlightView>(world, cache);
     crowdView_ = std::make_unique<CrowdView>(world, cache);
     bandView_ = std::make_unique<BandView>(world, cache);
+    spotlights_->setBandView(bandView_.get());
     build();
     setShot(world_.firstShot());
 }
@@ -96,12 +97,12 @@ void VenueView::build() {
     for (size_t i = 0; i < particleSet_.systems().size(); ++i) systemIndex_[&particleSet_.systems()[i].def()] = i;
 }
 
-bool venueObjectXfm(const World& world, const std::string& name, bool multiplayer, scene::Xfm& out) {
+bool venueObjectXfm(const World& world, const std::string& name, bool multiplayer, scene::Xfm& out, const std::string& subpart) {
     static const std::pair<const char*, uint32_t> kSlots[] = {{"guitarist0", 1},  {"guitarist1", 2}, {"singer", 4},
                                                               {"keyboard", 8},    {"bassist", 16},   {"drummer", 32}};
     const Venue& v = world.venue();
     // The band, when loaded: the member itself (game/band.h).
-    if (world.band && world.band->objectXfm(name, "", out)) return true;
+    if (world.band && world.band->objectXfm(name, subpart, out)) return true;
     for (const auto& [slot, flag] : kSlots) {
         if (name != slot) continue;
         const uint32_t want = multiplayer && flag == 1 ? 512u : flag;

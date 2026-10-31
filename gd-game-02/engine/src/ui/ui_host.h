@@ -128,6 +128,8 @@ public:
     virtual int gameCounter(int player, const std::string& key) const = 0;
     // beatmatch set_music_speed / set_paused (the failed song winding down).
     virtual void setMusicSpeed(float speed) = 0;
+    // options set_mute_fx: the game sounds silent (the tutorials' muting).
+    virtual void setMuteFx(bool /*mute*/) {}
     // The tutorials' player switches (set_whammystarpowerenabled /
     // set_mercuryswitchenabled) on the song's player `index`.
     virtual void setPlayerSwitch(int index, const std::string& name, bool on) = 0;

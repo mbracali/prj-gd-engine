@@ -562,8 +562,9 @@ public:
         if (msg == "get_volume_from_idx") return r = Value::real(db(intArg(args, 0, 11))), true;
         if (msg == "get_band_volume") return r = Value::real(db(o.bandVolumeIdx)), true;
         if (msg == "get_guitar_volume") return r = Value::real(db(o.guitarVolumeIdx)), true;
-        if (msg == "get_fx_volume") return r = Value::real(db(o.fxVolumeIdx)), true;
-        if (msg == "set_mute_fx") return true;
+        // set_mute_fx (the tutorials): the flag get_fx_volume answers -96 dB for (0x822B0F08) [C].
+        if (msg == "get_fx_volume") return r = Value::real(muteFx_ ? -96.0f : db(o.fxVolumeIdx)), true;
+        if (msg == "set_mute_fx") return muteFx_ = !args.empty() && args[0].truthy(), ui_.host().setMuteFx(muteFx_), true;
         return false;
     }
     void changed() {
@@ -573,6 +574,7 @@ public:
 
 private:
     UiManager& ui_;
+    bool muteFx_ = false;  // +0x34
 };
 
 // highscores: the current song's table at player 0's difficulty.

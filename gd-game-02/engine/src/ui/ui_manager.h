@@ -60,6 +60,9 @@ enum Pad {
 // native objects the scripts call (game, gamecfg, campaign, song_provider,
 // memcard, profilemgr, options...). The song itself stays in app.cpp,
 // reached through UiHost.
+// The game's language: eng fre deu ita esl.
+std::string systemLanguage();
+
 class UiManager {
 public:
     UiManager(const GameData& data, Canvas& canvas, UiHost& host, Input& input);

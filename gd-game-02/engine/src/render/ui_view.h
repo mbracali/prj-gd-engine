@@ -61,6 +61,8 @@ public:
 
     // Replaces a label's / button's string (empty: its own).
     void setText(const std::string& component, const std::string& text);
+    // UILabel set_wrap_width (0x8214B118): the label's Text wraps at this width.
+    void setWrapWidth(const std::string& component, float width);
     bool hasText(const std::string& component) const { return overrides_.count(component) != 0; }
     // The string a label shows now (its override, else its localized token / text).
     std::string text(const std::string& component) const;
@@ -222,6 +224,7 @@ private:
     scene::Milo* milo_ = nullptr;
     std::vector<scene::Milo*> subdirs_;
     std::map<std::string, std::string> overrides_;
+    std::map<std::string, float> wrapWidths_;  // set_wrap_width
     std::string focus_;
     std::map<std::string, scene::UiState> states_;
     std::map<std::string, bool> checks_;

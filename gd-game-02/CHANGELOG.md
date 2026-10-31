@@ -15,6 +15,10 @@ matches the tag's version. Nothing is released yet.
 - The track wears your character's own surface picture, and rosewood in
   practice and the tutorials, as on the Xbox 360.
 - The "blew a big note" crowd sound.
+- The tutorials: all three, with their narration, the tuner and the hammer-on
+  and pull-off trainer, in the five languages of the disc. The game now
+  follows your system's language (English, French, German, Italian or
+  Spanish), as the original follows the console's.
 
 ## [0.1.9] - 2026-10-30
 

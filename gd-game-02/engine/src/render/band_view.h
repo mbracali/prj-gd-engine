@@ -39,6 +39,10 @@ public:
               bool hdr, const std::function<void(const scene::Environ*)>& selectEnv);
     // One character on its own (the --view character viewer).
     void drawCharacter(gfx::MaterialRenderer& mr, chr::Character& c, const gfx::Camera& camera, bool hdr);
+    // Character::DrawShadow (0x82151B98): the shadow group's meshes, every
+    // bone flattened along `dir` onto the plane 1.5 above the character
+    // (0x8222EE58): the light's y axis, a parallel projection.
+    void drawShadow(gfx::MaterialRenderer& mr, chr::Character& c, const std::array<float, 3>& dir, bool hdr);
 
     // The meshes Character::DrawShowing draws now (its LOD, showing flags,
     // no shadow group), in draw order; `pose`: the world's showing.
@@ -53,7 +57,11 @@ public:
 
 private:
     void drawMesh(gfx::MaterialRenderer& mr, chr::Character& c, const scene::Mesh& m);
+    scene::Xfm flattened(scene::Xfm x) const;
 
+    bool flatten_ = false;  // drawShadow: bones pushed onto z = flatZ_ along flatDir_
+    std::array<float, 3> flatDir_{};
+    float flatZ_ = 0;
     World* world_ = nullptr;
     gfx::SceneCache& cache_;
     std::unique_ptr<gfx::DynamicMesh> dynamic_;

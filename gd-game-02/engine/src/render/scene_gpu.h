@@ -57,7 +57,9 @@ public:
     scene::Xfm local(const scene::Object* o) const;
     // Local transforms composed up the parent chain (parents resolved in the
     // object's directory; a directory itself counts as the identity).
-    scene::Xfm world(const scene::Object* o) const;
+    scene::Xfm world(const scene::Object* o) const { return world(o, local(o)); }
+    // The world transform with `local` in place of the object's local one.
+    scene::Xfm world(const scene::Object* o, const scene::Xfm& local) const;
 
     const MatState* mat(const scene::Mat* m) const;
     MatState& matState(const scene::Mat* m) { return mats_[m]; }

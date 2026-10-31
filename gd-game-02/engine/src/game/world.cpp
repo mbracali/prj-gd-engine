@@ -829,7 +829,7 @@ void World::applyPreset(const scene::LightPreset& p, size_t k) {
     for (size_t i = 0; i < p.spotlights.size() && i < kf.spots.size(); ++i)
         if (auto* s = venue_.find<scene::Spotlight>(p.spotlights[i]); s && s->animateFromPreset) {
             const auto& e = kf.spots[i];
-            spots_[s] = {e.intensity, e.color, e.rotation, e.target, e.flare};
+            spots_[s] = {e.intensity, e.color, e.rotation, e.target, e.subpart, e.flare};
         }
     for (size_t i = 0; i < p.environs.size() && i < kf.environs.size(); ++i)
         if (auto* env = venue_.find<scene::Environ>(p.environs[i]); env && env->animateFromPreset) {

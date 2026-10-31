@@ -502,6 +502,8 @@ private:
         if (vo_ != Vo::None) ui.logOnce("tutorial: voice over " + voName_ + " replaced before it played by " + name);
         ui.host().stopVoice();
         vo_ = Vo::Loading, voName_ = name, voPath_ = dir_ + "/" + file + ".mogg";
+        // The file layer puts the language in every path's /eng/ (0x82276048) [C].
+        if (const size_t at = voPath_.find("/eng/"); at != std::string::npos) voPath_.replace(at + 1, 3, ui.interp().language);
     }
     // 0x0014cc80: a loading stream starts, a finished one is freed.
     void voPoll() {

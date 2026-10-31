@@ -127,8 +127,8 @@ scene::Xfm ScenePose::local(const scene::Object* o) const {
     return t ? t->local : scene::Xfm{};
 }
 
-scene::Xfm ScenePose::world(const scene::Object* o) const {
-    scene::Xfm x = local(o);
+scene::Xfm ScenePose::world(const scene::Object* o, const scene::Xfm& own) const {
+    scene::Xfm x = own;
     const scene::Object* cur = o;
     for (int depth = 0; depth < 32; ++depth) {
         const scene::Trans* t = transOf(cur);

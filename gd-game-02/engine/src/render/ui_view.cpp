@@ -215,6 +215,11 @@ void UiView::setText(const std::string& component, const std::string& text) {
     overrides_[component] = text;
 }
 
+void UiView::setWrapWidth(const std::string& component, float width) {
+    wrapWidths_[component] = width;
+    labels_.clear();
+}
+
 std::string UiView::labelString(const scene::UILabel& l) const {
     if (auto it = overrides_.find(l.name); it != overrides_.end()) return it->second;
     if (l.localize) return l.textToken.empty() ? std::string() : locale_.text(l.textToken);
@@ -520,6 +525,7 @@ void UiView::drawLabel(MaterialRenderer& r, const scene::UILabel& l, const scene
             st.size = tmpl->size, st.leading = tmpl->leading, st.wrapWidth = tmpl->wrapWidth;
             st.align = tmpl->align, st.capsMode = tmpl->capsMode;
         }
+        if (auto w = wrapWidths_.find(l.name); w != wrapWidths_.end()) st.wrapWidth = w->second;
         lt->layout = layoutText(&fm, str, st);
         if (band) {
             jitterText(lt->layout, band->jitterSeed, band->deltaX, band->deltaZ, band->deltaRot);

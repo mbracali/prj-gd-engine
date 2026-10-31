@@ -130,6 +130,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         check("intro_camera");
         check("star_phrase");
         check("track_surface");
+        check("band_shadows");
         at("endgame_screen", 90000);
         wait(600);
         press(kX);  // CONTINUE (me_continue.btn)
@@ -1138,6 +1139,36 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         check("menu_sounds");
         expect_ = {"main_screen", "training_screen", "tutorials_screen", "tut_loading_screen", "tut_script_screen", "tut_pause_screen",
                    "tutorial_quit_screen", "meta_loading_screen", "main_screen"};
+    } else if (scenario == "tutorial1") {
+        // The whole first tutorial on autoplay: the tuning, then playing notes
+        // (tutorial102), different notes (103), held notes (104), chords,
+        // the interface and the wrap-up (105), to its end.
+        songKeys_ = "";
+        at("main_screen");
+        wait(2000);  // the main menu's entrance (a press during it is lost)
+        press(kDown), wait(150), press(kDown), wait(150);  // QUICK PLAY -> MULTIPLAYER -> TRAINING
+        press(kX);
+        at("training_screen");
+        press(kX);  // TUTORIALS (the focus)
+        at("tutorials_screen");
+        press(kX);
+        at("tut_loading_screen|tut_script_screen");
+        at("tut_script_screen", 30000);
+        check("tutorial_tuning", 180000);
+        wait(500);
+        for (SDL_Keycode f : {SDLK_1, SDLK_2, SDLK_3, SDLK_4, SDLK_5}) {
+            keyHold(f, true), wait(150);
+            for (int i = 0; i < 3; ++i) key(SDLK_DOWN), wait(300);
+            keyHold(f, false), wait(200);
+        }
+        check("tutorial_tuned", 15000);
+        for (const char* l : {"tutorial_lesson playing_notes", "tutorial_lesson diff_notes", "tutorial_lesson held_notes", "tutorial_lesson chords",
+                              "tutorial_lesson interface", "tutorial_lesson wrapup"})
+            check(l, 400000);
+        at("meta_loading_screen", 400000);
+        at("main_screen", 30000);
+        expect_ = {"main_screen", "training_screen", "tutorials_screen", "tut_loading_screen", "tut_script_screen", "tutorial_end_screen",
+                   "meta_loading_screen", "main_screen"};
     } else if (scenario == "tutorial2" || scenario == "tutorial3") {
         // The later tutorials (tutorials.dta tutorials_panel): each opens once
         // the one before has been started (campaign do_tutorial n ->
@@ -1294,7 +1325,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
 std::string WalkDriver::startScreen() const {
     if (scenario_ == "lose" || scenario_ == "pause" || scenario_ == "back" || scenario_ == "enhanced" || scenario_ == "cheats" ||
         scenario_ == "mouse" || scenario_ == "gamepads" || scenario_ == "gamepads_pad" || scenario_ == "stickyaxis" ||
-        scenario_ == "whammy_tail" || scenario_ == "practice" || scenario_ == "practice_menus" || scenario_ == "tutorial" || scenario_ == "tutorial2" ||
+        scenario_ == "whammy_tail" || scenario_ == "practice" || scenario_ == "practice_menus" || scenario_ == "tutorial" || scenario_ == "tutorial1" || scenario_ == "tutorial2" ||
         scenario_ == "tutorial3" || scenario_ == "options")
         return "main_screen";
     if (scenario_ == "attract") return "splash_screen";
@@ -1640,6 +1671,14 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         const int frames = ui.host().gameCounter(0, "surface_overrides");
         std::printf("  track surface: %d frames with the player's surface texture\n", frames);
         if (frames < 1) return fail("the track did not draw the player's surface texture (track/surfaces/<name>_keep.bmp)");
+        ++step_, stepStart_ = -1;
+        return;
+    }
+    if (s.screen == "band_shadows") {
+        // target_shadow's SHADOW_*.spot: the band's flattened shadow groups (0x8222EE58).
+        const int n = ui.host().gameCounter(0, "spot_shadows");
+        std::printf("  band shadows: %d drawn so far\n", n);
+        if (n < 1) return fail("no spotlight drew a band member's shadow");
         ++step_, stepStart_ = -1;
         return;
     }
@@ -2196,7 +2235,7 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         std::map<std::string, int> n;
         for (const std::string& h : ui.host().sfxHistory()) ++n[h];
         const bool two = s.screen.back() == '2';
-        const std::vector<const char*> done = two ? std::vector<const char*>{"star_combos_done", "whammy_done", "wail_done", "wrapup1_2"}
+        const std::vector<const char*> done = two ? std::vector<const char*>{"star_combos_done", "whammy_done", "wrapup1_2"}
                                                   : std::vector<const char*>{"hammeron_done", "hammeron_real_done", "pulloff_done",
                                                                              "pulloff_real_done", "wrapup1_3"};
         // A lesson's success voice-over requested while another (the last

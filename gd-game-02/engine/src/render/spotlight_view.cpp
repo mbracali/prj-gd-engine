@@ -9,7 +9,10 @@
 #include <cstring>
 #include <map>
 
+#include "char/character.h"
+#include "game/band.h"
 #include "game/world.h"
+#include "render/band_view.h"
 #include "render/venue_view.h"
 #include "scene/anim.h"
 #include "scene/world_objects.h"
@@ -261,48 +264,70 @@ void SpotlightView::draw(MaterialRenderer& mr, const Camera& camera, int viewW, 
         const scene::Environ* env;
     };
     std::vector<Can> cans;
+    struct Shadow {
+        std::string target;
+        Vec3 dir;
+    };
+    std::vector<Shadow> shadows;
     const auto& states = world_.spots();
     for (const scene::Spotlight* s : venue.all<scene::Spotlight>()) {
         if (!s->decoded || !pose.showing(s)) continue;
         // The preset's state over the object's own.
         float intensity = s->intensity;
         std::array<float, 4> color = s->color;
-        std::string target = s->target;
+        std::string target = s->target, subpart;
         bool flareOn = s->flareEnabled;
         scene::Xfm x = pose.world(s);
         if (auto it = states.find(s); it != states.end()) {
             intensity = it->second.intensity, color = it->second.color;
-            target = it->second.target;
+            target = it->second.target, subpart = it->second.subpart;
             flareOn = flareOn && it->second.flare;
-            if (it->second.rotation != std::array<float, 4>{}) scene::quatToRot(it->second.rotation, x.rot);
+            // The poll (0x82233250): the preset's quaternion is the LOCAL rotation.
+            if (it->second.rotation != std::array<float, 4>{}) {
+                scene::Xfm lx = pose.local(s);
+                scene::quatToRot(it->second.rotation, lx.rot);
+                x = pose.world(s, lx);
+            }
         }
+        // 0x822328E8: queued when intensity x green or x blue reads as a
+        // byte (the code tests green twice, not red) [C].
+        if ((int(intensity * color[1] * 255.0f) & 0xff) == 0 && (int(intensity * color[2] * 255.0f) & 0xff) == 0) continue;
         const float k = intensity * s->beam.brighten;
         const float rgb[3] = {color[0] * k, color[1] * k, color[2] * k};
-        if (rgb[0] <= 0.002f && rgb[1] <= 0.002f && rgb[2] <= 0.002f) continue;  // 0x822328E8: unlit, not drawn
+        const float lit[3] = {color[0] * intensity, color[1] * intensity, color[2] * intensity};
         ++spots_;
         const Vec3 pos = v3(x.pos);
         Vec3 right{x.rot[0], x.rot[1], x.rot[2]}, fwd{x.rot[3], x.rot[4], x.rot[5]}, up{x.rot[6], x.rot[7], x.rot[8]};
-        // A target turns the light's -z onto it (Spotlight target).
+        // The light shines along its y row [C: the can, beam, lens and flare
+        // offsets, 0x82231AF0, and the aim]. A target turns it there (0x82231610:
+        // y = target - position, z from y x (1 0 0)); a target its entry
+        // names that is not in the venue leaves the spotlight off (0x8223ADE8
+        // clears the flag, 0x82232698 clears +0x1ec, 0x822328E8 skips it).
+        scene::Xfm rootXfm;
+        bool targeted = false;
         if (!target.empty()) {
             scene::Xfm tx;
-            if (venueObjectXfm(world_, target, mp, tx)) {
-                Vec3 tp = v3(tx.pos);
-                if (const scene::Object* o = venue.find(target); !o || o->cls == "Character" || o->cls == "BandCharacter") tp.z += 35;
-                const Vec3 d = tp - pos;
-                if (dot(d, d) > 1) {
-                    up = normalize(d) * -1.0f;
-                    right = cross(Vec3{0, 1, 0}, up);
-                    if (dot(right, right) < 1e-6f) right = Vec3{1, 0, 0};
-                    right = normalize(right);
-                    fwd = cross(up, right);
-                }
+            if (!venueObjectXfm(world_, target, mp, tx, subpart)) continue;
+            venueObjectXfm(world_, target, mp, rootXfm);
+            targeted = true;
+            const Vec3 d = v3(tx.pos) - pos;
+            if (dot(d, d) > 1e-4f) {
+                fwd = normalize(d);
+                Vec3 n = cross(d, Vec3{1, 0, 0});
+                if (dot(n, n) < 1e-6f) n = Vec3{0, 0, 1};
+                right = normalize(cross(fwd, normalize(n)));
+                up = normalize(cross(right, fwd));
+                x.rot = {right.x, right.y, right.z, fwd.x, fwd.y, fwd.z, up.x, up.y, up.z};
             }
         }
-        Vec3 dir = up * -1.0f;
-        // angle_offset (degrees) tilts the beam about the light's x and y [I].
+        Vec3 dir = fwd;
+        // target_shadow (0x822312C8, drawn first by 0x8222EE58): the target
+        // character's shadow group flattened along the light (Character 0x82151B98).
+        if (targeted && s->targetShadow) shadows.push_back({target, dir});
+        // angle_offset (degrees) tilts the beam about the light's x and z [I].
         if (s->beam.angleOffset[0] != 0 || s->beam.angleOffset[1] != 0) {
             const float ax = s->beam.angleOffset[0] * kPi / 180, ay = s->beam.angleOffset[1] * kPi / 180;
-            dir = normalize(dir * std::cos(ax) + fwd * std::sin(ax));
+            dir = normalize(dir * std::cos(ax) + up * std::sin(ax));
             dir = normalize(dir * std::cos(ay) + right * std::sin(ay));
         }
         // The light can.
@@ -355,38 +380,43 @@ void SpotlightView::draw(MaterialRenderer& mr, const Camera& camera, int viewW, 
                     }
                 }
             }
-        // The floor spot where the beam meets z = spot_height.
-        if (const scene::Mat* sm = on('f') ? findMat(*s, s->spotMaterial) : nullptr; sm && dir.z < -0.05f && s->spotScale > 0) {
-            const float t = (s->spotHeight - pos.z) / dir.z;
-            if (t > 0 && t < 5000) {
-                const Vec3 c = pos + dir * t;
+        // The floor spot (0x82231AF0, its mesh 0x82235488: a unit quad, uv 0..1):
+        // only with a target and spot_material, where the light's y axis
+        // meets z = the target's z + spot_height, spot_scale wide across and
+        // spot_scale x |d| / |d.z| long along the light's heading.
+        if (const scene::Mat* sm = on('f') && targeted ? findMat(*s, s->spotMaterial) : nullptr; sm) {
+            const Vec3 d = v3(rootXfm.pos) - pos;
+            if (d.z != 0 && fwd.z != 0) {
+                const float t = (rootXfm.pos[2] + s->spotHeight - pos.z) / fwd.z;
+                const Vec3 c = pos + fwd * t;
+                Vec3 along{fwd.x, fwd.y, 0};
+                if (dot(along, along) < 1e-8f) along = Vec3{0, 1, 0};
+                along = normalize(along);
+                const Vec3 across = normalize(cross(along, Vec3{0, 0, 1}));
+                const float hw = s->spotScale * 0.5f, hl = hw * std::sqrt(dot(d, d)) / std::fabs(d.z);
                 Batch& bt = batch(sm);
                 const uint16_t base = uint16_t(bt.verts.size() / 16);
-                const float r = s->spotScale;
-                const float col[4] = {rgb[0], rgb[1], rgb[2], 1};
-                vertex(bt.verts, c + Vec3{-r, -r, 0}, col, 0, 0);
-                vertex(bt.verts, c + Vec3{r, -r, 0}, col, 1, 0);
-                vertex(bt.verts, c + Vec3{r, r, 0}, col, 1, 1);
-                vertex(bt.verts, c + Vec3{-r, r, 0}, col, 0, 1);
-                quadIdx(bt, base, uint16_t(base + 1), uint16_t(base + 2), uint16_t(base + 3));
+                const float col[4] = {lit[0], lit[1], lit[2], 1};
+                vertex(bt.verts, c + across * -hw + along * -hl, col, 0, 0);
+                vertex(bt.verts, c + across * hw + along * -hl, col, 1, 0);
+                vertex(bt.verts, c + across * -hw + along * hl, col, 0, 1);
+                vertex(bt.verts, c + across * hw + along * hl, col, 1, 1);
+                quadIdx(bt, base, uint16_t(base + 1), uint16_t(base + 3), uint16_t(base + 2));
             }
         }
-        // The lens: a disc across the beam at lens_offset.
+        // The lens (lens_material, 0x82231AF0): the unit quad lens_size wide
+        // at lens_offset along the light, square to it.
         if (const scene::Mat* lm = on('l') ? findMat(*s, s->lensMaterial) : nullptr; lm && s->lensSize > 0) {
-            const Vec3 c = pos + dir * s->lensOffset;
-            const Vec3 toCam = normalize(camPos - c);
-            const float face = std::clamp(dot(dir, toCam), 0.0f, 1.0f);
-            if (face > 0.01f) {
-                Batch& bt = batch(lm);
-                const uint16_t base = uint16_t(bt.verts.size() / 16);
-                const float r = s->lensSize;
-                const float col[4] = {rgb[0] * face, rgb[1] * face, rgb[2] * face, face};
-                vertex(bt.verts, c + (right * -r) + (fwd * -r), col, 0, 0);
-                vertex(bt.verts, c + (right * r) + (fwd * -r), col, 1, 0);
-                vertex(bt.verts, c + (right * r) + (fwd * r), col, 1, 1);
-                vertex(bt.verts, c + (right * -r) + (fwd * r), col, 0, 1);
-                quadIdx(bt, base, uint16_t(base + 1), uint16_t(base + 2), uint16_t(base + 3));
-            }
+            const Vec3 c = pos + fwd * s->lensOffset;
+            Batch& bt = batch(lm);
+            const uint16_t base = uint16_t(bt.verts.size() / 16);
+            const float r = s->lensSize * 0.5f;
+            const float col[4] = {lit[0], lit[1], lit[2], 1};
+            vertex(bt.verts, c + (right * -r) + (up * -r), col, 0, 0);
+            vertex(bt.verts, c + (right * r) + (up * -r), col, 1, 0);
+            vertex(bt.verts, c + (right * r) + (up * r), col, 1, 1);
+            vertex(bt.verts, c + (right * -r) + (up * r), col, 0, 1);
+            quadIdx(bt, base, uint16_t(base + 1), uint16_t(base + 2), uint16_t(base + 3));
         }
         // The flare.
         if (flareOn && on('F'))
@@ -472,6 +502,17 @@ void SpotlightView::draw(MaterialRenderer& mr, const Camera& camera, int viewW, 
     LightEnv plain;
     plain.ambient = {1, 1, 1};
     mr.setFrame(camera, plain, viewW, viewH);
+    // SpotlightDrawer's draw (0x8222EC40) starts with the shadows (0x8222EE58).
+    // shadow.mat adds black and writes depth, so the flattened character,
+    // just above the floor, shuts the floor spots out of its shape: the
+    // shadow is a hole in the pool of light [C for the order, I for the reading].
+    shadowsDrawn_ = 0;
+    if (bandView_ && world_.band)
+        for (const Shadow& sh : shadows)
+            if (chr::Character* c = world_.band->character(sh.target); c && c->visible && sh.dir.z != 0) {
+                bandView_->drawShadow(mr, *c, {sh.dir.x, sh.dir.y, sh.dir.z}, hdr);
+                ++shadowsDrawn_, ++shadowsTotal_;
+            }
     const Mat4 identity[1] = {Mat4::identity()};
     for (auto& [m, b] : batches) {
         if (b.idx.empty()) continue;

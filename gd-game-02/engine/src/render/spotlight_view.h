@@ -10,6 +10,7 @@
 #include "render/device.h"
 #include "render/scene_gpu.h"
 
+class BandView;
 class World;
 
 namespace gfx {
@@ -58,6 +59,11 @@ public:
     // PostFx, empty without post-processing).
     void draw(MaterialRenderer& mr, const Camera& camera, int viewW, int viewH, bool hdr, TargetId worldTarget, TextureId worldDepth);
 
+    // The band's characters, for target_shadow's shadows.
+    void setBandView(BandView* v) { bandView_ = v; }
+    int shadowsDrawn() const { return shadowsDrawn_; }
+    int shadowsTotal() const { return shadowsTotal_; }  // since the venue's load
+
     int beamsDrawn() const { return beams_; }
     int flaresDrawn() const { return flares_; }
     int spotsDrawn() const { return spots_; }
@@ -66,6 +72,8 @@ public:
     static std::vector<ProgramDesc> allPrograms();
 
 private:
+    BandView* bandView_ = nullptr;
+    int shadowsDrawn_ = 0, shadowsTotal_ = 0;
     struct Flare {
         Vec3 pos;
         float size = 0.1f;   // fraction of the picture's width

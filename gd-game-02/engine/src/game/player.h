@@ -29,6 +29,7 @@ struct PlayerEvent {
     Kind kind;
     int gem;  // gem index, or -1
     float value = 0;
+    int slot = -1;  // Miss: the fret the player played (gem_miss_callback's $slot_hit)
 };
 
 // What the HUD shows of a performer (a player or the co-op band).
@@ -200,6 +201,7 @@ private:
     void ownCrowdUpdate(float target, float t);
     bool inPractice(int gem) const;
     bool whammyStarPowerEnabled_ = true, mercuryEnabled_ = true;
+    int missSlot_ = -1;
     void bigNoteCheck(int gem);
     std::vector<int> bigNotes_;
     size_t nextBigNote_ = 0;

@@ -331,7 +331,7 @@ void Player::watcherHit(float t, int slot, int gem, bool hopo) {
 // passed last (+0x4c), and the last gem of the list when that leaves none
 // (-1). Then the player is told.
 void Player::watcherMiss(float t, int slot, int gem) {
-    (void)slot;
+    missSlot_ = slot;
     endSustain(t, false);
     if (!(lastOverstrumMs_ + rules_.overstrumGapMs < t)) return;
     lastOverstrumMs_ = t;
@@ -495,7 +495,10 @@ void Player::playerHit(float t, int gem) {
 void Player::playerMiss(float t, int gem) {
     if (gem >= 0 && !inPractice(gem)) return;
     penalise(t, gem);
-    emit(PlayerEvent::Kind::Miss, gem);
+    // gem_miss_callback's $timing_error: how far the gem is, in ms [I: an
+    // argument the decompile of 0x822E2B10 lost; the lessons compare it with 500].
+    emit(PlayerEvent::Kind::Miss, gem, gem >= 0 ? std::fabs(t - chart_.gems[size_t(gem)].ms) : 0.0f);
+    if (!events_.empty()) events_.back().slot = missSlot_;
 }
 
 // Pass 0x822c9498 [C]: counts the pass and penalises only when the gem was

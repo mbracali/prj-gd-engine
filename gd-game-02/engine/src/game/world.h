@@ -180,7 +180,7 @@ public:
         float intensity = 0;
         std::array<float, 4> color{};
         std::array<float, 4> rotation{};
-        std::string target;
+        std::string target, subpart;
         bool flare = false;
     };
     const std::unordered_map<const scene::Spotlight*, SpotState>& spots() const { return spots_; }

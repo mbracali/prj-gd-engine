@@ -28,6 +28,27 @@
 
 namespace ui {
 
+// The game's language (0x82271390): the console's, one of eng fre deu ita
+// esl (0x82275468; anything else eng) [C]. The port takes the system's first
+// preferred language in its place [I]; GD02_LANGUAGE=eng|fre|deu|ita|esl forces it.
+std::string systemLanguage() {
+    const auto& known = scene::Locale::languages();
+    if (const char* l = SDL_getenv("GD02_LANGUAGE"); l && std::find(known.begin(), known.end(), l) != known.end()) return l;
+    int count = 0;
+    std::string lang = "eng";
+    if (SDL_Locale** locales = SDL_GetPreferredLocales(&count)) {
+        if (count > 0 && locales[0] && locales[0]->language) {
+            const std::string code = locales[0]->language;
+            if (code == "fr") lang = "fre";
+            else if (code == "de") lang = "deu";
+            else if (code == "it") lang = "ita";
+            else if (code == "es") lang = "esl";
+        }
+        SDL_free(locales);
+    }
+    return lang;
+}
+
 namespace {
 
 bool isDirection(int b) { return b == kPad_DUp || b == kPad_DDown || b == kPad_DLeft || b == kPad_DRight; }
@@ -118,7 +139,7 @@ bool UiManager::init(std::string& error, bool headless) {
         styles_ = std::make_unique<scene::UiStyles>();
         styles_->load(data_);
         locale_ = std::make_unique<scene::Locale>();
-        locale_->load(data_, "eng");
+        locale_->load(data_, systemLanguage());
         if (!headless_) {
             cache_ = std::make_unique<gfx::SceneCache>(canvas_.renderer().device());
             text_ = std::make_unique<ScreenText>(data_, *library_, *cache_);
@@ -128,7 +149,7 @@ bool UiManager::init(std::string& error, bool headless) {
         return false;
     }
     interp_.locale = locale_->strings();
-    interp_.language = "eng";
+    interp_.language = systemLanguage();
     interp_.seed(uint32_t(std::time(nullptr)));
     if (const char* l = SDL_getenv("GD02_UILOG")) interp_.logReport = *l && *l != '0';
     save_ = std::make_unique<SaveFile>(SDL_getenv("GD02_SAVE_DIR") ? std::string(SDL_getenv("GD02_SAVE_DIR")) : std::string());

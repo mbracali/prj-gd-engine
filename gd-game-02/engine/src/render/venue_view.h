@@ -112,7 +112,7 @@ private:
 // kStartGuitarist0Mp 512; macros.dta [C data]), as {waypoint_find} places
 // them (chars set_singleplayer: guitarist0 start_at); other objects: their
 // world transform. False when nothing is found.
-bool venueObjectXfm(const World& world, const std::string& name, bool multiplayer, scene::Xfm& out);
+bool venueObjectXfm(const World& world, const std::string& name, bool multiplayer, scene::Xfm& out, const std::string& subpart = "");
 
 // A CamShot keyframe as a static camera (the director's full rules are the
 // next phase's, PLAN.md section 3): the keyframe transform under its parent

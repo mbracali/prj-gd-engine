@@ -221,7 +221,11 @@ bool ComponentObj::handleNative(Interp& in, const std::string& msg, std::vector<
     }
     if (msg == "set_localized_text" || msg == "set_localized") return setText(argStr(0)), true;
     if (msg == "get_text") return r = Value::string(isTextEntry() ? entered : v ? v->text(name()) : std::string()), true;
-    if (msg == "set_wrap_width" || msg == "jitter_text" || msg == "set_caps") return true;
+    if (msg == "set_wrap_width") {
+        if (v) v->setWrapWidth(name(), argNum(0));
+        return true;
+    }
+    if (msg == "jitter_text" || msg == "set_caps") return true;
     if (msg == "set_frame") {
         if (v) v->setFrame(name(), argNum(0));
         return true;

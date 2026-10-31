@@ -478,8 +478,8 @@ next to it to start.
 - The endgame stats receipt draws dark (`turn_off_ambient` /
   `reset_ambient` are no-ops).
 - Volume sliders apply from the next song or preview.
-- Tutorial screens: see "Training" below (practice and tutorials); the rest were generic panels (M10 /
-  M11). The career and the store: docs/career_and_store.md.
+- Tutorial and practice: see "Training" below.
+  The career and the store: docs/career_and_store.md.
 - Help bar background boxes.
 - The main menu's words are stacked tightly (re-checked in bug-fix 3: rows
   14 units apart, each `fit_text` 1 into 9 units tall against size 30 ×
@@ -508,3 +508,36 @@ next to it to start.
   track_surface_override (0x82693620); in the other modes the player's
   character's own bitmap (+0x3c), which the port now also draws [C].
 - `--walktest practice`, `practice_menus`, `career_practice`.
+
+## Training: tutorials
+- ui/tutorials.dta and tutorial_*.dta run on TutorialPanel (0x8228BCE0 natives):
+  play_vo plays sound.dta's streaming_vo events (tutorial/streams/eng/*.mogg) one
+  at a time: dropped while the current stream plays, replacing one still
+  loading or paused; is_vo_playing is "a stream exists" [C]. The tuner (0x822AD3C8:
+  three strums on a held fret tune it, tuning_hit_vo) and the hopo trainer
+  (0x822AC4B0: a strum starts a try, each hammer-on / pull-off within 1000 ms the
+  next note, s20601..5) read player 0's frets and strums [C].
+- Narration in five languages: the file layer puts the language in every
+  path's `/eng/` (0x82276048) [C]; the language is the console's (0x82271390 /
+  0x82275468: eng fre deu ita esl, others eng) [C]. The port takes the
+  system's first preferred language [I]; GD02_LANGUAGE forces it. The menus'
+  locale, `{system_language}` textures and venue pictures follow.
+- A lesson moves on with next_lesson (same song) or switch_to_song (`game
+  exit`, `game load_song`, `game enter`). The lessons hear the gameplay
+  through sinks (`add_sink`, everything else exported): player_matcher<n> gets
+  gem_hit_callback ($slot $hopoable $hopoed, 0x822E2748), gem_miss_callback
+  ($slot_hit $real_slot $timing_error, 0x822E2B10) and gem_pass_callback
+  (0x822E2FD0), the hopo / swingAtHopo handlers' hopo_callback and
+  swingAtHopo_callback; player<n> held_note_released_callback, and player.dta's
+  handlers whammy / star / phrase callbacks; `game add_sink x star_power_start`
+  the Star Power start and stop [C]. A new song starts with no sinks.
+- Star Power natives: fill_star_power, empty_star_power, set_star_power,
+  set_star_power_deploy_rate, set_star_power_phrase_boost,
+  set_whammystarpowerenabled, set_mercuryswitchenabled (0x822C7060) [C].
+- `options set_mute_fx`: get_fx_volume then answers -96 dB (0x822B0F08) [C];
+  UILabel set_wrap_width sets the Text's wrap [C]; kTaskTutorialSeconds runs
+  while the panel is not paused.
+- `--walktest tutorial` (pause and quit), `tutorial1` (the 6 lessons of the
+  first, charts 102..105), `tutorial2` (202..204: Star Power, whammy, wail),
+  `tutorial3` (205, 206: hammer-ons and pull-offs).
+

@@ -259,6 +259,10 @@ public:
         else if (what == "phrase_boost") p->setPhraseBoost(value);
     }
     void setMusicSpeed(float speed) override { mixer_.setSpeed(std::max(0.0f, speed)); }
+    void setMuteFx(bool mute) override {
+        fxMuted_ = mute;
+        if (synth_) synth_->setFxVolumeDb(mute ? -96.0f : fxVolumeDb_);
+    }
     void setMusicVolume(float db, float fadeMs) override { mixer_.setVolumeDb(db, fadeMs); }
     void setMusicPaused(bool paused) override {
         musicPaused_ = paused;
@@ -582,6 +586,7 @@ private:
     // venue's through the world; made with the game data.
     std::unique_ptr<Synth> synth_;
     float fxVolumeDb_ = 0;  // the options' sound effects volume (dB): {options get_fx_volume}
+    bool fxMuted_ = false;  // options set_mute_fx
     // The menus' background sounds while their music plays (MetaMusic,
     // 0x822A23F8 reads config/synth.dta (background_sfx (sequence
     // meta_people) (min_delay_sec 10) (max_delay_sec 20))) [C data]; a
@@ -1520,7 +1525,7 @@ void App::updateIntro(float t) {
         } kIntro[] = {{0, "track_unfurl"}, {1300, "nowbar_1"}, {1400, "nowbar_2"}, {1500, "nowbar_3"},
                       {1600, "nowbar_4"},  {1700, "nowbar_5"}, {2050, "meter_slide"}};
         while (introSfx_ < int(std::size(kIntro)) && t >= extendAtMs_ + kIntro[introSfx_].atMs)
-            playSfxArgs(kIntro[introSfx_++].sfx, fxVolumeDb_, 0, 0);
+            playSfxArgs(kIntro[introSfx_++].sfx, fxMuted_ ? -96.0f : fxVolumeDb_, 0, 0);
     }
     if (!controllersLive_ && t > kControllersLiveMs) {
         controllersLive_ = true;
@@ -1561,13 +1566,13 @@ void App::gameSounds(int player, const std::vector<PlayerEvent>& events) {
         else if (e.kind != PlayerEvent::Kind::PhraseCaptured && e.kind != PlayerEvent::Kind::StarPowerStart &&
                  e.kind != PlayerEvent::Kind::StarPowerEnd)
             continue;
-        if (matcher) playSfxArgs(bass ? "miss_bass" : "miss_gtr", fxVolumeDb_, pan, 0);
+        if (matcher) playSfxArgs(bass ? "miss_bass" : "miss_gtr", fxMuted_ ? -96.0f : fxVolumeDb_, pan, 0);
         else if (e.kind == PlayerEvent::Kind::PhraseCaptured) pendingAwardMs_ = lastT_ + 200.0f;
         else if (e.kind == PlayerEvent::Kind::StarPowerStart) {
-            playSfxArgs(multi ? "sp_deployed_multi" : "sp_deployed", fxVolumeDb_, pan, 0);
+            playSfxArgs(multi ? "sp_deployed_multi" : "sp_deployed", fxMuted_ ? -96.0f : fxVolumeDb_, pan, 0);
             if (track_) track_->animateExtend(2000, 2025, 800, lastT_);
         } else {
-            playSfxArgs(multi ? "sp_depleted_multi" : "sp_depleted", fxVolumeDb_, pan, 0);
+            playSfxArgs(multi ? "sp_depleted_multi" : "sp_depleted", fxMuted_ ? -96.0f : fxVolumeDb_, pan, 0);
         }
     }
     if (!ui_ && pendingAwardMs_ > -1e8f && lastT_ >= pendingAwardMs_) {
@@ -1580,13 +1585,12 @@ void App::gameSounds(int player, const std::vector<PlayerEvent>& events) {
 // hopo, swingAtHopo: beatmatch.dta) and the player's (phrase_captured,
 // phrase_miss, start_using, stop_using, whammy_start, whammy_end,
 // star_gem_hit: player.dta), whose {handle ($this x_callback)} reaches
-// the object's sinks; and what the PS2 sends the sinks itself [C]:
-// gem_hit_callback $slot $hopoable $hopoed (the matcher, 0x00115c40: the
-// gem's lowest fret, its HOPO flag, hit as a HOPO), gem_miss_callback
-// $slot_hit $real_slot $timing_error (0x00116160), gem_pass_callback
-// (0x00116778), held_note_released_callback $fraction (the player,
-// 0x00112348). The miss's slots and timing are not kept by the port's
-// player: the gem's lowest fret (or -1) and 0 [I].
+// the object's sinks; and what the matcher sends the sinks itself [C]:
+// gem_hit_callback $slot $hopoable $hopoed (0x822E2748: the gem's lowest
+// fret, its HOPO flag, hit as a HOPO), gem_miss_callback $slot_hit $real_slot
+// $timing_error (0x822E2B10: the fret played, the gem's lowest fret, how far
+// the gem is), gem_pass_callback (0x822E2FD0), held_note_released_callback
+// $fraction (the player).
 void App::gameCallbacks(int player, const std::vector<PlayerEvent>& events, size_t k) {
     const PlayerEvent& e = events[k];
     const Player* pl = player == 0 ? player_.get() : player2_.get();
@@ -1603,7 +1607,7 @@ void App::gameCallbacks(int player, const std::vector<PlayerEvent>& events, size
     switch (e.kind) {
     case K::Miss:
         ui_->callScript(matcher, "miss", {num});
-        in.send(matcher, "gem_miss_callback", {Value::integer(slot(e.gem)), Value::integer(slot(e.gem)), Value::real(0)}, false);
+        in.send(matcher, "gem_miss_callback", {Value::integer(e.slot >= 0 ? e.slot : slot(e.gem)), Value::integer(slot(e.gem)), Value::real(e.value)}, false);
         break;
     case K::Hit: {
         bool hopoed = false;
@@ -2019,6 +2023,7 @@ void App::gameBegin() {
 
 int App::gameCounter(int player, const std::string& key) const {
     if (key == "surface_overrides") return track_ ? track_->surfaceOverrides() : 0;
+    if (key == "spot_shadows") return venueView_ ? venueView_->spotlights().shadowsTotal() : 0;
     const int p = std::clamp(player, 0, 1);
     if (key == "sp_phrases") return spPhrases_[p];
     if (key == "streaks_broken") return streaksBroken_[p];
@@ -2409,7 +2414,7 @@ void App::applyOptions(float band, float guitar, float fx, bool lefty0, bool lef
     // GH2 passes it as the volume of its game sounds (play_game_sfx, the
     // crowd's reactions), not to every sound (audio/synth.h).
     fxVolumeDb_ = data_ ? Synth::optionsVolumeDb(*data_, int(std::lround(fx * 11.0f))) : 20.0f * std::log10(std::max(fx, 1e-5f));
-    if (synth_) synth_->setFxVolumeDb(fxVolumeDb_);
+    if (synth_) synth_->setFxVolumeDb(fxMuted_ ? -96.0f : fxVolumeDb_);
     bandVolume_ = band, guitarVolume_ = guitar;
     syncOffsetMs_ = syncOffsetMs;
     if (!SDL_getenv("GD02_LEFTY")) input_.setLefty(lefty0, lefty1);
