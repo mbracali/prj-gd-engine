@@ -127,16 +127,78 @@ scene::Xfm ScenePose::local(const scene::Object* o) const {
     return t ? t->local : scene::Xfm{};
 }
 
+namespace {
+
+using V = std::array<float, 3>;
+V rowOf(const scene::Xfm& x, int r) { return {x.rot[size_t(r * 3)], x.rot[size_t(r * 3 + 1)], x.rot[size_t(r * 3 + 2)]}; }
+void setRow(scene::Xfm& x, int r, const V& v) {
+    for (size_t i = 0; i < 3; ++i) x.rot[size_t(r) * 3 + i] = v[i];
+}
+V crossV(const V& a, const V& b) { return {a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]}; }
+float lenV(const V& a) { return std::sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]); }
+V normV(const V& a) {
+    const float l = lenV(a);
+    return l > 1e-9f ? V{a[0] / l, a[1] / l, a[2] / l} : a;
+}
+
+}  // namespace
+
+// The world transform (0x821AF988): constraint 1 LocalRotate keeps the local
+// rotation at the parent-carried position, 2 ParentWorld is the parent's, the
+// others the local one composed; then 0x821AEC78 against the camera being
+// drawn: 3 LookAtTarget (y at the target), 5 BillboardZ (y away from the
+// camera about the z kept), 6 BillboardXZ, 7 BillboardXYZ (y away, the
+// camera's z), 8 FastBillboardXYZ (the camera's rotation); preserve_scale
+// keeps the rows' lengths. 4 ShadowTarget (flattened on (shadow_plane)) has
+// no object on the disc's venues [C data].
 scene::Xfm ScenePose::world(const scene::Object* o, const scene::Xfm& own) const {
     scene::Xfm x = own;
-    const scene::Object* cur = o;
-    for (int depth = 0; depth < 32; ++depth) {
-        const scene::Trans* t = transOf(cur);
-        if (!t || t->parent.empty() || !cur->dir) break;
-        const scene::Object* p = cur->dir->resolve(t->parent);
-        if (!p || p == cur || !transOf(p)) break;
-        x = scene::compose(x, local(p));
-        cur = p;
+    const scene::Trans* t = transOf(o);
+    if (t && !t->parent.empty() && o->dir) {
+        const scene::Object* p = o->dir->resolve(t->parent);
+        if (p && p != o && transOf(p)) {
+            const scene::Xfm pw = world(p);
+            if (t->constraint == 2) {
+                x = pw;
+            } else if (t->constraint == 1) {
+                x.pos = scene::compose(own, pw).pos;
+            } else {
+                x = scene::compose(own, pw);
+            }
+        }
+    }
+    if (!t || t->constraint < 3 || t->constraint == 4 || !hasCamera_) return x;
+    const int c = t->constraint;
+    const float sx = lenV(rowOf(x, 0)), sy = lenV(rowOf(x, 1)), sz = lenV(rowOf(x, 2));
+    const V pos = x.pos;
+    const V cam = camera_.pos;
+    V y{pos[0] - cam[0], pos[1] - cam[1], pos[2] - cam[2]};
+    if (c == 3) {
+        const scene::Object* to = !t->target.empty() && o->dir ? o->dir->resolve(t->target) : nullptr;
+        if (!to || !transOf(to)) return x;
+        const V tp = world(to).pos;
+        y = {tp[0] - pos[0], tp[1] - pos[1], tp[2] - pos[2]};
+    }
+    if (c == 8) {
+        x.rot = camera_.rot;
+    } else if (c == 5) {
+        const V z = t->preserveScale ? normV(rowOf(x, 2)) : rowOf(x, 2);
+        const V xr = normV(crossV(y, z));
+        setRow(x, 0, xr), setRow(x, 2, z), setRow(x, 1, crossV(z, xr));
+    } else if (c == 6) {
+        y = normV(y);
+        const V xr = normV(crossV(y, rowOf(x, 2)));
+        setRow(x, 0, xr), setRow(x, 1, y), setRow(x, 2, crossV(xr, y));
+    } else {  // 3, 7: y, with the z kept or the camera's, made orthonormal (0x8214F7F0)
+        const V z0 = c == 7 ? rowOf(camera_, 2) : rowOf(x, 2);
+        y = normV(y);
+        const V xr = normV(crossV(y, z0));
+        setRow(x, 0, xr), setRow(x, 1, y), setRow(x, 2, normV(crossV(xr, y)));
+    }
+    if (t->preserveScale) {
+        const float s[3] = {sx, sy, sz};
+        for (int r = 0; r < 3; ++r)
+            for (int i = 0; i < 3; ++i) x.rot[size_t(r * 3 + i)] *= s[r];
     }
     return x;
 }

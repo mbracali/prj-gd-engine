@@ -6,7 +6,15 @@ matches the tag's version. Nothing is released yet.
 
 ## [Unreleased]
 
+### Fixed
+- Spotlight beams point where the original's do (they shine along the
+  light's own axis, follow their targets and bones, and sit under moving
+  rigs), and floor spots and lens discs have the original's size and place.
+- Glows, flames and smoke planes on the venues turn to the camera again.
+
 ### Added
+- The band's shadows in the spotlights' pools on the stage.
+- Long hair collides with the shoulders and the head.
 - Practice mode, as on the Xbox 360: pick the song, the part, the difficulty,
   a start and an end section and a speed. Below 100% the song is slowed
   (its pitch drops, as in the original), only your part is heard and a click

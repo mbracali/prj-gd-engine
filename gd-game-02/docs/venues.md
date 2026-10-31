@@ -339,18 +339,21 @@ gd02 draws them through the material shader [I]:
 - the light can: the light_can mesh at the spotlight (light_can_offset
   along the beam), lit by its directory's Environ;
 - the beam (beam.material; all 341 beams are sheets, is_cone 0): a strip
-  facing the camera from `offset` to `offset + length` along the light's
-  -z (the presets' rotations point -z down on average [C data]),
+  facing the camera from `offset` to `offset + length` along the light's y,
   top_radius at the light, bottom_radius at the end; the sides fade over
   top_side_border .. bottom_side_border of the half width and the end over
   bottom_border of the length; angle_offset tilts it (degrees); colour x
   intensity x brighten, added; it fades when seen end-on [I];
-- a target (the preset's or the object's) turns the light's -z onto it (a
-  band slot: 35 above its waypoint) [I];
-- the floor spot (spot_material): a square of half size spot_scale where
-  the beam meets z = spot_height [I];
-- the lens (lens_material): a disc of lens_size across the beam at
-  lens_offset, as bright as the beam faces the camera [I];
+- a target turns the light's y axis onto it (0x82231610, bones through the
+  entry's subpart, 0x82232CD0). The preset's quaternion is the LOCAL rotation
+  (poll 0x82233250, parents apply). A spotlight shines along y [C: 0x82231AF0];
+  an entry whose target is not in the venue leaves it off (0x8223ADE8,
+  0x82232698);
+- the floor spot (spot_material, target needed; 0x82231AF0, mesh 0x82235488):
+  the unit quad spot_scale wide, spot_scale x |d| / |d.z| long along the
+  heading, where the light's y meets z = target.z + spot_height [C];
+- the lens (lens_material): the unit quad lens_size wide, square to y, at
+  lens_offset [C];
 - flares (the spotlight's when its preset entry says flare and
   flare_enabled; RndFlare objects; RndFlare draw 0x8220D6A8 [C]): a
   screen-space square size x the picture's width wide, lerped from size.x
@@ -686,9 +689,8 @@ the loaded venue.
   (0x8216DB48's order); the order of downbeat and one_bar_to in one frame
   (two cuts in the same beat happen); TransAnim repeat_trans / follow_path
   on camera paths (none on the disc).
-- Spotlights: GH2's beam shader (screen-space softness, fog), the floor
-  spot's plane and shape, the lens orientation, damping_constant,
-  target_shadow, additional_objects, xsection / cutouts (unused on the
+- Spotlights: GH2's beam shader (screen-space softness, fog),
+  damping_constant, additional_objects, xsection / cutouts (unused on the
   disc).
 - script_task keeps the values of every $variable its body names at
   creation, and a value the task sets stays set [I: later Harmonix code's
@@ -699,3 +701,13 @@ the loaded venue.
 - Sound banks: no reverb sends or ADSR (docs/audio_and_charts.md section
   4); crowd_audio play_stream (stone's wingame.mogg after the campaign) is a
   STUB.
+
+## Transform constraints [C]
+
+0x821AF988 / 0x821AEC78, in gfx::ScenePose::world: 1 LocalRotate (the local
+rotation at the parent-carried position), 2 ParentWorld (the parent's world,
+711 meshes and 66 particle systems on the disc), 3 LookAtTarget, 5 BillboardZ,
+6 BillboardXZ, 7 BillboardXYZ, 8 FastBillboardXYZ against the camera being
+drawn: the venues' torch and lantern glows, flames and smoke planes (98 + 102
++ 57 meshes) turn to the camera; before they were drawn as saved. preserve_scale
+keeps the rows' lengths. 4 ShadowTarget: no object on the disc's venues.

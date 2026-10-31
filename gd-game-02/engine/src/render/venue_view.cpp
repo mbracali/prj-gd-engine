@@ -175,6 +175,13 @@ void VenueView::draw(gfx::Renderer& r, int viewW, int viewH, bool hdr) {
     hdr_ = hdr;
     envSet_ = false;
     meshes_ = particles_ = 0;
+    {
+        // The billboard constraints face the camera being drawn.
+        scene::Xfm cam;
+        for (size_t i = 0; i < 9; ++i) cam.rot[i] = camera_.world.m[i / 3 * 4 + i % 3];
+        cam.pos = {camera_.world.m[12], camera_.world.m[13], camera_.world.m[14]};
+        world_.pose().setCamera(cam);
+    }
     particleRenderer_->resetStats();
     crowdView_->resetStats();
     particleRenderer_->setHdr(hdr);

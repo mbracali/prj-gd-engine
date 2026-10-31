@@ -55,6 +55,8 @@ public:
     void setLocal(const scene::Object* o, const scene::Xfm& x) { local_[o] = x; }
     void resetLocal(const scene::Object* o) { local_.erase(o); }
     scene::Xfm local(const scene::Object* o) const;
+    // The camera being drawn: the transforms' billboard constraints face it.
+    void setCamera(const scene::Xfm& c) { camera_ = c, hasCamera_ = true; }
     // Local transforms composed up the parent chain (parents resolved in the
     // object's directory; a directory itself counts as the identity).
     scene::Xfm world(const scene::Object* o) const { return world(o, local(o)); }
@@ -102,6 +104,8 @@ private:
     void transAnim(const scene::TransAnim& a, float frame);
     void matAnim(const scene::MatAnim& a, float frame);
 
+    scene::Xfm camera_;
+    bool hasCamera_ = false;
     std::unordered_map<const scene::Object*, scene::Xfm> local_;
     std::unordered_map<const scene::Mat*, MatState> mats_;
     std::unordered_map<const scene::Object*, bool> showing_;
