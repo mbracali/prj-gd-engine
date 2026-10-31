@@ -74,6 +74,8 @@ public:
 private:
     BandView* bandView_ = nullptr;
     int shadowsDrawn_ = 0, shadowsTotal_ = 0;
+    std::unordered_map<const scene::Spotlight*, Vec3> damped_;  // damping_constant's eased aim
+    uint64_t lastDrawNs_ = 0;
     struct Flare {
         Vec3 pos;
         float size = 0.1f;   // fraction of the picture's width

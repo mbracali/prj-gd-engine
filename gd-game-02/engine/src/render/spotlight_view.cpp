@@ -182,8 +182,6 @@ Material fxMaterial(SceneCache& cache, const scene::Mat& mat, const ScenePose& p
     return m;
 }
 
-bool alphaBlend(const Material& m) { return m.blend == MatBlend::SrcAlpha || m.blend == MatBlend::SrcAlphaAdd || m.blend == MatBlend::PreMultAlpha; }
-
 // One vertex in GH2's 16-float layout (position, normal, colour, uv, tangent).
 void vertex(std::vector<float>& v, Vec3 p, const float rgba[4], float u, float t) {
     v.insert(v.end(), {p.x, p.y, p.z, 0, 0, 1, rgba[0], rgba[1], rgba[2], rgba[3], u, t, 1, 0, 0, 1});
@@ -196,6 +194,88 @@ struct Batch {
 };
 
 void quadIdx(Batch& b, uint16_t a, uint16_t c, uint16_t d, uint16_t e) { b.idx.insert(b.idx.end(), {a, c, d, a, d, e}); }
+
+// A beam as GH2 draws it (0x82260B40 -> 0x822601D0 with depthvolume.fx) [C
+// unless marked]. The sheet (0x82235F68, is_cone 0 on all 341): top_radius to
+// bottom_radius wide over `length`, starting `offset` along the light,
+// BillboardZ (constraint 5). The shader ignores the sheet's vertex alpha and
+// the material: the colour is
+//   spot colour x intensity x 8 x brighten x depth x illum
+// depth = saturate((w - nearest) x 0.125 / thickness): w the view depth,
+// nearest the closest of the volume's four corners (no nearer than the near
+// plane, 0x8225FF98), thickness min(length x 0.33, bottom radius / sin(angle to
+// the view)); illum = (1 - |d|)^2: d the screen distance from the light over
+// the distance to the end corners (aspect corrected, 0x8225E3C0). The
+// cross-section map defaults to white and the density map to black, so
+// neither changes it. Evaluated per vertex on a strip of rows [I: GH2 per
+// pixel]. GH2 adds the result to the scene in postprocess.fx FogPixel; the
+// buffer's scale (0x8225F2E8: total x 1024 x density) is not understood, so
+// the gain here keeps 1 [I]. Depth test on instead of the shader's min()
+// with the scene's depth [I: the same where a beam is fully hidden].
+bool beamStrip(const scene::Spotlight& s, Vec3 pos, Vec3 y, Vec3 dir, const Camera& camera, const float lit[3], Batch& out) {
+    const float len = s.beam.length, top = s.beam.topRadius, bottom = s.beam.bottomRadius;
+    const Vec3 cam = camera.position();
+    const Vec3 fwd = normalize(Vec3{camera.world.m[4], camera.world.m[5], camera.world.m[6]});
+    const Vec3 a = pos + y * s.beam.offset;  // the mesh, offset along the light
+    Vec3 side = cross(a - cam, dir);
+    if (dot(side, side) < 1e-6f) return false;
+    side = normalize(side);
+    // The volume's corners (0x8225E590): towards the camera and away, at the
+    // light and at the end, the sheet's radii narrowed by its borders (0x8222E9E0).
+    const float rTop = top * s.beam.expand * (1 - s.beam.topSideBorder * 0.7f);
+    const float rEnd = bottom * s.beam.expand * (1 - s.beam.bottomSideBorder * 0.7f);
+    Vec3 toCam = cam - pos;
+    toCam = toCam - y * dot(toCam, y);
+    toCam = dot(toCam, toCam) > 1e-8f ? normalize(toCam) : Vec3{camera.world.m[8], camera.world.m[9], camera.world.m[10]};
+    const Vec3 corners[4] = {pos + toCam * rTop, pos - toCam * rTop, pos + y * len + toCam * rEnd, pos + y * len - toCam * rEnd};
+    float nearest = 1e30f;
+    for (const Vec3& c : corners) nearest = std::min(nearest, dot(c - cam, fwd));
+    nearest = std::max(nearest, camera.nearPlane);
+    const float cosA = std::fabs(dot(fwd, y)), sinA = std::sqrt(std::max(0.0f, 1 - cosA * cosA));
+    float thick = len * 0.33f;
+    if (rEnd < thick * sinA) thick = rEnd / sinA;
+    const float scale = 0.125f / std::max(thick, 1e-3f);
+    // The screen ramp (0x8225E3C0): NDC, x in the picture's aspect.
+    const Mat4 vp = camera.viewProj(false);
+    const auto ndc = [&](Vec3 p, float& nx, float& ny) {
+        const float cw = vp.at(3, 0) * p.x + vp.at(3, 1) * p.y + vp.at(3, 2) * p.z + vp.at(3, 3);
+        nx = (vp.at(0, 0) * p.x + vp.at(0, 1) * p.y + vp.at(0, 2) * p.z + vp.at(0, 3)) / cw;
+        ny = (vp.at(1, 0) * p.x + vp.at(1, 1) * p.y + vp.at(1, 2) * p.z + vp.at(1, 3)) / cw;
+        return cw > 0;
+    };
+    float lx = 0, ly = 0, ex = 0, ey = 0;
+    float reach = 1e-3f;
+    if (!ndc(pos, lx, ly)) return false;
+    for (int i = 2; i < 4; ++i)
+        if (ndc(corners[i], ex, ey)) reach = std::max(reach, std::hypot((ex - lx) * camera.aspect, ey - ly));
+    const float k = 8.0f * s.beam.brighten;
+    const int rows = 16;
+    const uint16_t base = uint16_t(out.verts.size() / 16);
+    if (base > 60000) return false;
+    for (int r = 0; r <= rows; ++r) {
+        const float v = float(r) / rows;
+        const Vec3 c = a + dir * (len * v);
+        const float radius = top + (bottom - top) * v;
+        for (int u = -1; u <= 1; ++u) {
+            const Vec3 p = c + side * (radius * float(u));
+            float nx = 0, ny = 0;
+            const bool front = ndc(p, nx, ny);
+            const float d = front ? std::hypot((nx - lx) * camera.aspect, ny - ly) / reach : 1.0f;
+            float illum = std::clamp(1 - d, 0.0f, 1.0f);
+            illum *= illum;
+            const float depth = std::clamp((dot(p - cam, fwd) - nearest) * scale, 0.0f, 1.0f);
+            const float m = k * depth * illum;
+            const float col[4] = {lit[0] * m, lit[1] * m, lit[2] * m, 1};
+            vertex(out.verts, p, col, (float(u) + 1) * 0.5f, v);
+        }
+    }
+    for (uint16_t r = 0; r < rows; ++r)
+        for (uint16_t c = 0; c < 2; ++c) {
+            const uint16_t i0 = uint16_t(base + r * 3 + c);
+            quadIdx(out, i0, uint16_t(i0 + 1), uint16_t(i0 + 4), uint16_t(i0 + 3));
+        }
+    return true;
+}
 
 }  // namespace
 
@@ -236,6 +316,9 @@ int SpotlightView::slotOf(const void* key) {
 void SpotlightView::draw(MaterialRenderer& mr, const Camera& camera, int viewW, int viewH, bool hdr, TargetId worldTarget,
                          TextureId worldDepth) {
     beams_ = flares_ = spots_ = 0;
+    const uint64_t nowNs = SDL_GetTicksNS();
+    const float dt = lastDrawNs_ ? float(double(nowNs - lastDrawNs_) * 1e-9) : 0.0f;
+    lastDrawNs_ = nowNs;
     flareList_.clear();
     // Development aid: GD02_SPOTS=<letters> draws only those parts (c cans,
     // f floor spots, b beams, l lenses, F flares); unset: all.
@@ -247,6 +330,9 @@ void SpotlightView::draw(MaterialRenderer& mr, const Camera& camera, int viewW, 
     const Vec3 camPos = camera.position();
     const Vec3 camFwd = normalize(Vec3{camera.world.m[4], camera.world.m[5], camera.world.m[6]});
     std::map<const scene::Mat*, Batch> batches;
+    Batch beamBatch;
+    beamBatch.mat.prelit = true, beamBatch.mat.useEnviron = false, beamBatch.mat.cull = false;
+    beamBatch.mat.blend = MatBlend::Add, beamBatch.mat.zMode = ZMode::Transparent;
     auto batch = [&](const scene::Mat* m) -> Batch& {
         auto [it, added] = batches.try_emplace(m);
         if (added) it->second.mat = fxMaterial(cache_, *m, pose);
@@ -263,6 +349,15 @@ void SpotlightView::draw(MaterialRenderer& mr, const Camera& camera, int viewW, 
         Mat4 world;
         const scene::Environ* env;
     };
+    // additional_objects (Spotlight's draw children, 0x822348F8): drawn in the
+    // queue under an Environ whose ambient is the spot's colour x intensity
+    // (0x8222F738 under 0x8222EC40) [C]: the circles the spots throw.
+    struct Extra {
+        const scene::Mesh* mesh;
+        Mat4 world;
+        Vec3 color;
+    };
+    std::vector<Extra> extras;
     std::vector<Can> cans;
     struct Shadow {
         std::string target;
@@ -292,8 +387,6 @@ void SpotlightView::draw(MaterialRenderer& mr, const Camera& camera, int viewW, 
         // 0x822328E8: queued when intensity x green or x blue reads as a
         // byte (the code tests green twice, not red) [C].
         if ((int(intensity * color[1] * 255.0f) & 0xff) == 0 && (int(intensity * color[2] * 255.0f) & 0xff) == 0) continue;
-        const float k = intensity * s->beam.brighten;
-        const float rgb[3] = {color[0] * k, color[1] * k, color[2] * k};
         const float lit[3] = {color[0] * intensity, color[1] * intensity, color[2] * intensity};
         ++spots_;
         const Vec3 pos = v3(x.pos);
@@ -313,6 +406,17 @@ void SpotlightView::draw(MaterialRenderer& mr, const Camera& camera, int viewW, 
             const Vec3 d = v3(tx.pos) - pos;
             if (dot(d, d) > 1e-4f) {
                 fwd = normalize(d);
+                // damping_constant != 1 (15 spotlights): the aim eases there,
+                // dt x damping of the way each poll (0x82233250) [C; a
+                // normalised lerp in place of 0x8226A980's slerp, I].
+                if (s->dampingConstant != 1) {
+                    auto [it, fresh] = damped_.try_emplace(s, fwd);
+                    if (!fresh) {
+                        const float k = std::clamp(dt * s->dampingConstant, 0.0f, 1.0f);
+                        it->second = normalize(it->second + (fwd - it->second) * k);
+                        fwd = it->second;
+                    }
+                }
                 Vec3 n = cross(d, Vec3{1, 0, 0});
                 if (dot(n, n) < 1e-6f) n = Vec3{0, 0, 1};
                 right = normalize(cross(fwd, normalize(n)));
@@ -339,47 +443,12 @@ void SpotlightView::draw(MaterialRenderer& mr, const Camera& camera, int viewW, 
                 cx.pos = {cp.x, cp.y, cp.z};
                 cans.push_back({can, toMat4(cx), dirEnv(can->dir)});
             }
-        // The beam: a camera-facing strip.
-        if (s->beam.length > 0 && on('b'))
-            if (const scene::Mat* bm = findMat(*s, s->beam.material)) {
-                const Vec3 a = pos + dir * s->beam.offset, b = a + dir * s->beam.length;
-                const Vec3 mid = (a + b) * 0.5f;
-                Vec3 view = mid - camPos;
-                view = normalize(view);
-                Vec3 side = cross(dir, view);
-                const float edgeOn = std::sqrt(dot(side, side));
-                if (edgeOn > 1e-3f) {
-                    side = side * (1.0f / edgeOn);
-                    const float facing = std::clamp(edgeOn / 0.35f, 0.0f, 1.0f);
-                    Batch& bt = batch(bm);
-                    const bool alpha = alphaBlend(bt.mat);
-                    const uint16_t base = uint16_t(bt.verts.size() / 16);
-                    if (base < 60000) {
-                        const float rows[3] = {0, std::clamp(1 - s->beam.bottomBorder, 0.0f, 1.0f), 1};
-                        for (float v : rows) {
-                            const Vec3 c = a + (b - a) * v;
-                            const float radius = s->beam.topRadius + (s->beam.bottomRadius - s->beam.topRadius) * v;
-                            const float border = std::clamp(s->beam.topSideBorder + (s->beam.bottomSideBorder - s->beam.topSideBorder) * v, 0.0f, 0.99f);
-                            const float lenA = v >= 1 ? 0.0f : 1.0f;
-                            const float cols[4] = {-1, -1 + border, 1 - border, 1};
-                            for (float u : cols) {
-                                const float sideA = std::fabs(u) >= 1 ? 0.0f : 1.0f;
-                                const float aa = lenA * sideA * facing;
-                                float col[4] = {rgb[0], rgb[1], rgb[2], aa};
-                                if (!alpha)
-                                    for (int q = 0; q < 3; ++q) col[q] *= aa;
-                                vertex(bt.verts, c + side * (u * radius), col, (u + 1) * 0.5f, v);
-                            }
-                        }
-                        for (uint16_t r = 0; r < 2; ++r)
-                            for (uint16_t c = 0; c < 3; ++c) {
-                                const uint16_t i0 = uint16_t(base + r * 4 + c);
-                                quadIdx(bt, i0, uint16_t(i0 + 1), uint16_t(i0 + 5), uint16_t(i0 + 4));
-                            }
-                        ++beams_;
-                    }
-                }
-            }
+        if (on('f'))
+            for (const std::string& n : s->additionalObjects)
+                if (auto* m = s->dir ? s->dir->resolve<scene::Mesh>(n) : nullptr; m && pose.showing(m))
+                    extras.push_back({m, toMat4(pose.world(m)), Vec3{lit[0], lit[1], lit[2]}});
+        // The beam: depthvolume.fx on the sheet of 0x82235F68 (0x822601D0, 0x82260B40).
+        if (s->beam.length > 0 && on('b') && beamStrip(*s, pos, fwd, dir, camera, lit, beamBatch)) ++beams_;
         // The floor spot (0x82231AF0, its mesh 0x82235488: a unit quad, uv 0..1):
         // only with a target and spot_material, where the light's y axis
         // meets z = the target's z + spot_height, spot_scale wide across and
@@ -513,11 +582,26 @@ void SpotlightView::draw(MaterialRenderer& mr, const Camera& camera, int viewW, 
                 bandView_->drawShadow(mr, *c, {sh.dir.x, sh.dir.y, sh.dir.z}, hdr);
                 ++shadowsDrawn_, ++shadowsTotal_;
             }
+    for (const Extra& e : extras) {
+        const GpuMesh* g = cache_.mesh(e.mesh);
+        const scene::Mat* mat = e.mesh->dir ? e.mesh->dir->resolve<scene::Mat>(e.mesh->mat) : nullptr;
+        if (!g || g->skinned || !mat) continue;
+        LightEnv le;
+        le.ambient = e.color, le.envAmbient = e.color;
+        mr.setFrame(camera, le, viewW, viewH);
+        const Mat4 bones[1] = {e.world};
+        mr.draw(*g, bones, cache_.material(*mat, &pose), ctx);
+    }
+    if (!extras.empty()) mr.setFrame(camera, plain, viewW, viewH);
     const Mat4 identity[1] = {Mat4::identity()};
     for (auto& [m, b] : batches) {
         if (b.idx.empty()) continue;
         const GpuMesh g = mesh_.upload(b.verts, b.idx);
         mr.draw(g, identity, b.mat, ctx);
+    }
+    if (!beamBatch.idx.empty()) {
+        const GpuMesh g = mesh_.upload(beamBatch.verts, beamBatch.idx);
+        mr.draw(g, identity, beamBatch.mat, ctx);
     }
     drawFlares(camera, viewW, viewH, hdr, worldTarget, worldDepth);
 }

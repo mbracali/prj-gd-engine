@@ -11,6 +11,9 @@ matches the tag's version. Nothing is released yet.
   light's own axis, follow their targets and bones, and sit under moving
   rigs), and floor spots and lens discs have the original's size and place.
 - Glows, flames and smoke planes on the venues turn to the camera again.
+- Spotlight beams glow as the Xbox 360's shader lights them: brightest at the
+  lamp, fading over the beam, stronger the more you look along them.
+- The circles some spotlights throw on the stage follow those lights.
 
 ### Added
 - The band's shadows in the spotlights' pools on the stage.

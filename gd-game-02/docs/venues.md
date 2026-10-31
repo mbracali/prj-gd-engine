@@ -329,21 +329,24 @@ The preset manager (WorldDir + 0x14c; Handle 0x82265010, Poll 0x82263070)
 ## Spotlights and flares (render/spotlight_view.h)
 
 Spotlight::DrawShowing (0x822328E8) queues a spotlight whose intensity x
-colour is not zero into the SpotlightDrawer (0x822312C8); the DX drawer
-(ctor 0x8225F778) draws the queue (0x82260B40: beams 0x822601D0, then the
-other parts) after the world [C addresses]. No SpotlightDrawer object is on
-the disc: its defaults (0x8222F7B0: total 1, ambient 0 / 0.2, lit 0.2 /
-0.2, white, 0.025, fog and lit ranges 0..1000). GH2 draws the beams with
-its own shader (screen-space softness, constants 0x51 / 0x5a / 0x5b);
-gd02 draws them through the material shader [I]:
+green or blue reads as a byte into the SpotlightDrawer (0x822312C8); the
+default drawer (factory 0x82260498, no object on the disc: 0x8222F7B0 total
+1, ambient 0 / 0.2, lit 0.2 / 0.2, white, 0.025, ranges 0..1000) has two
+steps (vtable 0x82032BE4, second interface 0x82032BD4) [C]:
+- 0x82260D98 (end of the world): the beams, 0x82260B40 / 0x822601D0, into a
+  screen buffer with depthvolume.fx (compiled at run time: not in the
+  shader cache, 0x82307530), added by postprocess.fx FogPixel;
+- 0x8222EC40: shadows, additional objects, lenses, flares, floor spots.
 - the light can: the light_can mesh at the spotlight (light_can_offset
   along the beam), lit by its directory's Environ;
-- the beam (beam.material; all 341 beams are sheets, is_cone 0): a strip
-  facing the camera from `offset` to `offset + length` along the light's y,
-  top_radius at the light, bottom_radius at the end; the sides fade over
-  top_side_border .. bottom_side_border of the half width and the end over
-  bottom_border of the length; angle_offset tilts it (degrees); colour x
-  intensity x brighten, added; it fades when seen end-on [I];
+- the beam: render/spotlight_view.cpp beamStrip, every constant [C] from
+  0x82235F68 (the sheet), 0x8225E590 / 0x8225E3C0 / 0x8225FF98 (corners, the
+  screen ramp, the depth range), depthvolume.fx: colour x intensity x 8 x
+  brighten x saturate((w - nearest) x 0.125 / thickness) x (1 - screen
+  distance from the light / reach)^2, BillboardZ. The sheet's vertex alpha, the
+  beam material and borders do nothing on the 360. [I]: per vertex (17 rows);
+  the buffer's gain (total x 1024 x density in FogPixel, kept at 1); depth
+  test on in place of the shader's min() with the scene's depth;
 - a target turns the light's y axis onto it (0x82231610, bones through the
   entry's subpart, 0x82232CD0). The preset's quaternion is the LOCAL rotation
   (poll 0x82233250, parents apply). A spotlight shines along y [C: 0x82231AF0];
@@ -354,6 +357,10 @@ gd02 draws them through the material shader [I]:
   heading, where the light's y meets z = target.z + spot_height [C];
 - the lens (lens_material): the unit quad lens_size wide, square to y, at
   lens_offset [C];
+- additional_objects: draw children of the spotlight, not of the world
+  (0x822348F8), under an Environ of the spot's colour (the circles it
+  throws; before they were drawn lit by the world all the time) [C];
+- damping_constant (1.5 on 15 spotlights): the aim eases, 0x82233250 [C];
 - flares (the spotlight's when its preset entry says flare and
   flare_enabled; RndFlare objects; RndFlare draw 0x8220D6A8 [C]): a
   screen-space square size x the picture's width wide, lerped from size.x
@@ -689,9 +696,9 @@ the loaded venue.
   (0x8216DB48's order); the order of downbeat and one_bar_to in one frame
   (two cuts in the same beat happen); TransAnim repeat_trans / follow_path
   on camera paths (none on the disc).
-- Spotlights: GH2's beam shader (screen-space softness, fog),
-  damping_constant, additional_objects, xsection / cutouts (unused on the
-  disc).
+- Spotlights: the beam buffer's gain, xsection / cutouts (unused on the disc).
+- The free camera is a development cheat (cheats.dta, `cycle_free_camera`), not
+  for players: not built.
 - script_task keeps the values of every $variable its body names at
   creation, and a value the task sets stays set [I: later Harmonix code's
   ScriptTask]; GH2's own rule unread.

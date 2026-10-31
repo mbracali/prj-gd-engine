@@ -49,6 +49,12 @@ std::vector<const scene::Object*> drawList(const std::vector<const scene::Direct
             if (auto* g = o.as<scene::Group>())
                 for (const std::string& n : g->objects)
                     if (const scene::Object* c = g->dir ? g->dir->resolve(n) : nullptr; c && c != g) children.insert(c);
+            // A spotlight's can and additional objects are its draw children (0x822348F8).
+            if (auto* s = o.as<scene::Spotlight>()) {
+                if (const scene::Object* c = s->dir && !s->lightCan.empty() ? s->dir->resolve(s->lightCan) : nullptr) children.insert(c);
+                for (const std::string& n : s->additionalObjects)
+                    if (const scene::Object* c = s->dir ? s->dir->resolve(n) : nullptr) children.insert(c);
+            }
             if (drawable(&o)) all.push_back(&o);
         });
     std::vector<const scene::Object*> roots;
