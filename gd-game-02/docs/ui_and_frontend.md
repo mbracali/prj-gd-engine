@@ -187,8 +187,9 @@ Back turned the light on for a few seconds (gd-backlog GD02-077 / 081;
   (0x821424B0); the arrows keep their x and sit arrow_offset above
   (char_back) / below (char_next) the picked character's extent scaled by
   text_scale (0x82142218), the picked character scaled by text_scale
-  (0x82142120). GH2 also takes typed keys (backspace, 0x20..0x7E,
-  0x82143880; not in the port). `--walktest career` checks the name's
+  (0x82142120). Typed keys (0x82143880): backspace, 0x20..0x7E upper-cased;
+  the port takes letters, space and backspace (the digits stay the frets).
+  `--walktest band` types into the name. `--walktest career` checks the name's
   start stays put and the picked character follows it.
 - High score defaults (`0x822A4988`): 5 per song and difficulty, 50000 down
   to 10000, names from `highscore_dummy_N`.
@@ -198,15 +199,13 @@ Back turned the light on for a few seconds (gd-backlog GD02-077 / 081;
   help_bar.mesh / help_bar_strum.mesh (0x82299950, 0x82299778) with its own
   transform (the strum bar is 2 wide, 64 units; drawn at the pen's own
   transform it was half as wide, "broken in half"), and help_bar.txt
-  (0x822994F0), placed along the pen; the background box (help_box_left /
-  mid / right) is drawn only around the items (0x822998D0, 0x82299698):
-  the port does not draw it yet and hides the box meshes (left showing
-  they stood in the middle of every screen). The port lays the items out
-  in the help bar's own space (helpbar.view, on the metacam's camera), so
-  they keep together while a transition turns the camera (they drifted
-  against their icons by a few pixels on every screen change) [I: GH2
-  sets the items' world places from the start meshes' (0x82299CD8);
-  whether its help bar slides with the transition is not confirmed].
+  (0x822994F0), placed along the pen; each item has its background (0x82299420,
+  0x82298E00, 0x82298E90, called by 0x822998D0 and 0x82299698): help_box_left
+  at the icon, help_box_mid stretched under the icon's spacing and the label's
+  width, help_box_right at the label's end [C]. The items are copies of
+  templates under helpbar.view, parented to the metacam's camera, so the help
+  bar stays on the screen while a transition moves the panels (0x82299CD8 reads
+  the start meshes at enter, GD02-075).
 
 ### Inferred
 
@@ -475,12 +474,10 @@ next to it to start.
 - Sound effects play (docs/audio_and_charts.md section 4) without the
   reverb sends, the ADSR envelopes or the mute cheat (`synth
   set_master_vol`).
-- The endgame stats receipt draws dark (`turn_off_ambient` /
-  `reset_ambient` are no-ops).
-- Volume sliders apply from the next song or preview.
+- `turn_off_ambient` / `reset_ambient` are no-ops in GH2 too (0x8229FE78 only
+  answers them, [C]): the receipt's light is its own milo's.
 - Tutorial and practice: see "Training" below.
   The career and the store: docs/career_and_store.md.
-- Help bar background boxes.
 - The main menu's words are stacked tightly (re-checked in bug-fix 3: rows
   14 units apart, each `fit_text` 1 into 9 units tall against size 30 ×
   leading 0.7 (Text +0x11c × +0x100, 0x821CFF08), not the glyphs' height):
@@ -540,4 +537,9 @@ next to it to start.
 - `--walktest tutorial` (pause and quit), `tutorial1` (the 6 lessons of the
   first, charts 102..105), `tutorial2` (202..204: Star Power, whammy, wail),
   `tutorial3` (205, 206: hammer-ons and pull-offs).
+
+## Volumes
+`options set band_volume_idx ...` reach the song or preview at once
+(0x822B0F40 -> 0x822CE830 / 0x822CE938): the mixer's part volumes. The options
+screens set them on the way back; the pause screen's during a song.
 

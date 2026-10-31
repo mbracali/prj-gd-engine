@@ -128,8 +128,7 @@ bool envOn(const char* name) {
 // Two players (`parts`: their instruments): each player's (tracks
 // (<instrument> channels)) are muted while that player misses; the guitar
 // volume applies to both [I: GH2's per-player UnmuteBeatMatchAudio].
-std::vector<Mixer::Track> mixerTracks(const SongAudio& a, float band = 1, float guitar = 1,
-                                      const std::array<std::string, 2>* parts = nullptr) {
+std::vector<Mixer::Track> mixerTracks(const SongAudio& a, const std::array<std::string, 2>* parts = nullptr) {
     std::vector<Mixer::Track> tracks(a.pans.size());
     auto channelsOf = [&](const std::string& inst) {
         auto it = a.tracks.find(inst);
@@ -144,8 +143,8 @@ std::vector<Mixer::Track> mixerTracks(const SongAudio& a, float band = 1, float 
         } else {
             tracks[c].guitar = c < a.cores.size() && a.cores[c] == 1;
         }
-        const bool mine = tracks[c].guitar || tracks[c].guitar2;
-        tracks[c].volume = (c < a.vols.size() ? std::pow(10.0f, a.vols[c] / 20.0f) : 1.0f) * (mine ? guitar : band);
+        tracks[c].volume = c < a.vols.size() ? std::pow(10.0f, a.vols[c] / 20.0f) : 1.0f;
+        tracks[c].songPart = true;
     }
     return tracks;
 }
@@ -965,6 +964,7 @@ bool App::loadSong(const SongInfo& info, int difficulty, bool autoplay, float ba
         return false;
     }
     bandVolume_ = band, guitarVolume_ = guitar;
+    mixer_.setPartVolumes(band, guitar);
     // The lead-in until beginSong times GH2's intro clock.
     fastIntro_ = fastIntro;
     leadInMs_ = kLeadInMs;
@@ -1199,7 +1199,7 @@ void App::beginSong() {
     const std::array<std::string, 2> practicePart{parts_[0], parts_[0]};
     mixer_.setBackgroundDb(practice ? practiceBackgroundDb() : 0.0f);
     mixer_.play(std::move(pendingStream_),
-                mixerTracks(audio, bandVolume_, guitarVolume_, player2_ ? &parts_ : practice ? &practicePart : nullptr), leadInMs_);
+                mixerTracks(audio, player2_ ? &parts_ : practice ? &practicePart : nullptr), leadInMs_);
     mixer_.setSpeed(float(speed));
     mixer_.setClock(speed, std::max(0.0, startMs));
     // beatmatch set_paused before the game began (the tutorials' lessons
@@ -1297,6 +1297,15 @@ void App::handleEvent(const SDL_Event& e) {
     if (e.type == SDL_EVENT_QUIT) {
         running_ = false;
         return;
+    }
+    // A text entry takes typed letters, space and backspace (GH2's key message,
+    // 0x82143880). The digits stay the frets, the Enter and Escape their menu keys.
+    if (ui_ && e.type == SDL_EVENT_KEY_DOWN && !e.key.repeat && ui_->textEntryFocused()) {
+        const SDL_Keycode k = e.key.key;
+        if ((k >= SDLK_A && k <= SDLK_Z) || k == SDLK_SPACE || k == SDLK_BACKSPACE) {
+            ui_->typeKey(k == SDLK_BACKSPACE ? 8 : int(k));
+            return;
+        }
     }
     if (e.type == SDL_EVENT_WINDOW_HDR_STATE_CHANGED && canvas_.renderer().ready()) {  // HDR on / off, paper white, headroom
         canvas_.renderer().device().hdrStateChanged();
@@ -2024,6 +2033,8 @@ void App::gameBegin() {
 
 int App::gameCounter(int player, const std::string& key) const {
     if (key == "surface_overrides") return track_ ? track_->surfaceOverrides() : 0;
+    if (key == "mixer_band_pct") return int(std::lround(bandVolume_ * 100));
+    if (key == "mixer_guitar_pct") return int(std::lround(guitarVolume_ * 100));
     if (key == "band_fx_particles") return venueView_ ? venueView_->bandView().fxParticles() : 0;
     if (key == "spot_shadows") return venueView_ ? venueView_->spotlights().shadowsTotal() : 0;
     const int p = std::clamp(player, 0, 1);
@@ -2339,7 +2350,7 @@ void App::songPreview(const std::string& songId) {
     try {
         auto s = std::make_unique<VorbisStream>(data_->read(it->audio.moggPath));
         auto loop = std::make_unique<LoopSource>(std::move(s), it->previewStartMs, it->previewEndMs, 1000);
-        mixer_.play(std::move(loop), mixerTracks(it->audio, bandVolume_, guitarVolume_), 0);
+        mixer_.play(std::move(loop), mixerTracks(it->audio), 0);
         music_ = Music::Preview;
     } catch (const std::exception& e) {
         SDL_Log("song_preview %s: %s", songId.c_str(), e.what());
@@ -2418,6 +2429,9 @@ void App::applyOptions(float band, float guitar, float fx, bool lefty0, bool lef
     fxVolumeDb_ = data_ ? Synth::optionsVolumeDb(*data_, int(std::lround(fx * 11.0f))) : 20.0f * std::log10(std::max(fx, 1e-5f));
     if (synth_) synth_->setFxVolumeDb(fxMuted_ ? -96.0f : fxVolumeDb_);
     bandVolume_ = band, guitarVolume_ = guitar;
+    // The sliders act at once on the song or preview playing (0x822B0F40 ->
+    // 0x822CE830 / 0x822CE938) [C].
+    mixer_.setPartVolumes(band, guitar);
     syncOffsetMs_ = syncOffsetMs;
     if (!SDL_getenv("GD02_LEFTY")) input_.setLefty(lefty0, lefty1);
 }

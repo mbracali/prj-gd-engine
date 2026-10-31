@@ -87,6 +87,9 @@ public:
     // A BandTextEntry has the focus (the keyboard's Enter is Start there).
     bool textEntryFocused();
     void buttonUp(int button, int player);
+    // A typed key for the focused text entry (band names); false: none is focused.
+    bool textEntryFocused() const;
+    bool typeKey(int code);
     // A game event for the game panel and its sinks (intro_start_msg,
     // game_won_msg, game_lost, game_outro_complete, star_power_ready...).
     void gameEvent(const std::string& msg, std::vector<Value> args = {});

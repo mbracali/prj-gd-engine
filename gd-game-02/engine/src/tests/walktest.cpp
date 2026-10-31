@@ -801,9 +801,11 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         key(SDLK_1), wait(250);                                // "C"
         key(SDLK_DOWN), wait(250);                             // D
         key(SDLK_1), wait(250);                                // "CD"
+        key(SDLK_X), wait(150), key(SDLK_BACKSPACE), wait(150);  // typed (GD02-085): "CDX", "CD"
+        key(SDLK_E), wait(150);                                // typed: "CDE"
         key(SDLK_RETURN);
         at("sel_difficulty_screen");
-        check("band_named_CD");
+        check("band_named_CDE");
         expect_ = {"splash_screen", "startup_load_finder_screen", "startup_create_save_screen", "saving_screen", "guitar_help_screen",
                    "main_screen", "chooseprof_screen", "nameprof_screen", "sel_difficulty_screen"};
     } else if (scenario == "logo_skip") {
@@ -1290,7 +1292,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         // (sync_click.cue) struck along, its result, and back.
         at("main_screen");
         wait(2000);  // the main menu's entrance (a press during it is lost)
-        for (int i = 0; i < 3; ++i) press(kDown), wait(150);  // OPTIONS
+        for (int i = 0; i < 4; ++i) press(kDown), wait(150);  // OPTIONS
         press(kX);
         at("options_screen");
         press(kX);  // Audio Settings (the focus)
@@ -1306,6 +1308,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         press(kTri);  // back: set_volumes, autosave
         at("options_screen", 20000);
         check("volumes_saved");
+        check("volumes_live");
         press(kDown), wait(150);  // Video Settings
         press(kX);
         at("video_settings_screen");
@@ -1695,6 +1698,14 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         ++step_, stepStart_ = -1;
         return;
     }
+    if (s.screen == "volumes_live") {
+        // GD02-046: the sliders' values reach the mixer at once (0x822B0F40).
+        const int band = ui.host().gameCounter(0, "mixer_band_pct"), guitar = ui.host().gameCounter(0, "mixer_guitar_pct");
+        std::printf("  volumes: the mixer's band %d%%, guitar %d%%\n", band, guitar);
+        if (band >= 100 || guitar >= 100) return fail("the sliders' volumes did not reach the mixer");
+        ++step_, stepStart_ = -1;
+        return;
+    }
     if (s.screen == "band_shadows") {
         // target_shadow's SHADOW_*.spot: the band's flattened shadow groups (0x8222EE58).
         const int n = ui.host().gameCounter(0, "spot_shadows");
@@ -1991,11 +2002,11 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         ++step_, stepStart_ = -1;
         return;
     }
-    if (s.screen == "band_named_CD") {
+    if (s.screen == "band_named_CDE") {
         const int slot = ui.session().profileSlot;
         const std::string name = slot < 0 ? "" : ui.career().profiles[size_t(slot)].name;
         std::printf("  band: new band \"%s\"\n", name.c_str());
-        if (name != "CD") return fail("the band's name is \"" + name + "\", not \"CD\" (arrows, green, Enter)");
+        if (name != "CDE") return fail("the band's name is \"" + name + "\", not \"CDE\" (arrows, green, typed letters, Enter)");
         ++step_, stepStart_ = -1;
         return;
     }

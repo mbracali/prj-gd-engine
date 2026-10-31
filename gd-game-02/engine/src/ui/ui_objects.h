@@ -64,6 +64,8 @@ public:
     int maxLength = 8;
     void initTextEntry();
     void updateTextEntry();
+    // A typed key on a text entry (0x82143880).
+    bool keyChar(int code);
     // Handles a button for the focused component (true: handled).
     bool buttonDown(int button, int player);
 

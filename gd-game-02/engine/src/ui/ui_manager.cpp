@@ -1068,6 +1068,18 @@ void UiManager::routeButton(int button, int player) {
     if (fp->buttonDown(button, player) && fp->focus != before && s->handler("helpbar")) updateHelpbar();
 }
 
+bool UiManager::textEntryFocused() const {
+    if (splash_ >= 0 || !current_ || phase_ != Phase::Idle) return false;
+    PanelObj* fp = current_->focusPanel();
+    ComponentObj* c = fp && fp->up ? fp->focused() : nullptr;
+    return c && c->isTextEntry() && !c->done;
+}
+
+bool UiManager::typeKey(int code) {
+    if (!textEntryFocused()) return false;
+    return current_->focusPanel()->focused()->keyChar(code);
+}
+
 void UiManager::buttonUp(int button, int player) {
     player = std::clamp(player, 0, 1);
     if (held_[size_t(player)].button == button) held_[size_t(player)] = {};

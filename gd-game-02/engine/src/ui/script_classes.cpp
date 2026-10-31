@@ -103,6 +103,34 @@ void ComponentObj::refreshList() {
     }
 }
 
+// BandTextEntry's key message (0x82143880) [C]: backspace removes the last
+// character; 0x20..0x7E, upper-cased, adds it when the font has it (here:
+// the entry's character set) and the name has room; anything else is
+// component_bad_selection.
+bool ComponentObj::keyChar(int code) {
+    if (!isTextEntry() || done) return false;
+    UiManager& ui = panel->ui;
+    if (code == 8 && !entered.empty()) {
+        entered.pop_back();
+        updateTextEntry();
+        ui.route("char_removed", {});
+        return true;
+    }
+    if (code >= 0x20 && code < 0x7f) {
+        const char c = char(code >= 'a' && code <= 'z' ? code - 0x20 : code);
+        if (charset.find(c) != std::string::npos || c == ' ') {
+            if (int(entered.size()) < maxLength) {
+                entered += c;
+                updateTextEntry();
+                ui.route("char_added", {});
+            }
+            return true;
+        }
+    }
+    ui.route("component_bad_selection", {});
+    return true;
+}
+
 bool ComponentObj::buttonDown(int button, int player) {
     UiManager& ui = panel->ui;
     if (isTextEntry()) {

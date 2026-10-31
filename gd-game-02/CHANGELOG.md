@@ -16,6 +16,9 @@ matches the tag's version. Nothing is released yet.
 - The circles some spotlights throw on the stage follow those lights.
 
 ### Added
+- The help bar's dark boxes around each button and label.
+- Type letters into a band's name on the keyboard (space and backspace too).
+- The band and guitar volumes change at once, also on the pause screen.
 - The Flaming Head cheat burns, and the guitarist's hands catch fire in a solo
   at the top of the Rock Meter, with the original's particle effects.
 - The band's shadows in the spotlights' pools on the stage.

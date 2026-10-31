@@ -42,6 +42,7 @@ public:
         float pan = 0;        // -1 left .. 1 right
         bool guitar = false;  // muted while the player is missing
         bool guitar2 = false;  // the second player's part (two players on different parts)
+        bool songPart = false;  // a song's channel: the options' volumes act on it
     };
     // Starts playback after `leadInMs` of silence; song time 0 is the start of the audio.
     // `stream`: a song (VorbisStream) or any AudioSource (a video's sound).
@@ -60,6 +61,9 @@ public:
     // their own fader on top of the music: -7.5 dB at any speed
     // (beatmatcher.dta practice_attenuation, 0x823347B8) and silence below
     // 100% (0x822CE830: -96 dB unless the dev cheat $stretch_bg) [C].
+    // The options' band and guitar volumes (gains), live: the channels of
+    // the players' parts take `guitar`, the others `band`.
+    void setPartVolumes(float band, float guitar) { bandVolume_.store(band), guitarVolume_.store(guitar); }
     void setBackgroundDb(float db) { backgroundGain_.store(db <= -96.0f ? 0.0f : std::pow(10.0f, db / 20.0f)); }
     // The music's volume (dB, -96 silent), reached over `fadeMs` (GH2's
     // beatmatch set_volume, music_fader fade). Kept across play().
@@ -119,6 +123,7 @@ private:
     std::atomic<bool> paused_{false};
     double clockScale_ = 1, clockOffsetMs_ = 0;
     std::atomic<float> backgroundGain_{1};
+    std::atomic<float> bandVolume_{1}, guitarVolume_{1};
     double pausedTimeMs_ = 0;
     double frameMs_ = 0;
     uint64_t frameNs_ = 0;

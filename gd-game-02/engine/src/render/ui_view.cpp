@@ -597,6 +597,23 @@ float UiView::drawTemplate(MaterialRenderer& r, const std::string& key, const sc
     return lt->layout.maxWidth();
 }
 
+float UiView::templateWidth(const std::string& key, const scene::Text& tmpl, const std::string& str) {
+    const scene::Font* font = tmpl.dir ? tmpl.dir->resolve<scene::Font>(tmpl.font) : nullptr;
+    if (!font || str.empty()) return 0;
+    auto& lt = keyed_[key];
+    if (!lt || lt->str != str || lt->font != font) {
+        if (!lt) lt = std::make_unique<LabelText>();
+        lt->str = str;
+        lt->font = font;
+        FontMetrics fm(*font);
+        TextStyle st;
+        st.size = tmpl.size, st.leading = tmpl.leading, st.wrapWidth = tmpl.wrapWidth, st.italics = tmpl.italics;
+        st.align = tmpl.align, st.capsMode = tmpl.capsMode, st.markup = tmpl.markup, st.color = tmpl.color;
+        lt->layout = layoutText(&fm, str, st);
+    }
+    return lt->layout.maxWidth();
+}
+
 void UiView::drawMeshAt(MaterialRenderer& r, const scene::Mesh& mesh, const scene::Mat* mat, const scene::Xfm& world) {
     if (!cache_.mesh(&mesh)) return;
     drawMesh(r, cache_, mesh, toMat4(world), &pose_, mat ? mat : findMat(mesh, mesh.mat));

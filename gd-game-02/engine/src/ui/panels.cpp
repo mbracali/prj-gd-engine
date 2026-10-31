@@ -70,9 +70,7 @@ public:
         if (!view) return;
         // GH2 draws the icon and label templates only as copies at each
         // item (0x8229A630), and the background box (help_box_left / mid /
-        // right) only around the items (0x822998D0, 0x82299698) [C]. The
-        // port does not draw the boxes yet; left showing, they stood at
-        // their rest place in the middle of every screen.
+        // right) only around the items (0x822998D0, 0x82299698) [C].
         for (const char* t : {"help_bar.mesh", "help_bar_strum.mesh", "help_bar_starting.mesh", "help_bar_strumbar.mesh", "help_bar.txt",
                               "help_box_left.mesh", "help_box_mid.mesh", "help_box_right.mesh"})
             view->setShowing(t, false);
@@ -202,6 +200,29 @@ private:
         scene::Xfm pen = pose.local(start);
         scene::Xfm strumPen = strumStart ? pose.local(strumStart) : pen;
         const scene::Xfm textLocal = pose.local(text);
+        // The background (0x82299420, 0x82298E00, 0x82298E90) [C]: each item
+        // starts with help_box_left at its icon; help_box_mid is stretched
+        // under the icon's spacing and under the label's width (mesh width
+        // from its first and third vertices); help_box_right closes it at the
+        // label's end.
+        const auto boxMesh = [&](const char* n) -> const scene::Mesh* {
+            const auto* o = view->find(n);
+            return o ? o->as<scene::Mesh>() : nullptr;
+        };
+        const scene::Mesh* boxMid = boxMesh("help_box_mid.mesh");
+        const scene::Mesh* boxLeft = boxMesh("help_box_left.mesh");
+        const scene::Mesh* boxRight = boxMesh("help_box_right.mesh");
+        const auto box = [&](const scene::Mesh* m, const std::array<float, 3>& pos, float width) {
+            if (!m) return;
+            scene::Xfm at = pose.local(m);
+            at.pos = pos;
+            if (width > 0 && m->verts.size() > 2) {
+                const float mw = m->verts[2].pos[0] - m->verts[0].pos[0];
+                if (mw != 0)
+                    for (int i = 0; i < 3; ++i) at.rot[size_t(i)] *= width / mw;
+            }
+            view->drawMeshAt(r, *m, nullptr, scene::compose(at, space));
+        };
         int k = 0;
         for (const auto& [kind, token] : shown_) {
             scene::Xfm& p = kind == "strum" ? strumPen : pen;
@@ -216,13 +237,20 @@ private:
                 // transform, the strum bar was squeezed to half its width.
                 scene::Xfm at = pose.local(m);
                 at.pos = p.pos;
+                const float spacing = kind == "strum" ? strumSpacing : buttonSpacing;
+                box(boxMid, p.pos, spacing);
+                box(boxLeft, p.pos, 0);
                 view->drawMeshAt(r, *m, mat, scene::compose(at, space));
-                p.pos[0] += kind == "strum" ? strumSpacing : buttonSpacing;
+                p.pos[0] += spacing;
             }
             // The label: the template's orientation at the pen.
             scene::Xfm at = textLocal;
             at.pos = p.pos;
-            const float w = view->drawTemplate(r, "hb" + std::to_string(k++), *text, ui.localize(token), scene::compose(at, space));
+            const std::string label = ui.localize(token);
+            const float boxW = view->templateWidth("hb" + std::to_string(k), *text, label);
+            box(boxMid, p.pos, boxW);
+            box(boxRight, {p.pos[0] + boxW, p.pos[1], p.pos[2]}, 0);
+            const float w = view->drawTemplate(r, "hb" + std::to_string(k++), *text, label, scene::compose(at, space));
             p.pos[0] += w + textSpacing;
         }
     }

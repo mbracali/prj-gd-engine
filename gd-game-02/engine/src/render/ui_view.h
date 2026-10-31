@@ -145,6 +145,8 @@ public:
                        const scene::Xfm& world, const float* rgb = nullptr, float alpha = 1, int align = -1);
     float templateWidth(const scene::Text& tmpl, const std::string& str);
     void drawMeshAt(MaterialRenderer& r, const scene::Mesh& mesh, const scene::Mat* mat, const scene::Xfm& world);
+    // The width drawTemplate gives `str` (no draw).
+    float templateWidth(const std::string& key, const scene::Text& tmpl, const std::string& str);
     // A resource milo named by ui_objects.dta ("helpbar.milo", "../ui/button.milo"), loaded once.
     scene::Milo* resource(const std::string& rel);
 

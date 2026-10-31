@@ -179,6 +179,7 @@ void Mixer::fill(int frames) {
 
     const float target = guitarTarget_.load(), target2 = guitar2Target_.load();
     const float vTarget = volumeTarget_.load(), vStep = volumeStep_.load(), background = backgroundGain_.load();
+    const float bandVol = bandVolume_.load(), guitarVol = guitarVolume_.load();
     for (int i = 0; i < n; ++i) {
         size_t at = size_t((r + i) & (kRing - 1));
         volumeGain_ = volumeGain_ < vTarget ? std::min(vTarget, volumeGain_ + vStep) : std::max(vTarget, volumeGain_ - vStep);
@@ -188,7 +189,7 @@ void Mixer::fill(int frames) {
         float l = 0, rr = 0;
         for (size_t c = 0; c < tracks_.size(); ++c) {
             const Track& t = tracks_[c];
-            float v = ring_[c][at] * t.volume * volumeGain_ * (t.guitar ? guitarGain_ : t.guitar2 ? guitar2Gain_ : background);
+            float v = ring_[c][at] * t.volume * volumeGain_ * (t.guitar ? guitarGain_ : t.guitar2 ? guitar2Gain_ : background) * (!t.songPart ? 1.0f : t.guitar || t.guitar2 ? guitarVol : bandVol);
             // gd01's linear pan law: -1 = left only, 0 = both at full, 1 = right only [I].
             l += v * std::clamp(1.0f - t.pan, 0.0f, 1.0f);
             rr += v * std::clamp(1.0f + t.pan, 0.0f, 1.0f);
