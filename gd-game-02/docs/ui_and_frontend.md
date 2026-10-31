@@ -478,7 +478,7 @@ next to it to start.
 - The endgame stats receipt draws dark (`turn_off_ambient` /
   `reset_ambient` are no-ops).
 - Volume sliders apply from the next song or preview.
-- Tutorial and practice screens are generic panels (M10 /
+- Tutorial screens: see "Training" below (practice and tutorials); the rest were generic panels (M10 /
   M11). The career and the store: docs/career_and_store.md.
 - Help bar background boxes.
 - The main menu's words are stacked tightly (re-checked in bug-fix 3: rows
@@ -490,3 +490,21 @@ next to it to start.
   font's cell height / width tall (0x821CFB28), inside main_buttons.view's
   own (0.55, 1, 1.9) scale. All of it matches the code; not compared with
   a capture of the original yet (Q1).
+
+## Training: practice
+- ui/practice.dta: song -> part (guitar / bass or rhythm) -> difficulty ->
+  start and end section (`game practice_section_provider`: row 0 full_song,
+  then the EVENTS track's `[section x]`, each to the next; rows before the
+  start and sections with no gem of the chart inactive; `gamecfg
+  get_section_bounds`, `set (practice_sections n)`) -> speed (the song's
+  `practice_speeds`, else sound.dta's default_speeds, `0x822cee60`) [C].
+- modes.dta's song_block is `song`, or `song_coop` for another part; the mogg
+  is played at the speed, the clock at the speed, background silent below
+  100% (FINDINGS). The player counts only the sections' gems, `practice_end`
+  comes at the end section's end, music_fader fades the music [C].
+- The metronome is click_parser (TRIGGERS 24..26) below 100%, the section
+  names events_parser (EVENTS, echo) [C]; sounds from sfx/practice_bank.
+- The surface is track/surfaces/rosewood_keep.bmp: modes.dta's
+  track_surface_override (0x82693620); in the other modes the player's
+  character's own bitmap (+0x3c), which the port now also draws [C].
+- `--walktest practice`, `practice_menus`, `career_practice`.

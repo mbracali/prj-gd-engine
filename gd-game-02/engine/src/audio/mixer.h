@@ -5,6 +5,7 @@
 #include <SDL3/SDL.h>
 
 #include <atomic>
+#include <cmath>
 #include <memory>
 #include <string>
 #include <thread>
@@ -55,7 +56,21 @@ public:
     // (GH2's set_music_speed: the failed song winding down, practice) [I for
     // the pitch]. The song clock is not corrected for it.
     void setSpeed(float speed);
+    // Practice (0x822CEAB0): the background channels (no player's track) get
+    // their own fader on top of the music: -7.5 dB at any speed
+    // (beatmatcher.dta practice_attenuation, 0x823347B8) and silence below
+    // 100% (0x822CE830: -96 dB unless the dev cheat $stretch_bg) [C].
+    void setBackgroundDb(float db) { backgroundGain_.store(db <= -96.0f ? 0.0f : std::pow(10.0f, db / 20.0f)); }
+    // The music's volume (dB, -96 silent), reached over `fadeMs` (GH2's
+    // beatmatch set_volume, music_fader fade). Kept across play().
+    void setVolumeDb(float db, float fadeMs = 0);
 
+    // Practice: the audio plays at `scale` x its rate (setSpeed(scale)) and
+    // the song clock is `offsetMs` (where the stream was started) + the
+    // audio's own time, so the chart runs at the music's speed
+    // (set_music_speed scales the clock, 0x822E1DF8) [C]; set after play(),
+    // stop() resets it.
+    void setClock(double scale, double offsetMs) { clockScale_ = scale > 0 ? scale : 1, clockOffsetMs_ = offsetMs; }
     // Song time in ms at `ticksNs` (SDL_GetTicksNS clock), or now if 0.
     double songTimeMs(uint64_t ticksNs = 0) const;
     // The clock for drawing a frame: songTimeMs advanced by the wall clock and
@@ -90,6 +105,8 @@ private:
     std::thread worker_;
     std::atomic<int64_t> underruns_{0};
 
+    std::atomic<float> volumeTarget_{1}, volumeStep_{1};  // linear gain, its change per frame
+    float volumeGain_ = 1;  // audio thread only
     std::atomic<float> guitarTarget_{1};
     float guitarGain_ = 1;  // audio thread only
     std::atomic<float> guitar2Target_{1};
@@ -100,6 +117,8 @@ private:
     std::atomic<uint64_t> anchorNs_{0};
     std::atomic<int64_t> leadIn_{0};
     std::atomic<bool> paused_{false};
+    double clockScale_ = 1, clockOffsetMs_ = 0;
+    std::atomic<float> backgroundGain_{1};
     double pausedTimeMs_ = 0;
     double frameMs_ = 0;
     uint64_t frameNs_ = 0;

@@ -52,6 +52,16 @@ public:
     // Lefty flip (the player's option): the slots mirror (0x82699E78,
     // 0x82691348) [C].
     void setLefty(bool lefty) { lefty_ = lefty; }
+    // The player's track surface (0x82693620, 0x82699B70):
+    // track/surfaces/<name>_keep.bmp as track_surface.mat's texture, <name>
+    // the mode's track_surface_override (config/modes.dta: rosewood in
+    // practice and the tutorials) or else the player's character (outfit
+    // name, alterna1...; empty: the song's quickplay one). `mode`: gamecfg's
+    // mode (quickplay, practice...).
+    void setSurface(const GameData& data, const std::string& mode, const std::string& character, const std::string& songId);
+    const std::string& surfaceName() const { return surfaceName_; }
+    // Frames whose surface drew with that texture.
+    int surfaceOverrides() const { return surfaceOverrides_; }
     // The song is won (game.dta game_won_msg: {track_panel explode}).
     void explode(float nowMs);
     // The scripts' animate on the track's extend anim (player.dta
@@ -130,6 +140,10 @@ private:
 
     scene::Milo* track_ = nullptr;
     int player_ = -1;
+    // The surface texture (setSurface); null: the scene's own track_surface.tex.
+    const scene::Tex* surfaceTex_ = nullptr;
+    std::string surfaceName_;
+    int surfaceOverrides_ = 0;
     bool lefty_ = false;
     const scene::Cam* cam_ = nullptr;
     std::array<float, 4> screenRect_{0, 0, 1, 1};

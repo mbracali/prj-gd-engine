@@ -151,6 +151,10 @@ bool UiManager::init(std::string& error, bool headless) {
     }
     macros_ = loader_->macros;
     modes_ = boot_->find("modes");
+    // $syscfg: the system config (config/gh2.dta and its includes), read
+    // by {find $syscfg ...} (modes.dta practice's pre_processed_audio,
+    // cheats_funcs.dta) [C data].
+    interp_.var("syscfg") = interp_.toValue(*boot_);
     // The players' and their matchers' handlers: gh2.dta (player (handlers
     // ...)) (Player, 0x822C9720) and (beatmatch (player_matcher_handlers
     // ...)) (PlayerMatcher, 0x822E44B0) [C].
@@ -791,6 +795,10 @@ void UiManager::update() {
     lastWall_ = wall;
     uiMs_ += frameDt_;
     if (!(host_.gameLoaded() && host_.gamePaused())) secondsMs_ += frameDt_;
+    // kTaskTutorialSeconds: TutorialPanel's own timer, run by its poll while
+    // the panel is not paused, so a lesson's sleeps go on with the game
+    // paused and stop under tut_pause_screen (tutorial set_paused) [C].
+    if (PanelObj* t = panel("tutorial"); !t || !t->paused) tutorialMs_ += frameDt_;
     if (gamepadsAtMs_ > 0 && wall >= gamepadsAtMs_) openGamepads();
     if (splash_ >= 0) {
         splashMs_ += frameDt_;
@@ -803,7 +811,7 @@ void UiManager::update() {
     TaskMgr& tm = interp_.tasks();
     tm.setTime(kTaskUISeconds, uiMs_ / 1000.0);
     tm.setTime(kTaskSeconds, taskSeconds());
-    tm.setTime(kTaskTutorialSeconds, secondsMs_ / 1000.0);
+    tm.setTime(kTaskTutorialSeconds, tutorialMs_ / 1000.0);
     tm.setTime(kTaskBeats, host_.gameLoaded() ? host_.gameBeat() : 0.0);
     tm.poll();
     if (!deferred_.empty()) {

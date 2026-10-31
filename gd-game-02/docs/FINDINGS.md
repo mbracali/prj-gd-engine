@@ -470,10 +470,21 @@ decides in co-op is [I], see below].
   (guitar) or `song_coop` (`modes.dta`); the only code that touches
   `song_practice_N` rewrites paths of downloaded songs (`0x822af468`) [C].
 - No pitch correction: none of the `pitch_correct` keys exist in the
-  executable [C]. The channel voices take the speed as a playback frequency
-  ratio clamped to 0.01…2 (`0x8268a100`) [I: that this voice class is the one
-  the song stream uses], so slowed practice audio is resampled and **its
-  pitch drops** (85% ≈ −2.8 semitones) [I].
+  executable [C], `FxSendPitchShift` / SoundTouch are only an Fx class no
+  song stream sends to [C], and the stream's channel voices (`0x826a1d40` ->
+  the voice's speed, `0x8268a100`) take the speed as a frequency ratio
+  clamped to 0.01…2. So slowed practice audio is resampled and **its pitch
+  drops** (85% ≈ −2.8 semitones) [C for the path; GD02-034].
+- The background is not heard below 100% [C]: `0x822ceab0` -> `0x822ce830`
+  sets the background fader (+0x20, on every channel that is not a playing
+  track's, `0x82335c30` / `0x82336910`) to the option's value, or to −96 dB
+  in practice with `practice_speed` ≠ 0 and not the dev cheat `$stretch_bg`.
+  Practice also sets fader +0x30 to `practice_attenuation` (−7.5 dB,
+  `0x822d08f0` -> `0x823347b8`) on the same channels at every speed. So
+  below 100% only the player's part and the click track sound.
+- The clock (`0x822cbd18`) starts a measure before the start section's
+  measure (in the first measure: −4 beats); `practice_end` is a task at the
+  end section's end [C].
 - When the speed is not 100% a click track (TRIGGERS notes 24/25/26) plays
   (`ui/gen/practice.dta`, `click_parser`) [C]. Practice also disables Star
   Power and failing, skips the intro and counts only gems inside the chosen

@@ -416,6 +416,15 @@ void Player::update(float t) {
 
 // ================================================================= player
 
+// 0x00110e78 [C]: beats are ticks / 480.
+void Player::bigNoteCheck(int gem) {
+    if (nextBigNote_ >= bigNotes_.size()) return;
+    const float beat = float(chart_.gems[size_t(gem)].tick) / 480.0f, big = float(bigNotes_[nextBigNote_]) / 480.0f;
+    if (big - 0.2f > beat) return;
+    ++nextBigNote_;
+    if (beat < big + 0.2f) emit(PlayerEvent::Kind::BlewBigNote, gem);
+}
+
 bool Player::inPractice(int gem) const {
     const int tick = chart_.gems[size_t(gem)].tick;
     return tick >= practiceStartTick_ && tick < practiceEndTick_;
@@ -660,7 +669,7 @@ void Player::starPowerEngage(bool engaged, float t) {
     if (failed_) return;
     engaged_ = engaged;
     emit(PlayerEvent::Kind::StarPowerEngage, -1, engaged ? 1.0f : 0.0f);
-    if (!engaged || spActive_ || !spReady_) return;
+    if (!mercuryEnabled_ || !engaged || spActive_ || !spReady_) return;
     if (!partner_) {
         spStart(true);
         return;
@@ -723,6 +732,7 @@ void Player::setWhammyValue(float value, float t) {
 // armed or captured (state 2 / 3), and while the bar moved within the last
 // whammy_timeout (500 ms). Sends whammy_start / whammy_end.
 void Player::whammyPoll(float t) {
+    if (!whammyStarPowerEnabled_) return;
     bool eligible = false;
     if (sustainGem_ >= 0 && tail_.gem == sustainGem_) {
         const int p = chart_.gems[size_t(sustainGem_)].phrase;

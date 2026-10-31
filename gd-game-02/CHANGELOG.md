@@ -4,6 +4,18 @@ All notable changes for players. Versions follow SemVer; release tags are
 `gd-game-02/vX.Y.Z`. The release workflow publishes the section whose heading
 matches the tag's version. Nothing is released yet.
 
+## [Unreleased]
+
+### Added
+- Practice mode, as on the Xbox 360: pick the song, the part, the difficulty,
+  a start and an end section and a speed. Below 100% the song is slowed
+  (its pitch drops, as in the original), only your part is heard and a click
+  track keeps time; the section names show as you play, and you can change
+  speed or section from the pause and end menus.
+- The track wears your character's own surface picture, and rosewood in
+  practice and the tutorials, as on the Xbox 360.
+- The "blew a big note" crowd sound.
+
 ## [0.1.9] - 2026-10-30
 
 **The whammy bar fattens sustain tails again, as in the original.**

@@ -134,6 +134,10 @@ public:
 
     // Native messages; return true when handled (result in `r`).
     virtual bool handleNative(Interp&, const std::string& /*msg*/, std::vector<Value>& /*args*/, Value& /*r*/) { return false; }
+    // Messages the object's native code takes before its script handlers
+    // (a panel's enter / exit: UIPanel's Enter / Exit run the script's own
+    // enter / exit handler themselves).
+    virtual bool nativeFirst(const std::string& /*msg*/) const { return false; }
     // Properties: [name], {o get name}, {o set name v}. Natives override to
     // expose their state; the defaults use `props` then the definition.
     virtual Value getProp(Interp& in, const std::string& key);
@@ -264,7 +268,8 @@ public:
                                           "interp_task", "foreach_venue", "wait", "wait_timeout", "iterate"};
     // Messages whose $var arguments are passed by name (as symbols).
     std::vector<std::string> byNameMessages{"foreach_player", "foreach_player_matcher", "interp_task", "foreach_venue",
-                                            "finish_song", "next_cash_award", "get_highscore", "wait_timeout", "iterate"};
+                                            "finish_song", "next_cash_award", "get_highscore", "wait_timeout", "iterate",
+                                            "get_section_bounds"};
 
     // ---- host settings
     std::map<std::string, std::string> locale;  // {localize token}

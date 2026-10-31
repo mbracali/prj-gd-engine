@@ -503,8 +503,8 @@ library (last-bit differences never seen in 330 parameter sets).
 
 ## Open questions
 
-1. Practice mode: the `_pNN` moggs are not on the 360 disc. Does the game
-   time-stretch the full mogg, or is practice audio missing?
+1. Practice mode (settled, GD02-034): the `_pNN` moggs are not on the 360 disc; the
+   song's mogg is resampled (pitch drops), see FINDINGS "Practice mode".
 2. Exact meaning of the mogg map's sample column (resync point vs granule).
 3. Note 110 "big note": what it triggers.
 4. HOPO comparison (`<` or `<=` 170), chord window and sustain cut-off in
