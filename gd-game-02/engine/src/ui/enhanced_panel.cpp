@@ -401,8 +401,8 @@ const std::vector<Item>& items() {
         {Kind::Cheat, "cheat_hyper_speed_mode", "", true,
          "The original cheat: the notes come down the highway one and a half times as fast. Code at the main menu: "
          "Blue, Orange, Yellow, Orange, Blue, Orange, Yellow, Yellow."},
-        {Kind::Cheat, "cheat_flaming_head", "", false,
-         "The original cheat: the guitarist's head is on fire (the band's flames do not burn yet in this version). "
+        {Kind::Cheat, "cheat_flaming_head", "", true,
+         "The original cheat: the guitarist's head is on fire. "
          "Code at the main menu: Yellow, Orange, Yellow, Yellow, Orange, Yellow, Yellow, Orange."},
         {Kind::Cheat, "cheat_eyeball_head_crowd", "", true,
          "The original cheat: everyone in the crowd has a giant eyeball for a head. Code at the main menu: Yellow, "

@@ -49,6 +49,7 @@
 #include "render/hud_view.h"
 #include "render/scene_gpu.h"
 #include "render/track_view.h"
+#include "render/band_view.h"
 #include "render/venue_view.h"
 #include "scene/milo.h"
 #include "script/script.h"
@@ -2023,6 +2024,7 @@ void App::gameBegin() {
 
 int App::gameCounter(int player, const std::string& key) const {
     if (key == "surface_overrides") return track_ ? track_->surfaceOverrides() : 0;
+    if (key == "band_fx_particles") return venueView_ ? venueView_->bandView().fxParticles() : 0;
     if (key == "spot_shadows") return venueView_ ? venueView_->spotlights().shadowsTotal() : 0;
     const int p = std::clamp(player, 0, 1);
     if (key == "sp_phrases") return spPhrases_[p];

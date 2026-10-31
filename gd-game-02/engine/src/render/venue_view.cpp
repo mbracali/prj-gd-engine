@@ -190,6 +190,7 @@ void VenueView::draw(gfx::Renderer& r, int viewW, int viewH, bool hdr) {
     }
     particleRenderer_->resetStats();
     crowdView_->resetStats();
+    bandView_->resetStats();
     particleRenderer_->setHdr(hdr);
     gfx::MaterialRenderer& mr = r.materials();
     for (const Root& root : roots_) drawObject(mr, root.object, root.env, nullptr, 0);

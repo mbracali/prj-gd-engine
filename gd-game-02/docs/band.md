@@ -634,6 +634,15 @@ guitar | bass | grim | cheat)`, skins with outfit milo and mat),
   `GD02_FACE_CAM=<member>[:<distance>]` (a close-up of that member's head:
   `singer`, `guitarist0`, ...).
 
+## Effects on the band [C data]
+
+The character milos hold RndDirs proxying char/shared/ng/gen/*.milo
+(cheat_headflames, hand_flames_L / _R, god_particles, god_rays, guitar_fire);
+char_objects.dta starts and stops them: `{cheat_headflames start}` at enter
+with $cheat_enabled_flaming_head, hand_flames in a solo at peak. Member::fx
+loads the proxy at the first start; BandView::drawFx runs its AnimFilters and
+particle systems under the dir's parent bone. `--walktest flaming_head`.
+
 ## Shadows [C unless noted]
 
 The band's shadows are not a shadow map. Venues have dedicated spotlights

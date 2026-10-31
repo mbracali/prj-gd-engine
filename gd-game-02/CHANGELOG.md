@@ -16,6 +16,8 @@ matches the tag's version. Nothing is released yet.
 - The circles some spotlights throw on the stage follow those lights.
 
 ### Added
+- The Flaming Head cheat burns, and the guitarist's hands catch fire in a solo
+  at the top of the Rock Meter, with the original's particle effects.
 - The band's shadows in the spotlights' pools on the stage.
 - Long hair collides with the shoulders and the head.
 - Practice mode, as on the Xbox 360: pick the song, the part, the difficulty,

@@ -863,8 +863,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         check("cheat_air_off");
         // The same cheats in Enhanced Options > CHEATS (up from Gamepads
         // wraps to the list's end): Monkey Head Crowd on, Eyeball Head Crowd
-        // on (one crowd head at a time), Flaming Head (not built: stays
-        // off), Hyper Speed Mode off again.
+        // on (one crowd head at a time), Flaming Head on, Hyper Speed Mode off again.
         wait(900);
         for (int i = 0; i < 4; ++i) press(kDown), wait(150);  // OPTIONS
         press(kX);
@@ -1139,6 +1138,20 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         check("menu_sounds");
         expect_ = {"main_screen", "training_screen", "tutorials_screen", "tut_loading_screen", "tut_script_screen", "tut_pause_screen",
                    "tutorial_quit_screen", "meta_loading_screen", "main_screen"};
+    } else if (scenario == "flaming_head") {
+        // GD02-043: the Flaming Head code at the main menu, a song: the
+        // guitarist's cheat_headflames (char/shared) burns.
+        auto code = [&](std::initializer_list<int> buttons) {
+            for (int b : buttons) press(b), wait(120);
+        };
+        at("main_screen");
+        wait(2000);
+        code({kYellow, kOrange, kYellow, kYellow, kOrange, kYellow, kYellow, kOrange});
+        wait(2000);
+        quickplaySong(0);
+        wait(3000);
+        check("band_flames");
+        expect_ = {"main_screen", "qp_selsong_screen", "qp_diff_screen", "loading_screen", "game_screen"};
     } else if (scenario == "tutorial1") {
         // The whole first tutorial on autoplay: the tuning, then playing notes
         // (tutorial102), different notes (103), held notes (104), chords,
@@ -1326,7 +1339,7 @@ std::string WalkDriver::startScreen() const {
     if (scenario_ == "lose" || scenario_ == "pause" || scenario_ == "back" || scenario_ == "enhanced" || scenario_ == "cheats" ||
         scenario_ == "mouse" || scenario_ == "gamepads" || scenario_ == "gamepads_pad" || scenario_ == "stickyaxis" ||
         scenario_ == "whammy_tail" || scenario_ == "practice" || scenario_ == "practice_menus" || scenario_ == "tutorial" || scenario_ == "tutorial1" || scenario_ == "tutorial2" ||
-        scenario_ == "tutorial3" || scenario_ == "options")
+        scenario_ == "tutorial3" || scenario_ == "options" || scenario_ == "flaming_head")
         return "main_screen";
     if (scenario_ == "attract") return "splash_screen";
     return "";
@@ -1674,6 +1687,14 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         ++step_, stepStart_ = -1;
         return;
     }
+    if (s.screen == "band_flames") {
+        const int n = ui.host().gameCounter(0, "band_fx_particles");
+        std::printf("  flaming head: cheat %s, %d flame particles\n", ui.cheatOn("cheat_flaming_head") ? "on" : "off", n);
+        if (!ui.cheatOn("cheat_flaming_head")) return fail("the Flaming Head code did not turn the cheat on");
+        if (n < 1) return fail("no flame particle was drawn on the band");
+        ++step_, stepStart_ = -1;
+        return;
+    }
     if (s.screen == "band_shadows") {
         // target_shadow's SHADOW_*.spot: the band's flattened shadow groups (0x8222EE58).
         const int n = ui.host().gameCounter(0, "spot_shadows");
@@ -1905,7 +1926,7 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         std::printf("  cheats (Enhanced Options): monkey %d, eyeball %d, flaming head %d, hyper speed %d\n", monkey, eyeball, flaming, hyper);
         if (s.screen == "cheat_menu_monkey" && !monkey) return fail("Monkey Head Crowd did not turn on from the menu");
         if (s.screen == "cheat_menu_rest" && (monkey || !eyeball)) return fail("Eyeball Head Crowd did not replace Monkey Head Crowd");
-        if (s.screen == "cheat_menu_rest" && flaming) return fail("Flaming Head (not built) turned on");
+        if (s.screen == "cheat_menu_rest" && !flaming) return fail("Flaming Head did not turn on from the menu");
         if (s.screen == "cheat_menu_rest" && hyper) return fail("Hyper Speed Mode did not turn off from the menu");
         ++step_, stepStart_ = -1;
         return;
