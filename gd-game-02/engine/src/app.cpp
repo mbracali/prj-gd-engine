@@ -1279,6 +1279,7 @@ void App::endSong() {
     mixer_.setPaused(false);
     mixer_.setSpeed(1);
     mixer_.setVolumeDb(0);
+    mixer_.setBackgroundDb(0);
     mixer_.stop();
     band_.reset();
     if (gameParsers_)

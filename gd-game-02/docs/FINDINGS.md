@@ -202,13 +202,15 @@ poll extra `0x8234f028`, `+0x64` `0x8234eac8` (reset: pending, `+0x88`,
 `0x8234eb28`, `+0x70` `0x8234e948`, `+0x74` `0x8234f768` (next gem or −1),
 `+0x78` `0x8234f1c8`.
 
-**Open [I]:** OnHit (`0x823502e0`), OnMiss (`0x823503d0`) and a wrong
-HOPO (`0x8234f210`) first ask the watcher's `+0x10` object (vtable `+0x28`)
-about the gem's / the song's tick; when it answers true they do not hit or
-miss but call `+0x58` (`0x823526f8`: plays `bass_%d.cue` per slot, string
-`0x8205b738`). It looks like a free-play section for the bass; which
-object and which chart data drive it is not traced. gd02 always takes the
-normal path.
+**The bass path (GD02-036).** OnHit (`0x823502e0`), OnMiss (`0x823503d0`) and
+a wrong HOPO (`0x8234f210`) first ask the watcher's `+0x10` object (vtable
+`+0x28`) about the gem's / the song's tick; when it answers true they neither
+hit nor miss but call `+0x58` (`0x823526f8`: plays `bass_%d.cue` per slot,
+string `0x8205b738`). `+0x10` is the Beatmatcher (`0x8233c0e8` passes itself;
+slot `+0x28` = `0x8233aef0`): for a track type 0, 1 or 3, past `+0xc0`, the
+tick inside a range of the part's list (SongData +0x7c / +0x80 / +0x84,
+`0x823318a0`, `0x82343120`) [C]. No Sfx `bass_N.cue` exists in any bank on the
+disc [C data]; what fills the list is not traced, so gd02 takes the normal path.
 
 ### Pending wrong strum
 
@@ -598,7 +600,15 @@ Details, the save and the store: `docs/career_and_store.md`.
 4. ~~`min_length` and `recharge_rate`~~ Answered: `min_length` is copied to
    player +0xd4 (0x822C9720) and never read; the Star Power poll
    (0x822DBD60) has no recharge term [C as far as the export shows].
-5. ~~Co-op star thresholds~~ Answered as decoded: 0x822CE5D8 uses
+5. ~~Lefty flip, input sampling, latency~~ (GD02-037) Lefty changes the track's
+   drawing (slot x mirrored, `0x82699E78`) and, on a joypad, the controller type
+   (`lefty_joypad_guitar`, `0x8233c650`); a guitar's frets stay [C]. The
+   controller latency is the sync offset, added to the input time at watcher
+   `+0x2c` [C]. Sampling: the matcher reads the song time of its poll (`+0x8c`,
+   `0x8233aa80`), so GH2's inputs land on frames; gd02 takes each event's own
+   timestamp (`Mixer::songTimeMs`), at most a frame earlier [I: a deliberate
+   difference, see the backlog].
+5b. ~~Co-op star thresholds~~ Answered as decoded: 0x822CE5D8 uses
    `max_scores[song][1]` and `[3]` (the entries' difficulty keys) whatever
    difficulty was played; a song without max scores gets 5 stars.
 6. Range of the whammy value (assumed 0…1) and the controller's calibration

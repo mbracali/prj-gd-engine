@@ -321,7 +321,10 @@ public:
 
     void exit() override {
         PanelObj::exit();
-        sinks_.clear();
+        // The sinks stay (GD02-086): GamePanel's exit (0x822CC0A0) removes the
+        // panel from the world's source and nothing from its own, so RESTART
+        // ({game exit}, the same screen again: track_panel and hud are not
+        // entered again) keeps blow_streak and peak_on / peak_off [C].
         pendingBegin_ = false;
         ui.host().gameEnd();
     }
@@ -507,6 +510,12 @@ public:
             return true;
         }
         if (msg == "foreach_player_matcher") return true;
+        if (msg == "has_sink") {  // for the walks
+            const std::string n = args.empty() ? std::string() : argStr(0);
+            bool found = false;
+            for (const auto& [o, msgs] : sinks_) found = found || (o && o->name() == n);
+            return r = Value::integer(found ? 1 : 0), true;
+        }
         if (msg == "foreach_player") return r = ui.foreachPlayer(args), true;  // GameConfig's, on the game (game.dta beat)
         // player.dta's {handle (game star_power_start / stop $player_num)}:
         // the HUD and the world get Star Power from the program (HudView,

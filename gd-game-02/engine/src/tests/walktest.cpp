@@ -218,6 +218,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         press(kX);  // restart.btn
         at("game_screen");
         wait(2500);
+        check("game_sinks");  // track_panel and hud still hear the game after RESTART
         press(kStart);
         at("pause_screen");
         press(kUp);  // QUIT (up from RESUME)
@@ -350,8 +351,15 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
             check("career_target");
             press(kX);  // LET'S ROCK
             at("sel_venue_screen");
-            press(kX);  // the venue (set_career_venue: the newest unlocked)
+            // The newest unlocked venue has the focus (set_career_venue); on
+            // Easy a tier opens after 4 of its songs, so the target can be
+            // in an older one, and not the first left in the list (GD02-088).
+            wait(600);
+            check("career_pick_venue", 20000);
+            press(kX);
             at("sel_song_screen");
+            wait(600);
+            check("career_pick_song", 20000);
             check("career_song_target");
             press(kX);
             at("loading_screen");
@@ -1706,6 +1714,14 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         ++step_, stepStart_ = -1;
         return;
     }
+    if (s.screen == "game_sinks") {
+        Interp& in = ui.interp();
+        const bool track = in.send("game", "has_sink", {Value::symbol("track_panel")}).truthy(), hud = in.send("game", "has_sink", {Value::symbol("hud")}).truthy();
+        std::printf("  game sinks after RESTART: track_panel %d, hud %d\n", int(track), int(hud));
+        if (!track) return fail("track_panel lost the game's messages after RESTART");
+        ++step_, stepStart_ = -1;
+        return;
+    }
     if (s.screen == "band_shadows") {
         // target_shadow's SHADOW_*.spot: the band's flattened shadow groups (0x8222EE58).
         const int n = ui.host().gameCounter(0, "spot_shadows");
@@ -2033,7 +2049,7 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
     }
     if (s.screen == "career_target" || s.screen == "career_song_target") {
         const char* w = SDL_getenv("GD02_WALK_SONG");
-        const std::string target = w ? w : "strutter";
+        const std::string target = !winTarget_.empty() ? winTarget_ : w ? w : "strutter";
         if (s.screen == "career_target") {
             // The tiers' songs in order up to the target, at this difficulty.
             const int d = ui::campaign::difficulty(ui);
@@ -2054,6 +2070,23 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
             if (ui.session().song != target) return fail("the career offered " + ui.session().song + ", not " + target);
         }
         ++step_, stepStart_ = -1;
+        return;
+    }
+    if (s.screen == "career_pick_venue" || s.screen == "career_pick_song") {
+        const char* w = SDL_getenv("GD02_WALK_SONG");
+        const std::string target = !winTarget_.empty() ? winTarget_ : w ? w : "strutter";
+        ui::PanelObj* fp = ui.focusPanel();
+        std::string have, want;
+        int nav = kUp;
+        if (s.screen == "career_pick_venue") {
+            have = fp ? fp->focus : std::string(), want = "sv_" + ui::campaign::venueOf(ui, target) + ".btn";
+        } else {
+            ui::ComponentObj* c = fp ? fp->focused() : nullptr;
+            have = c ? ui.interp().send(c, "selected_sym", {}).str() : std::string(), want = target, nav = kDown;
+        }
+        if (have == want) return pass();
+        if (nowMs - stepStart_ > s.ms) return fail(s.screen + ": " + want + " not reached (on " + have + ")");
+        if (!ui.inTransition() && nowMs - lastNavMs_ > 250) ui.buttonDown(nav, 0), ui.buttonUp(nav, 0), lastNavMs_ = nowMs;
         return;
     }
     if (s.screen == "career_song_salvation") {

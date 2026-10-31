@@ -7,6 +7,7 @@ matches the tag's version. Nothing is released yet.
 ## [Unreleased]
 
 ### Fixed
+- After RESTART the track's streak flash and the HUD's peak message keep working.
 - Spotlight beams point where the original's do (they shine along the
   light's own axis, follow their targets and bones, and sit under moving
   rigs), and floor spots and lens discs have the original's size and place.
