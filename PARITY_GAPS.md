@@ -1,6 +1,6 @@
 # Parity gaps: what is missing for a 100% match (2026-10-29)
 
-Only original behaviour is listed, no Enhanced items. "Unverified" means the port has the feature, but nothing has compared it with the original yet, because no reference captures exist (GD02-064, GD03-018, GD04-027). IDs are rows in `gd-backlog.md`.
+Only original behaviour is listed, no Enhanced items. "Unverified" means the port has the feature, but nothing has compared it with the original; the owner dropped emulator comparisons on 2026-10-31 (GD02-064, GD03-018, GD04-027). IDs are rows in `gd-backlog.md`.
 
 ## gd-game-01: Guitar Hero (PS2)
 
