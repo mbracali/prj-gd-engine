@@ -423,7 +423,7 @@ next to it to start.
 
 - `--uitest`: 237 `new` objects, 82 panel milos, 357 component names checked
   in reachable handlers.
-- `--walktest quickplay|lose|pause|attract|career|career_full|career_song|back|enhanced|cheats|mouse|gamepads|stickyaxis`: drives the menus
+- `--walktest quickplay|lose|pause|attract|career|career_full|career_song|career_practice|practice|practice_menus|tutorial|tutorial1|tutorial2|tutorial3|options|flaming_head|back|enhanced|cheats|mouse|gamepads|stickyaxis`: drives the menus
   with scripted input and checks the screen order, the score in
   `career.json` and the endgame photo (quickplay), the band's look in
   `career.json` (career: Choose Band > NEW BAND, character / outfit / guitar / skin

@@ -2077,12 +2077,12 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         const std::string target = !winTarget_.empty() ? winTarget_ : w ? w : "strutter";
         ui::PanelObj* fp = ui.focusPanel();
         std::string have, want;
-        int nav = kUp;
+        const int nav = kDown;  // sel_venue.milo's nav_down runs from the newest venue to the first
         if (s.screen == "career_pick_venue") {
             have = fp ? fp->focus : std::string(), want = "sv_" + ui::campaign::venueOf(ui, target) + ".btn";
         } else {
             ui::ComponentObj* c = fp ? fp->focused() : nullptr;
-            have = c ? ui.interp().send(c, "selected_sym", {}).str() : std::string(), want = target, nav = kDown;
+            have = c ? ui.interp().send(c, "selected_sym", {}).str() : std::string(), want = target;
         }
         if (have == want) return pass();
         if (nowMs - stepStart_ > s.ms) return fail(s.screen + ": " + want + " not reached (on " + have + ")");
