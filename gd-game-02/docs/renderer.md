@@ -175,7 +175,7 @@ size (blur offsets kept in GH2's 640×320 uv units), the bright pass straight
 to half size (the 2×2 average of the full-size results, the same numbers),
 the Gaussian at a quarter; the final pass into the picture. The track and
 HUD are drawn afterwards over it [I: same picture, except that GH2's bright
-gems also feed the world's bloom]. Not built: FOG (depth-volume fog),
+gems also feed the world's bloom]. Not built: FOG (the beams' depth-volume buffer: the beams are added directly, docs/venues.md),
 BLENDPREVIOUS / COPYPREVIOUS and the flicker (unused by the data). The DOF /
 bloom buffers' 8-bit format is [I] (`0x821d5e30` with the screen's bpp).
 `GD02_POST=0` turns it off; `GD02_POST_DEBUG=bloom|dof|lum|doflow` shows the

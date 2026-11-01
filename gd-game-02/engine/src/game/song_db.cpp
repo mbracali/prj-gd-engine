@@ -67,6 +67,8 @@ std::vector<SongInfo> loadSongs(const GameData& data) {
         if (const DataNode* a = entry.find("artist")) s.artist = a->textAt(1);
         s.audio = std::move(*audio);
         s.coopAudio = readAudio(entry.find("song_coop"));
+        if (const DataNode* sp = valueList(entry.find("practice_speeds")))
+            for (size_t i = 0; i < sp->children.size(); ++i) s.practiceSpeeds.push_back(sp->intAt(i));
         if (const DataNode* p = entry.find("preview"); p && p->children.size() >= 3) {
             s.previewStartMs = p->floatAt(1);
             s.previewEndMs = p->floatAt(2);

@@ -7,7 +7,7 @@ nick_name: "Guitar Hero 80s"
 launch: 2007-07-24
 platforms: [PlayStation 2]
 based_on: PlayStation 2
-guitar_dream_version: "0.0.2"
+guitar_dream_version: "0.0.3"
 ready_to_play: true
 completeness: 0.8
 iso_signatures:

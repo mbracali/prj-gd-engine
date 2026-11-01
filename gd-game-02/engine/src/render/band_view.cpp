@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <set>
 
 #include "char/character.h"
@@ -43,7 +44,48 @@ bool BandView::draw(gfx::MaterialRenderer& mr, const scene::Object* slot, const 
     if (!c.visible) return true;
     selectEnv(c.slotEnviron ? c.slotEnviron : fallback);
     drawCharacter(mr, c, camera, hdr);
+    if (!m->fx.empty()) drawFx(mr, c, m, camera);
     return true;
+}
+
+void BandView::drawFx(gfx::MaterialRenderer& mr, chr::Character& c, const void* member, const gfx::Camera& camera) {
+    const auto* m = static_cast<const Band::Member*>(member);
+    if (!particles_) particles_ = std::make_unique<gfx::ParticleRenderer>(cache_.device());
+    particles_->setHdr(hdr_);
+    const double now = world_ ? world_->seconds() : 0.0;
+    for (const auto& [name, f] : m->fx) {
+        if (!f || !f->obj || !f->milo) continue;
+        FxState& st = fx_[f.get()];
+        if (st.parts.empty()) {
+            uint32_t seed = 11;
+            for (const auto& o : f->milo->root().objects)
+                if (o->as<scene::ParticleSys>() || o->as<scene::ParticleSysAnim>()) st.parts.add(o.get(), seed++);
+            if (st.parts.empty()) continue;
+        }
+        // The animatables (the AnimFilters over the MatAnims, the particle
+        // systems) from frame 0 at each start, on the world clock's forward
+        // steps (the band enters before a song resets that clock).
+        if (st.start != f->start) st.start = f->start, st.elapsed = 0, st.last = now;
+        if (now > st.last && now - st.last < 1.0) st.elapsed += now - st.last;
+        st.last = now;
+        const float frame = float(st.elapsed * 30.0);
+        // The MatAnims run through their AnimFilters (x.filt over x.mnm) when
+        // the effect has filters [I: the filters' targets].
+        bool filters = false;
+        for (const auto& o : f->milo->root().objects) filters = filters || o->cls == "AnimFilter";
+        for (const auto& o : f->milo->root().objects)
+            if (o->cls == "AnimFilter" || (!filters && o->as<scene::MatAnim>()) || o->as<scene::ParticleSysAnim>() || o->as<scene::ParticleSys>())
+                st.pose.setFrame(o.get(), frame);
+        scene::Xfm parent = c.xfm();
+        if (!f->obj->rnd.trans.parent.empty()) c.worldOf(f->obj->rnd.trans.parent, parent);
+        const scene::Xfm base = scene::compose(f->obj->rnd.trans.local, parent);
+        st.parts.sync(st.pose);
+        st.parts.setEmitting(f->on);
+        st.parts.update(st.pose, base, float(now * 30.0));
+        const int before = particles_->drawnParticles();
+        st.parts.draw(*particles_, mr, cache_, camera, Mat4::identity(), &st.pose);
+        fxParticles_ += particles_->drawnParticles() - before;
+    }
 }
 
 void BandView::drawCharacter(gfx::MaterialRenderer& mr, chr::Character& c, const gfx::Camera& camera, bool hdr) {
@@ -51,6 +93,41 @@ void BandView::drawCharacter(gfx::MaterialRenderer& mr, chr::Character& c, const
     // Character::DrawShowing 0x82153090: the LOD, then the directory.
     c.updateLod(screenSize(camera, c.worldSphere()));
     for (const scene::Mesh* m : meshesToDraw(c, world_ ? &world_->pose() : nullptr)) drawMesh(mr, c, *m);
+}
+
+void BandView::drawShadow(gfx::MaterialRenderer& mr, chr::Character& c, const std::array<float, 3>& dir, bool hdr) {
+    const scene::Group* g = c.shadowGroup();
+    if (!g) return;
+    hdr_ = hdr;
+    flatten_ = true, flatDir_ = dir, flatZ_ = c.xfm().pos[2] + 1.5f;
+    std::vector<const scene::Mesh*> meshes;
+    std::function<void(const scene::Group*, int)> walk = [&](const scene::Group* grp, int depth) {
+        if (depth > 8) return;
+        for (const std::string& n : grp->objects) {
+            const scene::Object* o = c.dir().get(n);
+            if (!o) continue;
+            if (auto* m = o->as<scene::Mesh>()) meshes.push_back(m);
+            else if (auto* sub = o->as<scene::Group>(); sub && sub != grp) walk(sub, depth + 1);
+        }
+    };
+    walk(g, 0);
+    for (const scene::Mesh* m : meshes) drawMesh(mr, c, *m);
+    flatten_ = false;
+}
+
+// A world transform pushed along the light onto z = flatZ_: each row of the
+// rotation loses its height through the light's direction, as the
+// shear of 0x82151B98 (P' = P - dir (P.z - plane) / dir.z).
+scene::Xfm BandView::flattened(scene::Xfm x) const {
+    if (!flatten_) return x;
+    const float dx = flatDir_[0] / flatDir_[2], dy = flatDir_[1] / flatDir_[2];
+    for (int r = 0; r < 3; ++r) {
+        const float h = x.rot[size_t(r * 3 + 2)];
+        x.rot[size_t(r * 3)] -= dx * h, x.rot[size_t(r * 3 + 1)] -= dy * h, x.rot[size_t(r * 3 + 2)] = 0;
+    }
+    const float h = x.pos[2] - flatZ_;
+    x.pos[0] -= dx * h, x.pos[1] -= dy * h, x.pos[2] = flatZ_;
+    return x;
 }
 
 namespace {
@@ -119,14 +196,14 @@ void BandView::drawMesh(gfx::MaterialRenderer& mr, chr::Character& c, const scen
     Mat4 bones[4];
     const int self = sk.find(m.name);
     const scene::Xfm world = self >= 0 ? sk.world(self) : sk.root();
-    bones[0] = gfx::toMat4(world);
+    bones[0] = gfx::toMat4(flattened(world));
     int boneCount = 1;
     if (g.skinned && !geom->bones.empty()) {
         boneCount = int(std::min<size_t>(geom->bones.size(), 4));
         for (int i = 0; i < boneCount; ++i) {
             const auto& bone = geom->bones[size_t(i)];
             const int b = sk.find(bone.name);
-            bones[i] = b >= 0 ? gfx::toMat4(scene::compose(bone.offset, sk.world(b))) : bones[0];
+            bones[i] = b >= 0 ? gfx::toMat4(flattened(scene::compose(bone.offset, sk.world(b)))) : bones[0];
         }
     } else {
         g.skinned = false;

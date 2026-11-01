@@ -2,6 +2,7 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #pragma once
 
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -75,9 +76,14 @@ public:
     void poll(Interp& in, double beat);
     // Back to before the first event (a restart).
     void reset();
+    // Past the events starting before `beat`, unsent (a song started
+    // later than its beginning: practice's jump, PS2 0x001225b0) [I].
+    void skipTo(double beat);
 
     // Sinks: add_sink / remove_sink from scripts, or from C++.
-    void addSink(ScriptObject* sink);
+    // `msgs`: the messages it takes (MsgSource add_sink <sink> <msg>...;
+    // none: every message).
+    void addSink(ScriptObject* sink, std::vector<std::string> msgs = {});
     void removeSink(ScriptObject* sink);
     void sinkDestroyed(ScriptObject* sink) override { removeSink(sink); }  // a deleted sink leaves (SinkHolder)
     const std::vector<ScriptObject*>& sinks() const { return sinks_; }
@@ -105,6 +111,7 @@ private:
     std::unique_ptr<Impl> impl_;
     const DataNode& def_;
     std::vector<ScriptObject*> sinks_;
+    std::map<ScriptObject*, std::vector<std::string>> sinkMsgs_;  // a sink's messages (empty: all)
     std::string trackName_;
     int built_ = 0, sent_ = 0;
 };

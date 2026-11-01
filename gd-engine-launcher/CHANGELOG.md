@@ -1,5 +1,21 @@
 # Guitar Dream Universal Launcher: changes
 
+## 0.1.9
+
+Games
+- Guitar Hero II (gd-game-02) 0.1.9: whammying a held sustain fattens its
+  tail again, as on the Xbox 360 (it used to get thinner).
+- Guitar Hero Encore: Rocks the 80s (gd-game-03) 0.0.3: the whammy fattens
+  held sustain tails as on the PS2; tutorials 2 and 3 play through with
+  their hammer-on / pull-off trainer; career tour wins; practice keeps the
+  guitar's pitch at slower speeds; the Horse Head cheat and a burning
+  Flaming Head (both also in Enhanced Options); the crowd meter holds still
+  where the original turns it off; mono sound as the PS2.
+
+### Also in this version
+- gd01 1.1.8: Android glare fix, shake whammy, Native (DLAA), gd01.log on Windows, song end safety.
+- gd02, gd03, gd04: Santroller guitars, shake whammy.
+
 ## 0.1.8
 
 Games

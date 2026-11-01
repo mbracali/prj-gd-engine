@@ -187,8 +187,9 @@ Back turned the light on for a few seconds (gd-backlog GD02-077 / 081;
   (0x821424B0); the arrows keep their x and sit arrow_offset above
   (char_back) / below (char_next) the picked character's extent scaled by
   text_scale (0x82142218), the picked character scaled by text_scale
-  (0x82142120). GH2 also takes typed keys (backspace, 0x20..0x7E,
-  0x82143880; not in the port). `--walktest career` checks the name's
+  (0x82142120). Typed keys (0x82143880): backspace, 0x20..0x7E upper-cased;
+  the port takes letters, space and backspace (the digits stay the frets).
+  `--walktest band` types into the name. `--walktest career` checks the name's
   start stays put and the picked character follows it.
 - High score defaults (`0x822A4988`): 5 per song and difficulty, 50000 down
   to 10000, names from `highscore_dummy_N`.
@@ -198,15 +199,13 @@ Back turned the light on for a few seconds (gd-backlog GD02-077 / 081;
   help_bar.mesh / help_bar_strum.mesh (0x82299950, 0x82299778) with its own
   transform (the strum bar is 2 wide, 64 units; drawn at the pen's own
   transform it was half as wide, "broken in half"), and help_bar.txt
-  (0x822994F0), placed along the pen; the background box (help_box_left /
-  mid / right) is drawn only around the items (0x822998D0, 0x82299698):
-  the port does not draw it yet and hides the box meshes (left showing
-  they stood in the middle of every screen). The port lays the items out
-  in the help bar's own space (helpbar.view, on the metacam's camera), so
-  they keep together while a transition turns the camera (they drifted
-  against their icons by a few pixels on every screen change) [I: GH2
-  sets the items' world places from the start meshes' (0x82299CD8);
-  whether its help bar slides with the transition is not confirmed].
+  (0x822994F0), placed along the pen; each item has its background (0x82299420,
+  0x82298E00, 0x82298E90, called by 0x822998D0 and 0x82299698): help_box_left
+  at the icon, help_box_mid stretched under the icon's spacing and the label's
+  width, help_box_right at the label's end [C]. The items are copies of
+  templates under helpbar.view, parented to the metacam's camera, so the help
+  bar stays on the screen while a transition moves the panels (0x82299CD8 reads
+  the start meshes at enter, GD02-075).
 
 ### Inferred
 
@@ -424,7 +423,7 @@ next to it to start.
 
 - `--uitest`: 237 `new` objects, 82 panel milos, 357 component names checked
   in reachable handlers.
-- `--walktest quickplay|lose|pause|attract|career|career_full|career_song|back|enhanced|cheats|mouse|gamepads|stickyaxis`: drives the menus
+- `--walktest quickplay|lose|pause|attract|career|career_full|career_song|career_practice|practice|practice_menus|tutorial|tutorial1|tutorial2|tutorial3|options|flaming_head|back|enhanced|cheats|mouse|gamepads|stickyaxis`: drives the menus
   with scripted input and checks the screen order, the score in
   `career.json` and the endgame photo (quickplay), the band's look in
   `career.json` (career: Choose Band > NEW BAND, character / outfit / guitar / skin
@@ -475,12 +474,10 @@ next to it to start.
 - Sound effects play (docs/audio_and_charts.md section 4) without the
   reverb sends, the ADSR envelopes or the mute cheat (`synth
   set_master_vol`).
-- The endgame stats receipt draws dark (`turn_off_ambient` /
-  `reset_ambient` are no-ops).
-- Volume sliders apply from the next song or preview.
-- Tutorial and practice screens are generic panels (M10 /
-  M11). The career and the store: docs/career_and_store.md.
-- Help bar background boxes.
+- `turn_off_ambient` / `reset_ambient` are no-ops in GH2 too (0x8229FE78 only
+  answers them, [C]): the receipt's light is its own milo's.
+- Tutorial and practice: see "Training" below.
+  The career and the store: docs/career_and_store.md.
 - The main menu's words are stacked tightly (re-checked in bug-fix 3: rows
   14 units apart, each `fit_text` 1 into 9 units tall against size 30 ×
   leading 0.7 (Text +0x11c × +0x100, 0x821CFF08), not the glyphs' height):
@@ -490,3 +487,59 @@ next to it to start.
   font's cell height / width tall (0x821CFB28), inside main_buttons.view's
   own (0.55, 1, 1.9) scale. All of it matches the code; not compared with
   a capture of the original yet (Q1).
+
+## Training: practice
+- ui/practice.dta: song -> part (guitar / bass or rhythm) -> difficulty ->
+  start and end section (`game practice_section_provider`: row 0 full_song,
+  then the EVENTS track's `[section x]`, each to the next; rows before the
+  start and sections with no gem of the chart inactive; `gamecfg
+  get_section_bounds`, `set (practice_sections n)`) -> speed (the song's
+  `practice_speeds`, else sound.dta's default_speeds, `0x822cee60`) [C].
+- modes.dta's song_block is `song`, or `song_coop` for another part; the mogg
+  is played at the speed, the clock at the speed, background silent below
+  100% (FINDINGS). The player counts only the sections' gems, `practice_end`
+  comes at the end section's end, music_fader fades the music [C].
+- The metronome is click_parser (TRIGGERS 24..26) below 100%, the section
+  names events_parser (EVENTS, echo) [C]; sounds from sfx/practice_bank.
+- The surface is track/surfaces/rosewood_keep.bmp: modes.dta's
+  track_surface_override (0x82693620); in the other modes the player's
+  character's own bitmap (+0x3c), which the port now also draws [C].
+- `--walktest practice`, `practice_menus`, `career_practice`.
+
+## Training: tutorials
+- ui/tutorials.dta and tutorial_*.dta run on TutorialPanel (0x8228BCE0 natives):
+  play_vo plays sound.dta's streaming_vo events (tutorial/streams/eng/*.mogg) one
+  at a time: dropped while the current stream plays, replacing one still
+  loading or paused; is_vo_playing is "a stream exists" [C]. The tuner (0x822AD3C8:
+  three strums on a held fret tune it, tuning_hit_vo) and the hopo trainer
+  (0x822AC4B0: a strum starts a try, each hammer-on / pull-off within 1000 ms the
+  next note, s20601..5) read player 0's frets and strums [C].
+- Narration in five languages: the file layer puts the language in every
+  path's `/eng/` (0x82276048) [C]; the language is the console's (0x82271390 /
+  0x82275468: eng fre deu ita esl, others eng) [C]. The port takes the
+  system's first preferred language [I]; GD02_LANGUAGE forces it. The menus'
+  locale, `{system_language}` textures and venue pictures follow.
+- A lesson moves on with next_lesson (same song) or switch_to_song (`game
+  exit`, `game load_song`, `game enter`). The lessons hear the gameplay
+  through sinks (`add_sink`, everything else exported): player_matcher<n> gets
+  gem_hit_callback ($slot $hopoable $hopoed, 0x822E2748), gem_miss_callback
+  ($slot_hit $real_slot $timing_error, 0x822E2B10) and gem_pass_callback
+  (0x822E2FD0), the hopo / swingAtHopo handlers' hopo_callback and
+  swingAtHopo_callback; player<n> held_note_released_callback, and player.dta's
+  handlers whammy / star / phrase callbacks; `game add_sink x star_power_start`
+  the Star Power start and stop [C]. A new song starts with no sinks.
+- Star Power natives: fill_star_power, empty_star_power, set_star_power,
+  set_star_power_deploy_rate, set_star_power_phrase_boost,
+  set_whammystarpowerenabled, set_mercuryswitchenabled (0x822C7060) [C].
+- `options set_mute_fx`: get_fx_volume then answers -96 dB (0x822B0F08) [C];
+  UILabel set_wrap_width sets the Text's wrap [C]; kTaskTutorialSeconds runs
+  while the panel is not paused.
+- `--walktest tutorial` (pause and quit), `tutorial1` (the 6 lessons of the
+  first, charts 102..105), `tutorial2` (202..204: Star Power, whammy, wail),
+  `tutorial3` (205, 206: hammer-ons and pull-offs).
+
+## Volumes
+`options set band_volume_idx ...` reach the song or preview at once
+(0x822B0F40 -> 0x822CE830 / 0x822CE938): the mixer's part volumes. The options
+screens set them on the way back; the pause screen's during a song.
+

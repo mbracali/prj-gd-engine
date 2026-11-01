@@ -52,6 +52,16 @@ public:
     // Lefty flip (the player's option): the slots mirror (0x82699E78,
     // 0x82691348) [C].
     void setLefty(bool lefty) { lefty_ = lefty; }
+    // The player's track surface (0x82693620, 0x82699B70):
+    // track/surfaces/<name>_keep.bmp as track_surface.mat's texture, <name>
+    // the mode's track_surface_override (config/modes.dta: rosewood in
+    // practice and the tutorials) or else the player's character (outfit
+    // name, alterna1...; empty: the song's quickplay one). `mode`: gamecfg's
+    // mode (quickplay, practice...).
+    void setSurface(const GameData& data, const std::string& mode, const std::string& character, const std::string& songId);
+    const std::string& surfaceName() const { return surfaceName_; }
+    // Frames whose surface drew with that texture.
+    int surfaceOverrides() const { return surfaceOverrides_; }
     // The song is won (game.dta game_won_msg: {track_panel explode}).
     void explode(float nowMs);
     // The scripts' animate on the track's extend anim (player.dta
@@ -72,6 +82,12 @@ public:
     // their tails.
     int starSmashes() const { return starSmashes_; }
     int starGlowLines() const { return starGlowLines_; }
+    // The held tail's widest row (1 at rest, up to 4 with the bar fully down)
+    // and its glow line's width scale, as last drawn, and that frame's song
+    // time (--walktest whammy_tail); 0 when no tail is held.
+    float heldTailWidest() const { return heldTailWidest_; }
+    float heldGlowScale() const { return heldGlowScale_; }
+    float tailNowMs() const { return tailNowMs_; }
     // Since reset: phrase_captured combo effects started (per slot).
     int comboStarts() const { return comboStarts_; }
     // Where each lane was on the screen in the last frame drawn (menu units,
@@ -124,6 +140,10 @@ private:
 
     scene::Milo* track_ = nullptr;
     int player_ = -1;
+    // The surface texture (setSurface); null: the scene's own track_surface.tex.
+    const scene::Tex* surfaceTex_ = nullptr;
+    std::string surfaceName_;
+    int surfaceOverrides_ = 0;
     bool lefty_ = false;
     const scene::Cam* cam_ = nullptr;
     std::array<float, 4> screenRect_{0, 0, 1, 1};
@@ -156,8 +176,20 @@ private:
     std::vector<scene::MeshVertex> tailRow_;
     int tailSegments_ = 30;
     float tailSegLen_ = 4.545f;
-    std::array<float, 100> whammyHist_{};
-    int whammyIndex_ = 0;
+    // Each tail's whammy history (100 samples and their index, zeroed when
+    // the tail is set up) and its glow line's width scale, keyed gem x 8 +
+    // slot; advanced one sample a poll while the tail is hit (0x8269EAD0) [C].
+    struct TailWhammy {
+        std::array<float, 100> hist{};
+        int index = 0;
+        float glowScale = 1;
+        bool seen = false;
+    };
+    std::unordered_map<int, TailWhammy> tailWhammy_;
+    int whammyPolls_ = 0;           // 60 Hz polls due this frame
+    float whammyClockMs_ = -1e9f;   // the last poll's song time
+    float starWhammyBlend_ = 0;     // the panel's whammy blend: +-0.1 a poll [C]
+    float heldTailWidest_ = 0, heldGlowScale_ = 0, tailNowMs_ = 0;
 
     std::array<float, 5> hitMs_{};    // last hit per slot (smasher hit anim)
     std::array<float, 5> missMs_{};   // last miss per slot (smasher pop anim)

@@ -60,6 +60,9 @@ enum Pad {
 // native objects the scripts call (game, gamecfg, campaign, song_provider,
 // memcard, profilemgr, options...). The song itself stays in app.cpp,
 // reached through UiHost.
+// The game's language: eng fre deu ita esl.
+std::string systemLanguage();
+
 class UiManager {
 public:
     UiManager(const GameData& data, Canvas& canvas, UiHost& host, Input& input);
@@ -84,6 +87,9 @@ public:
     // A BandTextEntry has the focus (the keyboard's Enter is Start there).
     bool textEntryFocused();
     void buttonUp(int button, int player);
+    // A typed key for the focused text entry (band names); false: none is focused.
+    bool textEntryFocused() const;
+    bool typeKey(int code);
     // A game event for the game panel and its sinks (intro_start_msg,
     // game_won_msg, game_lost, game_outro_complete, star_power_ready...).
     void gameEvent(const std::string& msg, std::vector<Value> args = {});
@@ -297,7 +303,7 @@ private:
     std::string firstScreen_;
 
     // clocks (ms)
-    double uiMs_ = 0, secondsMs_ = 0, lastWall_ = 0, frameDt_ = 0;
+    double uiMs_ = 0, secondsMs_ = 0, tutorialMs_ = 0, lastWall_ = 0, frameDt_ = 0;
     std::vector<PanelObj*> entered_;
     std::vector<ScriptObject*> made_;
     std::vector<std::function<void()>> deferred_;  // panels the current transition entered

@@ -25,10 +25,11 @@ struct PlayerEvent {
     // sp_engage message).
     enum class Kind { Hit, Miss, Pass, Hopo, SwingAtHopo, HeldNoteReleased, BuildStreak, EndStreak, EightX,
                       StarGemHit, PhraseCaptured, PhraseMissed, StarPowerReady, StarPowerStart, StarPowerEnd,
-                      WhammyStart, WhammyEnd, Failed, StarPowerEngage };
+                      WhammyStart, WhammyEnd, Failed, StarPowerEngage, BlewBigNote };
     Kind kind;
     int gem;  // gem index, or -1
     float value = 0;
+    int slot = -1;  // Miss: the fret the player played (gem_miss_callback's $slot_hit)
 };
 
 // What the HUD shows of a performer (a player or the co-op band).
@@ -98,6 +99,16 @@ public:
     void setWhammy(bool held) { whammyKey_ = held; }
     // Watcher +0x2c: added to the input time (the player's lag setting) [C].
     void setCalibrationMs(float ms) { offset_ = ms; }
+    // set_whammystarpowerenabled / set_mercuryswitchenabled (the tutorials'
+    // switches, 0x822C7060) [C].
+    void setWhammyStarPowerEnabled(bool on) { whammyStarPowerEnabled_ = on; }
+    void setMercurySwitchEnabled(bool on) { mercuryEnabled_ = on; }
+    // The tutorials' Star Power natives: the meter set, clamped to 0..1; the
+    // meter lost per measure while deployed and the meter a captured phrase
+    // adds replaced for this song [C].
+    void setStarMeter(float v) { meter_->value = v < 0 ? 0.0f : v > 1 ? 1.0f : v; }
+    void setDeployRate(float r) { sp_.deployRate = r; }
+    void setPhraseBoost(float b) { sp_.phrase = b; }
     // Enhanced Options > Forgiving Hammer-ons and Pull-offs [I: the port's]:
     // no lock after a wrong hammer-on, and a HOPO whose fret is held when it
     // arrives plays by itself.
@@ -106,6 +117,11 @@ public:
     // Practice: gems before `firstGem` are skipped (watcher +0x1c) and the
     // player counts only gems with ticks in [startTick, endTick) (+0xf0/+0xf4) [C].
     void setPracticeRange(int firstGem, int startTick, int endTick);
+    // The track's big notes (Song::bigNotes, ticks; PS2 0x00110cc0): a gem
+    // passed, or a sustain let go with under a tenth of its points, within
+    // 0.2 beats of the next one blows it (BlewBigNote, game.dta
+    // blew_big_note); each big note is looked at once (0x00110e78) [C].
+    void setBigNotes(std::vector<int> ticks) { bigNotes_ = std::move(ticks), nextBigNote_ = 0; }
     void update(float t);
 
     const Chart& chart() const { return chart_; }
@@ -121,6 +137,8 @@ public:
     // The streak multiplier without Star Power's doubling (1..4).
     int baseMultiplier() const { return baseMultiplier_; }
     int notesHit() const { return notesHit_; }
+    // Gems passed unhit (0x822c9498's count; practice: its sections' only) [C].
+    int gemsPassed() const { return passes_; }
     int passes() const { return passes_; }
     int penalties() const { return penalties_; }
     int perfectHits() const { return perfect_; }
@@ -182,6 +200,11 @@ private:
     void crowdUpdate(float target, float t);
     void ownCrowdUpdate(float target, float t);
     bool inPractice(int gem) const;
+    bool whammyStarPowerEnabled_ = true, mercuryEnabled_ = true;
+    int missSlot_ = -1;
+    void bigNoteCheck(int gem);
+    std::vector<int> bigNotes_;
+    size_t nextBigNote_ = 0;
 
     // ---- star power
     int spMultiplier() const { return spActive_ ? sp_.multiplier : 1; }

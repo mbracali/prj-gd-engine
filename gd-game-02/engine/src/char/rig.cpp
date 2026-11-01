@@ -349,18 +349,19 @@ void Rig::Impl::build() {
             p.kind = kServo, p.index = 0;
             p.writesAllBones = true;
         } else if (o->as<scene::CharWalk>()) {
-            // CharWalk: queues clips on the main driver [I: its PollDeps
-            // were not read; the plan's order puts it first].
+            // CharWalk (PollDeps 0x8218B2F8) [C]: changes the main driver and the
+            // character's servo; no dependency.
             p.kind = kWalk, p.index = 0;
-            for (const auto& q : dir.objects)
+            for (const auto& q : dir.objects) {
                 if (q->as<scene::CharDriver>() && q->name == "main.drv") p.writes.push_back(q->name);
+                if (q->as<scene::CharServoBone>()) p.writes.push_back(q->name);
+            }
         } else if (auto* f = o->as<scene::FaceFxLipSyncServo>()) {
-            // The lip servo: changed by its eye entries [I: its PollDeps were
-            // not read; the eyes' look-ats must come first], changes the face
-            // bones it poses.
+            // The lip servo (a CharServoBone: PollDeps 0x821887F8) [C]: changes
+            // its bones (0x821A5A18), reads nothing.
             weights[o->name] = {f->weightable.weight, f->weightable.weightOwner};
             p.kind = kFace, p.index = 0;
-            for (const auto& e : f->entries) p.reads.push_back(e.object);
+            for (const auto& e : f->entries) p.writes.push_back(e.object);
         } else if (auto* s = o->as<scene::CharWeightSetter>()) {
             weights[o->name] = {s->weightable.weight, s->weightable.weightOwner};
             setters.push_back({o->name, s->driver, s->flags, s->invert});
@@ -450,7 +451,7 @@ void Rig::Impl::build() {
                     q.pos = pt.pos;
                     q.bone = bone(pt.bone);
                     q.length = pt.length;
-                    q.type = int(pt.f50);
+                    q.type = pt.type;
                     q.collide = bone(pt.collide);
                     q.radius = pt.f60;
                     q.extra = pt.f64;
@@ -901,16 +902,6 @@ void Rig::Impl::pollEyes(Eyes& e, const RigContext& ctx) {
 
 // ---- CharHair --------------------------------------------------------------
 
-namespace {
-bool hairCollide() {
-    static const bool on = [] {
-        const char* e = SDL_getenv("GD02_HAIR_COLLIDE");
-        return e && *e && *e != '0';
-    }();
-    return on;
-}
-}  // namespace
-
 // 0x8217B6F0: each point at the end of its bone (the bones' chain from the
 // root's parent), velocities zero, the up vector its bone's z.
 void Rig::Impl::resetHair(Hair& h) {
@@ -959,25 +950,33 @@ void Rig::Impl::pollHair(Hair& h) {
             const V3 rest = add(prev, mul(row(frame, 1), p.length));
             const V3 up = lerp(p.up, row(frame, 2), h.p[1]);
             p.up = row(frame, 2);
-            // The collision (0x8217B898) measures from an object the decompile
-            // lost; taken as the collide bone, the plane rule (push along o by
-            // radius / n - 1) throws bind-pose bangs 10+ units out and the
-            // strands blow up, which GH2 does not show [I]. Off until that
-            // reference is confirmed (GD02_HAIR_COLLIDE=1 turns it on).
-            if (p.collide >= 0 && hairCollide()) {
+            // The collision (0x8217B898) against the collide bone [C]. Type 0:
+            // a plane (its y row, at radius); 1: stay outside a sphere; 2: stay
+            // inside a sphere; 3: stay outside a cylinder round its x row; 4:
+            // stay inside that cylinder. The type is an int (it read as a
+            // float once, so every strand was a plane and blew up). With a
+            // soft band (+0x64, types 2 and 3) the position is corrected only
+            // past the band's hard edge, the radius; inside the band the
+            // 0x82122100 blend touches no position [I: the blend's vector
+            // is lost to the decompile, so it is left out].
+            if (p.collide >= 0) {
                 const scene::Xfm& c = sk.world(p.collide);
                 const V3 o = sub(p.pos, c.pos);
                 if (p.type == 0) {
                     const float n = dot(row(c.rot, 1), o);
                     if (n < p.radius && n != 0) p.pos = add(p.pos, mul(o, p.radius / n - 1));
                 } else if (p.type == 1) {
-                    // a sphere: kept outside
                     const float l2 = dot(o, o);
                     if (l2 < p.radius * p.radius && l2 > 0) p.pos = add(p.pos, mul(o, p.radius / std::sqrt(l2) - 1));
-                } else {
-                    // 2..4: capsule / cylinder variants [I: kept outside like a sphere]
+                } else if (p.type == 2) {
                     const float l2 = dot(o, o);
-                    if (l2 < p.radius * p.radius && l2 > 0) p.pos = add(p.pos, mul(o, p.radius / std::sqrt(l2) - 1));
+                    if (l2 > p.radius * p.radius) p.pos = add(p.pos, mul(o, p.radius / std::sqrt(l2) - 1));
+                } else if (p.type == 3 || p.type == 4) {
+                    const V3 axis = row(c.rot, 0);
+                    const V3 perp = sub(o, mul(axis, dot(axis, o)));
+                    const float l2 = dot(perp, perp);
+                    const bool push = p.type == 3 ? l2 < p.radius * p.radius && l2 > 0 : l2 > p.radius * p.radius;
+                    if (push) p.pos = add(p.pos, mul(perp, p.radius / std::sqrt(l2) - 1));
                 }
             }
             frame = orthoY(sub(p.pos, prev), up);

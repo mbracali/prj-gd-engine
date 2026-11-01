@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "render/scene_renderer.h"
+
+#include "render/gl.h"
 #include "scene/particles.h"
 #include "render/image_enhance.h"
 
@@ -671,6 +673,19 @@ void SceneRenderer::resolveFlares() {
     // A ring of pixel-pack buffers: this frame's tests are read back
     // kFlareLag frames later, so the GPU never stalls on the readback.
     FlareBatch& b = flareRing_[flareSlot_];
+    if (gl::isEs()) {
+        // The depth buffer cannot be read here: the same test as an occlusion query.
+        std::vector<bool> passed;
+        if (!b.tests.empty() && renderer_.depthsPassed(b.queries, b.tests.size(), passed))
+            for (size_t i = 0; i < passed.size(); ++i) b.tests[i].flare->visible = passed[i];
+        std::vector<std::array<float, 3>> pts;
+        for (const FlareTest& t : flareTests_) pts.push_back({float(t.x), float(t.y), t.depth});
+        renderer_.testDepthsAsync(b.queries, pts);
+        b.tests = std::move(flareTests_);
+        flareTests_.clear();
+        flareSlot_ = (flareSlot_ + 1) % kFlareLag;
+        return;
+    }
     if (!b.tests.empty()) {
         std::vector<float> depths = renderer_.mapDepths(b.buffer, b.tests.size());
         if (depths.size() == b.tests.size())

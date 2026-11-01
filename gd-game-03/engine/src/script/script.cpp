@@ -589,6 +589,10 @@ Value Interp::send(ScriptObject* o, const std::string& message, std::vector<Valu
         int& d;
         ~Depth() { --d; }
     } guard{depth_};
+    if (o->nativeFirst(message)) {
+        Value result = Value::integer(0);
+        if (o->handleNative(*this, message, args, result)) return result;
+    }
     const DataNode* h = o->handler(message);
     if (h) {
         Value r = callHandler(o, *h, args);

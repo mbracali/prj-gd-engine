@@ -5,6 +5,12 @@ All notable changes for players. Versions follow SemVer; release tags are
 
 ## [Unreleased]
 
+## [0.0.2] - 2026-11-01
+
+### Added
+- Santroller guitars are detected as guitars.
+- Android: shake the phone to whammy, with a Shake for Whammy checkbox.
+
 ## [0.0.1] (not released)
 
 - The engine's shell: window, disc image (picked, remembered, opened as an

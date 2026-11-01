@@ -213,6 +213,7 @@ void App::applyEnhanced(const std::string& key) {
             SDL_SetWindowFullscreen(window_, true);
         }
     }
+    if (is("shake_whammy")) input_.setShakeWhammy(enhanced_.on("shake_whammy"));
     if (is("rockband")) input_.setRockBand(enhanced_.on("rockband"));
     if (is("xinput")) input_.setGamepadPlay(enhanced_.on("xinput"));
     if (is("touch")) input_.setTouch(false);  // touch controls are not built yet (greyed in Enhanced)

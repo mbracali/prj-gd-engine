@@ -28,6 +28,27 @@
 
 namespace ui {
 
+// The game's language (0x82271390): the console's, one of eng fre deu ita
+// esl (0x82275468; anything else eng) [C]. The port takes the system's first
+// preferred language in its place [I]; GD02_LANGUAGE=eng|fre|deu|ita|esl forces it.
+std::string systemLanguage() {
+    const auto& known = scene::Locale::languages();
+    if (const char* l = SDL_getenv("GD02_LANGUAGE"); l && std::find(known.begin(), known.end(), l) != known.end()) return l;
+    int count = 0;
+    std::string lang = "eng";
+    if (SDL_Locale** locales = SDL_GetPreferredLocales(&count)) {
+        if (count > 0 && locales[0] && locales[0]->language) {
+            const std::string code = locales[0]->language;
+            if (code == "fr") lang = "fre";
+            else if (code == "de") lang = "deu";
+            else if (code == "it") lang = "ita";
+            else if (code == "es") lang = "esl";
+        }
+        SDL_free(locales);
+    }
+    return lang;
+}
+
 namespace {
 
 bool isDirection(int b) { return b == kPad_DUp || b == kPad_DDown || b == kPad_DLeft || b == kPad_DRight; }
@@ -118,7 +139,7 @@ bool UiManager::init(std::string& error, bool headless) {
         styles_ = std::make_unique<scene::UiStyles>();
         styles_->load(data_);
         locale_ = std::make_unique<scene::Locale>();
-        locale_->load(data_, "eng");
+        locale_->load(data_, systemLanguage());
         if (!headless_) {
             cache_ = std::make_unique<gfx::SceneCache>(canvas_.renderer().device());
             text_ = std::make_unique<ScreenText>(data_, *library_, *cache_);
@@ -128,7 +149,7 @@ bool UiManager::init(std::string& error, bool headless) {
         return false;
     }
     interp_.locale = locale_->strings();
-    interp_.language = "eng";
+    interp_.language = systemLanguage();
     interp_.seed(uint32_t(std::time(nullptr)));
     if (const char* l = SDL_getenv("GD02_UILOG")) interp_.logReport = *l && *l != '0';
     save_ = std::make_unique<SaveFile>(SDL_getenv("GD02_SAVE_DIR") ? std::string(SDL_getenv("GD02_SAVE_DIR")) : std::string());
@@ -151,6 +172,10 @@ bool UiManager::init(std::string& error, bool headless) {
     }
     macros_ = loader_->macros;
     modes_ = boot_->find("modes");
+    // $syscfg: the system config (config/gh2.dta and its includes), read
+    // by {find $syscfg ...} (modes.dta practice's pre_processed_audio,
+    // cheats_funcs.dta) [C data].
+    interp_.var("syscfg") = interp_.toValue(*boot_);
     // The players' and their matchers' handlers: gh2.dta (player (handlers
     // ...)) (Player, 0x822C9720) and (beatmatch (player_matcher_handlers
     // ...)) (PlayerMatcher, 0x822E44B0) [C].
@@ -791,6 +816,10 @@ void UiManager::update() {
     lastWall_ = wall;
     uiMs_ += frameDt_;
     if (!(host_.gameLoaded() && host_.gamePaused())) secondsMs_ += frameDt_;
+    // kTaskTutorialSeconds: TutorialPanel's own timer, run by its poll while
+    // the panel is not paused, so a lesson's sleeps go on with the game
+    // paused and stop under tut_pause_screen (tutorial set_paused) [C].
+    if (PanelObj* t = panel("tutorial"); !t || !t->paused) tutorialMs_ += frameDt_;
     if (gamepadsAtMs_ > 0 && wall >= gamepadsAtMs_) openGamepads();
     if (splash_ >= 0) {
         splashMs_ += frameDt_;
@@ -803,7 +832,7 @@ void UiManager::update() {
     TaskMgr& tm = interp_.tasks();
     tm.setTime(kTaskUISeconds, uiMs_ / 1000.0);
     tm.setTime(kTaskSeconds, taskSeconds());
-    tm.setTime(kTaskTutorialSeconds, secondsMs_ / 1000.0);
+    tm.setTime(kTaskTutorialSeconds, tutorialMs_ / 1000.0);
     tm.setTime(kTaskBeats, host_.gameLoaded() ? host_.gameBeat() : 0.0);
     tm.poll();
     if (!deferred_.empty()) {
@@ -1037,6 +1066,18 @@ void UiManager::routeButton(int button, int player) {
     if (s != current_ || !pending_.empty()) return;
     const std::string before = fp->focus;
     if (fp->buttonDown(button, player) && fp->focus != before && s->handler("helpbar")) updateHelpbar();
+}
+
+bool UiManager::textEntryFocused() const {
+    if (splash_ >= 0 || !current_ || phase_ != Phase::Idle) return false;
+    PanelObj* fp = current_->focusPanel();
+    ComponentObj* c = fp && fp->up ? fp->focused() : nullptr;
+    return c && c->isTextEntry() && !c->done;
+}
+
+bool UiManager::typeKey(int code) {
+    if (!textEntryFocused()) return false;
+    return current_->focusPanel()->focused()->keyChar(code);
 }
 
 void UiManager::buttonUp(int button, int player) {

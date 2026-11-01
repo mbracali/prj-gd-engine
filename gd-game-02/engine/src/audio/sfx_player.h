@@ -69,6 +69,10 @@ public:
         float speed = 1;          // playback-rate ratio
         float attack = 0.001f;    // ADSR attack_rate / release_rate (s)
         float release = 0.005f;
+        // A stream, not an Sfx (the tutorials' voice-over, VoiceMgr): the
+        // game's pause, which pauses the Sfx instances, leaves it playing;
+        // setVoicePaused pauses it alone.
+        bool stream = false;
         std::shared_ptr<Bus> send;
         float sendVolume = 1;     // clamped to 0.0001 .. 5 (0x8268A168) [C]
     };
@@ -84,6 +88,7 @@ public:
     // pause each Sfx's current instances (0x822E7C68 -> 0x822ECB40), not
     // the Synth, so the menus after a song keep their sounds [C].
     void setPaused(bool paused);
+    void setVoicePaused(VoiceId id, bool paused);
     // `synth set_master_vol` (dB, -96 = silent): the Synth's master Fader,
     // in every Sfx's fader group (Sfx ctor 0x822EE190) [C].
     void setMasterDb(float db);
@@ -117,6 +122,7 @@ private:
         sfxdsp::Envelope env;
         bool ended = false;
         bool paused = false;
+        bool stream = false;
     };
     SDL_AudioStream* stream_ = nullptr;
     mutable std::mutex lock_;

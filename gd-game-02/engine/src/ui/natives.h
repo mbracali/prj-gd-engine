@@ -24,6 +24,8 @@ class ListProvider : public ScriptObject {
 public:
     using ScriptObject::ScriptObject;
     virtual int numData() = 0;
+    // set_provider on a list: a provider built from the configured song loads now.
+    virtual void initData() {}
     virtual std::string symbol(int index) = 0;
     virtual int indexOf(const std::string& sym);
     // UIListProvider::IsActive: an inactive row is drawn disabled and cannot be chosen.
@@ -31,6 +33,27 @@ public:
     // The list's rows (headers included) for gfx::UiView::setList, and the
     // row of data index `selected`.
     virtual void rows(std::vector<gfx::UiView::ListRow>& out, int selected, int& selectedRow) = 0;
+};
+
+// GH2's MsgSource for the players and their matchers: add_sink <obj>
+// [msg...] and remove_sink (PS2 0x002c0038 -> 0x002c0548 / 0x002c0738);
+// any other message the object does not handle goes to every sink (all
+// messages) and to the sinks that named it (0x002c01f8) [C]. The
+// tutorials add their lesson objects to hear the gameplay's *_callback
+// messages.
+class MsgSinks : public SinkHolder {
+public:
+    ~MsgSinks() override { stopHolding(); }
+    // add_sink / remove_sink: true when `msg` was one of them.
+    // The sink comes as an object or by name ({player0 add_sink tut_22_callback}).
+    bool handle(Interp& in, const std::string& msg, const std::vector<Value>& args);
+    // To the sinks that want `msg`, from a copy (a sink removed on the way is skipped).
+    void send(Interp& in, const std::string& msg, const std::vector<Value>& args);
+    void clear() { sinks_.clear(); }
+    void sinkDestroyed(ScriptObject* sink) override;
+
+private:
+    std::vector<std::pair<ScriptObject*, std::vector<std::string>>> sinks_;
 };
 
 // GameConfig (0x822B8B18) and the players' configs: what the menus chose.
@@ -65,6 +88,10 @@ struct Session {
     std::string venue;
     bool fastIntro = false;
     bool tutorialRunning = false;
+    // The tutorials' voice-over events played, in order (TutorialPanel play_vo; the walks check them).
+    std::vector<std::string> voiceEvents;
+    // play_vo requests dropped because another VO was playing (0x001407f0).
+    std::vector<std::string> voiceDropped;
     // The game panel's state.
     bool gameOver = false;
     std::string lastPreview;
@@ -97,6 +124,12 @@ int trackTypeOf(const std::string& instrument);
 int songInfoIndex(UiManager& ui, const std::string& song);
 // The difficulty symbol (easy medium hard expert).
 const char* difficultySym(int d);
+
+// A Fader's level now (dB; 0 for one the port does not keep): music_fader,
+// which practice's metronome sounds are added to (ComponentObj add_fader).
+float faderDb(const std::string& fader);
+// A song starts: the faders back at 0 dB, as the music.
+void resetFaders();
 
 // helpbar set_display: ((fret1 help_continue) (strum help_updown) ...).
 void setHelpbarDisplay(UiManager& ui, const Value& display);

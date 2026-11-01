@@ -215,6 +215,11 @@ void UiView::setText(const std::string& component, const std::string& text) {
     overrides_[component] = text;
 }
 
+void UiView::setWrapWidth(const std::string& component, float width) {
+    wrapWidths_[component] = width;
+    labels_.clear();
+}
+
 std::string UiView::labelString(const scene::UILabel& l) const {
     if (auto it = overrides_.find(l.name); it != overrides_.end()) return it->second;
     if (l.localize) return l.textToken.empty() ? std::string() : locale_.text(l.textToken);
@@ -520,6 +525,7 @@ void UiView::drawLabel(MaterialRenderer& r, const scene::UILabel& l, const scene
             st.size = tmpl->size, st.leading = tmpl->leading, st.wrapWidth = tmpl->wrapWidth;
             st.align = tmpl->align, st.capsMode = tmpl->capsMode;
         }
+        if (auto w = wrapWidths_.find(l.name); w != wrapWidths_.end()) st.wrapWidth = w->second;
         lt->layout = layoutText(&fm, str, st);
         if (band) {
             jitterText(lt->layout, band->jitterSeed, band->deltaX, band->deltaZ, band->deltaRot);
@@ -588,6 +594,23 @@ float UiView::drawTemplate(MaterialRenderer& r, const std::string& key, const sc
     texts_.draw(r, lt.get(), *font, lt->layout, wm, rgb, alpha < 1 ? tint : nullptr);
     addLayoutHit(key, lt->layout, wm);
     ++textsDrawn_;
+    return lt->layout.maxWidth();
+}
+
+float UiView::templateWidth(const std::string& key, const scene::Text& tmpl, const std::string& str) {
+    const scene::Font* font = tmpl.dir ? tmpl.dir->resolve<scene::Font>(tmpl.font) : nullptr;
+    if (!font || str.empty()) return 0;
+    auto& lt = keyed_[key];
+    if (!lt || lt->str != str || lt->font != font) {
+        if (!lt) lt = std::make_unique<LabelText>();
+        lt->str = str;
+        lt->font = font;
+        FontMetrics fm(*font);
+        TextStyle st;
+        st.size = tmpl.size, st.leading = tmpl.leading, st.wrapWidth = tmpl.wrapWidth, st.italics = tmpl.italics;
+        st.align = tmpl.align, st.capsMode = tmpl.capsMode, st.markup = tmpl.markup, st.color = tmpl.color;
+        lt->layout = layoutText(&fm, str, st);
+    }
     return lt->layout.maxWidth();
 }
 

@@ -30,6 +30,7 @@ const std::vector<EnhancedSetting>& enhancedSettings() {
     // The doc's ranges (universal_mechanisms.md 1.2.2); the first value is the base default.
     static const std::vector<EnhancedSetting> k = {
         {"mouse", {"on", "off"}},
+        {"shake_whammy", {"on", "off"}},
         {"touch", {"on", "off"}},
         {"screen_mode", {"windowed", "fullscreen", "borderless"}},
         {"max_fps", {"120", "60", "240", "unlimited"}},
@@ -263,6 +264,11 @@ const std::vector<Item>& items() {
          "scrolls lists. The help bar's buttons (SELECT, BACK, START, UP / DOWN) are clickable too. Hovering works only "
          "while the game window has focus; the pointer hides after a few seconds, when a key or a button is pressed, and "
          "during a song. Mouse buttons are never used as game buttons."},
+#ifdef __ANDROID__
+        {Kind::Check, "shake_whammy", "Shake for Whammy", true,
+         "Shake the phone during a song to use the whammy bar: keep shaking to hold it, stop to let go. Whammy bends the "
+         "note and fills Star Power faster on a Star Power note. A real whammy bar keeps working. Android only."},
+#endif
         {Kind::Check, "touch", "Enable Touch Controls", true,
          "Play on a touch screen; also shows the on-screen buttons. In the menus a tap is a click. In a song, touch a "
          "lane at the bottom of the highway when its note arrives: it plays the fret and the strum at once (hold the "
@@ -401,8 +407,8 @@ const std::vector<Item>& items() {
         {Kind::Cheat, "cheat_hyper_speed_mode", "", true,
          "The original cheat: the notes come down the highway one and a half times as fast. Code at the main menu: "
          "Blue, Orange, Yellow, Orange, Blue, Orange, Yellow, Yellow."},
-        {Kind::Cheat, "cheat_flaming_head", "", false,
-         "The original cheat: the guitarist's head is on fire (the band's flames do not burn yet in this version). "
+        {Kind::Cheat, "cheat_flaming_head", "", true,
+         "The original cheat: the guitarist's head is on fire. "
          "Code at the main menu: Yellow, Orange, Yellow, Yellow, Orange, Yellow, Yellow, Orange."},
         {Kind::Cheat, "cheat_eyeball_head_crowd", "", true,
          "The original cheat: everyone in the crowd has a giant eyeball for a head. Code at the main menu: Yellow, "

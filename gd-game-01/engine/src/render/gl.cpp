@@ -47,7 +47,7 @@ void APIENTRY esTexImage2D(GLenum target, GLint level, GLint internal, GLsizei w
 
 void APIENTRY esReadPixels(GLint x, GLint y, GLsizei w, GLsizei h, GLenum format, GLenum type, void* data) {
     if (format != GL_DEPTH_COMPONENT) return realReadPixels(x, y, w, h, format, type, data);
-    // ES cannot read the depth buffer: report "far" (lens flares stay visible).
+    // ES cannot read the depth buffer: report "far" (the lens flares use occlusion queries).
     std::vector<float> farDepth(size_t(w) * size_t(h), 1.0f);
     GLint pbo = 0;
     getIntegerv(GL_PIXEL_PACK_BUFFER_BINDING, &pbo);

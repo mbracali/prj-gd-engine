@@ -331,7 +331,7 @@ void Player::watcherHit(float t, int slot, int gem, bool hopo) {
 // passed last (+0x4c), and the last gem of the list when that leaves none
 // (-1). Then the player is told.
 void Player::watcherMiss(float t, int slot, int gem) {
-    (void)slot;
+    missSlot_ = slot;
     endSustain(t, false);
     if (!(lastOverstrumMs_ + rules_.overstrumGapMs < t)) return;
     lastOverstrumMs_ = t;
@@ -416,6 +416,15 @@ void Player::update(float t) {
 
 // ================================================================= player
 
+// 0x00110e78 [C]: beats are ticks / 480.
+void Player::bigNoteCheck(int gem) {
+    if (nextBigNote_ >= bigNotes_.size()) return;
+    const float beat = float(chart_.gems[size_t(gem)].tick) / 480.0f, big = float(bigNotes_[nextBigNote_]) / 480.0f;
+    if (big - 0.2f > beat) return;
+    ++nextBigNote_;
+    if (beat < big + 0.2f) emit(PlayerEvent::Kind::BlewBigNote, gem);
+}
+
 bool Player::inPractice(int gem) const {
     const int tick = chart_.gems[size_t(gem)].tick;
     return tick >= practiceStartTick_ && tick < practiceEndTick_;
@@ -486,7 +495,10 @@ void Player::playerHit(float t, int gem) {
 void Player::playerMiss(float t, int gem) {
     if (gem >= 0 && !inPractice(gem)) return;
     penalise(t, gem);
-    emit(PlayerEvent::Kind::Miss, gem);
+    // gem_miss_callback's $timing_error: how far the gem is, in ms [I: an
+    // argument the decompile of 0x822E2B10 lost; the lessons compare it with 500].
+    emit(PlayerEvent::Kind::Miss, gem, gem >= 0 ? std::fabs(t - chart_.gems[size_t(gem)].ms) : 0.0f);
+    if (!events_.empty()) events_.back().slot = missSlot_;
 }
 
 // Pass 0x822c9498 [C]: counts the pass and penalises only when the gem was
@@ -660,7 +672,7 @@ void Player::starPowerEngage(bool engaged, float t) {
     if (failed_) return;
     engaged_ = engaged;
     emit(PlayerEvent::Kind::StarPowerEngage, -1, engaged ? 1.0f : 0.0f);
-    if (!engaged || spActive_ || !spReady_) return;
+    if (!mercuryEnabled_ || !engaged || spActive_ || !spReady_) return;
     if (!partner_) {
         spStart(true);
         return;
@@ -723,6 +735,7 @@ void Player::setWhammyValue(float value, float t) {
 // armed or captured (state 2 / 3), and while the bar moved within the last
 // whammy_timeout (500 ms). Sends whammy_start / whammy_end.
 void Player::whammyPoll(float t) {
+    if (!whammyStarPowerEnabled_) return;
     bool eligible = false;
     if (sustainGem_ >= 0 && tail_.gem == sustainGem_) {
         const int p = chart_.gems[size_t(sustainGem_)].phrase;

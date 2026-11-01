@@ -6,6 +6,21 @@ matches the tag's version.
 
 ## [Unreleased]
 
+## [1.1.8] - 2026-11-01
+
+### Added
+- Android: shake the phone to whammy (patch by shenbolado1, issue #42).
+- Upscaling Quality > Native (DLAA): DLSS 4 or FSR 3.1 as anti-aliasing at full resolution (issue #40).
+- Santroller guitars are detected as guitars (issue #28).
+- gd01.log in the save folder on Windows, with a crash line, for bug reports.
+- Android: Shake for Whammy checkbox in Enhanced Settings.
+- Walk song_end: a whole song on autoplay through to the results.
+
+### Fixed
+- Android: lens flares no longer shine through walls and the band (issue #31).
+- The game no longer waits forever for the guitarist's win clip after a song (safety for issue #43).
+- DLSS 4 is no longer offered on builds without it (the Windows release).
+
 ## [1.1.7] - 2026-10-29
 
 **Universal menus: a new GAMEPADS screen, a new Enhanced Settings menu, and

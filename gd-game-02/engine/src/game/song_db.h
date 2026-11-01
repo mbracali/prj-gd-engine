@@ -32,6 +32,9 @@ struct SongInfo {
     std::string artist;
     SongAudio audio;                     // (song ...)
     std::optional<SongAudio> coopAudio;  // (song_coop ...), 17 songs
+    // Practice (songs.dta): (practice_speeds (100 85 65 50)) [C data]; empty
+    // when the song has none. song_practice_1..3 name audio the disc lacks.
+    std::vector<int> practiceSpeeds;
     float previewStartMs = 0, previewEndMs = 0;
     int animTempo = 1;  // kTempoMedium 1, kTempoFast 2
     std::string venue;  // (quickplay (venue x))

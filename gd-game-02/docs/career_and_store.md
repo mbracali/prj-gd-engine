@@ -235,7 +235,9 @@ become the records' best scores, the save-wide items every band's.
   unlock_venue_screen), $450; the store: the first finish (lp_cayenne,
   $250) bought and on the Les Paul; career.json checked (cash 200, spent
   250, battle completed, small1 unlocked, the stars, the item).
-- `--walktest career_song`: one career song through the menus.
+- `--walktest career_song`: one career song through the menus (it picks the
+  target's venue and row, so every song is reachable: on Easy a tier opens after
+  4 songs and set_career_venue moves on; GD02-088).
   `GD02_WALK_SONG` (default strutter) at `GD02_WALK_DIFF` (0..3, default
   Medium). Every tier song before it is passed with cheat_beat_song, so
   set_career_venue / set_career_song offer it; it is played on autoplay

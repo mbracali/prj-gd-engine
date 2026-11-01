@@ -13,7 +13,8 @@
 // "ms:key,ms:key,...", with key one of
 //   +green / -green (also red, yellow, blue, orange): press / release a fret,
 //   green (no sign): press, then release 1 ms later,
-//   strum, starpower, whammy=<0..1> (the bar's value).
+//   strum, starpower, whammy=<0..1> (the bar's value), +whammykey /
+//   -whammykey (a digital whammy: a key or button held / let go).
 // Items are applied in time order (ties keep their written order). Used by
 // the self-test's rule checks and by GD02_KEYS (app.cpp).
 class KeyScript {
@@ -47,6 +48,7 @@ public:
             case Step::Strum: p.strum(s.t); break;
             case Step::StarPower: p.starPowerButton(s.t); break;
             case Step::Whammy: p.setWhammyValue(s.value, s.t); break;
+            case Step::WhammyKey: p.setWhammy(s.value > 0); break;
             }
         }
     }
@@ -54,7 +56,7 @@ public:
 private:
     struct Step {
         float t;
-        enum Kind { Down, Up, Strum, StarPower, Whammy } kind;
+        enum Kind { Down, Up, Strum, StarPower, Whammy, WhammyKey } kind;
         int fret = -1;
         float value = 0;
     };
@@ -71,6 +73,7 @@ private:
         if (name == "strum") return steps_.push_back({t, Step::Strum});
         if (name == "starpower") return steps_.push_back({t, Step::StarPower});
         if (name.rfind("whammy=", 0) == 0) return steps_.push_back({t, Step::Whammy, -1, std::strtof(name.c_str() + 7, nullptr)});
+        if (name == "+whammykey" || name == "-whammykey") return steps_.push_back({t, Step::WhammyKey, -1, name[0] == '+' ? 1.0f : 0.0f});
         int edge = 0;
         if (!name.empty() && (name[0] == '+' || name[0] == '-')) edge = name[0] == '+' ? 1 : -1, name = name.substr(1);
         static const char* const kFrets[5] = {"green", "red", "yellow", "blue", "orange"};
