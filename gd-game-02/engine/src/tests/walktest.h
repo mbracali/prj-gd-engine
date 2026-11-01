@@ -77,6 +77,9 @@ class UiManager;
 //   logo_skip  the boot splashes skipped by the red fret (2) -> main ->
 //              Options -> Credits (clicked) left by the green fret (1) ->
 //              Credits again, left by a click (universal_mechanisms.md 1.1.1).
+//   whammy_tail quick play, autoplay holding the sustains: the analog bar fully
+//              down swells the held tail to 4x (glow line wider), up again it
+//              goes back to 1x; the same with a digital whammy (a key) held.
 //   stickyaxis an adapter whose D-pad is an axis resting off centre (a
 //              virtual pad, 0079:0006:dpadaxis=-32768) plugged in at the main
 //              menu: no left / right press in 2 s; moved, one right press.

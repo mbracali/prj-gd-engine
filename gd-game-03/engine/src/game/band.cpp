@@ -368,9 +368,29 @@ public:
             }
             return true;
         }
-        // The rest of the rig's and effects' messages come in later phases
-        // (M9.6 walks: bone.servo regulate_override; the proxies' particles:
-        // start / stop): reported as STUBs.
+        // A WorldFx (its proxied effect milo, first started loads it):
+        // start shows it and runs its anims from frame 0, its particles
+        // emitting; stop ends the emission, the particles living out
+        // (world_objects.dta WorldFx) [D; the frame clock as the world's, I].
+        if (o_->cls == "WorldFx" && (msg == "start" || msg == "stop")) {
+            auto& f = m_.fx[o_->name];
+            if (!f) {
+                f = std::make_unique<Member::Fx>();
+                f->obj = o_->as<scene::DirObj>();
+                if (f->obj && !f->obj->objectDir.proxyFile.empty()) {
+                    try {
+                        f->milo = scene::loadMilo(b_.data_, scene::findMiloRelative(b_.data_, m_.miloPath, f->obj->objectDir.proxyFile));
+                    } catch (const std::exception& e) {
+                        b_.problems_.push_back(m_.slot + ": " + o_->name + ": " + e.what());
+                    }
+                }
+            }
+            f->on = msg == "start";
+            if (f->on) f->start = b_.world_.seconds();
+            return true;
+        }
+        // The rest of the rig's messages come in later phases (M9.6 walks:
+        // bone.servo regulate_override): reported as STUBs.
         in.onStub(m_.slot + "::" + o_->name, msg, r);
         return true;
     }
@@ -617,9 +637,14 @@ void Band::assemble(const GameData& data, const SongInfo& song) {
             problems_.push_back("no slot " + w.slot + " in " + venueName_);
             continue;
         }
-        const std::string path = scene::findMiloRelative(data, "char/x/x.milo_ps2", "../" + w.character + "/og/" + w.character + ".milo");
+        // The Horse Head cheat ($cheat_enabled_horse_head_mode at the load):
+        // "%s/og/%s_horse.milo" instead of "%s/og/%s.milo" (0x00128778) [C];
+        // every character with an og milo has one on the disc.
+        const std::string path = scene::findMiloRelative(data, "char/x/x.milo_ps2",
+                                                         "../" + w.character + "/og/" + w.character + (config_.horseHead ? "_horse" : "") + ".milo");
         auto m = std::make_unique<Member>();
         m->slot = w.slot;
+        m->miloPath = path;
         m->object = it->second;
         m->player = w.player;
         // Outfits: the guitar (change_guitar) and the venue's kit (change_drums).

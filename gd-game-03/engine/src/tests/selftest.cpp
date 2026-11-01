@@ -647,6 +647,14 @@ int runRuleChecks(const Rules& rules) {
         check("PS2: with the whammy gate off (+0xbc, 0x00111d88) whammy fills no Star Power",
               r.count(K::PhraseCaptured) == 1 && r.count(K::WhammyStart) == 0 && std::abs(r.p->starMeter() - 0.25f) < 1e-6f);
     }
+    {
+        // crowd_rating_active off (practice, tutorials, the cheats' toggle): every gem missed, the meter holds.
+        Song s = makeSong({{1000, G}, {1500, R}, {2000, Y}, {2500, B}, {3000, O}, {3500, G}, {4000, R}});
+        Play r = play(s, rules, "", 5000, ControllerMode::Guitar, [](Player& p) { p.setCrowdRating(0.4f), p.setCrowdActive(false); });
+        Play on = play(s, rules, "", 5000, ControllerMode::Guitar, [](Player& p) { p.setCrowdRating(0.4f); });
+        check("PS2: with crowd_rating_active off the crowd update does nothing: the meter holds, no fail (0x0010fc78 +0x44)",
+              std::abs(r.p->rockMeter() - 0.4f) < 1e-6f && !r.p->failed() && on.p->rockMeter() < 0.4f);
+    }
     check("PS2: only the solo player may fail; co-op and face-off players never (0x0010fc78, 0x001260a8, 0x00112890)",
           Player::mayFail(1, false, 0) && !Player::mayFail(2, false, 0) && !Player::mayFail(2, false, 1) &&
               !Player::mayFail(2, true, 0) && !Player::mayFail(2, true, 1));

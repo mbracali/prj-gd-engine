@@ -61,6 +61,7 @@ SfxPlayer::VoiceId SfxPlayer::play(std::shared_ptr<const SfxPcm> pcm, const Para
         v.fxR = v.pan[sfxdsp::kFR] + sfxdsp::kDownmixCentre * v.pan[sfxdsp::kC] + sfxdsp::kDownmixRear * v.pan[sfxdsp::kRR];
     }
     v.env = sfxdsp::Envelope(p.attack, p.release);
+    v.stream = p.stream;
     ++started_;
     std::lock_guard<std::mutex> g(lock_);
     if (voices_.size() >= kMaxVoices) return 0;
@@ -82,7 +83,14 @@ void SfxPlayer::stopAll() {
 
 void SfxPlayer::setPaused(bool paused) {
     std::lock_guard<std::mutex> g(lock_);
-    for (Voice& v : voices_) v.paused = paused;
+    for (Voice& v : voices_)
+        if (!v.stream) v.paused = paused;
+}
+
+void SfxPlayer::setVoicePaused(VoiceId id, bool paused) {
+    std::lock_guard<std::mutex> g(lock_);
+    for (Voice& v : voices_)
+        if (v.id == id) v.paused = paused;
 }
 
 void SfxPlayer::setMasterDb(float db) { masterDb_.store(db); }
@@ -166,15 +174,21 @@ void SfxPlayer::mixBlock() {
         if (v.env.state() == sfxdsp::Envelope::kDone) v.ended = true;
         // The master: pan x volume (clamped) [C].
         const float vol = std::min(std::max(v.gain * fader, 0.0f), 1.0f);
+        // Mono: every voice re-panned to the centre (0x0021e490) [C].
+        const bool mono = audiodev::mono();
+        static const sfxdsp::Gains51 kCentre = sfxdsp::panGains(sfxdsp::wrapPan(0.0f));
+        const sfxdsp::Gains51& pan = mono ? kCentre : v.pan;
         for (int c = 0; c < 6; ++c) {
-            const float g = v.pan[size_t(c)] * vol;
+            const float g = pan[size_t(c)] * vol;
             if (g == 0.0f) continue;
             for (int i = 0; i < kBlock; ++i) master_[c][i] += mono_[i] * g;
         }
         // The core's effect input (VMIXEL / VMIXER): the voice after its volume and pan.
         if (v.fxCore >= 0) {
             float* in = coreIn_[v.fxCore];
-            const float gl = v.fxL * vol, gr = v.fxR * vol;
+            const float fxL = mono ? kCentre[sfxdsp::kFL] + sfxdsp::kDownmixCentre * kCentre[sfxdsp::kC] + sfxdsp::kDownmixRear * kCentre[sfxdsp::kRL] : v.fxL;
+            const float fxR = mono ? kCentre[sfxdsp::kFR] + sfxdsp::kDownmixCentre * kCentre[sfxdsp::kC] + sfxdsp::kDownmixRear * kCentre[sfxdsp::kRR] : v.fxR;
+            const float gl = fxL * vol, gr = fxR * vol;
             for (int i = 0; i < kBlock; ++i) in[2 * i] += mono_[i] * gl, in[2 * i + 1] += mono_[i] * gr;
         }
     }

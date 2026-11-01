@@ -11,6 +11,7 @@
 
 #include "char/character.h"
 #include "char/facefx.h"
+#include "scene/milo.h"
 #include "scene/objects.h"
 #include "script/script.h"
 
@@ -49,6 +50,7 @@ public:
         std::array<bool, 2> bass{};            // the player plays the bass track (bass_strum)
         bool campaignFinal = false;            // the career's last song (win_finals, kWinGameWalkSpot)
         bool encore = false;                   // an encore follows (kEncoreWalkSpot, post-game idle)
+        bool horseHead = false;                // the Horse Head cheat: <char>/og/<char>_horse.milo
         uint32_t seed = 0x42414e44u;           // the band's random numbers
     };
 
@@ -80,6 +82,19 @@ public:
         std::unique_ptr<ScriptObject> script;
         std::unique_ptr<facefx::LipSync> lip;
         std::unique_ptr<facefx::ExpressionScript> expr;
+        std::string miloPath;                  // the character's milo (its proxies resolve from it)
+        // The character's WorldFx objects (cheat_headflames, hand_flames_L /
+        // _R, god_particles...): a RndDir proxying a shared effect milo
+        // (char/shared/og), trans-parented to a bone; script start / stop
+        // (world_objects.dta WorldFx: "start/stop it. Cleans up particles
+        // post animation") [D]. Drawn by BandView (render/band_view.h).
+        struct Fx {
+            const scene::DirObj* obj = nullptr;
+            std::unique_ptr<scene::Milo> milo;  // the proxied effect
+            double start = 0;                   // world seconds at the last start
+            bool on = false;
+        };
+        std::map<std::string, std::unique_ptr<Fx>> fx;
     };
     const std::vector<std::unique_ptr<Member>>& members() const { return members_; }
     Member* member(const std::string& slot) const;

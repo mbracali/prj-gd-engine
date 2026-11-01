@@ -26,8 +26,12 @@ void closeStream(SDL_AudioStream* stream);
 // the mastering voice) [C].
 void toggleLimiter();
 bool limiterEnabled();
-// The options' stereo / mono choice (this disc's audio settings): mono folds
-// the final mix's left and right together.
+// The options' stereo / mono choice (options set_stereo, 0x0010dbc0 ->
+// 0x0010dc00) [C]: mono is no fold of the mix but every source panned to the
+// centre: the synth's voices (0x00225cd8 -> 0x0021e490 marks each voice for
+// re-panning) and the song's channels (0x00123110 -> 0x0023ab90: pan 0
+// instead of the channel's own). The mixer and the sfx player read it.
 void setMono(bool mono);
+bool mono();
 
 }  // namespace audiodev

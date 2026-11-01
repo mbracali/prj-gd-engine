@@ -830,6 +830,11 @@ void UiManager::update() {
     uiMs_ += frameDt_;
     gfx::UiView::setUiSeconds(uiMs_ / 1000.0);
     if (!(host_.gameLoaded() && host_.gamePaused())) secondsMs_ += frameDt_;
+    // kTaskTutorialSeconds: TutorialPanel's own timer, run by its poll
+    // while the panel is not paused (0x0013fb00 -> tutorial_seconds), so a
+    // lesson's sleeps go on with the game paused (tutorial_33's ending) and
+    // stop under tut_pause_screen (tutorial set_paused) [C].
+    if (PanelObj* t = panel("tutorial"); !t || !t->paused) tutorialMs_ += frameDt_;
     if (gamepadsAtMs_ > 0 && wall >= gamepadsAtMs_) openGamepads();
     if (splash_ >= 0) {
         splashMs_ += frameDt_;
@@ -842,7 +847,7 @@ void UiManager::update() {
     TaskMgr& tm = interp_.tasks();
     tm.setTime(kTaskUISeconds, uiMs_ / 1000.0);
     tm.setTime(kTaskSeconds, taskSeconds());
-    tm.setTime(kTaskTutorialSeconds, secondsMs_ / 1000.0);
+    tm.setTime(kTaskTutorialSeconds, tutorialMs_ / 1000.0);
     tm.setTime(kTaskBeats, host_.gameLoaded() ? host_.gameBeat() : 0.0);
     tm.poll();
     if (!deferred_.empty()) {
@@ -997,6 +1002,7 @@ bool UiManager::cheatOn(const std::string& id) const {
     if (id == "cheat_performance_mode") return in.var("cheat_enabled_performance_mode").truthy();
     if (id == "cheat_hyper_speed_mode") return in.var("cheat_enabled_hyper_speed_mode").truthy();
     if (id == "cheat_flaming_head") return in.var("cheat_enabled_flaming_head").truthy();
+    if (id == "cheat_horse_head_mode") return in.var("cheat_enabled_horse_head_mode").truthy();
     if (id == "cheat_eyeball_head_crowd") return in.var("cheat_crowd_heads").str() == "eyeball_crowd_heads";
     if (id == "cheat_monkey_head_crowd") return in.var("cheat_crowd_heads").str() == "monkey_crowd_heads";
     return false;
@@ -1012,7 +1018,7 @@ void UiManager::setCheat(const std::string& id, bool on) {
         session_->allAccess = on;
     } else if (id == "cheat_air_guitar") {
         interp_.var("cheat_guitar") = on ? Value::symbol("air_guitar") : Value::integer(0);
-    } else if (id == "cheat_performance_mode" || id == "cheat_hyper_speed_mode" || id == "cheat_flaming_head") {
+    } else if (id == "cheat_performance_mode" || id == "cheat_hyper_speed_mode" || id == "cheat_flaming_head" || id == "cheat_horse_head_mode") {
         const std::string var = id == "cheat_flaming_head" ? "cheat_enabled_flaming_head" : "cheat_enabled_" + id.substr(6);
         interp_.var(var) = Value::integer(on ? 1 : 0);
     } else if (id == "cheat_eyeball_head_crowd" || id == "cheat_monkey_head_crowd") {

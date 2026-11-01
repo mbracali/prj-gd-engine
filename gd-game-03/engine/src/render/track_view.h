@@ -72,6 +72,12 @@ public:
     // their tails.
     int starSmashes() const { return starSmashes_; }
     int starGlowLines() const { return starGlowLines_; }
+    // The held tail's widest row (1 at rest, up to 4 with the bar fully down)
+    // and its glow line's width scale, as last drawn, and that frame's song
+    // time (--walktest whammy_tail); 0 when no tail is held.
+    float heldTailWidest() const { return heldTailWidest_; }
+    float heldGlowScale() const { return heldGlowScale_; }
+    float tailNowMs() const { return tailNowMs_; }
     // Since reset: phrase_captured combo effects started (per slot).
     int comboStarts() const { return comboStarts_; }
     // Since reset: frames whose far-end fade was laid over the track (the
@@ -204,8 +210,21 @@ private:
     std::vector<scene::MeshVertex> tailRow_;
     int tailSegments_ = 30;
     float tailSegLen_ = 4.545f;
-    std::array<float, 100> whammyHist_{};
-    int whammyIndex_ = 0;
+    // Each tail's whammy history (the tail object's 100 floats at +0xc0 and
+    // index +0x250, zeroed when the tail is set up, 0x00158ab0) and its glow
+    // line's width scale (+0x254), keyed gem x 8 + slot; advanced one entry a
+    // poll while the tail is hit (states 2 / 3, 0x00158e50) [C].
+    struct TailWhammy {
+        std::array<float, 100> hist{};
+        int index = 0;
+        float glowScale = 1;
+        bool seen = false;
+    };
+    std::unordered_map<int, TailWhammy> tailWhammy_;
+    int whammyPolls_ = 0;           // 60 Hz polls due this frame
+    float whammyClockMs_ = -1e9f;   // the last poll's song time
+    float starWhammyBlend_ = 0;     // TrackPanel +0x2fc: +-0.1 a poll (0x00156530) [C]
+    float heldTailWidest_ = 0, heldGlowScale_ = 0, tailNowMs_ = 0;
 
     std::array<float, 5> hitMs_{};    // last hit per slot (smasher hit anim)
     std::array<float, 5> missMs_{};   // last miss per slot (smasher pop anim)

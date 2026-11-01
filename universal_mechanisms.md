@@ -15,8 +15,8 @@ in [guidelines/universal_launcher.md](guidelines/universal_launcher.md).
   starting point for every game.
 - Where a game cannot do something, it says so in its own docs and backlog.
 
-Implemented so far: **gd-game-01** (1.1.7), **gd-game-02** (0.1.8) and
-**gd-game-03** (0.0.2). The
+Implemented so far: **gd-game-01** (1.1.7), **gd-game-02** (0.1.9) and
+**gd-game-03** (0.0.3). The
 reference components are gd-game-01's: `engine/src/input/input.*` (the
 universal controls and their bindings), `engine/src/input/midi_in.*`
 (Generic MIDI through RtMidi), `engine/src/ui/gamepad_panel.cpp` (1.2.1),
@@ -548,8 +548,10 @@ unrelated and stay.)
   extras, Remove All Effects, No Fail, Autoplay and Forgiving HOPOs; the
   Modes set them as gd-game-02's do. Every effect is off by default (Bokeh
   Medium and Particles Original are the game's own), HDR None; the effects
-  work in 4:3 and 16:9. Still greyed: Enable Cut Content, FSR 3.1 / DLSS
-  (gd-game-01's Vulkan upscaler) and the Flaming Head cheat. Kept from
+  work in 4:3 and 16:9. Still greyed: Enable Cut Content (gd-game-03 0.0.3:
+  nothing unused on the disc to restore) and FSR 3.1 / DLSS (gd-game-01's
+  Vulkan upscaler). The Flaming Head cheat burns from 0.0.3, and Encore's
+  own Horse Head cheat is in Cheats & Enhancers. Kept from
   gd-game-03's own menu: **Widescreen (16:9)** after Resolution (4:3 is the
   default, as on the PS2). Ground Fog and Light Streaks are not there.
 - The port's universal menus open without a transition (also skipping the

@@ -811,7 +811,8 @@ bool isHudDirClass(const std::string& cls) {
 }  // namespace
 
 bool isDirClass(const std::string& cls) {
-    return cls == "ObjectDir" || cls == "RndDir" || cls == "PanelDir" || cls == "GHTrackDir" || cls == "WorldDir" || isHudDirClass(cls);
+    return cls == "ObjectDir" || cls == "RndDir" || cls == "PanelDir" || cls == "GHTrackDir" || cls == "WorldDir" || cls == "WorldFx" ||
+           isHudDirClass(cls);
 }
 
 std::unique_ptr<DirObj> decodeDir(const std::string& cls, const std::string& name, const Bytes& stream, size_t start,
@@ -848,6 +849,10 @@ std::unique_ptr<DirObj> decodeDir(const std::string& cls, const std::string& nam
         d->hasWorld = true;
     }
     if (isHudDirClass(cls)) hudPre(in, *d, own);
+    // WorldFx (revision 1 on this disc): a RndDir with its own revision word
+    // first; the record then follows RndDir's (data: every WorldFx record
+    // ends at its marker).
+    if (cls == "WorldFx" && d->version != 1) expectVersion(d->version, 1, "WorldFx");
     if (cls == "GHTrackDir" || cls == "PanelDir" || cls == "WorldDir") {
         if (cls == "PanelDir") expectVersion(d->version, kPanelDirRev, "PanelDir");
         else expectVersion(in.u32(), kPanelDirRev, "PanelDir");
@@ -868,7 +873,7 @@ std::unique_ptr<DirObj> decodeDir(const std::string& cls, const std::string& nam
     if (cls == "GHTrackDir") trackDirPost(in, *d);
     else if (cls == "PanelDir") panelDirPost(in, *d);
     else if (cls == "WorldDir") worldDirPost(in, *d);
-    else if (cls == "RndDir" || isHudDirClass(cls)) rndDirPost(in, *d);
+    else if (cls == "RndDir" || cls == "WorldFx" || isHudDirClass(cls)) rndDirPost(in, *d);
     else objectDirPost(in, *d);
     end = in.pos();
     if (in.remaining() < 4 || stream[end] != 0xAD || stream[end + 1] != 0xDE || stream[end + 2] != 0xAD ||
