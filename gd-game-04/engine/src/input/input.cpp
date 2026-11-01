@@ -303,7 +303,15 @@ SDL_JoystickID Input::attachVirtualPad(const std::string& spec) {
     return id;
 }
 
+void Input::closeShake() {
+    if (shakeSensor_) SDL_CloseSensor(shakeSensor_);
+    shakeSensor_ = nullptr;
+    shakeActive_ = false;
+    shakeValue_ = 0;
+}
+
 void Input::close() {
+    closeShake();
     for (auto& [id, p] : pads_) SDL_CloseGamepad(p.pad);
     pads_.clear();
 }
@@ -911,6 +919,8 @@ float Input::whammyValue(int player) const {
     float w = 0;
     for (const auto& [id, p] : pads_)
         if (player < 0 || p.slot == player) w = std::max(w, p.whammyAxis);
+    // Shake-to-whammy joins the max for player 0 (the phone itself).
+    if (player == 0) w = std::max(w, shakeWhammyValue());
     return w;
 }
 
@@ -1262,7 +1272,125 @@ void Input::touchEvent(const SDL_TouchFingerEvent& f, bool down, std::vector<Inp
     fingers_[f.fingerID] = fg;
 }
 
+// ----------------------------------------------------------- shake-to-whammy
+//
+// Phone shake -> the existing Whammy path, Android only. There is no shake
+// function in gd04's original game; this adds one, and
+// only for Whammy — Tilt/Gyro (Star Power) is never touched by shaking.
+//
+// How it works, and why it holds like a bar: every frame poll() samples the
+// SDL accelerometer, low-passes it to estimate gravity (so slowly rotating
+// the phone does not count as a shake), and measures the dynamic part
+// |a - gravity|. Two strong samples within 250 ms arm the shake (a single
+// bump, e.g. one footstep, does not); every further strong sample extends
+// the hold by 300 ms, so shaking continuously keeps Whammy down and stops
+// when shaking stops. While active, Input emits Action::Whammy down/up
+// (App turns that into Player::setWhammy, i.e. whammyHeld_ -> whammying()
+// true, exactly like holding Shift) and whammyValue() reports a varying
+// 0..1 value from the shake strength, so setWhammyValue() also sees the bar
+// moving. Physical bars, Shift and touch are untouched: whammyValue() takes
+// the max of all sources, and the Whammy event is only an extra down/up
+// edge, never a replacement.
+//
+// Tuning (env, read once, for on-device tuning without a rebuild):
+//   GD04_SHAKE_THRESHOLD — dynamic accel (m/s^2) counting as strong.
+//     Default 4.0: walking is typically 1-2, a real hand shake 5-15. Lower
+//     = easier to trigger, more false positives; higher = harder.
+//   GD04_SHAKE_HOLD_MS — hold after the last strong sample. Default 300.
+//   GD04_SHAKE_FORCE — set to 1 to also try on non-Android (still needs a
+//     real SDL accelerometer; on a desktop without one it stays a no-op).
+void Input::pollShake(uint64_t nowNs, std::vector<InputEvent>& out) {
+    auto release = [&] {
+        if (!shakeActive_) return;
+        shakeActive_ = false;
+        shakeValue_ = 0;
+        emit(out, Action::Whammy, false, nowNs, ControllerMode::Guitar, 0);
+        SDL_Log("shake whammy: off");
+    };
+    // Only in a song: in menus a Whammy edge is harmless, but there is
+    // nothing to whammy, so do not arm there and release on leaving a song.
+    // Enhanced Settings > Shake for Whammy turns it off.
+    if (!inGame() || !shakeOn_) {
+        release();
+        return;
+    }
+    const char* platform = SDL_GetPlatform();
+    const bool force = SDL_getenv("GD04_SHAKE_FORCE") != nullptr;
+    if (!force && (!platform || std::string(platform) != "Android")) return;
+    if (!shakeTried_) {
+        shakeTried_ = true;
+        if (!SDL_InitSubSystem(SDL_INIT_SENSOR)) {
+            SDL_Log("shake whammy: SDL_INIT_SENSOR failed: %s", SDL_GetError());
+            return;
+        }
+        int count = 0;
+        SDL_SensorID* ids = SDL_GetSensors(&count);
+        if (ids) {
+            for (int i = 0; i < count && !shakeSensor_; ++i) {
+                // The phone's own accelerometer only: not a Joy-Con / Wii
+                // accelerometer (ACCEL_L/R), which would belong to a pad.
+                if (SDL_GetSensorTypeForID(ids[i]) == SDL_SENSOR_ACCEL)
+                    shakeSensor_ = SDL_OpenSensor(ids[i]);
+            }
+            SDL_free(ids);
+        }
+        if (shakeSensor_) SDL_Log("shake whammy: accelerometer open (%s)", SDL_GetSensorName(shakeSensor_));
+        else SDL_Log("shake whammy: no accelerometer sensor found");
+    }
+    if (!shakeSensor_) return;
+    SDL_UpdateSensors();
+    float a[3] = {0, 0, 0};
+    if (!SDL_GetSensorData(shakeSensor_, a, 3)) return;
+    if (!shakeGravInit_) {
+        shakeGrav_[0] = a[0], shakeGrav_[1] = a[1], shakeGrav_[2] = a[2];
+        shakeGravInit_ = true;
+        shakeLastSampleNs_ = nowNs;
+        return;
+    }
+    shakeLastSampleNs_ = nowNs;
+    // Gravity estimate: slow low-pass, so a slow rotation of the phone
+    // (gravity vector moving) is absorbed, while a shake is not.
+    for (int i = 0; i < 3; ++i) shakeGrav_[i] = shakeGrav_[i] * 0.92f + a[i] * 0.08f;
+    float dyn2 = 0;
+    for (int i = 0; i < 3; ++i) {
+        float d = a[i] - shakeGrav_[i];
+        dyn2 += d * d;
+    }
+    const float dyn = std::sqrt(dyn2);
+    static const float kThreshold = [] {
+        if (const char* v = SDL_getenv("GD04_SHAKE_THRESHOLD")) {
+            float f = std::strtof(v, nullptr);
+            if (f > 0) return f;
+        }
+        return 4.0f;
+    }();
+    static const uint64_t kHoldNs = [] {
+        if (const char* v = SDL_getenv("GD04_SHAKE_HOLD_MS")) {
+            long ms = std::strtol(v, nullptr, 10);
+            if (ms > 0) return uint64_t(ms) * 1000000ull;
+        }
+        return 300000000ull;
+    }();
+    if (dyn > kThreshold) {
+        if (nowNs - shakeLastStrongNs_ > 250000000u) shakeStrongCount_ = 0;
+        shakeLastStrongNs_ = nowNs;
+        ++shakeStrongCount_;
+        // Varying strength (not a flat value) keeps setWhammyValue() seeing
+        // the bar move, which keeps whammyMoving() true while shaking.
+        shakeValue_ = std::clamp((dyn - kThreshold) / 8.0f, 0.15f, 1.0f);
+        if (!shakeActive_ && shakeStrongCount_ >= 2) {
+            shakeActive_ = true;
+            emit(out, Action::Whammy, true, nowNs, ControllerMode::Guitar, 0);
+            SDL_Log("shake whammy: on (dyn=%.1f)", dyn);
+        }
+        if (shakeActive_) shakeActiveUntilNs_ = nowNs + kHoldNs;
+    } else if (shakeActive_ && nowNs > shakeActiveUntilNs_) {
+        release();
+    }
+}
+
 void Input::poll(uint64_t nowNs, std::vector<InputEvent>& out) {
+    pollShake(nowNs, out);
     for (int p = 0; p < 2; ++p) {
         PendingStrum& s = strum_[size_t(p)];
         if (!s.on || nowNs < s.dueNs) continue;

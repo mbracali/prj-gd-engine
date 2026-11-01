@@ -1038,6 +1038,11 @@ private:
              "Point at a menu entry to highlight it and click to choose it; the mouse wheel scrolls lists. The help "
              "bar's buttons (CONFIRM, BACK, START, UP / DOWN) are clickable too. Hovering works only while the game "
              "window has focus. Mouse buttons are never used as game buttons."},
+#ifdef __ANDROID__
+            {Kind::Check, "shake_whammy", "Shake for Whammy", true,
+             "Shake the phone during a song to use the whammy bar: keep shaking to hold it, stop to let go. Whammy bends the "
+             "note and fills Star Power faster on a Star Power note. A real whammy bar keeps working. Android only."},
+#endif
             {Kind::Check, "touch", "Enable Touch Controls", true,
              "Play on a touch screen; also shows the on-screen buttons. In the menus a tap is a click. In a song, "
              "touch a lane at the bottom of the highway when its note arrives: it plays the fret and the strum at once "

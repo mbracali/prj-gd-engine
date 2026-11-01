@@ -95,6 +95,11 @@ std::vector<Item> buildItems(qs::Vm& vm) {
          "Point at a menu entry to highlight it and click to choose it; a right click goes back and the mouse wheel "
          "moves up and down. The help bar's items are clickable too. Hovering works only while the game window has "
          "focus; the pointer hides after a few seconds, when a key or a button is pressed, and during a song."},
+#ifdef __ANDROID__
+        {Kind::Check, "shake_whammy", "Shake for Whammy", true,
+         "Shake the phone during a song to use the whammy bar: keep shaking to hold it, stop to let go. Whammy bends the "
+         "note and fills Star Power faster on a Star Power note. A real whammy bar keeps working. Android only."},
+#endif
         {Kind::Check, "touch", "Enable Touch Controls", false,
          "Play on a touch screen. In the menus a tap is a click. In a song, touch a lane at the bottom of the highway when "
          "its note arrives: it plays the fret and the strum at once."},

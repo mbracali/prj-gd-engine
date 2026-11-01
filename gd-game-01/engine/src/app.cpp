@@ -170,6 +170,7 @@ const std::map<std::string, Json>& enhancedDefaults() {
     static const std::map<std::string, Json> d = [] {
         std::map<std::string, Json> m = {
         {"mouse", Json::boolean(true)},           {"touch", Json::boolean(false)},
+        {"shake_whammy", Json::boolean(true)},
         {"screen_mode", Json::string("windowed")},
         {"max_fps", Json::string("120")},         {"fps_counter", Json::boolean(false)},
         {"internal_res", Json::string("1080")},   {"ai_upscaling_mode", Json::string("quality")},
@@ -1900,6 +1901,7 @@ void App::applyEnhanced() {
     }
     // Controls: touch (SDL's touch-made mouse events only while it is off), XInput joypads, Rock Band guitars.
     input_.setTouch(enhancedOn("touch"));
+    input_.setShakeWhammy(enhancedOn("shake_whammy"));
     SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, enhancedOn("touch") ? "0" : "1");
     input_.setGamepadPlay(true);  // XInput controllers and Rock Band guitars are always on
     input_.setRockBand(true);
@@ -2283,6 +2285,7 @@ void App::frame() {
                     endMs_ = t;
                     endWallNs_ = nowNs;
                     bool won = !player_->failed();
+                    SDL_Log("song end: %s, %s at %.0f ms", songs_[playingIndex_].id.c_str(), won ? "won" : "lost", t);
                     if (venue_) {
                         // final_win_sequence (FUN_00282870): won the career's final song.
                         bool career = ui_->interp().send("meta", "get", {Value::symbol("mode")}).str() == "career";
@@ -2309,6 +2312,7 @@ void App::frame() {
                 bool outro = endMs_ >= 0 && endMs_ < 1e29f &&
                              (venue_ ? venue_->outroDone() || t >= endMs_ + kOutroMaxMs : t >= endMs_ + kOutroMs);
                 if (outro) {
+                    SDL_Log("song outro: %s", t >= endMs_ + kOutroMaxMs ? "gave up waiting for the clip" : "clip done");
                     endMs_ = 1e30f;
                     ui_->gameEvent("arena", "game_outro");  // stop_all_sfx, hud off, goto post_show / lose_screen
                 }

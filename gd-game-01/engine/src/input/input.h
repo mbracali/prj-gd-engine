@@ -224,6 +224,7 @@ public:
     // input.cpp). No sensor on desktop / no accelerometer: a no-op, and
     // physical whammy bars, keyboard Shift and touch keep working as before.
     // Tilt/Gyro (Star Power) is never driven by shaking.
+    void setShakeWhammy(bool on) { shakeOn_ = on; }
     float shakeWhammyValue() const { return shakeActive_ ? shakeValue_ : 0.0f; }
     bool shakeWhammyActive() const { return shakeActive_; }
     std::vector<std::pair<float, float>> takeMenuTaps() { return std::move(menuTaps_); }
@@ -325,7 +326,7 @@ private:
     void pollShake(uint64_t nowNs, std::vector<InputEvent>& out);
     void closeShake();
     SDL_Sensor* shakeSensor_ = nullptr;
-    bool shakeTried_ = false, shakeActive_ = false, shakeGravInit_ = false;
+    bool shakeOn_ = true, shakeTried_ = false, shakeActive_ = false, shakeGravInit_ = false;
     float shakeValue_ = 0, shakeGrav_[3] = {0, 0, 0};
     uint64_t shakeLastSampleNs_ = 0, shakeActiveUntilNs_ = 0, shakeLastStrongNs_ = 0;
     int shakeStrongCount_ = 0;

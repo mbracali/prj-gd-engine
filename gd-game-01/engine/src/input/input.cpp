@@ -1457,7 +1457,8 @@ void Input::pollShake(uint64_t nowNs, std::vector<InputEvent>& out) {
     };
     // Only in a song: in menus a Whammy edge is harmless, but there is
     // nothing to whammy, so do not arm there and release on leaving a song.
-    if (!inGame()) {
+    // Enhanced Settings > Shake for Whammy turns it off.
+    if (!inGame() || !shakeOn_) {
         release();
         return;
     }
