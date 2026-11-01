@@ -210,9 +210,22 @@ public:
         if (msg == "clear") return slot = -1, true;  // the splash: no profile chosen
         if (msg == "num_profiles") return r = Value::integer(c.numProfiles()), true;
         if (msg == "max_num_profiles") return r = Value::integer(Career::kProfiles), true;
+        // tutorials_done (0x0012f690): 3 with skip_tutorials or the cheat's
+        // tutorial access, else the current band's (+0x1c). The PS2's
+        // current band is an index that is never empty (0 after a delete,
+        // 0x0012d3f8), so before a band is chosen it is slot 0's [I: as the
+        // other campaign queries without a band].
         if (msg == "tutorials_done") {
-            const int done = skipTutorials_ || tutorialAccess_ ? 3 : slot >= 0 ? c.profiles[size_t(slot)].tutorialsDone : 0;
+            const int done = skipTutorials_ || tutorialAccess_ ? 3 : c.profiles[size_t(std::max(0, slot))].tutorialsDone;
             return r = Value::integer(done), true;
+        }
+        // do_tutorial <n> (0x0012f6c8 -> 0x0013ba00): as a tutorial starts,
+        // the band's tutorials done rises to n and the save is due (+0x7c);
+        // tutorials_panel enables the next tutorial from it [C].
+        if (msg == "do_tutorial") {
+            Career::Profile& tp = c.profiles[size_t(std::max(0, slot))];
+            if (intArg(args, 0) > tp.tutorialsDone) tp.tutorialsDone = intArg(args, 0), c.touch();
+            return true;
         }
         if (msg == "skip_tutorials") return skipTutorials_ = !args.empty() && args[0].truthy(), true;
         if (msg == "tutorial_access") return r = Value::integer(tutorialAccess_ ? 1 : 0), true;
@@ -316,7 +329,7 @@ public:
                                                      "new_campaign", "set_character_info", "get_character_info", "status", "get_cur_status_sym",
                                                      "get_status_progress", "is_max_status", "won_campaign", "is_song_passed", "high_score",
                                                      "final_song", "is_encore_song", "encore_unlock_potential", "encore_newly_unlocked",
-                                                     "get_cur_encore", "store_songs_passed", "check_practice_achievement", "do_tutorial",
+                                                     "get_cur_encore", "store_songs_passed", "check_practice_achievement",
                                                      "buy_item", "finish_song", "cheat_beat_song", "cheat_gold_song"};
             if (msg == "last_difficulty") return r = Value::integer(1), true;
             if (msg == "get_status_progress") return r = Value::string(""), true;
@@ -417,7 +430,7 @@ public:
                 if (!campaign::passed(ui_, p, diff, s)) return true;
             return r = Value::integer(1), true;
         }
-        if (msg == "check_practice_achievement" || msg == "do_tutorial") return true;  // achievements; the tutorials (M11)
+        if (msg == "check_practice_achievement") return true;  // achievements
         if (msg == "finish_song") {
             // {campaign finish_song $score $cash $reason $venue $status $status_award}: the outputs by name.
             // finish_song's $vars come by name (Interp::byNameMessages): $score is read.
@@ -549,8 +562,9 @@ public:
         if (msg == "get_volume_from_idx") return r = Value::real(db(intArg(args, 0, 11))), true;
         if (msg == "get_band_volume") return r = Value::real(db(o.bandVolumeIdx)), true;
         if (msg == "get_guitar_volume") return r = Value::real(db(o.guitarVolumeIdx)), true;
-        if (msg == "get_fx_volume") return r = Value::real(db(o.fxVolumeIdx)), true;
-        if (msg == "set_mute_fx") return true;
+        // set_mute_fx (the tutorials): the flag get_fx_volume answers -96 dB for (0x822B0F08) [C].
+        if (msg == "get_fx_volume") return r = Value::real(muteFx_ ? -96.0f : db(o.fxVolumeIdx)), true;
+        if (msg == "set_mute_fx") return muteFx_ = !args.empty() && args[0].truthy(), ui_.host().setMuteFx(muteFx_), true;
         return false;
     }
     void changed() {
@@ -560,6 +574,7 @@ public:
 
 private:
     UiManager& ui_;
+    bool muteFx_ = false;  // +0x34
 };
 
 // highscores: the current song's table at player 0's difficulty.
@@ -686,11 +701,70 @@ private:
 
 // Objects whose messages the port answers with nothing on purpose (render
 // and audio switches of the 360 build, the world before M8).
+// music_fader (the song's music Fader, PS2 0x00120f48 makes it and adds
+// it to the music stream's faders, 0x0021ea20) [C]: fade <dB> <ms>
+// (game.dta practice_end: -50 over a second). practice_panel's enter adds
+// it to the metronome's sounds too ({$sfx add_fader music_fader},
+// practice.dta), so they fade with the music; the port adds the fader's
+// level as each click starts (they are short) [I: the voices playing are
+// not changed]. The level goes linearly in gain as the mixer's music does;
+// a song's start puts it back at 0 dB (the mixer's music too) [I].
+class MusicFaderObj : public ScriptObject {
+public:
+    explicit MusicFaderObj(UiManager& ui) : ScriptObject("music_fader", "Fader"), ui_(ui) {}
+    bool handleNative(Interp&, const std::string& msg, std::vector<Value>& args, Value& r) override {
+        r = Value::integer(0);
+        if (msg == "fade") {
+            const float db = args.empty() ? 0.0f : args[0].number(), ms = args.size() > 1 ? args[1].number() : 0.0f;
+            from_ = gain(), to_ = db <= -96.0f ? 0.0f : std::pow(10.0f, db / 20.0f);
+            startMs_ = nowMs(), durMs_ = std::max(0.0f, ms);
+            return ui_.host().setMusicVolume(db, ms), true;
+        }
+        return false;
+    }
+    float gain() const {
+        if (durMs_ <= 0) return to_;
+        const double k = std::clamp((nowMs() - startMs_) / double(durMs_), 0.0, 1.0);
+        return float(from_ + (to_ - from_) * k);
+    }
+    void reset() { from_ = to_ = 1, durMs_ = 0; }
+
+private:
+    static double nowMs() { return double(SDL_GetTicksNS()) / 1e6; }
+    UiManager& ui_;
+    float from_ = 1, to_ = 1, durMs_ = 0;
+    double startMs_ = 0;
+};
+MusicFaderObj* gMusicFader = nullptr;
+
+// crowd_audio (CrowdAudio, 0x822E0928): `enabled` is +0x38, the mode's
+// crowd_audio (modes.dta) unless set_enabled turned it off (0x822DF9D8) [C]; its
+// streams are the world's (game/crowd.cpp), so turn_off / set_paused
+// change nothing here.
+class CrowdAudioObj : public ScriptObject {
+public:
+    explicit CrowdAudioObj(UiManager& ui) : ScriptObject("crowd_audio", "CrowdAudio"), ui_(ui) {}
+    bool handleNative(Interp&, const std::string& msg, std::vector<Value>& args, Value& r) override {
+        r = Value::integer(0);
+        if (msg == "enabled") return r = Value::integer(set_ && gameCfgValue(ui_, "crowd_audio").truthy() ? 1 : 0), true;
+        if (msg == "set_enabled") return set_ = !args.empty() && args[0].truthy(), true;
+        return msg == "turn_off" || msg == "set_paused";
+    }
+
+private:
+    UiManager& ui_;
+    bool set_ = true;
+};
+
 class QuietObj : public ScriptObject {
 public:
     QuietObj(UiManager& ui, const std::string& name, std::set<std::string> msgs) : ScriptObject(name, "Native"), ui_(ui), msgs_(std::move(msgs)) {}
     bool handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) override {
         r = Value::integer(0);
+        // "world" with no venue loaded (the tutorials): an empty world, whose
+        // play_sfx / stop_sfx find no sound in it, so player.dta's Star Power
+        // crowd_upto_good is silent there [I: WorldDir's sounds are its own].
+        if (name() == "world" && (msg == "play_sfx" || msg == "stop_sfx")) return true;
         if (msg == "play_sfx" || msg == "play_meta_sfx") {
             const SfxArgs a = sfxArgs(in, args, 1);
             return ui_.playSfx(args.empty() ? "" : args[0].str(), a.volume, a.pan, a.transpose), true;
@@ -705,6 +779,16 @@ private:
 };
 
 }  // namespace
+
+float faderDb(const std::string& fader) {
+    if (!gMusicFader || fader != "music_fader") return 0.0f;
+    const float g = gMusicFader->gain();
+    return g <= 0.0000158f ? -96.0f : 20.0f * std::log10(g);
+}
+
+void resetFaders() {
+    if (gMusicFader) gMusicFader->reset();
+}
 
 void installNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<ScriptObject>>& owned) {
     auto add = [&](std::unique_ptr<ScriptObject> o) -> ScriptObject* {
@@ -728,19 +812,12 @@ void installNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Scrip
     for (const char* stub : {"achievements", "leaderboards", "content_mgr"}) add(std::make_unique<StubObject>(stub, "XboxLive"));
     add(std::make_unique<QuietObj>(ui, "rnd", std::set<std::string>{"suspend", "unset_depth_of_field", "show_overlay", "toggle_overlay",
                                                                      "reflect", "reset_postproc", "overlay_showing", "aspect"}));
-    add(std::make_unique<QuietObj>(ui, "crowd_audio", std::set<std::string>{"turn_off", "enabled", "set_enabled", "set_paused"}));
+    add(std::make_unique<CrowdAudioObj>(ui));
     add(std::make_unique<QuietObj>(ui, "world", std::set<std::string>{"set", "get", "current_shot", "add_sink", "lighting"}));
-    add(std::make_unique<QuietObj>(ui, "music_fader", std::set<std::string>{"fade"}));
+    gMusicFader = static_cast<MusicFaderObj*>(add(std::make_unique<MusicFaderObj>(ui)));
     add(std::make_unique<QuietObj>(ui, "encore_stream", std::set<std::string>{"play", "stop"}));
     add(std::make_unique<QuietObj>(ui, "cheat_display", std::set<std::string>{"show"}));
-    // The PlayerMatchers (vtable 0x8204a1ac): their handlers are gh2.dta's
-    // (beatmatch (player_matcher_handlers ...)) (0x822E44B0), added after
-    // the boot. on_start_starpower / on_stop_starpower tell the player's
-    // character (0x822E3840 / 0x822E36B8), which the program's band does on
-    // the Star Power events (game/world_driver.cpp) [C].
-    for (const char* m : {"player_matcher0", "player_matcher1"})
-        add(std::make_unique<QuietObj>(ui, m, std::set<std::string>{"add_sink", "remove_sink", "auto_solo", "set_auto_solo",
-                                                                    "on_start_starpower", "on_stop_starpower", "refresh_track_buttons"}));
+    // The PlayerMatchers: ui/natives_game.cpp (MatcherObj).
     installGameNatives(ui, in, owned);
     chars::installNatives(ui, in, owned);
     store::installNatives(ui, in, owned);

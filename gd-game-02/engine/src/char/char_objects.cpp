@@ -314,7 +314,7 @@ const std::map<std::string, Decoder>& charDecoders() {
                      r.fs(p.pos);
                      p.bone = r.str();
                      p.length = r.f();
-                     p.f50 = r.f();
+                     p.type = int(r.u32());
                      p.collide = r.str();
                      p.f60 = r.f();
                      p.f64 = r.f();

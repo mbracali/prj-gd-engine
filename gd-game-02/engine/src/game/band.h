@@ -11,6 +11,7 @@
 
 #include "char/character.h"
 #include "char/facefx.h"
+#include "scene/milo.h"
 #include "scene/objects.h"
 #include "script/script.h"
 
@@ -77,6 +78,18 @@ public:
         std::unique_ptr<chr::Character> character;
         std::string type;                      // guitarist / singer / keyboardist / bassist / drummer
         int player = -1;                       // guitarists
+        std::string miloPath;                  // the character's milo (its proxies resolve from it)
+        // The character's effect dirs (cheat_headflames, hand_flames_L / _R,
+        // god_particles...): a RndDir proxying a shared milo (char/shared/og),
+        // parented to a bone; script start / stop (char_objects.dta) [C data].
+        // Drawn by BandView.
+        struct Fx {
+            const scene::DirObj* obj = nullptr;
+            std::unique_ptr<scene::Milo> milo;  // the proxied effect
+            double start = 0;                   // world seconds at the last start
+            bool on = false;
+        };
+        std::map<std::string, std::unique_ptr<Fx>> fx;
         std::unique_ptr<ScriptObject> script;
         std::unique_ptr<facefx::LipSync> lip;
         std::unique_ptr<facefx::ExpressionScript> expr;

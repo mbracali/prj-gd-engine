@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <sstream>
 
 #include "data/game_data.h"
@@ -75,6 +76,12 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
     auto until = [&](double ms) { steps_.push_back({S::Wait, "until", 0, ms}); };
     // A real key press, through SDL's events and the input layer (as GD02_KEYS' kReturn).
     auto key = [&](SDL_Keycode k) { steps_.push_back({S::Key, "", int(k), 0}); };
+    // A key held down (down) or let go (!down) on its own.
+    auto keyHold = [&](SDL_Keycode k, bool down) {
+        Step st{S::Key, "", int(k), 0};
+        st.x = down ? 1.0f : 2.0f;
+        steps_.push_back(st);
+    };
     auto check = [&](const char* what, double timeout = 0) { steps_.push_back({S::Check, what, 0, timeout}); };
     // The mouse (UiManager::mouse): at a point, or on a component of the focus panel.
     auto mouseAt = [&](float x, float y, int button) {
@@ -102,7 +109,10 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         at("game_screen", 30000);
     };
     if (scenario == "quickplay") {
-        endMs_ = 50000;  // long enough for a high score (the table's lowest is 10000)
+        endMs_ = 60000;  // long enough for a high score (the table's lowest is 10000)
+        // Star Power deployed once two phrases filled half the meter (20.8 s
+        // and 35.2 s on Easy): claps on its beats, sp_depleted as it runs out.
+        songKeys_ = "45000:starpower";
         wait(300);
         press(kX);  // skips the three splashes (9 s otherwise)
         check("splashes_skipped", 1000);
@@ -119,6 +129,8 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         check("intro_sequence");
         check("intro_camera");
         check("star_phrase");
+        check("track_surface");
+        check("band_shadows");
         at("endgame_screen", 90000);
         wait(600);
         press(kX);  // CONTINUE (me_continue.btn)
@@ -140,11 +152,12 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
                    "qp_selsong_screen", "main_screen"};
     } else if (scenario == "lose") {
         autoplay_ = false;
-        failMs_ = 3000;
+        failMs_ = 5000;  // past bangyourhead's first big note (beat 8), its gem passed unhit
         songKeys_ = "1000:strum,2000:strum";  // two overstrums: GH2's miss sound each
         quickplaySong(0);
         check("miss_sound", 30000);
         at("lose_screen", 30000);
+        check("big_note_blown");
         press(kDown), wait(150), press(kDown), wait(150);  // QUIT (lose_quit_normal.btn)
         press(kX);
         at("meta_loading_screen");
@@ -205,6 +218,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         press(kX);  // restart.btn
         at("game_screen");
         wait(2500);
+        check("game_sinks");  // track_panel and hud still hear the game after RESTART
         press(kStart);
         at("pause_screen");
         press(kUp);  // QUIT (up from RESUME)
@@ -218,7 +232,8 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         expect_ = {"main_screen", "qp_selsong_screen", "qp_diff_screen", "loading_screen", "game_screen", "pause_screen",
                    "game_screen", "pause_screen", "pause_confirm_restart_screen", "game_screen", "pause_screen",
                    "pause_confirm_quit_screen", "meta_loading_screen", "qp_selsong_screen"};
-    } else if (scenario == "career" || scenario == "career_full" || scenario == "career_song") {
+    } else if (scenario == "career" || scenario == "career_full" || scenario == "career_song" || scenario == "career_encore" ||
+               scenario == "career_win" || scenario == "career_win_medium" || scenario == "career_practice") {
         at("splash_screen", 30000);
         press(kX);
         at("startup_create_save_screen");
@@ -274,6 +289,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
             wait(800);
             check("bricks_same");
         }
+        if (scenario == "career_win") press(kUp), wait(150);  // Medium -> Easy
         if (scenario == "career_song") {
             // GD02_WALK_DIFF=0..3 (default Medium, the focus).
             const char* d = SDL_getenv("GD02_WALK_DIFF");
@@ -335,8 +351,15 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
             check("career_target");
             press(kX);  // LET'S ROCK
             at("sel_venue_screen");
-            press(kX);  // the venue (set_career_venue: the newest unlocked)
+            // The newest unlocked venue has the focus (set_career_venue); on
+            // Easy a tier opens after 4 of its songs, so the target can be
+            // in an older one, and not the first left in the list (GD02-088).
+            wait(600);
+            check("career_pick_venue", 20000);
+            press(kX);
             at("sel_song_screen");
+            wait(600);
+            check("career_pick_song", 20000);
             check("career_song_target");
             press(kX);
             at("loading_screen");
@@ -356,6 +379,111 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
                 wait(4000);
             }
             expect_.insert(expect_.end(), {"sel_venue_screen", "sel_song_screen", "loading_screen", "game_screen"});
+        }
+        if (scenario == "career_win" || scenario == "career_win_medium") {
+            // The tour won (GD02-023): every tier song before the tour's last
+            // passed with cheat_beat_song, the last one offered and played
+            // (cut short, a win). final_song (0x00132930): the last tier's
+            // song that completes it; at Easy the tour ends with fest
+            // (0x00130c58: one tier less) and its encore is never unlocked
+            // (0x00131c70), so it is losangeles; above Easy arena's encore
+            // playwithme [C]. win_game_screen: beat_easy / beat_other and
+            // the crowd's crowd_win, then pro face-off's unlock once all
+            // six tiers are complete (0x0012f130), the results.
+            const bool easy = scenario == "career_win";
+            winTarget_ = easy ? "losangeles" : "playwithme";
+            endMs_ = 30000;
+            check("career_target");
+            press(kX);  // LET'S ROCK
+            at("sel_venue_screen");
+            press(kX);
+            at("sel_song_screen");
+            check("career_song_target");
+            press(kX);
+            at("loading_screen");
+            at("game_screen", 30000);
+            at("win_game_screen", 120000);
+            wait(1500);
+            check(easy ? "tour_won easy" : "tour_won other");
+            wait(5500);  // WIN_GAME_INPUT_DELAY_SEC (6 s from the screen's entrance)
+            press(kX);
+            // (The save's The Glitches has pro face-off already, so
+            // unlock_pfo_screen, only for a new unlock, does not come.)
+            at("endgame_screen", 20000);
+            expect_.insert(expect_.end(), {"sel_venue_screen", "sel_song_screen", "loading_screen", "game_screen", "post_show_screen",
+                                           "win_game_screen", "endgame_screen"});
+        }
+        if (scenario == "career_practice") {
+            // Practice from a lost career song (lose.dta goto_practice_mode:
+            // practice_sel_section_screen's career_mode): the lose screen's
+            // career buttons, the section at 100%, the pause's career buttons
+            // (pause.dta: resume_career, change_speed_career, quit_career)
+            // and back to the career menu (resume_from_practice).
+            failMs_ = 8000;
+            autoplay_ = false;
+            press(kX);  // LET'S ROCK
+            at("sel_venue_screen");
+            press(kX);
+            at("sel_song_screen");
+            press(kX);
+            at("loading_screen");
+            at("game_screen", 30000);
+            at("lose_screen", 60000);
+            wait(800);
+            check("focus_to lose_practice_career.btn", 5000);
+            press(kX);
+            at("meta_loading_screen");
+            at("practice_sel_section_screen", 30000);
+            wait(1000);
+            press(kDown), wait(300);
+            press(kX), wait(600), press(kX);
+            at("practice_sel_speed_screen");
+            press(kX);
+            at("practice_loading_screen", 30000);
+            at("practice_game_screen", 30000);
+            wait(3000);
+            press(kStart);
+            at("pract_pause_screen");
+            check("focus_to resume_career.btn", 3000);
+            check("focus_to change_speed_career.btn", 5000);
+            press(kX);
+            at("practice_change_speed_screen");
+            press(kTri);  // back to the pause
+            at("pract_pause_screen");
+            check("focus_to quit_career.btn", 5000);
+            press(kX);
+            at("meta_loading_screen");
+            at("career_screen", 30000);
+            check("practice_career_back");
+            expect_.insert(expect_.end(), {"sel_venue_screen", "sel_song_screen", "loading_screen", "game_screen", "lose_screen",
+                                           "meta_loading_screen", "practice_sel_section_screen", "practice_sel_speed_screen",
+                                           "practice_loading_screen", "practice_game_screen", "pract_pause_screen",
+                                           "practice_change_speed_screen", "pract_pause_screen", "meta_loading_screen", "career_screen"});
+        }
+        if (scenario == "career_encore") {
+            // career_full's tier to its encore offer (iran played), declined:
+            // the venue's encore_no (endgame.dta no.btn), then the results.
+            endMs_ = 35000;
+            check("career_seed");
+            press(kX);  // LET'S ROCK
+            at("sel_venue_screen");
+            press(kX);
+            at("sel_song_screen");
+            wait(900);
+            check("career_song_iran");
+            press(kX);
+            at("loading_screen");
+            at("game_screen", 30000);
+            at("endgame_encore_screen", 90000);
+            wait(1500);
+            check("encore_decline");  // down to NO
+            wait(400);
+            check("encore_decline");  // select it
+            at("endgame_screen", 20000);
+            wait(500);
+            check("encore_declined");
+            expect_.insert(expect_.end(), {"sel_venue_screen", "sel_song_screen", "loading_screen", "game_screen", "post_show_screen",
+                                           "endgame_encore_screen", "endgame_screen"});
         }
         if (scenario == "career_full") {
             // The first tier at Medium: three songs passed with GH2's own
@@ -681,9 +809,11 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         key(SDLK_1), wait(250);                                // "C"
         key(SDLK_DOWN), wait(250);                             // D
         key(SDLK_1), wait(250);                                // "CD"
+        key(SDLK_X), wait(150), key(SDLK_BACKSPACE), wait(150);  // typed (GD02-085): "CDX", "CD"
+        key(SDLK_E), wait(150);                                // typed: "CDE"
         key(SDLK_RETURN);
         at("sel_difficulty_screen");
-        check("band_named_CD");
+        check("band_named_CDE");
         expect_ = {"splash_screen", "startup_load_finder_screen", "startup_create_save_screen", "saving_screen", "guitar_help_screen",
                    "main_screen", "chooseprof_screen", "nameprof_screen", "sel_difficulty_screen"};
     } else if (scenario == "logo_skip") {
@@ -743,8 +873,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         check("cheat_air_off");
         // The same cheats in Enhanced Options > CHEATS (up from Gamepads
         // wraps to the list's end): Monkey Head Crowd on, Eyeball Head Crowd
-        // on (one crowd head at a time), Flaming Head (not built: stays
-        // off), Hyper Speed Mode off again.
+        // on (one crowd head at a time), Flaming Head on, Hyper Speed Mode off again.
         wait(900);
         for (int i = 0; i < 4; ++i) press(kDown), wait(150);  // OPTIONS
         press(kX);
@@ -829,10 +958,20 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         }
         at("game_screen", 60000);
         check("multi_setup");
+        if (scenario == "faceoff") {
+            // Two-player Star Power (hud_panel.dta star_power_ready, player.dta
+            // stop_using: play_game_sfx_player's _multi sounds when {game
+            // multiplayer}): both meters filled with GH2's fill_star_power
+            // (its S debug key, cheats_funcs.dta fill_star_meter) and a
+            // deploy rate of a meter per measure, P1 deploys (Select) at 9 s.
+            songKeys_ = "9000:starpower";
+            check("sp_multi_fill", 30000);
+        }
         const char* results = scenario == "coop" ? "multi_compete_coop_screen" : scenario == "faceoff" ? "multi_compete_screen" : "multi_compete_fo_screen";
         at(results, 90000);
         wait(1500);
         if (scenario == "coop") check("coop_record");
+        if (scenario == "faceoff") check("sp_multi_sounds");
         press(kX);  // CONTINUE (me_continue.btn)
         if (scenario == "coop") {
             at("multi_unlock_bass_screen");  // surrender's three stars or more: bass_sg_mahogany (songs 1, stars 3)
@@ -856,6 +995,345 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         else
             expect_.insert(expect_.end(), {"multi_sel_character_screen", "multi_sel_guitar_screen", "multi_fo_venue_screen", "multi_fo_selsong_screen",
                                            "multi_fo_seldiff_screen", "loading_screen", "game_screen", "multi_compete_fo_screen", "complete_screen", "multi_fo_selsong_screen"});
+    } else if (scenario == "practice") {
+        // On the bass: an overstrum in the measure before the section (no
+        // gem there) is beatmatch.dta's miss on a bass track, miss_bass.
+        songKeys_ = "2600:strum";
+        at("main_screen");
+        wait(2000);  // the main menu's entrance (a press during it is lost)
+        press(kDown), wait(150), press(kDown), wait(150);  // QUICK PLAY -> MULTIPLAYER -> TRAINING
+        press(kX);
+        at("training_screen");
+        press(kDown), wait(150);  // TUTORIALS (the focus) -> PRACTICE
+        press(kX);
+        at("practice_selsong_screen");
+        press(kX);  // the first song
+        at("practice_selpart_screen");
+        press(kDown), wait(150);  // the guitar (part0.btn) -> the bass (part1.btn)
+        press(kX);
+        at("practice_diff_screen");
+        press(kX);
+        at("practice_sel_section_screen");
+        wait(1000);
+        press(kDown), wait(300);  // the full song -> the first section
+        press(kX);  // the start section
+        wait(600);
+        press(kX);  // the end section: the same
+        at("practice_sel_speed_screen");
+        press(kDown), wait(150), press(kDown), wait(150);  // 100% -> 85% -> 65%
+        press(kX);
+        at("practice_loading_screen");
+        at("practice_game_screen", 30000);
+        check("practice_stream");
+        wait(500);
+        check("track_surface");
+        check("practice_clock");  // the song clock's rate against the wall clock, now ...
+        wait(4000);
+        check("practice_clock");  // ... and 4 s later: the practice speed
+        at("practice_end_screen", 120000);
+        wait(1000);
+        check("practice_end");
+        check("practice_click_fader");
+        for (int i = 0; i < 4; ++i) press(kDown), wait(150);  // RESTART -> CHANGE SPEED -> CHANGE SECTION -> NEW SONG -> EXIT
+        press(kX);  // quit.btn: back to the main menu
+        at("meta_loading_screen");
+        at("main_screen", 30000);
+        check("menu_sounds");
+        expect_ = {"main_screen", "training_screen", "practice_selsong_screen", "practice_selpart_screen", "practice_diff_screen",
+                   "practice_sel_section_screen", "practice_sel_speed_screen", "practice_loading_screen", "practice_game_screen",
+                   "practice_end_screen", "meta_loading_screen", "main_screen"};
+    } else if (scenario == "practice_menus") {
+        // Practice's pause and its menus (pause.dta pract_pause_screen): a
+        // section at 100%, Start pauses (the game paused) and resumes;
+        // CHANGE SPEED -> 65% (game_restart: the section again on _p65);
+        // CHANGE SECTION -> the second section at 85% (_p85); NEW SONG ->
+        // the song list.
+        auto toGame = [&] {
+            at("practice_loading_screen", 30000);
+            at("practice_game_screen", 30000);
+            wait(3000);
+        };
+        auto pause = [&] {
+            press(kStart);
+            at("pract_pause_screen");
+        };
+        at("main_screen");
+        wait(2000);  // the main menu's entrance (a press during it is lost)
+        press(kDown), wait(150), press(kDown), wait(150);  // QUICK PLAY -> MULTIPLAYER -> TRAINING
+        press(kX);
+        at("training_screen");
+        press(kDown), wait(150);  // TUTORIALS -> PRACTICE
+        press(kX);
+        at("practice_selsong_screen");
+        press(kX);  // the first song
+        at("practice_selpart_screen");
+        press(kX);  // the guitar
+        at("practice_diff_screen");
+        press(kX);
+        at("practice_sel_section_screen");
+        wait(1000);
+        press(kDown), wait(300);  // the full song -> the first section
+        press(kX), wait(600), press(kX);  // start and end: the first section
+        at("practice_sel_speed_screen");
+        press(kX);  // 100%
+        toGame();
+        pause();
+        check("practice_paused yes");
+        press(kStart);  // resumes
+        at("practice_game_screen");
+        wait(1500);
+        check("practice_paused no");
+        pause();
+        check("focus_to change_speed.btn", 5000);
+        press(kX);
+        at("practice_change_speed_screen");
+        press(kDown), wait(150), press(kDown), wait(150);  // 100% -> 85% -> 65%
+        press(kX);  // game_restart
+        at("practice_game_screen", 30000);
+        wait(3000);
+        check("practice_stream 65");
+        pause();
+        check("focus_to section.btn", 5000);
+        press(kX);
+        at("meta_loading_screen");
+        at("practice_sel_section_screen", 30000);
+        wait(1000);
+        press(kDown), wait(300), press(kDown), wait(300);  // the second section
+        press(kX), wait(600), press(kX);
+        at("practice_sel_speed_screen");
+        press(kUp), wait(150);  // the speed list keeps its focus (65%): up to 85%
+        press(kX);
+        toGame();
+        check("practice_stream 85");
+        pause();
+        check("focus_to newsong.btn", 5000);
+        press(kX);
+        at("meta_loading_screen");
+        at("practice_selsong_screen", 30000);
+        expect_ = {"main_screen", "training_screen", "practice_selsong_screen", "practice_selpart_screen", "practice_diff_screen",
+                   "practice_sel_section_screen", "practice_sel_speed_screen", "practice_loading_screen", "practice_game_screen",
+                   "pract_pause_screen", "practice_game_screen", "pract_pause_screen", "practice_change_speed_screen", "practice_game_screen",
+                   "pract_pause_screen", "meta_loading_screen", "practice_sel_section_screen", "practice_sel_speed_screen",
+                   "practice_loading_screen", "practice_game_screen", "pract_pause_screen", "meta_loading_screen", "practice_selsong_screen"};
+    } else if (scenario == "tutorial") {
+        at("main_screen");
+        wait(2000);  // the main menu's entrance (a press during it is lost)
+        press(kDown), wait(150), press(kDown), wait(150);  // QUICK PLAY -> MULTIPLAYER -> TRAINING
+        press(kX);
+        at("training_screen");
+        press(kX);  // TUTORIALS (the focus)
+        at("tutorials_screen");
+        press(kX);  // the first tutorial (tut_1.btn)
+        at("tut_loading_screen|tut_script_screen");
+        at("tut_script_screen", 30000);
+        // tutorial_11_tuning: the voice-over, then the tuning (each fret
+        // held and strummed three times, with the keyboard's frets 1..5
+        // and its strum, Down), then the next lesson.
+        check("tutorial_tuning", 180000);
+        wait(500);
+        for (SDL_Keycode f : {SDLK_1, SDLK_2, SDLK_3, SDLK_4, SDLK_5}) {
+            keyHold(f, true), wait(150);
+            for (int i = 0; i < 3; ++i) key(SDLK_DOWN), wait(300);
+            keyHold(f, false), wait(200);
+        }
+        check("tutorial_tuned", 15000);
+        check("tutorial_next_lesson", 60000);
+        wait(1000);
+        press(kStart);  // tut_script_screen: Start pauses
+        at("tut_pause_screen");
+        press(kDown), wait(150), press(kDown), wait(150);  // RESUME -> RESTART -> QUIT
+        press(kX);
+        at("meta_loading_screen", 20000);
+        at("main_screen", 30000);
+        check("menu_sounds");
+        expect_ = {"main_screen", "training_screen", "tutorials_screen", "tut_loading_screen", "tut_script_screen", "tut_pause_screen",
+                   "tutorial_quit_screen", "meta_loading_screen", "main_screen"};
+    } else if (scenario == "flaming_head") {
+        // GD02-043: the Flaming Head code at the main menu, a song: the
+        // guitarist's cheat_headflames (char/shared) burns.
+        auto code = [&](std::initializer_list<int> buttons) {
+            for (int b : buttons) press(b), wait(120);
+        };
+        at("main_screen");
+        wait(2000);
+        code({kYellow, kOrange, kYellow, kYellow, kOrange, kYellow, kYellow, kOrange});
+        wait(2000);
+        quickplaySong(0);
+        wait(3000);
+        check("band_flames");
+        expect_ = {"main_screen", "qp_selsong_screen", "qp_diff_screen", "loading_screen", "game_screen"};
+    } else if (scenario == "tutorial1") {
+        // The whole first tutorial on autoplay: the tuning, then playing notes
+        // (tutorial102), different notes (103), held notes (104), chords,
+        // the interface and the wrap-up (105), to its end.
+        songKeys_ = "";
+        at("main_screen");
+        wait(2000);  // the main menu's entrance (a press during it is lost)
+        press(kDown), wait(150), press(kDown), wait(150);  // QUICK PLAY -> MULTIPLAYER -> TRAINING
+        press(kX);
+        at("training_screen");
+        press(kX);  // TUTORIALS (the focus)
+        at("tutorials_screen");
+        press(kX);
+        at("tut_loading_screen|tut_script_screen");
+        at("tut_script_screen", 30000);
+        check("tutorial_tuning", 180000);
+        wait(500);
+        for (SDL_Keycode f : {SDLK_1, SDLK_2, SDLK_3, SDLK_4, SDLK_5}) {
+            keyHold(f, true), wait(150);
+            for (int i = 0; i < 3; ++i) key(SDLK_DOWN), wait(300);
+            keyHold(f, false), wait(200);
+        }
+        check("tutorial_tuned", 15000);
+        for (const char* l : {"tutorial_lesson playing_notes", "tutorial_lesson diff_notes", "tutorial_lesson held_notes", "tutorial_lesson chords",
+                              "tutorial_lesson interface", "tutorial_lesson wrapup"})
+            check(l, 400000);
+        at("meta_loading_screen", 400000);
+        at("main_screen", 30000);
+        expect_ = {"main_screen", "training_screen", "tutorials_screen", "tut_loading_screen", "tut_script_screen", "tutorial_end_screen",
+                   "meta_loading_screen", "main_screen"};
+    } else if (scenario == "tutorial2" || scenario == "tutorial3") {
+        // The later tutorials (tutorials.dta tutorials_panel): each opens once
+        // the one before has been started (campaign do_tutorial n ->
+        // tutorials_done). Played through to their end on autoplay.
+        auto toTutorials = [&] {
+            at("main_screen");
+            wait(2000);  // the main menu's entrance (a press during it is lost)
+            press(kDown), wait(150), press(kDown), wait(150);  // QUICK PLAY -> MULTIPLAYER -> TRAINING
+            press(kX);
+            at("training_screen");
+            press(kX);  // TUTORIALS (the focus)
+            at("tutorials_screen");
+            wait(300);
+        };
+        if (scenario == "tutorial2") {
+            // Star Power (tutorial_21..24): the phrase captured (autoplay), the
+            // whammy on its sustains (the bar moved all along) filling the
+            // meter, then the tilt (Select, tried every second) deploying it
+            // for 8 gems; a gem hit before that is button_error.
+            std::string keys;
+            for (int t = 0; t < 400000; t += 100) keys += std::to_string(t) + (t % 200 ? ":whammy=1," : ":whammy=0,");
+            // From 4.5 s: tutorial204's first gem (tick 3840, 4.0 s) is hit
+            // before the first tilt, so it plays button_error.
+            for (int t = 4500; t < 400000; t += 1000) keys += std::to_string(t) + ":starpower,";
+            songKeys_ = keys;
+            toTutorials();
+            check("tut_locked 2");
+            press(kX);  // the first tutorial: started (do_tutorial 1), tuned, paused in its next lesson, quit
+            at("tut_script_screen", 30000);
+            // (Paused during its first lesson the tutorial does not stop:
+            // tutorial's state is still "intro" until a next_lesson, and
+            // tut_pause_screen pauses and takes buttons only at state "".)
+            check("tutorial_tuning", 180000);
+            wait(500);
+            for (SDL_Keycode f : {SDLK_1, SDLK_2, SDLK_3, SDLK_4, SDLK_5}) {
+                keyHold(f, true), wait(150);
+                for (int i = 0; i < 3; ++i) key(SDLK_DOWN), wait(300);
+                keyHold(f, false), wait(200);
+            }
+            check("tutorial_next_lesson", 60000);
+            wait(1000);
+            press(kStart);
+            at("tut_pause_screen");
+            press(kDown), wait(150), press(kDown), wait(150);  // RESUME -> RESTART -> QUIT
+            press(kX);
+            at("meta_loading_screen", 20000);
+            toTutorials();
+            check("tut_unlocked 2");
+            check("focus_to tut_2.btn", 5000);
+            press(kX);
+            at("tut_loading_screen|tut_script_screen");
+            at("tut_script_screen", 30000);
+            check("tutorial_lesson star_combos", 120000);
+            check("tutorial_lesson whammy", 400000);
+            check("tutorial_lesson wail", 400000);
+            at("meta_loading_screen", 400000);  // tutorial_end_screen goes on at once (meta_loading_goto)
+            at("main_screen", 30000);
+            check("tutorial_done 2");
+            expect_ = {"main_screen", "training_screen", "tutorials_screen", "tut_loading_screen", "tut_script_screen", "tut_pause_screen",
+                       "tutorial_quit_screen", "meta_loading_screen", "main_screen", "training_screen", "tutorials_screen",
+                       "tut_loading_screen", "tut_script_screen", "tutorial_end_screen", "meta_loading_screen", "main_screen"};
+        } else {
+            // Hammer-ons and pull-offs (tutorial_31..33): the trainer off the
+            // track twice (green, red, yellow hammered on; yellow, red, green
+            // pulled off; three times each, with the keyboard's frets and its
+            // strum, Down), the track's HOPOs on autoplay between.
+            check("tutorials_seed");
+            toTutorials();
+            check("tut_unlocked 3");
+            check("focus_to tut_3.btn", 5000);
+            press(kX);
+            at("tut_loading_screen|tut_script_screen");
+            at("tut_script_screen", 30000);
+            for (const bool pull : {false, true}) {
+                if (pull) check("tutorial_lesson pulloff", 400000);
+                check("hopo_training", 400000);
+                wait(500);
+                for (int i = 0; i < 3; ++i) {
+                    if (!pull) {
+                        keyHold(SDLK_1, true), wait(100);
+                        key(SDLK_DOWN), wait(200);
+                        keyHold(SDLK_2, true), wait(200);
+                        keyHold(SDLK_3, true), wait(300);
+                    } else {
+                        keyHold(SDLK_1, true), keyHold(SDLK_2, true), keyHold(SDLK_3, true), wait(100);
+                        key(SDLK_DOWN), wait(200);
+                        keyHold(SDLK_3, false), wait(200);
+                        keyHold(SDLK_2, false), wait(300);
+                    }
+                    keyHold(SDLK_3, false), keyHold(SDLK_2, false), keyHold(SDLK_1, false), wait(400);
+                }
+                check(pull ? "hopo_trained tut_34_fret_callback" : "hopo_trained tut_31_callback", 10000);
+            }
+            at("meta_loading_screen", 400000);  // tutorial_end_screen goes on at once (meta_loading_goto)
+            at("main_screen", 30000);
+            check("tutorial_done 3");
+            expect_ = {"main_screen", "training_screen", "tutorials_screen", "tut_loading_screen", "tut_script_screen",
+                       "tutorial_end_screen", "meta_loading_screen", "main_screen"};
+        }
+    } else if (scenario == "options") {
+        // The audio settings (options.dta AUDIO_SETTINGS_PANEL_HANDLERS):
+        // each slider selected, moved one step (its sound at the new
+        // volume: slider_band / slider_gtr / slider_sfx) and confirmed,
+        // then saved on the way back; the lag calibration (lag_panel)
+        // from the video settings: its countdown, the clicks
+        // (sync_click.cue) struck along, its result, and back.
+        at("main_screen");
+        wait(2000);  // the main menu's entrance (a press during it is lost)
+        for (int i = 0; i < 4; ++i) press(kDown), wait(150);  // OPTIONS
+        press(kX);
+        at("options_screen");
+        press(kX);  // Audio Settings (the focus)
+        at("audio_settings_screen");
+        check("volumes_record");
+        for (int k = 0; k < 3; ++k) {  // gs_band.sld, gs_guitar.sld, gs_sfx.sld
+            if (k) press(kDown), wait(200);
+            press(kX), wait(200);     // select the slider
+            press(kDown), wait(400);  // one step down
+            press(kX), wait(300);     // confirm
+        }
+        check("audio_sliders");
+        press(kTri);  // back: set_volumes, autosave
+        at("options_screen", 20000);
+        check("volumes_saved");
+        check("volumes_live");
+        press(kDown), wait(150);  // Video Settings
+        press(kX);
+        at("video_settings_screen");
+        check("focus_to calibrate_lag.btn", 5000);
+        press(kX);
+        at("lag_screen");
+        press(kX);  // autocalibrate.btn: the countdown, then 11 clicks 0.733 s apart
+        check("lag_strike", 20000);  // a strum (down) on each click as it plays
+        check("lag_calibrated", 15000);
+        press(kTri);
+        at("video_settings_screen");
+        press(kTri);
+        at("options_screen", 20000);
+        press(kTri);
+        at("main_screen");
+        expect_ = {"main_screen", "options_screen", "audio_settings_screen", "options_screen", "video_settings_screen", "lag_screen",
+                   "video_settings_screen", "options_screen", "main_screen"};
     } else if (scenario == "attract") {
         endMs_ = 20000;
         at("splash_screen");
@@ -871,7 +1349,8 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
 std::string WalkDriver::startScreen() const {
     if (scenario_ == "lose" || scenario_ == "pause" || scenario_ == "back" || scenario_ == "enhanced" || scenario_ == "cheats" ||
         scenario_ == "mouse" || scenario_ == "gamepads" || scenario_ == "gamepads_pad" || scenario_ == "stickyaxis" ||
-        scenario_ == "whammy_tail")
+        scenario_ == "whammy_tail" || scenario_ == "practice" || scenario_ == "practice_menus" || scenario_ == "tutorial" || scenario_ == "tutorial1" || scenario_ == "tutorial2" ||
+        scenario_ == "tutorial3" || scenario_ == "options" || scenario_ == "flaming_head")
         return "main_screen";
     if (scenario_ == "attract") return "splash_screen";
     return "";
@@ -887,7 +1366,8 @@ void WalkDriver::poll(ui::UiManager& ui, double nowMs) {
     if (stepStart_ < 0) stepStart_ = nowMs;
     // career: the band has bought Judy Nails' second outfit and the SG's
     // white skin in the store (M10), so both choices offer two.
-    if ((scenario_ == "career" || scenario_ == "career_full" || scenario_ == "career_song") && !seeded_ && ui.currentScreen() == "sel_difficulty_screen" && ui.session().profileSlot >= 0) {
+    if ((scenario_ == "career" || scenario_ == "career_full" || scenario_ == "career_song" || scenario_ == "career_encore" ||
+         scenario_ == "career_win" || scenario_ == "career_win_medium" || scenario_ == "career_practice") && !seeded_ && ui.currentScreen() == "sel_difficulty_screen" && ui.session().profileSlot >= 0) {
         seeded_ = true;
         Career::Profile& p = ui.career().profiles[size_t(ui.session().profileSlot)];
         p.items["alterna2"] = true;
@@ -914,6 +1394,7 @@ void WalkDriver::poll(ui::UiManager& ui, double nowMs) {
         return;
     case Step::Key:
         for (const bool down : {true, false}) {
+            if ((s.x == 1.0f && !down) || (s.x == 2.0f && down)) continue;
             SDL_Event e{};
             e.type = down ? SDL_EVENT_KEY_DOWN : SDL_EVENT_KEY_UP;
             e.key.timestamp = SDL_GetTicksNS();
@@ -1208,6 +1689,47 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         ++step_, stepStart_ = -1;
         return;
     }
+    if (s.screen == "track_surface") {
+        // The track's surface is the player's character's bitmap, rosewood in
+        // practice and the tutorials (TrackPanel 0x82693620, 0x82699B70).
+        const int frames = ui.host().gameCounter(0, "surface_overrides");
+        std::printf("  track surface: %d frames with the player's surface texture\n", frames);
+        if (frames < 1) return fail("the track did not draw the player's surface texture (track/surfaces/<name>_keep.bmp)");
+        ++step_, stepStart_ = -1;
+        return;
+    }
+    if (s.screen == "band_flames") {
+        const int n = ui.host().gameCounter(0, "band_fx_particles");
+        std::printf("  flaming head: cheat %s, %d flame particles\n", ui.cheatOn("cheat_flaming_head") ? "on" : "off", n);
+        if (!ui.cheatOn("cheat_flaming_head")) return fail("the Flaming Head code did not turn the cheat on");
+        if (n < 1) return fail("no flame particle was drawn on the band");
+        ++step_, stepStart_ = -1;
+        return;
+    }
+    if (s.screen == "volumes_live") {
+        // GD02-046: the sliders' values reach the mixer at once (0x822B0F40).
+        const int band = ui.host().gameCounter(0, "mixer_band_pct"), guitar = ui.host().gameCounter(0, "mixer_guitar_pct");
+        std::printf("  volumes: the mixer's band %d%%, guitar %d%%\n", band, guitar);
+        if (band >= 100 || guitar >= 100) return fail("the sliders' volumes did not reach the mixer");
+        ++step_, stepStart_ = -1;
+        return;
+    }
+    if (s.screen == "game_sinks") {
+        Interp& in = ui.interp();
+        const bool track = in.send("game", "has_sink", {Value::symbol("track_panel")}).truthy(), hud = in.send("game", "has_sink", {Value::symbol("hud")}).truthy();
+        std::printf("  game sinks after RESTART: track_panel %d, hud %d\n", int(track), int(hud));
+        if (!track) return fail("track_panel lost the game's messages after RESTART");
+        ++step_, stepStart_ = -1;
+        return;
+    }
+    if (s.screen == "band_shadows") {
+        // target_shadow's SHADOW_*.spot: the band's flattened shadow groups (0x8222EE58).
+        const int n = ui.host().gameCounter(0, "spot_shadows");
+        std::printf("  band shadows: %d drawn so far\n", n);
+        if (n < 1) return fail("no spotlight drew a band member's shadow");
+        ++step_, stepStart_ = -1;
+        return;
+    }
     if (s.screen == "star_phrase") {
         // A Star Power phrase played through (autoplay): player.dta's
         // phrase_captured plays sp_awarded, the star meter fills, its gems
@@ -1250,14 +1772,23 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
                                                         {"nowbar_4", -400},      {"nowbar_5", -300}, {"meter_slide", 50}};
         const auto got = ui.host().gameSfx();
         size_t k = 0;
+        int begin = 0;
         for (const auto& [name, at] : got) {
             if (at >= 300) break;
+            // The crowd's crowd_begin as the intro starts (CrowdAudio's intro_start_msg, 0x822DFCA8).
+            if (name == "crowd_begin") {
+                std::printf("  intro sound %s at %.0f ms (the crowd)\n", name.c_str(), at);
+                if (at > -2000) return fail("crowd_begin after the intro's start");
+                ++begin;
+                continue;
+            }
             std::printf("  intro sound %s at %.0f ms\n", name.c_str(), at);
             if (k >= std::size(want) || name != want[k].first || std::fabs(at - want[k].second) > 60)
                 return fail("intro sound " + name + " not as GH2's (" + (k < std::size(want) ? want[k].first : "none") + ")");
             ++k;
         }
         if (k != std::size(want)) return fail("intro: " + std::to_string(k) + " of 7 sounds");
+        if (begin != 1) return fail("the crowd's crowd_begin did not play once at the intro");
         ++step_, stepStart_ = -1;
         return;
     }
@@ -1422,7 +1953,7 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         std::printf("  cheats (Enhanced Options): monkey %d, eyeball %d, flaming head %d, hyper speed %d\n", monkey, eyeball, flaming, hyper);
         if (s.screen == "cheat_menu_monkey" && !monkey) return fail("Monkey Head Crowd did not turn on from the menu");
         if (s.screen == "cheat_menu_rest" && (monkey || !eyeball)) return fail("Eyeball Head Crowd did not replace Monkey Head Crowd");
-        if (s.screen == "cheat_menu_rest" && flaming) return fail("Flaming Head (not built) turned on");
+        if (s.screen == "cheat_menu_rest" && !flaming) return fail("Flaming Head did not turn on from the menu");
         if (s.screen == "cheat_menu_rest" && hyper) return fail("Hyper Speed Mode did not turn off from the menu");
         ++step_, stepStart_ = -1;
         return;
@@ -1487,11 +2018,11 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         ++step_, stepStart_ = -1;
         return;
     }
-    if (s.screen == "band_named_CD") {
+    if (s.screen == "band_named_CDE") {
         const int slot = ui.session().profileSlot;
         const std::string name = slot < 0 ? "" : ui.career().profiles[size_t(slot)].name;
         std::printf("  band: new band \"%s\"\n", name.c_str());
-        if (name != "CD") return fail("the band's name is \"" + name + "\", not \"CD\" (arrows, green, Enter)");
+        if (name != "CDE") return fail("the band's name is \"" + name + "\", not \"CDE\" (arrows, green, typed letters, Enter)");
         ++step_, stepStart_ = -1;
         return;
     }
@@ -1518,7 +2049,7 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
     }
     if (s.screen == "career_target" || s.screen == "career_song_target") {
         const char* w = SDL_getenv("GD02_WALK_SONG");
-        const std::string target = w ? w : "strutter";
+        const std::string target = !winTarget_.empty() ? winTarget_ : w ? w : "strutter";
         if (s.screen == "career_target") {
             // The tiers' songs in order up to the target, at this difficulty.
             const int d = ui::campaign::difficulty(ui);
@@ -1539,6 +2070,23 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
             if (ui.session().song != target) return fail("the career offered " + ui.session().song + ", not " + target);
         }
         ++step_, stepStart_ = -1;
+        return;
+    }
+    if (s.screen == "career_pick_venue" || s.screen == "career_pick_song") {
+        const char* w = SDL_getenv("GD02_WALK_SONG");
+        const std::string target = !winTarget_.empty() ? winTarget_ : w ? w : "strutter";
+        ui::PanelObj* fp = ui.focusPanel();
+        std::string have, want;
+        const int nav = kDown;  // sel_venue.milo's nav_down runs from the newest venue to the first
+        if (s.screen == "career_pick_venue") {
+            have = fp ? fp->focus : std::string(), want = "sv_" + ui::campaign::venueOf(ui, target) + ".btn";
+        } else {
+            ui::ComponentObj* c = fp ? fp->focused() : nullptr;
+            have = c ? ui.interp().send(c, "selected_sym", {}).str() : std::string(), want = target;
+        }
+        if (have == want) return pass();
+        if (nowMs - stepStart_ > s.ms) return fail(s.screen + ": " + want + " not reached (on " + have + ")");
+        if (!ui.inTransition() && nowMs - lastNavMs_ > 250) ui.buttonDown(nav, 0), ui.buttonUp(nav, 0), lastNavMs_ = nowMs;
         return;
     }
     if (s.screen == "career_song_salvation") {
@@ -1601,6 +2149,272 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         }
         ++step_, stepStart_ = -1;
         return;
+    }
+    // Practice (practice.dta, PS2 0x00106840): 65% plays the song's
+    // song_practice_2 audio (songs/<s>/<s>_p65.vgs), the clock runs at
+    // 0.65 of the wall clock from one measure before the start section,
+    // the metronome (click_parser: practice_kick / _snare / _hat) plays,
+    // and the end screen's count is the section's gems.
+    if (s.screen == "practice_stream" || s.screen.rfind("practice_stream ", 0) == 0) {
+        const std::string a = ui.host().gameAudioPath();
+        const ui::Session& ss = ui.session();
+        const std::string pct = s.screen.size() > 16 ? s.screen.substr(16) : "65";
+        std::printf("  practice: %s, audio %s, speed %d, sections %s\n", ss.song.c_str(), a.c_str(), ui::gameCfgValue(ui, "practice_speed").integerValue(),
+                    ui::gameCfgValue(ui, "practice_sections").str().c_str());
+        // The song's own mogg (or its song_coop block's, for the bass) at any
+        // speed; below 100% the background silent, at 100% practice_attenuation.
+        if (a.rfind("songs/" + ss.song + "/", 0) != 0 || a.size() < 5 || a.compare(a.size() - 5, 5, ".mogg") != 0)
+            return fail("practice at " + pct + "% plays " + a + ", not the song's mogg");
+        const float bg = ui.host().gameBackgroundDb();
+        std::printf("  practice: background %.1f dB\n", double(bg));
+        if (std::fabs(bg - (pct == "100" ? -7.5f : -96.0f)) > 0.01f) return fail("practice's background fader is wrong");
+        if (ui.host().gameTimeMs() < 500) return fail("practice from the first section did not start at its measure");
+        return pass();
+    }
+    if (s.screen == "practice_paused yes" || s.screen == "practice_paused no") {
+        const bool want = s.screen.back() == 's';
+        std::printf("  practice: the game %s at %.0f ms\n", ui.host().gamePaused() ? "paused" : "running", ui.host().gameTimeMs());
+        if (ui.host().gamePaused() != want) return fail(want ? "Start did not pause practice" : "Start did not resume practice");
+        return pass();
+    }
+    if (s.screen == "practice_career_back") {
+        // career_screen resume_from_practice: career_mode off again, the career's mode back.
+        Interp& in = ui.interp();
+        ScriptObject* ss = in.findObject("practice_sel_section_screen");
+        const bool careerMode = ss && ss->getProp(in, "career_mode").truthy();
+        const std::string mode = ui::gameCfgValue(ui, "mode").str();
+        std::printf("  career practice: back on the career menu, mode %s, career_mode %s\n", mode.c_str(), careerMode ? "on" : "off");
+        if (careerMode || mode != "career") return fail("the career did not take over again after practice");
+        return pass();
+    }
+    if (s.screen == "practice_click_fader") {
+        // practice_panel's enter put the metronome under music_fader
+        // (practice.dta); practice_end faded it with the music to -50 dB.
+        const float db = ui::faderDb("music_fader");
+        ui::PanelObj* pp = ui.panel("practice_panel");
+        ui::ComponentObj* kick = pp ? pp->component("practice_kick") : nullptr;
+        const bool under = kick && std::find(kick->faders.begin(), kick->faders.end(), "music_fader") != kick->faders.end();
+        std::printf("  practice: music_fader at %.1f dB, practice_kick %s it\n", db, under ? "under" : "not under");
+        if (!under || db > -49.0f) return fail("the metronome is not faded out with the music");
+        return pass();
+    }
+    if (s.screen == "practice_clock") {
+        const double song = ui.host().gameTimeMs();
+        if (practiceClock_[0] < 0) {
+            practiceClock_ = {nowMs, song};
+            return pass();
+        }
+        const double rate = (song - practiceClock_[1]) / std::max(1.0, nowMs - practiceClock_[0]);
+        std::printf("  practice: the song clock at %.3f x the wall clock\n", rate);
+        if (std::fabs(rate - 0.65) > 0.05) return fail("the practice song clock does not run at 65%");
+        return pass();
+    }
+    if (s.screen == "practice_end") {
+        int kick = 0, snare = 0, hat = 0;
+        for (const auto& [name, at] : ui.host().gameSfx()) kick += name == "practice_kick", snare += name == "practice_snare", hat += name == "practice_hat";
+        const Player* pl = ui.host().gamePlayer(0);
+        const int hit = pl ? pl->notesHit() : 0, passed = pl ? pl->gemsPassed() : 0;
+        std::printf("  practice: metronome %d kick, %d snare, %d hat; the section's gems %d hit, %d passed\n", kick, snare, hat, hit, passed);
+        if (!kick || !snare || !hat) return fail("the practice metronome (click_parser) did not play its three sounds");
+        int bass = 0;
+        for (const auto& [name, at] : ui.host().gameSfx()) bass += name == "miss_bass";
+        std::printf("  practice: the bass part, %d miss_bass\n", bass);
+        if (ui::gameCfgValue(ui, "mode").str() != "practice" || ui.session().players[0].trackType != 0) return fail("practice is not on the bass");
+        if (bass != 1) return fail("the overstrum on the bass did not play miss_bass once");
+        if (hit < 1 || hit + passed >= int(pl->chart().gems.size())) return fail("the practice end counts not just the section's gems");
+        return pass();
+    }
+    // The first tutorial (tutorials.dta, tutorial_11_tuning.dta): its
+    // voice-over plays to the tuning, the five frets each strummed three
+    // times tune it (TutorialPanel's tuner: s101xx, tuning_hit_vo), then
+    // tuning_complete plays and the next lesson (playing_notes) starts.
+    if (s.screen == "tutorial_tuning" || s.screen == "tutorial_tuned" || s.screen == "tutorial_next_lesson") {
+        ScriptObject* t = ui.interp().findObject("tutorial");
+        if (!t) return fail("no tutorial object");
+        Interp& in = ui.interp();
+        const bool tuning = in.send(t, "is_tuning", {}).truthy();
+        const std::string lesson = t->getProp(in, "lesson").str();
+        bool ok = false;
+        if (s.screen == "tutorial_tuning") ok = tuning;
+        if (s.screen == "tutorial_tuned") ok = !tuning && lesson == "intro";
+        if (s.screen == "tutorial_next_lesson") ok = lesson == "playing_notes";
+        if (!ok) {
+            if (nowMs - stepStart_ > s.ms) return fail(s.screen + " not reached (lesson " + lesson + (tuning ? ", tuning" : "") + ")");
+            return;
+        }
+        if (s.screen == "tutorial_next_lesson") {
+            int notes = 0, complete = 0;
+            for (const auto& [name, at] : ui.host().gameSfx()) {
+                notes += name.size() == 6 && name.rfind("s101", 0) == 0;
+                complete += name == "tuning_complete";
+            }
+            std::printf("  tutorial: %d tuning notes, tuning_complete %s, lesson %s\n", notes, complete ? "played" : "not played", lesson.c_str());
+            if (notes != 15 || !complete) return fail("the tuning did not play its 15 notes and tuning_complete");
+        }
+        return pass();
+    }
+    // The later tutorials: tutorials_panel's buttons (enabled by
+    // tutorials_done), the lessons in turn, the hopo trainer, and what each
+    // tutorial played to its end.
+    if (s.screen.rfind("tut_locked ", 0) == 0 || s.screen.rfind("tut_unlocked ", 0) == 0) {
+        const bool want = s.screen[4] == 'l';
+        const std::string btn = "tut_" + s.screen.substr(s.screen.size() - 1) + ".btn";
+        ui::PanelObj* p = ui.panel("tutorials_panel");
+        const int done = ui.interp().send("campaign", "tutorials_done", {}).integerValue();
+        std::printf("  tutorials: %d done, %s %s\n", done, btn.c_str(), p && p->isDisabled(btn) ? "disabled" : "enabled");
+        if (!p || p->isDisabled(btn) != want) return fail(btn + (want ? " is not disabled" : " is not enabled"));
+        return pass();
+    }
+    if (s.screen == "tutorials_seed") {
+        ui.interp().send("campaign", "do_tutorial", {Value::integer(2)});  // tutorials 1 and 2 started before
+        return pass();
+    }
+    if (s.screen.rfind("tutorial_lesson ", 0) == 0 || s.screen == "hopo_training" || s.screen.rfind("hopo_trained ", 0) == 0) {
+        ScriptObject* t = ui.interp().findObject("tutorial");
+        if (!t) return fail("no tutorial object");
+        Interp& in = ui.interp();
+        const std::string lesson = t->getProp(in, "lesson").str();
+        const bool training = in.send(t, "is_hopo_training", {}).truthy();
+        bool ok = false;
+        if (s.screen.rfind("tutorial_lesson ", 0) == 0) ok = lesson == s.screen.substr(16);
+        else if (s.screen == "hopo_training") ok = training;
+        else ok = !training;
+        if (!ok) {
+            if (nowMs - stepStart_ > s.ms) return fail(s.screen + " not reached (lesson " + lesson + (training ? ", hopo training" : "") + ")");
+            return;
+        }
+        std::printf("  tutorial: lesson %s%s\n", lesson.c_str(), training ? ", hopo training" : "");
+        if (s.screen.rfind("hopo_trained ", 0) == 0) {
+            ScriptObject* cb = in.findObject(s.screen.substr(13));
+            const int hits = cb ? cb->getProp(in, "hopos_hit").integerValue() : -1;
+            int notes = 0;
+            for (const std::string& h : ui.host().sfxHistory()) notes += h.size() == 6 && h.rfind("s2060", 0) == 0;
+            std::printf("  hopo trainer: %d tries hit (%s), %d notes so far\n", hits, s.screen.substr(13).c_str(), notes);
+            if (hits != 3) return fail("the hopo trainer did not count three tries");
+        }
+        return pass();
+    }
+    if (s.screen == "tutorial_done 2" || s.screen == "tutorial_done 3") {
+        const auto& vo = ui.session().voiceEvents;
+        const auto has = [&](const char* e) { return std::find(vo.begin(), vo.end(), e) != vo.end(); };
+        std::map<std::string, int> n;
+        for (const std::string& h : ui.host().sfxHistory()) ++n[h];
+        const bool two = s.screen.back() == '2';
+        const std::vector<const char*> done = two ? std::vector<const char*>{"star_combos_done", "whammy_done", "wrapup1_2"}
+                                                  : std::vector<const char*>{"hammeron_done", "hammeron_real_done", "pulloff_done",
+                                                                             "pulloff_real_done", "wrapup1_3"};
+        // A lesson's success voice-over requested while another (the last
+        // hit's great_hit_vo / hit_vo) still plays is dropped, as on the PS2
+        // (0x001407f0 plays only when no stream is playing): the success
+        // branch is then shown by its banner sound and the drop.
+        const auto& dropped = ui.session().voiceDropped;
+        const auto wasDropped = [&](const char* e) { return std::find(dropped.begin(), dropped.end(), e) != dropped.end(); };
+        std::string line;
+        for (const char* e : done) line += std::string(" ") + e + (has(e) ? "" : wasDropped(e) ? "(dropped: a VO was playing)" : "(missing)");
+        std::printf("  tutorial %c: voice-overs%s; timeout_vo %s\n", s.screen.back(), line.c_str(), has("timeout_vo") ? "played" : "not played");
+        std::printf("  tutorial %c: button_error %d, s19901 %d, s19902 %d, s20601..3 %d %d %d\n", s.screen.back(), n["button_error"],
+                    n["s19901"], n["s19902"], n["s20601"], n["s20602"], n["s20603"]);
+        for (const char* e : done)
+            if (!has(e) && !wasDropped(e)) return fail(std::string("the lesson's success voice-over ") + e + " was never requested");
+        if (has("timeout_vo")) return fail("a lesson timed out");
+        if (!n["s19901"] || !n["s19902"]) return fail("the tutorial's end (s19901 / s19902) did not play");
+        if (two && !n["button_error"]) return fail("a gem hit before the wail did not play button_error");
+        if (!two && (!n["s20601"] || !n["s20602"] || !n["s20603"])) return fail("the hopo trainer's notes s20601..3 did not play");
+        return pass();
+    }
+    if (s.screen == "volumes_record" || s.screen == "volumes_saved") {
+        Interp& in = ui.interp();
+        std::array<int, 3> v{};
+        const char* keys[] = {"band_volume_idx", "guitar_volume_idx", "fx_volume_idx"};
+        for (size_t k = 0; k < 3; ++k) v[k] = in.send("options", "get", {Value::symbol(keys[k])}).integerValue();
+        std::printf("  options: volumes band %d, guitar %d, fx %d\n", v[0], v[1], v[2]);
+        if (s.screen == "volumes_record") return volumes_ = v, pass();
+        for (size_t k = 0; k < 3; ++k)
+            if (v[k] != std::max(0, volumes_[k] - 1)) return fail(std::string("the slider did not set ") + keys[k] + " one step down");
+        return pass();
+    }
+    if (s.screen == "audio_sliders") {
+        int band = 0, gtr = 0, sfx = 0;
+        for (const std::string& n : ui.host().sfxHistory()) band += n == "slider_band", gtr += n == "slider_gtr", sfx += n == "slider_sfx";
+        std::printf("  options: slider sounds band %d, guitar %d, sfx %d\n", band, gtr, sfx);
+        if (!band || !gtr || !sfx) return fail("a volume slider moved without its sound");
+        return pass();
+    }
+    if (s.screen.rfind("focus_to ", 0) == 0) {
+        // Down until the focus panel's focus is the component.
+        ui::PanelObj* fp = ui.focusPanel();
+        if (fp && fp->focus == s.screen.substr(9)) return pass();
+        if (nowMs - stepStart_ > s.ms) return fail("no focus on " + s.screen.substr(9) + " (on " + (fp ? fp->focus : std::string("-")) + ")");
+        if (!ui.inTransition() && nowMs - lastNavMs_ > 200) ui.buttonDown(kDown, 0), ui.buttonUp(kDown, 0), lastNavMs_ = nowMs;
+        return;
+    }
+    if (s.screen == "lag_strike") {
+        int clicks = 0;
+        for (const std::string& n : ui.host().sfxHistory()) clicks += n == "sync_click.cue";
+        if (clicks > lagStrikes_) ++lagStrikes_, ui.buttonDown(kDown, 0), ui.buttonUp(kDown, 0);
+        if (lagStrikes_ >= 11) return pass();
+        if (nowMs - stepStart_ > s.ms) return fail("the lag calibration played " + std::to_string(clicks) + " of 11 clicks");
+        return;
+    }
+    if (s.screen == "lag_calibrated") {
+        ScriptObject* lp = ui.interp().findObject("lag_panel");
+        const std::string state = lp ? lp->getProp(ui.interp(), "state").str() : std::string();
+        if (state == "calibrating" || state == "init") {
+            if (nowMs - stepStart_ > s.ms) return fail("the lag calibration did not finish (state " + state + ")");
+            return;
+        }
+        int clicks = 0, hats = 0;
+        for (const std::string& n : ui.host().sfxHistory()) clicks += n == "sync_click.cue", hats += n == "practice_hat";
+        std::printf("  lag: %s, lag %s ms, %d sync_click.cue, %d countdown hats; hits %s, clicks %s\n", state.c_str(), lp->getProp(ui.interp(), "lag").str().c_str(), clicks,
+                    hats, lp->getProp(ui.interp(), "hits").str().c_str(), lp->getProp(ui.interp(), "seconds").str().c_str());
+        if (clicks != 11 || hats != 4) return fail("the lag calibration did not play its countdown and 11 clicks");
+        if (state != "success") return fail("strums on the clicks did not calibrate the lag");
+        return pass();
+    }
+    if (s.screen == "encore_decline") {
+        // On the encore offer: down to no.btn, then select it.
+        if (ui.currentScreen() == "endgame_encore_screen" && !ui.inTransition()) {
+            ui::PanelObj* fp = ui.focusPanel();
+            const int b = fp && fp->focus == "no.btn" ? kX : kDown;
+            if (b == kX) encoreDeclined_ = true;
+            ui.buttonDown(b, 0), ui.buttonUp(b, 0);
+        }
+        return pass();
+    }
+    if (s.screen == "encore_declined") {
+        if (!encoreDeclined_) return pass();  // no encore offered
+        int no = 0;
+        for (const std::string& h : ui.host().sfxHistory()) no += h == "encore_no";
+        std::printf("  career: encore declined, encore_no %d, on %s\n", no, ui.currentScreen().c_str());
+        if (!no) return fail("declining the encore did not play encore_no");
+        if (ui.currentScreen() != "endgame_screen") return fail("declining the encore did not go on to the results");
+        return pass();
+    }
+    if (s.screen == "big_note_blown") {
+        // A gem passed within 0.2 beats of a big note (PART GUITAR pitch
+        // 110): the player's blew_big_note, game.dta's {world play_sfx
+        // blew_bignote.cue} with the crowd audio on (0x00110e78) [C].
+        double at = -1;
+        for (const auto& [name, t] : ui.host().gameSfx())
+            if (name == "blew_bignote.cue" && at < 0) at = t;
+        std::printf("  big note: blew_bignote.cue %s%s\n", at < 0 ? "not played" : "at ", at < 0 ? "" : (std::to_string(int(at)) + " ms").c_str());
+        return at < 0 ? fail("the passed big note did not play blew_bignote.cue") : pass();
+    }
+    if (s.screen == "song_sounds") {
+        // The song's sounds after its middle: Star Power deployed
+        // (player.dta start_using: sp_deployed) and run out (stop_using:
+        // sp_depleted), game.dta's claps 0.9 beats after each beat under it
+        // (the world's claps sequence), and the crowd's crowd_win at the win
+        // (CrowdAudio's game_won_msg).
+        std::map<std::string, int> n;
+        for (const auto& [name, at] : ui.host().gameSfx()) ++n[name];
+        int crowdWin = 0;
+        for (const std::string& h : ui.host().sfxHistory()) crowdWin += h == "crowd_win";
+        std::printf("  song sounds: sp_deployed %d, sp_depleted %d, claps %d, crowd_win %d\n", n["sp_deployed"], n["sp_depleted"], n["claps"], crowdWin);
+        if (!n["sp_deployed"] || !n["sp_depleted"]) return fail("Star Power was not deployed and run out (sp_deployed / sp_depleted)");
+        if (!n["claps"]) return fail("no claps under Star Power");
+        if (!crowdWin) return fail("the crowd did not cheer the win (crowd_win)");
+        return pass();
     }
     fail("unknown check " + s.screen);
 }

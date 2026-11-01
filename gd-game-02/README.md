@@ -38,6 +38,8 @@ id = `gd-game-02`
     - [ ] Carrer
     - [ ] Quick play
 - [X] Unlocks and/or in-game shops
+- [X] Practice (sections, four speeds, click track)
+- [X] Tutorials (narration in the disc's five languages)
 - [ ] Character creation
 - [ ] Music creation
 
@@ -91,6 +93,11 @@ with the reason in the help box where it cannot run).
 | Max FPS | 120 | 60 | 120 | 120 | 60 |
 | Resolution | 1080p | 800p | 1440p | 1440p | 900p |
 | Touch Controls | off | on | off | off | on |
+
+
+**Language**: the game follows your system's language when the disc has it
+(English, French, German, Italian, Spanish; the original follows the
+console's). `GD02_LANGUAGE=eng|fre|deu|ita|esl` forces one.
 
 
 **Running** (`engine/README.md` has the details, it ships in every download):

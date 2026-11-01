@@ -9,6 +9,7 @@
 #include <stdexcept>
 
 #include "data/dta.h"
+#include "data/bytes.h"
 #include "data/game_data.h"
 #include "render/renderer.h"
 #include "scene/milo.h"
@@ -825,6 +826,80 @@ void TrackView::drawExplode(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, f
     particlesDrawn_ = particles_->drawnParticles();
 }
 
+// The player's surface texture [C unless marked]. TrackPanel's load
+// (0x82693620) queues, per player, the bitmap track/surfaces/<s>_keep.bmp,
+// <s> being gamecfg's track_surface_override for the mode (the mode's entry,
+// else defaults: '' but in practice and the tutorial, rosewood) or, when
+// that is the empty symbol, the player config's character (+0x3c, an outfit
+// name as alterna1). The track copies track_surface.tex / track_surface.mat
+// and gives them that bitmap (0x82699B70). Every player's track so shows its
+// own surface. A bitmap missing from the disc keeps the scene's own texture
+// here [I: the 360 would fail the load].
+void TrackView::setSurface(const GameData& data, const std::string& mode, const std::string& character, const std::string& songId) {
+    std::string name;
+    // gamecfg's mode lookup: the mode's own entry, else defaults (as the
+    // script side's gameCfgValue).
+    try {
+        const DataNode modes = parseDtb(data.read("config/gen/modes.dtb"));
+        bool found = false;
+        for (const std::string& m : {mode, std::string("defaults")}) {
+            for (const DataNode& e : modes.children) {
+                if (!e.isList() || e.children.empty() || !e.children[0].isText() || e.children[0].s != m) continue;
+                if (const DataNode* o = e.find("track_surface_override")) name = o->textAt(1), found = true;
+            }
+            if (found) break;
+        }
+    } catch (const std::exception& e) {
+        SDL_Log("track: modes.dtb: %s", e.what());
+    }
+    if (name.empty()) name = character;
+    // An unchosen character: the song's quickplay character_outfit, else
+    // alterna1 (as game/band.cpp, set_quickplay) [C there].
+    if (name.empty()) {
+        try {
+            DataNode root = parseDtb(data.read("config/gen/songs.dtb"));
+            resolveConditionals(root, {"HX_XBOX", "_SHIP"});
+            for (const DataNode& e : root.children) {
+                if (!e.isList() || e.children.empty() || !e.children[0].isText() || e.children[0].s != songId) continue;
+                if (const DataNode* q = e.find("quickplay"))
+                    if (const DataNode* c = q->find("character_outfit")) name = c->textAt(1);
+            }
+        } catch (const std::exception& e) {
+            SDL_Log("track: songs.dtb: %s", e.what());
+        }
+        if (name.empty()) name = "alterna1";
+    }
+    if (name == surfaceName_ && surfaceTex_) return;
+    surfaceName_ = name;
+    surfaceTex_ = nullptr;
+    // The bitmaps live as long as the program: the scene cache keys its
+    // GPU textures by the Tex's address [I: a port choice].
+    static std::unordered_map<std::string, std::unique_ptr<scene::Tex>> loaded;
+    const std::string path = "track/surfaces/gen/" + name + "_keep.bmp_xbox";
+    auto it = loaded.find(path);
+    if (it == loaded.end()) {
+        std::unique_ptr<scene::Tex> tex;
+        if (data.exists(path)) {
+            try {
+                const Bytes b = data.read(path);
+                ByteReader r(b);
+                tex = std::make_unique<scene::Tex>();
+                tex->name = tex->file = "track/surfaces/" + name + "_keep.bmp";
+                tex->bitmap = scene::readBitmap(r);
+                tex->width = tex->bitmap.width, tex->height = tex->bitmap.height;
+                tex->decoded = true;
+            } catch (const std::exception& e) {
+                SDL_Log("track: %s: %s", path.c_str(), e.what());
+                tex.reset();
+            }
+        } else {
+            SDL_Log("track: no surface %s", path.c_str());
+        }
+        it = loaded.emplace(path, std::move(tex)).first;
+    }
+    surfaceTex_ = it->second.get();
+}
+
 void TrackView::draw(gfx::Renderer& r, gfx::SceneCache& cache, const Song& song, const Player& player, float nowMs, float trackSpeed) {
     if (!track_) return;
     particlesDrawn_ = 0;
@@ -860,7 +935,11 @@ void TrackView::draw(gfx::Renderer& r, gfx::SceneCache& cache, const Song& song,
         pose_.setFrame(obj("extend_track_normal.tnm"), frame);
     }
     // blow_streak: the surface flash and the camera shake.
-    if (const scene::Mat* m = get<scene::Mat>("track_surface.mat")) pose_.matState(m).hasColor = false;
+    if (const scene::Mat* m = get<scene::Mat>("track_surface.mat")) {
+        pose_.matState(m).hasColor = false;
+        // The player's surface bitmap (setSurface), over whatever its anims set.
+        if (surfaceTex_) pose_.matState(m).tex = surfaceTex_, ++surfaceOverrides_;
+    }
     if (blowLevel_ >= 2) {
         const float f = (nowMs - blowMs_) * 0.001f * kFrameRate;
         char name[48];

@@ -344,7 +344,7 @@ void LightPresets::apply(const scene::LightPreset& p, int a, int b, float t, flo
         if (st.rotation == std::array<float, 4>{}) {  // first touch: the spotlight's own
             st.intensity = s->intensity, st.color = s->color;
             st.rotation = {0, 0, 0, 1};
-            st.target = s->target;
+            st.target = s->target, st.subpart.clear();
             st.flare = s->flareEnabled;
         }
         const float in = lerp(ea.intensity, eb.intensity, t);
@@ -356,7 +356,7 @@ void LightPresets::apply(const scene::LightPreset& p, int a, int b, float t, flo
         st.rotation = scene::slerp(st.rotation, q, weight);
         if (weight >= 1) {
             const auto& e = t < 1 ? ea : eb;
-            st.target = e.target;
+            st.target = e.target, st.subpart = e.subpart;
             st.flare = e.flare;
         }
     }

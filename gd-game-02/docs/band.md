@@ -215,7 +215,7 @@ record of every class on the disc to its end and asserts the counts.
   twist bones; fore arm (0x82181980) a third of (offset + the hand's twist).
 - **Eyes (0x82170BA8 / 0x82170130):** not the camera: points ahead of the
   head, picked again after 8 s [C]; **look-at** (0x8216E4E8) smoothing and
-  yaw / pitch limits. **Hair (0x8217B898):** one step per poll [C].
+  yaw / pitch limits. **Hair (0x8217B898):** one step per poll, collisions against the collide bone: plane, outside / inside a sphere, outside / inside a cylinder [C].
 - **LOD (DrawShowing 0x82153090):** from min_lod (`set_min_lod`, the camera
   shots' force_char_lod), the first LOD i whose screen_size x (1.09 below
   the current LOD, 0.91 from it on) the screen size reaches; FUN_82151DE0
@@ -227,8 +227,8 @@ record of every class on the disc to its end and asserts the counts.
   something, its guitar and no stray shadow mesh at each LOD
   (`BandView::meshesToDraw`). Screen size (0x8214FC60): the
   sphere radius over its depth, scaled by the camera [I: the camera
-  fields]. The shadow group is not drawn in the colour pass [I: GH2 draws
-  it into the shadow buffer; gd02 has no shadow pass yet].
+  fields]. The shadow group is not drawn in the colour pass: a target_shadow
+  spotlight draws it flattened (see "Shadows").
 - A guitar on its own (GuitarDisplayPanel, the guitar select and the
   store; wave B #14): the outfit is a Character directory and draws as one,
   at its first LOD (the record's LOD list, so flyingv_v2's `lod0` as well
@@ -634,6 +634,30 @@ guitar | bass | grim | cheat)`, skins with outfit milo and mat),
   `GD02_FACE_CAM=<member>[:<distance>]` (a close-up of that member's head:
   `singer`, `guitarist0`, ...).
 
+## Effects on the band [C data]
+
+The character milos hold RndDirs proxying char/shared/ng/gen/*.milo
+(cheat_headflames, hand_flames_L / _R, god_particles, god_rays, guitar_fire);
+char_objects.dta starts and stops them: `{cheat_headflames start}` at enter
+with $cheat_enabled_flaming_head, hand_flames in a solo at peak. Member::fx
+loads the proxy at the first start; BandView::drawFx runs its AnimFilters and
+particle systems under the dir's parent bone. `--walktest flaming_head`.
+
+## Shadows [C unless noted]
+
+The band's shadows are not a shadow map. Venues have dedicated spotlights
+(SHADOW_singer.spot, SHADOW_bassist.spot, SHADOW_solo.spot, SHADOW_multi.spot
+and others, target_shadow set, target a band slot, spot_circle.mat, no beam).
+Spotlight::DrawShowing (0x822328E8) queues a lit one in the list SpotlightDrawer
+draws first (0x822312C8, 0x8222EE58), before additional objects, lenses,
+flares and floor spots (vtable 0x82032BE4). Character::DrawShadow (0x82151B98):
+every bone of the shadow group's meshes (ShadowBones, 0x82153FD8) takes its
+world transform sheared along the light's y axis onto the plane 1.5 above
+the character, a parallel projection. shadow.mat adds black with depth
+written, so the draw leaves no colour: the flattened shape only keeps the
+additive floor spots out, a hole in the pool of light [I: the reading; the
+order and the material are C]. `check band_shadows` in `--walktest quickplay`.
+
 ## Open
 
 - M9.10: the CharsysPanel preload order and memory budget; how the door / room
@@ -641,14 +665,16 @@ guitar | bass | grim | cheat)`, skins with outfit milo and mat),
   characters' clock; CharDriver transfer; multiplayer character / guitar
   screens (MultiCharSelPanel, M10). The store's characters and guitars draw
   in store.milo's placer / proxy (docs/career_and_store.md).
-- Walks: the global waypoint list's order (load order assumed); CharWalk's
-  and the lip servo's PollDeps; regulate_override's bone offset (posed
-  alone); arrivals end 10-40 units from the target before the servo
-  regulates (the stop starts 2.2 beats before its end, see the 6-unit
-  quirk); the song end used by the schedule; multiplayer walks (none: one
-  player only) untested.
-- The shadow pass (the shadow group); hair collision types 1-4; the eyes'
-  retarget threshold; the face-off "doing badly" rule (score lead);
-  CharDriverMidi's inactive clip (+0x74 / +0x78 meaning).
+- Walks: the global waypoint list's order (load order assumed); arrivals end
+  10-40 units from the target before the servo regulates (0x82189E28's test
+  really is on the world position, 0x82192D60 starts it at the last path
+  point [C]); the song end used by the schedule; multiplayer walks: none, one
+  player only [C].
+- Hair: the soft band of types 2 and 3 (0x82122100's vector is lost to the
+  decompile; no position change there); CharEyes' interest branch (no
+  interests on the disc); the face-off "doing badly" rule (0x822C6DC0: the
+  other's score lead over max(score rate) x 0x822BB358 / 30, growing; the
+  clock of the rate unread); CharDriverMidi's +8 flag that selects the inactive
+  clip in `midi_parser` (0x82184B28).
 - CharClipGroup's starting index; the hand drivers' order among equal
   dependencies.

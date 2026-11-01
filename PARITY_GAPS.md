@@ -1,6 +1,6 @@
 # Parity gaps: what is missing for a 100% match (2026-10-29)
 
-Only original behaviour is listed, no Enhanced items. "Unverified" means the port has the feature, but nothing has compared it with the original yet, because no reference captures exist (GD02-064, GD03-018, GD04-027). IDs are rows in `gd-backlog.md`.
+Only original behaviour is listed, no Enhanced items. "Unverified" means the port has the feature, but nothing has compared it with the original; the owner dropped emulator comparisons on 2026-10-31 (GD02-064, GD03-018, GD04-027). IDs are rows in `gd-backlog.md`.
 
 ## gd-game-01: Guitar Hero (PS2)
 
@@ -23,13 +23,10 @@ Only original behaviour is listed, no Enhanced items. "Unverified" means the por
 
 | Area | Missing or wrong | Backlog |
 |---|---|---|
-| Menus | Button animation on screen change (does GH2 have it?); song-list font; "Beat X/5" label drawn over other labels; help bar boxes (`help_box_*`); typing letters into band names; endgame receipt lighting; live volume sliders | GD02-075, -082, -084, -085, -046 |
-| Band | Walks and interactions (CharWalk, GuitarCharacter timeline: walks to the solo and win spots, holds, Star Power, interacts); full pose system | GD02-050, -051 |
-| Venues | Every venue's entering animation and missing effects; GH2's beam shader | GD02-091, -049 |
-| Cheats | Flaming Head particles (the cheat is accepted but nothing shows) | GD02-043 |
-| Modes | Practice (sections, 4 speeds, click track, rosewood surface, pitch); tutorials (9 charts, narration); hopo and other tutorial script callbacks | GD02-056, -038, -034, -058, -087 |
-| Gameplay research | Watcher bass cues; lefty flip, input sampling and controller latency; sinks after RESTART | GD02-036, -037, -086 |
-| Career | About 20 Easy career songs not covered by the walk test | GD02-088 |
+| Menus | Compare by eye: the song list's font, the help bar in a transition (both drawn as the data says) | GD02-075, -082 |
+| Band | The face-off "doing badly" rule's rate clock, CharDriverMidi's +8 flag for the inactive clip, hair's soft band orientation | GD02-050 |
+| Venues | The beams' buffer gain and scene-depth softness (per vertex here); compare each venue by eye | GD02-049, -091 |
+| Gameplay research | The bass path's range list (no `bass_N.cue` on the disc, normal path taken); input time per event here, per frame on the 360 | GD02-036, -037 |
 | Platform reports | Salvation not starting on Windows and the camera going under the venue: both not reproduced; ~20 fps on macOS M4 Pro | GD02-060, -061, -062 |
 | Not in the port | Achievements, leaderboards, DLC sample package | GD02-066 |
 

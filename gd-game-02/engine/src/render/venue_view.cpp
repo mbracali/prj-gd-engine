@@ -49,6 +49,12 @@ std::vector<const scene::Object*> drawList(const std::vector<const scene::Direct
             if (auto* g = o.as<scene::Group>())
                 for (const std::string& n : g->objects)
                     if (const scene::Object* c = g->dir ? g->dir->resolve(n) : nullptr; c && c != g) children.insert(c);
+            // A spotlight's can and additional objects are its draw children (0x822348F8).
+            if (auto* s = o.as<scene::Spotlight>()) {
+                if (const scene::Object* c = s->dir && !s->lightCan.empty() ? s->dir->resolve(s->lightCan) : nullptr) children.insert(c);
+                for (const std::string& n : s->additionalObjects)
+                    if (const scene::Object* c = s->dir ? s->dir->resolve(n) : nullptr) children.insert(c);
+            }
             if (drawable(&o)) all.push_back(&o);
         });
     std::vector<const scene::Object*> roots;
@@ -70,6 +76,7 @@ VenueView::VenueView(World& world, gfx::SceneCache& cache) : world_(world), cach
     spotlights_ = std::make_unique<gfx::SpotlightView>(world, cache);
     crowdView_ = std::make_unique<CrowdView>(world, cache);
     bandView_ = std::make_unique<BandView>(world, cache);
+    spotlights_->setBandView(bandView_.get());
     build();
     setShot(world_.firstShot());
 }
@@ -96,12 +103,12 @@ void VenueView::build() {
     for (size_t i = 0; i < particleSet_.systems().size(); ++i) systemIndex_[&particleSet_.systems()[i].def()] = i;
 }
 
-bool venueObjectXfm(const World& world, const std::string& name, bool multiplayer, scene::Xfm& out) {
+bool venueObjectXfm(const World& world, const std::string& name, bool multiplayer, scene::Xfm& out, const std::string& subpart) {
     static const std::pair<const char*, uint32_t> kSlots[] = {{"guitarist0", 1},  {"guitarist1", 2}, {"singer", 4},
                                                               {"keyboard", 8},    {"bassist", 16},   {"drummer", 32}};
     const Venue& v = world.venue();
     // The band, when loaded: the member itself (game/band.h).
-    if (world.band && world.band->objectXfm(name, "", out)) return true;
+    if (world.band && world.band->objectXfm(name, subpart, out)) return true;
     for (const auto& [slot, flag] : kSlots) {
         if (name != slot) continue;
         const uint32_t want = multiplayer && flag == 1 ? 512u : flag;
@@ -174,8 +181,16 @@ void VenueView::draw(gfx::Renderer& r, int viewW, int viewH, bool hdr) {
     hdr_ = hdr;
     envSet_ = false;
     meshes_ = particles_ = 0;
+    {
+        // The billboard constraints face the camera being drawn.
+        scene::Xfm cam;
+        for (size_t i = 0; i < 9; ++i) cam.rot[i] = camera_.world.m[i / 3 * 4 + i % 3];
+        cam.pos = {camera_.world.m[12], camera_.world.m[13], camera_.world.m[14]};
+        world_.pose().setCamera(cam);
+    }
     particleRenderer_->resetStats();
     crowdView_->resetStats();
+    bandView_->resetStats();
     particleRenderer_->setHdr(hdr);
     gfx::MaterialRenderer& mr = r.materials();
     for (const Root& root : roots_) drawObject(mr, root.object, root.env, nullptr, 0);

@@ -9,6 +9,7 @@
 #include <utility>
 #include <vector>
 
+#include "render/scene_gpu.h"
 #include "scene/milo.h"
 #include "scene/ui_objects.h"
 #include "script/tasks.h"
@@ -100,6 +101,34 @@ void ComponentObj::refreshList() {
         p->rows(rows, selected, selRow);
         panel->view->setList(name(), std::move(rows), selRow);
     }
+}
+
+// BandTextEntry's key message (0x82143880) [C]: backspace removes the last
+// character; 0x20..0x7E, upper-cased, adds it when the font has it (here:
+// the entry's character set) and the name has room; anything else is
+// component_bad_selection.
+bool ComponentObj::keyChar(int code) {
+    if (!isTextEntry() || done) return false;
+    UiManager& ui = panel->ui;
+    if (code == 8 && !entered.empty()) {
+        entered.pop_back();
+        updateTextEntry();
+        ui.route("char_removed", {});
+        return true;
+    }
+    if (code >= 0x20 && code < 0x7f) {
+        const char c = char(code >= 'a' && code <= 'z' ? code - 0x20 : code);
+        if (charset.find(c) != std::string::npos || c == ' ') {
+            if (int(entered.size()) < maxLength) {
+                entered += c;
+                updateTextEntry();
+                ui.route("char_added", {});
+            }
+            return true;
+        }
+    }
+    ui.route("component_bad_selection", {});
+    return true;
 }
 
 bool ComponentObj::buttonDown(int button, int player) {
@@ -220,13 +249,31 @@ bool ComponentObj::handleNative(Interp& in, const std::string& msg, std::vector<
     }
     if (msg == "set_localized_text" || msg == "set_localized") return setText(argStr(0)), true;
     if (msg == "get_text") return r = Value::string(isTextEntry() ? entered : v ? v->text(name()) : std::string()), true;
-    if (msg == "set_wrap_width" || msg == "jitter_text" || msg == "set_caps") return true;
+    if (msg == "set_wrap_width") {
+        if (v) v->setWrapWidth(name(), argNum(0));
+        return true;
+    }
+    if (msg == "jitter_text" || msg == "set_caps") return true;
     if (msg == "set_frame") {
         if (v) v->setFrame(name(), argNum(0));
         return true;
     }
     if (msg == "frame") return r = Value::real(v ? v->frame(name()) : 0), true;
     if (msg == "end_frame") return r = Value::real(v ? v->endFrame(name()) : 0), true;
+    if (msg == "animate" && directory) {
+        // The milo itself ({lag animate}, options.dta's sync animation): a
+        // RndDir's frame is every animatable's of it, its end their last
+        // [I: RndDir's SetFrame over its anims], at 30 frames a second.
+        if (!v || !v->milo()) return true;
+        std::vector<std::pair<std::string, float>> anims;
+        float end = 0;
+        for (const auto& o : v->milo()->root().objects) {
+            const float e = gfx::ScenePose::endFrame(o.get());
+            if (e > 0) anims.emplace_back(o->name, e), end = std::max(end, e);
+        }
+        for (const auto& [n, e] : anims) ui.animate(panel, n, 0, end, end / 30.0f, kTaskUISeconds);
+        return true;
+    }
     if (msg == "animate") {
         // RndAnimatable Animate (0x821E9D00): (range a b) (period s) (dest d)
         // (units u); without a period, 30 frames a second.
@@ -260,6 +307,7 @@ bool ComponentObj::handleNative(Interp& in, const std::string& msg, std::vector<
     // UIList (0x8237B540)
     if (msg == "set_provider") {
         provider = !args.empty() && args[0].type == Value::Type::Object ? args[0].object : in.findObject(argStr(0));
+        if (auto* p = dynamic_cast<ListProvider*>(provider)) p->initData();
         if (auto* p = dynamic_cast<ListProvider*>(provider)) selected = std::clamp(selected, 0, std::max(0, p->numData() - 1));
         refreshList();
         return true;
@@ -317,10 +365,21 @@ bool ComponentObj::handleNative(Interp& in, const std::string& msg, std::vector<
         if (v) v->setPictureTex(name(), argStr(0));
         return true;
     }
+    // An Sfx under a fader ({practice_snare add_fader music_fader},
+    // practice.dta): it plays at the faders' levels (ui/natives.h faderDb).
+    if (msg == "add_fader" || msg == "remove_fader") {
+        const std::string f = args.empty() ? std::string() : nameOf(args[0]);
+        faders.erase(std::remove(faders.begin(), faders.end(), f), faders.end());
+        if (msg == "add_fader" && !f.empty()) faders.push_back(f);
+        return true;
+    }
     // A sound cue in a panel ({sync_click.cue play}) or another sound object.
     if (msg == "play") {
         const SfxArgs a = sfxArgs(in, args, 0);
-        return ui.playSfx(name(), a.volume, a.pan, a.transpose), true;
+        float db = a.volume;
+        for (const std::string& f : faders) db += faderDb(f);
+        if (db <= -96.0f) return true;  // faded out
+        return ui.playSfx(name(), db, a.pan, a.transpose), true;
     }
     // A mesh's set_mat (RndMesh SetMat): the character select's locked
     // portraits draw with char_locked.mat (career.dta) [C data]; it was a
@@ -350,7 +409,22 @@ void ComponentObj::setProp(Interp& in, const std::string& key, const Value& v) {
         setText(s.empty() ? std::string() : panel->ui.localize(s));
         return;
     }
-    if (key == "diffuse_tex" || key == "color") return;  // .mat set (Mat properties; not drawn yet)
+    // {<mat> set diffuse_tex <tex>} (tutorial_31 / _33: t1_guitar_1.mat,
+    // t1_guitar_3.mat): the material draws with that texture from now on,
+    // the texture looked up by name in the panel's milo as the Mat's own
+    // (RndMat's diffuse_tex property: an object pointer resolved in the
+    // directory) [I: Mat property set].
+    if (key == "diffuse_tex") {
+        const scene::Mat* mat = object ? object->as<scene::Mat>() : nullptr;
+        if (!mat || !panel->view) return;
+        const std::string t = nameOf(v);
+        const scene::Object* o = t.empty() ? nullptr : panel->view->find(t);
+        const scene::Tex* tex = o ? o->as<scene::Tex>() : nullptr;
+        if (!t.empty() && !tex) return panel->ui.logOnce("mat set diffuse_tex: no texture " + t);
+        panel->view->pose().matState(mat).tex = tex;
+        return;
+    }
+    if (key == "color") return;  // .mat set color (not drawn yet)
     ScriptObject::setProp(in, key, v);
 }
 
@@ -362,8 +436,10 @@ ComponentObj* PanelObj::component(const std::string& name) {
     if (name.empty()) return nullptr;
     if (auto it = components_.find(name); it != components_.end()) return it->second.get();
     const scene::Object* o = view ? view->find(name) : nullptr;
-    if (!o && !anyComponent_) return nullptr;
+    const bool dir = !o && view && view->milo() && view->milo()->root().name == name;
+    if (!o && !anyComponent_ && !dir) return nullptr;
     auto c = std::make_unique<ComponentObj>(this, o, name);
+    c->directory = dir;
     ComponentObj* raw = c.get();
     components_[name] = std::move(c);
     return raw;

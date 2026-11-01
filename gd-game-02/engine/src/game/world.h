@@ -134,6 +134,8 @@ public:
     bool playSound(const std::string& name, const scene::Directory* from = nullptr, float volumeDb = 0, float pan = 0,
                    float transpose = 0);
     void stopSound(const std::string& name);
+    // Told each sound playSound plays (the walk tests' record).
+    std::function<void(const std::string&)> onSound;
     // The script object of a venue object (created on first use).
     ScriptObject* scriptFor(scene::Object* o) { return objectFor(o); }
     // The world panel entered (WORLD_OBJECT_BASE enter + `start`): call
@@ -178,7 +180,7 @@ public:
         float intensity = 0;
         std::array<float, 4> color{};
         std::array<float, 4> rotation{};
-        std::string target;
+        std::string target, subpart;
         bool flare = false;
     };
     const std::unordered_map<const scene::Spotlight*, SpotState>& spots() const { return spots_; }

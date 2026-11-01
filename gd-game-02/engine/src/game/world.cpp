@@ -149,6 +149,7 @@ public:
                 return true;
             }
             ++w_.stats_.sounds;
+            if (w_.onSound) w_.onSound(o_->name);
             // (volume {options get_fx_volume}) and the like (ui/sfx_args.h).
             const SfxArgs a = sfxArgs(in, args, 0);
             if (w_.synth_) w_.synth_->play(*o_, a.volume, a.pan, a.transpose);
@@ -635,6 +636,7 @@ bool World::playSound(const std::string& name, const scene::Directory* from, flo
         return false;
     }
     ++stats_.sounds;
+    if (onSound) onSound(name);
     if (synth_) synth_->play(*o, volumeDb, pan, transpose);
     else interp_->onStub("world_sfx", name + " play", Value::integer(0));
     return true;
@@ -827,7 +829,7 @@ void World::applyPreset(const scene::LightPreset& p, size_t k) {
     for (size_t i = 0; i < p.spotlights.size() && i < kf.spots.size(); ++i)
         if (auto* s = venue_.find<scene::Spotlight>(p.spotlights[i]); s && s->animateFromPreset) {
             const auto& e = kf.spots[i];
-            spots_[s] = {e.intensity, e.color, e.rotation, e.target, e.flare};
+            spots_[s] = {e.intensity, e.color, e.rotation, e.target, e.subpart, e.flare};
         }
     for (size_t i = 0; i < p.environs.size() && i < kf.environs.size(); ++i)
         if (auto* env = venue_.find<scene::Environ>(p.environs[i]); env && env->animateFromPreset) {

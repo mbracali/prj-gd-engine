@@ -4,6 +4,39 @@ All notable changes for players. Versions follow SemVer; release tags are
 `gd-game-02/vX.Y.Z`. The release workflow publishes the section whose heading
 matches the tag's version. Nothing is released yet.
 
+## [Unreleased]
+
+### Fixed
+- After RESTART the track's streak flash and the HUD's peak message keep working.
+- Spotlight beams point where the original's do (they shine along the
+  light's own axis, follow their targets and bones, and sit under moving
+  rigs), and floor spots and lens discs have the original's size and place.
+- Glows, flames and smoke planes on the venues turn to the camera again.
+- Spotlight beams glow as the Xbox 360's shader lights them: brightest at the
+  lamp, fading over the beam, stronger the more you look along them.
+- The circles some spotlights throw on the stage follow those lights.
+
+### Added
+- The help bar's dark boxes around each button and label.
+- Type letters into a band's name on the keyboard (space and backspace too).
+- The band and guitar volumes change at once, also on the pause screen.
+- The Flaming Head cheat burns, and the guitarist's hands catch fire in a solo
+  at the top of the Rock Meter, with the original's particle effects.
+- The band's shadows in the spotlights' pools on the stage.
+- Long hair collides with the shoulders and the head.
+- Practice mode, as on the Xbox 360: pick the song, the part, the difficulty,
+  a start and an end section and a speed. Below 100% the song is slowed
+  (its pitch drops, as in the original), only your part is heard and a click
+  track keeps time; the section names show as you play, and you can change
+  speed or section from the pause and end menus.
+- The track wears your character's own surface picture, and rosewood in
+  practice and the tutorials, as on the Xbox 360.
+- The "blew a big note" crowd sound.
+- The tutorials: all three, with their narration, the tuner and the hammer-on
+  and pull-off trainer, in the five languages of the disc. The game now
+  follows your system's language (English, French, German, Italian or
+  Spanish), as the original follows the console's.
+
 ## [0.1.9] - 2026-10-30
 
 **The whammy bar fattens sustain tails again, as in the original.**

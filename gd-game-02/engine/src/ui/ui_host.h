@@ -55,8 +55,50 @@ public:
         std::array<std::string, 2> parts{"guitar", "guitar"};
         std::array<bool, 2> leftys{false, false};
         std::array<int, 2> pads{0, 1};
+        // The mode's song_block (config/modes.dta: practice's song_practice_1
+        // .. _3, the pre-slowed audio; empty or `song`: the song's own) and
+        // skip_intro (practice: GamePanel sends intro_skip, not the intro).
+        std::string songBlock;
+        bool skipIntro = false;
+        // Practice (PS2 0x00106840) [C]: the speed (the song's
+        // practice_speeds entry / 100, the chart's clock against the
+        // audio's) and the chosen sections' ticks, start of the first and
+        // end of the last (-1: the whole song).
+        float practiceSpeed = 1;
+        int practiceStartTick = -1, practiceEndTick = -1;
     };
     virtual bool gameLoad(const GameSetup& setup, std::string& error) = 0;
+    // A song's practice sections (the section provider, PS2 0x0011b678)
+    // [C]: the EVENTS track's [section x] events, each to the next (the
+    // last to the song's end) [I: the ends], with their ticks and ms and
+    // whether the chart of `part` at `difficulty` has a gem in them; and
+    // the whole song (full_song: tick 0 to the end).
+    struct Section {
+        std::string name;
+        int startTick = 0, endTick = 0;
+        float startMs = 0, endMs = 0;
+        bool hasGems = false;
+    };
+    virtual std::vector<Section> songSections(const std::string& /*song*/, const std::string& /*part*/, int /*difficulty*/, Section& /*full*/) {
+        return {};
+    }
+    // The audio file the game plays (tests: practice plays the slowed one).
+    // The background channels' fader (practice: -7.5 dB, -96 dB below 100%).
+    virtual float gameBackgroundDb() const { return 0; }
+    virtual std::string gameAudioPath() const { return {}; }
+    // The tutorials' streaming voice-over (TutorialPanel's VoiceMgr, PS2
+    // 0x00140398): one stream (a .vgs of sound.dta's streaming_vo dir) at
+    // `volumeDb`; whether it still plays (held by synth pause_all_sfx);
+    // stopped (reset_vo).
+    virtual bool playVoice(const std::string& /*path*/, float /*volumeDb*/) { return false; }
+    virtual bool voicePlaying() { return false; }
+    virtual void stopVoice() {}
+    // The voice-over held (tut_pause_screen's {tutorial set_paused TRUE}) or let go on.
+    virtual void pauseVoice(bool /*paused*/) {}
+    // A player's guitar as the tutorial's tuner reads it (PS2 0x0014d6d8
+    // reads pad 0): the frets held (bit 0 green) and the strums so far.
+    virtual unsigned playerFrets(int /*player*/) { return 0; }
+    virtual int playerStrums(int /*player*/) { return 0; }
     // Starts the music and the clock (after every game panel has entered).
     virtual void gameBegin() = 0;
     // GamePanel exit: stops the song.
@@ -64,10 +106,14 @@ public:
     virtual bool gameLoaded() const = 0;
     virtual void gameSetPaused(bool paused) = 0;
     virtual bool gamePaused() const = 0;
+    // The beatmatch's pause (beatmatch set_paused, and game set_paused with a song loaded).
+    virtual bool musicPaused() const { return gamePaused(); }
     virtual double gameTimeMs() const = 0;     // the song clock (negative in the lead-in)
     // The sounds played since the song began, with their song times (the
     // first 256; --walktest checks the intro's).
     virtual std::vector<std::pair<std::string, double>> gameSfx() const { return {}; }
+    // Every sound played by name so far, menus included (the last 1024; tests).
+    virtual std::vector<std::string> sfxHistory() const { return {}; }
     // The camera's distance travelled between the intro's start and song
     // time -2000 ms (the INTRO shot moves in every venue), -1 unknown.
     virtual double introCameraTravel() const { return -1; }
@@ -82,6 +128,17 @@ public:
     virtual int gameCounter(int player, const std::string& key) const = 0;
     // beatmatch set_music_speed / set_paused (the failed song winding down).
     virtual void setMusicSpeed(float speed) = 0;
+    // options set_mute_fx: the game sounds silent (the tutorials' muting).
+    virtual void setMuteFx(bool /*mute*/) {}
+    // The tutorials' player switches (set_whammystarpowerenabled /
+    // set_mercuryswitchenabled) on the song's player `index`.
+    virtual void setPlayerSwitch(int index, const std::string& name, bool on) = 0;
+    // The tutorials' Star Power natives on the song's player `index`:
+    // "meter" (fill / empty / set_star_power), "deploy_rate", "phrase_boost".
+    virtual void setPlayerStarPower(int /*index*/, const std::string& /*what*/, float /*value*/) {}
+    // The song's music volume (dB) reached over `fadeMs`: beatmatch
+    // set_volume (the tutorials' muting), music_fader fade (practice's end).
+    virtual void setMusicVolume(float /*db*/, float /*fadeMs*/) {}
     virtual void setMusicPaused(bool paused) = 0;
 
     // GH2's track_panel and hud panels: the track and HUD the program draws

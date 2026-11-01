@@ -218,7 +218,8 @@ public:
     struct Point {
         std::array<float, 3> pos{};
         std::string bone;
-        float length = 0, f50 = 0;
+        float length = 0;
+        int type = 0;  // the collision: 0 plane, 1 / 2 outside / inside a sphere, 3 / 4 outside / inside a cylinder
         std::string collide;
         float f60 = 0, f64 = 0;
     };

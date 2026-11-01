@@ -43,6 +43,7 @@ public:
     const Player* gamePlayer(int) const override { return nullptr; }
     int gameCounter(int, const std::string&) const override { return 0; }
     void setMusicSpeed(float) override {}
+    void setPlayerSwitch(int, const std::string&, bool) override {}
     void setMusicPaused(bool) override {}
     void trackCommand(const std::string&, const std::vector<Value>&) override {}
     void hudCommand(const std::string&, const std::vector<Value>&) override {}
