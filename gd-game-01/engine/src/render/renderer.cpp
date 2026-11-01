@@ -699,6 +699,89 @@ std::vector<float> Renderer::mapDepths(unsigned buffer, size_t count) {
     return out;
 }
 
+namespace {
+constexpr const char* kPointVertex = R"(#version 330 core
+uniform vec3 uPos;
+void main() { gl_Position = vec4(uPos, 1.0); gl_PointSize = 1.0; }
+)";
+constexpr const char* kPointFragment = R"(#version 330 core
+out vec4 outColor;
+void main() { outColor = vec4(1.0); }
+)";
+constexpr GLenum kAnySamplesPassed = 0x8C2F, kPrimitivePoints = 0x0000, kQueryResult = 0x8866, kQueryAvailable = 0x8867;
+struct QueryFns {
+    void(APIENTRY* gen)(GLsizei, GLuint*) = nullptr;
+    void(APIENTRY* begin)(GLenum, GLuint) = nullptr;
+    void(APIENTRY* end)(GLenum) = nullptr;
+    void(APIENTRY* get)(GLuint, GLenum, GLuint*) = nullptr;
+};
+const QueryFns& queryFns() {
+    static const QueryFns f = [] {
+        QueryFns q;
+        q.gen = reinterpret_cast<decltype(q.gen)>(SDL_GL_GetProcAddress("glGenQueries"));
+        q.begin = reinterpret_cast<decltype(q.begin)>(SDL_GL_GetProcAddress("glBeginQuery"));
+        q.end = reinterpret_cast<decltype(q.end)>(SDL_GL_GetProcAddress("glEndQuery"));
+        q.get = reinterpret_cast<decltype(q.get)>(SDL_GL_GetProcAddress("glGetQueryObjectuiv"));
+        return q;
+    }();
+    return f;
+}
+}  // namespace
+
+void Renderer::testDepthsAsync(std::vector<unsigned>& queries, const std::vector<std::array<float, 3>>& points) {
+    const QueryFns& q = queryFns();
+    if (points.empty() || !q.gen || !q.begin || !q.end || !q.get) return;
+    if (!pointProgram_) {
+        std::string error;
+        unsigned vs = compile(GL_VERTEX_SHADER, kPointVertex, error);
+        unsigned fs = vs ? compile(GL_FRAGMENT_SHADER, kPointFragment, error) : 0;
+        if (!fs) {
+            SDL_Log("depth test program: %s", error.c_str());
+            return;
+        }
+        pointProgram_ = gl::glCreateProgram();
+        gl::glAttachShader(pointProgram_, vs);
+        gl::glAttachShader(pointProgram_, fs);
+        gl::glLinkProgram(pointProgram_);
+    }
+    if (queries.size() < points.size()) {
+        size_t have = queries.size();
+        queries.resize(points.size());
+        q.gen(GLsizei(queries.size() - have), queries.data() + have);
+    }
+    gl::glUseProgram(pointProgram_);
+    gl::glBindVertexArray(vao_);
+    gl::glEnable(GL_DEPTH_TEST);
+    gl::glDepthMask(GL_FALSE);
+    gl::glDepthFunc(GL_LEQUAL);
+    gl::glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+    const int pos = gl::glGetUniformLocation(pointProgram_, "uPos");
+    const float W = float(std::max(viewport_[2], 1)), H = float(std::max(viewport_[3], 1));
+    for (size_t i = 0; i < points.size(); ++i) {
+        gl::glUniform3f(pos, (points[i][0] + 0.5f) / W * 2 - 1, (points[i][1] + 0.5f) / H * 2 - 1, points[i][2] * 2 - 1);
+        q.begin(kAnySamplesPassed, queries[i]);
+        gl::glDrawArrays(kPrimitivePoints, 0, 1);
+        q.end(kAnySamplesPassed);
+    }
+    gl::glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);  // the scene pass's
+    gl::glUseProgram(program_);
+}
+
+bool Renderer::depthsPassed(const std::vector<unsigned>& queries, size_t count, std::vector<bool>& passed) {
+    const QueryFns& q = queryFns();
+    if (!q.get || !count || queries.size() < count) return false;
+    GLuint ready = 0;
+    q.get(queries[count - 1], kQueryAvailable, &ready);  // the last one done: all are
+    if (!ready) return false;
+    passed.assign(count, false);
+    for (size_t i = 0; i < count; ++i) {
+        GLuint r = 0;
+        q.get(queries[i], kQueryResult, &r);
+        passed[i] = r != 0;
+    }
+    return true;
+}
+
 float Renderer::beginWide(float maxAspect) {
     int w = 0, h = 0;
     frameSize(w, h);

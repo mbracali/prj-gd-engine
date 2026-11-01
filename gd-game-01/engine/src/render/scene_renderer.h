@@ -157,6 +157,7 @@ private:
         std::vector<FlareTest> tests;
         unsigned buffer = 0;
         size_t capacity = 0;
+        std::vector<unsigned> queries;  // OpenGL ES: no depth reads
     };
     FlareBatch flareRing_[kFlareLag];
     int flareSlot_ = 0;

@@ -7,7 +7,7 @@ nick_name: "Guitar Hero III"
 launch: 2007-10-28
 platforms: [Xbox 360, PlayStation 3, Wii, PlayStation 2, Windows, macOS]
 based_on: Xbox 360
-guitar_dream_version: "0.0.1"
+guitar_dream_version: "0.0.2"
 ready_to_play: true
 completeness: 0.47
 iso_signatures:

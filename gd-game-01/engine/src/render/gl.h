@@ -98,7 +98,8 @@ GD01_GL11_FUNCTIONS(GD01_DECLARE)
 // On an OpenGL ES 3 context (Android, or GD01_GLES=1 on desktop) a few entry
 // points are wrapped so the desktop code runs unchanged: shaders get the
 // "#version 300 es" preamble, float render targets fall back to RGBA8 without
-// EXT_color_buffer_(half_)float, and depth reads (no ES equivalent) return 1.
+// EXT_color_buffer_(half_)float, and depth reads (no ES equivalent) return 1
+// (the lens flares use occlusion queries there, Renderer::testDepthsAsync).
 const char* load();
 // Whether the current context is OpenGL ES.
 bool isEs();

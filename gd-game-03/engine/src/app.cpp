@@ -2738,6 +2738,7 @@ void App::applyEnhanced() {
     input_.setTouch(true);
 #else
     input_.setTouch(on("touch"));
+    input_.setShakeWhammy(on("shake_whammy"));
 #endif
     input_.setRockBand(true);
     input_.setGamepadPlay(true);

@@ -292,6 +292,14 @@ public:
     void setTouchLanes(int player, const TouchLanes& lanes) { lanes_[size_t(player & 1)] = lanes; }
     // Emits the strums of chords whose 30 ms window has closed; reads MIDI.
     void poll(uint64_t nowNs, std::vector<InputEvent>& out);
+    // Shake-to-whammy (Android only, phone accelerometer via SDL sensors):
+    // shaking the phone drives the existing Whammy path (see pollShake in
+    // input.cpp). No sensor on desktop / no accelerometer: a no-op, and
+    // physical whammy bars, keyboard Shift and touch keep working as before.
+    // Tilt/Gyro (Star Power) is never driven by shaking.
+    void setShakeWhammy(bool on) { shakeOn_ = on; }
+    float shakeWhammyValue() const { return shakeActive_ ? shakeValue_ : 0.0f; }
+    bool shakeWhammyActive() const { return shakeActive_; }
     std::vector<std::pair<float, float>> takeMenuTaps() { return std::move(menuTaps_); }
 
     // The touch settings (Gamepads screen > Touch Screen; controllers.json "touch").
@@ -308,6 +316,16 @@ public:
     std::vector<TouchButton> touchButtons() const;
 
 private:
+    // Shake-to-whammy state (see pollShake in input.cpp). The sensor is
+    // opened lazily on first poll on Android only; shakeSensor_ is null
+    // everywhere else, which makes the whole feature a no-op.
+    void pollShake(uint64_t nowNs, std::vector<InputEvent>& out);
+    void closeShake();
+    SDL_Sensor* shakeSensor_ = nullptr;
+    bool shakeOn_ = true, shakeTried_ = false, shakeActive_ = false, shakeGravInit_ = false;
+    float shakeValue_ = 0, shakeGrav_[3] = {0, 0, 0};
+    uint64_t shakeLastSampleNs_ = 0, shakeActiveUntilNs_ = 0, shakeLastStrongNs_ = 0;
+    int shakeStrongCount_ = 0;
     // In controllers.json "type" order (kTypeKeys); Keyboard and Midi are not a choice.
     enum class Profile { XboxGuitar, XboxGuitarOld, Ps2Guitar, RockBand, Joypad, Keyboard, Midi };
     static constexpr int kTypes = 5;

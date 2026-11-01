@@ -24,6 +24,12 @@ constexpr bool kVkUpscalers = false;
 #else
 constexpr bool kVkUpscalers = true;
 #endif
+// DLSS 4 only where its NGX library is linked (not the MinGW Windows build).
+#if defined(GD01_DLSS) && GD01_DLSS
+constexpr bool kDlss = true;
+#else
+constexpr bool kDlss = false;
+#endif
 
 // PS2 pad buttons (UiSystem::Button).
 constexpr int kUp = 12, kDown = 14;
@@ -1032,6 +1038,11 @@ private:
              "Point at a menu entry to highlight it and click to choose it; the mouse wheel scrolls lists. The help "
              "bar's buttons (CONFIRM, BACK, START, UP / DOWN) are clickable too. Hovering works only while the game "
              "window has focus. Mouse buttons are never used as game buttons."},
+#ifdef __ANDROID__
+            {Kind::Check, "shake_whammy", "Shake for Whammy", true,
+             "Shake the phone during a song to use the whammy bar: keep shaking to hold it, stop to let go. Whammy bends the "
+             "note and fills Star Power faster on a Star Power note. A real whammy bar keeps working. Android only."},
+#endif
             {Kind::Check, "touch", "Enable Touch Controls", true,
              "Play on a touch screen; also shows the on-screen buttons. In the menus a tap is a click. In a song, "
              "touch a lane at the bottom of the highway when its note arrives: it plays the fret and the strum at once "
@@ -1068,11 +1079,12 @@ private:
              "GPU. DLSS 4: NVIDIA RTX GPUs (Linux build). The game always starts on the dedicated GPU when there "
              "are two. If one cannot run, FSR 1 is used.",
              {{"none", "None"}, {"fsr1", "FSR 1 (Spatial)"}, {"fsr31", "FSR 3.1", kVkUpscalers},
-              {"dlss4", "DLSS 4", kVkUpscalers}, {"dlss5", "DLSS 5", false}}},
+              {"dlss4", "DLSS 4", kDlss}, {"dlss5", "DLSS 5", false}}},
             {Kind::Choice, "ai_upscaling_mode", "Upscaling Quality", true,
              "How far below the screen's resolution the scene is drawn: Quality (1.5x upscale, the sharpest), "
-             "Balanced (1.7x) or Performance (2x, the fastest). On a 1440p screen: 960p, 847p, 720p.",
-             {{"performance", "Performance"}, {"balanced", "Balanced"}, {"quality", "Quality"}}, "ai_upscaling"},
+             "Balanced (1.7x) or Performance (2x, the fastest). On a 1440p screen: 960p, 847p, 720p. Native draws "
+             "at the screen's resolution and uses DLSS 4 or FSR 3.1 only as anti-aliasing (DLAA with DLSS 4).",
+             {{"performance", "Performance"}, {"balanced", "Balanced"}, {"quality", "Quality"}, {"native", "Native (DLAA)"}}, "ai_upscaling"},
             {Kind::Choice, "max_fps", "Max FPS", true,
              "The highest frame rate the game draws at; the original ran at 60. Unlimited draws as fast as the "
              "computer can (no vertical sync).",

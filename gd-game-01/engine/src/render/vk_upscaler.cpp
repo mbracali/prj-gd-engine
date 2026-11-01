@@ -790,18 +790,19 @@ bool VkUpscaler::Impl::runDlss(VkCommandBuffer c, const VkUpscaleFrame& f) {
             NVSDK_NGX_VULKAN_ReleaseFeature(dlss);
             dlss = nullptr;
         }
-        static const NVSDK_NGX_PerfQuality_Value kQuality[3] = {NVSDK_NGX_PerfQuality_Value_MaxPerf, NVSDK_NGX_PerfQuality_Value_Balanced,
-                                                                 NVSDK_NGX_PerfQuality_Value_MaxQuality};
+        static const NVSDK_NGX_PerfQuality_Value kQuality[4] = {NVSDK_NGX_PerfQuality_Value_MaxPerf, NVSDK_NGX_PerfQuality_Value_Balanced,
+                                                                 NVSDK_NGX_PerfQuality_Value_MaxQuality, NVSDK_NGX_PerfQuality_Value_DLAA};
         // DLSS 4: the transformer model (preset K) for every mode.
         NVSDK_NGX_Parameter_SetUI(ngxParams, NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_Quality, NVSDK_NGX_DLSS_Hint_Render_Preset_K);
         NVSDK_NGX_Parameter_SetUI(ngxParams, NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_Balanced, NVSDK_NGX_DLSS_Hint_Render_Preset_K);
         NVSDK_NGX_Parameter_SetUI(ngxParams, NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_Performance, NVSDK_NGX_DLSS_Hint_Render_Preset_K);
+        NVSDK_NGX_Parameter_SetUI(ngxParams, NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_DLAA, NVSDK_NGX_DLSS_Hint_Render_Preset_K);
         NVSDK_NGX_DLSS_Create_Params cp{};
         cp.Feature.InWidth = unsigned(f.sw);
         cp.Feature.InHeight = unsigned(f.sh);
         cp.Feature.InTargetWidth = unsigned(f.ow);
         cp.Feature.InTargetHeight = unsigned(f.oh);
-        cp.Feature.InPerfQualityValue = kQuality[std::clamp(f.quality, 0, 2)];
+        cp.Feature.InPerfQualityValue = kQuality[std::clamp(f.quality, 0, 3)];
         cp.InFeatureCreateFlags = NVSDK_NGX_DLSS_Feature_Flags_MVLowRes;
         if (NVSDK_NGX_FAILED(NGX_VULKAN_CREATE_DLSS_EXT1(device, c, 1, 1, &dlss, ngxParams, &cp)) || !dlss) {
             dlss = nullptr;

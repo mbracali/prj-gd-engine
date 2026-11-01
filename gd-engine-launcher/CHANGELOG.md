@@ -12,6 +12,10 @@ Games
   Flaming Head (both also in Enhanced Options); the crowd meter holds still
   where the original turns it off; mono sound as the PS2.
 
+### Also in this version
+- gd01 1.1.8: Android glare fix, shake whammy, Native (DLAA), gd01.log on Windows, song end safety.
+- gd02, gd03, gd04: Santroller guitars, shake whammy.
+
 ## 0.1.8
 
 Games

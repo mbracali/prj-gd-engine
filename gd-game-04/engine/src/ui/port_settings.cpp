@@ -16,6 +16,7 @@ const std::vector<EnhancedSetting>& enhancedSettings() {
     static const std::vector<EnhancedSetting> k = {
         {"mouse", {"on", "off"}},
         {"touch", {"on", "off"}},
+        {"shake_whammy", {"on", "off"}},
         {"rockband", {"off", "on"}},
         {"xinput", {"on", "off"}},
         {"screen_mode", {"windowed", "fullscreen", "borderless"}},
