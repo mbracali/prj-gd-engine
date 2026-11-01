@@ -79,6 +79,11 @@ public:
     // as needed); mapDepths reads them once the GPU is done (a few frames on).
     void readDepthsAsync(unsigned& buffer, size_t& capacity, const std::vector<std::array<int, 2>>& points);
     std::vector<float> mapDepths(unsigned buffer, size_t count);
+    // OpenGL ES cannot read the depth buffer: one occlusion query per point
+    // ({x, y, window depth}, pixels of the viewport) tests it against the
+    // scene's depth instead; depthsPassed fills `passed` once the GPU is done.
+    void testDepthsAsync(std::vector<unsigned>& queries, const std::vector<std::array<float, 3>>& points);
+    bool depthsPassed(const std::vector<unsigned>& queries, size_t count, std::vector<bool>& passed);
 
     // Track fade (docs/track_fade_plan.md): copies the framebuffer under the
     // NDC rect (x0, y0)-(x1, y1) of the current viewport into grab texture
@@ -216,6 +221,7 @@ private:
     float hdrWhite_ = 1, hdrHeadroom_ = 1;  // scRGB units (1 = 80 nits); headroom in paper whites
     std::string hdrLogged_;
     unsigned hdrProgram_ = 0;
+    unsigned pointProgram_ = 0;  // testDepthsAsync
     void updateHdr();
     void outputHdr(int ww, int wh);
     void frameSize(int& w, int& h) const;  // the drawn frame's pixels (window or internal)

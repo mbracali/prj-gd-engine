@@ -24,6 +24,12 @@ constexpr bool kVkUpscalers = false;
 #else
 constexpr bool kVkUpscalers = true;
 #endif
+// DLSS 4 only where its NGX library is linked (not the MinGW Windows build).
+#if defined(GD01_DLSS) && GD01_DLSS
+constexpr bool kDlss = true;
+#else
+constexpr bool kDlss = false;
+#endif
 
 // PS2 pad buttons (UiSystem::Button).
 constexpr int kUp = 12, kDown = 14;
@@ -1068,11 +1074,12 @@ private:
              "GPU. DLSS 4: NVIDIA RTX GPUs (Linux build). The game always starts on the dedicated GPU when there "
              "are two. If one cannot run, FSR 1 is used.",
              {{"none", "None"}, {"fsr1", "FSR 1 (Spatial)"}, {"fsr31", "FSR 3.1", kVkUpscalers},
-              {"dlss4", "DLSS 4", kVkUpscalers}, {"dlss5", "DLSS 5", false}}},
+              {"dlss4", "DLSS 4", kDlss}, {"dlss5", "DLSS 5", false}}},
             {Kind::Choice, "ai_upscaling_mode", "Upscaling Quality", true,
              "How far below the screen's resolution the scene is drawn: Quality (1.5x upscale, the sharpest), "
-             "Balanced (1.7x) or Performance (2x, the fastest). On a 1440p screen: 960p, 847p, 720p.",
-             {{"performance", "Performance"}, {"balanced", "Balanced"}, {"quality", "Quality"}}, "ai_upscaling"},
+             "Balanced (1.7x) or Performance (2x, the fastest). On a 1440p screen: 960p, 847p, 720p. Native draws "
+             "at the screen's resolution and uses DLSS 4 or FSR 3.1 only as anti-aliasing (DLAA with DLSS 4).",
+             {{"performance", "Performance"}, {"balanced", "Balanced"}, {"quality", "Quality"}, {"native", "Native (DLAA)"}}, "ai_upscaling"},
             {Kind::Choice, "max_fps", "Max FPS", true,
              "The highest frame rate the game draws at; the original ran at 60. Unlimited draws as fast as the "
              "computer can (no vertical sync).",

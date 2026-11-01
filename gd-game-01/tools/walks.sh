@@ -13,7 +13,7 @@
 #   tools/walks.sh <gd01 binary> <Guitar Hero (PS2) .iso> [walk ...]
 #
 # Walks (all by default): selftest logo_skip band quickplay mouse enhanced
-# gamepads gamepads_pad. "band" runs first when another walk needs its save.
+# gamepads gamepads_pad. song_end is run by name (it plays a whole song). "band" runs first when another walk needs its save.
 # The universal menus (universal_mechanisms.md) are covered by: logo_skip and
 # band (1.1.1 skips, 1.1.2 band naming), mouse (1.1.3, credits skip),
 # enhanced (1.2.2 Modes, old enhanced.json, HDR), gamepads / gamepads_pad (1.2.1).
@@ -25,7 +25,7 @@ walks=("$@")
 [ ${#walks[@]} -eq 0 ] && walks=(selftest logo_skip band quickplay mouse enhanced gamepads gamepads_pad)
 
 work="$(mktemp -d "${TMPDIR:-/tmp}/gd01-walks.XXXXXX")"
-trap 'rm -rf "$work"' EXIT
+trap '[ -n "${WALK_KEEP:-}" ] && cp "$work"/*.log "$WALK_KEEP"/ ; rm -rf "$work"' EXIT
 fails=0
 seed=""
 
@@ -37,7 +37,7 @@ run() {
   [ -n "$seed" ] && cp -r "$seed/." "$work/$name/xdg/"
   (cd "$work/$name" && env XDG_DATA_HOME="$work/$name/xdg" SDL_VIDEO_DRIVER=offscreen SDL_AUDIO_DRIVER=dummy \
      GD01_UILOG=1 GD01_NO_DESKTOP_ENTRY=1 GD01_KEYS="$keys" GD01_SCREENSHOT="$work/$name/shot.bmp" \
-     GD01_SCREENSHOT_WALL="$quit" "$@" timeout 120 "$bin" "$iso" >"$work/$name.log" 2>&1)
+     GD01_SCREENSHOT_WALL="$quit" "$@" timeout "$(( quit / 1000 + 60 ))" "$bin" "$iso" >"$work/$name.log" 2>&1)
 }
 save() { echo "$work/$1/xdg/gd-engine/gd01"; }
 result() {  # <name> <ok 0/1> <what>
@@ -83,6 +83,19 @@ walk_quickplay() {
   needs_band
   run quickplay 26000 "3000:keyDown,3300:keyReturn,6000:keyReturn,8500:keyReturn,11000:keyReturn,13500:keyReturn" GD01_SKIP_BOOT=1
   result quickplay "$(( $(has quickplay "goto_screen qp_selsong") && $(has quickplay "ui: start game") ))" "main > Quick Play > song > difficulty > the song plays"
+}
+
+# Issue #43: the first song (I Love Rock 'n Roll) on autoplay, to its end and
+# the results; the game must leave the song by itself.
+walk_song_end() {
+  needs_band
+  local keep="$seed"
+  seed="$work/song_end_seed"
+  cp -r "$keep" "$seed"
+  echo "${SONG_END_SETTINGS:-{\"autoplay\": true\}}" > "$seed/gd-engine/gd01/enhanced.json"
+  run song_end "${SONG_END_MS:-235000}" "${SONG_END_KEYS:-3000:keyDown,3300:keyReturn,6000:keyReturn,8500:keyReturn,11000:keyReturn,13500:keyReturn}" GD01_SKIP_BOOT=1
+  seed="$keep"
+  result song_end "$(has song_end "goto_screen post_show")" "the song ends and the game moves on to the results"
 }
 
 # Mouse only: OPTIONS, Enhanced Settings, collapse MODES, the Resolution

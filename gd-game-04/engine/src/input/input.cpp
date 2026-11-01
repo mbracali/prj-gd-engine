@@ -63,6 +63,16 @@ bool isPs2Guitar(SDL_Gamepad* pad) {
            n.find("harmonix") == std::string::npos && n.find("xbox") == std::string::npos;
 }
 
+// Santroller (open-source guitar controller boards): XInput by default, and
+// Xbox-guitar buttons in any of its modes. Its drums and other kinds say so by name.
+bool isSantrollerGuitar(SDL_Gamepad* pad) {
+    std::string n = lower(SDL_GetGamepadName(pad));
+    if (n.find("santroller") == std::string::npos) return false;
+    for (const char* other : {"drum", "dance", "turntable", "dj", "keyboard", "wheel", "stage kit"})
+        if (n.find(other) != std::string::npos) return false;
+    return true;
+}
+
 // SDL has no gamepad mappings for the HID Rock Band guitars: the Xbox-guitar
 // layout (A green, B red, Y yellow, X blue, left shoulder orange, d-pad
 // strum, right stick X whammy). [I] Button and axis numbers follow the
@@ -502,7 +512,7 @@ void Input::handle(const SDL_Event& e, std::vector<InputEvent>& out) {
         if (!pad) break;
         Profile profile = Profile::Joypad;
         if (rockBand_ && isHidRockBandGuitar(id)) profile = Profile::RockBand;
-        else if (isXboxGuitar(id)) profile = Profile::XboxGuitar;
+        else if (isXboxGuitar(id) || isSantrollerGuitar(pad)) profile = Profile::XboxGuitar;
         else if (isPs2Guitar(pad)) profile = Profile::Ps2Guitar;
         Pad np;
         np.pad = pad, np.profile = np.detected = profile;
