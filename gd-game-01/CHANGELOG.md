@@ -6,6 +6,8 @@ matches the tag's version.
 
 ## [Unreleased]
 
+## [1.1.8] - 2026-11-01
+
 ### Added
 - Android: shake the phone to whammy (patch by shenbolado1, issue #42).
 - Upscaling Quality > Native (DLAA): DLSS 4 or FSR 3.1 as anti-aliasing at full resolution (issue #40).
