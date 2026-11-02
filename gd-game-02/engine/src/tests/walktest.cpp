@@ -16,6 +16,7 @@
 #include "data/game_data.h"
 #include "data/json.h"
 #include "game/player.h"
+#include "game/song_db.h"
 #include "input/input.h"
 #include "render/scene_gpu.h"
 #include "render/ui_view.h"
@@ -233,7 +234,8 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
                    "game_screen", "pause_screen", "pause_confirm_restart_screen", "game_screen", "pause_screen",
                    "pause_confirm_quit_screen", "meta_loading_screen", "qp_selsong_screen"};
     } else if (scenario == "career" || scenario == "career_full" || scenario == "career_song" || scenario == "career_encore" ||
-               scenario == "career_win" || scenario == "career_win_medium" || scenario == "career_practice") {
+               scenario == "career_win" || scenario == "career_win_medium" || scenario == "career_practice" ||
+               scenario == "career_venues") {
         at("splash_screen", 30000);
         press(kX);
         at("startup_create_save_screen");
@@ -301,11 +303,11 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         at("sel_character_new_screen");
         check("locked_portraits");
         wait(1500);  // the character opens the door
-        if (scenario == "career_song" && SDL_getenv("GD02_WALK_CHAR")) {
+        if ((scenario == "career_song" && SDL_getenv("GD02_WALK_CHAR")) || scenario == "career_venues") {
             // GD02_WALK_CHAR=<downs> from Punk, GD02_WALK_GUITAR=<downs> from
             // the Les Paul; the first outfit / skin when there are two.
             const char* g = SDL_getenv("GD02_WALK_GUITAR");
-            for (int i = std::atoi(SDL_getenv("GD02_WALK_CHAR")); i > 0; --i) press(kDown), wait(300);
+            for (int i = SDL_getenv("GD02_WALK_CHAR") ? std::atoi(SDL_getenv("GD02_WALK_CHAR")) : 0; i > 0; --i) press(kDown), wait(300);
             press(kX);
             wait(1200);
             check("confirm_on sel_character_new_screen");
@@ -380,6 +382,60 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
                 wait(4000);
             }
             expect_.insert(expect_.end(), {"sel_venue_screen", "sel_song_screen", "loading_screen", "game_screen"});
+        }
+        if (scenario == "career_venues") {
+            // The venue select follows the focus (GD02-144): every venue
+            // unlocked (stone's songs offered), then down from stone to the
+            // battle and back up: at each press the focus, the game's venue,
+            // the map (venue_anims.grp scrolled to the venue's frame,
+            // career.dta's FOCUS_MSG) and the focused poster's state.
+            winTarget_ = "beastandtheharlot";
+            check("career_target");
+            press(kX);  // LET'S ROCK
+            at("sel_venue_screen");
+            wait(1500);
+            check("venue_follow");
+            for (int i = 0; i < 7; ++i) press(kDown), wait(900), check("venue_follow");
+            for (int i = 0; i < 3; ++i) press(kUp), wait(900), check("venue_follow");
+            // A career song in that venue (big), quit from the pause; then
+            // quick play plays in its song's venue (set_quickplay
+            // 0x822B86D0), not the career's last.
+            press(kX);
+            at("sel_song_screen");
+            wait(800);
+            press(kX);
+            at("loading_screen");
+            at("game_screen", 30000);
+            check("career_venue_loaded big");
+            wait(3000);
+            press(kStart);
+            at("pause_screen");
+            press(kUp);  // QUIT
+            wait(150);
+            press(kX);
+            at("pause_confirm_quit_screen");
+            press(kX);
+            at("meta_loading_screen");
+            at("sel_song_screen", 30000);
+            wait(800);
+            press(kTri);
+            at("sel_venue_screen");
+            wait(800);
+            press(kTri);
+            at("career_screen");
+            press(kTri);
+            at("sel_difficulty_screen");
+            wait(1200);
+            check("difficulty_status");  // the band's songs passed, per difficulty
+            press(kTri);
+            at("chooseprof_screen");
+            press(kTri);
+            quickplaySong(0);
+            check("quickplay_venue");
+            expect_.insert(expect_.end(), {"sel_venue_screen", "sel_song_screen", "loading_screen", "game_screen", "pause_screen",
+                                           "pause_confirm_quit_screen", "meta_loading_screen", "sel_song_screen", "sel_venue_screen",
+                                           "career_screen", "sel_difficulty_screen", "chooseprof_screen", "main_screen",
+                                           "qp_selsong_screen", "qp_diff_screen", "loading_screen", "game_screen"});
         }
         if (scenario == "career_win" || scenario == "career_win_medium") {
             // The tour won (GD02-023): every tier song before the tour's last
@@ -1486,8 +1542,12 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
                 if (h.key.size() > 8 && h.key.compare(h.key.size() - 8, 8, "#picking") == 0) picking = &h;
             }
         if (!entered || !picking) return fail("the name entry drew no entered text or picked character");
+        if (const char* dir = SDL_getenv("GD02_WALK_SHOTS")) ui.host().saveScreenshot(std::string(dir) + "/" + s.screen + ".bmp");
         std::printf("  name entry: entered %.1f..%.1f, picking %.1f..%.1f\n", entered->x0, entered->x1, picking->x0, picking->x1);
-        if (picking->x0 < entered->x1 - 1) return fail("the picked character overlaps the entered name");
+        // Ink boxes: the dotted font's letters reach a little past their
+        // advance (GH2 moves the picked Text by the layout's width), so a
+        // few pixels of the boxes may touch; more is an overlap.
+        if (picking->x0 < entered->x1 - 0.12f * (entered->x1 - entered->x0)) return fail("the picked character overlaps the entered name");
         if (s.screen == "name_entry_1") nameX0_ = entered->x0;
         else if (std::fabs(entered->x0 - nameX0_) > 1) return fail("the name does not grow left to right (its start moved)");
         return pass();
@@ -2080,6 +2140,60 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         }
         ++step_, stepStart_ = -1;
         return;
+    }
+    if (s.screen.rfind("career_venue_loaded ", 0) == 0) {
+        const std::string v = s.screen.substr(20);
+        const bool loaded = ui.host().gameCounter(0, "venue_loaded:" + v) == 1;
+        std::printf("  career song: venue %s, %s's world %s\n", ui.session().venue.c_str(), v.c_str(), loaded ? "loaded" : "not loaded");
+        if (ui.session().venue != v || !loaded) return fail("the career song is not in " + v);
+        return pass();
+    }
+    if (s.screen == "difficulty_status") {
+        // sel_diff_career_panel's enter (career.dta): each difficulty's
+        // campaign get_status_progress (0x82284F18) on its label.
+        ui::PanelObj* fp = ui.focusPanel();
+        if (!fp || !fp->view) return fail("no difficulty panel");
+        if (const char* dir = SDL_getenv("GD02_WALK_SHOTS")) ui.host().saveScreenshot(std::string(dir) + "/difficulty_status.bmp");
+        bool any = false;
+        for (const char* l : {"sd_easy_status.lbl", "sd_med_status.lbl", "sd_hard_status.lbl", "sd_expert_status.lbl"}) {
+            const std::string t = fp->view->text(l);
+            std::printf("  difficulty status: %s '%s'\n", l, t.c_str());
+            any = any || !t.empty();
+        }
+        if (fp->view->text("sd_med_status.lbl").find("OF") == std::string::npos) return fail("Medium's label shows no songs passed");
+        return any ? pass() : fail("no difficulty shows its status");
+    }
+    if (s.screen == "quickplay_venue") {
+        std::string want;
+        for (const auto& song : ui.host().songs())
+            if (song.id == ui.session().song) want = song.venue;
+        const bool loaded = !want.empty() && ui.host().gameCounter(0, "venue_loaded:" + want) == 1;
+        std::printf("  quick play: song %s, venue %s (the song's %s), its world %s\n", ui.session().song.c_str(), ui.session().venue.c_str(),
+                    want.c_str(), loaded ? "loaded" : "not loaded");
+        if (want.empty() || ui.session().venue != want || !loaded)
+            return fail("quick play is not in the song's venue");
+        return pass();
+    }
+    if (s.screen == "venue_follow") {
+        ui::PanelObj* fp = ui.focusPanel();
+        if (!fp || !fp->view) return fail("no sel_venue_panel");
+        static const std::vector<std::string> order = {"battle", "small1", "small2", "big", "theatre", "fest", "arena", "stone"};
+        const std::string f = fp->focus;
+        int idx = -1;
+        for (size_t i = 0; i < order.size(); ++i)
+            if (f == "sv_" + order[i] + ".btn") idx = int(i);
+        const float frame = fp->view->frame("venue_anims.grp");
+        const ui::ComponentObj* c = fp->focused();
+        const int state = c ? int(c->state()) : -1;
+        std::printf("  venue select: focus %s, game venue %s, map frame %.2f, focused state %d\n", f.c_str(), ui.session().venue.c_str(),
+                    frame, state);
+        if (const char* dir = SDL_getenv("GD02_WALK_SHOTS"))
+            ui.host().saveScreenshot(std::string(dir) + "/venue_" + std::to_string(++shotN_) + ".bmp");
+        if (idx < 0) return fail("the focus is not a venue: " + f);
+        if (ui.session().venue != order[size_t(idx)]) return fail("the game's venue is " + ui.session().venue + ", the focus " + f);
+        if (std::fabs(frame - float(idx + 1)) > 0.01f) return fail("the map is at frame " + std::to_string(frame) + ", not " + std::to_string(idx + 1));
+        if (state != int(scene::UiState::Focused)) return fail("the focused poster is not in its focused state");
+        return pass();
     }
     if (s.screen == "career_pick_venue" || s.screen == "career_pick_song") {
         const char* w = SDL_getenv("GD02_WALK_SONG");

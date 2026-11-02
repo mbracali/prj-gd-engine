@@ -52,6 +52,18 @@ UNKNOWN / UNHANDLED, 740 handlers smoke-run, 44 unit checks.
   highway and HUD) → post show → endgame (Daily Dose) → high scores →
   complete. Pause (resume / restart / quit), lose, options, credits, bonus
   videos.
+- Animate options (`{x animate (dest $frame) (period s) (range $a $b)}`):
+  their elements are evaluated as they are read, as GH2's DataArray Float /
+  Int evaluate a node. sel_venue's map (`venue_anims.grp`, whose frame also
+  drives every `highlight_<venue>.mnm` and `banner_<venue>.tnm`) and
+  nameprof's zoom depend on it (GD02-144, GD02-143).
+- Panels stay loaded once loaded (the port's choice), except `world_panel`:
+  its milo is the song's venue (`{game get_venue}`), so it unloads when the
+  game's screens (GAME_PANELS) are left, as GH2 unloads panels the next
+  screen does not hold; the next song loads its own venue (GD02-148).
+  set_quickplay's venue: the song's `(quickplay (venue x))` when a band in
+  use has it unlocked, else its tier venue, or for a store / downloaded song
+  the last open venue (0x822B86D0, 0x82284900).
 
 ### Controls in the menus
 

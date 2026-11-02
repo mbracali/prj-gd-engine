@@ -2050,6 +2050,11 @@ int App::gameCounter(int player, const std::string& key) const {
     if (key == "mixer_band_pct") return int(std::lround(bandVolume_ * 100));
     if (key == "mixer_guitar_pct") return int(std::lround(guitarVolume_ * 100));
     if (key == "band_fx_particles") return venueView_ ? venueView_->bandView().fxParticles() : 0;
+    if (key.rfind("venue_loaded:", 0) == 0) {  // the walks: is that venue's world the one loaded
+        for (VenueVariant var : {VenueVariant::Single, VenueVariant::Mp, VenueVariant::Coop})
+            if (venue_ && venuePath_ == venues::worldMilo(key.substr(13), var)) return 1;
+        return 0;
+    }
     if (key == "spot_shadows") return venueView_ ? venueView_->spotlights().shadowsTotal() : 0;
     const int p = std::clamp(player, 0, 1);
     if (key == "sp_phrases") return spPhrases_[p];

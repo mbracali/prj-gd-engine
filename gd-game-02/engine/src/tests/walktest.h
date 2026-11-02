@@ -190,6 +190,7 @@ private:
     int lagStrikes_ = 0;                           // the options walk: strums on the lag clicks
     bool encoreDeclined_ = false;                  // career_song: NO on the encore offer
     std::string winTarget_;                        // career_win: the tour's last song
+    int shotN_ = 0;                                // venue_follow: screenshot number
     float nameX0_ = 0;               // the career walk's band name: where it starts
 
     void runCheck(ui::UiManager& ui, const Step& s, double nowMs);

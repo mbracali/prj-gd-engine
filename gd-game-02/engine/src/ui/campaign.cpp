@@ -318,6 +318,23 @@ bool finishCoopSong(UiManager& ui, int bandScore, int bandStars, int percent0, i
     return changed;
 }
 
+bool venueOpen(UiManager& ui, const std::string& venue) {
+    for (int d = 0; d < Career::kDifficulties; ++d)
+        for (Career::Profile& p : ui.career().profiles)
+            if (p.inUse && profileUnlocked(ui, p, venue, d)) return true;
+    const int i = venueIndex(ui, venue);
+    return i >= 0 && i < 2;
+}
+
+std::string quickplayVenue(UiManager& ui, const std::string& song, const std::string& venue) {
+    if (venue == "attract" || venueOpen(ui, venue)) return venue;
+    if (!isStoreSong(ui, song) && !isDownload(ui, song)) return venueOf(ui, song);
+    std::string last = venue;
+    for (const auto& t : config(ui).tiers)
+        if (venueOpen(ui, t.first)) last = t.first;
+    return last;
+}
+
 bool isUnlocked(UiManager& ui, const std::string& sym) {
     if (ui.session().allAccess) return true;
     if (sym == "multi_fo") return ui.career().proFaceOff;
