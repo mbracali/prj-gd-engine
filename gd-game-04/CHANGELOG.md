@@ -6,6 +6,8 @@ All notable changes for players. Versions follow SemVer; release tags are
 ## [Unreleased]
 
 ### Fixed
+- Career: winning the song that unlocks a boss now leads to the boss, with its help screen first, as in GH3.
+- Scripts read a missing parameter as nothing, as GH3 does (it used to fall back to a global of that name).
 - Sustain tails widen with the whammy bar, as in GH3 (the bar's recent history rolls up the tail).
 - The whammy bar now bends the guitar's sound while you hold a note, like the
   original's pitch shifter, and analog bars follow your hand instead of acting

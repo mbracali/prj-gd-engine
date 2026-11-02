@@ -98,6 +98,9 @@ public:
     // going on update() when it waits.
     // `object`: the screen element it runs on (an event handler's element).
     bool run(uint32_t name, const qb::Struct& params, bool* result = nullptr, uint32_t object = 0);
+    // A script (or native) called as a condition from a native, its return
+    // value as true / false (`fastif should_play_boss_intro`).
+    bool condition(ScriptRun& run, uint32_t name, qb::Struct& params) { return callForValue(run, name, params); }
     // Starts a script as a spawned one (runs from the next update).
     uint32_t spawn(uint32_t name, const qb::Struct& params, uint32_t spawnedBy = 0);
     // Runs a just-spawned script now, up to its first wait.

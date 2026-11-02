@@ -111,7 +111,10 @@ bool noOp(uint32_t m) {
                                     K("ragdoll_markforreset"),    K("Obj_ForceUpdate"),      K("Obj_WaitRotate"),      K("Obj_WaitMove"),
                                     K("obj_stoprotating"),        K("obj_stopmoving"),       K("Obj_PlaySound"),       K("SetTags"),
                                     K("removetags"),              K("obj_enablescaling"),    K("seteventhandler"),     K("ClearEventHandlerGroup"),
-                                    K("ResetEventHandlersFromTable")};
+                                    K("ResetEventHandlersFromTable"),
+                                    // LightShow_CreatePermModels parks the zone's light models
+                                    // (Suspend: no updates); the port's venue lights do not update them [C script].
+                                    K("Suspend")};
     return std::find(std::begin(keys), std::end(keys), m) != std::end(keys);
 }
 

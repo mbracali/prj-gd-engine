@@ -61,7 +61,9 @@ void addFlowNatives(qs::Vm& vm, FlowState& st) {
                           "AddToMaterialLibrary", "SetFontProperties", "SetFontNonProportionalNumbers", "EnableRemoveSoundEntry",
                           "SetScenePermanent", "ParseNodeArray", "startup", "CreateBussSystem", "SetSoundBussParams", "SoundBussLock",
                           "SoundBussUnLock", "createsoundbusseffects", "SetSoundBussEffects", "createnodeflag", "LightShow_Init",
-                          "LightShow_SetProcessors", "CreatePakManMap", "UnloadPak", "WaitUnloadPak"})
+                          "LightShow_SetProcessors", "CreatePakManMap", "UnloadPak", "WaitUnloadPak",
+                          // guitar_startup's LoadFSB streams/streamall: audio/fsb reads the banks when played [C script]
+                          "LoadFSB"})
         vm.addNative(n, yes);
     for (const char* n : {"NetSessionFunc", "IsHost", "EnumContentFiles", "IsEnumContentFilesDamaged", "GetLatestContentIndexFile",
                           "GetContentFolderIndexFromFile", "French", "German", "Spanish", "Italian", "IsCreated", "CompositeObjectExists",

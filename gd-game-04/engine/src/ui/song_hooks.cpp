@@ -1067,6 +1067,17 @@ void SongHooks::addNatives() {
     // drawn yet -- CreateParticleSystem_fast on a band member's bone (the 4x
     // finger flames, the Star Power stage FX), Crowd_PlayAnim (the crowd's
     // Star Power anim), EngineWind, LightShow_SetTime from <song>_lightshow.
+    // The song's teardown and setup calls for systems the port runs natively
+    // [C scripts]: destroy_cameracuts / notemap_deinit ClearNoteMappings (the
+    // camera cuts and note maps are render/venue_camera's, rebuilt per song),
+    // LightShow_Shutdown's LightShow_SetActive / SetMapping (render/venue_lights,
+    // made per song), end_song's StopStream (the song's streams stop with the
+    // song's audio), destroy_highway_prepass's RemovePrepassViewport and
+    // disable_bg_viewport's SetActiveCamera (the port draws one view),
+    // destroy_crowd_models' ClearCrowdModelCams (render/crowd).
+    for (const char* n : {"ClearNoteMappings", "LightShow_SetActive", "LightShow_SetMapping", "StopStream", "RemovePrepassViewport",
+                          "SetActiveCamera", "ClearCrowdModelCams"})
+        vm.addNative(n, [](Vm&, ScriptRun&, qb::Struct&) { return true; });
     for (const char* n : {"CreateParticleSystem_fast", "CreateParticleSystem", "DestroyParticlesByGroupID", "DeleteTeslaEffectObject",
                           "Crowd_PlayAnim", "EngineWind", "LightShow_SetTime"})
         vm.addNative(n, [this, n](Vm&, ScriptRun&, qb::Struct&) {

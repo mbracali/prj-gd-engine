@@ -185,7 +185,14 @@ void addCoreNatives(Vm& vm) {
         // A key names the global struct [C data: start_flow_manager passes the flow state's key].
         if (s && (s->type == qb::Type::Key || s->type == qb::Type::KeyPtr)) s = v.global(s->key);
         if (!s || !n || s->type != qb::Type::Struct || !s->st) return false;
-        return v.globals().field(*s->st, n->key) != nullptr;
+        if (v.globals().field(*s->st, n->key) != nullptr) return true;
+        // A flag (a nameless key, `$boss` / `$encorep1` in GH3_Career_Songs'
+        // tiers) counts too: Progression_GetBossSong finds a tier's boss so,
+        // and leaves the encore out of its count [C script; I: the native's
+        // flag test, which the script relies on].
+        for (const qb::Item& it : s->st->items)
+            if (!it.name && (it.value.type == qb::Type::Key || it.value.type == qb::Type::KeyPtr) && it.value.key == n->key) return true;
+        return false;
     });
     // GetArraySize <array> -> array_size.
     // GetArraySize <array> | <name> globalarray (a global array by its name,
@@ -299,7 +306,10 @@ void addCoreNatives(Vm& vm) {
             if (it != v.globalTags.end())
                 for (const qb::Item& item : it->second.items)
                     d += qbkey::name(item.name) + "=" + qb::typeName(item.value.type) + ":" +
-                         (item.value.type == qb::Type::Int ? std::to_string(item.value.i) : item.value.str) + " ";
+                         (item.value.type == qb::Type::Int                                           ? std::to_string(item.value.i)
+                          : item.value.type == qb::Type::Key || item.value.type == qb::Type::KeyPtr ? qbkey::name(item.value.key)
+                                                                                                    : item.value.str) +
+                         " ";
             SDL_Log("tag %s read: %s", tagLog, d.c_str());
         }
         if (it == v.globalTags.end()) return false;

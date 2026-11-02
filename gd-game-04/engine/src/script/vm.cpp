@@ -29,6 +29,7 @@ struct Exec {
     const std::vector<Token>& t;
     size_t i;
     int parens = 0;  // inside ( ): a name may be a call
+    size_t missingArgEnd_ = size_t(-1);  // the token after the last unset <name> read
 
     Exec(Vm& v, ScriptRun& r) : vm(v), run(r), fr(&r.frames.back()), t(fr->code->tokens), i(fr->pc) {}
 
@@ -194,9 +195,11 @@ struct Exec {
             if (i < t.size() && t[i].op == kName) {
                 const uint32_t n = t[i++].u;
                 if (const qb::Value* lv = local(n)) return *lv;
-                // An unset <name> reads the global of that name
-                // (`GetArraySize { <guitar_hero_cheats> }`, `<Bonus_Guitars>`) [I: the scripts rely on it].
-                if (const qb::Value* gv = vm.global(n)) return *gv;
+                // An unset <name> is nothing: GH3 looks it up in the script's
+                // parameters only (0x82142968 from the evaluator's 0x2D case,
+                // 0x821977A0) and leaves the value empty; a struct being built
+                // gets no component for it (0x82194BE0) [C]. paramItem drops it.
+                missingArgEnd_ = i;
                 return none();
             }
             return none();
@@ -506,12 +509,23 @@ struct Exec {
 
     // -- parameter lists ---------------------------------------------------
     // One item of a parameter list or struct literal.
+    // Whether the value just read was only an unset <name> (GH3 adds no
+    // component for it: `change { current_level = <g_last_venue_selected> }`
+    // changes nothing when the script has no such parameter) [C 0x82194BE0].
+    bool onlyMissingArg(size_t start) {
+        size_t j = start;
+        while (j < t.size() && t[j].op == kNop) ++j;
+        return j < t.size() && t[j].op == kArg && missingArgEnd_ == i;
+    }
+
     void paramItem(qb::Struct& out) {
         skipNops();
         const Token& k = t[i];
         if (k.op == kName && i + 1 < t.size() && t[i + 1].op == kEquals) {
             i += 2;
+            const size_t start = i;
             qb::Value v = paramValue();
+            if (onlyMissingArg(start)) return;
             Vm::set(out, k.u, std::move(v));
             return;
         }
@@ -541,7 +555,9 @@ struct Exec {
             return;
         }
         // A positional value.
+        const size_t start = i;
         qb::Value v = paramValue();
+        if (onlyMissingArg(start)) return;
         out.items.push_back(qb::Item{0, std::move(v)});
     }
 
@@ -1236,7 +1252,7 @@ bool Vm::step(ScriptRun& run, int budget) {
                 fr.pc = ex.i;
                 bool handled = false;
                 if (objectCall && objId) objectCall(*this, run, objId, method, p, handled);
-                if (!handled) logOnce("UNHANDLED member call " + qbkey::name(method));
+                if (!handled) logOnce("UNHANDLED member call " + qbkey::name(method) + " (in " + qbkey::name(fr.code->name) + ", on " + qbkey::name(objId) + ")");
                 continue;
             }
         }
