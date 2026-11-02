@@ -2228,12 +2228,18 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         if (!p) return fail("no band chosen");
         const char* labels[4] = {"sd_easy_status.lbl", "sd_med_status.lbl", "sd_hard_status.lbl", "sd_expert_status.lbl"};
         for (int d = 0; d < 4; ++d) {
-            int n = 0;
-            for (const auto& t : ui::campaign::config(ui).tiers)
-                for (const std::string& song : t.second) n += ui::campaign::passed(ui, *p, d, song) ? 1 : 0;
+            // The difficulty's tiers, Easy without its encores (0x82284F18).
+            int n = 0, m = 0;
+            const auto& tiers = ui::campaign::config(ui).tiers;
+            for (int v = 0; v < ui::campaign::numTiers(ui, d) && v < int(tiers.size()); ++v)
+                for (const std::string& song : tiers[size_t(v)].second) {
+                    if (d == 0 && song == tiers[size_t(v)].second.back()) continue;
+                    ++m, n += ui::campaign::passed(ui, *p, d, song) ? 1 : 0;
+                }
             const std::string t = fp->view->text(labels[d]);
-            std::printf("  difficulty status: %s '%s' (%d songs passed)\n", labels[d], t.c_str(), n);
-            if (n == 0 ? t.find("OF") != std::string::npos : t.find("(" + std::to_string(n) + " OF") != 0)
+            std::printf("  difficulty status: %s '%s' (%d of %d songs passed)\n", labels[d], t.c_str(), n, m);
+            const std::string want = "(" + std::to_string(n) + " OF " + std::to_string(m) + " ";
+            if (n == 0 ? t.find("OF") != std::string::npos : t.find(want) != 0)
                 return fail(std::string(labels[d]) + " does not show the band's songs passed");
         }
         return pass();

@@ -258,7 +258,7 @@ difficulty (main.dta's reset_player_settings: punk1, the first guitar and
 skin) and **everything unlocked** (`campaign::unlockGlitches`, GD02-090),
 written into its records as GH2's rules leave a band that won the tour at
 every difficulty: every tier venue unlocked and completed (Easy's seven),
-every tier song and store song unlocked, every item the store sells bought
+every tier song and store song unlocked, every tier song passed (three stars, so the career difficulty screen counts it: owner, 11-02), every item the store sells bought
 (guitars with the tour rewards, finishes, characters, outfits, videos),
 $1,000,000, and the save's pro face-off (a tour won). Its encores are
 unlocked at every difficulty, Easy's too (a port rule for this band only;

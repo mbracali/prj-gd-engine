@@ -580,7 +580,15 @@ bool unlockGlitches(UiManager& ui) {
             for (int v = 0; v < numTiers(ui, d) && v < int(c.tiers.size()); ++v) {
                 Career::Entry& ve = rec[c.tiers[size_t(v)].first];
                 set(ve.unlocked), set(ve.completed);
-                for (const std::string& s : c.tiers[size_t(v)].second) set(rec[s].unlocked);
+                for (const std::string& s : c.tiers[size_t(v)].second) {
+                    set(rec[s].unlocked);
+                    // Passed (three stars, 0x822AE8F8): the career difficulty
+                    // screen counts it (owner's choice, 11-02); a real score
+                    // played later replaces it as any best score does.
+                    // Easy has no encores to play (its count leaves them out, 0x82284F18).
+                    const bool easyEncore = d == 0 && s == c.tiers[size_t(v)].second.back();
+                    if (!easyEncore && rec[s].stars < 3) rec[s].stars = 3, changed = true;
+                }
             }
             for (const std::string& s : c.storeSongs) set(rec[s].unlocked);  // buy_item: every record
         }
