@@ -24,7 +24,7 @@ Only original behaviour is listed, no Enhanced items. "Unverified" means the por
 | Area | Missing or wrong | Backlog |
 |---|---|---|
 | Menus | Compare by eye: the song list's font, the help bar in a transition (both drawn as the data says) | GD02-075, -082 |
-| Band | The face-off "doing badly" rule's rate clock, CharDriverMidi's +8 flag for the inactive clip, hair's soft band orientation | GD02-050 |
+| Band | CharDriverMidi's +8 flag for the inactive clip (no writer found, the requested clip is played) | GD02-050 |
 | Venues | The beams' buffer gain and scene-depth softness (per vertex here); compare each venue by eye | GD02-049, -091 |
 | Gameplay research | The bass path's range list (no `bass_N.cue` on the disc, normal path taken); input time per event here, per frame on the 360 | GD02-036, -037 |
 | Platform reports | Salvation not starting on Windows and the camera going under the venue: both not reproduced; ~20 fps on macOS M4 Pro | GD02-060, -061, -062 |
