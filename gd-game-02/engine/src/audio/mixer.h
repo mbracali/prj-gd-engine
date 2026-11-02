@@ -2,6 +2,7 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #pragma once
 
+#include <array>
 #include <SDL3/SDL.h>
 
 #include <atomic>
@@ -53,6 +54,12 @@ public:
     void setGuitarAudible(bool audible) { guitarTarget_.store(audible ? 1.0f : 0.0f); }
     // The second player's part (Track::guitar2), the same way.
     void setGuitar2Audible(bool audible) { guitar2Target_.store(audible ? 1.0f : 0.0f); }
+    // The whammy (gd01's docs/whammy_audio_plan.md): a player's guitar channels
+    // play through a delay line at `speed` (<= 1), so they drop in pitch and fall
+    // behind the song (the slip voice); resyncGuitar() jumps them back in sync.
+    void setGuitarSlipSpeed(float speed, int player = 0) { slip_[size_t(player)].speed.store(speed); }
+    void resyncGuitar(int player = 0) { slip_[size_t(player)].resync.fetch_add(1); }
+    double guitarSlipMs(int player = 0) const { return slip_[size_t(player)].lagMs.load(); }
     // Playback speed (1 normal): the song is resampled, so its pitch follows
     // (GH2's set_music_speed: the failed song winding down, practice) [I for
     // the pitch]. The song clock is not corrected for it.
@@ -113,6 +120,18 @@ private:
     float volumeGain_ = 1;  // audio thread only
     std::atomic<float> guitarTarget_{1};
     float guitarGain_ = 1;  // audio thread only
+    struct Slip {
+        std::atomic<float> speed{1};
+        std::atomic<int> resync{0};
+        std::atomic<double> lagMs{0};
+        // Audio thread only:
+        int resyncSeen = 0;
+        double lag = 0;  // in frames
+    };
+    std::array<Slip, 2> slip_;
+    static constexpr uint32_t kSlipRing = 1 << 15;
+    std::vector<std::vector<float>> slipHist_;  // per track (only the guitar's read)
+    uint32_t slipWrite_ = 0;
     std::atomic<float> guitar2Target_{1};
     float guitar2Gain_ = 1;
 

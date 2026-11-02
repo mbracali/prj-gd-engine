@@ -78,6 +78,9 @@ void Mixer::play(std::unique_ptr<AudioSource> stream, std::vector<Track> tracks,
     songFrames_ = 0;
     guitarGain_ = 1, guitarTarget_ = 1;
     guitar2Gain_ = 1, guitar2Target_ = 1;
+    for (Slip& s : slip_) s.speed = 1, s.lag = 0, s.lagMs = 0, s.resyncSeen = s.resync.load();
+    slipWrite_ = 0;
+    slipHist_.assign(tracks_.size(), std::vector<float>(kSlipRing, 0.0f));
     anchorFrames_ = 0;
     anchorNs_ = SDL_GetTicksNS();
     paused_ = false;
@@ -180,6 +183,16 @@ void Mixer::fill(int frames) {
     const float target = guitarTarget_.load(), target2 = guitar2Target_.load();
     const float vTarget = volumeTarget_.load(), vStep = volumeStep_.load(), background = backgroundGain_.load();
     const float bandVol = bandVolume_.load(), guitarVol = guitarVolume_.load();
+    // Each player's slip voice: its guitar reads `lag` frames behind, the lag
+    // growing by 1 - speed a frame up to max_slip (300 ms).
+    const double maxLag = 0.3 * rate_;
+    double slipStep[2];
+    for (int k = 0; k < 2; ++k) {
+        Slip& s = slip_[size_t(k)];
+        slipStep[k] = 1.0 - std::clamp(double(s.speed.load()), 0.5, 1.0);
+        if (int v = s.resync.load(); v != s.resyncSeen) s.resyncSeen = v, s.lag = 0;
+    }
+    if (slipHist_.size() != tracks_.size()) slipHist_.assign(tracks_.size(), std::vector<float>(kSlipRing, 0.0f));
     for (int i = 0; i < n; ++i) {
         size_t at = size_t((r + i) & (kRing - 1));
         volumeGain_ = volumeGain_ < vTarget ? std::min(vTarget, volumeGain_ + vStep) : std::max(vTarget, volumeGain_ - vStep);
@@ -189,13 +202,28 @@ void Mixer::fill(int frames) {
         float l = 0, rr = 0;
         for (size_t c = 0; c < tracks_.size(); ++c) {
             const Track& t = tracks_[c];
-            float v = ring_[c][at] * t.volume * volumeGain_ * (t.guitar ? guitarGain_ : t.guitar2 ? guitar2Gain_ : background) * (!t.songPart ? 1.0f : t.guitar || t.guitar2 ? guitarVol : bandVol);
+            float in = ring_[c][at];
+            slipHist_[c][slipWrite_ & (kSlipRing - 1)] = in;
+            if (t.guitar || t.guitar2) {
+                const double lag = slip_[t.guitar ? 0 : 1].lag;
+                if (lag > 1e-6) {
+                    const double rp = double(slipWrite_) - lag;
+                    const uint32_t i0 = uint32_t(int64_t(std::floor(rp)));
+                    const float f = float(rp - std::floor(rp));
+                    const auto& h = slipHist_[c];
+                    in = h[i0 & (kSlipRing - 1)] * (1 - f) + h[(i0 + 1) & (kSlipRing - 1)] * f;
+                }
+            }
+            float v = in * t.volume * volumeGain_ * (t.guitar ? guitarGain_ : t.guitar2 ? guitar2Gain_ : background) * (!t.songPart ? 1.0f : t.guitar || t.guitar2 ? guitarVol : bandVol);
             // gd01's linear pan law: -1 = left only, 0 = both at full, 1 = right only [I].
             l += v * std::clamp(1.0f - t.pan, 0.0f, 1.0f);
             rr += v * std::clamp(1.0f + t.pan, 0.0f, 1.0f);
         }
         out_[size_t(silent + i) * 2] = std::clamp(l, -1.0f, 1.0f);
         out_[size_t(silent + i) * 2 + 1] = std::clamp(rr, -1.0f, 1.0f);
+        ++slipWrite_;
+        for (int k = 0; k < 2; ++k) slip_[size_t(k)].lag = std::min(slip_[size_t(k)].lag + slipStep[k], maxLag);
     }
+    for (Slip& s : slip_) s.lagMs.store(s.lag * 1000.0 / rate_);
     read_.store(r + n, std::memory_order_release);
 }

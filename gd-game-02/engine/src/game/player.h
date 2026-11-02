@@ -159,6 +159,10 @@ public:
     // The whammy bar's position (0 rest .. 1), 1 while a whammy key is held:
     // the track bends sustained tails with it.
     float whammyBar() const { return whammyKey_ ? 1.0f : whammyValue_; }
+    // The audio's bend (0x8234FF18): the guitar's speed while a sustain is
+    // whammied (<= 1); guitarHits() counts the hits, each resyncs the slip voice.
+    float bendSpeed() const { return bendSpeed_; }
+    int guitarHits() const { return guitarHits_; }
     bool phraseIntact(int phrase) const;
     bool failed() const { return failed_; }
     // Development aid (GD02_FAIL_AT): fails the song now, as an empty rock
@@ -281,6 +285,10 @@ private:
         int earned = 0;
     } tail_;
     bool guitarAudible_ = true;
+    float bendSpeed_ = 1, bendBase_ = -1, sustainHitMs_ = 0;  // +0x78 (the bar's rest), +0x74
+    bool bendArmed_ = false;                                  // +0x68
+    int guitarHits_ = 0;
+    void updateBend(float t);
 
     // Crowd (player +0x40).
     float raw_ = 0;      // +8
