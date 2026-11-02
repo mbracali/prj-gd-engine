@@ -23,6 +23,12 @@ const char* const kPcStrings[][2] = {
     {"delete_confirm", "Are you sure you want to permanently delete this band?"},
     {"BAND_NAME_EXPLAIN", "This is also your SAVE GAME name."},
     {"HOW_TO_EDIT", "You can edit this name later from Data Settings in the Options menu."},
+    // A controller lost mid-song (CONTROLLER_LOSS): PCs have no numbered
+    // controller ports (GD01-191).
+    {"controller_loss_msg", "Please make sure your Guitar Controller is connected."},
+    {"controller_loss_msg_multi", "Please make sure both players' Guitar Controllers are connected."},
+    {"tut_guitar_loss_msg", "Please make sure your Guitar Controller is connected."},
+    {"mc_title_error", "save data error"},
     // The Universal Access Buttons' START pill (help bar, universal_mechanisms.md 1.1.3).
     {"gd_uab_start", "START"},
     // Only when saving fails on PC.
