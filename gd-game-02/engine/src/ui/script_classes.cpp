@@ -618,7 +618,7 @@ void PanelObj::navigate(int button) {
         }
         if (next.empty() || next == focus) return;
         cur = next;
-        if (!isDisabled(cur) && (!view->find(cur) || view->showing(cur))) break;
+        if (!isDisabled(cur)) break;  // 0x82374160: state 2 only, hidden components count
     }
     if (cur != focus && !isDisabled(cur)) setFocus(cur, true);
 }

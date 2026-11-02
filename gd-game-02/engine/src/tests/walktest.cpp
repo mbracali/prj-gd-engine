@@ -361,6 +361,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
             wait(600);
             check("career_pick_song", 20000);
             check("career_song_target");
+            wait(600);  // the list still scrolling takes no select
             press(kX);
             at("loading_screen");
             at("game_screen", 30000);
@@ -2065,6 +2066,14 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
                 }
             if (!found) return fail("no career song " + target + " at difficulty " + std::to_string(d));
         } else {
+            for (const auto& tier : ui::campaign::config(ui).tiers)
+                if (!tier.second.empty() && tier.second.back() == target) {
+                    // The venue's last song is its encore (never on the list to pick): walk career_encore plays it.
+                    std::printf("  career: %s is %s's encore\n", target.c_str(), tier.first.c_str());
+                    expect_.clear();
+                    step_ = int(steps_.size()), stepStart_ = -1;
+                    return;
+                }
             std::printf("  career: venue %s, song %s, difficulty %d\n", ui.session().venue.c_str(), ui.session().song.c_str(),
                         ui::campaign::difficulty(ui));
             if (ui.session().song != target) return fail("the career offered " + ui.session().song + ", not " + target);
