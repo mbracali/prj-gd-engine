@@ -1732,7 +1732,7 @@ void App::updateSong(float t) {
     if (const char* w = SDL_getenv("GD02_WHAMMYLOG")) {  // development aid: a moving bar, logs the deepest lag so far
         static double most = 0;
         player_->setWhammyValue(0.5f + 0.5f * std::sin(t / 150.0f), t);
-        if (*w && mixer_.guitarSlipMs(0) > most + 25) most = mixer_.guitarSlipMs(0), SDL_Log("whammy: guitar lag %.0f ms, speed %.3f", most, player_->bendSpeed());
+        if (*w && mixer_.guitarSlipMs(0) > most + 4) most = mixer_.guitarSlipMs(0), SDL_Log("whammy: guitar lag %.0f ms, speed %.3f", most, player_->bendSpeed());
     }
     if (!player2_) {
         mixer_.setGuitarAudible(player_->guitarAudible());

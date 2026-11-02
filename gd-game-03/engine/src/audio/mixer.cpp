@@ -48,7 +48,7 @@ void Mixer::workerLoop() {
     for (size_t c = 0; c < channels; ++c) ptrs[c] = block[c].data();
     while (workerRun_.load()) {
         int64_t w = written_.load(std::memory_order_relaxed);
-        if (sourceEnded_.load() || w - read_.load(std::memory_order_acquire) > kRing - kBlock) {
+        if (sourceEnded_.load() || w - read_.load(std::memory_order_acquire) > kRing - kBlock || (source_ && !source_->ready(kBlock))) {
             std::this_thread::sleep_for(std::chrono::milliseconds(4));
             continue;
         }

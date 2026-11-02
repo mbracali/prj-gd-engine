@@ -546,7 +546,9 @@ void UiManager::beginTransition(ScreenObj* next, bool back) {
             if (p->up && !next->hasPanel(p) && p->view)
                 for (const char* ev : {"ui_exit", back_ ? "ui_exit_back" : "ui_exit_forward"})
                     for (const gfx::UiView::Trigger& t : p->view->triggers(ev))
-                        animate(p, t.anim->name, 0, t.endFrame, float(transitionMs_ / 1000.0), kTaskUISeconds);
+                        // The name's zoom leaves from where the name left it, with no jump (GD02-143).
+                        animate(p, t.anim->name, t.anim->name == "nameprof.tnm" ? p->view->frame(t.anim->name) : 0, t.endFrame,
+                                float(transitionMs_ / 1000.0), kTaskUISeconds);
         // The metacam's exit: forward meta_cam_pause_right_out 0 -> 500,
         // back meta_cam_right_in 500 -> 0.
         transitionAnim_ = forwardAnim_ ? "meta_cam_pause_right_out.tnm" : "meta_cam_right_in.tnm";

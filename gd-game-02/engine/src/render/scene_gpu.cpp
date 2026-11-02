@@ -433,6 +433,13 @@ SceneCache::~SceneCache() {
     for (BufferId b : buffers_) device_.destroyBuffer(b);
 }
 
+bool SceneCache::stale(const scene::Object* o) {
+    auto [it, added] = owners_.try_emplace(o, o->uid);
+    if (added || it->second == o->uid) return false;
+    it->second = o->uid;
+    return true;
+}
+
 TextureId SceneCache::texture(const scene::Object* owner, const std::string& name) {
     if (name.empty() || !owner || !owner->dir) return {};
     return texture(owner->dir->resolve<scene::Tex>(name));
@@ -440,7 +447,12 @@ TextureId SceneCache::texture(const scene::Object* owner, const std::string& nam
 
 TextureId SceneCache::texture(const scene::Tex* tex) {
     if (!tex) return {};
-    if (auto it = textures_.find(tex); it != textures_.end()) return it->second;
+    if (auto it = textures_.find(tex); it != textures_.end()) {
+        if (!stale(tex)) return it->second;
+        if (it->second) device_.destroyTexture(it->second);
+        textures_.erase(it);
+    }
+    stale(tex);
     TextureId id;
     const scene::Bitmap& b = tex->bitmap;
     TexFormat format = TexFormat::RGBA8;
@@ -483,7 +495,12 @@ TextureId SceneCache::texture(const scene::Tex* tex) {
 // +x -x +y -y +z -z, Direct3D's order, which OpenGL samples the same way).
 TextureId SceneCache::cubeTexture(const scene::CubeTex* cube) {
     if (!cube) return {};
-    if (auto it = cubes_.find(cube); it != cubes_.end()) return it->second;
+    if (auto it = cubes_.find(cube); it != cubes_.end()) {
+        if (!stale(cube)) return it->second;
+        if (it->second) device_.destroyTexture(it->second);
+        cubes_.erase(it);
+    }
+    stale(cube);
     TextureId id;
     const scene::Bitmap& f0 = cube->faces[0];
     bool ok = cube->inlineBitmaps && !f0.empty();
@@ -547,7 +564,11 @@ const GpuMesh* SceneCache::mesh(const scene::Mesh* m) {
     const scene::Mesh* geom = m;
     if (m->verts.empty() && !m->geomOwner.empty() && m->dir)
         if (auto* owner = m->dir->resolve<scene::Mesh>(m->geomOwner)) geom = owner;
-    if (auto it = meshes_.find(geom); it != meshes_.end()) return it->second.get();
+    if (auto it = meshes_.find(geom); it != meshes_.end()) {
+        if (!stale(geom)) return it->second.get();
+        meshes_.erase(it);  // its buffers stay in buffers_ until the cache goes
+    }
+    stale(geom);
     std::unique_ptr<GpuMesh> g;
     if (!geom->verts.empty() && !geom->faces.empty()) {
         g = std::make_unique<GpuMesh>();

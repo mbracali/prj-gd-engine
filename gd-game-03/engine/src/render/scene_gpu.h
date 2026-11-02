@@ -143,6 +143,10 @@ public:
 
 private:
     RenderDevice& device_;
+    // Whether `o` is a new object at an address seen before: the milo that held
+    // the old one was freed, and its geometry or texture must not be drawn for it.
+    bool stale(const scene::Object* o);
+    std::unordered_map<const scene::Object*, uint64_t> owners_;
     std::map<const scene::Tex*, TextureId> textures_;
     std::map<const scene::CubeTex*, TextureId> cubes_;
     std::map<const scene::Mesh*, std::unique_ptr<GpuMesh>> meshes_;

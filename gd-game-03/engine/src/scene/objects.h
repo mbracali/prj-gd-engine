@@ -2,6 +2,7 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #pragma once
 
+#include <atomic>
 #include <array>
 #include <cstdint>
 #include <functional>
@@ -84,6 +85,10 @@ struct Animatable {
 class Object {
 public:
     virtual ~Object() = default;
+    static uint64_t nextUid() {
+        static std::atomic<uint64_t> n{0};
+        return ++n;
+    }
 
     std::string cls, name;
     uint32_t version = 0;   // the record's first u32 (the class's own revision)
@@ -93,6 +98,8 @@ public:
     bool typed = false;     // a decoder exists for this class
     bool decoded = false;   // the decoder read the record exactly to its end
     std::string error;      // why decoding failed
+    // Unique for the program's life: an address can be reused once an object is freed.
+    uint64_t uid = nextUid();
 
     template <class T> T* as() { return dynamic_cast<T*>(this); }
     template <class T> const T* as() const { return dynamic_cast<const T*>(this); }

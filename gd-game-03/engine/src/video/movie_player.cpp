@@ -38,6 +38,10 @@ public:
     explicit QueueSource(std::shared_ptr<SoundQueue> q) : q_(std::move(q)) {}
     int channels() const override { return PssMovie::kAudioChannels; }
     int sampleRate() const override { return PssMovie::kAudioRate; }
+    bool ready(int frames) override {
+        std::lock_guard lock(q_->m);
+        return q_->ended || q_->samples.size() >= size_t(frames) * 2;
+    }
     int decode(float* const* out, int frames) override {
         std::lock_guard lock(q_->m);
         if (q_->ended && q_->samples.empty()) return 0;
