@@ -770,6 +770,9 @@ universal launcher, not released on its own.
 | GD04-028 | Original | 🟡 built only | Android reads the GH3 disc in place: in the launcher through /proc/self/fd/<n> (the module shim's fopen, as gd-game-01/02), standalone through the content:// URI with SDL's IO (data/random_file.cpp); the 8 GB copy is gone. Not run on a device | `engine/src/data/random_file.cpp`, `platform/disc_picker.cpp` | Owner 2026-10-29 |
 | GD04-029 | Enhancement | ✅ | Enhanced options default off (original look): every graphics enhancer off, Max FPS 60, no FPS counter; the platform rows only set the window and touch | `engine/src/ui/port_settings.cpp` | Owner 2026-10-29 |
 | GD04-030 | Original | 🟡 in progress | Menus: menu animations and composite menu objects (checkpoint 23d66cf) | PARITY_GAPS.md | 2026-10-29 |
+| GD04-031 | Original | ✅ | Whammy bends the guitar's sound: GH3's FastPitchShift rebuilt from 0x826E5C38 (resampler on an 8192-frame ring, jumps back past 4096 frames, 100-frame crossfade), one per player ahead of the buss effects; `set_whammy_pitchshift` runs every frame of a hold and resets at its end (0x8211D078, 0x8211D49C); pitch 1 - 0.057 x bar. Analog bars now reach the song as their real value, not on / off. The boss's pitch down works through the same unit. Checked: selftest 414.9 Hz at full bar, log on a real song; not heard by ear | `audio/fast_pitch.*`, `GD04_WHAMMYLOG=1` | 2026-11-02 |
+| GD04-032 | Original | ❌ | The sustain's tail on the highway does not follow the bar: SetNewWhammyValue / SetAllWhammyValues (0x821056F8, 0x82105918; scale 1 + bar) are not implemented | GD04-018 | 2026-11-02 |
+| GD04-033 | Original | ✅ not affected | GD02-145's cache bug: GH3's GPU textures are keyed by asset hash, and venue_view's one pointer-keyed map is cleared on reload | | 2026-11-02 |
 
 
 ## gd-game-05: Rock Band (Xbox 360)

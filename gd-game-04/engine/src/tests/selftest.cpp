@@ -2,16 +2,64 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "tests/selftest.h"
 
+#include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <exception>
+#include <functional>
+#include <memory>
 #include <string>
 
+#include "audio/fast_pitch.h"
 #include "data/disc.h"
 #include "data/qbkey.h"
 #include "game/chart.h"
 #include "game/song_db.h"
 #include "script/globals.h"
 #include "tests/selftest_play.h"
+
+// The whammy's pitch shifter on a 440 Hz sine: untouched at rest, down by the
+// script's most (pitch 0.943, 415 Hz) under the bar, the lag jumping back
+// past its limit, and exact again after a release.
+static void checkFastPitch(const std::function<void(const std::string&)>& fail) {
+    constexpr float kRate = 44100, kTau = 6.2831853f;
+    auto sine = [&](int i) { return std::sin(kTau * 440.0f * float(i) / kRate); };
+    auto fp = std::make_unique<FastPitch>();
+    int at = 0;
+    for (; at < 1000; ++at) {
+        float l = sine(at), r = l;
+        fp->process(l, r, 1);
+        if (l != sine(at)) return fail("fast pitch: changed the sound at rest");
+    }
+    int rising = 0, first = -1, last = -1;
+    float prev = 0, peak = 0;
+    bool wrapped = false;
+    for (int i = 0; i < 60000; ++i, ++at) {
+        float l = sine(at), r = l;
+        fp->process(l, r, 0.943f);
+        if (i > 2000 && prev < 0 && l >= 0) {
+            if (first < 0) first = i;
+            last = i, ++rising;
+        }
+        prev = l;
+        peak = std::max(peak, fp->lag());
+    }
+    const float hz = float(rising - 1) * kRate / float(last - first);
+    std::printf("fast pitch: %.1f Hz at pitch 0.943, lag %.0f\n", hz, peak);
+    if (std::fabs(hz - 414.9f) > 1.5f) fail("fast pitch: wrong pitch");
+    for (int i = 0; i < 20000; ++i, ++at) {
+        float l = sine(at), r = l;
+        const float before = fp->lag();
+        fp->process(l, r, 0.943f);
+        if (fp->lag() < before) wrapped = true;
+    }
+    if (!wrapped || fp->lag() > FastPitch::kMaxLag) fail("fast pitch: the lag did not jump back");
+    for (int i = 0; i < 200; ++i, ++at) {
+        float l = sine(at), r = l;
+        fp->process(l, r, 1);
+        if (i >= FastPitch::kMaxFade && l != sine(at)) return fail("fast pitch: not back to the input");
+    }
+}
 
 // --selftest <disc>: the data checks (globals, song list, every chart), then
 // every chart auto-played at every difficulty and part (selftest_play.cpp).
@@ -28,6 +76,7 @@ int runSelfTest(const std::string& discPath) {
     auto fail = [&](const std::string& what) {
         if (++failures <= 40) std::printf("FAIL %s\n", what.c_str());
     };
+    checkFastPitch(fail);
 
     Globals globals;
     try {

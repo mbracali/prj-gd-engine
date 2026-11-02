@@ -332,6 +332,13 @@ void App::songEvent(const InputEvent& ev) {
 void App::frame() {
     if (song_) {
         canvas_.begin(SDL_Color{0, 0, 0, 255});
+        // An analog bar's real position, not just past its threshold.
+        if (song_->twoPlayers()) {
+            for (int p = 0; p < 2; ++p)
+                if (input_.analogWhammy(p)) song_->setWhammy(p, input_.whammyValue(p));
+        } else if (input_.analogWhammy() || input_.shakeWhammyActive()) {
+            song_->setWhammy(0, std::max(input_.whammyValue(), input_.whammyValue(0)));
+        }
         const bool more = song_->frame(canvas_, mixer_, textures_.get());
         if (front_) front_->songClockMs = song_->songMs();
         if (hooks_) hooks_->setPaused(front_->songPaused), hooks_->frame(*song_, song_->songMs());

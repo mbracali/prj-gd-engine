@@ -689,6 +689,28 @@ void SongHooks::step(SongScreen& s, double now) {
         }
     }
     eventArrays(s, now);
+    // CheckNoteHoldPerFrame runs control_whammy_pitchshift every frame of a
+    // hold and CheckNoteHoldEnd resets it [C 0x8211D078, 0x8211D49C]. The bar
+    // is read here (control_whammy_pitchshift's GuitarGetAnalogueInfo), the
+    // pitch is GH3's own set_whammy_pitchshift; in a boss battle the boss's
+    // guitar stays out of it [C script].
+    static const bool whammyLog = SDL_getenv("GD04_WHAMMYLOG") != nullptr;  // dev aid: --autoplay with a moving bar
+    for (int p = 0; p < players_; ++p) {
+        if (m.mode() == GameMode::Boss && p == 1) continue;
+        PerPlayer& pp = pp_[size_t(p)];
+        const bool holding = m.player(p).sustaining() >= 0;
+        float control = holding ? s.whammy(p) : 0;
+        if (whammyLog && holding) control = 0.5f + 0.5f * std::sin(float(now) / 150.0f);
+        if (holding || pp.whammyHeld) {
+            qb::Struct a;
+            Vm::set(a, K("control"), Vm::makeFloat(control));
+            Vm::set(a, K("player_status"), Vm::makeKey(K(statusName(p))));
+            vm.run(K("set_whammy_pitchshift"), a);
+        }
+        pp.whammyHeld = holding;
+        if (whammyLog && holding)
+            SDL_Log("whammy: p%d %.0f ms control %.3f pitch %.4f lag %.0f", p + 1, now, control, mixer_.guitarPitch(p), mixer_.guitarPitchLag(p));
+    }
     fx_.step(now);
     // Runs spawned by the song's runs are the song's too (GH3 pauses them together).
     for (auto& r : vm.runs())
@@ -795,6 +817,7 @@ void SongHooks::end(bool killed) {
     fe_.vm().run(K("GH_Star_Power_Verb_Off"), qb::Struct{});
     fe_.vm().run(K("GuitarEvent_ExitVenue"), qb::Struct{});
     mixer_.guitarFx().reset();
+    mixer_.setGuitarPitch(0, 1), mixer_.setGuitarPitch(1, 1);
     active_ = false;
     song_ = nullptr;
 }
@@ -916,6 +939,12 @@ void SongHooks::addNatives() {
         auto num = [&](const char* n, float& out) {
             if (const qb::Value* x = v.globals().field(es, K(n)); x && (x->type == qb::Type::Int || x->type == qb::Type::Float)) out = x->number();
         };
+        if (name == K("Guitar1PitchShift") || name == K("Guitar2PitchShift")) {
+            float pitch = 1;
+            num("pitch", pitch);
+            mixer_.setGuitarPitch(name == K("Guitar1PitchShift") ? 0 : 1, pitch);
+            return true;
+        }
         if (name == K("GuitarEcho1")) {
             num("delay", gp.echoDelayMs), num("DecayRatio", gp.echoDecay), num("Drymix", gp.echoDry), num("Wetmix", gp.echoWet);
         } else if (name == K("GuitarReverb1")) {

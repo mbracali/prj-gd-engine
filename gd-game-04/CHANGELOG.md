@@ -5,6 +5,11 @@ All notable changes for players. Versions follow SemVer; release tags are
 
 ## [Unreleased]
 
+### Fixed
+- The whammy bar now bends the guitar's sound while you hold a note, like the
+  original's pitch shifter, and analog bars follow your hand instead of acting
+  as on / off.
+
 ## [0.0.2] - 2026-11-01
 
 ### Added

@@ -31,6 +31,7 @@ target_sources(gd04 PRIVATE
   src/app.cpp
   src/audio/audio_device.cpp
   src/audio/mixer.cpp
+  src/audio/fast_pitch.cpp
   src/audio/guitar_fx.cpp
   src/audio/sfx_dsp.cpp
   src/audio/sfx.cpp

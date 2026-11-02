@@ -81,6 +81,10 @@ public:
     const Chart& chart() const { return chart_; }
     const SongInfo& song() const { return song_; }
     bool twoPlayers() const { return twoPlayers_; }
+    // The bar's position, 0 rest .. 1: analog bars set it every frame, a key
+    // or button through handle().
+    void setWhammy(int player, float value) { whammy_[size_t(player & 1)] = value; }
+    float whammy(int player) const { return whammy_[size_t(player & 1)]; }
     // Player p's guitar muted (guitar_volume 0) after its last judged note.
     bool guitarMuted(int p) const { return muted_[size_t(p & 1)]; }
     VenueStage* venue() { return venue_.get(); }
