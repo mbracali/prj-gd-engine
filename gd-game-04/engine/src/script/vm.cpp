@@ -808,6 +808,23 @@ uint32_t Vm::spawn(uint32_t name, const qb::Struct& params, uint32_t spawnedBy) 
     return id;
 }
 
+void Vm::runNow(uint32_t id) {
+    // SpawnScriptNow's updateimmediately: to its first Wait, inside the
+    // caller's line [C 0x8226A0B8]. A run spawning itself goes on next frame.
+    static int depth = 0;
+    if (depth >= 32) return;
+    for (size_t k = 0; k < runs_.size(); ++k) {
+        if (runs_[k]->id != id) continue;
+        ScriptRun& r = *runs_[k];  // a unique_ptr's target: stays put if runs_ grows
+        ++depth;
+        r.busy = true;
+        if (!step(r, 100000)) r.finished = true;
+        r.busy = false;
+        --depth;
+        return;
+    }
+}
+
 void Vm::update(double dtMs) {
     clockMs_ += dtMs;
     if (dtMs > 0) frameMs_ = dtMs;
@@ -1198,6 +1215,18 @@ bool Vm::step(ScriptRun& run, int budget) {
                 objId = t[j].u;
                 j += 2;
                 isObj = true;
+            } else if (t[j].op == kOpenParen) {
+                // `( $ player1_status . band_member ) : obj_setposition ...`: the
+                // object named by an expression (setup_character_hub) [C data].
+                const size_t start = ex.i;
+                const qb::Value o = ex.primary();
+                ex.skipNops();
+                if (ex.i < t.size() && t[ex.i].op == kColon) {
+                    objId = o.type == qb::Type::Key || o.type == qb::Type::KeyPtr ? o.key : 0;
+                    j = ex.i + 1;
+                    isObj = true;
+                }
+                ex.i = start;
             }
             if (isObj && j < t.size() && t[j].op == kName) {
                 const uint32_t method = t[j].u;

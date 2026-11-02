@@ -9,6 +9,11 @@ All notable changes for players. Versions follow SemVer; release tags are
 - The whammy bar now bends the guitar's sound while you hold a note, like the
   original's pitch shifter, and analog bars follow your hand instead of acting
   as on / off.
+- Character hub: your guitarist stands next to the menu again (it was cut off
+  at the left edge), and in co-op both players' characters show above their
+  menus.
+- Menu scripts that start other scripts now run them at once, as the original
+  does, so menu animations and dialog boxes start on the right frame.
 
 ## [0.0.2] - 2026-11-01
 

@@ -420,7 +420,8 @@ bool MenuObjects::member(qs::ScriptRun& run, Object& o, uint32_t method, qb::Str
         if (!scr || scr == K("EmptyScript") || (o.type == K("bandmember") && nativeLoop(scr))) return true;
         qb::Struct args;
         if (const qb::Struct* ps = structOf(Vm::param(*in, K("params")))) args = *ps;
-        vm_.spawnOn(scr, args, id);
+        const uint32_t spawned = vm_.spawnOn(scr, args, id);
+        if (spawned && method == K("obj_spawnscriptnow")) vm_.runNow(spawned);
         return true;
     }
     if (method == K("obj_killspawnedscript")) {
@@ -491,6 +492,10 @@ void MenuObjects::addNatives() {
         uint32_t n = keyOf(Vm::param(p, K("name")));
         if (!n) n = keyOf(Vm::param(p, K("id")));
         if (!n) n = keyOf(Vm::positional(p));
+        // `CompositeObjectExists <arg> name`: the name as a bare key
+        // (create_band_member's useoldpos check) [C data].
+        for (const qb::Item& it : p.items)
+            if (!n && !it.name) n = keyOf(&it.value);
         return n;
     };
     vm_.addNative("CompositeObjectExists", [this, nameOf](Vm&, ScriptRun&, qb::Struct& p) { return exists(nameOf(p)); });

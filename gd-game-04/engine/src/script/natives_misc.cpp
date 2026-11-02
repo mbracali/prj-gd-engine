@@ -46,6 +46,21 @@ bool truthy(const qb::Value* v) {
 }  // namespace
 
 void addMiscNatives(qs::Vm& vm) {
+    // A pad's confirm is always A here, never the Japanese circle [C 0x820EBE00].
+    vm.addNative("GetEnterButtonAssignment", [](Vm&, ScriptRun& run, qb::Struct&) {
+        if (qb::Struct* l = locals(run)) Vm::set(*l, qbkey::key("assignment"), Vm::makeKey(qbkey::key("none")));
+        return true;
+    });
+    // The career's difficulty for its progression atoms [C 0x82270C90, 0x82270CD0].
+    auto difficulty = std::make_shared<int>(0);
+    vm.addNative("SetProgressionDifficulty", [difficulty](Vm&, ScriptRun&, qb::Struct& p) {
+        *difficulty = int(Vm::number(Vm::param(p, qbkey::key("difficulty")), 0));
+        return true;
+    });
+    vm.addNative("GetProgressionDifficulty", [difficulty](Vm&, ScriptRun& run, qb::Struct&) {
+        if (qb::Struct* l = locals(run)) Vm::set(*l, qbkey::key("difficulty"), Vm::makeInt(*difficulty));
+        return true;
+    });
     // mod a = x b = y -> mod [C use: TileSprite].
     vm.addNative("mod", [](Vm&, ScriptRun& run, qb::Struct& p) {
         const int a = int(Vm::number(Vm::param(p, K("a")), 0)), b = int(Vm::number(Vm::param(p, K("b")), 1));

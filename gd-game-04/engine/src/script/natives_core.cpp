@@ -133,7 +133,7 @@ void addCoreNatives(Vm& vm) {
     vm.addNative("IsPS2", [](Vm&, ScriptRun&, qb::Struct&) { return false; });
     vm.addNative("IsFmodEnabled", [](Vm&, ScriptRun&, qb::Struct&) { return true; });
     // SpawnScriptNow / SpawnScriptLater <script> params = {...} id = x.
-    auto spawn = [](Vm& v, ScriptRun& run, qb::Struct& p) {
+    auto spawn = [](Vm& v, ScriptRun& run, qb::Struct& p, bool now) {
         const qb::Value* s = first(p);
         if (!s || s->type != qb::Type::Key) return false;
         qb::Struct params;
@@ -149,11 +149,15 @@ void addCoreNatives(Vm& vm) {
         if (const qb::Value* sid = Vm::param(p, K("id")))
             for (auto& r : v.runs())
                 if (r->id == id) r->type = sid->key;
+        if (id && now) v.runNow(id);
         return id != 0;
     };
-    vm.addNative("SpawnScriptNow", spawn);
-    vm.addNative("SpawnScriptLater", spawn);
-    vm.addNative("SpawnScript", spawn);
+    vm.addNative("SpawnScriptNow", [spawn](Vm& v, ScriptRun& run, qb::Struct& p) { return spawn(v, run, p, true); });
+    vm.addNative("SpawnScriptLater", [spawn](Vm& v, ScriptRun& run, qb::Struct& p) { return spawn(v, run, p, false); });
+    // SpawnScript: later unless updateimmediately is set [C 0x8226A048].
+    vm.addNative("SpawnScript", [spawn](Vm& v, ScriptRun& run, qb::Struct& p) {
+        return spawn(v, run, p, Vm::number(Vm::param(p, K("updateimmediately")), 0) != 0);
+    });
     vm.addNative("KillSpawnedScript", [](Vm& v, ScriptRun& run, qb::Struct& p) {
         if (const qb::Value* n = Vm::param(p, K("name"))) v.killByName(n->key);
         if (const qb::Value* id = Vm::param(p, K("id")))
