@@ -6,6 +6,12 @@ matches the tag's version. Nothing is released yet.
 
 ## [Unreleased]
 
+### Fixed
+- Whammy on a sustain now bends the guitar's sound.
+- Character select: the door stays closed until the character kicks it open.
+- Models no longer pick up another model's mesh or texture after menus free scenes.
+- Name your band: the page no longer jumps when leaving with a long name.
+
 ## [0.1.10] - 2026-11-02
 
 ### Added

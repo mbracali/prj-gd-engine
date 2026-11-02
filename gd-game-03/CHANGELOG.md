@@ -5,6 +5,14 @@ All notable changes for players. Versions follow SemVer; release tags are
 
 ## [Unreleased]
 
+### Fixed
+- Whammy on a sustain now bends the guitar's sound.
+- Character select: the door stays closed until the character kicks it open.
+- Models no longer pick up another model's mesh or texture after menus free scenes.
+- Name your band: the page no longer jumps when leaving with a long name.
+- Intro video: no silence at the start.
+- Venue select: older venues can be picked.
+
 ## [0.0.3] - 2026-10-30
 
 ### Added
