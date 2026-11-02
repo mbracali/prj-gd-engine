@@ -582,6 +582,15 @@ void UiManager::switchScreens() {
             for (PanelObj* p : below->panels())
                 if (!to->hasPanel(p)) exitPanel(p);
         }
+    // GH2's engine loads a screen's panels as it enters and unloads those the
+    // next screen does not hold (UIPanel's load references); the port keeps
+    // the menus' panels loaded, but world_panel's milo is the song's venue
+    // ({game get_venue}, game.dta), so it goes once the game's screens are
+    // left and the next song's world_panel loads its own venue (as gd02's
+    // GD02-148). Kept loaded, every later song played in the first one's.
+    if (from && !push)
+        for (PanelObj* p : from->panels())
+            if (p->loaded && !to->hasPanel(p) && p->path.rfind("world/", 0) == 0) p->unload();
     current_ = to;
     // The keyboard's split layout (P2 on H J K L ;, N / M, B, O) while the
     // two-player menus need a second controller: from the controller select

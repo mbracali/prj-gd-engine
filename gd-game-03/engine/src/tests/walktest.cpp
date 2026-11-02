@@ -18,6 +18,7 @@
 #include "data/game_data.h"
 #include "data/json.h"
 #include "game/player.h"
+#include "game/song_db.h"
 #include "input/input.h"
 #include "render/camera.h"
 #include "render/scene_gpu.h"
@@ -192,6 +193,7 @@ WalkDriver::WalkDriver(const std::string& name)
                    "meta_loading_screen", "main_screen", "options_screen", "enhanced_options_screen", "options_screen", "main_screen"};
     } else if (scenario == "pause") {
         quickplaySong(1);
+        check("quickplay_venue");  // the first song's venue
         wait(2500);
         press(kStart);
         at("pause_screen");
@@ -213,8 +215,19 @@ WalkDriver::WalkDriver(const std::string& name)
         at("meta_loading_screen");
         at("qp_selsong_screen");
         check("menu_sounds");
+        // A second song in another venue: its own world (world_panel unloads
+        // once the game's screens are left; it kept the first song's venue).
+        wait(600);
+        for (int i = 0; i < 4; ++i) press(kDown), wait(150);
+        press(kX);
+        at("qp_diff_screen");
+        press(kX);
+        at("loading_screen");
+        at("game_screen", 30000);
+        check("quickplay_venue");
         expect_ = {"main_screen", "qp_selsong_screen", "qp_diff_screen", "loading_screen", "game_screen", "pause_screen",
-                   "game_screen", "pause_screen", "game_screen", "pause_screen", "meta_loading_screen", "qp_selsong_screen"};
+                   "game_screen", "pause_screen", "game_screen", "pause_screen", "meta_loading_screen", "qp_selsong_screen",
+                   "qp_diff_screen", "loading_screen", "game_screen"};
     } else if (scenario == "flaming_head") {
         // GD03-048 / GD03-045: the Flaming Head code at the main menu, a
         // song: the guitarist's cheat_headflames (char/shared/og) burns;
@@ -2311,6 +2324,16 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         if (ui.currentScreen() == s.screen.substr(11) && !ui.inTransition()) ui.buttonDown(kX, 0), ui.buttonUp(kX, 0);
         ++step_, stepStart_ = -1;
         return;
+    }
+    if (s.screen == "quickplay_venue") {
+        std::string want;
+        for (const auto& song : ui.host().songs())
+            if (song.id == ui.session().song) want = song.venue;
+        const bool loaded = !want.empty() && ui.host().gameCounter(0, "venue_loaded:" + want) == 1;
+        std::printf("  quick play: song %s, venue %s (the song's %s), its world %s\n", ui.session().song.c_str(), ui.session().venue.c_str(),
+                    want.c_str(), loaded ? "loaded" : "not loaded");
+        if (want.empty() || ui.session().venue != want || !loaded) return fail("quick play is not in the song's venue");
+        return pass();
     }
     if (s.screen == "career_target" || s.screen == "career_song_target") {
         const char* w = SDL_getenv("GD03_WALK_SONG");

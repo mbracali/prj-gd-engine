@@ -12,6 +12,7 @@ All notable changes for players. Versions follow SemVer; release tags are
 - Name your band: the page no longer jumps when leaving with a long name.
 - Intro video: no silence at the start.
 - Venue select: older venues can be picked.
+- Every song after the first now plays in its own venue (it kept the first song's).
 
 ## [0.0.3] - 2026-10-30
 
