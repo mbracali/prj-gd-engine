@@ -247,12 +247,21 @@ removed and a flame shown (2.8) [I: GemStep / hit path not fully read].
 - Rendering: a strip mesh in 8-row steps (0x8238E338 / 0x8238ECF8): half width = whammy_top_width *
   (1 + whammy_width_offset * D) / 2 (1P: 10 px at top -> 28 px at the playline), each vertex
   carrying a row index into the per-player wibble array `whammywibble0/1` (128 floats) [C: keys
-  whammy_top_width, whammy_width_offset, heightperspfact/exp, whammywibble0/1 read in 0x8238ECF8;
-  displacement use I]. `SetNewWhammyValue` 0x821056F8 (per player, args value, time_remaining):
-  n = floor(128 * time_remaining_s / T) + 2, clamped to [whammy_wibble_speed (2), 128]; the
-  array is shifted down by whammy_wibble_speed entries up to n, the first whammy_wibble_speed
-  entries get the new value, entries from n to 127 are set to 1.0 [C 0x821057C4-0x821058F4;
-  reading of the loops I]. So the wibble pattern scrolls with the tail.
+  whammy_top_width, whammy_width_offset, heightperspfact/exp, whammywibble0/1 read in 0x8238ECF8].
+  The vertex at table row i (0 top .. 128 playline) carries index 128 - i (0x8238E338); 0x8238ECF8
+  uploads the 128 values as vertex constants c4..c35, and the WhammyBar_UI vertex shader
+  (MaterialLibrary, m_vsVertexScales) multiplies the vertex's x offset from the lane centre by
+  m_vsVertexScales[index]: the wibble only widens the tail, x1 at rest to x2 at full bar; then the
+  slant (m_HeightConstants) and the fade smoothstep (m_fadeConstants) [C: the shader].
+  `SetNewWhammyValue` 0x821056F8 (value, time_remaining ms, player): n = int(128 / T_s x
+  time_remaining x 0.001) + 2 (T = the global at 0x829E4C84 / player_status.highway_speed, sign
+  dropped), at most 128, at least whammy_wibble_speed (2); entries n-1 down to 2 take the entry 2
+  before them, the first 2 the value, n..127 1.0 [C 0x821057C4-0x821058F4]. The newest value sits at
+  the playline end and the pattern moves up the tail 2 entries (16 rows) a frame.
+  control_whammy_pitchshift passes value = bar + 1 and the hold's remaining ms (CheckNoteHoldPerFrame
+  0x8211D078, the note's field), reset_whammy_pitchshift SetAllWhammyValues 1.0 at the hold's end.
+  The port: render/highway2d.cpp (the tail on the 8-row grid; its two ends interpolate their cell's
+  scale [I]), the natives and the hold hook in ui/song_hooks.cpp; selftest wibble check.
 - Dead / star / normal swaps: `MakeDeadWhammy` 0x8210E508 (sys_Whammy2D_Dead), `MakeStarWhammy`
   0x8210E5C8, `MakeNormalWhammy` 0x8210E6B8 [C names; triggers I: miss/release, SP on].
 
@@ -414,7 +423,7 @@ note_hit01 A38B2820, note_hit_blue_01 9E700D1C; Particle_Spark01 44E7B154; whamm
 
 - Exact flip-book frame selection (start frame / loop) and Star2D spin (star_spin_rate -2.5 unused
   here?) [I].
-- Whammy wibble displacement amount and SetNewWhammyValue index formula [I].
+- The tail strip's two ends between grid rows (the port interpolates their cell's scale) [I].
 - Hit path: where the gem is destroyed and which pos is passed to NoteFX (gem pos vs pos_2d) [I].
 - Blend enum confirmation (material d8 3 / 1) and fade shader math [I].
 - The 2D particle system's units (Create2DParticleSystem: velocity, friction) [I].

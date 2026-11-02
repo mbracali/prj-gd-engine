@@ -6,6 +6,7 @@ All notable changes for players. Versions follow SemVer; release tags are
 ## [Unreleased]
 
 ### Fixed
+- Sustain tails widen with the whammy bar, as in GH3 (the bar's recent history rolls up the tail).
 - The whammy bar now bends the guitar's sound while you hold a note, like the
   original's pitch shifter, and analog bars follow your hand instead of acting
   as on / off.

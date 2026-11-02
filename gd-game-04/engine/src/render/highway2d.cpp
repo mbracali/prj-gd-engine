@@ -159,6 +159,24 @@ float Highway2D::depthOf(double noteMs, double nowMs) const {
     return accum_[size_t(i)] + (d_[size_t(i + 1)] - d_[size_t(i)]) * f;
 }
 
+double Highway2D::rowOf(double noteMs, double nowMs) const {
+    return ((nowMs - noteMs - gemOffsetMs_) + travelMs_) / travelMs_ * kRealRows;
+}
+
+void Highway2D::setNewWhammyValue(float value, float remainingMs, int speed) {
+    // 0x821056F8 [C]: the travel time in s (its sign dropped), n entries over
+    // the remaining time (truncated, + 2, at most 128), at least `speed`.
+    const int len = int(wibble_.size());
+    float t = travelMs_ / 1000.0f;
+    if (t < 0) t = -t;
+    int n = t > 0 ? int(float(len) / t * (remainingMs * 0.001f)) + 2 : len;
+    n = std::min(n, len);
+    n = std::max(n, std::max(speed, 1));
+    for (int i = n - 1; i >= speed; --i) wibble_[size_t(i)] = wibble_[size_t(i - speed)];
+    for (int i = 0; i < speed && i < len; ++i) wibble_[size_t(i)] = value;
+    for (int i = n; i < len; ++i) wibble_[size_t(i)] = 1.0f;
+}
+
 float Highway2D::alphaAt(float y) const {
     // Transparent at the top edge, opaque highway_fade px below [I: m_startfade / m_endfade].
     return std::clamp((y - topY_) / std::max(1.0f, fade_), 0.0f, 1.0f);
@@ -470,20 +488,42 @@ void Highway2D::drawAll(Canvas& c, const TextureCache& tex, const NoteTrack& tra
                     // whammy_cutoff x T / 1152, so the head sits at row
                     // 1100 x 1024 / 1152 = 977.8 (above the playline row 1024,
                     // under the fret buttons) [C 0x8210E8D4-0x8210E910].
-                    float vHead = std::min(v, accum_.back());
-                    if (player.sustaining() == int(i)) vHead = std::min(v, rowDepth(whammyCutoff_ * float(kRealRows) / 1152.0f));
-                    const float vTail = depthOf(double(n.time) + n.holdMs, now);
-                    if (vTail < 0 && vHead < 0) continue;
+                    // Rows (0 top .. 1024 playline): the head's (held: pinned
+                    // at whammy_cutoff's) and the tail end's.
+                    const double rowEnd = rowOf(double(n.time) + n.holdMs, now);
+                    double rowHead = rowOf(double(n.time), now);
+                    if (player.sustaining() == int(i)) rowHead = std::min(rowHead, double(whammyCutoff_) * kRealRows / 1152.0);
+                    rowHead = std::min(rowHead, double(kRealRows));
+                    if (rowHead < 0) continue;
+                    const double r0 = std::max(0.0, rowEnd);
+                    if (r0 >= rowHead) continue;
                     const uint32_t key = st.starPowerActive ? kWhammyStarPower : kWhammy[l];
-                    const int segs = 12;
-                    const float a0 = std::max(0.0f, vTail), a1 = vHead;
-                    for (int s = 0; s < segs; ++s) {
-                        const float va = a0 + (a1 - a0) * float(s) / segs, vb = a0 + (a1 - a0) * float(s + 1) / segs;
-                        const float wa = whammyTop_ * (1 + whammyOffset_ * va), wb = whammyTop_ * (1 + whammyOffset_ * vb);
+                    // GH3's strip (0x8238E338) has its vertices on the 8-row
+                    // grid, grid row k carrying the wibble entry 128 - k, which
+                    // WhammyBar_UI's vertex shader multiplies the half width by
+                    // (the newest whammy value at the playline end) [C]; the
+                    // tail's two ends take their cell's interpolated scale [I].
+                    std::vector<double> rows{r0};
+                    for (double g = std::floor(r0 / 8.0) * 8.0 + 8.0; g < rowHead; g += 8.0) rows.push_back(g);
+                    rows.push_back(rowHead);
+                    const auto scaleAt = [&](double r) {
+                        const auto entry = [&](int k) {
+                            const int e = 128 - k;
+                            return e >= 0 && e < 128 ? double(wibble_[size_t(e)]) : 1.0;
+                        };
+                        const int k = int(std::floor(r / 8.0));
+                        const double f = r / 8.0 - k;
+                        return float(entry(k) + (entry(k + 1) - entry(k)) * f);
+                    };
+                    const size_t segs = rows.size() - 1;
+                    for (size_t s = 0; s < segs; ++s) {
+                        const float va = rowDepth(float(rows[s])), vb = rowDepth(float(rows[s + 1]));
+                        const float wa = whammyTop_ * (1 + whammyOffset_ * va) * scaleAt(rows[s]);
+                        const float wb = whammyTop_ * (1 + whammyOffset_ * vb) * scaleAt(rows[s + 1]);
                         const float xa = laneX(lane, va), xb = laneX(lane, vb), ya = yAt(va), yb = yAt(vb);
                         const auto A = uint8_t(255 * alphaAt(ya)), B = uint8_t(255 * alphaAt(yb));
                         // V runs once along the whole tail, tail end (0) to head (1) [I].
-                        const float ta = float(s) / segs, tb = float(s + 1) / segs;
+                        const float ta = float((rows[s] - r0) / (rowHead - r0)), tb = float((rows[s + 1] - r0) / (rowHead - r0));
                         const Vertex p0{xa - wa, ya, 0, 0, ta, 255, 255, 255, A}, p1{xa + wa, ya, 0, 1, ta, 255, 255, 255, A};
                         const Vertex p2{xb + wb, yb, 0, 1, tb, 255, 255, 255, B}, p3{xb - wb, yb, 0, 0, tb, 255, 255, 255, B};
                         const Vertex q[6] = {p0, p1, p2, p0, p2, p3};

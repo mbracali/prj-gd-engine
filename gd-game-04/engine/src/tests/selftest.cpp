@@ -15,12 +15,32 @@
 #include "data/qbkey.h"
 #include "game/chart.h"
 #include "game/song_db.h"
+#include "render/highway2d.h"
 #include "script/globals.h"
 #include "tests/selftest_play.h"
 
 // The whammy's pitch shifter on a 440 Hz sine: untouched at rest, down by the
 // script's most (pitch 0.943, 415 Hz) under the bar, the lag jumping back
 // past its limit, and exact again after a release.
+// SetNewWhammyValue (0x821056F8): at the default travel time (1.5 s) a hold
+// with 750 ms left keeps 128 / 1.5 x 0.75 + 2 = 66 entries; each call puts
+// the value in the first whammy_wibble_speed (2) after moving the older ones
+// down by 2; past the kept entries 1.0 (GD04-032).
+static void checkWibble(const std::function<void(const std::string&)>& fail) {
+    Highway2D h;
+    h.setNewWhammyValue(2.0f, 750, 2);
+    h.setNewWhammyValue(1.5f, 750, 2);
+    const auto& w = h.wibble();
+    std::printf("wibble: %.2f %.2f %.2f %.2f %.2f, [65] %.2f [66] %.2f\n", double(w[0]), double(w[1]), double(w[2]), double(w[3]), double(w[4]),
+                double(w[65]), double(w[66]));
+    if (w[0] != 1.5f || w[1] != 1.5f || w[2] != 2.0f || w[3] != 2.0f || w[4] != 1.0f) fail("SetNewWhammyValue did not shift the wibble by 2");
+    h.setNewWhammyValue(2.0f, 0, 2);  // 2 entries kept: the rest back to 1
+    if (w[0] != 2.0f || w[1] != 2.0f || w[2] != 1.0f) fail("SetNewWhammyValue kept entries past the hold's end");
+    h.setAllWhammyValues(1.0f);
+    for (float v : w)
+        if (v != 1.0f) return fail("SetAllWhammyValues left an entry");
+}
+
 static void checkFastPitch(const std::function<void(const std::string&)>& fail) {
     constexpr float kRate = 44100, kTau = 6.2831853f;
     auto sine = [&](int i) { return std::sin(kTau * 440.0f * float(i) / kRate); };
@@ -77,6 +97,7 @@ int runSelfTest(const std::string& discPath) {
         if (++failures <= 40) std::printf("FAIL %s\n", what.c_str());
     };
     checkFastPitch(fail);
+    checkWibble(fail);
 
     Globals globals;
     try {

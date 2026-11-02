@@ -29,6 +29,12 @@ using qs::Vm;
 uint32_t K(const char* s) { return qbkey::key(s); }
 uint32_t K(const std::string& s) { return qbkey::key(s); }
 
+// whammy_wibble_speed (2) [C data]: the entries each SetNewWhammyValue adds.
+int wibbleSpeed(Vm& v) {
+    const qb::Value* w = v.global(K("whammy_wibble_speed"));
+    return w && (w->type == qb::Type::Int || w->type == qb::Type::Float) ? int(w->number()) : 2;
+}
+
 const char* const kColors[5] = {"green", "red", "yellow", "blue", "orange"};
 const char* const kFx[5] = {"g", "r", "y", "b", "o"};
 
@@ -707,6 +713,18 @@ void SongHooks::step(SongScreen& s, double now) {
             Vm::set(a, K("player_status"), Vm::makeKey(K(statusName(p))));
             vm.run(K("set_whammy_pitchshift"), a);
         }
+        // control_whammy_pitchshift then sets the tail's wibble:
+        // SetNewWhammyValue value = (len x 0.5 + 0.5) x 2 time_remaining =
+        // <time> (the hold's remaining ms, CheckNoteHoldPerFrame's note
+        // field); reset_whammy_pitchshift at the hold's end: SetAllWhammyValues
+        // value = 1.0 [C script, 0x8211D078 / 0x8211D49C].
+        if (holding) {
+            const TrackNote& hn = m.track(p).notes[size_t(m.player(p).sustaining())];
+            const float remaining = float(std::max(0.0, double(hn.time) + hn.holdMs - now));
+            s.highwayOf(p).setNewWhammyValue((control * 0.5f + 0.5f) * 2.0f, remaining, wibbleSpeed(vm));
+        } else if (pp.whammyHeld) {
+            s.highwayOf(p).setAllWhammyValues(1.0f);
+        }
         pp.whammyHeld = holding;
         if (whammyLog && holding)
             SDL_Log("whammy: p%d %.0f ms control %.3f pitch %.4f lag %.0f", p + 1, now, control, mixer_.guitarPitch(p), mixer_.guitarPitchLag(p));
@@ -922,6 +940,22 @@ void SongHooks::addNatives() {
         const qb::Value* st = v.global(keyOf(Vm::param(p, K("player_status"))));
         const qb::Value* text = st && st->st ? v.globals().field(*st->st, K("Text")) : nullptr;
         for (const char* c : kColors) fx_.destroy(K(std::string(c) + "WhammyFXID01" + (text ? text->str : "p1")), true);
+        return true;
+    });
+    // SetNewWhammyValue {value time_remaining player_status player} /
+    // SetAllWhammyValues {value player} (0x821056F8, 0x82105918): the
+    // player's sustain tail wibble (render/highway2d.h) [C].
+    vm.addNative("SetNewWhammyValue", [this](Vm& v, ScriptRun&, qb::Struct& p) {
+        if (!song_) return true;
+        const int pl = int(Vm::number(Vm::param(p, K("player")), 1)) - 1;
+        song_->highwayOf(pl).setNewWhammyValue(Vm::number(Vm::param(p, K("value")), 1), Vm::number(Vm::param(p, K("time_remaining")), 0),
+                                               wibbleSpeed(v));
+        return true;
+    });
+    vm.addNative("SetAllWhammyValues", [this](Vm&, ScriptRun&, qb::Struct& p) {
+        if (!song_) return true;
+        const int pl = int(Vm::number(Vm::param(p, K("player")), 1)) - 1;
+        song_->highwayOf(pl).setAllWhammyValues(Vm::number(Vm::param(p, K("value")), 1));
         return true;
     });
     // setsoundbusseffects effect = {effect name params} | effect = $<global>

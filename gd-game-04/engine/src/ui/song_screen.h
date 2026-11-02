@@ -85,6 +85,9 @@ public:
     // or button through handle().
     void setWhammy(int player, float value) { whammy_[size_t(player & 1)] = value; }
     float whammy(int player) const { return whammy_[size_t(player & 1)]; }
+    // The player's highway (its sustain tails' wibble: SetNewWhammyValue /
+    // SetAllWhammyValues): player 0 the left / only one, 1 the right.
+    Highway2D& highwayOf(int player) { return (player & 1) && twoPlayers_ ? highway2_ : highway_; }
     // Player p's guitar muted (guitar_volume 0) after its last judged note.
     bool guitarMuted(int p) const { return muted_[size_t(p & 1)]; }
     VenueStage* venue() { return venue_.get(); }
