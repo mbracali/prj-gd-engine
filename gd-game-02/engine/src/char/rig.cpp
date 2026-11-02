@@ -260,7 +260,7 @@ struct Rig::Impl {
         struct Point {
             V3 pos{}, vel{}, prevVel{}, up{};
             int bone = -1, collide = -1, type = 0;
-            float length = 0, radius = 0, extra = 0;
+            float length = 0, radius = 0, band = 0;
         };
         struct Strand {
             int root = -1;
@@ -454,7 +454,7 @@ void Rig::Impl::build() {
                     q.type = pt.type;
                     q.collide = bone(pt.collide);
                     q.radius = pt.f60;
-                    q.extra = pt.f64;
+                    q.band = pt.f64;
                     st.points.push_back(q);
                 }
                 k.strands.push_back(st);
@@ -948,7 +948,7 @@ void Rig::Impl::pollHair(Hair& h) {
             if (i > 0) s.points[i - 1].vel = add(s.points[i - 1].vel, mul(d, k * pull));
             p.pos = add(p.pos, mul(d, k));
             const V3 rest = add(prev, mul(row(frame, 1), p.length));
-            const V3 up = lerp(p.up, row(frame, 2), h.p[1]);
+            V3 up = lerp(p.up, row(frame, 2), h.p[1]);
             p.up = row(frame, 2);
             // The collision (0x8217B898) against the collide bone [C]. Type 0:
             // a plane (its y row, at radius); 1: stay outside a sphere; 2: stay
@@ -956,9 +956,9 @@ void Rig::Impl::pollHair(Hair& h) {
             // stay inside that cylinder. The type is an int (it read as a
             // float once, so every strand was a plane and blew up). With a
             // soft band (+0x64, types 2 and 3) the position is corrected only
-            // past the band's hard edge, the radius; inside the band the
-            // 0x82122100 blend touches no position [I: the blend's vector
-            // is lost to the decompile, so it is left out].
+            // past the band's hard edge, the radius; inside the band the up
+            // vector blends towards the collision's direction (0x82122100),
+            // and past the edge it takes that direction.
             if (p.collide >= 0) {
                 const scene::Xfm& c = sk.world(p.collide);
                 const V3 o = sub(p.pos, c.pos);
@@ -970,13 +970,33 @@ void Rig::Impl::pollHair(Hair& h) {
                     if (l2 < p.radius * p.radius && l2 > 0) p.pos = add(p.pos, mul(o, p.radius / std::sqrt(l2) - 1));
                 } else if (p.type == 2) {
                     const float l2 = dot(o, o);
-                    if (l2 > p.radius * p.radius) p.pos = add(p.pos, mul(o, p.radius / std::sqrt(l2) - 1));
+                    if (p.band > 0) {
+                        const float inner = p.radius - p.band;
+                        if (l2 > inner * inner) {
+                            const float d = std::sqrt(l2);
+                            const V3 dir = mul(o, 1 / d);
+                            if (p.radius < d) p.pos = add(p.pos, mul(dir, p.radius - d)), up = dir;
+                            else up = lerp(up, dir, (d - inner) / p.band);
+                        }
+                    } else if (l2 > p.radius * p.radius) {
+                        p.pos = add(p.pos, mul(o, p.radius / std::sqrt(l2) - 1));
+                    }
                 } else if (p.type == 3 || p.type == 4) {
                     const V3 axis = row(c.rot, 0);
                     const V3 perp = sub(o, mul(axis, dot(axis, o)));
                     const float l2 = dot(perp, perp);
-                    const bool push = p.type == 3 ? l2 < p.radius * p.radius && l2 > 0 : l2 > p.radius * p.radius;
-                    if (push) p.pos = add(p.pos, mul(perp, p.radius / std::sqrt(l2) - 1));
+                    const float outer = p.radius + p.band;
+                    if (p.type == 3 && p.band > 0) {
+                        if (l2 < outer * outer && l2 > 0) {
+                            const float d = std::sqrt(l2);
+                            const V3 dir = mul(perp, -1 / d);
+                            if (p.radius <= d) up = lerp(up, dir, (outer - d) / p.band);
+                            else p.pos = add(p.pos, mul(dir, d - p.radius)), up = dir;
+                        }
+                    } else {
+                        const bool push = p.type == 3 ? l2 < p.radius * p.radius && l2 > 0 : l2 > p.radius * p.radius;
+                        if (push) p.pos = add(p.pos, mul(perp, p.radius / std::sqrt(l2) - 1));
+                    }
                 }
             }
             frame = orthoY(sub(p.pos, prev), up);

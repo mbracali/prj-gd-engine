@@ -2276,6 +2276,18 @@ void App::startBand(const SongInfo& info, const Song& song, bool backdrop) {
                 return pl ? pl->rockMeter() : 0.5f;
             };
             band_->excitement = [this] { return worldDriver_.excitementLevel(); };
+            if (mode_ == DevMode::FaceOff || mode_ == DevMode::ProFaceOff) {
+                band_->lead = [this](int p) {
+                    const Player* me = p == 0 ? player_.get() : player2_.get();
+                    const Player* other = p == 0 ? player2_.get() : player_.get();
+                    return me && other ? other->score() - me->score() : 0;
+                };
+                // 0x822C6DC0, 0x822BB358 [C]: the higher average multiplier x the normalised base score / 30.
+                band_->leadLimit = [this] {
+                    if (!player_ || !player2_) return 1e30f;
+                    return std::max(player_->averageMultiplier(), player2_->averageMultiplier()) * float(player_->baseScore()) * player_->normalisation() * (1.0f / 30.0f);
+                };
+            }
         }
         band_->loadSong(parseMidi(data_->read(info.audio.midiPath)), &song);
         // The characters enter with the world (World::start); a world already

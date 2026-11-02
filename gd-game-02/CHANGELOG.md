@@ -6,6 +6,15 @@ matches the tag's version. Nothing is released yet.
 
 ## [Unreleased]
 
+## [0.1.10] - 2026-11-02
+
+### Added
+- Face-off: the guitarist plays the bad clips when the opponent's lead is over the original's limit and growing.
+- Hair: the soft band of inside-sphere and outside-cylinder collisions.
+
+### Fixed
+- Venue select: older venues can be picked again (focus skipped hidden buttons, the original only skips disabled ones).
+
 ### Fixed
 - After RESTART the track's streak flash and the HUD's peak message keep working.
 - Spotlight beams point where the original's do (they shine along the

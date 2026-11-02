@@ -384,6 +384,8 @@ void Player::sweep(float t) {
 // own poll: sustain points and Star Power.
 void Player::update(float t) {
     if (failed_) return;
+    if (avgLastMs_ >= 0 && t > avgLastMs_) mulTime_ += float(multiplier()) * (t - avgLastMs_), avgClockMs_ += t - avgLastMs_;  // 0x822DD298
+    avgLastMs_ = t;
     if (sustainGem_ >= 0 && t >= sustainEndMs_) endSustain(t, false);
     sweep(t);
     whammyPoll(t);

@@ -1,5 +1,9 @@
 # Guitar Dream Universal Launcher: changes
 
+## 0.1.10
+
+- gd02 0.1.10: older venues can be picked again, face-off doing badly rule, hair soft band.
+
 ## 0.1.9
 
 Games
