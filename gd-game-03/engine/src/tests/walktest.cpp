@@ -287,7 +287,8 @@ WalkDriver::WalkDriver(const std::string& name)
         expect_ = {"main_screen", "qp_selsong_screen", "qp_diff_screen", "loading_screen", "game_screen", "pause_screen",
                    "meta_loading_screen", "qp_selsong_screen"};
     } else if (scenario == "career" || scenario == "career_full" || scenario == "career_song" || scenario == "career_encore" ||
-               scenario == "career_win" || scenario == "career_win_medium" || scenario == "career_practice") {
+               scenario == "career_win" || scenario == "career_win_medium" || scenario == "career_practice" ||
+               scenario == "career_venues") {
         bootToMain();
         at("main_screen");
         if (scenario == "career_song" && SDL_getenv("GD03_WALK_ENHANCED")) {
@@ -356,11 +357,11 @@ WalkDriver::WalkDriver(const std::string& name)
             wait(400);
             check("loop_advances|sel_character_panel sel_character.view|sel_character_panel char_highlight.mnm");
         }
-        if (scenario == "career_song" && SDL_getenv("GD03_WALK_CHAR")) {
+        if ((scenario == "career_song" && SDL_getenv("GD03_WALK_CHAR")) || scenario == "career_venues") {
             // GD03_WALK_CHAR=<downs> from Punk, GD03_WALK_GUITAR=<downs> from
             // the Les Paul; the first outfit / skin when there are two.
             const char* g = SDL_getenv("GD03_WALK_GUITAR");
-            for (int i = std::atoi(SDL_getenv("GD03_WALK_CHAR")); i > 0; --i) press(kDown), wait(300);
+            for (int i = SDL_getenv("GD03_WALK_CHAR") ? std::atoi(SDL_getenv("GD03_WALK_CHAR")) : 0; i > 0; --i) press(kDown), wait(300);
             press(kX);
             wait(1200);
             check("confirm_on sel_character_new_screen");
@@ -462,6 +463,24 @@ WalkDriver::WalkDriver(const std::string& name)
             at("endgame_screen", 20000);
             expect_.insert(expect_.end(), {"sel_venue_screen", "sel_song_screen", "loading_screen", "game_screen", "post_show_screen",
                                            "win_game_screen", "endgame_screen"});
+        }
+        if (scenario == "career_venues") {
+            // The venue select follows the focus (GD03-094, as gd02's
+            // GD02-144): every venue unlocked (arena's songs offered), down
+            // from arena to the battle, quick presses back up: at each step
+            // the focus, the game's venue, the map (venue_anims.grp at the
+            // venue's frame, career.dta's FOCUS_MSG) and the focused state.
+            winTarget_ = "electriceye";
+            check("career_target");
+            press(kX);  // LET'S ROCK
+            at("sel_venue_screen");
+            wait(1500);
+            check("venue_follow");
+            for (int i = 0; i < 5; ++i) press(kDown), wait(900), check("venue_follow");
+            for (int i = 0; i < 3; ++i) press(kUp), wait(100);
+            wait(900);
+            check("venue_follow");
+            expect_.insert(expect_.end(), {"sel_venue_screen"});
         }
         if (scenario == "career_practice") {
             // Practice from a lost career song (lose.dta goto_practice_mode:
@@ -2324,6 +2343,27 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         if (ui.currentScreen() == s.screen.substr(11) && !ui.inTransition()) ui.buttonDown(kX, 0), ui.buttonUp(kX, 0);
         ++step_, stepStart_ = -1;
         return;
+    }
+    if (s.screen == "venue_follow") {
+        ui::PanelObj* fp = ui.focusPanel();
+        if (!fp || !fp->view) return fail("no sel_venue_panel");
+        static const std::vector<std::string> order = {"battle", "small1", "small2", "theatre", "fest", "arena"};
+        const std::string f = fp->focus;
+        int idx = -1;
+        for (size_t i = 0; i < order.size(); ++i)
+            if (f == "sv_" + order[i] + ".btn") idx = int(i);
+        const float frame = fp->view->frame("venue_anims.grp");
+        const ui::ComponentObj* c = fp->focused();
+        const int state = c ? int(c->state()) : -1;
+        std::printf("  venue select: focus %s, game venue %s, map frame %.2f, focused state %d\n", f.c_str(), ui.session().venue.c_str(),
+                    frame, state);
+        if (const char* dir = SDL_getenv("GD03_WALK_SHOTS"))
+            ui.host().saveScreenshot(std::string(dir) + "/venue_" + std::to_string(++shotN_) + ".bmp");
+        if (idx < 0) return fail("the focus is not a venue: " + f);
+        if (ui.session().venue != order[size_t(idx)]) return fail("the game's venue is " + ui.session().venue + ", the focus " + f);
+        if (std::fabs(frame - float(idx + 1)) > 0.01f) return fail("the map is at frame " + std::to_string(frame) + ", not " + std::to_string(idx + 1));
+        if (state != int(scene::UiState::Focused)) return fail("the focused poster is not in its focused state");
+        return pass();
     }
     if (s.screen == "quickplay_venue") {
         std::string want;
