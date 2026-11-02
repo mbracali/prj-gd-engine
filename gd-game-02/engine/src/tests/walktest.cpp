@@ -361,6 +361,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
             wait(600);
             check("career_pick_song", 20000);
             check("career_song_target");
+            wait(600);  // the list still scrolling takes no select
             press(kX);
             at("loading_screen");
             at("game_screen", 30000);
@@ -2065,6 +2066,14 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
                 }
             if (!found) return fail("no career song " + target + " at difficulty " + std::to_string(d));
         } else {
+            for (const auto& tier : ui::campaign::config(ui).tiers)
+                if (!tier.second.empty() && tier.second.back() == target) {
+                    // The venue's last song is its encore (never on the list to pick): walk career_encore plays it.
+                    std::printf("  career: %s is %s's encore\n", target.c_str(), tier.first.c_str());
+                    expect_.clear();
+                    step_ = int(steps_.size()), stepStart_ = -1;
+                    return;
+                }
             std::printf("  career: venue %s, song %s, difficulty %d\n", ui.session().venue.c_str(), ui.session().song.c_str(),
                         ui::campaign::difficulty(ui));
             if (ui.session().song != target) return fail("the career offered " + ui.session().song + ", not " + target);
@@ -2399,6 +2408,28 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
             if (name == "blew_bignote.cue" && at < 0) at = t;
         std::printf("  big note: blew_bignote.cue %s%s\n", at < 0 ? "not played" : "at ", at < 0 ? "" : (std::to_string(int(at)) + " ms").c_str());
         return at < 0 ? fail("the passed big note did not play blew_bignote.cue") : pass();
+    }
+    if (s.screen == "sp_multi_fill") {
+        // Both meters full once the song runs (the deploy comes from songKeys_).
+        if (!ui.host().gamePlayer(0) || !ui.host().gamePlayer(1) || ui.host().gamePlayer(0)->nowMsForTest() < 1000) {
+            if (nowMs - stepStart_ > s.ms) return fail("the face-off song did not start");
+            return;
+        }
+        for (int p = 0; p < 2; ++p) ui.host().setPlayerStarPower(p, "meter", 1.0f);
+        return pass();
+    }
+    if (s.screen == "sp_multi_sounds") {
+        // Two-player Star Power's _multi sounds, and the averages the face-off
+        // doing badly rule reads (0x822C6DC0, 0x822DCF70).
+        std::map<std::string, int> n;
+        for (const auto& [name, at] : ui.host().gameSfx()) ++n[name];
+        const Player* a = ui.host().gamePlayer(0);
+        const Player* b = ui.host().gamePlayer(1);
+        std::printf("  face-off: sp_deployed_multi %d, average multipliers %.2f %.2f\n", n["sp_deployed_multi"], a ? a->averageMultiplier() : 0.0f,
+                    b ? b->averageMultiplier() : 0.0f);
+        if (!n["sp_deployed_multi"]) return fail("no sp_deployed_multi in a two-player song");
+        if (!a || !b || a->averageMultiplier() < 1 || b->averageMultiplier() < 1) return fail("the average multipliers were not kept");
+        return pass();
     }
     if (s.screen == "song_sounds") {
         // The song's sounds after its middle: Star Power deployed

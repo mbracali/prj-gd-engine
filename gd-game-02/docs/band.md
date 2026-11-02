@@ -670,11 +670,15 @@ order and the material are C]. `check band_shadows` in `--walktest quickplay`.
   really is on the world position, 0x82192D60 starts it at the last path
   point [C]); the song end used by the schedule; multiplayer walks: none, one
   player only [C].
-- Hair: the soft band of types 2 and 3 (0x82122100's vector is lost to the
-  decompile; no position change there); CharEyes' interest branch (no
-  interests on the disc); the face-off "doing badly" rule (0x822C6DC0: the
-  other's score lead over max(score rate) x 0x822BB358 / 30, growing; the
-  clock of the rate unread); CharDriverMidi's +8 flag that selects the inactive
-  clip in `midi_parser` (0x82184B28).
+- Hair's soft band (types 2 and 3): done. The up vector blends towards the
+  collision's direction inside the band and takes it past the hard edge
+  (0x8217B898, 0x82122100) [C]. CharEyes' interest branch: no interests on the
+  disc. The face-off doing badly rule: done (0x822C6DC0: the opponent's lead
+  over the higher average multiplier x the normalised base score / 30, and
+  growing; the average is 0x822DCF70, +0x74 over the clock) [C].
+- Open: CharDriverMidi's +8 flag. With it clear and an inactive clip set,
+  `midi_parser` plays the inactive clip (0x82184B28). The scripts do call
+  `set_inactive_clip`, but no writer of +8 was found, so the port keeps
+  playing the requested clip.
 - CharClipGroup's starting index; the hand drivers' order among equal
   dependencies.

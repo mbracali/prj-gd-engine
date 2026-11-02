@@ -906,11 +906,16 @@ std::string Band::currentGroup(Member& m) {
     return doingBadly(m) ? st->bad : st->mode;
 }
 
-bool Band::doingBadly(const Member& m) const {
-    // 0x822C6DC0: rock meter under 0.2 [C]; the face-off rule (score lead)
-    // [C structure] is left to the multiplayer phase.
-    if (!rating || m.player < 0) return false;
-    return rating(m.player) < 0.2f;
+bool Band::doingBadly(const Member& m) {
+    // 0x822C6DC0 [C]: under 0.2 on the rock meter; in the competitive modes,
+    // the opponent's lead over the limit and still growing.
+    if (m.player < 0) return false;
+    if (lead && leadLimit) {
+        const int l = lead(m.player), was = lastLead_[m.player & 1];
+        lastLead_[m.player & 1] = l;
+        return float(l) > leadLimit() && l > was;
+    }
+    return rating && rating(m.player) < 0.2f;
 }
 
 void Band::setMode(Member& m, const std::string& group) {

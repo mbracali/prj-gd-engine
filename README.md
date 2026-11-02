@@ -1,6 +1,17 @@
 
 # Guitar Dream Engine
 
+[![Quiver Launcher](https://img.shields.io/badge/Quiver_Launcher-Get_it_here-7C3AED?style=for-the-badge)](https://quiverlauncher.com/apps/guitar-hero-guitar-dream-engine)
+[![Recomp Launcher](https://img.shields.io/badge/Recomp_Launcher-Get_it_here-0EA5E9?style=for-the-badge)](https://recomplauncher.com/game/prj-gd-engine)
+
+![C++](https://img.shields.io/badge/C%2B%2B-00599C?style=flat-square&logo=cplusplus&logoColor=white)
+![GLSL](https://img.shields.io/badge/GLSL-5586A4?style=flat-square&logo=opengl&logoColor=white)
+![Python](https://img.shields.io/badge/Python-3776AB?style=flat-square&logo=python&logoColor=white)
+![Shell](https://img.shields.io/badge/Shell-4EAA25?style=flat-square&logo=gnubash&logoColor=white)
+![Java](https://img.shields.io/badge/Java-ED8B00?style=flat-square&logo=openjdk&logoColor=white)
+![CMake](https://img.shields.io/badge/CMake-064F8C?style=flat-square&logo=cmake&logoColor=white)
+![HTML](https://img.shields.io/badge/HTML-E34F26?style=flat-square&logo=html5&logoColor=white)
+
 A re implementation of all major guitar hero and rock band engines.
 - Don't contain any original code.
 - Don't contain any original asset.

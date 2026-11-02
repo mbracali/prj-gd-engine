@@ -91,9 +91,8 @@ The scenes themselves are listed in `milo_and_textures.md`.
 
 - Particles are not drawn yet (smash sparks, `tail_bonus.part`, star-meter
   sparks); only the flame-light meshes of the smash and burn views show.
-- Not done: the intro gem sparkle, `peak_on` (rock meter peak flames), the
-  track-fail explode, the far-end fade (`track_fade.tex` is a runtime render
-  target).
+- Unused by the original: the intro gem sparkle (nothing draws it) and
+  `track_fade.*` (the far-end fade is the Environ fade).
 - Miss pop on the held frets [I];
   side-rail animation indices [I]; sphere tex_gen skips the camera half-angle
   step [I]; MatAnim / TransAnim SetFrame semantics follow GH1 [I].
