@@ -76,6 +76,9 @@ public:
     // Every point × this (use_normalization, 0x822BB320 / 0x822C6A58) [C].
     void setNormalisation(float factor) { norm_ = factor; }
     float normalisation() const { return norm_; }
+    // 0x822DCF70 [C]: the multiplier's average over the song (+0x74 / the clock).
+    float nowMsForTest() const { return avgClockMs_; }
+    float averageMultiplier() const { return avgClockMs_ > 0 ? mulTime_ / avgClockMs_ : 0; }
     // Co-op: one meter for both players, the other player (both must
     // engage, 0x822C80F8) and the band with this player's crowd mix
     // (0x822DEC68, +0x118 / +0x11c / +0x120) [C].
@@ -228,6 +231,7 @@ private:
     int index_;
     int number_ = 0;
     float norm_ = 1;
+    float mulTime_ = 0, avgClockMs_ = 0, avgLastMs_ = -1;  // +0x74, 0x822DD298
     BandPerformer* band_ = nullptr;
     float bandA_ = 0, bandB_ = 1, bandW_ = 1;
     Player* partner_ = nullptr;

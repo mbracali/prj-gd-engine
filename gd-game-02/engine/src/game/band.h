@@ -110,6 +110,10 @@ public:
 
     // The player's rock meter rating (0..1) for "bad" (0x822C6DC0); the host sets it.
     std::function<float(int player)> rating;
+    // Face-off (0x822C6DC0) [C]: the opponent's lead on this player and the
+    // lead that counts as losing badly; unset outside the competitive modes.
+    std::function<int(int player)> lead;
+    std::function<float()> leadLimit;
     // The game's excitement (Game +0x338, set by 0x822CBAC8 from 0x822CAAB0:
     // 0 Boot .. 3 Great; the world's `excitement` message) for walk_delays,
     // interact_probs, the walk speed and the faces. Unset: {game get excitement}.
@@ -163,7 +167,8 @@ private:
     void oneShot(Member& m, const std::string& group);
     void setGameOver(Member& m, const std::string& group);
     std::string currentGroup(Member& m);
-    bool doingBadly(const Member& m) const;
+    bool doingBadly(const Member& m);
+    int lastLead_[2] = {0, 0};  // the player's +0x104
     void runClipScript(Member& m, const std::string& script);
     void fireTriggers(Member& m, const std::string& event);
     scene::Xfm slotXfm(const Member& m) const;
