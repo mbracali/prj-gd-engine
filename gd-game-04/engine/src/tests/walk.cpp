@@ -66,6 +66,35 @@ Walk::Walk(const std::string& name) : name_(name) {
         steps_.push_back({"career_cash_reward_fs", {C}, 30000, true});  // the song's cash (Progression_AwardCash)
         steps_.push_back({"career_unlock_1_fs", {C}, 30000, true});
         steps_.push_back({"career_setlist_fs", {}, 30000});
+    } else if (name == "career_quickplay") {
+        // A career song in the venue picked (career_select_venue_fs), then
+        // back to the main menu and a quick play song: GH3's setlist_choose_song
+        // sets current_level = <g_last_venue_selected>, so quick play plays in
+        // the venue last picked (no venue select in quick play) [C script].
+        steps_ = boot;
+        steps_.push_back({"main_menu_fs", {C}, 10000});
+        steps_.push_back({"career_choose_band_fs", {C}, 20000, true});
+        steps_.push_back({"career_enter_band_name_fs", {C, C, C, Action::Start}, 20000, true});
+        steps_.push_back({"career_select_difficulty_fs", {C}, 20000});
+        steps_.push_back({"career_select_character_fs", {C}, 20000, true});
+        steps_.push_back({"career_character_hub_fs", {C}, 20000});
+        steps_.push_back({"career_select_venue_fs", {C}, 20000});
+        steps_.push_back({"career_setlist_fs", {C}, 20000});
+        steps_.push_back({"song", {}, 30000});
+        steps_.push_back({"song_over", {}, 600000});
+        steps_.push_back({"career_newspaper_fs", {C}, 30000});
+        steps_.push_back({"career_cash_reward_fs", {C}, 30000, true});
+        steps_.push_back({"career_unlock_1_fs", {C}, 30000, true});
+        steps_.push_back({"career_setlist_fs", {B}, 30000});
+        steps_.push_back({"career_select_venue_fs", {B}, 20000, true});
+        steps_.push_back({"career_character_hub_fs", {B}, 20000, true});
+        steps_.push_back({"career_select_character_fs", {B}, 20000, true});
+        steps_.push_back({"career_select_difficulty_fs", {B}, 20000, true});
+        steps_.push_back({"career_choose_band_fs", {B}, 20000, true});
+        steps_.push_back({"main_menu_fs", {D, D, C}, 20000});
+        steps_.push_back({"quickplay_select_difficulty_fs", {C}, 20000});
+        steps_.push_back({"quickplay_setlist_fs", {C}, 20000});
+        steps_.push_back({"song", {}, 30000});
     } else if (name == "pause" || name == "pausequit") {
         // Start in the song -> GH3's pause menu (quickplay_pause_fs) -> RESUME
         // and the song plays on; pausequit: QUIT -> its warning -> YES -> the menus.
@@ -152,6 +181,22 @@ Walk::Walk(const std::string& name) : name_(name) {
         steps_.push_back({"song", {}, 60000});
         steps_.push_back({"song_over", {}, 900000});
         steps_.push_back({"career_newspaper_fs", {}, 60000});
+    } else if (name == "boss_devil") {
+        // Lou's battle (bossdevil, the last tier's boss): won, GH3 restarts
+        // the song mid-way for the finish (start_devil_finish: <song>_markers[37],
+        // devil_finish_restart = 1; player 2's highway at x 1000, no death
+        // meter) and plays it to its end [C scripts] -> the newspaper.
+        steps_ = boot;
+        steps_.push_back({"main_menu_fs", {C}, 10000});
+        steps_.push_back({"career_choose_band_fs", {D, D, D, D, C}, 20000});
+        steps_.push_back({"career_select_difficulty_fs", {C}, 20000});
+        steps_.push_back({"career_character_hub_fs", {C}, 20000});
+        steps_.push_back({"career_select_venue_fs", {C}, 20000});
+        steps_.push_back({"career_setlist_fs", {"setlist:bossdevil", C}, 20000});
+        steps_.push_back({"career_battle_help_fs", {C}, 20000});
+        steps_.push_back({"song", {}, 60000});
+        steps_.push_back({"song_over", {}, 1200000});
+        steps_.push_back({"career_newspaper_fs", {}, 120000});
     } else if (name == "back") {
         steps_ = boot;
         steps_.push_back({"main_menu_fs", {D, D, C}, 10000});

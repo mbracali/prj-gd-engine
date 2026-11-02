@@ -202,7 +202,13 @@ Drawn (render/hud2p.cpp, render/highway2d.cpp, data/band.cpp):
   the native scroller (a mid-song start; FINDINGS "Mid-song starts"); with
   devil_finish player 2's gem container is at x 1000 and its HUD stays off
   screen, no death meter [C scripts setup_highway,
-  move_2d_elements_to_default] — not walked (no Lou walk).
+  move_2d_elements_to_default]; player 1's highway keeps its two-player
+  place (-x_offset_p2) [C script setup_highway]. Walk `boss_devil` (The
+  Glitches, Easy): the battle won at the death drain, the restart at
+  bossdevil_markers[37] (336,682 ms, "song: starts at ... (Lou's finish)"),
+  "Now Finish Him!", the 74 notes left to the end, then the newspaper
+  (frames checked). The walk picks the song from the first venue's set list
+  (setlist:bossdevil); in a career it is reached from its own venue.
 
 Not done / approximations:
 - The boss helper popup before a boss from the previous song's win

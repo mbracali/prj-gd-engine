@@ -107,6 +107,7 @@ void addGameNatives(FrontEnd& fe, const Disc& disc, TextureCache& textures) {
             if (song && song->key == K("bossdevil")) r.startMs = 0;
         }
         v.setGlobal(K("current_starttime"), Vm::makeInt(int32_t(r.startMs)));
+        if (r.devilFinish || r.startMs > 0) SDL_Log("song: starts at %.0f ms%s", r.startMs, r.devilFinish ? " (Lou's finish)" : "");
         // end_credits: cleared unless end_credits_restart = 1 or the song is
         // thrufireandflames [C script start_gem_scroller]; with it set,
         // CrowdDecrease takes no health [C 0x8210FD18].
