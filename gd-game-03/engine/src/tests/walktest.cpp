@@ -302,7 +302,7 @@ WalkDriver::WalkDriver(const std::string& name)
         expect_ = {"main_screen", "qp_selsong_screen", "qp_diff_screen", "loading_screen", "game_screen", "pause_screen",
                    "meta_loading_screen", "qp_selsong_screen"};
     } else if (scenario == "career" || scenario == "career_full" || scenario == "career_song" || scenario == "career_encore" ||
-               scenario == "career_win" || scenario == "career_win_medium" || scenario == "career_practice" ||
+               scenario == "career_win" || scenario == "career_win_medium" || scenario == "career_finalsong" || scenario == "career_practice" ||
                scenario == "career_venues") {
         bootToMain();
         at("main_screen");
@@ -478,6 +478,39 @@ WalkDriver::WalkDriver(const std::string& name)
             at("endgame_screen", 20000);
             expect_.insert(expect_.end(), {"sel_venue_screen", "sel_song_screen", "loading_screen", "game_screen", "post_show_screen",
                                            "win_game_screen", "endgame_screen"});
+        }
+        if (scenario == "career_finalsong") {
+            // The career's final-song choice (GD03-092): at Medium arena's
+            // songs before caughtinamosh passed, caughtinamosh played: its
+            // encore (playwithme) is the tour's last song, so the encore
+            // letter is endgame_encore_finalsong1 and YES asks three times
+            // (endgame.dta yes.btn -> yes_finalsong1..3.btn, finalsong1..3.grp
+            // shown in turn, finalsong_moves.tnm) before the encore starts.
+            winTarget_ = "caughtinamosh";
+            endMs_ = 30000;
+            check("career_target");
+            press(kX);  // LET'S ROCK
+            at("sel_venue_screen");
+            press(kX);
+            at("sel_song_screen");
+            check("career_song_target");
+            press(kX);
+            at("loading_screen");
+            at("game_screen", 30000);
+            at("endgame_encore_screen", 90000);
+            wait(1500);
+            check("finalsong 0");
+            for (int i = 1; i <= 3; ++i) {
+                press(kX);
+                wait(800);
+                check(("finalsong " + std::to_string(i)).c_str());
+            }
+            press(kX);  // yes_finalsong3.btn: START_ENCORE
+            at("loading_screen", 30000);
+            at("game_screen", 30000);
+            check("finalsong_encore");
+            expect_.insert(expect_.end(), {"sel_venue_screen", "sel_song_screen", "loading_screen", "game_screen", "post_show_screen",
+                                           "endgame_encore_screen", "loading_screen", "game_screen"});
         }
         if (scenario == "career_venues") {
             // The venue select follows the focus (GD03-094, as gd02's
@@ -1460,7 +1493,7 @@ void WalkDriver::poll(ui::UiManager& ui, double nowMs) {
     // career: the band has bought Judy Nails' second outfit and the SG's
     // white skin in the store (M10), so both choices offer two.
     if ((scenario_ == "career" || scenario_ == "career_full" || scenario_ == "career_song" || scenario_ == "career_encore" ||
-         scenario_ == "career_win" || scenario_ == "career_win_medium" || scenario_ == "career_practice") && !seeded_ && ui.currentScreen() == "sel_difficulty_screen" && ui.session().profileSlot >= 0) {
+         scenario_ == "career_win" || scenario_ == "career_win_medium" || scenario_ == "career_finalsong" || scenario_ == "career_practice") && !seeded_ && ui.currentScreen() == "sel_difficulty_screen" && ui.session().profileSlot >= 0) {
         seeded_ = true;
         Career::Profile& p = ui.career().profiles[size_t(ui.session().profileSlot)];
         p.items["alterna2"] = true;
@@ -1566,6 +1599,27 @@ static bool mainCamera(ui::UiManager& ui, std::array<float, 3>& pos) {
 void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
     auto fail = [&](const std::string& e) { error_ = e, failed_ = done_ = true; };
     auto pass = [&] { ++step_, stepStart_ = -1; };
+    if (s.screen.rfind("finalsong ", 0) == 0) {
+        // endgame_encore_panel: is_final_song set, the focus on yes.btn, then
+        // yes_finalsong1..3.btn with finalsong1..n.grp shown (GD03-092).
+        const int n = std::atoi(s.screen.c_str() + 10);
+        ui::PanelObj* fp = ui.focusPanel();
+        const std::string f = fp ? fp->focus : std::string();
+        const int isFinal = ui.interp().send("endgame_encore_panel", "get", {Value::symbol("is_final_song")}).integerValue();
+        std::printf("  final song: step %d, is_final_song %d, focus %s\n", n, isFinal, f.c_str());
+        if (!isFinal) return fail("the tour's last encore was not offered as the final song");
+        const std::string want = n == 0 ? "yes.btn" : "yes_finalsong" + std::to_string(n) + ".btn";
+        if (f != want) return fail("the focus is " + f + ", not " + want);
+        for (int g = 1; g <= 3; ++g) {
+            const bool shown = fp && fp->view && fp->view->showing("finalsong" + std::to_string(g) + ".grp");
+            if (shown != (g <= n)) return fail("finalsong" + std::to_string(g) + ".grp " + (shown ? "shown" : "hidden"));
+        }
+        return pass();
+    }
+    if (s.screen == "finalsong_encore") {
+        std::printf("  final song encore: %s\n", ui.session().song.c_str());
+        return ui.session().song == "playwithme" ? pass() : fail("the encore played " + ui.session().song + ", not playwithme");
+    }
     if (s.screen == "dev_cheat_on") {
         ui.host().setEnhancedValue("dev_key_cheats", "on");
         return pass();

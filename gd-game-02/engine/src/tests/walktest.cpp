@@ -543,7 +543,16 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
             if (!easy) {
                 at("endgame_encore_screen", 90000);
                 wait(1500);
-                press(kX);  // YES: the encore
+                // Free Bird is the tour's last song: the letter is
+                // endgame_encore_freebird1 and YES asks three times
+                // (yes_freebird1..3.btn, freebird1..3.grp) before it starts.
+                check("freebird 0");
+                for (int i = 1; i <= 3; ++i) {
+                    press(kX);
+                    wait(800);
+                    check(("freebird " + std::to_string(i)).c_str());
+                }
+                press(kX);  // yes_freebird3.btn: START_ENCORE
                 at("loading_screen", 30000);
                 at("game_screen", 30000);
             }
@@ -1622,6 +1631,24 @@ static bool mainCamera(ui::UiManager& ui, std::array<float, 3>& pos) {
 void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
     auto fail = [&](const std::string& e) { error_ = e, failed_ = done_ = true; };
     auto pass = [&] { ++step_, stepStart_ = -1; };
+    if (s.screen.rfind("freebird ", 0) == 0) {
+        // endgame_encore_panel: freebird set by {campaign encore_newly_unlocked
+        // $freebird} (its $var by name), the focus on yes.btn, then
+        // yes_freebird1..3.btn with freebird1..n.grp shown.
+        const int n = std::atoi(s.screen.c_str() + 9);
+        ui::PanelObj* fp = ui.focusPanel();
+        const std::string f = fp ? fp->focus : std::string();
+        const int isFinal = ui.interp().send("endgame_encore_panel", "get", {Value::symbol("freebird")}).integerValue();
+        std::printf("  free bird: step %d, freebird %d, focus %s\n", n, isFinal, f.c_str());
+        if (!isFinal) return fail("Free Bird was not offered as the tour's last song");
+        const std::string want = n == 0 ? "yes.btn" : "yes_freebird" + std::to_string(n) + ".btn";
+        if (f != want) return fail("the focus is " + f + ", not " + want);
+        for (int g = 1; g <= 3; ++g) {
+            const bool shown = fp && fp->view && fp->view->showing("freebird" + std::to_string(g) + ".grp");
+            if (shown != (g <= n)) return fail("freebird" + std::to_string(g) + ".grp " + (shown ? "shown" : "hidden"));
+        }
+        return pass();
+    }
     if (s.screen == "dev_cheat_on") {
         ui.host().setEnhancedValue("dev_key_cheats", "on");
         return pass();

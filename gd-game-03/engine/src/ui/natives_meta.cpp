@@ -423,12 +423,14 @@ public:
             return r = Value::integer(potential ? 1 : 0), true;
         }
         if (msg == "encore_newly_unlocked") {
-            // 0x822AAA78: $freebird (by name) = the encore is Free Bird; true once the song is passed.
+            // 0x0012f068 -> 0x00132a68 [C]: the out variable ($is_final_song) is
+            // set when the encore is playwithme (Encore's tour-ending song;
+            // GH2 compared freebird, GD03-092); true once the song is passed.
             const std::string enc = campaign::encoreOf(ui_, campaign::venueOf(ui_, song));
             if (!args.empty()) {
                 std::string var = args[0].str();
                 if (var.size() > 1 && var[0] == '$') var = var.substr(1);
-                in.var(var) = Value::integer(enc == "freebird" ? 1 : 0);
+                in.var(var) = Value::integer(enc == "playwithme" ? 1 : 0);
             }
             return r = Value::integer(enc != song && campaign::passed(ui_, p, diff, song) ? 1 : 0), true;
         }
