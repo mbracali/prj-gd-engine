@@ -6,6 +6,9 @@ matches the tag's version.
 
 ## [Unreleased]
 
+### Removed
+- The MODS item in the main menu's help bar (mods will be handled outside the game); the help bar stays evenly spaced.
+
 ## [1.1.9] - 2026-11-03
 
 ### Fixed

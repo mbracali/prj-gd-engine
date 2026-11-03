@@ -442,15 +442,15 @@ public:
     // (FUN_00153018): the band name or the character's name, through the token's %s.
     void fillStatus();
 
-    // The port's main-menu help items GAMEPADS (yellow) and MODS (orange): the
-    // disc has only the green and red help icons, so hb_fret4 / hb_fret5 are
-    // the green one recoloured.
+    // The port's main-menu help item GAMEPADS (yellow): the disc has only the
+    // green and red help icons, so hb_fret3 / hb_fret4 are the green one
+    // recoloured (MODS, orange, removed: GD01-312).
     void addFretIcons() {
         Scene& sc = scene_->scene();
         const SceneObject* tex = sc.find("hb_fret1.tex");
         const SceneObject* mat = sc.find("hb_fret1.mat");
         if (!tex || !tex->tex || !mat || !mat->mat || tex->tex->image.width <= 0) return;
-        for (int f : {3, 4, 5}) {
+        for (int f : {3, 4}) {
             SceneObject t;
             t.type = "Tex", t.name = "hb_fret" + std::to_string(f) + ".tex";
             t.tex = std::make_unique<TexObj>(*tex->tex);
@@ -458,8 +458,7 @@ public:
             for (size_t i = 0; i + 3 < px.size(); i += 4) {
                 uint8_t r = px[i], g = px[i + 1], b = px[i + 2];
                 if (f == 3) px[i] = uint8_t(std::min(255.0f, g * 1.1f)), px[i + 1] = g, px[i + 2] = uint8_t(b * 0.25f);  // green -> yellow
-                else if (f == 4) px[i] = r, px[i + 1] = b, px[i + 2] = g;  // green -> blue
-                else px[i] = uint8_t(std::min(255.0f, g * 1.25f)), px[i + 1] = uint8_t(std::min(255.0f, g * 0.72f)), px[i + 2] = uint8_t(b * 0.3f);  // green -> orange
+                else px[i] = r, px[i + 1] = b, px[i + 2] = g;  // green -> blue
             }
             SceneObject m;
             m.type = "Mat", m.name = "hb_fret" + std::to_string(f) + ".mat";
@@ -1364,10 +1363,10 @@ std::vector<std::pair<std::string, std::string>> UiSystem::PanelObj::helpItems()
     if (list.type != Value::Type::Array) return out;
     for (const Value& e : *list.array)
         if (e.type == Value::Type::Array && e.array->size() >= 2) out.push_back({(*e.array)[0].str(), (*e.array)[1].str()});
-    // The port's main menu also offers GAMEPADS (yellow, as every game: guidelines/universal_launcher.md) and MODS (orange), before the strum bar.
+    // The port's main menu also offers GAMEPADS (yellow, as every game: guidelines/universal_launcher.md), before the strum bar.
     if (!hasOverride_ && ui_.current_ && ui_.current_->name() == "main") {
         auto strumAt = std::find_if(out.begin(), out.end(), [](const auto& e) { return e.first == "strum"; });
-        out.insert(strumAt, {{"fret3", "GAMEPADS"}, {"fret5", "MODS"}});
+        out.insert(strumAt, {"fret3", "GAMEPADS"});
     }
     addAccessButtons(out);
     return out;
@@ -1432,7 +1431,7 @@ void UiSystem::PanelObj::drawHelpbar() {
     std::array<float, 3> cursor = start->mesh->trans.world.pos;
     const Xfm textLocal = local("help_bar.txt");
     const float textScale = std::hypot(textLocal.rot[0], textLocal.rot[1], textLocal.rot[2]);
-    // The port's extra main-menu items (GAMEPADS, MODS) do not fit before the
+    // The port's extra main-menu item (GAMEPADS) does not fit before the
     // strum bar's fixed spot: there the strum bar follows the row, every gap
     // twice text_spacing.
     const auto items = helpItems();
