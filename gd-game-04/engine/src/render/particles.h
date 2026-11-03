@@ -102,7 +102,19 @@ private:
         uint64_t seed = 1;
         double end() const;
     };
-    void create(const venue::Vec3& pos, const qb::Value* params, double t);
+    // A system; rate >= 0: a node's particleobject emitting `rate` a second
+    // with no end and no burst (emitrate), else the params' own.
+    void create(const venue::Vec3& pos, const qb::Value* params, double t, float rate = -1);
+    // The particleobject nodes (z_party's GFX fires / smoke / sparks): the
+    // system emitting now (index into systems_ by id), its params, position.
+    struct NodeEmitter {
+        venue::Vec3 pos{};
+        qb::Value params;
+        uint64_t system = 0;  // the running system's seed (0: none)
+        float rate = 0;
+    };
+    std::unordered_map<uint32_t, NodeEmitter> nodeEmitters_;
+    void setEmitRate(uint32_t node, float rate, double t);
     // One rotation axis (degrees) or the position: linear in song time.
     struct Axis {
         float a0 = 0;      // the angle at t0

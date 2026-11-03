@@ -153,12 +153,50 @@ bool Particles::start(const Disc& disc, const Globals& g, const venue::Venue& v,
         create(vec(qs::Vm::param(p, K("pos")), {}), qs::Vm::param(p, K("params_script")), vmTime_);
         return true;
     });
+    // CreateParticleSystem name = id pos = ... params_script = ... groupid =
+    // (Z_Party_Pyro's lantern sparks): the same emitter, named [C script; I:
+    // the name and group only matter to its destroy calls, none in a song].
+    vm_->addNative("CreateParticleSystem", [this](qs::Vm&, qs::ScriptRun&, qb::Struct& p) {
+        create(vec(qs::Vm::param(p, K("pos")), {}), qs::Vm::param(p, K("params_script")), vmTime_);
+        return true;
+    });
     vm_->addNative("IsCreated", [this](qs::Vm&, qs::ScriptRun&, qb::Struct& p) {
         const qb::Value* n = qs::Vm::positional(p);
         const venue::Node* node = n ? v_->node(keyOf(n)) : nullptr;
         return node && node->createdAtStart;
     });
     addObjectNatives();
+    // Create / Kill {name = node} (misclightutils.qb SafeCreate / SafeKill:
+    // z_party's Christmas lights by performance): shown / hidden; a
+    // particleobject stops emitting when killed [C scripts; I: the drawing].
+    vm_->addNative("Create", [this](qs::Vm&, qs::ScriptRun&, qb::Struct& p) {
+        if (const qb::Value* n = qs::Vm::param(p, K("name"))) visibility_[n->key] = 1;
+        return true;
+    });
+    vm_->addNative("Kill", [this](qs::Vm&, qs::ScriptRun&, qb::Struct& p) {
+        if (const qb::Value* n = qs::Vm::param(p, K("name"))) visibility_[n->key] = 0, setEmitRate(n->key, 0, vmTime_);
+        return true;
+    });
+    // The particleobject nodes (class particleobject, scriptreference = its
+    // GP_* parameters): one emitter each at the node; the created ones emit
+    // their emit_rate from the start, `<node> : emitrate {rate}` changes it
+    // (z_party's Performance_Changed) [C data; I: the emitter model].
+    nodeEmitters_.clear();
+    for (const venue::Node& n : v.nodes) {
+        if (n.cls != K("particleobject") || !n.st) continue;
+        const qb::Value* ref = n.st->find(K("scriptreference"));
+        if (!ref) continue;
+        NodeEmitter e;
+        e.pos = n.pos, e.params = *ref;
+        nodeEmitters_[n.name] = e;
+        if (n.createdAtStart) {
+            const qb::Value* gp = (ref->type == qb::Type::Key || ref->type == qb::Type::KeyPtr) ? g_->find(ref->key) : ref;
+            const qb::Struct* gs = structOf(gp);
+            const float rate = gs ? num(g_->field(*gs, K("emit_rate")), 0) : 0;
+            setEmitRate(n.name, rate, startMs);
+        }
+    }
+    if (!nodeEmitters_.empty()) SDL_Log("particles %s: %llu particle objects", v.zone.c_str(), static_cast<unsigned long long>(nodeEmitters_.size()));
     // The nodes' trigger scripts: a created node runs its triggerscript on
     // itself [C data: e.g. z_party's globes (Z_Party_GlobeRot01Script),
     // z_video's fans (Z_Video_G_RMM_fantop02Script); I: at the level's start].
@@ -373,6 +411,8 @@ void Particles::addObjectNatives() {
             }
         } else if (method == K("hide") || method == K("Unhide")) {
             visibility_[obj] = method == K("hide") ? 0 : 1;
+        } else if (method == K("emitrate")) {
+            setEmitRate(obj, qs::Vm::number(qs::Vm::param(p, K("rate")), 0), t);
         } else if (method == K("AddPulseEvent")) {
             static const char* const kEv[5] = {"hitnote_green", "hitnote_red", "hitnote_yellow", "hitnote_blue", "hitnote_orange"};
             m.pulseFrets = 0;
@@ -504,7 +544,22 @@ void Particles::shutdown() {
     dev_ = nullptr;
 }
 
-void Particles::create(const venue::Vec3& pos, const qb::Value* params, double t) {
+void Particles::setEmitRate(uint32_t node, float rate, double t) {
+    auto it = nodeEmitters_.find(node);
+    if (it == nodeEmitters_.end()) return;
+    NodeEmitter& e = it->second;
+    if (e.system && rate > 0 && rate == e.rate) return;  // already emitting so
+    e.rate = rate;
+    // The running emission stops now; its particles live out [I].
+    for (System& s : systems_)
+        if (e.system && s.seed == e.system) s.p.lifetime = float(std::max(0.0, (t - s.start) / 1000.0 - double(s.p.delay)));
+    e.system = 0;
+    if (rate <= 0) return;
+    create(e.pos, &e.params, t, rate);
+    if (!systems_.empty()) e.system = systems_.back().seed;
+}
+
+void Particles::create(const venue::Vec3& pos, const qb::Value* params, double t, float rate) {
     const qb::Value* pv = params;
     if (pv && (pv->type == qb::Type::Key || pv->type == qb::Type::KeyPtr)) pv = g_->find(pv->key);
     const qb::Struct* src = structOf(pv);
@@ -574,6 +629,7 @@ void Particles::create(const venue::Vec3& pos, const qb::Value* params, double t
         p.additive = p.blend == 1;
         p.alphaCut = num(g_->field(*qm, K("alphacutoff")), 0) / 255.0f;
     }
+    if (rate >= 0) p.rate = rate, p.lifetime = 1e6f, p.burst = 0, p.delay = 0;  // a node's emitter
     System s;
     s.p = std::move(p);
     s.pos = pos;

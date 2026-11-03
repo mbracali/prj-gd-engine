@@ -148,6 +148,27 @@ void MenuScene::addNatives() {
     using qs::ScriptRun;
     using qs::Vm;
     objects_->addNatives();
+    // Create / Kill {name = node}: a node of the zone's array made or removed
+    // (misclightutils.qb SafeCreate; the store's Kill of
+    // Z_SoundCheck_G_RMM_Kill_me) [C scripts; I: drawn as shown / hidden].
+    vm_.addNative("Create", [this](Vm&, ScriptRun&, qb::Struct& p) {
+        if (const qb::Value* n = Vm::param(p, K("name"))) nodeVis_[n->key] = 1;
+        return true;
+    });
+    vm_.addNative("Kill", [this](Vm&, ScriptRun&, qb::Struct& p) {
+        if (const qb::Value* n = Vm::param(p, K("name"))) nodeVis_[n->key] = 0;
+        return true;
+    });
+    // EnableLightGroup / DisableLightGroup {name = group}: the store's
+    // Guitar_Center_Band lights on the shadow character (monitor_store_shadow_character) [C scripts].
+    vm_.addNative("EnableLightGroup", [this](Vm&, ScriptRun&, qb::Struct& p) {
+        if (const qb::Value* n = Vm::param(p, K("name"))) lightsOff_.erase(n->key);
+        return true;
+    });
+    vm_.addNative("DisableLightGroup", [this](Vm&, ScriptRun&, qb::Struct& p) {
+        if (const qb::Value* n = Vm::param(p, K("name"))) lightsOff_.insert(n->key);
+        return true;
+    });
     // PlayIGCCam {name viewport [controlscript] [pos Quat FOV] [time]}: a
     // camera on the background viewport, held; its control script (spawned)
     // moves it with ccam_domorph [C scripts]. Other viewports (the song's
@@ -241,6 +262,15 @@ void MenuScene::draw(Canvas& c) {
     const Pose p = pose();
     const venue::CamPose cam{p.pos, p.rot, p.fov};
     lights_.evaluate(clockMs_, lightState_);
+    for (size_t i = 0; i < venue_->lights.size() && i < lightState_.size(); ++i)
+        if (lightsOff_.count(venue_->lights[i].group)) lightState_[i].intensity = 0;
+    {
+        const auto* vis = &nodeVis_;
+        view_->setNodeVisibility([vis](uint32_t node) {
+            auto it = vis->find(node);
+            return it == vis->end() ? -1 : it->second;
+        });
+    }
     c.flush();
     view_->setTime(clockMs_ / 1000.0);
     view_->draw(cam, lightState_, lights_);

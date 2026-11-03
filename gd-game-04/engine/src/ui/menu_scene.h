@@ -4,6 +4,8 @@
 
 #include <cstdint>
 #include <memory>
+#include <unordered_set>
+#include <unordered_map>
 #include <string>
 #include <vector>
 
@@ -66,6 +68,10 @@ private:
     venue::LightShow lights_;
     std::vector<venue::LightState> lightState_;
     bool failed_ = false;  // the zone did not load (logged once)
+    // Create / Kill {name = node} (SafeCreate, the store's Z_SoundCheck_G_RMM_Kill_me):
+    // 1 created, 0 killed; EnableLightGroup / DisableLightGroup: the groups switched off.
+    std::unordered_map<uint32_t, int> nodeVis_;
+    std::unordered_set<uint32_t> lightsOff_;
     // The camera: a morph from `from_` to `to_` over `duration_` ms.
     bool playing_ = false;
     uint32_t controlRun_ = 0;  // the control script's run
