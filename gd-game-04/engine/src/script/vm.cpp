@@ -767,14 +767,11 @@ bool Vm::callName(ScriptRun& run, uint32_t name, qb::Struct& params, bool& resul
         // The port loads in a moment where the Xbox 360 took seconds, so the
         // loading screen (its tip, its jiggling text) flashed by: as
         // gd-game-01..03, it stays up at least 2 s of the VM clock (GD04-040)
-        // [I]. The wait goes before start_song (the 360 loaded the song in
-        // it, under the loading screen: the intro starts once it is
-        // loaded), else before destroy_loading_screen.
+        // [I]. The wait goes before the song starts (the native
+        // start_gem_scroller: the 360 loaded the song under the loading
+        // screen, the intro starts once it is loaded), else before
+        // destroy_loading_screen.
         if (name == kCreateLoading) loadingShownMs_ = clockMs_;
-        if (name == kStartSong && loadingShownMs_ >= 0 && clockMs_ < loadingShownMs_ + kLoadingHoldMs) {
-            run.waitUntilMs = loadingShownMs_ + kLoadingHoldMs;
-            heldLoadingMs_ += run.waitUntilMs - clockMs_;
-        }
         if (name == kDestroyLoading && loadingShownMs_ >= 0) {
             if (clockMs_ < loadingShownMs_ + kLoadingHoldMs) {
                 run.waitUntilMs = loadingShownMs_ + kLoadingHoldMs;

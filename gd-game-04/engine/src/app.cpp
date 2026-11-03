@@ -741,6 +741,7 @@ int App::run() {
         }
     }
     song_.reset();
+    outroSong_.reset();  // its venue's GPU objects before the device
     ports_.reset();
     hooks_.reset();
     front_.reset();

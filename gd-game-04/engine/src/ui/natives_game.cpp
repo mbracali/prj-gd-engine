@@ -78,7 +78,7 @@ void addGameNatives(FrontEnd& fe, const Disc& disc, TextureCache& textures) {
     // native game core (game/player.h, ui/song_screen.h) on $current_song at
     // $current_difficulty [approximation: GH3's own gem scroller scripts and
     // their C functions are replaced as one unit; backlog GD04-021].
-    vm.addNative("start_gem_scroller", [&fe](Vm& v, ScriptRun& run, qb::Struct& p) {
+    auto startScroller = [&fe](Vm& v, ScriptRun& run, qb::Struct& p) -> bool {
         auto diffOf = [](const qb::Value* diff) {
             if (diff) {
                 if (diff->key == K("easy")) return 0;
@@ -189,6 +189,23 @@ void addGameNatives(FrontEnd& fe, const Disc& disc, TextureCache& textures) {
                 const qb::Value* h = ps && ps->st ? v.globals().field(*ps->st, K("save_health")) : nullptr;
                 r.saveHealth[i] = h ? h->number() : 1.0f;
             }
+        return true;
+    };
+    // A loading screen up for less than 2 s: the start waits for the rest
+    // (the port loads at once; GH3's own loading took that long and more,
+    // GD04-040), whichever script starts the song (restart_gem_scroller,
+    // create_attract_mode, training) [I].
+    vm.addNative("start_gem_scroller", [startScroller](Vm& v, ScriptRun& run, qb::Struct& p) {
+        const double until = v.loadingHoldUntil();
+        if (v.clockMs() >= until) return startScroller(v, run, p);
+        auto params = std::make_shared<qb::Struct>(p);
+        Vm* vp = &v;
+        ScriptRun* rp = &run;
+        run.waitFor = [startScroller, vp, rp, params, until] {
+            if (vp->clockMs() < until) return false;
+            startScroller(*vp, *rp, *params);
+            return true;
+        };
         return true;
     });
     // SongUnLoadFSBIfDownloaded: kill_gem_scroller's (quit / restart from the
