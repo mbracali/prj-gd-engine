@@ -32,7 +32,9 @@ Owner-test rows GD02-060/061/062/143/144/145 marked done.
   big-note fix (aee06ff), GD02-050 hair 60 Hz / up vector / eye blink (5efd68c), GD02-045 dev cheats
   (ec597e5), GD02-152 input timing + GD02-036 bass ranges (72a5102).
 - Research reports (git-ignored): agents/scratch/band_gaps.md, agents/scratch/beams_input_bass.md.
-- Left: GD02-151 beams (rework per beams_input_bass.md §1: per-pixel depthvolume, own RGBA16F
+- Done after: GD02-151 beams per pixel (2e95807, gain kept 1 [I]), GD02-050 G5/G6 (6cbdb13), GD02-041 / GD02-153
+  closed (cf96510); all 34 walks + selftest / chartest / venuetest pass; GH2 100%.
+- (Old note) Left: GD02-151 beams (rework per beams_input_bass.md §1: per-pixel depthvolume, own RGBA16F
   target, no depth test, FogPixel composite on world pixels, gain ~3.2 [I]); GD02-050 G5 drum kit
   routing through drummer_kick_drum MidiParser + G6 docs; GD02-041 / GD02-153 final checks; then
   all walks + selftest + chartest + venuetest, packages, backlog end, GH2 %.

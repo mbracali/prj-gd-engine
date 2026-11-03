@@ -27,7 +27,7 @@ A re implementation of all major guitar hero and rock band engines.
 | id         | Original game                     | Base version  | Done         |
 | ---------- | --------------------------------- | ------------- | ------------ |
 | gd-game-01 | Guitar Hero                       | Playstation 2 | 100% Playable |
-| gd-game-02 | Guitar Hero II                    | Xbox 360      | 90% Playable |
+| gd-game-02 | Guitar Hero II                    | Xbox 360      | 100% Playable |
 | gd-game-03 | Guitar Hero Encore: Rocks the 80s | Playstation 2 | 85% Playable |
 | gd-game-04 | Guitar Hero III: Legends of Rock  | Xbox 360      | 55% Playable |
 | gd-game-05 | Rock Band                         | Xbox 360      | --           |
