@@ -726,7 +726,12 @@ private:
             // The mean multiplier: score over base score [I].
             return r = Value::real(p && p->baseScore() > 0 ? float(p->score()) / float(p->baseScore()) : 1.0f), true;
         }
-        if (msg == "sp_phrases" || msg == "streaks_broken") return r = Value::integer(ui_.host().gameCounter(index, msg)), true;
+        // sp_phrases: "<captured>/<started>" (0x822C7060: sprintf "%d/%d") [C].
+        if (msg == "sp_phrases")
+            return r = Value::string(std::to_string(ui_.host().gameCounter(index, "sp_phrases")) + "/" +
+                                     std::to_string(ui_.host().gameCounter(index, "sp_started"))),
+                   true;
+        if (msg == "streaks_broken") return r = Value::integer(ui_.host().gameCounter(index, msg)), true;
         if (msg == "lead_time_sec") return r = Value::real(0), true;
         if (msg == "base_multiplier") return r = Value::integer(p ? p->baseMultiplier() : 1), true;
         if (msg == "in_star_mode") return r = Value::integer(p && p->starPowerActive() ? 1 : 0), true;

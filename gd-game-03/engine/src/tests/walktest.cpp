@@ -114,6 +114,28 @@ WalkDriver::WalkDriver(const std::string& name)
         at("splash_screen");
         press(kX);
     };
+    // MORE STATS on a results screen (endgame.dta / multiplayer.dta
+    // me_morestats.btn): endgame_stats_screen filled for each player, then
+    // back to the results with CONTINUE focused again (GD03-092).
+    // forward: CONTINUE from the stats screen itself (its next_screen, set
+    // from the results' own when MORE STATS was pressed). Co-op's results
+    // screen records the song on every entrance (finish_coop_song), so back
+    // there the guitar award is gone, as on the PS2; forward keeps it.
+    auto statsVisit = [&](const char* results, bool forward = false) {
+        press(kDown), wait(150);
+        press(kX);
+        at("endgame_stats_screen");
+        wait(1000);
+        check("stats_screen");
+        if (forward) {
+            press(kX);
+            return;
+        }
+        press(kTri);
+        at(results);
+        wait(800);
+        check("focus_continue");
+    };
     auto quickplaySong = [&](int downs) {
         at("main_screen");
         press(kX);  // QUICK PLAY (main_quickspin.btn, the focus)
@@ -146,6 +168,7 @@ WalkDriver::WalkDriver(const std::string& name)
         at("endgame_screen", 90000);
         check("song_sounds");
         wait(600);
+        statsVisit("endgame_screen");
         press(kX);  // CONTINUE (me_continue.btn)
         at("highscore_screen");
         press(kStart);  // the name as it is
@@ -162,7 +185,8 @@ WalkDriver::WalkDriver(const std::string& name)
         check("menu_sounds");  // game_outro_complete paused the game: menu sounds still play (GD03-073)
         expect_ = {"bootup_load", "bootup_create_save_check", "bootup_create_save", "cut_scene_screen",
                    "splash_screen", "main_screen", "qp_selsong_screen", "qp_diff_screen", "loading_screen", "game_screen",
-                   "post_show_screen", "endgame_screen", "highscore_screen", "complete_screen", "meta_loading_screen", "autosave",
+                   "post_show_screen", "endgame_screen", "endgame_stats_screen", "endgame_screen", "highscore_screen", "complete_screen",
+                   "meta_loading_screen", "autosave",
                    "qp_selsong_screen", "main_screen"};
     } else if (scenario == "dev_cheats") {
         // GD03-103: Enhanced > Developer Keyboard Cheats on, then a real 'l'
@@ -1141,7 +1165,8 @@ WalkDriver::WalkDriver(const std::string& name)
         wait(1500);
         if (scenario == "coop") check("coop_record");
         if (scenario == "faceoff") check("sp_multi_sounds");
-        press(kX);  // CONTINUE (me_continue.btn)
+        statsVisit(results, scenario == "coop");
+        if (scenario != "coop") press(kX);  // CONTINUE (me_continue.btn)
         if (scenario == "coop") {
             at("multi_unlock_bass_screen");  // surrender's three stars or more: bass_sg_mahogany (songs 1, stars 3)
             wait(1200);
@@ -1157,13 +1182,13 @@ WalkDriver::WalkDriver(const std::string& name)
         if (scenario == "coop")
             expect_.insert(expect_.end(), {"multi_coop_venue_screen", "multi_coop_selsong_screen", "selpart_screen", "multi_coop_seldiff_screen",
                                            "multi_sel_character_screen", "multi_sel_guitar_screen", "loading_screen", "game_screen",
-                                           "multi_compete_coop_screen", "multi_unlock_bass_screen", "complete_screen", "autosave", "multi_coop_selsong_screen"});
+                                           "multi_compete_coop_screen", "endgame_stats_screen", "multi_unlock_bass_screen", "complete_screen", "autosave", "multi_coop_selsong_screen"});
         else if (scenario == "faceoff")
             expect_.insert(expect_.end(), {"multi_sel_character_screen", "multi_sel_guitar_screen", "multi_vs_venue_screen", "multi_vs_selsong_screen",
-                                           "multi_vs_seldiff_screen", "loading_screen", "game_screen", "multi_compete_screen", "complete_screen", "multi_vs_selsong_screen"});
+                                           "multi_vs_seldiff_screen", "loading_screen", "game_screen", "multi_compete_screen", "endgame_stats_screen", "multi_compete_screen", "complete_screen", "multi_vs_selsong_screen"});
         else
             expect_.insert(expect_.end(), {"multi_sel_character_screen", "multi_sel_guitar_screen", "multi_fo_venue_screen", "multi_fo_selsong_screen",
-                                           "multi_fo_seldiff_screen", "loading_screen", "game_screen", "multi_compete_fo_screen", "complete_screen", "multi_fo_selsong_screen"});
+                                           "multi_fo_seldiff_screen", "loading_screen", "game_screen", "multi_compete_fo_screen", "endgame_stats_screen", "multi_compete_fo_screen", "complete_screen", "multi_fo_selsong_screen"});
     } else if (scenario == "practice") {
         // On the bass: an overstrum in the measure before the section (no
         // gem there) is beatmatch.dta's miss on a bass track, miss_bass.
@@ -1619,6 +1644,37 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
     if (s.screen == "finalsong_encore") {
         std::printf("  final song encore: %s\n", ui.session().song.c_str());
         return ui.session().song == "playwithme" ? pass() : fail("the encore played " + ui.session().song + ", not playwithme");
+    }
+    if (s.screen == "stats_screen") {
+        // endgame_stats_panel enter: the song's name, each player's notes hit
+        // ("<hit>/<total>"), Star Power phrases and average multiplier.
+        ui::PanelObj* fp = ui.focusPanel();
+        if (!fp || !fp->view) return fail("no stats panel");
+        const int players = scenario_ == "quickplay" ? 1 : 2;
+        const std::string song = fp->view->text("song_name.lbl");
+        std::printf("  stats: song \"%s\"\n", song.c_str());
+        if (song.empty()) return fail("the stats screen shows no song name");
+        for (int pl = 0; pl < players; ++pl) {
+            const std::string pre = "player" + std::to_string(pl);
+            // Single player: the average multiplier; co-op: streaks broken;
+            // face-offs: the time in the lead (update_*_stats).
+            const std::string extra = players == 1 ? "_avg_multi.lbl" : scenario_ == "coop" ? "_streaks_broken.lbl" : "_lead_time.lbl";
+            const std::string hit = fp->view->text(pre + "_notes_hit.lbl"), sp = fp->view->text(pre + "_sp_phrases.lbl"),
+                              more = fp->view->text(pre + extra);
+            std::printf("  stats: %s notes \"%s\", sp phrases \"%s\", %s \"%s\"\n", pre.c_str(), hit.c_str(), sp.c_str(), extra.c_str(), more.c_str());
+            int h = -1, t = -1, c = -1, st = -1;
+            if (std::sscanf(hit.c_str(), "%d/%d", &h, &t) != 2 || t <= 0 || h < 0 || h > t) return fail(pre + "'s notes hit are not <hit>/<total>");
+            // "<captured>/<started>" (0x001131a0's "%d/%d").
+            if (std::sscanf(sp.c_str(), "%d/%d", &c, &st) != 2 || c < 0 || c > st) return fail(pre + "'s Star Power phrases are not <captured>/<started>");
+            if (more.empty()) return fail(pre + "'s " + extra + " is empty");
+        }
+        return pass();
+    }
+    if (s.screen == "focus_continue") {
+        ui::PanelObj* fp = ui.focusPanel();
+        const std::string f = fp ? fp->focus : std::string();
+        std::printf("  results focus: %s\n", f.c_str());
+        return f == "me_continue.btn" ? pass() : fail("back from the stats, the focus is " + f + ", not CONTINUE");
     }
     if (s.screen == "dev_cheat_on") {
         ui.host().setEnhancedValue("dev_key_cheats", "on");

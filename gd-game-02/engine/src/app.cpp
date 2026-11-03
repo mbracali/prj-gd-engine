@@ -501,7 +501,7 @@ private:
     uint64_t overNs_ = 0, outroAtNs_ = 0;
     float overT_ = 0;
     bool musicPaused_ = false;
-    int spPhrases_[2] = {}, streaksBroken_[2] = {};
+    int spPhrases_[2] = {}, spStarted_[2] = {}, streaksBroken_[2] = {};
     float lastT_ = 0;
     // Development aid: GD02_KEYS="<song ms>:<key>,..." (game/key_script.h)
     // plays scripted guitar input in every song, at exact song times.
@@ -979,7 +979,7 @@ bool App::loadSong(const SongInfo& info, int difficulty, bool autoplay, float ba
     info_ = &info;
     begun_ = wonSent_ = lostSent_ = outroSent_ = spReadySent_ = false;
     musicPaused_ = false;
-    spPhrases_[0] = spPhrases_[1] = streaksBroken_[0] = streaksBroken_[1] = 0;
+    spPhrases_[0] = spPhrases_[1] = spStarted_[0] = spStarted_[1] = streaksBroken_[0] = streaksBroken_[1] = 0;
     paused_ = false;
     lastT_ = float(-leadInMs_);
     std::fill(flashes_.begin(), flashes_.end(), 0.0f);
@@ -1700,6 +1700,17 @@ void App::updateSong(float t) {
     const std::vector<PlayerEvent> events = player_->takeEvents();
     const std::vector<PlayerEvent> events2 = player2_ ? player2_->takeEvents() : std::vector<PlayerEvent>{};
     const std::vector<PlayerEvent> bandEvents = coopBand_ ? coopBand_->takeEvents() : std::vector<PlayerEvent>{};
+    // A Star Power phrase counts as started once its first gem is hit or
+    // passed: the stats' "<captured>/<started>" (Star Power object +0x5c /
+    // +0x60, read at 0x822C7060; counted as Encore's 0x0011e9e0) [C].
+    auto phraseStart = [](const Player* pl, const PlayerEvent& e) {
+        if (!pl || e.gem < 0 || (e.kind != PlayerEvent::Kind::Hit && e.kind != PlayerEvent::Kind::Pass)) return false;
+        const Chart& c = pl->chart();
+        const int ph = size_t(e.gem) < c.gems.size() ? c.gems[size_t(e.gem)].phrase : -1;
+        return ph >= 0 && size_t(ph) < c.phrases.size() && c.phrases[size_t(ph)].firstGem == e.gem;
+    };
+    for (const PlayerEvent& e : events) spStarted_[0] += phraseStart(player_.get(), e);
+    for (const PlayerEvent& e : events2) spStarted_[1] += phraseStart(player2_.get(), e);
     for (const PlayerEvent& e : events2) {
         if (e.kind == PlayerEvent::Kind::PhraseCaptured) ++spPhrases_[1];
         if (e.kind == PlayerEvent::Kind::EndStreak) ++streaksBroken_[1];
@@ -2081,6 +2092,7 @@ int App::gameCounter(int player, const std::string& key) const {
     if (key == "spot_shadows") return venueView_ ? venueView_->spotlights().shadowsTotal() : 0;
     const int p = std::clamp(player, 0, 1);
     if (key == "sp_phrases") return spPhrases_[p];
+    if (key == "sp_started") return spStarted_[p];
     if (key == "streaks_broken") return streaksBroken_[p];
     if (key == "gems") {
         const Player* pl = gamePlayer(p);

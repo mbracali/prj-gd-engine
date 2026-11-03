@@ -719,7 +719,16 @@ private:
             // The mean multiplier: score over base score [I].
             return r = Value::real(p && p->baseScore() > 0 ? float(p->score()) / float(p->baseScore()) : 1.0f), true;
         }
-        if (msg == "sp_phrases" || msg == "streaks_broken") return r = Value::integer(ui_.host().gameCounter(index, msg)), true;
+        // sp_phrases: "<captured>/<started>" (0x001131a0: sprintf "%d/%d" of
+        // the Star Power object's +0x60 / +0x64) [C].
+        if (msg == "sp_phrases")
+            return r = Value::string(std::to_string(ui_.host().gameCounter(index, "sp_phrases")) + "/" +
+                                     std::to_string(ui_.host().gameCounter(index, "sp_started"))),
+                   true;
+        if (msg == "streaks_broken") return r = Value::integer(ui_.host().gameCounter(index, msg)), true;
+        // The face-off stats' time in the lead: the PS2 returns the player's
+        // +0x24 float (0x001131a0), which no code on the disc writes (the
+        // decompiled player code searched: no store to it) [C by absence]: 0.
         if (msg == "lead_time_sec") return r = Value::real(0), true;
         if (msg == "base_multiplier") return r = Value::integer(p ? p->baseMultiplier() : 1), true;
         if (msg == "in_star_mode") return r = Value::integer(p && p->starPowerActive() ? 1 : 0), true;
