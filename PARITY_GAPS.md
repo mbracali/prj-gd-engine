@@ -21,14 +21,16 @@ Only original behaviour is listed, no Enhanced items. "Unverified" means the por
 
 ## gd-game-02: Guitar Hero II (Xbox 360)
 
-| Area | Missing or wrong | Backlog |
+Updated 2026-11-03 (0.1.12): every gap listed here before is closed (GD02-036,
+-037/-152, -041, -049/-091/-151, -050, -075/-082/-153; GD02-060/-061/-062 marked
+done for the owner's tests; GD02-066 dropped). What stays inferred, with no
+behaviour left to change from code or data:
+
+| Area | Inferred [I] | Backlog |
 |---|---|---|
-| Menus | Compare by eye: the song list's font, the help bar in a transition (both drawn as the data says) | GD02-075, -082 |
-| Band | CharDriverMidi's +8 flag for the inactive clip (no writer found, the requested clip is played) | GD02-050 |
-| Venues | The beams' buffer gain and scene-depth softness (per vertex here); compare each venue by eye | GD02-049, -091 |
-| Gameplay research | The bass path's range list (no `bass_N.cue` on the disc, normal path taken); input time per event here, per frame on the 360 | GD02-036, -037 |
-| Platform reports | Salvation not starting on Windows and the camera going under the venue: both not reproduced; ~20 fps on macOS M4 Pro | GD02-060, -061, -062 |
-| Not in the port | Achievements, leaderboards, DLC sample package | GD02-066 |
+| Venues | The beam buffer's effective gain (kept at 1: the inferred 3.2 turns beams white) | GD02-151 |
+| Band | The owner of CharDriverMidi's +8 byte (behaviour settled by the fret IK's test) | GD02-050 |
+| Gameplay | The joypad poll running before the game poll in a frame (press time = the last game poll) | GD02-152 |
 
 ## gd-game-03: Guitar Hero Encore: Rocks the 80s (PS2)
 
