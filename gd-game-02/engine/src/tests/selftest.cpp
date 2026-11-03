@@ -152,9 +152,10 @@ struct Play {
 };
 
 Play play(const Song& song, const Rules& rules, const std::string& script, float untilMs = 0,
-          ControllerMode mode = ControllerMode::Guitar) {
+          ControllerMode mode = ControllerMode::Guitar, std::vector<int> bigNotes = {}) {
     Play r;
     r.p = std::make_unique<Player>(song, Part::Guitar, Difficulty::Expert, rules, mode, false);
+    r.p->setBigNotes(std::move(bigNotes));
     KeyScript keys(script);
     if (!keys.valid()) throw std::runtime_error("bad key script: " + script);
     if (untilMs <= 0) untilMs = song.endMs;
@@ -450,6 +451,17 @@ int runRuleChecks(const Rules& rules) {
         Play r2 = play(s, rules, "999:+green,1000:strum,1480:-green", 3000);
         check("sustain: 2 beats = 50 tail points held fully, 25 when let go halfway", r.p->score() == 100 && r2.p->score() == 75);
         check("sustain: base score counts the tail (50 + 960 x 25 / 480 = 100 for the first gem)", r.p->baseScore() == 100 + 50);
+        // GD02-150: blew_big_note only from a big note's sustain let go under
+        // a tenth of its points (0x822C86F8 -> 0x822C7F30) [C].
+        const std::vector<int> big{1000};
+        Play b1 = play(s, rules, "999:+green,1000:strum,1020:-green", 3000, ControllerMode::Guitar, big);
+        Play b2 = play(s, rules, "999:+green,1000:strum,1480:-green", 3000, ControllerMode::Guitar, big);
+        Play b3 = play(s, rules, "999:+green,1000:strum,2500:-green", 3000, ControllerMode::Guitar, big);
+        Play b4 = play(s, rules, "", 3000, ControllerMode::Guitar, big);
+        Play b5 = play(s, rules, "999:+green,1000:strum,1020:-green", 3000, ControllerMode::Guitar, {1200});
+        check("big note: its sustain let go at once blows it; halfway, held or missed it does not; 0.2 beats away it does not",
+              b1.count(K::BlewBigNote) == 1 && b2.count(K::BlewBigNote) == 0 && b3.count(K::BlewBigNote) == 0 &&
+                  b4.count(K::BlewBigNote) == 0 && b5.count(K::BlewBigNote) == 0);
         // 0x823500c8 [C]: a fret pressed below a sustained single note (an anchor) keeps it, one above ends it.
         Song y = makeSong({{1000, Y, 960}, {5000, R}});
         Play r3 = play(y, rules, "999:+yellow,1000:strum,1200:+green,2500:-yellow", 3000);

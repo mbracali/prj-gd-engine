@@ -6,6 +6,9 @@ matches the tag's version. Nothing is released yet.
 
 ## [Unreleased]
 
+### Fixed
+- Letting go of a big note's sustain right away plays the crowd's "blew it" sound again, as in GH2 (a missed big note stays silent).
+
 ### Changed
 - PC wording instead of Xbox 360, Xbox Live, console and storage-device text, in all five languages; the Xbox Live loading tips are replaced by GD-Engine tips, as in Guitar Hero.
 - Loading and saving screens stay up at least 2 seconds with their animation, so the tips can be read, as in Guitar Hero.

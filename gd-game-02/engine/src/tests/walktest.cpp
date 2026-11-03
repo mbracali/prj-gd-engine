@@ -159,12 +159,12 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
                    "qp_selsong_screen", "main_screen", "qp_selsong_screen", "qp_diff_screen", "loading_screen", "game_screen"};
     } else if (scenario == "lose") {
         autoplay_ = false;
-        failMs_ = 5000;  // past bangyourhead's first big note (beat 8), its gem passed unhit
+        failMs_ = 6000;  // past hush's first big note (PART GUITAR beat 8), its gem passed unhit
         songKeys_ = "1000:strum,2000:strum";  // two overstrums: GH2's miss sound each
-        quickplaySong(0);
+        quickplaySong(19);  // hush (big, the 20th quick play song)
         check("miss_sound", 30000);
         at("lose_screen", 30000);
-        check("big_note_blown");
+        check("big_note_missed");
         press(kDown), wait(150), press(kDown), wait(150);  // QUIT (lose_quit_normal.btn)
         press(kX);
         at("meta_loading_screen");
@@ -500,15 +500,14 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         if (scenario == "career_win" || scenario == "career_win_medium") {
             // The tour won (GD02-023): every tier song before the tour's last
             // passed with cheat_beat_song, the last one offered and played
-            // (cut short, a win). final_song (0x00132930): the last tier's
-            // song that completes it; at Easy the tour ends with fest
-            // (0x00130c58: one tier less) and its encore is never unlocked
-            // (0x00131c70), so it is losangeles; above Easy arena's encore
-            // playwithme [C]. win_game_screen: beat_easy / beat_other and
-            // the crowd's crowd_win, then pro face-off's unlock once all
-            // six tiers are complete (0x0012f130), the results.
+            // (cut short, a win). At Easy the tour ends with arena (numTiers
+            // 0x822A2BC8: one tier less) and Easy has no encores, so arena's
+            // fifth song (required 5) psychobilly completes it; above Easy
+            // stone needs all six: hangar18 played, then its encore freebird
+            // accepted and played [C]. win_game_screen: beat_easy /
+            // beat_other and the crowd's crowd_win, then the results.
             const bool easy = scenario == "career_win";
-            winTarget_ = easy ? "losangeles" : "playwithme";
+            winTarget_ = easy ? "psychobilly" : "hangar18";
             endMs_ = 30000;
             check("career_target");
             press(kX);  // LET'S ROCK
@@ -519,6 +518,13 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
             press(kX);
             at("loading_screen");
             at("game_screen", 30000);
+            if (!easy) {
+                at("endgame_encore_screen", 90000);
+                wait(1500);
+                press(kX);  // YES: the encore
+                at("loading_screen", 30000);
+                at("game_screen", 30000);
+            }
             at("win_game_screen", 120000);
             wait(1500);
             check(easy ? "tour_won easy" : "tour_won other");
@@ -578,7 +584,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
                                            "practice_change_speed_screen", "pract_pause_screen", "meta_loading_screen", "career_screen"});
         }
         if (scenario == "career_encore") {
-            // career_full's tier to its encore offer (iran played), declined:
+            // career_full's tier to its encore offer (salvation played), declined:
             // the venue's encore_no (endgame.dta no.btn), then the results.
             endMs_ = 35000;
             check("career_seed");
@@ -587,7 +593,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
             press(kX);
             at("sel_song_screen");
             wait(900);
-            check("career_song_iran");
+            check("career_song_salvation");
             press(kX);
             at("loading_screen");
             at("game_screen", 30000);
@@ -2340,6 +2346,24 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         if (!ui.inTransition() && nowMs - lastNavMs_ > 250) ui.buttonDown(nav, 0), ui.buttonUp(nav, 0), lastNavMs_ = nowMs;
         return;
     }
+    if (s.screen == "tour_won easy" || s.screen == "tour_won other") {
+        // win_game_screen's enter (ui/gen/endgame.dta): beat_easy on Easy,
+        // else beat_other, and the meta crowd_win; the campaign won (status
+        // >= its tiers); a tour above Easy unlocks pro face-off (GH2 +0x68).
+        std::map<std::string, int> n;
+        for (const std::string& h : ui.host().sfxHistory()) ++n[h];
+        Interp& in = ui.interp();
+        const bool won = in.send("campaign", "won_campaign", {}).truthy();
+        const int status = in.send("campaign", "status", {}).integerValue();
+        std::printf("  tour: won %s, status %d, difficulty %d; beat_easy %d, beat_other %d, crowd_win %d, pro face-off %s\n", won ? "yes" : "no",
+                    status, ui::campaign::difficulty(ui), n["beat_easy"], n["beat_other"], n["crowd_win"], ui.career().proFaceOff ? "unlocked" : "locked");
+        const bool easy = s.screen == "tour_won easy";
+        if (!won) return fail("the tour is not won after its last song");
+        if (n[easy ? "beat_easy" : "beat_other"] != 1 || n[easy ? "beat_other" : "beat_easy"] != 0) return fail("win_game_screen did not play its difficulty's sound");
+        if (!n["crowd_win"]) return fail("no crowd_win on win_game_screen");
+        if (!easy && !ui.career().proFaceOff) return fail("pro face-off not unlocked by the tour");
+        return pass();
+    }
     if (s.screen == "career_song_salvation") {
         // set_career_song (0x822B89B8): the venue's first unlocked song not passed yet.
         std::printf("  career: venue %s, song %s\n", ui.session().venue.c_str(), ui.session().song.c_str());
@@ -2641,15 +2665,16 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         if (ui.currentScreen() != "endgame_screen") return fail("declining the encore did not go on to the results");
         return pass();
     }
-    if (s.screen == "big_note_blown") {
-        // A gem passed within 0.2 beats of a big note (PART GUITAR pitch
-        // 110): the player's blew_big_note, game.dta's {world play_sfx
-        // blew_bignote.cue} with the crowd audio on (0x00110e78) [C].
+    if (s.screen == "big_note_missed") {
+        // A big note (PART GUITAR pitch 110) whose gem passed unhit: GH2 asks
+        // the big-note check only from a sustain let go early (0x822C86F8),
+        // so a missed one plays no blew_bignote.cue (GD02-150) [C]; the
+        // early release itself is a self-test rule check.
         double at = -1;
         for (const auto& [name, t] : ui.host().gameSfx())
             if (name == "blew_bignote.cue" && at < 0) at = t;
-        std::printf("  big note: blew_bignote.cue %s%s\n", at < 0 ? "not played" : "at ", at < 0 ? "" : (std::to_string(int(at)) + " ms").c_str());
-        return at < 0 ? fail("the passed big note did not play blew_bignote.cue") : pass();
+        std::printf("  big note missed: blew_bignote.cue %s\n", at < 0 ? "not played" : "played");
+        return at < 0 ? pass() : fail("a missed big note played blew_bignote.cue (GH2 plays it only for a sustain let go early)");
     }
     if (s.screen == "sp_multi_fill") {
         // Both meters full once the song runs (the deploy comes from songKeys_).
