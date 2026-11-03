@@ -911,6 +911,7 @@ bool App::loadSong(const SongInfo& info, int difficulty, bool autoplay, float ba
                                            two ? modeOfPad(pads_[0]) : input_.lastMode(), noFail, faceOff ? 0 : -1, config);
         player_->setCalibrationMs(calibrationMs());
         player_->setBigNotes(song_->bigNotes[size_t(part0)]);
+        if (part0 == Part::Bass) player_->setBassRanges(song_->bassRanges);
         player_->setForgivingHopos(enhancedValue("hopo_mode") == "forgiving");
         bot_ = autoplay ? std::make_unique<Autoplay>(player_->chart(), faceOff ? 0 : -1) : nullptr;
         player2_.reset(), bot2_.reset(), coopBand_.reset();
@@ -923,6 +924,7 @@ bool App::loadSong(const SongInfo& info, int difficulty, bool autoplay, float ba
             player2_->setNumber(1);
             player2_->setCalibrationMs(calibrationMs());
             player2_->setBigNotes(song_->bigNotes[size_t(part1)]);
+            if (part1 == Part::Bass) player2_->setBassRanges(song_->bassRanges);
             player2_->setForgivingHopos(enhancedValue("hopo_mode") == "forgiving");
             // Without the menus the second player always autoplays.
             if (autoplay || !ui_) bot2_ = std::make_unique<Autoplay>(player2_->chart(), faceOff ? 1 : -1);
@@ -1495,7 +1497,13 @@ void App::playerAction(const InputEvent& a) {
     if (exploded_ || wonSent_ || lostSent_) return;
     Player* p = playerFor(a.player);
     if (!p || botFor(p)) return;  // autoplay owns that player's frets
-    const float t = float(mixer_.songTimeMs(a.timestampNs));
+    // GH2 stamps a press with the song time of the Beatmatcher's last poll
+    // (the watcher reads Beatmatcher +0x90 through 0x8233BBF0, written only
+    // by its poll 0x8233A208): the frame's game time, the same for every
+    // press in a frame (the joypad poll runs before the game's), so its
+    // 52 ms strum repeat and chord-by-fret checks compare frame times
+    // (GD02-152) [C; the poll order I].
+    const float t = lastT_;
     // On the intro clock the beat-match controllers are off and drop every
     // button (0x822CED30; on again in 0x822E2510 once the clock hands over)
     // [C]: no strum, Star Power or miss before the track is up.

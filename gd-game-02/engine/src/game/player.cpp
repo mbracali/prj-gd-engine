@@ -332,6 +332,11 @@ void Player::watcherHit(float t, int slot, int gem, bool hopo) {
 // passed last (+0x4c), and the last gem of the list when that leaves none
 // (-1). Then the player is told.
 void Player::watcherMiss(float t, int slot, int gem) {
+    // Inside a bass range (the bass part only) GH2's OnMiss plays the
+    // range's bass_%d.cue (+0x58, 0x823526F8; no such cue on the disc)
+    // instead of the overstrum: no miss, the sustain kept (GD02-036) [C].
+    for (const auto& [a, b] : bassRanges_)
+        if (t >= a && t <= b) return;
     missSlot_ = slot;
     endSustain(t, false);
     if (!(lastOverstrumMs_ + rules_.overstrumGapMs < t)) return;

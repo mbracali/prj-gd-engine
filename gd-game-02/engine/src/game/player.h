@@ -125,6 +125,8 @@ public:
     // 0.2 beats of the next one blows it (BlewBigNote, game.dta
     // blew_big_note); each big note is looked at once (0x00110e78) [C].
     void setBigNotes(std::vector<int> ticks) { bigNotes_ = std::move(ticks), nextBigNote_ = 0; }
+    // The bass part's ranges (Song::bassRanges; set for a bass player only).
+    void setBassRanges(std::vector<std::pair<float, float>> ms) { bassRanges_ = std::move(ms); }
     void update(float t);
 
     const Chart& chart() const { return chart_; }
@@ -279,6 +281,7 @@ private:
     int notesHit_ = 0, passes_ = 0, penalties_ = 0, perfect_ = 0, good_ = 0;
     int penalisedGem_ = -1;  // +0xac: the highest gem already penalised
     int practiceStartTick_ = INT_MIN, practiceEndTick_ = INT_MAX;  // +0xf0 / +0xf4
+    std::vector<std::pair<float, float>> bassRanges_;
     struct Tail {  // the open sustain record (0x822de310)
         int gem = -1;
         int max = 0;

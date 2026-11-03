@@ -662,12 +662,48 @@ int runSelfTest(const std::string& dataPath) {
         std::printf("input checks (virtual controllers):\n");
         const int inputFailures = runInputChecks();
         std::printf(inputFailures ? "%d input check(s) failed\n" : "all input checks passed\n", inputFailures);
+        // GD02-036: the disc's one bass range (X-Stream, PART GUITAR pitch 35
+        // at 302.21..302.31 s); a bass strum inside it is no overstrum.
+        int bassFailures = 0;
+        {
+            int ranges = 0;
+            bool ok = false;
+            for (const SongInfo& info : songs) {
+                Song sg;
+                try {
+                    sg = loadChart(data, info, rules);
+                } catch (const std::exception&) {
+                    continue;
+                }
+                ranges += int(sg.bassRanges.size());
+                if (info.id != "xstream" || sg.bassRanges.size() != 1 || !sg.hasPart[size_t(Part::Bass)]) continue;
+                const auto [a, b] = sg.bassRanges[0];
+                auto misses = [&](float at) {
+                    Player p(sg, Part::Bass, Difficulty::Expert, rules, ControllerMode::Guitar, true);  // no fail: nothing is played before
+                    p.setBassRanges(sg.bassRanges);
+                    int n = 0;
+                    for (float tt = -1000; tt < at + 50; tt += 4) {
+                        p.update(tt);
+                        if (tt <= at && tt + 4 > at) p.strum(at);
+                        for (const PlayerEvent& e : p.takeEvents()) n += e.kind == PlayerEvent::Kind::Miss && tt > at - 8;
+                    }
+                    return n;
+                };
+                ok = std::abs(a - 302210) < 5 && std::abs(b - 302314) < 5 && misses((a + b) / 2) == 0 && misses(a - 400) == 1;
+                std::printf("bass range: xstream %.0f..%.0f ms; a strum inside: %d miss(es), 400 ms before: %d\n", double(a), double(b),
+                            misses((a + b) / 2), misses(a - 400));
+            }
+            if (!ok || ranges != 1) {
+                std::printf("bass range check failed (%d ranges on the disc, expected 1)\n", ranges);
+                bassFailures = 1;
+            }
+        }
         const int wordingFailures = checkPcWording(data);
         std::printf(wordingFailures ? "%d string(s) still name the Xbox 360 or a console\n" : "PC wording: no Xbox 360 or console in any language\n",
                     wordingFailures);
         std::printf("%d song audio file(s) with problems, %d script(s) not decoded\n", audioFailures, scriptFailures);
         std::printf(chartFailures ? "%d chart(s) not fully hit\n" : "all charts fully hit\n", chartFailures);
-        return chartFailures || audioFailures || scriptFailures || ruleFailures || inputFailures || wordingFailures ? 1 : 0;
+        return chartFailures || audioFailures || scriptFailures || ruleFailures || inputFailures || wordingFailures || bassFailures ? 1 : 0;
     } catch (const std::exception& ex) {
         std::fprintf(stderr, "self-test failed: %s\n", ex.what());
         return 2;

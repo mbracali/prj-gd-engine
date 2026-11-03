@@ -7,6 +7,8 @@ matches the tag's version. Nothing is released yet.
 ## [Unreleased]
 
 ### Fixed
+- Button presses are timed once per frame, as on the Xbox 360 (two strums in one frame count as one).
+- X-Stream: a bass strum in the one spot GH2 ignores (302 s) is no longer an overstrum.
 - Hair swings at the original's speed at any frame rate (it moved twice as fast at 120 FPS), and its strands twist as in GH2.
 - Goth and rockabilly characters' eyes look somewhere new after some blinks, as in GH2.
 - Letting go of a big note's sustain right away plays the crowd's "blew it" sound again, as in GH2 (a missed big note stays silent).
