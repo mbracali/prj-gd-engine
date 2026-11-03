@@ -11,6 +11,7 @@
 #include <cstdlib>
 #include <set>
 
+#include "scene/pc_strings.h"
 #include "audio/audio_device.h"
 #include "game/song_db.h"
 #include "input/input.h"
@@ -642,8 +643,13 @@ public:
                 for (size_t j = 1; j < diff->children.size(); ++j) ok = ok || (diff->children[j].type == DataNode::Type::Int && diff->children[j].i == d);
                 if (!ok) continue;
             }
-            pick.push_back(t.children[0].s);
+            const std::string& tok = t.children[0].s;
+            bool dropped = false;  // Xbox Live tips are never shown on PC (GD02-154)
+            for (int j = 0; j < scene::kDroppedLoadingTipCount; ++j) dropped = dropped || tok == scene::kDroppedLoadingTips[j];
+            if (!dropped) pick.push_back(tok);
         }
+        // [I] The GD-Engine tips join every pool, on every difficulty (as gd-game-01).
+        for (int j = 0; list && j < scene::kPcLoadingTipCount; ++j) pick.push_back(scene::kPcLoadingTips[j]);
         r = Value::string(pick.empty() ? std::string() : ui_.localize(pick[size_t(in.randomInt(0, int(pick.size())))]));
         return true;
     }

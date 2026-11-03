@@ -6,6 +6,9 @@ matches the tag's version. Nothing is released yet.
 
 ## [Unreleased]
 
+### Changed
+- PC wording instead of Xbox 360, Xbox Live, console and storage-device text, in all five languages; the Xbox Live loading tips are replaced by GD-Engine tips, as in Guitar Hero.
+
 ## [0.1.11] - 2026-11-03
 
 ### Fixed

@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
+#include "scene/ui_styles.h"
 #include "tests/selftest.h"
 
+#include <cstring>
+#include <cctype>
 #include <algorithm>
 #include <cstdio>
 #include <cmath>
@@ -536,6 +539,41 @@ int runRuleChecks(const Rules& rules) {
 
 }  // namespace
 
+// GD02-154: no string the port can show names the Xbox 360, Xbox Live or a
+// console, in any of GH2's languages. The leaderboard / gamer card screens
+// are not in the port (GD02-066 dropped) and two Xbox Live tips are never
+// picked (scene::kDroppedLoadingTips).
+int checkPcWording(const GameData& data) {
+    static const char* const kNeverShown[] = {"help_tolisting", "help_gamercard", "lb_select_song", "leaderboards",
+                                              "loading_tip10", "loading_tip13"};
+    int failures = 0;
+    for (const std::string& lang : scene::Locale::languages()) {
+        scene::Locale loc;
+        loc.load(data, lang);
+        for (const auto& [token, text] : loc.strings()) {
+            std::string low = text;
+            for (char& c : low) c = char(std::tolower(static_cast<unsigned char>(c)));
+            auto word = [&](const char* w) {  // whole words only ("consolerà" is not "console")
+                const size_t n = std::strlen(w);
+                for (size_t at = low.find(w); at != std::string::npos; at = low.find(w, at + 1)) {
+                    const bool before = at > 0 && std::isalpha(static_cast<unsigned char>(low[at - 1]));
+                    const size_t e = at + n;
+                    const bool after = e < low.size() && (std::isalpha(static_cast<unsigned char>(low[e])) || (low[e] & 0x80));
+                    if (!before && !after) return true;
+                }
+                return false;
+            };
+            if (low.find("xbox") == std::string::npos && !word("console") && !word("konsole") && !word("consola")) continue;
+            bool skip = false;
+            for (const char* n : kNeverShown) skip = skip || token == n;
+            if (skip) continue;
+            std::fprintf(stderr, "  %s %s: \"%.80s\"\n", lang.c_str(), token.c_str(), text.c_str());
+            ++failures;
+        }
+    }
+    return failures;
+}
+
 int runSelfTest(const std::string& dataPath) {
     try {
         GameData data(dataPath);
@@ -612,9 +650,12 @@ int runSelfTest(const std::string& dataPath) {
         std::printf("input checks (virtual controllers):\n");
         const int inputFailures = runInputChecks();
         std::printf(inputFailures ? "%d input check(s) failed\n" : "all input checks passed\n", inputFailures);
+        const int wordingFailures = checkPcWording(data);
+        std::printf(wordingFailures ? "%d string(s) still name the Xbox 360 or a console\n" : "PC wording: no Xbox 360 or console in any language\n",
+                    wordingFailures);
         std::printf("%d song audio file(s) with problems, %d script(s) not decoded\n", audioFailures, scriptFailures);
         std::printf(chartFailures ? "%d chart(s) not fully hit\n" : "all charts fully hit\n", chartFailures);
-        return chartFailures || audioFailures || scriptFailures || ruleFailures || inputFailures ? 1 : 0;
+        return chartFailures || audioFailures || scriptFailures || ruleFailures || inputFailures || wordingFailures ? 1 : 0;
     } catch (const std::exception& ex) {
         std::fprintf(stderr, "self-test failed: %s\n", ex.what());
         return 2;

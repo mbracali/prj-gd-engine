@@ -2,6 +2,8 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "scene/ui_styles.h"
 
+#include "scene/pc_strings.h"
+
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
@@ -242,6 +244,7 @@ void Locale::load(const GameData& data, const std::string& language) {
             if (e.isList() && e.children.size() >= 2 && e.children[0].isText() && e.children[1].isText())
                 strings_[e.children[0].s] = e.children[1].s;
     }
+    applyPcStrings(strings_, language);  // the port's PC wording (GD02-154)
 }
 
 const std::string* Locale::find(const std::string& token) const {

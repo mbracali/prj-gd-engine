@@ -631,7 +631,7 @@ universal launcher, not released on its own.
 | GD02-151 | Original | 🟡 in progress (0.1.12) | Venues: the beams' buffer gain and scene-depth softness (per vertex in the port), as GH2 | Left over from GD02-049 / 091 (PARITY_GAPS) | Owner 11-03 |
 | GD02-152 | Original | 🟡 in progress (0.1.12) | Gameplay: note presses read once per frame, as on the Xbox 360 (the port times each input event) | Left over from GD02-037 (PARITY_GAPS) | Owner 11-03 |
 | GD02-153 | Original | 🟡 in progress (0.1.12) | Menus: final check of the song list font and the help bar during transitions against the original's code and data | Left over from GD02-075 / 082 (PARITY_GAPS) | Owner 11-03 |
-| GD02-154 | Bugfix | 🟡 in progress (0.1.12) | No PlayStation 2 / Xbox 360 labels in menus or loading screens (PC wording, as gd01) |  | Owner 11-03 |
+| GD02-154 | Bugfix | ✅ | No PlayStation 2 / Xbox 360 labels in menus or loading screens (PC wording, as gd01) | scene/pc_strings.cpp (as gd01): 20 tokens rewritten in eng / fre / deu / ita / esl (save messages, sign-in, leaderboards, downloads, select controller); Xbox Live tips 10 / 13 never picked; six GD-Engine tips join every pool. Self-test check: no Xbox / console word in any language (whole words). Images: only a hand-drawn generic gamepad, kept | Owner 11-03 |
 | GD02-155 | Bugfix | 🟡 in progress (0.1.12) | Loading screens: some have no animation or pass too fast to read; hold them as gd01 does to keep the original feel |  | Owner 11-03 |
 
 
