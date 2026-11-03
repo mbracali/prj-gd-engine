@@ -31,6 +31,7 @@
 #include "ui/natives.h"
 #include "ui/ui_objects.h"
 #include "ui/ui_host.h"
+#include "scene/ui_objects.h"
 #include "ui/ui_manager.h"
 
 extern const unsigned char kUiStubsTxt[];
@@ -1439,6 +1440,99 @@ WalkDriver::WalkDriver(const std::string& name)
             expect_ = {"main_screen", "training_screen", "tutorials_screen", "tut_loading_screen", "tut_script_screen",
                        "tutorial_end_screen", "meta_loading_screen", "main_screen"};
         }
+    } else if (scenario == "options_extras") {
+        // The PS2 options no other walk visits (GD03-092): memory card
+        // (autosave off / on, save bands, load bands), manage bands (rename,
+        // delete), progressive scan (warning, switch, kept; then off); Bonus
+        // Videos hidden as options.milo has it.
+        at("main_screen");
+        check("autosave_boot");
+        wait(2000);  // the main menu's entrance (a press during it is lost)
+        for (int i = 0; i < 3; ++i) press(kDown), wait(150);  // OPTIONS
+        press(kX);
+        at("options_screen");
+        check("focus_to memory_card.btn", 5000);
+        press(kX);
+        at("mem_card_screen");
+        wait(500);
+        check("autosave_is 1");  // set by bootup_load (mem_card.dta), seeded here (the walk starts past the boot)
+        check("focus_to autosave.btn", 5000);  // (the panel's focus is save_bands.btn)
+        press(kX), wait(500);
+        check("autosave_is 0");
+        press(kX), wait(500);
+        check("autosave_is 1");
+        check("focus_to save_bands.btn", 5000);
+        press(kX);
+        at("memcard_save_confirm");
+        check("focus_to dl_button1.btn", 5000);  // YES (the focus is NO)
+        press(kX);
+        at("autosave", 20000);
+        at("mem_card_screen", 20000);
+        check("focus_to load_bands.btn", 5000);
+        press(kX);
+        at("memcard_load_confirm");
+        check("focus_to dl_button1.btn", 5000);  // CONTINUE
+        press(kX);
+        at("memcard_load", 20000);
+        at("mem_card_screen", 20000);
+        press(kTri);
+        at("options_screen", 20000);
+        // Manage bands: rename the first band (a character added), then delete it.
+        check("bands_record");
+        check("focus_to op_data.btn", 5000);
+        press(kX);
+        at("options_chooseprof_screen");
+        check("focus_to cp_band?.btn", 8000);  // (the slot: bands_record)
+        press(kX);
+        at("manage_band_screen");
+        check("focus_to rename_band.btn", 5000);
+        press(kX);
+        at("nameprof_screen");
+        wait(800);
+        press(kX);  // the picked character added to the name
+        wait(300);
+        key(SDLK_RETURN);  // Start: done
+        at("options_screen", 20000);
+        check("band_renamed");
+        check("focus_to op_data.btn", 5000);
+        press(kX);
+        at("options_chooseprof_screen");
+        check("focus_to cp_band?.btn", 8000);
+        press(kX);
+        at("manage_band_screen");
+        check("focus_to delete_band.btn", 5000);
+        press(kX);
+        at("delete_confirm");
+        check("focus_to dl_button1.btn", 5000);  // YES
+        press(kX);
+        at("options_screen", 20000);
+        check("band_deleted");
+        // Progressive scan: off -> the warning -> OK -> the switch screen ->
+        // YES keeps it on; selected again it goes off at once.
+        check("focus_to video_settings.btn", 5000);
+        press(kX);
+        at("video_settings_screen");
+        check("focus_to p_scan.btn", 5000);
+        press(kX);
+        at("pscan_warning_screen");
+        press(kX);  // pscan_ok.btn
+        at("pscan_switch_screen");
+        wait(1000);
+        press(kX);  // pscan_yes.btn
+        at("video_settings_screen", 20000);
+        check("pscan_is 1");
+        press(kX), wait(500);  // p_scan.btn again
+        check("pscan_is 0");
+        press(kTri);
+        at("options_screen", 20000);
+        // Bonus Videos: hidden on this disc (the bonus material screen is
+        // never reached on the PS2).
+        check("bonus_hidden");
+        expect_ = {"main_screen", "options_screen", "mem_card_screen", "memcard_save_confirm", "autosave", "mem_card_screen",
+                   "memcard_load_confirm", "memcard_load", "mem_card_screen", "options_screen", "options_chooseprof_screen",
+                   "manage_band_screen", "nameprof_screen", "options_screen", "options_chooseprof_screen", "manage_band_screen",
+                   "delete_confirm", "options_screen", "video_settings_screen", "pscan_warning_screen", "pscan_switch_screen",
+                   "video_settings_screen", "options_screen"};
     } else if (scenario == "options") {
         // The audio settings (options.dta AUDIO_SETTINGS_PANEL_HANDLERS):
         // each slider selected, moved one step (its sound at the new
@@ -1497,7 +1591,7 @@ std::string WalkDriver::startScreen() const {
     if (scenario_ == "lose" || scenario_ == "pause" || scenario_ == "back" || scenario_ == "enhanced" || scenario_ == "cheats" ||
         scenario_ == "mouse" || scenario_ == "gamepads" || scenario_ == "gamepads_pad" || scenario_ == "menu_anim" || scenario_ == "stickyaxis" || scenario_ == "practice" ||
         scenario_ == "practice_menus" || scenario_ == "tutorial" || scenario_ == "tutorial2" || scenario_ == "tutorial3" || scenario_ == "options" || scenario_ == "whammy_tail" ||
-        scenario_ == "flaming_head" || scenario_ == "dev_cheats")
+        scenario_ == "flaming_head" || scenario_ == "dev_cheats" || scenario_ == "options_extras")
         return "main_screen";
     if (scenario_ == "attract") return "splash_screen";
     return "";
@@ -1675,6 +1769,42 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         const std::string f = fp ? fp->focus : std::string();
         std::printf("  results focus: %s\n", f.c_str());
         return f == "me_continue.btn" ? pass() : fail("back from the stats, the focus is " + f + ", not CONTINUE");
+    }
+    if (s.screen.rfind("autosave_is ", 0) == 0 || s.screen.rfind("pscan_is ", 0) == 0) {
+        const bool autosave = s.screen[0] == 'a';
+        const int want = s.screen.back() - '0';
+        const int now = autosave ? ui.interp().var("autosave").integerValue() : (ui.career().options.pscan ? 1 : 0);
+        std::printf("  %s: %d\n", autosave ? "autosave" : "progressive scan", now);
+        return now == want ? pass() : fail(std::string(autosave ? "autosave" : "progressive scan") + " is " + std::to_string(now));
+    }
+    if (s.screen == "autosave_boot") {
+        ui.interp().var("autosave") = Value::integer(1);  // bootup_load's {set $autosave TRUE}
+        return pass();
+    }
+    if (s.screen == "bands_record") {
+        bandNames_.clear();
+        bandSlot_ = -1;
+        for (const auto& p : ui.career().profiles) {
+            if (bandSlot_ < 0 && p.inUse) bandSlot_ = int(bandNames_.size());
+            bandNames_.push_back(p.inUse ? p.name : std::string());
+        }
+        std::printf("  bands: %zu slots, managing slot %d \"%s\"\n", bandNames_.size(), bandSlot_, bandSlot_ < 0 ? "" : bandNames_[size_t(bandSlot_)].c_str());
+        if (bandSlot_ < 0) return fail("no band to manage");
+        // The band's button on the choose band screen (cp_band<slot>.btn).
+        for (Step& st : steps_)
+            if (st.screen == "focus_to cp_band?.btn") st.screen = "focus_to cp_band" + std::to_string(bandSlot_) + ".btn";
+        return pass();
+    }
+    if (s.screen == "band_renamed" || s.screen == "band_deleted") {
+        const auto& ps = ui.career().profiles;
+        const size_t k = size_t(std::max(0, bandSlot_));
+        const std::string now = k < ps.size() && ps[k].inUse ? ps[k].name : std::string();
+        std::printf("  band slot %zu now \"%s\" (was \"%s\")\n", k, now.c_str(), bandNames_[k].c_str());
+        if (s.screen == "band_renamed")
+            return now.size() == bandNames_[k].size() + 1 && now.compare(0, bandNames_[k].size(), bandNames_[k]) == 0
+                       ? pass()
+                       : fail("the band was not renamed (one character added)");
+        return now.empty() ? pass() : fail("the band was not deleted");
     }
     if (s.screen == "dev_cheat_on") {
         ui.host().setEnhancedValue("dev_key_cheats", "on");
@@ -2833,6 +2963,20 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         std::printf("  options: slider sounds band %d, guitar %d, sfx %d\n", band, gtr, sfx);
         if (!band || !gtr || !sfx) return fail("a volume slider moved without its sound");
         return pass();
+    }
+    if (s.screen == "bonus_hidden") {
+        // options.milo hides Bonus Videos (op_bonus.btn not showing, no
+        // button's navDown leads to it) [C data]: the bonus material screen
+        // cannot be reached on the PS2, nor here.
+        ui::PanelObj* fp = ui.focusPanel();
+        bool linked = false;
+        if (fp && fp->view && fp->view->milo())
+            for (const char* n : {"op_audio.btn", "video_settings.btn", "port_enhanced.btn", "op_data.btn", "memory_card.btn", "op_credit.btn"})
+                if (auto* o = fp->view->milo()->root().get(n))
+                    if (auto* c = o->as<scene::UIComponent>()) linked = linked || c->navDown == "op_bonus.btn";
+        const bool shown = fp && fp->view && fp->view->showing("op_bonus.btn");
+        std::printf("  bonus videos: showing %d, reachable %d\n", shown ? 1 : 0, linked ? 1 : 0);
+        return !shown && !linked ? pass() : fail("Bonus Videos is shown or reachable in the options menu");
     }
     if (s.screen.rfind("focus_to ", 0) == 0) {
         // Down until the focus panel's focus is the component.
