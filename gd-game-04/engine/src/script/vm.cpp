@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "script/vm.h"
+#include "script/pc_strings.h"
 
 #include <SDL3/SDL_log.h>
 #include <SDL3/SDL_stdinc.h>
@@ -140,11 +141,11 @@ struct Exec {
         case kInteger: ++i; return Vm::makeInt(k.i());
         case kHexInteger: ++i; return Vm::makeInt(k.i());
         case kFloat: ++i; return Vm::makeFloat(k.f[0]);
-        case kString: ++i; return Vm::makeString(k.str);
+        case kString: ++i; return Vm::makeString(pcstrings::pcText(k.str));  // PC wording (GD04-039)
         case kLocalString:
         case kWideString:
             ++i;
-            v = Vm::makeString(k.str);
+            v = Vm::makeString(pcstrings::pcText(k.str));
             v.type = qb::Type::WString;
             return v;
         case kVector:
