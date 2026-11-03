@@ -1440,6 +1440,30 @@ WalkDriver::WalkDriver(const std::string& name)
             expect_ = {"main_screen", "training_screen", "tutorials_screen", "tut_loading_screen", "tut_script_screen",
                        "tutorial_end_screen", "meta_loading_screen", "main_screen"};
         }
+    } else if (scenario == "pad_unplugged") {
+        // A controller lost mid-song (GD03-092): a pad as player 1, the
+        // keyboard given player 2; the pad unplugged: the song pauses on
+        // pause_controller_screen with the PC message, RESUME disabled; the
+        // pad back: RESUME plays on.
+        autoplay_ = false;
+        at("main_screen");
+        check("vpad_attach");
+        wait(600);
+        check("keyboard_p2");
+        quickplaySong(3);
+        wait(3000);
+        check("vpad_detach");
+        at("pause_controller_screen", 5000);
+        wait(800);
+        check("pad_loss_message");
+        press(kX);  // ignored while the pad is missing
+        wait(500);
+        check("still pause_controller_screen");
+        check("vpad_attach");
+        wait(800);
+        press(kX);  // RESUME
+        at("game_screen", 5000);
+        expect_ = {"main_screen", "qp_selsong_screen", "qp_diff_screen", "loading_screen", "game_screen", "pause_controller_screen", "game_screen"};
     } else if (scenario == "options_extras") {
         // The PS2 options no other walk visits (GD03-092): memory card
         // (autosave off / on, save bands, load bands), manage bands (rename,
@@ -1591,7 +1615,7 @@ std::string WalkDriver::startScreen() const {
     if (scenario_ == "lose" || scenario_ == "pause" || scenario_ == "back" || scenario_ == "enhanced" || scenario_ == "cheats" ||
         scenario_ == "mouse" || scenario_ == "gamepads" || scenario_ == "gamepads_pad" || scenario_ == "menu_anim" || scenario_ == "stickyaxis" || scenario_ == "practice" ||
         scenario_ == "practice_menus" || scenario_ == "tutorial" || scenario_ == "tutorial2" || scenario_ == "tutorial3" || scenario_ == "options" || scenario_ == "whammy_tail" ||
-        scenario_ == "flaming_head" || scenario_ == "dev_cheats" || scenario_ == "options_extras")
+        scenario_ == "flaming_head" || scenario_ == "dev_cheats" || scenario_ == "options_extras" || scenario_ == "pad_unplugged")
         return "main_screen";
     if (scenario_ == "attract") return "splash_screen";
     return "";
@@ -1997,6 +2021,24 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         adapter_ = Input::attachVirtualPad("045e:028e");
         return adapter_ ? pass() : fail("no virtual pad");
     }
+    if (s.screen == "keyboard_p2") {
+        ui.input().setPlayer("keyboard", 1);
+        const std::string p1 = ui.input().playerDevice(0), p2 = ui.input().playerDevice(1);
+        std::printf("  devices: player 1 %s, player 2 %s\n", p1.c_str(), p2.c_str());
+        return p1 == "pad:" + std::to_string(adapter_) && p2 == "keyboard" ? pass() : fail("the pad is not player 1 with the keyboard player 2");
+    }
+    if (s.screen == "vpad_detach") {
+        SDL_DetachVirtualJoystick(adapter_);
+        return pass();
+    }
+    if (s.screen == "pad_loss_message") {
+        ui::PanelObj* fp = ui.focusPanel();
+        const std::string msg = fp && fp->view ? fp->view->text("pause_controller_msg.lbl") : std::string();
+        std::printf("  controller lost: \"%s\", resume disabled %d\n", msg.c_str(), fp && fp->isDisabled("resume.btn") ? 1 : 0);
+        if (msg != "Please make sure your Guitar Controller is connected.") return fail("the controller message is not the PC one");
+        return fp->isDisabled("resume.btn") ? pass() : fail("RESUME is not disabled while the pad is missing");
+    }
+    if (s.screen.rfind("still ", 0) == 0) return ui.currentScreen() == s.screen.substr(6) ? pass() : fail("left " + s.screen.substr(6));
     if (s.screen == "vpad_press") {
         SDL_Joystick* j = SDL_GetJoystickFromID(adapter_);
         if (!j) return fail("the virtual pad is not open");
