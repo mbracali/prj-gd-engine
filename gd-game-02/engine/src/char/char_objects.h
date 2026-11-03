@@ -246,7 +246,7 @@ public:
 class CharEyes : public Object {
 public:
     std::vector<std::string> eyes;  // CharLookAt names
-    std::string viewDirection;
+    std::string rightLid;  // the right eyelid bone (char_objects.dta right_lid): blinks retarget the eyes (0x82170BA8)
     std::vector<std::pair<std::string, uint32_t>> interests;  // none on the disc
 };
 

@@ -251,6 +251,9 @@ struct Rig::Impl {
         float timer = 0;           // +0x50 seconds
         float threshold = kHuge;   // +0x54 [I: its value; never reached]
         float smoothed = 0;        // +0x58
+        int lid = -1;              // right_lid (+0x38): its blinks retarget (GD02-050 G3)
+        float lidLast = 0;         // +0x5c (Enter: 0)
+        float lidDelta = 0;        // +0x60 (Enter: 0)
         std::vector<std::pair<int, float>> interests;  // (object, radius); none on the disc
     };
     // CharHair (Poll 0x8217B898, reset 0x8217B6F0).
@@ -269,6 +272,7 @@ struct Rig::Impl {
         };
         std::vector<Strand> strands;
         bool simulate = false, reset = true;
+        double clock = 0;  // unstepped seconds: the hair steps at GH2's 60 Hz (GD02-050 G1)
     };
     // CharPosConstraint (Poll 0x82178B28).
     struct PosConstraint {
@@ -331,6 +335,8 @@ struct Rig::Impl {
     void pollEyes(Eyes& e, const RigContext& ctx);
     void resetHair(Hair& h);
     void pollHair(Hair& h);
+    void stepHair(Hair& h, double dSeconds);
+    void placeHair(Hair& h);
     void pollConstraint(PosConstraint& c);
     void pollRod(IkRod& r);
 };
@@ -506,6 +512,7 @@ void Rig::Impl::build() {
             const int piv = l.pivot >= 0 ? l.pivot : l.source;
             e.head = piv >= 0 ? sk.parent(piv) : -1;
         }
+        e.lid = bone(def->rightLid);
         // The look-ats' changes feed the eyes; the eyes also read the head.
         for (Pollable& p : pollables)
             if (p.kind == kEyes && p.name == e.name) p.reads.push_back(nameOf(e.head));
@@ -604,7 +611,7 @@ void Rig::Impl::poll(const RigContext& ctx) {
         case kFore: pollFore(fores[p.index]); break;
         case kLookAt: pollLookAt(lookats[p.index], ctx); break;
         case kEyes: pollEyes(eyes[p.index], ctx); break;
-        case kHair: pollHair(hairs[p.index]); break;
+        case kHair: stepHair(hairs[p.index], ctx.dSeconds); break;
         case kConstraint: pollConstraint(constraints[p.index]); break;
         case kRod: pollRod(rods[p.index]); break;
         }
@@ -892,9 +899,19 @@ void Rig::Impl::pollEyes(Eyes& e, const RigContext& ctx) {
     V3 target = first.destPoint ? first.point : first.dest >= 0 ? sk.world(first.dest).pos : add(h.pos, row(h.rot, 1));
     const V3 dir = normalize(sub(target, h.pos));
     const float d = std::clamp(dot(dir, row(h.rot, 1)), -1.0f, 1.0f);
+    // A blink (0x82170BA8) [C]: the right lid's local m00 [I] below -0.1 and
+    // just turning to open; one in three (RandomFloat, drawn only then, as
+    // GH2's short-circuit) moves the eyes to a new point after it.
+    bool blink = false;
+    if (e.lid >= 0) {
+        const float v = row(sk.local(e.lid).rot, 0)[0];
+        const float dv = v - e.lidLast;
+        blink = v < -0.1f && dv > 0 && e.lidDelta <= 0 && rng.real(0.0f, 1.0f) < 0.33f;
+        e.lidLast = v, e.lidDelta = dv;
+    }
     if (e.lastDot != kHuge) {
         e.smoothed = ((d - e.lastDot) - e.smoothed) * 0.1f + e.smoothed;
-        if (8 < e.timer || (1 < e.timer && e.threshold < d && 0 < e.smoothed)) retarget(e);
+        if (8 < e.timer || (1 < e.timer && (blink || (e.threshold < d && 0 < e.smoothed)))) retarget(e);
     }
     e.lastDot = d;
     e.lastForward = row(sk.world(e.head).rot, 1);
@@ -949,7 +966,6 @@ void Rig::Impl::pollHair(Hair& h) {
             p.pos = add(p.pos, mul(d, k));
             const V3 rest = add(prev, mul(row(frame, 1), p.length));
             V3 up = lerp(p.up, row(frame, 2), h.p[1]);
-            p.up = row(frame, 2);
             // The collision (0x8217B898) against the collide bone [C]. Type 0:
             // a plane (its y row, at radius); 1: stay outside a sphere; 2: stay
             // inside a sphere; 3: stay outside a cylinder round its x row; 4:
@@ -1000,6 +1016,7 @@ void Rig::Impl::pollHair(Hair& h) {
                 }
             }
             frame = orthoY(sub(p.pos, prev), up);
+            p.up = row(frame, 2);  // the new segment's z (0x8214F7F0 writes the frame first) [C]
             if (p.bone >= 0) {
                 scene::Xfm b;
                 b.rot = frame;
@@ -1013,6 +1030,41 @@ void Rig::Impl::pollHair(Hair& h) {
             v = add(v, mul(sub(oldPrev, nv), -h.p[5]));
             v = add(v, mul(sub(p.pos, old), h.p[2]));
             p.vel = v;
+            prev = p.pos;
+        }
+    }
+}
+
+// GH2 polls the hair once a frame at 60 Hz, with no time step in the maths
+// (0x8217B898) [C], so the port steps it on a 60 Hz clock whatever the frame
+// rate (at most 4 steps a frame, so a hitch cannot fling the strands). A
+// frame without a step still places the bones from the points, so the hair
+// follows the head (the segments aimed as the last step left them) [I].
+void Rig::Impl::stepHair(Hair& h, double dSeconds) {
+    constexpr double kStep = 1.0 / 60;
+    h.clock += std::max(0.0, dSeconds);
+    int n = int(h.clock / kStep);
+    h.clock -= n * kStep;
+    if (n > 4) n = 4, h.clock = 0;
+    if (n == 0 || h.reset) {
+        if (h.reset) return pollHair(h);
+        return placeHair(h);
+    }
+    for (int i = 0; i < n; ++i) pollHair(h);
+}
+
+void Rig::Impl::placeHair(Hair& h) {
+    if (!h.simulate) return;
+    for (auto& s : h.strands) {
+        if (s.root < 0) continue;
+        V3 prev = sk.world(s.root).pos;
+        for (auto& p : s.points) {
+            if (p.bone >= 0) {
+                scene::Xfm b;
+                b.rot = orthoY(sub(p.pos, prev), p.up);
+                b.pos = prev;
+                sk.setWorld(p.bone, b);
+            }
             prev = p.pos;
         }
     }

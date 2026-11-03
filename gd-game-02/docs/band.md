@@ -47,7 +47,7 @@ record of every class on the disc to its end and asserts the counts.
 | CharIKMidi | 4 | 0x82184950 | 19 | the fret bone |
 | CharHair | 2 | 0x8217FAF0 | 92 | 6 params, strands {root, angle, points, 2 x 3x3}, simulate |
 | CharLookAt | 3 | 0x8216EBB0 | 36 | hdr, Wt, source, pivot, dest, 8 f32 (smoothing s, yaw / pitch limits deg, an angle fade), allow_roll |
-| CharEyes | 4 | 0x82172708 | 18 | look-ats, view_direction, interests (none) |
+| CharEyes | 4 | 0x82172708 | 18 | look-ats, right_lid (the right eyelid bone; was read as view_direction), interests (none) |
 | CharWeightSetter | 3 | 0x8218DFC0 | 38 | hdr, Wt, driver, flags (kGuitarLeftIK / RightIK), invert |
 | CharUpperTwist / CharForeTwist | 1 | 0x82182C00 / 0x82182018 | 88 / 79 | arm and twist bones (fore: f32 offset deg) |
 | CharServoBone / CharWalk | 1 | 0x82188870 / 0x82189F80 | 57 / 19 | hdr only |
@@ -215,7 +215,7 @@ record of every class on the disc to its end and asserts the counts.
   twist bones; fore arm (0x82181980) a third of (offset + the hand's twist).
 - **Eyes (0x82170BA8 / 0x82170130):** not the camera: points ahead of the
   head, picked again after 8 s [C]; **look-at** (0x8216E4E8) smoothing and
-  yaw / pitch limits. **Hair (0x8217B898):** one step per poll, collisions against the collide bone: plane, outside / inside a sphere, outside / inside a cylinder [C].
+  yaw / pitch limits. **Hair (0x8217B898):** one step per poll with no time term, so the port steps it on a 60 Hz clock at any frame rate (at most 4 a frame; a frame without a step only places the bones), `--chartest` checks 60 / 120 / 240 fps give the same bones; each point keeps the new segment's z as its up vector (stored after 0x8214F7F0 builds the frame) [C]; collisions against the collide bone: plane, outside / inside a sphere, outside / inside a cylinder [C].
 - **LOD (DrawShowing 0x82153090):** from min_lod (`set_min_lod`, the camera
   shots' force_char_lod), the first LOD i whose screen_size x (1.09 below
   the current LOD, 0.91 from it on) the screen size reaches; FUN_82151DE0
@@ -670,6 +670,7 @@ order and the material are C]. `check band_shadows` in `--walktest quickplay`.
   really is on the world position, 0x82192D60 starts it at the last path
   point [C]); the song end used by the schedule; multiplayer walks: none, one
   player only [C].
+- CharEyes blink retarget (0x82170BA8) [C]: with right_lid set (goth1, goth2, rockabill1) the lid's local m00 [I] below -0.1 and just opening, one blink in three (RandomFloat, drawn only then) moves the eyes to a new point after 1 s.
 - Hair's soft band (types 2 and 3): done. The up vector blends towards the
   collision's direction inside the band and takes it past the hard edge
   (0x8217B898, 0x82122100) [C]. CharEyes' interest branch: no interests on the
