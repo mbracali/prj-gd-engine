@@ -22,6 +22,7 @@ class Vm;
 }
 namespace venue {
 struct Venue;
+class LightShow;
 }
 
 // GH3's venue particles and pyro (docs/venues.md "Particles"): the zone's
@@ -69,6 +70,8 @@ public:
     // on the moving cage): where it is at `ms` (its placed position moved by
     // the target's motion); false when not locked.
     bool lockedPos(uint32_t node, double ms, venue::Vec3& pos) const;
+    // The venue's light show (lightvolume_getparams on a light housing).
+    void setLightShow(const venue::LightShow* show) { show_ = show; }
     int drumKicks = 0, leftKicks = 0, scalePulses = 0, flashes = 0;  // drumkick events launched, obj_applyscaling calls (logged)
     // hide / Unhide on a node by the zone's scripts: 0 hidden, 1 shown, -1 never set.
     int visibility(uint32_t node) const {
@@ -126,6 +129,7 @@ private:
         venue::Vec3 offset{};
     };
     std::unordered_map<uint32_t, Lock> locks_;
+    const venue::LightShow* show_ = nullptr;
     struct Flash {
         bool on = false;
         float b0 = 1, c0 = 1, b1 = 1, c1 = 1;  // from / to

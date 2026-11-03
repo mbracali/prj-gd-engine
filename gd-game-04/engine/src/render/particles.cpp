@@ -19,6 +19,7 @@
 #include "data/venue.h"
 #include "render/camera.h"
 #include "render/rmath.h"
+#include "render/venue_lights.h"
 #include "script/natives_core.h"
 #include "script/vm.h"
 
@@ -454,6 +455,19 @@ void Particles::addObjectNatives() {
             }
         } else if (method == K("hide") || method == K("Unhide")) {
             visibility_[obj] = method == K("hide") ? 0 : 1;
+        } else if (method == K("lightvolume_getparams")) {
+            // A light housing's volume now (Z_Party_LightSparks: sparks only
+            // while a chimney flare's volumedensity is over 0.2) [C script; I:
+            // the names returned besides volumedensity].
+            venue::HousingState h;
+            if (show_ && show_->housing(obj, t, h) && !run.frames.empty() && run.frames.back().locals) {
+                qb::Struct& l = *run.frames.back().locals;
+                qs::Vm::set(l, K("volumedensity"), qs::Vm::makeFloat(h.density));
+                qs::Vm::set(l, K("startradius"), qs::Vm::makeFloat(h.startRadius));
+                qs::Vm::set(l, K("endradius"), qs::Vm::makeFloat(h.endRadius));
+                qs::Vm::set(l, K("innerradius"), qs::Vm::makeFloat(h.innerRadius));
+                qs::Vm::set(l, K("range"), qs::Vm::makeFloat(h.range));
+            }
         } else if (method == K("obj_locktoobject")) {
             // The object follows `objectname`, `offset` in its frame (the
             // dancer 11.4 below the cage) [C script Z_Prison_Caged_Ped; I: the frame].

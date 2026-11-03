@@ -164,6 +164,7 @@ bool VenueStage::start(const Disc& disc, const Globals& g, const std::string& zo
     if (!SDL_getenv("GD04_NO_PARTICLES")) {
         particles_ = std::make_unique<Particles>();
         std::string perr;
+        particles_->setLightShow(&lights_);
         if (!particles_->start(disc, g, *venue_, chart, &perf_, -leadInMs, perr)) {
             if (!perr.empty()) SDL_Log("particles: %s", perr.c_str());
             particles_.reset();
