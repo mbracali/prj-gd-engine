@@ -154,6 +154,8 @@ public:
     void logOnce(const std::string& what);
     ScreenText& screenText();
     double nowMs() const { return uiMs_; }
+    static constexpr double kLoadScreenHoldMs = 2000;  // GD03-102
+    bool holdingLoadScreen() const;
     // A GH2 boot macro's int value (kMCFileExists...), else `def`.
     int macroInt(const std::string& name, int def) const;
     // config/gh2.dta's (modes ...).
@@ -319,6 +321,7 @@ private:
     std::string firstScreen_;
 
     // clocks (ms)
+    double currentSinceMs_ = 0;  // uiMs_ when current_ was entered (loading screens' hold, GD03-102)
     double uiMs_ = 0, secondsMs_ = 0, tutorialMs_ = 0, lastWall_ = 0, frameDt_ = 0;
     std::vector<PanelObj*> entered_;
     std::vector<ScriptObject*> made_;

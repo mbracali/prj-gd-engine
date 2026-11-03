@@ -210,6 +210,9 @@ private:
     uint32_t jitter0_ = 0;
     uint64_t frameHash_ = 0;         // enhanced: the backdrop's pixels at frame_record           // menu_anim: the focused button's re-jitters at jitter_record
     std::map<std::string, float> loops0_;  // menu_anim_loops: the up panels' frames at loop_record
+    std::string shownScreen_;               // the screen up now, since shownSinceMs_
+    double shownSinceMs_ = 0;
+    std::map<std::string, double> shownMs_;  // how long each screen was last up (load_hold)
     float nameX0_ = 0;               // the career walk's band name: where it starts
     std::array<float, 2> optionsHit_{-1, -1};  // the mouse walk: OPTIONS' hit centre in 4:3
     std::array<double, 2> practiceClock_{-1, 0};  // the practice walk: (wall ms, song ms) first seen

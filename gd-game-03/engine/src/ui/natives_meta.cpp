@@ -11,6 +11,7 @@
 #include <cstdlib>
 #include <set>
 
+#include "scene/pc_strings.h"
 #include "audio/audio_device.h"
 #include "game/song_db.h"
 #include "input/input.h"
@@ -680,6 +681,8 @@ public:
             }
             pick.push_back(t.children[0].s);
         }
+        // [I] Port: the GD-Engine tips join every pool (GD03-101, as gd01 / gd02).
+        for (int j = 0; list && j < scene::kPcLoadingTipCount; ++j) pick.push_back(scene::kPcLoadingTips[j]);
         r = Value::string(pick.empty() ? std::string() : ui_.localize(pick[size_t(in.randomInt(0, int(pick.size())))]));
         return true;
     }

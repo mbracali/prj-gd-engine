@@ -3,7 +3,9 @@
 #include "tests/selftest.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
+#include <cstring>
 #include <cmath>
 #include <exception>
 #include <functional>
@@ -22,6 +24,7 @@
 #include "game/song_db.h"
 #include "game/song_setup.h"
 #include "input/input_selftest.h"
+#include "scene/ui_styles.h"
 
 namespace {
 
@@ -663,6 +666,37 @@ int runRuleChecks(const Rules& rules) {
 
 }  // namespace
 
+// PC wording (GD03-101): no string in any language names the PS2, its
+// memory card slots, the console or a numbered controller port.
+int checkPcWording(const GameData& data) {
+    int failures = 0;
+    for (const std::string& lang : scene::Locale::languages()) {
+        scene::Locale loc;
+        loc.load(data, lang);
+        for (const auto& [token, text] : loc.strings()) {
+            std::string low = text;
+            for (char& c : low) c = char(std::tolower(static_cast<unsigned char>(c)));
+            auto word = [&](const char* w) {  // whole words only
+                const size_t n = std::strlen(w);
+                for (size_t at = low.find(w); at != std::string::npos; at = low.find(w, at + 1)) {
+                    const bool before = at > 0 && std::isalpha(static_cast<unsigned char>(low[at - 1]));
+                    const size_t e = at + n;
+                    const bool after = e < low.size() && (std::isalpha(static_cast<unsigned char>(low[e])) || (low[e] & 0x80));
+                    if (!before && !after) return true;
+                }
+                return false;
+            };
+            bool bad = word("console") || word("konsole") || word("consola");
+            for (const char* w : {"playstation", "{slot}", "port 1", "ports 1", "manette 1", "anschluss 1", "controller 1", "mando 1"})
+                bad = bad || low.find(w) != std::string::npos;
+            if (!bad) continue;
+            std::fprintf(stderr, "  %s %s: \"%.80s\"\n", lang.c_str(), token.c_str(), text.c_str());
+            ++failures;
+        }
+    }
+    return failures;
+}
+
 int runSelfTest(const std::string& dataPath) {
     try {
         GameData data(dataPath);
@@ -752,9 +786,12 @@ int runSelfTest(const std::string& dataPath) {
         std::printf("input checks (virtual controllers):\n");
         const int inputFailures = runInputChecks();
         std::printf(inputFailures ? "%d input check(s) failed\n" : "all input checks passed\n", inputFailures);
+        const int wordingFailures = checkPcWording(data);
+        std::printf(wordingFailures ? "%d string(s) still name the PS2 or a console\n" : "PC wording: no PS2 or console in any language\n",
+                    wordingFailures);
         std::printf("%d song audio file(s) with problems, %d script(s) not decoded\n", audioFailures, scriptFailures);
         std::printf(chartFailures ? "%d chart(s) not fully hit\n" : "all charts fully hit\n", chartFailures);
-        return chartFailures || audioFailures || scriptFailures || ruleFailures || inputFailures ? 1 : 0;
+        return chartFailures || audioFailures || scriptFailures || ruleFailures || inputFailures || wordingFailures ? 1 : 0;
     } catch (const std::exception& ex) {
         std::fprintf(stderr, "self-test failed: %s\n", ex.what());
         return 2;

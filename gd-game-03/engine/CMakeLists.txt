@@ -115,6 +115,7 @@ target_sources(gd03 PRIVATE
   src/script/tasks.cpp
   src/scene/ui_objects.cpp
   src/scene/ui_styles.cpp
+  src/scene/pc_strings.cpp
   src/scene/world_objects.cpp
   src/tests/scripttest.cpp
   src/ui/career.cpp

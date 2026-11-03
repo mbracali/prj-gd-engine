@@ -156,6 +156,7 @@ WalkDriver::WalkDriver(const std::string& name)
         at("meta_loading_screen");
         at("autosave");
         at("qp_selsong_screen");
+        check("load_hold");
         press(kTri);  // back
         at("main_screen");
         check("menu_sounds");  // game_outro_complete paused the game: menu sounds still play (GD03-073)
@@ -1438,6 +1439,10 @@ void WalkDriver::poll(ui::UiManager& ui, double nowMs) {
     }
     Step& s = steps_[step_];
     if (stepStart_ < 0) stepStart_ = nowMs;
+    if (ui.currentScreen() != shownScreen_) {
+        if (!shownScreen_.empty()) shownMs_[shownScreen_] = nowMs - shownSinceMs_;
+        shownScreen_ = ui.currentScreen(), shownSinceMs_ = nowMs;
+    }
     // career: the band has bought Judy Nails' second outfit and the SG's
     // white skin in the store (M10), so both choices offer two.
     if ((scenario_ == "career" || scenario_ == "career_full" || scenario_ == "career_song" || scenario_ == "career_encore" ||
@@ -1547,6 +1552,16 @@ static bool mainCamera(ui::UiManager& ui, std::array<float, 3>& pos) {
 void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
     auto fail = [&](const std::string& e) { error_ = e, failed_ = done_ = true; };
     auto pass = [&] { ++step_, stepStart_ = -1; };
+    if (s.screen == "load_hold") {
+        // The song's loading screen, the meta loading screen and the autosave
+        // each stay up at least 2 s with their animation (UiManager::holdingLoadScreen, GD03-102).
+        for (const char* n : {"loading_screen", "meta_loading_screen", "autosave"}) {
+            const auto it = shownMs_.find(n);
+            std::printf("  %s shown %.0f ms\n", n, it == shownMs_.end() ? -1.0 : it->second);
+            if (it == shownMs_.end() || it->second < ui::UiManager::kLoadScreenHoldMs - 50) return fail(std::string(n) + " passed in under 2 s");
+        }
+        return pass();
+    }
     if (s.screen == "jitter_record" || s.screen == "jitter_advances") {
         ui::PanelObj* fp = ui.focusPanel();
         if (!fp || !fp->view) return fail("no focus panel with a view");

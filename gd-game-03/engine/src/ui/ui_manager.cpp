@@ -592,6 +592,7 @@ void UiManager::switchScreens() {
         for (PanelObj* p : from->panels())
             if (p->loaded && !to->hasPanel(p) && p->path.rfind("world/", 0) == 0) p->unload();
     current_ = to;
+    currentSinceMs_ = uiMs_;
     // The keyboard's split layout (P2 on H J K L ;, N / M, B, O) while the
     // two-player menus need a second controller: from the controller select
     // with fewer than two pads, until the main menu [I: the port's].
@@ -701,6 +702,21 @@ void UiManager::applyTransitionPose(float t) {
     setMetacamFrame(transitionAnim_, 500 * (transitionReverse_ ? 1 - t : t));
 }
 
+// The port loads and saves in a moment where the PS2 took seconds, so
+// Encore's loading and memory card screens flashed by before their animation
+// or tip could be read. As gd-game-01 (its memory card rule) and gd-game-02
+// (GD02-155), each stays up at least 2 s of UI time, animating, before the
+// next screen starts (GD03-102) [I].
+bool UiManager::holdingLoadScreen() const {
+    static const char* const kHold[] = {"loading_screen", "practice_loading_screen", "tut_loading_screen", "meta_loading_screen",
+                                        "bootup_load", "bootup_create_save", "autosave", "memcard_load",
+                                        "mc_format"};
+    if (!current_) return false;
+    for (const char* n : kHold)
+        if (current_->name() == n) return uiMs_ - currentSinceMs_ < kLoadScreenHoldMs;
+    return false;
+}
+
 void UiManager::updateTransition() {
     if (phase_ == Phase::Out || phase_ == Phase::In) {
         phaseMs_ += frameDt_;
@@ -717,6 +733,7 @@ void UiManager::updateTransition() {
         return;
     }
     if (!pending_.empty()) {
+        if (holdingLoadScreen()) return;
         ScreenObj* s = screen(pending_);
         const bool back = pendingBack_;
         pending_.clear();
