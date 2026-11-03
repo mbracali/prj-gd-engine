@@ -6,6 +6,8 @@ matches the tag's version. Nothing is released yet.
 
 ## [Unreleased]
 
+## [0.1.11] - 2026-11-03
+
 ### Fixed
 - Whammy on a sustain now bends the guitar's sound.
 - Character select: the door stays closed until the character kicks it open.

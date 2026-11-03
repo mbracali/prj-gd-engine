@@ -5,6 +5,8 @@ All notable changes for players. Versions follow SemVer; release tags are
 
 ## [Unreleased]
 
+## [0.0.4] - 2026-11-03
+
 ### Fixed
 - Whammy on a sustain now bends the guitar's sound.
 - Character select: the door stays closed until the character kicks it open.

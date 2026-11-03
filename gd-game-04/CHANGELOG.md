@@ -5,6 +5,8 @@ All notable changes for players. Versions follow SemVer; release tags are
 
 ## [Unreleased]
 
+## [0.0.3] - 2026-11-03
+
 ### Fixed
 - Career: winning the song that unlocks a boss now leads to the boss, with its help screen first, as in GH3.
 - Scripts read a missing parameter as nothing, as GH3 does (it used to fall back to a global of that name).

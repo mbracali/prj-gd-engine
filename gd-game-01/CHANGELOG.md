@@ -6,6 +6,8 @@ matches the tag's version.
 
 ## [Unreleased]
 
+## [1.1.9] - 2026-11-03
+
 ### Fixed
 - Menu characters cast their shadow from the menu's shadow light, as in the original.
 - Controller messages no longer mention console controller ports.

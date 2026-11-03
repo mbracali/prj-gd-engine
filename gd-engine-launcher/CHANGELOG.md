@@ -1,5 +1,12 @@
 # Guitar Dream Universal Launcher: changes
 
+## 0.1.11
+
+- gd01 1.1.9: GH1 at 100%: menu character shadows, PC wording for controller messages, end of the career and the shop walked.
+- gd02 0.1.11: career venue select follows the selection, quick play venue as GH2, songs done per difficulty, band name size.
+- gd03 0.0.4: venue reload fixes, Glitches profile counts.
+- gd04 0.0.3: whammy tail, boss help flow, script fixes, random quick play venue.
+
 ## 0.1.10
 
 - gd02 0.1.10: older venues can be picked again, face-off doing badly rule, hair soft band.
