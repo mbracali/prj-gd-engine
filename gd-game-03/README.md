@@ -92,3 +92,10 @@ pitch correction; the crowd meter holds where the mode turns it off; mono
 as the PS2 (every sound panned to the centre). Status per area:
 [PARITY_GAPS.md](../PARITY_GAPS.md); walks: `engine/src/tests/walktest.h`
 (`whammy_tail`, `flaming_head`, `tutorial2`, `tutorial3`, `career_win` ...).
+
+**0.1.12 (Encore 100%)**: every screen walked (the final-song choice, the
+end-of-song stats, memory card / manage bands / progressive scan options,
+the controller pause, every store guitar), PC wording in all five
+languages, loading screens held 2 s, the developer keyboard cheats, WorldFx
+start / stop as the PS2. New walks: `career_finalsong`, `options_extras`,
+`pad_unplugged`, `store_guitars`, `dev_cheats`.

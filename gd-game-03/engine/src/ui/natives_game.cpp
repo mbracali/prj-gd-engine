@@ -449,14 +449,14 @@ public:
                 if (d.id.rfind("pad:", 0) == 0 && ui.input().gh2Type(d.id).find("joypad") == std::string::npos) guitar = true;
             return r = Value::symbol(guitar ? "guitar" : "joypad"), true;
         }
-        // Player 1's slot, and player 2's in multiplayer, has no device left
+        // Player 1's slot, and player 2's in multiplayer, lost its device mid-song
         // (as gd-game-01, GH1's 0x00113910 [C]): the song pauses on
         // pause_controller_screen (game.dta). The keyboard plays any free
         // slot unless the Gamepads screen gave it a player, so only a pad
         // unplugged with the keyboard on the other player leaves one empty.
         if (msg == "is_missing_controller") {
             const bool multi = gameCfgValue(ui, "num_players").integerValue() > 1;
-            return r = Value::integer(!ui.input().padConnected(0) || (multi && !ui.input().padConnected(1)) ? 1 : 0), true;
+            return r = Value::integer(ui.host().gameDeviceLost(0) || (multi && ui.host().gameDeviceLost(1)) ? 1 : 0), true;
         }
         // PS2: true greys out MULTIPLAYER when pad 2 is missing; the port
         // assigns players in GAMEPADS, so it is never missing (DECISIONS D4).

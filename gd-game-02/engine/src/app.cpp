@@ -215,6 +215,7 @@ public:
     const std::vector<SongInfo>& songs() const override { return songs_; }
     bool gameLoad(const GameSetup& setup, std::string& error) override;
     void gameBegin() override;
+    bool gameDeviceLost(int slot) const override { return slot >= 0 && slot < 2 && hadDevice_[slot] && !input_.padConnected(slot); }
     void gameEnd() override { endSong(); }
     void gameForceLose() override { failAtMs_ = -1e30f; }
     void gameForceWin() override {
@@ -436,6 +437,7 @@ private:
     std::unique_ptr<MidiParser> eventsParser_;
     DataNode eventsParserDef_;
     std::unique_ptr<Song> song_;
+    bool hadDevice_[2] = {};  // each slot had a device at the song's start (gameDeviceLost)
     std::unique_ptr<Player> player_;
     std::unique_ptr<Autoplay> bot_;
     std::unique_ptr<VorbisStream> pendingStream_;
@@ -2071,6 +2073,7 @@ bool App::gameLoad(const GameSetup& setup, std::string& error) {
 }
 
 void App::gameBegin() {
+    for (int s = 0; s < 2; ++s) hadDevice_[s] = input_.padConnected(s);
     overNs_ = 0;
     // GamePanel's start (0x822CCA60): an encore begins with every crowd full.
     if (encoreFx_)

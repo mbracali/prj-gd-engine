@@ -7,6 +7,9 @@ matches the tag's version. Nothing is released yet.
 ## [Unreleased]
 
 ### Fixed
+- Career: Free Bird, the tour's last encore, asks its three "are you sure?" letters again before it starts.
+- End-of-song stats: SP Phrases shows phrases captured out of phrases played, as in GH2.
+- Unplugging the controller mid-song pauses the game with GH2's "connect a Guitar Controller" message (when the keyboard is set to the other player).
 - Quick play: the last setlist no longer says to play Career Mode for more songs when every setlist is already open.
 - Stage light beams are drawn per pixel as in GH2's shader: they fade softly where they meet the stage and are no longer cut off by the drum kit or props in front of them.
 - Button presses are timed once per frame, as on the Xbox 360 (two strums in one frame count as one).

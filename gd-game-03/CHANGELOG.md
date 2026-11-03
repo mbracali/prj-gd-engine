@@ -5,6 +5,20 @@ All notable changes for players. Versions follow SemVer; release tags are
 
 ## [Unreleased]
 
+### Added
+- Enhanced > Developer Keyboard Cheats: Encore's own debug keys from its development kit (e.g. p autoplay, l lose, w win, c next camera, h hide the HUD).
+- Loading tips from the GD-Engine developers.
+
+### Changed
+- Memory card, console and controller port messages now use PC wording in every language.
+- Loading and saving screens stay up at least 2 seconds with their animation, as in Guitar Hero 1.
+
+### Fixed
+- Career: Play With Me, the tour's last encore, asks its three "are you sure?" letters before it starts.
+- End-of-song stats: SP Phrases shows phrases captured out of phrases played, as on the PS2.
+- Unplugging the controller mid-song pauses the game with the "connect your Guitar Controller" message (when the keyboard is set to the other player).
+- Flaming Head and the band's hand flames: when an effect stops, its flames go out at once and its animation holds, as on the PS2.
+
 ## [0.0.4] - 2026-11-03
 
 ### Fixed

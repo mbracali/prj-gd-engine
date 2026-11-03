@@ -34,18 +34,22 @@ behaviour left to change from code or data:
 
 ## gd-game-03: Guitar Hero Encore: Rocks the 80s (PS2)
 
-| Area | Missing or wrong | Backlog |
+Updated 2026-11-03 (0.1.12): every gap listed here before is closed. The
+unvisited screens are walked (GD03-092: the final-song choice, the stats
+screens, the options extras, the controller pause, the store guitars; their
+fixes in GD03-092 / GD02-157..159), WorldFx follows the PS2 (GD03-100), the
+Star Power tube and the camera shake were checked against the PS2 code
+(GD03-099, GD03-098), Animate's unused options need nothing (GD03-104), and
+the verification rows were closed by the owner (GD03-029, -030, -105, -106).
+What stays inferred, with no behaviour left to change from code or data:
+
+| Area | Inferred [I] | Backlog |
 |---|---|---|
-| Menus | Transitions, focus growth / re-jitter, looping anims as on the PS2 (0.0.2); the Horse Head cheat (0.0.3). Still missing: Animate's (blend) / (delay) / (wait) options (no menu uses them) | GD03-026, GD03-042, GD03-044, GD03-045 |
-| Highway | Nothing known: the sustain tails swell with the whammy as the PS2 (0.0.3, GD03-091); gem sparkle / bonus spark are never shown by the PS2 either (verified, GD03-027) | GD03-091, GD03-027 |
-| Gameplay rules | Nothing known open (0.0.3: crowd_rating_active as the PS2); 7 of the 10 rule fixes read from the decompiler only, not re-read in assembly | GD03-028, GD03-029 |
-| Band effects | WorldFx effects (Flaming Head, hand flames, god particles) drawn from 0.0.3; their anim clock and start / stop semantics from world_objects.dta, not the PS2 WorldFx code [I] | GD03-048 |
-| Audio / screens | Every scripted sound heard except two never used by the game; screens no walk visits yet (end-of-song stats, final-song choice, manage bands, PS2 options extras) | GD03-092 |
-| Stage director, band, crowd, MIDI | Run, but their goldens are the port's own baseline; unverified | GD03-018 |
-| Reverb, fade | Reverb network is SPU2 hardware (no code on the disc to read) [I by nature]; the fade's frame alpha and strip scaling to the picture height [I] | GD03-029 |
-| Data | Class layouts exact to every record's end marker; only Mat's first fields re-read in the PS2 loader (0x001bfc40), the rest from the 360 executable's old-revision branches | GD03-030 |
-| Mono | Mono is every source panned to the centre (0.0.3, [C]); the music's pan law at the centre is the IOP's (not read) [I] | GD03-031 |
-| Reference | PCSX2 captures blocked (needs the owner's PS2 BIOS) | GD03-018 |
+| Gameplay rules | 7 rule fixes read from the decompiler only, not re-read in assembly | GD03-029 |
+| Reverb, fade | The reverb network is SPU2 hardware (no code to read); the fade's frame alpha | GD03-029 |
+| Data | Field meanings from the 360 executable's old-revision branches (layouts exact to every record's end marker) | GD03-030 |
+| Mono | The IOP's pan law at the centre | GD03-106 |
+| Stats | Face-off's time in the lead is 0: no code on the disc writes it [C by absence] | GD03-092 |
 
 ## gd-game-04: Guitar Hero III: Legends of Rock (Xbox 360)
 

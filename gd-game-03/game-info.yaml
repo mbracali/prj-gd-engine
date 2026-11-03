@@ -9,7 +9,7 @@ platforms: [PlayStation 2]
 based_on: PlayStation 2
 guitar_dream_version: "0.0.4"
 ready_to_play: true
-completeness: 0.85
+completeness: 1.0
 iso_signatures:
   - format: iso9660
     ps2_boot: "SLUS_215.86"
