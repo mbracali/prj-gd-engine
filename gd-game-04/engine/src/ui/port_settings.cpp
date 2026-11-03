@@ -45,6 +45,7 @@ const std::vector<EnhancedSetting>& enhancedSettings() {
         {"no_shaky_cam", {"off", "on"}},
         {"no_fail", {"off", "on"}},
         {"autoplay", {"off", "on"}},
+        {"dev_debug_menu", {"off", "on"}},
         {"hopo_mode", {"original", "forgiving"}},
         {"audio_offset", {}, -300, 500},
         {"video_offset", {}, -300, 500},

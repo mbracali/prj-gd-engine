@@ -62,6 +62,7 @@ public:
     Input& walkInput() override { return input_; }
     std::string walkSaveDir() override { return saveDir_; }
     std::string walkEnhanced(const std::string& key) override { return enhanced_.get(key); }
+    void walkSetEnhanced(const std::string& key, const std::string& value) override { enhanced_.set(key, value); }
 
 private:
     bool loadData(const std::string& path);
@@ -95,6 +96,7 @@ private:
     std::unique_ptr<SongScreen> song_;
     std::unique_ptr<TextureCache> textures_;
     std::unique_ptr<FrontEnd> front_;
+    bool devDebugMenu_ = false;  // Enhanced > Developer Debug Menu last frame (GD04-041)
     // GH3's song scripts over the native core (D10; GD04_NO_HOOKS=1: off, the earlier path).
     std::unique_ptr<SongHooks> hooks_;
     std::unique_ptr<Walk> walk_;
@@ -330,6 +332,14 @@ void App::songEvent(const InputEvent& ev) {
 }
 
 void App::frame() {
+    // Enhanced > Developer Debug Menu (GD04-041): GH3's development switch
+    // enable_button_cheats (retail 0, set by the boot when NotCD is false):
+    // the pause menu's DEBUG MENU and the button cheats.
+    if (front_) {
+        const bool dev = enhanced_.on("dev_debug_menu");
+        if (dev || devDebugMenu_) front_->vm().setGlobal(qbkey::key("enable_button_cheats"), qs::Vm::makeInt(dev ? 1 : 0));
+        devDebugMenu_ = dev;
+    }
     if (song_) {
         canvas_.begin(SDL_Color{0, 0, 0, 255});
         // An analog bar's real position, not just past its threshold.

@@ -97,6 +97,16 @@ Walk::Walk(const std::string& name) : name_(name) {
         steps_.push_back({"quickplay_select_difficulty_fs", {C}, 20000});
         steps_.push_back({"quickplay_setlist_fs", {C}, 20000});
         steps_.push_back({"song", {}, 30000});
+    } else if (name == "dev_debug") {
+        // GD04-041: Enhanced > Developer Debug Menu on -> the pause menu
+        // offers GH3's DEBUG MENU (enable_button_cheats) -> its debug menu.
+        steps_ = boot;
+        steps_.push_back({"main_menu_fs", {"set:enhanced:dev_debug_menu=on", D, D, C}, 10000});
+        steps_.push_back({"quickplay_select_difficulty_fs", {C}, 20000});
+        steps_.push_back({"quickplay_setlist_fs", {C}, 20000});
+        steps_.push_back({"song", {Action::Start}, 30000});
+        steps_.push_back({"quickplay_pause_fs", {"check:text:pause_debug_menu!=", D, D, D, D, D, C}, 20000});
+        steps_.push_back({"debug_menu_fs", {"check:text:debug_vmenu!=never"}, 20000});
     } else if (name == "pause" || name == "pausequit") {
         // Start in the song -> GH3's pause menu (quickplay_pause_fs) -> RESUME
         // and the song plays on; pausequit: QUIT -> its warning -> YES -> the menus.
@@ -541,6 +551,12 @@ bool Walk::act(const std::string& what, FrontEnd& fe, WalkHost& host) {
         const int got = v ? int(v->type == qb::Type::Float ? v->f[0] : float(v->i)) : -999;
         std::printf("  tags: %s.%s = %d\n", tag.c_str(), field.c_str(), got);
         return got == want ? true : fail("tag " + kv + " is " + std::to_string(got));
+    }
+    if (starts("set:enhanced:")) {  // set:enhanced:<key>=<value>: an Enhanced option set
+        const std::string kv = rest("set:enhanced:");
+        const size_t eq = kv.find('=');
+        host.walkSetEnhanced(kv.substr(0, eq), kv.substr(eq + 1));
+        return true;
     }
     if (starts("check:enhanced:")) {
         const std::string kv = rest("check:enhanced:");

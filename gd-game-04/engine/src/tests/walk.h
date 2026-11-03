@@ -23,6 +23,7 @@ struct WalkHost {
     virtual Input& walkInput() = 0;
     virtual std::string walkSaveDir() = 0;
     virtual std::string walkEnhanced(const std::string& key) = 0;
+    virtual void walkSetEnhanced(const std::string& key, const std::string& value) = 0;
 };
 
 // --walktest <walk>: plays through GH3's own menus with scripted buttons

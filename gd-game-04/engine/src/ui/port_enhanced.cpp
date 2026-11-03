@@ -182,6 +182,11 @@ std::vector<Item> buildItems(qs::Vm& vm) {
          "Notes with a coloured top can be played without strumming. Forgiving: a wrong fret can be corrected, and a "
          "note whose fret is already held when it arrives plays by itself.",
          {{"original", "Original"}, {"forgiving", "Forgiving"}}},
+        {Kind::Check, "dev_debug_menu", "Developer Debug Menu", true,
+         "Developer cheats: GH3's own debug switch from its development kit (enable_button_cheats), off on a retail disc. "
+         "With this on, the pause menu offers GH3's DEBUG MENU (Unlock All, Repeat Last Song, Skip Into Song, Character "
+         "Select, Play Credits...) and the developers' button cheats work. Some of its entries only show debug output the "
+         "port does not draw."},
     };
     for (Item& c : gh3Cheats(vm)) k.push_back(std::move(c));
     return k;
