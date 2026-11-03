@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <exception>
+#include <functional>
 #include <vector>
 
 #include "data/disc.h"
@@ -64,6 +65,16 @@ int runScriptTest(const std::string& discPath) {
                         // PC wording (GD04-039): no text the scripts show names the console
                         // (qb.pak: English, the one language the port loads).
                         const bool english = path.find("/qb.pak.xen") != std::string::npos;
+                        std::function<void(const qb::Struct&)> structStrings = [&](const qb::Struct& st) {
+                            for (const qb::Item& it : st.items) {
+                                const qb::Value& v = it.value;
+                                if ((v.type == qb::Type::String || v.type == qb::Type::WString) && consoleWording(v.str) && ++failures <= 20)
+                                    std::printf("FAIL console wording in %s: \"%s\"\n", qbkey::name(s.name).c_str(), v.str.c_str());
+                                if (v.st) structStrings(*v.st);
+                            }
+                        };
+                        for (const auto& t : toks)
+                            if (english && t.st) structStrings(*t.st);
                         for (const auto& t : toks)
                             if (english)
                             if ((t.op == qs::kString || t.op == qs::kWideString || t.op == qs::kLocalString) && consoleWording(pcstrings::pcText(t.str))) {

@@ -97,6 +97,7 @@ private:
     std::unique_ptr<TextureCache> textures_;
     std::unique_ptr<FrontEnd> front_;
     bool devDebugMenu_ = false;  // Enhanced > Developer Debug Menu last frame (GD04-041)
+    bool hadDevice_[2] = {}, unplugReported_[2] = {};  // controller loss mid-song (GD04-042)
     // GH3's song scripts over the native core (D10; GD04_NO_HOOKS=1: off, the earlier path).
     std::unique_ptr<SongHooks> hooks_;
     std::unique_ptr<Walk> walk_;
@@ -332,6 +333,26 @@ void App::songEvent(const InputEvent& ev) {
 }
 
 void App::frame() {
+    // A controller lost mid-song (GD04-042): the 360's engine calls GH3's
+    // controller_unplugged {device_num} while check_for_unplugged_controllers
+    // is 1 (controller_pulling.qb; in a song: controller_disconnect_fs, "YOU
+    // ARE ROCKING OUT A BIT TOO HARD", RESUME / QUIT) [C script; I: the call
+    // site]. As gd-game-01..03, a player is missing when their slot had a
+    // device at the song's start and has none now (the keyboard plays any
+    // free slot unless the Gamepads screen gave it a player).
+    if (song_ && front_) {
+        for (int s = 0; s < (song_->twoPlayers() ? 2 : 1); ++s) {
+            const bool lost = hadDevice_[s] && !input_.padConnected(s);
+            const qb::Value* check = front_->vm().global(qbkey::key("check_for_unplugged_controllers"));
+            if (lost && !unplugReported_[s] && check && check->number() != 0) {
+                qb::Struct p;
+                p.items.push_back({qbkey::key("device_num"), qs::Vm::makeInt(s)});
+                front_->vm().spawn(qbkey::key("controller_unplugged"), p);
+                unplugReported_[s] = true;
+            }
+            if (!lost) unplugReported_[s] = false;
+        }
+    }
     // Enhanced > Developer Debug Menu (GD04-041): GH3's development switch
     // enable_button_cheats (retail 0, set by the boot when NotCD is false):
     // the pause menu's DEBUG MENU and the button cheats.
@@ -426,6 +447,7 @@ void App::frame() {
             if (s.checksum == front_->songRequest.song) info = &s;
         std::string err;
         song_ = std::make_unique<SongScreen>();
+        for (int s = 0; s < 2; ++s) hadDevice_[s] = input_.padConnected(s), unplugReported_[s] = false;
         // Enhanced > CHEATS: Autoplay and No Fail Mode (as --autoplay / --no-fail).
         // The attract mode plays itself (player1_status.bot_play) [C script create_attract_mode].
         const bool autoplay = options_.autoplay || walk_ || SDL_getenv("GD04_AUTOPLAY") || enhanced_.on("autoplay") || front_->attractMode();

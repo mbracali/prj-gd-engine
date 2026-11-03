@@ -35,6 +35,19 @@ const std::unordered_map<std::string, std::string>& table() {
         {"No storage device selected or found. If no storage device is available, progress will not be saved.",
          "No save location found. If none is available, progress will not be saved."},
         {"SELECT STORAGE DEVICE", "SELECT SAVE LOCATION"},
+        // Saving and loading screens (\n: QScript's line break, kept as written).
+        {"Checking storage device...\\nPlease do not turn off the Xbox 360 console.", "Checking the save data...\\nPlease do not turn off the system."},
+        {"Deleting Content.\\nPlease don't turn off the Xbox 360 console.", "Deleting Content.\\nPlease don't turn off the system."},
+        {"Loading Content.\\nPlease don't turn off the Xbox 360 console.", "Loading Content.\\nPlease don't turn off the system."},
+        {"Checking for downloadable content. Please don't turn off your Xbox 360 console.",
+         "Checking for downloadable content. Please don't turn off the system."},
+        {"Overwrite Failed.\\nNo storage device was selected or the in-use storage device is unavailable.",
+         "Overwrite Failed.\\nThe save location is unavailable."},
+        {"Save Failed.\\nNo storage device was selected or the in-use storage device is unavailable.",
+         "Save Failed.\\nThe save location is unavailable."},
+        {"You are not signed in to a Xbox 360 gamer profile. You will be unable to save any game content until you sign in.",
+         "No save profile is in use. You will be unable to save any game content."},
+        {"Xbox LIVE Main Menu", "Online Main Menu"},
         // Cheats: no achievements or leaderboards to turn off.
         {"WARNING: Some active cheats do not work in career modes and online.", "WARNING: Some active cheats do not work in career modes."},
         {"Also, achievement unlocking and leaderboard posts are turned off.", ""},
@@ -73,6 +86,10 @@ const std::string& pcText(const std::string& text) {
     const auto& t = table();
     auto it = t.find(text);
     return it == t.end() ? text : it->second;
+}
+
+void applyToStruct(qb::Struct& st) {
+    for (qb::Item& it : st.items) apply(it.value, 1);
 }
 
 void applyToGlobals(Globals& globals) {

@@ -5,6 +5,9 @@
 #include <string>
 
 class Globals;
+namespace qb {
+struct Struct;
+}
 
 namespace pcstrings {
 
@@ -12,6 +15,10 @@ namespace pcstrings {
 // port's PC wording (as gd-game-01..03; GD04-039). `text` itself when it has
 // no PC version. GH3's disc is English only.
 const std::string& pcText(const std::string& text);
+
+// Applies pcText to every string in a struct (a script's inline structs:
+// `textblock = { Text = ... }`).
+void applyToStruct(qb::Struct& st);
 
 // Applies pcText to every string in the globals, and swaps the online
 // loading tip for the GD-Engine tips (loading_screen_tips).

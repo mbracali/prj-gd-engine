@@ -107,6 +107,17 @@ Walk::Walk(const std::string& name) : name_(name) {
         steps_.push_back({"song", {Action::Start}, 30000});
         steps_.push_back({"quickplay_pause_fs", {"check:text:pause_debug_menu!=", D, D, D, D, D, C}, 20000});
         steps_.push_back({"debug_menu_fs", {"check:text:debug_vmenu!=never"}, 20000});
+    } else if (name == "pad_unplugged") {
+        // GD04-042: a pad as player 1, the keyboard given player 2; the pad
+        // unplugged mid-song: GH3's controller_disconnect_fs ("YOU ARE ROCKING
+        // OUT A BIT TOO HARD"); plugged back, RESUME and the song plays on.
+        steps_ = boot;
+        steps_.push_back({"main_menu_fs", {"xpad_attach", Op("keyboard_p2", 600), D, D, C}, 10000});
+        steps_.push_back({"quickplay_select_difficulty_fs", {C}, 20000});
+        steps_.push_back({"quickplay_setlist_fs", {C}, 20000});
+        steps_.push_back({"song", {Op("pad_detach", 10000)}, 30000});  // past the intro (playing_song = 1)
+        steps_.push_back({"controller_disconnect_fs", {Op("xpad_attach", 1000), Op(C, 1500)}, 20000});
+        steps_.push_back({"song_over", {}, 600000});
     } else if (name == "pause" || name == "pausequit") {
         // Start in the song -> GH3's pause menu (quickplay_pause_fs) -> RESUME
         // and the song plays on; pausequit: QUIT -> its warning -> YES -> the menus.
@@ -581,6 +592,18 @@ bool Walk::act(const std::string& what, FrontEnd& fe, WalkHost& host) {
         }
         std::printf("  gamepads: Whammy %s, controllers.json %s\n", bound ? "on E" : "not on E", saved ? "has it" : "does not");
         return bound && saved ? true : fail("the rebinding of the keyboard's Whammy to E did not take or was not saved");
+    }
+    if (what == "xpad_attach") {  // a virtual Xbox 360 pad (player 1 when plugged in first)
+        adapter_ = unsigned(Input::attachVirtualPad("045e:028e"));
+        return adapter_ ? true : fail("no virtual pad");
+    }
+    if (what == "pad_detach") {
+        SDL_DetachVirtualJoystick(SDL_JoystickID(adapter_));
+        return true;
+    }
+    if (what == "keyboard_p2") {  // the keyboard given player 2 (the Gamepads screen's Bind to)
+        host.walkInput().setPlayer("keyboard", 1);
+        return true;
     }
     if (what == "adapter_attach") {
         adapter_ = unsigned(Input::attachVirtualPad("0079:0006:dpadaxis=-32768"));
