@@ -62,6 +62,7 @@ public:
     // song time `ms` (the speakers' Venue_Pulse* scripts: AddPulseEvent on
     // hitnote_<colour>).
     void playerHit(double ms, uint8_t frets);
+    int drumKicks = 0, leftKicks = 0, scalePulses = 0;  // drumkick events launched, obj_applyscaling calls (logged)
     // hide / Unhide on a node by the zone's scripts: 0 hidden, 1 shown, -1 never set.
     int visibility(uint32_t node) const {
         auto it = visibility_.find(node);
@@ -143,6 +144,9 @@ private:
     uint32_t pyroScript_ = 0;
     std::vector<uint32_t> perfScripts_;
     std::vector<double> pyroTimes_;
+    // The drummer's kicks: (time, drumkick_left / _right) (Drum_iterator_CFunc).
+    std::vector<std::pair<double, uint32_t>> kicks_;
+    size_t kickAt_ = 0;
     size_t pyroAt_ = 0, perfAt_ = 0;
     venue::Performance lastPerf_ = venue::Performance::Medium;
     double vmTime_ = 0;

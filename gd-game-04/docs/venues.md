@@ -537,11 +537,19 @@ The characters receiving shadows, the effect passes' own render and
 sampler states (gd04 uses the scene material's, which 823DC180 applies
 over them), the `volume` light type and projectors, the ReducedLOD
 technique [I: the venues fit inside lod_dist1, 150 m], the encore / boss / win / lose transitions
-and their cameras, two-player arrays, the drum pulses (drumkick events),
-ScreenFlash, the first branch of a `random(...)` of clip names (z_prison /
-z_artdeco security, the caged dancer: gd04's VM yields no value for it, so
-those peds wait for a later branch), walks (Band_WalkToNode, so no
-cameras_walk).
+and their cameras, two-player arrays, ScreenFlash, walks
+(Band_WalkToNode, so no cameras_walk).
+
+Drum pulses (0.1.12): Drum_iterator_CFunc (0x821121D8) launches
+drumkick_left on drum note 36 and drumkick_right on 48 as it reaches them
+(drum_anim_lead_time early, as the arms) [C]; the Venue_PulseDrumLeft /
+Right / Both speakers wait in `Block anytypes = [...]`, then
+drum_kick_anim_delay (0.2 s), scale to 1.1 for a game frame and back over
+0.1 s [C script]. gd04 launches the events on the venue VM at those song
+times (render/particles.cpp); every venue but z_credits has 1-4 such
+speakers. The random() first-branch note is fixed (random() follows each
+branch's jump): z_prison / z_artdeco's security and the caged dancer play
+their first clip from the start.
 
 ## 7. Test
 

@@ -125,6 +125,17 @@ bool Particles::start(const Disc& disc, const Globals& g, const venue::Venue& v,
     for (const ChartEvent& e : chart.lightshow)
         if (e.note == 56) pyroTimes_.push_back(double(e.time) - offsetMs_);
     std::sort(pyroTimes_.begin(), pyroTimes_.end());
+    // Drum_iterator_CFunc (0x821121D8): drum note 36 launches drumkick_left,
+    // 48 drumkick_right, as it reaches them drum_anim_lead_time early (the
+    // arms' lead, render/band_anim.cpp) [C]; the speakers' Venue_PulseDrum*
+    // then wait drum_kick_anim_delay (0.2 s) and pulse [C script].
+    kicks_.clear(), kickAt_ = 0;
+    {
+        const double lead = qbInt(g, K("drum_anim_lead_time"), 150);
+        for (const ChartEvent& e : chart.drums)
+            if (e.note == 36 || e.note == 48) kicks_.push_back({double(e.time) - lead, K(e.note == 36 ? "drumkick_left" : "drumkick_right")});
+        std::sort(kicks_.begin(), kicks_.end());
+    }
     pyroAt_ = perfAt_ = 0;
     lastPerf_ = venue::Performance::Medium;
     vmTime_ = startMs;
@@ -377,6 +388,7 @@ void Particles::addObjectNatives() {
                 qs::Vm::set(*run.frames.back().locals, K("scaling"), qs::Vm::makeFloat(m.scale(t)));
         } else if (method == K("obj_applyscaling")) {
             m.s0 = m.sTo = qs::Vm::number(qs::Vm::param(p, K("scale")), 1), m.sDur = 0;
+            ++scalePulses;
         } else if (method == K("obj_morphscaling")) {
             m.s0 = m.scale(t), m.sT0 = t;
             m.sTo = qs::Vm::number(qs::Vm::param(p, K("target_scale")), 1);
@@ -479,6 +491,7 @@ bool Particles::attach(gfx::RenderDevice& dev, const Disc& disc, std::string& er
 }
 
 void Particles::shutdown() {
+    if (drumKicks) SDL_Log("particles: %d drum kicks launched (%d left), %d scale pulses applied", drumKicks, leftKicks, scalePulses);
     if (dev_) {
         if (program_) dev_->destroyProgram(program_);
         if (vb_) dev_->destroyBuffer(vb_);
@@ -585,6 +598,11 @@ void Particles::step(double t) {
         qs::Vm::set(params, K("performance"),
                     qs::Vm::makeKey(K(p == venue::Performance::Poor ? "poor" : p == venue::Performance::Good ? "good" : "medium")));
         for (uint32_t s : perfScripts_) vm_->run(s, params);
+    }
+    while (kickAt_ < kicks_.size() && kicks_[kickAt_].first <= t) {
+        const uint32_t type = kicks_[kickAt_++].second;
+        vm_->launchEvent(type);
+        ++drumKicks, leftKicks += type == K("drumkick_left");
     }
     while (pyroAt_ < pyroTimes_.size() && pyroTimes_[pyroAt_] <= t) {
         ++pyroAt_;

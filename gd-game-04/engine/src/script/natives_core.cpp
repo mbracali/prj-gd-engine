@@ -396,8 +396,22 @@ void addCoreNatives(Vm& vm) {
         return true;
     });
     // Block: the script waits for an event that nothing sends yet [I].
-    vm.addNative("Block", [](Vm&, ScriptRun& run, qb::Struct&) {
-        run.waitFor = [] { return false; };
+    // Block: waits for good; with `anytypes = [...]` until one of those event
+    // types is launched (Venue_PulseOnEvents' drumkick_left / _right) [C script].
+    vm.addNative("Block", [](Vm& v, ScriptRun& run, qb::Struct& p) {
+        std::vector<std::pair<uint32_t, uint64_t>> seen;
+        if (const qb::Value* a = Vm::param(p, qbkey::key("anytypes")); a && a->arr)
+            for (const qb::Value& e : a->arr->values) seen.push_back({e.key, v.eventSeq(e.key)});
+        if (seen.empty()) {
+            run.waitFor = [] { return false; };
+            return true;
+        }
+        Vm* vm = &v;
+        run.waitFor = [vm, seen] {
+            for (const auto& [type, seq] : seen)
+                if (vm->eventSeq(type) != seq) return true;
+            return false;
+        };
         return true;
     });
     // Memory and profiling calls of the console build: nothing to do on PC.
