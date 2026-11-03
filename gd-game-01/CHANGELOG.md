@@ -10,6 +10,9 @@ matches the tag's version.
 - Menu characters cast their shadow from the menu's shadow light, as in the original.
 - Controller messages no longer mention console controller ports.
 
+### Tests
+- New walks: the Unlock Shop purchase and the campaign's final song (win screens, Battle Axe, cash award); the gamepad Detect walk clicks the right list entry again.
+
 ## [1.1.8] - 2026-11-01
 
 ### Added
