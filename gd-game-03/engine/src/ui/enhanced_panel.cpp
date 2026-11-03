@@ -68,6 +68,7 @@ const std::vector<EnhancedSetting>& enhancedSettings() {
         {"no_fail", {"off", "on"}},
         {"autoplay", {"off", "on"}},
         {"hopo_mode", {"original", "forgiving"}},
+        {"dev_key_cheats", {"off", "on"}},
         {"audio_offset", {}, -300, 500},
         {"video_offset", {}, -300, 500},
     };
@@ -365,6 +366,12 @@ const std::vector<Item>& items() {
          "(forgiving): a wrong fret can be corrected, and a note whose fret is already held when it arrives plays by "
          "itself.",
          {{"original", "Original"}, {"forgiving", "Forgiving"}}},
+        {Kind::Check, "dev_key_cheats", "Developer Keyboard Cheats", true,
+         "Developer cheats: Encore's own debug keys from its development kit, never on in the retail game. With this "
+         "on, a keyboard key that is not bound to a control runs its cheat, e.g. p Autoplay, l Automatically Lose, w "
+         "Win, e / E lower / raise the crowd, c next camera, V hold the camera, h hide the HUD and fretboard, H the HUD "
+         "only, P cycle the track speed, + force the encore, S fill Star Power. Keys bound to frets (1-5, F1-F5) keep "
+         "playing. Some only show the developers' debug overlays, which the port does not draw."},
         {Kind::Cheat, "cheat_unlock_all", "", true,
          "The original cheat: every song, venue, character and guitar is open. Saving and the career are off while it "
          "is on. Code at the main menu: Blue, Orange, Yellow, Red, Orange, Yellow, Blue, Yellow, Red, Yellow, Blue, "

@@ -219,6 +219,10 @@ public:
     void gameBegin() override;
     void gameEnd() override { endSong(); }
     bool gameLoaded() const override { return player_ != nullptr; }
+    void gameForceLose() override { failAtMs_ = -1e30f; }
+    void gameForceWin() override {
+        if (song_) song_->endMs = std::min(song_->endMs, lastT_);
+    }
     void gameSetPaused(bool paused) override {
         paused_ = paused;
         mixer_.setPaused(paused || musicPaused_);
@@ -1322,6 +1326,17 @@ void App::handleEvent(const SDL_Event& e) {
     }
     actions_.clear();
     input_.handle(e, actions_);  // always: it opens the controllers as they connect
+    // Encore's developer keyboard cheats (Enhanced, GD03-103): a key not bound
+    // to a keyboard control runs its cheats.dta entry.
+    if (ui_ && e.type == SDL_EVENT_KEY_DOWN && !e.key.repeat && !ui_->textEntryFocused() && enhancedValue("dev_key_cheats") == "on") {
+        bool bound = false;
+        for (const auto& srcs : input_.bindings("keyboard"))
+            for (const Input::Source& s : srcs) bound = bound || (s.kind == Input::Source::Kind::Key && s.index == int(e.key.key));
+        int code = -1;
+        if (e.key.key >= SDLK_F1 && e.key.key <= SDLK_F12) code = 401 + int(e.key.key - SDLK_F1);
+        else if (const SDL_Keycode c = SDL_GetKeyFromScancode(e.key.scancode, e.key.mod, false); c >= 32 && c < 127) code = int(c);
+        if (!bound && code >= 0 && ui_->keyCheat(code)) return;
+    }
     if (!data_) {
         // The first screen: a click, a tap, Enter or a gamepad's A opens the
         // file dialog; a disc image dropped onto the window is used at once.

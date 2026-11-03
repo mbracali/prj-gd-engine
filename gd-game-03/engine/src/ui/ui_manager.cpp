@@ -717,6 +717,29 @@ bool UiManager::holdingLoadScreen() const {
     return false;
 }
 
+// The development kit's keyboard cheats (quick_cheats, config/cheats.dta;
+// the retail game never enables them): (key {script} ...), the key a KB_
+// macro (F-keys 401..412), a digit or a one-character symbol ('#', a, A).
+// Encore's entries have no name (GH2's have one). The port runs them from
+// the Enhanced menu's Developer Keyboard Cheats (GD03-103).
+bool UiManager::keyCheat(int code) {
+    const DataNode* qc = boot_ ? boot_->find("quick_cheats") : nullptr;
+    const DataNode* kb = qc ? qc->find("keyboard") : nullptr;
+    for (size_t k = 1; kb && k < kb->children.size(); ++k) {
+        const DataNode& c = kb->children[k];
+        if (!c.isList() || c.children.size() < 2) continue;
+        const DataNode& key = c.children[0];
+        int want = -1;
+        if (key.type == DataNode::Type::Int) want = key.i >= 0 && key.i <= 9 ? '0' + key.i : key.i;
+        else if (key.isText()) want = key.s.size() == 1 ? static_cast<unsigned char>(key.s[0]) : macroInt(key.s, -1);
+        if (want != code) continue;
+        SDL_Log("dev cheat: %s", key.isText() ? key.s.c_str() : std::to_string(key.i).c_str());
+        interp_.runList(c, 1);
+        return true;
+    }
+    return false;
+}
+
 void UiManager::updateTransition() {
     if (phase_ == Phase::Out || phase_ == Phase::In) {
         phaseMs_ += frameDt_;

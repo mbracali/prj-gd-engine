@@ -156,6 +156,10 @@ public:
     double nowMs() const { return uiMs_; }
     static constexpr double kLoadScreenHoldMs = 2000;  // GD03-102
     bool holdingLoadScreen() const;
+    // Encore's developer keyboard cheats (config/cheats.dta, quick_cheats
+    // keyboard): runs the cheat on `code` (a character, or KB_F1.. 401..412).
+    // False: no cheat on that key (GD03-103).
+    bool keyCheat(int code);
     // A GH2 boot macro's int value (kMCFileExists...), else `def`.
     int macroInt(const std::string& name, int def) const;
     // config/gh2.dta's (modes ...).

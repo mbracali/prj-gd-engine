@@ -103,6 +103,10 @@ public:
     virtual void gameEnd() = 0;
     virtual bool gameLoaded() const = 0;
     virtual void gameSetPaused(bool paused) = 0;
+    // The developer cheats' {player0 lose} / {player0 win <stars>} (cheats.dta,
+    // GD03-103): the song failed now / ended now as won.
+    virtual void gameForceLose() {}
+    virtual void gameForceWin() {}
     virtual bool gamePaused() const = 0;
     // The beatmatch's pause (beatmatch set_paused, and game set_paused with a song loaded).
     virtual bool musicPaused() const { return gamePaused(); }
