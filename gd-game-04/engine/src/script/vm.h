@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "data/qb.h"
+#include "data/qbkey.h"
 #include "script/bytecode.h"
 #include "script/globals.h"
 
@@ -183,6 +184,19 @@ private:
     std::unordered_set<std::string> logged_;
     uint32_t nextId_ = 1;
     double clockMs_ = 0;
+    double loadingShownMs_ = -1, heldLoadingMs_ = 0, minLoadingShownMs_ = -1;  // the loading screen's hold (GD04-040)
+    static constexpr uint32_t kCreateLoading = qbkey::key("create_loading_screen");
+    static constexpr uint32_t kDestroyLoading = qbkey::key("destroy_loading_screen");
+    static constexpr uint32_t kStartSong = qbkey::key("start_song");
+
+public:
+    static constexpr double kLoadingHoldMs = 2000;
+    // How long destroy_loading_screen was held back in all (walk checks).
+    double loadingHeldMs() const { return heldLoadingMs_; }
+    // The shortest time a loading screen was up (-1: none was).
+    double minLoadingShownMs() const { return minLoadingShownMs_; }
+
+private:
     double frameMs_ = 1000.0 / 60.0;
     VmStats stats_;
     bool uiLog_ = false;

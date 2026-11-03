@@ -591,7 +591,6 @@ bool Walk::act(const std::string& what, FrontEnd& fe, WalkHost& host) {
 }
 
 int Walk::finish(FrontEnd& fe) const {
-    (void)fe;
     std::string path;
     for (const std::string& s : log_) path += (path.empty() ? "" : " > ") + s;
     if (failed_ || !done()) {
@@ -604,6 +603,13 @@ int Walk::finish(FrontEnd& fe) const {
         for (const std::string& n : emptyStates_) std::printf(" %s", n.c_str());
         std::printf("\nuitest: every screen was started through the flow manager\n");
         return 0;
+    }
+    // Every loading screen stayed up 2 s (GD04-040).
+    const double shown = fe.vm().minLoadingShownMs();
+    if (shown >= 0) std::printf("walk: loading screens up at least %.0f ms\n", shown);
+    if (shown >= 0 && shown < qs::Vm::kLoadingHoldMs - 50) {
+        std::printf("walktest %s: FAILED (a loading screen passed in %.0f ms); reached: %s\n", name_.c_str(), shown, path.c_str());
+        return 1;
     }
     std::printf("walktest %s: passed (%s); songs started %d, ended %d\n", name_.c_str(), path.c_str(), songsStarted, songsEnded);
     return 0;
