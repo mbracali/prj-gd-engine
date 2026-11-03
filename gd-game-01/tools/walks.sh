@@ -13,7 +13,7 @@
 #   tools/walks.sh <gd01 binary> <Guitar Hero (PS2) .iso> [walk ...]
 #
 # Walks (all by default): selftest logo_skip band quickplay mouse enhanced
-# gamepads gamepads_pad. song_end is run by name (it plays a whole song). "band" runs first when another walk needs its save.
+# gamepads gamepads_pad store. song_end and career_win are run by name (each plays a whole song). "band" runs first when another walk needs its save.
 # The universal menus (universal_mechanisms.md) are covered by: logo_skip and
 # band (1.1.1 skips, 1.1.2 band naming), mouse (1.1.3, credits skip),
 # enhanced (1.2.2 Modes, old enhanced.json, HDR), gamepads / gamepads_pad (1.2.1).
@@ -22,7 +22,7 @@ bin="$(realpath "$1")"
 iso="$(realpath "$2")"
 shift 2
 walks=("$@")
-[ ${#walks[@]} -eq 0 ] && walks=(selftest logo_skip band quickplay mouse enhanced gamepads gamepads_pad)
+[ ${#walks[@]} -eq 0 ] && walks=(selftest logo_skip band quickplay mouse enhanced gamepads gamepads_pad store)
 
 work="$(mktemp -d "${TMPDIR:-/tmp}/gd01-walks.XXXXXX")"
 trap '[ -n "${WALK_KEEP:-}" ] && cp "$work"/*.log "$WALK_KEEP"/ ; rm -rf "$work"' EXIT
@@ -170,9 +170,74 @@ walk_gamepads() {
 # button: the pad becomes player 2 and the keyboard takes player 1.
 walk_gamepads_pad() {
   needs_band
-  run gamepads_pad 7500 "3000:keyF3,5000:click400_256,5600:click400_398,6200:vpad0" GD01_SKIP_BOOT=1 GD01_VIRTUAL_PAD=054c:0268
+  run gamepads_pad 7500 "3000:keyF3,5000:click400_256,5600:click400_372,6200:vpad0" GD01_SKIP_BOOT=1 GD01_VIRTUAL_PAD=054c:0268
   result gamepads_pad "$(json "$(save gamepads_pad)/controllers.json" "d['devices']['keyboard']['player'] == 0 and [v['player'] for k, v in d['devices'].items() if k != 'keyboard'] == [1]")" \
     "Detect binds the pad to Player 2"
+}
+
+# A copy of the band save where every <diff> career song is beaten except
+# the last one of the last venue (the campaign's final song); [cash] too;
+# [band] = the character and guitar already picked (skips those screens).
+career_seed() {  # <out dir> <easy|medium|hard|expert> [cash] [band]
+  rm -rf "$1" && cp -r "$seed" "$1"
+  echo '{"autoplay": true}' > "$1/gd-engine/gd01/enhanced.json"
+  python3 -I - "$1/gd-engine/gd01/career.json" "$2" "${3:-0}" "${4:-}" <<'EOF'
+import json, sys
+p, diff, cash, band = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4]
+order = [('basement', 'iloverockandroll iwannabesedated thunderkiss65 smokeonthewater infected'),
+         ('small_club', 'ironman morethanafeeling yougotanotherthingcomin takemeout sharpdressedman'),
+         ('big_club', 'killerqueen heyyou stellar heartfullofblack symphofdestruction'),
+         ('theatre', 'ziggystardust fatlip cochise takeitoff unsung'),
+         ('fest', 'spanishcastlemagic higherground nooneknows aceofspades crossroads'),
+         ('arena', 'godzilla texasflood frankenstein cowboysfromhell barkatthemoon')]
+if diff == 'easy':
+    order = order[:5]  # Easy has no Arena (campaign.h numVenues)
+d = json.load(open(p))
+c = d['profiles'][0]['careers'][diff]
+items = {}
+for vi, (v, songs) in enumerate(order):
+    items['venue:' + v] = {'unlocked': True}
+    for si, s in enumerate(songs.split()):
+        beaten = not (vi == len(order) - 1 and si == 4)
+        items['song:' + s] = {'unlocked': True, 'beaten': beaten, 'score': 100000 if beaten else 0, 'stars': 4 if beaten else 0}
+c.update(items=items, cash=cash)
+if band:
+    c.update(character='metal', guitar='gibson_sg_cherry')
+d['profiles'][0].update(last_difficulty=diff, tutorials_done=3)
+json.dump(d, open(p, 'w'))
+EOF
+}
+
+# Unlock Shop: Career > UNLOCK SHOP > Guitars > the Gibson ES-335 ($600),
+# SOLD, back out twice: the purchase is saved by the shop's autosave_goto.
+walk_store() {
+  needs_band
+  local keep="$seed"
+  career_seed "$work/store_seed" medium 50000 band
+  seed="$work/store_seed"
+  run store 27000 "3000:keyReturn,5500:keyReturn,8000:keyDown,8300:keyDown,8600:keyDown,9000:keyReturn,12000:keyReturn,14500:keyReturn,17000:keyReturn,19500:red,22000:red" GD01_SKIP_BOOT=1
+  seed="$keep"
+  result store "$(( $(has store "goto_screen store_bought") && $(json "$(save store)/career.json" "d['profiles'][0]['careers']['medium']['cash'] == 49400 and d['profiles'][0]['careers']['medium']['items']['guitar:gibson_es335']['unlocked']") ))" \
+    "buy the ES-335 for \$600, saved on leaving the shop"
+}
+
+# The campaign's final song (Bark at the Moon, Expert) on autoplay: win_game,
+# the Battle Axe (display_battleaxe, Expert only), the results, the cash
+# award and back to the career (goto_endgame_complete). About 6 minutes.
+walk_career_win() {
+  needs_band
+  local keep="$seed" keys="3000:keyReturn,5500:keyReturn,8000:keyReturn,10500:keyReturn,13000:keyReturn,18000:keyReturn,21000:keyReturn,24000:keyReturn" t
+  for t in $(seq 316000 8000 356000); do keys+=",$t:keyReturn"; done
+  career_seed "$work/win_seed" expert
+  seed="$work/win_seed"
+  run career_win 365000 "$keys" GD01_SKIP_BOOT=1
+  seed="$keep"
+  local order
+  order=$(grep -oE "goto_screen (post_show|win_game|endgame|status|cashaward|career)$" "$work/career_win.log" | awk '{print $2}' | uniq | tr '\n' ' ')
+  result career_win "$( [[ "$order" == *"post_show win_game endgame status cashaward career"* ]] && echo 1 || echo 0 )" \
+    "final song won: win_game, Battle Axe, results, cash award, career"
+  result career_win_axe "$(json "$(save career_win)/career.json" "d['profiles'][0]['careers']['expert']['items']['guitar:battleaxe']['unlocked'] and d['profiles'][0]['careers']['expert']['items']['song:barkatthemoon']['beaten']")" \
+    "the Battle Axe is unlocked and the final song saved as beaten"
 }
 
 for w in "${walks[@]}"; do

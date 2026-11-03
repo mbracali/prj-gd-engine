@@ -1257,6 +1257,51 @@ bool UiSystem::member(qs::ScriptRun& run, uint32_t obj, uint32_t method, qb::Str
         }
         return true;
     }
+    if (method == K("RemoveTags")) {
+        // `: removetags [a b]`, `{ [$a] }`, `tags = [a]` [C data].
+        if (!e) return false;
+        std::function<void(const qb::Struct&)> scan = [&](const qb::Struct& s) {
+            for (const qb::Item& it : s.items) {
+                if (it.value.type == qb::Type::Struct && it.value.st) scan(*it.value.st);
+                if (it.value.type != qb::Type::Array || !it.value.arr) continue;
+                for (const qb::Value& k : it.value.arr->values) {
+                    if (k.type != qb::Type::Key && k.type != qb::Type::KeyPtr) continue;
+                    auto& tags = e->tags.items;
+                    tags.erase(std::remove_if(tags.begin(), tags.end(), [&](const qb::Item& t) { return t.name == k.key; }), tags.end());
+                }
+            }
+        };
+        scan(p);
+        return true;
+    }
+    if (method == K("Obj_SpawnScriptNow") || method == K("Obj_SpawnScriptLater")) {
+        // A script on this element: `: obj_spawnscriptlater script params = {...}`
+        // (animate_dialog_box_in, pulse_dialog_title), or written as a struct
+        // `{ $script params = {...} }` [C data].
+        const qb::Struct* in = &p;
+        for (const qb::Item& it : p.items)
+            if (!it.name && it.value.type == qb::Type::Struct && it.value.st) in = it.value.st.get();
+        uint32_t script = 0;
+        for (const qb::Item& it : in->items)
+            if (!it.name && (it.value.type == qb::Type::Key || it.value.type == qb::Type::KeyPtr) && !script) script = it.value.key;
+        if (!e || !script) return false;
+        qb::Struct params;
+        if (const qb::Value* ps = qs::Vm::param(*in, K("params")); ps && ps->st) params = *ps->st;
+        const uint32_t id = vm_.spawnOn(script, params, e->id);
+        if (id && method == K("Obj_SpawnScriptNow")) vm_.runNow(id);
+        return id != 0;
+    }
+    if (method == K("GetProps")) {
+        if (!e) return false;
+        qb::Struct q;
+        qs::Vm::set(q, K("id"), qs::Vm::makeKey(obj));
+        return vm_.callNative(K("GetScreenElementProps"), run, q);
+    }
+    if (method == K("GetParentID")) {
+        if (!e) return false;
+        if (qb::Struct* l = locals(run)) qs::Vm::set(*l, K("parent_id"), qs::Vm::makeKey(e->parent ? e->parent->id : 0));
+        return true;
+    }
     if (method == K("GetSingleTag")) {
         if (!e) return false;
         uint32_t key = 0;

@@ -111,7 +111,10 @@ bool noOp(uint32_t m) {
                                     K("ragdoll_markforreset"),    K("Obj_ForceUpdate"),      K("Obj_WaitRotate"),      K("Obj_WaitMove"),
                                     K("obj_stoprotating"),        K("obj_stopmoving"),       K("Obj_PlaySound"),       K("SetTags"),
                                     K("removetags"),              K("obj_enablescaling"),    K("seteventhandler"),     K("ClearEventHandlerGroup"),
-                                    K("ResetEventHandlersFromTable")};
+                                    K("ResetEventHandlersFromTable"),
+                                    // LightShow_CreatePermModels parks the zone's light models
+                                    // (Suspend: no updates); the port's venue lights do not update them [C script].
+                                    K("Suspend")};
     return std::find(std::begin(keys), std::end(keys), m) != std::end(keys);
 }
 
@@ -420,7 +423,8 @@ bool MenuObjects::member(qs::ScriptRun& run, Object& o, uint32_t method, qb::Str
         if (!scr || scr == K("EmptyScript") || (o.type == K("bandmember") && nativeLoop(scr))) return true;
         qb::Struct args;
         if (const qb::Struct* ps = structOf(Vm::param(*in, K("params")))) args = *ps;
-        vm_.spawnOn(scr, args, id);
+        const uint32_t spawned = vm_.spawnOn(scr, args, id);
+        if (spawned && method == K("obj_spawnscriptnow")) vm_.runNow(spawned);
         return true;
     }
     if (method == K("obj_killspawnedscript")) {
@@ -491,6 +495,10 @@ void MenuObjects::addNatives() {
         uint32_t n = keyOf(Vm::param(p, K("name")));
         if (!n) n = keyOf(Vm::param(p, K("id")));
         if (!n) n = keyOf(Vm::positional(p));
+        // `CompositeObjectExists <arg> name`: the name as a bare key
+        // (create_band_member's useoldpos check) [C data].
+        for (const qb::Item& it : p.items)
+            if (!n && !it.name) n = keyOf(&it.value);
         return n;
     };
     vm_.addNative("CompositeObjectExists", [this, nameOf](Vm&, ScriptRun&, qb::Struct& p) { return exists(nameOf(p)); });

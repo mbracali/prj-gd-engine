@@ -13,4 +13,6 @@ public:
     // Decodes up to `frames` frames into one float buffer per channel;
     // returns the count decoded (less than asked only at the end).
     virtual int decode(float* const* channelBuffers, int frames) = 0;
+    // False while the source has no data yet (a live feed): the mixer waits, not silence.
+    virtual bool ready(int /*frames*/) { return true; }
 };

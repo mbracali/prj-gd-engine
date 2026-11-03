@@ -180,6 +180,17 @@ public:
                 env = &dark;
             }
             c->draw(vp, env);
+            // The shadow, flattened away from the shadow light onto the
+            // character's floor and drawn depth-only after it (charsys_shadow.mat,
+            // alpha 0), so the menu art drawn next is cut out there [C FUN_0013fa90;
+            // docs/faces_shadows.md C].
+            if (const SceneObject* l = scene_->scene().find(name_ + "_shadow.lit"); l && l->transformable()) {
+                const auto& L = l->transformable()->world.pos;
+                const auto& t = c->placement().pos;
+                std::array<float, 3> d{t[0] - L[0], t[1] - L[1], t[2] - L[2]};
+                const float len = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+                if (len > 0) c->drawShadow(vp, {d[0] / len, d[1] / len, d[2] / len});
+            }
         }
     }
 
@@ -272,6 +283,17 @@ private:
             m.model->setWorldLookup([scene](const std::string& o) -> const SceneObject* {
                 return scene ? scene->scene().find(o) : nullptr;
             });
+            // The menu character's shadow (FUN_0013fa90 / FUN_00195bd8): its
+            // <c>_shadow.rnd (classic: male_shadow), cast from the panel's
+            // ui::<panel>_shadow.lit (char_single / char_store / char_multi) [C].
+            const std::string c = m.character;
+            std::string flat = c;
+            std::erase(flat, '_');
+            for (const std::string& n : {c + "_shadow", flat + "_shadow", std::string("male_shadow")})
+                if (host_.data().exists("charsys/" + c + "/gen/" + n + ".rnd_ps2")) {
+                    m.model->loadShadow(host_.data(), "charsys/" + c + "/" + n + ".rnd");
+                    break;
+                }
         } catch (const std::exception& ex) {
             SDL_Log("%s: character %s: %s", name_.c_str(), m.character.c_str(), ex.what());
             m.failed = true;

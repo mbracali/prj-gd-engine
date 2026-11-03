@@ -78,7 +78,7 @@ void addGameNatives(FrontEnd& fe, const Disc& disc, TextureCache& textures) {
     // native game core (game/player.h, ui/song_screen.h) on $current_song at
     // $current_difficulty [approximation: GH3's own gem scroller scripts and
     // their C functions are replaced as one unit; backlog GD04-021].
-    vm.addNative("start_gem_scroller", [&fe](Vm& v, ScriptRun&, qb::Struct& p) {
+    vm.addNative("start_gem_scroller", [&fe](Vm& v, ScriptRun& run, qb::Struct& p) {
         auto diffOf = [](const qb::Value* diff) {
             if (diff) {
                 if (diff->key == K("easy")) return 0;
@@ -107,6 +107,7 @@ void addGameNatives(FrontEnd& fe, const Disc& disc, TextureCache& textures) {
             if (song && song->key == K("bossdevil")) r.startMs = 0;
         }
         v.setGlobal(K("current_starttime"), Vm::makeInt(int32_t(r.startMs)));
+        if (r.devilFinish || r.startMs > 0) SDL_Log("song: starts at %.0f ms%s", r.startMs, r.devilFinish ? " (Lou's finish)" : "");
         // end_credits: cleared unless end_credits_restart = 1 or the song is
         // thrufireandflames [C script start_gem_scroller]; with it set,
         // CrowdDecrease takes no health [C 0x8210FD18].
@@ -156,6 +157,22 @@ void addGameNatives(FrontEnd& fe, const Disc& disc, TextureCache& textures) {
             r.part2Rhythm[i] = part && part->key == K("rhythm");
         }
         if (r.boss) r.part2Rhythm[1] = true;
+        // The boss after the song that leads to it (GuitarEvent_SongWon_Spawned's
+        // preboss: show_boss_helper_screen = 1): the boss song is set up, then
+        // its intro shown when the venue has one (should_play_boss_intro:
+        // wait_and_show_boss_helper_after_intro, spawned now) or at once
+        // (show_boss_helper_now, spawned later); both kill the gem scroller and
+        // go to battle_mode_helper, whose BATTLE starts the song again with the
+        // flag cleared [C script start_gem_scroller's end; battlemode_container's
+        // alpha: the port's battle HUD is native].
+        if (r.boss && Vm::number(v.global(K("show_boss_helper_screen")), 0) == 1) {
+            qb::Struct q;
+            if (v.condition(run, K("should_play_boss_intro"), q)) {
+                if (const uint32_t id = v.spawn(K("wait_and_show_boss_helper_after_intro"), qb::Struct{})) v.runNow(id);
+            } else {
+                v.spawn(K("show_boss_helper_now"), qb::Struct{});
+            }
+        }
         // Battle's sudden death: the saved health carries over [C scripts GuitarEvent_SongWon, restart_song].
         r.suddenDeath = r.gameMode == K("p2_battle") && Vm::number(v.global(K("battle_sudden_death")), 0) != 0;
         if (r.suddenDeath)
@@ -170,6 +187,7 @@ void addGameNatives(FrontEnd& fe, const Disc& disc, TextureCache& textures) {
     // pause menu, the attract mode's end) -- a playing song is abandoned [C script kill_gem_scroller].
     vm.addNative("SongUnLoadFSBIfDownloaded", [&fe](Vm&, ScriptRun&, qb::Struct&) {
         if (fe.songPlaying) fe.songKill = true;
+        fe.songRequest.pending = false;  // a song asked for but not started yet goes too (show_boss_helper_now)
         return true;
     });
     // GetHeldPattern [controller = n] -> hold_pattern: the frets held, green

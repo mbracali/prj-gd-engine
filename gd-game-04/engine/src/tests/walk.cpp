@@ -66,6 +66,37 @@ Walk::Walk(const std::string& name) : name_(name) {
         steps_.push_back({"career_cash_reward_fs", {C}, 30000, true});  // the song's cash (Progression_AwardCash)
         steps_.push_back({"career_unlock_1_fs", {C}, 30000, true});
         steps_.push_back({"career_setlist_fs", {}, 30000});
+    } else if (name == "career_quickplay") {
+        // A career song in the venue picked (career_select_venue_fs), then
+        // back to the main menu and a quick play song: each song loads its own
+        // venue. Quick play has no venue select: setlist_choose_song's
+        // `change { current_level = <g_last_venue_selected> }` changes nothing
+        // (no such parameter), then quickplay_start_song picks a random
+        // unlocked venue, guitarist and guitar (get_valid_venue_index) [C scripts].
+        steps_ = boot;
+        steps_.push_back({"main_menu_fs", {C}, 10000});
+        steps_.push_back({"career_choose_band_fs", {C}, 20000, true});
+        steps_.push_back({"career_enter_band_name_fs", {C, C, C, Action::Start}, 20000, true});
+        steps_.push_back({"career_select_difficulty_fs", {C}, 20000});
+        steps_.push_back({"career_select_character_fs", {C}, 20000, true});
+        steps_.push_back({"career_character_hub_fs", {C}, 20000});
+        steps_.push_back({"career_select_venue_fs", {C}, 20000});
+        steps_.push_back({"career_setlist_fs", {C}, 20000});
+        steps_.push_back({"song", {}, 30000});
+        steps_.push_back({"song_over", {}, 600000});
+        steps_.push_back({"career_newspaper_fs", {C}, 30000});
+        steps_.push_back({"career_cash_reward_fs", {C}, 30000, true});
+        steps_.push_back({"career_unlock_1_fs", {C}, 30000, true});
+        steps_.push_back({"career_setlist_fs", {B}, 30000});
+        steps_.push_back({"career_select_venue_fs", {B}, 20000, true});
+        steps_.push_back({"career_character_hub_fs", {B}, 20000, true});
+        steps_.push_back({"career_select_character_fs", {B}, 20000, true});
+        steps_.push_back({"career_select_difficulty_fs", {B}, 20000, true});
+        steps_.push_back({"career_choose_band_fs", {B}, 20000, true});
+        steps_.push_back({"main_menu_fs", {D, D, C}, 20000});
+        steps_.push_back({"quickplay_select_difficulty_fs", {C}, 20000});
+        steps_.push_back({"quickplay_setlist_fs", {C}, 20000});
+        steps_.push_back({"song", {}, 30000});
     } else if (name == "pause" || name == "pausequit") {
         // Start in the song -> GH3's pause menu (quickplay_pause_fs) -> RESUME
         // and the song plays on; pausequit: QUIT -> its warning -> YES -> the menus.
@@ -149,6 +180,47 @@ Walk::Walk(const std::string& name) : name_(name) {
         steps_.push_back({"career_select_venue_fs", {C}, 20000});
         steps_.push_back({"career_setlist_fs", {"setlist:bosstom", C}, 20000});
         steps_.push_back({"career_battle_help_fs", {C}, 20000});  // "MORELLO CHALLENGES YOU!": BATTLE
+        steps_.push_back({"song", {}, 60000});
+        steps_.push_back({"song_over", {}, 900000});
+        steps_.push_back({"career_newspaper_fs", {}, 60000});
+    } else if (name == "boss_devil") {
+        // Lou's battle (bossdevil, the last tier's boss): won, GH3 restarts
+        // the song mid-way for the finish (start_devil_finish: <song>_markers[37],
+        // devil_finish_restart = 1; player 2's highway at x 1000, no death
+        // meter) and plays it to its end [C scripts] -> the newspaper.
+        steps_ = boot;
+        steps_.push_back({"main_menu_fs", {C}, 10000});
+        steps_.push_back({"career_choose_band_fs", {D, D, D, D, C}, 20000});
+        steps_.push_back({"career_select_difficulty_fs", {C}, 20000});
+        steps_.push_back({"career_character_hub_fs", {C}, 20000});
+        steps_.push_back({"career_select_venue_fs", {C}, 20000});
+        steps_.push_back({"career_setlist_fs", {"setlist:bossdevil", C}, 20000});
+        steps_.push_back({"career_battle_help_fs", {C}, 20000});
+        steps_.push_back({"song", {}, 60000});
+        steps_.push_back({"song_over", {}, 1200000});
+        steps_.push_back({"career_newspaper_fs", {}, 120000});
+    } else if (name == "boss_helper") {
+        // The boss after the song that unlocks it (GD04-038): a new band on
+        // Easy; Slow Ride played and, during it, GH3's own
+        // Progression_TierBossUnlock tier = 2 (what Progression_SongWon runs
+        // when a win completes tier 2: the boss song tag, its unlock,
+        // current_transition = preboss); the song won: GuitarEvent_SongWon_Spawned's preboss ->
+        // preboss_win_song -> start_boss (show_boss_helper_screen = 1) -> the
+        // boss song set up, its helper (should_play_boss_intro) ->
+        // battle_mode_helper -> BATTLE -> the battle [C scripts].
+        steps_ = boot;
+        steps_.push_back({"main_menu_fs", {C}, 10000});
+        steps_.push_back({"career_choose_band_fs", {C}, 20000, true});
+        steps_.push_back({"career_enter_band_name_fs", {C, C, C, Action::Start}, 20000, true});
+        steps_.push_back({"career_select_difficulty_fs", {C}, 20000});
+        steps_.push_back({"career_select_character_fs", {C}, 20000, true});
+        steps_.push_back({"career_character_hub_fs", {C}, 20000});
+        steps_.push_back({"career_select_venue_fs", {C}, 20000});
+        steps_.push_back({"career_setlist_fs", {"setlist:slowride", C}, 30000});
+        steps_.push_back({"song", {Op("script:Progression_TierBossUnlock tier=2", 3000)}, 30000});
+        steps_.push_back({"song_over", {}, 900000});
+        steps_.push_back({"career_autosave_boss_confirmation_fs", {}, 60000, true});
+        steps_.push_back({"career_battle_help_boss_confirmation_fs", {C}, 60000});  // the boss's help: BATTLE
         steps_.push_back({"song", {}, 60000});
         steps_.push_back({"song_over", {}, 900000});
         steps_.push_back({"career_newspaper_fs", {}, 60000});
@@ -319,7 +391,24 @@ std::vector<Walk::Press> Walk::update(FrontEnd& fe, bool songPlaying, double now
         if (now - lastKey_ >= (key_ == 0 ? std::max(1000.0, op.delayMs) : op.delayMs)) {
             ++key_;
             lastKey_ = now;
-            if (op.act.rfind("setlist:", 0) == 0) {
+            if (op.act.rfind("global:", 0) == 0) {
+                // "global:<name>=<int>": a script global set (GH3's own debug
+                // switches, e.g. enable_button_cheats for setlist_debug_completesong).
+                const std::string kv = op.act.substr(7);
+                const size_t eq = kv.find('=');
+                fe.vm().setGlobal(qbkey::key(kv.substr(0, eq).c_str()), qs::Vm::makeInt(std::atoi(kv.substr(eq + 1).c_str())));
+            } else if (op.act.rfind("script:", 0) == 0) {
+                // "script:<name> [<param>=<int>]": one of GH3's scripts run now.
+                std::string rest = op.act.substr(7), name = rest;
+                qb::Struct params;
+                if (const size_t sp = rest.find(' '); sp != std::string::npos) {
+                    name = rest.substr(0, sp);
+                    const std::string kv = rest.substr(sp + 1);
+                    const size_t eq = kv.find('=');
+                    qs::Vm::set(params, qbkey::key(kv.substr(0, eq).c_str()), qs::Vm::makeInt(std::atoi(kv.substr(eq + 1).c_str())));
+                }
+                fe.vm().run(qbkey::key(name.c_str()), params);
+            } else if (op.act.rfind("setlist:", 0) == 0) {
                 // Down until the setlist's cursor (setlist_selection_tier /
                 // _song, set by the items' focus handlers) is on the song.
                 const qb::Value* sl = fe.vm().global(qbkey::key("g_gh3_setlist"));

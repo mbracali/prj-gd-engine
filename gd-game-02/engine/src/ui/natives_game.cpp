@@ -413,9 +413,10 @@ public:
         }
         if (msg == "get_venue_index") return r = Value::integer(campaign::venueIndex(ui, s.venue)), true;
         if (msg == "set_quickplay") {
-            // The song's quickplay venue (songs.dta (quickplay (venue x))).
+            // The song's quickplay venue (songs.dta (quickplay (venue x))),
+            // when a band has opened it (0x822B86D0, campaign::quickplayVenue).
             const int i = songInfoIndex(ui, s.song);
-            if (i >= 0) s.venue = host.songs()[size_t(i)].venue;
+            if (i >= 0) s.venue = campaign::quickplayVenue(ui, s.song, host.songs()[size_t(i)].venue);
             // 0x822B86D0: player 0 plays the song's (quickplay (character_outfit X)
             // (guitar G) [(guitar_skin S)]), skin `default` when none.
             const DataNode* e = songEntry(ui, s.song);

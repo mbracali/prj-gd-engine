@@ -65,6 +65,16 @@ public:
     void setSurfaceTexture(uint32_t key) { surfaceTex_ = key; }
     // A gem's time on screen: scroll_time - destroy_time (ms).
     float travelMs() const { return travelMs_; }
+    // The sustain tails' wibble (whammywibble0 / 1, 128 values; the tail
+    // shader WhammyBar_UI scales a vertex's half width by m_vsVertexScales
+    // [128 - its 8-row grid row]). SetNewWhammyValue 0x821056F8: `value`
+    // (1 rest .. 2 full bar) into the first `speed` entries (whammy_wibble_speed)
+    // after the older ones moved down by as many, kept over the hold's
+    // remaining time (128 x remaining / travel time + 2 entries), the rest 1.
+    // SetAllWhammyValues 0x82105918: every entry `value` [C].
+    void setNewWhammyValue(float value, float remainingMs, int speed);
+    void setAllWhammyValues(float value) { wibble_.fill(value); }
+    const std::array<float, 128>& wibble() const { return wibble_; }
     // The gem container's y (the intro rise; 0 once up).
     float containerY() const { return containerY_; }
     // gem_container<p>'s position at song time `now`: the x offset, the
@@ -99,6 +109,7 @@ private:
     float yAt(float v) const { return topY_ + height_ * v; }
     // The normalised depth of perspective row `r` (0 .. 1152; 1024 the playline).
     float rowDepth(float r) const;
+    double rowOf(double noteMs, double nowMs) const;  // the row (0 top .. 1024 playline), unclamped
     float laneX(int lane, float v) const { return startX_[size_t(lane)] + (endX_[size_t(lane)] - startX_[size_t(lane)]) * v; }
     float alphaAt(float y) const;
     void quad(Canvas& c, uint32_t texKey, const TextureCache& tex, float cx, float cy, float w, float h, float justY, SDL_Color col,
@@ -121,6 +132,12 @@ private:
     float pulseMs_ = 200;  // highway_pulse_time
     float whammyCutoff_ = 1100;  // whammy_cutoff [C data]
     float travelMs_ = 1500;  // scroll_time - destroy_time
+    std::array<float, 128> wibble_ = filled(1.0f);
+    static std::array<float, 128> filled(float v) {
+        std::array<float, 128> a;
+        a.fill(v);
+        return a;
+    }
     std::array<float, 5> startX_{}, endX_{};
     std::vector<float> d_, accum_;  // per-row heights (normalised) and their running sum
     uint32_t surfaceTex_ = 0x2C0ED3FD;  // global fallback highway texture [C data]

@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "audio/audio_source.h"
+#include "audio/fast_pitch.h"
 #include "audio/guitar_fx.h"
 
 // Plays a song's multitrack audio and owns the song clock. The clock and
@@ -58,6 +59,12 @@ public:
     // The guitar buss's echo / reverb / volume (GH3's setsoundbusseffects,
     // SetSoundBussParams; ui/song_hooks.cpp): the guitar tracks pass through it.
     GuitarFx& guitarFx() { return guitarFx_; }
+    // The FastPitchShift on a player's guitar tracks (the whammy, the boss's
+    // pitch down); 1 is off, 0 counts as 1 [C 0x826E67E0].
+    void setGuitarPitch(int player, float pitch) { guitarPitch_[size_t(player & 1)].store(pitch == 0 ? 1.0f : pitch); }
+    float guitarPitch(int player) const { return guitarPitch_[size_t(player & 1)].load(); }
+    // Frames that guitar lags behind the band.
+    float guitarPitchLag(int player) const { return guitarLag_[size_t(player & 1)].load(); }
 
     // Song time in ms at `ticksNs` (SDL_GetTicksNS clock), or now if 0.
     double songTimeMs(uint64_t ticksNs = 0) const;
@@ -98,6 +105,8 @@ private:
     std::atomic<float> guitar2Target_{1};
     float guitar2Gain_ = 1;
     GuitarFx guitarFx_;
+    std::array<FastPitch, 2> pitch_;  // audio thread only
+    std::array<std::atomic<float>, 2> guitarPitch_{1.0f, 1.0f}, guitarLag_{0.0f, 0.0f};
 
     // Clock anchor: `anchorFrames_` frames had been played at `anchorNs_`.
     std::atomic<int64_t> anchorFrames_{0};

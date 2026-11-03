@@ -344,6 +344,7 @@ void Player::watcherHit(float t, int slot, int gem, bool hopo) {
     const Gem& g = chart_.gems[size_t(gem)];
     if (g.durationMs != 0) {
         sustainGem_ = gem;
+        sustainHitMs_ = t;
         sustainEndMs_ = g.ms + g.durationMs;
     }
 }
@@ -373,6 +374,29 @@ void Player::watcherMiss(float t, int slot, int gem) {
 // with time left also silences the guitar track (GH1's UnmuteBeatMatchAudio)
 // [I: the PS2 release only reaches the player and the highway, so short
 // notes, now released too, keep the guitar on].
+// 0x8234FF18 [C]: the bar counts once it is under -0.35 of its travel (0.675
+// here, 0 at rest); the bend is the travel past its rest, scaled by
+// pitch_bend_range (1 semitone) and ramped over ms_to_full_pitch_bend (1000)
+// from the hit; down only. The speed is the slip voice's.
+void Player::updateBend(float t) {
+    const float v = whammyBar();
+    if (sustainGem_ < 0) {
+        bendSpeed_ = 1, bendBase_ = -1, bendArmed_ = false;
+        return;
+    }
+    if (v <= 0.675f) {
+        bendArmed_ = true;
+        bendBase_ = bendBase_ < 0 ? v : std::min(bendBase_, v);
+    }
+    if (!bendArmed_ || bendBase_ >= 1) {
+        bendSpeed_ = 1;
+        return;
+    }
+    const float amount = std::clamp((v - bendBase_) / (1 - bendBase_), 0.0f, 1.0f);
+    const float ramp = std::clamp((t - sustainHitMs_) / 1000.0f, 0.0f, 1.0f);
+    bendSpeed_ = std::pow(2.0f, -amount * ramp / 12.0f);
+}
+
 void Player::endSustain(float t, bool early) {
     if (sustainGem_ < 0) return;
     const int gem = sustainGem_;
@@ -432,6 +456,7 @@ void Player::update(float t) {
     if (sustainGem_ >= 0 && sustainEndMs_ < t) endSustain(t, false);  // `end < now` (PS2 0x00248c80) [C]
     sweep(t);
     whammyPoll(t);
+    updateBend(t);
     // 0x8234e968 [C]: a pending strum past its deadline is a miss, unless it
     // was set right after a HOPO hit; then it is dropped silently. Past means
     // `deadline < now` (PS2 0x0024de90) [C].
@@ -546,6 +571,7 @@ void Player::playerHit(float t, int gem) {
     }
     spGemHit(gem);
     guitarAudible_ = true;
+    ++guitarHits_;
     emit(PlayerEvent::Kind::Hit, gem);
 }
 

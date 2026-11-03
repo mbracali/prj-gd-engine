@@ -278,6 +278,16 @@ bool ComponentObj::handleNative(Interp& in, const std::string& msg, std::vector<
         // RndAnimatable Animate (0x821E9D00): (range a b) (period s) (dest d)
         // (units u); without a period, 30 frames a second.
         if (!v) return true;
+        // The options' elements are evaluated as they are read (DataArray
+        // Float / Int evaluate their node): sel_venue's (dest $frame) is the
+        // handler's $frame. Read as is, it was no number, the map went
+        // towards the group's last frame and never followed the focus.
+        for (Value& a : args)
+            if (a.type == Value::Type::Array && a.array) {
+                auto copy = std::make_shared<std::vector<Value>>(*a.array);
+                for (Value& e : *copy) e = in.evalValue(e);
+                a.array = std::move(copy);
+            }
         const float end = v->endFrame(name());
         float from = optionNumber(args, "range", 1, 0), to = optionNumber(args, "range", 2, end);
         if (option(args, "dest")) from = v->frame(name()), to = optionNumber(args, "dest", 1, end);

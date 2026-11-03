@@ -546,7 +546,9 @@ void UiManager::beginTransition(ScreenObj* next, bool back) {
             if (p->up && !next->hasPanel(p) && p->view)
                 for (const char* ev : {"ui_exit", back_ ? "ui_exit_back" : "ui_exit_forward"})
                     for (const gfx::UiView::Trigger& t : p->view->triggers(ev))
-                        animate(p, t.anim->name, 0, t.endFrame, float(transitionMs_ / 1000.0), kTaskUISeconds);
+                        // The name's zoom leaves from where the name left it, with no jump (GD02-143).
+                        animate(p, t.anim->name, t.anim->name == "nameprof.tnm" ? p->view->frame(t.anim->name) : 0, t.endFrame,
+                                float(transitionMs_ / 1000.0), kTaskUISeconds);
         // The metacam's exit: forward meta_cam_pause_right_out 0 -> 500,
         // back meta_cam_right_in 500 -> 0.
         transitionAnim_ = forwardAnim_ ? "meta_cam_pause_right_out.tnm" : "meta_cam_right_in.tnm";
@@ -580,6 +582,15 @@ void UiManager::switchScreens() {
             for (PanelObj* p : below->panels())
                 if (!to->hasPanel(p)) exitPanel(p);
         }
+    // GH2's engine loads a screen's panels as it enters and unloads those the
+    // next screen does not hold (UIPanel's load references); the port keeps
+    // the menus' panels loaded, but world_panel's milo is the song's venue
+    // ({game get_venue}, game.dta), so it goes once the game's screens are
+    // left and the next song's world_panel loads its own venue (as gd02's
+    // GD02-148). Kept loaded, every later song played in the first one's.
+    if (from && !push)
+        for (PanelObj* p : from->panels())
+            if (p->loaded && !to->hasPanel(p) && p->path.rfind("world/", 0) == 0) p->unload();
     current_ = to;
     // The keyboard's split layout (P2 on H J K L ;, N / M, B, O) while the
     // two-player menus need a second controller: from the controller select
