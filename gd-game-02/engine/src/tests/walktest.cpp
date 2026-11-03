@@ -2,6 +2,7 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "tests/walktest.h"
 
+#include <set>
 #include <SDL3/SDL.h>
 
 #include <algorithm>
@@ -100,6 +101,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         at("main_screen");
         press(kX);  // QUICK PLAY (main_quickspin.btn, the focus)
         at("qp_selsong_screen");
+        check("qp_footer");
         for (int i = 0; i < downs; ++i) press(kDown), wait(150);
         press(kX);
         at("qp_diff_screen");
@@ -1627,6 +1629,28 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
     if (s.screen == "dev_cheat_bound") {
         std::printf("  dev cheats: after the bound key '1', on %s\n", ui.currentScreen().c_str());
         if (ui.currentScreen() != "game_screen") return fail("a key bound to a control ran a developer cheat");
+        return pass();
+    }
+    if (s.screen == "qp_footer") {
+        // GD02-156: quick play's footer ("Play Career Mode to get more songs")
+        // only while a tier is missing from the list; every save's The
+        // Glitches lists all eight, so no row carries it.
+        auto* sp = dynamic_cast<ui::ListProvider*>(ui.interp().findObject("song_provider"));
+        if (!sp) return fail("no song_provider");
+        std::vector<gfx::UiView::ListRow> rows;
+        int sel = 0;
+        sp->rows(rows, 0, sel);
+        int blurbs = 0;
+        std::set<std::string> venues;
+        for (const auto& r : rows) {
+            auto it = r.texts.find("blurb.txt");
+            blurbs += it != r.texts.end() && !it->second.empty();
+        }
+        for (int i = 0; i < sp->numData(); ++i) venues.insert(ui::campaign::venueOf(ui, sp->symbol(i)));
+        const bool all = std::all_of(ui::campaign::config(ui).tiers.begin(), ui::campaign::config(ui).tiers.end(),
+                                     [&](const auto& tier) { return venues.count(tier.first) > 0; });
+        std::printf("  quick play: %zu venues listed (all tiers: %s), %d footer row(s)\n", venues.size(), all ? "yes" : "no", blurbs);
+        if (all && blurbs) return fail("every tier is listed but the footer still says to play more");
         return pass();
     }
     if (s.screen == "load_hold") {

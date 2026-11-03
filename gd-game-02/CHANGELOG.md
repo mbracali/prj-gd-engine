@@ -7,6 +7,7 @@ matches the tag's version. Nothing is released yet.
 ## [Unreleased]
 
 ### Fixed
+- Quick play: the last setlist no longer says to play Career Mode for more songs when every setlist is already open.
 - Stage light beams are drawn per pixel as in GH2's shader: they fade softly where they meet the stage and are no longer cut off by the drum kit or props in front of them.
 - Button presses are timed once per frame, as on the Xbox 360 (two strums in one frame count as one).
 - X-Stream: a bass strum in the one spot GH2 ignores (302 s) is no longer an overstrum.

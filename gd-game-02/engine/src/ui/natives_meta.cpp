@@ -92,6 +92,15 @@ public:
     std::string blurb() {
         Career::Profile* p = campaign::profile(ui_);
         if (mode == 1) {
+            // [I] Port: no footer once the list already holds every tier. GH2
+            // lists the tiers every band unlocked but tests only the current
+            // band (below); with the port's The Glitches every tier is listed
+            // whatever the current band, and the last one said "play more"
+            // (GD02-156).
+            bool allTiers = true;
+            for (const auto& tier : campaign::config(ui_).tiers)
+                allTiers = allTiers && std::any_of(headers_.begin(), headers_.end(), [&](const auto& h) { return h.second == tier.first; });
+            if (allTiers) return {};
             // Until a band is a tier from the end at medium or harder.
             for (int d = 1; p && d < Career::kDifficulties; ++d)
                 if (int(campaign::config(ui_).tiers.size()) - 1 <= campaign::status(ui_, *p, d)) return {};
