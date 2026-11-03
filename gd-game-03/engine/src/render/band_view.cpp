@@ -61,14 +61,19 @@ void BandView::drawFx(gfx::MaterialRenderer& mr, chr::Character& c, const void* 
                 if (o->as<scene::ParticleSys>() || o->as<scene::ParticleSysAnim>()) st.parts.add(o.get(), seed++);
             if (st.parts.empty()) continue;
         }
-        // Its animatables (the AnimFilters over the MatAnims, the particle
-        // systems) from frame 0 at each start: RndDir's animate (range 0
-        // kHugeFloat), as the crowd's lighter_flame.
-        // The time since the start on the world clock's forward steps (the
-        // band enters before a song resets that clock).
+        // WorldFx (0x00272b78): start (0x00272668) sets every animatable in
+        // it to frame 0 and turns it on; while on, its poll (0x00272580)
+        // moves each one on by the task clock's step in its units times its
+        // rate (the effects' anims run at 30 frames a second); stop
+        // (0x00272890) turns it off, the anims holding their frame, and
+        // frees every live particle of its systems (0x001d0580) [C]. The
+        // time is the world clock's forward steps (the band enters before a
+        // song resets that clock).
         if (st.start != f->start) st.start = f->start, st.elapsed = 0, st.last = now;
-        if (now > st.last && now - st.last < 1.0) st.elapsed += now - st.last;
+        if (f->on && now > st.last && now - st.last < 1.0) st.elapsed += now - st.last;
         st.last = now;
+        if (st.on && !f->on) st.parts.reset();
+        st.on = f->on;
         const float frame = float(st.elapsed * 30.0);
         // The MatAnims run through their AnimFilters (cheat_headflames_0n.filt
         // over .mnm) when the effect has filters [I: the filters' targets].
