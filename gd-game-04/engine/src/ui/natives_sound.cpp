@@ -84,6 +84,11 @@ void addSoundNatives(qs::Vm& vm, Sfx& sfx) {
         if (!sfx.play(s->key, vol / 100.0f, pitch / 100.0f)) v.logOnce("PlaySound: no sample " + qbkey::name(s->key));
         return true;
     });
+    // StopAllSounds (destroy_attract_mode_text): every sound effect playing stops [C script; I: the streams are the native core's].
+    vm.addNative("StopAllSounds", [&sfx](Vm&, ScriptRun&, qb::Struct&) {
+        sfx.stopAll();
+        return true;
+    });
     for (const char* n : {"StopSound", "StopSoundsByBuss", "PauseSoundsByBuss", "UnPauseSoundsByBuss",
                           "SetSoundParams", "SetSoundBussParams"})
         vm.addNative(n, [](Vm&, ScriptRun&, qb::Struct&) { return true; });

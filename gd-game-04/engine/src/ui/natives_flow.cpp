@@ -57,13 +57,20 @@ void addFlowNatives(qs::Vm& vm, FlowState& st) {
                           "ResetEventHandlersFromTable", "RequireParams", "EnableUserMusic", "MassiveInit", "English",
                           "ClearDataBuffer", "SetRandomSeeds", "SetSlomo", "LockDSP", "UnLockDSP", "KillCamAnim", "PlayIGCCam",
                           "SetViewportProperties", "ScreenFX_ClearFXInstances", "ScreenFX_UpdateFXInstanceParams",
-                          "ScreenFX_AddFXInstance", "HideObjectByType", "SetProgressionMaxDifficulty", "Init2DParticles",
+                          "ScreenFX_AddFXInstance", "ScreenFX_RemoveFXInstance", "HideObjectByType", "SetProgressionMaxDifficulty", "Init2DParticles",
                           "AddToMaterialLibrary", "SetFontProperties", "SetFontNonProportionalNumbers", "EnableRemoveSoundEntry",
                           "SetScenePermanent", "ParseNodeArray", "startup", "CreateBussSystem", "SetSoundBussParams", "SoundBussLock",
                           "SoundBussUnLock", "createsoundbusseffects", "SetSoundBussEffects", "createnodeflag", "LightShow_Init",
                           "LightShow_SetProcessors", "CreatePakManMap", "UnloadPak", "WaitUnloadPak",
                           // guitar_startup's LoadFSB streams/streamall: audio/fsb reads the banks when played [C script]
-                          "LoadFSB"})
+                          "LoadFSB",
+                          // The song's streams are the native core's (D10, GD04-021): it starts,
+                          // pauses and stops them itself, with the guitar volume it tracks
+                          // [C scripts startpreloadpaused_song, begin_song, preload_song].
+                          "StartPreloadedStream", "PauseSound", "SetLastGuitarVolume",
+                          // Achievements and leaderboard posts, dropped (GD04-013) [C scripts
+                          // Achievements_SongWon, send_leader_board_message].
+                          "AddParam", "GetNetID", "CheckAndWriteMakerAchievement"})
         vm.addNative(n, yes);
     for (const char* n : {"NetSessionFunc", "IsHost", "EnumContentFiles", "IsEnumContentFilesDamaged", "GetLatestContentIndexFile",
                           "GetContentFolderIndexFromFile", "French", "German", "Spanish", "Italian", "IsCreated", "CompositeObjectExists",
@@ -243,6 +250,18 @@ void addFlowNatives(qs::Vm& vm, FlowState& st) {
         out.arr = a && a->arr ? std::make_shared<qb::Array>(*a->arr) : std::make_shared<qb::Array>();
         if (out.arr->type == qb::Type::None) out.arr->type = e->type;
         out.arr->values.push_back(*e);
+        if (qb::Struct* l = locals(run)) Vm::set(*l, K("array"), out);
+        return true;
+    });
+    // RemoveArrayElement array = a index = i -> array (a copy without element
+    // i) [C script store_prune_guitar_finishes: the finishes a guitar lacks].
+    vm.addNative("RemoveArrayElement", [](Vm&, ScriptRun& run, qb::Struct& p) {
+        const qb::Value* a = Vm::param(p, K("array"));
+        const int i = int(Vm::number(Vm::param(p, K("index")), -1));
+        qb::Value out;
+        out.type = qb::Type::Array;
+        out.arr = a && a->arr ? std::make_shared<qb::Array>(*a->arr) : std::make_shared<qb::Array>();
+        if (i >= 0 && size_t(i) < out.arr->values.size()) out.arr->values.erase(out.arr->values.begin() + i);
         if (qb::Struct* l = locals(run)) Vm::set(*l, K("array"), out);
         return true;
     });
