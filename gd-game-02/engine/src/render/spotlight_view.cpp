@@ -112,6 +112,97 @@ struct FlareBlock {
     float params[4];
 };
 
+// The beams per pixel (GD02-151): GH2's depthvolume.fx "render cone
+// depths" branch, from the disc's own HLSL (system/run/shaders): the screen
+// ramp illum = sat(1 - |(ramp.xy - ndc) * (aspect, 1)| / reach)^2, the depth
+// min(scene's view depth, the sheet's) as sat((w - nearest) * scale), out
+// colour x depth x illum, into a beam buffer with no depth test (add, ONE /
+// ONE), as 0x82307078 [C]. Cross-section, cut-outs and the density map are
+// identities on the disc [C data].
+const char* kBeamVertex = R"(
+layout(location = 0) in vec3 aPos;
+layout(location = 1) in vec3 aColor;
+layout(location = 2) in vec4 aRamp;   // light ndc xy, aspect, 1 / reach
+layout(location = 3) in vec2 aRange;  // nearest view depth, scale
+layout(std140) uniform GdBeam {
+    mat4 uViewProj;
+    vec4 uDepth;  // near, far, depth 0..1 (1) or -1..1 (0), output scale
+};
+uniform sampler2D sDepth;
+out vec4 vClip;
+out vec3 vColor;
+out vec4 vRamp;
+out vec2 vRange;
+void main() {
+    vec4 c = uViewProj * vec4(aPos, 1.0);
+    gl_Position = c;
+    vClip = c;
+    vColor = aColor;
+    vRamp = aRamp;
+    vRange = aRange;
+}
+)";
+const char* kBeamFragment = R"(
+layout(std140) uniform GdBeam {
+    mat4 uViewProj;
+    vec4 uDepth;
+};
+uniform sampler2D sDepth;
+in vec4 vClip;
+in vec3 vColor;
+in vec4 vRamp;
+in vec2 vRange;
+out vec4 fragColor;
+void main() {
+    vec2 ndc = vClip.xy / vClip.w;
+    float d = length(vec2((ndc.x - vRamp.x) * vRamp.z, ndc.y - vRamp.y)) * vRamp.w;
+    float illum = clamp(1.0 - d, 0.0, 1.0);
+    illum *= illum;
+    float z = texture(sDepth, ndc * 0.5 + 0.5).r;
+    float n = uDepth.x, f = uDepth.y;
+    float sceneW = uDepth.z > 0.5 ? n * f / (f - z * (f - n)) : 2.0 * n * f / ((f + n) - (z * 2.0 - 1.0) * (f - n));
+    float w = min(sceneW, vClip.w);
+    float depth = clamp((w - vRange.x) * vRange.y, 0.0, 1.0);
+    fragColor = vec4(vColor * (depth * illum * uDepth.w), 0.0);
+}
+)";
+// FogPixel (postprocess.fx): the beam buffer added onto the world's pixels.
+const char* kBeamCompVertex = R"(
+layout(location = 0) in vec2 aPos;
+out vec2 vUv;
+void main() { gl_Position = vec4(aPos, 0.0, 1.0); vUv = aPos * 0.5 + 0.5; }
+)";
+const char* kBeamCompFragment = R"(
+layout(std140) uniform GdBeamComp {
+    vec4 uGain;  // x: the buffer's gain (x the HDR output scale)
+};
+uniform sampler2D sBeams;
+in vec2 vUv;
+out vec4 fragColor;
+void main() { fragColor = vec4(texture(sBeams, vUv).rgb * uGain.x, 0.0); }
+)";
+
+struct BeamBlock {
+    float viewProj[16];
+    float depth[4];
+};
+struct BeamCompBlock {
+    float gain[4];
+};
+
+const VertexLayout& beamLayout() {
+    static VertexLayout l = [] {
+        VertexLayout v;
+        v.stride = 48;
+        v.attribs[0] = {0, 3, AttribType::Float, 0};
+        v.attribs[1] = {1, 3, AttribType::Float, 12};
+        v.attribs[2] = {2, 4, AttribType::Float, 24};
+        v.attribs[3] = {3, 2, AttribType::Float, 40};
+        return v;
+    }();
+    return l;
+}
+
 const VertexLayout& triangleLayout() {
     static VertexLayout l = [] {
         VertexLayout v;
@@ -143,6 +234,26 @@ ProgramDesc visDesc() {
     d.fragment = kVisFragment;
     d.uniformBlocks = {"GdFlareVis"};
     d.samplers = {"sPrev", "sDepth"};
+    return d;
+}
+
+ProgramDesc beamDesc() {
+    ProgramDesc d;
+    d.name = "spotlight_beam";
+    d.vertex = kBeamVertex;
+    d.fragment = kBeamFragment;
+    d.uniformBlocks = {"GdBeam"};
+    d.samplers = {"sDepth"};
+    return d;
+}
+
+ProgramDesc beamCompDesc() {
+    ProgramDesc d;
+    d.name = "spotlight_beam_composite";
+    d.vertex = kBeamCompVertex;
+    d.fragment = kBeamCompFragment;
+    d.uniformBlocks = {"GdBeamComp"};
+    d.samplers = {"sBeams"};
     return d;
 }
 
@@ -212,7 +323,8 @@ void quadIdx(Batch& b, uint16_t a, uint16_t c, uint16_t d, uint16_t e) { b.idx.i
 // buffer's scale (0x8225F2E8: total x 1024 x density) is not understood, so
 // the gain here keeps 1 [I]. Depth test on instead of the shader's min()
 // with the scene's depth [I: the same where a beam is fully hidden].
-bool beamStrip(const scene::Spotlight& s, Vec3 pos, Vec3 y, Vec3 dir, const Camera& camera, const float lit[3], Batch& out) {
+bool beamStrip(const scene::Spotlight& s, Vec3 pos, Vec3 y, Vec3 dir, const Camera& camera, const float lit[3], Batch& out,
+               std::vector<float>* px) {
     const float len = s.beam.length, top = s.beam.topRadius, bottom = s.beam.bottomRadius;
     const Vec3 cam = camera.position();
     const Vec3 fwd = normalize(Vec3{camera.world.m[4], camera.world.m[5], camera.world.m[6]});
@@ -249,6 +361,13 @@ bool beamStrip(const scene::Spotlight& s, Vec3 pos, Vec3 y, Vec3 dir, const Came
     for (int i = 2; i < 4; ++i)
         if (ndc(corners[i], ex, ey)) reach = std::max(reach, std::hypot((ex - lx) * camera.aspect, ey - ly));
     const float k = 8.0f * s.beam.brighten;
+    if (px) {  // per pixel (GD02-151): the sheet's two triangles, the beam's constants on every vertex
+        const Vec3 q[4] = {a - side * top, a + side * top, a + dir * len + side * bottom, a + dir * len - side * bottom};
+        for (int i : {0, 1, 2, 0, 2, 3})
+            px->insert(px->end(), {q[i].x, q[i].y, q[i].z, lit[0] * k, lit[1] * k, lit[2] * k, lx, ly, camera.aspect, 1.0f / reach,
+                                   nearest, scale});
+        return true;
+    }
     const int rows = 16;
     const uint16_t base = uint16_t(out.verts.size() / 16);
     if (base > 60000) return false;
@@ -286,6 +405,12 @@ SpotlightView::SpotlightView(World& world, SceneCache& cache) : world_(world), c
     error.clear();
     flareProgram_ = device_.createProgram(flareDesc(), error);
     if (!flareProgram_) SDL_Log("spotlights: %s does not compile: %s", flareDesc().name.c_str(), error.c_str());
+    error.clear();
+    beamProgram_ = device_.createProgram(beamDesc(), error);
+    if (!beamProgram_) SDL_Log("spotlights: %s does not compile: %s", beamDesc().name.c_str(), error.c_str());
+    error.clear();
+    beamCompProgram_ = device_.createProgram(beamCompDesc(), error);
+    if (!beamCompProgram_) SDL_Log("spotlights: %s does not compile: %s", beamCompDesc().name.c_str(), error.c_str());
     const float tri[6] = {-1, -1, 3, -1, -1, 3};
     triangle_ = device_.createBuffer(BufferKind::Vertex, sizeof tri, tri, false);
     for (TargetId& t : vis_) {
@@ -301,9 +426,13 @@ SpotlightView::~SpotlightView() {
     if (flareVb_) device_.destroyBuffer(flareVb_);
     if (visProgram_) device_.destroyProgram(visProgram_);
     if (flareProgram_) device_.destroyProgram(flareProgram_);
+    if (beamProgram_) device_.destroyProgram(beamProgram_);
+    if (beamCompProgram_) device_.destroyProgram(beamCompProgram_);
+    if (beamTarget_) device_.destroyTarget(beamTarget_);
+    if (beamVb_) device_.destroyBuffer(beamVb_);
 }
 
-std::vector<ProgramDesc> SpotlightView::allPrograms() { return {visDesc(), flareDesc()}; }
+std::vector<ProgramDesc> SpotlightView::allPrograms() { return {visDesc(), flareDesc(), beamDesc(), beamCompDesc()}; }
 
 int SpotlightView::slotOf(const void* key) {
     auto it = slots_.find(key);
@@ -333,6 +462,10 @@ void SpotlightView::draw(MaterialRenderer& mr, const Camera& camera, int viewW, 
     Batch beamBatch;
     beamBatch.mat.prelit = true, beamBatch.mat.useEnviron = false, beamBatch.mat.cull = false;
     beamBatch.mat.blend = MatBlend::Add, beamBatch.mat.zMode = ZMode::Transparent;
+    // Per pixel into the beam buffer when the world's depth is there (post-
+    // processing on); else the old per-vertex sheet in the world (GD02-151).
+    const bool perPixel = worldTarget && worldDepth && beamProgram_ && beamCompProgram_;
+    beamPx_.clear();
     auto batch = [&](const scene::Mat* m) -> Batch& {
         auto [it, added] = batches.try_emplace(m);
         if (added) it->second.mat = fxMaterial(cache_, *m, pose);
@@ -448,7 +581,7 @@ void SpotlightView::draw(MaterialRenderer& mr, const Camera& camera, int viewW, 
                 if (auto* m = s->dir ? s->dir->resolve<scene::Mesh>(n) : nullptr; m && pose.showing(m))
                     extras.push_back({m, toMat4(pose.world(m)), Vec3{lit[0], lit[1], lit[2]}});
         // The beam: depthvolume.fx on the sheet of 0x82235F68 (0x822601D0, 0x82260B40).
-        if (s->beam.length > 0 && on('b') && beamStrip(*s, pos, fwd, dir, camera, lit, beamBatch)) ++beams_;
+        if (s->beam.length > 0 && on('b') && beamStrip(*s, pos, fwd, dir, camera, lit, beamBatch, perPixel ? &beamPx_ : nullptr)) ++beams_;
         // The floor spot (0x82231AF0, its mesh 0x82235488: a unit quad, uv 0..1):
         // only with a target and spot_material, where the light's y axis
         // meets z = the target's z + spot_height, spot_scale wide across and
@@ -603,7 +736,74 @@ void SpotlightView::draw(MaterialRenderer& mr, const Camera& camera, int viewW, 
         const GpuMesh g = mesh_.upload(beamBatch.verts, beamBatch.idx);
         mr.draw(g, identity, beamBatch.mat, ctx);
     }
+    if (perPixel && !beamPx_.empty()) drawBeams(camera, viewW, viewH, hdr, worldTarget, worldDepth);
     drawFlares(camera, viewW, viewH, hdr, worldTarget, worldDepth);
+}
+
+// The beam buffer (0x8225F948): its own target, cleared, every beam added
+// with no depth test; half size when the picture is wider than 960 [C; the
+// upsampling I]. Then FogPixel adds it to the world (before the track and
+// HUD are drawn): drawer total (1) x 1024 x density 0.2 on the sampled
+// value of the 360's fixed 16-bit EDRAM buffer [C]. What that read returns
+// is not settled: 1/64 of the value (a gain of 3.2) turns every beam
+// white, so the port keeps gain 1, the brightness its per-vertex beams had
+// [I].
+void SpotlightView::drawBeams(const Camera& camera, int viewW, int viewH, bool hdr, TargetId worldTarget, TextureId worldDepth) {
+    const int bw = viewW > 960 ? viewW / 2 : viewW, bh = viewW > 960 ? viewH / 2 : viewH;
+    if (!beamTarget_ || beamW_ != bw || beamH_ != bh) {
+        if (beamTarget_) device_.destroyTarget(beamTarget_);
+        TargetDesc d;
+        d.width = bw, d.height = bh, d.format = TargetFormat::RGBA16F;
+        std::string error;
+        beamTarget_ = device_.createTarget(d, error);
+        beamW_ = bw, beamH_ = bh;
+        if (!beamTarget_) {
+            SDL_Log("spotlights: no beam buffer: %s", error.c_str());
+            return;
+        }
+    }
+    const size_t bytes = beamPx_.size() * sizeof(float);
+    if (bytes > beamVbSize_) {
+        if (beamVb_) device_.destroyBuffer(beamVb_);
+        beamVbSize_ = std::max<size_t>(bytes * 2, 16 * 1024);
+        beamVb_ = device_.createBuffer(BufferKind::Vertex, beamVbSize_, nullptr, true);
+    }
+    device_.updateBuffer(beamVb_, 0, beamPx_.data(), bytes);
+    device_.setTarget(beamTarget_);
+    device_.setViewport(0, 0, bw, bh);
+    const float zero[4] = {0, 0, 0, 0};
+    device_.clear(zero, false);
+    const bool zeroToOne = device_.info().clipDepthZeroToOne;
+    const Mat4 vp = camera.viewProj(zeroToOne);
+    BeamBlock bb;
+    std::copy(vp.m, vp.m + 16, bb.viewProj);
+    bb.depth[0] = camera.nearPlane, bb.depth[1] = camera.farPlane, bb.depth[2] = zeroToOne ? 1.0f : 0.0f, bb.depth[3] = 1.0f;
+    DrawCall c;
+    c.program = beamProgram_;
+    c.state.blend = true;
+    c.state.src = BlendFactor::One, c.state.dst = BlendFactor::One;
+    c.layout = &beamLayout();
+    c.vertices = beamVb_;
+    c.count = int(beamPx_.size() / 12);
+    c.textures[0] = worldDepth;
+    c.samplers[0] = {Filter::Nearest, Wrap::Clamp, 0};
+    c.uniforms[0] = UniformData{&bb, sizeof bb, 0};
+    device_.draw(c);
+    device_.setTarget(worldTarget);
+    device_.setViewport(0, 0, viewW, viewH);
+    BeamCompBlock cb{};
+    cb.gain[0] = kBeamGain * (hdr ? 0.25f : 1.0f);
+    DrawCall k;
+    k.program = beamCompProgram_;
+    k.state.blend = true;
+    k.state.src = BlendFactor::One, k.state.dst = BlendFactor::One;
+    k.layout = &triangleLayout();
+    k.vertices = triangle_;
+    k.count = 3;
+    k.textures[0] = device_.targetTexture(beamTarget_);
+    k.samplers[0] = {Filter::Linear, Wrap::Clamp, 0};
+    k.uniforms[0] = UniformData{&cb, sizeof cb, 0};
+    device_.draw(k);
 }
 
 void SpotlightView::drawFlares(const Camera& camera, int viewW, int viewH, bool hdr, TargetId worldTarget, TextureId worldDepth) {
