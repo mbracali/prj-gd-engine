@@ -168,7 +168,9 @@ std::vector<Item> buildItems(qs::Vm& vm) {
          "more_lights"},
         {Kind::Choice, "ground_fog", "Add Fog to the Ground (Experimental)", false, "A low fog over the stage floor where the band plays.",
          {{"none", "None"}, {"low", "Low"}, {"full", "Full"}, {"super", "Super Fog"}}},
-        {Kind::Check, "no_shaky_cam", "Disable Shaky Camera", false, "Steady shots instead of the original game's handheld camera shake."},
+        {Kind::Check, "no_shaky_cam", "Disable Shaky Camera", false,
+         "Steady shots instead of a handheld camera shake. Not available: GH3's cameras do not shake (its only camera "
+         "shake, the boss battles' BossBattle_CameraShake, is an empty script on this disc)."},
         {Kind::Button, "export", "Export User Files", false,
          "Choose a folder to save your Enhanced Options and your progress in, as a backup or to move to another computer."},
         {Kind::Button, "load_settings", "Load User Settings", false, "Choose a user settings file to load."},
