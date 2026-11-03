@@ -465,6 +465,7 @@ private:
     // difficulty, the part (instrument) and the pad (input slot) that plays
     // it; the co-op band and the shared Star Power meter.
     DevMode mode_ = DevMode::Single;
+    int slipHits_[2] = {0, 0};
     std::array<int, 2> difficulties_{3, 3};
     std::array<std::string, 2> parts_{"guitar", "guitar"};
     std::array<int, 2> pads_{0, 1};
@@ -1729,6 +1730,18 @@ void App::updateSong(float t) {
     }
     gameSounds(0, events);
     if (player2_) gameSounds(1, events2);
+    // The whammy's bend: each player's slip voice, back to speed 1 once it
+    // lags 0.9 x max_slip (270 ms); every hit jumps it back in sync.
+    for (int k = 0; k < (player2_ && parts_[0] != parts_[1] ? 2 : 1); ++k) {
+        const Player* pl = k == 0 ? player_.get() : player2_.get();
+        if (pl->guitarHits() != slipHits_[k]) slipHits_[k] = pl->guitarHits(), mixer_.resyncGuitar(k);
+        mixer_.setGuitarSlipSpeed(mixer_.guitarSlipMs(k) > 270 ? 1.0f : pl->bendSpeed(), k);
+    }
+    if (const char* w = SDL_getenv("GD03_WHAMMYLOG")) {  // development aid: a moving bar, logs the deepest lag so far
+        static double most = 0;
+        player_->setWhammyValue(0.5f + 0.5f * std::sin(t / 150.0f), t);
+        if (*w && mixer_.guitarSlipMs(0) > most + 4) most = mixer_.guitarSlipMs(0), SDL_Log("whammy: guitar lag %.0f ms, speed %.3f", most, player_->bendSpeed());
+    }
     if (!player2_) {
         mixer_.setGuitarAudible(player_->guitarAudible());
     } else if (parts_[0] != parts_[1]) {
@@ -2056,6 +2069,11 @@ int App::gameCounter(int player, const std::string& key) const {
         if (key == "star_combos") return tv->comboStarts();
         if (key == "surface_overrides") return tv->surfaceOverrides();
         if (key == "band_fx_particles") return venueView_ ? venueView_->bandView().fxParticles() : 0;
+        if (key.rfind("venue_loaded:", 0) == 0) {  // the walks: is that venue's world the one loaded
+            for (VenueVariant var : {VenueVariant::Single, VenueVariant::Mp, VenueVariant::Coop})
+                if (venue_ && venuePath_ == venues::worldMilo(key.substr(13), var)) return 1;
+            return 0;
+        }
         if (key == "band_horse_members") {
             int n = 0;
             if (band_)

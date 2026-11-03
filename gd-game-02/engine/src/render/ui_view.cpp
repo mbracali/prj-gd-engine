@@ -147,6 +147,10 @@ const scene::Tex* UiView::textureFile(const std::string& rel) {
 void UiView::load(const std::string& path) {
     milo_ = &lib_.load(path);
     pose_.clear();
+    // The character select's door stands closed until a character swings it
+    // (0x8228F250); the scripts hand it over at TRANSITION_COMPLETE, so it must
+    // not show the milo's open pose before that (GD02-147).
+    if (find("cs_door.mesh")) setLocalEuler("cs_door.mesh", 1.5707964f, 0, 0);
     labels_.clear();
     keyed_.clear();
     subdirs_ = linkSubdirs(*milo_, 0);

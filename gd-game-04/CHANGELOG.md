@@ -5,6 +5,21 @@ All notable changes for players. Versions follow SemVer; release tags are
 
 ## [Unreleased]
 
+## [0.0.3] - 2026-11-03
+
+### Fixed
+- Career: winning the song that unlocks a boss now leads to the boss, with its help screen first, as in GH3.
+- Scripts read a missing parameter as nothing, as GH3 does (it used to fall back to a global of that name).
+- Sustain tails widen with the whammy bar, as in GH3 (the bar's recent history rolls up the tail).
+- The whammy bar now bends the guitar's sound while you hold a note, like the
+  original's pitch shifter, and analog bars follow your hand instead of acting
+  as on / off.
+- Character hub: your guitarist stands next to the menu again (it was cut off
+  at the left edge), and in co-op both players' characters show above their
+  menus.
+- Menu scripts that start other scripts now run them at once, as the original
+  does, so menu animations and dialog boxes start on the right frame.
+
 ## [0.0.2] - 2026-11-01
 
 ### Added

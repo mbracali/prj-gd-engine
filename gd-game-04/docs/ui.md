@@ -383,3 +383,13 @@ for the results. Every screen is ~7 % lighter in the port's mid tones (the
 | Store guitars | 42_store_guitars | 42_store_guitars | the info text outside its window, black background, no guitar model | fixed: window defaults (§2), the camera morph; the instrument (composite objects) not done |
 | Store songs | 43_store_songs | - | not reached by the scripted runs | - |
 | Character select / hub | - | char_select, char_hub | (no capture) black before; now the zone, no character | the characters need CreateCompositeObject / obj_*: not done |
+
+## Script spawning [C 0x8226A048..0x8226A0C4]
+
+SpawnScriptNow runs the new script at once, up to its first Wait, inside the
+caller's line (updateimmediately = 1); SpawnScriptLater starts it at the next
+update; SpawnScript is later unless `updateimmediately` is set. Scripts that
+spawn a worker and then poll a flag it sets (generic_select_monitor_wait) rely
+on it. Screen elements and composite objects take the same pair as members
+(`: obj_spawnscriptnow` / `: obj_spawnscriptlater`).
+

@@ -171,26 +171,33 @@ void Mixer::fill(int frames) {
     if (n < audible && !sourceEnded_.load()) underruns_ += audible - n;
 
     const float target = guitarTarget_.load(), target2 = guitar2Target_.load();
+    const float pitch0 = guitarPitch_[0].load(), pitch1 = guitarPitch_[1].load();
     for (int i = 0; i < n; ++i) {
         size_t at = size_t((r + i) & (kRing - 1));
         // ~8 ms ramp, no click (gd01) [I].
         guitarGain_ += (target - guitarGain_) * 0.003f;
         guitar2Gain_ += (target2 - guitar2Gain_) * 0.003f;
-        float l = 0, rr = 0, gl = 0, gr = 0;
+        float l = 0, rr = 0;
+        float g[2][2] = {};  // each player's guitar, ahead of the buss's effects
         for (size_t c = 0; c < tracks_.size(); ++c) {
             const Track& t = tracks_[c];
             float v = ring_[c][at] * t.volume * (t.guitar ? guitarGain_ : t.guitar2 ? guitar2Gain_ : 1.0f);
             // gd01's linear pan law: -1 = left only, 0 = both at full, 1 = right only [I].
             // The players' guitar tracks go through the guitar buss's effects.
-            float& L = (t.guitar || t.guitar2) ? gl : l;
-            float& R = (t.guitar || t.guitar2) ? gr : rr;
+            float& L = t.guitar ? g[0][0] : t.guitar2 ? g[1][0] : l;
+            float& R = t.guitar ? g[0][1] : t.guitar2 ? g[1][1] : rr;
             L += v * std::clamp(1.0f - t.pan, 0.0f, 1.0f);
             R += v * std::clamp(1.0f + t.pan, 0.0f, 1.0f);
         }
+        // Player1Effects / Player2Effects: the pitch shift comes first [C data].
+        pitch_[0].process(g[0][0], g[0][1], pitch0);
+        pitch_[1].process(g[1][0], g[1][1], pitch1);
+        float gl = g[0][0] + g[1][0], gr = g[0][1] + g[1][1];
         guitarFx_.process(gl, gr);
         l += gl, rr += gr;
         out_[size_t(silent + i) * 2] = std::clamp(l, -1.0f, 1.0f);
         out_[size_t(silent + i) * 2 + 1] = std::clamp(rr, -1.0f, 1.0f);
     }
+    guitarLag_[0].store(pitch_[0].lag()), guitarLag_[1].store(pitch_[1].lag());
     read_.store(r + n, std::memory_order_release);
 }

@@ -29,6 +29,12 @@ using qs::Vm;
 uint32_t K(const char* s) { return qbkey::key(s); }
 uint32_t K(const std::string& s) { return qbkey::key(s); }
 
+// whammy_wibble_speed (2) [C data]: the entries each SetNewWhammyValue adds.
+int wibbleSpeed(Vm& v) {
+    const qb::Value* w = v.global(K("whammy_wibble_speed"));
+    return w && (w->type == qb::Type::Int || w->type == qb::Type::Float) ? int(w->number()) : 2;
+}
+
 const char* const kColors[5] = {"green", "red", "yellow", "blue", "orange"};
 const char* const kFx[5] = {"g", "r", "y", "b", "o"};
 
@@ -689,6 +695,40 @@ void SongHooks::step(SongScreen& s, double now) {
         }
     }
     eventArrays(s, now);
+    // CheckNoteHoldPerFrame runs control_whammy_pitchshift every frame of a
+    // hold and CheckNoteHoldEnd resets it [C 0x8211D078, 0x8211D49C]. The bar
+    // is read here (control_whammy_pitchshift's GuitarGetAnalogueInfo), the
+    // pitch is GH3's own set_whammy_pitchshift; in a boss battle the boss's
+    // guitar stays out of it [C script].
+    static const bool whammyLog = SDL_getenv("GD04_WHAMMYLOG") != nullptr;  // dev aid: --autoplay with a moving bar
+    for (int p = 0; p < players_; ++p) {
+        if (m.mode() == GameMode::Boss && p == 1) continue;
+        PerPlayer& pp = pp_[size_t(p)];
+        const bool holding = m.player(p).sustaining() >= 0;
+        float control = holding ? s.whammy(p) : 0;
+        if (whammyLog && holding) control = 0.5f + 0.5f * std::sin(float(now) / 150.0f);
+        if (holding || pp.whammyHeld) {
+            qb::Struct a;
+            Vm::set(a, K("control"), Vm::makeFloat(control));
+            Vm::set(a, K("player_status"), Vm::makeKey(K(statusName(p))));
+            vm.run(K("set_whammy_pitchshift"), a);
+        }
+        // control_whammy_pitchshift then sets the tail's wibble:
+        // SetNewWhammyValue value = (len x 0.5 + 0.5) x 2 time_remaining =
+        // <time> (the hold's remaining ms, CheckNoteHoldPerFrame's note
+        // field); reset_whammy_pitchshift at the hold's end: SetAllWhammyValues
+        // value = 1.0 [C script, 0x8211D078 / 0x8211D49C].
+        if (holding) {
+            const TrackNote& hn = m.track(p).notes[size_t(m.player(p).sustaining())];
+            const float remaining = float(std::max(0.0, double(hn.time) + hn.holdMs - now));
+            s.highwayOf(p).setNewWhammyValue((control * 0.5f + 0.5f) * 2.0f, remaining, wibbleSpeed(vm));
+        } else if (pp.whammyHeld) {
+            s.highwayOf(p).setAllWhammyValues(1.0f);
+        }
+        pp.whammyHeld = holding;
+        if (whammyLog && holding)
+            SDL_Log("whammy: p%d %.0f ms control %.3f pitch %.4f lag %.0f", p + 1, now, control, mixer_.guitarPitch(p), mixer_.guitarPitchLag(p));
+    }
     fx_.step(now);
     // Runs spawned by the song's runs are the song's too (GH3 pauses them together).
     for (auto& r : vm.runs())
@@ -795,6 +835,7 @@ void SongHooks::end(bool killed) {
     fe_.vm().run(K("GH_Star_Power_Verb_Off"), qb::Struct{});
     fe_.vm().run(K("GuitarEvent_ExitVenue"), qb::Struct{});
     mixer_.guitarFx().reset();
+    mixer_.setGuitarPitch(0, 1), mixer_.setGuitarPitch(1, 1);
     active_ = false;
     song_ = nullptr;
 }
@@ -901,6 +942,22 @@ void SongHooks::addNatives() {
         for (const char* c : kColors) fx_.destroy(K(std::string(c) + "WhammyFXID01" + (text ? text->str : "p1")), true);
         return true;
     });
+    // SetNewWhammyValue {value time_remaining player_status player} /
+    // SetAllWhammyValues {value player} (0x821056F8, 0x82105918): the
+    // player's sustain tail wibble (render/highway2d.h) [C].
+    vm.addNative("SetNewWhammyValue", [this](Vm& v, ScriptRun&, qb::Struct& p) {
+        if (!song_) return true;
+        const int pl = int(Vm::number(Vm::param(p, K("player")), 1)) - 1;
+        song_->highwayOf(pl).setNewWhammyValue(Vm::number(Vm::param(p, K("value")), 1), Vm::number(Vm::param(p, K("time_remaining")), 0),
+                                               wibbleSpeed(v));
+        return true;
+    });
+    vm.addNative("SetAllWhammyValues", [this](Vm&, ScriptRun&, qb::Struct& p) {
+        if (!song_) return true;
+        const int pl = int(Vm::number(Vm::param(p, K("player")), 1)) - 1;
+        song_->highwayOf(pl).setAllWhammyValues(Vm::number(Vm::param(p, K("value")), 1));
+        return true;
+    });
     // setsoundbusseffects effect = {effect name params} | effect = $<global>
     // [time = s]: the guitar buss's GuitarEcho1 / GuitarReverb1 drive
     // audio/guitar_fx; the crowd buss's CrowdEcho1 / InGameReverb1 are kept
@@ -916,6 +973,12 @@ void SongHooks::addNatives() {
         auto num = [&](const char* n, float& out) {
             if (const qb::Value* x = v.globals().field(es, K(n)); x && (x->type == qb::Type::Int || x->type == qb::Type::Float)) out = x->number();
         };
+        if (name == K("Guitar1PitchShift") || name == K("Guitar2PitchShift")) {
+            float pitch = 1;
+            num("pitch", pitch);
+            mixer_.setGuitarPitch(name == K("Guitar1PitchShift") ? 0 : 1, pitch);
+            return true;
+        }
         if (name == K("GuitarEcho1")) {
             num("delay", gp.echoDelayMs), num("DecayRatio", gp.echoDecay), num("Drymix", gp.echoDry), num("Wetmix", gp.echoWet);
         } else if (name == K("GuitarReverb1")) {
@@ -1004,6 +1067,17 @@ void SongHooks::addNatives() {
     // drawn yet -- CreateParticleSystem_fast on a band member's bone (the 4x
     // finger flames, the Star Power stage FX), Crowd_PlayAnim (the crowd's
     // Star Power anim), EngineWind, LightShow_SetTime from <song>_lightshow.
+    // The song's teardown and setup calls for systems the port runs natively
+    // [C scripts]: destroy_cameracuts / notemap_deinit ClearNoteMappings (the
+    // camera cuts and note maps are render/venue_camera's, rebuilt per song),
+    // LightShow_Shutdown's LightShow_SetActive / SetMapping (render/venue_lights,
+    // made per song), end_song's StopStream (the song's streams stop with the
+    // song's audio), destroy_highway_prepass's RemovePrepassViewport and
+    // disable_bg_viewport's SetActiveCamera (the port draws one view),
+    // destroy_crowd_models' ClearCrowdModelCams (render/crowd).
+    for (const char* n : {"ClearNoteMappings", "LightShow_SetActive", "LightShow_SetMapping", "StopStream", "RemovePrepassViewport",
+                          "SetActiveCamera", "ClearCrowdModelCams"})
+        vm.addNative(n, [](Vm&, ScriptRun&, qb::Struct&) { return true; });
     for (const char* n : {"CreateParticleSystem_fast", "CreateParticleSystem", "DestroyParticlesByGroupID", "DeleteTeslaEffectObject",
                           "Crowd_PlayAnim", "EngineWind", "LightShow_SetTime"})
         vm.addNative(n, [this, n](Vm&, ScriptRun&, qb::Struct&) {

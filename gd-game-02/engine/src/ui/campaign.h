@@ -101,6 +101,13 @@ int status(UiManager& ui, Career::Profile& p, int d);          // 0x822A9D30
 // in career the band's (its table, else its record at the difficulty),
 // else any band's at any difficulty.
 bool isUnlocked(UiManager& ui, const std::string& sym);
+// 0x82284900: a venue some band in use has unlocked, at any difficulty, or
+// one of the first two (always open).
+bool venueOpen(UiManager& ui, const std::string& venue);
+// set_quickplay's venue (0x822B86D0): the song's (quickplay (venue x)) when
+// open, else the song's tier venue, or for a store / downloaded song the
+// last open venue.
+std::string quickplayVenue(UiManager& ui, const std::string& song, const std::string& venue);
 // A store item a band can buy, as the profile's table holds it.
 bool inTable(UiManager& ui, const std::string& sym);
 

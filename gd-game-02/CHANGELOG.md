@@ -6,6 +6,18 @@ matches the tag's version. Nothing is released yet.
 
 ## [Unreleased]
 
+## [0.1.11] - 2026-11-03
+
+### Fixed
+- Whammy on a sustain now bends the guitar's sound.
+- Character select: the door stays closed until the character kicks it open.
+- Models no longer pick up another model's mesh or texture after menus free scenes.
+- Name your band: the page no longer jumps when leaving with a long name.
+- Career venue select: the map scrolls to the chosen venue and the venue gets its highlight (the script's `$frame` was not read as a value).
+- Name your band: the name keeps its size while typing, shrinking only past 8 letters as in the original.
+- The Glitches counts as having passed every tour song: the career difficulty screen shows its songs.
+- Quick play after a career song plays in the song's own venue (the venue's world was never unloaded); a venue no band has unlocked falls back as in the original.
+
 ## [0.1.10] - 2026-11-02
 
 ### Added

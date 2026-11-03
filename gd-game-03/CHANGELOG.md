@@ -5,6 +5,18 @@ All notable changes for players. Versions follow SemVer; release tags are
 
 ## [Unreleased]
 
+## [0.0.4] - 2026-11-03
+
+### Fixed
+- Whammy on a sustain now bends the guitar's sound.
+- Character select: the door stays closed until the character kicks it open.
+- Models no longer pick up another model's mesh or texture after menus free scenes.
+- Name your band: the page no longer jumps when leaving with a long name.
+- Intro video: no silence at the start.
+- Venue select: older venues can be picked.
+- The Glitches counts as having passed every tour song: the career difficulty screen shows its songs.
+- Every song after the first now plays in its own venue (it kept the first song's).
+
 ## [0.0.3] - 2026-10-30
 
 ### Added

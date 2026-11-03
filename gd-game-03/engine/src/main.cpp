@@ -62,7 +62,7 @@ void usage() {
         "  --venuetest          load the 8 venues (one player, face-off, co-op): their milos, classes, references and\n"
         "                       scripts, headlessly\n"
         "  --walktest <walk>    play through the menus with scripted buttons and check them: quickplay, lose, pause,\n"
-        "                       attract, career, career_full, career_song, career_encore, back, enhanced, cheats, coop, faceoff, proface,\n"
+        "                       attract, career, career_full, career_song, career_encore, career_venues, back, enhanced, cheats, coop, faceoff, proface,\n"
         "                       practice, tutorial, options, mouse, gamepads, gamepads_pad, stickyaxis, band, logo_skip,\n"
         "                       menu_anim, menu_anim_loops (headless: SDL_VIDEO_DRIVER=offscreen SDL_AUDIO_DRIVER=dummy)\n"
         "Environment: GD03_KEYS=\"<ms>:<key>,...,s<song ms>:<key>,...\" scripted input: menu keys at wall-clock ms\n"

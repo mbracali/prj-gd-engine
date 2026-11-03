@@ -202,11 +202,28 @@ Drawn (render/hud2p.cpp, render/highway2d.cpp, data/band.cpp):
   the native scroller (a mid-song start; FINDINGS "Mid-song starts"); with
   devil_finish player 2's gem container is at x 1000 and its HUD stays off
   screen, no death meter [C scripts setup_highway,
-  move_2d_elements_to_default] — not walked (no Lou walk).
+  move_2d_elements_to_default]; player 1's highway keeps its two-player
+  place (-x_offset_p2) [C script setup_highway]. Walk `boss_devil` (The
+  Glitches, Easy): the battle won at the death drain, the restart at
+  bossdevil_markers[37] (336,682 ms, "song: starts at ... (Lou's finish)"),
+  "Now Finish Him!", the 74 notes left to the end, then the newspaper
+  (frames checked). The walk picks the song from the first venue's set list
+  (setlist:bossdevil); in a career it is reached from its own venue.
 
 Not done / approximations:
-- The boss helper popup before a boss from the previous song's win
-  (show_boss_helper_screen) is not reached by the native gem scroller [I].
+- The boss after the song that unlocks it: GuitarEvent_SongWon_Spawned's
+  preboss (Progression_TierBossUnlock: the boss_song tag, current_transition
+  preboss) -> preboss_win_song -> start_boss (show_boss_helper_screen = 1)
+  -> the boss song set up; the native start_gem_scroller then runs its
+  script's end: wait_and_show_boss_helper_after_intro (spawned now) when
+  should_play_boss_intro, else show_boss_helper_now (spawned later); both
+  kill the scroller (a song asked for but not started yet goes too) and go
+  to battle_mode_helper -> career_autosave_boss_confirmation_fs ->
+  career_battle_help_boss_confirmation_fs, whose BATTLE starts the battle
+  [C scripts]. Walk `boss_helper` (Slow Ride won with tier 2's boss
+  unlocked by GH3's own Progression_TierBossUnlock tier = 2). It needed
+  StructureContains to see flags (`$boss` in a tier): Progression_GetBossSong
+  found no boss before (GD04-038).
 - Card animations beyond the flight (the steal hand, the whammy bar
   training, lefty flip's button slide), band attack / response animations,
   the battle alert frames (create_battle_alert_frames), attack_ready_text's

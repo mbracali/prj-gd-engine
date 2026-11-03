@@ -218,6 +218,7 @@ private:
     int lagStrikes_ = 0;                           // the options walk: strums on the lag clicks
     bool encoreDeclined_ = false;
     std::string winTarget_;                        // career_win: the tour's last song                  // career_song: NO on the encore offer
+    int shotN_ = 0;                                // venue_follow: screenshot number
 
     void runCheck(ui::UiManager& ui, const Step& s, double nowMs);
 };

@@ -106,6 +106,7 @@ private:
         uint32_t firstGemId = 0;
         int firstNote = -1;
         std::set<int> taps;  // notes of this step hit by a hammer-on / pull-off
+        bool whammyHeld = false;  // a sustain held last step
     };
     std::array<PerPlayer, 2> pp_{};
     float lastCrowd_ = 1;

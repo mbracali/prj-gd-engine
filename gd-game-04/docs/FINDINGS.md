@@ -210,6 +210,15 @@ player's `player_status` struct.
   outlives its head's last row while its tail is on the highway (a held
   one always), so long sustains keep their tail [C 0x8210E750].
 
+- Whammy sound: CheckNoteHoldPerFrame runs control_whammy_pitchshift every frame
+  of a hold, CheckNoteHoldEnd runs reset_whammy_pitchshift [C 0x8211D078,
+  0x8211D49C]. set_whammy_pitchshift sets Guitar1PitchShift / Guitar2PitchShift
+  to 1 - 0.057 x bar, about a semitone down at full bar. The unit (FastPitchShift,
+  PitchShiftEffect1 / 2, first in Player1Effects) is 0x826E5C38: a linear
+  resampler on an 8192-frame ring whose lag grows by 1 - pitch a frame, resets
+  past 4096 frames or at pitch >= 1, with a crossfade of up to 100 frames.
+  audio/fast_pitch.cpp.
+
 ### 6. Star Power
 
 - star_power_amount 0..100 [C 0x8210C5B8 clamp]. Phrase: each star-note hit

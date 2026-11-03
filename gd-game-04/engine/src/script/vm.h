@@ -87,14 +87,24 @@ public:
     void addNative(const std::string& name, Native fn);
     void addNative(uint32_t key, Native fn) { natives_[key] = std::move(fn); }
     bool hasNative(uint32_t key) const { return natives_.count(key) != 0; }
+    // Runs a native for an object's member call; false if there is none.
+    bool callNative(uint32_t key, ScriptRun& run, qb::Struct& params) {
+        auto it = natives_.find(key);
+        return it != natives_.end() && it->second(*this, run, params);
+    }
 
     // Runs a script to its end or its first wait, synchronously (a call from
     // the engine); returns false if `name` is not a script. Its run keeps
     // going on update() when it waits.
     // `object`: the screen element it runs on (an event handler's element).
     bool run(uint32_t name, const qb::Struct& params, bool* result = nullptr, uint32_t object = 0);
+    // A script (or native) called as a condition from a native, its return
+    // value as true / false (`fastif should_play_boss_intro`).
+    bool condition(ScriptRun& run, uint32_t name, qb::Struct& params) { return callForValue(run, name, params); }
     // Starts a script as a spawned one (runs from the next update).
     uint32_t spawn(uint32_t name, const qb::Struct& params, uint32_t spawnedBy = 0);
+    // Runs a just-spawned script now, up to its first wait.
+    void runNow(uint32_t id);
     // Advances every spawned script by one game frame of `dtMs`.
     void update(double dtMs);
     double clockMs() const { return clockMs_; }
