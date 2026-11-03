@@ -169,6 +169,49 @@ bool Particles::start(const Disc& disc, const Globals& g, const venue::Venue& v,
     // Create / Kill {name = node} (misclightutils.qb SafeCreate / SafeKill:
     // z_party's Christmas lights by performance): shown / hidden; a
     // particleobject stops emitting when killed [C scripts; I: the drawing].
+    // ScreenFX_* on bg_viewport's FlashBS (ScreenFlashOn / Off, misclightutils.qb):
+    // a bright_sat at the given Brightness / Contrast; an update with `time`
+    // eases to its values over that time [C scripts; I: the ease is linear].
+    auto fxParams = [this](const qb::Struct& p, float& b, float& c, double& time) {
+        b = 1, c = 1, time = 0;
+        for (const qb::Item& it : p.items) {
+            if (it.name == 0 && it.value.st) {  // ( $ScreenFlash_TOD_Manager.screen_FX[0] )
+                b = num(it.value.st->find(K("Brightness")), b), c = num(it.value.st->find(K("Contrast")), c);
+                continue;
+            }
+            if (it.name == K("Brightness")) b = num(&it.value, b);
+            if (it.name == K("Contrast")) c = num(&it.value, c);
+            if (it.name == K("time")) time = num(&it.value, 0);
+        }
+    };
+    auto isFlash = [](const qb::Struct& p) {
+        const qb::Value* n = qs::Vm::param(p, K("name"));
+        return n && n->key == K("FlashBS");
+    };
+    vm_->addNative("ScreenFX_AddFXInstance", [this, fxParams, isFlash](qs::Vm&, qs::ScriptRun&, qb::Struct& p) {
+        if (!isFlash(p)) return true;
+        double time = 0;
+        fxParams(p, flash_.b1, flash_.c1, time);
+        flash_.on = true, flash_.b0 = flash_.b1, flash_.c0 = flash_.c1, flash_.t0 = vmTime_, flash_.dur = 0;
+        ++flashes;
+        return true;
+    });
+    vm_->addNative("ScreenFX_UpdateFXInstanceParams", [this, fxParams, isFlash](qs::Vm&, qs::ScriptRun&, qb::Struct& p) {
+        if (!isFlash(p) || !flash_.on) return true;
+        float b = 1, c = 1;
+        double time = 0;
+        flash(vmTime_, flash_.b0, flash_.c0);
+        fxParams(p, b, c, time);
+        flash_.b1 = b, flash_.c1 = c, flash_.t0 = vmTime_, flash_.dur = time * 1000.0;
+        if (flash_.dur <= 0) flash_.b0 = b, flash_.c0 = c;
+        return true;
+    });
+    vm_->addNative("ScreenFX_RemoveFXInstance", [this, isFlash](qs::Vm&, qs::ScriptRun&, qb::Struct& p) {
+        if (isFlash(p)) flash_.on = false;
+        return true;
+    });
+    vm_->addNative("ScreenFX_FXInstanceExists", [this, isFlash](qs::Vm&, qs::ScriptRun&, qb::Struct& p) { return isFlash(p) && flash_.on; });
+    vm_->addNative("ViewportExists", [](qs::Vm&, qs::ScriptRun&, qb::Struct&) { return true; });
     vm_->addNative("Create", [this](qs::Vm&, qs::ScriptRun&, qb::Struct& p) {
         if (const qb::Value* n = qs::Vm::param(p, K("name"))) visibility_[n->key] = 1;
         return true;
@@ -411,6 +454,14 @@ void Particles::addObjectNatives() {
             }
         } else if (method == K("hide") || method == K("Unhide")) {
             visibility_[obj] = method == K("hide") ? 0 : 1;
+        } else if (method == K("obj_locktoobject")) {
+            // The object follows `objectname`, `offset` in its frame (the
+            // dancer 11.4 below the cage) [C script Z_Prison_Caged_Ped; I: the frame].
+            Lock lk;
+            lk.target = keyOf(qs::Vm::param(p, K("objectname")));
+            for (const qb::Item& it : p.items)
+                if (it.name == 0 && it.value.type == qb::Type::Vector) lk.offset = {it.value.f[0], it.value.f[1], it.value.f[2]};
+            if (lk.target) locks_[obj] = lk;
         } else if (method == K("emitrate")) {
             setEmitRate(obj, qs::Vm::number(qs::Vm::param(p, K("rate")), 0), t);
         } else if (method == K("AddPulseEvent")) {
@@ -531,6 +582,7 @@ bool Particles::attach(gfx::RenderDevice& dev, const Disc& disc, std::string& er
 }
 
 void Particles::shutdown() {
+    if (flashes) SDL_Log("particles: %d screen flashes", flashes);
     if (drumKicks) SDL_Log("particles: %d drum kicks launched (%d left), %d scale pulses applied", drumKicks, leftKicks, scalePulses);
     if (dev_) {
         if (program_) dev_->destroyProgram(program_);
@@ -542,6 +594,33 @@ void Particles::shutdown() {
     vbSize_ = 0;
     textures_.clear();
     dev_ = nullptr;
+}
+
+bool Particles::lockedPos(uint32_t node, double ms, venue::Vec3& pos) const {
+    auto it = locks_.find(node);
+    if (it == locks_.end() || !v_) return false;
+    // The node keeps where the level placed it relative to the target and
+    // moves as the target moves (its motion's transform) [I: the offset's
+    // frame; read as the target's pivot offset, the dancer landed on the
+    // floor 11.75 below her cage, so the placed position is kept].
+    const venue::Node* self = v_->node(node);
+    if (!self || !v_->node(it->second.target)) return false;
+    venue::Vec3 w = self->pos;
+    if (gfx::Mat4 d; nodeMotion(it->second.target, ms, d)) {
+        venue::Vec3 o{};
+        for (int r = 0; r < 3; ++r) o[size_t(r)] = d.at(r, 0) * w[0] + d.at(r, 1) * w[1] + d.at(r, 2) * w[2] + d.at(r, 3);
+        w = o;
+    }
+    pos = w;
+    return true;
+}
+
+bool Particles::flash(double ms, float& brightness, float& contrast) const {
+    if (!flash_.on) return false;
+    const double k = flash_.dur > 0 ? std::clamp((ms - flash_.t0) / flash_.dur, 0.0, 1.0) : 1.0;
+    brightness = flash_.b0 + (flash_.b1 - flash_.b0) * float(k);
+    contrast = flash_.c0 + (flash_.c1 - flash_.c0) * float(k);
+    return true;
 }
 
 void Particles::setEmitRate(uint32_t node, float rate, double t) {

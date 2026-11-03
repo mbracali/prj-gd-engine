@@ -537,8 +537,22 @@ The characters receiving shadows, the effect passes' own render and
 sampler states (gd04 uses the scene material's, which 823DC180 applies
 over them), the `volume` light type and projectors, the ReducedLOD
 technique [I: the venues fit inside lod_dist1, 150 m], the encore / boss / win / lose transitions
-and their cameras, two-player arrays, ScreenFlash, walks
-(Band_WalkToNode, so no cameras_walk).
+and their cameras, two-player arrays, walks (Band_WalkToNode, so no
+cameras_walk).
+
+ScreenFlash (0.1.12; z_prison's Z_Prison_LightShow_Flare_Enter):
+ScreenFlashOn adds bg_viewport's FlashBS, ScreenFlash_TOD_Manager's
+bright_sat (Brightness 2.5, Contrast 0.6), after 0.1 x time updates it to
+Brightness 1 / Contrast 1 with `time`, and ScreenFlashOff removes it [C
+scripts misclightutils.qb]; gd04 eases linearly over `time` [I] and draws it
+in the second bright_sat slot. Particle objects (class particleobject:
+z_party's GFX fires / smoke / sparks, z_video's) emit from their node with
+their scriptreference's GP_* parameters; `emitrate {rate}` (the
+performance scripts) restarts the emission at that rate, 0 stops it.
+obj_locktoobject (z_prison's caged dancer on the cage, lowered and raised by
+performance): the dancer moves as the cage's motion moves her placed
+position [I: the offset's frame]. random() branches ending in `,` before
+the jump (Z_Prison_Caged_Ped) are followed across the line end.
 
 Drum pulses (0.1.12): Drum_iterator_CFunc (0x821121D8) launches
 drumkick_left on drum note 36 and drumkick_right on 48 as it reaches them

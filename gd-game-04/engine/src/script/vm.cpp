@@ -307,6 +307,17 @@ struct Exec {
                 break;
             }
         qb::Value v = unary();
+        // A branch may end with a comma before its jump (z_prison's caged
+        // dancer: `Anim = random(...) clip1 , jump clip2 , ...`) [C data].
+        skipNops();
+        while (i < t.size() && t[i].op == kComma) ++i, skipNops();
+        // ... and its jump may come on the next line (`clip1 ,` new line
+        // `jump`): look past line ends for it.
+        for (size_t n = i; n < t.size(); ++n) {
+            if (t[n].op == kEndOfLine || t[n].op == kEndOfLineNumber || t[n].op == kNop) continue;
+            if (t[n].op == kJump) i = n;
+            break;
+        }
         // Each branch but the last ends with a jump past the others (its
         // target is the token's end + the operand) [C data: every random on
         // the disc]; without following it the next branch's value was read

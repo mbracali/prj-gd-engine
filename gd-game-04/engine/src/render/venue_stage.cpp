@@ -409,6 +409,14 @@ void VenueStage::draw(double ms) {
                         int slot = 2;
                         readFx(*e.st, p, slot);
                     }
+        // ScreenFlash (z_prison's flares): FlashBS on the venue viewport, a
+        // bright_sat of its own after the TOD's [C scripts misclightutils.qb].
+        if (float b = 1, c = 1; particles_ && particles_->flash(ms, b, c)) {
+            screenfx::BrightSat& bs = p.brightSat[1];
+            bs = screenfx::BrightSat{};
+            bs.on = true, bs.brightness = b, bs.contrast = c;
+            ++flashFrames;
+        }
         p.nearZ = 0.05f, p.farZ = 4000.0f;  // VenueView::globals' projection
         fx_.end(p);
     }

@@ -82,6 +82,7 @@ private:
     std::unique_ptr<Particles> particles_;  // the zone's particles and pyro (GD04_NO_PARTICLES=1: none)
     gfx::RenderDevice* device_ = nullptr;
     gfx::TargetId shadow_;  // the band's dynamic shadow map (GD04_NO_SHADOWS=1: none)
+    int flashFrames = 0;       // frames drawn with ScreenFlash's FlashBS (venuetest)
     screenfx::ScreenFx fx_;    // GH3's screen effects (GD04_NO_SCREENFX=1: none)
     bool fxReady_ = false;
     bool starPower_ = false;

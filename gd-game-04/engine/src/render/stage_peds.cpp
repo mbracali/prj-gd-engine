@@ -171,6 +171,14 @@ void StagePeds::draw(double ms, const venue::CamPose& cam, const venue::Venue& v
         in.member = p.view;
         in.skin = &p.skin;
         in.root = p.root;
+        if (venue::Vec3 lp; scripts && scripts->lockedPos(p.node, ms, lp)) {
+            static const bool log = SDL_getenv("GD04_STAGEPEDS_LOG") != nullptr;
+            static double lastLog = -1e9;
+            if (log && ms - lastLog > 2000)
+                lastLog = ms, SDL_Log("stage peds: %.0f ms %s locked at (%.2f %.2f %.2f), its node at (%.2f %.2f %.2f)", ms,
+                                      qbkey::names().get(p.node).c_str(), lp[0], lp[1], lp[2], p.root.m[3], p.root.m[7], p.root.m[11]);
+            in.root.m[3] = lp[0], in.root.m[7] = lp[1], in.root.m[11] = lp[2];
+        }
         in.lightGroups = p.lightGroups;
         inst.push_back(std::move(in));
     }

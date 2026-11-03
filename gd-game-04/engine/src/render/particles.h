@@ -62,7 +62,14 @@ public:
     // song time `ms` (the speakers' Venue_Pulse* scripts: AddPulseEvent on
     // hitnote_<colour>).
     void playerHit(double ms, uint8_t frets);
-    int drumKicks = 0, leftKicks = 0, scalePulses = 0;  // drumkick events launched, obj_applyscaling calls (logged)
+    // ScreenFlash's FlashBS on bg_viewport (z_prison's flares): the bright_sat
+    // brightness / contrast at `ms`; false when the instance is not up.
+    bool flash(double ms, float& brightness, float& contrast) const;
+    // obj_locktoobject {objectname offset} on a node (z_prison's caged dancer
+    // on the moving cage): where it is at `ms` (its placed position moved by
+    // the target's motion); false when not locked.
+    bool lockedPos(uint32_t node, double ms, venue::Vec3& pos) const;
+    int drumKicks = 0, leftKicks = 0, scalePulses = 0, flashes = 0;  // drumkick events launched, obj_applyscaling calls (logged)
     // hide / Unhide on a node by the zone's scripts: 0 hidden, 1 shown, -1 never set.
     int visibility(uint32_t node) const {
         auto it = visibility_.find(node);
@@ -114,6 +121,16 @@ private:
         float rate = 0;
     };
     std::unordered_map<uint32_t, NodeEmitter> nodeEmitters_;
+    struct Lock {
+        uint32_t target = 0;
+        venue::Vec3 offset{};
+    };
+    std::unordered_map<uint32_t, Lock> locks_;
+    struct Flash {
+        bool on = false;
+        float b0 = 1, c0 = 1, b1 = 1, c1 = 1;  // from / to
+        double t0 = 0, dur = 0;
+    } flash_;
     void setEmitRate(uint32_t node, float rate, double t);
     // One rotation axis (degrees) or the position: linear in song time.
     struct Axis {
