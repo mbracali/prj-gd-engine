@@ -632,7 +632,7 @@ universal launcher, not released on its own.
 | GD02-152 | Original | 🟡 in progress (0.1.12) | Gameplay: note presses read once per frame, as on the Xbox 360 (the port times each input event) | Left over from GD02-037 (PARITY_GAPS) | Owner 11-03 |
 | GD02-153 | Original | 🟡 in progress (0.1.12) | Menus: final check of the song list font and the help bar during transitions against the original's code and data | Left over from GD02-075 / 082 (PARITY_GAPS) | Owner 11-03 |
 | GD02-154 | Bugfix | ✅ | No PlayStation 2 / Xbox 360 labels in menus or loading screens (PC wording, as gd01) | scene/pc_strings.cpp (as gd01): 20 tokens rewritten in eng / fre / deu / ita / esl (save messages, sign-in, leaderboards, downloads, select controller); Xbox Live tips 10 / 13 never picked; six GD-Engine tips join every pool. Self-test check: no Xbox / console word in any language (whole words). Images: only a hand-drawn generic gamepad, kept | Owner 11-03 |
-| GD02-155 | Bugfix | 🟡 in progress (0.1.12) | Loading screens: some have no animation or pass too fast to read; hold them as gd01 does to keep the original feel |  | Owner 11-03 |
+| GD02-155 | Bugfix | ✅ | Loading screens: some have no animation or pass too fast to read; hold them as gd01 does to keep the original feel | UiManager::holdingLoadScreen: the loading / saving / startup load screens stay up 2 s of UI time (their animate_forever_30fps tasks run); walk check load_hold (2.76 s measured); frames show the tape animating. The saving dialog is static in GH2 too | Owner 11-03 |
 
 
 ### Done (history)

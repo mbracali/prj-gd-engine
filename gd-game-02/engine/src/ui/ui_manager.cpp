@@ -603,6 +603,7 @@ void UiManager::switchScreens() {
         for (PanelObj* p : from->panels())
             if (p->loaded && !to->hasPanel(p) && p->path.rfind("world/", 0) == 0) p->unload();
     current_ = to;
+    currentSinceMs_ = uiMs_;
     // The keyboard's split layout (P2 on H J K L ;, N / M, B, O) while the
     // two-player menus need a second controller: from the controller select
     // with fewer than two pads, until the main menu [I: the port's].
@@ -711,12 +712,27 @@ void UiManager::updateTransition() {
         return;
     }
     if (!pending_.empty()) {
+        if (holdingLoadScreen()) return;
         ScreenObj* s = screen(pending_);
         const bool back = pendingBack_;
         pending_.clear();
         pendingBack_ = false;
         if (s) beginTransition(s, back);
     }
+}
+
+// The port loads in a moment where the Xbox 360 took seconds, so GH2's
+// loading and saving screens flashed by before their animation or tip could
+// be read. As gd-game-01 (its memory-card rule), each stays up at least 2 s
+// of UI time, animating, before the next screen starts (GD02-155) [I].
+bool UiManager::holdingLoadScreen() const {
+    static const char* const kHold[] = {"loading_screen", "practice_loading_screen", "tut_loading_screen", "meta_loading_screen",
+                                        "saving_screen", "normal_save_screen", "normal_load_screen", "startup_load_screen",
+                                        "startup_create_save_screen", "startup_load_finder_screen"};
+    if (!current_) return false;
+    for (const char* n : kHold)
+        if (current_->name() == n) return uiMs_ - currentSinceMs_ < kLoadScreenHoldMs;
+    return false;
 }
 
 void UiManager::updateHelpbar() {

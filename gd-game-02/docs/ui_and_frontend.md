@@ -414,6 +414,18 @@ section lists the seven with GH2's names and toggles the same variables
 - Leaderboards without Xbox Live shows a port message. Xbox Live calls
   (achievements, leaderboards, marketplace, sign-in) are whitelisted stubs
   (`engine/tests/ui_stubs.txt`).
+- PC wording (GD02-154): `scene/pc_strings.cpp` rewrites every string that
+  names the Xbox 360, Xbox Live, a console or a storage device, in the five
+  languages, as gd-game-01 does; the two Xbox Live loading tips are never
+  picked and six GD-Engine tips join every pool. `--selftest` checks that no
+  shown string still names them.
+- Loading and saving screens hold (GD02-155): `loading_screen`,
+  `practice_loading_screen`, `tut_loading_screen`, `meta_loading_screen`,
+  `saving_screen`, `normal_save_screen`, `normal_load_screen` and the startup
+  load / create screens stay up at least 2 s of UI time, animating, before
+  the next screen starts (`UiManager::holdingLoadScreen`), as gd-game-01's
+  memory-card rule: the port loads at once, where the Xbox 360 took seconds.
+  The quick play walk checks it (`load_hold`).
 
 ## Videos (`engine/src/video/`)
 

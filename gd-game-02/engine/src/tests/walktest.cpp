@@ -125,6 +125,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         at("guitar_help_screen");
         press(kX);
         quickplaySong(3);
+        check("load_hold");
         check("quickplay_venue");
         wait(3000);
         check("task_clock_song");
@@ -1480,6 +1481,10 @@ void WalkDriver::poll(ui::UiManager& ui, double nowMs) {
     }
     Step& s = steps_[step_];
     if (stepStart_ < 0) stepStart_ = nowMs;
+    if (ui.currentScreen() != lastScreen_) {
+        if (lastScreen_ == "loading_screen") lastLoadingMs_ = nowMs - lastChangeMs_;
+        lastScreen_ = ui.currentScreen(), lastChangeMs_ = nowMs;
+    }
     // career: the band has bought Judy Nails' second outfit and the SG's
     // white skin in the store (M10), so both choices offer two.
     if ((scenario_ == "career" || scenario_ == "career_full" || scenario_ == "career_song" || scenario_ == "career_encore" ||
@@ -1589,6 +1594,13 @@ static bool mainCamera(ui::UiManager& ui, std::array<float, 3>& pos) {
 void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
     auto fail = [&](const std::string& e) { error_ = e, failed_ = done_ = true; };
     auto pass = [&] { ++step_, stepStart_ = -1; };
+    if (s.screen == "load_hold") {
+        // The song's loading screen stays up at least 2 s with its animation
+        // (UiManager::holdingLoadScreen, GD02-155).
+        std::printf("  loading screen shown %.0f ms\n", lastLoadingMs_);
+        if (lastLoadingMs_ < ui::UiManager::kLoadScreenHoldMs - 50) return fail("the loading screen passed in under 2 s");
+        return pass();
+    }
     if (s.screen == "name_entry_1" || s.screen == "name_entry_2") {
         // BandTextEntry's Texts are aligned middle left (0x82144558): the
         // entered text starts at the same x whatever its length and the

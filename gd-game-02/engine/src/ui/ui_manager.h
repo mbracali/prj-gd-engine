@@ -98,6 +98,8 @@ public:
 
     std::string currentScreen() const;
     bool inTransition() const;
+    static constexpr double kLoadScreenHoldMs = 2000;  // GD02-155
+    bool holdingLoadScreen() const;
     bool inSplashes() const { return splash_ >= 0; }
     // The game panel is up (the song is the UI's).
     bool inGame() const;
@@ -274,6 +276,7 @@ private:
 
     // screens
     ScreenObj* current_ = nullptr;
+    double currentSinceMs_ = 0;  // uiMs_ when current_ was entered (loading screens' hold, GD02-155)
     ScreenObj* next_ = nullptr;  // being transitioned to
     ScreenObj* previous_ = nullptr;
     bool back_ = false;
