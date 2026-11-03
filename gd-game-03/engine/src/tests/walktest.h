@@ -214,7 +214,8 @@ private:
     double shownSinceMs_ = 0;
     std::map<std::string, double> shownMs_;  // how long each screen was last up (load_hold)
     std::vector<std::string> bandNames_;
-    int bandSlot_ = -1;  // options_extras: the bands before managing them
+    int bandSlot_ = -1;
+    std::vector<std::string> storeSeen_;  // store_guitars: the guitars focused so far  // options_extras: the bands before managing them
     float nameX0_ = 0;               // the career walk's band name: where it starts
     std::array<float, 2> optionsHit_{-1, -1};  // the mouse walk: OPTIONS' hit centre in 4:3
     std::array<double, 2> practiceClock_{-1, 0};  // the practice walk: (wall ms, song ms) first seen

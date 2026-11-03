@@ -327,7 +327,7 @@ WalkDriver::WalkDriver(const std::string& name)
         expect_ = {"main_screen", "qp_selsong_screen", "qp_diff_screen", "loading_screen", "game_screen", "pause_screen",
                    "meta_loading_screen", "qp_selsong_screen"};
     } else if (scenario == "career" || scenario == "career_full" || scenario == "career_song" || scenario == "career_encore" ||
-               scenario == "career_win" || scenario == "career_win_medium" || scenario == "career_finalsong" || scenario == "career_practice" ||
+               scenario == "career_win" || scenario == "career_win_medium" || scenario == "career_finalsong" || scenario == "store_guitars" || scenario == "career_practice" ||
                scenario == "career_venues") {
         bootToMain();
         at("main_screen");
@@ -503,6 +503,31 @@ WalkDriver::WalkDriver(const std::string& name)
             at("endgame_screen", 20000);
             expect_.insert(expect_.end(), {"sel_venue_screen", "sel_song_screen", "loading_screen", "game_screen", "post_show_screen",
                                            "win_game_screen", "endgame_screen"});
+        }
+        if (scenario == "store_guitars") {
+            // The store's guitars (GD03-092): the tour passed (every tier
+            // song beaten, cash added), STORE > GUITARS, each guitar the list
+            // offers focused in turn (store_guitar_display_panel shows it),
+            // then the focused one bought.
+            check("store_seed");
+            for (int i = 0; i < 3; ++i) press(kDown), wait(150);  // LET'S ROCK -> ... -> STORE
+            press(kX);
+            at("store_screen");
+            wait(1500);
+            press(kX);  // GUITARS (st_screen2: the list)
+            wait(1500);
+            check("store_browse", 120000);
+            press(kX);  // buy the focused guitar
+            at("store_bought_screen");
+            wait(900);
+            press(kX);
+            at("store_screen");
+            check("guitar_bought");
+            press(kTri);
+            wait(800);
+            press(kTri);
+            at("career_screen", 30000);
+            expect_.insert(expect_.end(), {"store_screen", "store_bought_screen", "store_screen", "career_screen"});
         }
         if (scenario == "career_finalsong") {
             // The career's final-song choice (GD03-092): at Medium arena's
@@ -1636,7 +1661,7 @@ void WalkDriver::poll(ui::UiManager& ui, double nowMs) {
     // career: the band has bought Judy Nails' second outfit and the SG's
     // white skin in the store (M10), so both choices offer two.
     if ((scenario_ == "career" || scenario_ == "career_full" || scenario_ == "career_song" || scenario_ == "career_encore" ||
-         scenario_ == "career_win" || scenario_ == "career_win_medium" || scenario_ == "career_finalsong" || scenario_ == "career_practice") && !seeded_ && ui.currentScreen() == "sel_difficulty_screen" && ui.session().profileSlot >= 0) {
+         scenario_ == "career_win" || scenario_ == "career_win_medium" || scenario_ == "career_finalsong" || scenario_ == "store_guitars" || scenario_ == "career_practice") && !seeded_ && ui.currentScreen() == "sel_difficulty_screen" && ui.session().profileSlot >= 0) {
         seeded_ = true;
         Career::Profile& p = ui.career().profiles[size_t(ui.session().profileSlot)];
         p.items["alterna2"] = true;
@@ -2020,6 +2045,41 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
     if (s.screen == "vpad_attach") {
         adapter_ = Input::attachVirtualPad("045e:028e");
         return adapter_ ? pass() : fail("no virtual pad");
+    }
+    if (s.screen == "store_seed") {
+        const int d = ui::campaign::difficulty(ui);
+        const auto& tiers = ui::campaign::config(ui).tiers;
+        for (int t = 0; t < ui::campaign::numTiers(ui, d) && t < int(tiers.size()); ++t)
+            for (const std::string& song : tiers[size_t(t)].second)
+                ui.interp().send("campaign", "cheat_beat_song", {Value::symbol(song), Value::integer(1)});
+        ui.interp().send("campaign", "add_cash", {Value::integer(100000)});
+        std::printf("  store: tour passed at difficulty %d, cash %d\n", d, ui.interp().send("campaign", "cash", {}).integerValue());
+        return pass();
+    }
+    if (s.screen == "store_browse") {
+        // Down through the guitar list (store_panel update_index) until it
+        // comes round to the first; store_panel's item_name is the one shown.
+        const std::string f = ui.interp().send("store_panel", "get", {Value::symbol("item_name")}).str();
+        if (nowMs - lastNavMs_ < 900 || ui.inTransition()) return;
+        if (!storeSeen_.empty() && f == storeSeen_.front()) {
+            std::printf("  store: %zu guitars offered:", storeSeen_.size());
+            for (const std::string& g : storeSeen_) std::printf(" %s", g.c_str());
+            std::printf("\n");
+            return storeSeen_.size() > 1 ? pass() : fail("the store offers one guitar or none");
+        }
+        if (std::find(storeSeen_.begin(), storeSeen_.end(), f) != storeSeen_.end() || f.empty())
+            return fail("the guitar list did not come round (stuck on " + f + ")");
+        storeSeen_.push_back(f);
+        if (nowMs - stepStart_ > s.ms) return fail("the guitar list is longer than the walk waits");
+        ui.buttonDown(kDown, 0), ui.buttonUp(kDown, 0), lastNavMs_ = nowMs;
+        return;
+    }
+    if (s.screen == "guitar_bought") {
+        const Career::Profile& p = ui.career().profiles[size_t(ui.session().profileSlot)];
+        int n = 0;
+        for (const auto& [item, owned] : p.items) n += owned;
+        std::printf("  store: %d items owned, cash %d\n", n, p.cash);
+        return p.cash < 100000 ? pass() : fail("nothing was bought");
     }
     if (s.screen == "keyboard_p2") {
         ui.input().setPlayer("keyboard", 1);
