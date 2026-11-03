@@ -92,6 +92,8 @@ private:
     size_t key_ = 0;
     double reachedAt_ = -1, stepStart_ = 0, lastKey_ = 0;
     bool failed_ = false;
+    double songSeenAt_ = -1;      // when the song (still playing) started, walk time
+    bool loadingChecked_ = false;
     std::string failure_;
     std::vector<std::string> log_;
     // uitest: every flow state with a Create script, started in turn.

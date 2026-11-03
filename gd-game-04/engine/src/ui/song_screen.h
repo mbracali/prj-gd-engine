@@ -130,6 +130,17 @@ private:
     std::array<bool, 2> strum_{}, star_{}, tilt_{};
     std::array<float, 2> whammy_{};
     double finishedAt_ = -1;
+    // The SongWon / SongLost transition's length (Default_SongWon_Transition
+    // time 8000 [C data]); the outro started (the venue told).
+    double transitionMs_ = 8000;
+    bool outro_ = false;
+public:
+    // After the song: the venue alone at `ms` (song time) while GH3's
+    // transition runs; false once there is nothing to draw.
+    bool drawOutro(Canvas& c, double ms);
+    double lastMs() const { return lastMs_; }
+    double transitionMs() const { return transitionMs_; }
+private:
     bool forcedFail_ = false;
     // The venue behind the highway (render/venue_stage.h; GD04_NO_VENUE=1: none).
     std::unique_ptr<VenueStage> venue_;

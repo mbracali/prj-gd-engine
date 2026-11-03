@@ -70,6 +70,29 @@ void readFx(const qb::Struct& e, screenfx::Params& p, int& brightSlot) {
 
 }  // namespace
 
+void VenueStage::outro(double ms, bool won, bool versus, bool p1Won, bool boss) {
+    // UseSmallVenueAnims: z_party, z_dive, z_video, z_prison, z_hell, and
+    // z_artdeco after the encore (LS_ENCORE_POST) -> Win_SmStg / Lose_SmStg [C script].
+    const std::string& z = venue_ ? venue_->zone : std::string();
+    const bool small = z == "z_party" || z == "z_dive" || z == "z_video" || z == "z_prison" || z == "z_hell" ||
+                       (z == "z_artdeco" && lights_.flag(qbkey::key("LS_ENCORE_POST")));
+    const uint32_t win = qbkey::key(small ? "Win_SmStg" : "win"), lose = qbkey::key(small ? "Lose_SmStg" : "lose");
+    if (band_) {
+        // play_win_anims / play_lose_anims: one player or co-op, both members
+        // the same; a boss battle: the guitarist the player's outcome, the
+        // bassist (the boss) the other; the versus modes by who won [C scripts].
+        uint32_t g = won ? win : lose, b = g;
+        if (boss) b = won ? lose : win;
+        else if (versus) g = p1Won ? win : lose, b = p1Won ? lose : win;
+        band_->playSpecial(band::Role::Guitarist, g, qbkey::key("idle"), ms);
+        band_->playSpecial(band::Role::Bassist, b, qbkey::key("idle"), ms);
+    }
+    // Crowd_AllPlayAnim Anim = idle: the lighters end [C data].
+    if (crowd_) crowd_->setLighterSpans({});
+    cameras_.outro(ms, won ? "cameras_win" : "cameras_lose");
+    ++outros;
+}
+
 std::string VenueStage::chooseZone(const Globals& g) {
     if (const char* env = SDL_getenv("GD04_VENUE")) return env;
     if (const qb::Value* lvl = g.find(qbkey::key("current_level")); lvl && (lvl->type == qb::Type::Key || lvl->type == qb::Type::KeyPtr)) {

@@ -98,6 +98,9 @@ private:
     std::unique_ptr<FrontEnd> front_;
     bool devDebugMenu_ = false;  // Enhanced > Developer Debug Menu last frame (GD04-041)
     bool hadDevice_[2] = {}, unplugReported_[2] = {};  // controller loss mid-song (GD04-042)
+    std::unique_ptr<SongScreen> outroSong_;  // the ended song's venue, drawn during GH3's end transition
+    double outroFrom_ = 0, outroWall_ = 0;
+    long long outroFrames_ = 0;  // frames drawn with the ended song's venue (logged when it ends)
     // GH3's song scripts over the native core (D10; GD04_NO_HOOKS=1: off, the earlier path).
     std::unique_ptr<SongHooks> hooks_;
     std::unique_ptr<Walk> walk_;
@@ -424,7 +427,10 @@ void App::frame() {
                 if (m.mode() == GameMode::FaceOff || m.mode() == GameMode::ProFaceOff || m.mode() == GameMode::Battle) r.won = true;
             }
             if (hooks_) hooks_->end(false);
-            song_.reset();
+            // GH3's SongWon / SongLost transition runs on over the venue
+            // (the band's win / lose stance, cameras_win / _lose) [C data].
+            outroSong_ = std::move(song_);
+            outroFrom_ = outroSong_->lastMs(), outroWall_ = double(SDL_GetTicksNS()) / 1e6;
             mixer_.stop();
             input_.setInGame(false);
             front_->songEnded(r);
@@ -446,6 +452,7 @@ void App::frame() {
         for (const SongInfo& s : songs_.songs())
             if (s.checksum == front_->songRequest.song) info = &s;
         std::string err;
+        outroSong_.reset();
         song_ = std::make_unique<SongScreen>();
         for (int s = 0; s < 2; ++s) hadDevice_[s] = input_.padConnected(s), unplugReported_[s] = false;
         // Enhanced > CHEATS: Autoplay and No Fail Mode (as --autoplay / --no-fail).
@@ -527,6 +534,17 @@ void App::frame() {
             ports_->draw(canvas_);
             front_->sfx.update();
         } else {
+            // The ended song's venue under GH3's transition (its time from
+            // the song's end; the results come after it) [C data Default_SongWon_Transition].
+            if (outroSong_) {
+                const double el = double(nowNs) / 1e6 - outroWall_;
+                if (el >= outroSong_->transitionMs() || !outroSong_->drawOutro(canvas_, outroFrom_ + el)) {
+                    SDL_Log("song: end transition drawn over the venue for %lld frames", outroFrames_);
+                    outroSong_.reset(), outroFrames_ = 0;
+                } else {
+                    ++outroFrames_;
+                }
+            }
             front_->frame(canvas_, dt);
             if (ports_) ports_->drawItems(canvas_, front_->flowState());
         }

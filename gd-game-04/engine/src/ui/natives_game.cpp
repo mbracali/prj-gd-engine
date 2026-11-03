@@ -111,6 +111,10 @@ void addGameNatives(FrontEnd& fe, const Disc& disc, TextureCache& textures) {
         // script start_gem_scroller]: controller_unplugged, sysnotify and
         // destroy_loading_screen read it; kill_gem_scroller sets it back to 0.
         v.setGlobal(K("playing_song"), Vm::makeInt(1));
+        // ... and, two game frames after the gem scroller starts, the
+        // loading screen goes (destroy_loading_screen, near the script's end)
+        // [C script start_gem_scroller; I: spawned, the next VM step].
+        v.spawn(K("destroy_loading_screen"), qb::Struct{});
         if (r.devilFinish || r.startMs > 0) SDL_Log("song: starts at %.0f ms%s", r.startMs, r.devilFinish ? " (Lou's finish)" : "");
         // end_credits: cleared unless end_credits_restart = 1 or the song is
         // thrufireandflames [C script start_gem_scroller]; with it set,

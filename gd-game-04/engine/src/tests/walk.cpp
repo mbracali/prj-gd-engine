@@ -373,6 +373,18 @@ std::vector<Walk::Press> Walk::update(FrontEnd& fe, bool songPlaying, double now
         return out;
     }
     if (done() || failed_) return out;
+    // A song under a loading screen (GD04-040's regression): 5 s into a song
+    // the loading screen's tip and picture are gone [C script start_gem_scroller].
+    if (songPlaying && songSeenAt_ < 0) songSeenAt_ = now;
+    if (!songPlaying) songSeenAt_ = -1;
+    if (songSeenAt_ >= 0 && now - songSeenAt_ > 5000 && !loadingChecked_) {
+        loadingChecked_ = true;
+        if (fe.ui().loadingScreenUp() || fe.ui().find(qbkey::key("loading_tip_text"))) {
+            failed_ = true, failure_ = "the loading screen is still up 5 s into the song";
+            std::printf("walk: FAILED: %s\n", failure_.c_str());
+            return out;
+        }
+    }
     const Step& s = steps_[step_];
     if (reachedAt_ < 0) {
         bool reached;

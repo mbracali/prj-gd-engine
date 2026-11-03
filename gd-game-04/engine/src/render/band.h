@@ -47,6 +47,11 @@ public:
     // (Guitarist, Bassist, Drummer, vocalist) at the last advance; false if
     // there is no such member or bone.
     bool bonePos(uint32_t member, uint32_t bone, venue::Vec3& out) const;
+    // play_special_anim on the member of `role` (play_win_anims / play_lose_anims).
+    void playSpecial(band::Role role, uint32_t stance, uint32_t anim, double ms) {
+        for (Entry& e : members_)
+            if (e.anim.role() == role) e.anim.playSpecial(stance, anim, ms);
+    }
 
     struct Entry {
         std::unique_ptr<band::Model> model;

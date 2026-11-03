@@ -428,6 +428,23 @@ void CameraDirector::update(double ms, const PerfTimeline& perf) {
     now_ = std::max(now_, ms);
 }
 
+void CameraDirector::outro(double ms, const std::string& prefix) {
+    if (perf_) update(ms, *perf_);
+    pending_.clear();
+    spCamera_ = false;     // Kill_StarPower_Camera changecamera = 0
+    allowNotes_ = false;   // kill_cameracuts_iterator: the song's camera notes end
+    qb::Struct p;
+    qb::Value v;
+    v.type = qb::Type::String;
+    v.str = prefix;
+    p.items.push_back({K("prefix"), v});
+    qb::Item now;
+    now.value.type = qb::Type::Key;
+    now.value.key = K("changenow");
+    p.items.push_back(now);
+    setArrayPrefix(&p, 0);
+}
+
 void CameraDirector::starPower(double ms, bool on) {
     if (on) {
         // do_starpower_camera: not while a walk / Star Power camera runs; one

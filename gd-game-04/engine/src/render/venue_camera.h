@@ -65,6 +65,9 @@ public:
     // (current_num_players = 1), its end Kill_StarPower_Camera [C:
     // Function_8211DA70, guitar_starpower.qb].
     void starPower(double ms, bool on);
+    // Transition_CameraCut {prefix changenow} after play_outro's
+    // kill_cameracuts_iterator (the SongWon / SongLost transitions) [C data].
+    void outro(double ms, const std::string& prefix);
 
     struct Shot {
         double start = 0, end = 0;  // song ms; end: when CameraCuts_WaitScript lets it go

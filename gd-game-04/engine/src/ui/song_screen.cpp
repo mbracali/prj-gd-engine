@@ -52,6 +52,9 @@ bool SongScreen::start(const Disc& disc, const Globals& g, const SongInfo& song,
         error = e.what();
         return false;
     }
+    for (const char* t : {"Default_SongWon_Transition"})
+        if (const qb::Value* tr = g.find(qbkey::key(t)); tr && tr->st)
+            if (const qb::Value* tm = tr->st->find(qbkey::key("time"))) transitionMs_ = tm->number();
     if (!tuning_.load(g)) {
         error = "the gameplay tuning is incomplete";
         return false;
@@ -244,6 +247,21 @@ bool SongScreen::frame(Canvas& canvas, Mixer& mixer, const TextureCache* texture
     if (now >= endMs_ || (match_->outcome() != Match::Outcome::None && finishedAt_ < 0)) {
         if (finishedAt_ < 0) finishedAt_ = now;
     }
+    // The song's end: GH3 plays the SongWon / SongLost transition over the
+    // venue (play_outro: the HUD and the gems gone; the band's win / lose
+    // stance, cameras_win / cameras_lose) for its time, then the results [C
+    // data Common_SongWon_Transition]. The song ends to GH3's flow 2 s after
+    // as before (its transition waits the rest); App keeps drawing the venue
+    // meanwhile (drawOutro).
+    if (finishedAt_ >= 0 && venue_ && !outro_) {
+        outro_ = true;
+        const bool lost = failed();
+        const GameMode m = match_->mode();
+        const bool versus = m == GameMode::FaceOff || m == GameMode::ProFaceOff || m == GameMode::Battle;
+        const Match::Outcome o = match_->outcome();
+        const bool p1Won = o == Match::Outcome::P1Wins || (o == Match::Outcome::None && match_->winnerAtEnd() == 0);
+        venue_->outro(now, !lost, versus, p1Won, m == GameMode::Boss);
+    }
     const bool more = finishedAt_ < 0 || now < finishedAt_ + 2000.0;
     if (!more && twoPlayers_) {
         // The two players' numbers and the mode's (walks and the self-test read them).
@@ -302,6 +320,13 @@ Highway2D::Effects SongScreen::effects(int p, double now) const {
     return fx;
 }
 
+bool SongScreen::drawOutro(Canvas& /*c*/, double ms) {
+    if (!venue_ || !venue_->view()) return false;
+    venue_->advance(ms);
+    venue_->draw(ms);
+    return true;
+}
+
 void SongScreen::draw(Canvas& c, double now, const TextureCache* textures) {
     if (venue_) {
         // The venue first, under the 2D highway and HUD.
@@ -317,6 +342,7 @@ void SongScreen::draw(Canvas& c, double now, const TextureCache* textures) {
     }
     const PlayerStats& st = player_->stats();
     char text[160];
+    if (outro_) return;  // play_outro: destroy_hud, the gems killed [C script]
     if (twoPlayers_ && highwayOk_ && textures) {
         // GH3's two highways (x_offset_p2 left / right) and the mode's HUD.
         for (int p = 0; p < 2; ++p) {

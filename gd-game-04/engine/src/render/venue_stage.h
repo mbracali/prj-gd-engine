@@ -56,6 +56,11 @@ public:
         if (particles_ && hit) particles_->playerHit(ms, frets);
     }
     void draw(double ms);
+    // The SongWon / SongLost transition (Common_SongWon_Transition /
+    // Common_SongLost_Transition): play_win_anims / play_lose_anims, the
+    // crowd back to idle, cameras_win / cameras_lose. `p1Won`: player 1 won
+    // (the versus modes), `boss`: a boss battle [C data].
+    void outro(double ms, bool won, bool versus, bool p1Won, bool boss);
 
     venue::CamPose camera(double ms) const { return cameras_.pose(ms); }
     const venue::CameraDirector& cameras() const { return cameras_; }
@@ -82,7 +87,7 @@ private:
     std::unique_ptr<Particles> particles_;  // the zone's particles and pyro (GD04_NO_PARTICLES=1: none)
     gfx::RenderDevice* device_ = nullptr;
     gfx::TargetId shadow_;  // the band's dynamic shadow map (GD04_NO_SHADOWS=1: none)
-    int flashFrames = 0;       // frames drawn with ScreenFlash's FlashBS (venuetest)
+    int flashFrames = 0, outros = 0;       // frames drawn with ScreenFlash's FlashBS (venuetest)
     screenfx::ScreenFx fx_;    // GH3's screen effects (GD04_NO_SCREENFX=1: none)
     bool fxReady_ = false;
     bool starPower_ = false;

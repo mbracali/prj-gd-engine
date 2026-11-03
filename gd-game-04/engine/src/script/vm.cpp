@@ -838,6 +838,12 @@ bool Vm::run(uint32_t name, const qb::Struct& params, bool* result, uint32_t obj
 
 uint32_t Vm::spawn(uint32_t name, const qb::Struct& params, uint32_t spawnedBy) {
     auto c = code(name);
+    // The native start_gem_scroller spawns destroy_loading_screen (GD04-040's measure).
+    if (name == kDestroyLoading && loadingShownMs_ >= 0) {
+        const double shown = clockMs_ - loadingShownMs_;
+        minLoadingShownMs_ = minLoadingShownMs_ < 0 ? shown : std::min(minLoadingShownMs_, shown);
+        loadingShownMs_ = -1;
+    }
     if (const char* v = SDL_getenv("GD04_VMTRACE"); v && *v && *v != '0') SDL_Log("qscript: %.0f ms spawn %s", clockMs_, qbkey::name(name).c_str());
     if (!c) {
         if (unhandledNames_.insert(name).second) logOnce("UNHANDLED spawn " + qbkey::name(name));

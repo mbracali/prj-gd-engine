@@ -619,6 +619,19 @@ void Animator::playAnimEvent(const qb::Struct& p, double t) {
     }
 }
 
+// play_special_anim (guitar_character.qb): disable_arms 2 (hero_disable_arms
+// for the guitarist / bassist), the random loop killed, `stance` set, the
+// tempo anim `anim` now (hero_play_tempo_anim_cfunc) and again when it ends
+// [C script; I: the loop is the body loop with cycle].
+void Animator::playSpecial(uint32_t stance, uint32_t anim, double t) {
+    stance_ = nextStance_ = stance;
+    currentAnim_ = anim ? anim : K("idle");
+    nextAnim_ = 0;
+    cycle_ = true, repeat_ = 1;
+    if (guitarLike()) disableArms_ = nextDisableArms_ = 2;
+    bodyIteration(t);
+}
+
 // handle_change_stance [C script].
 void Animator::changeStanceEvent(uint32_t stance, bool noWait, double t) {
     const bool introish = stance == K("intro") || stance == K("intro_smstg") || stance == K("stance_frontend") ||

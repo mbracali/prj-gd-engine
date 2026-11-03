@@ -121,6 +121,10 @@ public:
     // menus' calls; a song's come from its performance array) [C scripts].
     void changeStance(uint32_t stance, bool noWait, double ms) { changeStanceEvent(stance, noWait, ms); }
     void playAnim(const qb::Struct& params, double ms) { playAnimEvent(params, ms); }
+    // play_special_anim {stance anim}: the stance at once (no transition),
+    // its `anim` looping, the arms off (guitarist, bassist) [C script].
+    void playSpecial(uint32_t stance, uint32_t anim, double ms);
+    band::Role role() const { return role_; }
     // The pose at `ms` (>= the last advance): local transforms, then the
     // model-space bone matrices (`world`) and the skinning matrices
     // (world x inverse bind).
