@@ -60,6 +60,7 @@ const std::vector<EnhancedSetting>& enhancedSettings() {
         {"no_fail", {"off", "on"}},
         {"autoplay", {"off", "on"}},
         {"hopo_mode", {"original", "forgiving"}},
+        {"dev_key_cheats", {"off", "on"}},
         {"audio_offset", {}, -300, 500},
         {"video_offset", {}, -300, 500},
     };
@@ -416,6 +417,12 @@ const std::vector<Item>& items() {
         {Kind::Cheat, "cheat_monkey_head_crowd", "", true,
          "The original cheat: everyone in the crowd wears a monkey head. Code at the main menu: Orange, Yellow, "
          "Blue, Blue, Yellow, Orange, Blue, Blue."},
+        {Kind::Check, "dev_key_cheats", "Developer Keyboard Cheats", true,
+         "Developer cheats: GH2's own debug keys from its development kit, never on in the retail game. With this on, "
+         "a keyboard key that is not bound to a control runs its cheat, e.g. p Autoplay, l Automatically Lose, e / E "
+         "lower / raise the crowd, c next camera, V hold the camera, h hide the HUD and fretboard, H the HUD only, "
+         "P cycle the track speed, + force the encore, A access all. Keys bound to frets (1-5, F1-F5) keep playing. "
+         "Some only show the developers' debug overlays, which the port does not draw."},
     };
     return k;
 }

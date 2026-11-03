@@ -735,6 +735,30 @@ bool UiManager::holdingLoadScreen() const {
     return false;
 }
 
+// The development kit's keyboard cheats (CheatMgr 0x8235C610 loads
+// quick_cheats; the retail game never enables them): (key "name" {script}
+// ...), the key a KB_ macro (F-keys 401..412), a digit or a one-character
+// symbol ('#', a, A). The port runs them from the Enhanced menu's
+// Developer Keyboard Cheats (GD02-045).
+bool UiManager::keyCheat(int code) {
+    const DataNode* qc = boot_ ? boot_->find("quick_cheats") : nullptr;
+    const DataNode* kb = qc ? qc->find("keyboard") : nullptr;
+    for (size_t k = 1; kb && k < kb->children.size(); ++k) {
+        const DataNode& c = kb->children[k];
+        if (!c.isList() || c.children.size() < 3) continue;
+        const DataNode& key = c.children[0];
+        int want = -1;
+        if (key.type == DataNode::Type::Int) want = key.i >= 0 && key.i <= 9 ? '0' + key.i : key.i;
+        else if (key.isText()) want = key.s.size() == 1 ? static_cast<unsigned char>(key.s[0]) : macroInt(key.s, -1);
+        if (want != code) continue;
+        const std::string name = c.children[1].isText() ? c.children[1].s : std::string();
+        SDL_Log("dev cheat: %s", name.c_str());
+        interp_.runList(c, 2);
+        return true;
+    }
+    return false;
+}
+
 void UiManager::updateHelpbar() {
     PanelObj* hb = panel("helpbar");
     if (!hb || !current_) return;

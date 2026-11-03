@@ -733,6 +733,10 @@ private:
         if (msg == "star_power_ready") return r = Value::integer(p && p->starPowerReady() ? 1 : 0), true;
         if (msg == "crowd_rating") return r = Value::real(p ? p->rockMeter() : 0.5f), true;
         if (msg == "crowd_rating_active") return r = Value::integer(1), true;
+        // The developer cheats (cheats.dta l / # $ %): lose now, win now [I:
+        // the win's star count is not forced, the song just ends won].
+        if (msg == "lose") return ui_.host().gameForceLose(), true;
+        if (msg == "win" && !args.empty()) return ui_.host().gameForceWin(), true;
         if (msg == "win") return r = Value::integer(p && !p->failed() ? 1 : 0), true;
         if (msg == "failed") return r = Value::integer(p && p->failed() ? 1 : 0), true;
         if (sinks_.handle(ui_.interp(), msg, args)) return true;

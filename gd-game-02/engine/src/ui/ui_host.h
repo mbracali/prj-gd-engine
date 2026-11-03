@@ -103,6 +103,10 @@ public:
     virtual void gameBegin() = 0;
     // GamePanel exit: stops the song.
     virtual void gameEnd() = 0;
+    // The developer cheats' {player0 lose} / {player0 win <stars>} (cheats.dta,
+    // GD02-045): the song failed now / ended now as won.
+    virtual void gameForceLose() {}
+    virtual void gameForceWin() {}
     virtual bool gameLoaded() const = 0;
     virtual void gameSetPaused(bool paused) = 0;
     virtual bool gamePaused() const = 0;

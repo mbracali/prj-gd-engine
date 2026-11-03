@@ -90,6 +90,10 @@ public:
     // A typed key for the focused text entry (band names); false: none is focused.
     bool textEntryFocused() const;
     bool typeKey(int code);
+    // GH2's developer keyboard cheats (config/cheats.dta, quick_cheats
+    // keyboard): runs the cheat on `code` (a character, or KB_F1.. 401..412).
+    // False: no cheat on that key (GD02-045).
+    bool keyCheat(int code);
     // A game event for the game panel and its sinks (intro_start_msg,
     // game_won_msg, game_lost, game_outro_complete, star_power_ready...).
     void gameEvent(const std::string& msg, std::vector<Value> args = {});

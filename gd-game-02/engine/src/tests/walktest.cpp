@@ -157,6 +157,26 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
                    "guitar_help_screen", "main_screen", "qp_selsong_screen", "qp_diff_screen", "loading_screen", "game_screen",
                    "post_show_screen", "endgame_screen", "highscore_screen", "complete_screen", "meta_loading_screen", "saving_screen",
                    "qp_selsong_screen", "main_screen", "qp_selsong_screen", "qp_diff_screen", "loading_screen", "game_screen"};
+    } else if (scenario == "dev_cheats") {
+        // GD02-045: Enhanced > Developer Keyboard Cheats on, then a real 'l'
+        // key (SDL event, through the app's bound-key filter) runs cheats.dta's
+        // "Automatically Lose" ({handle (player0 lose)}): the lose screen. A
+        // bound key ('1', green) runs no cheat.
+        at("splash_screen", 30000);
+        press(kX);
+        at("startup_create_save_screen");
+        press(kX);
+        at("saving_screen");
+        at("guitar_help_screen");
+        press(kX);
+        quickplaySong(3);
+        wait(3000);
+        check("dev_cheat_on");
+        key(SDLK_1);  // bound to green: no cheat
+        wait(1500);
+        check("dev_cheat_bound");
+        key(SDLK_L);  // Automatically Lose
+        at("lose_screen", 20000);
     } else if (scenario == "lose") {
         autoplay_ = false;
         failMs_ = 6000;  // past hush's first big note (PART GUITAR beat 8), its gem passed unhit
@@ -1600,6 +1620,15 @@ static bool mainCamera(ui::UiManager& ui, std::array<float, 3>& pos) {
 void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
     auto fail = [&](const std::string& e) { error_ = e, failed_ = done_ = true; };
     auto pass = [&] { ++step_, stepStart_ = -1; };
+    if (s.screen == "dev_cheat_on") {
+        ui.host().setEnhancedValue("dev_key_cheats", "on");
+        return pass();
+    }
+    if (s.screen == "dev_cheat_bound") {
+        std::printf("  dev cheats: after the bound key '1', on %s\n", ui.currentScreen().c_str());
+        if (ui.currentScreen() != "game_screen") return fail("a key bound to a control ran a developer cheat");
+        return pass();
+    }
     if (s.screen == "load_hold") {
         // The song's loading screen stays up at least 2 s with its animation
         // (UiManager::holdingLoadScreen, GD02-155).

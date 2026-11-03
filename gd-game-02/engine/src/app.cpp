@@ -216,6 +216,10 @@ public:
     bool gameLoad(const GameSetup& setup, std::string& error) override;
     void gameBegin() override;
     void gameEnd() override { endSong(); }
+    void gameForceLose() override { failAtMs_ = -1e30f; }
+    void gameForceWin() override {
+        if (song_) song_->endMs = std::min(song_->endMs, lastT_);
+    }
     bool gameLoaded() const override { return player_ != nullptr; }
     void gameSetPaused(bool paused) override {
         paused_ = paused;
@@ -1308,6 +1312,17 @@ void App::handleEvent(const SDL_Event& e) {
             ui_->typeKey(k == SDLK_BACKSPACE ? 8 : int(k));
             return;
         }
+    }
+    // GH2's developer keyboard cheats (Enhanced, GD02-045): a key not bound
+    // to a keyboard control runs its cheats.dta entry.
+    if (ui_ && e.type == SDL_EVENT_KEY_DOWN && !e.key.repeat && !ui_->textEntryFocused() && enhancedValue("dev_key_cheats") == "on") {
+        bool bound = false;
+        for (const auto& srcs : input_.bindings("keyboard"))
+            for (const Input::Source& s : srcs) bound = bound || (s.kind == Input::Source::Kind::Key && s.index == int(e.key.key));
+        int code = -1;
+        if (e.key.key >= SDLK_F1 && e.key.key <= SDLK_F12) code = 401 + int(e.key.key - SDLK_F1);
+        else if (const SDL_Keycode c = SDL_GetKeyFromScancode(e.key.scancode, e.key.mod, false); c >= 32 && c < 127) code = int(c);
+        if (!bound && code >= 0 && ui_->keyCheat(code)) return;
     }
     if (e.type == SDL_EVENT_WINDOW_HDR_STATE_CHANGED && canvas_.renderer().ready()) {  // HDR on / off, paper white, headroom
         canvas_.renderer().device().hdrStateChanged();

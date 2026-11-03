@@ -383,6 +383,15 @@ walktests' career.json check.
 
 ### Cheats
 
+- Developer Keyboard Cheats (Enhanced, GD02-045): GH2's development-kit keys
+  (`config/cheats.dta` `quick_cheats` keyboard; CheatMgr 0x8235C610 loads
+  them, the retail game never enables them). With the row on, a key that is
+  not bound to a keyboard control runs its entry (`UiManager::keyCheat`; F-keys
+  are KB_F1.. 401..412, digits and characters as typed with Shift). Their
+  scripts (`cheats_funcs.dta`) run as GH2's; `{player0 lose}` fails the song,
+  `{player0 win <n>}` ends it won [I: the star count is not forced]; debug
+  overlays (`rnd show_overlay`) only log. Walk `dev_cheats`.
+
 GH2's long cheats (`config/long_cheats.dta`, in gh2.dta's `(long_cheats
 ...)`) run as the original's CheatsManager (0x8235B5B0) [C]: every button
 pressed (any controller, the joypad's yellow / blue / orange too) goes into
