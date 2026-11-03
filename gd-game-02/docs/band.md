@@ -671,6 +671,8 @@ order and the material are C]. `check band_shadows` in `--walktest quickplay`.
   point [C]); the song end used by the schedule; multiplayer walks: none, one
   player only [C].
 - CharEyes blink retarget (0x82170BA8) [C]: with right_lid set (goth1, goth2, rockabill1) the lid's local m00 [I] below -0.1 and just opening, one blink in three (RandomFloat, drawn only then) moves the eyes to a new point after 1 s.
+- CharDriverMidi's +8 byte (inactive clip when 0, 0x82184B28): CharIKMidi's midi_parser (0x821837B8) tests the same byte before it moves the fretting hand at all [C], and on the 360 the hand slides along the neck, so the byte is set in play: the requested clip plays, as the port does (band.cpp ignores set_inactive_clip) [I: the owner of the byte, a shared base field].
+- Drum kit: BAND DRUMS 36 / 37 (kick_drum, crash_symbal) go out one a poll, as the drummer_kick_drum MidiParser (0x8233E5B8) [C] (`WorldDriver::drumsDue_`).
 - Hair's soft band (types 2 and 3): done. The up vector blends towards the
   collision's direction inside the band and takes it past the hard edge
   (0x8217B898, 0x82122100) [C]. CharEyes' interest branch: no interests on the
