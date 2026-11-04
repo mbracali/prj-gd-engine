@@ -52,6 +52,10 @@ public:
         for (Entry& e : members_)
             if (e.anim.role() == role) e.anim.playSpecial(stance, anim, ms);
     }
+    void playClip(band::Role role, uint32_t clip, uint32_t stance, bool cycle, double ms) {
+        for (Entry& e : members_)
+            if (e.anim.role() == role) e.anim.playClip(clip, stance, cycle, ms);
+    }
 
     struct Entry {
         std::unique_ptr<band::Model> model;

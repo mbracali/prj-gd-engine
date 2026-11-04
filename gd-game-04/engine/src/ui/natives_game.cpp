@@ -122,6 +122,11 @@ void addGameNatives(FrontEnd& fe, const Disc& disc, TextureCache& textures) {
         if (Vm::number(Vm::param(p, K("end_credits_restart")), 0) != 1 && !(song && song->key == K("thrufireandflames")))
             v.setGlobal(K("end_credits"), Vm::makeInt(0));
         r.endCredits = Vm::number(v.global(K("end_credits")), 0) == 1;
+        // current_transition (none: fastintro), set by Transition_SelectTransition
+        // or the restart / practice scripts; Transition_Play plays it, then
+        // change current_transition = none [C script start_gem_scroller].
+        if (const qb::Value* t = v.global(K("current_transition")); t && t->key && t->key != K("none")) r.transition = t->key;
+        v.setGlobal(K("current_transition"), Vm::makeKey(K("none")));
         if (auto it = v.globalTags.find(K("user_options")); it != v.globalTags.end())
             for (int i = 0; i < 2; ++i)
                 if (const qb::Value* l = it->second.find(K(i ? "lefty_flip_p2" : "lefty_flip_p1"))) r.lefty[i] = l->number() != 0;

@@ -47,6 +47,10 @@ struct SongSetup {
     // user_options.lag_calibration (ms): input_offset = the song's - this [C script gem_scroller].
     double lagMs = 0;
     bool endCredits = false;  // end_credits = 1 (the credits song) [C script start_gem_scroller]
+    // current_transition's key (0: fastintro): the intro's length (its
+    // Default_<t>_Transition time) and cameras (Common_<t>_Transition's
+    // Transition_CameraCut prefix) [C script start_gem_scroller].
+    uint32_t transition = 0;
 };
 
 class SongScreen {
@@ -133,11 +137,21 @@ private:
     // The SongWon / SongLost transition's length (Default_SongWon_Transition
     // time 8000 [C data]); the outro started (the venue told).
     double transitionMs_ = 8000;
+    double leadInMs_ = 3000;  // the intro transition's time before the music
+    std::string introCameras_ = "cameras_fastintro";
+    bool introFast_ = true;
     bool outro_ = false;
+    std::string outroPrefix_;
 public:
     // After the song: the venue alone at `ms` (song time) while GH3's
     // transition runs; false once there is nothing to draw.
     bool drawOutro(Canvas& c, double ms);
+    // GuitarEvent_SongWon_Spawned plays PreEncore / PreBoss when the tier's
+    // unlock set current_transition (Progression_TierEncoreUnlock /
+    // TierBossUnlock): the same win stances, their own cameras [C data
+    // Common_PreEncore_Transition, Common_PreBoss_Transition].
+    void outroCameras(double ms, const std::string& prefix);
+    void playClip(int role, uint32_t clip, uint32_t stance, bool cycle, double ms);
     double lastMs() const { return lastMs_; }
     double transitionMs() const { return transitionMs_; }
 private:

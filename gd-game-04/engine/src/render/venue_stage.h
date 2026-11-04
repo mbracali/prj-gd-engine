@@ -64,6 +64,12 @@ public:
 
     venue::CamPose camera(double ms) const { return cameras_.pose(ms); }
     const venue::CameraDirector& cameras() const { return cameras_; }
+    // Before start: the intro transition's cameras (cameras_encore, ...).
+    void setIntroCameras(const std::string& prefix) { cameras_.setIntroCameras(prefix); }
+    // The end transition's cameras from `ms` (cameras_preencore / _preboss).
+    void outroCameras(double ms, const std::string& prefix) { cameras_.outro(ms, prefix); }
+    // A band member's Obj_SwitchScript Transition_PlayAnim_Spawned (role 0 guitarist, 1 bassist).
+    void playClip(int role, uint32_t clip, uint32_t stance, bool cycle, double ms);
     const venue::LightShow& lights() const { return lights_; }
     const venue::Venue& venue() const { return *venue_; }
     const VenueView* view() const { return view_.get(); }

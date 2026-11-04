@@ -89,7 +89,7 @@ void CameraDirector::init(const Venue& v, const Globals& g, const Chart& chart, 
     qb::Struct p;
     qb::Value s;
     s.type = qb::Type::String;
-    s.str = leadInMs > 3000.5 ? "cameras_intro" : "cameras_fastintro";
+    s.str = !introPrefix_.empty() ? introPrefix_ : leadInMs > 3000.5 ? "cameras_intro" : "cameras_fastintro";
     p.items.push_back({K("prefix"), s});
     qb::Value cn;
     cn.type = qb::Type::Key;

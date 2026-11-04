@@ -22,8 +22,36 @@
 namespace {
 
 constexpr double kStepMs = 1000.0 / 60.0;  // GH3 runs its judge once per game frame [I: 60 Hz]
-// The intro before the music: fastintro's 3000 ms (quickplay) [C script start_gem_scroller, fastintro props].
-constexpr double kLeadInMs = 3000.0;
+// The intro before the music: the transition's time (fastintro 3000 ms,
+// intro / boss 8000, encore 5000), its cameras the Transition_CameraCut
+// prefix in its Common_ table [C script start_gem_scroller: starttime -=
+// Transition_GetTime; data Default_ / Common_<t>_Transition].
+struct IntroTransition {
+    double ms = 3000;
+    std::string cameras = "cameras_fastintro";
+    bool fast = true;
+};
+
+IntroTransition introTransition(const Globals& g, uint32_t key) {
+    IntroTransition t;
+    // debugintro plays as intro [C script Transition_SelectTransition].
+    static const char* const kNames[] = {"FastIntro", "Intro", "Encore", "Boss", "Practice", "Immediate", "RestartEncore", "RestartBoss"};
+    std::string name = "FastIntro";
+    for (const char* n : kNames)
+        if (key == qbkey::key(n)) name = n;
+    if (key == qbkey::key("debugintro")) name = "Intro";
+    t.fast = name == "FastIntro";
+    if (const qb::Value* d = g.find(qbkey::key("Default_" + name + "_Transition")); d && d->st)
+        if (const qb::Value* tm = d->st->find(qbkey::key("time"))) t.ms = tm->number();
+    if (const qb::Value* c = g.find(qbkey::key("Common_" + name + "_Transition")); c && c->st)
+        if (const qb::Value* tab = c->st->find(qbkey::key("ScriptTable")); tab && tab->arr)
+            for (const qb::Value& e : tab->arr->values)
+                if (e.st)
+                    if (const qb::Value* scr = e.st->find(qbkey::key("scr")); scr && scr->key == qbkey::key("Transition_CameraCut"))
+                        if (const qb::Value* ps = e.st->find(qbkey::key("params")); ps && ps->st)
+                            if (const qb::Value* pre = ps->st->find(qbkey::key("prefix")); pre && !pre->str.empty()) t.cameras = pre->str;
+    return t;
+}
 const SDL_Color kFretColors[5] = {{40, 200, 60, 255}, {220, 40, 40, 255}, {230, 210, 40, 255}, {40, 100, 230, 255}, {240, 130, 30, 255}};
 
 }  // namespace
@@ -44,6 +72,11 @@ bool SongScreen::start(const Disc& disc, const Globals& g, const SongInfo& song,
     song_ = song;
     startMs_ = setup.startMs;
     devilFinish_ = setup.devilFinish;
+    const IntroTransition intro = introTransition(g, setup.transition);
+    leadInMs_ = intro.ms;
+    introCameras_ = intro.cameras;
+    introFast_ = intro.fast;
+    if (setup.transition) SDL_Log("song: transition %s, %.0f ms (%s)", introCameras_.c_str(), leadInMs_, intro.fast ? "fast" : "full");
     difficulty_ = std::clamp(setup.difficulty[0], 0, 3);
     twoPlayers_ = setup.mode != GameMode::Solo;
     try {
@@ -101,7 +134,7 @@ bool SongScreen::start(const Disc& disc, const Globals& g, const SongInfo& song,
     }
     // The intro counts from current_starttime; the scroller's first frame is
     // the transition's time (fastintro 3000 ms) before it [C start_gem_scroller].
-    const double first = startMs_ - kLeadInMs;
+    const double first = startMs_ - leadInMs_;
     hud_.setStart(startMs_);
     hud2p_.setStart(startMs_);
     for (int p = 0; p < players; ++p) {
@@ -124,7 +157,7 @@ bool SongScreen::start(const Disc& disc, const Globals& g, const SongInfo& song,
                     else if (const qb::Value* gs = g.find(at->key); gs && (gs->type == qb::Type::String || gs->type == qb::Type::WString))
                         by = gs->str;
                 }
-        intro_.setup(song.title, by, song.artist, startMs_, first);
+        intro_.setup(song.title, by, song.artist, startMs_, first, introFast_ ? -6700.0 : -6500.0);
     }
     if (!highwayOk_) SDL_Log("highway: the 2D highway's tables are missing; the debug highway is drawn");
     auto stream = SongStream::open(disc, song.name, error);
@@ -144,19 +177,20 @@ bool SongScreen::start(const Disc& disc, const Globals& g, const SongInfo& song,
     const int p1Stem = p1Rhythm ? 2 : 0;
     tracks[size_t(p1Stem)].guitar = tracks[size_t(p1Stem + 1)].guitar = true;
     if (p2Other) tracks[size_t(2 - p1Stem)].guitar2 = tracks[size_t(3 - p1Stem)].guitar2 = true;
-    mixer.play(std::move(stream), std::move(tracks), kLeadInMs);
+    mixer.play(std::move(stream), std::move(tracks), leadInMs_);
     // The venue: its scene, cameras and light show (uploaded on the first frame).
     if (!SDL_getenv("GD04_NO_VENUE")) {
         disc_ = &disc;
         venue_ = std::make_unique<VenueStage>();
         std::string verr;
         const std::string zone = VenueStage::chooseZone(g);
-        if (!venue_->start(disc, g, zone, chart_, qbkey::key(song.name), kLeadInMs, nullptr, verr)) {
+        venue_->setIntroCameras(introCameras_);
+        if (!venue_->start(disc, g, zone, chart_, qbkey::key(song.name), leadInMs_, nullptr, verr)) {
             SDL_Log("venue: %s", verr.c_str());
             venue_.reset();
         }
     }
-    stepMs_ = startMs_ - kLeadInMs;
+    stepMs_ = startMs_ - leadInMs_;
     if (twoPlayers_)
         SDL_Log("song %s (%s): %s, %s / %s%s", song.name.c_str(), song.title.c_str(), gameModeName(setup.mode), difficultyName(difficulty_),
                 difficultyName(setup.difficulty[1]), setup.suddenDeath ? ", sudden death" : "");
@@ -235,7 +269,7 @@ void SongScreen::tick(double nowMs, Mixer& mixer) {
 }
 
 bool SongScreen::frame(Canvas& canvas, Mixer& mixer, const TextureCache* textures) {
-    const double now = mixer.frameTimeMs() - kLeadInMs + startMs_;
+    const double now = mixer.frameTimeMs() - leadInMs_ + startMs_;
     lastMs_ = now;
     tick(now, mixer);
     draw(canvas, now, textures);
@@ -450,4 +484,15 @@ uint32_t SongScreen::highwayTexture(const Disc& disc, const Globals& g, TextureC
     const uint32_t t = tex.materialTexture(material);
     if (!t) SDL_Log("highway: no %s highway material for player %d (the global highway)", name.c_str(), p + 1);
     return t;
+}
+
+void SongScreen::outroCameras(double ms, const std::string& prefix) {
+    if (!venue_ || outroPrefix_ == prefix) return;
+    outroPrefix_ = prefix;
+    venue_->outroCameras(ms, prefix);
+    SDL_Log("song: end transition %s", prefix.c_str());
+}
+
+void SongScreen::playClip(int role, uint32_t clip, uint32_t stance, bool cycle, double ms) {
+    if (venue_) venue_->playClip(role, clip, stance, cycle, ms);
 }

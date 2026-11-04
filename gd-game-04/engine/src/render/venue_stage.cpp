@@ -70,6 +70,10 @@ void readFx(const qb::Struct& e, screenfx::Params& p, int& brightSlot) {
 
 }  // namespace
 
+void VenueStage::playClip(int role, uint32_t clip, uint32_t stance, bool cycle, double ms) {
+    if (band_) band_->playClip(role == 1 ? band::Role::Bassist : band::Role::Guitarist, clip, stance, cycle, ms);
+}
+
 void VenueStage::outro(double ms, bool won, bool versus, bool p1Won, bool boss) {
     // UseSmallVenueAnims: z_party, z_dive, z_video, z_prison, z_hell, and
     // z_artdeco after the encore (LS_ENCORE_POST) -> Win_SmStg / Lose_SmStg [C script].

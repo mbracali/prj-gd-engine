@@ -536,9 +536,22 @@ own quad builders (VMX128 code not decoded), lit quick materials.
 The characters receiving shadows, the effect passes' own render and
 sampler states (gd04 uses the scene material's, which 823DC180 applies
 over them), the `volume` light type and projectors, the ReducedLOD
-technique [I: the venues fit inside lod_dist1, 150 m], the encore / boss / win / lose transitions
-and their cameras, two-player arrays, walks (Band_WalkToNode, so no
+technique [I: the venues fit inside lod_dist1, 150 m], two-player arrays, walks (Band_WalkToNode, so no
 cameras_walk).
+
+Transitions (0.1.12): the song starts with current_transition, chosen by
+Transition_SelectTransition (quickplay and career: intro, 8 s; an encore
+5 s; a boss 8 s when should_play_boss_intro; restarts fastintro, 3 s):
+the song clock starts the transition's time before the music
+(start_gem_scroller: starttime -= Transition_GetTime) and the intro cameras
+are its Common_ table's Transition_CameraCut prefix (cameras_intro,
+cameras_encore, cameras_boss, cameras_fastintro); the song title at
+song_title_start_time (-6500, fast -6700). The end: SongWon / SongLost
+(cameras_win / _lose, the win / lose stances); when the tier's unlock sets
+current_transition to preencore / preboss (Progression_TierEncoreUnlock /
+TierBossUnlock, run by GuitarEvent_SongWon) the cameras switch to
+cameras_preencore / cameras_preboss [C data Common_*_Transition, scripts].
+GD04_TRANSITION=<name> forces the intro (development aid).
 
 ScreenFlash (0.1.12; z_prison's Z_Prison_LightShow_Flare_Enter):
 ScreenFlashOn adds bg_viewport's FlashBS, ScreenFlash_TOD_Manager's

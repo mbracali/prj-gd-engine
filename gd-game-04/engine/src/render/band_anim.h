@@ -124,6 +124,7 @@ public:
     // play_special_anim {stance anim}: the stance at once (no transition),
     // its `anim` looping, the arms off (guitarist, bassist) [C script].
     void playSpecial(uint32_t stance, uint32_t anim, double ms);
+    void playClip(uint32_t clip, uint32_t stance, bool cycle, double ms);
     band::Role role() const { return role_; }
     // The pose at `ms` (>= the last advance): local transforms, then the
     // model-space bone matrices (`world`) and the skinning matrices
@@ -158,6 +159,8 @@ private:
     void schedule(double t, Ev kind, int a = 0, int b = 0, uint32_t gen = 0, const qb::Struct* params = nullptr);
     void handle(const Event& e);
     uint32_t random(uint32_t n);
+    uint32_t scriptedClip_ = 0;  // playClip's clip (0: the random anims run)
+    bool scriptedCycle_ = false;
     const anim::Clip* clip(uint32_t key);
     const qb::Value* animSet() const;
     const anim::Clip* tempoAnim(uint32_t anim, double t, uint32_t& key);

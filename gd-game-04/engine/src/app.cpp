@@ -80,6 +80,7 @@ private:
     void updatePointer();
     // An Enhanced setting changed ("" : all of them, at start): applied at once.
     void applyEnhanced(const std::string& key);
+    void addVenueScriptCalls();
     // Drawn over every frame: the FPS counter (Enhanced > Show FPS Counter).
     void overlay();
     bool windowToMenu(float wx, float wy, float& mx, float& my) const;
@@ -209,6 +210,59 @@ void App::updatePointer() {
         else SDL_HideCursor();
         pointerShown_ = show;
     }
+}
+
+// The band and camera calls GH3's song-end scripts make on the venue
+// (devil_finish_anim, devil_lose_anim, play_win_anims...): `Bassist :
+// Obj_SwitchScript Transition_PlayAnim_Spawned params = {Anim [stance]
+// [Cycle]}` plays the clip on that member, CameraCuts_SetArrayPrefix
+// switches the cameras (cameras_boss_finish, cameras_boss_dead) [C
+// scripts]. They reach the song being played, or the ended one still drawn
+// under the end transition.
+void App::addVenueScriptCalls() {
+    using qs::ScriptRun;
+    using qs::Vm;
+    auto venueSong = [this](double& ms) -> SongScreen* {
+        if (song_) return ms = song_->songMs(), song_.get();
+        if (outroSong_) return ms = outroFrom_ + double(SDL_GetTicksNS()) / 1e6 - outroWall_, outroSong_.get();
+        return nullptr;
+    };
+    Vm& vm = front_->vm();
+    auto next = vm.objectCall;
+    vm.objectCall = [venueSong, next](Vm& v, ScriptRun& run, uint32_t obj, uint32_t method, qb::Struct& p, bool& handled) -> bool {
+        const bool member = obj == qbkey::key("Guitarist") || obj == qbkey::key("Bassist");
+        if (member && method == qbkey::key("Obj_SwitchScript")) {
+            const qb::Value* scr = nullptr;
+            for (const qb::Item& it : p.items)
+                if (!it.name && it.value.key) scr = &it.value;
+            const qb::Value* params = Vm::param(p, qbkey::key("params"));
+            // play_win_anims / play_lose_anims' play_special_anim {stance Anim = idle}:
+            // VenueStage::outro has already put the same stances on at the song's end.
+            if (scr && scr->key == qbkey::key("play_special_anim")) return handled = true, true;
+            if (scr && scr->key == qbkey::key("Transition_PlayAnim_Spawned") && params && params->st) {
+                handled = true;
+                double ms = 0;
+                if (SongScreen* s = venueSong(ms)) {
+                    const qb::Value* anim = params->st->find(qbkey::key("Anim"));
+                    const qb::Value* stance = params->st->find(qbkey::key("stance"));
+                    const qb::Value* cycle = params->st->find(qbkey::key("Cycle"));
+                    s->playClip(obj == qbkey::key("Bassist") ? 1 : 0, anim ? anim->key : 0, stance ? stance->key : 0,
+                                cycle && cycle->number() != 0, ms);
+                }
+                return true;
+            }
+        }
+        return next ? next(v, run, obj, method, p, handled) : false;
+    };
+    vm.addNative("CameraCuts_SetArrayPrefix", [venueSong](Vm&, ScriptRun&, qb::Struct& p) {
+        const qb::Value* pre = Vm::param(p, qbkey::key("prefix"));
+        double ms = 0;
+        // Only the boss endings' prefixes: the star power, walk and transition
+        // cameras are the camera director's own (venue_camera.cpp).
+        if (!pre || (pre->str != "cameras_boss_finish" && pre->str != "cameras_boss_dead")) return true;
+        if (SongScreen* s = venueSong(ms)) s->outroCameras(ms, pre->str);
+        return true;
+    });
 }
 
 void App::applyEnhanced(const std::string& key) {
@@ -484,6 +538,9 @@ void App::frame() {
         setup.lefty = {rq.lefty[0], rq.lefty[1]};
         setup.lagMs = rq.lagMs;
         setup.endCredits = rq.endCredits;
+        setup.transition = rq.transition;
+        // GD04_TRANSITION=<name>: every song starts with that transition (encore, boss, intro...; development aid).
+        if (const char* tr = SDL_getenv("GD04_TRANSITION")) setup.transition = qbkey::key(tr);
         // GD04_START_AT=<song ms>: start every song there (development aid; GH3's starttime).
         if (const char* at = SDL_getenv("GD04_START_AT")) setup.startMs = std::max(0.0, std::atof(at));
         if (setup.mode == GameMode::Boss) setup.difficulty[1] = rq.difficulty;  // the 1P menu sets both [C selected_difficulty]
@@ -550,6 +607,9 @@ void App::frame() {
             // the song's end; the results come after it) [C data Default_SongWon_Transition].
             if (outroSong_) {
                 const double el = double(nowNs) / 1e6 - outroWall_;
+                if (const qb::Value* t = front_ ? front_->vm().global(qbkey::key("current_transition")) : nullptr)
+                    if (t->key == qbkey::key("preencore") || t->key == qbkey::key("preboss"))
+                        outroSong_->outroCameras(outroFrom_ + el, t->key == qbkey::key("preencore") ? "cameras_preencore" : "cameras_preboss");
                 if (el >= outroSong_->transitionMs() || !outroSong_->drawOutro(canvas_, outroFrom_ + el)) {
                     SDL_Log("song: end transition drawn over the venue for %lld frames", outroFrames_);
                     outroSong_.reset(), outroFrames_ = 0;
@@ -665,6 +725,7 @@ int App::run() {
         } else {
             ports_ = std::make_unique<PortScreens>(input_, *front_, enhanced_, [this](const std::string& k) { applyEnhanced(k); });
             if (!envOn("GD04_NO_HOOKS")) hooks_ = std::make_unique<SongHooks>(*front_, mixer_, *disc_, *textures_);
+            addVenueScriptCalls();
         }
     }
     if (walk_ && walk_->twoPlayers()) input_.setSplitKeyboard(true);  // two-player walks: player 2 on the keyboard's other half

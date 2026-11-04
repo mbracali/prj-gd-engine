@@ -77,6 +77,7 @@ public:
         // end_credits: kept by an end_credits_restart or for
         // thrufireandflames, else cleared [C script start_gem_scroller].
         bool endCredits = false;
+        uint32_t transition = 0;  // current_transition (fastintro, intro, encore, boss, ...)
     } songRequest;
     bool songPlaying = false;
     // Paused with Start in a song: GH3's pause menu runs over the frozen song

@@ -7,6 +7,8 @@ All notable changes for players. Versions follow SemVer; release tags are
 
 ### Added
 - In-Game Max FPS: 144 (#57).
+- Songs open with GH3's own intro: the full 8-second venue intro with its cameras (the port used the 3-second fast one), the encore's and the boss's own intros, and the pre-encore / pre-boss endings.
+- Lou's finish and defeat scenes play with their animations and cameras.
 
 ### Fixed
 - Android: the same buffer-update path as macOS, which phone graphics drivers handle without stalling (#55).

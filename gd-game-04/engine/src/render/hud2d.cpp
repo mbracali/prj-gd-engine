@@ -579,15 +579,17 @@ void draw(Canvas& c, const Hud2D::TextFn& text, const HudAnim& a, uint32_t font,
 
 }  // namespace hudalert
 
-void IntroText::setup(const std::string& title, const std::string& by, const std::string& artist, double startMs, double firstMs) {
+void IntroText::setup(const std::string& title, const std::string& by, const std::string& artist, double startMs, double firstMs,
+                      double titleStartMs) {
     auto upper = [](std::string t) {
         for (char& ch : t) ch = char(std::toupper(static_cast<unsigned char>(ch)));
         return t;
     };
     title_ = upper(title), by_ = upper(by), artist_ = upper(artist);
-    // fastintro: song_title_start_time -6700 after current_starttime, so at
-    // the scroller's first frame [C data fastintro_sequence_props].
-    at_ = std::max(firstMs, startMs - 6700.0);
+    // song_title_start_time after current_starttime: fastintro -6700 (so at
+    // the scroller's first frame), intro -6500 (1.5 s into the 8 s intro)
+    // [C data fastintro_sequence_props, intro_sequence_props].
+    at_ = std::max(firstMs, startMs + titleStartMs);
 }
 
 void IntroText::draw(Canvas& c, const Hud2D::TextFn& text, double now) const {

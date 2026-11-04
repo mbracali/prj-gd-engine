@@ -547,6 +547,13 @@ void Animator::bodyIteration(double t) {
 }
 
 void Animator::bodyFinished(double t) {
+    if (scriptedClip_) {  // a scripted clip: looped (Cycle = 1) or held
+        if (scriptedCycle_) {
+            const uint32_t k = scriptedClip_;
+            playClip(k, 0, true, t);
+        }
+        return;
+    }
     if (nextStance_ != stance_) {
         // play_stance_transition_cfunc: anim_set.<old>.transitions.<new> [I: the C function's lookup].
         const anim::Clip* tr = nullptr;
@@ -624,12 +631,30 @@ void Animator::playAnimEvent(const qb::Struct& p, double t) {
 // tempo anim `anim` now (hero_play_tempo_anim_cfunc) and again when it ends
 // [C script; I: the loop is the body loop with cycle].
 void Animator::playSpecial(uint32_t stance, uint32_t anim, double t) {
+    scriptedClip_ = 0;
     stance_ = nextStance_ = stance;
     currentAnim_ = anim ? anim : K("idle");
     nextAnim_ = 0;
     cycle_ = true, repeat_ = 1;
     if (guitarLike()) disableArms_ = nextDisableArms_ = 2;
     bodyIteration(t);
+}
+
+// Transition_PlayAnim_Spawned {Anim [stance] [Cycle]}: the named clip on its
+// own (devil_finish_anim, devil_lose_anim); Cycle = 1 loops it, otherwise
+// the last frame holds; the random anims stop [C scripts].
+void Animator::playClip(uint32_t clipKey, uint32_t stance, bool cycle, double t) {
+    const anim::Clip* c = clip(clipKey);
+    if (!c) return;
+    if (stance) stance_ = nextStance_ = stance;
+    nextAnim_ = 0;
+    if (guitarLike()) disableArms_ = nextDisableArms_ = 2;
+    setArms(disableArms_, t, 0.25f);
+    ++bodyGen_;
+    body_.play(c, t, 0.2f);
+    bodyKey_ = clipKey;
+    scriptedClip_ = clipKey, scriptedCycle_ = cycle;
+    schedule(t + std::max(kFrameMs, double(c->duration) * 1000.0), Ev::BodyDone, 0, 0, bodyGen_);
 }
 
 // handle_change_stance [C script].

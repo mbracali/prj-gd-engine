@@ -54,6 +54,10 @@ public:
     // `leadInMs`: the time before song time 0 the transition starts (the
     // intro transition's length: fastintro 3000 ms).
     void init(const Venue& v, const Globals& g, const Chart& chart, uint32_t seed, double leadInMs);
+    // The intro transition's camera prefix (cameras_intro, cameras_encore,
+    // cameras_boss...); empty: chosen by the lead-in (fast or full intro).
+    void setIntroCameras(const std::string& prefix) { introPrefix_ = prefix; }
+    std::string introPrefix_;
     // Advances to song time `ms` (monotonic), processing every camera note
     // and every cut up to it in time order (a cut picks its camera array by
     // the performance at its own time).
