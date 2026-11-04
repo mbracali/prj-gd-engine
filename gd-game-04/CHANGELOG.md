@@ -19,6 +19,9 @@ All notable changes for players. Versions follow SemVer; release tags are
 - Lou's finish and defeat scenes play with their animations and cameras.
 
 ### Fixed
+- Song previews play again on the setlist (GD04-059).
+- Career venue select moves one venue per press (GD04-059).
+- Removed the experimental ground fog and the light streaks; the band's self-shadowing and the approximated projector and volume lights are off (GD04-059).
 - The band froze and their hands stopped: the animator ran its events out of order (GD04-058).
 - The music played seconds ahead of the notes: the song clock subtracted the intro twice (GD04-058).
 - The Enhanced page's backdrop is a still close-up of the band with the singer on the right, not dimmed; the FPS counter uses the game's font (GD04-058).

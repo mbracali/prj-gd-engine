@@ -34,14 +34,12 @@ const std::vector<EnhancedSetting>& enhancedSettings() {
         {"color_grade", {"off", "warm", "cold", "vintage", "noir", "neon"}},
         {"film_grain", {"off", "light", "strong"}},
         {"chromatic", {"off", "on"}},
-        {"light_streaks", {"off", "on"}},
         {"ssao", {"off", "on"}},
         {"sharpening", {"off", "low", "high"}},
         {"star_blur", {"none", "light", "medium", "high"}},
         {"shadows_all", {"off", "on"}},
         {"more_lights", {"off", "subtle", "strong"}},
         {"light_dust", {"off", "on"}},
-        {"ground_fog", {"none", "low", "full", "super"}},
         {"no_shaky_cam", {"off", "on"}},
         {"no_fail", {"off", "on"}},
         {"autoplay", {"off", "on"}},
@@ -79,10 +77,10 @@ std::vector<std::pair<std::string, std::string>> enhancedProfile(bool deck) {
     // touch controls.
     std::map<std::string, std::string> d = {
         {"antialiasing", "none"}, {"ai_upscaling", "none"}, {"bokeh", "regular"}, {"particles", "on"}, {"cinematic_color", "off"},
-        {"color_grade", "off"}, {"chromatic", "off"}, {"light_streaks", "off"}, {"more_lights", "off"}, {"no_shaky_cam", "off"},
+        {"color_grade", "off"}, {"chromatic", "off"}, {"more_lights", "off"}, {"no_shaky_cam", "off"},
         {"screen_mode", "windowed"}, {"max_fps", "60"}, {"fps_counter", "off"}, {"internal_res", "1080"}, {"sharp_ui", "off"},
         {"bloom", "off"}, {"film_grain", "off"}, {"ssao", "off"}, {"sharpening", "off"}, {"star_blur", "none"},
-        {"shadows_all", "off"}, {"light_dust", "off"}, {"ground_fog", "none"}, {"touch", "off"},
+        {"shadows_all", "off"}, {"light_dust", "off"}, {"touch", "off"},
     };
     auto set = [&](std::initializer_list<std::pair<const char*, const char*>> kv) {
         for (const auto& [k, v] : kv) d[k] = v;

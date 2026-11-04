@@ -173,6 +173,12 @@ void Sfx::stopSample(uint32_t sample) {
         if (v.sample == sample) SDL_ClearAudioStream(v.stream);
 }
 
+bool Sfx::samplePlaying(uint32_t sample) const {
+    for (const Voice& v : voices_)
+        if (v.sample == sample && (v.paused || SDL_GetAudioStreamAvailable(v.stream) > 0)) return true;
+    return false;
+}
+
 void Sfx::stopBuss(uint32_t buss) {
     for (Voice& v : voices_)
         if (buss && v.buss == buss) SDL_ClearAudioStream(v.stream);

@@ -269,6 +269,19 @@ Walk::Walk(const std::string& name) : name_(name) {
                           10000});
         steps_.push_back({"options_select_option_fs", {"click:help:BACK"}, 10000});
         steps_.push_back({"main_menu_fs", {}, 20000});
+    } else if (name == "venues") {
+        // Career venue select: down moves the focus to the next venue (owner
+        // report: stuck on the first) [C script create_select_venue_menu].
+        steps_ = boot;
+        steps_.push_back({"main_menu_fs", {C}, 10000});
+        steps_.push_back({"career_choose_band_fs", {C}, 20000, true});
+        steps_.push_back({"career_enter_band_name_fs", {C, C, C, Action::Start}, 20000, true});
+        steps_.push_back({"career_select_difficulty_fs", {C}, 20000});
+        steps_.push_back({"career_select_character_fs", {C}, 20000, true});
+        steps_.push_back({"career_character_hub_fs", {"unlock:all", C}, 20000});  // the venues unlocked (as progress does)
+        steps_.push_back({"career_select_venue_fs", {"check:focus:venue_3", Action::Up, "wait", "check:focus:venue_4", Action::Up, "wait", "check:focus:venue_5", D, "wait",
+                                                     "check:focus:venue_4", B}, 20000});
+        steps_.push_back({"career_character_hub_fs", {}, 20000});
     } else if (name == "hub") {
         // The character hub's CHANGE OUTFIT and CHANGE GUITAR screens
         // (GD04-043) [C data
@@ -674,6 +687,28 @@ bool Walk::act(const std::string& what, FrontEnd& fe, WalkHost& host) {
         const std::string kv = rest("set:enhanced:");
         const size_t eq = kv.find('=');
         host.walkSetEnhanced(kv.substr(0, eq), kv.substr(eq + 1));
+        return true;
+    }
+    if (what == "wait") return true;  // one step (300 ms) of nothing
+    if (what == "unlock:all") {  // every save tag with an `unlocked` field set to 1 (the venues as a finished career has them)
+        int n = 0;
+        for (auto& [k, st] : fe.vm().globalTags)
+            if (qs::Vm::param(st, qbkey::key("unlocked"))) qs::Vm::set(st, qbkey::key("unlocked"), qs::Vm::makeInt(1)), ++n;
+        std::printf("  unlocked: %d tags\n", n);
+        return true;
+    }
+    if (starts("check:focus:")) {  // check:focus:<id>: that element is the one focused (no other item focused)
+        const uint32_t want = qbkey::key(rest("check:focus:").c_str());
+        int items = 0;
+        bool has = false;
+        for (const ui::Element* e : fe.ui().focusedElements())
+            if (e->id != qbkey::key("root_window")) ++items, has = has || e->id == want;
+        std::printf("  focus: %s %s (%d focused)\n", rest("check:focus:").c_str(), has ? "yes" : "no", items);
+        return has && items == 1 ? true : fail("focus is not on " + rest("check:focus:") + " alone");
+    }
+    if (what == "log:focus") {  // the focused menu item's id and text (development aid)
+        for (const ui::Element* e : fe.ui().focusedElements())
+            std::printf("  focus: %s \"%s\"\n", qbkey::name(e->id).c_str(), e->text.c_str());
         return true;
     }
     if (starts("set:global:")) {  // set:global:<name>=<number>: a GH3 global set (a test's shortcut)

@@ -58,14 +58,13 @@ struct PostSettings {
     int ssao = 0;           // 0 none, 1 light, 2 medium, 3 strong, 4 stronger
     int sharpen = 0;        // 0 off, 1 low, 2 high
     int starBlur = 0;       // 0 none, 1 light, 2 medium, 3 strong, 4 stronger
-    bool streaks = false;   // Anamorphic Light Streaks (gd04)
     int hdr = 0;            // 0 none (the original look), 1 emulated (tone mapped to SDR), 2 HDR output
     float hdrPeak = 1;      // True HDR: the display's headroom in paper whites (1: tone mapped as Emulated); set by PostFx
     // The world's size against the picture (SSAA 2x, FSR 1 below 1).
     float renderScale() const { return (fsr1 ? fsrScale : 1.0f) * (aa == AA::Ssaa ? 2.0f : 1.0f); }
     // Whether the port's chain runs at all.
     bool any() const {
-        return aa != AA::None || fsr1 || bloom || cinematic || grade || grain || chromatic || ssao || sharpen || starBlur || hdr || streaks;
+        return aa != AA::None || fsr1 || bloom || cinematic || grade || grain || chromatic || ssao || sharpen || starBlur || hdr;
     }
 };
 

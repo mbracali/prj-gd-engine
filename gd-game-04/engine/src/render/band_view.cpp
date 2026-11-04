@@ -16,9 +16,10 @@
 #include "render/venue_view.h"
 
 namespace {
-// GD04_NO_BAND_SHADOWS=1: the band does not receive the shadow map (development aid).
+// GD04_BAND_SHADOWS=1: the band receives the shadow map (development aid;
+// off: self-shadowing speckled the characters, owner report 2026-11-04).
 bool noBandShadows() {
-    static const bool off = SDL_getenv("GD04_NO_BAND_SHADOWS") != nullptr;
+    static const bool off = SDL_getenv("GD04_BAND_SHADOWS") == nullptr;
     return off;
 }
 

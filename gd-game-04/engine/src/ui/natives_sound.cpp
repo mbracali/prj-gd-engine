@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "ui/natives_sound.h"
+#include "data/disc.h"
+#include <set>
 #include <SDL3/SDL_timer.h>
 #include <vector>
 #include <algorithm>
@@ -34,7 +36,7 @@ const qb::Value* firstUnnamed(const qb::Struct& p) {
 
 void setSoundEventListener(std::function<void(uint32_t)> f) { listener() = std::move(f); }
 
-void addSoundNatives(qs::Vm& vm, Sfx& sfx) {
+void addSoundNatives(qs::Vm& vm, Sfx& sfx, const Disc& disc) {
     using qs::ScriptRun;
     using qs::Vm;
     // Per sound event: its voices, when it last started, its last picks
@@ -135,6 +137,30 @@ void addSoundNatives(qs::Vm& vm, Sfx& sfx) {
         const qb::Value* b = Vm::param(p, K("buss"));
         if (!sfx.play(s->key, vol / 100.0f, pitch / 100.0f, b ? b->key : 0)) v.logOnce("PlaySound: no sample " + qbkey::name(s->key));
         return true;
+    });
+    // SongLoadFSB song_prefix = p: the song's bank (DATA/MUSIC/<p>.fsb.xen +
+    // .dat.xen) for its <p>_preview, played by the setlist's
+    // setlist_songpreview_monitor (indexed once a song; decoded on play) [C scripts].
+    auto loadedBanks = std::make_shared<std::set<std::string>>();
+    vm.addNative("SongLoadFSB", [&sfx, &disc, loadedBanks](Vm& v, ScriptRun&, qb::Struct& p) {
+        const qb::Value* pre = Vm::param(p, K("song_prefix"));
+        if (!pre) return false;
+        const std::string name = pre->type == qb::Type::String || pre->type == qb::Type::WString ? pre->str : qbkey::name(pre->key);
+        if (loadedBanks->count(name)) return true;
+        const std::string fsb = "DATA/MUSIC/" + name + ".fsb.xen", dat = "DATA/MUSIC/" + name + ".dat.xen";
+        if (!disc.exists(fsb)) {
+            v.logOnce("SongLoadFSB: no " + fsb);
+            return false;
+        }
+        sfx.addFsb(disc, fsb, dat);
+        loadedBanks->insert(name);
+        return true;
+    });
+    vm.addNative("SongUnLoadFSB", [](Vm&, ScriptRun&, qb::Struct&) { return true; });
+    // IsSoundPlaying <sample>: a voice of it still sounding (the preview's loop).
+    vm.addNative("IsSoundPlaying", [&sfx](Vm&, ScriptRun&, qb::Struct& p) {
+        const qb::Value* s = firstUnnamed(p);
+        return s && sfx.samplePlaying(s->key);
     });
     // StopSound <sample> (the song preview leaving the setlist); the buss
     // calls on the voices played on that buss [C scripts].

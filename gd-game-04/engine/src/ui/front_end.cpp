@@ -36,7 +36,7 @@ FrontEnd::FrontEnd(const Disc& disc, Globals& globals, TextureCache& textures, g
     if (!sfx.open(err)) SDL_Log("sfx: %s", err.c_str());
     sfx.addPak(disc_, "DATA/COMPRESSED/ZONES/global_sfx.pak.xen");
     sfx.addFsb(disc_, "DATA/STREAMS/streamall.fsb.xen", "DATA/STREAMS/streamall.dat.xen");
-    addSoundNatives(*vm_, sfx);
+    addSoundNatives(*vm_, sfx, disc_);
     ui_->addMovieNatives();  // after the game natives' movie stubs
     scene_ = std::make_unique<MenuScene>(disc_, globals_, *vm_, *ui_);
     scene_->addNatives();  // after the flow natives' stubs (PlayIGCCam, KillCamAnim)

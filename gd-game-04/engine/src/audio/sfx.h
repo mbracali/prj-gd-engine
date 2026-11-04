@@ -37,6 +37,7 @@ public:
     void stop(uint32_t voice);
     // StopSound <sample>: every voice of that sample.
     void stopSample(uint32_t sample);
+    bool samplePlaying(uint32_t sample) const;
     // StopSoundsByBuss / PauseSoundsByBuss / UnPauseSoundsByBuss.
     void stopBuss(uint32_t buss);
     void pauseBuss(uint32_t buss, bool paused);

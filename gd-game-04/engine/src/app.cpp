@@ -611,12 +611,10 @@ void App::applyEnhanced(const std::string& key) {
         ps.grade = idx("color_grade", {"off", "warm", "cold", "vintage", "noir", "neon"});
         ps.grain = std::array<int, 3>{0, 1, 3}[size_t(idx("film_grain", {"off", "light", "strong"}))];
         ps.chromatic = enhanced_.on("chromatic") ? 2 : 0;
-        ps.streaks = enhanced_.on("light_streaks");
         Player::forgivingHopos = enhanced_.get("hopo_mode") == "forgiving";
         VenueStage::extras.shadowsAll = enhanced_.on("shadows_all");
         VenueStage::extras.moreLights = idx("more_lights", {"off", "subtle", "strong"});
         VenueStage::extras.lightDust = enhanced_.on("light_dust") ? 2 : 0;
-        VenueStage::extras.groundFog = idx("ground_fog", {"none", "low", "full", "super"});
         TextureCache::sharp = enhanced_.on("sharp_ui");
         venue::CameraDirector::noShake = enhanced_.on("no_shaky_cam");
         qs::Vm::cutContent = enhanced_.on("cut_content");  // from the next start (the textures load at boot)
@@ -1240,6 +1238,8 @@ int App::run() {
             song_.reset();
         } else if (SongSetup one; one.difficulty = {options_.difficulty, options_.difficulty},
                    one.startMs = SDL_getenv("GD04_START_AT") ? std::max(0.0, std::atof(SDL_getenv("GD04_START_AT"))) : 0.0,
+                   // The intro quickplay plays (GD04_TRANSITION overrides; fastintro for the 3 s one).
+                   one.transition = qbkey::key(SDL_getenv("GD04_TRANSITION") ? SDL_getenv("GD04_TRANSITION") : "intro"),
                    !song_->start(*disc_, *globals_, *s, one, options_.autoplay, options_.noFail, mixer_, err, textures_.get())) {
             std::fprintf(stderr, "%s: %s\n", app::kProgram, err.c_str());
             running_ = false, exitCode_ = 2;

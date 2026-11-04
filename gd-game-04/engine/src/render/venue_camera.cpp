@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "render/venue_camera.h"
+#include <SDL3/SDL_log.h>
+#include <cstdlib>
 
 #include <algorithm>
 #include <cmath>
@@ -228,6 +230,9 @@ CamPose CameraDirector::world(const Keyed& k) const {
 }
 
 void CameraDirector::startShot(double t) {
+    // GD04_CAMLOG=1: every shot as it starts (development aid).
+    static const bool camLog = std::getenv("GD04_CAMLOG") != nullptr;
+    if (camLog) SDL_Log("camera: %.0f ms shot from %s (change now %d, next %.0f ms)", t, prefix_.c_str(), int(changeNow_), nextTimeMs_);
     changeNow_ = false;
     // CameraCuts_Performance [I: CameraCuts_Performance starts good; the crowd's
     // performance is set by C code (cameracuts_setparams), here the rock meter's band].

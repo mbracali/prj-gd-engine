@@ -131,6 +131,8 @@ public:
     float textWidth(uint32_t font, const std::string& s, float h, float spacing = 0) const;
     // A script text's \m<n> button codes as the buttons font's glyphs (SetProps text) [C 0x8228E0B0].
     std::string setText(const std::string& s) const;
+    // The focused elements: menus and their selected items (walk checks too).
+    std::vector<Element*> focusedElements() const;
     // A GH3 texture (by key) stretched over x0..x1, y0..y1 in menu units,
     // flipped left-right if `flipU`; false if the texture is not loaded.
     bool drawSprite(Canvas& c, uint32_t texture, float x0, float y0, float x1, float y1, const std::array<uint8_t, 4>& rgba, bool flipU = false) const;
@@ -181,7 +183,6 @@ private:
     Element* resolve(const qb::Value* v) const;
     bool member(qs::ScriptRun& run, uint32_t obj, uint32_t method, qb::Struct& p, bool& handled);
     void startMorph(Element& e, const qb::Struct& p);
-    std::vector<Element*> focusedElements() const;
 
     qs::Vm& vm_;
     const Disc& disc_;

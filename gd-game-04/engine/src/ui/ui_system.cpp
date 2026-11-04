@@ -618,8 +618,28 @@ bool UiSystem::launch(Element* target, uint32_t event, const qb::Struct& data) {
         return true;
     }
     if (find(id)) {
-        if (event == K("focus")) target->focused = true;
-        else if (event == K("unfocus")) target->focused = false;
+        if (event == K("focus")) {
+            // One focused item among its siblings for the same player: a focus
+            // moved by script (venue_scroll_up / _down's LaunchEvent focus,
+            // with no unfocus) takes it from the item before, which hears its
+            // unfocus. Left focused, each pad event reached every venue item
+            // and the list jumped [I: the C's per-parent focus].
+            if (target->parent && !isMenu(*target->parent)) {
+                std::vector<uint32_t> was;
+                for (const auto& c : target->parent->children)
+                    if (c.get() != target && c->focused && !isMenu(*c) && c->exclusiveDevice == target->exclusiveDevice &&
+                        c->exclusiveMask == target->exclusiveMask)
+                        was.push_back(c->id);
+                for (uint32_t w : was)
+                    if (Element* e = find(w)) {
+                        e->focused = false;
+                        launch(e, K("unfocus"), qb::Struct{});
+                    }
+            }
+            if (Element* t2 = find(id)) t2->focused = true;
+        } else if (event == K("unfocus")) {
+            target->focused = false;
+        }
     }
     // A VScrollingMenu passes focus to its menu [I].
     if (find(id) && target->type == kVScrollingMenu && (event == K("focus") || event == K("unfocus")) && !target->children.empty())

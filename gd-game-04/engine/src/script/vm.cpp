@@ -196,6 +196,12 @@ struct Exec {
             if (i < t.size() && t[i].op == kName) {
                 const uint32_t n = t[i++].u;
                 if (const qb::Value* lv = local(n)) return *lv;
+                // <g_...> with no such argument: the global of that name
+                // (menu_venue.qb's venue_scroll_up / _down read <g_venue_index>
+                // and <g_venue_current_pos>, set by `change`; without this the
+                // venue list never moved) [I: GH3's fallback for these].
+                if (const std::string nm = qbkey::name(n); nm.size() > 2 && (nm[0] == 'g' || nm[0] == 'G') && nm[1] == '_')
+                    if (const qb::Value* gv = vm.global(n)) return *gv;
                 // An unset <name> is nothing: GH3 looks it up in the script's
                 // parameters only (0x82142968 from the evaluator's 0x2D case,
                 // 0x821977A0) and leaves the value empty; a struct being built

@@ -425,7 +425,10 @@ bool VenueView::init(gfx::RenderDevice& dev, const Disc& disc, const venue::Venu
             // ConeImpostor's beam; the `volume` / `normal` types (GH3's
             // _Raytrace_cone templates over the depth buffer) are drawn as the
             // same impostor cone [I: gd04 has no depth copy to ray-march].
-            if (const qb::Value* lt = n.st->find(K("lightvolumetype")); lt && lt->key != K("flareonly")) cones_.push_back(int(ni));
+            static const bool volumeCones = SDL_getenv("GD04_VOLUME_CONES") != nullptr;  // [I] the volume types as cones: off
+            if (const qb::Value* lt = n.st->find(K("lightvolumetype"));
+                lt && (lt->key == K("ConeImpostor") || (volumeCones && lt->key != K("flareonly"))))
+                cones_.push_back(int(ni));
             if (!it->second) continue;
             ++stats_.housings;
             for (const scene::Mesh& m : it->second->meshes) addMesh(*it->second, m, nullptr, int(ni), &n, n.name, int(ni));

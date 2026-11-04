@@ -21,7 +21,7 @@ struct EnhBlock {
     float prevViewProj[16];
     float texel[4];   // xy the source's texel
     float size[4];    // xy the source's size, zw the output's
-    float fx[4];      // x bloom, y light streaks, z cinematic, w grade
+    float fx[4];      // x bloom, z cinematic, w grade
     float ao[4];      // x the occlusion's exponent (0 off), y its radius
     float pass[4];    // per pass (star blur, TAA, finish, RCAS, downsample, luminance, exposure)
     float hdr[4];     // HDR: x the display's headroom (linear, 1 = SDR), y the encoded white (1, above with True HDR)
@@ -190,21 +190,6 @@ void main() {
                 sum += a.x * w, wsum += w;
             }
         c *= pow(sum / wsum, uAo.x);  // the occlusion's exponent: light 0.5 .. stronger 1.5 (gd01's)
-    }
-    if (uFx.y > 0.0) {
-        // Anamorphic light streaks (gd04): the brightest lights of the 1/8
-        // blur smeared far along the horizontal, tinted blue like a
-        // cinema lens's flare [I: the port's own].
-        vec3 st = vec3(0.0);
-        float ws = 0.0;
-        for (int i = -24; i <= 24; ++i) {
-            vec3 s = texture(sBlurLo, vUv + vec2(float(i) * uTexel.x * 22.0, 0.0)).rgb;
-            float l = luma(s);
-            float w = exp(-abs(float(i)) / 7.0);
-            st += s * smoothstep(0.7, 0.95, l) * w;
-            ws += w;
-        }
-        c += st / ws * vec3(0.55, 0.75, 1.25) * 2.2 * uFx.y;
     }
     if (uFx.x > 0.0) {
         // The bright parts of the blurred frame, on luminance with a soft knee.
@@ -770,7 +755,7 @@ bool EnhancedFx::process(TextureId color, TextureId depth, int sw, int sh, int x
     b.hdr[1] = wide ? 1.055f * std::pow(peak, 1 / 2.4f) - 0.055f : 1.0f;  // the encoded white
 
     // 1. The blur pyramid (dual Kawase) for bloom.
-    const bool pyramid = s.bloom != 0 || s.streaks;
+    const bool pyramid = s.bloom != 0;
     if (pyramid) {
         int w = sw, h = sh;
         TextureId src = color;
@@ -802,11 +787,10 @@ bool EnhancedFx::process(TextureId color, TextureId depth, int sw, int sh, int x
     // 2. Ambient occlusion, bloom, colour.
     static constexpr float kAoK[5] = {0, 0.5f, 0.8f, 1.1f, 1.5f};  // the occlusion's exponent: none, light, medium, strong, stronger
     if (hdr && !autoExposure(color, sw, sh)) return false;
-    if (pyramid || ssao || s.cinematic || s.grade || hdr || s.streaks) {
+    if (pyramid || ssao || s.cinematic || s.grade || hdr) {
         if (!ensure(a_, sw, sh, wide)) return false;
         EnhBlock k = b;
         k.fx[0] = !pyramid ? 0.0f : s.bloom >= 3 ? 0.9f : s.bloom == 2 ? 0.68f : s.bloom == 1 ? 0.45f : 0.0f;
-        k.fx[1] = s.streaks ? 1.0f : 0.0f;
         k.fx[2] = s.cinematic ? 1.0f : 0.0f;
         k.fx[3] = float(s.grade);
         k.ao[0] = ssao ? kAoK[std::clamp(s.ssao, 0, 4)] : 0.0f;

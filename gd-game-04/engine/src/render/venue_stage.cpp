@@ -494,7 +494,8 @@ void VenueStage::draw(double ms) {
     // lights the stage where the beam lands): a pool of the projector's colour
     // where the beam's axis meets the floor, as wide as the cone is there [I:
     // a pool, not GH3's projected texture].
-    if (device_ && venue_) {
+    static const bool projectorPoolsOn = SDL_getenv("GD04_PROJECTORS") != nullptr;  // [I] pools: off (owner: the lights looked wrong)
+    if (projectorPoolsOn && device_ && venue_) {
         if (!projectorsListed_) {
             projectorsListed_ = true;
             for (const venue::Node& n : venue_->nodes)
