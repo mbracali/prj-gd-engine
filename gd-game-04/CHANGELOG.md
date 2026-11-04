@@ -6,12 +6,13 @@ All notable changes for players. Versions follow SemVer; release tags are
 ## [Unreleased]
 
 ### Added
+- GH3's stage projectors: the round light pools where the spotlights hit the stage, with the band's shadow in them, and the encore helicopter's and crowd spotlights' light on whatever they hit (GD04-064).
+- The band's twist and split helper bones (wrists, elbows, knees, hips) and the leg IK (GD04-064).
 - The `volume` light beams of seven venues use GH3's own raytraced beam shader against the scene's depth; they were not drawn (GD04-063).
 - The universal Gamepad menu: four player boxes (instrument, device, Customize inputs), two bindings per control with Save / Discard, Detect, Export / Import, Generic MIDI controllers (GD04-060).
 - The universal Enhanced menu: one-click MODES (Steam Deck, Original Feel, Clean Image, Max Out, Rocking on a Budget, Good Old Days) and the shared sections and ranges (GD04-060).
 - Every Enhanced Option that can work now does: the picture effects (bloom, anti-aliasing, FSR 1, internal resolution, colour, grain, AO, sharpening, Star Power blur, light streaks, bokeh), sharper text, the venue extras and ground fog, no shaky camera, the cheat rows, forgiving HOPOs, touch controls and cut content (GD04-054).
 - Star Power's stage effects now play for every character, including the Tesla lightning from the guitar; the hearts / bats swirl (GD04-055).
-- The `volume` light beams and the stage projectors are drawn (approximated, GD04-056).
 - The band receives the stage lights' shadows (GD04-053).
 - The band takes its intro poses during the venue intro, as GH3's play_intro_anims (GD04-049).
 - Star Power effects on the band (hearts, flames, peace signs, bats...) and the 4x finger sparks (GD04-050).
@@ -22,6 +23,7 @@ All notable changes for players. Versions follow SemVer; release tags are
 - Lou's finish and defeat scenes play with their animations and cameras.
 
 ### Fixed
+- The band receives the stage lights' shadows again, without the speckles (a missing depth bias) (GD04-064).
 - The guitarist's fret hand grips the neck; it floated above it with the fingers in the air (GD04-062).
 - Sustain tails are GH3's straight ribbons at its width; they were short, wide cones (GD04-062).
 - Esc pauses a song and goes back in the pause menu, where Enter selects; settings from 0.0.3 move Start from Tab to Enter (GD04-062).

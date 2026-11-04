@@ -216,9 +216,17 @@ private:
     // Two-bone IK chains: bicep, forearm, palm -> target bone [C data Hero_Ik_params].
     struct Chain {
         int b0 = -1, b1 = -1, b2 = -1, target = -1;
-        bool right = false;
+        bool right = false, leg = false;
     };
     std::vector<Chain> chains_;
+    // hero_ConstraintBones: helper bones driven from the animated ones after the IK [C data].
+    struct Constraint {
+        enum Type : uint8_t { Twist, TwistChild, Split, SplitR } type = Twist;
+        int bone = -1, target = -1;
+        float amount = 0;
+    };
+    std::vector<Constraint> constraints_;
+    void applyConstraints(Pose& pose) const;
 };
 
 }  // namespace bandanim

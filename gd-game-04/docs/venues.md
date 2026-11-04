@@ -506,11 +506,20 @@ them like the lights [I].
   the chord through the cone in front of the scene's depth x the colour x
   the smoke. gd04 draws it additively, far faces, no depth test, over a
   copy of the scene's depth [I: the states].
-- Not done: the projectors (_Projector_StageOnly: Function_823B4B68 builds
-  the frustum from a quad at the housing and one at `range` with the end
-  radius (823B6D74..823B7354), a depth map from the projector
-  (g_ViewToLightProjection0/1, g_sampShadowMap0/1, 4-tap PCF) and the
-  stage's meshes drawn again with it).
+- Projectors [C: Function_823B4B68 823B6D74..823B7354, the shaders]:
+  `stageonly`: the beam's frustum (a quad at the housing with the start
+  radius along its x / y, one at `range` along the beam with the end
+  radius) has its 4 edges cut by the stage plane y = DAT_82a74a64 (never set
+  on the disc: 0); that quad (a quad list, the unit square's UVs) is drawn
+  with _Projector_StageOnly: the round pool (uv x 2 - 1) in g_SpotlightColor
+  c11 = projectorcolor with g_SpotlightInfo c12 = (inner, 1 - inner),
+  shadowed by the band's dynamic shadow (g_ViewToLightProjection0/1,
+  g_sampShadowMap0/1). `everything` (z_party's encore helicopter and crowd
+  hotspots): _Raytrace_cone_projector (+ _volume with a volume) lights
+  whatever the cone meets through the depth buffer: g_SpotLightViewProj
+  c7..c10 takes a scene point to the cone's frame as (x, y, -, a + kz), the
+  edge at |xy / w| = 1 [C: the shader's maths]. Additive, no depth write [I:
+  the states].
 
 ### Particles and pyro  [C scripts; I: the emitter model]
 
@@ -550,9 +559,7 @@ own quad builders (VMX128 code not decoded), lit quick materials.
 
 The effect passes' own render and sampler states (gd04 uses the scene
 material's, which 823DC180 applies over them), the ReducedLOD technique
-[I: the venues fit inside lod_dist1, 150 m]. Approximated (0.1.12): the
-stageonly projectors as a pool of their colour where the beam meets the
-stage (off by default). The band receives the dynamic
+[I: the venues fit inside lod_dist1, 150 m]. The band receives the dynamic
 shadow (DynamicShadowReciever). Band_WalkToNode has no caller on the disc
 (no walks, no cameras_walk in GH3 either).
 

@@ -54,6 +54,10 @@ public:
     // empty texture: not drawn.
     void drawRaytraced(const venue::CamPose& cam, const venue::LightShow& show, gfx::TextureId depth);
     bool hasRaytraced() const { return !rays_.empty(); }
+    // The projectortype stageonly housings: GH3's _Projector_StageOnly on the
+    // quad where the beam's frustum meets the stage plane (y 0), shadowed by
+    // the band's dynamic shadow map.
+    void drawProjectors(const venue::CamPose& cam, const venue::LightShow& show);
     // A viewport texture override (CreateViewportTextureOverride: the crowd's
     // renders on the cards); an empty id removes it.
     // Moving level objects (render/particles.h nodeMotion): a node's world
@@ -79,6 +83,7 @@ public:
         size_t gh3Meshes = 0, fallbackMeshes = 0;  // drawn with GH3's shaders / the approximation
         size_t housings = 0;
         size_t raytraced = 0;  // `volume` beam draws (all frames)
+        size_t projected = 0;  // projector pool draws (all frames)
     };
     const Stats& stats() const { return stats_; }
 
@@ -125,6 +130,7 @@ private:
     std::unordered_map<uint32_t, gfx::TextureId> overrides_;
     std::vector<int> cones_;  // nodes of the ConeImpostor housings
     std::vector<int> rays_;   // nodes of the `volume` housings (raytraced)
+    std::vector<int> projectors_;  // nodes of the projectortype stageonly housings
     gfx::TextureId smoke_;    // the beams' smoke texture
     struct Flare {
         gfx::QueryId a, b;   // all pixels / depth-tested pixels of the occlusion quad
@@ -139,6 +145,7 @@ private:
     float shadowIntensity_ = 0.35f;
     gfx::BufferId coneVb_, coneIb_, rayVb_, rayIb_;
     uint32_t rayCount_ = 0;
+    gfx::BufferId projVb_, projIb_;
     gh3shader::Programs gh3_;
     std::function<bool(uint32_t, gfx::Mat4&)> motion_;
     std::function<int(uint32_t)> visible_;

@@ -18,11 +18,12 @@
 #include "script/globals.h"
 
 VenueStage::~VenueStage() {
-    if (teslaFrames || projectorPools || (particles_ && particles_->scriptedCreated))
-        SDL_Log("venue: %llu scripted particle systems, %llu frames with Tesla bolts, %llu projector pools drawn",
-                (unsigned long long)(particles_ ? particles_->scriptedCreated : 0), (unsigned long long)teslaFrames,
-                (unsigned long long)projectorPools);
-    if (view_ && view_->stats().raytraced) SDL_Log("venue: %llu raytraced beam draws", (unsigned long long)view_->stats().raytraced);
+    if (teslaFrames || (particles_ && particles_->scriptedCreated))
+        SDL_Log("venue: %llu scripted particle systems, %llu frames with Tesla bolts",
+                (unsigned long long)(particles_ ? particles_->scriptedCreated : 0), (unsigned long long)teslaFrames);
+    if (view_ && (view_->stats().raytraced || view_->stats().projected))
+        SDL_Log("venue: %llu raytraced beam draws, %llu projector draws", (unsigned long long)view_->stats().raytraced,
+                (unsigned long long)view_->stats().projected);
     fx_.shutdown();
     if (device_ && shadow_) device_->destroyTarget(shadow_);
 }
@@ -434,8 +435,16 @@ void VenueStage::shadowPass(double ms) {
     dev.setTarget(oldTarget);
     dev.setViewport(vx, vy, vw, vh);
     static const float intensity = SDL_getenv("GD04_SHADOW_INTENSITY") ? float(std::atof(SDL_getenv("GD04_SHADOW_INTENSITY"))) : 0.35f;
-    view_->setShadow(dev.targetDepth(shadow_), vp, 1024, intensity);
-    if (band_->view()) band_->view()->setShadow(dev.targetDepth(shadow_), vp, 1024, intensity);
+    // The receivers compare a little nearer the light than the map: without a
+    // bias a surface shadows itself in speckles at the map's 1.4 cm texels (the
+    // band's self-shadowing) [I: GH3's bias, in its projection or its shadow
+    // pass's depth-bias state, is not decoded; 4 cm].
+    static const float biasM = SDL_getenv("GD04_SHADOW_BIAS") ? float(std::atof(SDL_getenv("GD04_SHADOW_BIAS"))) : 0.04f;
+    gfx::Mat4 bias;
+    bias.at(2, 3) = -biasM / depth;
+    const gfx::Mat4 recv = bias * vp;
+    view_->setShadow(dev.targetDepth(shadow_), recv, 1024, intensity);
+    if (band_->view()) band_->view()->setShadow(dev.targetDepth(shadow_), recv, 1024, intensity);
 }
 
 void VenueStage::draw(double ms) {
@@ -480,6 +489,8 @@ void VenueStage::draw(double ms) {
     view_->draw(cam, lightState_, lights_);
     if (band_) band_->draw(ms, cam, *venue_, lightState_, lights_);
     if (peds_) peds_->draw(ms, cam, *venue_, lightState_, lights_, particles_.get());
+    static const bool noProjectors = SDL_getenv("GD04_NO_PROJECTORS") != nullptr;  // development aid: compare without them
+    if (!noProjectors) view_->drawProjectors(cam, lights_);
     view_->drawVolumes(cam, lights_);
     static const bool noRays = SDL_getenv("GD04_NO_RAYTRACE") != nullptr;  // development aid: compare without the `volume` beams
     if (fx && !noRays && view_->hasRaytraced()) view_->drawRaytraced(cam, lights_, fx_.depthSnapshot());
@@ -501,56 +512,6 @@ void VenueStage::draw(double ms) {
         lv.up = to02(venue::rotate(cam.rot, {0, 1, 0}), 1);
         return lv;
     };
-    // The projectors (housings with projectortype stageonly; GH3's _Projector_StageOnly
-    // lights the stage where the beam lands): a pool of the projector's colour
-    // where the beam's axis meets the floor, as wide as the cone is there [I:
-    // a pool, not GH3's projected texture].
-    static const bool projectorPoolsOn = SDL_getenv("GD04_PROJECTORS") != nullptr;  // [I] pools: off (owner: the lights looked wrong)
-    if (projectorPoolsOn && device_ && venue_) {
-        if (!projectorsListed_) {
-            projectorsListed_ = true;
-            for (const venue::Node& n : venue_->nodes)
-                if (n.st && n.st->find(qbkey::key("lightvolumetype")))
-                    if (const qb::Value* pt = n.st->find(qbkey::key("projectortype")); pt && pt->key == qbkey::key("stageonly")) projectors_.push_back(&n);
-            if (SDL_getenv("GD04_PROJECTOR_LOG"))
-                for (const venue::Node* n : projectors_) {
-                    const qb::Value* pt = n->st->find(qbkey::key("projectortype"));
-                    const qb::Value* lt = n->st->find(qbkey::key("lightvolumetype"));
-                    const qb::Value* pc = n->st->find(qbkey::key("projectorcolor"));
-                    SDL_Log("projector %s: type %s, volume %s, colour %g %g %g", qbkey::name(n->name).c_str(), pt ? qbkey::name(pt->key).c_str() : "-",
-                            lt ? qbkey::name(lt->key).c_str() : "-", pc && pc->arr && pc->arr->values.size() > 2 ? double(pc->arr->values[0].number()) : -1.0,
-                            pc && pc->arr && pc->arr->values.size() > 2 ? double(pc->arr->values[1].number()) : -1.0,
-                            pc && pc->arr && pc->arr->values.size() > 2 ? double(pc->arr->values[2].number()) : -1.0);
-                }
-        }
-        float floorY = 0;
-        int nf = 0;
-        if (band_)
-            for (const Band::Entry& e : band_->members())
-                if (e.placed) floorY += e.root.m[7], ++nf;
-        if (nf) floorY /= float(nf);
-        std::vector<gfx::EnhancedLights::Pool> pools;
-        for (const venue::Node* n : projectors_) {
-            if (!n->createdAtStart && !(n->createdOn && lights_.flag(n->createdOn))) continue;
-            venue::HousingState h;
-            if (!lights_.housing(n->name, ms, h)) continue;
-            const float bright = h.projectorColor[0] + h.projectorColor[1] + h.projectorColor[2];
-            if (bright <= 0.01f) continue;
-            const venue::Vec3 z = venue::rotate(h.rot, {0, 0, 1});  // the beam runs along -z
-            if (-z[1] > -0.05f) continue;                             // not pointing down
-            const float t = (floorY - h.pos[1]) / -z[1];
-            const float range = h.range > 0 ? h.range : 10.0f;
-            if (t <= 0 || t > range * 1.5f) continue;
-            const float r = h.startRadius + (std::max(h.endRadius, 0.5f) - h.startRadius) * std::min(t / range, 1.5f);
-            const venue::Vec3 hit{h.pos[0] - z[0] * t, floorY + 0.02f, h.pos[2] - z[2] * t};
-            pools.push_back({to02(hit, kU), r * kU, {h.projectorColor[0], h.projectorColor[1], h.projectorColor[2]}, 0.45f});
-        }
-        if (!pools.empty()) {
-            if (!extras_) extras_ = std::make_unique<gfx::EnhancedLights>(*device_);
-            extras_->drawPools(pools, lightsView());
-            projectorPools += pools.size();
-        }
-    }
     // The Tesla Star Power's bolts (Create / SetTeslaEffectObject: width =
     // 0.15 x the length, the zigzag) [C script Create_StarPower_TeslaFX; I: the look].
     if (device_ && particles_ && !particles_->teslas.empty()) {

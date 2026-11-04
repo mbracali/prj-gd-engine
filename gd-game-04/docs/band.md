@@ -114,11 +114,21 @@ linear]; a `play` timer holds its last frame [I].
 
 Two-bone chains bicep -> forearm -> palm onto `Bone_IK_Hand_Guitar_R`
 (child of `BONE_GUITAR_STRUM_POS`) and `Bone_IK_Hand_Guitar_L` (child of
-`BONE_GUITAR_FRET_POS`, which the fret clips slide along the neck). gd04
-solves in the plane through the animated elbow, gives the palm the target's
-orientation, and blends with the animated arm by the arm's strength
-(`hero_toggle_arms`, 0.25 s). Leg chains, the drummer's and the singer's IK,
-the hinge limits and `hero_ConstraintBones` (twist bones) are not done.
+`BONE_GUITAR_FRET_POS`, which the fret clips slide along the neck), and
+the legs thigh -> knee -> ankle onto `Bone_IK_Foot_Slave_L/R`. gd04 solves
+in the plane through the animated elbow / knee; the palm and the ankle keep
+their animated rotations (copying the target's turned the fret hand off the
+neck); the arms blend with the animation by the arm's strength
+(`hero_toggle_arms`, 0.25 s), the legs always [I]. The drummer's and the
+singer's IK and the hinge limits are not done.
+
+`hero_ConstraintBones` (the root of the guitarist's, singer's and drummer's
+trees) [C data; I: the operations]: after the IK, `twist` bones (children of
+their target: the biceps' top 1.0 / middle 0.5, the thighs' 0.5) undo that
+share of the target's twist about x; `twistchild` (the wrists, children of the
+forearm) take 0.5 of the palm's; `split` / `splitr` (knees, elbows, hips) turn
+by 0.5 of the target's rotation from its bind in their parent's space. The
+clips' own poses already come close (89 pixels changed in the chartest grid).
 
 ### Body loop  [C scripts `hero_play_adjusting_random_anims`, `handle_play_anim`, `handle_change_stance`]
 
@@ -231,11 +241,10 @@ the guitarist) and `defaultgroup` [C].
 
 ## 7. Gaps
 
-Band_WalkToNode (walks, turns), intro / win / lose stances in the
-transitions, two-player layouts, the twist constraint bones, leg / drummer /
-singer IK, Havok's own solver for the accessory bones (gd04's model below),
-star power and battle reactions, receiving dynamic shadows (they cast
-them onto the venue: docs/venues.md "Dynamic shadows").
+Band_WalkToNode (no caller on the disc), two-player layouts, the drummer's
+and the singer's IK, Havok's own solver for the accessory bones (gd04's
+model above). The band receives the dynamic shadow (the receivers compare 4
+cm nearer the light: without it the characters speckled [I: GH3's bias]).
 
 ## 8. Test
 

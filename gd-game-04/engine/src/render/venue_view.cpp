@@ -160,6 +160,8 @@ void VenueView::shutdown() {
     if (coneVb_) dev_->destroyBuffer(coneVb_);
     if (rayVb_) dev_->destroyBuffer(rayVb_);
     if (rayIb_) dev_->destroyBuffer(rayIb_);
+    if (projVb_) dev_->destroyBuffer(projVb_);
+    if (projIb_) dev_->destroyBuffer(projIb_);
     if (coneIb_) dev_->destroyBuffer(coneIb_);
     if (smoke_) dev_->destroyTexture(smoke_);
     smoke_ = {};
@@ -168,10 +170,11 @@ void VenueView::shutdown() {
         if (f.b) dev_->destroyQuery(f.b);
     }
     flares_.clear();
-    program_ = {}, vb_ = {}, ib_ = {}, coneVb_ = {}, coneIb_ = {}, rayVb_ = {}, rayIb_ = {};
+    program_ = {}, vb_ = {}, ib_ = {}, coneVb_ = {}, coneIb_ = {}, rayVb_ = {}, rayIb_ = {}, projVb_ = {}, projIb_ = {};
     rayCount_ = 0;
     cones_.clear();
     rays_.clear();
+    projectors_.clear();
     gh3_.shutdown();
     mats_.clear();
     for (auto& [k, t] : textures_) dev_->destroyTexture(t.id);
@@ -427,8 +430,14 @@ bool VenueView::init(gfx::RenderDevice& dev, const Disc& disc, const venue::Venu
                 it = models.emplace(key, std::move(sc)).first;
             }
             // ConeImpostor's beam; `volume`: GH3's _Raytrace_cone_volume (drawRaytraced).
-            if (const qb::Value* lt = n.st->find(K("lightvolumetype")); lt && lt->key == K("ConeImpostor")) cones_.push_back(int(ni));
-            else if (lt && lt->key == K("volume")) rays_.push_back(int(ni));
+            const qb::Value* lt = n.st->find(K("lightvolumetype"));
+            const qb::Value* pt = n.st->find(K("projectortype"));
+            const bool everything = pt && pt->key == K("everything");
+            if (lt && lt->key == K("ConeImpostor")) cones_.push_back(int(ni));
+            // Raytraced: the `volume` beams, and the `everything` projectors (light on
+            // whatever the cone meets, through the depth buffer).
+            if ((lt && lt->key == K("volume")) || everything) rays_.push_back(int(ni));
+            if (pt && pt->key == K("stageonly")) projectors_.push_back(int(ni));
             if (!it->second) continue;
             ++stats_.housings;
             for (const scene::Mesh& m : it->second->meshes) addMesh(*it->second, m, nullptr, int(ni), &n, n.name, int(ni));
@@ -488,6 +497,15 @@ bool VenueView::init(gfx::RenderDevice& dev, const Disc& disc, const venue::Venu
         rayVb_ = dev.createBuffer(gfx::BufferKind::Vertex, rv.size() * sizeof(float), rv.data(), false);
         rayIb_ = dev.createBuffer(gfx::BufferKind::Index, ri.size() * sizeof(uint32_t), ri.data(), false);
         rayCount_ = uint32_t(ri.size());
+    }
+    // The projectors' quads: 4 vertices each (position, TEXCOORD0), rewritten every frame.
+    if (!projectors_.empty()) {
+        std::vector<float> pv(projectors_.size() * 4 * 6, 0.0f);
+        std::vector<uint32_t> pi;
+        for (uint32_t q = 0; q < projectors_.size(); ++q)
+            for (uint32_t k : {0u, 1u, 2u, 0u, 2u, 3u}) pi.push_back(q * 4 + k);
+        projVb_ = dev.createBuffer(gfx::BufferKind::Vertex, pv.size() * sizeof(float), pv.data(), true);
+        projIb_ = dev.createBuffer(gfx::BufferKind::Index, pi.size() * sizeof(uint32_t), pi.data(), false);
     }
     vb_ = dev.createBuffer(gfx::BufferKind::Vertex, verts.size() * sizeof(Vtx), verts.data(), false);
     ib_ = dev.createBuffer(gfx::BufferKind::Index, idx.size() * sizeof(uint32_t), idx.data(), false);
@@ -1053,8 +1071,6 @@ gfx::Mat4 inverse4(const gfx::Mat4& m) {
 // impostor's], the far faces drawn, no depth test (the shader clips by depth).
 void VenueView::drawRaytraced(const venue::CamPose& cam, const venue::LightShow& show, gfx::TextureId depth) {
     if (!dev_ || rays_.empty() || !rayCount_ || !depth || !gh3_.ready()) return;
-    const gh3shader::Program* prog = gh3_.get(K("_Raytrace_cone_volume"));
-    if (!prog) return;
     gfx::RenderDevice& d = *dev_;
     gh3shader::Globals globals;
     gfx::Mat4 viewM, viewProjM;
@@ -1068,18 +1084,13 @@ void VenueView::drawRaytraced(const venue::CamPose& cam, const venue::LightShow&
         return l;
     }();
     gfx::DrawCall c;
-    c.program = prog->id;
     c.layout = &layout;
     c.vertices = rayVb_;
     c.indices = rayIb_;
     c.indices32 = true;
     c.first = 0, c.count = rayCount_;
     c.uniforms[0] = frame;
-    for (int k = 0; k < 16; ++k) {
-        c.textures[k] = (prog->samplers >> k & 1) ? (smoke_ ? smoke_ : gh3_.white()) : gfx::TextureId{};
-        c.samplers[k] = {gfx::Filter::Linear, gfx::Wrap::Repeat, 0};
-    }
-    c.textures[1] = depth;
+    for (int k = 0; k < 16; ++k) c.samplers[k] = {gfx::Filter::Linear, gfx::Wrap::Repeat, 0};
     c.samplers[1] = {gfx::Filter::Nearest, gfx::Wrap::Clamp, 0};
     c.state.blend = true;
     c.state.src = gfx::BlendFactor::One, c.state.dst = gfx::BlendFactor::One, c.state.op = gfx::BlendOp::Add;
@@ -1091,7 +1102,22 @@ void VenueView::drawRaytraced(const venue::CamPose& cam, const venue::LightShow&
         if (!n.createdAtStart && !(n.createdOn && show.flag(n.createdOn))) continue;
         venue::HousingState h;
         if (!show.housing(n.name, ms, h)) continue;
-        if (h.density <= 0 || h.range <= 1e-4f) continue;
+        if (h.range <= 1e-4f) continue;
+        // The template: _Raytrace_cone_volume (the beam), _Raytrace_cone_projector
+        // (an `everything` projector's light on the scene inside the cone) or both,
+        // _Raytrace_cone_projector_volume [C: the templates' constants].
+        const qb::Value* lt = n.st->find(K("lightvolumetype"));
+        const qb::Value* pt = n.st->find(K("projectortype"));
+        const bool volume = lt && lt->key == K("volume") && h.density > 0;
+        const bool projector = pt && pt->key == K("everything") && h.projectorColor[0] + h.projectorColor[1] + h.projectorColor[2] > 0;
+        if (!volume && !projector) continue;
+        const gh3shader::Program* prog = gh3_.get(K(volume && projector ? "_Raytrace_cone_projector_volume"
+                                                   : volume            ? "_Raytrace_cone_volume"
+                                                                       : "_Raytrace_cone_projector"));
+        if (!prog) continue;
+        c.program = prog->id;
+        for (int k = 0; k < 16; ++k) c.textures[k] = (prog->samplers >> k & 1) ? (smoke_ ? smoke_ : gh3_.white()) : gfx::TextureId{};
+        c.textures[1] = depth;
         // The object's +z runs along the beam, the housing's -z [C: the impostor's direction].
         const venue::Vec3 ax = venue::rotate(h.rot, {1, 0, 0}), ay = venue::rotate(h.rot, {0, 1, 0}), az = venue::rotate(h.rot, {0, 0, 1});
         gfx::Mat4 w;
@@ -1117,11 +1143,155 @@ void VenueView::drawRaytraced(const venue::CamPose& cam, const venue::LightShow&
         for (int i = 0; i < 4; ++i)  // g_ViewProjInv, rows as the shaders read them
             for (int q = 0; q < 4; ++q) ps[3 + i][q] = vpInv.at(q, i);
         ps[17][0] = 0, ps[17][1] = k * k, ps[17][2] = 2 * a * k, ps[17][3] = a * a;  // g_coeff
+        // The projector variants: g_SpotLightViewProj c7..c10 takes a scene point to
+        // the cone's frame as (x, y, -, a + k z), the cone's edge at |xy / w| = 1;
+        // g_SpotlightColor c11 = projectorcolor, g_SpotlightInfo c12 = (inner,
+        // 1 - inner) [C: the shader's maths; the fields as the stageonly projector's].
+        if (projector) {
+            gfx::Mat4 pr;
+            for (int r = 0; r < 4; ++r)
+                for (int q = 0; q < 4; ++q) pr.at(r, q) = 0;
+            pr.at(0, 0) = 1, pr.at(1, 1) = 1, pr.at(3, 2) = k, pr.at(3, 3) = a;
+            const gfx::Mat4 slvp = pr * w.inverseAffine();
+            for (int i = 0; i < 4; ++i)
+                for (int q = 0; q < 4; ++q) ps[7 + i][q] = slvp.at(q, i);
+            for (int q = 0; q < 3; ++q) ps[11][q] = h.projectorColor[size_t(q)];
+            ps[11][3] = 1;
+            ps[12][0] = h.innerRadius, ps[12][1] = 1.0f - h.innerRadius;
+        }
         ps[63][0] = -1;
         c.uniforms[1] = d.stageUniforms(vs, sizeof vs);
         c.uniforms[2] = d.stageUniforms(ps, sizeof ps);
         c.uniforms[3] = d.stageUniforms(&obj, sizeof obj);
         d.draw(c);
         ++stats_.raytraced;
+    }
+}
+
+// The stageonly projectors [C: Function_823B4B68 823B6D74..823B7354 and
+// _Projector_StageOnly's shaders]: for projectortype stageonly with a range,
+// the beam's frustum runs from a quad at the housing (start radius, along the
+// housing's x and y) to one at `range` along the beam (end radius); each of
+// its 4 edges meets the stage plane y = DAT_82a74a64 (0: EngineConfig never
+// sets it on the disc), and that quad (a D3D quad list, 4 vertices with the
+// unit square's UVs: the shader's round pool, uv x 2 - 1) is drawn with
+// g_SpotlightColor c11 = projectorcolor and g_SpotlightInfo c12 = (inner,
+// 1 - inner) (the record's fields as the impostor's), shadowed through
+// g_ViewToLightProjection0/1 and g_sampShadowMap0/1 (the band's dynamic shadow,
+// as the venue's receivers). An edge too flat to meet the plane skips the
+// projector [C]. Additive, depth tested, no depth write [I: the states].
+void VenueView::drawProjectors(const venue::CamPose& cam, const venue::LightShow& show) {
+    if (!dev_ || projectors_.empty() || !projVb_ || !gh3_.ready()) return;
+    const gh3shader::Program* prog = gh3_.get(K("_Projector_StageOnly"));
+    if (!prog) return;
+    gfx::RenderDevice& d = *dev_;
+    const double ms = seconds_ * 1000.0;
+    struct Quad {
+        float v[4][6];
+        venue::HousingState h;
+    };
+    std::vector<Quad> quads;
+    for (int ni : projectors_) {
+        const venue::Node& n = v_->nodes[size_t(ni)];
+        if (!n.createdAtStart && !(n.createdOn && show.flag(n.createdOn))) continue;
+        venue::HousingState h;
+        if (!show.housing(n.name, ms, h)) continue;
+        if (h.range <= 0) continue;
+        if (h.projectorColor[0] + h.projectorColor[1] + h.projectorColor[2] <= 0) continue;
+        const venue::Vec3 ax = venue::rotate(h.rot, {1, 0, 0}), ay = venue::rotate(h.rot, {0, 1, 0}), az = venue::rotate(h.rot, {0, 0, 1});
+        const venue::Vec3 dir{-az[0], -az[1], -az[2]};
+        const venue::Vec3 farC{h.pos[0] + dir[0] * h.range, h.pos[1] + dir[1] * h.range, h.pos[2] + dir[2] * h.range};
+        // Corners in GH3's order: -x -y, -x +y, +x +y, +x -y.
+        static const float kSx[4] = {-1, -1, 1, 1}, kSy[4] = {-1, 1, 1, -1};
+        static const float kU[4] = {0, 0, 1, 1}, kV[4] = {0, 1, 1, 0};
+        Quad q;
+        q.h = h;
+        bool ok = true;
+        for (int i = 0; i < 4 && ok; ++i) {
+            venue::Vec3 nearP, farP;
+            for (int k = 0; k < 3; ++k) {
+                nearP[size_t(k)] = h.pos[size_t(k)] + (ax[size_t(k)] * kSx[i] + ay[size_t(k)] * kSy[i]) * h.startRadius;
+                farP[size_t(k)] = farC[size_t(k)] + (ax[size_t(k)] * kSx[i] + ay[size_t(k)] * kSy[i]) * h.endRadius;
+            }
+            venue::Vec3 e{farP[0] - nearP[0], farP[1] - nearP[1], farP[2] - nearP[2]};
+            const float len = std::sqrt(e[0] * e[0] + e[1] * e[1] + e[2] * e[2]);
+            if (len < 1e-6f) {
+                ok = false;
+                break;
+            }
+            for (float& c : e) c /= len;
+            if (std::fabs(e[1]) < 1e-6f) {
+                ok = false;
+                break;
+            }
+            const float t = (0.0f - nearP[1]) / e[1];
+            q.v[i][0] = nearP[0] + e[0] * t, q.v[i][1] = nearP[1] + e[1] * t, q.v[i][2] = nearP[2] + e[2] * t;
+            q.v[i][3] = 1, q.v[i][4] = kU[i], q.v[i][5] = kV[i];
+        }
+        if (ok) quads.push_back(q);
+    }
+    if (quads.empty()) return;
+    std::vector<float> data;
+    data.reserve(quads.size() * 24);
+    for (const Quad& q : quads)
+        for (int i = 0; i < 4; ++i) data.insert(data.end(), q.v[i], q.v[i] + 6);
+    d.updateBuffer(projVb_, 0, data.data(), data.size() * sizeof(float));
+
+    gh3shader::Globals globals;
+    gfx::Mat4 viewM, viewProjM;
+    cameraGlobals(cam, d.info().clipDepthZeroToOne, seconds_, globals, &viewProjM, 16.0f / 9.0f, false, &viewM);
+    if (shadowTex_) {  // as the venue's receivers (draw)
+        const gfx::Mat4 v2l = shadowVP_ * viewM.inverseAffine();
+        globals.setMatrix(gh3shader::kRegViewToLight0, v2l, 4);
+        globals.setMatrix(gh3shader::kRegViewToLight1, v2l, 4);
+        globals.set(gh3shader::kRegShadowMapConstants, 0, 0, 0, 1e9f);
+        globals.set(gh3shader::kRegShadowLevel, 0, 0, 1.0f - shadowIntensity_, shadowIntensity_);
+        const float sz = float(shadowSize_);
+        globals.set(gh3shader::kRegShadowMapSize, sz, sz, 1.0f / sz, 1.0f / sz);
+    }
+    gh3shader::ObjectConstants obj;
+    obj.setMatrix(gh3shader::kRegWorld, gfx::Mat4::identity(), 4);
+    obj.setMatrix(gh3shader::kRegWorldView, viewM, 4);
+    obj.setMatrix(gh3shader::kRegWorldViewProj, viewProjM, 4);
+    static const gfx::VertexLayout layout = [] {
+        gfx::VertexLayout l;
+        l.stride = 24;
+        l.attribs[0] = {0, 4, gfx::AttribType::Float, 0};
+        l.attribs[1] = {3, 2, gfx::AttribType::Float, 16};  // TEXCOORD0
+        return l;
+    }();
+    gfx::DrawCall c;
+    c.program = prog->id;
+    c.layout = &layout;
+    c.vertices = projVb_;
+    c.indices = projIb_;
+    c.indices32 = true;
+    c.uniforms[0] = d.stageUniforms(&globals, sizeof globals);
+    c.uniforms[3] = d.stageUniforms(&obj, sizeof obj);
+    for (int k = 0; k < 16; ++k) {
+        c.textures[k] = (prog->samplers >> k & 1) ? gh3_.white() : gfx::TextureId{};
+        c.samplers[k] = {gfx::Filter::Linear, gfx::Wrap::Clamp, 0};
+    }
+    c.textures[14] = c.textures[15] = shadowTex_ ? shadowTex_ : gh3_.white();  // g_sampShadowMap0 / 1
+    c.samplers[14] = c.samplers[15] = {gfx::Filter::Nearest, gfx::Wrap::Clamp, 0};
+    c.state.blend = true;
+    c.state.src = gfx::BlendFactor::One, c.state.dst = gfx::BlendFactor::One, c.state.op = gfx::BlendOp::Add;
+    c.state.depthTest = true, c.state.depthWrite = false;
+    c.state.depthFunc = gfx::CompareFunc::LessEqual;
+    c.state.cull = gfx::Cull::None;
+    for (size_t qi = 0; qi < quads.size(); ++qi) {
+        const venue::HousingState& h = quads[qi].h;
+        float vs[64][4] = {};
+        float ps[64][4] = {};
+        vs[63][0] = -1;
+        for (int k = 0; k < 3; ++k) ps[11][k] = h.projectorColor[size_t(k)];  // g_SpotlightColor
+        ps[11][3] = 1;
+        ps[12][0] = h.innerRadius, ps[12][1] = 1.0f - h.innerRadius;  // g_SpotlightInfo
+        ps[63][0] = -1;
+        c.uniforms[1] = d.stageUniforms(vs, sizeof vs);
+        c.uniforms[2] = d.stageUniforms(ps, sizeof ps);
+        c.first = uint32_t(qi * 6), c.count = 6;
+        d.draw(c);
+        ++stats_.projected;
     }
 }

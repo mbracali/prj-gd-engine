@@ -373,7 +373,8 @@ bool Animator::init(const Setup& s, std::string& error) {
     fingerAnims_ = prof ? structOf(g.find(keyOf(prof->find(K("finger_anims"))))) : nullptr;
     fretAnims_ = prof ? structOf(g.find(keyOf(prof->find(K("fret_anims"))))) : nullptr;
 
-    // IK chains: the arms of ik_params (Hero_Ik_params) whose target is a guitar hand bone [C data].
+    // IK chains: ik_params (Hero_Ik_params): the arms onto the guitar's hand bones and the legs
+    // onto the foot slaves [C data].
     chains_.clear();
     if (guitarLike()) {
         uint32_t ikKey = prof ? keyOf(prof->find(K("ik_params"))) : 0;
@@ -383,8 +384,10 @@ bool Animator::init(const Setup& s, std::string& error) {
                 const qb::Struct* st = structOf(&e);
                 if (!st) continue;
                 const uint32_t tgt = keyOf(st->find(K("bonetarget")));
-                if (tgt != K("bone_ik_hand_guitar_l") && tgt != K("bone_ik_hand_guitar_r")) continue;
+                const bool leg = tgt == K("bone_ik_foot_slave_l") || tgt == K("bone_ik_foot_slave_r");
+                if (tgt != K("bone_ik_hand_guitar_l") && tgt != K("bone_ik_hand_guitar_r") && !leg) continue;
                 Chain c;
+                c.leg = leg;
                 c.b0 = rig_.find(keyOf(st->find(K("bone0"))));
                 c.b1 = rig_.find(keyOf(st->find(K("bone1"))));
                 c.b2 = rig_.find(keyOf(st->find(K("bone2"))));
@@ -393,6 +396,26 @@ bool Animator::init(const Setup& s, std::string& error) {
                 if (c.b0 >= 0 && c.b1 >= 0 && c.b2 >= 0 && c.target >= 0) chains_.push_back(c);
             }
     }
+    // The twist and split helper bones (hero_ConstraintBones, the root of the
+    // guitarist's, singer's and drummer's trees) [C data].
+    constraints_.clear();
+    if (const qb::Value* cb = g.find(K("hero_constraintbones")); cb && cb->type == qb::Type::Array && cb->arr)
+        for (const qb::Value& e : cb->arr->values) {
+            const qb::Struct* st = structOf(&e);
+            if (!st) continue;
+            Constraint c;
+            const uint32_t ty = keyOf(st->find(K("type")));
+            if (ty == K("twist")) c.type = Constraint::Twist;
+            else if (ty == K("twistchild")) c.type = Constraint::TwistChild;
+            else if (ty == K("split")) c.type = Constraint::Split;
+            else if (ty == K("splitr")) c.type = Constraint::SplitR;
+            else continue;
+            c.bone = rig_.find(keyOf(st->find(K("bone"))));
+            c.target = rig_.find(keyOf(st->find(K("target"))));
+            const qb::Value* am = st->find(K("amount"));
+            c.amount = am ? float(am->number()) : 0.5f;
+            if (c.bone >= 0 && c.target >= 0) constraints_.push_back(c);
+        }
     // The song's events [C scripts Strum_iterator, FretPos_iterator,
     // FretFingers_iterator, Drum_iterator, Drum_cymbal_iterator, event_iterator].
     fixed_.clear();
@@ -941,7 +964,7 @@ void Animator::evaluate(double ms, std::vector<Mat34>& world, std::vector<Mat34>
     if (!chains_.empty()) {
         bool changed = false;
         for (const Chain& c : chains_) {
-            const float s = c.right ? rightStrength_.at(ms) : leftStrength_.at(ms);
+            const float s = c.leg ? 1.0f : c.right ? rightStrength_.at(ms) : leftStrength_.at(ms);  // the legs always [I]
             if (s <= 0) continue;
             const Vec S = posOf(world[size_t(c.b0)]), E = posOf(world[size_t(c.b1)]), W = posOf(world[size_t(c.b2)]);
             const Vec T = posOf(world[size_t(c.target)]);
@@ -979,8 +1002,61 @@ void Animator::evaluate(double ms, std::vector<Mat34>& world, std::vector<Mat34>
         }
         if (changed) worldOf(rig_, pose, world);
     }
+    static const bool noConstraints = std::getenv("GD04_NO_CONSTRAINTS") != nullptr;  // development aid: compare without them
+    if (!constraints_.empty() && !noConstraints) {
+        applyConstraints(pose);
+        worldOf(rig_, pose, world);
+    }
     skin.resize(world.size());
     for (size_t b = 0; b < world.size(); ++b) skin[b] = mmul(world[b], rig_.invBind[b]);
+}
+
+// hero_ConstraintBones [C data: the types, bones, targets and amounts; I: the
+// operations, Neversoft's twist / split helpers as the skeleton places them].
+// The helpers have flag 7 and sit at their bind (identity under their bone for
+// the twists, at the joint for the splits); the clips leave them there, so the
+// skin around wrists, elbows, knees and hips pinched as the joints turned.
+// A target's deviation from its bind (local): d = bind^-1 q.
+// - twist (the bone a child of its target, a bicep / thigh): the bone undoes
+//   `amount` of the target's twist about its own axis (x): the top of the
+//   bicep (1.0) keeps the shoulder's, the middle (0.5) half of it.
+// - twistchild (the wrist, a child of the forearm, the target the palm): the
+//   bone takes `amount` of the palm's twist about x.
+// - split / splitr (the knee and elbow helpers under the thigh / bicep, the
+//   hips' under the pelvis): the bone turns by `amount` of the target's
+//   rotation from its bind, in the bone's parent's space.
+void Animator::applyConstraints(Pose& pose) const {
+    auto twistX = [](Quat q) {  // the swing-twist decomposition's twist about x
+        Quat t{q.x, 0, 0, q.w};
+        const float n = std::sqrt(t.x * t.x + t.w * t.w);
+        if (n < 1e-6f) return Quat{};
+        return Quat{t.x / n, 0, 0, t.w / n};
+    };
+    auto inParentOf = [&](int bone, int target, bool bind) {  // target's rotation in bone's parent's space
+        Quat r = bind ? rig_.bind[size_t(target)].q : pose[size_t(target)].q;
+        const int stop = rig_.parent[size_t(bone)];
+        for (int p = rig_.parent[size_t(target)]; p >= 0 && p != stop; p = rig_.parent[size_t(p)])
+            r = qmul(bind ? rig_.bind[size_t(p)].q : pose[size_t(p)].q, r);
+        return r;
+    };
+    for (const Constraint& c : constraints_) {
+        const Quat bindB = rig_.bind[size_t(c.bone)].q;
+        const Quat dev = qmul(qconj(rig_.bind[size_t(c.target)].q), pose[size_t(c.target)].q);
+        switch (c.type) {
+        case Constraint::Twist:
+            pose[size_t(c.bone)].q = qmul(bindB, qpow(qconj(twistX(dev)), c.amount));
+            break;
+        case Constraint::TwistChild:
+            pose[size_t(c.bone)].q = qmul(bindB, qpow(twistX(dev), c.amount));
+            break;
+        case Constraint::Split:
+        case Constraint::SplitR: {
+            const Quat delta = qmul(inParentOf(c.bone, c.target, false), qconj(inParentOf(c.bone, c.target, true)));
+            pose[size_t(c.bone)].q = qmul(qpow(delta, c.amount), bindB);
+            break;
+        }
+        }
+    }
 }
 
 }  // namespace bandanim
