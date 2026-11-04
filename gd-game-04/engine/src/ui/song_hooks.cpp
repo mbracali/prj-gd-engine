@@ -863,7 +863,20 @@ void SongHooks::addNatives() {
     // CrowdIncrease / CrowdDecrease (0x8210FCC0 / 0x82110570: the health),
     // NoteFX (0x8211BAE8: the hit flame, render/highway2d), LaunchGemEvent
     // (0x8211A570: the gems' Star Power look), UpdateNixie (0x82106F20).
-    for (const char* n : {"CrowdIncrease", "CrowdDecrease", "NoteFX", "LaunchGemEvent", "UpdateNixie"})
+    // LaunchGemEvent event = e player = n: the gem event <e>p<n> to
+    // create_guitar_events' handlers, with the player's params (star_power_on:
+    // GuitarEvent_StarPowerOn, the Star Power stage FX) [C 0x821578E8; I: the
+    // params the handlers get, as the native core's events].
+    vm.addNative("LaunchGemEvent", [this](Vm&, ScriptRun&, qb::Struct& p) {
+        const qb::Value* ev = Vm::param(p, K("event"));
+        const int player = int(Vm::number(Vm::param(p, K("player")), 1));
+        if (!ev || player < 1 || player > 2) return true;
+        // star_miss_note is the native core's already (the judge raises it).
+        for (const char* e : {"star_power_on", "star_power_off", "flicker_on", "flicker_off"})
+            if (ev->key == K(e)) broadcast(e, player - 1, playerParams(player - 1));
+        return true;
+    });
+    for (const char* n : {"CrowdIncrease", "CrowdDecrease", "NoteFX", "UpdateNixie"})
         vm.addNative(n, [this](Vm&, ScriptRun&, qb::Struct&) {
             ++k_.absorbed;
             return true;
@@ -1079,7 +1092,7 @@ void SongHooks::addNatives() {
         vm.addNative(n, [](Vm&, ScriptRun&, qb::Struct&) { return true; });
     // (CreateParticleSystem / _fast and DestroyParticlesByGroupID are App's,
     // on the venue's particles: addVenueScriptCalls.)
-    for (const char* n : {"DeleteTeslaEffectObject", "Crowd_PlayAnim", "EngineWind", "LightShow_SetTime"})
+    for (const char* n : {"Crowd_PlayAnim", "LightShow_SetTime"})
         vm.addNative(n, [this, n](Vm&, ScriptRun&, qb::Struct&) {
             ++k_.spawned[std::string("(3D) ") + n];
             return true;

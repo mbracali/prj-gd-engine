@@ -82,11 +82,15 @@ struct VmStats {
 
 class Vm {
 public:
+    // Enhanced > Enable Cut Content (StructureContains ... debug_only reads false; set by the app).
+    static inline bool cutContent = false;
     explicit Vm(Globals& globals);
 
     Globals& globals() { return g_; }
     void addNative(const std::string& name, Native fn);
     void addNative(uint32_t key, Native fn) { natives_[key] = std::move(fn); }
+    // The native registered under `name` (empty if none): a wrapper keeps it.
+    Native native(const std::string& name) const;
     bool hasNative(uint32_t key) const { return natives_.count(key) != 0; }
     // Runs a native for an object's member call; false if there is none.
     bool callNative(uint32_t key, ScriptRun& run, qb::Struct& params) {

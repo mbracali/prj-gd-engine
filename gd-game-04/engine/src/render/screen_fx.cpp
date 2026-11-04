@@ -97,24 +97,26 @@ bool ScreenFx::ensure(Target& t, int w, int h, bool depth) {
     return true;
 }
 
-bool ScreenFx::begin() {
+bool ScreenFx::begin(float scale) {
     if (!dev_) return false;
     outer_ = dev_->currentTarget();
     dev_->currentViewport(ox_, oy_, ow_, oh_);
     if (ow_ <= 0 || oh_ <= 0) return false;
-    // The venue viewport's own colour + depth-stencil (A8R8G8B8, D24S8) [C 0.4].
-    if (!scene_.id || scene_.w != ow_ || scene_.h != oh_) {
+    // The venue viewport's own colour + depth-stencil (A8R8G8B8, D24S8) [C 0.4];
+    // `scale` (Enhanced: Internal Resolution, SSAA, FSR 1) sizes it against the viewport [I].
+    const int sw = std::clamp(int(std::lround(float(ow_) * scale)), 16, 8192), sh = std::clamp(int(std::lround(float(oh_) * scale)), 16, 8192);
+    if (!scene_.id || scene_.w != sw || scene_.h != sh) {
         if (scene_.id) dev_->destroyTarget(scene_.id);
         scene_ = {};
         std::string err;
         gfx::TargetDesc d;
-        d.width = ow_, d.height = oh_, d.depth = true, d.stencil = true;
+        d.width = sw, d.height = sh, d.depth = true, d.stencil = true;
         scene_.id = dev_->createTarget(d, err);
         if (!scene_.id) {
             SDL_Log("screen fx: no scene target: %s", err.c_str());
             return false;
         }
-        scene_.w = ow_, scene_.h = oh_;
+        scene_.w = sw, scene_.h = sh;
     }
     dev_->setTarget(scene_.id);
     dev_->setViewport(0, 0, scene_.w, scene_.h);
@@ -221,8 +223,12 @@ void ScreenFx::dofBlur(const Target& t, const Target& tmp, float radius) {
     }
 }
 
-void ScreenFx::end(const Params& p) {
+void ScreenFx::end(const Params& p, gfx::TargetId into) {
     if (!dev_) return;
+    // Into the port's buffer (Enhanced's chain reads it), scene-sized; else the viewport begin() saw.
+    const gfx::TargetId realOuter = outer_;
+    const int rx = ox_, ry = oy_, rw = ow_, rh = oh_;
+    if (into) outer_ = into, ox_ = oy_ = 0, ow_ = scene_.w, oh_ = scene_.h;
     // 823DE658: the instances in the order the scripts added them (venue_DOF,
     // the TOD's BnS, sbloom), each reading the previous one's output [C].
     gfx::TextureId cur = dev_->targetTexture(scene_.id);
@@ -334,6 +340,7 @@ void ScreenFx::end(const Params& p) {
     }
     dev_->setTarget(outer_);
     dev_->setViewport(ox_, oy_, ow_, oh_);
+    outer_ = realOuter, ox_ = rx, oy_ = ry, ow_ = rw, oh_ = rh;
 }
 
 }  // namespace screenfx

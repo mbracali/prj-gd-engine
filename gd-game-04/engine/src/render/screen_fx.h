@@ -57,9 +57,15 @@ public:
     void shutdown();
     // Redirects drawing to the scene target (the current viewport's size);
     // false when the effects cannot run (draw straight to the target then).
-    bool begin();
+    bool begin(float scale = 1.0f);
     // Runs the effects and composites into the target and viewport bound at begin().
-    void end(const Params& p);
+    void end(const Params& p, gfx::TargetId into = {});
+    // The scene target's depth and size, and the viewport begin() saw (Enhanced's chain).
+    gfx::TextureId sceneDepth() const { return dev_ && scene_.id ? dev_->targetDepth(scene_.id) : gfx::TextureId{}; }
+    int sceneW() const { return scene_.w; }
+    int sceneH() const { return scene_.h; }
+    gfx::TargetId outer() const { return outer_; }
+    void outerViewport(int& x, int& y, int& w, int& h) const { x = ox_, y = oy_, w = ow_, h = oh_; }
 
 private:
     struct Target {

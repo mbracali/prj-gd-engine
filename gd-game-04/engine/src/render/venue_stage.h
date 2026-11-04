@@ -9,6 +9,8 @@
 #include "data/venue.h"
 #include "render/band.h"
 #include "render/crowd.h"
+#include "render/enhanced_fx.h"
+#include "render/enhanced_lights.h"
 #include "render/particles.h"
 #include "render/screen_fx.h"
 #include "render/stage_peds.h"
@@ -37,6 +39,18 @@ public:
     static std::string chooseZone(const Globals& g);
     // Enhanced > Enable Particles FX (off: no venue or band particles, from the next song).
     static inline bool particlesOn = true;
+    // Enhanced Options' picture chain (render/enhanced_fx, gd02's) after
+    // GH3's screen effects, and the world's resolution against the window
+    // (Internal Resolution); set by the app.
+    static inline gfx::PostSettings post;
+    static inline int internalHeight = 0;  // 0: the window's
+    // Enhanced: All Band Mates Cast Shadows, More Lights on Venues, Dust in Light Beams (gd02's extras).
+    static inline gfx::EnhancedLights::Settings extras;
+    // A player's Star Power on (Blur on Star Power), set each frame by the song.
+    void setStarPower(bool on) { starPowerOn_ = on; }
+    const gfx::EnhancedFx* enhancedFx() const { return enh_.get(); }
+    uint64_t projectorPools = 0;
+    uint64_t teslaFrames = 0;  // frames with Tesla bolts drawn  // projector pools drawn (frames x pools)
     // Loads the zone (and uploads it when `device` is given); false and
     // `error` on failure. Without a device nothing draws until attach().
     bool start(const Disc& disc, const Globals& g, const std::string& zone, const Chart& chart, uint32_t songKey, double leadInMs,
@@ -108,7 +122,16 @@ private:
     std::vector<std::pair<double, double>> lighterSpans_;  // Crowd_StartLighters .. StopLighters
     std::vector<uint32_t> lighterNodes_;  // <zone>_LIGHTER_Geo00..14
     bool lightersOn(double ms) const;
-    screenfx::Params fxParams_;  // Default_TOD_Manager's screen_FX
+    screenfx::Params fxParams_;
+    std::unique_ptr<gfx::EnhancedFx> enh_;
+    std::unique_ptr<gfx::EnhancedLights> extras_;
+    std::vector<const venue::Node*> projectors_;
+    bool projectorsListed_ = false;
+    gfx::TargetId ldr_;
+    int ldrW_ = 0, ldrH_ = 0;
+    bool starPowerOn_ = false;
+    float starBlur_ = 0;
+    double starBlurAt_ = 0;  // Default_TOD_Manager's screen_FX
     void shadowPass(double ms);
 public:
     const Crowd* crowd() const { return crowd_.get(); }

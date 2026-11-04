@@ -185,6 +185,16 @@ void addCoreNatives(Vm& vm) {
         // A key names the global struct [C data: start_flow_manager passes the flow state's key].
         if (s && (s->type == qb::Type::Key || s->type == qb::Type::KeyPtr)) s = v.global(s->key);
         if (!s || !n || s->type != qb::Type::Struct || !s->st) return false;
+        // Enhanced > Enable Cut Content: the debug_only flag reads as absent,
+        // so the musician profiles (the BoneMan characters) and the venues
+        // (z_credits, z_soundcheck) GH3 keeps out of its menus show; the
+        // viewer zone stays out [C scripts get_valid_character_index,
+        // create_select_venue_menu; I: the port's switch].
+        if (Vm::cutContent && n->key == K("debug_only")) {
+            const qb::Value* nm = v.globals().field(*s->st, K("name"));
+            const bool viewer = nm && (nm->type == qb::Type::String || nm->type == qb::Type::WString) && nm->str == "z_viewer";
+            if (!viewer) return false;
+        }
         if (v.globals().field(*s->st, n->key) != nullptr) return true;
         // A flag (a nameless key, `$boss` / `$encorep1` in GH3_Career_Songs'
         // tiers) counts too: Progression_GetBossSong finds a tier's boss so,

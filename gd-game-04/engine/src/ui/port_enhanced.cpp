@@ -39,6 +39,8 @@ struct Item {
     std::string help;
     std::vector<Option> options = {};
     std::string needs = {};  // shown only while this setting is on (a check) or not none / off (a choice)
+    uint32_t cheatVar = 0;   // a cheat: its global (0 locked, 1 on, 2 off) and index in guitar_hero_cheats
+    int cheatIndex = -1;
 };
 
 // GH3's cheats [C data: guitar_hero_cheats, scripts/guitar/menu/
@@ -50,7 +52,9 @@ std::vector<Item> gh3Cheats(qs::Vm& vm) {
     std::vector<Item> out;
     const qb::Value* list = vm.global(qbkey::key("guitar_hero_cheats"));
     if (!list || !list->arr) return out;
+    int index = -1;
     for (const qb::Value& c : list->arr->values) {
+        ++index;
         if (!c.st) continue;
         const qb::Value* nt = qs::Vm::param(*c.st, qbkey::key("name_text"));
         const qb::Value* pat = qs::Vm::param(*c.st, qbkey::key("unlock_pattern"));
@@ -70,9 +74,12 @@ std::vector<Item> gh3Cheats(qs::Vm& vm) {
                 if (bits & bit) chord += letter;
             code += (code.empty() ? "" : " ") + chord;
         }
-        out.push_back({Kind::Cheat, key, name, false,
-                       "The original cheat. Entered in Options > Cheats > Enter Cheat, one strum per chord (G R Y B O: green, "
-                       "red, yellow, blue, orange): " + code + "."});
+        const qb::Value* var = qs::Vm::param(*c.st, qbkey::key("var"));
+        Item it{Kind::Cheat, key, name, var != nullptr,
+                "The original cheat, on or off (unlocked if it was not). Its code, in Options > Cheats > Enter Cheat, one strum "
+                "per chord (G R Y B O: green, red, yellow, blue, orange): " + code + "."};
+        it.cheatVar = var ? var->key : 0, it.cheatIndex = index;
+        out.push_back(std::move(it));
     }
     return out;
 }
@@ -100,7 +107,7 @@ std::vector<Item> buildItems(qs::Vm& vm) {
          "Shake the phone during a song to use the whammy bar: keep shaking to hold it, stop to let go. Whammy bends the "
          "note and fills Star Power faster on a Star Power note. A real whammy bar keeps working. Android only."},
 #endif
-        {Kind::Check, "touch", "Enable Touch Controls", false,
+        {Kind::Check, "touch", "Enable Touch Controls", true,
          "Play on a touch screen. In the menus a tap is a click. In a song, touch a lane at the bottom of the highway when "
          "its note arrives: it plays the fret and the strum at once."},
         {Kind::Check, "rockband", "Enable Rock Band Guitars", true,
@@ -125,52 +132,53 @@ std::vector<Item> buildItems(qs::Vm& vm) {
          "whatever the display's refresh rate.",
          {{"60", "60"}, {"120", "120"}, {"144", "144"}, {"240", "240"}}},
         {Kind::Check, "fps_counter", "Show FPS Counter", true, "Shows the frames drawn per second in the bottom-left corner of the screen."},
-        {Kind::Choice, "internal_res", "Internal Resolution", false,
+        {Kind::Choice, "internal_res", "Internal Resolution", true,
          "The resolution the game draws at before it is scaled to the window. The Xbox 360 drew 1280 x 720 (x360).",
          {{"720", "720p (x360)"}, {"800", "800p (Steam Deck)"}, {"900", "900p"}, {"1080", "1080p"}, {"1440", "1440p"},
           {"2160", "4K (2160p)"}}},
-        {Kind::Check, "sharp_ui", "Sharper Text & Sprites", false,
-         "Upscales the menu art and the game's fonts with a sharper filter, so text and sprites stay crisp on large screens."},
-        {Kind::Choice, "antialiasing", "Anti-Aliasing", false, "Smooths jagged edges: FXAA, SSAA or TAA.",
+        {Kind::Check, "sharp_ui", "Sharper Text & Sprites", true,
+         "Upscales the menu art and the game's fonts with a sharper filter, so text and sprites stay crisp on large screens "
+         "(from the next start)."},
+        {Kind::Choice, "antialiasing", "Anti-Aliasing", true, "Smooths jagged edges: FXAA, SSAA or TAA.",
          {{"none", "None"}, {"fxaa", "FXAA"}, {"ssaa", "SSAA"}, {"taa", "TAA"}}},
-        {Kind::Choice, "ai_upscaling", "AI Upscaling", false,
+        {Kind::Choice, "ai_upscaling", "AI Upscaling", true,
          "Draws the 3D scene below your screen's resolution and upscales it to the screen, for higher frame rates.",
-         {{"none", "None"}, {"fsr1", "FSR 1 (Spatial)", false}, {"fsr31", "FSR 3.1", false}, {"dlss4", "DLSS 4", false},
+         {{"none", "None"}, {"fsr1", "FSR 1 (Spatial)"}, {"fsr31", "FSR 3.1", false}, {"dlss4", "DLSS 4", false},
           {"dlss5", "DLSS 5", false}}},
-        {Kind::Choice, "ai_upscaling_mode", "Upscaling Quality", false,
+        {Kind::Choice, "ai_upscaling_mode", "Upscaling Quality", true,
          "How far below the screen's resolution the scene is drawn: Quality (1.5x), Balanced (1.7x) or Performance (2x).",
          {{"performance", "Performance"}, {"balanced", "Balanced"}, {"quality", "Quality"}}, "ai_upscaling"},
-        {Kind::Choice, "bokeh", "Bokeh Effect", false,
+        {Kind::Choice, "bokeh", "Bokeh Effect", true,
          "The depth-of-field blur of the close shots. None: always sharp. Regular: as the original game. Stronger: a wider blur.",
          {{"none", "None"}, {"regular", "Regular"}, {"stronger", "Stronger"}}},
         {Kind::Check, "particles", "Enable Particles FX", true, "Sparks, smoke and fire on the stage and the band's Star Power effects (from the next song)."},
-        {Kind::Choice, "bloom", "Bloom", false, "A soft glow around the brightest lights of the venue, over the original game's own.",
+        {Kind::Choice, "bloom", "Bloom", true, "A soft glow around the brightest lights of the venue, over the original game's own.",
          {{"off", "Off"}, {"low", "Low"}, {"medium", "Medium"}, {"high", "High"}}},
-        {Kind::Check, "cinematic_color", "Cinematic Color", false, "A filmic colour curve with a gentle grade and vignette on the venue."},
-        {Kind::Choice, "color_grade", "Color Grading", false, "A colour look for the venue: Warm, Cold, Vintage, Noir or Neon.",
+        {Kind::Check, "cinematic_color", "Cinematic Color", true, "A filmic colour curve with a gentle grade and vignette on the venue."},
+        {Kind::Choice, "color_grade", "Color Grading", true, "A colour look for the venue: Warm, Cold, Vintage, Noir or Neon.",
          {{"off", "Off"}, {"warm", "Warm"}, {"cold", "Cold"}, {"vintage", "Vintage"}, {"noir", "Noir"}, {"neon", "Neon"}}},
-        {Kind::Choice, "film_grain", "Film Grain", false, "Fine animated grain over the venue, like a concert shot on film.",
+        {Kind::Choice, "film_grain", "Film Grain", true, "Fine animated grain over the venue, like a concert shot on film.",
          {{"off", "Off"}, {"light", "Light"}, {"strong", "Strong"}}},
-        {Kind::Check, "chromatic", "Chromatic Aberration", false, "A camera lens's colour fringes towards the corners of the venue."},
-        {Kind::Check, "light_streaks", "Anamorphic Light Streaks", false, "The brightest stage lights flare into long horizontal streaks."},
-        {Kind::Check, "ssao", "Ambient Occlusion", false, "Soft contact shadows where surfaces meet, for more depth."},
-        {Kind::Choice, "sharpening", "Sharpening", false, "Contrast-adaptive sharpening of the venue (AMD CAS).",
+        {Kind::Check, "chromatic", "Chromatic Aberration", true, "A camera lens's colour fringes towards the corners of the venue."},
+        {Kind::Check, "light_streaks", "Anamorphic Light Streaks", true, "The brightest stage lights flare into long horizontal streaks."},
+        {Kind::Check, "ssao", "Ambient Occlusion", true, "Soft contact shadows where surfaces meet, for more depth."},
+        {Kind::Choice, "sharpening", "Sharpening", true, "Contrast-adaptive sharpening of the venue (AMD CAS).",
          {{"off", "Off"}, {"low", "Low"}, {"high", "High"}}},
-        {Kind::Choice, "star_blur", "Blur on Star Power", false,
+        {Kind::Choice, "star_blur", "Blur on Star Power", true,
          "While Star Power is on, the venue and the band blur with the camera's motion and leave light trails.",
          {{"none", "None"}, {"light", "Light"}, {"medium", "Medium"}, {"high", "High"}}},
         {Kind::Separator, "", "", true, ""},
         {Kind::Section, "enhancers", "ENHANCERS", true, "Visual extras beyond the original game, and your user files."},
-        {Kind::Check, "shadows_all", "All Band Mates Cast Shadows", false,
+        {Kind::Check, "shadows_all", "All Band Mates Cast Shadows", true,
          "Every band mate gets a spotlight from above and casts a shadow on the stage floor."},
-        {Kind::Choice, "more_lights", "More Lights on Venues", false,
+        {Kind::Choice, "more_lights", "More Lights on Venues", true,
          "Richer stage lighting: brighter light cones and floor pools and a fill light on the band.",
          {{"off", "Off"}, {"subtle", "Subtle"}, {"strong", "Strong"}}},
-        {Kind::Check, "light_dust", "Dust in Light Beams", false, "With More Lights on Venues: fine dust drifting in the light beams.", {},
+        {Kind::Check, "light_dust", "Dust in Light Beams", true, "With More Lights on Venues: fine dust drifting in the light beams.", {},
          "more_lights"},
-        {Kind::Choice, "ground_fog", "Add Fog to the Ground (Experimental)", false, "A low fog over the stage floor where the band plays.",
+        {Kind::Choice, "ground_fog", "Add Fog to the Ground (Experimental)", true, "A low fog over the stage floor where the band plays.",
          {{"none", "None"}, {"low", "Low"}, {"full", "Full"}, {"super", "Super Fog"}}},
-        {Kind::Check, "no_shaky_cam", "Disable Shaky Camera", false,
+        {Kind::Check, "no_shaky_cam", "Disable Shaky Camera", true,
          "Steady shots instead of a handheld camera shake. Not available: GH3's cameras do not shake (its only camera "
          "shake, the boss battles' BossBattle_CameraShake, is an empty script on this disc)."},
         {Kind::Button, "export", "Export User Files", true,
@@ -179,12 +187,14 @@ std::vector<Item> buildItems(qs::Vm& vm) {
         {Kind::Button, "load_progress", "Load User Progress", true, "Choose a user progress file to load."},
         {Kind::Separator, "", "", true, ""},
         {Kind::Section, "cheats", "CHEATS", true, "The original game's cheats and more ways to bend the rules."},
-        {Kind::Check, "cut_content", "Enable Cut Content", false, "Loads content left unused on the original disc into the game."},
+        {Kind::Check, "cut_content", "Enable Cut Content", true,
+         "Shows what the original keeps hidden on the disc: the Bone Man characters in character select and the Credits and "
+         "Soundcheck venues in the venue list."},
         {Kind::Check, "no_fail", "No Fail Mode", true, "The rock meter cannot fail you: every song plays to the end."},
         {Kind::Check, "autoplay", "Autoplay", true, "The game plays every note of a song by itself, without a miss."},
-        {Kind::Choice, "hopo_mode", "Forgiving Hammer-ons & Pull-offs", false,
-         "Notes with a coloured top can be played without strumming. Forgiving: a wrong fret can be corrected, and a "
-         "note whose fret is already held when it arrives plays by itself.",
+        {Kind::Choice, "hopo_mode", "Forgiving Hammer-ons & Pull-offs", true,
+         "Notes with a coloured top can be played without strumming. Forgiving: a note whose fret is already held when "
+         "it arrives plays by itself.",
          {{"original", "Original"}, {"forgiving", "Forgiving"}}},
         {Kind::Check, "dev_debug_menu", "Developer Debug Menu", true,
          "Developer cheats: GH3's own debug switch from its development kit (enable_button_cheats), off on a retail disc. "
@@ -409,7 +419,13 @@ private:
         const std::string v = ctx_.store.get(key);
         return !v.empty() && v != "none" && v != "off";
     }
-    bool isOn(const Item& it) const { return it.ready && ctx_.store.get(it.key) == "on"; }
+    bool isOn(const Item& it) const {
+        if (it.kind == Kind::Cheat) {  // GH3's own global: 1 on [C script toggle_cheat]
+            const qb::Value* v = ctx_.fe.vm().global(it.cheatVar);
+            return it.ready && v && v->number() == 1;
+        }
+        return it.ready && ctx_.store.get(it.key) == "on";
+    }
     // A choice of exactly two values is shown and used as a check box (gd01).
     static bool isToggle(const Item& it) { return it.kind == Kind::Choice && it.options.size() == 2; }
     int optionIndex(const Item& it) const {
@@ -439,8 +455,22 @@ private:
             ctx_.sound("select");
             return;
         case Kind::Separator: return;
+        case Kind::Cheat: {
+            if (!it.ready) return ctx_.sound("error");
+            // GH3's toggle_cheat (its timing windows for Easy Expert / Precision
+            // Mode); a locked cheat is unlocked first (2: off) [C script menu_cheats.qb].
+            qs::Vm& vm = ctx_.fe.vm();
+            if (const qb::Value* v = vm.global(it.cheatVar); !v || v->number() <= 0) vm.setGlobal(it.cheatVar, qs::Vm::makeInt(2));
+            qb::Struct p;
+            qs::Vm::set(p, qbkey::key("cheat"), qs::Vm::makeKey(it.cheatVar));
+            qs::Vm::set(p, qbkey::key("index"), qs::Vm::makeInt(it.cheatIndex));
+            qs::Vm::set(p, qbkey::key("id"), qs::Vm::makeKey(qbkey::key("port_enhanced_cheat")));
+            vm.run(qbkey::key("toggle_cheat"), p);
+            rebuild();
+            ctx_.sound("select");
+            return;
+        }
         case Kind::Check:
-        case Kind::Cheat:
             if (!it.ready) return ctx_.sound("error");
             store(it.key, isOn(it) ? "off" : "on");
             rebuild();  // a check may show or hide its dependent row

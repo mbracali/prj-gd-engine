@@ -77,6 +77,9 @@ target_sources(gd04 PRIVATE
   src/render/particles.cpp
   src/render/renderer.cpp
   src/render/screen_fx.cpp
+  src/render/enhanced_fx.cpp
+  src/render/enhanced_lights.cpp
+  src/render/image_enhance.cpp
   src/render/stage_peds.cpp
   src/render/shadertest.cpp
   src/render/texture_cache.cpp

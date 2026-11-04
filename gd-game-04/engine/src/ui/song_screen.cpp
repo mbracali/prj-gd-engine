@@ -390,6 +390,9 @@ void SongScreen::draw(Canvas& c, double now, const TextureCache* textures) {
             venue_.reset();
         } else {
             c.flush();
+            bool sp = false;  // Enhanced > Blur on Star Power
+            for (int pl = 0; pl < (twoPlayers_ ? 2 : 1); ++pl) sp = sp || match_->player(pl).stats().starPowerActive;
+            venue_->setStarPower(sp);
             venue_->advance(now);
             venue_->draw(now);
         }

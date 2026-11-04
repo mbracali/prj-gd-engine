@@ -130,7 +130,31 @@ public:
     bool hasNamed(uint32_t name) const;
     void destroyGroup(uint32_t group);
     std::function<bool(uint32_t member, uint32_t bone, venue::Vec3& out)> bonePos;
+    // EngineWind (the Star Power hearts / bats / butterflies / peace swirl):
+    // a twist about the wind's vertical axis plus its velocity, on the
+    // particles within `range` (inv_distance attenuation) [C scripts; I: the
+    // field's model]. Create replaces, modify moves it, remove ends it.
+    struct Wind {
+        venue::Vec3 pos{}, velocity{};
+        float speed = 0, tangentWeight = 0, range = 0;
+    };
+    void setWind(uint32_t name, const Wind& w) { winds_[name] = w; }
+    Wind* wind(uint32_t name) {
+        auto it = winds_.find(name);
+        return it == winds_.end() ? nullptr : &it->second;
+    }
+    void removeWind(uint32_t name) { winds_.erase(name); }
+    // CreateTeslaEffectObject / SetTeslaEffectObject (the default Star Power:
+    // bolts from the guitar to the zone's TeslaNodes), drawn by VenueStage.
+    struct Tesla {
+        venue::Vec3 start{}, end{};
+        float width = 0.1f;
+    };
+    std::unordered_map<uint32_t, Tesla> teslas;
     uint64_t scriptedCreated = 0;
+private:
+    std::unordered_map<uint32_t, Wind> winds_;
+public:
 private:
     // The particleobject nodes (z_party's GFX fires / smoke / sparks): the
     // system emitting now (index into systems_ by id), its params, position.

@@ -16,6 +16,9 @@ class Disc;
 class TextureCache {
 public:
     explicit TextureCache(gfx::RenderDevice& dev) : dev_(dev) {}
+    // Enhanced > Sharper Text & Sprites, read when the textures load (set by the app before).
+    static inline bool sharp = false;
+    int sharpened = 0;
     ~TextureCache();
     // Uploads the textures of a pak; returns how many, -1 on error (logged).
     int loadPak(const Disc& disc, const std::string& pakPath);

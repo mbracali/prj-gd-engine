@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "render/particles.h"
+#include "render/venue_view.h"
 
 #include <SDL3/SDL_log.h>
 
@@ -821,7 +822,9 @@ void Particles::draw(const venue::CamPose& cam, double ms) {
     const float aspect = gfx::kLogicalW / gfx::kLogicalH;
     const float hfov = cam.fov * 3.14159265f / 180.0f;
     const float yfov = 2.0f * std::atan(std::tan(hfov * 0.5f) / aspect);
-    const gfx::Mat4 vp = gfx::Mat4::perspective(yfov, aspect, 0.05f, 4000.0f, d.info().clipDepthZeroToOne) * view;
+    gfx::Mat4 proj = gfx::Mat4::perspective(yfov, aspect, 0.05f, 4000.0f, d.info().clipDepthZeroToOne);
+    proj.at(0, 2) -= VenueView::jitterX, proj.at(1, 2) -= VenueView::jitterY;  // Enhanced TAA
+    const gfx::Mat4 vp = proj * view;
 
     struct Batch {
         uint32_t texture = 0;
@@ -881,6 +884,18 @@ void Particles::draw(const venue::CamPose& cam, double ms) {
             for (size_t k = 0; k < 3; ++k) {
                 vel[k] = vdir[k] * speed + p.force[k] * at;
                 pos[k] = p0[k] + vdir[k] * speed * at + 0.5f * p.force[k] * at * at;
+            }
+            // EngineWind: the particle swirls about each wind's axis (angle =
+            // speed x tangentweight x its age / distance) and drifts with it.
+            for (const auto& [wn, w] : winds_) {
+                const float dx = pos[0] - w.pos[0], dz = pos[2] - w.pos[2];
+                const float dist = std::sqrt(dx * dx + dz * dz + (pos[1] - w.pos[1]) * (pos[1] - w.pos[1]));
+                if (w.range > 0 && dist > w.range) continue;
+                const float att = 1.0f / std::max(dist, 0.5f);
+                const float ang = w.speed * w.tangentWeight * at * att;
+                const float c = std::cos(ang), sn = std::sin(ang);
+                pos[0] = w.pos[0] + dx * c - dz * sn, pos[2] = w.pos[2] + dx * sn + dz * c;
+                for (size_t k = 0; k < 3; ++k) pos[k] += w.velocity[k] * at * w.speed * att;
             }
             const float s0 = p.sizeStart + p.sizeStartVar * rnd(s.seed, uint64_t(i), 7);
             const float s1 = p.sizeEnd + p.sizeEndVar * rnd(s.seed, uint64_t(i), 8);

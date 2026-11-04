@@ -103,6 +103,14 @@ public:
         bool battle = false;  // star gems: sys_BattleGEM_* [C 0x82120C90]
     };
     void setEffects(Effects e) { fx_ = std::move(e); }
+    // The five lanes for touch play (menu units): at the strike line and at
+    // the far end, as drawn (lefty mirrors) [I: the fingers' map].
+    void touchLanes(std::array<float, 5>& nearX, std::array<float, 5>& nearY, std::array<float, 5>& farX, std::array<float, 5>& farY) const {
+        for (int k = 0; k < 5; ++k) {
+            nearX[size_t(k)] = endX_[size_t(k)], nearY[size_t(k)] = playline_;
+            farX[size_t(k)] = startX_[size_t(k)], farY[size_t(k)] = topY_;
+        }
+    }
 
 private:
     void drawAll(Canvas& c, const TextureCache& tex, const NoteTrack& track, const Player& player, double nowMs, uint8_t held);

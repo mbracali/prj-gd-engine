@@ -538,7 +538,7 @@ CamPose CameraDirector::pose(double ms) const {
     }
     }
     if (ctl_ != Ctl::Spline) p = aim(p, k0, k1, mix, ms);
-    if (handCam_) {
+    if (handCam_ && !noShake) {  // Enhanced > Disable Shaky Camera: off
         // CameraCuts_SetHandCamParams: motionx / motiony, amplitude 0.034 /
         // 0.04, period base 0.013 / 0.017 per frame with multiples 1, 3, 4 [C
         // data]; applied as small yaw / pitch sways [I: the units and the sum].

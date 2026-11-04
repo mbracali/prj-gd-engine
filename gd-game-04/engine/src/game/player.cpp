@@ -326,6 +326,10 @@ void Player::frame(double now, double dt, const FrameInput& raw) {
         const uint8_t h = highest(in.frets);
         if (h && h != lastHitMask_) candidate = h;
     }
+    // Enhanced > Forgiving Hammer-ons & Pull-offs [I: the port's, gd02's]:
+    // a HOPO whose fret is already held when it arrives plays by itself
+    // (no fret change needed), after any earlier hit too.
+    if (forgivingHopos && !in.strum && !candidate && in.frets) candidate = highest(in.frets);
     // 5. The scan [C 0x82120260-0x82120880].
     bool hitSomething = false;
     for (size_t k = cur_; k < n && double(notes[k].time) <= base + E; ++k) {

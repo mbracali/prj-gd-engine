@@ -71,6 +71,8 @@ struct PlayerRules {
 
 class Player {
 public:
+    // Enhanced > Forgiving Hammer-ons & Pull-offs (set by the app).
+    static inline bool forgivingHopos = false;
     // `inputOffsetMs`: the input offset (xenon_input_offset + the song's +
     // calibration) [C script gem_scroller]; 0 in the self-test.
     Player(const NoteTrack& track, const Tuning& tuning, int difficulty, bool noFail, float inputOffsetMs = 0);

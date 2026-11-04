@@ -422,7 +422,10 @@ bool VenueView::init(gfx::RenderDevice& dev, const Disc& disc, const venue::Venu
                 }
                 it = models.emplace(key, std::move(sc)).first;
             }
-            if (const qb::Value* lt = n.st->find(K("lightvolumetype")); lt && lt->key == K("ConeImpostor")) cones_.push_back(int(ni));
+            // ConeImpostor's beam; the `volume` / `normal` types (GH3's
+            // _Raytrace_cone templates over the depth buffer) are drawn as the
+            // same impostor cone [I: gd04 has no depth copy to ray-march].
+            if (const qb::Value* lt = n.st->find(K("lightvolumetype")); lt && lt->key != K("flareonly")) cones_.push_back(int(ni));
             if (!it->second) continue;
             ++stats_.housings;
             for (const scene::Mesh& m : it->second->meshes) addMesh(*it->second, m, nullptr, int(ni), &n, n.name, int(ni));
@@ -503,6 +506,7 @@ void VenueView::cameraGlobals(const venue::CamPose& cam, bool clipZeroToOne, dou
     proj.at(0, 0) = sx, proj.at(1, 1) = flipY ? -sy : sy;
     proj.at(2, 2) = zf / (zf - zn), proj.at(2, 3) = -zn * zf / (zf - zn);
     proj.at(3, 2) = 1, proj.at(3, 3) = 0;
+    proj.at(0, 2) += jitterX, proj.at(1, 2) += jitterY;  // Enhanced TAA's sub-pixel jitter (0 otherwise)
     const gfx::Mat4 vp = proj * view;
     g = gh3shader::Globals{};
     g.setMatrix(gh3shader::kRegView, view, 4);
@@ -542,7 +546,8 @@ void VenueView::draw(const venue::CamPose& cam, const std::vector<venue::LightSt
     const float aspect = gfx::kLogicalW / gfx::kLogicalH;
     const float hfov = cam.fov * 3.14159265f / 180.0f;
     const float yfov = 2.0f * std::atan(std::tan(hfov * 0.5f) / aspect);
-    const gfx::Mat4 proj = gfx::Mat4::perspective(yfov, aspect, 0.05f, 4000.0f, d.info().clipDepthZeroToOne);
+    gfx::Mat4 proj = gfx::Mat4::perspective(yfov, aspect, 0.05f, 4000.0f, d.info().clipDepthZeroToOne);
+    proj.at(0, 2) -= jitterX, proj.at(1, 2) -= jitterY;  // GL's -z forward: the same NDC shift
     const gfx::Mat4 vp = proj * view;
 
     FrameUniforms fu{};

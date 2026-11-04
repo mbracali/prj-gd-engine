@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "render/texture_cache.h"
+#include "render/image_enhance.h"
+#include "render/texture_codec.h"
+#include <atomic>
+#include <thread>
+#include <unordered_map>
 
 #include <SDL3/SDL_log.h>
 
@@ -43,15 +48,77 @@ bool TextureCache::loadImage(const Disc& disc, const std::string& path, uint32_t
     }
 }
 
+namespace {
+struct Sharp {
+    std::vector<uint8_t> rgba;
+    std::vector<std::vector<uint8_t>> chain;
+    int w = 0, h = 0;
+    bool ok = false;
+};
+}  // namespace
+
 int TextureCache::loadPak(const Disc& disc, const std::string& pakPath) {
     int n = 0;
     try {
         Pak pak = Pak::load(disc, pakPath);
+        // Enhanced > Sharper Text & Sprites (gd02's, from the next start): each
+        // 2D texture up to 512 px decoded, upscaled (image_enhance) and
+        // uploaded as RGBA8 with its own mips, worked out on every core first;
+        // the size the menus use stays.
+        std::unordered_map<uint32_t, Sharp> sharpDone;
+        if (sharp) {
+            std::vector<std::pair<uint32_t, gh3tex::Texture>> todo;
+            auto want = [&](uint32_t key, gh3tex::Texture t) {
+                if (t.supported && !t.levels.empty() && t.kind == gfx::TexKind::Tex2D && t.width <= 512 && t.height <= 512)
+                    todo.emplace_back(key, std::move(t));
+            };
+            for (const PakEntry& e : pak.entries()) {
+                auto [p, size] = pak.data(e);
+                try {
+                    if (e.type == qbkey::key(".tex"))
+                        for (gh3tex::Texture& t : gh3tex::decodeTexDict(p, size)) want(t.key, std::move(t));
+                    else if (e.type == qbkey::key(".img"))
+                        want(e.fullName, gh3tex::decodeImg(p, size));
+                } catch (const std::exception&) {
+                }
+            }
+            std::vector<Sharp> out(todo.size());
+            std::atomic<size_t> next{0};
+            auto work = [&] {
+                for (size_t i; (i = next++) < todo.size();) {
+                    const gh3tex::Texture& t = todo[i].second;
+                    Sharp& sh = out[i];
+                    sh.w = t.width, sh.h = t.height;
+                    const bool ok = t.format == gfx::TexFormat::RGBA8
+                                        ? (sh.rgba.assign(t.levels[0].begin(), t.levels[0].end()), sh.rgba.size() >= size_t(sh.w) * size_t(sh.h) * 4)
+                                        : gfx::decodeToRgba8(t.format, t.levels[0].data(), t.levels[0].size(), sh.w, sh.h, sh.rgba);
+                    sh.ok = ok && gfx::enhanceImage(sh.rgba, sh.w, sh.h);
+                    if (sh.ok) sh.chain = gfx::mipChain(sh.rgba, sh.w, sh.h);
+                }
+            };
+            std::vector<std::thread> pool;
+            const unsigned n = std::max(1u, std::min(16u, std::thread::hardware_concurrency()));
+            for (unsigned k = 1; k < n; ++k) pool.emplace_back(work);
+            work();
+            for (std::thread& th : pool) th.join();
+            for (size_t i = 0; i < todo.size(); ++i) sharpDone.emplace(todo[i].first, std::move(out[i]));
+        }
         auto upload = [&](uint32_t key, const gh3tex::Texture& t) {
             if (!t.supported || t.levels.empty() || textures_.count(key)) return;
             std::string error;
             auto levels = t.texLevels();
-            gfx::TextureId id = dev_.createTexture(t.desc(), levels.data(), error);
+            gfx::TextureId id;
+            // Enhanced > Sharper Text & Sprites (gd02's, from the next start):
+            // a 2D texture up to 512 px decoded, upscaled (image_enhance) and
+            // uploaded as RGBA8 with its own mips; the size the menus use stays.
+            if (auto it = sharpDone.find(key); it != sharpDone.end() && it->second.ok) {
+                const Sharp& sh = it->second;
+                std::vector<gfx::TexLevel> lv{{sh.rgba.data(), sh.rgba.size()}};
+                for (const auto& m : sh.chain) lv.push_back({m.data(), m.size()});
+                id = dev_.createTexture(gfx::TextureDesc{sh.w, sh.h, int(lv.size()), gfx::TexFormat::RGBA8, gfx::TexKind::Tex2D}, lv.data(), error);
+                if (id) ++sharpened;
+            }
+            if (!id) id = dev_.createTexture(t.desc(), levels.data(), error);
             if (!id) {
                 SDL_Log("textures: %s in %s: %s", qbkey::name(key).c_str(), pakPath.c_str(), error.c_str());
                 return;

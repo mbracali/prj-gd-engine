@@ -18,6 +18,10 @@
 #include "script/globals.h"
 
 VenueStage::~VenueStage() {
+    if (teslaFrames || projectorPools || (particles_ && particles_->scriptedCreated))
+        SDL_Log("venue: %llu scripted particle systems, %llu frames with Tesla bolts, %llu projector pools drawn",
+                (unsigned long long)(particles_ ? particles_->scriptedCreated : 0), (unsigned long long)teslaFrames,
+                (unsigned long long)projectorPools);
     fx_.shutdown();
     if (device_ && shadow_) device_->destroyTarget(shadow_);
 }
@@ -423,7 +427,22 @@ void VenueStage::shadowPass(double ms) {
 
 void VenueStage::draw(double ms) {
     if (!view_) return;
-    const bool fx = fxReady_ && fx_.begin();
+    // Enhanced's chain: on when any of its effects is (and it has not failed).
+    const bool chain = post.any() && device_ && !(enh_ && enh_->failed());
+    float internalScale = 1.0f;
+    if (internalHeight > 0 && device_) {
+        int vx, vy, vw, vh;
+        device_->currentViewport(vx, vy, vw, vh);
+        if (vh > 0) internalScale = float(internalHeight) / float(vh);
+    }
+    const bool fx = fxReady_ && fx_.begin(std::clamp(internalScale * (chain ? post.renderScale() : 1.0f), 0.25f, 4.0f));
+    if (fx && chain) {
+        if (!enh_) enh_ = std::make_unique<gfx::EnhancedFx>(*device_);
+        const std::array<float, 2> j = enh_->jitter(post, fx_.sceneW(), fx_.sceneH());
+        VenueView::jitterX = j[0], VenueView::jitterY = j[1];
+    } else {
+        VenueView::jitterX = VenueView::jitterY = 0;
+    }
     lights_.evaluate(ms, lightState_);
     const venue::CamPose cam = cameras_.pose(ms);
     shadowPass(ms);
@@ -450,6 +469,90 @@ void VenueStage::draw(double ms) {
     if (peds_) peds_->draw(ms, cam, *venue_, lightState_, lights_, particles_.get());
     view_->drawVolumes(cam, lights_);
     if (particles_) particles_->draw(cam, ms);
+    // gd02's extras (EnhancedLights) work in GH2's space (z up, ~44 units a
+    // metre): the band's feet and the camera mapped there, and back by the matrix [I].
+    constexpr float kU = 44.0f;
+    auto to02 = [](const venue::Vec3& p, float k) { return gfx::Vec3{p[0] * k, p[2] * k, p[1] * k}; };
+    auto lightsView = [&] {
+        gh3shader::Globals g;
+        gfx::Mat4 vp;
+        VenueView::cameraGlobals(cam, device_->info().clipDepthZeroToOne, ms / 1000.0, g, &vp);
+        gfx::Mat4 back;  // GH2 space -> GH3 world
+        back.at(0, 0) = 1 / kU, back.at(1, 1) = 0, back.at(2, 2) = 0, back.at(1, 2) = 1 / kU, back.at(2, 1) = 1 / kU;
+        gfx::LightsView lv;
+        lv.viewProj = vp * back;
+        lv.pos = to02(cam.pos, kU);
+        lv.right = to02(venue::rotate(cam.rot, {-1, 0, 0}), 1);
+        lv.up = to02(venue::rotate(cam.rot, {0, 1, 0}), 1);
+        return lv;
+    };
+    // The projectors (housings with projectortype stageonly; GH3's _Projector_StageOnly
+    // lights the stage where the beam lands): a pool of the projector's colour
+    // where the beam's axis meets the floor, as wide as the cone is there [I:
+    // a pool, not GH3's projected texture].
+    if (device_ && venue_) {
+        if (!projectorsListed_) {
+            projectorsListed_ = true;
+            for (const venue::Node& n : venue_->nodes)
+                if (n.st && n.st->find(qbkey::key("lightvolumetype")))
+                    if (const qb::Value* pt = n.st->find(qbkey::key("projectortype")); pt && pt->key == qbkey::key("stageonly")) projectors_.push_back(&n);
+            if (SDL_getenv("GD04_PROJECTOR_LOG"))
+                for (const venue::Node* n : projectors_) {
+                    const qb::Value* pt = n->st->find(qbkey::key("projectortype"));
+                    const qb::Value* lt = n->st->find(qbkey::key("lightvolumetype"));
+                    const qb::Value* pc = n->st->find(qbkey::key("projectorcolor"));
+                    SDL_Log("projector %s: type %s, volume %s, colour %g %g %g", qbkey::name(n->name).c_str(), pt ? qbkey::name(pt->key).c_str() : "-",
+                            lt ? qbkey::name(lt->key).c_str() : "-", pc && pc->arr && pc->arr->values.size() > 2 ? double(pc->arr->values[0].number()) : -1.0,
+                            pc && pc->arr && pc->arr->values.size() > 2 ? double(pc->arr->values[1].number()) : -1.0,
+                            pc && pc->arr && pc->arr->values.size() > 2 ? double(pc->arr->values[2].number()) : -1.0);
+                }
+        }
+        float floorY = 0;
+        int nf = 0;
+        if (band_)
+            for (const Band::Entry& e : band_->members())
+                if (e.placed) floorY += e.root.m[7], ++nf;
+        if (nf) floorY /= float(nf);
+        std::vector<gfx::EnhancedLights::Pool> pools;
+        for (const venue::Node* n : projectors_) {
+            if (!n->createdAtStart && !(n->createdOn && lights_.flag(n->createdOn))) continue;
+            venue::HousingState h;
+            if (!lights_.housing(n->name, ms, h)) continue;
+            const float bright = h.projectorColor[0] + h.projectorColor[1] + h.projectorColor[2];
+            if (bright <= 0.01f) continue;
+            const venue::Vec3 z = venue::rotate(h.rot, {0, 0, 1});  // the beam runs along -z
+            if (-z[1] > -0.05f) continue;                             // not pointing down
+            const float t = (floorY - h.pos[1]) / -z[1];
+            const float range = h.range > 0 ? h.range : 10.0f;
+            if (t <= 0 || t > range * 1.5f) continue;
+            const float r = h.startRadius + (std::max(h.endRadius, 0.5f) - h.startRadius) * std::min(t / range, 1.5f);
+            const venue::Vec3 hit{h.pos[0] - z[0] * t, floorY + 0.02f, h.pos[2] - z[2] * t};
+            pools.push_back({to02(hit, kU), r * kU, {h.projectorColor[0], h.projectorColor[1], h.projectorColor[2]}, 0.45f});
+        }
+        if (!pools.empty()) {
+            if (!extras_) extras_ = std::make_unique<gfx::EnhancedLights>(*device_);
+            extras_->drawPools(pools, lightsView());
+            projectorPools += pools.size();
+        }
+    }
+    // The Tesla Star Power's bolts (Create / SetTeslaEffectObject: width =
+    // 0.15 x the length, the zigzag) [C script Create_StarPower_TeslaFX; I: the look].
+    if (device_ && particles_ && !particles_->teslas.empty()) {
+        std::vector<gfx::EnhancedLights::Bolt> bolts;
+        for (const auto& [name, t] : particles_->teslas)
+            bolts.push_back({to02(t.start, kU), to02(t.end, kU), std::min(t.width, 1.5f) * kU * 0.35f, name});
+        if (!extras_) extras_ = std::make_unique<gfx::EnhancedLights>(*device_);
+        extras_->drawBolts(bolts, lightsView(), float(ms / 1000.0), 0.012f * kU, 0.06f * kU);
+        teslaFrames += 1;
+    }
+    if (extras.any() && band_ && device_) {
+        std::vector<gfx::Vec3> feet;
+        for (const Band::Entry& e : band_->members())
+            if (e.placed) feet.push_back(to02({e.root.m[3], e.root.m[7], e.root.m[11]}, kU));
+        const gfx::LightsView lv = lightsView();
+        if (!extras_) extras_ = std::make_unique<gfx::EnhancedLights>(*device_);
+        extras_->draw(extras, feet, lv, false, float(ms / 1000.0));
+    }
     if (fx) {
         // venue_DOF: the shot's dof (a DOF_*_tod_manager's screen_FX[0]), else
         // DOF_Off_TOD_Manager's, set when the cut starts [C CameraCuts_StartCallback].
@@ -471,6 +574,41 @@ void VenueStage::draw(double ms) {
             ++flashFrames;
         }
         p.nearZ = 0.05f, p.farZ = 4000.0f;  // VenueView::globals' projection
-        fx_.end(p);
+        // Enhanced > Bokeh Effect: GH3's depth of field off, as is, or twice as strong [I].
+        if (post.bokeh == 0) p.dof.on = false;
+        else if (post.bokeh >= 3) p.dof.blurRadius *= 2.0f;
+        VenueView::jitterX = VenueView::jitterY = 0;
+        bool chained = false;
+        if (chain && enh_) {
+            const int sw = fx_.sceneW(), sh = fx_.sceneH();
+            if (!ldr_ || ldrW_ != sw || ldrH_ != sh) {
+                if (ldr_) device_->destroyTarget(ldr_);
+                std::string err;
+                gfx::TargetDesc d;
+                d.width = sw, d.height = sh;
+                ldr_ = device_->createTarget(d, err);
+                ldrW_ = sw, ldrH_ = sh;
+            }
+            if (ldr_) {
+                fx_.end(p, ldr_);
+                gfx::PostFrame f;
+                gh3shader::Globals g;
+                gfx::Mat4 vp;
+                VenueView::cameraGlobals(cam, false, ms / 1000.0, g, &vp);
+                f.viewProj = vp, f.hasCamera = true;
+                f.timeSec = float(double(SDL_GetTicksNS()) / 1e9);
+                // Blur on Star Power: in over 0.4 s, out over 0.6 s (gd02's) [I].
+                const double now = double(SDL_GetTicksNS()) / 1e9;
+                const float dt = starBlurAt_ > 0 ? float(std::clamp(now - starBlurAt_, 0.0, 0.1)) : 0.0f;
+                starBlurAt_ = now;
+                starBlur_ = std::clamp(starBlur_ + (starPowerOn_ ? dt / 0.4f : -dt / 0.6f), 0.0f, 1.0f);
+                f.starBlur = starBlur_;
+                int ox, oy, ow, oh;
+                fx_.outerViewport(ox, oy, ow, oh);
+                chained = enh_->process(device_->targetTexture(ldr_), fx_.sceneDepth(), sw, sh, ox, oy, ow, oh, post, f, fx_.outer());
+                if (!chained) SDL_Log("enhanced fx: the chain failed; the venue is drawn without it");
+            }
+        }
+        if (!chained) fx_.end(p);
     }
 }

@@ -25,9 +25,9 @@ const std::vector<EnhancedSetting>& enhancedSettings() {
         {"internal_res", {"1080", "720", "800", "900", "1440", "2160"}},
         {"sharp_ui", {"off", "on"}},
         {"antialiasing", {"none", "fxaa", "ssaa", "taa"}},
-        {"ai_upscaling", {"none"}},
+        {"ai_upscaling", {"none", "fsr1"}},
         {"ai_upscaling_mode", {"quality", "balanced", "performance"}},
-        {"bokeh", {"none", "regular", "stronger"}},
+        {"bokeh", {"regular", "none", "stronger"}},
         {"particles", {"on", "off"}},
         {"bloom", {"off", "low", "medium", "high"}},
         {"cinematic_color", {"off", "on"}},
@@ -47,6 +47,7 @@ const std::vector<EnhancedSetting>& enhancedSettings() {
         {"autoplay", {"off", "on"}},
         {"dev_debug_menu", {"off", "on"}},
         {"hopo_mode", {"original", "forgiving"}},
+        {"cut_content", {"off", "on"}},
         {"audio_offset", {}, -300, 500},
         {"video_offset", {}, -300, 500},
     };
@@ -77,7 +78,7 @@ std::vector<std::pair<std::string, std::string>> enhancedProfile(bool deck) {
     // original's 60. The platform rows below only change the window and the
     // touch controls.
     std::map<std::string, std::string> d = {
-        {"antialiasing", "none"}, {"ai_upscaling", "none"}, {"bokeh", "none"}, {"particles", "on"}, {"cinematic_color", "off"},
+        {"antialiasing", "none"}, {"ai_upscaling", "none"}, {"bokeh", "regular"}, {"particles", "on"}, {"cinematic_color", "off"},
         {"color_grade", "off"}, {"chromatic", "off"}, {"light_streaks", "off"}, {"more_lights", "off"}, {"no_shaky_cam", "off"},
         {"screen_mode", "windowed"}, {"max_fps", "60"}, {"fps_counter", "off"}, {"internal_res", "1080"}, {"sharp_ui", "off"},
         {"bloom", "off"}, {"film_grain", "off"}, {"ssao", "off"}, {"sharpening", "off"}, {"star_blur", "none"},

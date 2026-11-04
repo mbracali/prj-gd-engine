@@ -264,9 +264,18 @@ Walk::Walk(const std::string& name) : name_(name) {
                           {"hover:row:max_fps", "click:row:max_fps", "click:option:1", "check:enhanced:max_fps=120",
                            // Export User Files, a setting changed, Load User Settings brings it back (the dialogs answered with the save folder).
                            "dialog:savedir", "click:row:export", "set:enhanced:max_fps=60", "click:row:load_settings", "check:enhanced:max_fps=120", "click:row:load_progress", "set:enhanced:audio_offset=40", "set:enhanced:video_offset=-20", "click:row:calibrate_reset", "check:enhanced:audio_offset=0", "check:enhanced:video_offset=0",
+                           "click:row:cheat_air_guitar", "check:global:Cheat_AirGuitar=1", "click:row:cheat_air_guitar", "check:global:Cheat_AirGuitar=2",
                            "rclick"},
                           10000});
         steps_.push_back({"options_select_option_fs", {"click:help:BACK"}, 10000});
+        steps_.push_back({"main_menu_fs", {}, 20000});
+    } else if (name == "touch") {
+        // Enhanced > Enable Touch Controls on; a finger taps OPTIONS on the
+        // main menu (SDL finger events, as a touch screen sends them) ->
+        // Options -> back -> main.
+        steps_ = boot;
+        steps_.push_back({"main_menu_fs", {"set:enhanced:touch=on", "tap:menu:main_menu_options_text"}, 10000});
+        steps_.push_back({"options_select_option_fs", {B}, 20000});
         steps_.push_back({"main_menu_fs", {}, 20000});
     } else if (name == "gamepads") {
         // The keyboard's yellow fret (3) on the main menu -> GAMEPADS -> the
@@ -529,6 +538,19 @@ bool Walk::act(const std::string& what, FrontEnd& fe, WalkHost& host) {
         if (button) host.walkMouse(x, y, 1);
         return true;
     }
+    if (starts("tap:menu:")) {  // a finger down and up on an element (window-normalised, the walk's 1280 x 720 window)
+        float x0, y0, x1, y1;
+        if (!fe.ui().drawnBounds(qbkey::key(what.substr(9).c_str()), x0, y0, x1, y1)) return fail("the finger: " + what + " is not on the screen");
+        const float nx = (x0 + x1) * 0.5f / 1280.0f, ny = (y0 + y1) * 0.5f / 720.0f;
+        for (SDL_EventType t : {SDL_EVENT_FINGER_DOWN, SDL_EVENT_FINGER_UP}) {
+            SDL_Event e{};
+            e.type = t;
+            e.tfinger.touchID = 1, e.tfinger.fingerID = 7;
+            e.tfinger.x = nx, e.tfinger.y = ny, e.tfinger.pressure = t == SDL_EVENT_FINGER_DOWN ? 1.0f : 0.0f;
+            SDL_PushEvent(&e);
+        }
+        return true;
+    }
     if (what == "rclick") return host.walkMouse(640, 360, 3), true;
     if (starts("check:text:")) {  // check:text:<element id>!=<text>: the element's text is not that
         const std::string kv = rest("check:text:");
@@ -584,6 +606,14 @@ bool Walk::act(const std::string& what, FrontEnd& fe, WalkHost& host) {
         const size_t eq = kv.find('=');
         host.walkSetEnhanced(kv.substr(0, eq), kv.substr(eq + 1));
         return true;
+    }
+    if (starts("check:global:")) {  // check:global:<name>=<number>: a GH3 global's value
+        const std::string kv = rest("check:global:");
+        const size_t eq = kv.find('=');
+        const qb::Value* v = fe.vm().global(qbkey::key(kv.substr(0, eq).c_str()));
+        const float got = v ? v->number() : -1;
+        std::printf("  global: %s = %g\n", kv.substr(0, eq).c_str(), double(got));
+        return got == std::atof(kv.c_str() + eq + 1) ? true : fail("global " + kv);
     }
     if (what == "dialog:savedir") {  // GD04_DIALOG: the user-file dialogs answered with the walk's save folder
         SDL_setenv_unsafe("GD04_DIALOG", host.walkSaveDir().c_str(), 1);

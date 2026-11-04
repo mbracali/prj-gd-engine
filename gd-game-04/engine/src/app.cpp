@@ -39,6 +39,8 @@
 #include "platform/paths.h"
 #include "render/canvas.h"
 #include "render/venue_stage.h"
+#include <array>
+#include <initializer_list>
 #include "render/texture_cache.h"
 
 // The program's window and main loop. M0 (kickoff): the platform shell
@@ -67,7 +69,7 @@ public:
     Input& walkInput() override { return input_; }
     std::string walkSaveDir() override { return saveDir_; }
     std::string walkEnhanced(const std::string& key) override { return enhanced_.get(key); }
-    void walkSetEnhanced(const std::string& key, const std::string& value) override { enhanced_.set(key, value); }
+    void walkSetEnhanced(const std::string& key, const std::string& value) override { enhanced_.set(key, value), applyEnhanced(key); }
 
 private:
     bool loadData(const std::string& path);
@@ -97,6 +99,7 @@ private:
     void addVenueScriptCalls();
     // Drawn over every frame: the FPS counter (Enhanced > Show FPS Counter).
     void overlay();
+    void drawTouchButtons();
     bool windowToMenu(float wx, float wy, float& mx, float& my) const;
 
     Options options_;
@@ -331,6 +334,101 @@ void App::addVenueScriptCalls() {
         if (Particles* ps = particles(ms); ps && g) ps->destroyGroup(g->key);
         return true;
     });
+    // GetPakManCurrent / Name map = zones in a song: the zone the venue loaded
+    // (the port loads it natively, so the pak manager's may be unset); the
+    // Star Power stage FX switch on it [C scripts Do_StarPower_TeslaFX, GH_SFX_Intro_WarmUp].
+    for (const char* nm : {"GetPakManCurrent", "GetPakManCurrentName"}) {
+        qs::Native prev = vm.native(nm);
+        vm.addNative(nm, [venueSong, prev](Vm& v, ScriptRun& run, qb::Struct& p) {
+            double ms = 0;
+            const qb::Value* map = Vm::param(p, qbkey::key("map"));
+            SongScreen* s = venueSong(ms);
+            if (map && map->key == qbkey::key("zones") && s && s->venue()) {
+                const std::string& zone = s->venue()->venue().zone;
+                if (!run.frames.empty() && run.frames.back().locals) {
+                    Vm::set(*run.frames.back().locals, qbkey::key("pak"), Vm::makeKey(qbkey::key(zone)));
+                    Vm::set(*run.frames.back().locals, qbkey::key("pakname"), Vm::makeString(zone));
+                }
+                return true;
+            }
+            return prev ? prev(v, run, p) : false;
+        });
+    }
+    // GetNode <id> -> node (the venue node's struct: pos, name); the Tesla
+    // Star Power aims at the zone's TeslaNodes [C script Create_StarPower_TeslaFX].
+    vm.addNative("GetNode", [venueSong](Vm&, ScriptRun& run, qb::Struct& p) {
+        double ms = 0;
+        SongScreen* s = venueSong(ms);
+        const qb::Value* id = Vm::positional(p);
+        if (!s || !s->venue() || !id) return false;
+        const venue::Node* n = s->venue()->venue().node(id->key);
+        if (!n) return false;
+        qb::Struct node;
+        qb::Value pos;
+        pos.type = qb::Type::Vector;
+        pos.f[0] = n->pos[0], pos.f[1] = n->pos[1], pos.f[2] = n->pos[2];
+        Vm::set(node, qbkey::key("pos"), pos);
+        Vm::set(node, qbkey::key("name"), Vm::makeKey(n->name));
+        if (!run.frames.empty() && run.frames.back().locals) {
+            qb::Value nv;
+            nv.type = qb::Type::Struct;
+            nv.st = std::make_shared<qb::Struct>(std::move(node));
+            Vm::set(*run.frames.back().locals, qbkey::key("node"), nv);
+        }
+        return true;
+    });
+    // CreateTeslaEffectObject / SetTeslaEffectObject name start end width; DeleteTeslaEffectObject name.
+    auto tesla = [particles](Vm&, ScriptRun&, qb::Struct& p) {
+        double ms = 0;
+        Particles* ps = particles(ms);
+        const qb::Value* nm = Vm::param(p, qbkey::key("name"));
+        if (!ps || !nm) return true;
+        Particles::Tesla& t = ps->teslas[nm->key];
+        if (const qb::Value* a = Vm::param(p, qbkey::key("start")); a && a->type == qb::Type::Vector) t.start = {a->f[0], a->f[1], a->f[2]};
+        if (const qb::Value* b = Vm::param(p, qbkey::key("end")); b && b->type == qb::Type::Vector) t.end = {b->f[0], b->f[1], b->f[2]};
+        t.width = Vm::number(Vm::param(p, qbkey::key("width")), t.width);
+        return true;
+    };
+    vm.addNative("CreateTeslaEffectObject", tesla);
+    vm.addNative("SetTeslaEffectObject", tesla);
+    vm.addNative("DeleteTeslaEffectObject", [particles](Vm&, ScriptRun&, qb::Struct& p) {
+        double ms = 0;
+        Particles* ps = particles(ms);
+        const qb::Value* nm = Vm::param(p, qbkey::key("name"));
+        if (!nm) nm = Vm::positional(p);
+        if (ps && nm) ps->teslas.erase(nm->key);
+        return true;
+    });
+    // EngineWind Create = {...} / modify = {name pos} / remove = {name} (the Star Power FX swirl) [C scripts].
+    vm.addNative("EngineWind", [particles](Vm&, ScriptRun&, qb::Struct& p) {
+        double ms = 0;
+        Particles* ps = particles(ms);
+        if (!ps) return true;
+        auto vec = [](const qb::Value* v, venue::Vec3 d) {
+            if (v && v->type == qb::Type::Vector) d = {v->f[0], v->f[1], v->f[2]};
+            return d;
+        };
+        for (const char* op : {"Create", "modify", "remove"}) {
+            const qb::Value* a = Vm::param(p, qbkey::key(op));
+            if (!a || !a->st) continue;
+            const qb::Value* nm = a->st->find(qbkey::key("name"));
+            if (!nm) continue;
+            if (std::string(op) == "remove") {
+                ps->removeWind(nm->key);
+            } else if (std::string(op) == "Create") {
+                Particles::Wind w;
+                w.pos = vec(a->st->find(qbkey::key("pos")), {});
+                w.velocity = vec(a->st->find(qbkey::key("velocity")), {});
+                w.speed = Vm::number(a->st->find(qbkey::key("Speed")), 0);
+                w.tangentWeight = Vm::number(a->st->find(qbkey::key("tangentweight")), 0);
+                w.range = Vm::number(a->st->find(qbkey::key("range")), 0);
+                ps->setWind(nm->key, w);
+            } else if (Particles::Wind* w = ps->wind(nm->key)) {
+                w->pos = vec(a->st->find(qbkey::key("pos")), w->pos);
+            }
+        }
+        return true;
+    });
     vm.addNative("IsCreated", [particles](Vm&, ScriptRun&, qb::Struct& p) {
         double ms = 0;
         const qb::Value* n = Vm::positional(p);
@@ -482,14 +580,87 @@ void App::applyEnhanced(const std::string& key) {
         }
     }
     if (is("particles")) VenueStage::particlesOn = enhanced_.get("particles") != "off";
+    {
+        // The picture: Enhanced's chain (render/enhanced_fx) and the world's resolution.
+        auto idx = [&](const char* k, std::initializer_list<const char*> vals) {
+            int i = 0;
+            for (const char* v : vals) {
+                if (enhanced_.get(k) == v) return i;
+                ++i;
+            }
+            return 0;
+        };
+        gfx::PostSettings& ps = VenueStage::post;
+        ps.aa = gfx::PostSettings::AA(idx("antialiasing", {"none", "fxaa", "ssaa", "taa"}));
+        ps.fsr1 = enhanced_.get("ai_upscaling") == "fsr1";
+        ps.fsrScale = 1.0f / std::array<float, 3>{1.5f, 1.7f, 2.0f}[size_t(idx("ai_upscaling_mode", {"quality", "balanced", "performance"}))];
+        ps.bloom = idx("bloom", {"off", "low", "medium", "high"});
+        ps.cinematic = enhanced_.on("cinematic_color");
+        ps.grade = idx("color_grade", {"off", "warm", "cold", "vintage", "noir", "neon"});
+        ps.grain = std::array<int, 3>{0, 1, 3}[size_t(idx("film_grain", {"off", "light", "strong"}))];
+        ps.chromatic = enhanced_.on("chromatic") ? 2 : 0;
+        ps.streaks = enhanced_.on("light_streaks");
+        Player::forgivingHopos = enhanced_.get("hopo_mode") == "forgiving";
+        VenueStage::extras.shadowsAll = enhanced_.on("shadows_all");
+        VenueStage::extras.moreLights = idx("more_lights", {"off", "subtle", "strong"});
+        VenueStage::extras.lightDust = enhanced_.on("light_dust") ? 2 : 0;
+        VenueStage::extras.groundFog = idx("ground_fog", {"none", "low", "full", "super"});
+        TextureCache::sharp = enhanced_.on("sharp_ui");
+        venue::CameraDirector::noShake = enhanced_.on("no_shaky_cam");
+        qs::Vm::cutContent = enhanced_.on("cut_content");  // from the next start (the textures load at boot)
+        ps.ssao = enhanced_.on("ssao") ? 2 : 0;
+        ps.sharpen = idx("sharpening", {"off", "low", "high"});
+        ps.starBlur = idx("star_blur", {"none", "light", "medium", "high"});
+        ps.bokeh = std::array<int, 3>{0, 2, 4}[size_t(idx("bokeh", {"none", "regular", "stronger"}))];
+        VenueStage::internalHeight = std::atoi(enhanced_.get("internal_res").c_str());
+    }
     if (is("shake_whammy")) input_.setShakeWhammy(enhanced_.on("shake_whammy"));
     if (is("rockband")) input_.setRockBand(enhanced_.on("rockband"));
     if (is("xinput")) input_.setGamepadPlay(enhanced_.on("xinput"));
-    if (is("touch")) input_.setTouch(false);  // touch controls are not built yet (greyed in Enhanced)
+    if (is("touch")) input_.setTouch(enhanced_.on("touch"));
     if (is("mouse")) mouseMovedMs_ = -1e9;
 }
 
+// The on-screen touch buttons (Input::touchButtons, menu units): a
+// translucent disc with an arrow, or START / II (gd02's look).
+void App::drawTouchButtons() {
+    const std::vector<Input::TouchButton> buttons = input_.touchButtons();
+    if (buttons.empty()) return;
+    canvas_.flush();
+    std::vector<Vertex> v;
+    auto tri = [&](float ax, float ay, float bx, float by, float cx, float cy, SDL_Color c) {
+        for (auto [x, y] : {std::pair{ax, ay}, std::pair{bx, by}, std::pair{cx, cy}}) v.push_back({x, y, 0, 0, 0, c.r, c.g, c.b, c.a});
+    };
+    for (const Input::TouchButton& b : buttons) {
+        constexpr int kSeg = 32;
+        for (int i = 0; i < kSeg; ++i) {
+            const float a0 = float(i) / kSeg * 6.2831853f, a1 = float(i + 1) / kSeg * 6.2831853f;
+            tri(b.x, b.y, b.x + b.r * std::cos(a0), b.y + b.r * std::sin(a0), b.x + b.r * std::cos(a1), b.y + b.r * std::sin(a1), {0, 0, 0, 110});
+        }
+        const SDL_Color w{255, 255, 255, 200};
+        const float k = b.r * 0.45f;
+        if (b.action == Action::Up) tri(b.x - k, b.y + k * 0.5f, b.x + k, b.y + k * 0.5f, b.x, b.y - k * 0.7f, w);
+        else if (b.action == Action::Down) tri(b.x - k, b.y - k * 0.5f, b.x + k, b.y - k * 0.5f, b.x, b.y + k * 0.7f, w);
+    }
+    if (!v.empty()) canvas_.draw(v.data(), v.size(), 0, Blend::Alpha);
+    for (const Input::TouchButton& b : buttons)
+        if (b.action == Action::Start) canvas_.textCentered(b.x, b.y - 4, 1, {255, 255, 255, 220}, b.y < 100 ? "II" : "START");
+}
+
 void App::overlay() {
+    // Touch: the lanes of this frame's highways for the fingers, menu taps as clicks, the buttons.
+    if (input_.touch()) {
+        for (int p = 0; p < 2; ++p) {
+            Input::TouchLanes l;
+            if (song_ && (p == 0 || song_->twoPlayers())) {
+                song_->highwayOf(p).touchLanes(l.nearX, l.nearY, l.farX, l.farY);
+                l.active = true;
+            }
+            input_.setTouchLanes(p, l);
+        }
+        for (auto [tx, ty] : input_.takeMenuTaps()) menuMouse(tx, ty, 1);
+        drawTouchButtons();
+    }
     const uint64_t now = SDL_GetTicksNS();
     ++fpsFrames_;
     if (!fpsStart_) fpsStart_ = now;
@@ -768,6 +939,15 @@ void App::frame() {
                 if (setup.mode == GameMode::Boss) song_->walkEndMs_ = -1;
             }
             front_->songPlaying = true;
+            // GD04_SP_CHARACTER=<id> (AXEL, JUDY, ...): player 1's character_id for
+            // the Star Power stage FX (development aid: Do_StarPower_StageFX's switch).
+            if (const char* ch = SDL_getenv("GD04_SP_CHARACTER"))
+                if (const qb::Value* ps = front_->vm().global(qbkey::key("player1_status")); ps && ps->st) {
+                    qb::Value copy = *ps;
+                    copy.st = std::make_shared<qb::Struct>(*ps->st);
+                    qs::Vm::set(*copy.st, qbkey::key("character_id"), qs::Vm::makeKey(qbkey::key(ch)));
+                    front_->vm().setGlobal(qbkey::key("player1_status"), copy);
+                }
             input_.setInGame(true);
             if (hooks_) {
                 SongHooks* h = hooks_.get();
@@ -860,6 +1040,12 @@ int App::run() {
     flags |= SDL_WINDOW_FULLSCREEN;
 #endif
     window_ = SDL_CreateWindow(app::kWindowTitle, int(kScreenW), int(kScreenH), flags);
+    // Touch: window-normalised positions to menu units (windowToMenu, the 16:9 picture).
+    input_.setTouchToMenu([this](float nx, float ny, float& mx, float& my) {
+        int ww = 0, wh = 0;
+        SDL_GetWindowSize(window_, &ww, &wh);
+        windowToMenu(nx * float(ww), ny * float(wh), mx, my);
+    });
     setAppWindowIcon(window_);
     installDesktopEntry();
     std::string error;
@@ -897,6 +1083,7 @@ int App::run() {
         textures_ = std::make_unique<TextureCache>(canvas_.renderer().device());
         const uint64_t t0 = SDL_GetTicksNS();
         const int n = textures_->loadPak(*disc_, "DATA/COMPRESSED/ZONES/global.pak.xen");
+        if (textures_->sharpened) SDL_Log("textures: %d sharpened (Sharper Text & Sprites)", textures_->sharpened);
         const int a = textures_->loadPak(*disc_, "DATA/COMPRESSED/PAK/axel_1.pak.xen");  // the default guitarist [I]
         SDL_Log("textures: %d from global.pak, %d from axel_1.pak (%.0f ms)", n, a, double(SDL_GetTicksNS() - t0) / 1e6);
     }

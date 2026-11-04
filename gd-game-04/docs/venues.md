@@ -533,11 +533,14 @@ own quad builders (VMX128 code not decoded), lit quick materials.
 
 ### Not done yet
 
-The characters receiving shadows, the effect passes' own render and
-sampler states (gd04 uses the scene material's, which 823DC180 applies
-over them), the `volume` light type and projectors, the ReducedLOD
-technique [I: the venues fit inside lod_dist1, 150 m], two-player arrays, walks (Band_WalkToNode, so no
-cameras_walk).
+The effect passes' own render and sampler states (gd04 uses the scene
+material's, which 823DC180 applies over them), the ReducedLOD technique
+[I: the venues fit inside lod_dist1, 150 m]. Approximated (0.1.12): the
+`volume` / `normal` housings draw as the ConeImpostor beam (GH3 ray-marches
+them over the depth buffer), the stageonly projectors as a pool of their
+colour where the beam meets the stage. The band receives the dynamic
+shadow (DynamicShadowReciever). Band_WalkToNode has no caller on the disc
+(no walks, no cameras_walk in GH3 either).
 
 Transitions (0.1.12): the song starts with current_transition, chosen by
 Transition_SelectTransition (quickplay and career: intro, 8 s; an encore

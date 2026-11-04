@@ -6,6 +6,9 @@ All notable changes for players. Versions follow SemVer; release tags are
 ## [Unreleased]
 
 ### Added
+- Every Enhanced Option that can work now does: the picture effects (bloom, anti-aliasing, FSR 1, internal resolution, colour, grain, AO, sharpening, Star Power blur, light streaks, bokeh), sharper text, the venue extras and ground fog, no shaky camera, the cheat rows, forgiving HOPOs, touch controls and cut content (GD04-054).
+- Star Power's stage effects now play for every character, including the Tesla lightning from the guitar; the hearts / bats swirl (GD04-055).
+- The `volume` light beams and the stage projectors are drawn (approximated, GD04-056).
 - The band receives the stage lights' shadows (GD04-053).
 - The band takes its intro poses during the venue intro, as GH3's play_intro_anims (GD04-049).
 - Star Power effects on the band (hearts, flames, peace signs, bats...) and the 4x finger sparks (GD04-050).

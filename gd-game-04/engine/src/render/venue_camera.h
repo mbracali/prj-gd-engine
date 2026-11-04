@@ -51,6 +51,8 @@ struct CamPose {
 
 class CameraDirector {
 public:
+    // Enhanced > Disable Shaky Camera: the hand-held cameras' sway off (set by the app).
+    static inline bool noShake = false;
     // `leadInMs`: the time before song time 0 the transition starts (the
     // intro transition's length: fastintro 3000 ms).
     void init(const Venue& v, const Globals& g, const Chart& chart, uint32_t seed, double leadInMs);

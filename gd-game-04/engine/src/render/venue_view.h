@@ -62,6 +62,8 @@ public:
     // GH3's shaders read them (also the band's, render/band_view.cpp).
     // `flipY`: upside down, for a render target sampled as a texture
     // (Direct3D's v runs down, OpenGL's target rows up).
+    // Enhanced TAA: this frame's projection jitter in NDC (VenueStage sets it; 0 otherwise).
+    static inline float jitterX = 0, jitterY = 0;
     static void cameraGlobals(const venue::CamPose& cam, bool clipZeroToOne, double seconds, gh3shader::Globals& g,
                               gfx::Mat4* viewProj = nullptr, float aspect = 16.0f / 9.0f, bool flipY = false,
                               gfx::Mat4* viewOut = nullptr);

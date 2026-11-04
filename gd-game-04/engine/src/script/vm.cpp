@@ -628,6 +628,11 @@ Vm::Vm(Globals& globals) : g_(globals) {
     uiLog_ = v && *v && *v != '0';
 }
 
+Native Vm::native(const std::string& name) const {
+    auto it = natives_.find(qbkey::key(name));
+    return it == natives_.end() ? Native{} : it->second;
+}
+
 void Vm::addNative(const std::string& name, Native fn) { natives_[qbkey::key(name)] = std::move(fn); }
 
 void Vm::logOnce(const std::string& what) {
