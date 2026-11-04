@@ -261,7 +261,11 @@ Walk::Walk(const std::string& name) : name_(name) {
                           10000});
         steps_.push_back({"options_select_option_fs", {"click:item"}, 20000});
         steps_.push_back({"port_enhanced",
-                          {"hover:row:max_fps", "click:row:max_fps", "click:option:1", "check:enhanced:max_fps=120", "rclick"}, 10000});
+                          {"hover:row:max_fps", "click:row:max_fps", "click:option:1", "check:enhanced:max_fps=120",
+                           // Export User Files, a setting changed, Load User Settings brings it back (the dialogs answered with the save folder).
+                           "dialog:savedir", "click:row:export", "set:enhanced:max_fps=60", "click:row:load_settings", "check:enhanced:max_fps=120", "click:row:load_progress", "set:enhanced:audio_offset=40", "set:enhanced:video_offset=-20", "click:row:calibrate_reset", "check:enhanced:audio_offset=0", "check:enhanced:video_offset=0",
+                           "rclick"},
+                          10000});
         steps_.push_back({"options_select_option_fs", {"click:help:BACK"}, 10000});
         steps_.push_back({"main_menu_fs", {}, 20000});
     } else if (name == "gamepads") {
@@ -579,6 +583,10 @@ bool Walk::act(const std::string& what, FrontEnd& fe, WalkHost& host) {
         const std::string kv = rest("set:enhanced:");
         const size_t eq = kv.find('=');
         host.walkSetEnhanced(kv.substr(0, eq), kv.substr(eq + 1));
+        return true;
+    }
+    if (what == "dialog:savedir") {  // GD04_DIALOG: the user-file dialogs answered with the walk's save folder
+        SDL_setenv_unsafe("GD04_DIALOG", host.walkSaveDir().c_str(), 1);
         return true;
     }
     if (starts("check:enhanced:")) {

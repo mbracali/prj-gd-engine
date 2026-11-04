@@ -6,6 +6,10 @@ All notable changes for players. Versions follow SemVer; release tags are
 ## [Unreleased]
 
 ### Added
+- The band takes its intro poses during the venue intro, as GH3's play_intro_anims (GD04-049).
+- Star Power effects on the band (hearts, flames, peace signs, bats...) and the 4x finger sparks (GD04-050).
+- Enhanced Options: Export User Files, Load User Settings, Load User Progress (GD04-051).
+- Enhanced Options: Audio / Video Calibration, Reset Calibration and Enable Particles FX (GD04-052).
 - In-Game Max FPS: 144 (#57).
 - Songs open with GH3's own intro: the full 8-second venue intro with its cameras (the port used the 3-second fast one), the encore's and the boss's own intros, and the pre-encore / pre-boss endings.
 - Lou's finish and defeat scenes play with their animations and cameras.

@@ -46,6 +46,9 @@ struct SongSetup {
     std::array<bool, 2> lefty{false, false};
     // user_options.lag_calibration (ms): input_offset = the song's - this [C script gem_scroller].
     double lagMs = 0;
+    // Enhanced > Audio / Video Calibration: the video delay draws the highway
+    // this far ahead (the audio delay is added to lagMs by the app).
+    double videoOffsetMs = 0;
     bool endCredits = false;  // end_credits = 1 (the credits song) [C script start_gem_scroller]
     // current_transition's key (0: fastintro): the intro's length (its
     // Default_<t>_Transition time) and cameras (Common_<t>_Transition's
@@ -137,7 +140,8 @@ private:
     // The SongWon / SongLost transition's length (Default_SongWon_Transition
     // time 8000 [C data]); the outro started (the venue told).
     double transitionMs_ = 8000;
-    bool holdClock_ = false;  // the mixer paused until the venue is up (frame)
+    bool holdClock_ = false;
+    double videoOffsetMs_ = 0;  // the mixer paused until the venue is up (frame)
     double leadInMs_ = 3000;  // the intro transition's time before the music
     std::string introCameras_ = "cameras_fastintro";
     bool introFast_ = true;

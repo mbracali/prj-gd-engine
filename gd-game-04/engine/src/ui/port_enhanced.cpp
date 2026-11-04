@@ -111,9 +111,11 @@ std::vector<Item> buildItems(qs::Vm& vm) {
          "the note and the strum at once. Off, gamepads only work the menus."},
         {Kind::Separator, "", "", true, ""},
         {Kind::Section, "graphics", "PERFORMANCE & GRAPHICS", true, "Timing, window, frame rate and image quality."},
-        {Kind::Button, "calibrate", "Audio / Video Calibration", false,
+        {Kind::Button, "calibrate", "Audio / Video Calibration", true,
          "Measures your setup's delay so notes are judged and drawn in time: strum on each tick you hear, then on each "
          "flash you see."},
+        {Kind::Button, "calibrate_reset", "Reset Calibration", true,
+         "Removes the calibration: the audio and video delays go back to 0 ms, as before calibrating."},
         {Kind::Choice, "screen_mode", "Screen Mode", true,
          "Windowed; full screen at the desktop's resolution; or full screen without a border (a window covering the "
          "screen, the quickest to switch away from).",
@@ -141,7 +143,7 @@ std::vector<Item> buildItems(qs::Vm& vm) {
         {Kind::Choice, "bokeh", "Bokeh Effect", false,
          "The depth-of-field blur of the close shots. None: always sharp. Regular: as the original game. Stronger: a wider blur.",
          {{"none", "None"}, {"regular", "Regular"}, {"stronger", "Stronger"}}},
-        {Kind::Check, "particles", "Enable Particles FX", false, "Sparks, smoke, fire and the highway's hit effects."},
+        {Kind::Check, "particles", "Enable Particles FX", true, "Sparks, smoke and fire on the stage and the band's Star Power effects (from the next song)."},
         {Kind::Choice, "bloom", "Bloom", false, "A soft glow around the brightest lights of the venue, over the original game's own.",
          {{"off", "Off"}, {"low", "Low"}, {"medium", "Medium"}, {"high", "High"}}},
         {Kind::Check, "cinematic_color", "Cinematic Color", false, "A filmic colour curve with a gentle grade and vignette on the venue."},
@@ -171,10 +173,10 @@ std::vector<Item> buildItems(qs::Vm& vm) {
         {Kind::Check, "no_shaky_cam", "Disable Shaky Camera", false,
          "Steady shots instead of a handheld camera shake. Not available: GH3's cameras do not shake (its only camera "
          "shake, the boss battles' BossBattle_CameraShake, is an empty script on this disc)."},
-        {Kind::Button, "export", "Export User Files", false,
+        {Kind::Button, "export", "Export User Files", true,
          "Choose a folder to save your Enhanced Options and your progress in, as a backup or to move to another computer."},
-        {Kind::Button, "load_settings", "Load User Settings", false, "Choose a user settings file to load."},
-        {Kind::Button, "load_progress", "Load User Progress", false, "Choose a user progress file to load."},
+        {Kind::Button, "load_settings", "Load User Settings", true, "Choose a user settings file to load."},
+        {Kind::Button, "load_progress", "Load User Progress", true, "Choose a user progress file to load."},
         {Kind::Separator, "", "", true, ""},
         {Kind::Section, "cheats", "CHEATS", true, "The original game's cheats and more ways to bend the rules."},
         {Kind::Check, "cut_content", "Enable Cut Content", false, "Loads content left unused on the original disc into the game."},
@@ -216,6 +218,7 @@ public:
     }
 
     bool button(PortButton b) override {
+        if (cal_.phase) return calibButton(b), true;
         if (rows_.empty()) return false;
         const Item& it = item(focus_);
         if (dropdown_ >= 0) {  // the open dropdown takes the input
@@ -258,6 +261,10 @@ public:
     }
 
     bool mouse(float x, float y, bool click) override {
+        if (cal_.phase) {  // the calibration takes the mouse: a click is a press
+            if (click) calibButton(PortButton::Select);
+            return true;
+        }
         if (rows_.empty()) return false;
         // The open dropdown: its options, or a click anywhere else closes it.
         if (dropdown_ >= 0) {
@@ -291,6 +298,12 @@ public:
         scroll_ += (scrollTarget_ - scroll_) * k;
         if (std::fabs(scrollTarget_ - scroll_) < 0.3f) scroll_ = scrollTarget_;
         statusMs_ = std::max(0.0f, statusMs_ - float(dtMs));
+        calibPoll();
+        if (!ctx_.status.empty()) {  // Export / Load User Files' outcome (App)
+            status_ = ctx_.status, statusMs_ = 5000;
+            ctx_.status.clear();
+            rebuild();  // loaded settings change the rows
+        }
     }
 
     void draw(PortDraw& d) override {
@@ -298,14 +311,22 @@ public:
         d.quad(0, 0, kScreenW, kScreenH, {0, 0, 0, 1});  // a black page: no venue renderer yet (the guideline's fallback)
         drawAll();
         if (dropdown_ >= 0) drawDropdown();  // over everything
+        if (cal_.phase) drawCalib();
         d_ = nullptr;
     }
 
     // For walks: the centre of a setting's row, and of its open dropdown's option `k`.
-    bool rowCenter(const std::string& key, float& x, float& y) const {
+    // (Walks) the row's centre, the list scrolled to it first if it is off the list.
+    bool rowCenter(const std::string& key, float& x, float& y) {
         for (size_t r = 0; r < rows_.size(); ++r)
             if (item(int(r)).key == key) {
                 x = (kNameX + kCtrlX1) * 0.5f, y = rowY(int(r)) + rowHeight(item(int(r))) * 0.5f;
+                if (y <= kListTop || y >= kListBottom) {
+                    focus_ = int(r);
+                    keepVisible();
+                    scroll_ = scrollTarget_;
+                    y = rowY(int(r)) + rowHeight(item(int(r))) * 0.5f;
+                }
                 return y > kListTop && y < kListBottom;
             }
         return false;
@@ -436,6 +457,18 @@ private:
             if (!it.ready) return ctx_.sound("error");
             ctx_.sound("select");
             if (it.key == "gamepads") return ctx_.screens.open(PortScreens::Id::Gamepads);
+            if (it.key == "calibrate") return calibStart();
+            if (it.key == "calibrate_reset") {  // #47 (gd01-gd03's)
+                store("audio_offset", "0"), store("video_offset", "0");
+                status_ = "Calibration reset: audio 0 ms, video 0 ms", statusMs_ = 5000;
+                rebuild();
+                return;
+            }
+            if ((it.key == "export" || it.key == "load_settings" || it.key == "load_progress") && ctx_.action) {
+                ctx_.status.clear();
+                ctx_.action(it.key);
+                return;
+            }
             if (it.key == "steam_deck") {  // the handheld column, once; nothing is locked (gd01)
                 for (const auto& [k, v] : enhancedProfile(true)) store(k, v);
                 status_ = "Steam Deck settings applied", statusMs_ = 5000;
@@ -524,6 +557,7 @@ private:
     static const char* buttonLabel(const std::string& key) {
         if (key == "gamepads") return "Open...";
         if (key == "calibrate") return "Calibrate...";
+        if (key == "calibrate_reset") return "Reset";
         if (key == "export") return "Export...";
         if (key == "load_settings" || key == "load_progress") return "Load...";
         return "Apply";
@@ -586,6 +620,105 @@ private:
     int focus_ = 0, dropdown_ = -1, ddFocus_ = 0;
     bool entered_ = false;
     float scroll_ = 0, scrollTarget_ = 0, ddTop_ = 0;
+
+    // -- Audio / Video Calibration (gd02's; the original had none). A beat
+    // every 750 ms: the audio step plays a tick, the video step flashes a
+    // ring silently. After 3 lead-in beats, each press is matched to the
+    // nearest beat; the median of 8 is the step's offset. audio_offset is
+    // added to GH3's lag_calibration (the judging), video_offset draws the
+    // highway ahead (app.cpp, song_screen.cpp).
+    static constexpr uint64_t kBeatNs = 750000000ull;
+    static constexpr int kLeadIn = 3, kSamples = 8;
+    struct Calib {
+        int phase = 0;  // 0 off, 1 audio, 2 video, 3 done
+        uint64_t nextTick = 0, flashNs = 0;
+        std::vector<uint64_t> ticks;
+        std::vector<float> samples;
+        float audio = 0, video = 0;
+    };
+    Calib cal_;
+    void calibStart() {
+        cal_ = Calib{};
+        cal_.phase = 1;
+        cal_.nextTick = SDL_GetTicksNS() + 1000000000ull;
+    }
+    void calibPoll() {
+        if (cal_.phase != 1 && cal_.phase != 2) return;
+        const uint64_t now = SDL_GetTicksNS();
+        if (now < cal_.nextTick) return;
+        if (cal_.phase == 1) ctx_.sound("toggle");
+        else cal_.flashNs = now;
+        cal_.ticks.push_back(now);
+        cal_.nextTick += kBeatNs;
+        if (cal_.nextTick < now) cal_.nextTick = now + kBeatNs;  // a stall: no burst of ticks
+    }
+    void calibButton(PortButton b) {
+        if (b == PortButton::Back) {  // cancel (or close the result)
+            cal_.phase = 0;
+            ctx_.sound("back");
+            return;
+        }
+        if (cal_.phase == 3) {
+            if (b == PortButton::Select) cal_.phase = 0, ctx_.sound("select"), rebuild();
+            return;
+        }
+        if (b != PortButton::Select && b != PortButton::Up && b != PortButton::Down) return;  // green, Enter or the strum bar
+        if (int(cal_.ticks.size()) < kLeadIn) return;
+        const uint64_t now = SDL_GetTicksNS();
+        float best = 1e9f;
+        for (uint64_t t : cal_.ticks)
+            if (std::fabs(float(int64_t(now - t)) / 1e6f) < std::fabs(best)) best = float(int64_t(now - t)) / 1e6f;
+        if (const float dn = float(int64_t(now - cal_.nextTick)) / 1e6f; std::fabs(dn) < std::fabs(best)) best = dn;  // early for the next
+        if (std::fabs(best) > float(kBeatNs) / 1e6f * 0.45f) return;
+        cal_.samples.push_back(best);
+        if (int(cal_.samples.size()) < kSamples) return;
+        std::vector<float> v = cal_.samples;
+        std::nth_element(v.begin(), v.begin() + long(v.size() / 2), v.end());
+        const float median = std::clamp(v[v.size() / 2], -300.0f, 500.0f);
+        if (cal_.phase == 1) {
+            cal_.audio = median;
+            cal_.phase = 2;
+            cal_.ticks.clear(), cal_.samples.clear();
+            cal_.nextTick = now + 1500000000ull;
+        } else {
+            cal_.video = median;
+            cal_.phase = 3;
+            store("audio_offset", std::to_string(std::lround(cal_.audio)));
+            store("video_offset", std::to_string(std::lround(cal_.video)));
+        }
+    }
+    static std::string signedMs(long ms) { return (ms > 0 ? "+" : "") + std::to_string(ms) + " ms"; }
+    void drawCalib() {
+        PortDraw& d = *d_;
+        const float o = d.offset(), cx = kScreenW * 0.5f + o, cy = 360;
+        d.quad(o, 0, kScreenW + o, kScreenH, {0, 0, 0, 0.88f});
+        d.text("CALIBRATION", cx, 110, 56, kTitle, 0x22, true);
+        if (cal_.phase == 3) {
+            d.text("Audio " + signedMs(std::lround(cal_.audio)) + "   Video " + signedMs(std::lround(cal_.video)), cx, cy, 34, PortDraw::kOn, 0x22);
+            d.text("Saved. Press green to close.", cx, cy + 60, 22, kNormal, 0x22);
+            return;
+        }
+        const bool audio = cal_.phase == 1;
+        d.text(audio ? "Step 1 of 2: AUDIO" : "Step 2 of 2: VIDEO", cx, 200, 30, kAccent, 0x22);
+        d.text(audio ? "Strum or press green on each tick you HEAR" : "Strum or press green on each flash you SEE", cx, 245, 24, kNormal, 0x22);
+        if (!audio) {  // the ring, lit for 120 ms on each beat
+            const float lit = cal_.flashNs ? std::max(0.0f, 1 - float(SDL_GetTicksNS() - cal_.flashNs) / 120e6f) : 0;
+            for (int i = 0; i < 48; ++i) {
+                const float a0 = float(i) / 48 * 6.2831853f, a1 = float(i + 1) / 48 * 6.2831853f;
+                d.line(cx + 70 * std::cos(a0), cy + 70 * std::sin(a0), cx + 70 * std::cos(a1), cy + 70 * std::sin(a1), 6,
+                       {0.4f + 0.6f * lit, 0.4f + 0.46f * lit, 0.45f - 0.25f * lit, 1});
+                if (lit > 0)
+                    d.triangle(cx, cy, cx + 62 * std::cos(a0), cy + 62 * std::sin(a0), cx + 62 * std::cos(a1), cy + 62 * std::sin(a1),
+                               {1, 0.86f, 0.2f, lit});
+            }
+        }
+        for (int k = 0; k < kSamples; ++k) {  // one dot per press taken
+            const float x = cx + (float(k) - (kSamples - 1) * 0.5f) * 34;
+            d.quad(x - 9, cy + 130, x + 9, cy + 148, k < int(cal_.samples.size()) ? PortDraw::kOn : Color{0.3f, 0.3f, 0.34f, 1});
+        }
+        if (int(cal_.ticks.size()) < kLeadIn) d.text("Get ready...", cx, cy + 190, 22, kDim, 0x22);
+        d.text("Back cancels", cx, cy + 230, 18, kDim, 0x22);
+    }
 };
 
 }  // namespace

@@ -108,6 +108,8 @@ private:
     struct System {
         Params p;
         venue::Vec3 pos{};
+        uint32_t name = 0, group = 0;     // CreateParticleSystem's name / groupid (the song scripts')
+        uint32_t member = 0, bone = 0;    // ObjID / bone: follows that band member's bone
         double start = 0;
         uint64_t seed = 1;
         double end() const;
@@ -115,6 +117,21 @@ private:
     // A system; rate >= 0: a node's particleobject emitting `rate` a second
     // with no end and no burst (emitrate), else the params' own.
     void create(const venue::Vec3& pos, const qb::Value* params, double t, float rate = -1);
+public:
+    // The song scripts' CreateParticleSystem (the Star Power stage FX, the
+    // finger flames): `member` / `bone` non-zero, the system follows that
+    // band member's bone (bonePos) [C scripts; I: the emitter carries the
+    // particles already out with it]. Returns false without such params.
+    bool createScripted(uint32_t name, uint32_t group, const qb::Value* params, const venue::Vec3& pos, uint32_t member, uint32_t bone, double t);
+    // DestroyParticlesByGroupID / a name's system: gone at once.
+    void destroyNamed(uint32_t name);
+    // <name> : emitrate rate = 0 (no new particles; the ones out live on).
+    void stopEmitting(uint32_t name, double t);
+    bool hasNamed(uint32_t name) const;
+    void destroyGroup(uint32_t group);
+    std::function<bool(uint32_t member, uint32_t bone, venue::Vec3& out)> bonePos;
+    uint64_t scriptedCreated = 0;
+private:
     // The particleobject nodes (z_party's GFX fires / smoke / sparks): the
     // system emitting now (index into systems_ by id), its params, position.
     struct NodeEmitter {

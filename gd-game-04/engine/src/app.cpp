@@ -9,7 +9,10 @@
 #include <filesystem>
 #include <exception>
 #include <cstdio>
+#include <fstream>
+#include <iterator>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -23,6 +26,7 @@
 #include "ui/front_end.h"
 #include "ui/port_screens.h"
 #include "ui/port_settings.h"
+#include "data/json.h"
 #include "game/save.h"
 #include "ui/song_hooks.h"
 #include "ui/song_screen.h"
@@ -34,6 +38,7 @@
 #include "platform/disc_picker.h"
 #include "platform/paths.h"
 #include "render/canvas.h"
+#include "render/venue_stage.h"
 #include "render/texture_cache.h"
 
 // The program's window and main loop. M0 (kickoff): the platform shell
@@ -80,6 +85,15 @@ private:
     void updatePointer();
     // An Enhanced setting changed ("" : all of them, at start): applied at once.
     void applyEnhanced(const std::string& key);
+    // Enhanced > Export / Load User Files (gd02's App::enhancedAction): the
+    // system dialog, answered on its own thread; pollUserFiles acts on it.
+    void userFileAction(const std::string& action);
+    void pollUserFiles();
+    std::string exportUserFiles(const std::string& dir);
+    bool importSettings(const std::string& file);
+    bool importProgress(const std::string& file);
+    std::mutex dialogMutex_;
+    std::vector<std::pair<std::string, std::string>> dialogResults_;
     void addVenueScriptCalls();
     // Drawn over every frame: the FPS counter (Enhanced > Show FPS Counter).
     void overlay();
@@ -252,8 +266,77 @@ void App::addVenueScriptCalls() {
                 return true;
             }
         }
+        // <member> : obj_getboneposition bone = b -> x y z (Do_StarPower_*FX) [C scripts].
+        const bool band = member || obj == qbkey::key("Drummer") || obj == qbkey::key("vocalist");
+        if (band && method == qbkey::key("obj_getboneposition")) {
+            handled = true;
+            double ms = 0;
+            venue::Vec3 pos{};
+            SongScreen* s = venueSong(ms);
+            const qb::Value* bone = Vm::param(p, qbkey::key("bone"));
+            if (!s || !s->venue() || !bone || !s->venue()->bonePos(obj, bone->key, pos)) return false;
+            if (!run.frames.empty() && run.frames.back().locals)
+                for (int k = 0; k < 3; ++k) Vm::set(*run.frames.back().locals, qbkey::key(k == 0 ? "x" : k == 1 ? "y" : "z"), Vm::makeFloat(pos[size_t(k)]));
+            return true;
+        }
+        // A scripted particle system by its (mangled) name: <id> : emitrate rate = 0,
+        // <id> : destroy ifempty (Kill_StarPower_StageFX, kill_4x_fx) [C scripts].
+        if (method == qbkey::key("emitrate") || method == qbkey::key("destroy")) {
+            double ms = 0;
+            SongScreen* s = venueSong(ms);
+            Particles* ps = s && s->venue() ? s->venue()->particles() : nullptr;
+            if (ps && ps->hasNamed(obj)) {
+                handled = true;
+                if (method == qbkey::key("emitrate")) {
+                    if (Vm::number(Vm::param(p, qbkey::key("rate")), 0) <= 0) ps->stopEmitting(obj, ms);
+                } else if (Vm::number(Vm::param(p, qbkey::key("ifempty")), 0) == 0) {
+                    ps->destroyNamed(obj);
+                } else {
+                    ps->stopEmitting(obj, ms);  // gone when its particles are
+                }
+                return true;
+            }
+        }
         return next ? next(v, run, obj, method, p, handled) : false;
     };
+    // The song scripts' particle systems (the Star Power stage FX, the 4x
+    // finger flames) on the venue's particles; ObjID + bone follow that band
+    // member's bone; named systems are kept under MangleChecksums(name, ObjID)
+    // as the kill scripts look them up (script/natives_misc.cpp's mangle) [C scripts].
+    auto particles = [venueSong](double& ms) -> Particles* {
+        SongScreen* s = venueSong(ms);
+        return s && s->venue() ? s->venue()->particles() : nullptr;
+    };
+    auto create = [particles](Vm&, ScriptRun&, qb::Struct& p) {
+        double ms = 0;
+        Particles* ps = particles(ms);
+        if (!ps) return true;
+        auto key = [&](const char* n) {
+            const qb::Value* v = Vm::param(p, qbkey::key(n));
+            return v ? v->key : 0u;
+        };
+        const uint32_t name = key("name"), obj = key("ObjID");
+        const uint32_t id = obj ? name ^ (obj * 0x9E3779B1u + 0x7F4A7C15u) : name;
+        venue::Vec3 pos{};
+        if (const qb::Value* pv = Vm::param(p, qbkey::key("pos")); pv && pv->type == qb::Type::Vector)
+            for (size_t k = 0; k < 3; ++k) pos[k] = pv->f[k];
+        ps->createScripted(id, key("groupid"), Vm::param(p, qbkey::key("params_script")), pos, obj, obj ? key("bone") : 0, ms);
+        return true;
+    };
+    vm.addNative("CreateParticleSystem", create);
+    vm.addNative("CreateParticleSystem_fast", create);
+    vm.addNative("DestroyParticlesByGroupID", [particles](Vm&, ScriptRun&, qb::Struct& p) {
+        double ms = 0;
+        const qb::Value* g = Vm::param(p, qbkey::key("groupid"));
+        if (Particles* ps = particles(ms); ps && g) ps->destroyGroup(g->key);
+        return true;
+    });
+    vm.addNative("IsCreated", [particles](Vm&, ScriptRun&, qb::Struct& p) {
+        double ms = 0;
+        const qb::Value* n = Vm::positional(p);
+        Particles* ps = particles(ms);
+        return ps && n && ps->hasNamed(n->key);
+    });
     vm.addNative("CameraCuts_SetArrayPrefix", [venueSong](Vm&, ScriptRun&, qb::Struct& p) {
         const qb::Value* pre = Vm::param(p, qbkey::key("prefix"));
         double ms = 0;
@@ -263,6 +346,126 @@ void App::addVenueScriptCalls() {
         if (SongScreen* s = venueSong(ms)) s->outroCameras(ms, pre->str);
         return true;
     });
+}
+
+namespace {
+constexpr const char* kSettingsFile = "GD04-user-settings.json";
+constexpr const char* kProgressFile = "GD04-user-progress.json";
+struct DialogRequest {
+    std::mutex* mutex;
+    std::vector<std::pair<std::string, std::string>>* results;
+    std::string action;
+};
+void SDLCALL dialogDone(void* user, const char* const* files, int) {
+    std::unique_ptr<DialogRequest> req(static_cast<DialogRequest*>(user));
+    std::lock_guard<std::mutex> lock(*req->mutex);
+    req->results->push_back({req->action, files && files[0] ? std::string(files[0]) : std::string()});
+}
+}  // namespace
+
+void App::userFileAction(const std::string& action) {
+    // Development aid: GD04_DIALOG=<path> answers the dialog at once (walk
+    // tests); a folder answers the load dialogs with its exported file.
+    if (const char* forced = SDL_getenv("GD04_DIALOG")) {
+        std::string path = forced;
+        std::error_code ec;
+        if (action != "export" && std::filesystem::is_directory(path, ec))
+            path = (std::filesystem::path(path) / (action == "load_settings" ? kSettingsFile : kProgressFile)).string();
+        std::lock_guard<std::mutex> lock(dialogMutex_);
+        dialogResults_.push_back({action, path});
+        return;
+    }
+    auto* req = new DialogRequest{&dialogMutex_, &dialogResults_, action};
+    if (action == "export") {
+        SDL_ShowOpenFolderDialog(dialogDone, req, window_, nullptr, false);
+    } else {
+        static const SDL_DialogFileFilter kJson[] = {{"GD04 user files", "json"}};
+        SDL_ShowOpenFileDialog(dialogDone, req, window_, kJson, 1, nullptr, false);
+    }
+}
+
+void App::pollUserFiles() {
+    std::vector<std::pair<std::string, std::string>> done;
+    {
+        std::lock_guard<std::mutex> lock(dialogMutex_);
+        done.swap(dialogResults_);
+    }
+    for (const auto& [action, path] : done) {
+        if (path.empty()) continue;  // cancelled
+        std::string status;
+        if (action == "export") status = exportUserFiles(path);
+        else if (action == "load_settings") status = importSettings(path) ? "Settings loaded" : "Could not load that settings file";
+        else if (action == "load_progress") status = importProgress(path) ? "Progress loaded" : "Could not load that progress file";
+        SDL_Log("enhanced options: %s: %s", action.c_str(), status.c_str());
+        if (ports_) ports_->context().status = status;
+    }
+}
+
+// GD04-user-settings.json: every Enhanced Option; GD04-user-progress.json:
+// GH3's save (save.json: the global tags, as SaveToMemoryCard writes them).
+std::string App::exportUserFiles(const std::string& dir) {
+    const std::filesystem::path base(dir);
+    Json all = Json::object();
+    all.set("format", Json::string("gd04-enhanced"));
+    for (const EnhancedSetting& e : enhancedSettings()) all.set(e.key, Json::string(enhanced_.get(e.key)));
+    bool ok;
+    {
+        std::ofstream out(base / kSettingsFile, std::ios::binary | std::ios::trunc);
+        out << all.dump(1) << "\n";
+        ok = bool(out);
+    }
+    std::error_code ec;
+    if (ok && !save::path().empty() && std::filesystem::exists(save::path(), ec))
+        ok = std::filesystem::copy_file(save::path(), base / kProgressFile, std::filesystem::copy_options::overwrite_existing, ec);
+    return ok ? "Exported to " + dir : "Could not write to " + dir;
+}
+
+// Each known setting with a value it takes is kept; anything odd keeps the
+// current value. Applied at once.
+bool App::importSettings(const std::string& file) {
+    std::ifstream in(file, std::ios::binary);
+    if (!in) return false;
+    Json j;
+    try {
+        j = Json::parse(std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>()));
+    } catch (const std::exception& ex) {
+        SDL_Log("load user settings %s: %s", file.c_str(), ex.what());
+        return false;
+    }
+    if (j.type != Json::Type::Object) return false;
+    for (const EnhancedSetting& e : enhancedSettings()) {
+        if (!j.has(e.key)) continue;
+        const Json& v = j[e.key];
+        if (v.type == Json::Type::String && enhancedValid(e, v.str())) enhanced_.set(e.key, v.str());
+        else SDL_Log("load user settings: %s is not valid, kept", e.key);
+    }
+    applyEnhanced("");
+    return true;
+}
+
+// The progress replaces save.json, read back as LoadFromMemoryCard does
+// (the old save is put back if the file is not a GH3 save) and put in effect.
+bool App::importProgress(const std::string& file) {
+    const std::string savePath = save::path();
+    if (savePath.empty() || !front_) return false;
+    std::error_code ec;
+    const std::string backup = savePath + ".bak";
+    const bool had = std::filesystem::exists(savePath, ec);
+    if (had) std::filesystem::copy_file(savePath, backup, std::filesystem::copy_options::overwrite_existing, ec);
+    if (!std::filesystem::copy_file(file, savePath, std::filesystem::copy_options::overwrite_existing, ec)) return false;
+    save::Tags tags;
+    save::Sections sections;
+    std::string err;
+    if (!save::read(tags, sections, err)) {
+        SDL_Log("load user progress %s: %s", file.c_str(), err.c_str());
+        if (had) std::filesystem::copy_file(backup, savePath, std::filesystem::copy_options::overwrite_existing, ec);
+        else std::filesystem::remove(savePath, ec);
+        return false;
+    }
+    qs::Vm& vm = front_->vm();
+    for (auto& [k, t] : tags) vm.globalTags[k] = std::move(t);
+    for (auto& [k, t] : sections) vm.globalTagSections[k] = std::move(t);
+    return true;
 }
 
 void App::applyEnhanced(const std::string& key) {
@@ -278,6 +481,7 @@ void App::applyEnhanced(const std::string& key) {
             SDL_SetWindowFullscreen(window_, true);
         }
     }
+    if (is("particles")) VenueStage::particlesOn = enhanced_.get("particles") != "off";
     if (is("shake_whammy")) input_.setShakeWhammy(enhanced_.on("shake_whammy"));
     if (is("rockband")) input_.setRockBand(enhanced_.on("rockband"));
     if (is("xinput")) input_.setGamepadPlay(enhanced_.on("xinput"));
@@ -402,6 +606,7 @@ void App::songEvent(const InputEvent& ev) {
 }
 
 void App::frame() {
+    pollUserFiles();
     // A controller lost mid-song (GD04-042): the 360's engine calls GH3's
     // controller_unplugged {device_num} while check_for_unplugged_controllers
     // is 1 (controller_pulling.qb; in a song: controller_disconnect_fs, "YOU
@@ -536,7 +741,10 @@ void App::frame() {
         if (rq.suddenDeath) setup.startHealth = {rq.saveHealth[0], rq.saveHealth[1]};
         setup.startMs = rq.startMs, setup.devilFinish = rq.devilFinish;
         setup.lefty = {rq.lefty[0], rq.lefty[1]};
-        setup.lagMs = rq.lagMs;
+        // GH3's lag_calibration plus Enhanced > Calibration's audio delay
+        // (judged later by it); the video delay draws the highway ahead.
+        setup.lagMs = rq.lagMs + std::atof(enhanced_.get("audio_offset").c_str());
+        setup.videoOffsetMs = std::atof(enhanced_.get("video_offset").c_str());
         setup.endCredits = rq.endCredits;
         setup.transition = rq.transition;
         // GD04_TRANSITION=<name>: every song starts with that transition (encore, boss, intro...; development aid).
@@ -724,6 +932,7 @@ int App::run() {
             front_.reset();
         } else {
             ports_ = std::make_unique<PortScreens>(input_, *front_, enhanced_, [this](const std::string& k) { applyEnhanced(k); });
+            ports_->context().action = [this](const std::string& a) { userFileAction(a); };
             if (!envOn("GD04_NO_HOOKS")) hooks_ = std::make_unique<SongHooks>(*front_, mixer_, *disc_, *textures_);
             addVenueScriptCalls();
         }

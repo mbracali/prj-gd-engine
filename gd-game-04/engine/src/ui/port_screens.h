@@ -36,6 +36,10 @@ struct PortContext {
     PortScreens& screens;
     // A change of an Enhanced setting, applied by the app at once.
     std::function<void(const std::string& key)> changed;
+    // Export / Load User Files: the app's dialog (`action` export,
+    // load_settings, load_progress); its outcome lands in `status`.
+    std::function<void(const std::string& action)> action;
+    std::string status;
     // gd01's sound names: toggle (a move), select, back, error.
     void sound(const char* what) const;
 };

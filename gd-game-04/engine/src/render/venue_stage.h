@@ -35,6 +35,8 @@ public:
     // level the scripts chose ($current_level: quickplay_start_song's random
     // venue, the career tier's venue), else the first listed venue.
     static std::string chooseZone(const Globals& g);
+    // Enhanced > Enable Particles FX (off: no venue or band particles, from the next song).
+    static inline bool particlesOn = true;
     // Loads the zone (and uploads it when `device` is given); false and
     // `error` on failure. Without a device nothing draws until attach().
     bool start(const Disc& disc, const Globals& g, const std::string& zone, const Chart& chart, uint32_t songKey, double leadInMs,
@@ -61,6 +63,11 @@ public:
     // crowd back to idle, cameras_win / cameras_lose. `p1Won`: player 1 won
     // (the versus modes), `boss`: a boss battle [C data].
     void outro(double ms, bool won, bool versus, bool p1Won, bool boss);
+    // play_intro_anims (the intro, encore and boss transitions): the band's
+    // intro stance at once, then Stance_A after it. `p2Career`: two-player
+    // career / co-op (player 2's member straight to Stance_A).
+    void introAnims(double ms, bool p2Career);
+    bool smallVenue();
 
     venue::CamPose camera(double ms) const { return cameras_.pose(ms); }
     const venue::CameraDirector& cameras() const { return cameras_; }
@@ -106,4 +113,6 @@ private:
 public:
     const Crowd* crowd() const { return crowd_.get(); }
     const Particles* particles() const { return particles_.get(); }
+    Particles* particles() { return particles_.get(); }
+    bool bonePos(uint32_t member, uint32_t bone, venue::Vec3& out) const;
 };

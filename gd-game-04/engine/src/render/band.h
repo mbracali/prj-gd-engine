@@ -52,6 +52,11 @@ public:
         for (Entry& e : members_)
             if (e.anim.role() == role) e.anim.playSpecial(stance, anim, ms);
     }
+    // Band_ChangeStance on the member of `role` (play_intro_anims).
+    void changeStance(band::Role role, uint32_t stance, bool noWait, double ms) {
+        for (Entry& e : members_)
+            if (e.anim.role() == role) e.anim.changeStance(stance, noWait, ms);
+    }
     void playClip(band::Role role, uint32_t clip, uint32_t stance, bool cycle, double ms) {
         for (Entry& e : members_)
             if (e.anim.role() == role) e.anim.playClip(clip, stance, cycle, ms);

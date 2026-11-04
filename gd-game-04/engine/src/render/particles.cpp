@@ -736,6 +736,39 @@ void Particles::create(const venue::Vec3& pos, const qb::Value* params, double t
     ++created_;
 }
 
+bool Particles::createScripted(uint32_t name, uint32_t group, const qb::Value* params, const venue::Vec3& pos, uint32_t member, uint32_t bone,
+                               double t) {
+    if (!g_) return false;
+    const size_t before = systems_.size();
+    create(pos, params, t);
+    if (systems_.size() == before) return false;
+    System& s = systems_.back();
+    s.name = name, s.group = group, s.member = member, s.bone = bone;
+    ++scriptedCreated;
+    return true;
+}
+
+void Particles::destroyNamed(uint32_t name) {
+    if (!name) return;
+    systems_.erase(std::remove_if(systems_.begin(), systems_.end(), [&](const System& s) { return s.name == name; }), systems_.end());
+}
+
+void Particles::stopEmitting(uint32_t name, double t) {
+    for (System& s : systems_)
+        if (name && s.name == name) s.p.lifetime = std::max(0.0f, std::min(s.p.lifetime, float((t - s.start) / 1000.0 - s.p.delay)));
+}
+
+bool Particles::hasNamed(uint32_t name) const {
+    for (const System& s : systems_)
+        if (name && s.name == name) return true;
+    return false;
+}
+
+void Particles::destroyGroup(uint32_t group) {
+    if (!group) return;
+    systems_.erase(std::remove_if(systems_.begin(), systems_.end(), [&](const System& s) { return s.group == group; }), systems_.end());
+}
+
 void Particles::step(double t) {
     // The performance changes (LightShow_SetParams performance=...: the
     // mapping's transitions.performance scripts) and pyro notes at their times.
@@ -805,6 +838,8 @@ void Particles::draw(const venue::CamPose& cam, double ms) {
         const double age = (ms - s.start) / 1000.0 - p.delay;
         if (age < 0) continue;
         Batch b{p.texture, p.additive, p.blend, p.burn, p.alphaCut, verts.size(), 0};
+        venue::Vec3 base = s.pos;
+        if (s.member && !(bonePos && bonePos(s.member, s.bone, base))) continue;
         // The burst at the start, then emit_rate a second for `lifetime` [I].
         const int continuous = int(std::floor(double(p.rate) * double(p.lifetime)));
         const int total = p.burst + continuous;
@@ -833,8 +868,8 @@ void Particles::draw(const venue::CamPose& cam, double ms) {
             if (a < 0 || a > life) continue;
             const float tl = float(a / life);
             // Start: the emitter box (half extents) [I]; direction within the spread cone.
-            venue::Vec3 p0{s.pos[0] + p.box[0] * (rnd(s.seed, uint64_t(i), 1) - 0.5f), s.pos[1] + p.box[1] * (rnd(s.seed, uint64_t(i), 2) - 0.5f),
-                           s.pos[2] + p.box[2] * (rnd(s.seed, uint64_t(i), 3) - 0.5f)};
+            venue::Vec3 p0{base[0] + p.box[0] * (rnd(s.seed, uint64_t(i), 1) - 0.5f), base[1] + p.box[1] * (rnd(s.seed, uint64_t(i), 2) - 0.5f),
+                           base[2] + p.box[2] * (rnd(s.seed, uint64_t(i), 3) - 0.5f)};
             const float th = p.spread * 0.5f * 3.14159265f / 180.0f * std::sqrt(rnd(s.seed, uint64_t(i), 4));
             const float ph = 6.2831853f * rnd(s.seed, uint64_t(i), 5);
             const float st = std::sin(th), ct = std::cos(th);

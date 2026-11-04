@@ -74,12 +74,34 @@ void VenueStage::playClip(int role, uint32_t clip, uint32_t stance, bool cycle, 
     if (band_) band_->playClip(role == 1 ? band::Role::Bassist : band::Role::Guitarist, clip, stance, cycle, ms);
 }
 
+bool VenueStage::bonePos(uint32_t member, uint32_t bone, venue::Vec3& out) const { return band_ && band_->bonePos(member, bone, out); }
+
+bool VenueStage::smallVenue() {
+    // UseSmallVenueAnims: z_party, z_dive, z_video, z_prison, z_hell, and
+    // z_artdeco after the encore (LS_ENCORE_POST) [C script].
+    const std::string& z = venue_ ? venue_->zone : std::string();
+    return z == "z_party" || z == "z_dive" || z == "z_video" || z == "z_prison" || z == "z_hell" ||
+           (z == "z_artdeco" && lights_.flag(qbkey::key("LS_ENCORE_POST")));
+}
+
+void VenueStage::introAnims(double ms, bool p2Career) {
+    if (!band_) return;
+    using band::Role;
+    const uint32_t intro = qbkey::key(smallVenue() ? "intro_smstg" : "intro"), a = qbkey::key("Stance_A");
+    // z_artdeco after the encore: the guitarist straight to Stance_A [C script play_intro_anims].
+    const bool guitaristIntro = !(venue_ && venue_->zone == "z_artdeco" && lights_.flag(qbkey::key("LS_ENCORE_POST")));
+    // player1 / player2_status.band_member: Guitarist / Bassist in the port's two-player career.
+    band_->changeStance(Role::Guitarist, guitaristIntro ? intro : a, true, ms);
+    band_->changeStance(Role::Bassist, guitaristIntro && p2Career ? a : intro, true, ms);
+    band_->changeStance(Role::Vocalist, intro, true, ms);
+    band_->changeStance(Role::Drummer, qbkey::key("intro"), true, ms);
+    for (Role r : {Role::Guitarist, Role::Bassist, Role::Vocalist, Role::Drummer}) band_->changeStance(r, a, false, ms);
+}
+
 void VenueStage::outro(double ms, bool won, bool versus, bool p1Won, bool boss) {
     // UseSmallVenueAnims: z_party, z_dive, z_video, z_prison, z_hell, and
     // z_artdeco after the encore (LS_ENCORE_POST) -> Win_SmStg / Lose_SmStg [C script].
-    const std::string& z = venue_ ? venue_->zone : std::string();
-    const bool small = z == "z_party" || z == "z_dive" || z == "z_video" || z == "z_prison" || z == "z_hell" ||
-                       (z == "z_artdeco" && lights_.flag(qbkey::key("LS_ENCORE_POST")));
+    const bool small = smallVenue();
     const uint32_t win = qbkey::key(small ? "Win_SmStg" : "win"), lose = qbkey::key(small ? "Lose_SmStg" : "lose");
     if (band_) {
         // play_win_anims / play_lose_anims: one player or co-op, both members
@@ -188,10 +210,11 @@ bool VenueStage::start(const Disc& disc, const Globals& g, const std::string& zo
         }
     // The zone's particle systems (pyro notes, performance changes).
     particles_.reset();
-    if (!SDL_getenv("GD04_NO_PARTICLES")) {
+    if (!SDL_getenv("GD04_NO_PARTICLES") && particlesOn) {
         particles_ = std::make_unique<Particles>();
         std::string perr;
         particles_->setLightShow(&lights_);
+        particles_->bonePos = [this](uint32_t member, uint32_t bone, venue::Vec3& out) { return band_ && band_->bonePos(member, bone, out); };
         if (!particles_->start(disc, g, *venue_, chart, &perf_, -leadInMs, perr)) {
             if (!perr.empty()) SDL_Log("particles: %s", perr.c_str());
             particles_.reset();

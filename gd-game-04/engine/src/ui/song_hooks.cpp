@@ -1064,8 +1064,7 @@ void SongHooks::addNatives() {
     });
     // The 3D effects the song scripts ask for that need the venue / band /
     // crowd renderers' support (render/particles, render/crowd): counted, not
-    // drawn yet -- CreateParticleSystem_fast on a band member's bone (the 4x
-    // finger flames, the Star Power stage FX), Crowd_PlayAnim (the crowd's
+    // drawn yet -- Crowd_PlayAnim (the crowd's
     // Star Power anim), EngineWind, LightShow_SetTime from <song>_lightshow.
     // The song's teardown and setup calls for systems the port runs natively
     // [C scripts]: destroy_cameracuts / notemap_deinit ClearNoteMappings (the
@@ -1078,8 +1077,9 @@ void SongHooks::addNatives() {
     for (const char* n : {"ClearNoteMappings", "LightShow_SetActive", "LightShow_SetMapping", "StopStream", "RemovePrepassViewport",
                           "SetActiveCamera", "ClearCrowdModelCams"})
         vm.addNative(n, [](Vm&, ScriptRun&, qb::Struct&) { return true; });
-    for (const char* n : {"CreateParticleSystem_fast", "CreateParticleSystem", "DestroyParticlesByGroupID", "DeleteTeslaEffectObject",
-                          "Crowd_PlayAnim", "EngineWind", "LightShow_SetTime"})
+    // (CreateParticleSystem / _fast and DestroyParticlesByGroupID are App's,
+    // on the venue's particles: addVenueScriptCalls.)
+    for (const char* n : {"DeleteTeslaEffectObject", "Crowd_PlayAnim", "EngineWind", "LightShow_SetTime"})
         vm.addNative(n, [this, n](Vm&, ScriptRun&, qb::Struct&) {
             ++k_.spawned[std::string("(3D) ") + n];
             return true;
