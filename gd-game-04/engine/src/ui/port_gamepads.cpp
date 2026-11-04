@@ -109,7 +109,7 @@ public:
     void draw(PortDraw& d) override {
         if (!input_) return;
         d_ = &d;
-        d.quad(0, 0, kScreenW, kScreenH, {0, 0, 0, 0.62f});  // GH3's screen behind, dimmed (App draws it first)
+        if (!d.hasBackdrop()) d.quad(0, 0, kScreenW, kScreenH, {0, 0, 0, 1});  // the band's still shot behind, else black
         drawAll();
         d_ = nullptr;
     }

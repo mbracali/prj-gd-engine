@@ -448,7 +448,7 @@ void VenueStage::draw(double ms) {
         VenueView::jitterX = VenueView::jitterY = 0;
     }
     lights_.evaluate(ms, lightState_);
-    const venue::CamPose cam = cameras_.pose(ms);
+    const venue::CamPose cam = hasFixedCam_ ? fixedCam_ : cameras_.pose(ms);
     shadowPass(ms);
     if (crowd_) {
         crowd_->render(ms, cam, *venue_, lightState_, lights_);

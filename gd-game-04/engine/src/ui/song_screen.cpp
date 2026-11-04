@@ -296,7 +296,15 @@ bool SongScreen::frame(Canvas& canvas, Mixer& mixer, const TextureCache* texture
         if (venue_ && (introCameras_ == "cameras_intro" || introCameras_ == "cameras_encore" || introCameras_ == "cameras_boss"))
             venue_->introAnims(startMs_ - leadInMs_, twoPlayers_ && match_->mode() == GameMode::Coop);
     }
-    const double now = mixer.frameTimeMs() - leadInMs_ + startMs_;
+    // The mixer's clock already runs from -leadIn (Mixer::songTimeMs: the
+    // lead-in's silent frames before the song's first sample): the song's
+    // time is it plus the start. It subtracted the lead-in a second time,
+    // so the music played 3 s (then, with the 8 s intro, 8 s) ahead of the gems.
+    const double now = mixer.frameTimeMs() + startMs_;
+    // GD04_CLOCKLOG=1: the song clock against the wall clock, each second (development aid).
+    static const bool clockLog = SDL_getenv("GD04_CLOCKLOG") != nullptr;
+    if (clockLog && std::floor(now / 1000.0) != std::floor(lastMs_ / 1000.0))
+        SDL_Log("clock: wall %llu ms, song %.0f ms", (unsigned long long)SDL_GetTicks(), now);
     lastMs_ = now;
     tick(now, mixer);
     draw(canvas, now, textures);

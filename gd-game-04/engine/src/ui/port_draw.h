@@ -28,6 +28,9 @@ public:
     PortDraw(Canvas& c, const ui::UiSystem& ui) : c_(c), ui_(ui) {}
 
     void setTransition(float offset, float fade) { offset_ = offset, fade_ = fade; }
+    // The app drew the band's still shot under this frame (App::drawMenuBackdrop).
+    static inline bool backdropDrawn = false;
+    bool hasBackdrop() const { return backdropDrawn; }
     float offset() const { return offset_; }
 
     void quad(float x0, float y0, float x1, float y1, const Color& c);

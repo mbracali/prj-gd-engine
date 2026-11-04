@@ -48,6 +48,8 @@ public:
     static inline gfx::EnhancedLights::Settings extras;
     // A player's Star Power on (Blur on Star Power), set each frame by the song.
     void setStarPower(bool on) { starPowerOn_ = on; }
+    // A fixed camera instead of the director's (the Enhanced backdrop's shot); null: the director's.
+    void setFixedCamera(const venue::CamPose* p) { fixedCam_ = p ? *p : venue::CamPose{}, hasFixedCam_ = p != nullptr; }
     const gfx::EnhancedFx* enhancedFx() const { return enh_.get(); }
     uint64_t projectorPools = 0;
     uint64_t teslaFrames = 0;  // frames with Tesla bolts drawn  // projector pools drawn (frames x pools)
@@ -130,6 +132,8 @@ private:
     gfx::TargetId ldr_;
     int ldrW_ = 0, ldrH_ = 0;
     bool starPowerOn_ = false;
+    venue::CamPose fixedCam_;
+    bool hasFixedCam_ = false;
     float starBlur_ = 0;
     double starBlurAt_ = 0;  // Default_TOD_Manager's screen_FX
     void shadowPass(double ms);

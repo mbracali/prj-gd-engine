@@ -901,7 +901,9 @@ void Animator::advance(double ms) {
         const bool haveQueued = !queue_.empty();
         if (!haveFixed && !haveQueued) break;
         bool takeFixed = haveFixed;
-        if (haveFixed && haveQueued) takeFixed = !(queue_.top() > fixed_[fixedAt_]);
+        // The earlier of the two (the fixed one on a tie): this was inverted, so the
+        // later one ran first and held the earlier back (a frozen band, still hands).
+        if (haveFixed && haveQueued) takeFixed = !(fixed_[fixedAt_] > queue_.top());
         const Event e = takeFixed ? fixed_[fixedAt_] : queue_.top();
         if (e.t > ms) break;
         if (takeFixed) ++fixedAt_;

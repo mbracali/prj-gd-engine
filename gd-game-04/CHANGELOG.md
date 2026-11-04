@@ -19,6 +19,9 @@ All notable changes for players. Versions follow SemVer; release tags are
 - Lou's finish and defeat scenes play with their animations and cameras.
 
 ### Fixed
+- The band froze and their hands stopped: the animator ran its events out of order (GD04-058).
+- The music played seconds ahead of the notes: the song clock subtracted the intro twice (GD04-058).
+- The Enhanced page's backdrop is a still close-up of the band with the singer on the right, not dimmed; the FPS counter uses the game's font (GD04-058).
 - Menu music played over itself and on into songs; sound events keep GH3's instance limits and the song stops the menu music (GD04-057).
 - The Neversoft logo video had no sound; videos now play all their audio tracks (GD04-057).
 - The band's intro stance was lost; the venue's intro crowd sound plays (GD04-057).

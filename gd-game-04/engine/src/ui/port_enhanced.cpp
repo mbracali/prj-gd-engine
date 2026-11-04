@@ -318,7 +318,9 @@ public:
 
     void draw(PortDraw& d) override {
         d_ = &d;
-        d.quad(0, 0, kScreenW, kScreenH, {0, 0, 0, 0.62f});  // GH3's screen behind, dimmed (App draws it first)
+        // The band's still shot behind (App's backdrop), undimmed: the box on
+        // the left darkens only what is behind it (guidelines/universal_launcher.md).
+        if (!d.hasBackdrop()) d.quad(0, 0, kScreenW, kScreenH, {0, 0, 0, 1});
         drawAll();
         if (dropdown_ >= 0) drawDropdown();  // over everything
         if (cal_.phase) drawCalib();

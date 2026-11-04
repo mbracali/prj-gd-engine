@@ -40,6 +40,7 @@
 #include "platform/paths.h"
 #include "render/canvas.h"
 #include "render/venue_stage.h"
+#include "ui/port_draw.h"
 #include "game/chart.h"
 #include <array>
 #include <initializer_list>
@@ -102,9 +103,13 @@ private:
     // Drawn over every frame: the FPS counter (Enhanced > Show FPS Counter).
     void overlay();
     void drawMenuBackdrop(double dtMs);
+    void prepareMenuBackdrop();
+    static constexpr double kBackdropMs = 30000;  // the song's instant the band is caught at
+    static constexpr float kBackdropFlank = -1.3f;  // metres to one side of the singer (the other side from the box)
+    static constexpr float kBackdropDist = 3.6f;   // metres in front of the singer
+    static constexpr float kBackdropTurn = -1.4f;  // the aim moved across the stage (the singer right of centre)
     std::unique_ptr<VenueStage> backdrop_;
     std::unique_ptr<Chart> backdropChart_;
-    double backdropMs_ = 0;
     bool backdropTried_ = false;
     void drawTouchButtons();
     bool windowToMenu(float wx, float wy, float& mx, float& my) const;
@@ -654,35 +659,107 @@ void App::drawTouchButtons() {
         if (b.action == Action::Start) canvas_.textCentered(b.x, b.y - 4, 1, {255, 255, 255, 220}, b.y < 100 ? "II" : "START");
 }
 
-// The Enhanced / Gamepads backdrop (gd02's App::menuBackdrop): the career's
-// venue (current_level, else the first) with its band under its intro
-// cameras (the wide shots), looping, made when a port screen opens [I:
-// gd02's look; GH3 has no such screen].
-void App::drawMenuBackdrop(double dtMs) {
-    if (!backdrop_ && !backdropTried_ && disc_ && globals_) {
-        backdropTried_ = true;
-        std::string err;
-        try {
-            backdropChart_ = std::make_unique<Chart>(loadChart(*disc_, "slowride"));
-            backdrop_ = std::make_unique<VenueStage>();
-            backdrop_->setIntroCameras("cameras_intro");  // the intro's wide shots: the band in view
-            if (!backdrop_->start(*disc_, *globals_, VenueStage::chooseZone(*globals_), *backdropChart_, qbkey::key("slowride"), 8000, nullptr, err) ||
-                !backdrop_->attach(canvas_.renderer().device(), *disc_, err)) {
-                SDL_Log("menu backdrop: %s", err.c_str());
-                backdrop_.reset();
-            }
-        } catch (const std::exception& ex) {
-            SDL_Log("menu backdrop: %s", ex.what());
-            backdrop_.reset();
-        }
-        backdropMs_ = -7800;
-    }
+// The Enhanced / Gamepads backdrop (guidelines/universal_launcher.md "The
+// Enhanced menu"): a venue with the band caught mid-song, posed and still
+// (advanced to 30 s into a song once, then drawn at that instant), under a
+// static close-up of the singer on the right with the whole band in view
+// (gd01's Enhanced pose); made once (at the first menu frame) and kept, so
+// the page opens at once [I: the shot's distances].
+void App::drawMenuBackdrop(double) {
+    if (!backdrop_ && !backdropTried_) prepareMenuBackdrop();  // the boot screen was skipped
+    PortDraw::backdropDrawn = backdrop_ != nullptr;
     if (!backdrop_) return;
-    backdropMs_ += dtMs;
-    if (backdropMs_ > -1200) backdropMs_ = -7800;  // the intro's shots again
     canvas_.flush();
-    backdrop_->advance(backdropMs_);
-    backdrop_->draw(backdropMs_);
+    backdrop_->draw(kBackdropMs);
+}
+
+void App::prepareMenuBackdrop() {
+    if (backdrop_ || backdropTried_ || !disc_ || !globals_) return;
+    backdropTried_ = true;
+    const uint64_t t0 = SDL_GetTicksNS();
+    std::string err;
+    try {
+        backdropChart_ = std::make_unique<Chart>(loadChart(*disc_, "slowride"));
+        backdrop_ = std::make_unique<VenueStage>();
+        // Started 1.5 s before the instant (a negative lead-in: the band, crowd
+        // and particles begin there), so one step reaches it posed.
+        if (!backdrop_->start(*disc_, *globals_, VenueStage::chooseZone(*globals_), *backdropChart_, qbkey::key("slowride"), -(kBackdropMs - 1500), nullptr, err) ||
+            !backdrop_->attach(canvas_.renderer().device(), *disc_, err)) {
+            SDL_Log("menu backdrop: %s", err.c_str());
+            backdrop_.reset();
+            return;
+        }
+    } catch (const std::exception& ex) {
+        SDL_Log("menu backdrop: %s", ex.what());
+        backdrop_.reset();
+        return;
+    }
+    // The band posed mid-song: the venue stepped to the instant, then still.
+    for (double t = kBackdropMs - 1500; t <= kBackdropMs; t += 100) backdrop_->advance(t);
+    canvas_.flush();
+    backdrop_->draw(kBackdropMs);  // the band posed (their bones are known after a draw), unseen
+    // The shot: from the stage's front (the drummer behind the singer), a
+    // little to one flank, the singer's head on the right of the picture.
+    venue::Vec3 head{}, drums{};
+    const bool haveHead = backdrop_->bonePos(qbkey::key("vocalist"), qbkey::key("Bone_Head"), head);
+    const bool haveDrums = backdrop_->bonePos(qbkey::key("Drummer"), qbkey::key("Bone_Head"), drums);
+    if (haveHead) {
+        venue::Vec3 front{head[0] - (haveDrums ? drums[0] : head[0]), 0, head[2] - (haveDrums ? drums[2] : head[2] - 1)};
+        float fl = std::sqrt(front[0] * front[0] + front[2] * front[2]);
+        if (fl < 1e-3f) front = {0, 0, 1}, fl = 1;
+        front[0] /= fl, front[2] /= fl;
+        const venue::Vec3 side{front[2], 0, -front[0]};  // across the stage
+        venue::CamPose cam;
+        cam.fov = 58;
+        // The band's middle (the members' feet, chest high).
+        venue::Vec3 mid{0, 0, 0};
+        int nm = 0;
+        for (uint32_t m : {qbkey::key("Guitarist"), qbkey::key("Bassist"), qbkey::key("Drummer"), qbkey::key("vocalist")}) {
+            venue::Vec3 p;
+            if (backdrop_->bonePos(m, qbkey::key("Bone_Head"), p)) mid[0] += p[0], mid[1] += p[1], mid[2] += p[2], ++nm;
+        }
+        if (nm) mid = {mid[0] / float(nm), mid[1] / float(nm) - 0.4f, mid[2] / float(nm)};
+        else mid = head;
+        cam.pos = {head[0] + front[0] * kBackdropDist + side[0] * kBackdropFlank, head[1] + 0.1f,
+                   head[2] + front[2] * kBackdropDist + side[2] * kBackdropFlank};
+        // Aimed between the band's middle and the singer, past the singer: the
+        // singer right of centre, the band beside and behind.
+        venue::Vec3 look{mid[0] * 0.65f + head[0] * 0.35f, mid[1] * 0.65f + (head[1] - 0.2f) * 0.35f, mid[2] * 0.65f + head[2] * 0.35f};
+        for (size_t k : {size_t(0), size_t(2)}) look[k] += side[k] * kBackdropTurn;  // the singer to the picture's right
+        venue::Vec3 f{look[0] - cam.pos[0], look[1] - cam.pos[1], look[2] - cam.pos[2]};
+        const float l = std::sqrt(f[0] * f[0] + f[1] * f[1] + f[2] * f[2]);
+        for (float& c : f) c /= l;
+        // The camera's basis: +z forward, +y up, -x right (venue::rotate's convention).
+        venue::Vec3 r{f[2], 0, -f[0]};  // right = up x forward with up (0,1,0)... as -x
+        const float rl = std::sqrt(r[0] * r[0] + r[2] * r[2]);
+        r[0] /= rl, r[2] /= rl;
+        const venue::Vec3 u{f[1] * r[2] - f[2] * r[1], f[2] * r[0] - f[0] * r[2], f[0] * r[1] - f[1] * r[0]};
+        // Columns: local x = r, y = u, z = f (a right-handed frame); to a quaternion.
+        const float m00 = r[0], m11 = u[1], m22 = f[2];
+        float q[4];
+        const float tr = m00 + m11 + m22;
+        if (tr > 0) {
+            const float sq = std::sqrt(tr + 1.0f) * 2;
+            q[3] = 0.25f * sq, q[0] = (u[2] - f[1]) / sq, q[1] = (f[0] - r[2]) / sq, q[2] = (r[1] - u[0]) / sq;
+        } else if (m00 > m11 && m00 > m22) {
+            const float sq = std::sqrt(1.0f + m00 - m11 - m22) * 2;
+            q[3] = (u[2] - f[1]) / sq, q[0] = 0.25f * sq, q[1] = (u[0] + r[1]) / sq, q[2] = (f[0] + r[2]) / sq;
+        } else if (m11 > m22) {
+            const float sq = std::sqrt(1.0f + m11 - m00 - m22) * 2;
+            q[3] = (f[0] - r[2]) / sq, q[0] = (u[0] + r[1]) / sq, q[1] = 0.25f * sq, q[2] = (f[1] + u[2]) / sq;
+        } else {
+            const float sq = std::sqrt(1.0f + m22 - m00 - m11) * 2;
+            q[3] = (r[1] - u[0]) / sq, q[0] = (f[0] + r[2]) / sq, q[1] = (f[1] + u[2]) / sq, q[2] = 0.25f * sq;
+        }
+        cam.rot = {q[0], q[1], q[2], q[3]};
+        SDL_Log("menu backdrop: singer head (%.2f %.2f %.2f), drummer (%.2f %.2f %.2f), band (%.2f %.2f %.2f), camera (%.2f %.2f %.2f)", head[0], head[1],
+                head[2], drums[0], drums[1], drums[2], mid[0], mid[1], mid[2], cam.pos[0], cam.pos[1], cam.pos[2]);
+        backdrop_->setFixedCamera(&cam);
+    }
+    // Drawn once now, unseen, so its shaders are ready when the page opens.
+    canvas_.flush();
+    backdrop_->draw(kBackdropMs);
+    SDL_Log("menu backdrop: %s, ready in %.0f ms", backdrop_->venue().zone.c_str(), double(SDL_GetTicksNS() - t0) / 1e6);
 }
 
 void App::overlay() {
@@ -704,9 +781,15 @@ void App::overlay() {
     if (!fpsStart_) fpsStart_ = now;
     if (now - fpsStart_ >= 500'000'000ull) fps_ = fpsFrames_ * 1e9 / double(now - fpsStart_), fpsStart_ = now, fpsFrames_ = 0;
     if (enhanced_.on("fps_counter") && fps_ > 0) {
+        // As gd02's: the game's own font, green with a dark shadow, bottom left
+        // (guidelines/universal_launcher.md: "Frames a second, bottom left").
         const std::string t = std::to_string(int(std::lround(fps_))) + " FPS";
-        canvas_.fillRect(8, kScreenH - 30, float(t.size()) * 16 + 12, 24, SDL_Color{0, 0, 0, 150});
-        canvas_.text(14, kScreenH - 26, 2, SDL_Color{120, 255, 120, 255}, t);
+        if (front_) {
+            canvas_.flush();
+            const uint32_t font = qbkey::key("text_a5");  // the options' font (gd02: its game's helveticablack)
+            front_->ui().drawText(canvas_, font, t, 25, 686, 22, {0, 0, 0, 153}, 0x21);
+            front_->ui().drawText(canvas_, font, t, 23, 684, 22, {51, 255, 77, 255}, 0x21);
+        }
     }
 }
 
@@ -1033,6 +1116,9 @@ void App::frame() {
         const double dt = lastFrameNs_ ? double(nowNs - lastFrameNs_) / 1e6 : 0;
         lastFrameNs_ = nowNs;
         canvas_.begin(SDL_Color{0, 0, 0, 255});
+        // The Enhanced backdrop, made once while the menus run (drawn unseen
+        // under the first screen, which covers it).
+        if (!backdrop_ && !backdropTried_ && front_->flowState() == "bootup_press_any_button_fs") prepareMenuBackdrop();
         if (ports_ && ports_->isOpen()) {
             // The port's screen over a venue with the band (gd02's backdrop:
             // App::menuBackdrop), GH3's scripts waiting meanwhile.
@@ -1055,7 +1141,6 @@ void App::frame() {
                     ++outroFrames_;
                 }
             }
-            backdrop_.reset(), backdropChart_.reset(), backdropTried_ = false;  // the backdrop venue only while a port screen is open
             front_->frame(canvas_, dt);
             if (ports_) ports_->drawItems(canvas_, front_->flowState());
         }
