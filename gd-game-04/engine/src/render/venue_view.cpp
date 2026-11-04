@@ -158,6 +158,8 @@ void VenueView::shutdown() {
     if (vb_) dev_->destroyBuffer(vb_);
     if (ib_) dev_->destroyBuffer(ib_);
     if (coneVb_) dev_->destroyBuffer(coneVb_);
+    if (rayVb_) dev_->destroyBuffer(rayVb_);
+    if (rayIb_) dev_->destroyBuffer(rayIb_);
     if (coneIb_) dev_->destroyBuffer(coneIb_);
     if (smoke_) dev_->destroyTexture(smoke_);
     smoke_ = {};
@@ -166,8 +168,10 @@ void VenueView::shutdown() {
         if (f.b) dev_->destroyQuery(f.b);
     }
     flares_.clear();
-    program_ = {}, vb_ = {}, ib_ = {}, coneVb_ = {}, coneIb_ = {};
+    program_ = {}, vb_ = {}, ib_ = {}, coneVb_ = {}, coneIb_ = {}, rayVb_ = {}, rayIb_ = {};
+    rayCount_ = 0;
     cones_.clear();
+    rays_.clear();
     gh3_.shutdown();
     mats_.clear();
     for (auto& [k, t] : textures_) dev_->destroyTexture(t.id);
@@ -422,13 +426,9 @@ bool VenueView::init(gfx::RenderDevice& dev, const Disc& disc, const venue::Venu
                 }
                 it = models.emplace(key, std::move(sc)).first;
             }
-            // ConeImpostor's beam; the `volume` / `normal` types (GH3's
-            // _Raytrace_cone templates over the depth buffer) are drawn as the
-            // same impostor cone [I: gd04 has no depth copy to ray-march].
-            static const bool volumeCones = SDL_getenv("GD04_VOLUME_CONES") != nullptr;  // [I] the volume types as cones: off
-            if (const qb::Value* lt = n.st->find(K("lightvolumetype"));
-                lt && (lt->key == K("ConeImpostor") || (volumeCones && lt->key != K("flareonly"))))
-                cones_.push_back(int(ni));
+            // ConeImpostor's beam; `volume`: GH3's _Raytrace_cone_volume (drawRaytraced).
+            if (const qb::Value* lt = n.st->find(K("lightvolumetype")); lt && lt->key == K("ConeImpostor")) cones_.push_back(int(ni));
+            else if (lt && lt->key == K("volume")) rays_.push_back(int(ni));
             if (!it->second) continue;
             ++stats_.housings;
             for (const scene::Mesh& m : it->second->meshes) addMesh(*it->second, m, nullptr, int(ni), &n, n.name, int(ni));
@@ -436,7 +436,7 @@ bool VenueView::init(gfx::RenderDevice& dev, const Disc& disc, const venue::Venu
     }
     // The beams' smoke: global_gfx.tex's 0xa500318e, a 128 x 128 grey noise
     // (sys_coneimpostor's texture, Function_823B49D0) [C].
-    if (!cones_.empty() && !smoke_) {
+    if ((!cones_.empty() || !rays_.empty()) && !smoke_) {
         try {
             const Pak gp = Pak::load(disc, "DATA/COMPRESSED/ZONES/global.pak.xen");
             if (const PakEntry* te = gp.findType(qbkey::key("c:/gh3/data/zones/global/global_gfx.tex.xen"), K(".tex"))) {
@@ -465,6 +465,29 @@ bool VenueView::init(gfx::RenderDevice& dev, const Disc& disc, const venue::Venu
         const uint32_t ci[6] = {0, 1, 2, 1, 3, 2};
         coneVb_ = dev.createBuffer(gfx::BufferKind::Vertex, sizeof cv, cv, false);
         coneIb_ = dev.createBuffer(gfx::BufferKind::Index, sizeof ci, ci, false);
+    }
+    // The raytraced cone's mesh: 20 segments (Function_823B4368's count) [C];
+    // a vertex is (cx, cy, t): the VS reads it .zxy as (t, cx, cy), radius
+    // start + (end - start) t, z = t x range [C: the VS]. Closed with its
+    // caps, wound counter-clockwise outwards [I: GH3's own buffers not read].
+    if (!rays_.empty()) {
+        constexpr int kSeg = 20;
+        std::vector<float> rv;
+        std::vector<uint32_t> ri;
+        for (int ring = 0; ring < 2; ++ring)
+            for (int i = 0; i < kSeg; ++i) {
+                const float a = 2.0f * float(M_PI) * float(i) / kSeg;
+                rv.insert(rv.end(), {std::cos(a), std::sin(a), float(ring), 1});
+            }
+        rv.insert(rv.end(), {0, 0, 0, 1, 0, 0, 1, 1});  // the caps' centres: 2 kSeg, 2 kSeg + 1
+        const uint32_t cn = 2 * kSeg, cf = 2 * kSeg + 1;
+        for (uint32_t i = 0; i < kSeg; ++i) {
+            const uint32_t j = (i + 1) % kSeg, ni = i, nj = j, fi = kSeg + i, fj = kSeg + j;
+            ri.insert(ri.end(), {ni, nj, fi, nj, fj, fi, cf, fi, fj, cn, nj, ni});
+        }
+        rayVb_ = dev.createBuffer(gfx::BufferKind::Vertex, rv.size() * sizeof(float), rv.data(), false);
+        rayIb_ = dev.createBuffer(gfx::BufferKind::Index, ri.size() * sizeof(uint32_t), ri.data(), false);
+        rayCount_ = uint32_t(ri.size());
     }
     vb_ = dev.createBuffer(gfx::BufferKind::Vertex, verts.size() * sizeof(Vtx), verts.data(), false);
     ib_ = dev.createBuffer(gfx::BufferKind::Index, idx.size() * sizeof(uint32_t), idx.data(), false);
@@ -985,5 +1008,120 @@ void VenueView::drawVolumes(const venue::CamPose& cam, const venue::LightShow& s
         c.uniforms[1] = d.stageUniforms(vs, sizeof vs);
         c.uniforms[2] = d.stageUniforms(ps, sizeof ps);
         d.draw(c);
+    }
+}
+
+namespace {
+// A general 4 x 4 inverse (the view-projection's, for g_ViewProjInv).
+gfx::Mat4 inverse4(const gfx::Mat4& m) {
+    double a[4][8];
+    for (int r = 0; r < 4; ++r)
+        for (int c = 0; c < 8; ++c) a[r][c] = c < 4 ? double(m.at(r, c)) : (c - 4 == r ? 1.0 : 0.0);
+    for (int c = 0; c < 4; ++c) {
+        int p = c;
+        for (int r = c + 1; r < 4; ++r)
+            if (std::fabs(a[r][c]) > std::fabs(a[p][c])) p = r;
+        if (std::fabs(a[p][c]) < 1e-12) return gfx::Mat4::identity();
+        if (p != c)
+            for (int k = 0; k < 8; ++k) std::swap(a[p][k], a[c][k]);
+        const double d = a[c][c];
+        for (int k = 0; k < 8; ++k) a[c][k] /= d;
+        for (int r = 0; r < 4; ++r) {
+            if (r == c) continue;
+            const double f = a[r][c];
+            for (int k = 0; k < 8; ++k) a[r][k] -= f * a[c][k];
+        }
+    }
+    gfx::Mat4 out;
+    for (int r = 0; r < 4; ++r)
+        for (int c = 0; c < 4; ++c) out.at(r, c) = float(a[r][c + 4]);
+    return out;
+}
+}  // namespace
+
+// The `volume` housings [C: _Raytrace_cone_volume's shaders; Function_823B4B68
+// sets them up but does not decompile, so the constants are read from the
+// shaders' maths]: VS g_ConeSize_VS c1 = (start, end, range, density),
+// g_UVOffset c15 / g_UVScale c16 (the smoke's, as the impostor's); PS
+// g_CameraPosition_ObjectSpace_VS c0, c1, g_ConeColor c2 (volumecolor x
+// density, alpha density), g_ViewProjInv c3..c6 (screen x, y, depth to the
+// world), g_coeff c17 = (-, k^2, 2 a k, a^2) for the cone x^2 + y^2 = (a +
+// k z)^2 (a start radius, k (end - start) / range: the shader's quadratic
+// A = dx^2 + dy^2 - k^2 dz^2, B and C with 2ak and a^2), m_Texture s0 the
+// smoke, g_DepthBufferTexture s1. The chord through the cone in front of the
+// scene's depth x the colour x the smoke; additive [I: the blend, as the
+// impostor's], the far faces drawn, no depth test (the shader clips by depth).
+void VenueView::drawRaytraced(const venue::CamPose& cam, const venue::LightShow& show, gfx::TextureId depth) {
+    if (!dev_ || rays_.empty() || !rayCount_ || !depth || !gh3_.ready()) return;
+    const gh3shader::Program* prog = gh3_.get(K("_Raytrace_cone_volume"));
+    if (!prog) return;
+    gfx::RenderDevice& d = *dev_;
+    gh3shader::Globals globals;
+    gfx::Mat4 viewM, viewProjM;
+    cameraGlobals(cam, d.info().clipDepthZeroToOne, seconds_, globals, &viewProjM, 16.0f / 9.0f, false, &viewM);
+    const gfx::UniformData frame = d.stageUniforms(&globals, sizeof globals);
+    const gfx::Mat4 vpInv = inverse4(viewProjM);
+    static const gfx::VertexLayout layout = [] {
+        gfx::VertexLayout l;
+        l.stride = 16;
+        l.attribs[0] = {0, 4, gfx::AttribType::Float, 0};
+        return l;
+    }();
+    gfx::DrawCall c;
+    c.program = prog->id;
+    c.layout = &layout;
+    c.vertices = rayVb_;
+    c.indices = rayIb_;
+    c.indices32 = true;
+    c.first = 0, c.count = rayCount_;
+    c.uniforms[0] = frame;
+    for (int k = 0; k < 16; ++k) {
+        c.textures[k] = (prog->samplers >> k & 1) ? (smoke_ ? smoke_ : gh3_.white()) : gfx::TextureId{};
+        c.samplers[k] = {gfx::Filter::Linear, gfx::Wrap::Repeat, 0};
+    }
+    c.textures[1] = depth;
+    c.samplers[1] = {gfx::Filter::Nearest, gfx::Wrap::Clamp, 0};
+    c.state.blend = true;
+    c.state.src = gfx::BlendFactor::One, c.state.dst = gfx::BlendFactor::One, c.state.op = gfx::BlendOp::Add;
+    c.state.depthTest = false, c.state.depthWrite = false;
+    c.state.cull = gfx::Cull::Clockwise;  // keeps the clockwise (far) faces of the outward-wound cone
+    const double ms = seconds_ * 1000.0;
+    for (int ni : rays_) {
+        const venue::Node& n = v_->nodes[size_t(ni)];
+        if (!n.createdAtStart && !(n.createdOn && show.flag(n.createdOn))) continue;
+        venue::HousingState h;
+        if (!show.housing(n.name, ms, h)) continue;
+        if (h.density <= 0 || h.range <= 1e-4f) continue;
+        // The object's +z runs along the beam, the housing's -z [C: the impostor's direction].
+        const venue::Vec3 ax = venue::rotate(h.rot, {1, 0, 0}), ay = venue::rotate(h.rot, {0, 1, 0}), az = venue::rotate(h.rot, {0, 0, 1});
+        gfx::Mat4 w;
+        for (int r = 0; r < 3; ++r) {
+            w.at(r, 0) = -ax[size_t(r)], w.at(r, 1) = ay[size_t(r)], w.at(r, 2) = -az[size_t(r)];
+            w.at(r, 3) = h.pos[size_t(r)];
+        }
+        gh3shader::ObjectConstants obj;
+        obj.setMatrix(gh3shader::kRegWorld, w, 4);
+        obj.setMatrix(gh3shader::kRegWorldView, viewM * w, 4);
+        obj.setMatrix(gh3shader::kRegWorldViewProj, viewProjM * w, 4);
+        const gfx::Vec3 co = w.inverseAffine().transformPoint({cam.pos[0], cam.pos[1], cam.pos[2]});
+        const float a = h.startRadius, k = (h.endRadius - h.startRadius) / h.range;
+        float vs[64][4] = {};
+        float ps[64][4] = {};
+        vs[1][0] = h.startRadius, vs[1][1] = h.endRadius, vs[1][2] = h.range, vs[1][3] = h.density;  // g_ConeSize_VS
+        for (int q = 0; q < 4; ++q) vs[15][q] = float((n.name * 2654435761u >> (q * 8)) % 10000u) * 0.0001f;  // g_UVOffset
+        vs[63][0] = -1;
+        ps[0][0] = co.x, ps[0][1] = co.y, ps[0][2] = co.z, ps[0][3] = 1;  // g_CameraPosition_ObjectSpace_VS
+        std::memcpy(ps[1], vs[1], sizeof ps[1]);
+        for (int q = 0; q < 3; ++q) ps[2][q] = h.volumeColor[size_t(q)] * h.density;  // g_ConeColor
+        ps[2][3] = h.density;
+        for (int i = 0; i < 4; ++i)  // g_ViewProjInv, rows as the shaders read them
+            for (int q = 0; q < 4; ++q) ps[3 + i][q] = vpInv.at(q, i);
+        ps[17][0] = 0, ps[17][1] = k * k, ps[17][2] = 2 * a * k, ps[17][3] = a * a;  // g_coeff
+        ps[63][0] = -1;
+        c.uniforms[1] = d.stageUniforms(vs, sizeof vs);
+        c.uniforms[2] = d.stageUniforms(ps, sizeof ps);
+        c.uniforms[3] = d.stageUniforms(&obj, sizeof obj);
+        d.draw(c);
+        ++stats_.raytraced;
     }
 }

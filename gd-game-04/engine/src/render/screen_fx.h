@@ -62,6 +62,9 @@ public:
     void end(const Params& p, gfx::TargetId into = {});
     // The scene target's depth and size, and the viewport begin() saw (Enhanced's chain).
     gfx::TextureId sceneDepth() const { return dev_ && scene_.id ? dev_->targetDepth(scene_.id) : gfx::TextureId{}; }
+    // A copy of the scene's depth so far (the raytraced light beams sample
+    // it while the scene target stays bound) [I: GH3 resolves its depth].
+    gfx::TextureId depthSnapshot();
     int sceneW() const { return scene_.w; }
     int sceneH() const { return scene_.h; }
     gfx::TargetId outer() const { return outer_; }
@@ -76,7 +79,7 @@ private:
     gh3shader::Programs gh3_;
     gfx::BufferId quad_;
     gfx::ProgramId copy_;
-    Target scene_, quarterA_, quarterB_, copyA_, copyB_;
+    Target scene_, quarterA_, quarterB_, copyA_, copyB_, depthCopy_;
     gfx::TargetId outer_;
     int ox_ = 0, oy_ = 0, ow_ = 0, oh_ = 0;
     uint32_t immediate_ = 0, immediateAlt_ = 0, filter_ = 0;

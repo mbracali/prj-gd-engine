@@ -6,6 +6,7 @@ All notable changes for players. Versions follow SemVer; release tags are
 ## [Unreleased]
 
 ### Added
+- The `volume` light beams of seven venues use GH3's own raytraced beam shader against the scene's depth; they were not drawn (GD04-063).
 - The universal Gamepad menu: four player boxes (instrument, device, Customize inputs), two bindings per control with Save / Discard, Detect, Export / Import, Generic MIDI controllers (GD04-060).
 - The universal Enhanced menu: one-click MODES (Steam Deck, Original Feel, Clean Image, Max Out, Rocking on a Budget, Good Old Days) and the shared sections and ranges (GD04-060).
 - Every Enhanced Option that can work now does: the picture effects (bloom, anti-aliasing, FSR 1, internal resolution, colour, grain, AO, sharpening, Star Power blur, light streaks, bokeh), sharper text, the venue extras and ground fog, no shaky camera, the cheat rows, forgiving HOPOs, touch controls and cut content (GD04-054).

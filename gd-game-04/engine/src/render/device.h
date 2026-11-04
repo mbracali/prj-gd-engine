@@ -194,6 +194,9 @@ public:
     virtual TargetId createTarget(const TargetDesc& desc, std::string& error) = 0;
     virtual TextureId targetTexture(TargetId t) const = 0;
     virtual TextureId targetDepth(TargetId t) const = 0;
+    // Copies `src`'s depth (and stencil) into `dst` (the same size and depth
+    // format), so a pass can sample the scene's depth while it stays bound.
+    virtual void copyDepth(TargetId src, TargetId dst) = 0;
     virtual void destroyTarget(TargetId t) = 0;
 
     // Frames. beginFrame waits until at most one earlier frame is still on

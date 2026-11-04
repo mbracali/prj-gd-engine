@@ -69,7 +69,7 @@ bool ScreenFx::init(gfx::RenderDevice& dev, std::shared_ptr<const matlib::Librar
 
 void ScreenFx::shutdown() {
     if (!dev_) return;
-    for (Target* t : {&scene_, &quarterA_, &quarterB_, &copyA_, &copyB_}) {
+    for (Target* t : {&scene_, &quarterA_, &quarterB_, &copyA_, &copyB_, &depthCopy_}) {
         if (t->id) dev_->destroyTarget(t->id);
         *t = {};
     }
@@ -341,6 +341,24 @@ void ScreenFx::end(const Params& p, gfx::TargetId into) {
     dev_->setTarget(outer_);
     dev_->setViewport(ox_, oy_, ow_, oh_);
     outer_ = realOuter, ox_ = rx, oy_ = ry, ow_ = rw, oh_ = rh;
+}
+
+gfx::TextureId ScreenFx::depthSnapshot() {
+    if (!dev_ || !scene_.id) return {};
+    if (!depthCopy_.id || depthCopy_.w != scene_.w || depthCopy_.h != scene_.h) {
+        if (depthCopy_.id) dev_->destroyTarget(depthCopy_.id);
+        depthCopy_ = {};
+        std::string err;
+        gfx::TargetDesc d;
+        d.width = scene_.w, d.height = scene_.h, d.depth = true, d.stencil = true;  // the scene's D24S8
+        depthCopy_.id = dev_->createTarget(d, err);
+        if (!depthCopy_.id) return {};
+        depthCopy_.w = scene_.w, depthCopy_.h = scene_.h;
+        dev_->setTarget(scene_.id);  // createTarget unbinds
+        dev_->setViewport(0, 0, scene_.w, scene_.h);
+    }
+    dev_->copyDepth(scene_.id, depthCopy_.id);
+    return dev_->targetDepth(depthCopy_.id);
 }
 
 }  // namespace screenfx

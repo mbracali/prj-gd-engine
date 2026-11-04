@@ -158,6 +158,7 @@ public:
     TargetId createTarget(const TargetDesc& desc, std::string& error) override;
     TextureId targetTexture(TargetId t) const override;
     TextureId targetDepth(TargetId t) const override;
+    void copyDepth(TargetId src, TargetId dst) override;
     void destroyTarget(TargetId t) override;
     void beginFrame() override;
     void setTarget(TargetId t) override;
@@ -689,6 +690,21 @@ TextureId GlDevice::targetTexture(TargetId t) const {
 TextureId GlDevice::targetDepth(TargetId t) const {
     const GlTarget* p = targets_.get(t.id);
     return p ? p->depth : TextureId{};
+}
+
+void GlDevice::copyDepth(TargetId src, TargetId dst) {
+    const GlTarget* a = targets_.get(src.id);
+    const GlTarget* b = targets_.get(dst.id);
+    if (!a || !b || !a->depth.id || !b->depth.id || a->w != b->w || a->h != b->h) return;
+    gl::glBindFramebuffer(GL_READ_FRAMEBUFFER, a->fbo);
+    gl::glBindFramebuffer(GL_DRAW_FRAMEBUFFER, b->fbo);
+    // As is: the scene targets already hold rows as GH3's shaders address
+    // them (a flipped copy cut the beams at the wrong silhouettes).
+    gl::glBlitFramebuffer(0, 0, a->w, a->h, 0, 0, b->w, b->h, GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT, GL_NEAREST);
+    // Back to the target that was bound.
+    const GlTarget* t = targets_.get(target_.id);
+    const GlTarget* frame = frameOn_ ? targets_.get(frame_.id) : nullptr;
+    gl::glBindFramebuffer(GL_FRAMEBUFFER, t ? t->fbo : frame ? frame->fbo : 0);
 }
 
 void GlDevice::destroyTarget(TargetId id) {

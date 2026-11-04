@@ -493,9 +493,24 @@ them like the lights [I].
   the camera z axis squared. Blend ONE / ONE, cull none, depth tested, no
   z write; drawn after the scene and before the screen effects (so
   bloomed). Defaults: density 0.5, start 0, end 10, inner 0, range 10.
-  gd04 does all of this. Not done: the `volume` / `normal` types
-  (_Raytrace_cone templates, a 20-segment circle mesh and the depth
-  buffer: 9 objects), projectors (_Projector_StageOnly).
+  gd04 does all of this.
+- Raytraced volumes (`volume`: 14 housings in 7 venues) [C: the shaders;
+  Function_823B4B68 does not decompile]: _Raytrace_cone_volume over a
+  closed 20-segment cone (Function_823B4368's count); the VS reads a vertex
+  (cx, cy, t) as radius start + (end - start) t, z = t x range along the
+  beam. VS g_ConeSize_VS c1 (start, end, range, density), g_UVOffset c15,
+  g_UVScale c16; PS g_CameraPosition_ObjectSpace_VS c0, g_ConeColor c2,
+  g_ViewProjInv c3..c6 (screen x, y and depth to the world), g_coeff c17 =
+  (-, k^2, 2ak, a^2) for the cone x^2 + y^2 = (a + kz)^2 (read from the
+  shader's quadratic), m_Texture s0 (the smoke), g_DepthBufferTexture s1:
+  the chord through the cone in front of the scene's depth x the colour x
+  the smoke. gd04 draws it additively, far faces, no depth test, over a
+  copy of the scene's depth [I: the states].
+- Not done: the projectors (_Projector_StageOnly: Function_823B4B68 builds
+  the frustum from a quad at the housing and one at `range` with the end
+  radius (823B6D74..823B7354), a depth map from the projector
+  (g_ViewToLightProjection0/1, g_sampShadowMap0/1, 4-tap PCF) and the
+  stage's meshes drawn again with it).
 
 ### Particles and pyro  [C scripts; I: the emitter model]
 
@@ -536,9 +551,8 @@ own quad builders (VMX128 code not decoded), lit quick materials.
 The effect passes' own render and sampler states (gd04 uses the scene
 material's, which 823DC180 applies over them), the ReducedLOD technique
 [I: the venues fit inside lod_dist1, 150 m]. Approximated (0.1.12): the
-`volume` / `normal` housings draw as the ConeImpostor beam (GH3 ray-marches
-them over the depth buffer), the stageonly projectors as a pool of their
-colour where the beam meets the stage. The band receives the dynamic
+stageonly projectors as a pool of their colour where the beam meets the
+stage (off by default). The band receives the dynamic
 shadow (DynamicShadowReciever). Band_WalkToNode has no caller on the disc
 (no walks, no cameras_walk in GH3 either).
 

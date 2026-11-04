@@ -22,6 +22,7 @@ VenueStage::~VenueStage() {
         SDL_Log("venue: %llu scripted particle systems, %llu frames with Tesla bolts, %llu projector pools drawn",
                 (unsigned long long)(particles_ ? particles_->scriptedCreated : 0), (unsigned long long)teslaFrames,
                 (unsigned long long)projectorPools);
+    if (view_ && view_->stats().raytraced) SDL_Log("venue: %llu raytraced beam draws", (unsigned long long)view_->stats().raytraced);
     fx_.shutdown();
     if (device_ && shadow_) device_->destroyTarget(shadow_);
 }
@@ -480,6 +481,8 @@ void VenueStage::draw(double ms) {
     if (band_) band_->draw(ms, cam, *venue_, lightState_, lights_);
     if (peds_) peds_->draw(ms, cam, *venue_, lightState_, lights_, particles_.get());
     view_->drawVolumes(cam, lights_);
+    static const bool noRays = SDL_getenv("GD04_NO_RAYTRACE") != nullptr;  // development aid: compare without the `volume` beams
+    if (fx && !noRays && view_->hasRaytraced()) view_->drawRaytraced(cam, lights_, fx_.depthSnapshot());
     if (particles_) particles_->draw(cam, ms);
     // gd02's extras (EnhancedLights) work in GH2's space (z up, ~44 units a
     // metre): the band's feet and the camera mapped there, and back by the matrix [I].

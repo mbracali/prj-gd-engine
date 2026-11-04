@@ -49,6 +49,11 @@ public:
     // _Cone_Impostor template on a camera-facing quad along the beam), drawn
     // after the band (additive, depth tested).
     void drawVolumes(const venue::CamPose& cam, const venue::LightShow& show);
+    // The `volume` housings: GH3's _Raytrace_cone_volume over a closed
+    // 20-segment cone, ray-cast against the scene's depth (a copy). An
+    // empty texture: not drawn.
+    void drawRaytraced(const venue::CamPose& cam, const venue::LightShow& show, gfx::TextureId depth);
+    bool hasRaytraced() const { return !rays_.empty(); }
     // A viewport texture override (CreateViewportTextureOverride: the crowd's
     // renders on the cards); an empty id removes it.
     // Moving level objects (render/particles.h nodeMotion): a node's world
@@ -73,6 +78,7 @@ public:
         size_t drawsLastFrame = 0;
         size_t gh3Meshes = 0, fallbackMeshes = 0;  // drawn with GH3's shaders / the approximation
         size_t housings = 0;
+        size_t raytraced = 0;  // `volume` beam draws (all frames)
     };
     const Stats& stats() const { return stats_; }
 
@@ -118,6 +124,7 @@ private:
     std::vector<Mat> mats_;
     std::unordered_map<uint32_t, gfx::TextureId> overrides_;
     std::vector<int> cones_;  // nodes of the ConeImpostor housings
+    std::vector<int> rays_;   // nodes of the `volume` housings (raytraced)
     gfx::TextureId smoke_;    // the beams' smoke texture
     struct Flare {
         gfx::QueryId a, b;   // all pixels / depth-tested pixels of the occlusion quad
@@ -130,7 +137,8 @@ private:
     gfx::Mat4 shadowVP_;
     int shadowSize_ = 1024;
     float shadowIntensity_ = 0.35f;
-    gfx::BufferId coneVb_, coneIb_;
+    gfx::BufferId coneVb_, coneIb_, rayVb_, rayIb_;
+    uint32_t rayCount_ = 0;
     gh3shader::Programs gh3_;
     std::function<bool(uint32_t, gfx::Mat4&)> motion_;
     std::function<int(uint32_t)> visible_;
