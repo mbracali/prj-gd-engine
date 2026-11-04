@@ -77,6 +77,7 @@ public:
     const std::vector<Entry>& members() const { return members_; }
     std::vector<Entry>& members() { return members_; }
     const BandView* view() const { return view_.get(); }
+    BandView* view() { return view_.get(); }
     // A member's accessory-bone ragdoll (null: none), as the band's members
     // get it (shared with the menus' characters, ui/menu_objects.h);
     // `globalPak`: ZONES/global.pak, loaded on first use.

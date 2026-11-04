@@ -44,6 +44,12 @@ public:
     // A shadow pass: GH3's shaders with these engine constants (the light's
     // view and projection) instead of the camera's; null: off.
     void setShadowPass(const gh3shader::Globals* g) { shadowPass_ = g; }
+    // The venue's dynamic shadow map this frame (VenueView::setShadow's):
+    // opaque meshes draw with their templates' DynamicShadowReciever
+    // technique where they have one. An empty texture: none.
+    void setShadow(gfx::TextureId depth, const gfx::Mat4& lightViewProj, int size, float intensity) {
+        shadowTex_ = depth, shadowVP_ = lightViewProj, shadowSize_ = size, shadowIntensity_ = intensity;
+    }
     // Reuse the vertices the last draw skinned (a second pass in the same frame).
     void setReuseSkinning(bool on) { reuseSkin_ = on; }
     // `flipY`: drawn upside down (a target sampled as a texture).
@@ -77,6 +83,7 @@ private:
         float alphaRef = 0;
         int8_t stencil = -1;  // the material's stencil reference (+0xdc; -1: none) [C 823DC180]
         const gh3shader::Program* gh3 = nullptr;
+        const gh3shader::Program* receiver = nullptr;  // its DynamicShadowReciever technique (null: none)
         int mat = -1;  // index into mats_
     };
     struct SrcVertex {
@@ -100,6 +107,10 @@ private:
     gfx::ProgramId program_;
     std::shared_ptr<const matlib::Library> lib_;
     gh3shader::Programs gh3_;
+    gfx::TextureId shadowTex_;
+    gfx::Mat4 shadowVP_;
+    int shadowSize_ = 1024;
+    float shadowIntensity_ = 0.35f;
     std::vector<Mat> mats_;
     double seconds_ = 0;
     float aspect_ = 16.0f / 9.0f;

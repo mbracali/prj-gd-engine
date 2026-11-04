@@ -348,6 +348,7 @@ void VenueStage::advance(double ms) {
 
 void VenueStage::shadowPass(double ms) {
     view_->setShadow({}, gfx::Mat4{}, 1024, 0.35f);
+    if (band_ && band_->view()) band_->view()->setShadow({}, gfx::Mat4{}, 1024, 0.35f);
     if (!shadow_ || !band_ || !device_) return;
     // The shadow light: the strongest of the band group's directional lights
     // pointing down [I: GH3's SetShadowDirFromLight is not called by the
@@ -417,6 +418,7 @@ void VenueStage::shadowPass(double ms) {
     dev.setViewport(vx, vy, vw, vh);
     static const float intensity = SDL_getenv("GD04_SHADOW_INTENSITY") ? float(std::atof(SDL_getenv("GD04_SHADOW_INTENSITY"))) : 0.35f;
     view_->setShadow(dev.targetDepth(shadow_), vp, 1024, intensity);
+    if (band_->view()) band_->view()->setShadow(dev.targetDepth(shadow_), vp, 1024, intensity);
 }
 
 void VenueStage::draw(double ms) {

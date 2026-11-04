@@ -16,6 +16,11 @@
 #include "render/venue_view.h"
 
 namespace {
+// GD04_NO_BAND_SHADOWS=1: the band does not receive the shadow map (development aid).
+bool noBandShadows() {
+    static const bool off = SDL_getenv("GD04_NO_BAND_SHADOWS") != nullptr;
+    return off;
+}
 
 constexpr uint32_t K(const char* s) { return qbkey::key(s); }
 constexpr int kMaxLights = 16;
@@ -238,6 +243,7 @@ int BandView::add(gfx::RenderDevice& dev, const band::Model& model, std::string&
                 // GH3's template: material constants and its textures in sampler order.
                 if (gh3_.ready())
                     if (const gh3shader::Program* gp = gh3_.get(mat->shader)) {
+                        out.receiver = gh3_.get(mat->shader, matlib::DynamicShadowReceiver);
                         Mat mm;
                         const float ref = out.mode == Mode::Opaque ? out.alphaRef : std::max(out.alphaRef, 0.02f);
                         gh3shader::fillMaterialConstants(*mat, ref > 0 ? ref : -1.0f, mm.consts);
@@ -307,7 +313,19 @@ void BandView::draw(const venue::CamPose& cam, const std::vector<Instance>& inst
     std::vector<gfx::UniformData> matVs(mats_.size()), matPs(mats_.size());
     if (!mats_.empty()) {
         if (shadowPass_) globals = *shadowPass_;
-        else VenueView::cameraGlobals(cam, d.info().clipDepthZeroToOne, seconds_, globals, nullptr, aspect_, flipY_);
+        else {
+            gfx::Mat4 viewM;
+            VenueView::cameraGlobals(cam, d.info().clipDepthZeroToOne, seconds_, globals, nullptr, aspect_, flipY_, &viewM);
+            if (shadowTex_) {  // as VenueView::draw's receivers [C: the DynamicShadowReciever microcode]
+                const gfx::Mat4 v2l = shadowVP_ * viewM.inverseAffine();
+                globals.setMatrix(gh3shader::kRegViewToLight0, v2l, 4);
+                globals.setMatrix(gh3shader::kRegViewToLight1, v2l, 4);
+                globals.set(gh3shader::kRegShadowMapConstants, 0, 0, 0, 1e9f);
+                globals.set(gh3shader::kRegShadowLevel, 0, 0, 1.0f - shadowIntensity_, shadowIntensity_);
+                const float sz = float(shadowSize_);
+                globals.set(gh3shader::kRegShadowMapSize, sz, sz, 1.0f / sz, 1.0f / sz);
+            }
+        }
         gframe = d.stageUniforms(&globals, sizeof globals);
     } else if (shadowPass_) {
         return;  // the approximation casts no shadows
@@ -455,6 +473,13 @@ void BandView::draw(const venue::CamPose& cam, const std::vector<Instance>& inst
                 for (int k = 0; k < 16; ++k) {
                     gc.textures[k] = mats_[mi].tex[k];
                     gc.samplers[k] = {gfx::Filter::Trilinear, gfx::Wrap::Repeat, 0};
+                }
+                if (shadowTex_ && !shadowPass_ && mesh.receiver && mesh.mode == Mode::Opaque && !noBandShadows()) {
+                    gc.program = mesh.receiver->id;
+                    for (int k = 0; k < 14; ++k)
+                        if ((mesh.receiver->samplers >> k & 1) && !gc.textures[k]) gc.textures[k] = gh3_.white();
+                    gc.textures[14] = gc.textures[15] = shadowTex_;  // g_sampShadowMap0 / 1
+                    gc.samplers[14] = gc.samplers[15] = {gfx::Filter::Nearest, gfx::Wrap::Clamp, 0};
                 }
                 gc.state.depthTest = true;
                 gc.state.depthFunc = gfx::CompareFunc::LessEqual;
