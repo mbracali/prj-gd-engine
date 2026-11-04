@@ -156,7 +156,13 @@ void addSoundNatives(qs::Vm& vm, Sfx& sfx, const Disc& disc) {
         loadedBanks->insert(name);
         return true;
     });
-    vm.addNative("SongUnLoadFSB", [](Vm&, ScriptRun&, qb::Struct&) { return true; });
+    // SongUnLoadFSB: the bank goes, and with it the preview playing from it
+    // (the setlist's buss Music_Setlist): a preview never outlives its song's
+    // bank (it played on into the next song) [C script setlist_songpreview_monitor; I: the buss].
+    vm.addNative("SongUnLoadFSB", [&sfx](Vm&, ScriptRun&, qb::Struct&) {
+        sfx.stopBuss(K("Music_Setlist"));
+        return true;
+    });
     // IsSoundPlaying <sample>: a voice of it still sounding (the preview's loop).
     vm.addNative("IsSoundPlaying", [&sfx](Vm&, ScriptRun&, qb::Struct& p) {
         const qb::Value* s = firstUnnamed(p);

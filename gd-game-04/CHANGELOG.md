@@ -19,6 +19,8 @@ All notable changes for players. Versions follow SemVer; release tags are
 - Lou's finish and defeat scenes play with their animations and cameras.
 
 ### Fixed
+- The venues' scripted cameras (Backyard Bash's intro, every encore, the boss cameras) play; they started in a wrong spot (GD04-061).
+- A song's preview stops when the song starts (GD04-061).
 - Song previews play again on the setlist (GD04-059).
 - Career venue select moves one venue per press (GD04-059).
 - Removed the experimental ground fog and the light streaks; the band's self-shadowing and the approximated projector and volume lights are off (GD04-059).

@@ -234,6 +234,8 @@ void CameraDirector::startShot(double t) {
     static const bool camLog = std::getenv("GD04_CAMLOG") != nullptr;
     if (camLog) SDL_Log("camera: %.0f ms shot from %s (change now %d, next %.0f ms)", t, prefix_.c_str(), int(changeNow_), nextTimeMs_);
     changeNow_ = false;
+    if (scriptRun_ && stopScript) stopScript(scriptRun_);  // the last shot's camera script ends with it
+    scriptRun_ = 0, haveMorph_ = false, scriptPending_ = false;
     // CameraCuts_Performance [I: CameraCuts_Performance starts good; the crowd's
     // performance is set by C code (cameracuts_setparams), here the rock meter's band].
     const Performance perf = perf_ ? perf_->at(t) : Performance::Good;
@@ -333,8 +335,13 @@ void CameraDirector::startShot(double t) {
             for (const qb::Value& k : kf->arr->values) keys_.push_back(readCam(structOf(&k)));
         else
             keys_ = {cam("cam1"), cam("cam2"), cam("Cam3"), cam("Cam4")};
+    } else if (script && startScript && (scriptRun_ = startScript(script, t)) != 0) {
+        // A venue's own control script (the intro, encore, boss): run by
+        // the zone VM, which morphs the camera (scriptMorph) [C scripts].
+        ctl_ = Ctl::Script;
     } else {
-        // A venue's own control script (encore, boss): its first camera [I].
+        // A control script the VM does not have (yet): its first camera [I].
+        scriptPending_ = script != 0;
         Keyed k = cam("cam1");
         keys_.push_back(k.valid ? k : readCam(params));
     }
@@ -477,6 +484,14 @@ void CameraDirector::starPower(double ms, bool on) {
 }
 
 CamPose CameraDirector::pose(double ms) const {
+    if (ctl_ == Ctl::Script) {
+        // ccam_domorph: from the pose at the call to its target over `time` (0: at once) [C].
+        if (!haveMorph_) return lastPose_;
+        const CamPose to = world(morphTo_);
+        const float u = morphDur_ > 0 ? float(std::clamp((ms - morphStart_) / morphDur_, 0.0, 1.0)) : 1.0f;
+        lastPose_ = u >= 1.0f ? to : blend(morphFrom_, to, smooth(u));
+        return lastPose_;
+    }
     if (keys_.empty()) return {};
     const double since = (ms - shot_.start) / 1000.0;  // s since the cut
     const double span = std::max(1e-3, camTime_);
@@ -542,7 +557,7 @@ CamPose CameraDirector::pose(double ms) const {
         break;
     }
     }
-    if (ctl_ != Ctl::Spline) p = aim(p, k0, k1, mix, ms);
+    if (ctl_ != Ctl::Spline && ctl_ != Ctl::Script) p = aim(p, k0, k1, mix, ms);
     if (handCam_ && !noShake) {  // Enhanced > Disable Shaky Camera: off
         // CameraCuts_SetHandCamParams: motionx / motiony, amplitude 0.034 /
         // 0.04, period base 0.013 / 0.017 per frame with multiples 1, 3, 4 [C
@@ -556,7 +571,25 @@ CamPose CameraDirector::pose(double ms) const {
         const float yaw = 0.034f * 0.25f * sway(0.013), pitch = 0.04f * 0.25f * sway(0.017);
         p.rot = mul(p.rot, mul(yRot(yaw), Quat{std::sin(pitch * 0.5f), 0, 0, std::cos(pitch * 0.5f)}));
     }
+    lastPose_ = p;
     return p;
+}
+
+void CameraDirector::retryScript() {
+    if (!scriptPending_ || !startScript || !shot_.script) return;
+    scriptPending_ = false;
+    if ((scriptRun_ = startScript(shot_.script, shot_.start)) != 0) ctl_ = Ctl::Script, keys_.clear();
+}
+
+void CameraDirector::scriptMorph(const qb::Struct& params, double ms) {
+    Keyed k = readCam(&params);
+    if (!k.valid) return;
+    morphFrom_ = haveMorph_ ? pose(ms) : world(k);
+    morphTo_ = k;
+    morphStart_ = ms;
+    const qb::Value* tm = params.find(K("time"));
+    morphDur_ = tm ? double(tm->number()) * 1000.0 : 0.0;
+    haveMorph_ = true;
 }
 
 // lookat / lookatbone / screenoffset: the camera turns (the least rotation

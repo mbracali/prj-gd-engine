@@ -171,6 +171,21 @@ bool Particles::start(const Disc& disc, const Globals& g, const venue::Venue& v,
         return true;
     });
     vm_->addNative("shadow", [](qs::Vm&, qs::ScriptRun&, qb::Struct&) { return true; });
+    // The camera scripts' calls [C scripts CameraCuts_NewIntro, <zone>_camera_encore]:
+    // ccam_domorph {LockTo pos Quat FOV time}; ccam_waitmorph waits for it;
+    // the hand-cam amplitudes, the crowd-model switch and CameraCuts_CalcTime /
+    // WaitScript are the director's (its shot length) [I].
+    vm_->addNative("ccam_domorph", [this](qs::Vm&, qs::ScriptRun&, qb::Struct& p) {
+        if (camMorph) camMorph(p, vmTime_);
+        return true;
+    });
+    vm_->addNative("ccam_waitmorph", [this](qs::Vm&, qs::ScriptRun& run, qb::Struct&) {
+        if (!camMorphDone || camMorphDone(vmTime_)) return true;
+        run.waitFor = [this] { return !camMorphDone || camMorphDone(vmTime_); };
+        return true;
+    });
+    for (const char* n : {"CameraCuts_SetHandCamParams", "enable_crowd_models_cfunc", "CameraCuts_CalcTime", "CameraCuts_WaitScript"})
+        vm_->addNative(n, [](qs::Vm&, qs::ScriptRun&, qb::Struct&) { return true; });
     vm_->addNative("IsCreated", [this](qs::Vm&, qs::ScriptRun&, qb::Struct& p) {
         const qb::Value* n = qs::Vm::positional(p);
         const venue::Node* node = n ? v_->node(keyOf(n)) : nullptr;
@@ -766,6 +781,24 @@ void Particles::destroyNamed(uint32_t name) {
 void Particles::stopEmitting(uint32_t name, double t) {
     for (System& s : systems_)
         if (name && s.name == name) s.p.lifetime = std::max(0.0f, std::min(s.p.lifetime, float((t - s.start) / 1000.0 - s.p.delay)));
+}
+
+uint32_t Particles::spawnCameraScript(uint32_t script) {
+    static const bool camLog = std::getenv("GD04_CAMLOG") != nullptr;
+    if (!vm_ || !vm_->code(script)) {
+        if (camLog) {
+            const qb::Value* gv = vm_ ? vm_->global(script) : nullptr;
+            SDL_Log("camera: no script %s in the zone VM (global: %s, type %d)", qbkey::name(script).c_str(), gv ? "yes" : "no", gv ? int(gv->type) : -1);
+        }
+        return 0;
+    }
+    const uint32_t run = vm_->spawn(script, qb::Struct{});
+    if (camLog) SDL_Log("camera: script %s started (run %u)", qbkey::name(script).c_str(), run);
+    return run;
+}
+
+void Particles::killRun(uint32_t run) {
+    if (vm_ && run) vm_->kill(run);
 }
 
 bool Particles::hasNamed(uint32_t name) const {

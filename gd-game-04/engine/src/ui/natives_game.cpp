@@ -206,6 +206,7 @@ void addGameNatives(FrontEnd& fe, const Disc& disc, TextureCache& textures) {
         // The script's Menu_Music_Off first: the menu music stops as the song
         // loads (it played on into the song once the port's sounds were heard) [C script start_gem_scroller].
         v.run(K("Menu_Music_Off"), qb::Struct{});
+        v.run(K("SongUnLoadFSB"), qb::Struct{});  // the setlist's preview stops as the song loads
         const double until = v.loadingHoldUntil();
         if (v.clockMs() >= until) return startScroller(v, run, p);
         auto params = std::make_shared<qb::Struct>(p);

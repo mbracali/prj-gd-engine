@@ -153,6 +153,13 @@ public:
     std::unordered_map<uint32_t, Tesla> teslas;
     uint64_t scriptedCreated = 0;
     uint32_t shadowLight = 0;  // SetShadowDirFromLight's light (0: none)
+    // The camera director's script shots (CameraDirector::startScript): the
+    // zone VM runs the control script; its ccam_domorph / ccam_waitmorph
+    // reach the director through these.
+    std::function<void(const qb::Struct& params, double ms)> camMorph;
+    std::function<bool(double ms)> camMorphDone;
+    uint32_t spawnCameraScript(uint32_t script);
+    void killRun(uint32_t run);
 private:
     std::unordered_map<uint32_t, Wind> winds_;
 public:

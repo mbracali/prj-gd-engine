@@ -219,10 +219,18 @@ bool VenueStage::start(const Disc& disc, const Globals& g, const std::string& zo
         std::string perr;
         particles_->setLightShow(&lights_);
         particles_->bonePos = [this](uint32_t member, uint32_t bone, venue::Vec3& out) { return band_ && band_->bonePos(member, bone, out); };
+        // The camera's script shots run on the zone VM (CameraCuts_NewIntro, the encores, the boss cameras).
+        particles_->camMorph = [this](const qb::Struct& p, double ms) { cameras_.scriptMorph(p, ms); };
+        particles_->camMorphDone = [this](double ms) { return cameras_.scriptMorphDone(ms); };
+        cameras_.startScript = [this](uint32_t script, double) { return particles_ ? particles_->spawnCameraScript(script) : 0u; };
+        cameras_.stopScript = [this](uint32_t run) {
+            if (particles_) particles_->killRun(run);
+        };
         if (!particles_->start(disc, g, *venue_, chart, &perf_, -leadInMs, perr)) {
             if (!perr.empty()) SDL_Log("particles: %s", perr.c_str());
             particles_.reset();
         }
+        cameras_.retryScript();  // the intro's, started before the VM was there
     }
     // The stage peds: their trigger scripts run on the zone VM (Particles).
     peds_.reset();

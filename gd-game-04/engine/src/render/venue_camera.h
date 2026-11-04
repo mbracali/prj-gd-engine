@@ -66,6 +66,18 @@ public:
     void update(double ms, const PerfTimeline& perf);
     // The camera at song time `ms` (>= the last update's time).
     CamPose pose(double ms) const;
+    // A venue's camera script (controlscript not one of the CameraCuts_*
+    // the director plays itself: CameraCuts_NewIntro, <zone>_camera_encore,
+    // the boss cameras): run by the zone's VM (render/particles), which
+    // calls scriptMorph for its ccam_domorph and asks scriptMorphDone for
+    // ccam_waitmorph [C scripts]. startScript returns the run (0: none).
+    std::function<uint32_t(uint32_t script, double ms)> startScript;
+    std::function<void(uint32_t run)> stopScript;
+    void scriptMorph(const qb::Struct& params, double ms);
+    bool scriptMorphDone(double ms) const { return ms >= morphStart_ + morphDur_; }
+    // The current shot's control script again, once startScript can run it
+    // (the first shot starts in init, before the zone VM exists).
+    void retryScript();
     // Star Power switched on / off at song time `ms` (>= the last update's
     // time) in a one-player song: StarPowerOn spawns do_starpower_camera
     // (current_num_players = 1), its end Kill_StarPower_Camera [C:
@@ -147,9 +159,16 @@ private:
     Shot shot_;
     int cuts_ = 0;
     std::vector<Shot> history_;
-    enum class Ctl : uint8_t { Static, TwoCam, HandCam, HandCamZoom2, QuickZoom, Pan, Orbit, OrbitMorph, Spline };
+    enum class Ctl : uint8_t { Static, TwoCam, HandCam, HandCamZoom2, QuickZoom, Pan, Orbit, OrbitMorph, Spline, Script };
     Ctl ctl_ = Ctl::Static;
     std::vector<Keyed> keys_;     // cam1 / cam2 / ... (or the single params pose)
+    uint32_t scriptRun_ = 0;      // Ctl::Script: the zone VM's run
+    bool scriptPending_ = false;  // a control script with no VM to run it yet
+    bool haveMorph_ = false;
+    CamPose morphFrom_;
+    Keyed morphTo_;
+    double morphStart_ = 0, morphDur_ = 0;
+    mutable CamPose lastPose_;
     double calcAt_ = 0, camTime_ = 0;  // when CalcTime ran and the camera_time it returned (s)
     float zoomFov_ = 0;           // HandCam's random zoom target (0: none)
     float orbitRad_ = 0;          // total orbit angle
