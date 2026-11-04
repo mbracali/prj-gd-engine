@@ -19,6 +19,10 @@ All notable changes for players. Versions follow SemVer; release tags are
 - Lou's finish and defeat scenes play with their animations and cameras.
 
 ### Fixed
+- Menu music played over itself and on into songs; sound events keep GH3's instance limits and the song stops the menu music (GD04-057).
+- The Neversoft logo video had no sound; videos now play all their audio tracks (GD04-057).
+- The band's intro stance was lost; the venue's intro crowd sound plays (GD04-057).
+- The Enhanced and Gamepads pages show the band behind them, and their help items look like GH3's (GD04-057).
 - Practice played the whole song instead of the chosen section; it now ends at the section's end and shows its results (GD04-043).
 - The Soundcheck venue's shadow comes from its own light (SetShadowDirFromLight) (GD04-043).
 - Menu sounds, menu music, crowd and every other sound effect were silent: they were dropped before reaching the audio device (GD04-048).

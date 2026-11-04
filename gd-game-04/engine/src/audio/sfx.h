@@ -31,9 +31,15 @@ public:
     void addFsb(const Disc& disc, const std::string& fsbPath, const std::string& datPath);
     // Plays a sample; volume 1 = as recorded, pitch 1 = normal. Returns a
     // voice id (0: unknown sample).
-    uint32_t play(uint32_t sample, float volume, float pitch);
+    // `buss`: the voice's FMOD buss key (0: none) for the buss calls below.
+    uint32_t play(uint32_t sample, float volume, float pitch, uint32_t buss = 0);
     bool playing(uint32_t voice) const;
     void stop(uint32_t voice);
+    // StopSound <sample>: every voice of that sample.
+    void stopSample(uint32_t sample);
+    // StopSoundsByBuss / PauseSoundsByBuss / UnPauseSoundsByBuss.
+    void stopBuss(uint32_t buss);
+    void pauseBuss(uint32_t buss, bool paused);
     void stopAll();
     // Frees finished voices (call once a frame).
     void update();
@@ -65,6 +71,8 @@ private:
     struct Voice {
         uint32_t id;
         SDL_AudioStream* stream;
+        uint32_t sample = 0, buss = 0;
+        bool paused = false;
     };
     std::vector<Voice> voices_;
     uint32_t nextVoice_ = 1;

@@ -84,6 +84,7 @@ public:
     const Highway2D& highway() const { return highway_; }
     const Highway2D& highway2() const { return highway2_; }
     double startMs() const { return startMs_; }
+    const std::string& introCameras() const { return introCameras_; }
     const Match& match() const { return *match_; }
     const Hud2P& hud2p() const { return hud2p_; }
     const Chart& chart() const { return chart_; }

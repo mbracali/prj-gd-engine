@@ -42,6 +42,8 @@ public:
     // `title`: GH3's title font (fontgrid_title_gh3, the main menu's), else
     // its body font (text_a5, the options menu's).
     void text(const std::string& s, float x, float y, float h, const Color& c, uint32_t align, bool title = false);
+    // A GH3 texture over x0..x1, y0..y1 (the page's slide and fade applied); false if not loaded.
+    bool sprite(uint32_t texture, float x0, float y0, float x1, float y1, const Color& c, bool flipU = false);
     float width(const std::string& s, float h, bool title = false) const;
     std::string fit(std::string s, float h, float width, bool title = false) const;
     std::vector<std::string> wrap(const std::string& s, float width, float h) const;

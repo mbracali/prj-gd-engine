@@ -129,6 +129,11 @@ public:
     void drawText(Canvas& c, uint32_t font, const std::string& s, float x, float y, float h, const std::array<uint8_t, 4>& rgba,
                   uint32_t align, const TextStyle& style) const;
     float textWidth(uint32_t font, const std::string& s, float h, float spacing = 0) const;
+    // A script text's \m<n> button codes as the buttons font's glyphs (SetProps text) [C 0x8228E0B0].
+    std::string setText(const std::string& s) const;
+    // A GH3 texture (by key) stretched over x0..x1, y0..y1 in menu units,
+    // flipped left-right if `flipU`; false if the texture is not loaded.
+    bool drawSprite(Canvas& c, uint32_t texture, float x0, float y0, float x1, float y1, const std::array<uint8_t, 4>& rgba, bool flipU = false) const;
     // A font's line height in its own units (0 if the font is not loaded).
     float fontLineHeight(uint32_t font) const;
     // The mouse over GH3's menus: the focused menus' items, hit-tested at
@@ -163,7 +168,6 @@ private:
     std::vector<std::u16string> blockLines(const FontEntry& fe, const Element& e) const;
     // SetText: "\m<n>" (a meta button) becomes "\b<glyph>" through
     // meta_button_map, "\_" a space [C 0x8231A2C8, 0x8228E0B0].
-    std::string setText(const std::string& s) const;
     // A text element's glyphs (its shadow with `shadowPass`) at the corner
     // (cx, cy), world scale / alpha / rotation.
     void drawElementText(Canvas& c, const Element& e, const FontEntry& fe, float cx, float cy, float wsx, float wsy, float wa, float wrot,

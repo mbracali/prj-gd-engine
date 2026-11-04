@@ -21,6 +21,7 @@
 #include <condition_variable>
 #include <cstddef>
 #include <cstring>
+#include <cstdint>
 #include <deque>
 #include <mutex>
 #include <optional>
@@ -149,6 +150,13 @@ struct MoviePlayer::Impl {
     AVCodecContext* vctx = nullptr;
     AVCodecContext* actx = nullptr;
     int vIndex = -1, aIndex = -1;
+    // The other audio tracks (GH3's Bink movies carry 5.1 as six mono
+    // tracks; ns_logo's sound is all outside the first): decoded alongside
+    // and mixed down to stereo with the first [I: the track order L R C LFE Ls Rs].
+    std::vector<int> extraIndex;
+    std::vector<AVCodecContext*> extraCtx;
+    std::vector<std::deque<float>> pending;  // per track (0: aIndex), mono samples not mixed yet
+    bool multi() const { return !extraIndex.empty(); }
     double startMs = 0;  // the earliest stream start
     AVPacket* pkt = nullptr;
     AVFrame* frame = nullptr;
@@ -173,6 +181,8 @@ struct MoviePlayer::Impl {
         av_packet_free(&pkt);
         avcodec_free_context(&vctx);
         avcodec_free_context(&actx);
+        for (AVCodecContext*& c : extraCtx) avcodec_free_context(&c);
+        extraCtx.clear();
         if (fmt) {
             AVIOContext* pb = fmt->pb;
             avformat_close_input(&fmt);
@@ -263,7 +273,57 @@ struct MoviePlayer::Impl {
         }
     }
 
+    // One of several tracks: its samples (channels averaged) into its
+    // pending queue, then every sample all tracks have into the stereo mix.
+    void receiveTrack(size_t t, AVCodecContext* c) {
+        while (avcodec_receive_frame(c, frame) == 0) {
+            const int n = frame->nb_samples, chans = std::max(1, c->ch_layout.nb_channels);
+            const auto sf = AVSampleFormat(frame->format);
+            const bool planar = av_sample_fmt_is_planar(sf);
+            for (int i = 0; i < n; ++i) {
+                float sum = 0;
+                for (int ch = 0; ch < chans; ++ch) {
+                    const int plane = planar ? ch : 0, at = planar ? i : i * chans + ch;
+                    switch (av_get_packed_sample_fmt(sf)) {
+                    case AV_SAMPLE_FMT_FLT: sum += reinterpret_cast<const float*>(frame->extended_data[plane])[at]; break;
+                    case AV_SAMPLE_FMT_S16: sum += reinterpret_cast<const int16_t*>(frame->extended_data[plane])[at] / 32768.0f; break;
+                    case AV_SAMPLE_FMT_S32: sum += float(reinterpret_cast<const int32_t*>(frame->extended_data[plane])[at] / 2147483648.0); break;
+                    default: break;
+                    }
+                }
+                pending[t].push_back(sum / float(chans));
+            }
+            av_frame_unref(frame);
+        }
+        mixPending(false);
+    }
+    void mixPending(bool flush) {
+        size_t n = SIZE_MAX, most = 0;
+        for (const auto& q : pending) n = std::min(n, q.size()), most = std::max(most, q.size());
+        if (flush) n = most;
+        if (!n || n == SIZE_MAX) return;
+        // L R C LFE Ls Rs to stereo: the centre and LFE in both at 0.707 / 0.5, the surrounds on their side at 0.707.
+        static constexpr float kL[6] = {1, 0, 0.707f, 0.5f, 0.707f, 0}, kR[6] = {0, 1, 0.707f, 0.5f, 0, 0.707f};
+        std::vector<float> buf(n * 2);
+        for (size_t t = 0; t < pending.size(); ++t) {
+            auto& q = pending[t];
+            const float l = t < 6 ? kL[t] : 0.5f, r = t < 6 ? kR[t] : 0.5f;
+            for (size_t i = 0; i < n; ++i) {
+                const float v = i < q.size() ? q[i] : 0.0f;
+                buf[i * 2] += v * l, buf[i * 2 + 1] += v * r;
+            }
+            q.erase(q.begin(), q.begin() + long(std::min(n, q.size())));
+        }
+        for (float& v : buf) v = std::clamp(v * 0.6f, -1.0f, 1.0f);  // headroom for the summed tracks
+        {
+            std::lock_guard lock(sound->m);
+            sound->samples.insert(sound->samples.end(), buf.begin(), buf.end());
+        }
+        sound->cv.notify_all();
+    }
+
     void receiveSound() {
+        if (multi()) return receiveTrack(0, actx);
         while (avcodec_receive_frame(actx, frame) == 0) {
             const int n = frame->nb_samples, ch = sound->channels;
             const auto sf = AVSampleFormat(frame->format);
@@ -319,6 +379,12 @@ struct MoviePlayer::Impl {
             } else if (pkt->stream_index == aIndex) {
                 if (const int s = avcodec_send_packet(actx, pkt); s < 0) logDecodeError(s);
                 receiveSound();
+            } else {
+                for (size_t t = 0; t < extraIndex.size(); ++t)
+                    if (pkt->stream_index == extraIndex[t]) {
+                        if (const int s = avcodec_send_packet(extraCtx[t], pkt); s < 0) logDecodeError(s);
+                        receiveTrack(t + 1, extraCtx[t]);
+                    }
             }
             av_packet_unref(pkt);
         }
@@ -329,6 +395,11 @@ struct MoviePlayer::Impl {
                 avcodec_send_packet(actx, nullptr);
                 receiveSound();
             }
+            for (size_t t = 0; t < extraCtx.size(); ++t) {
+                avcodec_send_packet(extraCtx[t], nullptr);
+                receiveTrack(t + 1, extraCtx[t]);
+            }
+            if (multi()) mixPending(true);
         }
         {
             std::lock_guard lock(m);
@@ -417,6 +488,18 @@ bool MoviePlayer::open(const Disc& disc, const std::string& discPath, std::strin
         d.actx = d.openDecoder(d.aIndex, audioError);
         if (!d.actx) SDL_Log("video %s: no sound (%s)", discPath.c_str(), audioError.c_str()), d.aIndex = -1;
         else d.sound->channels = std::clamp(d.actx->ch_layout.nb_channels, 1, 8);
+    }
+    // The other audio tracks of the same rate (the 5.1 movies): mixed to stereo with the first.
+    if (d.actx)
+        for (unsigned i = 0; i < d.fmt->nb_streams; ++i) {
+            if (int(i) == d.aIndex || d.fmt->streams[i]->codecpar->codec_type != AVMEDIA_TYPE_AUDIO) continue;
+            if (d.fmt->streams[i]->codecpar->sample_rate != d.actx->sample_rate || d.extraIndex.size() >= 7) continue;
+            std::string e;
+            if (AVCodecContext* c = d.openDecoder(int(i), e)) d.extraIndex.push_back(int(i)), d.extraCtx.push_back(c);
+        }
+    if (d.multi()) {
+        d.pending.assign(d.extraIndex.size() + 1, {});
+        d.sound->channels = 2;
     }
     d.startMs = 1e30;
     for (int s : {d.vIndex, d.aIndex}) {

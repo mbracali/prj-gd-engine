@@ -170,6 +170,8 @@ private:
     void setArms(int disable, double t, float blend);
     void playAnimEvent(const qb::Struct& p, double t);
     void changeStanceEvent(uint32_t stance, bool noWait, double t);
+    void afterStanceBody(double t, bool stanceChanged);
+    uint32_t queuedStance_ = 0;  // a stance change waiting behind the pending one
     void strum(int length, double t);
     void facial(double t);
     bool guitarLike() const { return role_ == band::Role::Guitarist || role_ == band::Role::Bassist; }

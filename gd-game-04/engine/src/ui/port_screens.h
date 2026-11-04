@@ -93,6 +93,7 @@ public:
     // The item under (x, y) on that screen: "gamepads", "enhanced" or "".
     std::string itemAt(float x, float y, const std::string& flowState) const;
     // The item's bounds (walks click it).
+    void ensureItem(const std::string& flowState);
     bool itemRect(const std::string& flowState, float& x0, float& y0, float& x1, float& y1) const;
 
     PortContext& context() { return ctx_; }

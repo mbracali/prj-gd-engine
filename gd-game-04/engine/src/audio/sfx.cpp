@@ -119,7 +119,7 @@ bool Sfx::decode(Entry& e) {
     return true;
 }
 
-uint32_t Sfx::play(uint32_t sample, float volume, float pitch) {
+uint32_t Sfx::play(uint32_t sample, float volume, float pitch, uint32_t buss) {
     // GD04_SFXLOG=1: every sound asked for (development aid).
     static const bool log = SDL_getenv("GD04_SFXLOG") != nullptr;
     if (log) SDL_Log("sfx: play %s (%s)", qbkey::name(sample).c_str(), entries_.count(sample) ? "found" : "unknown");
@@ -153,7 +153,7 @@ uint32_t Sfx::play(uint32_t sample, float volume, float pitch) {
     SDL_FlushAudioStream(s);
     if (!bound || !put || SDL_GetAudioStreamAvailable(s) <= 0) ++stats_.lost;
     if (log) SDL_Log("sfx:   bound %d, put %d (%s), available %d", int(bound), int(put), put ? "" : SDL_GetError(), SDL_GetAudioStreamAvailable(s));
-    voices_.push_back(Voice{id, s});
+    voices_.push_back(Voice{id, s, sample, buss, false});
     return id;
 }
 
@@ -168,6 +168,25 @@ void Sfx::stop(uint32_t voice) {
         if (v.id == voice) SDL_ClearAudioStream(v.stream);
 }
 
+void Sfx::stopSample(uint32_t sample) {
+    for (Voice& v : voices_)
+        if (v.sample == sample) SDL_ClearAudioStream(v.stream);
+}
+
+void Sfx::stopBuss(uint32_t buss) {
+    for (Voice& v : voices_)
+        if (buss && v.buss == buss) SDL_ClearAudioStream(v.stream);
+}
+
+void Sfx::pauseBuss(uint32_t buss, bool paused) {
+    for (Voice& v : voices_) {
+        if (!buss || v.buss != buss || v.paused == paused) continue;
+        v.paused = paused;
+        if (paused) SDL_UnbindAudioStream(v.stream);
+        else if (device_) SDL_BindAudioStream(device_, v.stream);
+    }
+}
+
 void Sfx::stopAll() {
     for (Voice& v : voices_) SDL_DestroyAudioStream(v.stream);
     voices_.clear();
@@ -176,7 +195,7 @@ void Sfx::stopAll() {
 void Sfx::update() {
     voices_.erase(std::remove_if(voices_.begin(), voices_.end(),
                                  [](const Voice& v) {
-                                     if (SDL_GetAudioStreamAvailable(v.stream) > 0) return false;
+                                     if (v.paused || SDL_GetAudioStreamAvailable(v.stream) > 0) return false;
                                      SDL_DestroyAudioStream(v.stream);
                                      return true;
                                  }),

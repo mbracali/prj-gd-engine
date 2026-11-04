@@ -13,6 +13,7 @@
 #include <iterator>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -39,6 +40,7 @@
 #include "platform/paths.h"
 #include "render/canvas.h"
 #include "render/venue_stage.h"
+#include "game/chart.h"
 #include <array>
 #include <initializer_list>
 #include "render/texture_cache.h"
@@ -99,6 +101,11 @@ private:
     void addVenueScriptCalls();
     // Drawn over every frame: the FPS counter (Enhanced > Show FPS Counter).
     void overlay();
+    void drawMenuBackdrop(double dtMs);
+    std::unique_ptr<VenueStage> backdrop_;
+    std::unique_ptr<Chart> backdropChart_;
+    double backdropMs_ = 0;
+    bool backdropTried_ = false;
     void drawTouchButtons();
     bool windowToMenu(float wx, float wy, float& mx, float& my) const;
 
@@ -647,6 +654,37 @@ void App::drawTouchButtons() {
         if (b.action == Action::Start) canvas_.textCentered(b.x, b.y - 4, 1, {255, 255, 255, 220}, b.y < 100 ? "II" : "START");
 }
 
+// The Enhanced / Gamepads backdrop (gd02's App::menuBackdrop): the career's
+// venue (current_level, else the first) with its band under its intro
+// cameras (the wide shots), looping, made when a port screen opens [I:
+// gd02's look; GH3 has no such screen].
+void App::drawMenuBackdrop(double dtMs) {
+    if (!backdrop_ && !backdropTried_ && disc_ && globals_) {
+        backdropTried_ = true;
+        std::string err;
+        try {
+            backdropChart_ = std::make_unique<Chart>(loadChart(*disc_, "slowride"));
+            backdrop_ = std::make_unique<VenueStage>();
+            backdrop_->setIntroCameras("cameras_intro");  // the intro's wide shots: the band in view
+            if (!backdrop_->start(*disc_, *globals_, VenueStage::chooseZone(*globals_), *backdropChart_, qbkey::key("slowride"), 8000, nullptr, err) ||
+                !backdrop_->attach(canvas_.renderer().device(), *disc_, err)) {
+                SDL_Log("menu backdrop: %s", err.c_str());
+                backdrop_.reset();
+            }
+        } catch (const std::exception& ex) {
+            SDL_Log("menu backdrop: %s", ex.what());
+            backdrop_.reset();
+        }
+        backdropMs_ = -7800;
+    }
+    if (!backdrop_) return;
+    backdropMs_ += dtMs;
+    if (backdropMs_ > -1200) backdropMs_ = -7800;  // the intro's shots again
+    canvas_.flush();
+    backdrop_->advance(backdropMs_);
+    backdrop_->draw(backdropMs_);
+}
+
 void App::overlay() {
     // Touch: the lanes of this frame's highways for the fingers, menu taps as clicks, the buttons.
     if (input_.touch()) {
@@ -940,6 +978,15 @@ void App::frame() {
                 if (setup.mode == GameMode::Boss) song_->walkEndMs_ = -1;
             }
             front_->songPlaying = true;
+            // Common_Intro_Transition's GH_SFX_Intro_WarmUp: the zone's crowd
+            // before the song (the port runs the transition's other entries natively) [C data].
+            // The zone's own sounds (its pak's .wav: <zone>_intro, the encore cheers), indexed once a zone [C data].
+            if (song_->venue()) {
+                static std::set<std::string> zonesHeard;
+                const std::string& z = song_->venue()->venue().zone;
+                if (zonesHeard.insert(z).second) front_->sfx.addPak(*disc_, "DATA/COMPRESSED/ZONES/" + z + ".pak.xen");
+            }
+            if (song_->introCameras() == "cameras_intro") front_->vm().spawn(qbkey::key("GH_SFX_Intro_WarmUp"), qb::Struct{});
             // GD04_SP_CHARACTER=<id> (AXEL, JUDY, ...): player 1's character_id for
             // the Star Power stage FX (development aid: Do_StarPower_StageFX's switch).
             if (const char* ch = SDL_getenv("GD04_SP_CHARACTER"))
@@ -987,7 +1034,9 @@ void App::frame() {
         lastFrameNs_ = nowNs;
         canvas_.begin(SDL_Color{0, 0, 0, 255});
         if (ports_ && ports_->isOpen()) {
-            // The port's screen instead of GH3's, whose scripts wait meanwhile.
+            // The port's screen over a venue with the band (gd02's backdrop:
+            // App::menuBackdrop), GH3's scripts waiting meanwhile.
+            drawMenuBackdrop(dt);
             ports_->update(dt);
             ports_->draw(canvas_);
             front_->sfx.update();
@@ -1006,6 +1055,7 @@ void App::frame() {
                     ++outroFrames_;
                 }
             }
+            backdrop_.reset(), backdropChart_.reset(), backdropTried_ = false;  // the backdrop venue only while a port screen is open
             front_->frame(canvas_, dt);
             if (ports_) ports_->drawItems(canvas_, front_->flowState());
         }
@@ -1212,6 +1262,7 @@ int App::run() {
     }
     song_.reset();
     outroSong_.reset();  // its venue's GPU objects before the device
+    backdrop_.reset(), backdropChart_.reset();  // the menu backdrop's too
     ports_.reset();
     hooks_.reset();
     front_.reset();

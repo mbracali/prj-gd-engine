@@ -1501,4 +1501,14 @@ void UiSystem::addNatives() {
     });
 }
 
+bool UiSystem::drawSprite(Canvas& c, uint32_t texture, float x0, float y0, float x1, float y1, const std::array<uint8_t, 4>& rgba, bool flipU) const {
+    const gfx::TextureId id = tex_.find(texture);
+    if (!id) return false;
+    const float u0 = flipU ? 1.0f : 0.0f, u1 = flipU ? 0.0f : 1.0f;
+    auto V = [&](float x, float y, float u, float v) { return Vertex{x, y, 0, u, v, rgba[0], rgba[1], rgba[2], rgba[3]}; };
+    const Vertex q[6] = {V(x0, y0, u0, 0), V(x1, y0, u1, 0), V(x1, y1, u1, 1), V(x0, y0, u0, 0), V(x1, y1, u1, 1), V(x0, y1, u0, 1)};
+    c.draw(q, 6, int(id.id), Blend::Alpha);
+    return true;
+}
+
 }  // namespace ui

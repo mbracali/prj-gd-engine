@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "render/band_anim.h"
+#include <SDL3/SDL_log.h>
+#include <cstdlib>
 
 #include <algorithm>
 #include <cmath>
@@ -535,6 +537,11 @@ void Animator::bodyIteration(double t) {
     setArms(disableArms_, t, 0.25f);
     uint32_t key = 0;
     const anim::Clip* c = tempoAnim(currentAnim_, t, key);
+    // GD04_ANIMLOG=1: each body clip a member starts (development aid).
+    static const bool animLog = std::getenv("GD04_ANIMLOG") != nullptr;
+    if (animLog)
+        SDL_Log("anim: %.0f ms role %d stance %s anim %s -> %s (%.2f s)", t, int(role_), qbkey::name(stance_).c_str(), qbkey::name(currentAnim_).c_str(),
+                c ? qbkey::name(key).c_str() : "(none)", c ? double(c->duration) : 0.0);
     ++bodyGen_;
     if (c) {
         body_.play(c, t, 0.2f);
@@ -574,6 +581,19 @@ void Animator::bodyFinished(double t) {
 }
 
 void Animator::afterStance(double t, bool stanceChanged) {
+    if (stanceChanged && queuedStance_) {  // the queued change waits for this stance's first anim
+        const uint32_t q = queuedStance_;
+        queuedStance_ = 0;
+        const bool qIntro = q == K("intro") || q == K("intro_smstg") || q == K("stance_frontend") || q == K("stance_frontend_guitar");
+        afterStanceBody(t, stanceChanged);
+        nextStance_ = q;
+        if (guitarLike()) nextDisableArms_ = qIntro ? 2 : 0;
+        return;
+    }
+    afterStanceBody(t, stanceChanged);
+}
+
+void Animator::afterStanceBody(double t, bool stanceChanged) {
     const bool introish = nextStance_ == K("intro") || nextStance_ == K("intro_smstg") || nextStance_ == K("stance_frontend") ||
                           nextStance_ == K("stance_frontend_guitar");
     if (nextAnim_ == 0 && !stanceChanged) {
@@ -665,6 +685,11 @@ void Animator::changeStanceEvent(uint32_t stance, bool noWait, double t) {
         nextStance_ = stance;
         if (guitarLike()) disableArms_ = nextDisableArms_ = introish ? 2 : 0;
         bodyFinished(t);  // the transition now, then the idle loop
+    } else if (nextStance_ != stance_ && nextStance_ != stance) {
+        // A change already pending (play_intro_anims: intro no_wait, then
+        // Stance_A): this one follows it, as GH3's script queue runs them in
+        // order [I: the queue's depth].
+        queuedStance_ = stance;
     } else {
         nextStance_ = stance;
         if (guitarLike()) nextDisableArms_ = introish ? 2 : 0;
