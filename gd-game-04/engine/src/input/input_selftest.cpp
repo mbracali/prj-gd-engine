@@ -149,9 +149,10 @@ int runInputChecks() {
         using C = Input::Control;
         const Input::Bindings& b = in.bindings("keyboard");
         auto only = [&](C c, SDL_Keycode k) { return b[size_t(c)].size() == 1 && b[size_t(c)][0].index == int(k); };
-        check(only(C::Green, SDLK_G) && only(C::Start, SDLK_TAB) && only(C::GuitarStart, SDLK_TAB) && only(C::Gyro, SDLK_SPACE) &&
+        // gd04 0.0.3's Start on Tab (its default then) becomes the universal Enter.
+        check(only(C::Green, SDLK_G) && only(C::Start, SDLK_RETURN) && only(C::GuitarStart, SDLK_RETURN) && only(C::Gyro, SDLK_SPACE) &&
                   only(C::Select, SDLK_SPACE) && only(C::StrumUp, SDLK_UP) && only(C::MenuUp, SDLK_UP) && !in.requireStrum("keyboard"),
-              "controllers.json version 1 migrated (green, Start, Star Power, frets also strum)");
+              "controllers.json version 1 migrated (green, Start on Enter, Star Power, frets also strum)");
         in.setPlayerEnabled(1, false);
         const std::string saved = readFile(dir + "controllers.json");
         check(saved.find("\"version\": 2") != std::string::npos && saved.find("guitar_start") != std::string::npos &&

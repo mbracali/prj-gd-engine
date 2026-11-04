@@ -981,6 +981,7 @@ void App::frame() {
             if (walk_) ++walk_->songsEnded;
             return;
         }
+        input_.setMenuOverSong(front_ && (front_->songPaused || front_->attractMode()));
         if (front_ && front_->songPaused &&
             ((pauseSeen_ && !front_->flow.paused) || (!pauseSeen_ && SDL_GetTicksNS() - pausedAtNs_ > 3000000000ull))) {
             // Resumed (UnPauseGame), or the scripts never paused.

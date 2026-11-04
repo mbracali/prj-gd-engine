@@ -483,6 +483,13 @@ void Input::load() {
             if (bj["menu_up"].type != Json::Type::Array) b[size_t(C::MenuUp)] = b[size_t(C::StrumUp)];
             if (bj["menu_down"].type != Json::Type::Array) b[size_t(C::MenuDown)] = b[size_t(C::StrumDown)];
             b[size_t(C::GuitarSelect)] = b[size_t(C::Select)] = b[size_t(C::Gyro)];
+            // gd04 0.0.3's keyboard paused on Tab; the universal table's Start is
+            // Enter (universal_mechanisms.md: Enter pauses a song), Tab is Select.
+            if (guid == "keyboard") {
+                const std::vector<Source> tab = {{Kind::Key, int(SDLK_TAB)}};
+                if (b[size_t(C::Start)] == tab) b[size_t(C::Start)] = b[size_t(C::GuitarStart)] = def[size_t(C::Start)];
+                if (b[size_t(C::Select)].empty()) b[size_t(C::Select)] = b[size_t(C::GuitarSelect)] = def[size_t(C::Select)];
+            }
             for (auto& list : b)  // two slots at most
                 if (list.size() > kSlots) list.resize(kSlots);
         }
@@ -904,9 +911,12 @@ void Input::keyEvent(const SDL_KeyboardEvent& k, std::vector<InputEvent>& out) {
     // when Start was Tab).
     Action a;
     switch (k.key) {
-    case SDLK_ESCAPE: case SDLK_BACKSPACE: case SDLK_AC_BACK: a = Action::Back; break;  // AC_BACK: Android's back button
+    case SDLK_ESCAPE:  // in a song Esc pauses (Start), as on GH3's PC release; the pause menu then takes Back
+        a = inGame() && !menuOverSong_ ? Action::Start : Action::Back;
+        break;
+    case SDLK_BACKSPACE: case SDLK_AC_BACK: a = Action::Back; break;  // AC_BACK: Android's back button
     case SDLK_RETURN: case SDLK_KP_ENTER:
-        if (inGame()) {
+        if (inGame() && !menuOverSong_) {
             if (down) emit(out, Action::Strum, true, ts, mode, std::max(kb, 0));
             else emit(out, Action::Strum, false, ts, mode, std::max(kb, 0));
             return;
@@ -1030,7 +1040,7 @@ void Input::controlEdges(const std::array<bool, size_t(Control::Count)>& was, co
                          ControllerMode mode, int player, bool joypad, uint64_t ts, std::vector<InputEvent>& out) {
     const ActionSet before = actionsOf(was, joypad, player), after = actionsOf(now, joypad, player);
     const int pl = std::max(player, 0);
-    const bool keyboardStart = device_ == -1 && !inGame();
+    const bool keyboardStart = device_ == -1 && (!inGame() || menuOverSong_);
     for (size_t k = 0; k < after.on.size(); ++k) {
         const Action a = Action(k);
         if (a == Action::Strum) continue;

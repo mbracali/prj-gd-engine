@@ -146,6 +146,8 @@ public:
     // In a song (the menus' one-press-from-two-devices filter is off, Enter
     // strums, Back pauses).
     void setInGame(bool on) { inGame_ = on; }
+    // A menu over the song (the pause menu): the keyboard's Enter selects and Esc goes back there.
+    void setMenuOverSong(bool on) { menuOverSong_ = on; }
     bool inGame() const { return inGame_ || lanes_[0].active || lanes_[1].active; }
     // The analog whammy of player `player`'s pads (-1: any pad), 0 at rest ..
     // 1 fully pressed; the Whammy action still fires past a threshold.
@@ -397,7 +399,7 @@ private:
     std::map<std::string, int> players_;         // chosen players by GUID
     std::map<std::string, Profile> types_;       // chosen controller types by GUID
     std::string saveDir_;                        // "" = the SDL pref dir
-    bool loaded_ = false, capturing_ = false, inGame_ = false;
+    bool loaded_ = false, capturing_ = false, inGame_ = false, menuOverSong_ = false;
     std::string captureId_;
     Control captureControl_ = Control::Green;
     std::array<int16_t, SDL_GAMEPAD_AXIS_COUNT> captureRest_{};

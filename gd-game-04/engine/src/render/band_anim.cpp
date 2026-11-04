@@ -937,7 +937,7 @@ void Animator::evaluate(double ms, std::vector<Mat34>& world, std::vector<Mat34>
 
     // Two-bone IK of the arms onto the guitar's hand bones [C data
     // Hero_Ik_params; I: the bend plane through the animated elbow, the palm
-    // taking the target's orientation].
+    // keeping its animated local rotation].
     if (!chains_.empty()) {
         bool changed = false;
         for (const Chain& c : chains_) {
@@ -970,7 +970,11 @@ void Animator::evaluate(double ms, std::vector<Mat34>& world, std::vector<Mat34>
             Quat l0 = qmul(qconj(parentRot), w0), l1 = qmul(qconj(w0), w1), l2 = qmul(qconj(w1), w2);
             pose[size_t(c.b0)].q = nlerp(pose[size_t(c.b0)].q, l0, s);
             pose[size_t(c.b1)].q = nlerp(pose[size_t(c.b1)].q, l1, s);
-            pose[size_t(c.b2)].q = nlerp(pose[size_t(c.b2)].q, l2, s);
+            // The palm keeps its animated rotation under the forearm (the clips'
+            // grip, the fingers' deltas on top); copying the target bone's
+            // rotation turned the fret hand up off the neck, fingers in the air
+            // (owner, 2026-11-04) [I: renders].
+            (void)l2;
             changed = true;
         }
         if (changed) worldOf(rig_, pose, world);

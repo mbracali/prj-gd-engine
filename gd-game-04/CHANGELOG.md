@@ -21,6 +21,9 @@ All notable changes for players. Versions follow SemVer; release tags are
 - Lou's finish and defeat scenes play with their animations and cameras.
 
 ### Fixed
+- The guitarist's fret hand grips the neck; it floated above it with the fingers in the air (GD04-062).
+- Sustain tails are GH3's straight ribbons at its width; they were short, wide cones (GD04-062).
+- Esc pauses a song and goes back in the pause menu, where Enter selects; settings from 0.0.3 move Start from Tab to Enter (GD04-062).
 - The venues' scripted cameras (Backyard Bash's intro, every encore, the boss cameras) play; they started in a wrong spot (GD04-061).
 - A song's preview stops when the song starts (GD04-061).
 - Song previews play again on the setlist (GD04-059).

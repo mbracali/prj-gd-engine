@@ -518,14 +518,18 @@ void Highway2D::drawAll(Canvas& c, const TextureCache& tex, const NoteTrack& tra
                     const size_t segs = rows.size() - 1;
                     for (size_t s = 0; s < segs; ++s) {
                         const float va = rowDepth(float(rows[s])), vb = rowDepth(float(rows[s + 1]));
-                        const float wa = whammyTop_ * (1 + whammyOffset_ * va) * scaleAt(rows[s]);
-                        const float wb = whammyTop_ * (1 + whammyOffset_ * vb) * scaleAt(rows[s + 1]);
+                        // Half width = whammy_top_width x (1 + offset x D) / 2 [C 0x8238E338].
+                        const float wa = whammyTop_ * (1 + whammyOffset_ * va) * 0.5f * scaleAt(rows[s]);
+                        const float wb = whammyTop_ * (1 + whammyOffset_ * vb) * 0.5f * scaleAt(rows[s + 1]);
                         const float xa = laneX(lane, va), xb = laneX(lane, vb), ya = yAt(va), yb = yAt(vb);
                         const auto A = uint8_t(255 * alphaAt(ya)), B = uint8_t(255 * alphaAt(yb));
-                        // V runs once along the whole tail, tail end (0) to head (1) [I].
-                        const float ta = float((rows[s] - r0) / (rowHead - r0)), tb = float((rows[s + 1] - r0) / (rowHead - r0));
-                        const Vertex p0{xa - wa, ya, 0, 0, ta, 255, 255, 255, A}, p1{xa + wa, ya, 0, 1, ta, 255, 255, 255, A};
-                        const Vertex p2{xb + wb, yb, 0, 1, tb, 255, 255, 255, B}, p3{xb - wb, yb, 0, 0, tb, 255, 255, 255, B};
+                        // Every vertex has u 0 (left) / 1 (right) and v 1.0 [C 0x8238E338]:
+                        // the strip is the texture's bottom row (the cap's full-width base)
+                        // stretched along the tail, a straight ribbon with no rounded end.
+                        // The texel centre of the last row (32 px) keeps a wrapping sampler off row 0.
+                        constexpr float kV = 1.0f - 0.5f / 32.0f;
+                        const Vertex p0{xa - wa, ya, 0, 0, kV, 255, 255, 255, A}, p1{xa + wa, ya, 0, 1, kV, 255, 255, 255, A};
+                        const Vertex p2{xb + wb, yb, 0, 1, kV, 255, 255, 255, B}, p3{xb - wb, yb, 0, 0, kV, 255, 255, 255, B};
                         const Vertex q[6] = {p0, p1, p2, p0, p2, p3};
                         c.draw(q, 6, int(tex.find(key).id), Blend::Alpha);
                     }

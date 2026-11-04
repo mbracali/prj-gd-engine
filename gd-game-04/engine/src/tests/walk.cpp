@@ -125,9 +125,10 @@ Walk::Walk(const std::string& name) : name_(name) {
         steps_.push_back({"main_menu_fs", {D, D, C}, 10000});
         steps_.push_back({"quickplay_select_difficulty_fs", {C}, 20000});
         steps_.push_back({"quickplay_setlist_fs", {C}, 20000});
-        steps_.push_back({"song", {Action::Start}, 30000});
+        // The keyboard: Esc pauses, Enter picks RESUME (pausequit: Start, the pad's).
+        steps_.push_back({"song", {name == "pause" ? Op("key:Escape") : Op(Action::Start)}, 30000});
         if (name == "pause") {
-            steps_.push_back({"quickplay_pause_fs", {C}, 20000});
+            steps_.push_back({"quickplay_pause_fs", {Op("key:Return")}, 20000});
             steps_.push_back({"song_over", {}, 600000});
             steps_.push_back({"quickplay_win_song_fs", {}, 30000});
         } else {
