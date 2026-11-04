@@ -1083,6 +1083,9 @@ bool UiManager::mouse(float x, float y, bool click) {
         return click;
     }
     if (!current_ || phase_ != Phase::Idle || !pending_.empty()) return false;
+    mouseX_ = x, mouseY_ = y;
+    if (wheelHold_ && !click && std::hypot(x - wheelX_, y - wheelY_) <= kWheelHoverSlack) return true;
+    wheelHold_ = false;
     for (PanelObj* p : current_->panels())
         if (p->up && p->helpMouse(x, y, click)) return true;
     PanelObj* fp = current_->focusPanel();
@@ -1092,6 +1095,7 @@ bool UiManager::mouse(float x, float y, bool click) {
 void UiManager::wheel(int dir) {
     if (splash_ >= 0 || !current_ || phase_ != Phase::Idle || !pending_.empty()) return;
     const int b = dir < 0 ? kPad_DUp : kPad_DDown;
+    wheelHold_ = true, wheelX_ = mouseX_, wheelY_ = mouseY_;
     buttonDown(b, 0);
     buttonUp(b, 0);
 }

@@ -216,6 +216,12 @@ public:
     bool mouse(float x, float y, bool click);
     // The wheel: one Up (-1) or Down (+1) press.
     void wheel(int dir);
+    // After a wheel step, hover waits until the pointer really moves (more
+    // than kWheelHoverSlack menu units), or a slight nudge would focus the
+    // row under it again and undo the scroll (#51).
+    float mouseX_ = -1e9f, mouseY_ = -1e9f, wheelX_ = 0, wheelY_ = 0;
+    bool wheelHold_ = false;
+    static constexpr float kWheelHoverSlack = 24;
     // Turns a cheat on or off as its button code does (Enhanced Options).
     void setCheat(const std::string& id, bool on);
 

@@ -121,7 +121,7 @@ std::vector<Item> buildItems(qs::Vm& vm) {
         {Kind::Choice, "max_fps", "In-Game Max FPS", true,
          "The highest frame rate the game draws at; the original ran at 60. The game never draws faster than this, "
          "whatever the display's refresh rate.",
-         {{"60", "60"}, {"120", "120"}, {"240", "240"}}},
+         {{"60", "60"}, {"120", "120"}, {"144", "144"}, {"240", "240"}}},
         {Kind::Check, "fps_counter", "Show FPS Counter", true, "Shows the frames drawn per second in the bottom-left corner of the screen."},
         {Kind::Choice, "internal_res", "Internal Resolution", false,
          "The resolution the game draws at before it is scaled to the window. The Xbox 360 drew 1280 x 720 (x360).",

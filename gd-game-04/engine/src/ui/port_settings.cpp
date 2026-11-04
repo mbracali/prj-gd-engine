@@ -20,7 +20,7 @@ const std::vector<EnhancedSetting>& enhancedSettings() {
         {"rockband", {"off", "on"}},
         {"xinput", {"on", "off"}},
         {"screen_mode", {"windowed", "fullscreen", "borderless"}},
-        {"max_fps", {"60", "120", "240"}},
+        {"max_fps", {"60", "120", "144", "240"}},
         {"fps_counter", {"off", "on"}},
         {"internal_res", {"1080", "720", "800", "900", "1440", "2160"}},
         {"sharp_ui", {"off", "on"}},

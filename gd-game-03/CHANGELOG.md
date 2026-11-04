@@ -6,6 +6,8 @@ All notable changes for players. Versions follow SemVer; release tags are
 ## [Unreleased]
 
 ### Added
+- Max FPS: 144 (#57).
+- Enhanced > Reset Calibration: sets the audio and video delays back to 0 ms (#47).
 - Enhanced > Developer Keyboard Cheats: Encore's own debug keys from its development kit (e.g. p autoplay, l lose, w win, c next camera, h hide the HUD).
 - Loading tips from the GD-Engine developers.
 
@@ -14,6 +16,8 @@ All notable changes for players. Versions follow SemVer; release tags are
 - Loading and saving screens stay up at least 2 seconds with their animation, as in Guitar Hero 1.
 
 ### Fixed
+- Android: songs no longer drop to 10-15 fps on phones whose graphics drivers stall on buffer updates (#55).
+- The mouse wheel in lists no longer jumps back when the mouse moves slightly (#51).
 - Career: Play With Me, the tour's last encore, asks its three "are you sure?" letters before it starts.
 - End-of-song stats: SP Phrases shows phrases captured out of phrases played, as on the PS2.
 - Unplugging the controller mid-song pauses the game with the "connect your Guitar Controller" message (when the keyboard is set to the other player).

@@ -5,6 +5,13 @@ All notable changes for players. Versions follow SemVer; release tags are
 
 ## [Unreleased]
 
+### Added
+- In-Game Max FPS: 144 (#57).
+
+### Fixed
+- Android: the same buffer-update path as macOS, which phone graphics drivers handle without stalling (#55).
+- The mouse wheel in menus no longer jumps back when the mouse moves slightly (#51).
+
 ## [0.0.3] - 2026-11-03
 
 ### Fixed

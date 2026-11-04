@@ -815,6 +815,10 @@ WalkDriver::WalkDriver(const std::string& name)
         wait(750);
         check("enhanced_calibrated");
         press(kX), wait(200);
+        // Reset Calibration, the next row (#47): both delays back to 0 ms.
+        press(kDown), wait(120);
+        press(kX), wait(300);
+        check("enhanced_calibration_reset");
         // PERFORMANCE & GRAPHICS -> Screen Mode -> Resolution; select opens
         // its dropdown, down and select pick the next option.
         for (int i = 0; i < 3; ++i) press(kDown), wait(120);
@@ -915,16 +919,23 @@ WalkDriver::WalkDriver(const std::string& name)
         mouseAt(300, 297, 1);
         wait(300);
         check("enhanced_mode_clean");
-        // MODES collapsed (a click on its title): Resolution is the list's
-        // 11th row; its dropdown opens upward, 720p 180 units above the row.
+        // MODES collapsed (a click on its title): Screen Mode is the list's
+        // 11th row, hovered; the wheel moves to Resolution, scrolled into its
+        // place, and the small nudge after it keeps that focus (#51), so
+        // select opens its dropdown, upward: 720p 180 units above the row
+        // (the row is the 12th, one below where it was clicked before).
         mouseAt(300, 190, 0);
         mouseAt(300, 190, 1);
         wait(300);
         mouseAt(480, 523, 0);
-        mouseAt(480, 523, 1);
         wait(200);
-        mouseAt(480, 343, 0);
-        mouseAt(480, 343, 1);
+        mouseAt(480, 523, 5);
+        wait(600);
+        mouseAt(483, 525, 0);
+        press(kX);  // the focused row's dropdown: Resolution's only if the nudge kept the focus
+        wait(200);
+        mouseAt(480, 375, 0);
+        mouseAt(480, 375, 1);
         wait(300);
         check("enhanced_res_720");
         // Widescreen (16:9), the next row (cut off at the list's bottom): the
@@ -2447,7 +2458,7 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         if (s.screen == "frame_differs") return hash != frameHash_ ? pass() : fail("HDR Emulated and Bloom 2x left the frame as it was");
         return hash == frameHash_ ? pass() : fail("HDR None with the effects off does not draw the frame as before");
     }
-    if (s.screen == "enhanced_fx_default" || s.screen == "enhanced_controls" || s.screen == "enhanced_calibrated" ||
+    if (s.screen == "enhanced_fx_default" || s.screen == "enhanced_controls" || s.screen == "enhanced_calibrated" || s.screen == "enhanced_calibration_reset" ||
         s.screen.rfind("enhanced_hdr_", 0) == 0 || s.screen == "enhanced_graphics" || s.screen == "enhanced_no_effects" ||
         s.screen == "enhanced_effects_back" || s.screen == "enhanced_lights_default" || s.screen == "enhanced_enhancers" ||
         s.screen == "enhanced_cheats") {
@@ -2510,6 +2521,12 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
                 if (v.empty() || std::abs(std::atoi(v.c_str())) > 337) add(std::string(key) + " not calibrated (" + v + ")");
             }
             state("calibration_ms", -500, 300);
+        } else if (w == "enhanced_calibration_reset") {
+            for (const char* key : {"audio_offset", "video_offset"}) {
+                const std::string v = saved.has(key) ? saved[key].str() : "";
+                std::printf("  enhanced: reset %s %s\n", key, v.c_str());
+                if (v != "0") add(std::string(key) + " not reset (" + v + ")");
+            }
         } else if (w == "enhanced_graphics") {
             want("sharp_ui", "off"), want("antialiasing", "fxaa"), want("ai_upscaling", "fsr1"), want("ai_upscaling_mode", "performance");
             want("bokeh", "none"), want("particles", "none"), want("bloom", "2x"), want("cinematic_color", "on"), want("color_grade", "warm");

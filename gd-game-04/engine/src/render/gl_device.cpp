@@ -318,7 +318,9 @@ bool GlDevice::init(std::string& error) {
     gl::glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     gl::glPixelStorei(GL_PACK_ALIGNMENT, 1);
 
-#ifdef __APPLE__
+#if defined(__APPLE__) || defined(__ANDROID__)
+    // Phones too (#55): Adreno / Mali drivers stall or copy the whole
+    // buffer on a glBufferSubData into a buffer the GPU may still read.
     streamMap_ = true;
 #endif
     if (const char* m = SDL_getenv("GD04_GL_STREAM")) streamMap_ = std::strcmp(m, "map") == 0;

@@ -326,7 +326,7 @@ void Player::update(float t) {
 }
 
 // FUN_00263e60: the bend arms once the bar has been at rest since the hit
-// (the keyboard's wiggle never rests: <= 0.01 [I]); its depth ramps over
+// (a bar at <= 0.01 [I]; a held whammy key is a full bar); its depth ramps over
 // ms_to_full_pitch_bend (1000) to pitch_bend_range (1 semitone), down only.
 void Player::updateBend(float t) {
     if (whammyValue_ <= 0.01f) bendArmed_ = true;

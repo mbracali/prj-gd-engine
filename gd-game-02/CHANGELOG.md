@@ -7,6 +7,8 @@ matches the tag's version. Nothing is released yet.
 ## [Unreleased]
 
 ### Fixed
+- Android: songs no longer drop to 10-15 fps on phones whose graphics drivers stall on buffer updates (#55).
+- The mouse wheel in lists no longer jumps back when the mouse moves slightly (#51).
 - Career: Free Bird, the tour's last encore, asks its three "are you sure?" letters again before it starts.
 - End-of-song stats: SP Phrases shows phrases captured out of phrases played, as in GH2.
 - Unplugging the controller mid-song pauses the game with GH2's "connect a Guitar Controller" message (when the keyboard is set to the other player).
@@ -19,6 +21,8 @@ matches the tag's version. Nothing is released yet.
 - Letting go of a big note's sustain right away plays the crowd's "blew it" sound again, as in GH2 (a missed big note stays silent).
 
 ### Added
+- Max FPS: 144 (#57).
+- Enhanced > Reset Calibration: sets the audio and video delays back to 0 ms (#47).
 - Enhanced > Developer Keyboard Cheats: GH2's own debug keys from its development kit (e.g. p autoplay, l lose, c next camera, h hide the HUD).
 
 ### Changed

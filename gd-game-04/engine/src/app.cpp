@@ -117,6 +117,11 @@ private:
     std::unique_ptr<PortScreens> ports_;
     std::string saveDir_;               // enhanced.json and controllers.json ("" : the pref dir)
     double mouseMovedMs_ = -1e9;        // the pointer shows for 3 s after the mouse moves
+    // After a wheel step, hover waits until the pointer really moves (more
+    // than 24 menu units), or a slight nudge would focus the row under it
+    // again and undo the scroll (#51).
+    float mouseX_ = -1e9f, mouseY_ = -1e9f, wheelX_ = 0, wheelY_ = 0;
+    bool wheelHold_ = false;
     bool pointerShown_ = true;
     uint64_t fpsStart_ = 0;
     int fpsFrames_ = 0;
@@ -273,10 +278,17 @@ void App::handleEvent(const SDL_Event& e) {
         const bool inside = windowToMenu(click ? e.button.x : e.motion.x, click ? e.button.y : e.motion.y, mx, my);
         if (menuMouseAllowed()) mouseMovedMs_ = double(SDL_GetTicksNS()) / 1e6;
         const bool focused = (SDL_GetWindowFlags(window_) & SDL_WINDOW_INPUT_FOCUS) != 0;
-        if (inside && (click || focused) && (!click || e.button.button == SDL_BUTTON_LEFT || e.button.button == SDL_BUTTON_RIGHT))
+        bool held = false;
+        if (inside) {
+            mouseX_ = mx, mouseY_ = my;
+            held = wheelHold_ && !click && std::hypot(mx - wheelX_, my - wheelY_) <= 24.0f;
+            if (!held) wheelHold_ = false;
+        }
+        if (inside && !held && (click || focused) && (!click || e.button.button == SDL_BUTTON_LEFT || e.button.button == SDL_BUTTON_RIGHT))
             menuMouse(mx, my, !click ? 0 : e.button.button == SDL_BUTTON_LEFT ? 1 : 3);
     } else if (front_ && e.type == SDL_EVENT_MOUSE_WHEEL && e.wheel.which != SDL_TOUCH_MOUSEID && e.wheel.y != 0 && menuMouseAllowed()) {
         mouseMovedMs_ = double(SDL_GetTicksNS()) / 1e6;
+        wheelHold_ = true, wheelX_ = mouseX_, wheelY_ = mouseY_;
         menuAction(InputEvent{e.wheel.y > 0 ? Action::Up : Action::Down, true, SDL_GetTicksNS(), ControllerMode::Guitar, 0});
     } else if (e.type == SDL_EVENT_KEY_DOWN || e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
         mouseMovedMs_ = -1e9;  // a key or a button hides the pointer

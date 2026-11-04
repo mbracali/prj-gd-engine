@@ -103,11 +103,14 @@ walk_song_end() {
 # then Credits, skipped with green (1.1.1).
 walk_mouse() {
   needs_band
-  run mouse 24000 "3000:click640_554,5500:click520_376,8000:click200_190,9000:click480_486,9300:keyUp,9400:keyUp,9500:keyUp,9700:keyReturn,10500:click460_684,13000:click520_376,15500:click150_606,18000:click600_564,21000:green" GD01_SKIP_BOOT=1
+  run mouse 24000 "3000:click640_554,5500:click520_376,8000:click200_190,9000:click480_520,9300:keyUp,9400:keyUp,9500:keyUp,9700:keyReturn,10500:click460_684,13000:click520_376,15500:click150_606,18000:click600_564,21000:green" GD01_SKIP_BOOT=1
   local backs
   backs=$(grep -c "goto_screen options" "$work/mouse.log")
   result mouse "$(( $(json "$(save mouse)/enhanced.json" "d['internal_res'] == '720'") && backs >= 4 && $(has mouse "goto_screen credits") ))" \
     "clicks through Options and Enhanced, a dropdown, help-bar BACK, < Back, credits skipped"
+  # The main menu's GAMEPADS pill opens GAMEPADS on a click (#51).
+  run mouse_gamepads 6000 "3000:hover560_685,3500:click560_685" GD01_SKIP_BOOT=1
+  result mouse_gamepads "$(has mouse_gamepads "goto_screen gamepads")" "a click on the help bar's GAMEPADS opens GAMEPADS"
 }
 
 # Enhanced: a 1.1.6 enhanced.json (old values, XInput / Rock Band toggles)
@@ -124,6 +127,20 @@ walk_enhanced() {
   result enhanced "$(json "$(save enhanced)/enhanced.json" "d['color_grade'] == 'sepia' and d['internal_res'] == '448' and d['bloom'] == '3x' and d['fps_counter'] is True and 'rockband' not in d and 'xinput' not in d and d['hdr'] == 'none'")" \
     "Good Old Days preset applied over a migrated 1.1.6 file"
   walk_enhanced_hdr
+  walk_calibration_reset
+}
+
+# Enhanced > Reset Calibration (#47): a saved calibration goes back to 0 ms.
+walk_calibration_reset() {
+  local s keys="" keep="$seed" i
+  s="$work/calibration_seed" && rm -rf "$s" && cp -r "$seed" "$s"
+  printf '{"audio_offset":"40","video_offset":"-20"}\n' > "$s/gd-engine/gd01/enhanced.json"
+  seed="$s"
+  for i in $(seq 0 11); do keys+="$((2500 + i * 100)):keyDown,"; done  # down to Reset Calibration
+  run calibration_reset 6000 "${keys}4500:keyReturn" GD01_SKIP_BOOT=1 GD01_SCREEN=enhanced_settings
+  seed="$keep"
+  result calibration_reset "$(json "$(save calibration_reset)/enhanced.json" "d['audio_offset'] == '0' and d['video_offset'] == '0'")" \
+    "Reset Calibration sets the audio and video delays back to 0 ms"
 }
 
 # Enhanced > HDR (universal_mechanisms.md 1.2.2): from a file without the key
@@ -137,7 +154,7 @@ walk_enhanced_hdr() {
   printf '{"bloom":"original"}\n' > "$s/gd-engine/gd01/enhanced.json"
   seed="$s"
   keys=""
-  for i in $(seq 0 19); do keys+="$((2500 + i * 100)):keyDown,"; done  # down to the HDR row
+  for i in $(seq 0 20); do keys+="$((2500 + i * 100)):keyDown,"; done  # down to the HDR row
   run enhanced_hdr 9000 "${keys}5000:keyRight,5800:keyRight,6600:keyRight,7400:keyRight" GD01_SKIP_BOOT=1 GD01_SCREEN=enhanced_settings
   result enhanced_hdr "$(( $(json "$(save enhanced_hdr)/enhanced.json" "d['hdr'] == 'emulated'") && $(has enhanced_hdr "hdr: mode none") && \
     $(has enhanced_hdr "hdr: mode emulated - Emulated") && $(has enhanced_hdr "hdr: mode true - True HDR unavailable.*Using Emulated") ))" \

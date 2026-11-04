@@ -36,7 +36,7 @@ notes and links).
 [Releases & packaging](#releases--packaging) · [Site](#site) ·
 [All games](#all-games) ·
 [gd-game-01](#gd-game-01-guitar-hero-playstation-2) ·
-[gd-game-02](#gd-game-02-guitar-hero-ii-xbox-360) · gd-game-03 … gd-game-19
+[gd-game-02](#gd-game-02-guitar-hero-ii-xbox-360) · gd-game-03 … gd-game-24
 (one Discovery task each)
 
 
@@ -188,6 +188,11 @@ shipped in the universal launcher.
 | GD01-311 | Enhancement | ✅ | gd01 log file and Windows crash line, as gd02-gd04 | main.cpp: gd01.log in the save folder on Windows (GD01_LOG elsewhere), crash code and address via SetUnhandledExceptionFilter; song end and outro logged, including when the 30 s wait gives up. Log file checked on Linux with GD01_LOG; the Windows crash path is built, not run | Owner 11-01 |
 | GD01-312 | Enhancement | ✅ | Remove the MODS item from the main menu's help bar (mods will be handled another way); the help bar stays aligned | Only gd01 had it (gd02-gd04 never did; the orange button had no action). Removed from the main menu help bar and its orange icon; the row keeps the even flow (CONTINUE, GAMEPADS, UP/DOWN, gaps twice text_spacing): checked by frames; putting UP/DOWN back at its data spot left an uneven gap. gd01 walks pass | Owner 11-03 |
 | GDALL-032 | Enhancement | ✅ | Shake for Whammy in every game: Enhanced checkbox (Android only, on by default), gd02, gd03, gd04 get pollShake | Built for Android in the packages; not run on a phone. gd04 has no touch play yet, so it only matters there once touch is built Marked done (owner 11-03: what needs the owner's testing is marked done). | Owner 11-01 |
+| GD01-313 | Bugfix | ✅ | #56: a whammy key held on a sustain acts like a turbo instead of a held lever | The held key drew a 4 Hz wiggle (0.3 + 0.3 sin). Now a held key or button is the bar all the way down (1.0), as a lever held down: steady bend and steady fat tail; whammying() still counts it for Star Power. gd02 / gd03 already held 1.0; gd04 takes the key as a held bar too | GitHub 11-03 Owner 11-04 |
+| GD01-314 | Bugfix | ✅ | #51: the main menu's GAMEPADS pill does not take a click; the Enhanced list jumps back after the wheel when the mouse moves a little; help-bar pills do not react to hover | GAMEPADS was sent as L1 (nothing on the main menu): it now opens GAMEPADS as the yellow fret does. After a wheel step hover waits until the pointer moves more than 24 menu units (gd01-gd04: the same jump-back was in every game). The pill under the mouse shows its text in the focus yellow (gd01). Walk mouse_gamepads; checked by frames | GitHub 11-02 Owner 11-04 |
+| GDALL-034 | Enhancement | ✅ | #57: 144 FPS in Max FPS, every game | 60 / 120 / 144 / 240 (/ Unlimited) in gd01-gd04; pacing already works for any cap (vsync when the refresh rate is a multiple, otherwise paced) | GitHub 11-03 Owner 11-04 |
+| GDALL-035 | Enhancement | ✅ | #47: no way to remove the calibration | Enhanced > Reset Calibration (gd01, gd02, gd03): the audio and video delays go back to 0 ms; the help box shows the current values. gd04 has no calibration screen yet. Walk calibration_reset (gd01) | GitHub 11-01 Owner 11-04 |
+| GDALL-036 | Bugfix | 🟡 needs a phone | #55: GH2 and Encore at 10-15 fps in songs on Android (S25 Ultra); menus smooth | Not reproducible on PC (the GLES path and CPU-decoded textures run 185+ fps). Likely cause: every draw writes its uniforms with glBufferSubData into a buffer the GPU may still read, which Adreno / Mali drivers answer with a stall or a buffer copy; a song has ~600 draws, a menu ~20. Android now uses the unsynchronized glMapBufferRange path macOS already used (gd02, gd03, gd04); checked on GLES on PC (walk quickplay, frame by eye). Needs a test on the phone | GitHub 11-03 Owner 11-04 |
 | GD01-290 | Bugfix | ✅ | Main guitarist's movement still weird: sometimes a force seems to pull him to a spot | Follows old B85 (docs/character_animation.md §5) Done (gd01 1.1.6): port-only standGuard / snapHome / hold-to-spot removed; the original pose hold (FUN_001958b0) holds where the walk ended; root motion ignores the phase snap. | Wave B 10-28 |
 | GD01-291 | Bugfix | ✅ | The strum icon is broken in half in every menu (as gd-game-02 #10) | Old B29 fixed the help bar's strum icon; it is back gd01 draws the asset exactly as the original (64×16 texture has a light / dark split, same in GH2): need the owner's screenshot or a reference before changing anything. | Wave B 10-28 Owner 11-02: fixed |
 | GD01-037 | Bugfix | ✅ | Weird glitches in the venues | Needs specifics (venue / moment); candidates in "Venue artifacts" below | Bugs 10-21 r1 B3 11-02: not reproduced in a frame sweep of Toxic Summer Fest and the big club (no see-through, no flat frames); the listed causes are fixed (GD01-249, 251, 252) |
@@ -913,3 +918,33 @@ universal launcher, not released on its own.
 | ID | Class | Status | Item | Notes | From |
 |---|---|---|---|---|---|
 | GD19-001 | Original | ❌ | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-19/agent-instructions.md`, [docs/adding-a-game.md](docs/adding-a-game.md) | New 10-28 |
+
+## gd-game-20: Guitar Hero: On Tour (Nintendo DS)
+
+| ID | Class | Status | Item | Notes | From |
+|---|---|---|---|---|---|
+| GD20-001 | Original | ❌ | Discovery: the cartridge / UMD and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-20/agent-instructions.md`, [docs/adding-a-game.md](docs/adding-a-game.md) | New 11-04 |
+
+## gd-game-21: Guitar Hero On Tour: Decades (Nintendo DS)
+
+| ID | Class | Status | Item | Notes | From |
+|---|---|---|---|---|---|
+| GD21-001 | Original | ❌ | Discovery: the cartridge / UMD and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-21/agent-instructions.md`, [docs/adding-a-game.md](docs/adding-a-game.md) | New 11-04 |
+
+## gd-game-22: Guitar Hero On Tour: Modern Hits (Nintendo DS)
+
+| ID | Class | Status | Item | Notes | From |
+|---|---|---|---|---|---|
+| GD22-001 | Original | ❌ | Discovery: the cartridge / UMD and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-22/agent-instructions.md`, [docs/adding-a-game.md](docs/adding-a-game.md) | New 11-04 |
+
+## gd-game-23: Band Hero (Nintendo DS)
+
+| ID | Class | Status | Item | Notes | From |
+|---|---|---|---|---|---|
+| GD23-001 | Original | ❌ | Discovery: the cartridge / UMD and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-23/agent-instructions.md`, [docs/adding-a-game.md](docs/adding-a-game.md) | New 11-04 |
+
+## gd-game-24: Rock Band Unplugged (PlayStation Portable)
+
+| ID | Class | Status | Item | Notes | From |
+|---|---|---|---|---|---|
+| GD24-001 | Original | ❌ | Discovery: the cartridge / UMD and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-24/agent-instructions.md`, [docs/adding-a-game.md](docs/adding-a-game.md) | New 11-04 |

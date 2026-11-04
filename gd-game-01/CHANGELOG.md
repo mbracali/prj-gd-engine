@@ -6,6 +6,16 @@ matches the tag's version.
 
 ## [Unreleased]
 
+### Added
+- Max FPS: 144 (#57).
+- Enhanced > Reset Calibration: sets the audio and video delays back to 0 ms (#47).
+- The help bar's buttons light up under the mouse (#51).
+
+### Fixed
+- A whammy key or button held on a long note now holds the bar down, a steady bend like a guitar's lever, instead of wobbling (#56).
+- The main menu's GAMEPADS button opens GAMEPADS on a click (#51).
+- The mouse wheel in lists (Enhanced Settings) no longer jumps back when the mouse moves slightly (#51).
+
 ### Removed
 - The MODS item in the main menu's help bar (mods will be handled outside the game); the help bar stays evenly spaced.
 

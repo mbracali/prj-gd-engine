@@ -1449,6 +1449,16 @@ void UiSystem::PanelObj::drawHelpbar() {
                          at(local(isStrum ? "help_bar_strum.mesh" : "help_bar.mesh"), cursor));
         cursor[0] += width;
     };
+    // [I] Port: the pill under the mouse lights up (its text in the menus'
+    // focus yellow), so CONTINUE / BACK / GAMEPADS read as clickable (#51).
+    // Last frame's rectangles; mouseX_ is off-screen until the mouse moves.
+    const auto lastElems = helpElems_;
+    size_t elemIndex = 0;
+    auto hovered = [&] {
+        if (elemIndex >= lastElems.size()) return false;
+        const Panel::Hit& h = lastElems[elemIndex].second;
+        return ui_.mouseX_ >= h.x0 - 4 && ui_.mouseX_ <= h.x1 + 4 && ui_.mouseY_ >= h.y0 - 4 && ui_.mouseY_ <= h.y1 + 4;
+    };
     // Label element (LabelHBElement_v5): box as wide as the text, the right cap, the text.
     auto label = [&](const std::string& token) {
         std::string text = res.localize(token);
@@ -1456,7 +1466,8 @@ void UiSystem::PanelObj::drawHelpbar() {
         mid(cursor, width);
         res.drawMeshAt("help_box_right.mesh", vp, at(local("help_box_right.mesh"), {cursor[0] + width, cursor[1], cursor[2]}));
         size_t before = scene_->hits().size();
-        scene_->drawText("helpbar" + std::to_string(k++), text, "help_bar.txt", {0.847f, 0.847f, 0.847f}, vp, at(textLocal, cursor));
+        const std::array<float, 3> colour = hovered() ? std::array<float, 3>{1.0f, 0.86f, 0.1f} : std::array<float, 3>{0.847f, 0.847f, 0.847f};
+        scene_->drawText("helpbar" + std::to_string(k++), text, "help_bar.txt", colour, vp, at(textLocal, cursor));
         if (scene_->hits().size() > before) helpHit_ = scene_->hits().back();
         cursor[0] += width + gap;
     };
@@ -1478,6 +1489,7 @@ void UiSystem::PanelObj::drawHelpbar() {
             Panel::Hit h = helpHit_;
             if (hasIcon) h.x0 -= (h.y1 - h.y0) * 1.6f;
             helpElems_.push_back({elem, h});
+            ++elemIndex;
         }
     }
 }
@@ -2652,6 +2664,12 @@ bool UiSystem::mouse(float x, float y, bool click) {
         return true;
     }
     if (!logos_.empty() || phase_ != Phase::Idle || !current_) return false;
+    mouseX_ = x, mouseY_ = y;
+    if (wheelHold_ && !click) {
+        if (std::hypot(x - wheelX_, y - wheelY_) <= kWheelHoverSlack) return true;
+        wheelHold_ = false;
+    }
+    wheelHold_ = false;
     auto inside = [&](const Panel::Hit& h, float pad) { return x >= h.x0 - pad && x <= h.x1 + pad && y >= h.y0 - pad && y <= h.y1 + pad; };
     const int select = guitar_ ? R2 : Cross;
     auto press = [&](int b) {
@@ -2664,9 +2682,10 @@ bool UiSystem::mouse(float x, float y, bool click) {
             if (inside(h, 4)) {
                 // The strum bar's pill: its upper half is Up, its lower half Down (UAB).
                 int b = elem == "fret1" ? select : elem == "fret2" ? (guitar_ ? Circle : Triangle) : elem == "start" ? Start
-                        : elem == "fret3" ? L1 : elem == "strum" ? (y < (h.y0 + h.y1) * 0.5f ? Up : Down) : -1;
+                        : elem == "strum" ? (y < (h.y0 + h.y1) * 0.5f ? Up : Down) : -1;
                 if (click && b >= 0) press(b);
-                if (click && elem == "fret4") gotoScreen("gamepads");  // the main menu's GAMEPADS
+                // The main menu's GAMEPADS (yellow): as the yellow fret does (app.cpp) (#51).
+                if (click && elem == "fret3") gotoScreen("gamepads");
                 return true;
             }
     PanelObj* fp = focusPanel();
@@ -2723,6 +2742,7 @@ bool UiSystem::mouse(float x, float y, bool click) {
 void UiSystem::wheel(int dir) {
     if (!logos_.empty() || phase_ != Phase::Idle || !current_) return;
     const int b = dir < 0 ? Up : Down;
+    wheelHold_ = true, wheelX_ = mouseX_, wheelY_ = mouseY_;
     buttonDown(b, guitar_, 0);
     buttonUp(b, 0);
 }
