@@ -552,7 +552,7 @@ material blend table; `burn` = premultiplied (ONE / ONE_MINUS_SRC_ALPHA)
 with a' = (1 - burnvalue) a, rgb x a x a'; alphacutoff the alpha test;
 texturelayout 2x2 / 1x2 / 2x1 cells, cell = (int(age x quadanimationfps)
 + the particle's random) & mask (the random alone at 0 fps) [C 82427E08].
-Not done: bounce, spline knots, wind, the size / rotation maths of GH3's
+Particles bounce off bounceheight (bouncecoeff, solved exactly) [I: the model]. Not done: spline knots, wind (every windcoeff on the disc is 0), the size / rotation maths of GH3's
 own quad builders (VMX128 code not decoded), lit quick materials.
 
 ### Not done yet

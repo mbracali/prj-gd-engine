@@ -372,7 +372,7 @@ for the results. Every screen is ~7 % lighter in the port's mid tones (the
 | Select controller | 09_multiplayer_select_controller | 09_select_controller | two guitar icons vs one pad | not a bug: the walk's two players count as guitars |
 | Loading screen | 10a_loading_screen | 10a_loading | none drawn | fixed: texture-slot movies (§8); up for 1-2 frames (the port's script loads are instant, its song load stalls after) |
 | Song intro | 10b-10g | 10c_intro_title | title and HUD ~2 s early (no load time), cameras | not mine (song start, venue) |
-| Pause | 20_pause_menu | 20_pause | RESUME not white | fixed: the first item's focus deferred (§5). The background is not blurred / dimmed and the highway is hidden: render / song side, not done |
+| Pause | 20_pause_menu | 20_pause | RESUME not white | fixed: the first item's focus deferred (§5); the highway hides and create_pause_menu_frame's gradient_128 (black, alpha 180) dims the scene (pausequit walk frames, 2026-11-04) |
 | Pause options | 21_pause_options | 21_pause_options | the pause menu stayed (for_options lost) | fixed: struct parameters merged (qscript.md). CALIBRATE WHAMMY: the port's pad counts as a guitar |
 | Restart warning | 22_pause_restart_warning | 22_restart_warning | none drawn before | fixed by the above |
 | Newspaper | 30_results_newspaper | 30_newspaper | RETRY SONG in the short runs | right: shown unless the score is a new top score (create_newspaper_menu); the full-song run matches |
@@ -382,7 +382,7 @@ for the results. Every screen is ~7 % lighter in the port's mid tones (the
 | Store | 41_store_main | 41_store_main | black background; the menu 20 px high | the 3D scene fixed (§9); the 20 px (= -spacing) not found in the layout code [C 0x82315FB0 / 0x82317640 read]: not done |
 | Store guitars | 42_store_guitars | 42_store_guitars | the info text outside its window, black background, no guitar model | fixed: window defaults (§2), the camera morph; the instrument (composite objects) not done |
 | Store songs | 43_store_songs | - | not reached by the scripted runs | - |
-| Character select / hub | - | char_select, char_hub | (no capture) black before; now the zone, no character | the characters need CreateCompositeObject / obj_*: not done |
+| Character select / hub | - | char_select, char_hub | (no capture) black before; now the zone, no character | the character is drawn through the menu objects (CreateCompositeObject, career walk frames 2026-11-04) |
 
 ## Script spawning [C 0x8226A048..0x8226A0C4]
 

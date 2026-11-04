@@ -728,6 +728,11 @@ void Particles::create(const venue::Vec3& pos, const qb::Value* params, double t
     for (const qb::Item& it : st->items)
         if (it.name == 0 && it.value.type == qb::Type::Key && it.value.key == K("alignwithpath")) p.alignWithPath = true;
     p.pathTime = num(f("pathfollowtime"), 0.1f);
+    if (const qb::Value* bc = f("bouncecoeff"); bc && bc->number() > 0) {
+        p.bounceHeight = num(f("bounceheight"), 0);
+        p.bounceCoeff = float(bc->number());
+        p.bounce = p.bounceHeight > -99.0f;
+    }
     for (const qb::Item& it : st->items)
         if (it.name == 0 && it.value.type == qb::Type::Key && it.value.key == K("burn")) p.burn = std::max(0.0f, num(f("burnvalue"), 0.0f));
     {
@@ -926,6 +931,35 @@ void Particles::draw(const venue::CamPose& cam, double ms) {
             for (size_t k = 0; k < 3; ++k) {
                 vel[k] = vdir[k] * speed + p.force[k] * at;
                 pos[k] = p0[k] + vdir[k] * speed * at + 0.5f * p.force[k] * at * at;
+            }
+            // Bounces off y = bounceheight: each hit (solved exactly under the
+            // constant force) restarts the flight from the plane with the
+            // velocity's y reflected and all of it scaled by bouncecoeff [I].
+            if (p.bounce && p0[1] >= p.bounceHeight && pos[1] < p.bounceHeight) {
+                venue::Vec3 sp = p0, sv{vdir[0] * speed, vdir[1] * speed, vdir[2] * speed};
+                float left = at;
+                for (int hit = 0; hit < 6; ++hit) {
+                    // sp.y + sv.y t + 0.5 f t^2 = h: the first t > 0.
+                    const float A = 0.5f * p.force[1], B = sv[1], C = sp[1] - p.bounceHeight;
+                    float th = -1;
+                    if (std::fabs(A) < 1e-6f) th = B < 0 ? -C / B : -1;
+                    else if (const float disc = B * B - 4 * A * C; disc >= 0) {
+                        const float r = std::sqrt(disc), t1 = (-B - r) / (2 * A), t2 = (-B + r) / (2 * A);
+                        th = t1 > 1e-5f ? (t2 > 1e-5f ? std::min(t1, t2) : t1) : t2;
+                    }
+                    if (th <= 1e-5f || th >= left) break;
+                    for (size_t k = 0; k < 3; ++k) {
+                        sp[k] += sv[k] * th + 0.5f * p.force[k] * th * th;
+                        sv[k] = (sv[k] + p.force[k] * th) * p.bounceCoeff;
+                    }
+                    sp[1] = p.bounceHeight, sv[1] = -sv[1];
+                    left -= th;
+                }
+                for (size_t k = 0; k < 3; ++k) {
+                    vel[k] = sv[k] + p.force[k] * left;
+                    pos[k] = sp[k] + sv[k] * left + 0.5f * p.force[k] * left * left;
+                }
+                pos[1] = std::max(pos[1], p.bounceHeight);
             }
             // EngineWind: the particle swirls about each wind's axis (angle =
             // speed x tangentweight x its age / distance) and drifts with it.

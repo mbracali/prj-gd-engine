@@ -93,6 +93,10 @@ public:
         float speedMin = 1, speedMax = 1;
         bool alignWithPath = false;
         float pathTime = 0.1f;
+        // bounceheight / bouncecoeff: the particles rebound off the plane y = height (world)
+        // keeping coeff of their speed; off when the coeff is 0 or the height -99.9 [C data; I: the model].
+        bool bounce = false;
+        float bounceHeight = 0, bounceCoeff = 0;
         uint32_t color = 0xFFFFFFFF;          // RGBA
         std::vector<uint32_t> gradient;       // particlecolor, over the life
         uint32_t texture = 0;                 // quickmaterial.diffusetexture

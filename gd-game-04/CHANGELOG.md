@@ -6,6 +6,7 @@ All notable changes for players. Versions follow SemVer; release tags are
 ## [Unreleased]
 
 ### Added
+- Sparks and debris bounce off the stage as in GH3 (GD04-065).
 - GH3's stage projectors: the round light pools where the spotlights hit the stage, with the band's shadow in them, and the encore helicopter's and crowd spotlights' light on whatever they hit (GD04-064).
 - The band's twist and split helper bones (wrists, elbows, knees, hips) and the leg IK (GD04-064).
 - The `volume` light beams of seven venues use GH3's own raytraced beam shader against the scene's depth; they were not drawn (GD04-063).
