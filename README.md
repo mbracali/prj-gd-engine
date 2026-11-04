@@ -24,27 +24,52 @@ A re implementation of all major guitar hero and rock band engines.
 
 # Contents
 
-| id         | Original game                     | Base version  | Done         |
-| ---------- | --------------------------------- | ------------- | ------------ |
+## Games
+
+This is a list of all the planned and already decompiled games. Every game is planned, but may not be fully featured in the launcher yet.
+
+| id         | Original game                     | Base version  | Done          |
+| ---------- | --------------------------------- | ------------- | ------------- |
 | gd-game-01 | Guitar Hero                       | Playstation 2 | 100% Playable |
 | gd-game-02 | Guitar Hero II                    | Xbox 360      | 100% Playable |
 | gd-game-03 | Guitar Hero Encore: Rocks the 80s | Playstation 2 | 100% Playable |
-| gd-game-04 | Guitar Hero III: Legends of Rock  | Xbox 360      | 55% Playable |
-| gd-game-05 | Rock Band                         | Xbox 360      | --           |
-| gd-game-06 | Guitar Hero: Aerosmith            | Xbox 360      | --           |
-| gd-game-07 | Guitar Hero World Tour            | Xbox 360      | --           |
-| gd-game-08 | Rock Band 2                       | Xbox 360      | --           |
-| gd-game-09 | The Beatles: Rock Band            | Xbox 360      | --           |
-| gd-game-10 | Guitar Hero: Metallica            | Xbox 360      | --           |
-| gd-game-11 | Guitar Hero: Smash Hits           | Xbox 360      | --           |
-| gd-game-12 | Guitar Hero 5                     | Xbox 360      | --           |
-| gd-game-13 | Lego Rock Band                    | Xbox 360      | --           |
-| gd-game-14 | Band Hero                         | Xbox 360      | --           |
-| gd-game-15 | Guitar Hero: Van Halen            | Xbox 360      | --           |
-| gd-game-16 | Green Day: Rock Band              | Xbox 360      | --           |
-| gd-game-17 | Guitar Hero: Warriors of Rock     | Xbox 360      | --           |
-| gd-game-18 | Rock Band 3                       | Xbox 360      | --           |
-| gd-game-19 | Rock Band 4                       | Xbox One      | Considering  |
+| gd-game-04 | Guitar Hero III: Legends of Rock  | Xbox 360      | 55% Playable  |
+| gd-game-05 | Rock Band                         | Xbox 360      | Tunning in... |
+| gd-game-06 | Guitar Hero: Aerosmith            | Xbox 360      | --            |
+| gd-game-07 | Guitar Hero World Tour            | Xbox 360      | --            |
+| gd-game-08 | Rock Band 2                       | Xbox 360      | --            |
+| gd-game-09 | The Beatles: Rock Band            | Xbox 360      | --            |
+| gd-game-10 | Guitar Hero: Metallica            | Xbox 360      | --            |
+| gd-game-11 | Guitar Hero: Smash Hits           | Xbox 360      | --            |
+| gd-game-12 | Guitar Hero 5                     | Xbox 360      | --            |
+| gd-game-13 | Lego Rock Band                    | Xbox 360      | --            |
+| gd-game-14 | Band Hero                         | Xbox 360      | --            |
+| gd-game-15 | Guitar Hero: Van Halen            | Xbox 360      | --            |
+| gd-game-16 | Green Day: Rock Band              | Xbox 360      | --            |
+| gd-game-17 | Guitar Hero: Warriors of Rock     | Xbox 360      | --            |
+| gd-game-18 | Rock Band 3                       | Xbox 360      | --            |
+| gd-game-19 | Rock Band 4                       | Xbox One      | Not sure yet  |
+| gd-game-20 | Guitar Hero: On Tour              | Nintendo DS   | --            |
+| gd-game-21 | Guitar Hero On Tour: Decades      | Nintendo DS   | --            |
+| gd-game-22 | Guitar Hero On Tour: Modern Hits  | Nintendo DS   | --            |
+| gd-game-23 | Band Hero (DS)                    | Nintendo DS   | --            |
+| gd-game-24 | Rock Band Unplugged               | PSP           | --            |
+
+
+## Tools
+
+The dream engine also feature some tools to enhance the experience of the decompilations. In the future you will be able to create your own songs, play songs from one game in another and add the characters of your dreams.
+
+The open dream engine is a bigger project. The idea is to create a engine that everybody can use to create their own version of guitar games.
+
+| id         | Name                 | Done          |
+| ---------- | -------------------- | ------------- |
+| gd-tool-01 | Additive music menu  | Concept phase |
+| gd-tool-02 | Music mod / DLC menu | Concept phase |
+| gd-tool-03 | Band mod menu        | --            |
+| gd-tool-04 | Open dream engine    | --            |
+
+
 
 # Repository layout
 
@@ -62,7 +87,7 @@ prj-gd-engine/
   gd-engine-launcher/        the Guitar Dream Universal Launcher
   res/                       official Guitar Dream assets (icon)
   original_isos/             your own disc images and ROMs (git-ignored)
-  gd-game-01/ ... gd-game-19/
+  gd-game-01/ ... gd-game-24/
 ```
 
 Every game folder (`gd-game-02` is the model; `gd-game-01` keeps its older

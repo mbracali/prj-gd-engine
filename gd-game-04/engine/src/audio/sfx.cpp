@@ -5,6 +5,7 @@
 #include <SDL3/SDL_log.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <exception>
 
@@ -119,6 +120,9 @@ bool Sfx::decode(Entry& e) {
 }
 
 uint32_t Sfx::play(uint32_t sample, float volume, float pitch) {
+    // GD04_SFXLOG=1: every sound asked for (development aid).
+    static const bool log = SDL_getenv("GD04_SFXLOG") != nullptr;
+    if (log) SDL_Log("sfx: play %s (%s)", qbkey::name(sample).c_str(), entries_.count(sample) ? "found" : "unknown");
     auto it = entries_.find(sample);
     if (it == entries_.end()) {
         ++stats_.unknown;
@@ -126,6 +130,12 @@ uint32_t Sfx::play(uint32_t sample, float volume, float pitch) {
     }
     Entry& e = *it->second;
     if (!e.decoded) decode(e);
+    if (log) {
+        float peak = 0;
+        for (float f : e.pcm) peak = std::max(peak, std::fabs(f));
+        SDL_Log("sfx:   %zu samples, %d Hz, %d ch, peak %.3f, volume %.2f%s", e.pcm.size(), e.rate, e.channels, double(peak), double(volume),
+                device_ ? "" : ", no device");
+    }
     if (e.bad || e.pcm.empty()) return 0;
     ++stats_.plays;
     const uint32_t id = nextVoice_++;
@@ -135,9 +145,14 @@ uint32_t Sfx::play(uint32_t sample, float volume, float pitch) {
     if (!s) return 0;
     SDL_SetAudioStreamGain(s, std::clamp(volume, 0.0f, 4.0f));
     if (pitch > 0 && pitch != 1) SDL_SetAudioStreamFrequencyRatio(s, std::clamp(pitch, 0.25f, 4.0f));
-    SDL_PutAudioStreamData(s, e.pcm.data(), int(e.pcm.size() * sizeof(float)));
+    // Bound first: a stream made without an output format holds nothing
+    // until it has one (the data put before was dropped: no sound effect
+    // was ever heard).
+    const bool bound = SDL_BindAudioStream(device_, s);
+    const bool put = SDL_PutAudioStreamData(s, e.pcm.data(), int(e.pcm.size() * sizeof(float)));
     SDL_FlushAudioStream(s);
-    SDL_BindAudioStream(device_, s);
+    if (!bound || !put || SDL_GetAudioStreamAvailable(s) <= 0) ++stats_.lost;
+    if (log) SDL_Log("sfx:   bound %d, put %d (%s), available %d", int(bound), int(put), put ? "" : SDL_GetError(), SDL_GetAudioStreamAvailable(s));
     voices_.push_back(Voice{id, s});
     return id;
 }

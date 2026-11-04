@@ -42,6 +42,7 @@ public:
     bool pcm(uint32_t sample, std::vector<float>& out, int& rate, int& channels);
     struct Stats {
         uint64_t plays = 0, decoded = 0, failures = 0, unknown = 0;
+        uint64_t lost = 0;  // played but not taken by the device (nothing heard)
     };
     const Stats& stats() const { return stats_; }
 

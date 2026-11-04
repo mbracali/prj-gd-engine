@@ -644,6 +644,13 @@ bool Walk::act(const std::string& what, FrontEnd& fe, WalkHost& host) {
 int Walk::finish(FrontEnd& fe) const {
     std::string path;
     for (const std::string& s : log_) path += (path.empty() ? "" : " > ") + s;
+    // Every sound effect reached the device (0.1.12: none did, the menus were silent).
+    const Sfx::Stats& sx = fe.sfx.stats();
+    std::printf("sound effects: %llu played, %llu lost\n", (unsigned long long)sx.plays, (unsigned long long)sx.lost);
+    if (!failed_ && done() && sx.lost) {
+        std::printf("walktest %s: FAILED (sound effects lost on the device); reached: %s\n", name_.c_str(), path.c_str());
+        return 1;
+    }
     if (failed_ || !done()) {
         std::printf("walktest %s: FAILED (%s); reached: %s\n", name_.c_str(),
                     failure_.empty() ? "did not finish in time" : failure_.c_str(), path.c_str());

@@ -178,6 +178,12 @@ bool SongScreen::start(const Disc& disc, const Globals& g, const SongInfo& song,
     tracks[size_t(p1Stem)].guitar = tracks[size_t(p1Stem + 1)].guitar = true;
     if (p2Other) tracks[size_t(2 - p1Stem)].guitar2 = tracks[size_t(3 - p1Stem)].guitar2 = true;
     mixer.play(std::move(stream), std::move(tracks), leadInMs_);
+    // The clock waits for the venue: loading the band and the scene here and
+    // uploading it on the first frame take a second or more, which ran the
+    // intro's clock (its first cameras and poses never showed). GH3 starts
+    // the song once the zone is loaded [I].
+    mixer.setPaused(true);
+    holdClock_ = true;
     // The venue: its scene, cameras and light show (uploaded on the first frame).
     if (!SDL_getenv("GD04_NO_VENUE")) {
         disc_ = &disc;
@@ -269,6 +275,15 @@ void SongScreen::tick(double nowMs, Mixer& mixer) {
 }
 
 bool SongScreen::frame(Canvas& canvas, Mixer& mixer, const TextureCache* textures) {
+    if (holdClock_) {
+        holdClock_ = false;
+        std::string verr;
+        if (venue_ && !venue_->view() && !venue_->attach(canvas.renderer().device(), *disc_, verr)) {
+            SDL_Log("venue: %s", verr.c_str());
+            venue_.reset();
+        }
+        mixer.setPaused(false);
+    }
     const double now = mixer.frameTimeMs() - leadInMs_ + startMs_;
     lastMs_ = now;
     tick(now, mixer);

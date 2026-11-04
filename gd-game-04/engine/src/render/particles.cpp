@@ -817,7 +817,16 @@ void Particles::draw(const venue::CamPose& cam, double ms) {
         float al = std::sqrt(ax[0] * ax[0] + ax[1] * ax[1] + ax[2] * ax[2]);
         for (float& c : ax) c /= al;
         const venue::Vec3 ay{dir[1] * ax[2] - dir[2] * ax[1], dir[2] * ax[0] - dir[0] * ax[2], dir[0] * ax[1] - dir[1] * ax[0]};
+        // Only the particles that can be alive now: the burst while age < lifeMax,
+        // then the continuous ones born in [age - lifeMax, age] (a long-lived
+        // emitter has millions of indices; walking them all took seconds a frame).
+        const double rate = std::max(1.0f, p.rate);
+        const int burstEnd = age <= double(p.lifeMax) ? p.burst : 0;
+        const int contLo = p.burst + std::max(0, int(std::floor((age - double(p.lifeMax)) * rate)));
+        const int contHi = int(std::min<double>(double(total), double(p.burst) + std::floor(age * rate) + 1.0));
         for (int i = 0; i < total && verts.size() / 6 < kMaxParticles; ++i) {
+            if (i == burstEnd && i < contLo) i = contLo;
+            if (i >= contHi) break;
             const double born = i < p.burst ? 0.0 : double(i - p.burst) / std::max(1.0f, p.rate);
             const float life = p.lifeMin + (p.lifeMax - p.lifeMin) * rnd(s.seed, uint64_t(i), 0);
             const double a = age - born;

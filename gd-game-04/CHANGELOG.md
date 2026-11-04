@@ -11,6 +11,9 @@ All notable changes for players. Versions follow SemVer; release tags are
 - Lou's finish and defeat scenes play with their animations and cameras.
 
 ### Fixed
+- Menu sounds, menu music, crowd and every other sound effect were silent: they were dropped before reaching the audio device (GD04-048).
+- Songs in some venues (z_party) ran at 3 fps on integrated GPUs: venue particles were walked by the millions every frame (GD04-046).
+- The venue intro lost its first second or more: the song clock ran while the venue loaded (GD04-047).
 - Android: the same buffer-update path as macOS, which phone graphics drivers handle without stalling (#55).
 - The mouse wheel in menus no longer jumps back when the mouse moves slightly (#51).
 
