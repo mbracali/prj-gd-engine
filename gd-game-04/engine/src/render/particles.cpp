@@ -162,6 +162,15 @@ bool Particles::start(const Disc& disc, const Globals& g, const venue::Venue& v,
         create(vec(qs::Vm::param(p, K("pos")), {}), qs::Vm::param(p, K("params_script")), vmTime_);
         return true;
     });
+    // SetShadowDirFromLight name = <light> (z_soundcheck's node scripts, the
+    // character hub): the dynamic shadow's light (VenueStage::shadowPass) [C
+    // scripts]. `shadow` (the same scripts' bare call) is absorbed [I: its use].
+    vm_->addNative("SetShadowDirFromLight", [this](qs::Vm&, qs::ScriptRun&, qb::Struct& p) {
+        const qb::Value* n = qs::Vm::param(p, K("name"));
+        if (n) shadowLight = n->key;
+        return true;
+    });
+    vm_->addNative("shadow", [](qs::Vm&, qs::ScriptRun&, qb::Struct&) { return true; });
     vm_->addNative("IsCreated", [this](qs::Vm&, qs::ScriptRun&, qb::Struct& p) {
         const qb::Value* n = qs::Vm::positional(p);
         const venue::Node* node = n ? v_->node(keyOf(n)) : nullptr;

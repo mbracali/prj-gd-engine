@@ -158,6 +158,7 @@ void FrontEnd::songEnded(const SongResult& r) {
 void FrontEnd::frame(Canvas& c, double dtMs) {
     sfx.update();
     if (!songPlaying && !flow.paused) songClockMs += dtMs;
+
     // GD04_FLOWLOG=1: each flow state player 1 enters (ui_flow_manager_state[0]).
     static const bool flowLog = SDL_getenv("GD04_FLOWLOG") != nullptr;
     if (flowLog) {

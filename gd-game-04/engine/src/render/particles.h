@@ -152,6 +152,7 @@ public:
     };
     std::unordered_map<uint32_t, Tesla> teslas;
     uint64_t scriptedCreated = 0;
+    uint32_t shadowLight = 0;  // SetShadowDirFromLight's light (0: none)
 private:
     std::unordered_map<uint32_t, Wind> winds_;
 public:

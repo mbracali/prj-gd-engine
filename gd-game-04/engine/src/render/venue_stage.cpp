@@ -369,6 +369,10 @@ void VenueStage::shadowPass(double ms) {
         if (p > bestPower) bestPower = p, best = int(i);
     }
     static const bool log = SDL_getenv("GD04_SHADOW_LOG") != nullptr;
+    // SetShadowDirFromLight (a zone's node script) names it outright [C scripts].
+    if (particles_ && particles_->shadowLight)
+        for (size_t i = 0; i < v.lights.size(); ++i)
+            if (v.lights[i].name == particles_->shadowLight) best = int(i);
     if (log) SDL_Log("shadow: light %s", best >= 0 ? qbkey::names().get(v.lights[size_t(best)].name).c_str() : "none");
     if (best < 0) return;
     venue::Vec3 centre{};

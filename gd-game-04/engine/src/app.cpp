@@ -911,6 +911,7 @@ void App::frame() {
         setup.suddenDeath = rq.suddenDeath;
         if (rq.suddenDeath) setup.startHealth = {rq.saveHealth[0], rq.saveHealth[1]};
         setup.startMs = rq.startMs, setup.devilFinish = rq.devilFinish;
+        setup.endMs = rq.endMs;
         setup.lefty = {rq.lefty[0], rq.lefty[1]};
         // GH3's lag_calibration plus Enhanced > Calibration's audio delay
         // (judged later by it); the video delay draws the highway ahead.

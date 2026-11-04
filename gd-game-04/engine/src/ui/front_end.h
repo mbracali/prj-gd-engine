@@ -68,6 +68,7 @@ public:
         // Lou's finish at marker 37); devil_finish kept by a
         // devil_finish_restart [C script start_gem_scroller].
         double startMs = 0;
+        double endMs = -1;  // start_gem_scroller's endtime (practice: the section's end; -1: the song's)
         bool devilFinish = false;
         // The user_options tags' lefty_flip_p1 / _p2 -> lefthanded_gems and
         // lefthanded_button_ups [C script start_gem_scroller].

@@ -19,6 +19,8 @@ All notable changes for players. Versions follow SemVer; release tags are
 - Lou's finish and defeat scenes play with their animations and cameras.
 
 ### Fixed
+- Practice played the whole song instead of the chosen section; it now ends at the section's end and shows its results (GD04-043).
+- The Soundcheck venue's shadow comes from its own light (SetShadowDirFromLight) (GD04-043).
 - Menu sounds, menu music, crowd and every other sound effect were silent: they were dropped before reaching the audio device (GD04-048).
 - Songs in some venues (z_party) ran at 3 fps on integrated GPUs: venue particles were walked by the millions every frame (GD04-046).
 - The venue intro lost its first second or more: the song clock ran while the venue loaded (GD04-047).

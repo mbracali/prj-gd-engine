@@ -42,6 +42,7 @@ struct SongSetup {
     // starttime (ms): a mid-song start; Lou's finish (devil_finish: player 2's
     // highway and HUD off screen); the players' lefty flip [C start_gem_scroller].
     double startMs = 0;
+    double endMs = -1;  // the gems end here and the song finishes (practice's section end; -1: the song's)
     bool devilFinish = false;
     std::array<bool, 2> lefty{false, false};
     // user_options.lag_calibration (ms): input_offset = the song's - this [C script gem_scroller].

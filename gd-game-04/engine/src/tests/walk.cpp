@@ -269,6 +269,75 @@ Walk::Walk(const std::string& name) : name_(name) {
                           10000});
         steps_.push_back({"options_select_option_fs", {"click:help:BACK"}, 10000});
         steps_.push_back({"main_menu_fs", {}, 20000});
+    } else if (name == "hub") {
+        // The character hub's CHANGE OUTFIT and CHANGE GUITAR screens
+        // (GD04-043) [C data
+        // career_character_hub_fs].
+        steps_ = boot;
+        steps_.push_back({"main_menu_fs", {C}, 10000});
+        steps_.push_back({"career_choose_band_fs", {C}, 20000, true});
+        steps_.push_back({"career_enter_band_name_fs", {C, C, C, Action::Start}, 20000, true});
+        steps_.push_back({"career_select_difficulty_fs", {C}, 20000});
+        steps_.push_back({"career_select_character_fs", {C}, 20000, true});
+        steps_.push_back({"career_character_hub_fs", {D, D, C}, 20000});  // PLAY SHOW, CHANGE CHARACTER, CHANGE OUTFIT
+        steps_.push_back({"career_select_outfit_fs", {B}, 20000});
+        steps_.push_back({"career_character_hub_fs", {D, D, D, C}, 20000});  // CHANGE GUITAR
+        steps_.push_back({"career_select_guitar_fs", {C}, 20000});  // the guitar chosen: back to the hub
+        steps_.push_back({"career_character_hub_fs", {}, 20000});
+    } else if (name == "store") {
+        // The Vault's pages no other walk opens (GD04-043): finishes, songs,
+        // characters, outfits, styles, videos -- each opened and backed out
+        // of [C data store_fs].
+        steps_ = boot;
+        steps_.push_back({"main_menu_fs", {C}, 10000});
+        steps_.push_back({"career_choose_band_fs", {C}, 20000, true});
+        steps_.push_back({"career_enter_band_name_fs", {C, C, C, Action::Start}, 20000, true});
+        steps_.push_back({"career_select_difficulty_fs", {C}, 20000});
+        steps_.push_back({"career_select_character_fs", {C}, 20000, true});
+        steps_.push_back({"career_character_hub_fs", {D, D, D, D, C}, 20000});  // VISIT STORE
+        const std::pair<int, const char*> pages[] = {{1, "store_finishes_fs"}, {2, "store_songs_fs"},   {3, "store_characters_fs"},
+                                                     {4, "store_outfits_fs"},  {5, "store_styles_fs"}, {6, "store_videos_fs"}};
+        for (const auto& [downs, state] : pages) {
+            std::vector<Op> go(size_t(downs), D);
+            go.push_back(C);
+            steps_.push_back({"store_fs", go, 20000});
+            steps_.push_back({state, {B}, 20000});
+        }
+        steps_.push_back({"store_fs", {}, 20000});
+    } else if (name == "practice") {
+        // Training -> PRACTICE -> the first song -> difficulty -> the song's
+        // first section -> speed -> the section played -> its results
+        // (GD04-043) [C data practice_*_fs, script practice_update].
+        steps_ = boot;
+        steps_.push_back({"main_menu_fs", {"click:menu:main_menu_training_text"}, 10000});
+        steps_.push_back({"practice_select_mode_fs", {D, C}, 20000});  // TUTORIAL, PRACTICE
+        steps_.push_back({"practice_setlist_fs", {C}, 20000});
+        steps_.push_back({"practice_select_part_fs", {C}, 20000, true});
+        steps_.push_back({"practice_select_difficulty_fs", {C}, 20000});
+        steps_.push_back({"practice_select_song_section_fs", {C}, 20000});
+        steps_.push_back({"practice_select_speed_fs", {C}, 20000});
+        // The section's end brought to 5 s in (the walk's song ends early):
+        // practice_update then ends it as GH3 does, Song_Win_Delay later.
+        steps_.push_back({"song", {"set:global:practice_end_time=5000"}, 30000});
+        steps_.push_back({"song_over", {}, 600000});
+        steps_.push_back({"practice_newspaper_fs", {}, 60000});  // the section's results: restart / speed / section / new song / quit
+    } else if (name == "options") {
+        // Options' screens no other walk opens (GD04-043): AUDIO SETTINGS,
+        // CALIBRATE LAG, CONTROLLER SETTINGS, DATA SETTINGS, BONUS VIDEOS,
+        // TOP ROCKERS, each opened and backed out of (the menu comes back
+        // with the top item focused) [C data options_select_option_fs].
+        steps_ = boot;
+        steps_.push_back({"main_menu_fs", {"click:menu:main_menu_options_text"}, 10000});
+        const std::pair<int, const char*> screens[] = {{0, "options_audio_settings_fs"},   {1, "options_calibrate_lag_fs"},
+                                                       {2, "options_controller_settings_fs"}, {4, "options_data_settings_fs"},
+                                                       {5, "options_bonus_videos_fs"},        {7, "options_top_rockers_difficulty_select_fs"}};
+        for (const auto& [downs, state] : screens) {
+            std::vector<Op> go(size_t(downs), D);
+            go.push_back(C);
+            steps_.push_back({"options_select_option_fs", go, 20000});
+            steps_.push_back({state, {B}, 20000});
+        }
+        steps_.push_back({"options_select_option_fs", {}, 20000});
     } else if (name == "touch") {
         // Enhanced > Enable Touch Controls on; a finger taps OPTIONS on the
         // main menu (SDL finger events, as a touch screen sends them) ->
@@ -605,6 +674,12 @@ bool Walk::act(const std::string& what, FrontEnd& fe, WalkHost& host) {
         const std::string kv = rest("set:enhanced:");
         const size_t eq = kv.find('=');
         host.walkSetEnhanced(kv.substr(0, eq), kv.substr(eq + 1));
+        return true;
+    }
+    if (starts("set:global:")) {  // set:global:<name>=<number>: a GH3 global set (a test's shortcut)
+        const std::string kv = rest("set:global:");
+        const size_t eq = kv.find('=');
+        fe.vm().setGlobal(qbkey::key(kv.substr(0, eq).c_str()), qs::Vm::makeInt(std::atoi(kv.c_str() + eq + 1)));
         return true;
     }
     if (starts("check:global:")) {  // check:global:<name>=<number>: a GH3 global's value

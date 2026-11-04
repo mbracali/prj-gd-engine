@@ -100,6 +100,8 @@ void addGameNatives(FrontEnd& fe, const Disc& disc, TextureCache& textures) {
         // starttime; devil_finish_restart keeps devil_finish, any other start
         // clears it (and BossDevil then starts at 0) [C script start_gem_scroller].
         r.startMs = std::max(0.0, double(Vm::number(Vm::param(p, K("starttime")), 0)));
+        // endtime (practice_start_song: practice_end_time; default 99999999) [C script start_gem_scroller].
+        if (const qb::Value* e = Vm::param(p, K("endtime")); e && e->number() > 0 && e->number() < 99999999.0f) r.endMs = e->number();
         if (Vm::number(Vm::param(p, K("devil_finish_restart")), 0) == 1) {
             r.devilFinish = Vm::number(v.global(K("devil_finish")), 0) != 0;
         } else {

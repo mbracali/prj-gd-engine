@@ -81,6 +81,11 @@ bool SongScreen::start(const Disc& disc, const Globals& g, const SongInfo& song,
     twoPlayers_ = setup.mode != GameMode::Solo;
     try {
         chart_ = loadChart(disc, song.name);
+        // endtime: no gems after it (practice's section) [C script start_gem_scroller's endtime].
+        if (setup.endMs > 0)
+            for (PartChart& pc : chart_.parts)
+                for (auto& notes : pc.notes)
+                    notes.erase(std::remove_if(notes.begin(), notes.end(), [&](const ChartNote& n) { return double(n.time) > setup.endMs; }), notes.end());
     } catch (const std::exception& e) {
         error = e.what();
         return false;
@@ -168,6 +173,8 @@ bool SongScreen::start(const Disc& disc, const Globals& g, const SongInfo& song,
         return false;
     }
     endMs_ = std::max(endMs_, double(stream->length()) * 1000.0 / std::max(1, stream->sampleRate()));
+    // Practice: the song finishes at the section's end (practice_update ends the screen Song_Win_Delay later) [C scripts].
+    if (setup.endMs > 0) endMs_ = std::min(endMs_, setup.endMs);
     // Six channels: guitar L R (muted on a miss), rhythm L R, song L R.
     std::vector<Mixer::Track> tracks(6);
     for (int i = 0; i < 6; ++i) tracks[size_t(i)].pan = (i % 2) ? 1.0f : -1.0f;
