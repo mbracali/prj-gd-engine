@@ -6,6 +6,8 @@ All notable changes for players. Versions follow SemVer; release tags are
 ## [Unreleased]
 
 ### Added
+- The universal Gamepad menu: four player boxes (instrument, device, Customize inputs), two bindings per control with Save / Discard, Detect, Export / Import, Generic MIDI controllers (GD04-060).
+- The universal Enhanced menu: one-click MODES (Steam Deck, Original Feel, Clean Image, Max Out, Rocking on a Budget, Good Old Days) and the shared sections and ranges (GD04-060).
 - Every Enhanced Option that can work now does: the picture effects (bloom, anti-aliasing, FSR 1, internal resolution, colour, grain, AO, sharpening, Star Power blur, light streaks, bokeh), sharper text, the venue extras and ground fog, no shaky camera, the cheat rows, forgiving HOPOs, touch controls and cut content (GD04-054).
 - Star Power's stage effects now play for every character, including the Tesla lightning from the guitar; the hearts / bats swirl (GD04-055).
 - The `volume` light beams and the stage projectors are drawn (approximated, GD04-056).

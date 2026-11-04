@@ -58,6 +58,7 @@ target_sources(gd04 PRIVATE
   src/devaids/menu_keys.cpp
   src/devaids/screenshot.cpp
   src/input/input.cpp
+  src/input/midi_in.cpp
   src/input/input_selftest.cpp
   src/platform/app_icon.cpp
   src/platform/disc_picker.cpp
@@ -140,6 +141,12 @@ endif()
 
 find_package(Threads REQUIRED)
 target_link_libraries(gd04 PRIVATE Threads::Threads)
+
+# Generic MIDI input (src/input/midi_in.cpp): RtMidi (third_party/rtmidi), desktop only.
+if(NOT ANDROID)
+  add_subdirectory(third_party/rtmidi)
+  target_link_libraries(gd04 PRIVATE gd_rtmidi)
+endif()
 
 target_compile_definitions(gd04 PRIVATE GD04_VERSION="${PROJECT_VERSION}")
 
@@ -308,3 +315,4 @@ if(GD04_MODULE)
     target_link_options(gd04_module PRIVATE -Wl,--exclude-libs,ALL)
   endif()
 endif()
+

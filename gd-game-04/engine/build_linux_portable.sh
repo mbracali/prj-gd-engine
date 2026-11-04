@@ -49,6 +49,7 @@ compile build/portable/gd04 gd04
 say "Assembling dist/gd04-linux-x86_64 (program, SDL3, FFmpeg, icon, licences)..."
 d=dist/gd04-linux-x86_64
 rm -rf "$d" && mkdir -p "$d/licenses"
+cp third_party/rtmidi/LICENSE "$d/licenses/RtMidi-LICENSE.txt"  # Generic MIDI (src/input/midi_in.cpp)
 cp build/portable/gd04/gd04 README.md ../../LICENSE ../../LICENSE-ADDITIONAL-TERMS.md "$d/"
 strip "$d/gd04"
 cp res/gd04_icon_512.png "$d/gd04.png"

@@ -84,108 +84,155 @@ std::vector<Item> gh3Cheats(qs::Vm& vm) {
     return out;
 }
 
-// gd01's list, in its sections and order, with its explanations (gd02's
-// wording); gd02's Gamepads button where the guideline puts it; then GH3's
-// own cheats.
+// The universal Enhanced menu (universal_mechanisms.md 1.2.2): gd03's list
+// in the doc's sections and order, GH3's own rows (cut content, the debug
+// menu), then GH3's own cheats.
 std::vector<Item> buildItems(qs::Vm& vm) {
     std::vector<Item> k = {
-        {Kind::Section, "deck", "STEAM DECK MODE", true, "Settings for handheld PCs such as the Steam Deck."},
-        {Kind::Button, "steam_deck", "Apply Steam Deck Settings", true,
-         "Sets every option to what runs best on a handheld PC such as the Steam Deck: full screen at 60 FPS and lighter "
-         "effects. You can still change any option afterwards."},
+        // universal_mechanisms.md 1.2.2: MODES, CONTROLS, PERFORMANCE &
+        // GRAPHICS, CHEATS & ENHANCERS, in the doc's order (gd03's list, gd01's).
+        // Modes are presets (enhancedPreset): one click sets every value they name.
+        {Kind::Section, "modes", "MODES", true, "Presets: one click sets many options below at once."},
+        {Kind::Button, "mode_steam_deck", "Steam Deck", true,
+         "Sets the options to run best on a handheld PC such as the Steam Deck: full screen at 60 FPS, an 800p internal "
+         "resolution and light effects (original bloom, cinematic colour, a light Star Power blur, FXAA). You can still "
+         "change any option afterwards."},
+        {Kind::Button, "mode_original", "Original Feel", true,
+         "Looks like the original Xbox 360 game: every enhanced effect off, the original depth of field and particles, 60 "
+         "FPS. The window and the resolution stay as they are. This is how the game starts."},
+        {Kind::Button, "mode_clean", "Clean Image", true,
+         "Removes every enhanced effect for a clean, sharp picture: full HD (1080p) internal resolution, FXAA, sharper "
+         "text and sprites, 120 FPS."},
+        {Kind::Button, "mode_max_hd", "Max Out (Full HD)", true,
+         "Every effect at its strongest at a full HD (1080p) internal resolution, up to 240 FPS. Needs a strong GPU."},
+        {Kind::Button, "mode_max_4k", "Max Out (4K)", true,
+         "Every effect at its strongest at a 4K (2160p) internal resolution, up to 240 FPS. Needs a very strong GPU."},
+        {Kind::Button, "mode_budget", "Rocking on a Budget", true,
+         "Every effect at its lowest (even the original particles and depth of field are off) at 720p and 60 FPS, for "
+         "slow computers."},
+        {Kind::Button, "mode_good_old_days", "Good Old Days", true,
+         "Every effect at its strongest, in sepia, at the Xbox 360's resolution (720p), 60 FPS."},
         {Kind::Separator, "", "", true, ""},
-        {Kind::Section, "controls", "CONTROLS & GAMEPAD", true, "Gamepads, mouse, touch and guitars."},
+        {Kind::Section, "controls", "CONTROLS", true, "Gamepads, mouse, touch and your setup's delay."},
         {Kind::Button, "gamepads", "Gamepads", true,
-         "The connected guitars, gamepads and the keyboard: which player each one is, its buttons lit as you press them, "
-         "and new buttons for any of them."},
+         "The Gamepad menu: each player's instrument and device, and every device's buttons (two per control), lit as "
+         "you press them. Also on the main menu's yellow fret."},
         {Kind::Check, "mouse", "Enable Mouse Selection", true,
          "Point at a menu entry to highlight it and click to choose it; a right click goes back and the mouse wheel "
-         "moves up and down. The help bar's items are clickable too. Hovering works only while the game window has "
-         "focus; the pointer hides after a few seconds, when a key or a button is pressed, and during a song."},
-#ifdef __ANDROID__
+         "scrolls lists. The help bar's buttons (SELECT, BACK, UP / DOWN, GAMEPADS, ENHANCED) are clickable too. The "
+         "pointer hides after a few seconds, when a key or a button is pressed, and during a song. Mouse buttons are "
+         "never used as game buttons."},
         {Kind::Check, "shake_whammy", "Shake for Whammy", true,
-         "Shake the phone during a song to use the whammy bar: keep shaking to hold it, stop to let go. Whammy bends the "
-         "note and fills Star Power faster on a Star Power note. A real whammy bar keeps working. Android only."},
-#endif
+         "Shake the phone during a song to use the whammy bar: keep shaking to hold it, stop to let go. A real whammy bar "
+         "keeps working. Android only (a phone's accelerometer)."},
         {Kind::Check, "touch", "Enable Touch Controls", true,
-         "Play on a touch screen. In the menus a tap is a click. In a song, touch a lane at the bottom of the highway when "
-         "its note arrives: it plays the fret and the strum at once."},
-        {Kind::Check, "rockband", "Enable Rock Band Guitars", true,
-         "Plays with the USB Rock Band guitars for Xbox 360 and PlayStation 3 / 4: the five frets (the solo frets too), "
-         "the strum bar, the whammy bar, and tilt or Select for Star Power."},
-        {Kind::Check, "xinput", "Enable XInput Controllers", true,
-         "Any XInput gamepad plays: the shoulder buttons and the face buttons are the frets, and pressing a button plays "
-         "the note and the strum at once. Off, gamepads only work the menus."},
-        {Kind::Separator, "", "", true, ""},
-        {Kind::Section, "graphics", "PERFORMANCE & GRAPHICS", true, "Timing, window, frame rate and image quality."},
+         "Play on a touch screen; also shows the on-screen buttons. In the menus a tap is a click. In a song, touch a "
+         "lane at the bottom of the highway when its note arrives: it plays the fret and the strum at once (hold the "
+         "finger for long notes, several fingers for chords). Two fingers above the highway deploy Star Power; the top "
+         "corner pauses. Its settings are in Gamepads > Player 1 > Customize inputs."},
         {Kind::Button, "calibrate", "Audio / Video Calibration", true,
-         "Measures your setup's delay so notes are judged and drawn in time: strum on each tick you hear, then on each "
-         "flash you see."},
+         "Measures your setup's delay so notes are judged and drawn in time. First strum (or press green) on each tick "
+         "you HEAR, then on each flash you SEE, 8 times each. Back cancels."},
         {Kind::Button, "calibrate_reset", "Reset Calibration", true,
          "Removes the calibration: the audio and video delays go back to 0 ms, as before calibrating."},
+        {Kind::Separator, "", "", true, ""},
+        {Kind::Section, "graphics", "PERFORMANCE & GRAPHICS", true, "Window, frame rate, image quality and the venue's effects."},
         {Kind::Choice, "screen_mode", "Screen Mode", true,
          "Windowed; full screen at the desktop's resolution; or full screen without a border (a window covering the "
          "screen, the quickest to switch away from).",
          {{"windowed", "Windowed"}, {"fullscreen", "Full Screen"}, {"borderless", "Full Screen (No Border)"}}},
-        {Kind::Choice, "max_fps", "In-Game Max FPS", true,
-         "The highest frame rate the game draws at; the original ran at 60. The game never draws faster than this, "
-         "whatever the display's refresh rate.",
-         {{"60", "60"}, {"120", "120"}, {"144", "144"}, {"240", "240"}}},
-        {Kind::Check, "fps_counter", "Show FPS Counter", true, "Shows the frames drawn per second in the bottom-left corner of the screen."},
-        {Kind::Choice, "internal_res", "Internal Resolution", true,
-         "The resolution the game draws at before it is scaled to the window. The Xbox 360 drew 1280 x 720 (x360).",
-         {{"720", "720p (x360)"}, {"800", "800p (Steam Deck)"}, {"900", "900p"}, {"1080", "1080p"}, {"1440", "1440p"},
-          {"2160", "4K (2160p)"}}},
+        {Kind::Choice, "internal_res", "Resolution", true,
+         "The resolution the game draws the venue at before it is scaled to the window. Higher is sharper and costs "
+         "more; above the window's own size it also smooths the edges. The Xbox 360 drew 1280 x 720 (x360).",
+         {{"0", "Window"}, {"720", "720p (x360)"}, {"800", "800p (Steam Deck)"}, {"900", "900p"}, {"1080", "1080p"},
+          {"1440", "1440p"}, {"2160", "4K (2160p)"}}},
         {Kind::Check, "sharp_ui", "Sharper Text & Sprites", true,
-         "Upscales the menu art and the game's fonts with a sharper filter, so text and sprites stay crisp on large screens "
-         "(from the next start)."},
-        {Kind::Choice, "antialiasing", "Anti-Aliasing", true, "Smooths jagged edges: FXAA, SSAA or TAA.",
+         "Upscales the menu art and the game's fonts with a sharper filter, so text and sprites stay crisp on large "
+         "screens (from the next start)."},
+        {Kind::Choice, "antialiasing", "Anti-Aliasing", true,
+         "Smooths jagged edges. FXAA: a fast filter over the image. SSAA: draws the venue at twice the resolution and "
+         "scales it down, the sharpest and the most costly. TAA: blends each frame with the last ones for very smooth "
+         "edges, with a little softness in motion.",
          {{"none", "None"}, {"fxaa", "FXAA"}, {"ssaa", "SSAA"}, {"taa", "TAA"}}},
         {Kind::Choice, "ai_upscaling", "AI Upscaling", true,
-         "Draws the 3D scene below your screen's resolution and upscales it to the screen, for higher frame rates.",
+         "Draws the 3D scene below your screen's resolution and upscales it to the screen (menus and the highway stay "
+         "sharp), for higher frame rates. FSR 1: spatial, any GPU. FSR 3.1 and DLSS need AMD's and NVIDIA's own "
+         "libraries, not in this version.",
          {{"none", "None"}, {"fsr1", "FSR 1 (Spatial)"}, {"fsr31", "FSR 3.1", false}, {"dlss4", "DLSS 4", false},
           {"dlss5", "DLSS 5", false}}},
         {Kind::Choice, "ai_upscaling_mode", "Upscaling Quality", true,
-         "How far below the screen's resolution the scene is drawn: Quality (1.5x), Balanced (1.7x) or Performance (2x).",
+         "How far below the screen's resolution the scene is drawn: Quality (1.5x upscale, the sharpest), Balanced (1.7x) "
+         "or Performance (2x, the fastest).",
          {{"performance", "Performance"}, {"balanced", "Balanced"}, {"quality", "Quality"}}, "ai_upscaling"},
+        {Kind::Choice, "max_fps", "Max FPS", true,
+         "The highest frame rate the game draws at; the original ran at 60. Unlimited draws as fast as the computer can.",
+         {{"60", "60"}, {"120", "120"}, {"144", "144"}, {"240", "240"}, {"unlimited", "Unlimited"}}},
+        {Kind::Check, "fps_counter", "Show FPS Counter", true,
+         "Shows the frames drawn per second in the bottom-left corner of the screen."},
+        {Kind::Choice, "hdr", "HDR", false,
+         "High dynamic range for the venue and the band: None, Emulated (a filmic curve and an automatic exposure) or True "
+         "HDR on an HDR display. Not in gd04 yet.",
+         {{"none", "None"}, {"emulated", "Emulated"}, {"true", "True HDR"}}},
         {Kind::Choice, "bokeh", "Bokeh Effect", true,
-         "The depth-of-field blur of the close shots. None: always sharp. Regular: as the original game. Stronger: a wider blur.",
-         {{"none", "None"}, {"regular", "Regular"}, {"stronger", "Stronger"}}},
-        {Kind::Check, "particles", "Enable Particles FX", true, "Sparks, smoke and fire on the stage and the band's Star Power effects (from the next song)."},
-        {Kind::Choice, "bloom", "Bloom", true, "A soft glow around the brightest lights of the venue, over the original game's own.",
-         {{"off", "Off"}, {"low", "Low"}, {"medium", "Medium"}, {"high", "High"}}},
-        {Kind::Check, "cinematic_color", "Cinematic Color", true, "A filmic colour curve with a gentle grade and vignette on the venue."},
-        {Kind::Choice, "color_grade", "Color Grading", true, "A colour look for the venue: Warm, Cold, Vintage, Noir or Neon.",
-         {{"off", "Off"}, {"warm", "Warm"}, {"cold", "Cold"}, {"vintage", "Vintage"}, {"noir", "Noir"}, {"neon", "Neon"}}},
-        {Kind::Choice, "film_grain", "Film Grain", true, "Fine animated grain over the venue, like a concert shot on film.",
-         {{"off", "Off"}, {"light", "Light"}, {"strong", "Strong"}}},
-        {Kind::Check, "chromatic", "Chromatic Aberration", true, "A camera lens's colour fringes towards the corners of the venue."},
-        {Kind::Check, "ssao", "Ambient Occlusion", true, "Soft contact shadows where surfaces meet, for more depth."},
-        {Kind::Choice, "sharpening", "Sharpening", true, "Contrast-adaptive sharpening of the venue (AMD CAS).",
+         "The depth-of-field blur of the close shots. None: always sharp. Medium: as the original game. Light is softer; "
+         "Strong and Stronger blur wider.",
+         {{"none", "None"}, {"light", "Light"}, {"medium", "Medium (original)"}, {"strong", "Strong"}, {"stronger", "Stronger"}}},
+        {Kind::Choice, "particles", "Enable Particles FX", true,
+         "Sparks, smoke, fire and the band's Star Power effects (from the next song). None turns them off to save power "
+         "(the gameplay is the same); 2x emits twice as many.",
+         {{"none", "None"}, {"original", "Original"}, {"2x", "2x"}}},
+        {Kind::Choice, "bloom", "Bloom", true,
+         "A soft glow around the brightest lights of the venue, over the original game's own. Original is a gentle glow; "
+         "2x and 3x are stronger.",
+         {{"none", "None"}, {"original", "Original"}, {"2x", "2x"}, {"3x", "3x"}}},
+        {Kind::Check, "cinematic_color", "Cinematic Color", true,
+         "A filmic colour curve with a gentle grade and vignette on the venue, for a richer, more cinematic image."},
+        {Kind::Choice, "color_grade", "Color Grading", true,
+         "A colour look for the venue, like a film's grade (with or without Cinematic Color). Warm: golden stage light. "
+         "Cold: steel blue. Vintage: faded 70s film. Noir: high-contrast black and white. Neon: punchy purples and cyans. "
+         "Sepia: an old photograph.",
+         {{"off", "Off"}, {"warm", "Warm"}, {"cold", "Cold"}, {"vintage", "Vintage"}, {"noir", "Noir"}, {"neon", "Neon"}, {"sepia", "Sepia"}}},
+        {Kind::Choice, "film_grain", "Film Grain", true,
+         "Fine animated grain over the venue, like a concert shot on film. Light is barely there; Stronger is clearly visible.",
+         {{"none", "None"}, {"light", "Light"}, {"medium", "Medium"}, {"strong", "Strong"}, {"stronger", "Stronger"}}},
+        {Kind::Choice, "chromatic", "Chromatic Aberration", true,
+         "A camera lens's colour fringes: red and blue edges pull apart towards the corners of the venue.",
+         {{"none", "None"}, {"light", "Light"}, {"medium", "Medium"}, {"strong", "Strong"}}},
+        {Kind::Choice, "ssao", "Ambient Occlusion", true,
+         "Soft contact shadows where surfaces meet: under the band's feet, in the folds of clothes, in the corners of the "
+         "stage, for more depth. Costs some performance.",
+         {{"none", "None"}, {"light", "Light"}, {"medium", "Medium"}, {"strong", "Strong"}, {"stronger", "Stronger"}}},
+        {Kind::Choice, "sharpening", "Sharpening", true,
+         "Contrast-adaptive sharpening of the venue (AMD CAS): crisper detail without halos, good with TAA or an upscaler.",
          {{"off", "Off"}, {"low", "Low"}, {"high", "High"}}},
         {Kind::Choice, "star_blur", "Blur on Star Power", true,
-         "While Star Power is on, the venue and the band blur with the camera's motion and leave light trails.",
-         {{"none", "None"}, {"light", "Light"}, {"medium", "Medium"}, {"high", "High"}}},
-        {Kind::Separator, "", "", true, ""},
-        {Kind::Section, "enhancers", "ENHANCERS", true, "Visual extras beyond the original game, and your user files."},
+         "While Star Power is on, the venue and the band blur with the camera's motion and leave light trails; it fades "
+         "out when Star Power ends. The highway always stays sharp.",
+         {{"none", "None"}, {"light", "Light"}, {"medium", "Medium"}, {"strong", "Strong"}, {"stronger", "Stronger"}}},
         {Kind::Check, "shadows_all", "All Band Mates Cast Shadows", true,
          "Every band mate gets a spotlight from above and casts a shadow on the stage floor."},
         {Kind::Choice, "more_lights", "More Lights on Venues", true,
-         "Richer stage lighting: brighter light cones and floor pools and a fill light on the band.",
-         {{"off", "Off"}, {"subtle", "Subtle"}, {"strong", "Strong"}}},
-        {Kind::Check, "light_dust", "Dust in Light Beams", true, "With More Lights on Venues: fine dust drifting in the light beams.", {},
-         "more_lights"},
-        {Kind::Check, "no_shaky_cam", "Disable Shaky Camera", true,
-         "Steady shots: the hand-held cameras' gentle sway is turned off."},
-        {Kind::Button, "export", "Export User Files", true,
-         "Choose a folder to save your Enhanced Options and your progress in, as a backup or to move to another computer."},
-        {Kind::Button, "load_settings", "Load User Settings", true, "Choose a user settings file to load."},
-        {Kind::Button, "load_progress", "Load User Progress", true, "Choose a user progress file to load."},
+         "Richer stage lighting: brighter floor pools and a soft beam on each band mate.",
+         {{"none", "None"}, {"1.5x", "1.5x"}, {"2x", "2x"}, {"2.5x", "2.5x"}}},
+        {Kind::Choice, "light_dust", "Dust in Light Beams", true,
+         "Fine dust drifting and twinkling in the light beams over the band (with or without More Lights).",
+         {{"none", "None"}, {"1.5x", "1.5x"}, {"2x", "2x"}, {"2.5x", "2.5x"}}},
+        {Kind::Check, "no_shaky_cam", "Disable Shaky Camera", true, "Steady shots: the hand-held cameras' gentle sway is turned off."},
         {Kind::Separator, "", "", true, ""},
-        {Kind::Section, "cheats", "CHEATS", true, "The original game's cheats and more ways to bend the rules."},
+        {Kind::Section, "cheats", "CHEATS & ENHANCERS", true, "Your user files, the original game's cheats and more ways to bend the rules."},
+        {Kind::Button, "export", "Export User Files", true,
+         "Choose a folder to save two files in: GD04-user-settings.json with every Enhanced Option, and "
+         "GD04-user-progress.json with your save (bands and their progress). Use them as a backup or to move to another "
+         "computer."},
+        {Kind::Button, "load_settings", "Load User Settings", true,
+         "Choose a GD04-user-settings.json file to load. The settings take effect at once; any setting in the file that "
+         "is missing or not valid keeps its value."},
+        {Kind::Button, "load_progress", "Load User Progress", true,
+         "Choose a GD04-user-progress.json file to load. It replaces your save and takes effect at once; a file that is "
+         "not a GH3 save is refused."},
         {Kind::Check, "cut_content", "Enable Cut Content", true,
-         "Shows what the original keeps hidden on the disc: the Bone Man characters in character select and the Credits and "
-         "Soundcheck venues in the venue list."},
+         "Shows what the original keeps hidden on the disc: the Bone Man characters in character select and the Credits "
+         "and Soundcheck venues in the venue list."},
         {Kind::Check, "no_fail", "No Fail Mode", true, "The rock meter cannot fail you: every song plays to the end."},
         {Kind::Check, "autoplay", "Autoplay", true, "The game plays every note of a song by itself, without a miss."},
         {Kind::Choice, "hopo_mode", "Forgiving Hammer-ons & Pull-offs", true,
@@ -497,9 +544,9 @@ private:
                 ctx_.action(it.key);
                 return;
             }
-            if (it.key == "steam_deck") {  // the handheld column, once; nothing is locked (gd01)
-                for (const auto& [k, v] : enhancedProfile(true)) store(k, v);
-                status_ = "Steam Deck settings applied", statusMs_ = 5000;
+            if (it.key.rfind("mode_", 0) == 0) {  // MODES: a preset, once; every option stays editable (gd03's)
+                for (const auto& [k, v] : enhancedPreset(it.key.substr(5))) store(k, v);
+                status_ = it.name + " applied", statusMs_ = 5000;
             }
             rebuild();
             return;

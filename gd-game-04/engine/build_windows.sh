@@ -38,6 +38,7 @@ compile build/windows "gd04 (Windows)"
 
 d=dist/gd04-windows-x64
 rm -rf "$d" && mkdir -p "$d/licenses"
+cp third_party/rtmidi/LICENSE "$d/licenses/RtMidi-LICENSE.txt"  # Generic MIDI (src/input/midi_in.cpp)
 cp build/windows/gd04.exe "$sdl_dll" README.md ../../LICENSE ../../LICENSE-ADDITIONAL-TERMS.md "$d/"
 if [ "${GD04_VIDEO:-1}" != 0 ]; then
   cp "$ffmpeg"/bin/av*.dll "$d/"

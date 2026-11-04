@@ -4,6 +4,7 @@
 
 #include <SDL3/SDL.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <fstream>
@@ -53,6 +54,111 @@ int runInputChecks() {
     const std::string dir = (prefDir().empty() ? std::string("./") : prefDir()) + "selftest-input/";
     SDL_CreateDirectory(dir.c_str());
     std::remove((dir + "controllers.json").c_str());
+    {
+        // The universal controls on the keyboard's defaults (universal_mechanisms.md
+        // 1.1.4 / 1.2.1, gd01's input self-test): no double inputs where two
+        // controls share a key, none missed, the keyboard's Start selects in
+        // the menus, two slots per control, an edit saved or discarded whole.
+        Input in;
+        in.setSaveDir(dir);
+        std::vector<InputEvent> out;
+        uint64_t t = SDL_GetTicksNS();
+        auto key = [&](SDL_Keycode k, bool down) {
+            SDL_Event e{};
+            e.type = down ? SDL_EVENT_KEY_DOWN : SDL_EVENT_KEY_UP;
+            e.key.key = k, e.key.down = down, e.key.timestamp = t += 200000000ull;
+            in.handle(e, out);
+        };
+        auto count = [&](Action a, bool down) {
+            return std::count_if(out.begin(), out.end(), [&](const InputEvent& e) { return e.action == a && e.down == down; });
+        };
+        key(SDLK_UP, true);
+        check(count(Action::Up, true) == 1 && count(Action::Strum, true) == 1 && out.size() == 2, "Up arrow: Up and Strum once");
+        out.clear();
+        key(SDLK_UP, false);
+        check(count(Action::Up, false) == 1 && count(Action::Strum, false) == 1 && out.size() == 2, "... released once");
+        out.clear();
+        key(SDLK_RETURN, true);
+        check(out.size() == 1 && out[0].action == Action::Confirm && out[0].enterKey, "Enter (both Starts): one select in the menus");
+        key(SDLK_RETURN, false);
+        out.clear();
+        in.setInGame(true);
+        key(SDLK_RETURN, true);
+        check(out.size() == 1 && out[0].action == Action::Start, "... and Start (pause) in a song");
+        key(SDLK_RETURN, false);
+        in.setInGame(false);
+        out.clear();
+        key(SDLK_1, true), key(SDLK_F1, true);
+        check(count(Action::Fret0, true) == 1 && out.size() == 1, "1 + F1: green pressed once");
+        out.clear();
+        key(SDLK_1, false);
+        check(out.empty(), "1 released, F1 held: green stays");
+        key(SDLK_F1, false);
+        check(count(Action::Fret0, false) == 1, "F1 released: green released");
+        out.clear();
+        key(SDLK_TAB, true);
+        check(count(Action::StarPower, true) == 1 && out.size() == 1, "Tab (Select, Select, gyro): Star Power once");
+        key(SDLK_TAB, false);
+        out.clear();
+        key(SDLK_UP, true), key(SDLK_DOWN, true);
+        check(count(Action::Strum, true) == 2 && count(Action::Down, true) == 1, "Up then Down: two strums (none missed)");
+        key(SDLK_UP, false), key(SDLK_DOWN, false);
+        check(count(Action::Strum, false) == 2 && count(Action::Up, false) == 1 && count(Action::Down, false) == 1, "... both released");
+        out.clear();
+        key(SDLK_BACKSPACE, true);
+        check(count(Action::Back, true) == 1, "Backspace: back");
+        key(SDLK_BACKSPACE, false);
+        out.clear();
+        // Customize inputs: Key 2 of the green fret to G, then discarded.
+        using C = Input::Control;
+        in.beginEdit("keyboard");
+        in.beginCapture("keyboard", C::Green, 1);
+        key(SDLK_G, true), key(SDLK_G, false);
+        const auto& g = in.bindings("keyboard")[size_t(C::Green)];
+        check(g.size() == 2 && g[0].index == int(SDLK_1) && g[1].index == int(SDLK_G), "Key 2 of the green fret captured (Key 1 kept)");
+        out.clear();
+        key(SDLK_G, true);
+        check(count(Action::Fret0, true) == 1, "... and plays at once");
+        key(SDLK_G, false);
+        in.discardEdit();
+        check(in.bindings("keyboard")[size_t(C::Green)].size() == 2 && in.bindings("keyboard")[size_t(C::Green)][1].index == int(SDLK_F1) &&
+                  readFile(dir + "controllers.json").empty(),
+              "... discarded: F1 back, nothing written");
+        in.beginEdit("keyboard");
+        in.setRequireStrum("keyboard", false);
+        in.commitEdit();
+        check(!in.requireStrum("keyboard") && readFile(dir + "controllers.json").find("\"require_strum\": false") != std::string::npos,
+              "Require Strum off saved on Save");
+        out.clear();
+        key(SDLK_2, true);
+        check(out.size() == 1 && out[0].action == Action::Fret1 && out[0].mode == ControllerMode::Joypad, "... a fret then also strums (joypad mode)");
+        key(SDLK_2, false);
+    }
+    {
+        // controllers.json of 0.1.7 (version 1): its keyboard bindings carry over.
+        std::ofstream(dir + "controllers.json")
+            << R"({"devices":{"keyboard":{"frets_strum":true,"bindings":{"green":[{"kind":"key","index":103}],)"
+               R"("start":[{"kind":"key","index":9}],"star_power":[{"kind":"key","index":32}],"select":[{"kind":"key","index":13}],)"
+               R"("back":[{"kind":"key","index":8}]}}}})";
+        Input in;
+        in.setSaveDir(dir);
+        std::vector<InputEvent> out;
+        SDL_Event e{};
+        e.type = SDL_EVENT_KEY_UP, e.key.key = SDLK_F12;
+        in.handle(e, out);  // loads controllers.json
+        using C = Input::Control;
+        const Input::Bindings& b = in.bindings("keyboard");
+        auto only = [&](C c, SDL_Keycode k) { return b[size_t(c)].size() == 1 && b[size_t(c)][0].index == int(k); };
+        check(only(C::Green, SDLK_G) && only(C::Start, SDLK_TAB) && only(C::GuitarStart, SDLK_TAB) && only(C::Gyro, SDLK_SPACE) &&
+                  only(C::Select, SDLK_SPACE) && only(C::StrumUp, SDLK_UP) && only(C::MenuUp, SDLK_UP) && !in.requireStrum("keyboard"),
+              "controllers.json version 1 migrated (green, Start, Star Power, frets also strum)");
+        in.setPlayerEnabled(1, false);
+        const std::string saved = readFile(dir + "controllers.json");
+        check(saved.find("\"version\": 2") != std::string::npos && saved.find("guitar_start") != std::string::npos &&
+                  saved.find("\"player2\": false") != std::string::npos && !in.playerEnabled(1),
+              "... saved again as version 2 (player 2 off)");
+        std::remove((dir + "controllers.json").c_str());
+    }
     {
         Input in;
         in.setSaveDir(dir);

@@ -360,15 +360,20 @@ Walk::Walk(const std::string& name) : name_(name) {
         steps_.push_back({"options_select_option_fs", {B}, 20000});
         steps_.push_back({"main_menu_fs", {}, 20000});
     } else if (name == "gamepads") {
-        // The keyboard's yellow fret (3) on the main menu -> GAMEPADS -> the
-        // keyboard's Whammy rebound to E (a real key), saved in
-        // controllers.json -> back -> main; then the help bar's GAMEPADS
-        // clicked -> GAMEPADS.
-        const Action U = Action::Up;
+        // The universal Gamepad menu (universal_mechanisms.md 1.2.1): the
+        // keyboard's yellow fret (3) on the main menu opens it; Player 1's
+        // Customize inputs (the 4th field); Whammy (13 rows down the mapping)
+        // key 1 rebound to E; Save (4 rows down: Gyro, Require Strum, Reset,
+        // Save) writes controllers.json; back -> main; then the help bar's
+        // GAMEPADS clicked opens it again.
         steps_ = boot;
         steps_.push_back({"main_menu_fs", {"key:3"}, 10000});
-        // Up from the keyboard's row wraps to its last rows: 11 up is Whammy.
-        steps_.push_back({"port_gamepads", {U, U, U, U, U, U, U, U, U, U, U, C, "key:E", "check:whammy_is_e", B}, 10000});
+        std::vector<Op> ops{D, D, D, C};
+        for (int k = 0; k < 13; ++k) ops.push_back(D);
+        ops.push_back(C), ops.push_back(Op("key:E"));
+        for (int k = 0; k < 4; ++k) ops.push_back(D);
+        ops.push_back(C), ops.push_back(Op("check:whammy_is_e")), ops.push_back(B);
+        steps_.push_back({"port_gamepads", ops, 10000});
         steps_.push_back({"main_menu_fs", {"click:item"}, 10000});
         steps_.push_back({"port_gamepads", {}, 10000});
     } else if (name == "stickyaxis") {

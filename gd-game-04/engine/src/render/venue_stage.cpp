@@ -588,8 +588,10 @@ void VenueStage::draw(double ms) {
         }
         p.nearZ = 0.05f, p.farZ = 4000.0f;  // VenueView::globals' projection
         // Enhanced > Bokeh Effect: GH3's depth of field off, as is, or twice as strong [I].
-        if (post.bokeh == 0) p.dof.on = false;
-        else if (post.bokeh >= 3) p.dof.blurRadius *= 2.0f;
+        // None / Light / Medium (as is) / Strong / Stronger [I: the scale].
+        static constexpr float kBokeh[5] = {0, 0.6f, 1, 1.5f, 2};
+        if (post.bokeh <= 0) p.dof.on = false;
+        else p.dof.blurRadius *= kBokeh[std::min(post.bokeh, 4)];
         VenueView::jitterX = VenueView::jitterY = 0;
         bool chained = false;
         if (chain && enh_) {

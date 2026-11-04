@@ -26,6 +26,11 @@ bool enhancedValid(const EnhancedSetting& s, const std::string& value);
 // Steam Deck: `deck`; Android). Only the profile's keys.
 std::vector<std::pair<std::string, std::string>> enhancedProfile(bool deck);
 std::string enhancedDefault(const std::string& key, bool deck = false);
+// Enhanced > MODES (gd03's enhancedPreset): the values a mode sets at once
+// (steam_deck, original, clean, max_hd, max_4k, budget, good_old_days).
+std::vector<std::pair<std::string, std::string>> enhancedPreset(const std::string& mode);
+// A value saved by 0.0.3 (before the universal menu) in today's terms.
+std::string migrateEnhancedValue(const std::string& key, const std::string& value);
 
 // The values, saved at once on every change (enhanced.json: {"version": 1,
 // "settings": {key: value}}, written to a temporary file and renamed). A

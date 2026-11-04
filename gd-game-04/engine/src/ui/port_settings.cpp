@@ -13,33 +13,36 @@
 #include "data/json.h"
 
 const std::vector<EnhancedSetting>& enhancedSettings() {
+    // The doc's ranges (universal_mechanisms.md 1.2.2, gd03's): the first
+    // value is the default, the original game's look (GD04-029): windowed, 60
+    // FPS, the window's resolution, every effect off (Bokeh Medium and
+    // Particles Original are GH3's own). The controls start on.
     static const std::vector<EnhancedSetting> k = {
         {"mouse", {"on", "off"}},
-        {"touch", {"on", "off"}},
+        {"touch", {"off", "on"}},
         {"shake_whammy", {"on", "off"}},
-        {"rockband", {"off", "on"}},
-        {"xinput", {"on", "off"}},
         {"screen_mode", {"windowed", "fullscreen", "borderless"}},
-        {"max_fps", {"60", "120", "144", "240"}},
+        {"max_fps", {"60", "120", "144", "240", "unlimited"}},
         {"fps_counter", {"off", "on"}},
-        {"internal_res", {"1080", "720", "800", "900", "1440", "2160"}},
+        {"hdr", {"none", "emulated", "true"}},
+        {"internal_res", {"0", "720", "800", "900", "1080", "1440", "2160"}},
         {"sharp_ui", {"off", "on"}},
         {"antialiasing", {"none", "fxaa", "ssaa", "taa"}},
         {"ai_upscaling", {"none", "fsr1"}},
         {"ai_upscaling_mode", {"quality", "balanced", "performance"}},
-        {"bokeh", {"regular", "none", "stronger"}},
-        {"particles", {"on", "off"}},
-        {"bloom", {"off", "low", "medium", "high"}},
+        {"bokeh", {"medium", "none", "light", "strong", "stronger"}},
+        {"particles", {"original", "none", "2x"}},
+        {"bloom", {"none", "original", "2x", "3x"}},
         {"cinematic_color", {"off", "on"}},
-        {"color_grade", {"off", "warm", "cold", "vintage", "noir", "neon"}},
-        {"film_grain", {"off", "light", "strong"}},
-        {"chromatic", {"off", "on"}},
-        {"ssao", {"off", "on"}},
+        {"color_grade", {"off", "warm", "cold", "vintage", "noir", "neon", "sepia"}},
+        {"film_grain", {"none", "light", "medium", "strong", "stronger"}},
+        {"chromatic", {"none", "light", "medium", "strong"}},
+        {"ssao", {"none", "light", "medium", "strong", "stronger"}},
         {"sharpening", {"off", "low", "high"}},
-        {"star_blur", {"none", "light", "medium", "high"}},
+        {"star_blur", {"none", "light", "medium", "strong", "stronger"}},
         {"shadows_all", {"off", "on"}},
-        {"more_lights", {"off", "subtle", "strong"}},
-        {"light_dust", {"off", "on"}},
+        {"more_lights", {"none", "1.5x", "2x", "2.5x"}},
+        {"light_dust", {"none", "1.5x", "2x", "2.5x"}},
         {"no_shaky_cam", {"off", "on"}},
         {"no_fail", {"off", "on"}},
         {"autoplay", {"off", "on"}},
@@ -70,36 +73,81 @@ bool enhancedValid(const EnhancedSetting& s, const std::string& value) {
 }
 
 std::vector<std::pair<std::string, std::string>> enhancedProfile(bool deck) {
-    // gd01's profileValues' rows (gd02's copy) [C: gd-game-01/engine/src/app.cpp].
-    // Every enhancement off: the original look by default (owner,
-    // 2026-10-29, GD04-029); the controls keep their defaults. Max FPS is the
-    // original's 60. The platform rows below only change the window and the
-    // touch controls.
-    std::map<std::string, std::string> d = {
-        {"antialiasing", "none"}, {"ai_upscaling", "none"}, {"bokeh", "regular"}, {"particles", "on"}, {"cinematic_color", "off"},
-        {"color_grade", "off"}, {"chromatic", "off"}, {"more_lights", "off"}, {"no_shaky_cam", "off"},
-        {"screen_mode", "windowed"}, {"max_fps", "60"}, {"fps_counter", "off"}, {"internal_res", "1080"}, {"sharp_ui", "off"},
-        {"bloom", "off"}, {"film_grain", "off"}, {"ssao", "off"}, {"sharpening", "off"}, {"star_blur", "none"},
-        {"shadows_all", "off"}, {"light_dust", "off"}, {"touch", "off"},
-    };
-    auto set = [&](std::initializer_list<std::pair<const char*, const char*>> kv) {
-        for (const auto& [k, v] : kv) d[k] = v;
-    };
-    auto handheld = [&] { set({{"screen_mode", "fullscreen"}}); };
+    // The defaults (the first values: the original look) with the platform's
+    // window and touch rows: a handheld starts full screen at 800p.
+    std::map<std::string, std::string> d;
+    for (const EnhancedSetting& e : enhancedSettings())
+        if (!e.values.empty()) d[e.key] = e.values.front();
 #if defined(__ANDROID__)
     (void)deck;
-    handheld();
-    set({{"internal_res", "900"}, {"touch", "on"}});
+    d["screen_mode"] = "fullscreen", d["internal_res"] = "900", d["touch"] = "on";
 #else
-#if defined(_WIN32) || defined(__APPLE__)
-    d["internal_res"] = "1440";
-#endif
-    if (deck) {
-        handheld();
-        set({{"internal_res", "800"}});
-    }
+    if (deck) d["screen_mode"] = "fullscreen", d["internal_res"] = "800", d["touch"] = "on";
 #endif
     return {d.begin(), d.end()};
+}
+
+namespace {
+using Values = std::map<std::string, std::string>;
+// Every effect at its lowest, at the original's look and at its highest (gd03's, gd01's).
+const Values& lowest() {
+    static const Values v = {{"bokeh", "none"},       {"particles", "none"},  {"bloom", "none"},       {"cinematic_color", "off"},
+                             {"film_grain", "none"},  {"chromatic", "none"},  {"ssao", "none"},        {"star_blur", "none"},
+                             {"shadows_all", "off"},  {"more_lights", "none"}, {"light_dust", "none"}, {"color_grade", "off"},
+                             {"sharpening", "off"},   {"antialiasing", "none"}, {"ai_upscaling", "none"}, {"sharp_ui", "off"}};
+    return v;
+}
+Values originalLook() {
+    Values v = lowest();
+    v["bokeh"] = "medium";  // GH3's own depth of field
+    v["particles"] = "original";
+    return v;
+}
+const Values& highest() {
+    static const Values v = {{"bokeh", "stronger"},   {"particles", "2x"},      {"bloom", "3x"},        {"cinematic_color", "on"},
+                             {"film_grain", "stronger"}, {"chromatic", "strong"}, {"ssao", "stronger"},   {"star_blur", "stronger"},
+                             {"shadows_all", "on"},   {"more_lights", "2.5x"},   {"light_dust", "2.5x"}, {"color_grade", "off"},
+                             {"sharpening", "low"},   {"antialiasing", "taa"},   {"ai_upscaling", "none"}, {"sharp_ui", "on"}};
+    return v;
+}
+std::vector<std::pair<std::string, std::string>> with(Values base, std::initializer_list<std::pair<const char*, const char*>> over) {
+    for (const auto& [k, v] : over) base[k] = v;
+    return {base.begin(), base.end()};
+}
+}  // namespace
+
+std::vector<std::pair<std::string, std::string>> enhancedPreset(const std::string& mode) {
+    if (mode == "steam_deck")
+        return with(originalLook(), {{"screen_mode", "fullscreen"}, {"max_fps", "60"}, {"internal_res", "800"}, {"bloom", "original"},
+                                     {"cinematic_color", "on"}, {"star_blur", "light"}, {"antialiasing", "fxaa"}, {"sharp_ui", "on"},
+                                     {"fps_counter", "off"}});
+    if (mode == "original") return with(originalLook(), {{"max_fps", "60"}});
+    if (mode == "clean")
+        return with(lowest(), {{"internal_res", "1080"}, {"max_fps", "120"}, {"particles", "original"}, {"antialiasing", "fxaa"}, {"sharp_ui", "on"}});
+    if (mode == "max_hd") return with(highest(), {{"internal_res", "1080"}, {"max_fps", "240"}});
+    if (mode == "max_4k") return with(highest(), {{"internal_res", "2160"}, {"max_fps", "240"}});
+    if (mode == "budget") return with(lowest(), {{"max_fps", "60"}, {"internal_res", "720"}});
+    if (mode == "good_old_days")  // every effect, in sepia, at the Xbox 360's 720p
+        return with(highest(), {{"color_grade", "sepia"}, {"internal_res", "720"}, {"max_fps", "60"}, {"antialiasing", "none"}});
+    return {};
+}
+
+std::string migrateEnhancedValue(const std::string& key, const std::string& v) {
+    // 0.0.3's values (before the universal menu), as gd03 maps gd02 0.1.7's.
+    static const std::map<std::string, std::map<std::string, std::string>> m = {
+        {"bokeh", {{"regular", "medium"}}},
+        {"particles", {{"on", "original"}, {"off", "none"}}},
+        {"bloom", {{"off", "none"}, {"low", "original"}, {"medium", "2x"}, {"high", "3x"}}},
+        {"film_grain", {{"off", "none"}}},
+        {"chromatic", {{"on", "medium"}, {"off", "none"}}},
+        {"ssao", {{"on", "medium"}, {"off", "none"}}},
+        {"star_blur", {{"high", "strong"}}},
+        {"more_lights", {{"off", "none"}, {"subtle", "1.5x"}, {"strong", "2x"}}},
+        {"light_dust", {{"on", "1.5x"}, {"off", "none"}}},
+    };
+    if (auto it = m.find(key); it != m.end())
+        if (auto jt = it->second.find(v); jt != it->second.end()) return jt->second;
+    return v;
 }
 
 std::string enhancedDefault(const std::string& key, bool deck) {
@@ -123,7 +171,7 @@ void EnhancedStore::load(const std::string& dir) {
         const Json root = Json::parse(ss.str());
         for (const auto& [k, v] : root["settings"].o) {
             const EnhancedSetting* s = enhancedSetting(k);
-            const std::string value = v.type == Json::Type::Number ? std::to_string(long(v.n)) : v.str();
+            const std::string value = migrateEnhancedValue(k, v.type == Json::Type::Number ? std::to_string(long(v.n)) : v.str());
             if (s && enhancedValid(*s, value)) values_[k] = value;
         }
     } catch (const std::exception& e) {

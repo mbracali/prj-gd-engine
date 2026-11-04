@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "tests/selftest.h"
+#include "input/input_selftest.h"
 
 #include <algorithm>
 #include <cmath>
@@ -143,6 +144,15 @@ int runSelfTest(const std::string& discPath) {
         if (!playChart(globals, s, c, totals, why)) fail(s.name + ": " + why);
     }
     printPlayTotals(totals);
+    // The input layer's rules on virtual controllers (gd03's checks: two slots,
+    // no double inputs, the axis rest rules, Require Strum, controllers.json v2).
+    std::printf("input checks (virtual controllers):\n");
+    if (const int inputFailures = runInputChecks()) {
+        std::printf("%d input check(s) failed\n", inputFailures);
+        failures += inputFailures;
+    } else {
+        std::printf("all input checks passed\n");
+    }
     if (failures) {
         std::printf("selftest: %d FAILED\n", failures);
         return 1;

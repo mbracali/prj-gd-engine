@@ -102,6 +102,7 @@ private:
     void addVenueScriptCalls();
     // Drawn over every frame: the FPS counter (Enhanced > Show FPS Counter).
     void overlay();
+    void dispatchInput(const std::vector<InputEvent>& events);
     void drawMenuBackdrop(double dtMs);
     void prepareMenuBackdrop();
     static constexpr double kBackdropMs = 30000;  // the song's instant the band is caught at
@@ -461,6 +462,7 @@ void App::addVenueScriptCalls() {
 namespace {
 constexpr const char* kSettingsFile = "GD04-user-settings.json";
 constexpr const char* kProgressFile = "GD04-user-progress.json";
+constexpr const char* kControllersFile = "GD04-controllers.json";  // the Gamepad menu's Export / Import
 struct DialogRequest {
     std::mutex* mutex;
     std::vector<std::pair<std::string, std::string>>* results;
@@ -479,14 +481,17 @@ void App::userFileAction(const std::string& action) {
     if (const char* forced = SDL_getenv("GD04_DIALOG")) {
         std::string path = forced;
         std::error_code ec;
-        if (action != "export" && std::filesystem::is_directory(path, ec))
-            path = (std::filesystem::path(path) / (action == "load_settings" ? kSettingsFile : kProgressFile)).string();
+        if (action != "export" && action != "export_controllers" && std::filesystem::is_directory(path, ec))
+            path = (std::filesystem::path(path) / (action == "load_settings"        ? kSettingsFile
+                                                   : action == "import_controllers" ? kControllersFile
+                                                                                    : kProgressFile))
+                       .string();
         std::lock_guard<std::mutex> lock(dialogMutex_);
         dialogResults_.push_back({action, path});
         return;
     }
     auto* req = new DialogRequest{&dialogMutex_, &dialogResults_, action};
-    if (action == "export") {
+    if (action == "export" || action == "export_controllers") {
         SDL_ShowOpenFolderDialog(dialogDone, req, window_, nullptr, false);
     } else {
         static const SDL_DialogFileFilter kJson[] = {{"GD04 user files", "json"}};
@@ -506,6 +511,11 @@ void App::pollUserFiles() {
         if (action == "export") status = exportUserFiles(path);
         else if (action == "load_settings") status = importSettings(path) ? "Settings loaded" : "Could not load that settings file";
         else if (action == "load_progress") status = importProgress(path) ? "Progress loaded" : "Could not load that progress file";
+        else if (action == "export_controllers")  // the Gamepad menu's Export
+            status = input_.exportTo((std::filesystem::path(path) / kControllersFile).string()) ? std::string("Exported to ") + kControllersFile
+                                                                                               : "Could not write the controllers file";
+        else if (action == "import_controllers")  // the Gamepad menu's Import
+            status = input_.importFrom(path) ? "Controllers loaded" : "Could not load that controllers file";
         SDL_Log("enhanced options: %s: %s", action.c_str(), status.c_str());
         if (ports_) ports_->context().status = status;
     }
@@ -591,7 +601,7 @@ void App::applyEnhanced(const std::string& key) {
             SDL_SetWindowFullscreen(window_, true);
         }
     }
-    if (is("particles")) VenueStage::particlesOn = enhanced_.get("particles") != "off";
+    if (is("particles")) VenueStage::particlesOn = enhanced_.get("particles") != "none";
     {
         // The picture: Enhanced's chain (render/enhanced_fx) and the world's resolution.
         auto idx = [&](const char* k, std::initializer_list<const char*> vals) {
@@ -606,27 +616,27 @@ void App::applyEnhanced(const std::string& key) {
         ps.aa = gfx::PostSettings::AA(idx("antialiasing", {"none", "fxaa", "ssaa", "taa"}));
         ps.fsr1 = enhanced_.get("ai_upscaling") == "fsr1";
         ps.fsrScale = 1.0f / std::array<float, 3>{1.5f, 1.7f, 2.0f}[size_t(idx("ai_upscaling_mode", {"quality", "balanced", "performance"}))];
-        ps.bloom = idx("bloom", {"off", "low", "medium", "high"});
+        ps.bloom = idx("bloom", {"none", "original", "2x", "3x"});
         ps.cinematic = enhanced_.on("cinematic_color");
-        ps.grade = idx("color_grade", {"off", "warm", "cold", "vintage", "noir", "neon"});
-        ps.grain = std::array<int, 3>{0, 1, 3}[size_t(idx("film_grain", {"off", "light", "strong"}))];
-        ps.chromatic = enhanced_.on("chromatic") ? 2 : 0;
+        ps.grade = idx("color_grade", {"off", "warm", "cold", "vintage", "noir", "neon", "sepia"});
+        ps.grain = idx("film_grain", {"none", "light", "medium", "strong", "stronger"});
+        ps.chromatic = idx("chromatic", {"none", "light", "medium", "strong"});
         Player::forgivingHopos = enhanced_.get("hopo_mode") == "forgiving";
         VenueStage::extras.shadowsAll = enhanced_.on("shadows_all");
-        VenueStage::extras.moreLights = idx("more_lights", {"off", "subtle", "strong"});
-        VenueStage::extras.lightDust = enhanced_.on("light_dust") ? 2 : 0;
-        TextureCache::sharp = enhanced_.on("sharp_ui");
+        VenueStage::extras.moreLights = idx("more_lights", {"none", "1.5x", "2x", "2.5x"});
+        VenueStage::extras.lightDust = idx("light_dust", {"none", "1.5x", "2x", "2.5x"});
+        TextureCache::sharp = enhanced_.on("sharp_ui");  // from the next start (the textures load at boot)
         venue::CameraDirector::noShake = enhanced_.on("no_shaky_cam");
-        qs::Vm::cutContent = enhanced_.on("cut_content");  // from the next start (the textures load at boot)
-        ps.ssao = enhanced_.on("ssao") ? 2 : 0;
+        qs::Vm::cutContent = enhanced_.on("cut_content");
+        ps.ssao = idx("ssao", {"none", "light", "medium", "strong", "stronger"});
         ps.sharpen = idx("sharpening", {"off", "low", "high"});
-        ps.starBlur = idx("star_blur", {"none", "light", "medium", "high"});
-        ps.bokeh = std::array<int, 3>{0, 2, 4}[size_t(idx("bokeh", {"none", "regular", "stronger"}))];
+        ps.starBlur = idx("star_blur", {"none", "light", "medium", "strong", "stronger"});
+        ps.bokeh = idx("bokeh", {"none", "light", "medium", "strong", "stronger"});  // 2: GH3's own
         VenueStage::internalHeight = std::atoi(enhanced_.get("internal_res").c_str());
     }
     if (is("shake_whammy")) input_.setShakeWhammy(enhanced_.on("shake_whammy"));
-    if (is("rockband")) input_.setRockBand(enhanced_.on("rockband"));
-    if (is("xinput")) input_.setGamepadPlay(enhanced_.on("xinput"));
+    // Rock Band guitars and XInput pads always play (universal_mechanisms.md 1.2.2: everything on by default).
+    input_.setRockBand(true), input_.setGamepadPlay(true);
     if (is("touch")) input_.setTouch(enhanced_.on("touch"));
     if (is("mouse")) mouseMovedMs_ = -1e9;
 }
@@ -853,6 +863,12 @@ void App::handleEvent(const SDL_Event& e) {
     }
     std::vector<InputEvent> events;
     input_.handle(e, events);
+    dispatchInput(events);
+}
+
+// The input layer's actions to the song or the menus (SDL events, and the
+// per-frame poll: touch chords, shake-to-whammy, MIDI).
+void App::dispatchInput(const std::vector<InputEvent>& events) {
     for (const InputEvent& ev : events) {
         if (walk_ && ev.down) walk_->countPress(ev.action);
         if (song_) {
@@ -897,6 +913,11 @@ void App::songEvent(const InputEvent& ev) {
 
 void App::frame() {
     pollUserFiles();
+    {
+        std::vector<InputEvent> polled;  // touch chords, shake-to-whammy, MIDI notes
+        input_.poll(SDL_GetTicksNS(), polled);
+        if (!polled.empty()) dispatchInput(polled);
+    }
     // A controller lost mid-song (GD04-042): the 360's engine calls GH3's
     // controller_unplugged {device_num} while check_for_unplugged_controllers
     // is 1 (controller_pulling.qb; in a song: controller_disconnect_fs, "YOU
@@ -1333,7 +1354,8 @@ int App::run() {
         if (quitAfter && double(SDL_GetTicksNS() - startNs_) / 1e6 >= std::atof(quitAfter)) running_ = false;
         updatePointer();
         // Enhanced > In-Game Max FPS (the menus keep the engine's own cap).
-        const uint64_t minNs = song_ ? uint64_t(1e9 / std::max(30.0, std::atof(enhanced_.get("max_fps").c_str()))) : kMinFrameNs;
+        const std::string mf = enhanced_.get("max_fps");
+        const uint64_t minNs = !song_ ? kMinFrameNs : mf == "unlimited" ? 0 : uint64_t(1e9 / std::max(30.0, std::atof(mf.c_str())));
         const uint64_t spent = SDL_GetTicksNS() - frameStart;
         if (spent < minNs) SDL_DelayNS(minNs - spent);
         if (stats) {
