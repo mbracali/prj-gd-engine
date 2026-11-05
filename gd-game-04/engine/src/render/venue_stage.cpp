@@ -26,7 +26,8 @@ VenueStage::~VenueStage() {
         SDL_Log("venue: %llu raytraced beam draws, %llu projector draws", (unsigned long long)view_->stats().raytraced,
                 (unsigned long long)view_->stats().projected);
     fx_.shutdown();
-    if (device_ && shadow_) device_->destroyTarget(shadow_);
+    for (gfx::TargetId t : shadow_)
+        if (device_ && t) device_->destroyTarget(t);
 }
 
 void VenueStage::playClip(int role, uint32_t clip, uint32_t stance, bool cycle, double ms) {
@@ -268,20 +269,24 @@ bool VenueStage::attachStep(gfx::RenderDevice& device, const Disc& disc, std::st
         }
         break;
     case 2: {
-        // The dynamic shadow map: shadow_map_size (1024, 512) of
-        // Default_TOD_Manager's one_camera mode, the shadow_big style 1024 x 1024
-        // depth only [C data tod_profiles.qb; I: one map for both cascades].
-        if (device_ && shadow_) device_->destroyTarget(shadow_);
-        shadow_ = {};
-        device_ = &device;
-        if (!SDL_getenv("GD04_NO_SHADOWS")) {
-            std::string serr;
-            gfx::TargetDesc td;
-            td.width = td.height = 1024;
-            td.depth = true;
-            shadow_ = device.createTarget(td, serr);
-            if (!shadow_) SDL_Log("venue: no shadow map: %s", serr.c_str());
+        // The dynamic shadow's cascades: shadow_map_size (1024, 512) of
+        // Default_TOD_Manager's one_camera mode, the shadow_big / shadow_small
+        // styles 1024 x 1024 / 512 x 512 depth only [C data tod_profiles.qb;
+        // I: cascade 0 the big one].
+        for (gfx::TargetId& t : shadow_) {
+            if (device_ && t) device_->destroyTarget(t);
+            t = {};
         }
+        device_ = &device;
+        if (!SDL_getenv("GD04_NO_SHADOWS"))
+            for (int i = 0; i < 2; ++i) {
+                std::string serr;
+                gfx::TargetDesc td;
+                td.width = td.height = i ? 512 : 1024;
+                td.depth = true;
+                shadow_[size_t(i)] = device.createTarget(td, serr);
+                if (!shadow_[size_t(i)]) SDL_Log("venue: no shadow map: %s", serr.c_str());
+            }
         fxReady_ = !SDL_getenv("GD04_NO_SCREENFX") && fx_.init(device, gh3shader::library(disc));
         break;
     }
@@ -357,10 +362,109 @@ void VenueStage::advance(double ms) {
     lights_.update(ms, perf_);
 }
 
-void VenueStage::shadowPass(double ms) {
-    view_->setShadow({}, gfx::Mat4{}, 1024, 0.35f);
-    if (band_ && band_->view()) band_->view()->setShadow({}, gfx::Mat4{}, 1024, 0.35f);
-    if (!shadow_ || !band_ || !device_) return;
+namespace {
+
+// GH3's shadow map parameters, ResetShadowMapParams (822B2DA0) and the
+// statics around 8291D708..8291D770, as guitar_startup leaves them
+// (SetShadowMapParams far = 16) [C: default.xex; the scripts]:
+// - each cascade ends at a camera depth that moves between `near` / `far`
+//   (8291D764: 13, 16) and 8291D748 (6.5, 19) by |the view direction . the
+//   shadow direction| (5850: a cascade's far depth = d764 + (max(d748, d764)
+//   - d764) x |cos|, in GH3's view space looking down -z): 13 .. 6.5 m and 16 m;
+//   cascade 0 starts at the camera's near plane, cascade 1 where 0 ends;
+// - the shadow fades out (c141.zw) from far - farblend (3) to far: 13 .. 16 m;
+// - each cascade's light projection (822B4870) is a light-space perspective
+//   shadow map (LiSPSM): the slice's corners in a light basis (y towards
+//   the light, z the view direction's part across the light), the
+//   projection's centre n = (8291D754: 4 / 16 + the slice's near depth) /
+//   sin(view, light) behind the slice along z, its near plane bottom / top
+//   lightdist - lightfar / lightdist - lightnear (400 - 1000, 400 - 5) along
+//   the light, then remapped so the map's v is the warped z and its depth
+//   the light axis (2.0 / -1 / 0.5 / -0.5) [C: 82236568 is
+//   D3DXMatrixPerspectiveOffCenterRH, 822366D8 its orthographic one, used
+//   when sin < 0.01];
+// - the casters' depth bias (GetShadowMapBias, 8291E644): single_sided 64 /
+//   1280, double_sided 1200 / 1600, x 2^-24 (8291F168) as the depth-bias
+//   render state (823DCC48), slopes 0.
+constexpr float kCascadeFar[2] = {13.0f, 16.0f};   // 8291D764 (near, far)
+constexpr float kCascadeFarAlong[2] = {6.5f, 19.0f};  // 8291D748
+constexpr float kFarBlend = 3.0f;                   // 8291D710
+constexpr float kNearBlend[2] = {0.5f, 1.0f};       // 8291D708 -> c141.xy
+constexpr float kLispsmN[2] = {4.0f, 16.0f};        // 8291D754
+constexpr float kLightDist = 400, kLightNear = 5, kLightFar = 1000;  // 8291D718..20
+constexpr float kBias[2] = {64.0f / 16777216.0f, 1280.0f / 16777216.0f};  // single_sided x 2^-24
+constexpr int kCascadeSize[2] = {1024, 512};        // tod_profiles' shadow_map_size
+
+gfx::Vec3 toG(const venue::Vec3& v) { return {v[0], v[1], v[2]}; }
+
+// One cascade's world -> Direct3D clip matrix (the map's u = x, v = -y,
+// depth = z, after the divide) for the camera slice [zNear, zFar] [C: the
+// steps of 822B4870; I: GH3's own camera near plane, the basis' signs].
+gfx::Mat4 cascadeMatrix(const venue::CamPose& cam, float aspect, float zNear, float zFar, const gfx::Vec3& lightDir, float lispsmN) {
+    const gfx::Vec3 fwd = toG(venue::rotate(cam.rot, {0, 0, 1}));
+    const gfx::Vec3 up = toG(venue::rotate(cam.rot, {0, 1, 0}));
+    const gfx::Vec3 right = toG(venue::rotate(cam.rot, {-1, 0, 0}));
+    const gfx::Vec3 eye = toG(cam.pos);
+    const gfx::Vec3 Y = lightDir * -1.0f;  // towards the light
+    const gfx::Vec3 back = fwd * -1.0f;    // GH3's camera z
+    gfx::Vec3 Z = back - Y * gfx::dot(back, Y);
+    if (gfx::dot(Z, Z) > 1e-4f) Z = gfx::normalize(Z);
+    else Z = up * -1.0f;  // looking along the light: the camera's -y [C]
+    const gfx::Vec3 X = gfx::cross(Y, Z);
+    const float sinG = std::fabs(gfx::dot(back, Z));
+    gfx::Mat4 basis;
+    const gfx::Vec3 rows[3] = {X, Y, Z};
+    for (int r = 0; r < 3; ++r) basis.at(r, 0) = rows[r].x, basis.at(r, 1) = rows[r].y, basis.at(r, 2) = rows[r].z;
+    // The slice's corners in light space and their box.
+    const float tx = std::tan(cam.fov * 3.14159265f / 360.0f), ty = tx / aspect;
+    gfx::Vec3 c[8];
+    for (int i = 0; i < 8; ++i) {
+        const float d = (i & 4) ? zFar : zNear;
+        const gfx::Vec3 w = eye + fwd * d + right * (((i & 1) ? 1.0f : -1.0f) * d * tx) + up * (((i & 2) ? 1.0f : -1.0f) * d * ty);
+        c[i] = basis.transformPoint(w);
+    }
+    gfx::Vec3 lo = c[0], hi = c[0];
+    for (const gfx::Vec3& p : c) {
+        lo = {std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z)};
+        hi = {std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z)};
+    }
+    const float cx = (lo.x + hi.x) * 0.5f, cy = (lo.y + hi.y) * 0.5f;
+    const float b = kLightDist - kLightFar, t = kLightDist - kLightNear;
+    gfx::Mat4 proj, view;
+    if (sinG > 0.01f) {
+        const float n = std::max((lispsmN + zNear) / sinG, 0.0f), f = n + (hi.z - lo.z);
+        view = gfx::Mat4::translation(-cx, -cy, -(hi.z + n)) * basis;
+        float l = 1e30f, r = -1e30f;
+        for (const gfx::Vec3& p : c) {
+            const float x = (p.x - cx) * n / (hi.z + n - p.z);
+            l = std::min(l, x), r = std::max(r, x);
+        }
+        proj.at(0, 0) = 2 * n / (r - l), proj.at(0, 2) = (l + r) / (r - l);
+        proj.at(1, 1) = 2 * n / (t - b), proj.at(1, 2) = (t + b) / (t - b);
+        proj.at(2, 2) = f / (n - f), proj.at(2, 3) = n * f / (n - f);
+        proj.at(3, 2) = -1, proj.at(3, 3) = 0;
+    } else {
+        const float l = lo.x - cx, r = hi.x - cx, f = hi.z - lo.z;
+        view = gfx::Mat4::translation(-cx, -cy, -hi.z) * basis;
+        proj.at(0, 0) = 2 / (r - l), proj.at(0, 3) = (l + r) / (l - r);
+        proj.at(1, 1) = 2 / (t - b), proj.at(1, 3) = (t + b) / (b - t);
+        proj.at(2, 2) = 1 / (0 - f), proj.at(2, 3) = 0;
+    }
+    // The map's v from the warped z (0..1 -> -1..1), its depth from the
+    // light axis (y -1..1 -> 1..0: nearer the light, smaller).
+    gfx::Mat4 remap;
+    remap.at(1, 1) = 0, remap.at(1, 2) = 2, remap.at(1, 3) = -1;
+    remap.at(2, 1) = -0.5f, remap.at(2, 2) = 0, remap.at(2, 3) = 0.5f;
+    return remap * proj * view;
+}
+
+}  // namespace
+
+void VenueStage::shadowPass(double ms, const venue::CamPose& cam) {
+    view_->setShadow(gh3shader::DynamicShadow{});
+    if (band_ && band_->view()) band_->view()->setShadow(gh3shader::DynamicShadow{});
+    shadowDraws_ = {};
+    if (!shadow_[0] || !shadow_[1] || !band_ || !device_) return;
     // The shadow light: the strongest of the band group's directional lights
     // pointing down, by their own colour and intensity, chosen once and kept
     // [C: the shadow pass (82384BB8) reads one global direction (822B84B0),
@@ -388,66 +492,75 @@ void VenueStage::shadowPass(double ms) {
             if (v.lights[i].name == particles_->shadowLight) best = int(i);
     if (log) SDL_Log("shadow: light %s", best >= 0 ? qbkey::names().get(v.lights[size_t(best)].name).c_str() : "none");
     if (best < 0) return;
-    venue::Vec3 centre{};
-    int n = 0;
-    for (const Band::Entry& e : band_->members())
-        if (e.placed) centre[0] += e.root.m[3], centre[1] += e.root.m[7], centre[2] += e.root.m[11], ++n;
-    if (!n) return;
-    for (float& c : centre) c /= float(n);
     const venue::Vec3 d = v.lights[size_t(best)].dir;
     const float dl = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
-    const venue::Vec3 f{d[0] / dl, d[1] / dl, d[2] / dl};
-    venue::Vec3 r{f[2], 0, -f[0]};  // across the light, level
-    const float rl = std::sqrt(r[0] * r[0] + r[2] * r[2]);
-    if (rl < 1e-4f) r = {1, 0, 0};
-    else r[0] /= rl, r[2] /= rl;
-    const venue::Vec3 u{f[1] * r[2] - f[2] * r[1], f[2] * r[0] - f[0] * r[2], f[0] * r[1] - f[1] * r[0]};
-    const float back = 30.0f, halfSize = 7.0f, depth = 60.0f;
-    const venue::Vec3 eye{centre[0] - f[0] * back, centre[1] + 1.0f - f[1] * back, centre[2] - f[2] * back};
-    gfx::Mat4 view, proj;
-    const venue::Vec3 rows[3] = {r, u, f};
-    for (int a = 0; a < 3; ++a) {
-        for (int c = 0; c < 3; ++c) view.at(a, c) = rows[a][size_t(c)];
-        view.at(a, 3) = -(rows[a][0] * eye[0] + rows[a][1] * eye[1] + rows[a][2] * eye[2]);
-    }
-    // Orthographic, Direct3D depth 0..1 (the casters' shaders convert it
-    // when they export; the receivers compare z / w with the map: lit where
-    // not deeper, 4 taps blended bilinearly) [C: the DynamicShadowReciever
-    // microcode; I: the engine's matrices]. The casters draw upside down:
-    // the receivers' v = 0.5 - 0.5 y reads OpenGL target rows bottom up.
-    proj.at(0, 0) = 1.0f / halfSize, proj.at(1, 1) = 1.0f / halfSize, proj.at(2, 2) = 1.0f / depth;
-    const gfx::Mat4 vp = proj * view;
-    gfx::Mat4 casterProj = proj;
-    casterProj.at(1, 1) = -casterProj.at(1, 1);
-    const gfx::Mat4 casterVp = casterProj * view;
-    gh3shader::Globals g;
-    g.setMatrix(gh3shader::kRegView, view, 4);
-    g.setMatrix(gh3shader::kRegProjection, casterProj, 4);
-    g.setMatrix(gh3shader::kRegViewProj, casterVp, 4);
-    g.setMatrix(gh3shader::kRegInvView, view.inverseAffine(), 4);
-    g.set(gh3shader::kRegDistanceLodScaler, 1, 0, 0, 0);
+    if (dl < 1e-6f) return;
+    const gfx::Vec3 dir{d[0] / dl, d[1] / dl, d[2] / dl};
+    // GH3's two cascades along the camera's view (the constants above). The
+    // camera's near plane is the port's (0.05, VenueView::cameraGlobals) [I].
+    const gfx::Vec3 fwd = toG(venue::rotate(cam.rot, {0, 0, 1}));
+    const float cosVL = std::fabs(gfx::dot(fwd, dir));
+    float slice[3] = {0.05f, 0, 0};
+    for (int i = 0; i < 2; ++i)
+        slice[i + 1] = kCascadeFar[i] + (std::min(kCascadeFarAlong[i], kCascadeFar[i]) - kCascadeFar[i]) * cosVL;
+    static const float biasScale = SDL_getenv("GD04_SHADOW_BIAS") ? float(std::atof(SDL_getenv("GD04_SHADOW_BIAS"))) : 1.0f;  // development aid
+    static const float intensity = SDL_getenv("GD04_SHADOW_INTENSITY") ? float(std::atof(SDL_getenv("GD04_SHADOW_INTENSITY"))) : 0.35f;
     gfx::RenderDevice& dev = *device_;
     const gfx::TargetId oldTarget = dev.currentTarget();
     int vx, vy, vw, vh;
     dev.currentViewport(vx, vy, vw, vh);
-    dev.setTarget(shadow_);
-    dev.setViewport(0, 0, 1024, 1024);
-    const float white[4] = {1, 1, 1, 1};
-    dev.clear(white, true);
-    band_->drawShadow(ms, g, v, lightState_, lights_);
+    gh3shader::DynamicShadow s;
+    s.blend[0] = kNearBlend[0], s.blend[1] = kNearBlend[1];
+    s.fadeStart = kCascadeFar[1] - kFarBlend, s.fadeEnd = kCascadeFar[1];
+    s.intensity = intensity;
+    for (int i = 0; i < 2; ++i) {
+        const gfx::Mat4 vp = cascadeMatrix(cam, 16.0f / 9.0f, slice[i], slice[i + 1], dir, kLispsmN[i]);
+        // The casters draw upside down: the receivers' v = 0.5 - 0.5 y reads
+        // OpenGL target rows bottom up (their shaders convert the depth).
+        gfx::Mat4 flip;
+        flip.at(1, 1) = -1;
+        const gfx::Mat4 casterVp = flip * vp;
+        gh3shader::Globals g;
+        g.setMatrix(gh3shader::kRegView, gfx::Mat4::identity(), 4);
+        g.setMatrix(gh3shader::kRegProjection, casterVp, 4);
+        g.setMatrix(gh3shader::kRegViewProj, casterVp, 4);
+        g.setMatrix(gh3shader::kRegInvView, gfx::Mat4::identity(), 4);
+        g.set(gh3shader::kRegDistanceLodScaler, 1, 0, 0, 0);
+        dev.setTarget(shadow_[size_t(i)]);
+        dev.setViewport(0, 0, kCascadeSize[i], kCascadeSize[i]);
+        const float white[4] = {1, 1, 1, 1};
+        dev.clear(white, true);
+        band_->drawShadow(ms, g, v, lightState_, lights_);
+        if (band_->view()) shadowDraws_[size_t(i)] = band_->view()->stats().drawsLastFrame;
+        // GH3 biases the casters' depth (the depth-bias state); the same,
+        // subtracted from the receivers' depth [C: the values; I: the
+        // double_sided ones (1200 / 1600) for double-sided casters are not
+        // applied].
+        gfx::Mat4 bias;
+        bias.at(2, 3) = -kBias[i] * biasScale;
+        s.tex[i] = dev.targetDepth(shadow_[size_t(i)]);
+        s.vp[i] = bias * vp;
+        s.size[i] = float(kCascadeSize[i]);
+    }
     dev.setTarget(oldTarget);
     dev.setViewport(vx, vy, vw, vh);
-    static const float intensity = SDL_getenv("GD04_SHADOW_INTENSITY") ? float(std::atof(SDL_getenv("GD04_SHADOW_INTENSITY"))) : 0.35f;
-    // The receivers compare a little nearer the light than the map: without a
-    // bias a surface shadows itself in speckles at the map's 1.4 cm texels (the
-    // band's self-shadowing) [I: GH3's bias, in its projection or its shadow
-    // pass's depth-bias state, is not decoded; 4 cm].
-    static const float biasM = SDL_getenv("GD04_SHADOW_BIAS") ? float(std::atof(SDL_getenv("GD04_SHADOW_BIAS"))) : 0.04f;
-    gfx::Mat4 bias;
-    bias.at(2, 3) = -biasM / depth;
-    const gfx::Mat4 recv = bias * vp;
-    view_->setShadow(dev.targetDepth(shadow_), recv, 1024, intensity);
-    if (band_->view()) band_->view()->setShadow(dev.targetDepth(shadow_), recv, 1024, intensity);
+    if (log)
+        for (const Band::Entry& e : band_->members()) {
+            if (!e.placed) continue;
+            std::string where;
+            for (int i = 0; i < 2; ++i) {
+                const gfx::Mat4& m = s.vp[i];
+                const float p[4] = {e.root.m[3], e.root.m[7], e.root.m[11], 1};
+                float q[4];
+                for (int r = 0; r < 4; ++r) q[r] = m.at(r, 0) * p[0] + m.at(r, 1) * p[1] + m.at(r, 2) * p[2] + m.at(r, 3) * p[3];
+                char buf[96];
+                std::snprintf(buf, sizeof buf, " c%d u %.3f v %.3f z %.5f", i, 0.5f + 0.5f * q[0] / q[3], 0.5f - 0.5f * q[1] / q[3], q[2] / q[3]);
+                where += buf;
+            }
+            SDL_Log("shadow: slices %.2f %.2f %.2f, member at%s", slice[0], slice[1], slice[2], where.c_str());
+        }
+    view_->setShadow(s);
+    if (band_->view()) band_->view()->setShadow(s);
 }
 
 void VenueStage::draw(double ms) {
@@ -470,7 +583,7 @@ void VenueStage::draw(double ms) {
     }
     lights_.evaluate(ms, lightState_);
     const venue::CamPose cam = hasFixedCam_ ? fixedCam_ : cameras_.pose(ms);
-    shadowPass(ms);
+    shadowPass(ms, cam);
     if (crowd_) {
         crowd_->render(ms, cam, *venue_, lightState_, lights_);
         for (uint32_t card : hide_) view_->setOverride(card, crowd_->texture(card));

@@ -104,6 +104,36 @@ bool groupLights(uint32_t lightGroup, uint32_t objectGroup);
 // the SH (no slot).
 void lightObject(const LightIn* lights, size_t count, const gfx::Vec3& p, ObjectConstants& out);
 
+// The band's dynamic shadow for one frame (VenueStage::shadowPass), as the
+// DynamicShadowReciever shaders read it [C: the microcode, 822B6E08]:
+// g_ViewToLightProjection0 / 1 (c144 / c148: view space -> each cascade's
+// Direct3D clip space), g_sampShadowMap0 / 1 (s14 / s15), g_shadowMapSize
+// (c143.x / .y: cascade 0's / 1's texels), g_shadowMapConstants (c141: zw =
+// the camera distance where the shadow fades out, smoothstepped) and
+// g_shadowLevel (c142.zw: light = lit x (1 - i) + i). A pixel takes cascade
+// 0 where its coordinates are inside that map (0 < u, v < 1, depth < 1),
+// else cascade 1.
+struct DynamicShadow {
+    gfx::TextureId tex[2];       // the cascades' depth maps; tex[0] empty: no shadow
+    gfx::Mat4 vp[2];             // world -> the cascade's clip space (the receivers' bias in)
+    float size[2] = {1024, 1024};
+    float blend[2] = {0, 0};     // c141.xy (not read by the receivers seen)
+    float fadeStart = 0, fadeEnd = 1e9f;
+    float intensity = 0.35f;
+    explicit operator bool() const { return bool(tex[0]); }
+    // One map for both cascades (the menus' backdrop), no fade.
+    static DynamicShadow single(gfx::TextureId depth, const gfx::Mat4& vp, int size, float intensity) {
+        DynamicShadow s;
+        s.tex[0] = s.tex[1] = depth;
+        s.vp[0] = s.vp[1] = vp;
+        s.size[0] = s.size[1] = float(size);
+        s.intensity = intensity;
+        return s;
+    }
+};
+// c141..c151 for a camera's `view` (world -> view) when `s` is on.
+void setShadowGlobals(Globals& g, const DynamicShadow& s, const gfx::Mat4& view);
+
 // One translated template.
 struct Program {
     gfx::ProgramId id;

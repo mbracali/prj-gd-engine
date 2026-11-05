@@ -48,6 +48,16 @@ void Globals::setMatrix(int r, const gfx::Mat4& m, int rows) {
     for (int i = 0; i < rows; ++i) set(r + i, m.at(0, i), m.at(1, i), m.at(2, i), m.at(3, i));
 }
 
+void setShadowGlobals(Globals& g, const DynamicShadow& s, const gfx::Mat4& view) {
+    if (!s) return;
+    const gfx::Mat4 inv = view.inverseAffine();
+    g.setMatrix(kRegViewToLight0, s.vp[0] * inv, 4);
+    g.setMatrix(kRegViewToLight1, s.vp[1] * inv, 4);
+    g.set(kRegShadowMapConstants, s.blend[0], s.blend[1], s.fadeStart, s.fadeEnd);
+    g.set(kRegShadowLevel, 0, 0, 1.0f - s.intensity, s.intensity);
+    g.set(kRegShadowMapSize, s.size[0], s.size[1], 1.0f / s.size[0], 1.0f / s.size[1]);
+}
+
 gfx::ProgramDesc programDesc(const xenos::Program& p, const std::string& name, bool clipZeroToOne) {
     gfx::ProgramDesc d;
     d.name = "gh3:" + name;

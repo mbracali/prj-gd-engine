@@ -39,11 +39,13 @@ public:
     void draw(const venue::CamPose& cam, const std::vector<venue::LightState>& lights, const venue::LightShow& show);
 
     static gfx::ProgramDesc programDesc();
-    // The dynamic shadow map for this frame (the band from the shadow light,
-    // depth 0..1): opaque meshes draw with their templates'
-    // DynamicShadowReciever technique. An empty texture: none.
+    // The dynamic shadow for this frame (the band from the shadow light, GH3's
+    // two cascades): opaque meshes draw with their templates'
+    // DynamicShadowReciever technique. Off: none.
+    void setShadow(const gh3shader::DynamicShadow& s) { shadow_ = s; }
+    // One map for both cascades (the menus' backdrop).
     void setShadow(gfx::TextureId depth, const gfx::Mat4& lightViewProj, int size, float intensity) {
-        shadowTex_ = depth, shadowVP_ = lightViewProj, shadowSize_ = size, shadowIntensity_ = intensity;
+        shadow_ = gh3shader::DynamicShadow::single(depth, lightViewProj, size, intensity);
     }
     // The light housings' volumes (lightvolumetype ConeImpostor: the
     // _Cone_Impostor template on a camera-facing quad along the beam), drawn
@@ -140,10 +142,7 @@ private:
     };
     std::unordered_map<const Item*, Flare> flares_;
     void drawFlare(const Item& it, gfx::DrawCall gc, const venue::Vec3& centre, const venue::CamPose& cam);
-    gfx::TextureId shadowTex_;
-    gfx::Mat4 shadowVP_;
-    int shadowSize_ = 1024;
-    float shadowIntensity_ = 0.35f;
+    gh3shader::DynamicShadow shadow_;
     gfx::BufferId coneVb_, coneIb_, rayVb_, rayIb_;
     uint32_t rayCount_ = 0;
     gfx::BufferId projVb_, projIb_;

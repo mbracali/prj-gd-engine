@@ -361,15 +361,7 @@ void BandView::draw(const venue::CamPose& cam, const std::vector<Instance>& inst
         else {
             gfx::Mat4 viewM;
             VenueView::cameraGlobals(cam, d.info().clipDepthZeroToOne, seconds_, globals, nullptr, aspect_, flipY_, &viewM);
-            if (shadowTex_) {  // as VenueView::draw's receivers [C: the DynamicShadowReciever microcode]
-                const gfx::Mat4 v2l = shadowVP_ * viewM.inverseAffine();
-                globals.setMatrix(gh3shader::kRegViewToLight0, v2l, 4);
-                globals.setMatrix(gh3shader::kRegViewToLight1, v2l, 4);
-                globals.set(gh3shader::kRegShadowMapConstants, 0, 0, 0, 1e9f);
-                globals.set(gh3shader::kRegShadowLevel, 0, 0, 1.0f - shadowIntensity_, shadowIntensity_);
-                const float sz = float(shadowSize_);
-                globals.set(gh3shader::kRegShadowMapSize, sz, sz, 1.0f / sz, 1.0f / sz);
-            }
+            gh3shader::setShadowGlobals(globals, shadow_, viewM);  // as VenueView::draw's receivers
         }
         gframe = d.stageUniforms(&globals, sizeof globals);
     } else if (shadowPass_) {
@@ -520,11 +512,11 @@ void BandView::draw(const venue::CamPose& cam, const std::vector<Instance>& inst
                     gc.textures[k] = mats_[mi].tex[k];
                     gc.samplers[k] = {gfx::Filter::Trilinear, gfx::Wrap::Repeat, 0};
                 }
-                if (shadowTex_ && !shadowPass_ && mesh.receiver && mesh.mode == Mode::Opaque && !noBandShadows()) {
+                if (shadow_ && !shadowPass_ && mesh.receiver && mesh.mode == Mode::Opaque && !noBandShadows()) {
                     gc.program = mesh.receiver->id;
                     for (int k = 0; k < 14; ++k)
                         if ((mesh.receiver->samplers >> k & 1) && !gc.textures[k]) gc.textures[k] = gh3_.white();
-                    gc.textures[14] = gc.textures[15] = shadowTex_;  // g_sampShadowMap0 / 1
+                    gc.textures[14] = shadow_.tex[0], gc.textures[15] = shadow_.tex[1];  // g_sampShadowMap0 / 1
                     gc.samplers[14] = gc.samplers[15] = {gfx::Filter::Nearest, gfx::Wrap::Clamp, 0};
                 }
                 gc.state.depthTest = true;

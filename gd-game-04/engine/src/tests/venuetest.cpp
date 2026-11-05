@@ -186,6 +186,7 @@ int runVenueTest(const std::string& discPath) {
         long drawn = 0;
         int shadowLight = -1;
         bool shadowMoved = false;
+        long shadowFrames = 0, bothCascades = 0;  // frames with a shadow light; of them, both cascades drawn
         for (int fps : {60, 240}) {
             VenueStage& st = d;
             double step = -kLeadInMs;
@@ -207,6 +208,9 @@ int runVenueTest(const std::string& discPath) {
                 if (st.shadowLight() >= 0) {
                     if (shadowLight >= 0 && st.shadowLight() != shadowLight) shadowMoved = true;
                     shadowLight = st.shadowLight();
+                    // GH3's two cascades (GD04-106): the band in both maps.
+                    ++shadowFrames;
+                    if (st.shadowCascadeDraws()[0] > 0 && st.shadowCascadeDraws()[1] > 0) ++bothCascades;
                 }
             }
             // The 240 fps pass replays the same window: restart the stage.
@@ -217,6 +221,9 @@ int runVenueTest(const std::string& discPath) {
         }
         if (drawsMin == 0) fail("a frame drew nothing");
         if (shadowMoved) fail("the dynamic shadow changed its light between frames");
+        if (d.band() && d.band()->view() && !SDL_getenv("GD04_NO_SHADOWS") && shadowFrames > 0 && bothCascades != shadowFrames)
+            fail("the dynamic shadow drew " + std::to_string(bothCascades) + " of " + std::to_string(shadowFrames) +
+                 " frames into both cascades");
 
         // 3. Screenshots: the middle of the first shots after the intro.
         int saved = 0;

@@ -118,6 +118,8 @@ public:
     const Band* band() const { return band_.get(); }
     Band* band() { return band_.get(); }
     int shadowLight() const { return shadowLight_; }  // the index of the dynamic shadow's light (-1: none yet)
+    // The casters (band draws) each dynamic shadow cascade drew last frame (venuetest).
+    const std::array<size_t, 2>& shadowCascadeDraws() const { return shadowDraws_; }
     static venue::Performance performance(float health);
 
 private:
@@ -136,7 +138,8 @@ private:
     std::shared_ptr<band::Library> pedLib_;
     std::unique_ptr<Particles> particles_;  // the zone's particles and pyro (GD04_NO_PARTICLES=1: none)
     gfx::RenderDevice* device_ = nullptr;
-    gfx::TargetId shadow_;  // the band's dynamic shadow map (GD04_NO_SHADOWS=1: none)
+    std::array<gfx::TargetId, 2> shadow_{};  // the band's dynamic shadow cascades, 1024 / 512 (GD04_NO_SHADOWS=1: none)
+    std::array<size_t, 2> shadowDraws_{};    // the casters each cascade drew last frame
     int shadowLight_ = -1;  // the shadow's light, chosen once per venue (VenueStage::shadowPass)
     int flashFrames = 0, outros = 0;       // frames drawn with ScreenFlash's FlashBS (venuetest)
     screenfx::ScreenFx fx_;    // GH3's screen effects (GD04_NO_SCREENFX=1: none)
@@ -157,7 +160,7 @@ private:
     bool hasFixedCam_ = false;
     float starBlur_ = 0;
     double starBlurAt_ = 0;  // Default_TOD_Manager's screen_FX
-    void shadowPass(double ms);
+    void shadowPass(double ms, const venue::CamPose& cam);
 public:
     const Crowd* crowd() const { return crowd_.get(); }
     const Particles* particles() const { return particles_.get(); }

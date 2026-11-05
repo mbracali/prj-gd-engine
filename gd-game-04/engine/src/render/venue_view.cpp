@@ -721,22 +721,11 @@ void VenueView::draw(const venue::CamPose& cam, const std::vector<venue::LightSt
     gh3shader::Globals globals;
     gfx::Mat4 viewM, viewProjM;
     cameraGlobals(cam, d.info().clipDepthZeroToOne, seconds_, globals, &viewProjM, 16.0f / 9.0f, false, &viewM);
-    if (shadowTex_) {
-        // g_ViewToLightProjection0/1 (view space -> the light's clip space;
-        // both cascades the one map [I]), g_shadowMapConstants (z, w: the
-        // cascade fade's start and end distance: none), g_shadowLevel (z, w:
-        // light = i + lit x (1 - i), i = SetDynamicShadowIntensity 0.35 [C
-        // script tod_manager_create_perm_lights; I: the register's use, the
-        // shadows as dark as the reference captures']),
-        // g_shadowMapSize (x, y: the maps' sizes, tod_profiles' 1024 x 512 [C]).
-        const gfx::Mat4 v2l = shadowVP_ * viewM.inverseAffine();
-        globals.setMatrix(gh3shader::kRegViewToLight0, v2l, 4);
-        globals.setMatrix(gh3shader::kRegViewToLight1, v2l, 4);
-        globals.set(gh3shader::kRegShadowMapConstants, 0, 0, 0, 1e9f);
-        globals.set(gh3shader::kRegShadowLevel, 0, 0, 1.0f - shadowIntensity_, shadowIntensity_);
-        const float sz = float(shadowSize_);
-        globals.set(gh3shader::kRegShadowMapSize, sz, sz, 1.0f / sz, 1.0f / sz);
-    }
+    // The dynamic shadow's cascades (gh3shader::DynamicShadow); g_shadowLevel
+    // z, w: light = i + lit x (1 - i), i = SetDynamicShadowIntensity 0.35 [C
+    // script tod_manager_create_perm_lights; I: the register's use, the
+    // shadows as dark as the reference captures'].
+    gh3shader::setShadowGlobals(globals, shadow_, viewM);
     const gfx::UniformData gframe = d.stageUniforms(&globals, sizeof globals);
     std::vector<gfx::UniformData> matVs(mats_.size()), matPs(mats_.size());
     gh3shader::ObjectConstants obj;
@@ -764,7 +753,7 @@ void VenueView::draw(const venue::CamPose& cam, const std::vector<venue::LightSt
         if (it->gh3) {
             gc.program = it->gh3->id;
             const gh3shader::Program* rcv = nullptr;
-            if (shadowTex_ && it->mode == Mode::Opaque && it->housing < 0 && !it->card) {
+            if (shadow_ && it->mode == Mode::Opaque && it->housing < 0 && !it->card) {
                 rcv = gh3_.get(it->shaderKey, matlib::DynamicShadowReceiver);
                 if (rcv) gc.program = rcv->id;
             }
@@ -815,7 +804,7 @@ void VenueView::draw(const venue::CamPose& cam, const std::vector<venue::LightSt
             if (rcv) {
                 for (int k = 0; k < 14; ++k)
                     if ((rcv->samplers >> k & 1) && !gc.textures[k]) gc.textures[k] = gh3_.white();
-                gc.textures[14] = gc.textures[15] = shadowTex_;  // g_sampShadowMap0 / 1
+                gc.textures[14] = shadow_.tex[0], gc.textures[15] = shadow_.tex[1];  // g_sampShadowMap0 / 1
                 gc.samplers[14] = gc.samplers[15] = {gfx::Filter::Nearest, gfx::Wrap::Clamp, 0};
             } else {
                 gc.samplers[14] = gc.samplers[15] = {gfx::Filter::Trilinear, gfx::Wrap::Repeat, 0};
@@ -1249,15 +1238,7 @@ void VenueView::drawProjectors(const venue::CamPose& cam, const venue::LightShow
     gh3shader::Globals globals;
     gfx::Mat4 viewM, viewProjM;
     cameraGlobals(cam, d.info().clipDepthZeroToOne, seconds_, globals, &viewProjM, 16.0f / 9.0f, false, &viewM);
-    if (shadowTex_) {  // as the venue's receivers (draw)
-        const gfx::Mat4 v2l = shadowVP_ * viewM.inverseAffine();
-        globals.setMatrix(gh3shader::kRegViewToLight0, v2l, 4);
-        globals.setMatrix(gh3shader::kRegViewToLight1, v2l, 4);
-        globals.set(gh3shader::kRegShadowMapConstants, 0, 0, 0, 1e9f);
-        globals.set(gh3shader::kRegShadowLevel, 0, 0, 1.0f - shadowIntensity_, shadowIntensity_);
-        const float sz = float(shadowSize_);
-        globals.set(gh3shader::kRegShadowMapSize, sz, sz, 1.0f / sz, 1.0f / sz);
-    }
+    gh3shader::setShadowGlobals(globals, shadow_, viewM);  // as the venue's receivers (draw)
     gh3shader::ObjectConstants obj;
     obj.setMatrix(gh3shader::kRegWorld, gfx::Mat4::identity(), 4);
     obj.setMatrix(gh3shader::kRegWorldView, viewM, 4);
@@ -1281,7 +1262,8 @@ void VenueView::drawProjectors(const venue::CamPose& cam, const venue::LightShow
         c.textures[k] = (prog->samplers >> k & 1) ? gh3_.white() : gfx::TextureId{};
         c.samplers[k] = {gfx::Filter::Linear, gfx::Wrap::Clamp, 0};
     }
-    c.textures[14] = c.textures[15] = shadowTex_ ? shadowTex_ : gh3_.white();  // g_sampShadowMap0 / 1
+    c.textures[14] = shadow_ ? shadow_.tex[0] : gh3_.white();  // g_sampShadowMap0 / 1
+    c.textures[15] = shadow_ ? shadow_.tex[1] : gh3_.white();
     c.samplers[14] = c.samplers[15] = {gfx::Filter::Nearest, gfx::Wrap::Clamp, 0};
     c.state.blend = true;
     c.state.src = gfx::BlendFactor::One, c.state.dst = gfx::BlendFactor::One, c.state.op = gfx::BlendOp::Add;

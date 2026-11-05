@@ -220,7 +220,9 @@ void Band::drawShadow(double ms, const gh3shader::Globals& light, const venue::V
         inst.push_back(std::move(i));
     }
     view_->setShadowPass(&light);
+    view_->setReuseSkinning(skinnedAt_ == ms);  // the second cascade: the first's vertices
     view_->draw(venue::CamPose{}, inst, v, lights, show);
+    view_->setReuseSkinning(false);
     view_->setShadowPass(nullptr);
     skinnedAt_ = ms;
 }
