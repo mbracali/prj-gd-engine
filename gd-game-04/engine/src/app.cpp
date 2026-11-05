@@ -1301,7 +1301,10 @@ void App::frame() {
         // A quit during the movie (the window closed, the launcher's
         // GDUL_GAME_QUIT_AFTER) quits the game too.
         // GD04_NO_MOVIES=1 skips them outside walks too (development aid).
-        if ((!walk_ && !SDL_getenv("GD04_NO_MOVIES")) || SDL_getenv("GD04_WALK_MOVIES"))
+        // GD04_MOVIES=<name>,...: only those play (development aid: GH3_Intro without the boot's logos).
+        const char* only = SDL_getenv("GD04_MOVIES");
+        const bool listed = !only || ("," + std::string(only) + ",").find("," + movie + ",") != std::string::npos;
+        if (((!walk_ && !SDL_getenv("GD04_NO_MOVIES")) || SDL_getenv("GD04_WALK_MOVIES")) && listed)
             if (playMovie(*disc_, movie, canvas_, mixer_, input_) == MoviePlayer::Result::Quit) running_ = false;
         lastFrameNs_ = SDL_GetTicksNS();
         return;
