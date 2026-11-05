@@ -32,6 +32,11 @@ public:
     // False when the rig has none of `bones` with a .rag body.
     bool init(const bandanim::Rig& rig, const havok::Physics& rag, const std::vector<uint32_t>& bones);
     bool empty() const { return dynamic_ == 0; }
+    // True when the bone is an accessory (a simulated body).
+    bool isDynamic(int bone) const {
+        const int b = bone >= 0 && size_t(bone) < bodyOf_.size() ? bodyOf_[size_t(bone)] : -1;
+        return b >= 0 && bodies_[size_t(b)].dynamic;
+    }
     // The animated model-space bone matrices at `ms` in `world`, replaced by
     // the simulated ones; `animate(t, world)` gives the animated matrices at
     // a step time. `gravity`: the world's (0, -9.8, 0) in model space.

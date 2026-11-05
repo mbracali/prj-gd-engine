@@ -305,7 +305,12 @@ prismatic (TYPE_ANG, lin0 / lin1, linLimit). The step [I: Havok's solver
 in outline, not its code]: damping, then 4 sub-steps of gravity, one
 Gauss-Seidel pass (impulse = damping × (tau × error / h − J·v) / K, the
 limits one-sided), the velocity caps and the integration. Fixed 60 Hz of
-song time (GH3's frame on the 360 [I]), the pose of step k − 1 at frame k;
+song time (GH3's frame on the 360 [I]), the pose of step k − 1 at step k's
+time and, between step times, the poses after steps k − 1 and k
+interpolated (a frame that took the newest step as is held the hair for
+one frame and jumped the next: the accessories stuttered at refresh rates
+other than 60 Hz or with frame times jittering, GD04-104; `--chartest`
+samples every millisecond and fails a 1 ms move over 12× the mean);
 a start (or a jump of over 2 s) puts every body at the animated pose at
 rest (setPoseModelSpace). The accessory bones take the ragdoll's local
 transforms under their animated parents; their descendants follow.

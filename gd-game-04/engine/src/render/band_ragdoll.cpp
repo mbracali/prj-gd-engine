@@ -395,8 +395,16 @@ void AccessorySim::apply(double ms, std::vector<Mat34>& world, const std::functi
                          const Vec& gravity) {
     if (!dynamic_) return;
     // The pose read at a frame is the one before that frame's step [C 823FE140:
-    // keyframe, read, then the world steps]: the state after step k - 1.
-    const int64_t want = int64_t(std::floor(ms / kStepMs)) - 1;
+    // keyframe, read, then the world steps]: the state after step k - 1 at
+    // step k's time. Between two step times the shown pose is interpolated
+    // from the states after k - 1 and k [I: GH3 steps once per 60 Hz frame,
+    // so it never shows a step held; a frame here (any refresh rate, frame
+    // times that jitter around 16.7 ms) took the newest step's state as is,
+    // and the accessories held a step for two frames then jumped two: the
+    // hair / chains stuttered while the body moved smoothly, GD04-104].
+    const double pos = ms / kStepMs;
+    const int64_t want = int64_t(std::floor(pos));  // the newest step whose time is not after ms
+    const float frac = float(pos - std::floor(pos));
     std::vector<Mat34> w;
     auto restart = [&](int64_t s) {
         // ragdoll setPoseModelSpace: every body at the animated pose, at rest [C 823FE8C8 / 826BCEE0].
@@ -411,7 +419,7 @@ void AccessorySim::apply(double ms, std::vector<Mat34>& world, const std::functi
         history_.push_back(cur_);
         started_ = true;
     };
-    if (!started_ || want > cur_.step + 120 || want < history_.front().step) restart(want);
+    if (!started_ || want > cur_.step + 120 || want - 1 < history_.front().step) restart(want - 1);
     while (cur_.step < want) {
         ++cur_.step;
         w.clear();
@@ -440,9 +448,22 @@ void AccessorySim::apply(double ms, std::vector<Mat34>& world, const std::functi
         history_.push_back(cur_);
         while (history_.size() > kHistory) history_.pop_front();
     }
-    const State* s = &cur_;
-    if (want < cur_.step)
-        for (const State& h : history_)
-            if (h.step == want) s = &h;
-    pose(*s, world);
+    const State *a = nullptr, *b = nullptr;
+    for (const State& h : history_) {
+        if (h.step == want - 1) a = &h;
+        if (h.step == want) b = &h;
+    }
+    if (!b) b = &cur_;
+    if (!a || frac <= 0.0f) {
+        pose(*(a ? a : b), world);
+        return;
+    }
+    State mix;
+    mix.step = a->step;
+    mix.b.resize(a->b.size());
+    for (size_t i = 0; i < a->b.size(); ++i) {
+        const Rt &x0 = a->b[i].x, &x1 = b->b[i].x;
+        mix.b[i].x = {bandanim::nlerp(x0.q, x1.q, frac), add(x0.t, mul(sub(x1.t, x0.t), frac))};
+    }
+    pose(mix, world);
 }

@@ -226,6 +226,40 @@ BodyResult testMember(const Disc& disc, const Globals& g, band::Library& lib, co
             if (!finite(mt)) return {false, "a NaN in the skinning matrices at " + std::to_string(int(t)) + " ms"};
         if (f % 30 == 0 && !skinBounds(*model, skin, lo, hi)) return {false, "a NaN in the skinned vertices"};
     }
+    // The accessories sampled every millisecond for 0.5 s (frames that fall
+    // anywhere between the 60 Hz steps): no 1 ms move may be far over the
+    // mean, else they hold a step then jump (the stutter of GD04-104).
+    if (acc) {
+        const double t1 = t0 + double(frames) * kStepMs;
+        std::vector<bandanim::Vec> prev;
+        double sum = 0, worst = 0;
+        int n = 0;
+        for (int ms = 0; ms <= 500; ++ms) {
+            const double t = t1 + ms;
+            a.advance(t);
+            a.evaluate(t, world, skin);
+            acc->apply(t, world, [&a](double ts, std::vector<bandanim::Mat34>& w) {
+                std::vector<bandanim::Mat34> sk;
+                a.evaluate(ts, w, sk);
+            }, {0, -9.8f, 0});
+            std::vector<bandanim::Vec> cur;
+            for (size_t b = 0; b < world.size(); ++b)
+                if (acc->isDynamic(int(b))) cur.push_back(bandanim::xform(world[b], {0.1f, 0, 0}));
+            if (!prev.empty())
+                for (size_t i = 0; i < cur.size(); ++i) {
+                    const float dx = cur[i].x - prev[i].x, dy = cur[i].y - prev[i].y, dz = cur[i].z - prev[i].z;
+                    const double d = std::sqrt(double(dx * dx + dy * dy + dz * dz));
+                    sum += d, worst = std::max(worst, d), ++n;
+                }
+            prev = std::move(cur);
+        }
+        const double mean = n ? sum / n : 0;
+        if (std::getenv("GD04_CHARTEST_VERBOSE")) std::printf("  %s: accessories per ms: mean %.5f m, worst %.5f m\n", label(m).c_str(), mean, worst);
+        // [I] 12x the mean: a held 60 Hz step gives ~17x and more at the step times
+        // (21..66x before GD04-104), the interpolated steps 3..10x.
+        if (mean > 1e-5 && worst > 12.0 * mean)
+            return {false, "the accessories jump between frames (worst 1 ms move " + std::to_string(worst / mean) + "x the mean)"};
+    }
     if (!skinBounds(*model, skin, lo, hi)) return {false, "a NaN in the skinned vertices"};
     const float height = hi[1] - lo[1];
     if (a.stats().bodyAnims == 0) res = {false, "no body animation played"};
