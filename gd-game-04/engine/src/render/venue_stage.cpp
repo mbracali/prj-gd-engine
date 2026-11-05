@@ -107,6 +107,7 @@ venue::Performance VenueStage::performance(float health) {
 bool VenueStage::start(const Disc& disc, const Globals& g, const std::string& zone, const Chart& chart, uint32_t songKey, double leadInMs,
                        gfx::RenderDevice* device, std::string& error, double songStartMs) {
     const double from = songStartMs - leadInMs;  // the venue's first ms
+    shadowLight_ = -1;
     try {
         venue_ = venue::load(disc, zone);
     } catch (const std::exception& e) {
@@ -361,19 +362,25 @@ void VenueStage::shadowPass(double ms) {
     if (band_ && band_->view()) band_->view()->setShadow({}, gfx::Mat4{}, 1024, 0.35f);
     if (!shadow_ || !band_ || !device_) return;
     // The shadow light: the strongest of the band group's directional lights
-    // pointing down [I: GH3's SetShadowDirFromLight is not called by the
-    // zones' scripts; the C code's choice is not known].
+    // pointing down, by their own colour and intensity, chosen once and kept
+    // [C: the shadow pass (82384BB8) reads one global direction (822B84B0),
+    // set only by SetShadowDir / SetShadowDirFromLight (822B9788), never per
+    // frame; I: SetShadowDirFromLight is not called by the zones' scripts and
+    // the default direction is not known]. It was chosen each frame from the
+    // light show's state: in z_prison it switched between three lights every
+    // half second and the band's shadows jumped direction (GD04-103).
     const venue::Venue& v = *venue_;
-    int best = -1;
-    float bestPower = 0;
-    for (size_t i = 0; i < v.lights.size() && i < lightState_.size(); ++i) {
-        const venue::Light& l = v.lights[i];
-        if (l.type != venue::LightType::Directional || l.group != qbkey::key("band") || l.dir[1] > -0.2f) continue;
-        if (!l.createdAtStart && !(l.createdOn && lights_.flag(l.createdOn))) continue;
-        const venue::LightState& st = lightState_[i];
-        const float p = st.intensity * (st.color[0] + st.color[1] + st.color[2]);
-        if (p > bestPower) bestPower = p, best = int(i);
+    if (shadowLight_ < 0) {
+        float bestPower = 0;
+        for (size_t i = 0; i < v.lights.size() && i < lightState_.size(); ++i) {
+            const venue::Light& l = v.lights[i];
+            if (l.type != venue::LightType::Directional || l.group != qbkey::key("band") || l.dir[1] > -0.2f) continue;
+            if (!l.createdAtStart && !(l.createdOn && lights_.flag(l.createdOn))) continue;
+            const float p = l.intensity * (l.color[0] + l.color[1] + l.color[2]);
+            if (p > bestPower) bestPower = p, shadowLight_ = int(i);
+        }
     }
+    int best = shadowLight_;
     static const bool log = SDL_getenv("GD04_SHADOW_LOG") != nullptr;
     // SetShadowDirFromLight (a zone's node script) names it outright [C scripts].
     if (particles_ && particles_->shadowLight)

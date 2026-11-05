@@ -184,6 +184,8 @@ int runVenueTest(const std::string& discPath) {
         }
         size_t drawsMin = ~size_t(0), drawsMax = 0;
         long drawn = 0;
+        int shadowLight = -1;
+        bool shadowMoved = false;
         for (int fps : {60, 240}) {
             VenueStage& st = d;
             double step = -kLeadInMs;
@@ -201,6 +203,11 @@ int runVenueTest(const std::string& discPath) {
                 drawsMin = std::min(drawsMin, st.view()->stats().drawsLastFrame);
                 drawsMax = std::max(drawsMax, st.view()->stats().drawsLastFrame);
                 ++drawn;
+                // The dynamic shadow keeps one light (GD04-103: it followed the light show).
+                if (st.shadowLight() >= 0) {
+                    if (shadowLight >= 0 && st.shadowLight() != shadowLight) shadowMoved = true;
+                    shadowLight = st.shadowLight();
+                }
             }
             // The 240 fps pass replays the same window: restart the stage.
             if (fps == 60 && !d.start(*disc, g, zone, chart, songKey, kLeadInMs, &renderer.device(), error)) {
@@ -209,6 +216,7 @@ int runVenueTest(const std::string& discPath) {
             }
         }
         if (drawsMin == 0) fail("a frame drew nothing");
+        if (shadowMoved) fail("the dynamic shadow changed its light between frames");
 
         // 3. Screenshots: the middle of the first shots after the intro.
         int saved = 0;

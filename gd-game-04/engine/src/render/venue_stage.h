@@ -117,6 +117,7 @@ public:
     // The band on the stage (render/band.h; GD04_NO_BAND=1: none); null if it could not load.
     const Band* band() const { return band_.get(); }
     Band* band() { return band_.get(); }
+    int shadowLight() const { return shadowLight_; }  // the index of the dynamic shadow's light (-1: none yet)
     static venue::Performance performance(float health);
 
 private:
@@ -136,6 +137,7 @@ private:
     std::unique_ptr<Particles> particles_;  // the zone's particles and pyro (GD04_NO_PARTICLES=1: none)
     gfx::RenderDevice* device_ = nullptr;
     gfx::TargetId shadow_;  // the band's dynamic shadow map (GD04_NO_SHADOWS=1: none)
+    int shadowLight_ = -1;  // the shadow's light, chosen once per venue (VenueStage::shadowPass)
     int flashFrames = 0, outros = 0;       // frames drawn with ScreenFlash's FlashBS (venuetest)
     screenfx::ScreenFx fx_;    // GH3's screen effects (GD04_NO_SCREENFX=1: none)
     bool fxReady_ = false;

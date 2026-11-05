@@ -415,10 +415,19 @@ microcode]. Sizes: shadow_map_size (1024, 512), styles shadow_big 1024 x
 1024 / shadow_small 512 x 512 depth only; SetDynamicShadowIntensity 0.35
 [C data tod_profiles.qb, tod_manager.qb]. gd04 [I]: one 1024 x 1024 map
 for both cascades, orthographic (14 m square, 60 m deep) around the band
-from the band group's strongest directional light pointing down, the
+from the band group's strongest directional light pointing down (by its
+own colour x intensity, chosen once per venue: GH3's shadow pass reads one
+global direction, set only by SetShadowDir / SetShadowDirFromLight [C
+82384BB8, 822B84B0, 822B9788]; choosing it each frame from the light
+show's state made the shadows jump direction, GD04-103), the
 band's opaque meshes as casters, light = 0.35 + 0.65 x lit (as dark as the
 reference captures' shadows); the characters do not receive.
-GD04_NO_SHADOWS=1 turns it off.
+GD04_NO_SHADOWS=1 turns it off. Not used yet [C default.xex]:
+ResetShadowMapParams (822B2DA0) sets 4 / 16 (8291D754/58: the two
+cascades' sizes [I]) and -6.5 / -19, -13 / -20 (8291D748.., 8291D764..);
+GetShadowMapBias's per-cascade biases (8291E644..): single_sided 64 / 1280,
+double_sided 1200 / 1600 (the slopes 0 until SetShadowMapBias) [I: depth
+units; gd04's 4 cm bias is not derived from them].
 
 ### LOD
 
