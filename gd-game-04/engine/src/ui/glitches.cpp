@@ -103,6 +103,21 @@ bool ensureGlitches(Vm& vm) {
             const qb::Value* z = lz && lz->st ? lz->st->find(arr[i].key) : nullptr;
             const qb::Value* nm = z && z->st ? z->st->find(K("name")) : nullptr;
             if (!nm || nm->str.empty()) continue;
+            // Not the debug_only zones (viewer = z_viewer, z_credits): their
+            // venue_<zone> stays locked, as GH3's setup_generalvenuetags
+            // leaves it (default_venuetags), so get_valid_venue_index never
+            // gives quick play's random venue z_viewer, a zone with no scene
+            // (a black venue all song, owner report 2026-11-05); saves this
+            // unlocked before are locked again [C scripts setup_venuetags,
+            // get_valid_venue_index; LevelZones' $debug_only].
+            bool debugOnly = false;
+            for (const qb::Item& it : z->st->items)
+                if (!it.name && (it.value.type == qb::Type::Key || it.value.type == qb::Type::KeyPtr) && it.value.key == K("debug_only"))
+                    debugOnly = true;
+            if (debugOnly) {
+                if (auto t = vm.globalTags.find(K("venue_" + nm->str)); t != vm.globalTags.end()) changed |= setInt(t->second, "unlocked", 0);
+                continue;
+            }
             for (int p = 1; p <= 2; ++p)
                 for (const char* d : kDiffs)
                     changed |= setInt(vm.globalTags[K("p" + std::to_string(p) + "_career_band" + std::to_string(kBand) + "_" + d + nm->str)],

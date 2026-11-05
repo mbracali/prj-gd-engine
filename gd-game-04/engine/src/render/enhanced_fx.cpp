@@ -504,6 +504,9 @@ void main() {
 uniform sampler2D sTex;
 float tap(vec2 uv) {
     vec3 c = texture(sTex, uv).rgb;
+    // A NaN or inf texel (a shader's) would make the mean, the exposure and,
+    // through the eased history, every later frame NaN: a black screen.
+    if (any(isnan(c)) || any(isinf(c))) c = vec3(0.0);
     if (uPass.x > 0.5) return c.r;
     return log(max(luma(toLinear(min(c, vec3(64.0)))), 1e-4));
 }
@@ -524,6 +527,8 @@ void main() {
     float avg = exp(texture(sLum, vec2(0.5)).r);
     float target = exp2(clamp(0.5 * log2(0.012 / max(avg, 1e-4)), -0.5, 0.5));
     float prev = texture(sPrev, vec2(0.5)).r;
+    if (isnan(target) || isinf(target)) target = 1.0;
+    if (isnan(prev) || isinf(prev)) prev = target;
     fragColor = vec4(mix(prev, target, uPass.x), 0.0, 0.0, 1.0);
 }
 #else

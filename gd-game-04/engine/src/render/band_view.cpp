@@ -400,6 +400,7 @@ void BandView::draw(const venue::CamPose& cam, const std::vector<Instance>& inst
             if (!l.createdAtStart && !(l.createdOn && show.flag(l.createdOn))) continue;
             const venue::LightState& s = lights[i];
             if (s.intensity <= 0) continue;
+            if (l.type == venue::LightType::Prt) continue;  // its SH terms only reach GH3's shaders
             if (l.type == venue::LightType::Ambient) {
                 for (size_t k = 0; k < 3; ++k) lu.ambient[k] += s.color[k] * s.intensity;
                 continue;

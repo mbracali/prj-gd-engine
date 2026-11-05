@@ -287,7 +287,10 @@ runs first), `func = quickplay_start_song`, flow_state **quickplay_play_song_fs*
   random guitarist (character_id, style 1, outfit 1); random guitar from
   Bonus_Guitars + Secret_Guitars with `unlocked_for_purchase` (GetGlobalTags,
   AddArrayElement); random venue (get_total_num_venues / get_valid_venue_index
-  -> current_level); `start_song device_num`.
+  -> current_level: the venues whose save-wide `venue_<zone>` tag is
+  unlocked, over LevelZoneArray, which lists `viewer` = z_viewer, a zone with
+  no scene; The Glitches' unlock leaves the debug_only zones locked so the
+  random venue is never it); `start_song device_num`.
 - `start_song` (guitar_gems.qb) [C]: mark_unsafe_for_shutdown;
   set_rich_presence_game_mode; xenon_singleplayer_session_init (CheckForSignin
   false -> nothing on Xenon); **Load_Venue** (GetPakManCurrentName map=zones;

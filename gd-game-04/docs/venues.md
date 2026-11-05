@@ -251,14 +251,25 @@ lerp(1, shadow map, c178.w)); the "lightmap" is the material's last
 texture, m_sampShadowMap, sampled with texcoord set 1, a shadow term on the
 dynamic lights, not a light map.
 
+The scalar ops with a constant (MUL / ADD / SUB_CONST_0 / 1) take src3's
+negate and the constants' abs flag on both of their operands, the constant
+and the temporary (as Xenia's shader translator) [C: the hair shader's
+edge factor is (N.V - m_psEdgeSpecularStart) / (End - Start) only so].
+gd04 used to negate the constant alone: HairShader's specular exponent
+fell to m_psEdgeSpecularPower (0.1 on the bassist and the singer) over the
+whole head and their hair burnt white under the band lights. MUL, MAD,
+DP4 / DP3 / DP2ADD, DST.y, MULS, MUL_PREV(2) and MUL_CONST follow Shader
+Model 3: +-0 x anything (inf, NaN) = +0 (as Xenia's translators); without
+it the hair's log2(0) x 0 made NaN pixels.
+
 ### Lights  [C: the light manager, read with a VMX128 decoder over Ghidra's `.word`s]
 
 The per-object registers c176..c191 are filled by 823DA990 (the object's
 light set) and uploaded by 823DB168 before each draw (Function_822B6E08
 only builds the shadow cascades c140..c148) [C]:
 
-- **A light** (822BE020; defaults 822B7998): `Type` point / spot / ambient
-  / PRT, anything else (`dir`, none) directional; `lightcolor` (0..1),
+- **A light** (822BE020; defaults 822B7998): `Type` point (2) / spot (3)
+  / prt (4) / ambient (5), anything else (`dir`, none) directional (1); `lightcolor` (0..1),
   `intensity` (default 1), `specularintensity` (1), `shadowintensity`
   (`shadowdensity`, 1), `attenstart` / `attenend` (7.5 / 15), `hotspot` /
   `field` (45); it shines along rotationquat x (0, -1, 0) (z_dive's
@@ -288,6 +299,12 @@ only builds the shadow cascades c140..c148) [C]:
   C x 4/17, SH1..3 += C x 8/17 x l (C: colour x intensity, x attenuation
   for point lights; spot lights always into the SH, x clamp((P - pos) . dir,
   0, 1), no cone). **Ambient** lights sum into c176 (colour x intensity).
+- **PRT** lights (z_soundcheck's `Char_PRT`, the menus' band light) carry
+  `coeff0`..`coeff8` ([r, g, b, -], stored at +0x70 + 0x10 i, 822BE6A0);
+  the light set adds coeff0..3 x the candidate's intensity to SH0..3
+  (823DAFA8: no colour, no slot), for objects whose record has the SH bit
+  (+0x9c bit 24, which also gates 823DA668) [C]. gd04 adds them for every
+  object (the characters are the only ones lit by one).
 - The light show's snapshots (light_setparams 821B4950) set r g b / 255,
   intensity, specularintensity, shadowintensity; FarAttenStart / End are
   not applied (ApplyLightFarAtten*Change are empty scripts) [C].

@@ -30,6 +30,9 @@ All notable changes for players. Versions follow SemVer; release tags are
 ### Fixed
 - The results magazine shows your own character, outfit and style (each body's Mag_Photo by its asset context), for every character in 1P and 2P.
 - Switching characters on the character select is smooth: the next characters are read ahead, a new one loads in the background while the old one stays up, and its textures upload a few milliseconds a frame (frames of 150-300 ms before).
+- The bassist's and the singer's hair no longer turns white under the stage lights: GH3's hair shader read one of its terms with the wrong sign, and its multiplications now treat 0 x anything as 0 like the console's GPU.
+- Quick play no longer picks the empty test venue (a black venue for the whole song); The Glitches' unlock left it open.
+- The menus' characters (character select, the hub) take the soundcheck stage's PRT light as GH3 does instead of a stray top light.
 - The keyboard's Enter finishes every name entry (the high score name after a song, the band name, a new cheat), as in the other games; it still selects in the menus.
 - Every pill of the help bar takes a mouse click (SELECT, BACK, DELETE, ACCEPT, UP/DOWN...), and the pause menu takes the mouse during a song.
 - The guitarists' fret hands grip the neck from below with the fingers on the strings: GH3's own IK, decoded from the game (GD04-066).

@@ -147,7 +147,8 @@ void fillMaterialConstants(const scene::Material& m, float alphaRef, MaterialCon
 LightIn lightIn(const venue::Light& l, const venue::LightState& s) {
     LightIn li;
     li.type = l.type == venue::LightType::Ambient ? LightIn::Ambient : l.type == venue::LightType::Directional ? LightIn::Directional
-              : l.type == venue::LightType::Point ? LightIn::Point : LightIn::Spot;
+              : l.type == venue::LightType::Point ? LightIn::Point : l.type == venue::LightType::Prt ? LightIn::Prt : LightIn::Spot;
+    for (int k = 0; k < 4; ++k) li.prt[k] = {l.prt[k][0], l.prt[k][1], l.prt[k][2]};
     li.pos = {l.pos[0], l.pos[1], l.pos[2]};
     li.dir = {l.dir[0], l.dir[1], l.dir[2]};
     li.color = {s.color[0], s.color[1], s.color[2]};
@@ -224,6 +225,12 @@ void lightObject(const LightIn* lights, size_t count, const gfx::Vec3& p, Object
             break;
         }
         case LightIn::Ambient: amb = amb + l.color * c.inten; break;
+        case LightIn::Prt:
+            // 823DAFA8: SH0..3 += coeff0..3 x the candidate's intensity (no
+            // colour, no slot; for objects whose record has the SH bit, as
+            // the characters') [C].
+            for (int k = 0; k < 4; ++k) sh[k] = sh[k] + l.prt[k] * c.inten;
+            break;
         }
     }
     out.set(kRegAmbient, amb.x, amb.y, amb.z, 1);

@@ -4,6 +4,7 @@
 
 #include <cmath>
 #include <stdexcept>
+#include <string>
 
 #include "data/disc.h"
 #include "data/pak.h"
@@ -63,13 +64,21 @@ void readNodes(Venue& v, const qb::Array& arr) {
         Light l;
         l.name = n.name;
         l.group = n.lightGroup;
-        // The light manager's light (822BE020; defaults 822B7998): Type point /
-        // spot / ambient, anything else directional; intensity 1, attenstart
-        // 7.5, attenend 15, hotspot / field 45; the direction it shines =
-        // rotationquat x (0, -1, 0) [C: docs/venues.md "Lights"].
+        // The light manager's light (822BE020; defaults 822B7998): Type point
+        // (2) / spot (3) / prt (4) / ambient (5), anything else directional
+        // (1); intensity 1, attenstart 7.5, attenend 15, hotspot / field 45;
+        // the direction it shines = rotationquat x (0, -1, 0) [C: docs/venues.md "Lights"].
         const uint32_t t = n.type;
         l.type = t == K("ambient") ? LightType::Ambient : t == K("point") ? LightType::Point : t == K("spot") ? LightType::Spot
-                                                                                                              : LightType::Directional;
+                 : t == K("prt")   ? LightType::Prt
+                                   : LightType::Directional;
+        // A prt light: coeff0..coeff8 ([r, g, b, -] each) into the record at
+        // +0x70 + 0x10 i; the light set reads coeff0..3 [C 822BE6A0..822BE7FC].
+        if (l.type == LightType::Prt)
+            for (int i = 0; i < 4; ++i)
+                if (const qb::Value* c = st.find(K(("coeff" + std::to_string(i)).c_str()));
+                    c && c->type == qb::Type::Array && c->arr && c->arr->values.size() >= 3)
+                    for (size_t k = 0; k < 3; ++k) l.prt[i][k] = c->arr->values[k].number();
         l.pos = n.pos;
         Quat q = n.rot;
         if (const qb::Value* rq = st.find(K("rotationquat")); rq && rq->type == qb::Type::Array && rq->arr && rq->arr->values.size() == 4)

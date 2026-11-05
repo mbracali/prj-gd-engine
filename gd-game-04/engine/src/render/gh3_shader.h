@@ -74,7 +74,7 @@ enum : int {
 // A light as the light manager sees it (the light record 822BE020 fills,
 // with the light show's live values) [C: docs/venues.md "Lights"].
 struct LightIn {
-    enum Type : uint8_t { Ambient, Directional, Point, Spot } type = Directional;
+    enum Type : uint8_t { Ambient, Directional, Point, Spot, Prt } type = Directional;
     gfx::Vec3 pos, dir{0, -1, 0};  // dir: where the light shines
     gfx::Vec3 color{1, 1, 1};      // lightcolor (0..1), not scaled
     float intensity = 1, specular = 1, shadow = 1;
@@ -83,6 +83,7 @@ struct LightIn {
     bool shadowLight = false;      // ranked x 50000
     gfx::Vec3 boxCenter, boxHalf{1e9f, 1e9f, 1e9f};
     float groupScale = 1;          // the group's intensity x the fade weight x the modulation (1)
+    gfx::Vec3 prt[4];              // Prt: its SH terms (coeff0..3)
 };
 LightIn lightIn(const venue::Light& l, const venue::LightState& s);
 // The light group rule of the candidate query (822BB680): the object's
@@ -99,7 +100,8 @@ bool groupLights(uint32_t lightGroup, uint32_t objectGroup);
 // the next three take the specular slots (c180..c185) and go into the L1
 // spherical harmonics (4/17, 8/17 l) with every other directional, point
 // (attenuated) and spot light (by the unnormalised axis distance); ambient
-// lights sum into c176.
+// lights sum into c176; a prt light adds its own coeff0..3 x intensity to
+// the SH (no slot).
 void lightObject(const LightIn* lights, size_t count, const gfx::Vec3& p, ObjectConstants& out);
 
 // One translated template.
