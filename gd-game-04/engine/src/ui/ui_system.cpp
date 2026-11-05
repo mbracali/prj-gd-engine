@@ -749,6 +749,10 @@ void UiSystem::startMorph(Element& e, const qb::Struct& p) {
         }
     }
     if (const qb::Value* v = qs::Vm::param(p, K("scale"))) m.scale = readPair(*v, m.sx1, m.sy1);
+    // The relative_scale flag: the scale times the element's own
+    // (jiggle_text_array_elements' random 0.7..1.3) [C flag parsed at
+    // 0x8221A738; I: its use].
+    if (m.scale && qs::Vm::flag(p, K("relative_scale"))) m.sx1 *= e.sx, m.sy1 *= e.sy;
     if (const qb::Value* v = qs::Vm::param(p, K("relative_scale"))) {
         float a = 1, b = 1;
         if (readPair(*v, a, b)) m.scale = true, m.sx1 = e.sx * a, m.sy1 = e.sy * b;
@@ -1319,9 +1323,11 @@ bool UiSystem::member(qs::ScriptRun& run, uint32_t obj, uint32_t method, qb::Str
     if (method == K("GetTags")) {
         if (!e) return false;
         if (qb::Struct* l = locals(run)) {
-            // The element's id comes with its tags [I: retail_menu_focus
-            // without an id recolours `<id>` after its gettags].
-            if (!qs::Vm::param(e->tags, K("id"))) qs::Vm::set(*l, K("id"), qs::Vm::makeKey(e->id));
+            // The element's id comes with its tags when the script has none
+            // [I: retail_menu_focus without an id recolours `<id>` after its
+            // gettags; jiggle_text_array_elements' gettags on each letter
+            // keeps its own id (the container) for explode_text_array_elements <...>].
+            if (!qs::Vm::param(e->tags, K("id")) && !qs::Vm::param(*l, K("id"))) qs::Vm::set(*l, K("id"), qs::Vm::makeKey(e->id));
             for (const qb::Item& it : e->tags.items) qs::Vm::set(*l, it.name, it.value);
         }
         return true;

@@ -405,7 +405,9 @@ from `_lightshow_notes`, crowd, particles) and the band (render/band_*:
 the performance array's Band_ChangeStance / PlayAnim / PlayFacialAnim /
 WalkToNode, the C hand / drum iterators). The song ends into GH3's own
 GuitarEvent_SongWon / GuitarEvent_SongFailed (front_end.cpp), so the end
-is the original's. **None of the GH3 song scripts below runs.**
+is the original's; a won song keeps drawing (venue, highway until
+disable_highway) under GuitarEvent_SongWon_Spawned and the songwon
+transition until kill_gem_scroller (docs/flow.md section 12). **None of the GH3 song scripts below runs.**
 
 **Scripts not run, with an effect the port therefore lacks** (L) or
 re-implements natively (R) [C scripts]:
@@ -423,11 +425,16 @@ re-implements natively (R) [C scripts]:
   the intro cameras R), battlemode_init / bossbattle_init (R),
   practicemode_init (training: not supported), the boss intro audio
   GH_SFX_Preload_Boss_Intro_Audio and the boss helper screen (L),
+  play_intro's sounds (R, ui/song_hooks: Song_Intro_Highway_Up_SFX_Waiting
+  at highway_start_time, Notes_Ripple_Up_SFX per player at
+  button_ripple_start_time, Song_Intro_Kick_SFX_Waiting at hud_start_time,
+  from current_intro = the intro transition's sequence props),
   Progression_SetProgressionNodeFlags (node flags: R where venues need them).
 - gem_scroller's iterators: gem_iterator x4, fretbar_iterator x3,
   check_buttons_fast, button_checker, check_for_star_power,
   update_score_fast, check_note_hold, the band iterators, lightshow_iterator,
-  cameracuts_iterator, win_song, faceoff_init (R, as the C they call);
+  cameracuts_iterator, win_song (R: its end time and movie, ui/song_screen
+  and ui/song_hooks), faceoff_init (R, as the C they call);
   faceoff_volumes_init (the guitar track at 100 % for both, the face-off
   volume switching by section: R in part, mixer guitar mute only);
   event_iterator + notemap_startiterator x8 over `<song>_scripts`, `_anim`,

@@ -94,8 +94,21 @@ public:
     bool start(const Disc& disc, const Globals& g, const SongInfo& song, const SongSetup& setup, bool autoplay, bool noFail, Mixer& mixer,
                std::string& error, TextureCache* textures = nullptr);
     void handle(const InputEvent& e);
-    // Advances and draws one frame; false once the song is over.
+    // Advances and draws one frame; false once the song is over (a won
+    // song with holdAfterWin goes on until the caller ends it).
     bool frame(Canvas& canvas, Mixer& mixer, const TextureCache* textures);
+    // The song played to its end: song_won was due (end marker + Song_Win_Delay) [C script win_song].
+    bool won() const { return won_; }
+    // The end marker reached (win_song's first wait over; a walk's forced end too).
+    bool endReached() const { return forcedEnd_ || lastMs_ >= songEndMs_; }
+    double songEndMs() const { return songEndMs_; }
+    // GH3's scripts run the end: a won song keeps playing and drawing under
+    // them until kill_gem_scroller (the app ends it).
+    void setHoldAfterWin(bool on) { holdAfterWin_ = on; }
+    // The end's teardown: destroy_hud (the HUD), disable_highway (the gem
+    // containers and HUD at alpha 0) [C scripts play_outro, disable_bg_viewport].
+    void hideHud() { hudHidden_ = true; }
+    void hideHighway() { highwayHidden_ = hudHidden_ = true; }
     const PlayerStats& stats() const { return player_->stats(); }
     double songMs() const { return lastMs_; }
     Hud2D& hud() { return hud_; }
@@ -112,6 +125,8 @@ public:
     const Highway2D& highway2() const { return highway2_; }
     double startMs() const { return startMs_; }
     const std::string& introCameras() const { return introCameras_; }
+    // The intro transition's play_intro props (current_intro); empty: no play_intro.
+    const std::string& introProps() const { return introProps_; }
     const Match& match() const { return *match_; }
     const Hud2P& hud2p() const { return hud2p_; }
     const Chart& chart() const { return chart_; }
@@ -159,7 +174,6 @@ private:
     const TextureCache* textures_ = nullptr;
     std::array<uint8_t, 2> shownHeld_{};
     std::array<double, 2> lastHammer_{-1e9, -1e9};  // Match::BattleSide::highwayPushAt last seen
-    double endMs_ = 0;
     double stepMs_ = 0;      // the judge's own clock (60 Hz steps)
     double lastMs_ = -1e9;
     // The live input between steps, per player.
@@ -175,6 +189,7 @@ private:
     double leadInMs_ = 3000;  // the intro transition's time before the music
     std::string introCameras_ = "cameras_fastintro";
     bool introFast_ = true;
+    std::string introProps_ = "fastintro_sequence_props";
     bool outro_ = false;
     std::string outroPrefix_;
 public:
@@ -195,7 +210,10 @@ public:
     double lastMs() const { return lastMs_; }
     double transitionMs() const { return transitionMs_; }
 private:
-    bool forcedFail_ = false;
+    bool forcedFail_ = false, forcedEnd_ = false, practiceEnd_ = false;
+    double songEndMs_ = 0, winDelayMs_ = 2000;  // get_song_end_time, Song_Win_Delay (ms)
+    bool won_ = false, holdAfterWin_ = false, reported_ = false;
+    bool highwayHidden_ = false, hudHidden_ = false;
     // The venue behind the highway (render/venue_stage.h; GD04_NO_VENUE=1: none).
     std::shared_ptr<VenuePreload> preload_;  // owns the preloaded stage's globals and chart: before venue_
     std::unique_ptr<VenueStage> venue_;

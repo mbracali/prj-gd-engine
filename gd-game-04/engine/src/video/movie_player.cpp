@@ -46,11 +46,12 @@ std::string avError(int code) {
     return text;
 }
 
-// One decoded picture: tightly packed YUV 4:2:0 planes.
+// One decoded picture: tightly packed YUV 4:2:0 planes (and a full-size
+// alpha plane for Bink's alpha videos, e.g. Fret_Flames; empty: opaque).
 struct Frame {
     double ms = 0;  // presentation time from the start of the video
     int w = 0, h = 0;
-    std::vector<uint8_t> y, u, v;
+    std::vector<uint8_t> y, u, v, a;
 };
 
 void copyPlane(std::vector<uint8_t>& dst, const uint8_t* src, int pitch, int w, int h) {
@@ -255,7 +256,8 @@ struct MoviePlayer::Impl {
                 logDecodeError(r);
                 return true;
             }
-            if (frame->format != AV_PIX_FMT_YUV420P && frame->format != AV_PIX_FMT_YUVJ420P) {
+            const bool alpha = frame->format == AV_PIX_FMT_YUVA420P;
+            if (frame->format != AV_PIX_FMT_YUV420P && frame->format != AV_PIX_FMT_YUVJ420P && !alpha) {
                 SDL_Log("video %s: unexpected picture format %d", name.c_str(), frame->format);
                 av_frame_unref(frame);
                 return false;
@@ -268,6 +270,7 @@ struct MoviePlayer::Impl {
             copyPlane(f.y, frame->data[0], frame->linesize[0], f.w, f.h);
             copyPlane(f.u, frame->data[1], frame->linesize[1], cw, ch);
             copyPlane(f.v, frame->data[2], frame->linesize[2], cw, ch);
+            if (alpha) copyPlane(f.a, frame->data[3], frame->linesize[3], f.w, f.h);
             av_frame_unref(frame);
             if (!sink(std::move(f))) return false;
         }
@@ -582,7 +585,7 @@ bool MoviePlayer::takeFrame(double ms, std::vector<uint8_t>& rgba, int& w, int& 
             o[0] = uint8_t(std::clamp(Y + 1.402f * V, 0.0f, 255.0f));
             o[1] = uint8_t(std::clamp(Y - 0.344136f * U - 0.714136f * V, 0.0f, 255.0f));
             o[2] = uint8_t(std::clamp(Y + 1.772f * U, 0.0f, 255.0f));
-            o[3] = 255;
+            o[3] = due->a.empty() ? 255 : due->a[size_t(y) * size_t(w) + size_t(x)];
         }
     return true;
 }

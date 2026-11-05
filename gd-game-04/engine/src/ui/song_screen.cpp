@@ -32,6 +32,10 @@ struct IntroTransition {
     double ms = 3000;
     std::string cameras = "cameras_fastintro";
     bool fast = true;
+    // The transition's play_intro: {fast} fastintro_sequence_props, {practice}
+    // practice_sequence_props, {} intro_sequence_props; none for Immediate [C
+    // data Common_*_Transition, script play_intro].
+    std::string introProps = "fastintro_sequence_props";
 };
 
 IntroTransition introTransition(const Globals& g, uint32_t key) {
@@ -43,6 +47,10 @@ IntroTransition introTransition(const Globals& g, uint32_t key) {
         if (key == qbkey::key(n)) name = n;
     if (key == qbkey::key("debugintro")) name = "Intro";
     t.fast = name == "FastIntro";
+    t.introProps = name == "FastIntro" || name == "RestartEncore" || name == "RestartBoss" ? "fastintro_sequence_props"
+                   : name == "Practice"                                                  ? "practice_sequence_props"
+                   : name == "Immediate"                                                 ? ""
+                                                                                         : "intro_sequence_props";
     if (const qb::Value* d = g.find(qbkey::key("Default_" + name + "_Transition")); d && d->st)
         if (const qb::Value* tm = d->st->find(qbkey::key("time"))) t.ms = tm->number();
     if (const qb::Value* c = g.find(qbkey::key("Common_" + name + "_Transition")); c && c->st)
@@ -121,6 +129,7 @@ bool SongScreen::start(const Disc& disc, const Globals& g, const SongInfo& song,
     leadInMs_ = intro.ms;
     introCameras_ = intro.cameras;
     introFast_ = intro.fast;
+    introProps_ = intro.introProps;
     if (setup.transition) SDL_Log("song: transition %s, %.0f ms (%s)", introCameras_.c_str(), leadInMs_, intro.fast ? "fast" : "full");
     difficulty_ = std::clamp(setup.difficulty[0], 0, 3);
     twoPlayers_ = setup.mode != GameMode::Solo;
@@ -173,7 +182,24 @@ bool SongScreen::start(const Disc& disc, const Globals& g, const SongInfo& song,
         error = song.name + " has no " + difficultyName(difficulty_) + " chart for this mode";
         return false;
     }
-    endMs_ = match_->lastNoteEndMs() + 3000.0;
+    // win_song: get_song_end_time = the latest end (time + length of the last
+    // entry) of the expert guitar and rhythm arrays (and the co-op ones when
+    // use_coop_notetracks), 2 ms with none; it waits there (the gem
+    // scroller's starttime is the transition's start), then Song_Win_Delay
+    // seconds, then song_won [C scripts win_song, get_song_end_time,
+    // get_song_end_time_for_array, start_gem_scroller; data Song_Win_Delay = 2].
+    songEndMs_ = 2.0;
+    for (Part p : {Part::Guitar, Part::Rhythm, Part::GuitarCoop, Part::RhythmCoop}) {
+        if ((p == Part::GuitarCoop || p == Part::RhythmCoop) && !song.useCoopNotetracks) continue;
+        const std::vector<ChartNote>& n = chart_.notes(p, 3);
+        if (!n.empty()) songEndMs_ = std::max(songEndMs_, double(n.back().time) + double(n.back().length));
+    }
+    // A chart without expert arrays: the port's own notes' end [I: GH3's are all there].
+    songEndMs_ = std::max(songEndMs_, match_->lastNoteEndMs());
+    {
+        const qb::Value* d = g.find(qbkey::key("Song_Win_Delay"));
+        winDelayMs_ = (d && (d->type == qb::Type::Int || d->type == qb::Type::Float) ? double(d->number()) : 2.0) * 1000.0;
+    }
     if (twoPlayers_) hud2pOk_ = hud2p_.init(g, *match_);
     // Each player's highway: its character's sys_<name>_1_highway material
     // (player_status.highway_material, set by create_guitarist), else the
@@ -218,9 +244,8 @@ bool SongScreen::start(const Disc& disc, const Globals& g, const SongInfo& song,
         error = song.name + ": cannot start the audio at " + std::to_string(int(startMs_)) + " ms";
         return false;
     }
-    endMs_ = std::max(endMs_, double(stream->length()) * 1000.0 / std::max(1, stream->sampleRate()));
     // Practice: the song finishes at the section's end (practice_update ends the screen Song_Win_Delay later) [C scripts].
-    if (setup.endMs > 0) endMs_ = std::min(endMs_, setup.endMs);
+    if (setup.endMs > 0) songEndMs_ = setup.endMs, practiceEnd_ = true;
     // Six channels: guitar L R (muted on a miss), rhythm L R, song L R.
     std::vector<Mixer::Track> tracks(6);
     for (int i = 0; i < 6; ++i) tracks[size_t(i)].pan = (i % 2) ? 1.0f : -1.0f;
@@ -294,8 +319,10 @@ void SongScreen::tick(double nowMs, Mixer& mixer) {
     // any frame rate plays the same (guidelines: frame-rate independence).
     while (stepMs_ + kStepMs <= nowMs) {
         stepMs_ += kStepMs;
-        // Decided (a fail, a KO, a boss beaten): the gem scroller stops [C kill_gem_scroller].
-        if (match_->outcome() != Match::Outcome::None) continue;
+        // Decided (a fail, a KO, a boss beaten): the gem scroller stops [C
+        // kill_gem_scroller]. Won: nothing is left to judge (a walk's forced
+        // end stops the judge too); play_outro kills the song's iterators [C].
+        if (match_->outcome() != Match::Outcome::None || won_) continue;
         std::array<FrameInput, 2> in{};
         for (size_t p = 0; p < 2; ++p) {
             in[p].frets = held_[p];
@@ -385,16 +412,20 @@ bool SongScreen::frame(Canvas& canvas, Mixer& mixer, const TextureCache* texture
     static const double endAt = SDL_getenv("GD04_END_AT") ? std::atof(SDL_getenv("GD04_END_AT")) : walkEndMs_;
     static const double failAt = SDL_getenv("GD04_FAIL_AT") ? std::atof(SDL_getenv("GD04_FAIL_AT")) : walkFailMs_;
     if (failAt >= 0 && now >= failAt && finishedAt_ < 0) forcedFail_ = true, finishedAt_ = now - 2000.0;
-    if (endAt >= 0 && now >= endAt && finishedAt_ < 0) finishedAt_ = now - 2000.0;
-    if (now >= endMs_ || (match_->outcome() != Match::Outcome::None && finishedAt_ < 0)) {
-        if (finishedAt_ < 0) finishedAt_ = now;
-    }
+    // A walk's forced end: the song's end marker and its delay at once.
+    if (endAt >= 0 && now >= endAt && finishedAt_ < 0) forcedEnd_ = true;
+    if (match_->outcome() != Match::Outcome::None && finishedAt_ < 0) finishedAt_ = now;
+    // Played to the end: song_won at the end marker + Song_Win_Delay [C script
+    // win_song]; practice: the section's end, then the screen's end 2 s later.
+    bool justWon = false;
+    if (finishedAt_ < 0 && practiceEnd_ && now >= songEndMs_) finishedAt_ = now;
+    if (finishedAt_ < 0 && (forcedEnd_ || now >= songEndMs_ + winDelayMs_)) won_ = justWon = true, finishedAt_ = now;
     // The song's end: GH3 plays the SongWon / SongLost transition over the
     // venue (play_outro: the HUD and the gems gone; the band's win / lose
     // stance, cameras_win / cameras_lose) for its time, then the results [C
-    // data Common_SongWon_Transition]. The song ends to GH3's flow 2 s after
-    // as before (its transition waits the rest); App keeps drawing the venue
-    // meanwhile (drawOutro).
+    // data Common_SongWon_Transition]. A won song (song_won) starts it with
+    // GuitarEvent_SongWon_Spawned's Transition_Play songwon; the others as
+    // they are decided.
     if (finishedAt_ >= 0 && venue_ && !outro_) {
         outro_ = true;
         const bool lost = failed();
@@ -404,8 +435,14 @@ bool SongScreen::frame(Canvas& canvas, Mixer& mixer, const TextureCache* texture
         const bool p1Won = o == Match::Outcome::P1Wins || (o == Match::Outcome::None && match_->winnerAtEnd() == 0);
         venue_->outro(now, !lost, versus, p1Won, m == GameMode::Boss);
     }
-    const bool more = finishedAt_ < 0 || now < finishedAt_ + 2000.0;
-    if (!more && twoPlayers_) {
+    // Won with GH3's scripts on (ui/song_hooks): the song goes on under them
+    // (the venue, the highway until disable_highway) until kill_gem_scroller;
+    // alone (--song): over 2 s later, as a decided song; decided songs and
+    // practice end 2 s later, App drawing the venue meanwhile (drawOutro).
+    const bool more = (won_ && holdAfterWin_) || finishedAt_ < 0 || now < finishedAt_ + 2000.0;
+    const bool report = (!more || justWon) && !reported_;
+    if (report) reported_ = true;
+    if (report && twoPlayers_) {
         // The two players' numbers and the mode's (walks and the self-test read them).
         const Match::Counters& k = match_->counters();
         const Hud2P::Counters& h = hud2p_.counters();
@@ -421,7 +458,7 @@ bool SongScreen::frame(Canvas& canvas, Mixer& mixer, const TextureCache* texture
                 gameModeName(match_->mode()), int(match_->outcome()), match_->winnerAtEnd() + 1, k.raiseAxe, k.coopActivations, k.forcedMisses[1],
                 (unsigned long long)h.scoreChanges, (unsigned long long)h.needleChanges, (unsigned long long)h.leadChanges,
                 (unsigned long long)h.cardsShown, (unsigned long long)h.attackTexts, (unsigned long long)h.missingTextures);
-    } else if (!more) {
+    } else if (report) {
         const Hud2D::Counters& h = hud_.counters();
         SDL_Log("hud: score %llu, needle %llu, tubes %llu, multiplier %llu, streak bar in %llu / out %llu, dial flips %llu, combos %llu, "
                 "danger %llu, star ready %llu / on %llu / off %llu, flames %llu, missing textures %llu",
@@ -480,32 +517,30 @@ void SongScreen::draw(Canvas& c, double now, const TextureCache* textures) {
     }
     const PlayerStats& st = player_->stats();
     char text[160];
-    if (outro_) return;  // play_outro: destroy_hud, the gems killed [C script]
+    // play_outro: destroy_hud, the gems killed [C script]; a won song's
+    // highway and HUD follow the scripts (hideHud / hideHighway).
+    if (outro_ && !won_) return;
     if (twoPlayers_ && highwayOk_ && textures) {
         // GH3's two highways (x_offset_p2 left / right) and the mode's HUD.
-        for (int p = 0; p < 2; ++p) {
+        for (int p = 0; p < 2 && !highwayHidden_; ++p) {
             Highway2D& hw = p == 0 ? highway_ : highway2_;
             hw.setEffects(effects(p, now));
             hw.draw(c, *textures, match_->track(p), match_->player(p), now + videoOffsetMs_, shownHeld_[size_t(p)]);
         }
-        if (hud2pOk_) hud2p_.draw(c, *textures, *match_, now);
+        if (hud2pOk_ && !hudHidden_) hud2p_.draw(c, *textures, *match_, now);
         intro_.draw(c, introText_, now);
         return;
     }
     const NoteTrack& track_ = match_->track(0);
     if (highwayOk_ && textures && !std::getenv("GD04_DEBUG_HIGHWAY")) {
-        highway_.draw(c, *textures, track_, *player_, now + videoOffsetMs_, shownHeld_[0]);
-        hud_.draw(c, *textures, now);
+        if (!highwayHidden_) highway_.draw(c, *textures, track_, *player_, now + videoOffsetMs_, shownHeld_[0]);
+        if (!hudHidden_) hud_.draw(c, *textures, now);
         intro_.draw(c, introText_, now);
         if (std::getenv("GD04_HUD_NUMBERS")) {  // development aid: the numbers behind the HUD
             std::snprintf(text, sizeof text, "%lld   x%d   streak %d", static_cast<long long>(st.score), st.multiplier(), st.currentRun);
             c.text(40, 680, 2, SDL_Color{255, 255, 255, 255}, text);
             std::snprintf(text, sizeof text, "rock %.2f  star %.0f%s", double(st.health), double(st.starPower), st.starPowerActive ? " ON" : "");
             c.text(1000, 680, 2, SDL_Color{255, 255, 255, 255}, text);
-        }
-        if (finishedAt_ >= 0) {
-            std::snprintf(text, sizeof text, "%s  %d / %d notes", st.failed ? "SONG FAILED" : "SONG COMPLETE", st.notesHit, int(track_.notes.size()));
-            c.textCentered(640, 200, 3, SDL_Color{255, 255, 255, 255}, text);
         }
         return;
     }

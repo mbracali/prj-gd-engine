@@ -161,6 +161,11 @@ public:
     // Called after PushGlobalTags (pop = false) / PopGlobalTags (pop = true)
     // of a section (the port's The Glitches hook).
     std::function<void(Vm&, uint32_t section, bool pop)> onTagSection;
+    // Called as a script starts (called, run or spawned), with its name and
+    // parameters: the port's natively drawn parts follow the scripts that
+    // drive GH3's (the song's end: Transition_CameraCut, destroy_hud,
+    // disable_highway, kill_gem_scroller).
+    std::function<void(uint32_t name, const qb::Struct& params)> onScriptEnter;
 
     // Code of a script global (tokenized once).
     std::shared_ptr<const CodeCache> code(uint32_t name);

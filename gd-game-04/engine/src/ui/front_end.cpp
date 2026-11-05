@@ -161,7 +161,7 @@ void FrontEnd::songEnded(const SongResult& r) {
 
 void FrontEnd::frame(Canvas& c, double dtMs) {
     sfx.update();
-    if (!songPlaying && !flow.paused) songClockMs += dtMs;
+    if (!songPlaying && !songOutro && !flow.paused) songClockMs += dtMs;
 
     // GD04_FLOWLOG=1: each flow state player 1 enters (ui_flow_manager_state[0]).
     static const bool flowLog = SDL_getenv("GD04_FLOWLOG") != nullptr;
@@ -178,7 +178,7 @@ void FrontEnd::frame(Canvas& c, double dtMs) {
     }
     // During a song GH3's scripts keep running (the attract mode's input
     // check, the end-of-song events) and their elements draw over it [C: one VM].
-    scene_->setSuspended(songPlaying);  // the menus' characters wait while the song's band plays
+    scene_->setSuspended(songPlaying || songOutro);  // the menus' characters wait while the song's band plays
     accum_ += dtMs;
     int steps = 0;
     while (accum_ >= kStepMs && steps < 8) {
@@ -189,7 +189,7 @@ void FrontEnd::frame(Canvas& c, double dtMs) {
         ++steps;
     }
     if (accum_ > kStepMs * 8) accum_ = 0;
-    if (!songPlaying) scene_->draw(c);
+    if (!songPlaying && !songOutro) scene_->draw(c);
     ui_->draw(c);
 }
 

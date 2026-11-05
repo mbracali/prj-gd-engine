@@ -777,6 +777,7 @@ bool Vm::callName(ScriptRun& run, uint32_t name, qb::Struct& params, bool& resul
             return v && *v && *v != '0';
         }();
         if (trace) SDL_Log("qscript: %.0f ms call %s (from %s)", clockMs_, qbkey::name(name).c_str(), qbkey::name(run.name).c_str());
+        if (onScriptEnter) onScriptEnter(name, params);
         Frame f;
         f.code = std::move(c);
         f.locals = std::make_shared<qb::Struct>(scriptParams(std::move(params)));
@@ -840,6 +841,7 @@ bool Vm::run(uint32_t name, const qb::Struct& params, bool* result, uint32_t obj
         return false;
     }
     if (const char* v = SDL_getenv("GD04_VMTRACE"); v && *v && *v != '0') SDL_Log("qscript: %.0f ms run %s", clockMs_, qbkey::name(name).c_str());
+    if (onScriptEnter) onScriptEnter(name, params);
     auto r = std::make_unique<ScriptRun>();
     r->id = nextId_++;
     r->name = name;
@@ -868,6 +870,7 @@ uint32_t Vm::spawn(uint32_t name, const qb::Struct& params, uint32_t spawnedBy) 
         if (unhandledNames_.insert(name).second) logOnce("UNHANDLED spawn " + qbkey::name(name));
         return 0;
     }
+    if (onScriptEnter) onScriptEnter(name, params);
     auto r = std::make_unique<ScriptRun>();
     r->id = nextId_++;
     r->name = name;

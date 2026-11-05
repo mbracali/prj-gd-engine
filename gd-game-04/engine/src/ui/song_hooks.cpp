@@ -252,6 +252,13 @@ void SongHooks::begin(SongScreen& s) {
     pp_ = {};
     players_ = s.match().players();
     nowMs_ = s.startMs() - 3000;
+    winMovie_ = false;
+    // play_intro: current_intro = the transition's sequence props (fast:
+    // fastintro_sequence_props) [C scripts play_intro, Common_*_Transition];
+    // no play_intro (Immediate): no intro sounds.
+    introSfx_ = {};
+    if (s.introProps().empty()) introSfx_ = {true, true, true};
+    else if (const qb::Value* fi = fe_.vm().global(K(s.introProps().c_str()))) fe_.vm().setGlobal(K("current_intro"), *fi);
     const Match& m0 = s.match();
     lastCards_ = {}, lastFired_ = {}, lastByAttack_ = {};
     lastBolt_ = {-1e9, -1e9}, fxEnds_.clear();
@@ -430,6 +437,69 @@ void SongHooks::eventArrays(SongScreen&, double now) {
         } else {
             fe_.vm().logOnce("song hooks: no script or C function " + qbkey::name(x.script) + " (" + x.array + ")");
         }
+    }
+}
+
+void SongHooks::introAndEndMedia(SongScreen& s, double now) {
+    Vm& vm = fe_.vm();
+    // play_intro's scripts, each waiting for its current_intro time after
+    // current_starttime (GetSongTimeMs, every game frame); the intro itself
+    // (highway, buttons, HUD) is the native highway's and HUD's [C scripts
+    // play_intro, intro_highway_move, intro_buttonup_ripple, intro_hud_move]:
+    //  - intro_highway_move (not in performance mode offline) spawns
+    //    Song_Intro_Highway_Up_SFX_Waiting (highway_move_time - 1.5 s, then
+    //    SoundEvent Song_Intro_Highway_Up);
+    //  - intro_buttonup_ripple, per player: SoundEvent Notes_Ripple_Up_SFX
+    //    (unless button_ripple_per_button_time = 0);
+    //  - intro_hud_move (tutorial_disable_hud = 0) spawns
+    //    Song_Intro_Kick_SFX_Waiting (hud_move_time, then Song_Intro_Kick_SFX).
+    // None with the boss helper screen up or in the attract mode (play_intro returns) [C].
+    const qb::Value* ci = vm.global(K("current_intro"));
+    const bool noIntro = Vm::number(vm.global(K("show_boss_helper_screen")), 0) == 1 || Vm::number(vm.global(K("is_attract_mode")), 0) == 1;
+    if (ci && ci->st && !noIntro) {
+        auto at = [&](const char* field) { return s.startMs() + Vm::number(vm.globals().field(*ci->st, K(field)), 0); };
+        if (!introSfx_[0] && now > at("highway_start_time")) {
+            introSfx_[0] = true;
+            if (!(Vm::number(vm.global(K("cheat_performancemode")), 0) == 1 && Vm::number(vm.global(K("is_network_game")), 0) == 0))
+                spawnTracked(K("Song_Intro_Highway_Up_SFX_Waiting"), qb::Struct{}, "Song_Intro_Highway_Up_SFX_Waiting", k_.spawned);
+        }
+        if (!introSfx_[1] && now > at("button_ripple_start_time")) {
+            introSfx_[1] = true;
+            if (Vm::number(vm.globals().field(*ci->st, K("button_ripple_per_button_time")), 0) != 0)
+                for (int p = 0; p < players_; ++p) {
+                    qb::Struct e;
+                    Vm::set(e, K("event"), Vm::makeKey(K("Notes_Ripple_Up_SFX")));
+                    vm.run(K("SoundEvent"), e);
+                }
+        }
+        if (!introSfx_[2] && now > at("hud_start_time")) {
+            introSfx_[2] = true;
+            if (Vm::number(vm.global(K("tutorial_disable_hud")), 0) == 0)
+                spawnTracked(K("Song_Intro_Kick_SFX_Waiting"), qb::Struct{}, "Song_Intro_Kick_SFX_Waiting", k_.spawned);
+        }
+    }
+    // win_song at the end marker, before its Song_Win_Delay: KillMovie, then
+    // the You Rock movie preloaded into texture slot 1 (Fret_Flames; face-off:
+    // Player1_wins / Player2_wins by score), which GuitarEvent_SongWon_Spawned's
+    // wait_and_play_you_rock_movie starts [C scripts win_song, wait_and_play_you_rock_movie].
+    if (!winMovie_ && s.endReached() && s.match().outcome() == Match::Outcome::None) {
+        winMovie_ = true;
+        const Match& m = s.match();
+        std::string movie = "Fret_Flames";
+        if (players_ == 2 && (m.mode() == GameMode::FaceOff || m.mode() == GameMode::ProFaceOff)) {
+            const int64_t a = m.player(0).stats().score, b = m.player(1).stats().score;
+            if (a > b) movie = "Player1_wins";
+            else if (b > a) movie = "Player2_wins";
+        }
+        qb::Struct k;
+        Vm::set(k, K("textureslot"), Vm::makeInt(1));
+        vm.run(K("KillMovie"), k);
+        qb::Struct p;
+        Vm::set(p, K("movie"), Vm::makeString(movie));
+        Vm::set(p, K("textureslot"), Vm::makeInt(1));
+        Vm::set(p, K("texturepri"), Vm::makeInt(70));
+        for (const char* f : {"no_looping", "no_hold"}) p.items.push_back({0, Vm::makeKey(K(f))});
+        vm.run(K("PreLoadMovie"), p);
     }
 }
 
@@ -829,6 +899,7 @@ void SongHooks::step(SongScreen& s, double now) {
 
 void SongHooks::frame(SongScreen& s, double now) {
     if (!active_ || song_ != &s) return;
+    if (!paused_) introAndEndMedia(s, now);
     // The scripts' big bolts: adopted (hidden in the element tree, drawn by draw()).
     bolts_.erase(std::remove_if(bolts_.begin(), bolts_.end(), [this](const Bolt& b) { return !fe_.ui().find(b.id); }), bolts_.end());
     for (int p = 0; p < players_; ++p)
@@ -1163,6 +1234,14 @@ void SongHooks::addNatives() {
         if (qb::Struct* l = locals(run)) Vm::set(*l, K("uniqueid"), Vm::makeKey(keyOf(Vm::param(p, K("preferredid")))));
         return true;
     });
+    // StopStream: a won song's end (play_outro -> end_song at the songwon
+    // transition's start): the song's streams stop, its clock runs on [C
+    // scripts play_outro, end_song]; elsewhere the song's streams stop with
+    // the song's audio.
+    vm.addNative("StopStream", [this](Vm&, ScriptRun&, qb::Struct&) {
+        if (fe_.songOutro) mixer_.silence();
+        return true;
+    });
     vm.addNative("SafeGetUniqueCompositeObjectID", [](Vm&, ScriptRun& run, qb::Struct& p) {
         if (qb::Struct* l = locals(run)) Vm::set(*l, K("uniqueid"), Vm::makeKey(keyOf(Vm::param(p, K("preferredid")))));
         return true;
@@ -1179,7 +1258,7 @@ void SongHooks::addNatives() {
     // song's audio), destroy_highway_prepass's RemovePrepassViewport and
     // disable_bg_viewport's SetActiveCamera (the port draws one view),
     // destroy_crowd_models' ClearCrowdModelCams (render/crowd).
-    for (const char* n : {"ClearNoteMappings", "LightShow_SetActive", "LightShow_SetMapping", "StopStream", "RemovePrepassViewport",
+    for (const char* n : {"ClearNoteMappings", "LightShow_SetActive", "LightShow_SetMapping", "RemovePrepassViewport",
                           "SetActiveCamera", "ClearCrowdModelCams"})
         vm.addNative(n, [](Vm&, ScriptRun&, qb::Struct&) { return true; });
     // (CreateParticleSystem / _fast and DestroyParticlesByGroupID are App's,

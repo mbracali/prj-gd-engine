@@ -91,6 +91,10 @@ public:
     // Paused with Start in a song: GH3's pause menu runs over the frozen song
     // (gh3_start_pressed); songKill: its quit / restart killed the gem scroller.
     bool songPaused = false, songKill = false;
+    // A won song's end under GH3's scripts (GuitarEvent_SongWon_Spawned, the
+    // songwon transition): the song still drawn and its clock running, the
+    // scripts' You Rock over it, until kill_gem_scroller (songKill).
+    bool songOutro = false;
     uint32_t heldPattern = 0;  // frets held in the menus (GetHeldPattern)
     void startPressed();
     // is_attract_mode = 1 (the demo after 110 s on "press any button").

@@ -48,6 +48,9 @@ public:
     void play(std::unique_ptr<AudioSource> stream, std::vector<Track> tracks, double leadInMs);
     void stop();
     void setPaused(bool paused);
+    // The song's streams stopped (GH3's StopStream at the song's end) while
+    // the song clock runs on: the rest plays silent [C script end_song].
+    void silence() { silenced_ = true; }
     // The player's guitar channels heard (true) or muted after a miss (false).
     void setGuitarAudible(bool audible) { guitarTarget_.store(audible ? 1.0f : 0.0f); }
     // The second player's part (Track::guitar2), the same way.
@@ -113,6 +116,7 @@ private:
     std::atomic<uint64_t> anchorNs_{0};
     std::atomic<int64_t> leadIn_{0};
     std::atomic<bool> paused_{false};
+    std::atomic<bool> silenced_{false};
     double pausedTimeMs_ = 0;
     double frameMs_ = 0;
     uint64_t frameNs_ = 0;

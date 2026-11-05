@@ -72,6 +72,7 @@ void Mixer::play(std::unique_ptr<AudioSource> stream, std::vector<Track> tracks,
     tracks_ = std::move(tracks);
     ring_.assign(size_t(stream->channels()), std::vector<float>(size_t(kRing), 0.0f));
     written_ = 0, read_ = 0, sourceEnded_ = false, underruns_ = 0;
+    silenced_ = false;
     source_ = std::move(stream);
     leadInFrames_ = static_cast<int64_t>(leadInMs * rate_ / 1000.0);
     leadIn_ = leadInFrames_;
@@ -200,4 +201,5 @@ void Mixer::fill(int frames) {
     }
     guitarLag_[0].store(pitch_[0].lag()), guitarLag_[1].store(pitch_[1].lag());
     read_.store(r + n, std::memory_order_release);
+    if (silenced_.load()) std::fill(out_.begin(), out_.end(), 0.0f);
 }

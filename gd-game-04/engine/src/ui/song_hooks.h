@@ -78,6 +78,9 @@ private:
     void broadcast(const char* event, int player, qb::Struct data);
     uint32_t spawnTracked(uint32_t script, const qb::Struct& params, const char* counterName, std::map<std::string, uint64_t>& counter);
     void syncStatus(SongScreen& s, int p);
+    // The intro's and the song end's sounds and movie the port's native
+    // intro / end leave to it (play_intro's scripts, win_song's movie).
+    void introAndEndMedia(SongScreen& s, double nowMs);
     void buildInputArray(SongScreen& s, int p);
     void loadSongScripts(SongScreen& s);
     void eventArrays(SongScreen& s, double nowMs);
@@ -139,4 +142,6 @@ private:
         double born = 0;
     };
     std::vector<Bolt> bolts_;
+    std::array<bool, 3> introSfx_{};  // play_intro's highway / ripple / HUD sounds started
+    bool winMovie_ = false;           // win_song's movie preloaded
 };

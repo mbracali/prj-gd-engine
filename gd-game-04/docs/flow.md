@@ -397,6 +397,37 @@ interface the scripts expect from it. Fail: health <= 0 is decided in C
   highway, Destroy2DParticleSystem all, `LaunchGemEvent {event=kill_objects}`,
   KillSpawnedScript of every gameplay script) -> **quickplay_win_song_fs**;
   agora/net stats (stubs) [C].
+- Timeline of a won song (quickplay) [C scripts win_song,
+  get_song_end_time, GuitarEvent_SongWon_Spawned, waitAndKillHighway,
+  You_Rock_Waiting_Crowd_SFX, jiggle_text_array_elements,
+  explode_text_array_elements, Common_SongWon_Transition, play_outro,
+  end_song; data Song_Win_Delay = 2, Default_SongWon_Transition time 8000]:
+  T = get_song_end_time (the latest end, time + length, of the last entry of
+  the expert guitar / rhythm arrays, and the co-op ones with
+  use_coop_notetracks): KillMovie slot 1, PreLoadMovie Fret_Flames (face-off:
+  Player1_wins / Player2_wins by score) slot 1, texturepri 70, no_looping,
+  no_hold. T + 2 s: song_won: You_Rock_End_SFX, Fret_Flames starts, "You
+  Rock!" letters (z 95) jiggle every 0.075 s (random +-10 x, -10 y, rot 0..3,
+  scale x 0.7..1.3 relative), the songwon transition starts: play_win_anims,
+  play_outro (destroy_hud: the HUD goes; end_song: StopStream, the music
+  stops; kill_cameracuts_iterator), Transition_CameraCut cameras_win (8000
+  ms). T + 2.5 s: waitAndKillHighway: Crowd_Fast_Surge_Cheer,
+  disable_bg_viewport -> disable_highway (gem containers and HUD alpha 0: the
+  highway goes). T + 4 s: Crowd_Fast_Surge_Cheer + Medium_Crowd_Applause.
+  T + 5 s: the letters explode to the four corners over 1 s (ease_out, rot
+  0..180). T + 10 s: Transition_Wait over, action win_song ->
+  kill_gem_scroller -> newspaper; Crowd_Med_To_Good_SFX.
+- The port [C as above, I where marked]: ui/song_screen raises song_won at
+  T + Song_Win_Delay (won()); the app keeps the song drawn and its clock
+  running (FrontEnd::songOutro) under the scripts until kill_gem_scroller;
+  Vm::onScriptEnter maps destroy_hud / disable_highway to the native HUD /
+  highway; the venue's outro (VenueStage::outro: play_win_anims, cameras_win)
+  starts with song_won; ui/song_hooks preloads win_song's movie at T, and
+  StopStream in the end silences the song (Mixer::silence); the Bink alpha
+  movie (YUVA 4:2:0) is drawn with its alpha. A failed or decided song and
+  practice still end 2 s after the decision, the venue drawn alone under
+  GH3's transition (App::outroSong_) [I: GH3 disables the highway at once on
+  song_failed].
 - quickplay_win_song_fs Create `create_newspaper_menu` (1,369 lines: newspaper
   stats page; `GetGlobalTags Progression`, `GetGlobalTags user_options`,
   StopSoundsByBuss, new_menu newspaper_vmenu, np_create_options_menu) [C].

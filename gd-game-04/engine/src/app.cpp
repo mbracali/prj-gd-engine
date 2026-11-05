@@ -49,6 +49,7 @@
 #include <array>
 #include <initializer_list>
 #include "render/texture_cache.h"
+#include "script/vm.h"
 
 // The program's window and main loop. M0 (kickoff): the platform shell
 // only: the window, the disc (picked, remembered, opened), input, audio
@@ -83,6 +84,8 @@ private:
     void handleEvent(const SDL_Event& e);
     void frame();
     void songEvent(const InputEvent& ev);
+    // The song's numbers for GH3's end-of-song scripts (playerN_status).
+    FrontEnd::SongResult songResult() const;
     // -- the port's own screens and the mouse (ui/port_screens.h)
     // An action for the menus: the port's open screen, its entry keys on
     // GH3's main menu (yellow: GAMEPADS) and options (blue: ENHANCED), else
@@ -149,6 +152,7 @@ private:
     uint64_t lastFrameNs_ = 0;
     bool pauseSeen_ = false;  // GH3's PauseGame came after Start
     uint64_t pausedAtNs_ = 0;
+    uint64_t outroAtNs_ = 0;  // when a won song's end (songOutro) began
     std::string message_;
     bool running_ = true;
     int exitCode_ = 0;
@@ -1008,9 +1012,37 @@ void App::dispatchInput(const std::vector<InputEvent>& events) {
     }
 }
 
+FrontEnd::SongResult App::songResult() const {
+    FrontEnd::SongResult r;
+    const PlayerStats& st = song_->stats();
+    r.won = !song_->failed(), r.score = st.score, r.notesHit = st.notesHit, r.totalNotes = st.totalNotes;
+    r.bestRun = st.bestRun, r.phrasesHit = st.phrasesCaptured, r.phrasesTotal = song_->phraseCount();
+    r.baseScore = song_->baseScore(), r.health = st.health, r.starPower = st.starPower;
+    const Match& m = song_->match();
+    r.maxNotes = m.maxNotes(0);
+    if (m.players() == 2) {
+        const PlayerStats& s2 = m.player(1).stats();
+        r.twoPlayers = true;
+        r.p2.score = s2.score, r.p2.notesHit = s2.notesHit, r.p2.totalNotes = s2.totalNotes, r.p2.bestRun = s2.bestRun;
+        r.p2.phrasesHit = s2.phrasesCaptured, r.p2.phrasesTotal = m.phraseCount(1), r.p2.baseScore = m.baseScore(1);
+        r.p2.health = s2.health, r.p2.starPower = s2.starPower, r.p2.maxNotes = m.maxNotes(1);
+        r.battleKo = m.mode() == GameMode::Battle && (m.outcome() == Match::Outcome::P1Wins || m.outcome() == Match::Outcome::P2Wins);
+        for (int p = 0; p < 2; ++p) r.finalBlow[size_t(p)] = m.battle(p).finalBlow, r.cards[size_t(p)] = m.battle(p).cards;
+        // Face-off and battle never fail (battle's KO goes through song_failed: battleKo) [C 0x8210FD18].
+        if (m.mode() == GameMode::FaceOff || m.mode() == GameMode::ProFaceOff || m.mode() == GameMode::Battle) r.won = true;
+    }
+    return r;
+}
+
 // A button in a song: Start opens GH3's pause menu (gh3_start_pressed),
 // which then has the buttons until it resumes.
 void App::songEvent(const InputEvent& ev) {
+    // A won song's end: the buttons are the scripts' (kill_start_key_binding:
+    // no pause) [C script GuitarEvent_SongWon_Spawned].
+    if (front_ && front_->songOutro) {
+        menuAction(ev);
+        return;
+    }
     // The attract mode: any button goes to GH3's check_for_attract_mode_input.
     if (front_ && front_->attractMode()) {
         menuAction(ev);
@@ -1088,14 +1120,37 @@ void App::frame() {
         overlay();
         captureMenuScreenshot(canvas_, double(SDL_GetTicksNS() - startNs_) / 1e6, song_->songMs());
         canvas_.end();
+        if (front_ && front_->songOutro && !front_->songKill) {
+            // A request for a song (or a won song's end the scripts never
+            // tear down) ends it too [I: GH3's kill_gem_scroller always comes].
+            if (front_->songRequest.pending) front_->songKill = true;
+            else if (SDL_GetTicksNS() - outroAtNs_ > 60000000000ull) {
+                SDL_Log("song: no kill_gem_scroller 60 s after song_won; the song ends");
+                front_->songKill = true;
+            }
+        }
         if (front_ && front_->songKill) {
             // Quit or restart from the pause menu: the song is abandoned; a
-            // restart's start_gem_scroller follows as a new request.
-            front_->songKill = false, front_->songPaused = false, front_->songPlaying = false;
-            if (hooks_) hooks_->end(true);
+            // restart's start_gem_scroller follows as a new request. A won
+            // song's end (songOutro): the flow's kill_gem_scroller.
+            const bool outro = front_->songOutro;
+            front_->songKill = false, front_->songPaused = false, front_->songPlaying = false, front_->songOutro = false;
+            if (hooks_) hooks_->end(!outro);
             song_.reset();
             mixer_.stop();
             input_.setInGame(false);
+            if (walk_ && !outro) ++walk_->songsEnded;
+            return;
+        }
+        if (front_ && song_->won() && !front_->songOutro) {
+            // song_won: GH3's GuitarEvent_SongWon (You Rock, the songwon
+            // transition) runs over the song, which goes on until the flow's
+            // win_song action kills the gem scroller [C scripts win_song,
+            // GuitarEvent_SongWon_Spawned, kill_gem_scroller].
+            front_->songOutro = true;
+            outroAtNs_ = SDL_GetTicksNS();
+            input_.setInGame(false);
+            front_->songEnded(songResult());
             if (walk_) ++walk_->songsEnded;
             return;
         }
@@ -1109,24 +1164,7 @@ void App::frame() {
         }
         if (!more && front_) {
             // Back to GH3's own flow (results, setlist).
-            FrontEnd::SongResult r;
-            const PlayerStats& st = song_->stats();
-            r.won = !song_->failed(), r.score = st.score, r.notesHit = st.notesHit, r.totalNotes = st.totalNotes;
-            r.bestRun = st.bestRun, r.phrasesHit = st.phrasesCaptured, r.phrasesTotal = song_->phraseCount();
-            r.baseScore = song_->baseScore(), r.health = st.health, r.starPower = st.starPower;
-            const Match& m = song_->match();
-            r.maxNotes = m.maxNotes(0);
-            if (m.players() == 2) {
-                const PlayerStats& s2 = m.player(1).stats();
-                r.twoPlayers = true;
-                r.p2.score = s2.score, r.p2.notesHit = s2.notesHit, r.p2.totalNotes = s2.totalNotes, r.p2.bestRun = s2.bestRun;
-                r.p2.phrasesHit = s2.phrasesCaptured, r.p2.phrasesTotal = m.phraseCount(1), r.p2.baseScore = m.baseScore(1);
-                r.p2.health = s2.health, r.p2.starPower = s2.starPower, r.p2.maxNotes = m.maxNotes(1);
-                r.battleKo = m.mode() == GameMode::Battle && (m.outcome() == Match::Outcome::P1Wins || m.outcome() == Match::Outcome::P2Wins);
-                for (int p = 0; p < 2; ++p) r.finalBlow[size_t(p)] = m.battle(p).finalBlow, r.cards[size_t(p)] = m.battle(p).cards;
-                // Face-off and battle never fail (battle's KO goes through song_failed: battleKo) [C 0x8210FD18].
-                if (m.mode() == GameMode::FaceOff || m.mode() == GameMode::ProFaceOff || m.mode() == GameMode::Battle) r.won = true;
-            }
+            const FrontEnd::SongResult r = songResult();
             if (hooks_) hooks_->end(false);
             // GH3's SongWon / SongLost transition runs on over the venue
             // (the band's win / lose stance, cameras_win / _lose) [C data].
@@ -1217,6 +1255,7 @@ void App::frame() {
                 if (setup.mode == GameMode::Boss) song_->walkEndMs_ = -1;
             }
             front_->songPlaying = true;
+            song_->setHoldAfterWin(true);  // GH3's scripts end a won song (songOutro)
             // Common_Intro_Transition's GH_SFX_Intro_WarmUp: the zone's crowd
             // before the song (the port runs the transition's other entries natively) [C data].
             // The zone's own sounds (its pak's .wav: <zone>_intro, the encore cheers), indexed once a zone [C data].
@@ -1420,6 +1459,18 @@ int App::run() {
             ports_->context().action = [this](const std::string& a) { userFileAction(a); };
             if (!envOn("GD04_NO_HOOKS")) hooks_ = std::make_unique<SongHooks>(*front_, mixer_, *disc_, *textures_);
             addVenueScriptCalls();
+            // A won song's teardown by GH3's scripts: play_outro's destroy_hud
+            // (the HUD), disable_bg_viewport's disable_highway (the gem
+            // containers and HUDs at alpha 0), then the flow's
+            // kill_gem_scroller (the song) [C scripts].
+            front_->vm().onScriptEnter = [this](uint32_t name, const qb::Struct&) {
+                static const uint32_t destroyHud = qbkey::key("destroy_hud"), disableHighway = qbkey::key("disable_highway"),
+                                      kill = qbkey::key("kill_gem_scroller");
+                if (!front_ || !front_->songOutro || !song_) return;
+                if (name == destroyHud) song_->hideHud();
+                else if (name == disableHighway) song_->hideHighway();
+                else if (name == kill) front_->songKill = true;
+            };
         }
     }
     if (walk_ && walk_->twoPlayers()) input_.setSplitKeyboard(true);  // two-player walks: player 2 on the keyboard's other half
