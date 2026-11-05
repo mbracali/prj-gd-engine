@@ -525,7 +525,8 @@ them like the lights [I].
   1, 0) far; the pixel shader: profile (1 - s, with a plateau inside the
   inner share) x the far fade x the chord through the cone (2 sqrt(R^2 -
   side^2), metres) x g_ConeColor x three planar lookups of the smoke
-  texture (global_gfx.tex 0xa500318e, 128 x 128 grey noise) weighted by
+  texture (global_gfx.tex 0xa500318e, 128 x 128 DXT1 grey noise; the pak
+  entry is found by its short name, global_gfx) weighted by
   the camera z axis squared. sys_coneimpostor's material (Function_823B49D0:
   +0xd8 = 7, +0xcc |= 0xa8): blend ONE / ONE, cull none, depth tested, no
   z write; drawn after the scene and before the screen effects (so

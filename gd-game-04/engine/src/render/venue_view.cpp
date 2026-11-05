@@ -447,12 +447,15 @@ bool VenueView::init(gfx::RenderDevice& dev, const Disc& disc, const venue::Venu
         }
     }
     // The beams' smoke: global_gfx.tex's 0xa500318e, a 128 x 128 grey noise
-    // (sys_coneimpostor's texture, Function_823B49D0) [C].
+    // (DXT1; sys_coneimpostor's texture, Function_823B49D0) [C]. The
+    // dictionary's pak entry is named by its short name, global_gfx: looked up
+    // by the full path it was never found and the beams drew with white for
+    // their smoke, far brighter and without the noise.
     if ((!cones_.empty() || !rays_.empty()) && !smoke_) {
         try {
             const auto gpPtr = Pak::shared(disc, "DATA/COMPRESSED/ZONES/global.pak.xen");
             const Pak& gp = *gpPtr;
-            if (const PakEntry* te = gp.findType(qbkey::key("c:/gh3/data/zones/global/global_gfx.tex.xen"), K(".tex"))) {
+            if (const PakEntry* te = gp.findType(K("global_gfx"), K(".tex"))) {
                 auto [tp, ts] = gp.data(*te);
                 for (const gh3tex::Texture& t : gh3tex::decodeTexDict(tp, ts)) {
                     if (t.key != 0xa500318eu || !t.supported || t.levels.empty()) continue;
@@ -464,6 +467,7 @@ bool VenueView::init(gfx::RenderDevice& dev, const Disc& disc, const venue::Venu
         } catch (const std::exception& ex) {
             SDL_Log("venue: the beams' smoke: %s", ex.what());
         }
+        if (!smoke_) SDL_Log("venue: the beams' smoke (global_gfx.tex 0xa500318e) not found; drawn with white");
     }
     if (verts.empty()) {
         error = v.zone + ": no geometry";
