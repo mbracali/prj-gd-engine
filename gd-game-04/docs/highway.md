@@ -422,6 +422,15 @@ note_hit01 A38B2820, note_hit_blue_01 9E700D1C; Particle_Spark01 44E7B154; whamm
 
 ## 6. Implemented (engine/src/render/highway2d.cpp)
 
+- A gem at its note time sits on its button: row 1024 = the playline (y 655); the gem (128x64 x
+  gem_end_scale 0.8, just y gem_y_just 0.83) spans y 608.3..659.3, the button parts (x
+  now_scale 0.8, just centre bottom at the playline) 603.8..655, so the gem's centre is 4.4 px
+  under the button's [C data, scripts generate_pos_table / setup_highway]. gem_offset and
+  input_offset move together on the 360 (xenon_gem_offset = xenon_input_offset = -66 ms: the
+  display's lag, both gems and judge earlier than the audio); lag_calibration moves the input
+  only [C script gem_scroller]. The port keeps both platform values out (D7), so gems, judge and
+  audio meet at the note time; Enhanced's video_offset moves the drawing only (checked
+  2026-11-05: slowride 30310 ms without autoplay, the red / yellow gems on their buttons).
 - Intro: `move_highway_2d` (released by move_highway_camera_to_default at highway_start_time,
   fastintro -2000 ms after current_starttime): the gem container's y starts at 720; each game
   frame y += v dt, v *= k, k -= 0.00044 (v from -720 px/s, k from 1.0), snapped to 0 at y <= 0
