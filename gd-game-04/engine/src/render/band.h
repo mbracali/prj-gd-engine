@@ -47,6 +47,13 @@ public:
     // (Guitarist, Bassist, Drummer, vocalist) at the last advance; false if
     // there is no such member or bone.
     bool bonePos(uint32_t member, uint32_t bone, venue::Vec3& out) const;
+    // `<member> : hide` / `: Unhide` (Hide_Band: practicemode_init) [C scripts]: not drawn while hidden.
+    bool setHidden(uint32_t member, bool hidden) {
+        bool found = false;
+        for (Entry& e : members_)
+            if (e.model && e.model->member.object == member) e.hidden = hidden, found = true;
+        return found;
+    }
     // play_special_anim on the member of `role` (play_win_anims / play_lose_anims).
     void playSpecial(band::Role role, uint32_t stance, uint32_t anim, double ms, float blend = 0.2f, int disableArms = 2) {
         for (Entry& e : members_)
@@ -71,6 +78,7 @@ public:
         bandanim::Animator anim;
         bandanim::Mat34 root;  // model -> world: the waypoint's position and rotation, the profile's scale
         bool placed = false;   // its waypoint exists
+        bool hidden = false;   // setHidden
         int view = -1;
         std::vector<uint32_t> lightGroups;
         std::vector<bandanim::Mat34> world, skin;  // at the last evaluate

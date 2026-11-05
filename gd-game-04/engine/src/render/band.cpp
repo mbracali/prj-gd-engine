@@ -211,7 +211,7 @@ void Band::drawShadow(double ms, const gh3shader::Globals& light, const venue::V
     evaluate(ms);
     std::vector<BandView::Instance> inst;
     for (const Entry& e : members_) {
-        if (!e.placed) continue;
+        if (!e.placed || e.hidden) continue;
         BandView::Instance i;
         i.member = e.view;
         i.skin = &e.skin;
@@ -232,7 +232,7 @@ void Band::draw(double ms, const venue::CamPose& cam, const venue::Venue& v, con
     view_->setReuseSkinning(skinnedAt_ == ms);
     std::vector<BandView::Instance> inst;
     for (const Entry& e : members_) {
-        if (!e.placed) continue;
+        if (!e.placed || e.hidden) continue;
         BandView::Instance i;
         i.member = e.view;
         i.skin = &e.skin;

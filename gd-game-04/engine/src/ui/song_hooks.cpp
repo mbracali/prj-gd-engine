@@ -337,6 +337,22 @@ void SongHooks::begin(SongScreen& s) {
     // and the guitar buss dry [C script start_gem_scroller].
     vm.run(K("GuitarEvent_EnterVenue"), qb::Struct{});
     vm.run(K("GH3_Set_Guitar_Verb_And_Echo_to_Dry"), qb::Struct{});
+    // reset_score: current_section_array = <song>_markers, its entry 0 [C
+    // script reset_score]; the entry then follows the song (frame()) [I: the
+    // C core moves it on as the song passes each marker].
+    markers_.clear();
+    sectionEntry_ = -1;
+    if (const qb::Value* mk = vm.global(K(s.song().name + "_markers")); mk && mk->arr)
+        for (const qb::Value& m : mk->arr->values) markers_.push_back(m.st ? Vm::number(m.st->find(K("time")), 0) : 0.0);
+    vm.setGlobal(K("current_section_array"), Vm::makeKey(K(s.song().name + "_markers")));
+    vm.setGlobal(K("current_section_array_entry"), Vm::makeInt(0));
+    // Training: practicemode_init (the band hidden, the section's name over
+    // the song: practicemode_section) [C script start_gem_scroller].
+    if (const qb::Value* gm = vm.global(K("game_mode")); gm && gm->key == K("training")) {
+        sectionEntry_ = 0;
+        frameSection(s.startMs());
+        vm.spawn(K("practicemode_init"), qb::Struct{});
+    }
     // The fretbar iterators start at the song's start.
     fretbar_ = preFretbar_ = 0;
     const NoteTrack& t0 = s.match().track(0);
@@ -914,9 +930,18 @@ void SongHooks::step(SongScreen& s, double now) {
         if (r->spawnedBy && runs_.count(r->spawnedBy)) runs_.insert(r->id);
 }
 
+void SongHooks::frameSection(double now) {
+    if (sectionEntry_ < 0) return;
+    int entry = 0;
+    for (size_t i = 0; i < markers_.size(); ++i)
+        if (markers_[i] <= now) entry = int(i);
+    if (entry != sectionEntry_) sectionEntry_ = entry, fe_.vm().setGlobal(K("current_section_array_entry"), Vm::makeInt(entry));
+}
+
 void SongHooks::frame(SongScreen& s, double now) {
     if (!active_ || song_ != &s) return;
     if (!paused_) introAndEndMedia(s, now);
+    frameSection(now);
     // The scripts' big bolts: adopted (hidden in the element tree, drawn by draw()).
     bolts_.erase(std::remove_if(bolts_.begin(), bolts_.end(), [this](const Bolt& b) { return !fe_.ui().find(b.id); }), bolts_.end());
     for (int p = 0; p < players_; ++p)

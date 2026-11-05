@@ -143,6 +143,9 @@ private:
     };
     std::vector<Bolt> bolts_;
     std::array<bool, 3> introSfx_{};  // play_intro's highway / ripple / HUD sounds started
+    std::vector<double> markers_;  // <song>_markers' times (current_section_array)
+    int sectionEntry_ = -1;        // current_section_array_entry as last set (-1: not followed)
+    void frameSection(double now);
     bool winMovie_ = false;           // win_song's movie preloaded
     double transitionAt_ = -1e18;     // the start transition's first frame (song ms; -1e18: not yet)
     bool startRendered_ = false;      // its Transition_StartRendering ran

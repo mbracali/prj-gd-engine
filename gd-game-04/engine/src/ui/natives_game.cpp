@@ -234,6 +234,8 @@ void addGameNatives(FrontEnd& fe, const Disc& disc, TextureCache& textures) {
             if (song && song->key == K("bossdevil")) r.startMs = 0;
         }
         v.setGlobal(K("current_starttime"), Vm::makeInt(int32_t(r.startMs)));
+        // change current_endtime = <endtime> (default 99999999; practicemode_section fades its text out past it) [C script start_gem_scroller].
+        v.setGlobal(K("current_endtime"), Vm::makeInt(int32_t(r.endMs > 0 ? r.endMs : 99999999.0)));
         // change playing_song = 1 (the script's, before the venue enters) [C
         // script start_gem_scroller]: controller_unplugged, sysnotify and
         // destroy_loading_screen read it; kill_gem_scroller sets it back to 0.

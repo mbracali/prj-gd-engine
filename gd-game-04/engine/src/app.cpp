@@ -317,6 +317,9 @@ void App::addVenueScriptCalls() {
     if (auto prevExists = vm.native(qbkey::key("CompositeObjectExists")))
         vm.addNative("CompositeObjectExists", [this, venueSong, prevExists](Vm& v, ScriptRun& r, qb::Struct& p) {
             const qb::Value* n = Vm::param(p, qbkey::key("name"));
+            // `CompositeObjectExists {$Guitarist}`: the name as a bare key (Hide_Band) [C scripts].
+            for (const qb::Item& it : p.items)
+                if (!n && !it.name && it.value.type == qb::Type::Key) n = &it.value;
             double ms = 0;
             if (n && (n->type == qb::Type::Key || n->type == qb::Type::KeyPtr))
                 if (SongScreen* s = venueSong(ms); s && s->hasMember(n->key)) return true;
@@ -360,6 +363,12 @@ void App::addVenueScriptCalls() {
         }
         // <member> : obj_getboneposition bone = b -> x y z (Do_StarPower_*FX) [C scripts].
         const bool band = member || obj == qbkey::key("Drummer") || obj == qbkey::key("vocalist");
+        // <member> : hide / Unhide (Hide_Band: practicemode_init) [C scripts].
+        if (band && (method == qbkey::key("hide") || method == qbkey::key("Unhide"))) {
+            double ms = 0;
+            SongScreen* s = venueSong(ms);
+            if (s && s->venue() && s->venue()->band() && s->venue()->band()->setHidden(obj, method == qbkey::key("hide"))) return handled = true, true;
+        }
         if (band && method == qbkey::key("obj_getboneposition")) {
             handled = true;
             double ms = 0;
