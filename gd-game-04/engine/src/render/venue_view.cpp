@@ -953,8 +953,12 @@ void VenueView::drawVolumes(const venue::CamPose& cam, const venue::LightShow& s
         c.textures[k] = (prog->samplers >> k & 1) ? gh3_.white() : gfx::TextureId{};  // m_SmokeTextureSamp: the engine's smoke [I: none]
         c.samplers[k] = {gfx::Filter::Linear, gfx::Wrap::Repeat, 0};
     }
-    c.state.blend = true;  // GH3's additive, weighed by the shader's alpha (as drawRaytraced's)
-    c.state.src = gfx::BlendFactor::SrcAlpha, c.state.dst = gfx::BlendFactor::One, c.state.op = gfx::BlendOp::Add;
+    // sys_coneimpostor's state (Function_823B49D0: +0xd8 = 7, +0xcc |= 0xa8):
+    // ONE + ONE, no depth write, cull none, depth tested [C].
+    static const bool alphaWeighted = SDL_getenv("GD04_CONE_SRCALPHA") != nullptr;  // development aid: the old SRC_ALPHA + ONE
+    c.state.blend = true;
+    c.state.src = alphaWeighted ? gfx::BlendFactor::SrcAlpha : gfx::BlendFactor::One, c.state.dst = gfx::BlendFactor::One;
+    c.state.op = gfx::BlendOp::Add;
     c.state.depthTest = true, c.state.depthWrite = false;
     c.state.depthFunc = gfx::CompareFunc::LessEqual;
     c.state.cull = gfx::Cull::None;
@@ -1037,14 +1041,14 @@ gfx::Mat4 inverse4(const gfx::Mat4& m) {
 // sets them up but does not decompile, so the constants are read from the
 // shaders' maths]: VS g_ConeSize_VS c1 = (start, end, range, density),
 // g_UVOffset c15 / g_UVScale c16 (the smoke's, as the impostor's); PS
-// g_CameraPosition_ObjectSpace_VS c0, c1, g_ConeColor c2 (volumecolor x
-// density, alpha density), g_ViewProjInv c3..c6 (screen x, y, depth to the
+// g_CameraPosition_ObjectSpace_VS c0, c1, g_ConeColor c2 (the volume colour;
+// the shader weighs it by c1.w, the density), g_ViewProjInv c3..c6 (screen x, y, depth to the
 // world), g_coeff c17 = (-, k^2, 2 a k, a^2) for the cone x^2 + y^2 = (a +
 // k z)^2 (a start radius, k (end - start) / range: the shader's quadratic
 // A = dx^2 + dy^2 - k^2 dz^2, B and C with 2ak and a^2), m_Texture s0 the
 // smoke, g_DepthBufferTexture s1. The chord through the cone in front of the
-// scene's depth x the colour x the smoke; additive [I: the blend, as the
-// impostor's], the far faces drawn, no depth test (the shader clips by depth).
+// scene's depth x the colour x the smoke. The near faces, ONE + ONE, depth
+// tested against the scene's depth buffer (the states below).
 void VenueView::drawRaytraced(const venue::CamPose& cam, const venue::LightShow& show, gfx::TextureId depth) {
     if (!dev_ || rays_.empty() || !rayCount_ || !depth || !gh3_.ready()) return;
     gfx::RenderDevice& d = *dev_;
@@ -1068,15 +1072,20 @@ void VenueView::drawRaytraced(const venue::CamPose& cam, const venue::LightShow&
     c.uniforms[0] = frame;
     for (int k = 0; k < 16; ++k) c.samplers[k] = {gfx::Filter::Linear, gfx::Wrap::Repeat, 0};
     c.samplers[1] = {gfx::Filter::Nearest, gfx::Wrap::Clamp, 0};
-    // GH3's additive (SRC_ALPHA + ONE, its materials' mode 1): the shader's
-    // alpha (path x density x g_ConeColor.w) weighs the beam; ONE + ONE
-    // ignored it and the beams near the camera burnt to white walls over
-    // the band (owner 11-04 doc 1.3) [C: the alpha the shader writes and the
-    // engine fills; I: the blend, Function_823B4B68 sets no blend of its own].
+    // sys_raytracecone's state (Function_823B49D0 sets its +0xd8 = 7 and +0xcc
+    // |= 0xa0; 823DC180 applies it) [C]: blend ONE + ONE (control 0x1010101),
+    // no depth write, depth tested LESSEQUAL against the scene's own depth
+    // buffer. Function_823B4B68 then culls the cone's fans / strip so that one
+    // side is drawn (cull 6 for the side, 2 for the cap, the buffers built by
+    // Function_823B4368) [C]: the near faces, so the band and the scenery in
+    // front of the beam hide it and the shader's min(exit, scene depth) - entry
+    // ends it on what it meets [I: which side, from the shader: with the far
+    // faces its |chord| turned a beam behind the band into one over it].
     c.state.blend = true;
-    c.state.src = gfx::BlendFactor::SrcAlpha, c.state.dst = gfx::BlendFactor::One, c.state.op = gfx::BlendOp::Add;
-    c.state.depthTest = false, c.state.depthWrite = false;
-    c.state.cull = gfx::Cull::Clockwise;  // keeps the clockwise (far) faces of the outward-wound cone
+    c.state.src = gfx::BlendFactor::One, c.state.dst = gfx::BlendFactor::One, c.state.op = gfx::BlendOp::Add;
+    c.state.depthTest = true, c.state.depthWrite = false;
+    c.state.depthFunc = gfx::CompareFunc::LessEqual;
+    c.state.cull = gfx::Cull::CounterClockwise;  // keeps the near faces of the outward-wound cone
     const double ms = seconds_ * 1000.0;
     for (int ni : rays_) {
         const venue::Node& n = v_->nodes[size_t(ni)];
@@ -1112,6 +1121,11 @@ void VenueView::drawRaytraced(const venue::CamPose& cam, const venue::LightShow&
         obj.setMatrix(gh3shader::kRegWorldViewProj, viewProjM * w, 4);
         const gfx::Vec3 co = w.inverseAffine().transformPoint({cam.pos[0], cam.pos[1], cam.pos[2]});
         const float a = h.startRadius, k = (h.endRadius - h.startRadius) / h.range;
+        static const bool rayLog = SDL_getenv("GD04_RAY_LOG") != nullptr;  // development aid
+        if (rayLog)
+            SDL_Log("ray %s t=%.0f pos %.2f %.2f %.2f dir %.2f %.2f %.2f r %.2f..%.2f range %.2f inner %.2f dens %.2f col %.2f %.2f %.2f cam %.2f %.2f %.2f camobj %.2f %.2f %.2f",
+                    qbkey::names().get(n.name).c_str(), seconds_ * 1000.0, h.pos[0], h.pos[1], h.pos[2], -az[0], -az[1], -az[2], h.startRadius, h.endRadius,
+                    h.range, h.innerRadius, h.density, h.volumeColor[0], h.volumeColor[1], h.volumeColor[2], cam.pos[0], cam.pos[1], cam.pos[2], co.x, co.y, co.z);
         float vs[64][4] = {};
         float ps[64][4] = {};
         vs[1][0] = h.startRadius, vs[1][1] = h.endRadius, vs[1][2] = h.range, vs[1][3] = h.density;  // g_ConeSize_VS
@@ -1119,8 +1133,11 @@ void VenueView::drawRaytraced(const venue::CamPose& cam, const venue::LightShow&
         vs[63][0] = -1;
         ps[0][0] = co.x, ps[0][1] = co.y, ps[0][2] = co.z, ps[0][3] = 1;  // g_CameraPosition_ObjectSpace_VS
         std::memcpy(ps[1], vs[1], sizeof ps[1]);
-        for (int q = 0; q < 3; ++q) ps[2][q] = h.volumeColor[size_t(q)] * h.density;  // g_ConeColor
-        ps[2][3] = h.density;
+        // g_ConeColor: the record's volume colour as is (823B6314: c2 = record +0x18;
+        // the impostor's is that x density, 823B5E44) [C]; the shader weighs it by
+        // g_ConeSize.w (the density) itself. Alpha 1 [I: the colour's fourth lane].
+        for (int q = 0; q < 3; ++q) ps[2][q] = h.volumeColor[size_t(q)];
+        ps[2][3] = 1;
         for (int i = 0; i < 4; ++i)  // g_ViewProjInv, rows as the shaders read them
             for (int q = 0; q < 4; ++q) ps[3 + i][q] = vpInv.at(q, i);
         ps[17][0] = 0, ps[17][1] = k * k, ps[17][2] = 2 * a * k, ps[17][3] = a * a;  // g_coeff

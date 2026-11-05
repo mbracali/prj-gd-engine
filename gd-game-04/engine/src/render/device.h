@@ -195,7 +195,9 @@ public:
     virtual TextureId targetTexture(TargetId t) const = 0;
     virtual TextureId targetDepth(TargetId t) const = 0;
     // Copies `src`'s depth (and stencil) into `dst` (the same size and depth
-    // format), so a pass can sample the scene's depth while it stays bound.
+    // format), so a pass can sample the scene's depth while it stays bound;
+    // the copy's rows run top-down, as GH3's shaders address a screen texture
+    // (v = 0.5 - 0.5 y).
     virtual void copyDepth(TargetId src, TargetId dst) = 0;
     virtual void destroyTarget(TargetId t) = 0;
 

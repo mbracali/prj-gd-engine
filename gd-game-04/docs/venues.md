@@ -526,10 +526,12 @@ them like the lights [I].
   inner share) x the far fade x the chord through the cone (2 sqrt(R^2 -
   side^2), metres) x g_ConeColor x three planar lookups of the smoke
   texture (global_gfx.tex 0xa500318e, 128 x 128 grey noise) weighted by
-  the camera z axis squared. Blend ONE / ONE, cull none, depth tested, no
+  the camera z axis squared. sys_coneimpostor's material (Function_823B49D0:
+  +0xd8 = 7, +0xcc |= 0xa8): blend ONE / ONE, cull none, depth tested, no
   z write; drawn after the scene and before the screen effects (so
   bloomed). Defaults: density 0.5, start 0, end 10, inner 0, range 10.
-  gd04 does all of this.
+  gd04 does all of this (it had used SRC_ALPHA / ONE, which dimmed them by
+  their own alpha).
 - Raytraced volumes (`volume`: 14 housings in 7 venues) [C: the shaders;
   Function_823B4B68 does not decompile]: _Raytrace_cone_volume over a
   closed 20-segment cone (Function_823B4368's count); the VS reads a vertex
@@ -540,13 +542,20 @@ them like the lights [I].
   (-, k^2, 2ak, a^2) for the cone x^2 + y^2 = (a + kz)^2 (read from the
   shader's quadratic), m_Texture s0 (the smoke), g_DepthBufferTexture s1:
   the chord through the cone in front of the scene's depth x the colour x
-  the smoke. gd04 draws it additively weighed by the shader's alpha
-  (SRC_ALPHA + ONE, GH3's materials' additive mode: the alpha it writes is
-  path x density x g_ConeColor.w), far faces, no depth test, over a copy of
-  the scene's depth [I: the states; Function_823B4B68 sets cull only, and
-  sys_raytracecone's own material is opaque]. The cone impostors the same
-  (their shader writes factor x g_ConeColor.w x the smoke's alpha). ONE +
-  ONE ignored the alpha and burnt the beams near the camera white.
+  the smoke. The states [C]: sys_raytracecone's material (Function_823B49D0:
+  +0xd8 = 7 ONE / ONE, +0xcc |= 0xa0 no z write; ZFUNC LESSEQUAL, depth
+  tested against the scene's depth buffer), and Function_823B4B68 draws
+  the cone as fans / a strip (Function_823B4368's buffers, by the record's
+  flags: the side as a fan from the apex, cull 6, and the end cap, cull 2;
+  or the side as a strip, cull 6, and both caps) culled to one side. g_ConeColor c2 is the
+  record's volume colour as is (823B6314; the impostor's is x density,
+  823B5E44); the shader weighs it by c1.w (the density). gd04 draws the
+  near faces [I: the side, from the shader: its |min(exit, scene) - entry|
+  needs the entry in front of the scene, which the depth test on the near
+  faces ensures; the far faces without a depth test turned a beam behind
+  the band into one over it]. The depth texture: a copy of the scene's
+  depth with its rows flipped (the shader reads v = 0.5 - 0.5 y; GL's
+  rows run bottom-up).
 - Materials' render states (Function_823DC180) [C]: +0xd8 picks one of 13
   blend controls (gh3shader::materialState), +0xcc & 0x20 turns depth
   writes off (blended meshes write depth otherwise: the band's hair layers),

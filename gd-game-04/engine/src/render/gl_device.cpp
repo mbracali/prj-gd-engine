@@ -700,9 +700,11 @@ void GlDevice::copyDepth(TargetId src, TargetId dst) {
     if (!a || !b || !a->depth.id || !b->depth.id || a->w != b->w || a->h != b->h) return;
     gl::glBindFramebuffer(GL_READ_FRAMEBUFFER, a->fbo);
     gl::glBindFramebuffer(GL_DRAW_FRAMEBUFFER, b->fbo);
-    // As is: the scene targets already hold rows as GH3's shaders address
-    // them (a flipped copy cut the beams at the wrong silhouettes).
-    gl::glBlitFramebuffer(0, 0, a->w, a->h, 0, 0, b->w, b->h, GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT, GL_NEAREST);
+    // Upside down: GL's rows run bottom-up, GH3's shaders read a screen
+    // texture at v = 0.5 - 0.5 y (_Raytrace_cone_*'s g_DepthBufferTexture)
+    // [C: the shaders' maths]. Read as is, a beam ended on the depth of the
+    // mirrored row.
+    gl::glBlitFramebuffer(0, 0, a->w, a->h, 0, b->h, b->w, 0, GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT, GL_NEAREST);
     // Back to the target that was bound.
     const GlTarget* t = targets_.get(target_.id);
     const GlTarget* frame = frameOn_ ? targets_.get(frame_.id) : nullptr;
