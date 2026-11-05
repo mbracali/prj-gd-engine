@@ -470,14 +470,23 @@ Walk::Walk(const std::string& name) : name_(name) {
         steps_.push_back({"practice_setlist_fs", {C}, 20000});
         steps_.push_back({"practice_select_part_fs", {C}, 20000, true});
         steps_.push_back({"practice_select_difficulty_fs", {C}, 20000});
-        steps_.push_back({"practice_select_song_section_fs", {D, D, D, C, Op(C, 800)}, 20000});  // VERSE 1 .. VERSE 1
+        // The section menu plays the song from the highlighted section (the
+        // preview follows the highlight) and stops on leaving: Back to the
+        // difficulty and in again (the highlight comes back on VERSE 1) (GD04-105).
+        const Action U = Action::Up;
+        steps_.push_back({"practice_select_song_section_fs",
+                          {D, D, D, D, Op("check:preview:on", 3000), U, Op("check:preview:on", 3000), B}, 20000});
+        steps_.push_back({"practice_select_difficulty_fs", {Op("check:preview:off", 1500), C}, 20000});
+        steps_.push_back({"practice_select_song_section_fs", {Op("check:preview:on", 3000), C, Op(C, 800)}, 20000});  // VERSE 1 .. VERSE 1
         // Slowest, Slower, Slow, Full Speed: current_speedfactor 0.5, 2 / 3, 0.8, 1.
         const std::pair<int, const char*> speeds[] = {{3, "check:sync:0.5"}, {2, "check:sync:0.6666667"}, {1, "check:sync:0.8"}, {0, "check:sync:1"}};
         for (size_t k = 0; k < 4; ++k) {
             std::vector<Op> pick(size_t(speeds[k].first), D);
+            // The section menu stays under the speed menu, its preview playing [C scripts create_choose_practice_speed_menu].
+            if (k == 0) pick.insert(pick.begin(), Op("check:preview:on"));
             pick.push_back(C);
             steps_.push_back({"practice_select_speed_fs", pick, 20000});
-            steps_.push_back({"song", {}, 30000});
+            steps_.push_back({"song", k == 0 ? std::vector<Op>{Op("check:preview:off")} : std::vector<Op>{}, 30000});
             steps_.push_back({"song_over", {}, 600000});
             // The section's results: CONTINUE / RESTART / CHANGE SPEED / CHANGE SECTION / QUIT.
             std::vector<Op> next{Op(speeds[k].second, 1000)};
@@ -1064,6 +1073,26 @@ bool Walk::act(const std::string& what, FrontEnd& fe, WalkHost& host) {
         if (!s.measured) return fail("sync: no first gem measured");
         if (std::fabs(s.speed - want) > 0.01f) return fail("sync: speed " + std::to_string(s.speed));
         if (s.lateMs < 0 || s.lateMs > 40.0 * s.speed || std::fabs(s.clockErrMs) > 40 || std::fabs(s.audioErrMs) > 25) return fail("sync: out of step");
+        return true;
+    }
+    if (starts("check:preview:")) {
+        // check:preview:on: practice's section preview plays the song from the
+        // highlighted section's marker (target_practice_songpreview_starttime)
+        // at full speed, its stream past that time by no more than it has had
+        // to play; check:preview:off: no preview plays, and none was left
+        // playing as a song started (GD04-105).
+        const FrontEnd::SongPreview& pv = fe.songPreview;
+        const double target = qs::Vm::number(fe.vm().global(qbkey::key("target_practice_songpreview_starttime")), -1);
+        const double pos = pv.positionMs ? pv.positionMs() : -1;
+        std::printf("  preview: %s%s %s from %.0f ms (target %.0f), now %.0f ms, speed %.2f, %d starts%s\n", pv.active ? "active" : "off",
+                    pv.playing ? " playing" : "", pv.prefix.c_str(), pv.startMs, target, pos, double(pv.speed), pv.starts,
+                    pv.leaked ? ", LEAKED into a song" : "");
+        if (pv.leaked) return fail("preview: still playing as a song started");
+        if (rest("check:preview:") == "off") return pv.active ? fail("preview: still playing") : true;
+        if (!pv.active || !pv.playing) return fail("preview: not playing");
+        if (std::fabs(pv.startMs - target) > 1.0 || target <= 0) return fail("preview: not from the highlighted section's marker");
+        if (std::fabs(pv.speed - 1.0f) > 0.001f) return fail("preview: not at full speed");
+        if (pos < pv.startMs || pos > pv.startMs + 15000.0) return fail("preview: the stream is not where it started");
         return true;
     }
     if (starts("check:global:")) {  // check:global:<name>=<number>: a GH3 global's value
