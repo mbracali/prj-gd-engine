@@ -765,6 +765,10 @@ void Particles::create(const venue::Vec3& pos, const qb::Value* params, double t
     for (const qb::Item& it : st->items)
         if (it.name == 0 && it.value.type == qb::Type::Key && it.value.key == K("alignwithpath")) p.alignWithPath = true;
     p.pathTime = num(f("pathfollowtime"), 0);
+    // Type: flat 82427360, textureribbontrail 82427E08 (drawn), flatribbontrail
+    // 82427A00 (none on the disc's swirls; drawn flat here) [C 824283D0].
+    p.ribbon = keyOf(f("Type")) == K("textureribbontrail");
+    p.history = std::max(0, int(num(f("history"), 0)));
     {
         const venue::Vec3 rv = vec(f("rotvel"), {});
         p.rotMin = rv[0], p.rotMax = rv[1];
@@ -816,6 +820,12 @@ void Particles::create(const venue::Vec3& pos, const qb::Value* params, double t
                 p.burn = std::max(0.0f, num(g_->field(*qm, K("burnvalue")), 0.0f));
     }
     if (rate >= 0) p.rate = rate, p.lifetime = 1e6f, p.burst = 0, p.delay = 0;  // a node's emitter
+    // lifetime 0 and no emitnum: emit_rate a second until the scripts stop or
+    // destroy it (the Star Power FX and their swirls, the 4x finger flames:
+    // Kill_StarPower_StageFX / kill_4x_fx end them); with an emitnum, the
+    // burst alone (the poofs) [I: GH3's emitter; C data: every such GP
+    // struct has its kill script].
+    else if (p.lifetime <= 0 && p.burst == 0 && p.rate > 0) p.lifetime = 1e6f;
     System s;
     s.p = std::move(p);
     s.pos = pos;
@@ -995,52 +1005,56 @@ void Particles::draw(const venue::CamPose& cam, double ms) {
             for (size_t k = 0; k < 3; ++k) vdir[k] = dir[k] * ct + (ax[k] * std::cos(ph) + ay[k] * std::sin(ph)) * st;
             const float speed = p.speedMin + (p.speedMax - p.speedMin) * rnd(s.seed, uint64_t(i), 6);
             const float at = float(a);
-            venue::Vec3 pos, vel;
-            for (size_t k = 0; k < 3; ++k) {
-                vel[k] = vdir[k] * speed + p.force[k] * at;
-                pos[k] = p0[k] + vdir[k] * speed * at + 0.5f * p.force[k] * at * at;
-            }
-            // Bounces off y = bounceheight: each hit (solved exactly under the
-            // constant force) restarts the flight from the plane with the
-            // velocity's y reflected and all of it scaled by bouncecoeff [I].
-            if (p.bounce && p0[1] >= p.bounceHeight && pos[1] < p.bounceHeight) {
-                venue::Vec3 sp = p0, sv{vdir[0] * speed, vdir[1] * speed, vdir[2] * speed};
-                float left = at;
-                for (int hit = 0; hit < 6; ++hit) {
-                    // sp.y + sv.y t + 0.5 f t^2 = h: the first t > 0.
-                    const float A = 0.5f * p.force[1], B = sv[1], C = sp[1] - p.bounceHeight;
-                    float th = -1;
-                    if (std::fabs(A) < 1e-6f) th = B < 0 ? -C / B : -1;
-                    else if (const float disc = B * B - 4 * A * C; disc >= 0) {
-                        const float r = std::sqrt(disc), t1 = (-B - r) / (2 * A), t2 = (-B + r) / (2 * A);
-                        th = t1 > 1e-5f ? (t2 > 1e-5f ? std::min(t1, t2) : t1) : t2;
-                    }
-                    if (th <= 1e-5f || th >= left) break;
-                    for (size_t k = 0; k < 3; ++k) {
-                        sp[k] += sv[k] * th + 0.5f * p.force[k] * th * th;
-                        sv[k] = (sv[k] + p.force[k] * th) * p.bounceCoeff;
-                    }
-                    sp[1] = p.bounceHeight, sv[1] = -sv[1];
-                    left -= th;
-                }
+            // The particle's place and velocity at age `at` (the ribbons walk back through it).
+            auto place = [&](const float at, venue::Vec3& pos, venue::Vec3& vel) {
                 for (size_t k = 0; k < 3; ++k) {
-                    vel[k] = sv[k] + p.force[k] * left;
-                    pos[k] = sp[k] + sv[k] * left + 0.5f * p.force[k] * left * left;
+                    vel[k] = vdir[k] * speed + p.force[k] * at;
+                    pos[k] = p0[k] + vdir[k] * speed * at + 0.5f * p.force[k] * at * at;
                 }
-                pos[1] = std::max(pos[1], p.bounceHeight);
-            }
-            // EngineWind: the particle swirls about each wind's axis (angle =
-            // speed x tangentweight x its age / distance) and drifts with it.
-            for (const auto& [wn, w] : winds_) {
-                const float dx = pos[0] - w.pos[0], dz = pos[2] - w.pos[2];
-                const float dist = std::sqrt(dx * dx + dz * dz + (pos[1] - w.pos[1]) * (pos[1] - w.pos[1]));
-                if (w.range > 0 && dist > w.range) continue;
-                const float att = 1.0f / std::max(dist, 0.5f);
-                const float ang = w.speed * w.tangentWeight * at * att;
-                const float c = std::cos(ang), sn = std::sin(ang);
-                pos[0] = w.pos[0] + dx * c - dz * sn, pos[2] = w.pos[2] + dx * sn + dz * c;
-                for (size_t k = 0; k < 3; ++k) pos[k] += w.velocity[k] * at * w.speed * att;
-            }
+                // Bounces off y = bounceheight: each hit (solved exactly under the
+                // constant force) restarts the flight from the plane with the
+                // velocity's y reflected and all of it scaled by bouncecoeff [I].
+                if (p.bounce && p0[1] >= p.bounceHeight && pos[1] < p.bounceHeight) {
+                    venue::Vec3 sp = p0, sv{vdir[0] * speed, vdir[1] * speed, vdir[2] * speed};
+                    float left = at;
+                    for (int hit = 0; hit < 6; ++hit) {
+                        // sp.y + sv.y t + 0.5 f t^2 = h: the first t > 0.
+                        const float A = 0.5f * p.force[1], B = sv[1], C = sp[1] - p.bounceHeight;
+                        float th = -1;
+                        if (std::fabs(A) < 1e-6f) th = B < 0 ? -C / B : -1;
+                        else if (const float disc = B * B - 4 * A * C; disc >= 0) {
+                            const float r = std::sqrt(disc), t1 = (-B - r) / (2 * A), t2 = (-B + r) / (2 * A);
+                            th = t1 > 1e-5f ? (t2 > 1e-5f ? std::min(t1, t2) : t1) : t2;
+                        }
+                        if (th <= 1e-5f || th >= left) break;
+                        for (size_t k = 0; k < 3; ++k) {
+                            sp[k] += sv[k] * th + 0.5f * p.force[k] * th * th;
+                            sv[k] = (sv[k] + p.force[k] * th) * p.bounceCoeff;
+                        }
+                        sp[1] = p.bounceHeight, sv[1] = -sv[1];
+                        left -= th;
+                    }
+                    for (size_t k = 0; k < 3; ++k) {
+                        vel[k] = sv[k] + p.force[k] * left;
+                        pos[k] = sp[k] + sv[k] * left + 0.5f * p.force[k] * left * left;
+                    }
+                    pos[1] = std::max(pos[1], p.bounceHeight);
+                }
+                // EngineWind: the particle swirls about each wind's axis (angle =
+                // speed x tangentweight x its age / distance) and drifts with it.
+                for (const auto& [wn, w] : winds_) {
+                    const float dx = pos[0] - w.pos[0], dz = pos[2] - w.pos[2];
+                    const float dist = std::sqrt(dx * dx + dz * dz + (pos[1] - w.pos[1]) * (pos[1] - w.pos[1]));
+                    if (w.range > 0 && dist > w.range) continue;
+                    const float att = 1.0f / std::max(dist, 0.5f);
+                    const float ang = w.speed * w.tangentWeight * at * att;
+                    const float c = std::cos(ang), sn = std::sin(ang);
+                    pos[0] = w.pos[0] + dx * c - dz * sn, pos[2] = w.pos[2] + dx * sn + dz * c;
+                    for (size_t k = 0; k < 3; ++k) pos[k] += w.velocity[k] * at * w.speed * att;
+                }
+            };
+            venue::Vec3 pos, vel;
+            place(at, pos, vel);
             // Half sizes: +0xf0 = sw / 2 (+0x100 = sh / 2) plus t (ew - sw) / 2 [C 822E2390, 82427360, 82801948: 0.5].
             const float hw = 0.5f * p.w0 + tl * (p.w1 - p.w0) * 0.5f;
             const float hh = 0.5f * p.h0 + tl * (p.h1 - p.h0) * 0.5f;
@@ -1071,6 +1085,61 @@ void Particles::draw(const venue::CamPose& cam, double ms) {
                     const float v = float((p.color >> (24 - 8 * k)) & 0xFF) * col[k];
                     c8[k] = uint8_t(std::clamp(v, 0.0f, 255.0f));
                 }
+            }
+            if (p.ribbon && p.history > 0) {
+                // textureribbontrail (82427E08) [C]: the history ring holds the
+                // particle's last moves, one a frame (8233CAD0 -> 8233B688: a
+                // direction and a length; empty, length 0, before its birth).
+                // From the particle back, segment k runs from point k to point
+                // k + 1 = point k - direction k x length k; the far end's edges
+                // are +-(direction k x forward) x half width (not normalised),
+                // the near end's the previous far end's (segment 0: its own).
+                // u: the cell's u1 on the + edge, u0 on the - edge; v from the
+                // cell's v0, + 1 / history a segment (layout1x2 / 2x2: 0.5 /
+                // history); one colour [C 82427E08, tables 8291E360..8291E3FC].
+                // [I: a frame is 1/60 s; the moves are the analytic path's,
+                // relative to the emitter now.]
+                constexpr float kFrame = 1.0f / 60.0f;
+                float cu0 = 0, cv0 = 0, cu1 = 1, vstep = 1.0f / float(p.history);
+                if (p.layout) {
+                    const int mask = p.layout == 1 ? 3 : 1;
+                    const int r = int(rnd(s.seed, uint64_t(i), 9) * 65536.0f);
+                    const int cell = (p.animFps > 0 ? int(float(int(p.animFps)) * at) + r : r) & mask;
+                    if (p.layout == 1) cu0 = 0.5f * float(cell & 1), cv0 = 0.5f * float(cell >> 1), cu1 = cu0 + 0.5f, vstep *= 0.5f;
+                    else if (p.layout == 2) cu0 = 0.5f * float(cell), cu1 = cu0 + 0.5f, vstep *= 0.5f;
+                    else cv0 = 0.5f * float(cell);
+                }
+                auto edge = [&](const venue::Vec3& from, const venue::Vec3& to) {
+                    venue::Vec3 d{from[0] - to[0], from[1] - to[1], from[2] - to[2]};
+                    const float l = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+                    if (l > 0) for (float& c : d) c /= l;
+                    return venue::Vec3{(d[1] * fwd[2] - d[2] * fwd[1]) * hw, (d[2] * fwd[0] - d[0] * fwd[2]) * hw, (d[0] * fwd[1] - d[1] * fwd[0]) * hw};
+                };
+                venue::Vec3 nearP = pos, nearX{}, farP, fv;
+                float vNear = cv0;
+                for (int k = 0; k < p.history && verts.size() / 6 < kMaxParticles; ++k) {
+                    const float back = at - float(k + 1) * kFrame;
+                    if (back < 0) break;  // before its birth: empty entries
+                    place(back, farP, fv);
+                    const venue::Vec3 X = edge(nearP, farP);
+                    if (k == 0) nearX = X;
+                    const float vFar = vNear + vstep;
+                    PVtx q[4];
+                    const venue::Vec3 cp[4] = {{nearP[0] + nearX[0], nearP[1] + nearX[1], nearP[2] + nearX[2]},
+                                               {nearP[0] - nearX[0], nearP[1] - nearX[1], nearP[2] - nearX[2]},
+                                               {farP[0] - X[0], farP[1] - X[1], farP[2] - X[2]},
+                                               {farP[0] + X[0], farP[1] + X[1], farP[2] + X[2]}};
+                    const float qu[4] = {cu1, cu0, cu0, cu1}, qv[4] = {vNear, vNear, vFar, vFar};
+                    for (int j = 0; j < 4; ++j) {
+                        for (size_t m = 0; m < 3; ++m) q[j].pos[m] = cp[j][m];
+                        std::memcpy(q[j].col, c8, 4);
+                        q[j].uv[0] = qu[j], q[j].uv[1] = qv[j];
+                    }
+                    for (int j : {0, 1, 2, 0, 2, 3}) verts.push_back(q[j]);
+                    nearP = farP, nearX = X, vNear = vFar;
+                    ++ribbonSegments;
+                }
+                continue;
             }
             // The quad's half axes X (width, across) and Y (height, along).
             venue::Vec3 X, Y;

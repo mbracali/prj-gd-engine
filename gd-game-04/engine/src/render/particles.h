@@ -117,6 +117,10 @@ public:
         int layout = 0;         // texturelayout: 0 1x1, 1 2x2, 2 1x2, 3 2x1
         float animFps = 0;      // quadanimationfps
         float alphaCut = 0;
+        // Type textureribbontrail (the Star Power swirls): a ribbon through
+        // the particle's last `history` frames (82427E08) [C].
+        bool ribbon = false;
+        int history = 0;
     };
 
 private:
@@ -167,6 +171,7 @@ public:
     };
     std::unordered_map<uint32_t, Tesla> teslas;
     uint64_t scriptedCreated = 0;
+    uint64_t ribbonSegments = 0;  // textureribbontrail quads drawn (all frames)
     uint32_t shadowLight = 0;  // SetShadowDirFromLight's light (0: none)
     // The camera director's script shots (CameraDirector::startScript): the
     // zone VM runs the control script; its ccam_domorph / ccam_waitmorph

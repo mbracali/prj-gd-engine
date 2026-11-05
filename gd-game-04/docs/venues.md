@@ -645,7 +645,9 @@ What GH3's code does with the keys [C, default.xex]:
 
 gd04 does all of the above for the flat quads. These parts are inferred
 [I]: the emitter model (a burst of emitnum, then emit_rate a second for
-`lifetime` seconds; the start in the emitter box; the direction within
+`lifetime` seconds, lifetime 0 with no emitnum emitting until the scripts
+stop or destroy the system: the Star Power FX and swirls, the 4x finger
+flames, each with its kill script; the start in the emitter box; the direction within
 anglespread / elevspread of emit_target; speed in speedrange; constant
 force), the camera axes being gd04's right / up / forward, the colour words
 read as RGBA, the spin starting at angle 0, and the segment progress taken
@@ -658,11 +660,22 @@ subtract 2, blend 3, modulate 4, brighten 5, else 0 (opaque) by the
 material blend table; `burn` = premultiplied (ONE / ONE_MINUS_SRC_ALPHA)
 with a' = (1 - burnvalue) a, rgb x a x a'; alphacutoff the alpha test.
 Particles bounce off bounceheight (bouncecoeff, solved exactly) [I: the model].
+Ribbons (textureribbontrail, 82427E08; the history ring 8233CAD0 /
+8233B688) [C]: each frame the particle's move is pushed as a direction and
+a length (history entries, newest first; empty before its birth). From the
+particle back, segment k runs from point k to point k + 1 = point k -
+direction k x length k; its far end's edges are +-(direction k x forward) x
+half width (not normalised), its near end's the previous far end's (segment
+0 uses its own); u is the cell's u1 on the + edge and u0 on the - edge; v
+runs from the cell's v0 by 1 / history a segment (layout1x2 / 2x2: 0.5 /
+history; layout2x1 cells 8291E3D0, 1x2 8291E3B0, 2x2 8291E360, 1x1
+8291E3A0 = (0, 0, 1, 1)); the particle's colour on every vertex. gd04
+replays the analytic path back one 1/60 s frame a segment [I: the frame
+step, the path relative to the emitter now] (render/particles.cpp; the
+swirls GP_StarPower_*Swirl01, history 20).
 Not done: wind (every windcoeff on the disc is 0), rotate3d (82427238),
-emitangle's fixed facing (+0x8b2: 8233B740), the ribbon builders (82427E08:
-each history entry is a direction and a length; a ribbon of quads walks back
-from the particle, width = (direction x forward) x half width, v stepping
-1 / history), lit quick materials, GH3's frame-stepped motion.
+emitangle's fixed facing (+0x8b2: 8233B740), flatribbontrail (82427A00: no
+GP struct uses it), lit quick materials, GH3's frame-stepped motion.
 
 ### Not done yet
 

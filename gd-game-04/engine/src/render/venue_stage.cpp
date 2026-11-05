@@ -19,8 +19,9 @@
 
 VenueStage::~VenueStage() {
     if (teslaFrames || (particles_ && particles_->scriptedCreated))
-        SDL_Log("venue: %llu scripted particle systems, %llu frames with Tesla bolts",
-                (unsigned long long)(particles_ ? particles_->scriptedCreated : 0), (unsigned long long)teslaFrames);
+        SDL_Log("venue: %llu scripted particle systems (%llu ribbon segments drawn), %llu frames with Tesla bolts",
+                (unsigned long long)(particles_ ? particles_->scriptedCreated : 0),
+                (unsigned long long)(particles_ ? particles_->ribbonSegments : 0), (unsigned long long)teslaFrames);
     if (view_ && (view_->stats().raytraced || view_->stats().projected))
         SDL_Log("venue: %llu raytraced beam draws, %llu projector draws", (unsigned long long)view_->stats().raytraced,
                 (unsigned long long)view_->stats().projected);
