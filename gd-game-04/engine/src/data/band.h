@@ -126,5 +126,8 @@ struct Model {
 // Null and `error` on failure.
 std::unique_ptr<Model> loadModel(const Disc& disc, const Globals& g, Library& lib, const Member& m, const std::string& song,
                                  std::string& error);
+// A copy of a model loadModel kept (the last 8), or null: nothing is read.
+// Thread-safe, as loadModel is.
+std::unique_ptr<Model> cachedModel(const Disc& disc, const Member& m, const std::string& song);
 
 }  // namespace band

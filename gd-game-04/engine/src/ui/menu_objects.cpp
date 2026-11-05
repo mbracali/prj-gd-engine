@@ -7,6 +7,7 @@
 #include <SDL3/SDL_stdinc.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <exception>
 
@@ -121,12 +122,26 @@ bool noOp(uint32_t m) {
 
 }  // namespace
 
+// A model loading on a worker: band::loadModel with the musician tables
+// copied (the VM's globals stay on the main thread).
+// GPU work a frame for a character being added (BandView::prepare) [port].
+constexpr double kUploadMsPerFrame = 6.0;
+
+struct MenuObjects::ModelLoad {
+    std::future<std::unique_ptr<band::Model>> work;
+    band::Member member;
+    std::string error;  // written by the worker before the future is ready
+    bool ready() const { return work.valid() && work.wait_for(std::chrono::seconds(0)) == std::future_status::ready; }
+};
+
 MenuObjects::MenuObjects(const Disc& disc, Globals& globals, qs::Vm& vm, WaypointFn waypoint)
     : disc_(disc), globals_(globals), vm_(vm), waypoint_(std::move(waypoint)) {}
 
 MenuObjects::~MenuObjects() {
     if (next_) vm_.objectCall = next_;
     objects_.clear();
+    ghosts_.clear();
+    inflight_.clear();  // waits for the workers
     view_.reset();
 }
 
@@ -143,14 +158,54 @@ bandanim::Mat34 MenuObjects::root(const Object& o) const {
 
 void MenuObjects::unload(Object& o) {
     if (o.entry && o.entry->view >= 0 && view_) view_->remove(o.entry->view);
+    if (dev_)
+        for (auto& [k, t] : o.made)
+            if (t) dev_->destroyTexture(t);
+    o.made.clear();
     o.entry.reset();
     o.animated = false;
+    o.pending.reset();  // a load under way ends on its own (inflight_), its model cached
+}
+
+void MenuObjects::retire(Object& o) {
+    if (!o.entry || o.entry->view < 0 || o.hidden) {
+        unload(o);
+        return;
+    }
+    auto g = std::make_unique<Object>();
+    g->name = o.name, g->type = o.type, g->pos = o.pos, g->rot = o.rot, g->scale = o.scale;
+    g->skeleton = o.skeleton, g->lightGroup = o.lightGroup, g->bodySpeed = o.bodySpeed, g->animMs = o.animMs;
+    g->animated = o.animated;
+    g->profile = o.profile;  // the model's member.profile points into it (the animator's anim_set)
+    g->entry = std::move(o.entry);
+    o.animated = false;
+    o.pending.reset();
+    if (Object* old = ghostOf(o.name)) unload(*old);
+    ghosts_[o.name] = std::move(g);
 }
 
 // obj_initmodelfromprofile: the profile's body and instrument (band::loadModel,
-// as the song band's) on the object's skeleton [C scripts].
+// as the song band's) on the object's skeleton [C scripts]: a model loaded
+// before at once, else on a worker (placed by a later load()).
 void MenuObjects::load(Object& o) {
     if (o.entry || o.loadFailed || !o.profile || suspended_) return;
+    if (o.pending) {
+        if (!o.pending->ready()) return;
+        const std::shared_ptr<ModelLoad> job = std::move(o.pending);
+        std::unique_ptr<band::Model> model;
+        try {
+            model = job->work.get();
+        } catch (const std::exception& e) {
+            job->error = e.what();
+        }
+        if (!model) {
+            SDL_Log("menu objects: %s: %s", qbkey::name(o.name).c_str(), job->error.c_str());
+            o.loadFailed = true;
+            return;
+        }
+        place(o, std::move(model), job->member);
+        return;
+    }
     if (!libLoaded_) {
         if (libFailed_) return;
         try {
@@ -164,14 +219,31 @@ void MenuObjects::load(Object& o) {
     }
     band::Member m = band::memberOf(globals_, o.name, *o.profile);
     if (o.skeleton) m.skeleton = o.skeleton;
-    std::string error;
-    auto e = std::make_unique<Band::Entry>();
-    e->model = band::loadModel(disc_, globals_, *lib_, m, "", error);
-    if (!e->model) {
-        SDL_Log("menu objects: %s: %s", qbkey::name(o.name).c_str(), error.c_str());
-        o.loadFailed = true;
+    if (auto model = band::cachedModel(disc_, m, "")) {
+        place(o, std::move(model), m);
         return;
     }
+    // The worker reads only the musician tables (bodyDesc / instrumentDesc):
+    // those are copied, the arrays shared (the scripts never change them).
+    auto snap = std::make_shared<Globals>();
+    for (uint32_t k : {K("musician_body"), K("musician_instrument")})
+        if (const qb::Value* v = globals_.find(k)) *snap->ensure(k) = *v;
+    auto job = std::make_shared<ModelLoad>();
+    job->member = m;
+    ModelLoad* raw = job.get();
+    job->work = std::async(std::launch::async, [raw, snap, lib = lib_, d = &disc_, m] {
+        std::string error;
+        auto model = band::loadModel(*d, *snap, *lib, m, "", error);
+        raw->error = error;
+        return model;
+    });
+    o.pending = job;
+    inflight_.push_back(std::move(job));
+}
+
+void MenuObjects::place(Object& o, std::unique_ptr<band::Model> model, const band::Member& m) {
+    auto e = std::make_unique<Band::Entry>();
+    e->model = std::move(model);
     // The model's lights: its lightgroup (alt_band with band, as the song's guitarist) [C script create_band_member].
     const uint32_t lg = o.lightGroup ? o.lightGroup : K("band");
     e->lightGroups = {lg};
@@ -234,11 +306,13 @@ bool MenuObjects::frame(uint32_t object, uint32_t bone, venue::Vec3& pos, venue:
         return true;
     }
     load(o);
-    if (!o.entry) return false;
-    evaluate(o);
-    const Band::Entry& e = *o.entry;
+    // Loading: the ghost of that name (the model it replaces) stands in.
+    Object* src = o.entry ? &o : ghostOf(o.name);
+    if (!src || !src->entry) return false;
+    evaluate(*src);
+    const Band::Entry& e = *src->entry;
     int b = -1;
-    if (o.animated) {
+    if (src->animated) {
         b = e.anim.rig().find(bone);
     } else if (e.model->skeleton) {
         bandanim::Rig rig;
@@ -246,7 +320,7 @@ bool MenuObjects::frame(uint32_t object, uint32_t bone, venue::Vec3& pos, venue:
         b = rig.find(bone);
     }
     if (b < 0 || size_t(b) >= e.world.size()) return false;
-    const bandanim::Mat34 w = bandanim::mmul(root(o), e.world[size_t(b)]);
+    const bandanim::Mat34 w = bandanim::mmul(root(*src), e.world[size_t(b)]);
     pos = {w.m[3], w.m[7], w.m[11]};
     rot = quatOfMat(w);
     return true;
@@ -258,12 +332,21 @@ void MenuObjects::update(double dtMs) {
         o->animMs += dtMs * double(o->bodySpeed);
         if (o->animated && o->entry) o->entry->anim.advance(o->animMs);
     }
+    for (auto& [k, g] : ghosts_) {
+        g->animMs += dtMs * double(g->bodySpeed);
+        g->ghostMs += dtMs;
+        if (g->animated && g->entry) g->entry->anim.advance(g->animMs);
+    }
+    // Loads no object waits for any more, once done (their models stay in band::loadModel's cache).
+    inflight_.erase(std::remove_if(inflight_.begin(), inflight_.end(),
+                                   [](const std::shared_ptr<ModelLoad>& j) { return j.use_count() == 1 && j->ready(); }),
+                    inflight_.end());
 }
 
 void MenuObjects::draw(gfx::RenderDevice& dev, const venue::CamPose& cam, const venue::Venue& v, const std::vector<venue::LightState>& lights,
                        const venue::LightShow& show) {
-    if (objects_.empty()) return;
-    if (dev_ && dev_ != &dev) view_.reset();
+    if (objects_.empty() && ghosts_.empty()) return;
+    if (dev_ && dev_ != &dev) view_.reset(), ghosts_.clear();
     dev_ = &dev;
     std::vector<BandView::Instance> inst;
     for (auto& [k, op] : objects_) {
@@ -277,8 +360,12 @@ void MenuObjects::draw(gfx::RenderDevice& dev, const venue::CamPose& cam, const 
                 view_ = std::make_unique<BandView>();
                 view_->setLibrary(gh3shader::library(disc_));
             }
+            // The textures and programs a few milliseconds a frame (a
+            // character's 5-8 MB and its new templates took 40-230 ms at once).
+            if (!view_->prepare(dev, *e.model, o.made, kUploadMsPerFrame)) continue;
             std::string error;
-            e.view = view_->add(dev, *e.model, error);
+            e.view = view_->add(dev, *e.model, error, &o.made);
+            o.made.clear();  // the member's now
             if (e.view < 0) {
                 SDL_Log("menu objects: %s: %s", qbkey::name(o.name).c_str(), error.c_str());
                 o.loadFailed = true;
@@ -294,6 +381,28 @@ void MenuObjects::draw(gfx::RenderDevice& dev, const venue::CamPose& cam, const 
         i.root = root(o);
         i.lightGroups = e.lightGroups;
         inst.push_back(std::move(i));
+    }
+    // A ghost stands in while the object of its name loads, up to 2 s.
+    for (auto it = ghosts_.begin(); it != ghosts_.end();) {
+        Object& g = *it->second;
+        auto live = objects_.find(it->first);
+        const Object* o = live == objects_.end() ? nullptr : live->second.get();
+        const bool waiting = o && !o->hidden && !o->loadFailed && !(o->entry && o->entry->view >= 0) && g.ghostMs < 2000;
+        if (!waiting || !g.entry || g.entry->view < 0) {
+            unload(g);
+            it = ghosts_.erase(it);
+            continue;
+        }
+        evaluate(g);
+        if (!g.entry->skin.empty()) {
+            BandView::Instance i;
+            i.member = g.entry->view;
+            i.skin = &g.entry->skin;
+            i.root = root(g);
+            i.lightGroups = g.entry->lightGroups;
+            inst.push_back(std::move(i));
+        }
+        ++it;
     }
     if (inst.empty() || !view_) return;
     view_->setTime(clockMs_ / 1000.0);
@@ -319,7 +428,7 @@ bool MenuObjects::member(qs::ScriptRun& run, Object& o, uint32_t method, qb::Str
         // The object and the scripts running on it [I: Die ends them].
         for (auto& r : vm_.runs())
             if (r && r->object == id && r.get() != &run) vm_.kill(r->id);
-        unload(o);
+        retire(o);
         objects_.erase(id);  // `o` is gone
         return true;
     }
@@ -369,7 +478,7 @@ bool MenuObjects::member(qs::ScriptRun& run, Object& o, uint32_t method, qb::Str
         if (const qb::Struct* st = structOf(Vm::param(p, K("struct")))) flatten(*st, *prof);
         if (const qb::Struct* ps = structOf(Vm::param(p, K("params"))))
             if (const uint32_t lg = keyOf(ps->find(K("lightgroup")))) o.lightGroup = lg;
-        unload(o);
+        retire(o);
         o.profile = std::move(prof);
         o.loadFailed = false;
         load(o);
@@ -488,7 +597,7 @@ void MenuObjects::addNatives() {
                     if (const uint32_t lg = keyOf(cs->find(K("lightgroup")))) o->lightGroup = lg;
             }
         o->animMs = clockMs_;
-        if (auto old = objects_.find(name); old != objects_.end()) unload(*old->second);
+        if (auto old = objects_.find(name); old != objects_.end()) retire(*old->second);
         objects_[name] = std::move(o);
         return true;
     });

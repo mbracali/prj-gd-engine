@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <future>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -40,6 +41,10 @@ struct Venue;
 // would run them on the object are not run), Band::accessorySim, BandView.
 // The objects' member functions (obj_*, anim_*, hero_*, Die, hide) go
 // through the VM's objectCall ahead of the screen elements'.
+// A model not loaded before loads on a worker (band::loadModel) while the
+// one it replaces stays drawn (a ghost), as GH3 keeps the old character up
+// while preload_band_member's LoadPakAsync reads the new one [C scripts];
+// the frame never waits for the disc (owner: character select stutters).
 class MenuObjects {
 public:
     // `waypoint`: a node of the current zone (GetWaypointPos / Dir), false
@@ -62,6 +67,7 @@ public:
     size_t count() const { return objects_.size(); }
 
 private:
+    struct ModelLoad;  // a model loading on a worker
     struct Object {
         uint32_t name = 0, type = 0;  // object_type: bandmember, hud_model_3d
         venue::Vec3 pos{};
@@ -78,10 +84,21 @@ private:
         double animMs = 0;         // the object's animation clock
         std::unique_ptr<Band::Entry> entry;  // the loaded model (and animator with a tree)
         bool animated = false;
+        std::shared_ptr<ModelLoad> pending;  // its model loading on a worker
+        double ghostMs = 0;  // a ghost: how long it has stood in
+        std::unordered_map<uint32_t, gfx::TextureId> made;  // BandView::prepare's textures, before add
     };
     bool member(qs::ScriptRun& run, Object& o, uint32_t method, qb::Struct& p, bool& handled);
     void load(Object& o);
+    void place(Object& o, std::unique_ptr<band::Model> model, const band::Member& m);
     void unload(Object& o);
+    // Unloads the object, its drawn model kept as the ghost of its name
+    // until a new model of that name is drawn (or 2 s pass).
+    void retire(Object& o);
+    Object* ghostOf(uint32_t name) {
+        auto it = ghosts_.find(name);
+        return it == ghosts_.end() ? nullptr : it->second.get();
+    }
     void startAnim(Object& o);
     bandanim::Mat34 root(const Object& o) const;
     void evaluate(Object& o);
@@ -92,6 +109,8 @@ private:
     WaypointFn waypoint_;
     std::function<bool(qs::Vm&, qs::ScriptRun&, uint32_t, uint32_t, qb::Struct&, bool&)> next_;  // the screen elements'
     std::unordered_map<uint32_t, std::unique_ptr<Object>> objects_;
+    std::unordered_map<uint32_t, std::unique_ptr<Object>> ghosts_;
+    std::vector<std::shared_ptr<ModelLoad>> inflight_;  // worker loads (kept to their end: a future's destructor waits)
     std::shared_ptr<band::Library> lib_;  // band::Library::shared
     bool libLoaded_ = false, libFailed_ = false;
     std::shared_ptr<const Pak> globalPak_;  // the ragdolls (Band::accessorySim)

@@ -33,7 +33,15 @@ public:
     // GH3's material library (before add; null: the approximation only).
     void setLibrary(std::shared_ptr<const matlib::Library> lib) { lib_ = std::move(lib); }
     // Uploads one member's skins and textures; its index, or -1 and `error`.
-    int add(gfx::RenderDevice& dev, const band::Model& m, std::string& error);
+    // `made`: textures prepare() uploaded (the member owns them now).
+    int add(gfx::RenderDevice& dev, const band::Model& m, std::string& error,
+            const std::unordered_map<uint32_t, gfx::TextureId>* made = nullptr);
+    // add()'s heavy GPU work spread over frames (the menus' characters):
+    // uploads the model's textures into `made` and compiles its materials'
+    // programs until about `budgetMs` is spent (at least one step a call);
+    // true once all are done (add() then only builds the buffers). The
+    // caller frees `made` if it never calls add().
+    bool prepare(gfx::RenderDevice& dev, const band::Model& m, std::unordered_map<uint32_t, gfx::TextureId>& made, double budgetMs);
     // Frees one member's buffers and textures (the menus' objects that die);
     // its index stays, drawing nothing.
     void remove(int member);

@@ -346,39 +346,48 @@ std::unique_ptr<Model> loadModelUncached(const Disc& disc, const Globals& g, Lib
                                          std::string& error);
 }
 
-// A copy of a model loaded before (the 8 last: character select scrolls
-// back and forth, a song loads the menu's guitarist again), else loaded.
+namespace {
+// The models loaded before (the 8 last: character select scrolls back and
+// forth, a song loads the menu's guitarist again), most recent first.
 // Each part loaded took about 0.2 s (owner 1.7: character select's stutters).
+struct Cached {
+    const Disc* disc;
+    uint32_t body, instrument, skeleton;
+    int outfit, style;
+    std::string song;
+    std::shared_ptr<const Model> model;
+};
+std::mutex cacheMutex;
+std::list<Cached> modelCache;
+bool sameModel(const Cached& c, const Disc& disc, const Member& m, const std::string& song) {
+    return c.disc == &disc && c.body == m.body && c.instrument == m.instrument && c.skeleton == m.skeleton && c.outfit == m.outfit &&
+           c.style == m.style && c.song == song;
+}
+}  // namespace
+
+std::unique_ptr<Model> cachedModel(const Disc& disc, const Member& m, const std::string& song) {
+    std::lock_guard<std::mutex> lock(cacheMutex);
+    for (auto it = modelCache.begin(); it != modelCache.end(); ++it)
+        if (sameModel(*it, disc, m, song)) {
+            modelCache.splice(modelCache.begin(), modelCache, it);
+            auto copy = std::make_unique<Model>(*modelCache.front().model);
+            copy->member = m;
+            return copy;
+        }
+    return nullptr;
+}
+
+// A copy of a model loaded before, else loaded (and kept).
 std::unique_ptr<Model> loadModel(const Disc& disc, const Globals& g, Library& lib, const Member& m, const std::string& song,
                                  std::string& error) {
-    struct Cached {
-        const Disc* disc;
-        uint32_t body, instrument, skeleton;
-        int outfit, style;
-        std::string song;
-        std::shared_ptr<const Model> model;
-    };
-    static std::mutex mutex;
-    static std::list<Cached> cache;  // most recent first
-    auto same = [&](const Cached& c) {
-        return c.disc == &disc && c.body == m.body && c.instrument == m.instrument && c.skeleton == m.skeleton && c.outfit == m.outfit &&
-               c.style == m.style && c.song == song;
-    };
-    {
-        std::lock_guard<std::mutex> lock(mutex);
-        for (auto it = cache.begin(); it != cache.end(); ++it)
-            if (same(*it)) {
-                cache.splice(cache.begin(), cache, it);
-                auto copy = std::make_unique<Model>(*cache.front().model);
-                copy->member = m;
-                return copy;
-            }
-    }
+    if (auto copy = cachedModel(disc, m, song)) return copy;
     auto model = loadModelUncached(disc, g, lib, m, song, error);
     if (!model) return model;
-    std::lock_guard<std::mutex> lock(mutex);
-    cache.push_front(Cached{&disc, m.body, m.instrument, m.skeleton, m.outfit, m.style, song, std::make_shared<const Model>(*model)});
-    if (cache.size() > 8) cache.pop_back();
+    std::lock_guard<std::mutex> lock(cacheMutex);
+    for (const Cached& c : modelCache)
+        if (sameModel(c, disc, m, song)) return model;  // another thread loaded it meanwhile
+    modelCache.push_front(Cached{&disc, m.body, m.instrument, m.skeleton, m.outfit, m.style, song, std::make_shared<const Model>(*model)});
+    if (modelCache.size() > 8) modelCache.pop_back();
     return model;
 }
 

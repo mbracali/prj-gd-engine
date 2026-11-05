@@ -20,6 +20,44 @@
 TextureCache::~TextureCache() {
     for (auto& [k, e] : textures_)
         if (e.owner) dev_.destroyTexture(e.id);
+    for (auto& [k, e] : ctxTextures_)
+        if (e.owner) dev_.destroyTexture(e.id);
+}
+
+void TextureCache::size(uint32_t context, uint32_t key, int& w, int& h) const {
+    auto it = context ? ctxTextures_.find(ctxKey(context, key)) : ctxTextures_.end();
+    if (it == ctxTextures_.end()) return size(key, w, h);
+    w = it->second.w, h = it->second.h;
+}
+
+int TextureCache::loadContextImages(const Disc& disc, const std::string& pakPath, uint32_t context) {
+    if (auto it = contexts_.find(context); it != contexts_.end()) return it->second;
+    int n = 0;
+    try {
+        const auto pakShared = Pak::shared(disc, pakPath);
+        for (const PakEntry& e : pakShared->entries()) {
+            if (e.type != qbkey::key(".img")) continue;
+            auto [p, size] = pakShared->data(e);
+            const gh3tex::Texture t = gh3tex::decodeImg(p, size);
+            if (!t.supported || t.levels.empty()) continue;
+            std::string error;
+            auto levels = t.texLevels();
+            const gfx::TextureId id = dev_.createTexture(t.desc(), levels.data(), error);
+            if (!id) {
+                SDL_Log("textures: %s in %s: %s", qbkey::name(e.fullName).c_str(), pakPath.c_str(), error.c_str());
+                continue;
+            }
+            // Scripts name an .img by its full name or its short one [C data].
+            ctxTextures_[ctxKey(context, e.fullName)] = Entry{id, t.width, t.height, true};
+            if (e.name && e.name != e.fullName) ctxTextures_[ctxKey(context, e.name)] = Entry{id, t.width, t.height, false};
+            ++n;
+        }
+    } catch (const std::exception& ex) {
+        SDL_Log("textures: %s: %s", pakPath.c_str(), ex.what());
+        n = -1;
+    }
+    contexts_[context] = n;
+    return n;
 }
 
 void TextureCache::size(uint32_t key, int& w, int& h) const {

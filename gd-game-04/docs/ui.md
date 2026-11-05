@@ -371,6 +371,39 @@ elements' curves [I]. Not drawn yet: the composite objects on it (the
 character, CreateCompositeObject / obj_* members, the store's instrument
 models).
 
+Character switches (character select, hub): preload_band_member reads the
+body and instrument paks with LoadPakAsync, but inside a condition
+(load_musician_pak_file), which the port's VM runs to its end, so the
+read cannot overlap frames there. The port instead reads the character
+select's neighbours ahead (LoadPak of a body pak queues the next / previous
+two valid guitarists' body, anims and instrument paks on a worker:
+musician_profiles order, Guitarist, not debug_only, not locked, no wrap
+[C script get_valid_character_index]); a character pak's textures do not
+go to the global texture cache (the model and the results art have their
+own). MenuObjects loads a model not cached on a worker (band::loadModel with
+the musician tables copied) and uploads its textures and new shader
+programs about 6 ms a frame (BandView::prepare); the model it replaces stays
+drawn (a ghost, at most 2 s) until the new one is up, as GH3 keeps the old
+character while its async load runs [I]. Faceoff walk, 4 scrolls: frames of
+150-300 ms before, none over 25 ms after (offscreen, GD04_FRAMELOG).
+
+### Results art (create_newspaper_menu)
+
+The magazine cover's photo is `displaySprite tex = Mag_Photo` between
+PushAssetContext context = <body>.asset_context and PopAssetContext; the
+body is Guitarist_<profile name>_Outfit<o>_Style<s> from the player's
+character_id / outfit / style (player1_status, or the 2P screen's
+player_status) [C script]. Every character body pak holds its own .img
+Mag_Photo under the same key; its pak name key (the pak header's) is the
+body's asset_context (axel_1) [C data]. The port keeps those images per
+context (TextureCache::loadContextImages) and a texture set while a
+context is pushed takes the context's image first. Morello_1 and the
+BoneMan bodies have no asset_context (nothing is pushed: GH3 finds the one
+loaded body's image); the port uses the body the script just looked up
+(info_struct) [I]. Walks: career, coop, faceoff and results_art
+(GD04_WALK_CHARACTER=<name>[,<outfit>,<style>], default Morello) run
+check:mag_photo.
+
 ## 10. Reference comparison (the 360 under Xenia, 2026-10-29)
 
 Captures: `~/.local/share/gd-engine/refcaps/gd04/` (INDEX.md). Port shots

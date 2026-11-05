@@ -217,8 +217,10 @@ Element* UiSystem::resolve(const qb::Value* v) const {
 
 void UiSystem::setTexture(Element& e, uint32_t key) {
     e.texture = key;
+    const uint32_t ctx = assetContexts_.empty() ? 0 : assetContexts_.back();
+    e.texContext = tex_.inContext(ctx, key) ? ctx : 0;
     int tw = 0, th = 0;
-    tex_.size(key, tw, th);
+    tex_.size(e.texContext, key, tw, th);
     if (!tw) {
         ++stats_.missingTextures;
         return;
@@ -358,7 +360,7 @@ void UiSystem::applyProps(Element& e, const qb::Struct& p, bool create) {
         if (e.type == kSprite && e.texture && !newTexture) {
             // New dims on a textured sprite: dims are the on-screen size [C 0x82219C78].
             int tw = 0, th = 0;
-            tex_.size(e.texture, tw, th);
+            tex_.size(e.texContext, e.texture, tw, th);
             if (tw) e.sx = newDimsW / float(tw), e.sy = newDimsH / float(th), e.w = float(tw), e.h = float(th), e.dimsGiven = false;
         }
     }
@@ -932,7 +934,7 @@ void UiSystem::draw(Canvas& c) {
             e.drawnIn = drawCount_;
         }
         if (e.type == kSprite && e.texture) {
-            gfx::TextureId id = tex_.find(e.texture);
+            gfx::TextureId id = tex_.find(e.texContext, e.texture);
             if (!id) id = movieTexture(e.texture);
             if (!id) continue;
             const float w = e.w * it.wsx, h = e.h * it.wsy;
@@ -1384,9 +1386,62 @@ bool UiSystem::member(qs::ScriptRun& run, uint32_t obj, uint32_t method, qb::Str
     return false;
 }
 
+uint32_t UiSystem::loadAssetContext(uint32_t context, const qb::Struct* body) {
+    // An asset context is a pak's name key (its header's, the key of the
+    // pak's file name: axel_1); for a character it is
+    // musician_body[].asset_context, whose `pak` is the body pak [C data, qb
+    // musician_body / download_musician_body]. Morello_1 and the BoneMan
+    // bodies have no asset_context (the script pushes nothing): GH3 then finds
+    // Mag_Photo in the paks loaded, the players' bodies alone; the port keeps
+    // every body loaded, so it takes the body the script just looked up
+    // (`info_struct`) [I].
+    auto strOf = [](const qb::Value* v) { return v && (v->type == qb::Type::String || v->type == qb::Type::WString) ? v->str : std::string(); };
+    auto pathOf = [&](const qb::Struct& b, std::string& stem) {
+        const std::string pak = strOf(b.find(K("pak")));
+        const size_t slash = pak.find_last_of("\\/");
+        stem = slash == std::string::npos ? pak : pak.substr(slash + 1);
+        if (stem.size() > 4 && stem.compare(stem.size() - 4, 4, ".pak") == 0) stem.resize(stem.size() - 4);
+        return pak.empty() ? std::string() : "DATA/COMPRESSED/PAK/" + stem + ".pak.xen";
+    };
+    auto load = [&](const qb::Struct& b, uint32_t ctx) -> uint32_t {
+        std::string stem;
+        const std::string path = pathOf(b, stem);
+        if (!ctx) ctx = qbkey::key(stem);
+        if (tex_.hasContext(ctx)) return ctx;
+        if (path.empty() || !disc_.exists(path)) return 0;
+        return tex_.loadContextImages(disc_, path, ctx) > 0 ? ctx : 0;
+    };
+    if (!context) return body ? load(*body, 0) : 0;
+    if (tex_.hasContext(context)) return context;
+    for (uint32_t arr : {K("musician_body"), K("download_musician_body")}) {
+        const qb::Value* a = vm_.global(arr);
+        if (!a || !a->arr) continue;
+        for (const qb::Value& b : a->arr->values)
+            if (b.st)
+                if (const qb::Value* ac = b.st->find(K("asset_context")); ac && ac->key == context) return load(*b.st, context);
+    }
+    return 0;
+}
+
 void UiSystem::addNatives() {
     using qs::ScriptRun;
     using qs::Vm;
+    // PushAssetContext context = <pak name> / PopAssetContext: what the UI
+    // creates meanwhile takes its textures from that pak first (the results
+    // screen's Mag_Photo, one per character body) [C script create_newspaper_menu].
+    vm_.addNative("PushAssetContext", [this](Vm&, ScriptRun& run, qb::Struct& p) {
+        const qb::Value* c = Vm::param(p, K("context"));
+        const uint32_t ctx = c && (c->type == qb::Type::Key || c->type == qb::Type::KeyPtr) ? c->key : 0;
+        const qb::Struct* body = nullptr;
+        if (!ctx && !run.frames.empty() && run.frames.back().locals)
+            if (const qb::Value* is = run.frames.back().locals->find(K("info_struct")); is && is->st) body = is->st.get();
+        assetContexts_.push_back(loadAssetContext(ctx, body));
+        return true;
+    });
+    vm_.addNative("PopAssetContext", [this](Vm&, ScriptRun&, qb::Struct&) {
+        if (!assetContexts_.empty()) assetContexts_.pop_back();
+        return true;
+    });
     vm_.addNative("CreateScreenElement", [this](Vm&, ScriptRun& run, qb::Struct& p) {
         auto e = std::make_unique<Element>();
         static uint32_t anonymous = 0x80000000u;

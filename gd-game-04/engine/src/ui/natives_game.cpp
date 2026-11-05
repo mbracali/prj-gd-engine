@@ -2,6 +2,7 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "ui/natives_game.h"
 
+#include "data/band.h"
 #include "data/disc.h"
 #include "data/pak.h"
 #include "data/qb.h"
@@ -12,14 +13,124 @@
 
 #include <algorithm>
 #include <cctype>
+#include <deque>
 #include <exception>
+#include <mutex>
 #include <set>
+#include <thread>
 #include <unordered_map>
 #include "render/texture_cache.h"
 #include "ui/front_end.h"
 
 namespace {
 uint32_t K(const char* s) { return qbkey::key(s); }
+
+// Reads paks into Pak::shared's cache on one worker thread, the newest
+// wishes first (the character select's neighbours, see LoadPak).
+class PakPrefetch {
+public:
+    explicit PakPrefetch(const Disc& disc) : disc_(disc) {}
+    ~PakPrefetch() {
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            stop_ = true;
+            queue_.clear();
+        }
+        if (thread_.joinable()) thread_.join();
+    }
+    void want(const std::vector<std::string>& paths) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        queue_.assign(paths.begin(), paths.end());
+        if (running_ || queue_.empty()) return;
+        if (thread_.joinable()) thread_.join();  // ended (running_ false)
+        running_ = true;
+        thread_ = std::thread([this] { run(); });
+    }
+
+private:
+    void run() {
+        for (;;) {
+            std::string p;
+            {
+                std::lock_guard<std::mutex> lock(mutex_);
+                if (stop_ || queue_.empty()) {
+                    running_ = false;
+                    return;
+                }
+                p = queue_.front();
+                queue_.pop_front();
+            }
+            try {
+                if (disc_.exists(p)) Pak::shared(disc_, p);
+            } catch (const std::exception& ex) {
+                SDL_Log("prefetch %s: %s", p.c_str(), ex.what());
+            }
+        }
+    }
+    const Disc& disc_;
+    std::mutex mutex_;
+    std::deque<std::string> queue_;
+    std::thread thread_;
+    bool running_ = false, stop_ = false;
+};
+
+std::string lowerCase(std::string s) {
+    for (char& c : s) c = char(std::tolower(static_cast<unsigned char>(c)));
+    return s;
+}
+
+const qb::Struct* descIn(const Globals& g, const char* array, uint32_t id) {
+    if (const qb::Value* a = g.find(qbkey::key(array)); a && a->arr)
+        for (const qb::Value& e : a->arr->values)
+            if (e.st)
+                if (const qb::Value* d = e.st->find(qbkey::key("desc_id")); d && d->key == id) return e.st.get();
+    return nullptr;
+}
+
+// The paks of the characters next to the one whose body pak `discPath` is,
+// in the character select's order: musician_profiles' guitarists, not
+// debug_only, not locked (their body's tag unlocked = 0) [C script
+// get_valid_character_index]; the nearest first: body, anims, instrument.
+std::vector<std::string> neighbourPaks(qs::Vm& v, const std::string& discPath) {
+    const Globals& g = v.globals();
+    auto strOf = [](const qb::Value* x) { return x && (x->type == qb::Type::String || x->type == qb::Type::WString) ? x->str : std::string(); };
+    auto descOf = [](const qb::Struct& prof, const char* field) -> uint32_t {
+        const qb::Value* s = prof.find(qbkey::key(field));
+        const qb::Value* d = s && s->st ? s->st->find(qbkey::key("desc_id")) : nullptr;
+        return d ? d->key : 0;
+    };
+    std::vector<const qb::Struct*> valid;
+    const qb::Value* profs = g.find(qbkey::key("musician_profiles"));
+    if (!profs || !profs->arr) return {};
+    for (const qb::Value& e : profs->arr->values) {
+        if (!e.st) continue;
+        const qb::Value* type = e.st->find(qbkey::key("Type"));
+        if (!type || type->key != qbkey::key("Guitarist") || e.st->find(qbkey::key("debug_only"))) continue;
+        const uint32_t body = descOf(*e.st, "musician_body");
+        if (auto t = v.globalTags.find(body); t != v.globalTags.end())
+            if (const qb::Value* u = qs::Vm::param(t->second, qbkey::key("unlocked")); u && u->number() == 0) continue;
+        valid.push_back(e.st.get());
+    }
+    auto bodyPak = [&](const qb::Struct& prof) -> const qb::Struct* { return descIn(g, "musician_body", descOf(prof, "musician_body")); };
+    const std::string want = lowerCase(discPath);
+    int at = -1;
+    for (size_t i = 0; i < valid.size() && at < 0; ++i)
+        if (const qb::Struct* b = bodyPak(*valid[i]); b && lowerCase(band::pakPath(strOf(b->find(qbkey::key("pak"))))) == want) at = int(i);
+    if (at < 0) return {};
+    std::vector<std::string> out;
+    const int n = int(valid.size());
+    for (int d : {1, -1, 2, -2}) {
+        if (at + d < 0 || at + d >= n) continue;  // the list does not wrap (cs_scroll_up_or_down) [C script]
+        const qb::Struct& prof = *valid[size_t(at + d)];
+        if (const qb::Struct* b = bodyPak(prof)) {
+            if (std::string p = strOf(b->find(qbkey::key("pak"))); !p.empty()) out.push_back(band::pakPath(p));
+            if (std::string p = strOf(b->find(qbkey::key("anims_pak"))); !p.empty()) out.push_back(band::pakPath(p));
+        }
+        if (const qb::Struct* in = descIn(g, "musician_instrument", descOf(prof, "musician_instrument")))
+            if (std::string p = strOf(in->find(qbkey::key("pak"))); !p.empty()) out.push_back(band::pakPath(p));
+    }
+    return out;
+}
 qb::Struct* locals(qs::ScriptRun& run) {
     if (run.frames.empty()) return nullptr;
     if (!run.frames.back().locals) run.frames.back().locals = std::make_shared<qb::Struct>();
@@ -35,8 +146,17 @@ void addGameNatives(FrontEnd& fe, const Disc& disc, TextureCache& textures) {
     // the pak's textures to the GPU and its scripts into the globals; the
     // callback runs with `end` and result = 0 (LoadPakAsync waits for it)
     // [C 0x8218B378; behaviour from LoadPakAsync / LoadPakAsync_callback].
+    // A character's pak (pak/models/...): its textures are the model's own
+    // (MenuObjects, the band) and the results art's (PushAssetContext), not
+    // the global cache's. GH3 reads it async (preload_band_member) but its
+    // LoadPakAsync runs inside a condition (load_musician_pak_file), which
+    // the VM runs to its end: instead, a body pak loaded has the character
+    // select's neighbours (their body, anims and instrument paks) read ahead
+    // on a worker, so the next scroll finds its paks read (owner: character
+    // select stutters).
     auto loaded = std::make_shared<std::set<std::string>>();
-    vm.addNative("LoadPak", [&disc, &textures, loaded](Vm& v, ScriptRun&, qb::Struct& p) {
+    auto prefetch = std::make_shared<PakPrefetch>(disc);
+    vm.addNative("LoadPak", [&disc, &textures, loaded, prefetch](Vm& v, ScriptRun&, qb::Struct& p) {
         const qb::Value* path = nullptr;
         for (const qb::Item& it : p.items)
             if (it.name == 0 && (it.value.type == qb::Type::String || it.value.type == qb::Type::WString)) path = &it.value;
@@ -48,11 +168,12 @@ void addGameNatives(FrontEnd& fe, const Disc& disc, TextureCache& textures) {
         for (char& c : folder) c = char(std::toupper(static_cast<unsigned char>(c)));
         const std::string file = last == std::string::npos ? src : src.substr(last + 1);
         std::string discPath = "DATA/COMPRESSED/" + folder + "/" + file + ".xen";
+        const bool modelPak = src.rfind("pak/models/", 0) == 0;
         bool ok = disc.exists(discPath);
         if (ok && !loaded->count(discPath)) {
             loaded->insert(discPath);
             try {
-                textures.loadPak(disc, discPath);
+                if (!modelPak) textures.loadPak(disc, discPath);
                 const auto pakShared = Pak::shared(disc, discPath);
                 const Pak& pak = *pakShared;
                 for (const PakEntry& e : pak.entries())
@@ -65,6 +186,8 @@ void addGameNatives(FrontEnd& fe, const Disc& disc, TextureCache& textures) {
                 ok = false;
             }
         }
+        if (ok && modelPak)
+            if (std::vector<std::string> next = neighbourPaks(v, discPath); !next.empty()) prefetch->want(next);
         if (!ok) v.logOnce("LoadPak: no " + discPath);
         if (const qb::Value* cb = Vm::param(p, K("load_callback"))) {
             qb::Struct cp;

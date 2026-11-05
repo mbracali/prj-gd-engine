@@ -6,6 +6,7 @@
 #include <SDL3/SDL_stdinc.h>
 #include <SDL3/SDL_timer.h>
 
+#include <cctype>
 #include <list>
 #include <mutex>
 
@@ -27,19 +28,34 @@ std::shared_ptr<const Pak> Pak::shared(const Disc& disc, const std::string& pakP
     static std::mutex mutex;
     static std::list<std::pair<std::string, std::shared_ptr<const Pak>>> cache;  // most recent first
     static const Disc* cacheDisc = nullptr;
-    std::lock_guard<std::mutex> lock(mutex);
-    if (cacheDisc != &disc) cache.clear(), cacheDisc = &disc;
-    for (auto it = cache.begin(); it != cache.end(); ++it)
-        if (it->first == pakPath) {
-            cache.splice(cache.begin(), cache, it);
-            return cache.front().second;
-        }
+    // The disc's names match in any case (LoadPak lowercases its path, the
+    // musician tables keep Johnny_1): one entry for both.
+    std::string key = pakPath;
+    for (char& c : key) c = char(std::tolower(static_cast<unsigned char>(c)));
+    auto find = [&]() -> std::shared_ptr<const Pak> {
+        if (cacheDisc != &disc) cache.clear(), cacheDisc = &disc;
+        for (auto it = cache.begin(); it != cache.end(); ++it)
+            if (it->first == key) {
+                cache.splice(cache.begin(), cache, it);
+                return cache.front().second;
+            }
+        return nullptr;
+    };
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        if (auto hit = find()) return hit;
+    }
+    // Read without the lock: a worker reading a character's pak (the
+    // character select's LoadPak, MenuObjects) must not stall the main
+    // thread's own hits. Two readers of one pak keep the first one cached.
     auto pak = std::make_shared<const Pak>(load(disc, pakPath));
-    cache.emplace_front(pakPath, pak);
+    std::lock_guard<std::mutex> lock(mutex);
+    if (auto hit = find()) return hit;
+    cache.emplace_front(key, pak);
     constexpr size_t kBudget = size_t(160) << 20;  // a venue, its band and the menus' paks
     size_t used = 0;
     for (auto it = cache.begin(); it != cache.end();) {
-        const bool pinned = it->first == "DATA/COMPRESSED/ZONES/global.pak.xen";
+        const bool pinned = it->first == "data/compressed/zones/global.pak.xen";
         used += pinned ? 0 : it->second->bytes();
         if (!pinned && it != cache.begin() && used > kBudget) it = cache.erase(it);
         else ++it;

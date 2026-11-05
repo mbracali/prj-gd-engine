@@ -119,6 +119,10 @@ public:
     // The template's program for a technique (compiled on first use); null
     // when the template is unknown or its shaders cannot be translated.
     const Program* get(uint32_t templateKey, matlib::Technique t = matlib::Default);
+    // Whether get() made (or failed) that program before: no GL work left.
+    bool has(uint32_t templateKey, matlib::Technique t = matlib::Default) const {
+        return programs_.count(uint64_t(templateKey) << 8 | t) != 0;
+    }
     // A named technique of a template (the filter templates' passes, e.g.
     // ImmediateMode's "_2D_Cutoff"), its Default variant; null when missing
     // or not translated.

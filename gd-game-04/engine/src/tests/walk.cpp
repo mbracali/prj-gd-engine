@@ -12,6 +12,7 @@
 #include <fstream>
 #include <sstream>
 
+#include "data/band.h"
 #include "data/json.h"
 #include "data/qbkey.h"
 #include "script/vm.h"
@@ -59,6 +60,19 @@ Walk::Walk(const std::string& name) : name_(name) {
             steps_.push_back({"quickplay_toprockers_fs", {"check:focus:score_name1", "key:Return"}, 30000});
             steps_.push_back({"quickplay_setlist_fs", {}, 30000});
         }
+    } else if (name == "results_art") {
+        // A quick play song as GD04_WALK_CHARACTER ("<name>[,<outfit>,<style>]",
+        // default Morello: a body with no asset_context), set while it plays;
+        // the results art must be that character's (check:mag_photo).
+        const char* who = SDL_getenv("GD04_WALK_CHARACTER");
+        const std::string setChar = std::string("set:character:") + (who && *who ? who : "Morello");
+        steps_ = boot;
+        steps_.push_back({"main_menu_fs", {D, D, C}, 10000});
+        steps_.push_back({"quickplay_select_difficulty_fs", {C}, 20000});
+        steps_.push_back({"quickplay_setlist_fs", {C}, 20000});
+        steps_.push_back({"song", {setChar.c_str()}, 30000});
+        steps_.push_back({"song_over", {}, 600000});
+        steps_.push_back({"quickplay_win_song_fs", {"check:mag_photo"}, 30000});
     } else if (name == "career") {
         // Career: band -> difficulty -> character hub -> venue -> setlist ->
         // the first song -> won -> newspaper -> autosave -> setlist [C: the
@@ -78,7 +92,7 @@ Walk::Walk(const std::string& name) : name_(name) {
         steps_.push_back({"career_setlist_fs", {C}, 20000});
         steps_.push_back({"song", {}, 30000});
         steps_.push_back({"song_over", {}, 600000});
-        steps_.push_back({"career_newspaper_fs", {C}, 30000});
+        steps_.push_back({"career_newspaper_fs", {"check:mag_photo", C}, 30000});
         steps_.push_back({"career_cash_reward_fs", {C}, 30000, true});  // the song's cash (Progression_AwardCash)
         steps_.push_back({"career_unlock_1_fs", {C}, 30000, true});
         steps_.push_back({"career_setlist_fs", {}, 30000});
@@ -425,7 +439,7 @@ Walk::Walk(const std::string& name) : name_(name) {
         steps_.push_back({"coop_career_choose_part_fs", {C, P2C}, 20000});
         steps_.push_back({"song", {}, 30000});
         steps_.push_back({"song_over", {}, 600000});
-        steps_.push_back({"coop_career_newspaper_fs", {}, 30000});
+        steps_.push_back({"coop_career_newspaper_fs", {"check:mag_photo"}, 30000});
     } else if (name == "faceoff" || name == "proface" || name == "battle") {
         // MULTIPLAYER -> controllers (as co-op) -> the mode [C script
         // create_mp_select_mode_menu: FACE-OFF, PRO FACE-OFF, BATTLE; CO-OP
@@ -442,7 +456,11 @@ Walk::Walk(const std::string& name) : name_(name) {
         for (int i = 0; i < modeIdx; ++i) mode.push_back(D);
         mode.push_back(C);
         steps_.push_back({"mp_select_mode_fs", mode, 20000});
-        steps_.push_back({"mp_faceoff_character_select_fs", {C, P2C}, 20000});
+        // Each player scrolls the characters before picking (player 1 down
+        // three and up one: Izzy; player 2 down one: Casey): the results art
+        // shows a player's character (check:mag_photo), and GD04_FRAMELOG
+        // times the scrolls.
+        steps_.push_back({"mp_faceoff_character_select_fs", {Op(D, 300), Op(D, 300), Op(D, 300), Op(Action::Up, 300), Op::p2(D, 300), Op(C, 300), P2C}, 20000});
         steps_.push_back({"mp_faceoff_character_hub_fs", {C, P2C}, 20000});
         steps_.push_back({"mp_faceoff_select_venue_fs", {C}, 20000});
         steps_.push_back({"mp_faceoff_setlist_fs", {C}, 20000});
@@ -451,7 +469,7 @@ Walk::Walk(const std::string& name) : name_(name) {
         else steps_.push_back({"mp_faceoff_select_difficulty_fs", {C, P2C}, 20000});
         steps_.push_back({"song", {}, 30000});
         steps_.push_back({"song_over", {}, 900000});
-        steps_.push_back({"mp_faceoff_newspaper_fs", {}, 120000});
+        steps_.push_back({"mp_faceoff_newspaper_fs", {"check:mag_photo"}, 120000});
     } else if (name == "escquit") {
         // Back three times in a row on the main menu quits (to the launcher);
         // another button between them starts the count again (owner 1.9).
@@ -687,6 +705,73 @@ bool Walk::act(const std::string& what, FrontEnd& fe, WalkHost& host) {
         if (k == SDLK_UNKNOWN) return fail("no key " + rest("key:"));
         host.walkKey(int(k));
         return true;
+    }
+    if (starts("set:character:")) {  // set:character:<name>[,<outfit>,<style>]: player 1's character (player1_status)
+        std::string v = rest("set:character:");
+        int o = 1, sy = 1;
+        if (size_t c = v.find(','); c != std::string::npos) {
+            std::sscanf(v.c_str() + c + 1, "%d,%d", &o, &sy);
+            v.resize(c);
+        }
+        qb::Value* st = fe.vm().globals().ensure(qbkey::key("player1_status"));
+        if (!st->st) return fail("no player1_status");
+        auto copy = std::make_shared<qb::Struct>(*st->st);
+        qs::Vm::set(*copy, qbkey::key("character_id"), qs::Vm::makeKey(qbkey::key(v.c_str())));
+        qs::Vm::set(*copy, qbkey::key("outfit"), qs::Vm::makeInt(o));
+        qs::Vm::set(*copy, qbkey::key("style"), qs::Vm::makeInt(sy));
+        st->st = copy;
+        std::printf("  character: %s outfit %d style %d\n", v.c_str(), o, sy);
+        return true;
+    }
+    if (what == "check:mag_photo") {
+        // The results art (create_newspaper_menu's Mag_Photo) comes from the
+        // body pak of a player's character, outfit and style (its asset
+        // context), not whichever body pak loaded first [C script].
+        qs::Vm& vm = fe.vm();
+        auto keyOf = [](const qb::Value* v) -> uint32_t {
+            if (!v) return 0;
+            return v->type == qb::Type::String || v->type == qb::Type::WString ? qbkey::key(v->str.c_str()) : v->key;
+        };
+        std::vector<uint32_t> want;
+        for (const char* ps : {"player1_status", "player2_status"}) {
+            const qb::Value* st = vm.global(qbkey::key(ps));
+            if (!st || !st->st) continue;
+            const uint32_t id = keyOf(qs::Vm::param(*st->st, qbkey::key("character_id")));
+            const int o = int(qs::Vm::number(qs::Vm::param(*st->st, qbkey::key("outfit")), 1));
+            const int sy = int(qs::Vm::number(qs::Vm::param(*st->st, qbkey::key("style")), 1));
+            const qb::Value* profs = vm.global(qbkey::key("musician_profiles"));
+            if (!profs || !profs->arr) continue;
+            for (const qb::Value& pr : profs->arr->values) {
+                const qb::Value* n = pr.st ? pr.st->find(qbkey::key("name")) : nullptr;
+                if (!n || keyOf(n) != id) continue;
+                char body[160];
+                std::snprintf(body, sizeof body, "Guitarist_%s_Outfit%d_Style%d", n->str.c_str(), o, sy);
+                if (const qb::Struct* b = band::bodyDesc(vm.globals(), qbkey::key(body))) {
+                    // No asset_context (Morello_1, the BoneMen): the pak's name.
+                    uint32_t ctx = keyOf(b->find(qbkey::key("asset_context")));
+                    if (const qb::Value* pk = b->find(qbkey::key("pak")); !ctx && pk) {
+                        std::string stem = pk->str.substr(pk->str.find_last_of("\\/") + 1);
+                        if (stem.size() > 4) stem.resize(stem.size() - 4);  // ".pak"
+                        ctx = qbkey::key(stem.c_str());
+                    }
+                    want.push_back(ctx);
+                }
+                std::printf("  mag_photo: %s wants %s (%s)\n", ps, body, want.empty() ? "-" : qbkey::name(want.back()).c_str());
+            }
+        }
+        int n = 0, ok = 0;
+        std::vector<const ui::Element*> stack{&fe.ui().root()};
+        while (!stack.empty()) {
+            const ui::Element* e = stack.back();
+            stack.pop_back();
+            for (const auto& c : e->children) stack.push_back(c.get());
+            if (e->texture != qbkey::key("Mag_Photo")) continue;
+            ++n;
+            const bool good = e->texContext && std::find(want.begin(), want.end(), e->texContext) != want.end();
+            ok += good;
+            std::printf("  mag_photo: a sprite from %s%s\n", e->texContext ? qbkey::name(e->texContext).c_str() : "the global cache", good ? "" : " (wrong)");
+        }
+        return n && ok == n ? true : fail("the results art is not the player's character (" + std::to_string(ok) + " / " + std::to_string(n) + ")");
     }
     if (starts("check:selected:")) {
         // The focused menu's selected item stands for that element (its focus handler names it).

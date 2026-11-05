@@ -37,6 +37,23 @@ public:
     }
     // Size of a texture (0 x 0 if unknown).
     void size(uint32_t key, int& w, int& h) const;
+    // GH3's asset contexts (PushAssetContext context = <pak name key>): every
+    // character body pak holds its own .img Mag_Photo, all under the same
+    // key; the pak header's pak-name key (= the body's asset_context, e.g.
+    // axel_1) tells them apart [C data: musician_body[].asset_context = the
+    // .img entries' pak name; script create_newspaper_menu]. Uploads the
+    // pak's .img entries (only: the results art, small) under `context`,
+    // once; returns how many there are, -1 on error.
+    int loadContextImages(const Disc& disc, const std::string& pakPath, uint32_t context);
+    bool hasContext(uint32_t context) const { return contexts_.count(context) != 0; }
+    // A texture under a context, or 0 (then the global one applies).
+    gfx::TextureId find(uint32_t context, uint32_t key) const {
+        if (!context) return find(key);
+        auto it = ctxTextures_.find(ctxKey(context, key));
+        return it == ctxTextures_.end() ? find(key) : it->second.id;
+    }
+    bool inContext(uint32_t context, uint32_t key) const { return context && ctxTextures_.count(ctxKey(context, key)); }
+    void size(uint32_t context, uint32_t key, int& w, int& h) const;
     size_t count() const { return textures_.size(); }
 
 private:
@@ -48,4 +65,7 @@ private:
     gfx::RenderDevice& dev_;
     std::unordered_map<uint32_t, Entry> textures_;
     std::unordered_map<uint32_t, uint32_t> materials_;
+    static uint64_t ctxKey(uint32_t context, uint32_t key) { return (uint64_t(context) << 32) | key; }
+    std::unordered_map<uint64_t, Entry> ctxTextures_;
+    std::unordered_map<uint32_t, int> contexts_;  // loaded contexts -> their image count
 };

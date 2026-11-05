@@ -42,6 +42,7 @@ struct Element {
     bool zGiven = false;  // without its own z_priority an element draws at its parent's [I]
     std::array<uint8_t, 4> rgba{255, 255, 255, 255};
     uint32_t texture = 0, font = 0;
+    uint32_t texContext = 0;  // the asset context the texture was set under (PushAssetContext), 0: global
     std::string text;
     bool hidden = false, flipH = false, flipV = false, notFocusable = false, blockEvents = false;
     bool allowExpansion = false, locked = false, preserveOrientation = false;
@@ -203,6 +204,11 @@ private:
     // DisplayLoadingScreen's image (full screen) and spinning wheel, over
     // everything until HideLoadingScreen [C 0x8218DDE8 / 0x8218E0A0].
     uint32_t loadingTex_ = 0, loadingSpin_ = 0;
+    // PushAssetContext / PopAssetContext: textures set meanwhile come from
+    // the context's pak first (a character body's Mag_Photo) [C script
+    // create_newspaper_menu]; 0 entries: a context with no body pak (zones).
+    std::vector<uint32_t> assetContexts_;
+    uint32_t loadAssetContext(uint32_t context, const qb::Struct* body);
     float spinX_ = 0, spinY_ = 0;
     double loadingMs_ = 0;
     // Texture-slot movies (PlayMovieFromBuffer, PreLoadMovie +

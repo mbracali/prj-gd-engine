@@ -3,6 +3,7 @@
 #include "render/band_view.h"
 
 #include <SDL3/SDL_stdinc.h>
+#include <SDL3/SDL_timer.h>
 
 #include <algorithm>
 #include <cmath>
@@ -163,7 +164,39 @@ void BandView::remove(int member) {
     m = Member{};
 }
 
-int BandView::add(gfx::RenderDevice& dev, const band::Model& model, std::string& error) {
+bool BandView::prepare(gfx::RenderDevice& dev, const band::Model& model, std::unordered_map<uint32_t, gfx::TextureId>& made, double budgetMs) {
+    if (dev_ && dev_ != &dev) return true;  // add() reports it
+    dev_ = &dev;
+    const uint64_t t0 = SDL_GetTicksNS();
+    auto spent = [&] { return double(SDL_GetTicksNS() - t0) / 1e6 >= budgetMs; };
+    if (!program_) {
+        std::string error;
+        program_ = dev.createProgram(programDesc(), error);
+        if (!program_) return true;  // add() reports it
+        if (lib_) gh3_.init(dev, lib_);
+        if (spent()) return false;
+    }
+    for (const auto& [key, t] : model.textures) {
+        if (made.count(key) || (t.usage != 0 && !gh3_.ready())) continue;
+        std::string err;
+        auto levels = t.texLevels();
+        made[key] = dev.createTexture(t.desc(), levels.data(), err);  // a failed one stays 0: add() skips it
+        if (spent()) return false;
+    }
+    // The programs (one GL link each, the first time a template is used).
+    if (gh3_.ready())
+        for (const band::Part& part : model.parts)
+            for (const scene::Material& mat : part.scene.materials) {
+                if (gh3_.has(mat.shader) && gh3_.has(mat.shader, matlib::DynamicShadowReceiver)) continue;
+                gh3_.get(mat.shader);
+                gh3_.get(mat.shader, matlib::DynamicShadowReceiver);
+                if (spent()) return false;
+            }
+    return true;
+}
+
+int BandView::add(gfx::RenderDevice& dev, const band::Model& model, std::string& error,
+                  const std::unordered_map<uint32_t, gfx::TextureId>* made) {
     if (dev_ && dev_ != &dev) {
         error = "band view: another device";
         return -1;
@@ -178,6 +211,14 @@ int BandView::add(gfx::RenderDevice& dev, const band::Model& model, std::string&
     std::unordered_map<uint32_t, gfx::TextureId> tex, all;  // colour maps; every texture (GH3's shaders)
     for (const auto& [key, t] : model.textures) {
         if (t.usage != 0 && !gh3_.ready()) continue;  // the approximation: colour maps only [I: class 0]
+        if (made)
+            if (auto m = made->find(key); m != made->end()) {
+                if (!m->second) continue;
+                if (t.usage == 0) tex.emplace(key, m->second);
+                all.emplace(key, m->second);
+                mem.textures.push_back(m->second);
+                continue;
+            }
         std::string err;
         auto levels = t.texLevels();
         if (const gfx::TextureId id = dev.createTexture(t.desc(), levels.data(), err)) {
