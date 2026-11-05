@@ -249,10 +249,17 @@ void addCoreNatives(Vm& vm) {
             Vm::set(*run.frames.back().locals, K("starttime"), Vm::makeInt(int32_t(v.clockMs())));
         return true;
     });
+    // GetTrueElapsedTime's one caller is guitar_startup's legal-screen wait,
+    // a loop without a Wait until 6000 ms (the 360 draws the loading screen
+    // from another thread meanwhile) [C script guitar_startup]. Here the VM
+    // clock stands still within a frame, so the loop spun to the step's
+    // budget every frame (~70 ms: the legal screen ran at ~12 fps): the
+    // call yields the script to the next frame [I].
     vm.addNative("GetTrueElapsedTime", [](Vm& v, ScriptRun& run, qb::Struct& p) {
         const float start = Vm::number(Vm::param(p, K("starttime")), 0);
         if (!run.frames.empty() && run.frames.back().locals)
             Vm::set(*run.frames.back().locals, K("elapsedtime"), Vm::makeInt(int32_t(v.clockMs() - start)));
+        run.waitFrames = 1;
         return true;
     });
     vm.addNative("GetElapsedTime", [](Vm& v, ScriptRun& run, qb::Struct& p) {
