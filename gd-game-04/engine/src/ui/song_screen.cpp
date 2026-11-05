@@ -343,6 +343,7 @@ void SongScreen::tick(double nowMs, Mixer& mixer) {
             Player& pl = match_->player(p);
             Highway2D& hw = p == 0 ? highway_ : highway2_;
             hw.step(pl.stats(), stepMs_, kStepMs, match_->battleMode(), twoModes);
+            hw.stepTails(pl, match_->track(p), stepMs_, whammy_[size_t(p)], !match_->battleMode());
             const bool other = match_->mode() == GameMode::Coop || match_->mode() == GameMode::Boss;
             for (const PlayerEvent& ev : pl.events()) {
                 if (p == 0 && venue_ && ev.note >= 0 && (ev.kind == PlayerEvent::Kind::Hit || ev.kind == PlayerEvent::Kind::Miss))
@@ -356,6 +357,7 @@ void SongScreen::tick(double nowMs, Mixer& mixer) {
                 // GuitarEvent_MissedNote: a passing note missed with the guitar already
                 // muted pulses the highway black; else the guitar mutes [C script].
                 if (ev.kind == PlayerEvent::Kind::Miss && muted_[size_t(p)]) hw.missPulse(stepMs_);
+                if (ev.kind == PlayerEvent::Kind::Miss) hw.noteMissed(ev.note);
                 if (hit || ev.kind == PlayerEvent::Kind::Miss || ev.kind == PlayerEvent::Kind::Overstrum) muted_[size_t(p)] = !hit;
                 if (hit && ev.note >= 0)
                     hw.noteHit(match_->track(p).notes[size_t(ev.note)].frets, shownHeld_[size_t(p)], stepMs_, pl.stats().starPowerActive);
@@ -467,6 +469,8 @@ bool SongScreen::frame(Canvas& canvas, Mixer& mixer, const TextureCache* texture
                 (unsigned long long)h.dialFlips, (unsigned long long)h.combos, (unsigned long long)h.dangerStarts,
                 (unsigned long long)h.starReady, (unsigned long long)h.starActivations, (unsigned long long)h.starOffs,
                 (unsigned long long)highway_.flamesStarted, (unsigned long long)h.missingTextures);
+        SDL_Log("tails: holds %llu, dead %llu, star whammys %llu", (unsigned long long)highway_.holdFxStarted,
+                (unsigned long long)highway_.deadTails, (unsigned long long)highway_.starWhammys);
     }
     return more;
 }

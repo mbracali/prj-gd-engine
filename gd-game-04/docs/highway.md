@@ -265,10 +265,41 @@ removed and a flame shown (2.8) [I: GemStep / hit path not fully read].
   the playline end and the pattern moves up the tail 2 entries (16 rows) a frame.
   control_whammy_pitchshift passes value = bar + 1 and the hold's remaining ms (CheckNoteHoldPerFrame
   0x8211D078, the note's field), reset_whammy_pitchshift SetAllWhammyValues 1.0 at the hold's end.
-  The port: render/highway2d.cpp (the tail on the 8-row grid; its two ends interpolate their cell's
-  scale [I]), the natives and the hold hook in ui/song_hooks.cpp; selftest wibble check.
-- Dead / star / normal swaps: `MakeDeadWhammy` 0x8210E508 (sys_Whammy2D_Dead), `MakeStarWhammy`
-  0x8210E5C8, `MakeNormalWhammy` 0x8210E6B8 [C names; triggers I: miss/release, SP on].
+- Texture coordinates [C 0x8238E338's last loop]: u 0 (left) / 1 (right); v 1.0 (the 32x32
+  texture's bottom row: an opaque coloured bar, white-hot centre, soft alpha edges) except the
+  first DAT_8291E730 = 4.0 grid cells from the tail end, whose vertex k (from the grid row at the
+  tail end) gets v = k / 4 + (that row's distance above the tail end in cells) / 4: the texture's
+  32 rows spread over the 32 rows behind the tail end, its transparent top and rounded cap
+  (texture rows 12..20) making the tail's rounded end. The strip runs from the grid row at the
+  tail end to the first grid row past the head (the last vertex below the head, hidden by the
+  gem / the raised button). The tail end and the head carry whammy_offset_tweak (-33 ms behind the gem).
+- Material [C data global_gfx.scn]: WhammyBar_UI (0xBE66AAC0), m_psPass0MaterialColor (1,1,1,1),
+  d8 3 (alpha blend), so the colour is the texture's; no glow pass (the sprite's
+  `m_glowenabled` 0). Dead / Star Power: sys_Whammy2D_Dead (dark grey) / sys_Whammy2D_StarPower
+  (cyan with a white centre), same shader.
+- Material swaps: `Function_8210C0D0` (element, player, button_models key, ..., z) sets the
+  bar's material from `button_models.<c>` and its z_priority.
+  - Dead (`dead_whammy`, z 3.1 = under the now-bar buttons at rest, 3.6..3.9): CheckNoteHoldEnd
+    (0x8211D3B8) makes every fret's bar of the hold dead and clears `holding`, so the head
+    scrolls on from row 977.8 (a released sustain's rest goes grey and slides under the
+    buttons); the miss judge (0x8211F328) makes a missed note's bars dead [C].
+  - Star (`star_power_whammy_material`, z 4.0): star_power_whammy (C-spawned for a held star
+    note; returns at once in Star Power) counts the frames the bar moved more than 0.03: 5 of
+    them (whammy_on held at 5 frames) MakeStarWhammy the pattern's bars, 5 without
+    MakeNormalWhammy them back; not in battle / boss (do_blue_whammys 0) [C script].
+  - Star Power: the gem and tail materials are chosen at creation (0x82120C90); StarPowerOn
+    (0x8211DA70) and GuitarEvent_StarPowerOff do not touch the ones already out [C].
+- Hold FX (GuitarEvent_WhammyOn -> WhammyFXOn 0x8211C1A0, per fret of the pattern with a
+  sustain; WhammyFXOff 0x8211C390 / 0x8211C0E0 removes them) [C 0x8211BE98]: a SpriteElement
+  `fx_whammy_<c><p>` (DAT_829193A0) in gem_container<p>, clonematerial sys_whammy_hold01 (512x512
+  DXT1, AnimatedTexture_UI 4 x 4 frames at 30 fps, d8 1 additive: a red / white-hot burst), pos =
+  button_up_models.<c>.pos_2d (left_pos_2d lefty), just (0, 1), scale 1 (128x128 px), z 10; and a
+  particle system `fx_whammy_<c><p>_particle` (DAT_829193C8) with whammy_particle_params (orange
+  -> red sparks, 0.5 s; read into a C struct by 0x8210D258) at pos_2d - (0, 20) [C].
+- The port: render/highway2d.cpp drawTail (the strip, cap, materials, z), stepTails (hold start /
+  end, star whammy, the Star Power log), the hold burst in drawAll; the sparks and the
+  SetNewWhammyValue natives in ui/song_hooks.cpp; selftest wibble check. [I]: the tail's two
+  ends interpolate their cell's wibble; the burst's frames count from its creation.
 
 ### 2.7 Now-bar strike buttons [C script setup_highway, C 0x8211B1E0]
 

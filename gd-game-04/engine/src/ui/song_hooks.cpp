@@ -1078,10 +1078,12 @@ void SongHooks::addNatives() {
         return true;
     });
     // WhammyFXOn / WhammyFXOff {song array_entry player_status pattern ...}
-    // (0x8211C1A0 / 0x8211C390): per fret of the pattern a spark system at the
-    // fret's button (button_up_models.<color>.pos_2d, left_pos_2d when
-    // lefty) in gem_container<p>, with whammy_particle_params, id
-    // <color>WhammyFXID01<p> [C; the second system 02 I: one here].
+    // (0x8211C1A0 / 0x8211C390): per fret of the pattern with a sustain,
+    // 0x8211BE98 makes the sprite fx_whammy_<c><p> (sys_whammy_hold01: drawn by
+    // render/highway2d) and a spark system fx_whammy_<c><p>_particle (the
+    // DAT_829193C8 ids) 20 px above the fret's button (button_up_models.<color>
+    // .pos_2d, left_pos_2d when lefty) in gem_container<p>, with
+    // whammy_particle_params (read by 0x8210D258) [C].
     auto whammy = [this](Vm& v, qb::Struct& p, bool on) {
         const uint32_t ps = keyOf(Vm::param(p, K("player_status")));
         const qb::Value* st = v.global(ps);
@@ -1094,7 +1096,7 @@ void SongHooks::addNatives() {
         const qb::Value* params = v.global(K("whammy_particle_params"));
         for (int l = 0; l < 5; ++l) {
             if (!(pattern & (0x10000 >> (4 * l)))) continue;
-            const uint32_t id = K(std::string(kColors[l]) + "WhammyFXID01" + pt);
+            const uint32_t id = K(std::string("fx_whammy_") + kColors[l][0] + pt + "_particle");
             if (!on) {
                 fx_.destroy(id, true);
                 continue;
@@ -1105,7 +1107,11 @@ void SongHooks::addNatives() {
             Vm::set(c, K("parent"), Vm::makeKey(K("gem_container" + pt)));
             if (models && models->st)
                 if (const qb::Value* m = v.globals().field(*models->st, K(kColors[l])); m && m->st)
-                    if (const qb::Value* pos = v.globals().field(*m->st, K(lefty ? "left_pos_2d" : "pos_2d"))) Vm::set(c, K("pos"), *pos);
+                    if (const qb::Value* pos = v.globals().field(*m->st, K(lefty ? "left_pos_2d" : "pos_2d"))) {
+                        qb::Value at = *pos;
+                        if (at.type == qb::Type::Pair) at.f[1] -= 20;  // f2 - 20 [C 0x8211C0AC]
+                        Vm::set(c, K("pos"), at);
+                    }
             fx_.create(c, nowMs_);
         }
         return true;
@@ -1115,7 +1121,7 @@ void SongHooks::addNatives() {
     vm.addNative("WhammyFXOffAll", [this](Vm& v, ScriptRun&, qb::Struct& p) {
         const qb::Value* st = v.global(keyOf(Vm::param(p, K("player_status"))));
         const qb::Value* text = st && st->st ? v.globals().field(*st->st, K("Text")) : nullptr;
-        for (const char* c : kColors) fx_.destroy(K(std::string(c) + "WhammyFXID01" + (text ? text->str : "p1")), true);
+        for (const char* c : kColors) fx_.destroy(K(std::string("fx_whammy_") + c[0] + (text ? text->str : "p1") + "_particle"), true);
         return true;
     });
     // SetNewWhammyValue {value time_remaining player_status player} /

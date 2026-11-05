@@ -23,7 +23,8 @@ constexpr uint32_t kStarHammer[5] = {0x22E10D71, 0x5C5C9114, 0x76D89EA6, 0xB695B
 constexpr uint32_t kBattle[5] = {0x06485C80, 0xAE484472, 0xD9987563, 0xCEA8D3F0, 0x36381741};
 constexpr uint32_t kBattleHammer[5] = {0x4E605076, 0xDADBCA9A, 0xAB496E94, 0xD6C32766, 0x486C2688};
 constexpr uint32_t kWhammy[5] = {0xB47133C1, 0x6C97B6C6, 0xEC463E7A, 0x037E6D2C, 0xCA034A7A};
-constexpr uint32_t kWhammyStarPower = 0xE78E1A35;
+constexpr uint32_t kWhammyStarPower = 0xE78E1A35, kWhammyDead = 0x2A589F46;
+constexpr uint32_t kWhammyHold = 0x736906DE;  // sys_whammy_hold01: 4x4 flip-book at 30 fps, additive [C data]
 constexpr uint32_t kFretbarLarge = 0xC1832175, kFretbarMedium = 0x9C77551B;
 constexpr uint32_t kSidebar = 0x7F2DACD6, kSpGlow = 0x72B4DF7E, kBolt = 0x9D12571C, kString = 0x2ED9AC77;
 constexpr uint32_t kHead[5] = {0x42B576FB, 0x2A2FFBB4, 0x043BD094, 0xC9901DA2, 0x49DED95F};
@@ -87,6 +88,7 @@ bool Highway2D::init(const Globals& g, int difficulty, int players, int player) 
     neckSprite_ = num(g, "neck_sprite_size", 16);
     neckLipAdd_ = num(g, "neck_lip_add", 16);
     whammyCutoff_ = num(g, "whammy_cutoff", 1100);
+    whammyTweakMs_ = num(g, "whammy_offset_tweak", -33);
     neckLipBase_ = num(g, "neck_lip_base", 5);
     buttonUpPixels_ = num(g, "button_up_pixels", 20);
     buttonSinkMs_ = num(g, "button_sink_time", 0.1f) * 1000.0f;
@@ -232,6 +234,94 @@ void Highway2D::missPulse(double now) {
     // highway_pulse_time, then -> highway_normal over the other half [C script].
     if (now - pulseAt_ < pulseMs_) return;
     pulseAt_ = now, ++pulses;
+}
+
+Highway2D::Tail* Highway2D::tail(int note) {
+    for (auto& t : tails_)
+        if (t.first == note) return &t.second;
+    tails_.push_back({note, Tail{}});
+    return &tails_.back().second;
+}
+
+const Highway2D::Tail* Highway2D::tail(int note) const {
+    for (const auto& t : tails_)
+        if (t.first == note) return &t.second;
+    return nullptr;
+}
+
+bool Highway2D::spAt(double ms) const {
+    bool on = false;
+    for (const auto& e : spLog_) {
+        if (e.first > ms) break;
+        on = e.second;
+    }
+    return on;
+}
+
+void Highway2D::noteMissed(int note) {
+    // The miss judge makes the note's whammy bars dead: MakeDeadWhammy's
+    // 0x8210C0D0 with button_models.<c>.dead_whammy (sys_Whammy2D_Dead), z
+    // 3.1 (under the now-bar buttons) [C 0x8211F5C0-0x8211F660].
+    if (note < 0) return;
+    Tail* t = tail(note);
+    if (!t->dead) t->dead = true, ++deadTails;
+}
+
+void Highway2D::stepTails(const Player& player, const NoteTrack& track, double now, float whammy, bool blueWhammys) {
+    // A gem / tail takes the Star Power material if Star Power is on when it
+    // is created; StarPowerOn does not touch the ones already out [C
+    // 0x82120C90, 0x8211DA70].
+    if (spLog_.empty() ? player.stats().starPowerActive : spLog_.back().second != player.stats().starPowerActive)
+        spLog_.push_back({now, player.stats().starPowerActive});
+    const int held = player.sustaining();
+    if (held != holdNote_) {
+        // CheckNoteHoldEnd: every fret's tail of the hold made dead (z 3.1),
+        // `holding` 0 (the head scrolls on from row whammy_cutoff) -- a hold
+        // played to its end has no tail left to show [C 0x8211D3B8-0x8211D570].
+        if (holdNote_ >= 0) {
+            Tail* t = tail(holdNote_);
+            if (!t->dead) ++deadTails;
+            t->dead = true, t->star = false, t->releasedAt = now;
+        }
+        // GuitarEvent_WhammyOn -> WhammyFXOn (0x8211C1A0): per fret of the
+        // pattern with a sustain, Function_8211BE98 makes fx_whammy_<c>p<n>
+        // (sys_whammy_hold01 at button_up_models pos_2d, just (0, 1), scale 1,
+        // z 10) and its particle system (render: drawAll; the particles:
+        // ui/song_hooks.cpp) [C].
+        holdNote_ = held, holdStart_ = now;
+        holdFrets_ = held >= 0 && size_t(held) < track.notes.size() ? track.notes[size_t(held)].frets : 0;
+        if (held >= 0) ++holdFxStarted;
+        whammyOn_ = whammyStarOn_ = whammyStarOff_ = 0, whammyFirst_ = true;
+    }
+    // star_power_whammy (spawned for a held star note; it returns at once in
+    // Star Power): the bar moving more than 0.03 a frame keeps whammy_on at
+    // 5 frames; 5 frames of it MakeStarWhammy the pattern's bars
+    // (star_power_whammy_material, z 4), 5 frames without MakeNormalWhammy
+    // them; not in battle / boss (do_blue_whammys) [C script, 0x8210E5C8 / 0x8210E6B8].
+    if (held >= 0 && size_t(held) < track.notes.size()) {
+        const TrackNote& n = track.notes[size_t(held)];
+        if (n.phrase >= 0 && !player.phraseLost(n.phrase) && !player.stats().starPowerActive) {
+            if (whammyFirst_) lastWhammy_ = whammy, whammyFirst_ = false;
+            if (std::fabs(whammy - lastWhammy_) > 0.03f) whammyOn_ = 5;
+            Tail* t = tail(held);
+            if (whammyOn_ > 0) {
+                whammyStarOff_ = 0, ++whammyStarOn_, --whammyOn_;
+                if (blueWhammys && whammyStarOn_ == 5 && !t->star) t->star = true, ++starWhammys;
+            } else {
+                whammyStarOn_ = 0, ++whammyStarOff_;
+                if (blueWhammys && whammyStarOff_ == 5) t->star = false;
+            }
+            lastWhammy_ = whammy;
+        }
+    }
+    // A tail's element goes when its end passes row 1152 [C 0x8210E750].
+    tails_.erase(std::remove_if(tails_.begin(), tails_.end(),
+                                [&](const std::pair<int, Tail>& t) {
+                                    if (size_t(t.first) >= track.notes.size()) return true;
+                                    const TrackNote& n = track.notes[size_t(t.first)];
+                                    return t.first != held && rowOf(double(n.time) - whammyTweakMs_ + n.holdMs, now) > kRows;
+                                }),
+                 tails_.end());
 }
 
 SDL_Color Highway2D::surfaceTint(double now) const {
@@ -484,6 +574,72 @@ void Highway2D::drawStarPowerFx(Canvas& c, const TextureCache& tex, double now, 
     }
 }
 
+void Highway2D::drawTail(Canvas& c, const TextureCache& tex, const TrackNote& n, int i, int fret, int lane, const Player& player, double now) const {
+    // Rows (0 top .. 1024 playline .. 1152 the last): the mover's elapsed
+    // time carries whammy_offset_tweak (-33 ms: the tail 33 ms behind its
+    // gem); the tail end is the length L = hold / T behind the head
+    // [C 0x82121428-0x82121444, 0x8210E750].
+    const Tail* t = tail(i);
+    const double noteMs = double(n.time) - whammyTweakMs_;
+    const double rowEnd = rowOf(noteMs + n.holdMs, now);
+    const double pinned = double(whammyCutoff_) * kRealRows / 1152.0;
+    double rowHead = rowOf(noteMs, now);
+    // Held: the head's start time is reset each frame to now - whammy_cutoff
+    // x T / 1152, the head at row 1100 x 1024 / 1152 = 977.8 (above the
+    // playline, under the raised fret buttons) [C 0x8210E8D4-0x8210E910];
+    // let go (CheckNoteHoldEnd's holding 0), it scrolls on from there [C].
+    if (player.sustaining() == i) rowHead = pinned;
+    else if (t && t->releasedAt >= 0) rowHead = pinned + (now - t->releasedAt) / travelMs_ * kRealRows;
+    if (rowHead <= 0 || rowEnd >= kRows - 8) return;
+    // The strip (0x8238E338): vertices on the 8-row grid from the grid row at
+    // the tail end to the first grid row past the head; half width =
+    // whammy_top_width x (1 + whammy_width_offset x D) / 2, D the depth of
+    // the grid row; grid row k carries the wibble entry 128 - k, which
+    // WhammyBar_UI's vertex shader multiplies the half width by. Texture u 0
+    // (left) .. 1 (right); v 1.0 (the texture's bottom row: the bar) except
+    // the first DAT_8291E730 = 4 grid cells from the tail end, v = (cells
+    // from the tail end) / 4: the texture's rounded cap [C 0x8238E338, 0x8238ECF8].
+    const double r0 = std::max(0.0, rowEnd);
+    const double rLast = std::min(double(kRows - 8), (std::floor(rowHead / 8.0) + 1.0) * 8.0);
+    if (r0 >= rLast) return;
+    std::vector<double> rows{r0};
+    for (double g = std::floor(r0 / 8.0) * 8.0 + 8.0; g < rLast; g += 8.0) rows.push_back(g);
+    rows.push_back(rLast);
+    const auto entry = [&](int k) {
+        const int e = 128 - k;
+        return e >= 0 && e < 128 ? double(wibble_[size_t(e)]) : 1.0;
+    };
+    const auto scaleAt = [&](double r) {
+        const int k = int(std::floor(r / 8.0));
+        const double f = r / 8.0 - k;
+        return float(entry(k) + (entry(k + 1) - entry(k)) * f);
+    };
+    // The tail end's v: 0 at the end, 1 four grid cells (32 rows) on [C]. The
+    // texel centres of the first / last rows keep a wrapping sampler off the far edge.
+    const auto vAt = [&](double r) {
+        const double cap = rowEnd < 0 ? 1.0 : std::min(1.0, (r - rowEnd) / 32.0);
+        return float(std::clamp(cap, 0.5 / 32.0, 1.0 - 0.5 / 32.0));
+    };
+    // The material: dead (sys_Whammy2D_Dead), else Star Power at creation or
+    // a star whammy (sys_Whammy2D_StarPower), else the fret's [C 0x82121360, 0x8210C0D0].
+    const uint32_t key = t && t->dead                                        ? kWhammyDead
+                         : (t && t->star) || spAt(createdAt(double(n.time))) ? kWhammyStarPower
+                                                                              : kWhammy[fret];
+    const int texId = int(tex.find(key).id);
+    for (size_t s = 0; s + 1 < rows.size(); ++s) {
+        const float va = rowDepth(float(rows[s])), vb = rowDepth(float(rows[s + 1]));
+        const float wa = whammyTop_ * (1 + whammyOffset_ * va) * 0.5f * scaleAt(rows[s]);
+        const float wb = whammyTop_ * (1 + whammyOffset_ * vb) * 0.5f * scaleAt(rows[s + 1]);
+        const float xa = laneX(lane, va), xb = laneX(lane, vb), ya = yAt(va), yb = yAt(vb);
+        const auto A = uint8_t(255 * alphaAt(ya)), B = uint8_t(255 * alphaAt(yb));
+        const float ta = vAt(rows[s]), tb = vAt(rows[s + 1]);
+        const Vertex p0{xa - wa, ya, 0, 0, ta, 255, 255, 255, A}, p1{xa + wa, ya, 0, 1, ta, 255, 255, 255, A};
+        const Vertex p2{xb + wb, yb, 0, 1, tb, 255, 255, 255, B}, p3{xb - wb, yb, 0, 0, tb, 255, 255, 255, B};
+        const Vertex q[6] = {p0, p1, p2, p0, p2, p3};
+        c.draw(q, 6, texId, Blend::Alpha);
+    }
+}
+
 void Highway2D::drawAll(Canvas& c, const TextureCache& tex, const NoteTrack& track, const Player& player, double now, uint8_t held) {
     const PlayerStats& st = player.stats();
     drawStarPowerFx(c, tex, now, true);  // the glow and the big bolt (z 0, 0.02) under the highway (z 0.1)
@@ -570,75 +726,30 @@ void Highway2D::drawAll(Canvas& c, const TextureCache& tex, const NoteTrack& tra
         }
     }
     drawStarPowerFx(c, tex, now, false);  // Lightning01 (z 4) over the highway
-    // The now-bar buttons at rest (z 3.6 .. 3.9) under the tails and gems.
-    drawButtons(c, tex, held, false);
-    // Sustain tails, then gems, back to front [C z: tails 4.0, gems 4.1].
     const bool leftyGems = lefty_ != fx_.leftyGems;
     const size_t first = player.current() > 8 ? player.current() - 8 : 0;
-    for (int pass = 0; pass < 2; ++pass) {
+    // Dead tails (MakeDeadWhammy: z 3.1) under the now-bar buttons at rest
+    // (z 3.6 .. 3.9); the live tails (z 4.0) and gems (4.1) over them, back
+    // to front [C 0x8210C0D0, z values].
+    for (int dead = 1; dead >= 0; --dead) {
+        for (size_t i = track.notes.size(); i-- > first;) {
+            const TrackNote& n = track.notes[i];
+            if (!n.sustain) continue;
+            const Tail* t = tail(int(i));
+            if ((t && t->dead) != (dead == 1)) continue;
+            for (int l = 0; l < 5; ++l)
+                if (n.frets & (1 << l)) drawTail(c, tex, n, int(i), l, leftyGems ? 4 - l : l, player, now);
+        }
+        if (dead) drawButtons(c, tex, held, false);
+    }
+    for (int pass = 1; pass < 2; ++pass) {
         for (size_t i = track.notes.size(); i-- > first;) {
             const TrackNote& n = track.notes[i];
             const float v = depthOf(n.time, now);
-            // A sustain's element lives on past the last row while its tail
-            // is on the highway (held: its head pinned) [C 0x8210E750].
-            const bool tailOnly = pass == 0 && n.sustain && v > accum_.back() &&
-                                  (player.sustaining() == int(i) || depthOf(double(n.time) + n.holdMs, now) <= accum_.back());
-            if ((v < 0 || v > accum_.back()) && !tailOnly) continue;
+            if (v < 0 || v > accum_.back()) continue;
             for (int l = 0; l < 5; ++l) {
                 if (!(n.frets & (1 << l))) continue;
                 const int lane = leftyGems ? 4 - l : l;  // lefthanded_gems: mirrored [C 0x82120D20]
-                if (pass == 0 && n.sustain) {
-                    // The tail: from the gem to the end of the hold. While held,
-                    // the head's start time is reset each frame to now -
-                    // whammy_cutoff x T / 1152, so the head sits at row
-                    // 1100 x 1024 / 1152 = 977.8 (above the playline row 1024,
-                    // under the fret buttons) [C 0x8210E8D4-0x8210E910].
-                    // Rows (0 top .. 1024 playline): the head's (held: pinned
-                    // at whammy_cutoff's) and the tail end's.
-                    const double rowEnd = rowOf(double(n.time) + n.holdMs, now);
-                    double rowHead = rowOf(double(n.time), now);
-                    if (player.sustaining() == int(i)) rowHead = std::min(rowHead, double(whammyCutoff_) * kRealRows / 1152.0);
-                    rowHead = std::min(rowHead, double(kRealRows));
-                    if (rowHead < 0) continue;
-                    const double r0 = std::max(0.0, rowEnd);
-                    if (r0 >= rowHead) continue;
-                    const uint32_t key = st.starPowerActive ? kWhammyStarPower : kWhammy[l];
-                    // GH3's strip (0x8238E338) has its vertices on the 8-row
-                    // grid, grid row k carrying the wibble entry 128 - k, which
-                    // WhammyBar_UI's vertex shader multiplies the half width by
-                    // (the newest whammy value at the playline end) [C]; the
-                    // tail's two ends take their cell's interpolated scale [I].
-                    std::vector<double> rows{r0};
-                    for (double g = std::floor(r0 / 8.0) * 8.0 + 8.0; g < rowHead; g += 8.0) rows.push_back(g);
-                    rows.push_back(rowHead);
-                    const auto scaleAt = [&](double r) {
-                        const auto entry = [&](int k) {
-                            const int e = 128 - k;
-                            return e >= 0 && e < 128 ? double(wibble_[size_t(e)]) : 1.0;
-                        };
-                        const int k = int(std::floor(r / 8.0));
-                        const double f = r / 8.0 - k;
-                        return float(entry(k) + (entry(k + 1) - entry(k)) * f);
-                    };
-                    const size_t segs = rows.size() - 1;
-                    for (size_t s = 0; s < segs; ++s) {
-                        const float va = rowDepth(float(rows[s])), vb = rowDepth(float(rows[s + 1]));
-                        // Half width = whammy_top_width x (1 + offset x D) / 2 [C 0x8238E338].
-                        const float wa = whammyTop_ * (1 + whammyOffset_ * va) * 0.5f * scaleAt(rows[s]);
-                        const float wb = whammyTop_ * (1 + whammyOffset_ * vb) * 0.5f * scaleAt(rows[s + 1]);
-                        const float xa = laneX(lane, va), xb = laneX(lane, vb), ya = yAt(va), yb = yAt(vb);
-                        const auto A = uint8_t(255 * alphaAt(ya)), B = uint8_t(255 * alphaAt(yb));
-                        // Every vertex has u 0 (left) / 1 (right) and v 1.0 [C 0x8238E338]:
-                        // the strip is the texture's bottom row (the cap's full-width base)
-                        // stretched along the tail, a straight ribbon with no rounded end.
-                        // The texel centre of the last row (32 px) keeps a wrapping sampler off row 0.
-                        constexpr float kV = 1.0f - 0.5f / 32.0f;
-                        const Vertex p0{xa - wa, ya, 0, 0, kV, 255, 255, 255, A}, p1{xa + wa, ya, 0, 1, kV, 255, 255, 255, A};
-                        const Vertex p2{xb + wb, yb, 0, 1, kV, 255, 255, 255, B}, p3{xb - wb, yb, 0, 0, kV, 255, 255, 255, B};
-                        const Vertex q[6] = {p0, p1, p2, p0, p2, p3};
-                        c.draw(q, 6, int(tex.find(key).id), Blend::Alpha);
-                    }
-                }
                 if (pass == 1 && i >= player.current() && !(fx_.hidden && fx_.hidden(i))) {
                     // The gem sprite [C 0x82120C90]: Star Power / battle star /
                     // star / normal, hammer variants for HOPOs; star sprites are
@@ -649,7 +760,10 @@ void Highway2D::drawAll(Canvas& c, const TextureCache& tex, const NoteTrack& tra
                     uint32_t key;
                     float u1 = 1, v1 = 1, u0 = 0, v0 = 0, scale = gemStart_ + (gemEnd_ - gemStart_) * v, just = gemJust_;
                     const int frame = int(now / 1000.0 * 30) % 16;
-                    if (st.starPowerActive) key = n.hopo ? kGemStarPowerHammer : kGemStarPower;
+                    // The material is chosen when the gem is created: Star Power then
+                    // gives the Star Power gem (StarPowerOn leaves the gems out) [C 0x82120C90, 0x8211DA70].
+                    const bool spGem = spAt(createdAt(n.time));
+                    if (spGem) key = n.hopo ? kGemStarPowerHammer : kGemStarPower;
                     else if (star && fx_.battle) {
                         key = n.hopo ? kBattleHammer[l] : kBattle[l];
                         const int f8 = frame % 8;
@@ -671,7 +785,7 @@ void Highway2D::drawAll(Canvas& c, const TextureCache& tex, const NoteTrack& tra
                     // A battle star gem's card icon: a child sprite <gem>_battle_icon,
                     // texture = the card's card_texture, scale 1.2, alpha 0.5 [C
                     // 0x821218A8..0x821219D0; centred on the gem I].
-                    if (star && fx_.battle && fx_.card && !st.starPowerActive)
+                    if (star && fx_.battle && fx_.card && !spGem)
                         if (const uint32_t icon = fx_.card(i)) {
                             int iw = 64, ih = 64;
                             tex.size(icon, iw, ih);
@@ -703,6 +817,22 @@ void Highway2D::drawAll(Canvas& c, const TextureCache& tex, const NoteTrack& tra
             const float k = 1 - 0.5f * f;
             quad(c, kSpark, tex, x, y, float(sw) * k, float(sh) * k, 0, col, 0, 0, 1, 1, Blend::Add);
         }
+    }
+    // The hold's fx_whammy_<c>p<n> (WhammyFXOn -> 0x8211BE98): sys_whammy_hold01
+    // at the fret's button_up_models pos_2d (left_pos_2d lefty), just (0, 1)
+    // (anchored at its bottom), scale 1 (a 128x128 frame), z 10, until
+    // WhammyFXOff; the material's AnimatedTexture_UI flip-book: 4 x 4 frames
+    // at 30 fps, additive (d8 1) [C; the frames counted from its creation I].
+    if (holdNote_ >= 0 && holdFrets_) {
+        const bool leftyB = lefty_ != fx_.leftyButtons;
+        int tw = 512, th = 512;
+        tex.size(kWhammyHold, tw, th);
+        const int frame = int((now - holdStart_) / (1000.0 / 30.0)) % 16;
+        const float u0 = float(std::max(frame, 0) % 4) / 4, v0 = float(std::max(frame, 0) / 4) / 4;
+        for (int l = 0; l < 5; ++l)
+            if (holdFrets_ & (1 << l))
+                quad(c, kWhammyHold, tex, endX_[size_t(leftyB ? 4 - l : l)], playline_, float(tw) / 4, float(th) / 4, 1, SDL_Color{255, 255, 255, 255},
+                     u0, v0, u0 + 0.25f, v0 + 0.25f, Blend::Add);
     }
     // Hit flames: 16 frames of the 4x4 flip-book at 60 fps, additive, 20 px
     // above the strike point, anchored at their bottom, z 10 [C 0x8211BCBC, script hit_note_fx].
