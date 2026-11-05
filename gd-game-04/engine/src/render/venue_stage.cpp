@@ -236,6 +236,7 @@ bool VenueStage::start(const Disc& disc, const Globals& g, const std::string& zo
             if (e.type == qb::Type::Struct && e.st)
                 if (const qb::Value* t = e.st->find(qbkey::key("textureasset"))) hide_.push_back(t->key);
     view_.reset();
+    attachStep_ = 0;  // a restarted stage uploads again (attachStep)
     if (device && !attach(*device, disc, error)) return false;
     return true;
 }
