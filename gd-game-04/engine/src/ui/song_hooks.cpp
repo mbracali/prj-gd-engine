@@ -1045,17 +1045,21 @@ void SongHooks::addNatives() {
     // CrowdIncrease / CrowdDecrease (0x8210FCC0 / 0x82110570: the health),
     // NoteFX (0x8211BAE8: the hit flame, render/highway2d), LaunchGemEvent
     // (0x8211A570: the gems' Star Power look), UpdateNixie (0x82106F20).
-    // LaunchGemEvent event = e player = n: the gem event <e>p<n> to
-    // create_guitar_events' handlers, with the player's params (star_power_on:
-    // GuitarEvent_StarPowerOn, the Star Power stage FX) [C 0x821578E8; I: the
-    // params the handlers get, as the native core's events].
+    // LaunchGemEvent event = e player = n: the event to the player's gems
+    // (their Star Power look, the flicker: native in render/highway2d), not
+    // to create_guitar_events' handlers: star_power_activate_and_drain
+    // broadcasts star_power_on / star_power_off itself right after it
+    // (BroadcastEvent Type = <event><player_text>), and flicker_on / _off
+    // have no handler (guitar_events) [C scripts star_power_activate_and_drain,
+    // flicker_gems; data guitar_events]. Sending it to the handlers here too
+    // ran GuitarEvent_StarPowerOn / Off twice (the stage FX twice, the
+    // Star Power sounds and camera twice).
     vm.addNative("LaunchGemEvent", [this](Vm&, ScriptRun&, qb::Struct& p) {
         const qb::Value* ev = Vm::param(p, K("event"));
         const int player = int(Vm::number(Vm::param(p, K("player")), 1));
         if (!ev || player < 1 || player > 2) return true;
-        // star_miss_note is the native core's already (the judge raises it).
         for (const char* e : {"star_power_on", "star_power_off", "flicker_on", "flicker_off"})
-            if (ev->key == K(e)) broadcast(e, player - 1, playerParams(player - 1));
+            if (ev->key == K(e)) ++k_.events[e];
         return true;
     });
     for (const char* n : {"CrowdIncrease", "CrowdDecrease", "NoteFX", "UpdateNixie"})
