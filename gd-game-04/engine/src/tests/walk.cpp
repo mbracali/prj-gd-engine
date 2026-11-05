@@ -16,6 +16,7 @@
 #include "data/json.h"
 #include "data/qbkey.h"
 #include "render/canvas.h"
+#include "game/save.h"
 #include "script/vm.h"
 #include "ui/front_end.h"
 #include "ui/port_screens.h"
@@ -186,16 +187,34 @@ Walk::Walk(const std::string& name) : name_(name) {
     } else if (name == "vault") {
         // The Vault: career band 1 -> character hub -> THE STORE -> guitars ->
         // back -> back to the hub [C: career_character_hub_fs, store_fs].
+        // First The Glitches' Vault (all bought for their band, GD04-026),
+        // saved while their career is popped, then left: band 1's Vault
+        // and the save must not have their purchases (GD04-096).
         steps_ = boot;
         steps_.push_back({"main_menu_fs", {C}, 10000});
-        steps_.push_back({"career_choose_band_fs", {C}, 20000, true});
+        steps_.push_back({"career_choose_band_fs", {D, D, D, D, C}, 20000});
+        steps_.push_back({"career_select_difficulty_fs", {C}, 20000});
+        steps_.push_back({"career_character_hub_fs", {D, D, D, D, C}, 20000});  // VISIT STORE
+        steps_.push_back({"store_fs", {C}, 20000});
+        steps_.push_back({"store_guitars_fs",
+                          {"check:tag:Instrument_focus01.unlocked=1", "save:write", "check:save:Instrument_focus01.unlocked=0",
+                           "check:save:Guitarist_Judy_Outfit2_Style2.unlocked=0", B},
+                          20000});
+        steps_.push_back({"store_fs", {B}, 20000});
+        steps_.push_back({"career_character_hub_fs", {B}, 20000});
+        steps_.push_back({"career_select_character_fs", {B}, 20000});
+        steps_.push_back({"career_select_difficulty_fs", {B}, 20000});
+        steps_.push_back({"career_choose_band_fs", {Action::Up, Action::Up, Action::Up, Action::Up, C}, 20000});
         steps_.push_back({"career_enter_band_name_fs", {C, C, C, Action::Start}, 20000, true});
         steps_.push_back({"career_select_difficulty_fs", {C}, 20000});
         steps_.push_back({"career_select_character_fs", {C}, 20000, true});
         steps_.push_back({"career_character_hub_fs", {D, D, D, D, C}, 20000});  // VISIT STORE
         steps_.push_back({"store_fs", {C}, 20000});
         // The first category; band 1's Vault is the save's own (not The Glitches', GD04-026).
-        steps_.push_back({"store_guitars_fs", {"check:tag:Instrument_focus01.unlocked=0", B}, 20000});
+        steps_.push_back({"store_guitars_fs",
+                          {"check:tag:Instrument_focus01.unlocked=0", "check:tag:Guitarist_Judy_Outfit2_Style2.unlocked=0", "save:write",
+                           "check:save:Instrument_focus01.unlocked=0", B},
+                          20000});
         steps_.push_back({"store_fs", {B}, 20000});
         steps_.push_back({"career_character_hub_fs", {}, 20000});
     } else if (name == "cheats") {
@@ -908,6 +927,26 @@ bool Walk::act(const std::string& what, FrontEnd& fe, WalkHost& host) {
         qs::Vm::set(fe.vm().globalTags[qbkey::key(kv.substr(0, dot).c_str())], qbkey::key(kv.substr(dot + 1, eq - dot - 1).c_str()),
                     qs::Vm::makeInt(std::atoi(kv.c_str() + eq + 1)));
         return true;
+    }
+    if (what == "save:write") {  // the save written now, as GH3's SaveToMemoryCard writes it
+        qs::ScriptRun run;
+        qb::Struct params;
+        return fe.vm().callNative(qbkey::key("SaveToMemoryCard"), run, params) ? true : fail("SaveToMemoryCard failed");
+    }
+    if (starts("check:save:")) {
+        // check:save:<tag>.<field>=<int>: a tag's field in save.json (absent field: 0).
+        const std::string kv = rest("check:save:");
+        const size_t dot = kv.find('.'), eq = kv.find('=');
+        const std::string tag = kv.substr(0, dot), field = kv.substr(dot + 1, eq - dot - 1);
+        save::Tags tags;
+        save::Sections sections;
+        std::string err;
+        if (!save::read(tags, sections, err)) return fail("save: " + err);
+        auto it = tags.find(qbkey::key(tag.c_str()));
+        const qb::Value* v = it == tags.end() ? nullptr : qs::Vm::param(it->second, qbkey::key(field.c_str()));
+        const int got = v ? int(v->type == qb::Type::Float ? v->f[0] : float(v->i)) : 0;
+        std::printf("  save: %s.%s = %d\n", tag.c_str(), field.c_str(), got);
+        return got == std::atoi(kv.c_str() + eq + 1) ? true : fail("saved tag " + kv + " is " + std::to_string(got));
     }
     if (starts("set:enhanced:")) {  // set:enhanced:<key>=<value>: an Enhanced option set
         const std::string kv = rest("set:enhanced:");

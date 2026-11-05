@@ -216,8 +216,17 @@ void restore(Vm& vm) {
 void installGlitchesStore(Vm& vm) {
     store() = StoreState{};
     vm.onTagSection = [](Vm& v, uint32_t sec, bool pop) {
-        if (pop && glitchesSection(sec)) activate(v);
-        else if ((pop && bandSection(sec)) || (!pop && glitchesSection(sec))) restore(v);
+        if (pop && glitchesSection(sec)) {
+            activate(v);
+        } else if ((pop && bandSection(sec)) || (!pop && glitchesSection(sec))) {
+            restore(v);
+            // The hook runs after the pop: the band's own section tags
+            // (bonus_song<n>_tier1, push_bandtags' Bonus list) win over the
+            // restored ones, which were The Glitches' (GD04-096).
+            if (pop)
+                if (auto s = v.globalTagSections.find(sec); s != v.globalTagSections.end())
+                    for (const auto& [k, t] : s->second) v.globalTags[k] = t;
+        }
     };
 }
 
