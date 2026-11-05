@@ -49,7 +49,9 @@ const std::vector<EnhancedSetting>& enhancedSettings() {
         {"autoplay", {"off", "on"}},
         {"dev_debug_menu", {"off", "on"}},
         {"hopo_mode", {"original", "forgiving"}},
-        {"cut_content", {"off", "on"}},
+        // Enable Cut Content removed (owner 11-05, GD04-110): off is its only
+        // value, so a saved "on" is dropped on load and a set to on refused.
+        {"cut_content", {"off"}},
         {"audio_offset", {}, -300, 500},
         {"video_offset", {}, -300, 500},
     };

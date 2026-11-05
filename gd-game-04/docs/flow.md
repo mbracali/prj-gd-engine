@@ -324,7 +324,9 @@ runs first), `func = quickplay_start_song`, flow_state **quickplay_play_song_fs*
   `$ <icon_index>` while its caller passes the number, so on GH3 it never
   pages (a retail disc has at most 13 guitarists) [C]; Enable Cut Content's 17
   need the second page, so the port answers it from the number (natives_flow)
-  [I: the port's reading].
+  [I: the port's reading]. Enable Cut Content is no longer offered (owner
+  11-05, GD04-110: its only value is off, a saved on is dropped), so the
+  second page is unreachable; the paging stays.
 - `start_song` (guitar_gems.qb) [C]: mark_unsafe_for_shutdown;
   set_rich_presence_game_mode; xenon_singleplayer_session_init (CheckForSignin
   false -> nothing on Xenon); **Load_Venue** (GetPakManCurrentName map=zones;

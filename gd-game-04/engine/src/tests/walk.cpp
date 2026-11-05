@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <exception>
+#include <filesystem>
 #include <fstream>
 #include <sstream>
 
@@ -266,41 +267,31 @@ Walk::Walk(const std::string& name) : name_(name) {
         steps_.push_back({"song", {"check:global:current_tab=tab_bonus", "check:global:current_song=avalancha"}, 30000});
 
     } else if (name == "cutcontent") {
-        // GD04-094: Enhanced > Enable Cut Content on, The Glitches (every
-        // character unlocked) -> CHANGE CHARACTER -> down past the last
-        // character and back up: the original characters stay reachable.
-        const Action U = Action::Up;
+        // GD04-110: Enable Cut Content removed from Enhanced Options: a saved
+        // "on" is dropped on load, a set to on refused, the row is gone; The
+        // Glitches (every character unlocked) -> CHANGE CHARACTER -> down
+        // past the last character: GH3's 13 guitarists on one page (the
+        // GD04-094 paging stays, unreachable).
         steps_ = boot;
-        steps_.push_back({"main_menu_fs", {"set:enhanced:cut_content=on", C}, 10000});
+        steps_.push_back({"main_menu_fs",
+                          {"check:cut_content_ignored", "set:enhanced:cut_content=on", "check:enhanced:cut_content=off",
+                           "click:menu:main_menu_options_text"},
+                          10000});
+        steps_.push_back({"options_select_option_fs", {"click:item"}, 20000});
+        steps_.push_back({"port_enhanced", {"hover:row:no_fail", "check:norow:cut_content", "rclick"}, 10000});
+        steps_.push_back({"options_select_option_fs", {B}, 20000});
+        steps_.push_back({"main_menu_fs", {"wait", C}, 20000});
         steps_.push_back({"career_choose_band_fs", {D, D, D, D, C}, 20000});
         steps_.push_back({"career_select_difficulty_fs", {C}, 20000});
         steps_.push_back({"career_character_hub_fs", {D, C}, 20000});  // CHANGE CHARACTER
-        std::vector<Op> cs;
+        std::vector<Op> cs{Op("wait"), Op("wait")};
         for (int i = 0; i < 20; ++i) cs.push_back(Op(D, 300));
         cs.push_back(Op("log:cs"));
-        cs.push_back(Op("check:global:g_cs_jumped_p1=13"));  // the second page
-        for (int i = 0; i < 20; ++i) cs.push_back(Op(U, 300));
-        cs.push_back(Op("log:cs"));
         cs.push_back(Op("check:global:g_cs_jumped_p1=0"));
-        cs.push_back(Op("check:global:g_character_select_icon_index_p1=0"));
+        cs.push_back(Op("check:global:cs_total_guitarists_p1=13"));
         // Quick play's random guitarist keeps to GH3's 13 (GD04-091).
         cs.push_back(Op("check:qp_guitarists=13"));
-        // A Bone Man picked (the second page's second, BoneMan_Judy): the menu
-        // opens on it again; with the option off it opens on the first page.
-        for (int i = 0; i < 14; ++i) cs.push_back(Op(D, 300));
-        cs.push_back(C);
         steps_.push_back({"career_select_character_fs", cs, 20000});
-        steps_.push_back({"career_character_hub_fs", {"wait", "wait", D, C}, 20000});  // CHANGE CHARACTER
-        steps_.push_back({"career_select_character_fs",
-                          {"wait", "wait", "log:cs", "check:global:g_cs_jumped_p1=13", "check:global:g_character_select_icon_index_p1=1",
-                           "set:enhanced:cut_content=off", B},
-                          20000});
-        steps_.push_back({"career_select_difficulty_fs", {"wait", C}, 20000});
-        steps_.push_back({"career_character_hub_fs", {"wait", "wait", D, C}, 20000});
-        steps_.push_back({"career_select_character_fs",
-                          {"wait", "wait", "log:cs", "check:global:g_cs_jumped_p1=0", "check:global:cs_total_guitarists_p1=13", D,
-                           "check:global:g_character_select_icon_index_p1=1"},
-                          20000});
 
     } else if (name == "boss") {
         // A career boss battle: The Glitches (everything unlocked) -> EASY ->
@@ -1007,6 +998,25 @@ bool Walk::act(const std::string& what, FrontEnd& fe, WalkHost& host) {
             if (e->id != qbkey::key("root_window")) ++items, has = has || e->id == want, seen += " " + qbkey::name(e->id);
         std::printf("  focus: %s %s (%d focused:%s)\n", rest("check:focus:").c_str(), has ? "yes" : "no", items, seen.c_str());
         return has && items == 1 ? true : fail("focus is not on " + rest("check:focus:") + " alone");
+    }
+    if (starts("check:norow:")) {  // an Enhanced Options row that must not exist (the screen open)
+        float x = 0, y = 0;
+        if (!host.walkPorts()) return fail("no port screens");
+        return !enhancedRowCenter(*host.walkPorts()->screen(PortScreens::Id::Enhanced), rest("check:norow:"), x, y)
+                   ? true
+                   : fail("Enhanced has a " + rest("check:norow:") + " row");
+    }
+    if (what == "check:cut_content_ignored") {  // an enhanced.json with cut_content on loads as off (GD04-110)
+        const std::string dir = (std::filesystem::temp_directory_path() / "gd04_walk_cutcontent").string() + "/";
+        std::error_code ec;
+        std::filesystem::create_directories(dir, ec);
+        std::ofstream(dir + "enhanced.json") << R"({"version": 2, "settings": {"cut_content": "on", "no_fail": "on"}})";
+        EnhancedStore st;
+        st.load(dir);
+        const std::string cut = st.get("cut_content"), noFail = st.get("no_fail");
+        std::filesystem::remove_all(dir, ec);
+        std::printf("  a saved cut_content on loads as %s (no_fail %s)\n", cut.c_str(), noFail.c_str());
+        return cut == "off" && noFail == "on" ? true : fail("a saved cut_content on loads as " + cut);
     }
     if (starts("check:qp_guitarists=")) {  // quick play's random guitarist count (cs_get_total_guitarists from quickplay_start_song)
         qs::ScriptRun r;
