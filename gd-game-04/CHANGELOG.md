@@ -6,6 +6,11 @@ All notable changes for players. Versions follow SemVer; release tags are
 ## [Unreleased]
 
 ### Added
+- Sustains look as GH3 draws them: the white-hot burst and sparks on a held fret, the rounded tail end, grey dropped tails, the blue Star Power whammy tail (GD04-084).
+- Failed songs end as GH3: the highway goes at once, the band plays its lose animations, the music slows and fades, the fail menu opens over the frozen venue (GD04-088).
+- Star Power's swirl ribbons; the guitarist's Star Power pose; the drummer's and singer's own win / lose animations (GD04-088).
+- The battle's Lefty Flip slides the fret buttons across before flipping (GD04-088).
+- The menus' 3D scenes (character select, hub, store) get GH3's screen effects and the characters' floor shadow (GD04-086).
 - The career's movies play: the career intro at the first venue select, each tier's completion movie and the ending (GD04-070).
 - The band reacts in battles: the attacker plays its attack, the target its hit reaction, as GH3 (GD04-077).
 - The drummer's and the singer's arms and feet follow GH3's IK (GD04-078).
@@ -28,6 +33,11 @@ All notable changes for players. Versions follow SemVer; release tags are
 - Lou's finish and defeat scenes play with their animations and cameras.
 
 ### Fixed
+- Light beams no longer draw over the band; the stage-floor light pools no longer flicker; the beams' smoke texture loads (beams were solid white) (GD04-085).
+- Depth of field and bloom cover the same part of the screen at any resolution, as at 720p on the 360 (GD04-085).
+- Menus sit where GH3 puts them: the pause menu centred in its frame, Store, Cheats, Calibrate Lag and the options lists on their highlights (GD04-086).
+- Every song shows its loading screen (songs after the first skipped it); no black flash after the intro animation or before the results; the legal screen no longer stutters (GD04-087).
+- Star Power's effects, sounds and camera no longer fire twice; Star Power and 4x effects appear and stop as GH3's scripts say (GD04-088).
 - The results magazine shows your own character, outfit and style (each body's Mag_Photo by its asset context), for every character in 1P and 2P.
 - Switching characters on the character select is smooth: the next characters are read ahead, a new one loads in the background while the old one stays up, and its textures upload a few milliseconds a frame (frames of 150-300 ms before).
 - The bassist's and the singer's hair no longer turns white under the stage lights: GH3's hair shader read one of its terms with the wrong sign, and its multiplications now treat 0 x anything as 0 like the console's GPU.
