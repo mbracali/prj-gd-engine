@@ -712,7 +712,9 @@ the song is thrufireandflames; with it set CrowdDecrease takes no health
 - Dynamic shadows: the DynamicShadowReciever technique (cascades
   c144 / c148, maps s14 / s15, 4-tap bilinear PCF, c141..c143), shadow map
   sizes 1024 / 512 and SetDynamicShadowIntensity 0.35 from tod_profiles.qb /
-  tod_manager.qb [C]; the light and the matrices are gd04's [I].
+  tod_manager.qb [C]; the two cascades' slices, fade, light-space
+  perspective projections and biases are GH3's (venues.md "Dynamic
+  shadows", GD04-106), the light gd04's [I].
 - Back-face culling fixes the M5 stage-rear cameras (they stand behind
   walls) [I: Direct3D's default CCW, the templates' own states not decoded].
 

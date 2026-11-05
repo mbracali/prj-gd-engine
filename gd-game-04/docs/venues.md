@@ -405,29 +405,83 @@ Enhanced Options' Bloom / Bokeh rows are separate port enhancements.
 The band casts shadows onto the venue: opaque venue meshes draw with
 their template's DynamicShadowReciever technique, whose vertex shader
 projects the view-space position with g_ViewToLightProjection0 / 1
-(c144 / c148, two cascades) and whose pixel shader takes four taps of
-g_sampShadowMap0 / 1 (s14 / s15) around the pixel, blends the "not
-deeper than the map" results bilinearly (g_shadowMapSize c143 = the maps'
-sizes), fades between the cascades by the camera distance
-(g_shadowMapConstants c141.zw), maps the result with g_shadowLevel
+(c144 / c148, two cascades, each to Direct3D clip space; the shader maps
+u = 0.5 x / w + 0.5, v = 0.5 - 0.5 y / w) and whose pixel shader picks
+cascade 0 where its coordinates are inside that map (0 < u, v < 1,
+depth < 1), else cascade 1, takes four taps of that cascade's map
+(g_sampShadowMap0 / 1, s14 / s15) half a texel around the pixel, blends
+the "not deeper than the map" results bilinearly (g_shadowMapSize c143.x
+/ .y = cascade 0's / 1's texels), adds smoothstep((camera distance -
+c141.z) / (c141.w - c141.z)) (the shadow fades out with the distance
+from the camera, clamped at 1), maps the result with g_shadowLevel
 (c142.zw) and keeps the darker of it and the static shadow map [C: the
-microcode]. Sizes: shadow_map_size (1024, 512), styles shadow_big 1024 x
-1024 / shadow_small 512 x 512 depth only; SetDynamicShadowIntensity 0.35
-[C data tod_profiles.qb, tod_manager.qb]. gd04 [I]: one 1024 x 1024 map
-for both cascades, orthographic (14 m square, 60 m deep) around the band
-from the band group's strongest directional light pointing down (by its
+microcode of the venue templates, SkinShader and HairShader; there is no
+blend between the cascades]. The characters receive too (their skin and
+hair templates' receiver variants; GD04_NO_BAND_SHADOWS=1 turns that off).
+
+GH3's cascades [C default.xex, GD04-106]: Function_822B6E08 runs once per
+cascade, calls 822B5850 for its matrix and writes c140 (the shadow
+direction), c141 = (nearblend 0.5, 1, far - farblend, far) and c144 or
+c148 (vertex and pixel banks, device +0x1040.. / +0x2040..). Its
+parameters (ResetShadowMapParams 822B2DA0, SetShadowMapParams 82276F30 and
+the statics 8291D708..8291D770), as guitar_startup leaves them
+(SetShadowMapParams far = 16):
+
+- the slices along the camera's view depth: cascade 0 from the camera's
+  near plane, cascade 1 from where 0 ends; cascade i ends at near / far
+  (8291D764: 13 / 16, `near`, `far`) moved towards 8291D748 (6.5 / 19) by
+  |view direction . shadow direction|, never past near / far (5850: d764 +
+  (max(d748, d764) - d764) |cos| in GH3's view space looking down -z):
+  cascade 0 ends 13 m (looking across the light) .. 6.5 m (along it),
+  cascade 1 at 16 m;
+- the fade: c141.zw = far - farblend (3), far = 13, 16 m from the camera;
+- each cascade's projection (822B4870) is a light-space perspective shadow
+  map: the slice's 8 corners (the camera's inverse projection, then the
+  light basis: y towards the light, z the camera's back vector's part
+  across the light, x their cross; looking along the light, z the camera's
+  -y) and their box; sin = |back . z| (pow(x, 1)); above 0.01 the centre
+  of projection is n = (8291D754: 4 / 16 + the slice's near depth) / sin
+  behind the box along z, x centred, a D3DXMatrixPerspectiveOffCenterRH
+  (82236568) with left / right the corners' x on the near plane, bottom /
+  top lightdist - lightfar / lightdist - lightnear (8291D718..20: 400 -
+  1000, 400 - 5) along the light, near n, far n + the box's depth;
+  otherwise D3DXMatrixOrthoOffCenterRH (822366D8) over the box; then a
+  remap (constants 2, -1, 0.5, -0.5) so the map's v is the warped z and
+  its depth the light axis;
+- the casters' depth bias (823DCC48): GetShadowMapBias's single_sided 64 /
+  1280 (double_sided 1200 / 1600 for double-sided materials) x 2^-24
+  (8291F168), slopes 0 until SetShadowMapBias;
+- the maps: shadow_map_size (1024, 512), the shadow_big / shadow_small
+  styles 1024 x 1024 / 512 x 512 depth only; SetDynamicShadowIntensity
+  0.35 [C data tod_profiles.qb, tod_manager.qb].
+
+(An earlier note read 82384BB8's writes at device +0x1290 / +0x12A0 as
+c140 / c141; with c140 at +0x1040 they are c177 / c178, the key light's
+direction and colour [I: the bank's base from 822B6E08's writes]; 82C11170
+is set only for a light named SunDirLight, which no zone has [C].)
+
+gd04 (VenueStage::shadowPass, gh3shader::DynamicShadow) does the same:
+two depth targets 1024 x 1024 and 512 x 512, each cascade's matrix as
+above, the band's opaque meshes drawn into both (the second reuses the
+first's skinning), the receivers given both maps with c141 = (0.5, 1, 13,
+16) and c143 = (1024, 512), the single_sided bias subtracted from the
+receivers' depth instead of added to the casters' [I: the same test; the
+double_sided values are not applied]. The camera's near plane is the
+port's (0.05) and the view vector for |cos| the camera's forward [I]. The
+light: the band group's strongest directional light pointing down (by its
 own colour x intensity, chosen once per venue: GH3's shadow pass reads one
 global direction, set only by SetShadowDir / SetShadowDirFromLight [C
 82384BB8, 822B84B0, 822B9788]; choosing it each frame from the light
-show's state made the shadows jump direction, GD04-103), the
-band's opaque meshes as casters, light = 0.35 + 0.65 x lit (as dark as the
-reference captures' shadows); the characters do not receive.
-GD04_NO_SHADOWS=1 turns it off. Not used yet [C default.xex]:
-ResetShadowMapParams (822B2DA0) sets 4 / 16 (8291D754/58: the two
-cascades' sizes [I]) and -6.5 / -19, -13 / -20 (8291D748.., 8291D764..);
-GetShadowMapBias's per-cascade biases (8291E644..): single_sided 64 / 1280,
-double_sided 1200 / 1600 (the slopes 0 until SetShadowMapBias) [I: depth
-units; gd04's 4 cm bias is not derived from them].
+show's state made the shadows jump direction, GD04-103), light = 0.35 +
+0.65 x lit (as dark as the reference captures' shadows). Cost: one more
+band depth pass (512 x 512) per frame; the receivers' shaders are GH3's
+and already sampled both maps. GD04_NO_SHADOWS=1 turns it off;
+GD04_SHADOW_LOG=1 logs the light, the slices and each member's cascade
+coordinates; GD04_SHADOW_BIAS scales the bias (development aids). Not
+done: c140 (g_shadowDirWorldSpace, which some prop shaders read) stays 0.
+--venuetest fails when a frame with a shadow light did not draw the band
+into both cascades. The menus' backdrop (ui/menu_scene.cpp) keeps its one
+map for both cascades, without the fade.
 
 ### LOD
 
