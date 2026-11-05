@@ -354,6 +354,16 @@ void UiSystem::applyProps(Element& e, const qb::Struct& p, bool create) {
                         else hd.script = hi.value.key;
                     } else if (hi.name == K("params") && hi.value.st) {
                         hd.params = *hi.value.st;
+                    } else if (hi.name == 0 && hi.value.type == qb::Type::Struct && hi.value.st && unnamed == 1) {
+                        // `{ pad_choose ( <option> . func ) }` with func a struct
+                        // `{ script params = {...} }` (the popups' options:
+                        // create_popup_warning_menu_option) [C data; I: read as
+                        // the handler's script and params].
+                        for (const qb::Item& fi : hi.value.st->items) {
+                            if (fi.name == 0 && (fi.value.type == qb::Type::Key || fi.value.type == qb::Type::KeyPtr) && !hd.script) hd.script = fi.value.key;
+                            else if (fi.name == K("params") && fi.value.st) hd.params = *fi.value.st;
+                        }
+                        ++unnamed;
                     }
                 }
                 e.handlers.push_back(std::move(hd));

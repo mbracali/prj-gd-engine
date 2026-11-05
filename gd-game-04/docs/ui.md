@@ -215,7 +215,11 @@ Start->pad_start. Guitar: green=A, red=B, yellow=Y, blue=X, orange=LB, strum =
 d-pad up/down. The port sends yellow / blue / orange as pad_option2 /
 pad_option / pad_l1 only (the set list's SETLIST / BONUS / DOWNLOADS tabs,
 setlist_event_handlers -> change_tab; the other events those buttons raise
-have handlers only in debug and online menus); walk setlist_tabs (GD04-090). SetMenuAutoRepeatTimes (0.3, 0.05) = held-direction repeat
+have handlers only in debug and online menus); walk setlist_tabs (GD04-090).
+An event handler `{ pad_choose ( <option> . func ) }` whose func is a struct
+`{ script params = {...} }` (create_popup_warning_menu_option: the lefty flip
+warning's RESTART, the popups' options) runs that script with those params
+[C data; I: the reading]. SetMenuAutoRepeatTimes (0.3, 0.05) = held-direction repeat
 delay/interval in s [I].
 Delivery: a pad event goes to every element that currently has focus (a menu
 and its selected child are both focused), filtered by exclusive_device; an
