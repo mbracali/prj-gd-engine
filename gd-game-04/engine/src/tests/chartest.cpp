@@ -207,10 +207,21 @@ BodyResult testMember(const Disc& disc, const Globals& g, band::Library& lib, co
     std::vector<bandanim::Mat34> world, skin;
     const double t0 = 20000.0;
     float lo[3], hi[3];
+    // The accessory bones as the band gets them (render/band_ragdoll.h), so
+    // the portraits show the hair / chains hanging after `frames` steps.
+    static std::shared_ptr<const Pak> globalPak;
+    std::unique_ptr<AccessorySim> acc = Band::accessorySim(disc, g, m, a.rig(), globalPak);
     for (int f = 0; f < frames; ++f) {
         const double t = t0 + double(f) * kStepMs;
         a.advance(t);
         a.evaluate(t, world, skin);
+        if (acc) {
+            acc->apply(t, world, [&a](double ts, std::vector<bandanim::Mat34>& w) {
+                std::vector<bandanim::Mat34> sk;
+                a.evaluate(ts, w, sk);
+            }, {0, -9.8f, 0});
+            for (size_t b = 0; b < world.size() && b < a.rig().invBind.size(); ++b) skin[b] = bandanim::mmul(world[b], a.rig().invBind[b]);
+        }
         for (const auto& mt : skin)
             if (!finite(mt)) return {false, "a NaN in the skinning matrices at " + std::to_string(int(t)) + " ms"};
         if (f % 30 == 0 && !skinBounds(*model, skin, lo, hi)) return {false, "a NaN in the skinned vertices"};

@@ -242,16 +242,61 @@ the venue, no back-face culling (hair cards) [I].
 (Bone_ACC_01..15) makes those bones of the member's ragdoll (the profile's
 `ragdoll`, `ragdoll2` for outfit 2: a `.rag` of global.pak) Havok bodies
 while the body bones follow the animation [C scripts; formats.md "Havok
-packfiles"]. gd04 (`render/band_ragdoll.*`) [I: the model]: each
-accessory body is a point mass at its bone's tip (the far end of its .rag
-shape: the boxes' translation doubled, along the bone's +x; the bodies sit
-at the bones' bind positions [C data]) on a rod from the bone's joint,
-under gravity with the body's damping (max of linear / angular, 0.05 on
-the disc), its swing held inside its ragdoll constraint's cone around the
-animated direction; the bone turns to the mass and its descendants follow.
-Stepped at 60 Hz of song time from the animated pose at each step (frame
-rate independent; a restart at rest after a jump of over 2 s);
-GD04_NO_RAGDOLL=1 turns it off.
+packfiles"]. What GH3 does with it [C default.xex]:
+
+- the world (82253B10): gravity (0, -9.8, 0) (8200E4E4), collision
+  tolerance 0.001, `setupSolverInfo(SOLVER_TYPE_4ITERS_MEDIUM)`: 4 solver
+  iterations, tau 0.6, damping 1 (the .rag's own worldCinfo agrees);
+- the ragdoll component (821B19B8: ragdollname, accessoryragdollname,
+  accessory_bones, the toi qualities) loads the .rag (82336798: 825FD868(2)
+  on every constraint [I: setPriority(PRIORITY_TOI)]; ragdoll / limited
+  hinge constraints made powered with a position motor (8268C108,
+  hkConstraintUtils::convertToPowered by its message), prismatic left as
+  is), clones it into an
+  hkaRagdollInstance and maps it to the skeleton by bone name
+  (821AF798: hkaSkeletonMapperUtils::createMapping both ways);
+  `ragdoll_setaccessorybones` records each accessory bone (821B1418);
+- the drive state `keyframed_motion_rigidbody_driven_pose_unused`
+  (821AFC08, the band's): motors stopped (826BE368), every non-accessory
+  body MOTION_KEYFRAMED with its constraint removed from the world, every
+  accessory body MOTION_STABILIZED_SPHERE_INERTIA with its constraint
+  (to its parent body) in the world;
+- each frame the ragdoll anim node (823FE140): the non-accessory bodies
+  hard-keyframed to the animated pose (823FE8C8: the object's rotation and
+  position at scale 1, hkKeyFrameUtility::applyHardKeyFrame with 1 / frame
+  time); then the ragdoll's pose is read (823FFC28: getPoseModelSpace,
+  mapPose to the animation skeleton, model→local) and
+  checkAndFixConstraint(0.05, 0.8) runs over the constraints from the last
+  until one reports a fix; the pose blends into the output (823FDBA0); the
+  world steps after, so the pose drawn is the one before this frame's step.
+
+gd04 (`render/band_ragdoll.*`) re-implements that: the .rag's bodies
+(mass, centre of mass, inverse inertia — the sphere motion's single value,
+the largest inertia [I], linear / angular damping, max linear / angular
+velocity: 10 rad/s on several hair bodies) at their bind poses mapped to
+the bones (body→bone offsets from the two bind poses, about identity on the
+disc); the non-accessory bodies keyframed (the velocities that reach the
+animated pose in one step, the rotation integrated exactly); the
+constraints with an accessory child solved as velocity rows: ball socket,
+ragdoll twist / cone / planes limits (tau × angularLimitsTauFactor) and
+angular friction (maxFrictionTorque), limited hinge (2dAng, angLimit),
+prismatic (TYPE_ANG, lin0 / lin1, linLimit). The step [I: Havok's solver
+in outline, not its code]: damping, then 4 sub-steps of gravity, one
+Gauss-Seidel pass (impulse = damping × (tau × error / h − J·v) / K, the
+limits one-sided), the velocity caps and the integration. Fixed 60 Hz of
+song time (GH3's frame on the 360 [I]), the pose of step k − 1 at frame k;
+a start (or a jump of over 2 s) puts every body at the animated pose at
+rest (setPoseModelSpace). The accessory bones take the ragdoll's local
+transforms under their animated parents; their descendants follow.
+GD04_NO_RAGDOLL=1 turns it off; GD04_RAGDOLL_LOG=1 lists the bodies and,
+every 60 steps, the worst pivot gap, the fastest body and the largest swing
+off the animation.
+
+Not done: collisions. Each body's collisionFilterInfo is layer 16 + its
+group in the profile's `ragdoll_collision_group` (RagdollCollisionGroups_*:
+group 6 the accessories, 7 most of the body, 0..2 a few chosen bones)
+[C 823360F0], but the world's layer matrix was not found, so the hair does
+not collide with the chest / head capsules yet.
 
 The light registers are GH3's light manager's (docs/venues.md "Lights"):
 a member's query point is its origin, its groups `band` (+ `alt_band` for
@@ -260,9 +305,10 @@ the guitarist) and `defaultgroup` [C].
 ## 7. Gaps
 
 Band_WalkToNode (no caller on the disc), two-player layouts, the drummer's
-and the singer's IK, Havok's own solver for the accessory bones (gd04's
-model above). The band receives the dynamic shadow (the receivers compare 4
-cm nearer the light: without it the characters speckled [I: GH3's bias]).
+and the singer's IK, the accessory bodies' collisions and Havok's exact
+solver code (gd04's re-implementation in 6b). The band receives the dynamic
+shadow (the receivers compare 4 cm nearer the light: without it the
+characters speckled [I: GH3's bias]).
 
 ## 8. Test
 
@@ -277,7 +323,8 @@ cm nearer the light: without it the characters speckled [I: GH3's bias]).
 3. `GD04_CHARTEST_GOLDEN=<file>`: writes, then compares, a checksum of each
    venue band's poses at 5, 30 and 60 s;
 4. `GD04_CHARTEST_SHOTS=<dir>`: portrait grids of every body and instrument
-   (`bodies_NN.bmp`, `instruments_NN.bmp`, legend on stdout) and the band in
+   (`bodies_NN.bmp`, `instruments_NN.bmp`, legend on stdout; the accessory
+   bones simulated over the frames, as in 6b) and the band in
    each venue's first six shots.
 
 The debug-only BoneMan profiles borrow anim sets whose clips their paks

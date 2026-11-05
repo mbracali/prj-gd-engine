@@ -72,7 +72,7 @@ public:
         std::vector<bandanim::Mat34> world, skin;  // at the last evaluate
         double evaluatedAt = -1e18;
         std::unique_ptr<AccessorySim> acc;  // the accessory bones' swing (render/band_ragdoll.h)
-        bandanim::Vec gravity{0, -9.81f, 0};  // in model space
+        bandanim::Vec gravity{0, -9.8f, 0};  // in model space
     };
     const std::vector<Entry>& members() const { return members_; }
     std::vector<Entry>& members() { return members_; }

@@ -307,6 +307,7 @@ public:
         Addr at(const char* n) const { return a + m(n).offset; }
         float real(const char* n) const { return pk->f32(at(n)); }
         int32_t i32(const char* n) const { return pk->s32(at(n)); }
+        int u8(const char* n) const { return *pk->at(at(n), 1); }
         std::array<float, 4> vec(const char* n) const {
             std::array<float, 4> v{};
             for (int i = 0; i < 4; ++i) v[size_t(i)] = pk->f32(at(n) + 4 * Addr(i));
@@ -452,6 +453,11 @@ Physics parse(const uint8_t* data, size_t size) {
             b.mass = invMass != 0 ? 1.0f / invMass : 0.0f;
             const Pack::Obj ms = mo.sub("motionState");
             for (int i = 0; i < 16; ++i) b.transform[size_t(i)] = pk.f32(ms.at("transform") + 4 * Addr(i));
+            const std::array<float, 4> ii = mo.vec("inertiaAndMassInv");
+            b.invInertia = {ii[0], ii[1], ii[2]};
+            b.comLocal = xyz(ms.sub("sweptTransform").vec("centerOfMassLocal"));
+            b.maxLinearVelocity = ms.real("maxLinearVelocity");
+            b.maxAngularVelocity = ms.real("maxAngularVelocity");
             b.linearDamping = ms.real("linearDamping");
             b.angularDamping = ms.real("angularDamping");
             const Pack::Obj mat = rb.sub("material");
@@ -473,18 +479,51 @@ Physics parse(const uint8_t* data, size_t size) {
             const Pack::Obj atoms = d.sub("atoms");
             if (atoms.k->find("transforms")) {
                 const Pack::Obj tr = atoms.sub("transforms");
-                for (int i = 0; i < 3; ++i) {
-                    c.pivotA[size_t(i)] = pk.f32(tr.at("transformA") + 4 * Addr(12 + i));
-                    c.pivotB[size_t(i)] = pk.f32(tr.at("transformB") + 4 * Addr(12 + i));
+                for (int i = 0; i < 16; ++i) {
+                    c.transformA[size_t(i)] = pk.f32(tr.at("transformA") + 4 * Addr(i));
+                    c.transformB[size_t(i)] = pk.f32(tr.at("transformB") + 4 * Addr(i));
                 }
+                for (int i = 0; i < 3; ++i) c.pivotA[size_t(i)] = c.transformA[size_t(12 + i)], c.pivotB[size_t(i)] = c.transformB[size_t(12 + i)];
             }
             if (c.type == "hkRagdollConstraintData") {
-                c.coneMax = atoms.sub("coneLimit").real("maxAngle");
-                c.twistMin = atoms.sub("twistLimit").real("minAngle");
-                c.twistMax = atoms.sub("twistLimit").real("maxAngle");
+                const Pack::Obj tw = atoms.sub("twistLimit"), co = atoms.sub("coneLimit"), pl = atoms.sub("planesLimit"),
+                                fr = atoms.sub("angFriction");
+                c.coneMax = co.real("maxAngle");
+                c.twistMin = tw.real("minAngle");
+                c.twistMax = tw.real("maxAngle");
+                c.twistOn = tw.u8("isEnabled") != 0;
+                c.twistTau = tw.real("angularLimitsTauFactor");
+                c.twistAxis = tw.u8("twistAxis");
+                c.twistRefAxis = tw.u8("refAxis");
+                c.coneOn = co.u8("isEnabled") != 0;
+                c.coneTau = co.real("angularLimitsTauFactor");
+                c.coneAxisA = co.u8("twistAxisInA");
+                c.coneAxisB = co.u8("refAxisInB");
+                c.coneAligned = co.enumName("angleMeasurementMode") == "ZERO_WHEN_VECTORS_ALIGNED";
+                c.planesOn = pl.u8("isEnabled") != 0;
+                c.planesMin = pl.real("minAngle");
+                c.planesMax = pl.real("maxAngle");
+                c.planesTau = pl.real("angularLimitsTauFactor");
+                c.planesAxisA = pl.u8("twistAxisInA");
+                c.planesAxisB = pl.u8("refAxisInB");
+                c.planesAligned = pl.enumName("angleMeasurementMode") == "ZERO_WHEN_VECTORS_ALIGNED";
+                if (fr.u8("isEnabled")) c.maxFriction = fr.real("maxFrictionTorque"), c.frictionAxes = fr.u8("numFrictionAxes");
             } else if (c.type == "hkLimitedHingeConstraintData") {
-                c.twistMin = atoms.sub("angLimit").real("minAngle");
-                c.twistMax = atoms.sub("angLimit").real("maxAngle");
+                const Pack::Obj li = atoms.sub("angLimit"), fr = atoms.sub("angFriction");
+                c.twistOn = li.u8("isEnabled") != 0;
+                c.twistMin = li.real("minAngle");
+                c.twistMax = li.real("maxAngle");
+                c.twistTau = li.real("angularLimitsTauFactor");
+                c.hingeAxis = atoms.sub("2dAng").u8("freeRotationAxis");
+                if (fr.u8("isEnabled")) c.maxFriction = fr.real("maxFrictionTorque"), c.frictionAxes = fr.u8("numFrictionAxes");
+            } else if (c.type == "hkPrismaticConstraintData") {
+                const Pack::Obj ll = atoms.sub("linLimit"), fr = atoms.sub("friction");
+                c.linMin = ll.real("min");
+                c.linMax = ll.real("max");
+                c.linAxis = ll.u8("axisIndex");
+                c.linLock0 = atoms.sub("lin0").u8("axisIndex");
+                c.linLock1 = atoms.sub("lin1").u8("axisIndex");
+                if (fr.u8("isEnabled")) c.maxFriction = fr.real("maxFrictionForce"), c.frictionAxes = 1;
             }
             ph.constraints.push_back(std::move(c));
         }

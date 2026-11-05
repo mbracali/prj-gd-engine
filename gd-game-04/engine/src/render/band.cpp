@@ -103,10 +103,13 @@ bool Band::startWith(const Disc& disc, const Globals& g, const venue::Venue* v, 
         e.root = bandanim::matOf(root);
         for (int i = 0; i < 3; ++i)
             for (int j = 0; j < 3; ++j) e.root.m[i * 4 + j] *= m.scale;
-        // Gravity in model units: R^T (0, -9.81, 0) / scale^2.
+        // The physics world's gravity (0, -9.8, 0) [C 82253B10: 8200E4E4] in
+        // model space: R^T (0, -9.8, 0). GH3 places the ragdoll with the
+        // object's rotation and position at scale 1 [C 823FF100], so only the
+        // rotation counts.
         {
-            const float s2 = std::max(1e-6f, m.scale * m.scale);
-            e.gravity = {e.root.m[4] * -9.81f / s2, e.root.m[5] * -9.81f / s2, e.root.m[6] * -9.81f / s2};
+            const float s = std::max(1e-6f, m.scale);
+            e.gravity = {e.root.m[4] * -9.8f / s, e.root.m[5] * -9.8f / s, e.root.m[6] * -9.8f / s};
         }
         e.acc = accessorySim(disc, g, m, e.anim.rig(), globalPak_);
         // create_band_member: lightgroup band; the guitarist alt_band [C script; I: alt_band lights add to band's].

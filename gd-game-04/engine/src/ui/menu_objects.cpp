@@ -275,7 +275,8 @@ void MenuObjects::startAnim(Object& o) {
     }
     const float sc = std::max(1e-6f, o.scale * e.model->member.scale);
     const bandanim::Mat34 r = root(o);
-    e.gravity = {r.m[4] * -9.81f / (sc * sc), r.m[5] * -9.81f / (sc * sc), r.m[6] * -9.81f / (sc * sc)};
+    // The world's (0, -9.8, 0) in model space, the rotation only (render/band.cpp).
+    e.gravity = {r.m[4] * -9.8f / sc, r.m[5] * -9.8f / sc, r.m[6] * -9.8f / sc};
     e.acc = Band::accessorySim(disc_, globals_, e.model->member, e.anim.rig(), globalPak_);
     e.evaluatedAt = -1e18;
     o.animated = true;
