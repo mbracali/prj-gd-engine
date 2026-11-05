@@ -9,6 +9,7 @@
 #include <cstring>
 #include <exception>
 
+#include "audio/audio_device.h"
 #include "audio/xma_decoder.h"
 #include "data/disc.h"
 #include "data/fsb.h"
@@ -28,6 +29,10 @@ bool Sfx::open(std::string& error) {
         error = SDL_GetError();
         return false;
     }
+    // GD04_AUDIODUMP: this device's mix too (audiodev::dumpPostmix).
+    if (audiodev::dumpEnabled())
+        SDL_SetAudioPostmixCallback(
+            device_, [](void*, const SDL_AudioSpec* spec, float* buffer, int bytes) { audiodev::dumpPostmix(1, "sfx", spec, buffer, bytes); }, nullptr);
     return true;
 }
 
@@ -155,6 +160,9 @@ uint32_t Sfx::play(uint32_t sample, float volume, float pitch, uint32_t buss) {
     SDL_FlushAudioStream(s);
     if (!bound || !put || SDL_GetAudioStreamAvailable(s) <= 0) ++stats_.lost;
     if (log) SDL_Log("sfx:   bound %d, put %d (%s), available %d", int(bound), int(put), put ? "" : SDL_GetError(), SDL_GetAudioStreamAvailable(s));
+    if (audiodev::dumpEnabled())
+        SDL_Log("audiodump: sfx %s at frame %lld, wall %.0f ms, volume %.2f", qbkey::name(sample).c_str(), audiodev::dumpFrames(1),
+                double(SDL_GetTicksNS()) / 1e6, double(volume));
     voices_.push_back(Voice{id, s, sample, buss, false});
     return id;
 }

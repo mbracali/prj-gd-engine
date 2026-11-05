@@ -27,4 +27,14 @@ void closeStream(SDL_AudioStream* stream);
 void toggleLimiter();
 bool limiterEnabled();
 
+// GD04_AUDIODUMP=<prefix> (development aid): a logical device's final mix
+// (after its postmix: the song's limiter) written to <prefix>.<tag>.wav
+// (float, the device's rate and channels), so a sound's level can be
+// measured against the song's at the moment it plays. `dumpPostmix` is
+// called from that device's postmix callback; `dumpFrames` is how many
+// frames the dump holds now (the sound effects log where they start).
+bool dumpEnabled();
+void dumpPostmix(int slot, const char* tag, const SDL_AudioSpec* spec, const float* buffer, int bytes);
+long long dumpFrames(int slot);
+
 }  // namespace audiodev
