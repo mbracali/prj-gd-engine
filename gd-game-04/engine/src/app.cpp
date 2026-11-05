@@ -126,6 +126,8 @@ private:
     void finishMenuBackdrop(bool wait);
     std::unique_ptr<Chart> backdropChart_;
     bool backdropTried_ = false;
+    bool backdropAttaching_ = false;  // its parts uploading, one a frame (VenueStage::attachStep)
+    int backdropPose_ = 0;            // then its unseen draws, one a frame
     void drawTouchButtons();
     bool windowToMenu(float wx, float wy, float& mx, float& my) const;
 
@@ -803,23 +805,47 @@ void App::prepareMenuBackdrop() {
 }
 
 // The backdrop's load done: attached, posed and its camera set (on this thread).
+// Unless `wait` (the page is open: all of it now), one part a frame: the
+// venue's uploads (VenueStage::attachStep), then the posing draw, then the
+// shot and its first draw. Done at once it held a frame of the press-start
+// screen for ~400 ms.
 void App::finishMenuBackdrop(bool wait) {
-    if (!backdropWork_.valid()) return;
-    if (!wait && backdropWork_.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return;
-    std::string err = backdropWork_.get();
-    if (backdropChartSlot_) backdropChart_ = std::move(*backdropChartSlot_), backdropChartSlot_.reset();
-    if (err.empty() && !backdropPending_->attach(canvas_.renderer().device(), *disc_, err) && err.empty()) err = "attach";
-    if (!err.empty()) {
-        SDL_Log("menu backdrop: %s", err.c_str());
-        backdropPending_.reset();
-        return;
+    if (backdropWork_.valid()) {
+        if (!wait && backdropWork_.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return;
+        std::string err = backdropWork_.get();
+        if (backdropChartSlot_) backdropChart_ = std::move(*backdropChartSlot_), backdropChartSlot_.reset();
+        if (!err.empty()) {
+            SDL_Log("menu backdrop: %s", err.c_str());
+            backdropPending_.reset();
+            return;
+        }
+        backdropAttaching_ = true;
+        if (!wait) return;  // the uploads from the next frame
     }
-    backdrop_ = std::move(backdropPending_);
+    if (backdropAttaching_) {
+        std::string err;
+        if (wait) backdropPending_->attach(canvas_.renderer().device(), *disc_, err);
+        else if (!backdropPending_->attachStep(canvas_.renderer().device(), *disc_, err)) return;  // more parts next frame
+        backdropAttaching_ = false;
+        if (!backdropPending_->attached()) {
+            SDL_Log("menu backdrop: %s", err.empty() ? "attach" : err.c_str());
+            backdropPending_.reset();
+            return;
+        }
+        backdrop_ = std::move(backdropPending_);
+        backdropPose_ = 1;
+        if (!wait) return;
+    }
+    if (backdropPose_ == 0 || !backdrop_) return;
     const uint64_t t0 = backdropT0_;
-
-    // (stepped to the instant on the worker)
-    canvas_.flush();
-    backdrop_->draw(kBackdropMs);  // the band posed (their bones are known after a draw), unseen
+    if (backdropPose_ == 1) {
+        // (stepped to the instant on the worker)
+        canvas_.flush();
+        backdrop_->draw(kBackdropMs);  // the band posed (their bones are known after a draw), unseen
+        backdropPose_ = 2;
+        if (!wait) return;
+    }
+    backdropPose_ = 0;
     // The shot: from the stage's front (the drummer behind the singer), a
     // little to one flank, the singer's head on the right of the picture.
     venue::Vec3 head{}, drums{};
@@ -1216,7 +1242,16 @@ void App::frame() {
     }
     preloadDiscard_.erase(std::remove_if(preloadDiscard_.begin(), preloadDiscard_.end(), [](const auto& p) { return p->ready(); }),
                           preloadDiscard_.end());
-    if (front_ && front_->songRequest.pending && (!songPreload_ || songPreload_->ready())) {
+    if (textures_) textures_->poll();  // the zone textures read on a worker (TextureCache::loadPakAsync)
+    // The preloaded venue's uploads, a part a frame under the loading screen
+    // (VenueStage::attachStep); on the song's first frame they held it ~300 ms.
+    if (front_ && front_->songRequest.pending && songPreload_ && songPreload_->ready() && songPreload_->stage && !songPreload_->stage->attachDone()) {
+        std::string aerr;
+        songPreload_->stage->attachStep(canvas_.renderer().device(), *disc_, aerr);
+        if (!aerr.empty()) SDL_Log("venue preload: %s", aerr.c_str());
+    }
+    if (front_ && front_->songRequest.pending && (!songPreload_ || (songPreload_->ready() && (!songPreload_->stage || songPreload_->stage->attachDone()))) &&
+        !(textures_ && textures_->pending())) {
         front_->songRequest.pending = false;
         // The loading screen goes with the song's start (GH3: after its async loads) [C script start_gem_scroller].
         front_->vm().spawn(qbkey::key("destroy_loading_screen"), qb::Struct{});

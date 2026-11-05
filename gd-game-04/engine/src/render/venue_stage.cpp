@@ -241,54 +241,78 @@ bool VenueStage::start(const Disc& disc, const Globals& g, const std::string& zo
 }
 
 bool VenueStage::attach(gfx::RenderDevice& device, const Disc& disc, std::string& error) {
-    if (view_ || !venue_) return bool(view_);
-    view_ = std::make_unique<VenueView>();
-    if (!view_->init(device, disc, *venue_, hide_, error)) {
-        view_.reset();
-        return false;
-    }
-    if (band_) {
-        std::string berr;
-        if (!band_->attach(device, berr)) SDL_Log("band: %s", berr.c_str());
-    }
-    // The dynamic shadow map: shadow_map_size (1024, 512) of
-    // Default_TOD_Manager's one_camera mode, the shadow_big style 1024 x 1024
-    // depth only [C data tod_profiles.qb; I: one map for both cascades].
-    if (device_ && shadow_) device_->destroyTarget(shadow_);
-    shadow_ = {};
-    device_ = &device;
-    if (!SDL_getenv("GD04_NO_SHADOWS")) {
-        std::string serr;
-        gfx::TargetDesc td;
-        td.width = td.height = 1024;
-        td.depth = true;
-        shadow_ = device.createTarget(td, serr);
-        if (!shadow_) SDL_Log("venue: no shadow map: %s", serr.c_str());
-    }
-    fxReady_ = !SDL_getenv("GD04_NO_SCREENFX") && fx_.init(device, gh3shader::library(disc));
-    if (particles_) {
-        std::string perr;
-        if (!particles_->attach(device, disc, perr)) {
-            SDL_Log("particles: %s", perr.c_str());
-            particles_.reset();
+    if (!venue_) return bool(view_);
+    while (!attachStep(device, disc, error))
+        if (!view_) return false;
+    return bool(view_);
+}
+
+bool VenueStage::attachStep(gfx::RenderDevice& device, const Disc& disc, std::string& error) {
+    if (!venue_) return true;
+    if (attachStep_ >= kAttachSteps) return true;
+    switch (attachStep_) {
+    case 0:
+        view_ = std::make_unique<VenueView>();
+        if (!view_->init(device, disc, *venue_, hide_, error)) {
+            view_.reset();
+            attachStep_ = kAttachSteps;  // failed: nothing more to upload
+            return true;
         }
-    }
-    if (peds_) {
-        std::string perr;
-        if (!peds_->attach(device, gh3shader::library(disc), perr)) {
-            SDL_Log("stage peds: %s", perr.c_str());
-            peds_.reset();
-            if (particles_) particles_->setAnimHook(nullptr);
+        break;
+    case 1:
+        if (band_) {
+            std::string berr;
+            if (!band_->attach(device, berr)) SDL_Log("band: %s", berr.c_str());
         }
-    }
-    if (crowd_) {
-        std::string cerr;
-        if (!crowd_->attach(device, gh3shader::library(disc), cerr)) {
-            SDL_Log("crowd: %s", cerr.c_str());
-            crowd_.reset();
+        break;
+    case 2: {
+        // The dynamic shadow map: shadow_map_size (1024, 512) of
+        // Default_TOD_Manager's one_camera mode, the shadow_big style 1024 x 1024
+        // depth only [C data tod_profiles.qb; I: one map for both cascades].
+        if (device_ && shadow_) device_->destroyTarget(shadow_);
+        shadow_ = {};
+        device_ = &device;
+        if (!SDL_getenv("GD04_NO_SHADOWS")) {
+            std::string serr;
+            gfx::TargetDesc td;
+            td.width = td.height = 1024;
+            td.depth = true;
+            shadow_ = device.createTarget(td, serr);
+            if (!shadow_) SDL_Log("venue: no shadow map: %s", serr.c_str());
         }
+        fxReady_ = !SDL_getenv("GD04_NO_SCREENFX") && fx_.init(device, gh3shader::library(disc));
+        break;
     }
-    return true;
+    case 3:
+        if (particles_) {
+            std::string perr;
+            if (!particles_->attach(device, disc, perr)) {
+                SDL_Log("particles: %s", perr.c_str());
+                particles_.reset();
+            }
+        }
+        break;
+    case 4:
+        if (peds_) {
+            std::string perr;
+            if (!peds_->attach(device, gh3shader::library(disc), perr)) {
+                SDL_Log("stage peds: %s", perr.c_str());
+                peds_.reset();
+                if (particles_) particles_->setAnimHook(nullptr);
+            }
+        }
+        break;
+    case 5:
+        if (crowd_) {
+            std::string cerr;
+            if (!crowd_->attach(device, gh3shader::library(disc), cerr)) {
+                SDL_Log("crowd: %s", cerr.c_str());
+                crowd_.reset();
+            }
+        }
+        break;
+    }
+    return ++attachStep_ >= kAttachSteps;
 }
 
 bool VenueStage::lightersOn(double ms) const {

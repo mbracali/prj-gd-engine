@@ -63,6 +63,14 @@ public:
                gfx::RenderDevice* device, std::string& error, double songStartMs = 0);
     // Uploads the venue to `device` (once).
     bool attach(gfx::RenderDevice& device, const Disc& disc, std::string& error);
+    // The same, one part per call (the scene; the band; the shadow map and
+    // screen FX; the particles; the stage peds; the crowd), so a frame
+    // holds one part's upload rather than all of them (~250 ms on the
+    // menus' backdrop and the song's first frame). True once all are in
+    // (`error` set or no scene: failed).
+    bool attachStep(gfx::RenderDevice& device, const Disc& disc, std::string& error);
+    bool attached() const { return view_ && attachStep_ >= kAttachSteps; }
+    bool attachDone() const { return !venue_ || attachStep_ >= kAttachSteps; }
     // Advances the cuts and the light show to song time `ms` (monotonic).
     // `health`: the rock meter, 0..2 (the crowd's performance [I]), as the
     // 60 Hz step at `ms` set it; call it on every step and as often between
@@ -116,6 +124,8 @@ private:
     venue::CameraDirector cameras_;
     venue::LightShow lights_;
     std::unique_ptr<VenueView> view_;
+    static constexpr int kAttachSteps = 6;
+    int attachStep_ = 0;
     std::vector<venue::LightState> lightState_;
     std::vector<uint32_t> hide_;  // the crowd cards' textures
     venue::PerfTimeline perf_;
