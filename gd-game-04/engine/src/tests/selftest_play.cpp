@@ -99,6 +99,27 @@ bool overstrumCut(const NoteTrack& track, const Tuning& tu, PlayTotals& t, std::
     return false;
 }
 
+// GD04-112: strums before the first note's window (the highway's intro)
+// are nothing: no overstrum, no health lost; the first note is still hit.
+bool strumBeforeFirst(const NoteTrack& track, const Tuning& tu, std::string& why) {
+    if (track.notes.empty()) return true;
+    const double E = tu.checkTimeEarly * 1000.0, first = track.notes.front().time;
+    Player p(track, tu, 3, true);
+    Autoplay ap(track, false);
+    const double frame = 1000.0 / 60.0;
+    p.setSongLengthMs(first + 2000);
+    int strums = 0;
+    for (double now = first - 3000.0; now < first + 500.0; now += frame) {
+        FrameInput in = ap.input(now, frame, p);
+        if (now < first - E - 2 * frame && int((now - first) / frame) % 10 == 0) in.strum = true, ++strums;
+        p.frame(now, frame, in);
+    }
+    if (strums > 0 && p.stats().overstrums == 0 && p.stats().notesHit >= 1) return true;
+    why = "strums before the first note: " + std::to_string(strums) + " strums, " + std::to_string(p.stats().overstrums) + " overstrums, " +
+          std::to_string(p.stats().notesHit) + " hit";
+    return false;
+}
+
 }  // namespace
 
 bool playChart(const Globals& g, const SongInfo& song, const Chart& chart, PlayTotals& t, std::string& why) {
@@ -139,6 +160,13 @@ bool playChart(const Globals& g, const SongInfo& song, const Chart& chart, PlayT
     if (!chart.notes(Part::Guitar, 3).empty()) {
         std::string w;
         if (!overstrumCut(buildTrack(chart, Part::Guitar, 3, tu, scale), tu, t, w)) {
+            if (ok) why = "guitar expert: " + w;
+            ok = false;
+        }
+    }
+    if (!chart.notes(Part::Guitar, 3).empty()) {
+        std::string w;
+        if (!strumBeforeFirst(buildTrack(chart, Part::Guitar, 3, tu, scale), tu, w)) {
             if (ok) why = "guitar expert: " + w;
             ok = false;
         }
