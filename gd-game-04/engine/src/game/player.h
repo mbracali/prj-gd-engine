@@ -83,6 +83,9 @@ public:
     const std::vector<PlayerEvent>& events() const { return events_; }
     void clearEvents() { events_.clear(); }
     size_t current() const { return cur_; }
+    // A star note of this Star Power phrase was missed: its gems are normal
+    // gems now (star_miss_note) [C 0x8211F56C].
+    bool phraseLost(int phrase) const { return phrase >= 0 && size_t(phrase) < missedPhrase_.size() && missedPhrase_[size_t(phrase)]; }
     // The note index whose sustain is held, or -1.
     int sustaining() const { return sus_.note; }
     // A mid-song start: the notes before `ms` are passed over (not judged;

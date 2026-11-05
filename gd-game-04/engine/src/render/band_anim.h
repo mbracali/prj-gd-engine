@@ -217,6 +217,9 @@ private:
     struct Chain {
         int b0 = -1, b1 = -1, b2 = -1, target = -1;
         bool right = false, leg = false;
+        Vec hinge{0, 0, -1};                   // hingeaxis, in bone1's frame
+        float cosMax = -1, cosMin = 1;         // cosmaxhingeangle / cosminhingeangle (Function_823F78E0's defaults)
+        float gain1 = 1, gain2 = 1;            // strength (first / second joint gains)
     };
     std::vector<Chain> chains_;
     // hero_ConstraintBones: helper bones driven from the animated ones after the IK [C data].

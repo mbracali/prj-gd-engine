@@ -84,8 +84,10 @@ member's transform is the waypoint's position and rotation (docs/venues.md
   holds absolute values (the `rig/defaults/*_default` clips equal the bind
   pose).
 - Flags 0x200: a difference clip (the hands' `_D` clips): finger bones with a
-  zero translation and a rotation off the bind; gd04 composes it onto the
-  pose below (pose x delta, translations added) [I: the order].
+  zero translation and a rotation off the bind; gd04 composes it before the
+  pose below (delta x pose in its column-vector terms, translations added)
+  [I: the order, chosen from the fret hand's grip: the other order twisted
+  the IK target and the hand].
 - Body clips (`GH3_Guit_Axel_A_Med_Idle1`) drive the root, spine, legs,
   head, the guitar bones and the IK targets, **not** the arms: a
   guitarist's arms come from IK (below). Break / intro clips (`handsoff`)
@@ -110,17 +112,30 @@ twist difference scaled by the twist value. A `degenerateblend` node
 cross-fades from what it played to the new clip over the blend time [I:
 linear]; a `play` timer holds its last frame [I].
 
-### IK  [C data `Hero_Ik_params`; I: the solver]
+### IK  [C data `Hero_Ik_params`; C: Function_823F78E0, the job 0x823F65C0]
 
-Two-bone chains bicep -> forearm -> palm onto `Bone_IK_Hand_Guitar_R`
-(child of `BONE_GUITAR_STRUM_POS`) and `Bone_IK_Hand_Guitar_L` (child of
-`BONE_GUITAR_FRET_POS`, which the fret clips slide along the neck), and
-the legs thigh -> knee -> ankle onto `Bone_IK_Foot_Slave_L/R`. gd04 solves
-in the plane through the animated elbow / knee; the palm and the ankle keep
-their animated rotations (copying the target's turned the fret hand off the
-neck); the arms blend with the animation by the arm's strength
-(`hero_toggle_arms`, 0.25 s), the legs always [I]. The drummer's and the
-singer's IK and the hinge limits are not done.
+The `ik` node (`two_bone_chains = ik_params`) builds one Havok two-joints
+setup per `Hero_Ik_params` entry (Function_823F78E0): bone0 / bone1 / bone2
+(bicep, forearm, palm; thigh, knee, ankle), `bonetarget`, `hingeaxis` (in
+bone1's frame), `cosmaxhingeangle` (default -1), `cosminhingeangle` (1) and
+the two joint gains `strength` (1; ramped by `hero_toggle_arms` at +0x40).
+Each frame the job reads the target's matrix, calls Havok's
+`hkaTwoJointsIkSolver::solve` (Function_826B5340, "LtTWOJOINTSOLVER": no end
+rotation in this Havok's setup), then turns the target's rotation rows
+(r0, r2, -r1) into a quaternion, multiplies it by (-0.7071, 0, 0, 0.7071)
+(the two 90-degree turns cancel) and stores it, slerped by the gain, as the
+end bone's model rotation [C 0x823F6D1C..0x823F715C]. gd04: the elbow / knee
+turns about its hinge axis to the angle the target's distance asks for
+(clamped by the cosines), the shoulder / hip swings the chain onto the
+target, the palm / ankle takes the target's model rotation; the arms by the
+arm's strength (`hero_toggle_arms`, 0.25 s), the legs always [I: Havok's
+solve as documented]. Targets: `Bone_IK_Hand_Guitar_R` (child of
+`BONE_GUITAR_STRUM_POS`), `Bone_IK_Hand_Guitar_L` (child of
+`BONE_GUITAR_FRET_POS`, which the fret clips slide along the neck),
+`Bone_IK_Foot_Slave_L/R`. The difference clips compose before the pose below
+(the flags 0x200 note above); with the other order the target, and the fret hand
+on it, turned about the wrong axes (owner 2026-11-04: the left hand twisted,
+off the neck). The drummer's and the singer's IK are not done.
 
 `hero_ConstraintBones` (the root of the guitarist's, singer's and drummer's
 trees) [C data; I: the operations]: after the IK, `twist` bones (children of

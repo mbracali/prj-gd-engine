@@ -5,6 +5,7 @@
 #include <cstdlib>
 
 #include <algorithm>
+#include <set>
 #include <cmath>
 #include <cstdio>
 #include <string_view>
@@ -195,7 +196,11 @@ void evalDelta(const Rig& rig, const Node& n, double t, float strength, Pose& po
     }
     for (size_t b = 0; b < pose.size(); ++b) {
         const Xf& d = cur[b];
-        pose[b].q = qmul(pose[b].q, qpow(d.q, strength));
+        // The delta goes before the pose below (in the file's row-vector terms
+        // the pose below, then the delta): the other order turned the IK
+        // target, and the fret hand with it, about the wrong axes (owner
+        // 11-04 doc 1.1; checked against the fret hand's grip in renders).
+        pose[b].q = qmul(qpow(d.q, strength), pose[b].q);
         pose[b].t = vadd(pose[b].t, vmul(d.t, strength));
     }
 }
@@ -393,6 +398,10 @@ bool Animator::init(const Setup& s, std::string& error) {
                 c.b2 = rig_.find(keyOf(st->find(K("bone2"))));
                 c.target = rig_.find(tgt);
                 c.right = tgt == K("bone_ik_hand_guitar_r");
+                if (const qb::Value* h = st->find(K("hingeaxis")); h && h->type == qb::Type::Vector) c.hinge = {h->f[0], h->f[1], h->f[2]};
+                if (const qb::Value* v = st->find(K("cosmaxhingeangle"))) c.cosMax = float(v->number());
+                if (const qb::Value* v = st->find(K("cosminhingeangle"))) c.cosMin = float(v->number());
+                if (const qb::Value* v = st->find(K("strength"))) c.gain1 = c.gain2 = float(v->number());
                 if (c.b0 >= 0 && c.b1 >= 0 && c.b2 >= 0 && c.target >= 0) chains_.push_back(c);
             }
     }
@@ -958,46 +967,66 @@ void Animator::evaluate(double ms, std::vector<Mat34>& world, std::vector<Mat34>
     }
     worldOf(rig_, pose, world);
 
-    // Two-bone IK of the arms onto the guitar's hand bones [C data
-    // Hero_Ik_params; I: the bend plane through the animated elbow, the palm
-    // keeping its animated local rotation].
+    // Two-bone IK onto the guitar's hand bones and the foot slaves: GH3's ik
+    // node runs Havok's two-joints solver per Hero_Ik_params chain
+    // (Function_823F78E0 builds each setup: bone0..2, bonetarget, hingeaxis,
+    // cosmaxhingeangle (default -1), cosminhingeangle (1), first / second
+    // joint gains = `strength` (1), end joint gain 0) [C]. The elbow / knee
+    // turns about its hinge axis (in its own frame) to the angle the
+    // target's distance asks for, clamped by the cosines; the shoulder / hip
+    // then swings the chain onto the target; the end bone keeps its local
+    // rotation (gain 0) [C: the setup; I: Havok's solve as documented]. The
+    // free elbow bend before rolled the forearm, and with it the fret hand
+    // (owner 11-04 doc 1.1).
     if (!chains_.empty()) {
         bool changed = false;
         for (const Chain& c : chains_) {
             const float s = c.leg ? 1.0f : c.right ? rightStrength_.at(ms) : leftStrength_.at(ms);  // the legs always [I]
             if (s <= 0) continue;
-            const Vec S = posOf(world[size_t(c.b0)]), E = posOf(world[size_t(c.b1)]), W = posOf(world[size_t(c.b2)]);
+            const Vec A = posOf(world[size_t(c.b0)]), B = posOf(world[size_t(c.b1)]), C = posOf(world[size_t(c.b2)]);
             const Vec T = posOf(world[size_t(c.target)]);
-            const float a = vlen(vsub(E, S)), b = vlen(vsub(W, E));
-            if (a < 1e-5f || b < 1e-5f) continue;
-            const Vec toT = vsub(T, S);
-            const float d = std::clamp(vlen(toT), std::fabs(a - b) + 1e-4f, a + b - 1e-4f);
-            const Vec n = vnorm(toT);
-            Vec pole = vsub(E, S);
-            pole = vsub(pole, vmul(n, vdot(pole, n)));
-            if (vlen(pole) < 1e-6f) pole = vcross(n, {0, 1, 0});
-            pole = vnorm(pole);
-            const float cosA = std::clamp((a * a + d * d - b * b) / (2 * a * d), -1.0f, 1.0f);
-            const float sinA = std::sqrt(std::max(0.0f, 1 - cosA * cosA));
-            const Vec E2 = vadd(S, vadd(vmul(n, a * cosA), vmul(pole, a * sinA)));
-            const Vec T2 = vadd(S, vmul(n, d));
-            const Quat r0 = between(vsub(E, S), vsub(E2, S));
+            const Vec BA = vsub(A, B), BC = vsub(C, B);
+            const float lab = vlen(BA), lbc = vlen(BC);
+            if (lab < 1e-5f || lbc < 1e-5f) continue;
+            // 1. The hinge: the angle at B between BA and BC to reach |AT|.
+            const float lat = vlen(vsub(T, A));
+            float cosWant = (lab * lab + lbc * lbc - lat * lat) / (2 * lab * lbc);
+            cosWant = std::clamp(cosWant, std::max(-1.0f, c.cosMax), std::min(1.0f, c.cosMin));
+            const float cosNow = std::clamp(vdot(BA, BC) / (lab * lbc), -1.0f, 1.0f);
+            const Vec axis = vnorm(qrot(rotOf(world[size_t(c.b1)]), c.hinge));  // the hinge axis in model space
+            const float d = std::acos(cosWant) - std::acos(cosNow);
+            // The sign: the turn about the axis that opens / closes the angle as wanted.
+            auto angleAfter = [&](float a) {
+                const Vec bc = qrot(Quat{axis.x * std::sin(a * 0.5f), axis.y * std::sin(a * 0.5f), axis.z * std::sin(a * 0.5f), std::cos(a * 0.5f)}, BC);
+                return std::acos(std::clamp(vdot(BA, bc) / (lab * lbc), -1.0f, 1.0f));
+            };
+            const float want = std::acos(cosWant);
+            const float turn = std::fabs(angleAfter(d) - want) <= std::fabs(angleAfter(-d) - want) ? d : -d;
+            const float g1 = c.gain1 * s, g2 = c.gain2 * s;
+            const float ht = turn * g2;
+            const Quat hq{axis.x * std::sin(ht * 0.5f), axis.y * std::sin(ht * 0.5f), axis.z * std::sin(ht * 0.5f), std::cos(ht * 0.5f)};
+            const Quat w1 = qmul(hq, rotOf(world[size_t(c.b1)]));
+            const Vec C1 = vadd(B, qrot(hq, BC));
+            // 2. The first joint: the chain swung so that the end meets the target.
+            const Quat full = between(vsub(C1, A), vsub(T, A));
+            const Quat r0 = nlerp(Quat{}, full, g1);
             const Quat w0 = qmul(r0, rotOf(world[size_t(c.b0)]));
-            const Vec W1 = vadd(S, qrot(r0, vsub(W, S)));
-            const Quat r1 = between(vsub(W1, E2), vsub(T2, E2));
-            const Quat w1 = qmul(r1, qmul(r0, rotOf(world[size_t(c.b1)])));
-            const Quat w2 = rotOf(world[size_t(c.target)]);
-            // Back to local rotations, blended with the animated ones by the chain's strength.
+            const Quat w1b = qmul(r0, w1);
+            // Back to local rotations (the end bone keeps its own: gain 0).
             const int p0 = rig_.parent[size_t(c.b0)];
             const Quat parentRot = p0 >= 0 ? rotOf(world[size_t(p0)]) : Quat{};
-            Quat l0 = qmul(qconj(parentRot), w0), l1 = qmul(qconj(w0), w1), l2 = qmul(qconj(w1), w2);
-            pose[size_t(c.b0)].q = nlerp(pose[size_t(c.b0)].q, l0, s);
-            pose[size_t(c.b1)].q = nlerp(pose[size_t(c.b1)].q, l1, s);
-            // The palm keeps its animated rotation under the forearm (the clips'
-            // grip, the fingers' deltas on top); copying the target bone's
-            // rotation turned the fret hand up off the neck, fingers in the air
-            // (owner, 2026-11-04) [I: renders].
-            (void)l2;
+            pose[size_t(c.b0)].q = qmul(qconj(parentRot), w0);
+            pose[size_t(c.b1)].q = qmul(qconj(w0), w1b);
+            // 3. The end bone (palm, ankle) takes the target's model rotation,
+            // by the chain's gain: the job turns the target's matrix rows
+            // (r0, r2, -r1) into a quaternion, times (-0.7071, 0, 0, 0.7071)
+            // (the two 90-degree turns cancel), and stores it as the end
+            // bone's model rotation [C 0x823F6D1C..0x823F715C].
+            {
+                const Quat want = rotOf(world[size_t(c.target)]);
+                const Quat endModel = qmul(w1b, pose[size_t(c.b2)].q);
+                pose[size_t(c.b2)].q = qmul(qconj(w1b), nlerp(endModel, want, s));
+            }
             changed = true;
         }
         if (changed) worldOf(rig_, pose, world);

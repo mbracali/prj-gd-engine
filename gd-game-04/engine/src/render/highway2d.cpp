@@ -538,7 +538,9 @@ void Highway2D::drawAll(Canvas& c, const TextureCache& tex, const NoteTrack& tra
                     // The gem sprite [C 0x82120C90]: Star Power / battle star /
                     // star / normal, hammer variants for HOPOs; star sprites are
                     // flip-books (Star2D 4x4, BattleGEM 2x4, 30 fps) [C data; frame order I].
-                    const bool star = n.phrase >= 0;
+                    // A lost phrase's gems are normal gems again (star_miss_note,
+                    // owner 11-04 doc 1.8: they kept rolling as stars) [C 0x8211F56C].
+                    const bool star = n.phrase >= 0 && !player.phraseLost(n.phrase);
                     uint32_t key;
                     float u1 = 1, v1 = 1, u0 = 0, v0 = 0, scale = gemStart_ + (gemEnd_ - gemStart_) * v, just = gemJust_;
                     const int frame = int(now / 1000.0 * 30) % 16;
