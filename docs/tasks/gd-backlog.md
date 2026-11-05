@@ -857,6 +857,22 @@ universal launcher, not released on its own.
 | GD04-086 | Bugfix | ✅ | Owner 11-05: menus misaligned (pause in a song, Cheats, Store); menu screens' effects and shadows | VScrollingMenu decoded (0x82317640): every new_menu list half its first item lower; locked menus lay out once. Pause / Store / Cheats / Calibrate Lag / options on their highlights. Menu viewport: bg_viewport's BnS + sbloom, the characters' shadow. Left: pause x is GH3's menu_pos (730) | Owner 11-05 |
 | GD04-087 | Bugfix | ✅ | Owner 11-05: quick play's loading animation sometimes missing; a black frame between the intro movie and the main menu (and other transitions) | is_changing_levels reset by Transition_StartRendering; GH3_Intro plays noblack over the menu with its alpha; empty frames keep the last picture (250 ms); legal screen no longer spins; hitches: menu music / previews streamed, zone textures and venue uploads on workers / spread (<= ~100 ms frames). Left: one ~100-160 ms scene upload under the loading movie, save writes 57-87 ms | Owner 11-05 |
 | GD04-088 | Feature | ✅ | Owner 11-05: failed-song ending (highway hidden at once, music slows), Star Power swirl ribbons, battle lefty-flip slide, Death Drain bites seen on screen; animation polish | Decided songs as GH3's scripts (disable_bg_viewport, Failed_Song_Pitch_Down); textureribbontrail ribbons (82427E08); lifetime-0 FX emit; IsCreated with mangled ids; lefty flip slide (0.15 s); Death Drain seen; win / lose clips once for all members; Star Power events no longer doubled; Star Power pose. Left: mid-slide frame and hands / feet close-ups not verified | Owner 11-05 |
+| GD04-089 | Bugfix | 🟡 in progress (wave 4) | Owner 11-05 (wave 4): the press-start screen flashes black for about a second |  | Owner 11-05 |
+| GD04-090 | Bugfix | 🟡 in progress (wave 4) | Owner 11-05: Bonus and DLC song lists not reachable from quick play's song select |  | Owner 11-05 |
+| GD04-091 | Bugfix | 🟡 in progress (wave 4) | Owner 11-05: quick play loads random characters / guests / venues each song; check against GH3's quick play rules |  | Owner 11-05 |
+| GD04-092 | Bugfix | 🟡 in progress (wave 4) | Owner 11-05: Star Power gem colour must switch for every gem on screen at once (on and off); some gems keep the Star Power colour afterwards |  | Owner 11-05 |
+| GD04-093 | Bugfix | 🟡 in progress (wave 4) | Owner 11-05: a black screen for a couple of seconds after a song instead of the save menu |  | Owner 11-05 |
+| GD04-094 | Bugfix | 🟡 in progress (wave 4) | Owner 11-05: with cut content on, character select breaks and the original characters can't be picked again |  | Owner 11-05 |
+| GD04-095 | Enhancement | 🟡 in progress (wave 4) | Owner 11-05: with cut content on, a blue button lists the cut venues; the pick is used for the next song |  | Owner 11-05 |
+| GD04-096 | Bugfix | 🟡 in progress (wave 4) | Owner 11-05: the store shows everything bought for every band; new bands must start with nothing bought (the owner's save: every band but The Glitches wiped, backup kept) |  | Owner 11-05 |
+| GD04-097 | Bugfix | 🟡 in progress (wave 4) | Owner 11-05: check that every character plays their Star Power effects |  | Owner 11-05 |
+| GD04-098 | Bugfix | 🟡 in progress (wave 4) | Owner 11-05: the music sounds distorted / reverbed during Star Power; match GH3 exactly |  | Owner 11-05 |
+| GD04-099 | Bugfix | 🟡 in progress (wave 4) | Owner 11-05: store character names offset from the menu rows |  | Owner 11-05 |
+| GD04-100 | Bugfix | 🟡 in progress (wave 4) | Owner 11-05: practice menus look broken; practice music, highway, intro SFX and notes out of sync (notes arrive late, all at once) |  | Owner 11-05 |
+| GD04-101 | Bugfix | 🟡 in progress (wave 4) | Owner 11-05: main menu Online must be greyed out and not selectable |  | Owner 11-05 |
+| GD04-102 | Bugfix | 🟡 in progress (wave 4) | Owner 11-05: co-op career menu icons don't move as they should |  | Owner 11-05 |
+| GD04-103 | Bugfix | 🟡 in progress (wave 4) | Owner 11-05: remaining lighting and shadow glitches |  | Owner 11-05 |
+| GD04-104 | Bugfix | 🟡 in progress (wave 4) | Owner 11-05: the female singer's accessories stutter and glitch (cloth / bone physics?) |  | Owner 11-05 |
 | GD04-033 | Original | ✅ not affected | GD02-145's cache bug: GH3's GPU textures are keyed by asset hash, and venue_view's one pointer-keyed map is cleared on reload | | 2026-11-02 |
 
 
