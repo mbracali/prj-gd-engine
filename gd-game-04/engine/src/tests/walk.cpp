@@ -229,6 +229,43 @@ Walk::Walk(const std::string& name) : name_(name) {
         steps_.push_back({"career_select_venue_fs", {"check:tag:venue_z_hell.unlocked=1", "check:focus:venue_3", "key:Up", "wait", "check:focus:venue_4", B}, 20000});
         steps_.push_back({"career_character_hub_fs", {}, 20000});
 
+    } else if (name == "cutcontent") {
+        // GD04-094: Enhanced > Enable Cut Content on, The Glitches (every
+        // character unlocked) -> CHANGE CHARACTER -> down past the last
+        // character and back up: the original characters stay reachable.
+        const Action U = Action::Up;
+        steps_ = boot;
+        steps_.push_back({"main_menu_fs", {"set:enhanced:cut_content=on", C}, 10000});
+        steps_.push_back({"career_choose_band_fs", {D, D, D, D, C}, 20000});
+        steps_.push_back({"career_select_difficulty_fs", {C}, 20000});
+        steps_.push_back({"career_character_hub_fs", {D, C}, 20000});  // CHANGE CHARACTER
+        std::vector<Op> cs;
+        for (int i = 0; i < 20; ++i) cs.push_back(Op(D, 300));
+        cs.push_back(Op("log:cs"));
+        cs.push_back(Op("check:global:g_cs_jumped_p1=13"));  // the second page
+        for (int i = 0; i < 20; ++i) cs.push_back(Op(U, 300));
+        cs.push_back(Op("log:cs"));
+        cs.push_back(Op("check:global:g_cs_jumped_p1=0"));
+        cs.push_back(Op("check:global:g_character_select_icon_index_p1=0"));
+        // Quick play's random guitarist keeps to GH3's 13 (GD04-091).
+        cs.push_back(Op("check:qp_guitarists=13"));
+        // A Bone Man picked (the second page's second, BoneMan_Judy): the menu
+        // opens on it again; with the option off it opens on the first page.
+        for (int i = 0; i < 14; ++i) cs.push_back(Op(D, 300));
+        cs.push_back(C);
+        steps_.push_back({"career_select_character_fs", cs, 20000});
+        steps_.push_back({"career_character_hub_fs", {"wait", "wait", D, C}, 20000});  // CHANGE CHARACTER
+        steps_.push_back({"career_select_character_fs",
+                          {"wait", "wait", "log:cs", "check:global:g_cs_jumped_p1=13", "check:global:g_character_select_icon_index_p1=1",
+                           "set:enhanced:cut_content=off", B},
+                          20000});
+        steps_.push_back({"career_select_difficulty_fs", {"wait", C}, 20000});
+        steps_.push_back({"career_character_hub_fs", {"wait", "wait", D, C}, 20000});
+        steps_.push_back({"career_select_character_fs",
+                          {"wait", "wait", "log:cs", "check:global:g_cs_jumped_p1=0", "check:global:cs_total_guitarists_p1=13", D,
+                           "check:global:g_character_select_icon_index_p1=1"},
+                          20000});
+
     } else if (name == "boss") {
         // A career boss battle: The Glitches (everything unlocked) -> EASY ->
         // venue -> the setlist's tier-2 boss, Tom Morello (bosstom) [C data
@@ -862,6 +899,29 @@ bool Walk::act(const std::string& what, FrontEnd& fe, WalkHost& host) {
             if (e->id != qbkey::key("root_window")) ++items, has = has || e->id == want, seen += " " + qbkey::name(e->id);
         std::printf("  focus: %s %s (%d focused:%s)\n", rest("check:focus:").c_str(), has ? "yes" : "no", items, seen.c_str());
         return has && items == 1 ? true : fail("focus is not on " + rest("check:focus:") + " alone");
+    }
+    if (starts("check:qp_guitarists=")) {  // quick play's random guitarist count (cs_get_total_guitarists from quickplay_start_song)
+        qs::ScriptRun r;
+        qs::Frame f;
+        f.code = fe.vm().code(qbkey::key("quickplay_start_song"));
+        f.locals = std::make_shared<qb::Struct>();
+        r.frames.push_back(std::move(f));
+        qb::Struct none;
+        fe.vm().condition(r, qbkey::key("cs_get_total_guitarists"), none);
+        const qb::Value* n = qs::Vm::param(*r.frames.back().locals, qbkey::key("num_guitarists"));
+        const int got = n ? int(n->number()) : -1;
+        std::printf("  quick play guitarists: %d\n", got);
+        return got == std::atoi(rest("check:qp_guitarists=").c_str()) ? true : fail("quick play deals from " + std::to_string(got) + " guitarists");
+    }
+    if (what == "log:cs") {  // character select's page, icon and name (player 1)
+        auto num = [&](const char* g) {
+            const qb::Value* v = fe.vm().global(qbkey::key(g));
+            return v ? double(v->number()) : -1.0;
+        };
+        const ui::Element* t = fe.ui().find(qbkey::key("cs_name_text_p1"));
+        std::printf("  cs: jumped %g icon %g total %g name \"%s\"\n", num("g_cs_jumped_p1"), num("g_character_select_icon_index_p1"),
+                    num("cs_total_guitarists_p1"), t ? t->text.c_str() : "(none)");
+        return true;
     }
     if (what == "log:focus") {  // the focused menu item's id and text (development aid)
         for (const ui::Element* e : fe.ui().focusedElements())

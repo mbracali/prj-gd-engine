@@ -188,7 +188,7 @@ void addCoreNatives(Vm& vm) {
         return false;
     });
     // StructureContains structure = s name = n.
-    vm.addNative("StructureContains", [](Vm& v, ScriptRun&, qb::Struct& p) {
+    vm.addNative("StructureContains", [](Vm& v, ScriptRun& run, qb::Struct& p) {
         const qb::Value* s = Vm::param(p, K("structure"));
         const qb::Value* n = Vm::param(p, K("name"));
         if (!n) n = first(p);
@@ -200,7 +200,11 @@ void addCoreNatives(Vm& vm) {
         // (z_credits, z_soundcheck) GH3 keeps out of its menus show; the
         // viewer zone stays out [C scripts get_valid_character_index,
         // create_select_venue_menu; I: the port's switch].
-        if (Vm::cutContent && n->key == K("debug_only")) {
+        // Not in quick play's random guitarist (quickplay_start_song:
+        // cs_get_total_guitarists, get_valid_character_index): the option
+        // shows the cut characters to pick, it does not deal them out at
+        // random, so a quick play song gets GH3's own (owner GD04-091).
+        if (Vm::cutContent && n->key == K("debug_only") && !run.calledFrom(K("quickplay_start_song"))) {
             const qb::Value* nm = v.globals().field(*s->st, K("name"));
             const bool viewer = nm && (nm->type == qb::Type::String || nm->type == qb::Type::WString) && nm->str == "z_viewer";
             if (!viewer) return false;

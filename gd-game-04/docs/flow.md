@@ -313,7 +313,18 @@ runs first), `func = quickplay_start_song`, flow_state **quickplay_play_song_fs*
   -> current_level: the venues whose save-wide `venue_<zone>` tag is
   unlocked, over LevelZoneArray, which lists `viewer` = z_viewer, a zone with
   no scene; The Glitches' unlock leaves the debug_only zones locked so the
-  random venue is never it); `start_song device_num`.
+  random venue is never it); `start_song device_num`. The guitarist is any
+  valid character (get_valid_character_index: unlocked, not debug_only, a
+  Guitarist), so Slash, Tom Morello, Lou, the God of Rock and the Grim Ripper
+  appear once unlocked in the save; the bassist, drummer and singer come from
+  the song (create_band: the song's `bassist` / `singer`, Bret Michaels only on
+  `singer = bret` or Cheat_BretMichaels) [C scripts]. The port's Enable Cut
+  Content does not apply to this draw (the Bone Men only in character select).
+- Character select pages by g_cs_num_icons (13): cs_check_if_new_page reads
+  `$ <icon_index>` while its caller passes the number, so on GH3 it never
+  pages (a retail disc has at most 13 guitarists) [C]; Enable Cut Content's 17
+  need the second page, so the port answers it from the number (natives_flow)
+  [I: the port's reading].
 - `start_song` (guitar_gems.qb) [C]: mark_unsafe_for_shutdown;
   set_rich_presence_game_mode; xenon_singleplayer_session_init (CheckForSignin
   false -> nothing on Xenon); **Load_Venue** (GetPakManCurrentName map=zones;

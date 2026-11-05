@@ -975,6 +975,7 @@ bool Vm::callForValue(ScriptRun& run, uint32_t name, qb::Struct& params) {
         ScriptRun sub;
         sub.id = 0;
         sub.name = name;
+        sub.caller = &run;
         Frame f;
         f.code = std::move(c);
         f.locals = std::make_shared<qb::Struct>(scriptParams(params));

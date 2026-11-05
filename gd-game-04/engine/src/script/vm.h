@@ -73,6 +73,14 @@ struct ScriptRun {
     uint32_t object = 0;      // the object (screen element id) the script runs on, 0: none
     bool handler = false;     // an event handler's run: it outlives its element (a pad_choose that destroys its menu)
     bool busy = false;        // executing now (a pump inside a condition skips it)
+    const ScriptRun* caller = nullptr;  // a condition's run: the run whose `if` called it
+    // Whether a script of that name is on this run's stack, or its caller's.
+    bool calledFrom(uint32_t script) const {
+        for (const ScriptRun* r = this; r; r = r->caller)
+            for (const Frame& f : r->frames)
+                if (f.code && f.code->name == script) return true;
+        return false;
+    }
 };
 
 struct VmStats {

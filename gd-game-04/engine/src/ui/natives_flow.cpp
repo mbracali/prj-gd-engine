@@ -167,6 +167,30 @@ void addFlowNatives(qs::Vm& vm, FlowState& st) {
         if (const qb::Value* v = Vm::param(*l, n->key)) Vm::set(*l, n->key, Vm::makeInt(int32_t(Vm::number(v, 0))));
         return true;
     });
+    // cs_check_if_new_page dir = d icon_index = i total_guitarists = n ->
+    // cs_go_new_page: the script reads `$ <icon_index>`, but its caller
+    // passes the icon's number (`icon_index = $ <char_select_icon_index>`),
+    // and `$` of a number names no global (0x821977A0's 0x4B case keeps the
+    // argument's raw word as a global's key) [C], so the down test never
+    // pages. A retail disc has at most 13 guitarists, g_cs_num_icons, and
+    // never pages; Enable Cut Content's 17 (the Bone Men) need the second
+    // page the menu is built for (cs_load_characters' starting_index,
+    // cs_icon_id_next / _prev): the script's tests on the number. With 13
+    // or fewer the answer is the script's on a retail disc (owner GD04-094)
+    // [C script cs_check_if_new_page; I: the port's reading].
+    vm.addNative("cs_check_if_new_page", [](Vm& v, ScriptRun& run, qb::Struct& p) {
+        const qb::Value* iv = Vm::param(p, K("icon_index"));
+        if (iv && (iv->type == qb::Type::Key || iv->type == qb::Type::KeyPtr)) iv = v.global(iv->key);
+        const int icon = int(Vm::number(iv, 0));
+        const int total = int(Vm::number(Vm::param(p, K("total_guitarists")), 0));
+        const qb::Value* nIcons = v.global(K("g_cs_num_icons"));
+        const int icons = nIcons ? int(nIcons->number()) : 13;
+        const qb::Value* dir = Vm::param(p, K("dir"));
+        const bool down = !dir || dir->key == K("down");
+        const bool page = down ? (icon + 1 >= icons && total > icon + 1) : (icon - 1 < 0);
+        if (qb::Struct* l = locals(run)) Vm::set(*l, K("cs_go_new_page"), Vm::makeInt(page ? 1 : 0));
+        return true;
+    });
     vm.addNative("MathMin", [](Vm&, ScriptRun& run, qb::Struct& p) {
         const float a = Vm::number(Vm::param(p, K("a")), 0), b = Vm::number(Vm::param(p, K("b")), 0);
         if (qb::Struct* l = locals(run)) Vm::set(*l, K("min"), Vm::makeFloat(std::min(a, b)));
