@@ -89,6 +89,11 @@ public:
     Globals& globals() { return g_; }
     void addNative(const std::string& name, Native fn);
     void addNative(uint32_t key, Native fn) { natives_[key] = std::move(fn); }
+    // The native registered for `key` (empty: none), to wrap it.
+    Native native(uint32_t key) const {
+        auto it = natives_.find(key);
+        return it == natives_.end() ? Native{} : it->second;
+    }
     // The native registered under `name` (empty if none): a wrapper keeps it.
     Native native(const std::string& name) const;
     bool hasNative(uint32_t key) const { return natives_.count(key) != 0; }

@@ -556,6 +556,7 @@ CamPose CameraDirector::pose(double ms) const {
         p = aim(p, keys_[i], keys_[i + 1], u, ms);
         break;
     }
+    case Ctl::Script: p = world(k0); break;  // returned above (ccam_domorph); here for the compiler
     }
     if (ctl_ != Ctl::Spline && ctl_ != Ctl::Script) p = aim(p, k0, k1, mix, ms);
     if (handCam_ && !noShake) {  // Enhanced > Disable Shaky Camera: off

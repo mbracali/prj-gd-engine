@@ -15,6 +15,7 @@
 #include "data/band.h"
 #include "data/disc.h"
 #include "data/qbkey.h"
+#include "render/band.h"
 #include "render/canvas.h"
 #include "render/texture_cache.h"
 #include "render/venue_stage.h"
@@ -584,6 +585,25 @@ void SongScreen::outroCameras(double ms, const std::string& prefix) {
     outroPrefix_ = prefix;
     venue_->outroCameras(ms, prefix);
     SDL_Log("song: end transition %s", prefix.c_str());
+}
+
+bool SongScreen::hasMember(uint32_t object) const {
+    if (!venue_ || !venue_->band()) return false;
+    for (const Band::Entry& e : venue_->band()->members())
+        if (e.model && e.model->member.object == object) return true;
+    return false;
+}
+
+bool SongScreen::memberPlayAnim(uint32_t object, const qb::Struct& params, double ms) {
+    if (!venue_ || !venue_->band()) return false;
+    for (Band::Entry& e : venue_->band()->members())
+        if (e.model && e.model->member.object == object) {
+            // handle_play_anim reads `anim`; play_battle_anim's data names it `Anim`
+            // (keys are case-insensitive) [C scripts].
+            e.anim.playAnim(params, ms);
+            return true;
+        }
+    return false;
 }
 
 void SongScreen::playClip(int role, uint32_t clip, uint32_t stance, bool cycle, double ms) {

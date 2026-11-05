@@ -8,6 +8,7 @@
 #include <memory>
 #include <string>
 
+#include "data/qb.h"
 #include "game/autoplay.h"
 #include "game/chart.h"
 #include "game/match.h"
@@ -185,6 +186,11 @@ public:
     // Common_PreEncore_Transition, Common_PreBoss_Transition].
     void outroCameras(double ms, const std::string& prefix);
     void playClip(int role, uint32_t clip, uint32_t stance, bool cycle, double ms);
+    // A band member by its composite object's name (Guitarist, Bassist,
+    // Drummer, vocalist): whether the song has it, and its handle_play_anim
+    // (play_battle_anim's data: Anim, no_wait) [C scripts Band_PlayAttackAnim, Band_PlayResponseAnim].
+    bool hasMember(uint32_t object) const;
+    bool memberPlayAnim(uint32_t object, const qb::Struct& params, double ms);
     double lastMs() const { return lastMs_; }
     double transitionMs() const { return transitionMs_; }
 private:

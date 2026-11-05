@@ -198,7 +198,7 @@ bool Particles::start(const Disc& disc, const Globals& g, const venue::Venue& v,
     // ScreenFX_* on bg_viewport's FlashBS (ScreenFlashOn / Off, misclightutils.qb):
     // a bright_sat at the given Brightness / Contrast; an update with `time`
     // eases to its values over that time [C scripts; I: the ease is linear].
-    auto fxParams = [this](const qb::Struct& p, float& b, float& c, double& time) {
+    auto fxParams = [](const qb::Struct& p, float& b, float& c, double& time) {
         b = 1, c = 1, time = 0;
         for (const qb::Item& it : p.items) {
             if (it.name == 0 && it.value.st) {  // ( $ScreenFlash_TOD_Manager.screen_FX[0] )

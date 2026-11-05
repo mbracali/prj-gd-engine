@@ -283,6 +283,31 @@ void App::addVenueScriptCalls() {
         return nullptr;
     };
     Vm& vm = front_->vm();
+    // Battle: the band members exist in a song (CompositeObjectExists), and
+    // play_battle_anim reaches the member's handle_play_anim: the attacker's
+    // ATTACK at once (no_wait), the receiver's react_right after its
+    // current anim [C scripts Band_PlayAttackAnim, Band_PlayResponseAnim,
+    // battle_trigger_on; owner 11-04 doc 2: the band never reacted].
+    if (auto prevExists = vm.native(qbkey::key("CompositeObjectExists")))
+        vm.addNative("CompositeObjectExists", [this, venueSong, prevExists](Vm& v, ScriptRun& r, qb::Struct& p) {
+            const qb::Value* n = Vm::param(p, qbkey::key("name"));
+            double ms = 0;
+            if (n && (n->type == qb::Type::Key || n->type == qb::Type::KeyPtr))
+                if (SongScreen* s = venueSong(ms); s && s->hasMember(n->key)) return true;
+            return prevExists(v, r, p);
+        });
+    if (auto prevLaunch = vm.native(qbkey::key("LaunchEvent")))
+        vm.addNative("LaunchEvent", [venueSong, prevLaunch](Vm& v, ScriptRun& r, qb::Struct& p) {
+            const qb::Value* type = Vm::param(p, qbkey::key("type"));
+            const qb::Value* target = Vm::param(p, qbkey::key("target"));
+            if (type && target && type->key == qbkey::key("play_battle_anim")) {
+                double ms = 0;
+                qb::Struct data;
+                if (const qb::Value* d = Vm::param(p, qbkey::key("data")); d && d->st) data = *d->st;
+                if (SongScreen* s = venueSong(ms); s && s->memberPlayAnim(target->key, data, ms)) return true;
+            }
+            return prevLaunch(v, r, p);
+        });
     auto next = vm.objectCall;
     vm.objectCall = [venueSong, next](Vm& v, ScriptRun& run, uint32_t obj, uint32_t method, qb::Struct& p, bool& handled) -> bool {
         const bool member = obj == qbkey::key("Guitarist") || obj == qbkey::key("Bassist");

@@ -115,6 +115,14 @@ fallback (the character's highway material: M6) [I].
   an unset local, so saved hands come back empty [C script; kept].)
 - Hit by an attack (`fire_bolt`): the highway is pushed (-70, 50) / (70, 50)
   over 0.1 s and back [hammer_highway].
+- The band: battle_trigger_on runs `Band_PlayAttackAnim` on the attacker's
+  `band_member` and `Band_PlayResponseAnim` on the receiver's (Type = the
+  power-up's index); each sends `play_battle_anim` with the anim set entry
+  of `player1_battlemode_anims` / `player2_battlemode_anims` (ATTACK /
+  attack_right, react_right): the attacker's at once (`no_wait`), the
+  receiver's after its current anim [C scripts]. gd04 runs both scripts from
+  the native attacks; CompositeObjectExists answers true for the song's
+  members and play_battle_anim reaches the member's handle_play_anim.
 
 ## 6. Boss battles [C unless noted]
 

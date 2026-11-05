@@ -692,6 +692,24 @@ void SongHooks::step(SongScreen& s, double now) {
                     if (a == kDeathLick)
                         spawnTracked(K(victim ? "GH_BattleMode_Start_Heartbeat_P2" : "GH_BattleMode_Start_Heartbeat_P1"), qb::Struct{},
                                      "GH_BattleMode_Start_Heartbeat", k_.spawned);
+                    // The band's attack and its answer: battle_trigger_on's
+                    // Band_PlayAttackAnim on the attacker's band_member and
+                    // Band_PlayResponseAnim on the receiver's, Type = the
+                    // power-up's index [C script battle_trigger_on].
+                    auto member = [&](int who) {
+                        const qb::Value* ps = vm.global(K(who ? "player2_status" : "player1_status"));
+                        const qb::Value* bm = ps && ps->st ? vm.globals().field(*ps->st, K("band_member")) : nullptr;
+                        return bm ? bm->key : 0u;
+                    };
+                    for (int side = 0; side < 2; ++side) {
+                        const uint32_t name = member(side == 0 ? p : victim);
+                        if (!name) continue;
+                        qb::Struct q;
+                        Vm::set(q, K("name"), Vm::makeKey(name));
+                        Vm::set(q, K("Type"), Vm::makeInt(a));
+                        vm.run(K(side == 0 ? "Band_PlayAttackAnim" : "Band_PlayResponseAnim"), q);
+                        ++k_.spawned[side == 0 ? "Band_PlayAttackAnim" : "Band_PlayResponseAnim"];
+                    }
                 }
         }
     }

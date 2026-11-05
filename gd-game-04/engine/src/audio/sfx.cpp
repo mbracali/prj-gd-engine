@@ -134,7 +134,8 @@ uint32_t Sfx::play(uint32_t sample, float volume, float pitch, uint32_t buss) {
     if (log) {
         float peak = 0;
         for (float f : e.pcm) peak = std::max(peak, std::fabs(f));
-        SDL_Log("sfx:   %zu samples, %d Hz, %d ch, peak %.3f, volume %.2f%s", e.pcm.size(), e.rate, e.channels, double(peak), double(volume),
+        SDL_Log("sfx:   %llu samples, %d Hz, %d ch, peak %.3f, volume %.2f%s", (unsigned long long)e.pcm.size(), e.rate, e.channels, double(peak),
+                double(volume),
                 device_ ? "" : ", no device");
     }
     if (e.bad || e.pcm.empty()) return 0;

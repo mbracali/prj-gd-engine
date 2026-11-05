@@ -6,6 +6,10 @@ All notable changes for players. Versions follow SemVer; release tags are
 ## [Unreleased]
 
 ### Added
+- The career's movies play: the career intro at the first venue select, each tier's completion movie and the ending (GD04-070).
+- The band reacts in battles: the attacker plays its attack, the target its hit reaction, as GH3 (GD04-077).
+- The drummer's and the singer's arms and feet follow GH3's IK (GD04-078).
+- Esc (Back) three times on the main menu returns to the launcher; Enhanced > Remove All Effects (GD04-074).
 - Sparks and debris bounce off the stage as in GH3 (GD04-065).
 - GH3's stage projectors: the round light pools where the spotlights hit the stage, with the band's shadow in them, and the encore helicopter's and crowd spotlights' light on whatever they hit (GD04-064).
 - The band's twist and split helper bones (wrists, elbows, knees, hips) and the leg IK (GD04-064).
@@ -24,6 +28,14 @@ All notable changes for players. Versions follow SemVer; release tags are
 - Lou's finish and defeat scenes play with their animations and cameras.
 
 ### Fixed
+- The guitarists' fret hands grip the neck from below with the fingers on the strings: GH3's own IK, decoded from the game (GD04-066).
+- Stutters and freezes: the press-start screen no longer drops to a few frames a second, character select and the end of the loading screen no longer hitch (the venue loads in the background) (GD04-072).
+- Quick play picks a new random guitarist, guitar and venue each time (GD04-071).
+- The Glitches band can pick every venue (GD04-069).
+- White glare over the band: Enhanced > Bloom's Original is GH3's own bloom alone (it doubled it), and the light beams blend as GH3's (GD04-068).
+- Hair and other layered band materials draw with GH3's render states (no longer see-through) (GD04-067).
+- Star notes turn into normal notes when their Star Power phrase is lost; Star Power's glow and big lightning sit under the highway (GD04-073).
+- Lou's finish ends in every venue (it could freeze in his own) (GD04-072).
 - The band receives the stage lights' shadows again, without the speckles (a missing depth bias) (GD04-064).
 - The guitarist's fret hand grips the neck; it floated above it with the fingers in the air (GD04-062).
 - Sustain tails are GH3's straight ribbons at its width; they were short, wide cones (GD04-062).
