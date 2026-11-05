@@ -239,6 +239,8 @@ public:
     virtual bool queryResult(QueryId q, uint64_t& samples) = 0;
     // The counters since the last call, then cleared.
     virtual DevicePerf takePerf() = 0;
+    // Draw calls since the device was made (never cleared): whether a frame drew anything.
+    virtual uint64_t drawCalls() const = 0;
 };
 
 // The window flags and GL attributes the device needs: call before

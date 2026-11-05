@@ -1345,7 +1345,9 @@ void App::frame() {
         }
         overlay();
         captureMenuScreenshot(canvas_, double(nowNs - startNs_) / 1e6, -1e9);  // no song
-        canvas_.end();
+        // A frame that drew nothing (a screen gone, the next not drawn yet:
+        // the song's end before the results) keeps the last picture (Canvas::end).
+        canvas_.end(true);
         return;
     }
     canvas_.begin(SDL_Color{0, 0, 0, 255});

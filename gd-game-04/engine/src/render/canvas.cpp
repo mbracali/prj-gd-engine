@@ -80,17 +80,55 @@ void Canvas::shutdown() {
 
 void Canvas::begin(SDL_Color clear) {
     beginNs_ = SDL_GetTicksNS();
+    beginDraws_ = renderer_.device().drawCalls();
     const float c[4] = {clear.r / 255.0f, clear.g / 255.0f, clear.b / 255.0f, 1};
     renderer_.beginFrame(c);
     batch_.clear();
     bufferUsed_ = 0;
 }
 
-void Canvas::end() {
+bool Canvas::end(bool holdIfEmpty) {
     flush();
     drawNs += SDL_GetTicksNS() - beginNs_;
     ++drawnFrames;
+    const bool empty = renderer_.device().drawCalls() == beginDraws_;
+    if (empty && holdIfEmpty && presentedContent_) {
+        const uint64_t now = SDL_GetTicksNS();
+        if (!heldSinceNs_) heldSinceNs_ = now;
+        if (double(now - heldSinceNs_) / 1e6 < kMaxHoldMs) {
+            ++heldFrames;
+            return false;
+        }
+    }
+    heldSinceNs_ = 0;
+    presentedContent_ = !empty;
+    // GD04_FRAMEPROBE=1 (development aid): every presented frame's mean
+    // brightness (0..255) and the time since the last one, so black or
+    // stalled frames between screens can be counted (the transitions).
+    static const bool probe = [] { const char* v = SDL_getenv("GD04_FRAMEPROBE"); return v && *v && *v != '0'; }();
+    if (probe) {
+        static uint64_t lastNs = 0;
+        const uint64_t now = SDL_GetTicksNS();
+        double luma = -1;
+        if (SDL_Surface* s = renderer_.readPixels()) {
+            if (SDL_Surface* c = SDL_ConvertSurface(s, SDL_PIXELFORMAT_RGBA32)) {
+                uint64_t sum = 0, n = 0;
+                for (int y = 0; y < c->h; y += 4)
+                    for (int x = 0; x < c->w; x += 4) {
+                        const uint8_t* px = static_cast<const uint8_t*>(c->pixels) + size_t(y) * size_t(c->pitch) + size_t(x) * 4;
+                        sum += (px[0] * 54u + px[1] * 183u + px[2] * 19u) >> 8, ++n;
+                    }
+                luma = n ? double(sum) / double(n) : 0;
+                SDL_DestroySurface(c);
+            }
+            SDL_DestroySurface(s);
+        }
+        SDL_Log("frameprobe: %llu at %.0f ms, luma %.1f, %.1f ms since the last (%d held)", (unsigned long long)drawnFrames, double(now) / 1e6, luma,
+                lastNs ? double(now - lastNs) / 1e6 : 0.0, heldFrames);
+        lastNs = now;
+    }
     renderer_.endFrame();
+    return true;
 }
 
 void Canvas::flush() {

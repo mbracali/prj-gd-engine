@@ -149,6 +149,7 @@ public:
         perf_ = {};
         return p;
     }
+    uint64_t drawCalls() const override { return drawCalls_; }
     void destroyBuffer(BufferId b) override;
     ProgramId createProgram(const ProgramDesc& desc, std::string& error) override;
     void destroyProgram(ProgramId p) override;
@@ -238,6 +239,7 @@ private:
     bool streamMap_ = false;
     void streamWrite(GLenum target, size_t offset, const void* data, size_t size);
     DevicePerf perf_;
+    uint64_t drawCalls_ = 0;
 
     // Cached GL state.
     PipelineState state_;
@@ -910,7 +912,7 @@ void GlDevice::draw(const DrawCall& c) {
     }
     enabledAttribs_ = enabled;
 
-    ++perf_.draws;
+    ++perf_.draws, ++drawCalls_;
     const GLenum mode = c.primitive == Primitive::Lines ? GL_LINES : GL_TRIANGLES;
     if (const GlBuffer* ib = buffers_.get(c.indices.id)) {
         gl::glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ib->name);
