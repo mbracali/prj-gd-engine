@@ -429,8 +429,14 @@ void addGameNatives(FrontEnd& fe, const Disc& disc, TextureCache& textures) {
         // Zone keys name the zone (z_budokan); its pak is ZONES/<zone>.pak.xen [C data].
         const std::string zone = qbkey::name(pak->key);
         const std::string path = "DATA/COMPRESSED/ZONES/" + zone + ".pak.xen";
-        if (disc.exists(path)) textures.loadPak(disc, path);
-        else v.logOnce("SetPakManCurrent: no " + path);
+        // Under a loading screen (a song's zone, chosen in setlist_choose_song
+        // after create_loading_screen) the pak is read and decoded on a
+        // worker and uploaded when ready; the song starts after it (App).
+        // Read here it had stopped the game for half a second under the
+        // loading screen's movie [I: GH3 loads it asynchronously there too].
+        if (!disc.exists(path)) v.logOnce("SetPakManCurrent: no " + path);
+        else if (v.loadingHoldUntil() >= 0) textures.loadPakAsync(disc, path);
+        else textures.loadPak(disc, path);
         return true;
     };
     vm.addNative("SetPakManCurrentBlock", setCurrent);

@@ -3,6 +3,9 @@
 #pragma once
 
 #include <cstdint>
+#include <future>
+#include <list>
+#include <memory>
 #include <string>
 #include <unordered_map>
 
@@ -22,6 +25,13 @@ public:
     ~TextureCache();
     // Uploads the textures of a pak; returns how many, -1 on error (logged).
     int loadPak(const Disc& disc, const std::string& pakPath);
+    // The same, the pak read and its textures decoded on a worker; poll()
+    // uploads what is ready (the app calls it every frame; wait = true:
+    // everything pending, now). A song's zone pak under the loading screen
+    // (it had stopped the game for half a second).
+    void loadPakAsync(const Disc& disc, const std::string& pakPath);
+    void poll(bool wait = false);
+    bool pending() const { return !pending_.empty(); }
     // Uploads one loose image (an .img.xen, e.g. a loading screen) under
     // `key`; true if it is there (loaded now or before).
     bool loadImage(const Disc& disc, const std::string& path, uint32_t key);
@@ -57,6 +67,10 @@ public:
     size_t count() const { return textures_.size(); }
 
 private:
+    struct Prepared;
+    static std::shared_ptr<Prepared> prepare(const Disc& disc, const std::string& pakPath, bool sharpen);
+    int commit(Prepared& pr);
+    std::list<std::future<std::shared_ptr<Prepared>>> pending_;
     struct Entry {
         gfx::TextureId id;
         int w = 0, h = 0;
