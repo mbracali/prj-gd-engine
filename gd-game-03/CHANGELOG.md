@@ -5,7 +5,7 @@ All notable changes for players. Versions follow SemVer; release tags are
 
 ## [Unreleased]
 
-## [0.0.5] - 2026-11-05
+## [1.1.5] - 2026-11-05
 
 ### Added
 - Max FPS: 144 (#57).

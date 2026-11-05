@@ -1,11 +1,11 @@
 # Guitar Dream Universal Launcher: changes
 
-## 0.1.12
+## 1.1.12
 
 - gd01 1.1.10: Max FPS 144, Reset Calibration, steady whammy hold, help bar mouse fixes, MODS removed from the help bar.
-- gd02 0.1.12: Android frame rate fix, per-pixel stage beams, hair speed at any frame rate, developer keyboard cheats, PC wording, loading screens held 2 s.
-- gd03 0.0.5: Android frame rate fix, developer keyboard cheats, PC wording, loading tips, flame effects stop as on the PS2.
-- gd04 0.0.4: GH3's sustains, lighting and beams, two shadow cascades, Star Power (gems, character effects, reverb level), practice speeds and section preview, menus aligned, set list tabs, store and save fixes, sound busses, overstrum drops a sustain.
+- gd02 1.1.12: Android frame rate fix, per-pixel stage beams, hair speed at any frame rate, developer keyboard cheats, PC wording, loading screens held 2 s.
+- gd03 1.1.5: Android frame rate fix, developer keyboard cheats, PC wording, loading tips, flame effects stop as on the PS2.
+- gd04 1.1.4: GH3's sustains, lighting and beams, two shadow cascades, Star Power (gems, character effects, reverb level), practice speeds and section preview, menus aligned, set list tabs, store and save fixes, sound busses, overstrum drops a sustain.
 - Completeness: gd01 / gd02 / gd03 99%, gd04 96%; DJ Hero and DJ Hero 2 (gd-game-25 / 26) listed.
 
 ## 0.1.11

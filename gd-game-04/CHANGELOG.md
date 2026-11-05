@@ -5,7 +5,7 @@ All notable changes for players. Versions follow SemVer; release tags are
 
 ## [Unreleased]
 
-## [0.0.4] - 2026-11-05
+## [1.1.4] - 2026-11-05
 
 ### Added
 - The band's shadows use GH3's two shadow cascades: sharper shadows near the camera, fading out 13-16 m away as on the 360 (GD04-106).
