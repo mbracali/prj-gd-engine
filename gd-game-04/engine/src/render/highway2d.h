@@ -155,13 +155,17 @@ private:
     bool spAt(double ms) const;
     // The song time a note's gem and tail are created (row 0).
     double createdAt(double noteMs) const { return noteMs + gemOffsetMs_ - travelMs_; }
-    void drawButtons(Canvas& c, const TextureCache& tex, uint8_t held, bool raised) const;
+    void drawButtons(Canvas& c, const TextureCache& tex, uint8_t held, bool raised, double now) const;
     SDL_Color surfaceTint(double now) const;
 
     float playline_ = 655, height_ = 350, topWidth_ = 160, widthOffset_ = 2.2f, fade_ = 30;
     float cx_ = 640;    // the highway's centre (x)
     float baseX_ = 0;   // the container's x offset from the one-player layout
     Effects fx_;
+    // Lefty Flip's button slide (animate_lefty_flip): the buttons as drawn
+    // (lefthanded_button_ups), the one before and when it changed.
+    mutable bool btnLefty_ = false, btnFrom_ = false, btnSeen_ = false;
+    mutable double btnSlideAt_ = -1e9;
     float topY_ = 305, gemStart_ = 0.25f, gemEnd_ = 0.8f, starScale_ = 1.3f, gemJust_ = 0.83f, starJust_ = 0.5f;
     float fretbarStart_ = 0.15f, fretbarEnd_ = 0.48f, whammyTop_ = 10, whammyOffset_ = 1.8f;
     float sidebarXScale_ = 0.3f, sidebarYScale_ = 1, sidebarXOffset_ = 4;

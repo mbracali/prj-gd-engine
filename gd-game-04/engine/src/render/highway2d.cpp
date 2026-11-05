@@ -512,19 +512,32 @@ bool Highway2D::gemAt(int32_t noteMs, int fret, double now, float& x, float& y, 
     return true;
 }
 
-void Highway2D::drawButtons(Canvas& c, const TextureCache& tex, uint8_t held, bool raised) const {
+void Highway2D::drawButtons(Canvas& c, const TextureCache& tex, uint8_t held, bool raised, double now) const {
     // Per lane: lip / mid / neck / head at pos_2d (lefty: left_pos_2d, x
     // scale negated), scale now_scale, just centre bottom; z 3.9 / 3.6 / 3.7
     // / 3.8, +1 while raised (pixels > 0); the neck at pos_2d - (0,
     // neck_lip_base), y scale (pixels + neck_lip_add) / neck_sprite_size; the
     // head pixels up: normal, _Down held, the lit HeadL held and raised [C
     // script setup_highway, 0x8211B1E0].
-    const bool lefty = lefty_ != fx_.leftyButtons;
+    // Lefty Flip (animate_lefty_flip): each button's base slides from its
+    // place to the other side's (pos_2d to left_pos_2d or back) in 0.15 s,
+    // then lefthanded_button_ups flips (the sprites mirrored) [C scripts
+    // battle_lefty_notes, animate_lefty_flip; I: a linear morph, the base's
+    // `- pixels` y term left out]. The match flips the buttons as the slide
+    // starts: drawn the old way, sliding, for 0.15 s.
+    bool lefty = lefty_ != fx_.leftyButtons;
+    if (!btnSeen_) btnSeen_ = true, btnLefty_ = btnFrom_ = lefty;
+    if (lefty != btnLefty_) btnFrom_ = btnLefty_, btnLefty_ = lefty, btnSlideAt_ = now;
+    const float slide = float(std::clamp((now - btnSlideAt_) / 150.0, 0.0, 1.0));
+    const bool sliding = slide < 1 && btnFrom_ != lefty;
+    if (sliding) lefty = btnFrom_;
     const SDL_Color white{255, 255, 255, 255};
     for (int l = 0; l < 5; ++l) {
         const float p = pixels_[size_t(l)];
         if ((p > 0) != raised) continue;
-        const float x = endX_[size_t(lefty ? 4 - l : l)], y = playline_;
+        float x = endX_[size_t(lefty ? 4 - l : l)];
+        if (sliding) x += (endX_[size_t(lefty ? l : 4 - l)] - x) * slide;
+        const float y = playline_;
         const float sxl = lefty ? -nowScaleX_ : nowScaleX_;
         auto at = [&](uint32_t key, float px, float py, float scx, float scy) {
             int tw = 128, th = 64;
@@ -740,7 +753,7 @@ void Highway2D::drawAll(Canvas& c, const TextureCache& tex, const NoteTrack& tra
             for (int l = 0; l < 5; ++l)
                 if (n.frets & (1 << l)) drawTail(c, tex, n, int(i), l, leftyGems ? 4 - l : l, player, now);
         }
-        if (dead) drawButtons(c, tex, held, false);
+        if (dead) drawButtons(c, tex, held, false, now);
     }
     for (int pass = 1; pass < 2; ++pass) {
         for (size_t i = track.notes.size(); i-- > first;) {
@@ -798,7 +811,7 @@ void Highway2D::drawAll(Canvas& c, const TextureCache& tex, const NoteTrack& tra
         }
     }
     // The raised buttons (z 4.6 .. 4.9) over the gems.
-    drawButtons(c, tex, held, true);
+    drawButtons(c, tex, held, true, now);
     // Hit sparks (z 8): sys_Particle_Spark01, colour start_color -> end_color,
     // scale 1 -> 0.5, additive [C data hit_particle_params / star_hit_particle_params].
     {

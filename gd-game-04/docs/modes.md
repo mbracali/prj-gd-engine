@@ -273,8 +273,10 @@ Not done / approximations:
   unlocked by GH3's own Progression_TierBossUnlock tier = 2). It needed
   StructureContains to see flags (`$boss` in a tier): Progression_GetBossSong
   found no boss before (GD04-038).
-- The whammy bar training and lefty flip's button slide (animate_lefty_flip);
-  the cards' slides start from their slots, not from where an interrupted
+- The whammy bar training; lefty flip's button slide (animate_lefty_flip:
+  each button's base morphs between pos_2d and left_pos_2d in 0.15 s, then
+  lefthanded_button_ups flips) is drawn by render/highway2d without the
+  morph's `- pixels` y term [I]; the cards' slides start from their slots, not from where an interrupted
   slide left them [I]; two steals at once share one animation [I].
 - Co-op's time_in_lead is not kept.
 - Battle / boss: the cards and attacks are the native Match's; GH3's
