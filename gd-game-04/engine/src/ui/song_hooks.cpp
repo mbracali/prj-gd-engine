@@ -253,6 +253,7 @@ void SongHooks::begin(SongScreen& s) {
     players_ = s.match().players();
     nowMs_ = s.startMs() - 3000;
     winMovie_ = false;
+    transitionAt_ = -1e18, startRendered_ = false;
     // play_intro: current_intro = the transition's sequence props (fast:
     // fastintro_sequence_props) [C scripts play_intro, Common_*_Transition];
     // no play_intro (Immediate): no intro sounds.
@@ -454,6 +455,21 @@ void SongHooks::introAndEndMedia(SongScreen& s, double now) {
     //  - intro_hud_move (tutorial_disable_hud = 0) spawns
     //    Song_Intro_Kick_SFX_Waiting (hud_move_time, then Song_Intro_Kick_SFX).
     // None with the boss helper screen up or in the attract mode (play_intro returns) [C].
+    // Every transition a song starts with (Common_Immediate / FastIntro /
+    // Intro / Encore / Boss / Practice / RestartEncore / RestartBoss) runs
+    // Transition_StartRendering 100 ms in: StartRendering, enable_pause,
+    // is_changing_levels = 0 [C data Common_*_Transition, script
+    // Transition_StartRendering]. The port plays the transitions natively, so
+    // it runs here: without it is_changing_levels stayed 1 from the song's
+    // create_loading_screen (destroy_loading_screen leaves it while
+    // playing_song = 1), so the next create_loading_screen returned at once
+    // (no loading_flying movie, no LOADING, no tip: every song after the
+    // first) and handle_start_pressed refused the pause menu.
+    if (transitionAt_ < -1e17) transitionAt_ = now;
+    if (!startRendered_ && now >= transitionAt_ + 100) {
+        startRendered_ = true;
+        vm.spawn(K("Transition_StartRendering"), qb::Struct{});
+    }
     const qb::Value* ci = vm.global(K("current_intro"));
     const bool noIntro = Vm::number(vm.global(K("show_boss_helper_screen")), 0) == 1 || Vm::number(vm.global(K("is_attract_mode")), 0) == 1;
     if (ci && ci->st && !noIntro) {

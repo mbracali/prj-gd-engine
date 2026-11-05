@@ -144,4 +144,6 @@ private:
     std::vector<Bolt> bolts_;
     std::array<bool, 3> introSfx_{};  // play_intro's highway / ripple / HUD sounds started
     bool winMovie_ = false;           // win_song's movie preloaded
+    double transitionAt_ = -1e18;     // the start transition's first frame (song ms; -1e18: not yet)
+    bool startRendered_ = false;      // its Transition_StartRendering ran
 };

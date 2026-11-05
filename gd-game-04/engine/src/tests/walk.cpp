@@ -522,7 +522,12 @@ std::vector<Walk::Press> Walk::update(FrontEnd& fe, bool songPlaying, double now
     if (done() || failed_) return out;
     // A song under a loading screen (GD04-040's regression): 5 s into a song
     // the loading screen's tip and picture are gone [C script start_gem_scroller].
-    if (songPlaying && songSeenAt_ < 0) songSeenAt_ = now;
+    if (!songPlaying && fe.ui().find(qbkey::key("loading_tip_text"))) loadingSeen_ = true;
+    if (songPlaying && songSeenAt_ < 0) {
+        songSeenAt_ = now;
+        if (!loadingSeen_ && !fe.attractMode()) ++songsWithoutLoading_;
+        loadingSeen_ = false;
+    }
     if (!songPlaying) songSeenAt_ = -1;
     if (songSeenAt_ >= 0 && now - songSeenAt_ > 5000 && !loadingChecked_) {
         loadingChecked_ = true;
@@ -955,6 +960,12 @@ int Walk::finish(FrontEnd& fe) const {
     if (shown >= 0) std::printf("walk: loading screens up at least %.0f ms\n", shown);
     if (shown >= 0 && shown < qs::Vm::kLoadingHoldMs - 50) {
         std::printf("walktest %s: FAILED (a loading screen passed in %.0f ms); reached: %s\n", name_.c_str(), shown, path.c_str());
+        return 1;
+    }
+    // Quick play and career put the loading screen up before every song (create_loading_screen) [C scripts].
+    if (songsWithoutLoading_ > 0) std::printf("walk: %d song(s) started without a loading screen\n", songsWithoutLoading_);
+    if (songsWithoutLoading_ > 0 && (name_ == "quickplay" || name_ == "career" || name_ == "career_quickplay")) {
+        std::printf("walktest %s: FAILED (a song started without its loading screen); reached: %s\n", name_.c_str(), path.c_str());
         return 1;
     }
     std::printf("walktest %s: passed (%s); songs started %d, ended %d\n", name_.c_str(), path.c_str(), songsStarted, songsEnded);

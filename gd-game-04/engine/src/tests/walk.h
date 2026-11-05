@@ -95,6 +95,10 @@ private:
     bool failed_ = false;
     double songSeenAt_ = -1;      // when the song (still playing) started, walk time
     bool loadingChecked_ = false;
+    // A loading screen (its tip) seen since the last song; songs started
+    // without one (every song after the first had none: is_changing_levels).
+    bool loadingSeen_ = false;
+    int songsWithoutLoading_ = 0;
     std::string failure_;
     std::vector<std::string> log_;
     // uitest: every flow state with a Create script, started in turn.
