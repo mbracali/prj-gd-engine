@@ -367,9 +367,23 @@ the zones map's current zone (SetPakManCurrentBlock map = zones:
 z_soundcheck for the store, the character select and the hub) with the
 venue renderer behind the elements while bg_viewport is shown and no song
 plays. Poses: pos, Quat (x, y, z; w >= 0), FOV, LockTo world; morphs use the
-elements' curves [I]. Not drawn yet: the composite objects on it (the
-character, CreateCompositeObject / obj_* members, the store's instrument
-models).
+elements' curves [I]. The composite objects on it (the character,
+CreateCompositeObject / obj_* members): ui/menu_objects.h.
+
+Screen effects and shadow: setup_bg_viewport -> enable_bg_viewport_properties
+-> TOD_Proxim_Update_LightFX_Viewport {fxParam = Default_TOD_Manager
+viewport = bg_viewport}: venue_DOF from DOF_Off_TOD_Manager (strength 0),
+then Default_TOD_Manager's BnS (bright_sat) and sbloom (simple_bloom), the
+songs' own chain (venues.md "Screen effects") [C scripts]. The port runs it
+on the menu scene too (render/screen_fx.h), Enhanced's Remove All Effects /
+Bloom None as in a song. setup_character_hub's SetShadowDirFromLight
+{name = Z_SoundCheck_GFX_Char_front01} names the characters' dynamic
+shadow light [C script]; the port draws the menu objects into a 1024 x 1024
+shadow map from it (else the strongest band-group directional light
+pointing down) and the zone and the characters receive it, as the songs'
+band (VenueStage::shadowPass: its box, bias and intensity, [I] there).
+The main menu, options and boot screens' full-screen 2D backdrop
+(create_menu_backdrop) hides the scene: nothing 3D shows there.
 
 Character switches (character select, hub): preload_band_member reads the
 body and instrument paks with LoadPakAsync, but inside a condition

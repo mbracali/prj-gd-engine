@@ -13,7 +13,9 @@
 #include "data/venue.h"
 #include "game/chart.h"
 #include "render/canvas.h"
+#include "render/gh3_shader.h"
 #include "render/renderer.h"
+#include "render/venue_stage.h"
 #include "render/venue_view.h"
 #include "script/globals.h"
 #include "script/vm.h"
@@ -74,7 +76,86 @@ MenuScene::MenuScene(const Disc& disc, Globals& globals, qs::Vm& vm, ui::UiSyste
     });
 }
 
-MenuScene::~MenuScene() = default;
+MenuScene::~MenuScene() { releaseGpu(); }
+
+void MenuScene::releaseGpu() {
+    fx_.shutdown();
+    if (dev_ && shadow_) dev_->destroyTarget(shadow_);
+    shadow_ = {}, fxTried_ = fxReady_ = false, dev_ = nullptr;
+}
+
+// The characters' dynamic shadow: as VenueStage::shadowPass (the same
+// light-space box, 1024 x 1024 depth map, bias and intensity [I there]),
+// from SetShadowDirFromLight's light, else the strongest band-group
+// directional light pointing down [I].
+void MenuScene::shadowPass(gfx::RenderDevice& dev) {
+    view_->setShadow({}, gfx::Mat4{}, 1024, 0.35f);
+    objects_->setShadow({}, gfx::Mat4{}, 1024, 0.35f);
+    venue::Vec3 centre;
+    if (!shadow_ || !objects_->centre(centre)) return;
+    const venue::Venue& v = *venue_;
+    int best = -1;
+    float bestPower = 0;
+    for (size_t i = 0; i < v.lights.size() && i < lightState_.size(); ++i) {
+        const venue::Light& l = v.lights[i];
+        if (objects_->shadowLight) {
+            if (l.name == objects_->shadowLight) best = int(i);
+            continue;
+        }
+        if (l.type != venue::LightType::Directional || l.group != K("band") || l.dir[1] > -0.2f || !l.createdAtStart) continue;
+        const venue::LightState& st = lightState_[i];
+        const float pw = st.intensity * (st.color[0] + st.color[1] + st.color[2]);
+        if (pw > bestPower) bestPower = pw, best = int(i);
+    }
+    static const bool log = SDL_getenv("GD04_SHADOW_LOG") != nullptr;  // development aid
+    if (log)
+        SDL_Log("menu shadow: light %s, centre %.2f %.2f %.2f", best >= 0 ? qbkey::name(v.lights[size_t(best)].name).c_str() : "none",
+                centre[0], centre[1], centre[2]);
+    if (best < 0) return;
+    const venue::Vec3 d = v.lights[size_t(best)].dir;
+    const float dl = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+    if (dl < 1e-6f) return;
+    const venue::Vec3 f{d[0] / dl, d[1] / dl, d[2] / dl};
+    venue::Vec3 r{f[2], 0, -f[0]};
+    const float rl = std::sqrt(r[0] * r[0] + r[2] * r[2]);
+    if (rl < 1e-4f) r = {1, 0, 0};
+    else r[0] /= rl, r[2] /= rl;
+    const venue::Vec3 u{f[1] * r[2] - f[2] * r[1], f[2] * r[0] - f[0] * r[2], f[0] * r[1] - f[1] * r[0]};
+    const float back = 30.0f, halfSize = 7.0f, depth = 60.0f;
+    const venue::Vec3 eye{centre[0] - f[0] * back, centre[1] + 1.0f - f[1] * back, centre[2] - f[2] * back};
+    gfx::Mat4 view, proj;
+    const venue::Vec3 rows[3] = {r, u, f};
+    for (int a = 0; a < 3; ++a) {
+        for (int c = 0; c < 3; ++c) view.at(a, c) = rows[a][size_t(c)];
+        view.at(a, 3) = -(rows[a][0] * eye[0] + rows[a][1] * eye[1] + rows[a][2] * eye[2]);
+    }
+    proj.at(0, 0) = 1.0f / halfSize, proj.at(1, 1) = 1.0f / halfSize, proj.at(2, 2) = 1.0f / depth;
+    const gfx::Mat4 vp = proj * view;
+    gfx::Mat4 casterProj = proj;
+    casterProj.at(1, 1) = -casterProj.at(1, 1);
+    const gfx::Mat4 casterVp = casterProj * view;
+    gh3shader::Globals g;
+    g.setMatrix(gh3shader::kRegView, view, 4);
+    g.setMatrix(gh3shader::kRegProjection, casterProj, 4);
+    g.setMatrix(gh3shader::kRegViewProj, casterVp, 4);
+    g.setMatrix(gh3shader::kRegInvView, view.inverseAffine(), 4);
+    g.set(gh3shader::kRegDistanceLodScaler, 1, 0, 0, 0);
+    const gfx::TargetId oldTarget = dev.currentTarget();
+    int vx, vy, vw, vh;
+    dev.currentViewport(vx, vy, vw, vh);
+    dev.setTarget(shadow_);
+    dev.setViewport(0, 0, 1024, 1024);
+    const float white[4] = {1, 1, 1, 1};
+    dev.clear(white, true);
+    objects_->drawShadow(g, v, lightState_, lights_);
+    dev.setTarget(oldTarget);
+    dev.setViewport(vx, vy, vw, vh);
+    gfx::Mat4 bias;
+    bias.at(2, 3) = -0.04f / depth;
+    const gfx::Mat4 recv = bias * vp;
+    view_->setShadow(dev.targetDepth(shadow_), recv, 1024, 0.35f);
+    objects_->setShadow(dev.targetDepth(shadow_), recv, 1024, 0.35f);
+}
 
 // A camera pose: pos, Quat (x, y, z; w >= 0) and FOV, LockTo world
 // (the menus' cameras) [C data: store_camera_props, ch_view_cam].
@@ -272,8 +353,34 @@ void MenuScene::draw(Canvas& c) {
         });
     }
     c.flush();
+    gfx::RenderDevice& dev = c.renderer().device();
+    if (!fxTried_) {
+        fxTried_ = true, dev_ = &dev;
+        fxReady_ = !SDL_getenv("GD04_NO_SCREENFX") && fx_.init(dev, gh3shader::library(disc_));
+        screenfx::readViewport(globals_, K("Default_TOD_Manager"), fxParams_);
+        if (!SDL_getenv("GD04_NO_SHADOWS")) {
+            std::string serr;
+            gfx::TargetDesc td;
+            td.width = td.height = 1024;
+            td.depth = true;
+            shadow_ = dev.createTarget(td, serr);
+            if (!shadow_) SDL_Log("menu scene: no shadow map: %s", serr.c_str());
+        }
+    }
+    objects_->prepareFrame(dev);
+    shadowPass(dev);
+    const bool fx = fxReady_ && fx_.begin();
+    VenueView::jitterX = VenueView::jitterY = 0;  // a song's Enhanced TAA jitter (statics)
     view_->setTime(clockMs_ / 1000.0);
     view_->draw(cam, lightState_, lights_);
-    objects_->draw(c.renderer().device(), cam, *venue_, lightState_, lights_);
+    objects_->draw(dev, cam, *venue_, lightState_, lights_);
     view_->drawVolumes(cam, lights_);
+    if (fx) {
+        // Enhanced: Remove All Effects drops GH3's own; Bloom None its bloom (as the songs').
+        screenfx::Params p = fxParams_;
+        if (!VenueStage::post.original) p.bloom.on = false, p.brightSat[0].on = p.brightSat[1].on = false;
+        if (!VenueStage::post.gameBloom) p.bloom.on = false;
+        p.nearZ = 0.05f, p.farZ = 4000.0f;  // VenueView's projection
+        fx_.end(p);
+    }
 }

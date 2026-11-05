@@ -344,12 +344,12 @@ void MenuObjects::update(double dtMs) {
                     inflight_.end());
 }
 
-void MenuObjects::draw(gfx::RenderDevice& dev, const venue::CamPose& cam, const venue::Venue& v, const std::vector<venue::LightState>& lights,
-                       const venue::LightShow& show) {
+void MenuObjects::prepareFrame(gfx::RenderDevice& dev) {
+    frame_.clear();
     if (objects_.empty() && ghosts_.empty()) return;
     if (dev_ && dev_ != &dev) view_.reset(), ghosts_.clear();
     dev_ = &dev;
-    std::vector<BandView::Instance> inst;
+    std::vector<BandView::Instance>& inst = frame_;
     for (auto& [k, op] : objects_) {
         Object& o = *op;
         if (o.hidden || !o.profile) continue;
@@ -405,9 +405,37 @@ void MenuObjects::draw(gfx::RenderDevice& dev, const venue::CamPose& cam, const 
         }
         ++it;
     }
-    if (inst.empty() || !view_) return;
+}
+
+bool MenuObjects::centre(venue::Vec3& out) const {
+    if (frame_.empty()) return false;
+    out = {0, 0, 0};
+    for (const BandView::Instance& i : frame_) out[0] += i.root.m[3], out[1] += i.root.m[7], out[2] += i.root.m[11];
+    for (float& c : out) c /= float(frame_.size());
+    return true;
+}
+
+void MenuObjects::drawShadow(const gh3shader::Globals& light, const venue::Venue& v, const std::vector<venue::LightState>& lights,
+                             const venue::LightShow& show) {
+    if (frame_.empty() || !view_) return;
     view_->setTime(clockMs_ / 1000.0);
-    view_->draw(cam, inst, v, lights, show);
+    view_->setShadowPass(&light);
+    view_->draw(venue::CamPose{}, frame_, v, lights, show);
+    view_->setShadowPass(nullptr);
+}
+
+void MenuObjects::setShadow(gfx::TextureId depth, const gfx::Mat4& lightViewProj, int size, float intensity) {
+    if (view_) view_->setShadow(depth, lightViewProj, size, intensity);
+}
+
+void MenuObjects::draw(gfx::RenderDevice& dev, const venue::CamPose& cam, const venue::Venue& v, const std::vector<venue::LightState>& lights,
+                       const venue::LightShow& show) {
+    if (frame_.empty()) prepareFrame(dev);
+    if (!frame_.empty() && view_) {
+        view_->setTime(clockMs_ / 1000.0);
+        view_->draw(cam, frame_, v, lights, show);
+    }
+    frame_.clear();  // it points into the objects: one frame's only
 }
 
 bool MenuObjects::member(qs::ScriptRun& run, Object& o, uint32_t method, qb::Struct& p, bool& handled) {
@@ -656,7 +684,11 @@ void MenuObjects::addNatives() {
         if (qb::Struct* l = locals(run)) Vm::set(*l, K("result_vector"), out);
         return true;
     });
-    // SetShadowDirFromLight {name}: the characters' shadow direction (no
-    // dynamic shadows in the menus' scene yet).
-    vm_.addNative("SetShadowDirFromLight", [](Vm&, ScriptRun&, qb::Struct&) { return true; });
+    // SetShadowDirFromLight {name}: the characters' dynamic shadow's light
+    // (setup_character_hub: Z_SoundCheck_GFX_Char_front01) [C scripts; the
+    // pass: ui/menu_scene.cpp].
+    vm_.addNative("SetShadowDirFromLight", [this](Vm&, ScriptRun&, qb::Struct& p) {
+        if (const qb::Value* n = Vm::param(p, K("name"))) shadowLight = n->key;
+        return true;
+    });
 }

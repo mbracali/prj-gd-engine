@@ -14,6 +14,7 @@
 #include "data/qb.h"
 #include "game/chart.h"
 #include "render/band.h"
+#include "render/band_view.h"
 #include "render/venue_camera.h"
 #include "render/venue_lights.h"
 #include "script/vm.h"
@@ -57,9 +58,22 @@ public:
     // band is render/band.h's); they load when the menus draw them again.
     void setSuspended(bool on) { suspended_ = on; }
     void update(double dtMs);
+    // Once a frame before drawing: loads and poses the shown objects (and
+    // the ghosts standing in for them).
+    void prepareFrame(gfx::RenderDevice& dev);
+    // The shown objects' feet, averaged (the dynamic shadow's centre); false: none.
+    bool centre(venue::Vec3& out) const;
+    // The shadow pass: the objects with these engine constants (the light's
+    // view and projection) into the bound shadow map.
+    void drawShadow(const gh3shader::Globals& light, const venue::Venue& v, const std::vector<venue::LightState>& lights,
+                    const venue::LightShow& show);
+    // The dynamic shadow map the objects receive (BandView::setShadow).
+    void setShadow(gfx::TextureId depth, const gfx::Mat4& lightViewProj, int size, float intensity);
     // Draws the shown objects into the bound target, after the zone.
     void draw(gfx::RenderDevice& dev, const venue::CamPose& cam, const venue::Venue& v, const std::vector<venue::LightState>& lights,
               const venue::LightShow& show);
+    // SetShadowDirFromLight {name}: the dynamic shadow's light (0: none) [C scripts setup_character_hub].
+    uint32_t shadowLight = 0;
     // An object's frame (its bone's when `bone` is set: ccam LockTo /
     // locktobone), false if there is no such object or bone.
     bool frame(uint32_t object, uint32_t bone, venue::Vec3& pos, venue::Quat& rot);
@@ -117,6 +131,7 @@ private:
     std::unique_ptr<BandView> view_;
     gfx::RenderDevice* dev_ = nullptr;
     std::vector<int> freed_;  // BandView members to free at the next draw
+    std::vector<BandView::Instance> frame_;  // prepareFrame's
     Chart chart_;             // no song: no notes, no tempo (120 bpm) [I]
     double clockMs_ = 0;
     bool suspended_ = false;
