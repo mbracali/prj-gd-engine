@@ -215,6 +215,17 @@ void App::menuMouse(float x, float y, int button) {
 
 void App::menuAction(const InputEvent& ev) {
     if (ports_ && ports_->isOpen()) return ports_->handle(ev);
+    // Esc / Back three times in a row on the main menu quits (back to the
+    // launcher), as every game (guidelines/smilar_behaviors.md; gd03's rule).
+    if (ev.down) {
+        escapes_ = ev.action == Action::Back && front_->flowState() == "main_menu_fs" ? escapes_ + 1 : 0;
+        if (escapes_ >= 3) {
+            SDL_Log("main menu: Back three times, quitting");
+            if (walk_) walk_->sawQuit(), exitCode_ = walk_->finish(*front_);
+            running_ = false;
+            return;
+        }
+    }
     if (ports_ && ev.down) {
         const std::string state = front_->flowState();
         // The port's screens from GH3's (guidelines/universal_launcher.md;
@@ -633,6 +644,17 @@ void App::applyEnhanced(const std::string& key) {
         ps.starBlur = idx("star_blur", {"none", "light", "medium", "strong", "stronger"});
         ps.bokeh = idx("bokeh", {"none", "light", "medium", "strong", "stronger"});  // 2: GH3's own
         VenueStage::internalHeight = std::atoi(enhanced_.get("internal_res").c_str());
+        // Remove All Effects: every effect off at once, GH3's own too (its
+        // bloom, depth of field, colour transforms, flashes) and the camera's
+        // shake; the rows keep their values (GDALL-002, gd02's GD02-129).
+        ps.original = !enhanced_.on("no_effects");
+        if (!ps.original) {
+            ps.bloom = ps.grade = ps.grain = ps.chromatic = ps.ssao = ps.sharpen = ps.starBlur = ps.bokeh = 0;
+            ps.cinematic = false;
+            VenueStage::extras.shadowsAll = false;
+            VenueStage::extras.moreLights = VenueStage::extras.lightDust = 0;
+            venue::CameraDirector::noShake = true;
+        }
     }
     if (is("shake_whammy")) input_.setShakeWhammy(enhanced_.on("shake_whammy"));
     // Rock Band guitars and XInput pads always play (universal_mechanisms.md 1.2.2: everything on by default).

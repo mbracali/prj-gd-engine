@@ -91,6 +91,25 @@ bool ensureGlitches(Vm& vm) {
         if (popped && popped->i == 1 && cur && cur->i == kBand && gm && gm->key == K(mode))
             changed |= unlockList(vm, vm.globalTags, list, false, true);
     }
+    // Its venues: setup_venuetags with cheat_venuetags for band 5 (the
+    // career's venue select lists a venue when p<p>_career_band<i>_<diff><zone>
+    // is unlocked), and save-wide venue_<zone> (face-off / battle / co-op and
+    // quick play's random venue) [C scripts setup_venuetags,
+    // create_select_venue_menu, get_valid_venue_index]. Owner report 1.4.
+    if (const qb::Value* zones = vm.global(K("LevelZoneArray")); zones && zones->type == qb::Type::Array && zones->arr) {
+        const qb::Value* lz = vm.global(K("LevelZones"));
+        const auto& arr = zones->arr->values;
+        for (size_t i = 0; i + 1 < arr.size(); ++i) {  // repeat (size - 1), as the script
+            const qb::Value* z = lz && lz->st ? lz->st->find(arr[i].key) : nullptr;
+            const qb::Value* nm = z && z->st ? z->st->find(K("name")) : nullptr;
+            if (!nm || nm->str.empty()) continue;
+            for (int p = 1; p <= 2; ++p)
+                for (const char* d : kDiffs)
+                    changed |= setInt(vm.globalTags[K("p" + std::to_string(p) + "_career_band" + std::to_string(kBand) + "_" + d + nm->str)],
+                                      "unlocked", 1);
+            changed |= setInt(vm.globalTags[K("venue_" + nm->str)], "unlocked", 1);
+        }
+    }
     // Save-wide: the quick play songs the career unlocks (GlobalTags_UnlockAll's songs part) [C script].
     changed |= unlockList(vm, vm.globalTags, "GH3_General_Songs", true, false);
     changed |= unlockList(vm, vm.globalTags, "GH3_GeneralP2_Songs", true, false);

@@ -218,6 +218,10 @@ std::vector<Item> buildItems(qs::Vm& vm) {
          "Fine dust drifting and twinkling in the light beams over the band (with or without More Lights).",
          {{"none", "None"}, {"1.5x", "1.5x"}, {"2x", "2x"}, {"2.5x", "2.5x"}}},
         {Kind::Check, "no_shaky_cam", "Disable Shaky Camera", true, "Steady shots: the hand-held cameras' gentle sway is turned off."},
+        {Kind::Check, "no_effects", "Remove All Effects", true,
+         "Turns every effect off at once, the original game's own too: its bloom, depth of field, colour transforms and "
+         "flashes, every effect above and the camera's shake. The options above keep their values for when you turn "
+         "this off."},
         {Kind::Separator, "", "", true, ""},
         {Kind::Section, "cheats", "CHEATS & ENHANCERS", true, "Your user files, the original game's cheats and more ways to bend the rules."},
         {Kind::Button, "export", "Export User Files", true,

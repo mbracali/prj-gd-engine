@@ -556,6 +556,7 @@ void VenueStage::draw(double ms) {
         static constexpr float kBokeh[5] = {0, 0.6f, 1, 1.5f, 2};
         if (post.bokeh <= 0) p.dof.on = false;
         else p.dof.blurRadius *= kBokeh[std::min(post.bokeh, 4)];
+        if (!post.original) p.bloom.on = false, p.brightSat[0].on = p.brightSat[1].on = false;  // Remove All Effects
         VenueView::jitterX = VenueView::jitterY = 0;
         bool chained = false;
         if (chain && enh_) {

@@ -57,6 +57,7 @@ public:
     // Every action the menus got (the app counts them; stickyaxis checks them).
     void countPress(Action a) { ++presses_[size_t(a)]; }
     bool done() const { return step_ >= steps_.size(); }
+    void sawQuit() { quitSeen_ = true; }  // the main menu's three-Back quit
     bool failed() const { return failed_; }
     // The exit code and a summary line.
     int finish(FrontEnd& fe) const;
@@ -111,4 +112,5 @@ private:
     int sideBase_ = 0, rightBase_ = 0;
     int seek_ = 0;  // setlist:<song> presses so far
     unsigned adapter_ = 0;  // stickyaxis: the virtual adapter (SDL_JoystickID)
+    bool expectQuit_ = false, quitSeen_ = false;
 };

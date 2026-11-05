@@ -177,6 +177,9 @@ int run(int argc, char** argv) {
         else if (!a.empty() && a[0] == '-' && a.rfind("-psn_", 0) != 0) { usage(); return 2; }  // -psn_: macOS Finder
         else if (a.rfind("-psn_", 0) != 0) opt.dataPath = a;
     }
+    if (shadertest || !movie.empty() || audittest || formattest || selftest || sfxtest || scripttest || venuetest || chartest ||
+        !opt.walk.empty())
+        SDL_setenv_unsafe("GD04_SEED", "12345", 0);  // the tests' scripts pick the same randoms every run
     if (shadertest) return runShaderTest(opt.dataPath);
     if ((!movie.empty() || audittest || formattest || selftest || sfxtest || scripttest || venuetest || chartest || !opt.walk.empty()) &&
         opt.dataPath.empty()) {

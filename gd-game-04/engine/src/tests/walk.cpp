@@ -187,8 +187,11 @@ Walk::Walk(const std::string& name) : name_(name) {
         steps_.push_back({"career_select_difficulty_fs", {Action::Down, Action::Down, Action::Down, C}, 20000});
         // The Vault all bought for this band only (GD04-026).
         steps_.push_back({"career_character_hub_fs",
-                          {"check:tag:careertier8.complete=1", "check:tag:career_song1_tier8.stars=5", "check:tag:Instrument_focus01.unlocked=1"},
+                          {"check:tag:careertier8.complete=1", "check:tag:career_song1_tier8.stars=5", "check:tag:Instrument_focus01.unlocked=1", C},
                           20000});
+        // Its venues are unlocked too: the list moves (owner report 1.4).
+        steps_.push_back({"career_select_venue_fs", {"check:tag:venue_z_hell.unlocked=1", "check:focus:venue_3", "key:Up", "wait", "check:focus:venue_4", B}, 20000});
+        steps_.push_back({"career_character_hub_fs", {}, 20000});
 
     } else if (name == "boss") {
         // A career boss battle: The Glitches (everything unlocked) -> EASY ->
@@ -281,6 +284,7 @@ Walk::Walk(const std::string& name) : name_(name) {
         steps_.push_back({"career_select_character_fs", {C}, 20000, true});
         steps_.push_back({"career_character_hub_fs", {"unlock:all", C}, 20000});  // the venues unlocked (as progress does)
         steps_.push_back({"career_select_venue_fs", {"check:focus:venue_3", Action::Up, "wait", "check:focus:venue_4", Action::Up, "wait", "check:focus:venue_5", D, "wait",
+                                                     "check:focus:venue_4", "key:Down", "wait", "check:focus:venue_3", "key:Up", "wait",
                                                      "check:focus:venue_4", B}, 20000});
         steps_.push_back({"career_character_hub_fs", {}, 20000});
     } else if (name == "hub") {
@@ -430,6 +434,12 @@ Walk::Walk(const std::string& name) : name_(name) {
         steps_.push_back({"song", {}, 30000});
         steps_.push_back({"song_over", {}, 900000});
         steps_.push_back({"mp_faceoff_newspaper_fs", {}, 120000});
+    } else if (name == "escquit") {
+        // Back three times in a row on the main menu quits (to the launcher);
+        // another button between them starts the count again (owner 1.9).
+        steps_ = boot;
+        expectQuit_ = true;
+        steps_.push_back({"main_menu_fs", {B, "wait", B, "wait", D, "wait", B, "wait", B, "wait", B}, 10000});
     } else if (name == "boot") {
         steps_ = boot;
     } else if (name == "uitest") {
@@ -707,9 +717,10 @@ bool Walk::act(const std::string& what, FrontEnd& fe, WalkHost& host) {
         const uint32_t want = qbkey::key(rest("check:focus:").c_str());
         int items = 0;
         bool has = false;
+        std::string seen;
         for (const ui::Element* e : fe.ui().focusedElements())
-            if (e->id != qbkey::key("root_window")) ++items, has = has || e->id == want;
-        std::printf("  focus: %s %s (%d focused)\n", rest("check:focus:").c_str(), has ? "yes" : "no", items);
+            if (e->id != qbkey::key("root_window")) ++items, has = has || e->id == want, seen += " " + qbkey::name(e->id);
+        std::printf("  focus: %s %s (%d focused:%s)\n", rest("check:focus:").c_str(), has ? "yes" : "no", items, seen.c_str());
         return has && items == 1 ? true : fail("focus is not on " + rest("check:focus:") + " alone");
     }
     if (what == "log:focus") {  // the focused menu item's id and text (development aid)
@@ -804,6 +815,11 @@ int Walk::finish(FrontEnd& fe) const {
     if (!failed_ && done() && sx.lost) {
         std::printf("walktest %s: FAILED (sound effects lost on the device); reached: %s\n", name_.c_str(), path.c_str());
         return 1;
+    }
+    if (expectQuit_) {  // escquit: the quit is the walk's end (the last Back)
+        const bool ok = !failed_ && quitSeen_ && step_ + 1 >= steps_.size() && key_ >= steps_.back().keys.size();
+        std::printf("walktest %s: %s; reached: %s\n", name_.c_str(), ok ? "passed (Back x3 quit)" : "FAILED (no quit on the third Back)", path.c_str());
+        return ok ? 0 : 1;
     }
     if (failed_ || !done()) {
         std::printf("walktest %s: FAILED (%s); reached: %s\n", name_.c_str(),

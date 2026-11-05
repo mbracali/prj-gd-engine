@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
+#include <cstdlib>
 #include "script/vm.h"
 #include "script/pc_strings.h"
 
@@ -632,6 +633,11 @@ qb::Struct scriptParams(qb::Struct p) {
 Vm::Vm(Globals& globals) : g_(globals) {
     const char* v = SDL_getenv("GD04_UILOG");
     uiLog_ = v && *v && *v != '0';
+    // GetRandomValue / PermuteArray: a new seed every launch, as the 360's
+    // (quickplay's random guitarist, guitar and venue); GD04_SEED fixes it
+    // for the tests (main.cpp sets 12345 for every test mode).
+    const char* seed = SDL_getenv("GD04_SEED");
+    rng_.seed(seed && *seed ? uint32_t(std::strtoul(seed, nullptr, 10)) : std::random_device{}());
 }
 
 Native Vm::native(const std::string& name) const {

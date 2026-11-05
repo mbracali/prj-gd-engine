@@ -44,6 +44,7 @@ const std::vector<EnhancedSetting>& enhancedSettings() {
         {"more_lights", {"none", "1.5x", "2x", "2.5x"}},
         {"light_dust", {"none", "1.5x", "2x", "2.5x"}},
         {"no_shaky_cam", {"off", "on"}},
+        {"no_effects", {"off", "on"}},
         {"no_fail", {"off", "on"}},
         {"autoplay", {"off", "on"}},
         {"dev_debug_menu", {"off", "on"}},
@@ -94,7 +95,7 @@ const Values& lowest() {
     static const Values v = {{"bokeh", "none"},       {"particles", "none"},  {"bloom", "none"},       {"cinematic_color", "off"},
                              {"film_grain", "none"},  {"chromatic", "none"},  {"ssao", "none"},        {"star_blur", "none"},
                              {"shadows_all", "off"},  {"more_lights", "none"}, {"light_dust", "none"}, {"color_grade", "off"},
-                             {"sharpening", "off"},   {"antialiasing", "none"}, {"ai_upscaling", "none"}, {"sharp_ui", "off"}};
+                             {"sharpening", "off"},   {"antialiasing", "none"}, {"ai_upscaling", "none"}, {"sharp_ui", "off"}, {"no_effects", "off"}};
     return v;
 }
 Values originalLook() {
@@ -107,7 +108,7 @@ const Values& highest() {
     static const Values v = {{"bokeh", "stronger"},   {"particles", "2x"},      {"bloom", "3x"},        {"cinematic_color", "on"},
                              {"film_grain", "stronger"}, {"chromatic", "strong"}, {"ssao", "stronger"},   {"star_blur", "stronger"},
                              {"shadows_all", "on"},   {"more_lights", "2.5x"},   {"light_dust", "2.5x"}, {"color_grade", "off"},
-                             {"sharpening", "low"},   {"antialiasing", "taa"},   {"ai_upscaling", "none"}, {"sharp_ui", "on"}};
+                             {"sharpening", "low"},   {"antialiasing", "taa"},   {"ai_upscaling", "none"}, {"sharp_ui", "on"}, {"no_effects", "off"}};
     return v;
 }
 std::vector<std::pair<std::string, std::string>> with(Values base, std::initializer_list<std::pair<const char*, const char*>> over) {
