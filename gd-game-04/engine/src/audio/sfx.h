@@ -74,7 +74,11 @@ private:
         SDL_AudioStream* stream;
         uint32_t sample = 0, buss = 0;
         bool paused = false;
+        int bussIndex = -1;           // audio/sound_buss.h (-1: none)
+        float volume = 1, pitch = 1;  // the voice's own (vol / 100, pitch / 100)
+        float gainSet = -1, ratioSet = -1;  // what the stream has
     };
+    void applyBuss(Voice& v);
     std::vector<Voice> voices_;
     uint32_t nextVoice_ = 1;
     Stats stats_;

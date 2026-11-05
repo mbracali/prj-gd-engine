@@ -10,6 +10,7 @@
 #include <exception>
 
 #include "audio/audio_device.h"
+#include "audio/sound_buss.h"
 #include "audio/xma_decoder.h"
 #include "data/disc.h"
 #include "data/fsb.h"
@@ -150,8 +151,11 @@ uint32_t Sfx::play(uint32_t sample, float volume, float pitch, uint32_t buss) {
     SDL_AudioSpec src{SDL_AUDIO_F32, e.channels, e.rate};
     SDL_AudioStream* s = SDL_CreateAudioStream(&src, nullptr);
     if (!s) return 0;
-    SDL_SetAudioStreamGain(s, std::clamp(volume, 0.0f, 4.0f));
-    if (pitch > 0 && pitch != 1) SDL_SetAudioStreamFrequencyRatio(s, std::clamp(pitch, 0.25f, 4.0f));
+    // The voice's level: its own volume and pitch times its buss's (audio/sound_buss.h).
+    Voice voice{id, s, sample, buss, false};
+    voice.bussIndex = soundBusses().index(buss);
+    voice.volume = volume, voice.pitch = pitch > 0 ? pitch : 1;
+    applyBuss(voice);
     // Bound first: a stream made without an output format holds nothing
     // until it has one (the data put before was dropped: no sound effect
     // was ever heard).
@@ -161,9 +165,10 @@ uint32_t Sfx::play(uint32_t sample, float volume, float pitch, uint32_t buss) {
     if (!bound || !put || SDL_GetAudioStreamAvailable(s) <= 0) ++stats_.lost;
     if (log) SDL_Log("sfx:   bound %d, put %d (%s), available %d", int(bound), int(put), put ? "" : SDL_GetError(), SDL_GetAudioStreamAvailable(s));
     if (audiodev::dumpEnabled())
-        SDL_Log("audiodump: sfx %s at frame %lld, wall %.0f ms, volume %.2f", qbkey::name(sample).c_str(), audiodev::dumpFrames(1),
-                double(SDL_GetTicksNS()) / 1e6, double(volume));
-    voices_.push_back(Voice{id, s, sample, buss, false});
+        SDL_Log("audiodump: sfx %s at frame %lld, wall %.0f ms, volume %.2f, buss %s %.1f dB", qbkey::name(sample).c_str(), audiodev::dumpFrames(1),
+                double(SDL_GetTicksNS()) / 1e6, double(volume), qbkey::name(buss).c_str(),
+                20.0 * std::log10(std::max(1e-5f, soundBusses().gainAt(voice.bussIndex))));
+    voices_.push_back(voice);
     return id;
 }
 
@@ -191,12 +196,12 @@ bool Sfx::samplePlaying(uint32_t sample) const {
 
 void Sfx::stopBuss(uint32_t buss) {
     for (Voice& v : voices_)
-        if (buss && v.buss == buss) SDL_ClearAudioStream(v.stream);
+        if (buss && soundBusses().under(v.buss, buss)) SDL_ClearAudioStream(v.stream);
 }
 
 void Sfx::pauseBuss(uint32_t buss, bool paused) {
     for (Voice& v : voices_) {
-        if (!buss || v.buss != buss || v.paused == paused) continue;
+        if (!buss || !soundBusses().under(v.buss, buss) || v.paused == paused) continue;
         v.paused = paused;
         if (paused) SDL_UnbindAudioStream(v.stream);
         else if (device_) SDL_BindAudioStream(device_, v.stream);
@@ -208,7 +213,17 @@ void Sfx::stopAll() {
     voices_.clear();
 }
 
+void Sfx::applyBuss(Voice& v) {
+    const SoundBusses& sb = soundBusses();
+    const float gain = std::max(0.0f, v.volume * sb.gainAt(v.bussIndex));
+    const float pr = sb.pitchAt(v.bussIndex);
+    const float ratio = std::clamp(v.pitch * (pr > 0 ? pr : 0.01f), 0.01f, 100.0f);
+    if (gain != v.gainSet) SDL_SetAudioStreamGain(v.stream, gain), v.gainSet = gain;
+    if (ratio != v.ratioSet) SDL_SetAudioStreamFrequencyRatio(v.stream, ratio), v.ratioSet = ratio;
+}
+
 void Sfx::update() {
+    for (Voice& v : voices_) applyBuss(v);  // the busses' fades
     voices_.erase(std::remove_if(voices_.begin(), voices_.end(),
                                  [](const Voice& v) {
                                      if (v.paused || SDL_GetAudioStreamAvailable(v.stream) > 0) return false;

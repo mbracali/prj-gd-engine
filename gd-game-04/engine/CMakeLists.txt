@@ -35,6 +35,7 @@ target_sources(gd04 PRIVATE
   src/audio/guitar_fx.cpp
   src/audio/sfx_dsp.cpp
   src/audio/sfx.cpp
+  src/audio/sound_buss.cpp
   src/audio/song_stream.cpp
   src/audio/xma_decoder.cpp
   src/audio/xma_stream.cpp

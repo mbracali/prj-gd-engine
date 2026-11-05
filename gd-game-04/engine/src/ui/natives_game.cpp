@@ -19,6 +19,7 @@
 #include <set>
 #include <thread>
 #include <unordered_map>
+#include "audio/sound_buss.h"
 #include "render/texture_cache.h"
 #include "ui/front_end.h"
 
@@ -237,6 +238,24 @@ void addGameNatives(FrontEnd& fe, const Disc& disc, TextureCache& textures) {
         // script start_gem_scroller]: controller_unplugged, sysnotify and
         // destroy_loading_screen read it; kill_gem_scroller sets it back to 0.
         v.setGlobal(K("playing_song"), Vm::makeInt(1));
+        // preload_song's busses (the native core loads the streams): Band_Balance
+        // = the song's band_playback_volume - 1.5 dB, Guitar_Balance its
+        // guitar_playback_volume - 1.5 (0 when absent), unlocked, set at once
+        // (start_gem_scroller passes no fadeintime) and locked again [C script preload_song].
+        {
+            float band = 0, guitar = 0;
+            if (const qb::Value* props = v.global(K("gh3_songlist_props")); props && props->st && song)
+                if (const qb::Value* ss = v.globals().field(*props->st, song->key); ss && ss->st) {
+                    if (const qb::Value* b = ss->st->find(K("band_playback_volume"))) band = b->number();
+                    if (const qb::Value* g = ss->st->find(K("guitar_playback_volume"))) guitar = g->number();
+                }
+            SoundBusses& sb = soundBusses();
+            const float bv = band - 1.5f, gv = guitar - 1.5f;
+            for (const char* b : {"Band_Balance", "Guitar_Balance"}) sb.lock(K(b), false);
+            sb.set(K("Band_Balance"), &bv, nullptr, 0);
+            sb.set(K("Guitar_Balance"), &gv, nullptr, 0);
+            for (const char* b : {"Band_Balance", "Guitar_Balance"}) sb.lock(K(b), true);
+        }
         // ... and, once the song has started (its venue loaded: App), the
         // loading screen goes (destroy_loading_screen, near the script's end)
         // [C script start_gem_scroller; I: spawned by App with the song].

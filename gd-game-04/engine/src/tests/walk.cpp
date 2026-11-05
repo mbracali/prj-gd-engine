@@ -352,7 +352,8 @@ Walk::Walk(const std::string& name) : name_(name) {
             std::vector<Op> go(size_t(downs), D);
             go.push_back(C);
             steps_.push_back({"store_fs", go, 20000});
-            steps_.push_back({state, {B}, 20000});
+            if (downs == 0) steps_.push_back({state, {C, Op(Action::Up, 300), Op(Action::Up, 300), B, B}, 20000});
+            else steps_.push_back({state, {B}, 20000});
         }
         steps_.push_back({"store_fs", {}, 20000});
     } else if (name == "practice") {
@@ -386,7 +387,8 @@ Walk::Walk(const std::string& name) : name_(name) {
             std::vector<Op> go(size_t(downs), D);
             go.push_back(C);
             steps_.push_back({"options_select_option_fs", go, 20000});
-            steps_.push_back({state, {B}, 20000});
+            if (downs == 0) steps_.push_back({state, {C, Op(Action::Up, 300), Op(Action::Up, 300), B, B}, 20000});
+            else steps_.push_back({state, {B}, 20000});
         }
         steps_.push_back({"options_select_option_fs", {}, 20000});
     } else if (name == "touch") {

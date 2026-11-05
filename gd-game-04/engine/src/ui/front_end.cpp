@@ -2,6 +2,8 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "ui/front_end.h"
 
+#include "audio/sound_buss.h"
+
 #include <SDL3/SDL_log.h>
 
 #include "data/qbkey.h"
@@ -160,6 +162,7 @@ void FrontEnd::songEnded(const SongResult& r) {
 }
 
 void FrontEnd::frame(Canvas& c, double dtMs) {
+    soundBusses().update(dtMs);  // the busses' fades (SetSoundBussParams time = s)
     sfx.update();
     if (!songPlaying && !songOutro && !flow.paused) songClockMs += dtMs;
 

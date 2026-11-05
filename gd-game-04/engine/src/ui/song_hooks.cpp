@@ -10,6 +10,7 @@
 #include <exception>
 
 #include "audio/mixer.h"
+#include "audio/sound_buss.h"
 #include "data/disc.h"
 #include "data/pak.h"
 #include "data/qb.h"
@@ -1201,6 +1202,7 @@ void SongHooks::addNatives() {
     // a stack of it [C 0x8227CE58, 0x8227D368].
     vm.addNative("SetSoundBussParams", [this](Vm& v, ScriptRun&, qb::Struct& p) {
         ++k_.bussParams;
+        applySoundBussParams(v, p);  // the busses (audio/sound_buss.h)
         static const uint32_t band = K("Band_Balance"), guitar = K("Guitar_Balance");
         for (const qb::Item& it : p.items) {
             // A song's end (songOutro): Band_Balance / Guitar_Balance's vol (dB)
@@ -1227,10 +1229,12 @@ void SongHooks::addNatives() {
     });
     vm.addNative("PushSoundBussParams", [this](Vm&, ScriptRun&, qb::Struct&) {
         pushedBuss_.push_back({mixer_.guitarFx().params().bussDb, 0});
+        soundBusses().push();
         return true;
     });
     vm.addNative("PopSoundBussParams", [this](Vm&, ScriptRun&, qb::Struct&) {
         if (pushedBuss_.empty()) return true;
+        soundBusses().pop();
         GuitarFx::Params gp = mixer_.guitarFx().params();
         gp.bussDb = pushedBuss_.back().first;
         pushedBuss_.pop_back();

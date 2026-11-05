@@ -8,6 +8,7 @@
 #include <cstdio>
 
 #include "audio/audio_device.h"
+#include "audio/sound_buss.h"
 
 Mixer::~Mixer() { close(); }
 
@@ -70,6 +71,8 @@ void Mixer::play(std::unique_ptr<AudioSource> stream, std::vector<Track> tracks,
     SDL_SetAudioStreamFrequencyRatio(stream_, 1.0f);
     tracks.resize(size_t(stream->channels()));
     tracks_ = std::move(tracks);
+    bussGain_.assign(tracks_.size(), 1.0f);
+    for (size_t c = 0; c < tracks_.size(); ++c) bussGain_[c] = soundBusses().gainAt(tracks_[c].buss);
     ring_.assign(size_t(stream->channels()), std::vector<float>(size_t(kRing), 0.0f));
     written_ = 0, read_ = 0, sourceEnded_ = false, underruns_ = 0;
     silenced_ = false;
@@ -198,10 +201,9 @@ void Mixer::fill(int frames) {
 
     const float target = guitarTarget_.load(), target2 = guitar2Target_.load();
     const float pitch0 = guitarPitch_[0].load(), pitch1 = guitarPitch_[1].load();
-    // The busses' volumes (setBuss), once a callback (~10 ms blocks).
-    const uint64_t nowNs = SDL_GetTicksNS();
-    const float bandDb = buss_[0].db(nowNs), guitarDb = buss_[1].db(nowNs);
-    const float bandGain = bandDb == 0 ? 1.0f : std::pow(10.0f, bandDb / 20.0f), guitarBuss = guitarDb == 0 ? 1.0f : std::pow(10.0f, guitarDb / 20.0f);
+    float bussTarget[16];
+    const size_t nt = std::min<size_t>(tracks_.size(), 16);
+    for (size_t c = 0; c < nt; ++c) bussTarget[c] = soundBusses().gainAt(tracks_[c].buss);
     for (int i = 0; i < n; ++i) {
         size_t at = size_t((r + i) & (kRing - 1));
         // ~8 ms ramp, no click (gd01) [I].
@@ -211,7 +213,9 @@ void Mixer::fill(int frames) {
         float g[2][2] = {};  // each player's guitar, ahead of the buss's effects
         for (size_t c = 0; c < tracks_.size(); ++c) {
             const Track& t = tracks_[c];
-            float v = ring_[c][at] * t.volume * (t.guitar ? guitarGain_ * guitarBuss : t.guitar2 ? guitar2Gain_ * guitarBuss : bandGain);
+            float bg = 1;
+            if (c < nt) bussGain_[c] += (bussTarget[c] - bussGain_[c]) * 0.003f, bg = bussGain_[c];
+            float v = ring_[c][at] * t.volume * bg * (t.guitar ? guitarGain_ : t.guitar2 ? guitar2Gain_ : 1.0f);
             // gd01's linear pan law: -1 = left only, 0 = both at full, 1 = right only [I].
             // The players' guitar tracks go through the guitar buss's effects.
             float& L = t.guitar ? g[0][0] : t.guitar2 ? g[1][0] : l;

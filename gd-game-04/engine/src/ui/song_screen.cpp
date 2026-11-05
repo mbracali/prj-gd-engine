@@ -2,6 +2,8 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "ui/song_screen.h"
 
+#include "audio/sound_buss.h"
+
 #include <SDL3/SDL_log.h>
 #include <SDL3/SDL_timer.h>
 
@@ -256,6 +258,19 @@ bool SongScreen::start(const Disc& disc, const Globals& g, const SongInfo& song,
     const int p1Stem = p1Rhythm ? 2 : 0;
     tracks[size_t(p1Stem)].guitar = tracks[size_t(p1Stem + 1)].guitar = true;
     if (p2Other) tracks[size_t(2 - p1Stem)].guitar2 = tracks[size_t(3 - p1Stem)].guitar2 = true;
+    // The stems' busses: player 1's part First_Player_Lead_Playback; the
+    // other part player 2's (Second_Player_Rhythm_Playback, two players on
+    // different parts) or the extra stream (Single_Player_Rhythm_Playback);
+    // the song Band_Playback [C script startpreloadpaused_song].
+    const SoundBusses& sb = soundBusses();
+    const int p1Buss = sb.index(qbkey::key("First_Player_Lead_Playback"));
+    const int otherBuss = sb.index(qbkey::key(p2Other ? "Second_Player_Rhythm_Playback" : "Single_Player_Rhythm_Playback"));
+    const int bandBuss = sb.index(qbkey::key("Band_Playback"));
+    for (int c = 0; c < 2; ++c) {
+        tracks[size_t(p1Stem + c)].buss = p1Buss;
+        tracks[size_t(2 - p1Stem + c)].buss = otherBuss;
+        tracks[size_t(4 + c)].buss = bandBuss;
+    }
     mixer.play(std::move(stream), std::move(tracks), leadInMs_);
     // The clock waits for the venue: loading the band and the scene here and
     // uploading it on the first frame take a second or more, which ran the

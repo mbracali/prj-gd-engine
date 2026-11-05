@@ -44,6 +44,9 @@ public:
         float pan = 0;        // -1 left .. 1 right
         bool guitar = false;  // muted while the player is missing
         bool guitar2 = false;  // the second player's part (two players on different parts)
+        // Its sound buss (audio/sound_buss.h: SoundBusses::index; -1 none):
+        // the buss's level and its parents' scale it.
+        int buss = -1;
     };
     // Starts playback after `leadInMs` of silence; song time 0 is the start of the audio.
     // `stream`: a song (VorbisStream) or any AudioSource (a video's sound).
@@ -118,6 +121,7 @@ private:
     float guitarGain_ = 1;  // audio thread only
     std::atomic<float> guitar2Target_{1};
     float guitar2Gain_ = 1;
+    std::vector<float> bussGain_;  // per track, eased to its buss's level (audio thread)
     GuitarFx guitarFx_;
     std::array<FastPitch, 2> pitch_;  // audio thread only
     std::array<std::atomic<float>, 2> guitarPitch_{1.0f, 1.0f}, guitarLag_{0.0f, 0.0f};
