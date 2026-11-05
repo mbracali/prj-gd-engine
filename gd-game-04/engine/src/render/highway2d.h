@@ -151,10 +151,6 @@ private:
     void drawStarPowerFx(Canvas& c, const TextureCache& tex, double now, bool under) const;
     // One sustain tail (the strip of 0x8238E338) of note `i` on lane `lane`.
     void drawTail(Canvas& c, const TextureCache& tex, const TrackNote& n, int i, int fret, int lane, const Player& player, double now) const;
-    // Star Power at song time `ms` (a gem / tail takes its material when created) [C 0x82120C90].
-    bool spAt(double ms) const;
-    // The song time a note's gem and tail are created (row 0).
-    double createdAt(double noteMs) const { return noteMs + gemOffsetMs_ - travelMs_; }
     void drawButtons(Canvas& c, const TextureCache& tex, uint8_t held, bool raised, double now) const;
     SDL_Color surfaceTint(double now) const;
 
@@ -190,7 +186,7 @@ private:
     int whammyOn_ = 0, whammyStarOn_ = 0, whammyStarOff_ = 0;
     float lastWhammy_ = 0;
     bool whammyFirst_ = true;
-    std::vector<std::pair<double, bool>> spLog_;  // Star Power switched on / off at
+    bool tailsSp_ = false;  // Star Power as stepTails last saw it (LaunchGemEvent star_power_on / _off)
     float travelMs_ = 1500;  // scroll_time - destroy_time
     std::array<float, 128> wibble_ = filled(1.0f);
     static std::array<float, 128> filled(float v) {

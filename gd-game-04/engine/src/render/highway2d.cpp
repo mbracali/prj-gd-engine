@@ -249,15 +249,6 @@ const Highway2D::Tail* Highway2D::tail(int note) const {
     return nullptr;
 }
 
-bool Highway2D::spAt(double ms) const {
-    bool on = false;
-    for (const auto& e : spLog_) {
-        if (e.first > ms) break;
-        on = e.second;
-    }
-    return on;
-}
-
 void Highway2D::noteMissed(int note) {
     // The miss judge makes the note's whammy bars dead: MakeDeadWhammy's
     // 0x8210C0D0 with button_models.<c>.dead_whammy (sys_Whammy2D_Dead), z
@@ -268,11 +259,22 @@ void Highway2D::noteMissed(int note) {
 }
 
 void Highway2D::stepTails(const Player& player, const NoteTrack& track, double now, float whammy, bool blueWhammys) {
-    // A gem / tail takes the Star Power material if Star Power is on when it
-    // is created; StarPowerOn does not touch the ones already out [C
-    // 0x82120C90, 0x8211DA70].
-    if (spLog_.empty() ? player.stats().starPowerActive : spLog_.back().second != player.stats().starPowerActive)
-        spLog_.push_back({now, player.stats().starPowerActive});
+    // star_power_activate_and_drain's LaunchGemEvent star_power_on / _off
+    // (0x8211A570 -> 0x821195C0) walks every gem out: on, each gem and star
+    // gem takes star_power_[hammer_]material (gem_y_just, gem scale) and each
+    // tail star_power_whammy_material; off, the gems gem_[hammer_]material,
+    // the star gems star_[hammer_]material (battle_star_* in p2_battle;
+    // star_y_just, gem_star_scale x the gem scale) and the tails
+    // whammy_material -- a star whammy's blue goes too. Gems made in between
+    // take the Star Power look from star_power_used (0x82120C90). So the
+    // look follows Star Power at the frame it switches; drawn from the
+    // player's state (drawAll / drawTail) [C 0x821198A0-0x82119E60,
+    // 0x82119BE8-0x82119C20, script star_power_activate_and_drain].
+    if (player.stats().starPowerActive != tailsSp_) {
+        tailsSp_ = player.stats().starPowerActive;
+        if (!tailsSp_)
+            for (auto& t : tails_) t.second.star = false;
+    }
     const int held = player.sustaining();
     if (held != holdNote_) {
         // CheckNoteHoldEnd: every fret's tail of the hold made dead (z 3.1),
@@ -633,10 +635,12 @@ void Highway2D::drawTail(Canvas& c, const TextureCache& tex, const TrackNote& n,
         const double cap = rowEnd < 0 ? 1.0 : std::min(1.0, (r - rowEnd) / 32.0);
         return float(std::clamp(cap, 0.5 / 32.0, 1.0 - 0.5 / 32.0));
     };
-    // The material: dead (sys_Whammy2D_Dead), else Star Power at creation or
-    // a star whammy (sys_Whammy2D_StarPower), else the fret's [C 0x82121360, 0x8210C0D0].
+    // The material: dead (sys_Whammy2D_Dead), else Star Power (on now:
+    // LaunchGemEvent star_power_on / _off, stepTails) or a star whammy
+    // (sys_Whammy2D_StarPower), else the fret's [C 0x82121360, 0x8210C0D0,
+    // 0x821195C0; dead kept over Star Power I].
     const uint32_t key = t && t->dead                                        ? kWhammyDead
-                         : (t && t->star) || spAt(createdAt(double(n.time))) ? kWhammyStarPower
+                         : (t && t->star) || player.stats().starPowerActive ? kWhammyStarPower
                                                                               : kWhammy[fret];
     const int texId = int(tex.find(key).id);
     for (size_t s = 0; s + 1 < rows.size(); ++s) {
@@ -773,9 +777,11 @@ void Highway2D::drawAll(Canvas& c, const TextureCache& tex, const NoteTrack& tra
                     uint32_t key;
                     float u1 = 1, v1 = 1, u0 = 0, v0 = 0, scale = gemStart_ + (gemEnd_ - gemStart_) * v, just = gemJust_;
                     const int frame = int(now / 1000.0 * 30) % 16;
-                    // The material is chosen when the gem is created: Star Power then
-                    // gives the Star Power gem (StarPowerOn leaves the gems out) [C 0x82120C90, 0x8211DA70].
-                    const bool spGem = spAt(createdAt(n.time));
+                    // Star Power gives every gem out the Star Power gem (plain size,
+                    // gem_y_just) from the frame it starts to the frame it ends:
+                    // LaunchGemEvent star_power_on / _off re-material the gems out,
+                    // star_power_used the new ones (stepTails) [C 0x821195C0, 0x82120C90].
+                    const bool spGem = st.starPowerActive;
                     if (spGem) key = n.hopo ? kGemStarPowerHammer : kGemStarPower;
                     else if (star && fx_.battle) {
                         key = n.hopo ? kBattleHammer[l] : kBattle[l];

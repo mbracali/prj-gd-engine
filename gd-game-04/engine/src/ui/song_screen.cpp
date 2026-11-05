@@ -362,6 +362,7 @@ void SongScreen::tick(double nowMs, Mixer& mixer) {
         for (int p = 0; p < match_->players() && p < 2; ++p) {
             const bool on = match_->player(p).stats().starPowerActive;
             if (venue_ && on && !spSeen_[size_t(p)]) venue_->starPowerAnim(p, stepMs_);
+            if (on != spSeen_[size_t(p)]) SDL_Log("star power: player %d %s at %.0f ms", p + 1, on ? "on" : "off", stepMs_);
             spSeen_[size_t(p)] = on;
         }
         if (twoPlayers_) hud2p_.update(*match_, stepMs_);

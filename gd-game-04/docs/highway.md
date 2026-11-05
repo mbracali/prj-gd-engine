@@ -238,7 +238,8 @@ removed and a flame shown (2.8) [I: GemStep / hit path not fully read].
 
 - Exists when the lane's sustain length (0x82102E28) > 0 (sustain rule: FINDINGS §5) [C].
 - Container (z 4.0, just (-1,-1)) + sprite: clonematerial = `sys_Whammy2D_<C>` (32x32), or
-  `sys_Whammy2D_StarPower` if SP is active at creation [C]; pos = lane start, scale (0.6, 0),
+  `sys_Whammy2D_StarPower` if SP is active at creation [C] (and from star_power_on to
+  star_power_off for tails already out, below); pos = lane start, scale (0.6, 0),
   rot_angle = lane angle, just (0, 1), z 4.0, `m_glowenabled` = 0 [C].
 - Mover with whammy flag: same start/end positions, scale 1; elapsed + whammy_offset_tweak
   (-33 ms); length parameter L = sustain_s / T (fraction of the travel) [C 0x82121428-0x82121444].
@@ -287,8 +288,15 @@ removed and a flame shown (2.8) [I: GemStep / hit path not fully read].
     note; returns at once in Star Power) counts the frames the bar moved more than 0.03: 5 of
     them (whammy_on held at 5 frames) MakeStarWhammy the pattern's bars, 5 without
     MakeNormalWhammy them back; not in battle / boss (do_blue_whammys 0) [C script].
-  - Star Power: the gem and tail materials are chosen at creation (0x82120C90); StarPowerOn
-    (0x8211DA70) and GuitarEvent_StarPowerOff do not touch the ones already out [C].
+  - Star Power: star_power_activate_and_drain's `LaunchGemEvent event = star_power_on / _off`
+    (0x8211A570 -> 0x821195C0) walks every gem and tail out: on, gems and star gems take
+    star_power_[hammer_]material (gem_y_just, the gem scale) and tails
+    star_power_whammy_material; off, gems gem_[hammer_]material, star gems star_ (battle_star_
+    in p2_battle) [hammer_]material with star_y_just and gem_star_scale, tails whammy_material
+    (a star whammy's blue goes too). Gems made in between take it from star_power_used
+    (0x82120C90). So every gem on screen turns at the activation frame and back at the end
+    frame (GD04-092; before, only gems created in Star Power were blue and they stayed blue
+    after it) [C 0x821198A0-0x82119E60]. Dead tails stay dead [I].
 - Hold FX (GuitarEvent_WhammyOn -> WhammyFXOn 0x8211C1A0, per fret of the pattern with a
   sustain; WhammyFXOff 0x8211C390 / 0x8211C0E0 removes them) [C 0x8211BE98]: a SpriteElement
   `fx_whammy_<c><p>` (DAT_829193A0) in gem_container<p>, clonematerial sys_whammy_hold01 (512x512
