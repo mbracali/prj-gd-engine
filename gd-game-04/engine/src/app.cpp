@@ -35,6 +35,7 @@
 #include "data/json.h"
 #include "game/save.h"
 #include "ui/song_hooks.h"
+#include "ui/song_preview.h"
 #include "ui/song_screen.h"
 #include "video/movie_player.h"
 #include "devaids/menu_keys.h"
@@ -1324,6 +1325,12 @@ void App::frame() {
                 // Practice (an endtime): the section ends it (a mid-song start is past 20 s already).
                 if (setup.endMs > 0) song_->walkEndMs_ = -1;
             }
+            // The song took the mixer over: a section preview still playing
+            // (end_song never stopped it) is gone (walk practice checks it).
+            if (front_->songPreview.active) {
+                SDL_Log("practice preview: %s still playing as the song started", front_->songPreview.prefix.c_str());
+                front_->songPreview.leaked = true, front_->songPreview.active = front_->songPreview.playing = false;
+            }
             front_->songPlaying = true;
             song_->setHoldAfterWin(true);  // GH3's scripts end a won song (songOutro)
             // Common_Intro_Transition's GH_SFX_Intro_WarmUp: the zone's crowd
@@ -1534,6 +1541,7 @@ int App::run() {
             ports_ = std::make_unique<PortScreens>(input_, *front_, enhanced_, [this](const std::string& k) { applyEnhanced(k); });
             ports_->context().action = [this](const std::string& a) { userFileAction(a); };
             if (!envOn("GD04_NO_HOOKS")) hooks_ = std::make_unique<SongHooks>(*front_, mixer_, *disc_, *textures_);
+            addSongPreviewNatives(front_->vm(), *front_, mixer_, *disc_);  // practice's section preview (GD04-105)
             addVenueScriptCalls();
             cutVenues_ = std::make_unique<CutVenues>(*front_);
             // A won song's teardown by GH3's scripts: play_outro's destroy_hud

@@ -66,7 +66,8 @@ void addFlowNatives(qs::Vm& vm, FlowState& st) {
                           "LoadFSB",
                           // The song's streams are the native core's (D10, GD04-021): it starts,
                           // pauses and stops them itself, with the guitar volume it tracks
-                          // [C scripts startpreloadpaused_song, begin_song, preload_song].
+                          // [C scripts startpreloadpaused_song, begin_song, preload_song];
+                          // practice's section preview replaces these (ui/song_preview.cpp).
                           "StartPreloadedStream", "PauseSound", "SetLastGuitarVolume",
                           // Achievements and leaderboard posts, dropped (GD04-013) [C scripts
                           // Achievements_SongWon, send_leader_board_message].

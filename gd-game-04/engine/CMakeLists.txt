@@ -115,6 +115,7 @@ target_sources(gd04 PRIVATE
   src/tests/venuetest.cpp
   src/ui/song_screen.cpp
   src/ui/song_hooks.cpp
+  src/ui/song_preview.cpp
   src/ui/fx2d.cpp
   src/ui/front_end.cpp
   src/ui/glitches.cpp

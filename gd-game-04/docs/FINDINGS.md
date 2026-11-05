@@ -827,3 +827,24 @@ data sound_buss.qb]; the port's audio/sound_buss.h:
   7-8 dB under its old level in all. Compressor_Master_Buss (GAINMAKEUP 12)
   is defined but no script creates it [C data].
 - GD04_BUSSLOG=1 logs every buss change (development aid).
+- Practice's section preview (GD04-105): create_choose_practice_section_menu
+  (end_practice_song_slomo first: current_speedfactor 1) spawns
+  practice_songpreview_monitor; when the highlight's section
+  (menu_choose_practice_section_refreshsongpreviewposition:
+  target_practice_songpreview_starttime = <song>_markers[index - 1].time, 0 for
+  the full song) changes, it fades Band_Balance / Guitar_Balance to -20 dB in
+  0.5 s (if one played), end_song, preload_song starttime fadeintime = 1.0
+  (the busses back to the song's playback volumes - 1.5 dB over 1 s; the
+  streams on startpreloadpaused_song's busses at pitch current_speedfactor *
+  100, sought to the marker by SetSeekPosition_Song), begin_song;
+  practice_songpreview_fadeinandrepeat restarts it at the section's end. The
+  speed menu keeps the section menu (and the preview); its destroy (the speed
+  chosen, Back) waits for practice_songpreview_changing = 0, kills both
+  scripts, end_song [C scripts]. end_song's StopStream {unique_id =
+  <song_unique_id>} has no such local, so StopStream gets neither a
+  unique_id nor a name: StopAudioStreams, every stream [C 0x8227E580 ->
+  0x8223EDE0(1), as StopAudioStreams 0x8227E668]. The port runs these
+  scripts; ui/song_preview.cpp's PreloadStream / StartPreloadedStream /
+  SetSoundSeekPosition / PauseSound / StopStream play the song's SongStream on
+  the song mixer while no song is (Mixer::play at the song's start resets the
+  speed); walk practice checks it (check:preview).
