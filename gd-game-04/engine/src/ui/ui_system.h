@@ -167,6 +167,14 @@ public:
     // "yellow", "blue", "orange", "strumbar", "start" or ""), `midY` the
     // pill's middle (the strum bar: above it up, below down).
     std::string helperAt(float x, float y, std::string* button = nullptr, float* midY = nullptr) const;
+    // The help bar's pills as drawn in the last frame: the text (upper case),
+    // its button (as helperAt), and the whole visible pill (glyph, text and
+    // the backing: Control_pill_body and its two ends) that helperAt takes.
+    struct HelpPillHit {
+        std::string text, button;
+        float x0, y0, x1, y1;
+    };
+    std::vector<HelpPillHit> helperPills() const;
     // The drawn bounds of an element (false: not drawn in the last frame).
     bool drawnBounds(uint32_t id, float& x0, float& y0, float& x1, float& y1) const;
     uint64_t drawCount() const { return drawCount_; }

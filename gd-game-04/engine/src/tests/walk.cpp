@@ -378,6 +378,61 @@ Walk::Walk(const std::string& name) : name_(name) {
                           10000});
         steps_.push_back({"options_select_option_fs", {"click:help:BACK"}, 10000});
         steps_.push_back({"main_menu_fs", {}, 20000});
+    } else if (name == "mouseall") {
+        // GD04-111: the help bar's pills on every screen the walk reaches take
+        // the mouse over all they draw (check:pills), and clicked (at their
+        // backing's left end: click:helpend) do what their buttons do; the
+        // port's screens' three pills too (click:porthelp).
+        const Op W("wait"), P("check:pills");
+        steps_ = boot;
+        steps_.push_back({"main_menu_fs",
+                          {W, W, P, "click:helpend:UP/DOWN", "check:selected:main_menu_options_text", "click:helplow:UP/DOWN",
+                           "check:selected:main_menu_career_text", "click:helpend:GAMEPADS"},
+                          10000});
+        steps_.push_back({"port_gamepads", {Op("click:porthelp:2low", 700), "click:porthelp:2top", "click:porthelp:1"}, 10000});
+        steps_.push_back({"main_menu_fs", {W, "click:menu:main_menu_options_text"}, 10000});
+        steps_.push_back({"options_select_option_fs", {W, W, P, "click:helpend:ENHANCED"}, 20000});
+        steps_.push_back({"port_enhanced", {Op("click:porthelp:2low", 700), "click:porthelp:2top", "click:porthelp:1"}, 10000});
+        const std::pair<int, const char*> screens[] = {{0, "options_audio_settings_fs"},       {1, "options_calibrate_lag_fs"},
+                                                       {2, "options_controller_settings_fs"}, {4, "options_data_settings_fs"},
+                                                       {5, "options_bonus_videos_fs"},        {7, "options_top_rockers_difficulty_select_fs"},
+                                                       {8, "options_cheats_fs"}};
+        for (const auto& [downs, state] : screens) {
+            std::vector<Op> go{W};
+            for (int k = 0; k < downs; ++k) go.push_back(D);
+            go.push_back(C);
+            steps_.push_back({"options_select_option_fs", go, 20000});
+            steps_.push_back({state, {W, W, W, P, "click:helpend:BACK"}, 20000});
+        }
+        steps_.push_back({"options_select_option_fs", {W, W, "click:helpend:BACK"}, 20000});
+        steps_.push_back({"main_menu_fs", {W, D, D, C}, 20000});  // QUICKPLAY
+        steps_.push_back({"quickplay_select_difficulty_fs", {W, W, P, "click:helpend:SELECT"}, 20000});
+        // The set list's five pills touch (narrowed to the safe width): each takes its own clicks.
+        steps_.push_back({"quickplay_setlist_fs",
+                          {W, W, W, P, "click:helpend:BONUS", W, W, "check:global:current_tab=tab_bonus", P, "click:helpend:DOWNLOADS", W, W,
+                           "check:global:current_tab=tab_downloads", P, "click:helpend:BACK"},
+                          20000});
+        steps_.push_back({"quickplay_select_difficulty_fs", {W, "click:helpend:BACK"}, 20000});
+        steps_.push_back({"main_menu_fs", {W, C}, 20000});  // CAREER
+        steps_.push_back({"career_choose_band_fs", {W, W, P, C}, 20000, true});
+        steps_.push_back({"career_enter_band_name_fs", {W, W, P, C, C, C, W, "click:helpend:ACCEPT"}, 20000, true});
+        steps_.push_back({"career_select_difficulty_fs", {W, W, P, "click:helpend:SELECT"}, 20000});
+        steps_.push_back({"career_select_character_fs", {W, W, W, P, C}, 20000, true});
+        steps_.push_back({"career_character_hub_fs", {W, W, P, D, D, D, D, C}, 20000});  // VISIT STORE
+        steps_.push_back({"store_fs", {W, W, W, P, "click:helpend:BACK"}, 20000});
+        steps_.push_back({"career_character_hub_fs", {W, C}, 20000});  // PLAY SHOW
+        steps_.push_back({"career_select_venue_fs", {W, W, P, "click:helpend:SELECT"}, 20000});
+        steps_.push_back({"career_setlist_fs", {W, W, W, P, C}, 20000});
+        steps_.push_back({"song", {Op(Action::Start, 3000)}, 30000});
+        // The pause menu (no BACK pill: Start resumes) -> OPTIONS and back -> QUIT -> its warning: QUIT.
+        steps_.push_back({"career_pause_fs", {W, W, P, D, D, D, "click:helpend:SELECT"}, 20000});  // OPTIONS
+        steps_.push_back({"career_pause_options_fs", {W, W, P, "click:helpend:BACK"}, 20000});
+        steps_.push_back({"career_pause_fs", {W, W, D, D, D, D, "click:helpend:SELECT"}, 20000});  // QUIT
+        // The popups' items (no help bar) take hover and click: QUIT (not
+        // CANCEL), then NEW SONG (pausequit's keys, by the mouse).
+        steps_.push_back({"career_quit_warning_fs", {W, W, "hover:menuitem:1", "check:menusel:1", "click:menuitem:1"}, 20000});
+        steps_.push_back({"career_song_ended_fs", {Op("wait", 4000), "hover:menuitem:1", "check:menusel:1", "click:menuitem:1"}, 20000});
+        steps_.push_back({"career_setlist_fs", {}, 40000});
     } else if (name == "venues") {
         // Career venue select: down moves the focus to the next venue (owner
         // report: stuck on the first) [C script create_select_venue_menu].
@@ -769,6 +824,25 @@ bool Walk::act(const std::string& what, FrontEnd& fe, WalkHost& host) {
                 for (const auto& c : box->children)
                     if (c->text == target.substr(low ? 8 : 5) && c->drawnIn == fe.ui().drawCount())
                         x = (c->bx0 + c->bx1) * 0.5f, y = low ? c->by1 + 4 : (c->by0 + c->by1) * 0.5f, found = true;
+        } else if (target.rfind("menuitem:", 0) == 0) {
+            // The focused menu's item N (popups' items have no names), at its drawn bounds.
+            const ui::Element* menu = nullptr;
+            for (const ui::Element* e : fe.ui().focusedElements())
+                if (!e->children.empty() && e->selected >= 0) menu = e;
+            const size_t n = size_t(std::atoi(target.c_str() + 9));
+            float x0, y0, x1, y1;
+            if (menu && n < menu->children.size() && fe.ui().drawnBounds(menu->children[n]->id, x0, y0, x1, y1))
+                x = (x0 + x1) * 0.5f, y = (y0 + y1) * 0.5f, found = true;
+        } else if (target.rfind("helpend:", 0) == 0) {
+            // A help bar pill's backing: 3 units in from its left end (GD04-111).
+            for (const auto& p : fe.ui().helperPills())
+                if (p.text == target.substr(8)) x = p.x0 + 3, y = (p.y0 + p.y1) * 0.5f - 1, found = true;
+        } else if (target.rfind("porthelp:", 0) == 0 && host.walkPorts() && host.walkPorts()->isOpen()) {
+            // The port's help bar: porthelp:<k>[low] (0 SELECT, 1 BACK, 2 UP/DOWN), at its left end (low: the bottom half).
+            float x0, y0, x1, y1;
+            host.walkPorts()->helpRect(std::atoi(target.c_str() + 9), x0, y0, x1, y1);
+            const bool low = target.find("low") != std::string::npos;
+            x = x0 + 3, y = low ? y1 - 2 : (target.back() == 'p' ? y0 + 2 : (y0 + y1) * 0.5f), found = true;
         } else if (target == "item" && host.walkPorts()) {
             float x0, y0, x1, y1;
             found = host.walkPorts()->itemRect(flowState(fe), x0, y0, x1, y1);
@@ -803,6 +877,40 @@ bool Walk::act(const std::string& what, FrontEnd& fe, WalkHost& host) {
         Canvas::countBlack = false;
         std::printf("  black frames: %d\n", Canvas::blackFrames);
         return Canvas::blackFrames == 0 ? true : fail(std::to_string(Canvas::blackFrames) + " black frames presented");
+    }
+    if (what == "check:pills") {
+        // GD04-111: every help bar pill takes the mouse over all it draws
+        // (glyph, text, backing), each has a button the click acts as, and
+        // every element the bar draws is part of a pill.
+        const auto pills = fe.ui().helperPills();
+        if (pills.empty()) return fail("no help bar pills drawn");
+        std::string bad;
+        for (const auto& p : pills) {
+            std::printf("  pill %-24s %-8s (%.0f,%.0f)-(%.0f,%.0f)\n", p.text.c_str(), p.button.c_str(), double(p.x0), double(p.y0), double(p.x1), double(p.y1));
+            if (p.button.empty() && p.text != "BACK") bad += " " + p.text + ": no button;";
+            const float xs[] = {p.x0 + 1, (p.x0 + p.x1) * 0.5f, p.x1 - 1}, ys[] = {p.y0 + 1, (p.y0 + p.y1) * 0.5f, p.y1 - 1};
+            auto shared = [&](float px, float py) {  // also on another pill (the set list's touch): the nearest takes it
+                for (const auto& o : pills)
+                    if (&o != &p && px >= o.x0 && px <= o.x1 && py >= o.y0 && py <= o.y1) return true;
+                return false;
+            };
+            for (float px : xs)
+                for (float py : ys)
+                    if (const std::string h = fe.ui().helperAt(px, py); h != p.text && !shared(px, py)) {
+                        bad += " " + p.text + " at " + std::to_string(int(px)) + "," + std::to_string(int(py)) + " is " + (h.empty() ? "nothing" : h) + ";";
+                        goto nextPill;
+                    }
+        nextPill:;
+        }
+        if (const ui::Element* box = fe.ui().find(qbkey::key("user_control_container")))
+            for (const auto& c : box->children) {
+                if (c->drawnIn != fe.ui().drawCount() || c->bx1 - c->bx0 < 1) continue;
+                const float cx = (c->bx0 + c->bx1) * 0.5f, cy = (c->by0 + c->by1) * 0.5f;
+                if (fe.ui().helperAt(cx, cy).empty())
+                    bad += " " + qbkey::name(c->type) + " " + (c->text.empty() ? qbkey::name(c->texture) : c->text) + " at " + std::to_string(int(cx)) + "," +
+                           std::to_string(int(cy)) + " takes no click;";
+            }
+        return bad.empty() ? true : fail("help bar:" + bad);
     }
     if (starts("check:text:")) {  // check:text:<element id>!=<text>: the element's text is not that
         const std::string kv = rest("check:text:");
@@ -1040,6 +1148,12 @@ bool Walk::act(const std::string& what, FrontEnd& fe, WalkHost& host) {
         std::printf("  cs: jumped %g icon %g total %g name \"%s\"\n", num("g_cs_jumped_p1"), num("g_character_select_icon_index_p1"),
                     num("cs_total_guitarists_p1"), t ? t->text.c_str() : "(none)");
         return true;
+    }
+    if (starts("check:menusel:")) {  // check:menusel:<n>: the focused menu's item n is selected (menuitem:)
+        int sel = -1;
+        for (const ui::Element* e : fe.ui().focusedElements())
+            if (!e->children.empty() && e->selected >= 0) sel = e->selected;
+        return sel == std::atoi(rest("check:menusel:").c_str()) ? true : fail("the focused menu's item is " + std::to_string(sel) + ", not " + rest("check:menusel:"));
     }
     if (what == "log:focus") {  // the focused menu item's id and text (development aid)
         for (const ui::Element* e : fe.ui().focusedElements())
