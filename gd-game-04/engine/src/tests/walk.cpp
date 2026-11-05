@@ -265,24 +265,6 @@ Walk::Walk(const std::string& name) : name_(name) {
                           20000});
         steps_.push_back({"song", {"check:global:current_tab=tab_bonus", "check:global:current_song=avalancha"}, 30000});
 
-    } else if (name == "cutvenue") {
-        // GD04-095: Enable Cut Content on: quick play's set list shows a
-        // VENUE pill (yellow); its popup lists the cut venues (CREDITS,
-        // SOUNDCHECK, CANCEL); the venue picked is the next song's only.
-        steps_ = boot;
-        steps_.push_back({"main_menu_fs", {"set:enhanced:cut_content=on", D, D, C}, 10000});
-        steps_.push_back({"quickplay_select_difficulty_fs", {C}, 20000});
-        steps_.push_back({"quickplay_setlist_fs",
-                          {"wait", "wait", "hover:help:VENUE", Action::Fret2, "wait", "wait", "check:text:pu_warning_vmenu!=x", "log:focus", B,
-                           "wait", "log:focus", Action::Fret2, "wait", "wait", C, "wait", "wait", "clear:topscores", C},
-                          20000});
-        steps_.push_back({"song", {"check:global:current_level=load_z_credits"}, 30000});
-        steps_.push_back({"song_over", {}, 600000});
-        steps_.push_back({"quickplay_win_song_fs", {C}, 30000});
-        steps_.push_back({"quickplay_toprockers_fs", {"key:Return"}, 30000, true});
-        steps_.push_back({"quickplay_setlist_fs", {"wait", "wait", C}, 30000});
-        steps_.push_back({"song", {"check:global:current_level!=load_z_credits"}, 30000});
-
     } else if (name == "cutcontent") {
         // GD04-094: Enhanced > Enable Cut Content on, The Glitches (every
         // character unlocked) -> CHANGE CHARACTER -> down past the last
@@ -1096,14 +1078,7 @@ bool Walk::act(const std::string& what, FrontEnd& fe, WalkHost& host) {
         return true;
     }
     if (starts("check:global:")) {  // check:global:<name>=<number>: a GH3 global's value
-        std::string kv = rest("check:global:");
-        // <name>!=<key>: a key global is not that one.
-        if (const size_t ne = kv.find("!="); ne != std::string::npos) {
-            const qb::Value* v = fe.vm().global(qbkey::key(kv.substr(0, ne).c_str()));
-            const bool isKey = v && (v->type == qb::Type::Key || v->type == qb::Type::KeyPtr);
-            std::printf("  global: %s = %s\n", kv.substr(0, ne).c_str(), isKey ? qbkey::name(v->key).c_str() : "(not a key)");
-            return isKey && v->key != qbkey::key(kv.substr(ne + 2).c_str()) ? true : fail("global " + kv);
-        }
+        const std::string kv = rest("check:global:");
         const size_t eq = kv.find('=');
         const qb::Value* v = fe.vm().global(qbkey::key(kv.substr(0, eq).c_str()));
         // A key value (game_mode = p1_career) compares by name, a number by value.

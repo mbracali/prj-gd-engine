@@ -236,8 +236,7 @@ std::vector<Item> buildItems(qs::Vm& vm) {
          "not a GH3 save is refused."},
         {Kind::Check, "cut_content", "Enable Cut Content", true,
          "Shows what the original keeps hidden on the disc: the Bone Man characters in character select and the Credits "
-         "and Soundcheck venues in the venue list. On quick play's song list the yellow button (VENUE) picks one of "
-         "them for the next song."},
+         "and Soundcheck venues in the venue list."},
         {Kind::Check, "no_fail", "No Fail Mode", true, "The rock meter cannot fail you: every song plays to the end."},
         {Kind::Check, "autoplay", "Autoplay", true, "The game plays every note of a song by itself, without a miss."},
         {Kind::Choice, "hopo_mode", "Forgiving Hammer-ons & Pull-offs", true,
