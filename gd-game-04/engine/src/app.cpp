@@ -515,7 +515,11 @@ void App::addVenueScriptCalls() {
     });
     vm.addNative("IsCreated", [particles](Vm&, ScriptRun&, qb::Struct& p) {
         double ms = 0;
-        const qb::Value* n = Vm::positional(p);
+        // IsCreated <id>: the id is a key (MangleChecksums' mangled_id), which
+        // Vm::positional skips as a flag: the first unnamed item [C scripts kill_4x_fx, Kill_StarPower_StageFX].
+        const qb::Value* n = nullptr;
+        for (const qb::Item& it : p.items)
+            if (it.name == 0 && !n) n = &it.value;
         Particles* ps = particles(ms);
         return ps && n && ps->hasNamed(n->key);
     });

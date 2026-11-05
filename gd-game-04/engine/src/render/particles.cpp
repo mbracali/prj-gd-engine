@@ -857,8 +857,12 @@ void Particles::destroyNamed(uint32_t name) {
 }
 
 void Particles::stopEmitting(uint32_t name, double t) {
+    static const bool log = std::getenv("GD04_PARTICLES_LOG") != nullptr;
     for (System& s : systems_)
-        if (name && s.name == name) s.p.lifetime = std::max(0.0f, std::min(s.p.lifetime, float((t - s.start) / 1000.0 - s.p.delay)));
+        if (name && s.name == name) {
+            s.p.lifetime = std::max(0.0f, std::min(s.p.lifetime, float((t - s.start) / 1000.0 - s.p.delay)));
+            if (log) SDL_Log("particles: %.0f ms system %08x stops emitting", t, name);
+        }
 }
 
 uint32_t Particles::spawnCameraScript(uint32_t script) {
