@@ -437,12 +437,13 @@ bool SongScreen::frame(Canvas& canvas, Mixer& mixer, const TextureCache* texture
         const bool p1Won = o == Match::Outcome::P1Wins || (o == Match::Outcome::None && match_->winnerAtEnd() == 0);
         venue_->outro(now, !lost, versus, p1Won, m == GameMode::Boss);
     }
-    // Won with GH3's scripts on (ui/song_hooks): the song goes on under them
-    // (the venue, the highway until disable_highway) until kill_gem_scroller;
-    // alone (--song): over 2 s later, as a decided song; decided songs and
-    // practice end 2 s later, App drawing the venue meanwhile (drawOutro).
+    // Won or decided with GH3's scripts on (ui/song_hooks): the song goes on
+    // under them (the venue, the highway until disable_highway) until
+    // kill_gem_scroller; alone (--song) and practice: over 2 s later, App
+    // drawing the venue meanwhile (drawOutro).
     const bool more = (holdAfterWin_ && (won_ || decided())) || finishedAt_ < 0 || now < finishedAt_ + 2000.0;
-    const bool report = (!more || justWon) && !reported_;
+    // The numbers: at the end, at song_won, or as a held song is decided.
+    const bool report = (!more || justWon || (holdAfterWin_ && decided())) && !reported_;
     if (report) reported_ = true;
     if (report && twoPlayers_) {
         // The two players' numbers and the mode's (walks and the self-test read them).

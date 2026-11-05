@@ -965,6 +965,9 @@ void SongHooks::frame(SongScreen& s, double now) {
 void SongHooks::draw(Canvas& c, double nowMs) {
     // Not over the pause menu (its elements are drawn before these) [I: GH3's z order].
     if (!active_ || paused_) return;
+    // disable_highway: the HUD containers at alpha 0 take their bolts and
+    // sparks with them (a failed song's bolt stayed over the venue) [C script].
+    if (song_ && song_->highwayHidden()) return;
     // The big bolts: sys_Big_Bolt01, 8 frames at 15 fps, additive (the
     // material's flip-book, render/highway2d's Star Power bolts), the frame's
     // size x the element's scale (star_power_bolt_scale), just centre bottom,

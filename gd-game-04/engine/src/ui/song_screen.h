@@ -113,6 +113,7 @@ public:
     // containers and HUD at alpha 0) [C scripts play_outro, disable_bg_viewport].
     void hideHud() { hudHidden_ = true; }
     void hideHighway() { highwayHidden_ = hudHidden_ = true; }
+    bool highwayHidden() const { return highwayHidden_; }
     const PlayerStats& stats() const { return player_->stats(); }
     double songMs() const { return lastMs_; }
     Hud2D& hud() { return hud_; }
