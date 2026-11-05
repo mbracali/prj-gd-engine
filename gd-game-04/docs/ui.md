@@ -107,9 +107,32 @@ rgba, rot_angle (degrees), z_priority, just, events_blocked, plus type-specific
   (default 0 = off), padding_scale (default 1), spacing_between (default 0),
   dont_allow_wrap (wrap on by default), exclusive_device; selected index
   starts at -1 [C base menu ctor 0x823156D8]. Layout and focus: §5.
-- VScrollingMenu: a window that scrolls its VMenu child to keep the focused
-  item visible; scroll_speed, num_items_to_show, reset_window(_top/_bottom)
-  [C keys at 0x82317348; behaviour I].
+- VScrollingMenu [C ctor 0x82316E58, props 0x82317348, update 0x82317640,
+  item box 0x82317158]: a window (its dims' height, or num_items_to_show x
+  the menu's regular_space_amount) over its last VMenu child. Every update it
+  takes the focused item (the first before any focus), its box = pos.y -
+  (just.y + 1) / 2 x height (menu and item scale), and moves the window
+  (offset 0x270, starts 0) only when the box leaves it: above, offset = box
+  top; below, offset = top - (int(window / (spacing + h)) - 1) x (spacing + h)
+  (scroll_speed 10000, i.e. at once). The menu goes to (its x, -offset), its
+  just forced to [left top] (0x8221B788). On a refresh (first update, focus
+  change, a child added or gone) items wholly inside the window get alpha
+  1, the others 0 [C FUN_8221a418 from 0x82317A4C].
+  The mechanism behind the "rows one spacing too high" reports: a VMenu lays
+  its items out only on its first-update event 0x3056434f (0x8221D2A0 posts
+  it, 0x823164E0 calls the layout 0x82315FB0), and SetParent / Die re-arm
+  it; the event is handled after the scrolling menu's own update in that
+  frame. So the window first sees the first item where the script made it,
+  pos (0,0) centred: box top -h/2, and the offset stays -h/2 after the
+  layout (top 0 is inside). Every new_menu list therefore sits half its first
+  item lower than menu_pos: the pause menu's 100-high containers 50 px (the
+  five items centred in the frame), the store's texts 31.5 px and the cheats'
+  17.3 px (their scripted highlights hilite_pos / cheats_morph_hilite fall on
+  the rows), the controller / data settings / calibrate lag rows onto their
+  bars. Items made with just [.. top] (the practice pause, the setlist) or
+  away from 0 do not move. SetScreenElementLock on also posts the event once
+  (0x8221A588): the calibrate lag menu, locked right after its items, is
+  laid out once (with the same offset) and then frozen.
 - WindowElement: container that clips children to its rect. Every
   WindowElement starts with just [-1 -1] and dims = the screen (not only
   `root_window`) [C ctor 0x82315138] (the store's info text windows are
@@ -439,7 +462,7 @@ for the results. Every screen is ~7 % lighter in the port's mid tones (the
 | Choose band | 06_store_choose_band | 06_choose_band | the selected row's text under its bar | fixed: draw-list ties (§3). The Glitches row and the random ticket art are the port's / random |
 | Difficulty | 07a_quickplay_difficulty | 07a_difficulty | no highlight bar | fixed: unset z_priority ignored (§1), `white` |
 | Setlist | 07_quickplay_setlist | 07_setlist | no torn first page / tabs, light shoeprints, dark tab buttons, random lines missing | fixed: flips per props call, subtract blend, \b white, `random` branches (qscript.md); the decorations are random |
-| Cheats | 08_options_cheats, 08b, 08c | 08_cheats, 08b_cheat_entry, 08c_cheat_unlocked | rows 4-18 px off (the scrolling window, rot 1) | not done. 2026-11-05: the text path matches GH3's code (TextElement draw 0x8231A8C0: position = world pos, pivot by just; glyph draw 0x8232B5E8: top = (line height - (height - baseline) - vShift) * sy + 1.25 [C DAT_8291d970]; menu layout 0x82315FB0 and the VScrollingMenu 0x82317640 / 0x82317158 as the port's). The scripts' own highlight positions say the rows sit lower than the port puts them: cheats_morph_hilite (349, 206 + 23 k, 30 tall) centres 12.7 px below the port's row boxes (= -spacing 12 within 1 px), menu_store's hilite_pos (897, 155 + 43 k) 20.5 px (= -spacing 20); but the audio settings' knobs (spacing +105: the labels just above them as the port draws them [I]) and the 360 capture of the pause menu (spacing -65, containers: matched above) argue against a general shift, so no rule from code yet |
+| Cheats | 08_options_cheats, 08b, 08c | 08_cheats, 08b_cheat_entry, 08c_cheat_unlocked | rows 4-18 px off (the scrolling window, rot 1) | fixed 2026-11-05 (GD04-086): the VScrollingMenu's window (§2): the list sits half its first item lower, the highlights cheats_morph_hilite (349, 206 + 23 k) fall on the rows; earlier notes said the text path and menu layout match GH3's code, which still holds |
 | Select controller | 09_multiplayer_select_controller | 09_select_controller | two guitar icons vs one pad | not a bug: the walk's two players count as guitars |
 | Loading screen | 10a_loading_screen | 10a_loading | none drawn | fixed: texture-slot movies (§8); up for 1-2 frames (the port's script loads are instant, its song load stalls after) |
 | Song intro | 10b-10g | 10c_intro_title | title and HUD ~2 s early (no load time), cameras | not mine (song start, venue) |

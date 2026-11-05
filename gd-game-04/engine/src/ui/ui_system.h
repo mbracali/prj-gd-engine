@@ -46,6 +46,7 @@ struct Element {
     std::string text;
     bool hidden = false, flipH = false, flipV = false, notFocusable = false, blockEvents = false;
     bool allowExpansion = false, locked = false, preserveOrientation = false;
+    bool layoutOnce = false;  // SetScreenElementLock on: one more layout first [C 0x8221A588]
     int exclusiveDevice = -1;
     uint32_t exclusiveMask = 0;  // exclusive_device as an array of devices (bit per device; 0: none) [C script create_select_difficulty_menu]
     float fontSpacing = 0, spaceSpacing = 0, lineSpacing = 1;
@@ -62,6 +63,15 @@ struct Element {
     // Menus [C 0x82315AA0 / 0x82315B08]
     float regularSpace = 0, paddingScale = 1, spacingBetween = 0;
     bool dontWrap = false;
+    // VScrollingMenu [C ctor 0x82316E58, props 0x82317348, update 0x82317640]:
+    // its menu's offset (0x270), scroll_speed (0x274, 10000), num_items_to_show
+    // (0x278, -1), the refresh flag (0x26d); the port's record of the item
+    // and child count it last saw (GH3: the focus / first-update events).
+    float scroll = 0, scrollSpeed = 10000;
+    int numItemsToShow = -1;
+    bool scrollDirty = true, scrollRelayout = false;
+    int scrollSel = -2;
+    size_t scrollKids = 0;
     int selected = -1;
     bool focused = false;
     int controller = 0;
@@ -186,6 +196,7 @@ private:
     void focusMenu(Element* m, const qb::Struct& data);
     void moveMenu(Element* m, int dir);
     void layoutMenu(Element& m);
+    void scrollMenu(Element& s);
     Element* resolve(const qb::Value* v) const;
     bool member(qs::ScriptRun& run, uint32_t obj, uint32_t method, qb::Struct& p, bool& handled);
     void startMorph(Element& e, const qb::Struct& p);

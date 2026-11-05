@@ -265,6 +265,9 @@ void UiSystem::applyProps(Element& e, const qb::Struct& p, bool create) {
             else if (f == K("preserve_local_orientation")) e.preserveOrientation = true;
             else if (f == K("shadow")) e.shadow = true;
             else if (f == K("no_shadow") || f == K("noshadow")) e.shadow = false;
+            // A scrolling menu's window back to its menu's top [C 0x82317348].
+            else if (f == K("reset_window_top")) e.scroll = 0, e.scrollDirty = true;
+            else if (f == K("reset_window")) e.scrollDirty = true;
             continue;
         }
         if (n == K("pos")) {
@@ -323,6 +326,8 @@ void UiSystem::applyProps(Element& e, const qb::Struct& p, bool create) {
         else if (n == K("regular_space_amount")) e.regularSpace = v.number();
         else if (n == K("padding_scale")) e.paddingScale = v.number();
         else if (n == K("spacing_between")) e.spacingBetween = v.number();
+        else if (n == K("scroll_speed")) e.scrollSpeed = float(int(v.number()));  // [C 0x82317348]
+        else if (n == K("num_items_to_show")) e.numItemsToShow = int(v.number()), e.scrollDirty = true;
         else if (n == K("tags") && v.st) {
             for (const qb::Item& ti : v.st->items) qs::Vm::set(e.tags, ti.name, ti.value);
         } else if (n == K("event_handlers") && v.type == qb::Type::Array && v.arr) {
@@ -724,6 +729,84 @@ void UiSystem::layoutMenu(Element& m) {
     }
 }
 
+void UiSystem::scrollMenu(Element& s) {
+    // GH3's VScrollingMenu, every update [C 0x82317640]: its menu (the last
+    // vmenu child, 0x823174F8) is moved to (x, -scroll) so the focused item
+    // (the first one before any focus) lies in the window; it moves only when
+    // the item leaves the window. Items outside the window get alpha 0, the
+    // others 1, whenever the window is refreshed (first update, a focus
+    // change, a child added or gone) [C FUN_8221a418 from 0x82317A4C].
+    // The menu lays its items out on its own first-update event, which comes
+    // after this update [C 0x8221D2A0 posts 0x3056434f, the VMenu lays out on
+    // it in 0x823164E0]: the window first sees the first item where the
+    // script made it (pos (0,0), centred = top -h/2) and keeps that offset,
+    // so new_menu's lists sit half their first item lower than the menu's
+    // pos (the pause menu's 100-high containers 50 px, the store's / cheats'
+    // texts so their scripted highlight bars fall on them).
+    Element* m = nullptr;
+    for (auto& c : s.children)
+        if (c->type == kVMenu) m = c.get();
+    if (!m) return;
+    if (m->children.empty()) return;
+    const float itemSize = (m->regularSpace > 0.0001f && s.numItemsToShow >= 0) ? m->regularSpace : -1.0f;  // [C 0x82315918]
+    const float window = itemSize >= 0 ? float(s.numItemsToShow) * itemSize : s.h;  // [C 0x823174F8]
+    const int count = int(m->children.size());
+    const int idx = (m->selected >= 0 && m->selected < count) ? m->selected : 0;
+    if (m->children.size() != s.scrollKids) s.scrollDirty = s.scrollRelayout = true;
+    if (idx != s.scrollSel) s.scrollDirty = true;
+    s.scrollSel = idx, s.scrollKids = m->children.size();
+    // The item's top and height in the menu [C 0x82317158].
+    auto box = [&](const Element& it, int i, float& top, float& h) {
+        if (itemSize >= 0) {
+            top = float(i) * itemSize, h = itemSize;
+            return;
+        }
+        h = it.h * m->sy * it.sy;
+        top = it.y * m->sy - (it.justY + 1) / 2 * h;
+    };
+    float d16 = 0, d17 = 0;
+    if (itemSize >= 0) {
+        const int half = s.numItemsToShow / 2;
+        if (half <= idx) d16 = float((s.numItemsToShow - 1) / 2) * itemSize;
+        if (idx < count - half) d17 = float(half) * itemSize;
+    }
+    // The menu's just becomes [left top], its pos kept in place [C 0x8221B788].
+    if (m->justX != -1 || m->justY != -1) {
+        const float dx = (-1 - m->justX) * m->w * m->sx * 0.5f, dy = (-1 - m->justY) * m->h * m->sy * 0.5f;
+        const float r = m->rot * kDeg, cs = std::cos(r), sn = std::sin(r);
+        m->x += cs * dx - sn * dy, m->y += sn * dx + cs * dy;
+        m->justX = m->justY = -1;
+    }
+    float top = 0, h = 0;
+    box(*m->children[size_t(idx)], idx, top, h);
+    // A first item that cannot take the focus shows above the second [C].
+    float d13 = 0;
+    if (idx == 1 && (m->children[0]->notFocusable || m->children[0]->hidden)) d13 = h;
+    if (s.scroll + d16 <= top - d13) {
+        if (top + h > s.scroll + window - d17) {
+            s.scroll += s.scrollSpeed;
+            if (top + h < s.scroll + window) {
+                const float step = m->spacingBetween + h;
+                if (step > 0) s.scroll = top - float(int(window / step) - 1) * step + d17;
+            }
+            s.scrollDirty = true;
+        }
+    } else {
+        s.scroll -= s.scrollSpeed;
+        if (s.scroll - d13 < top) s.scroll = top - d16 - d13;
+        s.scrollDirty = true;
+    }
+    if (!s.scrollDirty) return;
+    s.scrollDirty = false;
+    m->y = -s.scroll;
+    for (int i = 0; i < count; ++i) {
+        Element& it = *m->children[size_t(i)];
+        float t = 0, ih = 0;
+        box(it, i, t, ih);
+        it.alpha = (s.scroll <= t && t + ih <= window + s.scroll) ? 1.0f : 0.0f;
+    }
+}
+
 void UiSystem::startMorph(Element& e, const qb::Struct& p) {
     Element::Morph m;
     m.active = true;
@@ -840,7 +923,17 @@ void UiSystem::draw(Canvas& c) {
         while (!stack.empty()) {
             Element* e = stack.back();
             stack.pop_back();
-            if (isMenu(*e) && !e->locked) layoutMenu(*e);
+            // A scrolling menu updates before its menu lays out (parents first) [C 0x8221D2A0].
+            if (e->type == kVScrollingMenu) scrollMenu(*e);
+            if (isMenu(*e) && (!e->locked || e->layoutOnce)) layoutMenu(*e);
+            e->layoutOnce = false;
+            // The menu's first-update event (it got a child or lost one) also
+            // refreshes its scrolling menu's window, after the menu's layout
+            // [C 0x82317CB0 on 0x3056434f]: the items' alphas by where they now are.
+            if (isMenu(*e) && e->parent && e->parent->type == kVScrollingMenu && e->parent->scrollRelayout) {
+                e->parent->scrollRelayout = false, e->parent->scrollDirty = true;
+                scrollMenu(*e->parent);
+            }
             for (auto& ch : e->children) stack.push_back(ch.get());
         }
     }
@@ -1619,12 +1712,19 @@ void UiSystem::addNatives() {
             if (r->object == e->id && !r->handler) r->finished = true;
         return true;
     });
-    // SetScreenElementLock id on|off: on suspends the menu relayout, off relayouts [C flag 0x4000].
+    // SetScreenElementLock id on|off: on posts the first-update event
+    // (0x3056434f), so the menu lays out once more, after this frame's
+    // scrolling-menu update, then suspends its relayout; off relayouts
+    // [C 0x82172258 -> 0x8221A588, flag 0x4000] (the calibrate lag menu locks
+    // its menu right after making the items: they still get laid out, the
+    // window offset by the first one, its highlights calibrate_lag_hilite_pos0..2).
     vm_.addNative("SetScreenElementLock", [this](Vm&, ScriptRun&, qb::Struct& p) {
         Element* e = resolve(Vm::param(p, K("id")));
         if (!e) return false;
-        e->locked = Vm::flag(p, K("on"));
-        if (!e->locked && isMenu(*e)) layoutMenu(*e);
+        const bool on = Vm::flag(p, K("on"));
+        if (on && !e->locked) e->layoutOnce = true;
+        e->locked = on;
+        if (!on && isMenu(*e)) layoutMenu(*e);
         return true;
     });
 }
