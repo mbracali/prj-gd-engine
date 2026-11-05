@@ -28,6 +28,8 @@ All notable changes for players. Versions follow SemVer; release tags are
 - Lou's finish and defeat scenes play with their animations and cameras.
 
 ### Fixed
+- The keyboard's Enter finishes every name entry (the high score name after a song, the band name, a new cheat), as in the other games; it still selects in the menus.
+- Every pill of the help bar takes a mouse click (SELECT, BACK, DELETE, ACCEPT, UP/DOWN...), and the pause menu takes the mouse during a song.
 - The guitarists' fret hands grip the neck from below with the fingers on the strings: GH3's own IK, decoded from the game (GD04-066).
 - Stutters and freezes: the press-start screen no longer drops to a few frames a second, character select and the end of the loading screen no longer hitch (the venue loads in the background) (GD04-072).
 - Quick play picks a new random guitarist, guitar and venue each time (GD04-071).

@@ -671,6 +671,27 @@ void UiSystem::padEvent(uint32_t event, int device) {
         if (Element* e = find(id)) launch(e, event, data);
 }
 
+bool UiSystem::startFinishesEntry(int device) const {
+    // GH3's text entries take Start on the element that has the focus: the
+    // band name (create_enter_band_name_menu: pad_start confirm_band_name),
+    // the top rockers' name (menu_top_rockers_init_band_name_creation:
+    // pad_start menu_tr_confirm_band_name) and a new cheat (cheats_zoomin_guitar:
+    // pad_start new_cheat_finished) [C scripts]. root_window's pause handler
+    // and the gamercard / null handlers are not entries [C scripts
+    // setup_pause, create_character_hub_menu].
+    static const uint32_t notEntry[] = {K("menu_show_gamercard"), K("show_gamercard"), K("menu_show_gamercard_from_netid"),
+                                        K("null_script"), K("gh3_start_pressed")};
+    for (const Element* e : focusedElements()) {
+        if (e->id == kRootWindow) continue;
+        const bool mine = e->exclusiveMask ? (device >= 0 && device < 32 && (e->exclusiveMask >> device & 1))
+                                           : (e->exclusiveDevice < 0 || e->exclusiveDevice == device);
+        if (!mine) continue;
+        for (const Element::Handler& h : e->handlers)
+            if (h.event == K("pad_start") && std::find(std::begin(notEntry), std::end(notEntry), h.script) == std::end(notEntry)) return true;
+    }
+    return false;
+}
+
 void UiSystem::layoutMenu(Element& m) {
     // [C 0x82315FB0] stack the children in creation order.
     const bool vert = m.type == kVMenu;
@@ -1216,13 +1237,38 @@ bool UiSystem::menuAt(float x, float y, bool focus, bool* isList) {
     return true;
 }
 
-std::string UiSystem::helperAt(float x, float y) const {
+std::string UiSystem::helperAt(float x, float y, std::string* button, float* midY) const {
     const Element* box = find(K("user_control_container"));
     if (!box) return {};
-    for (const auto& c : box->children) {
+    // add_user_control_helper's button glyphs, as SetText leaves them
+    // (\m0 / \m1 through meta_button_map) [C script add_user_control_helper].
+    static const char* const kButtons[][2] = {{"\\m0", "green"},  {"\\m1", "red"},      {"\\b6", "yellow"}, {"\\b7", "blue"},
+                                              {"\\b8", "orange"}, {"\\bb", "strumbar"}, {"\\ba", "start"}};
+    auto buttonOf = [&](const Element* b) -> std::string {
+        if (!b) return {};
+        for (const auto& k : kButtons)
+            if (b->text == setText(k[0])) return k[1];
+        return {};
+    };
+    const auto& kids = box->children;
+    for (size_t i = 0; i < kids.size(); ++i) {
+        const Element* c = kids[i].get();
         if (c->type != kText || c->text.empty() || c->drawnIn != drawCount_ || c->text[0] == '\\') continue;
-        // The text and its button glyph on the left [I].
-        if (x < c->bx0 - 40 || x > c->bx1 + 8 || y < c->by0 - 8 || y > c->by1 + 8) continue;
+        // Its glyph: uc_button_N for the text uc_text_N (the auto-centred
+        // pills), else the glyph made just after it (or, without a pill,
+        // just before it) [C script add_user_control_helper].
+        const Element* glyph = nullptr;
+        for (int n = 0; n < 16 && !glyph; ++n)
+            if (c->id == K(("uc_text_" + std::to_string(n)).c_str())) glyph = find(K(("uc_button_" + std::to_string(n)).c_str()));
+        if (!glyph && i + 1 < kids.size() && !kids[i + 1]->text.empty() && kids[i + 1]->text[0] == '\\') glyph = kids[i + 1].get();
+        if (!glyph && i > 0 && !kids[i - 1]->text.empty() && kids[i - 1]->text[0] == '\\') glyph = kids[i - 1].get();
+        // The pill: the text and its glyph on the left [I].
+        float x0 = c->bx0 - 40, y0 = c->by0, x1 = c->bx1, y1 = c->by1;
+        if (glyph && glyph->drawnIn == drawCount_)
+            x0 = std::min(c->bx0, glyph->bx0), y0 = std::min(y0, glyph->by0), x1 = std::max(x1, glyph->bx1), y1 = std::max(y1, glyph->by1);
+        if (x < x0 - 8 || x > x1 + 8 || y < y0 - 8 || y > y1 + 8) continue;
+        if (button) *button = buttonOf(glyph);
+        if (midY) *midY = (y0 + y1) * 0.5f;
         std::string t = c->text;
         for (char& ch : t) ch = char(std::toupper(static_cast<unsigned char>(ch)));
         return t;

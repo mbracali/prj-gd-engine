@@ -196,8 +196,11 @@ bool App::windowToMenu(float wx, float wy, float& mx, float& my) const {
 }
 
 bool App::menuMouseAllowed() const {
-    // Enhanced > Enable Mouse Selection; the menus only (a song takes no mouse).
-    return front_ && !song_ && !front_->songPlaying && enhanced_.get("mouse") != "off";
+    // Enhanced > Enable Mouse Selection; the menus, and the pause menu over a
+    // song (it takes the mouse again: guidelines/smilar_behaviors.md), not a
+    // song being played.
+    if (!front_ || enhanced_.get("mouse") == "off") return false;
+    return song_ ? front_->songPaused : !front_->songPlaying;
 }
 
 void App::menuMouse(float x, float y, int button) {
@@ -212,11 +215,25 @@ void App::menuMouse(float x, float y, int button) {
             return;
         }
     }
-    // GH3's help bar: SELECT and BACK are clickable.
-    const std::string help = front_->ui().helperAt(x, y);
+    // GH3's help bar: every pill is clickable and does what its button does
+    // (gd01-gd03's help bars, guidelines/universal_launcher.md): green
+    // (SELECT) selects, red (BACK, DELETE) goes back, Start (ACCEPT, FINISH
+    // ENTERING CHEAT) is Start, the strum bar (UP/DOWN) moves up above its
+    // middle and down below it, yellow / blue / orange are those frets.
+    std::string pill;
+    float pillMid = 0;
+    const std::string help = front_->ui().helperAt(x, y, &pill, &pillMid);
     if (!help.empty()) {
-        if (button == 1 && (help == "SELECT" || help == "BACK"))
-            menuAction(InputEvent{help == "BACK" ? Action::Back : Action::Confirm, true, SDL_GetTicksNS(), ControllerMode::Guitar, 0});
+        if (button != 1) return;
+        Action a = Action::Confirm;
+        if (pill == "red" || (pill.empty() && help == "BACK")) a = Action::Back;  // a pill without a glyph: its text
+        else if (pill == "start") a = Action::Start;
+        else if (pill == "strumbar") a = y < pillMid ? Action::Up : Action::Down;
+        else if (pill == "yellow") a = Action::Fret2;
+        else if (pill == "blue") a = Action::Fret3;
+        else if (pill == "orange") a = Action::Fret4;
+        SDL_Log("mouse: help bar %s (%s)", help.c_str(), pill.empty() ? "no button" : pill.c_str());
+        menuAction(InputEvent{a, true, SDL_GetTicksNS(), ControllerMode::Guitar, 0});
         return;
     }
     // GH3's menus: a hover focuses (not on a list, which takes clicks only),

@@ -82,7 +82,11 @@ void FrontEnd::handle(const InputEvent& e) {
     case Action::Down: ev = "pad_down"; break;
     case Action::Left: ev = "pad_left"; break;
     case Action::Right: ev = "pad_right"; break;
-    case Action::Confirm: ev = "pad_choose"; break;
+    // The keyboard's Enter (Start, bound) is select in the menus and Start on
+    // a text entry, where it finishes the name, as in gd02 / gd03 (the
+    // owner's rule: Enter is Start; GH3's menus select with pad_choose only,
+    // their pad_start shows a gamercard) [C scripts; UiSystem::startFinishesEntry].
+    case Action::Confirm: ev = e.enterKey && ui_->startFinishesEntry(e.player) ? "pad_start" : "pad_choose"; break;
     case Action::Back: ev = "pad_back"; break;
     case Action::Start: ev = "pad_start"; break;
     case Action::Fret0: ev = "pad_choose"; break;  // green [I: GH3's button mapping, docs/ui.md]

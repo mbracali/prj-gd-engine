@@ -100,6 +100,9 @@ public:
     void draw(Canvas& c);
     // A pad event (pad_choose, pad_back, pad_up ...) to every focused element.
     void padEvent(uint32_t event, int device);
+    // A focused element of `device` handles pad_start as GH3's text entries
+    // do (finish the name): the keyboard's Enter is Start there (FrontEnd::handle).
+    bool startFinishesEntry(int device) const;
     Element* find(uint32_t id) const;
     // DisplayLoadingScreen's picture is up (over everything).
     bool loadingScreenUp() const { return loadingTex_ != 0; }
@@ -144,8 +147,10 @@ public:
     // moves the selection there (a hover). Returns whether one was hit.
     bool menuAt(float x, float y, bool focus, bool* isList = nullptr);
     // The help bar's item (user_control_container) at (x, y): its text, upper
-    // case ("SELECT", "BACK"), or "".
-    std::string helperAt(float x, float y) const;
+    // case ("SELECT", "BACK"), or "". `button`: its button ("green", "red",
+    // "yellow", "blue", "orange", "strumbar", "start" or ""), `midY` the
+    // pill's middle (the strum bar: above it up, below down).
+    std::string helperAt(float x, float y, std::string* button = nullptr, float* midY = nullptr) const;
     // The drawn bounds of an element (false: not drawn in the last frame).
     bool drawnBounds(uint32_t id, float& x0, float& y0, float& x1, float& y1) const;
     uint64_t drawCount() const { return drawCount_; }

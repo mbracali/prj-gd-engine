@@ -41,11 +41,24 @@ Walk::Walk(const std::string& name) : name_(name) {
     if (name == "quickplay" || name == "lose") {
         steps_ = boot;
         steps_.push_back({"main_menu_fs", {D, D, C}, 10000});  // career, co-op career, QUICKPLAY
-        steps_.push_back({"quickplay_select_difficulty_fs", {C}, 20000});
-        steps_.push_back({"quickplay_setlist_fs", {C}, 20000});
+        // The keyboard's Enter selects in the menus (the owner's rule: Enter is Start).
+        steps_.push_back({"quickplay_select_difficulty_fs", {"key:Return"}, 20000});
+        steps_.push_back({"quickplay_setlist_fs", {"clear:topscores", C}, 20000});
         steps_.push_back({"song", {}, 30000});
         steps_.push_back({"song_over", {}, 600000});
-        steps_.push_back({name == "lose" ? "quickplay_fail_song_fs" : "quickplay_win_song_fs", {}, 30000});
+        if (name == "lose") {
+            steps_.push_back({"quickplay_fail_song_fs", {}, 30000});
+        } else {
+            // CONTINUE -> Top Rockers: the autoplayed score beats the scores
+            // (cleared: the walk's song is cut short), so GH3 asks for
+            // the name (menu_top_rockers_init_band_name_creation, score_name1
+            // focused); the keyboard's Enter is Start there: ACCEPT
+            // (menu_tr_confirm_band_name -> continue -> autosave -> setlist)
+            // instead of NEXT (pad_choose: the next letter, the screen stays) [C scripts].
+            steps_.push_back({"quickplay_win_song_fs", {C}, 30000});
+            steps_.push_back({"quickplay_toprockers_fs", {"check:focus:score_name1", "key:Return"}, 30000});
+            steps_.push_back({"quickplay_setlist_fs", {}, 30000});
+        }
     } else if (name == "career") {
         // Career: band -> difficulty -> character hub -> venue -> setlist ->
         // the first song -> won -> newspaper -> autosave -> setlist [C: the
@@ -53,8 +66,9 @@ Walk::Walk(const std::string& name) : name_(name) {
         steps_ = boot;
         steps_.push_back({"main_menu_fs", {C}, 10000});  // CAREER
         steps_.push_back({"career_choose_band_fs", {C}, 20000, true});  // not on the first play
-        // The name: three letters (NEXT) then ACCEPT (Start) [C script menu_ebn handlers].
-        steps_.push_back({"career_enter_band_name_fs", {C, C, C, Action::Start}, 20000, true});
+        // The name: three letters (NEXT) then ACCEPT (Start) [C script menu_ebn
+        // handlers], by the keyboard's Enter (Start on a text entry).
+        steps_.push_back({"career_enter_band_name_fs", {C, C, C, "key:Return"}, 20000, true});
         steps_.push_back({"career_select_difficulty_fs", {C}, 20000});
         steps_.push_back({"career_select_character_fs", {C}, 20000, true});  // first play
         // The career's first venue select plays singleplayer_01 and marks the band
@@ -134,7 +148,9 @@ Walk::Walk(const std::string& name) : name_(name) {
             steps_.push_back({"song_over", {}, 600000});
             steps_.push_back({"quickplay_win_song_fs", {}, 30000});
         } else {
-            steps_.push_back({"quickplay_pause_fs", {D, D, D, D, C}, 20000});
+            // The help bar's pills take the mouse over the song too: UP/DOWN's
+            // lower half (down) and SELECT pick QUIT.
+            steps_.push_back({"quickplay_pause_fs", {D, D, D, "click:helplow:UP/DOWN", "click:help:SELECT"}, 20000});
             steps_.push_back({"quickplay_quit_warning_fs", {D, C}, 20000});         // QUIT (not CANCEL)
             // NEW SONG: kill_gem_scroller. The menu comes 3 s after the state
             // (the quit's spawned_func waits first) [C script].
@@ -177,7 +193,7 @@ Walk::Walk(const std::string& name) : name_(name) {
             chords.push_back(D);  // strum
             chords.push_back(Op("frets:0"));
         }
-        chords.push_back(Action::Start);
+        chords.push_back(Op("key:Return"));  // FINISH ENTERING CHEAT: the keyboard's Enter is Start on the entry
         steps_.push_back({"options_enter_new_cheat_fs", chords, 20000});
         steps_.push_back({"options_cheats_fs", {"check:text:Cheat_PerformanceMode_Text!=locked"}, 20000});
     } else if (name == "glitches") {
@@ -618,11 +634,13 @@ bool Walk::act(const std::string& what, FrontEnd& fe, WalkHost& host) {
             float x0, y0, x1, y1;
             found = fe.ui().drawnBounds(qbkey::key(target.substr(5).c_str()), x0, y0, x1, y1);
             x = (x0 + x1) * 0.5f, y = (y0 + y1) * 0.5f;
-        } else if (target.rfind("help:", 0) == 0) {
+        } else if (target.rfind("help:", 0) == 0 || target.rfind("helplow:", 0) == 0) {
+            // A help bar pill's text; helplow: its bottom edge (the strum bar's down half).
+            const bool low = target[4] == 'l';
             if (const ui::Element* box = fe.ui().find(qbkey::key("user_control_container")))
                 for (const auto& c : box->children)
-                    if (c->text == target.substr(5) && c->drawnIn == fe.ui().drawCount())
-                        x = (c->bx0 + c->bx1) * 0.5f, y = (c->by0 + c->by1) * 0.5f, found = true;
+                    if (c->text == target.substr(low ? 8 : 5) && c->drawnIn == fe.ui().drawCount())
+                        x = (c->bx0 + c->bx1) * 0.5f, y = low ? c->by1 + 4 : (c->by0 + c->by1) * 0.5f, found = true;
         } else if (target == "item" && host.walkPorts()) {
             float x0, y0, x1, y1;
             found = host.walkPorts()->itemRect(flowState(fe), x0, y0, x1, y1);
@@ -713,6 +731,14 @@ bool Walk::act(const std::string& what, FrontEnd& fe, WalkHost& host) {
         for (auto& [k, st] : fe.vm().globalTags)
             if (qs::Vm::param(st, qbkey::key("unlocked"))) qs::Vm::set(st, qbkey::key("unlocked"), qs::Vm::makeInt(1)), ++n;
         std::printf("  unlocked: %d tags\n", n);
+        return true;
+    }
+    if (what == "clear:topscores") {  // every song's Top Rockers scores 0 (the walk's short song then makes the list)
+        int n = 0;
+        for (auto& [k, st] : fe.vm().globalTags)
+            for (const char* f : {"score1", "score2", "score3", "score4", "score5"})
+                if (qs::Vm::param(st, qbkey::key(f))) qs::Vm::set(st, qbkey::key(f), qs::Vm::makeInt(0)), ++n;
+        std::printf("  top scores cleared: %d\n", n);
         return true;
     }
     if (starts("check:focus:")) {  // check:focus:<id>: that element is the one focused (no other item focused)

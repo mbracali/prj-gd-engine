@@ -195,6 +195,30 @@ Delivery: a pad event goes to every element that currently has focus (a menu
 and its selected child are both focused), filtered by exclusive_device; an
 element with block_events ignores events [I; device check C 0x821F5040].
 
+The port's keyboard and mouse (gd02 / gd03's policy, the owner's "Enter is
+Start"): Enter is bound to Start; in the menus (and the pause menu over a
+song) the keyboard's Start is select (pad_choose), except on a text entry,
+where it is pad_start and finishes the entry. A text entry is a focused
+element (not root_window) whose pad_start runs something other than the
+gamercard or null_script: the band name (create_enter_band_name_menu:
+confirm_band_name), the Top Rockers name (menu_top_rockers_init_band_name_creation:
+menu_tr_confirm_band_name) and a new cheat (cheats_zoomin_guitar:
+new_cheat_finished) [C scripts]. GH3's menus select with pad_choose only
+(their pad_start shows a gamercard, 51 handlers), so a plain pad_start would
+leave Enter dead there. Esc / Backspace are Back (pad_back: the entries'
+DELETE); in a song Esc pauses, Enter (Start) pauses too. Walks: quickplay
+(Enter on the difficulty, then Enter accepts the Top Rockers name), career
+(Enter accepts the band name), cheats (Enter finishes the cheat), pause.
+
+The help bar (add_user_control_helper's pills, user_control_container): every
+pill takes a click and does what its button does, found from its glyph
+(uc_button_N beside uc_text_N, or the glyph made next to the text): green
+pad_choose, red pad_back, Start pad_start (ACCEPT, FINISH ENTERING CHEAT),
+the strum bar up above the pill's middle and down below it, yellow / blue /
+orange those frets. The pause menu takes the mouse again (hover, click, the
+pills) while the song is paused. Walk pausequit clicks UP/DOWN's lower half
+and SELECT (QUIT); walk mouse clicks BACK.
+
 VMenu/HMenu event handling [C 0x823164E0]:
 - new_menu focuses its VMenu before the items exist: the first focusable
   item added takes the focus at the menu's next update or event, once the
@@ -364,11 +388,11 @@ for the results. Every screen is ~7 % lighter in the port's mid tones (the
 | Press any button | 01_press_any_button | 01_press_any_button | the text block on one line | fixed: text block wrap (§6) |
 | Controller instructions | 02_controller_instructions | 02_controller_instructions | texts 2 px a glyph narrow; the caption box black | fixed: bearing / tracking (§6); the 4x4 `white` decoded black (formats.md "Tiling") |
 | Main menu | 03_main_menu | 03_main_menu | no cream highlight, CAREER not red, no shadows, no button glyphs | fixed: `white`, handler `id`, shadows, \m / \b glyphs; the eyes' glow phase is random (glow_menu_element); the GAMEPADS pill is the port's |
-| Options | 04_options | 04_options | AUDIO unreadable (focus colour) | fixed: handler object, GetTags `id` (§5). The "V2" bottom left is in no script (a C-side label): not done. ENHANCED is the port's |
+| Options | 04_options | 04_options | AUDIO unreadable (focus colour) | fixed: handler object, GetTags `id` (§5). The "V2" bottom left is in no script (a C-side label): not done (2026-11-05: no "V2" string in the XEX, ASCII or UTF-16, nor in qb.pak's scripts / data, nor in options_main_poster, Venue_BG, Venue_Overlay). ENHANCED is the port's |
 | Choose band | 06_store_choose_band | 06_choose_band | the selected row's text under its bar | fixed: draw-list ties (§3). The Glitches row and the random ticket art are the port's / random |
 | Difficulty | 07a_quickplay_difficulty | 07a_difficulty | no highlight bar | fixed: unset z_priority ignored (§1), `white` |
 | Setlist | 07_quickplay_setlist | 07_setlist | no torn first page / tabs, light shoeprints, dark tab buttons, random lines missing | fixed: flips per props call, subtract blend, \b white, `random` branches (qscript.md); the decorations are random |
-| Cheats | 08_options_cheats, 08b, 08c | 08_cheats, 08b_cheat_entry, 08c_cheat_unlocked | rows 4-18 px off (the scrolling window, rot 1) | not done (small; VScrollingMenu 0x82317640 read, not matched) |
+| Cheats | 08_options_cheats, 08b, 08c | 08_cheats, 08b_cheat_entry, 08c_cheat_unlocked | rows 4-18 px off (the scrolling window, rot 1) | not done. 2026-11-05: the text path matches GH3's code (TextElement draw 0x8231A8C0: position = world pos, pivot by just; glyph draw 0x8232B5E8: top = (line height - (height - baseline) - vShift) * sy + 1.25 [C DAT_8291d970]; menu layout 0x82315FB0 and the VScrollingMenu 0x82317640 / 0x82317158 as the port's). The scripts' own highlight positions say the rows sit lower than the port puts them: cheats_morph_hilite (349, 206 + 23 k, 30 tall) centres 12.7 px below the port's row boxes (= -spacing 12 within 1 px), menu_store's hilite_pos (897, 155 + 43 k) 20.5 px (= -spacing 20); but the audio settings' knobs (spacing +105: the labels just above them as the port draws them [I]) and the 360 capture of the pause menu (spacing -65, containers: matched above) argue against a general shift, so no rule from code yet |
 | Select controller | 09_multiplayer_select_controller | 09_select_controller | two guitar icons vs one pad | not a bug: the walk's two players count as guitars |
 | Loading screen | 10a_loading_screen | 10a_loading | none drawn | fixed: texture-slot movies (§8); up for 1-2 frames (the port's script loads are instant, its song load stalls after) |
 | Song intro | 10b-10g | 10c_intro_title | title and HUD ~2 s early (no load time), cameras | not mine (song start, venue) |
