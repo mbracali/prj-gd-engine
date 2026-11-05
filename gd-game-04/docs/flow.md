@@ -93,6 +93,13 @@ by the port over everything meanwhile (docs/ui.md §8; refcaps 00a matches).
   letterbox 0, mark_safe_for_shutdown (-> UnPauseSpawnedScript) [C].
   Stub path: IsMoviePlaying false makes every movie a no-op [I].
   Movies are `movies\bik\<name>.bik.xen` (the engine's `--playmovie` decodes them) [I].
+  The port: PlayMovie is the app's modal player, except with `noblack`
+  (create_main_menu's GH3_Intro): that one plays on texture slot 0 at
+  texturepri 1000 with its alpha (yuva420p; its first frame and last five are
+  transparent) over the main menu built before it, the scripts going on (two
+  frames in, fadetoblack OFF), IsMoviePlaying true until its end (ui/ui_movies.cpp).
+  Played modally and opaque its transparent frames had been ~25 black frames
+  between the card flip and the menu.
 
 ## 3. bootup_press_any_button_fs  (menu_press_any_button.qb)
 
@@ -267,7 +274,7 @@ runs first), `func = quickplay_start_song`, flow_state **quickplay_play_song_fs*
 ## 11. Loading + start (quickplay_start_song -> start_song)
 
 - `create_loading_screen {mode=play_song}` [C]: kill_start_key_binding;
-  is_changing_levels = 1; random tip; movie 'loading_flying': `IsMovieInBuffer`,
+  returns at once when is_changing_levels = 1, else sets it; random tip; movie 'loading_flying': `IsMovieInBuffer`,
   FreeMovieBuffer, AllocateMovieBuffer {buffer_slot=0 movie='movies\bik\loading_flying.bik.xen'},
   LoadMovieIntoBuffer, `PlayMovieFromBuffer {buffer_slot textureslot=2 no_hold
   wait_until_rendered texturepri=4999}`; TextBlockElement tip; "LOADING" letters
@@ -280,6 +287,12 @@ runs first), `func = quickplay_start_song`, flow_state **quickplay_play_song_fs*
   VenuePreload) while the loading screen animates, and the script waits
   until the song has started before going on, as GH3's start_gem_scroller
   returns after its async loads; destroy_loading_screen comes with the song.
+  destroy_loading_screen leaves is_changing_levels at 1 while playing_song =
+  1; every start transition's Transition_StartRendering (Common_*_Transition,
+  time 100) sets it back to 0 (and enable_pause). The port runs the
+  transitions natively, so SongHooks spawns Transition_StartRendering 100 ms
+  into the song; without it every song after the first had no loading screen
+  and handle_start_pressed refused the pause menu [C scripts].
   Paks, the animation library and loaded characters are shared caches. The
   360 shows LOADING for about 2 s (refcaps 10a at 1.0 s, 10b fly-by at 2.9 s);
   the port holds it 2 s at least (GD04-040).
