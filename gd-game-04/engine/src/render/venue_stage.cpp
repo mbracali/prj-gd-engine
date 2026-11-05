@@ -308,12 +308,26 @@ void VenueStage::update(double ms, float health, bool starPower) {
     }
 }
 
+void VenueStage::starPowerAnim(int p, double) {
+    if (p >= 0 && p < 2 && band_) spAnimCuts_[size_t(p)] = cameras_.cuts();
+}
+
 void VenueStage::advance(double ms) {
     if (!venue_) return;
     if (band_) band_->advance(ms);
     if (crowd_) crowd_->advance(ms);
     if (particles_) particles_->advance(ms);
     cameras_.update(ms, perf_);
+    // handle_star_power: at the next camera cut (CameraCuts_StartCallback),
+    // the Starpower anim once, cut in, the arms on; then Stance_A's idle
+    // [C scripts handle_star_power, play_special_anim; I: player 1's band
+    // member the guitarist, player 2's the bassist].
+    for (int p = 0; p < 2; ++p)
+        if (spAnimCuts_[size_t(p)] >= 0 && cameras_.cuts() != spAnimCuts_[size_t(p)] && band_) {
+            spAnimCuts_[size_t(p)] = -1;
+            band_->playSpecial(p == 0 ? band::Role::Guitarist : band::Role::Bassist, qbkey::key("Stance_A"), qbkey::key("Starpower"), ms,
+                               0.0f, 0);
+        }
     lights_.update(ms, perf_);
 }
 

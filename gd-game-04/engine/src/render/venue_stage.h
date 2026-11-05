@@ -2,6 +2,7 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #pragma once
 
+#include <array>
 #include <memory>
 #include <string>
 #include <vector>
@@ -94,6 +95,12 @@ public:
     void setIntroCameras(const std::string& prefix) { cameras_.setIntroCameras(prefix); }
     // The end transition's cameras from `ms` (cameras_preencore / _preboss).
     void outroCameras(double ms, const std::string& prefix) { cameras_.outro(ms, prefix); }
+    // Star Power on for player `p` (0 / 1): handle_star_power on its band
+    // member (the guitarist / the bassist) waits for the next camera cut,
+    // then play_special_anim {Stance_A, Starpower, blendduration 0.0,
+    // disable_arms 0} [C scripts guitarist_idle, handle_star_power,
+    // CameraCuts_StartCallback's waiting_for_cameracut].
+    void starPowerAnim(int p, double ms);
     // A band member's Obj_SwitchScript Transition_PlayAnim_Spawned (role 0 guitarist, 1 bassist).
     void playClip(int role, uint32_t clip, uint32_t stance, bool cycle, double ms);
     const venue::LightShow& lights() const { return lights_; }
@@ -133,6 +140,7 @@ private:
     gfx::TargetId ldr_;
     int ldrW_ = 0, ldrH_ = 0;
     bool starPowerOn_ = false;
+    std::array<int, 2> spAnimCuts_{-1, -1};  // handle_star_power waiting: the cut count it waits past (-1: none)
     venue::CamPose fixedCam_;
     bool hasFixedCam_ = false;
     float starBlur_ = 0;

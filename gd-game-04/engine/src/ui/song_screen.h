@@ -179,6 +179,7 @@ private:
     const TextureCache* textures_ = nullptr;
     std::array<uint8_t, 2> shownHeld_{};
     std::array<double, 2> lastHammer_{-1e9, -1e9};  // Match::BattleSide::highwayPushAt last seen
+    std::array<bool, 2> spSeen_{};  // Star Power on at the last step (handle_star_power's edge)
     double stepMs_ = 0;      // the judge's own clock (60 Hz steps)
     double lastMs_ = -1e9;
     // The live input between steps, per player.

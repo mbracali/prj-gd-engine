@@ -124,7 +124,7 @@ public:
     // play_special_anim {stance anim}: the stance at once (no transition),
     // its `anim` looping, the arms off (guitarist, bassist) [C script].
     // `blend`: blendduration (play_win_anims / play_lose_anims: 0) [C scripts].
-    void playSpecial(uint32_t stance, uint32_t anim, double ms, float blend = 0.2f);
+    void playSpecial(uint32_t stance, uint32_t anim, double ms, float blend = 0.2f, int disableArms = 2);
     void playClip(uint32_t clip, uint32_t stance, bool cycle, double ms);
     // play_outro: Strum / FretPos / FretFingers / Drum / Drum_cymbal /
     // event_iterator killed: no song event from `ms` on [C script].

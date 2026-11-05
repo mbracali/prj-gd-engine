@@ -702,13 +702,13 @@ void Animator::playAnimEvent(const qb::Struct& p, double t) {
 // for the guitarist / bassist), the random loop killed, `stance` set, the
 // tempo anim `anim` now (hero_play_tempo_anim_cfunc) and again when it ends
 // [C script; I: the loop is the body loop with cycle].
-void Animator::playSpecial(uint32_t stance, uint32_t anim, double t, float blend) {
+void Animator::playSpecial(uint32_t stance, uint32_t anim, double t, float blend, int disableArms) {
     scriptedClip_ = 0;
     stance_ = nextStance_ = stance;
     currentAnim_ = anim ? anim : K("idle");
     nextAnim_ = 0;
     cycle_ = true, repeat_ = 1;
-    if (guitarLike()) disableArms_ = nextDisableArms_ = 2;
+    if (guitarLike()) disableArms_ = nextDisableArms_ = disableArms;  // play_special_anim disable_arms (default 2)
     // The clip once, blended in over blendduration; when it ends (hero_wait_
     // until_anim_finished) stance Stance_A and guitarist_idle / bandmember_idle
     // [C script play_special_anim; I: the arms back over 0.25 s from the end,

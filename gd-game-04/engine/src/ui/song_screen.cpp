@@ -335,6 +335,13 @@ void SongScreen::tick(double nowMs, Mixer& mixer) {
         match_->frame(stepMs_, kStepMs, in);
         for (int p = 0; p < match_->players(); ++p) shownHeld_[size_t(p)] = match_->shownInput(p).frets;
         if (venue_) venue_->update(stepMs_, player_->stats().health, match_->players() == 1 && player_->stats().starPowerActive);
+        // star_power_on<p>: the player's band member's guitarist_idle handler
+        // (handle_star_power) [C scripts guitarist_idle, handle_star_power].
+        for (int p = 0; p < match_->players() && p < 2; ++p) {
+            const bool on = match_->player(p).stats().starPowerActive;
+            if (venue_ && on && !spSeen_[size_t(p)]) venue_->starPowerAnim(p, stepMs_);
+            spSeen_[size_t(p)] = on;
+        }
         if (twoPlayers_) hud2p_.update(*match_, stepMs_);
         else hud_.update(player_->stats(), stepMs_);
         const GameMode mode = match_->mode();
