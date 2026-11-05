@@ -229,6 +229,22 @@ Walk::Walk(const std::string& name) : name_(name) {
         steps_.push_back({"career_select_venue_fs", {"check:tag:venue_z_hell.unlocked=1", "check:focus:venue_3", "key:Up", "wait", "check:focus:venue_4", B}, 20000});
         steps_.push_back({"career_character_hub_fs", {}, 20000});
 
+    } else if (name == "setlist_tabs") {
+        // GD04-090: quick play's set list tabs: blue BONUS (the bonus songs),
+        // orange DOWNLOADS (none on the disc), yellow SETLIST [C data
+        // setlist_event_handlers, change_tab].
+        steps_ = boot;
+        steps_.push_back({"main_menu_fs", {D, D, C}, 10000});
+        steps_.push_back({"quickplay_select_difficulty_fs", {C}, 20000});
+        steps_.push_back({"quickplay_setlist_fs",
+                          {"wait", "check:global:current_tab=tab_setlist", Action::Fret3, "wait", "wait", "check:global:current_tab=tab_bonus",
+                           "check:text:sl_text_1!=", "log:focus", Action::Down, "log:focus", Action::Fret4, "wait", "wait",
+                           "check:global:current_tab=tab_downloads", Action::Fret2, "wait", "wait", "check:global:current_tab=tab_setlist",
+                           // A bonus song bought (its save tag unlocked): listed and played.
+                           "set:tag:avalancha.unlocked=1", Action::Fret3, "wait", "wait", C},
+                          20000});
+        steps_.push_back({"song", {"check:global:current_tab=tab_bonus", "check:global:current_song=avalancha"}, 30000});
+
     } else if (name == "cutcontent") {
         // GD04-094: Enhanced > Enable Cut Content on, The Glitches (every
         // character unlocked) -> CHANGE CHARACTER -> down past the last
@@ -867,6 +883,13 @@ bool Walk::act(const std::string& what, FrontEnd& fe, WalkHost& host) {
         const int got = v ? int(v->type == qb::Type::Float ? v->f[0] : float(v->i)) : -999;
         std::printf("  tags: %s.%s = %d\n", tag.c_str(), field.c_str(), got);
         return got == want ? true : fail("tag " + kv + " is " + std::to_string(got));
+    }
+    if (starts("set:tag:")) {  // set:tag:<tag>.<field>=<int>: a save tag's field set (a test's shortcut)
+        const std::string kv = rest("set:tag:");
+        const size_t dot = kv.find('.'), eq = kv.find('=');
+        qs::Vm::set(fe.vm().globalTags[qbkey::key(kv.substr(0, dot).c_str())], qbkey::key(kv.substr(dot + 1, eq - dot - 1).c_str()),
+                    qs::Vm::makeInt(std::atoi(kv.c_str() + eq + 1)));
+        return true;
     }
     if (starts("set:enhanced:")) {  // set:enhanced:<key>=<value>: an Enhanced option set
         const std::string kv = rest("set:enhanced:");

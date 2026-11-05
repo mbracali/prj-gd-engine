@@ -93,6 +93,15 @@ void FrontEnd::handle(const InputEvent& e) {
     case Action::Start: ev = "pad_start"; break;
     case Action::Fret0: ev = "pad_choose"; break;  // green [I: GH3's button mapping, docs/ui.md]
     case Action::Fret1: ev = "pad_back"; break;    // red
+    // Yellow / blue / orange: the 360 guitar's Y / X / LB, which xenon_pad
+    // makes pad_option2 / pad_option / pad_l1 (the set list's SETLIST /
+    // BONUS / DOWNLOADS tabs: setlist_event_handlers, setlist_show_helperbar's
+    // \b6 \b7 \b8) [C data menubuttonremap.qb; I: only these three of the
+    // events each button raises (pad_square, pad_space, ... have no menu
+    // handler outside debug and online menus)]. GD04-090.
+    case Action::Fret2: ev = "pad_option2"; break;
+    case Action::Fret3: ev = "pad_option"; break;
+    case Action::Fret4: ev = "pad_l1"; break;
     default: break;
     }
     if (ev) ui_->padEvent(qbkey::key(ev), e.player);

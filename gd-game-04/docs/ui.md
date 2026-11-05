@@ -212,7 +212,10 @@ pad_select, X->pad_square/option/backspace, Y->pad_option2/space/expand,
 LB->pad_l1, RB->pad_r1, LT->pad_l2, RT->pad_r2, LS/RS click->pad_l3/r3,
 d-pad->pad_up/down/left/right (xenon_guitar_flip swaps up/down for lefty),
 Start->pad_start. Guitar: green=A, red=B, yellow=Y, blue=X, orange=LB, strum =
-d-pad up/down. SetMenuAutoRepeatTimes (0.3, 0.05) = held-direction repeat
+d-pad up/down. The port sends yellow / blue / orange as pad_option2 /
+pad_option / pad_l1 only (the set list's SETLIST / BONUS / DOWNLOADS tabs,
+setlist_event_handlers -> change_tab; the other events those buttons raise
+have handlers only in debug and online menus); walk setlist_tabs (GD04-090). SetMenuAutoRepeatTimes (0.3, 0.05) = held-direction repeat
 delay/interval in s [I].
 Delivery: a pad event goes to every element that currently has focus (a menu
 and its selected child are both focused), filtered by exclusive_device; an
