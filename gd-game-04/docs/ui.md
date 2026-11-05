@@ -272,6 +272,12 @@ regular_space_amount); menu width = widest child (unless dims set), height =
 sum. Each child gets just = [internal_just.x, 0] and pos =
 ((ij.x+1)/2*menu_w, cursor + h/2); block start = (menu_h-total)*(ij.y+1)/2.
 HMenu: same on the other axis. Relayout when children change;
+a VMenu's width is only set by that first-update event (made, a child added
+or gone, the lock), not when a child's text changes later: the store's
+character name (one text in cs_vmenu at menu_pos (845, 85)) is laid out with
+Slash's name and every later name stays centred there, on the frame's centre
+(GD04-099; the port had re-measured each frame, so long names started at 845
+and ran off the frame);
 SetScreenElementLock id ON suspends relayout, OFF re-enables and relayouts
 (scripts do ON;OFF then GetScreenElementDims) [C flag 0x4000 0x8221A588; I].
 new_menu defaults: VScrollingMenu dims (400,480) at menu_pos, VMenu inside

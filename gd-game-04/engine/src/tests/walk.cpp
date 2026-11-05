@@ -5,6 +5,7 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -451,6 +452,8 @@ Walk::Walk(const std::string& name) : name_(name) {
             go.push_back(C);
             steps_.push_back({"store_fs", go, 20000});
             if (downs == 0) steps_.push_back({state, {C, Op(Action::Up, 300), Op(Action::Up, 300), B, B}, 20000});
+            // The characters' names stay centred on the frame (x 900) from one to the next (GD04-099).
+            else if (downs == 3) steps_.push_back({state, {"wait", "check:centrex:character_name_text=900", D, "wait", "wait", "wait", "check:centrex:character_name_text=900", B}, 20000});
             else steps_.push_back({state, {B}, 20000});
         }
         steps_.push_back({"store_fs", {}, 20000});
@@ -927,6 +930,15 @@ bool Walk::act(const std::string& what, FrontEnd& fe, WalkHost& host) {
         qs::Vm::set(fe.vm().globalTags[qbkey::key(kv.substr(0, dot).c_str())], qbkey::key(kv.substr(dot + 1, eq - dot - 1).c_str()),
                     qs::Vm::makeInt(std::atoi(kv.c_str() + eq + 1)));
         return true;
+    }
+    if (starts("check:centrex:")) {  // check:centrex:<id>=<x>: the element's drawn centre is at x (1280-wide, +-12 px)
+        const std::string kv = rest("check:centrex:");
+        const size_t eq = kv.find('=');
+        float x0, y0, x1, y1;
+        if (!fe.ui().drawnBounds(qbkey::key(kv.substr(0, eq).c_str()), x0, y0, x1, y1)) return fail(kv.substr(0, eq) + " is not drawn");
+        const float cx = (x0 + x1) * 0.5f, want = float(std::atof(kv.c_str() + eq + 1));
+        std::printf("  centre: %s x = %.1f\n", kv.substr(0, eq).c_str(), double(cx));
+        return std::fabs(cx - want) <= 12.0f ? true : fail(kv.substr(0, eq) + " is centred at x " + std::to_string(int(cx)));
     }
     if (what == "save:write") {  // the save written now, as GH3's SaveToMemoryCard writes it
         qs::ScriptRun run;

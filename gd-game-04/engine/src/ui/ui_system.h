@@ -47,6 +47,11 @@ struct Element {
     bool hidden = false, flipH = false, flipV = false, notFocusable = false, blockEvents = false;
     bool allowExpansion = false, locked = false, preserveOrientation = false;
     bool layoutOnce = false;  // SetScreenElementLock on: one more layout first [C 0x8221A588]
+    // A VMenu's width is set by its first-update event only (made, a child
+    // added or gone, SetScreenElementLock), not when a child's text changes
+    // later: the children it was set with (count, last one) (GD04-099).
+    size_t widthKids = size_t(-1);
+    const Element* widthLast = nullptr;
     int exclusiveDevice = -1;
     uint32_t exclusiveMask = 0;  // exclusive_device as an array of devices (bit per device; 0: none) [C script create_select_difficulty_menu]
     float fontSpacing = 0, spaceSpacing = 0, lineSpacing = 1;

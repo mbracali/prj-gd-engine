@@ -722,8 +722,21 @@ void UiSystem::layoutMenu(Element& m) {
     }
     for (size_t i = 0; i < sizes.size(); ++i) total += sizes[i] + (i ? m.spacingBetween : 0);
     if (!m.dimsGiven) {
-        if (vert) m.w = widest, m.h = total;
-        else m.w = total, m.h = widest;
+        if (vert) {
+            // GH3 lays a menu out on its first-update event only [C 0x823164E0
+            // on 0x3056434f; 0x8221D2A0 posts it, SetParent / Die re-arm it]:
+            // a child's later text (the store's character name, set by
+            // store_show_character after the first one, Slash) keeps the
+            // width, so a centred item stays centred where the first
+            // layout put it (menu_pos (845, 85) + Slash / 2 = the frame's
+            // centre) instead of moving with each name's width (GD04-099).
+            const Element* last = m.children.empty() ? nullptr : m.children.back().get();
+            if (m.layoutOnce || m.children.size() != m.widthKids || last != m.widthLast)
+                m.w = widest, m.widthKids = m.children.size(), m.widthLast = last;
+            m.h = total;
+        } else {
+            m.w = total, m.h = widest;
+        }
     }
     float cursor = vert ? (m.h - total) * (m.ijustY + 1) / 2 : (m.w - total) * (m.ijustX + 1) / 2;
     for (size_t i = 0; i < m.children.size(); ++i) {
@@ -1741,7 +1754,7 @@ void UiSystem::addNatives() {
         const bool on = Vm::flag(p, K("on"));
         if (on && !e->locked) e->layoutOnce = true;
         e->locked = on;
-        if (!on && isMenu(*e)) layoutMenu(*e);
+        if (!on && isMenu(*e)) e->widthKids = size_t(-1), layoutMenu(*e);
         return true;
     });
 }

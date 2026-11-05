@@ -34,6 +34,7 @@ All notable changes for players. Versions follow SemVer; release tags are
 
 ### Fixed
 - Another band no longer gets The Glitches' bonus-song store state when its career is loaded after theirs; saves from the first Glitches build (which bought the whole Vault save-wide) can be cleaned with `tools/save_wipe_bands.py` (GD04-096).
+- The store's character names sit centred on the frame instead of running off its right edge: a menu keeps the width of its first layout, as GH3 (GD04-099).
 - Light beams no longer draw over the band; the stage-floor light pools no longer flicker; the beams' smoke texture loads (beams were solid white) (GD04-085).
 - Depth of field and bloom cover the same part of the screen at any resolution, as at 720p on the 360 (GD04-085).
 - Menus sit where GH3 puts them: the pause menu centred in its frame, Store, Cheats, Calibrate Lag and the options lists on their highlights (GD04-086).
