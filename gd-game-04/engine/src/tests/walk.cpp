@@ -59,8 +59,10 @@ Walk::Walk(const std::string& name) : name_(name) {
             // (menu_tr_confirm_band_name -> continue -> autosave -> setlist)
             // instead of NEXT (pad_choose: the next letter, the screen stays) [C scripts].
             steps_.push_back({"quickplay_win_song_fs", {C}, 30000});
-            steps_.push_back({"quickplay_toprockers_fs", {"check:focus:score_name1", "key:Return"}, 30000});
-            steps_.push_back({"quickplay_setlist_fs", {}, 30000});
+            // The autosave's overwrite shows its SAVING... popup: no black
+            // frame from here to the setlist (GD04-093).
+            steps_.push_back({"quickplay_toprockers_fs", {"check:focus:score_name1", "probe:black", "key:Return"}, 30000});
+            steps_.push_back({"quickplay_setlist_fs", {Op("check:no_black", 1000)}, 30000});
         }
     } else if (name == "results_art") {
         // A quick play song as GD04_WALK_CHARACTER ("<name>[,<outfit>,<style>]",

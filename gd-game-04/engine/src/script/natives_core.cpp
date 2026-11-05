@@ -123,9 +123,19 @@ void addCoreNatives(Vm& vm) {
         return true;
     });
     // GetPlatform: platform = Xenon (the version this port follows).
+    // Except in create_overwrite_menu, whose Xenon case is empty [C script
+    // menu_memcard_messages.qb: case PS3 'OVERWRITING...', case Xenon nothing,
+    // default 'SAVING...' "Saving Content. Please don't turn off your
+    // console." (Xenon's create_save_menu text)]: every autosave after the
+    // first overwrites, and memcard_save_file's 3 s (memcard_wait_for_timer)
+    // showed no screen at all, black after each song (GD04-093). There the
+    // other platforms' default case answers (GH3 PC's) [I].
     vm.addNative("GetPlatform", [](Vm&, ScriptRun& run, qb::Struct&) {
-        if (!run.frames.empty() && run.frames.back().locals)
-            Vm::set(*run.frames.back().locals, K("platform"), Vm::makeKey(K("Xenon")));
+        if (!run.frames.empty() && run.frames.back().locals) {
+            const Frame& f = run.frames.back();
+            const bool overwrite = f.code && f.code->name == K("create_overwrite_menu");
+            Vm::set(*f.locals, K("platform"), Vm::makeKey(overwrite ? K("PC") : K("Xenon")));
+        }
         return true;
     });
     vm.addNative("IsXenon", [](Vm&, ScriptRun&, qb::Struct&) { return true; });

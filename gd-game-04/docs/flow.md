@@ -486,6 +486,11 @@ interface the scripts expect from it. Fail: health <= 0 is decided in C
   memcard_validate_card_data validateprev=1 (MC_HasActiveFolder ...); found ->
   memcard_save_file OverwriteConfirmed=1) -> `memcard_sequence_save_success`
   or `_failed` -> **quickplay_setlist_fs** [C].
+  The overwrite's create_overwrite_menu has an empty Xenon case (PS3:
+  OVERWRITING..., default: SAVING... "Saving Content...") [C], so memcard_save_file's
+  3 s timer showed no screen (black after each song); the port answers GetPlatform
+  there with the default case's platform (GD04-093, natives_core.cpp) [I]; the
+  quickplay walk checks no black frame from Top Rockers to the setlist.
 
 ## 13. Fail path
 
