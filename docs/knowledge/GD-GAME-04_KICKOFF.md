@@ -4,7 +4,7 @@
 > night.** Read this whole file before your first command. It holds the
 > owner's rules, the plan, the gates and the mistakes made on earlier games,
 > so you can do this almost in one shot. When it conflicts with a tool
-> default, this file wins. When it conflicts with `guidelines/`, the
+> default, this file wins. When it conflicts with `docs/knowledge/`, the
 > guidelines win.
 
 ## 1. The target
@@ -124,12 +124,12 @@ truly blocked on all of them.
 
 ## 3. Ground rules (non-negotiable, from the owner)
 
-Read every file in `guidelines/` at the repository root first:
+Read every file in `docs/knowledge/` first:
 - `general_guidelines.md`
 - `universal_launcher.md`
 - `smilar_behaviors.md`
 
-Then read the root `README.md`, `docs/adding-a-game.md`, `gd-backlog.md`, and
+Then read the root `README.md`, `docs/adding-a-game.md`, `docs/tasks/gd-backlog.md`, and
 `gd-game-02/docs/reuse_and_lessons.md` (lessons L1-L21, all of them).
 
 - **Workspace isolation.** Another session may be working on the other new
@@ -144,7 +144,7 @@ Then read the root `README.md`, `docs/adding-a-game.md`, `gd-backlog.md`, and
   - Put your rip in this worktree's `gd-game-04/extracted/` and your Ghidra
     project in `gd-game-04/ghidra/` (both git-ignored).
   - Outside `gd-game-04/`, only touch, minimally:
-    - your game's section of `gd-backlog.md`;
+    - your game's section of `docs/tasks/gd-backlog.md`;
     - `gd-engine-launcher/scripts/build.sh` (your `build_module_NN`);
     - `gd-engine-launcher/games.yaml`, if needed.
 - **Never modify `gd-game-01/` or `gd-game-02/`.** Copy what you need into
@@ -259,7 +259,7 @@ These cost the owner days of back and forth. Each one is now a rule.
     - Screens must not darken when you go back and forth.
     - Locked items show as locked.
     - Mouse works everywhere; Enter is Start.
-    - GAMEPADS and Enhanced menus follow `guidelines/universal_launcher.md`.
+    - GAMEPADS and Enhanced menus follow `docs/knowledge/universal_launcher.md`.
 11. **The Glitches** band has **everything** unlocked in every build.
 12. **Packages.** A launcher build missing a module, or a launcher that
     can't open ISOs (Android 15 content URIs, Windows DLL dependencies such
@@ -321,7 +321,7 @@ Engine:
 - `iso_signatures` in `game-info.yaml`. Read the real values from the disc
   and check that the launcher recognises it in `gdul.log`.
 
-**Port extras (`guidelines/`):**
+**Port extras (`docs/knowledge/`):**
 - the Enhanced menu, in gd-game-01's layout (options left, band close-up
   right; dropdowns for multiple choice, checkboxes for on/off);
 - the GAMEPADS screen (the yellow fret on the main menu opens it);
@@ -435,7 +435,7 @@ Estimates are for planning; write yours in `PROGRESS.md`.
 
 **M8: the port's extras (≈2 h).**
 - Enhanced menu, GAMEPADS, mouse and touch, cheats, Steam Deck preset, the
-  windowed default: exactly per `guidelines/universal_launcher.md`,
+  windowed default: exactly per `docs/knowledge/universal_launcher.md`,
   modelled on gd-game-01.
 - Gate: walks `enhanced`, `cheats`, `mouse`, `gamepads`, `stickyaxis`.
 

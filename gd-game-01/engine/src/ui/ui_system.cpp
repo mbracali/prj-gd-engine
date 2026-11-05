@@ -1363,7 +1363,7 @@ std::vector<std::pair<std::string, std::string>> UiSystem::PanelObj::helpItems()
     if (list.type != Value::Type::Array) return out;
     for (const Value& e : *list.array)
         if (e.type == Value::Type::Array && e.array->size() >= 2) out.push_back({(*e.array)[0].str(), (*e.array)[1].str()});
-    // The port's main menu also offers GAMEPADS (yellow, as every game: guidelines/universal_launcher.md), before the strum bar.
+    // The port's main menu also offers GAMEPADS (yellow, as every game: docs/knowledge/universal_launcher.md), before the strum bar.
     if (!hasOverride_ && ui_.current_ && ui_.current_->name() == "main") {
         auto strumAt = std::find_if(out.begin(), out.end(), [](const auto& e) { return e.first == "strum"; });
         out.insert(strumAt, {"fret3", "GAMEPADS"});

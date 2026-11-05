@@ -3053,7 +3053,7 @@ void App::updateBackdrop() {
         const std::array<float, 3> cam{c.x, c.y, c.z};
         band_->update(world_->seconds(), world_->beats(), &cam);
     }
-    // The shot (guidelines/universal_launcher.md, gd01's Enhanced pose): a
+    // The shot (docs/knowledge/universal_launcher.md, gd01's Enhanced pose): a
     // still close-up of the singer, on the right of the picture beside the
     // options' box, from the audience's side a little to one flank so the
     // rest of the band stands behind and beside them.

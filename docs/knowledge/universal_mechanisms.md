@@ -5,9 +5,9 @@ menus every game in this project must have, so that a player finds them the
 same in every game. **This file is the reference for every game**; the owner
 updates it from time to time. The general rules for every task (section 0 of
 the requirements) are in
-[guidelines/general_guidelines.md](guidelines/general_guidelines.md); how the
+[docs/knowledge/general_guidelines.md](general_guidelines.md); how the
 port's own screens look and behave in detail (gd-game-01 is the reference) is
-in [guidelines/universal_launcher.md](guidelines/universal_launcher.md).
+in [docs/knowledge/universal_launcher.md](universal_launcher.md).
 
 - **Context:** these rules create consistency across all the games we
   decompile and rebuild.

@@ -1,7 +1,7 @@
 # General guidelines
 
 The owner's rules for every task in this repository, for people and AI agents
-alike. Read every file in [guidelines/](README.md) before you start.
+alike. Read every file in [docs/knowledge/](.) before you start.
 
 ## Before you start
 
@@ -9,9 +9,9 @@ alike. Read every file in [guidelines/](README.md) before you start.
   this one, [universal_launcher.md](universal_launcher.md) and
   [smilar_behaviors.md](smilar_behaviors.md).
 - **System and app.** Understand the project before changing it: read the
-  documentation ([README.md](../README.md), [docs/](../docs/README.md), the
+  documentation ([README.md](../../README.md), [docs/](../README.md), the
   game folder's `README.md`, `agent-instructions.md` and `docs/`).
-- **Backlog (extreme importance).** [gd-backlog.md](../gd-backlog.md) is the
+- **Backlog (extreme importance).** [gd-backlog.md](../tasks/gd-backlog.md) is the
   single backlog. Read it and update it **at the start and at the end of every
   task**: mark what you start, mark what you finish, add what you found. Keep
   IDs stable and classify every item (Original re-implementation, Enhancement

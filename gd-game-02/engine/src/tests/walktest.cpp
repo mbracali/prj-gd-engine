@@ -1762,7 +1762,7 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
     }
     if (s.screen == "backdrop_band") {
         // Enhanced Options' still shot always shows the band, its singer on
-        // the right (guidelines/universal_launcher.md, GD02-074).
+        // the right (docs/knowledge/universal_launcher.md, GD02-074).
         const bool ok = ui.host().menuBackdropFramed();
         std::printf("  enhanced backdrop: %s\n", ok ? "the band, the singer on the right" : "no band in the shot");
         return ok ? pass() : fail("Enhanced Options' backdrop shows no band");

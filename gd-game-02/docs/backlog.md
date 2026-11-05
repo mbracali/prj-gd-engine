@@ -1,3 +1,3 @@
 # Backlog moved
 
-The backlog is now [../../gd-backlog.md](../../gd-backlog.md) (section gd-game-02, IDs GD02-nnn); everything that was here was moved there on 2026-10-28.
+The backlog is now [../../docs/tasks/gd-backlog.md](../../docs/tasks/gd-backlog.md) (section gd-game-02, IDs GD02-nnn); everything that was here was moved there on 2026-10-28.

@@ -35,7 +35,7 @@ These win over anything older below.
 The launcher is the project's only release, so a missing module is a broken
 release. It already happened twice (gdul 0.1.1 and 0.1.2 on Windows, then on
 Android: "This launcher build has no gd-game-01 module"). The full story is in
-[docs/release-process.md](../docs/release-process.md) "Never again:
+[docs/release-process.md](../release-process.md) "Never again:
 incomplete bundles".
 
 - **Every platform carries every ready module**, in every build: Linux, Steam
@@ -76,7 +76,7 @@ incomplete bundles".
 
 ## GAMEPADS screen, Enhanced menu and mouse: the same in every game
 
-> **Since 2026-10-29 the reference is [universal_mechanisms.md](../universal_mechanisms.md)**
+> **Since 2026-10-29 the reference is [universal_mechanisms.md](universal_mechanisms.md)**
 > at the repository root: the owner's universal mechanisms (skips, band
 > naming, Universal Access Buttons, default mappings) and the universal
 > Gamepad menu (1.2.1) and Enhanced menu (1.2.2), with their mockups.

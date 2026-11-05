@@ -56,7 +56,7 @@ id = `gd-game-02`
 - Mods support
 
 
-**Universal menus** ([universal_mechanisms.md](../universal_mechanisms.md),
+**Universal menus** ([universal_mechanisms.md](../docs/knowledge/universal_mechanisms.md),
 as gd-game-01): the GAMEPADS screen (the yellow fret on the main menu, or
 Enhanced Options > Gamepads) with four player boxes (Guitar Hero II has two),
 each player's instrument (5 Fret Guitar, Gamepad, Generic MIDI) and device,

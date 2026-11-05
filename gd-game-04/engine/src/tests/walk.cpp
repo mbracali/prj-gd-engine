@@ -291,7 +291,7 @@ Walk::Walk(const std::string& name) : name_(name) {
         // The mouse alone: hover OPTIONS on the main menu (focused), click it
         // -> Options -> click the help bar's ENHANCED -> In-Game Max FPS's
         // dropdown clicked open, 120 clicked -> right click -> Options -> the
-        // help bar's BACK clicked -> main (guidelines/universal_launcher.md).
+        // help bar's BACK clicked -> main (docs/knowledge/universal_launcher.md).
         steps_ = boot;
         steps_.push_back({"main_menu_fs",
                           {"hover:menu:main_menu_options_text", "check:selected:main_menu_options_text", "click:menu:main_menu_options_text"},

@@ -3,7 +3,7 @@
 Short studies of platforms, distribution ideas and technical options. Each one
 gives a verdict, effort, costs, blockers, steps and sources. Prices and
 policies change, so check the linked sources before acting. A study found
-implementable goes into [../gd-backlog.md](../gd-backlog.md) as an
+implementable goes into [../tasks/gd-backlog.md](../tasks/gd-backlog.md) as an
 **Enhancement** (its ID is given below).
 
 File names: `study_<topic>.md`. A `_old` suffix marks an earlier study that a
@@ -25,4 +25,4 @@ newer one on the same topic replaces or merges.
 | [study_shader_ports.md](study_shader_ports.md) | 2026-10-28 | Worth it selectively: GH2 bloom/grade/DOF, GPU flare test and crowd cards fit GH1 (days each); normal/spec/env maps lack data. Proposes a shared `gd-engine-fx` library. | candidates in file |
 
 Each study ends with "Backlog candidates"; the IDs are given in
-[../gd-backlog.md](../gd-backlog.md) once the items are added there.
+[../tasks/gd-backlog.md](../tasks/gd-backlog.md) once the items are added there.

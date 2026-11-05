@@ -31,7 +31,7 @@ struct WalkHost {
 // SDL_VIDEO_DRIVER=offscreen SDL_AUDIO_DRIVER=dummy. Each step waits for a
 // flow state (ui_flow_manager_state[0]) or for a song to be playing / over,
 // then presses its buttons. The walk passes when every step was reached.
-// The port's own screens' walks (guidelines/universal_launcher.md "Tests
+// The port's own screens' walks (docs/knowledge/universal_launcher.md "Tests
 // every game keeps"): mouse (the mouse alone: main menu -> OPTIONS ->
 // ENHANCED -> In-Game Max FPS's dropdown set to 60 -> right click -> the
 // help bar's BACK -> main), gamepads (the yellow fret -> GAMEPADS -> the

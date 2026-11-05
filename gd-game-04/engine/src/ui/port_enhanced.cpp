@@ -5,7 +5,7 @@
 // it (gd-game-02/engine/src/ui/enhanced_panel.cpp): its sections, rows, check
 // boxes, dropdowns, explanation box and mouse, in GH3's fonts and colours
 // (PortDraw), over GH3's own screen dimmed (App draws it first; the guideline's
-// fallback). Not in the original game (guidelines/universal_launcher.md).
+// fallback). Not in the original game (docs/knowledge/universal_launcher.md).
 // Rows gd04 does not have yet stay in place, greyed with the warning sign.
 #include <SDL3/SDL.h>
 
@@ -366,7 +366,7 @@ public:
     void draw(PortDraw& d) override {
         d_ = &d;
         // The band's still shot behind (App's backdrop), undimmed: the box on
-        // the left darkens only what is behind it (guidelines/universal_launcher.md).
+        // the left darkens only what is behind it (docs/knowledge/universal_launcher.md).
         if (!d.hasBackdrop()) d.quad(0, 0, kScreenW, kScreenH, {0, 0, 0, 1});
         drawAll();
         if (dropdown_ >= 0) drawDropdown();  // over everything

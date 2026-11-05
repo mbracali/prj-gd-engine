@@ -2,7 +2,7 @@
 
 Behaviour that is the same in every gd-game, gathered from gd-game-01 (the
 reference) and gd-game-02. A new game starts with all of it; a game that
-breaks one of these has a Bugfix item in [gd-backlog.md](../gd-backlog.md).
+breaks one of these has a Bugfix item in [gd-backlog.md](../tasks/gd-backlog.md).
 Where the original game itself behaves differently, the original wins and the
 game's docs say so. The screens of the port itself (Enhanced menu, GAMEPADS,
 mouse, touch) are in [universal_launcher.md](universal_launcher.md).
@@ -38,7 +38,7 @@ mouse, touch) are in [universal_launcher.md](universal_launcher.md).
   as in the original (gd-game-01 B64; gd-game-02 wave B #2).
 - **Esc three times** in a row on the main menu quits. Logos, splashes,
   videos and credits skip with green, red, Enter, Esc, Start, a left click
-  or a tap ([universal_mechanisms.md](../universal_mechanisms.md) 1.1.1).
+  or a tap ([universal_mechanisms.md](universal_mechanisms.md) 1.1.1).
 - **Held directions repeat** with the original's hold and repeat times; key
   repeat resets on screen transitions (gd-game-01 B80).
 - **Menu sounds never go silent.** Every volume or mute a screen changes is
@@ -88,9 +88,9 @@ mouse, touch) are in [universal_launcher.md](universal_launcher.md).
 - Every game folder has the same layout as gd-game-02 (`README.md`,
   `agent-instructions.md`, `CHANGELOG.md`, `local_build.sh`,
   `build_commands/`, `docs/`, `engine/`, `tools/`, `agents/`), see
-  [docs/adding-a-game.md](../docs/adding-a-game.md).
+  [docs/adding-a-game.md](../adding-a-game.md).
 - Never commit game data, rips, decompiler output or Ghidra files
   (`python3 .github/scripts/repo_guard.py`).
 
 The lessons L1–L21 are in
-[gd-game-02/docs/reuse_and_lessons.md](../gd-game-02/docs/reuse_and_lessons.md) §3.
+[gd-game-02/docs/reuse_and_lessons.md](../../gd-game-02/docs/reuse_and_lessons.md) §3.
