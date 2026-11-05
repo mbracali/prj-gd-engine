@@ -436,7 +436,8 @@ note_hit01 A38B2820, note_hit_blue_01 9E700D1C; Particle_Spark01 44E7B154; whamm
 ## The song scripts' 2D effects (D10, ui/song_hooks.cpp, ui/fx2d.cpp)
 
 - `gem_container<p>` is a proxy container element at Highway2D::containerPos
-  (the x offset, the intro rise, the multiplier-loss shake, battle's push);
+  (the x offset, the intro rise, the multiplier-loss shake, battle's
+  hammer_highway / shake_highway morphs: modes.md section 5);
   GH3's scripts create their highway elements under it [C script setup_highway].
 - button_up_models.<color>.pos_2d / left_pos_2d = (the lane's playline x,
   highway_playline) and button_models.<color>.angle / left_angle =

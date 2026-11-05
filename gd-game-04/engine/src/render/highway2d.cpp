@@ -324,7 +324,91 @@ void Highway2D::containerPos(double now, float& x, float& y) const {
         sx = shake_.x[size_t(k)] + (shake_.x[size_t(k + 1)] - shake_.x[size_t(k)]) * f;
         sy = shake_.y[size_t(k)] + (shake_.y[size_t(k + 1)] - shake_.y[size_t(k)]) * f;
     }
-    x = baseX_ + fx_.dx + sx, y = containerY_ + fx_.dy + sy;
+    float bx = 0, by = 0;
+    battleOffset(now, bx, by);
+    x = baseX_ + fx_.dx + sx + bx, y = containerY_ + fx_.dy + sy + by;
+}
+
+void Highway2D::battleOffset(double now, float& x, float& y) const {
+    const double t = now - bm_.start;
+    const float u = bm_.ms <= 0 || t >= bm_.ms ? 1.0f : t <= 0 ? 0.0f : float(t / bm_.ms);
+    x = bm_.x0 + (bm_.x1 - bm_.x0) * u, y = bm_.y0 + (bm_.y1 - bm_.y0) * u;
+}
+
+void Highway2D::battleMorph(double now, float x, float y, double ms) {
+    float cx = 0, cy = 0;
+    battleOffset(now, cx, cy);
+    bm_ = Morph{cx, cy, x, y, now, ms};
+}
+
+namespace {
+// A script's Wait <t> Seconds started at `from` is over on the first game
+// frame at or after it (the 60 Hz steps' rounding allowed for).
+bool waited(double now, double until) { return now >= until - 0.5; }
+}  // namespace
+
+void Highway2D::hammer(double now, float pushX, float pushY, float timeS) {
+    // hammer_highway: GetScreenElementPosition, then DoScreenElementMorph
+    // pos = original + push, just [center bottom], time; Wait time;
+    // back to the original; Wait time; the flag cleared [C script].
+    if (hammer_.state != 0) return;
+    float ox = 0, oy = 0;
+    battleOffset(now, ox, oy);
+    hammer_.ox = ox, hammer_.oy = oy, hammer_.ms = double(timeS) * 1000.0;
+    battleMorph(now, ox + pushX, oy + pushY, hammer_.ms);
+    hammer_.until = now + hammer_.ms, hammer_.state = 1;
+    ++hammers;
+}
+
+void Highway2D::runShake(double now, bool shaking) {
+    // shake_highway: waits (a game frame at a time) for the hammer to end,
+    // takes the container's position, then while shake_notes > -1 morphs it
+    // to there + (0, 8) and - (0, 8) by turns over shake_frequency (0.05 s),
+    // waiting that and a game frame each; at the end back at once [C script].
+    ShakeScript& s = shakeScript_;
+    for (int guard = 0; guard < 4; ++guard) {
+        switch (s.state) {
+        case 1:
+            if (hammer_.state != 0) return;
+            battleOffset(now, s.ox, s.oy);
+            s.state = 2, s.pulseOn = false;
+            continue;
+        case 2:
+            if (!shaking) {
+                bm_ = Morph{s.ox, s.oy, s.ox, s.oy, now, 0};
+                s.state = 0;
+                return;
+            }
+            battleMorph(now, s.ox, s.oy + (s.pulseOn ? -8.0f : 8.0f), 50);
+            s.until = now + 50, s.state = 3;
+            return;
+        case 3:
+            if (!waited(now, s.until)) return;
+            s.pulseOn = !s.pulseOn;
+            s.state = 2;  // Wait 1 gameframe: the loop's top next frame
+            return;
+        default: return;
+        }
+    }
+}
+
+void Highway2D::stepBattle(double now, bool shaking) {
+    // The running scripts first [I: their order within a frame], then
+    // battle_lightning's spawn of shake_highway (spawnscriptnow: it runs at
+    // once, before battle_trigger_on's hammer_highway) [C scripts].
+    if (hammer_.state == 1 && waited(now, hammer_.until)) {
+        battleMorph(now, hammer_.ox, hammer_.oy, hammer_.ms);
+        hammer_.until = now + hammer_.ms, hammer_.state = 2;
+    } else if (hammer_.state == 2 && waited(now, hammer_.until)) {
+        hammer_.state = 0;
+    }
+    if (shakeScript_.state != 0) runShake(now, shaking);
+    if (shaking && !wasShaking_ && shakeScript_.state == 0) {
+        shakeScript_.state = 1;
+        ++battleShakes;
+        runShake(now, shaking);
+    }
+    wasShaking_ = shaking;
 }
 
 bool Highway2D::gemAt(int32_t noteMs, int fret, double now, float& x, float& y, float& scale) const {

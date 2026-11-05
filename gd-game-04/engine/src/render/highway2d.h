@@ -55,6 +55,19 @@ public:
     void noteHit(uint8_t frets, uint8_t held, double nowMs, bool starPower);
     // highway_pulse_black: a passing note missed while the guitar is muted [C script GuitarEvent_MissedNote].
     void missPulse(double nowMs);
+    // Battle / boss: the scripts that morph gem_container<p>.
+    // hammer_highway {push time}: from where the container is, a linear
+    // morph to there + push over `timeS`, the same back, `timeS` each; a
+    // hammer while one runs (battle_p<n>_highway_hammer) does nothing. An
+    // attack's hit pushes (-70, 50) / (70, 50) over 0.1 s (battle_trigger_on,
+    // bossbattle_trigger_on); Death Drain's bites (0, 30) over 0.01 s
+    // (bite_particle) [C scripts].
+    void hammer(double nowMs, float pushX, float pushY, float timeS);
+    // Each game frame of a battle, before that frame's hammers: the running
+    // hammer and shake_highway go on; `shaking` (shake_notes > -1, Amp
+    // Overload) rising spawns shake_highway [C scripts battle_lightning, shake_highway].
+    void stepBattle(double nowMs, bool shaking);
+    uint64_t hammers = 0, battleShakes = 0;
     // Counters for the walk / self checks.
     uint64_t flamesStarted = 0, pulses = 0, shakes = 0;
     // The normalised depth v (0 top, 1 playline) of a note time at song time
@@ -189,4 +202,28 @@ private:
         bool blue = false;
     };
     std::array<Emitter, 5> emitters_{};
+    // gem_container<p>'s battle morphs: one DoScreenElementMorph at a time
+    // (a new one starts from where the last left the container) [C scripts; I: linear].
+    struct Morph {
+        float x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+        double start = -1e18, ms = 0;
+    } bm_;
+    void battleOffset(double now, float& x, float& y) const;
+    void battleMorph(double now, float x, float y, double ms);
+    // hammer_highway: 0 idle, 1 out (the wait after the push), 2 back.
+    struct Hammer {
+        int state = 0;
+        double until = 0, ms = 100;
+        float ox = 0, oy = 0;
+    } hammer_;
+    // shake_highway: 0 not running, 1 waiting for the hammer, 2 the loop's
+    // top (next frame), 3 waiting shake_frequency (0.05 s).
+    struct ShakeScript {
+        int state = 0;
+        double until = 0;
+        float ox = 0, oy = 0;
+        bool pulseOn = false;
+    } shakeScript_;
+    bool wasShaking_ = false;
+    void runShake(double now, bool shaking);
 };

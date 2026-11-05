@@ -144,6 +144,12 @@ public:
         int selection = -1;
         uint8_t lastRaw = 0;
         double highwayPushAt = -1e9;  // hammer_highway (the attack hit)
+        // A steal on this player (animate_steal): the open hand from
+        // `stealOpenAt` (a game frame after the hit) for 0.5 s; at `stealAt`
+        // the top card is taken (`stealCard`, `stealTakeAt`) and flies to the
+        // thief for 0.5 s, given at `stealGiveAt` [C scripts battle_steal, animate_steal].
+        double stealOpenAt = -1e9, stealTakeAt = -1e9, stealGiveAt = -1;
+        int stealCard = -1;
         // The HUD's battle pieces [C scripts attack_bolt, battle_death_lick]:
         // this player's last bolt (fire_bolt cards: 60 deg; Death Drain: 80),
         // the Death Drain on this player since `deathAt`.

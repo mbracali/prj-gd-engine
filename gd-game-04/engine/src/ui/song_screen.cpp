@@ -192,6 +192,7 @@ bool SongScreen::start(const Disc& disc, const Globals& g, const SongInfo& song,
         Highway2D& hw = p == 0 ? highway_ : highway2_;
         hw.setStart(startMs_, first);
         hw.setLefty(setup.lefty[size_t(p)] && !(setup.mode == GameMode::Boss && p == 1));
+        hud2p_.setLefty(p, setup.lefty[size_t(p)]);
         hw.setGemOffset(song.gemOffset);  // gem_offset = default (0 on PC, D7) + the song's [C script gem_scroller]
     }
     // devil_finish: player 2's gem container at x 1000 (off screen) [C script setup_highway].
@@ -333,6 +334,22 @@ void SongScreen::tick(double nowMs, Mixer& mixer) {
                     hw.noteHit(match_->track(p).notes[size_t(ev.note)].frets, shownHeld_[size_t(p)], stepMs_, pl.stats().starPowerActive);
             }
         }
+        // Battle / boss: the scripts that move gem_container<p>: shake_highway
+        // (Amp Overload), then hammer_highway for an attack's hit on that
+        // player (-/+70, 50; 0.1 s) and Death Drain's bites (0, 30; 0.01 s)
+        // [C scripts battle_trigger_on, bossbattle_trigger_on, bite_particle].
+        if (match_->battleMode() && twoPlayers_)
+            for (int p = 0; p < match_->players(); ++p) {
+                Highway2D& hw = p == 0 ? highway_ : highway2_;
+                const Match::BattleSide& b = match_->battle(p);
+                hw.stepBattle(stepMs_, b.shakeUntil >= 0 && b.shakeUntil > stepMs_);
+                if (b.highwayPushAt != lastHammer_[size_t(p)]) {
+                    lastHammer_[size_t(p)] = b.highwayPushAt;
+                    hw.hammer(stepMs_, p == 0 ? -70.0f : 70.0f, 50, 0.1f);
+                }
+                for (const Hud2P::Bite& bt : hud2p_.bites())
+                    if (bt.player == p) hw.hammer(stepMs_, 0, 30, 0.01f);
+            }
         if (onStep) onStep(*this, stepMs_);
         match_->clearEvents();
     }
@@ -417,7 +434,7 @@ bool SongScreen::frame(Canvas& canvas, Mixer& mixer, const TextureCache* texture
     return more;
 }
 
-Highway2D::Effects SongScreen::effects(int p, double now) const {
+Highway2D::Effects SongScreen::effects(int p, double) const {
     Highway2D::Effects fx;
     if (!match_->battleMode()) return fx;
     const Match::BattleSide& b = match_->battle(p);
@@ -434,14 +451,7 @@ Highway2D::Effects SongScreen::effects(int p, double now) const {
         const int card = ph < pc.size() ? pc[ph] : -1;
         return card >= 0 && card < int(m->battleData().powerups.size()) ? m->battleData().powerups[size_t(card)].cardTexture : 0;
     };
-    // Amp Overload bobs the highway +-8 px every 0.05 s [C battle_lightning].
-    if (b.shakeUntil > now) fx.dy = (int(now / 50.0) % 2) ? 8.0f : -8.0f;
-    // hammer_highway: pushed (-70,50) / (70,50) over 0.1 s and back [C script].
-    const double t = now - b.highwayPushAt;
-    if (t >= 0 && t < 200) {
-        const float u = float(t < 100 ? t / 100 : 1 - (t - 100) / 100);
-        fx.dx += (p == 0 ? -70.0f : 70.0f) * u, fx.dy += 50.0f * u;
-    }
+    // Amp Overload's shake and the hits' / bites' hammer_highway: Highway2D::stepBattle / hammer.
     return fx;
 }
 

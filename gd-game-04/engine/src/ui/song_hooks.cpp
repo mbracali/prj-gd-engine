@@ -254,6 +254,7 @@ void SongHooks::begin(SongScreen& s) {
     nowMs_ = s.startMs() - 3000;
     const Match& m0 = s.match();
     lastCards_ = {}, lastFired_ = {}, lastByAttack_ = {};
+    lastBolt_ = {-1e9, -1e9}, fxEnds_.clear();
     Vm& vm = fe_.vm();
     loadSongScripts(s);
     for (int p = 0; p < players_; ++p) {
@@ -681,6 +682,8 @@ void SongHooks::step(SongScreen& s, double now) {
             for (int a = 0; a < 8 && a < kAttacks; ++a)
                 for (; lastByAttack_[i][size_t(a)] < c.byAttack[i][size_t(a)]; ++lastByAttack_[i][size_t(a)]) {
                     const int victim = 1 - p;
+                    static const bool battleLog = SDL_getenv("GD04_BATTLELOG") != nullptr;  // development aid
+                    if (battleLog) SDL_Log("battle: p%d attacks p%d with %d at song %.0f ms", p + 1, victim + 1, a, now);
                     qb::Struct r;
                     Vm::set(r, K("receiving_player"), Vm::makeInt(victim + 1));
                     Vm::set(r, K("receiving_player_current_crowd_level"), Vm::makeFloat(m.player(victim).stats().health));
@@ -711,6 +714,76 @@ void SongHooks::step(SongScreen& s, double now) {
                         ++k_.spawned[side == 0 ? "Band_PlayAttackAnim" : "Band_PlayResponseAnim"];
                     }
                 }
+        }
+        auto sparks = [&](uint32_t id, float x, float y, float z, std::array<int, 4> c0, float dir, float spread, float velocity, float friction,
+                          float life) {
+            qb::Struct ps;
+            auto rgba = [](std::array<int, 4> v) {
+                qb::Value a;
+                a.type = qb::Type::Array;
+                a.arr = std::make_shared<qb::Array>();
+                for (int k : v) a.arr->values.push_back(Vm::makeInt(k));
+                return a;
+            };
+            auto pair = [](float a, float b) {
+                qb::Value v;
+                v.type = qb::Type::Pair;
+                v.f[0] = a, v.f[1] = b;
+                return v;
+            };
+            Vm::set(ps, K("id"), Vm::makeKey(id));
+            Vm::set(ps, K("pos"), pair(x, y));
+            Vm::set(ps, K("z_priority"), Vm::makeFloat(z));
+            Vm::set(ps, K("material"), Vm::makeKey(K("sys_Particle_Spark01_sys_Particle_Spark01")));
+            Vm::set(ps, K("start_color"), rgba(c0));
+            Vm::set(ps, K("end_color"), rgba({128, 0, 0, 0}));
+            Vm::set(ps, K("start_scale"), pair(2, 2));
+            Vm::set(ps, K("end_scale"), pair(0.5f, 0.5f));
+            Vm::set(ps, K("start_angle_spread"), Vm::makeFloat(360));
+            Vm::set(ps, K("min_rotation"), Vm::makeFloat(-500));
+            Vm::set(ps, K("max_rotation"), Vm::makeFloat(500));
+            Vm::set(ps, K("emit_start_radius"), Vm::makeFloat(0));
+            Vm::set(ps, K("emit_radius"), Vm::makeFloat(1));
+            Vm::set(ps, K("emit_rate"), Vm::makeFloat(0.01f));
+            Vm::set(ps, K("emit_dir"), Vm::makeFloat(dir));
+            Vm::set(ps, K("emit_spread"), Vm::makeFloat(spread));
+            Vm::set(ps, K("velocity"), Vm::makeFloat(velocity));
+            Vm::set(ps, K("friction"), pair(0, friction));
+            Vm::set(ps, K("time"), Vm::makeFloat(life));
+            fx_.create(ps, now);
+        };
+        for (int p = 0; p < players_; ++p) {
+            // attack_bolt's sparks where the bolt hits the other highway: the
+            // bolt's pos + / - (455, 0) + (0, 250) in battlemode_container (at
+            // (0,0)), sys_Particle_Spark01 [255 66 0 255] -> [128 0 0 0],
+            // scale 2 -> 0.5, emit_dir 300 / -300, spread 90, velocity 16,
+            // friction (0, 24), life 1 s, every 0.01 s; the system dies
+            // 8 + 2 game frames later (kill_when_empty) [C scripts attack_bolt, battlemode_init].
+            const Match::BattleSide& b = m.battle(p);
+            if (b.boltAt != lastBolt_[size_t(p)]) {
+                lastBolt_[size_t(p)] = b.boltAt;
+                const uint32_t id = K("attack_bolt_particle_" + std::string(textOf(p)) + "_" + std::to_string(int64_t(now)));
+                sparks(id, p == 0 ? 310.0f + 455 : 970.0f - 455, 230 + 250, 8, {255, 66, 0, 255}, p == 0 ? 300.0f : -300.0f, 90, 16, 24, 1);
+                fxEnds_.push_back(FxEnd{id, now + 10000.0 / 60, true});
+                ++k_.spawned["attack_bolt sparks"];
+            }
+        }
+        // bite_particle's sparks at the Death Drain alert's bite, [255 0 0 255],
+        // emit_dir 0, spread 160, velocity 10, friction (0, 50), life 0.25 s;
+        // destroyed (with its sparks) 7 frames later [C script].
+        for (const Hud2P::Bite& bt : s.hud2p().bites()) {
+            const uint32_t id = K(std::string(bt.rot > 0 ? "death_bite_r_" : "death_bite_l_") + textOf(bt.player));
+            sparks(id, bt.x, bt.y, 12, {255, 0, 0, 255}, 0, 160, 10, 50, 0.25f);
+            fxEnds_.push_back(FxEnd{id, now + 7000.0 / 60, false});
+            ++k_.spawned["bite_particle sparks"];
+        }
+    }
+    for (size_t k = 0; k < fxEnds_.size();) {
+        if (now >= fxEnds_[k].at - 0.5) {
+            fx_.destroy(fxEnds_[k].id, fxEnds_[k].whenEmpty);
+            fxEnds_.erase(fxEnds_.begin() + std::ptrdiff_t(k));
+        } else {
+            ++k;
         }
     }
     eventArrays(s, now);
