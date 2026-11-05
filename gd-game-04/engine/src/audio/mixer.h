@@ -4,6 +4,8 @@
 
 #include <SDL3/SDL.h>
 
+#include <algorithm>
+#include <array>
 #include <atomic>
 #include <memory>
 #include <string>
@@ -51,6 +53,15 @@ public:
     // The song's streams stopped (GH3's StopStream at the song's end) while
     // the song clock runs on: the rest plays silent [C script end_song].
     void silence() { silenced_ = true; }
+    // GH3's Band_Balance / Guitar_Balance busses at the song's end
+    // (SetSoundBussParams {Band_Balance = {vol pitch}} time = s): `db` the
+    // band's (guitar = false) or the guitars' volume, `semitones` the pitch,
+    // reached linearly over `seconds` from where they are [C script
+    // Failed_Song_Pitch_Down: vol -20, pitch -8 in 3 s; 0x8217B0B8: pitch in
+    // semitones, 2^(st / 12); I: linear in dB and semitones]. The streams
+    // are resampled (both busses pitch alike in GH3's data: the band's sets
+    // the ratio); the song clock then runs on with the wall clock.
+    void setBuss(bool guitar, float db, float semitones, float seconds);
     // The player's guitar channels heard (true) or muted after a miss (false).
     void setGuitarAudible(bool audible) { guitarTarget_.store(audible ? 1.0f : 0.0f); }
     // The second player's part (Track::guitar2), the same way.
@@ -117,6 +128,20 @@ private:
     std::atomic<int64_t> leadIn_{0};
     std::atomic<bool> paused_{false};
     std::atomic<bool> silenced_{false};
+    // The busses' ramps (setBuss; under the stream's lock): band 0, guitar 1.
+    struct Buss {
+        float fromDb = 0, toDb = 0, fromSt = 0, toSt = 0, seconds = 0;
+        uint64_t startNs = 0;
+        float db(uint64_t now) const { return fromDb + (toDb - fromDb) * t(now); }
+        float st(uint64_t now) const { return fromSt + (toSt - fromSt) * t(now); }
+        float t(uint64_t now) const {
+            return seconds <= 0 || now <= startNs ? (seconds <= 0 ? 1.0f : 0.0f) : std::min(1.0f, float(double(now - startNs) / 1e9 / seconds));
+        }
+    };
+    std::array<Buss, 2> buss_{};
+    std::atomic<bool> pitched_{false};  // a buss pitch was set: the clock follows the wall clock
+    float ratio_ = 1;  // the stream's frequency ratio now (main thread)
+    void updatePitch();
     double pausedTimeMs_ = 0;
     double frameMs_ = 0;
     uint64_t frameNs_ = 0;

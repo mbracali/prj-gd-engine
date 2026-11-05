@@ -73,6 +73,7 @@ void Mixer::play(std::unique_ptr<AudioSource> stream, std::vector<Track> tracks,
     ring_.assign(size_t(stream->channels()), std::vector<float>(size_t(kRing), 0.0f));
     written_ = 0, read_ = 0, sourceEnded_ = false, underruns_ = 0;
     silenced_ = false;
+    buss_ = {}, pitched_ = false, ratio_ = 1;
     source_ = std::move(stream);
     leadInFrames_ = static_cast<int64_t>(leadInMs * rate_ / 1000.0);
     leadIn_ = leadInFrames_;
@@ -91,6 +92,27 @@ void Mixer::play(std::unique_ptr<AudioSource> stream, std::vector<Track> tracks,
 
 void Mixer::setSpeed(float speed) {
     if (stream_) SDL_SetAudioStreamFrequencyRatio(stream_, std::clamp(speed, 0.01f, 100.0f));
+}
+
+void Mixer::setBuss(bool guitar, float db, float semitones, float seconds) {
+    if (!stream_) return;
+    SDL_LockAudioStream(stream_);
+    Buss& b = buss_[guitar ? 1 : 0];
+    const uint64_t now = SDL_GetTicksNS();
+    b.fromDb = b.db(now), b.fromSt = b.st(now);
+    b.toDb = db, b.toSt = semitones, b.seconds = std::max(0.0f, seconds), b.startNs = now;
+    if (!guitar && (semitones != 0 || b.fromSt != 0)) pitched_ = true;
+    SDL_UnlockAudioStream(stream_);
+}
+
+// The band buss's pitch as the stream's resampling ratio (frameTimeMs, each frame).
+void Mixer::updatePitch() {
+    if (!stream_ || !pitched_.load()) return;
+    SDL_LockAudioStream(stream_);
+    const float st = buss_[0].st(SDL_GetTicksNS());
+    SDL_UnlockAudioStream(stream_);
+    const float ratio = std::exp2(st / 12.0f);
+    if (std::fabs(ratio - ratio_) > 1e-4f) ratio_ = ratio, SDL_SetAudioStreamFrequencyRatio(stream_, std::clamp(ratio, 0.01f, 100.0f));
 }
 
 void Mixer::stop() {
@@ -126,6 +148,7 @@ double Mixer::songTimeMs(uint64_t ticksNs) const {
 }
 
 double Mixer::frameTimeMs() {
+    updatePitch();
     uint64_t now = SDL_GetTicksNS();
     double raw = songTimeMs(now);
     if (paused_ || !frameNs_) {
@@ -151,7 +174,9 @@ void SDLCALL Mixer::callback(void* user, SDL_AudioStream* stream, int additional
     if (dump && self->source_) std::fwrite(self->out_.data(), sizeof(float), self->out_.size(), dump);
     SDL_PutAudioStreamData(stream, self->out_.data(), frames * int(2 * sizeof(float)));
     // The song clock counts only the frames the song played (it stops while paused).
-    if (self->source_ && !self->paused_) {
+    // A pitched stream plays slower or faster than the clock's frames: the
+    // clock keeps its last anchor and runs on with the wall clock.
+    if (self->source_ && !self->paused_ && !self->pitched_.load()) {
         self->songFrames_ += frames;
         int64_t queued = SDL_GetAudioStreamQueued(stream) / int(2 * sizeof(float));
         self->anchorFrames_ = self->songFrames_ - queued;
@@ -173,6 +198,10 @@ void Mixer::fill(int frames) {
 
     const float target = guitarTarget_.load(), target2 = guitar2Target_.load();
     const float pitch0 = guitarPitch_[0].load(), pitch1 = guitarPitch_[1].load();
+    // The busses' volumes (setBuss), once a callback (~10 ms blocks).
+    const uint64_t nowNs = SDL_GetTicksNS();
+    const float bandDb = buss_[0].db(nowNs), guitarDb = buss_[1].db(nowNs);
+    const float bandGain = bandDb == 0 ? 1.0f : std::pow(10.0f, bandDb / 20.0f), guitarBuss = guitarDb == 0 ? 1.0f : std::pow(10.0f, guitarDb / 20.0f);
     for (int i = 0; i < n; ++i) {
         size_t at = size_t((r + i) & (kRing - 1));
         // ~8 ms ramp, no click (gd01) [I].
@@ -182,7 +211,7 @@ void Mixer::fill(int frames) {
         float g[2][2] = {};  // each player's guitar, ahead of the buss's effects
         for (size_t c = 0; c < tracks_.size(); ++c) {
             const Track& t = tracks_[c];
-            float v = ring_[c][at] * t.volume * (t.guitar ? guitarGain_ : t.guitar2 ? guitar2Gain_ : 1.0f);
+            float v = ring_[c][at] * t.volume * (t.guitar ? guitarGain_ * guitarBuss : t.guitar2 ? guitar2Gain_ * guitarBuss : bandGain);
             // gd01's linear pan law: -1 = left only, 0 = both at full, 1 = right only [I].
             // The players' guitar tracks go through the guitar buss's effects.
             float& L = t.guitar ? g[0][0] : t.guitar2 ? g[1][0] : l;

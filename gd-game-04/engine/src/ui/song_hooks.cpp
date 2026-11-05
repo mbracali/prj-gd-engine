@@ -1194,7 +1194,18 @@ void SongHooks::addNatives() {
     // a stack of it [C 0x8227CE58, 0x8227D368].
     vm.addNative("SetSoundBussParams", [this](Vm& v, ScriptRun&, qb::Struct& p) {
         ++k_.bussParams;
+        static const uint32_t band = K("Band_Balance"), guitar = K("Guitar_Balance");
         for (const qb::Item& it : p.items) {
+            // A song's end (songOutro): Band_Balance / Guitar_Balance's vol (dB)
+            // and pitch (semitones), Failed_Song_Pitch_Down's -20 / -8 in 3 s,
+            // end_song's reset [C scripts Failed_Song_Pitch_Down, end_song];
+            // during the song the port's track volumes stand for preload_song's
+            // Band_Balance levels [I].
+            if ((it.name == band || it.name == guitar) && it.value.type == qb::Type::Struct && it.value.st && fe_.songOutro) {
+                const float vol = Vm::number(it.value.st->find(K("vol")), 0), pitch = Vm::number(it.value.st->find(K("pitch")), 0);
+                mixer_.setBuss(it.name == guitar, vol, pitch, Vm::number(Vm::param(p, K("time")), 0));
+                continue;
+            }
             const qb::Value* val = &it.value;
             if (it.name == 0 && (val->type == qb::Type::Key || val->type == qb::Type::KeyPtr)) val = v.global(val->key);
             if (!val || val->type != qb::Type::Struct || !val->st) continue;

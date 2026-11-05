@@ -48,7 +48,8 @@ Walk::Walk(const std::string& name) : name_(name) {
         steps_.push_back({"song", {}, 30000});
         steps_.push_back({"song_over", {}, 600000});
         if (name == "lose") {
-            steps_.push_back({"quickplay_fail_song_fs", {}, 30000});
+            // A few steps on the fail menu, over the paused song (screenshots).
+            steps_.push_back({"quickplay_fail_song_fs", {"wait", "wait", "wait"}, 30000});
         } else {
             // CONTINUE -> Top Rockers: the autoplayed score beats the scores
             // (cleared: the walk's song is cut short), so GH3 asks for

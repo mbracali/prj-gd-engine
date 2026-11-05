@@ -413,7 +413,7 @@ bool SongScreen::frame(Canvas& canvas, Mixer& mixer, const TextureCache* texture
     // GD04_END_AT=<song ms> / GD04_FAIL_AT=<song ms>: end (win) or fail the song then (walk tests).
     static const double endAt = SDL_getenv("GD04_END_AT") ? std::atof(SDL_getenv("GD04_END_AT")) : walkEndMs_;
     static const double failAt = SDL_getenv("GD04_FAIL_AT") ? std::atof(SDL_getenv("GD04_FAIL_AT")) : walkFailMs_;
-    if (failAt >= 0 && now >= failAt && finishedAt_ < 0) forcedFail_ = true, finishedAt_ = now - 2000.0;
+    if (failAt >= 0 && now >= failAt && finishedAt_ < 0) forcedFail_ = true, finishedAt_ = now;
     // A walk's forced end: the song's end marker and its delay at once.
     if (endAt >= 0 && now >= endAt && finishedAt_ < 0) forcedEnd_ = true;
     if (match_->outcome() != Match::Outcome::None && finishedAt_ < 0) finishedAt_ = now;
@@ -441,7 +441,7 @@ bool SongScreen::frame(Canvas& canvas, Mixer& mixer, const TextureCache* texture
     // (the venue, the highway until disable_highway) until kill_gem_scroller;
     // alone (--song): over 2 s later, as a decided song; decided songs and
     // practice end 2 s later, App drawing the venue meanwhile (drawOutro).
-    const bool more = (won_ && holdAfterWin_) || finishedAt_ < 0 || now < finishedAt_ + 2000.0;
+    const bool more = (holdAfterWin_ && (won_ || decided())) || finishedAt_ < 0 || now < finishedAt_ + 2000.0;
     const bool report = (!more || justWon) && !reported_;
     if (report) reported_ = true;
     if (report && twoPlayers_) {
@@ -523,7 +523,7 @@ void SongScreen::draw(Canvas& c, double now, const TextureCache* textures) {
     char text[160];
     // play_outro: destroy_hud, the gems killed [C script]; a won song's
     // highway and HUD follow the scripts (hideHud / hideHighway).
-    if (outro_ && !won_) return;
+    if (outro_ && !won_ && !holdAfterWin_) return;
     if (twoPlayers_ && highwayOk_ && textures) {
         // GH3's two highways (x_offset_p2 left / right) and the mode's HUD.
         for (int p = 0; p < 2 && !highwayHidden_; ++p) {

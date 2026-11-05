@@ -102,9 +102,13 @@ public:
     // The end marker reached (win_song's first wait over; a walk's forced end too).
     bool endReached() const { return forcedEnd_ || lastMs_ >= songEndMs_; }
     double songEndMs() const { return songEndMs_; }
-    // GH3's scripts run the end: a won song keeps playing and drawing under
-    // them until kill_gem_scroller (the app ends it).
+    // GH3's scripts run the end: a won or decided song (failed, a battle
+    // KO, a boss beaten) keeps playing and drawing under them until
+    // kill_gem_scroller (the app ends it) [C: song_won / song_failed fire
+    // at once; GuitarEvent_SongFailed_Spawned, GuitarEvent_SongWon_Spawned].
     void setHoldAfterWin(bool on) { holdAfterWin_ = on; }
+    // Decided before the end marker: failed, a battle KO, a boss beaten (not practice's end).
+    bool decided() const { return finishedAt_ >= 0 && !won_ && !practiceEnd_; }
     // The end's teardown: destroy_hud (the HUD), disable_highway (the gem
     // containers and HUD at alpha 0) [C scripts play_outro, disable_bg_viewport].
     void hideHud() { hudHidden_ = true; }

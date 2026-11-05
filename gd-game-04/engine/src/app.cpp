@@ -1123,8 +1123,9 @@ void App::frame() {
         if (front_ && front_->songOutro && !front_->songKill) {
             // A request for a song (or a won song's end the scripts never
             // tear down) ends it too [I: GH3's kill_gem_scroller always comes].
+            // A failed song waits under its fail menu for the player.
             if (front_->songRequest.pending) front_->songKill = true;
-            else if (SDL_GetTicksNS() - outroAtNs_ > 60000000000ull) {
+            else if (song_->won() && SDL_GetTicksNS() - outroAtNs_ > 60000000000ull) {
                 SDL_Log("song: no kill_gem_scroller 60 s after song_won; the song ends");
                 front_->songKill = true;
             }
@@ -1142,11 +1143,22 @@ void App::frame() {
             if (walk_ && !outro) ++walk_->songsEnded;
             return;
         }
-        if (front_ && song_->won() && !front_->songOutro) {
+        // The end's pausegame (GuitarEvent_SongFailed_Spawned's after its
+        // transition, under the fail menu; SongWon's before win_song) freezes
+        // the song: its clock, the band, the venue [C scripts].
+        if (front_ && front_->songOutro) mixer_.setPaused(front_->flow.paused);
+        if (front_ && (song_->won() || song_->decided()) && !front_->songOutro) {
             // song_won: GH3's GuitarEvent_SongWon (You Rock, the songwon
             // transition) runs over the song, which goes on until the flow's
             // win_song action kills the gem scroller [C scripts win_song,
-            // GuitarEvent_SongWon_Spawned, kill_gem_scroller].
+            // GuitarEvent_SongWon_Spawned, kill_gem_scroller]. Decided at
+            // once (song_failed, a battle KO, a boss beaten): the C code's
+            // event comes as the health runs out; GuitarEvent_SongFailed_Spawned
+            // hides the highway (disable_bg_viewport), pitches the music down
+            // (the songlost transition's play_outro -> end_song ->
+            // Failed_Song_Pitch_Down) and opens the fail menu after the
+            // transition, over the paused song [C scripts GuitarEvent_SongFailed,
+            // GuitarEvent_SongFailed_Spawned, Common_SongLost_Transition].
             front_->songOutro = true;
             outroAtNs_ = SDL_GetTicksNS();
             input_.setInGame(false);

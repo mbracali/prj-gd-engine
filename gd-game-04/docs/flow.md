@@ -437,10 +437,35 @@ interface the scripts expect from it. Fail: health <= 0 is decided in C
   highway; the venue's outro (VenueStage::outro: play_win_anims, cameras_win)
   starts with song_won; ui/song_hooks preloads win_song's movie at T, and
   StopStream in the end silences the song (Mixer::silence); the Bink alpha
-  movie (YUVA 4:2:0) is drawn with its alpha. A failed or decided song and
-  practice still end 2 s after the decision, the venue drawn alone under
-  GH3's transition (App::outroSong_) [I: GH3 disables the highway at once on
-  song_failed].
+  movie (YUVA 4:2:0) is drawn with its alpha. Practice still ends 2 s after
+  its section, the venue drawn alone under GH3's transition (App::outroSong_).
+- Timeline of a failed song [C scripts GuitarEvent_SongFailed,
+  GuitarEvent_SongFailed_Spawned, Common_SongLost_Transition, play_outro,
+  end_song, Failed_Song_Pitch_Down; data Default_SongLost_Transition time
+  8000]: the C code's song_failed comes as the health runs out (battle: the
+  script turns it into GuitarEvent_SongWon battle_win = 1). At once:
+  disable_highway_prepass, disable_bg_viewport -> disable_highway (not in a
+  boss battle, whose waitAndKillHighway hides it 0.7 s later under "<boss>
+  Rocks!" and the boss's movie), failed_song_time = GetSongTimeMs,
+  Progression_SongFailed, Crowd_Fail_Song_SFX, GH_SFX_You_Lose_Single_Player,
+  Transition_Play songlost: play_lose_anims, crowd looping state bad,
+  play_outro song_failed_pitch_streams = 1 (destroy_hud; end_song spawns
+  Failed_Song_Pitch_Down: SetSoundBussParams Band_Balance and Guitar_Balance
+  vol -20 dB, pitch -8 semitones over 3 s, then end_song stops the streams),
+  Crowd_AllPlayAnim idle, cameras_lose. After the 8 s transition: pausegame
+  (the song frozen) and the flow's fail_song: the fail menu over the frozen
+  venue; RETRY / NEW SONG / QUIT kill the gem scroller.
+- The port: a decided song (failed, a battle KO, a boss beaten) goes the won
+  song's way (songOutro, SongScreen::decided): FrontEnd::songEnded at the
+  decision, the song drawn and its clock running under the scripts until
+  kill_gem_scroller; disable_highway / destroy_hud reach the native highway
+  and HUD (Vm::onScriptEnter); SetSoundBussParams' Band_Balance /
+  Guitar_Balance at the song's end ramp the song's volume (dB) and pitch
+  (semitones, 2^(st/12): 0x8217B0B8 / 0x8217B140) in the mixer, the pitch as
+  the stream's resampling ratio (the song clock then follows the wall clock)
+  [I: linear ramps; both busses pitch alike in the data]; PauseGame during
+  the end pauses the song (its clock, the band, the venue). Walk `lose`
+  (the walk's fail at 10 s) checks the fail menu.
 - quickplay_win_song_fs Create `create_newspaper_menu` (1,369 lines: newspaper
   stats page; `GetGlobalTags Progression`, `GetGlobalTags user_options`,
   StopSoundsByBuss, new_menu newspaper_vmenu, np_create_options_menu) [C].
