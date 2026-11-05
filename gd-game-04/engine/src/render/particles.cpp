@@ -189,7 +189,15 @@ bool Particles::start(const Disc& disc, const Globals& g, const venue::Venue& v,
     vm_->addNative("IsCreated", [this](qs::Vm&, qs::ScriptRun&, qb::Struct& p) {
         const qb::Value* n = qs::Vm::positional(p);
         const venue::Node* node = n ? v_->node(keyOf(n)) : nullptr;
-        return node && node->createdAtStart;
+        if (!node) return false;
+        // Create / Kill by the zone's scripts (SafeCreate / SafeKill) override createdatstart.
+        if (auto it = visibility_.find(node->name); it != visibility_.end()) return it->second != 0;
+        return node->createdAtStart;
+    });
+    // IsInNodeArray <node> (SafeCreate's guard): the zone has that node [C scripts].
+    vm_->addNative("IsInNodeArray", [this](qs::Vm&, qs::ScriptRun&, qb::Struct& p) {
+        const qb::Value* n = qs::Vm::positional(p);
+        return n && v_->node(keyOf(n)) != nullptr;
     });
     addObjectNatives();
     // Create / Kill {name = node} (misclightutils.qb SafeCreate / SafeKill:
@@ -239,7 +247,13 @@ bool Particles::start(const Disc& disc, const Globals& g, const venue::Venue& v,
     vm_->addNative("ScreenFX_FXInstanceExists", [this, isFlash](qs::Vm&, qs::ScriptRun&, qb::Struct& p) { return isFlash(p) && flash_.on; });
     vm_->addNative("ViewportExists", [](qs::Vm&, qs::ScriptRun&, qb::Struct&) { return true; });
     vm_->addNative("Create", [this](qs::Vm&, qs::ScriptRun&, qb::Struct& p) {
-        if (const qb::Value* n = qs::Vm::param(p, K("name"))) visibility_[n->key] = 1;
+        if (const qb::Value* n = qs::Vm::param(p, K("name"))) {
+            visibility_[n->key] = 1;
+            // A particleobject created (z_wikker's Z_Wikker_Start_DinoFlames):
+            // it emits its emit_rate [C scripts; I: from the Create].
+            if (auto it = nodeEmitters_.find(n->key); it != nodeEmitters_.end() && !it->second.system)
+                setEmitRate(n->key, it->second.ownRate, vmTime_);
+        }
         return true;
     });
     vm_->addNative("Kill", [this](qs::Vm&, qs::ScriptRun&, qb::Struct& p) {
@@ -250,20 +264,25 @@ bool Particles::start(const Disc& disc, const Globals& g, const venue::Venue& v,
     // GP_* parameters): one emitter each at the node; the created ones emit
     // their emit_rate from the start, `<node> : emitrate {rate}` changes it
     // (z_party's Performance_Changed) [C data; I: the emitter model].
+    // The flexibleparticle component's init (821CE4A8) reads the
+    // scriptreference struct when the node has one, else the node's own
+    // keys (z_hell's, z_video's, z_wikker's fires have only those) [C].
     nodeEmitters_.clear();
     for (const venue::Node& n : v.nodes) {
         if (n.cls != K("particleobject") || !n.st) continue;
-        const qb::Value* ref = n.st->find(K("scriptreference"));
-        if (!ref) continue;
         NodeEmitter e;
-        e.pos = n.pos, e.params = *ref;
-        nodeEmitters_[n.name] = e;
-        if (n.createdAtStart) {
-            const qb::Value* gp = (ref->type == qb::Type::Key || ref->type == qb::Type::KeyPtr) ? g_->find(ref->key) : ref;
-            const qb::Struct* gs = structOf(gp);
-            const float rate = gs ? num(g_->field(*gs, K("emit_rate")), 0) : 0;
-            setEmitRate(n.name, rate, startMs);
+        e.pos = n.pos;
+        if (const qb::Value* ref = n.st->find(K("scriptreference"))) {
+            e.params = *ref;
+        } else {
+            e.params.type = qb::Type::Struct;
+            e.params.st = std::make_shared<qb::Struct>(*n.st);
         }
+        const qb::Value* gp = (e.params.type == qb::Type::Key || e.params.type == qb::Type::KeyPtr) ? g_->find(e.params.key) : &e.params;
+        const qb::Struct* gs = structOf(gp);
+        e.ownRate = gs ? num(g_->field(*gs, K("emit_rate")), 0) : 0;
+        nodeEmitters_[n.name] = e;
+        if (n.createdAtStart) setEmitRate(n.name, e.ownRate, startMs);
     }
     if (!nodeEmitters_.empty()) SDL_Log("particles %s: %llu particle objects", v.zone.c_str(), static_cast<unsigned long long>(nodeEmitters_.size()));
     // The nodes' trigger scripts: a created node runs its triggerscript on
@@ -715,23 +734,42 @@ void Particles::create(const venue::Vec3& pos, const qb::Value* params, double t
     p.box = vec(f("emitrangedims"), {});
     p.target = vec(f("emit_target"), {0, 1, 0});
     p.force = vec(f("force"), {});
+    // anglespread a: elevation within a / 2 of the target, any sweep [C
+    // 821CCCD8: elev (-a/360, a/360), sweep (0, 2) in half turns];
+    // elevspread (e0, e1) degrees: the same range as e1 - e0 [I: the cone].
     p.spread = num(f("anglespread"), 0);
+    if (const qb::Value* el = f("elevspread"); el && !f("anglespread")) {
+        const venue::Vec3 e = vec(el, {180, 180, 0});
+        p.spread = e[1] - e[0];
+    }
     const venue::Vec3 life = vec(f("liferange"), {1, 1, 0});
     p.lifeMin = life[0], p.lifeMax = std::max(life[0], life[1]);
     p.rate = num(f("emit_rate"), 0);
     p.lifetime = num(f("lifetime"), 0);
     p.burst = int(num(f("emitnum"), 0));
     p.delay = num(f("emitdelaystart"), 0);
+    // sizerange: [(sw, sh), (ew, eh)] (vectors) or [s, e] (floats: square) [C 821CCCD8].
     if (const qb::Value* sr = f("sizerange"); sr && sr->type == qb::Type::Array && sr->arr && sr->arr->values.size() >= 2) {
-        const venue::Vec3 a = vec(&sr->arr->values[0], {0.1f, 0, 0}), b = vec(&sr->arr->values[1], {0.1f, 0, 0});
-        p.sizeStart = a[0], p.sizeStartVar = a[1], p.sizeEnd = b[0], p.sizeEndVar = b[1];
+        const qb::Value& a = sr->arr->values[0];
+        const qb::Value& b = sr->arr->values[1];
+        if (a.type == qb::Type::Float || a.type == qb::Type::Int) {
+            p.w0 = p.h0 = a.number(), p.w1 = p.h1 = b.number();
+        } else {
+            const venue::Vec3 va = vec(&a, {0.1f, 0.1f, 0}), vb = vec(&b, {0.1f, 0.1f, 0});
+            p.w0 = va[0], p.h0 = va[1], p.w1 = vb[0], p.h1 = vb[1];
+        }
     }
     const venue::Vec3 speed = vec(f("speedrange"), {1, 1, 0});
     p.speedMin = speed[0], p.speedMax = std::max(speed[0], speed[1]);
     p.alignWithPath = false;
     for (const qb::Item& it : st->items)
         if (it.name == 0 && it.value.type == qb::Type::Key && it.value.key == K("alignwithpath")) p.alignWithPath = true;
-    p.pathTime = num(f("pathfollowtime"), 0.1f);
+    p.pathTime = num(f("pathfollowtime"), 0);
+    {
+        const venue::Vec3 rv = vec(f("rotvel"), {});
+        p.rotMin = rv[0], p.rotMax = rv[1];
+        p.rotScale = num(f("rotveltimescale"), 0);
+    }
     if (const qb::Value* bc = f("bouncecoeff"); bc && bc->number() > 0) {
         p.bounceHeight = num(f("bounceheight"), 0);
         p.bounceCoeff = float(bc->number());
@@ -745,8 +783,25 @@ void Particles::create(const venue::Vec3& pos, const qb::Value* params, double t
         p.animFps = num(f("quadanimationfps"), 0);
     }
     if (const qb::Value* c = f("color"); c && c->type == qb::Type::Int) p.color = uint32_t(c->i);
-    if (const qb::Value* pc = f("particlecolor"); pc && pc->type == qb::Type::Array && pc->arr)
-        for (const qb::Value& c : pc->arr->values) p.gradient.push_back(uint32_t(c.i));
+    // particlecolor: pairs of RGBA words, a key each; vertexweight: the
+    // keys' times after the first (key count = pairs = weights + 1) [C 821CCCD8, 822E37C8].
+    if (const qb::Value* pc = f("particlecolor"); pc && pc->type == qb::Type::Array && pc->arr) {
+        const auto& cv = pc->arr->values;
+        std::vector<float> wt;
+        if (const qb::Value* vw = f("vertexweight"); vw && vw->type == qb::Type::Array && vw->arr)
+            for (const qb::Value& w : vw->arr->values) wt.push_back(w.number());
+        const size_t n = cv.size() / 2;
+        for (size_t k = 0; k < n; ++k) {
+            Params::Key key;
+            // [I: a key past the weights (none on the disc): evenly spread]
+            key.t = k == 0 ? 0.0f : k - 1 < wt.size() ? wt[k - 1] : float(k) / float(std::max<size_t>(1, n - 1));
+            for (int j = 0; j < 4; ++j) {
+                key.a[j] = float((uint32_t(cv[2 * k].i) >> (24 - 8 * j)) & 0xFF) / 255.0f;
+                key.b[j] = float((uint32_t(cv[2 * k + 1].i) >> (24 - 8 * j)) & 0xFF) / 255.0f;
+            }
+            p.keys.push_back(key);
+        }
+    }
     if (const qb::Struct* qm = structOf(f("quickmaterial"))) {
         p.texture = keyOf(g_->field(*qm, K("diffusetexture")));
         // blendmode (FUN_823a5f18): add 1, subtract / sub 2, blend 3, modulate 4, brighten 5, else 0 [C].
@@ -755,6 +810,10 @@ void Particles::create(const venue::Vec3& pos, const qb::Value* params, double t
                   : bm == K("brighten") ? 5 : 0;
         p.additive = p.blend == 1;
         p.alphaCut = num(g_->field(*qm, K("alphacutoff")), 0) / 255.0f;
+        // `burn` sits in the quick material on the zone objects.
+        for (const qb::Item& it : qm->items)
+            if (it.name == 0 && it.value.type == qb::Type::Key && it.value.key == K("burn"))
+                p.burn = std::max(0.0f, num(g_->field(*qm, K("burnvalue")), 0.0f));
     }
     if (rate >= 0) p.rate = rate, p.lifetime = 1e6f, p.burst = 0, p.delay = 0;  // a node's emitter
     System s;
@@ -887,6 +946,11 @@ void Particles::draw(const venue::CamPose& cam, double ms) {
     };
     std::vector<Batch> batches;
     std::vector<PVtx> verts;
+    // GH3's flat flexparticle quads (Type flat: 82427360, chosen by 824283D0;
+    // textureribbontrail 82427E08 and flatribbontrail 82427A00 are only the
+    // star power swirls' types) [C]. The camera's axes: the columns of the
+    // view matrix at system +0x2d0 [I: screen right, up, forward].
+    constexpr float kTwoPi = 6.2831853f;
     for (const System& s : systems_) {
         const Params& p = s.p;
         const double age = (ms - s.start) / 1000.0 - p.delay;
@@ -977,61 +1041,103 @@ void Particles::draw(const venue::CamPose& cam, double ms) {
                 pos[0] = w.pos[0] + dx * c - dz * sn, pos[2] = w.pos[2] + dx * sn + dz * c;
                 for (size_t k = 0; k < 3; ++k) pos[k] += w.velocity[k] * at * w.speed * att;
             }
-            const float s0 = p.sizeStart + p.sizeStartVar * rnd(s.seed, uint64_t(i), 7);
-            const float s1 = p.sizeEnd + p.sizeEndVar * rnd(s.seed, uint64_t(i), 8);
-            const float size = std::max(0.0f, s0 + (s1 - s0) * tl);
-            // Colour: the system's colour x the particlecolor gradient over the life (RGBA words) [I].
-            float col[4];
-            for (int k = 0; k < 4; ++k) col[k] = float((p.color >> (24 - 8 * k)) & 0xFF) / 255.0f;
-            if (!p.gradient.empty()) {
-                const float gpos = tl * float(p.gradient.size() - 1);
-                const size_t g0 = std::min(p.gradient.size() - 1, size_t(gpos));
-                const size_t g1 = std::min(p.gradient.size() - 1, g0 + 1);
-                const float w = gpos - float(g0);
-                for (int k = 0; k < 4; ++k) {
-                    const float c0 = float((p.gradient[g0] >> (24 - 8 * k)) & 0xFF) / 255.0f;
-                    const float c1 = float((p.gradient[g1] >> (24 - 8 * k)) & 0xFF) / 255.0f;
-                    col[k] *= c0 + (c1 - c0) * w;
-                }
-            }
+            // Half sizes: +0xf0 = sw / 2 (+0x100 = sh / 2) plus t (ew - sw) / 2 [C 822E2390, 82427360, 82801948: 0.5].
+            const float hw = 0.5f * p.w0 + tl * (p.w1 - p.w0) * 0.5f;
+            const float hh = 0.5f * p.h0 + tl * (p.h1 - p.h0) * 0.5f;
+            // Colour (823EDEC0): keys k, k + 1 around the life, each a + s (b - a)
+            // with the particle's random s (+0x34), x `color`; truncated to bytes [C].
             uint8_t c8[4];
-            for (int k = 0; k < 4; ++k) c8[k] = uint8_t(std::clamp(col[k], 0.0f, 1.0f) * 255.0f + 0.5f);
-            // A camera-facing quad; alignwithpath stretches it back along the
-            // velocity over pathfollowtime (the sparks' trails) [I].
-            venue::Vec3 sx = right, sy = up;
-            venue::Vec3 centre = pos;
-            if (p.alignWithPath) {
-                venue::Vec3 trail;
-                for (size_t k = 0; k < 3; ++k) trail[k] = vel[k] * p.pathTime;
-                const float tlen = std::sqrt(trail[0] * trail[0] + trail[1] * trail[1] + trail[2] * trail[2]);
-                if (tlen > 1e-5f) {
-                    venue::Vec3 td{trail[0] / tlen, trail[1] / tlen, trail[2] / tlen};
-                    venue::Vec3 side{td[1] * fwd[2] - td[2] * fwd[1], td[2] * fwd[0] - td[0] * fwd[2], td[0] * fwd[1] - td[1] * fwd[0]};
-                    const float sl = std::sqrt(side[0] * side[0] + side[1] * side[1] + side[2] * side[2]);
-                    if (sl > 1e-5f) {
-                        for (size_t k = 0; k < 3; ++k) sx[k] = side[k] / sl, sy[k] = td[k] * (tlen * 0.5f + size) / std::max(size, 1e-4f);
-                        for (size_t k = 0; k < 3; ++k) centre[k] = pos[k] - trail[k] * 0.5f;
+            {
+                float col[4] = {1, 1, 1, 1};
+                const size_t nk = p.keys.size();
+                if (nk == 1) {
+                    for (int k = 0; k < 4; ++k) col[k] = p.keys[0].a[k];
+                } else if (nk >= 2) {
+                    // The segment k runs from key k's time to key k + 1's; its
+                    // progress stops at 1 in the last one [C 823EF088; I: GH3
+                    // steps it a frame at a time, dropping the overshoot].
+                    size_t k = 0;
+                    while (k + 2 < nk && tl >= p.keys[k + 1].t) ++k;
+                    const float span = p.keys[k + 1].t - p.keys[k].t;
+                    const float u = span > 0 ? std::clamp((tl - p.keys[k].t) / span, 0.0f, 1.0f) : 1.0f;
+                    const float rs = rnd(s.seed, uint64_t(i), 10);
+                    for (int j = 0; j < 4; ++j) {
+                        const float c0 = p.keys[k].a[j] + rs * (p.keys[k].b[j] - p.keys[k].a[j]);
+                        const float c1 = p.keys[k + 1].a[j] + rs * (p.keys[k + 1].b[j] - p.keys[k + 1].a[j]);
+                        col[j] = c0 + u * (c1 - c0);
                     }
                 }
+                for (int k = 0; k < 4; ++k) {
+                    const float v = float((p.color >> (24 - 8 * k)) & 0xFF) * col[k];
+                    c8[k] = uint8_t(std::clamp(v, 0.0f, 255.0f));
+                }
             }
-            const float h = size * 0.5f;
-            const float cx[4] = {-1, 1, 1, -1}, cy[4] = {-1, -1, 1, 1};
+            // The quad's half axes X (width, across) and Y (height, along).
+            venue::Vec3 X, Y;
+            bool skip = false;
+            if (p.alignWithPath) {
+                auto cross = [&](const venue::Vec3& v) {
+                    return venue::Vec3{v[1] * fwd[2] - v[2] * fwd[1], v[2] * fwd[0] - v[0] * fwd[2], v[0] * fwd[1] - v[1] * fwd[0]};
+                };
+                if (p.pathTime > 0) {
+                    // Along the path: Y = velocity x pathfollowtime / 2 (centred
+                    // on the particle), X = unit(Y x forward) x half width [C].
+                    for (size_t k = 0; k < 3; ++k) Y[k] = vel[k] * p.pathTime * 0.5f;
+                    const venue::Vec3 sd = cross(Y);
+                    const float l2 = sd[0] * sd[0] + sd[1] * sd[1] + sd[2] * sd[2];
+                    if (l2 == 0) skip = true;
+                    else {
+                        const float inv = 1.0f / std::sqrt(l2);
+                        for (size_t k = 0; k < 3; ++k) X[k] = sd[k] * inv * hw;
+                    }
+                } else {
+                    // Y = unit velocity x half height, X = (unit velocity x forward) x half width [C].
+                    const float l2 = vel[0] * vel[0] + vel[1] * vel[1] + vel[2] * vel[2];
+                    if (l2 == 0) skip = true;
+                    else {
+                        const float inv = 1.0f / std::sqrt(l2);
+                        const venue::Vec3 dn{vel[0] * inv, vel[1] * inv, vel[2] * inv};
+                        const venue::Vec3 sd = cross(dn);
+                        for (size_t k = 0; k < 3; ++k) Y[k] = dn[k] * hh, X[k] = sd[k] * hw;
+                    }
+                }
+            } else {
+                venue::Vec3 r = right, u = up;
+                if (p.rotMin != 0 || p.rotMax != 0) {
+                    // Spin (+0x28): w = rotvel's random x 2 pi rad/s [C 8233B120],
+                    // going to w x rotveltimescale over the life [C 823EF088;
+                    // I: integrated exactly from angle 0]; quantised to GH3's
+                    // 256-step table of Z rotations (row 0 (c, s), row 1 (-s, c))
+                    // [C 823B8078, 82234750; I: c = cos].
+                    const float w = (p.rotMin + rnd(s.seed, uint64_t(i), 11) * (p.rotMax - p.rotMin)) * kTwoPi;
+                    const float ang = w * (at + (p.rotScale - 1.0f) * at * at / (2.0f * life));
+                    const int idx = int(ang * 0.15915494f * 256.0f) & 0xFF;
+                    const float ta = float(idx) * 0.024543693f;
+                    const float c = std::cos(ta), sn = std::sin(ta);
+                    for (size_t k = 0; k < 3; ++k) r[k] = c * right[k] + sn * up[k], u[k] = -sn * right[k] + c * up[k];
+                }
+                for (size_t k = 0; k < 3; ++k) X[k] = r[k] * hw, Y[k] = u[k] * hh;
+            }
+            if (skip) continue;
             // The flipbook cell: (int(age x quadanimationfps) + the particle's
-            // random) & mask, or the random alone; 2x2 / 1x2 / 2x1 cells [C 82427E08].
-            float cu = 0, cv = 0, cw = 1, chh = 1;
+            // random) & mask, or the random alone; cells (u0, v0, u1, v1) [C 82427360, table 8291E360].
+            float u0 = 0, v0 = 0, u1 = 1, v1 = 1;
             if (p.layout) {
                 const int mask = p.layout == 1 ? 3 : 1;
                 const int r = int(rnd(s.seed, uint64_t(i), 9) * 65536.0f);
-                const int cell = (p.animFps > 0 ? int(float(a) * p.animFps) + r : r) & mask;
-                if (p.layout == 1) cw = chh = 0.5f, cu = 0.5f * float(cell & 1), cv = 0.5f * float(cell >> 1);
-                else if (p.layout == 2) cw = 0.5f, cu = 0.5f * float(cell);
-                else chh = 0.5f, cv = 0.5f * float(cell);
+                const int cell = (p.animFps > 0 ? int(float(int(p.animFps)) * at) + r : r) & mask;
+                if (p.layout == 1) u0 = 0.5f * float(cell & 1), v0 = 0.5f * float(cell >> 1), u1 = u0 + 0.5f, v1 = v0 + 0.5f;
+                else if (p.layout == 2) u0 = 0.5f * float(cell), u1 = u0 + 0.5f;
+                else v0 = 0.5f * float(cell), v1 = v0 + 0.5f;
             }
+            // Corners: P - X - Y (u1, v1), P + X - Y (u0, v1), P + X + Y (u0, v0), P - X + Y (u1, v0) [C 82427360].
+            const float sx[4] = {-1, 1, 1, -1}, sy[4] = {-1, -1, 1, 1};
+            const float cu[4] = {u1, u0, u0, u1}, cvv[4] = {v1, v1, v0, v0};
             PVtx q[4];
             for (int k = 0; k < 4; ++k) {
-                for (size_t j = 0; j < 3; ++j) q[k].pos[j] = centre[j] + (sx[j] * cx[k] + sy[j] * cy[k]) * h;
+                for (size_t j = 0; j < 3; ++j) q[k].pos[j] = pos[j] + X[j] * sx[k] + Y[j] * sy[k];
                 std::memcpy(q[k].col, c8, 4);
-                q[k].uv[0] = (cx[k] * 0.5f + 0.5f) * cw + cu, q[k].uv[1] = (0.5f - cy[k] * 0.5f) * chh + cv;
+                q[k].uv[0] = cu[k], q[k].uv[1] = cvv[k];
             }
             for (int k : {0, 1, 2, 0, 2, 3}) verts.push_back(q[k]);
         }

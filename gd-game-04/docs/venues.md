@@ -536,39 +536,97 @@ them like the lights [I].
   edge at |xy / w| = 1 [C: the shader's maths]. Additive, no depth write [I:
   the states].
 
-### Particles and pyro  [C scripts; I: the emitter model]
+### Particles and pyro  [C scripts; C: the quads, sizes, spin, colours; I: the emitter model]
 
 Particle systems come from the zone's scripts: `CreateParticleSystem_fast
 pos params_script` with a GP_* struct (scripts\fx\particles\*.qb:
 emitrangedims, emit_target, anglespread, force, liferange, emit_rate,
 lifetime, emitnum, emitdelaystart, sizerange, speedrange, alignwithpath /
-pathfollowtime, color (RGBA word), particlecolor (a gradient), the quick
-material's diffusetexture (an .img of ZONES/global.pak), blendmode,
-alphacutoff) [C data]. Triggers [C scripts]: the light show's note 56
+pathfollowtime, rotvel / rotveltimescale, color (RGBA word),
+particlecolor / vertexweight, the quick material's diffusetexture (an .img
+of ZONES/global.pak), blendmode, alphacutoff) [C data], and from the
+particle objects (above). Triggers [C scripts]: the light show's note 56
 (LightShow_PyroEvent: `<zone>_lightshow_mapping.pyro_script performance =
 ...`, e.g. z_artdeco_pyro's six spark pots when good), and the performance
 changes (`<zone>_lightshow_mapping.transitions.performance`, e.g.
 z_dive_performance_changed spawning Z_Dive_Create_GoodParticles: the
 cobra and dancer sparks every 1-3 s while good). gd04 (`render/particles.*`)
 runs those scripts on its QScript VM stepped at 60 Hz of song time and
-draws each particle as a function of its system's start and seed: a burst
-of emitnum, then emit_rate a second for `lifetime` seconds; start in the
-emitter box (half extents), direction within anglespread of emit_target,
-speed in speedrange, constant force, size from sizerange's start to end
-(+ a random share of each's second number), colour = color x the
-particlecolor gradient over the life, camera-facing quads stretched back
-along the velocity over pathfollowtime with alignwithpath [I: the whole
-model]. Drawn with gd04's own program in the quick
+draws each particle as a function of its system's start and seed.
+
+What GH3's code does with the keys [C, default.xex]:
+
+- The parser of the flexibleparticle component is 821CCCD8. It switches on
+  each item's type and key and writes into a 0x340-byte parameter block. The
+  system's init from that block is 822E37C8. Both GP_* structs and the zone
+  objects go through it.
+- `knot` is not read by the flexibleparticle component. Only the `particle`
+  component's init (821CFE38) reads `knot`, and only when it also has a
+  `knots` count, which nothing on the disc has. GH3 ignores the knot arrays.
+- `history` (+0x28) and `historylistcoordinatespace` only feed the history
+  ring (system +0x350 entries, +0x7e0 buffer, updated by 8233CAD0), which
+  only the ribbon builders read.
+- The draw (824283D0) picks the quad builder by Type: `flat` 82427360,
+  `textureribbontrail` 82427E08, `flatribbontrail` 82427A00, else 82446AA8.
+  Every zone object and 67 of the 72 GP structs are `flat`. The 4
+  `textureribbontrail` ones are the star power swirls
+  (GP_StarPower_*Swirl01).
+- Sizes: `sizerange = [(sw, sh), (ew, eh)]` (or `[s, e]` floats: square) is
+  the start and end width and height. 822E2390 stores +0x90/+0xa0 = sw/sh
+  and +0xf0/+0x100 = sw/2, sh/2; +0xc0/+0xd0 = ew/eh. 82427360 takes half
+  width = sw/2 + t (ew - sw) x 0.5 and half height the same way, with t =
+  age / life (the 0.5 is the vector 82BE70B0, set by 82801948). It is linear
+  and the same for every particle (no random size).
+- Flat quads (82427360): the camera axes are the columns of the view matrix
+  at system +0x2d0 (right, up, forward). X = right x half width, Y = up x
+  half height. The corners are P - X - Y (u1, v1), P + X - Y (u0, v1),
+  P + X + Y (u0, v0), P - X + Y (u1, v0), with the cell (u0, v0, u1, v1)
+  from table 8291E360. For 2x2 the cells are (0,0,.5,.5), (.5,0,1,.5),
+  (0,.5,.5,1), (.5,.5,1,1); 1x2 is (0,0,.5,1), (.5,0,1,1); 2x1 is
+  (0,0,1,.5), (0,.5,1,1). The cell is (int(quadanimationfps x age) + the
+  particle's random) & mask, or the random alone when the fps is 0.
+- `alignwithpath` (+0x8c2) with `pathfollowtime` (+0x7f0) > 0: Y =
+  velocity x pathfollowtime / 2, so the quad is centred on the particle and
+  runs half a path behind and ahead. X = normalise(Y x forward) x half
+  width. With pathfollowtime <= 0: Y = unit velocity x half height and X =
+  (unit velocity x forward) x half width. A zero cross product skips the
+  particle.
+- Spin: `rotvel = (a, b)` turns a second. At the system's init (8233B120)
+  every slot gets w = (a + rand (b - a)) x 2 pi rad/s, and the +0x8cc flag
+  is set. Each frame (823EF088) the angle (+0x28) gains w (1 + (s - 1) t) dt,
+  with s = `rotveltimescale` and t = age / life. The builder quantises the
+  angle to int(angle / 2 pi x 256) & 255 into a table of Z rotations
+  (823B8078 with 82234750: row 0 (c, s), row 1 (-s, c)). Then X = (c right +
+  s up) x half width and Y = (-s right + c up) x half height.
+- Colours: `particlecolor` holds pairs of RGBA words, one pair a key, and
+  the key count is pairs = weights + 1. `vertexweight` holds the times of
+  keys 1.. as a fraction of the life; key 0 is at 0. 822E37C8 multiplies
+  each key by `color`. Each frame 823EF088 moves the particle's segment
+  progress by dt / ((t[k+1] - t[k]) life). At 1 it goes to the next segment,
+  or holds 1 in the last one. 823EDEC0 makes the colour: key k and key k + 1,
+  each a + s (b - a) with the particle's random s (+0x34), interpolated by
+  the progress and truncated to bytes.
+
+gd04 does all of the above for the flat quads. These parts are inferred
+[I]: the emitter model (a burst of emitnum, then emit_rate a second for
+`lifetime` seconds; the start in the emitter box; the direction within
+anglespread / elevspread of emit_target; speed in speedrange; constant
+force), the camera axes being gd04's right / up / forward, the colour words
+read as RGBA, the spin starting at angle 0, and the segment progress taken
+exactly (GH3 steps it a frame at a time and drops the overshoot, at most a
+frame). Drawn with gd04's own program in the quick
 material's state [C: 823B7768, 823DC180, the particlequickmaterial
 shaders, which read no particle constants: the CPU builds world-space
 quads; g_Particle_Vec / Tex belong to the GPU rain]: blendmode add 1,
 subtract 2, blend 3, modulate 4, brighten 5, else 0 (opaque) by the
 material blend table; `burn` = premultiplied (ONE / ONE_MINUS_SRC_ALPHA)
-with a' = (1 - burnvalue) a, rgb x a x a'; alphacutoff the alpha test;
-texturelayout 2x2 / 1x2 / 2x1 cells, cell = (int(age x quadanimationfps)
-+ the particle's random) & mask (the random alone at 0 fps) [C 82427E08].
-Particles bounce off bounceheight (bouncecoeff, solved exactly) [I: the model]. Not done: spline knots, wind (every windcoeff on the disc is 0), the size / rotation maths of GH3's
-own quad builders (VMX128 code not decoded), lit quick materials.
+with a' = (1 - burnvalue) a, rgb x a x a'; alphacutoff the alpha test.
+Particles bounce off bounceheight (bouncecoeff, solved exactly) [I: the model].
+Not done: wind (every windcoeff on the disc is 0), rotate3d (82427238),
+emitangle's fixed facing (+0x8b2: 8233B740), the ribbon builders (82427E08:
+each history entry is a direction and a length; a ribbon of quads walks back
+from the particle, width = (direction x forward) x half width, v stepping
+1 / history), lit quick materials, GH3's frame-stepped motion.
 
 ### Not done yet
 
@@ -598,9 +656,13 @@ bright_sat (Brightness 2.5, Contrast 0.6), after 0.1 x time updates it to
 Brightness 1 / Contrast 1 with `time`, and ScreenFlashOff removes it [C
 scripts misclightutils.qb]; gd04 eases linearly over `time` [I] and draws it
 in the second bright_sat slot. Particle objects (class particleobject:
-z_party's GFX fires / smoke / sparks, z_video's) emit from their node with
-their scriptreference's GP_* parameters; `emitrate {rate}` (the
-performance scripts) restarts the emission at that rate, 0 stops it.
+z_party's GFX fires / smoke / sparks, z_video's, z_hell's, z_wikker's) emit
+from their node with their scriptreference's GP_* parameters, or their own
+keys when they have none (821CE4A8, the flexibleparticle init, reads
+whichever is there [C]); `emitrate {rate}` (the performance scripts)
+restarts the emission at that rate, 0 stops it; `Create name=` (SafeCreate,
+z_wikker's dino flames) starts one emitting its emit_rate, and IsCreated
+follows Create / Kill [C scripts].
 obj_locktoobject (z_prison's caged dancer on the cage, lowered and raised by
 performance): the dancer moves as the cage's motion moves her placed
 position [I: the offset's frame]. random() branches ending in `,` before

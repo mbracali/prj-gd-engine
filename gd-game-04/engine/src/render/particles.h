@@ -86,19 +86,30 @@ public:
     // One CreateParticleSystem_fast's parameters, decoded.
     struct Params {
         venue::Vec3 box{}, target{0, 1, 0}, force{};
-        float spread = 0;  // anglespread, degrees
+        float spread = 0;  // anglespread (or elevspread's range), degrees
         float lifeMin = 1, lifeMax = 1, rate = 0, lifetime = 0, delay = 0;
         int burst = 0;
-        float sizeStart = 0.1f, sizeStartVar = 0, sizeEnd = 0.1f, sizeEndVar = 0;
+        // sizerange [(start width, start height), (end width, end height)],
+        // linear over the life, the same for every particle [C 822E37C8, 822E2390, 82427360].
+        float w0 = 0.1f, h0 = 0.1f, w1 = 0.1f, h1 = 0.1f;
         float speedMin = 1, speedMax = 1;
         bool alignWithPath = false;
-        float pathTime = 0.1f;
+        float pathTime = 0;                   // pathfollowtime (system +0x7f0) [C]
+        float rotMin = 0, rotMax = 0;         // rotvel (turns a second) [C 8233B120]
+        float rotScale = 0;                   // rotveltimescale [C 823EF088]
         // bounceheight / bouncecoeff: the particles rebound off the plane y = height (world)
         // keeping coeff of their speed; off when the coeff is 0 or the height -99.9 [C data; I: the model].
         bool bounce = false;
         float bounceHeight = 0, bounceCoeff = 0;
         uint32_t color = 0xFFFFFFFF;          // RGBA
-        std::vector<uint32_t> gradient;       // particlecolor, over the life
+        // particlecolor / vertexweight: colour keys, each a pair (a, b) the
+        // particle's random picks between; key 0 at life 0, key k at
+        // vertexweight[k - 1] [C 821CCCD8, 822E37C8, 823EDEC0].
+        struct Key {
+            float t = 0;
+            float a[4]{}, b[4]{};
+        };
+        std::vector<Key> keys;
         uint32_t texture = 0;                 // quickmaterial.diffusetexture
         bool additive = true;
         int blend = 1;          // blendmode: 0 diffuse, 1 add, 2 subtract, 3 blend, 4 modulate, 5 brighten [C 823B7768]
@@ -175,6 +186,7 @@ private:
         qb::Value params;
         uint64_t system = 0;  // the running system's seed (0: none)
         float rate = 0;
+        float ownRate = 0;    // its params' emit_rate (createdatstart / Create)
     };
     std::unordered_map<uint32_t, NodeEmitter> nodeEmitters_;
     struct Lock {
