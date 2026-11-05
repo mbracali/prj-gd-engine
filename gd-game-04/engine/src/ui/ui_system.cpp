@@ -285,7 +285,11 @@ void UiSystem::applyProps(Element& e, const qb::Struct& p, bool create) {
         } else if (n == K("dims")) {
             if (v.type == qb::Type::Pair) newDimsW = v.f[0], newDimsH = v.f[1];
         } else if (n == K("scale")) {
-            haveScale = readPair(v, scaleX, scaleY);
+            // A number or a pair; a vector is not one (left as it was):
+            // create_choose_practice_part_menu's GUITAR / BASS texts pass
+            // scale = (1.0, 0.0, 1.0) and show at scale 1 [C 0x8221A738:
+            // FUN_821f7028 (int / float) else FUN_821f7380 (pair, type 5)].
+            haveScale = v.type != qb::Type::Vector && readPair(v, scaleX, scaleY);
         } else if (n == K("relative_scale")) {
             float a = 1, b = 1;
             if (readPair(v, a, b)) e.sx *= a, e.sy *= b;
