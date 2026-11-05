@@ -6,7 +6,7 @@ matches the tag's version. Nothing is released yet.
 
 ## [Unreleased]
 
-## [0.1.12] - 2026-11-05
+## [1.1.12] - 2026-11-05
 
 ### Fixed
 - Android: songs no longer drop to 10-15 fps on phones whose graphics drivers stall on buffer updates (#55).
