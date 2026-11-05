@@ -21,7 +21,7 @@ class UiManager;
 // scrollbar on the left and Back / Export / Import under the list, check
 // boxes and dropdowns, over a still shot of the second venue with the band
 // posed (UiHost::menuBackdrop), the focused setting's explanation in a box on
-// the right (guidelines/universal_launcher.md). Every change is saved and
+// the right (docs/knowledge/universal_launcher.md). Every change is saved and
 // applies at once. Settings gd03 does not have yet are listed greyed, "not
 // available yet", and cannot be chosen. CHEATS & ENHANCERS has the game's
 // own cheats (the main menu's button codes, config/long_cheats.dta). Defined

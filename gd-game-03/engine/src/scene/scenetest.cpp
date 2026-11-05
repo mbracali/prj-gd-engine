@@ -198,7 +198,13 @@ int runSceneTest(const std::string& dataPath) {
                 std::vector<const Object*> objs;
                 if (d->self) objs.push_back(d->self.get());
                 for (const auto& o : d->objects) objs.push_back(o.get());
+                static const char* dumpMat = std::getenv("GD03_DUMP_MAT");  // dev aid: print a Mat's fields
                 for (const Object* o : objs) {
+                    if (const auto* m = o->as<Mat>(); m && dumpMat && o->name.find(dumpMat) != std::string::npos)
+                        std::printf("%s %s v%d: blend %d color %.3f %.3f %.3f %.3f prelit %d environ %d zmode %d tex %s next %s intensify %d emissive %.2f\n",
+                                    p.c_str(), o->name.c_str(), o->version, m->blend, m->color[0], m->color[1], m->color[2], m->color[3],
+                                    m->prelit, m->useEnviron, m->zMode, m->diffuseTex.c_str(), m->nextPass.c_str(), m->intensify,
+                                    m->emissiveMultiplier);
                     if (const auto* dobj = o->as<DirObj>(); dobj && !dobj->own && !dobj->objectDir.proxyFile.empty() &&
                                                            dobj->objectDir.inlineProxy != 1 && dobj->objectDir.inlineProxy != 2) {
                         std::string target = findMiloRelative(data, p, dobj->objectDir.proxyFile);

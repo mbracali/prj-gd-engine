@@ -209,6 +209,19 @@ Gem totals over the 74 songs (chord = one gem):
 | PART RHYTHM | 7537 | 10275 | 13176 | 15090 |
 | PART GUITAR COOP | 6417 | 8546 | 11496 | 13565 |
 
+- Notes below pitch 36 on any non-drum PART track are the **bass ranges**
+  (0x823457A8 -> 0x82345A68 -> 0x82331580, all into the bass part's list)
+  [C]. For a bass player GH2's OnMiss (0x823503D0) inside a range plays the
+  range's `bass_%d.cue` (none on the disc: silent) instead of the
+  overstrum. The disc has one: X-Stream's PART GUITAR pitch 35,
+  302.21..302.31 s (`Song::bassRanges`, `Player::watcherMiss`; self-test
+  "bass range") (GD02-036).
+- Input timing: a press is stamped with the song time of the Beatmatcher's
+  last poll (+0x90, read by 0x8233BBF0, written only by 0x8233A208): the
+  frame's game time, the same for every press in a frame, so the 52 ms
+  strum repeat and the chord-by-fret check compare frame times
+  (`App::playerAction` uses `lastT_`) (GD02-152) [C; the poll order I].
+
 ### EVENTS track
 
 | Text | Use |

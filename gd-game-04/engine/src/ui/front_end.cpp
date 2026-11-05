@@ -2,6 +2,8 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "ui/front_end.h"
 
+#include "audio/sound_buss.h"
+
 #include <SDL3/SDL_log.h>
 
 #include "data/qbkey.h"
@@ -36,7 +38,7 @@ FrontEnd::FrontEnd(const Disc& disc, Globals& globals, TextureCache& textures, g
     if (!sfx.open(err)) SDL_Log("sfx: %s", err.c_str());
     sfx.addPak(disc_, "DATA/COMPRESSED/ZONES/global_sfx.pak.xen");
     sfx.addFsb(disc_, "DATA/STREAMS/streamall.fsb.xen", "DATA/STREAMS/streamall.dat.xen");
-    addSoundNatives(*vm_, sfx);
+    addSoundNatives(*vm_, sfx, disc_);
     ui_->addMovieNatives();  // after the game natives' movie stubs
     scene_ = std::make_unique<MenuScene>(disc_, globals_, *vm_, *ui_);
     scene_->addNatives();  // after the flow natives' stubs (PlayIGCCam, KillCamAnim)
@@ -82,11 +84,24 @@ void FrontEnd::handle(const InputEvent& e) {
     case Action::Down: ev = "pad_down"; break;
     case Action::Left: ev = "pad_left"; break;
     case Action::Right: ev = "pad_right"; break;
-    case Action::Confirm: ev = "pad_choose"; break;
+    // The keyboard's Enter (Start, bound) is select in the menus and Start on
+    // a text entry, where it finishes the name, as in gd02 / gd03 (the
+    // owner's rule: Enter is Start; GH3's menus select with pad_choose only,
+    // their pad_start shows a gamercard) [C scripts; UiSystem::startFinishesEntry].
+    case Action::Confirm: ev = e.enterKey && ui_->startFinishesEntry(e.player) ? "pad_start" : "pad_choose"; break;
     case Action::Back: ev = "pad_back"; break;
     case Action::Start: ev = "pad_start"; break;
     case Action::Fret0: ev = "pad_choose"; break;  // green [I: GH3's button mapping, docs/ui.md]
     case Action::Fret1: ev = "pad_back"; break;    // red
+    // Yellow / blue / orange: the 360 guitar's Y / X / LB, which xenon_pad
+    // makes pad_option2 / pad_option / pad_l1 (the set list's SETLIST /
+    // BONUS / DOWNLOADS tabs: setlist_event_handlers, setlist_show_helperbar's
+    // \b6 \b7 \b8) [C data menubuttonremap.qb; I: only these three of the
+    // events each button raises (pad_square, pad_space, ... have no menu
+    // handler outside debug and online menus)]. GD04-090.
+    case Action::Fret2: ev = "pad_option2"; break;
+    case Action::Fret3: ev = "pad_option"; break;
+    case Action::Fret4: ev = "pad_l1"; break;
     default: break;
     }
     if (ev) ui_->padEvent(qbkey::key(ev), e.player);
@@ -156,8 +171,10 @@ void FrontEnd::songEnded(const SongResult& r) {
 }
 
 void FrontEnd::frame(Canvas& c, double dtMs) {
+    soundBusses().update(dtMs);  // the busses' fades (SetSoundBussParams time = s)
     sfx.update();
-    if (!songPlaying && !flow.paused) songClockMs += dtMs;
+    if (!songPlaying && !songOutro && !flow.paused) songClockMs += dtMs;
+
     // GD04_FLOWLOG=1: each flow state player 1 enters (ui_flow_manager_state[0]).
     static const bool flowLog = SDL_getenv("GD04_FLOWLOG") != nullptr;
     if (flowLog) {
@@ -173,18 +190,22 @@ void FrontEnd::frame(Canvas& c, double dtMs) {
     }
     // During a song GH3's scripts keep running (the attract mode's input
     // check, the end-of-song events) and their elements draw over it [C: one VM].
-    scene_->setSuspended(songPlaying);  // the menus' characters wait while the song's band plays
+    scene_->setSuspended(songPlaying || songOutro);  // the menus' characters wait while the song's band plays
     accum_ += dtMs;
     int steps = 0;
+    // Practice's setslomo: the scripts' clock (Wait n seconds: the intro's
+    // sound waits, the song's events) runs at the song's speed while it
+    // plays [C script start_gem_scroller; I: GH3's script waits on game time].
+    const double vmStep = songPlaying && !songPaused ? kStepMs * double(songRequest.speed) : kStepMs;
     while (accum_ >= kStepMs && steps < 8) {
         accum_ -= kStepMs;
-        vm_->update(kStepMs);
+        vm_->update(vmStep);
         ui_->update(kStepMs);
         scene_->update(kStepMs);
         ++steps;
     }
     if (accum_ > kStepMs * 8) accum_ = 0;
-    if (!songPlaying) scene_->draw(c);
+    if (!songPlaying && !songOutro) scene_->draw(c);
     ui_->draw(c);
 }
 

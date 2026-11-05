@@ -73,7 +73,8 @@ const char* partName(Part p) {
 const char* difficultyName(int d) { return d >= 0 && d < kDifficulties ? kDiff[d] : "?"; }
 
 Chart loadChart(const Disc& disc, const std::string& song) {
-    Pak pak = Pak::load(disc, "DATA/COMPRESSED/SONGS/" + song + "_song.pak.xen");
+    const auto pakShared = Pak::shared(disc, "DATA/COMPRESSED/SONGS/" + song + "_song.pak.xen");
+    const Pak& pak = *pakShared;
     const PakEntry* e = pak.findType(qbkey::key("songs\\" + song + ".mid.qb"), qbkey::key(".qb"));
     if (!e) throw std::runtime_error("no songs\\" + song + ".mid.qb in its pak");
     auto span = pak.data(*e);

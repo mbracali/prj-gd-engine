@@ -79,7 +79,12 @@ void PortDraw::text(const std::string& s, float x, float y, float h, const Color
     // GH3's options font draws ';' as a 'y' [I: seen]: a comma instead.
     std::string t = s;
     std::replace(t.begin(), t.end(), ';', ',');
+    t = ui_.setText(t);  // GH3's \m<n> button codes to the buttons font's glyphs, as its text elements
     ui_.drawText(c_, fontKey(title), t, x, y, h, bytes(faded(c)), align);
+}
+
+bool PortDraw::sprite(uint32_t texture, float x0, float y0, float x1, float y1, const Color& c, bool flipU) {
+    return ui_.drawSprite(c_, texture, x0 + offset_, y0, x1 + offset_, y1, bytes(faded(c)), flipU);
 }
 
 float PortDraw::width(const std::string& s, float h, bool title) const { return ui_.textWidth(fontKey(title), s, h); }

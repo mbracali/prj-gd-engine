@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "render/band_anim.h"
+#include <SDL3/SDL_log.h>
+#include <cstdlib>
 
 #include <algorithm>
+#include <set>
 #include <cmath>
 #include <cstdio>
 #include <string_view>
@@ -193,7 +196,11 @@ void evalDelta(const Rig& rig, const Node& n, double t, float strength, Pose& po
     }
     for (size_t b = 0; b < pose.size(); ++b) {
         const Xf& d = cur[b];
-        pose[b].q = qmul(pose[b].q, qpow(d.q, strength));
+        // The delta goes before the pose below (in the file's row-vector terms
+        // the pose below, then the delta): the other order turned the IK
+        // target, and the fret hand with it, about the wrong axes (owner
+        // 11-04 doc 1.1; checked against the fret hand's grip in renders).
+        pose[b].q = qmul(qpow(d.q, strength), pose[b].q);
         pose[b].t = vadd(pose[b].t, vmul(d.t, strength));
     }
 }
@@ -371,26 +378,64 @@ bool Animator::init(const Setup& s, std::string& error) {
     fingerAnims_ = prof ? structOf(g.find(keyOf(prof->find(K("finger_anims"))))) : nullptr;
     fretAnims_ = prof ? structOf(g.find(keyOf(prof->find(K("fret_anims"))))) : nullptr;
 
-    // IK chains: the arms of ik_params (Hero_Ik_params) whose target is a guitar hand bone [C data].
+    // IK chains: the tree's ik node's two_bone_chains: the guitarist's
+    // `$ik_params` (the profile's, else Hero_Ik_params: the arms onto the
+    // guitar's hand bones, the legs onto the foot slaves), the drummer's
+    // Drummer_IK_Params and the singer's Singer_IK_Params (the hands onto
+    // Bone_IK_Hand_Slave_L/R, the feet onto the foot slaves) [C data
+    // guitarist / drummer / vocalist_static_tree]. Owner 11-04 doc 1.2 / 2:
+    // the drummer and the singer had none.
     chains_.clear();
-    if (guitarLike()) {
-        uint32_t ikKey = prof ? keyOf(prof->find(K("ik_params"))) : 0;
-        if (!ikKey) ikKey = K("hero_ik_params");
-        if (const qb::Value* ik = g.find(ikKey); ik && ik->type == qb::Type::Array && ik->arr)
+    {
+        uint32_t ikKey = 0;
+        if (guitarLike()) {
+            ikKey = prof ? keyOf(prof->find(K("ik_params"))) : 0;
+            if (!ikKey) ikKey = K("hero_ik_params");
+        } else if (role_ == band::Role::Drummer) {
+            ikKey = K("drummer_ik_params");
+        } else if (role_ == band::Role::Vocalist) {
+            ikKey = K("singer_ik_params");
+        }
+        if (const qb::Value* ik = ikKey ? g.find(ikKey) : nullptr; ik && ik->type == qb::Type::Array && ik->arr)
             for (const qb::Value& e : ik->arr->values) {
                 const qb::Struct* st = structOf(&e);
                 if (!st) continue;
                 const uint32_t tgt = keyOf(st->find(K("bonetarget")));
-                if (tgt != K("bone_ik_hand_guitar_l") && tgt != K("bone_ik_hand_guitar_r")) continue;
+                const bool leg = tgt == K("bone_ik_foot_slave_l") || tgt == K("bone_ik_foot_slave_r");
                 Chain c;
+                c.leg = leg;
                 c.b0 = rig_.find(keyOf(st->find(K("bone0"))));
                 c.b1 = rig_.find(keyOf(st->find(K("bone1"))));
                 c.b2 = rig_.find(keyOf(st->find(K("bone2"))));
                 c.target = rig_.find(tgt);
-                c.right = tgt == K("bone_ik_hand_guitar_r");
+                c.right = tgt == K("bone_ik_hand_guitar_r") || tgt == K("bone_ik_hand_slave_r");
+                if (const qb::Value* h = st->find(K("hingeaxis")); h && h->type == qb::Type::Vector) c.hinge = {h->f[0], h->f[1], h->f[2]};
+                if (const qb::Value* v = st->find(K("cosmaxhingeangle"))) c.cosMax = float(v->number());
+                if (const qb::Value* v = st->find(K("cosminhingeangle"))) c.cosMin = float(v->number());
+                if (const qb::Value* v = st->find(K("strength"))) c.gain1 = c.gain2 = float(v->number());
                 if (c.b0 >= 0 && c.b1 >= 0 && c.b2 >= 0 && c.target >= 0) chains_.push_back(c);
             }
     }
+    // The twist and split helper bones (hero_ConstraintBones, the root of the
+    // guitarist's, singer's and drummer's trees) [C data].
+    constraints_.clear();
+    if (const qb::Value* cb = g.find(K("hero_constraintbones")); cb && cb->type == qb::Type::Array && cb->arr)
+        for (const qb::Value& e : cb->arr->values) {
+            const qb::Struct* st = structOf(&e);
+            if (!st) continue;
+            Constraint c;
+            const uint32_t ty = keyOf(st->find(K("type")));
+            if (ty == K("twist")) c.type = Constraint::Twist;
+            else if (ty == K("twistchild")) c.type = Constraint::TwistChild;
+            else if (ty == K("split")) c.type = Constraint::Split;
+            else if (ty == K("splitr")) c.type = Constraint::SplitR;
+            else continue;
+            c.bone = rig_.find(keyOf(st->find(K("bone"))));
+            c.target = rig_.find(keyOf(st->find(K("target"))));
+            const qb::Value* am = st->find(K("amount"));
+            c.amount = am ? float(am->number()) : 0.5f;
+            if (c.bone >= 0 && c.target >= 0) constraints_.push_back(c);
+        }
     // The song's events [C scripts Strum_iterator, FretPos_iterator,
     // FretFingers_iterator, Drum_iterator, Drum_cymbal_iterator, event_iterator].
     fixed_.clear();
@@ -535,10 +580,17 @@ void Animator::bodyIteration(double t) {
     setArms(disableArms_, t, 0.25f);
     uint32_t key = 0;
     const anim::Clip* c = tempoAnim(currentAnim_, t, key);
+    // GD04_ANIMLOG=1: each body clip a member starts (development aid).
+    static const bool animLog = std::getenv("GD04_ANIMLOG") != nullptr;
+    if (animLog)
+        SDL_Log("anim: %.0f ms role %d stance %s anim %s -> %s (%.2f s)", t, int(role_), qbkey::name(stance_).c_str(), qbkey::name(currentAnim_).c_str(),
+                c ? qbkey::name(key).c_str() : "(none)", c ? double(c->duration) : 0.0);
     ++bodyGen_;
     if (c) {
-        body_.play(c, t, 0.2f);
+        body_.play(c, t, bodyBlend_);
+        bodyBlend_ = 0.2f;
         bodyKey_ = key;
+        scheduleClipEvents(key, t);
         ++stats_.bodyAnims;
         schedule(t + std::max(kFrameMs, double(c->duration) * 1000.0), Ev::BodyDone, 0, 0, bodyGen_);
     } else {
@@ -546,7 +598,40 @@ void Animator::bodyIteration(double t) {
     }
 }
 
+// ped_animevents.<clip> = [{time scr params}]: each entry's script at `time`
+// s into the clip while it plays (a later body clip cancels the rest) --
+// Casey's / Judy's Star Power anims fire StarPower_ShootShotgun (spCaseyShoot:
+// Do_StarPower_ShotgunFX's shots), Johnny's StarPower_FlameThrowerFlames
+// (spJohnnyFlamesOn: Do_StarPower_FlameThrowerFX's flames) [C data
+// ped_animevents, scripts guitar_starpower.qb; I: times at the clip's own rate].
+void Animator::scheduleClipEvents(uint32_t clipKey, double t) {
+    const qb::Value* all = g_ ? g_->find(K("ped_animevents")) : nullptr;
+    if (!all || !all->st) return;
+    const qb::Value* list = all->st->find(clipKey);
+    if (!list || list->type != qb::Type::Array || !list->arr) return;
+    for (const qb::Value& e : list->arr->values)
+        if (e.type == qb::Type::Struct && e.st) {
+            const qb::Value* at = e.st->find(K("time"));
+            schedule(t + (at ? double(at->number()) : 0.0) * 1000.0, Ev::ClipEvent, 0, 0, bodyGen_, e.st.get());
+        }
+}
+
 void Animator::bodyFinished(double t) {
+    if (scriptedClip_) {  // a scripted clip: looped (Cycle = 1) or held
+        if (scriptedCycle_) {
+            const uint32_t k = scriptedClip_;
+            playClip(k, 0, true, t);
+        }
+        return;
+    }
+    if (specialOnce_) {
+        specialOnce_ = false;
+        stance_ = nextStance_ = K("Stance_A");
+        currentAnim_ = K("idle"), nextAnim_ = 0, cycle_ = true, repeat_ = 1;
+        disableArms_ = nextDisableArms_ = 0;
+        bodyIteration(t);
+        return;
+    }
     if (nextStance_ != stance_) {
         // play_stance_transition_cfunc: anim_set.<old>.transitions.<new> [I: the C function's lookup].
         const anim::Clip* tr = nullptr;
@@ -567,6 +652,19 @@ void Animator::bodyFinished(double t) {
 }
 
 void Animator::afterStance(double t, bool stanceChanged) {
+    if (stanceChanged && queuedStance_) {  // the queued change waits for this stance's first anim
+        const uint32_t q = queuedStance_;
+        queuedStance_ = 0;
+        const bool qIntro = q == K("intro") || q == K("intro_smstg") || q == K("stance_frontend") || q == K("stance_frontend_guitar");
+        afterStanceBody(t, stanceChanged);
+        nextStance_ = q;
+        if (guitarLike()) nextDisableArms_ = qIntro ? 2 : 0;
+        return;
+    }
+    afterStanceBody(t, stanceChanged);
+}
+
+void Animator::afterStanceBody(double t, bool stanceChanged) {
     const bool introish = nextStance_ == K("intro") || nextStance_ == K("intro_smstg") || nextStance_ == K("stance_frontend") ||
                           nextStance_ == K("stance_frontend_guitar");
     if (nextAnim_ == 0 && !stanceChanged) {
@@ -619,6 +717,45 @@ void Animator::playAnimEvent(const qb::Struct& p, double t) {
     }
 }
 
+// play_special_anim (guitar_character.qb): disable_arms 2 (hero_disable_arms
+// for the guitarist / bassist), the random loop killed, `stance` set, the
+// tempo anim `anim` now (hero_play_tempo_anim_cfunc) and again when it ends
+// [C script; I: the loop is the body loop with cycle].
+void Animator::playSpecial(uint32_t stance, uint32_t anim, double t, float blend, int disableArms) {
+    scriptedClip_ = 0;
+    stance_ = nextStance_ = stance;
+    currentAnim_ = anim ? anim : K("idle");
+    nextAnim_ = 0;
+    cycle_ = true, repeat_ = 1;
+    if (guitarLike()) disableArms_ = nextDisableArms_ = disableArms;  // play_special_anim disable_arms (default 2)
+    // The clip once, blended in over blendduration; when it ends (hero_wait_
+    // until_anim_finished) stance Stance_A and guitarist_idle / bandmember_idle
+    // [C script play_special_anim; I: the arms back over 0.25 s from the end,
+    // GH3 starts that 0.25 s before it].
+    specialOnce_ = true;
+    bodyBlend_ = std::max(0.0f, blend);
+    bodyIteration(t);
+}
+
+// Transition_PlayAnim_Spawned {Anim [stance] [Cycle]}: the named clip on its
+// own (devil_finish_anim, devil_lose_anim); Cycle = 1 loops it, otherwise
+// the last frame holds; the random anims stop [C scripts].
+void Animator::playClip(uint32_t clipKey, uint32_t stance, bool cycle, double t) {
+    const anim::Clip* c = clip(clipKey);
+    if (!c) return;
+    specialOnce_ = false;  // Obj_SwitchScript ends play_special_anim
+    if (stance) stance_ = nextStance_ = stance;
+    nextAnim_ = 0;
+    if (guitarLike()) disableArms_ = nextDisableArms_ = 2;
+    setArms(disableArms_, t, 0.25f);
+    ++bodyGen_;
+    body_.play(c, t, 0.2f);
+    bodyKey_ = clipKey;
+    scheduleClipEvents(clipKey, t);
+    scriptedClip_ = clipKey, scriptedCycle_ = cycle;
+    schedule(t + std::max(kFrameMs, double(c->duration) * 1000.0), Ev::BodyDone, 0, 0, bodyGen_);
+}
+
 // handle_change_stance [C script].
 void Animator::changeStanceEvent(uint32_t stance, bool noWait, double t) {
     const bool introish = stance == K("intro") || stance == K("intro_smstg") || stance == K("stance_frontend") ||
@@ -627,6 +764,11 @@ void Animator::changeStanceEvent(uint32_t stance, bool noWait, double t) {
         nextStance_ = stance;
         if (guitarLike()) disableArms_ = nextDisableArms_ = introish ? 2 : 0;
         bodyFinished(t);  // the transition now, then the idle loop
+    } else if (nextStance_ != stance_ && nextStance_ != stance) {
+        // A change already pending (play_intro_anims: intro no_wait, then
+        // Stance_A): this one follows it, as GH3's script queue runs them in
+        // order [I: the queue's depth].
+        queuedStance_ = stance;
     } else {
         nextStance_ = stance;
         if (guitarLike()) nextDisableArms_ = introish ? 2 : 0;
@@ -744,6 +886,10 @@ void Animator::handle(const Event& e) {
     case Ev::BodyDone:
         if (e.gen == bodyGen_) bodyFinished(t);
         break;
+    case Ev::ClipEvent:
+        if (e.gen == bodyGen_ && e.params)
+            if (const uint32_t scr = keyOf(e.params->find(K("scr")))) clipEvents_.push_back({scr, structOf(e.params->find(K("params")))});
+        break;
     case Ev::TransitionDone:
         if (e.gen == bodyGen_) {
             stance_ = nextStance_;
@@ -838,7 +984,9 @@ void Animator::advance(double ms) {
         const bool haveQueued = !queue_.empty();
         if (!haveFixed && !haveQueued) break;
         bool takeFixed = haveFixed;
-        if (haveFixed && haveQueued) takeFixed = !(queue_.top() > fixed_[fixedAt_]);
+        // The earlier of the two (the fixed one on a tie): this was inverted, so the
+        // later one ran first and held the earlier back (a frozen band, still hands).
+        if (haveFixed && haveQueued) takeFixed = !(fixed_[fixedAt_] > queue_.top());
         const Event e = takeFixed ? fixed_[fixedAt_] : queue_.top();
         if (e.t > ms) break;
         if (takeFixed) ++fixedAt_;
@@ -870,48 +1018,133 @@ void Animator::evaluate(double ms, std::vector<Mat34>& world, std::vector<Mat34>
     }
     worldOf(rig_, pose, world);
 
-    // Two-bone IK of the arms onto the guitar's hand bones [C data
-    // Hero_Ik_params; I: the bend plane through the animated elbow, the palm
-    // taking the target's orientation].
+    // Two-bone IK onto the guitar's hand bones and the foot slaves: GH3's ik
+    // node runs Havok's two-joints solver per Hero_Ik_params chain
+    // (Function_823F78E0 builds each setup: bone0..2, bonetarget, hingeaxis,
+    // cosmaxhingeangle (default -1), cosminhingeangle (1), first / second
+    // joint gains = `strength` (1), end joint gain 0) [C]. The elbow / knee
+    // turns about its hinge axis (in its own frame) to the angle the
+    // target's distance asks for, clamped by the cosines; the shoulder / hip
+    // then swings the chain onto the target; the end bone keeps its local
+    // rotation (gain 0) [C: the setup; I: Havok's solve as documented]. The
+    // free elbow bend before rolled the forearm, and with it the fret hand
+    // (owner 11-04 doc 1.1).
     if (!chains_.empty()) {
         bool changed = false;
         for (const Chain& c : chains_) {
-            const float s = c.right ? rightStrength_.at(ms) : leftStrength_.at(ms);
+            // The legs and the drummer's / singer's arms always; the guitarists'
+            // arms by hero_toggle_arms' strength [I: the others' toggles].
+            const float s = c.leg || !guitarLike() ? 1.0f : c.right ? rightStrength_.at(ms) : leftStrength_.at(ms);
             if (s <= 0) continue;
-            const Vec S = posOf(world[size_t(c.b0)]), E = posOf(world[size_t(c.b1)]), W = posOf(world[size_t(c.b2)]);
+            const Vec A = posOf(world[size_t(c.b0)]), B = posOf(world[size_t(c.b1)]), C = posOf(world[size_t(c.b2)]);
             const Vec T = posOf(world[size_t(c.target)]);
-            const float a = vlen(vsub(E, S)), b = vlen(vsub(W, E));
-            if (a < 1e-5f || b < 1e-5f) continue;
-            const Vec toT = vsub(T, S);
-            const float d = std::clamp(vlen(toT), std::fabs(a - b) + 1e-4f, a + b - 1e-4f);
-            const Vec n = vnorm(toT);
-            Vec pole = vsub(E, S);
-            pole = vsub(pole, vmul(n, vdot(pole, n)));
-            if (vlen(pole) < 1e-6f) pole = vcross(n, {0, 1, 0});
-            pole = vnorm(pole);
-            const float cosA = std::clamp((a * a + d * d - b * b) / (2 * a * d), -1.0f, 1.0f);
-            const float sinA = std::sqrt(std::max(0.0f, 1 - cosA * cosA));
-            const Vec E2 = vadd(S, vadd(vmul(n, a * cosA), vmul(pole, a * sinA)));
-            const Vec T2 = vadd(S, vmul(n, d));
-            const Quat r0 = between(vsub(E, S), vsub(E2, S));
+            const Vec BA = vsub(A, B), BC = vsub(C, B);
+            const float lab = vlen(BA), lbc = vlen(BC);
+            if (lab < 1e-5f || lbc < 1e-5f) continue;
+            // 1. The hinge: the angle at B between BA and BC to reach |AT|.
+            const float lat = vlen(vsub(T, A));
+            float cosWant = (lab * lab + lbc * lbc - lat * lat) / (2 * lab * lbc);
+            cosWant = std::clamp(cosWant, std::max(-1.0f, c.cosMax), std::min(1.0f, c.cosMin));
+            const float cosNow = std::clamp(vdot(BA, BC) / (lab * lbc), -1.0f, 1.0f);
+            const Vec axis = vnorm(qrot(rotOf(world[size_t(c.b1)]), c.hinge));  // the hinge axis in model space
+            const float d = std::acos(cosWant) - std::acos(cosNow);
+            // The sign: the turn about the axis that opens / closes the angle as wanted.
+            auto angleAfter = [&](float a) {
+                const Vec bc = qrot(Quat{axis.x * std::sin(a * 0.5f), axis.y * std::sin(a * 0.5f), axis.z * std::sin(a * 0.5f), std::cos(a * 0.5f)}, BC);
+                return std::acos(std::clamp(vdot(BA, bc) / (lab * lbc), -1.0f, 1.0f));
+            };
+            const float want = std::acos(cosWant);
+            const float turn = std::fabs(angleAfter(d) - want) <= std::fabs(angleAfter(-d) - want) ? d : -d;
+            const float g1 = c.gain1 * s, g2 = c.gain2 * s;
+            const float ht = turn * g2;
+            const Quat hq{axis.x * std::sin(ht * 0.5f), axis.y * std::sin(ht * 0.5f), axis.z * std::sin(ht * 0.5f), std::cos(ht * 0.5f)};
+            const Quat w1 = qmul(hq, rotOf(world[size_t(c.b1)]));
+            const Vec C1 = vadd(B, qrot(hq, BC));
+            // 2. The first joint: the chain swung so that the end meets the target.
+            const Quat full = between(vsub(C1, A), vsub(T, A));
+            const Quat r0 = nlerp(Quat{}, full, g1);
             const Quat w0 = qmul(r0, rotOf(world[size_t(c.b0)]));
-            const Vec W1 = vadd(S, qrot(r0, vsub(W, S)));
-            const Quat r1 = between(vsub(W1, E2), vsub(T2, E2));
-            const Quat w1 = qmul(r1, qmul(r0, rotOf(world[size_t(c.b1)])));
-            const Quat w2 = rotOf(world[size_t(c.target)]);
-            // Back to local rotations, blended with the animated ones by the chain's strength.
+            const Quat w1b = qmul(r0, w1);
+            // Back to local rotations (the end bone keeps its own: gain 0).
             const int p0 = rig_.parent[size_t(c.b0)];
             const Quat parentRot = p0 >= 0 ? rotOf(world[size_t(p0)]) : Quat{};
-            Quat l0 = qmul(qconj(parentRot), w0), l1 = qmul(qconj(w0), w1), l2 = qmul(qconj(w1), w2);
-            pose[size_t(c.b0)].q = nlerp(pose[size_t(c.b0)].q, l0, s);
-            pose[size_t(c.b1)].q = nlerp(pose[size_t(c.b1)].q, l1, s);
-            pose[size_t(c.b2)].q = nlerp(pose[size_t(c.b2)].q, l2, s);
+            pose[size_t(c.b0)].q = qmul(qconj(parentRot), w0);
+            pose[size_t(c.b1)].q = qmul(qconj(w0), w1b);
+            // 3. The end bone (palm, ankle) takes the target's model rotation,
+            // by the chain's gain: the job turns the target's matrix rows
+            // (r0, r2, -r1) into a quaternion, times (-0.7071, 0, 0, 0.7071)
+            // (the two 90-degree turns cancel), and stores it as the end
+            // bone's model rotation [C 0x823F6D1C..0x823F715C].
+            {
+                const Quat want = rotOf(world[size_t(c.target)]);
+                const Quat endModel = qmul(w1b, pose[size_t(c.b2)].q);
+                pose[size_t(c.b2)].q = qmul(qconj(w1b), nlerp(endModel, want, s));
+            }
             changed = true;
         }
         if (changed) worldOf(rig_, pose, world);
     }
+    static const bool noConstraints = std::getenv("GD04_NO_CONSTRAINTS") != nullptr;  // development aid: compare without them
+    if (!constraints_.empty() && !noConstraints) {
+        applyConstraints(pose);
+        worldOf(rig_, pose, world);
+    }
     skin.resize(world.size());
     for (size_t b = 0; b < world.size(); ++b) skin[b] = mmul(world[b], rig_.invBind[b]);
+}
+
+// hero_ConstraintBones [C data: the types, bones, targets and amounts; I: the
+// operations, Neversoft's twist / split helpers as the skeleton places them].
+// The helpers have flag 7 and sit at their bind (identity under their bone for
+// the twists, at the joint for the splits); the clips leave them there, so the
+// skin around wrists, elbows, knees and hips pinched as the joints turned.
+// A target's deviation from its bind (local): d = bind^-1 q.
+// - twist (the bone a child of its target, a bicep / thigh): the bone undoes
+//   `amount` of the target's twist about its own axis (x): the top of the
+//   bicep (1.0) keeps the shoulder's, the middle (0.5) half of it.
+// - twistchild (the wrist, a child of the forearm, the target the palm): the
+//   bone takes `amount` of the palm's twist about x.
+// - split / splitr (the knee and elbow helpers under the thigh / bicep, the
+//   hips' under the pelvis): the bone turns by `amount` of the target's
+//   rotation from its bind, in the bone's parent's space.
+void Animator::applyConstraints(Pose& pose) const {
+    auto twistX = [](Quat q) {  // the swing-twist decomposition's twist about x
+        Quat t{q.x, 0, 0, q.w};
+        const float n = std::sqrt(t.x * t.x + t.w * t.w);
+        if (n < 1e-6f) return Quat{};
+        return Quat{t.x / n, 0, 0, t.w / n};
+    };
+    auto inParentOf = [&](int bone, int target, bool bind) {  // target's rotation in bone's parent's space
+        Quat r = bind ? rig_.bind[size_t(target)].q : pose[size_t(target)].q;
+        const int stop = rig_.parent[size_t(bone)];
+        for (int p = rig_.parent[size_t(target)]; p >= 0 && p != stop; p = rig_.parent[size_t(p)])
+            r = qmul(bind ? rig_.bind[size_t(p)].q : pose[size_t(p)].q, r);
+        return r;
+    };
+    for (const Constraint& c : constraints_) {
+        const Quat bindB = rig_.bind[size_t(c.bone)].q;
+        const Quat dev = qmul(qconj(rig_.bind[size_t(c.target)].q), pose[size_t(c.target)].q);
+        switch (c.type) {
+        case Constraint::Twist:
+            pose[size_t(c.bone)].q = qmul(bindB, qpow(qconj(twistX(dev)), c.amount));
+            break;
+        case Constraint::TwistChild:
+            pose[size_t(c.bone)].q = qmul(bindB, qpow(twistX(dev), c.amount));
+            break;
+        case Constraint::Split:
+        case Constraint::SplitR: {
+            const Quat delta = qmul(inParentOf(c.bone, c.target, false), qconj(inParentOf(c.bone, c.target, true)));
+            pose[size_t(c.bone)].q = qmul(qpow(delta, c.amount), bindB);
+            break;
+        }
+        }
+    }
+}
+
+void Animator::endSongEvents(double t) {
+    if (fixedAt_ >= fixed_.size()) return;
+    fixed_.erase(std::remove_if(fixed_.begin() + std::ptrdiff_t(fixedAt_), fixed_.end(), [t](const Event& e) { return e.t >= t; }),
+                 fixed_.end());
 }
 
 }  // namespace bandanim

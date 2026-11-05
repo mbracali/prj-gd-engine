@@ -56,7 +56,7 @@ id = `gd-game-04`
 
 **Status** (Guitar Dream version 0.0.1, not ready to play): the engine's
 shell and GH3's data layer (archives, QB scripts and data). Plan and progress:
-the kickoff (`../GD-GAME-04_KICKOFF.md`), `agents/PROGRESS.md` and the
-gd-game-04 section of `../gd-backlog.md`.
+the kickoff (`../docs/knowledge/GD-GAME-04_KICKOFF.md`), `agents/PROGRESS.md` and the
+gd-game-04 section of `../docs/tasks/gd-backlog.md`.
 
 **Build and test**: `agents/CONTEXT.md`. Formats and findings: `docs/`.

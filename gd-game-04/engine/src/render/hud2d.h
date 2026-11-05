@@ -163,7 +163,8 @@ void draw(Canvas& c, const Hud2D::TextFn& text, const HudAnim& a, uint32_t font,
 class IntroText {
 public:
     // `firstMs`: the song time the scroller starts at (the script's first frame).
-    void setup(const std::string& title, const std::string& by, const std::string& artist, double startMs, double firstMs);
+    void setup(const std::string& title, const std::string& by, const std::string& artist, double startMs, double firstMs,
+               double titleStartMs = -6700.0);
     void draw(Canvas& c, const Hud2D::TextFn& text, double nowMs) const;
 
 private:

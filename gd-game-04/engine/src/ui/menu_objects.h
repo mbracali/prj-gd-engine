@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <future>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -13,6 +14,7 @@
 #include "data/qb.h"
 #include "game/chart.h"
 #include "render/band.h"
+#include "render/band_view.h"
 #include "render/venue_camera.h"
 #include "render/venue_lights.h"
 #include "script/vm.h"
@@ -40,6 +42,10 @@ struct Venue;
 // would run them on the object are not run), Band::accessorySim, BandView.
 // The objects' member functions (obj_*, anim_*, hero_*, Die, hide) go
 // through the VM's objectCall ahead of the screen elements'.
+// A model not loaded before loads on a worker (band::loadModel) while the
+// one it replaces stays drawn (a ghost), as GH3 keeps the old character up
+// while preload_band_member's LoadPakAsync reads the new one [C scripts];
+// the frame never waits for the disc (owner: character select stutters).
 class MenuObjects {
 public:
     // `waypoint`: a node of the current zone (GetWaypointPos / Dir), false
@@ -52,9 +58,22 @@ public:
     // band is render/band.h's); they load when the menus draw them again.
     void setSuspended(bool on) { suspended_ = on; }
     void update(double dtMs);
+    // Once a frame before drawing: loads and poses the shown objects (and
+    // the ghosts standing in for them).
+    void prepareFrame(gfx::RenderDevice& dev);
+    // The shown objects' feet, averaged (the dynamic shadow's centre); false: none.
+    bool centre(venue::Vec3& out) const;
+    // The shadow pass: the objects with these engine constants (the light's
+    // view and projection) into the bound shadow map.
+    void drawShadow(const gh3shader::Globals& light, const venue::Venue& v, const std::vector<venue::LightState>& lights,
+                    const venue::LightShow& show);
+    // The dynamic shadow map the objects receive (BandView::setShadow).
+    void setShadow(gfx::TextureId depth, const gfx::Mat4& lightViewProj, int size, float intensity);
     // Draws the shown objects into the bound target, after the zone.
     void draw(gfx::RenderDevice& dev, const venue::CamPose& cam, const venue::Venue& v, const std::vector<venue::LightState>& lights,
               const venue::LightShow& show);
+    // SetShadowDirFromLight {name}: the dynamic shadow's light (0: none) [C scripts setup_character_hub].
+    uint32_t shadowLight = 0;
     // An object's frame (its bone's when `bone` is set: ccam LockTo /
     // locktobone), false if there is no such object or bone.
     bool frame(uint32_t object, uint32_t bone, venue::Vec3& pos, venue::Quat& rot);
@@ -62,6 +81,7 @@ public:
     size_t count() const { return objects_.size(); }
 
 private:
+    struct ModelLoad;  // a model loading on a worker
     struct Object {
         uint32_t name = 0, type = 0;  // object_type: bandmember, hud_model_3d
         venue::Vec3 pos{};
@@ -78,10 +98,21 @@ private:
         double animMs = 0;         // the object's animation clock
         std::unique_ptr<Band::Entry> entry;  // the loaded model (and animator with a tree)
         bool animated = false;
+        std::shared_ptr<ModelLoad> pending;  // its model loading on a worker
+        double ghostMs = 0;  // a ghost: how long it has stood in
+        std::unordered_map<uint32_t, gfx::TextureId> made;  // BandView::prepare's textures, before add
     };
     bool member(qs::ScriptRun& run, Object& o, uint32_t method, qb::Struct& p, bool& handled);
     void load(Object& o);
+    void place(Object& o, std::unique_ptr<band::Model> model, const band::Member& m);
     void unload(Object& o);
+    // Unloads the object, its drawn model kept as the ghost of its name
+    // until a new model of that name is drawn (or 2 s pass).
+    void retire(Object& o);
+    Object* ghostOf(uint32_t name) {
+        auto it = ghosts_.find(name);
+        return it == ghosts_.end() ? nullptr : it->second.get();
+    }
     void startAnim(Object& o);
     bandanim::Mat34 root(const Object& o) const;
     void evaluate(Object& o);
@@ -92,12 +123,15 @@ private:
     WaypointFn waypoint_;
     std::function<bool(qs::Vm&, qs::ScriptRun&, uint32_t, uint32_t, qb::Struct&, bool&)> next_;  // the screen elements'
     std::unordered_map<uint32_t, std::unique_ptr<Object>> objects_;
-    band::Library lib_;
+    std::unordered_map<uint32_t, std::unique_ptr<Object>> ghosts_;
+    std::vector<std::shared_ptr<ModelLoad>> inflight_;  // worker loads (kept to their end: a future's destructor waits)
+    std::shared_ptr<band::Library> lib_;  // band::Library::shared
     bool libLoaded_ = false, libFailed_ = false;
-    std::unique_ptr<Pak> globalPak_;  // the ragdolls (Band::accessorySim)
+    std::shared_ptr<const Pak> globalPak_;  // the ragdolls (Band::accessorySim)
     std::unique_ptr<BandView> view_;
     gfx::RenderDevice* dev_ = nullptr;
     std::vector<int> freed_;  // BandView members to free at the next draw
+    std::vector<BandView::Instance> frame_;  // prepareFrame's
     Chart chart_;             // no song: no notes, no tempo (120 bpm) [I]
     double clockMs_ = 0;
     bool suspended_ = false;

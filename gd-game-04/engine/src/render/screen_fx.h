@@ -8,6 +8,11 @@
 #include "render/device.h"
 #include "render/gh3_shader.h"
 
+class Globals;
+namespace qb {
+struct Struct;
+}
+
 // GH3's screen effects on the venue viewport (bg_viewport): the ScreenFX
 // instances the scripts add (TOD_Proxim_Update_LightFX_Viewport:
 // Default_TOD_Manager's bright_sat + simple_bloom, the cameras' venue_DOF,
@@ -30,10 +35,10 @@ struct Bloom {  // simple_bloom (Function_8241BC20 parses, Function_8243D240 dra
     float distanceMod = 0;
 };
 
-struct Dof {  // dof [C params; the chain: screen_fx.cpp]
+struct Dof {  // dof (Function_8241EE68 parses, Function_824440F8 draws) [C params; the chain: screen_fx.cpp]
     bool on = false;
     float backDist = 1, frontDist = 0, strength = 0, blurRadius = 0;
-    bool half = false;  // blurresolution half (else quarter)
+    int resolution = 1;  // blurresolution: 0 half, 1 quarter, 2 sixteenth [C 8241F160]
 };
 
 struct BrightSat {  // bright_sat
@@ -47,8 +52,22 @@ struct Params {
     Dof dof;
     BrightSat brightSat[2];  // the TOD's BnS and global_brightness (ScreenFlash's FlashBS replaces [1]'s values while on)
     float nearZ = 0.05f, farZ = 4000.0f;  // the projection's clip planes (the depth buffer's)
-    float cameraFar = 500.0f;             // GH3's camera far clip (DOF's backdist / frontdist scale)
+    // GH3's camera far clip, DOF's backdist / frontdist scale: the render's
+    // far plane (0x82c18acc, from the camera component's +0xe0: 823A8DB8),
+    // far_clip of the camera's params, default 400 (822BF1E0, 0x8200fa1c);
+    // PlayIGCCam's cameras (the songs' cuts, the menus') give none [C].
+    float cameraFar = 400.0f;
 };
+
+// One screen_FX entry (ScreenFX_AddFXInstance's params: Type dof /
+// bright_sat / simple_bloom) into `p`; bright_sat fills brightSat[slot++].
+void readEntry(const qb::Struct& e, Params& p, int& brightSlot);
+// TOD_Proxim_Update_LightFX_Viewport on bg_viewport: venue_DOF from
+// DOF_Off_TOD_Manager's screen_FX[0], then `manager`'s screen_FX
+// (Default_TOD_Manager: BnS, sbloom) [C scripts tod_proxims.qb].
+void readViewport(const Globals& g, uint32_t manager, Params& p);
+// venue_DOF set to a DOF_*_tod_manager's screen_FX[0] (CameraCuts_StartCallback).
+void readDof(const Globals& g, uint32_t manager, Params& p);
 
 class ScreenFx {
 public:
@@ -57,9 +76,18 @@ public:
     void shutdown();
     // Redirects drawing to the scene target (the current viewport's size);
     // false when the effects cannot run (draw straight to the target then).
-    bool begin();
+    bool begin(float scale = 1.0f);
     // Runs the effects and composites into the target and viewport bound at begin().
-    void end(const Params& p);
+    void end(const Params& p, gfx::TargetId into = {});
+    // The scene target's depth and size, and the viewport begin() saw (Enhanced's chain).
+    gfx::TextureId sceneDepth() const { return dev_ && scene_.id ? dev_->targetDepth(scene_.id) : gfx::TextureId{}; }
+    // A copy of the scene's depth so far (the raytraced light beams sample
+    // it while the scene target stays bound) [I: GH3 resolves its depth].
+    gfx::TextureId depthSnapshot();
+    int sceneW() const { return scene_.w; }
+    int sceneH() const { return scene_.h; }
+    gfx::TargetId outer() const { return outer_; }
+    void outerViewport(int& x, int& y, int& w, int& h) const { x = ox_, y = oy_, w = ow_, h = oh_; }
 
 private:
     struct Target {
@@ -70,7 +98,9 @@ private:
     gh3shader::Programs gh3_;
     gfx::BufferId quad_;
     gfx::ProgramId copy_;
-    Target scene_, quarterA_, quarterB_, copyA_, copyB_;
+    Target scene_, quarterA_, quarterB_, copyA_, copyB_, depthCopy_;
+    Target sceneQ_, halves_[4];  // the scene's quarter, and the steps down to the effects' fixed size
+    Target sixteenA_, sixteenB_;  // dof blurresolution sixteenth
     gfx::TargetId outer_;
     int ox_ = 0, oy_ = 0, ow_ = 0, oh_ = 0;
     uint32_t immediate_ = 0, immediateAlt_ = 0, filter_ = 0;
@@ -81,6 +111,10 @@ private:
     void pass(const gh3shader::Program* prog, const Target* dst, gfx::TextureId s0, gfx::TextureId s1, const gh3shader::Globals& g,
               const float (*ps)[4], int psCount, Blend blend, bool s0Point = false, bool stencilEqual1 = false);
     void downsample4x(gfx::TextureId src, const Target& dst);
+    // `src` (w x h) into `dst` by bilinear copies halving the size (2 x 2 means) [I].
+    void resample(gfx::TextureId src, int w, int h, const Target& dst);
+    // The scene colour (or a quarter-size pass's result in sceneQ_) into quarterA_.
+    void toQuarter(gfx::TextureId sceneColor);
     void bloomBlur(const Target& t, const Target& tmp, float gain);
     void dofBlur(const Target& t, const Target& tmp, float radius);
 };

@@ -342,11 +342,17 @@ steps (vtable 0x82032BE4, second interface 0x82032BD4) [C]:
 - the beam: render/spotlight_view.cpp beamStrip, every constant [C] from
   0x82235F68 (the sheet), 0x8225E590 / 0x8225E3C0 / 0x8225FF98 (corners, the
   screen ramp, the depth range), depthvolume.fx: colour x intensity x 8 x
-  brighten x saturate((w - nearest) x 0.125 / thickness) x (1 - screen
-  distance from the light / reach)^2, BillboardZ. The sheet's vertex alpha, the
-  beam material and borders do nothing on the 360. [I]: per vertex (17 rows);
-  the buffer's gain (total x 1024 x density in FogPixel, kept at 1); depth
-  test on in place of the shader's min() with the scene's depth;
+  brighten x saturate((min(scene w, w) - nearest) x 0.125 / thickness) x
+  (1 - screen distance from the light / reach)^2, BillboardZ. The sheet's
+  vertex alpha, the beam material and borders do nothing on the 360. Since
+  0.1.12 (GD02-151) per pixel, as the disc's depthvolume.fx: the scene's view
+  depth from the world's depth buffer, no depth test (add ONE / ONE,
+  0x82307078), into a float beam buffer (half size above 960 wide,
+  0x8225F948) added onto the world before the track and HUD (FogPixel,
+  world pixels only) (`SpotlightView::drawBeams`). [I]: the buffer's gain
+  (total x 1024 x density on the 360's fixed-point buffer; 3.2 turns the
+  beams white, kept at 1); without post-processing (no world depth) the old
+  per-vertex sheet with the depth test;
 - a target turns the light's y axis onto it (0x82231610, bones through the
   entry's subpart, 0x82232CD0). The preset's quaternion is the LOCAL rotation
   (poll 0x82233250, parents apply). A spotlight shines along y [C: 0x82231AF0];

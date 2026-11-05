@@ -332,6 +332,11 @@ void Player::watcherHit(float t, int slot, int gem, bool hopo) {
 // passed last (+0x4c), and the last gem of the list when that leaves none
 // (-1). Then the player is told.
 void Player::watcherMiss(float t, int slot, int gem) {
+    // Inside a bass range (the bass part only) GH2's OnMiss plays the
+    // range's bass_%d.cue (+0x58, 0x823526F8; no such cue on the disc)
+    // instead of the overstrum: no miss, the sustain kept (GD02-036) [C].
+    for (const auto& [a, b] : bassRanges_)
+        if (t >= a && t <= b) return;
     missSlot_ = slot;
     endSustain(t, false);
     if (!(lastOverstrumMs_ + rules_.overstrumGapMs < t)) return;
@@ -443,7 +448,8 @@ void Player::update(float t) {
 
 // ================================================================= player
 
-// 0x00110e78 [C]: beats are ticks / 480.
+// 0x822C7F30 [C]: the next big note within 0.2 beats of the sustain's beat
+// (ticks / 480) is used up; inside the window it is blown.
 void Player::bigNoteCheck(int gem) {
     if (nextBigNote_ >= bigNotes_.size()) return;
     const float beat = float(chart_.gems[size_t(gem)].tick) / 480.0f, big = float(bigNotes_[nextBigNote_]) / 480.0f;
@@ -569,12 +575,15 @@ void Player::accrueSustain(float t) {
 }
 
 // Sustain end 0x822c86f8 [C]: rock meter target (earned + 50) / (max + 50).
-// TODO: blew_big_note (earned / max < 0.1 on a MIDI 110 big note) only plays
-// a crowd sound (ui/gen/game.dta) and has no gameplay effect [C].
+// A sustain let go with under a tenth of its points earned (0x822de3f8 <
+// 0.1) asks the big-note check with the sustain's beat (tick / 480): GH2's
+// only blew_big_note, a crowd sound (ui/gen/game.dta), no gameplay effect.
+// A big note missed outright or held through says nothing (GD02-150) [C].
 void Player::finishSustain(float t) {
     if (tail_.gem < 0) return;
     const Gem& g = chart_.gems[size_t(tail_.gem)];
     const float frac = g.durationMs > 0 ? std::clamp((t - g.ms) / g.durationMs, 0.0f, 1.0f) : 1.0f;
+    if (tail_.max > 0 && float(tail_.earned) / float(tail_.max) < 0.1f) bigNoteCheck(tail_.gem);
     const int earned = roundHalfAway(double(frac) * tail_.max);
     if (earned > tail_.earned) addScore(earned - tail_.earned), tail_.earned = earned;
     const Tail done = tail_;

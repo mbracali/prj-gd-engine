@@ -47,29 +47,66 @@ public:
     // (Guitarist, Bassist, Drummer, vocalist) at the last advance; false if
     // there is no such member or bone.
     bool bonePos(uint32_t member, uint32_t bone, venue::Vec3& out) const;
+    // `<member> : hide` / `: Unhide` (Hide_Band: practicemode_init) [C scripts]: not drawn while hidden.
+    bool setHidden(uint32_t member, bool hidden) {
+        bool found = false;
+        for (Entry& e : members_)
+            if (e.model && e.model->member.object == member) e.hidden = hidden, found = true;
+        return found;
+    }
+    // play_special_anim on the member of `role` (play_win_anims / play_lose_anims).
+    void playSpecial(band::Role role, uint32_t stance, uint32_t anim, double ms, float blend = 0.2f, int disableArms = 2) {
+        for (Entry& e : members_)
+            if (e.anim.role() == role) e.anim.playSpecial(stance, anim, ms, blend, disableArms);
+    }
+    // play_outro: every member's song events stop at `ms`.
+    void endSongEvents(double ms) {
+        for (Entry& e : members_) e.anim.endSongEvents(ms);
+    }
+    // Band_ChangeStance on the member of `role` (play_intro_anims).
+    void changeStance(band::Role role, uint32_t stance, bool noWait, double ms) {
+        for (Entry& e : members_)
+            if (e.anim.role() == role) e.anim.changeStance(stance, noWait, ms);
+    }
+    void playClip(band::Role role, uint32_t clip, uint32_t stance, bool cycle, double ms) {
+        for (Entry& e : members_)
+            if (e.anim.role() == role) e.anim.playClip(clip, stance, cycle, ms);
+    }
+    // The members' due ped_animevents (Animator::clipEvents), taken.
+    std::vector<bandanim::Animator::ClipEvent> takeClipEvents() {
+        std::vector<bandanim::Animator::ClipEvent> out;
+        for (Entry& e : members_) {
+            auto& q = e.anim.clipEvents();
+            out.insert(out.end(), q.begin(), q.end());
+            q.clear();
+        }
+        return out;
+    }
 
     struct Entry {
         std::unique_ptr<band::Model> model;
         bandanim::Animator anim;
         bandanim::Mat34 root;  // model -> world: the waypoint's position and rotation, the profile's scale
         bool placed = false;   // its waypoint exists
+        bool hidden = false;   // setHidden
         int view = -1;
         std::vector<uint32_t> lightGroups;
         std::vector<bandanim::Mat34> world, skin;  // at the last evaluate
         double evaluatedAt = -1e18;
         std::unique_ptr<AccessorySim> acc;  // the accessory bones' swing (render/band_ragdoll.h)
-        bandanim::Vec gravity{0, -9.81f, 0};  // in model space
+        bandanim::Vec gravity{0, -9.8f, 0};  // in model space
     };
     const std::vector<Entry>& members() const { return members_; }
     std::vector<Entry>& members() { return members_; }
     const BandView* view() const { return view_.get(); }
+    BandView* view() { return view_.get(); }
     // A member's accessory-bone ragdoll (null: none), as the band's members
     // get it (shared with the menus' characters, ui/menu_objects.h);
     // `globalPak`: ZONES/global.pak, loaded on first use.
     static std::unique_ptr<AccessorySim> accessorySim(const Disc& disc, const Globals& g, const band::Member& m, const bandanim::Rig& rig,
-                                                      std::unique_ptr<Pak>& globalPak);
+                                                      std::shared_ptr<const Pak>& globalPak);
     // The skeletons and perm_anims clips (shared with the crowd, render/crowd.h).
-    const band::Library& library() const { return lib_; }
+    const band::Library& library() const { return *lib_; }
     // The song pak's .qb files (its <song>_performance array).
     const std::vector<qb::File>& songFiles() const { return songFiles_; }
     // Evaluates every member's pose at `ms` (after advance).
@@ -83,8 +120,8 @@ public:
                     const venue::LightShow& show);
 
 private:
-    band::Library lib_;
-    std::unique_ptr<Pak> globalPak_;  // the ragdolls' .rag files
+    std::shared_ptr<band::Library> lib_;  // band::Library::shared
+    std::shared_ptr<const Pak> globalPak_;  // the ragdolls' .rag files
     std::shared_ptr<const matlib::Library> shaderLib_;
     double skinnedAt_ = -1e18;  // the shadow pass's song time  // GH3's material library (render/gh3_shader.h)
     std::vector<Entry> members_;

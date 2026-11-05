@@ -1075,6 +1075,9 @@ private:
              "Measures your setup's delay so notes are judged and drawn in time. First strum (or press green) on each "
              "tick you HEAR, then on each flash you SEE, 8 times each. Back cancels.",
              {{"", "Calibrate..."}}},
+            {Kind::Button, "calibrate_reset", "Reset Calibration", true,
+             "Removes the calibration: the audio and video delays go back to 0 ms, as before calibrating.",
+             {{"", "Reset"}}},
             {Kind::Separator, "", "", true, ""},
             {Kind::Section, "graphics", "PERFORMANCE & GRAPHICS", true, "Window, frame rate and image quality."},
             {Kind::Choice, "screen_mode", "Screen Mode", true,
@@ -1110,7 +1113,7 @@ private:
             {Kind::Choice, "max_fps", "Max FPS", true,
              "The highest frame rate the game draws at; the original ran at 60. Unlimited draws as fast as the "
              "computer can (no vertical sync).",
-             {{"60", "60"}, {"120", "120"}, {"240", "240"}, {"unlimited", "Unlimited"}}},
+             {{"60", "60"}, {"120", "120"}, {"144", "144"}, {"240", "240"}, {"unlimited", "Unlimited"}}},
             {Kind::Check, "fps_counter", "Show FPS Counter", true,
              "Shows the frames drawn per second in the bottom-left corner of the screen."},
             {Kind::Choice, "hdr", "HDR", true,
@@ -1354,6 +1357,11 @@ private:
             if (!it.ready) return sound("button_error");
             sound("button_select");
             if (std::string(it.key) == "calibrate") return calibStart();
+            if (std::string(it.key) == "calibrate_reset") {  // #47
+                host_.setEnhancedValue("audio_offset", "0");
+                host_.setEnhancedValue("video_offset", "0");
+                return;
+            }
             host_.userFiles(it.key);
             return;
         }
@@ -1497,7 +1505,8 @@ private:
         const float o = offset_, x0 = kPopX0 + o, x1 = kPopX1 + o, pad = 24, bodyH = 22, lineH = 30;
         std::vector<std::string> lines = wrap(it.help, x1 - x0 - 2 * pad, bodyH);
         const bool locked = it.kind != Kind::Section && it.kind != Kind::Button && it.ready && !editable(it);
-        const bool calib = std::string(it.key) == "calibrate" || std::string(it.key) == "ai_upscaling" ||
+        const bool calib = std::string(it.key) == "calibrate" || std::string(it.key) == "calibrate_reset" ||
+                           std::string(it.key) == "ai_upscaling" ||
                            std::string(it.key) == "hdr";  // a status line
         // The upscaler's (what runs, its resolutions and cost) and HDR's status can take two lines.
         std::vector<std::string> status;
@@ -1519,7 +1528,7 @@ private:
         if (std::string(it.key) == "ai_upscaling" || std::string(it.key) == "hdr") {
             y += 6;
             for (const std::string& l : status) text("impactor.font", l, x0 + pad, y + 13, 19, kOn, 0x21), y += 26;
-        } else if (std::string(it.key) == "calibrate") {
+        } else if (std::string(it.key) == "calibrate" || std::string(it.key) == "calibrate_reset") {
             y += 6;
             text("impactor.font", "Now: audio " + signedMs(host_.enhancedValue("audio_offset")) + ", video " +
                  signedMs(host_.enhancedValue("video_offset")), x0 + pad, y + 13, 21, kOn, 0x21);

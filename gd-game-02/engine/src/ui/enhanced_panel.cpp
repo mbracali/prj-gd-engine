@@ -4,7 +4,7 @@
 // (gd-game-01/engine/src/ui/select_panels.cpp, EnhancedPanel): its
 // sections, rows, check boxes, dropdowns, explanation box and mouse, in
 // GH2's menu font and colours (PortDraw) over a still shot of a venue
-// (guidelines/universal_launcher.md).
+// (docs/knowledge/universal_launcher.md).
 #include "ui/enhanced_panel.h"
 
 #include <SDL3/SDL.h>
@@ -33,7 +33,7 @@ const std::vector<EnhancedSetting>& enhancedSettings() {
         {"shake_whammy", {"on", "off"}},
         {"touch", {"on", "off"}},
         {"screen_mode", {"windowed", "fullscreen", "borderless"}},
-        {"max_fps", {"120", "60", "240", "unlimited"}},
+        {"max_fps", {"120", "60", "144", "240", "unlimited"}},
         {"fps_counter", {"off", "on"}},
         {"hdr", {"none", "emulated", "true"}},
         {"internal_res", {"1080", "0", "448", "480", "720", "800", "900", "1440", "2160"}},
@@ -60,6 +60,7 @@ const std::vector<EnhancedSetting>& enhancedSettings() {
         {"no_fail", {"off", "on"}},
         {"autoplay", {"off", "on"}},
         {"hopo_mode", {"original", "forgiving"}},
+        {"dev_key_cheats", {"off", "on"}},
         {"audio_offset", {}, -300, 500},
         {"video_offset", {}, -300, 500},
     };
@@ -278,6 +279,8 @@ const std::vector<Item>& items() {
         {Kind::Button, "calibrate", "Audio / Video Calibration", true,
          "Measures your setup's delay so notes are judged and drawn in time. First strum (or press green) on each tick "
          "you HEAR, then on each flash you SEE, 8 times each. Back cancels."},
+        {Kind::Button, "calibrate_reset", "Reset Calibration", true,
+         "Removes the calibration: the audio and video delays go back to 0 ms, as before calibrating."},
         {Kind::Separator, "", "", true, ""},
         {Kind::Section, "graphics", "PERFORMANCE & GRAPHICS", true, "Window, frame rate, image quality and the venue's effects."},
         {Kind::Choice, "screen_mode", "Screen Mode", true,
@@ -311,7 +314,7 @@ const std::vector<Item>& items() {
         {Kind::Choice, "max_fps", "Max FPS", true,
          "The highest frame rate the game draws at; the original ran at 60. Unlimited draws as fast as the computer can "
          "(no vertical sync).",
-         {{"60", "60"}, {"120", "120"}, {"240", "240"}, {"unlimited", "Unlimited"}}},
+         {{"60", "60"}, {"120", "120"}, {"144", "144"}, {"240", "240"}, {"unlimited", "Unlimited"}}},
         {Kind::Check, "fps_counter", "Show FPS Counter", true,
          "Shows the frames drawn per second in the bottom-left corner of the screen."},
         {Kind::Choice, "hdr", "HDR", true,
@@ -394,6 +397,12 @@ const std::vector<Item>& items() {
          "(forgiving): a wrong fret can be corrected, and a note whose fret is already held when it arrives plays by "
          "itself.",
          {{"original", "Original"}, {"forgiving", "Forgiving"}}},
+        {Kind::Check, "dev_key_cheats", "Developer Keyboard Cheats", true,
+         "Developer cheats: GH2's own debug keys from its development kit, never on in the retail game. With this on, "
+         "a keyboard key that is not bound to a control runs its cheat, e.g. p Autoplay, l Automatically Lose, e / E "
+         "lower / raise the crowd, c next camera, V hold the camera, h hide the HUD and fretboard, H the HUD only, "
+         "P cycle the track speed, + force the encore, A access all. Keys bound to frets (1-5, F1-F5) keep playing. "
+         "Some only show the developers' debug overlays, which the port does not draw."},
         {Kind::Cheat, "cheat_unlock_all", "", true,
          "The original cheat: every song, venue, character and guitar is open. Saving and the career are off while it "
          "is on. Code at the main menu: Blue, Yellow, Orange, Red, Yellow, Orange, Blue, Yellow, Blue, Yellow, Blue, "
@@ -712,6 +721,11 @@ private:
             ui.playSfx("button_select");
             if (std::string(it.key) == "gamepads") return ui.gotoScreen("gamepads_screen");
             if (std::string(it.key) == "calibrate") return calibStart();
+            if (std::string(it.key) == "calibrate_reset") {  // #47
+                ui.host().setEnhancedValue("audio_offset", "0");
+                ui.host().setEnhancedValue("video_offset", "0");
+                return rebuild();
+            }
             ui.host().enhancedAction(it.key);  // a mode, Export / Load User Files
             rebuild();
             return;
@@ -820,6 +834,7 @@ private:
     static const char* buttonLabel(const std::string& key) {
         if (key == "gamepads") return "Open...";
         if (key == "calibrate") return "Calibrate...";
+        if (key == "calibrate_reset") return "Reset";
         if (key == "export") return "Export...";
         if (key == "load_settings" || key == "load_progress") return "Load...";
         return "Apply";
@@ -853,7 +868,7 @@ private:
         const std::vector<std::string> lines = d_.wrap(it.help, x1 - x0 - 2 * pad, bodyH);
         const bool notYet = !it.ready && it.kind != Kind::Section;
         const bool locked = it.kind == Kind::Check && it.ready && !editable(it);
-        const bool calib = std::string(it.key) == "calibrate";  // its status line
+        const bool calib = std::string(it.key) == "calibrate" || std::string(it.key) == "calibrate_reset";  // its status line
         // HDR's status ("Now: ..."), which can take two lines.
         std::vector<std::string> status;
         if (std::string(it.key) == "hdr") {

@@ -18,17 +18,63 @@ constexpr double kTransitionMs = 300;  // gd01's screen transition [I: its lengt
 // GH3's help texts (add_user_control_helper: SELECT, BACK, UP/DOWN) [C data].
 const char* const kHelp[3] = {"SELECT", "BACK", "UP/DOWN"};
 
-constexpr PortDraw::Color kPillText{0.08f, 0.08f, 0.08f, 1};
+// The help texts' button glyphs: \m0 green, \m1 red, \bb the strum bar [C script add_user_control_helper].
+const char* const kGlyph[3] = {"\\m0", "\\m1", "\\bb"};
 
-void pill(PortDraw& d, float x0, float y0, float x1, float y1) {
-    const float r = (y1 - y0) * 0.5f, cy = (y0 + y1) * 0.5f;
-    const PortDraw::Color c{0.8f, 0.8f, 0.8f, 0.95f};
-    d.quad(x0 + r, y0, x1 - r, y1, c);
-    for (int k = 0; k < 8; ++k) {  // the round ends
-        const float a0 = 3.14159265f * (0.5f + float(k) / 8), a1 = 3.14159265f * (0.5f + float(k + 1) / 8);
-        d.triangle(x0 + r, cy, x0 + r + r * std::cos(a0), cy + r * std::sin(a0), x0 + r + r * std::cos(a1), cy + r * std::sin(a1), c);
-        d.triangle(x1 - r, cy, x1 - r - r * std::cos(a0), cy + r * std::sin(a0), x1 - r - r * std::cos(a1), cy + r * std::sin(a1), c);
+// GH3's help bar as add_user_control_helper and user_control_build_pills
+// lay it out (user_control_auto_center on, no super pill; GD04-110) [C
+// scripts; the globals' defaults: user_control_pill_scale 0.4,
+// user_control_pill_y_position 650, user_control_pill_gap 150,
+// user_control_pill_end_width 50, action_safe_width_for_helpers 925]: the
+// glyph (gh3_button_font = buttonsxenon at 1.2 x the pill scale) at
+// (-10, 8) x scale, the text (user_control_text_font = fontgrid_title_gh3
+// at 1.1 x) at (50, 20) x scale, the strum bar's text 50 x scale further
+// (offset_for_strumbar); every pill as wide as the widest glyph + text, the
+// row centred on 640 with pill_gap x scale between the bodies (narrowed to
+// the action-safe width); the body at y + 0.8 x scale, 1.2 x the glyph-top
+// to text-bottom height, raised by a tenth of it; the ends (Control_pill_end,
+// the left one flipped) end_width x scale wide outside it; glyph and text
+// centred on their pill (align_user_control_with_pill). The same numbers as
+// the Options screen's helpers (GD04_UIDUMP: bodies 125 wide, 60 apart, at
+// y 647.1).
+struct HelpPill {
+    float x0, x1, y0, y1, end;  // the body; the ends outside it
+    float glyphX, glyphY, glyphH, textX, textY, textH;
+};
+
+void helpLayout(FrontEnd& fe, HelpPill out[3]) {
+    const ui::UiSystem& ui = fe.ui();
+    auto g = [&](const char* name, float def) { return qs::Vm::number(fe.vm().global(qbkey::key(name)), def); };
+    const float s = g("user_control_pill_scale", 0.4f), y = g("user_control_pill_y_position", 650);
+    const float gap = g("user_control_pill_gap", 150) * s, end = g("user_control_pill_end_width", 50) * s;
+    const float safeW = g("action_safe_width_for_helpers", 925);
+    const uint32_t tf = qbkey::key("fontgrid_title_gh3");
+    const float glyphH = ui.fontLineHeight(qbkey::key("buttonsxenon")) * 1.2f * s, textH = ui.fontLineHeight(tf) * 1.1f * s;
+    constexpr int n = 3;
+    float groupW[n], textOff[n], widest = 0;
+    for (int k = 0; k < n; ++k) {
+        textOff[k] = (50 + 10) * s + (k == 2 ? 50 * s : 0);  // the text's x past the glyph's
+        groupW[k] = textOff[k] + ui.textWidth(tf, kHelp[k], textH);
+        widest = std::max(widest, groupW[k]);
     }
+    if ((widest + 2 * end) * n + gap * (n - 1) > safeW) widest = (safeW - gap * (n - 1)) / n - 2 * end;
+    const float glyphTop = y + 8 * s, textTop = y + 20 * s, rawH = textTop + textH - glyphTop, pad = rawH * 0.2f;
+    float x = 640 - n / 2.0f * widest - 0.5f * gap * (n - 1);
+    for (int k = 0; k < n; ++k) {
+        HelpPill& p = out[k];
+        p.x0 = x, p.x1 = x + widest, p.y0 = y + 0.8f * s - 0.5f * pad, p.y1 = p.y0 + rawH + pad, p.end = end;
+        p.glyphX = x + 0.5f * (widest - groupW[k]), p.glyphY = glyphTop, p.glyphH = glyphH;
+        p.textX = p.glyphX + textOff[k], p.textY = textTop, p.textH = textH;
+        x += widest + gap;
+    }
+}
+
+// A colour global ([r g b a]) as the screen below left it.
+std::array<uint8_t, 4> globalColor(FrontEnd& fe, const char* name, std::array<uint8_t, 4> c) {
+    const qb::Value* v = fe.vm().global(qbkey::key(name));
+    if (!v || !v->arr || v->arr->values.size() < 4) return c;
+    for (size_t i = 0; i < 4; ++i) c[i] = uint8_t(std::clamp(qs::Vm::number(&v->arr->values[i]), 0.0f, 255.0f));
+    return c;
 }
 
 const char* itemLabel(const std::string& flowState) { return flowState == "main_menu_fs" ? "GAMEPADS" : "ENHANCED"; }
@@ -45,7 +91,7 @@ void PortContext::sound(const char* what) const {
 }
 
 PortScreens::PortScreens(Input& input, FrontEnd& fe, EnhancedStore& store, std::function<void(const std::string&)> changed)
-    : ctx_{input, fe, store, *this, std::move(changed)} {
+    : ctx_{input, fe, store, *this, std::move(changed), {}, {}} {
     gamepads_ = makeGamepadScreen(ctx_);
     enhanced_ = makeEnhancedScreen(ctx_);
 }
@@ -126,65 +172,69 @@ void PortScreens::draw(Canvas& c) {
     const float t = float(std::min(1.0, transMs_ / kTransitionMs)), e = t * t * (3 - 2 * t);
     d.setTransition((transBack_ ? -1.0f : 1.0f) * (1 - e) * kScreenW * 0.6f, e);
     screen(stack_.back())->draw(d);
-    // GH3's help bar on the port's screens: select, back, up / down.
-    d.setTransition(0, 1);
+    // GH3's help bar on the port's screens: select, back, up / down, laid
+    // out and drawn as GH3's own (helpLayout), in the colours the screen
+    // below (Options, the main menu) left [C globals user_control_pill_color,
+    // user_control_pill_text_color; their defaults 20 20 20 155 / 180 180 180].
+    ui::UiSystem& ui = ctx_.fe.ui();
+    HelpPill pills[3];
+    helpLayout(ctx_.fe, pills);
+    const auto pillColor = globalColor(ctx_.fe, "user_control_pill_color", {20, 20, 20, 155});
+    const auto textColor = globalColor(ctx_.fe, "user_control_pill_text_color", {180, 180, 180, 255});
+    const uint32_t body = qbkey::key("Control_pill_body"), endTex = qbkey::key("Control_pill_end");
     for (int k = 0; k < 3; ++k) {
-        float x0, y0, x1, y1;
-        helpRect(k, x0, y0, x1, y1);
-        static const PortDraw::Color kFret[3] = {{0.2f, 0.85f, 0.25f, 1}, {0.9f, 0.2f, 0.2f, 1}, {0.25f, 0.25f, 0.25f, 1}};
-        const float h = y1 - y0 - 8, cy = (y0 + y1) * 0.5f;
-        pill(d, x0, y0, x1, y1);
-        if (k < 2) d.quad(x0 + 8, cy - h * 0.5f, x0 + 8 + h, cy + h * 0.5f, kFret[k]);
-        else d.quad(x0 + 8, cy - 3, x0 + 8 + h, cy + 3, kFret[k]);  // the strum bar
-        d.text(kHelp[k], x0 + h + 20, cy, h * 0.8f, kPillText, 0x21, true);
+        const HelpPill& p = pills[k];
+        ui.drawSprite(c, body, p.x0, p.y0, p.x1, p.y1, pillColor);
+        ui.drawSprite(c, endTex, p.x0 - p.end, p.y0, p.x0, p.y1, pillColor, true);
+        ui.drawSprite(c, endTex, p.x1, p.y0, p.x1 + p.end, p.y1, pillColor);
+        ui.drawText(c, qbkey::key("buttonsxenon"), ui.setText(kGlyph[k]), p.glyphX, p.glyphY, p.glyphH, {255, 255, 255, 255}, 0x11);
+        ui.drawText(c, qbkey::key("fontgrid_title_gh3"), kHelp[k], p.textX, p.textY, p.textH, textColor, 0x11);
     }
 }
 
 void PortScreens::helpRect(int k, float& x0, float& y0, float& x1, float& y1) const {
-    const float h = 26;
-    x0 = 56;
-    for (int i = 0; i <= k; ++i) {
-        x1 = x0 + h + 34 + ctx_.fe.ui().textWidth(qbkey::key("fontgrid_title_gh3"), kHelp[i], h * 0.8f);
-        if (i < k) x0 = x1 + 16;
-    }
-    y0 = 660 - h * 0.5f - 4, y1 = 660 + h * 0.5f + 4;
+    HelpPill pills[3];
+    helpLayout(ctx_.fe, pills);
+    const HelpPill& p = pills[k];
+    x0 = p.x0 - p.end, x1 = p.x1 + p.end, y0 = p.y0, y1 = p.y1;
+}
+
+// The port's item on GH3's help bar (GAMEPADS on the main menu, ENHANCED on
+// Options) is one of GH3's own pills: added through its
+// add_user_control_helper (yellow / blue fret glyph, its pill texture and
+// layout) when the screen's helpers lack it (ensureItem), so it looks and
+// lines up as GH3's do [C script add_user_control_helper].
+void PortScreens::ensureItem(const std::string& flowState) {
+    if (isOpen() || (flowState != "main_menu_fs" && flowState != "options_select_option_fs")) return;
+    ui::UiSystem& ui = ctx_.fe.ui();
+    const ui::Element* box = ui.find(qbkey::key("user_control_container"));
+    if (!box || box->children.empty()) return;  // the screen's own helpers first
+    const std::string label = itemLabel(flowState);
+    for (const auto& c : box->children)
+        if (c->text == label) return;
+    qb::Struct p;
+    qs::Vm::set(p, qbkey::key("Text"), qs::Vm::makeString(label));
+    qs::Vm::set(p, qbkey::key("button"), qs::Vm::makeKey(qbkey::key(flowState == "main_menu_fs" ? "yellow" : "blue")));
+    qs::Vm::set(p, qbkey::key("z"), qs::Vm::makeInt(100));
+    ctx_.fe.vm().run(qbkey::key("add_user_control_helper"), p);
 }
 
 bool PortScreens::itemRect(const std::string& flowState, float& x0, float& y0, float& x1, float& y1) const {
     if (flowState != "main_menu_fs" && flowState != "options_select_option_fs") return false;
-    // After GH3's own help items' texts (user_control_container), on their
-    // line; GH3 puts its pills at y 650 (user_control_pill_y_position) [C data].
+    // GH3's pill holding the item's text (ensureItem), its glyph to the left.
     const ui::UiSystem& ui = ctx_.fe.ui();
-    float bx1 = 120, by0 = 650, by1 = 680;
-    bool any = false;
-    if (const ui::Element* box = ui.find(qbkey::key("user_control_container")))
-        for (const auto& c : box->children)
-            if (c->drawnIn == ui.drawCount() && !c->text.empty() && c->text[0] != '\\') {
-                if (!any) bx1 = c->bx1, by0 = c->by0, by1 = c->by1;
-                else bx1 = std::max(bx1, c->bx1), by0 = std::min(by0, c->by0), by1 = std::max(by1, c->by1);
-                any = true;
-            }
-    const float h = std::clamp(by1 - by0, 22.0f, 34.0f), cy = (by0 + by1) * 0.5f;
-    x0 = bx1 + 40, x1 = x0 + h + 14 + ui.textWidth(qbkey::key("fontgrid_title_gh3"), itemLabel(flowState), h * 0.8f) + 18;
-    y0 = cy - h * 0.5f - 4, y1 = cy + h * 0.5f + 4;
-    return true;
+    const ui::Element* box = ui.find(qbkey::key("user_control_container"));
+    if (!box) return false;
+    const std::string label = itemLabel(flowState);
+    for (const auto& c : box->children)
+        if (c->text == label && c->drawnIn == ui.drawCount()) {
+            x0 = c->bx0 - 40, x1 = c->bx1 + 8, y0 = c->by0 - 8, y1 = c->by1 + 8;
+            return true;
+        }
+    return false;
 }
 
-void PortScreens::drawItems(Canvas& c, const std::string& flowState) {
-    float x0, y0, x1, y1;
-    if (isOpen() || !itemRect(flowState, x0, y0, x1, y1)) return;
-    PortDraw d(c, ctx_.fe.ui());
-    // A pill as GH3 draws its help items (light, dark text, as seen on its
-    // Control_pill textures) [I: drawn as quads], with the fret's colour
-    // (yellow: GAMEPADS, blue: ENHANCED) as a square where GH3 draws its
-    // button glyph.
-    const bool main = flowState == "main_menu_fs";
-    const PortDraw::Color fret = main ? PortDraw::Color{0.95f, 0.85f, 0.2f, 1} : PortDraw::Color{0.25f, 0.45f, 0.95f, 1};
-    const float h = y1 - y0 - 8, cy = (y0 + y1) * 0.5f;
-    pill(d, x0, y0, x1, y1);
-    d.quad(x0 + 8, cy - h * 0.5f, x0 + 8 + h, cy + h * 0.5f, fret);
-    d.text(itemLabel(flowState), x0 + h + 20, cy, h * 0.8f, kPillText, 0x21, true);
-}
+void PortScreens::drawItems(Canvas&, const std::string& flowState) { ensureItem(flowState); }
 
 std::string PortScreens::itemAt(float x, float y, const std::string& flowState) const {
     float x0, y0, x1, y1;

@@ -13,6 +13,7 @@
 class Globals;
 class TextureCache;
 struct NoteTrack;
+struct TrackNote;
 struct PlayerStats;
 class Player;
 
@@ -55,6 +56,28 @@ public:
     void noteHit(uint8_t frets, uint8_t held, double nowMs, bool starPower);
     // highway_pulse_black: a passing note missed while the guitar is muted [C script GuitarEvent_MissedNote].
     void missPulse(double nowMs);
+    // The sustain tails, each game frame after step() (docs/highway.md 2.6):
+    // the hold's start (WhammyFXOn's sys_whammy_hold01 at the frets) and end
+    // (CheckNoteHoldEnd 0x8211D3B8: the tail MakeDeadWhammy'd, its head let
+    // go), star_power_whammy's blue tail for a whammied star sustain
+    // (`whammy` 0 rest .. 1, `blueWhammys` off in battle / boss) [C].
+    void stepTails(const Player& player, const NoteTrack& track, double nowMs, float whammy, bool blueWhammys);
+    // A missed note: its tail MakeDeadWhammy'd (the miss judge 0x8211F328) [C].
+    void noteMissed(int note);
+    uint64_t deadTails = 0, starWhammys = 0, holdFxStarted = 0;  // for the checks
+    // Battle / boss: the scripts that morph gem_container<p>.
+    // hammer_highway {push time}: from where the container is, a linear
+    // morph to there + push over `timeS`, the same back, `timeS` each; a
+    // hammer while one runs (battle_p<n>_highway_hammer) does nothing. An
+    // attack's hit pushes (-70, 50) / (70, 50) over 0.1 s (battle_trigger_on,
+    // bossbattle_trigger_on); Death Drain's bites (0, 30) over 0.01 s
+    // (bite_particle) [C scripts].
+    void hammer(double nowMs, float pushX, float pushY, float timeS);
+    // Each game frame of a battle, before that frame's hammers: the running
+    // hammer and shake_highway go on; `shaking` (shake_notes > -1, Amp
+    // Overload) rising spawns shake_highway [C scripts battle_lightning, shake_highway].
+    void stepBattle(double nowMs, bool shaking);
+    uint64_t hammers = 0, battleShakes = 0;
     // Counters for the walk / self checks.
     uint64_t flamesStarted = 0, pulses = 0, shakes = 0;
     // The normalised depth v (0 top, 1 playline) of a note time at song time
@@ -103,6 +126,14 @@ public:
         bool battle = false;  // star gems: sys_BattleGEM_* [C 0x82120C90]
     };
     void setEffects(Effects e) { fx_ = std::move(e); }
+    // The five lanes for touch play (menu units): at the strike line and at
+    // the far end, as drawn (lefty mirrors) [I: the fingers' map].
+    void touchLanes(std::array<float, 5>& nearX, std::array<float, 5>& nearY, std::array<float, 5>& farX, std::array<float, 5>& farY) const {
+        for (int k = 0; k < 5; ++k) {
+            nearX[size_t(k)] = endX_[size_t(k)], nearY[size_t(k)] = playline_;
+            farX[size_t(k)] = startX_[size_t(k)], farY[size_t(k)] = topY_;
+        }
+    }
 
 private:
     void drawAll(Canvas& c, const TextureCache& tex, const NoteTrack& track, const Player& player, double nowMs, uint8_t held);
@@ -117,13 +148,20 @@ private:
     // A sprite turned by `rotDeg` (clockwise) about its anchor (just jx, jy in -1..1); w / h may be negative (mirrored).
     void sprite(Canvas& c, uint32_t texKey, const TextureCache& tex, float x, float y, float w, float h, float jx, float jy, float rotDeg,
                 SDL_Color col, float u0 = 0, float v0 = 0, float u1 = 1, float v1 = 1, Blend blend = Blend::Alpha, bool fade = false) const;
-    void drawButtons(Canvas& c, const TextureCache& tex, uint8_t held, bool raised) const;
+    void drawStarPowerFx(Canvas& c, const TextureCache& tex, double now, bool under) const;
+    // One sustain tail (the strip of 0x8238E338) of note `i` on lane `lane`.
+    void drawTail(Canvas& c, const TextureCache& tex, const TrackNote& n, int i, int fret, int lane, const Player& player, double now) const;
+    void drawButtons(Canvas& c, const TextureCache& tex, uint8_t held, bool raised, double now) const;
     SDL_Color surfaceTint(double now) const;
 
     float playline_ = 655, height_ = 350, topWidth_ = 160, widthOffset_ = 2.2f, fade_ = 30;
     float cx_ = 640;    // the highway's centre (x)
     float baseX_ = 0;   // the container's x offset from the one-player layout
     Effects fx_;
+    // Lefty Flip's button slide (animate_lefty_flip): the buttons as drawn
+    // (lefthanded_button_ups), the one before and when it changed.
+    mutable bool btnLefty_ = false, btnFrom_ = false, btnSeen_ = false;
+    mutable double btnSlideAt_ = -1e9;
     float topY_ = 305, gemStart_ = 0.25f, gemEnd_ = 0.8f, starScale_ = 1.3f, gemJust_ = 0.83f, starJust_ = 0.5f;
     float fretbarStart_ = 0.15f, fretbarEnd_ = 0.48f, whammyTop_ = 10, whammyOffset_ = 1.8f;
     float sidebarXScale_ = 0.3f, sidebarYScale_ = 1, sidebarXOffset_ = 4;
@@ -131,6 +169,24 @@ private:
     float neckSprite_ = 16, neckLipAdd_ = 16, neckLipBase_ = 5, buttonUpPixels_ = 20, buttonSinkMs_ = 100;
     float pulseMs_ = 200;  // highway_pulse_time
     float whammyCutoff_ = 1100;  // whammy_cutoff [C data]
+    float whammyTweakMs_ = -33;  // whammy_offset_tweak [C data]
+    // The tails' state by note index: dead (sys_Whammy2D_Dead, z 3.1, its
+    // head moving on from where the hold left it), blue (star_power_whammy).
+    struct Tail {
+        bool dead = false, star = false;
+        double releasedAt = -1;  // the hold's end (-1: never held)
+    };
+    std::vector<std::pair<int, Tail>> tails_;
+    Tail* tail(int note);
+    const Tail* tail(int note) const;
+    int holdNote_ = -1;     // the note held (Player::sustaining) as last seen
+    uint8_t holdFrets_ = 0;
+    double holdStart_ = 0;  // WhammyFXOn's sys_whammy_hold01 created
+    // star_power_whammy's locals [C script].
+    int whammyOn_ = 0, whammyStarOn_ = 0, whammyStarOff_ = 0;
+    float lastWhammy_ = 0;
+    bool whammyFirst_ = true;
+    bool tailsSp_ = false;  // Star Power as stepTails last saw it (LaunchGemEvent star_power_on / _off)
     float travelMs_ = 1500;  // scroll_time - destroy_time
     std::array<float, 128> wibble_ = filled(1.0f);
     static std::array<float, 128> filled(float v) {
@@ -180,4 +236,28 @@ private:
         bool blue = false;
     };
     std::array<Emitter, 5> emitters_{};
+    // gem_container<p>'s battle morphs: one DoScreenElementMorph at a time
+    // (a new one starts from where the last left the container) [C scripts; I: linear].
+    struct Morph {
+        float x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+        double start = -1e18, ms = 0;
+    } bm_;
+    void battleOffset(double now, float& x, float& y) const;
+    void battleMorph(double now, float x, float y, double ms);
+    // hammer_highway: 0 idle, 1 out (the wait after the push), 2 back.
+    struct Hammer {
+        int state = 0;
+        double until = 0, ms = 100;
+        float ox = 0, oy = 0;
+    } hammer_;
+    // shake_highway: 0 not running, 1 waiting for the hammer, 2 the loop's
+    // top (next frame), 3 waiting shake_frequency (0.05 s).
+    struct ShakeScript {
+        int state = 0;
+        double until = 0;
+        float ox = 0, oy = 0;
+        bool pulseOn = false;
+    } shakeScript_;
+    bool wasShaking_ = false;
+    void runShake(double now, bool shaking);
 };

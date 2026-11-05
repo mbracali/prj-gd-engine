@@ -168,7 +168,7 @@ interpreter, gd-game-02/docs/ui_and_frontend.md). What this disc changes:
   FPS 60, no FPS counter, Internal Resolution "Window", Widescreen off, the
   greyed (not yet built) effects off, the cheats off. Enable Mouse Selection
   starts on: it is a control, and every gd-game works with the mouse
-  (guidelines/universal_launcher.md). `--walktest enhanced` checks them, the
+  (docs/knowledge/universal_launcher.md). `--walktest enhanced` checks them, the
   4:3 picture with its bars, and 16:9 after Widescreen is switched on.
 - The page follows gd-game-01's Enhanced Settings (ui/enhanced_panel.cpp):
   the options box on the left, the still close-up of the singer with the

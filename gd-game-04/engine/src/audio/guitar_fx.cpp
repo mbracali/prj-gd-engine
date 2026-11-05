@@ -8,9 +8,15 @@
 namespace {
 // Freeverb's comb and all-pass lengths at 44100 Hz, the right channel 23
 // samples longer (stereo spread) [I: gd04's reverb].
-constexpr int kComb[4] = {1116, 1188, 1277, 1356};
+constexpr int kComb[GuitarFx::kCombs] = {1116, 1188, 1277, 1356, 1422, 1491, 1557, 1617};
 constexpr int kAllPass[2] = {556, 441};
 constexpr int kSpread = 23;
+// The early reflections: four taps (ms after ReflectionsDelay) of gain 0.5
+// (unit energy), the right channel's second and fourth inverted. A single
+// tap at the default ReflectionsDelay 0 was the dry signal again: it added
+// in phase (+1.9 dB at ReflectionsLevel -1200 instead of +0.3) [I: gd04's;
+// FMOD's reflection pattern is not reimplemented].
+constexpr float kReflMs[4] = {7.1f, 11.3f, 17.9f, 23.7f};
 float mbToGain(float mb) { return mb <= -9999 ? 0.0f : std::pow(10.0f, mb / 2000.0f); }
 float dbToGain(float db) { return std::pow(10.0f, db / 20.0f); }
 }  // namespace
@@ -55,7 +61,7 @@ void GuitarFx::tune() {
         for (auto& e : echo_) e.assign(size_t(rate_ * 2) + 1, 0.0f);
         for (auto& p : pre_) p.assign(size_t(rate_ / 2) + 1, 0.0f);
         for (int c = 0; c < 2; ++c) {
-            for (int i = 0; i < 4; ++i) comb_[size_t(c)][size_t(i)].buf.assign(size_t(float(kComb[i] + c * kSpread) * k) + 1, 0.0f);
+            for (int i = 0; i < kCombs; ++i) comb_[size_t(c)][size_t(i)].buf.assign(size_t(float(kComb[i] + c * kSpread) * k) + 1, 0.0f);
             for (int i = 0; i < 2; ++i) ap_[size_t(c)][size_t(i)].buf.assign(size_t(float(kAllPass[i] + c * kSpread) * k) + 1, 0.0f);
         }
         echoPos_ = prePos_ = 0;
@@ -64,6 +70,40 @@ void GuitarFx::tune() {
     for (auto& ch : comb_)
         for (Comb& c : ch) c.fb = std::pow(10.0f, -3.0f * float(c.buf.size()) / float(rate_) / std::max(0.1f, cur_.decayTime));
     tunedDecay_ = cur_.decayTime;
+    // The network's energy for a unit impulse (left channel; the right's
+    // lengths differ by kSpread only), over 1.5 x DecayTime (< -90 dB left).
+    // Unscaled (0.25) it was ~+8 dB over the level asked: the SP reverb at
+    // ReverbLevel -550 came out near +3 dB and the guitar buss ~6 dB louder
+    // than its dry level, clipping on loud guitar (owner 11-05: distortion).
+    std::array<Comb, kCombs> cs = comb_[0];
+    std::array<AllPass, 2> as = ap_[0];
+    for (Comb& c : cs) std::fill(c.buf.begin(), c.buf.end(), 0.0f), c.pos = 0, c.lp = 0;
+    for (AllPass& a : as) std::fill(a.buf.begin(), a.buf.end(), 0.0f), a.pos = 0;
+    double energy = 0;
+    const int n = int(float(rate_) * 1.5f * std::max(0.1f, cur_.decayTime));
+    for (int i = 0; i < n; ++i) {
+        const float acc = runLate(cs, as, i == 0 ? 1.0f : 0.0f);
+        energy += double(acc) * acc;
+    }
+    lateNorm_ = energy > 1e-9 ? float(1.0 / std::sqrt(energy)) : 0.0f;
+}
+
+float GuitarFx::runLate(std::array<Comb, kCombs>& combs, std::array<AllPass, 2>& aps, float x) {
+    float acc = 0;
+    for (Comb& cb : combs) {
+        const float y = cb.buf[cb.pos];
+        cb.lp = y * 0.8f + cb.lp * 0.2f;  // damping
+        cb.buf[cb.pos] = x + cb.lp * cb.fb;
+        cb.pos = (cb.pos + 1) % cb.buf.size();
+        acc += y;
+    }
+    for (AllPass& a : aps) {
+        const float b = a.buf[a.pos];
+        a.buf[a.pos] = acc + b * 0.5f;
+        a.pos = (a.pos + 1) % a.buf.size();
+        acc = b - acc;
+    }
+    return acc;
 }
 
 void GuitarFx::process(float& l, float& r) {
@@ -108,23 +148,16 @@ void GuitarFx::process(float& l, float& r) {
     if (late > 0 || refl > 0) {
         const size_t rd = std::min(pn - 1, size_t(cur_.reverbDelay * float(rate_)));
         const size_t ed = std::min(pn - 1, size_t(cur_.reflectionsDelay * float(rate_)));
-        const float x = pre_[0][(prePos_ + pn - rd) % pn], e = pre_[0][(prePos_ + pn - ed) % pn];
+        const float x = pre_[0][(prePos_ + pn - rd) % pn];
+        float e[2] = {0, 0};
+        for (int k = 0; k < 4; ++k) {
+            const size_t d = std::min(pn - 1, ed + size_t(kReflMs[k] * float(rate_) / 1000.0f));
+            const float tap = 0.5f * pre_[0][(prePos_ + pn - d) % pn];
+            e[0] += tap, e[1] += k % 2 ? -tap : tap;
+        }
         for (int c = 0; c < 2; ++c) {
-            float acc = 0;
-            for (Comb& cb : comb_[size_t(c)]) {
-                const float y = cb.buf[cb.pos];
-                cb.lp = y * 0.8f + cb.lp * 0.2f;  // damping
-                cb.buf[cb.pos] = x + cb.lp * cb.fb;
-                cb.pos = (cb.pos + 1) % cb.buf.size();
-                acc += y;
-            }
-            for (AllPass& a : ap_[size_t(c)]) {
-                const float b = a.buf[a.pos];
-                a.buf[a.pos] = acc + b * 0.5f;
-                a.pos = (a.pos + 1) % a.buf.size();
-                acc = b - acc;
-            }
-            out[c] += acc * 0.25f * late + e * refl;
+            const float acc = runLate(comb_[size_t(c)], ap_[size_t(c)], x);
+            out[c] += acc * lateNorm_ * late + e[c] * refl;
         }
     }
     prePos_ = (prePos_ + 1) % pn;

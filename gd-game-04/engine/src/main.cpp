@@ -44,7 +44,7 @@ void usage() {
         "  --selftest           check the data (song list, every chart), auto-play every chart\n"
         "  --uitest             boot through the menus, then start every flow state's screen in turn (headless)\n"
         "  --walktest <walk>    play through GH3's own menus: quickplay, lose, back, boot, mouse, gamepads,\n"
-        "                       stickyaxis, career, career_quickplay, pause, pausequit, coop, faceoff, proface,\n"
+        "                       stickyaxis, touch, options, practice, store, hub, venues, career, career_quickplay, pause, pausequit, coop, faceoff, proface,\n"
         "                       battle, boss, boss_devil, boss_helper, vault, cheats, glitches, attract (headless:\n"
         "                       SDL_VIDEO_DRIVER=offscreen SDL_AUDIO_DRIVER=dummy)\n"
         "  --audittest [--out f] the asset / reference audit: names the scripts call and pak types the engine lacks\n"
@@ -177,6 +177,9 @@ int run(int argc, char** argv) {
         else if (!a.empty() && a[0] == '-' && a.rfind("-psn_", 0) != 0) { usage(); return 2; }  // -psn_: macOS Finder
         else if (a.rfind("-psn_", 0) != 0) opt.dataPath = a;
     }
+    if (shadertest || !movie.empty() || audittest || formattest || selftest || sfxtest || scripttest || venuetest || chartest ||
+        !opt.walk.empty())
+        SDL_setenv_unsafe("GD04_SEED", "12345", 0);  // the tests' scripts pick the same randoms every run
     if (shadertest) return runShaderTest(opt.dataPath);
     if ((!movie.empty() || audittest || formattest || selftest || sfxtest || scripttest || venuetest || chartest || !opt.walk.empty()) &&
         opt.dataPath.empty()) {

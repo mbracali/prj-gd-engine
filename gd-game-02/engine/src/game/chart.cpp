@@ -2,6 +2,7 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "game/chart.h"
 
+#include <map>
 #include <algorithm>
 #include <cmath>
 #include <utility>
@@ -152,6 +153,18 @@ Song buildSong(const MidiFile& midi, int hopoThresholdTicks) {
             if (e.isNoteOn() && e.data1 == 110) song.bigNotes[size_t(p)].push_back(int(e.tick));
     }
     song.bigNotes[size_t(Part::GuitarCoop)] = song.bigNotes[size_t(Part::Guitar)];
+    for (const MidiTrack& tr : midi.tracks) {  // tracks named "PART..." (0x82345B78); GH2 has no drum part
+        if (tr.name.rfind("PART", 0) != 0) continue;
+        std::map<int, uint32_t> open;
+        for (const MidiEvent& e : tr.events) {
+            if (e.data1 >= 36 || !(e.isNoteOn() || e.isNoteOff())) continue;
+            if (e.isNoteOn()) open[e.data1] = e.tick;
+            else if (auto it = open.find(e.data1); it != open.end()) {
+                song.bassRanges.emplace_back(float(song.tempo.tickToMs(it->second)), float(song.tempo.tickToMs(e.tick)));
+                open.erase(it);
+            }
+        }
+    }
     if (!song.hasPart[0]) throw std::runtime_error("chart has no PART GUITAR track");
 
     uint32_t lastTick = 0;

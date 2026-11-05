@@ -338,7 +338,7 @@ const std::map<std::string, Decoder>& charDecoders() {
         {"CharEyes", dec<CharEyes>(4, [](Rd& r, CharEyes& e) {
              e.header = r.header();
              e.eyes = r.strs();
-             e.viewDirection = r.str();
+             e.rightLid = r.str();
              e.interests.resize(r.count(8));
              for (auto& i : e.interests) {
                  i.first = r.str();

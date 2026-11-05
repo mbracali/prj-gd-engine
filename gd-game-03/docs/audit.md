@@ -95,7 +95,18 @@ Never looked up (1): `band_shadow1.mesh`
 
 229 sounds in the banks, 149 played or looked up; referenced by scripts but never played (2): `click.cue` `sp_gemhit`
 
-## Rows left (gd03 0.0.3, GD03-011)
+## Rows left (gd03 0.0.3, GD03-011; walked in 0.1.12, GD03-092)
+
+0.1.12: every screen below now has a walk: `career_finalsong` (yes_ /
+no_finalsong*.btn, finalsong1..3.grp), the stats on `quickplay`, `coop`,
+`faceoff`, `proface` (endgame_stats_screen: song_name.lbl, *_notes_hit.lbl,
+*_sp_phrases.lbl, player0_avg_multi.lbl, *_streaks_broken.lbl,
+*_lead_time.lbl, stats_coop.grp / stats_faceoff.grp), `options_extras`
+(autosave, save / load bands, manage bands rename / delete, progressive
+scan; Bonus Videos is hidden in options.milo, so the bonus material screen
+is never reached on the PS2), `pad_unplugged` (pause_controller_msg.lbl)
+and `store_guitars` (all 24 guitars shown). The text below is the 0.0.3
+state.
 
 Every sound the scripts play is now heard except `click.cue` (game.dta's
 `$debug.beep` only) and `sp_gemhit` (no `hit` reaches the matcher handlers

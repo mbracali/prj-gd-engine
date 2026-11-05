@@ -90,6 +90,10 @@ public:
     // A typed key for the focused text entry (band names); false: none is focused.
     bool textEntryFocused() const;
     bool typeKey(int code);
+    // GH2's developer keyboard cheats (config/cheats.dta, quick_cheats
+    // keyboard): runs the cheat on `code` (a character, or KB_F1.. 401..412).
+    // False: no cheat on that key (GD02-045).
+    bool keyCheat(int code);
     // A game event for the game panel and its sinks (intro_start_msg,
     // game_won_msg, game_lost, game_outro_complete, star_power_ready...).
     void gameEvent(const std::string& msg, std::vector<Value> args = {});
@@ -98,6 +102,8 @@ public:
 
     std::string currentScreen() const;
     bool inTransition() const;
+    static constexpr double kLoadScreenHoldMs = 2000;  // GD02-155
+    bool holdingLoadScreen() const;
     bool inSplashes() const { return splash_ >= 0; }
     // The game panel is up (the song is the UI's).
     bool inGame() const;
@@ -210,6 +216,12 @@ public:
     bool mouse(float x, float y, bool click);
     // The wheel: one Up (-1) or Down (+1) press.
     void wheel(int dir);
+    // After a wheel step, hover waits until the pointer really moves (more
+    // than kWheelHoverSlack menu units), or a slight nudge would focus the
+    // row under it again and undo the scroll (#51).
+    float mouseX_ = -1e9f, mouseY_ = -1e9f, wheelX_ = 0, wheelY_ = 0;
+    bool wheelHold_ = false;
+    static constexpr float kWheelHoverSlack = 24;
     // Turns a cheat on or off as its button code does (Enhanced Options).
     void setCheat(const std::string& id, bool on);
 
@@ -274,6 +286,7 @@ private:
 
     // screens
     ScreenObj* current_ = nullptr;
+    double currentSinceMs_ = 0;  // uiMs_ when current_ was entered (loading screens' hold, GD02-155)
     ScreenObj* next_ = nullptr;  // being transitioned to
     ScreenObj* previous_ = nullptr;
     bool back_ = false;

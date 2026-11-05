@@ -30,7 +30,7 @@ verified, not run on a device) · macOS 🔴 (not built: no toolchain).
 
 
 Guitar Hero Encore: Rocks the 80s (PS2) -> `gd03`. Kickoff:
-`GD-GAME-03_KICKOFF.md` (repository root). Newest entries at the bottom.
+`docs/knowledge/GD-GAME-03_KICKOFF.md`. Newest entries at the bottom.
 "Verified" lines quote the command and its output; "built only" and "not
 tested" are said explicitly.
 

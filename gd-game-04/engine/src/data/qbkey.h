@@ -4,6 +4,8 @@
 
 #include <array>
 #include <cstdint>
+#include <mutex>
+#include <shared_mutex>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -41,18 +43,32 @@ static_assert(key(".qb") == 0xa7f505c4u, "QB key of .qb");
 // lines) and the file names (Disc::loadNames). Unknown keys print as hex.
 class Names {
 public:
-    void add(uint32_t k, std::string name) { names_.emplace(k, std::move(name)); }
-    void add(const std::string& name) { names_.emplace(key(name), name); }
+    // Locked: a song's venue loads on a worker thread while FormatText's
+    // addtostringlookup adds names on the main one (owner 1.7). Elements
+    // are never removed, so a found name's pointer stays valid.
+    void add(uint32_t k, std::string name) {
+        std::unique_lock l(mutex_);
+        names_.emplace(k, std::move(name));
+    }
+    void add(const std::string& name) {
+        std::unique_lock l(mutex_);
+        names_.emplace(key(name), name);
+    }
     std::string get(uint32_t k) const;
     const std::string* find(uint32_t k) const {
+        std::shared_lock l(mutex_);
         auto it = names_.find(k);
         return it == names_.end() ? nullptr : &it->second;
     }
-    size_t size() const { return names_.size(); }
+    size_t size() const {
+        std::shared_lock l(mutex_);
+        return names_.size();
+    }
     // Adds the "[Checksums]" lines ("0x1234abcd name") of a debug file.
     void addDebugText(std::string_view text);
 
 private:
+    mutable std::shared_mutex mutex_;
     std::unordered_map<uint32_t, std::string> names_;
 };
 

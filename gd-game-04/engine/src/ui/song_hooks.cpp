@@ -10,14 +10,17 @@
 #include <exception>
 
 #include "audio/mixer.h"
+#include "audio/sound_buss.h"
 #include "data/disc.h"
 #include "data/pak.h"
 #include "data/qb.h"
 #include "data/qbkey.h"
 #include "game/match.h"
+#include "render/band.h"
 #include "render/canvas.h"
 #include "render/texture_cache.h"
 #include "render/highway2d.h"
+#include "render/venue_stage.h"
 #include "script/vm.h"
 #include "ui/front_end.h"
 #include "ui/natives_sound.h"
@@ -231,7 +234,8 @@ void SongHooks::loadSongScripts(SongScreen& s) {
     // globals [C script start_gem_scroller].
     const std::string path = "DATA/COMPRESSED/SONGS/" + s.song().name + "_song.pak.xen";
     try {
-        const Pak pak = Pak::load(disc_, path);
+        const auto pakShared = Pak::shared(disc_, path);
+        const Pak& pak = *pakShared;
         for (const PakEntry& e : pak.entries())
             if (e.type == K(".qb")) {
                 auto [d, n] = pak.data(e);
@@ -251,8 +255,17 @@ void SongHooks::begin(SongScreen& s) {
     pp_ = {};
     players_ = s.match().players();
     nowMs_ = s.startMs() - 3000;
+    winMovie_ = false;
+    transitionAt_ = -1e18, startRendered_ = false;
+    // play_intro: current_intro = the transition's sequence props (fast:
+    // fastintro_sequence_props) [C scripts play_intro, Common_*_Transition];
+    // no play_intro (Immediate): no intro sounds.
+    introSfx_ = {};
+    if (s.introProps().empty()) introSfx_ = {true, true, true};
+    else if (const qb::Value* fi = fe_.vm().global(K(s.introProps().c_str()))) fe_.vm().setGlobal(K("current_intro"), *fi);
     const Match& m0 = s.match();
     lastCards_ = {}, lastFired_ = {}, lastByAttack_ = {};
+    lastBolt_ = {-1e9, -1e9}, fxEnds_.clear();
     Vm& vm = fe_.vm();
     loadSongScripts(s);
     for (int p = 0; p < players_; ++p) {
@@ -326,6 +339,22 @@ void SongHooks::begin(SongScreen& s) {
     // and the guitar buss dry [C script start_gem_scroller].
     vm.run(K("GuitarEvent_EnterVenue"), qb::Struct{});
     vm.run(K("GH3_Set_Guitar_Verb_And_Echo_to_Dry"), qb::Struct{});
+    // reset_score: current_section_array = <song>_markers, its entry 0 [C
+    // script reset_score]; the entry then follows the song (frame()) [I: the
+    // C core moves it on as the song passes each marker].
+    markers_.clear();
+    sectionEntry_ = -1;
+    if (const qb::Value* mk = vm.global(K(s.song().name + "_markers")); mk && mk->arr)
+        for (const qb::Value& m : mk->arr->values) markers_.push_back(m.st ? Vm::number(m.st->find(K("time")), 0) : 0.0);
+    vm.setGlobal(K("current_section_array"), Vm::makeKey(K(s.song().name + "_markers")));
+    vm.setGlobal(K("current_section_array_entry"), Vm::makeInt(0));
+    // Training: practicemode_init (the band hidden, the section's name over
+    // the song: practicemode_section) [C script start_gem_scroller].
+    if (const qb::Value* gm = vm.global(K("game_mode")); gm && gm->key == K("training")) {
+        sectionEntry_ = 0;
+        frameSection(s.startMs());
+        vm.spawn(K("practicemode_init"), qb::Struct{});
+    }
     // The fretbar iterators start at the song's start.
     fretbar_ = preFretbar_ = 0;
     const NoteTrack& t0 = s.match().track(0);
@@ -431,6 +460,84 @@ void SongHooks::eventArrays(SongScreen&, double now) {
     }
 }
 
+void SongHooks::introAndEndMedia(SongScreen& s, double now) {
+    Vm& vm = fe_.vm();
+    // play_intro's scripts, each waiting for its current_intro time after
+    // current_starttime (GetSongTimeMs, every game frame); the intro itself
+    // (highway, buttons, HUD) is the native highway's and HUD's [C scripts
+    // play_intro, intro_highway_move, intro_buttonup_ripple, intro_hud_move]:
+    //  - intro_highway_move (not in performance mode offline) spawns
+    //    Song_Intro_Highway_Up_SFX_Waiting (highway_move_time - 1.5 s, then
+    //    SoundEvent Song_Intro_Highway_Up);
+    //  - intro_buttonup_ripple, per player: SoundEvent Notes_Ripple_Up_SFX
+    //    (unless button_ripple_per_button_time = 0);
+    //  - intro_hud_move (tutorial_disable_hud = 0) spawns
+    //    Song_Intro_Kick_SFX_Waiting (hud_move_time, then Song_Intro_Kick_SFX).
+    // None with the boss helper screen up or in the attract mode (play_intro returns) [C].
+    // Every transition a song starts with (Common_Immediate / FastIntro /
+    // Intro / Encore / Boss / Practice / RestartEncore / RestartBoss) runs
+    // Transition_StartRendering 100 ms in: StartRendering, enable_pause,
+    // is_changing_levels = 0 [C data Common_*_Transition, script
+    // Transition_StartRendering]. The port plays the transitions natively, so
+    // it runs here: without it is_changing_levels stayed 1 from the song's
+    // create_loading_screen (destroy_loading_screen leaves it while
+    // playing_song = 1), so the next create_loading_screen returned at once
+    // (no loading_flying movie, no LOADING, no tip: every song after the
+    // first) and handle_start_pressed refused the pause menu.
+    if (transitionAt_ < -1e17) transitionAt_ = now;
+    if (!startRendered_ && now >= transitionAt_ + 100) {
+        startRendered_ = true;
+        vm.spawn(K("Transition_StartRendering"), qb::Struct{});
+    }
+    const qb::Value* ci = vm.global(K("current_intro"));
+    const bool noIntro = Vm::number(vm.global(K("show_boss_helper_screen")), 0) == 1 || Vm::number(vm.global(K("is_attract_mode")), 0) == 1;
+    if (ci && ci->st && !noIntro) {
+        auto at = [&](const char* field) { return s.startMs() + Vm::number(vm.globals().field(*ci->st, K(field)), 0); };
+        if (!introSfx_[0] && now > at("highway_start_time")) {
+            introSfx_[0] = true;
+            if (!(Vm::number(vm.global(K("cheat_performancemode")), 0) == 1 && Vm::number(vm.global(K("is_network_game")), 0) == 0))
+                spawnTracked(K("Song_Intro_Highway_Up_SFX_Waiting"), qb::Struct{}, "Song_Intro_Highway_Up_SFX_Waiting", k_.spawned);
+        }
+        if (!introSfx_[1] && now > at("button_ripple_start_time")) {
+            introSfx_[1] = true;
+            if (Vm::number(vm.globals().field(*ci->st, K("button_ripple_per_button_time")), 0) != 0)
+                for (int p = 0; p < players_; ++p) {
+                    qb::Struct e;
+                    Vm::set(e, K("event"), Vm::makeKey(K("Notes_Ripple_Up_SFX")));
+                    vm.run(K("SoundEvent"), e);
+                }
+        }
+        if (!introSfx_[2] && now > at("hud_start_time")) {
+            introSfx_[2] = true;
+            if (Vm::number(vm.global(K("tutorial_disable_hud")), 0) == 0)
+                spawnTracked(K("Song_Intro_Kick_SFX_Waiting"), qb::Struct{}, "Song_Intro_Kick_SFX_Waiting", k_.spawned);
+        }
+    }
+    // win_song at the end marker, before its Song_Win_Delay: KillMovie, then
+    // the You Rock movie preloaded into texture slot 1 (Fret_Flames; face-off:
+    // Player1_wins / Player2_wins by score), which GuitarEvent_SongWon_Spawned's
+    // wait_and_play_you_rock_movie starts [C scripts win_song, wait_and_play_you_rock_movie].
+    if (!winMovie_ && s.endReached() && s.match().outcome() == Match::Outcome::None) {
+        winMovie_ = true;
+        const Match& m = s.match();
+        std::string movie = "Fret_Flames";
+        if (players_ == 2 && (m.mode() == GameMode::FaceOff || m.mode() == GameMode::ProFaceOff)) {
+            const int64_t a = m.player(0).stats().score, b = m.player(1).stats().score;
+            if (a > b) movie = "Player1_wins";
+            else if (b > a) movie = "Player2_wins";
+        }
+        qb::Struct k;
+        Vm::set(k, K("textureslot"), Vm::makeInt(1));
+        vm.run(K("KillMovie"), k);
+        qb::Struct p;
+        Vm::set(p, K("movie"), Vm::makeString(movie));
+        Vm::set(p, K("textureslot"), Vm::makeInt(1));
+        Vm::set(p, K("texturepri"), Vm::makeInt(70));
+        for (const char* f : {"no_looping", "no_hold"}) p.items.push_back({0, Vm::makeKey(K(f))});
+        vm.run(K("PreLoadMovie"), p);
+    }
+}
+
 void SongHooks::step(SongScreen& s, double now) {
     if (!active_ || song_ != &s) return;
     nowMs_ = now;
@@ -441,6 +548,16 @@ void SongHooks::step(SongScreen& s, double now) {
         buildInputArray(s, p);
         syncStatus(s, p);
     }
+    // The band's ped_animevents (render/band_anim): each `scr` spawned with
+    // its params -- the Star Power anims' StarPower_ShootShotgun /
+    // StarPower_FlameThrowerFlames (Casey's shots, Johnny's flames: GD04-097).
+    // The win / lose anims' PreloadWinAnimStream / PlayPreLoadedWinAnimStream
+    // run as the member (obj_getid) and are not reproduced [C data ped_animevents].
+    if (VenueStage* venue = s.venue(); venue && venue->band())
+        for (const auto& e : venue->band()->takeClipEvents()) {
+            if (e.scr == K("PreloadWinAnimStream") || e.scr == K("PlayPreLoadedWinAnimStream")) continue;
+            spawnTracked(e.scr, e.params ? *e.params : qb::Struct{}, "ped_animevents", k_.spawned);
+        }
     // current_crowd: player 1's health (two players outside battle / boss: the
     // mean); crossing crowd_poor_medium / crowd_medium_good spawns the crowd's
     // transition sound and its loop change, not in face-off [C 0x8210F200].
@@ -680,6 +797,8 @@ void SongHooks::step(SongScreen& s, double now) {
             for (int a = 0; a < 8 && a < kAttacks; ++a)
                 for (; lastByAttack_[i][size_t(a)] < c.byAttack[i][size_t(a)]; ++lastByAttack_[i][size_t(a)]) {
                     const int victim = 1 - p;
+                    static const bool battleLog = SDL_getenv("GD04_BATTLELOG") != nullptr;  // development aid
+                    if (battleLog) SDL_Log("battle: p%d attacks p%d with %d at song %.0f ms", p + 1, victim + 1, a, now);
                     qb::Struct r;
                     Vm::set(r, K("receiving_player"), Vm::makeInt(victim + 1));
                     Vm::set(r, K("receiving_player_current_crowd_level"), Vm::makeFloat(m.player(victim).stats().health));
@@ -691,7 +810,95 @@ void SongHooks::step(SongScreen& s, double now) {
                     if (a == kDeathLick)
                         spawnTracked(K(victim ? "GH_BattleMode_Start_Heartbeat_P2" : "GH_BattleMode_Start_Heartbeat_P1"), qb::Struct{},
                                      "GH_BattleMode_Start_Heartbeat", k_.spawned);
+                    // The band's attack and its answer: battle_trigger_on's
+                    // Band_PlayAttackAnim on the attacker's band_member and
+                    // Band_PlayResponseAnim on the receiver's, Type = the
+                    // power-up's index [C script battle_trigger_on].
+                    auto member = [&](int who) {
+                        const qb::Value* ps = vm.global(K(who ? "player2_status" : "player1_status"));
+                        const qb::Value* bm = ps && ps->st ? vm.globals().field(*ps->st, K("band_member")) : nullptr;
+                        return bm ? bm->key : 0u;
+                    };
+                    for (int side = 0; side < 2; ++side) {
+                        const uint32_t name = member(side == 0 ? p : victim);
+                        if (!name) continue;
+                        qb::Struct q;
+                        Vm::set(q, K("name"), Vm::makeKey(name));
+                        Vm::set(q, K("Type"), Vm::makeInt(a));
+                        vm.run(K(side == 0 ? "Band_PlayAttackAnim" : "Band_PlayResponseAnim"), q);
+                        ++k_.spawned[side == 0 ? "Band_PlayAttackAnim" : "Band_PlayResponseAnim"];
+                    }
                 }
+        }
+        auto sparks = [&](uint32_t id, float x, float y, float z, std::array<int, 4> c0, float dir, float spread, float velocity, float friction,
+                          float life) {
+            qb::Struct ps;
+            auto rgba = [](std::array<int, 4> v) {
+                qb::Value a;
+                a.type = qb::Type::Array;
+                a.arr = std::make_shared<qb::Array>();
+                for (int k : v) a.arr->values.push_back(Vm::makeInt(k));
+                return a;
+            };
+            auto pair = [](float a, float b) {
+                qb::Value v;
+                v.type = qb::Type::Pair;
+                v.f[0] = a, v.f[1] = b;
+                return v;
+            };
+            Vm::set(ps, K("id"), Vm::makeKey(id));
+            Vm::set(ps, K("pos"), pair(x, y));
+            Vm::set(ps, K("z_priority"), Vm::makeFloat(z));
+            Vm::set(ps, K("material"), Vm::makeKey(K("sys_Particle_Spark01_sys_Particle_Spark01")));
+            Vm::set(ps, K("start_color"), rgba(c0));
+            Vm::set(ps, K("end_color"), rgba({128, 0, 0, 0}));
+            Vm::set(ps, K("start_scale"), pair(2, 2));
+            Vm::set(ps, K("end_scale"), pair(0.5f, 0.5f));
+            Vm::set(ps, K("start_angle_spread"), Vm::makeFloat(360));
+            Vm::set(ps, K("min_rotation"), Vm::makeFloat(-500));
+            Vm::set(ps, K("max_rotation"), Vm::makeFloat(500));
+            Vm::set(ps, K("emit_start_radius"), Vm::makeFloat(0));
+            Vm::set(ps, K("emit_radius"), Vm::makeFloat(1));
+            Vm::set(ps, K("emit_rate"), Vm::makeFloat(0.01f));
+            Vm::set(ps, K("emit_dir"), Vm::makeFloat(dir));
+            Vm::set(ps, K("emit_spread"), Vm::makeFloat(spread));
+            Vm::set(ps, K("velocity"), Vm::makeFloat(velocity));
+            Vm::set(ps, K("friction"), pair(0, friction));
+            Vm::set(ps, K("time"), Vm::makeFloat(life));
+            fx_.create(ps, now);
+        };
+        for (int p = 0; p < players_; ++p) {
+            // attack_bolt's sparks where the bolt hits the other highway: the
+            // bolt's pos + / - (455, 0) + (0, 250) in battlemode_container (at
+            // (0,0)), sys_Particle_Spark01 [255 66 0 255] -> [128 0 0 0],
+            // scale 2 -> 0.5, emit_dir 300 / -300, spread 90, velocity 16,
+            // friction (0, 24), life 1 s, every 0.01 s; the system dies
+            // 8 + 2 game frames later (kill_when_empty) [C scripts attack_bolt, battlemode_init].
+            const Match::BattleSide& b = m.battle(p);
+            if (b.boltAt != lastBolt_[size_t(p)]) {
+                lastBolt_[size_t(p)] = b.boltAt;
+                const uint32_t id = K("attack_bolt_particle_" + std::string(textOf(p)) + "_" + std::to_string(int64_t(now)));
+                sparks(id, p == 0 ? 310.0f + 455 : 970.0f - 455, 230 + 250, 8, {255, 66, 0, 255}, p == 0 ? 300.0f : -300.0f, 90, 16, 24, 1);
+                fxEnds_.push_back(FxEnd{id, now + 10000.0 / 60, true});
+                ++k_.spawned["attack_bolt sparks"];
+            }
+        }
+        // bite_particle's sparks at the Death Drain alert's bite, [255 0 0 255],
+        // emit_dir 0, spread 160, velocity 10, friction (0, 50), life 0.25 s;
+        // destroyed (with its sparks) 7 frames later [C script].
+        for (const Hud2P::Bite& bt : s.hud2p().bites()) {
+            const uint32_t id = K(std::string(bt.rot > 0 ? "death_bite_r_" : "death_bite_l_") + textOf(bt.player));
+            sparks(id, bt.x, bt.y, 12, {255, 0, 0, 255}, 0, 160, 10, 50, 0.25f);
+            fxEnds_.push_back(FxEnd{id, now + 7000.0 / 60, false});
+            ++k_.spawned["bite_particle sparks"];
+        }
+    }
+    for (size_t k = 0; k < fxEnds_.size();) {
+        if (now >= fxEnds_[k].at - 0.5) {
+            fx_.destroy(fxEnds_[k].id, fxEnds_[k].whenEmpty);
+            fxEnds_.erase(fxEnds_.begin() + std::ptrdiff_t(k));
+        } else {
+            ++k;
         }
     }
     eventArrays(s, now);
@@ -735,8 +942,18 @@ void SongHooks::step(SongScreen& s, double now) {
         if (r->spawnedBy && runs_.count(r->spawnedBy)) runs_.insert(r->id);
 }
 
+void SongHooks::frameSection(double now) {
+    if (sectionEntry_ < 0) return;
+    int entry = 0;
+    for (size_t i = 0; i < markers_.size(); ++i)
+        if (markers_[i] <= now) entry = int(i);
+    if (entry != sectionEntry_) sectionEntry_ = entry, fe_.vm().setGlobal(K("current_section_array_entry"), Vm::makeInt(entry));
+}
+
 void SongHooks::frame(SongScreen& s, double now) {
     if (!active_ || song_ != &s) return;
+    if (!paused_) introAndEndMedia(s, now);
+    frameSection(now);
     // The scripts' big bolts: adopted (hidden in the element tree, drawn by draw()).
     bolts_.erase(std::remove_if(bolts_.begin(), bolts_.end(), [this](const Bolt& b) { return !fe_.ui().find(b.id); }), bolts_.end());
     for (int p = 0; p < players_; ++p)
@@ -786,6 +1003,9 @@ void SongHooks::frame(SongScreen& s, double now) {
 void SongHooks::draw(Canvas& c, double nowMs) {
     // Not over the pause menu (its elements are drawn before these) [I: GH3's z order].
     if (!active_ || paused_) return;
+    // disable_highway: the HUD containers at alpha 0 take their bolts and
+    // sparks with them (a failed song's bolt stayed over the venue) [C script].
+    if (song_ && song_->highwayHidden()) return;
     // The big bolts: sys_Big_Bolt01, 8 frames at 15 fps, additive (the
     // material's flip-book, render/highway2d's Star Power bolts), the frame's
     // size x the element's scale (star_power_bolt_scale), just centre bottom,
@@ -863,7 +1083,24 @@ void SongHooks::addNatives() {
     // CrowdIncrease / CrowdDecrease (0x8210FCC0 / 0x82110570: the health),
     // NoteFX (0x8211BAE8: the hit flame, render/highway2d), LaunchGemEvent
     // (0x8211A570: the gems' Star Power look), UpdateNixie (0x82106F20).
-    for (const char* n : {"CrowdIncrease", "CrowdDecrease", "NoteFX", "LaunchGemEvent", "UpdateNixie"})
+    // LaunchGemEvent event = e player = n: the event to the player's gems
+    // (their Star Power look, the flicker: native in render/highway2d), not
+    // to create_guitar_events' handlers: star_power_activate_and_drain
+    // broadcasts star_power_on / star_power_off itself right after it
+    // (BroadcastEvent Type = <event><player_text>), and flicker_on / _off
+    // have no handler (guitar_events) [C scripts star_power_activate_and_drain,
+    // flicker_gems; data guitar_events]. Sending it to the handlers here too
+    // ran GuitarEvent_StarPowerOn / Off twice (the stage FX twice, the
+    // Star Power sounds and camera twice).
+    vm.addNative("LaunchGemEvent", [this](Vm&, ScriptRun&, qb::Struct& p) {
+        const qb::Value* ev = Vm::param(p, K("event"));
+        const int player = int(Vm::number(Vm::param(p, K("player")), 1));
+        if (!ev || player < 1 || player > 2) return true;
+        for (const char* e : {"star_power_on", "star_power_off", "flicker_on", "flicker_off"})
+            if (ev->key == K(e)) ++k_.events[e];
+        return true;
+    });
+    for (const char* n : {"CrowdIncrease", "CrowdDecrease", "NoteFX", "UpdateNixie"})
         vm.addNative(n, [this](Vm&, ScriptRun&, qb::Struct&) {
             ++k_.absorbed;
             return true;
@@ -902,10 +1139,12 @@ void SongHooks::addNatives() {
         return true;
     });
     // WhammyFXOn / WhammyFXOff {song array_entry player_status pattern ...}
-    // (0x8211C1A0 / 0x8211C390): per fret of the pattern a spark system at the
-    // fret's button (button_up_models.<color>.pos_2d, left_pos_2d when
-    // lefty) in gem_container<p>, with whammy_particle_params, id
-    // <color>WhammyFXID01<p> [C; the second system 02 I: one here].
+    // (0x8211C1A0 / 0x8211C390): per fret of the pattern with a sustain,
+    // 0x8211BE98 makes the sprite fx_whammy_<c><p> (sys_whammy_hold01: drawn by
+    // render/highway2d) and a spark system fx_whammy_<c><p>_particle (the
+    // DAT_829193C8 ids) 20 px above the fret's button (button_up_models.<color>
+    // .pos_2d, left_pos_2d when lefty) in gem_container<p>, with
+    // whammy_particle_params (read by 0x8210D258) [C].
     auto whammy = [this](Vm& v, qb::Struct& p, bool on) {
         const uint32_t ps = keyOf(Vm::param(p, K("player_status")));
         const qb::Value* st = v.global(ps);
@@ -918,7 +1157,7 @@ void SongHooks::addNatives() {
         const qb::Value* params = v.global(K("whammy_particle_params"));
         for (int l = 0; l < 5; ++l) {
             if (!(pattern & (0x10000 >> (4 * l)))) continue;
-            const uint32_t id = K(std::string(kColors[l]) + "WhammyFXID01" + pt);
+            const uint32_t id = K(std::string("fx_whammy_") + kColors[l][0] + pt + "_particle");
             if (!on) {
                 fx_.destroy(id, true);
                 continue;
@@ -929,7 +1168,11 @@ void SongHooks::addNatives() {
             Vm::set(c, K("parent"), Vm::makeKey(K("gem_container" + pt)));
             if (models && models->st)
                 if (const qb::Value* m = v.globals().field(*models->st, K(kColors[l])); m && m->st)
-                    if (const qb::Value* pos = v.globals().field(*m->st, K(lefty ? "left_pos_2d" : "pos_2d"))) Vm::set(c, K("pos"), *pos);
+                    if (const qb::Value* pos = v.globals().field(*m->st, K(lefty ? "left_pos_2d" : "pos_2d"))) {
+                        qb::Value at = *pos;
+                        if (at.type == qb::Type::Pair) at.f[1] -= 20;  // f2 - 20 [C 0x8211C0AC]
+                        Vm::set(c, K("pos"), at);
+                    }
             fx_.create(c, nowMs_);
         }
         return true;
@@ -939,7 +1182,7 @@ void SongHooks::addNatives() {
     vm.addNative("WhammyFXOffAll", [this](Vm& v, ScriptRun&, qb::Struct& p) {
         const qb::Value* st = v.global(keyOf(Vm::param(p, K("player_status"))));
         const qb::Value* text = st && st->st ? v.globals().field(*st->st, K("Text")) : nullptr;
-        for (const char* c : kColors) fx_.destroy(K(std::string(c) + "WhammyFXID01" + (text ? text->str : "p1")), true);
+        for (const char* c : kColors) fx_.destroy(K(std::string("fx_whammy_") + c[0] + (text ? text->str : "p1") + "_particle"), true);
         return true;
     });
     // SetNewWhammyValue {value time_remaining player_status player} /
@@ -996,7 +1239,19 @@ void SongHooks::addNatives() {
     // a stack of it [C 0x8227CE58, 0x8227D368].
     vm.addNative("SetSoundBussParams", [this](Vm& v, ScriptRun&, qb::Struct& p) {
         ++k_.bussParams;
+        applySoundBussParams(v, p);  // the busses (audio/sound_buss.h)
+        static const uint32_t band = K("Band_Balance"), guitar = K("Guitar_Balance");
         for (const qb::Item& it : p.items) {
+            // A song's end (songOutro): Band_Balance / Guitar_Balance's vol (dB)
+            // and pitch (semitones), Failed_Song_Pitch_Down's -20 / -8 in 3 s,
+            // end_song's reset [C scripts Failed_Song_Pitch_Down, end_song];
+            // during the song the port's track volumes stand for preload_song's
+            // Band_Balance levels [I].
+            if ((it.name == band || it.name == guitar) && it.value.type == qb::Type::Struct && it.value.st && fe_.songOutro) {
+                const float vol = Vm::number(it.value.st->find(K("vol")), 0), pitch = Vm::number(it.value.st->find(K("pitch")), 0);
+                mixer_.setBuss(it.name == guitar, vol, pitch, Vm::number(Vm::param(p, K("time")), 0));
+                continue;
+            }
             const qb::Value* val = &it.value;
             if (it.name == 0 && (val->type == qb::Type::Key || val->type == qb::Type::KeyPtr)) val = v.global(val->key);
             if (!val || val->type != qb::Type::Struct || !val->st) continue;
@@ -1011,10 +1266,12 @@ void SongHooks::addNatives() {
     });
     vm.addNative("PushSoundBussParams", [this](Vm&, ScriptRun&, qb::Struct&) {
         pushedBuss_.push_back({mixer_.guitarFx().params().bussDb, 0});
+        soundBusses().push();
         return true;
     });
     vm.addNative("PopSoundBussParams", [this](Vm&, ScriptRun&, qb::Struct&) {
         if (pushedBuss_.empty()) return true;
+        soundBusses().pop();
         GuitarFx::Params gp = mixer_.guitarFx().params();
         gp.bussDb = pushedBuss_.back().first;
         pushedBuss_.pop_back();
@@ -1058,14 +1315,21 @@ void SongHooks::addNatives() {
         if (qb::Struct* l = locals(run)) Vm::set(*l, K("uniqueid"), Vm::makeKey(keyOf(Vm::param(p, K("preferredid")))));
         return true;
     });
+    // StopStream: a won song's end (play_outro -> end_song at the songwon
+    // transition's start): the song's streams stop, its clock runs on [C
+    // scripts play_outro, end_song]; elsewhere the song's streams stop with
+    // the song's audio.
+    vm.addNative("StopStream", [this](Vm&, ScriptRun&, qb::Struct&) {
+        if (fe_.songOutro) mixer_.silence();
+        return true;
+    });
     vm.addNative("SafeGetUniqueCompositeObjectID", [](Vm&, ScriptRun& run, qb::Struct& p) {
         if (qb::Struct* l = locals(run)) Vm::set(*l, K("uniqueid"), Vm::makeKey(keyOf(Vm::param(p, K("preferredid")))));
         return true;
     });
     // The 3D effects the song scripts ask for that need the venue / band /
     // crowd renderers' support (render/particles, render/crowd): counted, not
-    // drawn yet -- CreateParticleSystem_fast on a band member's bone (the 4x
-    // finger flames, the Star Power stage FX), Crowd_PlayAnim (the crowd's
+    // drawn yet -- Crowd_PlayAnim (the crowd's
     // Star Power anim), EngineWind, LightShow_SetTime from <song>_lightshow.
     // The song's teardown and setup calls for systems the port runs natively
     // [C scripts]: destroy_cameracuts / notemap_deinit ClearNoteMappings (the
@@ -1075,11 +1339,12 @@ void SongHooks::addNatives() {
     // song's audio), destroy_highway_prepass's RemovePrepassViewport and
     // disable_bg_viewport's SetActiveCamera (the port draws one view),
     // destroy_crowd_models' ClearCrowdModelCams (render/crowd).
-    for (const char* n : {"ClearNoteMappings", "LightShow_SetActive", "LightShow_SetMapping", "StopStream", "RemovePrepassViewport",
+    for (const char* n : {"ClearNoteMappings", "LightShow_SetActive", "LightShow_SetMapping", "RemovePrepassViewport",
                           "SetActiveCamera", "ClearCrowdModelCams"})
         vm.addNative(n, [](Vm&, ScriptRun&, qb::Struct&) { return true; });
-    for (const char* n : {"CreateParticleSystem_fast", "CreateParticleSystem", "DestroyParticlesByGroupID", "DeleteTeslaEffectObject",
-                          "Crowd_PlayAnim", "EngineWind", "LightShow_SetTime"})
+    // (CreateParticleSystem / _fast and DestroyParticlesByGroupID are App's,
+    // on the venue's particles: addVenueScriptCalls.)
+    for (const char* n : {"Crowd_PlayAnim", "LightShow_SetTime"})
         vm.addNative(n, [this, n](Vm&, ScriptRun&, qb::Struct&) {
             ++k_.spawned[std::string("(3D) ") + n];
             return true;

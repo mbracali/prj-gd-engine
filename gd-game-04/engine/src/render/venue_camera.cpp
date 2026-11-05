@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "render/venue_camera.h"
+#include <SDL3/SDL_log.h>
+#include <cstdlib>
 
 #include <algorithm>
 #include <cmath>
@@ -68,7 +70,7 @@ const qb::Value* CameraDirector::global(uint32_t name) const {
     return g && g->type == qb::Type::KeyPtr ? g_->resolve(*g) : g;
 }
 
-void CameraDirector::init(const Venue& v, const Globals& g, const Chart& chart, uint32_t seed, double leadInMs) {
+void CameraDirector::init(const Venue& v, const Globals& g, const Chart& chart, uint32_t seed, double leadInMs, double startMs) {
     v_ = &v, g_ = &g;
     notes_ = chart.cameras;
     std::stable_sort(notes_.begin(), notes_.end(), [](const ChartEvent& a, const ChartEvent& b) { return a.time < b.time; });
@@ -83,20 +85,20 @@ void CameraDirector::init(const Venue& v, const Globals& g, const Chart& chart, 
     // Transition_CameraCut at its time 0: prefix cameras_fastintro (the
     // 3 s fast intro) or cameras_intro (8 s), length = the transition's time
     // [C scripts start_gem_scroller, Common_FastIntro_Transition].
-    now_ = -leadInMs;
+    now_ = startMs - leadInMs;
     prefix_ = "cameras";
     setDefaultCuts();
     qb::Struct p;
     qb::Value s;
     s.type = qb::Type::String;
-    s.str = leadInMs > 3000.5 ? "cameras_intro" : "cameras_fastintro";
+    s.str = !introPrefix_.empty() ? introPrefix_ : leadInMs > 3000.5 ? "cameras_intro" : "cameras_fastintro";
     p.items.push_back({K("prefix"), s});
     qb::Value cn;
     cn.type = qb::Type::Key;
     cn.key = K("changenow");
     p.items.push_back({0, cn});
     setArrayPrefix(&p, int(leadInMs));
-    transitionEnd_ = 0;
+    transitionEnd_ = startMs;
     startShot(now_);
 }
 
@@ -228,7 +230,12 @@ CamPose CameraDirector::world(const Keyed& k) const {
 }
 
 void CameraDirector::startShot(double t) {
+    // GD04_CAMLOG=1: every shot as it starts (development aid).
+    static const bool camLog = std::getenv("GD04_CAMLOG") != nullptr;
+    if (camLog) SDL_Log("camera: %.0f ms shot from %s (change now %d, next %.0f ms)", t, prefix_.c_str(), int(changeNow_), nextTimeMs_);
     changeNow_ = false;
+    if (scriptRun_ && stopScript) stopScript(scriptRun_);  // the last shot's camera script ends with it
+    scriptRun_ = 0, haveMorph_ = false, scriptPending_ = false;
     // CameraCuts_Performance [I: CameraCuts_Performance starts good; the crowd's
     // performance is set by C code (cameracuts_setparams), here the rock meter's band].
     const Performance perf = perf_ ? perf_->at(t) : Performance::Good;
@@ -287,6 +294,7 @@ void CameraDirector::startShot(double t) {
         const qb::Value* d = params ? params->find(K("dof")) : nullptr;
         if (!d && e) d = e->find(K("dof"));
         shot_.dof = keyOf(d);
+        if (camLog) SDL_Log("camera: entry %d, dof %08x", index, shot_.dof);
     }
     auto cam = [&](const char* n) { return readCam(params ? structOf(params->find(K(n))) : nullptr); };
     if (!script || script == K("CameraCuts_StaticCamControl")) {
@@ -328,8 +336,13 @@ void CameraDirector::startShot(double t) {
             for (const qb::Value& k : kf->arr->values) keys_.push_back(readCam(structOf(&k)));
         else
             keys_ = {cam("cam1"), cam("cam2"), cam("Cam3"), cam("Cam4")};
+    } else if (script && startScript && (scriptRun_ = startScript(script, t)) != 0) {
+        // A venue's own control script (the intro, encore, boss): run by
+        // the zone VM, which morphs the camera (scriptMorph) [C scripts].
+        ctl_ = Ctl::Script;
     } else {
-        // A venue's own control script (encore, boss): its first camera [I].
+        // A control script the VM does not have (yet): its first camera [I].
+        scriptPending_ = script != 0;
         Keyed k = cam("cam1");
         keys_.push_back(k.valid ? k : readCam(params));
     }
@@ -428,6 +441,23 @@ void CameraDirector::update(double ms, const PerfTimeline& perf) {
     now_ = std::max(now_, ms);
 }
 
+void CameraDirector::outro(double ms, const std::string& prefix) {
+    if (perf_) update(ms, *perf_);
+    pending_.clear();
+    spCamera_ = false;     // Kill_StarPower_Camera changecamera = 0
+    allowNotes_ = false;   // kill_cameracuts_iterator: the song's camera notes end
+    qb::Struct p;
+    qb::Value v;
+    v.type = qb::Type::String;
+    v.str = prefix;
+    p.items.push_back({K("prefix"), v});
+    qb::Item now;
+    now.value.type = qb::Type::Key;
+    now.value.key = K("changenow");
+    p.items.push_back(now);
+    setArrayPrefix(&p, 0);
+}
+
 void CameraDirector::starPower(double ms, bool on) {
     if (on) {
         // do_starpower_camera: not while a walk / Star Power camera runs; one
@@ -455,6 +485,14 @@ void CameraDirector::starPower(double ms, bool on) {
 }
 
 CamPose CameraDirector::pose(double ms) const {
+    if (ctl_ == Ctl::Script) {
+        // ccam_domorph: from the pose at the call to its target over `time` (0: at once) [C].
+        if (!haveMorph_) return lastPose_;
+        const CamPose to = world(morphTo_);
+        const float u = morphDur_ > 0 ? float(std::clamp((ms - morphStart_) / morphDur_, 0.0, 1.0)) : 1.0f;
+        lastPose_ = u >= 1.0f ? to : blend(morphFrom_, to, smooth(u));
+        return lastPose_;
+    }
     if (keys_.empty()) return {};
     const double since = (ms - shot_.start) / 1000.0;  // s since the cut
     const double span = std::max(1e-3, camTime_);
@@ -519,9 +557,10 @@ CamPose CameraDirector::pose(double ms) const {
         p = aim(p, keys_[i], keys_[i + 1], u, ms);
         break;
     }
+    case Ctl::Script: p = world(k0); break;  // returned above (ccam_domorph); here for the compiler
     }
-    if (ctl_ != Ctl::Spline) p = aim(p, k0, k1, mix, ms);
-    if (handCam_) {
+    if (ctl_ != Ctl::Spline && ctl_ != Ctl::Script) p = aim(p, k0, k1, mix, ms);
+    if (handCam_ && !noShake) {  // Enhanced > Disable Shaky Camera: off
         // CameraCuts_SetHandCamParams: motionx / motiony, amplitude 0.034 /
         // 0.04, period base 0.013 / 0.017 per frame with multiples 1, 3, 4 [C
         // data]; applied as small yaw / pitch sways [I: the units and the sum].
@@ -534,7 +573,25 @@ CamPose CameraDirector::pose(double ms) const {
         const float yaw = 0.034f * 0.25f * sway(0.013), pitch = 0.04f * 0.25f * sway(0.017);
         p.rot = mul(p.rot, mul(yRot(yaw), Quat{std::sin(pitch * 0.5f), 0, 0, std::cos(pitch * 0.5f)}));
     }
+    lastPose_ = p;
     return p;
+}
+
+void CameraDirector::retryScript() {
+    if (!scriptPending_ || !startScript || !shot_.script) return;
+    scriptPending_ = false;
+    if ((scriptRun_ = startScript(shot_.script, shot_.start)) != 0) ctl_ = Ctl::Script, keys_.clear();
+}
+
+void CameraDirector::scriptMorph(const qb::Struct& params, double ms) {
+    Keyed k = readCam(&params);
+    if (!k.valid) return;
+    morphFrom_ = haveMorph_ ? pose(ms) : world(k);
+    morphTo_ = k;
+    morphStart_ = ms;
+    const qb::Value* tm = params.find(K("time"));
+    morphDur_ = tm ? double(tm->number()) * 1000.0 : 0.0;
+    haveMorph_ = true;
 }
 
 // lookat / lookatbone / screenoffset: the camera turns (the least rotation

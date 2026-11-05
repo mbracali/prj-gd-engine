@@ -45,7 +45,7 @@ bool Band::startWith(const Disc& disc, const Globals& g, const venue::Venue* v, 
     view_.reset();
     songFiles_.clear();
     try {
-        lib_.load(disc);
+        lib_ = band::Library::shared(disc);
         shaderLib_ = gh3shader::library(disc);
     } catch (const std::exception& e) {
         error = std::string("band: ") + e.what();
@@ -56,7 +56,8 @@ bool Band::startWith(const Disc& disc, const Globals& g, const venue::Venue* v, 
     const std::string songPak = "DATA/COMPRESSED/SONGS/" + chart.song + "_song.pak.xen";
     if (!chart.song.empty() && disc.exists(songPak)) {
         try {
-            const Pak pak = Pak::load(disc, songPak);
+            const auto pakShared = Pak::shared(disc, songPak);
+            const Pak& pak = *pakShared;
             for (const PakEntry& e : pak.entries()) {
                 if (e.type != K(".qb")) continue;
                 auto [p, size] = pak.data(e);
@@ -78,7 +79,7 @@ bool Band::startWith(const Disc& disc, const Globals& g, const venue::Venue* v, 
     members_.reserve(chosen.size());
     for (const band::Member& m : chosen) {
         Entry e;
-        e.model = band::loadModel(disc, g, lib_, m, chart.song, error);
+        e.model = band::loadModel(disc, g, *lib_, m, chart.song, error);
         if (!e.model) return false;
         bandanim::Animator::Setup s;
         s.model = e.model.get();
@@ -102,10 +103,13 @@ bool Band::startWith(const Disc& disc, const Globals& g, const venue::Venue* v, 
         e.root = bandanim::matOf(root);
         for (int i = 0; i < 3; ++i)
             for (int j = 0; j < 3; ++j) e.root.m[i * 4 + j] *= m.scale;
-        // Gravity in model units: R^T (0, -9.81, 0) / scale^2.
+        // The physics world's gravity (0, -9.8, 0) [C 82253B10: 8200E4E4] in
+        // model space: R^T (0, -9.8, 0). GH3 places the ragdoll with the
+        // object's rotation and position at scale 1 [C 823FF100], so only the
+        // rotation counts.
         {
-            const float s2 = std::max(1e-6f, m.scale * m.scale);
-            e.gravity = {e.root.m[4] * -9.81f / s2, e.root.m[5] * -9.81f / s2, e.root.m[6] * -9.81f / s2};
+            const float s = std::max(1e-6f, m.scale);
+            e.gravity = {e.root.m[4] * -9.8f / s, e.root.m[5] * -9.8f / s, e.root.m[6] * -9.8f / s};
         }
         e.acc = accessorySim(disc, g, m, e.anim.rig(), globalPak_);
         // create_band_member: lightgroup band; the guitarist alt_band [C script; I: alt_band lights add to band's].
@@ -120,7 +124,7 @@ bool Band::startWith(const Disc& disc, const Globals& g, const venue::Venue* v, 
 // global.pak, its accessory bodies simulated (ragdoll_setaccessorybones
 // accessory_bones = $Guitarist_accessory_bones) [C scripts].
 std::unique_ptr<AccessorySim> Band::accessorySim(const Disc& disc, const Globals& g, const band::Member& m, const bandanim::Rig& rig,
-                                                 std::unique_ptr<Pak>& globalPak) {
+                                                 std::shared_ptr<const Pak>& globalPak) {
     if (!m.profile || SDL_getenv("GD04_NO_RAGDOLL")) return nullptr;
     uint32_t ragKey = 0;
     if (m.outfit == 2)
@@ -132,7 +136,7 @@ std::unique_ptr<AccessorySim> Band::accessorySim(const Disc& disc, const Globals
         for (const qb::Value& b : ab->arr->values) accBones.push_back(b.key);
     if (ragKey && !accBones.empty()) {
         try {
-            if (!globalPak) globalPak = std::make_unique<Pak>(Pak::load(disc, "DATA/COMPRESSED/ZONES/global.pak.xen"));
+            if (!globalPak) globalPak = Pak::shared(disc, "DATA/COMPRESSED/ZONES/global.pak.xen");
             if (const PakEntry* re = globalPak->findType(ragKey, K(".rag"))) {
                 auto [rp, rs] = globalPak->data(*re);
                 const havok::Physics phys = havok::parse(rp, rs);
@@ -207,7 +211,7 @@ void Band::drawShadow(double ms, const gh3shader::Globals& light, const venue::V
     evaluate(ms);
     std::vector<BandView::Instance> inst;
     for (const Entry& e : members_) {
-        if (!e.placed) continue;
+        if (!e.placed || e.hidden) continue;
         BandView::Instance i;
         i.member = e.view;
         i.skin = &e.skin;
@@ -216,7 +220,9 @@ void Band::drawShadow(double ms, const gh3shader::Globals& light, const venue::V
         inst.push_back(std::move(i));
     }
     view_->setShadowPass(&light);
+    view_->setReuseSkinning(skinnedAt_ == ms);  // the second cascade: the first's vertices
     view_->draw(venue::CamPose{}, inst, v, lights, show);
+    view_->setReuseSkinning(false);
     view_->setShadowPass(nullptr);
     skinnedAt_ = ms;
 }
@@ -228,7 +234,7 @@ void Band::draw(double ms, const venue::CamPose& cam, const venue::Venue& v, con
     view_->setReuseSkinning(skinnedAt_ == ms);
     std::vector<BandView::Instance> inst;
     for (const Entry& e : members_) {
-        if (!e.placed) continue;
+        if (!e.placed || e.hidden) continue;
         BandView::Instance i;
         i.member = e.view;
         i.skin = &e.skin;

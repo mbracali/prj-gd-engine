@@ -66,6 +66,7 @@ private:
         gfx::ParticleSet parts;
         gfx::ScenePose pose;
         double start = -1, elapsed = 0, last = 0;
+        bool on = false;  // the Fx's state last frame (stop: its particles freed)
     };
     std::map<const void*, FxState> fx_;
     std::unique_ptr<gfx::ParticleRenderer> particles_;

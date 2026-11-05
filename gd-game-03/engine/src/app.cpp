@@ -217,8 +217,13 @@ public:
     const std::vector<SongInfo>& songs() const override { return songs_; }
     bool gameLoad(const GameSetup& setup, std::string& error) override;
     void gameBegin() override;
+    bool gameDeviceLost(int slot) const override { return slot >= 0 && slot < 2 && hadDevice_[slot] && !input_.padConnected(slot); }
     void gameEnd() override { endSong(); }
     bool gameLoaded() const override { return player_ != nullptr; }
+    void gameForceLose() override { failAtMs_ = -1e30f; }
+    void gameForceWin() override {
+        if (song_) song_->endMs = std::min(song_->endMs, lastT_);
+    }
     void gameSetPaused(bool paused) override {
         paused_ = paused;
         mixer_.setPaused(paused || musicPaused_);
@@ -431,6 +436,7 @@ private:
     std::unique_ptr<MidiParser> eventsParser_;
     DataNode eventsParserDef_;
     std::unique_ptr<Song> song_;
+    bool hadDevice_[2] = {};  // each slot had a device at the song's start (gameDeviceLost)
     std::unique_ptr<Player> player_;
     std::unique_ptr<Autoplay> bot_;
     std::string walkSaveDir_;  // the walk test's temporary save folder, removed at its end
@@ -497,7 +503,7 @@ private:
     uint64_t overNs_ = 0, outroAtNs_ = 0;
     float overT_ = 0;
     bool musicPaused_ = false;
-    int spPhrases_[2] = {}, streaksBroken_[2] = {};
+    int spPhrases_[2] = {}, spStarted_[2] = {}, streaksBroken_[2] = {};
     float lastT_ = 0;
     // Development aid: GD03_KEYS="<song ms>:<key>,..." (game/key_script.h)
     // plays scripted guitar input in every song, at exact song times.
@@ -982,7 +988,7 @@ bool App::loadSong(const SongInfo& info, int difficulty, bool autoplay, float ba
     info_ = &info;
     begun_ = wonSent_ = lostSent_ = outroSent_ = spReadySent_ = false;
     musicPaused_ = false;
-    spPhrases_[0] = spPhrases_[1] = streaksBroken_[0] = streaksBroken_[1] = 0;
+    spPhrases_[0] = spPhrases_[1] = spStarted_[0] = spStarted_[1] = streaksBroken_[0] = streaksBroken_[1] = 0;
     paused_ = false;
     lastT_ = float(-leadInMs_);
     std::fill(flashes_.begin(), flashes_.end(), 0.0f);
@@ -1322,6 +1328,17 @@ void App::handleEvent(const SDL_Event& e) {
     }
     actions_.clear();
     input_.handle(e, actions_);  // always: it opens the controllers as they connect
+    // Encore's developer keyboard cheats (Enhanced, GD03-103): a key not bound
+    // to a keyboard control runs its cheats.dta entry.
+    if (ui_ && e.type == SDL_EVENT_KEY_DOWN && !e.key.repeat && !ui_->textEntryFocused() && enhancedValue("dev_key_cheats") == "on") {
+        bool bound = false;
+        for (const auto& srcs : input_.bindings("keyboard"))
+            for (const Input::Source& s : srcs) bound = bound || (s.kind == Input::Source::Kind::Key && s.index == int(e.key.key));
+        int code = -1;
+        if (e.key.key >= SDLK_F1 && e.key.key <= SDLK_F12) code = 401 + int(e.key.key - SDLK_F1);
+        else if (const SDL_Keycode c = SDL_GetKeyFromScancode(e.key.scancode, e.key.mod, false); c >= 32 && c < 127) code = int(c);
+        if (!bound && code >= 0 && ui_->keyCheat(code)) return;
+    }
     if (!data_) {
         // The first screen: a click, a tap, Enter or a gamepad's A opens the
         // file dialog; a disc image dropped onto the window is used at once.
@@ -1685,6 +1702,17 @@ void App::updateSong(float t) {
     const std::vector<PlayerEvent> events = player_->takeEvents();
     const std::vector<PlayerEvent> events2 = player2_ ? player2_->takeEvents() : std::vector<PlayerEvent>{};
     const std::vector<PlayerEvent> bandEvents = coopBand_ ? coopBand_->takeEvents() : std::vector<PlayerEvent>{};
+    // A Star Power phrase counts as started once its first gem is hit or
+    // passed (0x0011e9e0 from the hit 0x0011e2b8 and the miss 0x0011e6a8:
+    // +0x64; captured ones +0x60) [C].
+    auto phraseStart = [](const Player* pl, const PlayerEvent& e) {
+        if (!pl || e.gem < 0 || (e.kind != PlayerEvent::Kind::Hit && e.kind != PlayerEvent::Kind::Pass)) return false;
+        const Chart& c = pl->chart();
+        const int ph = size_t(e.gem) < c.gems.size() ? c.gems[size_t(e.gem)].phrase : -1;
+        return ph >= 0 && size_t(ph) < c.phrases.size() && c.phrases[size_t(ph)].firstGem == e.gem;
+    };
+    for (const PlayerEvent& e : events) spStarted_[0] += phraseStart(player_.get(), e);
+    for (const PlayerEvent& e : events2) spStarted_[1] += phraseStart(player2_.get(), e);
     for (const PlayerEvent& e : events2) {
         if (e.kind == PlayerEvent::Kind::PhraseCaptured) ++spPhrases_[1];
         if (e.kind == PlayerEvent::Kind::EndStreak) ++streaksBroken_[1];
@@ -2046,6 +2074,7 @@ bool App::gameLoad(const GameSetup& setup, std::string& error) {
 }
 
 void App::gameBegin() {
+    for (int s = 0; s < 2; ++s) hadDevice_[s] = input_.padConnected(s);
     overNs_ = 0;
     // GamePanel's start (0x822CCA60): an encore begins with every crowd full.
     if (encoreFx_)
@@ -2057,6 +2086,7 @@ void App::gameBegin() {
 int App::gameCounter(int player, const std::string& key) const {
     const int p = std::clamp(player, 0, 1);
     if (key == "sp_phrases") return spPhrases_[p];
+    if (key == "sp_started") return spStarted_[p];
     if (key == "streaks_broken") return streaksBroken_[p];
     if (key == "gems") {
         const Player* pl = gamePlayer(p);
@@ -3037,7 +3067,7 @@ void App::updateBackdrop() {
         const std::array<float, 3> cam{c.x, c.y, c.z};
         band_->update(world_->seconds(), world_->beats(), &cam);
     }
-    // The shot (guidelines/universal_launcher.md, gd01's Enhanced pose): a
+    // The shot (docs/knowledge/universal_launcher.md, gd01's Enhanced pose): a
     // still close-up of the singer, on the right of the picture beside the
     // options' box, from the audience's side a little to one flank so the
     // rest of the band stands behind and beside them.

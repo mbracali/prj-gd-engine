@@ -86,6 +86,8 @@ private:
         int slot = 0;        // its texel in the visibility texture
     };
     void drawFlares(const Camera& camera, int viewW, int viewH, bool hdr, TargetId worldTarget, TextureId worldDepth);
+    void drawBeams(const Camera& camera, int viewW, int viewH, bool hdr, TargetId worldTarget, TextureId worldDepth);
+    static constexpr float kBeamGain = 1.0f;  // FogPixel's 1024 x 0.2 on the 360's fixed-point buffer: effective gain [I]
     int slotOf(const void* key);
 
     World& world_;
@@ -94,11 +96,15 @@ private:
     DynamicMesh mesh_;
     std::vector<Flare> flareList_;
     std::unordered_map<const void*, int> slots_;
-    ProgramId visProgram_, flareProgram_;
+    ProgramId visProgram_, flareProgram_, beamProgram_, beamCompProgram_;
+    TargetId beamTarget_;
+    int beamW_ = 0, beamH_ = 0;
+    std::vector<float> beamPx_;  // this frame's beam sheets, 12 floats a vertex (beamLayout)
+    size_t beamVbSize_ = 0;
     TargetId vis_[2];
     int visCurrent_ = 0;
     bool visCleared_ = false;
-    BufferId triangle_, flareVb_;
+    BufferId triangle_, flareVb_, beamVb_;
     size_t flareVbSize_ = 0;
     int beams_ = 0, flares_ = 0, spots_ = 0;
 };

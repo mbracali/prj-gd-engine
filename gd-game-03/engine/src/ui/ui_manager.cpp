@@ -592,6 +592,7 @@ void UiManager::switchScreens() {
         for (PanelObj* p : from->panels())
             if (p->loaded && !to->hasPanel(p) && p->path.rfind("world/", 0) == 0) p->unload();
     current_ = to;
+    currentSinceMs_ = uiMs_;
     // The keyboard's split layout (P2 on H J K L ;, N / M, B, O) while the
     // two-player menus need a second controller: from the controller select
     // with fewer than two pads, until the main menu [I: the port's].
@@ -701,6 +702,44 @@ void UiManager::applyTransitionPose(float t) {
     setMetacamFrame(transitionAnim_, 500 * (transitionReverse_ ? 1 - t : t));
 }
 
+// The port loads and saves in a moment where the PS2 took seconds, so
+// Encore's loading and memory card screens flashed by before their animation
+// or tip could be read. As gd-game-01 (its memory card rule) and gd-game-02
+// (GD02-155), each stays up at least 2 s of UI time, animating, before the
+// next screen starts (GD03-102) [I].
+bool UiManager::holdingLoadScreen() const {
+    static const char* const kHold[] = {"loading_screen", "practice_loading_screen", "tut_loading_screen", "meta_loading_screen",
+                                        "bootup_load", "bootup_create_save", "autosave", "memcard_load",
+                                        "mc_format"};
+    if (!current_) return false;
+    for (const char* n : kHold)
+        if (current_->name() == n) return uiMs_ - currentSinceMs_ < kLoadScreenHoldMs;
+    return false;
+}
+
+// The development kit's keyboard cheats (quick_cheats, config/cheats.dta;
+// the retail game never enables them): (key {script} ...), the key a KB_
+// macro (F-keys 401..412), a digit or a one-character symbol ('#', a, A).
+// Encore's entries have no name (GH2's have one). The port runs them from
+// the Enhanced menu's Developer Keyboard Cheats (GD03-103).
+bool UiManager::keyCheat(int code) {
+    const DataNode* qc = boot_ ? boot_->find("quick_cheats") : nullptr;
+    const DataNode* kb = qc ? qc->find("keyboard") : nullptr;
+    for (size_t k = 1; kb && k < kb->children.size(); ++k) {
+        const DataNode& c = kb->children[k];
+        if (!c.isList() || c.children.size() < 2) continue;
+        const DataNode& key = c.children[0];
+        int want = -1;
+        if (key.type == DataNode::Type::Int) want = key.i >= 0 && key.i <= 9 ? '0' + key.i : key.i;
+        else if (key.isText()) want = key.s.size() == 1 ? static_cast<unsigned char>(key.s[0]) : macroInt(key.s, -1);
+        if (want != code) continue;
+        SDL_Log("dev cheat: %s", key.isText() ? key.s.c_str() : std::to_string(key.i).c_str());
+        interp_.runList(c, 1);
+        return true;
+    }
+    return false;
+}
+
 void UiManager::updateTransition() {
     if (phase_ == Phase::Out || phase_ == Phase::In) {
         phaseMs_ += frameDt_;
@@ -717,6 +756,7 @@ void UiManager::updateTransition() {
         return;
     }
     if (!pending_.empty()) {
+        if (holdingLoadScreen()) return;
         ScreenObj* s = screen(pending_);
         const bool back = pendingBack_;
         pending_.clear();
@@ -1065,6 +1105,9 @@ bool UiManager::mouse(float x, float y, bool click) {
         return click;
     }
     if (!current_ || phase_ != Phase::Idle || !pending_.empty()) return false;
+    mouseX_ = x, mouseY_ = y;
+    if (wheelHold_ && !click && std::hypot(x - wheelX_, y - wheelY_) <= kWheelHoverSlack) return true;
+    wheelHold_ = false;
     for (PanelObj* p : current_->panels())
         if (p->up && p->helpMouse(x, y, click)) return true;
     PanelObj* fp = current_->focusPanel();
@@ -1074,6 +1117,7 @@ bool UiManager::mouse(float x, float y, bool click) {
 void UiManager::wheel(int dir) {
     if (splash_ >= 0 || !current_ || phase_ != Phase::Idle || !pending_.empty()) return;
     const int b = dir < 0 ? kPad_DUp : kPad_DDown;
+    wheelHold_ = true, wheelX_ = mouseX_, wheelY_ = mouseY_;
     buttonDown(b, 0);
     buttonUp(b, 0);
 }

@@ -1,0 +1,12 @@
+# Read by the Guitar Dream Universal Launcher (gd-engine-launcher/games.yaml).
+# launch: release date (YYYY-MM-DD) of the version this folder reimplements
+# (based_on). guitar_dream_version: this folder's own version. completeness: 0..1.
+id: gd-game-20
+name: "Guitar Hero: On Tour"
+nick_name: "Guitar Hero: On Tour"
+launch: 2008-06-22
+platforms: [Nintendo DS]
+based_on: Nintendo DS
+guitar_dream_version: "0.0.0"
+ready_to_play: false
+completeness: 0

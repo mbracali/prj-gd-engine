@@ -175,7 +175,9 @@ private:
     std::vector<std::string> expect_;  // screens that must be entered, in order
     size_t step_ = 0;
     double stepStart_ = -1;
-    double markMs_ = 0;  // a "mark" wait's time, for "until" waits (steps on a fixed beat)
+    double markMs_ = 0;
+    std::string lastScreen_;           // screen-change times, for load_hold (GD02-155)
+    double lastChangeMs_ = 0, lastLoadingMs_ = -1;  // a "mark" wait's time, for "until" waits (steps on a fixed beat)
     bool done_ = false, failed_ = false, autoplay_ = true;
     float endMs_ = 1e30f, failMs_ = 1e30f;
     std::string songKeys_;

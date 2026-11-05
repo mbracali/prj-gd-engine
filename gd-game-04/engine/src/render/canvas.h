@@ -34,11 +34,25 @@ public:
     void shutdown();
 
     void begin(SDL_Color clear);
-    void end();
+    // Presents the frame. With `holdIfEmpty`, a frame that drew nothing after
+    // its clear (a screen torn down, the next not built yet) is not
+    // presented: the window keeps the last picture, as GH3 shows the previous
+    // screen until the next draws, rather than a black flash. A hold lasts
+    // at most kMaxHoldMs (a screen that is really empty goes black after it).
+    // Returns whether the frame was presented.
+    bool end(bool holdIfEmpty = false);
+    static constexpr double kMaxHoldMs = 250;
     // GD04_PERF: the time from begin() to the present (drawing, on the CPU)
     // and the frames drawn, summed until the caller clears them.
     uint64_t drawNs = 0;
     int drawnFrames = 0;
+    int heldFrames = 0;  // frames not presented (end's hold), all told
+    // Walks (probe:black / check:no_black): while on, presented frames that
+    // are all black after a lit one are counted (a black flash between
+    // screens: GD04-089).
+    static inline bool countBlack = false;
+    static inline bool countBlackLit = false;
+    static inline int blackFrames = 0;
 
     // Triangles (three vertices each). `texture` is a gfx::TextureId's id,
     // 0 for plain colour (the vertices' uv are then ignored).
@@ -61,6 +75,8 @@ public:
     void flush();
 
 private:
+    uint64_t beginDraws_ = 0, heldSinceNs_ = 0;
+    bool presentedContent_ = false;
     uint64_t beginNs_ = 0;
     bool makeFont(std::string& error);
 

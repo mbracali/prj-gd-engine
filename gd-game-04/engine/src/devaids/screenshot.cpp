@@ -85,10 +85,21 @@ bool captureMenuScreenshot(Canvas& canvas, double wallMs, double songMs) {
         return v;
     }();
     static size_t next = 0;
+    // GD04_SCREENSHOT_SONG=<n>: the song-time shots in the n-th song only (a
+    // song starts when its clock comes back more than 5 s; the second song
+    // of a walk, e.g. battle's sudden death).
+    static const int wantSong = SDL_getenv("GD04_SCREENSHOT_SONG") ? std::atoi(SDL_getenv("GD04_SCREENSHOT_SONG")) : 0;
+    static int songNo = 0;
+    static double lastSongMs = -1e9;
+    if (songMs > -1e8) {
+        if (lastSongMs < -1e8 || songMs < lastSongMs - 5000) ++songNo;
+        lastSongMs = songMs;
+    }
     std::string path = file;
     if (!shots.empty()) {
         if (next >= shots.size()) return true;
         const Shot& s = shots[next];
+        if (s.song && wantSong > 0 && songNo != wantSong) return false;
         if (s.song ? (songMs < -1e8 || songMs < s.at) : wallMs < s.at) return false;
         if (shots.size() > 1) {
             const size_t dot = path.rfind('.');

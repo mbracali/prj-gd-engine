@@ -71,6 +71,8 @@ struct PlayerRules {
 
 class Player {
 public:
+    // Enhanced > Forgiving Hammer-ons & Pull-offs (set by the app).
+    static inline bool forgivingHopos = false;
     // `inputOffsetMs`: the input offset (xenon_input_offset + the song's +
     // calibration) [C script gem_scroller]; 0 in the self-test.
     Player(const NoteTrack& track, const Tuning& tuning, int difficulty, bool noFail, float inputOffsetMs = 0);
@@ -81,6 +83,9 @@ public:
     const std::vector<PlayerEvent>& events() const { return events_; }
     void clearEvents() { events_.clear(); }
     size_t current() const { return cur_; }
+    // A star note of this Star Power phrase was missed: its gems are normal
+    // gems now (star_miss_note) [C 0x8211F56C].
+    bool phraseLost(int phrase) const { return phrase >= 0 && size_t(phrase) < missedPhrase_.size() && missedPhrase_[size_t(phrase)]; }
     // The note index whose sustain is held, or -1.
     int sustaining() const { return sus_.note; }
     // A mid-song start: the notes before `ms` are passed over (not judged;
@@ -144,6 +149,10 @@ private:
     std::vector<bool> missedPhrase_;  // a star note of the phrase was missed
     int triggerFrames_ = 0;
     bool frameStrum_ = false;  // 0x829BA008: a strum since the last hit / miss
+    // 0x829E4C80[player]: set by an overstrum, cleared when a sustain starts;
+    // the sustain update ends the held note while it is set [C 0x8211FA14,
+    // 0x82106B84, 0x8211C9D0].
+    bool overstrummed_ = false;
     struct Sustain {
         int note = -1;
         double start = 0, end = 0;

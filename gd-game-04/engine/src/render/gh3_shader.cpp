@@ -48,6 +48,16 @@ void Globals::setMatrix(int r, const gfx::Mat4& m, int rows) {
     for (int i = 0; i < rows; ++i) set(r + i, m.at(0, i), m.at(1, i), m.at(2, i), m.at(3, i));
 }
 
+void setShadowGlobals(Globals& g, const DynamicShadow& s, const gfx::Mat4& view) {
+    if (!s) return;
+    const gfx::Mat4 inv = view.inverseAffine();
+    g.setMatrix(kRegViewToLight0, s.vp[0] * inv, 4);
+    g.setMatrix(kRegViewToLight1, s.vp[1] * inv, 4);
+    g.set(kRegShadowMapConstants, s.blend[0], s.blend[1], s.fadeStart, s.fadeEnd);
+    g.set(kRegShadowLevel, 0, 0, 1.0f - s.intensity, s.intensity);
+    g.set(kRegShadowMapSize, s.size[0], s.size[1], 1.0f / s.size[0], 1.0f / s.size[1]);
+}
+
 gfx::ProgramDesc programDesc(const xenos::Program& p, const std::string& name, bool clipZeroToOne) {
     gfx::ProgramDesc d;
     d.name = "gh3:" + name;
@@ -147,7 +157,8 @@ void fillMaterialConstants(const scene::Material& m, float alphaRef, MaterialCon
 LightIn lightIn(const venue::Light& l, const venue::LightState& s) {
     LightIn li;
     li.type = l.type == venue::LightType::Ambient ? LightIn::Ambient : l.type == venue::LightType::Directional ? LightIn::Directional
-              : l.type == venue::LightType::Point ? LightIn::Point : LightIn::Spot;
+              : l.type == venue::LightType::Point ? LightIn::Point : l.type == venue::LightType::Prt ? LightIn::Prt : LightIn::Spot;
+    for (int k = 0; k < 4; ++k) li.prt[k] = {l.prt[k][0], l.prt[k][1], l.prt[k][2]};
     li.pos = {l.pos[0], l.pos[1], l.pos[2]};
     li.dir = {l.dir[0], l.dir[1], l.dir[2]};
     li.color = {s.color[0], s.color[1], s.color[2]};
@@ -224,6 +235,12 @@ void lightObject(const LightIn* lights, size_t count, const gfx::Vec3& p, Object
             break;
         }
         case LightIn::Ambient: amb = amb + l.color * c.inten; break;
+        case LightIn::Prt:
+            // 823DAFA8: SH0..3 += coeff0..3 x the candidate's intensity (no
+            // colour, no slot; for objects whose record has the SH bit, as
+            // the characters') [C].
+            for (int k = 0; k < 4; ++k) sh[k] = sh[k] + l.prt[k] * c.inten;
+            break;
         }
     }
     out.set(kRegAmbient, amb.x, amb.y, amb.z, 1);
@@ -268,6 +285,37 @@ const gfx::VertexLayout& vertexLayout() {
         return r;
     }();
     return l;
+}
+
+void materialState(uint32_t blendMode, uint32_t flags, gfx::PipelineState& out) {
+    using F = gfx::BlendFactor;
+    using O = gfx::BlendOp;
+    // The Xenos blend control word per mode (colour: src bits 0-4, op 5-7, dst 8-12).
+    static const uint32_t kControl[13] = {0x10001,   0x1060106, 0x1860186, 0x7060706, 0x6000600, 0x1080108, 0x10008,
+                                          0x1010101, 0x10706,   0x10701,   0x10108,   0x10189,   0x1810181};
+    const uint32_t w = blendMode < 13 ? kControl[blendMode] : kControl[0];
+    auto factor = [](uint32_t f) {
+        switch (f) {
+        case 0: return F::Zero;
+        case 1: return F::One;
+        case 4: return F::SrcColor;
+        case 5: return F::InvSrcColor;
+        case 6: return F::SrcAlpha;
+        case 7: return F::InvSrcAlpha;
+        case 8: return F::DstColor;
+        case 9: return F::InvDstColor;
+        case 10: return F::DstAlpha;
+        case 11: return F::InvDstAlpha;
+        default: return F::One;
+        }
+    };
+    const uint32_t src = w & 31, op = (w >> 5) & 7, dst = (w >> 8) & 31;
+    out.blend = !(src == 1 && dst == 0 && op == 0);
+    out.src = factor(src), out.dst = factor(dst);
+    out.op = op == 1 ? O::Subtract : op == 4 ? O::ReverseSubtract : O::Add;
+    out.depthWrite = (flags & 0x20) == 0;
+    out.depthTest = true;
+    out.depthFunc = (flags & 0x10) ? gfx::CompareFunc::Always : gfx::CompareFunc::LessEqual;
 }
 
 }  // namespace gh3shader

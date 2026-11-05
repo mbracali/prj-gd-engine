@@ -6,6 +6,31 @@ matches the tag's version. Nothing is released yet.
 
 ## [Unreleased]
 
+## [0.1.12] - 2026-11-05
+
+### Fixed
+- Android: songs no longer drop to 10-15 fps on phones whose graphics drivers stall on buffer updates (#55).
+- The mouse wheel in lists no longer jumps back when the mouse moves slightly (#51).
+- Career: Free Bird, the tour's last encore, asks its three "are you sure?" letters again before it starts.
+- End-of-song stats: SP Phrases shows phrases captured out of phrases played, as in GH2.
+- Unplugging the controller mid-song pauses the game with GH2's "connect a Guitar Controller" message (when the keyboard is set to the other player).
+- Quick play: the last setlist no longer says to play Career Mode for more songs when every setlist is already open.
+- Stage light beams are drawn per pixel as in GH2's shader: they fade softly where they meet the stage and are no longer cut off by the drum kit or props in front of them.
+- Button presses are timed once per frame, as on the Xbox 360 (two strums in one frame count as one).
+- X-Stream: a bass strum in the one spot GH2 ignores (302 s) is no longer an overstrum.
+- Hair swings at the original's speed at any frame rate (it moved twice as fast at 120 FPS), and its strands twist as in GH2.
+- Goth and rockabilly characters' eyes look somewhere new after some blinks, as in GH2.
+- Letting go of a big note's sustain right away plays the crowd's "blew it" sound again, as in GH2 (a missed big note stays silent).
+
+### Added
+- Max FPS: 144 (#57).
+- Enhanced > Reset Calibration: sets the audio and video delays back to 0 ms (#47).
+- Enhanced > Developer Keyboard Cheats: GH2's own debug keys from its development kit (e.g. p autoplay, l lose, c next camera, h hide the HUD).
+
+### Changed
+- PC wording instead of Xbox 360, Xbox Live, console and storage-device text, in all five languages; the Xbox Live loading tips are replaced by GD-Engine tips, as in Guitar Hero.
+- Loading and saving screens stay up at least 2 seconds with their animation, so the tips can be read, as in Guitar Hero.
+
 ## [0.1.11] - 2026-11-03
 
 ### Fixed

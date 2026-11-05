@@ -78,6 +78,9 @@ private:
     void broadcast(const char* event, int player, qb::Struct data);
     uint32_t spawnTracked(uint32_t script, const qb::Struct& params, const char* counterName, std::map<std::string, uint64_t>& counter);
     void syncStatus(SongScreen& s, int p);
+    // The intro's and the song end's sounds and movie the port's native
+    // intro / end leave to it (play_intro's scripts, win_song's movie).
+    void introAndEndMedia(SongScreen& s, double nowMs);
     void buildInputArray(SongScreen& s, int p);
     void loadSongScripts(SongScreen& s);
     void eventArrays(SongScreen& s, double nowMs);
@@ -112,6 +115,15 @@ private:
     float lastCrowd_ = 1;
     std::array<int, 2> lastCards_{}, lastFired_{};
     std::array<std::array<int, 8>, 2> lastByAttack_{};
+    // attack_bolt's and bite_particle's 2D sparks (Create2DParticleSystem in
+    // fx_) and their Destroy2DParticleSystem times [C scripts].
+    std::array<double, 2> lastBolt_{-1e9, -1e9};
+    struct FxEnd {
+        uint32_t id = 0;
+        double at = 0;
+        bool whenEmpty = false;
+    };
+    std::vector<FxEnd> fxEnds_;
     size_t fretbar_ = 0, preFretbar_ = 0;
     struct Timed {
         double time = 0;
@@ -130,4 +142,11 @@ private:
         double born = 0;
     };
     std::vector<Bolt> bolts_;
+    std::array<bool, 3> introSfx_{};  // play_intro's highway / ripple / HUD sounds started
+    std::vector<double> markers_;  // <song>_markers' times (current_section_array)
+    int sectionEntry_ = -1;        // current_section_array_entry as last set (-1: not followed)
+    void frameSection(double now);
+    bool winMovie_ = false;           // win_song's movie preloaded
+    double transitionAt_ = -1e18;     // the start transition's first frame (song ms; -1e18: not yet)
+    bool startRendered_ = false;      // its Transition_StartRendering ran
 };

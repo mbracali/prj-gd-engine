@@ -107,9 +107,32 @@ rgba, rot_angle (degrees), z_priority, just, events_blocked, plus type-specific
   (default 0 = off), padding_scale (default 1), spacing_between (default 0),
   dont_allow_wrap (wrap on by default), exclusive_device; selected index
   starts at -1 [C base menu ctor 0x823156D8]. Layout and focus: §5.
-- VScrollingMenu: a window that scrolls its VMenu child to keep the focused
-  item visible; scroll_speed, num_items_to_show, reset_window(_top/_bottom)
-  [C keys at 0x82317348; behaviour I].
+- VScrollingMenu [C ctor 0x82316E58, props 0x82317348, update 0x82317640,
+  item box 0x82317158]: a window (its dims' height, or num_items_to_show x
+  the menu's regular_space_amount) over its last VMenu child. Every update it
+  takes the focused item (the first before any focus), its box = pos.y -
+  (just.y + 1) / 2 x height (menu and item scale), and moves the window
+  (offset 0x270, starts 0) only when the box leaves it: above, offset = box
+  top; below, offset = top - (int(window / (spacing + h)) - 1) x (spacing + h)
+  (scroll_speed 10000, i.e. at once). The menu goes to (its x, -offset), its
+  just forced to [left top] (0x8221B788). On a refresh (first update, focus
+  change, a child added or gone) items wholly inside the window get alpha
+  1, the others 0 [C FUN_8221a418 from 0x82317A4C].
+  The mechanism behind the "rows one spacing too high" reports: a VMenu lays
+  its items out only on its first-update event 0x3056434f (0x8221D2A0 posts
+  it, 0x823164E0 calls the layout 0x82315FB0), and SetParent / Die re-arm
+  it; the event is handled after the scrolling menu's own update in that
+  frame. So the window first sees the first item where the script made it,
+  pos (0,0) centred: box top -h/2, and the offset stays -h/2 after the
+  layout (top 0 is inside). Every new_menu list therefore sits half its first
+  item lower than menu_pos: the pause menu's 100-high containers 50 px (the
+  five items centred in the frame), the store's texts 31.5 px and the cheats'
+  17.3 px (their scripted highlights hilite_pos / cheats_morph_hilite fall on
+  the rows), the controller / data settings / calibrate lag rows onto their
+  bars. Items made with just [.. top] (the practice pause, the setlist) or
+  away from 0 do not move. SetScreenElementLock on also posts the event once
+  (0x8221A588): the calibrate lag menu, locked right after its items, is
+  laid out once (with the same offset) and then frozen.
 - WindowElement: container that clips children to its rect. Every
   WindowElement starts with just [-1 -1] and dims = the screen (not only
   `root_window`) [C ctor 0x82315138] (the store's info text windows are
@@ -154,6 +177,14 @@ pos (with relative/absolute modifiers), scale (number|pair, relative_scale),
 rot_angle (relative_rot_angle), alpha, rgba, skew, just, time, motion.
 - On a call: current values are copied as the start; given props become the
   target; time (seconds, default 0) * 1000 -> integer ms duration.
+  The element keeps one target block (+0xf0; start +0x140, current +0xa0):
+  props the call does not name keep their earlier target, so they go on
+  moving to it over the new time; `{(x,y) relative}` is added to the target
+  pos (+0x110), not the current one [C 0x8221CEC8, 0x8221C240]. The
+  controller select's light_up_controller (pos, scale, alpha, 0.25 s) is
+  followed at once by controller_jiggle's relative DoMorphs, and the
+  controller still reaches its player's spot (GD04-102; the port had
+  replaced the whole morph, the controllers stayed in the middle).
 - time 0 -> target applied immediately.
 - Each frame: t = elapsed_ms/duration clamped to 1; f(t) by motion:
   linear 0 (default; unknown keys such as `gentle` stay linear), smooth =
@@ -189,11 +220,54 @@ pad_select, X->pad_square/option/backspace, Y->pad_option2/space/expand,
 LB->pad_l1, RB->pad_r1, LT->pad_l2, RT->pad_r2, LS/RS click->pad_l3/r3,
 d-pad->pad_up/down/left/right (xenon_guitar_flip swaps up/down for lefty),
 Start->pad_start. Guitar: green=A, red=B, yellow=Y, blue=X, orange=LB, strum =
-d-pad up/down. SetMenuAutoRepeatTimes (0.3, 0.05) = held-direction repeat
+d-pad up/down. The port sends yellow / blue / orange as pad_option2 /
+pad_option / pad_l1 only (the set list's SETLIST / BONUS / DOWNLOADS tabs,
+setlist_event_handlers -> change_tab; the other events those buttons raise
+have handlers only in debug and online menus); walk setlist_tabs (GD04-090).
+An event handler `{ pad_choose ( <option> . func ) }` whose func is a struct
+`{ script params = {...} }` (create_popup_warning_menu_option: the lefty flip
+warning's RESTART, the popups' options) runs that script with those params
+[C data; I: the reading]. SetMenuAutoRepeatTimes (0.3, 0.05) = held-direction repeat
 delay/interval in s [I].
 Delivery: a pad event goes to every element that currently has focus (a menu
 and its selected child are both focused), filtered by exclusive_device; an
 element with block_events ignores events [I; device check C 0x821F5040].
+
+The port's keyboard and mouse (gd02 / gd03's policy, the owner's "Enter is
+Start"): Enter is bound to Start; in the menus (and the pause menu over a
+song) the keyboard's Start is select (pad_choose), except on a text entry,
+where it is pad_start and finishes the entry. A text entry is a focused
+element (not root_window) whose pad_start runs something other than the
+gamercard or null_script: the band name (create_enter_band_name_menu:
+confirm_band_name), the Top Rockers name (menu_top_rockers_init_band_name_creation:
+menu_tr_confirm_band_name) and a new cheat (cheats_zoomin_guitar:
+new_cheat_finished) [C scripts]. GH3's menus select with pad_choose only
+(their pad_start shows a gamercard, 51 handlers), so a plain pad_start would
+leave Enter dead there. Esc / Backspace are Back (pad_back: the entries'
+DELETE); in a song Esc pauses, Enter (Start) pauses too. Walks: quickplay
+(Enter on the difficulty, then Enter accepts the Top Rockers name), career
+(Enter accepts the band name), cheats (Enter finishes the cheat), pause.
+
+The help bar (add_user_control_helper's pills, user_control_container): every
+pill takes a click and does what its button does, found from its glyph
+(uc_button_N beside uc_text_N, or the glyph made next to the text): green
+pad_choose, red pad_back, Start pad_start (ACCEPT, FINISH ENTERING CHEAT),
+the strum bar up above the pill's middle and down below it, yellow / blue /
+orange those frets. The pause menu takes the mouse again (hover, click, the
+pills) while the song is paused. Walk pausequit clicks UP/DOWN's lower half
+and SELECT (QUIT); walk mouse clicks BACK.
+
+The help bar's layout (user_control_build_pills, user_control_auto_center)
+[C scripts]: every pill as wide as the widest glyph + text, the row centred
+on x 640, user_control_pill_gap x user_control_pill_scale (0.4) between the
+bodies, the ends (Control_pill_end, 50 x 0.4) outside them, the row narrowed
+to action_safe_width_for_helpers (925); glyph and text centred on the pill.
+The set list's helpers are GH3's five (setlist_show_helperbar: UP/DOWN,
+SELECT, BACK and the other two tabs; create_sl_assets sets the gap to 100);
+the port adds none there (GD04-107). The port's own screens (GAMEPADS,
+Enhanced Options) draw SELECT / BACK / UP/DOWN with the same numbers, fonts
+and textures, in the user_control_pill_color / _text_color the screen below
+left (ui/port_screens.cpp helpLayout; GD04-110).
 
 VMenu/HMenu event handling [C 0x823164E0]:
 - new_menu focuses its VMenu before the items exist: the first focusable
@@ -218,6 +292,12 @@ regular_space_amount); menu width = widest child (unless dims set), height =
 sum. Each child gets just = [internal_just.x, 0] and pos =
 ((ij.x+1)/2*menu_w, cursor + h/2); block start = (menu_h-total)*(ij.y+1)/2.
 HMenu: same on the other axis. Relayout when children change;
+a VMenu's width is only set by that first-update event (made, a child added
+or gone, the lock), not when a child's text changes later: the store's
+character name (one text in cs_vmenu at menu_pos (845, 85)) is laid out with
+Slash's name and every later name stays centred there, on the frame's centre
+(GD04-099; the port had re-measured each frame, so long names started at 845
+and ran off the frame);
 SetScreenElementLock id ON suspends relayout, OFF re-enables and relayouts
 (scripts do ON;OFF then GetScreenElementDims) [C flag 0x4000 0x8221A588; I].
 new_menu defaults: VScrollingMenu dims (400,480) at menu_pos, VMenu inside
@@ -343,9 +423,56 @@ the zones map's current zone (SetPakManCurrentBlock map = zones:
 z_soundcheck for the store, the character select and the hub) with the
 venue renderer behind the elements while bg_viewport is shown and no song
 plays. Poses: pos, Quat (x, y, z; w >= 0), FOV, LockTo world; morphs use the
-elements' curves [I]. Not drawn yet: the composite objects on it (the
-character, CreateCompositeObject / obj_* members, the store's instrument
-models).
+elements' curves [I]. The composite objects on it (the character,
+CreateCompositeObject / obj_* members): ui/menu_objects.h.
+
+Screen effects and shadow: setup_bg_viewport -> enable_bg_viewport_properties
+-> TOD_Proxim_Update_LightFX_Viewport {fxParam = Default_TOD_Manager
+viewport = bg_viewport}: venue_DOF from DOF_Off_TOD_Manager (strength 0),
+then Default_TOD_Manager's BnS (bright_sat) and sbloom (simple_bloom), the
+songs' own chain (venues.md "Screen effects") [C scripts]. The port runs it
+on the menu scene too (render/screen_fx.h), Enhanced's Remove All Effects /
+Bloom None as in a song. setup_character_hub's SetShadowDirFromLight
+{name = Z_SoundCheck_GFX_Char_front01} names the characters' dynamic
+shadow light [C script]; the port draws the menu objects into a 1024 x 1024
+shadow map from it (else the strongest band-group directional light
+pointing down) and the zone and the characters receive it, as the songs'
+band (VenueStage::shadowPass: its box, bias and intensity, [I] there).
+The main menu, options and boot screens' full-screen 2D backdrop
+(create_menu_backdrop) hides the scene: nothing 3D shows there.
+
+Character switches (character select, hub): preload_band_member reads the
+body and instrument paks with LoadPakAsync, but inside a condition
+(load_musician_pak_file), which the port's VM runs to its end, so the
+read cannot overlap frames there. The port instead reads the character
+select's neighbours ahead (LoadPak of a body pak queues the next / previous
+two valid guitarists' body, anims and instrument paks on a worker:
+musician_profiles order, Guitarist, not debug_only, not locked, no wrap
+[C script get_valid_character_index]); a character pak's textures do not
+go to the global texture cache (the model and the results art have their
+own). MenuObjects loads a model not cached on a worker (band::loadModel with
+the musician tables copied) and uploads its textures and new shader
+programs about 6 ms a frame (BandView::prepare); the model it replaces stays
+drawn (a ghost, at most 2 s) until the new one is up, as GH3 keeps the old
+character while its async load runs [I]. Faceoff walk, 4 scrolls: frames of
+150-300 ms before, none over 25 ms after (offscreen, GD04_FRAMELOG).
+
+### Results art (create_newspaper_menu)
+
+The magazine cover's photo is `displaySprite tex = Mag_Photo` between
+PushAssetContext context = <body>.asset_context and PopAssetContext; the
+body is Guitarist_<profile name>_Outfit<o>_Style<s> from the player's
+character_id / outfit / style (player1_status, or the 2P screen's
+player_status) [C script]. Every character body pak holds its own .img
+Mag_Photo under the same key; its pak name key (the pak header's) is the
+body's asset_context (axel_1) [C data]. The port keeps those images per
+context (TextureCache::loadContextImages) and a texture set while a
+context is pushed takes the context's image first. Morello_1 and the
+BoneMan bodies have no asset_context (nothing is pushed: GH3 finds the one
+loaded body's image); the port uses the body the script just looked up
+(info_struct) [I]. Walks: career, coop, faceoff and results_art
+(GD04_WALK_CHARACTER=<name>[,<outfit>,<style>], default Morello) run
+check:mag_photo.
 
 ## 10. Reference comparison (the 360 under Xenia, 2026-10-29)
 
@@ -364,15 +491,15 @@ for the results. Every screen is ~7 % lighter in the port's mid tones (the
 | Press any button | 01_press_any_button | 01_press_any_button | the text block on one line | fixed: text block wrap (§6) |
 | Controller instructions | 02_controller_instructions | 02_controller_instructions | texts 2 px a glyph narrow; the caption box black | fixed: bearing / tracking (§6); the 4x4 `white` decoded black (formats.md "Tiling") |
 | Main menu | 03_main_menu | 03_main_menu | no cream highlight, CAREER not red, no shadows, no button glyphs | fixed: `white`, handler `id`, shadows, \m / \b glyphs; the eyes' glow phase is random (glow_menu_element); the GAMEPADS pill is the port's |
-| Options | 04_options | 04_options | AUDIO unreadable (focus colour) | fixed: handler object, GetTags `id` (§5). The "V2" bottom left is in no script (a C-side label): not done. ENHANCED is the port's |
+| Options | 04_options | 04_options | AUDIO unreadable (focus colour) | fixed: handler object, GetTags `id` (§5). The "V2" bottom left is in no script (a C-side label): not done (2026-11-05: no "V2" string in the XEX, ASCII or UTF-16, nor in qb.pak's scripts / data, nor in options_main_poster, Venue_BG, Venue_Overlay). ENHANCED is the port's |
 | Choose band | 06_store_choose_band | 06_choose_band | the selected row's text under its bar | fixed: draw-list ties (§3). The Glitches row and the random ticket art are the port's / random |
 | Difficulty | 07a_quickplay_difficulty | 07a_difficulty | no highlight bar | fixed: unset z_priority ignored (§1), `white` |
 | Setlist | 07_quickplay_setlist | 07_setlist | no torn first page / tabs, light shoeprints, dark tab buttons, random lines missing | fixed: flips per props call, subtract blend, \b white, `random` branches (qscript.md); the decorations are random |
-| Cheats | 08_options_cheats, 08b, 08c | 08_cheats, 08b_cheat_entry, 08c_cheat_unlocked | rows 4-18 px off (the scrolling window, rot 1) | not done (small; VScrollingMenu 0x82317640 read, not matched) |
+| Cheats | 08_options_cheats, 08b, 08c | 08_cheats, 08b_cheat_entry, 08c_cheat_unlocked | rows 4-18 px off (the scrolling window, rot 1) | fixed 2026-11-05 (GD04-086): the VScrollingMenu's window (§2): the list sits half its first item lower, the highlights cheats_morph_hilite (349, 206 + 23 k) fall on the rows; earlier notes said the text path and menu layout match GH3's code, which still holds |
 | Select controller | 09_multiplayer_select_controller | 09_select_controller | two guitar icons vs one pad | not a bug: the walk's two players count as guitars |
 | Loading screen | 10a_loading_screen | 10a_loading | none drawn | fixed: texture-slot movies (§8); up for 1-2 frames (the port's script loads are instant, its song load stalls after) |
 | Song intro | 10b-10g | 10c_intro_title | title and HUD ~2 s early (no load time), cameras | not mine (song start, venue) |
-| Pause | 20_pause_menu | 20_pause | RESUME not white | fixed: the first item's focus deferred (§5). The background is not blurred / dimmed and the highway is hidden: render / song side, not done |
+| Pause | 20_pause_menu | 20_pause | RESUME not white | fixed: the first item's focus deferred (§5); the highway hides and create_pause_menu_frame's gradient_128 (black, alpha 180) dims the scene (pausequit walk frames, 2026-11-04) |
 | Pause options | 21_pause_options | 21_pause_options | the pause menu stayed (for_options lost) | fixed: struct parameters merged (qscript.md). CALIBRATE WHAMMY: the port's pad counts as a guitar |
 | Restart warning | 22_pause_restart_warning | 22_restart_warning | none drawn before | fixed by the above |
 | Newspaper | 30_results_newspaper | 30_newspaper | RETRY SONG in the short runs | right: shown unless the score is a new top score (create_newspaper_menu); the full-song run matches |
@@ -382,7 +509,7 @@ for the results. Every screen is ~7 % lighter in the port's mid tones (the
 | Store | 41_store_main | 41_store_main | black background; the menu 20 px high | the 3D scene fixed (§9); the 20 px (= -spacing) not found in the layout code [C 0x82315FB0 / 0x82317640 read]: not done |
 | Store guitars | 42_store_guitars | 42_store_guitars | the info text outside its window, black background, no guitar model | fixed: window defaults (§2), the camera morph; the instrument (composite objects) not done |
 | Store songs | 43_store_songs | - | not reached by the scripted runs | - |
-| Character select / hub | - | char_select, char_hub | (no capture) black before; now the zone, no character | the characters need CreateCompositeObject / obj_*: not done |
+| Character select / hub | - | char_select, char_hub | (no capture) black before; now the zone, no character | the character is drawn through the menu objects (CreateCompositeObject, career walk frames 2026-11-04) |
 
 ## Script spawning [C 0x8226A048..0x8226A0C4]
 

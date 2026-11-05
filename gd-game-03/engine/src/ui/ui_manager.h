@@ -154,6 +154,12 @@ public:
     void logOnce(const std::string& what);
     ScreenText& screenText();
     double nowMs() const { return uiMs_; }
+    static constexpr double kLoadScreenHoldMs = 2000;  // GD03-102
+    bool holdingLoadScreen() const;
+    // Encore's developer keyboard cheats (config/cheats.dta, quick_cheats
+    // keyboard): runs the cheat on `code` (a character, or KB_F1.. 401..412).
+    // False: no cheat on that key (GD03-103).
+    bool keyCheat(int code);
     // A GH2 boot macro's int value (kMCFileExists...), else `def`.
     int macroInt(const std::string& name, int def) const;
     // config/gh2.dta's (modes ...).
@@ -214,6 +220,12 @@ public:
     bool mouse(float x, float y, bool click);
     // The wheel: one Up (-1) or Down (+1) press.
     void wheel(int dir);
+    // After a wheel step, hover waits until the pointer really moves (more
+    // than kWheelHoverSlack menu units), or a slight nudge would focus the
+    // row under it again and undo the scroll (#51).
+    float mouseX_ = -1e9f, mouseY_ = -1e9f, wheelX_ = 0, wheelY_ = 0;
+    bool wheelHold_ = false;
+    static constexpr float kWheelHoverSlack = 24;
     // Turns a cheat on or off as its button code does (Enhanced Options).
     void setCheat(const std::string& id, bool on);
 
@@ -319,6 +331,7 @@ private:
     std::string firstScreen_;
 
     // clocks (ms)
+    double currentSinceMs_ = 0;  // uiMs_ when current_ was entered (loading screens' hold, GD03-102)
     double uiMs_ = 0, secondsMs_ = 0, tutorialMs_ = 0, lastWall_ = 0, frameDt_ = 0;
     std::vector<PanelObj*> entered_;
     std::vector<ScriptObject*> made_;

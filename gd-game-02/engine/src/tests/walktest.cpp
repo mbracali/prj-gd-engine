@@ -2,6 +2,7 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "tests/walktest.h"
 
+#include <set>
 #include <SDL3/SDL.h>
 
 #include <algorithm>
@@ -100,6 +101,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         at("main_screen");
         press(kX);  // QUICK PLAY (main_quickspin.btn, the focus)
         at("qp_selsong_screen");
+        check("qp_footer");
         for (int i = 0; i < downs; ++i) press(kDown), wait(150);
         press(kX);
         at("qp_diff_screen");
@@ -125,6 +127,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         at("guitar_help_screen");
         press(kX);
         quickplaySong(3);
+        check("load_hold");
         check("quickplay_venue");
         wait(3000);
         check("task_clock_song");
@@ -156,14 +159,34 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
                    "guitar_help_screen", "main_screen", "qp_selsong_screen", "qp_diff_screen", "loading_screen", "game_screen",
                    "post_show_screen", "endgame_screen", "highscore_screen", "complete_screen", "meta_loading_screen", "saving_screen",
                    "qp_selsong_screen", "main_screen", "qp_selsong_screen", "qp_diff_screen", "loading_screen", "game_screen"};
+    } else if (scenario == "dev_cheats") {
+        // GD02-045: Enhanced > Developer Keyboard Cheats on, then a real 'l'
+        // key (SDL event, through the app's bound-key filter) runs cheats.dta's
+        // "Automatically Lose" ({handle (player0 lose)}): the lose screen. A
+        // bound key ('1', green) runs no cheat.
+        at("splash_screen", 30000);
+        press(kX);
+        at("startup_create_save_screen");
+        press(kX);
+        at("saving_screen");
+        at("guitar_help_screen");
+        press(kX);
+        quickplaySong(3);
+        wait(3000);
+        check("dev_cheat_on");
+        key(SDLK_1);  // bound to green: no cheat
+        wait(1500);
+        check("dev_cheat_bound");
+        key(SDLK_L);  // Automatically Lose
+        at("lose_screen", 20000);
     } else if (scenario == "lose") {
         autoplay_ = false;
-        failMs_ = 5000;  // past bangyourhead's first big note (beat 8), its gem passed unhit
+        failMs_ = 6000;  // past hush's first big note (PART GUITAR beat 8), its gem passed unhit
         songKeys_ = "1000:strum,2000:strum";  // two overstrums: GH2's miss sound each
-        quickplaySong(0);
+        quickplaySong(19);  // hush (big, the 20th quick play song)
         check("miss_sound", 30000);
         at("lose_screen", 30000);
-        check("big_note_blown");
+        check("big_note_missed");
         press(kDown), wait(150), press(kDown), wait(150);  // QUIT (lose_quit_normal.btn)
         press(kX);
         at("meta_loading_screen");
@@ -499,15 +522,14 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         if (scenario == "career_win" || scenario == "career_win_medium") {
             // The tour won (GD02-023): every tier song before the tour's last
             // passed with cheat_beat_song, the last one offered and played
-            // (cut short, a win). final_song (0x00132930): the last tier's
-            // song that completes it; at Easy the tour ends with fest
-            // (0x00130c58: one tier less) and its encore is never unlocked
-            // (0x00131c70), so it is losangeles; above Easy arena's encore
-            // playwithme [C]. win_game_screen: beat_easy / beat_other and
-            // the crowd's crowd_win, then pro face-off's unlock once all
-            // six tiers are complete (0x0012f130), the results.
+            // (cut short, a win). At Easy the tour ends with arena (numTiers
+            // 0x822A2BC8: one tier less) and Easy has no encores, so arena's
+            // fifth song (required 5) psychobilly completes it; above Easy
+            // stone needs all six: hangar18 played, then its encore freebird
+            // accepted and played [C]. win_game_screen: beat_easy /
+            // beat_other and the crowd's crowd_win, then the results.
             const bool easy = scenario == "career_win";
-            winTarget_ = easy ? "losangeles" : "playwithme";
+            winTarget_ = easy ? "psychobilly" : "hangar18";
             endMs_ = 30000;
             check("career_target");
             press(kX);  // LET'S ROCK
@@ -518,6 +540,22 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
             press(kX);
             at("loading_screen");
             at("game_screen", 30000);
+            if (!easy) {
+                at("endgame_encore_screen", 90000);
+                wait(1500);
+                // Free Bird is the tour's last song: the letter is
+                // endgame_encore_freebird1 and YES asks three times
+                // (yes_freebird1..3.btn, freebird1..3.grp) before it starts.
+                check("freebird 0");
+                for (int i = 1; i <= 3; ++i) {
+                    press(kX);
+                    wait(800);
+                    check(("freebird " + std::to_string(i)).c_str());
+                }
+                press(kX);  // yes_freebird3.btn: START_ENCORE
+                at("loading_screen", 30000);
+                at("game_screen", 30000);
+            }
             at("win_game_screen", 120000);
             wait(1500);
             check(easy ? "tour_won easy" : "tour_won other");
@@ -577,7 +615,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
                                            "practice_change_speed_screen", "pract_pause_screen", "meta_loading_screen", "career_screen"});
         }
         if (scenario == "career_encore") {
-            // career_full's tier to its encore offer (iran played), declined:
+            // career_full's tier to its encore offer (salvation played), declined:
             // the venue's encore_no (endgame.dta no.btn), then the results.
             endMs_ = 35000;
             check("career_seed");
@@ -586,7 +624,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
             press(kX);
             at("sel_song_screen");
             wait(900);
-            check("career_song_iran");
+            check("career_song_salvation");
             press(kX);
             at("loading_screen");
             at("game_screen", 30000);
@@ -739,6 +777,10 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         wait(750);
         check("enhanced_calibrated");
         press(kX), wait(200);
+        // Reset Calibration, the next row (#47): both delays back to 0 ms.
+        press(kDown), wait(120);
+        press(kX), wait(300);
+        check("enhanced_calibration_reset");
         // PERFORMANCE & GRAPHICS -> Screen Mode -> Resolution; select opens
         // its dropdown, down and select pick the next option.
         for (int i = 0; i < 3; ++i) press(kDown), wait(120);
@@ -827,16 +869,23 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         mouseAt(300, 297, 1);
         wait(300);
         check("enhanced_mode_clean");
-        // MODES collapsed (a click on its title): Resolution is the list's
-        // 11th row; its dropdown opens upward, 720p 180 units above the row.
+        // MODES collapsed (a click on its title): Screen Mode is the list's
+        // 11th row, hovered; the wheel moves to Resolution, scrolled into its
+        // place, and the small nudge after it keeps that focus (#51), so
+        // select opens its dropdown, upward: 720p 180 units above the row
+        // (the row is the 12th, one below where it was clicked before).
         mouseAt(300, 190, 0);
         mouseAt(300, 190, 1);
         wait(300);
         mouseAt(480, 523, 0);
-        mouseAt(480, 523, 1);
         wait(200);
-        mouseAt(480, 343, 0);
-        mouseAt(480, 343, 1);
+        mouseAt(480, 523, 5);
+        wait(600);
+        mouseAt(483, 525, 0);
+        press(kX);  // the focused row's dropdown: Resolution's only if the nudge kept the focus
+        wait(200);
+        mouseAt(480, 375, 0);
+        mouseAt(480, 375, 1);
         wait(300);
         check("enhanced_res_720");
         // The scrollbar's bottom: the list's end, Monkey Head Crowd clicked on, then off.
@@ -1407,6 +1456,30 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
             expect_ = {"main_screen", "training_screen", "tutorials_screen", "tut_loading_screen", "tut_script_screen",
                        "tutorial_end_screen", "meta_loading_screen", "main_screen"};
         }
+    } else if (scenario == "pad_unplugged") {
+        // A controller lost mid-song: a pad as player 1, the keyboard given
+        // player 2; the pad unplugged: the song pauses on
+        // pause_controller_screen with GH2's message, RESUME disabled; the
+        // pad back: RESUME plays on.
+        autoplay_ = false;
+        at("main_screen");
+        check("vpad_attach");
+        wait(600);
+        check("keyboard_p2");
+        quickplaySong(3);
+        wait(3000);
+        check("vpad_detach");
+        at("pause_controller_screen", 5000);
+        wait(800);
+        check("pad_loss_message");
+        press(kX);  // ignored while the pad is missing
+        wait(500);
+        check("still pause_controller_screen");
+        check("vpad_attach");
+        wait(800);
+        press(kX);  // RESUME
+        at("game_screen", 5000);
+        expect_ = {"main_screen", "qp_selsong_screen", "qp_diff_screen", "loading_screen", "game_screen", "pause_controller_screen", "game_screen"};
     } else if (scenario == "options") {
         // The audio settings (options.dta AUDIO_SETTINGS_PANEL_HANDLERS):
         // each slider selected, moved one step (its sound at the new
@@ -1466,7 +1539,7 @@ std::string WalkDriver::startScreen() const {
     if (scenario_ == "lose" || scenario_ == "pause" || scenario_ == "back" || scenario_ == "enhanced" || scenario_ == "cheats" ||
         scenario_ == "mouse" || scenario_ == "gamepads" || scenario_ == "gamepads_pad" || scenario_ == "stickyaxis" ||
         scenario_ == "whammy_tail" || scenario_ == "practice" || scenario_ == "practice_menus" || scenario_ == "tutorial" || scenario_ == "tutorial1" || scenario_ == "tutorial2" ||
-        scenario_ == "tutorial3" || scenario_ == "options" || scenario_ == "flaming_head")
+        scenario_ == "tutorial3" || scenario_ == "options" || scenario_ == "flaming_head" || scenario_ == "pad_unplugged")
         return "main_screen";
     if (scenario_ == "attract") return "splash_screen";
     return "";
@@ -1480,6 +1553,10 @@ void WalkDriver::poll(ui::UiManager& ui, double nowMs) {
     }
     Step& s = steps_[step_];
     if (stepStart_ < 0) stepStart_ = nowMs;
+    if (ui.currentScreen() != lastScreen_) {
+        if (lastScreen_ == "loading_screen") lastLoadingMs_ = nowMs - lastChangeMs_;
+        lastScreen_ = ui.currentScreen(), lastChangeMs_ = nowMs;
+    }
     // career: the band has bought Judy Nails' second outfit and the SG's
     // white skin in the store (M10), so both choices offer two.
     if ((scenario_ == "career" || scenario_ == "career_full" || scenario_ == "career_song" || scenario_ == "career_encore" ||
@@ -1589,6 +1666,62 @@ static bool mainCamera(ui::UiManager& ui, std::array<float, 3>& pos) {
 void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
     auto fail = [&](const std::string& e) { error_ = e, failed_ = done_ = true; };
     auto pass = [&] { ++step_, stepStart_ = -1; };
+    if (s.screen.rfind("freebird ", 0) == 0) {
+        // endgame_encore_panel: freebird set by {campaign encore_newly_unlocked
+        // $freebird} (its $var by name), the focus on yes.btn, then
+        // yes_freebird1..3.btn with freebird1..n.grp shown.
+        const int n = std::atoi(s.screen.c_str() + 9);
+        ui::PanelObj* fp = ui.focusPanel();
+        const std::string f = fp ? fp->focus : std::string();
+        const int isFinal = ui.interp().send("endgame_encore_panel", "get", {Value::symbol("freebird")}).integerValue();
+        std::printf("  free bird: step %d, freebird %d, focus %s\n", n, isFinal, f.c_str());
+        if (!isFinal) return fail("Free Bird was not offered as the tour's last song");
+        const std::string want = n == 0 ? "yes.btn" : "yes_freebird" + std::to_string(n) + ".btn";
+        if (f != want) return fail("the focus is " + f + ", not " + want);
+        for (int g = 1; g <= 3; ++g) {
+            const bool shown = fp && fp->view && fp->view->showing("freebird" + std::to_string(g) + ".grp");
+            if (shown != (g <= n)) return fail("freebird" + std::to_string(g) + ".grp " + (shown ? "shown" : "hidden"));
+        }
+        return pass();
+    }
+    if (s.screen == "dev_cheat_on") {
+        ui.host().setEnhancedValue("dev_key_cheats", "on");
+        return pass();
+    }
+    if (s.screen == "dev_cheat_bound") {
+        std::printf("  dev cheats: after the bound key '1', on %s\n", ui.currentScreen().c_str());
+        if (ui.currentScreen() != "game_screen") return fail("a key bound to a control ran a developer cheat");
+        return pass();
+    }
+    if (s.screen == "qp_footer") {
+        // GD02-156: quick play's footer ("Play Career Mode to get more songs")
+        // only while a tier is missing from the list; every save's The
+        // Glitches lists all eight, so no row carries it.
+        auto* sp = dynamic_cast<ui::ListProvider*>(ui.interp().findObject("song_provider"));
+        if (!sp) return fail("no song_provider");
+        std::vector<gfx::UiView::ListRow> rows;
+        int sel = 0;
+        sp->rows(rows, 0, sel);
+        int blurbs = 0;
+        std::set<std::string> venues;
+        for (const auto& r : rows) {
+            auto it = r.texts.find("blurb.txt");
+            blurbs += it != r.texts.end() && !it->second.empty();
+        }
+        for (int i = 0; i < sp->numData(); ++i) venues.insert(ui::campaign::venueOf(ui, sp->symbol(i)));
+        const bool all = std::all_of(ui::campaign::config(ui).tiers.begin(), ui::campaign::config(ui).tiers.end(),
+                                     [&](const auto& tier) { return venues.count(tier.first) > 0; });
+        std::printf("  quick play: %zu venues listed (all tiers: %s), %d footer row(s)\n", venues.size(), all ? "yes" : "no", blurbs);
+        if (all && blurbs) return fail("every tier is listed but the footer still says to play more");
+        return pass();
+    }
+    if (s.screen == "load_hold") {
+        // The song's loading screen stays up at least 2 s with its animation
+        // (UiManager::holdingLoadScreen, GD02-155).
+        std::printf("  loading screen shown %.0f ms\n", lastLoadingMs_);
+        if (lastLoadingMs_ < ui::UiManager::kLoadScreenHoldMs - 50) return fail("the loading screen passed in under 2 s");
+        return pass();
+    }
     if (s.screen == "name_entry_1" || s.screen == "name_entry_2") {
         // BandTextEntry's Texts are aligned middle left (0x82144558): the
         // entered text starts at the same x whatever its length and the
@@ -1629,7 +1762,7 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
     }
     if (s.screen == "backdrop_band") {
         // Enhanced Options' still shot always shows the band, its singer on
-        // the right (guidelines/universal_launcher.md, GD02-074).
+        // the right (docs/knowledge/universal_launcher.md, GD02-074).
         const bool ok = ui.host().menuBackdropFramed();
         std::printf("  enhanced backdrop: %s\n", ok ? "the band, the singer on the right" : "no band in the shot");
         return ok ? pass() : fail("Enhanced Options' backdrop shows no band");
@@ -1670,6 +1803,24 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         adapter_ = Input::attachVirtualPad("045e:028e");
         return adapter_ ? pass() : fail("no virtual pad");
     }
+    if (s.screen == "keyboard_p2") {
+        ui.input().setPlayer("keyboard", 1);
+        const std::string p1 = ui.input().playerDevice(0), p2 = ui.input().playerDevice(1);
+        std::printf("  devices: player 1 %s, player 2 %s\n", p1.c_str(), p2.c_str());
+        return p1 == "pad:" + std::to_string(adapter_) && p2 == "keyboard" ? pass() : fail("the pad is not player 1 with the keyboard player 2");
+    }
+    if (s.screen == "vpad_detach") {
+        SDL_DetachVirtualJoystick(adapter_);
+        return pass();
+    }
+    if (s.screen == "pad_loss_message") {
+        ui::PanelObj* fp = ui.focusPanel();
+        const std::string msg = fp && fp->view ? fp->view->text("pause_controller_msg.lbl") : std::string();
+        std::printf("  controller lost: \"%s\", resume disabled %d\n", msg.c_str(), fp && fp->isDisabled("resume.btn") ? 1 : 0);
+        if (msg != ui.localize("controller_loss_msg")) return fail("the controller message is not controller_loss_msg");
+        return fp->isDisabled("resume.btn") ? pass() : fail("RESUME is not disabled while the pad is missing");
+    }
+    if (s.screen.rfind("still ", 0) == 0) return ui.currentScreen() == s.screen.substr(6) ? pass() : fail("left " + s.screen.substr(6));
     if (s.screen == "vpad_press") {
         SDL_Joystick* j = SDL_GetJoystickFromID(adapter_);
         if (!j) return fail("the virtual pad is not open");
@@ -2008,6 +2159,12 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
                 if (v.empty() || std::abs(std::atoi(v.c_str())) > 337) problems += std::string(problems.empty() ? "" : "; ") + key + " not calibrated (" + v + ")";
             }
             state("calibration_ms", -500, 300);
+        } else if (w == "enhanced_calibration_reset") {
+            for (const char* key : {"audio_offset", "video_offset"}) {
+                const std::string v = saved.has(key) ? saved[key].str() : "";
+                std::printf("  enhanced: reset %s %s\n", key, v.c_str());
+                if (v != "0") problems += std::string(problems.empty() ? "" : "; ") + key + " not reset (" + v + ")";
+            }
         } else if (w == "enhanced_changed") {
             want("internal_res", "480");
         } else if (w == "enhanced_graphics") {
@@ -2328,6 +2485,24 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         if (!ui.inTransition() && nowMs - lastNavMs_ > 250) ui.buttonDown(nav, 0), ui.buttonUp(nav, 0), lastNavMs_ = nowMs;
         return;
     }
+    if (s.screen == "tour_won easy" || s.screen == "tour_won other") {
+        // win_game_screen's enter (ui/gen/endgame.dta): beat_easy on Easy,
+        // else beat_other, and the meta crowd_win; the campaign won (status
+        // >= its tiers); a tour above Easy unlocks pro face-off (GH2 +0x68).
+        std::map<std::string, int> n;
+        for (const std::string& h : ui.host().sfxHistory()) ++n[h];
+        Interp& in = ui.interp();
+        const bool won = in.send("campaign", "won_campaign", {}).truthy();
+        const int status = in.send("campaign", "status", {}).integerValue();
+        std::printf("  tour: won %s, status %d, difficulty %d; beat_easy %d, beat_other %d, crowd_win %d, pro face-off %s\n", won ? "yes" : "no",
+                    status, ui::campaign::difficulty(ui), n["beat_easy"], n["beat_other"], n["crowd_win"], ui.career().proFaceOff ? "unlocked" : "locked");
+        const bool easy = s.screen == "tour_won easy";
+        if (!won) return fail("the tour is not won after its last song");
+        if (n[easy ? "beat_easy" : "beat_other"] != 1 || n[easy ? "beat_other" : "beat_easy"] != 0) return fail("win_game_screen did not play its difficulty's sound");
+        if (!n["crowd_win"]) return fail("no crowd_win on win_game_screen");
+        if (!easy && !ui.career().proFaceOff) return fail("pro face-off not unlocked by the tour");
+        return pass();
+    }
     if (s.screen == "career_song_salvation") {
         // set_career_song (0x822B89B8): the venue's first unlocked song not passed yet.
         std::printf("  career: venue %s, song %s\n", ui.session().venue.c_str(), ui.session().song.c_str());
@@ -2629,15 +2804,16 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         if (ui.currentScreen() != "endgame_screen") return fail("declining the encore did not go on to the results");
         return pass();
     }
-    if (s.screen == "big_note_blown") {
-        // A gem passed within 0.2 beats of a big note (PART GUITAR pitch
-        // 110): the player's blew_big_note, game.dta's {world play_sfx
-        // blew_bignote.cue} with the crowd audio on (0x00110e78) [C].
+    if (s.screen == "big_note_missed") {
+        // A big note (PART GUITAR pitch 110) whose gem passed unhit: GH2 asks
+        // the big-note check only from a sustain let go early (0x822C86F8),
+        // so a missed one plays no blew_bignote.cue (GD02-150) [C]; the
+        // early release itself is a self-test rule check.
         double at = -1;
         for (const auto& [name, t] : ui.host().gameSfx())
             if (name == "blew_bignote.cue" && at < 0) at = t;
-        std::printf("  big note: blew_bignote.cue %s%s\n", at < 0 ? "not played" : "at ", at < 0 ? "" : (std::to_string(int(at)) + " ms").c_str());
-        return at < 0 ? fail("the passed big note did not play blew_bignote.cue") : pass();
+        std::printf("  big note missed: blew_bignote.cue %s\n", at < 0 ? "not played" : "played");
+        return at < 0 ? pass() : fail("a missed big note played blew_bignote.cue (GH2 plays it only for a sustain let go early)");
     }
     if (s.screen == "sp_multi_fill") {
         // Both meters full once the song runs (the deploy comes from songKeys_).

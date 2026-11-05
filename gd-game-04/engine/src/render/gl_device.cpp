@@ -149,6 +149,7 @@ public:
         perf_ = {};
         return p;
     }
+    uint64_t drawCalls() const override { return drawCalls_; }
     void destroyBuffer(BufferId b) override;
     ProgramId createProgram(const ProgramDesc& desc, std::string& error) override;
     void destroyProgram(ProgramId p) override;
@@ -158,6 +159,7 @@ public:
     TargetId createTarget(const TargetDesc& desc, std::string& error) override;
     TextureId targetTexture(TargetId t) const override;
     TextureId targetDepth(TargetId t) const override;
+    void copyDepth(TargetId src, TargetId dst) override;
     void destroyTarget(TargetId t) override;
     void beginFrame() override;
     void setTarget(TargetId t) override;
@@ -237,6 +239,7 @@ private:
     bool streamMap_ = false;
     void streamWrite(GLenum target, size_t offset, const void* data, size_t size);
     DevicePerf perf_;
+    uint64_t drawCalls_ = 0;
 
     // Cached GL state.
     PipelineState state_;
@@ -318,7 +321,9 @@ bool GlDevice::init(std::string& error) {
     gl::glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     gl::glPixelStorei(GL_PACK_ALIGNMENT, 1);
 
-#ifdef __APPLE__
+#if defined(__APPLE__) || defined(__ANDROID__)
+    // Phones too (#55): Adreno / Mali drivers stall or copy the whole
+    // buffer on a glBufferSubData into a buffer the GPU may still read.
     streamMap_ = true;
 #endif
     if (const char* m = SDL_getenv("GD04_GL_STREAM")) streamMap_ = std::strcmp(m, "map") == 0;
@@ -666,9 +671,14 @@ TargetId GlDevice::createTarget(const TargetDesc& desc, std::string& error) {
         gl::glFramebufferTexture2D(GL_FRAMEBUFFER, desc.stencil ? GL_DEPTH_STENCIL_ATTACHMENT : GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D,
                                    textures_.get(t.depth.id)->name, 0);
     const bool complete = gl::glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
-    gl::glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    targetH_ = 0;
-    target_ = {};
+    // Back to the target that was bound (as copyDepth): a target made in a
+    // frame (the menu backdrop's shadow map and screen FX, uploaded a part a
+    // frame under the press-start screen) had sent the rest of that frame to
+    // the window instead of the internal-resolution frame, which was then
+    // presented black (GD04-089).
+    const GlTarget* cur = targets_.get(target_.id);
+    const GlTarget* frame = frameOn_ ? targets_.get(frame_.id) : nullptr;
+    gl::glBindFramebuffer(GL_FRAMEBUFFER, cur ? cur->fbo : frame ? frame->fbo : 0);
     if (!complete) {
         error = "render target " + std::to_string(width) + "x" + std::to_string(height) + " is incomplete";
         gl::glDeleteFramebuffers(1, &t.fbo);
@@ -687,6 +697,23 @@ TextureId GlDevice::targetTexture(TargetId t) const {
 TextureId GlDevice::targetDepth(TargetId t) const {
     const GlTarget* p = targets_.get(t.id);
     return p ? p->depth : TextureId{};
+}
+
+void GlDevice::copyDepth(TargetId src, TargetId dst) {
+    const GlTarget* a = targets_.get(src.id);
+    const GlTarget* b = targets_.get(dst.id);
+    if (!a || !b || !a->depth.id || !b->depth.id || a->w != b->w || a->h != b->h) return;
+    gl::glBindFramebuffer(GL_READ_FRAMEBUFFER, a->fbo);
+    gl::glBindFramebuffer(GL_DRAW_FRAMEBUFFER, b->fbo);
+    // Upside down: GL's rows run bottom-up, GH3's shaders read a screen
+    // texture at v = 0.5 - 0.5 y (_Raytrace_cone_*'s g_DepthBufferTexture)
+    // [C: the shaders' maths]. Read as is, a beam ended on the depth of the
+    // mirrored row.
+    gl::glBlitFramebuffer(0, 0, a->w, a->h, 0, b->h, b->w, 0, GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT, GL_NEAREST);
+    // Back to the target that was bound.
+    const GlTarget* t = targets_.get(target_.id);
+    const GlTarget* frame = frameOn_ ? targets_.get(frame_.id) : nullptr;
+    gl::glBindFramebuffer(GL_FRAMEBUFFER, t ? t->fbo : frame ? frame->fbo : 0);
 }
 
 void GlDevice::destroyTarget(TargetId id) {
@@ -892,7 +919,7 @@ void GlDevice::draw(const DrawCall& c) {
     }
     enabledAttribs_ = enabled;
 
-    ++perf_.draws;
+    ++perf_.draws, ++drawCalls_;
     const GLenum mode = c.primitive == Primitive::Lines ? GL_LINES : GL_TRIANGLES;
     if (const GlBuffer* ib = buffers_.get(c.indices.id)) {
         gl::glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ib->name);

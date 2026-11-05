@@ -33,7 +33,15 @@ public:
     // GH3's material library (before add; null: the approximation only).
     void setLibrary(std::shared_ptr<const matlib::Library> lib) { lib_ = std::move(lib); }
     // Uploads one member's skins and textures; its index, or -1 and `error`.
-    int add(gfx::RenderDevice& dev, const band::Model& m, std::string& error);
+    // `made`: textures prepare() uploaded (the member owns them now).
+    int add(gfx::RenderDevice& dev, const band::Model& m, std::string& error,
+            const std::unordered_map<uint32_t, gfx::TextureId>* made = nullptr);
+    // add()'s heavy GPU work spread over frames (the menus' characters):
+    // uploads the model's textures into `made` and compiles its materials'
+    // programs until about `budgetMs` is spent (at least one step a call);
+    // true once all are done (add() then only builds the buffers). The
+    // caller frees `made` if it never calls add().
+    bool prepare(gfx::RenderDevice& dev, const band::Model& m, std::unordered_map<uint32_t, gfx::TextureId>& made, double budgetMs);
     // Frees one member's buffers and textures (the menus' objects that die);
     // its index stays, drawing nothing.
     void remove(int member);
@@ -44,6 +52,13 @@ public:
     // A shadow pass: GH3's shaders with these engine constants (the light's
     // view and projection) instead of the camera's; null: off.
     void setShadowPass(const gh3shader::Globals* g) { shadowPass_ = g; }
+    // The venue's dynamic shadow map this frame (VenueView::setShadow's):
+    // opaque meshes draw with their templates' DynamicShadowReciever
+    // technique where they have one. An empty texture: none.
+    void setShadow(const gh3shader::DynamicShadow& s) { shadow_ = s; }
+    void setShadow(gfx::TextureId depth, const gfx::Mat4& lightViewProj, int size, float intensity) {
+        shadow_ = gh3shader::DynamicShadow::single(depth, lightViewProj, size, intensity);
+    }
     // Reuse the vertices the last draw skinned (a second pass in the same frame).
     void setReuseSkinning(bool on) { reuseSkin_ = on; }
     // `flipY`: drawn upside down (a target sampled as a texture).
@@ -76,7 +91,9 @@ private:
         Mode mode = Mode::Opaque;
         float alphaRef = 0;
         int8_t stencil = -1;  // the material's stencil reference (+0xdc; -1: none) [C 823DC180]
+        uint32_t blendMode = 0, matFlags = 0;  // +0xd8, +0xcc (gh3shader::materialState)
         const gh3shader::Program* gh3 = nullptr;
+        const gh3shader::Program* receiver = nullptr;  // its DynamicShadowReciever technique (null: none)
         int mat = -1;  // index into mats_
     };
     struct SrcVertex {
@@ -100,6 +117,7 @@ private:
     gfx::ProgramId program_;
     std::shared_ptr<const matlib::Library> lib_;
     gh3shader::Programs gh3_;
+    gh3shader::DynamicShadow shadow_;
     std::vector<Mat> mats_;
     double seconds_ = 0;
     float aspect_ = 16.0f / 9.0f;

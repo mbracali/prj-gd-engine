@@ -53,7 +53,7 @@ id = `gd-game-03`
 - Extended gamepad support.
 - Mods support
 
-**Universal menus** ([universal_mechanisms.md](../universal_mechanisms.md),
+**Universal menus** ([universal_mechanisms.md](../docs/knowledge/universal_mechanisms.md),
 as gd-game-01 and gd-game-02): the GAMEPADS screen (the yellow fret on the
 main menu, or Enhanced Options > Gamepads) with four player boxes (the game
 has two players), each player's instrument (5 Fret Guitar, Gamepad, Generic
@@ -90,5 +90,12 @@ to four times as wide, the bulges running down the tail); tutorials 2 and 3
 complete (the hammer-on / pull-off trainer); career tour wins; practice
 pitch correction; the crowd meter holds where the mode turns it off; mono
 as the PS2 (every sound panned to the centre). Status per area:
-[PARITY_GAPS.md](../PARITY_GAPS.md); walks: `engine/src/tests/walktest.h`
+[PARITY_GAPS.md](../docs/tasks/PARITY_GAPS.md); walks: `engine/src/tests/walktest.h`
 (`whammy_tail`, `flaming_head`, `tutorial2`, `tutorial3`, `career_win` ...).
+
+**0.1.12 (Encore 100%)**: every screen walked (the final-song choice, the
+end-of-song stats, memory card / manage bands / progressive scan options,
+the controller pause, every store guitar), PC wording in all five
+languages, loading screens held 2 s, the developer keyboard cheats, WorldFx
+start / stop as the PS2. New walks: `career_finalsong`, `options_extras`,
+`pad_unplugged`, `store_guitars`, `dev_cheats`.
