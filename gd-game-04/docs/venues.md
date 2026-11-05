@@ -574,7 +574,11 @@ them like the lights [I].
   with _Projector_StageOnly: the round pool (uv x 2 - 1) in g_SpotlightColor
   c11 = projectorcolor with g_SpotlightInfo c12 = (inner, 1 - inner),
   shadowed by the band's dynamic shadow (g_ViewToLightProjection0/1,
-  g_sampShadowMap0/1). `everything` (z_party's encore helicopter and crowd
+  g_sampShadowMap0/1). sys_projector's material: ONE / ONE, cull none, no z
+  write, LESSEQUAL, no depth bias [C]. The pool lies in the stage floor's
+  plane; gd04 pulls its corners 0.1 % towards the camera along their sight
+  lines, or the two surfaces z-fight and the light under the band flickers
+  [I]. `everything` (z_party's encore helicopter and crowd
   hotspots): _Raytrace_cone_projector (+ _volume with a volume) lights
   whatever the cone meets through the depth buffer: g_SpotLightViewProj
   c7..c10 takes a scene point to the cone's frame as (x, y, -, a + kz), the

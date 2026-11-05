@@ -217,13 +217,23 @@ int runVenueTest(const std::string& discPath) {
             if (s.start(*disc, g, zone, chart, songKey, kLeadInMs, &renderer.device(), error)) {
                 double step = -kLeadInMs;
                 std::vector<double> times;
-                for (const auto& h : ha)
-                    if (h.start >= -kLeadInMs && times.size() < 8) times.push_back(std::min(h.end, h.start + 6000.0) * 0.5 + h.start * 0.5);
+                // GD04_VENUETEST_SEQ=<ms>,<count>[,<step ms>]: consecutive frames instead
+                // (16.67 ms apart by default), to catch flicker.
+                if (const char* seq = SDL_getenv("GD04_VENUETEST_SEQ")) {
+                    double from = 0, step = 1000.0 / 60.0;
+                    int count = 0;
+                    if (std::sscanf(seq, "%lf,%d,%lf", &from, &count, &step) >= 2)
+                        for (int i = 0; i < count && i < 600; ++i) times.push_back(from + step * i);
+                } else {
+                    for (const auto& h : ha)
+                        if (h.start >= -kLeadInMs && times.size() < 8) times.push_back(std::min(h.end, h.start + 6000.0) * 0.5 + h.start * 0.5);
+                }
                 for (double t : times) {
                     while (step + kStepMs <= t) {
                         step += kStepMs;
                         s.update(step, healthAt(step));
                     }
+                    if (SDL_getenv("GD04_VENUETEST_SEQ")) s.advance(t);  // as a played frame
                     const float black[4] = {0, 0, 0, 1};
                     renderer.beginFrame(black);
                     s.draw(t);

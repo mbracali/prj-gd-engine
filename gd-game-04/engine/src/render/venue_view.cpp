@@ -1224,6 +1224,13 @@ void VenueView::drawProjectors(const venue::CamPose& cam, const venue::LightShow
             }
             const float t = (0.0f - nearP[1]) / e[1];
             q.v[i][0] = nearP[0] + e[0] * t, q.v[i][1] = nearP[1] + e[1] * t, q.v[i][2] = nearP[2] + e[2] * t;
+            // The pool lies in the stage floor's own plane: drawn LESSEQUAL over it,
+            // the two surfaces' rounding fought pixel by pixel and the light under
+            // the band flickered every frame (owner 11-05). Pulled 0.1 % of the way
+            // to the camera along its own sight line (the same pixels, a hair
+            // nearer) it always wins [I: GH3 draws it with no depth bias
+            // (823DC180 sets 0); its depth buffer's rounding is not reproduced].
+            for (int k = 0; k < 3; ++k) q.v[i][k] = cam.pos[size_t(k)] + (q.v[i][k] - cam.pos[size_t(k)]) * 0.999f;
             q.v[i][3] = 1, q.v[i][4] = kU[i], q.v[i][5] = kV[i];
         }
         if (ok) quads.push_back(q);
