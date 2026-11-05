@@ -585,9 +585,9 @@ What gd04 runs now (ui/song_hooks.cpp; GD04_NO_HOOKS=1 turns it off):
 Natives for them (ui/song_hooks.cpp): setsoundbusseffects (GuitarEcho1 /
 GuitarReverb1 drive audio/guitar_fx: a feedback echo and a small reverb
 with the scripts' delay, DecayRatio, Drymix / Wetmix, I3DL2 levels, DSP [I];
-the crowd buss's CrowdEcho1 / InGameReverb1 are counted, the port's sound
-effects not being on busses [L]), SetSoundBussParams (Right_Notes_Player1's
-vol: the guitar buss's volume) / Push / Pop, Create2DParticleSystem /
+the crowd buss's CrowdEcho1 / InGameReverb1 are counted [L]),
+SetSoundBussParams (the busses below, and Right_Notes_Player1's vol: the
+guitar buss's volume) / Push / Pop, Create2DParticleSystem /
 Destroy2DParticleSystem (ui/fx2d: motion [I]), WhammyFXOn / Off (a
 whammy_particle_params system per fret at its button), get_song_tempo_cfunc,
 GetSongTime, GetStrumPattern, SafeGetUniqueCompositeObjectID; and the
@@ -756,3 +756,56 @@ the song is thrufireandflames; with it set CrowdDecrease takes no health
   songs' Crowd_StartLighters spans [C scripts].
 - The three water templates whose shaders loop are used by no scene on the
   disc [C data: every zone and character material].
+
+## Sound busses (2026-11-05)
+
+GH3's FMOD channel groups, built by Master_SFX_Adding_Sound_Busses at boot
+(CreateBussSystem <BussTree>, SetSoundBussParams <Default_BussSet>, then
+SoundBussLock on master, User_Guitar / Band / Sfx / Music, Crowd_Beds,
+Crowd_Singalong, Band_Balance, Guitar_Balance, Music_Setlist) [C scripts,
+data sound_buss.qb]; the port's audio/sound_buss.h:
+- the tree: master > User_Sfx (> ui > Front_End, Pause_Menu, UI_Star_Power,
+  UI_Battle_Mode, Wrong_Notes_P1/P2; > Crowd > Crowd_W_Reverb > Crowd_Singalong,
+  Crowd_One_Shots; Crowd > Crowd_Beds ... Crowd_Transitions; default,
+  Test_Tones, Encore_Events, binkcutscenes, Practice_Band_Playback,
+  Training_VO), User_Band > Band_Balance (> Band_Playback,
+  Single_Player_Rhythm_Playback, music_frontend, Music_Setlist, Countoffs),
+  User_Guitar (> Guitar_Balance > Guitar_Balance_First_Player >
+  First_Player_Lead_Playback, Guitar_Balance_Second_Player > Second_Player_*;
+  Test_Tones_DSP, Right_Notes_Player1/2): 45 busses [C data].
+- vol is dB-like: 100 * 2^(v/6) percent, at most 400 %, silent at -100 or
+  below [C 0x8217AFB0]; pitch is semitones: 100 * 2^(p/12) percent, silent at
+  -48 or below, at most 1600 % [C 0x8217B0B8]. A buss sounds at its own and
+  its ancestors' levels together (FMOD channel groups) [I]; a change with
+  `time` fades linearly [I].
+- SoundBussLock: SetSoundBussParams leaves a locked buss alone (the scripts
+  always unlock, set, lock: menu_audio_settings_update_*, preload_song,
+  GH3_AdjustCrowd*Surge, end_song, create_attract_mode) [I from that pattern].
+- Default levels: Front_End -6 (with master -2.5: menu and intro sounds at
+  -8.5 dB), Crowd -1, Crowd_PreSong_Intro -6 (the zone's intro crowd at -9.5),
+  Crowd_Beds -7, music_frontend -11 (the menu music at -13.5), Music_Setlist
+  the song's band_playback_volume (setlist_songpreview_monitor) [C data].
+- Who plays where: SoundEventFast on <event>_struct's default_buss, PlaySound
+  on its buss=, else `default` [I]; the song's stems as startpreloadpaused_song
+  (player 1's part First_Player_Lead_Playback, the other part
+  Single_Player_Rhythm_Playback, or Second_Player_Rhythm_Playback with two
+  players on different parts, the song Band_Playback) [C script];
+  preload_song's Band_Balance / Guitar_Balance = the song's
+  band_playback_volume / guitar_playback_volume - 1.5 dB, set by the native
+  start_gem_scroller [C script preload_song]. Stop / Pause / UnPauseSoundsByBuss
+  reach the busses below (PauseGh3Sounds pauses master) [I]. The song's stems
+  take no buss pitch (Failed_Song_Pitch_Down runs after the port's song has
+  stopped) [L].
+- The audio settings: ChangeSpinalTapVolume (0..11, the knob) feeds
+  menu_audio_settings_get_buss_volume (11 = 0 dB ... 1 = -21, 0 = -100) into
+  User_Band / User_Guitar / User_Sfx [C scripts; I: the CFunc's sum within
+  0..11]. Unhandled before, the knobs never moved.
+- Measured (quickplay walk, GD04_AUDIODUMP): the intro's Highway_Rise rises
+  +5.1 dB over the crowd intro under it (was +4.4 before the busses),
+  Notes_Ripple_Up +1.6 (+1.4), Song_Intro_Kick +9.5 (+9.1); every sound
+  effect is now 8.5 dB (Front_End) or 9.5 dB (crowd) under its old level;
+  the song by master -2.5 and its Band_Balance / Guitar_Balance (Slow Ride's
+  band_playback_volume -3, guitar_playback_volume -4: -4.5 / -5.5 dB), about
+  7-8 dB under its old level in all. Compressor_Master_Buss (GAINMAKEUP 12)
+  is defined but no script creates it [C data].
+- GD04_BUSSLOG=1 logs every buss change (development aid).
