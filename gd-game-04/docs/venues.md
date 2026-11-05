@@ -343,14 +343,33 @@ TOD_Proxim_Update_LightFX_Viewport: `venue_DOF` (the camera shot's `dof`,
 a DOF_*_tod_manager, else DOF_Off), then Default_TOD_Manager's screen_FX:
 `BnS` (bright_sat) and `sbloom` (simple_bloom) [C scripts].
 
-- **dof** (824440F8; on when strength > 0): the colour box-downsampled to a
-  quarter (_2D_DownSample4x: the mean of 16 texels), blurred by
-  _2D_GaussianBlur7x7 H then V (rho = sqrt(blurradius / 3), the centre and
-  three merged tap pairs, not normalised), then _2D_DepthOfFieldNear over
-  the scene with SRC_ALPHA / ONE_MINUS_SRC_ALPHA: a = strength x
+- **dof** (8241EE68 parses, 824440F8 draws; on when strength > 0): the
+  colour box-downsampled to a quarter (_2D_DownSample4x: the mean of 16
+  texels; blurresolution half 0 / quarter 1 / sixteenth 2, sixteenth a
+  second _2D_DownSample4x, half its own pass 823CB7C8 with
+  _2D_DownsampleHalf_GaussianBlurH: every camera the scripts reach uses
+  quarter), blurred by 823CAD48: _2D_GaussianBlur7x7 H then V, r =
+  max(blurradius, 0.5), rho = sqrt(r / 3), the centre and three merged tap
+  pairs (2k - 1, 2k) at +-(2k - 1 + G(2k) / w), not normalised, then
+  (ceil(r) + 5) / 6 - 1 further passes six texels further out each, no
+  centre, added SRC_ALPHA / ONE (only Enhanced's Strong / Stronger reach
+  them). Then _2D_DepthOfFieldNear over the scene (depth point sampled,
+  the blur bilinear) with SRC_ALPHA / ONE_MINUS_SRC_ALPHA: a = strength x
   saturate((z - frontdist x far) / ((backdist - frontdist) x far)), z the
-  linear depth (m_vInvProjMatT), far the camera's far clip [C; I: far =
-  camera_default_far_clip 500].
+  linear depth (m_vInvProjMatT), far the render's far plane (0x82c18acc,
+  set from the camera component's far_clip at +0xe0; 822BF1E0 defaults it
+  to 400 and PlayIGCCam's cameras give none: 400) [C]. The cameras' dof:
+  CloseUp01..03 back 0.012-0.02 (5-8 m), Medium01..04 0.05-0.55; the
+  `dof` of a cut's params, else of its entry, else DOF_Off (strength 0),
+  at once (no `time`) [C CameraCuts_StartCallback]. guitar_select_camera_morph
+  (GSdof / GSdof2, half, time 0.5) and CameraCuts_ApplyDOF are called by
+  no script [C data].
+- **Resolution** [I]: GH3 draws the venue at 1280 x 720 and its blurs in
+  the quarter's texels (320 x 180); the port's quarter is always 180 rows
+  (the scene's aspect), the scene's own quarter brought to it by bilinear
+  halvings, so the depth of field and the bloom cover the same part of the
+  picture at any window size or Internal Resolution (before 2026-11-05 a
+  1440p window got a blur half as wide as the 360's).
 - **bright_sat** (8243E5F0): out = Mix(b (k (Sat(Hue(rgb)) - 0.5) + 0.5)),
   hue a rotation about (1,1,1) by hue x 2 pi, saturation with Haeberli's
   weights (0.3086, 0.6094, 0.0820), alpha = the red result

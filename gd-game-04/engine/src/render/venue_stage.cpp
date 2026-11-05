@@ -28,54 +28,6 @@ VenueStage::~VenueStage() {
     if (device_ && shadow_) device_->destroyTarget(shadow_);
 }
 
-namespace {
-
-float num(const qb::Struct& s, const char* name, float def) {
-    const qb::Value* v = s.find(qbkey::key(name));
-    return v && (v->type == qb::Type::Float || v->type == qb::Type::Int) ? v->number() : def;
-}
-
-// An [r, g, b] array of 0..255 as 0..1 (Function_8241BC20: x DAT_82007b38) [C].
-void rgb(const qb::Struct& s, const char* name, float out[3], float scale) {
-    const qb::Value* v = s.find(qbkey::key(name));
-    if (!v || v->type != qb::Type::Array || !v->arr) return;
-    for (size_t k = 0; k < 3 && k < v->arr->values.size(); ++k) out[k] = v->arr->values[k].number() * scale;
-}
-
-// One screen_FX entry into the effect parameters [C data tod_profiles.qb;
-// the field offsets: Function_8241BC20 (simple_bloom)].
-void readFx(const qb::Struct& e, screenfx::Params& p, int& brightSlot) {
-    const qb::Value* type = e.find(qbkey::key("Type"));
-    if (!type) return;
-    const bool on = num(e, "ON", 1) > 0;
-    if (type->key == qbkey::key("simple_bloom")) {
-        screenfx::Bloom& b = p.bloom;
-        b.on = on;
-        rgb(e, "color", b.cutoff, 1.0f / 255.0f);
-        rgb(e, "strength", b.strength, 1.0f / 255.0f);
-        b.bloom1 = num(e, "bloom1", 0), b.bloom2 = num(e, "bloom2", 0);
-        b.falloff1 = num(e, "falloff1", 0), b.falloff2 = num(e, "falloff2", 0);
-        b.materialFilter = num(e, "materialfilter", 0) > 0;
-        b.autoLuminance = num(e, "autoluminancemod", 0) > 0;
-        b.distanceMod = num(e, "distancemod", 0);
-    } else if (type->key == qbkey::key("dof")) {
-        screenfx::Dof& d = p.dof;
-        d.on = on;
-        d.backDist = num(e, "backdist", 1), d.frontDist = num(e, "frontdist", 0);
-        d.strength = num(e, "strength", 0), d.blurRadius = num(e, "blurradius", 0);
-        const qb::Value* r = e.find(qbkey::key("blurresolution"));
-        d.half = r && r->key == qbkey::key("half");
-    } else if (type->key == qbkey::key("bright_sat") && brightSlot < 2) {
-        screenfx::BrightSat& bs = p.brightSat[brightSlot++];
-        bs.on = on;
-        bs.contrast = num(e, "Contrast", 1), bs.brightness = num(e, "Brightness", 1);
-        bs.saturation = num(e, "saturation", 1), bs.hue = num(e, "hue", 1);
-        rgb(e, "red_mix", bs.mix[0], 1), rgb(e, "green_mix", bs.mix[1], 1), rgb(e, "blue_mix", bs.mix[2], 1);
-    }
-}
-
-}  // namespace
-
 void VenueStage::playClip(int role, uint32_t clip, uint32_t stance, bool cycle, double ms) {
     if (band_) band_->playClip(role == 1 ? band::Role::Bassist : band::Role::Guitarist, clip, stance, cycle, ms);
 }
@@ -264,14 +216,8 @@ bool VenueStage::start(const Disc& disc, const Globals& g, const std::string& zo
     // screen_FX: bright_sat, simple_bloom) [C scripts tod_proxims.qb,
     // guitar_*.qb]; global_brightness (bright_sat, Brightness 0.5 + 0.1 x
     // SE_Brightness) is viewport 0's, not the venue's [C].
-    fxParams_ = {};
     globals_ = &g;
-    if (const qb::Value* tod = g.find(qbkey::key("Default_TOD_Manager")); tod && tod->type == qb::Type::Struct && tod->st)
-        if (const qb::Value* fx = tod->st->find(qbkey::key("screen_FX")); fx && fx->type == qb::Type::Array && fx->arr) {
-            int slot = 0;
-            for (const qb::Value& e : fx->arr->values)
-                if (e.type == qb::Type::Struct && e.st) readFx(*e.st, fxParams_, slot);
-        }
+    screenfx::readViewport(g, qbkey::key("Default_TOD_Manager"), fxParams_);
     hide_.clear();
     const qb::Value* cm = g.find(qbkey::key(zone + "_crowd_models"));
     if (cm && cm->type == qb::Type::Array && cm->arr)
@@ -534,14 +480,7 @@ void VenueStage::draw(double ms) {
         // venue_DOF: the shot's dof (a DOF_*_tod_manager's screen_FX[0]), else
         // DOF_Off_TOD_Manager's, set when the cut starts [C CameraCuts_StartCallback].
         screenfx::Params p = fxParams_;
-        const uint32_t dofKey = cameras_.shot().dof ? cameras_.shot().dof : qbkey::key("DOF_Off_TOD_Manager");
-        if (globals_)
-            if (const qb::Value* m = globals_->find(dofKey); m && m->type == qb::Type::Struct && m->st)
-                if (const qb::Value* fx = m->st->find(qbkey::key("screen_FX")); fx && fx->type == qb::Type::Array && fx->arr && !fx->arr->values.empty())
-                    if (const qb::Value& e = fx->arr->values.front(); e.type == qb::Type::Struct && e.st) {
-                        int slot = 2;
-                        readFx(*e.st, p, slot);
-                    }
+        if (globals_) screenfx::readDof(*globals_, cameras_.shot().dof, p);
         // ScreenFlash (z_prison's flares): FlashBS on the venue viewport, a
         // bright_sat of its own after the TOD's [C scripts misclightutils.qb].
         if (float b = 1, c = 1; particles_ && particles_->flash(ms, b, c)) {
