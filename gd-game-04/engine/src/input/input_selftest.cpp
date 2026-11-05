@@ -212,6 +212,20 @@ int runInputChecks() {
         pump(in, evs);
         check(has(evs, Action::StarPower, true, ControllerMode::Guitar), "guitar tilt deploys Star Power");
         evs.clear();
+        // GD04-113: back level, then Select (the guitar's Back): Star Power at once, not a tilt.
+        SDL_SetJoystickVirtualAxis(guitar, SDL_GAMEPAD_AXIS_RIGHTY, 0);
+        pump(in, evs);
+        evs.clear();
+        SDL_SetJoystickVirtualButton(guitar, SDL_GAMEPAD_BUTTON_BACK, true);
+        pump(in, evs);
+        {
+            bool sel = false;
+            for (const InputEvent& e : evs) sel = sel || (e.action == Action::StarPower && e.down && !e.tilt);
+            check(sel, "guitar Select deploys Star Power (not as a tilt)");
+        }
+        SDL_SetJoystickVirtualButton(guitar, SDL_GAMEPAD_BUTTON_BACK, false);
+        pump(in, evs);
+        evs.clear();
         SDL_SetJoystickVirtualButton(guitar, SDL_GAMEPAD_BUTTON_START, true);
         pump(in, evs);
         check(has(evs, Action::Start, true, ControllerMode::Guitar), "guitar Start is Start (pause)");
