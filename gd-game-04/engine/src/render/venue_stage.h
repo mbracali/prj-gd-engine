@@ -51,6 +51,9 @@ public:
     void setStarPower(bool on) { starPowerOn_ = on; }
     // A fixed camera instead of the director's (the Enhanced backdrop's shot); null: the director's.
     void setFixedCamera(const venue::CamPose* p) { fixedCam_ = p ? *p : venue::CamPose{}, hasFixedCam_ = p != nullptr; }
+    // A lens shift in NDC x for this stage's picture (the camera stays; the
+    // Enhanced backdrop's framing on the guitarist); 0: none.
+    void setLensShift(float x) { lensShift_ = x; }
     const gfx::EnhancedFx* enhancedFx() const { return enh_.get(); }
     uint64_t teslaFrames = 0;  // frames with Tesla bolts drawn
     // Loads the zone (and uploads it when `device` is given); false and
@@ -158,6 +161,7 @@ private:
     std::array<int, 2> spAnimCuts_{-1, -1};  // handle_star_power waiting: the cut count it waits past (-1: none)
     venue::CamPose fixedCam_;
     bool hasFixedCam_ = false;
+    float lensShift_ = 0;
     float starBlur_ = 0;
     double starBlurAt_ = 0;  // Default_TOD_Manager's screen_FX
     void shadowPass(double ms, const venue::CamPose& cam);

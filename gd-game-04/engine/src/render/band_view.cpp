@@ -342,6 +342,7 @@ void BandView::draw(const venue::CamPose& cam, const std::vector<Instance>& inst
     const float yfov = 2.0f * std::atan(std::tan(hfov * 0.5f) / aspect);
     gfx::Mat4 proj = gfx::Mat4::perspective(yfov, aspect, 0.05f, 4000.0f, d.info().clipDepthZeroToOne);
     if (flipY_) proj.at(1, 1) = -proj.at(1, 1);
+    proj.at(0, 2) -= VenueView::lensShiftX;  // the Enhanced backdrop's lens shift (0 otherwise)
     const gfx::Mat4 vp = proj * view;
     FrameUniforms fu{};
     std::memcpy(fu.viewProj, vp.m, sizeof fu.viewProj);

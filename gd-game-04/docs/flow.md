@@ -124,6 +124,9 @@ by the port over everything meanwhile (docs/ui.md §8; refcaps 00a matches).
   uploaded a part a frame; a render target made then (its shadow map, screen
   FX) must not unbind the frame being drawn, or that frame is presented black
   (GD04-089; the boot walk checks no black frame from here to the main menu).
+  Its shot keeps its camera; a lens shift (VenueStage::setLensShift, NDC x in
+  every projection of the frame and the shadow cascades' slices) puts the
+  guitarist's head at x 960, right of the page's panel (GD04-110).
   The intro movie's last ~3 s are black in the movie itself [C: its frames].
 - destroy: destroy_menu pab_container, destroy_menu_backdrop, KillSpawnedScript
   check_for_any_input / attract_mode_spawner [C].

@@ -913,6 +913,22 @@ void App::finishMenuBackdrop(bool wait) {
         SDL_Log("menu backdrop: singer head (%.2f %.2f %.2f), drummer (%.2f %.2f %.2f), band (%.2f %.2f %.2f), camera (%.2f %.2f %.2f)", head[0], head[1],
                 head[2], drums[0], drums[1], drums[2], mid[0], mid[1], mid[2], cam.pos[0], cam.pos[1], cam.pos[2]);
         backdrop_->setFixedCamera(&cam);
+        // The view framed on the guitarist (owner, GD04-110): the camera stays,
+        // a lens shift moves the picture so the guitarist's head is at x 960,
+        // the middle of the screen's right half the Enhanced page leaves
+        // open (the page's panel covers the left half). Art Deco's shot had
+        // him just off the right edge (NDC 1.58): a shift of -1.08.
+        if (venue::Vec3 g{}; backdrop_->bonePos(qbkey::key("Guitarist"), qbkey::key("Bone_Head"), g)) {
+            const venue::Vec3 fw = venue::rotate(cam.rot, {0, 0, 1}), rt = venue::rotate(cam.rot, {-1, 0, 0});
+            const venue::Vec3 v{g[0] - cam.pos[0], g[1] - cam.pos[1], g[2] - cam.pos[2]};
+            const float z = fw[0] * v[0] + fw[1] * v[1] + fw[2] * v[2];
+            if (z > 0.1f) {
+                const float x = (rt[0] * v[0] + rt[1] * v[1] + rt[2] * v[2]) / z / std::tan(cam.fov * 3.14159265f / 360.0f);
+                const float shift = std::clamp(0.5f - x, -1.25f, 1.25f);
+                backdrop_->setLensShift(shift);
+                SDL_Log("menu backdrop: guitarist at x %.2f (NDC), lens shift %.2f", x, shift);
+            }
+        }
     }
     // Drawn once now, unseen, so its shaders are ready when the page opens.
     canvas_.flush();

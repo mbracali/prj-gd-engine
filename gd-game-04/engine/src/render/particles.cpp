@@ -947,7 +947,7 @@ void Particles::draw(const venue::CamPose& cam, double ms) {
     const float hfov = cam.fov * 3.14159265f / 180.0f;
     const float yfov = 2.0f * std::atan(std::tan(hfov * 0.5f) / aspect);
     gfx::Mat4 proj = gfx::Mat4::perspective(yfov, aspect, 0.05f, 4000.0f, d.info().clipDepthZeroToOne);
-    proj.at(0, 2) -= VenueView::jitterX, proj.at(1, 2) -= VenueView::jitterY;  // Enhanced TAA
+    proj.at(0, 2) -= VenueView::jitterX + VenueView::lensShiftX, proj.at(1, 2) -= VenueView::jitterY;  // Enhanced TAA, the lens shift
     const gfx::Mat4 vp = proj * view;
 
     struct Batch {

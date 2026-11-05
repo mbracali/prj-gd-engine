@@ -420,7 +420,9 @@ gfx::Mat4 cascadeMatrix(const venue::CamPose& cam, float aspect, float zNear, fl
     gfx::Vec3 c[8];
     for (int i = 0; i < 8; ++i) {
         const float d = (i & 4) ? zFar : zNear;
-        const gfx::Vec3 w = eye + fwd * d + right * (((i & 1) ? 1.0f : -1.0f) * d * tx) + up * (((i & 2) ? 1.0f : -1.0f) * d * ty);
+        // (a lens shift moves the slice's x range: the Enhanced backdrop's)
+        const float sx = (i & 1) ? 1.0f - VenueView::lensShiftX : -1.0f - VenueView::lensShiftX;
+        const gfx::Vec3 w = eye + fwd * d + right * (sx * d * tx) + up * (((i & 2) ? 1.0f : -1.0f) * d * ty);
         c[i] = basis.transformPoint(w);
     }
     gfx::Vec3 lo = c[0], hi = c[0];
@@ -565,6 +567,11 @@ void VenueStage::shadowPass(double ms, const venue::CamPose& cam) {
 
 void VenueStage::draw(double ms) {
     if (!view_) return;
+    // This stage's lens shift for every pass of the frame, none after it.
+    struct ShiftScope {
+        explicit ShiftScope(float x) { VenueView::lensShiftX = x; }
+        ~ShiftScope() { VenueView::lensShiftX = 0; }
+    } shiftScope(lensShift_);
     // Enhanced's chain: on when any of its effects is (and it has not failed).
     const bool chain = post.any() && device_ && !(enh_ && enh_->failed());
     float internalScale = 1.0f;
