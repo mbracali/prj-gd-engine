@@ -66,11 +66,21 @@ void VenueStage::outro(double ms, bool won, bool versus, bool p1Won, bool boss) 
         // play_win_anims / play_lose_anims: one player or co-op, both members
         // the same; a boss battle: the guitarist the player's outcome, the
         // bassist (the boss) the other; the versus modes by who won [C scripts].
+        // play_outro kills the strum / fret / finger / drum iterators and
+        // event_iterator: no more strums, drum hits or performance stance
+        // changes over the win / lose anims [C script play_outro].
+        band_->endSongEvents(ms);
         uint32_t g = won ? win : lose, b = g;
         if (boss) b = won ? lose : win;
         else if (versus) g = p1Won ? win : lose, b = p1Won ? lose : win;
-        band_->playSpecial(band::Role::Guitarist, g, qbkey::key("idle"), ms);
-        band_->playSpecial(band::Role::Bassist, b, qbkey::key("idle"), ms);
+        // blendduration 0.0; the drummer and the singer too, `win` / `lose`
+        // whatever the venue (desired_twist 0) [C scripts play_win_anims,
+        // play_lose_anims: they stayed in the song's loop].
+        band_->playSpecial(band::Role::Guitarist, g, qbkey::key("idle"), ms, 0.0f);
+        band_->playSpecial(band::Role::Bassist, b, qbkey::key("idle"), ms, 0.0f);
+        const uint32_t rest = qbkey::key(won ? "win" : "lose");
+        band_->playSpecial(band::Role::Drummer, rest, qbkey::key("idle"), ms, 0.0f);
+        band_->playSpecial(band::Role::Vocalist, rest, qbkey::key("idle"), ms, 0.0f);
     }
     // Crowd_AllPlayAnim Anim = idle: the lighters end [C data].
     if (crowd_) crowd_->setLighterSpans({});

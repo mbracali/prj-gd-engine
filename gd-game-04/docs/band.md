@@ -168,6 +168,20 @@ clips' own poses already come close (89 pixels changed in the chartest grid).
   (event_iterator, lead 0) [C]. On the disc: Band_ChangeStance (1027),
   Band_PlayAnim (839), Band_PlayFacialAnim (316), Band_WalkToNode (79, not
   done).
+- The song's end: `play_win_anims` / `play_lose_anims` (the songwon /
+  songlost transitions) run `play_special_anim {stance anim = idle
+  blendduration = 0.0}` on the guitarist and bassist (win / lose, or
+  Win_SmStg / Lose_SmStg on the small stages; boss and versus by who won)
+  and on the drummer and the singer (`win` / `lose` always). The clip plays
+  once, cut in with no blend; when it ends the member goes back to
+  Stance_A and its idle loop (guitarist_idle / bandmember_idle), the arms
+  back on over 0.25 s [C script play_special_anim; I: GH3 starts the arms
+  0.25 s before the end]. The drummer and singer were left in the song's
+  loop before (render/venue_stage.cpp VenueStage::outro). `play_outro`
+  kills Strum_iterator, FretPos_iterator, FretFingers_iterator,
+  Drum_iterator, Drum_cymbal_iterator and event_iterator: no strum, fret,
+  drum hit or performance event after it (they went on, a song stance
+  change could cut the win / lose clip) [C script].
 - The fast intro (quickplay) does not run `play_intro_anims`: the members
   start in their profile's stance [C data `Common_FastIntro_Transition`].
 

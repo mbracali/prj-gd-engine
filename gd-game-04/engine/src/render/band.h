@@ -48,9 +48,13 @@ public:
     // there is no such member or bone.
     bool bonePos(uint32_t member, uint32_t bone, venue::Vec3& out) const;
     // play_special_anim on the member of `role` (play_win_anims / play_lose_anims).
-    void playSpecial(band::Role role, uint32_t stance, uint32_t anim, double ms) {
+    void playSpecial(band::Role role, uint32_t stance, uint32_t anim, double ms, float blend = 0.2f) {
         for (Entry& e : members_)
-            if (e.anim.role() == role) e.anim.playSpecial(stance, anim, ms);
+            if (e.anim.role() == role) e.anim.playSpecial(stance, anim, ms, blend);
+    }
+    // play_outro: every member's song events stop at `ms`.
+    void endSongEvents(double ms) {
+        for (Entry& e : members_) e.anim.endSongEvents(ms);
     }
     // Band_ChangeStance on the member of `role` (play_intro_anims).
     void changeStance(band::Role role, uint32_t stance, bool noWait, double ms) {

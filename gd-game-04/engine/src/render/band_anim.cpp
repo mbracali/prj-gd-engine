@@ -587,7 +587,8 @@ void Animator::bodyIteration(double t) {
                 c ? qbkey::name(key).c_str() : "(none)", c ? double(c->duration) : 0.0);
     ++bodyGen_;
     if (c) {
-        body_.play(c, t, 0.2f);
+        body_.play(c, t, bodyBlend_);
+        bodyBlend_ = 0.2f;
         bodyKey_ = key;
         ++stats_.bodyAnims;
         schedule(t + std::max(kFrameMs, double(c->duration) * 1000.0), Ev::BodyDone, 0, 0, bodyGen_);
@@ -602,6 +603,14 @@ void Animator::bodyFinished(double t) {
             const uint32_t k = scriptedClip_;
             playClip(k, 0, true, t);
         }
+        return;
+    }
+    if (specialOnce_) {
+        specialOnce_ = false;
+        stance_ = nextStance_ = K("Stance_A");
+        currentAnim_ = K("idle"), nextAnim_ = 0, cycle_ = true, repeat_ = 1;
+        disableArms_ = nextDisableArms_ = 0;
+        bodyIteration(t);
         return;
     }
     if (nextStance_ != stance_) {
@@ -693,13 +702,19 @@ void Animator::playAnimEvent(const qb::Struct& p, double t) {
 // for the guitarist / bassist), the random loop killed, `stance` set, the
 // tempo anim `anim` now (hero_play_tempo_anim_cfunc) and again when it ends
 // [C script; I: the loop is the body loop with cycle].
-void Animator::playSpecial(uint32_t stance, uint32_t anim, double t) {
+void Animator::playSpecial(uint32_t stance, uint32_t anim, double t, float blend) {
     scriptedClip_ = 0;
     stance_ = nextStance_ = stance;
     currentAnim_ = anim ? anim : K("idle");
     nextAnim_ = 0;
     cycle_ = true, repeat_ = 1;
     if (guitarLike()) disableArms_ = nextDisableArms_ = 2;
+    // The clip once, blended in over blendduration; when it ends (hero_wait_
+    // until_anim_finished) stance Stance_A and guitarist_idle / bandmember_idle
+    // [C script play_special_anim; I: the arms back over 0.25 s from the end,
+    // GH3 starts that 0.25 s before it].
+    specialOnce_ = true;
+    bodyBlend_ = std::max(0.0f, blend);
     bodyIteration(t);
 }
 
@@ -709,6 +724,7 @@ void Animator::playSpecial(uint32_t stance, uint32_t anim, double t) {
 void Animator::playClip(uint32_t clipKey, uint32_t stance, bool cycle, double t) {
     const anim::Clip* c = clip(clipKey);
     if (!c) return;
+    specialOnce_ = false;  // Obj_SwitchScript ends play_special_anim
     if (stance) stance_ = nextStance_ = stance;
     nextAnim_ = 0;
     if (guitarLike()) disableArms_ = nextDisableArms_ = 2;
@@ -1099,6 +1115,12 @@ void Animator::applyConstraints(Pose& pose) const {
         }
         }
     }
+}
+
+void Animator::endSongEvents(double t) {
+    if (fixedAt_ >= fixed_.size()) return;
+    fixed_.erase(std::remove_if(fixed_.begin() + std::ptrdiff_t(fixedAt_), fixed_.end(), [t](const Event& e) { return e.t >= t; }),
+                 fixed_.end());
 }
 
 }  // namespace bandanim

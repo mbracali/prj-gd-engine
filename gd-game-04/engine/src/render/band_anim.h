@@ -123,8 +123,12 @@ public:
     void playAnim(const qb::Struct& params, double ms) { playAnimEvent(params, ms); }
     // play_special_anim {stance anim}: the stance at once (no transition),
     // its `anim` looping, the arms off (guitarist, bassist) [C script].
-    void playSpecial(uint32_t stance, uint32_t anim, double ms);
+    // `blend`: blendduration (play_win_anims / play_lose_anims: 0) [C scripts].
+    void playSpecial(uint32_t stance, uint32_t anim, double ms, float blend = 0.2f);
     void playClip(uint32_t clip, uint32_t stance, bool cycle, double ms);
+    // play_outro: Strum / FretPos / FretFingers / Drum / Drum_cymbal /
+    // event_iterator killed: no song event from `ms` on [C script].
+    void endSongEvents(double ms);
     band::Role role() const { return role_; }
     // The pose at `ms` (>= the last advance): local transforms, then the
     // model-space bone matrices (`world`) and the skinning matrices
@@ -161,6 +165,7 @@ private:
     uint32_t random(uint32_t n);
     uint32_t scriptedClip_ = 0;  // playClip's clip (0: the random anims run)
     bool scriptedCycle_ = false;
+    bool specialOnce_ = false;  // play_special_anim's clip playing: then Stance_A and the idle loop
     const anim::Clip* clip(uint32_t key);
     const qb::Value* animSet() const;
     const anim::Clip* tempoAnim(uint32_t anim, double t, uint32_t& key);
@@ -200,6 +205,7 @@ private:
     const qb::Struct* fretAnims_ = nullptr;
     uint32_t bodyKey_ = 0;
     uint32_t bodyGen_ = 0, strumGen_ = 0, faceGen_ = 0, chordGen_ = 0, armGen_[2] = {0, 0};
+    float bodyBlend_ = 0.2f;  // the next body clip's blend in (play_special_anim blendduration)
     float slowTempo_ = 75, medTempo_ = 115, fastTempo_ = 145;
     int shortStrum_ = 150, medStrum_ = 600;
     float fingerPress_ = 0.07f, fingerRelease_ = 0.2f, fretBlend_ = 0.1f, drumBlend_ = 0.1f;
