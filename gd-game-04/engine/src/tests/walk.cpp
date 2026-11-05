@@ -296,8 +296,13 @@ Walk::Walk(const std::string& name) : name_(name) {
         // dropdown clicked open, 120 clicked -> right click -> Options -> the
         // help bar's BACK clicked -> main (docs/knowledge/universal_launcher.md).
         steps_ = boot;
+        // ONLINE is greyed and skipped (GH3's demo_mode_disable, GD04-101):
+        // Up from CAREER wraps to OPTIONS, the pad's Down and the keyboard's
+        // back to CAREER, and the mouse over ONLINE focuses nothing.
         steps_.push_back({"main_menu_fs",
-                          {"hover:menu:main_menu_options_text", "check:selected:main_menu_options_text", "click:menu:main_menu_options_text"},
+                          {Action::Up, "check:selected:main_menu_options_text", "key:Down", "check:selected:main_menu_career_text", Action::Up, D,
+                           "check:selected:main_menu_career_text", "hover:menu:main_menu_leaderboards_text", "check:selected:main_menu_career_text",
+                           "hover:menu:main_menu_options_text", "check:selected:main_menu_options_text", "click:menu:main_menu_options_text"},
                           10000});
         steps_.push_back({"options_select_option_fs", {"click:item"}, 20000});
         steps_.push_back({"port_enhanced",

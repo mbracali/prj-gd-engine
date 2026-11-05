@@ -226,6 +226,11 @@ false, GetLatestContentIndexFile (82134408) false [I].
   fit_text_in_rectangle); 7 empty TextElements in the vmenu whose handlers
   highlight (guitar_menu_highlighter) and choose; add_user_control_helper
   SELECT / UP-DOWN; `LaunchEvent {Type=focus target=vmenu_main_menu}`.
+- XBOX LIVE (ONLINE on PC) is disabled the way GH3's demo mode disables it:
+  `demo_mode_disable = {rgba = [128 128 128 255] not_focusable}` on its text
+  and its vmenu item [C]. The port has no online play, so it applies that to
+  them always (UiSystem's CreateScreenElement; GD04-101): grey, skipped by the
+  pad, the keyboard and the mouse (the mouse walk checks it).
 - Quickplay item: `pad_choose main_menu_select_quickplay` -> game_mode =
   p1_quickplay, current_num_players = 1, player1/2 part = guitar,
   respond_to_action `select_quickplay` -> **quickplay_select_difficulty_fs**

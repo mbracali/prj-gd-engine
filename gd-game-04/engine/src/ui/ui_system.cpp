@@ -1558,6 +1558,13 @@ void UiSystem::addNatives() {
         byId_[e->id] = raw;
         parent->children.push_back(std::move(e));
         applyProps(*raw, p, true);
+        // The main menu's XBOX LIVE (ONLINE: no online play in the port) as
+        // GH3 disables it in demo mode: create_main_menu's demo_mode_disable
+        // = {rgba = [128 128 128 255] not_focusable} on its text and its
+        // vmenu item [C script create_main_menu] (GD04-101).
+        bool online = raw->id == K("main_menu_leaderboards_text");
+        for (const Element::Handler& h : raw->handlers) online = online || h.script == K("main_menu_select_xbox_live");
+        if (online) raw->rgba = {128, 128, 128, 255}, raw->notFocusable = true;
         ++stats_.created;
         // new_menu focuses its menu before the items exist: the first
         // focusable item added to a focused menu takes the focus, once the
