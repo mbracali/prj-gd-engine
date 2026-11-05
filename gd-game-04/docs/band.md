@@ -168,6 +168,13 @@ clips' own poses already come close (89 pixels changed in the chartest grid).
   (event_iterator, lead 0) [C]. On the disc: Band_ChangeStance (1027),
   Band_PlayAnim (839), Band_PlayFacialAnim (316), Band_WalkToNode (79, not
   done).
+- Star Power: `guitarist_idle` handles `star_power_on<p>` for its player's
+  band member with `handle_star_power`: it waits for the next camera cut
+  (`CameraCuts_StartCallback` clears `waiting_for_cameracut`), then
+  `play_special_anim {stance = Stance_A, Anim = Starpower, blendduration =
+  0.0, disable_arms = 0}` (e.g. GH3_Guit_Mido_A_Med_Special02), once [C
+  scripts]. gd04: VenueStage::starPowerAnim, player 1 the guitarist,
+  player 2 the bassist [I].
 - The song's end: `play_win_anims` / `play_lose_anims` (the songwon /
   songlost transitions) run `play_special_anim {stance anim = idle
   blendduration = 0.0}` on the guitarist and bassist (win / lose, or
