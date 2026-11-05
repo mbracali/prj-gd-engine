@@ -592,7 +592,18 @@ What gd04 runs now (ui/song_hooks.cpp; GD04_NO_HOOKS=1 turns it off):
 Natives for them (ui/song_hooks.cpp): setsoundbusseffects (GuitarEcho1 /
 GuitarReverb1 drive audio/guitar_fx: a feedback echo and a small reverb
 with the scripts' delay, DecayRatio, Drymix / Wetmix, I3DL2 levels, DSP [I];
-the crowd buss's CrowdEcho1 / InGameReverb1 are counted [L]),
+the crowd buss's CrowdEcho1 / InGameReverb1 are counted [L]). Star Power
+(GH_Star_Power_Verb_On) is the only time the guitar buss is wet in a song:
+echo delay = the beat (halved to <= 400 ms), Wetmix 0.5 in 0.1 s,
+ReflectionsLevel -1200 / ReverbLevel -550 mB in 0.1 s, Star_Power_BussSet
+(Right_Notes -2 dB in 0.5 s), Star_Power_Deployed_SFX + _Cheer_SFX; _Off pops
+the busses, Wetmix 0 in 0.1 s, the reverb levels -10000 in 0.5 s [C scripts].
+The reverb's late level is normalised to its impulse energy and the early
+reflections are four taps (GD04-098, 11-05: the uncalibrated Schroeder
+network made the reverb ~8 dB over -550 mB and a 0 ms reflection tap added
+the dry signal in phase, so the guitar came out ~4 dB louder in Star Power
+and clipped on loud songs; now +0.3 dB on noise, the -2 dB buss set
+balancing the wet paths as GH3's data intends) [I: FMOD's DSP not reimplemented].
 SetSoundBussParams (the busses below, and Right_Notes_Player1's vol: the
 guitar buss's volume) / Push / Pop, Create2DParticleSystem /
 Destroy2DParticleSystem (ui/fx2d: motion [I]), WhammyFXOn / Off (a
