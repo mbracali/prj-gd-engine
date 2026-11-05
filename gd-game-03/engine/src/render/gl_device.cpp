@@ -204,7 +204,7 @@ private:
     // glMapBufferRange instead of glBufferSubData: Apple's OpenGL (on Metal)
     // stalls or copies on glBufferSubData into a buffer the GPU may still
     // read; the regions and fences already keep those bytes unused.
-    // Default on macOS; GD03_GL_STREAM=map | subdata chooses.
+    // Default on macOS and Android; GD03_GL_STREAM=map | subdata chooses.
     bool streamMap_ = false;
     void streamWrite(GLenum target, size_t offset, const void* data, size_t size);
     DevicePerf perf_;
@@ -288,7 +288,10 @@ bool GlDevice::init(std::string& error) {
     gl::glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     gl::glPixelStorei(GL_PACK_ALIGNMENT, 1);
 
-#ifdef __APPLE__
+#if defined(__APPLE__) || defined(__ANDROID__)
+    // Phones too (#55): Adreno / Mali drivers stall or copy the whole
+    // buffer on a glBufferSubData into a buffer the GPU may still read,
+    // once per draw: a song's ~600 draws fell to 10-15 fps there.
     streamMap_ = true;
 #endif
     if (const char* m = SDL_getenv("GD03_GL_STREAM")) streamMap_ = std::strcmp(m, "map") == 0;

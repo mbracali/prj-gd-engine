@@ -13,7 +13,7 @@
 // in dB) [C scripts, data: Echo_Guitar_Buss_Dry, Reverb_Guitar_Buss_Dry].
 // The parameters are the scripts' (delay ms, DecayRatio, Drymix / Wetmix;
 // I3DL2 levels in millibels, DecayTime s); the DSP is gd04's: a feedback
-// delay for the echo and a small Schroeder reverb (four combs, two
+// delay for the echo and a small Schroeder reverb (eight combs, two
 // all-passes) for the I3DL2 reverb [I: FMOD's echo / sfxreverb units are
 // not reimplemented]. Set from the main thread, run in the audio callback.
 class GuitarFx {
@@ -31,6 +31,10 @@ public:
     void process(float& l, float& r);
     void reset();
 
+    // Freeverb's eight combs: with four, a note on a comb's resonance came
+    // out up to +10 dB [I: gd04's].
+    static constexpr int kCombs = 8;
+
 private:
     struct Comb {
         std::vector<float> buf;
@@ -42,6 +46,8 @@ private:
         size_t pos = 0;
     };
     void tune();
+    // One sample through a channel's combs and all-passes (the late reverb).
+    static float runLate(std::array<Comb, kCombs>& combs, std::array<AllPass, 2>& aps, float x);
     mutable std::mutex m_;
     Params target_, cur_, from_;
     float rampLeft_ = 0, ramp_ = 0;
@@ -49,9 +55,14 @@ private:
     int rate_ = 48000;
     std::array<std::vector<float>, 2> echo_;
     size_t echoPos_ = 0;
-    std::array<std::array<Comb, 4>, 2> comb_;
+    std::array<std::array<Comb, kCombs>, 2> comb_;
     std::array<std::array<AllPass, 2>, 2> ap_;
     std::array<std::vector<float>, 2> pre_;
     size_t prePos_ = 0;
     float tunedDecay_ = -1;
+    // The late reverb's gain at ReverbLevel 0 mB: 1 / sqrt(the comb / all-pass
+    // network's impulse-response energy), so a ReverbLevel of L mB adds L mB
+    // of energy on a broadband signal [I: the I3DL2 / EAX late level as a
+    // density-normalised energy, as OpenAL Soft's EAX reverb does].
+    float lateNorm_ = 0.25f;
 };

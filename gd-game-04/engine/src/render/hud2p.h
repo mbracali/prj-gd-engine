@@ -3,10 +3,12 @@
 #pragma once
 
 #include <array>
+#include <initializer_list>
 #include <cstdint>
 #include <string>
 #include <random>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "render/hud2d.h"
@@ -37,8 +39,20 @@ public:
 
     struct Counters {
         uint64_t needleChanges = 0, scoreChanges = 0, leadChanges = 0, cardsShown = 0, attackTexts = 0, raiseAxe = 0, missingTextures = 0;
+        uint64_t alertUpdates = 0, alertFramesShown = 0, stealHands = 0, bites = 0;
     };
     const Counters& counters() const { return n_; }
+    // Death Drain's bites of the last game frame (death_text_wing_flap's
+    // bite_particle when its random_rot is not 0): the victim, the turn and
+    // the sparks' screen origin (the alert's (190,120) / (65,120)) [C scripts].
+    struct Bite {
+        int player = 0;
+        float rot = 0, x = 0, y = 0;
+    };
+    const std::vector<Bite>& bites() const { return bites_; }
+    // The players' lefty flip option (user_options lefty_flip_p<n>): the
+    // battle alert says RIGHTY for a lefty player [C script update_battle_alert_icon].
+    void setLefty(int p, bool on) { lefty_[size_t(p & 1)] = on; }
 
 private:
     struct El {
@@ -114,6 +128,43 @@ private:
         bool up = false;
     };
     std::array<Flap, 2> flap_{};
+    std::vector<Bite> bites_;
+    std::array<bool, 2> lefty_{};
+    // A script element's morphable props (x, y, scale x / y, alpha):
+    // DoScreenElementMorph runs linearly from where the element is to the
+    // given values; a new morph replaces the last, the props it leaves out
+    // stay where they are [C scripts; I: linear].
+    struct Anim {
+        std::array<float, 5> from{0, 0, 1, 1, 1}, to{0, 0, 1, 1, 1};
+        double start = -1e18, ms = 0;
+        std::array<float, 5> at(double now) const;
+        void set(int ch, float v) { from[size_t(ch)] = to[size_t(ch)] = v; }  // SetScreenElementProps / create
+        void morph(double now, double ms, std::initializer_list<std::pair<int, float>> v);
+    };
+    enum { kX, kY, kSX, kSY, kA };
+    // create_battle_alert_frames / update_battle_alert_icon: the victim's
+    // alert above the highway for Difficulty Up, Double Notes and Lefty
+    // Flip (frame, fills, stars, icons, "HARD DOUBLE LEFTY"); each attack's
+    // start updates it, its remove_hud_* polls every 30 frames until it is
+    // over and updates it again [C scripts guitar_battle_hud_icons.qb].
+    struct AlertFrame {
+        Anim frame, left, middle, right;
+        std::array<Anim, 5> fill;  // single, hard_double, hard_lefty, double_lefty, triple
+        std::array<Anim, 3> star, icon;
+        std::array<uint32_t, 3> iconTex{};
+        std::array<uint8_t, 3> singleRgb{255, 255, 255};
+        std::string text;
+        float textSx = 0.5f, textSy = 0.5f;
+        std::array<bool, 3> on{};  // harder, double, lefty (last frame)
+        std::array<double, 3> nextPoll{-1, -1, -1};
+        bool init = false;
+    };
+    std::array<AlertFrame, 2> alertFrame_{};
+    void initAlertFrame(AlertFrame& a);
+    void updateAlertIcon(int p, const Match& m, double now);
+    void drawAlertFrame(Canvas& c, const TextureCache& tex, int p, double now) const;
+    std::array<int, 2> lastStolen_{}, lastAwarded_{};
+    float deathW_ = 256, deathH_ = 128;  // battle_alert_death's size (cached by draw)
     // The hand's cards (battlecard_<i>_<p>): a new card flies from above the
     // last hit lane to the top slot in 0.3 s at alpha 0.5 -> 1, the others
     // move down a slot (scale 0.55, 0.4) [C scripts battlemode_ready, update_battlecards_add / _remove].
@@ -122,6 +173,7 @@ private:
         std::vector<int> prevRank;  // by stack index, before the last change (-1: new)
         double at = -1e9;
         bool flew = false;
+        bool stolen = false;  // battlemode_ready steal = 1: placed at once (time 0)
         float flyX = 0, flyY = 0;
     };
     std::array<Hand, 2> hand_{};

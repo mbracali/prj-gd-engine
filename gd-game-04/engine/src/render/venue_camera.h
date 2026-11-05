@@ -51,20 +51,42 @@ struct CamPose {
 
 class CameraDirector {
 public:
+    // Enhanced > Disable Shaky Camera: the hand-held cameras' sway off (set by the app).
+    static inline bool noShake = false;
     // `leadInMs`: the time before song time 0 the transition starts (the
     // intro transition's length: fastintro 3000 ms).
-    void init(const Venue& v, const Globals& g, const Chart& chart, uint32_t seed, double leadInMs);
+    // startMs: the song's first ms (a mid-song start: practice, Lou's finish); the intro runs from startMs - leadInMs.
+    void init(const Venue& v, const Globals& g, const Chart& chart, uint32_t seed, double leadInMs, double startMs = 0);
+    // The intro transition's camera prefix (cameras_intro, cameras_encore,
+    // cameras_boss...); empty: chosen by the lead-in (fast or full intro).
+    void setIntroCameras(const std::string& prefix) { introPrefix_ = prefix; }
+    std::string introPrefix_;
     // Advances to song time `ms` (monotonic), processing every camera note
     // and every cut up to it in time order (a cut picks its camera array by
     // the performance at its own time).
     void update(double ms, const PerfTimeline& perf);
     // The camera at song time `ms` (>= the last update's time).
     CamPose pose(double ms) const;
+    // A venue's camera script (controlscript not one of the CameraCuts_*
+    // the director plays itself: CameraCuts_NewIntro, <zone>_camera_encore,
+    // the boss cameras): run by the zone's VM (render/particles), which
+    // calls scriptMorph for its ccam_domorph and asks scriptMorphDone for
+    // ccam_waitmorph [C scripts]. startScript returns the run (0: none).
+    std::function<uint32_t(uint32_t script, double ms)> startScript;
+    std::function<void(uint32_t run)> stopScript;
+    void scriptMorph(const qb::Struct& params, double ms);
+    bool scriptMorphDone(double ms) const { return ms >= morphStart_ + morphDur_; }
+    // The current shot's control script again, once startScript can run it
+    // (the first shot starts in init, before the zone VM exists).
+    void retryScript();
     // Star Power switched on / off at song time `ms` (>= the last update's
     // time) in a one-player song: StarPowerOn spawns do_starpower_camera
     // (current_num_players = 1), its end Kill_StarPower_Camera [C:
     // Function_8211DA70, guitar_starpower.qb].
     void starPower(double ms, bool on);
+    // Transition_CameraCut {prefix changenow} after play_outro's
+    // kill_cameracuts_iterator (the SongWon / SongLost transitions) [C data].
+    void outro(double ms, const std::string& prefix);
 
     struct Shot {
         double start = 0, end = 0;  // song ms; end: when CameraCuts_WaitScript lets it go
@@ -138,9 +160,16 @@ private:
     Shot shot_;
     int cuts_ = 0;
     std::vector<Shot> history_;
-    enum class Ctl : uint8_t { Static, TwoCam, HandCam, HandCamZoom2, QuickZoom, Pan, Orbit, OrbitMorph, Spline };
+    enum class Ctl : uint8_t { Static, TwoCam, HandCam, HandCamZoom2, QuickZoom, Pan, Orbit, OrbitMorph, Spline, Script };
     Ctl ctl_ = Ctl::Static;
     std::vector<Keyed> keys_;     // cam1 / cam2 / ... (or the single params pose)
+    uint32_t scriptRun_ = 0;      // Ctl::Script: the zone VM's run
+    bool scriptPending_ = false;  // a control script with no VM to run it yet
+    bool haveMorph_ = false;
+    CamPose morphFrom_;
+    Keyed morphTo_;
+    double morphStart_ = 0, morphDur_ = 0;
+    mutable CamPose lastPose_;
     double calcAt_ = 0, camTime_ = 0;  // when CalcTime ran and the camera_time it returned (s)
     float zoomFov_ = 0;           // HandCam's random zoom target (0: none)
     float orbitRad_ = 0;          // total orbit angle

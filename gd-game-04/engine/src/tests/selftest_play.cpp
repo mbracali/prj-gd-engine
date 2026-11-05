@@ -53,6 +53,52 @@ bool playOnce(const NoteTrack& track, const Tuning& tu, int diff, bool tap, Play
     return true;
 }
 
+// GD04-108: autoplay holds the first sustain with at least 400 ms of hold
+// and no note within check_time_early of its middle; one extra strum there
+// is an overstrum that ends the sustain (0x829E4C80 -> 0x8211C9D0's
+// released path [C 0x8211FA14, 0x8211C9D0]): one overstrum, the note's
+// SustainLost, no sustain held after it and no score until the next note.
+// True when the chart has no such sustain or the cut behaves.
+bool overstrumCut(const NoteTrack& track, const Tuning& tu, PlayTotals& t, std::string& why) {
+    const double E = tu.checkTimeEarly * 1000.0;
+    int target = -1;
+    double strumAt = 0;
+    for (size_t i = 0; i + 1 < track.notes.size(); ++i) {
+        const TrackNote& n = track.notes[i];
+        if (!n.sustain || n.holdMs < 400) continue;
+        const double mid = n.time + n.holdMs / 2.0;
+        if (double(track.notes[i + 1].time) - mid <= E + 100) continue;
+        target = int(i), strumAt = mid;
+        break;
+    }
+    if (target < 0) return true;
+    Player p(track, tu, 3, true);
+    Autoplay ap(track, false);
+    const double frame = 1000.0 / 60.0;
+    const double nextAt = track.notes[size_t(target) + 1].time;
+    p.setSongLengthMs(nextAt + 1000);
+    bool injected = false, held = false;
+    long long scoreAfter = -1;
+    for (double now = track.notes.front().time - 2000.0; now < nextAt - E - 2 * frame; now += frame) {
+        FrameInput in = ap.input(now, frame, p);
+        if (!injected && now >= strumAt) {
+            held = p.sustaining() == target;
+            in.strum = true, injected = true;
+        }
+        p.frame(now, frame, in);
+        if (injected && scoreAfter < 0) scoreAfter = p.stats().score;
+    }
+    bool lost = false;
+    for (const PlayerEvent& e : p.events()) lost = lost || (e.kind == PlayerEvent::Kind::SustainLost && e.note == target);
+    ++t.overstrumCuts;
+    if (held && p.stats().overstrums == 1 && lost && p.sustaining() < 0 && p.stats().score == scoreAfter) return true;
+    ++t.overstrumCutFails;
+    why = "overstrum during the sustain of note " + std::to_string(target) + ": held " + std::to_string(held) + ", overstrums " +
+          std::to_string(p.stats().overstrums) + ", lost " + std::to_string(lost) + ", still held " + std::to_string(p.sustaining() >= 0) +
+          ", score " + std::to_string(scoreAfter) + " -> " + std::to_string(p.stats().score);
+    return false;
+}
+
 }  // namespace
 
 bool playChart(const Globals& g, const SongInfo& song, const Chart& chart, PlayTotals& t, std::string& why) {
@@ -87,6 +133,14 @@ bool playChart(const Globals& g, const SongInfo& song, const Chart& chart, PlayT
                     ++t.failedCharts;
                 }
             }
+        }
+    }
+    // GD04-108: an overstrum while a sustain is held ends it (guitar expert).
+    if (!chart.notes(Part::Guitar, 3).empty()) {
+        std::string w;
+        if (!overstrumCut(buildTrack(chart, Part::Guitar, 3, tu, scale), tu, t, w)) {
+            if (ok) why = "guitar expert: " + w;
+            ok = false;
         }
     }
     // Face-off: each player's notes (guitar, every difficulty) [C 0x82104558].
@@ -173,6 +227,7 @@ void printPlayTotals(const PlayTotals& t) {
     std::printf("face-off: %zu notes split between the players\n", t.faceOffNotes);
     std::printf("two players: co-op %zu charts (%zu notes, Star Power raised together %zu times), battles %zu (%zu attacks, %zu KOs)\n",
                 t.coopCharts, t.coopNotes, t.coopStarPower, t.battles, t.battleAttacks, t.battleKos);
+    std::printf("overstrum during a sustain: %zu sustains cut, %zu not ended\n", t.overstrumCuts, t.overstrumCutFails);
     std::printf("autoplay: score (strummed) %lld, HOPO landings %zu, phrases captured %zu, charts failing %zu\n",
                 static_cast<long long>(t.score), t.hopos, t.phrasesCaptured, t.failedCharts);
 }

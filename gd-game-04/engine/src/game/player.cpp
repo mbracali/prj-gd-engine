@@ -144,6 +144,9 @@ void Player::overstrum(double now) {
         }
     }
     changeHealth(false, now);
+    // The overstrum's last step sets 0x829E4C80[player] = 1 [C 0x8211FA10-
+    // 0x8211FA14]: a sustain being held ends (updateSustain).
+    overstrummed_ = true;
     events_.push_back({PlayerEvent::Kind::Overstrum, int(cur_), now, true});
     if (lostPhrase >= 0) events_.push_back({PlayerEvent::Kind::StarMiss, lostPhrase, now});
 }
@@ -177,6 +180,7 @@ void Player::hit(size_t i, double now, bool tap) {
     // A sustained note's health gain waits for the end of its sustain [C 0x82110E8C].
     if (n.sustain) {
         sus_ = Sustain{int(i), double(n.time), double(n.time) + n.holdMs, 0, 0, now};
+        overstrummed_ = false;  // the sustain's start clears 0x829E4C80[player] [C 0x82106B84]
     } else {
         changeHealth(true, now);
     }
@@ -200,7 +204,12 @@ void Player::updateSustain(double now, double dt, const FrameInput& in) {
     const TrackNote& n = t_.notes[size_t(sus_.note)];
     const bool held = n.chord() ? in.frets == n.frets : highest(in.frets) == n.frets;  // [C 0x8211C9D0]
     const int mult = st_.multiplier();
-    if (now >= sus_.end) {
+    // An overstrum since the sustain started: 0x8211C9D0 clears the flag and
+    // takes the released path (whammy_off finished 0, the tail dead, no more
+    // sustain points or star whammy) before the held / end checks [C 0x8211C9D0].
+    const bool killed = overstrummed_;
+    overstrummed_ = false;
+    if (!killed && now >= sus_.end) {
         // Held to the end: the rest of the note's points [C 0x82106B98].
         if (n.maxSustainPoints > sus_.awarded) addScore(double(n.maxSustainPoints - sus_.awarded) * mult);
         changeHealth(true, now);
@@ -208,7 +217,7 @@ void Player::updateSustain(double now, double dt, const FrameInput& in) {
         sus_ = Sustain{};
         return;
     }
-    if (held) {
+    if (held && !killed) {
         if (now > sus_.lastMs) sus_.units += (now - sus_.lastMs) / std::max(1.0f, t_.beatAt(float(now))) * kPointsPerBeat;
         sus_.lastMs = now;
         const int due = int(std::floor(sus_.units)) - sus_.awarded;
@@ -326,6 +335,10 @@ void Player::frame(double now, double dt, const FrameInput& raw) {
         const uint8_t h = highest(in.frets);
         if (h && h != lastHitMask_) candidate = h;
     }
+    // Enhanced > Forgiving Hammer-ons & Pull-offs [I: the port's, gd02's]:
+    // a HOPO whose fret is already held when it arrives plays by itself
+    // (no fret change needed), after any earlier hit too.
+    if (forgivingHopos && !in.strum && !candidate && in.frets) candidate = highest(in.frets);
     // 5. The scan [C 0x82120260-0x82120880].
     bool hitSomething = false;
     for (size_t k = cur_; k < n && double(notes[k].time) <= base + E; ++k) {

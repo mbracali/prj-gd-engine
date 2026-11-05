@@ -1,20 +1,41 @@
 // SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "tests/scripttest.h"
+#include <cctype>
+#include "script/pc_strings.h"
 
 #include <algorithm>
 #include <cstdio>
 #include <exception>
+#include <functional>
 #include <vector>
 
 #include "data/disc.h"
 #include "data/pak.h"
 #include "data/qb.h"
 #include "data/qbkey.h"
+#include "script/pc_strings.h"
 #include "script/bytecode.h"
 #include "script/globals.h"
 #include "script/natives_core.h"
 #include "script/vm.h"
+
+namespace {
+
+// "Xbox" as a word (not xboxlive_ in a debug name), gamer profiles, storage
+// devices, achievement unlocking.
+bool consoleWording(const std::string& text) {
+    std::string low = text;
+    for (char& c : low) c = char(std::tolower(static_cast<unsigned char>(c)));
+    for (size_t at = low.find("xbox"); at != std::string::npos; at = low.find("xbox", at + 1)) {
+        const size_t e = at + 4;
+        if (e >= low.size() || !(std::isalnum(static_cast<unsigned char>(low[e])) || low[e] == '_')) return true;
+    }
+    return low.find("gamer profile") != std::string::npos || low.find("storage device") != std::string::npos ||
+           low.find("achievement unlocking") != std::string::npos;
+}
+
+}  // namespace
 
 int runScriptTest(const std::string& discPath) {
     std::string error;
@@ -39,7 +60,26 @@ int runScriptTest(const std::string& discPath) {
                     if (s.value.type != qb::Type::Script) continue;
                     ++scripts;
                     try {
-                        tokens += qs::tokenize(s.value.script->code.data(), s.value.script->code.size()).size();
+                        const auto toks = qs::tokenize(s.value.script->code.data(), s.value.script->code.size());
+                        tokens += toks.size();
+                        // PC wording (GD04-039): no text the scripts show names the console
+                        // (qb.pak: English, the one language the port loads).
+                        const bool english = path.find("/qb.pak.xen") != std::string::npos;
+                        std::function<void(const qb::Struct&)> structStrings = [&](const qb::Struct& st) {
+                            for (const qb::Item& it : st.items) {
+                                const qb::Value& v = it.value;
+                                if ((v.type == qb::Type::String || v.type == qb::Type::WString) && consoleWording(v.str) && ++failures <= 20)
+                                    std::printf("FAIL console wording in %s: \"%s\"\n", qbkey::name(s.name).c_str(), v.str.c_str());
+                                if (v.st) structStrings(*v.st);
+                            }
+                        };
+                        for (const auto& t : toks)
+                            if (english && t.st) structStrings(*t.st);
+                        for (const auto& t : toks)
+                            if (english)
+                            if ((t.op == qs::kString || t.op == qs::kWideString || t.op == qs::kLocalString) && consoleWording(pcstrings::pcText(t.str))) {
+                                if (++failures <= 20) std::printf("FAIL console wording in %s: \"%.80s\"\n", qbkey::name(s.name).c_str(), t.str.c_str());
+                            }
                     } catch (const std::exception& ex) {
                         if (++failures <= 20) std::printf("FAIL %s %s: %s\n", path.c_str(), qbkey::name(s.name).c_str(), ex.what());
                     }

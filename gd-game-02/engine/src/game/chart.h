@@ -83,6 +83,11 @@ struct Song {
     // big_note_parser_guitar / _bass / _rhythm, BIG_NOTE_MAPPING), note-on
     // ticks; the co-op lead's are PART GUITAR's (TRACK_SYMBOLS) [C data].
     std::array<std::vector<int>, kPartCount> bigNotes;
+    // The bass ranges (GD02-036): every non-drum PART track's notes below
+    // pitch 36, [on, off] in ms; GH2 puts them all in the bass part's list
+    // (0x823457A8 -> 0x82345A68 -> 0x82331580) [C]. One on the disc:
+    // X-Stream's PART GUITAR pitch 35 at 302.2 s.
+    std::vector<std::pair<float, float>> bassRanges;
     std::vector<BeatLine> beats;
     std::vector<SongEvent> events;  // in time order
     std::vector<VenueNote> venueNotes;  // note-ons, in time order

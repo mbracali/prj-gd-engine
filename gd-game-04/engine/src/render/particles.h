@@ -22,6 +22,7 @@ class Vm;
 }
 namespace venue {
 struct Venue;
+class LightShow;
 }
 
 // GH3's venue particles and pyro (docs/venues.md "Particles"): the zone's
@@ -62,6 +63,16 @@ public:
     // song time `ms` (the speakers' Venue_Pulse* scripts: AddPulseEvent on
     // hitnote_<colour>).
     void playerHit(double ms, uint8_t frets);
+    // ScreenFlash's FlashBS on bg_viewport (z_prison's flares): the bright_sat
+    // brightness / contrast at `ms`; false when the instance is not up.
+    bool flash(double ms, float& brightness, float& contrast) const;
+    // obj_locktoobject {objectname offset} on a node (z_prison's caged dancer
+    // on the moving cage): where it is at `ms` (its placed position moved by
+    // the target's motion); false when not locked.
+    bool lockedPos(uint32_t node, double ms, venue::Vec3& pos) const;
+    // The venue's light show (lightvolume_getparams on a light housing).
+    void setLightShow(const venue::LightShow* show) { show_ = show; }
+    int drumKicks = 0, leftKicks = 0, scalePulses = 0, flashes = 0;  // drumkick events launched, obj_applyscaling calls (logged)
     // hide / Unhide on a node by the zone's scripts: 0 hidden, 1 shown, -1 never set.
     int visibility(uint32_t node) const {
         auto it = visibility_.find(node);
@@ -75,15 +86,30 @@ public:
     // One CreateParticleSystem_fast's parameters, decoded.
     struct Params {
         venue::Vec3 box{}, target{0, 1, 0}, force{};
-        float spread = 0;  // anglespread, degrees
+        float spread = 0;  // anglespread (or elevspread's range), degrees
         float lifeMin = 1, lifeMax = 1, rate = 0, lifetime = 0, delay = 0;
         int burst = 0;
-        float sizeStart = 0.1f, sizeStartVar = 0, sizeEnd = 0.1f, sizeEndVar = 0;
+        // sizerange [(start width, start height), (end width, end height)],
+        // linear over the life, the same for every particle [C 822E37C8, 822E2390, 82427360].
+        float w0 = 0.1f, h0 = 0.1f, w1 = 0.1f, h1 = 0.1f;
         float speedMin = 1, speedMax = 1;
         bool alignWithPath = false;
-        float pathTime = 0.1f;
+        float pathTime = 0;                   // pathfollowtime (system +0x7f0) [C]
+        float rotMin = 0, rotMax = 0;         // rotvel (turns a second) [C 8233B120]
+        float rotScale = 0;                   // rotveltimescale [C 823EF088]
+        // bounceheight / bouncecoeff: the particles rebound off the plane y = height (world)
+        // keeping coeff of their speed; off when the coeff is 0 or the height -99.9 [C data; I: the model].
+        bool bounce = false;
+        float bounceHeight = 0, bounceCoeff = 0;
         uint32_t color = 0xFFFFFFFF;          // RGBA
-        std::vector<uint32_t> gradient;       // particlecolor, over the life
+        // particlecolor / vertexweight: colour keys, each a pair (a, b) the
+        // particle's random picks between; key 0 at life 0, key k at
+        // vertexweight[k - 1] [C 821CCCD8, 822E37C8, 823EDEC0].
+        struct Key {
+            float t = 0;
+            float a[4]{}, b[4]{};
+        };
+        std::vector<Key> keys;
         uint32_t texture = 0;                 // quickmaterial.diffusetexture
         bool additive = true;
         int blend = 1;          // blendmode: 0 diffuse, 1 add, 2 subtract, 3 blend, 4 modulate, 5 brighten [C 823B7768]
@@ -91,17 +117,95 @@ public:
         int layout = 0;         // texturelayout: 0 1x1, 1 2x2, 2 1x2, 3 2x1
         float animFps = 0;      // quadanimationfps
         float alphaCut = 0;
+        // Type textureribbontrail (the Star Power swirls): a ribbon through
+        // the particle's last `history` frames (82427E08) [C].
+        bool ribbon = false;
+        int history = 0;
     };
 
 private:
     struct System {
         Params p;
         venue::Vec3 pos{};
+        uint32_t name = 0, group = 0;     // CreateParticleSystem's name / groupid (the song scripts')
+        uint32_t member = 0, bone = 0;    // ObjID / bone: follows that band member's bone
         double start = 0;
         uint64_t seed = 1;
         double end() const;
     };
-    void create(const venue::Vec3& pos, const qb::Value* params, double t);
+    // A system; rate >= 0: a node's particleobject emitting `rate` a second
+    // with no end and no burst (emitrate), else the params' own.
+    void create(const venue::Vec3& pos, const qb::Value* params, double t, float rate = -1);
+public:
+    // The song scripts' CreateParticleSystem (the Star Power stage FX, the
+    // finger flames): `member` / `bone` non-zero, the system follows that
+    // band member's bone (bonePos) [C scripts; I: the emitter carries the
+    // particles already out with it]. Returns false without such params.
+    bool createScripted(uint32_t name, uint32_t group, const qb::Value* params, const venue::Vec3& pos, uint32_t member, uint32_t bone, double t);
+    // DestroyParticlesByGroupID / a name's system: gone at once.
+    void destroyNamed(uint32_t name);
+    // <name> : emitrate rate = 0 (no new particles; the ones out live on).
+    void stopEmitting(uint32_t name, double t);
+    bool hasNamed(uint32_t name) const;
+    void destroyGroup(uint32_t group);
+    std::function<bool(uint32_t member, uint32_t bone, venue::Vec3& out)> bonePos;
+    // EngineWind (the Star Power hearts / bats / butterflies / peace swirl):
+    // a twist about the wind's vertical axis plus its velocity, on the
+    // particles within `range` (inv_distance attenuation) [C scripts; I: the
+    // field's model]. Create replaces, modify moves it, remove ends it.
+    struct Wind {
+        venue::Vec3 pos{}, velocity{};
+        float speed = 0, tangentWeight = 0, range = 0;
+    };
+    void setWind(uint32_t name, const Wind& w) { winds_[name] = w; }
+    Wind* wind(uint32_t name) {
+        auto it = winds_.find(name);
+        return it == winds_.end() ? nullptr : &it->second;
+    }
+    void removeWind(uint32_t name) { winds_.erase(name); }
+    // CreateTeslaEffectObject / SetTeslaEffectObject (the default Star Power:
+    // bolts from the guitar to the zone's TeslaNodes), drawn by VenueStage.
+    struct Tesla {
+        venue::Vec3 start{}, end{};
+        float width = 0.1f;
+    };
+    std::unordered_map<uint32_t, Tesla> teslas;
+    uint64_t scriptedCreated = 0;
+    uint64_t ribbonSegments = 0;  // textureribbontrail quads drawn (all frames)
+    uint32_t shadowLight = 0;  // SetShadowDirFromLight's light (0: none)
+    // The camera director's script shots (CameraDirector::startScript): the
+    // zone VM runs the control script; its ccam_domorph / ccam_waitmorph
+    // reach the director through these.
+    std::function<void(const qb::Struct& params, double ms)> camMorph;
+    std::function<bool(double ms)> camMorphDone;
+    uint32_t spawnCameraScript(uint32_t script);
+    void killRun(uint32_t run);
+private:
+    std::unordered_map<uint32_t, Wind> winds_;
+public:
+private:
+    // The particleobject nodes (z_party's GFX fires / smoke / sparks): the
+    // system emitting now (index into systems_ by id), its params, position.
+    struct NodeEmitter {
+        venue::Vec3 pos{};
+        qb::Value params;
+        uint64_t system = 0;  // the running system's seed (0: none)
+        float rate = 0;
+        float ownRate = 0;    // its params' emit_rate (createdatstart / Create)
+    };
+    std::unordered_map<uint32_t, NodeEmitter> nodeEmitters_;
+    struct Lock {
+        uint32_t target = 0;
+        venue::Vec3 offset{};
+    };
+    std::unordered_map<uint32_t, Lock> locks_;
+    const venue::LightShow* show_ = nullptr;
+    struct Flash {
+        bool on = false;
+        float b0 = 1, c0 = 1, b1 = 1, c1 = 1;  // from / to
+        double t0 = 0, dur = 0;
+    } flash_;
+    void setEmitRate(uint32_t node, float rate, double t);
     // One rotation axis (degrees) or the position: linear in song time.
     struct Axis {
         float a0 = 0;      // the angle at t0
@@ -143,6 +247,9 @@ private:
     uint32_t pyroScript_ = 0;
     std::vector<uint32_t> perfScripts_;
     std::vector<double> pyroTimes_;
+    // The drummer's kicks: (time, drumkick_left / _right) (Drum_iterator_CFunc).
+    std::vector<std::pair<double, uint32_t>> kicks_;
+    size_t kickAt_ = 0;
     size_t pyroAt_ = 0, perfAt_ = 0;
     venue::Performance lastPerf_ = venue::Performance::Medium;
     double vmTime_ = 0;

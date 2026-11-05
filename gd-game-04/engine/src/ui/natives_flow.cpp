@@ -57,17 +57,25 @@ void addFlowNatives(qs::Vm& vm, FlowState& st) {
                           "ResetEventHandlersFromTable", "RequireParams", "EnableUserMusic", "MassiveInit", "English",
                           "ClearDataBuffer", "SetRandomSeeds", "SetSlomo", "LockDSP", "UnLockDSP", "KillCamAnim", "PlayIGCCam",
                           "SetViewportProperties", "ScreenFX_ClearFXInstances", "ScreenFX_UpdateFXInstanceParams",
-                          "ScreenFX_AddFXInstance", "HideObjectByType", "SetProgressionMaxDifficulty", "Init2DParticles",
+                          "ScreenFX_AddFXInstance", "ScreenFX_RemoveFXInstance", "HideObjectByType", "SetProgressionMaxDifficulty", "Init2DParticles",
                           "AddToMaterialLibrary", "SetFontProperties", "SetFontNonProportionalNumbers", "EnableRemoveSoundEntry",
                           "SetScenePermanent", "ParseNodeArray", "startup", "CreateBussSystem", "SetSoundBussParams", "SoundBussLock",
                           "SoundBussUnLock", "createsoundbusseffects", "SetSoundBussEffects", "createnodeflag", "LightShow_Init",
                           "LightShow_SetProcessors", "CreatePakManMap", "UnloadPak", "WaitUnloadPak",
                           // guitar_startup's LoadFSB streams/streamall: audio/fsb reads the banks when played [C script]
-                          "LoadFSB"})
+                          "LoadFSB",
+                          // The song's streams are the native core's (D10, GD04-021): it starts,
+                          // pauses and stops them itself, with the guitar volume it tracks
+                          // [C scripts startpreloadpaused_song, begin_song, preload_song];
+                          // practice's section preview replaces these (ui/song_preview.cpp).
+                          "StartPreloadedStream", "PauseSound", "SetLastGuitarVolume",
+                          // Achievements and leaderboard posts, dropped (GD04-013) [C scripts
+                          // Achievements_SongWon, send_leader_board_message].
+                          "AddParam", "GetNetID", "CheckAndWriteMakerAchievement"})
         vm.addNative(n, yes);
     for (const char* n : {"NetSessionFunc", "IsHost", "EnumContentFiles", "IsEnumContentFilesDamaged", "GetLatestContentIndexFile",
                           "GetContentFolderIndexFromFile", "French", "German", "Spanish", "Italian", "IsCreated", "CompositeObjectExists",
-                          "IsInNodeArray", "IsSoundPlaying", "IsMovieInBuffer", "IsMoviePreLoaded", "GetGameProfileSetting"})
+                          "IsInNodeArray", "IsMovieInBuffer", "IsMoviePreLoaded", "GetGameProfileSetting"})
         vm.addNative(n, no);
     vm.addNative("EnumContentFilesFinished", yes);
     // GetDisplaySettings: a 16:9 frame (widescreen = 1) [I].
@@ -160,6 +168,30 @@ void addFlowNatives(qs::Vm& vm, FlowState& st) {
         if (const qb::Value* v = Vm::param(*l, n->key)) Vm::set(*l, n->key, Vm::makeInt(int32_t(Vm::number(v, 0))));
         return true;
     });
+    // cs_check_if_new_page dir = d icon_index = i total_guitarists = n ->
+    // cs_go_new_page: the script reads `$ <icon_index>`, but its caller
+    // passes the icon's number (`icon_index = $ <char_select_icon_index>`),
+    // and `$` of a number names no global (0x821977A0's 0x4B case keeps the
+    // argument's raw word as a global's key) [C], so the down test never
+    // pages. A retail disc has at most 13 guitarists, g_cs_num_icons, and
+    // never pages; Enable Cut Content's 17 (the Bone Men) need the second
+    // page the menu is built for (cs_load_characters' starting_index,
+    // cs_icon_id_next / _prev): the script's tests on the number. With 13
+    // or fewer the answer is the script's on a retail disc (owner GD04-094)
+    // [C script cs_check_if_new_page; I: the port's reading].
+    vm.addNative("cs_check_if_new_page", [](Vm& v, ScriptRun& run, qb::Struct& p) {
+        const qb::Value* iv = Vm::param(p, K("icon_index"));
+        if (iv && (iv->type == qb::Type::Key || iv->type == qb::Type::KeyPtr)) iv = v.global(iv->key);
+        const int icon = int(Vm::number(iv, 0));
+        const int total = int(Vm::number(Vm::param(p, K("total_guitarists")), 0));
+        const qb::Value* nIcons = v.global(K("g_cs_num_icons"));
+        const int icons = nIcons ? int(nIcons->number()) : 13;
+        const qb::Value* dir = Vm::param(p, K("dir"));
+        const bool down = !dir || dir->key == K("down");
+        const bool page = down ? (icon + 1 >= icons && total > icon + 1) : (icon - 1 < 0);
+        if (qb::Struct* l = locals(run)) Vm::set(*l, K("cs_go_new_page"), Vm::makeInt(page ? 1 : 0));
+        return true;
+    });
     vm.addNative("MathMin", [](Vm&, ScriptRun& run, qb::Struct& p) {
         const float a = Vm::number(Vm::param(p, K("a")), 0), b = Vm::number(Vm::param(p, K("b")), 0);
         if (qb::Struct* l = locals(run)) Vm::set(*l, K("min"), Vm::makeFloat(std::min(a, b)));
@@ -243,6 +275,18 @@ void addFlowNatives(qs::Vm& vm, FlowState& st) {
         out.arr = a && a->arr ? std::make_shared<qb::Array>(*a->arr) : std::make_shared<qb::Array>();
         if (out.arr->type == qb::Type::None) out.arr->type = e->type;
         out.arr->values.push_back(*e);
+        if (qb::Struct* l = locals(run)) Vm::set(*l, K("array"), out);
+        return true;
+    });
+    // RemoveArrayElement array = a index = i -> array (a copy without element
+    // i) [C script store_prune_guitar_finishes: the finishes a guitar lacks].
+    vm.addNative("RemoveArrayElement", [](Vm&, ScriptRun& run, qb::Struct& p) {
+        const qb::Value* a = Vm::param(p, K("array"));
+        const int i = int(Vm::number(Vm::param(p, K("index")), -1));
+        qb::Value out;
+        out.type = qb::Type::Array;
+        out.arr = a && a->arr ? std::make_shared<qb::Array>(*a->arr) : std::make_shared<qb::Array>();
+        if (i >= 0 && size_t(i) < out.arr->values.size()) out.arr->values.erase(out.arr->values.begin() + i);
         if (qb::Struct* l = locals(run)) Vm::set(*l, K("array"), out);
         return true;
     });

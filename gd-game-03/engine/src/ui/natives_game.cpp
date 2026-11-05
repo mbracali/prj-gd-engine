@@ -449,7 +449,15 @@ public:
                 if (d.id.rfind("pad:", 0) == 0 && ui.input().gh2Type(d.id).find("joypad") == std::string::npos) guitar = true;
             return r = Value::symbol(guitar ? "guitar" : "joypad"), true;
         }
-        if (msg == "is_missing_controller") return true;  // keyboards and controllers come and go freely in the port
+        // Player 1's slot, and player 2's in multiplayer, lost its device mid-song
+        // (as gd-game-01, GH1's 0x00113910 [C]): the song pauses on
+        // pause_controller_screen (game.dta). The keyboard plays any free
+        // slot unless the Gamepads screen gave it a player, so only a pad
+        // unplugged with the keyboard on the other player leaves one empty.
+        if (msg == "is_missing_controller") {
+            const bool multi = gameCfgValue(ui, "num_players").integerValue() > 1;
+            return r = Value::integer(ui.host().gameDeviceLost(0) || (multi && ui.host().gameDeviceLost(1)) ? 1 : 0), true;
+        }
         // PS2: true greys out MULTIPLAYER when pad 2 is missing; the port
         // assigns players in GAMEPADS, so it is never missing (DECISIONS D4).
         if (msg == "is_missing_multi_controller") return true;
@@ -719,12 +727,25 @@ private:
             // The mean multiplier: score over base score [I].
             return r = Value::real(p && p->baseScore() > 0 ? float(p->score()) / float(p->baseScore()) : 1.0f), true;
         }
-        if (msg == "sp_phrases" || msg == "streaks_broken") return r = Value::integer(ui_.host().gameCounter(index, msg)), true;
+        // sp_phrases: "<captured>/<started>" (0x001131a0: sprintf "%d/%d" of
+        // the Star Power object's +0x60 / +0x64) [C].
+        if (msg == "sp_phrases")
+            return r = Value::string(std::to_string(ui_.host().gameCounter(index, "sp_phrases")) + "/" +
+                                     std::to_string(ui_.host().gameCounter(index, "sp_started"))),
+                   true;
+        if (msg == "streaks_broken") return r = Value::integer(ui_.host().gameCounter(index, msg)), true;
+        // The face-off stats' time in the lead: the PS2 returns the player's
+        // +0x24 float (0x001131a0), which no code on the disc writes (the
+        // decompiled player code searched: no store to it) [C by absence]: 0.
         if (msg == "lead_time_sec") return r = Value::real(0), true;
         if (msg == "base_multiplier") return r = Value::integer(p ? p->baseMultiplier() : 1), true;
         if (msg == "in_star_mode") return r = Value::integer(p && p->starPowerActive() ? 1 : 0), true;
         if (msg == "star_power_ready") return r = Value::integer(p && p->starPowerReady() ? 1 : 0), true;
         if (msg == "crowd_rating") return r = Value::real(p ? p->rockMeter() : 0.5f), true;
+        // The developer cheats (cheats.dta l / w / # $ %): lose now, win now [I:
+        // the win's star count is not forced, the song just ends won].
+        if (msg == "lose") return ui_.host().gameForceLose(), true;
+        if (msg == "win" && !args.empty()) return ui_.host().gameForceWin(), true;
         if (msg == "crowd_rating_active") return r = Value::integer(p && p->crowdActive() ? 1 : 0), true;
         // set_crowd_rating / set_crowd_rating_active (0x0010fe90) [C]: the
         // tutorials' interface lesson and the cheats' crowd meter toggle.

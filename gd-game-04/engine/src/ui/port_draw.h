@@ -17,7 +17,7 @@ class UiSystem;
 // select_panels.cpp and gamepad_panel.cpp), as gd02 ported them
 // (gd-game-02/engine/src/ui/port_draw.*), in GH3's menu fonts and colours, in
 // menu units (1280 x 720). The shared look of every gd-game's two screens is
-// guidelines/universal_launcher.md. Text heights are line heights, as gd01's
+// docs/knowledge/universal_launcher.md. Text heights are line heights, as gd01's
 // drawText takes them; GH3's fonts are scaled so their line height is that
 // height. The page slides and fades with the screen transition (offset,
 // fade), as gd01's do. Unlike gd02 there is one pass: the canvas batches by
@@ -28,6 +28,9 @@ public:
     PortDraw(Canvas& c, const ui::UiSystem& ui) : c_(c), ui_(ui) {}
 
     void setTransition(float offset, float fade) { offset_ = offset, fade_ = fade; }
+    // The app drew the band's still shot under this frame (App::drawMenuBackdrop).
+    static inline bool backdropDrawn = false;
+    bool hasBackdrop() const { return backdropDrawn; }
     float offset() const { return offset_; }
 
     void quad(float x0, float y0, float x1, float y1, const Color& c);
@@ -42,6 +45,8 @@ public:
     // `title`: GH3's title font (fontgrid_title_gh3, the main menu's), else
     // its body font (text_a5, the options menu's).
     void text(const std::string& s, float x, float y, float h, const Color& c, uint32_t align, bool title = false);
+    // A GH3 texture over x0..x1, y0..y1 (the page's slide and fade applied); false if not loaded.
+    bool sprite(uint32_t texture, float x0, float y0, float x1, float y1, const Color& c, bool flipU = false);
     float width(const std::string& s, float h, bool title = false) const;
     std::string fit(std::string s, float h, float width, bool title = false) const;
     std::vector<std::string> wrap(const std::string& s, float width, float h) const;

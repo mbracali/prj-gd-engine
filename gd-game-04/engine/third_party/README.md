@@ -3,6 +3,7 @@
 | Folder | What | Version | Licence |
 |---|---|---|---|
 | (not in the repo) FFmpeg | GH3's Bink videos and XMA audio: the Bink demuxer, the Bink video / audio decoders and the XMA1 / XMA2 decoders only | 7.1.5 | LGPL 2.1 or later |
+| `rtmidi/` | RtMidi (MIDI input: ALSA, WinMM, CoreMIDI), unchanged, copied from gd-game-03; built by its own `CMakeLists.txt`; the Generic MIDI input of the Gamepad menu (`src/input/midi_in.cpp`); not built on Android (MIDI shows as unavailable) | 6.0.0 | MIT (`rtmidi/LICENSE`) |
 
 ## FFmpeg: downloaded and built by the build scripts
 

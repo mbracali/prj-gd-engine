@@ -97,10 +97,10 @@ fallback (the character's highway material: M6) [I].
 
 | attack | effect on the victim |
 |---|---|
-| Amp Overload | gems flicker in runs of [F, 2F-1] events every 3 frames (F 2/2/3/3), still judged; the highway bobs +-8 px [battle_lightning, 0x821195C0] |
+| Amp Overload | gems flicker in runs of [F, 2F-1] events every 3 frames (F 2/2/3/3), still judged; the highway bobs +-8 px (shake_highway, below) [battle_lightning, shake_highway, 0x821195C0] |
 | Difficulty Up | after the sustains on the highway (`hold_difficulty_up`), notes come from the next difficulty's chart for the drain; expert: Double Notes [battle_up_difficulty, 0x821213A8] |
 | Double Notes | at fill time a fret added per GH3's table, HOPOs off [0x821044C8] |
-| Powerup Steal | ~1 s later the victim's top card joins the thief's hand [battle_steal] |
+| Powerup Steal | animate_steal: a game frame + 0.5 s (the open hand) later the victim's top card is taken; 0.5 s later (the closing hand) it is the thief's, placed at once (battlemode_ready steal = 1) [battle_steal, animate_steal] |
 | Lefty Flip | gems mirrored at once, the fret buttons a highway later, back after the drain (visual only) [battle_lefty_notes] |
 | Broken String | a random fret (easy 3 / medium 4 / 5 lanes) dead until pressed 6/8/10/12 times [battle_broken_string, 0x82100DA0] |
 | Whammy | every fret dead until the whammy passes half 3/4/5/6 times [battle_whammy_attack] |
@@ -113,8 +113,25 @@ fallback (the character's highway material: M6) [I].
   every new card Death Drain, no invincibility; repeats [GuitarEvent_SongWon,
   restart_song]. (Its `save_current_powerups_p1 = <current_powerups_p1>` reads
   an unset local, so saved hands come back empty [C script; kept].)
-- Hit by an attack (`fire_bolt`): the highway is pushed (-70, 50) / (70, 50)
-  over 0.1 s and back [hammer_highway].
+- Every attack (battle_trigger_on / bossbattle_trigger_on): the victim's
+  gem_container is pushed (-70, 50) / (70, 50) from where it is over 0.1 s
+  and back over 0.1 s (linear morphs); a hammer while one runs
+  (battle_p<n>_highway_hammer) is skipped [hammer_highway]. Amp Overload's
+  shake_highway waits for a running hammer, then morphs the container to
+  +(0, 8) / -(0, 8) by turns over 0.05 s, each followed by a game frame's
+  wait, and snaps back when shake_notes is -1; its morphs and the hammer's
+  replace each other (one morph per element), as in GH3. Death Drain's
+  bites: every flap of the alert (4 game frames) with a non-zero turn runs
+  hammer_highway with push (0, 30) and time 0.01 s, and bite_particle's red
+  sparks [C scripts; render/highway2d.cpp stepBattle / hammer].
+- The band: battle_trigger_on runs `Band_PlayAttackAnim` on the attacker's
+  `band_member` and `Band_PlayResponseAnim` on the receiver's (Type = the
+  power-up's index); each sends `play_battle_anim` with the anim set entry
+  of `player1_battlemode_anims` / `player2_battlemode_anims` (ATTACK /
+  attack_right, react_right): the attacker's at once (`no_wait`), the
+  receiver's after its current anim [C scripts]. gd04 runs both scripts from
+  the native attacks; CompositeObjectExists answers true for the song's
+  members and play_battle_anim reaches the member's handle_play_anim.
 
 ## 6. Boss battles [C unless noted]
 
@@ -173,17 +190,49 @@ Drawn (render/hud2p.cpp, render/highway2d.cpp, data/band.cpp):
   fret here) is [I].
 - attack_bolt (fire_bolt cards; Death Drain's own at 80 deg):
   sys_Big_Bolt01_Red at (640,230) -/+ (330,0), turned -/+ 60, P1 mirrored,
-  8 game frames [C script; the red material's tint and the bolt's sparks I /
-  not drawn]. hammer_highway now follows every attack, as battle_trigger_on
-  spawns it unconditionally [C script].
+  8 game frames; the material's colour (1, 0.263, 0.059) [C data: global.pak
+  material 0x0BB3C16A, +0x170] and flip-book (8 frames, 15 fps). Its sparks:
+  Create2DParticleSystem at the bolt's pos +/- (455, 0) + (0, 250) (the
+  other highway), sys_Particle_Spark01 [255 66 0 255] -> [128 0 0 0],
+  scale 2 -> 0.5, angle spread 360, spin -500..500, emit_dir 300 / -300,
+  spread 90, velocity 16, friction (0, 24), life 1 s, one per 0.01 s, the
+  system stopped 10 game frames later (kill_when_empty) [C script
+  attack_bolt; ui/song_hooks.cpp, the motion's units I as ui/fx2d].
+- The battle alert above each highway (create_battle_alert_frames,
+  update_battle_alert_icon): battle_alert_container<p> at (640 -/+ 225,
+  655 - 270 - 48), z 49; for Difficulty Up / Double Notes / Lefty Flip on
+  that player: one: the frame (ends battle_alert_frame_end 32x72 at -/+48
+  scaled to -/+16x3, middle x3) fades in, battle_alert_fill_single x(1.2,1)
+  tinted [210 210 210] / [200 115 200] / [55 170 130], the icon at
+  battle_alert_icon_pos_off_2, star_1; two / three: the frame x5 / x7, the
+  pair's fill (hard_double / hard_lefty / double_lefty x1.1, triple x1)
+  and icons at pos_off_4 / 5 (1 / 2 / 3), star_2 / 3; every change a 0.3 s
+  morph; the text ("MEDIUM " / "HARD " / "EXPERT ", "DOUBLE ", "LEFTY" or
+  "RIGHTY" for a lefty player) text_a6 [100 0 0], scale (0.4 / 0.35 /
+  0.325, 0.75), fit_text_in_rectangle past width_max. update_hud_* run at
+  an attack's start, remove_hud_* poll every 30 frames and update again
+  when it is over [C scripts guitar_battle_hud_icons.qb; y of the text fit I].
+- attack_ready_text: the card's name 0.3 s after it is awarded, text_a4 0.6
+  white at attack_ready_text_pos_p<n> (just left / right bottom), 3 s, then
+  alpha 0 in 0.3 s [C script]. Boss battles' cards (bossbattle_ready) fly
+  at alpha 1; a stolen card is placed at once [C scripts].
+- The steal: battle_hud_steal_hand_open from the thief's card slot + (0,-10)
+  to the victim's + (0,-10) -/+ (40,0), alpha 0 -> 1, 0.5 s; then the taken
+  card (64x64) flies to the thief's slot in 0.5 s under
+  battle_hud_steal_hand (alpha 1; after 0.4 s -> 0 in 0.1 s); the hands x
+  scale -1 when player 1 is robbed [C script animate_steal].
 - Death Drain: the death icon (icon_attack_deth_128; boss songs their own)
   at the victim's side pulsing alpha 0.95 / 0.1 every 0.15 s; the "DEATH
   DRAIN" alert (battle_alert_death + wings + text_a10) at (640 -/+ 225, 430),
   scale 0.9 + 0.3 (1 - health), 220 (1 - health) px lower, turning to a
   random -7..7 deg and flapping every 4 game frames [C scripts
   battle_death_lick, animate_death_icon, death_text, death_text_wing_flap;
-  relative_scale read as absolute 1.1 / 1.2 I; the bite sparks and the
-  highway's bite push not drawn].
+  relative_scale read as absolute 1.1 / 1.2 I]. Each flap with a non-zero
+  turn bites: bite_particle's sparks at the alert's (190,120) (turn > 0) /
+  (65,120), [255 0 0 255] -> [128 0 0 0], emit_dir 0, spread 160, velocity
+  10, friction (0, 50), life 0.25 s, destroyed with its sparks 7 frames
+  later, and the highway's hammer (0, 30) in 0.01 s [C script; the sparks'
+  origin taken once, the parent's later turns not followed I].
 - The attacks in force on a player (add_battle_text: hud_screen_elements'
   texts, text_a6 0.7) at (380,35) / (890,35), older ones lower [C script;
   their order and the x shift of older texts I].
@@ -224,10 +273,11 @@ Not done / approximations:
   unlocked by GH3's own Progression_TierBossUnlock tier = 2). It needed
   StructureContains to see flags (`$boss` in a tier): Progression_GetBossSong
   found no boss before (GD04-038).
-- Card animations beyond the flight (the steal hand, the whammy bar
-  training, lefty flip's button slide), band attack / response animations,
-  the battle alert frames (create_battle_alert_frames), attack_ready_text's
-  exact motion.
+- The whammy bar training; lefty flip's button slide (animate_lefty_flip:
+  each button's base morphs between pos_2d and left_pos_2d in 0.15 s, then
+  lefthanded_button_ups flips) is drawn by render/highway2d without the
+  morph's `- pixels` y term [I]; the cards' slides start from their slots, not from where an interrupted
+  slide left them [I]; two steals at once share one animation [I].
 - Co-op's time_in_lead is not kept.
 - Battle / boss: the cards and attacks are the native Match's; GH3's
   battle scripts give only their sounds (Battle_Power_Awarded_SFX_P<n>, the

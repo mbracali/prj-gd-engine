@@ -236,8 +236,9 @@ Do these steps:
 5. A miss or pass already mutes the guitar through `setGuitarAudible(false)`, which is the StopSlip
    equivalent. On the next hit, resync **before** or at the same time as un-muting, so the fade-in
    starts in sync.
-6. The digital whammy wiggle (`0.3 + 0.3 sin`) never reaches exactly 0, so the bend would never arm. For
-   keyboard play, arm on `w <= 0.01` [I], or arm when the key is pressed. The analog bar at rest gives
+6. A digital whammy (key or button) holds the bar fully down (1.0) while held, as a guitar's lever held
+   down: a steady bend, not the old `0.3 + 0.3 sin` wiggle (#56). The bend arms on `w <= 0.01` [I], so
+   a key let go and pressed again on the sustain bends it, as a lever rested and pushed. The analog bar at rest gives
    0 (`min(axis,0)` clips the positive side) [C/I].
 7. Pause: the slip voice pauses with the stream (IOP state 3 restores its pitch × speed) [C]. Freeze
    `slipLag_`, which happens naturally because `fill` returns early.

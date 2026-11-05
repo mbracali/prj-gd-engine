@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
+#include "scene/ui_styles.h"
 #include "tests/selftest.h"
 
+#include <cstring>
+#include <cctype>
 #include <algorithm>
 #include <cstdio>
 #include <cmath>
@@ -149,9 +152,10 @@ struct Play {
 };
 
 Play play(const Song& song, const Rules& rules, const std::string& script, float untilMs = 0,
-          ControllerMode mode = ControllerMode::Guitar) {
+          ControllerMode mode = ControllerMode::Guitar, std::vector<int> bigNotes = {}) {
     Play r;
     r.p = std::make_unique<Player>(song, Part::Guitar, Difficulty::Expert, rules, mode, false);
+    r.p->setBigNotes(std::move(bigNotes));
     KeyScript keys(script);
     if (!keys.valid()) throw std::runtime_error("bad key script: " + script);
     if (untilMs <= 0) untilMs = song.endMs;
@@ -447,6 +451,17 @@ int runRuleChecks(const Rules& rules) {
         Play r2 = play(s, rules, "999:+green,1000:strum,1480:-green", 3000);
         check("sustain: 2 beats = 50 tail points held fully, 25 when let go halfway", r.p->score() == 100 && r2.p->score() == 75);
         check("sustain: base score counts the tail (50 + 960 x 25 / 480 = 100 for the first gem)", r.p->baseScore() == 100 + 50);
+        // GD02-150: blew_big_note only from a big note's sustain let go under
+        // a tenth of its points (0x822C86F8 -> 0x822C7F30) [C].
+        const std::vector<int> big{1000};
+        Play b1 = play(s, rules, "999:+green,1000:strum,1020:-green", 3000, ControllerMode::Guitar, big);
+        Play b2 = play(s, rules, "999:+green,1000:strum,1480:-green", 3000, ControllerMode::Guitar, big);
+        Play b3 = play(s, rules, "999:+green,1000:strum,2500:-green", 3000, ControllerMode::Guitar, big);
+        Play b4 = play(s, rules, "", 3000, ControllerMode::Guitar, big);
+        Play b5 = play(s, rules, "999:+green,1000:strum,1020:-green", 3000, ControllerMode::Guitar, {1200});
+        check("big note: its sustain let go at once blows it; halfway, held or missed it does not; 0.2 beats away it does not",
+              b1.count(K::BlewBigNote) == 1 && b2.count(K::BlewBigNote) == 0 && b3.count(K::BlewBigNote) == 0 &&
+                  b4.count(K::BlewBigNote) == 0 && b5.count(K::BlewBigNote) == 0);
         // 0x823500c8 [C]: a fret pressed below a sustained single note (an anchor) keeps it, one above ends it.
         Song y = makeSong({{1000, Y, 960}, {5000, R}});
         Play r3 = play(y, rules, "999:+yellow,1000:strum,1200:+green,2500:-yellow", 3000);
@@ -536,6 +551,41 @@ int runRuleChecks(const Rules& rules) {
 
 }  // namespace
 
+// GD02-154: no string the port can show names the Xbox 360, Xbox Live or a
+// console, in any of GH2's languages. The leaderboard / gamer card screens
+// are not in the port (GD02-066 dropped) and two Xbox Live tips are never
+// picked (scene::kDroppedLoadingTips).
+int checkPcWording(const GameData& data) {
+    static const char* const kNeverShown[] = {"help_tolisting", "help_gamercard", "lb_select_song", "leaderboards",
+                                              "loading_tip10", "loading_tip13"};
+    int failures = 0;
+    for (const std::string& lang : scene::Locale::languages()) {
+        scene::Locale loc;
+        loc.load(data, lang);
+        for (const auto& [token, text] : loc.strings()) {
+            std::string low = text;
+            for (char& c : low) c = char(std::tolower(static_cast<unsigned char>(c)));
+            auto word = [&](const char* w) {  // whole words only ("consolerà" is not "console")
+                const size_t n = std::strlen(w);
+                for (size_t at = low.find(w); at != std::string::npos; at = low.find(w, at + 1)) {
+                    const bool before = at > 0 && std::isalpha(static_cast<unsigned char>(low[at - 1]));
+                    const size_t e = at + n;
+                    const bool after = e < low.size() && (std::isalpha(static_cast<unsigned char>(low[e])) || (low[e] & 0x80));
+                    if (!before && !after) return true;
+                }
+                return false;
+            };
+            if (low.find("xbox") == std::string::npos && !word("console") && !word("konsole") && !word("consola")) continue;
+            bool skip = false;
+            for (const char* n : kNeverShown) skip = skip || token == n;
+            if (skip) continue;
+            std::fprintf(stderr, "  %s %s: \"%.80s\"\n", lang.c_str(), token.c_str(), text.c_str());
+            ++failures;
+        }
+    }
+    return failures;
+}
+
 int runSelfTest(const std::string& dataPath) {
     try {
         GameData data(dataPath);
@@ -612,9 +662,48 @@ int runSelfTest(const std::string& dataPath) {
         std::printf("input checks (virtual controllers):\n");
         const int inputFailures = runInputChecks();
         std::printf(inputFailures ? "%d input check(s) failed\n" : "all input checks passed\n", inputFailures);
+        // GD02-036: the disc's one bass range (X-Stream, PART GUITAR pitch 35
+        // at 302.21..302.31 s); a bass strum inside it is no overstrum.
+        int bassFailures = 0;
+        {
+            int ranges = 0;
+            bool ok = false;
+            for (const SongInfo& info : songs) {
+                Song sg;
+                try {
+                    sg = loadChart(data, info, rules);
+                } catch (const std::exception&) {
+                    continue;
+                }
+                ranges += int(sg.bassRanges.size());
+                if (info.id != "xstream" || sg.bassRanges.size() != 1 || !sg.hasPart[size_t(Part::Bass)]) continue;
+                const auto [a, b] = sg.bassRanges[0];
+                auto misses = [&](float at) {
+                    Player p(sg, Part::Bass, Difficulty::Expert, rules, ControllerMode::Guitar, true);  // no fail: nothing is played before
+                    p.setBassRanges(sg.bassRanges);
+                    int n = 0;
+                    for (float tt = -1000; tt < at + 50; tt += 4) {
+                        p.update(tt);
+                        if (tt <= at && tt + 4 > at) p.strum(at);
+                        for (const PlayerEvent& e : p.takeEvents()) n += e.kind == PlayerEvent::Kind::Miss && tt > at - 8;
+                    }
+                    return n;
+                };
+                ok = std::abs(a - 302210) < 5 && std::abs(b - 302314) < 5 && misses((a + b) / 2) == 0 && misses(a - 400) == 1;
+                std::printf("bass range: xstream %.0f..%.0f ms; a strum inside: %d miss(es), 400 ms before: %d\n", double(a), double(b),
+                            misses((a + b) / 2), misses(a - 400));
+            }
+            if (!ok || ranges != 1) {
+                std::printf("bass range check failed (%d ranges on the disc, expected 1)\n", ranges);
+                bassFailures = 1;
+            }
+        }
+        const int wordingFailures = checkPcWording(data);
+        std::printf(wordingFailures ? "%d string(s) still name the Xbox 360 or a console\n" : "PC wording: no Xbox 360 or console in any language\n",
+                    wordingFailures);
         std::printf("%d song audio file(s) with problems, %d script(s) not decoded\n", audioFailures, scriptFailures);
         std::printf(chartFailures ? "%d chart(s) not fully hit\n" : "all charts fully hit\n", chartFailures);
-        return chartFailures || audioFailures || scriptFailures || ruleFailures || inputFailures ? 1 : 0;
+        return chartFailures || audioFailures || scriptFailures || ruleFailures || inputFailures || wordingFailures || bassFailures ? 1 : 0;
     } catch (const std::exception& ex) {
         std::fprintf(stderr, "self-test failed: %s\n", ex.what());
         return 2;

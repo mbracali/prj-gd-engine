@@ -93,6 +93,13 @@ by the port over everything meanwhile (docs/ui.md §8; refcaps 00a matches).
   letterbox 0, mark_safe_for_shutdown (-> UnPauseSpawnedScript) [C].
   Stub path: IsMoviePlaying false makes every movie a no-op [I].
   Movies are `movies\bik\<name>.bik.xen` (the engine's `--playmovie` decodes them) [I].
+  The port: PlayMovie is the app's modal player, except with `noblack`
+  (create_main_menu's GH3_Intro): that one plays on texture slot 0 at
+  texturepri 1000 with its alpha (yuva420p; its first frame and last five are
+  transparent) over the main menu built before it, the scripts going on (two
+  frames in, fadetoblack OFF), IsMoviePlaying true until its end (ui/ui_movies.cpp).
+  Played modally and opaque its transparent frames had been ~25 black frames
+  between the card flip and the menu.
 
 ## 3. bootup_press_any_button_fs  (menu_press_any_button.qb)
 
@@ -113,6 +120,14 @@ by the port over everything meanwhile (docs/ui.md §8; refcaps 00a matches).
   => **GetButtonsPressed must return `makes` (nonzero on a new press) and
   `device_num` (the pad index)** [I].
 - action `continue` -> flow_state_func **bootup_check_for_sign_in** [C].
+- The port: the Enhanced menu's venue backdrop loads under this screen and is
+  uploaded a part a frame; a render target made then (its shadow map, screen
+  FX) must not unbind the frame being drawn, or that frame is presented black
+  (GD04-089; the boot walk checks no black frame from here to the main menu).
+  Its shot keeps its camera; a lens shift (VenueStage::setLensShift, NDC x in
+  every projection of the frame and the shadow cascades' slices) puts the
+  guitarist's head at x 1120 (NDC 0.75), above the description panel with the singer still in view (GD04-110).
+  The intro movie's last ~3 s are black in the movie itself [C: its frames].
 - destroy: destroy_menu pab_container, destroy_menu_backdrop, KillSpawnedScript
   check_for_any_input / attract_mode_spawner [C].
 
@@ -214,6 +229,11 @@ false, GetLatestContentIndexFile (82134408) false [I].
   fit_text_in_rectangle); 7 empty TextElements in the vmenu whose handlers
   highlight (guitar_menu_highlighter) and choose; add_user_control_helper
   SELECT / UP-DOWN; `LaunchEvent {Type=focus target=vmenu_main_menu}`.
+- XBOX LIVE (ONLINE on PC) is disabled the way GH3's demo mode disables it:
+  `demo_mode_disable = {rgba = [128 128 128 255] not_focusable}` on its text
+  and its vmenu item [C]. The port has no online play, so it applies that to
+  them always (UiSystem's CreateScreenElement; GD04-101): grey, skipped by the
+  pad, the keyboard and the mouse (the mouse walk checks it).
 - Quickplay item: `pad_choose main_menu_select_quickplay` -> game_mode =
   p1_quickplay, current_num_players = 1, player1/2 part = guitar,
   respond_to_action `select_quickplay` -> **quickplay_select_difficulty_fs**
@@ -267,22 +287,49 @@ runs first), `func = quickplay_start_song`, flow_state **quickplay_play_song_fs*
 ## 11. Loading + start (quickplay_start_song -> start_song)
 
 - `create_loading_screen {mode=play_song}` [C]: kill_start_key_binding;
-  is_changing_levels = 1; random tip; movie 'loading_flying': `IsMovieInBuffer`,
+  returns at once when is_changing_levels = 1, else sets it; random tip; movie 'loading_flying': `IsMovieInBuffer`,
   FreeMovieBuffer, AllocateMovieBuffer {buffer_slot=0 movie='movies\bik\loading_flying.bik.xen'},
   LoadMovieIntoBuffer, `PlayMovieFromBuffer {buffer_slot textureslot=2 no_hold
   wait_until_rendered texturepri=4999}`; TextBlockElement tip; "LOADING" letters
   (split_text_into_array_elements, StringToCharArray) + jiggle script.
   The port plays the movie on its texture slot behind the tip and holds the
   script at `wait_until_rendered` until the first picture is drawn (docs/ui.md
-  §8) [I], so the 10a screen shows; it is then destroyed within a frame or two
-  (the port's pak loads finish at once) and the song's own load runs after it,
-  in one long frame of the app's - the 360 shows LOADING for about 2 s
-  (refcaps 10a at 1.0 s, 10b fly-by at 2.9 s).
+  §8) [I], so the 10a screen shows. The native start_gem_scroller asks the
+  app for the song's venue at once (FrontEnd::preloadRequest): it loads on a
+  worker thread from a snapshot of the globals (ui/song_screen.h
+  VenuePreload) while the loading screen animates, and the script waits
+  until the song has started before going on, as GH3's start_gem_scroller
+  returns after its async loads; destroy_loading_screen comes with the song.
+  destroy_loading_screen leaves is_changing_levels at 1 while playing_song =
+  1; every start transition's Transition_StartRendering (Common_*_Transition,
+  time 100) sets it back to 0 (and enable_pause). The port runs the
+  transitions natively, so SongHooks spawns Transition_StartRendering 100 ms
+  into the song; without it every song after the first had no loading screen
+  and handle_start_pressed refused the pause menu [C scripts].
+  Paks, the animation library and loaded characters are shared caches. The
+  360 shows LOADING for about 2 s (refcaps 10a at 1.0 s, 10b fly-by at 2.9 s);
+  the port holds it 2 s at least (GD04-040).
 - `quickplay_start_song` [C]: cs_get_total_guitarists, GetRandomValue ->
   random guitarist (character_id, style 1, outfit 1); random guitar from
   Bonus_Guitars + Secret_Guitars with `unlocked_for_purchase` (GetGlobalTags,
   AddArrayElement); random venue (get_total_num_venues / get_valid_venue_index
-  -> current_level); `start_song device_num`.
+  -> current_level: the venues whose save-wide `venue_<zone>` tag is
+  unlocked, over LevelZoneArray, which lists `viewer` = z_viewer, a zone with
+  no scene; The Glitches' unlock leaves the debug_only zones locked so the
+  random venue is never it); `start_song device_num`. The guitarist is any
+  valid character (get_valid_character_index: unlocked, not debug_only, a
+  Guitarist), so Slash, Tom Morello, Lou, the God of Rock and the Grim Ripper
+  appear once unlocked in the save; the bassist, drummer and singer come from
+  the song (create_band: the song's `bassist` / `singer`, Bret Michaels only on
+  `singer = bret` or Cheat_BretMichaels) [C scripts]. The port's Enable Cut
+  Content does not apply to this draw (the Bone Men only in character select).
+- Character select pages by g_cs_num_icons (13): cs_check_if_new_page reads
+  `$ <icon_index>` while its caller passes the number, so on GH3 it never
+  pages (a retail disc has at most 13 guitarists) [C]; Enable Cut Content's 17
+  need the second page, so the port answers it from the number (natives_flow)
+  [I: the port's reading]. Enable Cut Content is no longer offered (owner
+  11-05, GD04-110: its only value is off, a saved on is dropped), so the
+  second page is unreachable; the paging stays.
 - `start_song` (guitar_gems.qb) [C]: mark_unsafe_for_shutdown;
   set_rich_presence_game_mode; xenon_singleplayer_session_init (CheckForSignin
   false -> nothing on Xenon); **Load_Venue** (GetPakManCurrentName map=zones;
@@ -389,6 +436,62 @@ interface the scripts expect from it. Fail: health <= 0 is decided in C
   highway, Destroy2DParticleSystem all, `LaunchGemEvent {event=kill_objects}`,
   KillSpawnedScript of every gameplay script) -> **quickplay_win_song_fs**;
   agora/net stats (stubs) [C].
+- Timeline of a won song (quickplay) [C scripts win_song,
+  get_song_end_time, GuitarEvent_SongWon_Spawned, waitAndKillHighway,
+  You_Rock_Waiting_Crowd_SFX, jiggle_text_array_elements,
+  explode_text_array_elements, Common_SongWon_Transition, play_outro,
+  end_song; data Song_Win_Delay = 2, Default_SongWon_Transition time 8000]:
+  T = get_song_end_time (the latest end, time + length, of the last entry of
+  the expert guitar / rhythm arrays, and the co-op ones with
+  use_coop_notetracks): KillMovie slot 1, PreLoadMovie Fret_Flames (face-off:
+  Player1_wins / Player2_wins by score) slot 1, texturepri 70, no_looping,
+  no_hold. T + 2 s: song_won: You_Rock_End_SFX, Fret_Flames starts, "You
+  Rock!" letters (z 95) jiggle every 0.075 s (random +-10 x, -10 y, rot 0..3,
+  scale x 0.7..1.3 relative), the songwon transition starts: play_win_anims,
+  play_outro (destroy_hud: the HUD goes; end_song: StopStream, the music
+  stops; kill_cameracuts_iterator), Transition_CameraCut cameras_win (8000
+  ms). T + 2.5 s: waitAndKillHighway: Crowd_Fast_Surge_Cheer,
+  disable_bg_viewport -> disable_highway (gem containers and HUD alpha 0: the
+  highway goes). T + 4 s: Crowd_Fast_Surge_Cheer + Medium_Crowd_Applause.
+  T + 5 s: the letters explode to the four corners over 1 s (ease_out, rot
+  0..180). T + 10 s: Transition_Wait over, action win_song ->
+  kill_gem_scroller -> newspaper; Crowd_Med_To_Good_SFX.
+- The port [C as above, I where marked]: ui/song_screen raises song_won at
+  T + Song_Win_Delay (won()); the app keeps the song drawn and its clock
+  running (FrontEnd::songOutro) under the scripts until kill_gem_scroller;
+  Vm::onScriptEnter maps destroy_hud / disable_highway to the native HUD /
+  highway; the venue's outro (VenueStage::outro: play_win_anims, cameras_win)
+  starts with song_won; ui/song_hooks preloads win_song's movie at T, and
+  StopStream in the end silences the song (Mixer::silence); the Bink alpha
+  movie (YUVA 4:2:0) is drawn with its alpha. Practice still ends 2 s after
+  its section, the venue drawn alone under GH3's transition (App::outroSong_).
+- Timeline of a failed song [C scripts GuitarEvent_SongFailed,
+  GuitarEvent_SongFailed_Spawned, Common_SongLost_Transition, play_outro,
+  end_song, Failed_Song_Pitch_Down; data Default_SongLost_Transition time
+  8000]: the C code's song_failed comes as the health runs out (battle: the
+  script turns it into GuitarEvent_SongWon battle_win = 1). At once:
+  disable_highway_prepass, disable_bg_viewport -> disable_highway (not in a
+  boss battle, whose waitAndKillHighway hides it 0.7 s later under "<boss>
+  Rocks!" and the boss's movie), failed_song_time = GetSongTimeMs,
+  Progression_SongFailed, Crowd_Fail_Song_SFX, GH_SFX_You_Lose_Single_Player,
+  Transition_Play songlost: play_lose_anims, crowd looping state bad,
+  play_outro song_failed_pitch_streams = 1 (destroy_hud; end_song spawns
+  Failed_Song_Pitch_Down: SetSoundBussParams Band_Balance and Guitar_Balance
+  vol -20 dB, pitch -8 semitones over 3 s, then end_song stops the streams),
+  Crowd_AllPlayAnim idle, cameras_lose. After the 8 s transition: pausegame
+  (the song frozen) and the flow's fail_song: the fail menu over the frozen
+  venue; RETRY / NEW SONG / QUIT kill the gem scroller.
+- The port: a decided song (failed, a battle KO, a boss beaten) goes the won
+  song's way (songOutro, SongScreen::decided): FrontEnd::songEnded at the
+  decision, the song drawn and its clock running under the scripts until
+  kill_gem_scroller; disable_highway / destroy_hud reach the native highway
+  and HUD (Vm::onScriptEnter); SetSoundBussParams' Band_Balance /
+  Guitar_Balance at the song's end ramp the song's volume (dB) and pitch
+  (semitones, 2^(st/12): 0x8217B0B8 / 0x8217B140) in the mixer, the pitch as
+  the stream's resampling ratio (the song clock then follows the wall clock)
+  [I: linear ramps; both busses pitch alike in the data]; PauseGame during
+  the end pauses the song (its clock, the band, the venue). Walk `lose`
+  (the walk's fail at 10 s) checks the fail menu.
 - quickplay_win_song_fs Create `create_newspaper_menu` (1,369 lines: newspaper
   stats page; `GetGlobalTags Progression`, `GetGlobalTags user_options`,
   StopSoundsByBuss, new_menu newspaper_vmenu, np_create_options_menu) [C].
@@ -404,6 +507,11 @@ interface the scripts expect from it. Fail: health <= 0 is decided in C
   memcard_validate_card_data validateprev=1 (MC_HasActiveFolder ...); found ->
   memcard_save_file OverwriteConfirmed=1) -> `memcard_sequence_save_success`
   or `_failed` -> **quickplay_setlist_fs** [C].
+  The overwrite's create_overwrite_menu has an empty Xenon case (PS3:
+  OVERWRITING..., default: SAVING... "Saving Content...") [C], so memcard_save_file's
+  3 s timer showed no screen (black after each song); the port answers GetPlatform
+  there with the default case's platform (GD04-093, natives_core.cpp) [I]; the
+  quickplay walk checks no black frame from Top Rockers to the setlist.
 
 ## 13. Fail path
 

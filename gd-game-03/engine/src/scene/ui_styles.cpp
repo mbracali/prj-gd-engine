@@ -9,6 +9,7 @@
 #include "data/game_data.h"
 #include "scene/milo.h"
 #include "scene/objects.h"
+#include "scene/pc_strings.h"
 
 namespace scene {
 
@@ -252,6 +253,7 @@ void Locale::load(const GameData& data, const std::string& language) {
             if (e.isList() && e.children.size() >= 2 && e.children[0].isText() && e.children[1].isText())
                 strings_[e.children[0].s] = e.children[1].s;
     }
+    applyPcStrings(strings_, language);  // GD03-101
 }
 
 const std::string* Locale::find(const std::string& token) const {

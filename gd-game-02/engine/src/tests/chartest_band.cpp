@@ -440,11 +440,48 @@ int bandRun(const GameData& data) {
     return failures;
 }
 
+// GD02-050 G1: GH2 steps the hair once a 60 Hz frame with no time term
+// (0x8217B898); the port's hair keeps that rate at any frame rate. Two
+// seconds of alterna1 playing (the "normal" clips, head moving) at 60, 120
+// and 240 fps (the clips advance by the same time) end with the same bones.
+int hairRateRun(const GameData& data) {
+    auto run = [&](int fps, std::vector<scene::Xfm>& out) {
+        chr::ClipLibrary clips(data);
+        chr::Character c(data, "char/alterna1/ng/gen/alterna1.milo_xbox", clips);
+        chr::ClipDriver* d = c.mainDriver();
+        chr::Random rng(7);
+        if (d) d->rng = &rng, d->playGroup("normal", chr::kPlayLast | chr::kPlayGraphLoop);
+        const float dt = 1.0f / float(fps);
+        double beat = 0;
+        for (int f = 0; f < 2 * fps; ++f) {
+            chr::RigContext ctx;
+            beat += dt * 2.0;
+            ctx.beat = beat, ctx.dBeats = dt * 2.0f, ctx.dSeconds = dt, ctx.seconds = beat / 2;
+            c.poll(ctx);
+        }
+        chr::Skeleton& sk = c.skeleton();
+        for (int i = 0; i < sk.size(); ++i) out.push_back(sk.world(i));
+    };
+    std::vector<scene::Xfm> a, b, e;
+    run(60, a), run(120, b), run(240, e);
+    float worst = 0;
+    for (size_t i = 0; i < a.size() && i < b.size() && i < e.size(); ++i)
+        for (size_t k = 0; k < 3; ++k) {
+            worst = std::max({worst, std::abs(a[i].pos[k] - b[i].pos[k]), std::abs(a[i].pos[k] - e[i].pos[k])});
+            for (size_t j = 0; j < 3; ++j)  // the hair turns its bones: compare the rotations (x 10, units vs. axes)
+                worst = std::max({worst, 10 * std::abs(a[i].rot[k * 3 + j] - b[i].rot[k * 3 + j]), 10 * std::abs(a[i].rot[k * 3 + j] - e[i].rot[k * 3 + j])});
+        }
+    const bool ok = !a.empty() && a.size() == b.size() && a.size() == e.size() && worst < 0.05f;
+    std::printf("chartest: hair at 60 / 120 / 240 fps: %zu bones, worst %.4f apart%s\n", a.size(), double(worst), ok ? "" : " MISMATCH");
+    return ok ? 0 : 1;
+}
+
 }  // namespace
 
 int chartestBandChecks(const GameData& data) {
     int failures = loadChecks(data);
     failures += driverRun(data);
+    failures += hairRateRun(data);
     failures += runMidiParserTest(data);
     failures += bandRun(data);
     return failures;

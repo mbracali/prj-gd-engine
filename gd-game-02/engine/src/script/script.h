@@ -269,7 +269,7 @@ public:
     // Messages whose $var arguments are passed by name (as symbols).
     std::vector<std::string> byNameMessages{"foreach_player", "foreach_player_matcher", "interp_task", "foreach_venue",
                                             "finish_song", "next_cash_award", "get_highscore", "wait_timeout", "iterate",
-                                            "get_section_bounds"};
+                                            "get_section_bounds", "encore_newly_unlocked"};
 
     // ---- host settings
     std::map<std::string, std::string> locale;  // {localize token}

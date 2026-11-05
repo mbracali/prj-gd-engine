@@ -63,7 +63,7 @@ meter, career and store) were rebuilt from how the original behaves. It runs
 on Linux, Windows, macOS and Android.
 
 **Status:** alpha. Career, Quickplay, two-player and the tutorials play;
-see [gd-backlog.md](../gd-backlog.md) (section gd-game-01) for what is still missing.
+see [gd-backlog.md](../docs/tasks/gd-backlog.md) (section gd-game-01) for what is still missing.
 
 ## Download
 
@@ -115,7 +115,7 @@ skip with green, red, Enter, Start, a click or a tap; the help bar's buttons
 (CONFIRM, BACK, START, UP / DOWN) are clickable. NAME YOUR BAND: any up / down
 changes the letter, green takes it, Start or Enter accepts the name.
 
-**Default controls** (universal_mechanisms.md at the repository root):
+**Default controls** (docs/knowledge/universal_mechanisms.md):
 
 | Control | Keyboard | Gamepad (PS2 layout) |
 |---|---|---|
@@ -184,7 +184,7 @@ and shows MIDI as unavailable.
 |---|---|
 | `engine/` | The program (C++20, SDL3, OpenGL; Vulkan for the AI upscalers) |
 | `tools/` | Python readers for the game's formats, Ghidra scripts, `fetch_dlss.sh` |
-| `docs/` | Research notes: `FINDINGS.md` (rules and formats), one note per system (the backlog is `gd-backlog.md` at the repository root) |
+| `docs/` | Research notes: `FINDINGS.md` (rules and formats), one note per system (the backlog is `docs/tasks/gd-backlog.md`) |
 | `local_build.sh` | Builds the release downloads into `local_builds/` (`build_commands/`: double-click versions) |
 | `CHANGELOG.md` | What changed in each release |
 

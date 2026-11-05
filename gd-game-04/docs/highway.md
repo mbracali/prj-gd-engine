@@ -183,6 +183,11 @@ z_priority (within the container; children of sub-containers order inside their 
   (1, 1.1)*fx (right (-1,1.1)), just [center bottom], z 0; lightning `sys_Big_Bolt01`
   (0x9D12571C, 1024x512 = 8 frames) rot 180, just [center top]: #1 rgba [0,0,128,128] scale
   (-0.5, 0.9)*fx (right (0.5,0.9)) z 4; #2 white scale (2, 0.9)*fx z 0.02 [C].
+  The highway surface is z 0.1, so the glow (z 0) and the big white bolt (z 0.02) draw under
+  it and only the small dark bolt (z 4) over it; gd04 draws them so
+  (Highway2D::drawStarPowerFx; they were all over the fretboard before, owner 2026-11-04).
+- A lost Star Power phrase (a star note missed) draws its gems as normal gems
+  (star_miss_note) [C 0x8211F56C].
 - Colours (`set_sidebar_flash`, run on every beat fretbar as it reaches the playline, i.e.
   fretbar_iterator with time_offset gem_offset -> GuitarEvent_Fretbar) [C script]: beat_flip
   toggles each beat; state priority: SP active -> sidebar_starpower; else dying (health <=
@@ -233,7 +238,8 @@ removed and a flame shown (2.8) [I: GemStep / hit path not fully read].
 
 - Exists when the lane's sustain length (0x82102E28) > 0 (sustain rule: FINDINGS §5) [C].
 - Container (z 4.0, just (-1,-1)) + sprite: clonematerial = `sys_Whammy2D_<C>` (32x32), or
-  `sys_Whammy2D_StarPower` if SP is active at creation [C]; pos = lane start, scale (0.6, 0),
+  `sys_Whammy2D_StarPower` if SP is active at creation [C] (and from star_power_on to
+  star_power_off for tails already out, below); pos = lane start, scale (0.6, 0),
   rot_angle = lane angle, just (0, 1), z 4.0, `m_glowenabled` = 0 [C].
 - Mover with whammy flag: same start/end positions, scale 1; elapsed + whammy_offset_tweak
   (-33 ms); length parameter L = sustain_s / T (fraction of the travel) [C 0x82121428-0x82121444].
@@ -260,10 +266,48 @@ removed and a flame shown (2.8) [I: GemStep / hit path not fully read].
   the playline end and the pattern moves up the tail 2 entries (16 rows) a frame.
   control_whammy_pitchshift passes value = bar + 1 and the hold's remaining ms (CheckNoteHoldPerFrame
   0x8211D078, the note's field), reset_whammy_pitchshift SetAllWhammyValues 1.0 at the hold's end.
-  The port: render/highway2d.cpp (the tail on the 8-row grid; its two ends interpolate their cell's
-  scale [I]), the natives and the hold hook in ui/song_hooks.cpp; selftest wibble check.
-- Dead / star / normal swaps: `MakeDeadWhammy` 0x8210E508 (sys_Whammy2D_Dead), `MakeStarWhammy`
-  0x8210E5C8, `MakeNormalWhammy` 0x8210E6B8 [C names; triggers I: miss/release, SP on].
+- Texture coordinates [C 0x8238E338's last loop]: u 0 (left) / 1 (right); v 1.0 (the 32x32
+  texture's bottom row: an opaque coloured bar, white-hot centre, soft alpha edges) except the
+  first DAT_8291E730 = 4.0 grid cells from the tail end, whose vertex k (from the grid row at the
+  tail end) gets v = k / 4 + (that row's distance above the tail end in cells) / 4: the texture's
+  32 rows spread over the 32 rows behind the tail end, its transparent top and rounded cap
+  (texture rows 12..20) making the tail's rounded end. The strip runs from the grid row at the
+  tail end to the first grid row past the head (the last vertex below the head, hidden by the
+  gem / the raised button). The tail end and the head carry whammy_offset_tweak (-33 ms behind the gem).
+- Material [C data global_gfx.scn]: WhammyBar_UI (0xBE66AAC0), m_psPass0MaterialColor (1,1,1,1),
+  d8 3 (alpha blend), so the colour is the texture's; no glow pass (the sprite's
+  `m_glowenabled` 0). Dead / Star Power: sys_Whammy2D_Dead (dark grey) / sys_Whammy2D_StarPower
+  (cyan with a white centre), same shader.
+- Material swaps: `Function_8210C0D0` (element, player, button_models key, ..., z) sets the
+  bar's material from `button_models.<c>` and its z_priority.
+  - Dead (`dead_whammy`, z 3.1 = under the now-bar buttons at rest, 3.6..3.9): CheckNoteHoldEnd
+    (0x8211D3B8) makes every fret's bar of the hold dead and clears `holding`, so the head
+    scrolls on from row 977.8 (a released sustain's rest goes grey and slides under the
+    buttons); the miss judge (0x8211F328) makes a missed note's bars dead [C].
+  - Star (`star_power_whammy_material`, z 4.0): star_power_whammy (C-spawned for a held star
+    note; returns at once in Star Power) counts the frames the bar moved more than 0.03: 5 of
+    them (whammy_on held at 5 frames) MakeStarWhammy the pattern's bars, 5 without
+    MakeNormalWhammy them back; not in battle / boss (do_blue_whammys 0) [C script].
+  - Star Power: star_power_activate_and_drain's `LaunchGemEvent event = star_power_on / _off`
+    (0x8211A570 -> 0x821195C0) walks every gem and tail out: on, gems and star gems take
+    star_power_[hammer_]material (gem_y_just, the gem scale) and tails
+    star_power_whammy_material; off, gems gem_[hammer_]material, star gems star_ (battle_star_
+    in p2_battle) [hammer_]material with star_y_just and gem_star_scale, tails whammy_material
+    (a star whammy's blue goes too). Gems made in between take it from star_power_used
+    (0x82120C90). So every gem on screen turns at the activation frame and back at the end
+    frame (GD04-092; before, only gems created in Star Power were blue and they stayed blue
+    after it) [C 0x821198A0-0x82119E60]. Dead tails stay dead [I].
+- Hold FX (GuitarEvent_WhammyOn -> WhammyFXOn 0x8211C1A0, per fret of the pattern with a
+  sustain; WhammyFXOff 0x8211C390 / 0x8211C0E0 removes them) [C 0x8211BE98]: a SpriteElement
+  `fx_whammy_<c><p>` (DAT_829193A0) in gem_container<p>, clonematerial sys_whammy_hold01 (512x512
+  DXT1, AnimatedTexture_UI 4 x 4 frames at 30 fps, d8 1 additive: a red / white-hot burst), pos =
+  button_up_models.<c>.pos_2d (left_pos_2d lefty), just (0, 1), scale 1 (128x128 px), z 10; and a
+  particle system `fx_whammy_<c><p>_particle` (DAT_829193C8) with whammy_particle_params (orange
+  -> red sparks, 0.5 s; read into a C struct by 0x8210D258) at pos_2d - (0, 20) [C].
+- The port: render/highway2d.cpp drawTail (the strip, cap, materials, z), stepTails (hold start /
+  end, star whammy, the Star Power log), the hold burst in drawAll; the sparks and the
+  SetNewWhammyValue natives in ui/song_hooks.cpp; selftest wibble check. [I]: the tail's two
+  ends interpolate their cell's wibble; the burst's frames count from its creation.
 
 ### 2.7 Now-bar strike buttons [C script setup_highway, C 0x8211B1E0]
 
@@ -294,8 +338,11 @@ negated), just [center bottom]:
 ### 2.8 Hit flame and sparks [C 0x8211BAE8, script hit_note_fx]
 
 - Flame sprite: clonematerial `sys_note_hit01` (0xA38B2820, 512x1024 = 4x4 frames of 128x256 @60
-  fps, additive) or `sys_note_hit_blue_01` (0x9E700D1C) when star_power_used; pos = given pos -
-  (0, 20); just (0, 1); scale 1; z 10 [C 0x8211BCBC, DAT_82007A9C = 20, DAT_8200158C = 10].
+  fps, additive) or `sys_note_hit_blue_01` (0x9E700D1C) when star_power_used; pos = the given
+  pos (button_up_models.<c>.pos_2d = lane x, highway_playline [C 0x8211EED0-0x8211EF2C]) as is
+  (0x8211BDE8 reloads y for 0x8221B578); just (0, 1); scale 1; z 10 [C 0x8211BD78-0x8211BE1C,
+  DAT_8200158C = 10]. Only the particle system (FUN_821065A0) sits at pos - (0, 20)
+  [C 0x8211BCBC-0x8211BD00, DAT_82007A9C = 20] (GD04-108: the port had the flame 20 px up).
 - Particles (`hit_particle_params`, SP: `star_hit_particle_params`): material
   sys_Particle_Spark01, z 8, colour [255,128,0,255] -> [255,0,0,0] (SP [0,255,255,255] ->
   [0,255,255,0]), scale 1 -> 0.5, emit_rate 0.02, spread 160, velocity 10, friction (0,50),
@@ -386,6 +433,15 @@ note_hit01 A38B2820, note_hit_blue_01 9E700D1C; Particle_Spark01 44E7B154; whamm
 
 ## 6. Implemented (engine/src/render/highway2d.cpp)
 
+- A gem at its note time sits on its button: row 1024 = the playline (y 655); the gem (128x64 x
+  gem_end_scale 0.8, just y gem_y_just 0.83) spans y 608.3..659.3, the button parts (x
+  now_scale 0.8, just centre bottom at the playline) 603.8..655, so the gem's centre is 4.4 px
+  under the button's [C data, scripts generate_pos_table / setup_highway]. gem_offset and
+  input_offset move together on the 360 (xenon_gem_offset = xenon_input_offset = -66 ms: the
+  display's lag, both gems and judge earlier than the audio); lag_calibration moves the input
+  only [C script gem_scroller]. The port keeps both platform values out (D7), so gems, judge and
+  audio meet at the note time; Enhanced's video_offset moves the drawing only (checked
+  2026-11-05: slowride 30310 ms without autoplay, the red / yellow gems on their buttons).
 - Intro: `move_highway_2d` (released by move_highway_camera_to_default at highway_start_time,
   fastintro -2000 ms after current_starttime): the gem container's y starts at 720; each game
   frame y += v dt, v *= k, k -= 0.00044 (v from -720 px/s, k from 1.0), snapped to 0 at y <= 0
@@ -431,7 +487,8 @@ note_hit01 A38B2820, note_hit_blue_01 9E700D1C; Particle_Spark01 44E7B154; whamm
 ## The song scripts' 2D effects (D10, ui/song_hooks.cpp, ui/fx2d.cpp)
 
 - `gem_container<p>` is a proxy container element at Highway2D::containerPos
-  (the x offset, the intro rise, the multiplier-loss shake, battle's push);
+  (the x offset, the intro rise, the multiplier-loss shake, battle's
+  hammer_highway / shake_highway morphs: modes.md section 5);
   GH3's scripts create their highway elements under it [C script setup_highway].
 - button_up_models.<color>.pos_2d / left_pos_2d = (the lane's playline x,
   highway_playline) and button_models.<color>.angle / left_angle =

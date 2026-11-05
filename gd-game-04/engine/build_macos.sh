@@ -18,6 +18,7 @@ compile build/macos "gd04 (macOS)"
 say "Assembling dist/gd04-macos (app with SDL3 and FFmpeg inside, ad-hoc signed)..."
 d=dist/gd04-macos
 rm -rf "$d" && mkdir -p "$d/licenses"
+cp third_party/rtmidi/LICENSE "$d/licenses/RtMidi-LICENSE.txt"  # Generic MIDI (src/input/midi_in.cpp)
 cp -R build/macos/gd04.app "$d/"
 app="$d/gd04.app"
 dylibbundler -od -b -x "$app/Contents/MacOS/gd04" -d "$app/Contents/Frameworks/" -p @executable_path/../Frameworks/ >/dev/null

@@ -192,7 +192,7 @@ const std::map<std::string, Json>& enhancedDefaults() {
 const std::map<std::string, std::set<std::string>>& enhancedChoices() {
     static const std::map<std::string, std::set<std::string>> c = {
         {"screen_mode", {"windowed", "fullscreen", "borderless"}},
-        {"max_fps", {"60", "120", "240", "unlimited"}},
+        {"max_fps", {"60", "120", "144", "240", "unlimited"}},
         {"internal_res", {"448", "480", "720", "800", "900", "1080", "1440", "2160"}},
         {"antialiasing", {"none", "fxaa", "ssaa", "taa"}},
         {"ai_upscaling", {"none", "fsr1", "fsr31", "dlss4", "dlss5"}},  // a saved "fsr4" (removed) loads as none
@@ -1187,6 +1187,8 @@ void App::injectDebugKeys(std::vector<InputEvent>& out) {
                         songKeys.push_back({std::atof(item.substr(1, colon - 1).c_str()), it->second, edge, player});
                     else if (it != kNames.end())
                         keys.push_back({std::atof(item.substr(0, colon).c_str()), it->second, edge, player});
+                    else if (name == "wheelup" || name == "wheeldown")  // a mouse wheel step
+                        keys.push_back({std::atof(item.substr(0, colon).c_str()), Action::Confirm, name == "wheelup" ? 8 : 9, 0});
                     else if (name.rfind("hover", 0) == 0 || name.rfind("click", 0) == 0) {
                         Key k{std::atof(item.substr(0, colon).c_str()), Action::Confirm, name[0] == 'h' ? 2 : 3, 0};
                         std::sscanf(name.c_str() + 5, "%f_%f", &k.mx, &k.my);
@@ -1226,7 +1228,7 @@ void App::injectDebugKeys(std::vector<InputEvent>& out) {
     while (!keys.empty() && keys.front().at <= now) {
         Key key = keys.front();
         keys.erase(keys.begin());
-        if (key.edge >= 4) {  // a synthetic finger at menu units (the inverse of windowToMenu)
+        if (key.edge >= 4 && key.edge <= 6) {  // a synthetic finger at menu units (the inverse of windowToMenu)
             float x0, y0, x1, y1;
             renderer_.windowToMenu(0, 0, x0, y0);
             renderer_.windowToMenu(1, 1, x1, y1);
@@ -1264,6 +1266,10 @@ void App::injectDebugKeys(std::vector<InputEvent>& out) {
                 up.edge = -1, up.at = now + 60;
                 keys.insert(std::upper_bound(keys.begin(), keys.end(), up, [](const Key& a, const Key& b) { return a.at < b.at; }), up);
             }
+            continue;
+        }
+        if (key.edge == 8 || key.edge == 9) {
+            if (ui_) ui_->wheel(key.edge == 8 ? -1 : 1);
             continue;
         }
         if (key.edge >= 2) {
@@ -2154,12 +2160,15 @@ void App::pollPlayer(int p, float t) {
     const bool uiGame = ui_ && ui_->inGame();
     if (ap && !endWallNs_) ap->feed(pl, t);
     if (!endWallNs_) {
-        // The bar: the guitar's analog whammy, or a wiggle while a digital whammy is held.
+        // The bar: the guitar's analog whammy, or the bar held all the way down
+        // while a digital whammy (a key or button) is held, as a guitar's lever
+        // held down: a steady bend and a steady fat tail, not a wiggle (#56).
+        // whammying() counts a held key as a moving bar for Star Power.
         // Development aid: GD01_WHAMMY=1 holds a digital whammy all song.
         static const bool devWhammy = SDL_getenv("GD01_WHAMMY") != nullptr;
         if (devWhammy) pl.setWhammy(true);
         float w = input_.whammyValue(p);
-        if (pl.whammyHeld()) w = std::max(w, 0.3f + 0.3f * std::sin(t * 0.025f));
+        if (pl.whammyHeld()) w = 1.0f;
         pl.setWhammyValue(w, t);
         pl.update(t);
     }

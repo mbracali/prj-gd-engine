@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -83,6 +84,10 @@ class Library {
 public:
     // Throws std::runtime_error.
     void load(const Disc& disc);
+    // One library per disc, loaded once and shared by the menus' characters,
+    // every song's band, crowd and peds (it took 0.5 s each time: owner 1.7).
+    // Thread-safe (a song's venue loads on a worker thread). Throws.
+    static std::shared_ptr<Library> shared(const Disc& disc);
     const anim::Skeleton* skeleton(uint32_t key) const {
         auto it = skeletons_.find(key);
         return it == skeletons_.end() ? nullptr : &it->second;
@@ -95,6 +100,7 @@ private:
     std::unordered_map<uint32_t, anim::Skeleton> skeletons_;
     ClipMap perm_;
     std::unordered_map<std::string, ClipMap> songs_;
+    std::mutex songsMutex_;  // songClips' cache (a shared library)
 };
 
 // One part (body or instrument): its skin and where it came from.
@@ -120,5 +126,8 @@ struct Model {
 // Null and `error` on failure.
 std::unique_ptr<Model> loadModel(const Disc& disc, const Globals& g, Library& lib, const Member& m, const std::string& song,
                                  std::string& error);
+// A copy of a model loadModel kept (the last 8), or null: nothing is read.
+// Thread-safe, as loadModel is.
+std::unique_ptr<Model> cachedModel(const Disc& disc, const Member& m, const std::string& song);
 
 }  // namespace band

@@ -83,7 +83,7 @@ private:
 
     const Globals* g_ = nullptr;
     const venue::PerfTimeline* perf_ = nullptr;
-    std::unique_ptr<band::Library> ownLib_;
+    std::shared_ptr<band::Library> ownLib_;
     const band::Library* lib_ = nullptr;
     std::vector<int32_t> fretbars_;
     float slowTempo_ = 75, medTempo_ = 115, fastTempo_ = 145;

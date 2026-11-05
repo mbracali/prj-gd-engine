@@ -40,7 +40,7 @@ inline int fretOf(Action a) { return static_cast<int>(a) - static_cast<int>(Acti
 inline bool isFret(Action a) { return a >= Action::Fret0 && a <= Action::Fret4; }
 
 // Translates keyboard, gamepad, MIDI and touch events into game actions
-// (universal_mechanisms.md 1.1.4 at the repository root). Each device drives
+// (docs/knowledge/universal_mechanisms.md 1.1.4). Each device drives
 // the universal "controls" (General: Start, Select, Up, Down; 5-fret guitar:
 // Start, Select, Strum Up / Down, the frets, Whammy, Gyro special trigger)
 // through a binding table of up to two sources per control: per profile

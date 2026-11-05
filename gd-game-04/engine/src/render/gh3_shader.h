@@ -74,7 +74,7 @@ enum : int {
 // A light as the light manager sees it (the light record 822BE020 fills,
 // with the light show's live values) [C: docs/venues.md "Lights"].
 struct LightIn {
-    enum Type : uint8_t { Ambient, Directional, Point, Spot } type = Directional;
+    enum Type : uint8_t { Ambient, Directional, Point, Spot, Prt } type = Directional;
     gfx::Vec3 pos, dir{0, -1, 0};  // dir: where the light shines
     gfx::Vec3 color{1, 1, 1};      // lightcolor (0..1), not scaled
     float intensity = 1, specular = 1, shadow = 1;
@@ -83,6 +83,7 @@ struct LightIn {
     bool shadowLight = false;      // ranked x 50000
     gfx::Vec3 boxCenter, boxHalf{1e9f, 1e9f, 1e9f};
     float groupScale = 1;          // the group's intensity x the fade weight x the modulation (1)
+    gfx::Vec3 prt[4];              // Prt: its SH terms (coeff0..3)
 };
 LightIn lightIn(const venue::Light& l, const venue::LightState& s);
 // The light group rule of the candidate query (822BB680): the object's
@@ -99,8 +100,39 @@ bool groupLights(uint32_t lightGroup, uint32_t objectGroup);
 // the next three take the specular slots (c180..c185) and go into the L1
 // spherical harmonics (4/17, 8/17 l) with every other directional, point
 // (attenuated) and spot light (by the unnormalised axis distance); ambient
-// lights sum into c176.
+// lights sum into c176; a prt light adds its own coeff0..3 x intensity to
+// the SH (no slot).
 void lightObject(const LightIn* lights, size_t count, const gfx::Vec3& p, ObjectConstants& out);
+
+// The band's dynamic shadow for one frame (VenueStage::shadowPass), as the
+// DynamicShadowReciever shaders read it [C: the microcode, 822B6E08]:
+// g_ViewToLightProjection0 / 1 (c144 / c148: view space -> each cascade's
+// Direct3D clip space), g_sampShadowMap0 / 1 (s14 / s15), g_shadowMapSize
+// (c143.x / .y: cascade 0's / 1's texels), g_shadowMapConstants (c141: zw =
+// the camera distance where the shadow fades out, smoothstepped) and
+// g_shadowLevel (c142.zw: light = lit x (1 - i) + i). A pixel takes cascade
+// 0 where its coordinates are inside that map (0 < u, v < 1, depth < 1),
+// else cascade 1.
+struct DynamicShadow {
+    gfx::TextureId tex[2];       // the cascades' depth maps; tex[0] empty: no shadow
+    gfx::Mat4 vp[2];             // world -> the cascade's clip space (the receivers' bias in)
+    float size[2] = {1024, 1024};
+    float blend[2] = {0, 0};     // c141.xy (not read by the receivers seen)
+    float fadeStart = 0, fadeEnd = 1e9f;
+    float intensity = 0.35f;
+    explicit operator bool() const { return bool(tex[0]); }
+    // One map for both cascades (the menus' backdrop), no fade.
+    static DynamicShadow single(gfx::TextureId depth, const gfx::Mat4& vp, int size, float intensity) {
+        DynamicShadow s;
+        s.tex[0] = s.tex[1] = depth;
+        s.vp[0] = s.vp[1] = vp;
+        s.size[0] = s.size[1] = float(size);
+        s.intensity = intensity;
+        return s;
+    }
+};
+// c141..c151 for a camera's `view` (world -> view) when `s` is on.
+void setShadowGlobals(Globals& g, const DynamicShadow& s, const gfx::Mat4& view);
 
 // One translated template.
 struct Program {
@@ -119,6 +151,10 @@ public:
     // The template's program for a technique (compiled on first use); null
     // when the template is unknown or its shaders cannot be translated.
     const Program* get(uint32_t templateKey, matlib::Technique t = matlib::Default);
+    // Whether get() made (or failed) that program before: no GL work left.
+    bool has(uint32_t templateKey, matlib::Technique t = matlib::Default) const {
+        return programs_.count(uint64_t(templateKey) << 8 | t) != 0;
+    }
     // A named technique of a template (the filter templates' passes, e.g.
     // ImmediateMode's "_2D_Cutoff"), its Default variant; null when missing
     // or not translated.
@@ -146,6 +182,18 @@ struct MaterialConstants {
     float ps[64][4] = {};
 };
 void fillMaterialConstants(const scene::Material& m, float alphaRef, MaterialConstants& out);
+
+// A material's render state as GH3 sets it (Function_823DC180) [C]: the
+// blend control of +0xd8 (13 modes: 0 opaque, 1 SRC_ALPHA + ONE, 2 its
+// reverse subtract, 3 SRC_ALPHA / INV_SRC_ALPHA, 4 ZERO / SRC_ALPHA, 5
+// DST_COLOR + ONE, 6 DST_COLOR / ZERO, 7 ONE + ONE, 8 SRC_ALPHA /
+// INV_SRC_ALPHA (alpha kept), 9 ONE / INV_SRC_ALPHA, 10 DST_COLOR + ONE,
+// 11 ONE - DST_COLOR reverse subtract, 12 ONE reverse subtract), depth
+// write unless +0xcc & 0x20, the depth test (LESSEQUAL) unless +0xcc &
+// 0x10. Blended materials write depth unless they say not to (the band's
+// hair and the venues' blended meshes drew without it: see-through hair,
+// smoke over the band; owner 11-04 doc 1.2 / 1.3).
+void materialState(uint32_t blendMode, uint32_t flags, gfx::PipelineState& out);
 
 // The vertex layout every GH3-shader mesh uses (attribute locations of
 // xenos::attribLocation).

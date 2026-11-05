@@ -90,7 +90,7 @@ turns them into GH2's kPad buttons, the way gd01's `App::uiButton` does:
   follows within the codes' 750 ms; a completed code or any other button
   cancels it (`UiManager::yellowButton`). Clicking the help item opens it at
   once. GAMEPADS' back returns to the main menu.
-- The mouse (gd01's, `guidelines/universal_launcher.md` at the repository root):
+- The mouse (gd01's, `docs/knowledge/universal_launcher.md` at the repository root):
   every panel's view records where it drew each button, list row, slider,
   check box, picture and text entry last frame, projected to menu units
   (`gfx::UiView::hits`). `PanelObj::mouse` focuses the component under the
@@ -304,10 +304,10 @@ walktests' career.json check.
   check boxes, dropdowns, framed buttons, the warning sign on rows not built
   yet, the explanation box bottom right, the mouse, and the page sliding with
   the transition (`ui/port_draw.*`;
-  `guidelines/universal_launcher.md` at the repository root). The names keep "AND",
+  `docs/knowledge/universal_launcher.md` at the repository root). The names keep "AND",
   since helveticablack has no `&`. Every gd01 Enhanced Setting that fits
   GH2 works (GDALL-015; the parity table is in
-  `guidelines/universal_launcher.md` "Enhanced options: parity"), with
+  `docs/knowledge/universal_launcher.md` "Enhanced options: parity"), with
   gd01's explanations, `needs` rows (Upscaling Quality with AI Upscaling,
   Dust with More Lights), dropdown options gd02 lacks shown "(not available
   yet)" (FSR 3.1, DLSS: gd01's Vulkan upscaler), the status line under the
@@ -363,7 +363,7 @@ walktests' career.json check.
   steps (1.5 s), from a quarter into the first song of its tier, silent, under
   the venue's chorus light preset, and then nothing updates again (up to 5 s
   more while the singer has not shown). The camera (the owner's rule in
-  `guidelines/universal_launcher.md`, gd01's pose as the model) is a still
+  `docs/knowledge/universal_launcher.md`, gd01's pose as the model) is a still
   close-up of the singer's head, put right of the list's box (0.3 of the
   half width right of the centre, 0.25 up), from the audience's side 0.3
   rad round to one flank, 2.6 x the band's half width away (140..220
@@ -382,6 +382,15 @@ walktests' career.json check.
   alpha.
 
 ### Cheats
+
+- Developer Keyboard Cheats (Enhanced, GD02-045): GH2's development-kit keys
+  (`config/cheats.dta` `quick_cheats` keyboard; CheatMgr 0x8235C610 loads
+  them, the retail game never enables them). With the row on, a key that is
+  not bound to a keyboard control runs its entry (`UiManager::keyCheat`; F-keys
+  are KB_F1.. 401..412, digits and characters as typed with Shift). Their
+  scripts (`cheats_funcs.dta`) run as GH2's; `{player0 lose}` fails the song,
+  `{player0 win <n>}` ends it won [I: the star count is not forced]; debug
+  overlays (`rnd show_overlay`) only log. Walk `dev_cheats`.
 
 GH2's long cheats (`config/long_cheats.dta`, in gh2.dta's `(long_cheats
 ...)`) run as the original's CheatsManager (0x8235B5B0) [C]: every button
@@ -414,6 +423,18 @@ section lists the seven with GH2's names and toggles the same variables
 - Leaderboards without Xbox Live shows a port message. Xbox Live calls
   (achievements, leaderboards, marketplace, sign-in) are whitelisted stubs
   (`engine/tests/ui_stubs.txt`).
+- PC wording (GD02-154): `scene/pc_strings.cpp` rewrites every string that
+  names the Xbox 360, Xbox Live, a console or a storage device, in the five
+  languages, as gd-game-01 does; the two Xbox Live loading tips are never
+  picked and six GD-Engine tips join every pool. `--selftest` checks that no
+  shown string still names them.
+- Loading and saving screens hold (GD02-155): `loading_screen`,
+  `practice_loading_screen`, `tut_loading_screen`, `meta_loading_screen`,
+  `saving_screen`, `normal_save_screen`, `normal_load_screen` and the startup
+  load / create screens stay up at least 2 s of UI time, animating, before
+  the next screen starts (`UiManager::holdingLoadScreen`), as gd-game-01's
+  memory-card rule: the port loads at once, where the Xbox 360 took seconds.
+  The quick play walk checks it (`load_hold`).
 
 ## Videos (`engine/src/video/`)
 

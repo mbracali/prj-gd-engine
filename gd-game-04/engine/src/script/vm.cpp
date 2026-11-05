@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
+#include <cstdlib>
 #include "script/vm.h"
+#include "script/pc_strings.h"
 
 #include <SDL3/SDL_log.h>
 #include <SDL3/SDL_stdinc.h>
@@ -140,11 +142,11 @@ struct Exec {
         case kInteger: ++i; return Vm::makeInt(k.i());
         case kHexInteger: ++i; return Vm::makeInt(k.i());
         case kFloat: ++i; return Vm::makeFloat(k.f[0]);
-        case kString: ++i; return Vm::makeString(k.str);
+        case kString: ++i; return Vm::makeString(pcstrings::pcText(k.str));  // PC wording (GD04-039)
         case kLocalString:
         case kWideString:
             ++i;
-            v = Vm::makeString(k.str);
+            v = Vm::makeString(pcstrings::pcText(k.str));
             v.type = qb::Type::WString;
             return v;
         case kVector:
@@ -195,6 +197,12 @@ struct Exec {
             if (i < t.size() && t[i].op == kName) {
                 const uint32_t n = t[i++].u;
                 if (const qb::Value* lv = local(n)) return *lv;
+                // <g_...> with no such argument: the global of that name
+                // (menu_venue.qb's venue_scroll_up / _down read <g_venue_index>
+                // and <g_venue_current_pos>, set by `change`; without this the
+                // venue list never moved) [I: GH3's fallback for these].
+                if (const std::string nm = qbkey::name(n); nm.size() > 2 && (nm[0] == 'g' || nm[0] == 'G') && nm[1] == '_')
+                    if (const qb::Value* gv = vm.global(n)) return *gv;
                 // An unset <name> is nothing: GH3 looks it up in the script's
                 // parameters only (0x82142968 from the evaluator's 0x2D case,
                 // 0x821977A0) and leaves the value empty; a struct being built
@@ -306,6 +314,17 @@ struct Exec {
                 break;
             }
         qb::Value v = unary();
+        // A branch may end with a comma before its jump (z_prison's caged
+        // dancer: `Anim = random(...) clip1 , jump clip2 , ...`) [C data].
+        skipNops();
+        while (i < t.size() && t[i].op == kComma) ++i, skipNops();
+        // ... and its jump may come on the next line (`clip1 ,` new line
+        // `jump`): look past line ends for it.
+        for (size_t n = i; n < t.size(); ++n) {
+            if (t[n].op == kEndOfLine || t[n].op == kEndOfLineNumber || t[n].op == kNop) continue;
+            if (t[n].op == kJump) i = n;
+            break;
+        }
         // Each branch but the last ends with a jump past the others (its
         // target is the token's end + the operand) [C data: every random on
         // the disc]; without following it the next branch's value was read
@@ -349,9 +368,14 @@ struct Exec {
                     const qb::Value key = primary();
                     if (key.type == qb::Type::Key || key.type == qb::Type::KeyPtr) v = member(v, key.key, vm);
                     else v = none();
-                } else if (i < t.size() && t[i].op == kArg) {
+                } else if (i < t.size() && (t[i].op == kArg || t[i].op == kGlobal)) {
+                    // `. <arg> x` / `. $ x`: the field the local's / global's value names
+                    // (create_select_venue_menu's `$ game_mode_names . $ game_mode`: the
+                    // band's tags were never found, so the career's movies never played;
+                    // owner 11-04 doc 1.5) [C data].
                     qb::Value key = primary();
-                    v = member(v, key.key, vm);
+                    if (key.type == qb::Type::Key || key.type == qb::Type::KeyPtr) v = member(v, key.key, vm);
+                    else v = none();
                 }
                 continue;
             }
@@ -614,6 +638,16 @@ qb::Struct scriptParams(qb::Struct p) {
 Vm::Vm(Globals& globals) : g_(globals) {
     const char* v = SDL_getenv("GD04_UILOG");
     uiLog_ = v && *v && *v != '0';
+    // GetRandomValue / PermuteArray: a new seed every launch, as the 360's
+    // (quickplay's random guitarist, guitar and venue); GD04_SEED fixes it
+    // for the tests (main.cpp sets 12345 for every test mode).
+    const char* seed = SDL_getenv("GD04_SEED");
+    rng_.seed(seed && *seed ? uint32_t(std::strtoul(seed, nullptr, 10)) : std::random_device{}());
+}
+
+Native Vm::native(const std::string& name) const {
+    auto it = natives_.find(qbkey::key(name));
+    return it == natives_.end() ? Native{} : it->second;
 }
 
 void Vm::addNative(const std::string& name, Native fn) { natives_[qbkey::key(name)] = std::move(fn); }
@@ -743,6 +777,7 @@ bool Vm::callName(ScriptRun& run, uint32_t name, qb::Struct& params, bool& resul
             return v && *v && *v != '0';
         }();
         if (trace) SDL_Log("qscript: %.0f ms call %s (from %s)", clockMs_, qbkey::name(name).c_str(), qbkey::name(run.name).c_str());
+        if (onScriptEnter) onScriptEnter(name, params);
         Frame f;
         f.code = std::move(c);
         f.locals = std::make_shared<qb::Struct>(scriptParams(std::move(params)));
@@ -752,6 +787,23 @@ bool Vm::callName(ScriptRun& run, uint32_t name, qb::Struct& params, bool& resul
             return true;
         }
         run.frames.push_back(std::move(f));
+        // The port loads in a moment where the Xbox 360 took seconds, so the
+        // loading screen (its tip, its jiggling text) flashed by: as
+        // gd-game-01..03, it stays up at least 2 s of the VM clock (GD04-040)
+        // [I]. The wait goes before the song starts (the native
+        // start_gem_scroller: the 360 loaded the song under the loading
+        // screen, the intro starts once it is loaded), else before
+        // destroy_loading_screen.
+        if (name == kCreateLoading) loadingShownMs_ = clockMs_;
+        if (name == kDestroyLoading && loadingShownMs_ >= 0) {
+            if (clockMs_ < loadingShownMs_ + kLoadingHoldMs) {
+                run.waitUntilMs = loadingShownMs_ + kLoadingHoldMs;
+                heldLoadingMs_ += run.waitUntilMs - clockMs_;
+            }
+            const double shown = std::max(clockMs_, run.waitUntilMs) - loadingShownMs_;
+            minLoadingShownMs_ = minLoadingShownMs_ < 0 ? shown : std::min(minLoadingShownMs_, shown);
+        }
+        if (name == kDestroyLoading) loadingShownMs_ = -1;
         result = true;
         return true;
     }
@@ -789,6 +841,7 @@ bool Vm::run(uint32_t name, const qb::Struct& params, bool* result, uint32_t obj
         return false;
     }
     if (const char* v = SDL_getenv("GD04_VMTRACE"); v && *v && *v != '0') SDL_Log("qscript: %.0f ms run %s", clockMs_, qbkey::name(name).c_str());
+    if (onScriptEnter) onScriptEnter(name, params);
     auto r = std::make_unique<ScriptRun>();
     r->id = nextId_++;
     r->name = name;
@@ -806,11 +859,18 @@ bool Vm::run(uint32_t name, const qb::Struct& params, bool* result, uint32_t obj
 
 uint32_t Vm::spawn(uint32_t name, const qb::Struct& params, uint32_t spawnedBy) {
     auto c = code(name);
+    // The native start_gem_scroller spawns destroy_loading_screen (GD04-040's measure).
+    if (name == kDestroyLoading && loadingShownMs_ >= 0) {
+        const double shown = clockMs_ - loadingShownMs_;
+        minLoadingShownMs_ = minLoadingShownMs_ < 0 ? shown : std::min(minLoadingShownMs_, shown);
+        loadingShownMs_ = -1;
+    }
     if (const char* v = SDL_getenv("GD04_VMTRACE"); v && *v && *v != '0') SDL_Log("qscript: %.0f ms spawn %s", clockMs_, qbkey::name(name).c_str());
     if (!c) {
         if (unhandledNames_.insert(name).second) logOnce("UNHANDLED spawn " + qbkey::name(name));
         return 0;
     }
+    if (onScriptEnter) onScriptEnter(name, params);
     auto r = std::make_unique<ScriptRun>();
     r->id = nextId_++;
     r->name = name;
@@ -915,6 +975,7 @@ bool Vm::callForValue(ScriptRun& run, uint32_t name, qb::Struct& params) {
         ScriptRun sub;
         sub.id = 0;
         sub.name = name;
+        sub.caller = &run;
         Frame f;
         f.code = std::move(c);
         f.locals = std::make_shared<qb::Struct>(scriptParams(params));

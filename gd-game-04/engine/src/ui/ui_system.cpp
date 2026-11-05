@@ -133,7 +133,8 @@ UiSystem::~UiSystem() {
 
 void UiSystem::loadFonts(const std::string& pakPath) {
     try {
-        Pak pak = Pak::load(disc_, pakPath);
+        const auto pakShared = Pak::shared(disc_, pakPath);
+        const Pak& pak = *pakShared;
         for (const PakEntry& e : pak.entries()) {
             if (e.type != K(".fnt") || fonts_.count(e.fullName)) continue;
             auto [p, n] = pak.data(e);
@@ -216,8 +217,10 @@ Element* UiSystem::resolve(const qb::Value* v) const {
 
 void UiSystem::setTexture(Element& e, uint32_t key) {
     e.texture = key;
+    const uint32_t ctx = assetContexts_.empty() ? 0 : assetContexts_.back();
+    e.texContext = tex_.inContext(ctx, key) ? ctx : 0;
     int tw = 0, th = 0;
-    tex_.size(key, tw, th);
+    tex_.size(e.texContext, key, tw, th);
     if (!tw) {
         ++stats_.missingTextures;
         return;
@@ -262,6 +265,9 @@ void UiSystem::applyProps(Element& e, const qb::Struct& p, bool create) {
             else if (f == K("preserve_local_orientation")) e.preserveOrientation = true;
             else if (f == K("shadow")) e.shadow = true;
             else if (f == K("no_shadow") || f == K("noshadow")) e.shadow = false;
+            // A scrolling menu's window back to its menu's top [C 0x82317348].
+            else if (f == K("reset_window_top")) e.scroll = 0, e.scrollDirty = true;
+            else if (f == K("reset_window")) e.scrollDirty = true;
             continue;
         }
         if (n == K("pos")) {
@@ -279,7 +285,11 @@ void UiSystem::applyProps(Element& e, const qb::Struct& p, bool create) {
         } else if (n == K("dims")) {
             if (v.type == qb::Type::Pair) newDimsW = v.f[0], newDimsH = v.f[1];
         } else if (n == K("scale")) {
-            haveScale = readPair(v, scaleX, scaleY);
+            // A number or a pair; a vector is not one (left as it was):
+            // create_choose_practice_part_menu's GUITAR / BASS texts pass
+            // scale = (1.0, 0.0, 1.0) and show at scale 1 [C 0x8221A738:
+            // FUN_821f7028 (int / float) else FUN_821f7380 (pair, type 5)].
+            haveScale = v.type != qb::Type::Vector && readPair(v, scaleX, scaleY);
         } else if (n == K("relative_scale")) {
             float a = 1, b = 1;
             if (readPair(v, a, b)) e.sx *= a, e.sy *= b;
@@ -320,6 +330,8 @@ void UiSystem::applyProps(Element& e, const qb::Struct& p, bool create) {
         else if (n == K("regular_space_amount")) e.regularSpace = v.number();
         else if (n == K("padding_scale")) e.paddingScale = v.number();
         else if (n == K("spacing_between")) e.spacingBetween = v.number();
+        else if (n == K("scroll_speed")) e.scrollSpeed = float(int(v.number()));  // [C 0x82317348]
+        else if (n == K("num_items_to_show")) e.numItemsToShow = int(v.number()), e.scrollDirty = true;
         else if (n == K("tags") && v.st) {
             for (const qb::Item& ti : v.st->items) qs::Vm::set(e.tags, ti.name, ti.value);
         } else if (n == K("event_handlers") && v.type == qb::Type::Array && v.arr) {
@@ -346,6 +358,16 @@ void UiSystem::applyProps(Element& e, const qb::Struct& p, bool create) {
                         else hd.script = hi.value.key;
                     } else if (hi.name == K("params") && hi.value.st) {
                         hd.params = *hi.value.st;
+                    } else if (hi.name == 0 && hi.value.type == qb::Type::Struct && hi.value.st && unnamed == 1) {
+                        // `{ pad_choose ( <option> . func ) }` with func a struct
+                        // `{ script params = {...} }` (the popups' options:
+                        // create_popup_warning_menu_option) [C data; I: read as
+                        // the handler's script and params].
+                        for (const qb::Item& fi : hi.value.st->items) {
+                            if (fi.name == 0 && (fi.value.type == qb::Type::Key || fi.value.type == qb::Type::KeyPtr) && !hd.script) hd.script = fi.value.key;
+                            else if (fi.name == K("params") && fi.value.st) hd.params = *fi.value.st;
+                        }
+                        ++unnamed;
                     }
                 }
                 e.handlers.push_back(std::move(hd));
@@ -357,7 +379,7 @@ void UiSystem::applyProps(Element& e, const qb::Struct& p, bool create) {
         if (e.type == kSprite && e.texture && !newTexture) {
             // New dims on a textured sprite: dims are the on-screen size [C 0x82219C78].
             int tw = 0, th = 0;
-            tex_.size(e.texture, tw, th);
+            tex_.size(e.texContext, e.texture, tw, th);
             if (tw) e.sx = newDimsW / float(tw), e.sy = newDimsH / float(th), e.w = float(tw), e.h = float(th), e.dimsGiven = false;
         }
     }
@@ -618,8 +640,28 @@ bool UiSystem::launch(Element* target, uint32_t event, const qb::Struct& data) {
         return true;
     }
     if (find(id)) {
-        if (event == K("focus")) target->focused = true;
-        else if (event == K("unfocus")) target->focused = false;
+        if (event == K("focus")) {
+            // One focused item among its siblings for the same player: a focus
+            // moved by script (venue_scroll_up / _down's LaunchEvent focus,
+            // with no unfocus) takes it from the item before, which hears its
+            // unfocus. Left focused, each pad event reached every venue item
+            // and the list jumped [I: the C's per-parent focus].
+            if (target->parent && !isMenu(*target->parent)) {
+                std::vector<uint32_t> was;
+                for (const auto& c : target->parent->children)
+                    if (c.get() != target && c->focused && !isMenu(*c) && c->exclusiveDevice == target->exclusiveDevice &&
+                        c->exclusiveMask == target->exclusiveMask)
+                        was.push_back(c->id);
+                for (uint32_t w : was)
+                    if (Element* e = find(w)) {
+                        e->focused = false;
+                        launch(e, K("unfocus"), qb::Struct{});
+                    }
+            }
+            if (Element* t2 = find(id)) t2->focused = true;
+        } else if (event == K("unfocus")) {
+            target->focused = false;
+        }
     }
     // A VScrollingMenu passes focus to its menu [I].
     if (find(id) && target->type == kVScrollingMenu && (event == K("focus") || event == K("unfocus")) && !target->children.empty())
@@ -650,6 +692,27 @@ void UiSystem::padEvent(uint32_t event, int device) {
         if (Element* e = find(id)) launch(e, event, data);
 }
 
+bool UiSystem::startFinishesEntry(int device) const {
+    // GH3's text entries take Start on the element that has the focus: the
+    // band name (create_enter_band_name_menu: pad_start confirm_band_name),
+    // the top rockers' name (menu_top_rockers_init_band_name_creation:
+    // pad_start menu_tr_confirm_band_name) and a new cheat (cheats_zoomin_guitar:
+    // pad_start new_cheat_finished) [C scripts]. root_window's pause handler
+    // and the gamercard / null handlers are not entries [C scripts
+    // setup_pause, create_character_hub_menu].
+    static const uint32_t notEntry[] = {K("menu_show_gamercard"), K("show_gamercard"), K("menu_show_gamercard_from_netid"),
+                                        K("null_script"), K("gh3_start_pressed")};
+    for (const Element* e : focusedElements()) {
+        if (e->id == kRootWindow) continue;
+        const bool mine = e->exclusiveMask ? (device >= 0 && device < 32 && (e->exclusiveMask >> device & 1))
+                                           : (e->exclusiveDevice < 0 || e->exclusiveDevice == device);
+        if (!mine) continue;
+        for (const Element::Handler& h : e->handlers)
+            if (h.event == K("pad_start") && std::find(std::begin(notEntry), std::end(notEntry), h.script) == std::end(notEntry)) return true;
+    }
+    return false;
+}
+
 void UiSystem::layoutMenu(Element& m) {
     // [C 0x82315FB0] stack the children in creation order.
     const bool vert = m.type == kVMenu;
@@ -663,8 +726,21 @@ void UiSystem::layoutMenu(Element& m) {
     }
     for (size_t i = 0; i < sizes.size(); ++i) total += sizes[i] + (i ? m.spacingBetween : 0);
     if (!m.dimsGiven) {
-        if (vert) m.w = widest, m.h = total;
-        else m.w = total, m.h = widest;
+        if (vert) {
+            // GH3 lays a menu out on its first-update event only [C 0x823164E0
+            // on 0x3056434f; 0x8221D2A0 posts it, SetParent / Die re-arm it]:
+            // a child's later text (the store's character name, set by
+            // store_show_character after the first one, Slash) keeps the
+            // width, so a centred item stays centred where the first
+            // layout put it (menu_pos (845, 85) + Slash / 2 = the frame's
+            // centre) instead of moving with each name's width (GD04-099).
+            const Element* last = m.children.empty() ? nullptr : m.children.back().get();
+            if (m.layoutOnce || m.children.size() != m.widthKids || last != m.widthLast)
+                m.w = widest, m.widthKids = m.children.size(), m.widthLast = last;
+            m.h = total;
+        } else {
+            m.w = total, m.h = widest;
+        }
     }
     float cursor = vert ? (m.h - total) * (m.ijustY + 1) / 2 : (m.w - total) * (m.ijustX + 1) / 2;
     for (size_t i = 0; i < m.children.size(); ++i) {
@@ -680,6 +756,84 @@ void UiSystem::layoutMenu(Element& m) {
     }
 }
 
+void UiSystem::scrollMenu(Element& s) {
+    // GH3's VScrollingMenu, every update [C 0x82317640]: its menu (the last
+    // vmenu child, 0x823174F8) is moved to (x, -scroll) so the focused item
+    // (the first one before any focus) lies in the window; it moves only when
+    // the item leaves the window. Items outside the window get alpha 0, the
+    // others 1, whenever the window is refreshed (first update, a focus
+    // change, a child added or gone) [C FUN_8221a418 from 0x82317A4C].
+    // The menu lays its items out on its own first-update event, which comes
+    // after this update [C 0x8221D2A0 posts 0x3056434f, the VMenu lays out on
+    // it in 0x823164E0]: the window first sees the first item where the
+    // script made it (pos (0,0), centred = top -h/2) and keeps that offset,
+    // so new_menu's lists sit half their first item lower than the menu's
+    // pos (the pause menu's 100-high containers 50 px, the store's / cheats'
+    // texts so their scripted highlight bars fall on them).
+    Element* m = nullptr;
+    for (auto& c : s.children)
+        if (c->type == kVMenu) m = c.get();
+    if (!m) return;
+    if (m->children.empty()) return;
+    const float itemSize = (m->regularSpace > 0.0001f && s.numItemsToShow >= 0) ? m->regularSpace : -1.0f;  // [C 0x82315918]
+    const float window = itemSize >= 0 ? float(s.numItemsToShow) * itemSize : s.h;  // [C 0x823174F8]
+    const int count = int(m->children.size());
+    const int idx = (m->selected >= 0 && m->selected < count) ? m->selected : 0;
+    if (m->children.size() != s.scrollKids) s.scrollDirty = s.scrollRelayout = true;
+    if (idx != s.scrollSel) s.scrollDirty = true;
+    s.scrollSel = idx, s.scrollKids = m->children.size();
+    // The item's top and height in the menu [C 0x82317158].
+    auto box = [&](const Element& it, int i, float& top, float& h) {
+        if (itemSize >= 0) {
+            top = float(i) * itemSize, h = itemSize;
+            return;
+        }
+        h = it.h * m->sy * it.sy;
+        top = it.y * m->sy - (it.justY + 1) / 2 * h;
+    };
+    float d16 = 0, d17 = 0;
+    if (itemSize >= 0) {
+        const int half = s.numItemsToShow / 2;
+        if (half <= idx) d16 = float((s.numItemsToShow - 1) / 2) * itemSize;
+        if (idx < count - half) d17 = float(half) * itemSize;
+    }
+    // The menu's just becomes [left top], its pos kept in place [C 0x8221B788].
+    if (m->justX != -1 || m->justY != -1) {
+        const float dx = (-1 - m->justX) * m->w * m->sx * 0.5f, dy = (-1 - m->justY) * m->h * m->sy * 0.5f;
+        const float r = m->rot * kDeg, cs = std::cos(r), sn = std::sin(r);
+        m->x += cs * dx - sn * dy, m->y += sn * dx + cs * dy;
+        m->justX = m->justY = -1;
+    }
+    float top = 0, h = 0;
+    box(*m->children[size_t(idx)], idx, top, h);
+    // A first item that cannot take the focus shows above the second [C].
+    float d13 = 0;
+    if (idx == 1 && (m->children[0]->notFocusable || m->children[0]->hidden)) d13 = h;
+    if (s.scroll + d16 <= top - d13) {
+        if (top + h > s.scroll + window - d17) {
+            s.scroll += s.scrollSpeed;
+            if (top + h < s.scroll + window) {
+                const float step = m->spacingBetween + h;
+                if (step > 0) s.scroll = top - float(int(window / step) - 1) * step + d17;
+            }
+            s.scrollDirty = true;
+        }
+    } else {
+        s.scroll -= s.scrollSpeed;
+        if (s.scroll - d13 < top) s.scroll = top - d16 - d13;
+        s.scrollDirty = true;
+    }
+    if (!s.scrollDirty) return;
+    s.scrollDirty = false;
+    m->y = -s.scroll;
+    for (int i = 0; i < count; ++i) {
+        Element& it = *m->children[size_t(i)];
+        float t = 0, ih = 0;
+        box(it, i, t, ih);
+        it.alpha = (s.scroll <= t && t + ih <= window + s.scroll) ? 1.0f : 0.0f;
+    }
+}
+
 void UiSystem::startMorph(Element& e, const qb::Struct& p) {
     Element::Morph m;
     m.active = true;
@@ -692,19 +846,39 @@ void UiSystem::startMorph(Element& e, const qb::Struct& p) {
     m.x0 = m.x1 = e.x, m.y0 = m.y1 = e.y, m.sx0 = m.sx1 = e.sx, m.sy0 = m.sy1 = e.sy;
     m.a0 = m.a1 = e.alpha, m.r0 = m.r1 = e.rot;
     for (int k = 0; k < 4; ++k) m.c0[size_t(k)] = m.c1[size_t(k)] = e.rgba[size_t(k)];
+    // GH3 keeps one target block per element: a new morph starts from the
+    // current values but only the props it names get new targets; the
+    // others keep heading for the targets of a morph still under way, and
+    // `{(x,y) relative}` adds to the target pos [C SetMorph 0x8221CEC8:
+    // start (+0x140) = current (+0xa0), target (+0xf0) written per given
+    // prop; 0x8221C240 relative = target pos (+0x110) + (x,y)]. The
+    // controller select's light_up_controller (pos to the player's spot,
+    // scale 1.5, 0.25 s) followed at once by controller_jiggle's relative
+    // DoMorphs: the controller reaches its spot (GD04-102).
+    if (const Element::Morph& prev = e.morph; prev.active) {
+        if (prev.pos) m.pos = true, m.x1 = prev.x1, m.y1 = prev.y1;
+        if (prev.scale) m.scale = true, m.sx1 = prev.sx1, m.sy1 = prev.sy1;
+        if (prev.alpha) m.alpha = true, m.a1 = prev.a1;
+        if (prev.rot) m.rot = true, m.r1 = prev.r1;
+        if (prev.rgba) m.rgba = true, m.c1 = prev.c1;
+    }
     if (const qb::Value* v = qs::Vm::param(p, K("pos"))) {
         m.pos = true;
         if (v->type == qb::Type::Struct && v->st) {
             float a = 0, b = 0;
             for (const qb::Item& pi : v->st->items)
                 if (pi.value.type == qb::Type::Pair) a = pi.value.f[0], b = pi.value.f[1];
-            if (qs::Vm::flag(*v->st, K("relative"))) m.x1 = e.x + a, m.y1 = e.y + b;
+            if (qs::Vm::flag(*v->st, K("relative"))) m.x1 += a, m.y1 += b;
             else m.x1 = a, m.y1 = b;
         } else {
             readPair(*v, m.x1, m.y1);
         }
     }
     if (const qb::Value* v = qs::Vm::param(p, K("scale"))) m.scale = readPair(*v, m.sx1, m.sy1);
+    // The relative_scale flag: the scale times the element's own
+    // (jiggle_text_array_elements' random 0.7..1.3) [C flag parsed at
+    // 0x8221A738; I: its use].
+    if (m.scale && qs::Vm::flag(p, K("relative_scale"))) m.sx1 *= e.sx, m.sy1 *= e.sy;
     if (const qb::Value* v = qs::Vm::param(p, K("relative_scale"))) {
         float a = 1, b = 1;
         if (readPair(*v, a, b)) m.scale = true, m.sx1 = e.sx * a, m.sy1 = e.sy * b;
@@ -792,7 +966,17 @@ void UiSystem::draw(Canvas& c) {
         while (!stack.empty()) {
             Element* e = stack.back();
             stack.pop_back();
-            if (isMenu(*e) && !e->locked) layoutMenu(*e);
+            // A scrolling menu updates before its menu lays out (parents first) [C 0x8221D2A0].
+            if (e->type == kVScrollingMenu) scrollMenu(*e);
+            if (isMenu(*e) && (!e->locked || e->layoutOnce)) layoutMenu(*e);
+            e->layoutOnce = false;
+            // The menu's first-update event (it got a child or lost one) also
+            // refreshes its scrolling menu's window, after the menu's layout
+            // [C 0x82317CB0 on 0x3056434f]: the items' alphas by where they now are.
+            if (isMenu(*e) && e->parent && e->parent->type == kVScrollingMenu && e->parent->scrollRelayout) {
+                e->parent->scrollRelayout = false, e->parent->scrollDirty = true;
+                scrollMenu(*e->parent);
+            }
             for (auto& ch : e->children) stack.push_back(ch.get());
         }
     }
@@ -890,7 +1074,7 @@ void UiSystem::draw(Canvas& c) {
             e.drawnIn = drawCount_;
         }
         if (e.type == kSprite && e.texture) {
-            gfx::TextureId id = tex_.find(e.texture);
+            gfx::TextureId id = tex_.find(e.texContext, e.texture);
             if (!id) id = movieTexture(e.texture);
             if (!id) continue;
             const float w = e.w * it.wsx, h = e.h * it.wsy;
@@ -1195,13 +1379,38 @@ bool UiSystem::menuAt(float x, float y, bool focus, bool* isList) {
     return true;
 }
 
-std::string UiSystem::helperAt(float x, float y) const {
+std::string UiSystem::helperAt(float x, float y, std::string* button, float* midY) const {
     const Element* box = find(K("user_control_container"));
     if (!box) return {};
-    for (const auto& c : box->children) {
+    // add_user_control_helper's button glyphs, as SetText leaves them
+    // (\m0 / \m1 through meta_button_map) [C script add_user_control_helper].
+    static const char* const kButtons[][2] = {{"\\m0", "green"},  {"\\m1", "red"},      {"\\b6", "yellow"}, {"\\b7", "blue"},
+                                              {"\\b8", "orange"}, {"\\bb", "strumbar"}, {"\\ba", "start"}};
+    auto buttonOf = [&](const Element* b) -> std::string {
+        if (!b) return {};
+        for (const auto& k : kButtons)
+            if (b->text == setText(k[0])) return k[1];
+        return {};
+    };
+    const auto& kids = box->children;
+    for (size_t i = 0; i < kids.size(); ++i) {
+        const Element* c = kids[i].get();
         if (c->type != kText || c->text.empty() || c->drawnIn != drawCount_ || c->text[0] == '\\') continue;
-        // The text and its button glyph on the left [I].
-        if (x < c->bx0 - 40 || x > c->bx1 + 8 || y < c->by0 - 8 || y > c->by1 + 8) continue;
+        // Its glyph: uc_button_N for the text uc_text_N (the auto-centred
+        // pills), else the glyph made just after it (or, without a pill,
+        // just before it) [C script add_user_control_helper].
+        const Element* glyph = nullptr;
+        for (int n = 0; n < 16 && !glyph; ++n)
+            if (c->id == K(("uc_text_" + std::to_string(n)).c_str())) glyph = find(K(("uc_button_" + std::to_string(n)).c_str()));
+        if (!glyph && i + 1 < kids.size() && !kids[i + 1]->text.empty() && kids[i + 1]->text[0] == '\\') glyph = kids[i + 1].get();
+        if (!glyph && i > 0 && !kids[i - 1]->text.empty() && kids[i - 1]->text[0] == '\\') glyph = kids[i - 1].get();
+        // The pill: the text and its glyph on the left [I].
+        float x0 = c->bx0 - 40, y0 = c->by0, x1 = c->bx1, y1 = c->by1;
+        if (glyph && glyph->drawnIn == drawCount_)
+            x0 = std::min(c->bx0, glyph->bx0), y0 = std::min(y0, glyph->by0), x1 = std::max(x1, glyph->bx1), y1 = std::max(y1, glyph->by1);
+        if (x < x0 - 8 || x > x1 + 8 || y < y0 - 8 || y > y1 + 8) continue;
+        if (button) *button = buttonOf(glyph);
+        if (midY) *midY = (y0 + y1) * 0.5f;
         std::string t = c->text;
         for (char& ch : t) ch = char(std::toupper(static_cast<unsigned char>(ch)));
         return t;
@@ -1250,9 +1459,11 @@ bool UiSystem::member(qs::ScriptRun& run, uint32_t obj, uint32_t method, qb::Str
     if (method == K("GetTags")) {
         if (!e) return false;
         if (qb::Struct* l = locals(run)) {
-            // The element's id comes with its tags [I: retail_menu_focus
-            // without an id recolours `<id>` after its gettags].
-            if (!qs::Vm::param(e->tags, K("id"))) qs::Vm::set(*l, K("id"), qs::Vm::makeKey(e->id));
+            // The element's id comes with its tags when the script has none
+            // [I: retail_menu_focus without an id recolours `<id>` after its
+            // gettags; jiggle_text_array_elements' gettags on each letter
+            // keeps its own id (the container) for explode_text_array_elements <...>].
+            if (!qs::Vm::param(e->tags, K("id")) && !qs::Vm::param(*l, K("id"))) qs::Vm::set(*l, K("id"), qs::Vm::makeKey(e->id));
             for (const qb::Item& it : e->tags.items) qs::Vm::set(*l, it.name, it.value);
         }
         return true;
@@ -1317,9 +1528,62 @@ bool UiSystem::member(qs::ScriptRun& run, uint32_t obj, uint32_t method, qb::Str
     return false;
 }
 
+uint32_t UiSystem::loadAssetContext(uint32_t context, const qb::Struct* body) {
+    // An asset context is a pak's name key (its header's, the key of the
+    // pak's file name: axel_1); for a character it is
+    // musician_body[].asset_context, whose `pak` is the body pak [C data, qb
+    // musician_body / download_musician_body]. Morello_1 and the BoneMan
+    // bodies have no asset_context (the script pushes nothing): GH3 then finds
+    // Mag_Photo in the paks loaded, the players' bodies alone; the port keeps
+    // every body loaded, so it takes the body the script just looked up
+    // (`info_struct`) [I].
+    auto strOf = [](const qb::Value* v) { return v && (v->type == qb::Type::String || v->type == qb::Type::WString) ? v->str : std::string(); };
+    auto pathOf = [&](const qb::Struct& b, std::string& stem) {
+        const std::string pak = strOf(b.find(K("pak")));
+        const size_t slash = pak.find_last_of("\\/");
+        stem = slash == std::string::npos ? pak : pak.substr(slash + 1);
+        if (stem.size() > 4 && stem.compare(stem.size() - 4, 4, ".pak") == 0) stem.resize(stem.size() - 4);
+        return pak.empty() ? std::string() : "DATA/COMPRESSED/PAK/" + stem + ".pak.xen";
+    };
+    auto load = [&](const qb::Struct& b, uint32_t ctx) -> uint32_t {
+        std::string stem;
+        const std::string path = pathOf(b, stem);
+        if (!ctx) ctx = qbkey::key(stem);
+        if (tex_.hasContext(ctx)) return ctx;
+        if (path.empty() || !disc_.exists(path)) return 0;
+        return tex_.loadContextImages(disc_, path, ctx) > 0 ? ctx : 0;
+    };
+    if (!context) return body ? load(*body, 0) : 0;
+    if (tex_.hasContext(context)) return context;
+    for (uint32_t arr : {K("musician_body"), K("download_musician_body")}) {
+        const qb::Value* a = vm_.global(arr);
+        if (!a || !a->arr) continue;
+        for (const qb::Value& b : a->arr->values)
+            if (b.st)
+                if (const qb::Value* ac = b.st->find(K("asset_context")); ac && ac->key == context) return load(*b.st, context);
+    }
+    return 0;
+}
+
 void UiSystem::addNatives() {
     using qs::ScriptRun;
     using qs::Vm;
+    // PushAssetContext context = <pak name> / PopAssetContext: what the UI
+    // creates meanwhile takes its textures from that pak first (the results
+    // screen's Mag_Photo, one per character body) [C script create_newspaper_menu].
+    vm_.addNative("PushAssetContext", [this](Vm&, ScriptRun& run, qb::Struct& p) {
+        const qb::Value* c = Vm::param(p, K("context"));
+        const uint32_t ctx = c && (c->type == qb::Type::Key || c->type == qb::Type::KeyPtr) ? c->key : 0;
+        const qb::Struct* body = nullptr;
+        if (!ctx && !run.frames.empty() && run.frames.back().locals)
+            if (const qb::Value* is = run.frames.back().locals->find(K("info_struct")); is && is->st) body = is->st.get();
+        assetContexts_.push_back(loadAssetContext(ctx, body));
+        return true;
+    });
+    vm_.addNative("PopAssetContext", [this](Vm&, ScriptRun&, qb::Struct&) {
+        if (!assetContexts_.empty()) assetContexts_.pop_back();
+        return true;
+    });
     vm_.addNative("CreateScreenElement", [this](Vm&, ScriptRun& run, qb::Struct& p) {
         auto e = std::make_unique<Element>();
         static uint32_t anonymous = 0x80000000u;
@@ -1337,6 +1601,13 @@ void UiSystem::addNatives() {
         byId_[e->id] = raw;
         parent->children.push_back(std::move(e));
         applyProps(*raw, p, true);
+        // The main menu's XBOX LIVE (ONLINE: no online play in the port) as
+        // GH3 disables it in demo mode: create_main_menu's demo_mode_disable
+        // = {rgba = [128 128 128 255] not_focusable} on its text and its
+        // vmenu item [C script create_main_menu] (GD04-101).
+        bool online = raw->id == K("main_menu_leaderboards_text");
+        for (const Element::Handler& h : raw->handlers) online = online || h.script == K("main_menu_select_xbox_live");
+        if (online) raw->rgba = {128, 128, 128, 255}, raw->notFocusable = true;
         ++stats_.created;
         // new_menu focuses its menu before the items exist: the first
         // focusable item added to a focused menu takes the focus, once the
@@ -1491,14 +1762,31 @@ void UiSystem::addNatives() {
             if (r->object == e->id && !r->handler) r->finished = true;
         return true;
     });
-    // SetScreenElementLock id on|off: on suspends the menu relayout, off relayouts [C flag 0x4000].
+    // SetScreenElementLock id on|off: on posts the first-update event
+    // (0x3056434f), so the menu lays out once more, after this frame's
+    // scrolling-menu update, then suspends its relayout; off relayouts
+    // [C 0x82172258 -> 0x8221A588, flag 0x4000] (the calibrate lag menu locks
+    // its menu right after making the items: they still get laid out, the
+    // window offset by the first one, its highlights calibrate_lag_hilite_pos0..2).
     vm_.addNative("SetScreenElementLock", [this](Vm&, ScriptRun&, qb::Struct& p) {
         Element* e = resolve(Vm::param(p, K("id")));
         if (!e) return false;
-        e->locked = Vm::flag(p, K("on"));
-        if (!e->locked && isMenu(*e)) layoutMenu(*e);
+        const bool on = Vm::flag(p, K("on"));
+        if (on && !e->locked) e->layoutOnce = true;
+        e->locked = on;
+        if (!on && isMenu(*e)) e->widthKids = size_t(-1), layoutMenu(*e);
         return true;
     });
+}
+
+bool UiSystem::drawSprite(Canvas& c, uint32_t texture, float x0, float y0, float x1, float y1, const std::array<uint8_t, 4>& rgba, bool flipU) const {
+    const gfx::TextureId id = tex_.find(texture);
+    if (!id) return false;
+    const float u0 = flipU ? 1.0f : 0.0f, u1 = flipU ? 0.0f : 1.0f;
+    auto V = [&](float x, float y, float u, float v) { return Vertex{x, y, 0, u, v, rgba[0], rgba[1], rgba[2], rgba[3]}; };
+    const Vertex q[6] = {V(x0, y0, u0, 0), V(x1, y0, u1, 0), V(x1, y1, u1, 1), V(x0, y0, u0, 0), V(x1, y1, u1, 1), V(x0, y1, u0, 1)};
+    c.draw(q, 6, int(id.id), Blend::Alpha);
+    return true;
 }
 
 }  // namespace ui

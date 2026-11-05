@@ -121,6 +121,15 @@ public:
     // menus' calls; a song's come from its performance array) [C scripts].
     void changeStance(uint32_t stance, bool noWait, double ms) { changeStanceEvent(stance, noWait, ms); }
     void playAnim(const qb::Struct& params, double ms) { playAnimEvent(params, ms); }
+    // play_special_anim {stance anim}: the stance at once (no transition),
+    // its `anim` looping, the arms off (guitarist, bassist) [C script].
+    // `blend`: blendduration (play_win_anims / play_lose_anims: 0) [C scripts].
+    void playSpecial(uint32_t stance, uint32_t anim, double ms, float blend = 0.2f, int disableArms = 2);
+    void playClip(uint32_t clip, uint32_t stance, bool cycle, double ms);
+    // play_outro: Strum / FretPos / FretFingers / Drum / Drum_cymbal /
+    // event_iterator killed: no song event from `ms` on [C script].
+    void endSongEvents(double ms);
+    band::Role role() const { return role_; }
     // The pose at `ms` (>= the last advance): local transforms, then the
     // model-space bone matrices (`world`) and the skinning matrices
     // (world x inverse bind).
@@ -136,11 +145,20 @@ public:
     const std::vector<uint32_t>& missing() const { return missing_; }
     uint32_t stance() const { return stance_; }
     uint32_t bodyClip() const { return body_.plays.empty() || !body_.plays.back().clip ? 0 : bodyKey_; }
+    // ped_animevents.<clip>: {time scr params} entries of the body clips
+    // played, due by the last advance (the caller runs `scr` on the game's
+    // VM and clears the list) [C data animevents / ped_animevents].
+    struct ClipEvent {
+        uint32_t scr = 0;
+        const qb::Struct* params = nullptr;
+    };
+    std::vector<ClipEvent>& clipEvents() { return clipEvents_; }
 
 private:
     enum class Ev : uint8_t {
         Strum, Fret, Chord, Perf, DrumArm, Cymbal,                                       // from the song
-        BodyDone, TransitionDone, StrumDone, FaceDone, ChordRelease, ArmDone, Twist  // scheduled
+        BodyDone, TransitionDone, StrumDone, FaceDone, ChordRelease, ArmDone, Twist,  // scheduled
+        ClipEvent                                                                     // ped_animevents
     };
     struct Event {
         double t = 0;
@@ -154,15 +172,22 @@ private:
     void schedule(double t, Ev kind, int a = 0, int b = 0, uint32_t gen = 0, const qb::Struct* params = nullptr);
     void handle(const Event& e);
     uint32_t random(uint32_t n);
+    uint32_t scriptedClip_ = 0;  // playClip's clip (0: the random anims run)
+    bool scriptedCycle_ = false;
+    bool specialOnce_ = false;  // play_special_anim's clip playing: then Stance_A and the idle loop
     const anim::Clip* clip(uint32_t key);
     const qb::Value* animSet() const;
     const anim::Clip* tempoAnim(uint32_t anim, double t, uint32_t& key);
     void bodyIteration(double t);
+    void scheduleClipEvents(uint32_t clipKey, double t);
+    std::vector<ClipEvent> clipEvents_;
     void bodyFinished(double t);
     void afterStance(double t, bool stanceChanged);
     void setArms(int disable, double t, float blend);
     void playAnimEvent(const qb::Struct& p, double t);
     void changeStanceEvent(uint32_t stance, bool noWait, double t);
+    void afterStanceBody(double t, bool stanceChanged);
+    uint32_t queuedStance_ = 0;  // a stance change waiting behind the pending one
     void strum(int length, double t);
     void facial(double t);
     bool guitarLike() const { return role_ == band::Role::Guitarist || role_ == band::Role::Bassist; }
@@ -191,6 +216,7 @@ private:
     const qb::Struct* fretAnims_ = nullptr;
     uint32_t bodyKey_ = 0;
     uint32_t bodyGen_ = 0, strumGen_ = 0, faceGen_ = 0, chordGen_ = 0, armGen_[2] = {0, 0};
+    float bodyBlend_ = 0.2f;  // the next body clip's blend in (play_special_anim blendduration)
     float slowTempo_ = 75, medTempo_ = 115, fastTempo_ = 145;
     int shortStrum_ = 150, medStrum_ = 600;
     float fingerPress_ = 0.07f, fingerRelease_ = 0.2f, fretBlend_ = 0.1f, drumBlend_ = 0.1f;
@@ -207,9 +233,20 @@ private:
     // Two-bone IK chains: bicep, forearm, palm -> target bone [C data Hero_Ik_params].
     struct Chain {
         int b0 = -1, b1 = -1, b2 = -1, target = -1;
-        bool right = false;
+        bool right = false, leg = false;
+        Vec hinge{0, 0, -1};                   // hingeaxis, in bone1's frame
+        float cosMax = -1, cosMin = 1;         // cosmaxhingeangle / cosminhingeangle (Function_823F78E0's defaults)
+        float gain1 = 1, gain2 = 1;            // strength (first / second joint gains)
     };
     std::vector<Chain> chains_;
+    // hero_ConstraintBones: helper bones driven from the animated ones after the IK [C data].
+    struct Constraint {
+        enum Type : uint8_t { Twist, TwistChild, Split, SplitR } type = Twist;
+        int bone = -1, target = -1;
+        float amount = 0;
+    };
+    std::vector<Constraint> constraints_;
+    void applyConstraints(Pose& pose) const;
 };
 
 }  // namespace bandanim

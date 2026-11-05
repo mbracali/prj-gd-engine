@@ -42,9 +42,16 @@ struct Element {
     bool zGiven = false;  // without its own z_priority an element draws at its parent's [I]
     std::array<uint8_t, 4> rgba{255, 255, 255, 255};
     uint32_t texture = 0, font = 0;
+    uint32_t texContext = 0;  // the asset context the texture was set under (PushAssetContext), 0: global
     std::string text;
     bool hidden = false, flipH = false, flipV = false, notFocusable = false, blockEvents = false;
     bool allowExpansion = false, locked = false, preserveOrientation = false;
+    bool layoutOnce = false;  // SetScreenElementLock on: one more layout first [C 0x8221A588]
+    // A VMenu's width is set by its first-update event only (made, a child
+    // added or gone, SetScreenElementLock), not when a child's text changes
+    // later: the children it was set with (count, last one) (GD04-099).
+    size_t widthKids = size_t(-1);
+    const Element* widthLast = nullptr;
     int exclusiveDevice = -1;
     uint32_t exclusiveMask = 0;  // exclusive_device as an array of devices (bit per device; 0: none) [C script create_select_difficulty_menu]
     float fontSpacing = 0, spaceSpacing = 0, lineSpacing = 1;
@@ -61,6 +68,15 @@ struct Element {
     // Menus [C 0x82315AA0 / 0x82315B08]
     float regularSpace = 0, paddingScale = 1, spacingBetween = 0;
     bool dontWrap = false;
+    // VScrollingMenu [C ctor 0x82316E58, props 0x82317348, update 0x82317640]:
+    // its menu's offset (0x270), scroll_speed (0x274, 10000), num_items_to_show
+    // (0x278, -1), the refresh flag (0x26d); the port's record of the item
+    // and child count it last saw (GH3: the focus / first-update events).
+    float scroll = 0, scrollSpeed = 10000;
+    int numItemsToShow = -1;
+    bool scrollDirty = true, scrollRelayout = false;
+    int scrollSel = -2;
+    size_t scrollKids = 0;
     int selected = -1;
     bool focused = false;
     int controller = 0;
@@ -100,6 +116,9 @@ public:
     void draw(Canvas& c);
     // A pad event (pad_choose, pad_back, pad_up ...) to every focused element.
     void padEvent(uint32_t event, int device);
+    // A focused element of `device` handles pad_start as GH3's text entries
+    // do (finish the name): the keyboard's Enter is Start there (FrontEnd::handle).
+    bool startFinishesEntry(int device) const;
     Element* find(uint32_t id) const;
     // DisplayLoadingScreen's picture is up (over everything).
     bool loadingScreenUp() const { return loadingTex_ != 0; }
@@ -129,6 +148,13 @@ public:
     void drawText(Canvas& c, uint32_t font, const std::string& s, float x, float y, float h, const std::array<uint8_t, 4>& rgba,
                   uint32_t align, const TextStyle& style) const;
     float textWidth(uint32_t font, const std::string& s, float h, float spacing = 0) const;
+    // A script text's \m<n> button codes as the buttons font's glyphs (SetProps text) [C 0x8228E0B0].
+    std::string setText(const std::string& s) const;
+    // The focused elements: menus and their selected items (walk checks too).
+    std::vector<Element*> focusedElements() const;
+    // A GH3 texture (by key) stretched over x0..x1, y0..y1 in menu units,
+    // flipped left-right if `flipU`; false if the texture is not loaded.
+    bool drawSprite(Canvas& c, uint32_t texture, float x0, float y0, float x1, float y1, const std::array<uint8_t, 4>& rgba, bool flipU = false) const;
     // A font's line height in its own units (0 if the font is not loaded).
     float fontLineHeight(uint32_t font) const;
     // The mouse over GH3's menus: the focused menus' items, hit-tested at
@@ -137,8 +163,10 @@ public:
     // moves the selection there (a hover). Returns whether one was hit.
     bool menuAt(float x, float y, bool focus, bool* isList = nullptr);
     // The help bar's item (user_control_container) at (x, y): its text, upper
-    // case ("SELECT", "BACK"), or "".
-    std::string helperAt(float x, float y) const;
+    // case ("SELECT", "BACK"), or "". `button`: its button ("green", "red",
+    // "yellow", "blue", "orange", "strumbar", "start" or ""), `midY` the
+    // pill's middle (the strum bar: above it up, below down).
+    std::string helperAt(float x, float y, std::string* button = nullptr, float* midY = nullptr) const;
     // The drawn bounds of an element (false: not drawn in the last frame).
     bool drawnBounds(uint32_t id, float& x0, float& y0, float& x1, float& y1) const;
     uint64_t drawCount() const { return drawCount_; }
@@ -163,7 +191,6 @@ private:
     std::vector<std::u16string> blockLines(const FontEntry& fe, const Element& e) const;
     // SetText: "\m<n>" (a meta button) becomes "\b<glyph>" through
     // meta_button_map, "\_" a space [C 0x8231A2C8, 0x8228E0B0].
-    std::string setText(const std::string& s) const;
     // A text element's glyphs (its shadow with `shadowPass`) at the corner
     // (cx, cy), world scale / alpha / rotation.
     void drawElementText(Canvas& c, const Element& e, const FontEntry& fe, float cx, float cy, float wsx, float wsy, float wa, float wrot,
@@ -174,10 +201,10 @@ private:
     void focusMenu(Element* m, const qb::Struct& data);
     void moveMenu(Element* m, int dir);
     void layoutMenu(Element& m);
+    void scrollMenu(Element& s);
     Element* resolve(const qb::Value* v) const;
     bool member(qs::ScriptRun& run, uint32_t obj, uint32_t method, qb::Struct& p, bool& handled);
     void startMorph(Element& e, const qb::Struct& p);
-    std::vector<Element*> focusedElements() const;
 
     qs::Vm& vm_;
     const Disc& disc_;
@@ -193,6 +220,11 @@ private:
     // DisplayLoadingScreen's image (full screen) and spinning wheel, over
     // everything until HideLoadingScreen [C 0x8218DDE8 / 0x8218E0A0].
     uint32_t loadingTex_ = 0, loadingSpin_ = 0;
+    // PushAssetContext / PopAssetContext: textures set meanwhile come from
+    // the context's pak first (a character body's Mag_Photo) [C script
+    // create_newspaper_menu]; 0 entries: a context with no body pak (zones).
+    std::vector<uint32_t> assetContexts_;
+    uint32_t loadAssetContext(uint32_t context, const qb::Struct* body);
     float spinX_ = 0, spinY_ = 0;
     double loadingMs_ = 0;
     // Texture-slot movies (PlayMovieFromBuffer, PreLoadMovie +

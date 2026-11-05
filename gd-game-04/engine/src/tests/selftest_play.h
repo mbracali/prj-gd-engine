@@ -21,6 +21,9 @@ struct PlayTotals {
     // Power raised together; battles autoplayed with attacks.
     size_t coopCharts = 0, coopNotes = 0, coopStarPower = 0, battles = 0, battleAttacks = 0, battleKos = 0;
     long long score = 0;
+    // GD04-108: sustains cut by an injected overstrum (0x829E4C80) and the
+    // charts where the cut did not end the sustain / stop its points.
+    size_t overstrumCuts = 0, overstrumCutFails = 0;
 };
 
 // Plays every part and difficulty of a chart with the autoplayer; false and

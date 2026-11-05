@@ -31,7 +31,7 @@ void Names::addDebugText(std::string_view text) {
         if (!stop || *stop) continue;
         std::string_view n = line.substr(sp + 1);
         while (!n.empty() && n.front() == ' ') n.remove_prefix(1);
-        if (!n.empty()) names_.emplace(uint32_t(v), std::string(n));
+        if (!n.empty()) add(uint32_t(v), std::string(n));
     }
 }
 

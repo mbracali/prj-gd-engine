@@ -4,9 +4,13 @@
 
 #include <cstdint>
 #include <memory>
+#include <unordered_set>
+#include <unordered_map>
 #include <string>
 #include <vector>
 
+#include "render/device.h"
+#include "render/screen_fx.h"
 #include "render/venue_camera.h"
 #include "render/venue_lights.h"
 
@@ -66,6 +70,10 @@ private:
     venue::LightShow lights_;
     std::vector<venue::LightState> lightState_;
     bool failed_ = false;  // the zone did not load (logged once)
+    // Create / Kill {name = node} (SafeCreate, the store's Z_SoundCheck_G_RMM_Kill_me):
+    // 1 created, 0 killed; EnableLightGroup / DisableLightGroup: the groups switched off.
+    std::unordered_map<uint32_t, int> nodeVis_;
+    std::unordered_set<uint32_t> lightsOff_;
     // The camera: a morph from `from_` to `to_` over `duration_` ms.
     bool playing_ = false;
     uint32_t controlRun_ = 0;  // the control script's run
@@ -77,4 +85,14 @@ private:
     // The current zone's nodes (GetWaypointPos, the objects); false if it does not load.
     bool ensureVenue();
     std::unique_ptr<MenuObjects> objects_;
+    // bg_viewport's screen effects (setup_bg_viewport -> enable_bg_viewport_properties:
+    // DOF_Off, Default_TOD_Manager's BnS and sbloom) and the characters'
+    // dynamic shadow, as the songs' venue (render/venue_stage.cpp).
+    screenfx::ScreenFx fx_;
+    screenfx::Params fxParams_;
+    bool fxTried_ = false, fxReady_ = false;
+    gfx::RenderDevice* dev_ = nullptr;
+    gfx::TargetId shadow_;
+    void shadowPass(gfx::RenderDevice& dev);
+    void releaseGpu();
 };

@@ -36,6 +36,10 @@ struct PortContext {
     PortScreens& screens;
     // A change of an Enhanced setting, applied by the app at once.
     std::function<void(const std::string& key)> changed;
+    // Export / Load User Files: the app's dialog (`action` export,
+    // load_settings, load_progress); its outcome lands in `status`.
+    std::function<void(const std::string& action)> action;
+    std::string status;
     // gd01's sound names: toggle (a move), select, back, error.
     void sound(const char* what) const;
 };
@@ -89,6 +93,7 @@ public:
     // The item under (x, y) on that screen: "gamepads", "enhanced" or "".
     std::string itemAt(float x, float y, const std::string& flowState) const;
     // The item's bounds (walks click it).
+    void ensureItem(const std::string& flowState);
     bool itemRect(const std::string& flowState, float& x0, float& y0, float& x1, float& y1) const;
 
     PortContext& context() { return ctx_; }

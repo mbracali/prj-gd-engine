@@ -3,6 +3,7 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -28,6 +29,11 @@ class Pak {
 public:
     // Throws std::runtime_error when broken.
     static Pak load(const Disc& disc, const std::string& pakPath);
+    // The same, from a small cache shared by every loader (a song's venue,
+    // band, crowd, particles and peds each read ZONES/global.pak and the
+    // zone's pak: decompressed once now, not 4-6 times; owner 1.7).
+    // Thread-safe; global.pak stays, the last others are kept up to 160 MB.
+    static std::shared_ptr<const Pak> shared(const Disc& disc, const std::string& pakPath);
     static Pak fromBytes(Bytes buffer, size_t headerSize, std::string name);
 
     const std::vector<PakEntry>& entries() const { return entries_; }
@@ -43,6 +49,7 @@ public:
     const PakEntry* findType(uint32_t fullOrShortName, uint32_t type) const;
     const std::string& name() const { return name_; }
     bool ended() const { return ended_; }
+    size_t bytes() const { return buf_.size(); }
 
 private:
     std::string name_;

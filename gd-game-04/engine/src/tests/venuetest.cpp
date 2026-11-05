@@ -184,6 +184,9 @@ int runVenueTest(const std::string& discPath) {
         }
         size_t drawsMin = ~size_t(0), drawsMax = 0;
         long drawn = 0;
+        int shadowLight = -1;
+        bool shadowMoved = false;
+        long shadowFrames = 0, bothCascades = 0;  // frames with a shadow light; of them, both cascades drawn
         for (int fps : {60, 240}) {
             VenueStage& st = d;
             double step = -kLeadInMs;
@@ -201,6 +204,14 @@ int runVenueTest(const std::string& discPath) {
                 drawsMin = std::min(drawsMin, st.view()->stats().drawsLastFrame);
                 drawsMax = std::max(drawsMax, st.view()->stats().drawsLastFrame);
                 ++drawn;
+                // The dynamic shadow keeps one light (GD04-103: it followed the light show).
+                if (st.shadowLight() >= 0) {
+                    if (shadowLight >= 0 && st.shadowLight() != shadowLight) shadowMoved = true;
+                    shadowLight = st.shadowLight();
+                    // GH3's two cascades (GD04-106): the band in both maps.
+                    ++shadowFrames;
+                    if (st.shadowCascadeDraws()[0] > 0 && st.shadowCascadeDraws()[1] > 0) ++bothCascades;
+                }
             }
             // The 240 fps pass replays the same window: restart the stage.
             if (fps == 60 && !d.start(*disc, g, zone, chart, songKey, kLeadInMs, &renderer.device(), error)) {
@@ -209,6 +220,10 @@ int runVenueTest(const std::string& discPath) {
             }
         }
         if (drawsMin == 0) fail("a frame drew nothing");
+        if (shadowMoved) fail("the dynamic shadow changed its light between frames");
+        if (d.band() && d.band()->view() && !SDL_getenv("GD04_NO_SHADOWS") && shadowFrames > 0 && bothCascades != shadowFrames)
+            fail("the dynamic shadow drew " + std::to_string(bothCascades) + " of " + std::to_string(shadowFrames) +
+                 " frames into both cascades");
 
         // 3. Screenshots: the middle of the first shots after the intro.
         int saved = 0;
@@ -217,13 +232,23 @@ int runVenueTest(const std::string& discPath) {
             if (s.start(*disc, g, zone, chart, songKey, kLeadInMs, &renderer.device(), error)) {
                 double step = -kLeadInMs;
                 std::vector<double> times;
-                for (const auto& h : ha)
-                    if (h.start >= -kLeadInMs && times.size() < 8) times.push_back(std::min(h.end, h.start + 6000.0) * 0.5 + h.start * 0.5);
+                // GD04_VENUETEST_SEQ=<ms>,<count>[,<step ms>]: consecutive frames instead
+                // (16.67 ms apart by default), to catch flicker.
+                if (const char* seq = SDL_getenv("GD04_VENUETEST_SEQ")) {
+                    double from = 0, step = 1000.0 / 60.0;
+                    int count = 0;
+                    if (std::sscanf(seq, "%lf,%d,%lf", &from, &count, &step) >= 2)
+                        for (int i = 0; i < count && i < 600; ++i) times.push_back(from + step * i);
+                } else {
+                    for (const auto& h : ha)
+                        if (h.start >= -kLeadInMs && times.size() < 8) times.push_back(std::min(h.end, h.start + 6000.0) * 0.5 + h.start * 0.5);
+                }
                 for (double t : times) {
                     while (step + kStepMs <= t) {
                         step += kStepMs;
                         s.update(step, healthAt(step));
                     }
+                    if (SDL_getenv("GD04_VENUETEST_SEQ")) s.advance(t);  // as a played frame
                     const float black[4] = {0, 0, 0, 1};
                     renderer.beginFrame(black);
                     s.draw(t);

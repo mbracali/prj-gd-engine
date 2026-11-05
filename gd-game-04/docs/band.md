@@ -84,8 +84,10 @@ member's transform is the waypoint's position and rotation (docs/venues.md
   holds absolute values (the `rig/defaults/*_default` clips equal the bind
   pose).
 - Flags 0x200: a difference clip (the hands' `_D` clips): finger bones with a
-  zero translation and a rotation off the bind; gd04 composes it onto the
-  pose below (pose x delta, translations added) [I: the order].
+  zero translation and a rotation off the bind; gd04 composes it before the
+  pose below (delta x pose in its column-vector terms, translations added)
+  [I: the order, chosen from the fret hand's grip: the other order twisted
+  the IK target and the hand].
 - Body clips (`GH3_Guit_Axel_A_Med_Idle1`) drive the root, spine, legs,
   head, the guitar bones and the IK targets, **not** the arms: a
   guitarist's arms come from IK (below). Break / intro clips (`handsoff`)
@@ -110,15 +112,41 @@ twist difference scaled by the twist value. A `degenerateblend` node
 cross-fades from what it played to the new clip over the blend time [I:
 linear]; a `play` timer holds its last frame [I].
 
-### IK  [C data `Hero_Ik_params`; I: the solver]
+### IK  [C data `Hero_Ik_params`; C: Function_823F78E0, the job 0x823F65C0]
 
-Two-bone chains bicep -> forearm -> palm onto `Bone_IK_Hand_Guitar_R`
-(child of `BONE_GUITAR_STRUM_POS`) and `Bone_IK_Hand_Guitar_L` (child of
-`BONE_GUITAR_FRET_POS`, which the fret clips slide along the neck). gd04
-solves in the plane through the animated elbow, gives the palm the target's
-orientation, and blends with the animated arm by the arm's strength
-(`hero_toggle_arms`, 0.25 s). Leg chains, the drummer's and the singer's IK,
-the hinge limits and `hero_ConstraintBones` (twist bones) are not done.
+The `ik` node (`two_bone_chains = ik_params`) builds one Havok two-joints
+setup per `Hero_Ik_params` entry (Function_823F78E0): bone0 / bone1 / bone2
+(bicep, forearm, palm; thigh, knee, ankle), `bonetarget`, `hingeaxis` (in
+bone1's frame), `cosmaxhingeangle` (default -1), `cosminhingeangle` (1) and
+the two joint gains `strength` (1; ramped by `hero_toggle_arms` at +0x40).
+Each frame the job reads the target's matrix, calls Havok's
+`hkaTwoJointsIkSolver::solve` (Function_826B5340, "LtTWOJOINTSOLVER": no end
+rotation in this Havok's setup), then turns the target's rotation rows
+(r0, r2, -r1) into a quaternion, multiplies it by (-0.7071, 0, 0, 0.7071)
+(the two 90-degree turns cancel) and stores it, slerped by the gain, as the
+end bone's model rotation [C 0x823F6D1C..0x823F715C]. gd04: the elbow / knee
+turns about its hinge axis to the angle the target's distance asks for
+(clamped by the cosines), the shoulder / hip swings the chain onto the
+target, the palm / ankle takes the target's model rotation; the arms by the
+arm's strength (`hero_toggle_arms`, 0.25 s), the legs always [I: Havok's
+solve as documented]. Targets: `Bone_IK_Hand_Guitar_R` (child of
+`BONE_GUITAR_STRUM_POS`), `Bone_IK_Hand_Guitar_L` (child of
+`BONE_GUITAR_FRET_POS`, which the fret clips slide along the neck),
+`Bone_IK_Foot_Slave_L/R`. The difference clips compose before the pose below
+(the flags 0x200 note above); with the other order the target, and the fret hand
+on it, turned about the wrong axes (owner 2026-11-04: the left hand twisted,
+off the neck). The drummer (`Drummer_IK_Params`) and the singer
+(`Singer_IK_Params`) solve the same way onto `Bone_IK_Hand_Slave_L/R` and the
+foot slaves, always at full strength [C data: their trees' ik nodes; I: no arm
+toggles of theirs]. The hinge limits are the cosines above.
+
+`hero_ConstraintBones` (the root of the guitarist's, singer's and drummer's
+trees) [C data; I: the operations]: after the IK, `twist` bones (children of
+their target: the biceps' top 1.0 / middle 0.5, the thighs' 0.5) undo that
+share of the target's twist about x; `twistchild` (the wrists, children of the
+forearm) take 0.5 of the palm's; `split` / `splitr` (knees, elbows, hips) turn
+by 0.5 of the target's rotation from its bind in their parent's space. The
+clips' own poses already come close (89 pixels changed in the chartest grid).
 
 ### Body loop  [C scripts `hero_play_adjusting_random_anims`, `handle_play_anim`, `handle_change_stance`]
 
@@ -140,6 +168,44 @@ the hinge limits and `hero_ConstraintBones` (twist bones) are not done.
   (event_iterator, lead 0) [C]. On the disc: Band_ChangeStance (1027),
   Band_PlayAnim (839), Band_PlayFacialAnim (316), Band_WalkToNode (79, not
   done).
+- Star Power: `guitarist_idle` handles `star_power_on<p>` for its player's
+  band member with `handle_star_power`: it waits for the next camera cut
+  (`CameraCuts_StartCallback` clears `waiting_for_cameracut`), then
+  `play_special_anim {stance = Stance_A, Anim = Starpower, blendduration =
+  0.0, disable_arms = 0}` (e.g. GH3_Guit_Mido_A_Med_Special02), once [C
+  scripts]. gd04: VenueStage::starPowerAnim, player 1 the guitarist,
+  player 2 the bassist [I]. --chartest checks every guitarist / bassist body
+  has the clip (all 70 playable bodies; the band's own Bassist and the
+  debug BoneMan bodies have none) (GD04-097).
+- Clip events: `ped_animevents.<clip> = [{time scr params}]` runs `scr` at
+  `time` s into a body clip while it plays. The Star Power ones drive the
+  stage FX: Casey's (and Judy's B / C) Star Power clips call
+  StarPower_ShootShotgun (spCaseyShoot -> Do_StarPower_ShotgunFX's shots),
+  Johnny's StarPower_FlameThrowerFlames (spJohnnyFlamesOn / Dur ->
+  Do_StarPower_FlameThrowerFX's flames) [C data, scripts guitar_starpower.qb].
+  gd04: Animator::scheduleClipEvents, spawned on the game VM by
+  SongHooks::step (before 11-05 they never ran: Casey and Johnny had no
+  Star Power FX). The win / lose clips' PreloadWinAnimStream /
+  PlayPreLoadedWinAnimStream (obj_getid: run as the member) are skipped [L].
+  Do_StarPower_StageFX's switch by character_id: Casey shotgun, Johnny
+  flamethrower, Judy hearts, Satan (Lou) bats, Midori butterflies, Xavier
+  peace, Lars and Ripper nothing (empty cases), default (Axel, Izzy, Slash,
+  Morello, the God of Rock) Tesla bolts from the zone's TeslaNodes (none
+  outside the eight zones that have them) [C script].
+- The song's end: `play_win_anims` / `play_lose_anims` (the songwon /
+  songlost transitions) run `play_special_anim {stance anim = idle
+  blendduration = 0.0}` on the guitarist and bassist (win / lose, or
+  Win_SmStg / Lose_SmStg on the small stages; boss and versus by who won)
+  and on the drummer and the singer (`win` / `lose` always). The clip plays
+  once, cut in with no blend; when it ends the member goes back to
+  Stance_A and its idle loop (guitarist_idle / bandmember_idle), the arms
+  back on over 0.25 s [C script play_special_anim; I: GH3 starts the arms
+  0.25 s before the end]. The drummer and singer were left in the song's
+  loop before (render/venue_stage.cpp VenueStage::outro). `play_outro`
+  kills Strum_iterator, FretPos_iterator, FretFingers_iterator,
+  Drum_iterator, Drum_cymbal_iterator and event_iterator: no strum, fret,
+  drum hit or performance event after it (they went on, a song stance
+  change could cut the win / lose clip) [C script].
 - The fast intro (quickplay) does not run `play_intro_anims`: the members
   start in their profile's stance [C data `Common_FastIntro_Transition`].
 
@@ -214,16 +280,66 @@ the venue, no back-face culling (hair cards) [I].
 (Bone_ACC_01..15) makes those bones of the member's ragdoll (the profile's
 `ragdoll`, `ragdoll2` for outfit 2: a `.rag` of global.pak) Havok bodies
 while the body bones follow the animation [C scripts; formats.md "Havok
-packfiles"]. gd04 (`render/band_ragdoll.*`) [I: the model]: each
-accessory body is a point mass at its bone's tip (the far end of its .rag
-shape: the boxes' translation doubled, along the bone's +x; the bodies sit
-at the bones' bind positions [C data]) on a rod from the bone's joint,
-under gravity with the body's damping (max of linear / angular, 0.05 on
-the disc), its swing held inside its ragdoll constraint's cone around the
-animated direction; the bone turns to the mass and its descendants follow.
-Stepped at 60 Hz of song time from the animated pose at each step (frame
-rate independent; a restart at rest after a jump of over 2 s);
-GD04_NO_RAGDOLL=1 turns it off.
+packfiles"]. What GH3 does with it [C default.xex]:
+
+- the world (82253B10): gravity (0, -9.8, 0) (8200E4E4), collision
+  tolerance 0.001, `setupSolverInfo(SOLVER_TYPE_4ITERS_MEDIUM)`: 4 solver
+  iterations, tau 0.6, damping 1 (the .rag's own worldCinfo agrees);
+- the ragdoll component (821B19B8: ragdollname, accessoryragdollname,
+  accessory_bones, the toi qualities) loads the .rag (82336798: 825FD868(2)
+  on every constraint [I: setPriority(PRIORITY_TOI)]; ragdoll / limited
+  hinge constraints made powered with a position motor (8268C108,
+  hkConstraintUtils::convertToPowered by its message), prismatic left as
+  is), clones it into an
+  hkaRagdollInstance and maps it to the skeleton by bone name
+  (821AF798: hkaSkeletonMapperUtils::createMapping both ways);
+  `ragdoll_setaccessorybones` records each accessory bone (821B1418);
+- the drive state `keyframed_motion_rigidbody_driven_pose_unused`
+  (821AFC08, the band's): motors stopped (826BE368), every non-accessory
+  body MOTION_KEYFRAMED with its constraint removed from the world, every
+  accessory body MOTION_STABILIZED_SPHERE_INERTIA with its constraint
+  (to its parent body) in the world;
+- each frame the ragdoll anim node (823FE140): the non-accessory bodies
+  hard-keyframed to the animated pose (823FE8C8: the object's rotation and
+  position at scale 1, hkKeyFrameUtility::applyHardKeyFrame with 1 / frame
+  time); then the ragdoll's pose is read (823FFC28: getPoseModelSpace,
+  mapPose to the animation skeleton, model→local) and
+  checkAndFixConstraint(0.05, 0.8) runs over the constraints from the last
+  until one reports a fix; the pose blends into the output (823FDBA0); the
+  world steps after, so the pose drawn is the one before this frame's step.
+
+gd04 (`render/band_ragdoll.*`) re-implements that: the .rag's bodies
+(mass, centre of mass, inverse inertia — the sphere motion's single value,
+the largest inertia [I], linear / angular damping, max linear / angular
+velocity: 10 rad/s on several hair bodies) at their bind poses mapped to
+the bones (body→bone offsets from the two bind poses, about identity on the
+disc); the non-accessory bodies keyframed (the velocities that reach the
+animated pose in one step, the rotation integrated exactly); the
+constraints with an accessory child solved as velocity rows: ball socket,
+ragdoll twist / cone / planes limits (tau × angularLimitsTauFactor) and
+angular friction (maxFrictionTorque), limited hinge (2dAng, angLimit),
+prismatic (TYPE_ANG, lin0 / lin1, linLimit). The step [I: Havok's solver
+in outline, not its code]: damping, then 4 sub-steps of gravity, one
+Gauss-Seidel pass (impulse = damping × (tau × error / h − J·v) / K, the
+limits one-sided), the velocity caps and the integration. Fixed 60 Hz of
+song time (GH3's frame on the 360 [I]), the pose of step k − 1 at step k's
+time and, between step times, the poses after steps k − 1 and k
+interpolated (a frame that took the newest step as is held the hair for
+one frame and jumped the next: the accessories stuttered at refresh rates
+other than 60 Hz or with frame times jittering, GD04-104; `--chartest`
+samples every millisecond and fails a 1 ms move over 12× the mean);
+a start (or a jump of over 2 s) puts every body at the animated pose at
+rest (setPoseModelSpace). The accessory bones take the ragdoll's local
+transforms under their animated parents; their descendants follow.
+GD04_NO_RAGDOLL=1 turns it off; GD04_RAGDOLL_LOG=1 lists the bodies and,
+every 60 steps, the worst pivot gap, the fastest body and the largest swing
+off the animation.
+
+Not done: collisions. Each body's collisionFilterInfo is layer 16 + its
+group in the profile's `ragdoll_collision_group` (RagdollCollisionGroups_*:
+group 6 the accessories, 7 most of the body, 0..2 a few chosen bones)
+[C 823360F0], but the world's layer matrix was not found, so the hair does
+not collide with the chest / head capsules yet.
 
 The light registers are GH3's light manager's (docs/venues.md "Lights"):
 a member's query point is its origin, its groups `band` (+ `alt_band` for
@@ -231,11 +347,11 @@ the guitarist) and `defaultgroup` [C].
 
 ## 7. Gaps
 
-Band_WalkToNode (walks, turns), intro / win / lose stances in the
-transitions, two-player layouts, the twist constraint bones, leg / drummer /
-singer IK, Havok's own solver for the accessory bones (gd04's model below),
-star power and battle reactions, receiving dynamic shadows (they cast
-them onto the venue: docs/venues.md "Dynamic shadows").
+Band_WalkToNode (no caller on the disc), two-player layouts, the drummer's
+and the singer's IK, the accessory bodies' collisions and Havok's exact
+solver code (gd04's re-implementation in 6b). The band receives the dynamic
+shadow (the receivers compare 4 cm nearer the light: without it the
+characters speckled [I: GH3's bias]).
 
 ## 8. Test
 
@@ -250,7 +366,8 @@ them onto the venue: docs/venues.md "Dynamic shadows").
 3. `GD04_CHARTEST_GOLDEN=<file>`: writes, then compares, a checksum of each
    venue band's poses at 5, 30 and 60 s;
 4. `GD04_CHARTEST_SHOTS=<dir>`: portrait grids of every body and instrument
-   (`bodies_NN.bmp`, `instruments_NN.bmp`, legend on stdout) and the band in
+   (`bodies_NN.bmp`, `instruments_NN.bmp`, legend on stdout; the accessory
+   bones simulated over the frames, as in 6b) and the band in
    each venue's first six shots.
 
 The debug-only BoneMan profiles borrow anim sets whose clips their paks

@@ -24,27 +24,54 @@ A re implementation of all major guitar hero and rock band engines.
 
 # Contents
 
-| id         | Original game                     | Base version  | Done         |
-| ---------- | --------------------------------- | ------------- | ------------ |
-| gd-game-01 | Guitar Hero                       | Playstation 2 | 100% Playable |
-| gd-game-02 | Guitar Hero II                    | Xbox 360      | 90% Playable |
-| gd-game-03 | Guitar Hero Encore: Rocks the 80s | Playstation 2 | 85% Playable |
-| gd-game-04 | Guitar Hero III: Legends of Rock  | Xbox 360      | 55% Playable |
-| gd-game-05 | Rock Band                         | Xbox 360      | --           |
-| gd-game-06 | Guitar Hero: Aerosmith            | Xbox 360      | --           |
-| gd-game-07 | Guitar Hero World Tour            | Xbox 360      | --           |
-| gd-game-08 | Rock Band 2                       | Xbox 360      | --           |
-| gd-game-09 | The Beatles: Rock Band            | Xbox 360      | --           |
-| gd-game-10 | Guitar Hero: Metallica            | Xbox 360      | --           |
-| gd-game-11 | Guitar Hero: Smash Hits           | Xbox 360      | --           |
-| gd-game-12 | Guitar Hero 5                     | Xbox 360      | --           |
-| gd-game-13 | Lego Rock Band                    | Xbox 360      | --           |
-| gd-game-14 | Band Hero                         | Xbox 360      | --           |
-| gd-game-15 | Guitar Hero: Van Halen            | Xbox 360      | --           |
-| gd-game-16 | Green Day: Rock Band              | Xbox 360      | --           |
-| gd-game-17 | Guitar Hero: Warriors of Rock     | Xbox 360      | --           |
-| gd-game-18 | Rock Band 3                       | Xbox 360      | --           |
-| gd-game-19 | Rock Band 4                       | Xbox One      | Considering  |
+## Games
+
+This is a list of all the planned and already decompiled games. Every game is planned, but may not be fully featured in the launcher yet.
+
+| id         | Original game                     | Base version  | Done          |
+| ---------- | --------------------------------- | ------------- | ------------- |
+| gd-game-01 | Guitar Hero                       | Playstation 2 | 99% Playable  |
+| gd-game-02 | Guitar Hero II                    | Xbox 360      | 99% Playable  |
+| gd-game-03 | Guitar Hero Encore: Rocks the 80s | Playstation 2 | 99% Playable  |
+| gd-game-04 | Guitar Hero III: Legends of Rock  | Xbox 360      | 96% Playable  |
+| gd-game-05 | Rock Band                         | Xbox 360      | Tunning in... |
+| gd-game-06 | Guitar Hero: Aerosmith            | Xbox 360      | --            |
+| gd-game-07 | Guitar Hero World Tour            | Xbox 360      | --            |
+| gd-game-08 | Rock Band 2                       | Xbox 360      | --            |
+| gd-game-09 | The Beatles: Rock Band            | Xbox 360      | --            |
+| gd-game-10 | Guitar Hero: Metallica            | Xbox 360      | --            |
+| gd-game-11 | Guitar Hero: Smash Hits           | Xbox 360      | --            |
+| gd-game-12 | Guitar Hero 5                     | Xbox 360      | --            |
+| gd-game-13 | Lego Rock Band                    | Xbox 360      | --            |
+| gd-game-14 | Band Hero                         | Xbox 360      | --            |
+| gd-game-15 | Guitar Hero: Van Halen            | Xbox 360      | --            |
+| gd-game-16 | Green Day: Rock Band              | Xbox 360      | --            |
+| gd-game-17 | Guitar Hero: Warriors of Rock     | Xbox 360      | --            |
+| gd-game-18 | Rock Band 3                       | Xbox 360      | --            |
+| gd-game-19 | Rock Band 4                       | Xbox One      | Not sure yet  |
+| gd-game-20 | Guitar Hero: On Tour              | Nintendo DS   | --            |
+| gd-game-21 | Guitar Hero On Tour: Decades      | Nintendo DS   | --            |
+| gd-game-22 | Guitar Hero On Tour: Modern Hits  | Nintendo DS   | --            |
+| gd-game-23 | Band Hero (DS)                    | Nintendo DS   | --            |
+| gd-game-24 | Rock Band Unplugged               | PSP           | --            |
+| gd-game-25 | DJ Hero                           | Xbox 360      | --            |
+| gd-game-26 | DJ Hero 2                         | Xbox 360      | --            |
+
+
+## Tools
+
+The dream engine also feature some tools to enhance the experience of the decompilations. In the future you will be able to create your own songs, play songs from one game in another and add the characters of your dreams.
+
+The open dream engine is a bigger project. The idea is to create a engine that everybody can use to create their own version of guitar games.
+
+| id         | Name                 | Done          |
+| ---------- | -------------------- | ------------- |
+| gd-tool-01 | Additive music menu  | Concept phase |
+| gd-tool-02 | Music mod / DLC menu | Concept phase |
+| gd-tool-03 | Band mod menu        | --            |
+| gd-tool-04 | Open dream engine    | --            |
+
+
 
 # Repository layout
 
@@ -53,16 +80,16 @@ prj-gd-engine/
   README.md LICENSE LICENSE-ADDITIONAL-TERMS.md
   .gd-game-00-boilerplate/   the template for a new game folder
   .github/                   workflows and the repo guard
-  gd-backlog.md              THE single backlog (every game, the launcher, releases, the site)
-  guidelines/                the rules for every task (read before working)
-  universal_mechanisms.md    the menus and mechanisms every game has (the owner's reference)
-  spikes/                    studies and spikes (platforms, signing, stores, HDR...)
-  docs/                      the official codebase documentation
-  gd-engine-docs/            the engine codebase (shared engine documentation)
+  docs/                      the official codebase documentation (the engine's shared docs)
+    tasks/gd-backlog.md      THE single backlog (every game, the launcher, releases, the site)
+    tasks/PARITY_GAPS.md     the parity gaps
+    knowledge/               the rules for every task (read before working), the kickoffs
+    knowledge/universal_mechanisms.md  the menus and mechanisms every game has (the owner's reference)
+    spikes/                  studies and spikes (platforms, signing, stores, HDR...)
   gd-engine-launcher/        the Guitar Dream Universal Launcher
   res/                       official Guitar Dream assets (icon)
   original_isos/             your own disc images and ROMs (git-ignored)
-  gd-game-01/ ... gd-game-19/
+  gd-game-01/ ... gd-game-26/
 ```
 
 Every game folder (`gd-game-02` is the model; `gd-game-01` keeps its older
@@ -75,12 +102,12 @@ Guitar Dream version, whether it is ready to play and how complete it is.
 
 # Before you work
 
-Read [guidelines/](guidelines/README.md) (general guidelines, the universal
+Read [docs/knowledge/](docs/knowledge/) (general guidelines, the universal
 launcher rules and the behaviours every game shares),
-[universal_mechanisms.md](universal_mechanisms.md) (the menus and mechanisms
+[docs/knowledge/universal_mechanisms.md](docs/knowledge/universal_mechanisms.md) (the menus and mechanisms
 every game has) and the single backlog
-[gd-backlog.md](gd-backlog.md). Update the backlog at the start and at the end
-of every task. Studies and spikes are in [spikes/](spikes/README.md).
+[docs/tasks/gd-backlog.md](docs/tasks/gd-backlog.md). Update the backlog at the start and at the end
+of every task. Studies and spikes are in [docs/spikes/](docs/spikes/README.md).
 
 # Guitar Dream Universal Launcher
 

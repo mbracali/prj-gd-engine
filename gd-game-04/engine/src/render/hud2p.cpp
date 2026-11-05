@@ -197,16 +197,24 @@ bool Hud2P::init(const Globals& g, const Match& m) {
 
 void Hud2P::update(const Match& m, double now) {
     started_ = true;
+    bites_.clear();
     // The hands (battlemode_ready / battle_trigger_on) [C scripts].
     if (mode_ == 2)
         for (int p = 0; p < m.players(); ++p) {
             Hand& h = hand_[size_t(p)];
             const std::vector<int>& now_ = m.battle(p).cards;
-            if (now_ == h.cards) continue;
+            // A card awarded this frame is the new top (a full hand lost its
+            // top first); a stolen one is placed at once (steal = 1) [C scripts].
+            const int awarded = m.counters().cards[size_t(p)], stolen = m.counters().stolen[size_t(p)];
+            const bool arrived = awarded != lastAwarded_[size_t(p)], stole = stolen != lastStolen_[size_t(p)];
+            lastAwarded_[size_t(p)] = awarded, lastStolen_[size_t(p)] = stolen;
+            if (now_ == h.cards && !arrived) continue;
             const int oldN = int(h.cards.size()), newN = int(now_.size());
+            const int keep = arrived ? newN - 1 : newN;
             h.prevRank.assign(size_t(newN), -1);
-            for (int j = 0; j < newN && j < oldN; ++j) h.prevRank[size_t(j)] = oldN - 1 - j;
-            h.flew = newN > oldN;
+            for (int j = 0; j < keep && j < oldN; ++j) h.prevRank[size_t(j)] = oldN - 1 - j;
+            h.flew = arrived;
+            h.stolen = arrived && stole;
             if (h.flew) {
                 // begin_pos: the last hit note's pos_2d - (0,90), -/+ 225 (two highways) [C script].
                 const Player& pl = m.player(p);
@@ -238,7 +246,38 @@ void Hud2P::update(const Match& m, double now) {
                 f.count = 0;
                 f.rot = std::uniform_int_distribution<int>(-7, 7)(rng_);
                 f.up = !f.up;
+                // bite_particle: a turn right or left bites (the highway's
+                // hammer and red sparks at the alert's (190,120) / (65,120)) [C script].
+                if (f.rot != 0) {
+                    const PlayerStats& st = m.player(p).stats();
+                    const float lost = st.health < 1 ? 1 - st.health : 0.0f;
+                    const float S = 0.9f + 0.3f * lost, ax = p == 0 ? 415.0f : 865.0f, ay = 430 + 220 * lost;
+                    const float lx = f.rot > 0 ? 190.0f : 65.0f, ly = 120;
+                    const float r = float(f.rot) * float(M_PI) / 180, cs = std::cos(r), sn = std::sin(r);
+                    const float px = (lx - deathW_ / 2) * S, py = (ly - deathH_) * S;
+                    bites_.push_back(Bite{p, float(f.rot), ax + px * cs - py * sn, ay + px * sn + py * cs});
+                    ++n_.bites;
+                }
             }
+        }
+    // The battle alerts above the highways [C scripts update_hud_difficulty_up,
+    // update_hud_double_notes, update_hud_lefty_notes and their remove_hud_*].
+    if (mode_ == 2)
+        for (int p = 0; p < m.players(); ++p) {
+            AlertFrame& a = alertFrame_[size_t(p)];
+            if (!a.init) initAlertFrame(a);
+            const Match::BattleSide& b = m.battle(p);
+            const std::array<bool, 3> on{b.diffUpWaiting || b.diffUpActive, (b.doubleUntil >= 0 && b.doubleUntil > now), b.leftyUntil >= 0 || b.leftyEnd >= 0};
+            bool upd = false;
+            for (size_t k = 0; k < 3; ++k) {
+                if (on[k] && !a.on[k]) upd = true, a.nextPoll[k] = now + 500;  // update_hud_*: at once, then remove_hud_* (Wait 30 frames)
+                else if (a.nextPoll[k] >= 0 && now >= a.nextPoll[k] - 0.5) {
+                    if (on[k]) a.nextPoll[k] += 500;
+                    else upd = true, a.nextPoll[k] = -1;
+                }
+            }
+            a.on = on;
+            if (upd) updateAlertIcon(p, m, now);
         }
     for (int p = 0; p < 2; ++p) {
         PlayerState& s = ps_[size_t(p)];
@@ -458,8 +497,10 @@ void Hud2P::draw(Canvas& c, const TextureCache& tex, const Match& m, double now)
                 float x, y, s, fx, fy, fs, a = 1;
                 slot(r, x, y, s);
                 const int pr = j < int(h.prevRank.size()) ? h.prevRank[size_t(j)] : r;
+                // battlemode_ready: alpha 0.5 -> 1 with the flight;
+                // bossbattle_ready: alpha 1; a stolen card at its slot at once [C scripts].
                 if (pr >= 0) slot(pr, fx, fy, fs);
-                else if (h.flew) fx = h.flyX, fy = h.flyY, fs = 1, a = 0.5f + 0.5f * u;
+                else if (h.flew && !h.stolen) fx = h.flyX, fy = h.flyY, fs = 1, a = m.mode() == GameMode::Boss ? 1.0f : 0.5f + 0.5f * u;
                 else fx = x, fy = y, fs = s;
                 const Xf at{fx + (x - fx) * u, fy + (y - fy) * u, 0, 1, 1};
                 const float sz = 64 * (fs + (s - fs) * u);
@@ -531,17 +572,6 @@ void Hud2P::draw(Canvas& c, const TextureCache& tex, const Match& m, double now)
                 text_(c, K("num_a7"), std::to_string(std::max(0, digits[i - 1])), d.x, d.y, scale_, col, 0x22, Hud2D::TextStyle{});
             }
         }
-        if (mode_ == 2) {
-            // The card's name when awarded (attack_ready_text_pos_p<n>) [C battlemode_ready].
-            const Match::BattleSide& b = m.battle(p);
-            const double t = now - b.textAt;
-            float x = 0, y = 0;
-            if (t >= 0 && t < 3000 && !b.text.empty() && lookup("attack_ready_text_pos", p, x, y)) {
-                text_(c, K("text_a6"), b.text, x + 2, y + 2, 0.8f, black, 0x22, Hud2D::TextStyle{});
-                text_(c, K("text_a6"), b.text, x, y, 0.8f, std::array<uint8_t, 4>{255, 230, 120, 255}, 0x22, Hud2D::TextStyle{});
-                if (t < 20) ++const_cast<Hud2P*>(this)->n_.attackTexts;
-            }
-        }
     }
     for (int p = 0; p < 2; ++p) {
         const Alerts& al = alerts_[size_t(p)];
@@ -574,12 +604,16 @@ void Hud2P::drawBattle(Canvas& c, const TextureCache& tex, const Match& m, doubl
                         if (const qb::Value* t = e.st->find(K("Text")); t && !t->str.empty()) return t->str;
         return fallback;
     };
+    // The alerts above the highways (battle_alert_container<p>, z 49).
+    for (int p = 0; p < m.players(); ++p) drawAlertFrame(c, tex, p, now);
     for (int p = 0; p < m.players(); ++p) {
         const Match::BattleSide& b = m.battle(p);
         const PlayerStats& st = m.player(p).stats();
         // attack_bolt: sys_Big_Bolt01_Red at (640,230) -/+ (330,0) for player
         // 1 / 2 attacking, turned -/+ the bolt angle (60; Death Drain 80), P1
-        // mirrored, just middle top, z 10, for 8 game frames [C script; red tint I].
+        // mirrored, just middle top, z 10, for 8 game frames; the material's
+        // flip-book (8 frames, 15 fps) and colour (1, 0.263, 0.059) [C script;
+        // C data: global.pak's sys_Big_Bolt01_Red material; frame order I].
         if (const double t = now - b.boltAt; t >= 0 && t < 8000.0 / 60) {
             float bw = 1024, bh = 512;
             texSize(tex, 0x9D12571C, bw, bh);
@@ -587,7 +621,48 @@ void Hud2P::drawBattle(Canvas& c, const TextureCache& tex, const Match& m, doubl
             const float u0 = float(frame) / 8;
             const bool p1 = p == 0;
             spriteAt(c, tex, 0x9D12571C, p1 ? 310.0f : 970.0f, 230, (p1 ? -1.0f : 1.0f) * bw / 8, bh, 0, -1, p1 ? -b.boltAngle : b.boltAngle,
-                     {255, 80, 60, 255}, Blend::Add, u0, 0, u0 + 1.0f / 8, 1);
+                     {255, 67, 15, 255}, Blend::Add, u0, 0, u0 + 1.0f / 8, 1);
+        }
+        // attack_ready_text: the card's name (name_text) 0.3 s after it is
+        // awarded, text_a4 0.6 white at attack_ready_text_pos_p<n>, just left
+        // bottom (P1) / right bottom (P2), z 25; after 3 s alpha -> 0 in 0.3 s [C script].
+        if (text_ && !b.text.empty()) {
+            const double t = now - b.textAt;
+            float x = 0, y = 0;
+            if (t >= 0 && t < 3300 && lookup("attack_ready_text_pos", p, x, y)) {
+                const float al = t < 3000 ? 1.0f : float(1 - (t - 3000) / 300);
+                text_(c, K("text_a4"), b.text, x, y, 0.6f, {255, 255, 255, uint8_t(255 * al)}, p == 0 ? 0x41 : 0x44, Hud2D::TextStyle{});
+                if (t < 20) ++const_cast<Hud2P*>(this)->n_.attackTexts;
+            }
+        }
+        // animate_steal (this player robbed): battle_hud_steal_hand_open from
+        // the thief's card slot + (0,-10) to this one's + (0,-10) -/+ (40,0),
+        // alpha 0 -> 1 over 0.5 s; then the taken card (64 x 64) flies to the
+        // thief's slot in 0.5 s under battle_hud_steal_hand (alpha 1, after
+        // 0.4 s -> 0 in 0.1 s); hands x scale -1 for player 1, z 25 [C script].
+        {
+            const int q = 1 - p;
+            float rx = 0, ry = 0, ox = 0, oy = 0, start[2] = {0, 0}, to[2] = {0, 0};
+            lookup("rock_pos", p, rx, ry), lookup("card_1_off", p, ox, oy), start[0] = rx + ox, start[1] = ry + oy;
+            lookup("rock_pos", q, rx, ry), lookup("card_1_off", q, ox, oy), to[0] = rx + ox, to[1] = ry + oy;
+            const float hx = p == 0 ? -40.0f : 40.0f, hs = p == 0 ? -1.0f : 1.0f, hy = -10;
+            if (const double t = now - b.stealOpenAt; t >= 0 && t < 500) {
+                const float u = float(t / 500);
+                float w = 64, h = 64;
+                texSize(tex, K("battle_hud_steal_hand_open"), w, h);
+                const float x = to[0] + (start[0] - hx - to[0]) * u, y = to[1] + hy + (start[1] - to[1]) * u;
+                spriteAt(c, tex, K("battle_hud_steal_hand_open"), x, y, w * hs, h, 0, 0, 0, {255, 255, 255, uint8_t(255 * u)});
+                if (t < 20) ++const_cast<Hud2P*>(this)->n_.stealHands;
+            }
+            if (const double t = now - b.stealTakeAt; t >= 0 && t < 500 && b.stealCard >= 0 && b.stealCard < int(m.battleData().powerups.size())) {
+                const float u = float(t / 500);
+                const float x = start[0] + (to[0] - start[0]) * u, y = start[1] + (to[1] - start[1]) * u;
+                spriteAt(c, tex, m.battleData().powerups[size_t(b.stealCard)].cardTexture, x, y, 64, 64, 0, 0, 0, white);
+                float w = 64, h = 64;
+                texSize(tex, K("battle_hud_steal_hand"), w, h);
+                const float al = t < 400 ? 1.0f : float(1 - (t - 400) / 100);
+                spriteAt(c, tex, K("battle_hud_steal_hand"), x - hx, y + hy, w * hs, h, 0, 0, 0, {255, 255, 255, uint8_t(255 * al)});
+            }
         }
         // battle_death_lick: the death icon at the victim's side ((310,170) /
         // (981,170)), 128x128, pulsing alpha 0.95 / 0.1 every 0.15 s [C scripts; scale pulse I].
@@ -610,6 +685,7 @@ void Hud2P::drawBattle(Canvas& c, const TextureCache& tex, const Match& m, doubl
             const float ax = (p == 0 ? 415.0f : 865.0f), ay = 430 + 220 * lost, rot = float(f.rot);
             float w = 256, h = 128;
             texSize(tex, K("battle_alert_death"), w, h);
+            const_cast<Hud2P*>(this)->deathW_ = w, const_cast<Hud2P*>(this)->deathH_ = h;
             const float r = rot * float(M_PI) / 180, cs = std::cos(r), sn = std::sin(r);
             auto at = [&](float lx, float ly, float& x, float& y) {  // the bg's top-left space -> screen
                 const float px = (lx - w / 2) * S, py = (ly - h) * S;
@@ -638,10 +714,10 @@ void Hud2P::drawBattle(Canvas& c, const TextureCache& tex, const Match& m, doubl
         // (380,35) / (890,35), the older ones 30 px lower [C scripts; order I].
         if (text_) {
             std::vector<std::string> on;
-            if (b.shakeUntil > now) on.push_back(textOf("lightning_text", "Amp Overload!"));
+            if (b.shakeUntil >= 0 && b.shakeUntil > now) on.push_back(textOf("lightning_text", "Amp Overload!"));
             if (b.diffUpActive) on.push_back(textOf("difficulty_up_text", "Difficulty Up!"));
-            if (b.doubleUntil > now) on.push_back(textOf("double_notes_text", "Double Notes!"));
-            if (b.leftyUntil > now) on.push_back(textOf("lefty_notes_text", "Lefty Notes!"));
+            if (b.doubleUntil >= 0 && b.doubleUntil > now) on.push_back(textOf("double_notes_text", "Double Notes!"));
+            if (b.leftyUntil >= 0 && b.leftyUntil > now) on.push_back(textOf("lefty_notes_text", "Lefty Notes!"));
             if (b.brokenMask) on.push_back(textOf("broken_string_text", "Broken String!"));
             if (b.whammyLeft > 0) on.push_back(textOf("whammy_attack_text", "Whammy!"));
             const float x = p == 0 ? 380.0f : 890.0f;
@@ -679,5 +755,168 @@ void Hud2P::drawBattle(Canvas& c, const TextureCache& tex, const Match& m, doubl
             spriteAt(c, tex, K("battle_alert_death_wing"), ox + 13, oy + 7, ww * 0.5f, wh * 0.5f, -1, -1, 15 - k2, white);
             spriteAt(c, tex, K("battle_alert_death_wing"), ox + 39, oy + 7, -ww * 0.5f, wh * 0.5f, -1, -1, -15 + k2, white);
         }
+    }
+}
+
+std::array<float, 5> Hud2P::Anim::at(double now) const {
+    const double t = now - start;
+    const float u = ms <= 0 || t >= ms ? 1.0f : t <= 0 ? 0.0f : float(t / ms);
+    std::array<float, 5> r;
+    for (size_t k = 0; k < 5; ++k) r[k] = from[k] + (to[k] - from[k]) * u;
+    return r;
+}
+
+void Hud2P::Anim::morph(double now, double t, std::initializer_list<std::pair<int, float>> v) {
+    from = to = at(now);
+    for (const auto& [ch, x] : v) to[size_t(ch)] = x;
+    start = now, ms = t;
+    if (ms <= 0) from = to;
+}
+
+void Hud2P::initAlertFrame(AlertFrame& a) {
+    // create_battle_alert_frames: the frame (alpha 0) with its ends at
+    // -/+ 48 and a 32 x 72 middle; the fills, stars and icons at alpha 0;
+    // the icons difficulty / addnote / leftyrighty; the text text_a6 0.5 [C script].
+    a = AlertFrame{};
+    a.frame.set(kA, 0);
+    a.left.set(kX, -48), a.right.set(kX, 48);
+    for (Anim& f : a.fill) f.set(kA, 0);
+    for (Anim& f : a.star) f.set(kA, 0), f.set(kY, -52);
+    for (Anim& f : a.icon) f.set(kA, 0);
+    a.iconTex = {K("icon_attack_difficulty"), K("icon_attack_addnote"), K("icon_attack_leftyrighty")};
+    a.init = true;
+}
+
+void Hud2P::updateAlertIcon(int p, const Match& m, double now) {
+    // update_battle_alert_icon {player_status} [C script guitar_battle_hud_icons.qb].
+    AlertFrame& a = alertFrame_[size_t(p)];
+    const Match::BattleSide& b = m.battle(p);
+    const bool harder = b.diffUpWaiting || b.diffUpActive, dbl = (b.doubleUntil >= 0 && b.doubleUntil > now), lefty = b.leftyUntil >= 0 || b.leftyEnd >= 0;
+    ++n_.alertUpdates;
+    std::string text;
+    int num = 0;
+    if (harder) {
+        // The current difficulty's next: easy MEDIUM, medium HARD, else EXPERT.
+        const int d = m.setup().difficulty[size_t(p)];
+        text = d == 0 ? "MEDIUM " : d == 1 ? "HARD " : "EXPERT ";
+        ++num;
+    }
+    if (dbl) text += "DOUBLE ", ++num;
+    if (lefty) text += lefty_[size_t(p)] ? "RIGHTY" : "LEFTY", ++num;
+    a.text = text;
+    if (num >= 1) {
+        static const float kSx[3] = {0.4f, 0.35f, 0.325f}, kFitW[3] = {43, 60, 75}, kMax[3] = {100, 150, 250};
+        const size_t i = size_t(num - 1);
+        a.textSx = kSx[i], a.textSy = 0.75f;
+        // GetScreenElementDims (dims x scale) over width_max: fit_text_in_rectangle
+        // sets the x scale to fit_dims' x / those dims [C scripts; I: y kept].
+        const float w = width_ ? width_(K("text_a6"), text, 1.0f, 0) * a.textSx : 0;
+        if (w > 0 && float(int(w)) > kMax[i]) a.textSx = kFitW[i] / float(int(w));
+    }
+    auto resetBgs = [&] {  // reset_all_battle_bgs
+        for (size_t k = 1; k < 5; ++k) a.fill[k].morph(now, 300, {{kA, 0}});
+        for (size_t k = 0; k < 3; ++k) a.star[k].morph(now, 300, {{kA, 0}}), a.icon[k].morph(now, 300, {{kA, 0}});
+    };
+    auto icon = [&](int n, const char* texName, int off) {  // change_battle_alert_icon
+        Anim& e = a.icon[size_t(n - 1)];
+        a.iconTex[size_t(n - 1)] = K(texName);
+        float x = 0, y = 0;
+        if (g_) pairOf(g_->find(K(("battle_alert_icon_pos_off_" + std::to_string(off)).c_str())), x, y);
+        e.set(kX, x), e.set(kY, y);
+        e.morph(now, 300, {{kA, 1}});
+    };
+    auto back = [&](size_t k, float sx) { a.fill[k].morph(now, 300, {{kA, 1}, {kSX, sx}, {kSY, 1}}); };  // change_battle_alert_back
+    int frameScale = 0;
+    if (num == 0) {
+        resetBgs();
+        a.frame.morph(now, 300, {{kA, 0}});  // alpha_in_or_out_battle_hud alpha = 0
+        a.fill[0].morph(now, 300, {{kA, 0}});
+    } else if (num == 1) {
+        resetBgs();
+        a.frame.morph(now, 300, {{kA, 1}});
+        frameScale = 3;
+        back(0, 1.2f);
+        if (lefty) icon(2, "icon_attack_leftyrighty", 2), a.singleRgb = {55, 170, 130};
+        else if (dbl) icon(2, "icon_attack_addnote", 2), a.singleRgb = {200, 115, 200};
+        else icon(2, "icon_attack_difficulty", 2), a.singleRgb = {210, 210, 210};
+    } else {
+        frameScale = num == 3 ? 7 : 5;
+        resetBgs();
+        a.fill[0].morph(now, 300, {{kA, 0}});
+        if (lefty && harder && dbl) {
+            back(4, 1.0f);
+            icon(1, "icon_attack_difficulty", 1), icon(2, "icon_attack_addnote", 2), icon(3, "icon_attack_leftyrighty", 3);
+        } else if (lefty && harder) {
+            back(2, 1.1f);
+            icon(1, "icon_attack_difficulty", 4), icon(3, "icon_attack_leftyrighty", 5);
+        } else if (lefty) {
+            back(3, 1.1f);
+            icon(2, "icon_attack_addnote", 4), icon(3, "icon_attack_leftyrighty", 5);
+        } else {
+            back(1, 1.1f);
+            icon(1, "icon_attack_difficulty", 4), icon(2, "icon_attack_addnote", 5);
+        }
+    }
+    if (num) a.star[size_t(num - 1)].morph(now, 300, {{kA, 1}});
+    if (frameScale) {
+        // scale_battle_alert_frame: the ends to -/+ 16 x scale, the middle x scale [C script].
+        const float f = float(frameScale);
+        a.left.morph(now, 300, {{kX, -16 * f}});
+        a.middle.morph(now, 300, {{kSX, f}, {kSY, 1}});
+        a.right.morph(now, 300, {{kX, 16 * f}});
+    }
+}
+
+void Hud2P::drawAlertFrame(Canvas& c, const TextureCache& tex, int p, double now) const {
+    // battle_alert_container<p>: (640 -/+ x_offset_p2, highway_playline -
+    // highway_height - 48) with the two-player highway (655 - 270), z 49;
+    // the frame, fills, stars and icons in its space [C script, data].
+    const AlertFrame& a = alertFrame_[size_t(p)];
+    if (!a.init) return;
+    const float xo = g_ ? qbNumber(*g_, K("x_offset_p2"), 225) : 225;
+    const float cx = 640 + (p == 0 ? -xo : xo);
+    const float cy = (g_ ? qbNumber(*g_, K("highway_playline2"), 655) - qbNumber(*g_, K("highway_height2"), 270) : 385.0f) - 48;
+    auto col = [](float alpha, std::array<uint8_t, 3> rgb) {
+        return std::array<uint8_t, 4>{rgb[0], rgb[1], rgb[2], uint8_t(std::clamp(alpha, 0.0f, 1.0f) * 255)};
+    };
+    const std::array<uint8_t, 3> white{255, 255, 255};
+    // The frame (ba_icon_frame_container's alpha): the ends
+    // battle_alert_frame_end 32 x 72, just right / left centre (the left
+    // one flip_v: mirrored left-right), the middle battle_alert_frame_middle
+    // 32 x 72 x its scale.
+    const float fa = a.frame.at(now)[kA];
+    if (fa > 0.002f) {
+        const auto l = a.left.at(now), mid = a.middle.at(now), r = a.right.at(now);
+        spriteAt(c, tex, K("battle_alert_frame_end"), cx + l[kX], cy, 32, 72, 1, 0, 0, col(fa, white), Blend::Alpha, 1, 0, 0, 1);
+        spriteAt(c, tex, K("battle_alert_frame_middle"), cx, cy, 32 * mid[kSX], 72 * mid[kSY], 0, 0, 0, col(fa, white));
+        spriteAt(c, tex, K("battle_alert_frame_end"), cx + r[kX], cy, 32, 72, -1, 0, 0, col(fa, white));
+        if (fa > 0.99f) ++const_cast<Hud2P*>(this)->n_.alertFramesShown;
+    }
+    static const char* const kFill[5] = {"battle_alert_fill_single", "battle_alert_fill_hard_double", "battle_alert_fill_hard_lefty",
+                                         "battle_alert_fill_double_lefty", "battle_alert_fill_triple"};
+    for (size_t k = 0; k < 5; ++k) {
+        const auto f = a.fill[k].at(now);
+        if (f[kA] <= 0.002f) continue;
+        const float w = k == 0 ? 128.0f : 256.0f;
+        spriteAt(c, tex, K(kFill[k]), cx, cy, w * f[kSX], 40 * f[kSY], 0, 0, 0, col(f[kA], k == 0 ? a.singleRgb : white));
+    }
+    static const char* const kStar[3] = {"battle_alert_star_1", "battle_alert_star_2", "battle_alert_star_3"};
+    for (size_t k = 0; k < 3; ++k) {
+        const auto f = a.star[k].at(now);
+        if (f[kA] <= 0.002f) continue;
+        float w = 64, h = 64;
+        texSize(tex, K(kStar[k]), w, h);
+        spriteAt(c, tex, K(kStar[k]), cx + f[kX], cy + f[kY], w, h, 0, 0, 0, col(f[kA], white));
+    }
+    for (size_t k = 0; k < 3; ++k) {
+        const auto f = a.icon[k].at(now);
+        if (f[kA] <= 0.002f) continue;
+        spriteAt(c, tex, a.iconTex[k], cx + f[kX], cy + f[kY], 40, 40, 0, 0, 0, col(f[kA], white));
+    }
+    // battle_alert_text: text_a6 at (1.5, 2.5), [100 0 0 255], no shadow, z 52.
+    if (text_ && !a.text.empty() && a.textSy > 0) {
+        Hud2D::TextStyle ts;
+        ts.sx = a.textSx / a.textSy;
+        text_(c, K("text_a6"), a.text, cx + 1.5f, cy + 2.5f, a.textSy, {100, 0, 0, 255}, 0x22, ts);
     }
 }

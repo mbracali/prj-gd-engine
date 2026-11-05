@@ -101,8 +101,8 @@ player's `player_status` struct.
 - In the port (GD04-020): input_offset = the song's `input_offset` - user_options.lag_calibration
   (read from the global tag at the song's start), passed to the judge; gem_offset = the song's
   `gem_offset`, shifting gems and fretbars on the highway; the 360's -66 ms defaults stay out
-  (D7) [C scripts gem_scroller, call_startup_scripts]. The practice pitch-shift offset is not
-  applied (no slowed practice yet).
+  (D7) [C scripts gem_scroller, call_startup_scripts]. The practice pitch-shift offsets are the
+  360's platform offsets too (xenon: -64 song, 0 slow / slower / slowest) and stay out with them.
 
 ### 2. HOPO
 
@@ -155,7 +155,12 @@ player's `player_status` struct.
 - Overstrum (0x8211F7B0): unnecessary_note event (wrong-note sound, guitar mute,
   CrowdDecrease), current_run := 0 (both players in co-op) [C 0x8210CB10]; if the
   previous note lies in the current star phrase the phrase is lost (stars ->
-  gems, next phrase) [C 0x8211F938-0x8211F9EC]. total_notes unchanged.
+  gems, next phrase) [C 0x8211F938-0x8211F9EC]. total_notes unchanged. Its
+  last step sets the byte 0x829E4C80[player] = 1 [C 0x8211FA10-0x8211FA14];
+  a sustain's start (0x82106758) clears it [C 0x82106B84] and the sustain
+  update 0x8211C9D0 seeing it clears it and takes the released path: a
+  sustain held through an overstrum ends there (whammy_off finished 0, the
+  tail dead, no more sustain points / star whammy) [C 0x8211C9D0] (GD04-108).
 - Miss (0x8211F328): missed_note event (bum_note = a strum happened),
   CrowdDecrease, total_notes+1, current_run := 0 [C 0x8210C800]; if any gem of the
   note is still tagged `star` (0x3624A5EB; no earlier loss of its phrase),
@@ -405,7 +410,9 @@ from `_lightshow_notes`, crowd, particles) and the band (render/band_*:
 the performance array's Band_ChangeStance / PlayAnim / PlayFacialAnim /
 WalkToNode, the C hand / drum iterators). The song ends into GH3's own
 GuitarEvent_SongWon / GuitarEvent_SongFailed (front_end.cpp), so the end
-is the original's. **None of the GH3 song scripts below runs.**
+is the original's; a won song keeps drawing (venue, highway until
+disable_highway) under GuitarEvent_SongWon_Spawned and the songwon
+transition until kill_gem_scroller (docs/flow.md section 12). **None of the GH3 song scripts below runs.**
 
 **Scripts not run, with an effect the port therefore lacks** (L) or
 re-implements natively (R) [C scripts]:
@@ -421,13 +428,25 @@ re-implements natively (R) [C scripts]:
   setup_highway / generate_pos_table / move_highway_2d / setup_hud /
   reset_hud (R), Transition_Play + GuitarEvent_Transition* (empty hooks;
   the intro cameras R), battlemode_init / bossbattle_init (R),
-  practicemode_init (training: not supported), the boss intro audio
+  practicemode_init (R, ui/song_hooks: spawned in training; Hide_Band hides the
+  band, practicemode_section shows the section's name from current_section_array
+  = <song>_markers and current_section_array_entry, which the port moves on as
+  the song passes each marker [I]; SetNoteMappings for the drums is a stub),
+  setslomo current_speedfactor (R: Mixer::setSlomo resamples every stream to the
+  speed and the song clock runs at it; the scripts' clock too while the song
+  plays; player 1's guitar shifted back up by PitchShiftSlow1's pitch with a
+  two-tap delay-line shifter [I: GH3's is FMOD's FFT PitchShift]), the boss intro audio
   GH_SFX_Preload_Boss_Intro_Audio and the boss helper screen (L),
+  play_intro's sounds (R, ui/song_hooks: Song_Intro_Highway_Up_SFX_Waiting
+  at highway_start_time, Notes_Ripple_Up_SFX per player at
+  button_ripple_start_time, Song_Intro_Kick_SFX_Waiting at hud_start_time,
+  from current_intro = the intro transition's sequence props),
   Progression_SetProgressionNodeFlags (node flags: R where venues need them).
 - gem_scroller's iterators: gem_iterator x4, fretbar_iterator x3,
   check_buttons_fast, button_checker, check_for_star_power,
   update_score_fast, check_note_hold, the band iterators, lightshow_iterator,
-  cameracuts_iterator, win_song, faceoff_init (R, as the C they call);
+  cameracuts_iterator, win_song (R: its end time and movie, ui/song_screen
+  and ui/song_hooks), faceoff_init (R, as the C they call);
   faceoff_volumes_init (the guitar track at 100 % for both, the face-off
   volume switching by section: R in part, mixer guitar mute only);
   event_iterator + notemap_startiterator x8 over `<song>_scripts`, `_anim`,
@@ -578,9 +597,20 @@ What gd04 runs now (ui/song_hooks.cpp; GD04_NO_HOOKS=1 turns it off):
 Natives for them (ui/song_hooks.cpp): setsoundbusseffects (GuitarEcho1 /
 GuitarReverb1 drive audio/guitar_fx: a feedback echo and a small reverb
 with the scripts' delay, DecayRatio, Drymix / Wetmix, I3DL2 levels, DSP [I];
-the crowd buss's CrowdEcho1 / InGameReverb1 are counted, the port's sound
-effects not being on busses [L]), SetSoundBussParams (Right_Notes_Player1's
-vol: the guitar buss's volume) / Push / Pop, Create2DParticleSystem /
+the crowd buss's CrowdEcho1 / InGameReverb1 are counted [L]). Star Power
+(GH_Star_Power_Verb_On) is the only time the guitar buss is wet in a song:
+echo delay = the beat (halved to <= 400 ms), Wetmix 0.5 in 0.1 s,
+ReflectionsLevel -1200 / ReverbLevel -550 mB in 0.1 s, Star_Power_BussSet
+(Right_Notes -2 dB in 0.5 s), Star_Power_Deployed_SFX + _Cheer_SFX; _Off pops
+the busses, Wetmix 0 in 0.1 s, the reverb levels -10000 in 0.5 s [C scripts].
+The reverb's late level is normalised to its impulse energy and the early
+reflections are four taps (GD04-098, 11-05: the uncalibrated Schroeder
+network made the reverb ~8 dB over -550 mB and a 0 ms reflection tap added
+the dry signal in phase, so the guitar came out ~4 dB louder in Star Power
+and clipped on loud songs; now +0.3 dB on noise, the -2 dB buss set
+balancing the wet paths as GH3's data intends) [I: FMOD's DSP not reimplemented].
+SetSoundBussParams (the busses below, and Right_Notes_Player1's vol: the
+guitar buss's volume) / Push / Pop, Create2DParticleSystem /
 Destroy2DParticleSystem (ui/fx2d: motion [I]), WhammyFXOn / Off (a
 whammy_particle_params system per fret at its button), get_song_tempo_cfunc,
 GetSongTime, GetStrumPattern, SafeGetUniqueCompositeObjectID; and the
@@ -687,7 +717,9 @@ the song is thrufireandflames; with it set CrowdDecrease takes no health
 - Dynamic shadows: the DynamicShadowReciever technique (cascades
   c144 / c148, maps s14 / s15, 4-tap bilinear PCF, c141..c143), shadow map
   sizes 1024 / 512 and SetDynamicShadowIntensity 0.35 from tod_profiles.qb /
-  tod_manager.qb [C]; the light and the matrices are gd04's [I].
+  tod_manager.qb [C]; the two cascades' slices, fade, light-space
+  perspective projections and biases are GH3's (venues.md "Dynamic
+  shadows", GD04-106), the light gd04's [I].
 - Back-face culling fixes the M5 stage-rear cameras (they stand behind
   walls) [I: Direct3D's default CCW, the templates' own states not decoded].
 
@@ -749,3 +781,77 @@ the song is thrufireandflames; with it set CrowdDecrease takes no health
   songs' Crowd_StartLighters spans [C scripts].
 - The three water templates whose shaders loop are used by no scene on the
   disc [C data: every zone and character material].
+
+## Sound busses (2026-11-05)
+
+GH3's FMOD channel groups, built by Master_SFX_Adding_Sound_Busses at boot
+(CreateBussSystem <BussTree>, SetSoundBussParams <Default_BussSet>, then
+SoundBussLock on master, User_Guitar / Band / Sfx / Music, Crowd_Beds,
+Crowd_Singalong, Band_Balance, Guitar_Balance, Music_Setlist) [C scripts,
+data sound_buss.qb]; the port's audio/sound_buss.h:
+- the tree: master > User_Sfx (> ui > Front_End, Pause_Menu, UI_Star_Power,
+  UI_Battle_Mode, Wrong_Notes_P1/P2; > Crowd > Crowd_W_Reverb > Crowd_Singalong,
+  Crowd_One_Shots; Crowd > Crowd_Beds ... Crowd_Transitions; default,
+  Test_Tones, Encore_Events, binkcutscenes, Practice_Band_Playback,
+  Training_VO), User_Band > Band_Balance (> Band_Playback,
+  Single_Player_Rhythm_Playback, music_frontend, Music_Setlist, Countoffs),
+  User_Guitar (> Guitar_Balance > Guitar_Balance_First_Player >
+  First_Player_Lead_Playback, Guitar_Balance_Second_Player > Second_Player_*;
+  Test_Tones_DSP, Right_Notes_Player1/2): 45 busses [C data].
+- vol is dB-like: 100 * 2^(v/6) percent, at most 400 %, silent at -100 or
+  below [C 0x8217AFB0]; pitch is semitones: 100 * 2^(p/12) percent, silent at
+  -48 or below, at most 1600 % [C 0x8217B0B8]. A buss sounds at its own and
+  its ancestors' levels together (FMOD channel groups) [I]; a change with
+  `time` fades linearly [I].
+- SoundBussLock: SetSoundBussParams leaves a locked buss alone (the scripts
+  always unlock, set, lock: menu_audio_settings_update_*, preload_song,
+  GH3_AdjustCrowd*Surge, end_song, create_attract_mode) [I from that pattern].
+- Default levels: Front_End -6 (with master -2.5: menu and intro sounds at
+  -8.5 dB), Crowd -1, Crowd_PreSong_Intro -6 (the zone's intro crowd at -9.5),
+  Crowd_Beds -7, music_frontend -11 (the menu music at -13.5), Music_Setlist
+  the song's band_playback_volume (setlist_songpreview_monitor) [C data].
+- Who plays where: SoundEventFast on <event>_struct's default_buss, PlaySound
+  on its buss=, else `default` [I]; the song's stems as startpreloadpaused_song
+  (player 1's part First_Player_Lead_Playback, the other part
+  Single_Player_Rhythm_Playback, or Second_Player_Rhythm_Playback with two
+  players on different parts, the song Band_Playback) [C script];
+  preload_song's Band_Balance / Guitar_Balance = the song's
+  band_playback_volume / guitar_playback_volume - 1.5 dB, set by the native
+  start_gem_scroller [C script preload_song]. Stop / Pause / UnPauseSoundsByBuss
+  reach the busses below (PauseGh3Sounds pauses master) [I]. The song's stems
+  take no buss pitch (Failed_Song_Pitch_Down runs after the port's song has
+  stopped) [L].
+- The audio settings: ChangeSpinalTapVolume (0..11, the knob) feeds
+  menu_audio_settings_get_buss_volume (11 = 0 dB ... 1 = -21, 0 = -100) into
+  User_Band / User_Guitar / User_Sfx [C scripts; I: the CFunc's sum within
+  0..11]. Unhandled before, the knobs never moved.
+- Measured (quickplay walk, GD04_AUDIODUMP): the intro's Highway_Rise rises
+  +5.1 dB over the crowd intro under it (was +4.4 before the busses),
+  Notes_Ripple_Up +1.6 (+1.4), Song_Intro_Kick +9.5 (+9.1); every sound
+  effect is now 8.5 dB (Front_End) or 9.5 dB (crowd) under its old level;
+  the song by master -2.5 and its Band_Balance / Guitar_Balance (Slow Ride's
+  band_playback_volume -3, guitar_playback_volume -4: -4.5 / -5.5 dB), about
+  7-8 dB under its old level in all. Compressor_Master_Buss (GAINMAKEUP 12)
+  is defined but no script creates it [C data].
+- GD04_BUSSLOG=1 logs every buss change (development aid).
+- Practice's section preview (GD04-105): create_choose_practice_section_menu
+  (end_practice_song_slomo first: current_speedfactor 1) spawns
+  practice_songpreview_monitor; when the highlight's section
+  (menu_choose_practice_section_refreshsongpreviewposition:
+  target_practice_songpreview_starttime = <song>_markers[index - 1].time, 0 for
+  the full song) changes, it fades Band_Balance / Guitar_Balance to -20 dB in
+  0.5 s (if one played), end_song, preload_song starttime fadeintime = 1.0
+  (the busses back to the song's playback volumes - 1.5 dB over 1 s; the
+  streams on startpreloadpaused_song's busses at pitch current_speedfactor *
+  100, sought to the marker by SetSeekPosition_Song), begin_song;
+  practice_songpreview_fadeinandrepeat restarts it at the section's end. The
+  speed menu keeps the section menu (and the preview); its destroy (the speed
+  chosen, Back) waits for practice_songpreview_changing = 0, kills both
+  scripts, end_song [C scripts]. end_song's StopStream {unique_id =
+  <song_unique_id>} has no such local, so StopStream gets neither a
+  unique_id nor a name: StopAudioStreams, every stream [C 0x8227E580 ->
+  0x8223EDE0(1), as StopAudioStreams 0x8227E668]. The port runs these
+  scripts; ui/song_preview.cpp's PreloadStream / StartPreloadedStream /
+  SetSoundSeekPosition / PauseSound / StopStream play the song's SongStream on
+  the song mixer while no song is (Mixer::play at the song's start resets the
+  speed); walk practice checks it (check:preview).

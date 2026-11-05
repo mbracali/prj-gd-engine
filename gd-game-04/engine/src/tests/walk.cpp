@@ -5,15 +5,20 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <exception>
+#include <filesystem>
 #include <fstream>
 #include <sstream>
 
+#include "data/band.h"
 #include "data/json.h"
 #include "data/qbkey.h"
+#include "render/canvas.h"
+#include "game/save.h"
 #include "script/vm.h"
 #include "ui/front_end.h"
 #include "ui/port_screens.h"
@@ -41,11 +46,40 @@ Walk::Walk(const std::string& name) : name_(name) {
     if (name == "quickplay" || name == "lose") {
         steps_ = boot;
         steps_.push_back({"main_menu_fs", {D, D, C}, 10000});  // career, co-op career, QUICKPLAY
-        steps_.push_back({"quickplay_select_difficulty_fs", {C}, 20000});
-        steps_.push_back({"quickplay_setlist_fs", {C}, 20000});
+        // The keyboard's Enter selects in the menus (the owner's rule: Enter is Start).
+        steps_.push_back({"quickplay_select_difficulty_fs", {"key:Return"}, 20000});
+        steps_.push_back({"quickplay_setlist_fs", {"clear:topscores", C}, 20000});
         steps_.push_back({"song", {}, 30000});
         steps_.push_back({"song_over", {}, 600000});
-        steps_.push_back({name == "lose" ? "quickplay_fail_song_fs" : "quickplay_win_song_fs", {}, 30000});
+        if (name == "lose") {
+            // A few steps on the fail menu, over the paused song (screenshots).
+            steps_.push_back({"quickplay_fail_song_fs", {"wait", "wait", "wait"}, 30000});
+        } else {
+            // CONTINUE -> Top Rockers: the autoplayed score beats the scores
+            // (cleared: the walk's song is cut short), so GH3 asks for
+            // the name (menu_top_rockers_init_band_name_creation, score_name1
+            // focused); the keyboard's Enter is Start there: ACCEPT
+            // (menu_tr_confirm_band_name -> continue -> autosave -> setlist)
+            // instead of NEXT (pad_choose: the next letter, the screen stays) [C scripts].
+            steps_.push_back({"quickplay_win_song_fs", {C}, 30000});
+            // The autosave's overwrite shows its SAVING... popup: no black
+            // frame from here to the setlist (GD04-093).
+            steps_.push_back({"quickplay_toprockers_fs", {"check:focus:score_name1", "probe:black", "key:Return"}, 30000});
+            steps_.push_back({"quickplay_setlist_fs", {Op("check:no_black", 1000)}, 30000});
+        }
+    } else if (name == "results_art") {
+        // A quick play song as GD04_WALK_CHARACTER ("<name>[,<outfit>,<style>]",
+        // default Morello: a body with no asset_context), set while it plays;
+        // the results art must be that character's (check:mag_photo).
+        const char* who = SDL_getenv("GD04_WALK_CHARACTER");
+        const std::string setChar = std::string("set:character:") + (who && *who ? who : "Morello");
+        steps_ = boot;
+        steps_.push_back({"main_menu_fs", {D, D, C}, 10000});
+        steps_.push_back({"quickplay_select_difficulty_fs", {C}, 20000});
+        steps_.push_back({"quickplay_setlist_fs", {C}, 20000});
+        steps_.push_back({"song", {setChar.c_str()}, 30000});
+        steps_.push_back({"song_over", {}, 600000});
+        steps_.push_back({"quickplay_win_song_fs", {"check:mag_photo"}, 30000});
     } else if (name == "career") {
         // Career: band -> difficulty -> character hub -> venue -> setlist ->
         // the first song -> won -> newspaper -> autosave -> setlist [C: the
@@ -53,16 +87,19 @@ Walk::Walk(const std::string& name) : name_(name) {
         steps_ = boot;
         steps_.push_back({"main_menu_fs", {C}, 10000});  // CAREER
         steps_.push_back({"career_choose_band_fs", {C}, 20000, true});  // not on the first play
-        // The name: three letters (NEXT) then ACCEPT (Start) [C script menu_ebn handlers].
-        steps_.push_back({"career_enter_band_name_fs", {C, C, C, Action::Start}, 20000, true});
+        // The name: three letters (NEXT) then ACCEPT (Start) [C script menu_ebn
+        // handlers], by the keyboard's Enter (Start on a text entry).
+        steps_.push_back({"career_enter_band_name_fs", {C, C, C, "key:Return"}, 20000, true});
         steps_.push_back({"career_select_difficulty_fs", {C}, 20000});
         steps_.push_back({"career_select_character_fs", {C}, 20000, true});  // first play
-        steps_.push_back({"career_character_hub_fs", {C}, 20000});
-        steps_.push_back({"career_select_venue_fs", {C}, 20000});
+        // The career's first venue select plays singleplayer_01 and marks the band
+        // (create_select_venue_menu; `$ game_mode_names . $ game_mode`, owner 1.5).
+        steps_.push_back({"career_character_hub_fs", {"check:tag:band1_info_p1_career.first_venue_movie_played=0", "check:global:game_mode=p1_career", C}, 20000});
+        steps_.push_back({"career_select_venue_fs", {"check:tag:band1_info_p1_career.first_venue_movie_played=1", C}, 20000});
         steps_.push_back({"career_setlist_fs", {C}, 20000});
         steps_.push_back({"song", {}, 30000});
         steps_.push_back({"song_over", {}, 600000});
-        steps_.push_back({"career_newspaper_fs", {C}, 30000});
+        steps_.push_back({"career_newspaper_fs", {"check:mag_photo", C}, 30000});
         steps_.push_back({"career_cash_reward_fs", {C}, 30000, true});  // the song's cash (Progression_AwardCash)
         steps_.push_back({"career_unlock_1_fs", {C}, 30000, true});
         steps_.push_back({"career_setlist_fs", {}, 30000});
@@ -97,6 +134,27 @@ Walk::Walk(const std::string& name) : name_(name) {
         steps_.push_back({"quickplay_select_difficulty_fs", {C}, 20000});
         steps_.push_back({"quickplay_setlist_fs", {C}, 20000});
         steps_.push_back({"song", {}, 30000});
+    } else if (name == "dev_debug") {
+        // GD04-041: Enhanced > Developer Debug Menu on -> the pause menu
+        // offers GH3's DEBUG MENU (enable_button_cheats) -> its debug menu.
+        steps_ = boot;
+        steps_.push_back({"main_menu_fs", {"set:enhanced:dev_debug_menu=on", D, D, C}, 10000});
+        steps_.push_back({"quickplay_select_difficulty_fs", {C}, 20000});
+        steps_.push_back({"quickplay_setlist_fs", {C}, 20000});
+        steps_.push_back({"song", {Action::Start}, 30000});
+        steps_.push_back({"quickplay_pause_fs", {"check:text:pause_debug_menu!=", D, D, D, D, D, C}, 20000});
+        steps_.push_back({"debug_menu_fs", {"check:text:debug_vmenu!=never"}, 20000});
+    } else if (name == "pad_unplugged") {
+        // GD04-042: a pad as player 1, the keyboard given player 2; the pad
+        // unplugged mid-song: GH3's controller_disconnect_fs ("YOU ARE ROCKING
+        // OUT A BIT TOO HARD"); plugged back, RESUME and the song plays on.
+        steps_ = boot;
+        steps_.push_back({"main_menu_fs", {"xpad_attach", Op("keyboard_p2", 600), D, D, C}, 10000});
+        steps_.push_back({"quickplay_select_difficulty_fs", {C}, 20000});
+        steps_.push_back({"quickplay_setlist_fs", {C}, 20000});
+        steps_.push_back({"song", {Op("pad_detach", 10000)}, 30000});  // past the intro (playing_song = 1)
+        steps_.push_back({"controller_disconnect_fs", {Op("xpad_attach", 1000), Op(C, 1500)}, 20000});
+        steps_.push_back({"song_over", {}, 600000});
     } else if (name == "pause" || name == "pausequit") {
         // Start in the song -> GH3's pause menu (quickplay_pause_fs) -> RESUME
         // and the song plays on; pausequit: QUIT -> its warning -> YES -> the menus.
@@ -104,13 +162,16 @@ Walk::Walk(const std::string& name) : name_(name) {
         steps_.push_back({"main_menu_fs", {D, D, C}, 10000});
         steps_.push_back({"quickplay_select_difficulty_fs", {C}, 20000});
         steps_.push_back({"quickplay_setlist_fs", {C}, 20000});
-        steps_.push_back({"song", {Action::Start}, 30000});
+        // The keyboard: Esc pauses, Enter picks RESUME (pausequit: Start, the pad's).
+        steps_.push_back({"song", {name == "pause" ? Op("key:Escape") : Op(Action::Start)}, 30000});
         if (name == "pause") {
-            steps_.push_back({"quickplay_pause_fs", {C}, 20000});
+            steps_.push_back({"quickplay_pause_fs", {Op("key:Return")}, 20000});
             steps_.push_back({"song_over", {}, 600000});
             steps_.push_back({"quickplay_win_song_fs", {}, 30000});
         } else {
-            steps_.push_back({"quickplay_pause_fs", {D, D, D, D, C}, 20000});
+            // The help bar's pills take the mouse over the song too: UP/DOWN's
+            // lower half (down) and SELECT pick QUIT.
+            steps_.push_back({"quickplay_pause_fs", {D, D, D, "click:helplow:UP/DOWN", "click:help:SELECT"}, 20000});
             steps_.push_back({"quickplay_quit_warning_fs", {D, C}, 20000});         // QUIT (not CANCEL)
             // NEW SONG: kill_gem_scroller. The menu comes 3 s after the state
             // (the quit's spawned_func waits first) [C script].
@@ -128,16 +189,34 @@ Walk::Walk(const std::string& name) : name_(name) {
     } else if (name == "vault") {
         // The Vault: career band 1 -> character hub -> THE STORE -> guitars ->
         // back -> back to the hub [C: career_character_hub_fs, store_fs].
+        // First The Glitches' Vault (all bought for their band, GD04-026),
+        // saved while their career is popped, then left: band 1's Vault
+        // and the save must not have their purchases (GD04-096).
         steps_ = boot;
         steps_.push_back({"main_menu_fs", {C}, 10000});
-        steps_.push_back({"career_choose_band_fs", {C}, 20000, true});
+        steps_.push_back({"career_choose_band_fs", {D, D, D, D, C}, 20000});
+        steps_.push_back({"career_select_difficulty_fs", {C}, 20000});
+        steps_.push_back({"career_character_hub_fs", {D, D, D, D, C}, 20000});  // VISIT STORE
+        steps_.push_back({"store_fs", {C}, 20000});
+        steps_.push_back({"store_guitars_fs",
+                          {"check:tag:Instrument_focus01.unlocked=1", "save:write", "check:save:Instrument_focus01.unlocked=0",
+                           "check:save:Guitarist_Judy_Outfit2_Style2.unlocked=0", B},
+                          20000});
+        steps_.push_back({"store_fs", {B}, 20000});
+        steps_.push_back({"career_character_hub_fs", {B}, 20000});
+        steps_.push_back({"career_select_character_fs", {B}, 20000});
+        steps_.push_back({"career_select_difficulty_fs", {B}, 20000});
+        steps_.push_back({"career_choose_band_fs", {Action::Up, Action::Up, Action::Up, Action::Up, C}, 20000});
         steps_.push_back({"career_enter_band_name_fs", {C, C, C, Action::Start}, 20000, true});
         steps_.push_back({"career_select_difficulty_fs", {C}, 20000});
         steps_.push_back({"career_select_character_fs", {C}, 20000, true});
         steps_.push_back({"career_character_hub_fs", {D, D, D, D, C}, 20000});  // VISIT STORE
         steps_.push_back({"store_fs", {C}, 20000});
         // The first category; band 1's Vault is the save's own (not The Glitches', GD04-026).
-        steps_.push_back({"store_guitars_fs", {"check:tag:Instrument_focus01.unlocked=0", B}, 20000});
+        steps_.push_back({"store_guitars_fs",
+                          {"check:tag:Instrument_focus01.unlocked=0", "check:tag:Guitarist_Judy_Outfit2_Style2.unlocked=0", "save:write",
+                           "check:save:Instrument_focus01.unlocked=0", B},
+                          20000});
         steps_.push_back({"store_fs", {B}, 20000});
         steps_.push_back({"career_character_hub_fs", {}, 20000});
     } else if (name == "cheats") {
@@ -153,7 +232,7 @@ Walk::Walk(const std::string& name) : name_(name) {
             chords.push_back(D);  // strum
             chords.push_back(Op("frets:0"));
         }
-        chords.push_back(Action::Start);
+        chords.push_back(Op("key:Return"));  // FINISH ENTERING CHEAT: the keyboard's Enter is Start on the entry
         steps_.push_back({"options_enter_new_cheat_fs", chords, 20000});
         steps_.push_back({"options_cheats_fs", {"check:text:Cheat_PerformanceMode_Text!=locked"}, 20000});
     } else if (name == "glitches") {
@@ -165,8 +244,54 @@ Walk::Walk(const std::string& name) : name_(name) {
         steps_.push_back({"career_select_difficulty_fs", {Action::Down, Action::Down, Action::Down, C}, 20000});
         // The Vault all bought for this band only (GD04-026).
         steps_.push_back({"career_character_hub_fs",
-                          {"check:tag:careertier8.complete=1", "check:tag:career_song1_tier8.stars=5", "check:tag:Instrument_focus01.unlocked=1"},
+                          {"check:tag:careertier8.complete=1", "check:tag:career_song1_tier8.stars=5", "check:tag:Instrument_focus01.unlocked=1", C},
                           20000});
+        // Its venues are unlocked too: the list moves (owner report 1.4).
+        steps_.push_back({"career_select_venue_fs", {"check:tag:venue_z_hell.unlocked=1", "check:focus:venue_3", "key:Up", "wait", "check:focus:venue_4", B}, 20000});
+        steps_.push_back({"career_character_hub_fs", {}, 20000});
+
+    } else if (name == "setlist_tabs") {
+        // GD04-090: quick play's set list tabs: blue BONUS (the bonus songs),
+        // orange DOWNLOADS (none on the disc), yellow SETLIST [C data
+        // setlist_event_handlers, change_tab].
+        steps_ = boot;
+        steps_.push_back({"main_menu_fs", {D, D, C}, 10000});
+        steps_.push_back({"quickplay_select_difficulty_fs", {C}, 20000});
+        steps_.push_back({"quickplay_setlist_fs",
+                          {"wait", "check:global:current_tab=tab_setlist", Action::Fret3, "wait", "wait", "check:global:current_tab=tab_bonus",
+                           "check:text:sl_text_1!=", "log:focus", Action::Down, "log:focus", Action::Fret4, "wait", "wait",
+                           "check:global:current_tab=tab_downloads", Action::Fret2, "wait", "wait", "check:global:current_tab=tab_setlist",
+                           // A bonus song bought (its save tag unlocked): listed and played.
+                           "set:tag:avalancha.unlocked=1", Action::Fret3, "wait", "wait", C},
+                          20000});
+        steps_.push_back({"song", {"check:global:current_tab=tab_bonus", "check:global:current_song=avalancha"}, 30000});
+
+    } else if (name == "cutcontent") {
+        // GD04-110: Enable Cut Content removed from Enhanced Options: a saved
+        // "on" is dropped on load, a set to on refused, the row is gone; The
+        // Glitches (every character unlocked) -> CHANGE CHARACTER -> down
+        // past the last character: GH3's 13 guitarists on one page (the
+        // GD04-094 paging stays, unreachable).
+        steps_ = boot;
+        steps_.push_back({"main_menu_fs",
+                          {"check:cut_content_ignored", "set:enhanced:cut_content=on", "check:enhanced:cut_content=off",
+                           "click:menu:main_menu_options_text"},
+                          10000});
+        steps_.push_back({"options_select_option_fs", {"click:item"}, 20000});
+        steps_.push_back({"port_enhanced", {"hover:row:no_fail", "check:norow:cut_content", "rclick"}, 10000});
+        steps_.push_back({"options_select_option_fs", {B}, 20000});
+        steps_.push_back({"main_menu_fs", {"wait", C}, 20000});
+        steps_.push_back({"career_choose_band_fs", {D, D, D, D, C}, 20000});
+        steps_.push_back({"career_select_difficulty_fs", {C}, 20000});
+        steps_.push_back({"career_character_hub_fs", {D, C}, 20000});  // CHANGE CHARACTER
+        std::vector<Op> cs{Op("wait"), Op("wait")};
+        for (int i = 0; i < 20; ++i) cs.push_back(Op(D, 300));
+        cs.push_back(Op("log:cs"));
+        cs.push_back(Op("check:global:g_cs_jumped_p1=0"));
+        cs.push_back(Op("check:global:cs_total_guitarists_p1=13"));
+        // Quick play's random guitarist keeps to GH3's 13 (GD04-091).
+        cs.push_back(Op("check:qp_guitarists=13"));
+        steps_.push_back({"career_select_character_fs", cs, 20000});
 
     } else if (name == "boss") {
         // A career boss battle: The Glitches (everything unlocked) -> EASY ->
@@ -233,26 +358,155 @@ Walk::Walk(const std::string& name) : name_(name) {
         // The mouse alone: hover OPTIONS on the main menu (focused), click it
         // -> Options -> click the help bar's ENHANCED -> In-Game Max FPS's
         // dropdown clicked open, 120 clicked -> right click -> Options -> the
-        // help bar's BACK clicked -> main (guidelines/universal_launcher.md).
+        // help bar's BACK clicked -> main (docs/knowledge/universal_launcher.md).
         steps_ = boot;
+        // ONLINE is greyed and skipped (GH3's demo_mode_disable, GD04-101):
+        // Up from CAREER wraps to OPTIONS, the pad's Down and the keyboard's
+        // back to CAREER, and the mouse over ONLINE focuses nothing.
         steps_.push_back({"main_menu_fs",
-                          {"hover:menu:main_menu_options_text", "check:selected:main_menu_options_text", "click:menu:main_menu_options_text"},
+                          {Action::Up, "check:selected:main_menu_options_text", "key:Down", "check:selected:main_menu_career_text", Action::Up, D,
+                           "check:selected:main_menu_career_text", "hover:menu:main_menu_leaderboards_text", "check:selected:main_menu_career_text",
+                           "hover:menu:main_menu_options_text", "check:selected:main_menu_options_text", "click:menu:main_menu_options_text"},
                           10000});
         steps_.push_back({"options_select_option_fs", {"click:item"}, 20000});
         steps_.push_back({"port_enhanced",
-                          {"hover:row:max_fps", "click:row:max_fps", "click:option:1", "check:enhanced:max_fps=120", "rclick"}, 10000});
+                          {"hover:row:max_fps", "click:row:max_fps", "click:option:1", "check:enhanced:max_fps=120",
+                           // Export User Files, a setting changed, Load User Settings brings it back (the dialogs answered with the save folder).
+                           "dialog:savedir", "click:row:export", "set:enhanced:max_fps=60", "click:row:load_settings", "check:enhanced:max_fps=120", "click:row:load_progress", "set:enhanced:audio_offset=40", "set:enhanced:video_offset=-20", "click:row:calibrate_reset", "check:enhanced:audio_offset=0", "check:enhanced:video_offset=0",
+                           "click:row:cheat_air_guitar", "check:global:Cheat_AirGuitar=1", "click:row:cheat_air_guitar", "check:global:Cheat_AirGuitar=2",
+                           "rclick"},
+                          10000});
         steps_.push_back({"options_select_option_fs", {"click:help:BACK"}, 10000});
         steps_.push_back({"main_menu_fs", {}, 20000});
-    } else if (name == "gamepads") {
-        // The keyboard's yellow fret (3) on the main menu -> GAMEPADS -> the
-        // keyboard's Whammy rebound to E (a real key), saved in
-        // controllers.json -> back -> main; then the help bar's GAMEPADS
-        // clicked -> GAMEPADS.
+    } else if (name == "venues") {
+        // Career venue select: down moves the focus to the next venue (owner
+        // report: stuck on the first) [C script create_select_venue_menu].
+        steps_ = boot;
+        steps_.push_back({"main_menu_fs", {C}, 10000});
+        steps_.push_back({"career_choose_band_fs", {C}, 20000, true});
+        steps_.push_back({"career_enter_band_name_fs", {C, C, C, Action::Start}, 20000, true});
+        steps_.push_back({"career_select_difficulty_fs", {C}, 20000});
+        steps_.push_back({"career_select_character_fs", {C}, 20000, true});
+        steps_.push_back({"career_character_hub_fs", {"unlock:all", C}, 20000});  // the venues unlocked (as progress does)
+        steps_.push_back({"career_select_venue_fs", {"check:focus:venue_3", Action::Up, "wait", "check:focus:venue_4", Action::Up, "wait", "check:focus:venue_5", D, "wait",
+                                                     "check:focus:venue_4", "key:Down", "wait", "check:focus:venue_3", "key:Up", "wait",
+                                                     "check:focus:venue_4", B}, 20000});
+        steps_.push_back({"career_character_hub_fs", {}, 20000});
+    } else if (name == "hub") {
+        // The character hub's CHANGE OUTFIT and CHANGE GUITAR screens
+        // (GD04-043) [C data
+        // career_character_hub_fs].
+        steps_ = boot;
+        steps_.push_back({"main_menu_fs", {C}, 10000});
+        steps_.push_back({"career_choose_band_fs", {C}, 20000, true});
+        steps_.push_back({"career_enter_band_name_fs", {C, C, C, Action::Start}, 20000, true});
+        steps_.push_back({"career_select_difficulty_fs", {C}, 20000});
+        steps_.push_back({"career_select_character_fs", {C}, 20000, true});
+        steps_.push_back({"career_character_hub_fs", {D, D, C}, 20000});  // PLAY SHOW, CHANGE CHARACTER, CHANGE OUTFIT
+        steps_.push_back({"career_select_outfit_fs", {B}, 20000});
+        steps_.push_back({"career_character_hub_fs", {D, D, D, C}, 20000});  // CHANGE GUITAR
+        steps_.push_back({"career_select_guitar_fs", {C}, 20000});  // the guitar chosen: back to the hub
+        steps_.push_back({"career_character_hub_fs", {}, 20000});
+    } else if (name == "store") {
+        // The Vault's pages no other walk opens (GD04-043): finishes, songs,
+        // characters, outfits, styles, videos -- each opened and backed out
+        // of [C data store_fs].
+        steps_ = boot;
+        steps_.push_back({"main_menu_fs", {C}, 10000});
+        steps_.push_back({"career_choose_band_fs", {C}, 20000, true});
+        steps_.push_back({"career_enter_band_name_fs", {C, C, C, Action::Start}, 20000, true});
+        steps_.push_back({"career_select_difficulty_fs", {C}, 20000});
+        steps_.push_back({"career_select_character_fs", {C}, 20000, true});
+        steps_.push_back({"career_character_hub_fs", {D, D, D, D, C}, 20000});  // VISIT STORE
+        const std::pair<int, const char*> pages[] = {{1, "store_finishes_fs"}, {2, "store_songs_fs"},   {3, "store_characters_fs"},
+                                                     {4, "store_outfits_fs"},  {5, "store_styles_fs"}, {6, "store_videos_fs"}};
+        for (const auto& [downs, state] : pages) {
+            std::vector<Op> go(size_t(downs), D);
+            go.push_back(C);
+            steps_.push_back({"store_fs", go, 20000});
+            if (downs == 0) steps_.push_back({state, {C, Op(Action::Up, 300), Op(Action::Up, 300), B, B}, 20000});
+            // The characters' names stay centred on the frame (x 900) from one to the next (GD04-099).
+            else if (downs == 3) steps_.push_back({state, {"wait", "check:centrex:character_name_text=900", D, "wait", "wait", "wait", "check:centrex:character_name_text=900", B}, 20000});
+            else steps_.push_back({state, {B}, 20000});
+        }
+        steps_.push_back({"store_fs", {}, 20000});
+    } else if (name == "practice") {
+        // Training -> PRACTICE -> the first song -> difficulty -> VERSE 1 as
+        // the start and the end section -> Slowest -> the section played ->
+        // its results; then CHANGE SPEED to Slower, Slow and Full Speed, the
+        // section played at each. Each result checks the first gem against
+        // the clocks at that speed (check:sync, GD04-100) (GD04-043) [C data
+        // practice_*_fs, scripts practice_update, menu_choose_practice_speed_set_speed].
+        steps_ = boot;
+        steps_.push_back({"main_menu_fs", {"click:menu:main_menu_training_text"}, 10000});
+        steps_.push_back({"practice_select_mode_fs", {D, C}, 20000});  // TUTORIAL, PRACTICE
+        steps_.push_back({"practice_setlist_fs", {C}, 20000});
+        steps_.push_back({"practice_select_part_fs", {C}, 20000, true});
+        steps_.push_back({"practice_select_difficulty_fs", {C}, 20000});
+        // The section menu plays the song from the highlighted section (the
+        // preview follows the highlight) and stops on leaving: Back to the
+        // difficulty and in again (the highlight comes back on VERSE 1) (GD04-105).
         const Action U = Action::Up;
+        steps_.push_back({"practice_select_song_section_fs",
+                          {D, D, D, D, Op("check:preview:on", 3000), U, Op("check:preview:on", 3000), B}, 20000});
+        steps_.push_back({"practice_select_difficulty_fs", {Op("check:preview:off", 1500), C}, 20000});
+        steps_.push_back({"practice_select_song_section_fs", {Op("check:preview:on", 3000), C, Op(C, 800)}, 20000});  // VERSE 1 .. VERSE 1
+        // Slowest, Slower, Slow, Full Speed: current_speedfactor 0.5, 2 / 3, 0.8, 1.
+        const std::pair<int, const char*> speeds[] = {{3, "check:sync:0.5"}, {2, "check:sync:0.6666667"}, {1, "check:sync:0.8"}, {0, "check:sync:1"}};
+        for (size_t k = 0; k < 4; ++k) {
+            std::vector<Op> pick(size_t(speeds[k].first), D);
+            // The section menu stays under the speed menu, its preview playing [C scripts create_choose_practice_speed_menu].
+            if (k == 0) pick.insert(pick.begin(), Op("check:preview:on"));
+            pick.push_back(C);
+            steps_.push_back({"practice_select_speed_fs", pick, 20000});
+            steps_.push_back({"song", k == 0 ? std::vector<Op>{Op("check:preview:off")} : std::vector<Op>{}, 30000});
+            steps_.push_back({"song_over", {}, 600000});
+            // The section's results: CONTINUE / RESTART / CHANGE SPEED / CHANGE SECTION / QUIT.
+            std::vector<Op> next{Op(speeds[k].second, 1000)};
+            if (k < 3) next.push_back(D), next.push_back(D), next.push_back(C);
+            steps_.push_back({"practice_newspaper_fs", next, 60000});
+        }
+    } else if (name == "options") {
+        // Options' screens no other walk opens (GD04-043): AUDIO SETTINGS,
+        // CALIBRATE LAG, CONTROLLER SETTINGS, DATA SETTINGS, BONUS VIDEOS,
+        // TOP ROCKERS, each opened and backed out of (the menu comes back
+        // with the top item focused) [C data options_select_option_fs].
+        steps_ = boot;
+        steps_.push_back({"main_menu_fs", {"click:menu:main_menu_options_text"}, 10000});
+        const std::pair<int, const char*> screens[] = {{0, "options_audio_settings_fs"},   {1, "options_calibrate_lag_fs"},
+                                                       {2, "options_controller_settings_fs"}, {4, "options_data_settings_fs"},
+                                                       {5, "options_bonus_videos_fs"},        {7, "options_top_rockers_difficulty_select_fs"}};
+        for (const auto& [downs, state] : screens) {
+            std::vector<Op> go(size_t(downs), D);
+            go.push_back(C);
+            steps_.push_back({"options_select_option_fs", go, 20000});
+            if (downs == 0) steps_.push_back({state, {C, Op(Action::Up, 300), Op(Action::Up, 300), B, B}, 20000});
+            else steps_.push_back({state, {B}, 20000});
+        }
+        steps_.push_back({"options_select_option_fs", {}, 20000});
+    } else if (name == "touch") {
+        // Enhanced > Enable Touch Controls on; a finger taps OPTIONS on the
+        // main menu (SDL finger events, as a touch screen sends them) ->
+        // Options -> back -> main.
+        steps_ = boot;
+        steps_.push_back({"main_menu_fs", {"set:enhanced:touch=on", "tap:menu:main_menu_options_text"}, 10000});
+        steps_.push_back({"options_select_option_fs", {B}, 20000});
+        steps_.push_back({"main_menu_fs", {}, 20000});
+    } else if (name == "gamepads") {
+        // The universal Gamepad menu (universal_mechanisms.md 1.2.1): the
+        // keyboard's yellow fret (3) on the main menu opens it; Player 1's
+        // Customize inputs (the 4th field); Whammy (13 rows down the mapping)
+        // key 1 rebound to E; Save (4 rows down: Gyro, Require Strum, Reset,
+        // Save) writes controllers.json; back -> main; then the help bar's
+        // GAMEPADS clicked opens it again.
         steps_ = boot;
         steps_.push_back({"main_menu_fs", {"key:3"}, 10000});
-        // Up from the keyboard's row wraps to its last rows: 11 up is Whammy.
-        steps_.push_back({"port_gamepads", {U, U, U, U, U, U, U, U, U, U, U, C, "key:E", "check:whammy_is_e", B}, 10000});
+        std::vector<Op> ops{D, D, D, C};
+        for (int k = 0; k < 13; ++k) ops.push_back(D);
+        ops.push_back(C), ops.push_back(Op("key:E"));
+        for (int k = 0; k < 4; ++k) ops.push_back(D);
+        ops.push_back(C), ops.push_back(Op("check:whammy_is_e")), ops.push_back(B);
+        steps_.push_back({"port_gamepads", ops, 10000});
         steps_.push_back({"main_menu_fs", {"click:item"}, 10000});
         steps_.push_back({"port_gamepads", {}, 10000});
     } else if (name == "stickyaxis") {
@@ -269,7 +523,11 @@ Walk::Walk(const std::string& name) : name_(name) {
         const Op P2D = Op::p2(D), P2C = Op::p2(C);
         steps_ = boot;
         steps_.push_back({"main_menu_fs", {D, C}, 10000});
-        steps_.push_back({"coop_career_select_controllers_fs", {Op(C, 1500), P2D, P2C}, 20000});
+        // Each controller ends on its player's shield (menu_select_controller_icon_positions
+        // [0] / [1]): light_up_controller's move survives controller_jiggle (GD04-102).
+        steps_.push_back({"coop_career_select_controllers_fs",
+                          {Op("check:pos:controller0_icon=370,350", 1500), C, P2D, Op("check:pos:controller1_icon=900,420", 800), P2C},
+                          20000});
         steps_.push_back({"coop_career_choose_band_fs", {C}, 20000, true});
         steps_.push_back({"coop_career_enter_band_name_fs", {C, C, C, Action::Start}, 20000, true});
         steps_.push_back({"coop_career_select_difficulty_fs", {C, P2C}, 20000});
@@ -281,7 +539,7 @@ Walk::Walk(const std::string& name) : name_(name) {
         steps_.push_back({"coop_career_choose_part_fs", {C, P2C}, 20000});
         steps_.push_back({"song", {}, 30000});
         steps_.push_back({"song_over", {}, 600000});
-        steps_.push_back({"coop_career_newspaper_fs", {}, 30000});
+        steps_.push_back({"coop_career_newspaper_fs", {"check:mag_photo"}, 30000});
     } else if (name == "faceoff" || name == "proface" || name == "battle") {
         // MULTIPLAYER -> controllers (as co-op) -> the mode [C script
         // create_mp_select_mode_menu: FACE-OFF, PRO FACE-OFF, BATTLE; CO-OP
@@ -298,7 +556,11 @@ Walk::Walk(const std::string& name) : name_(name) {
         for (int i = 0; i < modeIdx; ++i) mode.push_back(D);
         mode.push_back(C);
         steps_.push_back({"mp_select_mode_fs", mode, 20000});
-        steps_.push_back({"mp_faceoff_character_select_fs", {C, P2C}, 20000});
+        // Each player scrolls the characters before picking (player 1 down
+        // three and up one: Izzy; player 2 down one: Casey): the results art
+        // shows a player's character (check:mag_photo), and GD04_FRAMELOG
+        // times the scrolls.
+        steps_.push_back({"mp_faceoff_character_select_fs", {Op(D, 300), Op(D, 300), Op(D, 300), Op(Action::Up, 300), Op::p2(D, 300), Op(C, 300), P2C}, 20000});
         steps_.push_back({"mp_faceoff_character_hub_fs", {C, P2C}, 20000});
         steps_.push_back({"mp_faceoff_select_venue_fs", {C}, 20000});
         steps_.push_back({"mp_faceoff_setlist_fs", {C}, 20000});
@@ -307,9 +569,20 @@ Walk::Walk(const std::string& name) : name_(name) {
         else steps_.push_back({"mp_faceoff_select_difficulty_fs", {C, P2C}, 20000});
         steps_.push_back({"song", {}, 30000});
         steps_.push_back({"song_over", {}, 900000});
-        steps_.push_back({"mp_faceoff_newspaper_fs", {}, 120000});
+        steps_.push_back({"mp_faceoff_newspaper_fs", {"check:mag_photo"}, 120000});
+    } else if (name == "escquit") {
+        // Back three times in a row on the main menu quits (to the launcher);
+        // another button between them starts the count again (owner 1.9).
+        steps_ = boot;
+        expectQuit_ = true;
+        steps_.push_back({"main_menu_fs", {B, "wait", B, "wait", D, "wait", B, "wait", B, "wait", B}, 10000});
     } else if (name == "boot") {
         steps_ = boot;
+        // No black frame from the press-start screen's first picture to the
+        // main menu (GD04-089: a render target made mid-frame, the backdrop's,
+        // had the frame presented black).
+        steps_[0].keys.insert(steps_[0].keys.begin(), Op("probe:black"));
+        steps_.back().keys = {Op("check:no_black", 1000)};
     } else if (name == "uitest") {
         steps_ = boot;
         uitest_ = true;
@@ -352,6 +625,23 @@ std::vector<Walk::Press> Walk::update(FrontEnd& fe, bool songPlaying, double now
         return out;
     }
     if (done() || failed_) return out;
+    // A song under a loading screen (GD04-040's regression): 5 s into a song
+    // the loading screen's tip and picture are gone [C script start_gem_scroller].
+    if (!songPlaying && fe.ui().find(qbkey::key("loading_tip_text"))) loadingSeen_ = true;
+    if (songPlaying && songSeenAt_ < 0) {
+        songSeenAt_ = now;
+        if (!loadingSeen_ && !fe.attractMode()) ++songsWithoutLoading_;
+        loadingSeen_ = false;
+    }
+    if (!songPlaying) songSeenAt_ = -1;
+    if (songSeenAt_ >= 0 && now - songSeenAt_ > 5000 && !loadingChecked_) {
+        loadingChecked_ = true;
+        if (fe.ui().loadingScreenUp() || fe.ui().find(qbkey::key("loading_tip_text"))) {
+            failed_ = true, failure_ = "the loading screen is still up 5 s into the song";
+            std::printf("walk: FAILED: %s\n", failure_.c_str());
+            return out;
+        }
+    }
     const Step& s = steps_[step_];
     if (reachedAt_ < 0) {
         bool reached;
@@ -472,11 +762,13 @@ bool Walk::act(const std::string& what, FrontEnd& fe, WalkHost& host) {
             float x0, y0, x1, y1;
             found = fe.ui().drawnBounds(qbkey::key(target.substr(5).c_str()), x0, y0, x1, y1);
             x = (x0 + x1) * 0.5f, y = (y0 + y1) * 0.5f;
-        } else if (target.rfind("help:", 0) == 0) {
+        } else if (target.rfind("help:", 0) == 0 || target.rfind("helplow:", 0) == 0) {
+            // A help bar pill's text; helplow: its bottom edge (the strum bar's down half).
+            const bool low = target[4] == 'l';
             if (const ui::Element* box = fe.ui().find(qbkey::key("user_control_container")))
                 for (const auto& c : box->children)
-                    if (c->text == target.substr(5) && c->drawnIn == fe.ui().drawCount())
-                        x = (c->bx0 + c->bx1) * 0.5f, y = (c->by0 + c->by1) * 0.5f, found = true;
+                    if (c->text == target.substr(low ? 8 : 5) && c->drawnIn == fe.ui().drawCount())
+                        x = (c->bx0 + c->bx1) * 0.5f, y = low ? c->by1 + 4 : (c->by0 + c->by1) * 0.5f, found = true;
         } else if (target == "item" && host.walkPorts()) {
             float x0, y0, x1, y1;
             found = host.walkPorts()->itemRect(flowState(fe), x0, y0, x1, y1);
@@ -492,7 +784,26 @@ bool Walk::act(const std::string& what, FrontEnd& fe, WalkHost& host) {
         if (button) host.walkMouse(x, y, 1);
         return true;
     }
+    if (starts("tap:menu:")) {  // a finger down and up on an element (window-normalised, the walk's 1280 x 720 window)
+        float x0, y0, x1, y1;
+        if (!fe.ui().drawnBounds(qbkey::key(what.substr(9).c_str()), x0, y0, x1, y1)) return fail("the finger: " + what + " is not on the screen");
+        const float nx = (x0 + x1) * 0.5f / 1280.0f, ny = (y0 + y1) * 0.5f / 720.0f;
+        for (SDL_EventType t : {SDL_EVENT_FINGER_DOWN, SDL_EVENT_FINGER_UP}) {
+            SDL_Event e{};
+            e.type = t;
+            e.tfinger.touchID = 1, e.tfinger.fingerID = 7;
+            e.tfinger.x = nx, e.tfinger.y = ny, e.tfinger.pressure = t == SDL_EVENT_FINGER_DOWN ? 1.0f : 0.0f;
+            SDL_PushEvent(&e);
+        }
+        return true;
+    }
     if (what == "rclick") return host.walkMouse(640, 360, 3), true;
+    if (what == "probe:black") return Canvas::countBlack = true, Canvas::countBlackLit = false, Canvas::blackFrames = 0, true;
+    if (what == "check:no_black") {  // no all-black frame presented since probe:black (after its first lit one)
+        Canvas::countBlack = false;
+        std::printf("  black frames: %d\n", Canvas::blackFrames);
+        return Canvas::blackFrames == 0 ? true : fail(std::to_string(Canvas::blackFrames) + " black frames presented");
+    }
     if (starts("check:text:")) {  // check:text:<element id>!=<text>: the element's text is not that
         const std::string kv = rest("check:text:");
         const size_t ne = kv.find("!=");
@@ -510,6 +821,73 @@ bool Walk::act(const std::string& what, FrontEnd& fe, WalkHost& host) {
         if (k == SDLK_UNKNOWN) return fail("no key " + rest("key:"));
         host.walkKey(int(k));
         return true;
+    }
+    if (starts("set:character:")) {  // set:character:<name>[,<outfit>,<style>]: player 1's character (player1_status)
+        std::string v = rest("set:character:");
+        int o = 1, sy = 1;
+        if (size_t c = v.find(','); c != std::string::npos) {
+            std::sscanf(v.c_str() + c + 1, "%d,%d", &o, &sy);
+            v.resize(c);
+        }
+        qb::Value* st = fe.vm().globals().ensure(qbkey::key("player1_status"));
+        if (!st->st) return fail("no player1_status");
+        auto copy = std::make_shared<qb::Struct>(*st->st);
+        qs::Vm::set(*copy, qbkey::key("character_id"), qs::Vm::makeKey(qbkey::key(v.c_str())));
+        qs::Vm::set(*copy, qbkey::key("outfit"), qs::Vm::makeInt(o));
+        qs::Vm::set(*copy, qbkey::key("style"), qs::Vm::makeInt(sy));
+        st->st = copy;
+        std::printf("  character: %s outfit %d style %d\n", v.c_str(), o, sy);
+        return true;
+    }
+    if (what == "check:mag_photo") {
+        // The results art (create_newspaper_menu's Mag_Photo) comes from the
+        // body pak of a player's character, outfit and style (its asset
+        // context), not whichever body pak loaded first [C script].
+        qs::Vm& vm = fe.vm();
+        auto keyOf = [](const qb::Value* v) -> uint32_t {
+            if (!v) return 0;
+            return v->type == qb::Type::String || v->type == qb::Type::WString ? qbkey::key(v->str.c_str()) : v->key;
+        };
+        std::vector<uint32_t> want;
+        for (const char* ps : {"player1_status", "player2_status"}) {
+            const qb::Value* st = vm.global(qbkey::key(ps));
+            if (!st || !st->st) continue;
+            const uint32_t id = keyOf(qs::Vm::param(*st->st, qbkey::key("character_id")));
+            const int o = int(qs::Vm::number(qs::Vm::param(*st->st, qbkey::key("outfit")), 1));
+            const int sy = int(qs::Vm::number(qs::Vm::param(*st->st, qbkey::key("style")), 1));
+            const qb::Value* profs = vm.global(qbkey::key("musician_profiles"));
+            if (!profs || !profs->arr) continue;
+            for (const qb::Value& pr : profs->arr->values) {
+                const qb::Value* n = pr.st ? pr.st->find(qbkey::key("name")) : nullptr;
+                if (!n || keyOf(n) != id) continue;
+                char body[160];
+                std::snprintf(body, sizeof body, "Guitarist_%s_Outfit%d_Style%d", n->str.c_str(), o, sy);
+                if (const qb::Struct* b = band::bodyDesc(vm.globals(), qbkey::key(body))) {
+                    // No asset_context (Morello_1, the BoneMen): the pak's name.
+                    uint32_t ctx = keyOf(b->find(qbkey::key("asset_context")));
+                    if (const qb::Value* pk = b->find(qbkey::key("pak")); !ctx && pk) {
+                        std::string stem = pk->str.substr(pk->str.find_last_of("\\/") + 1);
+                        if (stem.size() > 4) stem.resize(stem.size() - 4);  // ".pak"
+                        ctx = qbkey::key(stem.c_str());
+                    }
+                    want.push_back(ctx);
+                }
+                std::printf("  mag_photo: %s wants %s (%s)\n", ps, body, want.empty() ? "-" : qbkey::name(want.back()).c_str());
+            }
+        }
+        int n = 0, ok = 0;
+        std::vector<const ui::Element*> stack{&fe.ui().root()};
+        while (!stack.empty()) {
+            const ui::Element* e = stack.back();
+            stack.pop_back();
+            for (const auto& c : e->children) stack.push_back(c.get());
+            if (e->texture != qbkey::key("Mag_Photo")) continue;
+            ++n;
+            const bool good = e->texContext && std::find(want.begin(), want.end(), e->texContext) != want.end();
+            ok += good;
+            std::printf("  mag_photo: a sprite from %s%s\n", e->texContext ? qbkey::name(e->texContext).c_str() : "the global cache", good ? "" : " (wrong)");
+        }
+        return n && ok == n ? true : fail("the results art is not the player's character (" + std::to_string(ok) + " / " + std::to_string(n) + ")");
     }
     if (starts("check:selected:")) {
         // The focused menu's selected item stands for that element (its focus handler names it).
@@ -542,6 +920,190 @@ bool Walk::act(const std::string& what, FrontEnd& fe, WalkHost& host) {
         std::printf("  tags: %s.%s = %d\n", tag.c_str(), field.c_str(), got);
         return got == want ? true : fail("tag " + kv + " is " + std::to_string(got));
     }
+    if (starts("set:tag:")) {  // set:tag:<tag>.<field>=<int>: a save tag's field set (a test's shortcut)
+        const std::string kv = rest("set:tag:");
+        const size_t dot = kv.find('.'), eq = kv.find('=');
+        qs::Vm::set(fe.vm().globalTags[qbkey::key(kv.substr(0, dot).c_str())], qbkey::key(kv.substr(dot + 1, eq - dot - 1).c_str()),
+                    qs::Vm::makeInt(std::atoi(kv.c_str() + eq + 1)));
+        return true;
+    }
+    if (starts("check:pos:")) {  // check:pos:<id>=<x>,<y>: the element's pos (parent space, +-2)
+        const std::string kv = rest("check:pos:");
+        const size_t eq = kv.find('='), comma = kv.find(',');
+        const ui::Element* e = fe.ui().find(qbkey::key(kv.substr(0, eq).c_str()));
+        if (!e) return fail(kv.substr(0, eq) + " does not exist");
+        const float x = float(std::atof(kv.c_str() + eq + 1)), y = float(std::atof(kv.c_str() + comma + 1));
+        std::printf("  pos: %s = %.1f, %.1f\n", kv.substr(0, eq).c_str(), double(e->x), double(e->y));
+        return std::fabs(e->x - x) <= 2.0f && std::fabs(e->y - y) <= 2.0f
+                   ? true
+                   : fail(kv.substr(0, eq) + " is at " + std::to_string(int(e->x)) + ", " + std::to_string(int(e->y)));
+    }
+    if (starts("check:centrex:")) {  // check:centrex:<id>=<x>: the element's drawn centre is at x (1280-wide, +-12 px)
+        const std::string kv = rest("check:centrex:");
+        const size_t eq = kv.find('=');
+        float x0, y0, x1, y1;
+        if (!fe.ui().drawnBounds(qbkey::key(kv.substr(0, eq).c_str()), x0, y0, x1, y1)) return fail(kv.substr(0, eq) + " is not drawn");
+        const float cx = (x0 + x1) * 0.5f, want = float(std::atof(kv.c_str() + eq + 1));
+        std::printf("  centre: %s x = %.1f\n", kv.substr(0, eq).c_str(), double(cx));
+        return std::fabs(cx - want) <= 12.0f ? true : fail(kv.substr(0, eq) + " is centred at x " + std::to_string(int(cx)));
+    }
+    if (what == "save:write") {  // the save written now, as GH3's SaveToMemoryCard writes it
+        qs::ScriptRun run;
+        qb::Struct params;
+        return fe.vm().callNative(qbkey::key("SaveToMemoryCard"), run, params) ? true : fail("SaveToMemoryCard failed");
+    }
+    if (starts("check:save:")) {
+        // check:save:<tag>.<field>=<int>: a tag's field in save.json (absent field: 0).
+        const std::string kv = rest("check:save:");
+        const size_t dot = kv.find('.'), eq = kv.find('=');
+        const std::string tag = kv.substr(0, dot), field = kv.substr(dot + 1, eq - dot - 1);
+        save::Tags tags;
+        save::Sections sections;
+        std::string err;
+        if (!save::read(tags, sections, err)) return fail("save: " + err);
+        auto it = tags.find(qbkey::key(tag.c_str()));
+        const qb::Value* v = it == tags.end() ? nullptr : qs::Vm::param(it->second, qbkey::key(field.c_str()));
+        const int got = v ? int(v->type == qb::Type::Float ? v->f[0] : float(v->i)) : 0;
+        std::printf("  save: %s.%s = %d\n", tag.c_str(), field.c_str(), got);
+        return got == std::atoi(kv.c_str() + eq + 1) ? true : fail("saved tag " + kv + " is " + std::to_string(got));
+    }
+    if (starts("set:enhanced:")) {  // set:enhanced:<key>=<value>: an Enhanced option set
+        const std::string kv = rest("set:enhanced:");
+        const size_t eq = kv.find('=');
+        host.walkSetEnhanced(kv.substr(0, eq), kv.substr(eq + 1));
+        return true;
+    }
+    if (what == "wait") return true;  // one step (300 ms) of nothing
+    if (what == "unlock:all") {  // every save tag with an `unlocked` field set to 1 (the venues as a finished career has them)
+        int n = 0;
+        for (auto& [k, st] : fe.vm().globalTags)
+            if (qs::Vm::param(st, qbkey::key("unlocked"))) qs::Vm::set(st, qbkey::key("unlocked"), qs::Vm::makeInt(1)), ++n;
+        std::printf("  unlocked: %d tags\n", n);
+        return true;
+    }
+    if (what == "clear:topscores") {  // every song's Top Rockers scores 0 (the walk's short song then makes the list)
+        int n = 0;
+        for (auto& [k, st] : fe.vm().globalTags)
+            for (const char* f : {"score1", "score2", "score3", "score4", "score5"})
+                if (qs::Vm::param(st, qbkey::key(f))) qs::Vm::set(st, qbkey::key(f), qs::Vm::makeInt(0)), ++n;
+        std::printf("  top scores cleared: %d\n", n);
+        return true;
+    }
+    if (starts("check:focus:")) {  // check:focus:<id>: that element is the one focused (no other item focused)
+        const uint32_t want = qbkey::key(rest("check:focus:").c_str());
+        int items = 0;
+        bool has = false;
+        std::string seen;
+        for (const ui::Element* e : fe.ui().focusedElements())
+            if (e->id != qbkey::key("root_window")) ++items, has = has || e->id == want, seen += " " + qbkey::name(e->id);
+        std::printf("  focus: %s %s (%d focused:%s)\n", rest("check:focus:").c_str(), has ? "yes" : "no", items, seen.c_str());
+        return has && items == 1 ? true : fail("focus is not on " + rest("check:focus:") + " alone");
+    }
+    if (starts("check:norow:")) {  // an Enhanced Options row that must not exist (the screen open)
+        float x = 0, y = 0;
+        if (!host.walkPorts()) return fail("no port screens");
+        return !enhancedRowCenter(*host.walkPorts()->screen(PortScreens::Id::Enhanced), rest("check:norow:"), x, y)
+                   ? true
+                   : fail("Enhanced has a " + rest("check:norow:") + " row");
+    }
+    if (what == "check:cut_content_ignored") {  // an enhanced.json with cut_content on loads as off (GD04-110)
+        const std::string dir = (std::filesystem::temp_directory_path() / "gd04_walk_cutcontent").string() + "/";
+        std::error_code ec;
+        std::filesystem::create_directories(dir, ec);
+        std::ofstream(dir + "enhanced.json") << R"({"version": 2, "settings": {"cut_content": "on", "no_fail": "on"}})";
+        EnhancedStore st;
+        st.load(dir);
+        const std::string cut = st.get("cut_content"), noFail = st.get("no_fail");
+        std::filesystem::remove_all(dir, ec);
+        std::printf("  a saved cut_content on loads as %s (no_fail %s)\n", cut.c_str(), noFail.c_str());
+        return cut == "off" && noFail == "on" ? true : fail("a saved cut_content on loads as " + cut);
+    }
+    if (starts("check:qp_guitarists=")) {  // quick play's random guitarist count (cs_get_total_guitarists from quickplay_start_song)
+        qs::ScriptRun r;
+        qs::Frame f;
+        f.code = fe.vm().code(qbkey::key("quickplay_start_song"));
+        f.locals = std::make_shared<qb::Struct>();
+        r.frames.push_back(std::move(f));
+        qb::Struct none;
+        fe.vm().condition(r, qbkey::key("cs_get_total_guitarists"), none);
+        const qb::Value* n = qs::Vm::param(*r.frames.back().locals, qbkey::key("num_guitarists"));
+        const int got = n ? int(n->number()) : -1;
+        std::printf("  quick play guitarists: %d\n", got);
+        return got == std::atoi(rest("check:qp_guitarists=").c_str()) ? true : fail("quick play deals from " + std::to_string(got) + " guitarists");
+    }
+    if (what == "log:cs") {  // character select's page, icon and name (player 1)
+        auto num = [&](const char* g) {
+            const qb::Value* v = fe.vm().global(qbkey::key(g));
+            return v ? double(v->number()) : -1.0;
+        };
+        const ui::Element* t = fe.ui().find(qbkey::key("cs_name_text_p1"));
+        std::printf("  cs: jumped %g icon %g total %g name \"%s\"\n", num("g_cs_jumped_p1"), num("g_character_select_icon_index_p1"),
+                    num("cs_total_guitarists_p1"), t ? t->text.c_str() : "(none)");
+        return true;
+    }
+    if (what == "log:focus") {  // the focused menu item's id and text (development aid)
+        for (const ui::Element* e : fe.ui().focusedElements())
+            std::printf("  focus: %s \"%s\"\n", qbkey::name(e->id).c_str(), e->text.c_str());
+        return true;
+    }
+    if (starts("set:global:")) {  // set:global:<name>=<number>: a GH3 global set (a test's shortcut)
+        const std::string kv = rest("set:global:");
+        const size_t eq = kv.find('=');
+        fe.vm().setGlobal(qbkey::key(kv.substr(0, eq).c_str()), qs::Vm::makeInt(std::atoi(kv.c_str() + eq + 1)));
+        return true;
+    }
+    if (starts("check:sync:")) {
+        // check:sync:<speed>: the last song ran at that speed and its first gem
+        // reached the strike line in step with the clocks: the frame it did is
+        // under two frames (x the speed) past the note, and the song clock
+        // there is within 25 ms of the audio's own clock and 40 ms of the
+        // wall clock since the first frame x the speed (GD04-100).
+        const FrontEnd::SongSync& s = fe.songSync;
+        const float want = float(std::atof(rest("check:sync:").c_str()));
+        std::printf("  sync: speed %.3f, first gem %.0f ms: %.1f ms past it, wall clock x speed %+.1f ms, audio %+.1f ms\n", double(s.speed),
+                    s.noteMs, s.lateMs, s.clockErrMs, s.audioErrMs);
+        if (!s.measured) return fail("sync: no first gem measured");
+        if (std::fabs(s.speed - want) > 0.01f) return fail("sync: speed " + std::to_string(s.speed));
+        if (s.lateMs < 0 || s.lateMs > 40.0 * s.speed || std::fabs(s.clockErrMs) > 40 || std::fabs(s.audioErrMs) > 25) return fail("sync: out of step");
+        return true;
+    }
+    if (starts("check:preview:")) {
+        // check:preview:on: practice's section preview plays the song from the
+        // highlighted section's marker (target_practice_songpreview_starttime)
+        // at full speed, its stream past that time by no more than it has had
+        // to play; check:preview:off: no preview plays, and none was left
+        // playing as a song started (GD04-105).
+        const FrontEnd::SongPreview& pv = fe.songPreview;
+        const double target = qs::Vm::number(fe.vm().global(qbkey::key("target_practice_songpreview_starttime")), -1);
+        const double pos = pv.positionMs ? pv.positionMs() : -1;
+        std::printf("  preview: %s%s %s from %.0f ms (target %.0f), now %.0f ms, speed %.2f, %d starts%s\n", pv.active ? "active" : "off",
+                    pv.playing ? " playing" : "", pv.prefix.c_str(), pv.startMs, target, pos, double(pv.speed), pv.starts,
+                    pv.leaked ? ", LEAKED into a song" : "");
+        if (pv.leaked) return fail("preview: still playing as a song started");
+        if (rest("check:preview:") == "off") return pv.active ? fail("preview: still playing") : true;
+        if (!pv.active || !pv.playing) return fail("preview: not playing");
+        if (std::fabs(pv.startMs - target) > 1.0 || target <= 0) return fail("preview: not from the highlighted section's marker");
+        if (std::fabs(pv.speed - 1.0f) > 0.001f) return fail("preview: not at full speed");
+        if (pos < pv.startMs || pos > pv.startMs + 15000.0) return fail("preview: the stream is not where it started");
+        return true;
+    }
+    if (starts("check:global:")) {  // check:global:<name>=<number>: a GH3 global's value
+        const std::string kv = rest("check:global:");
+        const size_t eq = kv.find('=');
+        const qb::Value* v = fe.vm().global(qbkey::key(kv.substr(0, eq).c_str()));
+        // A key value (game_mode = p1_career) compares by name, a number by value.
+        if (v && (v->type == qb::Type::Key || v->type == qb::Type::KeyPtr)) {
+            std::printf("  global: %s = %s\n", kv.substr(0, eq).c_str(), qbkey::name(v->key).c_str());
+            return v->key == qbkey::key(kv.substr(eq + 1).c_str()) ? true : fail("global " + kv);
+        }
+        const float got = v ? v->number() : -1;
+        std::printf("  global: %s = %g\n", kv.substr(0, eq).c_str(), double(got));
+        return got == std::atof(kv.c_str() + eq + 1) ? true : fail("global " + kv);
+    }
+    if (what == "dialog:savedir") {  // GD04_DIALOG: the user-file dialogs answered with the walk's save folder
+        SDL_setenv_unsafe("GD04_DIALOG", host.walkSaveDir().c_str(), 1);
+        return true;
+    }
     if (starts("check:enhanced:")) {
         const std::string kv = rest("check:enhanced:");
         const size_t eq = kv.find('=');
@@ -565,6 +1127,18 @@ bool Walk::act(const std::string& what, FrontEnd& fe, WalkHost& host) {
         }
         std::printf("  gamepads: Whammy %s, controllers.json %s\n", bound ? "on E" : "not on E", saved ? "has it" : "does not");
         return bound && saved ? true : fail("the rebinding of the keyboard's Whammy to E did not take or was not saved");
+    }
+    if (what == "xpad_attach") {  // a virtual Xbox 360 pad (player 1 when plugged in first)
+        adapter_ = unsigned(Input::attachVirtualPad("045e:028e"));
+        return adapter_ ? true : fail("no virtual pad");
+    }
+    if (what == "pad_detach") {
+        SDL_DetachVirtualJoystick(SDL_JoystickID(adapter_));
+        return true;
+    }
+    if (what == "keyboard_p2") {  // the keyboard given player 2 (the Gamepads screen's Bind to)
+        host.walkInput().setPlayer("keyboard", 1);
+        return true;
     }
     if (what == "adapter_attach") {
         adapter_ = unsigned(Input::attachVirtualPad("0079:0006:dpadaxis=-32768"));
@@ -591,9 +1165,20 @@ bool Walk::act(const std::string& what, FrontEnd& fe, WalkHost& host) {
 }
 
 int Walk::finish(FrontEnd& fe) const {
-    (void)fe;
     std::string path;
     for (const std::string& s : log_) path += (path.empty() ? "" : " > ") + s;
+    // Every sound effect reached the device (0.1.12: none did, the menus were silent).
+    const Sfx::Stats& sx = fe.sfx.stats();
+    std::printf("sound effects: %llu played, %llu lost\n", (unsigned long long)sx.plays, (unsigned long long)sx.lost);
+    if (!failed_ && done() && sx.lost) {
+        std::printf("walktest %s: FAILED (sound effects lost on the device); reached: %s\n", name_.c_str(), path.c_str());
+        return 1;
+    }
+    if (expectQuit_) {  // escquit: the quit is the walk's end (the last Back)
+        const bool ok = !failed_ && quitSeen_ && step_ + 1 >= steps_.size() && key_ >= steps_.back().keys.size();
+        std::printf("walktest %s: %s; reached: %s\n", name_.c_str(), ok ? "passed (Back x3 quit)" : "FAILED (no quit on the third Back)", path.c_str());
+        return ok ? 0 : 1;
+    }
     if (failed_ || !done()) {
         std::printf("walktest %s: FAILED (%s); reached: %s\n", name_.c_str(),
                     failure_.empty() ? "did not finish in time" : failure_.c_str(), path.c_str());
@@ -604,6 +1189,19 @@ int Walk::finish(FrontEnd& fe) const {
         for (const std::string& n : emptyStates_) std::printf(" %s", n.c_str());
         std::printf("\nuitest: every screen was started through the flow manager\n");
         return 0;
+    }
+    // Every loading screen stayed up 2 s (GD04-040).
+    const double shown = fe.vm().minLoadingShownMs();
+    if (shown >= 0) std::printf("walk: loading screens up at least %.0f ms\n", shown);
+    if (shown >= 0 && shown < qs::Vm::kLoadingHoldMs - 50) {
+        std::printf("walktest %s: FAILED (a loading screen passed in %.0f ms); reached: %s\n", name_.c_str(), shown, path.c_str());
+        return 1;
+    }
+    // Quick play and career put the loading screen up before every song (create_loading_screen) [C scripts].
+    if (songsWithoutLoading_ > 0) std::printf("walk: %d song(s) started without a loading screen\n", songsWithoutLoading_);
+    if (songsWithoutLoading_ > 0 && (name_ == "quickplay" || name_ == "career" || name_ == "career_quickplay")) {
+        std::printf("walktest %s: FAILED (a song started without its loading screen); reached: %s\n", name_.c_str(), path.c_str());
+        return 1;
     }
     std::printf("walktest %s: passed (%s); songs started %d, ended %d\n", name_.c_str(), path.c_str(), songsStarted, songsEnded);
     return 0;

@@ -182,12 +182,21 @@ void Translator::alu(const uint32_t* w) {
         const uint32_t swz = bits(w[1], 0, 8);
         const bool rel = slot == 0 ? bits(w[1], 31, 1) : bits(w[1], 30, 1);
         std::string c = constRef(bits(w[2], 0, 8), rel, bits(w[1], 29, 1) != 0);
-        if (bits(w[0], 7, 1)) c = "abs(" + c + ")";
+        // src3's negate and the constants' abs flag apply to BOTH operands
+        // (Xenia's shader_translator: const_op and temp_op share
+        // src_negate(3) and abs_constants()). Negating only the constant
+        // turned HairShader's edge factor (N.V - start) into (-start - N.V):
+        // the specular exponent fell to m_psEdgeSpecularPower (0.1) all over
+        // the hair and the bassist's / singer's hair burnt white.
+        const bool absC = bits(w[0], 7, 1) != 0, negC = bits(w[1], 24, 1) != 0;
+        if (absC) c = "abs(" + c + ")";
         sa = c + "." + kComp[((swz >> 6) + 3) & 3];
-        if (bits(w[1], 24, 1)) sa = "(-" + sa + ")";
+        if (negC) sa = "(-" + sa + ")";
         const int tr = int((sop & 1) | (bits(w[2], 29, 1) << 1) | (swz & 0x3C));
         reg(tr);
         sb = "r" + std::to_string(tr) + "." + kComp[swz & 3];
+        if (absC) sb = "abs(" + sb + ")";
+        if (negC) sb = "(-" + sb + ")";
         s3 = "vec4(0.0)";
     } else {
         s3 = operand(w, 3, uc, slot);
@@ -218,7 +227,7 @@ void Translator::alu(const uint32_t* w) {
     std::string kill;
     switch (vop) {
     case 0: v = s1 + " + " + s2; break;
-    case 1: v = s1 + " * " + s2; break;
+    case 1: v = "gdMul(" + s1 + ", " + s2 + ")"; break;
     case 2: v = "max(" + s1 + ", " + s2 + ")"; break;
     case 3: v = "min(" + s1 + ", " + s2 + ")"; break;
     case 4: v = "vec4(equal(" + s1 + ", " + s2 + "))"; break;
@@ -228,13 +237,13 @@ void Translator::alu(const uint32_t* w) {
     case 8: v = "fract(" + s1 + ")"; break;
     case 9: v = "trunc(" + s1 + ")"; break;
     case 10: v = "floor(" + s1 + ")"; break;
-    case 11: v = s1 + " * " + s2 + " + " + s3; break;
+    case 11: v = "gdMul(" + s1 + ", " + s2 + ") + " + s3; break;
     case 12: v = "mix(" + s3 + ", " + s2 + ", vec4(equal(" + s1 + ", vec4(0.0))))"; break;
     case 13: v = "mix(" + s3 + ", " + s2 + ", vec4(greaterThanEqual(" + s1 + ", vec4(0.0))))"; break;
     case 14: v = "mix(" + s3 + ", " + s2 + ", vec4(greaterThan(" + s1 + ", vec4(0.0))))"; break;
-    case 15: v = "vec4(dot(" + s1 + ", " + s2 + "))"; break;
-    case 16: v = "vec4(dot((" + s1 + ").xyz, (" + s2 + ").xyz))"; break;
-    case 17: v = "vec4(dot((" + s1 + ").xy, (" + s2 + ").xy) + (" + s3 + ").x)"; break;
+    case 15: v = "vec4(gdSum4(gdMul(" + s1 + ", " + s2 + ")))"; break;
+    case 16: v = "vec4(gdSum3(gdMul(" + s1 + ", " + s2 + ")))"; break;
+    case 17: v = "vec4(gdSum2(gdMul(" + s1 + ", " + s2 + ")) + (" + s3 + ").x)"; break;
     case 18: v = "gdCube(" + s1 + ", " + s2 + ")"; break;
     case 19: v = "vec4(gdMax4(" + s1 + "))"; break;
     case 20: case 21: case 22: case 23: {
@@ -250,7 +259,7 @@ void Translator::alu(const uint32_t* w) {
         v = "vec4(" + kill + " ? 1.0 : 0.0)";
         break;
     }
-    case 28: v = "vec4(1.0, (" + s1 + ").y * (" + s2 + ").y, (" + s1 + ").z, (" + s2 + ").w)"; break;
+    case 28: v = "vec4(1.0, gdMulS((" + s1 + ").y, (" + s2 + ").y), (" + s1 + ").z, (" + s2 + ").w)"; break;
     case 29: v = "max(" + s1 + ", " + s2 + ")"; add("int na = int(clamp(floor((" + s1 + ").w + 0.5), -256.0, 255.0)); "); break;
     }
     const bool usesT = !predPush.empty() || !kill.empty();
@@ -261,9 +270,9 @@ void Translator::alu(const uint32_t* w) {
     switch (sop) {
     case 0: sr = a + " + " + b; break;
     case 1: sr = a + " + pv"; break;
-    case 2: sr = a + " * " + b; break;
-    case 3: sr = a + " * pv"; break;
-    case 4: sr = "((pv == -3.402823e38 || isinf(pv) || isinf(" + b + ") || " + b + " <= 0.0) ? -3.402823e38 : " + a + " * pv)"; break;
+    case 2: sr = "gdMulS(" + a + ", " + b + ")"; break;
+    case 3: sr = "gdMulS(" + a + ", pv)"; break;
+    case 4: sr = "((pv == -3.402823e38 || isinf(pv) || isinf(" + b + ") || " + b + " <= 0.0) ? -3.402823e38 : gdMulS(" + a + ", pv))"; break;
     case 5: sr = "max(" + a + ", " + b + ")"; break;
     case 6: sr = "min(" + a + ", " + b + ")"; break;
     case 7: sr = "(" + a + " == 0.0 ? 1.0 : 0.0)"; break;
@@ -300,7 +309,7 @@ void Translator::alu(const uint32_t* w) {
     case 38: skill = a + " != 0.0"; break;
     case 39: skill = a + " == 1.0"; break;
     case 40: sr = "sqrt(" + a + ")"; break;
-    case 42: case 43: sr = a + " * " + b; break;
+    case 42: case 43: sr = "gdMulS(" + a + ", " + b + ")"; break;
     case 44: case 45: sr = a + " + " + b; break;
     case 46: case 47: sr = a + " - " + b; break;
     case 48: sr = "sin(" + a + ")"; break;
@@ -499,6 +508,13 @@ const char* kCommon = R"(
 layout(std140) uniform GdXG { vec4 cG[128]; };
 layout(std140) uniform GdXO { vec4 cO[28]; };
 float gdMax4(vec4 v) { return max(max(v.x, v.y), max(v.z, v.w)); }
+// Shader Model 3 / Xenos: +-0 x anything (inf, NaN) = +0 in MUL, MAD, the
+// dot products, DST.y, MULS, MUL_PREV and MUL_CONST (Xenia's translators).
+vec4 gdMul(vec4 a, vec4 b) { return mix(a * b, vec4(0.0), bvec4(ivec4(equal(a, vec4(0.0))) | ivec4(equal(b, vec4(0.0))))); }
+float gdMulS(float a, float b) { return (a == 0.0 || b == 0.0) ? 0.0 : a * b; }
+float gdSum4(vec4 p) { return (p.x + p.y) + (p.z + p.w); }
+float gdSum3(vec4 p) { return (p.x + p.y) + p.z; }
+float gdSum2(vec4 p) { return p.x + p.y; }
 float gdRcpFF(float x) { float r = 1.0 / x; return isinf(r) ? 0.0 : r; }
 float sclampv(float s, bool c) { return c ? clamp(s, 0.0, 1.0) : s; }
 // CUBE: operands (z, z, x, y) and (y, x, z, z) of the direction; result

@@ -285,7 +285,7 @@ def fmt(v, names, ind=0):
 def qb_entries(p):
     k = qbkey(".qb")
     for e in p.entries:
-        if e.type in (k, qbkey(".mqb"), qbkey(".sqb")):
+        if e.type in (k, qbkey(".mqb"), qbkey(".sqb"), qbkey(".nqb")):
             yield e
 
 

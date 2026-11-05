@@ -39,16 +39,27 @@ public:
     void draw(const venue::CamPose& cam, const std::vector<venue::LightState>& lights, const venue::LightShow& show);
 
     static gfx::ProgramDesc programDesc();
-    // The dynamic shadow map for this frame (the band from the shadow light,
-    // depth 0..1): opaque meshes draw with their templates'
-    // DynamicShadowReciever technique. An empty texture: none.
+    // The dynamic shadow for this frame (the band from the shadow light, GH3's
+    // two cascades): opaque meshes draw with their templates'
+    // DynamicShadowReciever technique. Off: none.
+    void setShadow(const gh3shader::DynamicShadow& s) { shadow_ = s; }
+    // One map for both cascades (the menus' backdrop).
     void setShadow(gfx::TextureId depth, const gfx::Mat4& lightViewProj, int size, float intensity) {
-        shadowTex_ = depth, shadowVP_ = lightViewProj, shadowSize_ = size, shadowIntensity_ = intensity;
+        shadow_ = gh3shader::DynamicShadow::single(depth, lightViewProj, size, intensity);
     }
     // The light housings' volumes (lightvolumetype ConeImpostor: the
     // _Cone_Impostor template on a camera-facing quad along the beam), drawn
     // after the band (additive, depth tested).
     void drawVolumes(const venue::CamPose& cam, const venue::LightShow& show);
+    // The `volume` housings: GH3's _Raytrace_cone_volume over a closed
+    // 20-segment cone, ray-cast against the scene's depth (a copy). An
+    // empty texture: not drawn.
+    void drawRaytraced(const venue::CamPose& cam, const venue::LightShow& show, gfx::TextureId depth);
+    bool hasRaytraced() const { return !rays_.empty(); }
+    // The projectortype stageonly housings: GH3's _Projector_StageOnly on the
+    // quad where the beam's frustum meets the stage plane (y 0), shadowed by
+    // the band's dynamic shadow map.
+    void drawProjectors(const venue::CamPose& cam, const venue::LightShow& show);
     // A viewport texture override (CreateViewportTextureOverride: the crowd's
     // renders on the cards); an empty id removes it.
     // Moving level objects (render/particles.h nodeMotion): a node's world
@@ -62,6 +73,11 @@ public:
     // GH3's shaders read them (also the band's, render/band_view.cpp).
     // `flipY`: upside down, for a render target sampled as a texture
     // (Direct3D's v runs down, OpenGL's target rows up).
+    // Enhanced TAA: this frame's projection jitter in NDC (VenueStage sets it; 0 otherwise).
+    static inline float jitterX = 0, jitterY = 0;
+    // A lens shift in NDC x (the picture moved sideways, the camera not):
+    // the Enhanced menu's backdrop (VenueStage::setLensShift; 0 otherwise).
+    static inline float lensShiftX = 0;
     static void cameraGlobals(const venue::CamPose& cam, bool clipZeroToOne, double seconds, gh3shader::Globals& g,
                               gfx::Mat4* viewProj = nullptr, float aspect = 16.0f / 9.0f, bool flipY = false,
                               gfx::Mat4* viewOut = nullptr);
@@ -71,6 +87,8 @@ public:
         size_t drawsLastFrame = 0;
         size_t gh3Meshes = 0, fallbackMeshes = 0;  // drawn with GH3's shaders / the approximation
         size_t housings = 0;
+        size_t raytraced = 0;  // `volume` beam draws (all frames)
+        size_t projected = 0;  // projector pool draws (all frames)
     };
     const Stats& stats() const { return stats_; }
 
@@ -82,6 +100,7 @@ private:
         Mode mode = Mode::Opaque;
         float alphaRef = 0, drawOrder = 0;
         bool twoSided = false, noDepthWrite = false;  // +0xcc & 8 (cull none), & 0x20 (no z write) [C 823DC180]
+        uint32_t blendMode = 0, matFlags = 0;          // +0xd8, +0xcc (gh3shader::materialState)
         int8_t stencil = -1;      // the material's stencil reference (+0xdc; -1: none, +0xcc & 0x80) [C 823DC180]
         bool unlit = false;
         const gh3shader::Program* gh3 = nullptr;  // the template's program (null: the approximation)
@@ -116,6 +135,8 @@ private:
     std::vector<Mat> mats_;
     std::unordered_map<uint32_t, gfx::TextureId> overrides_;
     std::vector<int> cones_;  // nodes of the ConeImpostor housings
+    std::vector<int> rays_;   // nodes of the `volume` housings (raytraced)
+    std::vector<int> projectors_;  // nodes of the projectortype stageonly housings
     gfx::TextureId smoke_;    // the beams' smoke texture
     struct Flare {
         gfx::QueryId a, b;   // all pixels / depth-tested pixels of the occlusion quad
@@ -124,11 +145,10 @@ private:
     };
     std::unordered_map<const Item*, Flare> flares_;
     void drawFlare(const Item& it, gfx::DrawCall gc, const venue::Vec3& centre, const venue::CamPose& cam);
-    gfx::TextureId shadowTex_;
-    gfx::Mat4 shadowVP_;
-    int shadowSize_ = 1024;
-    float shadowIntensity_ = 0.35f;
-    gfx::BufferId coneVb_, coneIb_;
+    gh3shader::DynamicShadow shadow_;
+    gfx::BufferId coneVb_, coneIb_, rayVb_, rayIb_;
+    uint32_t rayCount_ = 0;
+    gfx::BufferId projVb_, projIb_;
     gh3shader::Programs gh3_;
     std::function<bool(uint32_t, gfx::Mat4&)> motion_;
     std::function<int(uint32_t)> visible_;

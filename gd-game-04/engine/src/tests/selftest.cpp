@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "tests/selftest.h"
+#include "input/input_selftest.h"
 
 #include <algorithm>
 #include <cmath>
@@ -11,6 +12,7 @@
 #include <string>
 
 #include "audio/fast_pitch.h"
+#include "audio/guitar_fx.h"
 #include "data/disc.h"
 #include "data/qbkey.h"
 #include "game/chart.h"
@@ -81,6 +83,33 @@ static void checkFastPitch(const std::function<void(const std::string&)>& fail) 
     }
 }
 
+// GH_Star_Power_Verb_On's guitar buss (echo Wetmix 0.5 at a 375 ms beat,
+// ReflectionsLevel -1200, ReverbLevel -550 mB, Star_Power_BussSet -2 dB) on
+// white noise: the wet paths' energy (~+2.3 dB) less the buss's 2 dB, so
+// within 1 dB of the dry level; and no change at the dry defaults (GD04-098:
+// the reverb was ~8 dB too loud, the guitar +3.2 dB and clipping).
+static void checkGuitarFx(const std::function<void(const std::string&)>& fail) {
+    for (int sp = 0; sp < 2; ++sp) {
+        GuitarFx fx;
+        fx.setRate(48000);
+        GuitarFx::Params p = fx.params();
+        if (sp) p.echoDelayMs = 375, p.echoWet = 0.5f, p.reflectionsLevelMb = -1200, p.reverbLevelMb = -550, p.bussDb = -2;
+        fx.set(p, 0);
+        uint32_t rng = 1;
+        double in = 0, out = 0;
+        for (int i = 0; i < 48000 * 4; ++i) {
+            rng = rng * 1664525u + 1013904223u;
+            const float x = (float(rng >> 8) / float(1 << 24) - 0.5f) * 0.3f;
+            float l = x, r = x;
+            fx.process(l, r);
+            if (i >= 48000) in += double(x) * x, out += double(l) * l;
+        }
+        const double db = 10 * std::log10(out / in);
+        if (std::fabs(db) > (sp ? 1.0 : 0.01))
+            fail("guitar buss " + std::string(sp ? "in Star Power" : "dry") + ": " + std::to_string(db) + " dB on noise");
+    }
+}
+
 // --selftest <disc>: the data checks (globals, song list, every chart), then
 // every chart auto-played at every difficulty and part (selftest_play.cpp).
 // Prints "selftest: all charts fully hit" when everything passed.
@@ -97,6 +126,7 @@ int runSelfTest(const std::string& discPath) {
         if (++failures <= 40) std::printf("FAIL %s\n", what.c_str());
     };
     checkFastPitch(fail);
+    checkGuitarFx(fail);
     checkWibble(fail);
 
     Globals globals;
@@ -143,6 +173,15 @@ int runSelfTest(const std::string& discPath) {
         if (!playChart(globals, s, c, totals, why)) fail(s.name + ": " + why);
     }
     printPlayTotals(totals);
+    // The input layer's rules on virtual controllers (gd03's checks: two slots,
+    // no double inputs, the axis rest rules, Require Strum, controllers.json v2).
+    std::printf("input checks (virtual controllers):\n");
+    if (const int inputFailures = runInputChecks()) {
+        std::printf("%d input check(s) failed\n", inputFailures);
+        failures += inputFailures;
+    } else {
+        std::printf("all input checks passed\n");
+    }
     if (failures) {
         std::printf("selftest: %d FAILED\n", failures);
         return 1;

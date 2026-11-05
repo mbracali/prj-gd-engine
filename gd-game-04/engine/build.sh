@@ -23,6 +23,7 @@ compile build/linux "gd04 (Linux)"
 d=dist/gd04-linux-x86_64
 rm -rf "$d"
 mkdir -p "$d/licenses"
+cp third_party/rtmidi/LICENSE "$d/licenses/RtMidi-LICENSE.txt"  # Generic MIDI (src/input/midi_in.cpp)
 cp build/linux/gd04 README.md "$d/"
 # The project licence, and the third-party licences.
 cp ../../LICENSE ../../LICENSE-ADDITIONAL-TERMS.md "$d/"

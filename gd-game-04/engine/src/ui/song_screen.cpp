@@ -2,7 +2,10 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "ui/song_screen.h"
 
+#include "audio/sound_buss.h"
+
 #include <SDL3/SDL_log.h>
+#include <SDL3/SDL_timer.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -14,6 +17,7 @@
 #include "data/band.h"
 #include "data/disc.h"
 #include "data/qbkey.h"
+#include "render/band.h"
 #include "render/canvas.h"
 #include "render/texture_cache.h"
 #include "render/venue_stage.h"
@@ -22,11 +26,90 @@
 namespace {
 
 constexpr double kStepMs = 1000.0 / 60.0;  // GH3 runs its judge once per game frame [I: 60 Hz]
-// The intro before the music: fastintro's 3000 ms (quickplay) [C script start_gem_scroller, fastintro props].
-constexpr double kLeadInMs = 3000.0;
+// The intro before the music: the transition's time (fastintro 3000 ms,
+// intro / boss 8000, encore 5000), its cameras the Transition_CameraCut
+// prefix in its Common_ table [C script start_gem_scroller: starttime -=
+// Transition_GetTime; data Default_ / Common_<t>_Transition].
+struct IntroTransition {
+    double ms = 3000;
+    std::string cameras = "cameras_fastintro";
+    bool fast = true;
+    // The transition's play_intro: {fast} fastintro_sequence_props, {practice}
+    // practice_sequence_props, {} intro_sequence_props; none for Immediate [C
+    // data Common_*_Transition, script play_intro].
+    std::string introProps = "fastintro_sequence_props";
+};
+
+IntroTransition introTransition(const Globals& g, uint32_t key) {
+    IntroTransition t;
+    // debugintro plays as intro [C script Transition_SelectTransition].
+    static const char* const kNames[] = {"FastIntro", "Intro", "Encore", "Boss", "Practice", "Immediate", "RestartEncore", "RestartBoss"};
+    std::string name = "FastIntro";
+    for (const char* n : kNames)
+        if (key == qbkey::key(n)) name = n;
+    if (key == qbkey::key("debugintro")) name = "Intro";
+    t.fast = name == "FastIntro";
+    t.introProps = name == "FastIntro" || name == "RestartEncore" || name == "RestartBoss" ? "fastintro_sequence_props"
+                   : name == "Practice"                                                  ? "practice_sequence_props"
+                   : name == "Immediate"                                                 ? ""
+                                                                                         : "intro_sequence_props";
+    if (const qb::Value* d = g.find(qbkey::key("Default_" + name + "_Transition")); d && d->st)
+        if (const qb::Value* tm = d->st->find(qbkey::key("time"))) t.ms = tm->number();
+    if (const qb::Value* c = g.find(qbkey::key("Common_" + name + "_Transition")); c && c->st)
+        if (const qb::Value* tab = c->st->find(qbkey::key("ScriptTable")); tab && tab->arr)
+            for (const qb::Value& e : tab->arr->values)
+                if (e.st)
+                    if (const qb::Value* scr = e.st->find(qbkey::key("scr")); scr && scr->key == qbkey::key("Transition_CameraCut"))
+                        if (const qb::Value* ps = e.st->find(qbkey::key("params")); ps && ps->st)
+                            if (const qb::Value* pre = ps->st->find(qbkey::key("prefix")); pre && !pre->str.empty()) t.cameras = pre->str;
+    return t;
+}
 const SDL_Color kFretColors[5] = {{40, 200, 60, 255}, {220, 40, 40, 255}, {230, 210, 40, 255}, {40, 100, 230, 255}, {240, 130, 30, 255}};
 
 }  // namespace
+
+VenuePreload::~VenuePreload() {
+    if (work.valid()) work.wait();
+}
+
+std::shared_ptr<VenuePreload> VenuePreload::launch(const Disc& disc, const Globals& live, const std::string& songName, uint32_t transition,
+                                                   double endMs, double startMs) {
+    auto p = std::make_shared<VenuePreload>();
+    p->song = songName;
+    p->endMs = endMs;
+    p->startMs = startMs;
+    auto snap = std::make_shared<Globals>(live);  // copied here, on the VM's thread
+    p->globals = snap;
+    const IntroTransition intro = introTransition(*snap, transition);
+    p->leadInMs = intro.ms;
+    p->cameras = intro.cameras;
+    p->zone = VenueStage::chooseZone(*snap);
+    VenuePreload* raw = p.get();
+    const Disc* d = &disc;
+    p->work = std::async(std::launch::async, [raw, d] {
+        const uint64_t t0 = SDL_GetTicksNS();
+        try {
+            raw->chart = std::make_unique<Chart>(loadChart(*d, raw->song));
+            if (raw->endMs > 0)
+                for (PartChart& pc : raw->chart->parts)
+                    for (auto& notes : pc.notes)
+                        notes.erase(std::remove_if(notes.begin(), notes.end(), [&](const ChartNote& n) { return double(n.time) > raw->endMs; }),
+                                    notes.end());
+            auto st = std::make_unique<VenueStage>();
+            st->setIntroCameras(raw->cameras);
+            std::string err;
+            if (st->start(*d, *raw->globals, raw->zone, *raw->chart, qbkey::key(raw->song), raw->leadInMs, nullptr, err, raw->startMs))
+                raw->stage = std::move(st);
+            else SDL_Log("venue: %s", err.c_str());
+        } catch (const std::exception& ex) {
+            SDL_Log("venue preload %s: %s", raw->song.c_str(), ex.what());
+            raw->stage.reset();
+        }
+        SDL_Log("venue preload: %s in %s, %.0f ms (a worker thread)", raw->song.c_str(), raw->zone.c_str(), (SDL_GetTicksNS() - t0) / 1e6);
+        raw->finished = true;
+    });
+    return p;
+}
 
 SongScreen::SongScreen() = default;
 SongScreen::~SongScreen() = default;
@@ -44,14 +127,28 @@ bool SongScreen::start(const Disc& disc, const Globals& g, const SongInfo& song,
     song_ = song;
     startMs_ = setup.startMs;
     devilFinish_ = setup.devilFinish;
+    const IntroTransition intro = introTransition(g, setup.transition);
+    leadInMs_ = intro.ms;
+    introCameras_ = intro.cameras;
+    introFast_ = intro.fast;
+    introProps_ = intro.introProps;
+    if (setup.transition) SDL_Log("song: transition %s, %.0f ms (%s)", introCameras_.c_str(), leadInMs_, intro.fast ? "fast" : "full");
     difficulty_ = std::clamp(setup.difficulty[0], 0, 3);
     twoPlayers_ = setup.mode != GameMode::Solo;
     try {
         chart_ = loadChart(disc, song.name);
+        // endtime: no gems after it (practice's section) [C script start_gem_scroller's endtime].
+        if (setup.endMs > 0)
+            for (PartChart& pc : chart_.parts)
+                for (auto& notes : pc.notes)
+                    notes.erase(std::remove_if(notes.begin(), notes.end(), [&](const ChartNote& n) { return double(n.time) > setup.endMs; }), notes.end());
     } catch (const std::exception& e) {
         error = e.what();
         return false;
     }
+    for (const char* t : {"Default_SongWon_Transition"})
+        if (const qb::Value* tr = g.find(qbkey::key(t)); tr && tr->st)
+            if (const qb::Value* tm = tr->st->find(qbkey::key("time"))) transitionMs_ = tm->number();
     if (!tuning_.load(g)) {
         error = "the gameplay tuning is incomplete";
         return false;
@@ -79,6 +176,7 @@ bool SongScreen::start(const Disc& disc, const Globals& g, const SongInfo& song,
     // input_offset = time_input_offset (the song's input_offset; the 360's
     // default -66 ms is left out, D7) - lag_calibration [C script gem_scroller].
     ms.inputOffsetMs = float(song.inputOffset - setup.lagMs);
+    videoOffsetMs_ = setup.videoOffsetMs;
     match_ = std::make_unique<Match>();
     if (!match_->start(chart_, tuning_, &g, ms, setup.bossProps, error)) return false;
     player_ = &match_->player(0);
@@ -86,7 +184,24 @@ bool SongScreen::start(const Disc& disc, const Globals& g, const SongInfo& song,
         error = song.name + " has no " + difficultyName(difficulty_) + " chart for this mode";
         return false;
     }
-    endMs_ = match_->lastNoteEndMs() + 3000.0;
+    // win_song: get_song_end_time = the latest end (time + length of the last
+    // entry) of the expert guitar and rhythm arrays (and the co-op ones when
+    // use_coop_notetracks), 2 ms with none; it waits there (the gem
+    // scroller's starttime is the transition's start), then Song_Win_Delay
+    // seconds, then song_won [C scripts win_song, get_song_end_time,
+    // get_song_end_time_for_array, start_gem_scroller; data Song_Win_Delay = 2].
+    songEndMs_ = 2.0;
+    for (Part p : {Part::Guitar, Part::Rhythm, Part::GuitarCoop, Part::RhythmCoop}) {
+        if ((p == Part::GuitarCoop || p == Part::RhythmCoop) && !song.useCoopNotetracks) continue;
+        const std::vector<ChartNote>& n = chart_.notes(p, 3);
+        if (!n.empty()) songEndMs_ = std::max(songEndMs_, double(n.back().time) + double(n.back().length));
+    }
+    // A chart without expert arrays: the port's own notes' end [I: GH3's are all there].
+    songEndMs_ = std::max(songEndMs_, match_->lastNoteEndMs());
+    {
+        const qb::Value* d = g.find(qbkey::key("Song_Win_Delay"));
+        winDelayMs_ = (d && (d->type == qb::Type::Int || d->type == qb::Type::Float) ? double(d->number()) : 2.0) * 1000.0;
+    }
     if (twoPlayers_) hud2pOk_ = hud2p_.init(g, *match_);
     // Each player's highway: its character's sys_<name>_1_highway material
     // (player_status.highway_material, set by create_guitarist), else the
@@ -98,13 +213,14 @@ bool SongScreen::start(const Disc& disc, const Globals& g, const SongInfo& song,
     }
     // The intro counts from current_starttime; the scroller's first frame is
     // the transition's time (fastintro 3000 ms) before it [C start_gem_scroller].
-    const double first = startMs_ - kLeadInMs;
+    const double first = startMs_ - leadInMs_;
     hud_.setStart(startMs_);
     hud2p_.setStart(startMs_);
     for (int p = 0; p < players; ++p) {
         Highway2D& hw = p == 0 ? highway_ : highway2_;
         hw.setStart(startMs_, first);
         hw.setLefty(setup.lefty[size_t(p)] && !(setup.mode == GameMode::Boss && p == 1));
+        hud2p_.setLefty(p, setup.lefty[size_t(p)]);
         hw.setGemOffset(song.gemOffset);  // gem_offset = default (0 on PC, D7) + the song's [C script gem_scroller]
     }
     // devil_finish: player 2's gem container at x 1000 (off screen) [C script setup_highway].
@@ -121,7 +237,7 @@ bool SongScreen::start(const Disc& disc, const Globals& g, const SongInfo& song,
                     else if (const qb::Value* gs = g.find(at->key); gs && (gs->type == qb::Type::String || gs->type == qb::Type::WString))
                         by = gs->str;
                 }
-        intro_.setup(song.title, by, song.artist, startMs_, first);
+        intro_.setup(song.title, by, song.artist, startMs_, first, introFast_ ? -6700.0 : -6500.0);
     }
     if (!highwayOk_) SDL_Log("highway: the 2D highway's tables are missing; the debug highway is drawn");
     auto stream = SongStream::open(disc, song.name, error);
@@ -130,7 +246,8 @@ bool SongScreen::start(const Disc& disc, const Globals& g, const SongInfo& song,
         error = song.name + ": cannot start the audio at " + std::to_string(int(startMs_)) + " ms";
         return false;
     }
-    endMs_ = std::max(endMs_, double(stream->length()) * 1000.0 / std::max(1, stream->sampleRate()));
+    // Practice: the song finishes at the section's end (practice_update ends the screen Song_Win_Delay later) [C scripts].
+    if (setup.endMs > 0) songEndMs_ = setup.endMs, practiceEnd_ = true;
     // Six channels: guitar L R (muted on a miss), rhythm L R, song L R.
     std::vector<Mixer::Track> tracks(6);
     for (int i = 0; i < 6; ++i) tracks[size_t(i)].pan = (i % 2) ? 1.0f : -1.0f;
@@ -141,19 +258,57 @@ bool SongScreen::start(const Disc& disc, const Globals& g, const SongInfo& song,
     const int p1Stem = p1Rhythm ? 2 : 0;
     tracks[size_t(p1Stem)].guitar = tracks[size_t(p1Stem + 1)].guitar = true;
     if (p2Other) tracks[size_t(2 - p1Stem)].guitar2 = tracks[size_t(3 - p1Stem)].guitar2 = true;
-    mixer.play(std::move(stream), std::move(tracks), kLeadInMs);
+    // The stems' busses: player 1's part First_Player_Lead_Playback; the
+    // other part player 2's (Second_Player_Rhythm_Playback, two players on
+    // different parts) or the extra stream (Single_Player_Rhythm_Playback);
+    // the song Band_Playback [C script startpreloadpaused_song].
+    const SoundBusses& sb = soundBusses();
+    const int p1Buss = sb.index(qbkey::key("First_Player_Lead_Playback"));
+    const int otherBuss = sb.index(qbkey::key(p2Other ? "Second_Player_Rhythm_Playback" : "Single_Player_Rhythm_Playback"));
+    const int bandBuss = sb.index(qbkey::key("Band_Playback"));
+    for (int c = 0; c < 2; ++c) {
+        tracks[size_t(p1Stem + c)].buss = p1Buss;
+        tracks[size_t(2 - p1Stem + c)].buss = otherBuss;
+        tracks[size_t(4 + c)].buss = bandBuss;
+    }
+    mixer.play(std::move(stream), std::move(tracks), leadInMs_);
+    // Practice's speed: the streams and the song clock (so the gems, the
+    // venue and the intro) run at it [C script start_gem_scroller: setslomo].
+    speed_ = std::clamp(setup.speed, 0.1f, 1.0f);
+    if (speed_ != 1.0f || setup.slowPitch != 1.0f) {
+        mixer.setSlomo(speed_, setup.slowPitch);
+        SDL_Log("song: speed %.3f, guitar pitch %.2f", double(speed_), double(setup.slowPitch));
+    }
+    // The clock waits for the venue: loading the band and the scene here and
+    // uploading it on the first frame take a second or more, which ran the
+    // intro's clock (its first cameras and poses never showed). GH3 starts
+    // the song once the zone is loaded [I].
+    mixer.setPaused(true);
+    holdClock_ = true;
     // The venue: its scene, cameras and light show (uploaded on the first frame).
     if (!SDL_getenv("GD04_NO_VENUE")) {
         disc_ = &disc;
-        venue_ = std::make_unique<VenueStage>();
-        std::string verr;
         const std::string zone = VenueStage::chooseZone(g);
-        if (!venue_->start(disc, g, zone, chart_, qbkey::key(song.name), kLeadInMs, nullptr, verr)) {
-            SDL_Log("venue: %s", verr.c_str());
-            venue_.reset();
+        if (preload_) {
+            // The preload (VenuePreload) when it is this song's, zone and intro.
+            if (preload_->work.valid()) preload_->work.wait();
+            if (preload_->stage && preload_->song == song.name && preload_->zone == zone && preload_->leadInMs == leadInMs_ &&
+                preload_->cameras == introCameras_ && preload_->endMs == setup.endMs && preload_->startMs == startMs_)
+                venue_ = std::move(preload_->stage);
+            else
+                preload_.reset();
+        }
+        if (!venue_) {
+            venue_ = std::make_unique<VenueStage>();
+            std::string verr;
+            venue_->setIntroCameras(introCameras_);
+            if (!venue_->start(disc, g, zone, chart_, qbkey::key(song.name), leadInMs_, nullptr, verr, startMs_)) {
+                SDL_Log("venue: %s", verr.c_str());
+                venue_.reset();
+            }
         }
     }
-    stepMs_ = startMs_ - kLeadInMs;
+    stepMs_ = startMs_ - leadInMs_;
     if (twoPlayers_)
         SDL_Log("song %s (%s): %s, %s / %s%s", song.name.c_str(), song.title.c_str(), gameModeName(setup.mode), difficultyName(difficulty_),
                 difficultyName(setup.difficulty[1]), setup.suddenDeath ? ", sudden death" : "");
@@ -186,8 +341,10 @@ void SongScreen::tick(double nowMs, Mixer& mixer) {
     // any frame rate plays the same (guidelines: frame-rate independence).
     while (stepMs_ + kStepMs <= nowMs) {
         stepMs_ += kStepMs;
-        // Decided (a fail, a KO, a boss beaten): the gem scroller stops [C kill_gem_scroller].
-        if (match_->outcome() != Match::Outcome::None) continue;
+        // Decided (a fail, a KO, a boss beaten): the gem scroller stops [C
+        // kill_gem_scroller]. Won: nothing is left to judge (a walk's forced
+        // end stops the judge too); play_outro kills the song's iterators [C].
+        if (match_->outcome() != Match::Outcome::None || won_) continue;
         std::array<FrameInput, 2> in{};
         for (size_t p = 0; p < 2; ++p) {
             in[p].frets = held_[p];
@@ -200,6 +357,14 @@ void SongScreen::tick(double nowMs, Mixer& mixer) {
         match_->frame(stepMs_, kStepMs, in);
         for (int p = 0; p < match_->players(); ++p) shownHeld_[size_t(p)] = match_->shownInput(p).frets;
         if (venue_) venue_->update(stepMs_, player_->stats().health, match_->players() == 1 && player_->stats().starPowerActive);
+        // star_power_on<p>: the player's band member's guitarist_idle handler
+        // (handle_star_power) [C scripts guitarist_idle, handle_star_power].
+        for (int p = 0; p < match_->players() && p < 2; ++p) {
+            const bool on = match_->player(p).stats().starPowerActive;
+            if (venue_ && on && !spSeen_[size_t(p)]) venue_->starPowerAnim(p, stepMs_);
+            if (on != spSeen_[size_t(p)]) SDL_Log("star power: player %d %s at %.0f ms", p + 1, on ? "on" : "off", stepMs_);
+            spSeen_[size_t(p)] = on;
+        }
         if (twoPlayers_) hud2p_.update(*match_, stepMs_);
         else hud_.update(player_->stats(), stepMs_);
         const GameMode mode = match_->mode();
@@ -208,6 +373,7 @@ void SongScreen::tick(double nowMs, Mixer& mixer) {
             Player& pl = match_->player(p);
             Highway2D& hw = p == 0 ? highway_ : highway2_;
             hw.step(pl.stats(), stepMs_, kStepMs, match_->battleMode(), twoModes);
+            hw.stepTails(pl, match_->track(p), stepMs_, whammy_[size_t(p)], !match_->battleMode());
             const bool other = match_->mode() == GameMode::Coop || match_->mode() == GameMode::Boss;
             for (const PlayerEvent& ev : pl.events()) {
                 if (p == 0 && venue_ && ev.note >= 0 && (ev.kind == PlayerEvent::Kind::Hit || ev.kind == PlayerEvent::Kind::Miss))
@@ -221,31 +387,118 @@ void SongScreen::tick(double nowMs, Mixer& mixer) {
                 // GuitarEvent_MissedNote: a passing note missed with the guitar already
                 // muted pulses the highway black; else the guitar mutes [C script].
                 if (ev.kind == PlayerEvent::Kind::Miss && muted_[size_t(p)]) hw.missPulse(stepMs_);
+                if (ev.kind == PlayerEvent::Kind::Miss) hw.noteMissed(ev.note);
                 if (hit || ev.kind == PlayerEvent::Kind::Miss || ev.kind == PlayerEvent::Kind::Overstrum) muted_[size_t(p)] = !hit;
                 if (hit && ev.note >= 0)
                     hw.noteHit(match_->track(p).notes[size_t(ev.note)].frets, shownHeld_[size_t(p)], stepMs_, pl.stats().starPowerActive);
             }
         }
+        // Battle / boss: the scripts that move gem_container<p>: shake_highway
+        // (Amp Overload), then hammer_highway for an attack's hit on that
+        // player (-/+70, 50; 0.1 s) and Death Drain's bites (0, 30; 0.01 s)
+        // [C scripts battle_trigger_on, bossbattle_trigger_on, bite_particle].
+        if (match_->battleMode() && twoPlayers_)
+            for (int p = 0; p < match_->players(); ++p) {
+                Highway2D& hw = p == 0 ? highway_ : highway2_;
+                const Match::BattleSide& b = match_->battle(p);
+                hw.stepBattle(stepMs_, b.shakeUntil >= 0 && b.shakeUntil > stepMs_);
+                if (b.highwayPushAt != lastHammer_[size_t(p)]) {
+                    lastHammer_[size_t(p)] = b.highwayPushAt;
+                    hw.hammer(stepMs_, p == 0 ? -70.0f : 70.0f, 50, 0.1f);
+                }
+                for (const Hud2P::Bite& bt : hud2p_.bites())
+                    if (bt.player == p) hw.hammer(stepMs_, 0, 30, 0.01f);
+            }
         if (onStep) onStep(*this, stepMs_);
         match_->clearEvents();
     }
 }
 
 bool SongScreen::frame(Canvas& canvas, Mixer& mixer, const TextureCache* textures) {
-    const double now = mixer.frameTimeMs() - kLeadInMs + startMs_;
+    if (holdClock_) {
+        holdClock_ = false;
+        std::string verr;
+        if (venue_ && !venue_->view() && !venue_->attach(canvas.renderer().device(), *disc_, verr)) {
+            SDL_Log("venue: %s", verr.c_str());
+            venue_.reset();
+        }
+        mixer.setPaused(false);
+        // The intro, encore and boss transitions' play_intro_anims (not the
+        // fast intro's or practice's) [C data Common_*_Transition].
+        if (venue_ && (introCameras_ == "cameras_intro" || introCameras_ == "cameras_encore" || introCameras_ == "cameras_boss"))
+            venue_->introAnims(startMs_ - leadInMs_, twoPlayers_ && match_->mode() == GameMode::Coop);
+    }
+    // The mixer's clock already runs from -leadIn (Mixer::songTimeMs: the
+    // lead-in's silent frames before the song's first sample): the song's
+    // time is it plus the start. It subtracted the lead-in a second time,
+    // so the music played 3 s (then, with the 8 s intro, 8 s) ahead of the gems.
+    const double now = mixer.frameTimeMs() + startMs_;
+    // The first gem's arrival against the clocks (walk practice's sync check):
+    // the frame clock where it reaches its time, the wall clock since the
+    // first frame scaled by the speed, and the audio's own clock.
+    {
+        const uint64_t ns = SDL_GetTicksNS();
+        if (!sync_.wall0) sync_.wall0 = ns, sync_.song0 = now, sync_.speed = speed_;
+        const NoteTrack& t0 = match_->track(0);
+        double first = -1;
+        for (const TrackNote& n : t0.notes)
+            if (n.time >= startMs_) {
+                first = n.time;
+                break;
+            }
+        if (!sync_.measured && first >= 0 && now >= first) {
+            sync_.measured = true;
+            sync_.noteMs = first;
+            sync_.lateMs = now - first;
+            sync_.clockErrMs = now - (sync_.song0 + double(ns - sync_.wall0) / 1e6 * speed_);
+            sync_.audioErrMs = now - (mixer.songTimeMs(ns) + startMs_);
+            SDL_Log("song: first gem (%.0f ms) at %.1f ms, speed %.3f: %.1f ms past it, wall clock x speed %+.1f ms, audio clock %+.1f ms",
+                    first, now, double(speed_), sync_.lateMs, sync_.clockErrMs, sync_.audioErrMs);
+        }
+    }
+    // GD04_CLOCKLOG=1: the song clock against the wall clock, each second (development aid).
+    static const bool clockLog = SDL_getenv("GD04_CLOCKLOG") != nullptr;
+    if (clockLog && std::floor(now / 1000.0) != std::floor(lastMs_ / 1000.0))
+        SDL_Log("clock: wall %llu ms, song %.0f ms", (unsigned long long)SDL_GetTicks(), now);
     lastMs_ = now;
     tick(now, mixer);
     draw(canvas, now, textures);
     // GD04_END_AT=<song ms> / GD04_FAIL_AT=<song ms>: end (win) or fail the song then (walk tests).
     static const double endAt = SDL_getenv("GD04_END_AT") ? std::atof(SDL_getenv("GD04_END_AT")) : walkEndMs_;
     static const double failAt = SDL_getenv("GD04_FAIL_AT") ? std::atof(SDL_getenv("GD04_FAIL_AT")) : walkFailMs_;
-    if (failAt >= 0 && now >= failAt && finishedAt_ < 0) forcedFail_ = true, finishedAt_ = now - 2000.0;
-    if (endAt >= 0 && now >= endAt && finishedAt_ < 0) finishedAt_ = now - 2000.0;
-    if (now >= endMs_ || (match_->outcome() != Match::Outcome::None && finishedAt_ < 0)) {
-        if (finishedAt_ < 0) finishedAt_ = now;
+    if (failAt >= 0 && now >= failAt && finishedAt_ < 0) forcedFail_ = true, finishedAt_ = now;
+    // A walk's forced end: the song's end marker and its delay at once.
+    if (endAt >= 0 && now >= endAt && finishedAt_ < 0) forcedEnd_ = true;
+    if (match_->outcome() != Match::Outcome::None && finishedAt_ < 0) finishedAt_ = now;
+    // Played to the end: song_won at the end marker + Song_Win_Delay [C script
+    // win_song]; practice: the section's end, then the screen's end 2 s later.
+    bool justWon = false;
+    if (finishedAt_ < 0 && practiceEnd_ && now >= songEndMs_) finishedAt_ = now;
+    if (finishedAt_ < 0 && (forcedEnd_ || now >= songEndMs_ + winDelayMs_)) won_ = justWon = true, finishedAt_ = now;
+    // The song's end: GH3 plays the SongWon / SongLost transition over the
+    // venue (play_outro: the HUD and the gems gone; the band's win / lose
+    // stance, cameras_win / cameras_lose) for its time, then the results [C
+    // data Common_SongWon_Transition]. A won song (song_won) starts it with
+    // GuitarEvent_SongWon_Spawned's Transition_Play songwon; the others as
+    // they are decided.
+    if (finishedAt_ >= 0 && venue_ && !outro_) {
+        outro_ = true;
+        const bool lost = failed();
+        const GameMode m = match_->mode();
+        const bool versus = m == GameMode::FaceOff || m == GameMode::ProFaceOff || m == GameMode::Battle;
+        const Match::Outcome o = match_->outcome();
+        const bool p1Won = o == Match::Outcome::P1Wins || (o == Match::Outcome::None && match_->winnerAtEnd() == 0);
+        venue_->outro(now, !lost, versus, p1Won, m == GameMode::Boss);
     }
-    const bool more = finishedAt_ < 0 || now < finishedAt_ + 2000.0;
-    if (!more && twoPlayers_) {
+    // Won or decided with GH3's scripts on (ui/song_hooks): the song goes on
+    // under them (the venue, the highway until disable_highway) until
+    // kill_gem_scroller; alone (--song) and practice: over 2 s later, App
+    // drawing the venue meanwhile (drawOutro).
+    const bool more = (holdAfterWin_ && (won_ || decided())) || finishedAt_ < 0 || now < finishedAt_ + 2000.0;
+    // The numbers: at the end, at song_won, or as a held song is decided.
+    const bool report = (!more || justWon || (holdAfterWin_ && decided())) && !reported_;
+    if (report) reported_ = true;
+    if (report && twoPlayers_) {
         // The two players' numbers and the mode's (walks and the self-test read them).
         const Match::Counters& k = match_->counters();
         const Hud2P::Counters& h = hud2p_.counters();
@@ -261,7 +514,7 @@ bool SongScreen::frame(Canvas& canvas, Mixer& mixer, const TextureCache* texture
                 gameModeName(match_->mode()), int(match_->outcome()), match_->winnerAtEnd() + 1, k.raiseAxe, k.coopActivations, k.forcedMisses[1],
                 (unsigned long long)h.scoreChanges, (unsigned long long)h.needleChanges, (unsigned long long)h.leadChanges,
                 (unsigned long long)h.cardsShown, (unsigned long long)h.attackTexts, (unsigned long long)h.missingTextures);
-    } else if (!more) {
+    } else if (report) {
         const Hud2D::Counters& h = hud_.counters();
         SDL_Log("hud: score %llu, needle %llu, tubes %llu, multiplier %llu, streak bar in %llu / out %llu, dial flips %llu, combos %llu, "
                 "danger %llu, star ready %llu / on %llu / off %llu, flames %llu, missing textures %llu",
@@ -270,11 +523,13 @@ bool SongScreen::frame(Canvas& canvas, Mixer& mixer, const TextureCache* texture
                 (unsigned long long)h.dialFlips, (unsigned long long)h.combos, (unsigned long long)h.dangerStarts,
                 (unsigned long long)h.starReady, (unsigned long long)h.starActivations, (unsigned long long)h.starOffs,
                 (unsigned long long)highway_.flamesStarted, (unsigned long long)h.missingTextures);
+        SDL_Log("tails: holds %llu, dead %llu, star whammys %llu", (unsigned long long)highway_.holdFxStarted,
+                (unsigned long long)highway_.deadTails, (unsigned long long)highway_.starWhammys);
     }
     return more;
 }
 
-Highway2D::Effects SongScreen::effects(int p, double now) const {
+Highway2D::Effects SongScreen::effects(int p, double) const {
     Highway2D::Effects fx;
     if (!match_->battleMode()) return fx;
     const Match::BattleSide& b = match_->battle(p);
@@ -291,15 +546,15 @@ Highway2D::Effects SongScreen::effects(int p, double now) const {
         const int card = ph < pc.size() ? pc[ph] : -1;
         return card >= 0 && card < int(m->battleData().powerups.size()) ? m->battleData().powerups[size_t(card)].cardTexture : 0;
     };
-    // Amp Overload bobs the highway +-8 px every 0.05 s [C battle_lightning].
-    if (b.shakeUntil > now) fx.dy = (int(now / 50.0) % 2) ? 8.0f : -8.0f;
-    // hammer_highway: pushed (-70,50) / (70,50) over 0.1 s and back [C script].
-    const double t = now - b.highwayPushAt;
-    if (t >= 0 && t < 200) {
-        const float u = float(t < 100 ? t / 100 : 1 - (t - 100) / 100);
-        fx.dx += (p == 0 ? -70.0f : 70.0f) * u, fx.dy += 50.0f * u;
-    }
+    // Amp Overload's shake and the hits' / bites' hammer_highway: Highway2D::stepBattle / hammer.
     return fx;
+}
+
+bool SongScreen::drawOutro(Canvas& /*c*/, double ms) {
+    if (!venue_ || !venue_->view()) return false;
+    venue_->advance(ms);
+    venue_->draw(ms);
+    return true;
 }
 
 void SongScreen::draw(Canvas& c, double now, const TextureCache* textures) {
@@ -311,37 +566,39 @@ void SongScreen::draw(Canvas& c, double now, const TextureCache* textures) {
             venue_.reset();
         } else {
             c.flush();
+            bool sp = false;  // Enhanced > Blur on Star Power
+            for (int pl = 0; pl < (twoPlayers_ ? 2 : 1); ++pl) sp = sp || match_->player(pl).stats().starPowerActive;
+            venue_->setStarPower(sp);
             venue_->advance(now);
             venue_->draw(now);
         }
     }
     const PlayerStats& st = player_->stats();
     char text[160];
+    // play_outro: destroy_hud, the gems killed [C script]; a won song's
+    // highway and HUD follow the scripts (hideHud / hideHighway).
+    if (outro_ && !won_ && !holdAfterWin_) return;
     if (twoPlayers_ && highwayOk_ && textures) {
         // GH3's two highways (x_offset_p2 left / right) and the mode's HUD.
-        for (int p = 0; p < 2; ++p) {
+        for (int p = 0; p < 2 && !highwayHidden_; ++p) {
             Highway2D& hw = p == 0 ? highway_ : highway2_;
             hw.setEffects(effects(p, now));
-            hw.draw(c, *textures, match_->track(p), match_->player(p), now, shownHeld_[size_t(p)]);
+            hw.draw(c, *textures, match_->track(p), match_->player(p), now + videoOffsetMs_, shownHeld_[size_t(p)]);
         }
-        if (hud2pOk_) hud2p_.draw(c, *textures, *match_, now);
+        if (hud2pOk_ && !hudHidden_) hud2p_.draw(c, *textures, *match_, now);
         intro_.draw(c, introText_, now);
         return;
     }
     const NoteTrack& track_ = match_->track(0);
     if (highwayOk_ && textures && !std::getenv("GD04_DEBUG_HIGHWAY")) {
-        highway_.draw(c, *textures, track_, *player_, now, shownHeld_[0]);
-        hud_.draw(c, *textures, now);
+        if (!highwayHidden_) highway_.draw(c, *textures, track_, *player_, now + videoOffsetMs_, shownHeld_[0]);
+        if (!hudHidden_) hud_.draw(c, *textures, now);
         intro_.draw(c, introText_, now);
         if (std::getenv("GD04_HUD_NUMBERS")) {  // development aid: the numbers behind the HUD
             std::snprintf(text, sizeof text, "%lld   x%d   streak %d", static_cast<long long>(st.score), st.multiplier(), st.currentRun);
             c.text(40, 680, 2, SDL_Color{255, 255, 255, 255}, text);
             std::snprintf(text, sizeof text, "rock %.2f  star %.0f%s", double(st.health), double(st.starPower), st.starPowerActive ? " ON" : "");
             c.text(1000, 680, 2, SDL_Color{255, 255, 255, 255}, text);
-        }
-        if (finishedAt_ >= 0) {
-            std::snprintf(text, sizeof text, "%s  %d / %d notes", st.failed ? "SONG FAILED" : "SONG COMPLETE", st.notesHit, int(track_.notes.size()));
-            c.textCentered(640, 200, 3, SDL_Color{255, 255, 255, 255}, text);
         }
         return;
     }
@@ -424,4 +681,34 @@ uint32_t SongScreen::highwayTexture(const Disc& disc, const Globals& g, TextureC
     const uint32_t t = tex.materialTexture(material);
     if (!t) SDL_Log("highway: no %s highway material for player %d (the global highway)", name.c_str(), p + 1);
     return t;
+}
+
+void SongScreen::outroCameras(double ms, const std::string& prefix) {
+    if (!venue_ || outroPrefix_ == prefix) return;
+    outroPrefix_ = prefix;
+    venue_->outroCameras(ms, prefix);
+    SDL_Log("song: end transition %s", prefix.c_str());
+}
+
+bool SongScreen::hasMember(uint32_t object) const {
+    if (!venue_ || !venue_->band()) return false;
+    for (const Band::Entry& e : venue_->band()->members())
+        if (e.model && e.model->member.object == object) return true;
+    return false;
+}
+
+bool SongScreen::memberPlayAnim(uint32_t object, const qb::Struct& params, double ms) {
+    if (!venue_ || !venue_->band()) return false;
+    for (Band::Entry& e : venue_->band()->members())
+        if (e.model && e.model->member.object == object) {
+            // handle_play_anim reads `anim`; play_battle_anim's data names it `Anim`
+            // (keys are case-insensitive) [C scripts].
+            e.anim.playAnim(params, ms);
+            return true;
+        }
+    return false;
+}
+
+void SongScreen::playClip(int role, uint32_t clip, uint32_t stance, bool cycle, double ms) {
+    if (venue_) venue_->playClip(role, clip, stance, cycle, ms);
 }

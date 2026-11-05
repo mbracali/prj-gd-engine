@@ -3,6 +3,7 @@
 #include "render/band_view.h"
 
 #include <SDL3/SDL_stdinc.h>
+#include <SDL3/SDL_timer.h>
 
 #include <algorithm>
 #include <cmath>
@@ -16,6 +17,14 @@
 #include "render/venue_view.h"
 
 namespace {
+// The band receives the shadow map (GH3's DynamicShadowReciever technique of
+// the character shaders [C]); the speckles of the owner's 2026-11-04 report
+// were the missing depth bias (VenueStage::shadowPass). GD04_NO_BAND_SHADOWS=1
+// turns it off (development aid).
+bool noBandShadows() {
+    static const bool off = SDL_getenv("GD04_NO_BAND_SHADOWS") != nullptr;
+    return off;
+}
 
 constexpr uint32_t K(const char* s) { return qbkey::key(s); }
 constexpr int kMaxLights = 16;
@@ -155,7 +164,39 @@ void BandView::remove(int member) {
     m = Member{};
 }
 
-int BandView::add(gfx::RenderDevice& dev, const band::Model& model, std::string& error) {
+bool BandView::prepare(gfx::RenderDevice& dev, const band::Model& model, std::unordered_map<uint32_t, gfx::TextureId>& made, double budgetMs) {
+    if (dev_ && dev_ != &dev) return true;  // add() reports it
+    dev_ = &dev;
+    const uint64_t t0 = SDL_GetTicksNS();
+    auto spent = [&] { return double(SDL_GetTicksNS() - t0) / 1e6 >= budgetMs; };
+    if (!program_) {
+        std::string error;
+        program_ = dev.createProgram(programDesc(), error);
+        if (!program_) return true;  // add() reports it
+        if (lib_) gh3_.init(dev, lib_);
+        if (spent()) return false;
+    }
+    for (const auto& [key, t] : model.textures) {
+        if (made.count(key) || (t.usage != 0 && !gh3_.ready())) continue;
+        std::string err;
+        auto levels = t.texLevels();
+        made[key] = dev.createTexture(t.desc(), levels.data(), err);  // a failed one stays 0: add() skips it
+        if (spent()) return false;
+    }
+    // The programs (one GL link each, the first time a template is used).
+    if (gh3_.ready())
+        for (const band::Part& part : model.parts)
+            for (const scene::Material& mat : part.scene.materials) {
+                if (gh3_.has(mat.shader) && gh3_.has(mat.shader, matlib::DynamicShadowReceiver)) continue;
+                gh3_.get(mat.shader);
+                gh3_.get(mat.shader, matlib::DynamicShadowReceiver);
+                if (spent()) return false;
+            }
+    return true;
+}
+
+int BandView::add(gfx::RenderDevice& dev, const band::Model& model, std::string& error,
+                  const std::unordered_map<uint32_t, gfx::TextureId>* made) {
     if (dev_ && dev_ != &dev) {
         error = "band view: another device";
         return -1;
@@ -170,6 +211,14 @@ int BandView::add(gfx::RenderDevice& dev, const band::Model& model, std::string&
     std::unordered_map<uint32_t, gfx::TextureId> tex, all;  // colour maps; every texture (GH3's shaders)
     for (const auto& [key, t] : model.textures) {
         if (t.usage != 0 && !gh3_.ready()) continue;  // the approximation: colour maps only [I: class 0]
+        if (made)
+            if (auto m = made->find(key); m != made->end()) {
+                if (!m->second) continue;
+                if (t.usage == 0) tex.emplace(key, m->second);
+                all.emplace(key, m->second);
+                mem.textures.push_back(m->second);
+                continue;
+            }
         std::string err;
         auto levels = t.texLevels();
         if (const gfx::TextureId id = dev.createTexture(t.desc(), levels.data(), err)) {
@@ -235,9 +284,11 @@ int BandView::add(gfx::RenderDevice& dev, const band::Model& model, std::string&
                 // the band always is); +0xcc & 0x40 turns the alpha test off [C].
                 out.mode = mat->d8 == 1 ? Mode::Add : mat->d8 == 0 ? Mode::Opaque : Mode::Blend;
                 if (mat->cc & 0x40) out.alphaRef = 0;
+                out.blendMode = mat->d8, out.matFlags = mat->cc;
                 // GH3's template: material constants and its textures in sampler order.
                 if (gh3_.ready())
                     if (const gh3shader::Program* gp = gh3_.get(mat->shader)) {
+                        out.receiver = gh3_.get(mat->shader, matlib::DynamicShadowReceiver);
                         Mat mm;
                         const float ref = out.mode == Mode::Opaque ? out.alphaRef : std::max(out.alphaRef, 0.02f);
                         gh3shader::fillMaterialConstants(*mat, ref > 0 ? ref : -1.0f, mm.consts);
@@ -291,6 +342,7 @@ void BandView::draw(const venue::CamPose& cam, const std::vector<Instance>& inst
     const float yfov = 2.0f * std::atan(std::tan(hfov * 0.5f) / aspect);
     gfx::Mat4 proj = gfx::Mat4::perspective(yfov, aspect, 0.05f, 4000.0f, d.info().clipDepthZeroToOne);
     if (flipY_) proj.at(1, 1) = -proj.at(1, 1);
+    proj.at(0, 2) -= VenueView::lensShiftX;  // the Enhanced backdrop's lens shift (0 otherwise)
     const gfx::Mat4 vp = proj * view;
     FrameUniforms fu{};
     std::memcpy(fu.viewProj, vp.m, sizeof fu.viewProj);
@@ -307,7 +359,11 @@ void BandView::draw(const venue::CamPose& cam, const std::vector<Instance>& inst
     std::vector<gfx::UniformData> matVs(mats_.size()), matPs(mats_.size());
     if (!mats_.empty()) {
         if (shadowPass_) globals = *shadowPass_;
-        else VenueView::cameraGlobals(cam, d.info().clipDepthZeroToOne, seconds_, globals, nullptr, aspect_, flipY_);
+        else {
+            gfx::Mat4 viewM;
+            VenueView::cameraGlobals(cam, d.info().clipDepthZeroToOne, seconds_, globals, nullptr, aspect_, flipY_, &viewM);
+            gh3shader::setShadowGlobals(globals, shadow_, viewM);  // as VenueView::draw's receivers
+        }
         gframe = d.stageUniforms(&globals, sizeof globals);
     } else if (shadowPass_) {
         return;  // the approximation casts no shadows
@@ -337,6 +393,7 @@ void BandView::draw(const venue::CamPose& cam, const std::vector<Instance>& inst
             if (!l.createdAtStart && !(l.createdOn && show.flag(l.createdOn))) continue;
             const venue::LightState& s = lights[i];
             if (s.intensity <= 0) continue;
+            if (l.type == venue::LightType::Prt) continue;  // its SH terms only reach GH3's shaders
             if (l.type == venue::LightType::Ambient) {
                 for (size_t k = 0; k < 3; ++k) lu.ambient[k] += s.color[k] * s.intensity;
                 continue;
@@ -456,6 +513,13 @@ void BandView::draw(const venue::CamPose& cam, const std::vector<Instance>& inst
                     gc.textures[k] = mats_[mi].tex[k];
                     gc.samplers[k] = {gfx::Filter::Trilinear, gfx::Wrap::Repeat, 0};
                 }
+                if (shadow_ && !shadowPass_ && mesh.receiver && mesh.mode == Mode::Opaque && !noBandShadows()) {
+                    gc.program = mesh.receiver->id;
+                    for (int k = 0; k < 14; ++k)
+                        if ((mesh.receiver->samplers >> k & 1) && !gc.textures[k]) gc.textures[k] = gh3_.white();
+                    gc.textures[14] = shadow_.tex[0], gc.textures[15] = shadow_.tex[1];  // g_sampShadowMap0 / 1
+                    gc.samplers[14] = gc.samplers[15] = {gfx::Filter::Nearest, gfx::Wrap::Clamp, 0};
+                }
                 gc.state.depthTest = true;
                 gc.state.depthFunc = gfx::CompareFunc::LessEqual;
                 gc.state.alphaWrite = writeAlpha_;
@@ -464,16 +528,14 @@ void BandView::draw(const venue::CamPose& cam, const std::vector<Instance>& inst
                 gc.state.stencilRef = uint8_t(std::max<int>(0, mesh.stencil));
                 gc.state.stencilWriteMask = gc.state.stencilTest ? 0xFF : 0;
                 gc.state.stencilReplace = gc.state.stencilTest;
-                switch (mesh.mode) {
-                case Mode::Opaque: gc.state.blend = false, gc.state.depthWrite = true; break;
-                case Mode::Blend:
-                    gc.state.blend = true, gc.state.depthWrite = false;
-                    gc.state.src = gfx::BlendFactor::SrcAlpha, gc.state.dst = gfx::BlendFactor::InvSrcAlpha, gc.state.op = gfx::BlendOp::Add;
-                    break;
-                case Mode::Add:
-                    gc.state.blend = true, gc.state.depthWrite = false;
-                    gc.state.src = gfx::BlendFactor::SrcAlpha, gc.state.dst = gfx::BlendFactor::One, gc.state.op = gfx::BlendOp::Add;
-                    break;
+                {
+                    // GH3's state for the material: its blend mode, and depth
+                    // written unless +0xcc & 0x20 (the hair layers) [C 823DC180].
+                    gfx::PipelineState ms = gc.state;
+                    gh3shader::materialState(mesh.blendMode, mesh.matFlags, ms);
+                    gc.state.blend = ms.blend, gc.state.src = ms.src, gc.state.dst = ms.dst, gc.state.op = ms.op;
+                    gc.state.depthWrite = ms.depthWrite;
+                    gc.state.depthFunc = ms.depthFunc;
                 }
                 d.draw(gc);
                 ++draws;
@@ -483,16 +545,11 @@ void BandView::draw(const venue::CamPose& cam, const std::vector<Instance>& inst
             MatUniforms mu{{mesh.mode == Mode::Opaque ? std::max(mesh.alphaRef, 0.0f) : std::max(mesh.alphaRef, 0.02f),
                             mesh.mode == Mode::Add ? 1.0f : 0.0f, 0, 0}};
             c.uniforms[2] = {&mu, sizeof mu};
-            switch (mesh.mode) {
-            case Mode::Opaque: c.state.blend = false, c.state.depthWrite = true; break;
-            case Mode::Blend:
-                c.state.blend = true, c.state.depthWrite = false;
-                c.state.src = gfx::BlendFactor::SrcAlpha, c.state.dst = gfx::BlendFactor::InvSrcAlpha, c.state.op = gfx::BlendOp::Add;
-                break;
-            case Mode::Add:
-                c.state.blend = true, c.state.depthWrite = false;
-                c.state.src = gfx::BlendFactor::SrcAlpha, c.state.dst = gfx::BlendFactor::One, c.state.op = gfx::BlendOp::Add;
-                break;
+            {
+                gfx::PipelineState ms = c.state;
+                gh3shader::materialState(mesh.blendMode, mesh.matFlags, ms);
+                c.state.blend = ms.blend, c.state.src = ms.src, c.state.dst = ms.dst, c.state.op = ms.op;
+                c.state.depthWrite = ms.depthWrite, c.state.depthFunc = ms.depthFunc;
             }
             d.draw(c);
             ++draws;

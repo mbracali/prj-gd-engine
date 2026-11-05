@@ -131,7 +131,33 @@ void UiSystem::addMovieNatives() {
         it->second->started = it->second->player->startStream(it->second->loop);
         return it->second->started;
     });
-    // Slot 0 is PlayMovie's (modal, over by now): never playing here.
+    // PlayMovie from PlayMovieAndWait {noblack} (create_main_menu's
+    // GH3_Intro, the hands flipping the card over the main menu): no black
+    // under it, the scripts go on (two frames in, fadetoblack OFF uncovers
+    // the menu built just before), so it plays in its texture slot (0,
+    // texturepri 1000) with its own alpha over the screen, and the wait loop
+    // polls IsMoviePlaying (Start + A kills it) [C scripts PlayMovieAndWait,
+    // create_main_menu; data: GH3_Intro is yuva420p, its first frame and
+    // last five transparent]. Played modally and opaque, its transparent
+    // frames had shown as black between the card and the menu. The other
+    // movies stay the app's modal ones (ui/natives_game.cpp).
+    {
+        const qs::Native modal = vm_.native(K("PlayMovie"));
+        vm_.addNative("PlayMovie", [this, open, modal](Vm& v, ScriptRun& run, qb::Struct& p) {
+            const qb::Value* m = Vm::param(p, K("movie"));
+            if (m && Vm::flag(p, K("noblack")) && MoviePlayer::available() && !SDL_getenv("GD04_NO_MOVIES")) {
+                const int slot = int(Vm::number(Vm::param(p, K("textureslot")), 0));
+                MovieSlot* s = open(m->str, slot, p);
+                if (s && s->player->startStream(s->loop)) {
+                    s->started = true;
+                    return true;
+                }
+                movies_.erase(slot);
+            }
+            return modal ? modal(v, run, p) : false;
+        });
+    }
+    // Slot 0 is otherwise PlayMovie's (modal, over by now): not playing here.
     vm_.addNative("IsMoviePlaying", [this](Vm&, ScriptRun&, qb::Struct& p) {
         auto it = movies_.find(slotOf(p));
         return it != movies_.end() && it->second->started && (it->second->loop || !it->second->player->streamEnded());

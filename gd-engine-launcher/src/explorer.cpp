@@ -824,7 +824,7 @@ void Launcher::exploreDrawViewer(const Rect& viewPx) {
             text(FontId::Regular, 14, vx + 26, vy + 86, inf, kDim);
         }
     }
-    // "Show instrument": a checkbox (an on/off choice, guidelines/universal_launcher.md),
+    // "Show instrument": a checkbox (an on/off choice, docs/knowledge/universal_launcher.md),
     // under the model's card, for a character with a guitar, bass or drum kit.
     ex.instrumentBox = {};
     if (ex.shown >= 0 && ex.ok && ex.hasInstrument && !loading) {

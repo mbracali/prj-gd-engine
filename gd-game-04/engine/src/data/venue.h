@@ -44,7 +44,9 @@ struct Node {
     const qb::Struct* st = nullptr;
 };
 
-enum class LightType : uint8_t { Ambient, Directional, Point, Spot };
+// Prt: a light carrying its own L1 spherical-harmonics terms (coeff0..3;
+// z_soundcheck's Char_PRT, the menus' characters) [C 822BE020 / 823DA990].
+enum class LightType : uint8_t { Ambient, Directional, Point, Spot, Prt };
 struct Light {
     uint32_t name = 0, group = 0;
     LightType type = LightType::Point;
@@ -59,6 +61,7 @@ struct Light {
     bool vertexBake = false;         // a "_VC_" light (its name; lit at run time like any other) [C: 822BE020 makes no difference]
     bool createdAtStart = false;
     uint32_t createdOn = 0;
+    Vec3 prt[4]{};                   // a Prt light's coeff0..coeff3 (rgb): SH constant, then the three L1 terms
 };
 
 // One scene file's geometry, and where each of its sectors sits.

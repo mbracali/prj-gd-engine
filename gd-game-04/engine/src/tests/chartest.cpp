@@ -150,6 +150,9 @@ SDL_Surface* portrait(gfx::Renderer& r, const band::Model& model, const std::vec
             cam.pos[0] = d * std::sin(a), cam.pos[2] = d * std::cos(a);
             cam.rot = {0, std::cos(a * 0.5f), 0, -std::sin(a * 0.5f)};
         }
+        // GD04_CHARTEST_X / _Y: the camera moved sideways / up (metres), e.g. onto the fret hand.
+        if (const char* x = SDL_getenv("GD04_CHARTEST_X")) cam.pos[0] += float(std::atof(x));
+        if (const char* y = SDL_getenv("GD04_CHARTEST_Y")) cam.pos[1] += float(std::atof(y));
     }
     const float grey[4] = {0.18f, 0.18f, 0.2f, 1};
     r.beginFrame(grey);
@@ -164,6 +167,11 @@ struct BodyResult {
     bool ok = true;
     std::string why;
 };
+
+// Guitarist / bassist bodies whose handle_star_power anim (play_special_anim
+// Stance_A Starpower) played, and those without one (GD04-097).
+int g_spAnims = 0;
+std::vector<std::string> g_spMissing;
 
 // Loads, checks, animates (and draws) one member.
 BodyResult testMember(const Disc& disc, const Globals& g, band::Library& lib, const Chart& chart, const band::Member& m, int frames,
@@ -204,17 +212,73 @@ BodyResult testMember(const Disc& disc, const Globals& g, band::Library& lib, co
     std::vector<bandanim::Mat34> world, skin;
     const double t0 = 20000.0;
     float lo[3], hi[3];
+    // The accessory bones as the band gets them (render/band_ragdoll.h), so
+    // the portraits show the hair / chains hanging after `frames` steps.
+    static std::shared_ptr<const Pak> globalPak;
+    std::unique_ptr<AccessorySim> acc = Band::accessorySim(disc, g, m, a.rig(), globalPak);
     for (int f = 0; f < frames; ++f) {
         const double t = t0 + double(f) * kStepMs;
         a.advance(t);
         a.evaluate(t, world, skin);
+        if (acc) {
+            acc->apply(t, world, [&a](double ts, std::vector<bandanim::Mat34>& w) {
+                std::vector<bandanim::Mat34> sk;
+                a.evaluate(ts, w, sk);
+            }, {0, -9.8f, 0});
+            for (size_t b = 0; b < world.size() && b < a.rig().invBind.size(); ++b) skin[b] = bandanim::mmul(world[b], a.rig().invBind[b]);
+        }
         for (const auto& mt : skin)
             if (!finite(mt)) return {false, "a NaN in the skinning matrices at " + std::to_string(int(t)) + " ms"};
         if (f % 30 == 0 && !skinBounds(*model, skin, lo, hi)) return {false, "a NaN in the skinned vertices"};
     }
+    // The accessories sampled every millisecond for 0.5 s (frames that fall
+    // anywhere between the 60 Hz steps): no 1 ms move may be far over the
+    // mean, else they hold a step then jump (the stutter of GD04-104).
+    if (acc) {
+        const double t1 = t0 + double(frames) * kStepMs;
+        std::vector<bandanim::Vec> prev;
+        double sum = 0, worst = 0;
+        int n = 0;
+        for (int ms = 0; ms <= 500; ++ms) {
+            const double t = t1 + ms;
+            a.advance(t);
+            a.evaluate(t, world, skin);
+            acc->apply(t, world, [&a](double ts, std::vector<bandanim::Mat34>& w) {
+                std::vector<bandanim::Mat34> sk;
+                a.evaluate(ts, w, sk);
+            }, {0, -9.8f, 0});
+            std::vector<bandanim::Vec> cur;
+            for (size_t b = 0; b < world.size(); ++b)
+                if (acc->isDynamic(int(b))) cur.push_back(bandanim::xform(world[b], {0.1f, 0, 0}));
+            if (!prev.empty())
+                for (size_t i = 0; i < cur.size(); ++i) {
+                    const float dx = cur[i].x - prev[i].x, dy = cur[i].y - prev[i].y, dz = cur[i].z - prev[i].z;
+                    const double d = std::sqrt(double(dx * dx + dy * dy + dz * dz));
+                    sum += d, worst = std::max(worst, d), ++n;
+                }
+            prev = std::move(cur);
+        }
+        const double mean = n ? sum / n : 0;
+        if (std::getenv("GD04_CHARTEST_VERBOSE")) std::printf("  %s: accessories per ms: mean %.5f m, worst %.5f m\n", label(m).c_str(), mean, worst);
+        // [I] 12x the mean: a held 60 Hz step gives ~17x and more at the step times
+        // (21..66x before GD04-104), the interpolated steps 3..10x.
+        if (mean > 1e-5 && worst > 12.0 * mean)
+            return {false, "the accessories jump between frames (worst 1 ms move " + std::to_string(worst / mean) + "x the mean)"};
+    }
     if (!skinBounds(*model, skin, lo, hi)) return {false, "a NaN in the skinned vertices"};
     const float height = hi[1] - lo[1];
     if (a.stats().bodyAnims == 0) res = {false, "no body animation played"};
+    // handle_star_power: play_special_anim stance = Stance_A Anim = Starpower
+    // on the player's member, the same for every character: each playable
+    // body's anim set has the clip (the band's own bassist plays no Star
+    // Power; the debug_only BoneMan bodies have none) [C script].
+    const qb::Value* debugOnly = m.profile ? m.profile->find(K("debug_only")) : nullptr;
+    if (m.role == band::Role::Guitarist && !(debugOnly && debugOnly->number() == 1)) {
+        const int before = a.stats().bodyAnims;
+        a.playSpecial(K("Stance_A"), K("Starpower"), t0 + double(frames) * kStepMs, 0.0f, 0);
+        if (a.stats().bodyAnims > before) ++g_spAnims;
+        else g_spMissing.push_back(label(m));
+    }
     // A body stands between 0.4 and 3.5 m tall (Lou's wings, the drum kit) [I].
     if (!(height > 0.4f && height < 3.5f)) res = {false, "skinned height " + std::to_string(height) + " m"};
     missingClips += int(a.missing().size());
@@ -391,6 +455,8 @@ int runCharTest(const std::string& discPath) {
             else ++loaded;
         }
         std::printf("chartest: %zu bodies: %d loaded, skinned and animated, %d not on the disc\n", all.size(), loaded, notOnDisc);
+        std::printf("chartest: %d playable guitarist bodies play the Star Power anim (handle_star_power)\n", g_spAnims);
+        for (const std::string& who : g_spMissing) fail(who + ": no Starpower anim in Stance_A (handle_star_power)");
     }
     int instLoaded = 0, instMissing = 0;
     {

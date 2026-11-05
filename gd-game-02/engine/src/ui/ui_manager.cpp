@@ -603,6 +603,7 @@ void UiManager::switchScreens() {
         for (PanelObj* p : from->panels())
             if (p->loaded && !to->hasPanel(p) && p->path.rfind("world/", 0) == 0) p->unload();
     current_ = to;
+    currentSinceMs_ = uiMs_;
     // The keyboard's split layout (P2 on H J K L ;, N / M, B, O) while the
     // two-player menus need a second controller: from the controller select
     // with fewer than two pads, until the main menu [I: the port's].
@@ -711,12 +712,51 @@ void UiManager::updateTransition() {
         return;
     }
     if (!pending_.empty()) {
+        if (holdingLoadScreen()) return;
         ScreenObj* s = screen(pending_);
         const bool back = pendingBack_;
         pending_.clear();
         pendingBack_ = false;
         if (s) beginTransition(s, back);
     }
+}
+
+// The port loads in a moment where the Xbox 360 took seconds, so GH2's
+// loading and saving screens flashed by before their animation or tip could
+// be read. As gd-game-01 (its memory-card rule), each stays up at least 2 s
+// of UI time, animating, before the next screen starts (GD02-155) [I].
+bool UiManager::holdingLoadScreen() const {
+    static const char* const kHold[] = {"loading_screen", "practice_loading_screen", "tut_loading_screen", "meta_loading_screen",
+                                        "saving_screen", "normal_save_screen", "normal_load_screen", "startup_load_screen",
+                                        "startup_create_save_screen", "startup_load_finder_screen"};
+    if (!current_) return false;
+    for (const char* n : kHold)
+        if (current_->name() == n) return uiMs_ - currentSinceMs_ < kLoadScreenHoldMs;
+    return false;
+}
+
+// The development kit's keyboard cheats (CheatMgr 0x8235C610 loads
+// quick_cheats; the retail game never enables them): (key "name" {script}
+// ...), the key a KB_ macro (F-keys 401..412), a digit or a one-character
+// symbol ('#', a, A). The port runs them from the Enhanced menu's
+// Developer Keyboard Cheats (GD02-045).
+bool UiManager::keyCheat(int code) {
+    const DataNode* qc = boot_ ? boot_->find("quick_cheats") : nullptr;
+    const DataNode* kb = qc ? qc->find("keyboard") : nullptr;
+    for (size_t k = 1; kb && k < kb->children.size(); ++k) {
+        const DataNode& c = kb->children[k];
+        if (!c.isList() || c.children.size() < 3) continue;
+        const DataNode& key = c.children[0];
+        int want = -1;
+        if (key.type == DataNode::Type::Int) want = key.i >= 0 && key.i <= 9 ? '0' + key.i : key.i;
+        else if (key.isText()) want = key.s.size() == 1 ? static_cast<unsigned char>(key.s[0]) : macroInt(key.s, -1);
+        if (want != code) continue;
+        const std::string name = c.children[1].isText() ? c.children[1].s : std::string();
+        SDL_Log("dev cheat: %s", name.c_str());
+        interp_.runList(c, 2);
+        return true;
+    }
+    return false;
 }
 
 void UiManager::updateHelpbar() {
@@ -1043,6 +1083,9 @@ bool UiManager::mouse(float x, float y, bool click) {
         return click;
     }
     if (!current_ || phase_ != Phase::Idle || !pending_.empty()) return false;
+    mouseX_ = x, mouseY_ = y;
+    if (wheelHold_ && !click && std::hypot(x - wheelX_, y - wheelY_) <= kWheelHoverSlack) return true;
+    wheelHold_ = false;
     for (PanelObj* p : current_->panels())
         if (p->up && p->helpMouse(x, y, click)) return true;
     PanelObj* fp = current_->focusPanel();
@@ -1052,6 +1095,7 @@ bool UiManager::mouse(float x, float y, bool click) {
 void UiManager::wheel(int dir) {
     if (splash_ >= 0 || !current_ || phase_ != Phase::Idle || !pending_.empty()) return;
     const int b = dir < 0 ? kPad_DUp : kPad_DDown;
+    wheelHold_ = true, wheelX_ = mouseX_, wheelY_ = mouseY_;
     buttonDown(b, 0);
     buttonUp(b, 0);
 }

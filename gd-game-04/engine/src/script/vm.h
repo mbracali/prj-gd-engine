@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "data/qb.h"
+#include "data/qbkey.h"
 #include "script/bytecode.h"
 #include "script/globals.h"
 
@@ -72,6 +73,14 @@ struct ScriptRun {
     uint32_t object = 0;      // the object (screen element id) the script runs on, 0: none
     bool handler = false;     // an event handler's run: it outlives its element (a pad_choose that destroys its menu)
     bool busy = false;        // executing now (a pump inside a condition skips it)
+    const ScriptRun* caller = nullptr;  // a condition's run: the run whose `if` called it
+    // Whether a script of that name is on this run's stack, or its caller's.
+    bool calledFrom(uint32_t script) const {
+        for (const ScriptRun* r = this; r; r = r->caller)
+            for (const Frame& f : r->frames)
+                if (f.code && f.code->name == script) return true;
+        return false;
+    }
 };
 
 struct VmStats {
@@ -81,11 +90,20 @@ struct VmStats {
 
 class Vm {
 public:
+    // Enhanced > Enable Cut Content (StructureContains ... debug_only reads false; set by the app).
+    static inline bool cutContent = false;
     explicit Vm(Globals& globals);
 
     Globals& globals() { return g_; }
     void addNative(const std::string& name, Native fn);
     void addNative(uint32_t key, Native fn) { natives_[key] = std::move(fn); }
+    // The native registered for `key` (empty: none), to wrap it.
+    Native native(uint32_t key) const {
+        auto it = natives_.find(key);
+        return it == natives_.end() ? Native{} : it->second;
+    }
+    // The native registered under `name` (empty if none): a wrapper keeps it.
+    Native native(const std::string& name) const;
     bool hasNative(uint32_t key) const { return natives_.count(key) != 0; }
     // Runs a native for an object's member call; false if there is none.
     bool callNative(uint32_t key, ScriptRun& run, qb::Struct& params) {
@@ -151,6 +169,11 @@ public:
     // Called after PushGlobalTags (pop = false) / PopGlobalTags (pop = true)
     // of a section (the port's The Glitches hook).
     std::function<void(Vm&, uint32_t section, bool pop)> onTagSection;
+    // Called as a script starts (called, run or spawned), with its name and
+    // parameters: the port's natively drawn parts follow the scripts that
+    // drive GH3's (the song's end: Transition_CameraCut, destroy_hud,
+    // disable_highway, kill_gem_scroller).
+    std::function<void(uint32_t name, const qb::Struct& params)> onScriptEnter;
 
     // Code of a script global (tokenized once).
     std::shared_ptr<const CodeCache> code(uint32_t name);
@@ -183,6 +206,28 @@ private:
     std::unordered_set<std::string> logged_;
     uint32_t nextId_ = 1;
     double clockMs_ = 0;
+    std::unordered_map<uint32_t, uint64_t> eventSeq_;  // launchEvent counts
+    double loadingShownMs_ = -1, heldLoadingMs_ = 0, minLoadingShownMs_ = -1;  // the loading screen's hold (GD04-040)
+    static constexpr uint32_t kCreateLoading = qbkey::key("create_loading_screen");
+    static constexpr uint32_t kDestroyLoading = qbkey::key("destroy_loading_screen");
+
+public:
+    static constexpr double kLoadingHoldMs = 2000;
+    // LaunchEvent from the C side (e.g. the drummer's drumkick_left): a
+    // script waiting in `Block anytypes = [...]` on that type goes on.
+    void launchEvent(uint32_t type) { ++eventSeq_[type]; }
+    uint64_t eventSeq(uint32_t type) const {
+        auto it = eventSeq_.find(type);
+        return it == eventSeq_.end() ? 0 : it->second;
+    }
+    // How long destroy_loading_screen was held back in all (walk checks).
+    double loadingHeldMs() const { return heldLoadingMs_; }
+    // When a loading screen put up now has been up 2 s (-1: none is up).
+    double loadingHoldUntil() const { return loadingShownMs_ >= 0 ? loadingShownMs_ + kLoadingHoldMs : -1; }
+    // The shortest time a loading screen was up (-1: none was).
+    double minLoadingShownMs() const { return minLoadingShownMs_; }
+
+private:
     double frameMs_ = 1000.0 / 60.0;
     VmStats stats_;
     bool uiLog_ = false;

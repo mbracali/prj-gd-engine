@@ -26,6 +26,7 @@ compile build/steamdeck "gd04 (Steam Deck)"
 say "Assembling dist/gd04-steamdeck (program, SDL3, FFmpeg, icon, licences, STEAM-DECK.txt)..."
 d=dist/gd04-steamdeck
 rm -rf "$d" && mkdir -p "$d/licenses"
+cp third_party/rtmidi/LICENSE "$d/licenses/RtMidi-LICENSE.txt"  # Generic MIDI (src/input/midi_in.cpp)
 cp build/steamdeck/gd04 README.md ../../LICENSE ../../LICENSE-ADDITIONAL-TERMS.md "$d/"
 strip "$d/gd04"
 cp res/gd04_icon_512.png "$d/gd04.png"

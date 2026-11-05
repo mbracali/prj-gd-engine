@@ -101,8 +101,16 @@ public:
     virtual int playerStrums(int /*player*/) { return 0; }
     // Starts the music and the clock (after every game panel has entered).
     virtual void gameBegin() = 0;
+    // A player's slot had a device when the song began and has none now
+    // (is_missing_controller; a slot the port plays without, e.g. player 2
+    // on one keyboard, never counts).
+    virtual bool gameDeviceLost(int /*slot*/) const { return false; }
     // GamePanel exit: stops the song.
     virtual void gameEnd() = 0;
+    // The developer cheats' {player0 lose} / {player0 win <stars>} (cheats.dta,
+    // GD02-045): the song failed now / ended now as won.
+    virtual void gameForceLose() {}
+    virtual void gameForceWin() {}
     virtual bool gameLoaded() const = 0;
     virtual void gameSetPaused(bool paused) = 0;
     virtual bool gamePaused() const = 0;

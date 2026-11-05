@@ -343,7 +343,12 @@ void Match::award(int who, int card, double now, bool steal) {
     if (steal) ++counters_.stolen[size_t(who)];
     // The attack's name, 0.3 s later for 3 s (Lefty: "Righty Flip" while the victim is flipped).
     const BattlePowerup& p = data_.powerups[size_t(card)];
-    b.text = (card == kLefty && sides_[size_t(other(who))].battle.leftyGems && !p.altText.empty()) ? p.altText : p.text;
+    // attack_ready_text: Lefty Flip's alt_name_text when the victim is
+    // flipped (lefty_notes on and its buttons not lefty, or off and they
+    // are) [C script; I: the player's own lefty option left out].
+    const BattleSide& v = sides_[size_t(other(who))].battle;
+    const bool flipped = (v.leftyUntil >= 0 || v.leftyEnd >= 0) ? !v.leftyButtons : v.leftyButtons;
+    b.text = (card == kLefty && flipped && !p.altText.empty()) ? p.altText : p.text;
     b.textAt = now + 300;
 }
 
@@ -393,7 +398,10 @@ void Match::startAttack(int v, int card, int drain, double now) {
         }
         break;
     case kDoubleNotes: extend(b.doubleUntil); break;
-    case kSteal: b.stealAt = now + 1000; break;  // [C battle_steal: ~1 s of animation]
+    case kSteal:  // [C battle_steal -> animate_steal: Wait 1 gameframe, the open hand 0.5 s, then the card]
+        b.stealOpenAt = now + 1000.0 / 60;
+        b.stealAt = b.stealOpenAt + 500;
+        break;
     case kLefty:  // [C battle_lefty_notes]
         if (b.leftyUntil > now) {
             b.leftyUntil += drain;
@@ -575,16 +583,20 @@ void Match::battleFrame(double now, double dt, std::array<FrameInput, 2>& in) {
             else b.leftyButtons = !b.leftyButtons;
             b.leftyEnd = -1;
         }
-        // Steal: the victim's top card after the animation [C battle_steal].
-        if (b.stealAt >= 0 && now > b.stealAt) {
+        // Steal [C battle_steal]. animate_steal: the top card leaves the victim's hand when the open
+        // hand reaches it and is the thief's (battlemode_ready steal = 1)
+        // 0.5 s later, when the closing hand has carried it over [C script].
+        if (b.stealAt >= 0 && now >= b.stealAt - 0.5) {
             b.stealAt = -1;
-            BattleSide& thief = sides_[size_t(other(i))].battle;
-            (void)thief;
             if (!b.cards.empty()) {
-                const int c = b.cards.back();
+                b.stealCard = b.cards.back();
                 b.cards.pop_back();
-                award(other(i), c, now, true);
+                b.stealTakeAt = now, b.stealGiveAt = now + 500;
             }
+        }
+        if (b.stealGiveAt >= 0 && now >= b.stealGiveAt - 0.5) {
+            b.stealGiveAt = -1;
+            award(other(i), b.stealCard, now, true);
         }
         // Broken String: each broken fret pressed down N times (no strum) [C update_broken_button].
         const uint8_t raw = in[size_t(i)].frets;

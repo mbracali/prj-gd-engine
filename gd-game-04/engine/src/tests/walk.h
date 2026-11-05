@@ -23,6 +23,7 @@ struct WalkHost {
     virtual Input& walkInput() = 0;
     virtual std::string walkSaveDir() = 0;
     virtual std::string walkEnhanced(const std::string& key) = 0;
+    virtual void walkSetEnhanced(const std::string& key, const std::string& value) = 0;
 };
 
 // --walktest <walk>: plays through GH3's own menus with scripted buttons
@@ -30,7 +31,7 @@ struct WalkHost {
 // SDL_VIDEO_DRIVER=offscreen SDL_AUDIO_DRIVER=dummy. Each step waits for a
 // flow state (ui_flow_manager_state[0]) or for a song to be playing / over,
 // then presses its buttons. The walk passes when every step was reached.
-// The port's own screens' walks (guidelines/universal_launcher.md "Tests
+// The port's own screens' walks (docs/knowledge/universal_launcher.md "Tests
 // every game keeps"): mouse (the mouse alone: main menu -> OPTIONS ->
 // ENHANCED -> In-Game Max FPS's dropdown set to 60 -> right click -> the
 // help bar's BACK -> main), gamepads (the yellow fret -> GAMEPADS -> the
@@ -56,6 +57,7 @@ public:
     // Every action the menus got (the app counts them; stickyaxis checks them).
     void countPress(Action a) { ++presses_[size_t(a)]; }
     bool done() const { return step_ >= steps_.size(); }
+    void sawQuit() { quitSeen_ = true; }  // the main menu's three-Back quit
     bool failed() const { return failed_; }
     // The exit code and a summary line.
     int finish(FrontEnd& fe) const;
@@ -91,6 +93,12 @@ private:
     size_t key_ = 0;
     double reachedAt_ = -1, stepStart_ = 0, lastKey_ = 0;
     bool failed_ = false;
+    double songSeenAt_ = -1;      // when the song (still playing) started, walk time
+    bool loadingChecked_ = false;
+    // A loading screen (its tip) seen since the last song; songs started
+    // without one (every song after the first had none: is_changing_levels).
+    bool loadingSeen_ = false;
+    int songsWithoutLoading_ = 0;
     std::string failure_;
     std::vector<std::string> log_;
     // uitest: every flow state with a Create script, started in turn.
@@ -108,4 +116,5 @@ private:
     int sideBase_ = 0, rightBase_ = 0;
     int seek_ = 0;  // setlist:<song> presses so far
     unsigned adapter_ = 0;  // stickyaxis: the virtual adapter (SDL_JoystickID)
+    bool expectQuit_ = false, quitSeen_ = false;
 };

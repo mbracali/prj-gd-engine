@@ -123,9 +123,19 @@ void addCoreNatives(Vm& vm) {
         return true;
     });
     // GetPlatform: platform = Xenon (the version this port follows).
+    // Except in create_overwrite_menu, whose Xenon case is empty [C script
+    // menu_memcard_messages.qb: case PS3 'OVERWRITING...', case Xenon nothing,
+    // default 'SAVING...' "Saving Content. Please don't turn off your
+    // console." (Xenon's create_save_menu text)]: every autosave after the
+    // first overwrites, and memcard_save_file's 3 s (memcard_wait_for_timer)
+    // showed no screen at all, black after each song (GD04-093). There the
+    // other platforms' default case answers (GH3 PC's) [I].
     vm.addNative("GetPlatform", [](Vm&, ScriptRun& run, qb::Struct&) {
-        if (!run.frames.empty() && run.frames.back().locals)
-            Vm::set(*run.frames.back().locals, K("platform"), Vm::makeKey(K("Xenon")));
+        if (!run.frames.empty() && run.frames.back().locals) {
+            const Frame& f = run.frames.back();
+            const bool overwrite = f.code && f.code->name == K("create_overwrite_menu");
+            Vm::set(*f.locals, K("platform"), Vm::makeKey(overwrite ? K("PC") : K("Xenon")));
+        }
         return true;
     });
     vm.addNative("IsXenon", [](Vm&, ScriptRun&, qb::Struct&) { return true; });
@@ -178,13 +188,27 @@ void addCoreNatives(Vm& vm) {
         return false;
     });
     // StructureContains structure = s name = n.
-    vm.addNative("StructureContains", [](Vm& v, ScriptRun&, qb::Struct& p) {
+    vm.addNative("StructureContains", [](Vm& v, ScriptRun& run, qb::Struct& p) {
         const qb::Value* s = Vm::param(p, K("structure"));
         const qb::Value* n = Vm::param(p, K("name"));
         if (!n) n = first(p);
         // A key names the global struct [C data: start_flow_manager passes the flow state's key].
         if (s && (s->type == qb::Type::Key || s->type == qb::Type::KeyPtr)) s = v.global(s->key);
         if (!s || !n || s->type != qb::Type::Struct || !s->st) return false;
+        // Enhanced > Enable Cut Content: the debug_only flag reads as absent,
+        // so the musician profiles (the BoneMan characters) and the venues
+        // (z_credits, z_soundcheck) GH3 keeps out of its menus show; the
+        // viewer zone stays out [C scripts get_valid_character_index,
+        // create_select_venue_menu; I: the port's switch].
+        // Not in quick play's random guitarist (quickplay_start_song:
+        // cs_get_total_guitarists, get_valid_character_index): the option
+        // shows the cut characters to pick, it does not deal them out at
+        // random, so a quick play song gets GH3's own (owner GD04-091).
+        if (Vm::cutContent && n->key == K("debug_only") && !run.calledFrom(K("quickplay_start_song"))) {
+            const qb::Value* nm = v.globals().field(*s->st, K("name"));
+            const bool viewer = nm && (nm->type == qb::Type::String || nm->type == qb::Type::WString) && nm->str == "z_viewer";
+            if (!viewer) return false;
+        }
         if (v.globals().field(*s->st, n->key) != nullptr) return true;
         // A flag (a nameless key, `$boss` / `$encorep1` in GH3_Career_Songs'
         // tiers) counts too: Progression_GetBossSong finds a tier's boss so,
@@ -215,6 +239,7 @@ void addCoreNatives(Vm& vm) {
             if (it.name == 0 && (it.value.type == qb::Type::String || it.value.type == qb::Type::WString)) f = &it.value;
         if (!f || run.frames.empty()) return false;
         const std::string text = format(f->str, p, v);
+        if (static const bool fl = SDL_getenv("GD04_FMTLOG") != nullptr; fl) SDL_Log("FormatText '%s' -> '%s'", f->str.c_str(), text.c_str());
         if (!run.frames.back().locals) run.frames.back().locals = std::make_shared<qb::Struct>();
         if (const qb::Value* c = Vm::param(p, K("checksumName"))) {
             qbkey::names().add(text);
@@ -238,10 +263,17 @@ void addCoreNatives(Vm& vm) {
             Vm::set(*run.frames.back().locals, K("starttime"), Vm::makeInt(int32_t(v.clockMs())));
         return true;
     });
+    // GetTrueElapsedTime's one caller is guitar_startup's legal-screen wait,
+    // a loop without a Wait until 6000 ms (the 360 draws the loading screen
+    // from another thread meanwhile) [C script guitar_startup]. Here the VM
+    // clock stands still within a frame, so the loop spun to the step's
+    // budget every frame (~70 ms: the legal screen ran at ~12 fps): the
+    // call yields the script to the next frame [I].
     vm.addNative("GetTrueElapsedTime", [](Vm& v, ScriptRun& run, qb::Struct& p) {
         const float start = Vm::number(Vm::param(p, K("starttime")), 0);
         if (!run.frames.empty() && run.frames.back().locals)
             Vm::set(*run.frames.back().locals, K("elapsedtime"), Vm::makeInt(int32_t(v.clockMs() - start)));
+        run.waitFrames = 1;
         return true;
     });
     vm.addNative("GetElapsedTime", [](Vm& v, ScriptRun& run, qb::Struct& p) {
@@ -396,8 +428,22 @@ void addCoreNatives(Vm& vm) {
         return true;
     });
     // Block: the script waits for an event that nothing sends yet [I].
-    vm.addNative("Block", [](Vm&, ScriptRun& run, qb::Struct&) {
-        run.waitFor = [] { return false; };
+    // Block: waits for good; with `anytypes = [...]` until one of those event
+    // types is launched (Venue_PulseOnEvents' drumkick_left / _right) [C script].
+    vm.addNative("Block", [](Vm& v, ScriptRun& run, qb::Struct& p) {
+        std::vector<std::pair<uint32_t, uint64_t>> seen;
+        if (const qb::Value* a = Vm::param(p, qbkey::key("anytypes")); a && a->arr)
+            for (const qb::Value& e : a->arr->values) seen.push_back({e.key, v.eventSeq(e.key)});
+        if (seen.empty()) {
+            run.waitFor = [] { return false; };
+            return true;
+        }
+        Vm* vm = &v;
+        run.waitFor = [vm, seen] {
+            for (const auto& [type, seq] : seen)
+                if (vm->eventSeq(type) != seq) return true;
+            return false;
+        };
         return true;
     });
     // Memory and profiling calls of the console build: nothing to do on PC.

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
 # Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 cmake_minimum_required(VERSION 3.24)
-project(gd04 VERSION 0.0.3 LANGUAGES C CXX)
+project(gd04 VERSION 1.1.4 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)  # as gd-game-02 (agents/DECISIONS.md D2)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -35,6 +35,7 @@ target_sources(gd04 PRIVATE
   src/audio/guitar_fx.cpp
   src/audio/sfx_dsp.cpp
   src/audio/sfx.cpp
+  src/audio/sound_buss.cpp
   src/audio/song_stream.cpp
   src/audio/xma_decoder.cpp
   src/audio/xma_stream.cpp
@@ -58,6 +59,7 @@ target_sources(gd04 PRIVATE
   src/devaids/menu_keys.cpp
   src/devaids/screenshot.cpp
   src/input/input.cpp
+  src/input/midi_in.cpp
   src/input/input_selftest.cpp
   src/platform/app_icon.cpp
   src/platform/disc_picker.cpp
@@ -77,6 +79,9 @@ target_sources(gd04 PRIVATE
   src/render/particles.cpp
   src/render/renderer.cpp
   src/render/screen_fx.cpp
+  src/render/enhanced_fx.cpp
+  src/render/enhanced_lights.cpp
+  src/render/image_enhance.cpp
   src/render/stage_peds.cpp
   src/render/shadertest.cpp
   src/render/texture_cache.cpp
@@ -95,6 +100,7 @@ target_sources(gd04 PRIVATE
   src/game/tuning.cpp
   src/script/bytecode.cpp
   src/script/globals.cpp
+  src/script/pc_strings.cpp
   src/script/natives_core.cpp
   src/script/natives_misc.cpp
   src/script/vm.cpp
@@ -109,6 +115,7 @@ target_sources(gd04 PRIVATE
   src/tests/venuetest.cpp
   src/ui/song_screen.cpp
   src/ui/song_hooks.cpp
+  src/ui/song_preview.cpp
   src/ui/fx2d.cpp
   src/ui/front_end.cpp
   src/ui/glitches.cpp
@@ -136,6 +143,12 @@ endif()
 
 find_package(Threads REQUIRED)
 target_link_libraries(gd04 PRIVATE Threads::Threads)
+
+# Generic MIDI input (src/input/midi_in.cpp): RtMidi (third_party/rtmidi), desktop only.
+if(NOT ANDROID)
+  add_subdirectory(third_party/rtmidi)
+  target_link_libraries(gd04 PRIVATE gd_rtmidi)
+endif()
 
 target_compile_definitions(gd04 PRIVATE GD04_VERSION="${PROJECT_VERSION}")
 
@@ -304,3 +317,4 @@ if(GD04_MODULE)
     target_link_options(gd04_module PRIVATE -Wl,--exclude-libs,ALL)
   endif()
 endif()
+

@@ -33,6 +33,7 @@ void WorldDriver::reset(float startMs) {
     lastMs_ = startMs;
     introSent_ = introEndSent_ = overSent_ = false;
     beat_ = note_ = lookNote_ = event_ = lookEvent_ = 0;
+    drumsDue_.clear();
     excitement_ = -1;
     peak_ = false;
 }
@@ -61,12 +62,19 @@ void WorldDriver::update(World& world, const Song& song, float ms, const Player*
     // Band and venue notes; the lighting ones four beats early (start_offset -4).
     const auto& notes = song.venueNotes;
     auto isLighting = [](const VenueNote& n) { return n.track == VenueNote::Track::Triggers && n.pitch >= 48 && n.pitch <= 50; };
+    // BAND DRUMS 36 / 37 go through the drummer_kick_drum MidiParser, which
+    // hands out at most one due event a poll (0x8233E5B8) [C]: a kick and a
+    // crash on one tick fire a frame apart.
     for (; note_ < notes.size() && notes[note_].ms <= ms; ++note_) {
         const VenueNote& n = notes[note_];
         if (isLighting(n)) continue;
-        if (n.track == VenueNote::Track::Drums) world.message(n.pitch == 36 ? "kick_drum" : "crash_symbal");
+        if (n.track == VenueNote::Track::Drums) drumsDue_.push_back(n.pitch);
         else if (n.track == VenueNote::Track::Bass) world.message("bass_hit");
         else if (n.pitch == 52) world.message("venue_effect");
+    }
+    if (!drumsDue_.empty()) {
+        world.message(drumsDue_.front() == 36 ? "kick_drum" : "crash_symbal");
+        drumsDue_.erase(drumsDue_.begin());
     }
     for (; lookNote_ < notes.size(); ++lookNote_) {
         const VenueNote& n = notes[lookNote_];

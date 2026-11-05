@@ -31,6 +31,7 @@
 #include "ui/natives.h"
 #include "ui/ui_objects.h"
 #include "ui/ui_host.h"
+#include "scene/ui_objects.h"
 #include "ui/ui_manager.h"
 
 extern const unsigned char kUiStubsTxt[];
@@ -114,6 +115,28 @@ WalkDriver::WalkDriver(const std::string& name)
         at("splash_screen");
         press(kX);
     };
+    // MORE STATS on a results screen (endgame.dta / multiplayer.dta
+    // me_morestats.btn): endgame_stats_screen filled for each player, then
+    // back to the results with CONTINUE focused again (GD03-092).
+    // forward: CONTINUE from the stats screen itself (its next_screen, set
+    // from the results' own when MORE STATS was pressed). Co-op's results
+    // screen records the song on every entrance (finish_coop_song), so back
+    // there the guitar award is gone, as on the PS2; forward keeps it.
+    auto statsVisit = [&](const char* results, bool forward = false) {
+        press(kDown), wait(150);
+        press(kX);
+        at("endgame_stats_screen");
+        wait(1000);
+        check("stats_screen");
+        if (forward) {
+            press(kX);
+            return;
+        }
+        press(kTri);
+        at(results);
+        wait(800);
+        check("focus_continue");
+    };
     auto quickplaySong = [&](int downs) {
         at("main_screen");
         press(kX);  // QUICK PLAY (main_quickspin.btn, the focus)
@@ -146,6 +169,7 @@ WalkDriver::WalkDriver(const std::string& name)
         at("endgame_screen", 90000);
         check("song_sounds");
         wait(600);
+        statsVisit("endgame_screen");
         press(kX);  // CONTINUE (me_continue.btn)
         at("highscore_screen");
         press(kStart);  // the name as it is
@@ -156,13 +180,29 @@ WalkDriver::WalkDriver(const std::string& name)
         at("meta_loading_screen");
         at("autosave");
         at("qp_selsong_screen");
+        check("load_hold");
         press(kTri);  // back
         at("main_screen");
         check("menu_sounds");  // game_outro_complete paused the game: menu sounds still play (GD03-073)
         expect_ = {"bootup_load", "bootup_create_save_check", "bootup_create_save", "cut_scene_screen",
                    "splash_screen", "main_screen", "qp_selsong_screen", "qp_diff_screen", "loading_screen", "game_screen",
-                   "post_show_screen", "endgame_screen", "highscore_screen", "complete_screen", "meta_loading_screen", "autosave",
+                   "post_show_screen", "endgame_screen", "endgame_stats_screen", "endgame_screen", "highscore_screen", "complete_screen",
+                   "meta_loading_screen", "autosave",
                    "qp_selsong_screen", "main_screen"};
+    } else if (scenario == "dev_cheats") {
+        // GD03-103: Enhanced > Developer Keyboard Cheats on, then a real 'l'
+        // key (SDL event, through the app's bound-key filter) runs cheats.dta's
+        // {handle (player0 lose)}: the lose screen. A bound key ('1', green)
+        // runs no cheat.
+        autoplay_ = false;
+        quickplaySong(3);
+        wait(3000);
+        check("dev_cheat_on");
+        key(SDLK_1);  // bound to green: no cheat
+        wait(1500);
+        check("dev_cheat_bound");
+        key(SDLK_L);  // Automatically Lose
+        at("lose_screen", 20000);
     } else if (scenario == "lose") {
         autoplay_ = false;
         failMs_ = 5000;  // past bangyourhead's first big note (beat 8), its gem passed unhit
@@ -287,7 +327,7 @@ WalkDriver::WalkDriver(const std::string& name)
         expect_ = {"main_screen", "qp_selsong_screen", "qp_diff_screen", "loading_screen", "game_screen", "pause_screen",
                    "meta_loading_screen", "qp_selsong_screen"};
     } else if (scenario == "career" || scenario == "career_full" || scenario == "career_song" || scenario == "career_encore" ||
-               scenario == "career_win" || scenario == "career_win_medium" || scenario == "career_practice" ||
+               scenario == "career_win" || scenario == "career_win_medium" || scenario == "career_finalsong" || scenario == "store_guitars" || scenario == "career_practice" ||
                scenario == "career_venues") {
         bootToMain();
         at("main_screen");
@@ -463,6 +503,64 @@ WalkDriver::WalkDriver(const std::string& name)
             at("endgame_screen", 20000);
             expect_.insert(expect_.end(), {"sel_venue_screen", "sel_song_screen", "loading_screen", "game_screen", "post_show_screen",
                                            "win_game_screen", "endgame_screen"});
+        }
+        if (scenario == "store_guitars") {
+            // The store's guitars (GD03-092): the tour passed (every tier
+            // song beaten, cash added), STORE > GUITARS, each guitar the list
+            // offers focused in turn (store_guitar_display_panel shows it),
+            // then the focused one bought.
+            check("store_seed");
+            for (int i = 0; i < 3; ++i) press(kDown), wait(150);  // LET'S ROCK -> ... -> STORE
+            press(kX);
+            at("store_screen");
+            wait(1500);
+            press(kX);  // GUITARS (st_screen2: the list)
+            wait(1500);
+            check("store_browse", 120000);
+            press(kX);  // buy the focused guitar
+            at("store_bought_screen");
+            wait(900);
+            press(kX);
+            at("store_screen");
+            check("guitar_bought");
+            press(kTri);
+            wait(800);
+            press(kTri);
+            at("career_screen", 30000);
+            expect_.insert(expect_.end(), {"store_screen", "store_bought_screen", "store_screen", "career_screen"});
+        }
+        if (scenario == "career_finalsong") {
+            // The career's final-song choice (GD03-092): at Medium arena's
+            // songs before caughtinamosh passed, caughtinamosh played: its
+            // encore (playwithme) is the tour's last song, so the encore
+            // letter is endgame_encore_finalsong1 and YES asks three times
+            // (endgame.dta yes.btn -> yes_finalsong1..3.btn, finalsong1..3.grp
+            // shown in turn, finalsong_moves.tnm) before the encore starts.
+            winTarget_ = "caughtinamosh";
+            endMs_ = 30000;
+            check("career_target");
+            press(kX);  // LET'S ROCK
+            at("sel_venue_screen");
+            press(kX);
+            at("sel_song_screen");
+            check("career_song_target");
+            press(kX);
+            at("loading_screen");
+            at("game_screen", 30000);
+            at("endgame_encore_screen", 90000);
+            wait(1500);
+            check("finalsong 0");
+            for (int i = 1; i <= 3; ++i) {
+                press(kX);
+                wait(800);
+                check(("finalsong " + std::to_string(i)).c_str());
+            }
+            press(kX);  // yes_finalsong3.btn: START_ENCORE
+            at("loading_screen", 30000);
+            at("game_screen", 30000);
+            check("finalsong_encore");
+            expect_.insert(expect_.end(), {"sel_venue_screen", "sel_song_screen", "loading_screen", "game_screen", "post_show_screen",
+                                           "endgame_encore_screen", "loading_screen", "game_screen"});
         }
         if (scenario == "career_venues") {
             // The venue select follows the focus (GD03-094, as gd02's
@@ -717,6 +815,10 @@ WalkDriver::WalkDriver(const std::string& name)
         wait(750);
         check("enhanced_calibrated");
         press(kX), wait(200);
+        // Reset Calibration, the next row (#47): both delays back to 0 ms.
+        press(kDown), wait(120);
+        press(kX), wait(300);
+        check("enhanced_calibration_reset");
         // PERFORMANCE & GRAPHICS -> Screen Mode -> Resolution; select opens
         // its dropdown, down and select pick the next option.
         for (int i = 0; i < 3; ++i) press(kDown), wait(120);
@@ -817,16 +919,23 @@ WalkDriver::WalkDriver(const std::string& name)
         mouseAt(300, 297, 1);
         wait(300);
         check("enhanced_mode_clean");
-        // MODES collapsed (a click on its title): Resolution is the list's
-        // 11th row; its dropdown opens upward, 720p 180 units above the row.
+        // MODES collapsed (a click on its title): Screen Mode is the list's
+        // 11th row, hovered; the wheel moves to Resolution, scrolled into its
+        // place, and the small nudge after it keeps that focus (#51), so
+        // select opens its dropdown, upward: 720p 180 units above the row
+        // (the row is the 12th, one below where it was clicked before).
         mouseAt(300, 190, 0);
         mouseAt(300, 190, 1);
         wait(300);
         mouseAt(480, 523, 0);
-        mouseAt(480, 523, 1);
         wait(200);
-        mouseAt(480, 343, 0);
-        mouseAt(480, 343, 1);
+        mouseAt(480, 523, 5);
+        wait(600);
+        mouseAt(483, 525, 0);
+        press(kX);  // the focused row's dropdown: Resolution's only if the nudge kept the focus
+        wait(200);
+        mouseAt(480, 375, 0);
+        mouseAt(480, 375, 1);
         wait(300);
         check("enhanced_res_720");
         // Widescreen (16:9), the next row (cut off at the list's bottom): the
@@ -1093,7 +1202,8 @@ WalkDriver::WalkDriver(const std::string& name)
         wait(1500);
         if (scenario == "coop") check("coop_record");
         if (scenario == "faceoff") check("sp_multi_sounds");
-        press(kX);  // CONTINUE (me_continue.btn)
+        statsVisit(results, scenario == "coop");
+        if (scenario != "coop") press(kX);  // CONTINUE (me_continue.btn)
         if (scenario == "coop") {
             at("multi_unlock_bass_screen");  // surrender's three stars or more: bass_sg_mahogany (songs 1, stars 3)
             wait(1200);
@@ -1109,13 +1219,13 @@ WalkDriver::WalkDriver(const std::string& name)
         if (scenario == "coop")
             expect_.insert(expect_.end(), {"multi_coop_venue_screen", "multi_coop_selsong_screen", "selpart_screen", "multi_coop_seldiff_screen",
                                            "multi_sel_character_screen", "multi_sel_guitar_screen", "loading_screen", "game_screen",
-                                           "multi_compete_coop_screen", "multi_unlock_bass_screen", "complete_screen", "autosave", "multi_coop_selsong_screen"});
+                                           "multi_compete_coop_screen", "endgame_stats_screen", "multi_unlock_bass_screen", "complete_screen", "autosave", "multi_coop_selsong_screen"});
         else if (scenario == "faceoff")
             expect_.insert(expect_.end(), {"multi_sel_character_screen", "multi_sel_guitar_screen", "multi_vs_venue_screen", "multi_vs_selsong_screen",
-                                           "multi_vs_seldiff_screen", "loading_screen", "game_screen", "multi_compete_screen", "complete_screen", "multi_vs_selsong_screen"});
+                                           "multi_vs_seldiff_screen", "loading_screen", "game_screen", "multi_compete_screen", "endgame_stats_screen", "multi_compete_screen", "complete_screen", "multi_vs_selsong_screen"});
         else
             expect_.insert(expect_.end(), {"multi_sel_character_screen", "multi_sel_guitar_screen", "multi_fo_venue_screen", "multi_fo_selsong_screen",
-                                           "multi_fo_seldiff_screen", "loading_screen", "game_screen", "multi_compete_fo_screen", "complete_screen", "multi_fo_selsong_screen"});
+                                           "multi_fo_seldiff_screen", "loading_screen", "game_screen", "multi_compete_fo_screen", "endgame_stats_screen", "multi_compete_fo_screen", "complete_screen", "multi_fo_selsong_screen"});
     } else if (scenario == "practice") {
         // On the bass: an overstrum in the measure before the section (no
         // gem there) is beatmatch.dta's miss on a bass track, miss_bass.
@@ -1366,6 +1476,123 @@ WalkDriver::WalkDriver(const std::string& name)
             expect_ = {"main_screen", "training_screen", "tutorials_screen", "tut_loading_screen", "tut_script_screen",
                        "tutorial_end_screen", "meta_loading_screen", "main_screen"};
         }
+    } else if (scenario == "pad_unplugged") {
+        // A controller lost mid-song (GD03-092): a pad as player 1, the
+        // keyboard given player 2; the pad unplugged: the song pauses on
+        // pause_controller_screen with the PC message, RESUME disabled; the
+        // pad back: RESUME plays on.
+        autoplay_ = false;
+        at("main_screen");
+        check("vpad_attach");
+        wait(600);
+        check("keyboard_p2");
+        quickplaySong(3);
+        wait(3000);
+        check("vpad_detach");
+        at("pause_controller_screen", 5000);
+        wait(800);
+        check("pad_loss_message");
+        press(kX);  // ignored while the pad is missing
+        wait(500);
+        check("still pause_controller_screen");
+        check("vpad_attach");
+        wait(800);
+        press(kX);  // RESUME
+        at("game_screen", 5000);
+        expect_ = {"main_screen", "qp_selsong_screen", "qp_diff_screen", "loading_screen", "game_screen", "pause_controller_screen", "game_screen"};
+    } else if (scenario == "options_extras") {
+        // The PS2 options no other walk visits (GD03-092): memory card
+        // (autosave off / on, save bands, load bands), manage bands (rename,
+        // delete), progressive scan (warning, switch, kept; then off); Bonus
+        // Videos hidden as options.milo has it.
+        at("main_screen");
+        check("autosave_boot");
+        wait(2000);  // the main menu's entrance (a press during it is lost)
+        for (int i = 0; i < 3; ++i) press(kDown), wait(150);  // OPTIONS
+        press(kX);
+        at("options_screen");
+        check("focus_to memory_card.btn", 5000);
+        press(kX);
+        at("mem_card_screen");
+        wait(500);
+        check("autosave_is 1");  // set by bootup_load (mem_card.dta), seeded here (the walk starts past the boot)
+        check("focus_to autosave.btn", 5000);  // (the panel's focus is save_bands.btn)
+        press(kX), wait(500);
+        check("autosave_is 0");
+        press(kX), wait(500);
+        check("autosave_is 1");
+        check("focus_to save_bands.btn", 5000);
+        press(kX);
+        at("memcard_save_confirm");
+        check("focus_to dl_button1.btn", 5000);  // YES (the focus is NO)
+        press(kX);
+        at("autosave", 20000);
+        at("mem_card_screen", 20000);
+        check("focus_to load_bands.btn", 5000);
+        press(kX);
+        at("memcard_load_confirm");
+        check("focus_to dl_button1.btn", 5000);  // CONTINUE
+        press(kX);
+        at("memcard_load", 20000);
+        at("mem_card_screen", 20000);
+        press(kTri);
+        at("options_screen", 20000);
+        // Manage bands: rename the first band (a character added), then delete it.
+        check("bands_record");
+        check("focus_to op_data.btn", 5000);
+        press(kX);
+        at("options_chooseprof_screen");
+        check("focus_to cp_band?.btn", 8000);  // (the slot: bands_record)
+        press(kX);
+        at("manage_band_screen");
+        check("focus_to rename_band.btn", 5000);
+        press(kX);
+        at("nameprof_screen");
+        wait(800);
+        press(kX);  // the picked character added to the name
+        wait(300);
+        key(SDLK_RETURN);  // Start: done
+        at("options_screen", 20000);
+        check("band_renamed");
+        check("focus_to op_data.btn", 5000);
+        press(kX);
+        at("options_chooseprof_screen");
+        check("focus_to cp_band?.btn", 8000);
+        press(kX);
+        at("manage_band_screen");
+        check("focus_to delete_band.btn", 5000);
+        press(kX);
+        at("delete_confirm");
+        check("focus_to dl_button1.btn", 5000);  // YES
+        press(kX);
+        at("options_screen", 20000);
+        check("band_deleted");
+        // Progressive scan: off -> the warning -> OK -> the switch screen ->
+        // YES keeps it on; selected again it goes off at once.
+        check("focus_to video_settings.btn", 5000);
+        press(kX);
+        at("video_settings_screen");
+        check("focus_to p_scan.btn", 5000);
+        press(kX);
+        at("pscan_warning_screen");
+        press(kX);  // pscan_ok.btn
+        at("pscan_switch_screen");
+        wait(1000);
+        press(kX);  // pscan_yes.btn
+        at("video_settings_screen", 20000);
+        check("pscan_is 1");
+        press(kX), wait(500);  // p_scan.btn again
+        check("pscan_is 0");
+        press(kTri);
+        at("options_screen", 20000);
+        // Bonus Videos: hidden on this disc (the bonus material screen is
+        // never reached on the PS2).
+        check("bonus_hidden");
+        expect_ = {"main_screen", "options_screen", "mem_card_screen", "memcard_save_confirm", "autosave", "mem_card_screen",
+                   "memcard_load_confirm", "memcard_load", "mem_card_screen", "options_screen", "options_chooseprof_screen",
+                   "manage_band_screen", "nameprof_screen", "options_screen", "options_chooseprof_screen", "manage_band_screen",
+                   "delete_confirm", "options_screen", "video_settings_screen", "pscan_warning_screen", "pscan_switch_screen",
+                   "video_settings_screen", "options_screen"};
     } else if (scenario == "options") {
         // The audio settings (options.dta AUDIO_SETTINGS_PANEL_HANDLERS):
         // each slider selected, moved one step (its sound at the new
@@ -1424,7 +1651,7 @@ std::string WalkDriver::startScreen() const {
     if (scenario_ == "lose" || scenario_ == "pause" || scenario_ == "back" || scenario_ == "enhanced" || scenario_ == "cheats" ||
         scenario_ == "mouse" || scenario_ == "gamepads" || scenario_ == "gamepads_pad" || scenario_ == "menu_anim" || scenario_ == "stickyaxis" || scenario_ == "practice" ||
         scenario_ == "practice_menus" || scenario_ == "tutorial" || scenario_ == "tutorial2" || scenario_ == "tutorial3" || scenario_ == "options" || scenario_ == "whammy_tail" ||
-        scenario_ == "flaming_head")
+        scenario_ == "flaming_head" || scenario_ == "dev_cheats" || scenario_ == "options_extras" || scenario_ == "pad_unplugged")
         return "main_screen";
     if (scenario_ == "attract") return "splash_screen";
     return "";
@@ -1438,10 +1665,14 @@ void WalkDriver::poll(ui::UiManager& ui, double nowMs) {
     }
     Step& s = steps_[step_];
     if (stepStart_ < 0) stepStart_ = nowMs;
+    if (ui.currentScreen() != shownScreen_) {
+        if (!shownScreen_.empty()) shownMs_[shownScreen_] = nowMs - shownSinceMs_;
+        shownScreen_ = ui.currentScreen(), shownSinceMs_ = nowMs;
+    }
     // career: the band has bought Judy Nails' second outfit and the SG's
     // white skin in the store (M10), so both choices offer two.
     if ((scenario_ == "career" || scenario_ == "career_full" || scenario_ == "career_song" || scenario_ == "career_encore" ||
-         scenario_ == "career_win" || scenario_ == "career_win_medium" || scenario_ == "career_practice") && !seeded_ && ui.currentScreen() == "sel_difficulty_screen" && ui.session().profileSlot >= 0) {
+         scenario_ == "career_win" || scenario_ == "career_win_medium" || scenario_ == "career_finalsong" || scenario_ == "store_guitars" || scenario_ == "career_practice") && !seeded_ && ui.currentScreen() == "sel_difficulty_screen" && ui.session().profileSlot >= 0) {
         seeded_ = true;
         Career::Profile& p = ui.career().profiles[size_t(ui.session().profileSlot)];
         p.items["alterna2"] = true;
@@ -1547,6 +1778,113 @@ static bool mainCamera(ui::UiManager& ui, std::array<float, 3>& pos) {
 void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
     auto fail = [&](const std::string& e) { error_ = e, failed_ = done_ = true; };
     auto pass = [&] { ++step_, stepStart_ = -1; };
+    if (s.screen.rfind("finalsong ", 0) == 0) {
+        // endgame_encore_panel: is_final_song set, the focus on yes.btn, then
+        // yes_finalsong1..3.btn with finalsong1..n.grp shown (GD03-092).
+        const int n = std::atoi(s.screen.c_str() + 10);
+        ui::PanelObj* fp = ui.focusPanel();
+        const std::string f = fp ? fp->focus : std::string();
+        const int isFinal = ui.interp().send("endgame_encore_panel", "get", {Value::symbol("is_final_song")}).integerValue();
+        std::printf("  final song: step %d, is_final_song %d, focus %s\n", n, isFinal, f.c_str());
+        if (!isFinal) return fail("the tour's last encore was not offered as the final song");
+        const std::string want = n == 0 ? "yes.btn" : "yes_finalsong" + std::to_string(n) + ".btn";
+        if (f != want) return fail("the focus is " + f + ", not " + want);
+        for (int g = 1; g <= 3; ++g) {
+            const bool shown = fp && fp->view && fp->view->showing("finalsong" + std::to_string(g) + ".grp");
+            if (shown != (g <= n)) return fail("finalsong" + std::to_string(g) + ".grp " + (shown ? "shown" : "hidden"));
+        }
+        return pass();
+    }
+    if (s.screen == "finalsong_encore") {
+        std::printf("  final song encore: %s\n", ui.session().song.c_str());
+        return ui.session().song == "playwithme" ? pass() : fail("the encore played " + ui.session().song + ", not playwithme");
+    }
+    if (s.screen == "stats_screen") {
+        // endgame_stats_panel enter: the song's name, each player's notes hit
+        // ("<hit>/<total>"), Star Power phrases and average multiplier.
+        ui::PanelObj* fp = ui.focusPanel();
+        if (!fp || !fp->view) return fail("no stats panel");
+        const int players = scenario_ == "quickplay" ? 1 : 2;
+        const std::string song = fp->view->text("song_name.lbl");
+        std::printf("  stats: song \"%s\"\n", song.c_str());
+        if (song.empty()) return fail("the stats screen shows no song name");
+        for (int pl = 0; pl < players; ++pl) {
+            const std::string pre = "player" + std::to_string(pl);
+            // Single player: the average multiplier; co-op: streaks broken;
+            // face-offs: the time in the lead (update_*_stats).
+            const std::string extra = players == 1 ? "_avg_multi.lbl" : scenario_ == "coop" ? "_streaks_broken.lbl" : "_lead_time.lbl";
+            const std::string hit = fp->view->text(pre + "_notes_hit.lbl"), sp = fp->view->text(pre + "_sp_phrases.lbl"),
+                              more = fp->view->text(pre + extra);
+            std::printf("  stats: %s notes \"%s\", sp phrases \"%s\", %s \"%s\"\n", pre.c_str(), hit.c_str(), sp.c_str(), extra.c_str(), more.c_str());
+            int h = -1, t = -1, c = -1, st = -1;
+            if (std::sscanf(hit.c_str(), "%d/%d", &h, &t) != 2 || t <= 0 || h < 0 || h > t) return fail(pre + "'s notes hit are not <hit>/<total>");
+            // "<captured>/<started>" (0x001131a0's "%d/%d").
+            if (std::sscanf(sp.c_str(), "%d/%d", &c, &st) != 2 || c < 0 || c > st) return fail(pre + "'s Star Power phrases are not <captured>/<started>");
+            if (more.empty()) return fail(pre + "'s " + extra + " is empty");
+        }
+        return pass();
+    }
+    if (s.screen == "focus_continue") {
+        ui::PanelObj* fp = ui.focusPanel();
+        const std::string f = fp ? fp->focus : std::string();
+        std::printf("  results focus: %s\n", f.c_str());
+        return f == "me_continue.btn" ? pass() : fail("back from the stats, the focus is " + f + ", not CONTINUE");
+    }
+    if (s.screen.rfind("autosave_is ", 0) == 0 || s.screen.rfind("pscan_is ", 0) == 0) {
+        const bool autosave = s.screen[0] == 'a';
+        const int want = s.screen.back() - '0';
+        const int now = autosave ? ui.interp().var("autosave").integerValue() : (ui.career().options.pscan ? 1 : 0);
+        std::printf("  %s: %d\n", autosave ? "autosave" : "progressive scan", now);
+        return now == want ? pass() : fail(std::string(autosave ? "autosave" : "progressive scan") + " is " + std::to_string(now));
+    }
+    if (s.screen == "autosave_boot") {
+        ui.interp().var("autosave") = Value::integer(1);  // bootup_load's {set $autosave TRUE}
+        return pass();
+    }
+    if (s.screen == "bands_record") {
+        bandNames_.clear();
+        bandSlot_ = -1;
+        for (const auto& p : ui.career().profiles) {
+            if (bandSlot_ < 0 && p.inUse) bandSlot_ = int(bandNames_.size());
+            bandNames_.push_back(p.inUse ? p.name : std::string());
+        }
+        std::printf("  bands: %zu slots, managing slot %d \"%s\"\n", bandNames_.size(), bandSlot_, bandSlot_ < 0 ? "" : bandNames_[size_t(bandSlot_)].c_str());
+        if (bandSlot_ < 0) return fail("no band to manage");
+        // The band's button on the choose band screen (cp_band<slot>.btn).
+        for (Step& st : steps_)
+            if (st.screen == "focus_to cp_band?.btn") st.screen = "focus_to cp_band" + std::to_string(bandSlot_) + ".btn";
+        return pass();
+    }
+    if (s.screen == "band_renamed" || s.screen == "band_deleted") {
+        const auto& ps = ui.career().profiles;
+        const size_t k = size_t(std::max(0, bandSlot_));
+        const std::string now = k < ps.size() && ps[k].inUse ? ps[k].name : std::string();
+        std::printf("  band slot %zu now \"%s\" (was \"%s\")\n", k, now.c_str(), bandNames_[k].c_str());
+        if (s.screen == "band_renamed")
+            return now.size() == bandNames_[k].size() + 1 && now.compare(0, bandNames_[k].size(), bandNames_[k]) == 0
+                       ? pass()
+                       : fail("the band was not renamed (one character added)");
+        return now.empty() ? pass() : fail("the band was not deleted");
+    }
+    if (s.screen == "dev_cheat_on") {
+        ui.host().setEnhancedValue("dev_key_cheats", "on");
+        return pass();
+    }
+    if (s.screen == "dev_cheat_bound") {
+        std::printf("  dev cheats: after the bound key '1', on %s\n", ui.currentScreen().c_str());
+        if (ui.currentScreen() != "game_screen") return fail("a key bound to a control ran a developer cheat");
+        return pass();
+    }
+    if (s.screen == "load_hold") {
+        // The song's loading screen, the meta loading screen and the autosave
+        // each stay up at least 2 s with their animation (UiManager::holdingLoadScreen, GD03-102).
+        for (const char* n : {"loading_screen", "meta_loading_screen", "autosave"}) {
+            const auto it = shownMs_.find(n);
+            std::printf("  %s shown %.0f ms\n", n, it == shownMs_.end() ? -1.0 : it->second);
+            if (it == shownMs_.end() || it->second < ui::UiManager::kLoadScreenHoldMs - 50) return fail(std::string(n) + " passed in under 2 s");
+        }
+        return pass();
+    }
     if (s.screen == "jitter_record" || s.screen == "jitter_advances") {
         ui::PanelObj* fp = ui.focusPanel();
         if (!fp || !fp->view) return fail("no focus panel with a view");
@@ -1622,7 +1960,7 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
     }
     if (s.screen == "backdrop_band") {
         // Enhanced Options' still shot always shows the band, its singer on
-        // the right (guidelines/universal_launcher.md, GD03-074).
+        // the right (docs/knowledge/universal_launcher.md, GD03-074).
         const bool ok = ui.host().menuBackdropFramed();
         std::printf("  enhanced backdrop: %s\n", ok ? "the band, the singer on the right" : "no band in the shot");
         return ok ? pass() : fail("Enhanced Options' backdrop shows no band");
@@ -1719,6 +2057,59 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         adapter_ = Input::attachVirtualPad("045e:028e");
         return adapter_ ? pass() : fail("no virtual pad");
     }
+    if (s.screen == "store_seed") {
+        const int d = ui::campaign::difficulty(ui);
+        const auto& tiers = ui::campaign::config(ui).tiers;
+        for (int t = 0; t < ui::campaign::numTiers(ui, d) && t < int(tiers.size()); ++t)
+            for (const std::string& song : tiers[size_t(t)].second)
+                ui.interp().send("campaign", "cheat_beat_song", {Value::symbol(song), Value::integer(1)});
+        ui.interp().send("campaign", "add_cash", {Value::integer(100000)});
+        std::printf("  store: tour passed at difficulty %d, cash %d\n", d, ui.interp().send("campaign", "cash", {}).integerValue());
+        return pass();
+    }
+    if (s.screen == "store_browse") {
+        // Down through the guitar list (store_panel update_index) until it
+        // comes round to the first; store_panel's item_name is the one shown.
+        const std::string f = ui.interp().send("store_panel", "get", {Value::symbol("item_name")}).str();
+        if (nowMs - lastNavMs_ < 900 || ui.inTransition()) return;
+        if (!storeSeen_.empty() && f == storeSeen_.front()) {
+            std::printf("  store: %zu guitars offered:", storeSeen_.size());
+            for (const std::string& g : storeSeen_) std::printf(" %s", g.c_str());
+            std::printf("\n");
+            return storeSeen_.size() > 1 ? pass() : fail("the store offers one guitar or none");
+        }
+        if (std::find(storeSeen_.begin(), storeSeen_.end(), f) != storeSeen_.end() || f.empty())
+            return fail("the guitar list did not come round (stuck on " + f + ")");
+        storeSeen_.push_back(f);
+        if (nowMs - stepStart_ > s.ms) return fail("the guitar list is longer than the walk waits");
+        ui.buttonDown(kDown, 0), ui.buttonUp(kDown, 0), lastNavMs_ = nowMs;
+        return;
+    }
+    if (s.screen == "guitar_bought") {
+        const Career::Profile& p = ui.career().profiles[size_t(ui.session().profileSlot)];
+        int n = 0;
+        for (const auto& [item, owned] : p.items) n += owned;
+        std::printf("  store: %d items owned, cash %d\n", n, p.cash);
+        return p.cash < 100000 ? pass() : fail("nothing was bought");
+    }
+    if (s.screen == "keyboard_p2") {
+        ui.input().setPlayer("keyboard", 1);
+        const std::string p1 = ui.input().playerDevice(0), p2 = ui.input().playerDevice(1);
+        std::printf("  devices: player 1 %s, player 2 %s\n", p1.c_str(), p2.c_str());
+        return p1 == "pad:" + std::to_string(adapter_) && p2 == "keyboard" ? pass() : fail("the pad is not player 1 with the keyboard player 2");
+    }
+    if (s.screen == "vpad_detach") {
+        SDL_DetachVirtualJoystick(adapter_);
+        return pass();
+    }
+    if (s.screen == "pad_loss_message") {
+        ui::PanelObj* fp = ui.focusPanel();
+        const std::string msg = fp && fp->view ? fp->view->text("pause_controller_msg.lbl") : std::string();
+        std::printf("  controller lost: \"%s\", resume disabled %d\n", msg.c_str(), fp && fp->isDisabled("resume.btn") ? 1 : 0);
+        if (msg != "Please make sure your Guitar Controller is connected.") return fail("the controller message is not the PC one");
+        return fp->isDisabled("resume.btn") ? pass() : fail("RESUME is not disabled while the pad is missing");
+    }
+    if (s.screen.rfind("still ", 0) == 0) return ui.currentScreen() == s.screen.substr(6) ? pass() : fail("left " + s.screen.substr(6));
     if (s.screen == "vpad_press") {
         SDL_Joystick* j = SDL_GetJoystickFromID(adapter_);
         if (!j) return fail("the virtual pad is not open");
@@ -2067,7 +2458,7 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         if (s.screen == "frame_differs") return hash != frameHash_ ? pass() : fail("HDR Emulated and Bloom 2x left the frame as it was");
         return hash == frameHash_ ? pass() : fail("HDR None with the effects off does not draw the frame as before");
     }
-    if (s.screen == "enhanced_fx_default" || s.screen == "enhanced_controls" || s.screen == "enhanced_calibrated" ||
+    if (s.screen == "enhanced_fx_default" || s.screen == "enhanced_controls" || s.screen == "enhanced_calibrated" || s.screen == "enhanced_calibration_reset" ||
         s.screen.rfind("enhanced_hdr_", 0) == 0 || s.screen == "enhanced_graphics" || s.screen == "enhanced_no_effects" ||
         s.screen == "enhanced_effects_back" || s.screen == "enhanced_lights_default" || s.screen == "enhanced_enhancers" ||
         s.screen == "enhanced_cheats") {
@@ -2130,6 +2521,12 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
                 if (v.empty() || std::abs(std::atoi(v.c_str())) > 337) add(std::string(key) + " not calibrated (" + v + ")");
             }
             state("calibration_ms", -500, 300);
+        } else if (w == "enhanced_calibration_reset") {
+            for (const char* key : {"audio_offset", "video_offset"}) {
+                const std::string v = saved.has(key) ? saved[key].str() : "";
+                std::printf("  enhanced: reset %s %s\n", key, v.c_str());
+                if (v != "0") add(std::string(key) + " not reset (" + v + ")");
+            }
         } else if (w == "enhanced_graphics") {
             want("sharp_ui", "off"), want("antialiasing", "fxaa"), want("ai_upscaling", "fsr1"), want("ai_upscaling_mode", "performance");
             want("bokeh", "none"), want("particles", "none"), want("bloom", "2x"), want("cinematic_color", "on"), want("color_grade", "warm");
@@ -2685,6 +3082,20 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         std::printf("  options: slider sounds band %d, guitar %d, sfx %d\n", band, gtr, sfx);
         if (!band || !gtr || !sfx) return fail("a volume slider moved without its sound");
         return pass();
+    }
+    if (s.screen == "bonus_hidden") {
+        // options.milo hides Bonus Videos (op_bonus.btn not showing, no
+        // button's navDown leads to it) [C data]: the bonus material screen
+        // cannot be reached on the PS2, nor here.
+        ui::PanelObj* fp = ui.focusPanel();
+        bool linked = false;
+        if (fp && fp->view && fp->view->milo())
+            for (const char* n : {"op_audio.btn", "video_settings.btn", "port_enhanced.btn", "op_data.btn", "memory_card.btn", "op_credit.btn"})
+                if (auto* o = fp->view->milo()->root().get(n))
+                    if (auto* c = o->as<scene::UIComponent>()) linked = linked || c->navDown == "op_bonus.btn";
+        const bool shown = fp && fp->view && fp->view->showing("op_bonus.btn");
+        std::printf("  bonus videos: showing %d, reachable %d\n", shown ? 1 : 0, linked ? 1 : 0);
+        return !shown && !linked ? pass() : fail("Bonus Videos is shown or reachable in the options menu");
     }
     if (s.screen.rfind("focus_to ", 0) == 0) {
         // Down until the focus panel's focus is the component.

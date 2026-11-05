@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "script/globals.h"
+#include "script/pc_strings.h"
 
 #include "data/disc.h"
 #include "data/pak.h"
@@ -19,6 +20,7 @@ void Globals::load(const Disc& disc) {
         auto span = pak.data(e);
         add(qb::decode(span.first, span.second));
     }
+    pcstrings::applyToGlobals(*this);  // PC wording (GD04-039)
 }
 
 std::vector<qb::Item> Globals::expand(const qb::Struct& st) const {

@@ -68,6 +68,12 @@ public:
         // Lou's finish at marker 37); devil_finish kept by a
         // devil_finish_restart [C script start_gem_scroller].
         double startMs = 0;
+        double endMs = -1;  // start_gem_scroller's endtime (practice: the section's end; -1: the song's)
+        // setslomo current_speedfactor (practice's speed; 1 normal) and
+        // PitchShiftSlow1's pitch on player 1's guitar (Player1PracticeEffects:
+        // training outside the section menu; else 1) [C scripts
+        // start_gem_scroller, startpreloadpaused_song, menu_choose_practice_speed_set_speed].
+        float speed = 1, slowPitch = 1;
         bool devilFinish = false;
         // The user_options tags' lefty_flip_p1 / _p2 -> lefthanded_gems and
         // lefthanded_button_ups [C script start_gem_scroller].
@@ -77,11 +83,41 @@ public:
         // end_credits: kept by an end_credits_restart or for
         // thrufireandflames, else cleared [C script start_gem_scroller].
         bool endCredits = false;
+        uint32_t transition = 0;  // current_transition (fastintro, intro, encore, boss, ...)
     } songRequest;
+    // The venue preload start_gem_scroller asks for (App runs it on a worker:
+    // ui/song_screen.h VenuePreload); a new serial (re)starts it.
+    struct PreloadRequest {
+        int serial = 0;
+        uint32_t song = 0, transition = 0;
+        double endMs = -1, startMs = 0;
+    } preloadRequest;
     bool songPlaying = false;
+    // The last song's first gem against its clocks (SongScreen::SyncCheck; walk practice's check:sync).
+    struct SongSync {
+        bool measured = false;
+        float speed = 1;
+        double noteMs = 0, lateMs = 0, clockErrMs = 0, audioErrMs = 0;
+    } songSync;
+    // Practice's section-menu preview (ui/song_preview.cpp): the song's
+    // streams from `startMs` (SetSeekPosition_Song), playing once begin_song
+    // unpaused them; positionMs: where the stream is now (song ms). leaked: a
+    // song started while one still played (end_song never stopped it).
+    struct SongPreview {
+        bool active = false, playing = false, leaked = false;
+        std::string prefix;
+        double startMs = 0;
+        float speed = 1;
+        int starts = 0;
+        std::function<double()> positionMs;
+    } songPreview;
     // Paused with Start in a song: GH3's pause menu runs over the frozen song
     // (gh3_start_pressed); songKill: its quit / restart killed the gem scroller.
     bool songPaused = false, songKill = false;
+    // A won song's end under GH3's scripts (GuitarEvent_SongWon_Spawned, the
+    // songwon transition): the song still drawn and its clock running, the
+    // scripts' You Rock over it, until kill_gem_scroller (songKill).
+    bool songOutro = false;
     uint32_t heldPattern = 0;  // frets held in the menus (GetHeldPattern)
     void startPressed();
     // is_attract_mode = 1 (the demo after 110 s on "press any button").
