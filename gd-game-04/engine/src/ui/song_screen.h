@@ -46,6 +46,8 @@ struct SongSetup {
     // highway and HUD off screen); the players' lefty flip [C start_gem_scroller].
     double startMs = 0;
     double endMs = -1;  // the gems end here and the song finishes (practice's section end; -1: the song's)
+    // Practice's speed and its guitar pitch correction (FrontEnd::SongRequest; Mixer::setSlomo).
+    float speed = 1, slowPitch = 1;
     bool devilFinish = false;
     std::array<bool, 2> lefty{false, false};
     // user_options.lag_calibration (ms): input_offset = the song's - this [C script gem_scroller].
@@ -129,6 +131,15 @@ public:
     const Highway2D& highway() const { return highway_; }
     const Highway2D& highway2() const { return highway2_; }
     double startMs() const { return startMs_; }
+    float speed() const { return speed_; }  // practice's speed (1 normal)
+    // The first gem's arrival (SongScreen::frame; walk practice checks it).
+    struct SyncCheck {
+        bool measured = false;
+        uint64_t wall0 = 0;  // the first frame's wall clock (ns) and song time
+        double song0 = 0, noteMs = 0, lateMs = 0, clockErrMs = 0, audioErrMs = 0;
+        float speed = 1;
+    };
+    const SyncCheck& syncCheck() const { return sync_; }
     const std::string& introCameras() const { return introCameras_; }
     // The intro transition's play_intro props (current_intro); empty: no play_intro.
     const std::string& introProps() const { return introProps_; }
@@ -172,6 +183,8 @@ private:
     IntroText intro_;
     Hud2D::TextFn introText_;
     double startMs_ = 0;      // current_starttime
+    float speed_ = 1;         // setslomo's speed (practice)
+    SyncCheck sync_;
     bool devilFinish_ = false;
     std::array<bool, 2> muted_{true, true};  // guitar_volume = 0 (a miss then pulses the highway)
     bool twoPlayers_ = false, hud2pOk_ = false;

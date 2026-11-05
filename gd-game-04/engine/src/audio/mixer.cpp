@@ -77,6 +77,7 @@ void Mixer::play(std::unique_ptr<AudioSource> stream, std::vector<Track> tracks,
     written_ = 0, read_ = 0, sourceEnded_ = false, underruns_ = 0;
     silenced_ = false;
     buss_ = {}, pitched_ = false, ratio_ = 1;
+    speed_ = 1, slowPitch_ = 1, slowShift_ = SlowShift{};
     source_ = std::move(stream);
     leadInFrames_ = static_cast<int64_t>(leadInMs * rate_ / 1000.0);
     leadIn_ = leadInFrames_;
@@ -93,8 +94,18 @@ void Mixer::play(std::unique_ptr<AudioSource> stream, std::vector<Track> tracks,
     SDL_ResumeAudioStreamDevice(stream_);
 }
 
-void Mixer::setSpeed(float speed) {
-    if (stream_) SDL_SetAudioStreamFrequencyRatio(stream_, std::clamp(speed, 0.01f, 100.0f));
+void Mixer::setSlomo(float speed, float guitarPitch) {
+    if (!stream_) return;
+    speed = std::clamp(speed, 0.05f, 4.0f);
+    // Re-anchored where the clock is, so it changes rate from here.
+    const uint64_t now = SDL_GetTicksNS();
+    if (!paused_) anchorFrames_ = int64_t(songTimeMs(now) * rate_ / 1000.0) + leadIn_, anchorNs_ = now;
+    speed_ = speed;
+    slowPitch_ = guitarPitch > 0 ? guitarPitch : 1.0f;
+    frameNs_ = 0;
+    const float st = pitched_.load() ? buss_[0].st(now) : 0.0f;
+    ratio_ = speed * std::exp2(st / 12.0f);
+    SDL_SetAudioStreamFrequencyRatio(stream_, std::clamp(ratio_, 0.01f, 100.0f));
 }
 
 void Mixer::setBuss(bool guitar, float db, float semitones, float seconds) {
@@ -114,7 +125,7 @@ void Mixer::updatePitch() {
     SDL_LockAudioStream(stream_);
     const float st = buss_[0].st(SDL_GetTicksNS());
     SDL_UnlockAudioStream(stream_);
-    const float ratio = std::exp2(st / 12.0f);
+    const float ratio = speed_.load() * std::exp2(st / 12.0f);
     if (std::fabs(ratio - ratio_) > 1e-4f) ratio_ = ratio, SDL_SetAudioStreamFrequencyRatio(stream_, std::clamp(ratio, 0.01f, 100.0f));
 }
 
@@ -146,7 +157,7 @@ double Mixer::songTimeMs(uint64_t ticksNs) const {
     if (paused_) return pausedTimeMs_;
     if (ticksNs == 0) ticksNs = SDL_GetTicksNS();
     double elapsed = (double(ticksNs) - double(anchorNs_.load())) / 1e9;
-    double frames = double(anchorFrames_.load()) + std::max(0.0, elapsed) * rate_;
+    double frames = double(anchorFrames_.load()) + std::max(0.0, elapsed) * rate_ * double(speed_.load());
     return (frames - double(leadIn_.load())) * 1000.0 / rate_;
 }
 
@@ -158,7 +169,7 @@ double Mixer::frameTimeMs() {
         frameMs_ = raw, frameNs_ = now;
         return raw;
     }
-    double predicted = frameMs_ + double(now - frameNs_) / 1e6;
+    double predicted = frameMs_ + double(now - frameNs_) / 1e6 * double(speed_.load());
     double err = raw - predicted;
     // Big jumps (resume, a stalled device) snap; small ones ease in at 5 % a
     // frame, never moving the clock backwards (gd01).
@@ -201,6 +212,10 @@ void Mixer::fill(int frames) {
 
     const float target = guitarTarget_.load(), target2 = guitar2Target_.load();
     const float pitch0 = guitarPitch_[0].load(), pitch1 = guitarPitch_[1].load();
+    // Practice's slowed song: player 1's guitar through SlowShift, read W / 2 frames ahead.
+    const float slow = slowPitch_.load();
+    const int64_t ahead = slow != 1.0f ? SlowShift::kW / 2 : 0;
+    const int64_t end = written_.load(std::memory_order_acquire);
     float bussTarget[16];
     const size_t nt = std::min<size_t>(tracks_.size(), 16);
     for (size_t c = 0; c < nt; ++c) bussTarget[c] = soundBusses().gainAt(tracks_[c].buss);
@@ -215,7 +230,9 @@ void Mixer::fill(int frames) {
             const Track& t = tracks_[c];
             float bg = 1;
             if (c < nt) bussGain_[c] += (bussTarget[c] - bussGain_[c]) * 0.003f, bg = bussGain_[c];
-            float v = ring_[c][at] * t.volume * bg * (t.guitar ? guitarGain_ : t.guitar2 ? guitar2Gain_ : 1.0f);
+            float s = ring_[c][at];
+            if (ahead && t.guitar) s = r + i + ahead < end ? ring_[c][size_t((r + i + ahead) & (kRing - 1))] : 0.0f;
+            float v = s * t.volume * bg * (t.guitar ? guitarGain_ : t.guitar2 ? guitar2Gain_ : 1.0f);
             // gd01's linear pan law: -1 = left only, 0 = both at full, 1 = right only [I].
             // The players' guitar tracks go through the guitar buss's effects.
             float& L = t.guitar ? g[0][0] : t.guitar2 ? g[1][0] : l;
@@ -223,6 +240,8 @@ void Mixer::fill(int frames) {
             L += v * std::clamp(1.0f - t.pan, 0.0f, 1.0f);
             R += v * std::clamp(1.0f + t.pan, 0.0f, 1.0f);
         }
+        // Player1PracticeEffects: PitchShiftSlow1, then the whammy's [C data].
+        if (ahead) slowShift_.process(g[0][0], g[0][1], slow);
         // Player1Effects / Player2Effects: the pitch shift comes first [C data].
         pitch_[0].process(g[0][0], g[0][1], pitch0);
         pitch_[1].process(g[1][0], g[1][1], pitch1);
@@ -235,4 +254,25 @@ void Mixer::fill(int frames) {
     guitarLag_[0].store(pitch_[0].lag()), guitarLag_[1].store(pitch_[1].lag());
     read_.store(r + n, std::memory_order_release);
     if (silenced_.load()) std::fill(out_.begin(), out_.end(), 0.0f);
+}
+
+// Two taps W / 2 apart whose delay falls by (pitch - 1) a frame, wrapping
+// from 0 to W; each faded by sin^2(pi * delay / W), so the two sum to 1 and
+// a tap is silent as it wraps.
+void Mixer::SlowShift::process(float& l, float& r, float pitch) {
+    ring[0][write & (kRing - 1)] = l, ring[1][write & (kRing - 1)] = r;
+    d -= pitch - 1.0f;
+    while (d < 0) d += kW;
+    while (d >= kW) d -= kW;
+    float out[2] = {0, 0};
+    for (float tap : {d, d + kW * 0.5f >= kW ? d - kW * 0.5f : d + kW * 0.5f}) {
+        const float g = std::sin(3.14159265f * tap / kW);
+        const float pos = float(write) - tap;
+        const float fl = std::floor(pos);
+        const uint32_t i0 = uint32_t(int64_t(fl)) & (kRing - 1), i1 = (i0 + 1) & (kRing - 1);
+        const float f = pos - fl;
+        for (int c = 0; c < 2; ++c) out[c] += g * g * (ring[size_t(c)][i0] * (1 - f) + ring[size_t(c)][i1] * f);
+    }
+    l = out[0], r = out[1];
+    ++write;
 }

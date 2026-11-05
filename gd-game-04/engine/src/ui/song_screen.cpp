@@ -272,6 +272,13 @@ bool SongScreen::start(const Disc& disc, const Globals& g, const SongInfo& song,
         tracks[size_t(4 + c)].buss = bandBuss;
     }
     mixer.play(std::move(stream), std::move(tracks), leadInMs_);
+    // Practice's speed: the streams and the song clock (so the gems, the
+    // venue and the intro) run at it [C script start_gem_scroller: setslomo].
+    speed_ = std::clamp(setup.speed, 0.1f, 1.0f);
+    if (speed_ != 1.0f || setup.slowPitch != 1.0f) {
+        mixer.setSlomo(speed_, setup.slowPitch);
+        SDL_Log("song: speed %.3f, guitar pitch %.2f", double(speed_), double(setup.slowPitch));
+    }
     // The clock waits for the venue: loading the band and the scene here and
     // uploading it on the first frame take a second or more, which ran the
     // intro's clock (its first cameras and poses never showed). GH3 starts
@@ -425,6 +432,29 @@ bool SongScreen::frame(Canvas& canvas, Mixer& mixer, const TextureCache* texture
     // time is it plus the start. It subtracted the lead-in a second time,
     // so the music played 3 s (then, with the 8 s intro, 8 s) ahead of the gems.
     const double now = mixer.frameTimeMs() + startMs_;
+    // The first gem's arrival against the clocks (walk practice's sync check):
+    // the frame clock where it reaches its time, the wall clock since the
+    // first frame scaled by the speed, and the audio's own clock.
+    {
+        const uint64_t ns = SDL_GetTicksNS();
+        if (!sync_.wall0) sync_.wall0 = ns, sync_.song0 = now, sync_.speed = speed_;
+        const NoteTrack& t0 = match_->track(0);
+        double first = -1;
+        for (const TrackNote& n : t0.notes)
+            if (n.time >= startMs_) {
+                first = n.time;
+                break;
+            }
+        if (!sync_.measured && first >= 0 && now >= first) {
+            sync_.measured = true;
+            sync_.noteMs = first;
+            sync_.lateMs = now - first;
+            sync_.clockErrMs = now - (sync_.song0 + double(ns - sync_.wall0) / 1e6 * speed_);
+            sync_.audioErrMs = now - (mixer.songTimeMs(ns) + startMs_);
+            SDL_Log("song: first gem (%.0f ms) at %.1f ms, speed %.3f: %.1f ms past it, wall clock x speed %+.1f ms, audio clock %+.1f ms",
+                    first, now, double(speed_), sync_.lateMs, sync_.clockErrMs, sync_.audioErrMs);
+        }
+    }
     // GD04_CLOCKLOG=1: the song clock against the wall clock, each second (development aid).
     static const bool clockLog = SDL_getenv("GD04_CLOCKLOG") != nullptr;
     if (clockLog && std::floor(now / 1000.0) != std::floor(lastMs_ / 1000.0))

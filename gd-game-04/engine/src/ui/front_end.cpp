@@ -193,9 +193,13 @@ void FrontEnd::frame(Canvas& c, double dtMs) {
     scene_->setSuspended(songPlaying || songOutro);  // the menus' characters wait while the song's band plays
     accum_ += dtMs;
     int steps = 0;
+    // Practice's setslomo: the scripts' clock (Wait n seconds: the intro's
+    // sound waits, the song's events) runs at the song's speed while it
+    // plays [C script start_gem_scroller; I: GH3's script waits on game time].
+    const double vmStep = songPlaying && !songPaused ? kStepMs * double(songRequest.speed) : kStepMs;
     while (accum_ >= kStepMs && steps < 8) {
         accum_ -= kStepMs;
-        vm_->update(kStepMs);
+        vm_->update(vmStep);
         ui_->update(kStepMs);
         scene_->update(kStepMs);
         ++steps;

@@ -69,6 +69,11 @@ public:
         // devil_finish_restart [C script start_gem_scroller].
         double startMs = 0;
         double endMs = -1;  // start_gem_scroller's endtime (practice: the section's end; -1: the song's)
+        // setslomo current_speedfactor (practice's speed; 1 normal) and
+        // PitchShiftSlow1's pitch on player 1's guitar (Player1PracticeEffects:
+        // training outside the section menu; else 1) [C scripts
+        // start_gem_scroller, startpreloadpaused_song, menu_choose_practice_speed_set_speed].
+        float speed = 1, slowPitch = 1;
         bool devilFinish = false;
         // The user_options tags' lefty_flip_p1 / _p2 -> lefthanded_gems and
         // lefthanded_button_ups [C script start_gem_scroller].
@@ -88,6 +93,12 @@ public:
         double endMs = -1, startMs = 0;
     } preloadRequest;
     bool songPlaying = false;
+    // The last song's first gem against its clocks (SongScreen::SyncCheck; walk practice's check:sync).
+    struct SongSync {
+        bool measured = false;
+        float speed = 1;
+        double noteMs = 0, lateMs = 0, clockErrMs = 0, audioErrMs = 0;
+    } songSync;
     // Paused with Start in a song: GH3's pause menu runs over the frozen song
     // (gh3_start_pressed); songKill: its quit / restart killed the gem scroller.
     bool songPaused = false, songKill = false;

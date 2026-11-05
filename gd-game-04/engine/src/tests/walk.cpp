@@ -458,22 +458,32 @@ Walk::Walk(const std::string& name) : name_(name) {
         }
         steps_.push_back({"store_fs", {}, 20000});
     } else if (name == "practice") {
-        // Training -> PRACTICE -> the first song -> difficulty -> the song's
-        // first section -> speed -> the section played -> its results
-        // (GD04-043) [C data practice_*_fs, script practice_update].
+        // Training -> PRACTICE -> the first song -> difficulty -> VERSE 1 as
+        // the start and the end section -> Slowest -> the section played ->
+        // its results; then CHANGE SPEED to Slower, Slow and Full Speed, the
+        // section played at each. Each result checks the first gem against
+        // the clocks at that speed (check:sync, GD04-100) (GD04-043) [C data
+        // practice_*_fs, scripts practice_update, menu_choose_practice_speed_set_speed].
         steps_ = boot;
         steps_.push_back({"main_menu_fs", {"click:menu:main_menu_training_text"}, 10000});
         steps_.push_back({"practice_select_mode_fs", {D, C}, 20000});  // TUTORIAL, PRACTICE
         steps_.push_back({"practice_setlist_fs", {C}, 20000});
         steps_.push_back({"practice_select_part_fs", {C}, 20000, true});
         steps_.push_back({"practice_select_difficulty_fs", {C}, 20000});
-        steps_.push_back({"practice_select_song_section_fs", {C}, 20000});
-        steps_.push_back({"practice_select_speed_fs", {C}, 20000});
-        // The section's end brought to 5 s in (the walk's song ends early):
-        // practice_update then ends it as GH3 does, Song_Win_Delay later.
-        steps_.push_back({"song", {"set:global:practice_end_time=5000"}, 30000});
-        steps_.push_back({"song_over", {}, 600000});
-        steps_.push_back({"practice_newspaper_fs", {}, 60000});  // the section's results: restart / speed / section / new song / quit
+        steps_.push_back({"practice_select_song_section_fs", {D, D, D, C, Op(C, 800)}, 20000});  // VERSE 1 .. VERSE 1
+        // Slowest, Slower, Slow, Full Speed: current_speedfactor 0.5, 2 / 3, 0.8, 1.
+        const std::pair<int, const char*> speeds[] = {{3, "check:sync:0.5"}, {2, "check:sync:0.6666667"}, {1, "check:sync:0.8"}, {0, "check:sync:1"}};
+        for (size_t k = 0; k < 4; ++k) {
+            std::vector<Op> pick(size_t(speeds[k].first), D);
+            pick.push_back(C);
+            steps_.push_back({"practice_select_speed_fs", pick, 20000});
+            steps_.push_back({"song", {}, 30000});
+            steps_.push_back({"song_over", {}, 600000});
+            // The section's results: CONTINUE / RESTART / CHANGE SPEED / CHANGE SECTION / QUIT.
+            std::vector<Op> next{Op(speeds[k].second, 1000)};
+            if (k < 3) next.push_back(D), next.push_back(D), next.push_back(C);
+            steps_.push_back({"practice_newspaper_fs", next, 60000});
+        }
     } else if (name == "options") {
         // Options' screens no other walk opens (GD04-043): AUDIO SETTINGS,
         // CALIBRATE LAG, CONTROLLER SETTINGS, DATA SETTINGS, BONUS VIDEOS,
@@ -1039,6 +1049,21 @@ bool Walk::act(const std::string& what, FrontEnd& fe, WalkHost& host) {
         const std::string kv = rest("set:global:");
         const size_t eq = kv.find('=');
         fe.vm().setGlobal(qbkey::key(kv.substr(0, eq).c_str()), qs::Vm::makeInt(std::atoi(kv.c_str() + eq + 1)));
+        return true;
+    }
+    if (starts("check:sync:")) {
+        // check:sync:<speed>: the last song ran at that speed and its first gem
+        // reached the strike line in step with the clocks: the frame it did is
+        // under two frames (x the speed) past the note, and the song clock
+        // there is within 25 ms of the audio's own clock and 40 ms of the
+        // wall clock since the first frame x the speed (GD04-100).
+        const FrontEnd::SongSync& s = fe.songSync;
+        const float want = float(std::atof(rest("check:sync:").c_str()));
+        std::printf("  sync: speed %.3f, first gem %.0f ms: %.1f ms past it, wall clock x speed %+.1f ms, audio %+.1f ms\n", double(s.speed),
+                    s.noteMs, s.lateMs, s.clockErrMs, s.audioErrMs);
+        if (!s.measured) return fail("sync: no first gem measured");
+        if (std::fabs(s.speed - want) > 0.01f) return fail("sync: speed " + std::to_string(s.speed));
+        if (s.lateMs < 0 || s.lateMs > 40.0 * s.speed || std::fabs(s.clockErrMs) > 40 || std::fabs(s.audioErrMs) > 25) return fail("sync: out of step");
         return true;
     }
     if (starts("check:global:")) {  // check:global:<name>=<number>: a GH3 global's value

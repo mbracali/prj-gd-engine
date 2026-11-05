@@ -1149,6 +1149,10 @@ void App::frame() {
         }
         const bool more = song_->frame(canvas_, mixer_, textures_.get());
         if (front_) front_->songClockMs = song_->songMs();
+        if (front_ && song_->syncCheck().measured) {
+            const SongScreen::SyncCheck& sc = song_->syncCheck();
+            front_->songSync = {true, sc.speed, sc.noteMs, sc.lateMs, sc.clockErrMs, sc.audioErrMs};
+        }
         if (hooks_) hooks_->setPaused(front_->songPaused), hooks_->frame(*song_, song_->songMs());
         if (front_) {
             // GH3's scripts and elements over the song (the pause menu over the frozen song).
@@ -1290,6 +1294,7 @@ void App::frame() {
         if (rq.suddenDeath) setup.startHealth = {rq.saveHealth[0], rq.saveHealth[1]};
         setup.startMs = rq.startMs, setup.devilFinish = rq.devilFinish;
         setup.endMs = rq.endMs;
+        setup.speed = rq.speed, setup.slowPitch = rq.slowPitch;
         setup.lefty = {rq.lefty[0], rq.lefty[1]};
         // GH3's lag_calibration plus Enhanced > Calibration's audio delay
         // (judged later by it); the video delay draws the highway ahead.
@@ -1316,6 +1321,8 @@ void App::frame() {
                 // sudden death (and a boss) plays on to the KO.
                 if (setup.mode == GameMode::Battle) song_->walkEndMs_ = setup.suddenDeath ? -1 : 60000.0;
                 if (setup.mode == GameMode::Boss) song_->walkEndMs_ = -1;
+                // Practice (an endtime): the section ends it (a mid-song start is past 20 s already).
+                if (setup.endMs > 0) song_->walkEndMs_ = -1;
             }
             front_->songPlaying = true;
             song_->setHoldAfterWin(true);  // GH3's scripts end a won song (songOutro)

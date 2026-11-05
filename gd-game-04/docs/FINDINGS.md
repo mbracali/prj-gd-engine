@@ -101,8 +101,8 @@ player's `player_status` struct.
 - In the port (GD04-020): input_offset = the song's `input_offset` - user_options.lag_calibration
   (read from the global tag at the song's start), passed to the judge; gem_offset = the song's
   `gem_offset`, shifting gems and fretbars on the highway; the 360's -66 ms defaults stay out
-  (D7) [C scripts gem_scroller, call_startup_scripts]. The practice pitch-shift offset is not
-  applied (no slowed practice yet).
+  (D7) [C scripts gem_scroller, call_startup_scripts]. The practice pitch-shift offsets are the
+  360's platform offsets too (xenon: -64 song, 0 slow / slower / slowest) and stay out with them.
 
 ### 2. HOPO
 
@@ -423,7 +423,14 @@ re-implements natively (R) [C scripts]:
   setup_highway / generate_pos_table / move_highway_2d / setup_hud /
   reset_hud (R), Transition_Play + GuitarEvent_Transition* (empty hooks;
   the intro cameras R), battlemode_init / bossbattle_init (R),
-  practicemode_init (training: not supported), the boss intro audio
+  practicemode_init (R, ui/song_hooks: spawned in training; Hide_Band hides the
+  band, practicemode_section shows the section's name from current_section_array
+  = <song>_markers and current_section_array_entry, which the port moves on as
+  the song passes each marker [I]; SetNoteMappings for the drums is a stub),
+  setslomo current_speedfactor (R: Mixer::setSlomo resamples every stream to the
+  speed and the song clock runs at it; the scripts' clock too while the song
+  plays; player 1's guitar shifted back up by PitchShiftSlow1's pitch with a
+  two-tap delay-line shifter [I: GH3's is FMOD's FFT PitchShift]), the boss intro audio
   GH_SFX_Preload_Boss_Intro_Audio and the boss helper screen (L),
   play_intro's sounds (R, ui/song_hooks: Song_Intro_Highway_Up_SFX_Waiting
   at highway_start_time, Notes_Ripple_Up_SFX per player at

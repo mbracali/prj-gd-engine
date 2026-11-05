@@ -221,12 +221,22 @@ void addGameNatives(FrontEnd& fe, const Disc& disc, TextureCache& textures) {
         if (!diff2) diff2 = v.global(K("current_difficulty2"));
         FrontEnd::SongRequest& r = fe.songRequest;
         r = FrontEnd::SongRequest{};
+        fe.songSync = {};
         r.pending = true;
         // starttime; devil_finish_restart keeps devil_finish, any other start
         // clears it (and BossDevil then starts at 0) [C script start_gem_scroller].
         r.startMs = std::max(0.0, double(Vm::number(Vm::param(p, K("starttime")), 0)));
         // endtime (practice_start_song: practice_end_time; default 99999999) [C script start_gem_scroller].
         if (const qb::Value* e = Vm::param(p, K("endtime")); e && e->number() > 0 && e->number() < 99999999.0f) r.endMs = e->number();
+        // setslomo current_speedfactor once loaded; the streams at pitch =
+        // current_speedfactor * 100, player 1's guitar with
+        // Player1PracticeEffects (PitchShiftSlow1) in training outside the
+        // section menu [C scripts start_gem_scroller, startpreloadpaused_song].
+        r.speed = std::clamp(Vm::number(v.global(K("current_speedfactor")), 1), 0.1f, 1.0f);
+        if (v.global(K("game_mode")) && v.global(K("game_mode"))->key == K("training") &&
+            Vm::number(v.global(K("in_menu_choose_practice_section")), 0) == 0)
+            if (const qb::Value* ps = v.global(K("PitchShiftSlow1")); ps && ps->st)
+                r.slowPitch = Vm::number(v.globals().field(*ps->st, K("pitch")), 1);
         if (Vm::number(Vm::param(p, K("devil_finish_restart")), 0) == 1) {
             r.devilFinish = Vm::number(v.global(K("devil_finish")), 0) != 0;
         } else {
@@ -262,6 +272,7 @@ void addGameNatives(FrontEnd& fe, const Disc& disc, TextureCache& textures) {
         // loading screen goes (destroy_loading_screen, near the script's end)
         // [C script start_gem_scroller; I: spawned by App with the song].
         if (r.devilFinish || r.startMs > 0) SDL_Log("song: starts at %.0f ms%s", r.startMs, r.devilFinish ? " (Lou's finish)" : "");
+        if (r.endMs > 0) SDL_Log("song: ends at %.0f ms (endtime)", r.endMs);
         // end_credits: cleared unless end_credits_restart = 1 or the song is
         // thrufireandflames [C script start_gem_scroller]; with it set,
         // CrowdDecrease takes no health [C 0x8210FD18].

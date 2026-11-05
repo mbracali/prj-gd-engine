@@ -69,10 +69,15 @@ public:
     void setGuitarAudible(bool audible) { guitarTarget_.store(audible ? 1.0f : 0.0f); }
     // The second player's part (Track::guitar2), the same way.
     void setGuitar2Audible(bool audible) { guitar2Target_.store(audible ? 1.0f : 0.0f); }
-    // Playback speed (1 normal): the song is resampled, so its pitch follows
-    // (GH2's set_music_speed: the failed song winding down, practice) [I for
-    // the pitch]. The song clock is not corrected for it.
-    void setSpeed(float speed);
+    // Practice's slowed song (GH3's setslomo current_speedfactor, the streams
+    // started at pitch = current_speedfactor * 100) [C scripts
+    // start_gem_scroller, startpreloadpaused_song]: every stream is resampled
+    // to `speed` (1 normal) and the song clock runs at `speed` with it (it
+    // counts the stream's frames). `guitarPitch` (PitchShiftSlow1's pitch,
+    // Player1PracticeEffects: 1 none) shifts player 1's guitar tracks back
+    // up, ahead of the whammy's FastPitch [C data]. play() resets both to 1.
+    void setSlomo(float speed, float guitarPitch);
+    float slomo() const { return speed_.load(); }
     // The guitar buss's echo / reverb / volume (GH3's setsoundbusseffects,
     // SetSoundBussParams; ui/song_hooks.cpp): the guitar tracks pass through it.
     GuitarFx& guitarFx() { return guitarFx_; }
@@ -145,6 +150,20 @@ private:
     std::array<Buss, 2> buss_{};
     std::atomic<bool> pitched_{false};  // a buss pitch was set: the clock follows the wall clock
     float ratio_ = 1;  // the stream's frequency ratio now (main thread)
+    std::atomic<float> speed_{1.0f};      // setSlomo's speed: the stream's ratio and the clock's rate
+    std::atomic<float> slowPitch_{1.0f};  // setSlomo's guitar pitch (PitchShiftSlow1)
+    // PitchShiftSlow1 [C data: effect PitchShift, fftsize 4096] as a two-tap
+    // delay-line shifter (crossfaded taps W / 2 apart, sin^2 gains) reading
+    // its input W / 2 frames ahead so it adds no delay on average [I: GH3's
+    // is FMOD's FFT pitch shifter]. Audio thread only.
+    struct SlowShift {
+        static constexpr int kW = 2048, kRing = 4096;
+        std::array<std::array<float, kRing>, 2> ring{};
+        uint32_t write = 0;
+        float d = 0;
+        void process(float& l, float& r, float pitch);
+    };
+    SlowShift slowShift_;
     void updatePitch();
     double pausedTimeMs_ = 0;
     double frameMs_ = 0;
