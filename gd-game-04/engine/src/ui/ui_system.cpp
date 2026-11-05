@@ -842,13 +842,29 @@ void UiSystem::startMorph(Element& e, const qb::Struct& p) {
     m.x0 = m.x1 = e.x, m.y0 = m.y1 = e.y, m.sx0 = m.sx1 = e.sx, m.sy0 = m.sy1 = e.sy;
     m.a0 = m.a1 = e.alpha, m.r0 = m.r1 = e.rot;
     for (int k = 0; k < 4; ++k) m.c0[size_t(k)] = m.c1[size_t(k)] = e.rgba[size_t(k)];
+    // GH3 keeps one target block per element: a new morph starts from the
+    // current values but only the props it names get new targets; the
+    // others keep heading for the targets of a morph still under way, and
+    // `{(x,y) relative}` adds to the target pos [C SetMorph 0x8221CEC8:
+    // start (+0x140) = current (+0xa0), target (+0xf0) written per given
+    // prop; 0x8221C240 relative = target pos (+0x110) + (x,y)]. The
+    // controller select's light_up_controller (pos to the player's spot,
+    // scale 1.5, 0.25 s) followed at once by controller_jiggle's relative
+    // DoMorphs: the controller reaches its spot (GD04-102).
+    if (const Element::Morph& prev = e.morph; prev.active) {
+        if (prev.pos) m.pos = true, m.x1 = prev.x1, m.y1 = prev.y1;
+        if (prev.scale) m.scale = true, m.sx1 = prev.sx1, m.sy1 = prev.sy1;
+        if (prev.alpha) m.alpha = true, m.a1 = prev.a1;
+        if (prev.rot) m.rot = true, m.r1 = prev.r1;
+        if (prev.rgba) m.rgba = true, m.c1 = prev.c1;
+    }
     if (const qb::Value* v = qs::Vm::param(p, K("pos"))) {
         m.pos = true;
         if (v->type == qb::Type::Struct && v->st) {
             float a = 0, b = 0;
             for (const qb::Item& pi : v->st->items)
                 if (pi.value.type == qb::Type::Pair) a = pi.value.f[0], b = pi.value.f[1];
-            if (qs::Vm::flag(*v->st, K("relative"))) m.x1 = e.x + a, m.y1 = e.y + b;
+            if (qs::Vm::flag(*v->st, K("relative"))) m.x1 += a, m.y1 += b;
             else m.x1 = a, m.y1 = b;
         } else {
             readPair(*v, m.x1, m.y1);

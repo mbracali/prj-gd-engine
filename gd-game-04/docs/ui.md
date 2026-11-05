@@ -177,6 +177,14 @@ pos (with relative/absolute modifiers), scale (number|pair, relative_scale),
 rot_angle (relative_rot_angle), alpha, rgba, skew, just, time, motion.
 - On a call: current values are copied as the start; given props become the
   target; time (seconds, default 0) * 1000 -> integer ms duration.
+  The element keeps one target block (+0xf0; start +0x140, current +0xa0):
+  props the call does not name keep their earlier target, so they go on
+  moving to it over the new time; `{(x,y) relative}` is added to the target
+  pos (+0x110), not the current one [C 0x8221CEC8, 0x8221C240]. The
+  controller select's light_up_controller (pos, scale, alpha, 0.25 s) is
+  followed at once by controller_jiggle's relative DoMorphs, and the
+  controller still reaches its player's spot (GD04-102; the port had
+  replaced the whole morph, the controllers stayed in the middle).
 - time 0 -> target applied immediately.
 - Each frame: t = elapsed_ms/duration clamped to 1; f(t) by motion:
   linear 0 (default; unknown keys such as `gentle` stay linear), smooth =

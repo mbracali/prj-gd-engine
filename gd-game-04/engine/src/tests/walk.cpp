@@ -531,7 +531,11 @@ Walk::Walk(const std::string& name) : name_(name) {
         const Op P2D = Op::p2(D), P2C = Op::p2(C);
         steps_ = boot;
         steps_.push_back({"main_menu_fs", {D, C}, 10000});
-        steps_.push_back({"coop_career_select_controllers_fs", {Op(C, 1500), P2D, P2C}, 20000});
+        // Each controller ends on its player's shield (menu_select_controller_icon_positions
+        // [0] / [1]): light_up_controller's move survives controller_jiggle (GD04-102).
+        steps_.push_back({"coop_career_select_controllers_fs",
+                          {Op("check:pos:controller0_icon=370,350", 1500), C, P2D, Op("check:pos:controller1_icon=900,420", 800), P2C},
+                          20000});
         steps_.push_back({"coop_career_choose_band_fs", {C}, 20000, true});
         steps_.push_back({"coop_career_enter_band_name_fs", {C, C, C, Action::Start}, 20000, true});
         steps_.push_back({"coop_career_select_difficulty_fs", {C, P2C}, 20000});
@@ -930,6 +934,17 @@ bool Walk::act(const std::string& what, FrontEnd& fe, WalkHost& host) {
         qs::Vm::set(fe.vm().globalTags[qbkey::key(kv.substr(0, dot).c_str())], qbkey::key(kv.substr(dot + 1, eq - dot - 1).c_str()),
                     qs::Vm::makeInt(std::atoi(kv.c_str() + eq + 1)));
         return true;
+    }
+    if (starts("check:pos:")) {  // check:pos:<id>=<x>,<y>: the element's pos (parent space, +-2)
+        const std::string kv = rest("check:pos:");
+        const size_t eq = kv.find('='), comma = kv.find(',');
+        const ui::Element* e = fe.ui().find(qbkey::key(kv.substr(0, eq).c_str()));
+        if (!e) return fail(kv.substr(0, eq) + " does not exist");
+        const float x = float(std::atof(kv.c_str() + eq + 1)), y = float(std::atof(kv.c_str() + comma + 1));
+        std::printf("  pos: %s = %.1f, %.1f\n", kv.substr(0, eq).c_str(), double(e->x), double(e->y));
+        return std::fabs(e->x - x) <= 2.0f && std::fabs(e->y - y) <= 2.0f
+                   ? true
+                   : fail(kv.substr(0, eq) + " is at " + std::to_string(int(e->x)) + ", " + std::to_string(int(e->y)));
     }
     if (starts("check:centrex:")) {  // check:centrex:<id>=<x>: the element's drawn centre is at x (1280-wide, +-12 px)
         const std::string kv = rest("check:centrex:");
