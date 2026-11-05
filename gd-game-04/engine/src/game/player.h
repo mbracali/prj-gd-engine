@@ -149,6 +149,10 @@ private:
     std::vector<bool> missedPhrase_;  // a star note of the phrase was missed
     int triggerFrames_ = 0;
     bool frameStrum_ = false;  // 0x829BA008: a strum since the last hit / miss
+    // 0x829E4C80[player]: set by an overstrum, cleared when a sustain starts;
+    // the sustain update ends the held note while it is set [C 0x8211FA14,
+    // 0x82106B84, 0x8211C9D0].
+    bool overstrummed_ = false;
     struct Sustain {
         int note = -1;
         double start = 0, end = 0;

@@ -155,7 +155,12 @@ player's `player_status` struct.
 - Overstrum (0x8211F7B0): unnecessary_note event (wrong-note sound, guitar mute,
   CrowdDecrease), current_run := 0 (both players in co-op) [C 0x8210CB10]; if the
   previous note lies in the current star phrase the phrase is lost (stars ->
-  gems, next phrase) [C 0x8211F938-0x8211F9EC]. total_notes unchanged.
+  gems, next phrase) [C 0x8211F938-0x8211F9EC]. total_notes unchanged. Its
+  last step sets the byte 0x829E4C80[player] = 1 [C 0x8211FA10-0x8211FA14];
+  a sustain's start (0x82106758) clears it [C 0x82106B84] and the sustain
+  update 0x8211C9D0 seeing it clears it and takes the released path: a
+  sustain held through an overstrum ends there (whammy_off finished 0, the
+  tail dead, no more sustain points / star whammy) [C 0x8211C9D0] (GD04-108).
 - Miss (0x8211F328): missed_note event (bum_note = a strum happened),
   CrowdDecrease, total_notes+1, current_run := 0 [C 0x8210C800]; if any gem of the
   note is still tagged `star` (0x3624A5EB; no earlier loss of its phrase),
