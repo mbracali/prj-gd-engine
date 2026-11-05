@@ -118,6 +118,7 @@ target_sources(gd04 PRIVATE
   src/ui/fx2d.cpp
   src/ui/front_end.cpp
   src/ui/glitches.cpp
+  src/ui/cut_venues.cpp
   src/ui/menu_objects.cpp
   src/ui/menu_scene.cpp
   src/ui/ui_movies.cpp

@@ -21,7 +21,16 @@ functions is marked [I] where it matters).
   Royal Odeon), z_budokan (Kaiju Megadome), z_dive (Mitch's Moose Lounge),
   z_hell (Lou's Inferno), z_party (Backyard Bash), z_prison (Shanker's
   Island), z_video (Video Shoot), z_wikker (Desert Rock Festival); plus
-  `$debug_only` z_soundcheck, z_credits, z_viewer [C].
+  `$debug_only` z_soundcheck, z_credits, z_viewer [C]. The disc's other
+  zone, z_testlevel_peds, is in no LevelZones entry (a 12-triangle test
+  level) [C data].
+- The port's Enable Cut Content (GD04-095): on quick play's set list (the
+  SETLIST tab; GH3's yellow there does nothing) the yellow button, a VENUE
+  pill, opens GH3's popup (create_popup_warning_menu) with the `$debug_only`
+  venues but z_viewer (no scene): CREDITS, SOUNDCHECK; BACK closes it. The
+  pick replaces quickplay_start_song's random current_level at start_song,
+  for that one song (ui/cut_venues.cpp). z_credits plays with the guitarist
+  alone (create_band's z_credits branch) [C script]. Walk cutvenue.
 - The global `current_level` (default `load_z_artdeco`) names the level;
   `get_level_prefix` maps it to the zone name [C].
 - Quickplay: `quickplay_start_song` (`quickplay_menu_flow.qb`) draws a random

@@ -28,6 +28,7 @@
 #include "game/song_db.h"
 #include "script/globals.h"
 #include "tests/walk.h"
+#include "ui/cut_venues.h"
 #include "ui/front_end.h"
 #include "ui/port_screens.h"
 #include "ui/port_settings.h"
@@ -150,6 +151,7 @@ private:
     long long outroFrames_ = 0;  // frames drawn with the ended song's venue (logged when it ends)
     // GH3's song scripts over the native core (D10; GD04_NO_HOOKS=1: off, the earlier path).
     std::unique_ptr<SongHooks> hooks_;
+    std::unique_ptr<CutVenues> cutVenues_;  // Enable Cut Content's venue pick on quick play's set list (GD04-095)
     std::unique_ptr<Walk> walk_;
     uint64_t lastFrameNs_ = 0;
     bool pauseSeen_ = false;  // GH3's PauseGame came after Start
@@ -276,6 +278,7 @@ void App::menuAction(const InputEvent& ev) {
             return ports_->open(PortScreens::Id::Enhanced);
         }
     }
+    if (cutVenues_ && cutVenues_->button(ev)) return;
     front_->handle(ev);
 }
 
@@ -1391,6 +1394,7 @@ void App::frame() {
                     ++outroFrames_;
                 }
             }
+            if (cutVenues_) cutVenues_->update();
             front_->frame(canvas_, dt);
             if (ports_) ports_->drawItems(canvas_, front_->flowState());
         }
@@ -1515,11 +1519,13 @@ int App::run() {
             ports_->context().action = [this](const std::string& a) { userFileAction(a); };
             if (!envOn("GD04_NO_HOOKS")) hooks_ = std::make_unique<SongHooks>(*front_, mixer_, *disc_, *textures_);
             addVenueScriptCalls();
+            cutVenues_ = std::make_unique<CutVenues>(*front_);
             // A won song's teardown by GH3's scripts: play_outro's destroy_hud
             // (the HUD), disable_bg_viewport's disable_highway (the gem
             // containers and HUDs at alpha 0), then the flow's
             // kill_gem_scroller (the song) [C scripts].
             front_->vm().onScriptEnter = [this](uint32_t name, const qb::Struct&) {
+                if (cutVenues_) cutVenues_->scriptEnter(name);
                 static const uint32_t destroyHud = qbkey::key("destroy_hud"), disableHighway = qbkey::key("disable_highway"),
                                       kill = qbkey::key("kill_gem_scroller");
                 if (!front_ || !front_->songOutro || !song_) return;
