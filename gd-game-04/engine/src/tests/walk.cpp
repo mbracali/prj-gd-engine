@@ -15,6 +15,7 @@
 #include "data/band.h"
 #include "data/json.h"
 #include "data/qbkey.h"
+#include "render/canvas.h"
 #include "script/vm.h"
 #include "ui/front_end.h"
 #include "ui/port_screens.h"
@@ -481,6 +482,11 @@ Walk::Walk(const std::string& name) : name_(name) {
         steps_.push_back({"main_menu_fs", {B, "wait", B, "wait", D, "wait", B, "wait", B, "wait", B}, 10000});
     } else if (name == "boot") {
         steps_ = boot;
+        // No black frame from the press-start screen's first picture to the
+        // main menu (GD04-089: a render target made mid-frame, the backdrop's,
+        // had the frame presented black).
+        steps_[0].keys.insert(steps_[0].keys.begin(), Op("probe:black"));
+        steps_.back().keys = {Op("check:no_black", 1000)};
     } else if (name == "uitest") {
         steps_ = boot;
         uitest_ = true;
@@ -696,6 +702,12 @@ bool Walk::act(const std::string& what, FrontEnd& fe, WalkHost& host) {
         return true;
     }
     if (what == "rclick") return host.walkMouse(640, 360, 3), true;
+    if (what == "probe:black") return Canvas::countBlack = true, Canvas::countBlackLit = false, Canvas::blackFrames = 0, true;
+    if (what == "check:no_black") {  // no all-black frame presented since probe:black (after its first lit one)
+        Canvas::countBlack = false;
+        std::printf("  black frames: %d\n", Canvas::blackFrames);
+        return Canvas::blackFrames == 0 ? true : fail(std::to_string(Canvas::blackFrames) + " black frames presented");
+    }
     if (starts("check:text:")) {  // check:text:<element id>!=<text>: the element's text is not that
         const std::string kv = rest("check:text:");
         const size_t ne = kv.find("!=");

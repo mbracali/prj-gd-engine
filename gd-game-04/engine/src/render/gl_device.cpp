@@ -671,9 +671,14 @@ TargetId GlDevice::createTarget(const TargetDesc& desc, std::string& error) {
         gl::glFramebufferTexture2D(GL_FRAMEBUFFER, desc.stencil ? GL_DEPTH_STENCIL_ATTACHMENT : GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D,
                                    textures_.get(t.depth.id)->name, 0);
     const bool complete = gl::glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
-    gl::glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    targetH_ = 0;
-    target_ = {};
+    // Back to the target that was bound (as copyDepth): a target made in a
+    // frame (the menu backdrop's shadow map and screen FX, uploaded a part a
+    // frame under the press-start screen) had sent the rest of that frame to
+    // the window instead of the internal-resolution frame, which was then
+    // presented black (GD04-089).
+    const GlTarget* cur = targets_.get(target_.id);
+    const GlTarget* frame = frameOn_ ? targets_.get(frame_.id) : nullptr;
+    gl::glBindFramebuffer(GL_FRAMEBUFFER, cur ? cur->fbo : frame ? frame->fbo : 0);
     if (!complete) {
         error = "render target " + std::to_string(width) + "x" + std::to_string(height) + " is incomplete";
         gl::glDeleteFramebuffers(1, &t.fbo);

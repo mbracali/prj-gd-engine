@@ -120,6 +120,11 @@ by the port over everything meanwhile (docs/ui.md §8; refcaps 00a matches).
   => **GetButtonsPressed must return `makes` (nonzero on a new press) and
   `device_num` (the pad index)** [I].
 - action `continue` -> flow_state_func **bootup_check_for_sign_in** [C].
+- The port: the Enhanced menu's venue backdrop loads under this screen and is
+  uploaded a part a frame; a render target made then (its shadow map, screen
+  FX) must not unbind the frame being drawn, or that frame is presented black
+  (GD04-089; the boot walk checks no black frame from here to the main menu).
+  The intro movie's last ~3 s are black in the movie itself [C: its frames].
 - destroy: destroy_menu pab_container, destroy_menu_backdrop, KillSpawnedScript
   check_for_any_input / attract_mode_spawner [C].
 

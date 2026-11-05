@@ -47,6 +47,12 @@ public:
     uint64_t drawNs = 0;
     int drawnFrames = 0;
     int heldFrames = 0;  // frames not presented (end's hold), all told
+    // Walks (probe:black / check:no_black): while on, presented frames that
+    // are all black after a lit one are counted (a black flash between
+    // screens: GD04-089).
+    static inline bool countBlack = false;
+    static inline bool countBlackLit = false;
+    static inline int blackFrames = 0;
 
     // Triangles (three vertices each). `texture` is a gfx::TextureId's id,
     // 0 for plain colour (the vertices' uv are then ignored).

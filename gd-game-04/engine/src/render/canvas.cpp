@@ -106,7 +106,7 @@ bool Canvas::end(bool holdIfEmpty) {
     // brightness (0..255) and the time since the last one, so black or
     // stalled frames between screens can be counted (the transitions).
     static const bool probe = [] { const char* v = SDL_getenv("GD04_FRAMEPROBE"); return v && *v && *v != '0'; }();
-    if (probe) {
+    if (probe || countBlack) {
         static uint64_t lastNs = 0;
         const uint64_t now = SDL_GetTicksNS();
         double luma = -1;
@@ -123,8 +123,13 @@ bool Canvas::end(bool holdIfEmpty) {
             }
             SDL_DestroySurface(s);
         }
-        SDL_Log("frameprobe: %llu at %.0f ms, luma %.1f, %.1f ms since the last (%d held)", (unsigned long long)drawnFrames, double(now) / 1e6, luma,
-                lastNs ? double(now - lastNs) / 1e6 : 0.0, heldFrames);
+        if (probe)
+            SDL_Log("frameprobe: %llu at %.0f ms, luma %.1f, %.1f ms since the last (%d held)", (unsigned long long)drawnFrames, double(now) / 1e6, luma,
+                    lastNs ? double(now - lastNs) / 1e6 : 0.0, heldFrames);
+        if (countBlack && luma >= 0) {
+            if (luma >= 1) countBlackLit = true;
+            else if (countBlackLit) ++blackFrames, SDL_Log("walk: a black frame presented (%d)", blackFrames);
+        }
         lastNs = now;
     }
     renderer_.endFrame();
