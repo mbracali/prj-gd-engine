@@ -174,7 +174,24 @@ clips' own poses already come close (89 pixels changed in the chartest grid).
   `play_special_anim {stance = Stance_A, Anim = Starpower, blendduration =
   0.0, disable_arms = 0}` (e.g. GH3_Guit_Mido_A_Med_Special02), once [C
   scripts]. gd04: VenueStage::starPowerAnim, player 1 the guitarist,
-  player 2 the bassist [I].
+  player 2 the bassist [I]. --chartest checks every guitarist / bassist body
+  has the clip (all 70 playable bodies; the band's own Bassist and the
+  debug BoneMan bodies have none) (GD04-097).
+- Clip events: `ped_animevents.<clip> = [{time scr params}]` runs `scr` at
+  `time` s into a body clip while it plays. The Star Power ones drive the
+  stage FX: Casey's (and Judy's B / C) Star Power clips call
+  StarPower_ShootShotgun (spCaseyShoot -> Do_StarPower_ShotgunFX's shots),
+  Johnny's StarPower_FlameThrowerFlames (spJohnnyFlamesOn / Dur ->
+  Do_StarPower_FlameThrowerFX's flames) [C data, scripts guitar_starpower.qb].
+  gd04: Animator::scheduleClipEvents, spawned on the game VM by
+  SongHooks::step (before 11-05 they never ran: Casey and Johnny had no
+  Star Power FX). The win / lose clips' PreloadWinAnimStream /
+  PlayPreLoadedWinAnimStream (obj_getid: run as the member) are skipped [L].
+  Do_StarPower_StageFX's switch by character_id: Casey shotgun, Johnny
+  flamethrower, Judy hearts, Satan (Lou) bats, Midori butterflies, Xavier
+  peace, Lars and Ripper nothing (empty cases), default (Axel, Izzy, Slash,
+  Morello, the God of Rock) Tesla bolts from the zone's TeslaNodes (none
+  outside the eight zones that have them) [C script].
 - The song's end: `play_win_anims` / `play_lose_anims` (the songwon /
   songlost transitions) run `play_special_anim {stance anim = idle
   blendduration = 0.0}` on the guitarist and bassist (win / lose, or

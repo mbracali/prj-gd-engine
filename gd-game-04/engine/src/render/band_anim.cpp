@@ -590,11 +590,30 @@ void Animator::bodyIteration(double t) {
         body_.play(c, t, bodyBlend_);
         bodyBlend_ = 0.2f;
         bodyKey_ = key;
+        scheduleClipEvents(key, t);
         ++stats_.bodyAnims;
         schedule(t + std::max(kFrameMs, double(c->duration) * 1000.0), Ev::BodyDone, 0, 0, bodyGen_);
     } else {
         schedule(t + kFrameMs, Ev::BodyDone, 0, 0, bodyGen_);  // Wait 1 gameframe [C script]
     }
+}
+
+// ped_animevents.<clip> = [{time scr params}]: each entry's script at `time`
+// s into the clip while it plays (a later body clip cancels the rest) --
+// Casey's / Judy's Star Power anims fire StarPower_ShootShotgun (spCaseyShoot:
+// Do_StarPower_ShotgunFX's shots), Johnny's StarPower_FlameThrowerFlames
+// (spJohnnyFlamesOn: Do_StarPower_FlameThrowerFX's flames) [C data
+// ped_animevents, scripts guitar_starpower.qb; I: times at the clip's own rate].
+void Animator::scheduleClipEvents(uint32_t clipKey, double t) {
+    const qb::Value* all = g_ ? g_->find(K("ped_animevents")) : nullptr;
+    if (!all || !all->st) return;
+    const qb::Value* list = all->st->find(clipKey);
+    if (!list || list->type != qb::Type::Array || !list->arr) return;
+    for (const qb::Value& e : list->arr->values)
+        if (e.type == qb::Type::Struct && e.st) {
+            const qb::Value* at = e.st->find(K("time"));
+            schedule(t + (at ? double(at->number()) : 0.0) * 1000.0, Ev::ClipEvent, 0, 0, bodyGen_, e.st.get());
+        }
 }
 
 void Animator::bodyFinished(double t) {
@@ -732,6 +751,7 @@ void Animator::playClip(uint32_t clipKey, uint32_t stance, bool cycle, double t)
     ++bodyGen_;
     body_.play(c, t, 0.2f);
     bodyKey_ = clipKey;
+    scheduleClipEvents(clipKey, t);
     scriptedClip_ = clipKey, scriptedCycle_ = cycle;
     schedule(t + std::max(kFrameMs, double(c->duration) * 1000.0), Ev::BodyDone, 0, 0, bodyGen_);
 }
@@ -865,6 +885,10 @@ void Animator::handle(const Event& e) {
     }
     case Ev::BodyDone:
         if (e.gen == bodyGen_) bodyFinished(t);
+        break;
+    case Ev::ClipEvent:
+        if (e.gen == bodyGen_ && e.params)
+            if (const uint32_t scr = keyOf(e.params->find(K("scr")))) clipEvents_.push_back({scr, structOf(e.params->find(K("params")))});
         break;
     case Ev::TransitionDone:
         if (e.gen == bodyGen_) {

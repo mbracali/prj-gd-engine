@@ -72,6 +72,16 @@ public:
         for (Entry& e : members_)
             if (e.anim.role() == role) e.anim.playClip(clip, stance, cycle, ms);
     }
+    // The members' due ped_animevents (Animator::clipEvents), taken.
+    std::vector<bandanim::Animator::ClipEvent> takeClipEvents() {
+        std::vector<bandanim::Animator::ClipEvent> out;
+        for (Entry& e : members_) {
+            auto& q = e.anim.clipEvents();
+            out.insert(out.end(), q.begin(), q.end());
+            q.clear();
+        }
+        return out;
+    }
 
     struct Entry {
         std::unique_ptr<band::Model> model;

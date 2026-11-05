@@ -16,9 +16,11 @@
 #include "data/qb.h"
 #include "data/qbkey.h"
 #include "game/match.h"
+#include "render/band.h"
 #include "render/canvas.h"
 #include "render/texture_cache.h"
 #include "render/highway2d.h"
+#include "render/venue_stage.h"
 #include "script/vm.h"
 #include "ui/front_end.h"
 #include "ui/natives_sound.h"
@@ -546,6 +548,16 @@ void SongHooks::step(SongScreen& s, double now) {
         buildInputArray(s, p);
         syncStatus(s, p);
     }
+    // The band's ped_animevents (render/band_anim): each `scr` spawned with
+    // its params -- the Star Power anims' StarPower_ShootShotgun /
+    // StarPower_FlameThrowerFlames (Casey's shots, Johnny's flames: GD04-097).
+    // The win / lose anims' PreloadWinAnimStream / PlayPreLoadedWinAnimStream
+    // run as the member (obj_getid) and are not reproduced [C data ped_animevents].
+    if (VenueStage* venue = s.venue(); venue && venue->band())
+        for (const auto& e : venue->band()->takeClipEvents()) {
+            if (e.scr == K("PreloadWinAnimStream") || e.scr == K("PlayPreLoadedWinAnimStream")) continue;
+            spawnTracked(e.scr, e.params ? *e.params : qb::Struct{}, "ped_animevents", k_.spawned);
+        }
     // current_crowd: player 1's health (two players outside battle / boss: the
     // mean); crossing crowd_poor_medium / crowd_medium_good spawns the crowd's
     // transition sound and its loop change, not in face-off [C 0x8210F200].

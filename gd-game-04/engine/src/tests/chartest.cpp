@@ -168,6 +168,11 @@ struct BodyResult {
     std::string why;
 };
 
+// Guitarist / bassist bodies whose handle_star_power anim (play_special_anim
+// Stance_A Starpower) played, and those without one (GD04-097).
+int g_spAnims = 0;
+std::vector<std::string> g_spMissing;
+
 // Loads, checks, animates (and draws) one member.
 BodyResult testMember(const Disc& disc, const Globals& g, band::Library& lib, const Chart& chart, const band::Member& m, int frames,
                       gfx::Renderer* r, Grid* grid, int& missingTex, int& missingClips, size_t& verts) {
@@ -263,6 +268,17 @@ BodyResult testMember(const Disc& disc, const Globals& g, band::Library& lib, co
     if (!skinBounds(*model, skin, lo, hi)) return {false, "a NaN in the skinned vertices"};
     const float height = hi[1] - lo[1];
     if (a.stats().bodyAnims == 0) res = {false, "no body animation played"};
+    // handle_star_power: play_special_anim stance = Stance_A Anim = Starpower
+    // on the player's member, the same for every character: each playable
+    // body's anim set has the clip (the band's own bassist plays no Star
+    // Power; the debug_only BoneMan bodies have none) [C script].
+    const qb::Value* debugOnly = m.profile ? m.profile->find(K("debug_only")) : nullptr;
+    if (m.role == band::Role::Guitarist && !(debugOnly && debugOnly->number() == 1)) {
+        const int before = a.stats().bodyAnims;
+        a.playSpecial(K("Stance_A"), K("Starpower"), t0 + double(frames) * kStepMs, 0.0f, 0);
+        if (a.stats().bodyAnims > before) ++g_spAnims;
+        else g_spMissing.push_back(label(m));
+    }
     // A body stands between 0.4 and 3.5 m tall (Lou's wings, the drum kit) [I].
     if (!(height > 0.4f && height < 3.5f)) res = {false, "skinned height " + std::to_string(height) + " m"};
     missingClips += int(a.missing().size());
@@ -439,6 +455,8 @@ int runCharTest(const std::string& discPath) {
             else ++loaded;
         }
         std::printf("chartest: %zu bodies: %d loaded, skinned and animated, %d not on the disc\n", all.size(), loaded, notOnDisc);
+        std::printf("chartest: %d playable guitarist bodies play the Star Power anim (handle_star_power)\n", g_spAnims);
+        for (const std::string& who : g_spMissing) fail(who + ": no Starpower anim in Stance_A (handle_star_power)");
     }
     int instLoaded = 0, instMissing = 0;
     {

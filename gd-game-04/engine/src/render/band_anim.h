@@ -145,11 +145,20 @@ public:
     const std::vector<uint32_t>& missing() const { return missing_; }
     uint32_t stance() const { return stance_; }
     uint32_t bodyClip() const { return body_.plays.empty() || !body_.plays.back().clip ? 0 : bodyKey_; }
+    // ped_animevents.<clip>: {time scr params} entries of the body clips
+    // played, due by the last advance (the caller runs `scr` on the game's
+    // VM and clears the list) [C data animevents / ped_animevents].
+    struct ClipEvent {
+        uint32_t scr = 0;
+        const qb::Struct* params = nullptr;
+    };
+    std::vector<ClipEvent>& clipEvents() { return clipEvents_; }
 
 private:
     enum class Ev : uint8_t {
         Strum, Fret, Chord, Perf, DrumArm, Cymbal,                                       // from the song
-        BodyDone, TransitionDone, StrumDone, FaceDone, ChordRelease, ArmDone, Twist  // scheduled
+        BodyDone, TransitionDone, StrumDone, FaceDone, ChordRelease, ArmDone, Twist,  // scheduled
+        ClipEvent                                                                     // ped_animevents
     };
     struct Event {
         double t = 0;
@@ -170,6 +179,8 @@ private:
     const qb::Value* animSet() const;
     const anim::Clip* tempoAnim(uint32_t anim, double t, uint32_t& key);
     void bodyIteration(double t);
+    void scheduleClipEvents(uint32_t clipKey, double t);
+    std::vector<ClipEvent> clipEvents_;
     void bodyFinished(double t);
     void afterStance(double t, bool stanceChanged);
     void setArms(int disable, double t, float blend);
