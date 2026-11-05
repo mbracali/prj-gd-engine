@@ -30,10 +30,10 @@ This is a list of all the planned and already decompiled games. Every game is pl
 
 | id         | Original game                     | Base version  | Done          |
 | ---------- | --------------------------------- | ------------- | ------------- |
-| gd-game-01 | Guitar Hero                       | Playstation 2 | 100% Playable |
-| gd-game-02 | Guitar Hero II                    | Xbox 360      | 100% Playable |
-| gd-game-03 | Guitar Hero Encore: Rocks the 80s | Playstation 2 | 100% Playable |
-| gd-game-04 | Guitar Hero III: Legends of Rock  | Xbox 360      | 55% Playable  |
+| gd-game-01 | Guitar Hero                       | Playstation 2 | 99% Playable  |
+| gd-game-02 | Guitar Hero II                    | Xbox 360      | 99% Playable  |
+| gd-game-03 | Guitar Hero Encore: Rocks the 80s | Playstation 2 | 99% Playable  |
+| gd-game-04 | Guitar Hero III: Legends of Rock  | Xbox 360      | 96% Playable  |
 | gd-game-05 | Rock Band                         | Xbox 360      | Tunning in... |
 | gd-game-06 | Guitar Hero: Aerosmith            | Xbox 360      | --            |
 | gd-game-07 | Guitar Hero World Tour            | Xbox 360      | --            |
@@ -54,6 +54,8 @@ This is a list of all the planned and already decompiled games. Every game is pl
 | gd-game-22 | Guitar Hero On Tour: Modern Hits  | Nintendo DS   | --            |
 | gd-game-23 | Band Hero (DS)                    | Nintendo DS   | --            |
 | gd-game-24 | Rock Band Unplugged               | PSP           | --            |
+| gd-game-25 | DJ Hero                           | Xbox 360      | --            |
+| gd-game-26 | DJ Hero 2                         | Xbox 360      | --            |
 
 
 ## Tools
@@ -78,16 +80,16 @@ prj-gd-engine/
   README.md LICENSE LICENSE-ADDITIONAL-TERMS.md
   .gd-game-00-boilerplate/   the template for a new game folder
   .github/                   workflows and the repo guard
-  gd-backlog.md              THE single backlog (every game, the launcher, releases, the site)
-  guidelines/                the rules for every task (read before working)
-  universal_mechanisms.md    the menus and mechanisms every game has (the owner's reference)
-  spikes/                    studies and spikes (platforms, signing, stores, HDR...)
-  docs/                      the official codebase documentation
-  gd-engine-docs/            the engine codebase (shared engine documentation)
+  docs/                      the official codebase documentation (the engine's shared docs)
+    tasks/gd-backlog.md      THE single backlog (every game, the launcher, releases, the site)
+    tasks/PARITY_GAPS.md     the parity gaps
+    knowledge/               the rules for every task (read before working), the kickoffs
+    knowledge/universal_mechanisms.md  the menus and mechanisms every game has (the owner's reference)
+    spikes/                  studies and spikes (platforms, signing, stores, HDR...)
   gd-engine-launcher/        the Guitar Dream Universal Launcher
   res/                       official Guitar Dream assets (icon)
   original_isos/             your own disc images and ROMs (git-ignored)
-  gd-game-01/ ... gd-game-24/
+  gd-game-01/ ... gd-game-26/
 ```
 
 Every game folder (`gd-game-02` is the model; `gd-game-01` keeps its older
@@ -100,12 +102,12 @@ Guitar Dream version, whether it is ready to play and how complete it is.
 
 # Before you work
 
-Read [guidelines/](guidelines/README.md) (general guidelines, the universal
+Read [docs/knowledge/](docs/knowledge/) (general guidelines, the universal
 launcher rules and the behaviours every game shares),
-[universal_mechanisms.md](universal_mechanisms.md) (the menus and mechanisms
+[docs/knowledge/universal_mechanisms.md](docs/knowledge/universal_mechanisms.md) (the menus and mechanisms
 every game has) and the single backlog
-[gd-backlog.md](gd-backlog.md). Update the backlog at the start and at the end
-of every task. Studies and spikes are in [spikes/](spikes/README.md).
+[docs/tasks/gd-backlog.md](docs/tasks/gd-backlog.md). Update the backlog at the start and at the end
+of every task. Studies and spikes are in [docs/spikes/](docs/spikes/README.md).
 
 # Guitar Dream Universal Launcher
 

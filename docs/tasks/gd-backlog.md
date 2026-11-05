@@ -36,7 +36,7 @@ notes and links).
 [Releases & packaging](#releases--packaging) · [Site](#site) ·
 [All games](#all-games) ·
 [gd-game-01](#gd-game-01-guitar-hero-playstation-2) ·
-[gd-game-02](#gd-game-02-guitar-hero-ii-xbox-360) · gd-game-03 … gd-game-24
+[gd-game-02](#gd-game-02-guitar-hero-ii-xbox-360) · gd-game-03 … gd-game-26
 (one Discovery task each)
 
 
@@ -1015,3 +1015,15 @@ universal launcher, not released on its own.
 | ID | Class | Status | Item | Notes | From |
 |---|---|---|---|---|---|
 | GD24-001 | Original | ❌ | Discovery: the cartridge / UMD and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-24/agent-instructions.md`, [docs/adding-a-game.md](../adding-a-game.md) | New 11-04 |
+
+## gd-game-25: DJ Hero (Xbox 360)
+
+| ID | Class | Status | Item | Notes | From |
+|---|---|---|---|---|---|
+| GD25-001 | Original | ❌ | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-25/agent-instructions.md`, [docs/adding-a-game.md](../adding-a-game.md) | New 11-05 |
+
+## gd-game-26: DJ Hero 2 (Xbox 360)
+
+| ID | Class | Status | Item | Notes | From |
+|---|---|---|---|---|---|
+| GD26-001 | Original | ❌ | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-26/agent-instructions.md`, [docs/adding-a-game.md](../adding-a-game.md) | New 11-05 |

@@ -25,6 +25,8 @@ games:
   - gd-game-22/game-info.yaml
   - gd-game-23/game-info.yaml
   - gd-game-24/game-info.yaml
+  - gd-game-25/game-info.yaml
+  - gd-game-26/game-info.yaml
 
 # Disc signatures for games whose folder cannot carry them in its own
 # game-info.yaml (gd-game-01 is finished and left untouched). Same fields as
