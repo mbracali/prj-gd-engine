@@ -135,7 +135,10 @@ solve as documented]. Targets: `Bone_IK_Hand_Guitar_R` (child of
 `Bone_IK_Foot_Slave_L/R`. The difference clips compose before the pose below
 (the flags 0x200 note above); with the other order the target, and the fret hand
 on it, turned about the wrong axes (owner 2026-11-04: the left hand twisted,
-off the neck). The drummer's and the singer's IK are not done.
+off the neck). The drummer (`Drummer_IK_Params`) and the singer
+(`Singer_IK_Params`) solve the same way onto `Bone_IK_Hand_Slave_L/R` and the
+foot slaves, always at full strength [C data: their trees' ik nodes; I: no arm
+toggles of theirs]. The hinge limits are the cosines above.
 
 `hero_ConstraintBones` (the root of the guitarist's, singer's and drummer's
 trees) [C data; I: the operations]: after the IK, `twist` bones (children of

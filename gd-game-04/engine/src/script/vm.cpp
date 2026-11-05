@@ -368,9 +368,14 @@ struct Exec {
                     const qb::Value key = primary();
                     if (key.type == qb::Type::Key || key.type == qb::Type::KeyPtr) v = member(v, key.key, vm);
                     else v = none();
-                } else if (i < t.size() && t[i].op == kArg) {
+                } else if (i < t.size() && (t[i].op == kArg || t[i].op == kGlobal)) {
+                    // `. <arg> x` / `. $ x`: the field the local's / global's value names
+                    // (create_select_venue_menu's `$ game_mode_names . $ game_mode`: the
+                    // band's tags were never found, so the career's movies never played;
+                    // owner 11-04 doc 1.5) [C data].
                     qb::Value key = primary();
-                    v = member(v, key.key, vm);
+                    if (key.type == qb::Type::Key || key.type == qb::Type::KeyPtr) v = member(v, key.key, vm);
+                    else v = none();
                 }
                 continue;
             }

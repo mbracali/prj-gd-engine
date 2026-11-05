@@ -147,6 +147,18 @@ struct MaterialConstants {
 };
 void fillMaterialConstants(const scene::Material& m, float alphaRef, MaterialConstants& out);
 
+// A material's render state as GH3 sets it (Function_823DC180) [C]: the
+// blend control of +0xd8 (13 modes: 0 opaque, 1 SRC_ALPHA + ONE, 2 its
+// reverse subtract, 3 SRC_ALPHA / INV_SRC_ALPHA, 4 ZERO / SRC_ALPHA, 5
+// DST_COLOR + ONE, 6 DST_COLOR / ZERO, 7 ONE + ONE, 8 SRC_ALPHA /
+// INV_SRC_ALPHA (alpha kept), 9 ONE / INV_SRC_ALPHA, 10 DST_COLOR + ONE,
+// 11 ONE - DST_COLOR reverse subtract, 12 ONE reverse subtract), depth
+// write unless +0xcc & 0x20, the depth test (LESSEQUAL) unless +0xcc &
+// 0x10. Blended materials write depth unless they say not to (the band's
+// hair and the venues' blended meshes drew without it: see-through hair,
+// smoke over the band; owner 11-04 doc 1.2 / 1.3).
+void materialState(uint32_t blendMode, uint32_t flags, gfx::PipelineState& out);
+
 // The vertex layout every GH3-shader mesh uses (attribute locations of
 // xenos::attribLocation).
 struct Vertex {

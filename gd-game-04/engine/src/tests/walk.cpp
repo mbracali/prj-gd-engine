@@ -57,8 +57,10 @@ Walk::Walk(const std::string& name) : name_(name) {
         steps_.push_back({"career_enter_band_name_fs", {C, C, C, Action::Start}, 20000, true});
         steps_.push_back({"career_select_difficulty_fs", {C}, 20000});
         steps_.push_back({"career_select_character_fs", {C}, 20000, true});  // first play
-        steps_.push_back({"career_character_hub_fs", {C}, 20000});
-        steps_.push_back({"career_select_venue_fs", {C}, 20000});
+        // The career's first venue select plays singleplayer_01 and marks the band
+        // (create_select_venue_menu; `$ game_mode_names . $ game_mode`, owner 1.5).
+        steps_.push_back({"career_character_hub_fs", {"check:tag:band1_info_p1_career.first_venue_movie_played=0", "check:global:game_mode=p1_career", C}, 20000});
+        steps_.push_back({"career_select_venue_fs", {"check:tag:band1_info_p1_career.first_venue_movie_played=1", C}, 20000});
         steps_.push_back({"career_setlist_fs", {C}, 20000});
         steps_.push_back({"song", {}, 30000});
         steps_.push_back({"song_over", {}, 600000});
@@ -738,6 +740,11 @@ bool Walk::act(const std::string& what, FrontEnd& fe, WalkHost& host) {
         const std::string kv = rest("check:global:");
         const size_t eq = kv.find('=');
         const qb::Value* v = fe.vm().global(qbkey::key(kv.substr(0, eq).c_str()));
+        // A key value (game_mode = p1_career) compares by name, a number by value.
+        if (v && (v->type == qb::Type::Key || v->type == qb::Type::KeyPtr)) {
+            std::printf("  global: %s = %s\n", kv.substr(0, eq).c_str(), qbkey::name(v->key).c_str());
+            return v->key == qbkey::key(kv.substr(eq + 1).c_str()) ? true : fail("global " + kv);
+        }
         const float got = v ? v->number() : -1;
         std::printf("  global: %s = %g\n", kv.substr(0, eq).c_str(), double(got));
         return got == std::atof(kv.c_str() + eq + 1) ? true : fail("global " + kv);

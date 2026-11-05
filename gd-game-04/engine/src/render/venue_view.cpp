@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
@@ -343,6 +344,7 @@ bool VenueView::init(gfx::RenderDevice& dev, const Disc& disc, const venue::Venu
             }
             it.twoSided = (mat->cc & 8) != 0;
             it.noDepthWrite = (mat->cc & 0x20) != 0;
+            it.blendMode = mat->d8, it.matFlags = mat->cc;
             if (mat->cc & 0x40) it.alphaRef = 0;
             it.unlit = it.mode == Mode::Add;
             it.flare = mat->shader == K("Flare");
@@ -833,26 +835,13 @@ void VenueView::draw(const venue::CamPose& cam, const std::vector<venue::LightSt
             gc.state.stencilRef = uint8_t(std::max<int>(0, it->stencil));
             gc.state.stencilWriteMask = it->stencil >= 0 ? 0xFF : 0;
             gc.state.stencilReplace = it->stencil >= 0;
-            switch (it->mode) {
-            case Mode::Opaque: gc.state.blend = false, gc.state.depthWrite = true; break;
-            case Mode::Blend:
-                gc.state.blend = true, gc.state.depthWrite = false;
-                gc.state.src = gfx::BlendFactor::SrcAlpha, gc.state.dst = gfx::BlendFactor::InvSrcAlpha, gc.state.op = gfx::BlendOp::Add;
-                break;
-            case Mode::Add:
-                gc.state.blend = true, gc.state.depthWrite = false;
-                gc.state.src = gfx::BlendFactor::SrcAlpha, gc.state.dst = gfx::BlendFactor::One, gc.state.op = gfx::BlendOp::Add;
-                break;
-            case Mode::Subtract:
-                gc.state.blend = true, gc.state.depthWrite = false;
-                gc.state.src = gfx::BlendFactor::SrcAlpha, gc.state.dst = gfx::BlendFactor::One, gc.state.op = gfx::BlendOp::ReverseSubtract;
-                break;
-            case Mode::AddOne:
-                gc.state.blend = true, gc.state.depthWrite = false;
-                gc.state.src = gfx::BlendFactor::One, gc.state.dst = gfx::BlendFactor::One, gc.state.op = gfx::BlendOp::Add;
-                break;
+            {
+                // GH3's state for the material (blend mode, depth write / test) [C 823DC180].
+                gfx::PipelineState ms = gc.state;
+                gh3shader::materialState(it->blendMode, it->matFlags, ms);
+                gc.state.blend = ms.blend, gc.state.src = ms.src, gc.state.dst = ms.dst, gc.state.op = ms.op;
+                gc.state.depthWrite = ms.depthWrite, gc.state.depthFunc = ms.depthFunc;
             }
-            if (it->noDepthWrite) gc.state.depthWrite = false;
             if (it->flare && it->housing >= 0) {
                 drawFlare(*it, gc, centreOf(it), cam);
                 ++draws;
@@ -869,28 +858,12 @@ void VenueView::draw(const venue::CamPose& cam, const std::vector<venue::LightSt
         c.uniforms[2] = {&mu, sizeof mu};
         c.state.depthTest = true;
         c.state.depthFunc = gfx::CompareFunc::LessEqual;
-        switch (it->mode) {
-        case Mode::Opaque:
-            c.state.blend = false, c.state.depthWrite = true;
-            break;
-        case Mode::Blend:
-            c.state.blend = true, c.state.depthWrite = false;
-            c.state.src = gfx::BlendFactor::SrcAlpha, c.state.dst = gfx::BlendFactor::InvSrcAlpha, c.state.op = gfx::BlendOp::Add;
-            break;
-        case Mode::Add:
-            c.state.blend = true, c.state.depthWrite = false;
-            c.state.src = gfx::BlendFactor::SrcAlpha, c.state.dst = gfx::BlendFactor::One, c.state.op = gfx::BlendOp::Add;
-            break;
-        case Mode::Subtract:
-            c.state.blend = true, c.state.depthWrite = false;
-            c.state.src = gfx::BlendFactor::SrcAlpha, c.state.dst = gfx::BlendFactor::One, c.state.op = gfx::BlendOp::ReverseSubtract;
-            break;
-        case Mode::AddOne:
-            c.state.blend = true, c.state.depthWrite = false;
-            c.state.src = gfx::BlendFactor::One, c.state.dst = gfx::BlendFactor::One, c.state.op = gfx::BlendOp::Add;
-            break;
+        {
+            gfx::PipelineState ms = c.state;
+            gh3shader::materialState(it->blendMode, it->matFlags, ms);
+            c.state.blend = ms.blend, c.state.src = ms.src, c.state.dst = ms.dst, c.state.op = ms.op;
+            c.state.depthWrite = ms.depthWrite, c.state.depthFunc = ms.depthFunc;
         }
-        if (it->noDepthWrite) c.state.depthWrite = false;
         d.draw(c);
         ++draws;
     }
@@ -979,8 +952,8 @@ void VenueView::drawVolumes(const venue::CamPose& cam, const venue::LightShow& s
         c.textures[k] = (prog->samplers >> k & 1) ? gh3_.white() : gfx::TextureId{};  // m_SmokeTextureSamp: the engine's smoke [I: none]
         c.samplers[k] = {gfx::Filter::Linear, gfx::Wrap::Repeat, 0};
     }
-    c.state.blend = true;
-    c.state.src = gfx::BlendFactor::One, c.state.dst = gfx::BlendFactor::One, c.state.op = gfx::BlendOp::Add;
+    c.state.blend = true;  // GH3's additive, weighed by the shader's alpha (as drawRaytraced's)
+    c.state.src = gfx::BlendFactor::SrcAlpha, c.state.dst = gfx::BlendFactor::One, c.state.op = gfx::BlendOp::Add;
     c.state.depthTest = true, c.state.depthWrite = false;
     c.state.depthFunc = gfx::CompareFunc::LessEqual;
     c.state.cull = gfx::Cull::None;
@@ -1094,8 +1067,13 @@ void VenueView::drawRaytraced(const venue::CamPose& cam, const venue::LightShow&
     c.uniforms[0] = frame;
     for (int k = 0; k < 16; ++k) c.samplers[k] = {gfx::Filter::Linear, gfx::Wrap::Repeat, 0};
     c.samplers[1] = {gfx::Filter::Nearest, gfx::Wrap::Clamp, 0};
+    // GH3's additive (SRC_ALPHA + ONE, its materials' mode 1): the shader's
+    // alpha (path x density x g_ConeColor.w) weighs the beam; ONE + ONE
+    // ignored it and the beams near the camera burnt to white walls over
+    // the band (owner 11-04 doc 1.3) [C: the alpha the shader writes and the
+    // engine fills; I: the blend, Function_823B4B68 sets no blend of its own].
     c.state.blend = true;
-    c.state.src = gfx::BlendFactor::One, c.state.dst = gfx::BlendFactor::One, c.state.op = gfx::BlendOp::Add;
+    c.state.src = gfx::BlendFactor::SrcAlpha, c.state.dst = gfx::BlendFactor::One, c.state.op = gfx::BlendOp::Add;
     c.state.depthTest = false, c.state.depthWrite = false;
     c.state.cull = gfx::Cull::Clockwise;  // keeps the clockwise (far) faces of the outward-wound cone
     const double ms = seconds_ * 1000.0;

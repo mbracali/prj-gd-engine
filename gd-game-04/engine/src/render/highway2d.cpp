@@ -365,8 +365,44 @@ void Highway2D::drawButtons(Canvas& c, const TextureCache& tex, uint8_t held, bo
     }
 }
 
+// Star Power's highway lightning [C script setup_highway: the starpower
+// containers (z 3) hold sidebar_*_glow (SDGLOW, z 0), Lightning02 (Big_Bolt01
+// x (2, 0.9), turned 180, z 0.02) and Lightning01 (x (-0.5, 0.9), rgba
+// 0 0 128 128, z 4); the highway is z 0.1]: the glow and the big bolt go
+// under the highway, the small bolt over it (owner 11-04 doc 1.8: all three
+// were drawn over the fretboard). 8 frames at 15 fps, additive [C 0x8211DA70; frame order I].
+void Highway2D::drawStarPowerFx(Canvas& c, const TextureCache& tex, double now, bool under) const {
+    if (!spOn_) return;
+    const float bottomW = topWidth_ * (1 + widthOffset_);
+    const float stx = cx_ - topWidth_ / 2, sbx = cx_ - bottomW / 2;
+    const float sbX = sbx + (sbx - stx) * 0.25f - sidebarXOffset_, sbY = playline_ + height_ * 0.25f;
+    const float ang = std::atan2(stx - sbx, height_) * 180.0f / float(M_PI);
+    int gw = 128, gh = 512, bw = 1024, bh = 512;
+    tex.size(kSpGlow, gw, gh);
+    tex.size(kBolt, bw, bh);
+    const int frame = int(now / 1000.0 * 15) % 8;
+    const float bu0 = float(frame) / 8, bu1 = bu0 + 1.0f / 8;
+    const float fw = float(bw) / 8, fh = float(bh);
+    for (int side = 0; side < 2; ++side) {
+        const float m = side ? -1.0f : 1.0f;
+        const float px = side ? 2 * cx_ - sbX : sbX, rot = ang * m;
+        if (under) {
+            const float a = rot * float(M_PI) / 180, cs = std::cos(a), sn = std::sin(a);
+            const float lx = -55 * spFxScale_ * m, ly = 55 * spFxScale_;
+            const float ox = px + lx * cs - ly * sn, oy = sbY + lx * sn + ly * cs;
+            sprite(c, kSpGlow, tex, ox, oy, float(gw) * spFxScale_ * m, float(gh) * 1.1f * spFxScale_, 0, 1, rot, SDL_Color{255, 255, 255, 255});
+            sprite(c, kBolt, tex, px, sbY, fw * 2 * spFxScale_, fh * 0.9f * spFxScale_, 0, -1, rot + 180, SDL_Color{255, 255, 255, 255}, bu0, 0, bu1,
+                   1, Blend::Add);
+        } else {
+            sprite(c, kBolt, tex, px, sbY, fw * -0.5f * m * spFxScale_, fh * 0.9f * spFxScale_, 0, -1, rot + 180, SDL_Color{0, 0, 128, 128}, bu0, 0,
+                   bu1, 1, Blend::Add);
+        }
+    }
+}
+
 void Highway2D::drawAll(Canvas& c, const TextureCache& tex, const NoteTrack& track, const Player& player, double now, uint8_t held) {
     const PlayerStats& st = player.stats();
+    drawStarPowerFx(c, tex, now, true);  // the glow and the big bolt (z 0, 0.02) under the highway (z 0.1)
     // The highway surface: one strip per 8 rows, width top_width x (1 +
     // widthOffsetFactor x depth), texture V = row x tiling / 1024 scrolling
     // with the gems (m_velocityV = -tiling / T) [C 0x8238DE48, script Set2DHighwaySpeed].
@@ -442,29 +478,14 @@ void Highway2D::drawAll(Canvas& c, const TextureCache& tex, const NoteTrack& tra
         const float stx = cx_ - topWidth_ / 2, sbx = cx_ - bottomW / 2;
         const float sbX = sbx + (sbx - stx) * 0.25f - sidebarXOffset_, sbY = playline_ + height_ * 0.25f;
         const float ang = std::atan2(stx - sbx, height_) * 180.0f / float(M_PI);  // sidebar_angle (clockwise)
-        int gw = 128, gh = 512, bw = 1024, bh = 512;
-        tex.size(kSpGlow, gw, gh);
-        tex.size(kBolt, bw, bh);
-        const int frame = int(now / 1000.0 * 15) % 8;
-        const float bu0 = float(frame) / 8, bu1 = bu0 + 1.0f / 8;
         for (int side = 0; side < 2; ++side) {
             const float m = side ? -1.0f : 1.0f;
             const float px = side ? 2 * cx_ - sbX : sbX, rot = ang * m;
             sprite(c, kSidebar, tex, px, sbY, float(tw) * sidebarXScale_ * m, float(th) * sidebarYScale_, 0, 1, rot, col, 0, 0, 1, 1, Blend::Alpha,
                    true);
-            if (!spOn_) continue;
-            const float a = rot * float(M_PI) / 180, cs = std::cos(a), sn = std::sin(a);
-            auto child = [&](float lx, float ly, float& ox, float& oy) { ox = px + lx * cs - ly * sn, oy = sbY + lx * sn + ly * cs; };
-            float ox, oy;
-            child(-55 * spFxScale_ * m, 55 * spFxScale_, ox, oy);
-            sprite(c, kSpGlow, tex, ox, oy, float(gw) * spFxScale_ * m, float(gh) * 1.1f * spFxScale_, 0, 1, rot, SDL_Color{255, 255, 255, 255});
-            const float fw = float(bw) / 8, fh = float(bh);
-            sprite(c, kBolt, tex, px, sbY, fw * 2 * spFxScale_, fh * 0.9f * spFxScale_, 0, -1, rot + 180, SDL_Color{255, 255, 255, 255}, bu0, 0, bu1,
-                   1, Blend::Add);
-            sprite(c, kBolt, tex, px, sbY, fw * -0.5f * m * spFxScale_, fh * 0.9f * spFxScale_, 0, -1, rot + 180, SDL_Color{0, 0, 128, 128}, bu0, 0,
-                   bu1, 1, Blend::Add);
         }
     }
+    drawStarPowerFx(c, tex, now, false);  // Lightning01 (z 4) over the highway
     // The now-bar buttons at rest (z 3.6 .. 3.9) under the tails and gems.
     drawButtons(c, tex, held, false);
     // Sustain tails, then gems, back to front [C z: tails 4.0, gems 4.1].

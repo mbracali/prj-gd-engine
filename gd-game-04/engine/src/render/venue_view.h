@@ -95,6 +95,7 @@ private:
         Mode mode = Mode::Opaque;
         float alphaRef = 0, drawOrder = 0;
         bool twoSided = false, noDepthWrite = false;  // +0xcc & 8 (cull none), & 0x20 (no z write) [C 823DC180]
+        uint32_t blendMode = 0, matFlags = 0;          // +0xd8, +0xcc (gh3shader::materialState)
         int8_t stencil = -1;      // the material's stencil reference (+0xdc; -1: none, +0xcc & 0x80) [C 823DC180]
         bool unlit = false;
         const gh3shader::Program* gh3 = nullptr;  // the template's program (null: the approximation)

@@ -50,7 +50,8 @@ struct PostSettings {
     AA aa = AA::None;
     bool fsr1 = false;      // AI Upscaling: FSR 1
     float fsrScale = 1;     // its render scale: 1 / 1.5, 1 / 1.7, 1 / 2
-    int bloom = 0;          // 0 none, 1 original, 2 2x, 3 3x
+    int bloom = 0;          // the port's glow over GH3's: 0 none, 2 2x, 3 3x
+    bool gameBloom = true;  // GH3's own simple_bloom (Enhanced > Bloom: None turns it off)
     bool cinematic = false; // filmic curve, grade and vignette
     int grade = 0;          // 0 off, 1 warm, 2 cold, 3 vintage, 4 noir, 5 neon, 6 sepia
     int grain = 0;          // 0 none, 1 light, 2 medium, 3 strong, 4 stronger

@@ -31,7 +31,9 @@ optionally `default`.
   (all the caller's parameters), inline structs (merged; `$global` items in
   them resolve at call time [I]), positional values.
 - Values: literals; a bare name is a key; `<arg> x` a local; `$x` a global
-  (`$<arg> x`: the global named by a local's key); `.field`, `[index]`;
+  (`$<arg> x`: the global named by a local's key); `.field`, `[index]`,
+  `. <arg> x` / `. $ x` (the field a local's / global's key value names:
+  `$ game_mode_names . $ game_mode`);
   `( expr )` with `* /` over `+ -` over comparisons over `and` / `or`;
   inside parentheses `=` compares [C data: `( <arg> player = 1 )`].
 - An `if` condition is a call (`if not GuitarInputLogicPerFrame player =

@@ -270,4 +270,35 @@ const gfx::VertexLayout& vertexLayout() {
     return l;
 }
 
+void materialState(uint32_t blendMode, uint32_t flags, gfx::PipelineState& out) {
+    using F = gfx::BlendFactor;
+    using O = gfx::BlendOp;
+    // The Xenos blend control word per mode (colour: src bits 0-4, op 5-7, dst 8-12).
+    static const uint32_t kControl[13] = {0x10001,   0x1060106, 0x1860186, 0x7060706, 0x6000600, 0x1080108, 0x10008,
+                                          0x1010101, 0x10706,   0x10701,   0x10108,   0x10189,   0x1810181};
+    const uint32_t w = blendMode < 13 ? kControl[blendMode] : kControl[0];
+    auto factor = [](uint32_t f) {
+        switch (f) {
+        case 0: return F::Zero;
+        case 1: return F::One;
+        case 4: return F::SrcColor;
+        case 5: return F::InvSrcColor;
+        case 6: return F::SrcAlpha;
+        case 7: return F::InvSrcAlpha;
+        case 8: return F::DstColor;
+        case 9: return F::InvDstColor;
+        case 10: return F::DstAlpha;
+        case 11: return F::InvDstAlpha;
+        default: return F::One;
+        }
+    };
+    const uint32_t src = w & 31, op = (w >> 5) & 7, dst = (w >> 8) & 31;
+    out.blend = !(src == 1 && dst == 0 && op == 0);
+    out.src = factor(src), out.dst = factor(dst);
+    out.op = op == 1 ? O::Subtract : op == 4 ? O::ReverseSubtract : O::Add;
+    out.depthWrite = (flags & 0x20) == 0;
+    out.depthTest = true;
+    out.depthFunc = (flags & 0x10) ? gfx::CompareFunc::Always : gfx::CompareFunc::LessEqual;
+}
+
 }  // namespace gh3shader

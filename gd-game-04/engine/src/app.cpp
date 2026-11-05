@@ -641,7 +641,10 @@ void App::applyEnhanced(const std::string& key) {
         ps.aa = gfx::PostSettings::AA(idx("antialiasing", {"none", "fxaa", "ssaa", "taa"}));
         ps.fsr1 = enhanced_.get("ai_upscaling") == "fsr1";
         ps.fsrScale = 1.0f / std::array<float, 3>{1.5f, 1.7f, 2.0f}[size_t(idx("ai_upscaling_mode", {"quality", "balanced", "performance"}))];
+        // Bloom: None turns GH3's own off; Original is GH3's alone; 2x / 3x add the port's glow over it.
+        ps.gameBloom = enhanced_.get("bloom") != "none";
         ps.bloom = idx("bloom", {"none", "original", "2x", "3x"});
+        if (ps.bloom == 1) ps.bloom = 0;
         ps.cinematic = enhanced_.on("cinematic_color");
         ps.grade = idx("color_grade", {"off", "warm", "cold", "vintage", "noir", "neon", "sepia"});
         ps.grain = idx("film_grain", {"none", "light", "medium", "strong", "stronger"});
@@ -1287,7 +1290,10 @@ int App::run() {
 #ifdef __ANDROID__
     flags |= SDL_WINDOW_FULLSCREEN;
 #endif
-    window_ = SDL_CreateWindow(app::kWindowTitle, int(kScreenW), int(kScreenH), flags);
+    int winW = int(kScreenW), winH = int(kScreenH);
+    // GD04_WINDOW_SIZE=<w>x<h>: another window size (development aid: other aspect ratios).
+    if (const char* ws = SDL_getenv("GD04_WINDOW_SIZE")) std::sscanf(ws, "%dx%d", &winW, &winH);
+    window_ = SDL_CreateWindow(app::kWindowTitle, winW, winH, flags);
     // Touch: window-normalised positions to menu units (windowToMenu, the 16:9 picture).
     input_.setTouchToMenu([this](float nx, float ny, float& mx, float& my) {
         int ww = 0, wh = 0;

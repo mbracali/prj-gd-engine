@@ -82,6 +82,7 @@ private:
         Mode mode = Mode::Opaque;
         float alphaRef = 0;
         int8_t stencil = -1;  // the material's stencil reference (+0xdc; -1: none) [C 823DC180]
+        uint32_t blendMode = 0, matFlags = 0;  // +0xd8, +0xcc (gh3shader::materialState)
         const gh3shader::Program* gh3 = nullptr;
         const gh3shader::Program* receiver = nullptr;  // its DynamicShadowReciever technique (null: none)
         int mat = -1;  // index into mats_

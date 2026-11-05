@@ -183,6 +183,11 @@ z_priority (within the container; children of sub-containers order inside their 
   (1, 1.1)*fx (right (-1,1.1)), just [center bottom], z 0; lightning `sys_Big_Bolt01`
   (0x9D12571C, 1024x512 = 8 frames) rot 180, just [center top]: #1 rgba [0,0,128,128] scale
   (-0.5, 0.9)*fx (right (0.5,0.9)) z 4; #2 white scale (2, 0.9)*fx z 0.02 [C].
+  The highway surface is z 0.1, so the glow (z 0) and the big white bolt (z 0.02) draw under
+  it and only the small dark bolt (z 4) over it; gd04 draws them so
+  (Highway2D::drawStarPowerFx; they were all over the fretboard before, owner 2026-11-04).
+- A lost Star Power phrase (a star note missed) draws its gems as normal gems
+  (star_miss_note) [C 0x8211F56C].
 - Colours (`set_sidebar_flash`, run on every beat fretbar as it reaches the playline, i.e.
   fretbar_iterator with time_offset gem_offset -> GuitarEvent_Fretbar) [C script]: beat_flip
   toggles each beat; state priority: SP active -> sidebar_starpower; else dying (health <=

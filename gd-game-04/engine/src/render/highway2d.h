@@ -125,6 +125,7 @@ private:
     // A sprite turned by `rotDeg` (clockwise) about its anchor (just jx, jy in -1..1); w / h may be negative (mirrored).
     void sprite(Canvas& c, uint32_t texKey, const TextureCache& tex, float x, float y, float w, float h, float jx, float jy, float rotDeg,
                 SDL_Color col, float u0 = 0, float v0 = 0, float u1 = 1, float v1 = 1, Blend blend = Blend::Alpha, bool fade = false) const;
+    void drawStarPowerFx(Canvas& c, const TextureCache& tex, double now, bool under) const;
     void drawButtons(Canvas& c, const TextureCache& tex, uint8_t held, bool raised) const;
     SDL_Color surfaceTint(double now) const;
 

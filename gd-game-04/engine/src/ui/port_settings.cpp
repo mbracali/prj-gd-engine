@@ -32,7 +32,7 @@ const std::vector<EnhancedSetting>& enhancedSettings() {
         {"ai_upscaling_mode", {"quality", "balanced", "performance"}},
         {"bokeh", {"medium", "none", "light", "strong", "stronger"}},
         {"particles", {"original", "none", "2x"}},
-        {"bloom", {"none", "original", "2x", "3x"}},
+        {"bloom", {"original", "none", "2x", "3x"}},  // Original: GH3's own bloom alone (version 2)
         {"cinematic_color", {"off", "on"}},
         {"color_grade", {"off", "warm", "cold", "vintage", "noir", "neon", "sepia"}},
         {"film_grain", {"none", "light", "medium", "strong", "stronger"}},
@@ -101,6 +101,7 @@ const Values& lowest() {
 Values originalLook() {
     Values v = lowest();
     v["bokeh"] = "medium";  // GH3's own depth of field
+    v["bloom"] = "original";  // and its own bloom
     v["particles"] = "original";
     return v;
 }
@@ -170,9 +171,15 @@ void EnhancedStore::load(const std::string& dir) {
     ss << in.rdbuf();
     try {
         const Json root = Json::parse(ss.str());
+        const int version = root["version"].type == Json::Type::Number ? int(root["version"].n) : 0;
         for (const auto& [k, v] : root["settings"].o) {
             const EnhancedSetting* s = enhancedSetting(k);
-            const std::string value = migrateEnhancedValue(k, v.type == Json::Type::Number ? std::to_string(long(v.n)) : v.str());
+            std::string value = migrateEnhancedValue(k, v.type == Json::Type::Number ? std::to_string(long(v.n)) : v.str());
+            // Version 2: Bloom's Original is GH3's own bloom alone (it was
+            // the port's glow over it, and None left GH3's on): version 1's
+            // none and original both become Original (owner 11-04 doc 1.3:
+            // the doubled bloom burnt the stage lights white).
+            if (k == "bloom" && version < 2 && (value == "none" || value == "original")) value = "original";
             if (s && enhancedValid(*s, value)) values_[k] = value;
         }
     } catch (const std::exception& e) {
@@ -195,7 +202,7 @@ void EnhancedStore::set(const std::string& key, const std::string& value) {
 void EnhancedStore::save() const {
     if (dir_.empty()) return;
     Json root = Json::object(), settings = Json::object();
-    root.set("version", Json::number(1));
+    root.set("version", Json::number(2));
     for (const auto& [k, v] : values_) settings.set(k, Json::string(v));
     root.set("settings", settings);
     std::error_code ec;

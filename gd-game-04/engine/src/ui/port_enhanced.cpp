@@ -182,8 +182,8 @@ std::vector<Item> buildItems(qs::Vm& vm) {
          "(the gameplay is the same); 2x emits twice as many.",
          {{"none", "None"}, {"original", "Original"}, {"2x", "2x"}}},
         {Kind::Choice, "bloom", "Bloom", true,
-         "A soft glow around the brightest lights of the venue, over the original game's own. Original is a gentle glow; "
-         "2x and 3x are stronger.",
+         "The glow around the venue's brightest lights. Original: the original game's own bloom, as on the Xbox 360. "
+         "None turns it off; 2x and 3x add a stronger glow over it.",
          {{"none", "None"}, {"original", "Original"}, {"2x", "2x"}, {"3x", "3x"}}},
         {Kind::Check, "cinematic_color", "Cinematic Color", true,
          "A filmic colour curve with a gentle grade and vignette on the venue, for a richer, more cinematic image."},

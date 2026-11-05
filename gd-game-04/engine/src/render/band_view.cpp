@@ -243,6 +243,7 @@ int BandView::add(gfx::RenderDevice& dev, const band::Model& model, std::string&
                 // the band always is); +0xcc & 0x40 turns the alpha test off [C].
                 out.mode = mat->d8 == 1 ? Mode::Add : mat->d8 == 0 ? Mode::Opaque : Mode::Blend;
                 if (mat->cc & 0x40) out.alphaRef = 0;
+                out.blendMode = mat->d8, out.matFlags = mat->cc;
                 // GH3's template: material constants and its textures in sampler order.
                 if (gh3_.ready())
                     if (const gh3shader::Program* gp = gh3_.get(mat->shader)) {
@@ -492,16 +493,14 @@ void BandView::draw(const venue::CamPose& cam, const std::vector<Instance>& inst
                 gc.state.stencilRef = uint8_t(std::max<int>(0, mesh.stencil));
                 gc.state.stencilWriteMask = gc.state.stencilTest ? 0xFF : 0;
                 gc.state.stencilReplace = gc.state.stencilTest;
-                switch (mesh.mode) {
-                case Mode::Opaque: gc.state.blend = false, gc.state.depthWrite = true; break;
-                case Mode::Blend:
-                    gc.state.blend = true, gc.state.depthWrite = false;
-                    gc.state.src = gfx::BlendFactor::SrcAlpha, gc.state.dst = gfx::BlendFactor::InvSrcAlpha, gc.state.op = gfx::BlendOp::Add;
-                    break;
-                case Mode::Add:
-                    gc.state.blend = true, gc.state.depthWrite = false;
-                    gc.state.src = gfx::BlendFactor::SrcAlpha, gc.state.dst = gfx::BlendFactor::One, gc.state.op = gfx::BlendOp::Add;
-                    break;
+                {
+                    // GH3's state for the material: its blend mode, and depth
+                    // written unless +0xcc & 0x20 (the hair layers) [C 823DC180].
+                    gfx::PipelineState ms = gc.state;
+                    gh3shader::materialState(mesh.blendMode, mesh.matFlags, ms);
+                    gc.state.blend = ms.blend, gc.state.src = ms.src, gc.state.dst = ms.dst, gc.state.op = ms.op;
+                    gc.state.depthWrite = ms.depthWrite;
+                    gc.state.depthFunc = ms.depthFunc;
                 }
                 d.draw(gc);
                 ++draws;
@@ -511,16 +510,11 @@ void BandView::draw(const venue::CamPose& cam, const std::vector<Instance>& inst
             MatUniforms mu{{mesh.mode == Mode::Opaque ? std::max(mesh.alphaRef, 0.0f) : std::max(mesh.alphaRef, 0.02f),
                             mesh.mode == Mode::Add ? 1.0f : 0.0f, 0, 0}};
             c.uniforms[2] = {&mu, sizeof mu};
-            switch (mesh.mode) {
-            case Mode::Opaque: c.state.blend = false, c.state.depthWrite = true; break;
-            case Mode::Blend:
-                c.state.blend = true, c.state.depthWrite = false;
-                c.state.src = gfx::BlendFactor::SrcAlpha, c.state.dst = gfx::BlendFactor::InvSrcAlpha, c.state.op = gfx::BlendOp::Add;
-                break;
-            case Mode::Add:
-                c.state.blend = true, c.state.depthWrite = false;
-                c.state.src = gfx::BlendFactor::SrcAlpha, c.state.dst = gfx::BlendFactor::One, c.state.op = gfx::BlendOp::Add;
-                break;
+            {
+                gfx::PipelineState ms = c.state;
+                gh3shader::materialState(mesh.blendMode, mesh.matFlags, ms);
+                c.state.blend = ms.blend, c.state.src = ms.src, c.state.dst = ms.dst, c.state.op = ms.op;
+                c.state.depthWrite = ms.depthWrite, c.state.depthFunc = ms.depthFunc;
             }
             d.draw(c);
             ++draws;

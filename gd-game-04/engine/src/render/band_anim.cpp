@@ -378,26 +378,37 @@ bool Animator::init(const Setup& s, std::string& error) {
     fingerAnims_ = prof ? structOf(g.find(keyOf(prof->find(K("finger_anims"))))) : nullptr;
     fretAnims_ = prof ? structOf(g.find(keyOf(prof->find(K("fret_anims"))))) : nullptr;
 
-    // IK chains: ik_params (Hero_Ik_params): the arms onto the guitar's hand bones and the legs
-    // onto the foot slaves [C data].
+    // IK chains: the tree's ik node's two_bone_chains: the guitarist's
+    // `$ik_params` (the profile's, else Hero_Ik_params: the arms onto the
+    // guitar's hand bones, the legs onto the foot slaves), the drummer's
+    // Drummer_IK_Params and the singer's Singer_IK_Params (the hands onto
+    // Bone_IK_Hand_Slave_L/R, the feet onto the foot slaves) [C data
+    // guitarist / drummer / vocalist_static_tree]. Owner 11-04 doc 1.2 / 2:
+    // the drummer and the singer had none.
     chains_.clear();
-    if (guitarLike()) {
-        uint32_t ikKey = prof ? keyOf(prof->find(K("ik_params"))) : 0;
-        if (!ikKey) ikKey = K("hero_ik_params");
-        if (const qb::Value* ik = g.find(ikKey); ik && ik->type == qb::Type::Array && ik->arr)
+    {
+        uint32_t ikKey = 0;
+        if (guitarLike()) {
+            ikKey = prof ? keyOf(prof->find(K("ik_params"))) : 0;
+            if (!ikKey) ikKey = K("hero_ik_params");
+        } else if (role_ == band::Role::Drummer) {
+            ikKey = K("drummer_ik_params");
+        } else if (role_ == band::Role::Vocalist) {
+            ikKey = K("singer_ik_params");
+        }
+        if (const qb::Value* ik = ikKey ? g.find(ikKey) : nullptr; ik && ik->type == qb::Type::Array && ik->arr)
             for (const qb::Value& e : ik->arr->values) {
                 const qb::Struct* st = structOf(&e);
                 if (!st) continue;
                 const uint32_t tgt = keyOf(st->find(K("bonetarget")));
                 const bool leg = tgt == K("bone_ik_foot_slave_l") || tgt == K("bone_ik_foot_slave_r");
-                if (tgt != K("bone_ik_hand_guitar_l") && tgt != K("bone_ik_hand_guitar_r") && !leg) continue;
                 Chain c;
                 c.leg = leg;
                 c.b0 = rig_.find(keyOf(st->find(K("bone0"))));
                 c.b1 = rig_.find(keyOf(st->find(K("bone1"))));
                 c.b2 = rig_.find(keyOf(st->find(K("bone2"))));
                 c.target = rig_.find(tgt);
-                c.right = tgt == K("bone_ik_hand_guitar_r");
+                c.right = tgt == K("bone_ik_hand_guitar_r") || tgt == K("bone_ik_hand_slave_r");
                 if (const qb::Value* h = st->find(K("hingeaxis")); h && h->type == qb::Type::Vector) c.hinge = {h->f[0], h->f[1], h->f[2]};
                 if (const qb::Value* v = st->find(K("cosmaxhingeangle"))) c.cosMax = float(v->number());
                 if (const qb::Value* v = st->find(K("cosminhingeangle"))) c.cosMin = float(v->number());
@@ -981,7 +992,9 @@ void Animator::evaluate(double ms, std::vector<Mat34>& world, std::vector<Mat34>
     if (!chains_.empty()) {
         bool changed = false;
         for (const Chain& c : chains_) {
-            const float s = c.leg ? 1.0f : c.right ? rightStrength_.at(ms) : leftStrength_.at(ms);  // the legs always [I]
+            // The legs and the drummer's / singer's arms always; the guitarists'
+            // arms by hero_toggle_arms' strength [I: the others' toggles].
+            const float s = c.leg || !guitarLike() ? 1.0f : c.right ? rightStrength_.at(ms) : leftStrength_.at(ms);
             if (s <= 0) continue;
             const Vec A = posOf(world[size_t(c.b0)]), B = posOf(world[size_t(c.b1)]), C = posOf(world[size_t(c.b2)]);
             const Vec T = posOf(world[size_t(c.target)]);

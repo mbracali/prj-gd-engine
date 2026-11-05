@@ -504,8 +504,23 @@ them like the lights [I].
   (-, k^2, 2ak, a^2) for the cone x^2 + y^2 = (a + kz)^2 (read from the
   shader's quadratic), m_Texture s0 (the smoke), g_DepthBufferTexture s1:
   the chord through the cone in front of the scene's depth x the colour x
-  the smoke. gd04 draws it additively, far faces, no depth test, over a
-  copy of the scene's depth [I: the states].
+  the smoke. gd04 draws it additively weighed by the shader's alpha
+  (SRC_ALPHA + ONE, GH3's materials' additive mode: the alpha it writes is
+  path x density x g_ConeColor.w), far faces, no depth test, over a copy of
+  the scene's depth [I: the states; Function_823B4B68 sets cull only, and
+  sys_raytracecone's own material is opaque]. The cone impostors the same
+  (their shader writes factor x g_ConeColor.w x the smoke's alpha). ONE +
+  ONE ignored the alpha and burnt the beams near the camera white.
+- Materials' render states (Function_823DC180) [C]: +0xd8 picks one of 13
+  blend controls (gh3shader::materialState), +0xcc & 0x20 turns depth
+  writes off (blended meshes write depth otherwise: the band's hair layers),
+  & 0x10 the depth test, & 0x40 the alpha test (ref = +0xe8's top byte), & 8
+  cull none, & 0x80 the stencil; +0xdc the stencil value (the bloom's
+  material filter). gd04's venue and band renderers use them.
+- Enhanced > Bloom (version 2 of enhanced.json): None turns GH3's own
+  simple_bloom off, Original is GH3's alone, 2x / 3x add the port's glow
+  over it (Original used to add the port's glow over GH3's, which doubled
+  the bloom and burnt the stage lights white).
 - Projectors [C: Function_823B4B68 823B6D74..823B7354, the shaders]:
   `stageonly`: the beam's frustum (a quad at the housing with the start
   radius along its x / y, one at `range` along the beam with the end

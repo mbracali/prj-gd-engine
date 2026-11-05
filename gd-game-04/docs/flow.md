@@ -274,10 +274,15 @@ runs first), `func = quickplay_start_song`, flow_state **quickplay_play_song_fs*
   (split_text_into_array_elements, StringToCharArray) + jiggle script.
   The port plays the movie on its texture slot behind the tip and holds the
   script at `wait_until_rendered` until the first picture is drawn (docs/ui.md
-  §8) [I], so the 10a screen shows; it is then destroyed within a frame or two
-  (the port's pak loads finish at once) and the song's own load runs after it,
-  in one long frame of the app's - the 360 shows LOADING for about 2 s
-  (refcaps 10a at 1.0 s, 10b fly-by at 2.9 s).
+  §8) [I], so the 10a screen shows. The native start_gem_scroller asks the
+  app for the song's venue at once (FrontEnd::preloadRequest): it loads on a
+  worker thread from a snapshot of the globals (ui/song_screen.h
+  VenuePreload) while the loading screen animates, and the script waits
+  until the song has started before going on, as GH3's start_gem_scroller
+  returns after its async loads; destroy_loading_screen comes with the song.
+  Paks, the animation library and loaded characters are shared caches. The
+  360 shows LOADING for about 2 s (refcaps 10a at 1.0 s, 10b fly-by at 2.9 s);
+  the port holds it 2 s at least (GD04-040).
 - `quickplay_start_song` [C]: cs_get_total_guitarists, GetRandomValue ->
   random guitarist (character_id, style 1, outfit 1); random guitar from
   Bonus_Guitars + Secret_Guitars with `unlocked_for_purchase` (GetGlobalTags,

@@ -225,6 +225,7 @@ void addCoreNatives(Vm& vm) {
             if (it.name == 0 && (it.value.type == qb::Type::String || it.value.type == qb::Type::WString)) f = &it.value;
         if (!f || run.frames.empty()) return false;
         const std::string text = format(f->str, p, v);
+        if (static const bool fl = SDL_getenv("GD04_FMTLOG") != nullptr; fl) SDL_Log("FormatText '%s' -> '%s'", f->str.c_str(), text.c_str());
         if (!run.frames.back().locals) run.frames.back().locals = std::make_shared<qb::Struct>();
         if (const qb::Value* c = Vm::param(p, K("checksumName"))) {
             qbkey::names().add(text);
