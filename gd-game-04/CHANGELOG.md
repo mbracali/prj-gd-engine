@@ -5,6 +5,8 @@ All notable changes for players. Versions follow SemVer; release tags are
 
 ## [Unreleased]
 
+## [0.0.4] - 2026-11-05
+
 ### Added
 - The band's shadows use GH3's two shadow cascades: sharper shadows near the camera, fading out 13-16 m away as on the 360 (GD04-106).
 - Practice's Slow / Slower / Slowest speeds work: the section plays slowed (the guitar at its own pitch, the band silent, as GH3), with the notes, the highway, the venue and the intro sounds in step at every speed; the band leaves the stage and the section's name shows over the song, as GH3's practice (GD04-100).

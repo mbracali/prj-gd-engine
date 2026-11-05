@@ -5,6 +5,8 @@ All notable changes for players. Versions follow SemVer; release tags are
 
 ## [Unreleased]
 
+## [0.0.5] - 2026-11-05
+
 ### Added
 - Max FPS: 144 (#57).
 - Enhanced > Reset Calibration: sets the audio and video delays back to 0 ms (#47).

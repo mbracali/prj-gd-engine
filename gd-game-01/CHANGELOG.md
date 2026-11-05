@@ -6,6 +6,8 @@ matches the tag's version.
 
 ## [Unreleased]
 
+## [1.1.10] - 2026-11-05
+
 ### Added
 - Max FPS: 144 (#57).
 - Enhanced > Reset Calibration: sets the audio and video delays back to 0 ms (#47).
