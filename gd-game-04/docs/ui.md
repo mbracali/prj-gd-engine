@@ -257,6 +257,18 @@ orange those frets. The pause menu takes the mouse again (hover, click, the
 pills) while the song is paused. Walk pausequit clicks UP/DOWN's lower half
 and SELECT (QUIT); walk mouse clicks BACK.
 
+The help bar's layout (user_control_build_pills, user_control_auto_center)
+[C scripts]: every pill as wide as the widest glyph + text, the row centred
+on x 640, user_control_pill_gap x user_control_pill_scale (0.4) between the
+bodies, the ends (Control_pill_end, 50 x 0.4) outside them, the row narrowed
+to action_safe_width_for_helpers (925); glyph and text centred on the pill.
+The set list's helpers are GH3's five (setlist_show_helperbar: UP/DOWN,
+SELECT, BACK and the other two tabs; create_sl_assets sets the gap to 100);
+the port adds none there (GD04-107). The port's own screens (GAMEPADS,
+Enhanced Options) draw SELECT / BACK / UP/DOWN with the same numbers, fonts
+and textures, in the user_control_pill_color / _text_color the screen below
+left (ui/port_screens.cpp helpLayout; GD04-110).
+
 VMenu/HMenu event handling [C 0x823164E0]:
 - new_menu focuses its VMenu before the items exist: the first focusable
   item added takes the focus at the menu's next update or event, once the
