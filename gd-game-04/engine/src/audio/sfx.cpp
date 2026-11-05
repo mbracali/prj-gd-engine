@@ -12,6 +12,7 @@
 #include "audio/audio_device.h"
 #include "audio/sound_buss.h"
 #include "audio/xma_decoder.h"
+#include "audio/xma_stream.h"
 #include "data/disc.h"
 #include "data/fsb.h"
 #include "data/pak.h"
@@ -39,6 +40,9 @@ bool Sfx::open(std::string& error) {
 
 void Sfx::close() {
     stopAll();
+    for (auto& j : jobs_)
+        if (j->thread.joinable()) j->thread.join();
+    jobs_.clear();
     if (device_) SDL_CloseAudioDevice(device_);
     device_ = 0;
 }
@@ -75,6 +79,88 @@ void Sfx::addFsb(const Disc& disc, const std::string& fsbPath, const std::string
     }
 }
 
+namespace {
+// A RIFF entry's XMA data (and its rate and channels into the entry's fields).
+bool riffData(const Bytes& d, int& rate, int& channels, const uint8_t*& data, size_t& dataSize) {
+    data = nullptr, dataSize = 0;
+    if (d.size() < 12 || std::memcmp(d.data(), "RIFF", 4) != 0) return false;
+    for (size_t o = 12; o + 8 <= d.size();) {
+        const uint32_t size = le32(d.data() + o + 4);
+        if (o + 8 + size > d.size()) break;
+        if (std::memcmp(d.data() + o, "fmt ", 4) == 0 && size >= 32) {
+            const uint8_t* f = d.data() + o + 8;
+            rate = int(le32(f + 12 + 4));
+            channels = f[12 + 17];
+            if (rate < 8000 || rate > 96000) rate = 44100;
+            if (channels < 1 || channels > 2) channels = le16(f + 2) == 2 ? 2 : 1;
+        } else if (std::memcmp(d.data() + o, "data", 4) == 0) {
+            data = d.data() + o + 8;
+            dataSize = size;
+        }
+        o += 8 + size + (size & 1);
+    }
+    return data != nullptr;
+}
+}  // namespace
+
+bool Sfx::startStream(Entry& e) {
+    if (!xma::available()) return false;
+    const uint8_t* data = nullptr;
+    size_t size = 0;
+    if (e.disc) {
+        size = e.stored;
+    } else if (!riffData(e.riff, e.rate, e.channels, data, size)) {
+        return false;
+    }
+    if (size <= kStreamBytes) return false;
+    auto job = std::make_shared<Job>();
+    e.job = job, e.decoded = true;
+    jobs_.push_back(job);
+    // The worker reads its own copy (an FSB sample from the disc, decrypted).
+    Bytes bytes = e.disc ? Bytes() : Bytes(data, data + size);
+    const Disc* disc = e.disc;
+    const std::string bank = e.bank;
+    const uint64_t offset = e.offset;
+    const bool encrypted = e.encrypted;
+    const int rate = e.rate, channels = e.channels;
+    const uint32_t length = e.length;
+    Job* j = job.get();
+    job->thread = std::thread([j, bytes = std::move(bytes), disc, bank, offset, size, encrypted, rate, channels, length]() mutable {
+        auto fail = [j] {
+            std::lock_guard<std::mutex> g(j->m);
+            j->bad = j->done = true;
+        };
+        if (disc) {
+            bytes.resize(size);
+            try {
+                disc->readRange(bank, offset, bytes.data(), bytes.size());
+            } catch (const std::exception&) {
+                return fail();
+            }
+            if (encrypted) fsbDecrypt(bytes.data(), bytes.size(), offset);
+        }
+        // As xma::decodeXma1, one packet at a time [audio/xma_decoder.cpp].
+        XmaStream xs;
+        std::string err;
+        if (!xs.open(1, rate, channels, err)) return fail();
+        std::vector<float> chunk;
+        for (size_t at = 0; at < bytes.size(); at += 2048) {
+            chunk.clear();
+            if (!xs.feed(bytes.data() + at, std::min<size_t>(2048, bytes.size() - at), chunk, err)) return fail();
+            std::lock_guard<std::mutex> g(j->m);
+            j->pcm.insert(j->pcm.end(), chunk.begin(), chunk.end());
+        }
+        chunk.clear();
+        if (!xs.flush(chunk, err)) return fail();
+        std::lock_guard<std::mutex> g(j->m);
+        j->pcm.insert(j->pcm.end(), chunk.begin(), chunk.end());
+        if (length) j->pcm.resize(size_t(length) * size_t(channels), 0.0f);  // trimmed or padded as decodeXma1
+        if (j->pcm.empty()) j->bad = true;
+        j->done = true;
+    });
+    return true;
+}
+
 bool Sfx::decode(Entry& e) {
     e.decoded = true;
     if (e.disc) {
@@ -93,29 +179,12 @@ bool Sfx::decode(Entry& e) {
         ++stats_.decoded;
         return true;
     }
-    const Bytes& d = e.riff;
-    if (d.size() < 12 || std::memcmp(d.data(), "RIFF", 4) != 0) return e.bad = true, false;
+    // XMAWAVEFORMAT: a 12-byte header (tag 0x165, bits, options, skip,
+    // streams, loop count, version), then 20-byte streams: rate at +4,
+    // channels at +17 [C data: all 227 .wav].
     const uint8_t* data = nullptr;
     size_t dataSize = 0;
-    for (size_t o = 12; o + 8 <= d.size();) {
-        const uint32_t size = le32(d.data() + o + 4);
-        if (o + 8 + size > d.size()) break;
-        if (std::memcmp(d.data() + o, "fmt ", 4) == 0 && size >= 32) {
-            // XMAWAVEFORMAT: a 12-byte header (tag 0x165, bits, options,
-            // skip, streams, loop count, version), then 20-byte streams:
-            // rate at +4, channels at +17 [C data: all 227 .wav].
-            const uint8_t* f = d.data() + o + 8;
-            e.rate = int(le32(f + 12 + 4));
-            e.channels = f[12 + 17];
-            if (e.rate < 8000 || e.rate > 96000) e.rate = 44100;
-            if (e.channels < 1 || e.channels > 2) e.channels = le16(f + 2) == 2 ? 2 : 1;
-        } else if (std::memcmp(d.data() + o, "data", 4) == 0) {
-            data = d.data() + o + 8;
-            dataSize = size;
-        }
-        o += 8 + size + (size & 1);
-    }
-    if (!data) return e.bad = true, false;
+    if (!riffData(e.riff, e.rate, e.channels, data, dataSize)) return e.bad = true, false;
     std::string err;
     if (!xma::decodeXma1(data, dataSize, e.rate, e.channels, 0, e.pcm, err)) {
         SDL_Log("sfx: decode failed: %s", err.c_str());
@@ -136,15 +205,20 @@ uint32_t Sfx::play(uint32_t sample, float volume, float pitch, uint32_t buss) {
         return 0;
     }
     Entry& e = *it->second;
-    if (!e.decoded) decode(e);
-    if (log) {
+    if (!e.decoded && !startStream(e)) decode(e);
+    std::shared_ptr<Job> job = e.job;
+    if (job) {
+        std::lock_guard<std::mutex> g(job->m);
+        if (job->bad) return 0;
+    }
+    if (log && !job) {
         float peak = 0;
         for (float f : e.pcm) peak = std::max(peak, std::fabs(f));
         SDL_Log("sfx:   %llu samples, %d Hz, %d ch, peak %.3f, volume %.2f%s", (unsigned long long)e.pcm.size(), e.rate, e.channels, double(peak),
                 double(volume),
                 device_ ? "" : ", no device");
     }
-    if (e.bad || e.pcm.empty()) return 0;
+    if (!job && (e.bad || e.pcm.empty())) return 0;
     ++stats_.plays;
     const uint32_t id = nextVoice_++;
     if (!device_) return id;
@@ -152,7 +226,8 @@ uint32_t Sfx::play(uint32_t sample, float volume, float pitch, uint32_t buss) {
     SDL_AudioStream* s = SDL_CreateAudioStream(&src, nullptr);
     if (!s) return 0;
     // The voice's level: its own volume and pitch times its buss's (audio/sound_buss.h).
-    Voice voice{id, s, sample, buss, false};
+    Voice voice;
+    voice.id = id, voice.stream = s, voice.sample = sample, voice.buss = buss;
     voice.bussIndex = soundBusses().index(buss);
     voice.volume = volume, voice.pitch = pitch > 0 ? pitch : 1;
     applyBuss(voice);
@@ -160,9 +235,15 @@ uint32_t Sfx::play(uint32_t sample, float volume, float pitch, uint32_t buss) {
     // until it has one (the data put before was dropped: no sound effect
     // was ever heard).
     const bool bound = SDL_BindAudioStream(device_, s);
-    const bool put = SDL_PutAudioStreamData(s, e.pcm.data(), int(e.pcm.size() * sizeof(float)));
-    SDL_FlushAudioStream(s);
-    if (!bound || !put || SDL_GetAudioStreamAvailable(s) <= 0) ++stats_.lost;
+    bool put = true;
+    if (job) {
+        voice.job = job;
+        feed(voice);  // what is decoded so far; Sfx::update feeds the rest
+    } else {
+        put = SDL_PutAudioStreamData(s, e.pcm.data(), int(e.pcm.size() * sizeof(float)));
+        SDL_FlushAudioStream(s);
+    }
+    if (!bound || !put || (!voice.job && SDL_GetAudioStreamAvailable(s) <= 0)) ++stats_.lost;
     if (log) SDL_Log("sfx:   bound %d, put %d (%s), available %d", int(bound), int(put), put ? "" : SDL_GetError(), SDL_GetAudioStreamAvailable(s));
     if (audiodev::dumpEnabled())
         SDL_Log("audiodump: sfx %s at frame %lld, wall %.0f ms, volume %.2f, buss %s %.1f dB", qbkey::name(sample).c_str(), audiodev::dumpFrames(1),
@@ -172,31 +253,45 @@ uint32_t Sfx::play(uint32_t sample, float volume, float pitch, uint32_t buss) {
     return id;
 }
 
+void Sfx::feed(Voice& v) {
+    if (!v.job) return;
+    std::lock_guard<std::mutex> g(v.job->m);
+    const std::vector<float>& pcm = v.job->pcm;
+    if (pcm.size() > v.fed) {
+        SDL_PutAudioStreamData(v.stream, pcm.data() + v.fed, int((pcm.size() - v.fed) * sizeof(float)));
+        v.fed = pcm.size();
+    }
+    if (v.job->done) {
+        SDL_FlushAudioStream(v.stream);
+        v.job.reset();
+    }
+}
+
 bool Sfx::playing(uint32_t voice) const {
     for (const Voice& v : voices_)
-        if (v.id == voice) return SDL_GetAudioStreamAvailable(v.stream) > 0;
+        if (v.id == voice) return v.job || SDL_GetAudioStreamAvailable(v.stream) > 0;
     return false;
 }
 
 void Sfx::stop(uint32_t voice) {
     for (Voice& v : voices_)
-        if (v.id == voice) SDL_ClearAudioStream(v.stream);
+        if (v.id == voice) SDL_ClearAudioStream(v.stream), v.job.reset();
 }
 
 void Sfx::stopSample(uint32_t sample) {
     for (Voice& v : voices_)
-        if (v.sample == sample) SDL_ClearAudioStream(v.stream);
+        if (v.sample == sample) SDL_ClearAudioStream(v.stream), v.job.reset();
 }
 
 bool Sfx::samplePlaying(uint32_t sample) const {
     for (const Voice& v : voices_)
-        if (v.sample == sample && (v.paused || SDL_GetAudioStreamAvailable(v.stream) > 0)) return true;
+        if (v.sample == sample && (v.paused || v.job || SDL_GetAudioStreamAvailable(v.stream) > 0)) return true;
     return false;
 }
 
 void Sfx::stopBuss(uint32_t buss) {
     for (Voice& v : voices_)
-        if (buss && soundBusses().under(v.buss, buss)) SDL_ClearAudioStream(v.stream);
+        if (buss && soundBusses().under(v.buss, buss)) SDL_ClearAudioStream(v.stream), v.job.reset();
 }
 
 void Sfx::pauseBuss(uint32_t buss, bool paused) {
@@ -223,10 +318,14 @@ void Sfx::applyBuss(Voice& v) {
 }
 
 void Sfx::update() {
-    for (Voice& v : voices_) applyBuss(v);  // the busses' fades
+    for (Voice& v : voices_) applyBuss(v), feed(v);  // the busses' fades; the streamed decodes
+    for (auto& j : jobs_) {
+        std::lock_guard<std::mutex> g(j->m);
+        if (j->done && !j->counted) j->counted = true, ++(j->bad ? stats_.failures : stats_.decoded);
+    }
     voices_.erase(std::remove_if(voices_.begin(), voices_.end(),
                                  [](const Voice& v) {
-                                     if (v.paused || SDL_GetAudioStreamAvailable(v.stream) > 0) return false;
+                                     if (v.paused || v.job || SDL_GetAudioStreamAvailable(v.stream) > 0) return false;
                                      SDL_DestroyAudioStream(v.stream);
                                      return true;
                                  }),
@@ -238,6 +337,13 @@ bool Sfx::pcm(uint32_t sample, std::vector<float>& out, int& rate, int& channels
     if (it == entries_.end()) return false;
     Entry& e = *it->second;
     if (!e.decoded) decode(e);
+    if (e.job) {  // a streamed decode: wait for its end
+        if (e.job->thread.joinable()) e.job->thread.join();
+        std::lock_guard<std::mutex> g(e.job->m);
+        if (e.job->bad) return false;
+        out = e.job->pcm, rate = e.rate, channels = e.channels;
+        return true;
+    }
     if (e.bad || e.pcm.empty()) return false;
     out = e.pcm, rate = e.rate, channels = e.channels;
     return true;
