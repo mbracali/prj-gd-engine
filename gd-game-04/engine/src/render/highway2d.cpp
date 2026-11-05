@@ -830,7 +830,8 @@ void Highway2D::drawAll(Canvas& c, const TextureCache& tex, const NoteTrack& tra
             const SDL_Color col = s.blue ? mix(SDL_Color{0, 255, 255, 255}, SDL_Color{0, 255, 255, 0}, f)
                                          : mix(SDL_Color{255, 128, 0, 255}, SDL_Color{255, 0, 0, 0}, f);
             const int lane = int(s.x);
-            const float x0 = endX_[size_t(leftyGems ? 4 - lane : lane)], y0 = playline_;
+            // The particle system at the hit pos - (0, 20) [C 0x8211BCBC-0x8211BD00, DAT_82007A9C = 20].
+            const float x0 = endX_[size_t(leftyGems ? 4 - lane : lane)], y0 = playline_ - 20;
             // friction (0, 50): the y speed eases off [I].
             const float x = x0 + s.vx * t, y = y0 + s.vy * t + 0.5f * 50 * 60 * t * t;
             const float k = 1 - 0.5f * f;
@@ -853,8 +854,12 @@ void Highway2D::drawAll(Canvas& c, const TextureCache& tex, const NoteTrack& tra
                 quad(c, kWhammyHold, tex, endX_[size_t(leftyB ? 4 - l : l)], playline_, float(tw) / 4, float(th) / 4, 1, SDL_Color{255, 255, 255, 255},
                      u0, v0, u0 + 0.25f, v0 + 0.25f, Blend::Add);
     }
-    // Hit flames: 16 frames of the 4x4 flip-book at 60 fps, additive, 20 px
-    // above the strike point, anchored at their bottom, z 10 [C 0x8211BCBC, script hit_note_fx].
+    // Hit flames: 16 frames of the 4x4 flip-book at 60 fps, additive, at
+    // the hit_note's pos (button_up_models.<c>.pos_2d: the lane's x,
+    // highway_playline [C 0x8211EED0-0x8211EF2C, script generate_pos_table]),
+    // anchored at their bottom (just (0, 1)), z 10: NoteFX hands the sprite
+    // the pos as given (0x8211BDE8 reloads y) -- only the sparks sit 20 px
+    // up [C 0x8211BCBC-0x8211BDF4, script hit_note_fx] (GD04-108).
     for (int l = 0; l < 5; ++l) {
         const Flame& f = flames_[size_t(l)];
         const int frame = int((now - f.start) / (1000.0 / 60.0));
@@ -863,7 +868,7 @@ void Highway2D::drawAll(Canvas& c, const TextureCache& tex, const NoteTrack& tra
         int tw = 512, th = 1024;
         tex.size(key, tw, th);
         const float u0 = float(frame % 4) / 4, v0 = float(frame / 4) / 4;
-        quad(c, key, tex, endX_[size_t(leftyGems ? 4 - l : l)], playline_ - 20, float(tw) / 4, float(th) / 4, 1, SDL_Color{255, 255, 255, 255}, u0, v0,
+        quad(c, key, tex, endX_[size_t(leftyGems ? 4 - l : l)], playline_, float(tw) / 4, float(th) / 4, 1, SDL_Color{255, 255, 255, 255}, u0, v0,
              u0 + 0.25f, v0 + 0.25f, Blend::Add);
     }
 }

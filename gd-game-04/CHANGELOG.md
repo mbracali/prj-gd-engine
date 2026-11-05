@@ -37,6 +37,7 @@ All notable changes for players. Versions follow SemVer; release tags are
 
 ### Fixed
 - Strumming again while holding a sustain is an overstrum that drops the sustain, as GH3: the tail goes grey, its points and star whammy stop (GD04-108).
+- The hit flames sit on the fret buttons as in GH3; they were drawn 20 px too high (only the sparks rise 20 px) (GD04-108).
 - Another band no longer gets The Glitches' bonus-song store state when its career is loaded after theirs; saves from the first Glitches build (which bought the whole Vault save-wide) can be cleaned with `tools/save_wipe_bands.py` (GD04-096).
 - Co-op's Select Controller: each controller moves to its player's shield and grows when chosen; a menu animation started over another keeps the first one's moves, as GH3 (GD04-102).
 - The store's character names sit centred on the frame instead of running off its right edge: a menu keeps the width of its first layout, as GH3 (GD04-099).

@@ -338,8 +338,11 @@ negated), just [center bottom]:
 ### 2.8 Hit flame and sparks [C 0x8211BAE8, script hit_note_fx]
 
 - Flame sprite: clonematerial `sys_note_hit01` (0xA38B2820, 512x1024 = 4x4 frames of 128x256 @60
-  fps, additive) or `sys_note_hit_blue_01` (0x9E700D1C) when star_power_used; pos = given pos -
-  (0, 20); just (0, 1); scale 1; z 10 [C 0x8211BCBC, DAT_82007A9C = 20, DAT_8200158C = 10].
+  fps, additive) or `sys_note_hit_blue_01` (0x9E700D1C) when star_power_used; pos = the given
+  pos (button_up_models.<c>.pos_2d = lane x, highway_playline [C 0x8211EED0-0x8211EF2C]) as is
+  (0x8211BDE8 reloads y for 0x8221B578); just (0, 1); scale 1; z 10 [C 0x8211BD78-0x8211BE1C,
+  DAT_8200158C = 10]. Only the particle system (FUN_821065A0) sits at pos - (0, 20)
+  [C 0x8211BCBC-0x8211BD00, DAT_82007A9C = 20] (GD04-108: the port had the flame 20 px up).
 - Particles (`hit_particle_params`, SP: `star_hit_particle_params`): material
   sys_Particle_Spark01, z 8, colour [255,128,0,255] -> [255,0,0,0] (SP [0,255,255,255] ->
   [0,255,255,0]), scale 1 -> 0.5, emit_rate 0.02, spread 160, velocity 10, friction (0,50),
