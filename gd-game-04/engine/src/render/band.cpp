@@ -45,7 +45,7 @@ bool Band::startWith(const Disc& disc, const Globals& g, const venue::Venue* v, 
     view_.reset();
     songFiles_.clear();
     try {
-        lib_.load(disc);
+        lib_ = band::Library::shared(disc);
         shaderLib_ = gh3shader::library(disc);
     } catch (const std::exception& e) {
         error = std::string("band: ") + e.what();
@@ -56,7 +56,8 @@ bool Band::startWith(const Disc& disc, const Globals& g, const venue::Venue* v, 
     const std::string songPak = "DATA/COMPRESSED/SONGS/" + chart.song + "_song.pak.xen";
     if (!chart.song.empty() && disc.exists(songPak)) {
         try {
-            const Pak pak = Pak::load(disc, songPak);
+            const auto pakShared = Pak::shared(disc, songPak);
+            const Pak& pak = *pakShared;
             for (const PakEntry& e : pak.entries()) {
                 if (e.type != K(".qb")) continue;
                 auto [p, size] = pak.data(e);
@@ -78,7 +79,7 @@ bool Band::startWith(const Disc& disc, const Globals& g, const venue::Venue* v, 
     members_.reserve(chosen.size());
     for (const band::Member& m : chosen) {
         Entry e;
-        e.model = band::loadModel(disc, g, lib_, m, chart.song, error);
+        e.model = band::loadModel(disc, g, *lib_, m, chart.song, error);
         if (!e.model) return false;
         bandanim::Animator::Setup s;
         s.model = e.model.get();
@@ -120,7 +121,7 @@ bool Band::startWith(const Disc& disc, const Globals& g, const venue::Venue* v, 
 // global.pak, its accessory bodies simulated (ragdoll_setaccessorybones
 // accessory_bones = $Guitarist_accessory_bones) [C scripts].
 std::unique_ptr<AccessorySim> Band::accessorySim(const Disc& disc, const Globals& g, const band::Member& m, const bandanim::Rig& rig,
-                                                 std::unique_ptr<Pak>& globalPak) {
+                                                 std::shared_ptr<const Pak>& globalPak) {
     if (!m.profile || SDL_getenv("GD04_NO_RAGDOLL")) return nullptr;
     uint32_t ragKey = 0;
     if (m.outfit == 2)
@@ -132,7 +133,7 @@ std::unique_ptr<AccessorySim> Band::accessorySim(const Disc& disc, const Globals
         for (const qb::Value& b : ab->arr->values) accBones.push_back(b.key);
     if (ragKey && !accBones.empty()) {
         try {
-            if (!globalPak) globalPak = std::make_unique<Pak>(Pak::load(disc, "DATA/COMPRESSED/ZONES/global.pak.xen"));
+            if (!globalPak) globalPak = Pak::shared(disc, "DATA/COMPRESSED/ZONES/global.pak.xen");
             if (const PakEntry* re = globalPak->findType(ragKey, K(".rag"))) {
                 auto [rp, rs] = globalPak->data(*re);
                 const havok::Physics phys = havok::parse(rp, rs);

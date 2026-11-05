@@ -199,7 +199,8 @@ bool VenueView::init(gfx::RenderDevice& dev, const Disc& disc, const venue::Venu
     for (const std::string& pakPath : {"DATA/COMPRESSED/ZONES/" + v.zone + ".pak.xen", std::string("DATA/COMPRESSED/PAK/global_ad_tex.pak.xen")}) {
         if (!disc.exists(pakPath)) continue;
         try {
-            const Pak pak = Pak::load(disc, pakPath);
+            const auto pakPtr = Pak::shared(disc, pakPath);
+            const Pak& pak = *pakPtr;
             for (const PakEntry& e : pak.entries()) {
                 if (e.type != K(".tex")) continue;
                 auto [p, size] = pak.data(e);
@@ -394,7 +395,7 @@ bool VenueView::init(gfx::RenderDevice& dev, const Disc& disc, const venue::Venu
     // GO_LightHousing02.mdl, in ZONES/global.pak with its .tex) [C data].
     {
         std::unordered_map<uint32_t, std::unique_ptr<scene::Scene>> models;
-        std::unique_ptr<Pak> global;
+        std::shared_ptr<const Pak> global;
         for (size_t ni = 0; ni < v.nodes.size(); ++ni) {
             const venue::Node& n = v.nodes[ni];
             if (!n.st || !n.st->find(K("lightvolumetype"))) continue;
@@ -408,7 +409,7 @@ bool VenueView::init(gfx::RenderDevice& dev, const Disc& disc, const venue::Venu
             if (it == models.end()) {
                 std::unique_ptr<scene::Scene> sc;
                 try {
-                    if (!global) global = std::make_unique<Pak>(Pak::load(disc, "DATA/COMPRESSED/ZONES/global.pak.xen"));
+                    if (!global) global = Pak::shared(disc, "DATA/COMPRESSED/ZONES/global.pak.xen");
                     if (const PakEntry* e = global->findType(key, K(".mdl"))) {
                         auto [p, size] = global->data(*e);
                         sc = std::make_unique<scene::Scene>(scene::parse(p, size, scene::Kind::Mdl));
@@ -447,7 +448,8 @@ bool VenueView::init(gfx::RenderDevice& dev, const Disc& disc, const venue::Venu
     // (sys_coneimpostor's texture, Function_823B49D0) [C].
     if ((!cones_.empty() || !rays_.empty()) && !smoke_) {
         try {
-            const Pak gp = Pak::load(disc, "DATA/COMPRESSED/ZONES/global.pak.xen");
+            const auto gpPtr = Pak::shared(disc, "DATA/COMPRESSED/ZONES/global.pak.xen");
+            const Pak& gp = *gpPtr;
             if (const PakEntry* te = gp.findType(qbkey::key("c:/gh3/data/zones/global/global_gfx.tex.xen"), K(".tex"))) {
                 auto [tp, ts] = gp.data(*te);
                 for (const gh3tex::Texture& t : gh3tex::decodeTexDict(tp, ts)) {

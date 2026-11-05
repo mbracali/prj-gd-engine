@@ -3,6 +3,7 @@
 #include "ui/song_screen.h"
 
 #include <SDL3/SDL_log.h>
+#include <SDL3/SDL_timer.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -55,6 +56,49 @@ IntroTransition introTransition(const Globals& g, uint32_t key) {
 const SDL_Color kFretColors[5] = {{40, 200, 60, 255}, {220, 40, 40, 255}, {230, 210, 40, 255}, {40, 100, 230, 255}, {240, 130, 30, 255}};
 
 }  // namespace
+
+VenuePreload::~VenuePreload() {
+    if (work.valid()) work.wait();
+}
+
+std::shared_ptr<VenuePreload> VenuePreload::launch(const Disc& disc, const Globals& live, const std::string& songName, uint32_t transition,
+                                                   double endMs, double startMs) {
+    auto p = std::make_shared<VenuePreload>();
+    p->song = songName;
+    p->endMs = endMs;
+    p->startMs = startMs;
+    auto snap = std::make_shared<Globals>(live);  // copied here, on the VM's thread
+    p->globals = snap;
+    const IntroTransition intro = introTransition(*snap, transition);
+    p->leadInMs = intro.ms;
+    p->cameras = intro.cameras;
+    p->zone = VenueStage::chooseZone(*snap);
+    VenuePreload* raw = p.get();
+    const Disc* d = &disc;
+    p->work = std::async(std::launch::async, [raw, d] {
+        const uint64_t t0 = SDL_GetTicksNS();
+        try {
+            raw->chart = std::make_unique<Chart>(loadChart(*d, raw->song));
+            if (raw->endMs > 0)
+                for (PartChart& pc : raw->chart->parts)
+                    for (auto& notes : pc.notes)
+                        notes.erase(std::remove_if(notes.begin(), notes.end(), [&](const ChartNote& n) { return double(n.time) > raw->endMs; }),
+                                    notes.end());
+            auto st = std::make_unique<VenueStage>();
+            st->setIntroCameras(raw->cameras);
+            std::string err;
+            if (st->start(*d, *raw->globals, raw->zone, *raw->chart, qbkey::key(raw->song), raw->leadInMs, nullptr, err, raw->startMs))
+                raw->stage = std::move(st);
+            else SDL_Log("venue: %s", err.c_str());
+        } catch (const std::exception& ex) {
+            SDL_Log("venue preload %s: %s", raw->song.c_str(), ex.what());
+            raw->stage.reset();
+        }
+        SDL_Log("venue preload: %s in %s, %.0f ms (a worker thread)", raw->song.c_str(), raw->zone.c_str(), (SDL_GetTicksNS() - t0) / 1e6);
+        raw->finished = true;
+    });
+    return p;
+}
 
 SongScreen::SongScreen() = default;
 SongScreen::~SongScreen() = default;
@@ -195,13 +239,24 @@ bool SongScreen::start(const Disc& disc, const Globals& g, const SongInfo& song,
     // The venue: its scene, cameras and light show (uploaded on the first frame).
     if (!SDL_getenv("GD04_NO_VENUE")) {
         disc_ = &disc;
-        venue_ = std::make_unique<VenueStage>();
-        std::string verr;
         const std::string zone = VenueStage::chooseZone(g);
-        venue_->setIntroCameras(introCameras_);
-        if (!venue_->start(disc, g, zone, chart_, qbkey::key(song.name), leadInMs_, nullptr, verr)) {
-            SDL_Log("venue: %s", verr.c_str());
-            venue_.reset();
+        if (preload_) {
+            // The preload (VenuePreload) when it is this song's, zone and intro.
+            if (preload_->work.valid()) preload_->work.wait();
+            if (preload_->stage && preload_->song == song.name && preload_->zone == zone && preload_->leadInMs == leadInMs_ &&
+                preload_->cameras == introCameras_ && preload_->endMs == setup.endMs && preload_->startMs == startMs_)
+                venue_ = std::move(preload_->stage);
+            else
+                preload_.reset();
+        }
+        if (!venue_) {
+            venue_ = std::make_unique<VenueStage>();
+            std::string verr;
+            venue_->setIntroCameras(introCameras_);
+            if (!venue_->start(disc, g, zone, chart_, qbkey::key(song.name), leadInMs_, nullptr, verr, startMs_)) {
+                SDL_Log("venue: %s", verr.c_str());
+                venue_.reset();
+            }
         }
     }
     stepMs_ = startMs_ - leadInMs_;

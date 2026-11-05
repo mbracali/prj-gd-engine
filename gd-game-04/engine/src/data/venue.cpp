@@ -160,7 +160,8 @@ std::unique_ptr<Venue> load(const Disc& disc, const std::string& zone) {
     v->zoneKey = qbkey::key(zone);
     const std::string path = "DATA/COMPRESSED/ZONES/" + zone + ".pak.xen";
     if (!disc.exists(path)) throw std::runtime_error("no " + path);
-    const Pak pak = Pak::load(disc, path);
+    const auto pakPtr = Pak::shared(disc, path);
+    const Pak& pak = *pakPtr;
     for (const PakEntry& e : pak.entries()) {
         auto [p, size] = pak.data(e);
         if (e.type == K(".qb") || e.type == K(".nqb")) v->files.push_back(qb::decode(p, size));

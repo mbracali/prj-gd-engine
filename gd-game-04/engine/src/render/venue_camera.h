@@ -55,7 +55,8 @@ public:
     static inline bool noShake = false;
     // `leadInMs`: the time before song time 0 the transition starts (the
     // intro transition's length: fastintro 3000 ms).
-    void init(const Venue& v, const Globals& g, const Chart& chart, uint32_t seed, double leadInMs);
+    // startMs: the song's first ms (a mid-song start: practice, Lou's finish); the intro runs from startMs - leadInMs.
+    void init(const Venue& v, const Globals& g, const Chart& chart, uint32_t seed, double leadInMs, double startMs = 0);
     // The intro transition's camera prefix (cameras_intro, cameras_encore,
     // cameras_boss...); empty: chosen by the lead-in (fast or full intro).
     void setIntroCameras(const std::string& prefix) { introPrefix_ = prefix; }

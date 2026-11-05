@@ -286,6 +286,9 @@ bool Particles::start(const Disc& disc, const Globals& g, const venue::Venue& v,
     for (const char* noop : {"SpawnSound", "PlaySound", "Obj_PlaySound", "SoundEvent", "SetSpawnInstanceLimits", "RequireParams"})
         vm_->addNative(noop, [](qs::Vm&, qs::ScriptRun&, qb::Struct&) { return true; });
     using ull = unsigned long long;
+    // A mid-song start: the drum kicks and pyro notes before it are past.
+    kickAt_ = size_t(std::lower_bound(kicks_.begin(), kicks_.end(), std::make_pair(startMs, uint32_t(0))) - kicks_.begin());
+    pyroAt_ = size_t(std::lower_bound(pyroTimes_.begin(), pyroTimes_.end(), startMs) - pyroTimes_.begin());
     SDL_Log("particles %s: %llu pyro notes (%s), %llu performance scripts", v.zone.c_str(), ull(pyroTimes_.size()),
             pyroScript_ ? qbkey::names().get(pyroScript_).c_str() : "no pyro script", ull(perfScripts_.size()));
     if (std::getenv("GD04_PARTICLES_LOG"))
@@ -604,7 +607,8 @@ bool Particles::attach(gfx::RenderDevice& dev, const Disc& disc, std::string& er
     white_ = dev.createTexture({1, 1, 1, gfx::TexFormat::RGBA8, gfx::TexKind::Tex2D}, &l, error);
     // The quick materials' textures: .img entries of ZONES/global.pak by name [C data: JOW_Spark01].
     try {
-        const Pak pak = Pak::load(disc, "DATA/COMPRESSED/ZONES/global.pak.xen");
+        const auto pakPtr = Pak::shared(disc, "DATA/COMPRESSED/ZONES/global.pak.xen");
+        const Pak& pak = *pakPtr;
         for (const PakEntry& e : pak.entries()) {
             if (e.type != K(".img")) continue;
             auto [p, size] = pak.data(e);

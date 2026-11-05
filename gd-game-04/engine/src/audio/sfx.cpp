@@ -39,7 +39,8 @@ void Sfx::close() {
 
 void Sfx::addPak(const Disc& disc, const std::string& pakPath) {
     try {
-        Pak pak = Pak::load(disc, pakPath);
+        const auto pakPtr = Pak::shared(disc, pakPath);  // a zone's pak: just read by its venue
+        const Pak& pak = *pakPtr;
         for (const PakEntry& e : pak.entries()) {
             if (e.type != qbkey::key(".wav")) continue;
             auto en = std::make_shared<Entry>();

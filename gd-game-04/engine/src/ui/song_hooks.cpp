@@ -231,7 +231,8 @@ void SongHooks::loadSongScripts(SongScreen& s) {
     // globals [C script start_gem_scroller].
     const std::string path = "DATA/COMPRESSED/SONGS/" + s.song().name + "_song.pak.xen";
     try {
-        const Pak pak = Pak::load(disc_, path);
+        const auto pakShared = Pak::shared(disc_, path);
+        const Pak& pak = *pakShared;
         for (const PakEntry& e : pak.entries())
             if (e.type == K(".qb")) {
                 auto [d, n] = pak.data(e);

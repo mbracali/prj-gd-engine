@@ -92,9 +92,9 @@ private:
     WaypointFn waypoint_;
     std::function<bool(qs::Vm&, qs::ScriptRun&, uint32_t, uint32_t, qb::Struct&, bool&)> next_;  // the screen elements'
     std::unordered_map<uint32_t, std::unique_ptr<Object>> objects_;
-    band::Library lib_;
+    std::shared_ptr<band::Library> lib_;  // band::Library::shared
     bool libLoaded_ = false, libFailed_ = false;
-    std::unique_ptr<Pak> globalPak_;  // the ragdolls (Band::accessorySim)
+    std::shared_ptr<const Pak> globalPak_;  // the ragdolls (Band::accessorySim)
     std::unique_ptr<BandView> view_;
     gfx::RenderDevice* dev_ = nullptr;
     std::vector<int> freed_;  // BandView members to free at the next draw

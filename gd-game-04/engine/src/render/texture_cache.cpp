@@ -60,7 +60,8 @@ struct Sharp {
 int TextureCache::loadPak(const Disc& disc, const std::string& pakPath) {
     int n = 0;
     try {
-        Pak pak = Pak::load(disc, pakPath);
+        const auto pakShared = Pak::shared(disc, pakPath);
+        const Pak& pak = *pakShared;
         // Enhanced > Sharper Text & Sprites (gd02's, from the next start): each
         // 2D texture up to 512 px decoded, upscaled (image_enhance) and
         // uploaded as RGBA8 with its own mips, worked out on every core first;

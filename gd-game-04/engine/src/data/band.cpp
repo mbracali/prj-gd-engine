@@ -2,6 +2,9 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "data/band.h"
 
+#include <list>
+#include <mutex>
+
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
@@ -300,23 +303,37 @@ std::vector<Member> everyInstrument(const Globals& g) {
 }
 
 void Library::load(const Disc& disc) {
-    const Pak global = Pak::load(disc, "DATA/COMPRESSED/ZONES/global.pak.xen");
+    const auto globalPak = Pak::shared(disc, "DATA/COMPRESSED/ZONES/global.pak.xen");
+    const Pak& global = *globalPak;
     for (const PakEntry& e : global.entries()) {
         if (e.type != K(".ske")) continue;
         auto [p, size] = global.data(e);
         skeletons_.emplace(e.name, anim::parseSkeleton(p, size));
     }
-    perm_ = readClips(Pak::load(disc, "DATA/COMPRESSED/PAK/perm_anims.pak.xen"));
+    perm_ = readClips(*Pak::shared(disc, "DATA/COMPRESSED/PAK/perm_anims.pak.xen"));
+}
+
+std::shared_ptr<Library> Library::shared(const Disc& disc) {
+    static std::mutex mutex;
+    static const Disc* forDisc = nullptr;
+    static std::shared_ptr<Library> lib;
+    std::lock_guard<std::mutex> lock(mutex);
+    if (lib && forDisc == &disc) return lib;
+    auto l = std::make_shared<Library>();
+    l->load(disc);
+    lib = l, forDisc = &disc;
+    return lib;
 }
 
 const ClipMap& Library::songClips(const Disc& disc, const std::string& song) {
+    std::lock_guard<std::mutex> lock(songsMutex_);
     auto it = songs_.find(song);
     if (it != songs_.end()) return it->second;
     ClipMap clips;
     const std::string path = "DATA/COMPRESSED/SONGS/" + song + "_song.pak.xen";
     if (!song.empty() && disc.exists(path)) {
         try {
-            clips = readClips(Pak::load(disc, path));
+            clips = readClips(*Pak::shared(disc, path));
         } catch (const std::exception&) {
             clips.clear();
         }
@@ -324,8 +341,50 @@ const ClipMap& Library::songClips(const Disc& disc, const std::string& song) {
     return songs_.emplace(song, std::move(clips)).first->second;
 }
 
+namespace {
+std::unique_ptr<Model> loadModelUncached(const Disc& disc, const Globals& g, Library& lib, const Member& m, const std::string& song,
+                                         std::string& error);
+}
+
+// A copy of a model loaded before (the 8 last: character select scrolls
+// back and forth, a song loads the menu's guitarist again), else loaded.
+// Each part loaded took about 0.2 s (owner 1.7: character select's stutters).
 std::unique_ptr<Model> loadModel(const Disc& disc, const Globals& g, Library& lib, const Member& m, const std::string& song,
                                  std::string& error) {
+    struct Cached {
+        const Disc* disc;
+        uint32_t body, instrument, skeleton;
+        int outfit, style;
+        std::string song;
+        std::shared_ptr<const Model> model;
+    };
+    static std::mutex mutex;
+    static std::list<Cached> cache;  // most recent first
+    auto same = [&](const Cached& c) {
+        return c.disc == &disc && c.body == m.body && c.instrument == m.instrument && c.skeleton == m.skeleton && c.outfit == m.outfit &&
+               c.style == m.style && c.song == song;
+    };
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        for (auto it = cache.begin(); it != cache.end(); ++it)
+            if (same(*it)) {
+                cache.splice(cache.begin(), cache, it);
+                auto copy = std::make_unique<Model>(*cache.front().model);
+                copy->member = m;
+                return copy;
+            }
+    }
+    auto model = loadModelUncached(disc, g, lib, m, song, error);
+    if (!model) return model;
+    std::lock_guard<std::mutex> lock(mutex);
+    cache.push_front(Cached{&disc, m.body, m.instrument, m.skeleton, m.outfit, m.style, song, std::make_shared<const Model>(*model)});
+    if (cache.size() > 8) cache.pop_back();
+    return model;
+}
+
+namespace {
+std::unique_ptr<Model> loadModelUncached(const Disc& disc, const Globals& g, Library& lib, const Member& m, const std::string& song,
+                                         std::string& error) {
     auto model = std::make_unique<Model>();
     model->member = m;
     model->skeleton = lib.skeleton(m.skeleton);
@@ -340,7 +399,8 @@ std::unique_ptr<Model> loadModel(const Disc& disc, const Globals& g, Library& li
             return false;
         }
         try {
-            const Pak pak = Pak::load(disc, path);
+            const auto pakShared = Pak::shared(disc, path);
+            const Pak& pak = *pakShared;
             for (const PakEntry& e : pak.entries()) {
                 auto [p, size] = pak.data(e);
                 if (skins && e.type == K(".skin")) {
@@ -389,5 +449,6 @@ std::unique_ptr<Model> loadModel(const Disc& disc, const Globals& g, Library& li
     for (const auto& [k, c] : lib.songClips(disc, song)) model->clips.emplace(k, c);
     return model;
 }
+}  // namespace
 
 }  // namespace band

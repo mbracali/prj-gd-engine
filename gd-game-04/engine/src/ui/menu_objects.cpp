@@ -3,6 +3,7 @@
 #include "ui/menu_objects.h"
 
 #include <SDL3/SDL_log.h>
+#include <SDL3/SDL_timer.h>
 #include <SDL3/SDL_stdinc.h>
 
 #include <algorithm>
@@ -153,7 +154,7 @@ void MenuObjects::load(Object& o) {
     if (!libLoaded_) {
         if (libFailed_) return;
         try {
-            lib_.load(disc_);
+            lib_ = band::Library::shared(disc_);
             libLoaded_ = true;
         } catch (const std::exception& e) {
             SDL_Log("menu objects: %s", e.what());
@@ -165,7 +166,7 @@ void MenuObjects::load(Object& o) {
     if (o.skeleton) m.skeleton = o.skeleton;
     std::string error;
     auto e = std::make_unique<Band::Entry>();
-    e->model = band::loadModel(disc_, globals_, lib_, m, "", error);
+    e->model = band::loadModel(disc_, globals_, *lib_, m, "", error);
     if (!e->model) {
         SDL_Log("menu objects: %s: %s", qbkey::name(o.name).c_str(), error.c_str());
         o.loadFailed = true;

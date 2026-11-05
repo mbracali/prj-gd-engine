@@ -53,7 +53,8 @@ void addGameNatives(FrontEnd& fe, const Disc& disc, TextureCache& textures) {
             loaded->insert(discPath);
             try {
                 textures.loadPak(disc, discPath);
-                Pak pak = Pak::load(disc, discPath);
+                const auto pakShared = Pak::shared(disc, discPath);
+                const Pak& pak = *pakShared;
                 for (const PakEntry& e : pak.entries())
                     if (e.type == qbkey::key(".qb")) {
                         auto [d, n] = pak.data(e);
@@ -113,10 +114,9 @@ void addGameNatives(FrontEnd& fe, const Disc& disc, TextureCache& textures) {
         // script start_gem_scroller]: controller_unplugged, sysnotify and
         // destroy_loading_screen read it; kill_gem_scroller sets it back to 0.
         v.setGlobal(K("playing_song"), Vm::makeInt(1));
-        // ... and, two game frames after the gem scroller starts, the
+        // ... and, once the song has started (its venue loaded: App), the
         // loading screen goes (destroy_loading_screen, near the script's end)
-        // [C script start_gem_scroller; I: spawned, the next VM step].
-        v.spawn(K("destroy_loading_screen"), qb::Struct{});
+        // [C script start_gem_scroller; I: spawned by App with the song].
         if (r.devilFinish || r.startMs > 0) SDL_Log("song: starts at %.0f ms%s", r.startMs, r.devilFinish ? " (Lou's finish)" : "");
         // end_credits: cleared unless end_credits_restart = 1 or the song is
         // thrufireandflames [C script start_gem_scroller]; with it set,
@@ -162,6 +162,7 @@ void addGameNatives(FrontEnd& fe, const Disc& disc, TextureCache& textures) {
                         Vm::set(*nv.st, K("style"), Vm::makeInt(1));
                         v.setGlobal(K("player2_status"), nv);
                     }
+                    ++fe.preloadRequest.serial;  // the boss is player 2's character: the venue's band loads again
                 }
         const qb::Value* mode = v.global(K("game_mode"));
         r.gameMode = mode ? mode->key : 0;
@@ -202,20 +203,48 @@ void addGameNatives(FrontEnd& fe, const Disc& disc, TextureCache& textures) {
     // (the port loads at once; GH3's own loading took that long and more,
     // GD04-040), whichever script starts the song (restart_gem_scroller,
     // create_attract_mode, training) [I].
-    vm.addNative("start_gem_scroller", [startScroller](Vm& v, ScriptRun& run, qb::Struct& p) {
+    vm.addNative("start_gem_scroller", [startScroller, &fe](Vm& v, ScriptRun& run, qb::Struct& p) {
         // The script's Menu_Music_Off first: the menu music stops as the song
         // loads (it played on into the song once the port's sounds were heard) [C script start_gem_scroller].
         v.run(K("Menu_Music_Off"), qb::Struct{});
         v.run(K("SongUnLoadFSB"), qb::Struct{});  // the setlist's preview stops as the song loads
+        // The venue starts loading now, under the loading screen (VenuePreload).
+        {
+            FrontEnd::PreloadRequest& pr = fe.preloadRequest;
+            const qb::Value* song = Vm::param(p, K("song_name"));
+            if (!song) song = v.global(K("current_song"));
+            pr.song = song ? song->key : 0;
+            const qb::Value* t = v.global(K("current_transition"));
+            pr.transition = t && t->key && t->key != K("none") ? t->key : 0;
+            pr.endMs = -1;
+            if (const qb::Value* e = Vm::param(p, K("endtime")); e && e->number() > 0 && e->number() < 99999999.0f) pr.endMs = e->number();
+            // starttime, as startScroller reads it (bossdevil without devil_finish_restart: 0).
+            pr.startMs = std::max(0.0, double(Vm::number(Vm::param(p, K("starttime")), 0)));
+            if (song && song->key == K("bossdevil") && Vm::number(Vm::param(p, K("devil_finish_restart")), 0) != 1) pr.startMs = 0;
+            ++pr.serial;
+        }
+        // The script goes on once the song has started (App: its venue
+        // loaded on a worker), as GH3's start_gem_scroller returns after its
+        // loads: the calls after it (Lou's finish's cameras_boss_dead, the
+        // boss intro's) reach the new song [C script start_gem_scroller].
         const double until = v.loadingHoldUntil();
-        if (v.clockMs() >= until) return startScroller(v, run, p);
+        FrontEnd* fp = &fe;
+        if (v.clockMs() >= until) {
+            if (!startScroller(v, run, p)) return false;
+            if (fe.songRequest.pending) run.waitFor = [fp] { return !fp->songRequest.pending; };
+            return true;
+        }
         auto params = std::make_shared<qb::Struct>(p);
         Vm* vp = &v;
         ScriptRun* rp = &run;
-        run.waitFor = [startScroller, vp, rp, params, until] {
-            if (vp->clockMs() < until) return false;
-            startScroller(*vp, *rp, *params);
-            return true;
+        auto started = std::make_shared<bool>(false);
+        run.waitFor = [startScroller, vp, rp, params, until, fp, started] {
+            if (!*started) {
+                if (vp->clockMs() < until) return false;
+                startScroller(*vp, *rp, *params);
+                *started = true;
+            }
+            return !fp->songRequest.pending;
         };
         return true;
     });

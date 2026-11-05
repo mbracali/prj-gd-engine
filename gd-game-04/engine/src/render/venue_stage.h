@@ -54,8 +54,12 @@ public:
     uint64_t teslaFrames = 0;  // frames with Tesla bolts drawn
     // Loads the zone (and uploads it when `device` is given); false and
     // `error` on failure. Without a device nothing draws until attach().
+    // songStartMs: the song's first ms (a mid-song start: practice, Lou's
+    // finish at marker 37); the band, crowd, particles and cameras begin
+    // leadInMs before it (they used to begin at -leadInMs and step through
+    // the whole song on the first frame: Lou's finish never ended in z_hell).
     bool start(const Disc& disc, const Globals& g, const std::string& zone, const Chart& chart, uint32_t songKey, double leadInMs,
-               gfx::RenderDevice* device, std::string& error);
+               gfx::RenderDevice* device, std::string& error, double songStartMs = 0);
     // Uploads the venue to `device` (once).
     bool attach(gfx::RenderDevice& device, const Disc& disc, std::string& error);
     // Advances the cuts and the light show to song time `ms` (monotonic).
@@ -111,7 +115,7 @@ private:
     std::unique_ptr<Band> band_;
     std::unique_ptr<Crowd> crowd_;  // the crowd's peds and their card renders (GD04_NO_CROWD=1: none)
     std::unique_ptr<StagePeds> peds_;  // the stage peds and animated venue objects (GD04_NO_STAGEPEDS=1: none)
-    std::unique_ptr<band::Library> pedLib_;
+    std::shared_ptr<band::Library> pedLib_;
     std::unique_ptr<Particles> particles_;  // the zone's particles and pyro (GD04_NO_PARTICLES=1: none)
     gfx::RenderDevice* device_ = nullptr;
     gfx::TargetId shadow_;  // the band's dynamic shadow map (GD04_NO_SHADOWS=1: none)

@@ -142,7 +142,8 @@ venue::Performance VenueStage::performance(float health) {
 }
 
 bool VenueStage::start(const Disc& disc, const Globals& g, const std::string& zone, const Chart& chart, uint32_t songKey, double leadInMs,
-                       gfx::RenderDevice* device, std::string& error) {
+                       gfx::RenderDevice* device, std::string& error, double songStartMs) {
+    const double from = songStartMs - leadInMs;  // the venue's first ms
     try {
         venue_ = venue::load(disc, zone);
     } catch (const std::exception& e) {
@@ -152,7 +153,7 @@ bool VenueStage::start(const Disc& disc, const Globals& g, const std::string& zo
     perf_ = {};
     cameras_ = {};
     lights_ = {};
-    cameras_.init(*venue_, g, chart, songKey ^ venue_->zoneKey, leadInMs);
+    cameras_.init(*venue_, g, chart, songKey ^ venue_->zoneKey, leadInMs, songStartMs);
     lights_.init(*venue_, g, chart);
     // The band (create_band, at the song's start: the gem scroller's lead-in) [C script].
     band_.reset();
@@ -160,7 +161,7 @@ bool VenueStage::start(const Disc& disc, const Globals& g, const std::string& zo
         band_ = std::make_unique<Band>();
         std::string berr;
         const uint64_t t0 = SDL_GetTicks();
-        if (!band_->start(disc, g, *venue_, chart, songKey, &perf_, -leadInMs, berr)) {
+        if (!band_->start(disc, g, *venue_, chart, songKey, &perf_, from, berr)) {
             SDL_Log("band: %s", berr.c_str());
             band_.reset();
         } else {
@@ -183,7 +184,7 @@ bool VenueStage::start(const Disc& disc, const Globals& g, const std::string& zo
     if (!SDL_getenv("GD04_NO_CROWD")) {
         crowd_ = std::make_unique<Crowd>();
         std::string cerr;
-        if (!crowd_->start(disc, g, *venue_, chart, &perf_, band_ ? &band_->library() : nullptr, -leadInMs, cerr)) {
+        if (!crowd_->start(disc, g, *venue_, chart, &perf_, band_ ? &band_->library() : nullptr, from, cerr)) {
             if (!cerr.empty()) SDL_Log("crowd: %s", cerr.c_str());
             crowd_.reset();
         }
@@ -228,7 +229,7 @@ bool VenueStage::start(const Disc& disc, const Globals& g, const std::string& zo
         cameras_.stopScript = [this](uint32_t run) {
             if (particles_) particles_->killRun(run);
         };
-        if (!particles_->start(disc, g, *venue_, chart, &perf_, -leadInMs, perr)) {
+        if (!particles_->start(disc, g, *venue_, chart, &perf_, from, perr)) {
             if (!perr.empty()) SDL_Log("particles: %s", perr.c_str());
             particles_.reset();
         }
@@ -241,8 +242,7 @@ bool VenueStage::start(const Disc& disc, const Globals& g, const std::string& zo
         std::string serr;
         try {
             if (!lib) {
-                pedLib_ = std::make_unique<band::Library>();
-                pedLib_->load(disc);
+                pedLib_ = band::Library::shared(disc);
                 lib = pedLib_.get();
             }
             peds_ = std::make_unique<StagePeds>();

@@ -150,6 +150,9 @@ SDL_Surface* portrait(gfx::Renderer& r, const band::Model& model, const std::vec
             cam.pos[0] = d * std::sin(a), cam.pos[2] = d * std::cos(a);
             cam.rot = {0, std::cos(a * 0.5f), 0, -std::sin(a * 0.5f)};
         }
+        // GD04_CHARTEST_X / _Y: the camera moved sideways / up (metres), e.g. onto the fret hand.
+        if (const char* x = SDL_getenv("GD04_CHARTEST_X")) cam.pos[0] += float(std::atof(x));
+        if (const char* y = SDL_getenv("GD04_CHARTEST_Y")) cam.pos[1] += float(std::atof(y));
     }
     const float grey[4] = {0.18f, 0.18f, 0.2f, 1};
     r.beginFrame(grey);

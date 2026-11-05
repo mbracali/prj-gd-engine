@@ -1,10 +1,14 @@
 // SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "app.h"
+#include "data/band.h"
+#include "data/pak.h"
 
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <chrono>
+#include <future>
 #include <cmath>
 #include <filesystem>
 #include <exception>
@@ -110,6 +114,13 @@ private:
     static constexpr float kBackdropDist = 3.6f;   // metres in front of the singer
     static constexpr float kBackdropTurn = -1.4f;  // the aim moved across the stage (the singer right of centre)
     std::unique_ptr<VenueStage> backdrop_;
+    std::unique_ptr<VenueStage> backdropPending_;          // loading on a worker (prepareMenuBackdrop)
+    std::shared_ptr<const Globals> backdropGlobals_;       // its snapshot of the globals (kept with it)
+    std::shared_ptr<std::unique_ptr<Chart>> backdropChartSlot_;
+    std::future<std::string> backdropWork_;
+    std::future<void> warmup_;  // the shared library's first load (loadData)
+    uint64_t backdropT0_ = 0;
+    void finishMenuBackdrop(bool wait);
     std::unique_ptr<Chart> backdropChart_;
     bool backdropTried_ = false;
     void drawTouchButtons();
@@ -141,6 +152,9 @@ private:
     std::string message_;
     bool running_ = true;
     int exitCode_ = 0;
+    std::shared_ptr<VenuePreload> songPreload_;                 // the next song's venue, loading (VenuePreload)
+    std::vector<std::shared_ptr<VenuePreload>> preloadDiscard_;  // replaced ones still finishing on their thread
+    int preloadSerial_ = 0;
     int escapes_ = 0;  // Esc three times on the first screen quits (guidelines)
     uint64_t startNs_ = 0;
     std::unique_ptr<MenuKeys> keys_;
@@ -697,6 +711,7 @@ void App::drawTouchButtons() {
 // the page opens at once [I: the shot's distances].
 void App::drawMenuBackdrop(double) {
     if (!backdrop_ && !backdropTried_) prepareMenuBackdrop();  // the boot screen was skipped
+    finishMenuBackdrop(true);  // the page is open: wait for it
     PortDraw::backdropDrawn = backdrop_ != nullptr;
     if (!backdrop_) return;
     canvas_.flush();
@@ -706,26 +721,50 @@ void App::drawMenuBackdrop(double) {
 void App::prepareMenuBackdrop() {
     if (backdrop_ || backdropTried_ || !disc_ || !globals_) return;
     backdropTried_ = true;
-    const uint64_t t0 = SDL_GetTicksNS();
-    std::string err;
-    try {
-        backdropChart_ = std::make_unique<Chart>(loadChart(*disc_, "slowride"));
-        backdrop_ = std::make_unique<VenueStage>();
-        // Started 1.5 s before the instant (a negative lead-in: the band, crowd
-        // and particles begin there), so one step reaches it posed.
-        if (!backdrop_->start(*disc_, *globals_, VenueStage::chooseZone(*globals_), *backdropChart_, qbkey::key("slowride"), -(kBackdropMs - 1500), nullptr, err) ||
-            !backdrop_->attach(canvas_.renderer().device(), *disc_, err)) {
-            SDL_Log("menu backdrop: %s", err.c_str());
-            backdrop_.reset();
-            return;
+    backdropT0_ = SDL_GetTicksNS();
+    // Loaded on a worker thread from a snapshot of the globals (the press-start
+    // screen dropped to a few frames a second while it loaded: owner 1.7);
+    // attached and posed on this thread once it is in (finishMenuBackdrop).
+    backdropGlobals_ = std::make_shared<Globals>(*globals_);
+    backdropPending_ = std::make_unique<VenueStage>();
+    VenueStage* st = backdropPending_.get();
+    const Disc* d = disc_.get();
+    std::shared_ptr<const Globals> g = backdropGlobals_;
+    auto chart = std::make_shared<std::unique_ptr<Chart>>();
+    backdropChartSlot_ = chart;
+    backdropWork_ = std::async(std::launch::async, [st, d, g, chart]() -> std::string {
+        try {
+            *chart = std::make_unique<Chart>(loadChart(*d, "slowride"));
+            // Started 1.5 s before the instant (a negative lead-in: the band, crowd
+            // and particles begin there), so one step reaches it posed.
+            std::string err;
+            if (!st->start(*d, *g, VenueStage::chooseZone(*g), **chart, qbkey::key("slowride"), -(kBackdropMs - 1500), nullptr, err))
+                return err.empty() ? std::string("no venue") : err;
+            // The band posed mid-song: the venue stepped to the instant (then still).
+            for (double t = kBackdropMs - 1500; t <= kBackdropMs; t += 100) st->advance(t);
+            return {};
+        } catch (const std::exception& ex) {
+            return ex.what();
         }
-    } catch (const std::exception& ex) {
-        SDL_Log("menu backdrop: %s", ex.what());
-        backdrop_.reset();
+    });
+}
+
+// The backdrop's load done: attached, posed and its camera set (on this thread).
+void App::finishMenuBackdrop(bool wait) {
+    if (!backdropWork_.valid()) return;
+    if (!wait && backdropWork_.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return;
+    std::string err = backdropWork_.get();
+    if (backdropChartSlot_) backdropChart_ = std::move(*backdropChartSlot_), backdropChartSlot_.reset();
+    if (err.empty() && !backdropPending_->attach(canvas_.renderer().device(), *disc_, err) && err.empty()) err = "attach";
+    if (!err.empty()) {
+        SDL_Log("menu backdrop: %s", err.c_str());
+        backdropPending_.reset();
         return;
     }
-    // The band posed mid-song: the venue stepped to the instant, then still.
-    for (double t = kBackdropMs - 1500; t <= kBackdropMs; t += 100) backdrop_->advance(t);
+    backdrop_ = std::move(backdropPending_);
+    const uint64_t t0 = backdropT0_;
+
+    // (stepped to the instant on the worker)
     canvas_.flush();
     backdrop_->draw(kBackdropMs);  // the band posed (their bones are known after a draw), unseen
     // The shot: from the stage's front (the drummer behind the singer), a
@@ -836,6 +875,18 @@ bool App::loadData(const std::string& path) {
         globals_ = std::make_unique<Globals>();
         globals_->load(*disc_);
         songs_.load(*globals_);
+        // The characters' animation library and ZONES/global.pak load on a
+        // worker while the logos play (the menus' first characters and the
+        // first song waited 0.6 s and more for them: owner 1.7).
+        const Disc* d = disc_.get();
+        warmup_ = std::async(std::launch::async, [d] {
+            try {
+                Pak::shared(*d, "DATA/COMPRESSED/ZONES/global.pak.xen");
+                band::Library::shared(*d);
+            } catch (const std::exception& ex) {
+                SDL_Log("warm-up: %s", ex.what());
+            }
+        });
     } catch (const std::exception& e) {
         message_ = std::string("cannot read the scripts: ") + e.what();
         disc_.reset();
@@ -1051,14 +1102,32 @@ void App::frame() {
         }
         return;
     }
-    if (front_ && front_->songRequest.pending) {
+    // The song's venue loads on a worker under the loading screen (owner 1.7):
+    // start_gem_scroller asks (FrontEnd::preloadRequest), the song starts once it is in.
+    if (front_ && disc_ && globals_ && front_->preloadRequest.serial != preloadSerial_) {
+        preloadSerial_ = front_->preloadRequest.serial;
+        if (songPreload_ && !songPreload_->ready()) preloadDiscard_.push_back(std::move(songPreload_));
+        songPreload_.reset();
+        const FrontEnd::PreloadRequest& pr = front_->preloadRequest;
+        uint32_t tr = pr.transition;
+        if (const char* t = SDL_getenv("GD04_TRANSITION")) tr = qbkey::key(t);
+        if (!SDL_getenv("GD04_NO_VENUE") && !SDL_getenv("GD04_NO_PRELOAD"))  // GD04_NO_PRELOAD: the venue loads in the song's first frame (development aid)
+            for (const SongInfo& s : songs_.songs())
+                if (s.checksum == pr.song) songPreload_ = VenuePreload::launch(*disc_, *globals_, s.name, tr, pr.endMs, pr.startMs);
+    }
+    preloadDiscard_.erase(std::remove_if(preloadDiscard_.begin(), preloadDiscard_.end(), [](const auto& p) { return p->ready(); }),
+                          preloadDiscard_.end());
+    if (front_ && front_->songRequest.pending && (!songPreload_ || songPreload_->ready())) {
         front_->songRequest.pending = false;
+        // The loading screen goes with the song's start (GH3: after its async loads) [C script start_gem_scroller].
+        front_->vm().spawn(qbkey::key("destroy_loading_screen"), qb::Struct{});
         const SongInfo* info = nullptr;
         for (const SongInfo& s : songs_.songs())
             if (s.checksum == front_->songRequest.song) info = &s;
         std::string err;
         outroSong_.reset();
         song_ = std::make_unique<SongScreen>();
+        if (songPreload_) song_->usePreload(std::move(songPreload_));
         for (int s = 0; s < 2; ++s) hadDevice_[s] = input_.padConnected(s), unplugReported_[s] = false;
         // Enhanced > CHEATS: Autoplay and No Fail Mode (as --autoplay / --no-fail).
         // The attract mode plays itself (player1_status.bot_play) [C script create_attract_mode].
@@ -1161,6 +1230,7 @@ void App::frame() {
         // The Enhanced backdrop, made once while the menus run (drawn unseen
         // under the first screen, which covers it).
         if (!backdrop_ && !backdropTried_ && front_->flowState() == "bootup_press_any_button_fs") prepareMenuBackdrop();
+        finishMenuBackdrop(false);
         if (ports_ && ports_->isOpen()) {
             // The port's screen over a venue with the band (gd02's backdrop:
             // App::menuBackdrop), GH3's scripts waiting meanwhile.
@@ -1380,6 +1450,11 @@ int App::run() {
         const std::string mf = enhanced_.get("max_fps");
         const uint64_t minNs = !song_ ? kMinFrameNs : mf == "unlimited" ? 0 : uint64_t(1e9 / std::max(30.0, std::atof(mf.c_str())));
         const uint64_t spent = SDL_GetTicksNS() - frameStart;
+        // GD04_FRAMELOG: every frame over 25 ms, with the screen (owner 1.7).
+        static const bool frameLog = [] { const char* v = SDL_getenv("GD04_FRAMELOG"); return v && *v && *v != '0'; }();
+        if (frameLog && spent > 25'000'000ull)
+            SDL_Log("frame: %.1f ms at %.0f ms (%s)", double(spent) / 1e6, double(frameStart - startNs_) / 1e6,
+                    front_ ? front_->flowState().c_str() : song_ ? "song" : "-");
         if (spent < minNs) SDL_DelayNS(minNs - spent);
         if (stats) {
             ++statsFrames;
@@ -1392,7 +1467,9 @@ int App::run() {
     }
     song_.reset();
     outroSong_.reset();  // its venue's GPU objects before the device
-    backdrop_.reset(), backdropChart_.reset();  // the menu backdrop's too
+    if (backdropWork_.valid()) backdropWork_.wait();
+    if (warmup_.valid()) warmup_.wait();
+    backdrop_.reset(), backdropPending_.reset(), backdropChart_.reset();  // the menu backdrop's too
     ports_.reset();
     hooks_.reset();
     front_.reset();

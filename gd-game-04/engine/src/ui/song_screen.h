@@ -2,7 +2,9 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #pragma once
 
+#include <atomic>
 #include <functional>
+#include <future>
 #include <memory>
 #include <string>
 
@@ -57,8 +59,32 @@ struct SongSetup {
     uint32_t transition = 0;
 };
 
+// A song's venue loaded on a worker thread while GH3's loading screen is up
+// (owner 1.7: the loading screen froze, then the song started): its scene,
+// band, crowd, particles and peds read from a snapshot of the globals and
+// its own chart (both kept alive with the stage); the GPU upload stays on
+// the first frame. GH3 itself loads the song pak and the band async
+// (load_songqpak / create_band async = 1) and destroys the loading screen
+// after [C script start_gem_scroller].
+struct VenuePreload {
+    std::string song, zone, cameras;
+    double leadInMs = 0, endMs = -1, startMs = 0;
+    std::shared_ptr<const Globals> globals;
+    std::unique_ptr<Chart> chart;
+    std::unique_ptr<VenueStage> stage;
+    std::future<void> work;
+    std::atomic<bool> finished{false};
+    bool ready() const { return finished.load(); }
+    ~VenuePreload();
+    // Starts loading `songName`'s venue for `transition` (current_transition) on a worker.
+    static std::shared_ptr<VenuePreload> launch(const Disc& disc, const Globals& live, const std::string& songName, uint32_t transition,
+                                                double endMs, double startMs);
+};
+
 class SongScreen {
 public:
+    // The venue preloaded for this song (VenuePreload), used by the next start() when it matches.
+    void usePreload(std::shared_ptr<VenuePreload> p) { preload_ = std::move(p); }
     SongScreen();
     ~SongScreen();
     // `textures`: the players' highway textures are loaded into it (their body paks).
@@ -164,6 +190,7 @@ public:
 private:
     bool forcedFail_ = false;
     // The venue behind the highway (render/venue_stage.h; GD04_NO_VENUE=1: none).
+    std::shared_ptr<VenuePreload> preload_;  // owns the preloaded stage's globals and chart: before venue_
     std::unique_ptr<VenueStage> venue_;
     const Disc* disc_ = nullptr;
 

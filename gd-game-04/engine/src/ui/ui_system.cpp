@@ -133,7 +133,8 @@ UiSystem::~UiSystem() {
 
 void UiSystem::loadFonts(const std::string& pakPath) {
     try {
-        Pak pak = Pak::load(disc_, pakPath);
+        const auto pakShared = Pak::shared(disc_, pakPath);
+        const Pak& pak = *pakShared;
         for (const PakEntry& e : pak.entries()) {
             if (e.type != K(".fnt") || fonts_.count(e.fullName)) continue;
             auto [p, n] = pak.data(e);

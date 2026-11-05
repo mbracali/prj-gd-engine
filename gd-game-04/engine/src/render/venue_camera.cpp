@@ -70,7 +70,7 @@ const qb::Value* CameraDirector::global(uint32_t name) const {
     return g && g->type == qb::Type::KeyPtr ? g_->resolve(*g) : g;
 }
 
-void CameraDirector::init(const Venue& v, const Globals& g, const Chart& chart, uint32_t seed, double leadInMs) {
+void CameraDirector::init(const Venue& v, const Globals& g, const Chart& chart, uint32_t seed, double leadInMs, double startMs) {
     v_ = &v, g_ = &g;
     notes_ = chart.cameras;
     std::stable_sort(notes_.begin(), notes_.end(), [](const ChartEvent& a, const ChartEvent& b) { return a.time < b.time; });
@@ -85,7 +85,7 @@ void CameraDirector::init(const Venue& v, const Globals& g, const Chart& chart, 
     // Transition_CameraCut at its time 0: prefix cameras_fastintro (the
     // 3 s fast intro) or cameras_intro (8 s), length = the transition's time
     // [C scripts start_gem_scroller, Common_FastIntro_Transition].
-    now_ = -leadInMs;
+    now_ = startMs - leadInMs;
     prefix_ = "cameras";
     setDefaultCuts();
     qb::Struct p;
@@ -98,7 +98,7 @@ void CameraDirector::init(const Venue& v, const Globals& g, const Chart& chart, 
     cn.key = K("changenow");
     p.items.push_back({0, cn});
     setArrayPrefix(&p, int(leadInMs));
-    transitionEnd_ = 0;
+    transitionEnd_ = startMs;
     startShot(now_);
 }
 

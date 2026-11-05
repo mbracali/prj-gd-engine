@@ -80,6 +80,13 @@ public:
         bool endCredits = false;
         uint32_t transition = 0;  // current_transition (fastintro, intro, encore, boss, ...)
     } songRequest;
+    // The venue preload start_gem_scroller asks for (App runs it on a worker:
+    // ui/song_screen.h VenuePreload); a new serial (re)starts it.
+    struct PreloadRequest {
+        int serial = 0;
+        uint32_t song = 0, transition = 0;
+        double endMs = -1, startMs = 0;
+    } preloadRequest;
     bool songPlaying = false;
     // Paused with Start in a song: GH3's pause menu runs over the frozen song
     // (gh3_start_pressed); songKill: its quit / restart killed the gem scroller.

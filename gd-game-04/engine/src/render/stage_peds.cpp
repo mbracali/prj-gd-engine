@@ -52,7 +52,8 @@ bool StagePeds::start(const Disc& disc, const Globals& g, const venue::Venue& v,
     peds_.clear();
     byNode_.clear();
     try {
-        const Pak zone = Pak::load(disc, "DATA/COMPRESSED/ZONES/" + v.zone + ".pak.xen");
+        const auto zonePak = Pak::shared(disc, "DATA/COMPRESSED/ZONES/" + v.zone + ".pak.xen");
+        const Pak& zone = *zonePak;
         band::ClipMap zoneClips = band::readPakClips(zone);
         for (const venue::Node& n : v.nodes) {
             if (n.cls != K("gameobject") || !n.createdAtStart || !n.st) continue;

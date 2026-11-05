@@ -84,8 +84,7 @@ bool Crowd::start(const Disc& disc, const Globals& g, const venue::Venue& v, con
     lib_ = shared;
     try {
         if (!lib_) {
-            ownLib_ = std::make_unique<band::Library>();
-            ownLib_->load(disc);
+            ownLib_ = band::Library::shared(disc);
             lib_ = ownLib_.get();
         }
         const anim::Skeleton* ske = lib_->skeleton(K("GH3_Ped"));  // obj_security_creation_params SkeletonName [C]
@@ -93,8 +92,10 @@ bool Crowd::start(const Disc& disc, const Globals& g, const venue::Venue& v, con
             error = "no GH3_Ped skeleton";
             return false;
         }
-        const Pak zone = Pak::load(disc, "DATA/COMPRESSED/ZONES/" + v.zone + ".pak.xen");
-        const Pak global = Pak::load(disc, "DATA/COMPRESSED/ZONES/global.pak.xen");
+        const auto zonePak = Pak::shared(disc, "DATA/COMPRESSED/ZONES/" + v.zone + ".pak.xen");
+        const auto globalPak = Pak::shared(disc, "DATA/COMPRESSED/ZONES/global.pak.xen");
+        const Pak& zone = *zonePak;
+        const Pak& global = *globalPak;
         slowTempo_ = qbNumber(g, K("slow_tempo"), 75), medTempo_ = qbNumber(g, K("med_tempo"), 115), fastTempo_ = qbNumber(g, K("fast_tempo"), 145);
         blendTempo_ = qbNumber(g, K("Crowd_BlendTime_TempoChange"), 0.67f), blendBad_ = qbNumber(g, K("Crowd_BlendTime_Bad"), 0.5f);
         blendSpecial_ = qbNumber(g, K("Crowd_BlendTime_Special"), 0.4f), blendSlow_ = qbNumber(g, K("Crowd_BlendTime_Slow"), 0.6f);

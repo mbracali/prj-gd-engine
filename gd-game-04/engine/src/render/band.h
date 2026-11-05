@@ -82,9 +82,9 @@ public:
     // get it (shared with the menus' characters, ui/menu_objects.h);
     // `globalPak`: ZONES/global.pak, loaded on first use.
     static std::unique_ptr<AccessorySim> accessorySim(const Disc& disc, const Globals& g, const band::Member& m, const bandanim::Rig& rig,
-                                                      std::unique_ptr<Pak>& globalPak);
+                                                      std::shared_ptr<const Pak>& globalPak);
     // The skeletons and perm_anims clips (shared with the crowd, render/crowd.h).
-    const band::Library& library() const { return lib_; }
+    const band::Library& library() const { return *lib_; }
     // The song pak's .qb files (its <song>_performance array).
     const std::vector<qb::File>& songFiles() const { return songFiles_; }
     // Evaluates every member's pose at `ms` (after advance).
@@ -98,8 +98,8 @@ public:
                     const venue::LightShow& show);
 
 private:
-    band::Library lib_;
-    std::unique_ptr<Pak> globalPak_;  // the ragdolls' .rag files
+    std::shared_ptr<band::Library> lib_;  // band::Library::shared
+    std::shared_ptr<const Pak> globalPak_;  // the ragdolls' .rag files
     std::shared_ptr<const matlib::Library> shaderLib_;
     double skinnedAt_ = -1e18;  // the shadow pass's song time  // GH3's material library (render/gh3_shader.h)
     std::vector<Entry> members_;
