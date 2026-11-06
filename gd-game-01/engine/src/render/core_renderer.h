@@ -10,9 +10,10 @@
 // maths, the same uniform persistence, the same frame target and depth
 // format (gd-engine-core/docs/render.md section 6).
 //
-// Not on this path yet: the Enhanced post-processing chain (post_fx.h), True
-// HDR output and the FSR 3.1 / DLSS upscalers; beginScene returns false
-// (the scene draws without them) and says so once in the log.
+// The Enhanced post-processing chain and True HDR output run here too
+// (core_post_fx.h: local's PostFx and outputHdr on the Device). Not on this
+// path yet: the FSR 3.1 / DLSS upscalers (GL <-> Vulkan interop); FSR 1
+// takes their place, as on local when they cannot run.
 
 #include <SDL3/SDL.h>
 
@@ -23,6 +24,7 @@
 #include <vector>
 
 #include "gd/core/render/device.h"
+#include "render/core_post_fx.h"
 #include "render/renderer.h"
 
 class CoreRenderer {
@@ -108,12 +110,22 @@ private:
     enum Program { kMain, kFill, kBlur, kProbe, kPrograms };
 
     void setMvp(const float* m);
+    void setJitter(const std::array<float, 2>& j);  // TAA's sub-pixel offset of the scene's draws (local's uJitter)
     void ensureFrame();
+    // What target_ 0 is: the post-processing scene while one is active (Renderer::beginScene), else the frame.
+    Texture mainColor() const { return r_.sceneActive_ ? sceneColor_ : frameColor_; }
+    Texture mainDepth() const { return r_.sceneActive_ ? sceneDepth_ : frameDepth_; }
+    int mainWidth() const { return r_.sceneActive_ ? sceneW_ : frameW_; }
+    int mainHeight() const { return r_.sceneActive_ ? sceneH_ : frameH_; }
+    bool targetF16() const;  // the current target is RGBA16F (an HDR scene or frame)
+    // Copies a w x h rectangle of the current target into `dst` (RGBA8), as local's glCopyTexSubImage2D.
+    void copyFromTarget(int x, int y, Texture dst, int w, int h);
     void ensurePass();  // begins the current target's pass (loading what it holds) if none is open
     void suspend();     // ends the pass: resource updates and copies happen between passes
     int targetHeight() const;
     void applyRects();
-    Pipeline pipeline(Program program, Blend blend, bool depthTest, bool depthWrite, int cull, bool decal, uint8_t writeMask);
+    Pipeline pipeline(Program program, Blend blend, bool depthTest, bool depthWrite, int cull, bool decal, uint8_t writeMask,
+                      bool f16 = false);
     uint8_t colorMask() const;  // the current target's (local's glColorMask)
     Sampler sampler(gd::core::render::Filter min, gd::core::render::Filter mag, bool mips, bool repeat);
     void drawMain(int texture, Blend blend, bool depthTest, bool depthWrite, int cull, bool decal);
@@ -130,6 +142,16 @@ private:
     std::map<int, Texture> targetDepth_;  // render target handle -> its depth
     Texture frameColor_, frameDepth_;
     int frameW_ = 0, frameH_ = 0;
+    bool frameF16_ = false;  // True HDR: an RGBA16F frame, converted for the surface by endFrame
+    // Enhanced post-processing: the scene target (Renderer::beginScene) and the chain.
+    std::unique_ptr<CorePostFx> post_;
+    Texture sceneColor_, sceneDepth_;
+    int sceneW_ = 0, sceneH_ = 0;
+    bool sceneF16_ = false;
+    // True HDR: the converted frame (RGBA32F: local writes the shader's floats
+    // straight to the surface) and an RGBA8 copy of the frame for readPixels.
+    Texture hdrOut_, readCopy_;
+    int hdrOutW_ = 0, hdrOutH_ = 0, readCopyW_ = 0, readCopyH_ = 0;
     int target_ = 0;  // 0: the frame; else the render target being drawn
     // Viewport and scissor as local sets them (GL style: origin bottom-left).
     int vp_[4] = {0, 0, 0, 0}, sc_[4] = {0, 0, 0, 0};
@@ -150,5 +172,5 @@ private:
     std::map<unsigned, std::pair<gd::core::render::Readback, size_t>> probes_;
     unsigned nextProbe_ = 1;
     uint64_t paceNs_ = 0, nextFrameNs_ = 0;
-    mutable bool toldPost_ = false;
+    bool toldPost_ = false, toldHdr_ = false;
 };

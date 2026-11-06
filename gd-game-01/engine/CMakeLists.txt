@@ -51,6 +51,7 @@ target_sources(gd01 PRIVATE
   src/render/vk_upscaler.cpp
   src/render/renderer.cpp
   src/render/core_renderer.cpp
+  src/render/core_post_fx.cpp
   src/render/scene_renderer.cpp
   src/render/image_enhance.cpp
   src/render/text_layout.cpp

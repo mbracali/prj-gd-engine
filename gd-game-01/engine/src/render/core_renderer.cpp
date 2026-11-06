@@ -257,31 +257,47 @@ bool CoreRenderer::init(SDL_Window* window, gr::Backend backend, const gr::GlHoo
 void CoreRenderer::shutdown() {
     if (!dev_) return;
     suspend();
+    post_.reset();
     dev_.reset();  // the device frees everything it made, then its context
 }
 
 // ---------------------------------------------------------------- passes
 
 int CoreRenderer::targetHeight() const {
-    if (target_ == 0) return frameH_;
+    if (target_ == 0) return mainHeight();
     return textures_[size_t(target_)].h;
+}
+
+bool CoreRenderer::targetF16() const {
+    if (target_ != 0) return false;  // render targets are RGBA8
+    return r_.sceneActive_ ? sceneF16_ : frameF16_;
 }
 
 void CoreRenderer::ensureFrame() {
     int w = 0, h = 0;
     r_.frameSize(w, h);
     w = std::max(w, 1), h = std::max(h, 1);
-    if (frameColor_ && w == frameW_ && h == frameH_) return;
+    const bool f16 = r_.hdrSurface_ != 0;  // an HDR surface: the frame is RGBA16F (local's main_.f16)
+    if (frameColor_ && w == frameW_ && h == frameH_ && f16 == frameF16_) return;
     suspend();
     if (frameColor_) dev_->destroyTexture(frameColor_), dev_->destroyTexture(frameDepth_);
     // Local's frame: RGBA8 colour (the window's or the internal resolution's) + 24-bit depth.
     gr::TextureDesc c;
     c.width = w, c.height = h, c.usage = gr::kSampledTexture | gr::kColorTarget;
+    c.format = f16 ? gr::Format::RGBA16F : gr::Format::RGBA8;
     frameColor_ = dev_->createTexture(c);
     gr::TextureDesc d = c;
     d.format = gr::Format::D24, d.usage = gr::kSampledTexture | gr::kDepthTarget;
     frameDepth_ = dev_->createTexture(d);
-    frameW_ = w, frameH_ = h;
+    frameW_ = w, frameH_ = h, frameF16_ = f16;
+}
+
+// Local's glCopyTexSubImage2D from the bound framebuffer: an exact copy, or
+// from an RGBA16F scene or frame the same conversion to RGBA8 (a 1:1 blit).
+void CoreRenderer::copyFromTarget(int x, int y, Texture dst, int w, int h) {
+    const Texture src = target_ == 0 ? mainColor() : textures_[size_t(target_)].tex;
+    if (targetF16()) dev_->blit({src, 0, 0, x, y}, w, h, {dst}, w, h, gr::Filter::Nearest);
+    else dev_->copyTexture({src, 0, 0, x, y}, {dst}, w, h);
 }
 
 void CoreRenderer::ensurePass() {
@@ -293,8 +309,8 @@ void CoreRenderer::ensurePass() {
     p.depth.load = gr::LoadOp::Load;
     p.depth.stencilLoad = gr::LoadOp::DontCare;
     if (target_ == 0) {
-        p.colors[0].texture = frameColor_;
-        p.depth.texture = frameDepth_;
+        p.colors[0].texture = mainColor();
+        p.depth.texture = mainDepth();
     } else {
         p.colors[0].texture = textures_[size_t(target_)].tex;
         p.depth.texture = targetDepth_[target_];
@@ -314,7 +330,7 @@ void CoreRenderer::applyRects() {
     const int h = targetHeight();
     dev_->setViewport({vp_[0], vp_[1], vp_[2], vp_[3]});
     if (scissorOn_) dev_->setScissor({sc_[0], sc_[1], sc_[2], sc_[3]});
-    else dev_->setScissor({0, 0, target_ == 0 ? frameW_ : textures_[size_t(target_)].w, h});
+    else dev_->setScissor({0, 0, target_ == 0 ? mainWidth() : textures_[size_t(target_)].w, h});
     rectsDirty_ = false;
 }
 
@@ -330,9 +346,10 @@ uint8_t CoreRenderer::colorMask() const {
     return target_ != 0 ? gr::kWriteAll : gr::kWriteRGB;  // the frame keeps its cleared alpha (local's colour mask)
 }
 
-gr::Pipeline CoreRenderer::pipeline(Program program, Blend blend, bool depthTest, bool depthWrite, int cull, bool decal, uint8_t writeMask) {
+gr::Pipeline CoreRenderer::pipeline(Program program, Blend blend, bool depthTest, bool depthWrite, int cull, bool decal, uint8_t writeMask,
+                                    bool f16) {
     const uint32_t key = uint32_t(program) | uint32_t(blend) << 3 | uint32_t(depthTest) << 6 | uint32_t(depthWrite) << 7 |
-                         uint32_t(cull) << 8 | uint32_t(decal) << 10 | uint32_t(writeMask) << 11;
+                         uint32_t(cull) << 8 | uint32_t(decal) << 10 | uint32_t(writeMask) << 11 | uint32_t(f16) << 15;
     if (auto it = pipelines_.find(key); it != pipelines_.end()) return it->second;
     gr::PipelineDesc p;
     p.shader = shaders_[program];
@@ -379,7 +396,7 @@ gr::Pipeline CoreRenderer::pipeline(Program program, Blend blend, bool depthTest
     case Blend::None: both(F::Zero, F::One); break;
     }
     b.writeMask = writeMask;
-    p.colorFormats[0] = gr::Format::RGBA8;
+    p.colorFormats[0] = f16 ? gr::Format::RGBA16F : gr::Format::RGBA8;  // an HDR scene or frame
     p.depthFormat = program == kProbe ? gr::Format::Undefined : gr::Format::D24;
     gr::Pipeline pl = dev_->createPipeline(p);
     pipelines_[key] = pl;
@@ -390,6 +407,7 @@ gr::Pipeline CoreRenderer::pipeline(Program program, Blend blend, bool depthTest
 
 void CoreRenderer::beginFrame(SDL_Color clear) {
     dev_->beginFrame();
+    if (r_.hdrSurface_) r_.updateHdr();  // the window's HDR state (paper white, headroom), as local
     ensureFrame();
     const int w = frameW_, h = frameH_;
     int* viewport = r_.viewport_;
@@ -425,9 +443,9 @@ void CoreRenderer::fillRectPixels(const int rect[4], const float rgba[4], bool d
     ensurePass();
     if (depthOnly) {
         applyRects();
-        dev_->bindPipeline(pipeline(kFill, Blend::Opaque, true, true, 0, false, 0));
+        dev_->bindPipeline(pipeline(kFill, Blend::Opaque, true, true, 0, false, 0, targetF16()));
     } else {
-        dev_->bindPipeline(pipeline(kFill, Blend::Opaque, false, false, 0, false, gr::kWriteAll));  // a clear writes alpha
+        dev_->bindPipeline(pipeline(kFill, Blend::Opaque, false, false, 0, false, gr::kWriteAll, targetF16()));  // a clear writes alpha
         dev_->setViewport({rect[0], rect[1], rect[2], rect[3]});
         dev_->setScissor({rect[0], rect[1], rect[2], rect[3]});
         rectsDirty_ = true;
@@ -447,7 +465,32 @@ void CoreRenderer::endFrame() {
         now = SDL_GetTicksNS();
         nextFrameNs_ = nextFrameNs_ + paceNs_ >= now ? nextFrameNs_ + paceNs_ : now + paceNs_;
     }
-    if (frameColor_) dev_->present(frameColor_, {0, 0, frameW_, frameH_}, gr::Filter::Linear, true);  // GL style storage
+    if (frameColor_ && frameF16_) {
+        // True HDR (local's outputHdr): the frame converted for the surface at
+        // the window's size, then shown 1:1. Never a black window: without the
+        // conversion's program the frame shows unconverted, as local's.
+        int ww = 0, wh = 0;
+        dev_->drawableSize(ww, wh);
+        ww = std::max(ww, 1), wh = std::max(wh, 1);
+        if (!hdrOut_ || hdrOutW_ != ww || hdrOutH_ != wh) {
+            if (hdrOut_) dev_->destroyTexture(hdrOut_);
+            gr::TextureDesc d;
+            d.format = dev_->caps().supports(gr::Format::RGBA32F, gr::kRenderable) ? gr::Format::RGBA32F : gr::Format::RGBA16F;
+            d.width = ww, d.height = wh, d.usage = gr::kSampledTexture | gr::kColorTarget;
+            hdrOut_ = dev_->createTexture(d);
+            hdrOutW_ = ww, hdrOutH_ = wh;
+        }
+        if (!post_) post_ = std::make_unique<CorePostFx>(*dev_);
+        if (hdrOut_ && post_->hdrOutput(frameColor_, hdrOut_, ww, wh, r_.hdrWhite_, r_.hdrSurface_ == 2)) {
+            dev_->present(hdrOut_, {0, 0, ww, wh}, gr::Filter::Nearest, true);  // GL style storage
+        } else {
+            if (!toldHdr_) SDL_Log("hdr: output shader: %s; showing the frame unconverted", dev_->lastError().c_str());
+            toldHdr_ = true;
+            dev_->present(frameColor_, {0, 0, frameW_, frameH_}, gr::Filter::Linear, true);
+        }
+    } else if (frameColor_) {
+        dev_->present(frameColor_, {0, 0, frameW_, frameH_}, gr::Filter::Linear, true);  // GL style storage
+    }
     dev_->endFrame();
 }
 
@@ -558,11 +601,19 @@ void CoreRenderer::setMvp(const float* m) {
     for (int c = 0; c < 4; ++c) ds_.mvp[c * 4 + 1] = -ds_.mvp[c * 4 + 1];
 }
 
+// Local adds uJitter * w to clip x and y; with clip y negated (setMvp) the y
+// offset is negated too, so after the backend's flip the sum is local's, bit
+// for bit (IEEE negation is exact).
+void CoreRenderer::setJitter(const std::array<float, 2>& j) {
+    ds_.uvOffsetJitter[2] = j[0];
+    ds_.uvOffsetJitter[3] = -j[1];
+}
+
 void CoreRenderer::drawMain(int texture, Blend blend, bool depthTest, bool depthWrite, int cull, bool decal) {
     ensurePass();
     applyRects();
     // GL writes no depth while its depth test is off, whatever the mask says.
-    dev_->bindPipeline(pipeline(kMain, blend, depthTest, depthTest && depthWrite, cull, decal, colorMask()));
+    dev_->bindPipeline(pipeline(kMain, blend, depthTest, depthTest && depthWrite, cull, decal, colorMask(), targetF16()));
     ds_.flags[0] = texture > 0;
     dev_->pushUniforms(0, &ds_, sizeof ds_);
     dev_->pushUniforms(1, &ls_, sizeof ls_);
@@ -705,6 +756,7 @@ void CoreRenderer::beginRenderTarget(int texture) {
     auto it = targetDepth_.find(texture);
     if (it == targetDepth_.end()) return;
     suspend();
+    setJitter({0, 0});  // impostors and other targets are not part of the TAA frame
     target_ = texture;
     gr::PassDesc p;
     p.colorCount = 1;
@@ -719,6 +771,7 @@ void CoreRenderer::beginRenderTarget(int texture) {
 
 void CoreRenderer::endRenderTarget() {
     suspend();
+    if (r_.sceneActive_) setJitter(r_.sceneJitter_);
     target_ = 0;
     for (int k = 0; k < 4; ++k) vp_[k] = sc_[k] = r_.viewport_[k];
     scissorOn_ = true, rectsDirty_ = true;
@@ -742,10 +795,10 @@ void CoreRenderer::depthBlur(float depth, float tapPx) {
         blurW_ = w, blurH_ = h;
     }
     // Local's glCopyTexSubImage2D of the viewport.
-    dev_->copyTexture({target_ == 0 ? frameColor_ : textures_[size_t(target_)].tex, 0, 0, x, top}, {blurTex_}, w, h);
+    copyFromTarget(x, top, blurTex_, w, h);
     ensurePass();
     applyRects();
-    dev_->bindPipeline(pipeline(kBlur, Blend::Opaque, true, false, 0, false, colorMask()));
+    dev_->bindPipeline(pipeline(kBlur, Blend::Opaque, true, false, 0, false, colorMask(), targetF16()));
     const float u[8] = {depth, tapPx, float(w), float(h), float(x), float(top), 0, 0};
     dev_->pushUniforms(0, u, sizeof u);
     gr::TextureBinding b{blurTex_, sampler(gr::Filter::Linear, gr::Filter::Linear, false, false)};
@@ -774,7 +827,7 @@ void CoreRenderer::grabNdc(int slot, float x0, float y0, float x1, float y1) {
     setTextureNearest(g.texture);
     suspend();
     const int top = py0;  // rows as local's (GL style storage)
-    dev_->copyTexture({target_ == 0 ? frameColor_ : textures_[size_t(target_)].tex, 0, 0, px0, top}, {textures_[size_t(g.texture)].tex}, w, h);
+    copyFromTarget(px0, top, textures_[size_t(g.texture)].tex, w, h);
     g.vx0 = float(px0 - viewport[0]) / float(viewport[2]) * kScreenW;
     g.vx1 = float(px1 - viewport[0]) / float(viewport[2]) * kScreenW;
     g.vy0 = (1 - float(py1 - viewport[1]) / float(viewport[3])) * kScreenH;
@@ -834,7 +887,7 @@ void CoreRenderer::readDepthsAsync(unsigned& buffer, size_t& capacity, const std
     dev_->bindPipeline(pipeline(kProbe, Blend::Opaque, false, false, 0, false, gr::kWriteAll));
     gr::BufferRange vb = dev_->allocTransient(gr::kVertexBuffer, verts.data(), verts.size() * sizeof(float));
     dev_->bindVertexBuffers(0, &vb, 1);
-    gr::TextureBinding b{saved == 0 ? frameDepth_ : targetDepth_[saved], sampler(gr::Filter::Nearest, gr::Filter::Nearest, false, false)};
+    gr::TextureBinding b{saved == 0 ? mainDepth() : targetDepth_[saved], sampler(gr::Filter::Nearest, gr::Filter::Nearest, false, false)};
     dev_->bindTextures(0, &b, 1);
     dev_->draw(uint32_t(n * 6));
     dev_->endPass();
@@ -870,22 +923,95 @@ float CoreRenderer::readDepth(int x, int y) {
     return d.empty() ? 1.0f : d[0];
 }
 
-// ---------------------------------------------------------------- not on the core path yet
+// ---------------------------------------------------------------- post-processing (Renderer::beginScene / endScene)
 
-std::string CoreRenderer::upscalerStatus() const { return std::string("not on the ") + gr::backendId(backend_) + " graphics backend yet"; }
+std::string CoreRenderer::upscalerStatus() const { return post_ ? post_->upscalerStatus() : std::string(); }
 
 bool CoreRenderer::beginScene() {
-    if (!r_.post_.any()) return false;
-    if (!toldPost_)
-        SDL_Log("graphics backend %s: post-processing, True HDR and AI upscaling are not on this backend yet; drawing without them",
-                gr::backendId(backend_));
-    toldPost_ = true;
-    return false;
+    // True HDR: the display's headroom, when the surface and the display show HDR (else tone mapped to SDR).
+    PostSettings& post = r_.post_;
+    post.hdrPeak = post.hdr == 2 && r_.hdrSurface_ && r_.hdrOn_ ? r_.hdrHeadroom_ : 1.0f;
+    if (!post.any() || r_.sceneActive_) return false;
+    if (!post_) post_ = std::make_unique<CorePostFx>(*dev_);
+    // A shader the driver rejects turns the effects off (local's rule: never a black venue).
+    if (!post_->ready()) {
+        if (!toldPost_) SDL_Log("post-processing is off: a shader failed to compile (see above); drawing without effects");
+        toldPost_ = true;
+        return false;
+    }
+    int* viewport = r_.viewport_;
+    const int vw = viewport[2], vh = viewport[3];
+    const float scale = post.renderScale();
+    const int sw = std::max(1, int(std::lround(vw * scale))), sh = std::max(1, int(std::lround(vh * scale)));
+    const bool f16 = post.hdr != 0;
+    suspend();
+    if (!sceneColor_ || sceneW_ != sw || sceneH_ != sh || sceneF16_ != f16) {
+        if (sceneColor_) dev_->destroyTexture(sceneColor_), dev_->destroyTexture(sceneDepth_);
+        // HDR (Emulated / True): floating point, so lights and additive effects keep values above 1.0.
+        gr::TextureDesc c;
+        c.format = f16 ? gr::Format::RGBA16F : gr::Format::RGBA8;
+        c.width = sw, c.height = sh, c.usage = gr::kSampledTexture | gr::kColorTarget;
+        c.label = "post-processing scene";
+        sceneColor_ = dev_->createTexture(c);
+        gr::TextureDesc d = c;
+        d.format = gr::Format::D24, d.usage = gr::kSampledTexture | gr::kDepthTarget;  // sampled: SSAO, TAA, Star Power blur
+        sceneDepth_ = dev_->createTexture(d);
+        sceneW_ = sw, sceneH_ = sh, sceneF16_ = f16;
+        if (!sceneColor_ || !sceneDepth_) {
+            SDL_Log("post-processing: scene target %dx%d: %s", sw, sh, dev_->lastError().c_str());
+            if (sceneColor_) dev_->destroyTexture(sceneColor_);
+            if (sceneDepth_) dev_->destroyTexture(sceneDepth_);
+            sceneColor_ = sceneDepth_ = {};
+            return false;
+        }
+    }
+    for (int k = 0; k < 4; ++k) r_.sceneSaved_[k] = viewport[k];
+    r_.sceneActive_ = true;
+    target_ = 0;
+    viewport[0] = viewport[1] = 0, viewport[2] = sw, viewport[3] = sh;
+    for (int k = 0; k < 4; ++k) vp_[k] = sc_[k] = viewport[k];
+    scissorOn_ = true, rectsDirty_ = true;
+    // Local clears the whole scene (colour and depth) when it binds it: the pass's clears.
+    gr::PassDesc p;
+    p.colorCount = 1;
+    p.colors[0].texture = sceneColor_;
+    p.colors[0].clear[3] = 1;  // local keeps alpha masked; the chain never reads it
+    p.depth.texture = sceneDepth_;
+    p.depth.stencilLoad = gr::LoadOp::DontCare;
+    p.label = "scene";
+    dev_->beginPass(p);
+    r_.sceneJitter_ = post_->jitter(post, sw, sh);
+    setJitter(r_.sceneJitter_);
+    return true;
 }
 
-void CoreRenderer::endScene(const PostFrame& frame) { (void)frame; }
+void CoreRenderer::endScene(const PostFrame& frame) {
+    if (!r_.sceneActive_) return;
+    r_.sceneJitter_ = {0, 0};
+    setJitter(r_.sceneJitter_);
+    suspend();
+    target_ = 0;
+    const Texture out = post_->process(sceneColor_, sceneDepth_, sceneW_, sceneH_, r_.sceneSaved_[2], r_.sceneSaved_[3], r_.post_, frame);
+    r_.sceneActive_ = false;
+    int* viewport = r_.viewport_;
+    for (int k = 0; k < 4; ++k) viewport[k] = r_.sceneSaved_[k], vp_[k] = sc_[k] = viewport[k];
+    scissorOn_ = true, rectsDirty_ = true;
+    if (!out) return;
+    // Local's PostFx::blit into the frame's viewport: no blending, no depth test, alpha kept.
+    ensurePass();
+    applyRects();
+    post_->blit(out, frameF16_ ? gr::Format::RGBA16F : gr::Format::RGBA8, gr::kWriteRGB, gr::Format::D24);
+}
 
-std::string CoreRenderer::hdrStatus() const { return std::string("off: True HDR is not on the ") + gr::backendId(backend_) + " graphics backend yet"; }
+// Renderer::hdrStatus's text (the same window state, read by Renderer::updateHdr).
+std::string CoreRenderer::hdrStatus() const {
+    if (!r_.hdrSurface_) return "off: no HDR surface";
+    if (!r_.hdrOn_) return "off: HDR is off for this display (turn it on in the system's display settings)";
+    char buf[160];
+    std::snprintf(buf, sizeof buf, "%s output, paper white %.0f nits, peak %.0f nits", r_.hdrSurface_ == 2 ? "PQ (BT.2020)" : "scRGB",
+                  double(r_.hdrWhite_ * 80), double(r_.hdrWhite_ * r_.hdrHeadroom_ * 80));
+    return buf;  // (local's "highlights in SDR while FSR 3.1 / DLSS runs" does not apply: they do not run here)
+}
 
 // ---------------------------------------------------------------- screenshots, shader test
 
@@ -900,7 +1026,21 @@ Image CoreRenderer::readPixels() {
     const int top = viewport[1];  // rows bottom-up, as local's glReadPixels
     const bool resume = dev_->inPass();
     suspend();
-    gr::Readback rb = dev_->readTexture(frameColor_, {x, top, img.width, img.height});
+    Texture src = frameColor_;
+    if (frameF16_) {
+        // An RGBA16F frame (True HDR): local's glReadPixels converts it to
+        // RGBA8; here a 1:1 blit into an RGBA8 texture does the same conversion.
+        if (!readCopy_ || readCopyW_ != frameW_ || readCopyH_ != frameH_) {
+            if (readCopy_) dev_->destroyTexture(readCopy_);
+            gr::TextureDesc d;
+            d.width = frameW_, d.height = frameH_, d.usage = gr::kSampledTexture | gr::kColorTarget;
+            readCopy_ = dev_->createTexture(d);
+            readCopyW_ = frameW_, readCopyH_ = frameH_;
+        }
+        dev_->blit({frameColor_}, frameW_, frameH_, {readCopy_}, frameW_, frameH_, gr::Filter::Nearest);
+        src = readCopy_;
+    }
+    gr::Readback rb = dev_->readTexture(src, {x, top, img.width, img.height});
     if (!rb || !dev_->readbackData(rb, img.rgba.data(), img.rgba.size())) img.rgba.assign(img.rgba.size(), 0);
     if (resume) ensurePass();
     std::vector<uint8_t> row(size_t(img.width) * 4);
@@ -917,8 +1057,11 @@ Image CoreRenderer::readPixels() {
 std::vector<std::string> CoreRenderer::compileAllShaders(int& programs) {
     static const char* names[kPrograms] = {"core main", "core fill", "core depth of field", "core depth probe"};
     std::vector<std::string> failed;
-    programs = kPrograms;
+    programs = kPrograms + CorePostFx::kPrograms;
     for (int p = 0; p < kPrograms; ++p)
         if (!shaderOk_[p]) failed.push_back(names[p]);
+    if (!post_) post_ = std::make_unique<CorePostFx>(*dev_);
+    post_->ready();
+    for (const std::string& n : post_->failedPrograms()) failed.push_back("core " + n);
     return failed;
 }
