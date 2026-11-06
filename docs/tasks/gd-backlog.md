@@ -34,7 +34,7 @@ notes and links).
 
 [Universal launcher](#universal-launcher) ·
 [Releases & packaging](#releases--packaging) · [Site](#site) ·
-[All games](#all-games) ·
+[All games](#all-games) · [gd-engine-core](#gd-engine-core) ·
 [gd-game-01](#gd-game-01-guitar-hero-playstation-2) ·
 [gd-game-02](#gd-game-02-guitar-hero-ii-xbox-360) · gd-game-03 … gd-game-26
 (one Discovery task each)
@@ -193,6 +193,21 @@ shipped in the universal launcher.
 | GDALL-034 | Enhancement | ✅ | #57: 144 FPS in Max FPS, every game | 60 / 120 / 144 / 240 (/ Unlimited) in gd01-gd04; pacing already works for any cap (vsync when the refresh rate is a multiple, otherwise paced) | GitHub 11-03 Owner 11-04 |
 | GDALL-035 | Enhancement | ✅ | #47: no way to remove the calibration | Enhanced > Reset Calibration (gd01, gd02, gd03): the audio and video delays go back to 0 ms; the help box shows the current values. gd04 has no calibration screen yet. Walk calibration_reset (gd01) | GitHub 11-01 Owner 11-04 |
 | GDALL-036 | Bugfix | 🟡 needs a phone | #55: GH2 and Encore at 10-15 fps in songs on Android (S25 Ultra); menus smooth | Not reproducible on PC (the GLES path and CPU-decoded textures run 185+ fps). Likely cause: every draw writes its uniforms with glBufferSubData into a buffer the GPU may still read, which Adreno / Mali drivers answer with a stall or a buffer copy; a song has ~600 draws, a menu ~20. Android now uses the unsynchronized glMapBufferRange path macOS already used (gd02, gd03, gd04); checked on GLES on PC (walk quickplay, frame by eye). Needs a test on the phone | GitHub 11-03 Owner 11-04 |
+| GDALL-037 | Enhancement | 🟡 in progress (1.1.13) | Repo organization (1.1.13 spec §6): docs/knowledge -> docs/guidelines (+ universal_mechanisms.md, universal-menus.md, engine-backend-guidelines.md, usual-bugs.md, universal-behaviors.md from smilar_behaviors.md); KICKOFFs -> docs/spikes; adding-a-game / release-process -> docs/platform; res -> docs/res; gd-engine-tools/README.md; every link updated |  | Owner 11-06 (1.1.13) |
+
+## gd-engine-core
+
+The universal backends every game can load (1.1.13 spec: [engine-backend-guidelines.md](../guidelines/engine-backend-guidelines.md)).
+
+| ID | Class | Status | Item | Notes | From |
+|---|---|---|---|---|---|
+| GDCORE-001 | Enhancement | 🟡 in progress (1.1.13) | gd-engine-core: folders platform / inputs / audio / render / image / ui, CMake library, pinned third-party fetch (single headers vendored), built for Linux, Steam Deck, Windows, Android |  | Owner 11-06 (1.1.13) |
+| GDCORE-002 | Enhancement | 🟡 in progress (1.1.13) | Audio backends: interface + miniaudio, OpenAL Soft (shared library, LGPL), FAudio |  | Owner 11-06 (1.1.13) |
+| GDCORE-003 | Enhancement | 🟡 in progress (1.1.13) | Image backends: stb_image (+ write, resize2), bcdec + libktx, SDL3_image |  | Owner 11-06 (1.1.13) |
+| GDCORE-004 | Enhancement | 🟡 in progress (1.1.13) | Render interface + backends: OpenGL 3.3 / GLES 3.0, SDL3 GPU (Vulkan / D3D12 / Metal), Vulkan |  | Owner 11-06 (1.1.13) |
+| GDCORE-005 | Enhancement | 🟡 in progress (1.1.13) | gd-game-01 behind the core: Graphics backend and Audio backend selectable (default local = today's code) |  | Owner 11-06 (1.1.13) |
+| GDCORE-006 | Enhancement | 🟡 in progress (1.1.13) | Enhanced > Performance: Graphics backend / Audio backend dropdowns (local + the core's) in every game; selectable on gd-game-01 only |  | Owner 11-06 (1.1.13) |
+| GDCORE-007 | Enhancement | 🟡 in progress (1.1.13) | Packages carry the core's shared libraries (OpenAL Soft, licences); the launcher's window shared with a module on a non-GL backend |  | Owner 11-06 (1.1.13) |
 | GD01-290 | Bugfix | ✅ | Main guitarist's movement still weird: sometimes a force seems to pull him to a spot | Follows old B85 (docs/character_animation.md §5) Done (gd01 1.1.6): port-only standGuard / snapHome / hold-to-spot removed; the original pose hold (FUN_001958b0) holds where the walk ended; root motion ignores the phase snap. | Wave B 10-28 |
 | GD01-291 | Bugfix | ✅ | The strum icon is broken in half in every menu (as gd-game-02 #10) | Old B29 fixed the help bar's strum icon; it is back gd01 draws the asset exactly as the original (64×16 texture has a light / dark split, same in GH2): need the owner's screenshot or a reference before changing anything. | Wave B 10-28 Owner 11-02: fixed |
 | GD01-037 | Bugfix | ✅ | Weird glitches in the venues | Needs specifics (venue / moment); candidates in "Venue artifacts" below | Bugs 10-21 r1 B3 11-02: not reproduced in a frame sweep of Toxic Summer Fest and the big club (no see-through, no flat frames); the listed causes are fixed (GD01-249, 251, 252) |
