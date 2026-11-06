@@ -96,6 +96,7 @@ private:
     void menuMouse(float x, float y, int button);
     bool menuMouseAllowed() const;
     void updatePointer();
+    void menuRepeat();
     // An Enhanced setting changed ("" : all of them, at start): applied at once.
     void applyEnhanced(const std::string& key);
     // Enhanced > Export / Load User Files (gd02's App::enhancedAction): the
@@ -163,6 +164,13 @@ private:
     std::vector<std::shared_ptr<VenuePreload>> preloadDiscard_;  // replaced ones still finishing on their thread
     int preloadSerial_ = 0;
     int escapes_ = 0;  // Esc three times on the first screen quits (guidelines)
+    // A held menu direction repeats (GH3's SetMenuAutoRepeatTimes 0.3 0.05:
+    // first after 0.3 s, then every 0.05 s) [C script data; owner GD04-114].
+    struct HeldDir {
+        bool on = false;
+        InputEvent ev{Action::Up, true, 0, ControllerMode::Guitar, 0};
+        uint64_t nextNs = 0;
+    } held_;
     uint64_t startNs_ = 0;
     std::unique_ptr<MenuKeys> keys_;
     EnhancedStore enhanced_;
@@ -278,6 +286,23 @@ void App::menuAction(const InputEvent& ev) {
         }
     }
     front_->handle(ev);
+}
+
+void App::menuRepeat() {
+    if (!held_.on) return;
+    // Only where the menus take the buttons: the front end, or the pause
+    // menu over a song.
+    const bool menus = front_ && (!song_ || front_->songPaused);
+    const uint64_t now = SDL_GetTicksNS();
+    if (!menus) {
+        held_.on = false;
+        return;
+    }
+    if (now < held_.nextNs) return;
+    held_.nextNs = std::max<uint64_t>(held_.nextNs + 50'000'000ull, now);
+    InputEvent ev = held_.ev;
+    ev.timestampNs = now;
+    menuAction(ev);
 }
 
 void App::updatePointer() {
@@ -1049,6 +1074,10 @@ void App::handleEvent(const SDL_Event& e) {
 // per-frame poll: touch chords, shake-to-whammy, MIDI).
 void App::dispatchInput(const std::vector<InputEvent>& events) {
     for (const InputEvent& ev : events) {
+        if (ev.action == Action::Up || ev.action == Action::Down || ev.action == Action::Left || ev.action == Action::Right) {
+            if (ev.down) held_ = {true, ev, ev.timestampNs + 300'000'000ull};
+            else if (held_.on && held_.ev.action == ev.action) held_.on = false;
+        }
         if (walk_ && ev.down) walk_->countPress(ev.action);
         if (song_) {
             if (!front_ && ev.action == Action::Back && ev.down) running_ = false;  // --song alone: Back quits
@@ -1642,6 +1671,7 @@ int App::run() {
         frame();
         if (quitAfter && double(SDL_GetTicksNS() - startNs_) / 1e6 >= std::atof(quitAfter)) running_ = false;
         updatePointer();
+        menuRepeat();
         // Enhanced > In-Game Max FPS (the menus keep the engine's own cap).
         const std::string mf = enhanced_.get("max_fps");
         const uint64_t minNs = !song_ ? kMinFrameNs : mf == "unlimited" ? 0 : uint64_t(1e9 / std::max(30.0, std::atof(mf.c_str())));

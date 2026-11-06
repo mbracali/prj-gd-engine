@@ -1379,9 +1379,10 @@ bool UiSystem::menuAt(float x, float y, bool focus, bool* isList) {
     return true;
 }
 
-std::string UiSystem::helperAt(float x, float y, std::string* button, float* midY) const {
+std::vector<UiSystem::HelpPillHit> UiSystem::helperPills() const {
+    std::vector<HelpPillHit> out;
     const Element* box = find(K("user_control_container"));
-    if (!box) return {};
+    if (!box) return out;
     // add_user_control_helper's button glyphs, as SetText leaves them
     // (\m0 / \m1 through meta_button_map) [C script add_user_control_helper].
     static const char* const kButtons[][2] = {{"\\m0", "green"},  {"\\m1", "red"},      {"\\b6", "yellow"}, {"\\b7", "blue"},
@@ -1405,17 +1406,53 @@ std::string UiSystem::helperAt(float x, float y, std::string* button, float* mid
         if (!glyph && i + 1 < kids.size() && !kids[i + 1]->text.empty() && kids[i + 1]->text[0] == '\\') glyph = kids[i + 1].get();
         if (!glyph && i > 0 && !kids[i - 1]->text.empty() && kids[i - 1]->text[0] == '\\') glyph = kids[i - 1].get();
         // The pill: the text and its glyph on the left [I].
-        float x0 = c->bx0 - 40, y0 = c->by0, x1 = c->bx1, y1 = c->by1;
+        HelpPillHit h{c->text, buttonOf(glyph), c->bx0 - 40, c->by0, c->bx1, c->by1};
         if (glyph && glyph->drawnIn == drawCount_)
-            x0 = std::min(c->bx0, glyph->bx0), y0 = std::min(y0, glyph->by0), x1 = std::max(x1, glyph->bx1), y1 = std::max(y1, glyph->by1);
-        if (x < x0 - 8 || x > x1 + 8 || y < y0 - 8 || y > y1 + 8) continue;
-        if (button) *button = buttonOf(glyph);
-        if (midY) *midY = (y0 + y1) * 0.5f;
-        std::string t = c->text;
-        for (char& ch : t) ch = char(std::toupper(static_cast<unsigned char>(ch)));
-        return t;
+            h.x0 = std::min(c->bx0, glyph->bx0), h.y0 = std::min(h.y0, glyph->by0), h.x1 = std::max(h.x1, glyph->bx1), h.y1 = std::max(h.y1, glyph->by1);
+        for (char& ch : h.text) ch = char(std::toupper(static_cast<unsigned char>(ch)));
+        out.push_back(h);
     }
-    return {};
+    // The backing (GD04-111): each pill's Control_pill_body (the sprite over
+    // its text), then the ends touching a body, so the whole visible pill
+    // takes the mouse, not just its glyph and text [C script
+    // add_user_control_helper: a body, then its two Control_pill_end].
+    for (int pass = 0; pass < 2; ++pass)
+        for (const auto& k : kids) {
+            const Element* sp = k.get();
+            if (sp->type == kText || sp->drawnIn != drawCount_) continue;
+            HelpPillHit* best = nullptr;
+            float bestD = 1e30f;
+            for (HelpPillHit& h : out) {
+                // Not a backdrop under the whole bar: a pill is at most a third
+                // of action_safe_width_for_helpers (925) wide [C script].
+                if (sp->by1 < h.y0 - 8 || sp->by0 > h.y1 + 8 || sp->bx1 - sp->bx0 > 420) continue;
+                const float overlap = std::min(sp->bx1, h.x1) - std::max(sp->bx0, h.x0);
+                // pass 0: a body over at least half its text; pass 1: an end within 2 units of its pill.
+                const float d = pass == 0 ? (overlap >= 0.5f * (h.x1 - h.x0) ? -overlap : 1e30f) : std::max({0.0f, h.x0 - sp->bx1, sp->bx0 - h.x1});
+                if (d < bestD && (pass == 0 || d <= 2)) bestD = d, best = &h;
+            }
+            if (!best) continue;
+            best->x0 = std::min(best->x0, sp->bx0), best->y0 = std::min(best->y0, sp->by0);
+            best->x1 = std::max(best->x1, sp->bx1), best->y1 = std::max(best->y1, sp->by1);
+        }
+    return out;
+}
+
+std::string UiSystem::helperAt(float x, float y, std::string* button, float* midY) const {
+    // The pill under the point, else one within 8 units of it; pills that
+    // touch or overlap (the set list's five, narrowed to the safe width):
+    // the one whose middle is nearest (GD04-111).
+    const HelpPillHit* best = nullptr;
+    float bestOut = 9, bestMid = 0;
+    const std::vector<HelpPillHit> pills = helperPills();
+    for (const HelpPillHit& h : pills) {
+        const float out = std::max({0.0f, h.x0 - x, x - h.x1, h.y0 - y, y - h.y1}), mid = std::fabs(x - (h.x0 + h.x1) * 0.5f);
+        if (out < bestOut || (out == bestOut && mid < bestMid)) best = &h, bestOut = out, bestMid = mid;
+    }
+    if (!best) return {};
+    if (button) *button = best->button;
+    if (midY) *midY = (best->y0 + best->y1) * 0.5f;
+    return best->text;
 }
 
 bool UiSystem::member(qs::ScriptRun& run, uint32_t obj, uint32_t method, qb::Struct& p, bool& handled) {

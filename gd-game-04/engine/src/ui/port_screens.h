@@ -97,10 +97,11 @@ public:
     bool itemRect(const std::string& flowState, float& x0, float& y0, float& x1, float& y1) const;
 
     PortContext& context() { return ctx_; }
+    // The help bar's item k (0 select, 1 back, 2 up / down) on the port's
+    // screens: the whole pill as drawn, ends included (the mouse; walks).
+    void helpRect(int k, float& x0, float& y0, float& x1, float& y1) const;
 
 private:
-    // The help bar's item k (0 select, 1 back, 2 up / down) on the port's screens.
-    void helpRect(int k, float& x0, float& y0, float& x1, float& y1) const;
     PortContext ctx_;
     std::unique_ptr<PortScreen> gamepads_, enhanced_;
     std::vector<Id> stack_;

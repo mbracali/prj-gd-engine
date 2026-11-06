@@ -257,6 +257,18 @@ orange those frets. The pause menu takes the mouse again (hover, click, the
 pills) while the song is paused. Walk pausequit clicks UP/DOWN's lower half
 and SELECT (QUIT); walk mouse clicks BACK.
 
+A pill takes the mouse over all it draws (GD04-111): glyph, text and its
+backing (Control_pill_body, matched to the text it lies under, and the two
+Control_pill_end touching it), with 8 units around; where pills touch (the
+set list's five, narrowed to the safe width) the one whose middle is nearest
+wins. The port's screens (Enhanced, Gamepads) take SELECT, BACK and UP/DOWN
+over their whole drawn pills. Walk mouseall clicks the pills on the main
+menu, the port's screens, Options and seven of its screens, quick play's
+difficulty and set list (BONUS, DOWNLOADS), career band, name (ACCEPT),
+difficulty, hub, store, venue, set list, the pause menu and its options, and
+the quit popups' items (hover + click); `check:pills` checks every pill and
+every element of the bar on each.
+
 The help bar's layout (user_control_build_pills, user_control_auto_center)
 [C scripts]: every pill as wide as the widest glyph + text, the row centred
 on x 640, user_control_pill_gap x user_control_pill_scale (0.4) between the
