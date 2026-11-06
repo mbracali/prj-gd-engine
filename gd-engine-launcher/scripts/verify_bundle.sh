@@ -171,6 +171,14 @@ for gi in "${game_infos[@]}"; do
       [ -z "$undef" ] || fail "$id's module has undefined symbols (it would not load): $(echo "$undef" | head -3 | sed 's/^[[:space:]]*//' | tr '\n' ' ')"
     fi
   fi
+  # gd-engine-core's shared libraries (build.sh ship_core_runtime: loaded at
+  # run time, so no import table names them): every one listed is there.
+  if [ -f "$d/core-libs.txt" ]; then
+    while IFS= read -r lib; do
+      [ -n "$lib" ] || continue
+      nonempty "$libs/$lib"
+    done < "$d/core-libs.txt"
+  fi
   case "$nn" in
     02)  # FFmpeg (videos, sound effects) and its LGPL notice
       for lib in avformat avcodec avutil; do

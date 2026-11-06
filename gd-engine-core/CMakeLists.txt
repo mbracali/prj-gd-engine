@@ -40,6 +40,11 @@ endif()
 # module (a shared library): position-independent code everywhere, including
 # the fetched libraries built below this folder.
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+if(GDCORE_LAUNCHER_MODULE AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  # As the launcher's modules are compiled: a GNU unique symbol would keep the
+  # module loaded after the launcher unloads it (modules/gd01/CMakeLists.txt).
+  add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-fno-gnu-unique>)
+endif()
 
 set(GDCORE_ROOT ${CMAKE_CURRENT_SOURCE_DIR})
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
@@ -69,9 +74,10 @@ foreach(a ${GDCORE_AREAS})
 endforeach()
 message(STATUS "gd-engine-core ${PROJECT_VERSION}: areas ${GDCORE_LINKED_AREAS}")
 
-# The shared libraries the core's backends need at run time (none yet; see
-# cmake/gdcore_helpers.cmake gdcore_add_runtime_library): listed for the
-# packaging scripts in <build>/gdcore-runtime.txt.
+# What the packages must carry for the core, listed for the packaging scripts
+# in <build>/gdcore-runtime.txt: the shared libraries the backends load at
+# run time (gdcore_add_runtime_library; none yet) and the licences of the
+# third-party code (gdcore_add_license).
 gdcore_write_runtime_manifest(${CMAKE_BINARY_DIR}/gdcore-runtime.txt)
 
 if(GDCORE_BUILD_TESTS)

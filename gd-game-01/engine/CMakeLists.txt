@@ -85,6 +85,13 @@ target_sources(gd01 PRIVATE
 target_include_directories(gd01 PRIVATE src)
 target_link_libraries(gd01 PRIVATE SDL3::SDL3)
 
+# gd-engine-core (GDCORE-001, ../../gd-engine-core/docs/README.md): the
+# shared platform / image / audio / render libraries, static. Linking it does
+# not change the game: gd01 runs its own code ("local") unless the player
+# picks a core backend in Enhanced > Performance.
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../../gd-engine-core ${CMAKE_CURRENT_BINARY_DIR}/gd-engine-core)
+target_link_libraries(gd01 PRIVATE gdcore)
+
 # AI upscaling (render/vk_upscaler.cpp): Vulkan loaded at run time through
 # volk, AMD FidelityFX FSR 3.1 (third_party/fidelityfx) and, on Linux x86-64,
 # NVIDIA DLSS (third_party/dlss: the NGX static library and the DLSS model

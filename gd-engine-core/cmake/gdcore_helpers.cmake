@@ -9,10 +9,13 @@
 #       folder public, our warning level, SDL3 linked.
 #   gdcore_add_selftest(SOURCES <files...> [LIBRARIES <targets...>])
 #       adds test files to gdcore_selftest (tests/selftest.h: GDCORE_TEST).
-#   gdcore_add_runtime_library(<imported or built target | file> [LICENSE <file> <name>])
+#   gdcore_add_runtime_library(<built target | file> [LICENSE <file> <name>])
 #       a shared library a backend loads at run time (OpenAL Soft, ...), and
 #       its licence: the packaging scripts copy them next to the game module
 #       (docs/README.md, "Shared libraries in the packages").
+#   gdcore_add_license(<file> <name>)
+#       the licence of third-party code linked into the core (static): the
+#       packages carry it as licenses/<game id>-<name>.
 #   gdcore_third_party_warnings_off(<target>)
 #   gdcore_third_party_dir_warnings_off(<added source folder>)
 #       no warnings from fetched / vendored code we do not change.
@@ -101,7 +104,13 @@ endfunction()
 function(gdcore_add_runtime_library what)
   cmake_parse_arguments(R "" "" "LICENSE" ${ARGN})
   if(TARGET ${what})
-    set(path "$<TARGET_FILE:${what}>")
+    # The file the loader asks for: the soname file on ELF / Mach-O systems
+    # (libopenal.so.1, libopenal.1.dylib), the DLL on Windows.
+    if(WIN32 OR ANDROID)
+      set(path "$<TARGET_FILE:${what}>")
+    else()
+      set(path "$<TARGET_SONAME_FILE:${what}>")
+    endif()
   else()
     get_filename_component(path ${what} ABSOLUTE)
   endif()
@@ -113,9 +122,16 @@ function(gdcore_add_runtime_library what)
     endif()
     list(GET R_LICENSE 0 file)
     list(GET R_LICENSE 1 name)
-    get_filename_component(file ${file} ABSOLUTE)
-    set_property(GLOBAL APPEND PROPERTY GDCORE_RUNTIME_LINES "license|${file}|${name}")
+    gdcore_add_license(${file} ${name})
   endif()
+endfunction()
+
+function(gdcore_add_license file name)
+  get_filename_component(file ${file} ABSOLUTE)
+  if(NOT EXISTS ${file})
+    message(FATAL_ERROR "gdcore_add_license: ${file} does not exist")
+  endif()
+  set_property(GLOBAL APPEND PROPERTY GDCORE_RUNTIME_LINES "license|${file}|${name}")
 endfunction()
 
 # <file>: one line per entry, fields separated by TABs, written at generate

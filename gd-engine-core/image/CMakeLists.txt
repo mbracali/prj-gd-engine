@@ -21,6 +21,9 @@ else()
   set_source_files_properties(src/stb_impl.cpp src/bcdec_impl.cpp PROPERTIES COMPILE_OPTIONS -w)
 endif()
 
+gdcore_add_license(${GDCORE_ROOT}/third_party/stb/LICENSE stb-LICENSE.txt)
+gdcore_add_license(${GDCORE_ROOT}/third_party/bcdec/LICENSE bcdec-LICENSE.txt)
+
 # Fetched libraries: built static, with only what we use, inside this
 # folder's scope (the options below do not leak into the game's build).
 set(BUILD_SHARED_LIBS OFF)
@@ -52,7 +55,11 @@ if(GDCORE_IMAGE_SDL3)
     message(FATAL_ERROR "gd-engine-core: SDL3_image must be a static library here (got ${type})")
   endif()
   gdcore_third_party_dir_warnings_off(${sdl3_image_src})
+  # A static SDL3_image links SDL3::Headers only: make it depend on SDL3 so
+  # SDL3 comes after it on every link line (MinGW resolves in order).
+  target_link_libraries(${t} INTERFACE SDL3::SDL3)
   target_link_libraries(gdcore_image PRIVATE SDL3_image::SDL3_image)
+  gdcore_add_license(${sdl3_image_src}/LICENSE.txt SDL3_image-LICENSE.txt)
   target_sources(gdcore_image PRIVATE src/sdl3_backend.cpp)
   target_compile_definitions(gdcore_image PRIVATE GDCORE_IMAGE_SDL3=1)
 else()
@@ -86,6 +93,15 @@ if(GDCORE_IMAGE_KTX)
   add_subdirectory(${ktx_src} ${CMAKE_CURRENT_BINARY_DIR}/ktx EXCLUDE_FROM_ALL)
   gdcore_third_party_dir_warnings_off(${ktx_src})
   target_link_libraries(gdcore_image PRIVATE ktx_read)
+  # libktx (Apache-2.0) and what ktx_read compiles in: Basis Universal's
+  # transcoder (Apache-2.0) with zstd (BSD), astc-encoder (Apache-2.0),
+  # dfdutils (Apache-2.0).
+  gdcore_add_license(${ktx_src}/LICENSE.md KTX-Software-LICENSE.md)
+  gdcore_add_license(${ktx_src}/LICENSES/Apache-2.0.txt KTX-Software-Apache-2.0.txt)
+  gdcore_add_license(${ktx_src}/external/basisu/LICENSE basisu-LICENSE.txt)
+  gdcore_add_license(${ktx_src}/external/basisu/zstd/LICENSE zstd-LICENSE.txt)
+  gdcore_add_license(${ktx_src}/external/astc-encoder/LICENSE.txt astc-encoder-LICENSE.txt)
+  gdcore_add_license(${ktx_src}/external/dfdutils/LICENSE.adoc dfdutils-LICENSE.adoc)
   target_compile_definitions(gdcore_image PRIVATE GDCORE_IMAGE_KTX=1)
 else()
   target_compile_definitions(gdcore_image PRIVATE GDCORE_IMAGE_KTX=0)
