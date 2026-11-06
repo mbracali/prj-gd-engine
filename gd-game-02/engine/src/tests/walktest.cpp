@@ -807,6 +807,11 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         check("enhanced_hdr_true");
         again(kRight), wait(400);
         check("enhanced_hdr_none");
+        // Graphics / Audio Backend (GDCORE-006): greyed at local; Right,
+        // select and Left change nothing (selectable on gd-game-01 only).
+        press(kDown), wait(120), again(kRight), again(kX), again(kLeft);
+        press(kDown), wait(120), again(kRight), again(kX), again(kLeft);
+        check("enhanced_backends");
         row(kLeft), again(kLeft), row(kLeft), row(kRight), again(kRight), row(kX), row(kRight), row(kRight), again(kRight), row(kRight),
             row(kRight), again(kRight), row(kRight), again(kRight), row(kRight), again(kRight);
         wait(500);
@@ -2204,15 +2209,31 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
                 ss << in.rdbuf();
                 Json j = Json::parse(ss.str());
                 j.set("ground_fog", Json::string("2x")), j.set("light_streaks", Json::string("medium"));
+                j.set("graphics_backend", Json::string("vulkan")), j.set("audio_backend", Json::string("openal"));  // GDCORE-006
                 std::ofstream(d / "GD02-user-settings.json") << j.dump(2);
             } catch (const std::exception&) {
                 problems += std::string(problems.empty() ? "" : "; ") + "GD02-user-settings.json does not parse";
             }
+        } else if (w == "enhanced_backends") {
+            // Fixed at local, nothing saved; a non-local value in a file is dropped.
+            for (const char* key : {"graphics_backend", "audio_backend"}) {
+                const std::string got = ui.host().enhancedValue(key), file = saved.has(key) ? saved[key].str() : "(unset)";
+                std::printf("  enhanced: %s %s (enhanced.json %s)\n", key, got.c_str(), file.c_str());
+                if (got != "local" || (file != "(unset)" && file != "local"))
+                    problems += std::string(problems.empty() ? "" : "; ") + key + " is " + got + " / " + file + ", not local";
+            }
+            Json j = Json::parse(R"({"graphics_backend":"vulkan","audio_backend":"openal","bloom":"2x"})");
+            ui::migrateEnhanced(j);
+            if (j.has("graphics_backend") || j.has("audio_backend") || !j.has("bloom"))
+                problems += std::string(problems.empty() ? "" : "; ") + "a saved non-local backend was kept";
         } else if (w == "enhanced_settings_loaded") {
             status("Settings loaded");
             want("more_lights", "2x"), want("internal_res", "480"), want("antialiasing", "fxaa");
             for (const char* gone : {"ground_fog", "light_streaks"})
                 if (saved.has(gone)) problems += std::string(problems.empty() ? "" : "; ") + gone + " (removed) was loaded";
+            for (const char* key : {"graphics_backend", "audio_backend"})  // local only here (GDCORE-006)
+                if (ui.host().enhancedValue(key) != "local" || (saved.has(key) && saved[key].str() != "local"))
+                    problems += std::string(problems.empty() ? "" : "; ") + key + " other than local was loaded";
         } else if (w == "enhanced_progress_loaded") {
             status("Progress loaded");
         } else if (w == "enhanced_cheats") {
