@@ -394,7 +394,7 @@ private:
     // The graphics backend that draws now (after any fallback): "local" until
     // the gd-engine-core renderer lands (GDCORE-008; the graphics work returns
     // the device's real id here).
-    std::string graphicsBackendNow() const { return "local"; }
+    std::string graphicsBackendNow() const { return gfx::backendId(gfx::rendererBackend()); }  // what draws (after a fallback)
     // The audio backend that plays now (after any fallback).
     static std::string audioBackendNow() {
         const std::string b = audiodev::backend();
@@ -650,13 +650,6 @@ int App::run() {
     // window: SDL3 GPU and Vulkan need a window made for their API (in the
     // launcher, prepareWindowFor asks it for one). Local and opengl3 keep the
     // OpenGL window.
-    const gfx::Backend graphicsBackend = gfx::chosenBackend();
-    const bool gpuWindow = graphicsBackend == gfx::Backend::Sdl3 || graphicsBackend == gfx::Backend::Vulkan;
-    SDL_WindowFlags baseFlags = SDL_WINDOW_RESIZABLE;
-#ifdef __ANDROID__
-    baseFlags |= SDL_WINDOW_FULLSCREEN;
-#endif
-    SDL_WindowFlags flags = baseFlags | gfx::prepareWindowFor(graphicsBackend);  // OpenGL (render/device.h) for local
     debugHighway_ = envOn("GD02_DEBUG_HIGHWAY");
     debugMenu_ = envOn("GD02_DEBUG_MENU");
     if (!options_.walk.empty()) {
@@ -679,6 +672,13 @@ int App::run() {
         if (const char* b = SDL_getenv("GD02_AUDIO_BACKEND"); b && *b) audio = b;
         audiodev::setBackend(audio);  // every sound's output (audio/audio_device.h); local is SDL's device
     }
+    const gfx::Backend graphicsBackend = gfx::chosenBackend(startupBackends().graphics);
+    const bool gpuWindow = graphicsBackend == gfx::Backend::Sdl3 || graphicsBackend == gfx::Backend::Vulkan;
+    SDL_WindowFlags baseFlags = SDL_WINDOW_RESIZABLE;
+#ifdef __ANDROID__
+    baseFlags |= SDL_WINDOW_FULLSCREEN;
+#endif
+    SDL_WindowFlags flags = baseFlags | gfx::prepareWindowFor(graphicsBackend);  // OpenGL (render/device.h) for local
     // Enhanced > HDR > True HDR: the window's surface is chosen now (render/hdr_output.h).
     // A window or surface that cannot be made with it is made again without (Emulated).
     // The surface probe is local's (an OpenGL context): on the core backends True HDR runs as Emulated.

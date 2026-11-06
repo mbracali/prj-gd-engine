@@ -32,22 +32,6 @@ core::Backend coreBackend(Backend b) {
     return b == Backend::Sdl3 ? core::Backend::SdlGpu : b == Backend::Vulkan ? core::Backend::Vulkan : core::Backend::OpenGL3;
 }
 
-// enhanced.json's graphics_backend (the file App::enhancedPath reads).
-std::string savedBackend() {
-    const char* dir = SDL_getenv("GD02_SAVE_DIR");
-    std::ifstream f((dir && *dir ? std::string(dir) : prefDir()) + "enhanced.json", std::ios::binary);
-    if (!f) return "local";
-    std::stringstream ss;
-    ss << f.rdbuf();
-    try {
-        Json j = Json::parse(ss.str());
-        if (j.type != Json::Type::Object || j["format"].str() != "gd02-enhanced" || !j.has("graphics_backend")) return "local";
-        return j["graphics_backend"].str();
-    } catch (const std::exception&) {
-        return "local";
-    }
-}
-
 }  // namespace
 
 const char* backendId(Backend b) {
@@ -60,10 +44,10 @@ const char* backendId(Backend b) {
     return "local";
 }
 
-Backend chosenBackend() {
-    static const Backend chosen = [] {
+Backend chosenBackend(const std::string& saved) {
+    const Backend chosen = [&] {
         const char* env = SDL_getenv("GD02_GRAPHICS_BACKEND");  // development aid
-        const std::string id = env && *env ? std::string(env) : savedBackend();
+        const std::string id = env && *env ? std::string(env) : saved.empty() ? std::string("local") : saved;
         Backend b = Backend::Local;
         if (!parse(id, b)) {
             SDL_Log("graphics backend: unknown '%s'; using local", id.c_str());

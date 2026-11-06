@@ -20,10 +20,12 @@ enum class Backend : uint8_t { Local, OpenGL3, Sdl3, Vulkan };
 
 // The setting id: "local", "opengl3", "sdl3", "vulkan".
 const char* backendId(Backend b);
-// The backend chosen for this run, read once: the development aid
-// GD02_GRAPHICS_BACKEND=<id>, else enhanced.json's graphics_backend, else
-// local. A backend this build does not have is local (and logged).
-Backend chosenBackend();
+// The backend for this start of the game: the development aid
+// GD02_GRAPHICS_BACKEND=<id>, else `saved` (Enhanced > Graphics Backend as
+// App::run latched it, startupGraphicsBackend), else local. A backend this
+// build does not have is local (and logged). Not cached: Restart Now runs
+// App::run again in the same process with the new setting.
+Backend chosenBackend(const std::string& saved);
 
 // The window for a backend: call before SDL_CreateWindow and pass the result
 // in its flags (local and opengl3: gfx::prepareWindow()'s OpenGL window; sdl3
