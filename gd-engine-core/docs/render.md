@@ -3,11 +3,12 @@
 The core's graphics layer: one interface, `gd::core::render::Device`
 (`render/include/gd/core/render/device.h`), and its backends. The
 **OpenGL 3.3 / OpenGL ES 3.0** backend (`opengl3`) exists since 1.1.13
-(GDCORE-004 phase 1) and the **Vulkan** backend (`vulkan`, phase 3b, section
-4.3) since then; **SDL3 GPU** (`sdl3`) is written in parallel, on the same
-interface, on the groundwork of phase 2a (the build-time SPIR-V, section 3; the
-launcher's window hand-over, section 5; the state rules, 2.2). This file is the
-design: read it before adding a backend or moving a game onto the core. Facts are marked [C] confirmed or
+(GDCORE-004 phase 1), the **SDL3 GPU** backend (`sdl3`, phase 3a, section
+4.2) and the **Vulkan** backend (`vulkan`, phase 3b, section 4.3) since then,
+on the same interface, on the groundwork of phase 2a (the build-time SPIR-V,
+section 3; the launcher's window hand-over, section 5; the state rules, 2.2).
+This file is the design: read it before adding a backend or moving a game
+onto the core. Facts are marked [C] confirmed or
 [I] inferred where it matters.
 
 ## 1. What shaped it
@@ -357,7 +358,7 @@ loaded through `SDL_GL_GetProcAddress` (no GL library at link time).
 - On GLES without `EXT_color_buffer_float` the float formats are reported
   not renderable in `caps()`.
 
-### 4.2 SDL3 GPU (`sdl3`, phase 2) — how the interface maps
+### 4.2 SDL3 GPU (`sdl3`, 1.1.13 phase 3a) — how the interface maps
 
 | Interface | SDL_GPU |
 |---|---|
@@ -377,7 +378,56 @@ loaded through `SDL_GL_GetProcAddress` (no GL library at link time).
 | `Wrap::ClampToBorder` | none in SDL_GPU: clamp to edge, `Caps::clampToBorder` false |
 | D24 / D24S8 | where `SDL_GPUTextureSupportsFormat` says so, else D32F / D32FS8 behind the same `Format` |
 
-Section 9 lists the details the phase-2 backend needs.
+How `render/src/sdlgpu/sdlgpu_device.cpp` does it (the choices that are not
+in the table):
+
+- **Passes are recorded, then replayed.** `beginPass` .. `endPass` record
+  the pass's commands on the CPU (state, bindings, uniform data, draws);
+  `endPass` uploads the transient data allocated so far in one copy pass,
+  begins the SDL render pass and replays them. A pass that is never ended
+  is replayed by the next `beginPass` / `present` / `endFrame`.
+- **One command buffer at a time, in call order.** Everything outside a
+  pass (`updateBuffer`, `updateTexture`, `copyTexture`, `blit`,
+  `generateMipmaps`, `readTexture`) is recorded into the current command
+  buffer when it is called, so the GPU sees the calls' order (a draw
+  recorded before an update sees the old contents; uploads to buffers and
+  textures never cycle them). `present` submits it (the swapchain texture
+  is acquired on it), and `endFrame` submits what is left; each submission
+  has a fence, and `beginFrame` waits for the last one of frame N - 2.
+- **Uploads** go through one upload transfer buffer used as an arena: it is
+  cycled (`SDL_MapGPUTransferBuffer(..., true)`) at its first use in each
+  command buffer and filled behind the copies already recorded after that,
+  and made bigger when it is full. Transient vertex / index data lives in a
+  per-frame ring of GPU buffers (three slots, as the GL backend's).
+- **Uniforms**: SDL_GPU keeps pushed data per command buffer and stage. The
+  device keeps each slot's last data (2.2: pushed uniforms stay) and pushes
+  it, at the draw, to every stage whose reflection uses the slot, once per
+  command buffer and again when it changes. SDL's Vulkan driver binds 4 KiB
+  per slot [C: SDL 3.4.18 `MAX_UBO_SECTION_SIZE`]: a larger push is cut to
+  4096 bytes with a log line (no core or gd01 block is near it).
+- **Readback**: a download transfer buffer per `readTexture`, recorded in
+  the current command buffer; `readbackReady` submits that command buffer
+  if it still holds the copy (a poll must make progress), then queries the
+  fence; `readbackData` waits for it.
+- **Textures**: every renderable colour texture also gets `COLOR_TARGET`
+  (a blit's destination; `SDL_GenerateMipmapsForGPUTexture` needs it).
+  Unused sampler slots below a stage's highest get a 1 x 1 opaque black
+  texture (what GL samples from an empty unit). `MipFilter::None` is GL's
+  non-mipmapped minification: nearest mip mode with `max_lod` 0.25 (level 0
+  only, minification and magnification still told apart).
+- **Front face as given, no y flip** (3.2): SDL_GPU's images are top-down
+  natively, so `present(..., flipVertical)` is a blit with or without
+  `SDL_FLIP_VERTICAL`.
+- **Window**: `SDL_ClaimWindowForGPUDevice` at creation (it fails on the
+  `offscreen` video driver, "This surface does not support presenting!",
+  so the game falls back), `SDL_ReleaseWindowFromGPUDevice` in the
+  destructor (the launcher can then make the window again for another API).
+  Present modes: Mailbox, else Immediate, else Vsync, as the window allows.
+- **True HDR** is not on this backend yet (the SDR swapchain only): gd01
+  runs True HDR as Emulated on it and says so (section 6). SDL_GPU's
+  `HDR_EXTENDED_LINEAR` / `HDR10_ST2084` swapchain compositions are the way
+  to add it (an interface call to choose the surface; untestable here
+  without an HDR display).
 
 ### 4.3 Vulkan (`vulkan`, phase 3b, done)
 
@@ -508,9 +558,30 @@ the core.
 
 gd01 selects the backend once at start (`graphics_backend` in
 enhanced.json: `local`, `sdl3`, `vulkan`, `opengl3`; default `local`; the
-development aid `GD01_GRAPHICS_BACKEND=<id>` overrides it). `sdl3` and
-`vulkan` are not built yet: gd01 logs
-`graphics backend: <id> is not available yet; using local` and runs local.
+development aid `GD01_GRAPHICS_BACKEND=<id>` overrides it). `vulkan` is
+not built yet: gd01 logs `graphics backend: vulkan: not available yet;
+using local` and runs local.
+
+**The window (sdl3, vulkan).** `App::run` resolves the backend *before*
+making its window: for `sdl3` / `vulkan` it calls `prepareWindow(b, gles)`
+and makes the window with `windowFlags(b)` instead of `SDL_WINDOW_OPENGL`
+(in the launcher the module shim hands the window over, section 5), and
+skips the True HDR probe (an OpenGL context on the window). If the device
+then does not start (no SDL_GPU / Vulkan driver, the `offscreen` video
+driver, a launcher that cannot hand the window over), `Renderer::init`
+logs why and returns false on that non-OpenGL window; `App` logs
+`graphics backend: sdl3: making the window again for OpenGL (local)`,
+destroys the window, calls `prepareWindow(OpenGL3)`, makes it again with
+`SDL_WINDOW_OPENGL` and starts local on it. `local` and `opengl3` make the
+window exactly as before.
+
+**Shaders.** `CoreRenderer::init` and `CorePostFx::init` give every
+program its build-time SPIR-V next to its dialect text: the four renderer
+programs and the post-processing's (vertex `kPostVs`, 15 fragment shaders)
+from `core_renderer_spirv.h` (`DEFINES GD_HDR=0`), the three HDR variants
+(composite, finish, FSR RCAS with `GD_HDR 1`) from `core_post_fx_hdr_spirv.h`
+(a second `gdcore_spirv_shaders` call: `NAMESPACE gd01_hdr DEFINES
+GD_HDR=1`), in gd01's and in the launcher module's CMakeLists.txt.
 
 **How (and why this way).** All of gd01's drawing goes through one class,
 `Renderer` (render/renderer.h); only `renderer.cpp`, `post_fx.cpp` and
@@ -593,8 +664,11 @@ values and order. How it fits CoreRenderer:
 they share GL textures with a Vulkan device). With one selected the chain
 does what local does when it cannot run them: FSR 1 in their place, no
 jitter, and `ai upscaling: FSR 3.1 is not on the opengl3 graphics backend
-yet - using FSR 1` in the log and in the Enhanced menu's status. They
-become native on the Vulkan backend (phase 3).
+yet - using FSR 1` (`sdl3` on SDL3 GPU) in the log and in the Enhanced
+menu's status. They become native on the Vulkan backend (phase 3). **True
+HDR on sdl3** runs as Emulated (no HDR swapchain yet, 4.2): `hdr:
+unavailable (True HDR is not on the sdl3 graphics backend yet), using
+Emulated`.
 
 ## 7. Tests
 
