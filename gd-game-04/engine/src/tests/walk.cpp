@@ -12,6 +12,7 @@
 #include <exception>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <sstream>
 
 #include "data/band.h"
@@ -274,7 +275,7 @@ Walk::Walk(const std::string& name) : name_(name) {
         // GD04-094 paging stays, unreachable).
         steps_ = boot;
         steps_.push_back({"main_menu_fs",
-                          {"check:cut_content_ignored", "set:enhanced:cut_content=on", "check:enhanced:cut_content=off",
+                          {"check:cut_content_ignored", "set:enhanced:cut_content=on", "check:enhanced:cut_content=off", "check:backends_ignored",
                            "click:menu:main_menu_options_text"},
                           10000});
         steps_.push_back({"options_select_option_fs", {"click:item"}, 20000});
@@ -371,6 +372,9 @@ Walk::Walk(const std::string& name) : name_(name) {
         steps_.push_back({"options_select_option_fs", {"click:item"}, 20000});
         steps_.push_back({"port_enhanced",
                           {"hover:row:max_fps", "click:row:max_fps", "click:option:1", "check:enhanced:max_fps=120",
+                           // Graphics / Audio Backend (GDCORE-006): greyed at local, a click and a set change nothing.
+                           "click:row:graphics_backend", "click:row:audio_backend", "set:enhanced:graphics_backend=vulkan",
+                           "set:enhanced:audio_backend=openal", "check:enhanced:graphics_backend=local", "check:enhanced:audio_backend=local",
                            // Export User Files, a setting changed, Load User Settings brings it back (the dialogs answered with the save folder).
                            "dialog:savedir", "click:row:export", "set:enhanced:max_fps=60", "click:row:load_settings", "check:enhanced:max_fps=120", "click:row:load_progress", "set:enhanced:audio_offset=40", "set:enhanced:video_offset=-20", "click:row:calibrate_reset", "check:enhanced:audio_offset=0", "check:enhanced:video_offset=0",
                            "click:row:cheat_air_guitar", "check:global:Cheat_AirGuitar=1", "click:row:cheat_air_guitar", "check:global:Cheat_AirGuitar=2",
@@ -1125,6 +1129,24 @@ bool Walk::act(const std::string& what, FrontEnd& fe, WalkHost& host) {
         std::filesystem::remove_all(dir, ec);
         std::printf("  a saved cut_content on loads as %s (no_fail %s)\n", cut.c_str(), noFail.c_str());
         return cut == "off" && noFail == "on" ? true : fail("a saved cut_content on loads as " + cut);
+    }
+    if (what == "check:backends_ignored") {  // non-local Graphics / Audio Backend in enhanced.json load as local (GDCORE-006)
+        const std::string dir = (std::filesystem::temp_directory_path() / "gd04_walk_backends").string() + "/";
+        std::error_code ec;
+        std::filesystem::create_directories(dir, ec);
+        std::ofstream(dir + "enhanced.json")
+            << R"({"version": 2, "settings": {"graphics_backend": "vulkan", "audio_backend": "openal", "no_fail": "on"}})";
+        EnhancedStore st;
+        st.load(dir);
+        st.set("no_fail", "on");  // saved again: written back without them
+        std::ifstream in(dir + "enhanced.json");
+        const std::string saved((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        const std::string g = st.get("graphics_backend"), a = st.get("audio_backend"), noFail = st.get("no_fail");
+        std::filesystem::remove_all(dir, ec);
+        std::printf("  saved backends vulkan / openal load as %s / %s (no_fail %s)\n", g.c_str(), a.c_str(), noFail.c_str());
+        return g == "local" && a == "local" && noFail == "on" && saved.find("backend") == std::string::npos
+                   ? true
+                   : fail("saved non-local backends load as " + g + " / " + a);
     }
     if (starts("check:qp_guitarists=")) {  // quick play's random guitarist count (cs_get_total_guitarists from quickplay_start_song)
         qs::ScriptRun r;

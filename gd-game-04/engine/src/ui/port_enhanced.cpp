@@ -173,6 +173,23 @@ std::vector<Item> buildItems(qs::Vm& vm) {
          "High dynamic range for the venue and the band: None, Emulated (a filmic curve and an automatic exposure) or True "
          "HDR on an HDR display. Not in gd04 yet.",
          {{"none", "None"}, {"emulated", "Emulated"}, {"true", "True HDR"}}},
+        // engine-backend-guidelines.md 4 (GDCORE-006): shown greyed at local;
+        // selectable on gd-game-01 only for now.
+        {Kind::Choice, "graphics_backend", "Graphics Backend", false,
+         "The library the game draws with: local (the game's own renderer), SDL3, Vulkan"
+#ifndef __APPLE__
+         " or OpenGL3"
+#endif
+         ". Applies the next time the game starts.",
+         {{"local", "local"}, {"sdl3", "SDL3", false}, {"vulkan", "Vulkan", false},
+#ifndef __APPLE__
+          {"opengl3", "OpenGL3", false},  // no OpenGL on macOS (engine-backend-guidelines.md rule 7)
+#endif
+         }},
+        {Kind::Choice, "audio_backend", "Audio Backend", false,
+         "The library the game plays its sound through: local (the game's own audio output), miniaudio, OpenAL or "
+         "FAudio. Applies the next time the game starts.",
+         {{"local", "local"}, {"miniaudio", "miniaudio", false}, {"openal", "OpenAL", false}, {"faudio", "FAudio", false}}},
         {Kind::Choice, "bokeh", "Bokeh Effect", true,
          "The depth-of-field blur of the close shots. None: always sharp. Medium: as the original game. Light is softer; "
          "Strong and Stronger blur wider.",
@@ -682,7 +699,8 @@ private:
         if (notYet) {
             y += 6;
             d.warning(x0 + pad, y + 12);
-            d.text("Not available yet", x0 + pad + 30, y + 13, 21, kWarn, 0x21);
+            const bool backend = it.key == "graphics_backend" || it.key == "audio_backend";
+            d.text(backend ? "Available on Guitar Hero for now." : "Not available yet", x0 + pad + 30, y + 13, 21, kWarn, 0x21);
         }
     }
 

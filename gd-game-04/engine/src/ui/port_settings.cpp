@@ -25,6 +25,12 @@ const std::vector<EnhancedSetting>& enhancedSettings() {
         {"max_fps", {"60", "120", "144", "240", "unlimited"}},
         {"fps_counter", {"off", "on"}},
         {"hdr", {"none", "emulated", "true"}},
+        // Enhanced > Performance > Graphics / Audio backend (GDCORE-006,
+        // engine-backend-guidelines.md 4): selectable on gd-game-01 only for
+        // now; local is the only value here (another saved one is dropped on
+        // load, a set refused).
+        {"graphics_backend", {"local"}},
+        {"audio_backend", {"local"}},
         {"internal_res", {"0", "720", "800", "900", "1080", "1440", "2160"}},
         {"sharp_ui", {"off", "on"}},
         {"antialiasing", {"none", "fxaa", "ssaa", "taa"}},
