@@ -786,7 +786,25 @@ void SdlGpuDevice::generateMipmaps(Texture tx) {
     GpuTexture* t = textures_.get(tx.id);
     if (!t || t->desc.mips <= 1 || inPass_) return;
     if (!(caps_.formats[size_t(t->desc.format)] & kRenderable) || isDepthFormat(t->desc.format)) return;
-    SDL_GenerateMipmapsForGPUTexture(cmd(), t->texture);
+    // Level by level with linear blits, not SDL_GenerateMipmapsForGPUTexture:
+    // SDL 3.4.18's Vulkan driver sizes level n as `width >> n` without clamping
+    // to 1, so a non-square texture's last levels get zero-sized blits and stay
+    // undefined [C: SDL_gpu_vulkan.c VULKAN_GenerateMipmaps; gd01's drum lugs
+    // sampled them as transparent]. Each level halves the one above (at least
+    // 1 x 1), as glGenerateMipmap.
+    SDL_GPUCommandBuffer* cb = cmd();
+    const int layers = t->desc.type == TextureType::Cube ? 6 : 1;
+    for (int layer = 0; layer < layers; ++layer)
+        for (int m = 1; m < t->desc.mips; ++m) {
+            SDL_GPUBlitInfo bi{};
+            bi.source = {t->texture, uint32_t(m - 1), uint32_t(layer), 0, 0, uint32_t(std::max(1, t->desc.width >> (m - 1))),
+                         uint32_t(std::max(1, t->desc.height >> (m - 1)))};
+            bi.destination = {t->texture, uint32_t(m), uint32_t(layer), 0, 0, uint32_t(std::max(1, t->desc.width >> m)),
+                              uint32_t(std::max(1, t->desc.height >> m))};
+            bi.load_op = SDL_GPU_LOADOP_DONT_CARE;  // the whole level is written
+            bi.filter = SDL_GPU_FILTER_LINEAR;
+            SDL_BlitGPUTexture(cb, &bi);
+        }
 }
 
 void SdlGpuDevice::destroyTexture(Texture tx) {

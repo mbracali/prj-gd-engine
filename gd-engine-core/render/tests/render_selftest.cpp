@@ -417,6 +417,28 @@ int main(int argc, char** argv) {
         d.endPass();
         auto px = read(d, small, 1, 1);
         check(!px.empty() && near(px.data(), 128, 0, 128, 255, 4), "generated mipmaps, trilinear sampling");
+        // A non-square texture: its last levels are 1 pixel high (SDL 3.4.18's
+        // own mipmap generation leaves them undefined; docs/render.md 4.2).
+        TextureDesc wide;
+        wide.width = 32, wide.height = 4, wide.mips = 0;
+        Texture wtex = d.createTexture(wide);
+        std::vector<uint8_t> wpix(32 * 4 * 4);
+        for (int i = 0; i < 32 * 4; ++i) {
+            const bool red = ((i % 32) + (i / 32)) & 1;
+            wpix[size_t(i) * 4] = red ? 255 : 0, wpix[size_t(i) * 4 + 2] = red ? 0 : 255, wpix[size_t(i) * 4 + 3] = 255;
+        }
+        d.updateTexture({wtex}, 32, 4, wpix.data());
+        d.generateMipmaps(wtex);
+        d.beginPass(p);
+        d.bindPipeline(quad);
+        TextureBinding wb{wtex, d.createSampler(tri)};
+        d.bindTextures(0, &wb, 1);
+        d.draw(4);
+        d.endPass();
+        px = read(d, small, 1, 1);
+        check(d.textureDesc(wtex).mips == 6 && !px.empty() && near(px.data(), 128, 0, 128, 255, 4),
+              "generated mipmaps of a non-square texture (32 x 4: down to 1 x 1)");
+        d.destroyTexture(wtex);
         d.destroyTexture(small);
         d.destroyTexture(tex);
     }
