@@ -255,8 +255,8 @@ first; the others when they adopt the core):
   Enhanced Settings, with the same profile. A backend that cannot start falls
   back to local (engine-backend-guidelines.md rule 2).
 - **Indicator:** on the Enhanced Settings screen only, the backends in use are
-  shown in small white text: `Graphics: <name>   Audio: <name>`, on the line just
-  above the FPS counter (beside it the help bar's legend takes the room), or in
-  the counter's place when the FPS counter is off. It shows what really runs: a
+  shown in small white text: `Graphics: <name>   Audio: <name>`, always on the
+  line just above the FPS counter's place, whether the counter is on or off
+  (beside it, and on its own line, the help bar's legend takes the room). It shows what really runs: a
   chosen backend that could not start is shown as `local (<name> could not
   start)`.

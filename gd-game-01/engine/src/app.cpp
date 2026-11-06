@@ -1423,9 +1423,9 @@ void App::drawFpsCounter() {
 }
 
 // Enhanced Settings only: the graphics and audio backends this run uses (after
-// any fallback to local), on the line just above the FPS counter (beside it
-// the help bar's legend takes the room), or in its place when the counter is
-// off (universal-menus.md, Graphics / Audio backend).
+// any fallback to local), on the line just above the FPS counter's (beside
+// it, and on it when the counter is off, the help bar's legend takes the
+// room) (universal-menus.md, Graphics / Audio backend).
 void App::drawBackendLabel() {
     if (!ui_ || movie_ || screen_ != Screen::Menu || ui_->currentScreen() != "enhanced_settings") return;
     auto label = [](const std::string& id) -> std::string {
@@ -1441,7 +1441,7 @@ void App::drawBackendLabel() {
     const std::string audio = mixer_.outputBackend().empty() ? "local" : mixer_.outputBackend();
     const std::string s = "Graphics: " + shown(renderer_.backend(), startupGraphicsBackend()) +
                           "   Audio: " + shown(audio, startupAudioBackend());
-    const float y = enhancedOn("fps_counter") ? 667 : 695;
+    const float y = 667;  // always above the counter's line: there the help bar's legend starts at x 200
     ui_->drawText("impactor.font", s, 25, y + 2, 20, {0, 0, 0, 0.6f}, 0x41);  // shadow
     ui_->drawText("impactor.font", s, 23, y, 20, {1, 1, 1, 0.9f}, 0x41);
 }
