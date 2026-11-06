@@ -515,17 +515,43 @@ CoreRenderer reproduces the local renderer's pixels:
   points into a small colour target that is read back asynchronously,
   `kFlareLag` frames later, as local's pixel-pack buffers.
 
-**Not on the core path yet (phase 1):** the Enhanced post-processing chain
-(`post_fx.cpp`: anti-aliasing, FSR 1, bloom, SSAO, grain, grade...), True
-HDR output, and the FSR 3.1 / DLSS upscalers (`vk_upscaler.*`: GL<->Vulkan
-interop). With a core backend they are off, and gd01 logs
-`graphics backend opengl3: post-processing / True HDR / AI upscaling are not
-on this backend yet; drawing without them`. Everything they do stays
-available on `local`. The original look (the PS2 depth of field, particles,
-lights) is fully on the core path. Porting `post_fx.cpp` onto the Device is
-the next step (its 17 programs are fullscreen passes; nothing in them needs
-more than the interface has). The upscalers become native on the Vulkan
-backend (phase 3).
+**Enhanced post-processing and True HDR (1.1.13, after phase 1).**
+`render/core_post_fx.{h,cpp}` (`CorePostFx`) is local's `PostFx` and
+`outputHdr` on the Device, pass for pass: the same 17 programs plus the
+True HDR output pass, in the dialect (the loose uniforms become one std140
+block `Post` whose members keep their names, so every function body is the
+same text as local's: `gd-game-01/tools/check_core_shaders.py` compares
+them), the same targets and formats (RGBA8 / RGBA16F, the luminance map's
+mip chain), the same samplers (local's per-texture parameters as sampler
+objects, including the HDR frame's never-set REPEAT wrap), the same uniform
+values and order. How it fits CoreRenderer:
+
+- `beginScene` makes the scene target (RGBA8, or RGBA16F with HDR, + a
+  sampled D24 depth) and makes it "target 0" until `endScene` (every draw,
+  copy, depth probe and DOF pass goes to it, as local's bound scene FBO);
+  the clear is the pass's load op; pipelines carry the target's format
+  (RGBA16F scenes and frames get their own pipelines);
+- TAA's jitter is the main shader's `uUvOffsetJitter.zw`, with y negated as
+  the MVP's y (exact; impostor targets get 0, as local);
+- `endScene` ends the pass, runs the chain (each step a pass with
+  `DontCare` load over the whole target, fullscreen triangle whose y is
+  negated like `setMvp`'s, so on OpenGL3 it rasterises as local's), then
+  draws the result into the frame's viewport (RGB only, as local's mask);
+- copies from an RGBA16F scene or frame into RGBA8 textures (DOF, track
+  fade) are 1:1 `blit`s (`copyTexture` needs equal formats), the same
+  float-to-unorm conversion as local's `glCopyTexSubImage2D`;
+- True HDR: the frame is RGBA16F when the window got an HDR surface;
+  `endFrame` converts it into an RGBA32F texture at the window's size
+  (local writes the shader's floats straight to the surface; a 16-bit
+  intermediate would round twice) and presents it 1:1. `readPixels` blits
+  the frame to RGBA8 first (local's `glReadPixels` conversion).
+
+**Not on the core path yet:** the FSR 3.1 / DLSS upscalers (`vk_upscaler.*`:
+they share GL textures with a Vulkan device). With one selected the chain
+does what local does when it cannot run them: FSR 1 in their place, no
+jitter, and `ai upscaling: FSR 3.1 is not on the opengl3 graphics backend
+yet - using FSR 1` in the log and in the Enhanced menu's status. They
+become native on the Vulkan backend (phase 3).
 
 ## 7. Tests
 
@@ -578,6 +604,22 @@ backend (phase 3).
   in every shot. Local vs opengl3: 0 differing pixels in every shot.**
 - What the goldens do not cover: the Enhanced post-processing (off on the
   core path), True HDR, the upscalers, OpenGL ES devices (Android).
+
+**Post-processing on the core (CorePostFx), same machine:** 12 Enhanced
+settings files (the Modes Original Feel, Steam Deck, Clean Image, Max Out
+(Full HD), Max Out (4K), Rocking on a Budget, Good Old Days, and five mixes
+for what no Mode sets: SSAA, FSR 1 balanced / performance, every colour
+grade, HDR None / Emulated / True, SSAO, sharpening, grain, chromatic
+aberration, Star Power blur at every strength), 3 shots each (Enhanced
+menu with its venue backdrop, small_club at 30 s, Star Power in big_club at
+183 s): **before (4304464) vs after on local: 0 differing pixels in all 36;
+local vs opengl3: 0 differing pixels in all 36** (no tolerance was needed:
+the dialect shaders compile to the same code, and the double y flip keeps
+the rasteriser, `gl_FragCoord` and texel rows those of local). Not covered:
+True HDR with a real HDR surface (offscreen has none: True HDR runs as
+Emulated there, which is covered; the RGBA16F frame, the output pass and
+the HDR readback are untested on a display), FSR 3.1 / DLSS (by design
+FSR 1 on the core; checked that it logs and draws), OpenGL ES.
 
 ### Phase 2a (the groundwork for SDL3 GPU and Vulkan)
 
@@ -673,9 +715,10 @@ below is inside the backends.
     back to local, destroy the window, `prepareWindow(Backend::OpenGL3,
     gles)`, make it again with `SDL_WINDOW_OPENGL`, and init local on it.
     Nothing else changes for the launcher: the shim does the hand-over.
-  - Port `post_fx.cpp` and the True HDR output pass onto the Device; run the
-    same goldens per backend (expect small differences off OpenGL: other
-    rasteriser tie rules and precision).
+  - The post-processing and True HDR output already run on the Device
+    (CorePostFx, section 6): give core_post_fx.cpp's shaders their SPIR-V
+    form too, and run the same goldens per backend (expect small differences
+    off OpenGL: other rasteriser tie rules and precision).
 
 ## 10. Adding a backend
 
