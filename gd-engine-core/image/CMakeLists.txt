@@ -92,6 +92,14 @@ if(GDCORE_IMAGE_KTX)
   set(KTX_GIT_VERSION_FULL v${GDCORE_DEP_KTX_VERSION})
   add_subdirectory(${ktx_src} ${CMAKE_CURRENT_BINARY_DIR}/ktx EXCLUDE_FROM_ALL)
   gdcore_third_party_dir_warnings_off(${ktx_src})
+  if(APPLE)
+    # KTX-Software 4.4.2 on Apple replaces libktx_read.a after building it by
+    # `libtool -static` of the full ktx library and astc-encoder
+    # (set_astc_dependencies in its CMakeLists.txt [C]), without depending on
+    # ktx: build ktx first so that file exists. [I] not built here yet: the
+    # macOS package is built on the release runner.
+    add_dependencies(ktx_read ktx)
+  endif()
   target_link_libraries(gdcore_image PRIVATE ktx_read)
   # libktx (Apache-2.0) and what ktx_read compiles in: Basis Universal's
   # transcoder (Apache-2.0) with zstd (BSD), astc-encoder (Apache-2.0),
