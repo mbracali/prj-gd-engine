@@ -108,5 +108,9 @@ if(GDCORE_RENDER_TESTS AND NOT ANDROID)
       add_test(NAME gdcore_render_selftest_vulkan COMMAND gdcore_render_selftest --backend vulkan)
       set_tests_properties(gdcore_render_selftest_vulkan PROPERTIES ENVIRONMENT "SDL_VIDEO_DRIVER=offscreen" SKIP_RETURN_CODE 77)
     endif()
+    # SDL3 GPU needs a window it can present to: with the environment's video
+    # driver (x11 / wayland); skipped (77) where SDL_GPU cannot claim the window.
+    add_test(NAME gdcore_render_selftest_sdl3 COMMAND gdcore_render_selftest --backend sdl3)
+    set_tests_properties(gdcore_render_selftest_sdl3 PROPERTIES SKIP_RETURN_CODE 77)
   endif()
 endif()

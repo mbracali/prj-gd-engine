@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 //
-// gdcore_render_selftest [--backend opengl3|vulkan]: draws into off-screen
+// gdcore_render_selftest [--backend opengl3|sdl3|vulkan]: draws into off-screen
 // targets through gd::core::render and checks the pixels (docs/render.md
 // section 7). Headless: SDL_VIDEO_DRIVER=offscreen. Exit status: the number of
-// failed checks; 77 when the Vulkan backend cannot start here (no loader or
-// device: ctest counts it as skipped).
+// failed checks; 77 when the SDL3 GPU or Vulkan backend cannot start here (no
+// loader or device; SDL3 GPU on the offscreen video driver, which cannot
+// present: ctest counts it as skipped).
 
 #include <SDL3/SDL.h>
 
@@ -164,7 +165,7 @@ int main(int argc, char** argv) {
     }
     prepareWindow(backend, SDL_getenv("GD_GLES") != nullptr);
     SDL_Window* window = SDL_CreateWindow("gdcore_render_selftest", 64, 64, SDL_WindowFlags(windowFlags(backend)) | SDL_WINDOW_HIDDEN);
-    const int unavailable = backend == Backend::Vulkan ? 77 : 2;
+    const int unavailable = backend == Backend::OpenGL3 ? 2 : 77;
     if (!window) {
         std::fprintf(stderr, "window: %s\n", SDL_GetError());
         return unavailable;
