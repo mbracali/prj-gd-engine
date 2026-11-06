@@ -534,6 +534,7 @@ private:
         uint64_t pos = 0, startNs = 0, next = 0;
         int texture = 0;
         SDL_AudioStream* audio = nullptr;
+        std::unique_ptr<AudioRoute> route;  // the song's audio backend when not local (owns `audio`)
         Image frame;
     };
     std::unique_ptr<Movie> movie_;
@@ -1339,8 +1340,23 @@ void App::startMovie(const std::string& file) {
         return;
     }
     SDL_AudioSpec spec{SDL_AUDIO_S16, PssMovie::kAudioChannels, PssMovie::kAudioRate};
-    m->audio = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, nullptr, nullptr);
-    if (m->audio) SDL_ResumeAudioStreamDevice(m->audio);
+    if (!mixer_.outputBackend().empty()) {
+        // The movie's sound through the same backend as the game's (its own
+        // output: the picture follows the wall clock, as on local).
+        std::string why;
+        m->route = AudioRoute::open(mixer_.outputBackend(), spec, nullptr, nullptr, why);
+        if (m->route && m->route->start(why)) {
+            m->audio = m->route->stream();
+            SDL_Log("movie %s: audio through %s", path.c_str(), mixer_.outputBackend().c_str());
+        } else {
+            m->route.reset();
+            SDL_Log("movie %s: audio backend %s failed (%s); using local", path.c_str(), mixer_.outputBackend().c_str(), why.c_str());
+        }
+    }
+    if (!m->audio) {
+        m->audio = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, nullptr, nullptr);
+        if (m->audio) SDL_ResumeAudioStreamDevice(m->audio);
+    }
     mixer_.stopMusic(0);  // the movie plays alone
     m->startNs = SDL_GetTicksNS();
     movie_ = std::move(m);
@@ -1403,7 +1419,8 @@ void App::drawVersion() {
 
 void App::endMovie() {
     if (!movie_) return;
-    if (movie_->audio) SDL_DestroyAudioStream(movie_->audio);
+    if (movie_->route) movie_->route.reset();  // stops its output, destroys `audio`
+    else if (movie_->audio) SDL_DestroyAudioStream(movie_->audio);
     movie_.reset();
     uiTicks_ = SDL_GetTicksNS();  // the UI clock was frozen
 }
@@ -2563,7 +2580,12 @@ int App::run() {
     applyEnhanced();
 
     std::string audioError;
-    if (!mixer_.open(audioError)) {
+    // Enhanced > Audio backend, read once here (applies on the next start);
+    // anything but a gd-engine-core id that starts is local. Development aid:
+    // GD01_AUDIO_BACKEND=<id> overrides it (the walks on each backend).
+    std::string audioBackend = enhanced("audio_backend").str();
+    if (const char* b = SDL_getenv("GD01_AUDIO_BACKEND"); b && *b) audioBackend = b;
+    if (!mixer_.open(audioError, audioBackend)) {
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, kAppTitle, ("Cannot open audio: " + audioError).c_str(), window_);
         return 1;
     }
