@@ -369,7 +369,7 @@ loaded through `SDL_GL_GetProcAddress` (no GL library at link time).
 | `bindTextures` | `SDL_BindGPUFragmentSamplers` / `SDL_BindGPUVertexSamplers` |
 | `createPipeline` | `SDL_CreateGPUGraphicsPipeline` (the target formats are in `PipelineDesc`) |
 | `copyTexture` / `blit` | `SDL_CopyGPUTextureToTexture` / `SDL_BlitGPUTexture` |
-| `generateMipmaps` | `SDL_GenerateMipmapsForGPUTexture` |
+| `generateMipmaps` | `SDL_BlitGPUTexture` level by level (not `SDL_GenerateMipmapsForGPUTexture`: see below) |
 | `readTexture` | `SDL_DownloadFromGPUTexture` into a download transfer buffer + fence |
 | `present` | `SDL_AcquireGPUSwapchainTexture` + `SDL_BlitGPUTexture` |
 | shaders | SPIR-V from the build step (3.3; the Vulkan driver); MSL (Metal), DXIL (D3D12) later from the same SPIR-V |
@@ -409,8 +409,16 @@ in the table):
   the current command buffer; `readbackReady` submits that command buffer
   if it still holds the copy (a poll must make progress), then queries the
   fence; `readbackData` waits for it.
+- **Mipmaps** are generated level by level with linear `SDL_BlitGPUTexture`
+  blits (each level half the one above, at least 1 x 1), not with
+  `SDL_GenerateMipmapsForGPUTexture`: SDL 3.4.18's Vulkan driver sizes
+  level n as `width >> n` without clamping to 1, so a non-square texture's
+  last levels get zero-sized blits and stay undefined [C:
+  `SDL_gpu_vulkan.c` `VULKAN_GenerateMipmaps`; found by the goldens: gd01's
+  drum lugs, small and far, sampled those levels as transparent]. The
+  self-test checks a 32 x 4 chain on every backend.
 - **Textures**: every renderable colour texture also gets `COLOR_TARGET`
-  (a blit's destination; `SDL_GenerateMipmapsForGPUTexture` needs it).
+  (a blit's destination, the mipmap blits).
   Unused sampler slots below a stage's highest get a 1 x 1 opaque black
   texture (what GL samples from an empty unit). `MipFilter::None` is GL's
   non-mipmapped minification: nearest mip mode with `max_lod` 0.25 (level 0
@@ -692,6 +700,10 @@ Emulated`.
   `llvmpipe`), `GDCORE_VK_RENDER_PASSES=1` (the render-pass path),
   `GDCORE_VK_HEADLESS=1` (no surface: any GPU off screen),
   `GDCORE_VK_VALIDATION=1`.
+  `--backend sdl3` runs them on SDL3 GPU; it needs a window SDL_GPU can
+  present to, so it runs on `x11` / `wayland` and exits 77 (skipped) on
+  `offscreen`, where SDL_GPU cannot claim the window (ctest
+  `gdcore_render_selftest_sdl3` takes the environment's video driver).
 - The build itself: `gdcore_shaderc` fails the build on any shader of the
   core's self-test or of gd01's CoreRenderer that does not compile, is not
   valid SPIR-V (`spirv-val`) or breaks the binding layout, on every package
@@ -706,14 +718,29 @@ Emulated`.
   OpenGL window again and draws its list. Under `offscreen` SDL_GPU cannot
   present (the headless surface), so that one check is skipped there.
 - gd01: the selftest and the walks on `local` and on `opengl3`
-  (`GD01_GRAPHICS_BACKEND=opengl3`).
+  (`GD01_GRAPHICS_BACKEND=opengl3`); on `sdl3` under a display server (the
+  walks are written for `offscreen`, where sdl3 falls back to local: run a
+  copy of `tools/walks.sh` with the video driver of the display server).
+- **A display server that shows nothing**: `kwin_wayland --virtual
+  --no-lockscreen --socket <name> --width 1920 --height 1080
+  --exit-with-session <script>` is a real Wayland compositor rendering
+  into memory; SDL_GPU and the Vulkan backend present to it on the NVIDIA
+  GPU, so sdl3's goldens, walks and the launcher run there without a
+  window on the desktop (`WAYLAND_DISPLAY=<name> SDL_VIDEO_DRIVER=wayland`
+  in the script).
 - gd01 goldens: screenshots of the main menu, songs in three venues, the
   highway with Star Power, results, Enhanced menu; before / after on
   `local` must be identical, `opengl3` against `local` within a tiny
   tolerance. Reproducible headless frames need a fixed clock: the harness
   preloads a test-only library that makes `SDL_GetTicks*` advance 1/60 s per
   presented frame and `std::random_device` return a fixed sequence (it is
-  not part of any build). Results: section 8.
+  not part of any build). A presented frame is a `SDL_GL_SwapWindow`, a
+  `SDL_WaitAndAcquireGPUSwapchainTexture` (sdl3) or a `vkQueuePresentKHR`
+  (vulkan: the library wraps the `vkGetInstanceProcAddr` that
+  `SDL_Vulkan_GetVkGetInstanceProcAddr` hands out); a backend whose present
+  it does not count freezes the clock (the Enhanced menu's wall-clock shot
+  never comes, the post-processing's time-based effects stand still).
+  Results: section 8.
 
 ## 8. Results (1.1.13)
 
@@ -835,42 +862,20 @@ helper, the window hand-over (section 5), the interface's state rules (2.2),
 `Caps::clampToBorder`. No other interface change was needed: everything
 below is inside the backends.
 
-- **SDL3 GPU** (`render/src/sdlgpu/`, `GDCORE_RENDER_SDLGPU`):
-  - Device: `SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV, info.debug,
-    nullptr)` then `SDL_ClaimWindowForGPUDevice(dev, info.window)`; the
-    destructor waits idle, releases the window, destroys the device.
-    `windowFlags(SdlGpu)` stays 0.
-  - Shaders: `SDL_CreateGPUShader` from `spirvVertex` / `spirvFragment`
-    (`SDL_GPU_SHADERFORMAT_SPIRV`, entry `main`), `num_samplers` /
-    `num_uniform_buffers` from `reflectSpirv(...).numSamplers()` /
-    `numUniformBuffers()` per stage (`src/common/spirv_reflect.h`).
-    `pushUniforms(slot)` goes to `SDL_PushGPUVertexUniformData` when the
-    vertex info's `uniformMask` has the slot and to
-    `SDL_PushGPUFragmentUniformData` when the fragment's has it.
-    `bindTextures` to `SDL_BindGPUFragmentSamplers` / vertex samplers by the
-    `samplerMask`s; unused slots below a stage's count get a 1 x 1 dummy.
-  - Passes: record a pass's commands on the CPU until `endPass`, then
-    upload its transient data in a copy pass and replay the render pass
-    (SDL_GPU forbids a copy pass inside a render pass); outside a pass
-    `updateBuffer` / `updateTexture` / `copyTexture` / `generateMipmaps` /
-    `readTexture` go in copy passes (or `SDL_BlitGPUTexture` /
-    `SDL_GenerateMipmapsForGPUTexture`) of the frame's command buffer, in
-    call order.
-  - Readback: `SDL_DownloadFromGPUTexture` into a download transfer buffer,
-    a fence per frame (`SDL_SubmitGPUCommandBufferAndAcquireFence`),
-    `readbackReady` = `SDL_QueryGPUFence`. Rows come top-down already.
-  - Formats: D24 where `SDL_GPUTextureSupportsFormat(D24_UNORM,
-    SAMPLER | DEPTH_STENCIL_TARGET)`, else store D32_FLOAT (the game still
-    says D24; pipelines and textures map the same way); BGRA8 native;
-    textures with mips and a renderable format get `COLOR_TARGET` too
-    (`SDL_GenerateMipmapsForGPUTexture` needs it). `Caps::clampToBorder`
-    false (SDL_GPU has no border colour: ClampToBorder clamps to the edge).
-  - Present: acquire the swapchain texture at `present`, `SDL_BlitGPUTexture`
-    with `SDL_FLIP_VERTICAL` for `flipVertical`; a null swapchain texture
-    (minimised) skips it.
-  - Tests: `gdcore_render_selftest --backend sdl3` (same checks; the
-    SPIR-V is already in its ShaderDescs) on x11 / wayland (offscreen
-    cannot present, section 7), then gd01 with `GD01_GRAPHICS_BACKEND=sdl3`.
+- **SDL3 GPU** (`render/src/sdlgpu/`, `GDCORE_RENDER_SDLGPU`): **done
+  (phase 3a, section 4.2)**. Follow-ups:
+  - **True HDR**: SDL_GPU's `HDR_EXTENDED_LINEAR` (RGBA16F scRGB) /
+    `HDR10_ST2084` swapchain compositions, chosen through a Device call
+    from the game's request (`SDL_WindowSupportsGPUSwapchainComposition`),
+    and gd01's True HDR probe for it; today True HDR runs as Emulated on
+    sdl3 and says so. Needs an HDR display to test.
+  - **Metal / D3D12**: MSL and DXIL from the same SPIR-V at build time
+    (3.3); until then SDL picks its Vulkan driver (none on macOS without
+    MoltenVK: the game falls back to OpenGL).
+  - The FSR 3.1 / DLSS upscalers stay FSR 1 on sdl3 (SDL_GPU exposes no
+    native Vulkan objects for them; the vulkan backend is their home).
+  - Not run under `VK_LAYER_KHRONOS_validation` (not installed here) nor
+    with `SDL_GPU`'s debug mode: once where it is.
 - **Vulkan** (`render/src/vulkan/`): **done (phase 3b, section 4.3)**. gd01
   needs only the shared wiring above (SPIR-V in its ShaderDescs, the window
   made with `windowFlags(Backend::Vulkan)`, and `DeviceCreateInfo::cacheDir`
@@ -904,25 +909,12 @@ below is inside the backends.
   - The validation layer was not installed on the development machine
     (section 8): run the self-test and gd01 once with
     `GDCORE_VK_VALIDATION=1` where it is.
-- **gd01** (the backend agents and the post-FX port; core_renderer.cpp is
-  the post-FX port's file now):
-  - `core_renderer_spirv.h` is already generated for gd01 (engine and
-    launcher module builds, `gdcore_spirv_shaders` in both CMakeLists.txt):
-    in `CoreRenderer::init`, `#include "core_renderer_spirv.h"` and set
-    `d.spirv(kMainVsSpirv, kMainFsSpirv)` etc. for the four programs. The
-    post-FX programs: add their file to `SOURCES` (or a second call).
-  - `app.cpp`: resolve the backend (`startupGraphicsBackend()` /
-    `GD01_GRAPHICS_BACKEND`) *before* `SDL_CreateWindow`; for `sdl3` /
-    `vulkan` call `gd::core::render::prepareWindow(b, gles)` and make the
-    window with `windowFlags(b)` instead of `SDL_WINDOW_OPENGL` (the True
-    HDR probe is GL-only: skip it there); if `renderer_.init` then falls
-    back to local, destroy the window, `prepareWindow(Backend::OpenGL3,
-    gles)`, make it again with `SDL_WINDOW_OPENGL`, and init local on it.
-    Nothing else changes for the launcher: the shim does the hand-over.
-  - The post-processing and True HDR output already run on the Device
-    (CorePostFx, section 6): give core_post_fx.cpp's shaders their SPIR-V
-    form too, and run the same goldens per backend (expect small differences
-    off OpenGL: other rasteriser tie rules and precision).
+- **gd01**: **done** (the shared wiring, section 6): the backend is
+  resolved before the window, `prepareWindow` + `windowFlags` for sdl3 /
+  vulkan, the OpenGL fallback that makes the window again, every program's
+  SPIR-V (the post-processing's HDR variants from a second
+  `gdcore_spirv_shaders` call), `cacheDir` = the pref folder. The goldens
+  per backend: section 8.
 
 ## 10. Adding a backend
 
