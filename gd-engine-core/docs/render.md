@@ -600,7 +600,12 @@ backend (phase 3).
   launcher's list drawn again afterwards).
 - gd01 goldens (the eight shots of phase 1), the 2a build vs the phase-1
   build (4304464): **local 0 differing pixels, opengl3 0 differing pixels,
-  in every shot.**
+  in every shot.** gd01's walks: all pass on local; on opengl3 all but
+  `enhanced_hdr_frame` (the post-processing is not on the core path yet).
+- Packages (`build.sh linux / windows / android / steamdeck --force`): all
+  four complete with their 4 game modules; `gdcore_shaderc` was built for
+  the Fedora host (also serving the MinGW and NDK cross builds) and inside
+  the sniper container, and made `core_renderer_spirv.h` in each.
 
 ## 9. What phases 2 and 3 need
 
