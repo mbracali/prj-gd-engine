@@ -79,6 +79,8 @@ target_sources(gd03 PRIVATE
   src/platform/paths.cpp
   src/render/band_view.cpp
   src/render/canvas.cpp
+  src/render/core_backend.cpp
+  src/render/core_device.cpp
   src/render/char_view.cpp
   src/render/crowd_view.cpp
   src/render/gl_api.cpp
@@ -96,6 +98,7 @@ target_sources(gd03 PRIVATE
   src/render/scene_gpu.cpp
   src/render/scene_view.cpp
   src/render/shadertest.cpp
+  src/render/spirv_compile.cpp
   src/render/spotlight_view.cpp
   src/render/standard_shader.cpp
   src/render/texture_codec.cpp
@@ -167,6 +170,42 @@ option(GD03_MODULE "Also build gd03 as a Guitar Dream Universal Launcher module"
 set(GDCORE_LAUNCHER_MODULE ${GD03_MODULE})
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../../gd-engine-core ${CMAKE_CURRENT_BINARY_DIR}/gd-engine-core)
 target_link_libraries(gd03 PRIVATE gdcore)
+# The core's sdl3 and vulkan backends take SPIR-V. gd01 compiles its shaders
+# at build time (gdcore_spirv_shaders); GH2 builds its standard shader per
+# material key, millions of permutations known only once a disc is loaded,
+# so gd03 compiles them when a program is made (src/render/spirv_compile.cpp)
+# with glslang, the release gd-engine-core pins for its gdcore_shaderc (its
+# GLSL front end and SPIR-V back end only: no HLSL, no optimiser). Without
+# it (GD03_RUNTIME_SPIRV OFF) sdl3 and vulkan fall back to local.
+option(GD03_RUNTIME_SPIRV "Compile gd03's shaders to SPIR-V at run time (the sdl3 / vulkan graphics backends)" ON)
+if(GD03_RUNTIME_SPIRV)
+  include(${CMAKE_CURRENT_SOURCE_DIR}/../../gd-engine-core/cmake/gdcore_deps.cmake)  # the pins, in this scope
+  gdcore_fetch(GLSLANG gd03_glslang_src)
+  set(ENABLE_OPT OFF CACHE BOOL "" FORCE)
+  set(ENABLE_HLSL OFF CACHE BOOL "" FORCE)
+  set(ENABLE_GLSLANG_BINARIES OFF CACHE BOOL "" FORCE)
+  set(ENABLE_SPVREMAPPER OFF CACHE BOOL "" FORCE)
+  set(ENABLE_PCH OFF CACHE BOOL "" FORCE)
+  set(ENABLE_CTEST OFF CACHE BOOL "" FORCE)
+  set(GLSLANG_TESTS OFF CACHE BOOL "" FORCE)
+  set(GLSLANG_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+  set(BUILD_EXTERNAL OFF CACHE BOOL "" FORCE)
+  add_subdirectory(${gd03_glslang_src} glslang EXCLUDE_FROM_ALL)
+  foreach(t glslang MachineIndependent GenericCodeGen OSDependent SPIRV glslang-default-resource-limits)
+    if(TARGET ${t})  # upstream code, unchanged: no warnings from it
+      target_compile_options(${t} PRIVATE $<IF:$<CXX_COMPILER_ID:MSVC>,/w,-w>)
+    endif()
+  endforeach()
+  target_link_libraries(gd03 PRIVATE glslang::glslang glslang::glslang-default-resource-limits)
+  if(TARGET glslang::SPIRV)
+    target_link_libraries(gd03 PRIVATE glslang::SPIRV)
+  endif()
+  target_compile_definitions(gd03 PRIVATE GD03_RUNTIME_SPIRV=1)
+  # Its licence, for the packages (build_common.sh, the launcher's build.sh).
+  configure_file(${gd03_glslang_src}/LICENSE.txt ${CMAKE_BINARY_DIR}/glslang-LICENSE.txt COPYONLY)
+else()
+  target_compile_definitions(gd03 PRIVATE GD03_RUNTIME_SPIRV=0)
+endif()
 
 if(NOT WIN32 AND NOT APPLE)
   target_link_libraries(gd03 PRIVATE m)

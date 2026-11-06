@@ -343,6 +343,8 @@ build_module_03() {
     *) cp "$work/gd-game-03.so" "$dest/" ;;
   esac
   ship_core_runtime "$os" "$work" "$dest"  # gd-engine-core: its shared libraries and licences
+  # glslang, linked for the sdl3 / vulkan graphics backends' run-time SPIR-V (GD03_RUNTIME_SPIRV).
+  if [ -f "$work/glslang-LICENSE.txt" ]; then cp "$work/glslang-LICENSE.txt" "$dest/licenses/glslang-LICENSE.txt"; fi
   cp "$engine/README.md" "$dest/README.md"
 }
 

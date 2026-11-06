@@ -17,3 +17,10 @@ struct Options {
 // screen; `--song` plays one song directly, GD03_DEBUG_MENU=1 shows the
 // debug song list instead of the menus. Returns the exit code.
 int runApp(const Options& options);
+// Enhanced > Performance > Graphics Backend (GDCORE-009,
+// engine-backend-guidelines.md): the id this start of the game uses, "local"
+// (the game's own code, the default) or a gd-engine-core backend ("sdl3",
+// "vulkan", "opengl3"), read from enhanced.json when App::run starts; a
+// change in the menu applies on the next start. A backend that cannot start
+// falls back to local (rule 2).
+std::string startupGraphicsBackend();

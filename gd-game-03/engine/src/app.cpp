@@ -44,6 +44,7 @@
 #include "platform/disc_picker.h"
 #include "platform/paths.h"
 #include "render/canvas.h"
+#include "render/core_backend.h"
 #include "render/hdr_output.h"
 #include "render/highway.h"
 #include "render/hud_view.h"
@@ -612,10 +613,18 @@ int App::run() {
     // 1430:4748:guitar) plugs in a virtual controller, to test without hardware.
     if (const char* vp = SDL_getenv("GD03_VIRTUAL_PAD")) virtualPad_ = Input::attachVirtualPad(vp);
     inputLog_ = envOn("GD03_INPUTLOG");
-    SDL_WindowFlags flags = SDL_WINDOW_RESIZABLE | gfx::prepareWindow();  // OpenGL (render/device.h)
+    // Enhanced > Graphics Backend (GDCORE-009, render/core_backend.h): local
+    // (gd03's OpenGL device) or a gd-engine-core backend, decided before the
+    // window: SDL3 GPU and Vulkan need a window made for their API (in the
+    // launcher, prepareWindowFor asks it for one). Local and opengl3 keep the
+    // OpenGL window.
+    const gfx::Backend graphicsBackend = gfx::chosenBackend(startupGraphicsBackend());
+    const bool gpuWindow = graphicsBackend == gfx::Backend::Sdl3 || graphicsBackend == gfx::Backend::Vulkan;
+    SDL_WindowFlags baseFlags = SDL_WINDOW_RESIZABLE;
 #ifdef __ANDROID__
-    flags |= SDL_WINDOW_FULLSCREEN;
+    baseFlags |= SDL_WINDOW_FULLSCREEN;
 #endif
+    SDL_WindowFlags flags = baseFlags | gfx::prepareWindowFor(graphicsBackend);  // OpenGL (render/device.h) for local
     debugHighway_ = envOn("GD03_DEBUG_HIGHWAY");
     debugMenu_ = envOn("GD03_DEBUG_MENU");
     if (!options_.walk.empty()) {
@@ -629,9 +638,12 @@ int App::run() {
     }
     // Enhanced > HDR > True HDR: the window's surface is chosen now (render/hdr_output.h).
     // A window or surface that cannot be made with it is made again without (Emulated).
-    hdrReason_ = hdr::unsupportedReason();
+    // The surface probe is local's (an OpenGL context): on the core backends True HDR runs as Emulated.
+    hdrReason_ = graphicsBackend != gfx::Backend::Local
+                     ? std::string("True HDR is not on the ") + gfx::backendId(graphicsBackend) + " graphics backend yet"
+                     : hdr::unsupportedReason();
     const bool trueHdr = savedHdrMode() == "true";
-    const bool wantHdr = trueHdr && hdr::request();
+    const bool wantHdr = trueHdr && graphicsBackend == gfx::Backend::Local && hdr::request();
     window_ = SDL_CreateWindow(app::kWindowTitle, int(kScreenW), int(kScreenH), flags);
     if (wantHdr) {
         if (window_) {
@@ -665,7 +677,24 @@ int App::run() {
         my = (ny * float(wh) - (float(wh) - 720.0f * scale) * 0.5f) / scale;
     });
     std::string error;
-    if (!window_ || !canvas_.init(window_, error)) {
+    gfx::setRendererBackend(graphicsBackend);
+    bool rendererOk = window_ && canvas_.init(window_, error);
+    if (!rendererOk && graphicsBackend != gfx::Backend::Local) {
+        // The core backend did not start: local runs instead (rule 2: never a
+        // black screen); an SDL3 GPU / Vulkan window is made again for
+        // OpenGL first (in the launcher the shim gets its OpenGL window back).
+        SDL_Log("graphics backend: %s did not start (%s); using local", gfx::backendId(graphicsBackend), window_ ? error.c_str() : SDL_GetError());
+        if (gpuWindow) {
+            SDL_Log("graphics backend: %s: making the window again for OpenGL (local)", gfx::backendId(graphicsBackend));
+            if (window_) SDL_DestroyWindow(window_);
+            window_ = SDL_CreateWindow(app::kWindowTitle, int(kScreenW), int(kScreenH), baseFlags | gfx::prepareWindowFor(gfx::Backend::Local));
+            if (window_) setAppWindowIcon(window_);
+        }
+        gfx::setRendererBackend(gfx::Backend::Local);
+        error.clear();
+        rendererOk = window_ && canvas_.init(window_, error);
+    }
+    if (!rendererOk) {
         std::fprintf(stderr, "%s: cannot open the window: %s\n", app::kProgram, window_ ? error.c_str() : SDL_GetError());
         SDL_Quit();
         return 2;
@@ -3268,3 +3297,22 @@ void App::frameList() {
 }  // namespace
 
 int runApp(const Options& options) { return App(options).run(); }
+
+// Enhanced > Graphics Backend as this start uses it (app.h), read before
+// the window exists. Not cached: Restart Now runs App::run again.
+std::string startupGraphicsBackend() {
+    std::ifstream f(enhancedPath(), std::ios::binary);
+    if (!f) return "local";
+    std::stringstream ss;
+    ss << f.rdbuf();
+    try {
+        Json j = Json::parse(ss.str());
+        if (j.type != Json::Type::Object || j["format"].str() != "gd03-enhanced") return "local";
+        ui::migrateEnhanced(j);
+        const ui::EnhancedSetting* e = ui::enhancedSetting("graphics_backend");
+        const std::string v = j.has("graphics_backend") ? j["graphics_backend"].str() : "local";
+        return e && ui::enhancedValid(*e, v) ? v : "local";
+    } catch (const std::exception&) {
+        return "local";
+    }
+}
