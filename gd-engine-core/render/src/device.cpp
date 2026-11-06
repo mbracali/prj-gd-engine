@@ -99,7 +99,9 @@ std::unique_ptr<Device> createDevice(const DeviceCreateInfo& info, std::string& 
     // A launcher module's window is made for one API (the shim says which):
     // a GPU swapchain on the launcher's OpenGL window, or a GL context on a
     // window handed over for Vulkan, would fail later and less clearly.
-    if (const char* api = SDL_GetStringProperty(SDL_GetGlobalProperties(), kWindowApiProperty, nullptr); api && *api) {
+    const SDL_PropertiesID g = SDL_GetGlobalProperties();
+    const char* api = SDL_GetStringProperty(g, kWindowApiProperty, nullptr);
+    if (api && *api && SDL_GetPointerProperty(g, kWindowProperty, nullptr) == info.window) {
         if (std::strcmp(api, backendId(info.backend)) != 0) {
             error = std::string("the launcher's window is made for ") + api + ", not " + backendId(info.backend) +
                     (std::strcmp(api, "opengl3") == 0 ? " (this launcher cannot hand it over for another API, or could not make that window)"

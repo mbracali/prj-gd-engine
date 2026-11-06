@@ -114,12 +114,14 @@ typedef struct GdHost {
 // gd::core::render::prepareWindow(backend) sets GD_PROP_WINDOW_API_REQUEST to
 // the backend's id ("opengl3", "sdl3", "vulkan") before the game makes its
 // window; the shim's SDL_CreateWindow asks request_window for that API and
-// sets GD_PROP_WINDOW_API to what the window it returns is made for ("opengl3",
-// "sdl3", "vulkan", "metal"); gd::core::render::createDevice refuses a
-// backend the window is not made for, with the reason (and the game falls
-// back to OpenGL). Both are cleared at gdshim_begin / gdshim_end.
+// sets GD_PROP_WINDOW (a pointer property: the launcher's window it returns)
+// and GD_PROP_WINDOW_API (what that window is made for: "opengl3", "sdl3",
+// "vulkan", "metal"); gd::core::render::createDevice refuses a backend that
+// window is not made for, with the reason (and the game falls back to
+// OpenGL). All are cleared at gdshim_begin / gdshim_end.
 #define GD_PROP_WINDOW_API_REQUEST "gd.render.window_api_request"
 #define GD_PROP_WINDOW_API "gd.render.window_api"
+#define GD_PROP_WINDOW "gd.render.window"
 
 // A handheld PC (a Steam Deck: the launcher's Steam Deck download, or the
 // SteamDeck=1 environment / DMI board "Jupiter" or "Galileo"): a module

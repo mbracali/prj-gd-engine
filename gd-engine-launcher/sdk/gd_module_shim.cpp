@@ -142,10 +142,19 @@ const char* apiName(uint32_t api) {
     }
 }
 
+// Which window the launcher's is and what it is made for, for
+// gd-engine-core's createDevice (gd_host.h GD_PROP_WINDOW*).
+void publishWindow() {
+    const SDL_PropertiesID g = SDL_GetGlobalProperties();
+    SDL_SetPointerProperty(g, GD_PROP_WINDOW, hostWindow());
+    SDL_SetStringProperty(g, GD_PROP_WINDOW_API, apiName(g_api));
+}
+
 void clearWindowProperties() {
     const SDL_PropertiesID g = SDL_GetGlobalProperties();
     SDL_ClearProperty(g, GD_PROP_WINDOW_API_REQUEST);
     SDL_ClearProperty(g, GD_PROP_WINDOW_API);
+    SDL_ClearProperty(g, GD_PROP_WINDOW);
 }
 
 // What the game asks its window to be made for: gd-engine-core's
@@ -205,6 +214,7 @@ SDL_Window* gdshim_request_window(uint32_t api) {
         return nullptr;
     }
     g_api = api;
+    publishWindow();
     return static_cast<SDL_Window*>(w);
 }
 
@@ -247,8 +257,7 @@ extern "C" SDL_Window* gdshim_CreateWindow(const char* title, int w, int h, SDL_
     }
     const uint32_t want = wantedApi(flags);
     if (want != g_api) gdshim_request_window(want);
-    // What the window is made for, for gd-engine-core's createDevice.
-    SDL_SetStringProperty(SDL_GetGlobalProperties(), GD_PROP_WINDOW_API, apiName(g_api));
+    publishWindow();
     SDL_Window* win = hostWindow();
     if (title) SDL_SetWindowTitle(win, title);
     return win;

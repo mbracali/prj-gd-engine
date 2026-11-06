@@ -184,7 +184,23 @@ extern "C" GD_MODULE_EXPORT int gd_game_run(const GdHost* host) {
         auto dev = gr::createDevice(info, error);
         check(!dev && error.find("made for sdl3") != std::string::npos, "createDevice refuses OpenGL3 on it: " + error);
     }
-    check(SDL_GL_CreateContext(w) == nullptr, std::string("no GL context on it: ") + SDL_GetError());
+    const bool noContext = SDL_GL_CreateContext(w) == nullptr;
+    check(noContext, std::string("no GL context on it: ") + SDL_GetError());
+    {
+        // The game's own hidden window (a shader test, say) is not the
+        // launcher's: the check leaves it alone.
+        gr::prepareWindow(gr::Backend::OpenGL3, false);
+        SDL_Window* own = SDL_CreateWindow("gd-test-handover hidden", 16, 16, SDL_WINDOW_OPENGL | SDL_WINDOW_HIDDEN);
+        gr::DeviceCreateInfo info;
+        info.backend = gr::Backend::OpenGL3;
+        info.window = own;
+        std::string error;
+        auto dev = own ? gr::createDevice(info, error) : nullptr;
+        check(own && own != host->window && dev && gdshim_window_api() == GD_WINDOW_API_SDL_GPU,
+              "an OpenGL3 device on the game's own hidden window meanwhile" + (dev ? std::string() : ": " + error));
+        dev.reset();
+        if (own) SDL_DestroyWindow(own);
+    }
     if (w) useSdlGpu(w);
 
     // 3. Vulkan.

@@ -335,13 +335,15 @@ struct DeviceCreateInfo {
 uint64_t windowFlags(Backend b);
 void prepareWindow(Backend b, bool gles);
 
-// The SDL global properties (strings) shared with the launcher's module shim
+// The SDL global properties shared with the launcher's module shim
 // (gd-engine-launcher/sdk/gd_host.h GD_PROP_WINDOW_API_REQUEST /
-// GD_PROP_WINDOW_API): what the game asks for (set by prepareWindow), and
-// what the window it got is made for (set by the shim; absent outside a
-// launcher). createDevice refuses a backend the window is not made for.
+// GD_PROP_WINDOW_API / GD_PROP_WINDOW): what the game asks for (a string, set
+// by prepareWindow), and the launcher's window with what it is made for (a
+// pointer and a string, set by the shim; absent outside a launcher).
+// createDevice refuses a backend that window is not made for.
 constexpr const char* kWindowApiRequestProperty = "gd.render.window_api_request";
 constexpr const char* kWindowApiProperty = "gd.render.window_api";
+constexpr const char* kWindowProperty = "gd.render.window";
 
 class Device {
 public:
