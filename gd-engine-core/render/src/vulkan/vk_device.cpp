@@ -324,6 +324,16 @@ public:
     void pushDebugGroup(const char* name) override;
     void popDebugGroup() override;
 
+    // Occlusion queries: one pool, reset from the host (Vulkan 1.2's
+    // hostQueryReset) when a query is made and after its result is read, so
+    // a query can begin inside the pass it was made in. Without
+    // hostQueryReset: none (createQuery returns an empty handle).
+    Query createQuery() override;
+    void destroyQuery(Query q) override;
+    void beginQuery(Query q) override;
+    void endQuery() override;
+    bool queryResult(Query q, uint64_t& samples) override;
+
 private:
     struct Chunk {
         uint32_t buffer = 0;  // Buffer id
@@ -458,6 +468,12 @@ private:
 
     // Pass and binding state.
     bool inPass_ = false;
+    static constexpr uint32_t kMaxQueries = 4096;
+    VkQueryPool queryPool_ = VK_NULL_HANDLE;
+    std::vector<uint8_t> queryState_;  // per pool index: 0 free, 1 made (reset), 2 ended (result pending)
+    std::vector<uint32_t> freeQueries_;
+    uint32_t openQuery_ = 0;  // Query id (index + 1) begun and not ended
+    bool hostQueryReset_ = false, preciseQueries_ = false;
     PassDesc pass_;
     int passW_ = 0, passH_ = 0;
     const VPipeline* pipeline_ = nullptr;
@@ -514,6 +530,7 @@ VulkanDevice::~VulkanDevice() {
         if (texLayout_) vkDestroyDescriptorSetLayout(device_, texLayout_, nullptr);
         if (uboLayout_) vkDestroyDescriptorSetLayout(device_, uboLayout_, nullptr);
         if (pipelineCache_) vkDestroyPipelineCache(device_, pipelineCache_, nullptr);
+        if (queryPool_) vkDestroyQueryPool(device_, queryPool_, nullptr);
         if (vma_) vmaDestroyAllocator(vma_);
         vkDestroyDevice(device_, nullptr);
     }
@@ -700,6 +717,8 @@ bool VulkanDevice::createLogicalDevice(std::string& error) {
     features.depthClamp = supported_.depthClamp;
     features.textureCompressionBC = supported_.textureCompressionBC;
     features.independentBlend = supported_.independentBlend;
+    features.occlusionQueryPrecise = supported_.occlusionQueryPrecise;
+    preciseQueries_ = supported_.occlusionQueryPrecise;
     depthClamp_ = supported_.depthClamp, anisotropy_ = supported_.samplerAnisotropy, independentBlend_ = supported_.independentBlend;
 
     const float priority = 1.0f;
@@ -711,6 +730,16 @@ bool VulkanDevice::createLogicalDevice(std::string& error) {
     VkPhysicalDeviceDynamicRenderingFeaturesKHR dynOn{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES_KHR};
     dynOn.dynamicRendering = VK_TRUE;
     if (dynamicRendering_) ci.pNext = &dynOn;
+    // hostQueryReset (Vulkan 1.2): the occlusion queries' resets.
+    VkPhysicalDeviceHostQueryResetFeatures hqr{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_QUERY_RESET_FEATURES};
+    if (apiVersion_ >= VK_API_VERSION_1_2) {
+        VkPhysicalDeviceFeatures2 f2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
+        f2.pNext = &hqr;
+        vkGetPhysicalDeviceFeatures2(gpu_, &f2);
+        hostQueryReset_ = hqr.hostQueryReset == VK_TRUE;
+        hqr.pNext = const_cast<void*>(ci.pNext);
+        if (hostQueryReset_) ci.pNext = &hqr;
+    }
     ci.queueCreateInfoCount = 1;
     ci.pQueueCreateInfos = &qi;
     ci.enabledExtensionCount = uint32_t(enable.size());
@@ -737,6 +766,18 @@ bool VulkanDevice::createLogicalDevice(std::string& error) {
     ai.pVulkanFunctions = &fn;
     r = vmaCreateAllocator(&ai, &vma_);
     if (r != VK_SUCCESS) return error = vkError("vmaCreateAllocator", r), false;
+    if (hostQueryReset_ && vkResetQueryPool) {
+        VkQueryPoolCreateInfo qp{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
+        qp.queryType = VK_QUERY_TYPE_OCCLUSION;
+        qp.queryCount = kMaxQueries;
+        if (vkCreateQueryPool(device_, &qp, nullptr, &queryPool_) == VK_SUCCESS) {
+            vkResetQueryPool(device_, queryPool_, 0, kMaxQueries);
+            queryState_.assign(kMaxQueries, 0);
+            for (uint32_t i = kMaxQueries; i > 0; --i) freeQueries_.push_back(i - 1);
+        } else {
+            queryPool_ = VK_NULL_HANDLE;
+        }
+    }
     return true;
 }
 
@@ -2247,8 +2288,48 @@ void VulkanDevice::drawIndexed(uint32_t indexCount, uint32_t instanceCount, uint
     vkCmdDrawIndexed(cmd_, indexCount, std::max(instanceCount, 1u), firstIndex, vertexOffset, firstInstance);
 }
 
+Query VulkanDevice::createQuery() {
+    if (!queryPool_ || freeQueries_.empty()) return {};
+    const uint32_t i = freeQueries_.back();
+    freeQueries_.pop_back();
+    vkResetQueryPool(device_, queryPool_, i, 1);  // a reused one may hold an old result
+    queryState_[i] = 1;
+    return {i + 1};
+}
+
+void VulkanDevice::destroyQuery(Query q) {
+    if (!queryPool_ || !q.id || q.id > kMaxQueries || !queryState_[q.id - 1]) return;
+    if (openQuery_ == q.id) endQuery();
+    queryState_[q.id - 1] = 0;
+    freeQueries_.push_back(q.id - 1);
+}
+
+void VulkanDevice::beginQuery(Query q) {
+    if (!queryPool_ || !inPass_ || openQuery_ || !q.id || q.id > kMaxQueries || queryState_[q.id - 1] != 1) return;
+    vkCmdBeginQuery(cmd_, queryPool_, q.id - 1, preciseQueries_ ? VK_QUERY_CONTROL_PRECISE_BIT : 0);
+    openQuery_ = q.id;
+}
+
+void VulkanDevice::endQuery() {
+    if (!openQuery_) return;
+    vkCmdEndQuery(cmd_, queryPool_, openQuery_ - 1);
+    queryState_[openQuery_ - 1] = 2;
+    openQuery_ = 0;
+}
+
+bool VulkanDevice::queryResult(Query q, uint64_t& samples) {
+    if (!queryPool_ || !q.id || q.id > kMaxQueries || queryState_[q.id - 1] != 2) return false;
+    uint64_t v = 0;
+    if (vkGetQueryPoolResults(device_, queryPool_, q.id - 1, 1, sizeof v, &v, sizeof v, VK_QUERY_RESULT_64_BIT) != VK_SUCCESS) return false;
+    samples = v;
+    vkResetQueryPool(device_, queryPool_, q.id - 1, 1);  // ready to begin again
+    queryState_[q.id - 1] = 1;
+    return true;
+}
+
 void VulkanDevice::endPass() {
     if (!inPass_) return;
+    if (openQuery_) endQuery();  // a query lives inside one pass
     inPass_ = false;
     if (dynamicRendering_) cmdEndRendering_(cmd_);
     else vkCmdEndRenderPass(cmd_);
