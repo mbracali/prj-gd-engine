@@ -154,7 +154,9 @@ struct ShaderDesc {
     const char* glslVertex = nullptr;
     const char* glslFragment = nullptr;
     const char* defines = nullptr;
-    // SPIR-V (SDL3 GPU and Vulkan), compiled from the same source at build time.
+    // SPIR-V (SDL3 GPU and Vulkan), compiled from the same source at build
+    // time (gdcore_spirv_shaders(), docs/render.md 3.3): the dialect's sets
+    // and bindings, SPIR-V 1.0, entry point "main".
     const uint32_t* spirvVertex = nullptr;
     size_t spirvVertexBytes = 0;
     const uint32_t* spirvFragment = nullptr;
@@ -167,6 +169,15 @@ struct ShaderDesc {
     const char* samplers[kMaxTextureSlots] = {};
     uint8_t samplerStages[kMaxTextureSlots] = {kFragmentStage, kFragmentStage, kFragmentStage, kFragmentStage,
                                                kFragmentStage, kFragmentStage, kFragmentStage, kFragmentStage};
+
+    // Sets the SPIR-V form from the arrays gdcore_shaderc generates
+    // (k<Name>VsSpirv, k<Name>FsSpirv): desc.spirv(kMainVsSpirv, kMainFsSpirv).
+    template <size_t V, size_t F>
+    ShaderDesc& spirv(const uint32_t (&vertex)[V], const uint32_t (&fragment)[F]) {
+        spirvVertex = vertex, spirvVertexBytes = sizeof vertex;
+        spirvFragment = fragment, spirvFragmentBytes = sizeof fragment;
+        return *this;
+    }
 };
 
 // ---------------------------------------------------------------- pipelines

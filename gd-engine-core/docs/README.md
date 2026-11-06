@@ -131,6 +131,16 @@ was at least two weeks old when pinned.
 | SDL3_image | 3.4.8 (`release-3.4.8`, 2026-10-05) | fetched, static | zlib | image `sdl3` |
 | KTX-Software (libktx, `ktx_read`) | 4.4.2 (`v4.4.2`, 2025-10-04) | fetched, static | Apache-2.0; bundles Basis Universal (Apache-2.0), zstd (BSD), astc-encoder (Apache-2.0), dfdutils (Apache-2.0) | image `bcdec` (KTX / KTX2) |
 | SDL3 | the game's (3.4.18 in every package today) | the game's | zlib | every area |
+| glslang | Vulkan SDK 1.4.321.0 (`vulkan-sdk-1.4.321.0`, 2025) | fetched, **host tool only** (`gdcore_shaderc`) | BSD-3 / Apache-2.0 / MIT (mix) | render: build-time SPIR-V |
+| SPIRV-Tools | Vulkan SDK 1.4.321.0 | fetched, host tool only (the validator) | Apache-2.0 | render: build-time SPIR-V |
+| SPIRV-Headers | Vulkan SDK 1.4.321.0 | fetched, host tool only (SPIRV-Tools' grammar) | MIT (Khronos) | render: build-time SPIR-V |
+
+The three Khronos libraries build `gdcore_shaderc`, a program that runs on the
+build machine (also for the Windows and Android cross builds) and is never
+linked into a game or shipped, so no package carries their licences. It is
+built once per build environment (the host, each container) into
+`GDCORE_DEPS_DIR/host-tools/` (about 30 MB; under a minute on 16 cores):
+`docs/render.md` section 3.3.
 
 The AUDIO and RENDER areas add their rows here and in `gdcore_deps.cmake`.
 
@@ -172,7 +182,9 @@ folder in the repository (the default), or copy the cache into
 
 In GitHub Actions, cache `gd-engine-core/build/deps` keyed on
 `hashFiles('gd-engine-core/cmake/gdcore_deps.cmake')` (KTX-Software's release
-archive is about 210 MB, mostly its test images).
+archive is about 210 MB, mostly its test images). The `host-tools/` folder in
+it is keyed by the machine itself (system, release, compilers), so a cache
+restored on another runner image just builds its own next to it.
 
 ## Shared libraries in the packages (GDCORE-007)
 

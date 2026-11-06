@@ -13,6 +13,7 @@
 #include <string>
 #include <vector>
 
+#include "common/spirv_reflect.h"
 #include "gd/core/render/device.h"
 
 using namespace gd::core::render;
@@ -78,6 +79,50 @@ GD_FRAG_OUT(0) vec4 fragColor;
 void main() { fragColor = vec4(texelFetch(uDepth, ivec2(gl_FragCoord.xy), 0).r); }
 )";
 
+}  // namespace
+
+// The same shaders as SPIR-V, compiled at build time by gdcore_shaderc
+// (gdcore_spirv_shaders in CMakeLists.txt): k<Name>VsSpirv / k<Name>FsSpirv.
+#include "render_selftest_spirv.h"
+
+namespace {
+
+// What the build-time SPIR-V binds (docs/render.md 3.2): SDL_GPU's sets, the
+// slots the dialect's macros name.
+void checkSpirv() {
+    struct Expect {
+        const char* name;
+        const uint32_t* words;
+        size_t bytes;
+        SpirvStage stage;
+        uint32_t samplers, uniforms;
+    } expect[] = {
+        {"kColorVs", kColorVsSpirv, sizeof kColorVsSpirv, SpirvStage::Vertex, 0, 1u << 0},
+        {"kColorFs", kColorFsSpirv, sizeof kColorFsSpirv, SpirvStage::Fragment, 0, 1u << 1},
+        {"kQuadVs", kQuadVsSpirv, sizeof kQuadVsSpirv, SpirvStage::Vertex, 0, 0},
+        {"kQuadFs", kQuadFsSpirv, sizeof kQuadFsSpirv, SpirvStage::Fragment, 1u << 0, 0},
+        {"kCubeFs", kCubeFsSpirv, sizeof kCubeFsSpirv, SpirvStage::Fragment, 1u << 0, 0},
+        {"kDepthFs", kDepthFsSpirv, sizeof kDepthFsSpirv, SpirvStage::Fragment, 1u << 0, 0},
+    };
+    bool ok = true;
+    for (const Expect& e : expect) {
+        SpirvStageInfo info;
+        std::string why;
+        const bool good = reflectSpirv(e.words, e.bytes, info, why) && info.stage == e.stage && info.samplerMask == e.samplers &&
+                          info.uniformMask == e.uniforms;
+        if (!good) std::printf("  %s: %s (samplers %x, uniforms %x)\n", e.name, why.c_str(), info.samplerMask, info.uniformMask);
+        ok = ok && good;
+    }
+    SpirvStageInfo color;
+    std::string why;
+    reflectSpirv(kColorFsSpirv, sizeof kColorFsSpirv, color, why);
+    check(ok && color.numUniformBuffers() == 2 && color.numSamplers() == 0,
+          "SPIR-V (build time): every shader, SDL_GPU's sets and the dialect's slots");
+    uint32_t bad[] = {0x12345678u, 0, 0, 0, 0};
+    SpirvStageInfo none;
+    check(!reflectSpirv(bad, sizeof bad, none, why), "SPIR-V reflection refuses what is not SPIR-V");
+}
+
 struct V {
     float x, y;
     uint8_t r, g, b, a;
@@ -110,6 +155,7 @@ int main(int argc, char** argv) {
             std::fprintf(stderr, "unknown backend %s\n", argv[i + 1]);
             return 2;
         }
+    checkSpirv();
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         std::fprintf(stderr, "SDL_Init: %s\n", SDL_GetError());
         return 2;
@@ -146,17 +192,21 @@ int main(int argc, char** argv) {
     sd.name = "color";
     sd.glslVertex = kColorVs, sd.glslFragment = kColorFs;
     sd.uniformBlocks[0] = "Params", sd.uniformBlocks[1] = "Extra";
+    sd.spirv(kColorVsSpirv, kColorFsSpirv);
     Shader colorShader = d.createShader(sd);
     ShaderDesc qd;
     qd.name = "quad";
     qd.glslVertex = kQuadVs, qd.glslFragment = kQuadFs;
     qd.samplers[0] = "uTex";
+    qd.spirv(kQuadVsSpirv, kQuadFsSpirv);
     Shader quadShader = d.createShader(qd);
     ShaderDesc cd = qd;
     cd.name = "cube", cd.glslFragment = kCubeFs, cd.samplers[0] = "uCube";
+    cd.spirv(kQuadVsSpirv, kCubeFsSpirv);
     Shader cubeShader = d.createShader(cd);
     ShaderDesc pd = qd;
     pd.name = "depth probe", pd.glslFragment = kDepthFs, pd.samplers[0] = "uDepth";
+    pd.spirv(kQuadVsSpirv, kDepthFsSpirv);
     Shader probeShader = d.createShader(pd);
     check(colorShader && quadShader && cubeShader && probeShader, "shaders compile from the gd dialect");
     if (!colorShader || !quadShader || !cubeShader || !probeShader) return 1;

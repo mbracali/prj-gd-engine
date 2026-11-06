@@ -11,6 +11,15 @@
 # |------------|------------------------|--------------------------------|------------------------------------------|
 # | SDL3_image | 3.4.8 (release-3.4.8)  | zlib                           | image: the "sdl3" backend                |
 # | KTX        | 4.4.2 (v4.4.2)         | Apache-2.0 (+ bundled: see doc)| image: the "bcdec" backend's KTX / KTX2  |
+# | GLSLANG    | Vulkan SDK 1.4.321.0   | BSD-3 / Apache-2.0 / MIT (mix) | render: gdcore_shaderc (HOST tool only)   |
+# | SPIRV_TOOLS| Vulkan SDK 1.4.321.0   | Apache-2.0                     | render: gdcore_shaderc validation (host)  |
+# | SPIRV_HEADERS| Vulkan SDK 1.4.321.0 | MIT (Khronos)                  | render: SPIRV-Tools' grammar (host)       |
+#
+# The three Khronos repositories are pinned at the same Vulkan SDK tag (they
+# are released together; glslang's known_good.json names those SPIRV-Tools
+# and SPIRV-Headers commits). They build gdcore_shaderc, a program run on the
+# build machine only (render/cmake/gdcore_shaders.cmake): nothing of them is
+# linked into a game or shipped, so the packages carry no licence for them.
 #
 # New pins go in this file (a row above, a block below, the name in
 # GDCORE_DEPS). An area's CMakeLists.txt may call gdcore_pin() itself while
@@ -44,7 +53,22 @@ set(GDCORE_DEP_KTX_URL "https://github.com/KhronosGroup/KTX-Software/archive/ref
 set(GDCORE_DEP_KTX_SHA256 9412cb45045a503005acd47d98f9e8b47154634a50b4df21e17a1dfa8971d323)
 set(GDCORE_DEP_KTX_TOPDIR KTX-Software-4.4.2)
 
-set(GDCORE_DEPS SDL3_IMAGE KTX)
+set(GDCORE_DEP_GLSLANG_VERSION vulkan-sdk-1.4.321.0)
+set(GDCORE_DEP_GLSLANG_URL "https://github.com/KhronosGroup/glslang/archive/refs/tags/vulkan-sdk-1.4.321.0.tar.gz")
+set(GDCORE_DEP_GLSLANG_SHA256 cb14f05b25b832655f440a36b13fbd0ab83e508d4de5c2e19c5f83eb61f6d55c)
+set(GDCORE_DEP_GLSLANG_TOPDIR glslang-vulkan-sdk-1.4.321.0)
+
+set(GDCORE_DEP_SPIRV_TOOLS_VERSION vulkan-sdk-1.4.321.0)
+set(GDCORE_DEP_SPIRV_TOOLS_URL "https://github.com/KhronosGroup/SPIRV-Tools/archive/refs/tags/vulkan-sdk-1.4.321.0.tar.gz")
+set(GDCORE_DEP_SPIRV_TOOLS_SHA256 8327fb8f3e9472346a004c91dbb83a6e5f3b36c3846c142cf8c0dc8fac8710f3)
+set(GDCORE_DEP_SPIRV_TOOLS_TOPDIR SPIRV-Tools-vulkan-sdk-1.4.321.0)
+
+set(GDCORE_DEP_SPIRV_HEADERS_VERSION vulkan-sdk-1.4.321.0)
+set(GDCORE_DEP_SPIRV_HEADERS_URL "https://github.com/KhronosGroup/SPIRV-Headers/archive/refs/tags/vulkan-sdk-1.4.321.0.tar.gz")
+set(GDCORE_DEP_SPIRV_HEADERS_SHA256 5bbea925663d4cd2bab23efad53874f2718248a73dcaf9dd21dff8cb48e602fc)
+set(GDCORE_DEP_SPIRV_HEADERS_TOPDIR SPIRV-Headers-vulkan-sdk-1.4.321.0)
+
+set(GDCORE_DEPS SDL3_IMAGE KTX GLSLANG SPIRV_TOOLS SPIRV_HEADERS)
 
 # gdcore_pin(<NAME> <version> <url> <sha256> <folder inside the archive>)
 function(gdcore_pin name ver url sha top)
