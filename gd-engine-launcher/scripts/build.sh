@@ -407,6 +407,7 @@ build_module_04() {
       cp "$work/libgd-game-04.so" "$ffmpeg"/lib/libavformat.so "$ffmpeg"/lib/libavcodec.so "$ffmpeg"/lib/libavutil.so "$dest/"
       printf '%s\n' libgd-game-04.so libavformat.so libavcodec.so libavutil.so > "$dest/native-libs.txt" ;;
   esac
+  ship_core_runtime "$os" "$work" "$dest"  # gd-engine-core: its shared libraries and licences
   (. "$engine/build_common.sh"; ship_ffmpeg_licence "$ffmpeg" "$dest")
   if [ "$os" != android ]; then cp "$engine/third_party/rtmidi/LICENSE" "$dest/licenses/RtMidi-LICENSE.txt"; fi  # Generic MIDI (none on Android)
   cp "$engine/README.md" "$dest/README.md"

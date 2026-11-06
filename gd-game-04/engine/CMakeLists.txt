@@ -137,6 +137,20 @@ target_sources(gd04 PRIVATE
 target_include_directories(gd04 PRIVATE src)
 target_link_libraries(gd04 PRIVATE SDL3::SDL3)
 
+# gd-engine-core (GDCORE-010, ../../gd-engine-core/docs/README.md): the shared
+# render / audio / platform libraries, static, as gd-game-01 and gd-game-02
+# link them. Linking it does not change the game: gd04 runs its own code
+# ("local") unless a core backend is chosen (Enhanced > Performance, or the
+# development aids GD04_GRAPHICS_BACKEND / GD04_AUDIO_BACKEND). The launcher
+# module (GD04_MODULE, below) takes it through gd04's LINK_LIBRARIES, built in
+# the launcher's layout (GDCORE_LAUNCHER_MODULE); the core lists the shared
+# libraries and licences the packages must carry in <build>/gdcore-runtime.txt
+# (gd-engine-launcher/scripts/build.sh ship_core_runtime).
+option(GD04_MODULE "Also build gd04 as a Guitar Dream Universal Launcher module" OFF)
+set(GDCORE_LAUNCHER_MODULE ${GD04_MODULE})
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../../gd-engine-core ${CMAKE_CURRENT_BINARY_DIR}/gd-engine-core)
+target_link_libraries(gd04 PRIVATE gdcore)
+
 if(NOT WIN32 AND NOT APPLE)
   target_link_libraries(gd04 PRIVATE m)
 endif()
@@ -277,7 +291,6 @@ set_target_properties(gd04 PROPERTIES
 # program itself is unchanged. On Android the module is libgd-game-04.so in the
 # launcher's APK (gd-engine-launcher/scripts/build.sh android); it uses the
 # launcher's libSDL3.so, built from the same SDL3 source.
-option(GD04_MODULE "Also build gd04 as a Guitar Dream Universal Launcher module" OFF)
 if(GD04_MODULE)
   set(GD04_HOST_SDK "${CMAKE_CURRENT_SOURCE_DIR}/../../gd-engine-launcher/sdk" CACHE PATH
       "The launcher's module SDK (gd_host.h, gd_module_shim.h/.cpp)")
