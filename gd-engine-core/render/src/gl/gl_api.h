@@ -55,6 +55,11 @@
     X(PFNGLGENFRAMEBUFFERSPROC, glGenFramebuffers)                               \
     X(PFNGLGENRENDERBUFFERSPROC, glGenRenderbuffers)                             \
     X(PFNGLGENSAMPLERSPROC, glGenSamplers)                                       \
+    X(PFNGLGENQUERIESPROC, glGenQueries)                                         \
+    X(PFNGLDELETEQUERIESPROC, glDeleteQueries)                                   \
+    X(PFNGLBEGINQUERYPROC, glBeginQuery)                                         \
+    X(PFNGLENDQUERYPROC, glEndQuery)                                             \
+    X(PFNGLGETQUERYOBJECTUIVPROC, glGetQueryObjectuiv)                           \
     X(PFNGLGENVERTEXARRAYSPROC, glGenVertexArrays)                               \
     X(PFNGLGETPROGRAMINFOLOGPROC, glGetProgramInfoLog)                           \
     X(PFNGLGETPROGRAMIVPROC, glGetProgramiv)                                     \

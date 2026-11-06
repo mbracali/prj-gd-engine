@@ -43,6 +43,7 @@ GD_RENDER_HANDLE(Sampler)
 GD_RENDER_HANDLE(Shader)
 GD_RENDER_HANDLE(Pipeline)
 GD_RENDER_HANDLE(Readback)
+GD_RENDER_HANDLE(Query)
 #undef GD_RENDER_HANDLE
 
 // ---------------------------------------------------------------- backends
@@ -426,6 +427,22 @@ public:
     virtual void present(Texture src, const Rect& srcRect, Filter filter, bool flipVertical = false) = 0;
     virtual void setPresentMode(PresentMode mode) = 0;
     virtual void endFrame() = 0;
+
+    // Occlusion queries ------------------------------------------------------
+    // The samples that passed the depth and stencil tests in the draws
+    // between beginQuery and endQuery (inside one pass; OpenGL ES: 1 when
+    // any did, 0 when none). queryResult does not wait: false while the GPU
+    // has not answered (or the query was never ended). A backend without
+    // them (SDL_GPU has none; Vulkan not yet) returns an empty handle from
+    // createQuery, and the game does without (gd-game-04: docs/render.md 6c).
+    virtual Query createQuery() { return {}; }
+    virtual void destroyQuery(Query q) { (void)q; }
+    virtual void beginQuery(Query q) { (void)q; }
+    virtual void endQuery() {}
+    virtual bool queryResult(Query q, uint64_t& samples) {
+        (void)q, (void)samples;
+        return false;
+    }
 
     // Debugging ---------------------------------------------------------------
     virtual void pushDebugGroup(const char* name) { (void)name; }

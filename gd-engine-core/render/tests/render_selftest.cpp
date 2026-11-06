@@ -298,13 +298,33 @@ int main(int argc, char** argv) {
         p.depth.texture = depth;
         d.beginPass(p);
         d.bindPipeline(depthTested);
+        // Occlusion queries where the backend has them (docs/render.md 6c):
+        // every sample of the near quad passes, none of the far one.
+        const Query qNear = d.createQuery(), qFar = d.createQuery();
+        d.beginQuery(qNear);
         params(0, 0, -0.5f, 0, 1, 0, 1);
         fullQuad(255, 255, 255, 255);
+        d.endQuery();
+        d.beginQuery(qFar);
         params(0, 0, 0.5f, 1, 0, 0, 1);
         fullQuad(255, 255, 255, 255);
+        d.endQuery();
         d.endPass();
         auto px = read(d, color, W, H);
         check(!px.empty() && near(at(px, W, 5, 5), 0, 255, 0, 255), "depth test (Less) keeps the nearer quad");
+        if (qNear && qFar) {
+            uint64_t nearN = 0, farN = 1;
+            bool answered = false;
+            for (int i = 0; i < 1000 && !answered; ++i) {
+                answered = d.queryResult(qNear, nearN) && d.queryResult(qFar, farN);
+                if (!answered) SDL_Delay(1);
+            }
+            const bool es = d.caps().es;
+            check(answered && farN == 0 && (es ? nearN >= 1 : nearN == uint64_t(W) * uint64_t(H)), "occlusion queries (samples that passed)");
+            d.destroyQuery(qNear), d.destroyQuery(qFar);
+        } else {
+            std::printf("skip: occlusion queries (none on this backend)\n");
+        }
     }
     // 4. Depth probe: the depth texture sampled into colour (window depth of z -0.5 = 0.25).
     {

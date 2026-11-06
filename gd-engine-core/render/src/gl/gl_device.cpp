@@ -264,6 +264,41 @@ public:
     void endPass() override;
     bool inPass() const override { return inPass_; }
 
+    // Occlusion queries: GL_SAMPLES_PASSED (ES: GL_ANY_SAMPLES_PASSED).
+    Query createQuery() override {
+        GLuint q = 0;
+        gl::glGenQueries(1, &q);
+        if (!q) return {};
+        queries_.push_back(q);
+        return {uint32_t(queries_.size())};
+    }
+    void destroyQuery(Query q) override {
+        if (!q.id || q.id > queries_.size() || !queries_[q.id - 1]) return;
+        if (openQuery_ == q.id) endQuery();
+        gl::glDeleteQueries(1, &queries_[q.id - 1]);
+        queries_[q.id - 1] = 0;
+    }
+    void beginQuery(Query q) override {
+        if (!q.id || q.id > queries_.size() || !queries_[q.id - 1] || openQuery_) return;
+        gl::glBeginQuery(es_ ? GL_ANY_SAMPLES_PASSED : GL_SAMPLES_PASSED, queries_[q.id - 1]);
+        openQuery_ = q.id;
+    }
+    void endQuery() override {
+        if (!openQuery_) return;
+        gl::glEndQuery(es_ ? GL_ANY_SAMPLES_PASSED : GL_SAMPLES_PASSED);
+        openQuery_ = 0;
+    }
+    bool queryResult(Query q, uint64_t& samples) override {
+        if (!q.id || q.id > queries_.size() || !queries_[q.id - 1] || openQuery_ == q.id) return false;
+        GLuint avail = 0;
+        gl::glGetQueryObjectuiv(queries_[q.id - 1], GL_QUERY_RESULT_AVAILABLE, &avail);
+        if (!avail) return false;
+        GLuint n = 0;
+        gl::glGetQueryObjectuiv(queries_[q.id - 1], GL_QUERY_RESULT, &n);
+        samples = n;
+        return true;
+    }
+
     void drawableSize(int& w, int& h) const override { SDL_GetWindowSizeInPixels(info_.window, &w, &h); }
     void present(Texture src, const Rect& srcRect, Filter filter, bool flipVertical) override;
     void setPresentMode(PresentMode mode) override;
@@ -304,6 +339,8 @@ private:
 
     Ring vertexRing_, indexRing_, uniformRing_;
     GLsync fences_[2] = {nullptr, nullptr};
+    std::vector<GLuint> queries_;  // Query id = index + 1 (0: deleted)
+    uint32_t openQuery_ = 0;
 
     // Pass state.
     bool inPass_ = false;
@@ -323,6 +360,8 @@ private:
 GlDevice::~GlDevice() {
     if (!context_) return;
     SDL_GL_MakeCurrent(info_.window, context_);
+    for (GLuint q : queries_)
+        if (q) gl::glDeleteQueries(1, &q);
     for (size_t i = 0; i < buffers_.items.size(); ++i)
         if (buffers_.live[i]) gl::glDeleteBuffers(1, &buffers_.items[i].name);
     for (size_t i = 0; i < textures_.items.size(); ++i)
