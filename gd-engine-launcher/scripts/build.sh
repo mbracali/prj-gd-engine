@@ -376,6 +376,17 @@ build_module_01() {
       echo libgd-game-01.so > "$dest/native-libs.txt" ;;
     *) cp "$work/gd-game-01.so" "$dest/" ;;
   esac
+  # gd-engine-core audio (gd-engine-core/docs/audio.md, "Packaging"): when the
+  # module was built with the OpenAL backend, OpenAL Soft's shared library
+  # (LGPL, loaded at run time from the module's folder) goes next to the
+  # module, a missing one failing the build; the core's licences go to licenses/.
+  local oal
+  oal="$(sed -n 's/^GDCORE_OPENAL_LIBRARY_NAME:INTERNAL=//p' "$work/CMakeCache.txt")"
+  if [ -n "$oal" ]; then
+    cp "$work/$oal" "$dest/"
+    if [ "$os" = android ]; then echo "$oal" >> "$dest/native-libs.txt"; fi
+  fi
+  if [ -d "$work/gdcore-licenses" ]; then cp "$work"/gdcore-licenses/* "$dest/licenses/"; fi
   if [ "$os" != android ]; then  # the AI upscalers (none on Android)
     cp "$engine/third_party/fidelityfx/LICENSE.txt" "$dest/licenses/FidelityFX-SDK-LICENSE.txt"
     cp "$engine/third_party/volk/LICENSE.md" "$dest/licenses/volk-LICENSE.md"
