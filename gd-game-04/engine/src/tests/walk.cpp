@@ -15,6 +15,7 @@
 #include <iterator>
 #include <sstream>
 
+#include "audio/audio_device.h"
 #include "data/band.h"
 #include "data/json.h"
 #include "data/qbkey.h"
@@ -275,7 +276,7 @@ Walk::Walk(const std::string& name) : name_(name) {
         // GD04-094 paging stays, unreachable).
         steps_ = boot;
         steps_.push_back({"main_menu_fs",
-                          {"check:cut_content_ignored", "set:enhanced:cut_content=on", "check:enhanced:cut_content=off", "check:backends_ignored",
+                          {"check:cut_content_ignored", "set:enhanced:cut_content=on", "check:enhanced:cut_content=off", "check:backends_saved",
                            "click:menu:main_menu_options_text"},
                           10000});
         steps_.push_back({"options_select_option_fs", {"click:item"}, 20000});
@@ -355,6 +356,27 @@ Walk::Walk(const std::string& name) : name_(name) {
         steps_.push_back({"main_menu_fs", {D, D, C}, 10000});
         steps_.push_back({"quickplay_select_difficulty_fs", {B}, 20000});
         steps_.push_back({"main_menu_fs", {}, 20000});
+    } else if (name == "enhanced_backends") {
+        // GDCORE-010 (universal-menus.md "Backends"): main menu -> OPTIONS ->
+        // ENHANCED -> Audio Backend miniaudio: Restart Now / Later opens, Back
+        // is Later (the value kept, the screen stays) -> OpenAL -> the
+        // pop-up's Restart Now clicked: the game starts again in this
+        // process, back on Enhanced Options (enhanced_backends_restarted).
+        steps_ = boot;
+        steps_.push_back({"main_menu_fs", {"click:menu:main_menu_options_text"}, 10000});
+        steps_.push_back({"options_select_option_fs", {"click:item"}, 20000});
+        steps_.push_back({"port_enhanced",
+                          {"check:audio_now=local", "click:row:audio_backend", "click:option:1", "check:asking=1", B, "check:asking=0",
+                           "check:enhanced:audio_backend=miniaudio", "click:row:graphics_backend", "click:option:0", "check:asking=0",
+                           "click:row:audio_backend", "click:option:2", "check:asking=1", "click:ask:0"},
+                          10000});
+    } else if (name == "enhanced_backends_restarted") {
+        // After Restart Now: straight back on Enhanced Options (no boot
+        // screens), on OpenAL, with the walk's settings; Back leads to GH3's
+        // options and the main menu as always.
+        steps_.push_back({"port_enhanced", {"check:enhanced:audio_backend=openal", "check:audio_now=openal", "check:asking=0", B}, 90000});
+        steps_.push_back({"options_select_option_fs", {B}, 20000});
+        steps_.push_back({"main_menu_fs", {}, 20000});
     } else if (name == "mouse") {
         // The mouse alone: hover OPTIONS on the main menu (focused), click it
         // -> Options -> click the help bar's ENHANCED -> In-Game Max FPS's
@@ -372,9 +394,8 @@ Walk::Walk(const std::string& name) : name_(name) {
         steps_.push_back({"options_select_option_fs", {"click:item"}, 20000});
         steps_.push_back({"port_enhanced",
                           {"hover:row:max_fps", "click:row:max_fps", "click:option:1", "check:enhanced:max_fps=120",
-                           // Graphics / Audio Backend (GDCORE-006): greyed at local, a click and a set change nothing.
-                           "click:row:graphics_backend", "click:row:audio_backend", "set:enhanced:graphics_backend=vulkan",
-                           "set:enhanced:audio_backend=openal", "check:enhanced:graphics_backend=local", "check:enhanced:audio_backend=local",
+                           // Audio Backend (GDCORE-010): local, the one running, chosen again asks nothing.
+                           "click:row:audio_backend", "click:option:0", "check:asking=0", "check:enhanced:audio_backend=local",
                            // Export User Files, a setting changed, Load User Settings brings it back (the dialogs answered with the save folder).
                            "dialog:savedir", "click:row:export", "set:enhanced:max_fps=60", "click:row:load_settings", "check:enhanced:max_fps=120", "click:row:load_progress", "set:enhanced:audio_offset=40", "set:enhanced:video_offset=-20", "click:row:calibrate_reset", "check:enhanced:audio_offset=0", "check:enhanced:video_offset=0",
                            "click:row:cheat_air_guitar", "check:global:Cheat_AirGuitar=1", "click:row:cheat_air_guitar", "check:global:Cheat_AirGuitar=2",
@@ -853,6 +874,8 @@ bool Walk::act(const std::string& what, FrontEnd& fe, WalkHost& host) {
             x = (x0 + x1) * 0.5f, y = (y0 + y1) * 0.5f;
         } else if (target.rfind("row:", 0) == 0 && host.walkPorts()) {
             found = enhancedRowCenter(*host.walkPorts()->screen(PortScreens::Id::Enhanced), target.substr(4), x, y);
+        } else if (target.rfind("ask:", 0) == 0 && host.walkPorts()) {  // the Restart Now / Later pop-up's button (0 / 1)
+            found = enhancedAskCenter(*host.walkPorts()->screen(PortScreens::Id::Enhanced), std::atoi(target.c_str() + 4), x, y);
         } else if (target.rfind("option:", 0) == 0 && host.walkPorts()) {
             found = enhancedOptionCenter(*host.walkPorts()->screen(PortScreens::Id::Enhanced), std::atoi(target.c_str() + 7), x, y);
         }
@@ -1130,7 +1153,7 @@ bool Walk::act(const std::string& what, FrontEnd& fe, WalkHost& host) {
         std::printf("  a saved cut_content on loads as %s (no_fail %s)\n", cut.c_str(), noFail.c_str());
         return cut == "off" && noFail == "on" ? true : fail("a saved cut_content on loads as " + cut);
     }
-    if (what == "check:backends_ignored") {  // non-local Graphics / Audio Backend in enhanced.json load as local (GDCORE-006)
+    if (what == "check:backends_saved") {  // saved Graphics / Audio Backends load as saved, an unknown one is dropped (GDCORE-010)
         const std::string dir = (std::filesystem::temp_directory_path() / "gd04_walk_backends").string() + "/";
         std::error_code ec;
         std::filesystem::create_directories(dir, ec);
@@ -1138,15 +1161,25 @@ bool Walk::act(const std::string& what, FrontEnd& fe, WalkHost& host) {
             << R"({"version": 2, "settings": {"graphics_backend": "vulkan", "audio_backend": "openal", "no_fail": "on"}})";
         EnhancedStore st;
         st.load(dir);
-        st.set("no_fail", "on");  // saved again: written back without them
-        std::ifstream in(dir + "enhanced.json");
-        const std::string saved((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
         const std::string g = st.get("graphics_backend"), a = st.get("audio_backend"), noFail = st.get("no_fail");
+        st.set("audio_backend", "glide");  // refused: not a backend
+        const std::string a2 = st.get("audio_backend");
         std::filesystem::remove_all(dir, ec);
-        std::printf("  saved backends vulkan / openal load as %s / %s (no_fail %s)\n", g.c_str(), a.c_str(), noFail.c_str());
-        return g == "local" && a == "local" && noFail == "on" && saved.find("backend") == std::string::npos
-                   ? true
-                   : fail("saved non-local backends load as " + g + " / " + a);
+        std::printf("  saved backends vulkan / openal load as %s / %s (no_fail %s); glide set: %s\n", g.c_str(), a.c_str(), noFail.c_str(), a2.c_str());
+        return g == "vulkan" && a == "openal" && noFail == "on" && a2 == "openal" ? true
+                                                                                  : fail("saved backends vulkan / openal load as " + g + " / " + a);
+    }
+    if (starts("check:asking=")) {  // the Restart Now / Later pop-up open (1) or not (0)
+        if (!host.walkPorts()) return fail("no port screens");
+        const bool open = enhancedAsking(*host.walkPorts()->screen(PortScreens::Id::Enhanced));
+        std::printf("  Restart Now / Later: %s\n", open ? "open" : "closed");
+        return open == (rest("check:asking=") == "1") ? true : fail(std::string("the Restart Now / Later pop-up is ") + (open ? "open" : "closed"));
+    }
+    if (starts("check:audio_now=")) {  // the audio backend playing now (audio/audio_device.h)
+        std::string b = audiodev::backend();
+        if (b.empty()) b = "local";
+        std::printf("  audio backend now: %s\n", b.c_str());
+        return b == rest("check:audio_now=") ? true : fail("the audio backend is " + b);
     }
     if (starts("check:qp_guitarists=")) {  // quick play's random guitarist count (cs_get_total_guitarists from quickplay_start_song)
         qs::ScriptRun r;
