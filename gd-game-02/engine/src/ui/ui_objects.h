@@ -116,6 +116,9 @@ public:
     // PanelDir's button_down: the focused component, then navigation.
     virtual bool buttonDown(int button, int player);
     virtual bool buttonUp(int button, int player);
+    // The port's native panels: true while back belongs to the panel (an
+    // open pop-up), not to the screen's auto back (ScreenObj::nativeButtonDown).
+    virtual bool claimsBack() const { return false; }
     // Draws the panel (its view through its camera).
     virtual void draw();
     virtual bool drawsSomething() const { return view != nullptr; }
