@@ -2,11 +2,12 @@
 
 The core's graphics layer: one interface, `gd::core::render::Device`
 (`render/include/gd/core/render/device.h`), and its backends. The
-**OpenGL 3.3 / OpenGL ES 3.0** backend (`opengl3`) exists now (1.1.13,
-GDCORE-004 phase 1); **SDL3 GPU** (`sdl3`) and **Vulkan** (`vulkan`) come next,
-on the same interface, on the groundwork of phase 2a (the build-time SPIR-V,
-section 3; the launcher's window hand-over, section 5; the state rules, 2.2). This file is the design: read it before adding a
-backend or moving a game onto the core. Facts are marked [C] confirmed or
+**OpenGL 3.3 / OpenGL ES 3.0** backend (`opengl3`) exists since 1.1.13
+(GDCORE-004 phase 1) and the **Vulkan** backend (`vulkan`, phase 3b, section
+4.3) since then; **SDL3 GPU** (`sdl3`) is written in parallel, on the same
+interface, on the groundwork of phase 2a (the build-time SPIR-V, section 3; the
+launcher's window hand-over, section 5; the state rules, 2.2). This file is the
+design: read it before adding a backend or moving a game onto the core. Facts are marked [C] confirmed or
 [I] inferred where it matters.
 
 ## 1. What shaped it
@@ -159,8 +160,15 @@ std::unique_ptr<Device> dev = createDevice(info, error);   // nullptr + error: t
 
 `backendId()` / `parseBackend()` use the setting ids `opengl3`, `sdl3`,
 `vulkan`. `backendCompiled(b)` says whether this build has a backend; on a
-platform without one (OpenGL3 on macOS later, Vulkan without a loader) the
-game does not offer it (rule 7).
+platform without one (OpenGL3 on macOS later, Vulkan on Apple until MoltenVK
+ships) the game does not offer it (rule 7). A compiled backend can still fail
+to start (Vulkan without a loader or a device): `createDevice` says why and
+the game falls back.
+
+`DeviceCreateInfo::cacheDir` (optional): a folder the backend may keep caches
+in across runs, the game's pref folder (Vulkan: `vulkan_pipeline_cache.bin`,
+used only when its header names this very GPU and driver). Empty: nothing on
+disk.
 
 ## 3. Shaders: one source, compiled at build time where needed
 
@@ -371,16 +379,51 @@ loaded through `SDL_GL_GetProcAddress` (no GL library at link time).
 
 Section 9 lists the details the phase-2 backend needs.
 
-### 4.3 Vulkan (`vulkan`, phase 3)
+### 4.3 Vulkan (`vulkan`, phase 3b, done)
 
-Vulkan 1.1+ through volk (gd01 already vendors volk and the Vulkan headers),
-VMA for memory (single header, MIT). Dynamic rendering
-(`VK_KHR_dynamic_rendering`, core 1.3) for passes, a pipeline cache on
-disk, descriptor sets in the SDL_GPU layout (one SPIR-V for both; a
-negative-height viewport for y, 3.2),
-uniform slots as dynamic uniform buffers on a per-frame ring, timeline or
-per-frame fences for `kFramesInFlight`. MoltenVK / KosmicKrisp on Apple.
-gd01's FSR 3.1 / DLSS then run natively (no GL interop).
+`render/src/vulkan/` (`GDCORE_RENDER_VULKAN`, on everywhere but Apple and the
+web). Vulkan 1.1 or newer (1.3 used where the loader and the device have it).
+
+| Interface | Vulkan |
+|---|---|
+| loading | volk on the loader SDL opens (`SDL_Vulkan_LoadLibrary`, `SDL_Vulkan_GetVkGetInstanceProcAddr`): no Vulkan library at link time; Android: the NDK's `libvulkan.so` the same way. volk is compiled in the C++ namespace `volk` (`VOLK_NAMESPACE`), so gd01's own volk (extern "C", for its upscalers) never clashes with it |
+| device | the instance with SDL's surface extensions (+ `VK_EXT_debug_utils`, + portability enumeration where present); the GPU: discrete > integrated > virtual > CPU, one that presents to the window's surface, Vulkan 1.1+ (`GDCORE_VK_DEVICE=<index or part of the name>` prefers one: a development aid); one graphics queue; features `samplerAnisotropy`, `depthClamp`, `textureCompressionBC`, `independentBlend` where supported; memory: VMA 3.3.0 |
+| `beginPass` / `endPass` | dynamic rendering (core 1.3, or `VK_KHR_dynamic_rendering` on 1.1 / 1.2); else render passes made per (formats, samples, load / store ops, resolves) and framebuffers per views, both cached (`GDCORE_VK_RENDER_PASSES=1` forces this path for testing). Pipelines are made against a render pass of the same formats and samples: a single-subpass pass ignores resolves for compatibility [C: Vulkan spec, render pass compatibility] |
+| image layouts | every image **rests** in one layout: sampled ones `SHADER_READ_ONLY_OPTIMAL`, others their attachment layout. A pass, copy, blit, upload, mip generation, readback or present moves the subresources it touches out and back with a full barrier (ALL_COMMANDS, memory read / write). Clear / DontCare loads come from `UNDEFINED`. Simple and always valid; gd01 breaks passes only a few times per frame |
+| frames | one primary command buffer records in call order; each submission has a serial and a fence; a frame slot (`kFramesInFlight` = 2) waits for its previous use before its command pool, upload ring and descriptor pools are reset (so transient data lives until the frame after next starts, 2.1). New images get their first layout in a command buffer submitted just before the current one (a texture may be created inside a pass) |
+| transient data, `pushUniforms`, staging | one persistently mapped, host-coherent ring per frame slot (4 MiB chunks, bigger one-off chunks for big uploads, dropped after use) |
+| `updateBuffer` / `updateTexture` | staging in the ring + `vkCmdCopyBuffer` / `vkCmdCopyBufferToImage` in call order (draws recorded before see the old contents). Refused inside a pass (2.2) |
+| `pushUniforms(slot)` | the data in the ring; sets 1 and 3 are one descriptor set of 4 `UNIFORM_BUFFER_DYNAMIC` bindings (range 16 KiB, the ring keeps that much room after each block) and the slot's dynamic offset moves. Pushed slots are reset at `beginFrame` (an empty block is bound) |
+| `bindTextures` | sets 0 and 2: one descriptor set of 8 combined image samplers (both stages: the interface's slots are shared), made on change and cached per frame slot by (texture uid, sampler); unbound slots get a 1 x 1 texture |
+| shaders | SPIR-V only (`ShaderDesc::spirv*`), checked with `reflectSpirv`; one pipeline layout (sets 0..3 as 3.2) for every pipeline |
+| pipelines | immutable, dynamic viewport / scissor / stencil reference / blend constants; depth written with the test off = test `Always` (as GL); without `independentBlend` every target uses target 0's blend (as GLES); the pipeline cache on disk (`cacheDir`) |
+| y and the front face | the viewport's height is negative (`y = top + h`, core 1.1); the front face goes through unchanged (3.2); the self-test's cull check passes |
+| depth | D24 = `X8_D24_UNORM_PACK32` where it can be sampled and rendered, else D32F; D24S8 = `D24_UNORM_S8_UINT` else D32FS8 (AMD); depth targets are always sampleable; a sampled depth + stencil view sees depth |
+| samplers | GL's non-mipmapped minification = mip mode nearest with LOD 0..0.25; `ClampToBorder` with the three standard border colours (`Caps::clampToBorder` true); anisotropy where the feature is on |
+| MSAA | images with the sample count (clamped to what colour and depth targets both support); `StoreOp::Resolve` = an average resolve into the resolve texture |
+| `copyTexture` / `blit` / `generateMipmaps` | `vkCmdCopyImage` / `vkCmdBlitImage` (linear only where the format filters) / a chain of blits |
+| `readTexture` | `vkCmdCopyImageToBuffer` into a host buffer, **submitted at once** (GL's flush after its pixel-pack read): `readbackReady` polls the fence; rows top-down already |
+| `present` | the swapchain (B8G8R8A8 / R8G8B8A8 UNORM, sRGB non-linear space: values go to the screen as on GL's default framebuffer) is acquired with a 1 s timeout (a window that is not shown skips the frame instead of hanging), the texture blitted into it (`flipVertical` = reversed y offsets), submitted and presented at once; resized / out of date: made again (waiting for the GPU). `PresentMode` Vsync = FIFO, Immediate = IMMEDIATE else MAILBOX, Mailbox = MAILBOX else IMMEDIATE |
+| debugging | `pushDebugGroup` = debug utils labels; object names from `label`s |
+
+**Validation.** `VK_LAYER_KHRONOS_validation` is enabled in debug builds,
+with `DeviceCreateInfo::debug`, or with `GDCORE_VK_VALIDATION=1` (`=0` turns
+it off in a debug build), when the layer is installed; its messages go to the
+log, and the device logs how many there were when it is destroyed.
+
+**Without a window to present to.** The surface is made only on a window
+made with `SDL_WINDOW_VULKAN` (SDL would convert an OpenGL window in place,
+section 5). Without a surface, or with one no GPU presents to (the
+`offscreen` video driver's headless surface on NVIDIA), the device draws off
+screen and `present` does nothing, **only** under `SDL_VIDEO_DRIVER=offscreen`
+or with `GDCORE_VK_HEADLESS=1` (no surface at all); otherwise `createDevice`
+fails, so a game never gets a device that shows nothing (rule 2: it falls
+back). This is what lets the self-test and the goldens run headless (CI).
+
+**Next (not done):** gd01's FSR 3.1 / DLSS natively on this device (section
+9), an HDR swapchain for True HDR (HDR10 / scRGB colour space; today the
+swapchain is 8-bit SDR and True HDR shows as its SDR blit), MoltenVK /
+KosmicKrisp on Apple.
 
 ## 5. The window
 
@@ -564,6 +607,15 @@ become native on the Vulkan backend (phase 3).
   their build-time SPIR-V (`render_selftest_spirv.h`), and two checks read
   it back: every blob has SDL_GPU's sets and the dialect's slots, and the
   reflection refuses what is not SPIR-V.
+  `--backend vulkan` runs the same checks on the Vulkan backend (plus,
+  for every backend, a cull check: a counter-clockwise triangle is the front
+  face). Headless under `SDL_VIDEO_DRIVER=offscreen` (no swapchain where the
+  GPU cannot present to the headless surface); exit 77 when Vulkan cannot
+  start (ctest `gdcore_render_selftest_vulkan` counts it as skipped).
+  Development aids: `GDCORE_VK_DEVICE=<index or name part>` (e.g.
+  `llvmpipe`), `GDCORE_VK_RENDER_PASSES=1` (the render-pass path),
+  `GDCORE_VK_HEADLESS=1` (no surface: any GPU off screen),
+  `GDCORE_VK_VALIDATION=1`.
 - The build itself: `gdcore_shaderc` fails the build on any shader of the
   core's self-test or of gd01's CoreRenderer that does not compile, is not
   valid SPIR-V (`spirv-val`) or breaks the binding layout, on every package
@@ -649,6 +701,56 @@ FSR 1 on the core; checked that it logs and draws), OpenGL ES.
   the Fedora host (also serving the MinGW and NDK cross builds) and inside
   the sniper container, and made `core_renderer_spirv.h` in each.
 
+### Phase 3b (Vulkan)
+
+2026-11-06, Linux (Fedora, kernel 7.2), NVIDIA RTX 3060 Laptop (driver
+615.71, Vulkan 1.4.351) + AMD Renoir iGPU (RADV, Mesa) + llvmpipe:
+
+- `gdcore_render_selftest --backend vulkan`: **22 / 22** (the 21 checks + the
+  new cull check) on NVIDIA, RADV and llvmpipe, each with dynamic rendering
+  and with the render-pass path (`GDCORE_VK_RENDER_PASSES=1`), on `wayland`,
+  `x11` and headless `offscreen` (there RADV presents to the headless
+  surface; NVIDIA cannot, so it runs with `GDCORE_VK_HEADLESS=1`). opengl3
+  still 22 / 22. **The validation layer is not installed on this machine**
+  (`/usr/share/vulkan/explicit_layer.d` is empty; building it locally was
+  not allowed): nothing has run under `VK_LAYER_KHRONOS_validation` yet.
+- gd01 on Vulkan, before the shared wiring landed: a throwaway copy of gd01
+  with its ShaderDescs given their SPIR-V (and, for the windowed run only,
+  its window made with `SDL_WINDOW_VULKAN`), never committed. Windowed on
+  wayland and on x11: the song plays, the frame is presented the right way
+  up through the swapchain (checked on screen captures). Goldens headless
+  (`offscreen`, the device draws off screen and the shots are readbacks),
+  with a clock that advances once per drained event loop (the harness's
+  clock counted `SDL_GL_SwapWindow`, which Vulkan never calls), vulkan vs
+  opengl3 of the same binary:
+
+  | shot | differing px | max delta |
+  |---|---|---|
+  | main menu | 0 | 0 |
+  | results | 0 | 0 |
+  | Enhanced menu | 18 (0.001 %) | 109 |
+  | small_club 30 s | 301 (0.015 %) | 226 |
+  | theatre 45 s | 284 (0.014 %) | 216 |
+  | arena 60 s | 283 (0.014 %) | 228 |
+  | Star Power big_club 183 s | 262 (0.013 %) | 231 |
+  | basement 4:3 50 s | 528 (0.045 %) | 208 |
+
+  The differences are the fret sparks' sliver triangles and single pixels
+  at mesh seams: the rasteriser's tie rules see the picture mirrored (the
+  viewport flip), as 3.2 expected; the 2D UI is bit-exact.
+  Post-processing (6 of the 12 settings files, 3 shots each): Steam Deck
+  0.02-0.24 %, True HDR neon (Emulated headless) 0.5-0.9 %, SSAA warm with
+  high sharpening 2.6-4.4 % (max 56 off the sparks); with **film grain** on
+  (Max Out HD, Vintage TAA, FSR 1 noir) 18-33 %: the grain hash is
+  `fract(sin(x) * 43758.5)`, whose `sin` of large arguments differs between
+  NVIDIA's GLSL and SPIR-V compilers (random noise either way). The same
+  files without grain: FSR 1 noir 0.01-0.02 %, Max Out HD (TAA, SSAO,
+  bloom) 3-5 % at most 8 levels off. No backend bug found.
+- Packages (`build.sh linux / windows / android --force`, and Steam Deck in
+  the sniper container): all four complete with their 4 game modules; the
+  Linux, Windows and Android ones carry the volk, VMA and Vulkan-Headers
+  licences (`licenses/gd-game-01-*`).
+
 ## 9. What phases 2 and 3 need
 
 Ready now (phase 2a): the SPIR-V of every core and gd01 shader at build
@@ -693,13 +795,39 @@ below is inside the backends.
   - Tests: `gdcore_render_selftest --backend sdl3` (same checks; the
     SPIR-V is already in its ShaderDescs) on x11 / wayland (offscreen
     cannot present, section 7), then gd01 with `GD01_GRAPHICS_BACKEND=sdl3`.
-- **Vulkan** (`render/src/vulkan/`): the same SPIR-V and reflection;
-  descriptor set layouts 0..3 as in 3.2 (combined image samplers in 0 / 2,
-  dynamic uniform buffers in 1 / 3, one per slot on a per-frame ring);
-  **negative-height viewport, front face unchanged** (3.2); volk + VMA;
-  dynamic rendering; a pipeline cache; `SDL_Vulkan_CreateSurface` on the
-  window (made with `SDL_WINDOW_VULKAN`); then gd01's FSR 3.1 / DLSS
-  natively.
+- **Vulkan** (`render/src/vulkan/`): **done (phase 3b, section 4.3)**. gd01
+  needs only the shared wiring above (SPIR-V in its ShaderDescs, the window
+  made with `windowFlags(Backend::Vulkan)`, and `DeviceCreateInfo::cacheDir`
+  = its pref folder for the pipeline cache). Follow-ups:
+  - **gd01's FSR 3.1 / DLSS natively** (today FSR 1 in their place on every
+    core backend). What it needs: (1) an interop call on the Device that
+    hands out the native objects (`VkInstance`, `VkPhysicalDevice`,
+    `VkDevice`, the queue and its family, `vkGetDeviceProcAddr`, the
+    command buffer being recorded outside a pass, and per texture its
+    `VkImage` / `VkImageView` / format / resting layout), with the rule that
+    the caller leaves every image in its resting layout; (2) extra instance
+    and device extensions and features chosen *before* creation
+    (`DeviceCreateInfo` lists: DLSS asks NGX for them,
+    `NVSDK_NGX_VULKAN_RequiredExtensions`; FidelityFX's Vulkan backend wants
+    its own feature list, e.g. 16-bit storage / subgroup ops where it uses
+    them), so the core must create its instance and device with them; (3)
+    gd01's `vk_upscaler` rewritten from its GL-interop device (exported
+    memory, semaphores) to that interop: its FidelityFX backend already
+    takes `vkGetDeviceProcAddr`, so the two volk copies stay apart; (4) the
+    upscalers' inputs as core textures: colour, depth (D24 is
+    `X8_D24_UNORM_PACK32` or D32F here), motion vectors (gd01 has none:
+    FSR 3.1 runs with zero motion as now) and the jitter; (5) an output
+    texture with storage usage (`TextureUsage` gains a storage bit for
+    this backend only, or the interop makes it).
+  - **True HDR**: an HDR swapchain (`VK_EXT_swapchain_colorspace`:
+    HDR10 ST.2084 or extended sRGB linear with an RGBA16F / RGB10A2 image)
+    chosen from the game's request, and gd01's True HDR probe for Vulkan.
+  - **Apple**: MoltenVK / KosmicKrisp in the packages, then
+    `GDCORE_RENDER_VULKAN` on there (portability enumeration and
+    `VK_KHR_portability_subset` are already handled).
+  - The validation layer was not installed on the development machine
+    (section 8): run the self-test and gd01 once with
+    `GDCORE_VK_VALIDATION=1` where it is.
 - **gd01** (the backend agents and the post-FX port; core_renderer.cpp is
   the post-FX port's file now):
   - `core_renderer_spirv.h` is already generated for gd01 (engine and
