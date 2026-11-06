@@ -27,7 +27,7 @@ namespace {
 // style on the core path (CoreRenderer::setMvp negates clip y), so y is
 // negated here as there: on OpenGL3 the backend's own flip cancels it and
 // the triangle rasterises exactly as local's.
-const char* kVertex = R"(
+const char* kPostVs = R"(
 GD_OUT(0) vec2 vUv;
 void main() {
     vec2 p = vec2(float((GD_VERTEX_ID & 1) << 2) - 1.0, float((GD_VERTEX_ID & 2) << 1) - 1.0);
@@ -747,6 +747,23 @@ float halton(unsigned i, unsigned base) {
 
 }  // namespace
 
+// The same shaders as SPIR-V for the SDL3 GPU and Vulkan backends, compiled at
+// build time (gdcore_spirv_shaders in CMakeLists.txt): the GD_HDR 0 variants in
+// core_renderer_spirv.h, the GD_HDR 1 ones in namespace gd01_hdr.
+#include "core_post_fx_hdr_spirv.h"
+#include "core_renderer_spirv.h"
+
+namespace {
+struct Spirv {
+    const uint32_t* words = nullptr;
+    size_t bytes = 0;
+};
+template <size_t N>
+Spirv spirv(const uint32_t (&a)[N]) {
+    return {a, sizeof a};
+}
+}  // namespace
+
 CorePostFx::~CorePostFx() {
     // The device frees what it made when it goes; free the targets now in case it outlives this.
     auto drop = [&](Target& t) {
@@ -768,37 +785,40 @@ bool CorePostFx::init() {
         const char* fs;
         bool hdr;
         const char* samplers[5];
+        Spirv spirv;  // the fragment shader's SPIR-V, in its GD_HDR variant
     };
     // In PostFx::init's order (the failure log names them the same way).
     const Src src[kProgramCount] = {
-        {"blur down", kDownFs, false, {"uTex"}},
-        {"blur up", kUpFs, false, {"uTex", "uSkip"}},
-        {"composite", kCompositeFs, false, {"uTex", "uBlur", "uBlurLo", "uAo"}},
-        {"composite (HDR)", kCompositeFs, true, {"uTex", "uBlur", "uBlurLo", "uAo", "uExposure"}},
-        {"finish (HDR)", kFinishFs, true, {"uTex"}},
-        {"FSR RCAS (HDR)", kRcasFs, true, {"uTex"}},
-        {"TAA", kTaaFs, false, {"uTex", "uDepth", "uHistory"}},
-        {"FXAA", kFxaaFs, false, {"uTex"}},
-        {"SSAA", kDownsampleFs, false, {"uTex"}},
-        {"FSR EASU", kEasuFs, false, {"uTex"}},
-        {"FSR RCAS", kRcasFs, false, {"uTex"}},
-        {"copy", kCopyFs, false, {"uTex"}},
-        {"ambient occlusion", kAoFs, false, {"uDepth"}},
-        {"star power blur", kStarBlurFs, false, {"uTex", "uDepth", "uAccum"}},
-        {"finish", kFinishFs, false, {"uTex"}},
-        {"hdr luminance", kLumFs, false, {"uTex"}},
-        {"hdr exposure", kAdaptFs, false, {"uLum", "uPrev"}},
-        {"hdr output", kHdrOutFs, false, {"uTex"}},
+        {"blur down", kDownFs, false, {"uTex"}, spirv(kDownFsSpirv)},
+        {"blur up", kUpFs, false, {"uTex", "uSkip"}, spirv(kUpFsSpirv)},
+        {"composite", kCompositeFs, false, {"uTex", "uBlur", "uBlurLo", "uAo"}, spirv(kCompositeFsSpirv)},
+        {"composite (HDR)", kCompositeFs, true, {"uTex", "uBlur", "uBlurLo", "uAo", "uExposure"}, spirv(gd01_hdr::kCompositeFsSpirv)},
+        {"finish (HDR)", kFinishFs, true, {"uTex"}, spirv(gd01_hdr::kFinishFsSpirv)},
+        {"FSR RCAS (HDR)", kRcasFs, true, {"uTex"}, spirv(gd01_hdr::kRcasFsSpirv)},
+        {"TAA", kTaaFs, false, {"uTex", "uDepth", "uHistory"}, spirv(kTaaFsSpirv)},
+        {"FXAA", kFxaaFs, false, {"uTex"}, spirv(kFxaaFsSpirv)},
+        {"SSAA", kDownsampleFs, false, {"uTex"}, spirv(kDownsampleFsSpirv)},
+        {"FSR EASU", kEasuFs, false, {"uTex"}, spirv(kEasuFsSpirv)},
+        {"FSR RCAS", kRcasFs, false, {"uTex"}, spirv(kRcasFsSpirv)},
+        {"copy", kCopyFs, false, {"uTex"}, spirv(kCopyFsSpirv)},
+        {"ambient occlusion", kAoFs, false, {"uDepth"}, spirv(kAoFsSpirv)},
+        {"star power blur", kStarBlurFs, false, {"uTex", "uDepth", "uAccum"}, spirv(kStarBlurFsSpirv)},
+        {"finish", kFinishFs, false, {"uTex"}, spirv(kFinishFsSpirv)},
+        {"hdr luminance", kLumFs, false, {"uTex"}, spirv(kLumFsSpirv)},
+        {"hdr exposure", kAdaptFs, false, {"uLum", "uPrev"}, spirv(kAdaptFsSpirv)},
+        {"hdr output", kHdrOutFs, false, {"uTex"}, spirv(kHdrOutFsSpirv)},
     };
     for (int p = 0; p < kProgramCount; ++p) {
         gr::ShaderDesc d;
         d.name = src[p].name;
-        d.glslVertex = kVertex;
+        d.glslVertex = kPostVs;
         d.glslFragment = src[p].fs;
         // GD_HDR selects a shader's HDR variant (Enhanced > HDR), as PostFx::program's #define line.
         d.defines = src[p].hdr ? "#define GD_HDR 1\n" : "#define GD_HDR 0\n";
         d.uniformBlocks[0] = "Post";
         for (int s = 0; s < 5; ++s) d.samplers[s] = src[p].samplers[s];
+        d.spirvVertex = kPostVsSpirv, d.spirvVertexBytes = sizeof kPostVsSpirv;
+        d.spirvFragment = src[p].spirv.words, d.spirvFragmentBytes = src[p].spirv.bytes;
         shaders_[p] = dev_.createShader(d);
         if (!shaders_[p]) {
             SDL_Log("post-processing %s: %s", src[p].name, dev_.lastError().c_str());

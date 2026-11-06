@@ -209,6 +209,10 @@ void main() {
 
 }  // namespace
 
+// The same shaders as SPIR-V for the SDL3 GPU and Vulkan backends, compiled at
+// build time (gdcore_spirv_shaders in CMakeLists.txt): k<Name>VsSpirv / k<Name>FsSpirv.
+#include "core_renderer_spirv.h"
+
 CoreRenderer::~CoreRenderer() { shutdown(); }
 
 const char* CoreRenderer::backendId() const { return gr::backendId(backend_); }
@@ -236,6 +240,12 @@ bool CoreRenderer::init(SDL_Window* window, gr::Backend backend, const gr::GlHoo
         d.glslVertex = src[p].vs, d.glslFragment = src[p].fs;
         d.uniformBlocks[0] = src[p].block0, d.uniformBlocks[1] = src[p].block1;
         d.samplers[0] = src[p].sampler;
+        switch (p) {  // the build-time SPIR-V (SDL3 GPU, Vulkan)
+        case kMain: d.spirv(kMainVsSpirv, kMainFsSpirv); break;
+        case kFill: d.spirv(kFillVsSpirv, kFillFsSpirv); break;
+        case kBlur: d.spirv(kBlurVsSpirv, kBlurFsSpirv); break;
+        case kProbe: d.spirv(kProbeVsSpirv, kProbeFsSpirv); break;
+        }
         shaders_[p] = dev_->createShader(d);
         shaderOk_[p] = bool(shaders_[p]);
         if (!shaderOk_[p] && p != kBlur) {

@@ -29,6 +29,7 @@
 #include "game/rules.h"
 #include "game/song_db.h"
 #include "input/input.h"
+#include "gd/core/render/device.h"
 #include "render/hdr_output.h"
 #include "render/highway.h"
 #include "render/scene_renderer.h"
@@ -2530,20 +2531,34 @@ int App::run() {
         SDL_GetWindowSize(window_, &w, &h);
         renderer_.windowToMenu(nx * float(w), ny * float(h), mx, my);
     });
-    setGlAttributes();
+    const bool gles = setGlAttributes();
+    // Enhanced > Graphics backend (GDCORE-005): local, or a gd-engine-core
+    // backend; GD01_GRAPHICS_BACKEND=<id> overrides it (development aid, tests).
+    // Decided before the window: SDL3 GPU and Vulkan need a window made for
+    // their API (in the launcher, prepareWindow asks it for one;
+    // gd-engine-core/docs/render.md section 5). Local and opengl3 keep the
+    // OpenGL window.
+    const char* backendOverride = SDL_getenv("GD01_GRAPHICS_BACKEND");
+    const std::string backendId = backendOverride ? backendOverride : startupGraphicsBackend();
+    namespace gr = gd::core::render;
+    gr::Backend coreBackend = gr::Backend::OpenGL3;
+    const bool gpuWindow = gr::parseBackend(backendId.c_str(), coreBackend) && coreBackend != gr::Backend::OpenGL3 && gr::backendCompiled(coreBackend);
+    if (gpuWindow) gr::prepareWindow(coreBackend, gles);
     // Development aid: GD01_WINDOW=<w>x<h> sets the starting window size (e.g. ultrawide tests).
     int winW = int(kScreenW), winH = int(kScreenH);
     if (const char* ws = SDL_getenv("GD01_WINDOW")) std::sscanf(ws, "%dx%d", &winW, &winH);
-    const SDL_WindowFlags winFlags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY
+    const SDL_WindowFlags winFlagsGl = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY
 #ifdef __ANDROID__
-                                     | SDL_WINDOW_FULLSCREEN
+                                       | SDL_WINDOW_FULLSCREEN
 #endif
         ;
+    const SDL_WindowFlags winFlags = gpuWindow ? (winFlagsGl & ~SDL_WINDOW_OPENGL) | SDL_WindowFlags(gr::windowFlags(coreBackend)) : winFlagsGl;
     // Enhanced > HDR > True HDR: the window's surface is chosen now (render/hdr_output.h).
     // A window or surface that cannot be made with it is made again without (Emulated).
+    // The surface probe is OpenGL's: on the SDL3 GPU / Vulkan backends True HDR runs as Emulated.
     hdrSurface_ = hdr::Surface::Sdr;
-    hdrReason_ = hdr::unsupportedReason();
-    const bool wantHdr = enhanced("hdr").str() == "true" && hdr::request();
+    hdrReason_ = gpuWindow ? std::string("True HDR is not on the ") + backendId + " graphics backend yet" : hdr::unsupportedReason();
+    const bool wantHdr = !gpuWindow && enhanced("hdr").str() == "true" && hdr::request();
     window_ = SDL_CreateWindow(kAppTitle, winW, winH, winFlags);
     if (wantHdr) {
         if (window_) {
@@ -2569,11 +2584,20 @@ int App::run() {
     setAppWindowIcon(window_);
     installDesktopEntry();
     std::string glError;
-    // Enhanced > Graphics backend (GDCORE-005): local, or a gd-engine-core
-    // backend; GD01_GRAPHICS_BACKEND=<id> overrides it (development aid, tests).
-    const char* backendOverride = SDL_getenv("GD01_GRAPHICS_BACKEND");
-    renderer_.setBackend(backendOverride ? backendOverride : startupGraphicsBackend());
+    renderer_.setBackend(backendId);
     bool glOk = window_ && renderer_.init(window_, glError);
+    if (gpuWindow && !glOk) {
+        // The backend did not start (Renderer::init logged why): the window is
+        // made again for OpenGL and local runs on it (rule 2: never a black
+        // screen). In the launcher the shim gets its OpenGL window back.
+        SDL_Log("graphics backend: %s: making the window again for OpenGL (local)", backendId.c_str());
+        if (window_) SDL_DestroyWindow(window_);
+        gr::prepareWindow(gr::Backend::OpenGL3, gles);
+        window_ = SDL_CreateWindow(kAppTitle, winW, winH, winFlagsGl);
+        if (window_) setAppWindowIcon(window_);
+        renderer_.setBackend("local");
+        glOk = window_ && renderer_.init(window_, glError);
+    }
     if (glOk) renderer_.setHdrSurface(int(hdrSurface_));
     gpu::started(glOk, renderer_.gpuName());
     if (!glOk) {

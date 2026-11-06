@@ -230,6 +230,11 @@ bool Renderer::init(SDL_Window* window, std::string& error) {
             core_.reset();
         }
         SDL_Log("graphics backend: %s: %s; using local", backendRequest_.c_str(), why.c_str());
+        if (!(SDL_GetWindowFlags(window) & SDL_WINDOW_OPENGL)) {
+            // A window made for SDL3 GPU / Vulkan carries no OpenGL context: App makes it again for local.
+            error = why;
+            return false;
+        }
     }
     context_ = SDL_GL_CreateContext(window);
     if (!context_) {
