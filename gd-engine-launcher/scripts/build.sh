@@ -342,6 +342,7 @@ build_module_03() {
       echo libgd-game-03.so > "$dest/native-libs.txt" ;;
     *) cp "$work/gd-game-03.so" "$dest/" ;;
   esac
+  ship_core_runtime "$os" "$work" "$dest"  # gd-engine-core: its shared libraries and licences
   cp "$engine/README.md" "$dest/README.md"
 }
 
