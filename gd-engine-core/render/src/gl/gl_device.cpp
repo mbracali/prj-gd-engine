@@ -360,6 +360,7 @@ bool GlDevice::init(std::string& error) {
     caps_.version = version ? version : "";
     caps_.gpu = renderer ? renderer : "";
     caps_.es = es_;
+    caps_.clampToBorder = !es_;  // GLES 3.0 has no GL_CLAMP_TO_BORDER (createSampler clamps to the edge there)
     GLint v = 0;
     gl::glGetIntegerv(GL_MAX_TEXTURE_SIZE, &v);
     caps_.maxTextureSize = v;

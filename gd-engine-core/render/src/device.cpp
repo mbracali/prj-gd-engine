@@ -78,6 +78,10 @@ uint64_t windowFlags(Backend b) {
 }
 
 void prepareWindow(Backend b, bool gles) {
+    // In a launcher module: the shim's SDL_CreateWindow asks the launcher for
+    // a window made for this API (docs/render.md section 5). Elsewhere SDL
+    // ignores the property.
+    SDL_SetStringProperty(SDL_GetGlobalProperties(), kWindowApiRequestProperty, backendId(b));
     if (b != Backend::OpenGL3) return;
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, gles ? 0 : 3);
@@ -91,6 +95,17 @@ std::unique_ptr<Device> createDevice(const DeviceCreateInfo& info, std::string& 
     if (!info.window) {
         error = "no window";
         return nullptr;
+    }
+    // A launcher module's window is made for one API (the shim says which):
+    // a GPU swapchain on the launcher's OpenGL window, or a GL context on a
+    // window handed over for Vulkan, would fail later and less clearly.
+    if (const char* api = SDL_GetStringProperty(SDL_GetGlobalProperties(), kWindowApiProperty, nullptr); api && *api) {
+        if (std::strcmp(api, backendId(info.backend)) != 0) {
+            error = std::string("the launcher's window is made for ") + api + ", not " + backendId(info.backend) +
+                    (std::strcmp(api, "opengl3") == 0 ? " (this launcher cannot hand it over for another API, or could not make that window)"
+                                                       : " (call prepareWindow before making the window)");
+            return nullptr;
+        }
     }
     switch (info.backend) {
 #if GDCORE_RENDER_OPENGL3

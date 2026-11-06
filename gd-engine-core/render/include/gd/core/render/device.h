@@ -285,6 +285,10 @@ struct Caps {
     int maxTextureSize = 2048;
     int maxSamples = 1;
     float maxAnisotropy = 1;
+    // Wrap::ClampToBorder and SamplerDesc::border work (OpenGL 3.3; not
+    // SDL_GPU, which has no border colour, nor GLES 3.0: they clamp to the
+    // edge instead).
+    bool clampToBorder = false;
     uint8_t formats[size_t(Format::Count)] = {};  // FormatSupport bits per Format
     bool supports(Format f, uint8_t bits) const { return (formats[size_t(f)] & bits) == bits; }
 };
@@ -310,9 +314,23 @@ struct DeviceCreateInfo {
 
 // Window flags and attributes a backend needs: call prepareWindow before
 // SDL_CreateWindow (it sets the GL attributes for OpenGL) and pass
-// windowFlags in the window's flags.
+// windowFlags in the window's flags. Decide the backend BEFORE making the
+// window: in a launcher module, prepareWindow is also what asks the launcher
+// for a window made for that API (docs/render.md section 5; the SDL global
+// property kWindowApiRequestProperty, read by the module shim's
+// SDL_CreateWindow). A game whose device then fails to start destroys the
+// window, calls prepareWindow(Backend::OpenGL3, ...) and makes it again with
+// SDL_WINDOW_OPENGL (rule 2: never a black screen).
 uint64_t windowFlags(Backend b);
 void prepareWindow(Backend b, bool gles);
+
+// The SDL global properties (strings) shared with the launcher's module shim
+// (gd-engine-launcher/sdk/gd_host.h GD_PROP_WINDOW_API_REQUEST /
+// GD_PROP_WINDOW_API): what the game asks for (set by prepareWindow), and
+// what the window it got is made for (set by the shim; absent outside a
+// launcher). createDevice refuses a backend the window is not made for.
+constexpr const char* kWindowApiRequestProperty = "gd.render.window_api_request";
+constexpr const char* kWindowApiProperty = "gd.render.window_api";
 
 class Device {
 public:
@@ -359,6 +377,12 @@ public:
     virtual bool readbackData(Readback r, void* dst, size_t size) = 0;
 
     // Frames and passes ---------------------------------------------------
+    // State rules every backend keeps (docs/render.md 2.2): beginPass resets
+    // the viewport and the scissor to the whole attachment and unbinds the
+    // pipeline and the vertex / index buffers; texture bindings, the stencil
+    // reference and the blend constants must be set again after it (SDL_GPU
+    // and Vulkan lose them with the pass); pushed uniforms stay until the
+    // frame ends (push them in every frame before its first draw).
     virtual void beginFrame() = 0;
     virtual void beginPass(const PassDesc& pass) = 0;
     virtual void setViewport(const Rect& r, float minDepth = 0, float maxDepth = 1) = 0;
