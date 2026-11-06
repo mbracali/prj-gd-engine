@@ -209,6 +209,20 @@ The game loads it at run time only: you may replace this file with your own buil
 ")
 endif()
 
+# ---- packaging: the core's runtime manifest (gdcore_helpers.cmake; build.sh's
+# ship_core_runtime copies each library next to the module and each licence to
+# licenses/, verify_bundle.sh checks them) ----
+if(COMMAND gdcore_add_runtime_library)
+  if(GDCORE_AUDIO_OPENAL AND GDCORE_OPENAL_LIBRARY_NAME)
+    gdcore_add_runtime_library(${GDCORE_AUDIO_RUNTIME_DIR}/${GDCORE_OPENAL_LIBRARY_NAME})
+  endif()
+  file(GLOB gdcore_audio_license_files ${GDCORE_AUDIO_LICENSES}/*)
+  foreach(f ${gdcore_audio_license_files})
+    get_filename_component(n ${f} NAME)
+    gdcore_add_license(${f} ${n})
+  endforeach()
+endif()
+
 # ---- the headless self-test (every backend on its null / dummy device) ----
 if(GDCORE_AUDIO_SELFTEST AND NOT ANDROID)
   add_executable(gdcore_audio_selftest tests/audio_selftest.cpp)
