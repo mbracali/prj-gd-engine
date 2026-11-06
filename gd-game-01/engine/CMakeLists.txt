@@ -97,7 +97,7 @@ target_link_libraries(gd01 PRIVATE gdcore)
 # k<Name>Fs strings), compiled at build time for the SDL3 GPU and Vulkan
 # backends: core_renderer_spirv.h (k<Name>VsSpirv...), on the include path
 # (gd-engine-core/docs/render.md section 3.3).
-gdcore_spirv_shaders(gd01 OUTPUT core_renderer_spirv.h SOURCES src/render/core_renderer.cpp)
+gdcore_spirv_shaders(gd01 OUTPUT core_renderer_spirv.h SOURCES src/render/core_renderer.cpp src/render/core_post_fx.cpp)
 
 # AI upscaling (render/vk_upscaler.cpp): Vulkan loaded at run time through
 # volk, AMD FidelityFX FSR 3.1 (third_party/fidelityfx) and, on Linux x86-64,
