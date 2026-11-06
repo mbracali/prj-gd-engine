@@ -749,6 +749,34 @@ How gd02's GL-shaped calls map:
   OpenGL one; on any core backend True HDR runs as Emulated and says so),
   the frame pacing is local's (vsync where the rate matches, else software).
 
+## 6c. gd-game-03 on the core (GDCORE-009)
+
+gd-game-03 (Rocks the 80s, PS2) shares GH2's design, so it takes gd02's
+core device as it is (section 6b): `CoreDevice` (gd-game-03/engine/src/
+render/core_device.cpp) under gd03's `gfx::RenderDevice`, render/
+core_backend.cpp (`GD03_GRAPHICS_BACKEND`, else the `graphics_backend`
+App::run reads from enhanced.json at each start, `startupGraphicsBackend()`
+in app.h; not cached, so Restart Now reaches the new one), the window made
+for SDL_GPU / Vulkan and made again for OpenGL when the device does not
+start, glslang for the run-time SPIR-V (`GD03_RUNTIME_SPIRV`), the pref
+folder (or `GD03_SAVE_DIR`) as the Vulkan pipeline cache's.
+
+What gd03's device has that gd02's has not:
+
+- **`copyToTarget`** (the track's fade strips: two rectangles of the frame,
+  venue only, copied before the track is drawn and put back over it,
+  track_view.cpp `fadeSave`). Local does a flipped `glBlitFramebuffer`, so
+  the copy's first row is the rectangle's top. The core's copies do not
+  flip and both pictures are stored bottom-up, so `CoreDevice` copies the
+  rows one by one (`copyTexture`, one row each, in the other order; the
+  strips are a few dozen rows), clipped to the source and the destination
+  as local.
+- **`TargetDesc::opaque`** (those copies sample with alpha 1: local sets the
+  texture's alpha swizzle to one). The core has no swizzle; an opaque
+  target is cleared to opaque black when first copied into and gets an
+  alpha-only fill (the clear quad, write mask A) after every copy, so its
+  alpha is 1 wherever it is sampled.
+
 ## 7. Tests
 
 - `gdcore_render_selftest` (render/tests/): creates the OpenGL3 device on a
@@ -945,6 +973,30 @@ two states, 13.7 % apart), which is left out below.
   rasteriser's tie rules see the picture mirrored, as gd01's 3b results).
   **sdl3 vs vulkan: 0 differing pixels** in every shot (the same SPIR-V on
   the same driver). Headless, vulkan also draws on the AMD iGPU (RADV).
+
+### gd-game-03 (GDCORE-009)
+
+2026-11-06, Linux, NVIDIA RTX 3060 (driver 615.71), the same harness as
+gd-game-02's (fixed clock, no audio callback). Four goldens at the default
+1920 x 1080 window: the main menu, the Enhanced menu, Balls to the Wall in
+the theatre (30 s) and Star Power in the arena (deployed at 58 s, shot at
+61 s). The Enhanced menu's backdrop loads in the background (two states, as
+gd02's: 11-14 % apart between any two runs), so it is left out below.
+
+- **Before (da2b19f, the core linked only) vs after, local: 0 differing
+  pixels** in the three.
+- **local vs opengl3: within a tiny fraction**, headless and under the
+  virtual KWin alike: main menu 452 pixels (0.05 %, all off by 1),
+  theatre 34 pixels (0.004 %), Star Power arena 79 (0.009 %), one pixel
+  in each above 2. [I] Rounding in a few blended draws; not chased.
+- local vs **sdl3** and local vs **vulkan** (KWin): main menu the same 452
+  pixels off by 1; theatre 6.1 % of the pixels (mean |delta| 0.23, max
+  223), Star Power arena 1.4 % (0.040, max 255): in the characters (their
+  edges and lit highlights), the track's fade strips and the HUD equal;
+  nothing visible side by side. **sdl3 vs vulkan: 0 differing pixels.**
+- The selftest and the walks quickplay, pause, enhanced, back and options
+  pass on local and on opengl3 (headless); headless sdl3 falls back to
+  local ("making the window again for OpenGL") and quickplay passes.
 
 ## 9. What phases 2 and 3 need
 
