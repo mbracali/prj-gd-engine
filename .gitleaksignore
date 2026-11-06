@@ -1,0 +1,5 @@
+# gitleaks false positives (a full-history scan, e.g. a manual release run):
+# the macOS signing study names the repository's secrets (MACOS_CERT_PASSWORD,
+# APPLE_API_KEY_P8_B64, ...); it holds no values.
+5ffaea3011f0b22396e2dcf0cb2f915de0c2b20c:spikes/study_macos_trust.md:generic-api-key:72
+b7f64d0b897e5b7c9b61dc1135d78a6dd8dd69a6:docs/studies/macos-trust.md:generic-api-key:72
