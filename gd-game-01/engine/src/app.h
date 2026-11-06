@@ -22,6 +22,15 @@ struct Options {
 };
 
 int runApp(const Options& options);
+// Enhanced > Performance > Graphics backend / Audio backend (GDCORE-006): the
+// ids this start of the game uses, "local" (the game's own code, the default)
+// or a gd-engine-core backend: graphics "sdl3" / "vulkan" / "opengl3" (not
+// "opengl3" on macOS), audio "miniaudio" / "openal" / "faudio". Latched once
+// at start-up (App::run reads enhanced.json before SDL starts); a change in
+// the menu applies on the next start. A backend that cannot start must fall
+// back to local (engine-backend-guidelines.md rule 2).
+std::string startupGraphicsBackend();
+std::string startupAudioBackend();
 // Plays every chart with perfect input through the real judgment code and
 // reports scores; returns non-zero if any chart is not fully hit.
 int runSelfTest(const Options& options);

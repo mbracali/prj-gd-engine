@@ -16,7 +16,7 @@
 # gamepads gamepads_pad store. song_end and career_win are run by name (each plays a whole song). "band" runs first when another walk needs its save.
 # The universal menus (universal_mechanisms.md) are covered by: logo_skip and
 # band (1.1.1 skips, 1.1.2 band naming), mouse (1.1.3, credits skip),
-# enhanced (1.2.2 Modes, old enhanced.json, HDR), gamepads / gamepads_pad (1.2.1).
+# enhanced (1.2.2 Modes, old enhanced.json, HDR, backends), gamepads / gamepads_pad (1.2.1).
 set -uo pipefail
 bin="$(realpath "$1")"
 iso="$(realpath "$2")"
@@ -128,6 +128,29 @@ walk_enhanced() {
     "Good Old Days preset applied over a migrated 1.1.6 file"
   walk_enhanced_hdr
   walk_calibration_reset
+  walk_enhanced_backends
+}
+
+# Enhanced > Graphics Backend / Audio Backend (GDCORE-006): a value the build
+# does not offer is dropped at start (local); Right steps Graphics to Vulkan,
+# the Audio dropdown picks OpenAL; MODES > Steam Deck keeps both; the next
+# start reads them (the "backends:" log line).
+walk_enhanced_backends() {
+  local s keys="" keep="$seed" i
+  s="$work/enhanced_backends_seed" && rm -rf "$s" && cp -r "$seed" "$s"
+  printf '{"graphics_backend":"metal","audio_backend":"nope"}\n' > "$s/gd-engine/gd01/enhanced.json"
+  seed="$s"
+  for i in $(seq 0 21); do keys+="$((2500 + i * 100)):keyDown,"; done  # down to Graphics Backend
+  keys+="5000:keyRight,5300:keyRight,5600:keyDown,5900:keyReturn,6200:keyDown,6400:keyDown,6700:keyReturn,"  # Vulkan; dropdown: OpenAL
+  for i in $(seq 0 21); do keys+="$((7000 + i * 100)):keyUp,"; done  # up to MODES > Steam Deck
+  run enhanced_backends 11000 "${keys}9800:keyReturn" GD01_SKIP_BOOT=1 GD01_SCREEN=enhanced_settings
+  result enhanced_backends "$(( $(has enhanced_backends "backends: graphics local, audio local") && \
+    $(json "$(save enhanced_backends)/enhanced.json" "d['graphics_backend'] == 'vulkan' and d['audio_backend'] == 'openal' and d['max_fps'] == '60'") ))" \
+    "unknown backends dropped; Graphics Vulkan, Audio OpenAL saved; Steam Deck mode keeps them"
+  cp "$(save enhanced_backends)/enhanced.json" "$s/gd-engine/gd01/enhanced.json"
+  run enhanced_backends_start 4000 "" GD01_SKIP_BOOT=1
+  seed="$keep"
+  result enhanced_backends_start "$(has enhanced_backends_start "backends: graphics vulkan, audio openal")" "the next start reads the saved backends"
 }
 
 # Enhanced > Reset Calibration (#47): a saved calibration goes back to 0 ms.

@@ -1123,6 +1123,27 @@ private:
              "on), brighter highlights, menus at the screen's paper white; it starts with the game, and where it "
              "cannot run Emulated is used. Menus and the HUD keep their colours.",
              {{"none", "None"}, {"emulated", "Emulated"}, {"true", "True HDR"}}},
+            // engine-backend-guidelines.md 4 (GDCORE-006): the gd-engine-core
+            // backends, read once at start-up (startupGraphicsBackend /
+            // startupAudioBackend in app.h); no Mode button changes them.
+            {Kind::Choice, "graphics_backend", "Graphics Backend", true,
+             "The library the game draws with. local: the game's own OpenGL renderer, as always. SDL3: SDL's GPU API "
+             "(Vulkan, Metal or Direct3D 12 underneath). Vulkan: Vulkan directly. "
+#ifndef __APPLE__
+             "OpenGL3: the shared OpenGL 3.3 / GLES 3 renderer. "
+#endif
+             "If the one chosen cannot start, the game uses local. Applies the next time the game starts.",
+             {{"local", "local"}, {"sdl3", "SDL3"}, {"vulkan", "Vulkan"},
+#ifndef __APPLE__
+              {"opengl3", "OpenGL3"},  // no OpenGL on macOS (engine-backend-guidelines.md rule 7)
+#endif
+             }},
+            {Kind::Choice, "audio_backend", "Audio Backend", true,
+             "The library the game plays its sound through. local: the game's own audio output, as always. "
+             "miniaudio: the shared mixer for every system. OpenAL: OpenAL Soft, 3D sound. FAudio: the XAudio2 "
+             "re-implementation. If the one chosen cannot start, the game uses local. Applies the next time the "
+             "game starts.",
+             {{"local", "local"}, {"miniaudio", "miniaudio"}, {"openal", "OpenAL"}, {"faudio", "FAudio"}}},
             {Kind::Choice, "bokeh", "Bokeh Effect", true,
              "The depth-of-field blur of the close shots. None: always sharp. Medium: as the original game. Light is "
              "softer; Strong and Stronger start the focus nearer the subject and blur wider.",

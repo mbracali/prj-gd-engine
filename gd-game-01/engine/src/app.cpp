@@ -182,6 +182,10 @@ const std::map<std::string, Json>& enhancedDefaults() {
         {"cheat_no_venue", Json::boolean(false)},   {"cheat_monkey_crowd", Json::boolean(false)},
         {"cheat_skull_crowd", Json::boolean(false)}, {"audio_offset", Json::string("0")},
         {"video_offset", Json::string("0")},
+        // Enhanced > Performance > Graphics / Audio backend (GDCORE-006): read
+        // once at start-up (startupGraphicsBackend / startupAudioBackend); no
+        // Mode button sets them.
+        {"graphics_backend", Json::string("local")}, {"audio_backend", Json::string("local")},
         };
         for (auto& [k, v] : profileValues(false)) m[k] = v;
         return m;
@@ -209,6 +213,13 @@ const std::map<std::string, std::set<std::string>>& enhancedChoices() {
         {"color_grade", {"off", "warm", "cold", "vintage", "noir", "neon", "sepia"}},
         {"sharpening", {"off", "low", "high"}},
         {"hdr", {"none", "emulated", "true"}},
+        // engine-backend-guidelines.md 1 / rule 7: only what the platform can run (no OpenGL on macOS).
+#ifdef __APPLE__
+        {"graphics_backend", {"local", "sdl3", "vulkan"}},
+#else
+        {"graphics_backend", {"local", "sdl3", "vulkan", "opengl3"}},
+#endif
+        {"audio_backend", {"local", "miniaudio", "openal", "faudio"}},
         {"hopo_mode", {"original", "forgiving"}}};
     return c;
 }
@@ -251,10 +262,36 @@ void migrateEnhanced(Json& e) {
     map("light_dust", {{"true", "1.5x"}, {"false", "none"}});
     // XInput and Rock Band guitars are always on now; Ground Fog and Light
     // Streaks were removed (1.1.7): their saved values are dropped.
+    // A backend this build does not offer (OpenGL3 copied from another OS to
+    // macOS, a typo) is dropped: the game starts on local (GDCORE-006).
+    auto offered = [&](const std::string& k, const Json& v) {
+        if (k != "graphics_backend" && k != "audio_backend") return true;
+        const auto& c = enhancedChoices().at(k);
+        return v.type == Json::Type::String && c.count(v.s) > 0;
+    };
     Json kept = Json::object();
     for (const auto& [k, v] : e.o)
-        if (k != "xinput" && k != "rockband" && k != "ground_fog" && k != "light_streaks") kept.set(k, v);
+        if (k != "xinput" && k != "rockband" && k != "ground_fog" && k != "light_streaks" && offered(k, v)) kept.set(k, v);
     e = std::move(kept);
+}
+// Enhanced > Performance > Graphics / Audio backend as the game started with
+// them (GDCORE-006): latched by App::run right after enhanced.json is read, so
+// a change in the menu applies on the next start (engine-backend-guidelines.md
+// rule 4). Read through startupGraphicsBackend / startupAudioBackend (app.h).
+struct StartupBackends {
+    bool latched = false;
+    std::string graphics = "local", audio = "local";
+};
+StartupBackends& startupBackends() {
+    static StartupBackends b;
+    return b;
+}
+// `e` is enhanced.json after migrateEnhanced (anything not offered is gone).
+void latchStartupBackends(const Json& e) {
+    StartupBackends& b = startupBackends();
+    b.latched = true;
+    b.graphics = e.has("graphics_backend") ? e["graphics_backend"].str() : "local";
+    b.audio = e.has("audio_backend") ? e["audio_backend"].str() : "local";
 }
 // Number settings (as strings, ms) and their range.
 const std::map<std::string, std::pair<int, int>>& enhancedRanges() {
@@ -2437,6 +2474,8 @@ int App::run() {
         }
         if (enhanced_.type != Json::Type::Object) enhanced_ = Json::object();
     }
+    latchStartupBackends(enhanced_);  // this start's backends (startupGraphicsBackend / startupAudioBackend)
+    SDL_Log("backends: graphics %s, audio %s", startupBackends().graphics.c_str(), startupBackends().audio.c_str());
     gpu::preferDedicated();  // hybrid machines: the dedicated GPU, before SDL picks one
 #ifdef __ANDROID__
     SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");  // the back button is the game's Back, not "leave the app"
@@ -2622,6 +2661,27 @@ int App::run() {
 
 int runApp(const Options& options) { return App(options).run(); }
 
+std::string startupGraphicsBackend() {
+    if (!startupBackends().latched) {  // asked before App::run read the settings: read them now
+        Json e = Json::object();
+        if (std::ifstream in(enhancedPath()); in) {
+            try {
+                e = Json::parse(std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>()));
+            } catch (const std::exception&) {
+                e = Json::object();
+            }
+        }
+        migrateEnhanced(e);
+        latchStartupBackends(e.type == Json::Type::Object ? e : Json::object());
+    }
+    return startupBackends().graphics;
+}
+
+std::string startupAudioBackend() {
+    startupGraphicsBackend();  // latches both
+    return startupBackends().audio;
+}
+
 namespace {
 // The universal controls' rules (universal_mechanisms.md 1.1.4 / 1.2.1),
 // on the keyboard's default bindings: no double inputs where two controls
@@ -2692,6 +2752,26 @@ int inputSelfTest() {
           "1.1.6 enhanced.json migrated");
     for (const auto& [k, v] : old.o)
         if (auto c = enhancedChoices().find(k); c != enhancedChoices().end()) check(v.type == Json::Type::String && c->second.count(v.s), "migrated value valid");
+    // GDCORE-006: Graphics / Audio backend default local; no Mode button sets
+    // them; a value this build does not offer is dropped at load.
+    check(enhancedDefaults().at("graphics_backend").str() == "local" && enhancedDefaults().at("audio_backend").str() == "local",
+          "backends default local");
+    for (const char* m : {"steam_deck", "original", "clean", "max_hd", "max_4k", "budget", "good_old_days"}) {
+        auto p = enhancedPreset(m);
+        check(!p.empty() && !p.count("graphics_backend") && !p.count("audio_backend"), "a mode keeps the backends");
+    }
+    check(!profileValues(true).count("graphics_backend") && !profileValues(false).count("audio_backend"), "the build profiles keep the backends");
+    Json be = Json::parse(R"({"graphics_backend":"vulkan","audio_backend":"openal"})");
+    migrateEnhanced(be);
+    check(be["graphics_backend"].str() == "vulkan" && be["audio_backend"].str() == "openal", "offered backends kept");
+    be = Json::parse(R"({"graphics_backend":"metal","audio_backend":true,"bloom":"2x"})");
+    migrateEnhanced(be);
+    check(!be.has("graphics_backend") && !be.has("audio_backend") && be["bloom"].str() == "2x", "unknown backends dropped");
+#ifdef __APPLE__
+    be = Json::parse(R"({"graphics_backend":"opengl3"})");
+    migrateEnhanced(be);
+    check(!be.has("graphics_backend"), "no OpenGL3 on macOS");
+#endif
     std::printf(failures ? "input self-test: %d of %d checks failed\n" : "input self-test: all %d checks passed\n", failures ? failures : checks, checks);
     return failures;
 }
