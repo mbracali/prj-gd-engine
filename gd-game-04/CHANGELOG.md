@@ -5,6 +5,11 @@ All notable changes for players. Versions follow SemVer; release tags are
 
 ## [Unreleased]
 
+### Added
+- Enhanced > Performance & Graphics: Audio Backend (local, miniaudio, OpenAL, FAudio) and Graphics Backend, now selectable, the first two rows of the section; local (the game as before) is the default, and a backend that cannot start falls back to local. The song and every sound effect go through the chosen audio backend.
+- Changing a backend asks Restart Now or Later; Restart Now starts the game again on the new backend, straight back to Enhanced Options with the same save.
+- Enhanced Options shows the graphics and audio backends in use above the FPS counter.
+
 ## [1.1.4] - 2026-11-05
 
 ### Added
