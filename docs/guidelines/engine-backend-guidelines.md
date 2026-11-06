@@ -86,7 +86,8 @@ At the repository root. Every game loads common code from here.
    `gd::core::image::Decoder`); backends live behind a factory keyed by the
    ids above. Adding a backend never changes a game.
 4. **Backends are chosen at start-up** from the settings; a change in the
-   Enhanced menu applies on the next start of the game (the menu says so).
+   Enhanced menu applies on the next start of the game (the menu says so),
+   or at once with the Restart Now pop-up ([universal-menus.md](universal-menus.md), "Backends").
 5. **Plain C++17, no exceptions across the interface, no game types in the
    core.** The core knows nothing of PS2, Xbox, GH or any one game; games
    adapt to it. C APIs stay behind the backends.

@@ -337,7 +337,7 @@ void rememberPath(const std::string& path) {
 class App {
 public:
     explicit App(const Options& o) : opt_(o), difficulty_(std::clamp(o.difficulty, 0, 3)) {}
-    int run();
+    int run(int* restartSlot = nullptr);  // restartSlot: set (the profile slot) when Restart Now ends the run
 
 private:
     enum class Screen { NeedData, Menu, Playing, Paused, Results, SceneView, PanelView };
@@ -416,6 +416,7 @@ private:
     float venueMs_ = -1e9f;                 // song time of the last venue update
     void updateVenue(float t);
     bool running_ = true;
+    bool restart_ = false;  // Enhanced > Graphics / Audio backend > Restart Now
     Screen screen_ = Screen::NeedData;
     std::string message_;
 
@@ -499,6 +500,7 @@ private:
     };
     std::map<std::string, std::unique_ptr<VenueObjectProxy>> venueProxies_;
     void drawFpsCounter();
+    void drawBackendLabel();
     uint64_t uiTicks_ = 0;
     void backToMenu();
     void uiButton(const InputEvent& e);
@@ -761,9 +763,18 @@ void App::tryLoadData(const std::string& path) {
             hooks.enhancedValue = [this](const std::string& key) {
                 if (key == "upscaler_status") return renderer_.upscalerStatus();  // read-only, for the AI Upscaling help
                 if (key == "hdr_status") return hdrStatus();                      // read-only, for the HDR help
+                if (key == "graphics_backend_now") return renderer_.backend();    // read-only: what draws (after a fallback)
+                if (key == "audio_backend_now")                                   // read-only: what plays
+                    return mixer_.outputBackend().empty() ? std::string("local") : mixer_.outputBackend();
                 return enhanced(key).str();
             };
-            hooks.setEnhancedValue = [this](const std::string& key, const std::string& v) { setEnhanced(key, Json::string(v)); };
+            hooks.setEnhancedValue = [this](const std::string& key, const std::string& v) {
+                if (key == "restart_now") {  // not a setting: Enhanced's Restart Now
+                    restart_ = true, running_ = false;
+                    return;
+                }
+                setEnhanced(key, Json::string(v));
+            };
             hooks.userFiles = [this](const std::string& action) { userFiles(action); };
             hooks.userFilesStatus = [this] { return userFilesStatus_; };
             hooks.menuBackdrop = [this](bool on) {
@@ -819,8 +830,10 @@ void App::tryLoadData(const std::string& path) {
                         break;
                     }
                 if (const char* slot = SDL_getenv("GD01_SLOT")) campaign_->setSlot(std::atoi(slot));  // e.g. 8: The Glitches
+                if (opt_.startSlot >= 0) campaign_->setSlot(opt_.startSlot);  // Restart Now: the profile played
                 ui_->interp().var("autosave") = Value::integer(1);
                 const char* screen = SDL_getenv("GD01_SCREEN");  // dev aid: open this screen, e.g. credits
+                if (!screen && !opt_.startScreen.empty()) screen = opt_.startScreen.c_str();
                 ui_->gotoScreen(screen ? screen : "main");
             } else {
                 ui_->boot(false);
@@ -1407,6 +1420,30 @@ void App::drawFpsCounter() {
     } else {
         renderer_.text(23, 672, 1.5f, {50, 255, 80, 255}, buf);
     }
+}
+
+// Enhanced Settings only: the graphics and audio backends this run uses (after
+// any fallback to local), on the line just above the FPS counter (beside it
+// the help bar's legend takes the room), or in its place when the counter is
+// off (universal-menus.md, Graphics / Audio backend).
+void App::drawBackendLabel() {
+    if (!ui_ || movie_ || screen_ != Screen::Menu || ui_->currentScreen() != "enhanced_settings") return;
+    auto label = [](const std::string& id) -> std::string {
+        static const std::map<std::string, std::string> k = {{"sdl3", "SDL3"},          {"vulkan", "Vulkan"}, {"opengl3", "OpenGL3"},
+                                                             {"miniaudio", "miniaudio"}, {"openal", "OpenAL"}, {"faudio", "FAudio"}};
+        auto it = k.find(id);
+        return it == k.end() ? std::string("local") : it->second;
+    };
+    // The chosen one that could not start is named after it (rule 2's fallback, shown).
+    auto shown = [&](const std::string& running, const std::string& chosen) {
+        return label(running) + (chosen != running && label(chosen) != "local" ? " (" + label(chosen) + " could not start)" : "");
+    };
+    const std::string audio = mixer_.outputBackend().empty() ? "local" : mixer_.outputBackend();
+    const std::string s = "Graphics: " + shown(renderer_.backend(), startupGraphicsBackend()) +
+                          "   Audio: " + shown(audio, startupAudioBackend());
+    const float y = enhancedOn("fps_counter") ? 667 : 695;
+    ui_->drawText("impactor.font", s, 25, y + 2, 20, {0, 0, 0, 0.6f}, 0x41);  // shadow
+    ui_->drawText("impactor.font", s, 23, y, 20, {1, 1, 1, 0.9f}, 0x41);
 }
 
 // The version on the main title screen, top right: the FPS counter's font and
@@ -2480,7 +2517,7 @@ bool setGlAttributes() {
     return gles;
 }
 
-int App::run() {
+int App::run(int* restartSlot) {
     // The Enhanced Settings first (before SDL starts).
     if (std::ifstream in(enhancedPath()); in) {
         std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
@@ -2696,6 +2733,7 @@ int App::run() {
         drawVersion();
         if (!movie_) drawTouchButtons();
         if (enhancedOn("fps_counter")) drawFpsCounter();
+        drawBackendLabel();
         captureDebugScreenshot();
         renderer_.endFrame();
     }
@@ -2705,12 +2743,30 @@ int App::run() {
     renderer_.shutdown();
     SDL_DestroyWindow(window_);
     SDL_Quit();
+    if (restart_ && restartSlot) *restartSlot = campaign_ ? campaign_->slot() : 0;
     return 0;
 }
 
 }  // namespace
 
-int runApp(const Options& options) { return App(options).run(); }
+// Enhanced > Graphics / Audio backend > Restart Now (universal-menus.md):
+// the App ends and starts again in the same process (in the launcher too: the
+// module keeps running, so the launcher's window is handed over again), back
+// on Enhanced Settings with the same profile.
+int runApp(const Options& options) {
+    Options o = options;
+    for (;;) {
+        int restartSlot = -1;
+        const int r = App(o).run(&restartSlot);
+        if (restartSlot < 0) return r;
+        SDL_Log("restart: Enhanced Settings asked for a restart (the new backends)");
+        o = options;
+        o.song.clear(), o.panel.clear(), o.viewScene.clear();
+        o.skipBoot = true;
+        o.startScreen = "enhanced_settings";
+        o.startSlot = restartSlot;
+    }
+}
 
 std::string startupGraphicsBackend() {
     if (!startupBackends().latched) {  // asked before App::run read the settings: read them now

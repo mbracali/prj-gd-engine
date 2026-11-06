@@ -6,6 +6,11 @@ matches the tag's version.
 
 ## [Unreleased]
 
+### Added
+- Enhanced > Performance & Graphics: Graphics Backend (local, SDL3, Vulkan, OpenGL3) and Audio Backend (local, miniaudio, OpenAL, FAudio), the first two rows of the section; local (the game as before) is the default.
+- Changing a backend asks Restart Now or Later; Restart Now starts the game again on the new backend, straight back to Enhanced Settings.
+- Enhanced Settings shows the graphics and audio backends in use above the FPS counter.
+
 ## [1.1.10] - 2026-11-05
 
 ### Added

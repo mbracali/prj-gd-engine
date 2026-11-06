@@ -840,6 +840,7 @@ public:
         status_.clear();
         statusMs_ = 0;
         cal_ = Calib{};
+        ask_ = -1;
         host_.menuBackdrop(true);
     }
     void exit() override { host_.menuBackdrop(false); }
@@ -848,6 +849,7 @@ public:
         (void)player;
         if (rows_.empty()) return false;
         if (cal_.phase != 0) return calibButton(button), true;
+        if (ask_ >= 0) return askButton(button), true;
         const Item& it = item(focus_);
         if (dropdown_ >= 0) {  // the open dropdown takes the input
             int n = int(it.options.size());
@@ -888,6 +890,7 @@ public:
             if (click) calibButton(kCross);
             return true;
         }
+        if (ask_ >= 0) return askMouse(x, y, click), true;
         x -= offset_;
         if (dropdown_ < 0) {
             // Back / Export / Import.
@@ -979,6 +982,10 @@ public:
     }
 
     void drawAfter() override {
+        drawPage();
+        if (ask_ >= 0) drawAsk();
+    }
+    void drawPage() {
         const float o = offset_;
         quad(kBoxX0 + o, kBoxY0, kBoxX1 + o, kBoxY1, {0, 0, 0, 0.62f});
         frame(kBoxX0 + o, kBoxY0, kBoxX1 + o, kBoxY1, 1.5f, {1, 1, 1, 0.12f});
@@ -1080,6 +1087,27 @@ private:
              {{"", "Reset"}}},
             {Kind::Separator, "", "", true, ""},
             {Kind::Section, "graphics", "PERFORMANCE & GRAPHICS", true, "Window, frame rate and image quality."},
+            // engine-backend-guidelines.md 4 (GDCORE-006): the gd-engine-core
+            // backends, first in the section (universal-menus.md), read once at start-up (startupGraphicsBackend /
+            // startupAudioBackend in app.h); no Mode button changes them.
+            {Kind::Choice, "graphics_backend", "Graphics Backend", true,
+             "The library the game draws with. local: the game's own OpenGL renderer, as always. SDL3: SDL's GPU API "
+             "(Vulkan, Metal or Direct3D 12 underneath). Vulkan: Vulkan directly. "
+#ifndef __APPLE__
+             "OpenGL3: the shared OpenGL 3.3 / GLES 3 renderer. "
+#endif
+             "If the one chosen cannot start, the game uses local. Takes effect when the game starts again: Restart Now does it at once.",
+             {{"local", "local"}, {"sdl3", "SDL3"}, {"vulkan", "Vulkan"},
+#ifndef __APPLE__
+              {"opengl3", "OpenGL3"},  // no OpenGL on macOS (engine-backend-guidelines.md rule 7)
+#endif
+             }},
+            {Kind::Choice, "audio_backend", "Audio Backend", true,
+             "The library the game plays its sound through. local: the game's own audio output, as always. "
+             "miniaudio: the shared mixer for every system. OpenAL: OpenAL Soft, 3D sound. FAudio: the XAudio2 "
+             "re-implementation. If the one chosen cannot start, the game uses local. Takes effect when the game "
+             "starts again: Restart Now does it at once.",
+             {{"local", "local"}, {"miniaudio", "miniaudio"}, {"openal", "OpenAL"}, {"faudio", "FAudio"}}},
             {Kind::Choice, "screen_mode", "Screen Mode", true,
              "Windowed; full screen at the desktop's resolution; or full screen without a border (a window covering "
              "the screen, the quickest to switch away from).",
@@ -1123,27 +1151,6 @@ private:
              "on), brighter highlights, menus at the screen's paper white; it starts with the game, and where it "
              "cannot run Emulated is used. Menus and the HUD keep their colours.",
              {{"none", "None"}, {"emulated", "Emulated"}, {"true", "True HDR"}}},
-            // engine-backend-guidelines.md 4 (GDCORE-006): the gd-engine-core
-            // backends, read once at start-up (startupGraphicsBackend /
-            // startupAudioBackend in app.h); no Mode button changes them.
-            {Kind::Choice, "graphics_backend", "Graphics Backend", true,
-             "The library the game draws with. local: the game's own OpenGL renderer, as always. SDL3: SDL's GPU API "
-             "(Vulkan, Metal or Direct3D 12 underneath). Vulkan: Vulkan directly. "
-#ifndef __APPLE__
-             "OpenGL3: the shared OpenGL 3.3 / GLES 3 renderer. "
-#endif
-             "If the one chosen cannot start, the game uses local. Applies the next time the game starts.",
-             {{"local", "local"}, {"sdl3", "SDL3"}, {"vulkan", "Vulkan"},
-#ifndef __APPLE__
-              {"opengl3", "OpenGL3"},  // no OpenGL on macOS (engine-backend-guidelines.md rule 7)
-#endif
-             }},
-            {Kind::Choice, "audio_backend", "Audio Backend", true,
-             "The library the game plays its sound through. local: the game's own audio output, as always. "
-             "miniaudio: the shared mixer for every system. OpenAL: OpenAL Soft, 3D sound. FAudio: the XAudio2 "
-             "re-implementation. If the one chosen cannot start, the game uses local. Applies the next time the "
-             "game starts.",
-             {{"local", "local"}, {"miniaudio", "miniaudio"}, {"openal", "OpenAL"}, {"faudio", "FAudio"}}},
             {Kind::Choice, "bokeh", "Bokeh Effect", true,
              "The depth-of-field blur of the close shots. None: always sharp. Medium: as the original game. Light is "
              "softer; Strong and Stronger start the focus nearer the subject and blur wider.",
@@ -1341,9 +1348,14 @@ private:
     void setValue(const Item& it, const std::string& v) {
         for (const Option& o : it.options)
             if (v == o.value && !o.ok) return sound("button_error");
+        const std::string before = host_.enhancedValue(it.key);
         host_.setEnhancedValue(it.key, v);
         rebuild();  // a choice may show or hide its dependent row
         sound("button_select");
+        // A backend other than the one running: ask to restart now or later.
+        const std::string key = it.key;
+        if ((key == "graphics_backend" || key == "audio_backend") && v != before && v != host_.enhancedValue(key + "_now"))
+            ask_ = 0;
     }
     void sound(const char* seq) { host_.sendTo("synth", "play_sequence", {Value::symbol(seq)}); }
     void activate() {
@@ -1562,6 +1574,60 @@ private:
             text("impactor.font", "Locked by Steam Deck mode", x0 + pad, y + 13, 21, kAccent, 0x21);
         }
     }
+    // -- Restart Now / Later: after a Graphics or Audio backend change
+    // (universal-menus.md). Two buttons in the page's look: left/right (or
+    // up/down) moves, confirm chooses, back is Later. Restart Now ends the
+    // game and starts it again on the new backends, back on this screen.
+    static constexpr float kAskX0 = 330, kAskX1 = 950, kAskY0 = 250, kAskY1 = 470, kAskBtnY0 = 400, kAskBtnY1 = 440, kAskBtnW = 220;
+    static void askButtonRect(int b, float& x0, float& x1) {
+        const float cx = (kAskX0 + kAskX1) * 0.5f;
+        x0 = b == 0 ? cx - 20 - kAskBtnW : cx + 20, x1 = x0 + kAskBtnW;
+    }
+    void askChoose(int b) {
+        ask_ = -1;
+        if (b == 0) {
+            sound("button_select");
+            host_.setEnhancedValue("restart_now", "1");
+        } else {
+            sound("button_back");
+        }
+    }
+    void askButton(int button) {
+        if (button == kLeft || button == kRight || button == kUp || button == kDown) ask_ = 1 - ask_, sound("button_toggle");
+        else if (host_.isSelectButton(button)) askChoose(ask_);
+        else if (host_.isBackButton(button)) askChoose(1);
+    }
+    void askMouse(float x, float y, bool click) {
+        for (int b = 0; b < 2; ++b) {
+            float x0, x1;
+            askButtonRect(b, x0, x1);
+            if (x < x0 || x > x1 || y < kAskBtnY0 || y > kAskBtnY1) continue;
+            if (ask_ != b) ask_ = b, sound("button_toggle");
+            if (click) askChoose(b);
+            return;
+        }
+    }
+    void drawAsk() {
+        host_.renderer().fillRect(0, 0, kScreenW, kScreenH, {0, 0, 0, uint8_t(150 * fade_)});
+        quad(kAskX0, kAskY0, kAskX1, kAskY1, {0.06f, 0.06f, 0.08f, 0.96f});
+        frame(kAskX0, kAskY0, kAskX1, kAskY1, 1.5f, {1, 1, 1, 0.12f});
+        quad(kAskX0, kAskY0, kAskX1, kAskY0 + 5, kAccent);
+        const float cx = (kAskX0 + kAskX1) * 0.5f;
+        text("impactor.font", "RESTART THE GAME?", cx, kAskY0 + 50, 34, kFocused, 0x22);
+        text("impactor.font", "The new backend runs when the game starts again.", cx, kAskY0 + 100, 22, kNormal, 0x22);
+        text("impactor.font", "Restart now, or keep playing and use it next time.", cx, kAskY0 + 128, 22, kNormal, 0x22);
+        for (int b = 0; b < 2; ++b) {
+            float x0, x1;
+            askButtonRect(b, x0, x1);
+            const std::array<float, 4> c = b == 0 ? std::array<float, 4>{0.45f, 0.95f, 0.5f, 1} : std::array<float, 4>{1, 0.86f, 0.35f, 1};
+            const bool h = ask_ == b;
+            quad(x0, kAskBtnY0, x1, kAskBtnY1, {c[0], c[1], c[2], h ? 0.4f : 0.2f});
+            frame(x0, kAskBtnY0, x1, kAskBtnY1, h ? 3.0f : 1.5f, c);
+            text("impactor.font", b == 0 ? "Restart Now" : "Later", (x0 + x1) * 0.5f, (kAskBtnY0 + kAskBtnY1) * 0.5f + 1, 22, h ? kFocused : kTitle, 0x22);
+        }
+    }
+    int ask_ = -1;  // the Restart Now / Later pop-up: -1 closed, else the focused button
+
     // -- Audio / Video Calibration (the port's; the original had none). A
     // beat every 750 ms: the audio step plays a tick, the video step flashes
     // a ring silently. After 3 lead-in beats, each press is matched to the

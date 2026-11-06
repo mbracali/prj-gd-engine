@@ -201,6 +201,8 @@ components: we will.
 | Controls | Enable Touch Controls | Enables touch controls, and the virtual buttons | On by default only on Steam Deck and Android |
 | Controls | Audio / Video Calibration | Opens our own calibration tool | A button that opens a new screen |
 | *(space)* | | | |
+| Performance & graphics | Graphics backend | local, SDL3, Vulkan, OpenGL3 (`graphics_backend`: `local` / `sdl3` / `vulkan` / `opengl3`; only those the platform runs) | Dropdown, default local; the **first row** of the section; applies on the next start (a change asks Restart Now / Later, see "Backends" below). Selectable on gd-game-01 only for now ([engine-backend-guidelines.md](engine-backend-guidelines.md)) |
+| Performance & graphics | Audio backend | local, miniaudio, OpenAL, FAudio (`audio_backend`: `local` / `miniaudio` / `openal` / `faudio`) | Dropdown, default local; the **second row** of the section; applies on the next start (Restart Now / Later, as Graphics backend). Selectable on gd-game-01 only for now |
 | Performance & graphics | Screen mode | Windowed, full screen, or full screen without borders | Dropdown |
 | Performance & graphics | Resolution | Keep what we have today | Dropdown |
 | Performance & graphics | Force sharper Text & Sprites | What is already implemented | Check box |
@@ -210,8 +212,6 @@ components: we will.
 | Performance & graphics | Max FPS | 60, 120, 240 or unlimited | Dropdown |
 | Performance & graphics | Show FPS Counter | FPS counter in the bottom-left corner | Check box |
 | Performance & graphics | HDR | None, Emulated, True HDR (`hdr`: `none` / `emulated` / `true`) | Dropdown, default None. See "HDR" below |
-| Performance & graphics | Graphics backend | local, SDL3, Vulkan, OpenGL3 (`graphics_backend`: `local` / `sdl3` / `vulkan` / `opengl3`; only those the platform runs) | Dropdown, default local; applies on the next start. Selectable on gd-game-01 only for now ([engine-backend-guidelines.md](engine-backend-guidelines.md)) |
-| Performance & graphics | Audio backend | local, miniaudio, OpenAL, FAudio (`audio_backend`: `local` / `miniaudio` / `openal` / `faudio`) | Dropdown, default local; applies on the next start. Selectable on gd-game-01 only for now |
 | Performance & graphics | Bokeh Effect | None, light, medium, strong, stronger | Dropdown |
 | Performance & graphics | Enable Particles FX | None, original, 2x | Dropdown |
 | Performance & graphics | Bloom | None, original, 2x, 3x | Dropdown |
@@ -232,3 +232,31 @@ components: we will.
 One key difference from older versions, which had switches to enable the
 guitars and XInput: here **everything is on by default**. Some code may need
 to be redeveloped, adapted or improved for that.
+
+#### Backends (Graphics backend, Audio backend)
+
+Every game where the backends are selectable follows these rules (gd-game-01
+first; the others when they adopt the core):
+
+- **Position:** Graphics backend and Audio backend are the first two rows of
+  Performance & graphics, before Screen mode.
+- **Restart Now / Later:** choosing a backend other than the one running opens
+  a pop-up in the Enhanced page's own look (dark box, orange top line, the
+  page's font): the title "Restart the game?", one line saying the new backend
+  runs when the game starts again, and two buttons, **Restart Now** (green,
+  focused) and **Later** (yellow). Left / right or up / down moves between
+  them, confirm (green, Enter) chooses, back (red, Esc) is Later, the mouse
+  hovers and clicks them. The value is saved before the pop-up opens, so Later
+  keeps it for the next start. Choosing the backend that is already running
+  asks nothing.
+- **Restart Now** ends the game and starts it again **in the same process**
+  (in the launcher the module keeps running and gets the launcher's window
+  again, for the new graphics API): no boot screens, straight back to
+  Enhanced Settings, with the same profile. A backend that cannot start falls
+  back to local (engine-backend-guidelines.md rule 2).
+- **Indicator:** on the Enhanced Settings screen only, the backends in use are
+  shown in small white text: `Graphics: <name>   Audio: <name>`, on the line just
+  above the FPS counter (beside it the help bar's legend takes the room), or in
+  the counter's place when the FPS counter is off. It shows what really runs: a
+  chosen backend that could not start is shown as `local (<name> could not
+  start)`.

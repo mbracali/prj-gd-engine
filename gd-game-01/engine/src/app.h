@@ -19,6 +19,10 @@ struct Options {
     std::string character, venueName, guitar;
     bool skipBoot = false;  // start at the main menu (no logos, intro, profile or memory card screens)
     bool splitKeyboard = false;  // --kb2p: player 2 on the right half of the keyboard
+    // A restart from Enhanced > Graphics / Audio backend (Restart Now): the
+    // boot screens are skipped, this screen opens and this profile slot is used.
+    std::string startScreen;
+    int startSlot = -1;
 };
 
 int runApp(const Options& options);
