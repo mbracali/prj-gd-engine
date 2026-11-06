@@ -4,7 +4,8 @@ The core's graphics layer: one interface, `gd::core::render::Device`
 (`render/include/gd/core/render/device.h`), and its backends. The
 **OpenGL 3.3 / OpenGL ES 3.0** backend (`opengl3`) exists now (1.1.13,
 GDCORE-004 phase 1); **SDL3 GPU** (`sdl3`) and **Vulkan** (`vulkan`) come next,
-on the same interface. This file is the design: read it before adding a
+on the same interface, on the groundwork of phase 2a (the build-time SPIR-V,
+section 3; the launcher's window hand-over, section 5; the state rules, 2.2). This file is the design: read it before adding a
 backend or moving a game onto the core. Facts are marked [C] confirmed or
 [I] inferred where it matters.
 
@@ -97,20 +98,32 @@ Rules that keep the three backends honest:
 - **Textures and samplers bind as pairs** in slots 0..7 (`kMaxTextureSlots`),
   which is what SDL_GPU (`SDL_BindGPUFragmentSamplers`), Vulkan (combined
   image samplers) and GL (texture unit + sampler object) all do natively.
+- **What a pass keeps** (SDL_GPU's and Vulkan's state lives in the pass /
+  command buffer, GL's forever; the interface promises the intersection):
+  `beginPass` resets the viewport and the scissor to the whole attachment
+  (depth range 0..1) and unbinds the pipeline and the vertex / index
+  buffers. **Texture bindings, the stencil reference and the blend
+  constants must be set again after `beginPass`** (the GL backend happens to
+  keep them; the others do not). **Pushed uniforms stay until the frame
+  ends**, also across passes (SDL_GPU keeps them for the command buffer):
+  push every slot a draw reads in each frame before its first draw.
+  gd01's CoreRenderer binds its texture and pushes its blocks before every
+  draw [C: core_renderer.cpp], so it is portable as it is.
 
 ### 2.3 Conventions (the part that differs most between APIs)
 
 - **Clip space is OpenGL's**: y up, depth -1..1 (`gl_Position` as GL
   computes it). Shaders write `gl_Position = gd_clip(p);`; on 0..1 backends
-  `gd_clip` remaps z (`z = (z + w) / 2`) and, on Vulkan, flips y. Games keep
-  their matrices. Window depth (depth buffer values, depth range) is 0..1
-  everywhere.
+  `gd_clip` remaps z (`z = (z + w) / 2`); y needs no change for SDL_GPU (its
+  NDC is y up) and the Vulkan backend uses a negative-height viewport, so
+  one SPIR-V serves both (3.2). Games keep their matrices. Window depth
+  (depth buffer values, depth range) is 0..1 everywhere.
 - **Images are top-down**: row 0 of an uploaded texture, of a render target,
   of a readback, and y = 0 of a viewport or scissor rectangle are the **top**
   of the image. Texture coordinate (0, 0) is the top-left texel of what was
   uploaded *and* of what was rendered. In fragment shaders `gl_FragCoord`
-  counts from the top-left. This is SDL_GPU's and Vulkan's (with the y flip)
-  natural convention; the GL backend gets it by rendering every target
+  counts from the top-left. This is SDL_GPU's and Vulkan's (with the
+  viewport flip) natural convention; the GL backend gets it by rendering every target
   upside down (it flips y in `gd_clip` and swaps the front face), and by
   flipping once when it presents.
 - **Front face** is stated as in GL (counter-clockwise in clip space with y
@@ -153,50 +166,164 @@ game does not offer it (rule 7).
 
 **Decision.** Shaders are written once, in the **gd shader dialect**:
 GLSL in the subset shared by `#version 330 core`, `#version 300 es` and
-`#version 450` (Vulkan GLSL), with a few macros where those differ:
+`#version 450` (Vulkan GLSL), with a few macros where those differ. The
+OpenGL3 backend compiles it at run time with the driver's compiler; SDL3 GPU
+and Vulkan take **SPIR-V compiled from the same text at build time** by
+`gdcore_shaderc` (section 3.3). No shader compiler ships to players (rule 8).
 
-| Macro | OpenGL 3.3 / ES 3.0 | Vulkan GLSL 450 (SPIR-V for SDL_GPU and Vulkan) |
+### 3.1 The dialect
+
+| Macro | OpenGL 3.3 / ES 3.0 (run time) | SPIR-V: Vulkan GLSL 450 (build time) |
 |---|---|---|
-| `GD_UNIFORMS(slot, Name)` | `layout(std140) uniform Name` (bound to binding `slot` by name after linking) | `layout(std140, set = 1 (vertex) / 3 (fragment), binding = slot) uniform Name` |
-| `GD_SAMPLER2D(slot, name)` / `GD_SAMPLERCUBE` | `uniform sampler2D name;` (unit `slot` set after linking) | `layout(set = 0 / 2, binding = slot) uniform sampler2D name;` |
-| `GD_IN(loc)` / `GD_OUT(loc)` (varyings) | `in` / `out` (330 has no varying locations) | `layout(location = loc) in` / `out` |
+| `GD_UNIFORMS(slot, Name) { ... };` | `layout(std140) uniform Name` (bound to binding `slot` by name after linking) | `layout(std140, set = 1 (vertex) / 3 (fragment), binding = slot) uniform Name` |
+| `GD_SAMPLER2D(slot, name);` / `GD_SAMPLER2DSHADOW` / `GD_SAMPLERCUBE` | `uniform sampler2D name;` (unit `slot` set after linking) | `layout(set = 0 (vertex) / 2 (fragment), binding = slot) uniform sampler2D name;` |
 | `GD_ATTR(loc)` (vertex inputs) | `layout(location = loc) in` | the same |
+| `GD_IN(loc)` / `GD_OUT(loc)` (varyings) | `in` / `out` (330 has no varying locations: matched by name) | `layout(location = loc) in` / `out` (matched by location) |
 | `GD_FRAG_OUT(loc)` | `layout(location = loc) out` | the same |
-| `GD_VERTEX_ID` | `gl_VertexID` | `gl_VertexIndex` |
-| `gd_clip(p)` | `p`, y flipped in targets (`gd_FlipY`) | z remapped to 0..1 (+ y flip on Vulkan) |
+| `GD_VERTEX_ID` / `GD_INSTANCE_ID` | `gl_VertexID` / `gl_InstanceID` | `gl_VertexIndex` / `gl_InstanceIndex` |
+| `gd_clip(p)` (vertex) | `vec4(p.x, -p.y, p.z, p.w)`: every target drawn upside down (2.3) | `vec4(p.x, p.y, 0.5 * (p.z + p.w), p.w)`: z to 0..1 |
+| defined | `GD_GL`, `GD_VERTEX` / `GD_FRAGMENT` | `GD_SPIRV`, `GD_VERTEX` / `GD_FRAGMENT`, `GD_TEXTURE_SET`, `GD_UNIFORM_SET` |
 
-The set numbers are SDL_GPU's fixed layout (textures set 0 / 2, uniform
-buffers set 1 / 3 for vertex / fragment); the Vulkan backend uses the same
-layout, so one SPIR-V blob serves both.
+Rules of the dialect (the build step enforces the binding ones):
 
-- **OpenGL3** compiles the dialect at run time (the driver's compiler; no
-  compiler shipped by us): the backend adds the version line, precision
-  (ES), the macro definitions, and binds blocks and samplers by the
-  reflection names. This is what runs now.
-- **SDL3 GPU and Vulkan** (phases 2 and 3) take **SPIR-V compiled at build
-  time** with glslang, built from source as a *host* tool (FetchContent at a
-  pinned tag) and run on the Linux build machine for every package (SPIR-V
-  is platform neutral, so the Windows and Android cross builds use the same
-  blobs, embedded as C arrays). Metal (macOS / iOS through SDL_GPU) needs
-  MSL: SDL_shadercross (SPIRV-Cross inside) converts the SPIR-V offline on
-  the same host; D3D12 takes DXIL from shadercross + DXC, or SDL_GPU's
-  SPIR-V path where the driver has it [I]. No shader compiler ships to
-  players (rule 8).
+- **No loose uniforms** (`uniform float x;`): Vulkan GLSL has none. Every
+  value goes in a `GD_UNIFORMS` block (std140), at most
+  `kMaxUniformSlots` (4) blocks per stage, slots 0..3.
+- **Textures are combined samplers** in slots 0..7 (`kMaxTextureSlots`). No
+  separate samplers, storage buffers, storage images or push constants
+  (SDL_GPU's graphics pipelines bind only what is listed here).
+- **Varyings match by location** in SPIR-V and by name in GL 3.3: give a
+  varying the same name *and* the same `GD_IN` / `GD_OUT` location in both
+  stages.
+- **The same block in both stages** (gd01's `DrawState`) is two bindings
+  in SPIR-V (vertex set 1, fragment set 3, same slot); the backends push the
+  slot's data to every stage that declares it (2.2).
+- **`gl_FragCoord`** counts from the **top-left** on every backend (GL: the
+  targets are upside down; SDL_GPU and Vulkan: natively). Do not redeclare
+  it (`origin_upper_left` is not ES).
+- **`GD_INSTANCE_ID`** includes `firstInstance` in SPIR-V
+  (`gl_InstanceIndex`) and not in GL (`gl_InstanceID`; GL 3.3 has no base
+  instance): portable code draws instanced with `firstInstance = 0`.
+- **Points**: a shader drawn with `Primitive::Points` writes `gl_PointSize`
+  (Vulkan requires it).
+- **Precision**: the GL ES prelude sets `highp` everywhere; nothing in the
+  dialect names a precision.
+
+### 3.2 The SPIR-V form
+
+SPIR-V 1.0 for Vulkan 1.0 (what SDL_GPU's Vulkan driver and our Vulkan
+backend both accept), entry point `main`, no debug info, **not optimised**
+(the drivers optimise; the blob stays the source's maths, as the GL path
+compiles it). The resource sets are **SDL_GPU's fixed SPIR-V layout**
+[C: SDL 3.4.18 `SDL_gpu.h`, `SDL_CreateGPUShader`]:
+
+| Set | Vertex stage | Fragment stage |
+|---|---|---|
+| 0 | sampled textures, binding = slot | - |
+| 1 | uniform buffers, binding = slot | - |
+| 2 | - | sampled textures, binding = slot |
+| 3 | - | uniform buffers, binding = slot |
+
+The Vulkan backend uses the same four descriptor set layouts, so **one blob
+serves both** (no second variant). SDL_GPU numbers each stage's bindings
+from 0 and wants their counts (`num_samplers`, `num_uniform_buffers`):
+`render/src/common/spirv_reflect.h` (`reflectSpirv`) reads them from the
+blob's decorations (highest binding + 1 per set, plus masks of what is
+really used); a slot below the highest that a shader does not use still
+counts, and the backend binds a dummy (a 1 x 1 texture, an empty block) to
+it.
+
+**Clip space and y.** SDL_GPU's normalized device coordinates are y up,
+z 0..1, and its viewport / texture coordinates are top-left
+[C: `SDL_gpu.h` "Coordinate System"; its Vulkan driver flips the viewport
+itself]. So `gd_clip` only remaps z for SPIR-V, and NDC y = +1 lands on row 0
+(the top), the interface's convention. The **Vulkan backend** gets the same
+picture from the same blob with a **negative-height viewport** (core in
+Vulkan 1.1, `VK_KHR_maintenance1`): `y = top + height, height = -height`,
+exactly as SDL_GPU's own Vulkan driver does, and with the front face passed
+through unchanged (counter-clockwise stays counter-clockwise) [C: SDL 3.4.18
+`src/gpu/vulkan/SDL_gpu_vulkan.c`: `currentViewport.y = viewport->y +
+viewport->h; height = -viewport->h`, and `SDLToVK_FrontFace` maps CCW to
+`VK_FRONT_FACE_COUNTER_CLOCKWISE`]. So the interface's GL-style front face
+needs no swap on either (the self-test's cull check will say it on each).
+
+### 3.3 The build step: gdcore_shaderc
+
+`render/tools/shaderc/gdcore_shaderc.cpp`, a program for the **build
+machine**, linked with glslang (GLSL front end and SPIR-V back end only:
+no HLSL, no optimiser) and SPIRV-Tools (the validator), both pinned in
+`cmake/gdcore_deps.cmake` at Vulkan SDK 1.4.321.0. A game's CMakeLists.txt
+calls (the function comes with gdcore_render, `render/cmake/gdcore_shaders.cmake`):
+
+```cmake
+gdcore_spirv_shaders(<target> OUTPUT <header.h> SOURCES <file.cpp>...
+                     [NAMESPACE <ns>] [DEFINES NAME[=VALUE]...])
+```
+
+It reads the dialect **where the games keep it**: C++ raw string literals
+named `k<Name>Vs` (vertex) / `k<Name>Fs` (fragment), e.g.
+`const char* kMainVs = R"( ... )";` (any raw-string delimiter; one literal,
+no concatenation). Each one is compiled with the SPIR-V prelude (3.1) and the
+`DEFINES`, validated with `spirv-val` (Vulkan 1.0) and with the dialect's
+binding rules (`reflectSpirv`), and written to
+`<build>/gdcore_shaders/<target>/<header.h>`, which is on the target's
+include path:
+
+```cpp
+// kMainVs (vertex, core_renderer.cpp:21): samplers -, uniform blocks 0,1, inputs 0,1,2,3,4, outputs 0,1,2
+inline constexpr uint32_t kMainVsSpirv[] = {0x07230203u, ...};
+```
+
+and the game sets `desc.spirv(kMainVsSpirv, kMainFsSpirv)` next to its
+`glslVertex` / `glslFragment` (`ShaderDesc::spirv`, a template that also
+stores the sizes). A shader that does not compile, is invalid SPIR-V or
+breaks the layout **fails the build** with the error at the .cpp line
+(`core_renderer.cpp:23: 'x' : undeclared identifier`). A program
+permutation (`ShaderDesc::defines`) is a second call with other `DEFINES`
+and another `OUTPUT`.
+
+**Host tool, every package.** SPIR-V is the same for every platform, so the
+Windows (MinGW) and Android (NDK) cross builds use blobs made on the Linux
+build machine. `gdcore_spirv_shaders` builds `gdcore_shaderc` at configure
+time, **for the host** (a separate CMake project, configured with the
+environment's compilers and without the game's toolchain file; `CC` / `CXX`
+are kept, so the Steam Deck build uses the sniper SDK's gcc-14), **once per
+environment** in `GDCORE_DEPS_DIR/host-tools/gdcore_shaderc-<system>-<key>/`
+(the key hashes the system and its release, the compilers, the pins and the
+folder: the Fedora host, the sniper container and the ubuntu:22.04 container
+each get their own; about 30 MB and under a minute on 16 cores), under a
+file lock. Before every build a no-op step (`gdcore_shaderc_tool`) rebuilds
+it if its sources changed. Options: `GDCORE_SHADERC=<path>` (a prebuilt one;
+nothing is built), `GDCORE_HOST_CC` / `GDCORE_HOST_CXX` (when `CC` / `CXX`
+are a cross compiler), `GDCORE_SPIRV_VALIDATE=OFF` (no SPIRV-Tools; also
+automatic, with a warning, where there is no Python 3, which SPIRV-Tools'
+build needs).
+
+**Why raw strings and not .glsl files.** gd01's shaders already live in its
+.cpp files (the GL path compiles those strings); reading them where they are
+keeps one copy, needs no file layout change in any game, and the post-FX
+port adds its programs the same way. A game that prefers files can embed
+them as `k<Name>Vs` strings (`#include` of a generated header) and call the
+same function on that file.
+
+**Metal and D3D12 (later).** SDL_GPU on macOS / iOS needs MSL and on
+Windows prefers DXIL. Both come from the same SPIR-V offline: SPIRV-Cross
+(MSL; SDL_shadercross wraps it) and shadercross + DXC (DXIL), as further
+host tools of `gdcore_shaderc` filling `ShaderDesc` fields added then
+(`msl*`, `dxil*`). Until then the SDL3 GPU backend asks SDL for a device
+with `SDL_GPU_SHADERFORMAT_SPIRV` only, which picks the Vulkan driver (on
+Windows too, where a Vulkan driver is installed; else it fails and the game
+falls back to OpenGL).
 
 **Why not GLSL 450 + SPIRV-Cross to GLSL for GL too?** It would make the GL
-path depend on two large host tools now, for no gain: the GL backend
-already accepts the dialect, and the drivers' GLSL compilers are the ones
-gd01 and gd02 have always used (the risk-free choice for `opengl3`). The
-dialect is meant to be valid Vulkan GLSL 450 once the macros are defined
-for it, so the build-time SPIR-V step needs no rewrite of any shader [I: not
-yet checked; glslang is not installed on the phase-1 machine]. Phase 2's
-first step is a check that compiles every shader of the core and of each
-game to SPIR-V with glslang (it also catches dialect mistakes).
+path depend on two large host tools for no gain: the GL backend accepts the
+dialect, and the drivers' GLSL compilers are the ones gd01 and gd02 have
+always used (the risk-free choice for `opengl3`).
 
-`ShaderDesc` carries the forms a backend may pick: `glsl` (the dialect
-bodies + `#define` lines + reflection names) and `spirv` (vertex and
-fragment blobs + entry points); a backend takes the first it can use and
-fails with a clear error otherwise.
+`ShaderDesc` carries every form the build has: `glsl*` (the dialect bodies +
+`#define` lines + reflection names) and `spirv*` (vertex and fragment
+blobs). A backend takes the first it can use and fails with a clear error
+otherwise (OpenGL3: `glsl`; SDL3 GPU and Vulkan: `spirv`).
 
 ## 4. Backends
 
@@ -236,15 +363,21 @@ loaded through `SDL_GL_GetProcAddress` (no GL library at link time).
 | `generateMipmaps` | `SDL_GenerateMipmapsForGPUTexture` |
 | `readTexture` | `SDL_DownloadFromGPUTexture` into a download transfer buffer + fence |
 | `present` | `SDL_AcquireGPUSwapchainTexture` + `SDL_BlitGPUTexture` |
-| shaders | SPIR-V (Vulkan driver), MSL (Metal), DXIL (D3D12) from the build step |
-| depth bias, cull, front face | `SDL_GPURasterizerState` |
+| shaders | SPIR-V from the build step (3.3; the Vulkan driver); MSL (Metal), DXIL (D3D12) later from the same SPIR-V |
+| shader resource counts | `reflectSpirv` (`src/common/spirv_reflect.h`) |
+| depth bias, cull, front face | `SDL_GPURasterizerState` (front face as given: SDL flips the viewport itself) |
+| `Wrap::ClampToBorder` | none in SDL_GPU: clamp to edge, `Caps::clampToBorder` false |
+| D24 / D24S8 | where `SDL_GPUTextureSupportsFormat` says so, else D32F / D32FS8 behind the same `Format` |
+
+Section 9 lists the details the phase-2 backend needs.
 
 ### 4.3 Vulkan (`vulkan`, phase 3)
 
 Vulkan 1.1+ through volk (gd01 already vendors volk and the Vulkan headers),
 VMA for memory (single header, MIT). Dynamic rendering
 (`VK_KHR_dynamic_rendering`, core 1.3) for passes, a pipeline cache on
-disk, descriptor sets in the SDL_GPU layout (one SPIR-V for both),
+disk, descriptor sets in the SDL_GPU layout (one SPIR-V for both; a
+negative-height viewport for y, 3.2),
 uniform slots as dynamic uniform buffers on a per-frame ring, timeline or
 per-frame fences for `kFramesInFlight`. MoltenVK / KosmicKrisp on Apple.
 gd01's FSR 3.1 / DLSS then run natively (no GL interop).
@@ -257,40 +390,76 @@ on that window: the module shim (`sdk/gd_module_shim.h`, force-included in
 every file of a module) turns the module's `SDL_CreateWindow` into "the
 launcher's window" and tracks the module's GL contexts so none outlives it.
 
-**Now (OpenGL3).** The core is a separate library, *not* compiled with the
-shim, so the GL backend never calls `SDL_GL_CreateContext`,
+**OpenGL3.** The core is a separate library, *not* compiled with the shim,
+so the GL backend never calls `SDL_GL_CreateContext`,
 `SDL_GL_DestroyContext` or `SDL_GL_SwapWindow` itself when the game passes
 `DeviceCreateInfo::gl` hooks: gd01 passes its own (shimmed) calls, so the
 context the core makes is a module context the shim tracks and destroys,
 and the swap is the shim's (which does nothing while the launcher's model
 explorer presents). Without hooks (a standalone program, the self-test) the
-backend calls SDL directly. Nothing in the launcher changes for phase 1.
+backend calls SDL directly.
 
-**Phase 2 / 3 (SDL_GPU, Vulkan).** A window cannot be used by a GL context
-and a GPU swapchain at once (and on macOS a CAMetalLayer and an
-NSOpenGLContext conflict), and SDL's Vulkan / Metal surfaces want the
-window made with `SDL_WINDOW_VULKAN` / `SDL_WINDOW_METAL` [I: SDL3 recreates
-a window to switch its graphics API for `SDL_Renderer`; `SDL_ClaimWindowForGPUDevice`
-on a GL window must be tested on each platform]. The plan:
+**SDL3 GPU, Vulkan (Metal): the hand-over (1.1.13 phase 2a, done).** A window
+carries one graphics API: a GL context and a GPU swapchain cannot share it
+(and on macOS a CAMetalLayer and an NSOpenGLContext conflict), Vulkan and
+Metal surfaces want the window made with `SDL_WINDOW_VULKAN` /
+`SDL_WINDOW_METAL`, and SDL cannot turn a window back into an OpenGL one
+[C: SDL 3.4.18: `SDL_Vulkan_CreateSurface` converts an OpenGL window in
+place by unloading the GL library, which would pull it from under the
+launcher's live context; the reverse needs SDL's internal
+`SDL_RecreateWindow`]. So the window is **made again** for the API:
 
-1. **Module ABI**: the module asks the host for the window *for an API*
-   (`gd_host.h` gains `request_window(api)`: `gl`, `gpu`); the shim calls it
-   from the core's `DeviceCreateInfo::prepareWindow` hook.
-2. The **launcher releases its GL context** (makes nothing current,
-   destroys its context and its `gfx` objects), recreates the window
-   without `SDL_WINDOW_OPENGL` (with `SDL_WINDOW_VULKAN` / `METAL` when the
-   platform needs it) at the same size, position and fullscreen state, and
-   hands it to the module. The module's device claims it
-   (`SDL_ClaimWindowForGPUDevice`, or a `VkSurfaceKHR`).
-3. On return the module's device releases the window
-   (`SDL_ReleaseWindowFromGPUDevice` / surface destroyed); the launcher
-   recreates its GL window and context as it already does after a game
-   (size, position, fullscreen restored). One black frame is acceptable.
-4. A module that fails to get its backend (no Vulkan driver) creates the GL
-   device instead and logs why (rule 2: never a black screen).
+1. **The game** decides its backend *before* making its window and calls
+   `prepareWindow(backend, gles)` then `SDL_CreateWindow(...,
+   windowFlags(backend) | ...)` (what it does standalone too).
+   `prepareWindow` sets the SDL global property
+   `gd.render.window_api_request` (`kWindowApiRequestProperty`) to the
+   backend's id.
+2. **The shim's `SDL_CreateWindow`** reads it (or the `SDL_WINDOW_VULKAN` /
+   `METAL` flag of a game not on the core; nothing set: OpenGL, every module
+   before the core) and, when it differs from what the launcher's window is
+   made for, calls the **module ABI's `request_window(user, api)`**
+   (`sdk/gd_host.h`, appended to `GdHost` in gdul 1.1.13, read only when
+   `size` covers it: `GD_HOST_HAS`; `GD_WINDOW_API_OPENGL / SDL_GPU /
+   VULKAN / METAL`). It then publishes the window it returns
+   (`gd.render.window`, `kWindowProperty`, a pointer) and what it is made
+   for (`gd.render.window_api`, `kWindowApiProperty`).
+3. **The launcher** (`Launcher::switchWindowApi`) releases its GL context
+   and 2D renderer, makes a new window for that API (SDL_GPU: no graphics
+   flag, `SDL_ClaimWindowForGPUDevice` sets it up; Vulkan:
+   `SDL_WINDOW_VULKAN`; Metal: `SDL_WINDOW_METAL`) at the same size, place,
+   full screen state (and exclusive mode) and title, destroys the old one
+   (Android: first, one window at a time), and returns it; `host->window`
+   follows, `host->gl_context` is NULL. NULL when it cannot (no Vulkan
+   loader: `SDL_CreateWindow` fails): the window stays as it was.
+4. **`createDevice`** refuses a backend the launcher's window is not made
+   for (only that window: a game's own hidden window gets any device; the
+   properties are absent outside a launcher): `the launcher's window is made
+   for opengl3, not sdl3 (this launcher cannot hand it over ...)`. The game
+   then falls back (rule 2): `SDL_DestroyWindow` (nothing, for the
+   launcher's), `prepareWindow(Backend::OpenGL3, ...)`, `SDL_CreateWindow(...
+   SDL_WINDOW_OPENGL)`: the shim asks for an OpenGL window again, and the
+   launcher's context comes back with it. The shim's `SDL_GL_CreateContext`
+   on a window not made for OpenGL fails with that reason.
+5. **The module releases the window** before asking for another API and
+   before returning (destroys its device: `SDL_ReleaseWindowFromGPUDevice`,
+   the Vulkan surface). After `gd_game_run`, the launcher makes its OpenGL
+   window, context and renderer again by itself and draws its list (one
+   black frame at most). If that failed it says so in a message box and
+   stops, never leaving a black window.
 
-The model explorer (the launcher draws a module's scene) stays GL-only
-until the launcher's own 2D moves onto the core.
+Older launchers (no `request_window`) and older modules (never ask) keep
+working: the ABI version stays 1, the new fields are appended, and a module
+that asks an older launcher gets the OpenGL window and the core's refusal
+(so its OpenGL fallback). The game's window pointer changes with each
+hand-over: a game must ask before it stores the pointer anywhere (gd01:
+before `renderer_.init`), or take the one `SDL_CreateWindow` returns again.
+Window events of the old window (its id) may still be queued: the launcher
+pushes a `SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED` for the new one.
+
+The model explorer (the launcher draws a module's scene) stays OpenGL-only
+(its host has no `request_window`) until the launcher's own 2D moves onto
+the core.
 
 ## 6. gd-game-01 on the core
 
@@ -365,7 +534,23 @@ backend (phase 3).
   with each blend mode, depth test, scissor, a textured quad with mipmaps,
   a render target sampled in a second pass, an MSAA resolve, a cube map,
   uniforms in two slots, a copy, a blit, a top-down readback, and checks
-  pixels. `ctest` runs it; exit status 0 = pass.
+  pixels. `ctest` runs it; exit status 0 = pass. Its shaders also carry
+  their build-time SPIR-V (`render_selftest_spirv.h`), and two checks read
+  it back: every blob has SDL_GPU's sets and the dialect's slots, and the
+  reflection refuses what is not SPIR-V.
+- The build itself: `gdcore_shaderc` fails the build on any shader of the
+  core's self-test or of gd01's CoreRenderer that does not compile, is not
+  valid SPIR-V (`spirv-val`) or breaks the binding layout, on every package
+  build.
+- The window hand-over: `gd-engine-launcher/tests/handover/`
+  (`-DGDUL_BUILD_TESTS=ON`, `ctest -R gdul_handover`): a test module asks
+  for its window for SDL_GPU, Vulkan, OpenGL and SDL_GPU again the way a
+  game on the core does, uses each (an SDL_GPU device claims and presents,
+  a Vulkan surface, the core's OpenGL3 device draws), checks that the
+  core's `createDevice` refuses the wrong backend, and returns with the
+  window made for SDL_GPU; the test checks that the launcher made its
+  OpenGL window again and draws its list. Under `offscreen` SDL_GPU cannot
+  present (the headless surface), so that one check is skipped there.
 - gd01: the selftest and the walks on `local` and on `opengl3`
   (`GD01_GRAPHICS_BACKEND=opengl3`).
 - gd01 goldens: screenshots of the main menu, songs in three venues, the
@@ -376,7 +561,9 @@ backend (phase 3).
   presented frame and `std::random_device` return a fixed sequence (it is
   not part of any build). Results: section 8.
 
-## 8. Results (1.1.13 phase 1)
+## 8. Results (1.1.13)
+
+### Phase 1
 
 2026-11-06, Linux, NVIDIA RTX 3060 (driver 615.71), headless (offscreen):
 
@@ -392,28 +579,98 @@ backend (phase 3).
 - What the goldens do not cover: the Enhanced post-processing (off on the
   core path), True HDR, the upscalers, OpenGL ES devices (Android).
 
+### Phase 2a (the groundwork for SDL3 GPU and Vulkan)
+
+2026-11-06, same machine:
+
+- `gdcore_shaderc` (glslang + SPIRV-Tools, Vulkan SDK 1.4.321.0) built for
+  the host in under a minute; every shader of the core's self-test (6) and
+  of gd01's CoreRenderer (8: main, fill, depth of field, depth probe)
+  compiles to SPIR-V that passes `spirv-val` (Vulkan 1.0) and the dialect's
+  binding rules, with **no change to any shader**: the dialect was already
+  valid Vulkan GLSL 450 (the [I] of phase 1 is now [C]). A broken shader, a
+  loose uniform or a sampler in slot 9 fail the build at their .cpp line.
+- `gdcore_render_selftest`: 21 / 21 (19 + the two SPIR-V checks) on OpenGL
+  3.3 core, OpenGL ES 3.2 (`GD_GLES=1`) and Mesa llvmpipe.
+- The hand-over test (`ctest -R gdul_handover`): passes headless
+  (offscreen: SDL_GPU's claim is skipped, "This surface does not support
+  presenting!", the headless surface); all 17 checks pass on wayland and on
+  x11 (SDL_GPU on its Vulkan driver claims the handed-over window and
+  presents three frames; a Vulkan surface; the core's OpenGL3 device; the
+  launcher's list drawn again afterwards).
+- gd01 goldens (the eight shots of phase 1), the 2a build vs the phase-1
+  build (4304464): **local 0 differing pixels, opengl3 0 differing pixels,
+  in every shot.**
+
 ## 9. What phases 2 and 3 need
 
-- **SDL3 GPU** (`render/src/sdlgpu/`): a `Device` on `SDL_GPUDevice`; the
-  shader build step (glslang as a host tool at a pinned tag, SPIR-V for every
-  core and game shader embedded as arrays; shadercross for MSL / DXIL);
-  `ShaderDesc::spirv*` filled by the games (gd01: a generated header next to
-  core_renderer.cpp); `gd_clip` defined to remap z for 0..1 depth;
-  recording a pass so its transient uploads and pushed uniforms go in a copy
-  pass before it (section 4.2); readback through download transfer buffers;
-  depth textures that are both depth targets and sampled
-  (`SDL_GPU_TEXTUREUSAGE_SAMPLER | DEPTH_STENCIL_TARGET`, D24 where
-  `SDL_GPUTextureSupportsFormat` says so, else D32F: gd01's flare probe reads
-  through a shader, so the format may differ); the launcher window hand-over
-  (section 5) before a module can use it.
-- **Vulkan** (`render/src/vulkan/`): the same SPIR-V; volk + VMA; dynamic
-  rendering; the y flip in `gd_clip` (or a negative-height viewport) and the
-  front-face swap that goes with it; a pipeline cache; per-frame rings with
-  dynamic uniform offsets; then gd01's FSR 3.1 / DLSS natively.
-- **gd01**: port `post_fx.cpp` (17 fullscreen programs) and the True HDR
-  output pass onto the Device so the Enhanced effects run on every backend;
-  give its shaders a SPIR-V form; run the same goldens per backend (expect
-  small differences off OpenGL: other rasteriser tie rules and precision).
+Ready now (phase 2a): the SPIR-V of every core and gd01 shader at build
+time in every package (section 3), `ShaderDesc::spirv`, the reflection
+helper, the window hand-over (section 5), the interface's state rules (2.2),
+`Caps::clampToBorder`. No other interface change was needed: everything
+below is inside the backends.
+
+- **SDL3 GPU** (`render/src/sdlgpu/`, `GDCORE_RENDER_SDLGPU`):
+  - Device: `SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV, info.debug,
+    nullptr)` then `SDL_ClaimWindowForGPUDevice(dev, info.window)`; the
+    destructor waits idle, releases the window, destroys the device.
+    `windowFlags(SdlGpu)` stays 0.
+  - Shaders: `SDL_CreateGPUShader` from `spirvVertex` / `spirvFragment`
+    (`SDL_GPU_SHADERFORMAT_SPIRV`, entry `main`), `num_samplers` /
+    `num_uniform_buffers` from `reflectSpirv(...).numSamplers()` /
+    `numUniformBuffers()` per stage (`src/common/spirv_reflect.h`).
+    `pushUniforms(slot)` goes to `SDL_PushGPUVertexUniformData` when the
+    vertex info's `uniformMask` has the slot and to
+    `SDL_PushGPUFragmentUniformData` when the fragment's has it.
+    `bindTextures` to `SDL_BindGPUFragmentSamplers` / vertex samplers by the
+    `samplerMask`s; unused slots below a stage's count get a 1 x 1 dummy.
+  - Passes: record a pass's commands on the CPU until `endPass`, then
+    upload its transient data in a copy pass and replay the render pass
+    (SDL_GPU forbids a copy pass inside a render pass); outside a pass
+    `updateBuffer` / `updateTexture` / `copyTexture` / `generateMipmaps` /
+    `readTexture` go in copy passes (or `SDL_BlitGPUTexture` /
+    `SDL_GenerateMipmapsForGPUTexture`) of the frame's command buffer, in
+    call order.
+  - Readback: `SDL_DownloadFromGPUTexture` into a download transfer buffer,
+    a fence per frame (`SDL_SubmitGPUCommandBufferAndAcquireFence`),
+    `readbackReady` = `SDL_QueryGPUFence`. Rows come top-down already.
+  - Formats: D24 where `SDL_GPUTextureSupportsFormat(D24_UNORM,
+    SAMPLER | DEPTH_STENCIL_TARGET)`, else store D32_FLOAT (the game still
+    says D24; pipelines and textures map the same way); BGRA8 native;
+    textures with mips and a renderable format get `COLOR_TARGET` too
+    (`SDL_GenerateMipmapsForGPUTexture` needs it). `Caps::clampToBorder`
+    false (SDL_GPU has no border colour: ClampToBorder clamps to the edge).
+  - Present: acquire the swapchain texture at `present`, `SDL_BlitGPUTexture`
+    with `SDL_FLIP_VERTICAL` for `flipVertical`; a null swapchain texture
+    (minimised) skips it.
+  - Tests: `gdcore_render_selftest --backend sdl3` (same checks; the
+    SPIR-V is already in its ShaderDescs) on x11 / wayland (offscreen
+    cannot present, section 7), then gd01 with `GD01_GRAPHICS_BACKEND=sdl3`.
+- **Vulkan** (`render/src/vulkan/`): the same SPIR-V and reflection;
+  descriptor set layouts 0..3 as in 3.2 (combined image samplers in 0 / 2,
+  dynamic uniform buffers in 1 / 3, one per slot on a per-frame ring);
+  **negative-height viewport, front face unchanged** (3.2); volk + VMA;
+  dynamic rendering; a pipeline cache; `SDL_Vulkan_CreateSurface` on the
+  window (made with `SDL_WINDOW_VULKAN`); then gd01's FSR 3.1 / DLSS
+  natively.
+- **gd01** (the backend agents and the post-FX port; core_renderer.cpp is
+  the post-FX port's file now):
+  - `core_renderer_spirv.h` is already generated for gd01 (engine and
+    launcher module builds, `gdcore_spirv_shaders` in both CMakeLists.txt):
+    in `CoreRenderer::init`, `#include "core_renderer_spirv.h"` and set
+    `d.spirv(kMainVsSpirv, kMainFsSpirv)` etc. for the four programs. The
+    post-FX programs: add their file to `SOURCES` (or a second call).
+  - `app.cpp`: resolve the backend (`startupGraphicsBackend()` /
+    `GD01_GRAPHICS_BACKEND`) *before* `SDL_CreateWindow`; for `sdl3` /
+    `vulkan` call `gd::core::render::prepareWindow(b, gles)` and make the
+    window with `windowFlags(b)` instead of `SDL_WINDOW_OPENGL` (the True
+    HDR probe is GL-only: skip it there); if `renderer_.init` then falls
+    back to local, destroy the window, `prepareWindow(Backend::OpenGL3,
+    gles)`, make it again with `SDL_WINDOW_OPENGL`, and init local on it.
+    Nothing else changes for the launcher: the shim does the hand-over.
+  - Port `post_fx.cpp` and the True HDR output pass onto the Device; run the
+    same goldens per backend (expect small differences off OpenGL: other
+    rasteriser tie rules and precision).
 
 ## 10. Adding a backend
 
