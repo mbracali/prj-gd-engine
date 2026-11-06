@@ -321,6 +321,9 @@ struct DeviceCreateInfo {
     bool debug = false;            // API validation / debug output where available
     PresentMode presentMode = PresentMode::Vsync;
     GlHooks gl;
+    // A folder the backend may keep its caches in across runs (the game's
+    // pref folder; Vulkan: its pipeline cache). Empty: nothing on disk.
+    std::string cacheDir;
 };
 
 // Window flags and attributes a backend needs: call prepareWindow before
