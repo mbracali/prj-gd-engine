@@ -817,6 +817,11 @@ bool VulkanDevice::init(std::string& error) {
     std::string noPresent;
     if (forceHeadless) {
         noPresent = "GDCORE_VK_HEADLESS";
+    } else if (!(SDL_GetWindowFlags(info_.window) & SDL_WINDOW_VULKAN)) {
+        // Never SDL_Vulkan_CreateSurface on another window: SDL would turn an
+        // OpenGL window into a Vulkan one in place, unloading GL under the
+        // game's (or the launcher's) context [C: docs/render.md section 5].
+        noPresent = "the window is not made with SDL_WINDOW_VULKAN (prepareWindow / windowFlags(Backend::Vulkan))";
     } else if (!SDL_Vulkan_CreateSurface(info_.window, instance_, nullptr, &surface_)) {
         noPresent = std::string("no Vulkan surface on the window: ") + SDL_GetError();
         surface_ = VK_NULL_HANDLE;
