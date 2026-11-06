@@ -187,10 +187,11 @@ layout, so one SPIR-V blob serves both.
 path depend on two large host tools now, for no gain: the GL backend
 already accepts the dialect, and the drivers' GLSL compilers are the ones
 gd01 and gd02 have always used (the risk-free choice for `opengl3`). The
-dialect is valid GLSL 450 after the macros, so the build-time SPIR-V step
-needs no rewrite of any shader. `tools/` will hold a check that compiles
-every shader of the core and of each game to SPIR-V with glslang (it also
-catches dialect mistakes before phase 2).
+dialect is meant to be valid Vulkan GLSL 450 once the macros are defined
+for it, so the build-time SPIR-V step needs no rewrite of any shader [I: not
+yet checked; glslang is not installed on the phase-1 machine]. Phase 2's
+first step is a check that compiles every shader of the core and of each
+game to SPIR-V with glslang (it also catches dialect mistakes).
 
 `ShaderDesc` carries the forms a backend may pick: `glsl` (the dialect
 bodies + `#define` lines + reflection names) and `spirv` (vertex and
@@ -377,10 +378,44 @@ backend (phase 3).
 
 ## 8. Results (1.1.13 phase 1)
 
-Filled in by the work that landed it; see the report in the backlog item
-GDCORE-004 / 005.
+2026-11-06, Linux, NVIDIA RTX 3060 (driver 615.71), headless (offscreen):
 
-## 9. Adding a backend
+- `gdcore_render_selftest`: 19 / 19 on OpenGL 3.3 core, on OpenGL ES 3.2
+  (`GD_GLES=1`) and on Mesa llvmpipe.
+- gd01 goldens, 1280 x 720 window with the default 1080-line internal
+  resolution (and one 1000 x 750 window): main menu, Enhanced menu, Smoke on
+  the Water in small_club (30 s), theatre (45 s), arena (60 s), basement
+  (4:3 window, 50 s), Star Power deployed in big_club (183 s), the results
+  screen. The harness is reproducible: two runs of the same binary give 0
+  differing pixels. **Before (95e6dbd) vs after, local: 0 differing pixels
+  in every shot. Local vs opengl3: 0 differing pixels in every shot.**
+- What the goldens do not cover: the Enhanced post-processing (off on the
+  core path), True HDR, the upscalers, OpenGL ES devices (Android).
+
+## 9. What phases 2 and 3 need
+
+- **SDL3 GPU** (`render/src/sdlgpu/`): a `Device` on `SDL_GPUDevice`; the
+  shader build step (glslang as a host tool at a pinned tag, SPIR-V for every
+  core and game shader embedded as arrays; shadercross for MSL / DXIL);
+  `ShaderDesc::spirv*` filled by the games (gd01: a generated header next to
+  core_renderer.cpp); `gd_clip` defined to remap z for 0..1 depth;
+  recording a pass so its transient uploads and pushed uniforms go in a copy
+  pass before it (section 4.2); readback through download transfer buffers;
+  depth textures that are both depth targets and sampled
+  (`SDL_GPU_TEXTUREUSAGE_SAMPLER | DEPTH_STENCIL_TARGET`, D24 where
+  `SDL_GPUTextureSupportsFormat` says so, else D32F: gd01's flare probe reads
+  through a shader, so the format may differ); the launcher window hand-over
+  (section 5) before a module can use it.
+- **Vulkan** (`render/src/vulkan/`): the same SPIR-V; volk + VMA; dynamic
+  rendering; the y flip in `gd_clip` (or a negative-height viewport) and the
+  front-face swap that goes with it; a pipeline cache; per-frame rings with
+  dynamic uniform offsets; then gd01's FSR 3.1 / DLSS natively.
+- **gd01**: port `post_fx.cpp` (17 fullscreen programs) and the True HDR
+  output pass onto the Device so the Enhanced effects run on every backend;
+  give its shaders a SPIR-V form; run the same goldens per backend (expect
+  small differences off OpenGL: other rasteriser tie rules and precision).
+
+## 10. Adding a backend
 
 1. `render/src/<backend>/`: a class implementing `Device`; register it in
    `src/device.cpp`'s factory under its id; `backendCompiled` true where it
