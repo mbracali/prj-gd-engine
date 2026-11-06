@@ -72,7 +72,7 @@ beginFrame()                    waits until at most kFramesInFlight (2) frames a
                                 into a resolve texture), depth-stencil attachment (load / clear / store)
     setViewport / setScissor / setStencilRef / setBlendConstants
     bindPipeline / bindVertexBuffers / bindIndexBuffer
-    bindTextures(slot, {texture, sampler}...)           combined texture + sampler slots 0..7
+    bindTextures(slot, {texture, sampler}...)           combined texture + sampler slots 0..15
     pushUniforms(slot, data, size)                      std140 block contents for slot 0..3, used by later draws
     draw / drawIndexed (+ instances)
   endPass()
@@ -97,7 +97,7 @@ Rules that keep the three backends honest:
   stages (SDL_GPU: the backend pushes it to the vertex and fragment slot the
   shader declares; Vulkan: a dynamic-offset uniform buffer per slot; GL: a
   ring buffer bound with `glBindBufferRange` at binding = slot).
-- **Textures and samplers bind as pairs** in slots 0..7 (`kMaxTextureSlots`),
+- **Textures and samplers bind as pairs** in slots 0..15 (`kMaxTextureSlots`),
   which is what SDL_GPU (`SDL_BindGPUFragmentSamplers`), Vulkan (combined
   image samplers) and GL (texture unit + sampler object) all do natively.
 - **What a pass keeps** (SDL_GPU's and Vulkan's state lives in the pass /
@@ -198,7 +198,7 @@ Rules of the dialect (the build step enforces the binding ones):
 - **No loose uniforms** (`uniform float x;`): Vulkan GLSL has none. Every
   value goes in a `GD_UNIFORMS` block (std140), at most
   `kMaxUniformSlots` (4) blocks per stage, slots 0..3.
-- **Textures are combined samplers** in slots 0..7 (`kMaxTextureSlots`). No
+- **Textures are combined samplers** in slots 0..15 (`kMaxTextureSlots`). No
   separate samplers, storage buffers, storage images or push constants
   (SDL_GPU's graphics pipelines bind only what is listed here).
 - **Varyings match by location** in SPIR-V and by name in GL 3.3: give a
@@ -452,7 +452,7 @@ web). Vulkan 1.1 or newer (1.3 used where the loader and the device have it).
 | transient data, `pushUniforms`, staging | one persistently mapped, host-coherent ring per frame slot (4 MiB chunks, bigger one-off chunks for big uploads, dropped after use) |
 | `updateBuffer` / `updateTexture` | staging in the ring + `vkCmdCopyBuffer` / `vkCmdCopyBufferToImage` in call order (draws recorded before see the old contents). Refused inside a pass (2.2) |
 | `pushUniforms(slot)` | the data in the ring; sets 1 and 3 are one descriptor set of 4 `UNIFORM_BUFFER_DYNAMIC` bindings (range 16 KiB, the ring keeps that much room after each block) and the slot's dynamic offset moves. Pushed slots are reset at `beginFrame` (an empty block is bound) |
-| `bindTextures` | sets 0 and 2: one descriptor set of 8 combined image samplers (both stages: the interface's slots are shared), made on change and cached per frame slot by (texture uid, sampler); unbound slots get a 1 x 1 texture |
+| `bindTextures` | sets 0 and 2: one descriptor set of 16 combined image samplers (both stages: the interface's slots are shared), made on change and cached per frame slot by (texture uid, sampler); unbound slots get a 1 x 1 texture. The set is visible to both stages and bound at sets 0 and 2, so a pipeline layout counts 32 samplers per stage: within every desktop driver's `maxPerStageDescriptorSamplers`, above the spec's minimum of 16 (some older mobile drivers: a vertex-only and a fragment-only layout would bring it back to 16) |
 | shaders | SPIR-V only (`ShaderDesc::spirv*`), checked with `reflectSpirv`; one pipeline layout (sets 0..3 as 3.2) for every pipeline |
 | pipelines | immutable, dynamic viewport / scissor / stencil reference / blend constants; depth written with the test off = test `Always` (as GL); without `independentBlend` every target uses target 0's blend (as GLES); the pipeline cache on disk (`cacheDir`) |
 | y and the front face | the viewport's height is negative (`y = top + h`, core 1.1); the front face goes through unchanged (3.2); the self-test's cull check passes |
@@ -786,7 +786,7 @@ FSR 1 on the core; checked that it logs and draws), OpenGL ES.
   compiles to SPIR-V that passes `spirv-val` (Vulkan 1.0) and the dialect's
   binding rules, with **no change to any shader**: the dialect was already
   valid Vulkan GLSL 450 (the [I] of phase 1 is now [C]). A broken shader, a
-  loose uniform or a sampler in slot 9 fail the build at their .cpp line.
+  loose uniform or a sampler in slot 16 fail the build at their .cpp line.
 - `gdcore_render_selftest`: 21 / 21 (19 + the two SPIR-V checks) on OpenGL
   3.3 core, OpenGL ES 3.2 (`GD_GLES=1`) and Mesa llvmpipe.
 - The hand-over test (`ctest -R gdul_handover`): passes headless

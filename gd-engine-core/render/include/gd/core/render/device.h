@@ -21,7 +21,7 @@ namespace gd::core::render {
 // ---------------------------------------------------------------- limits
 
 constexpr int kMaxColorTargets = 4;
-constexpr int kMaxTextureSlots = 8;   // combined texture + sampler slots
+constexpr int kMaxTextureSlots = 16;  // combined texture + sampler slots (GH2's standard shader uses 13)
 constexpr int kMaxUniformSlots = 4;   // std140 blocks (SDL_GPU: 4 per stage)
 constexpr int kMaxVertexBuffers = 4;
 constexpr int kMaxVertexAttributes = 16;
@@ -168,6 +168,8 @@ struct ShaderDesc {
                                                kVertexStage | kFragmentStage, kVertexStage | kFragmentStage};
     const char* samplers[kMaxTextureSlots] = {};
     uint8_t samplerStages[kMaxTextureSlots] = {kFragmentStage, kFragmentStage, kFragmentStage, kFragmentStage,
+                                               kFragmentStage, kFragmentStage, kFragmentStage, kFragmentStage,
+                                               kFragmentStage, kFragmentStage, kFragmentStage, kFragmentStage,
                                                kFragmentStage, kFragmentStage, kFragmentStage, kFragmentStage};
 
     // Sets the SPIR-V form from the arrays gdcore_shaderc generates
