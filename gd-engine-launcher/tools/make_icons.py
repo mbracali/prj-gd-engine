@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
 # Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 """Makes the launcher's images from the Guitar Dream Engine badge
-(res/icon_full.jpg at the repo root), the same cut as gd-game-02's
+(docs/res/icon_full.jpg at the repo root), the same cut as gd-game-02's
 tools/make_icons.py. The results are committed; run it again (needs Pillow)
 after changing the badge:
 
@@ -26,7 +26,7 @@ from PIL import Image, ImageDraw
 HERE = os.path.dirname(os.path.abspath(__file__))
 LAUNCHER = os.path.dirname(HERE)
 REPO = os.path.dirname(LAUNCHER)
-SRC = os.path.join(REPO, "res", "icon_full.jpg")
+SRC = os.path.join(REPO, "docs", "res", "icon_full.jpg")
 RES = os.path.join(LAUNCHER, "res")
 ANDROID_RES = os.path.join(LAUNCHER, "android", "app", "src", "main", "res")
 DENSITIES = {"mdpi": 1, "hdpi": 1.5, "xhdpi": 2, "xxhdpi": 3, "xxxhdpi": 4}

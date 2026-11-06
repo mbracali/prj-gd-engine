@@ -1,68 +1,99 @@
-# Kickoff: gd-game-03, Guitar Hero Encore: Rocks the 80s (PlayStation 2)
+# Kickoff: gd-game-04, Guitar Hero III: Legends of Rock (Xbox 360)
 
 > **You are starting a new reimplementation and will run unattended all
 > night.** Read this whole file before your first command. It holds the
 > owner's rules, the plan, the gates and the mistakes made on earlier games,
 > so you can do this almost in one shot. When it conflicts with a tool
-> default, this file wins. When it conflicts with `docs/knowledge/`, the
+> default, this file wins. When it conflicts with `docs/guidelines/`, the
 > guidelines win.
 
 ## 1. The target
 
 | | |
 |---|---|
-| Game | **Guitar Hero Encore: Rocks the 80s** (Harmonix / RedOctane, July 2007), PlayStation 2, USA |
-| Folder / program | `gd-game-03/` → `gd03`, env prefix `GD03_`, Android `io.github.mbracali.gd03` |
-| Disc | `~/Development/prj-gd-engine/original_isos/Guitar Hero Encore - Rocks the 80s (USA) (PS2).iso` (1.9 GB, ISO 9660) |
-| Boot | `SYSTEM.CNF` `BOOT2 = cdrom0:\SLUS_215.86;1`; root: `GEN/`, `IOP/`, `VIDEOS/`, `SLUS_215.86`, `SYSTEM.CNF` |
-| Volume ID | **`GH2`**: the game runs on the PS2 build of Guitar Hero II's engine |
-| Executable | `SLUS_215.86`, a MIPS R5900 ELF (PS2 Emotion Engine) |
-| Branch | `feature/20261029-gd-game-03-initial` (from `origin/develop`, in its own worktree, section 3) |
+| Game | **Guitar Hero III: Legends of Rock** (Neversoft / RedOctane, October 2007), Xbox 360, USA Rev 1 |
+| Folder / program | `gd-game-04/` → `gd04`, env prefix `GD04_`, Android `io.github.mbracali.gd04` |
+| Disc | `~/Development/prj-gd-engine/original_isos/Guitar Hero III - Legends of Rock (USA) (Rev 1) (X360).iso` (7.8 GB, XDVDFS / XGD2) |
+| Executable | `default.xex` (PowerPC, Xenon; encrypted and compressed XEX2) |
+| Branch | `feature/20261029-gd-game-04-initial` (from `origin/develop`, in its own worktree, section 3) |
 | Goal | a full decompilation-based reimplementation, 100% faithful, playable from the Universal Launcher on Linux, Steam Deck, Windows and Android |
 
-### What this means for reuse (read before writing any code)
+### This is a different engine (read before writing any code)
 
-This game sits **between the two finished games**:
+GH3 is **Neversoft's** engine, not Harmonix's. **None of the Harmonix
+formats or scripts apply**: no Milo, no DataArray `.dtb`, no MIDI charts on
+disc, no `.mogg`. Don't port gd-game-02's game layers and try to bend them;
+write the GH3 layers from GH3's executable and data.
 
-- **gd-game-01 (GH1, PS2)** is your reference for everything PS2:
-  - ISO 9660 and the `GEN/MAIN.HDR` + `MAIN_n.ARK` archive;
-  - PS2 textures (`.bmp_ps2` / `.png_ps2`, palettes, alpha 0..0x80, CSM1);
-  - `.vgs` audio (PS-ADPCM);
-  - the `.dtb` decryption family;
-  - the PS2 video module, the 4:3 pillarboxed menus;
-  - how Ghidra handles the EE ELF.
-  - Code: `gd-game-01/engine/src/data/`, `audio/`, `video/`, `render/`;
-    tools: `gd-game-01/tools/`.
-- **gd-game-02 (GH2, Xbox 360)** is your reference for the **GH2-generation
-  engine and rules**:
-  - the Milo scene graph and its classes;
-  - the DataArray script interpreter and UI system (screens, panels,
-    components);
-  - the highway and HUD (track_graphics, smash and combo views, star
-    meter);
-  - the venues, camera director and band;
-  - the gameplay rules (HOPO, Star Power, co-op, face-off, practice);
-  - the walk and venue tests, the launcher module.
-  - Code: `gd-game-02/engine/src/`, docs: `gd-game-02/docs/`.
+**Reuse from gd-game-02** only what doesn't depend on the engine:
+- the platform layer (paths, GPU select, icon, Android data / fd access);
+- XDVDFS and `RandomFile` (`gd-game-02/tools/xdvdfs.py`, `engine/src/data/`);
+- XEX handling and the Ghidra XEX workflow (`gd-game-02/ghidra/README.md`,
+  `tools/ghidra_scripts/ExportAnalysisXex.java`);
+- XMA decoding through the project's FFmpeg build (xma1/xma2, LGPL,
+  `build_common.sh`);
+- the audio device, mixer and resampling (L8);
+- input, controllers and the GAMEPADS screen;
+- GL / GLES device basics and the shader test;
+- the dev-aid infrastructure and the test harness shape;
+- the launcher module and SDK glue;
+- the build scripts for every platform.
 
-**Expect** the GH2 code paths with PS2 data formats. **Assume nothing.**
-- Milo object versions, `.dtb` encryption and endianness, the texture
-  formats, the audio (`.vgs` or other), the video format in `VIDEOS/`, the
-  save format (memory card) and every gameplay constant must be confirmed in
-  `SLUS_215.86` and on the disc.
-- Write each confirmation in `docs/FINDINGS.md` as **[C] address**.
-- Where GH80s differs from GH2 or GH1, the GH80s executable wins, every
-  time.
+Expect these Neversoft formats, and **confirm each against the disc and the
+XEX** (offsets, endianness, hashing). Write each confirmation in
+`docs/FINDINGS.md` and the format docs, as [C] / [I]:
+- **Archives:** `.pak.xen` + `.pab.xen` pairs; entries keyed by **QB
+  checksums** (CRC32-based name hashes).
+- **Debug names:** build a checksum → name table from every name the disc
+  and the XEX reveal (debug paks, script strings), so the logs stay
+  readable.
+- **QB:** compiled QScript (`.qb.xen`): structs, arrays, script bytecode.
+  Gameplay flow, menus, career, the store and much tuning live in QB.
+  Following lesson L1, **run the original scripts through your own QScript
+  interpreter**; don't hand-port them. Log every unhandled script function
+  or C-function call once.
+- **Charts:** per song in its pak, as QB arrays: notes (time, length, fret
+  mask) per difficulty and part (guitar, rhythm / bass, co-op), Star Power
+  phrases, battle-star (boss / battle) phrases, face-off sections, fretbars,
+  time signatures, markers, lighting and camera events.
+- **Audio:** FSB4 banks (`.fsb.xen`), XMA. The song stems (guitar, rhythm,
+  song, plus the co-op variants) may be **encrypted or obfuscated**; find
+  out in the XEX.
+- **Textures and scenes:** `.img.xen` / `.tex.xen` (360-tiled DXT, endian
+  swapped), `.scn.xen` / `.mdl.xen` / `.skin.xen` (geometry, materials,
+  skinning), `.ska.xen` animations, `.col.xen`.
+- **Fonts:** `.fnt.xen`. **Video:** check what's on the disc (Bink or WMV).
 
-Known Ghidra setup on this machine (from gd-game-01):
+You may read publicly documented format notes from the modding community to
+speed up, but **don't copy any third-party code**. Write our own decoders,
+validated byte-exact (L21), and confirm every rule in the XEX: community
+notes describe the PC version and may differ.
+
+**GH3 features to reproduce** (verify the full list from the data):
+- Career: single player with tiers, encores, **boss battles** (Tom Morello,
+  Slash, Lou) and cash.
+- **Co-op career**, quickplay, practice (sections, speed).
+- Multiplayer: face-off, **pro face-off**, **battle mode** (battle
+  power-ups thrown with Star Power: Amp Overload, Broken String, Difficulty
+  Up, Double Notes, Lefty Flip, Whammy, Steal, Death Drain), **co-op
+  quickplay**.
+- Tilt / Select Star Power, whammy, HOPOs with GH3's own tolerance rules,
+  sustains, the rock meter.
+- The store (the Vault: songs, guitars, finishes, characters, outfits,
+  videos), unlocks, cheats (the original's codes).
+- Online, leaderboards and achievements: stub them, logged, and label them
+  in the backlog as "not in the port".
+
+Known Ghidra setup on this machine (from gd-game-02):
 - Ghidra 12.1.4 at `~/.local/opt/ghidra_12.1.4_PUBLIC`, JDK 21 at
   `~/.local/opt/jdk-21.0.12.1+1` (`export JAVA_HOME=...`).
-- The `ghidra-emotionengine-reloaded` extension is installed (language
-  `r5900:LE:32:default`, auto-selected on import).
-- The REA MCP tool **can't open PS2 ELFs**: use Ghidra headless.
-- Port `gd-game-02/tools/ghidra_scripts/ExportAnalysisXex.java` (functions,
-  strings, refs, pseudocode export into `ghidra/analysis/`) to the ELF, and
-  add `DumpAsm.java` / `ReadF.java` (section 4, rule 4).
+- The **XEXLoaderWV** extension is installed in Ghidra's Extensions:
+  import `default.xex` with it.
+- Add `DumpAsm.java` / `ReadF.java` (section 4, rule 4).
+- Export the functions, strings, refs and pseudocode into `ghidra/analysis/`
+  as gd-game-02 did. Name and comment functions as you confirm them (the
+  QB C-function table is the first big map: script names → native
+  addresses).
 
 ## 2. How you work tonight (autonomous mode)
 
@@ -72,11 +103,11 @@ truly blocked on all of them.
 
 - **Decisions.** When something would normally be the owner's choice, pick the
   original game's behaviour. When the original is unknown, pick the gd-game-02
-  pattern. Write the choice in `gd-game-03/agents/DECISIONS.md`: what was chosen,
+  pattern. Write the choice in `gd-game-04/agents/DECISIONS.md`: what was chosen,
   why, and how to undo it. Write questions for the morning in
-  `gd-game-03/agents/OPEN_QUESTIONS.md`. Never block on either.
+  `gd-game-04/agents/OPEN_QUESTIONS.md`. Never block on either.
 - **Progress log (the owner's "updates from time to time").** After every
-  milestone, and at least every 2 hours, append to `gd-game-03/agents/PROGRESS.md`:
+  milestone, and at least every 2 hours, append to `gd-game-04/agents/PROGRESS.md`:
   - time;
   - milestone and what is done;
   - test results, with the exact commands and the pass/fail lines;
@@ -93,26 +124,26 @@ truly blocked on all of them.
 
 ## 3. Ground rules (non-negotiable, from the owner)
 
-Read every file in `docs/knowledge/` first:
+Read every file in `docs/guidelines/` first:
 - `general_guidelines.md`
 - `universal_launcher.md`
-- `smilar_behaviors.md`
+- `universal-behaviors.md`
 
-Then read the root `README.md`, `docs/adding-a-game.md`, `docs/tasks/gd-backlog.md`, and
+Then read the root `README.md`, `docs/platform/adding-a-game.md`, `docs/tasks/gd-backlog.md`, and
 `gd-game-02/docs/reuse_and_lessons.md` (lessons L1-L21, all of them).
 
 - **Workspace isolation.** Another session may be working on the other new
   game at the same time. Work in your **own git worktree**:
   ```bash
   cd ~/Development/prj-gd-engine && git fetch origin
-  git worktree add ../prj-gd-engine-gd03 -b feature/20261029-gd-game-03-initial origin/develop
-  cd ../prj-gd-engine-gd03
+  git worktree add ../prj-gd-engine-gd04 -b feature/20261029-gd-game-04-initial origin/develop
+  cd ../prj-gd-engine-gd04
   ```
   - The disc images stay in the main checkout's git-ignored
     `~/Development/prj-gd-engine/original_isos/`. Use that absolute path.
-  - Put your rip in this worktree's `gd-game-03/extracted/` and your Ghidra
-    project in `gd-game-03/ghidra/` (both git-ignored).
-  - Outside `gd-game-03/`, only touch, minimally:
+  - Put your rip in this worktree's `gd-game-04/extracted/` and your Ghidra
+    project in `gd-game-04/ghidra/` (both git-ignored).
+  - Outside `gd-game-04/`, only touch, minimally:
     - your game's section of `docs/tasks/gd-backlog.md`;
     - `gd-engine-launcher/scripts/build.sh` (your `build_module_NN`);
     - `gd-engine-launcher/games.yaml`, if needed.
@@ -146,7 +177,7 @@ Then read the root `README.md`, `docs/adding-a-game.md`, `docs/tasks/gd-backlog.
     (L17).
 - **Processes.**
   - Every command that runs the game gets a `timeout`.
-  - Never leave background processes behind; check with `pgrep -fa gd03`
+  - Never leave background processes behind; check with `pgrep -fa gd04`
     before you finish a milestone.
   - Never wait with `pgrep -f <pattern>` when the pattern also matches your
     own shell.
@@ -169,7 +200,7 @@ These cost the owner days of back and forth. Each one is now a rule.
      still when the song was started from the menus. The world clock was set
      after the intro shot was picked. It was reported three times.
    - The rule: every feature is verified through **the menus**
-     (`--walktest`), through the launcher (`--play gd03`), and on Windows
+     (`--walktest`), through the launcher (`--play gd04`), and on Windows
      under Wine. `--song` is only a shortcut while you develop.
 2. **Never test a stale binary.**
    - Rebuild, then test. Check the binary's timestamp is newer than your
@@ -190,7 +221,7 @@ These cost the owner days of back and forth. Each one is now a rule.
 4. **The decompiler drops arguments: read the assembly.** Ghidra's output
    lost the argument that carried the "phrase captured" state. Save a
    headless asm dumper and a float/data reader as Ghidra scripts in
-   `gd-game-03/tools/ghidra_scripts/` on day one:
+   `gd-game-04/tools/ghidra_scripts/` on day one:
    - `DumpAsm.java` (address:count) and `ReadF.java`.
    - Run them with `analyzeHeadless <abs project dir> <name> -process
      -readOnly -noanalysis -postScript ...`. The project path must be
@@ -228,7 +259,7 @@ These cost the owner days of back and forth. Each one is now a rule.
     - Screens must not darken when you go back and forth.
     - Locked items show as locked.
     - Mouse works everywhere; Enter is Start.
-    - GAMEPADS and Enhanced menus follow `docs/knowledge/universal_launcher.md`.
+    - GAMEPADS and Enhanced menus follow `docs/guidelines/universal_launcher.md`.
 11. **The Glitches** band has **everything** unlocked in every build.
 12. **Packages.** A launcher build missing a module, or a launcher that
     can't open ISOs (Android 15 content URIs, Windows DLL dependencies such
@@ -242,25 +273,25 @@ These cost the owner days of back and forth. Each one is now a rule.
 
 ## 5. The pattern to follow (gd-game-02 is the model)
 
-Folder layout as in `docs/adding-a-game.md`:
+Folder layout as in `docs/platform/adding-a-game.md`:
 - `README.md`, `CHANGELOG.md`, `game-info.yaml`, `local_build.sh`;
 - `build_commands/`, `docs/`, `engine/`, `tools/`, `agents/`;
 - the git-ignored `extracted/`, `ghidra/` and `local_builds/`.
 
 Engine:
-- program `gd03`, save folder `SDL_GetPrefPath("gd-engine","gd03")`;
-- Android package `io.github.mbracali.gd03`;
-- env prefix `GD03_`.
+- program `gd04`, save folder `SDL_GetPrefPath("gd-engine","gd04")`;
+- Android package `io.github.mbracali.gd04`;
+- env prefix `GD04_`.
 
 **Dev aids from day one (L6).** Copy gd02's set, renamed:
 - `--song <id> --autoplay`, `--difficulty`, `--no-fail`;
-- `GD03_KEYS` scripted input (menu keys and song keys);
-- `GD03_SCREENSHOT` / `GD03_SCREENSHOT_AT` (wall-clock ms, or `s<ms>`
+- `GD04_KEYS` scripted input (menu keys and song keys);
+- `GD04_SCREENSHOT` / `GD04_SCREENSHOT_AT` (wall-clock ms, or `s<ms>`
   for song ms);
-- `GD03_SCREEN`, `GD03_SKIP_BOOT`;
-- `GD03_SFXLOG`, `GD03_UILOG` (every unhandled script message, stub or
+- `GD04_SCREEN`, `GD04_SKIP_BOOT`;
+- `GD04_SFXLOG`, `GD04_UILOG` (every unhandled script message, stub or
   unknown class is logged once, L1);
-- `GD03_STATS`, `GD03_PERF`.
+- `GD04_STATS`, `GD04_PERF`.
 
 **Headless tests (all of them take the disc path):**
 - `--selftest`: data checks, plus every chart auto-played at every
@@ -274,7 +305,7 @@ Engine:
 - `--venuetest`: every venue loads; every camera shot is checked; the
   result is the same at 60 and 240 fps.
 - `--shadertest`: every shader compiles on GL and on GLES
-  (`GD03_GLES=1`).
+  (`GD04_GLES=1`).
 - `--walktest <walk>` (`SDL_VIDEO_DRIVER=offscreen
   SDL_AUDIO_DRIVER=dummy`), with the walks:
   - quickplay, lose, pause, attract, back;
@@ -282,15 +313,15 @@ Engine:
   - enhanced, cheats, mouse, gamepads, stickyaxis;
   - every multiplayer mode the original has.
 
-**Launcher module (`docs/adding-a-game.md`, "The launcher module"):**
+**Launcher module (`docs/platform/adding-a-game.md`, "The launcher module"):**
 - `gd_game_run`, `gd_game_explore` (Explore models: characters in their
   rest pose, a "Show instrument" toggle) and `gd_game_ui_sounds`.
-- The `GD03_MODULE` CMake option.
+- The `GD04_MODULE` CMake option.
 - `build_module_NN` in `gd-engine-launcher/scripts/build.sh`.
 - `iso_signatures` in `game-info.yaml`. Read the real values from the disc
   and check that the launcher recognises it in `gdul.log`.
 
-**Port extras (`docs/knowledge/`):**
+**Port extras (`docs/guidelines/`):**
 - the Enhanced menu, in gd-game-01's layout (options left, band close-up
   right; dropdowns for multiple choice, checkboxes for on/off);
 - the GAMEPADS screen (the yellow fret on the main menu opens it);
@@ -305,7 +336,7 @@ Engine:
   with its own `WINEPREFIX`), Android arm64.
 - macOS builds only if a toolchain exists; never claim it was tested.
 
-**Docs (`gd-game-03/docs/`):** `FINDINGS.md` (gameplay rules, with addresses),
+**Docs (`gd-game-04/docs/`):** `FINDINGS.md` (gameplay rules, with addresses),
 plus one file per subsystem (formats, renderer, highway and HUD, UI, venues,
 audio and charts, band, career). Keep them current: they are the memory
 between sessions.
@@ -314,108 +345,105 @@ between sessions.
 
 Estimates are for planning; write yours in `PROGRESS.md`.
 
-**M0: set-up (≈30 min).**
+**M0: set-up (≈45 min).**
 - Create the worktree and branch.
-- Fill the `gd-game-03/` layout: copy gd-game-02's README, local_build.sh,
-  build_commands and engine skeleton and rename (gd02→gd03, GD02_→GD03_).
-  Empty the game logic.
-- Write `agents/CONTEXT.md` (how to build, test and run; the clocks).
+- Fill the `gd-game-04/` layout from gd-game-02's skeleton (README,
+  local_build.sh, build_commands, the engine's platform, build and test
+  scaffolding), renamed (gd02→gd04, GD02_→GD04_). **No Harmonix game
+  code.**
+- Write `agents/CONTEXT.md` (build, test, run; the clocks).
 - Add the `PROGRESS.md` / `DECISIONS.md` / `OPEN_QUESTIONS.md` files.
-- Rip the disc into `extracted/` (ISO files, ARK unpacked).
-- Import `SLUS_215.86` into Ghidra headless, analyse it, export
+- Rip the disc into `extracted/` (XDVDFS files).
+- Import `default.xex` with XEXLoaderWV, analyse it, export
   `ghidra/analysis/`, and add the DumpAsm / ReadF scripts.
-- Backlog section "gd-game-03": replace "Discovery" with the milestone rows.
-- `game-info.yaml`: version 0.0.1, `iso_signatures` (`format: iso9660`,
-  `ps2_boot: "SLUS_215.86"`, `volume_id: "GH2"`).
+- Read `default.xex`'s **title ID** for `game-info.yaml` `iso_signatures`
+  (`format: xdvdfs`, `xex_title_id`).
+- Backlog section "gd-game-04": replace "Discovery" with the milestone rows.
+- Version 0.0.1.
 
-**M1: data layer (≈2 h).**
-- Archive reader (`GEN/MAIN.HDR` + ARKs, as gd01 if it matches; verify),
-  `.dtb` reader (the decryption confirmed in the ELF), textures, Milo
-  container and every object class the disc uses.
-- Python tools in `tools/` decode **byte-exact** (L21): `ark.py`, `dtb.py`,
-  `milo.py`, `tex.py`.
-- Gate: `--scenetest` parses **every** Milo file and object to its end
-  marker; every texture decodes; every dtb decodes.
+**M1: data layer (≈3 h).**
+- PAK/PAB reader, QB checksum hashing and the debug-name table, the QB
+  decoder (every node type), textures, scenes, models, skins, animations,
+  collision, fonts.
+- Python tools in `tools/` decode **byte-exact** (L21): `pak.py`, `qb.py`,
+  `img.py`, `scn.py`, `fsb.py`.
+- Gate: `--scenetest` (or `--formattest`) parses **every** file of every
+  type to its end with no unknown chunks; every texture decodes; the name
+  table resolves the checksums the scripts use.
 
-**M2: songs, audio, gameplay core (≈2 h).**
-- Song list (`songs.dta`), charts (MIDI), audio streams with the original's
-  mixing (guitar / rhythm / song tracks, the miss mute), sound effects
-  banks.
-- Gameplay rules ported from the ELF, rendering-free (L17):
-  - hit window, HOPO, sustains and whammy;
-  - Star Power (phrases, meter, activation by tilt or Select);
-  - multiplier, rock meter and failing, score;
-  - every difficulty.
-- Gate: `--selftest` "all charts fully hit" at every difficulty;
-  `--sfxtest` decodes everything; the rules are in `FINDINGS.md` with
-  addresses.
+**M2: songs, audio, gameplay core (≈3 h).**
+- Song list and metadata (QB), charts from the song paks, FSB4/XMA streams
+  with decryption if any, the stem mixing (guitar / rhythm / song / co-op,
+  the miss mute), sound effects.
+- Gameplay rules from the XEX and QB tuning, rendering-free (L17):
+  - hit window, HOPO tolerance, sustains and whammy;
+  - Star Power (tilt and Select);
+  - multiplier, rock meter, score;
+  - battle and boss-battle power-ups, face-off and pro face-off;
+  - co-op rules.
+- Gate: `--selftest` "all charts fully hit" for every song, part and
+  difficulty; `--sfxtest` decodes every bank; the rules are in
+  `FINDINGS.md` with addresses.
 
-**M3: scripts, UI, the asset audit (≈3 h).**
-- The DataArray interpreter running the game's own scripts (L1), with
-  every unhandled message logged.
-- UI: screens, panels, components, fonts, text, transitions forward and
-  back, help bar, menu sounds (never silenced).
-- The **asset audit tool** (`--audittest`, section 4 rule 3): every
-  referenced name in dtb, scripts and Milo against what the engine
-  resolves. Write the gaps to `docs/audit.md` and the backlog.
+**M3: QScript interpreter, UI, the asset audit (≈4 h).**
+- The QScript VM running the game's own scripts (L1): structs, arrays,
+  script calls, spawned scripts, waits, events, the C-function bindings
+  implemented natively (each logged once when unhandled).
+- Menus as the original builds them: element tree, screen elements, text,
+  fonts, transitions forward and back, sounds (never silenced).
+- The **asset audit tool** (`--audittest`, section 4 rule 3): every name
+  referenced in QB, paks and scenes against what the engine resolves. Write
+  the gaps to `docs/audit.md` and the backlog.
 - Gate: `--scripttest`, `--uitest`; `--walktest quickplay` goes from boot
-  through the menus into a song and to the results screen.
+  (splashes and movies skippable) through the menus into a song and to the
+  results screen.
 
-**M4: highway and HUD, exact (≈2 h).**
-- Track, gems, tails (solid, glow lines drawn after their tails), smashers,
-  hit and burn effects.
-- The Star Power look:
-  - star gems;
-  - the phrase-captured combo views and their lightning;
-  - the rails, the lightning group during Star Power.
-- Streaks, the multiplier, the rock meter, the star meter (fill and ready
-  views, lightning), score, HUD.
-- Song start order (section 4 rule 9); explode on win.
-- Gate: `--walktest quickplay` asserts counters for every effect
-  (`star_smashes`, glow lines, combos), and screenshots at known song times
+**M4: highway and HUD, exact (≈2.5 h).**
+- Fretboard, gems, HOPO gems, star gems, sustains, whammy, the hit and
+  flame effects, the Star Power look (blue highway, lightning) and its
+  activation, the rock meter, the star meter, multiplier and streak, score.
+- The battle-mode HUD and attack effects; the boss-battle HUD.
+- Song start order (section 4 rule 9).
+- Gate: walk counters for every effect, and screenshots at known song times
   look right.
 
-**M5: venues, cameras, lighting (≈3 h).**
-- Every venue:
-  - world objects, animations, splines, lights and light presets;
-  - post effects with an "off" fallback (L5);
-  - crowd, as the original.
-- The camera director:
-  - shot picking, the INTRO shot moving from the first frame **through the
-    menus**;
-  - exact look-at, path and scale keys;
-  - fixed step.
-- Gate: `--venuetest` loads every venue, checks every shot of every venue,
-  and gives identical picks at 60 and 240 fps. The walk's intro camera
-  travels before the track extends.
+**M5: venues, cameras, lighting (≈3.5 h).**
+- Every venue: scenes, animated objects, lights, effects (post effects
+  with an "off" fallback, L5), crowd.
+- The camera system driven by the charts' camera events, and its
+  scripts: exact transforms, fixed step, the intro moving from the first
+  frame **through the menus**.
+- Gate: `--venuetest` loads every venue, checks every camera of every
+  venue, and gives identical results at 60 and 240 fps.
 
 **M6: the band (≈3 h).**
-- Characters, outfits and instruments: necks drawn in LOD order, no
-  see-through parts.
-- Animation clips and the character driver, hands and fingering.
-- Faces and lip sync as the original.
-- Gate: `--chartest` decodes every character and clip and checks golden
-  poses; no band member vanishes from any shot.
+- Characters (including the boss and unlockable characters), outfits,
+  instruments, skinning.
+- Animations driven as the original (song events, the per-character anim
+  sets); faces and lip sync if the original has them.
+- Gate: `--chartest` decodes every character and animation and checks
+  golden poses; no band member vanishes from any shot.
 
-**M7: modes, career, saves (≈3 h).**
-- Career (tiers, encores, cash, unlocks), quickplay, practice, co-op,
-  face-off: every mode the original has, with its own rules.
-- Store and unlocks, if the original has them (verify).
+**M7: modes, career, saves (≈3.5 h).**
+- Career and co-op career with tiers, encores, the bosses and cash;
+  quickplay, practice, face-off, pro face-off, battle.
+- The Vault (store) and unlocks; the original's cheats.
 - Saves as versioned JSON (L12).
-- **The Glitches** with everything unlocked.
+- **The Glitches** with everything unlocked and bought.
 - Gate: walks `career`, `career_full`, `career_song`, `coop`, `faceoff`,
-  `lose`, `pause`, `back`, `attract`.
+  `proface`, `battle`, `boss`, `lose`, `pause`, `back`, `attract`.
 
 **M8: the port's extras (≈2 h).**
-- Enhanced menu, GAMEPADS, mouse and touch, cheats, Steam Deck preset,
-  per-platform defaults, the windowed default: exactly per
-  `docs/knowledge/universal_launcher.md`, modelled on gd-game-01.
+- Enhanced menu, GAMEPADS, mouse and touch, cheats, Steam Deck preset, the
+  windowed default: exactly per `docs/guidelines/universal_launcher.md`,
+  modelled on gd-game-01.
 - Gate: walks `enhanced`, `cheats`, `mouse`, `gamepads`, `stickyaxis`.
 
 **M9: launcher module and packages (≈1.5 h).**
-- `gd_game_run`, `gd_game_explore`, `gd_game_ui_sounds`; `GD03_MODULE`.
-- `build_module_03` in the launcher's `build.sh`; `games.yaml`.
-- Android ISO loading through the picker's fd (as the launcher 0.1.6 does).
+- `gd_game_run`, `gd_game_explore`, `gd_game_ui_sounds`; `GD04_MODULE`.
+- `build_module_04` in the launcher's `build.sh`; `games.yaml`.
+- Android: a 7.8 GB disc is read **in place** through the picker's fd,
+  never copied.
 - Windows DLL dependencies bundled.
 - Gate:
   - section 7's end-of-run checks;
@@ -445,7 +473,7 @@ At the very end, also:
 - rebuild all the local packages
   (`gd-engine-launcher/scripts/build.sh all --force`; `verify_bundle` must
   list your module in linux, steamdeck, windows and android-arm64);
-- play your game from the Linux launcher (`--play gd03 --exit-after` with
+- play your game from the Linux launcher (`--play gd04 --exit-after` with
   `GDUL_GAME_QUIT_AFTER=25000`) and under Wine;
 - write the final report at the top of `PROGRESS.md`:
   - what works;

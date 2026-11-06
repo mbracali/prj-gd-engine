@@ -4,7 +4,7 @@ Rules for the Guitar Dream Universal Launcher (`gd-engine-launcher/`) and for
 the screens every game module shares inside it: the Enhanced menu, the
 GAMEPADS screen, controls (gamepad, mouse, Enter, touch) and packaging. Read
 with [general_guidelines.md](general_guidelines.md) and
-[smilar_behaviors.md](smilar_behaviors.md).
+[universal-behaviors.md](universal-behaviors.md).
 
 (This file absorbed the former `docs/guidelines/controls-and-enhanced-menu.md`
 on 2026-10-28.)
@@ -35,7 +35,7 @@ These win over anything older below.
 The launcher is the project's only release, so a missing module is a broken
 release. It already happened twice (gdul 0.1.1 and 0.1.2 on Windows, then on
 Android: "This launcher build has no gd-game-01 module"). The full story is in
-[docs/release-process.md](../release-process.md) "Never again:
+[docs/platform/release-process.md](../platform/release-process.md) "Never again:
 incomplete bundles".
 
 - **Every platform carries every ready module**, in every build: Linux, Steam

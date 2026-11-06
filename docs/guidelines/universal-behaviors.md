@@ -1,4 +1,4 @@
-# Similar behaviours: patterns every game shares
+# Universal behaviours: patterns every game shares
 
 Behaviour that is the same in every gd-game, gathered from gd-game-01 (the
 reference) and gd-game-02. A new game starts with all of it; a game that
@@ -88,7 +88,7 @@ mouse, touch) are in [universal_launcher.md](universal_launcher.md).
 - Every game folder has the same layout as gd-game-02 (`README.md`,
   `agent-instructions.md`, `CHANGELOG.md`, `local_build.sh`,
   `build_commands/`, `docs/`, `engine/`, `tools/`, `agents/`), see
-  [docs/adding-a-game.md](../adding-a-game.md).
+  [docs/platform/adding-a-game.md](../platform/adding-a-game.md).
 - Never commit game data, rips, decompiler output or Ghidra files
   (`python3 .github/scripts/repo_guard.py`).
 

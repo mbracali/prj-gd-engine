@@ -212,7 +212,7 @@ bool App::windowToMenu(float wx, float wy, float& mx, float& my) const {
 
 bool App::menuMouseAllowed() const {
     // Enhanced > Enable Mouse Selection; the menus, and the pause menu over a
-    // song (it takes the mouse again: docs/knowledge/smilar_behaviors.md), not a
+    // song (it takes the mouse again: docs/guidelines/universal-behaviors.md), not a
     // song being played.
     if (!front_ || enhanced_.get("mouse") == "off") return false;
     return song_ ? front_->songPaused : !front_->songPlaying;
@@ -231,7 +231,7 @@ void App::menuMouse(float x, float y, int button) {
         }
     }
     // GH3's help bar: every pill is clickable and does what its button does
-    // (gd01-gd03's help bars, docs/knowledge/universal_launcher.md): green
+    // (gd01-gd03's help bars, docs/guidelines/universal_launcher.md): green
     // (SELECT) selects, red (BACK, DELETE) goes back, Start (ACCEPT, FINISH
     // ENTERING CHEAT) is Start, the strum bar (UP/DOWN) moves up above its
     // middle and down below it, yellow / blue / orange are those frets.
@@ -262,7 +262,7 @@ void App::menuMouse(float x, float y, int button) {
 void App::menuAction(const InputEvent& ev) {
     if (ports_ && ports_->isOpen()) return ports_->handle(ev);
     // Esc / Back three times in a row on the main menu quits (back to the
-    // launcher), as every game (docs/knowledge/smilar_behaviors.md; gd03's rule).
+    // launcher), as every game (docs/guidelines/universal-behaviors.md; gd03's rule).
     if (ev.down) {
         escapes_ = ev.action == Action::Back && front_->flowState() == "main_menu_fs" ? escapes_ + 1 : 0;
         if (escapes_ >= 3) {
@@ -274,7 +274,7 @@ void App::menuAction(const InputEvent& ev) {
     }
     if (ports_ && ev.down) {
         const std::string state = front_->flowState();
-        // The port's screens from GH3's (docs/knowledge/universal_launcher.md;
+        // The port's screens from GH3's (docs/guidelines/universal_launcher.md;
         // agents/DECISIONS.md): yellow on the main menu, blue on the options.
         if (state == "main_menu_fs" && ev.action == Action::Fret2) {
             front_->soundEvent("ui_sfx_select");
@@ -793,7 +793,7 @@ void App::drawTouchButtons() {
         if (b.action == Action::Start) canvas_.textCentered(b.x, b.y - 4, 1, {255, 255, 255, 220}, b.y < 100 ? "II" : "START");
 }
 
-// The Enhanced / Gamepads backdrop (docs/knowledge/universal_launcher.md "The
+// The Enhanced / Gamepads backdrop (docs/guidelines/universal_launcher.md "The
 // Enhanced menu"): a venue with the band caught mid-song, posed and still
 // (advanced to 30 s into a song once, then drawn at that instant), under a
 // static close-up of the singer on the right with the whole band in view
@@ -982,7 +982,7 @@ void App::overlay() {
     if (now - fpsStart_ >= 500'000'000ull) fps_ = fpsFrames_ * 1e9 / double(now - fpsStart_), fpsStart_ = now, fpsFrames_ = 0;
     if (enhanced_.on("fps_counter") && fps_ > 0) {
         // As gd02's: the game's own font, green with a dark shadow, bottom left
-        // (docs/knowledge/universal_launcher.md: "Frames a second, bottom left").
+        // (docs/guidelines/universal_launcher.md: "Frames a second, bottom left").
         const std::string t = std::to_string(int(std::lround(fps_))) + " FPS";
         if (front_) {
             canvas_.flush();

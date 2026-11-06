@@ -358,7 +358,7 @@ Walk::Walk(const std::string& name) : name_(name) {
         // The mouse alone: hover OPTIONS on the main menu (focused), click it
         // -> Options -> click the help bar's ENHANCED -> In-Game Max FPS's
         // dropdown clicked open, 120 clicked -> right click -> Options -> the
-        // help bar's BACK clicked -> main (docs/knowledge/universal_launcher.md).
+        // help bar's BACK clicked -> main (docs/guidelines/universal_launcher.md).
         steps_ = boot;
         // ONLINE is greyed and skipped (GH3's demo_mode_disable, GD04-101):
         // Up from CAREER wraps to OPTIONS, the pad's Down and the keyboard's

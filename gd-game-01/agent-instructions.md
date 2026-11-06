@@ -5,9 +5,9 @@ Read this before working in this folder. It applies to every AI coding agent (Cl
 ## How the system works
 - Guitar Dream Engine reimplements Guitar Hero / Rock Band engines in C++17 + SDL3 + OpenGL. Each game folder holds one game's engine, docs and tools; the game loads the player's **own** disc image at run time.
 - `game-info.yaml` describes the game (names, version, readiness). Keep `guitar_dream_version` equal to the engine's version.
-- The Guitar Dream Universal Launcher (`gd-engine-launcher/`) loads each ready game as a module (`gd_game_run`, optional `gd_game_explore`) into its own window, and is the project's only release (`docs/release-process.md`).
+- The Guitar Dream Universal Launcher (`gd-engine-launcher/`) loads each ready game as a module (`gd_game_run`, optional `gd_game_explore`) into its own window, and is the project's only release (`docs/platform/release-process.md`).
 - Behaviour comes from the original game's executable (Ghidra project in `ghidra/`, git-ignored). The goal is to match the original exactly; mark findings **[C]** (confirmed, with address) or **[I]** (inferred) in the docs.
-- Read the guidelines in `docs/knowledge/` before working (`general_guidelines.md`, `universal_launcher.md`: the GAMEPADS screen, Enhanced menu, mouse / Enter / touch and packaging, the same in every game, modelled on gd-game-01; `smilar_behaviors.md`), and the single backlog `gd-backlog.md` at the root (section of this game). Update the backlog at the start and at the end of every task.
+- Read the guidelines in `docs/guidelines/` before working (`general_guidelines.md`, `universal_launcher.md`: the GAMEPADS screen, Enhanced menu, mouse / Enter / touch and packaging, the same in every game, modelled on gd-game-01; `universal-behaviors.md`), and the single backlog `docs/tasks/gd-backlog.md` (section of this game). Update the backlog at the start and at the end of every task.
 
 ## This folder
 **Guitar Hero** (PlayStation 2), Guitar Dream version 1.1.7, playable and released. This folder is **frozen**: do not change anything in it unless the owner explicitly asks for that change.

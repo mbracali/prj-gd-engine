@@ -3,7 +3,7 @@
 gd-game-02 (program `gd02`) reimplements Guitar Hero II (Xbox 360). It is a
 **fresh engine**, written for its own game. This document lists what
 gd-game-01 (`gd01`, Guitar Hero PS2, released up to 1.1.3) can give it: code
-we can copy (and later move into `gd-core/`, see `docs/adding-a-game.md`,
+we can copy (and later move into `gd-core/`, see `docs/platform/adding-a-game.md`,
 "rule of two"), the build and release pipeline, and above all the lessons
 that cost time in gd-game-01.
 
@@ -215,9 +215,9 @@ Groups that must move together:
 - Download names: `gd02-<v>-{windows-x64.zip, linux-x86_64.tar.gz, steamdeck.tar.gz, macos.zip, android.apk}`.
 - Tags: `gd-game-02/vX.Y.Z`; workflows `gd-game-02-{build,release}.yml`; concurrency group `gd-game-02-release`; label `gd-game-02`.
 - Icons: `gd02_icon*.png`, `gd02.ico`, `gd02.icns`, `kGd02IconPng`.
-- Android release key: **decide** whether gd02 uses its own keystore (`gd02-release.jks`), which keeps the apps independent, or shares gd01's. It must never change afterwards (`docs/release-process.md`, "Android release key").
+- Android release key: **decide** whether gd02 uses its own keystore (`gd02-release.jks`), which keeps the apps independent, or shares gd01's. It must never change afterwards (`docs/platform/release-process.md`, "Android release key").
 - First screen and docs: "pick your Guitar Hero II (Xbox 360) `.iso`". The image is XDVDFS (XGD2) **(Q: also accept an extracted folder containing `gen/main.hdr`, like gd01)**.
-- `docs/adding-a-game.md` still mentions `gd-game-01-ci.yml`, which was removed in commit c586410. Fix that doc when gd02's workflows are added.
+- `docs/platform/adding-a-game.md` still mentions `gd-game-01-ci.yml`, which was removed in commit c586410. Fix that doc when gd02's workflows are added.
 
 ---------------------------------------------------------------------------
 
@@ -408,7 +408,7 @@ gd-game-02/
   CHANGELOG.md, README.md, local_build.sh, build_commands/
 ```
 
-When gd02 needs a piece of gd01 unchanged (the platform group, `render/{gl,math,renderer core,post_fx,vk_upscaler}`, `input/`, `data/{bytes,inflate,json,midi}`), move it into `gd-core/` instead of keeping two copies (`docs/adding-a-game.md`). This is a decision for the owner, given the "fresh engine" wish **(Q: copy first and share later, or share from the start?)**.
+When gd02 needs a piece of gd01 unchanged (the platform group, `render/{gl,math,renderer core,post_fx,vk_upscaler}`, `input/`, `data/{bytes,inflate,json,midi}`), move it into `gd-core/` instead of keeping two copies (`docs/platform/adding-a-game.md`). This is a decision for the owner, given the "fresh engine" wish **(Q: copy first and share later, or share from the start?)**.
 
 ### 4.2 Milestones (ordered)
 
@@ -502,7 +502,7 @@ When gd02 needs a piece of gd01 unchanged (the platform group, `render/{gl,math,
 
 ### 4.4 Open questions for the owner
 
-1. **Sharing.** Copy gd01's game-independent modules into gd02 now and move them into `gd-core/` later, or create `gd-core/` immediately (`docs/adding-a-game.md` prefers "rule of two", which gd02 now meets)?
+1. **Sharing.** Copy gd01's game-independent modules into gd02 now and move them into `gd-core/` later, or create `gd-core/` immediately (`docs/platform/adding-a-game.md` prefers "rule of two", which gd02 now meets)?
 2. **Icon and Android key.** Does gd02 get its own badge and its own release keystore?
 3. **Third-party code.** Vorbis decoding (stb_vorbis, public domain, or libvorbis, BSD) and WMV decoding (FFmpeg LGPL as a dynamic library, or skip the videos) are both permitted under `docs/legal.md`'s third-party rule. Which do we want?
 4. **References.** Capture the original on real hardware or in Xenia (L13)?

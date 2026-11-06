@@ -7,7 +7,7 @@
 #include <utility>
 #include <vector>
 
-// The Enhanced Options' settings (gd01's keys, docs/knowledge/universal_launcher.md
+// The Enhanced Options' settings (gd01's keys, docs/guidelines/universal_launcher.md
 // "Enhanced options: parity"; gd02's table, gd-game-02/engine/src/ui/
 // enhanced_panel.cpp), kept in enhanced.json in the save folder. Not GH3's.
 //

@@ -282,7 +282,7 @@ its own drawable and a back buffer is undefined after a swap. The launcher keeps
 the input (the module polls no events); `close` frees everything and the
 library is unloaded as after a game. `module_host.cpp`'s `ExploreSession`
 does the loading; the game's log goes to `logs/<id>-explore.log`. How to
-write one: `docs/adding-a-game.md`.
+write one: `docs/platform/adding-a-game.md`.
 
 Both the launcher and the modules link the one SDL3 shared library next to the
 launcher (`libSDL3.so.0` / `SDL3.dll`), so they share SDL's state. A run
@@ -433,7 +433,7 @@ Each game folder keeps its own `local_build.sh` and `local_builds/` for its
 standalone program.
 
 A new game needs a recipe in `scripts/build.sh` (`build_module_NN`): see
-`docs/adding-a-game.md`.
+`docs/platform/adding-a-game.md`.
 
 ## Development aids
 
@@ -549,7 +549,7 @@ gd02's Android build. The Gradle project is `android/` (applicationId
 - **Signing**: the Android debug key (`~/.android/debug.keystore`, created if
   missing), or `GDUL_RELEASE_KEYSTORE` (+ `GDUL_RELEASE_KEYSTORE_PASSWORD`,
   `GDUL_RELEASE_KEY_ALIAS`, `GDUL_RELEASE_KEY_PASSWORD`). Releases use the
-  `ANDROID_GDUL_*` secrets (docs/release-process.md).
+  `ANDROID_GDUL_*` secrets (docs/platform/release-process.md).
 
 Releases of all four systems: `.github/workflows/gdul-release.yml`, see
-docs/release-process.md.
+docs/platform/release-process.md.

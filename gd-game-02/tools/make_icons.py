@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
 # Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
-"""Makes gd02's icons from the Guitar Dream Engine badge (res/icon_full.jpg at
+"""Makes gd02's icons from the Guitar Dream Engine badge (docs/res/icon_full.jpg at
 the repo root): the round badge cut out of its black square with smooth,
 transparent edges, in every size and format the builds use. Run it again
 after changing the badge (needs Pillow); the results are committed, so the
@@ -28,11 +28,11 @@ from PIL import Image, ImageDraw
 HERE = os.path.dirname(os.path.abspath(__file__))
 GAME = os.path.dirname(HERE)
 REPO = os.path.dirname(GAME)
-SRC = os.path.join(REPO, "res", "icon_full.jpg")
+SRC = os.path.join(REPO, "docs", "res", "icon_full.jpg")
 RES = os.path.join(GAME, "engine", "res")
 ANDROID_RES = os.path.join(GAME, "engine", "android", "app", "src", "main", "res")
 
-# The badge in res/icon_full.jpg (2048 x 2048): its circle's centre and radius.
+# The badge in docs/res/icon_full.jpg (2048 x 2048): its circle's centre and radius.
 CX, CY, R = 1023, 1030, 992
 # Small icons (48 px and below: taskbars, title bars, file lists, phone
 # launchers) show the badge's centre, so the GDE letters stay readable.

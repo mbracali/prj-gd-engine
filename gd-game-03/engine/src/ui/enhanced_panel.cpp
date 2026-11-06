@@ -5,7 +5,7 @@
 // src/ui/enhanced_panel.cpp, itself gd01's EnhancedPanel): its sections,
 // rows, check boxes, dropdowns, scrollbar, Back / Export / Import,
 // explanation box and mouse, in the game's menu font and colours (PortDraw)
-// over a still shot of a venue (docs/knowledge/universal_launcher.md).
+// over a still shot of a venue (docs/guidelines/universal_launcher.md).
 #include "ui/enhanced_panel.h"
 
 #include <SDL3/SDL.h>

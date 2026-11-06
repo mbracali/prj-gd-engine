@@ -216,7 +216,7 @@ if [ "$os" = windows ]; then
 fi
 
 if [ "$problems" != 0 ]; then
-  printf '%sverify: %s is INCOMPLETE (%d problem(s)): do not ship it. See docs/release-process.md, "Never again: incomplete bundles".%s\n' \
+  printf '%sverify: %s is INCOMPLETE (%d problem(s)): do not ship it. See docs/platform/release-process.md, "Never again: incomplete bundles".%s\n' \
     "$R" "$(basename "$target")" "$problems" "$N"
   exit 1
 fi

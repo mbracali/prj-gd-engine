@@ -53,7 +53,7 @@ id = `gd-game-03`
 - Extended gamepad support.
 - Mods support
 
-**Universal menus** ([universal_mechanisms.md](../docs/knowledge/universal_mechanisms.md),
+**Universal menus** ([universal_mechanisms.md](../docs/guidelines/universal_mechanisms.md),
 as gd-game-01 and gd-game-02): the GAMEPADS screen (the yellow fret on the
 main menu, or Enhanced Options > Gamepads) with four player boxes (the game
 has two players), each player's instrument (5 Fret Guitar, Gamepad, Generic

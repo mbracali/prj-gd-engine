@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
 # Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
-"""Renders the store / launcher-listing art in res/ from our own sources only
-(res/icon_full.jpg and the bundled Metal Mania font, SIL OFL 1.1):
+"""Renders the store / launcher-listing art in docs/res/ from our own sources only
+(docs/res/icon_full.jpg and the bundled Metal Mania font, SIL OFL 1.1):
 
-    python3 res/tools/make_store_art.py
+    python3 docs/res/tools/make_store_art.py
 
-Writes res/logo*.png (transparent badge + "GUITAR DREAM ENGINE" wordmark,
-horizontal and stacked), res/badge.png and res/backdrop_1920x1080*.png.
+Writes docs/res/logo*.png (transparent badge + "GUITAR DREAM ENGINE" wordmark,
+horizontal and stacked), docs/res/badge.png and docs/res/backdrop_1920x1080*.png.
 Needs Python 3 with Pillow and numpy. Deterministic (fixed random seed).
 """
 import os
@@ -15,8 +15,8 @@ import os
 import numpy as np
 from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
 
-ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-RES = os.path.join(ROOT, "res")
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+RES = os.path.join(ROOT, "docs", "res")
 FONT = os.path.join(ROOT, "gd-engine-launcher", "res", "fonts", "MetalMania-Regular.ttf")
 FIRE = [(0.0, (255, 211, 77)), (0.45, (255, 138, 31)), (1.0, (232, 52, 58))]  # docs/index.html --fire
 FRETS = [(47, 211, 90), (232, 52, 58), (245, 197, 24), (47, 140, 240), (255, 138, 31)]

@@ -1,13 +1,17 @@
 # General guidelines
 
 The owner's rules for every task in this repository, for people and AI agents
-alike. Read every file in [docs/knowledge/](.) before you start.
+alike. Read every file in [docs/guidelines/](.) before you start.
 
 ## Before you start
 
 - **Guidelines.** Read and understand all the guideline files before starting:
-  this one, [universal_launcher.md](universal_launcher.md) and
-  [smilar_behaviors.md](smilar_behaviors.md).
+  this one, [universal_launcher.md](universal_launcher.md),
+  [universal_mechanisms.md](universal_mechanisms.md),
+  [universal-menus.md](universal-menus.md),
+  [universal-behaviors.md](universal-behaviors.md),
+  [engine-backend-guidelines.md](engine-backend-guidelines.md) and
+  [usual-bugs.md](usual-bugs.md).
 - **System and app.** Understand the project before changing it: read the
   documentation ([README.md](../../README.md), [docs/](../README.md), the
   game folder's `README.md`, `agent-instructions.md` and `docs/`).

@@ -30,7 +30,7 @@ Use `repo` as the game id for changes to workflows, docs or the licence
 
 1. Branch from `develop`, open the PR against `develop`.
 2. Build it locally the way the release does: `gd-game-01/local_build.sh`
-   (GitHub builds nothing on pull requests; see docs/release-process.md).
+   (GitHub builds nothing on pull requests; see docs/platform/release-process.md).
 3. Fill in the PR checklist. For gameplay changes, run the self-test with your
    own disc image: `gd01 --selftest "path/to/Guitar Hero (USA).iso"` must
    print `all charts fully hit`. CI cannot run it (it has no game data).
