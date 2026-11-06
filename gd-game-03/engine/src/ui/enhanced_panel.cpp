@@ -43,6 +43,11 @@ const std::vector<EnhancedSetting>& enhancedSettings() {
         {"max_fps", {"60", "120", "144", "240", "unlimited"}},
         {"fps_counter", {"off", "on"}},
         {"hdr", {"none", "emulated", "true"}},
+        // Enhanced > Performance > Graphics / Audio backend (GDCORE-006,
+        // engine-backend-guidelines.md 4): selectable on gd-game-01 only for
+        // now; here fixed at local (another saved value is dropped).
+        {"graphics_backend", {"local"}},
+        {"audio_backend", {"local"}},
         {"internal_res", {"0", "448", "480", "720", "800", "900", "1080", "1440", "2160"}},
         {"widescreen", {"off", "on"}},
         {"sharp_ui", {"off", "on"}},
@@ -166,9 +171,15 @@ void migrateEnhanced(Json& e) {
     map("light_dust", {{"on", "1.5x"}, {"off", "none"}});
     // XInput and Rock Band guitars are always on; Ground Fog and Light
     // Streaks were removed from every game (0.0.2): their values are dropped.
+    // Graphics / Audio backend: only local here for now (GDCORE-006); a
+    // value saved by a later version or copied from gd-game-01 is dropped.
+    auto backendKept = [](const std::string& k, const Json& v) {
+        if (k != "graphics_backend" && k != "audio_backend") return true;
+        return v.type == Json::Type::String && v.str() == "local";
+    };
     Json kept = Json::object();
     for (const auto& [k, v] : e.o)
-        if (k != "xinput" && k != "rockband" && k != "ground_fog" && k != "light_streaks") kept.set(k, v);
+        if (k != "xinput" && k != "rockband" && k != "ground_fog" && k != "light_streaks" && backendKept(k, v)) kept.set(k, v);
     e = std::move(kept);
 }
 
@@ -293,6 +304,23 @@ const std::vector<Item>& items() {
          "highlights, menus at the screen's paper white; it starts with the game, and where it cannot run Emulated is "
          "used. Menus and the HUD keep their colours.",
          {{"none", "None"}, {"emulated", "Emulated"}, {"true", "True HDR"}}},
+        // engine-backend-guidelines.md 4 (GDCORE-006): shown greyed at local;
+        // selectable on gd-game-01 only for now.
+        {Kind::Choice, "graphics_backend", "Graphics Backend", false,
+         "The library the game draws with: local (the game's own renderer), SDL3, Vulkan"
+#ifndef __APPLE__
+         " or OpenGL3"
+#endif
+         ". Applies the next time the game starts.",
+         {{"local", "local"}, {"sdl3", "SDL3", false}, {"vulkan", "Vulkan", false},
+#ifndef __APPLE__
+          {"opengl3", "OpenGL3", false},  // no OpenGL on macOS (engine-backend-guidelines.md rule 7)
+#endif
+         }},
+        {Kind::Choice, "audio_backend", "Audio Backend", false,
+         "The library the game plays its sound through: local (the game's own audio output), miniaudio, OpenAL or "
+         "FAudio. Applies the next time the game starts.",
+         {{"local", "local"}, {"miniaudio", "miniaudio", false}, {"openal", "OpenAL", false}, {"faudio", "FAudio", false}}},
         {Kind::Choice, "bokeh", "Bokeh Effect", true,
          "The depth-of-field blur of the close shots. None: always sharp. Medium: as the original game. Light is softer; "
          "Strong and Stronger start the focus nearer the band and blur wider.",
@@ -876,7 +904,8 @@ private:
         } else if (notYet) {
             y += 6;
             d_.warning(x0 + pad, y + 12);
-            d_.text("Not available yet", x0 + pad + 30, y + 13, 21, kWarn, 0x21);
+            const bool backend = std::string(it.key) == "graphics_backend" || std::string(it.key) == "audio_backend";
+            d_.text(backend ? "Available on Guitar Hero for now." : "Not available yet", x0 + pad + 30, y + 13, 21, kWarn, 0x21);
         } else if (locked) {
             y += 6;
             d_.text("Always on in the Android app", x0 + pad, y + 13, 21, kAccent, 0x21);

@@ -853,6 +853,11 @@ WalkDriver::WalkDriver(const std::string& name)
         check("enhanced_hdr_true");
         again(kRight), wait(400);
         check("enhanced_hdr_none");
+        // Graphics / Audio Backend (GDCORE-006): greyed at local; Right,
+        // select and Left change nothing (selectable on gd-game-01 only).
+        press(kDown), wait(120), again(kRight), again(kX), again(kLeft);
+        press(kDown), wait(120), again(kRight), again(kX), again(kLeft);
+        check("enhanced_backends");
         // Bokeh None, Particles None, Bloom 2x, Cinematic Color on, Color
         // Grading Warm, Film Grain Medium, Chromatic Aberration Light, Ambient
         // Occlusion Medium, Sharpening High, Blur on Star Power Medium.
@@ -2149,7 +2154,8 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         return monkey ? pass() : fail("Monkey Head Crowd did not turn on from the menu");
     }
     if (s.screen.rfind("enhanced_mode_", 0) == 0 || s.screen == "enhanced_res_720" || s.screen == "enhanced_fps_unlimited" ||
-        s.screen == "enhanced_exported" || s.screen == "enhanced_settings_loaded" || s.screen == "enhanced_progress_loaded") {
+        s.screen == "enhanced_exported" || s.screen == "enhanced_settings_loaded" || s.screen == "enhanced_progress_loaded" ||
+        s.screen == "enhanced_backends") {
         // The universal Enhanced menu (universal_mechanisms.md 1.2.2): what
         // is in effect, in enhanced.json and the panel's status line.
         Json saved = Json::object();
@@ -2212,16 +2218,32 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
                 ss << in.rdbuf();
                 Json j = Json::parse(ss.str());
                 j.set("ground_fog", Json::string("full")), j.set("light_streaks", Json::string("on")), j.set("xinput", Json::string("off"));
+                j.set("graphics_backend", Json::string("vulkan")), j.set("audio_backend", Json::string("openal"));  // GDCORE-006
                 j.set("internal_res", Json::string("720"));
                 std::ofstream(d / "GD03-user-settings.json") << j.dump(2);
             } catch (const std::exception&) {
                 add("GD03-user-settings.json does not parse");
             }
+        } else if (w == "enhanced_backends") {
+            // Fixed at local, nothing saved; a non-local value in a file is dropped.
+            for (const char* key : {"graphics_backend", "audio_backend"}) {
+                const std::string got = ui.host().enhancedValue(key), file = saved.has(key) ? saved[key].str() : "(unset)";
+                std::printf("  enhanced: %s %s (enhanced.json %s)\n", key, got.c_str(), file.c_str());
+                if (got != "local" || (file != "(unset)" && file != "local"))
+                    problems += std::string(problems.empty() ? "" : "; ") + key + " is " + got + " / " + file + ", not local";
+            }
+            Json j = Json::parse(R"({"graphics_backend":"vulkan","audio_backend":"openal","bloom":"2x"})");
+            ui::migrateEnhanced(j);
+            if (j.has("graphics_backend") || j.has("audio_backend") || !j.has("bloom"))
+                problems += std::string(problems.empty() ? "" : "; ") + "a saved non-local backend was kept";
         } else if (w == "enhanced_settings_loaded") {
             status("Settings loaded");
             want("internal_res", "720"), want("max_fps", "60");
             for (const char* gone : {"ground_fog", "light_streaks", "xinput"})
                 if (saved.has(gone)) add(std::string(gone) + " (removed) was loaded");
+            for (const char* key : {"graphics_backend", "audio_backend"})  // local only here (GDCORE-006)
+                if (ui.host().enhancedValue(key) != "local" || (saved.has(key) && saved[key].str() != "local"))
+                    problems += std::string(problems.empty() ? "" : "; ") + key + " other than local was loaded";
         } else if (w == "enhanced_progress_loaded") {
             status("Progress loaded");
         }
