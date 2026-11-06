@@ -44,6 +44,7 @@
 #include "platform/disc_picker.h"
 #include "platform/paths.h"
 #include "render/canvas.h"
+#include "render/core_backend.h"
 #include "render/venue_stage.h"
 #include "ui/port_draw.h"
 #include "game/chart.h"
@@ -1485,6 +1486,18 @@ void App::frame() {
     canvas_.end();
 }
 
+// Enhanced > Graphics Backend as this start of the game uses it, read from
+// enhanced.json before the window is made (a change in the menu applies on
+// the next start). A minimal latch for the graphics work (GDCORE-010); the
+// Enhanced menu's work replaces it with the shared one (startupBackends, as
+// gd02's). Walks keep their own settings, fresh each run: local.
+static std::string startupGraphicsBackend(const Options& o) {
+    if (!o.walk.empty() || prefDir().empty()) return "local";
+    EnhancedStore st;
+    st.load(prefDir());
+    return st.get("graphics_backend");
+}
+
 int App::run() {
     SDL_SetAppMetadata(app::kDisplayName, app::kVersion, app::kAppId);
     Input::prepareSdl();
@@ -1492,10 +1505,18 @@ int App::run() {
         std::fprintf(stderr, "%s: cannot start SDL: %s\n", app::kProgram, SDL_GetError());
         return 2;
     }
-    SDL_WindowFlags flags = SDL_WINDOW_RESIZABLE | gfx::prepareWindow();
+    // Enhanced > Graphics Backend (GDCORE-010, render/core_backend.h): local
+    // (gd04's OpenGL device) or a gd-engine-core backend, decided before the
+    // window: SDL3 GPU and Vulkan need a window made for their API (in the
+    // launcher, prepareWindowFor asks it for one). Local and opengl3 keep the
+    // OpenGL window.
+    const gfx::Backend graphicsBackend = gfx::chosenBackend(startupGraphicsBackend(options_));
+    const bool gpuWindow = graphicsBackend == gfx::Backend::Sdl3 || graphicsBackend == gfx::Backend::Vulkan;
+    SDL_WindowFlags baseFlags = SDL_WINDOW_RESIZABLE;
 #ifdef __ANDROID__
-    flags |= SDL_WINDOW_FULLSCREEN;
+    baseFlags |= SDL_WINDOW_FULLSCREEN;
 #endif
+    SDL_WindowFlags flags = baseFlags | gfx::prepareWindowFor(graphicsBackend);  // OpenGL (render/device.h) for local
     int winW = int(kScreenW), winH = int(kScreenH);
     // GD04_WINDOW_SIZE=<w>x<h>: another window size (development aid: other aspect ratios).
     if (const char* ws = SDL_getenv("GD04_WINDOW_SIZE")) std::sscanf(ws, "%dx%d", &winW, &winH);
@@ -1509,7 +1530,24 @@ int App::run() {
     setAppWindowIcon(window_);
     installDesktopEntry();
     std::string error;
-    if (!window_ || !canvas_.init(window_, error)) {
+    gfx::setRendererBackend(graphicsBackend);
+    bool rendererOk = window_ && canvas_.init(window_, error);
+    if (!rendererOk && graphicsBackend != gfx::Backend::Local) {
+        // The core backend did not start: local runs instead (rule 2: never a
+        // black screen); an SDL3 GPU / Vulkan window is made again for
+        // OpenGL first (in the launcher the shim gets its OpenGL window back).
+        SDL_Log("graphics backend: %s did not start (%s); using local", gfx::backendId(graphicsBackend), window_ ? error.c_str() : SDL_GetError());
+        if (gpuWindow) {
+            SDL_Log("graphics backend: %s: making the window again for OpenGL (local)", gfx::backendId(graphicsBackend));
+            if (window_) SDL_DestroyWindow(window_);
+            window_ = SDL_CreateWindow(app::kWindowTitle, winW, winH, baseFlags | gfx::prepareWindowFor(gfx::Backend::Local));
+            if (window_) setAppWindowIcon(window_);
+        }
+        gfx::setRendererBackend(gfx::Backend::Local);
+        error.clear();
+        rendererOk = window_ && canvas_.init(window_, error);
+    }
+    if (!rendererOk) {
         std::fprintf(stderr, "%s: cannot open the window: %s\n", app::kProgram, window_ ? error.c_str() : SDL_GetError());
         if (window_) SDL_DestroyWindow(window_);
         SDL_Quit();
