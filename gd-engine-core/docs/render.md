@@ -315,14 +315,28 @@ rewritten freely for SDL_GPU and Vulkan later.
 
 CoreRenderer reproduces the local renderer's pixels:
 
+- **GL-style storage**: gd01 is a GL game (it samples its render targets
+  with row 0 at the bottom and counts viewport, scissor, copy and depth-read
+  rows from the bottom). CoreRenderer negates clip y in every MVP (exact)
+  and swaps the culled face, so every target holds its picture as local's
+  does and the interface's rows are local's rows; `present(...,
+  flipVertical = true)` shows the frame the right way up. On OpenGL3 this
+  flip and the backend's own cancel out, so the rasteriser sees exactly
+  local's coordinates: edges through pixel centres (the 2D UI at 1.5x
+  scale) break ties the same way. A first version without it shifted thin
+  2D lines by one row and drew the crowd's impostor cards upside down;
 - the same main shader, in the dialect, with its uniforms in two std140
-  blocks (draw state; lights); the same maths in the same order;
+  blocks (draw state; lights); the same maths in the same order; and the
+  uniforms keep their last value between draws as GL program uniforms do
+  (a `mix()` with a stale fog colour is not bit-exact otherwise);
 - one pipeline per (blend mode, depth test / write, cull face, decal bias,
   alpha write, target), cached;
 - the frame (Enhanced > Internal resolution, 1080 by default) is a colour
   + D24 target like local's; `present` scales it to the window;
   without an internal resolution the frame target is the window's size;
-- scissored clears become draws; mid-frame resource updates (text meshes,
+- scissored clears become draws (`clearDepth` is a depth-only draw at
+  z = 1 with the compare Always, inside the scissor as local's glClear);
+  mid-frame resource updates (text meshes,
   movie frames, textures made on first use) end the pass and begin a new one
   that loads the frame;
 - the depth of field and the track fade copy the frame's rectangle into a

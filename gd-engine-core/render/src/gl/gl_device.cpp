@@ -265,7 +265,7 @@ public:
     bool inPass() const override { return inPass_; }
 
     void drawableSize(int& w, int& h) const override { SDL_GetWindowSizeInPixels(info_.window, &w, &h); }
-    void present(Texture src, const Rect& srcRect, Filter filter) override;
+    void present(Texture src, const Rect& srcRect, Filter filter, bool flipVertical) override;
     void setPresentMode(PresentMode mode) override;
     void endFrame() override;
 
@@ -1073,7 +1073,7 @@ void GlDevice::endPass() {
     pipeline_ = nullptr, pipelineId_ = 0;
 }
 
-void GlDevice::present(Texture src, const Rect& r, Filter filter) {
+void GlDevice::present(Texture src, const Rect& r, Filter filter, bool flipVertical) {
     if (inPass_) endPass();
     int ww = 0, wh = 0;
     drawableSize(ww, wh);
@@ -1083,7 +1083,8 @@ void GlDevice::present(Texture src, const Rect& r, Filter filter) {
         gl::glDisable(GL_SCISSOR_TEST);
         gl::glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
         // The texture's row 0 is the top: flipped into the window (GL's row 0 is the bottom).
-        gl::glBlitFramebuffer(r.x, r.y, r.x + r.w, r.y + r.h, 0, wh, ww, 0, GL_COLOR_BUFFER_BIT, filter == Filter::Nearest ? GL_NEAREST : GL_LINEAR);
+        const int y0 = flipVertical ? 0 : wh, y1 = flipVertical ? wh : 0;
+        gl::glBlitFramebuffer(r.x, r.y, r.x + r.w, r.y + r.h, 0, y0, ww, y1, GL_COLOR_BUFFER_BIT, filter == Filter::Nearest ? GL_NEAREST : GL_LINEAR);
         gl::glBindFramebuffer(GL_FRAMEBUFFER, 0);
         pipeline_ = nullptr, pipelineId_ = 0;
     }

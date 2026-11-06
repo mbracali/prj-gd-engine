@@ -378,8 +378,10 @@ public:
 
     // The window ------------------------------------------------------------
     virtual void drawableSize(int& w, int& h) const = 0;
-    // Scales `src`'s rectangle to the whole window and presents it.
-    virtual void present(Texture src, const Rect& srcRect, Filter filter) = 0;
+    // Scales `src`'s rectangle to the whole window and presents it;
+    // flipVertical shows it upside down (a game that stores its frame
+    // bottom-up, GL style).
+    virtual void present(Texture src, const Rect& srcRect, Filter filter, bool flipVertical = false) = 0;
     virtual void setPresentMode(PresentMode mode) = 0;
     virtual void endFrame() = 0;
 
