@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 //
-// gdcore_render_selftest [--backend opengl3]: draws into off-screen targets
-// through gd::core::render and checks the pixels (docs/render.md section 7).
-// Headless: SDL_VIDEO_DRIVER=offscreen. Exit status: the number of failed checks.
+// gdcore_render_selftest [--backend opengl3|vulkan]: draws into off-screen
+// targets through gd::core::render and checks the pixels (docs/render.md
+// section 7). Headless: SDL_VIDEO_DRIVER=offscreen. Exit status: the number of
+// failed checks; 77 when the Vulkan backend cannot start here (no loader or
+// device: ctest counts it as skipped).
 
 #include <SDL3/SDL.h>
 
@@ -162,9 +164,10 @@ int main(int argc, char** argv) {
     }
     prepareWindow(backend, SDL_getenv("GD_GLES") != nullptr);
     SDL_Window* window = SDL_CreateWindow("gdcore_render_selftest", 64, 64, SDL_WindowFlags(windowFlags(backend)) | SDL_WINDOW_HIDDEN);
+    const int unavailable = backend == Backend::Vulkan ? 77 : 2;
     if (!window) {
         std::fprintf(stderr, "window: %s\n", SDL_GetError());
-        return 2;
+        return unavailable;
     }
     DeviceCreateInfo info;
     info.backend = backend;
@@ -173,7 +176,7 @@ int main(int argc, char** argv) {
     std::unique_ptr<Device> dev = createDevice(info, error);
     if (!dev) {
         std::fprintf(stderr, "device: %s\n", error.c_str());
-        return 2;
+        return unavailable;
     }
     Device& d = *dev;
     std::printf("backend %s: %s %s (%s)\n", backendId(backend), d.caps().api.c_str(), d.caps().version.c_str(), d.caps().gpu.c_str());
@@ -509,6 +512,41 @@ int main(int argc, char** argv) {
         check(d.readbackReady(rb) && d.readbackData(rb, one, 4) && near(one, 255, 0, 0, 255), "asynchronous readback");
         d.destroyTexture(other);
         d.destroyBuffer(vb);
+    }
+    // 11. Culling: a counter-clockwise triangle (GL clip space, y up) is the
+    // front face on every backend (docs/render.md 2.3, 3.2).
+    {
+        auto culled = [&](CullMode cull) {
+            PipelineDesc p;
+            p.shader = colorShader;
+            p.layout = colorLayout();
+            p.raster.cull = cull;
+            p.raster.frontFace = FrontFace::CounterClockwise;
+            p.colorFormats[0] = Format::RGBA8;
+            return d.createPipeline(p);
+        };
+        Pipeline cullBack = culled(CullMode::Back), cullFront = culled(CullMode::Front);
+        const V ccw[3] = {{-1, -1, 255, 255, 255, 255}, {1, -1, 255, 255, 255, 255}, {-1, 1, 255, 255, 255, 255}};
+        PassDesc p;
+        p.colorCount = 1;
+        p.colors[0].texture = color;
+        p.colors[0].clear[3] = 1;
+        d.beginPass(p);
+        d.bindPipeline(cullBack);
+        params(0, 0, 0, 1, 0, 0, 1);
+        BufferRange vb = d.allocTransient(kVertexBuffer, ccw, sizeof ccw);
+        d.bindVertexBuffers(0, &vb, 1);
+        d.draw(3);  // kept: red
+        d.bindPipeline(cullFront);
+        params(0, 0, 0, 0, 1, 0, 1);
+        d.bindVertexBuffers(0, &vb, 1);
+        d.draw(3);  // culled: no green
+        d.endPass();
+        auto px = read(d, color, W, H);
+        check(!px.empty() && near(at(px, W, 2, 13), 255, 0, 0, 255) && near(at(px, W, 13, 2), 0, 0, 0, 255),
+              "cull Back keeps a counter-clockwise triangle, cull Front drops it");
+        d.destroyPipeline(cullBack);
+        d.destroyPipeline(cullFront);
     }
     d.present(color, {0, 0, W, H}, Filter::Linear);
     d.endFrame();
