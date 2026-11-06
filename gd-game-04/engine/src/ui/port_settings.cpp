@@ -25,12 +25,17 @@ const std::vector<EnhancedSetting>& enhancedSettings() {
         {"max_fps", {"60", "120", "144", "240", "unlimited"}},
         {"fps_counter", {"off", "on"}},
         {"hdr", {"none", "emulated", "true"}},
-        // Enhanced > Performance > Graphics / Audio backend (GDCORE-006,
-        // engine-backend-guidelines.md 4): selectable on gd-game-01 only for
-        // now; local is the only value here (another saved one is dropped on
-        // load, a set refused).
-        {"graphics_backend", {"local"}},
-        {"audio_backend", {"local"}},
+        // Enhanced > Performance > Graphics / Audio backend (GDCORE-010,
+        // engine-backend-guidelines.md 4): read once at start-up
+        // (startupGraphicsBackend / startupAudioBackend in app.h); no mode
+        // changes them. Only what this build offers (no OpenGL on macOS, rule
+        // 7): another saved value is dropped on load, a set refused.
+#ifdef __APPLE__
+        {"graphics_backend", {"local", "sdl3", "vulkan"}},
+#else
+        {"graphics_backend", {"local", "sdl3", "vulkan", "opengl3"}},
+#endif
+        {"audio_backend", {"local", "miniaudio", "openal", "faudio"}},
         {"internal_res", {"0", "720", "800", "900", "1080", "1440", "2160"}},
         {"sharp_ui", {"off", "on"}},
         {"antialiasing", {"none", "fxaa", "ssaa", "taa"}},
