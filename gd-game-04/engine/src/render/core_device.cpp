@@ -265,8 +265,8 @@ public:
     void endFrame() override;
     void setFrameCap(int fps) override;
     void setInternalHeight(int height) override { internalH_ = std::max(0, height); }
-    // Occlusion queries: the core's (opengl3). A backend without them (sdl3:
-    // SDL_GPU has none; vulkan: not yet) answers every query at once with one
+    // Occlusion queries: the core's (opengl3, vulkan). A backend without them
+    // (sdl3: SDL_GPU has none) answers every query at once with one
     // sample, so the flares (venue_view.cpp drawFlare, B / A) are drawn at
     // full size, occluded or not (gd-engine-core/docs/render.md 6c).
     QueryId createQuery() override {

@@ -75,6 +75,7 @@ beginFrame()                    waits until at most kFramesInFlight (2) frames a
     bindTextures(slot, {texture, sampler}...)           combined texture + sampler slots 0..15
     pushUniforms(slot, data, size)                      std140 block contents for slot 0..3, used by later draws
     draw / drawIndexed (+ instances)
+    beginQuery / endQuery                               occlusion queries (opengl3, vulkan; not sdl3: section 6d)
   endPass()
 present(source texture, rect, filter)   blits into the window's swapchain (scaled) and presents
 endFrame()
@@ -777,6 +778,67 @@ What gd03's device has that gd02's has not:
   alpha-only fill (the clear quad, write mask A) after every copy, so its
   alpha is 1 wherever it is sampled.
 
+## 6d. gd-game-04 on the core (GDCORE-010)
+
+GH3's port (gd-game-04) has gd02's design, so it comes onto the core the
+same way (section 6b): `CoreDevice` (gd-game-04/engine/src/render/
+core_device.cpp, gd02's adapter) under gd04's `gfx::RenderDevice`, the
+backend chosen before the window (`GD04_GRAPHICS_BACKEND`, else Enhanced >
+Graphics Backend as `App::run` reads it from enhanced.json), the window made
+for SDL_GPU / Vulkan and made again for OpenGL (local) when the device does
+not start, the Vulkan pipeline cache in the pref folder, run-time SPIR-V
+with glslang (`GD04_RUNTIME_SPIRV`). GH3 has more reason than GH2 for the
+last one: its materials draw with the disc's own Xenos shader microcode,
+translated to GLSL when a material is loaded (render/xenos_glsl.cpp).
+
+What GH3's device adds over GH2's, and how it maps:
+
+- **Stencil**: targets made with `stencil` are D24S8 (the venue viewport's,
+  as the 360's); a material writes its stencil value (ALWAYS, REPLACE where
+  the depth test passes) and the bloom's material filter tests EQUAL 1. The
+  state goes into the pipeline (and its key), the reference is set per draw
+  (`setStencilRef`, after the pipeline: SDL_GPU / Vulkan lose it with the
+  pass). `clear(depth)` clears the stencil to 0 too, as local's: the pass's
+  stencil load op, or the clear quad with REPLACE 0.
+- **copyDepth** (the raytraced beams read the scene's depth while it stays
+  bound): a pass on the copy that writes `gl_FragDepth` from a `texelFetch`
+  of the source, rows reversed as local's `glBlitFramebuffer` (0..h to h..0).
+  `gl_FragCoord` and `texelFetch` both count rows from the first one in
+  memory on every backend, so one shader serves all three. The stencil is
+  not copied (only the copy's depth is sampled).
+- **The display gamma** (the 360's BT.709 output ramp, gl_device.cpp
+  `displayGammaRamp`, now shared through device.h): local draws every frame
+  off screen and presents it through the ramp; the adapter draws the frame
+  through the same 256-entry ramp into a second target before `present`,
+  and `readPixels` applies the ramp on the CPU, as local's. `GD04_GAMMA=0`
+  turns it off on both.
+- **Occlusion queries** (the venue flares' size, B / A of two queries a
+  frame late, venue_view.cpp `drawFlare`): the core had none; the interface
+  now has `createQuery` / `beginQuery` / `endQuery` / `queryResult` /
+  `destroyQuery`, with defaults that return no query. The OpenGL3 backend
+  implements them (GL_SAMPLES_PASSED; ES: GL_ANY_SAMPLES_PASSED), and so
+  does Vulkan: one pool of 4096, reset from the host (`vkResetQueryPool`,
+  Vulkan 1.2's hostQueryReset) when a query is made and after its result is
+  read, so a query made in a pass can begin in it (a command-buffer reset
+  must be outside a pass); precise counts where the device has
+  `occlusionQueryPrecise`. SDL_GPU has no occlusion queries. Where the
+  backend has none, every query answers one sample at once: the flares are
+  drawn at full size even when occluded.
+- **16 vertex attributes**, and inputs a Xenos shader reads that the vertex
+  layout does not give (BLENDWEIGHT, COLOR1, BLENDINDICES on GH3's venue
+  layout): local leaves those arrays disabled, so GL reads (0, 0, 0, 1);
+  the adapter feeds them from a one-element (0, 0, 0, 1) buffer in vertex
+  slot 1 (per instance), which SDL_GPU and Vulkan require anyway.
+- **Cube samplers** with nothing bound (or a 2D texture bound) get a white
+  cube (Vulkan / SDL_GPU need the view type to match).
+- **Frames Canvas::end holds** (a frame that drew nothing keeps the last
+  picture: no `endFrame`): the next `beginFrame` continues the same core
+  frame, so the core's frames stay paired. `drawCalls()` counts draws as
+  local does (before any check of its own), or a frame whose draws the
+  adapter skipped would be held and the clock would drift.
+- **Not on the core path**: the frame pacing is local's; gd04 has no True
+  HDR.
+
 ## 7. Tests
 
 - `gdcore_render_selftest` (render/tests/): creates the OpenGL3 device on a
@@ -997,6 +1059,36 @@ gd02's: 11-14 % apart between any two runs), so it is left out below.
 - The selftest and the walks quickplay, pause, enhanced, back and options
   pass on local and on opengl3 (headless); headless sdl3 falls back to
   local ("making the window again for OpenGL") and quickplay passes.
+
+### gd-game-04 (GDCORE-010)
+
+2026-11-06, Linux, NVIDIA RTX 3060 (driver 615.71). Goldens at the default
+1280 x 720 window, with the harness's fixed clock: the front end at 9 s
+(movies skipped), Slow Ride in the default venue (Art Deco)
+at 30 s, in the dive at 45 s, in Art Deco at 60 s. The dive shot is not
+reproducible even on local (three local runs differ by 5-8 % of the
+pixels, max 39), so it is left out below.
+
+- **Before (2981b7b, the core linked) vs after, local: 0 differing
+  pixels** in the three.
+- **local vs opengl3: 0 differing pixels** in the three, headless and under
+  the virtual KWin. Before the core had occlusion queries, opengl3 drew
+  the venue flares at full size (37.8 % of the pixels at 30 s, up to 43
+  levels, in the haze above the band): that is what sdl3 still shows.
+- local vs **sdl3** (KWin, SDL_GPU on Vulkan): the front end 0; Art Deco
+  30 s 37.8 % (mean |delta| 1.7, max 43) and 60 s 8.9 % (mean 0.08, max 9):
+  the flares at full size, SDL_GPU having no occlusion queries; nothing
+  else differs (the same shots on opengl3 without queries gave the same
+  numbers).
+- local vs **vulkan** (KWin, with the Vulkan occlusion queries): the front
+  end 0; Art Deco 30 s 126 pixels (0.014 %, max 9) and 60 s 845 pixels
+  (0.09 %, max 9): single pixels at mesh edges, as gd02's (the double y flip
+  does not hold for the rasteriser's tie rules). Before the Vulkan queries
+  sdl3 and vulkan gave 0 differing pixels between them in every shot.
+- Walks (headless, local and opengl3): `--selftest`, quickplay, pause,
+  back, options: all pass on both, no fallback.
+- gdcore_render_selftest: opengl3 24 passed (the occlusion queries
+  included), vulkan 24 passed, 0 failed.
 
 ## 9. What phases 2 and 3 need
 

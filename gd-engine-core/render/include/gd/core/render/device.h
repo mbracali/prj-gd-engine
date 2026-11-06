@@ -433,7 +433,7 @@ public:
     // between beginQuery and endQuery (inside one pass; OpenGL ES: 1 when
     // any did, 0 when none). queryResult does not wait: false while the GPU
     // has not answered (or the query was never ended). A backend without
-    // them (SDL_GPU has none; Vulkan not yet) returns an empty handle from
+    // them (SDL_GPU has none; Vulkan without hostQueryReset) returns an empty handle from
     // createQuery, and the game does without (gd-game-04: docs/render.md 6c).
     virtual Query createQuery() { return {}; }
     virtual void destroyQuery(Query q) { (void)q; }
