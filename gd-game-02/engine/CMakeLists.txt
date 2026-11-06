@@ -150,6 +150,20 @@ target_sources(gd02 PRIVATE
 target_include_directories(gd02 PRIVATE src)
 target_link_libraries(gd02 PRIVATE SDL3::SDL3)
 
+# gd-engine-core (GDCORE-008, ../../gd-engine-core/docs/README.md): the shared
+# render / audio / platform libraries, static, as gd-game-01 links them.
+# Linking it does not change the game: gd02 runs its own code ("local")
+# unless a core backend is chosen (Enhanced > Performance, or the development
+# aids GD02_GRAPHICS_BACKEND / GD02_AUDIO_BACKEND). The launcher module
+# (GD02_MODULE, below) takes it through gd02's LINK_LIBRARIES, built in the
+# launcher's layout (GDCORE_LAUNCHER_MODULE); the core lists the shared
+# libraries and licences the packages must carry in <build>/gdcore-runtime.txt
+# (gd-engine-launcher/scripts/build.sh ship_core_runtime).
+option(GD02_MODULE "Also build gd02 as a Guitar Dream Universal Launcher module" OFF)
+set(GDCORE_LAUNCHER_MODULE ${GD02_MODULE})
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../../gd-engine-core ${CMAKE_CURRENT_BINARY_DIR}/gd-engine-core)
+target_link_libraries(gd02 PRIVATE gdcore)
+
 # stb_vorbis (third_party/stb_vorbis, pinned; see third_party/README.md):
 # the Ogg Vorbis decoder for the .mogg song audio. Built as C, with its own
 # warnings silenced (it is upstream code, kept unmodified).
@@ -309,7 +323,6 @@ set_target_properties(gd02 PROPERTIES
 # program itself is unchanged. On Android the module is libgd-game-02.so in the
 # launcher's APK (gd-engine-launcher/scripts/build.sh android); it uses the
 # launcher's libSDL3.so, built from the same SDL3 source.
-option(GD02_MODULE "Also build gd02 as a Guitar Dream Universal Launcher module" OFF)
 if(GD02_MODULE)
   set(GD02_HOST_SDK "${CMAKE_CURRENT_SOURCE_DIR}/../../gd-engine-launcher/sdk" CACHE PATH
       "The launcher's module SDK (gd_host.h, gd_module_shim.h/.cpp)")

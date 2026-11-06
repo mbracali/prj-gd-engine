@@ -314,6 +314,7 @@ build_module_02() {
       cp "$work/libgd-game-02.so" "$ffmpeg"/lib/libavformat.so "$ffmpeg"/lib/libavcodec.so "$ffmpeg"/lib/libavutil.so "$dest/"
       printf '%s\n' libgd-game-02.so libavformat.so libavcodec.so libavutil.so > "$dest/native-libs.txt" ;;
   esac
+  ship_core_runtime "$os" "$work" "$dest"  # gd-engine-core: its shared libraries and licences
   cp "$engine/third_party/stb_vorbis/LICENSE.txt" "$dest/licenses/stb_vorbis-LICENSE.txt"
   (. "$engine/build_common.sh"; ship_ffmpeg_licence "$ffmpeg" "$dest")
   cp "$engine/README.md" "$dest/README.md"
