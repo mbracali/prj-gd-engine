@@ -91,7 +91,7 @@ void PortContext::sound(const char* what) const {
 }
 
 PortScreens::PortScreens(Input& input, FrontEnd& fe, EnhancedStore& store, std::function<void(const std::string&)> changed)
-    : ctx_{input, fe, store, *this, std::move(changed), {}, {}} {
+    : ctx_{input, fe, store, *this, std::move(changed), {}, {}, {}, {}} {
     gamepads_ = makeGamepadScreen(ctx_);
     enhanced_ = makeEnhancedScreen(ctx_);
 }

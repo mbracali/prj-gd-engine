@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "app_ids.h"
+#include "audio/audio_device.h"
 #include "audio/mixer.h"
 #include "data/disc.h"
 #include "data/qbkey.h"
@@ -67,10 +68,41 @@ bool envOn(const char* name) {
     return v && *v && std::string(v) != "0";
 }
 
+// Enhanced > Graphics / Audio Backend as this start of the game uses them
+// (startupGraphicsBackend / startupAudioBackend in app.h): read from
+// enhanced.json once, at the start of App::run (each restart reads it again).
+struct StartupBackends {
+    bool latched = false;
+    std::string graphics = "local", audio = "local";
+};
+StartupBackends& startupBackends() {
+    static StartupBackends b;
+    return b;
+}
+// The settings folder's enhanced.json (`dir`; "" : none, both local), as
+// EnhancedStore loads it: a value this build cannot offer is dropped.
+void latchStartupBackends(const std::string& dir) {
+    StartupBackends& b = startupBackends();
+    b = StartupBackends{};
+    b.latched = true;
+    if (dir.empty()) return;
+    EnhancedStore st;
+    st.load(dir);
+    b.graphics = st.get("graphics_backend"), b.audio = st.get("audio_backend");
+    if (b.graphics.empty()) b.graphics = "local";
+    if (b.audio.empty()) b.audio = "local";
+}
+// GD04_AUDIO_BACKEND=<id> (development aid; the walks on each backend) over the latched one.
+std::string audioBackendAsked() {
+    if (const char* v = SDL_getenv("GD04_AUDIO_BACKEND"); v && *v) return v;
+    return startupBackends().audio;
+}
+
 class App : public WalkHost {
 public:
     explicit App(const Options& o) : options_(o) {}
     int run();
+    bool restartAsked() const { return restart_; }
 
     // WalkHost (the port's walks).
     void walkMouse(float x, float y, int button) override { menuMouse(x, y, button); }
@@ -160,7 +192,24 @@ private:
     uint64_t outroAtNs_ = 0;  // when a won song's end (songOutro) began
     std::string message_;
     bool running_ = true;
+    bool restart_ = false;  // Enhanced's Restart Now: runApp starts the game again
     int exitCode_ = 0;
+    // A restart (Options::startScreen): GH3's boot screens passed unseen to
+    // Enhanced Options (restartToEnhanced).
+    bool restartNav_ = false;
+    uint64_t restartNavNs_ = 0, restartNavUntilNs_ = 0;
+    void restartToEnhanced();
+    // Enhanced Options only: "Graphics: X   Audio: Y", the backends this run uses.
+    void drawBackendLabel();
+    // The graphics backend that draws now (after any fallback): "local" until
+    // gd04's gd-engine-core renderer lands (the graphics work returns the
+    // device's real id here).
+    std::string graphicsBackendNow() const { return "local"; }
+    // The audio backend that plays now (after any fallback).
+    static std::string audioBackendNow() {
+        const std::string b = audiodev::backend();
+        return b.empty() ? std::string("local") : b;
+    }
     std::shared_ptr<VenuePreload> songPreload_;                 // the next song's venue, loading (VenuePreload)
     std::vector<std::shared_ptr<VenuePreload>> preloadDiscard_;  // replaced ones still finishing on their thread
     int preloadSerial_ = 0;
@@ -992,6 +1041,67 @@ void App::overlay() {
             front_->ui().drawText(canvas_, font, t, 23, 684, 22, {51, 255, 77, 255}, 0x21);
         }
     }
+    drawBackendLabel();
+}
+
+// Enhanced Options only: the graphics and audio backends this run uses (after
+// any fallback to local), in small white text on the line above the FPS
+// counter (universal-menus.md "Backends"; the port's help bar takes the
+// counter's line beside it, so the label stays above even with the counter
+// off). A chosen one that could not start shows as "local (<name> could not start)".
+void App::drawBackendLabel() {
+    if (!front_ || !ports_ || song_ || ports_->current() != "port_enhanced") return;
+    auto label = [](const std::string& id) -> std::string {
+        static const std::pair<const char*, const char*> k[] = {{"sdl3", "SDL3"},          {"vulkan", "Vulkan"}, {"opengl3", "OpenGL3"},
+                                                                {"miniaudio", "miniaudio"}, {"openal", "OpenAL"}, {"faudio", "FAudio"}};
+        for (const auto& [id0, name] : k)
+            if (id == id0) return name;
+        return "local";
+    };
+    auto shown = [&](const std::string& running, const std::string& chosen) {
+        return label(running) + (chosen != running && label(chosen) != "local" ? " (" + label(chosen) + " could not start)" : "");
+    };
+    const std::string t = "Graphics: " + shown(graphicsBackendNow(), startupBackends().graphics) + "   Audio: " + shown(audioBackendNow(), audioBackendAsked());
+    canvas_.flush();
+    const uint32_t font = qbkey::key("text_a5");
+    front_->ui().drawText(canvas_, font, t, 25, 660, 18, {0, 0, 0, 153}, 0x21);
+    front_->ui().drawText(canvas_, font, t, 23, 658, 18, {255, 255, 255, 230}, 0x21);
+}
+
+// Restart Now's way back (universal-menus.md "Backends": no boot screens,
+// straight back to Enhanced Settings, the same profile): GH3's own boot flow
+// runs (its save loads as always) under a black screen, its movies skipped:
+// any button on the boot screens, OPTIONS on the main menu, then Enhanced
+// Options opens over GH3's options, where Back leads as always.
+void App::restartToEnhanced() {
+    const uint64_t now = SDL_GetTicksNS();
+    if (!restartNavUntilNs_) restartNavUntilNs_ = now + 60'000'000'000ull;
+    if (!front_ || !ports_ || ports_->isOpen() || now > restartNavUntilNs_) {
+        if (now > restartNavUntilNs_) SDL_Log("restart: Enhanced Options not reached; staying on GH3's %s", front_ ? front_->flowState().c_str() : "-");
+        restartNav_ = false;
+        return;
+    }
+    if (now < restartNavNs_) return;
+    restartNavNs_ = now + 300'000'000ull;
+    const std::string st = front_->flowState();
+    auto press = [&](Action a) {
+        for (bool down : {true, false}) menuAction(InputEvent{a, down, SDL_GetTicksNS(), ControllerMode::Guitar, 0});
+    };
+    if (st == "bootup_press_any_button_fs" || st == "bootup_using_guitar_controller_fs") {
+        press(Action::Confirm);
+    } else if (st == "main_menu_fs") {
+        float x0, y0, x1, y1;
+        if (menuMouseAllowed() && front_->ui().drawnBounds(qbkey::key("main_menu_options_text"), x0, y0, x1, y1)) {
+            menuMouse((x0 + x1) * 0.5f, (y0 + y1) * 0.5f, 0);
+            menuMouse((x0 + x1) * 0.5f, (y0 + y1) * 0.5f, 1);
+        } else {
+            press(Action::Up), press(Action::Confirm);  // CAREER wraps up to OPTIONS
+        }
+    } else if (st == "options_select_option_fs") {
+        ports_->open(PortScreens::Id::Enhanced);
+        restartNav_ = false;
+        SDL_Log("restart: back on Enhanced Options");
+    }
 }
 
 bool App::loadData(const std::string& path) {
@@ -1425,7 +1535,7 @@ void App::frame() {
         // GD04_MOVIES=<name>,...: only those play (development aid: GH3_Intro without the boot's logos).
         const char* only = SDL_getenv("GD04_MOVIES");
         const bool listed = !only || ("," + std::string(only) + ",").find("," + movie + ",") != std::string::npos;
-        if (((!walk_ && !SDL_getenv("GD04_NO_MOVIES")) || SDL_getenv("GD04_WALK_MOVIES")) && listed)
+        if (((!walk_ && !restartNav_ && !SDL_getenv("GD04_NO_MOVIES")) || SDL_getenv("GD04_WALK_MOVIES")) && listed)
             if (playMovie(*disc_, movie, canvas_, mixer_, input_) == MoviePlayer::Result::Quit) running_ = false;
         lastFrameNs_ = SDL_GetTicksNS();
         return;
@@ -1463,6 +1573,7 @@ void App::frame() {
             }
             front_->frame(canvas_, dt);
             if (ports_) ports_->drawItems(canvas_, front_->flowState());
+            if (restartNav_) canvas_.flush(), canvas_.fillRect(0, 0, kScreenW, kScreenH, SDL_Color{0, 0, 0, 255});  // the boot screens unseen
         }
         overlay();
         captureMenuScreenshot(canvas_, double(nowNs - startNs_) / 1e6, -1e9);  // no song
@@ -1500,6 +1611,14 @@ static std::string startupGraphicsBackend(const Options& o) {
 
 int App::run() {
     SDL_SetAppMetadata(app::kDisplayName, app::kVersion, app::kAppId);
+    // Enhanced > Graphics / Audio Backend: this start's, read once (a change
+    // in the menu applies on the next start). A walk starts on fresh settings
+    // (local), its restart (Restart Now) on the walk's own.
+    const bool restarted = !options_.startScreen.empty();
+    if (options_.walk.empty()) latchStartupBackends(prefDir());
+    else latchStartupBackends(restarted && !prefDir().empty() ? prefDir() + "walktest/" : std::string());
+    SDL_Log("backends: graphics %s, audio %s", startupBackends().graphics.c_str(), startupBackends().audio.c_str());
+    audiodev::setBackend(audioBackendAsked());  // every sound's output (audio/audio_device.h); local is SDL's devices
     Input::prepareSdl();
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMEPAD)) {
         std::fprintf(stderr, "%s: cannot start SDL: %s\n", app::kProgram, SDL_GetError());
@@ -1560,10 +1679,11 @@ int App::run() {
     if (!options_.walk.empty() && !prefDir().empty()) {
         saveDir_ = prefDir() + "walktest/";
         std::error_code ec;
-        std::filesystem::remove(saveDir_ + "enhanced.json", ec);
-        std::filesystem::remove(saveDir_ + "controllers.json", ec);
+        // A restart (Restart Now) keeps the walk's settings and save.
+        if (!restarted) std::filesystem::remove(saveDir_ + "enhanced.json", ec);
+        if (!restarted) std::filesystem::remove(saveDir_ + "controllers.json", ec);
         // The game's save too (GD04_WALK_KEEP_SAVE=1 keeps it from the last walk).
-        if (!SDL_getenv("GD04_WALK_KEEP_SAVE")) {
+        if (!restarted && !SDL_getenv("GD04_WALK_KEEP_SAVE")) {
             std::filesystem::remove(saveDir_ + "save.json", ec);
             std::filesystem::remove(saveDir_ + "save.json.bak", ec);
         }
@@ -1589,7 +1709,7 @@ int App::run() {
         std::fprintf(stderr, "%s: %s\n", app::kProgram, message_.empty() ? "no disc image given" : message_.c_str());
         running_ = false, exitCode_ = 2;
     } else if (!options_.walk.empty() && !(walk_ = std::make_unique<Walk>(options_.walk))->known()) {
-        std::fprintf(stderr, "%s: unknown walk '%s' (quickplay, lose, back, career, pause, glitches, coop, faceoff, proface, battle, boss, boot, mouse, gamepads, stickyaxis)\n", app::kProgram,
+        std::fprintf(stderr, "%s: unknown walk '%s' (quickplay, lose, back, career, pause, glitches, coop, faceoff, proface, battle, boss, boot, mouse, gamepads, stickyaxis, enhanced_backends)\n", app::kProgram,
                      options_.walk.c_str());
         running_ = false, exitCode_ = 2;
     } else if (!options_.song.empty()) {
@@ -1620,6 +1740,15 @@ int App::run() {
         } else {
             ports_ = std::make_unique<PortScreens>(input_, *front_, enhanced_, [this](const std::string& k) { applyEnhanced(k); });
             ports_->context().action = [this](const std::string& a) { userFileAction(a); };
+            // Enhanced > Graphics / Audio Backend: what runs now, and Restart Now.
+            ports_->context().backendNow = [this](const std::string& key) {
+                return key == "graphics_backend" ? graphicsBackendNow() : key == "audio_backend" ? audioBackendNow() : std::string();
+            };
+            ports_->context().restart = [this] {
+                SDL_Log("restart: Restart Now (the new backends)");
+                restart_ = true, running_ = false;
+            };
+            restartNav_ = options_.startScreen == "port_enhanced";
             if (!envOn("GD04_NO_HOOKS")) hooks_ = std::make_unique<SongHooks>(*front_, mixer_, *disc_, *textures_);
             addSongPreviewNatives(front_->vm(), *front_, mixer_, *disc_);  // practice's section preview (GD04-105)
             addVenueScriptCalls();
@@ -1706,6 +1835,7 @@ int App::run() {
                 if (input_.padConnected(i)) m |= 1u << i;
             front_->activeControllers = m;
         }
+        if (restartNav_) restartToEnhanced();
         frame();
         if (quitAfter && double(SDL_GetTicksNS() - startNs_) / 1e6 >= std::atof(quitAfter)) running_ = false;
         updatePointer();
@@ -1729,6 +1859,9 @@ int App::run() {
             }
         }
     }
+    // Restart Now as a walk's last act: the walk is over (it goes on in the
+    // restarted game's walk, runApp).
+    if (restart_ && walk_ && front_) walk_->endAtRestart(), exitCode_ = walk_->finish(*front_);
     song_.reset();
     outroSong_.reset();  // its venue's GPU objects before the device
     if (backdropWork_.valid()) backdropWork_.wait();
@@ -1749,7 +1882,37 @@ int App::run() {
 
 }  // namespace
 
+// Enhanced > Graphics / Audio Backend > Restart Now (universal-menus.md
+// "Backends"): the App ends and starts again in the same process (in the
+// launcher too: the module keeps running and gets the launcher's window
+// again), no boot screens, back on Enhanced Options. A walk goes on as
+// "<walk>_restarted" (tests/walk.h).
 int runApp(const Options& options) {
-    App app(options);
-    return app.run();
+    Options o = options;
+    for (;;) {
+        bool restart = false;
+        int r;
+        {
+            App app(o);
+            r = app.run();
+            restart = app.restartAsked();
+        }
+        if (!restart || r != 0) return r;
+        SDL_Log("restart: Enhanced Options asked for a restart (the new backends)");
+        const std::string walk = o.walk;
+        o = options;
+        o.song.clear();
+        o.startScreen = "port_enhanced";
+        if (!walk.empty()) o.walk = walk + "_restarted";
+    }
+}
+
+std::string startupGraphicsBackend() {
+    if (!startupBackends().latched) latchStartupBackends(prefDir());  // asked before App::run read it
+    return startupBackends().graphics;
+}
+
+std::string startupAudioBackend() {
+    if (!startupBackends().latched) latchStartupBackends(prefDir());
+    return startupBackends().audio;
 }

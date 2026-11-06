@@ -40,6 +40,10 @@ struct PortContext {
     // load_settings, load_progress); its outcome lands in `status`.
     std::function<void(const std::string& action)> action;
     std::string status;
+    // Enhanced > Graphics / Audio Backend: the backend running now for the
+    // key (after any fallback), and Restart Now (the app ends and starts again).
+    std::function<std::string(const std::string& key)> backendNow;
+    std::function<void()> restart;
     // gd01's sound names: toggle (a move), select, back, error.
     void sound(const char* what) const;
 };
@@ -66,6 +70,10 @@ std::unique_ptr<PortScreen> makeEnhancedScreen(PortContext& ctx);
 // of the open dropdown's option k.
 bool enhancedRowCenter(PortScreen& enhanced, const std::string& key, float& x, float& y);
 bool enhancedOptionCenter(PortScreen& enhanced, int k, float& x, float& y);
+// The Restart Now / Later pop-up (after a backend change): button b's centre
+// (0 Restart Now, 1 Later; false: closed), and whether it is open.
+bool enhancedAskCenter(PortScreen& enhanced, int b, float& x, float& y);
+bool enhancedAsking(PortScreen& enhanced);
 
 class PortScreens {
 public:
