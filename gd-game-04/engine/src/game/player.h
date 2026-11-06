@@ -135,6 +135,7 @@ private:
     float offsetMs_;
     double songLengthMs_ = 0;
     size_t cur_ = 0;
+    size_t firstCur_ = 0;  // the first note this player meets (startAt): no overstrum before its window
     PlayerStats st_;
     std::vector<PlayerEvent> events_;
 

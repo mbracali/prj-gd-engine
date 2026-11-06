@@ -298,6 +298,14 @@ void Player::frame(double now, double dt, const FrameInput& raw) {
         miss(cur_, now);
         ++cur_;
     }
+    // Before the first note's window opens (the highway's intro, the
+    // count-in: GH3's firstnote_window_open) a strum is nothing: no
+    // overstrum, no tolerance miss (owner GD04-112) [I: GH3 runs
+    // check_buttons_fast from the gem scroller's start].
+    if (in.strum && cur_ < n && cur_ == firstCur_ && double(notes[cur_].time) > base + E) {
+        in.strum = false;
+        pendingMs_ = -1;
+    }
     // 2. The fret history.
     histPos_ = (histPos_ + 1) % histMask_.size();
     histMask_[histPos_] = in.frets;
@@ -379,4 +387,5 @@ void Player::startAt(double ms) {
         if (n.phrase >= 0 && size_t(n.phrase) < missedPhrase_.size()) missedPhrase_[size_t(n.phrase)] = true;
         ++cur_;
     }
+    firstCur_ = cur_;
 }

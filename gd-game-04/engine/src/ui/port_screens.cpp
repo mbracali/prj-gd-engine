@@ -149,11 +149,14 @@ void PortScreens::mouse(float x, float y, int button) {
         return;
     }
     if (transMs_ < kTransitionMs) return;  // the page is still sliding in
-    for (int k = 0; k < 2; ++k) {  // the help bar's SELECT and BACK
+    // The help bar's SELECT, BACK and UP/DOWN (the strum bar: up above its
+    // middle, down below it, as GH3's own pills in App::menuMouse; GD04-111).
+    for (int k = 0; k < 3; ++k) {
         float x0, y0, x1, y1;
         helpRect(k, x0, y0, x1, y1);
         if (x < x0 || x > x1 || y < y0 || y > y1) continue;
-        if (button == 1) handle(InputEvent{k == 0 ? Action::Confirm : Action::Back, true, 0, ControllerMode::Guitar, 0});
+        const Action a = k == 0 ? Action::Confirm : k == 1 ? Action::Back : y < 0.5f * (y0 + y1) ? Action::Up : Action::Down;
+        if (button == 1) handle(InputEvent{a, true, 0, ControllerMode::Guitar, 0});
         return;
     }
     screen(stack_.back())->mouse(x, y, button == 1);
