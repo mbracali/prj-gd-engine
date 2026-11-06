@@ -206,7 +206,7 @@ SDL_Window* gdshim_request_window(uint32_t api) {
         return nullptr;
     }
     if (!g_contexts.empty())  // they would outlive the window they were made on
-        SDL_Log("gdul shim: %zu OpenGL context(s) of the game still alive while its window is made for %s", g_contexts.size(),
+        SDL_Log("gdul shim: %d OpenGL context(s) of the game still alive while its window is made for %s", int(g_contexts.size()),
                 apiName(api));
     void* w = g_host->request_window(g_host->request_window_user, api);
     if (!w) {
