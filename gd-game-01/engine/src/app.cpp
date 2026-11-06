@@ -2580,10 +2580,11 @@ int App::run() {
     applyEnhanced();
 
     std::string audioError;
-    // Enhanced > Audio backend, read once here (applies on the next start);
-    // anything but a gd-engine-core id that starts is local. Development aid:
-    // GD01_AUDIO_BACKEND=<id> overrides it (the walks on each backend).
-    std::string audioBackend = enhanced("audio_backend").str();
+    // Enhanced > Audio backend, as latched at start-up (applies on the next
+    // start); a gd-engine-core backend that does not start leaves local.
+    // Development aid: GD01_AUDIO_BACKEND=<id> overrides it (the walks on
+    // each backend).
+    std::string audioBackend = startupAudioBackend();
     if (const char* b = SDL_getenv("GD01_AUDIO_BACKEND"); b && *b) audioBackend = b;
     if (!mixer_.open(audioError, audioBackend)) {
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, kAppTitle, ("Cannot open audio: " + audioError).c_str(), window_);
