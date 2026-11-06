@@ -10,6 +10,9 @@
 #if GDCORE_RENDER_OPENGL3
 #include "gl/gl_device.h"
 #endif
+#if GDCORE_RENDER_SDLGPU
+#include "sdlgpu/sdlgpu_device.h"
+#endif
 #if GDCORE_RENDER_VULKAN
 #include "vulkan/vk_device.h"
 #endif
@@ -35,7 +38,7 @@ bool parseBackend(const char* id, Backend& out) {
 bool backendCompiled(Backend b) {
     switch (b) {
     case Backend::OpenGL3: return GDCORE_RENDER_OPENGL3 != 0;
-    case Backend::SdlGpu: return false;  // phase 2
+    case Backend::SdlGpu: return GDCORE_RENDER_SDLGPU != 0;
     case Backend::Vulkan: return GDCORE_RENDER_VULKAN != 0;
     }
     return false;
@@ -115,6 +118,9 @@ std::unique_ptr<Device> createDevice(const DeviceCreateInfo& info, std::string& 
     switch (info.backend) {
 #if GDCORE_RENDER_OPENGL3
     case Backend::OpenGL3: return createGlDevice(info, error);
+#endif
+#if GDCORE_RENDER_SDLGPU
+    case Backend::SdlGpu: return createSdlGpuDevice(info, error);
 #endif
 #if GDCORE_RENDER_VULKAN
     case Backend::Vulkan: return createVulkanDevice(info, error);

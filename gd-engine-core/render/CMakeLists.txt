@@ -2,7 +2,8 @@
 # Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #
 # gdcore_render: gd::core::render, the graphics interface and its backends
-# (docs/render.md). OpenGL3 (OpenGL 3.3 core / OpenGL ES 3.0) is built
+# (docs/render.md). OpenGL3 (OpenGL 3.3 core / OpenGL ES 3.0) and SDL3 GPU
+# (SDL_GPU with the build-time SPIR-V: its Vulkan driver) are built
 # everywhere; Vulkan (GDCORE_RENDER_VULKAN) everywhere but Apple and the web
 # for now. Needs SDL3::SDL3 (find_package, or the game's add_subdirectory of
 # SDL's source on Android).
@@ -23,10 +24,11 @@ add_library(gdcore_render STATIC
   src/common/spirv_reflect.cpp
   src/gl/gl_api.cpp
   src/gl/gl_device.cpp
+  src/sdlgpu/sdlgpu_device.cpp
 )
 target_include_directories(gdcore_render PUBLIC include PRIVATE src)
 target_compile_features(gdcore_render PUBLIC cxx_std_17)
-target_compile_definitions(gdcore_render PRIVATE GDCORE_RENDER_OPENGL3=1)
+target_compile_definitions(gdcore_render PRIVATE GDCORE_RENDER_OPENGL3=1 GDCORE_RENDER_SDLGPU=1)
 target_link_libraries(gdcore_render PRIVATE SDL3::SDL3)
 
 # The Vulkan backend (docs/render.md 4.3): Vulkan-Headers, volk and VMA,
