@@ -7,6 +7,7 @@
 #include <array>
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -35,10 +36,22 @@ struct Lighting {
     float color[kMaxLights][4];  // rgb, range (point lights)
 };
 
+class CoreRenderer;  // render/core_renderer.h
+
 // OpenGL 3.3 renderer. 2D drawing uses a virtual 1280x720 screen (y down),
 // letterboxed into the window; 3D drawing takes a full model-view-projection.
 class Renderer {
 public:
+    Renderer();
+    ~Renderer();
+    // Enhanced > Graphics backend, before init: "local" (this class's own GL
+    // code, the default) or a gd-engine-core backend id ("opengl3"); a core
+    // backend that is not built or fails to start falls back to local and
+    // logs why. With a core backend every public call below goes to
+    // CoreRenderer (gd-engine-core/docs/render.md section 6).
+    void setBackend(const std::string& id) { backendRequest_ = id; }
+    // What draws: "local" or the core backend's id.
+    std::string backend() const;
     // Creates the GL context for `window` (created with SDL_WINDOW_OPENGL).
     bool init(SDL_Window* window, std::string& error);
     // GL_RENDERER of the context, e.g. "NVIDIA GeForce RTX 3060 Laptop GPU/PCIe/SSE2".
@@ -173,6 +186,9 @@ public:
     std::vector<std::string> compileAllShaders(int& programs);
 
 private:
+    friend class CoreRenderer;
+    std::string backendRequest_ = "local";
+    std::unique_ptr<CoreRenderer> core_;  // null: local
     std::string gpuName_;
     void createFontTexture();
     void setJitter(float x, float y);

@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdio>
 
+#include "render/core_renderer.h"
 #include "render/gl.h"
 
 namespace {
@@ -203,8 +204,33 @@ constexpr int kGlyph = 8, kFontCols = 16, kFontRows = 6;
 
 }  // namespace
 
+Renderer::Renderer() = default;
+Renderer::~Renderer() = default;
+
+std::string Renderer::backend() const { return core_ ? core_->backendId() : "local"; }
+
 bool Renderer::init(SDL_Window* window, std::string& error) {
     window_ = window;
+    if (backendRequest_ != "local" && !backendRequest_.empty()) {
+        // A gd-engine-core backend (Enhanced > Graphics backend); any failure falls back to local.
+        gd::core::render::Backend b{};
+        std::string why;
+        if (!gd::core::render::parseBackend(backendRequest_.c_str(), b)) why = "unknown backend";
+        else if (!gd::core::render::backendCompiled(b)) why = "not available yet";
+        if (why.empty()) {
+            gd::core::render::GlHooks hooks;  // this module's GL calls (the launcher's shims when it is one)
+            hooks.createContext = [](SDL_Window* w) -> void* { return SDL_GL_CreateContext(w); };
+            hooks.destroyContext = [](void* c) { SDL_GL_DestroyContext(static_cast<SDL_GLContext>(c)); };
+            hooks.swapWindow = [](SDL_Window* w) { return SDL_GL_SwapWindow(w); };
+            core_ = std::make_unique<CoreRenderer>(*this);
+            if (core_->init(window, b, hooks, why)) {
+                createFontTexture();
+                return true;
+            }
+            core_.reset();
+        }
+        SDL_Log("graphics backend: %s: %s; using local", backendRequest_.c_str(), why.c_str());
+    }
     context_ = SDL_GL_CreateContext(window);
     if (!context_) {
         error = SDL_GetError();
@@ -283,6 +309,7 @@ bool Renderer::init(SDL_Window* window, std::string& error) {
 }
 
 void Renderer::shutdown() {
+    if (core_) return core_->shutdown();
     if (!context_) return;
     for (unsigned t : textures_)
         if (t) gl::glDeleteTextures(1, &t);
@@ -300,6 +327,7 @@ void Renderer::shutdown() {
 }
 
 int Renderer::createTexture(const Image& image, bool repeat) {
+    if (core_) return core_->createTexture(image, repeat);
     unsigned id = 0;
     gl::glGenTextures(1, &id);
     gl::glBindTexture(GL_TEXTURE_2D, id);
@@ -316,6 +344,7 @@ int Renderer::createTexture(const Image& image, bool repeat) {
 }
 
 void Renderer::updateTexture(int texture, const Image& image) {
+    if (core_) return core_->updateTexture(texture, image);
     if (texture <= 0 || size_t(texture) >= textures_.size()) return;
     gl::glBindTexture(GL_TEXTURE_2D, textures_[size_t(texture)]);
     gl::glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
@@ -345,6 +374,7 @@ void Renderer::createFontTexture() {
     SDL_DestroySurface(surface);
 
     font_ = createTexture(img);
+    if (core_) return core_->setTextureNearest(font_);
     gl::glBindTexture(GL_TEXTURE_2D, textures_[font_]);
     gl::glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     gl::glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
@@ -358,6 +388,7 @@ void Renderer::createFontTexture() {
 // with a 120 cap, 144 Hz with 120) vsync is off and endFrame paces alone.
 // Headless drivers are not paced.
 void Renderer::setFrameCap(int fps) {
+    if (core_) return core_->setFrameCap(fps);
     if (fps <= 0) {  // Enhanced > Max FPS "Unlimited": no vsync, no pacing
         SDL_GL_SetSwapInterval(0);
         paceNs_ = 0, nextFrameNs_ = 0;
@@ -386,6 +417,7 @@ int Renderer::internalHeight(int windowH) const {
 }
 
 std::string Renderer::upscalerStatus() const {
+    if (core_) return core_->upscalerStatus();
     std::string s = postFx_.upscalerStatus();
     if (float ms = postFx_.upscalerMs(); ms > 0) {
         char cost[40];
@@ -406,6 +438,7 @@ void Renderer::frameSize(int& w, int& h) const {
 void Renderer::bindMain() { gl::glBindFramebuffer(GL_FRAMEBUFFER, sceneActive_ ? scene_.fbo : mainBound_ ? main_.fbo : 0); }
 
 void Renderer::beginFrame(SDL_Color clear) {
+    if (core_) return core_->beginFrame(clear);
     gpuTimer.begin();
     gpuTimer.mark(GpuTimer::FrameStart);
     int w = 0, h = 0;
@@ -473,6 +506,7 @@ void Renderer::beginFrame(SDL_Color clear) {
 // frames (seconds of GPU work with no vsync, e.g. offscreen), and the next
 // texture upload then waits for all of them.
 void Renderer::endFrame() {
+    if (core_) return core_->endFrame();
     gpuTimer.mark(GpuTimer::FrameEnd);
     if (mainBound_ && main_.f16) {  // True HDR: converted for the HDR surface
         int ww = 0, wh = 0;
@@ -505,6 +539,7 @@ void Renderer::endFrame() {
 }
 
 int Renderer::createRenderTarget(int width, int height) {
+    if (core_) return core_->createRenderTarget(width, height);
     unsigned tex = 0, fbo = 0, depth = 0;
     gl::glGenTextures(1, &tex);
     gl::glBindTexture(GL_TEXTURE_2D, tex);
@@ -530,6 +565,7 @@ int Renderer::createRenderTarget(int width, int height) {
 }
 
 void Renderer::beginRenderTarget(int texture) {
+    if (core_) return core_->beginRenderTarget(texture);
     auto it = targets_.find(texture);
     if (it == targets_.end()) return;
     setJitter(0, 0);  // impostors and other targets are not part of the TAA frame
@@ -543,6 +579,7 @@ void Renderer::beginRenderTarget(int texture) {
 }
 
 void Renderer::endRenderTarget() {
+    if (core_) return core_->endRenderTarget();
     bindMain();
     if (sceneActive_) setJitter(sceneJitter_[0], sceneJitter_[1]);
     gl::glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
@@ -589,6 +626,7 @@ void main() {
 }  // namespace
 
 bool Renderer::ensureBlurProgram() {
+    if (core_) return core_->ensureBlurProgram();
     if (blurProgram_) return blurProgram_ != ~0u;
     std::string error;
     unsigned vs = compile(GL_VERTEX_SHADER, kBlurVertexShader, error);
@@ -624,6 +662,7 @@ bool Renderer::ensureBlurProgram() {
 }
 
 std::vector<std::string> Renderer::compileAllShaders(int& programs) {
+    if (core_) return core_->compileAllShaders(programs);
     std::vector<std::string> failed;
     programs = 2;  // the main program (init) and depth of field
     if (!ensureBlurProgram()) failed.push_back("depth of field");
@@ -634,6 +673,7 @@ std::vector<std::string> Renderer::compileAllShaders(int& programs) {
 }
 
 void Renderer::depthBlur(float depth, float tapPx) {
+    if (core_) return core_->depthBlur(depth, tapPx);
     if (depth <= 0 || depth >= 1) return;
     if (!ensureBlurProgram()) return;
     const int x = viewport_[0], y = viewport_[1], w = viewport_[2], h = viewport_[3];
@@ -667,12 +707,14 @@ void Renderer::depthBlur(float depth, float tapPx) {
 }
 
 float Renderer::readDepth(int x, int y) {
+    if (core_) return core_->readDepth(x, y);
     float d = 1;
     gl::glReadPixels(viewport_[0] + x, viewport_[1] + y, 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT, &d);
     return d;
 }
 
 void Renderer::readDepthsAsync(unsigned& buffer, size_t& capacity, const std::vector<std::array<int, 2>>& points) {
+    if (core_) return core_->readDepthsAsync(buffer, capacity, points);
     if (points.empty()) return;
     if (!buffer) gl::glGenBuffers(1, &buffer);
     gl::glBindBuffer(GL_PIXEL_PACK_BUFFER, buffer);
@@ -687,6 +729,7 @@ void Renderer::readDepthsAsync(unsigned& buffer, size_t& capacity, const std::ve
 }
 
 std::vector<float> Renderer::mapDepths(unsigned buffer, size_t count) {
+    if (core_) return core_->mapDepths(buffer, count);
     std::vector<float> out;
     if (!buffer || !count) return out;
     gl::glBindBuffer(GL_PIXEL_PACK_BUFFER, buffer);
@@ -729,6 +772,7 @@ const QueryFns& queryFns() {
 }  // namespace
 
 void Renderer::testDepthsAsync(std::vector<unsigned>& queries, const std::vector<std::array<float, 3>>& points) {
+    if (core_) return;  // OpenGL ES only (gl::isEs); the core path reads depth through readDepthsAsync
     const QueryFns& q = queryFns();
     if (points.empty() || !q.gen || !q.begin || !q.end || !q.get) return;
     if (!pointProgram_) {
@@ -768,6 +812,7 @@ void Renderer::testDepthsAsync(std::vector<unsigned>& queries, const std::vector
 }
 
 bool Renderer::depthsPassed(const std::vector<unsigned>& queries, size_t count, std::vector<bool>& passed) {
+    if (core_) return false;
     const QueryFns& q = queryFns();
     if (!q.get || !count || queries.size() < count) return false;
     GLuint ready = 0;
@@ -783,6 +828,7 @@ bool Renderer::depthsPassed(const std::vector<unsigned>& queries, size_t count, 
 }
 
 float Renderer::beginWide(float maxAspect) {
+    if (core_) return core_->beginWide(maxAspect);
     int w = 0, h = 0;
     frameSize(w, h);
     saved_[0] = viewport_[0], saved_[1] = viewport_[1], saved_[2] = viewport_[2], saved_[3] = viewport_[3];
@@ -797,19 +843,25 @@ float Renderer::beginWide(float maxAspect) {
 }
 
 void Renderer::endWide() {
+    if (core_) return core_->endWide();
     for (int k = 0; k < 4; ++k) viewport_[k] = saved_[k];
     gl::glScissor(viewport_[0], viewport_[1], viewport_[2], viewport_[3]);
     gl::glViewport(viewport_[0], viewport_[1], viewport_[2], viewport_[3]);
 }
 
 void Renderer::clip43() {
+    if (core_) return core_->clip43();
     int w = std::min(viewport_[2], viewport_[3] * 4 / 3);
     gl::glScissor(viewport_[0] + (viewport_[2] - w) / 2, viewport_[1], w, viewport_[3]);
 }
 
-void Renderer::clipEnd() { gl::glScissor(viewport_[0], viewport_[1], viewport_[2], viewport_[3]); }
+void Renderer::clipEnd() {
+    if (core_) return core_->clipEnd();
+    gl::glScissor(viewport_[0], viewport_[1], viewport_[2], viewport_[3]);
+}
 
 void Renderer::clearDepth() {
+    if (core_) return core_->clearDepth();
     gl::glDepthMask(GL_TRUE);  // glClear only clears depth while depth writes are enabled
     gl::glClear(GL_DEPTH_BUFFER_BIT);
 }
@@ -843,6 +895,7 @@ void Renderer::applyState(int texture, Blend blend, bool depthTest, bool depthWr
 
 void Renderer::draw(const Vertex* v, size_t count, int texture, Blend blend, const float* mvp, bool depthTest,
                     bool depthWrite) {
+    if (core_) return core_->draw(v, count, texture, blend, mvp, depthTest, depthWrite);
     if (count == 0) return;
     applyState(texture, blend, depthTest, depthWrite, mvp);
     gl::glUniform1f(uCutout_, 0.0f);  // 2D: drop fully transparent texels
@@ -864,6 +917,7 @@ void Renderer::draw(const Vertex* v, size_t count, int texture, Blend blend, con
 }
 
 int Renderer::createMesh(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices) {
+    if (core_) return core_->createMesh(vertices, indices);
     GpuMesh m;
     gl::glGenVertexArrays(1, &m.vao);
     gl::glGenBuffers(1, &m.vbo);
@@ -889,6 +943,7 @@ int Renderer::createMesh(const std::vector<Vertex>& vertices, const std::vector<
 }
 
 void Renderer::updateMesh(int mesh, const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices) {
+    if (core_) return core_->updateMesh(mesh, vertices, indices);
     if (mesh <= 0 || size_t(mesh) >= meshes_.size()) return;
     GpuMesh& m = meshes_[size_t(mesh)];
     gl::glBindVertexArray(m.vao);
@@ -900,6 +955,7 @@ void Renderer::updateMesh(int mesh, const std::vector<Vertex>& vertices, const s
 }
 
 void Renderer::drawMesh(int mesh, const float* mvp, const RenderState& st) {
+    if (core_) return core_->drawMesh(mesh, mvp, st);
     if (mesh <= 0 || meshes_[mesh].count == 0) return;
     applyState(st.texture, st.blend, st.depthTest, st.depthWrite, mvp);
     gl::glUniform1f(uCutout_, st.alphaCutout ? 0.5f : -1.0f);
@@ -958,6 +1014,7 @@ void Renderer::drawMesh(int mesh, const float* mvp, const RenderState& st) {
 }
 
 void Renderer::grabNdc(int slot, float x0, float y0, float x1, float y1) {
+    if (core_) return core_->grabNdc(slot, x0, y0, x1, y1);
     Grab& g = grabs_[slot & 1];
     g.valid = false;
     int px0 = viewport_[0] + int(std::floor((x0 + 1) * 0.5f * float(viewport_[2])));
@@ -988,6 +1045,7 @@ void Renderer::grabNdc(int slot, float x0, float y0, float x1, float y1) {
 }
 
 void Renderer::drawGrab(int slot, float add) {
+    if (core_) return core_->drawGrab(slot, add);
     const Grab& g = grabs_[slot & 1];
     if (!g.valid) return;
     // GL copies are bottom-up: v 1 on the top edge. Alpha 255 at the top, 0 at the bottom.
@@ -1053,6 +1111,7 @@ void Renderer::textCentered(float cx, float y, float scale, SDL_Color c, const s
 }
 
 Image Renderer::readPixels() {
+    if (core_) return core_->readPixels();
     // The 16:9 area's rows across the whole window width (ultrawide scenery included).
     Image img;
     int w = 0, h = 0;
@@ -1083,6 +1142,7 @@ void Renderer::setJitter(float x, float y) {
 }
 
 bool Renderer::beginScene() {
+    if (core_) return core_->beginScene();
     // True HDR: the display's headroom, when the surface and the display show HDR (else tone mapped to SDR).
     post_.hdrPeak = post_.hdr == 2 && hdrSurface_ && hdrOn_ ? hdrHeadroom_ : 1.0f;
     if (!post_.any() || sceneActive_) return false;
@@ -1145,6 +1205,7 @@ bool Renderer::beginScene() {
 }
 
 void Renderer::endScene(const PostFrame& frame) {
+    if (core_) return core_->endScene(frame);
     if (!sceneActive_) return;
     setJitter(0, 0);
     sceneJitter_ = {0, 0};
@@ -1219,6 +1280,7 @@ void Renderer::updateHdr() {
 }
 
 std::string Renderer::hdrStatus() const {
+    if (core_) return core_->hdrStatus();
     if (!hdrSurface_) return "off: no HDR surface";
     if (!hdrOn_) return "off: HDR is off for this display (turn it on in the system's display settings)";
     char buf[160];

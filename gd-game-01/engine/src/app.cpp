@@ -2569,6 +2569,10 @@ int App::run() {
     setAppWindowIcon(window_);
     installDesktopEntry();
     std::string glError;
+    // Enhanced > Graphics backend (GDCORE-005): local, or a gd-engine-core
+    // backend; GD01_GRAPHICS_BACKEND=<id> overrides it (development aid, tests).
+    const char* backendOverride = SDL_getenv("GD01_GRAPHICS_BACKEND");
+    renderer_.setBackend(backendOverride ? backendOverride : startupGraphicsBackend());
     bool glOk = window_ && renderer_.init(window_, glError);
     if (glOk) renderer_.setHdrSurface(int(hdrSurface_));
     gpu::started(glOk, renderer_.gpuName());
