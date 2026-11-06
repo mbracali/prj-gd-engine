@@ -204,7 +204,7 @@ private:
     // The graphics backend that draws now (after any fallback): "local" until
     // gd04's gd-engine-core renderer lands (the graphics work returns the
     // device's real id here).
-    std::string graphicsBackendNow() const { return "local"; }
+    std::string graphicsBackendNow() const { return gfx::backendId(gfx::rendererBackend()); }  // what draws (after a fallback)
     // The audio backend that plays now (after any fallback).
     static std::string audioBackendNow() {
         const std::string b = audiodev::backend();
@@ -1597,18 +1597,6 @@ void App::frame() {
     canvas_.end();
 }
 
-// Enhanced > Graphics Backend as this start of the game uses it, read from
-// enhanced.json before the window is made (a change in the menu applies on
-// the next start). A minimal latch for the graphics work (GDCORE-010); the
-// Enhanced menu's work replaces it with the shared one (startupBackends, as
-// gd02's). Walks keep their own settings, fresh each run: local.
-static std::string startupGraphicsBackend(const Options& o) {
-    if (!o.walk.empty() || prefDir().empty()) return "local";
-    EnhancedStore st;
-    st.load(prefDir());
-    return st.get("graphics_backend");
-}
-
 int App::run() {
     SDL_SetAppMetadata(app::kDisplayName, app::kVersion, app::kAppId);
     // Enhanced > Graphics / Audio Backend: this start's, read once (a change
@@ -1629,7 +1617,7 @@ int App::run() {
     // window: SDL3 GPU and Vulkan need a window made for their API (in the
     // launcher, prepareWindowFor asks it for one). Local and opengl3 keep the
     // OpenGL window.
-    const gfx::Backend graphicsBackend = gfx::chosenBackend(startupGraphicsBackend(options_));
+    const gfx::Backend graphicsBackend = gfx::chosenBackend(startupBackends().graphics)  /* the latch above: every start, Restart Now too */;
     const bool gpuWindow = graphicsBackend == gfx::Backend::Sdl3 || graphicsBackend == gfx::Backend::Vulkan;
     SDL_WindowFlags baseFlags = SDL_WINDOW_RESIZABLE;
 #ifdef __ANDROID__
