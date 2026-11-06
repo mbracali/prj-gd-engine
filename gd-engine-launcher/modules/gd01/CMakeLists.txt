@@ -68,6 +68,8 @@ target_link_libraries(gd01_module PRIVATE SDL3::SDL3)
 set(GDCORE_LAUNCHER_MODULE ON)
 add_subdirectory(${GD01_ENGINE}/../../gd-engine-core gd-engine-core)
 target_link_libraries(gd01_module PRIVATE gdcore)
+# The core renderer's shaders as SPIR-V, as gd01 builds them (its engine/CMakeLists.txt).
+gdcore_spirv_shaders(gd01_module OUTPUT core_renderer_spirv.h SOURCES ${GD01_ENGINE}/src/render/core_renderer.cpp)
 target_compile_definitions(gd01_module PRIVATE GD01_VERSION="${GD01_VERSION}")
 set_source_files_properties(${GD01_ENGINE}/src/main.cpp PROPERTIES COMPILE_DEFINITIONS "main=gd01_main")
 

@@ -92,6 +92,11 @@ target_link_libraries(gd01 PRIVATE SDL3::SDL3)
 # picks a core backend in Enhanced > Performance.
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../../gd-engine-core ${CMAKE_CURRENT_BINARY_DIR}/gd-engine-core)
 target_link_libraries(gd01 PRIVATE gdcore)
+# The SPIR-V of the core renderer's shaders (the gd shader dialect's k<Name>Vs /
+# k<Name>Fs strings), compiled at build time for the SDL3 GPU and Vulkan
+# backends: core_renderer_spirv.h (k<Name>VsSpirv...), on the include path
+# (gd-engine-core/docs/render.md section 3.3).
+gdcore_spirv_shaders(gd01 OUTPUT core_renderer_spirv.h SOURCES src/render/core_renderer.cpp)
 
 # AI upscaling (render/vk_upscaler.cpp): Vulkan loaded at run time through
 # volk, AMD FidelityFX FSR 3.1 (third_party/fidelityfx) and, on Linux x86-64,
