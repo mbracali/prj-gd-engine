@@ -680,6 +680,75 @@ HDR on sdl3** runs as Emulated (no HDR swapchain yet, 4.2): `hdr:
 unavailable (True HDR is not on the sdl3 graphics backend yet), using
 Emulated`.
 
+## 6b. gd-game-02 on the core (GDCORE-008)
+
+gd02 already drew through its own device interface, `gfx::RenderDevice`
+(gd-game-02/engine/src/render/device.h: std140 blocks at fixed bindings,
+fixed texture slots, a `DrawCall` carrying its whole state). So the core
+comes in **under** that interface, not beside the renderer as in gd01: a
+second implementation, `CoreDevice` (render/core_device.cpp), on
+`gd::core::render::Device`; `local` keeps `gl_device.cpp` untouched, and no
+caller changes. The backend is read once at start
+(render/core_backend.cpp: `GD02_GRAPHICS_BACKEND`, else enhanced.json's
+`graphics_backend`, else `local`; `Renderer::init` makes the device for the
+backend `App` made the window for).
+
+**The window**, as gd01 (section 6): sdl3 / vulkan call the core's
+`prepareWindow` and make the window with `windowFlags(b)`; if the device
+does not start, `App` logs `graphics backend: vulkan did not start (...);
+using local`, makes the window again for OpenGL (the launcher's shim gets
+its OpenGL window back) and starts local. opengl3 keeps the OpenGL window
+(on failure local runs on the same window). In a launcher module the
+OpenGL3 device takes the module's (shimmed) context calls (`GlHooks`).
+
+How gd02's GL-shaped calls map:
+
+- **Pictures stored as local's** (GL style, row 0 at the bottom): every
+  vertex shader is wrapped (`#define main gd02_vertex_main` + a `main` that
+  calls it) and ends with `gl_Position = gd_clip(vec4(x, -y, z, w))`. On
+  opengl3 the core's own flip cancels the negation, so the rasteriser sees
+  exactly local's coordinates; gd02's top-left viewports become `y = height
+  - y - h`, the culled winding is mirrored (`Cull::Clockwise` = cull back
+  with front face counter-clockwise), the frame is presented with
+  `flipVertical` and `readPixels` flips its rows: local's own conversions.
+- **Pipelines** are made on first use and cached per (program, state,
+  vertex layout, primitive, target format, depth). Local's blend is
+  `glBlendFuncSeparate(src, dst, ONE, ONE_MINUS_SRC_ALPHA)` with one
+  equation; GL writes no depth while its test is off (so neither does the
+  pipeline).
+- **Passes**: `setTarget` only notes the target; the pass begins at the
+  first draw. A clear of the whole target before any draw is the pass's
+  load op (made even when the target changes before a draw), any other
+  clear a quad inside the viewport (local's `glClear` is scissored to it).
+- **The frame**: always an RGBA8 + D24 target (the window's size or the
+  internal resolution's), presented scaled with linear filtering, as local's
+  blit.
+- **Resource updates** inside a pass end it (the next draw loads the
+  target). gd02's dynamic buffers (the canvas, particles, lights, the
+  video quad) live in the frame's transient memory: each `updateBuffer` is
+  a new slice, a draw binds the newest slice holding its offset (GL's
+  rename: earlier draws keep the old data).
+- **Textures**: unbound slots a program declares get a 1 x 1 white texture
+  (local's), BCn sampled natively where `caps()` says so, else decoded on
+  the CPU as local does. GH2's standard shader binds 13 slots: the core's
+  `kMaxTextureSlots` went from 8 to 16 for it (every backend allows 16).
+- **Shaders: SPIR-V at run time.** GH2 builds its standard shader per
+  material key (31 switch bits; the keys a disc uses are known once it is
+  loaded), so the build-time step (section 3.3) cannot list them. For sdl3
+  and vulkan gd02 compiles each program when it is made
+  (render/spirv_compile.cpp) with glslang, the release this file pins for
+  gdcore_shaderc (GLSL front end and SPIR-V back end only; with the core's
+  backends the Linux program grows from 7.3 to 11.3 MB): each stage is preprocessed with the program's `#define`s,
+  then given SDL_GPU's layout from the names gd02 already passes (blocks
+  by `uniformBlocks` slot in sets 1 / 3, samplers by `samplers` slot in sets
+  0 / 2, varyings located by name in the vertex stage's order) and compiled
+  as gdcore_shaderc compiles the dialect (SPIR-V 1.0, Vulkan 1.0, not
+  optimised). This is the "unless a backend truly needs it" of rule 8;
+  `GD02_RUNTIME_SPIRV=OFF` builds without it (sdl3 / vulkan then fall back).
+- **Not on the core path**: True HDR (the HDR surface probe is local's
+  OpenGL one; on any core backend True HDR runs as Emulated and says so),
+  the frame pacing is local's (vsync where the rate matches, else software).
+
 ## 7. Tests
 
 - `gdcore_render_selftest` (render/tests/): creates the OpenGL3 device on a
@@ -853,6 +922,29 @@ FSR 1 on the core; checked that it logs and draws), OpenGL ES.
   the sniper container): all four complete with their 4 game modules; the
   Linux, Windows and Android ones carry the volk, VMA and Vulkan-Headers
   licences (`licenses/gd-game-01-*`).
+
+### gd-game-02 (GDCORE-008)
+
+2026-11-06, Linux, NVIDIA RTX 3060 (driver 615.71). Goldens at the default
+1920 x 1080 window: the main menu, the Enhanced menu, Yyz in the theatre
+(30 s), in the stone venue (45 s), Star Power in the arena (deployed at
+58 s, shot at 61 s). Reproducible frames need the harness's fixed clock and,
+for gd02, no audio callback (the song clock otherwise follows the audio
+thread's real-time pace): two runs of local give 0 differing pixels in
+every shot but the Enhanced menu (its backdrop is loaded in the background:
+two states, 13.7 % apart), which is left out below.
+
+- **Before (ef483d0) vs after, local: 0 differing pixels** in the four.
+- **local vs opengl3: 0 differing pixels** in the four, headless
+  (offscreen) and under the virtual KWin.
+- local vs **sdl3** and local vs **vulkan** (KWin, both on the NVIDIA GPU):
+  main menu 0; theatre 3.4 % of the pixels (mean |delta| 0.07, max 57),
+  stone 0.8 % (0.016, max 208), Star Power arena 1.2 % (0.027, max 176):
+  single pixels at mesh edges and in the post-processing's blurs, nothing
+  visible side by side (the double y flip does not hold there: the
+  rasteriser's tie rules see the picture mirrored, as gd01's 3b results).
+  **sdl3 vs vulkan: 0 differing pixels** in every shot (the same SPIR-V on
+  the same driver). Headless, vulkan also draws on the AMD iGPU (RADV).
 
 ## 9. What phases 2 and 3 need
 

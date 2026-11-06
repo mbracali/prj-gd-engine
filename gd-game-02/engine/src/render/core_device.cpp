@@ -31,6 +31,7 @@
 #include <string>
 #include <vector>
 
+#include "platform/paths.h"
 #include "render/core_backend.h"
 #include "render/device.h"
 #include "render/spirv_compile.h"
@@ -267,7 +268,9 @@ bool CoreDevice::init(std::string& error) {
     ci.backend = backend_ == Backend::Sdl3 ? core::Backend::SdlGpu : backend_ == Backend::Vulkan ? core::Backend::Vulkan : core::Backend::OpenGL3;
     ci.window = window_;
     ci.presentMode = core::PresentMode::Vsync;
-    ci.cacheDir = "";
+    // The pref folder (as enhanced.json's): the Vulkan backend's pipeline cache.
+    const char* saveDir = SDL_getenv("GD02_SAVE_DIR");
+    ci.cacheDir = saveDir && *saveDir ? std::string(saveDir) : prefDir();
 #if GD02_MODULE
     // A launcher module: the context is the module's (the shim tracks it and
     // its swap), as gd01's (gd-engine-core/docs/render.md section 5).
