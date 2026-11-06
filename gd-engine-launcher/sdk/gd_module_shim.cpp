@@ -16,6 +16,7 @@
 #undef SDL_GetPrefPath
 
 #include <algorithm>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -125,14 +126,50 @@ std::vector<SDL_InitFlags> g_inits;     // each SDL_Init of the game, undone in 
 std::vector<SDL_GLContext> g_contexts;  // the game's GL contexts still alive
 std::vector<SDL_Window*> g_windows;     // the game's own (hidden) windows still alive
 bool g_exploring = false;               // the model explorer is open: the launcher presents
+uint32_t g_api = GD_WINDOW_API_OPENGL;  // what the launcher's window is made for now
 
+// The launcher's window: read from the host each time (request_window may
+// have made it again).
 SDL_Window* hostWindow() { return g_host ? static_cast<SDL_Window*>(g_host->window) : nullptr; }
+
+// The ids of gd-engine-core's backends (gd::core::render::backendId) and Metal.
+const char* apiName(uint32_t api) {
+    switch (api) {
+    case GD_WINDOW_API_SDL_GPU: return "sdl3";
+    case GD_WINDOW_API_VULKAN: return "vulkan";
+    case GD_WINDOW_API_METAL: return "metal";
+    default: return "opengl3";
+    }
+}
+
+void clearWindowProperties() {
+    const SDL_PropertiesID g = SDL_GetGlobalProperties();
+    SDL_ClearProperty(g, GD_PROP_WINDOW_API_REQUEST);
+    SDL_ClearProperty(g, GD_PROP_WINDOW_API);
+}
+
+// What the game asks its window to be made for: gd-engine-core's
+// prepareWindow, else the window flags (a game that makes a Vulkan or Metal
+// window itself); OpenGL otherwise (every game before gd-engine-core).
+uint32_t wantedApi(SDL_WindowFlags flags) {
+    if (const char* r = SDL_GetStringProperty(SDL_GetGlobalProperties(), GD_PROP_WINDOW_API_REQUEST, nullptr)) {
+        if (std::strcmp(r, "sdl3") == 0) return GD_WINDOW_API_SDL_GPU;
+        if (std::strcmp(r, "vulkan") == 0) return GD_WINDOW_API_VULKAN;
+        if (std::strcmp(r, "metal") == 0) return GD_WINDOW_API_METAL;
+        return GD_WINDOW_API_OPENGL;
+    }
+    if (flags & SDL_WINDOW_VULKAN) return GD_WINDOW_API_VULKAN;
+    if (flags & SDL_WINDOW_METAL) return GD_WINDOW_API_METAL;
+    return GD_WINDOW_API_OPENGL;
+}
 
 }  // namespace
 
 void gdshim_begin(const GdHost* host) {
     g_host = host;
     g_inits.clear(), g_contexts.clear(), g_windows.clear();
+    g_api = GD_WINDOW_API_OPENGL;
+    clearWindowProperties();
 }
 
 void gdshim_end() {
@@ -141,8 +178,34 @@ void gdshim_end() {
     for (SDL_Window* w : g_windows) SDL_DestroyWindow(w);
     gdshim_Quit();
     g_contexts.clear(), g_windows.clear();
+    clearWindowProperties();
+    // A window made for another API: the launcher makes its OpenGL one again
+    // after gd_game_run (module_host.cpp).
+    g_api = GD_WINDOW_API_OPENGL;
     g_host = nullptr;
     g_exploring = false;
+}
+
+uint32_t gdshim_window_api() { return g_api; }
+
+SDL_Window* gdshim_request_window(uint32_t api) {
+    if (!g_host) return nullptr;
+    if (api == g_api) return hostWindow();
+    if (!GD_HOST_HAS(g_host, request_window)) {
+        SDL_Log("gdul shim: this launcher (%s) has only an OpenGL window; the game asked for %s", g_host->launcher_version,
+                apiName(api));
+        return nullptr;
+    }
+    if (!g_contexts.empty())  // they would outlive the window they were made on
+        SDL_Log("gdul shim: %zu OpenGL context(s) of the game still alive while its window is made for %s", g_contexts.size(),
+                apiName(api));
+    void* w = g_host->request_window(g_host->request_window_user, api);
+    if (!w) {
+        SDL_Log("gdul shim: the launcher could not make its window for %s (it stays %s)", apiName(api), apiName(g_api));
+        return nullptr;
+    }
+    g_api = api;
+    return static_cast<SDL_Window*>(w);
 }
 
 void gdshim_set_exploring(bool on) { g_exploring = on; }
@@ -182,6 +245,10 @@ extern "C" SDL_Window* gdshim_CreateWindow(const char* title, int w, int h, SDL_
         if (win && g_host) g_windows.push_back(win);
         return win;
     }
+    const uint32_t want = wantedApi(flags);
+    if (want != g_api) gdshim_request_window(want);
+    // What the window is made for, for gd-engine-core's createDevice.
+    SDL_SetStringProperty(SDL_GetGlobalProperties(), GD_PROP_WINDOW_API, apiName(g_api));
     SDL_Window* win = hostWindow();
     if (title) SDL_SetWindowTitle(win, title);
     return win;
@@ -194,6 +261,11 @@ extern "C" void gdshim_DestroyWindow(SDL_Window* window) {
 }
 
 extern "C" SDL_GLContext gdshim_GL_CreateContext(SDL_Window* window) {
+    if (g_host && window == hostWindow() && g_api != GD_WINDOW_API_OPENGL) {
+        SDL_SetError("the launcher's window is made for %s, not OpenGL (gd-engine-core: prepareWindow(OpenGL3) and "
+                     "SDL_CreateWindow again)", apiName(g_api));
+        return nullptr;
+    }
     SDL_GLContext c = SDL_GL_CreateContext(window);
     if (c && g_host) g_contexts.push_back(c);
     return c;

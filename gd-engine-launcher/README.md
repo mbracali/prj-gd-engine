@@ -20,6 +20,7 @@ gd-engine-launcher/
   sdk/                  the game module ABI: gd_host.h, gd_module_shim.h/.cpp,
                         gd_explore_helpers.h
   modules/gd01/         gd-game-01 built as a module, from here (gd-game-01 is frozen)
+  tests/handover/       the window hand-over test module (GDUL_BUILD_TESTS, never shipped)
   res/                  icon, backdrop and fonts (built in); tools/make_icons.py makes the images
   third_party/stb/      stb_image, stb_truetype (public domain / MIT)
   manual/               the user manual shipped in every build
@@ -246,8 +247,34 @@ typedef struct GdHost {
     int argc; const char* const* argv;   // "gdNN", [GDUL_GAME_ARGS...], the disc image
     const char *launcher_version, *game_id, *game_dir, *save_dir;
     void (*log)(void* user, const char* line); void* log_user;   // the action log
+    uint32_t flags;                  // GD_HOST_HANDHELD (gdul 0.1.6)
+    void* (*request_window)(void* user, uint32_t api); void* request_window_user;  // (gdul 1.1.13)
 } GdHost;
 ```
+
+Fields are only ever appended; a module reads a newer one only when `size`
+covers it (`GD_HOST_FLAGS`, `GD_HOST_HAS(host, request_window)`), so modules
+of every launcher keep working.
+
+**The window for another graphics API** (`request_window`, gdul 1.1.13): a
+module on gd-engine-core's SDL3 GPU or Vulkan backend cannot draw into the
+launcher's OpenGL window (a window carries one API: an OpenGL context and a
+GPU swapchain cannot share it, Vulkan / Metal surfaces want it made for
+them). The module shim asks for it by itself: gd-engine-core's
+`prepareWindow(backend)` sets the SDL global property
+`gd.render.window_api_request`, and the shim's `SDL_CreateWindow` calls
+`request_window(GD_WINDOW_API_SDL_GPU / VULKAN / METAL / OPENGL)`. The
+launcher (`Launcher::switchWindowApi`) releases its OpenGL context and its 2D
+renderer, makes the window again for that API at the same size, place, full
+screen state and title, and hands it over (`host->window`; `gl_context` NULL);
+NULL if it cannot (no Vulkan loader: the window stays an OpenGL one). The
+shim sets `gd.render.window_api` to what the window is made for, and the
+core's `createDevice` refuses a backend it is not made for, so the game falls
+back to OpenGL with the reason in its log. After `gd_game_run` the launcher
+makes its OpenGL window, context and renderer again by itself. A game that
+never asks (every module before gd-engine-core) gets the OpenGL window as
+before. Details: `gd-engine-core/docs/render.md` section 5. Test:
+`tests/handover/` (below).
 
 **The model explorer** (optional) is a second export:
 
@@ -447,6 +474,15 @@ A new game needs a recipe in `scripts/build.sh` (`build_module_NN`): see
 | `GDUL_GAMES_YAML=<file>` | another games.yaml |
 | `GDUL_SOUND_LOG=1` | logs each menu sound played (always on with `GDUL_SCRIPT`) |
 | `GDUL_BUILTIN_SOUNDS=1` | the launcher's built-in menu sounds even with a Guitar Hero disc |
+
+Tests: configure with `-DGDUL_BUILD_TESTS=ON` (never in a package) and run
+`ctest -R gdul_handover`: the test module `tests/handover/` (gd-test-handover)
+asks for its window for SDL_GPU, Vulkan, OpenGL and SDL_GPU again through
+gd-engine-core's `prepareWindow`, uses each (an SDL_GPU device claims and
+presents it, a Vulkan surface, the core's OpenGL3 device draws), returns with
+the window made for SDL_GPU, and the test checks that the launcher made its
+OpenGL window again and draws its list. Headless (offscreen) SDL_GPU cannot
+present, so that one check is skipped there; under x11 or wayland it runs.
 
 Headless: `SDL_VIDEO_DRIVER=offscreen SDL_AUDIO_DRIVER=dummy`. For example,
 play gd-game-02 from the list and come back:
