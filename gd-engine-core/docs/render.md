@@ -558,9 +558,11 @@ the core.
 
 gd01 selects the backend once at start (`graphics_backend` in
 enhanced.json: `local`, `sdl3`, `vulkan`, `opengl3`; default `local`; the
-development aid `GD01_GRAPHICS_BACKEND=<id>` overrides it). `vulkan` is
-not built yet: gd01 logs `graphics backend: vulkan: not available yet;
-using local` and runs local.
+development aid `GD01_GRAPHICS_BACKEND=<id>` overrides it). Every core
+backend runs gd01 (`opengl3`, `sdl3`, `vulkan`); a backend this build does
+not have (Vulkan on Apple) logs `graphics backend: vulkan: not available
+yet; using local` and runs local. `CoreRenderer::init` passes gd01's pref
+folder as `DeviceCreateInfo::cacheDir` (the Vulkan pipeline cache).
 
 **The window (sdl3, vulkan).** `App::run` resolves the backend *before*
 making its window: for `sdl3` / `vulkan` it calls `prepareWindow(b, gles)`

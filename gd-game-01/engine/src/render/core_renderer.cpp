@@ -7,6 +7,8 @@
 
 #include "render/core_renderer.h"
 
+#include "platform/paths.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -223,6 +225,7 @@ bool CoreRenderer::init(SDL_Window* window, gr::Backend backend, const gr::GlHoo
     info.backend = backend;
     info.window = window;
     info.gl = hooks;
+    info.cacheDir = prefDir();  // the Vulkan pipeline cache lives with the settings
     dev_ = gr::createDevice(info, error);
     if (!dev_) return false;
     r_.gpuName_ = dev_->caps().gpu;
