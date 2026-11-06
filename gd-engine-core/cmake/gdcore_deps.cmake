@@ -14,12 +14,20 @@
 # | GLSLANG    | Vulkan SDK 1.4.321.0   | BSD-3 / Apache-2.0 / MIT (mix) | render: gdcore_shaderc (HOST tool only)   |
 # | SPIRV_TOOLS| Vulkan SDK 1.4.321.0   | Apache-2.0                     | render: gdcore_shaderc validation (host)  |
 # | SPIRV_HEADERS| Vulkan SDK 1.4.321.0 | MIT (Khronos)                  | render: SPIRV-Tools' grammar (host)       |
+# | VULKAN_HEADERS| 1.4.350 (v1.4.350)    | Apache-2.0 / MIT               | render: the "vulkan" backend (headers)    |
+# | VOLK       | 1.4.350 (1.4.350)      | MIT                            | render: "vulkan", the loader at run time  |
+# | VMA        | 3.3.0 (v3.3.0)         | MIT                            | render: "vulkan", memory allocation       |
 #
 # The three Khronos repositories are pinned at the same Vulkan SDK tag (they
 # are released together; glslang's known_good.json names those SPIRV-Tools
 # and SPIRV-Headers commits). They build gdcore_shaderc, a program run on the
 # build machine only (render/cmake/gdcore_shaders.cmake): nothing of them is
 # linked into a game or shipped, so the packages carry no licence for them.
+#
+# Vulkan-Headers and volk are the versions gd-game-01 vendors for its
+# upscalers (engine/third_party/vulkan, volk: the same files [C]); the core
+# compiles volk in a C++ namespace (VOLK_NAMESPACE), so the two copies never
+# clash in gd01's program (render/CMakeLists.txt).
 #
 # New pins go in this file (a row above, a block below, the name in
 # GDCORE_DEPS). An area's CMakeLists.txt may call gdcore_pin() itself while
@@ -68,7 +76,22 @@ set(GDCORE_DEP_SPIRV_HEADERS_URL "https://github.com/KhronosGroup/SPIRV-Headers/
 set(GDCORE_DEP_SPIRV_HEADERS_SHA256 5bbea925663d4cd2bab23efad53874f2718248a73dcaf9dd21dff8cb48e602fc)
 set(GDCORE_DEP_SPIRV_HEADERS_TOPDIR SPIRV-Headers-vulkan-sdk-1.4.321.0)
 
-set(GDCORE_DEPS SDL3_IMAGE KTX GLSLANG SPIRV_TOOLS SPIRV_HEADERS)
+set(GDCORE_DEP_VULKAN_HEADERS_VERSION 1.4.350)
+set(GDCORE_DEP_VULKAN_HEADERS_URL "https://github.com/KhronosGroup/Vulkan-Headers/archive/refs/tags/v1.4.350.tar.gz")
+set(GDCORE_DEP_VULKAN_HEADERS_SHA256 6dd105e5cc7ddab6e7b611ae2c1872740d1727557cc8bf9daf13d6de1e4b3999)
+set(GDCORE_DEP_VULKAN_HEADERS_TOPDIR Vulkan-Headers-1.4.350)
+
+set(GDCORE_DEP_VOLK_VERSION 1.4.350)
+set(GDCORE_DEP_VOLK_URL "https://github.com/zeux/volk/archive/refs/tags/1.4.350.tar.gz")
+set(GDCORE_DEP_VOLK_SHA256 e47c6efe5294bb03729a976b385864bba5daf46ec60f0bdea11e1d1446345f9a)
+set(GDCORE_DEP_VOLK_TOPDIR volk-1.4.350)
+
+set(GDCORE_DEP_VMA_VERSION 3.3.0)
+set(GDCORE_DEP_VMA_URL "https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator/archive/refs/tags/v3.3.0.tar.gz")
+set(GDCORE_DEP_VMA_SHA256 c4f6bbe6b5a45c2eb610ca9d231158e313086d5b1a40c9922cb42b597419b14e)
+set(GDCORE_DEP_VMA_TOPDIR VulkanMemoryAllocator-3.3.0)
+
+set(GDCORE_DEPS SDL3_IMAGE KTX GLSLANG SPIRV_TOOLS SPIRV_HEADERS VULKAN_HEADERS VOLK VMA)
 
 # gdcore_pin(<NAME> <version> <url> <sha256> <folder inside the archive>)
 function(gdcore_pin name ver url sha top)

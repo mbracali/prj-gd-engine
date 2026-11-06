@@ -134,6 +134,9 @@ was at least two weeks old when pinned.
 | glslang | Vulkan SDK 1.4.321.0 (`vulkan-sdk-1.4.321.0`, 2025) | fetched, **host tool only** (`gdcore_shaderc`) | BSD-3 / Apache-2.0 / MIT (mix) | render: build-time SPIR-V |
 | SPIRV-Tools | Vulkan SDK 1.4.321.0 | fetched, host tool only (the validator) | Apache-2.0 | render: build-time SPIR-V |
 | SPIRV-Headers | Vulkan SDK 1.4.321.0 | fetched, host tool only (SPIRV-Tools' grammar) | MIT (Khronos) | render: build-time SPIR-V |
+| Vulkan-Headers | 1.4.350 (`v1.4.350`; the same files as gd-game-01's copy) | fetched, headers | Apache-2.0 / MIT | render `vulkan` |
+| volk | 1.4.350 (`1.4.350`; the same as gd-game-01's) | fetched, compiled into gdcore_render in the C++ namespace `volk` | MIT | render `vulkan` (the Vulkan loader, found at run time) |
+| Vulkan Memory Allocator | 3.3.0 (`v3.3.0`, 2025-05) | fetched, single header compiled into gdcore_render | MIT | render `vulkan` |
 
 The three Khronos libraries build `gdcore_shaderc`, a program that runs on the
 build machine (also for the Windows and Android cross builds) and is never
