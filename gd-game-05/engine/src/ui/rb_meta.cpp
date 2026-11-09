@@ -410,6 +410,7 @@ bool RbCharObj::handleNative(Interp& in, const std::string& msg, std::vector<Val
     if (msg == "skin_color") return r = Value::integer(d.skin), true;
     if (msg == "deform" || msg == "update" || msg == "print_guid" || msg == "set_dirty") return true;
     if (msg == "has_outfit") return r = Value::integer(d.owned.count(sArg(args, 1)) || (d.outfit.count(sArg(args, 0)) && d.outfit[sArg(args, 0)] == sArg(args, 1)) ? 1 : 0), true;
+    if (msg == "has_group_selection") return r = Value::integer(0), true;  // [I] colour groups not offered yet
     if (msg == "get_outfit") return r = Value::symbol(d.outfit.count(sArg(args, 0)) ? d.outfit[sArg(args, 0)] : "none"), true;
     if (msg == "set_outfit") return d.outfit[sArg(args, 0)] = sArg(args, 1), true;
     // The solo performer.
@@ -982,7 +983,214 @@ public:
     }
 };
 
+// The outfit catalog (char/outfitloader.dta, the boot tree's (outfit_loader
+// (types (<gender> (category (<cat> (outfits (<name> (cost n) (genre g)
+// ...))))))) [C data]: what the shop sells and the creator offers.
+const DataNode* outfitCategory(UiManager& ui, const std::string& gender, const std::string& cat) {
+    // char/char_objects.dta #includes it (outfitloader.dta) [C data].
+    static DataNode objects;
+    static bool loaded = false;
+    if (!loaded) {
+        loaded = true;
+        try {
+            ScriptLoader loader(ui.data());
+            objects = loader.load("char/char_objects.dta");
+        } catch (const std::exception& e) {
+            SDL_Log("rb meta: char_objects.dta: %s", e.what());
+        }
+    }
+    const DataNode* boot = &objects;
+    std::function<const DataNode*(const DataNode&)> findTypes = [&](const DataNode& n) -> const DataNode* {
+        for (const DataNode& c : n.children)
+            if (c.isList() && !c.children.empty()) {
+                if (c.children[0].isText() && c.children[0].s == "types" && c.find(gender)) return &c;
+                if (const DataNode* f = findTypes(c)) return f;
+            }
+        return nullptr;
+    };
+    const DataNode* types = boot ? findTypes(*boot) : nullptr;
+    const DataNode* g = types ? types->find(gender) : nullptr;
+    const DataNode* cats = g ? g->find("category") : nullptr;
+    return cats ? cats->find(cat) : nullptr;
+}
+
+// A category's outfits as a list (focus_provider): cost / token per outfit.
+class OutfitList : public RbList {
+public:
+    using RbList::RbList;
+    const DataNode* cat = nullptr;
+    bool handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) override {
+        if (msg == "cost") return r = Value::integer(cost(sArg(args, 0))), true;
+        if (msg == "token") return r = Value::symbol(sArg(args, 0)), true;  // the outfit's own name token [C data: locale]
+        return RbList::handleNative(in, msg, args, r);
+    }
+    int cost(const std::string& o) const {
+        const DataNode* outs = cat ? cat->find("outfits") : nullptr;
+        const DataNode* e = outs ? outs->find(o) : nullptr;
+        return num(e ? e->find("cost") : nullptr);
+    }
+};
+
+// OutfitPanel (ui/shop.dta, charcreator.dta): the shop's and the creator's
+// outfit lists. A focused <category>.lst lists the category's outfits for
+// the character's gender (the store's genre, or the character's own in
+// the closet); store_outfit wears the focused one, buying it first when it
+// is not owned [I: RB's purchase point; the price is the catalog's].
+class OutfitPanelObj : public PanelObj {
+public:
+    using PanelObj::PanelObj;
+    std::map<std::string, OutfitList*> lists;
+    RbCharObj* tourChar() {
+        if (!gMeta) return nullptr;
+        const Value oc = getProp(ui.interp(), "outfit_char");
+        const std::string who = oc.type == Value::Type::Object && oc.object ? oc.object->name() : oc.str();
+        if (who == "charcreator_panel") return dynamic_cast<RbCharObj*>(ui.interp().send("charcreator_panel", "get_tour_char", {}).object);
+        const int pn = ui.interp().send("shop_char_panel", "get", {Value::symbol("char_player_num")}).integerValue();
+        const Value cfg = ui.interp().send("game", "get_player_config", {Value::integer(std::max(0, pn))});
+        return cfg.object ? dynamic_cast<RbCharObj*>(ui.interp().send(cfg.object, "get_char", {}).object) : nullptr;
+    }
+    std::string base(const std::string& n) const {
+        const size_t d = n.rfind('.');
+        return d == std::string::npos ? n : n.substr(0, d);
+    }
+    OutfitList* listFor(const std::string& cat) {
+        RbCharObj* c = tourChar();
+        const std::string gender = c ? c->d.gender : "male";
+        auto& l = lists[cat];
+        if (!l) {
+            l = gMeta->own(std::make_unique<OutfitList>(name() + "_" + cat + "_provider"));
+        }
+        l->cat = outfitCategory(ui, gender, cat);
+        const Value g = getProp(ui.interp(), "genre");
+        const std::string genre = g.isText() ? g.str() : std::string();
+        const bool closet = getProp(ui.interp(), "closet").truthy();
+        OutfitList* raw = l;
+        l->build = [raw, genre, closet, c] {
+            std::vector<std::string> v;
+            const DataNode* outs = raw->cat ? raw->cat->find("outfits") : nullptr;
+            for (const auto& [o, n] : entries(outs)) {
+                const std::string og = text(n->find("genre"));
+                if (!genre.empty() && og != genre) continue;
+                if (closet && c && !c->d.owned.count(o) && num(n->find("cost")) > 0) continue;
+                v.push_back(o);
+            }
+            return v;
+        };
+        l->refresh();
+        return l;
+    }
+    bool handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) override {
+        if (gMeta) gMeta->ensure();
+        r = Value::integer(0);
+        if (msg == "focus_category") {
+            const std::string b = base(focus);
+            return r = Value::symbol(focus.size() > 4 && (focus.rfind(".lst") == focus.size() - 4 || focus.rfind(".btn") == focus.size() - 4) &&
+                                             b != "weight" && b != "height" && b != "skin" && b != "accessories"
+                                         ? b
+                                         : std::string()),
+                   true;
+        }
+        if (msg == "focus_outfit") {
+            if (focus.rfind(".lst") == std::string::npos) return r = Value::symbol(""), true;
+            OutfitList* l = listFor(base(focus));
+            ComponentObj* c = component(focus);
+            if (c && c->provider != l) in.send(c, "set_provider", {Value::obj(l)});
+            return r = Value::symbol(l->symbol(c ? c->selected : 0)), true;
+        }
+        if (msg == "focus_provider") return r = Value::obj(listFor(base(focus))), true;
+        if (msg == "tour_char") return r = Value::obj(tourChar()), true;
+        if (msg == "selected_outfit") {
+            RbCharObj* c = tourChar();
+            const std::string cat = base(focus);
+            return r = Value::symbol(c && c->d.outfit.count(cat) ? c->d.outfit[cat] : std::string()), true;
+        }
+        if (msg == "store_outfit") {
+            // Remembered for undo_outfit.
+            RbCharObj* c = tourChar();
+            const std::string cat = base(focus);
+            stored_[cat] = c && c->d.outfit.count(cat) ? c->d.outfit[cat] : std::string("none");
+            return true;
+        }
+        if (msg == "confirm_outfit" || msg == "undo_outfit") {
+            // Native first, then the script's camera: wear (buying when not
+            // owned, at the catalog's price) or put back, and the focus
+            // back on the category's button.
+            RbCharObj* c = tourChar();
+            const std::string cat = base(focus);
+            if (focus.rfind(".lst") != std::string::npos && c) {
+                if (msg == "confirm_outfit") {
+                    OutfitList* l = listFor(cat);
+                    ComponentObj* comp = component(focus);
+                    const std::string o = l->symbol(comp ? comp->selected : 0);
+                    if (!o.empty() && !c->d.owned.count(o) && l->cost(o) <= c->d.money) c->d.money -= l->cost(o), c->d.owned.insert(o);
+                    if (!o.empty() && (c->d.owned.count(o) || l->cost(o) == 0)) c->d.outfit[cat] = o, ++bought_;
+                } else if (stored_.count(cat)) {
+                    c->d.outfit[cat] = stored_[cat];
+                }
+                gMeta->save();
+                if (component(cat + ".btn")) setFocus(cat + ".btn", true);
+            }
+            return false;
+        }
+        if (msg == "find_outfit_config" || msg == "find_patch_renderer" || msg == "find_patch_color") return r = Value::symbol(""), true;
+        if (msg == "num_bought") return r = Value::integer(bought_), true;
+        // Lists' providers when a list gets the focus.
+        if (msg == "set_focus") {
+            const bool done = PanelObj::handleNative(in, msg, args, r);
+            if (focus.rfind(".lst") != std::string::npos)
+                if (ComponentObj* c = component(focus)) in.send(c, "set_provider", {Value::obj(listFor(base(focus)))});
+            return done;
+        }
+        return PanelObj::handleNative(in, msg, args, r);
+    }
+    bool nativeFirst(const std::string& msg) const override { return msg == "confirm_outfit" || msg == "undo_outfit"; }
+    // A category button opens its list (X); back on a list puts the outfit
+    // back (undo_outfit) [I: OutfitPanel's own navigation].
+    bool buttonDown(int button, int player) override {
+        const std::string before = focus;
+        const bool onBtn = before.size() > 4 && before.rfind(".btn") == before.size() - 4;
+        const bool r = PanelObj::buttonDown(button, player);
+        if (button == kPad_X && onBtn && focus == before && component(base(before) + ".lst")) {
+            ComponentObj* l = component(base(before) + ".lst");
+            ui.interp().send(l, "set_provider", {Value::obj(listFor(base(before)))});
+            ui.interp().send(this, "store_outfit", {});
+            setFocus(base(before) + ".lst", true);
+            ui.callScript(this, "update");
+            return true;
+        }
+        if (button == kPad_Tri && before.rfind(".lst") != std::string::npos && before.rfind(".lst") == before.size() - 4) {
+            ui.interp().send(this, "undo_outfit", {});
+            ui.callScript(this, "update");
+            return true;
+        }
+        return r;
+    }
+
+private:
+    std::map<std::string, std::string> stored_;
+    int bought_ = 0;
+};
+
+// CharPanel shop_char_panel: the shopped character's view [I: no 3D view of
+// the character in the menus yet; the camera and appearance messages are
+// answered].
+class CharPanelObj : public PanelObj {
+public:
+    using PanelObj::PanelObj;
+    bool handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) override {
+        if (msg == "select_cam" || msg == "update_appearance" || msg == "load_char") return r = Value::integer(0), true;
+        if (msg == "get_tour_char") {
+            const int pn = getProp(in, "char_player_num").integerValue();
+            const Value cfg = in.send("game", "get_player_config", {Value::integer(std::max(0, pn))});
+            return r = cfg.object ? in.send(cfg.object, "get_char", {}) : Value::integer(0), true;
+        }
+        return PanelObj::handleNative(in, msg, args, r);
+    }
+};
+
 std::unique_ptr<ScriptObject> makeRbMetaClass(UiManager& ui, const std::string& cls, const std::string& name) {
+    if (cls == "OutfitPanel") return std::make_unique<OutfitPanelObj>(ui, name, cls);
+    if (cls == "CharPanel") return std::make_unique<CharPanelObj>(ui, name, cls);
     if (cls == "BandCreatePanel") return std::make_unique<BandCreatePanelObj>(ui, name, cls);
     if (cls == "DialogPanel") return std::make_unique<QuietPanelObj>(ui, name, cls, std::set<std::string>{"set_player_num"});
     if (cls == "CharCreatorPanel") return std::make_unique<CharCreatorPanelObj>(ui, name, cls);

@@ -437,6 +437,9 @@ bool ComponentObj::handleNative(Interp& in, const std::string& msg, std::vector<
 
 Value ComponentObj::getProp(Interp& in, const std::string& key) {
     if (key == "showing") return Value::integer(panel->view && panel->view->showing(name()) ? 1 : 0);
+    // A label's or button's locale token (RB shop.dta: {$component get text_token}) [C data: the record].
+    if (key == "text_token" && object && !props.count(key))
+        if (const auto* l = object->as<scene::UILabel>(); l && l->localize) return Value::symbol(l->textToken);
     return ScriptObject::getProp(in, key);
 }
 

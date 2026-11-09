@@ -134,7 +134,48 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         press(kX);  // the focused difficulty: ready
         at("game_screen", 60000);  // through loading_screen and the loading tips
     };
-    if (scenario == "solo_tour") {
+    if (scenario == "rock_shop") {
+        // RB's Rock Shop (ui/shop.dta) from the Solo Tour's hub: a new
+        // character, the shop, clothing, a store, a shirt bought and worn.
+        wait(300);
+        press(kX);
+        at("splash_screen", 30000);
+        press(kX);
+        at("main_screen");
+        press(kX);  // SOLO
+        at("main_solomode_screen");
+        press(kDown), wait(200);
+        press(kX);  // TOUR
+        at("tour_solo_char_screen", 30000);
+        wait(800);
+        press(kX), wait(800), press(kX);  // create new, male
+        at("charcreator_maker_screen", 20000);
+        wait(1500);
+        press(kX);
+        wait(800);
+        for (int i = 0; i < 4; ++i) press(kDown), wait(200);
+        press(kX);
+        at("charcreator_confirm_screen", 10000);
+        wait(1500);
+        press(kUp), wait(400), press(kX);
+        at("tour_solo_hub_screen", 30000);
+        wait(1000);
+        press(kDown), wait(300);
+        check("print_focus");
+        press(kX);  // ROKK SHOPPE
+        at("shop_screen", 20000);
+        wait(1000);
+        press(kX);  // CLOTHING
+        at("shop_clothing_screen", 20000);
+        for (int i = 0; i < 5; ++i) {
+            wait(1500);
+            check("print_focus");
+            press(kX);
+        }
+        wait(1500);
+        check("print_focus");
+        check("counter:shop_bought:1");
+    } else if (scenario == "solo_tour") {
         // RB's Solo Tour (ui/tour_solo.dta): Solo > Tour, a character (made
         // in the creator the first time), the hub, the gig guide, a
         // difficulty, the first event, its song, the results, the gig's end.
@@ -239,6 +280,29 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         wait(1000);
         press(kX);
         at("tour_band_event_screen|tour_band_hub_screen|tour_band_firstgig_screen|tour_band_firstgig_checkmarks_screen|tour_band_newvan_screen|tour_band_newitem_screen|tour_band_firstvenue_screen", 40000);
+    } else if (scenario == "practice" || scenario == "tutorials" || scenario == "drum_trainer") {
+        // RB's Training menu (ui/training.dta): Tutorials, Practice, the Drum Trainer.
+        if (scenario == "drum_trainer") SDL_setenv_unsafe("GD05_INSTRUMENT", "drum", 1);
+        endMs_ = 20000;
+        wait(300);
+        press(kX);
+        at("splash_screen", 30000);
+        press(kX);
+        at("main_screen");
+        press(kDown), wait(200), press(kDown), wait(200);
+        press(kX);  // TRAINING
+        at("training_menu_screen", 20000);
+        wait(800);
+        if (scenario == "practice") press(kDown), wait(200);
+        if (scenario == "drum_trainer") press(kDown), wait(200), press(kDown), wait(200);
+        press(kX);
+        for (int i = 0; i < 6; ++i) {
+            wait(2500);
+            check("print_focus");
+            press(kX);
+        }
+        wait(8000);
+        check("print_focus");
     } else if (scenario == "score_duel" || scenario == "tug_of_war") {
         // RB's head to head (ui/main.dta): Multiplayer > Head to Head >
         // Tug of War (headtohead.btn) or Score Duel (headtohead_pro.btn) >
@@ -1953,6 +2017,12 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         ui::PanelObj* fp = ui.focusPanel();
         std::printf("  focus: screen %s panel %s component %s (up %d)\n", ui.currentScreen().c_str(), fp ? fp->name().c_str() : "-",
                     fp ? fp->focus.c_str() : "-", fp ? int(fp->up) : -1);
+        if (fp && fp->className() == "OutfitPanel") {
+            const Value prov = ui.interp().send(fp, "focus_provider", {});
+            std::printf("  outfit: category %s outfit %s (%d in the list, genre %s)\n", ui.interp().send(fp, "focus_category", {}).str().c_str(),
+                        ui.interp().send(fp, "focus_outfit", {}).str().c_str(),
+                        prov.object ? ui.interp().send(prov.object, "num_data", {}).integerValue() : -1, fp->getProp(ui.interp(), "genre").str().c_str());
+        }
         return pass();
     }
     if (s.screen == "sweep") {
@@ -2017,6 +2087,16 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         return pass();
     }
     // counter:<key>:<min>: the game's counter (App::gameCounter) reaches min.
+    if (s.screen == "counter:shop_bought:1") {
+        // An outfit chosen in the shop (worn, bought when it costs).
+        ui::PanelObj* fp = ui.focusPanel();
+        const int n = fp ? ui.interp().send(fp, "num_bought", {}).integerValue() : 0;
+        const Value c = ui.interp().send("tour", "performer", {});
+        const int money = c.object ? ui.interp().send(c.object, "money", {}).integerValue() : -1;
+        std::printf("  shop: %d outfit(s) worn, %d money left\n", n, money);
+        if (n < 1) return fail("no outfit was chosen");
+        return pass();
+    }
     if (s.screen.rfind("counter:", 0) == 0) {
         const std::string rest = s.screen.substr(8);
         const size_t c = rest.rfind(':');

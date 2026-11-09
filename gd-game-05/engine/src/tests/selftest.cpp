@@ -560,8 +560,18 @@ int runRuleChecks(const Rules& rules) {
 // are not in the port (GD02-066 dropped) and two Xbox Live tips are never
 // picked (scene::kDroppedLoadingTips).
 int checkPcWording(const GameData& data) {
+    // Rock Band: the Rock Central name / quote checks never fail in the port
+    // (DECISIONS D8), so their messages never show.
     static const char* const kNeverShown[] = {"help_tolisting", "help_gamercard", "lb_select_song", "leaderboards",
-                                              "loading_tip10", "loading_tip13"};
+                                              "loading_tip10", "loading_tip13", "shell_charcreator_name_ip_fmt",
+                                              "shell_charcreator_name_profane_fmt", "tour_char_profile_motto_ip",
+                                              "tour_profile_create_band_name_dup", "tour_profile_create_band_name_ip",
+                                              "tour_profile_create_band_name_profane", "tour_profile_motto_ip", "tour_profile_motto_profane",
+                                              "tour_profile_rename_band_name_dup", "tour_profile_rename_band_name_ip",
+                                              "tour_profile_rename_band_name_profane", "upload_error_band_motto_ip",
+                                              "upload_error_band_motto_profane", "upload_error_band_name_dup", "upload_error_band_name_ip",
+                                              "upload_error_band_name_profane", "upload_error_char_motto_ip", "upload_error_char_motto_profane",
+                                              "upload_error_char_name_ip", "upload_error_char_name_profane"};
     int failures = 0;
     for (const std::string& lang : scene::Locale::languages()) {
         scene::Locale loc;
@@ -802,10 +812,8 @@ int runSelfTest(const std::string& dataPath) {
                     wordingFailures);
         std::printf("%d song audio file(s) with problems, %d script(s) not decoded\n", audioFailures, scriptFailures);
         std::printf(chartFailures ? "%d chart(s) not fully hit\n" : "all charts fully hit\n", chartFailures);
-        // The PC wording of RB's strings is front-end work (GD05-005, M3):
-        // reported here, counted once the port's string overrides exist.
-        (void)wordingFailures;
-        return chartFailures || audioFailures || scriptFailures || ruleFailures || inputFailures || bassFailures ? 1 : 0;
+        // RB's PC wording (scene/pc_strings.cpp, wave 02): counted.
+        return wordingFailures || chartFailures || audioFailures || scriptFailures || ruleFailures || inputFailures || bassFailures ? 1 : 0;
     } catch (const std::exception& ex) {
         std::fprintf(stderr, "self-test failed: %s\n", ex.what());
         return 2;

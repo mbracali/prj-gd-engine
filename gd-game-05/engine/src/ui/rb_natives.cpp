@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdlib>
 #include <functional>
 #include <map>
@@ -281,7 +282,45 @@ void installRbNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Scr
     platform->quiet({"set_notify_ui_location", "disable_xmp", "enable_xmp", "signin"});
     RbHost* profiles = add(std::make_unique<RbHost>(ui, "profile_mgr"));
     // The profiles' save data: RB's saves are M7 (GD05-009; DECISIONS D4).
-    profiles->stub({"get_save_data_from_player", "get_char_options_from_player"});
+    profiles->on("get_save_data_from_player", no);  // the achievements' profile: none (GD05-013)
+    // The profile's options (ui/options*.dta): RB's volumes run 0..11
+    // [C data: the sliders' 12 steps], each step about 2 dB below the next
+    // [I]; the music's mix follows the background (the band) and the
+    // foreground (the player's part) levels, the effects' level the sfx.
+    static std::map<std::string, int> opts = {{"background_volume", 11}, {"foreground_volume", 11}, {"fx_volume", 11},
+                                               {"crowd_volume", 11}, {"vocal_cue_volume", 11}, {"bass_boost", 0},
+                                               {"dolby", 0}, {"mono", 0}, {"overscan", 0}, {"sync_preset_ix", 0},
+                                               {"song_to_taskmgr_ms", 0}, {"global_options_pad", 0}};
+    auto applyVolumes = [&ui] {
+        auto lin = [](int level) { return level <= 0 ? 0.0f : std::pow(10.0f, float(level - 11) * 2.0f / 20.0f); };
+        ui.host().applyOptions(lin(opts["background_volume"]), lin(opts["foreground_volume"]), lin(opts["fx_volume"]), false, false,
+                               opts["song_to_taskmgr_ms"]);
+    };
+    for (const auto& [key0, def] : opts) {
+        const std::string key = key0;
+        profiles->on("get_" + key, [key](std::vector<Value>&) { return Value::integer(opts[key]); });
+        profiles->on("get_" + key + "_db", [key](std::vector<Value>&) { return Value::real(opts[key] <= 0 ? -96.0f : float(opts[key] - 11) * 2.0f); });
+        profiles->on("set_" + key, [key, applyVolumes](std::vector<Value>& a) {
+            if (!a.empty()) opts[key] = a.back().integerValue();
+            applyVolumes();
+            return Value::integer(0);
+        });
+    }
+    profiles->on("get_default_song_to_taskmgr_ms", no);
+    profiles->on("get_max_bands_per_char", [](std::vector<Value>&) { return Value::integer(10); });
+    profiles->on("get_max_leaders_per_char", [](std::vector<Value>&) { return Value::integer(10); });
+    profiles->quiet({"set_not_first_timers"});
+    // The player's character options (lefty, the vocal style) [I: kept for the session].
+    {
+        RbHost* charOpts = add(std::make_unique<RbHost>(ui, "char_options"));
+        charOpts->props["lefty"] = Value::integer(0);
+        charOpts->props["vocal_style"] = Value::integer(0);
+        charOpts->on("get_lefty", [charOpts](std::vector<Value>&) { return charOpts->props["lefty"]; });
+        charOpts->on("set_lefty", [charOpts](std::vector<Value>& a) { return charOpts->props["lefty"] = a.empty() ? Value::integer(0) : a[0]; });
+        charOpts->on("get_vocal_style", [charOpts](std::vector<Value>&) { return charOpts->props["vocal_style"]; });
+        charOpts->on("set_vocal_style", [charOpts](std::vector<Value>& a) { return charOpts->props["vocal_style"] = a.empty() ? Value::integer(0) : a[0]; });
+        profiles->on("get_char_options_from_player", [charOpts](std::vector<Value>&) { return Value::obj(charOpts); });
+    }
     profiles->on("first_timer", no);
     profiles->on("can_player_create_char", yes);
     profiles->on("is_char_name_unique", yes);
@@ -321,6 +360,9 @@ void installRbNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Scr
         return Value::integer(0);
     });
     platform->on("player_has_online_privilege", no);
+    platform->on("is_connected", no);
+    platform->on("get_name", [](std::vector<Value>&) { return Value::string("Player"); });
+    platform->on("get_saving_name", [](std::vector<Value>&) { return Value::string("Rock Band"); });
     profiles->on("get_sync_offset", no);
     profiles->on("get_default_sync_offset_ms", no);
     profiles->on("has_profile_map", no);
@@ -332,7 +374,7 @@ void installRbNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Scr
     auto nobody = [](std::vector<Value>&) { return Value::integer(-1); };
     memcard->on("get_new_signin_player_num", nobody);
     memcard->on("get_autosavable_player_num", nobody);
-    memcard->quiet({"saveload_profile_complete", "saveload_all_complete", "select_device"});
+    memcard->quiet({"save_game", "load_game", "check_for_save_container", "saveload_profile_complete", "saveload_all_complete", "select_device"});
     RbHost* sink = add(std::make_unique<RbHost>(ui, "band_ui_sink"));
     sink->on("has_event", no);
     sink->on("is_network_busy", no);
@@ -370,8 +412,23 @@ void installRbNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Scr
         const std::string t = cmd.children.size() > 1 ? i2.eval(cmd.children[1]).str() : std::string();
         return Value::string(t == "drum" ? "D" : t == "vocals" ? "V" : t == "bass" ? "B" : "G");
     });
+    // The online services are not in the port (GD05-013): answered, empty.
+    add(std::make_unique<RbHost>(ui, "leaderboards"))->quiet({"cancel_enumerate", "clear_type", "create", "destroy", "enum_complete", "enumerate",
+                                                              "get_filter", "get_provider", "get_song_sym", "get_track_type_char", "get_type",
+                                                              "set_limits", "set_page_size"});
+    add(std::make_unique<RbHost>(ui, "achievements"))->quiet({"submit"});
+    for (const char* f : {"song_preview_bg", "song_preview_fg", "song_preview_fg_instr", "song_preview_crowd"})
+        in.addBuiltin(f, [](Interp&, const DataNode&) { return Value::integer(0); });  // the preview's mix levels [I: one mix]
+    in.addBuiltin("clamp", [](Interp& i2, const DataNode& cmd) {
+        const float v = cmd.children.size() > 1 ? i2.eval(cmd.children[1]).number() : 0.0f;
+        const float lo = cmd.children.size() > 2 ? i2.eval(cmd.children[2]).number() : v, hi = cmd.children.size() > 3 ? i2.eval(cmd.children[3]).number() : v;
+        return Value::real(std::clamp(v, lo, hi));
+    });
+    in.addBuiltin("joypad_get_players_padnum", [](Interp& i2, const DataNode& cmd) {
+        return Value::integer(cmd.children.size() > 1 ? i2.eval(cmd.children[1]).integerValue() : 0);
+    });
     // presence_mgr: Xbox Live rich presence, not in the port (GD05-013).
-    add(std::make_unique<RbHost>(ui, "presence_mgr"))->quiet({"set_mode", "set_presence", "update", "set_prepare_to_rock", "set_assembling_band"});
+    add(std::make_unique<RbHost>(ui, "presence_mgr"))->quiet({"set_mode", "set_presence", "update", "set_prepare_to_rock", "set_assembling_band", "set_customizing_rocker"});
     // entity_uploader: Rock Central (online) checks a new name or band; not
     // in the port (GD05-013): done at once, accepted (ROCK_CENTRAL_OP_COMPLETE_MSG
     // with a code that is no error) [I].
