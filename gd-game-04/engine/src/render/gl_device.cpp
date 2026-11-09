@@ -100,7 +100,6 @@ struct GlTarget {
 };
 
 GLuint compileStage(GLenum stage, const std::string& source, std::string& error);
-void displayGammaRamp(uint8_t out[256]);
 
 GLenum blendFactor(BlendFactor f) {
     switch (f) {
@@ -548,6 +547,8 @@ void GlDevice::destroyBuffer(BufferId id) {
     }
 }
 
+}  // namespace
+
 // The 360's output gamma [C: GH3 sets its gamma ramp once at start-up
 // (823BBA20 from 822CD240; 823BB830 builds ramp[i] = i x 256 x (brightness
 // 0.5 x 0.6 + 0.7) = i x 256, an identity) through D3DDevice_SetGammaRamp
@@ -569,6 +570,8 @@ void displayGammaRamp(uint8_t out[256]) {
         out[i] = uint8_t((t * 255 + 511) / 1023);
     }
 }
+
+namespace {
 
 GLuint compileStage(GLenum stage, const std::string& source, std::string& error) {
     GLuint s = gl::glCreateShader(stage);

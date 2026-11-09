@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(gd01 VERSION 1.1.10 LANGUAGES C CXX)
+project(gd01 VERSION 1.1.11 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -50,6 +50,8 @@ target_sources(gd01 PRIVATE
   src/render/hdr_output.cpp
   src/render/vk_upscaler.cpp
   src/render/renderer.cpp
+  src/render/core_renderer.cpp
+  src/render/core_post_fx.cpp
   src/render/scene_renderer.cpp
   src/render/image_enhance.cpp
   src/render/text_layout.cpp
@@ -84,6 +86,20 @@ target_sources(gd01 PRIVATE
 )
 target_include_directories(gd01 PRIVATE src)
 target_link_libraries(gd01 PRIVATE SDL3::SDL3)
+
+# gd-engine-core (GDCORE-001, ../../gd-engine-core/docs/README.md): the
+# shared platform / image / audio / render libraries, static. Linking it does
+# not change the game: gd01 runs its own code ("local") unless the player
+# picks a core backend in Enhanced > Performance.
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../../gd-engine-core ${CMAKE_CURRENT_BINARY_DIR}/gd-engine-core)
+target_link_libraries(gd01 PRIVATE gdcore)
+# The SPIR-V of the core renderer's shaders (the gd shader dialect's k<Name>Vs /
+# k<Name>Fs strings), compiled at build time for the SDL3 GPU and Vulkan
+# backends: core_renderer_spirv.h (k<Name>VsSpirv...), on the include path
+# (gd-engine-core/docs/render.md section 3.3).
+gdcore_spirv_shaders(gd01 OUTPUT core_renderer_spirv.h SOURCES src/render/core_renderer.cpp src/render/core_post_fx.cpp DEFINES GD_HDR=0)
+# The post-processing's HDR variants (core_post_fx.cpp with GD_HDR 1), in namespace gd01_hdr.
+gdcore_spirv_shaders(gd01 OUTPUT core_post_fx_hdr_spirv.h SOURCES src/render/core_post_fx.cpp NAMESPACE gd01_hdr DEFINES GD_HDR=1)
 
 # AI upscaling (render/vk_upscaler.cpp): Vulkan loaded at run time through
 # volk, AMD FidelityFX FSR 3.1 (third_party/fidelityfx) and, on Linux x86-64,

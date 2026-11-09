@@ -115,7 +115,7 @@ skip with green, red, Enter, Start, a click or a tap; the help bar's buttons
 (CONFIRM, BACK, START, UP / DOWN) are clickable. NAME YOUR BAND: any up / down
 changes the letter, green takes it, Start or Enter accepts the name.
 
-**Default controls** (docs/knowledge/universal_mechanisms.md):
+**Default controls** (docs/guidelines/universal_mechanisms.md):
 
 | Control | Keyboard | Gamepad (PS2 layout) |
 |---|---|---|

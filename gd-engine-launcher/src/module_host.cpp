@@ -161,6 +161,61 @@ struct HostSetup {
     }
 };
 
+// request_window (sdk/gd_host.h): the launcher's window made again for
+// another graphics API, during gd_game_run.
+struct WindowRequests {
+    SDL_Window** window;
+    SDL_GLContext* context;
+    const WindowSwitch* switchWindow;
+    GdHost* host;
+    ActionLog* log;
+    std::string gameId;
+    uint32_t api = GD_WINDOW_API_OPENGL;
+    int switches = 0;
+};
+
+const char* apiText(uint32_t api) {
+    switch (api) {
+    case GD_WINDOW_API_OPENGL: return "OpenGL";
+    case GD_WINDOW_API_SDL_GPU: return "SDL_GPU";
+    case GD_WINDOW_API_VULKAN: return "Vulkan";
+    case GD_WINDOW_API_METAL: return "Metal";
+    default: return "an unknown API";
+    }
+}
+
+void* requestWindow(void* user, uint32_t api) {
+    auto* r = static_cast<WindowRequests*>(user);
+    if (api == r->api) return *r->window;
+    if (api > GD_WINDOW_API_METAL || !r->switchWindow || !*r->switchWindow) {
+        SDL_Log("gdul: %s asked for a window for %s: not offered here", r->gameId.c_str(), apiText(api));
+        return nullptr;
+    }
+    std::string error;
+    if (!(*r->switchWindow)(api, *r->window, *r->context, error)) {
+        SDL_Log("gdul: %s asked for a window for %s: %s", r->gameId.c_str(), apiText(api), error.c_str());
+        r->log->add("game " + r->gameId + ": no window for " + apiText(api) + " (" + error + ")");
+        r->host->window = *r->window, r->host->gl_context = *r->context;
+        return nullptr;
+    }
+    SDL_Log("gdul: %s: the window is made for %s now", r->gameId.c_str(), apiText(api));
+    r->log->add("game " + r->gameId + ": window made for " + apiText(api));
+    r->api = api;
+    ++r->switches;
+    r->host->window = *r->window;
+    r->host->gl_context = *r->context;
+    // The game learns the new window's size as after any resize.
+    int w = 0, h = 0;
+    SDL_GetWindowSizeInPixels(*r->window, &w, &h);
+    SDL_Event e{};
+    e.type = SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED;
+    e.window.timestamp = SDL_GetTicksNS();
+    e.window.windowID = SDL_GetWindowID(*r->window);
+    e.window.data1 = w, e.window.data2 = h;
+    SDL_PushEvent(&e);
+    return *r->window;
+}
+
 // The launcher's window state again after a module had it.
 void takeBack(SDL_Window* window, SDL_GLContext context) {
     SDL_GL_MakeCurrent(window, context);
@@ -173,8 +228,8 @@ void takeBack(SDL_Window* window, SDL_GLContext context) {
 
 }  // namespace
 
-GameRun runGameModule(SDL_Window* window, SDL_GLContext context, const Game& game, const std::string& launcherVersion,
-                      ActionLog& log) {
+GameRun runGameModule(SDL_Window*& window, SDL_GLContext& context, const Game& game, const std::string& launcherVersion,
+                      ActionLog& log, const WindowSwitch& switchWindow) {
     GameRun run;
     std::string error;
     void* lib = platform::openLibrary(game.modulePath, error);
@@ -206,15 +261,33 @@ GameRun runGameModule(SDL_Window* window, SDL_GLContext context, const Game& gam
     SDL_TimerID timer = 0;
     if (const char* q = SDL_getenv("GDUL_GAME_QUIT_AFTER")) timer = SDL_AddTimer(Uint32(std::atoi(q)), &quitTimer, nullptr);
 
+    WindowRequests requests{&window, &context, &switchWindow, &setup.host, &log, game.id};
+    setup.host.request_window = &requestWindow;
+    setup.host.request_window_user = &requests;
+
     const Uint64 t0 = SDL_GetTicksNS();
     run.started = true;
     run.exitCode = entry(&setup.host);
     run.seconds = double(SDL_GetTicksNS() - t0) / 1e9;
 
-    // Take everything back.
+    // Take everything back: the OpenGL window first, if the game had it made
+    // for another API.
     if (timer) SDL_RemoveTimer(timer);
     setup.releaseLog();
-    takeBack(window, context);
+    run.windowSwitches = requests.switches;
+    if (requests.api != GD_WINDOW_API_OPENGL) {
+        std::string why;
+        if (switchWindow(GD_WINDOW_API_OPENGL, window, context, why)) {
+            SDL_Log("gdul: back from %s: the OpenGL window again", game.id.c_str());
+        } else {
+            SDL_Log("gdul: back from %s: the OpenGL window cannot be made again: %s", game.id.c_str(), why.c_str());
+            log.add("back from " + game.id + ": no OpenGL window (" + why + ")");
+            run.windowLost = true;
+            run.error = "the launcher's OpenGL window cannot be made again: " + why;
+        }
+        ++run.windowSwitches;
+    }
+    if (!run.windowLost) takeBack(window, context);
     run.unloaded = platform::closeLibrary(lib, game.modulePath);
     return run;
 }

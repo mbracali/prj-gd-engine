@@ -101,6 +101,11 @@ private:
     void toast(const std::string& text);
     void restoreWindow();
     void rememberWindow();
+    // A game module's request_window (sdk/gd_host.h, module_host.h WindowSwitch).
+    bool switchWindowApi(uint32_t api, std::string& error);
+    SDL_Window* makeWindow(uint32_t api, int w, int h, int x, int y, SDL_WindowFlags keep);
+    bool startGl(std::string& error);
+    void stopGl();
     void leaveFullscreen();
     bool duplicatePress(const SDL_Event& e);  // true: drop it
     void openGamepads();
@@ -126,7 +131,8 @@ private:
     static gfx::Color fretColor(Fret f);
 
     SDL_Window* window_ = nullptr;
-    SDL_GLContext context_ = nullptr;
+    SDL_GLContext context_ = nullptr;  // null while a game has the window for another API
+    uint32_t windowApi_ = 0;           // GD_WINDOW_API_* the window is made for (0: OpenGL)
     SDL_Surface* icon_ = nullptr;
     gfx::Renderer gfx_;
     Catalog catalog_;

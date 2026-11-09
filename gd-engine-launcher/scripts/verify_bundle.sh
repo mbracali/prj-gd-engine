@@ -171,6 +171,14 @@ for gi in "${game_infos[@]}"; do
       [ -z "$undef" ] || fail "$id's module has undefined symbols (it would not load): $(echo "$undef" | head -3 | sed 's/^[[:space:]]*//' | tr '\n' ' ')"
     fi
   fi
+  # gd-engine-core's shared libraries (build.sh ship_core_runtime: loaded at
+  # run time, so no import table names them): every one listed is there.
+  if [ -f "$d/core-libs.txt" ]; then
+    while IFS= read -r lib; do
+      [ -n "$lib" ] || continue
+      nonempty "$libs/$lib"
+    done < "$d/core-libs.txt"
+  fi
   case "$nn" in
     02)  # FFmpeg (videos, sound effects) and its LGPL notice
       for lib in avformat avcodec avutil; do
@@ -198,7 +206,7 @@ if [ "$os" = windows ]; then
   if [ -z "$tool" ]; then
     cannot "no objdump: the DLLs' own imports were not checked"
   else
-    syswin=" advapi32.dll bcrypt.dll cfgmgr32.dll comctl32.dll comdlg32.dll crypt32.dll d3d11.dll d3d12.dll dbghelp.dll dinput8.dll dwmapi.dll dxgi.dll gdi32.dll hid.dll imm32.dll iphlpapi.dll kernel32.dll msvcrt.dll ntdll.dll ole32.dll oleaut32.dll opengl32.dll powrprof.dll psapi.dll secur32.dll setupapi.dll shcore.dll shell32.dll shlwapi.dll user32.dll userenv.dll uxtheme.dll version.dll winmm.dll ws2_32.dll xinput1_4.dll "
+    syswin=" advapi32.dll avrt.dll bcrypt.dll cfgmgr32.dll comctl32.dll comdlg32.dll crypt32.dll d3d11.dll d3d12.dll dbghelp.dll dinput8.dll dwmapi.dll dxgi.dll gdi32.dll hid.dll imm32.dll iphlpapi.dll kernel32.dll msvcrt.dll ntdll.dll ole32.dll oleaut32.dll opengl32.dll powrprof.dll psapi.dll secur32.dll setupapi.dll shcore.dll shell32.dll shlwapi.dll user32.dll userenv.dll uxtheme.dll version.dll winmm.dll ws2_32.dll xinput1_4.dll "
     while IFS= read -r -d '' bin; do
       dir="$(dirname "$bin")"
       while IFS= read -r dll; do
@@ -216,7 +224,7 @@ if [ "$os" = windows ]; then
 fi
 
 if [ "$problems" != 0 ]; then
-  printf '%sverify: %s is INCOMPLETE (%d problem(s)): do not ship it. See docs/release-process.md, "Never again: incomplete bundles".%s\n' \
+  printf '%sverify: %s is INCOMPLETE (%d problem(s)): do not ship it. See docs/platform/release-process.md, "Never again: incomplete bundles".%s\n' \
     "$R" "$(basename "$target")" "$problems" "$N"
   exit 1
 fi

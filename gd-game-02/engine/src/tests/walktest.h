@@ -128,6 +128,15 @@ class UiManager;
 //              with its sound, saved -> Video Settings -> the lag
 //              calibration: its countdown, 11 clicks struck in time
 //              (success) -> back x3 -> main.
+//   enhanced_backends  main -> Options -> Enhanced Options: the backends
+//              this start uses (GD02_WALK_ENHANCED_SEED: an enhanced.json
+//              with unknown backends, dropped: local), Graphics Backend SDL3
+//              then Vulkan, Audio Backend OpenAL (each asks Restart Now /
+//              Later: back is Later), saved, still local; then Graphics SDL3
+//              and Restart Now: the game starts again in the same process
+//              (runApp) and walks enhanced_backends_restarted: straight on
+//              Enhanced Options, on the saved backends (headless SDL3 falls
+//              back to local; OpenAL plays on its null device).
 // quickplay also deploys Star Power (claps, sp_depleted) and checks the
 // crowd's crowd_begin / crowd_win; lose passes bangyourhead's first big
 // note (blew_bignote.cue).

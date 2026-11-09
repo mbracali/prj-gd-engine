@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <sstream>
@@ -19,6 +20,7 @@
 #include <vector>
 
 #include "app_ids.h"
+#include "audio/audio_device.h"
 #include "audio/mixer.h"
 #include "audio/synth.h"
 #include "char/midi_parser.h"
@@ -44,6 +46,7 @@
 #include "platform/disc_picker.h"
 #include "platform/paths.h"
 #include "render/canvas.h"
+#include "render/core_backend.h"
 #include "render/hdr_output.h"
 #include "render/highway.h"
 #include "render/hud_view.h"
@@ -208,10 +211,27 @@ private:
     uint64_t start_ = 0, end_ = 0, pos_ = 0, fade_ = 0;
 };
 
+// Enhanced > Graphics / Audio Backend as this start of the game uses them
+// (startupGraphicsBackend / startupAudioBackend in app.h): read from
+// enhanced.json once, at the start of App::run (each restart reads it again).
+struct StartupBackends {
+    bool latched = false;
+    std::string graphics = "local", audio = "local";
+};
+StartupBackends& startupBackends() {
+    static StartupBackends b;
+    return b;
+}
+void latchStartupBackends();
+// The walk test's own save folder (GD03_SAVE_DIR), made once a process: a
+// restart (Restart Now) keeps it. Returns it.
+std::string prepareWalkDirs();
+
 class App final : public UiHost {
 public:
     explicit App(const Options& o) : options_(o), difficulty_(std::clamp(o.difficulty, 0, kDifficultyCount - 1)) {}
     int run();
+    bool restartAsked() const { return restart_; }
 
     // ---- UiHost (GH2's menus around the song)
     const std::vector<SongInfo>& songs() const override { return songs_; }
@@ -369,6 +389,17 @@ private:
     bool importProgress(const std::string& file);
     void updateBackdrop();
     void drawFpsCounter();
+    // Enhanced Options only: "Graphics: X   Audio: Y", the backends this run uses.
+    void drawBackendLabel();
+    // The graphics backend that draws now (after any fallback): "local" until
+    // the gd-engine-core renderer lands (GDCORE-009; the graphics work returns
+    // the device's real id here).
+    std::string graphicsBackendNow() const { return gfx::backendId(gfx::rendererBackend()); }  // what draws (after a fallback)
+    // The audio backend that plays now (after any fallback).
+    static std::string audioBackendNow() {
+        const std::string b = audiodev::backend();
+        return b.empty() ? std::string("local") : b;
+    }
     // Enhanced Options > Enable Touch Controls: the track's lanes for the
     // fingers (Input::setTouchLanes) and the on-screen buttons.
     void updateTouchLanes();
@@ -388,6 +419,7 @@ private:
     Rules rules_;
     std::vector<SongInfo> songs_;
     bool running_ = true;
+    bool restart_ = false;  // Enhanced's Restart Now: runApp starts the game again
     int exitCode_ = 0;
     // The first screen (no disc image yet): the file dialog and its last error.
     DiscPicker picker_;
@@ -612,10 +644,11 @@ int App::run() {
     // 1430:4748:guitar) plugs in a virtual controller, to test without hardware.
     if (const char* vp = SDL_getenv("GD03_VIRTUAL_PAD")) virtualPad_ = Input::attachVirtualPad(vp);
     inputLog_ = envOn("GD03_INPUTLOG");
-    SDL_WindowFlags flags = SDL_WINDOW_RESIZABLE | gfx::prepareWindow();  // OpenGL (render/device.h)
-#ifdef __ANDROID__
-    flags |= SDL_WINDOW_FULLSCREEN;
-#endif
+    // Enhanced > Graphics Backend (GDCORE-009, render/core_backend.h): local
+    // (gd03's OpenGL device) or a gd-engine-core backend, decided before the
+    // window: SDL3 GPU and Vulkan need a window made for their API (in the
+    // launcher, prepareWindowFor asks it for one). Local and opengl3 keep the
+    // OpenGL window.
     debugHighway_ = envOn("GD03_DEBUG_HIGHWAY");
     debugMenu_ = envOn("GD03_DEBUG_MENU");
     if (!options_.walk.empty()) {
@@ -626,12 +659,34 @@ int App::run() {
             return 2;
         }
         debugMenu_ = false;
+        prepareWalkDirs();  // before enhanced.json is first read
     }
+    // Enhanced > Graphics / Audio Backend: this start's, read once (a change
+    // in the menu applies on the next start). Development aid:
+    // GD03_AUDIO_BACKEND=<id> overrides the audio one (the walks on each).
+    latchStartupBackends();
+    SDL_Log("backends: graphics %s, audio %s", startupBackends().graphics.c_str(), startupBackends().audio.c_str());
+    {
+        std::string audio = startupBackends().audio;
+        if (const char* b = SDL_getenv("GD03_AUDIO_BACKEND"); b && *b) audio = b;
+        audiodev::setBackend(audio);  // every sound's output (audio/audio_device.h); local is SDL's device
+    }
+    // (after the latch: Restart Now runs App::run again with the new setting)
+    const gfx::Backend graphicsBackend = gfx::chosenBackend(startupBackends().graphics);
+    const bool gpuWindow = graphicsBackend == gfx::Backend::Sdl3 || graphicsBackend == gfx::Backend::Vulkan;
+    SDL_WindowFlags baseFlags = SDL_WINDOW_RESIZABLE;
+#ifdef __ANDROID__
+    baseFlags |= SDL_WINDOW_FULLSCREEN;
+#endif
+    SDL_WindowFlags flags = baseFlags | gfx::prepareWindowFor(graphicsBackend);  // OpenGL (render/device.h) for local
     // Enhanced > HDR > True HDR: the window's surface is chosen now (render/hdr_output.h).
     // A window or surface that cannot be made with it is made again without (Emulated).
-    hdrReason_ = hdr::unsupportedReason();
+    // The surface probe is local's (an OpenGL context): on the core backends True HDR runs as Emulated.
+    hdrReason_ = graphicsBackend != gfx::Backend::Local
+                     ? std::string("True HDR is not on the ") + gfx::backendId(graphicsBackend) + " graphics backend yet"
+                     : hdr::unsupportedReason();
     const bool trueHdr = savedHdrMode() == "true";
-    const bool wantHdr = trueHdr && hdr::request();
+    const bool wantHdr = trueHdr && graphicsBackend == gfx::Backend::Local && hdr::request();
     window_ = SDL_CreateWindow(app::kWindowTitle, int(kScreenW), int(kScreenH), flags);
     if (wantHdr) {
         if (window_) {
@@ -665,7 +720,24 @@ int App::run() {
         my = (ny * float(wh) - (float(wh) - 720.0f * scale) * 0.5f) / scale;
     });
     std::string error;
-    if (!window_ || !canvas_.init(window_, error)) {
+    gfx::setRendererBackend(graphicsBackend);
+    bool rendererOk = window_ && canvas_.init(window_, error);
+    if (!rendererOk && graphicsBackend != gfx::Backend::Local) {
+        // The core backend did not start: local runs instead (rule 2: never a
+        // black screen); an SDL3 GPU / Vulkan window is made again for
+        // OpenGL first (in the launcher the shim gets its OpenGL window back).
+        SDL_Log("graphics backend: %s did not start (%s); using local", gfx::backendId(graphicsBackend), window_ ? error.c_str() : SDL_GetError());
+        if (gpuWindow) {
+            SDL_Log("graphics backend: %s: making the window again for OpenGL (local)", gfx::backendId(graphicsBackend));
+            if (window_) SDL_DestroyWindow(window_);
+            window_ = SDL_CreateWindow(app::kWindowTitle, int(kScreenW), int(kScreenH), baseFlags | gfx::prepareWindowFor(gfx::Backend::Local));
+            if (window_) setAppWindowIcon(window_);
+        }
+        gfx::setRendererBackend(gfx::Backend::Local);
+        error.clear();
+        rendererOk = window_ && canvas_.init(window_, error);
+    }
+    if (!rendererOk) {
         std::fprintf(stderr, "%s: cannot open the window: %s\n", app::kProgram, window_ ? error.c_str() : SDL_GetError());
         SDL_Quit();
         return 2;
@@ -745,9 +817,13 @@ int App::run() {
         }
     }
 
+    // Restart Now as a walk's last step: the walk is over (its checks go on
+    // in the restarted game's walk, runApp).
+    if (walk_ && ui_ && restart_) walk_->poll(*ui_, double(SDL_GetTicksNS()) / 1e6);
     if (walk_ && ui_) exitCode_ = walk_->finish(*ui_);
-    // The walk's own save folder goes with it (its checks have read it).
-    if (!walkSaveDir_.empty()) {
+    // The walk's own save folder goes with it (its checks have read it); a
+    // restart (Restart Now) keeps it for the restarted game's walk.
+    if (!walkSaveDir_.empty() && !restart_) {
         std::error_code ec;
         std::filesystem::remove_all(walkSaveDir_, ec);
         walkSaveDir_.clear();
@@ -812,18 +888,7 @@ bool App::loadData(const std::string& path) {
 // GH2's front end: the boot splashes and the intro (unless GD03_SKIP_BOOT=1
 // or GD03_SCREEN=<screen>, which opens that screen), then the menus.
 void App::startUi() {
-    if (walk_) {
-        // The walk test: no videos, a fresh save of its own, its song settings.
-        SDL_setenv_unsafe("GD03_SKIP_MOVIES", "1", 1);
-        walkSaveDir_ = (std::filesystem::temp_directory_path() / ("gd03-walk-" + std::to_string(SDL_GetTicksNS()))).string() + "/";
-        std::filesystem::create_directories(walkSaveDir_);
-        SDL_setenv_unsafe("GD03_SAVE_DIR", walkSaveDir_.c_str(), 1);
-        // Export / Load User Files answer with a folder of the walk's own.
-        static std::string files;
-        files = walkSaveDir_ + "user-files/";
-        std::filesystem::create_directories(files);
-        SDL_setenv_unsafe("GD03_DIALOG", files.c_str(), 1);
-    }
+    if (walk_) walkSaveDir_ = prepareWalkDirs();
     loadEnhanced();
     // A save folder of its own (the walk test, development) holds controllers.json too.
     if (const char* d = SDL_getenv("GD03_SAVE_DIR"); d && *d) {
@@ -846,6 +911,7 @@ void App::startUi() {
     menuKeys_ = MenuKeys(keys ? keys : "");
     if (!menuKeys_.valid()) SDL_Log("GD03_KEYS: some menu items were not understood and are ignored");
     std::string screen = SDL_getenv("GD03_SCREEN") ? SDL_getenv("GD03_SCREEN") : "";
+    if (screen.empty()) screen = options_.startScreen;  // Restart Now: back on Enhanced Options
     if (walk_) screen = walk_->startScreen();
     const bool skip = envOn("GD03_SKIP_BOOT") || !screen.empty();
     if (envOn("GD03_SKIP_BOOT") && screen.empty()) screen = "splash_screen";
@@ -2011,6 +2077,7 @@ void App::frameUi() {
     ui_->draw();
     drawTouchButtons();
     drawFpsCounter();
+    drawBackendLabel();
     shootScreens();
     // GD03_SCREENSHOT_AT: wall-clock ms in the menus, "s<ms>" song times.
     if (captureMenuScreenshot(canvas_, now, player_ && begun_ ? double(lastT_) : -1e9)) running_ = false;
@@ -2504,6 +2571,50 @@ std::string enhancedPath() {
     return (dir && *dir ? std::string(dir) : prefDir()) + "enhanced.json";
 }
 
+}  // namespace
+
+// enhanced.json as loadEnhanced reads it (its format, migrateEnhanced: a
+// backend this build cannot offer is gone), the two backends only.
+void latchStartupBackends() {
+    StartupBackends& b = startupBackends();
+    b = StartupBackends{};
+    b.latched = true;
+    std::ifstream f(enhancedPath(), std::ios::binary);
+    if (!f) return;
+    std::stringstream ss;
+    ss << f.rdbuf();
+    try {
+        Json j = Json::parse(ss.str());
+        if (j.type != Json::Type::Object || j["format"].str() != "gd03-enhanced") return;
+        ui::migrateEnhanced(j);
+        for (auto [key, out] : {std::pair<const char*, std::string*>{"graphics_backend", &b.graphics}, {"audio_backend", &b.audio}}) {
+            const ui::EnhancedSetting* e = ui::enhancedSetting(key);
+            if (j.has(key) && e && ui::enhancedValid(*e, j[key].str())) *out = j[key].str();
+        }
+    } catch (const std::exception&) {
+    }
+}
+
+std::string prepareWalkDirs() {
+    // No videos, a fresh save of its own, its song settings.
+    SDL_setenv_unsafe("GD03_SKIP_MOVIES", "1", 1);
+    static std::string dir;
+    if (!dir.empty() && std::filesystem::exists(dir)) return dir;
+    dir = (std::filesystem::temp_directory_path() / ("gd03-walk-" + std::to_string(SDL_GetTicksNS()))).string() + "/";
+    std::filesystem::create_directories(dir);
+    SDL_setenv_unsafe("GD03_SAVE_DIR", dir.c_str(), 1);
+    // GD03_WALK_ENHANCED_SEED=<json>: the walk's enhanced.json before the game reads it.
+    if (const char* seed = SDL_getenv("GD03_WALK_ENHANCED_SEED"); seed && *seed) std::ofstream(dir + "enhanced.json") << seed << "\n";
+    // Export / Load User Files answer with a folder of the walk's own.
+    static std::string files;
+    files = dir + "user-files/";
+    std::filesystem::create_directories(files);
+    SDL_setenv_unsafe("GD03_DIALOG", files.c_str(), 1);
+    return dir;
+}
+
+namespace {
+
 // Export User Files' names (gd02's GD02-user-*.json).
 constexpr const char* kSettingsFile = "GD03-user-settings.json";
 constexpr const char* kProgressFile = "GD03-user-progress.json";
@@ -2603,6 +2714,8 @@ static const char* deckDefault(const std::string& key) {
 
 std::string App::enhancedValue(const std::string& key) {
     if (key == "hdr_status") return hdrStatus();  // read-only, for the HDR help
+    if (key == "graphics_backend_now") return graphicsBackendNow();  // read-only: what draws (after a fallback)
+    if (key == "audio_backend_now") return audioBackendNow();        // read-only: what plays
     const ui::EnhancedSetting* e = ui::enhancedSetting(key);
     if (!e) return {};
     if (enhanced_.has(key))
@@ -2612,6 +2725,10 @@ std::string App::enhancedValue(const std::string& key) {
 }
 
 void App::setEnhancedValue(const std::string& key, const std::string& value) {
+    if (key == "restart_now") {  // not a setting: Enhanced's Restart Now
+        restart_ = true, running_ = false;
+        return;
+    }
     const ui::EnhancedSetting* e = ui::enhancedSetting(key);
     if (!e || !ui::enhancedValid(*e, value)) return;
     enhanced_.set(key, Json::string(value));
@@ -2958,6 +3075,34 @@ int App::enhancedState(const std::string& key) {
     return -1;
 }
 
+// Enhanced Options only: the graphics and audio backends this run uses (after
+// any fallback to local), in small white text above the FPS counter
+// (universal-menus.md "Backends"); GH2's help bar legend sits beside the
+// counter and reaches its left, so the label stays on the line above it even
+// when the counter is off. A chosen one that could not start shows as "local (<name>
+// could not start)".
+void App::drawBackendLabel() {
+    if (!ui_ || ui_->headless() || player_ || ui_->currentScreen() != "enhanced_options_screen") return;
+    auto label = [](const std::string& id) -> std::string {
+        static const std::map<std::string, std::string> k = {{"sdl3", "SDL3"},          {"vulkan", "Vulkan"}, {"opengl3", "OpenGL3"},
+                                                             {"miniaudio", "miniaudio"}, {"openal", "OpenAL"}, {"faudio", "FAudio"}};
+        auto it = k.find(id);
+        return it == k.end() ? std::string("local") : it->second;
+    };
+    auto shown = [&](const std::string& running, const std::string& chosen) {
+        return label(running) + (chosen != running && label(chosen) != "local" ? " (" + label(chosen) + " could not start)" : "");
+    };
+    std::string audio = startupBackends().audio;
+    if (const char* b = SDL_getenv("GD03_AUDIO_BACKEND"); b && *b) audio = b;
+    const std::string s = "Graphics: " + shown(graphicsBackendNow(), startupBackends().graphics) + "   Audio: " + shown(audioBackendNow(), audio);
+    const float y = 650;  // above the help bar's legend (SELECT / BACK start at x 205): the counter's own line would run into it
+    canvas_.flush();
+    ui::ScreenText& t = ui_->screenText();
+    t.begin(canvas_.renderer());
+    t.draw(canvas_.renderer().materials(), "helveticablack.font", s, 25, y + 2, 18, {0, 0, 0, 0.6f}, 0x41);
+    t.draw(canvas_.renderer().materials(), "helveticablack.font", s, 23, y, 18, {1, 1, 1, 0.9f}, 0x41);
+}
+
 // Bottom left, in GH2's menu font: the frames drawn a second (averaged).
 void App::drawFpsCounter() {
     const uint64_t now = SDL_GetTicksNS();
@@ -3067,7 +3212,7 @@ void App::updateBackdrop() {
         const std::array<float, 3> cam{c.x, c.y, c.z};
         band_->update(world_->seconds(), world_->beats(), &cam);
     }
-    // The shot (docs/knowledge/universal_launcher.md, gd01's Enhanced pose): a
+    // The shot (docs/guidelines/universal_launcher.md, gd01's Enhanced pose): a
     // still close-up of the singer, on the right of the picture beside the
     // options' box, from the audience's side a little to one flank so the
     // rest of the band stands behind and beside them.
@@ -3267,4 +3412,37 @@ void App::frameList() {
 
 }  // namespace
 
-int runApp(const Options& options) { return App(options).run(); }
+// Enhanced > Graphics / Audio Backend > Restart Now (universal-menus.md
+// "Backends"): the App ends and starts again in the same process (in the
+// launcher too: the module keeps running and gets the launcher's window
+// again), no boot screens, back on Enhanced Options. A walk goes on as
+// "<walk>_restarted" (tests/walktest.h).
+int runApp(const Options& options) {
+    Options o = options;
+    for (;;) {
+        bool restart = false;
+        int r;
+        {
+            App app(o);
+            r = app.run();
+            restart = app.restartAsked();
+        }
+        if (!restart || r != 0) return r;
+        SDL_Log("restart: Enhanced Options asked for a restart (the new backends)");
+        const std::string walk = o.walk;
+        o = options;
+        o.song.clear();
+        o.startScreen = "enhanced_options_screen";
+        if (!walk.empty()) o.walk = walk + "_restarted";
+    }
+}
+
+std::string startupGraphicsBackend() {
+    if (!startupBackends().latched) latchStartupBackends();  // asked before App::run read it
+    return startupBackends().graphics;
+}
+
+std::string startupAudioBackend() {
+    if (!startupBackends().latched) latchStartupBackends();
+    return startupBackends().audio;
+}

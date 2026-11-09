@@ -4,6 +4,8 @@
 
 #include <SDL3/SDL.h>
 
+#include <string>
+
 // The one output every gd03 sound goes through, like GH2's XAudio
 // mastering voice: the song (audio/mixer.h), the crowd (audio/crowd_audio.h)
 // and the sound effects (audio/sfx_player.h) are streams bound to one
@@ -14,6 +16,19 @@
 // console folds it to stereo; here it sees the device's own mix (its rate
 // and channels) [I].
 namespace audiodev {
+
+// Enhanced > Audio backend (audio_backend; gd-engine-core/docs/audio.md):
+// "local" (the default) is SDL's device, as always; "miniaudio", "openal" or
+// "faudio" plays the same streams through that gd-engine-core output (summed
+// and limited here, as SDL's device does; gd01's AudioRoute). Set once at
+// start-up, before the first openStream. A backend that cannot start leaves
+// the game on local for the run, logged (engine-backend-guidelines.md rule 2).
+void setBackend(const std::string& id);
+// The backend that plays now: "local", a core id, or "" while no stream is
+// open (then "local" when the asked one failed).
+std::string backend();
+// The one asked for with setBackend ("local" by default).
+std::string askedBackend();
 
 // Opens a stream of `spec` bound to the shared device (opening the device
 // the first time), its data pulled through `callback` (as

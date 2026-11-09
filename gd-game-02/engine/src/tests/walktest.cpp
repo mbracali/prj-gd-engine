@@ -25,6 +25,7 @@
 #include "script/tasks.h"
 #include "ui/campaign.h"
 #include "ui/char_select.h"
+#include "app.h"
 #include "ui/enhanced_panel.h"
 #include "ui/natives.h"
 #include "ui/ui_objects.h"
@@ -781,9 +782,10 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         press(kDown), wait(120);
         press(kX), wait(300);
         check("enhanced_calibration_reset");
-        // PERFORMANCE & GRAPHICS -> Screen Mode -> Resolution; select opens
-        // its dropdown, down and select pick the next option.
-        for (int i = 0; i < 3; ++i) press(kDown), wait(120);
+        // PERFORMANCE & GRAPHICS -> Graphics Backend -> Audio Backend (the
+        // section's first rows, kept at local) -> Screen Mode -> Resolution;
+        // select opens its dropdown, down and select pick the next option.
+        for (int i = 0; i < 5; ++i) press(kDown), wait(120);
         press(kX);
         wait(200);
         press(kDown), wait(120);
@@ -807,6 +809,9 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         check("enhanced_hdr_true");
         again(kRight), wait(400);
         check("enhanced_hdr_none");
+        // Graphics / Audio Backend (GDCORE-008): still local (the walk never
+        // touched them; the backends walk does).
+        check("enhanced_backends");
         row(kLeft), again(kLeft), row(kLeft), row(kRight), again(kRight), row(kX), row(kRight), row(kRight), again(kRight), row(kRight),
             row(kRight), again(kRight), row(kRight), again(kRight), row(kRight), again(kRight);
         wait(500);
@@ -852,6 +857,45 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         at("main_screen");
         expect_ = {"main_screen", "options_screen", "enhanced_options_screen", "options_screen", "enhanced_options_screen", "options_screen",
                    "main_screen"};
+    } else if (scenario == "enhanced_backends") {
+        // Enhanced > Graphics / Audio Backend (GDCORE-008, universal-menus.md
+        // "Backends"). With GD02_WALK_ENHANCED_SEED holding unknown backends:
+        // they are dropped at start (local). The two rows are the first of
+        // PERFORMANCE & GRAPHICS; Right steps Graphics to SDL3, then Vulkan
+        // (each change asks Restart Now / Later: back is Later), the Audio
+        // dropdown picks OpenAL (Later again): saved, still local in this run.
+        // Then Graphics back to SDL3 and Restart Now: the game starts again
+        // (enhanced_backends_restarted).
+        at("main_screen");
+        for (int i = 0; i < 4; ++i) press(kDown), wait(150);  // OPTIONS
+        press(kX);
+        at("options_screen");
+        press(kDown), wait(150), press(kDown), wait(150);
+        press(kX);
+        at("enhanced_options_screen");
+        check("enhanced_backends_start");
+        for (int i = 0; i < 14; ++i) press(kDown), wait(120);  // MODES > Steam Deck down to Graphics Backend
+        press(kRight), wait(300);  // SDL3: the pop-up
+        press(kTri), wait(300);    // Later
+        press(kRight), wait(300);  // Vulkan
+        press(kTri), wait(300);
+        press(kDown), wait(120);
+        press(kX), wait(200);  // Audio Backend's dropdown
+        press(kDown), wait(120), press(kDown), wait(120);
+        press(kX), wait(300);  // OpenAL
+        press(kTri), wait(300);
+        at("enhanced_options_screen");
+        check("enhanced_backends_saved");
+        press(kUp), wait(120);
+        press(kLeft), wait(300);  // Graphics: SDL3
+        press(kX);                // Restart Now (focused)
+        expect_ = {"main_screen", "options_screen", "enhanced_options_screen"};
+    } else if (scenario == "enhanced_backends_restarted") {
+        // The game started again by Restart Now: straight on Enhanced Options,
+        // on the saved backends (SDL3 falls back to local headless).
+        at("enhanced_options_screen");
+        check("enhanced_backends_restarted");
+        expect_ = {"enhanced_options_screen"};
     } else if (scenario == "mouse") {
         at("main_screen");
         wait(300);  // a frame drawn: the components' bounds are known
@@ -869,18 +913,18 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         mouseAt(300, 297, 1);
         wait(300);
         check("enhanced_mode_clean");
-        // MODES collapsed (a click on its title): Screen Mode is the list's
-        // 11th row, hovered; the wheel moves to Resolution, scrolled into its
-        // place, and the small nudge after it keeps that focus (#51), so
-        // select opens its dropdown, upward: 720p 180 units above the row
-        // (the row is the 12th, one below where it was clicked before).
+        // MODES collapsed (a click on its title): Graphics Backend is the
+        // list's 11th row, hovered; the wheel moves past Audio Backend and
+        // Screen Mode to Resolution, scrolled into its place, and the small
+        // nudge after it keeps that focus (#51), so select opens its
+        // dropdown, upward: 720p 180 units above the row.
         mouseAt(300, 190, 0);
         mouseAt(300, 190, 1);
         wait(300);
         mouseAt(480, 523, 0);
         wait(200);
-        mouseAt(480, 523, 5);
-        wait(600);
+        for (int i = 0; i < 3; ++i) mouseAt(480, 523, 5), wait(200);
+        wait(400);
         mouseAt(483, 525, 0);
         press(kX);  // the focused row's dropdown: Resolution's only if the nudge kept the focus
         wait(200);
@@ -1539,8 +1583,10 @@ std::string WalkDriver::startScreen() const {
     if (scenario_ == "lose" || scenario_ == "pause" || scenario_ == "back" || scenario_ == "enhanced" || scenario_ == "cheats" ||
         scenario_ == "mouse" || scenario_ == "gamepads" || scenario_ == "gamepads_pad" || scenario_ == "stickyaxis" ||
         scenario_ == "whammy_tail" || scenario_ == "practice" || scenario_ == "practice_menus" || scenario_ == "tutorial" || scenario_ == "tutorial1" || scenario_ == "tutorial2" ||
-        scenario_ == "tutorial3" || scenario_ == "options" || scenario_ == "flaming_head" || scenario_ == "pad_unplugged")
+        scenario_ == "tutorial3" || scenario_ == "options" || scenario_ == "flaming_head" || scenario_ == "pad_unplugged" ||
+        scenario_ == "enhanced_backends")
         return "main_screen";
+    if (scenario_ == "enhanced_backends_restarted") return "enhanced_options_screen";
     if (scenario_ == "attract") return "splash_screen";
     return "";
 }
@@ -1762,7 +1808,7 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
     }
     if (s.screen == "backdrop_band") {
         // Enhanced Options' still shot always shows the band, its singer on
-        // the right (docs/knowledge/universal_launcher.md, GD02-074).
+        // the right (docs/guidelines/universal_launcher.md, GD02-074).
         const bool ok = ui.host().menuBackdropFramed();
         std::printf("  enhanced backdrop: %s\n", ok ? "the band, the singer on the right" : "no band in the shot");
         return ok ? pass() : fail("Enhanced Options' backdrop shows no band");
@@ -2204,15 +2250,63 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
                 ss << in.rdbuf();
                 Json j = Json::parse(ss.str());
                 j.set("ground_fog", Json::string("2x")), j.set("light_streaks", Json::string("medium"));
+                j.set("graphics_backend", Json::string("vulkan")), j.set("audio_backend", Json::string("openal"));  // GDCORE-006
                 std::ofstream(d / "GD02-user-settings.json") << j.dump(2);
             } catch (const std::exception&) {
                 problems += std::string(problems.empty() ? "" : "; ") + "GD02-user-settings.json does not parse";
+            }
+        } else if (w == "enhanced_backends") {
+            // Local, nothing saved (no mode sets them); a saved backend the
+            // build offers is kept, an unknown one dropped.
+            for (const char* key : {"graphics_backend", "audio_backend"}) {
+                const std::string got = ui.host().enhancedValue(key), file = saved.has(key) ? saved[key].str() : "(unset)";
+                std::printf("  enhanced: %s %s (enhanced.json %s)\n", key, got.c_str(), file.c_str());
+                if (got != "local" || (file != "(unset)" && file != "local"))
+                    problems += std::string(problems.empty() ? "" : "; ") + key + " is " + got + " / " + file + ", not local";
+            }
+            Json j = Json::parse(R"({"graphics_backend":"vulkan","audio_backend":"openal","bloom":"2x"})");
+            ui::migrateEnhanced(j);
+            if (j["graphics_backend"].str() != "vulkan" || j["audio_backend"].str() != "openal" || !j.has("bloom"))
+                problems += std::string(problems.empty() ? "" : "; ") + "a saved backend the build offers was dropped";
+            j = Json::parse(R"({"graphics_backend":"metal","audio_backend":true,"bloom":"2x"})");
+            ui::migrateEnhanced(j);
+            if (j.has("graphics_backend") || j.has("audio_backend") || !j.has("bloom"))
+                problems += std::string(problems.empty() ? "" : "; ") + "an unknown backend was kept";
+#ifdef __APPLE__
+            j = Json::parse(R"({"graphics_backend":"opengl3"})");
+            ui::migrateEnhanced(j);
+            if (j.has("graphics_backend")) problems += std::string(problems.empty() ? "" : "; ") + "OpenGL3 kept on macOS";
+#endif
+        } else if (w == "enhanced_backends_start" || w == "enhanced_backends_saved" || w == "enhanced_backends_restarted") {
+            // What this start uses (latched), what is set and saved, what plays.
+            const std::string g0 = startupGraphicsBackend(), a0 = startupAudioBackend();
+            const std::string aNow = ui.host().enhancedValue("audio_backend_now"), gNow = ui.host().enhancedValue("graphics_backend_now");
+            std::printf("  backends: started with graphics %s, audio %s; running graphics %s, audio %s\n", g0.c_str(), a0.c_str(),
+                        gNow.c_str(), aNow.c_str());
+            auto add = [&](const std::string& p) { problems += std::string(problems.empty() ? "" : "; ") + p; };
+            if (w == "enhanced_backends_start") {
+                // (the file keeps what it had until the next save; the game reads local)
+                for (const char* key : {"graphics_backend", "audio_backend"})
+                    if (ui.host().enhancedValue(key) != "local") add(std::string(key) + " is " + ui.host().enhancedValue(key));
+                if (g0 != "local" || a0 != "local" || aNow != "local") add("an unknown saved backend was not dropped at start");
+            } else if (w == "enhanced_backends_saved") {
+                want("graphics_backend", "vulkan"), want("audio_backend", "openal");
+                if (!saved.has("graphics_backend") || saved["graphics_backend"].str() != "vulkan" || !saved.has("audio_backend") ||
+                    saved["audio_backend"].str() != "openal")
+                    add("the backends were not saved");
+                if (g0 != "local" || a0 != "local" || aNow != "local") add("a backend changed before the restart");
+            } else {
+                want("graphics_backend", "sdl3"), want("audio_backend", "openal");
+                if (g0 != "sdl3" || a0 != "openal") add("the restart did not start on the saved backends");
+                if (aNow != "openal" && aNow != "local") add("audio plays on " + aNow);
             }
         } else if (w == "enhanced_settings_loaded") {
             status("Settings loaded");
             want("more_lights", "2x"), want("internal_res", "480"), want("antialiasing", "fxaa");
             for (const char* gone : {"ground_fog", "light_streaks"})
                 if (saved.has(gone)) problems += std::string(problems.empty() ? "" : "; ") + gone + " (removed) was loaded";
+            // The file's backends are loaded (GDCORE-008): they apply on the next start.
+            want("graphics_backend", "vulkan"), want("audio_backend", "openal");
         } else if (w == "enhanced_progress_loaded") {
             status("Progress loaded");
         } else if (w == "enhanced_cheats") {

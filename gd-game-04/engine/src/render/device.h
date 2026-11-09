@@ -252,5 +252,8 @@ public:
 SDL_WindowFlags prepareWindow();
 // Creates the OpenGL device for a window made with prepareWindow's flags.
 std::unique_ptr<RenderDevice> createGlDevice(SDL_Window* window, std::string& error);
+// The 360's display gamma as a 256-entry ramp (gl_device.cpp): every device
+// presents the frame through it (render/core_device.cpp too).
+void displayGammaRamp(uint8_t out[256]);
 
 }  // namespace gfx

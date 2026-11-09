@@ -90,7 +90,7 @@ turns them into GH2's kPad buttons, the way gd01's `App::uiButton` does:
   follows within the codes' 750 ms; a completed code or any other button
   cancels it (`UiManager::yellowButton`). Clicking the help item opens it at
   once. GAMEPADS' back returns to the main menu.
-- The mouse (gd01's, `docs/knowledge/universal_launcher.md` at the repository root):
+- The mouse (gd01's, `docs/guidelines/universal_launcher.md` at the repository root):
   every panel's view records where it drew each button, list row, slider,
   check box, picture and text entry last frame, projected to menu units
   (`gfx::UiView::hits`). `PanelObj::mouse` focuses the component under the
@@ -304,10 +304,10 @@ walktests' career.json check.
   check boxes, dropdowns, framed buttons, the warning sign on rows not built
   yet, the explanation box bottom right, the mouse, and the page sliding with
   the transition (`ui/port_draw.*`;
-  `docs/knowledge/universal_launcher.md` at the repository root). The names keep "AND",
+  `docs/guidelines/universal_launcher.md` at the repository root). The names keep "AND",
   since helveticablack has no `&`. Every gd01 Enhanced Setting that fits
   GH2 works (GDALL-015; the parity table is in
-  `docs/knowledge/universal_launcher.md` "Enhanced options: parity"), with
+  `docs/guidelines/universal_launcher.md` "Enhanced options: parity"), with
   gd01's explanations, `needs` rows (Upscaling Quality with AI Upscaling,
   Dust with More Lights), dropdown options gd02 lacks shown "(not available
   yet)" (FSR 3.1, DLSS: gd01's Vulkan upscaler), the status line under the
@@ -363,7 +363,7 @@ walktests' career.json check.
   steps (1.5 s), from a quarter into the first song of its tier, silent, under
   the venue's chorus light preset, and then nothing updates again (up to 5 s
   more while the singer has not shown). The camera (the owner's rule in
-  `docs/knowledge/universal_launcher.md`, gd01's pose as the model) is a still
+  `docs/guidelines/universal_launcher.md`, gd01's pose as the model) is a still
   close-up of the singer's head, put right of the list's box (0.3 of the
   half width right of the centre, 0.25 up), from the audience's side 0.3
   rad round to one flank, 2.6 x the band's half width away (140..220

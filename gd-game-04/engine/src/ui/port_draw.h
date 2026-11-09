@@ -17,7 +17,7 @@ class UiSystem;
 // select_panels.cpp and gamepad_panel.cpp), as gd02 ported them
 // (gd-game-02/engine/src/ui/port_draw.*), in GH3's menu fonts and colours, in
 // menu units (1280 x 720). The shared look of every gd-game's two screens is
-// docs/knowledge/universal_launcher.md. Text heights are line heights, as gd01's
+// docs/guidelines/universal_launcher.md. Text heights are line heights, as gd01's
 // drawText takes them; GH3's fonts are scaled so their line height is that
 // height. The page slides and fades with the screen transition (offset,
 // fade), as gd01's do. Unlike gd02 there is one pass: the canvas batches by

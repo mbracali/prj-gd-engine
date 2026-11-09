@@ -16,7 +16,7 @@
 # gamepads gamepads_pad store. song_end and career_win are run by name (each plays a whole song). "band" runs first when another walk needs its save.
 # The universal menus (universal_mechanisms.md) are covered by: logo_skip and
 # band (1.1.1 skips, 1.1.2 band naming), mouse (1.1.3, credits skip),
-# enhanced (1.2.2 Modes, old enhanced.json, HDR), gamepads / gamepads_pad (1.2.1).
+# enhanced (1.2.2 Modes, old enhanced.json, HDR, backends), gamepads / gamepads_pad (1.2.1).
 set -uo pipefail
 bin="$(realpath "$1")"
 iso="$(realpath "$2")"
@@ -98,12 +98,12 @@ walk_song_end() {
   result song_end "$(has song_end "goto_screen post_show")" "the song ends and the game moves on to the results"
 }
 
-# Mouse only: OPTIONS, Enhanced Settings, collapse MODES, the Resolution
+# Mouse only: OPTIONS, Enhanced Settings, collapse MODES and CONTROLS, the Resolution
 # dropdown (720p), BACK in the help bar, Enhanced again, its own "< Back",
 # then Credits, skipped with green (1.1.1).
 walk_mouse() {
   needs_band
-  run mouse 24000 "3000:click640_554,5500:click520_376,8000:click200_190,9000:click480_520,9300:keyUp,9400:keyUp,9500:keyUp,9700:keyReturn,10500:click460_684,13000:click520_376,15500:click150_606,18000:click600_564,21000:green" GD01_SKIP_BOOT=1
+  run mouse 24000 "3000:click640_554,5500:click520_376,8000:click200_190,8500:click200_252,9000:click480_455,9300:keyUp,9400:keyUp,9500:keyUp,9700:keyReturn,10500:click460_684,13000:click520_376,15500:click150_606,18000:click600_564,21000:green" GD01_SKIP_BOOT=1
   local backs
   backs=$(grep -c "goto_screen options" "$work/mouse.log")
   result mouse "$(( $(json "$(save mouse)/enhanced.json" "d['internal_res'] == '720'") && backs >= 4 && $(has mouse "goto_screen credits") ))" \
@@ -128,6 +128,44 @@ walk_enhanced() {
     "Good Old Days preset applied over a migrated 1.1.6 file"
   walk_enhanced_hdr
   walk_calibration_reset
+  walk_enhanced_backends
+}
+
+# Enhanced > Graphics Backend / Audio Backend (GDCORE-006): a value the build
+# does not offer is dropped at start (local); the two rows are the first of
+# PERFORMANCE & GRAPHICS; Right steps Graphics to SDL3, then Vulkan (each
+# change asks Restart Now / Later: Esc is Later), the Audio dropdown picks
+# OpenAL (Later again); MODES > Steam Deck keeps both; the next start reads
+# them (the "backends:" log line). Then Restart Now restarts at once.
+walk_enhanced_backends() {
+  local s keys="" keep="$seed" i
+  s="$work/enhanced_backends_seed" && rm -rf "$s" && cp -r "$seed" "$s"
+  printf '{"graphics_backend":"metal","audio_backend":"nope"}\n' > "$s/gd-engine/gd01/enhanced.json"
+  seed="$s"
+  for i in $(seq 0 13); do keys+="$((2500 + i * 100)):keyDown,"; done  # down to Graphics Backend
+  keys+="4500:keyRight,4800:keyEscape,5100:keyRight,5400:keyEscape,"  # SDL3, Later; Vulkan, Later
+  keys+="5700:keyDown,6000:keyReturn,6200:keyDown,6400:keyDown,6700:keyReturn,7000:keyEscape,"  # dropdown: OpenAL, Later
+  for i in $(seq 0 13); do keys+="$((7300 + i * 100)):keyUp,"; done  # up to MODES > Steam Deck
+  run enhanced_backends 11000 "${keys}9800:keyReturn" GD01_SKIP_BOOT=1 GD01_SCREEN=enhanced_settings
+  result enhanced_backends "$(( $(has enhanced_backends "backends: graphics local, audio local") && \
+    ! $(has enhanced_backends "restart:") && \
+    $(json "$(save enhanced_backends)/enhanced.json" "d['graphics_backend'] == 'vulkan' and d['audio_backend'] == 'openal' and d['max_fps'] == '60'") ))" \
+    "unknown backends dropped; Graphics Vulkan, Audio OpenAL saved; Steam Deck mode keeps them"
+  cp "$(save enhanced_backends)/enhanced.json" "$s/gd-engine/gd01/enhanced.json"
+  run enhanced_backends_start 4000 "" GD01_SKIP_BOOT=1
+  seed="$keep"
+  result enhanced_backends_start "$(has enhanced_backends_start "backends: graphics vulkan, audio openal")" "the next start reads the saved backends"
+  # Restart Now: Graphics to SDL3, Restart Now; the game starts again in the
+  # same process on Enhanced Settings (offscreen: SDL3 falls back to local).
+  s="$work/enhanced_restart_seed" && rm -rf "$s" && cp -r "$keep" "$s"
+  printf '{}\n' > "$s/gd-engine/gd01/enhanced.json"
+  seed="$s"
+  keys=""
+  for i in $(seq 0 13); do keys+="$((2500 + i * 100)):keyDown,"; done
+  run enhanced_restart 12000 "${keys}4500:keyRight,5000:keyReturn" GD01_SKIP_BOOT=1 GD01_SCREEN=enhanced_settings
+  seed="$keep"
+  result enhanced_restart "$(( $(has enhanced_restart "restart: Enhanced Settings asked") && $(has enhanced_restart "backends: graphics sdl3, audio local") && \
+    $(grep -c "goto_screen enhanced_settings" "$work/enhanced_restart.log") >= 2 ))" "Restart Now starts the game again on the new backend, back on Enhanced Settings"
 }
 
 # Enhanced > Reset Calibration (#47): a saved calibration goes back to 0 ms.
@@ -154,7 +192,7 @@ walk_enhanced_hdr() {
   printf '{"bloom":"original"}\n' > "$s/gd-engine/gd01/enhanced.json"
   seed="$s"
   keys=""
-  for i in $(seq 0 20); do keys+="$((2500 + i * 100)):keyDown,"; done  # down to the HDR row
+  for i in $(seq 0 22); do keys+="$((2500 + i * 100)):keyDown,"; done  # down to the HDR row
   run enhanced_hdr 9000 "${keys}5000:keyRight,5800:keyRight,6600:keyRight,7400:keyRight" GD01_SKIP_BOOT=1 GD01_SCREEN=enhanced_settings
   result enhanced_hdr "$(( $(json "$(save enhanced_hdr)/enhanced.json" "d['hdr'] == 'emulated'") && $(has enhanced_hdr "hdr: mode none") && \
     $(has enhanced_hdr "hdr: mode emulated - Emulated") && $(has enhanced_hdr "hdr: mode true - True HDR unavailable.*Using Emulated") ))" \

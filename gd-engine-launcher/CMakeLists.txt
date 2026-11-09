@@ -117,3 +117,11 @@ if(WIN32)
   target_sources(gdul PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/gdul.rc)
   set_source_files_properties(${CMAKE_CURRENT_BINARY_DIR}/gdul.rc PROPERTIES OBJECT_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/res/gdul.ico)
 endif()
+
+# The window hand-over test (tests/handover/: a test module and `ctest -R
+# gdul_handover`, headless). Development only: never in a package.
+option(GDUL_BUILD_TESTS "Build the launcher's tests (the window hand-over test module)" OFF)
+if(GDUL_BUILD_TESTS AND NOT ANDROID)
+  enable_testing()
+  add_subdirectory(tests/handover)
+endif()

@@ -1,0 +1,7 @@
+# Identity of this tool. The root README's Tools table is the list.
+# status matches that table (its "--" is "Not started" here).
+# version: this folder's own version. Nothing is released yet.
+id: gd-tool-04
+name: "Band mod menu"
+status: "Not started"
+version: "0.0.0"

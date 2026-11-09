@@ -1,7 +1,7 @@
 # gd03: context for agents
 
 How to build, test and run gd-game-03 (Guitar Hero Encore: Rocks the 80s,
-PS2). Read the kickoff (`docs/knowledge/GD-GAME-03_KICKOFF.md`),
+PS2). Read the kickoff (`docs/spikes/GD-GAME-03_KICKOFF.md`),
 `PROGRESS.md`, `DECISIONS.md` and `OPEN_QUESTIONS.md` first.
 
 ## Layout

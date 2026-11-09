@@ -3,7 +3,7 @@
 // The universal Gamepad menu (universal_mechanisms.md 1.2.1 at the
 // repository root): gd-game-03's (gd-game-03/engine/src/ui/gamepad_panel.cpp,
 // itself gd01's) on gd04's port screens, drawn with PortDraw (GH3's menu font
-// and colours; docs/knowledge/universal_launcher.md). Replaces 0.0.3's GAMEPADS screen.
+// and colours; docs/guidelines/universal_launcher.md). Replaces 0.0.3's GAMEPADS screen.
 #include <SDL3/SDL.h>
 
 #include <algorithm>

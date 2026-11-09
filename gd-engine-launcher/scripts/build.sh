@@ -132,8 +132,55 @@ module_inputs_hash() {
   # The packaging recipes too (this script, the game's build_common.sh): a
   # module packaged by an older recipe is rebuilt, not reused (gdul 0.1.2's
   # gd-game-02 folder, without libwinpthread-1.dll, must not come back).
-  { find "$launcher/sdk" "$launcher/modules/gd$1" "$launcher/scripts" "$repo/gd-game-$1/engine/build_common.sh" -type f 2>/dev/null || true; } |
+  # gd-engine-core too, for a module that links it: a change in the core
+  # rebuilds the module even when the game's version stays the same.
+  local core=()
+  if grep -qs 'gd-engine-core' "$launcher/modules/gd$1/CMakeLists.txt" "$repo/gd-game-$1/engine/CMakeLists.txt"; then
+    core=("$repo/gd-engine-core")
+  fi
+  { find "$launcher/sdk" "$launcher/modules/gd$1" "$launcher/scripts" "$repo/gd-game-$1/engine/build_common.sh" "${core[@]}" \
+      -type f -not -path "$repo/gd-engine-core/build/*" 2>/dev/null || true; } |
     LC_ALL=C sort | while IFS= read -r f; do cat "$f"; done | sha256
+}
+
+# ship_core_runtime <os> <module build dir> <module folder out>: the shared
+# libraries gd-engine-core's backends load at run time (OpenAL Soft, LGPL:
+# never linked), as the core's CMake lists them in <build>/gdcore-runtime.txt
+# (gd-engine-core/docs/README.md, "Shared libraries in the packages"): each
+# copied next to the module (Android: into the APK's native libraries through
+# native-libs.txt; macOS: its install name @loader_path/), its licence into
+# licenses/, its name into core-libs.txt, which verify_bundle.sh checks. A
+# module that links the core calls it after writing its own native-libs.txt.
+ship_core_runtime() {
+  local os="$1" list="$2/gdcore-runtime.txt" dest="$3" kind a b name
+  if [ ! -f "$list" ]; then
+    echo "ship_core_runtime: $list is missing (the module does not link gd-engine-core?)" >&2
+    return 1
+  fi
+  : > "$dest/core-libs.txt"
+  while IFS=$'\t' read -r kind a b; do
+    case "$kind" in
+      "") ;;
+      lib)
+        [ -s "$a" ] || { echo "ship_core_runtime: $a, listed in $list, is missing" >&2; return 1; }
+        name="$(basename "$a")"
+        if [ "$os" = android ]; then
+          case "$name" in lib*.so) ;; *) echo "ship_core_runtime: $name: an APK packs lib*.so files only" >&2; return 1 ;; esac
+          echo "$name" >> "$dest/native-libs.txt"
+        fi
+        cp -L "$a" "$dest/$name"
+        [ "$os" = macos ] && install_name_tool -id "@loader_path/$name" "$dest/$name"
+        echo "$name" >> "$dest/core-libs.txt"
+        echo "gd-engine-core: $name shipped with the module"
+        ;;
+      license)
+        [ -s "$a" ] || { echo "ship_core_runtime: licence $a is missing" >&2; return 1; }
+        mkdir -p "$dest/licenses"
+        cp "$a" "$dest/licenses/$b"
+        ;;
+      *) echo "ship_core_runtime: unknown line '$kind' in $list" >&2; return 1 ;;
+    esac
+  done < "$list"
 }
 
 # ---- Android: the SDK, NDK and JDK (as gd-game-02/engine/build_android.sh), SDL3's source ----
@@ -267,6 +314,9 @@ build_module_02() {
       cp "$work/libgd-game-02.so" "$ffmpeg"/lib/libavformat.so "$ffmpeg"/lib/libavcodec.so "$ffmpeg"/lib/libavutil.so "$dest/"
       printf '%s\n' libgd-game-02.so libavformat.so libavcodec.so libavutil.so > "$dest/native-libs.txt" ;;
   esac
+  ship_core_runtime "$os" "$work" "$dest"  # gd-engine-core: its shared libraries and licences
+  # glslang, linked for the sdl3 / vulkan graphics backends' run-time SPIR-V (GD02_RUNTIME_SPIRV).
+  if [ -f "$work/glslang-LICENSE.txt" ]; then cp "$work/glslang-LICENSE.txt" "$dest/licenses/glslang-LICENSE.txt"; fi
   cp "$engine/third_party/stb_vorbis/LICENSE.txt" "$dest/licenses/stb_vorbis-LICENSE.txt"
   (. "$engine/build_common.sh"; ship_ffmpeg_licence "$ffmpeg" "$dest")
   cp "$engine/README.md" "$dest/README.md"
@@ -292,6 +342,9 @@ build_module_03() {
       echo libgd-game-03.so > "$dest/native-libs.txt" ;;
     *) cp "$work/gd-game-03.so" "$dest/" ;;
   esac
+  ship_core_runtime "$os" "$work" "$dest"  # gd-engine-core: its shared libraries and licences
+  # glslang, linked for the sdl3 / vulkan graphics backends' run-time SPIR-V (GD03_RUNTIME_SPIRV).
+  if [ -f "$work/glslang-LICENSE.txt" ]; then cp "$work/glslang-LICENSE.txt" "$dest/licenses/glslang-LICENSE.txt"; fi
   cp "$engine/README.md" "$dest/README.md"
 }
 
@@ -354,6 +407,9 @@ build_module_04() {
       cp "$work/libgd-game-04.so" "$ffmpeg"/lib/libavformat.so "$ffmpeg"/lib/libavcodec.so "$ffmpeg"/lib/libavutil.so "$dest/"
       printf '%s\n' libgd-game-04.so libavformat.so libavcodec.so libavutil.so > "$dest/native-libs.txt" ;;
   esac
+  ship_core_runtime "$os" "$work" "$dest"  # gd-engine-core: its shared libraries and licences
+  # glslang, linked for the sdl3 / vulkan graphics backends' run-time SPIR-V (GD04_RUNTIME_SPIRV).
+  if [ -f "$work/glslang-LICENSE.txt" ]; then cp "$work/glslang-LICENSE.txt" "$dest/licenses/glslang-LICENSE.txt"; fi
   (. "$engine/build_common.sh"; ship_ffmpeg_licence "$ffmpeg" "$dest")
   if [ "$os" != android ]; then cp "$engine/third_party/rtmidi/LICENSE" "$dest/licenses/RtMidi-LICENSE.txt"; fi  # Generic MIDI (none on Android)
   cp "$engine/README.md" "$dest/README.md"
@@ -376,6 +432,7 @@ build_module_01() {
       echo libgd-game-01.so > "$dest/native-libs.txt" ;;
     *) cp "$work/gd-game-01.so" "$dest/" ;;
   esac
+  ship_core_runtime "$os" "$work" "$dest"  # gd-engine-core: its shared libraries and licences
   if [ "$os" != android ]; then  # the AI upscalers (none on Android)
     cp "$engine/third_party/fidelityfx/LICENSE.txt" "$dest/licenses/FidelityFX-SDK-LICENSE.txt"
     cp "$engine/third_party/volk/LICENSE.md" "$dest/licenses/volk-LICENSE.md"

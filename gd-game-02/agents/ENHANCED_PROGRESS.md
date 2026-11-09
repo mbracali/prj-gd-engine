@@ -2,7 +2,7 @@
 
 The Enhanced-menu developer's log for pairing gd-game-02's Enhanced Options
 with gd-game-01's Enhanced Settings. The parity table is in
-`docs/knowledge/universal_launcher.md` "Enhanced options: parity"; the backlog
+`docs/guidelines/universal_launcher.md` "Enhanced options: parity"; the backlog
 rows are GD02-097..GD02-129.
 
 ## Batch 0: parity table (2026-10-28)
@@ -15,7 +15,7 @@ rows are GD02-097..GD02-129.
 
 ## Doubts for the owner
 
-- **Defaults.** `docs/knowledge/smilar_behaviors.md` says enhanced features
+- **Defaults.** `docs/guidelines/universal-behaviors.md` says enhanced features
   default to the original, but gd-game-01's `profileValues` (the reference
   the brief asks to copy) ships bloom, cinematic colour, grain, AO... on for
   every desktop build. gd02 follows gd01's table; the owner may want gd02's

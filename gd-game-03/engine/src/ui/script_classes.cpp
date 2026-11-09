@@ -806,6 +806,7 @@ bool ScreenObj::nativeButtonDown(int button, int player) {
     if (Value b = const_cast<ScreenObj*>(this)->getProp(ui.interp(), "back_screen"); b.isText() || b.type == Value::Type::Object)
         if (ScreenObj* s = ui.screen(nameOf(b))) target = s;
     if (button != kPad_Tri || !flag("allow_back", true) || !target) return false;
+    if (PanelObj* fp = focusPanel(); fp && fp->claimsBack()) return false;  // the port's pop-up: back closes it
     if (PanelObj* fp = focusPanel()) {
         Value r = ui.callScript(fp, "button_down", {Value::integer(button), Value::integer(player)});
         if (!r.isUnhandled()) return true;

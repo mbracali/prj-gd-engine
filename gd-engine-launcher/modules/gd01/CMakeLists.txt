@@ -60,6 +60,17 @@ endif()
 add_library(gd01_module SHARED ${gd01_srcs} gd01_module_entry.cpp gd01_module_explore.cpp gd01_module_sounds.cpp ${GDUL_SDK}/gd_module_shim.cpp)
 target_include_directories(gd01_module PRIVATE ${GD01_ENGINE}/src ${GDUL_SDK})
 target_link_libraries(gd01_module PRIVATE SDL3::SDL3)
+
+# gd-engine-core, as gd01 links it (its engine/CMakeLists.txt), in its launcher
+# layout (GDCORE_LAUNCHER_MODULE: on Android the core's save folders follow
+# the module shim's). Its shared libraries, if a backend needs any, are listed
+# in <build>/gdcore-runtime.txt for scripts/build.sh (ship_core_runtime).
+set(GDCORE_LAUNCHER_MODULE ON)
+add_subdirectory(${GD01_ENGINE}/../../gd-engine-core gd-engine-core)
+target_link_libraries(gd01_module PRIVATE gdcore)
+# The core renderer's shaders as SPIR-V, as gd01 builds them (its engine/CMakeLists.txt).
+gdcore_spirv_shaders(gd01_module OUTPUT core_renderer_spirv.h SOURCES ${GD01_ENGINE}/src/render/core_renderer.cpp ${GD01_ENGINE}/src/render/core_post_fx.cpp DEFINES GD_HDR=0)
+gdcore_spirv_shaders(gd01_module OUTPUT core_post_fx_hdr_spirv.h SOURCES ${GD01_ENGINE}/src/render/core_post_fx.cpp NAMESPACE gd01_hdr DEFINES GD_HDR=1)
 target_compile_definitions(gd01_module PRIVATE GD01_VERSION="${GD01_VERSION}")
 set_source_files_properties(${GD01_ENGINE}/src/main.cpp PROPERTIES COMPILE_DEFINITIONS "main=gd01_main")
 
