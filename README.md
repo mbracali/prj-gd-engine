@@ -67,9 +67,10 @@ The open dream engine is a bigger project. The idea is to create a engine that e
 | id         | Name                 | Done          |
 | ---------- | -------------------- | ------------- |
 | gd-tool-01 | Additive music menu  | Concept phase |
-| gd-tool-02 | Music mod / DLC menu | Concept phase |
-| gd-tool-03 | Band mod menu        | --            |
-| gd-tool-04 | Open dream engine    | --            |
+| gd-tool-02 | Dream charter engine | Concept phase |
+| gd-tool-03 | Music and DLC Mods   | Concept phase |
+| gd-tool-04 | Band mod menu        | --            |
+| gd-tool-05 | Open dream engine    | --            |
 
 
 
@@ -91,6 +92,7 @@ prj-gd-engine/
   gd-engine-core/            the universal backends every game can load (platform, inputs, audio, render, image, ui)
   gd-engine-launcher/        the Guitar Dream Universal Launcher
   gd-engine-tools/           shared tools (in construction)
+  gd-tool-01/ ... gd-tool-05/  one folder per tool in the table above
   original_isos/             your own disc images and ROMs (git-ignored)
   gd-game-01/ ... gd-game-26/
 ```
@@ -102,6 +104,12 @@ layout for now) has `README.md`, `agent-instructions.md` (how the system works a
 `ghidra/` (reverse-engineering project; never committed) and `local_builds/`.
 `game-info.yaml` holds the game's id, names, launch date, platforms, its
 Guitar Dream version, whether it is ready to play and how complete it is.
+
+Every tool folder has `README.md`, `agent-instructions.md`, `CHANGELOG.md`,
+`local_build.sh`, `tool-info.yaml`, `build_commands/`, `docs/`, `src/`,
+`agents/` and the git-ignored `local_builds/`. `tool-info.yaml` holds the
+tool's id, name, the status from the table above and its version. Nothing
+in these folders is built yet.
 
 # Before you work
 
