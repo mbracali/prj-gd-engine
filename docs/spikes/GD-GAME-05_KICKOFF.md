@@ -507,4 +507,9 @@ Band's waves are short:
 - Hardware: the owner has a Rock Band guitar, a Rock Band drum kit and a USB microphone; drums and vocals get real-device checks by the owner.
 - Character creator: the **full creator and the Rock Shop in wave 01** (M6, M7).
 - Shared Harmonix library: after Rock Band reaches 99%; copy gd-game-02's code into gd-game-05 now.
-- Still open: questions 3 (help bar placement) and 6 (Android `RECORD_AUDIO`).
+- Help bar (Q3, answered after wave 01): no owner preference; do as gd-game-02 (the universal help bar, same look and access buttons), placed so it does not cover Rock Band's own screen elements.
+- Android (Q6, answered after wave 01): the launcher asks for `RECORD_AUDIO` the first time the app starts.
+- The mogg key as a constant in the source (wave 01 D3): OK.
+
+## Wave 02 target (owner, 2026-11-09)
+At least **60% complete** (more if possible), on the same branch, measured honestly against `docs/parity.md` (the share of the original's features and screens that work as the original), not guessed. The owner gives detailed feedback once more of the game runs, so breadth comes first: every mode and screen working, then polish.

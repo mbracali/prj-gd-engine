@@ -16,3 +16,13 @@ chosen default is in `DECISIONS.md`.
    the disc's executable is itself encrypted. Is a key constant in the repo
    acceptable for you (and for the release), or should the player supply
    it, or should it be read at run time some other way?
+
+## Owner's answers (2026-11-09, after wave 01)
+
+1. Help bar: no preference from the owner. Do as gd-game-02 does (the
+   universal help bar of docs/guidelines/universal_mechanisms.md, same
+   look and access buttons), placed where it does not cover Rock Band's own
+   screen elements; record the placement in DECISIONS.md.
+2. Android: the launcher asks for the microphone permission the first time
+   the app starts (not when a game opens the mic).
+3. The mogg key as a constant in the source is OK.
