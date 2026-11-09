@@ -834,6 +834,7 @@ void installNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Scrip
     add(std::make_unique<QuietObj>(ui, "cheat_display", std::set<std::string>{"show"}));
     // The PlayerMatchers: ui/natives_game.cpp (MatcherObj).
     installGameNatives(ui, in, owned);
+    installRbNatives(ui, in, owned);
     chars::installNatives(ui, in, owned);
     store::installNatives(ui, in, owned);
 

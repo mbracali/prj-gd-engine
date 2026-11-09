@@ -447,7 +447,20 @@ void UiView::drawObject(MaterialRenderer& r, const scene::Object& o, int depth) 
     }
     if (const auto* t = o.as<scene::Text>()) return drawText(r, *t);
     if (const auto* l = o.as<scene::BandLabel>()) return drawLabel(r, *l, &l->band, l->color.data());
-    if (const auto* b = o.as<scene::BandButton>()) return drawLabel(r, *b, &b->band, nullptr);
+    if (const auto* b = o.as<scene::BandButton>()) {
+        // RB's BandButton: its type's resource meshes per state (border,
+        // inlay), then its text_mesh (a modelled word in the same resource,
+        // e.g. button_main.milo's solo.mesh), then the label text (the
+        // "null" font on the main menu) [C data: ui_objects.dtb BandButton
+        // types; how the text mesh takes the state: I].
+        drawStyleMeshes(r, o);
+        if (!b->textMesh.empty()) {
+            const scene::UiStyle style = styles_.style(b->cls, b->header.type);
+            if (scene::Milo* res = resource(style.resourceFile.empty() ? style.classResourceFile : style.resourceFile))
+                if (const scene::Mesh* m = res->find<scene::Mesh>(b->textMesh)) drawMeshAt(r, *m, nullptr, componentWorld(o));
+        }
+        return drawLabel(r, *b, &b->band, nullptr);
+    }
     if (const auto* u = o.as<scene::UILabel>()) return drawLabel(r, *u, nullptr, nullptr);
     if (o.as<scene::UIList>()) return drawList(r, o);
     if (o.as<scene::BandTextEntry>()) return drawTextEntry(r, o);

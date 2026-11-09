@@ -133,6 +133,7 @@ target_sources(gd05 PRIVATE
   src/ui/enhanced_panel.cpp
   src/ui/natives_game.cpp
   src/ui/natives_meta.cpp
+  src/ui/rb_natives.cpp
   src/ui/panels.cpp
   src/ui/port_screens.cpp
   src/ui/screen_text.cpp

@@ -165,9 +165,9 @@ bool UiManager::init(std::string& error, bool headless) {
 
     try {
         loader_ = std::make_unique<ScriptLoader>(data_);
-        boot_ = &interp_.keep(loader_->load("config/gh2.dta"));
+        boot_ = &interp_.keep(loader_->load("config/band.dta"));
     } catch (const std::exception& e) {
-        error = std::string("config/gh2.dta: ") + e.what();
+        error = std::string("config/band.dta: ") + e.what();
         return false;
     }
     macros_ = loader_->macros;
@@ -199,8 +199,10 @@ bool UiManager::init(std::string& error, bool headless) {
     for (const char* sub : {"system", "ui"}) {
         const DataNode* list = boot_->find(sub);
         const DataNode* init = list ? list->find("init") : nullptr;
+        // RB's (system ...) has no (init ...); only (ui (init ...)) is required [C data].
         if (!init) {
-            error = std::string("config/gh2.dta: no (") + sub + " (init ...))";
+            if (std::string(sub) == "system") continue;
+            error = std::string("config/band.dta: no (") + sub + " (init ...))";
             return false;
         }
         interp_.runList(*list, 1);
@@ -1107,18 +1109,35 @@ void UiManager::skipSplashes() {
 }
 
 void UiManager::routeButton(int button, int player) {
-    if (splash_ >= 0 || !current_ || phase_ != Phase::Idle || !pending_.empty()) return;
+    if (splash_ >= 0 || !current_ || phase_ != Phase::Idle || !pending_.empty()) {
+        if (interp_.logReport)
+            SDL_Log("ui: button %d dropped (screen %s, phase %d, %zu pending)", button, current_ ? current_->name().c_str() : "-",
+                    int(phase_), pending_.size());
+        return;
+    }
     const std::vector<Value> args{Value::integer(button), Value::integer(player)};
     // The ui object, the screen's script, GHScreen's auto back, the focus
     // panel's script, then PanelDir (the focused component, navigation).
-    if (!callScript(interp_.findObject("ui"), "button_down", args).isUnhandled()) return;
+    if (!callScript(interp_.findObject("ui"), "button_down", args).isUnhandled()) {
+        if (interp_.logReport) SDL_Log("ui: button %d taken by the ui object", button);
+        return;
+    }
     ScreenObj* s = current_;
-    if (!callScript(s, "button_down", args).isUnhandled()) return;
+    if (!callScript(s, "button_down", args).isUnhandled()) {
+        if (interp_.logReport) SDL_Log("ui: button %d taken by screen %s", button, s->name().c_str());
+        return;
+    }
     if (s != current_ || !pending_.empty()) return;
     if (s->nativeButtonDown(button, player)) return;
     PanelObj* fp = s->focusPanel();
-    if (!fp || !fp->up) return;
-    if (!callScript(fp, "button_down", args).isUnhandled()) return;
+    if (!fp || !fp->up) {
+        if (interp_.logReport) SDL_Log("ui: button %d: no focus panel up on %s", button, s->name().c_str());
+        return;
+    }
+    if (!callScript(fp, "button_down", args).isUnhandled()) {
+        if (interp_.logReport) SDL_Log("ui: button %d taken by panel %s (focus %s)", button, fp->name().c_str(), fp->focus.c_str());
+        return;
+    }
     if (s != current_ || !pending_.empty()) return;
     const std::string before = fp->focus;
     if (fp->buttonDown(button, player) && fp->focus != before && s->handler("helpbar")) updateHelpbar();
@@ -1205,9 +1224,12 @@ void UiManager::drawPanels(ScreenObj* s, bool outgoing) {
             if (below != s)
                 for (PanelObj* p : below->panels())
                     if (p->up && p->showing && !s->hasPanel(p)) p->draw();
+    // Development aid: GD05_HIDE_PANELS=a,b leaves those panels undrawn.
+    static const std::string hidden = SDL_getenv("GD05_HIDE_PANELS") ? "," + std::string(SDL_getenv("GD05_HIDE_PANELS")) + "," : "";
     for (PanelObj* p : s->panels()) {
         if (!p->up && !outgoing) continue;
         if (!p->showing) continue;
+        if (!hidden.empty() && hidden.find("," + p->name() + ",") != std::string::npos) continue;
         p->draw();
     }
 }

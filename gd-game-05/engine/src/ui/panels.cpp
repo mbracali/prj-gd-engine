@@ -12,6 +12,8 @@
 #include <cstring>
 #include <map>
 
+#include "data/dta.h"
+#include "data/game_data.h"
 #include "render/canvas.h"
 #include "scene/milo.h"
 #include "scene/ui_objects.h"
@@ -54,6 +56,42 @@ public:
             return r = Value::integer(b >= 0 && b < 16 ? 1 : 0), true;
         }
         return PanelObj::handleNative(in, msg, args, r);
+    }
+};
+
+// RB's MoviePanel (ui/main.dta: intro_movie_panel, movie_panel,
+// attract_movie_panel ...): (videos <key>) names a list in videos.dtb,
+// (loop) and (audio) say how it plays, movie_done runs at the end [C data].
+// A non-looping one plays modally through the Bink player on enter, then
+// sends movie_done; the looping menu background is not drawn yet [I]
+// (GD05-005: RB's MoviePanel streams behind the menus).
+class MoviePanelObj : public PanelObj {
+public:
+    MoviePanelObj(UiManager& ui, const std::string& name) : PanelObj(ui, name, "MoviePanel") {}
+    void enter() override {
+        PanelObj::enter();
+        auto prop = [&](const char* key) -> const DataNode* { return typeDef() ? typeDef()->find(key) : nullptr; };
+        const DataNode* loop = prop("loop");
+        const bool looping = loop && loop->children.size() > 1 && loop->children[1].isText() && loop->children[1].s == "TRUE";
+        const DataNode* videos = prop("videos");
+        if (looping || !videos || videos->children.size() < 2 || !videos->children[1].isText()) return;
+        const std::string file = firstVideo(videos->children[1].s);
+        if (file.empty()) return;
+        ui.host().playMovie(file);
+        if (handler("movie_done")) ui.interp().send(this, "movie_done", {});
+        else ui.logOnce("MoviePanel " + name() + ": no movie_done");
+    }
+
+private:
+    std::string firstVideo(const std::string& key) {
+        try {
+            const DataNode root = parseDtb(ui.data().read("config/gen/videos.dtb"));
+            if (const DataNode* e = root.find(key))
+                if (const DataNode* f = e->find("files"); f && f->children.size() > 1 && f->children[1].isText()) return f->children[1].s;
+        } catch (const std::exception& ex) {
+            ui.logOnce(std::string("videos.dtb: ") + ex.what());
+        }
+        return {};
     }
 };
 
@@ -821,18 +859,27 @@ const std::vector<std::string>& knownClasses() {
         "GHScreen", "UIScreen", "MultiSelectScreen", "TrackBudgetScreen", "GHPanel", "UIPanel", "MetaPanel", "HelpBarPanel",
         "SelSongPanel", "SliderPanel", "EndGamePanel", "FadePanel", "GamePanel", "HudPanel", "TrackPanel", "TrackMaskPanel",
         "MidiLoaderPanel", "LagPanel", "CreditsPanel", "StatsProvider", "MultiSelectPanel", "GuitarDisplayPanel", "CharsysPanel",
-        "GuitarSelectPanel", "StorePanel", "MultiCharSelPanel", "MultiSelectListPanel", "TutorialPanel", "GamepadPanel", "EnhancedPanel"};
+        "GuitarSelectPanel", "StorePanel", "MultiCharSelPanel", "MultiSelectListPanel", "TutorialPanel", "GamepadPanel", "EnhancedPanel",
+        // Rock Band's panel classes (ui/*.dta {new ...}) [C data]; the ones
+        // with no class of their own yet are plain panels, logged (GD05-005).
+        "MultiFocusScreen", "MoviePanel", "DialogPanel", "SessionPanel", "PreloadPanel", "LoadingPanel", "CharSelectPanel",
+        "CharLoadingPanel", "H2HEndGamePanel", "WorldMapPanel", "BandCreatePanel", "BandProfilePanel", "NextSongPanel",
+        "GameTimePanel", "CharProfilePanel", "AudioLatencyPanel", "TutorialBackgroundPanel", "TutorialTVScreenPanel",
+        "TutorialTVOverlayPanel", "DrumTutorialPanel", "GuitarTutorialPanel", "VocalsTutorialPanel", "DrumTrainerPanel",
+        "PracticeBackgroundPanel", "PracticePanel", "CharPanel", "PatchSelectPanel", "OutfitGroupPanel", "OutfitConfigPanel",
+        "OutfitPanel", "CharCreatorPanel", "PatchPanel", "BandLineupPanel"};
     return k;
 }
 
 std::unique_ptr<ScriptObject> makeClassObject(UiManager& ui, const std::string& cls, const std::string& name) {
     if (auto m = makeMultiClass(ui, cls, name)) return m;
-    if (cls == "GHScreen" || cls == "UIScreen" || cls == "TrackBudgetScreen")
+    if (cls == "GHScreen" || cls == "UIScreen" || cls == "TrackBudgetScreen" || cls == "MultiFocusScreen")
         return std::make_unique<GenericScreen>(ui, name, cls);
     if (auto g = makeGameClass(ui, cls, name)) return g;
     if (auto c = chars::makeClass(ui, cls, name)) return c;
     if (auto c = store::makeClass(ui, cls, name)) return c;
     if (cls == "MetaPanel") return std::make_unique<MetaPanelObj>(ui, name);
+    if (cls == "MoviePanel") return std::make_unique<MoviePanelObj>(ui, name);
     if (cls == "HelpBarPanel") return std::make_unique<HelpBarPanelObj>(ui, name);
     if (cls == "SelSongPanel") return std::make_unique<SelSongPanelObj>(ui, name);
     if (cls == "SliderPanel") return std::make_unique<SliderPanelObj>(ui, name);

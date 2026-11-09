@@ -38,6 +38,9 @@ enum class TexGen : int { None = 0, Xfm = 1, Sphere = 2, Projected = 3, XfmOrigi
 enum class TexWrap : int { Clamp = 0, Repeat = 1, BorderBlack = 2, BorderWhite = 3, Mirror = 4 };
 
 struct Material {
+    // A runtime texture nothing has filled (RB's Movie textures, until the
+    // port plays them): the mesh is not drawn [I] (GD05-005).
+    bool unfilled = false;
     MatBlend blend = MatBlend::Src;
     float color[3] = {1, 1, 1};
     float alpha = 1;

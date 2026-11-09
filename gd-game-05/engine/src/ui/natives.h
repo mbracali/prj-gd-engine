@@ -102,6 +102,8 @@ struct Session {
 std::unique_ptr<ScriptObject> makeGameClass(UiManager& ui, const std::string& cls, const std::string& name);
 // The game's named objects (gamecfg, player0, player1, band, beatmatch...).
 void installGameNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<ScriptObject>>& owned);
+// Rock Band's host objects (ui/rb_natives.cpp).
+void installRbNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<ScriptObject>>& owned);
 
 // Creates the object for {new <Class> <name> ...} (panels, screens,
 // providers); nullptr for an unknown class.

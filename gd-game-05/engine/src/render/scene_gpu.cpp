@@ -613,6 +613,8 @@ Material SceneCache::material(const scene::Mat& mat, const ScenePose* pose) {
         if (s->hasXfm) texXfm = s->texXfm;
         if (s->tex) g.diffuseTex = texture(s->tex);
     }
+    if (!g.diffuseTex && !mat.diffuseTex.empty() && mat.dir)
+        if (const auto* t = mat.dir->resolve<scene::Tex>(mat.diffuseTex); t && t->bitmap.empty() && t->file.empty()) g.unfilled = true;
     g.texXfm = toMat4(texCoordXfm(texXfm, mat.texGen));
     return g;
 }

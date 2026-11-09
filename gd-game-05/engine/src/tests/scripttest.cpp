@@ -469,7 +469,7 @@ int runScriptTest(const std::string& dataPath) {
     DataNode bootTree;
     int loadFailures = 0, leftovers = 0;
     try {
-        bootTree = boot.load("config/gh2.dta");
+        bootTree = boot.load("config/band.dta");
         leftovers += leftoverDirectives(bootTree);
     } catch (const std::exception& ex) {
         std::printf("  load config/gh2.dta: %s\n", ex.what());

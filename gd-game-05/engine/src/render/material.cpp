@@ -128,6 +128,7 @@ void MaterialRenderer::setFrame(const Camera& camera, const LightEnv& env, int v
 }
 
 void MaterialRenderer::draw(const GpuMesh& mesh, const Mat4* bones, const Material& m, const DrawContext& ctx) {
+    if (m.unfilled) return;
     const uint32_t key = standardKey(m, &env_, ctx);
     DrawCall c;
     c.program = shaders_.program(key);

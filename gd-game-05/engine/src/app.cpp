@@ -893,7 +893,7 @@ void App::startUi() {
     auto ui = std::make_unique<ui::UiManager>(*data_, canvas_, *this, input_);
     std::string error;
     if (!ui->init(error)) {
-        SDL_Log("GH2's menus could not start (%s); showing the debug song list", error.c_str());
+        SDL_Log("Rock Band's menus could not start (%s); showing the debug song list", error.c_str());
         message_ = error;
         return;
     }
