@@ -833,7 +833,7 @@ bool PanelObj::handleNative(Interp& in, const std::string& msg, std::vector<Valu
         return true;
     }
     if (msg == "focus_name") return r = Value::symbol(focus), true;
-    if (msg == "find") return r = Value::obj(component(argStr(0))), true;
+    if (msg == "find" || msg == "find_self") return r = Value::obj(component(argStr(0))), true;
     if (msg == "enable") return enable(argStr(0)), true;
     if (msg == "disable") return disable(argStr(0), args.size() > 1 && args[1].isNumber() ? args[1].integerValue() : kPad_DDown), true;
     if (msg == "foreach_player") return r = ui.foreachPlayer(args), true;

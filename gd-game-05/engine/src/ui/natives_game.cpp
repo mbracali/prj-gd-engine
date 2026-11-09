@@ -493,6 +493,11 @@ public:
         if (msg == "get_player_config") return r = Value::obj(configs_[size_t(std::clamp(intArg(args, 0), 0, 3))].get()), true;
         // RB: one local player participates (the band modes: M7) [I].
         if (msg == "get_num_participants") return r = in.send("session", "num_players", {}), true;
+        if (msg == "has_participating_guitar_controller") {
+            for (int n = 0; n < 4; ++n)
+                if ((n == 0 || ui.session().players[size_t(n)].participating) && ui.session().players[size_t(n)].controllerType == 1) return r = Value::integer(1), true;
+            return true;
+        }
         if (msg == "get_player_num_from_slot_num") return r = Value::integer(intArg(args, 0)), true;  // [I] slot n is player n
         if (msg == "is_player_participating") {
             const int n = intArg(args, 0);
@@ -1059,6 +1064,7 @@ public:
         }
         if (msg == "get_controller_type_from_controller") return r = Value::integer(ui_.host().controllerType(intArg(args, 0))), true;
         if (msg == "get_num_participants") return r = in.send("session", "num_players", {}), true;
+        if (msg == "has_participating_guitar_controller") return r = in.send("game", "has_participating_guitar_controller", {}), true;
         if (msg == "auto_assign_missing_slots" || msg == "debug_get_force_controller" || msg == "foreach_player_config") return true;
         // A handler of the mode's table (practice's full_speed_block,
         // pre_processed_audio: GameConfig evaluates the mode's entry) [C data: modes.dta].

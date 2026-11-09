@@ -1198,10 +1198,12 @@ void installRbMeta(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Script
     // character of their instrument, player 1 leading, and goes on to the
     // mode's post_matchmaking_screen as the lobby's continue does.
     ui.redirect = [&m, &ui](const std::string& name, bool back) -> std::string {
-        if (name != "matchmaking_band_screen" || back || SDL_getenv("GD05_REAL_LOBBY")) return {};
+        const bool hth = name == "matchmaking_hth_screen";
+        if ((name != "matchmaking_band_screen" && !hth) || back || SDL_getenv("GD05_REAL_LOBBY")) return {};
         Session& s = ui.session();
         int want = 0;
         if (const char* e = SDL_getenv("GD05_BAND_PLAYERS")) want = std::clamp(std::atoi(e), 1, 4);
+        if (hth) want = 2;  // head to head: two players [C data: modes.dta HTH max_players 2]
         for (int p = 0; p < 4; ++p) {
             Session::PlayerCfg& pc = s.players[size_t(p)];
             const bool join = p == 0 || (want ? p < want : ui.host().padConnected(p));
@@ -1212,7 +1214,7 @@ void installRbMeta(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Script
             pc.character = "prefab_" + inst;
             // Two guitar players: the second plays the bass [I: RB asks in seldiff].
             pc.trackType = pc.controllerType == 0 ? 0 : pc.controllerType == 2 ? 3 : 2;
-            if (pc.trackType == 2)
+            if (pc.trackType == 2 && !hth)
                 for (int q = 0; q < p; ++q)
                     if (s.players[size_t(q)].participating && s.players[size_t(q)].trackType == 2) pc.trackType = 1;
         }

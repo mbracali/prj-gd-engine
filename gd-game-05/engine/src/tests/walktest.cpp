@@ -239,6 +239,35 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         wait(1000);
         press(kX);
         at("tour_band_event_screen|tour_band_hub_screen|tour_band_firstgig_screen|tour_band_firstgig_checkmarks_screen|tour_band_newvan_screen|tour_band_newitem_screen|tour_band_firstvenue_screen", 40000);
+    } else if (scenario == "score_duel" || scenario == "tug_of_war") {
+        // RB's head to head (ui/main.dta): Multiplayer > Head to Head >
+        // Tug of War (headtohead.btn) or Score Duel (headtohead_pro.btn) >
+        // Local; the lobby's stand-in joins two players (DECISIONS D10).
+        const bool tow = scenario == "tug_of_war";
+        SDL_setenv_unsafe("GD05_INSTRUMENT", "guitar,guitar", 1);
+        endMs_ = 25000;
+        wait(300);
+        press(kX);
+        at("splash_screen", 30000);
+        press(kX);
+        at("main_screen");
+        press(kDown), wait(200);
+        press(kX);  // MULTIPLAYER
+        at("main_multimode_screen");
+        for (int i = 0; i < (tow ? 2 : 3); ++i) press(kDown), wait(200);
+        press(kX);
+        at(tow ? "main_hth_split_screen" : "main_hth_pro_screen", 20000);
+        press(kX);  // LOCAL
+        at("qp_selsong_screen", 30000);
+        wait(800);
+        press(kX);
+        wait(3000);
+        press(kX), wait(1500), press(kX), wait(1500);
+        pressP(kX, 1), wait(1500), pressP(kX, 1), wait(1500);
+        at("game_screen|hth_game_screen", 60000);
+        wait(3000);
+        check("counter:band_players:2");
+        at("qp_hth_endgame_screen|qp_hth_tow_endgame_screen|endgame_waiting_screen", 90000);
     } else if (scenario == "band_quickplay") {
         // RB's Band Quickplay (ui/main.dta, selsong / seldiff): Multiplayer >
         // Band Quickplay > Local; the band lobby joins four players (the
