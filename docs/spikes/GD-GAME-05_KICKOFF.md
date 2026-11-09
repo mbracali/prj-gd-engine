@@ -513,3 +513,5 @@ Band's waves are short:
 
 ## Wave 02 target (owner, 2026-11-09)
 At least **60% complete** (more if possible), on the same branch, measured honestly against `docs/parity.md` (the share of the original's features and screens that work as the original), not guessed. The owner gives detailed feedback once more of the game runs, so breadth comes first: every mode and screen working, then polish.
+
+The ledger is `gd-game-05/docs/parity.md` (weights fixed at the start of wave 02); `python3 -I gd-game-05/tools/parity.py gd-game-05/docs/parity.md` computes the completeness from it.
