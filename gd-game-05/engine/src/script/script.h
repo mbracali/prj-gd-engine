@@ -257,6 +257,11 @@ public:
     Value callFunc(const std::string& name, std::vector<Value> args);
     using Builtin = std::function<Value(Interp&, const DataNode& cmd)>;
     void addBuiltin(const std::string& name, Builtin fn) { builtins_[name] = std::move(fn); }
+    // A builtin by name (another builtin built on it), or one returning 0.
+    Builtin builtin(const std::string& name) const {
+        auto it = builtins_.find(name);
+        return it != builtins_.end() ? it->second : Builtin([](Interp&, const DataNode&) { return Value::integer(0); });
+    }
     bool hasBuiltin(const std::string& name) const { return builtins_.count(name) != 0; }
     std::vector<std::string> builtinNames() const;
     // Evaluated arguments of a builtin's command from `first` on.

@@ -220,6 +220,8 @@ void installRbNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Scr
     });
     gamemode->on("get_mode", [&ui](std::vector<Value>&) { return Value::symbol(ui.session().mode); });
     gamemode->on("get", [modeValue](std::vector<Value>& a) { return modeValue(strArg(a, 0)); });
+    // {gamemode intro_category}: the mode's (intro_category ...) (modes.dta) [C data].
+    gamemode->on("intro_category", [modeValue](std::vector<Value>&) { return modeValue("intro_category"); });
     gamemode->on("is_solo", [modeValue](std::vector<Value>&) { return Value::integer(modeValue("max_players").integerValue() == 1 ? 1 : 0); });
     gamemode->on("is_hth_arrangement", [modeValue](std::vector<Value>&) { return Value::integer(modeValue("player_arrangement").integerValue() == 1 ? 1 : 0); });
     gamemode->on("is_band_arrangement", [modeValue](std::vector<Value>&) { return Value::integer(modeValue("player_arrangement").integerValue() == 0 ? 1 : 0); });

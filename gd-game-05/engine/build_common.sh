@@ -10,7 +10,14 @@ say() { printf '   -> %s\n' "$*"; }
 compile() {
   local n logp="$1/compile.log"
   case "$1" in /*) ;; *) logp="gd-game-05/engine/$logp" ;; esac
-  n="$(cmake --build "$1" -- -n 2>/dev/null | grep -c '^\[' || true)"
+  local dry
+  # A dry run that fails (a missing input, a stale cache path) is not "up to
+  # date": the build below runs and shows the error.
+  if dry="$(cmake --build "$1" -- -n 2>&1)"; then
+    n="$(printf '%s\n' "$dry" | grep -c '^\[' || true)"
+  else
+    n="?"
+  fi
   if [ "$n" = 0 ]; then
     say "$2: nothing to compile, already up to date"
     return 0

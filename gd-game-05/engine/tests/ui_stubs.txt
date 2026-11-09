@@ -26,3 +26,6 @@ profile_mgr get_save_data_from_player
 profile_mgr get_char_options_from_player
 # RB's practice mode is M7 (GD05-009).
 practice_panel set_in_vocal_mode
+# RB's crowd characters (the venues' WorldCrowd members): their enter and
+# clip groups are not animated yet (M5, GD05-007).
+crowd:*

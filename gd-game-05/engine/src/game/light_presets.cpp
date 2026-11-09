@@ -131,8 +131,11 @@ bool LightPresets::native(Interp& in, const std::string& msg, std::vector<Value>
         r = current_ ? Value::symbol(current_->name) : Value::integer(0);
         return true;
     }
-    if (msg == "lighting_next_keyframe" || msg == "lighting_prev_keyframe" || msg == "lighting_first_keyframe") {
-        if (!ignoreEvents_ && current_) queueStep(msg == "lighting_next_keyframe" ? 0 : msg == "lighting_prev_keyframe" ? 1 : 2);
+    // RB names them do_lighting_* (the VENUE track's 48 / 49 / 50, game/world_driver.cpp) [C data].
+    std::string m = msg;
+    if (m.rfind("do_", 0) == 0) m = m.substr(3);
+    if (m == "lighting_next_keyframe" || m == "lighting_prev_keyframe" || m == "lighting_first_keyframe") {
+        if (!ignoreEvents_ && current_) queueStep(m == "lighting_next_keyframe" ? 0 : m == "lighting_prev_keyframe" ? 1 : 2);
         return true;
     }
     if (msg == "toggle_lighting_events") {

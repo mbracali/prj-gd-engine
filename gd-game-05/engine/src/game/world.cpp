@@ -791,6 +791,29 @@ Value World::native(const std::string& msg, std::vector<Value>& args, bool& hand
         return Value::integer(there ? 1 : 0);
     }
     if (msg == "add_sink" || msg == "remove_sink" || msg == "add_sinks" || msg == "set_name") return Value::integer(0);
+    // RB's world messages (world/worldbase.dta, the VENUE track) the port
+    // has nothing for yet: the beat (sinks get it), the camera's random seed
+    // and categories (App::rbShots picks the shots), the crowd's VENUE moods
+    // (the crowd keeps the game's excitement) [I].
+    if (msg == "downbeat" || msg == "camera_random_seed" || msg == "resync_categories" || msg.rfind("crowd_", 0) == 0)
+        return Value::integer(0);
+    // {world iterate <Class> $var body...}: the body per venue object of the class [C data].
+    if (msg == "iterate" && args.size() >= 2) {
+        const std::string cls = text(*interp_, args[0]);
+        std::string var = args[1].str();
+        if (!var.empty() && var[0] == '$') var = var.substr(1);
+        const Value saved = interp_->var(var);
+        std::vector<scene::Object*> found;
+        venue_.forEach([&](scene::Object& o) {
+            if (o.cls == cls) found.push_back(&o);
+        });
+        for (scene::Object* o : found) {
+            interp_->var(var) = Value::obj(objectFor(o));
+            for (size_t k = 2; k < args.size(); ++k) interp_->evalValue(args[k]);
+        }
+        interp_->var(var) = saved;
+        return Value::integer(0);
+    }
     for (const NativeHandler& h : natives_) {
         Value r = Value::integer(0);
         if (h(*interp_, msg, args, r)) return r;

@@ -1137,8 +1137,8 @@ void UiManager::skipSplashes() {
 void UiManager::routeButton(int button, int player) {
     if (splash_ >= 0 || !current_ || phase_ != Phase::Idle || !pending_.empty()) {
         if (interp_.logReport)
-            SDL_Log("ui: button %d dropped (screen %s, phase %d, %zu pending)", button, current_ ? current_->name().c_str() : "-",
-                    int(phase_), pending_.size());
+            SDL_Log("ui: button %d dropped (screen %s, phase %d, %d pending)", button, current_ ? current_->name().c_str() : "-",
+                    int(phase_), int(pending_.size()));
         return;
     }
     const std::vector<Value> args{Value::integer(button), Value::integer(player)};

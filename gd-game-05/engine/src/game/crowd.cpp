@@ -70,6 +70,7 @@ public:
             return true;
         }
         if (msg == "excitement") return react_(a_.excitement(int(num(0)), w_.seconds())), true;
+        if (msg == "post_load") return true;  // RB: the loops are loaded with the venue already
         return false;
     }
 

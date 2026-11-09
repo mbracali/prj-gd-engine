@@ -234,12 +234,6 @@ void RbTrackView::drawGems(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, co
     const float behindMs = (bottomY_ - 1) / (yPerSecond_ * speed_) * 1000.0f;
     auto first = std::lower_bound(gems.begin(), gems.end(), nowMs + behindMs, [](const Gem& g, float v) { return g.ms < v; });
     auto last = std::lower_bound(first, gems.end(), nowMs + aheadMs, [](const Gem& g, float v) { return g.ms < v; });
-    static bool logged = false;
-    if (!logged && nowMs > 20000 && SDL_getenv("GD05_TRACKLOG")) {
-        logged = true;
-        SDL_Log("RB track %s at %.0f ms: gems %d..%d of %zu, first frets %d at %.0f ms", part_.c_str(), double(nowMs), int(first - gems.begin()),
-                int(last - gems.begin()), gems.size(), first != gems.end() ? first->frets : -1, first != gems.end() ? double(first->ms) : -1.0);
-    }
     // Far to near; the drums' kick first (under the pads' gems).
     for (auto it = last; it != first;) {
         --it;

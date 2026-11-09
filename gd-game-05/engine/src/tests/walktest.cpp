@@ -141,6 +141,29 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         at("endgame_waiting_screen", 90000);  // modes.dta win_screen (the default mode)
         at("qp_endgame_screen", 20000);       // the mode's endgame_screen once the stats are in
         wait(1000);
+    } else if (scenario == "keys") {
+        // The keyboard through SDL's events (as a player without a
+        // controller): Enter starts at the title and selects in the menus,
+        // the arrows move [I: the port's keyboard map, docs/controls.md].
+        wait(300);
+        key(SDLK_RETURN);
+        at("splash_screen", 30000);
+        key(SDLK_RETURN);
+        at("main_screen");
+        key(SDLK_RETURN);  // SOLO
+        at("main_solomode_screen");
+        key(SDLK_RETURN);  // QUICKPLAY
+        at("qp_selsong_screen");
+        wait(500);
+        key(SDLK_DOWN);
+        wait(300);
+        key(SDLK_RETURN);
+        at("qp_seldiff_solo_screen");
+        key(SDLK_RETURN);  // guitar
+        wait(1500);
+        key(SDLK_RETURN);  // the difficulty
+        at("game_screen", 60000);
+        wait(2000);
     } else if (scenario == "dev_cheats") {
         // GD02-045: Enhanced > Developer Keyboard Cheats on, then a real 'l'
         // key (SDL event, through the app's bound-key filter) runs cheats.dta's

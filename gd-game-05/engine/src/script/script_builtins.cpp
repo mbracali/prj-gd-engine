@@ -539,6 +539,14 @@ void Interp::installGh2Builtins() {
         }
         return last;
     });
+    // {handle_ret (obj msg args...)}: RB's handle that returns the handler's
+    // value (ui/ui.dta scroll_sfx) [C data]; as handle, the last one's.
+    addBuiltin("handle_ret", [](Interp& in, const DataNode& c) { return in.builtin("handle")(in, c); });
+    // The Stage Kit (an Xbox 360 lights and fog accessory, world/worldbase.dta
+    // halfbeat): no bank mode, no LEDs to shift; the port drives none [decision].
+    addBuiltin("stagekit_get_bank_mode", [](Interp&, const DataNode&) { return Value::integer(0); });
+    addBuiltin("stagekit_led_shift", [](Interp&, const DataNode&) { return Value::integer(0); });
+    addBuiltin("stagekit_set_bank_state", [](Interp&, const DataNode&) { return Value::integer(0); });
     // {find_obj a b c}: object a, then its child b ({a find b}), then c.
     addBuiltin("find_obj", [](Interp& in, const DataNode& c) {
         ScriptObject* o = nullptr;

@@ -479,6 +479,8 @@ public:
             const size_t us = v.rfind('_');
             return r = Value::symbol(us != std::string::npos ? v.substr(0, us) : v), true;
         }
+        // The band name generator's AI (BandNameAI) is not there [I].
+        if (msg == "is_advanced_band_name_ai_active") return r = Value::integer(0), true;
         if (msg == "load_all_chars" || msg == "load_crowd_audio" || msg == "reset_config" || msg == "unload_crowd_audio")
             return r = Value::integer(0), true;
         // The solo modes' score to the profile: RB's saves are M7 (GD05-009).
