@@ -141,6 +141,11 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         at("endgame_waiting_screen", 90000);  // modes.dta win_screen (the default mode)
         at("qp_endgame_screen", 20000);       // the mode's endgame_screen once the stats are in
         wait(1000);
+        press(kX);  // continue (SELECT_START_MSG: ui sync_screen qp_complete_screen)
+        at("qp_complete_screen");
+        press(kX);  // the focused choice: pick another song
+        at("qp_selsong_screen", 30000);  // through meta_loading_continue_screen
+        wait(1000);
     } else if (scenario == "keys") {
         // The keyboard through SDL's events (as a player without a
         // controller): Enter starts at the title and selects in the menus,

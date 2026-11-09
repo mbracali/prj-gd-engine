@@ -6,6 +6,8 @@
 # Xbox Live and its services (no Live in the port).
 achievements *
 leaderboards *
+# RB's online server (Xbox Live; not in the port).
+server *
 content_mgr *
 profilemgr signin (Xbox Live)
 profilemgr show_marketplace (Xbox Live)

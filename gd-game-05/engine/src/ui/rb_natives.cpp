@@ -237,6 +237,8 @@ void installRbNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Scr
     session->on("disabled", no);
     // {session state}: kNetInGame (the .dtb's 2) while a song is loaded
     // (ui/game.dta on_pause) [C data], else 0 [I: the other states' values].
+    // {session has_player n}: the one local player [I].
+    session->on("has_player", [](std::vector<Value>& a) { return Value::integer(!a.empty() && a[0].integerValue() == 0 ? 1 : 0); });
     session->on("state", [&ui](std::vector<Value>&) { return Value::integer(ui.host().gameLoaded() ? 2 : 0); });
     session->on("num_open_slots", no);
     session->quiet({"clear", "send_to_all", "send_to_player", "set_all_local_ready_status", "set_invites_allowed", "ignore_remote_messages", "done_loading"});
@@ -271,19 +273,26 @@ void installRbNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Scr
         if (!a.empty()) ui.gotoScreen(a[0].type == Value::Type::Object && a[0].object ? a[0].object->name() : a[0].str(), false);
         return Value::integer(0);
     });
-    sink->quiet({"set_net_sync", "net_sync", "set_block_mode", "force_reset_screen", "dismiss_event", "hide_network_busy_icon",
+    sink->quiet({"set_net_sync", "net_sync", "set_block_mode", "dismiss_event", "hide_network_busy_icon",
                  "show_network_busy_icon", "set_controller_level"});
     // check_controllers: every player's controller is there (ui/game.dta: FALSE
     // pushes pause_controller_screen) [I: the port's own disconnect pause is the input layer's].
     sink->on("check_controllers", yes);
+    sink->on("current_event", no);  // no band event (sign_out, invites) [I]
+    // force_reset_screen <screen>: straight to it (meta_loading.dta) [I: the reset's network side].
+    sink->on("force_reset_screen", [&ui](std::vector<Value>& a) {
+        if (!a.empty()) ui.gotoScreen(a[0].type == Value::Type::Object && a[0].object ? a[0].object->name() : a[0].str(), false);
+        return Value::integer(0);
+    });
     RbHost* tour = add(std::make_unique<RbHost>(ui, "tour"));
     tour->on("performer", no);
     tour->quiet({"clear_performer"});
     RbHost* charCache = add(std::make_unique<RbHost>(ui, "char_cache"));
     // The characters' cache: the band's loading is M6's (GD05-008) [I].
-    charCache->quiet({"cache_update", "cache_enable", "cache_clear", "iterate", "meta_configure_done", "light_characters", "load_instruments",
+    charCache->quiet({"cache_update", "cache_enable", "cache_clear", "iterate", "light_characters", "load_instruments",
                       "world_configure_characters", "reclaim_characters"});
     charCache->on("loaded", yes);
+    charCache->on("meta_configure_done", yes);  // meta_loading.dta waits on it [I: nothing to configure]
     // content_mgr: the Music Store / downloads are not in the port (GD05-013):
     // the disc's content is all there is, its refresh always done.
     RbHost* content = add(std::make_unique<RbHost>(ui, "content_mgr"));

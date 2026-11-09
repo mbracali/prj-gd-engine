@@ -69,7 +69,9 @@ public:
             return r = c ? Value::obj(c) : Value::integer(0), true;
         }
         if (msg == "set_char") return p.character = args.empty() ? p.character : nameOf(args[0]), true;
-        if (msg == "set_ui_waiting") return true;
+        // RB's ui waiting state (meta_loading.dta: kUIWaitPreAutosave until the autosave) [C data].
+        if (msg == "set_ui_waiting") return uiWaiting_ = args.empty() ? Value::integer(0) : args[0], true;
+        if (msg == "ui_waiting") return r = uiWaiting_, true;
         if (msg == "is_ready") return r = Value::integer(ready_ ? 1 : 0), true;
         if (msg == "set_ready") return ready_ = !args.empty() && args[0].truthy(), true;
         if (msg == "intro_name") return r = Value::string(i_ == 0 ? "PLAYER 1" : "PLAYER " + std::to_string(i_ + 1)), true;
@@ -80,6 +82,7 @@ private:
     UiManager& ui_;
     int i_;
     bool ready_ = false;  // RB: the difficulty is chosen (seldiff.dta set_ready) [I: kept here, not in the session]
+    Value uiWaiting_ = Value::integer(0);
 };
 
 // {game get_bank_loader} reset, {game video_provider} get_video_file.
@@ -463,12 +466,12 @@ public:
         if (msg == "is_player_participating") return r = Value::integer(intArg(args, 0) == 0 ? 1 : 0), true;
         // RB's game panel queries (ui/game.dta, loading.dta) [I where noted].
         if (msg == "lost") return r = Value::integer(ui.host().songLostForUi() ? 1 : 0), true;
-        if (msg == "foreach_local_player" || msg == "foreach_local_player_config") {
+        if (msg == "foreach_local_player" || msg == "foreach_local_player_config" || msg == "foreach_player_config") {
             // $var bound to player 0's object (the player, or its config) [I: one local player].
             std::string var = args.empty() ? std::string() : args[0].str();
             if (!var.empty() && var[0] == '$') var = var.substr(1);
             const Value saved = in.var(var);
-            in.var(var) = msg == "foreach_local_player" ? Value::obj(in.findObject("player0")) : Value::obj(configs_[0].get());
+            in.var(var) = msg == "foreach_local_player" ? Value::obj(in.findObject("player0")) : Value::obj(configs_[0].get());  // [I] one player
             for (size_t k = 1; k < args.size(); ++k) r = in.evalValue(args[k]);
             in.var(var) = saved;
             return true;

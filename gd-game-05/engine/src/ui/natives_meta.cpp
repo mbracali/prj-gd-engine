@@ -830,7 +830,7 @@ void installNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Scrip
     add(std::make_unique<SynthObj>(ui));
     add(std::make_unique<MetaMusicObj>(ui));
     // Xbox Live and its services: logged STUBs (tests/ui_stubs.txt).
-    for (const char* stub : {"achievements", "leaderboards"}) add(std::make_unique<StubObject>(stub, "XboxLive"));
+    for (const char* stub : {"achievements", "leaderboards", "server"}) add(std::make_unique<StubObject>(stub, "XboxLive"));
     add(std::make_unique<QuietObj>(ui, "rnd", std::set<std::string>{"suspend", "unset_depth_of_field", "show_overlay", "toggle_overlay",
                                                                      "reflect", "reset_postproc", "overlay_showing", "aspect",
                                                                      "set_in_game"}));

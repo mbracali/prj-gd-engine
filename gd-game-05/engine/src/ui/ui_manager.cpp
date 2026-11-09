@@ -63,6 +63,8 @@ public:
         const auto argStr = [&](size_t i) { return i < args.size() ? args[i].str() : std::string(); };
         r = Value::integer(0);
         if (msg == "goto_screen" || msg == "reset_screen") return ui_.gotoScreen(argStr(0)), true;
+        // RB: {ui sync_screen <screen> <depth>}: the band's screen change, local here [I: the network sync].
+        if (msg == "sync_screen") return ui_.gotoScreen(argStr(0)), true;
         if (msg == "push_screen") return ui_.pushScreen(argStr(0)), true;
         if (msg == "pop_screen") return ui_.popScreen(argStr(0)), true;
         if (msg == "current_screen") return r = Value::obj(ui_.current()), true;
