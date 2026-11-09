@@ -11,11 +11,12 @@ class GameData;
 class Input;
 class Mixer;
 
-// GH2's videos (videos/intro.wmv, hmx.wmv, wg.wmv on the disc's file system,
-// not in the archive): ASF files with WMV3 (VC-1 Main profile) 720x480 video
-// at 59.94 or 29.97 fps and WMA v2 44.1 kHz stereo sound [C data], decoded
-// with FFmpeg (a minimal LGPL build shipped as shared libraries, see
-// build_common.sh). Built without FFmpeg (CMake GD05_VIDEO OFF) every video
+// Rock Band's videos (videos/*.bik on the disc's file system, not in the
+// archive; config/gen/videos.dtb names them): Bink video with Bink audio
+// (RDFT or DCT) [C data, --videotest], decoded with FFmpeg (a minimal LGPL
+// build shipped as shared libraries, see build_common.sh). The class keeps
+// gd-game-02's name (WmvPlayer) and its GH2 playback notes below until RB's
+// movie player is read (M3). Built without FFmpeg (CMake GD05_VIDEO OFF) every video
 // is skipped with a log line.
 //
 // Playback is GH2's MetaPanel play_movie (0x822A1850 -> 0x822A1630, player
@@ -55,6 +56,10 @@ public:
     // writing each one's Y, U and V planes (yuv420p, no padding) to `out`;
     // returns the count decoded, -1 on error.
     int dumpFrames(int frames, std::FILE* out);
+    // The opened video's frame count from its header (Bink: the file's own
+    // count), and whether it has a decodable sound track; -1 / false if unknown.
+    long long frameCount() const;
+    bool hasSound() const;
 
 private:
     struct Impl;

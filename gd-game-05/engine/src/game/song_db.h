@@ -23,7 +23,12 @@ struct SongAudio {
     // 1 exactly on the guitar channels [C data]. That these are the
     // channels muted when the player misses is [I] (docs/audio_and_charts.md).
     std::vector<int> cores;
-    int hopoThresholdTicks = -1;  // (hopo_threshold n), or -1: beatmatcher.dtb's
+    int hopoThresholdTicks = -1;  // (hopo_threshold n), or -1: the parser's default
+    std::vector<int> crowdChannels;  // (crowd_channels 11 12): the crowd stems [C data]
+    // (drum_solo (seqs (kick.cue ...))) / (drum_freestyle (seqs ...)): the
+    // drum kit's sounds per lane (kick, red, yellow, blue, green) in fills
+    // and freestyle [C data].
+    std::vector<std::string> drumSoloSeqs, drumFreestyleSeqs;
 };
 
 struct SongInfo {
@@ -38,6 +43,14 @@ struct SongInfo {
     float previewStartMs = 0, previewEndMs = 0;
     int animTempo = 1;  // kTempoMedium 1, kTempoFast 2
     std::string venue;  // (quickplay (venue x))
+    // Rock Band's song entry [C data: songs.dtb]:
+    bool master = false;           // (master TRUE): the master recording
+    int scrollSpeedMs = 2300;      // (song_scroll_speed 2300)
+    std::string bank;              // (bank sfx/tambourine_bank.milo): the vocal percussion sounds
+    std::map<std::string, int> rank;  // (rank (drum 300) (guitar 285) ... (band 300)): the difficulty tiers
+    std::string genre, decade, vocalGender;
+    int context = 0;               // (context n)
+    bool tutorial = false;         // a tutorial / drum trainer / test track (no rank), not in the song lists
 };
 
 // The songs of config/gen/songs.dtb (retail build: _SHIP and HX_XBOX

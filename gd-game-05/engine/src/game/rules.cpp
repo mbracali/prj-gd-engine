@@ -19,38 +19,6 @@ const DataNode& require(const DataNode& parent, std::string_view key) {
     return *n;
 }
 
-// One (default_config ...) / (coop_config ...) block: crowd (0x822de640)
-// and star_power (0x822d5fc0) [C].
-ScoreConfig readScoreConfig(const DataNode& config) {
-    ScoreConfig c;
-    const DataNode& sp = require(config, "star_power");
-    StarPowerRules& s = c.starPower;
-    s.rechargeRate = require(sp, "recharge_rate").floatAt(1);
-    s.deployRate = require(sp, "deploy_rate").floatAt(1);
-    s.phrase = require(sp, "star_phrase").floatAt(1);
-    s.whammyRate = require(sp, "whammy_rate").floatAt(1);
-    s.readyLevel = require(sp, "ready_level").floatAt(1);
-    s.multiplier = require(sp, "multiplier").intAt(1);
-    s.crowdBoost = require(sp, "crowd_boost").floatAt(1);
-    s.minLength = require(sp, "min_length").floatAt(1);
-    s.whammySpeed = require(sp, "whammy_speed").floatAt(1);
-    s.whammyTimeout = require(sp, "whammy_timeout").floatAt(1);
-
-    const DataNode& crowd = require(config, "crowd");
-    for (int d = 0; d < kDifficultyCount; ++d) {
-        const DataNode& n = require(crowd, kDifficultySymbols[d]);
-        CrowdRules& cr = c.crowd[size_t(d)];
-        cr.noteWeight = require(n, "note_weight").floatAt(1);
-        const DataNode& range = require(n, "range");
-        cr.rangeLow = range.floatAt(1);
-        cr.rangeHigh = range.floatAt(2);
-        cr.freeRide = require(n, "free_ride").floatAt(1);
-        cr.warningLevel = require(n, "warning_level").floatAt(1);
-        cr.loseLevel = require(n, "lose_level").floatAt(1);
-    }
-    return c;
-}
-
 }  // namespace
 
 const char* difficultyName(Difficulty d) {
@@ -82,70 +50,192 @@ int Rules::multiplierForStreak(int streak) const {
 
 Rules loadRules(const GameData& data) {
     Rules r;
-
-    // Score singleton 0x822d69c8: +0 head, +4 tail, +0xc good, +0x10 perfect,
-    // +0x14 streaks, +0x24 star power config [C].
+    RbScoring& rb = r.rb;
     DataNode scoring = parseDtb(data.read("config/gen/scoring.dtb"));
-    const DataNode& points = require(scoring, "points");
-    r.headPoints = require(points, "head").intAt(1);
-    r.tailPoints = require(points, "tail").intAt(1);
+
+    // (points (<instrument> (head n) (tail n)) ...) [C data]; GH2's single
+    // head / tail are the guitar's.
+    for (size_t i = 0; i < require(scoring, "points").children.size(); ++i) {
+        const DataNode& e = require(scoring, "points").children[i];
+        if (!e.isList() || e.children.empty() || !e.children[0].isText()) continue;
+        RbScoring::Points pts;
+        if (const DataNode* h = e.find("head")) pts.head = h->intAt(1);
+        if (const DataNode* t = e.find("tail")) pts.tail = t->intAt(1);
+        rb.points[e.children[0].s] = pts;
+    }
+    if (auto it = rb.points.find("guitar"); it != rb.points.end()) r.headPoints = it->second.head, r.tailPoints = it->second.tail;
+
     const DataNode& errorClass = require(scoring, "error_class");
     r.goodMs = require(errorClass, "good").intAt(1);
     r.perfectMs = require(errorClass, "perfect").intAt(1);
 
+    if (const DataNode* tug = scoring.find("tug_of_war")) {
+        if (const DataNode* m = tug->find("max_delta"); m && m->children.size() > 1 && m->children[1].isList())
+            for (int d = 0; d < kDifficultyCount && size_t(d) < m->children[1].children.size(); ++d) rb.tugMaxDelta[size_t(d)] = m->children[1].intAt(size_t(d));
+        if (const DataNode* t = tug->find("tie_window"); t && t->children.size() > 1 && t->children[1].isList())
+            for (int d = 0; d < kDifficultyCount && size_t(d) < t->children[1].children.size(); ++d) rb.tugTieWindow[size_t(d)] = t->children[1].intAt(size_t(d));
+    }
+    if (const DataNode* b = scoring.find("bonuses")) {
+        if (const DataNode* m = b->find("max_bonus")) rb.maxBonus = m->intAt(1);
+        auto list = [](const DataNode* e, std::vector<int>& out) {
+            if (e && e->children.size() > 1 && e->children[1].isList())
+                for (size_t i = 0; i < e->children[1].children.size(); ++i) out.push_back(e->children[1].intAt(i));
+        };
+        list(b->find("multiplier"), rb.bandMultiplier);
+        list(b->find("crowd_boost"), rb.bandCrowdBoost);
+    }
+
+    // (streaks (mechanic ...) (multipliers (<mode> (count mult) ...) ...) (energy (<instrument> (count energy) ...) ...)).
     const DataNode& streaks = require(scoring, "streaks");
-    r.streaks = {{0, 1}};  // 0x822d66b0's implicit first entry [C]
-    for (size_t i = 1; i < streaks.children.size(); ++i)
-        r.streaks.emplace_back(streaks.children[i].intAt(0), streaks.children[i].intAt(1));
+    if (const DataNode* m = streaks.find("multipliers"))
+        for (size_t i = 1; i < m->children.size(); ++i) {
+            const DataNode& e = m->children[i];
+            if (!e.isList() || e.children.empty() || !e.children[0].isText()) continue;
+            auto& v = rb.streakMultipliers[e.children[0].s];
+            for (size_t k = 1; k < e.children.size(); ++k) v.emplace_back(e.children[k].intAt(0), e.children[k].intAt(1));
+        }
+    if (const DataNode* m = streaks.find("energy"))
+        for (size_t i = 1; i < m->children.size(); ++i) {
+            const DataNode& e = m->children[i];
+            if (!e.isList() || e.children.empty() || !e.children[0].isText()) continue;
+            auto& v = rb.streakEnergy[e.children[0].s];
+            for (size_t k = 1; k < e.children.size(); ++k) v.emplace_back(e.children[k].intAt(0), e.children[k].floatAt(1));
+        }
+    if (auto it = rb.streakMultipliers.find("singleplayer"); it != rb.streakMultipliers.end()) r.streaks = it->second;
 
-    r.solo = readScoreConfig(require(scoring, "default_config"));
-    r.coop = readScoreConfig(require(scoring, "coop_config"));
-
-    // (star_ratings (thresholds (kDifficultyEasy 2.0 2.8) ...)), 0x822d6410 [C].
-    // thresholds_section is never read by the executable [C].
-    const DataNode& thresholds = require(require(scoring, "star_ratings"), "thresholds");
-    for (int d = 0; d < kDifficultyCount; ++d) {
-        const DataNode& t = require(thresholds, kDifficultySymbols[d]);
-        r.starThresholds[size_t(d)] = {t.floatAt(1), t.floatAt(2)};
-    }
-
-    // The band's stars (0x822CE5D8): (coop (thresholds (<difficulty> k) ...))
-    // and config/gen/coop_max_scores.dtb (scoring.dtb #includes it) [C].
-    if (const DataNode* coop = require(scoring, "star_ratings").find("coop"))
-        if (const DataNode* t = coop->find("thresholds")) {
-            r.coopThresholds.clear();
-            for (size_t i = 1; i < t->children.size(); ++i) {
-                const DataNode& e = t->children[i];
-                if (!e.isList() || e.children.size() < 2) continue;
-                int index = 0;
-                if (e.children[0].isText()) {
-                    for (int d = 0; d < kDifficultyCount; ++d)
-                        if (e.children[0].s == kDifficultySymbols[d]) index = d;
-                } else {
-                    index = e.intAt(0);
-                }
-                r.coopThresholds.emplace_back(index, e.floatAt(1));
+    if (const DataNode* v = scoring.find("vocals"))
+        for (size_t i = 1; i < v->children.size(); ++i) {
+            const DataNode& e = v->children[i];
+            if (!e.isList() || e.children.empty() || !e.children[0].isText()) continue;
+            std::vector<float> nums;
+            for (size_t k = 1; k < e.children.size(); ++k) {
+                const DataNode& n = e.children[k];
+                if (n.type == DataNode::Type::Int) nums.push_back(float(n.i));
+                else if (n.type == DataNode::Type::Float) nums.push_back(n.f);
+                else if (n.isText()) nums.push_back(n.s == "TRUE" ? 1.0f : 0.0f);
             }
+            rb.vocals[e.children[0].s] = nums;
         }
-    if (data.exists("config/gen/coop_max_scores.dtb")) {
-        DataNode maxScores = parseDtb(data.read("config/gen/coop_max_scores.dtb"));
-        for (const DataNode& e : maxScores.children) {
-            if (!e.isList() || e.children.size() < 2 || !e.children[0].isText() || !e.children[1].isList()) continue;
-            std::array<int, 4> v{};
-            for (size_t k = 0; k < 4 && k < e.children[1].children.size(); ++k) v[k] = e.children[1].intAt(k);
-            r.coopMaxScores[e.children[0].s] = v;
+    if (const DataNode* solo = scoring.find("solo")) {
+        auto awards = [](const DataNode* block, std::vector<RbScoring::Award>& out) {
+            const DataNode* a = block ? block->find("awards") : nullptr;
+            if (!a) return;
+            for (size_t i = 1; i < a->children.size(); ++i) {
+                const DataNode& e = a->children[i];
+                if (e.isList() && e.children.size() >= 3) out.push_back({e.intAt(0), e.intAt(1), e.textAt(2)});
+            }
+        };
+        const DataNode* g = solo->find("guitar");
+        awards(g, rb.guitarSolo);
+        awards(solo->find("tambourine"), rb.tambourine);
+        if (g) {
+            if (const DataNode* x = g->find("reward")) rb.soloReward = x->floatAt(1);
+            if (const DataNode* x = g->find("penalty")) rb.soloPenalty = x->floatAt(1);
         }
     }
+    if (const DataNode* u = scoring.find("unison_phrase")) {
+        if (const DataNode* x = u->find("reward")) rb.unisonReward = x->floatAt(1);
+        if (const DataNode* x = u->find("penalty")) rb.unisonPenalty = x->floatAt(1);
+    }
 
-    // (watcher (slop 100) ...) read by the watcher constructor 0x82350ae0, and
-    // (parser (hopo_threshold 170)) read by 0x823341d0 [C].
+    // (crowd (<difficulty> (default ...) (drum ...) (vocals ...)) (weights ...) ...).
+    const DataNode& crowd = require(scoring, "crowd");
+    static const char* const kKinds[kCrowdKindCount] = {"default", "drum", "vocals"};
+    for (int d = 0; d < kDifficultyCount; ++d) {
+        const DataNode& dn = require(crowd, kDifficultySymbols[d]);
+        for (int k = 0; k < kCrowdKindCount; ++k) {
+            const DataNode& n = require(dn, kKinds[k]);
+            CrowdRules& c = rb.crowd[size_t(d)][size_t(k)];
+            c.noteWeight = require(n, "note_weight").floatAt(1);
+            const DataNode& range = require(n, "range");
+            c.rangeLow = range.floatAt(1);
+            c.rangeHigh = range.floatAt(2);
+            c.freeRide = require(n, "free_ride").floatAt(1);
+            c.greatLevel = require(n, "great_level").floatAt(1);
+            c.okayLevel = require(n, "okay_level").floatAt(1);
+            c.badLevel = require(n, "bad_level").floatAt(1);
+            c.warningLevel = require(n, "warning_level").floatAt(1);
+            c.loseLevel = require(n, "lose_level").floatAt(1);
+            c.phraseWeight = require(n, "phrase_weight").floatAt(1);
+            c.initialDisplayLevel = require(n, "initial_display_level").floatAt(1);
+        }
+        r.solo.crowd[size_t(d)] = rb.crowd[size_t(d)][0];
+    }
+    if (const DataNode* w = crowd.find("weights"))
+        for (size_t i = 1; i < w->children.size(); ++i) {
+            const DataNode& e = w->children[i];
+            if (!e.isList() || e.children.size() < 2 || !e.children[1].isList()) continue;
+            auto& v = rb.crowdWeights[e.intAt(0)];
+            for (size_t k = 0; k < e.children[1].children.size(); ++k) v.push_back(e.children[1].floatAt(k));
+        }
+    if (const DataNode* x = crowd.find("multiplayer_lose_level")) rb.multiplayerLoseLevel = x->floatAt(1);
+    if (const DataNode* x = crowd.find("save_level")) rb.saveLevel = x->floatAt(1);
+    if (const DataNode* x = crowd.find("time_to_return_from_brink")) rb.timeToReturnFromBrink = x->floatAt(1);
+    if (const DataNode* x = crowd.find("vocals_to_return_from_brink")) rb.vocalsToReturnFromBrink = x->intAt(1);
+    if (const DataNode* x = crowd.find("crowd_loss_per_sec")) rb.crowdLossPerSec = x->floatAt(1);
+    if (const DataNode* x = crowd.find("clap_early_amount_ms")) rb.clapEarlyMs = x->intAt(1);
+
+    // (star_power ...): Overdrive [C data].
+    const DataNode& sp = require(scoring, "star_power");
+    StarPowerRules& s = r.solo.starPower;
+    s.rechargeRate = require(sp, "recharge_rate").floatAt(1);
+    s.deployRate = require(sp, "deploy_rate").floatAt(1);
+    s.phrase = require(sp, "star_phrase").floatAt(1);
+    s.commonPhrase = require(sp, "common_phrase").floatAt(1);
+    s.fillBoost = require(sp, "fill_boost").floatAt(1);
+    s.whammyRate = require(sp, "whammy_rate").floatAt(1);
+    s.readyLevel = require(sp, "ready_level").floatAt(1);
+    s.multiplier = require(sp, "multiplier").intAt(1);
+    s.crowdBoost = require(sp, "crowd_boost").floatAt(1);
+    s.minLength = require(sp, "min_length").floatAt(1);
+    s.whammySpeed = require(sp, "whammy_speed").floatAt(1);
+    s.whammyTimeout = require(sp, "whammy_timeout").floatAt(1);
+    s.crashFillReadyHits = require(sp, "crash_fill_ready_hits").intAt(1);
+    r.coop = r.solo;
+
+    if (const DataNode* be = scoring.find("band_energy")) {
+        if (const DataNode* x = be->find("deploy_beats")) rb.deployBeats = x->intAt(1);
+        if (const DataNode* x = be->find("deploy_bonus")) rb.deployBonus = x->intAt(1);
+        if (const DataNode* x = be->find("spotlight_phrase")) rb.spotlightPhrase = x->floatAt(1);
+        if (const DataNode* x = be->find("unison_phrase")) rb.unisonPhrase = x->floatAt(1);
+        if (const DataNode* x = be->find("deploy_threshold")) rb.deployThreshold = x->floatAt(1);
+        if (const DataNode* x = be->find("save_energy")) rb.saveEnergy = x->floatAt(1);
+    }
+    if (const DataNode* c = scoring.find("coda")) {
+        if (const DataNode* x = c->find("point_rate")) rb.codaPointRate = x->intAt(1);
+        if (const DataNode* x = c->find("max_mash_ms")) rb.codaMaxMashMs = x->intAt(1);
+    }
+
+    // star_thresholds.dtb (scoring.dtb #includes it into star_ratings) [C data].
+    if (data.exists("config/gen/star_thresholds.dtb")) {
+        DataNode st = parseDtb(data.read("config/gen/star_thresholds.dtb"));
+        if (const DataNode* t = st.find("thresholds"))
+            for (size_t i = 1; i < t->children.size(); ++i) rb.starThresholds.push_back(t->floatAt(i));
+        if (const DataNode* bt = st.find("band_thresholds"))
+            for (size_t i = 1; i < bt->children.size(); ++i) {
+                const DataNode& e = bt->children[i];
+                if (!e.isList() || e.children.empty() || !e.children[0].isList()) continue;
+                std::vector<std::string> who;
+                for (const DataNode& n : e.children[0].children)
+                    if (n.isText()) who.push_back(n.s);
+                std::vector<float> v;
+                for (size_t k = 1; k < e.children.size(); ++k) v.push_back(e.floatAt(k));
+                rb.bandStarThresholds.emplace_back(std::move(who), std::move(v));
+            }
+    }
+
+    // (watcher (slop 100) ...) [C data]; RB's parser has no hopo_threshold
+    // key: songs.dtb gives one per song, else the parser's default (RB
+    // 0x824A67A8) [I: 170 kept from GH2 until read].
     DataNode beatmatcher = parseDtb(data.read("config/gen/beatmatcher.dtb"));
     r.slopMs = require(require(beatmatcher, "watcher"), "slop").floatAt(1);
-    r.hopoThresholdTicks = require(require(beatmatcher, "parser"), "hopo_threshold").intAt(1);
+    if (const DataNode* parser = beatmatcher.find("parser"))
+        if (const DataNode* h = parser->find("hopo_threshold")) r.hopoThresholdTicks = h->intAt(1);
 
     DataNode track = parseDtb(data.read("config/gen/track_graphics.dtb"));
-    const DataNode& speed = require(track, "track_speed");
-    for (int d = 0; d < kDifficultyCount; ++d) r.trackSpeed[size_t(d)] = require(speed, kDifficultySymbols[d]).floatAt(1);
+    if (const DataNode* speed = track.find("track_speed"))
+        for (int d = 0; d < kDifficultyCount; ++d)
+            if (const DataNode* v = speed->find(kDifficultySymbols[d])) r.trackSpeed[size_t(d)] = v->floatAt(1);
 
     return r;
 }

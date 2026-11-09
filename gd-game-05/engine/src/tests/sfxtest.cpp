@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <exception>
 #include <functional>
 #include <map>
@@ -21,8 +22,10 @@
 #include "audio/sfx_player.h"
 #include "audio/xaudio_reverb.h"
 #include "audio/synth.h"
+#include "audio/vorbis_stream.h"
 #include "audio/xma_decoder.h"
 #include "data/game_data.h"
+#include "data/mogg.h"
 #include "game/venue.h"
 #include "scene/milo.h"
 #include "scene/synth_objects.h"
@@ -30,6 +33,59 @@
 namespace {
 
 using namespace scene;
+
+// Every .mogg on the disc: decrypted (version 11, data/mogg.h), its Ogg pages
+// walked from the first to the file's last byte (each page's header and
+// segment table give its size), and the stream opened by the Vorbis decoder
+// with one second decoded. Prints the totals; returns the failures.
+int moggChecks(const GameData& data, const std::function<void(const std::string&)>& fail) {
+    int files = 0, v11 = 0, bad = 0;
+    uint64_t pages = 0;
+    double seconds = 0;
+    std::map<int, int> channelCounts;
+    for (const auto& p : data.paths()) {
+        if (p.size() < 5 || p.compare(p.size() - 5, 5, ".mogg") != 0) continue;
+        ++files;
+        try {
+            Bytes original = data.read(p);
+            Bytes m = original;
+            MoggHeader h = parseMoggHeader(m.data(), m.size(), false);
+            if (h.version == 11) ++v11;
+            decryptMogg(m);
+            size_t at = h.oggOffset;
+            uint64_t lastGranule = 0;
+            while (at < m.size()) {
+                if (m.size() - at < 27 || std::memcmp(&m[at], "OggS", 4) != 0) throw std::runtime_error("broken Ogg page at " + std::to_string(at));
+                uint64_t g = 0;
+                for (int k = 7; k >= 0; --k) g = g << 8 | m[at + 6 + size_t(k)];
+                if (g != ~uint64_t(0)) lastGranule = g;
+                const size_t segs = m[at + 26];
+                if (m.size() - at < 27 + segs) throw std::runtime_error("truncated Ogg page");
+                size_t body = 0;
+                for (size_t k = 0; k < segs; ++k) body += m[at + 27 + k];
+                at += 27 + segs + body;
+                ++pages;
+            }
+            if (at != m.size()) throw std::runtime_error("the last Ogg page runs past the file");
+            VorbisStream v(std::move(original));  // decrypts its own copy
+            channelCounts[v.channels()]++;
+            seconds += double(lastGranule) / double(v.sampleRate());
+            std::vector<std::vector<float>> buf(size_t(v.channels()), std::vector<float>(size_t(v.sampleRate())));
+            std::vector<float*> ptr;
+            for (auto& b : buf) ptr.push_back(b.data());
+            if (v.decode(ptr.data(), v.sampleRate()) <= 0 && lastGranule > 0) throw std::runtime_error("no samples decoded");
+        } catch (const std::exception& e) {
+            ++bad;
+            fail(p + ": " + e.what());
+        }
+    }
+    std::string chans;
+    for (const auto& [c, n] : channelCounts) chans += " " + std::to_string(c) + "ch x" + std::to_string(n);
+    std::printf("sfxtest: moggs: %d files (%d version 11, decrypted), %llu Ogg pages walked to each file's end, %.0f s of audio,"
+                " channels:%s; %d failed\n",
+                files, v11, static_cast<unsigned long long>(pages), seconds, chans.c_str(), bad);
+    return bad;
+}
 
 // The sounds GH2's scripts and the port's game code name [C data: ui/,
 // hud/, tutorial/ play_sfx / play_sequence / sfx; config/synth.dta's
@@ -290,6 +346,7 @@ int runSfxTest(const std::string& dataPath) {
             if (failures++ < 20) std::printf("  FAIL %s\n", what.c_str());
         };
         dspChecks(fail);
+        moggChecks(data, fail);
         for (const auto& p : paths) {
             std::unique_ptr<Milo> milo;
             try {

@@ -23,7 +23,16 @@ struct CrowdRules {
     float freeRide = 0;
     float warningLevel = 0.15f;
     float loseLevel = 0.01f;
+    // Rock Band's extra crowd keys (scoring.dtb crowd <difficulty> <kind>) [C data]:
+    float greatLevel = 0.95f, okayLevel = 0.66f, badLevel = 0.33f;
+    float phraseWeight = 0.2f;          // vocals: per phrase
+    float initialDisplayLevel = 0.8333f;
 };
+
+// Rock Band's crowd kinds in scoring.dtb: (default ...) for guitar and bass,
+// (drum ...), (vocals ...) [C data].
+enum class CrowdKind { Default, Drum, Vocals };
+constexpr int kCrowdKindCount = 3;
 
 // scoring.dtb <config> (star_power ...), read by 0x822d5fc0 into
 // [0] recharge_rate .. [9] whammy_timeout [C]. Times are kept in the data's
@@ -40,6 +49,45 @@ struct StarPowerRules {
     float minLength = 2.0f;       // [7] seconds; copied to player +0xd4, no reader found [I: unused]
     float whammySpeed = 0.05f;    // [8] × 0.01 = bar range per ms
     float whammyTimeout = 0.5f;   // [9] seconds
+    // Rock Band's Overdrive (scoring.dtb star_power) [C data]:
+    float commonPhrase = 0.15f;    // a phrase shared by the band (unison) [I: meaning]
+    float fillBoost = 0.35f;       // a drum fill ended on the cymbal
+    int crashFillReadyHits = 3;
+};
+
+// Rock Band's scoring.dtb blocks that GH2 did not have [C data]; the code
+// that reads each value is cited where it is used (docs/FINDINGS.md).
+struct RbScoring {
+    struct Points { int head = 25, tail = 12; };
+    std::map<std::string, Points> points;  // (points (drum (head 25) (tail 12)) ...)
+    int maxBonus = 4;                      // (bonuses (max_bonus 4) ...)
+    std::vector<int> bandMultiplier;       // (bonuses (multiplier (1 2 4 6 8))): by members in Overdrive
+    std::vector<int> bandCrowdBoost;       // (bonuses (crowd_boost (1 6 6 6 6)))
+    // (streaks (multipliers (singleplayer ...) (bass ...) (multi ...) (default ...) (vocals ...))).
+    std::map<std::string, std::vector<std::pair<int, int>>> streakMultipliers;
+    // (streaks (energy (default ...) (drum ...) (bass ...) (guitar ...) (vocals ...))): streak -> Overdrive gained.
+    std::map<std::string, std::vector<std::pair<int, float>>> streakEnergy;
+    std::map<std::string, std::vector<float>> vocals;  // (vocals (slop 140 120 120 120) ...): every key's numbers
+    struct Award { int percent; int bonus; std::string name; };
+    std::vector<Award> guitarSolo, tambourine;  // (solo (guitar (awards ...)) (tambourine (awards ...)))
+    float soloReward = 1, soloPenalty = 1;
+    float unisonReward = 2, unisonPenalty = 2;  // (unison_phrase (reward 2.0) (penalty 2.0))
+    std::array<std::array<CrowdRules, kCrowdKindCount>, kDifficultyCount> crowd{};
+    std::map<int, std::vector<float>> crowdWeights;      // (weights (1 (1.0)) (2 (0.5 0.5)) ...)
+    float multiplayerLoseLevel = 0.2f, saveLevel = 0.8333f, timeToReturnFromBrink = 3.5f;
+    int vocalsToReturnFromBrink = 2;
+    float crowdLossPerSec = 0.04f;
+    int clapEarlyMs = 75;
+    // (band_energy ...)
+    int deployBeats = 32, deployBonus = 50;
+    float spotlightPhrase = 0.251f, unisonPhrase = 0.501f, deployThreshold = 0.5f, saveEnergy = 0.5f;
+    int codaPointRate = 100, codaMaxMashMs = 1500;  // (coda (point_rate 100) (max_mash_ms 1500))
+    // (tug_of_war (max_delta (...)) (tie_window (...))) per difficulty.
+    std::array<int, kDifficultyCount> tugMaxDelta{}, tugTieWindow{};
+    // star_thresholds.dtb: (thresholds ...) the solo stars as multiples of
+    // the base score, and (band_thresholds ((instruments) ...)).
+    std::vector<float> starThresholds;
+    std::vector<std::pair<std::vector<std::string>, std::vector<float>>> bandStarThresholds;
 };
 
 // One score config block of scoring.dtb: default_config (single player and
@@ -95,6 +143,10 @@ struct Rules {
 
     // The streak multiplier: the last entry whose count <= streak (0x822d66b0) [C].
     int multiplierForStreak(int streak) const;
+
+    RbScoring rb;  // Rock Band's own blocks
+    // The watcher's other keys (beatmatcher.dtb watcher) [C data].
+    int partStarCount = 0;
 };
 
 // Loads the rules from the game data; throws std::runtime_error on failure.

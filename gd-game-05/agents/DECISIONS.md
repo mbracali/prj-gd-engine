@@ -24,3 +24,20 @@ pattern). Each says what, why and how to undo it.
 - **Why:** RB's movies are `videos/*.bik`; the kickoff asks for the Bink
   decoders in our own FFmpeg build (LGPL, pinned).
 - **Undo:** the `FFMPEG_CONFIGURE` line.
+
+## D3. The version 11 mogg key is a constant in the engine (2026-11-09)
+- **What:** every Rock Band `.mogg` (374 on the disc) is version 11: the Ogg
+  stream is AES-128 in counter mode (16-byte nonce after the seek map,
+  128-bit counter incremented little-endian). The key is 16 bytes in the
+  executable's `.data` at 0x828B9AB4, set up by the mogg header reader at
+  0x827E02A8 [C]. `engine/src/data/mogg.cpp` holds it as a constant and
+  `data/aes128.cpp` is our own AES-128 (forward cipher).
+- **Why:** without it no song plays. Reading it from the player's own
+  `default.xex` at run time is not simpler: the executable on the disc is
+  itself encrypted (XEX2 file format: encryption 1, basic compression), so
+  that path would put the Xbox 360's own executable key in the source
+  instead. gd-game-02's Harmonix cipher constants are the precedent for a
+  format constant in the code.
+- **Undo:** replace the constant with a key read at run time (from a file
+  the player provides, or the decrypted XEX); `decryptMogg` is the only user.
+  OPEN_QUESTIONS.md Q3 asks the owner.

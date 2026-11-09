@@ -61,16 +61,18 @@ void WorldDriver::update(World& world, const Song& song, float ms, const Player*
     }
     // Band and venue notes; the lighting ones four beats early (start_offset -4).
     const auto& notes = song.venueNotes;
-    auto isLighting = [](const VenueNote& n) { return n.track == VenueNote::Track::Triggers && n.pitch >= 48 && n.pitch <= 50; };
+    // RB: the VENUE track's 48 / 49 / 50 (next / previous / first lighting
+    // keyframe) [I: GH2's TRIGGERS numbers; RB's venue parser is M5 work].
+    auto isLighting = [](const VenueNote& n) { return n.track == VenueNote::Track::Venue && n.pitch >= 48 && n.pitch <= 50; };
     // BAND DRUMS 36 / 37 go through the drummer_kick_drum MidiParser, which
     // hands out at most one due event a poll (0x8233E5B8) [C]: a kick and a
     // crash on one tick fire a frame apart.
     for (; note_ < notes.size() && notes[note_].ms <= ms; ++note_) {
         const VenueNote& n = notes[note_];
         if (isLighting(n)) continue;
-        if (n.track == VenueNote::Track::Drums) drumsDue_.push_back(n.pitch);
-        else if (n.track == VenueNote::Track::Bass) world.message("bass_hit");
-        else if (n.pitch == 52) world.message("venue_effect");
+        // GH2's BAND DRUMS / BAND BASS / venue_effect notes have no RB track
+        // (RB's band animation notes are in the PART tracks: M6).
+        (void)n;
     }
     if (!drumsDue_.empty()) {
         world.message(drumsDue_.front() == 36 ? "kick_drum" : "crash_symbal");

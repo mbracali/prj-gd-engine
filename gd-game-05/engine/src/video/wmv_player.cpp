@@ -321,7 +321,8 @@ WmvPlayer::~WmvPlayer() = default;
 
 bool WmvPlayer::available() {
     static const bool ok = [] {
-        const bool decoders = avcodec_find_decoder(AV_CODEC_ID_WMV3) && avcodec_find_decoder(AV_CODEC_ID_WMAV2) && av_find_input_format("asf");
+        const bool decoders = avcodec_find_decoder(AV_CODEC_ID_BINKVIDEO) && avcodec_find_decoder(AV_CODEC_ID_BINKAUDIO_RDFT) &&
+                              avcodec_find_decoder(AV_CODEC_ID_BINKAUDIO_DCT) && av_find_input_format("bink");
         const unsigned v = avcodec_version();
         SDL_Log("video: FFmpeg libavcodec %u.%u.%u (%s)%s", v >> 16, (v >> 8) & 0xff, v & 0xff, avcodec_license(),
                 decoders ? "" : ": no ASF / WMV3 / WMA v2 support in it, videos are skipped");
@@ -366,7 +367,7 @@ bool WmvPlayer::open(const GameData& data, const std::string& discPath, std::str
     }
     d.fmt->pb = pb;
     d.fmt->flags |= AVFMT_FLAG_CUSTOM_IO;
-    if (const int r = avformat_open_input(&d.fmt, discPath.c_str(), av_find_input_format("asf"), nullptr); r < 0) {
+    if (const int r = avformat_open_input(&d.fmt, discPath.c_str(), av_find_input_format("bink"), nullptr); r < 0) {
         // avformat_open_input frees the context, not the custom I/O.
         av_freep(&pb->buffer);
         avio_context_free(&pb);
@@ -412,14 +413,24 @@ bool WmvPlayer::open(const GameData& data, const std::string& discPath, std::str
     return true;
 }
 
+long long WmvPlayer::frameCount() const {
+    const Impl& d = *impl_;
+    if (!d.fmt || d.vIndex < 0) return -1;
+    return d.fmt->streams[d.vIndex]->nb_frames;
+}
+
+bool WmvPlayer::hasSound() const { return impl_->actx != nullptr; }
+
 int WmvPlayer::dumpFrames(int count, std::FILE* out) {
     Impl& d = *impl_;
     if (!d.fmt) return -1;
     int done = 0;
     auto sink = [&](Frame&& f) {
-        std::fwrite(f.y.data(), 1, f.y.size(), out);
-        std::fwrite(f.u.data(), 1, f.u.size(), out);
-        std::fwrite(f.v.data(), 1, f.v.size(), out);
+        if (out) {
+            std::fwrite(f.y.data(), 1, f.y.size(), out);
+            std::fwrite(f.u.data(), 1, f.u.size(), out);
+            std::fwrite(f.v.data(), 1, f.v.size(), out);
+        }
         return ++done < count;
     };
     bool more = true;
@@ -589,6 +600,8 @@ bool WmvPlayer::open(const GameData&, const std::string&, std::string& error) {
 WmvPlayer::Result WmvPlayer::play(Canvas&, Mixer&, Input&) { return Result::Unavailable; }
 
 int WmvPlayer::dumpFrames(int, std::FILE*) { return -1; }
+long long WmvPlayer::frameCount() const { return -1; }
+bool WmvPlayer::hasSound() const { return false; }
 
 #endif  // GD05_VIDEO
 

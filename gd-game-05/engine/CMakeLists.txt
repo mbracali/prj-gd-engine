@@ -53,6 +53,7 @@ target_sources(gd05 PRIVATE
   src/data/json.cpp
   src/data/midi.cpp
   src/data/mogg.cpp
+  src/data/aes128.cpp
   src/data/random_file.cpp
   src/data/xdvdfs.cpp
   src/devaids/menu_keys.cpp
@@ -137,6 +138,7 @@ target_sources(gd05 PRIVATE
   src/ui/ui_manager.cpp
   src/tests/selftest.cpp
   src/tests/sfxtest.cpp
+  src/tests/videotest.cpp
   src/tests/facefxtest.cpp
   src/tests/uitest.cpp
   src/tests/walktest.cpp

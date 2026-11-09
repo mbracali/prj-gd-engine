@@ -14,12 +14,13 @@
 #include "stb_vorbis.c"
 
 namespace {
-// GH2's song moggs have at most 6 channels [C data]; stb_vorbis's own limit is 16.
+// RB's song moggs have up to 16 channels (songs.dtb tracks + crowd) [C data]; stb_vorbis's own limit is 16.
 constexpr int kMaxChannels = 16;
 }  // namespace
 
 VorbisStream::VorbisStream(Bytes mogg) : data_(std::move(mogg)) {
-    MoggHeader h = parseMoggHeader(data_.data(), data_.size());
+    decryptMogg(data_);  // Rock Band's version 11 moggs (data/mogg.h)
+    MoggHeader h = parseMoggHeader(data_.data(), data_.size(), false);
     int error = 0;
     v_ = stb_vorbis_open_memory(data_.data() + h.oggOffset, int(data_.size() - h.oggOffset), &error, nullptr);
     if (!v_) throw std::runtime_error("cannot decode the mogg's Ogg Vorbis stream (stb_vorbis error " + std::to_string(error) + ")");
@@ -53,8 +54,11 @@ int VorbisStream::decode(float* const* channelBuffers, int frames) {
 bool VorbisStream::seek(uint64_t frame) { return stb_vorbis_seek(v_, static_cast<unsigned int>(frame)) != 0; }
 
 void probeMogg(const uint8_t* data, size_t size, int& channels, int& rate) {
-    MoggHeader h = parseMoggHeader(data, size);
+    MoggHeader h = parseMoggHeader(data, size, false);
     if (h.oggOffset >= size) throw std::runtime_error("mogg header longer than the bytes read");
+    Bytes plain(data, data + size);  // a version 11 mogg is decrypted on a copy
+    decryptMogg(plain);
+    data = plain.data();
     // The pushdata API reads the three Vorbis headers from the bytes given,
     // without needing the rest of the stream.
     int used = 0, error = 0;

@@ -47,13 +47,23 @@ std::optional<SongAudio> readAudio(const DataNode* block) {
     a.vols = floats(block->find("vols"));
     if (const DataNode* cores = valueList(block->find("cores"))) a.cores = ints(*cores);
     if (const DataNode* h = block->find("hopo_threshold")) a.hopoThresholdTicks = h->intAt(1);
+    if (const DataNode* c = block->find("crowd_channels"))
+        for (size_t i = 1; i < c->children.size(); ++i) a.crowdChannels.push_back(c->intAt(i));
+    auto seqs = [&](const char* key, std::vector<std::string>& out) {
+        if (const DataNode* d = block->find(key))
+            if (const DataNode* sq = valueList(d->find("seqs")))
+                for (const DataNode& n : sq->children)
+                    if (n.isText()) out.push_back(n.s);
+    };
+    seqs("drum_solo", a.drumSoloSeqs);
+    seqs("drum_freestyle", a.drumFreestyleSeqs);
     return a;
 }
 
 }  // namespace
 
 std::vector<SongInfo> loadSongs(const GameData& data) {
-    DataNode root = parseDtb(data.read("config/gen/songs.dtb"));
+    DataNode root = parseDtb(data.read("songs/gen/songs.dtb"));  // RB keeps it under songs/ [C data]
     resolveConditionals(root, {"HX_XBOX", "_SHIP"});
     std::vector<SongInfo> songs;
     for (const DataNode& entry : root.children) {
@@ -78,8 +88,22 @@ std::vector<SongInfo> loadSongs(const GameData& data) {
         if (const DataNode* t = entry.find("anim_tempo"); t && t->children.size() > 1) {
             const DataNode& v = t->children[1];
             if (v.type == DataNode::Type::Int) s.animTempo = v.i;
-            else if (v.isText()) s.animTempo = v.s == "kTempoFast" ? 2 : 1;  // macros.dta
+            else if (v.isText()) s.animTempo = v.s == "kTempoFast" ? 2 : v.s == "kTempoSlow" ? 0 : 1;  // macros.dta
         }
+        if (const DataNode* m = entry.find("master")) s.master = m->children.size() > 1 && m->children[1].isText() ? m->children[1].s == "TRUE" : m->intAt(1) != 0;
+        if (const DataNode* v = entry.find("song_scroll_speed")) s.scrollSpeedMs = v->intAt(1);
+        if (const DataNode* v = entry.find("bank")) s.bank = v->textAt(1);
+        if (const DataNode* v = entry.find("genre")) s.genre = v->textAt(1);
+        if (const DataNode* v = entry.find("decade")) s.decade = v->textAt(1);
+        if (const DataNode* v = entry.find("vocal_gender")) s.vocalGender = v->textAt(1);
+        if (const DataNode* v = entry.find("context")) s.context = v->intAt(1);
+        if (const DataNode* r = entry.find("rank")) {
+            for (size_t i = 1; i < r->children.size(); ++i) {
+                const DataNode& e = r->children[i];
+                if (e.isList() && e.children.size() >= 2 && e.children[0].isText()) s.rank[e.children[0].s] = e.intAt(1);
+            }
+        }
+        s.tutorial = s.rank.empty();
         if (s.name.empty()) s.name = s.id;
         if (data.exists(s.audio.moggPath) && data.exists(s.audio.midiPath)) songs.push_back(std::move(s));
     }

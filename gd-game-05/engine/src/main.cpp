@@ -27,6 +27,7 @@
 #include "tests/selftest.h"
 #include "tests/uitest.h"
 #include "tests/sfxtest.h"
+#include "tests/videotest.h"
 #include "tests/facefxtest.h"
 #include "tests/venuetest.h"
 #include "tests/chartest.h"
@@ -48,12 +49,13 @@ void usage() {
         "                       UNHANDLED / STUB / UNKNOWN script messages once each, also in the game)\n"
         "  --sfxtest            decode every sound effect (XMA SynthSamples) and check the banks and the sounds the\n"
         "                       scripts play (GD05_SFX_DUMP=<dir> writes them as WAVs)\n"
+        "  --videotest          decode every video videos.dtb names (Bink) to its last frame and check the frame counts\n"
         "  --facefxtest         parse every FaceFX .voc / .fac and check the lip servo's face graph against reference values\n"
         "  --shadertest         compile every shader on this GPU and report (no game data; GD05_GLES=1: OpenGL ES)\n"
         "  --view <milo>        draw one scene, e.g. world/stone/gen/stone.milo_xbox (development viewer); a UI\n"
         "                       panel (ui/gen/main.milo_xbox) draws with its components and texts (GD05_VIEW_LANG=\n"
         "                       eng|fre|deu|ita|esl, GD05_VIEW_FOCUS=<button>, GD05_VIEW_UI=0 plain scene)\n"
-        "  --playmovie <name>   play one of the disc's videos (intro.wmv, hmx.wmv, wg.wmv), then quit\n"
+        "  --playmovie <name>   play one of the disc's videos (e.g. rb_cinematic.bik), then quit\n"
         "  --uitest             run GH2's menu scripts headlessly: every screen and panel, their milos and components;\n"
         "                       GH2's career rules on a scratch band\n"
         "  --chartest           decode every character class on the disc (clips, rigs, band slots), check the counts\n"
@@ -167,7 +169,7 @@ namespace {
 
 int run(int argc, char** argv) {
     Options opt;
-    bool selftest = false, scenetest = false, shadertest = false, scripttest = false, uitest = false, venuetest = false, sfxtest = false, facefxtest = false, chartest = false;
+    bool videotest = false, selftest = false, scenetest = false, shadertest = false, scripttest = false, uitest = false, venuetest = false, sfxtest = false, facefxtest = false, chartest = false;
     std::string viewPath, movie;
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
@@ -190,6 +192,7 @@ int run(int argc, char** argv) {
         else if (a == "--venuetest") venuetest = true;
         else if (a == "--chartest") chartest = true;
         else if (a == "--sfxtest") sfxtest = true;
+        else if (a == "--videotest") videotest = true;
         else if (a == "--facefxtest") facefxtest = true;
         else if (a == "--walktest") opt.walk = value();
         else if (a == "--view") viewPath = value();
@@ -199,7 +202,7 @@ int run(int argc, char** argv) {
         else if (a.rfind("-psn_", 0) != 0) opt.dataPath = a;
     }
     if (shadertest) return runShaderTest();
-    if ((selftest || scenetest || scripttest || uitest || venuetest || sfxtest || facefxtest || chartest || !opt.walk.empty() || !viewPath.empty() || !movie.empty()) && opt.dataPath.empty()) {
+    if ((videotest || selftest || scenetest || scripttest || uitest || venuetest || sfxtest || facefxtest || chartest || !opt.walk.empty() || !viewPath.empty() || !movie.empty()) && opt.dataPath.empty()) {
         usage();
         return 2;
     }
@@ -209,6 +212,7 @@ int run(int argc, char** argv) {
     if (venuetest) return runVenueTest(opt.dataPath);
     if (chartest) return runCharTest(opt.dataPath);
     if (sfxtest) return runSfxTest(opt.dataPath);
+    if (videotest) return runVideoTest(opt.dataPath);
     if (facefxtest) return runFaceFxTest(opt.dataPath);
     if (!viewPath.empty()) return runSceneView(opt.dataPath, viewPath);
     if (!movie.empty()) return runPlayMovie(opt.dataPath, movie);

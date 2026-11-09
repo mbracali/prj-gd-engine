@@ -81,7 +81,7 @@ struct SongBand {
 SongBand songBand(const GameData& data, const std::string& id) {
     SongBand r;
     try {
-        DataNode root = parseDtb(data.read("config/gen/songs.dtb"));
+        DataNode root = parseDtb(data.read("songs/gen/songs.dtb"));
         resolveConditionals(root, {"HX_XBOX", "_SHIP"});
         for (const DataNode& e : root.children) {
             if (!e.isList() || e.children.empty() || !e.children[0].isText() || e.children[0].s != id) continue;

@@ -82,7 +82,7 @@ const DataNode* songEntry(UiManager& ui, const std::string& song) {
     if (!loaded) {
         loaded = true;
         try {
-            songs = scene::loadPlainDta(ui.data(), "config/gen/songs.dtb");
+            songs = scene::loadPlainDta(ui.data(), "songs/gen/songs.dtb");
         } catch (const std::exception&) {
         }
     }

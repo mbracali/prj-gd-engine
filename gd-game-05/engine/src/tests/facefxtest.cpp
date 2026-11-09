@@ -147,7 +147,7 @@ int runFaceFxTest(const std::string& dataPath) {
               "metal_singer .fac path");
         // The singer's .voc for every song of songs.dta: only the 6 instrumentals have none.
         {
-            DataNode songs = parseDtb(data.read("config/gen/songs.dtb"));
+            DataNode songs = parseDtb(data.read("songs/gen/songs.dtb"));
             resolveConditionals(songs, {"HX_XBOX", "_SHIP"});
             int found = 0, total = 0;
             std::set<std::string> missing;

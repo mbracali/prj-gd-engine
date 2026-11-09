@@ -152,13 +152,13 @@ std::vector<Mixer::Track> mixerTracks(const SongAudio& a, const std::array<std::
     return tracks;
 }
 
-// A player's chart (docs/multiplayer.md): the instrument's PART track; the
-// co-op lead's is PART GUITAR COOP (midi_suffix COOP) when the chart has it
-// [C data], the others fall back to the plain part [I].
+// A player's chart: the instrument's PART track (songs.dtb's instrument
+// symbols guitar / bass / drum / vocals) [C data].
 Part partFor(const Song& song, const std::string& instrument, bool coop) {
+    (void)coop;
     if (instrument == "bass" && song.hasPart[size_t(Part::Bass)]) return Part::Bass;
-    if (instrument == "rhythm" && song.hasPart[size_t(Part::Rhythm)]) return Part::Rhythm;
-    if (coop && song.hasPart[size_t(Part::GuitarCoop)]) return Part::GuitarCoop;
+    if ((instrument == "drum" || instrument == "drums") && song.hasPart[size_t(Part::Drums)]) return Part::Drums;
+    if (instrument == "vocals" && song.hasPart[size_t(Part::Vocals)]) return Part::Vocals;
     return Part::Guitar;
 }
 
