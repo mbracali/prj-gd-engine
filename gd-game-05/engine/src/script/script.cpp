@@ -597,7 +597,12 @@ Value Interp::send(ScriptObject* o, const std::string& message, std::vector<Valu
         o->setProp(*this, args[0].str(), args[1]);
         return args[1];
     }
-    if (message == "has" && !args.empty()) return Value::integer(o->hasProp(args[0].str()) ? 1 : 0);
+    if (message == "has" && !args.empty()) {
+        // {o has (key)} (RB's meta.dta) as {o has key}: a path's first key [I: deeper paths].
+        const auto* l = args[0].type == Value::Type::Array ? args[0].array.get() : nullptr;
+        const std::string key = l ? (l->empty() ? std::string() : l->front().str()) : args[0].str();
+        return Value::integer(o->hasProp(key) ? 1 : 0);
+    }
     if (message == "name") return Value::symbol(o->name());
     if (message == "class_name") return Value::symbol(o->className());
     if ((message == "thread_task" || message == "script_task") && !args.empty() && args[0].type == Value::Type::Code)

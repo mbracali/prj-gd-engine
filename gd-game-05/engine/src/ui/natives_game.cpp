@@ -996,6 +996,10 @@ public:
         if (msg == "is_player_participating") return r = Value::integer(intArg(args, 0) == 0 ? 1 : 0), true;
         if (msg == "set_active_roster") return true;
         if (msg == "load_all_chars") return true;  // the band's characters load with the venue (M6, GD05-008) [I]
+        // The help bar's icons (meta.dta refresh_display): a guitar (the
+        // keyboard and gamepads play as one) is always there; drums and a
+        // microphone are not recognised yet (M8) [I].
+        if (msg == "is_instrument_connected") return r = Value::integer(!args.empty() && args[0].str() == "guitar" ? 1 : 0), true;
         if (msg == "get_player_num_from_slot_num") return r = Value::integer(intArg(args, 0)), true;
         if (msg == "is_player_local") return r = Value::integer(intArg(args, 0) == 0 ? 1 : 0), true;
         if (msg == "get_instrument_from_controller") return r = Value::symbol("guitar"), true;

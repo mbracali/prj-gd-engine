@@ -691,6 +691,10 @@ void UiManager::switchScreens() {
     slots_ = makePlayerSlots(*this, *to);
     for (auto& sl : slots_) sl->dispatch("enter"), sl->dispatch("update");
     callScript(to, "enter");
+    // RB: the help bar learns the new screen ({helpbar update $new_screen},
+    // meta.dta: its (helpbar ...) config, then refresh_display) [C data; I: the native caller].
+    for (const char* hb : {"helpbar", "helpbar_dialog"})
+        if (ScriptObject* h = interp_.findObject(hb); h && h->handler("update")) callScript(h, "update", {Value::obj(to)});
     route("screen_change", {Value::obj(to), Value::obj(from), Value::integer(back_ ? 1 : 0)});
     if (animIn) {
         phase_ = Phase::In;
