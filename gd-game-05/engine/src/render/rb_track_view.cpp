@@ -106,6 +106,16 @@ void RbTrackView::load(const GameData& data, scene::MiloLibrary& library, const 
     // smasher_plate_guitar / _drum, its draw_order.grp [C data].
     for (const auto& [owner, d] : track_->root().subdirs)
         if (owner == (drums_ ? "smasher_plate_drum" : "smasher_plate_guitar")) smasherGroup_ = d->get("draw_order.grp") ? d->get("draw_order.grp")->as<scene::Group>() : nullptr;
+    // The sustain tails' template and materials (track/gem_tail.milo) [C data].
+    try {
+        tails_ = &library.load("track/gen/gem_tail.milo_xbox");
+        // Its materials' textures are track_shared's too [I].
+        scene::Milo& shared = library.load("track/gen/track_shared.milo_xbox");
+        auto& linked = tails_->root().linked;
+        if (std::find(linked.begin(), linked.end(), &shared.root()) == linked.end()) linked.push_back(&shared.root());
+    } catch (const std::exception& e) {
+        SDL_Log("RB track: gem_tail.milo: %s", e.what());
+    }
     // The camera: the track's game.cam [C data; the choice is I].
     cam_ = get<scene::Cam>("game.cam");
     if (!cam_)
@@ -257,6 +267,64 @@ void RbTrackView::drawGems(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, co
     }
 }
 
+// The sustain tails: a flat strip per sustained gem and slot, from the gem
+// (or the now bar while held) to its end, tail_<colour>.mat (tail_miss once
+// missed, tail_star for an Overdrive phrase); the drums have none [C data:
+// the materials; I: the shape, GH2's built tails are not ported (no whammy
+// wobble, no glow line)].
+void RbTrackView::drawTails(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, const PlayerView& player, float nowMs) {
+    if (!player.chart || !tails_ || drums_) return;
+    const scene::Mesh* tmpl = tails_->find<scene::Mesh>("tail02.mesh");
+    if (!tmpl) return;
+    tailVerts_.clear(), tailIndices_.clear(), tailRanges_.clear();
+    const auto& gems = player.chart->gems;
+    const float aheadMs = topY_ / (yPerSecond_ * speed_) * 1000.0f;
+    auto last = std::lower_bound(gems.begin(), gems.end(), nowMs + aheadMs, [](const Gem& g, float v) { return g.ms < v; });
+    constexpr float kHalfWidth = 0.5f, kZ = 0.05f;
+    for (auto it = gems.begin(); it != last; ++it) {
+        const Gem& g = *it;
+        if (g.noSustain || g.durationMs <= 0) continue;
+        const float endRel = yOf(g.ms + g.durationMs - nowMs);
+        if (endRel < bottomY_) continue;
+        const int i = int(it - gems.begin());
+        const bool hit = player.hit && player.hit(i);
+        const bool held = hit && player.heldGem == i;
+        if (hit && !held) continue;  // done or let go
+        const bool missed = player.missed && player.missed(i);
+        const bool star = !missed && g.phrase >= 0 && (!player.phraseIntact || player.phraseIntact(g.phrase));
+        float y0 = held ? 0.0f : std::max(yOf(g.ms - nowMs), bottomY_);
+        const float y1 = std::min(endRel, topY_);
+        if (y1 <= y0 + 0.01f) continue;
+        for (int b = 0; b < 5; ++b) {
+            if (!(g.frets & (1u << b))) continue;
+            const int f = player.laneOfBit[size_t(b)];
+            const std::string name = missed ? "tail_miss.mat" : star ? "tail_star.mat" : "tail_" + slotColors_[size_t(f)] + ".mat";
+            const scene::Mat* mat = tails_->find<scene::Mat>(name);
+            if (!mat) continue;
+            const float x = slotX(f);
+            const float c[4] = {mat->color[0], mat->color[1], mat->color[2], mat->color[3]};
+            const uint16_t base = uint16_t(tailVerts_.size() / 16);
+            if (base > 65000) break;
+            auto vertex = [&](float vx, float vy, float u, float v) {
+                tailVerts_.insert(tailVerts_.end(), {vx, vy, kZ, 0, 0, 1, c[0], c[1], c[2], c[3], u, v, 1, 0, 0, 1});
+            };
+            vertex(x - kHalfWidth, y0, 0, 0), vertex(x + kHalfWidth, y0, 1, 0), vertex(x + kHalfWidth, y1, 1, 1), vertex(x - kHalfWidth, y1, 0, 1);
+            const int first = int(tailIndices_.size());
+            for (uint16_t k : {0, 1, 2, 0, 2, 3}) tailIndices_.push_back(uint16_t(base + k));
+            tailRanges_.push_back({mat, first, 6});
+        }
+    }
+    if (tailRanges_.empty()) return;
+    if (!tailMesh_) tailMesh_ = std::make_unique<gfx::DynamicMesh>(cache.device());
+    const gfx::GpuMesh all = tailMesh_->upload(tailVerts_, tailIndices_);
+    setEnv(mr, cache, trackEnv_);
+    for (const TailRange& t : tailRanges_) {
+        gfx::GpuMesh part = all;
+        part.firstIndex = t.firstIndex, part.indexCount = t.indexCount;
+        gfx::drawMesh(mr, cache, *tmpl, gfx::Mat4::identity(), &pose_, t.mat, nullptr, &part);
+    }
+}
+
 void RbTrackView::draw(gfx::Renderer& r, gfx::SceneCache& cache, const Song& song, const PlayerView& player, float nowMs, float trackSpeed) {
     if (!track_) return;
     int vx, vy, vw, vh;
@@ -283,6 +351,7 @@ void RbTrackView::draw(gfx::Renderer& r, gfx::SceneCache& cache, const Song& son
     drawGroup(mr, cache, get<scene::Group>(drawGroup_), trackEnv_);
     drawBeatLines(mr, cache, song, nowMs);
     drawGroup(mr, cache, smasherGroup_, trackEnv_);
+    drawTails(mr, cache, player, nowMs);
     drawGems(mr, cache, player, nowMs);
     if (sub) r.device().setViewport(vx, vy, vw, vh);
     viewW_ = vw, viewH_ = vh;

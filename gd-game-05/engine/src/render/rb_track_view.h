@@ -4,6 +4,7 @@
 
 #include <array>
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -48,6 +49,7 @@ public:
         std::function<bool(int phrase)> phraseIntact;  // Overdrive phrase still capturable: star widgets
         bool overdriveActive = false;
         std::array<int, 5> laneOfBit{0, 1, 2, 3, 4};  // the gem's bit -> the track's lane
+        int heldGem = -1;  // the sustain being held (its tail shortens from the now bar)
     };
 
     RbTrackView();
@@ -75,6 +77,7 @@ private:
     const scene::Mat* slotMat(const scene::Mesh& m, int slot) const;
     void drawBeatLines(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, const Song& song, float nowMs);
     void drawGems(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, const PlayerView& player, float nowMs);
+    void drawTails(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, const PlayerView& player, float nowMs);
 
     scene::Milo* track_ = nullptr;
     std::string part_;
@@ -93,5 +96,15 @@ private:
     std::array<std::string, 5> slotColors_{"green", "red", "yellow", "blue", "orange"};
     const scene::TrackWidget *barW_ = nullptr, *beatW_ = nullptr, *halfBeatW_ = nullptr;
     std::string drawGroup_, animGroup_;
+    // The sustain tails (track/gem_tail.milo's tail02.mesh and tail_<colour>.mat).
+    scene::Milo* tails_ = nullptr;
+    std::unique_ptr<gfx::DynamicMesh> tailMesh_;
+    std::vector<float> tailVerts_;
+    std::vector<uint16_t> tailIndices_;
+    struct TailRange {
+        const scene::Mat* mat;
+        int firstIndex, indexCount;
+    };
+    std::vector<TailRange> tailRanges_;
     const scene::Group* smasherGroup_ = nullptr;  // smasher_plate_<instrument>'s draw_order.grp
 };

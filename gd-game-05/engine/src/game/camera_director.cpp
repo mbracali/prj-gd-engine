@@ -819,6 +819,7 @@ void CameraDirector::update() {
 // spring (0.02 x distance, velocity x 0.9); the offset is in the camera's
 // own axes (0x8214F950), the angles turn it about its right and up [I].
 void CameraDirector::play(const scene::CamShot& shot, ShotState& st, float f, float dt) {
+    if (shot.keyframes.empty()) return;  // RB has shots without keyframes (testlight...)
     Framing fr;
     frameShot(world_, shot, &st, f, &last_, dt, fr, &dof_);
     scene::Xfm x = fr.xfm;

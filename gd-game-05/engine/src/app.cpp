@@ -844,7 +844,7 @@ int App::run() {
                 synth_->stats().plays, synth_->stats().voices, (unsigned long long)synth_->player().started(), synth_->stats().decoded,
                 synth_->stats().decodeMs, synth_->stats().decodeFailures + synth_->stats().unresolved);
     synth_.reset();
-    hud_.reset(), track_.reset(), track2_.reset();
+    hud_.reset(), track_.reset(), track2_.reset(), rbTrack_.reset();
     sceneCache_.reset();
     milos_.reset();
     // A controller was used: its report (the save folder) for bug reports.
@@ -868,7 +868,7 @@ bool App::loadData(const std::string& path) {
         unloadVenue();
         dropGameParsers();
         ui_.reset();
-        hud_.reset(), track_.reset(), track2_.reset();
+        hud_.reset(), track_.reset(), track2_.reset(), rbTrack_.reset();
         sceneCache_.reset(), milos_.reset();
         trackTried_ = false;
         synth_.reset();
@@ -2394,7 +2394,7 @@ bool App::loadVenue(const std::string& venue, VenueVariant variant) {
     rbVenueNote_ = rbVenueEvent_ = 0;
     for (const auto& p : venue_->parts())
         for (scene::Object* o : p.milo->root().byClass("BandCamShot"))
-            if (auto* c = o->as<scene::CamShot>()) rbShots_[c->category].push_back(c);
+            if (auto* c = o->as<scene::CamShot>(); c && !c->keyframes.empty()) rbShots_[c->category].push_back(c);  // a shot with no keyframe frames nothing
     if (SDL_getenv("GD05_SHOTLOG")) {
         std::map<std::string, int> cats;
         for (const auto& p : venue_->parts())
@@ -3470,6 +3470,7 @@ void App::drawSong(float t) {
         pv.missed = [p, t](int i) { return !p->gemHit(i) && p->chart().gems[size_t(i)].ms < t - 150.0f; };  // [I] the miss window
         pv.phraseIntact = [p](int ph) { return p->phraseIntact(ph); };
         pv.overdriveActive = p->starPowerActive();
+        pv.heldGem = p->sustainGem();
         // The drums' permuted lanes back to the chart's (kick = lane 0).
         if (parts_[0] == "drum") pv.laneOfBit = {4, 1, 2, 3, 0};
         rbTrack_->setLefty(input_.lefty(0));

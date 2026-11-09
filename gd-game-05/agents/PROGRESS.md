@@ -145,3 +145,32 @@ Verified:
 Not done / approximate: RB's track and HUD (M4: the debug highway is
 used), RB's song list cloth (RenderDir drawn flat, GD05-022), label wrapping,
 the band modes' slots (one local player), characters as objects (M6).
+
+## 2026-11-09 16:50, M3 gate partly, M4 / M5 started
+
+Done since 15:45:
+- M3: RB's player slots, PreloadPanel, game_won / game_outro and
+  band_ui_sink sync_screen, endgame stats kept after the song, quasiquote,
+  Set objects, panel iterate / set_frame, stand-in characters, RB menu
+  music list, the in-game sfx bank.
+- M4: RB's highway from trackpanel.milo / tracksystem.milo (gem sets from
+  track_graphics.dtb, slot-coloured gems, beat lines, smasher plate); bass
+  and drums playable (`--part`, the slot's track type); drums through the
+  joypad watcher (D6); vocals fall back to the guitar (D7).
+- M5: RB's venues load and draw (VENUES list, WorldInstance as proxies,
+  mixed light kinds); camera cuts from the VENUE track by shot category.
+
+Verified (this hour, fresh build):
+- `gd05 "$ISO" --walktest quickplay` -> `walktest quickplay: OK` (screens: intro_movie_screen > ... > game_screen > endgame_waiting_screen > qp_endgame_screen).
+- `gd05 "$ISO" --scripttest` -> `scripttest: OK`.
+- `gd05 "$ISO" --scenetest` -> `scene test passed: 0 typed objects failed, 0 files failed` (WorldInstance 2683 + 286 own decoded).
+- `gd05 "$ISO" --selftest` (devices ignored) -> exit 0, `all charts fully hit`.
+- `gd05 "$ISO" --uitest` -> FAILED: 42 script component names not in the milos (open, GD05-005).
+- Screenshots (not committed): guitar and drums on RB's track, small_club_01 with cuts.
+
+Approximate / missing: no band on stage yet (M6), RB's HUD (debug HUD
+text), sustain tails, Overdrive / solo / fill looks, venue lighting
+calibration (no reference), RB's director rules (random shot per category).
+
+Next: M6 band on stage (prefab characters), then M9 launcher module and
+packages, then M10 by impact. Time used: 3.0 h of the 12-14 h estimate.
