@@ -50,6 +50,20 @@ public:
         if (chars::playerConfigNative(ui_, p, msg, args, r)) return true;
         if (msg == "set_track_type") return p.trackType = intArg(args, 0), true;
         if (msg == "get_track_type") return r = Value::integer(p.trackType), true;
+        // Rock Band's PlayerConfig messages (ui/*.dta): RB's track types are
+        // kTrackDrum 0, kTrackBass 1, kTrackGuitar 2, kTrackVocals 3 [C data: macros.dta].
+        if (msg == "player" || msg == "player_num") return r = Value::integer(i_), true;
+        if (msg == "is_local_player" || msg == "is_participating") return r = Value::integer(i_ == 0 ? 1 : 0), true;
+        if (msg == "get_track_sym") {
+            static const char* const kTracks[] = {"drum", "bass", "guitar", "vocals", "none"};
+            return r = Value::symbol(kTracks[std::clamp(p.trackType, 0, 4)]), true;
+        }
+        if (msg == "get_controller_sym") return r = Value::symbol(p.trackType == 0 ? "drum" : p.trackType == 3 ? "vocals" : "guitar"), true;
+        if (msg == "get_controller_type") return r = Value::integer(p.trackType == 0 ? 2 : p.trackType == 3 ? 3 : 1), true;
+        if (msg == "get_difficulty_sym") return r = Value::symbol(difficultySym(p.difficulty)), true;
+        if (msg == "get_char") return r = Value::symbol(p.character), true;
+        if (msg == "set_char") return p.character = args.empty() ? p.character : nameOf(args[0]), true;
+        if (msg == "set_ui_waiting") return true;
         return false;
     }
 
@@ -900,6 +914,15 @@ public:
             if (args.size() > 2) in.var(var(2)) = Value::real(e.endMs);
             return true;
         }
+        // Rock Band's GameConfig messages (ui/*.dta) [I: answers for one local
+        // player until the band modes (M7)].
+        if (msg == "get_player_config" || msg == "get_player") return r = in.send("game", "get_player_config", args), true;
+        if (msg == "is_missing_mic") return true;  // 0: the vocals' mic check comes with the mic (M8)
+        if (msg == "get_player_num_from_slot_num") return r = Value::integer(intArg(args, 0)), true;
+        if (msg == "is_player_local") return r = Value::integer(intArg(args, 0) == 0 ? 1 : 0), true;
+        if (msg == "get_instrument_from_controller") return r = Value::symbol("guitar"), true;
+        if (msg == "get_controller_type_from_controller") return r = Value::integer(1), true;
+        if (msg == "auto_assign_missing_slots" || msg == "debug_get_force_controller" || msg == "foreach_player_config") return true;
         // A handler of the mode's table (practice's full_speed_block,
         // pre_processed_audio: GameConfig evaluates the mode's entry) [C data: modes.dta].
         if (const DataNode* modes = ui_.modes())

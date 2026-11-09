@@ -41,3 +41,12 @@ pattern). Each says what, why and how to undo it.
 - **Undo:** replace the constant with a key read at run time (from a file
   the player provides, or the decrypted XEX); `decryptMogg` is the only user.
   OPEN_QUESTIONS.md Q3 asks the owner.
+
+## D4. No Xbox profile sign-in; the port's own save (2026-11-09)
+- **What:** `memcardmgr get_new_signin_player_num` and
+  `get_autosavable_player_num` answer -1 (nobody signed in), so RB's Xbox
+  save / load screens are skipped; `platform_mgr is_player_signed_in` is
+  FALSE. Progress goes to the port's versioned JSON save (lesson L12, M7).
+- **Why:** there is no Xbox Live profile or memory unit on PC; gd-game-02
+  did the same with GH2's memory card flow.
+- **Undo:** `engine/src/ui/rb_natives.cpp` (memcardmgr, platform_mgr).

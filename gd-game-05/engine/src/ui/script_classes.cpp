@@ -748,6 +748,8 @@ void PanelObj::draw() {
 }
 
 bool PanelObj::handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) {
+    // RB's panels: wait for session_mgr's next local player (ui/rb_natives.cpp).
+    if (msg == "wait_for_session_ready") return ui.setSessionWaiter(this), r = Value::integer(0), true;
     const auto argStr = [&](size_t i) { return i < args.size() ? nameOf(args[i]) : std::string(); };
     r = Value::integer(0);
     if (msg == "is_up") return r = Value::integer(up ? 1 : 0), true;
@@ -874,6 +876,13 @@ bool ScreenObj::handleNative(Interp&, const std::string& msg, std::vector<Value>
         return r = Value::symbol(p ? p->focus : std::string()), true;
     }
     if (msg == "is_up") return r = Value::integer(ui.current() == this ? 1 : 0), true;
+    // RB's UIScreen has_panel <panel>: whether the panel is one of the screen's [C data: main.dta].
+    if (msg == "has_panel") {
+        const std::string want = args.empty() ? std::string() : args[0].type == Value::Type::Object && args[0].object ? args[0].object->name() : args[0].str();
+        bool has = false;
+        for (PanelObj* p : panels()) has = has || p->name() == want;
+        return r = Value::integer(has ? 1 : 0), true;
+    }
     if (msg == "foreach_player") return r = ui.foreachPlayer(args), true;
     // Other messages go on to the focus panel: its natives (credits_screen's
     // {$this num_lines}), then its script (sel_guitar_new_screen's {$this

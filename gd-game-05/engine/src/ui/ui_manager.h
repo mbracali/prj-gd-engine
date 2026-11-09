@@ -160,6 +160,9 @@ public:
     int macroInt(const std::string& name, int def) const;
     // config/gh2.dta's (modes ...).
     const DataNode* modes() const { return modes_; }
+    // RB: the panel waiting for the session (wait_for_session_ready).
+    ScriptObject* sessionWaiter() const { return sessionWaiter_; }
+    void setSessionWaiter(ScriptObject* o) { sessionWaiter_ = o; }
     const DataNode* bootTree() const { return boot_; }
     // Objects reachable by name for scripts: components of panels resolve
     // through this ({tip.lbl ...}).
@@ -265,6 +268,7 @@ private:
     Interp interp_;
     const DataNode* boot_ = nullptr;
     const DataNode* modes_ = nullptr;
+    ScriptObject* sessionWaiter_ = nullptr;
     std::map<std::string, DataNode> macros_;
     std::vector<std::unique_ptr<ScriptObject>> natives_;
     std::unique_ptr<Session> session_;

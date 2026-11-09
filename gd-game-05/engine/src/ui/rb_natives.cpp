@@ -27,7 +27,6 @@ namespace ui {
 
 namespace {
 
-int intArg(const std::vector<Value>& a, size_t i, int def = 0) { return i < a.size() && a[i].isNumber() ? a[i].integerValue() : def; }
 std::string strArg(const std::vector<Value>& a, size_t i) { return i < a.size() ? a[i].str() : std::string(); }
 
 // A host object with a property map (get / set), add_sink / remove_sink,
@@ -63,39 +62,6 @@ protected:
     std::map<std::string, Fn> fns_;
 };
 
-// A player's configuration (gamecfg get_player_config n) [I: the fields
-// the scripts read, set by the menus].
-class PlayerConfigObj : public RbHost {
-public:
-    PlayerConfigObj(UiManager& ui, int n) : RbHost(ui, "player_config" + std::to_string(n)), num(n) {
-        static const char* const kTracks[] = {"drum", "bass", "guitar", "vocals", "none"};
-        on("player", [this](std::vector<Value>&) { return Value::integer(num); });
-        on("player_num", [this](std::vector<Value>&) { return Value::integer(num); });
-        on("is_local_player", [this](std::vector<Value>&) { return Value::integer(num == 0 ? 1 : 0); });
-        on("is_participating", [this](std::vector<Value>&) { return Value::integer(participating ? 1 : 0); });
-        on("set_participating", [this](std::vector<Value>& a) { return participating = intArg(a, 0) != 0, Value::integer(0); });
-        on("get_track_type", [this](std::vector<Value>&) { return Value::integer(track); });
-        on("set_track_type", [this](std::vector<Value>& a) { return track = intArg(a, 0, track), Value::integer(0); });
-        on("get_track_sym", [this](std::vector<Value>&) { return Value::symbol(kTracks[std::clamp(track, 0, 4)]); });
-        on("get_controller_type", [this](std::vector<Value>&) { return Value::integer(track == 2 || track == 1 ? 1 : 0); });
-        on("get_controller_sym", [this](std::vector<Value>&) { return Value::symbol(track == 0 ? "drum" : track == 3 ? "vocals" : "guitar"); });
-        on("get_difficulty", [this](std::vector<Value>&) { return Value::integer(difficulty); });
-        on("set_difficulty", [this](std::vector<Value>& a) { return difficulty = intArg(a, 0, difficulty), Value::integer(0); });
-        on("get_difficulty_sym", [this](std::vector<Value>&) {
-            static const char* const kDiff[] = {"easy", "medium", "hard", "expert"};
-            return Value::symbol(kDiff[std::clamp(difficulty, 0, 3)]);
-        });
-        on("get_char", [this](std::vector<Value>&) { return character; });
-        on("set_char", [this](std::vector<Value>& a) { return character = a.empty() ? Value::integer(0) : a[0], Value::integer(0); });
-        quiet({"set_ui_waiting", "reset"});
-    }
-    int num;
-    int track = 2;          // kTrackGuitar
-    int difficulty = 3;     // kDifficultyExpert
-    bool participating = false;
-    Value character = Value::integer(0);
-};
-
 }  // namespace
 
 void installRbNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<ScriptObject>>& owned) {
@@ -108,55 +74,32 @@ void installRbNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Scr
     auto yes = [](std::vector<Value>&) { return Value::integer(1); };
     auto no = [](std::vector<Value>&) { return Value::integer(0); };
 
-    // The four player configs and gamecfg (GameConfig).
-    std::array<PlayerConfigObj*, 4> cfg{};
-    for (int p = 0; p < 4; ++p) {
-        auto o = std::make_unique<PlayerConfigObj>(ui, p);
-        cfg[size_t(p)] = o.get();
-        add(std::move(o));
-    }
-    cfg[0]->participating = true;
-    RbHost* gamecfg = add(std::make_unique<RbHost>(ui, "gamecfg"));
-    gamecfg->on("get_player_config", [cfg](std::vector<Value>& a) { return Value::obj(cfg[size_t(std::clamp(intArg(a, 0), 0, 3))]); });
-    gamecfg->on("get_player", [cfg](std::vector<Value>& a) { return Value::obj(cfg[size_t(std::clamp(intArg(a, 0), 0, 3))]); });
-    gamecfg->on("get_player_num_from_slot_num", [](std::vector<Value>& a) { return Value::integer(intArg(a, 0)); });
-    gamecfg->on("is_player_local", [](std::vector<Value>& a) { return Value::integer(intArg(a, 0) == 0 ? 1 : 0); });
-    gamecfg->on("get_instrument_from_controller", [](std::vector<Value>&) { return Value::symbol("guitar"); });
-    gamecfg->on("get_controller_type_from_controller", [](std::vector<Value>&) { return Value::integer(1); });
-    gamecfg->quiet({"auto_assign_missing_slots", "debug_get_force_controller", "foreach_player_config"});
-
     // gamemode: the mode's settings from config/gen/modes.dtb (defaults,
     // then the mode's own block) [C data].
+    // gamemode: RB's mode switch over the same table gamecfg reads (the
+    // session's mode in config/gen/modes.dtb, then (defaults)) [C data].
     RbHost* gamemode = add(std::make_unique<RbHost>(ui, "gamemode"));
-    auto mode = std::make_shared<std::string>("init");
-    auto modeValue = [&ui, mode](const std::string& key) -> Value {
-        const DataNode* modes = ui.modes();
-        if (!modes) return Value::integer(0);
-        for (const char* block : {mode->c_str(), "defaults"}) {
-            const DataNode* b = modes->find(block);
-            if (!b) continue;
-            if (const DataNode* e = b->find(key); e && e->children.size() > 1) return ui.interp().toValue(e->children[1]);
-        }
+    auto modeValue = [&ui](const std::string& key) { return gameCfgValue(ui, key); };
+    gamemode->on("set_mode", [&ui](std::vector<Value>& a) {
+        Session& s = ui.session();
+        s.mode = strArg(a, 0);
+        s.cfgSet.clear();
+        if (a.size() > 1) s.cfgSet["player_num"] = a[1];
         return Value::integer(0);
-    };
-    gamemode->on("set_mode", [mode](std::vector<Value>& a) { return *mode = strArg(a, 0), Value::integer(0); });
-    gamemode->on("get_mode", [mode](std::vector<Value>&) { return Value::symbol(*mode); });
+    });
+    gamemode->on("get_mode", [&ui](std::vector<Value>&) { return Value::symbol(ui.session().mode); });
     gamemode->on("get", [modeValue](std::vector<Value>& a) { return modeValue(strArg(a, 0)); });
     gamemode->on("is_solo", [modeValue](std::vector<Value>&) { return Value::integer(modeValue("max_players").integerValue() == 1 ? 1 : 0); });
     gamemode->on("is_hth_arrangement", [modeValue](std::vector<Value>&) { return Value::integer(modeValue("player_arrangement").integerValue() == 1 ? 1 : 0); });
     gamemode->on("is_band_arrangement", [modeValue](std::vector<Value>&) { return Value::integer(modeValue("player_arrangement").integerValue() == 0 ? 1 : 0); });
-    gamemode->on("is_bwt", [mode](std::vector<Value>&) { return Value::integer(mode->find("bwt") != std::string::npos || *mode == "tour_band" ? 1 : 0); });
-    gamemode->on("is_solo_tour", [mode](std::vector<Value>&) { return Value::integer(*mode == "tour_solo" ? 1 : 0); });
+    gamemode->on("is_bwt", [&ui](std::vector<Value>&) { return Value::integer(ui.session().mode == "tour_world_local" ? 1 : 0); });
+    gamemode->on("is_solo_tour", [&ui](std::vector<Value>&) { return Value::integer(ui.session().mode == "tour_solo" ? 1 : 0); });
     gamemode->on("separate_parts", [modeValue](std::vector<Value>&) { return modeValue("separate_parts"); });
 
     // Online play is not in the port (GD05-013): a local session, signed out.
     RbHost* session = add(std::make_unique<RbHost>(ui, "session"));
     session->on("mode", no);  // kNetLocal
-    session->on("num_players", [cfg](std::vector<Value>&) {
-        int n = 0;
-        for (auto* c : cfg) n += c->participating ? 1 : 0;
-        return Value::integer(n);
-    });
+    session->on("num_players", [](std::vector<Value>&) { return Value::integer(1); });  // [I] solo until M7's band modes
     session->on("is_busy", no);
     session->on("disabled", no);
     session->on("state", no);
@@ -174,19 +117,43 @@ void installRbNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Scr
     profiles->on("get_sync_offset", no);
     profiles->on("get_default_sync_offset_ms", no);
     profiles->on("has_profile_map", no);
-    profiles->quiet({"set_sync_offset", "update_mic_gain", "update_vocal_volume"});
+    profiles->quiet({"set_sync_offset", "update_mic_gain", "update_vocal_volume", "purge_old_data"});
     RbHost* memcard = add(std::make_unique<RbHost>(ui, "memcardmgr"));
     memcard->on("is_device_valid", no);
+    // No profile signs in on PC: the Xbox save flow is skipped (-1 = nobody),
+    // the port keeps its own JSON save (lesson L12) [I] (DECISIONS D4).
+    auto nobody = [](std::vector<Value>&) { return Value::integer(-1); };
+    memcard->on("get_new_signin_player_num", nobody);
+    memcard->on("get_autosavable_player_num", nobody);
+    memcard->quiet({"saveload_profile_complete", "saveload_all_complete", "select_device"});
     RbHost* sink = add(std::make_unique<RbHost>(ui, "band_ui_sink"));
     sink->on("has_event", no);
     sink->on("is_forced_transition_active", no);
-    sink->quiet({"set_net_sync", "set_block_mode", "force_reset_screen", "sync_screen", "dismiss_event", "hide_network_busy_icon",
+    sink->quiet({"set_net_sync", "net_sync", "set_block_mode", "force_reset_screen", "sync_screen", "dismiss_event", "hide_network_busy_icon",
                  "show_network_busy_icon", "check_controllers", "set_controller_level"});
     RbHost* tour = add(std::make_unique<RbHost>(ui, "tour"));
     tour->on("performer", no);
     tour->quiet({"clear_performer"});
     RbHost* charCache = add(std::make_unique<RbHost>(ui, "char_cache"));
     charCache->quiet({"cache_update", "cache_enable", "cache_clear", "iterate", "meta_configure_done"});
+    // content_mgr: the Music Store / downloads are not in the port (GD05-013):
+    // the disc's content is all there is, its refresh always done.
+    RbHost* content = add(std::make_unique<RbHost>(ui, "content_mgr"));
+    content->on("refresh_done", yes);
+    content->quiet({"start_refresh"});
+    // session_mgr add_local_player: the local session is ready at once; the
+    // panel that asked (wait_for_session_ready) gets session_ready_complete_msg
+    // [I: the original's SessionMgr completes asynchronously].
+    RbHost* sessionMgr = add(std::make_unique<RbHost>(ui, "session_mgr"));
+    sessionMgr->on("add_local_player", [&ui](std::vector<Value>&) {
+        if (ScriptObject* w = ui.sessionWaiter()) {
+            ui.setSessionWaiter(nullptr);
+            ui.interp().send(w, "session_ready_complete_msg", {});
+        }
+        return Value::integer(0);
+    });
+    sessionMgr->on("is_finding", no);
+    sessionMgr->quiet({"remove_local_player", "cancel_find", "update_band_leader"});
     RbHost* songMgr = add(std::make_unique<RbHost>(ui, "song_mgr"));
     songMgr->on("has_song", [&ui](std::vector<Value>& a) { return Value::integer(songInfoIndex(ui, strArg(a, 0)) >= 0 ? 1 : 0); });
     songMgr->on("is_song_shared", yes);
