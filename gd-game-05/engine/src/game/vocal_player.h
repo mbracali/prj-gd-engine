@@ -65,7 +65,7 @@ private:
     std::vector<float> sungMs_;     // per note: ms sung on pitch
     std::vector<float> fraction_;   // per phrase, when rated
     std::vector<char> rated_;
-    size_t nextPhrase_ = 0, nextPerc_ = 0, cursor_ = 0;
+    size_t nextPhrase_ = 0, cursor_ = 0;
     float lastT_ = -1e9f;
     int score_ = 0, streak_ = 0;
     float meter_ = 0;

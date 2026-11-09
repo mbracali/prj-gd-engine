@@ -5,6 +5,55 @@ Rock Band (Xbox 360) -> `gd05`. Kickoff: `docs/spikes/GD-GAME-05_KICKOFF.md`
 bottom. "Verified" lines quote the command and its output; "built only" and
 "not tested" are said explicitly.
 
+## Final report, wave 01 (2026-11-09, about 4.3 h of agent time)
+
+Works (verified on Linux, fresh builds):
+- Solo Quickplay from RB's own menus: intro movie, title, main menu, Solo,
+  Quickplay, song list, difficulty (RB's player slots), loading, the song
+  in a venue, results, back to the song list; pause / resume.
+  `gd05 "$ISO" --walktest quickplay` -> `walktest quickplay: OK`;
+  `--walktest keys` (Enter / arrows / Esc through SDL events) -> `OK`.
+- Guitar, bass, drums on RB's highway (gems, colours, beat lines, now bar,
+  tails). Drums via GH2's joypad watcher (DECISIONS D6).
+- Every VENUES venue loads (WorldInstance decoded), camera cuts from the
+  VENUE track, lights.
+- `--selftest` exit 0 (`all charts fully hit`, `all input checks passed`,
+  vocals through the pitch detector 2132 / 2136 Great+); `--scenetest`
+  `0 typed objects failed, 0 files failed`; `--scripttest` `OK`;
+  `--videotest` OK; `--sfxtest` OK (374 moggs); core
+  `gdcore_audio_input_selftest` OK.
+- Enhanced Options reachable from RB's options menu.
+- Packages: `gd-engine-launcher/scripts/build.sh all --force` exit 0; every
+  bundle `complete (5 game module(s) ...)`: linux, steamdeck, windows,
+  android-arm64 (android rebuilt after a warning fix: 0 warnings).
+- Linux launcher: `--play gd05 --iso ... --exit-after` with
+  GDUL_GAME_QUIT_AFTER=25000 -> exit 0 (99 songs, intro movie playing).
+- Wine (Proton Experimental, own prefix): same -> `back from gd-game-05:
+  exit code 0 after 25.1 s`, the Bink intro decoded.
+
+Approximate [I]: venue lighting brightness (no reference), shot choice
+(random per category), song list cloth (inner camera, no render-to-texture,
+GD05-022), drum judging (joypad watcher), track colours swap, sustain tails
+(flat strips), help bar, debug text HUD instead of RB's HUD.
+
+Missing: band on stage (M6), vocals in game (D7: guitar instead), RB's HUD,
+Overdrive / solo / fill / BRE looks, tours / practice / training /
+multiplayer / Rock Shop / saves (M7), drum kit and mic recognition, 2-4
+players, `--uitest` (42 component names open, docs/audit.md), PC wording.
+
+Confidence per OS: Linux 🟢 (walks + launcher run), Windows 🟡 (Wine run
+25 s, no walk), Steam Deck 🟡 (built and verified, not run), Android 🔴
+(built and verified, not run), macOS 🔴 (not built here).
+
+## For the owner to play (wave 01)
+- Launcher > Rock Band > Solo > Quickplay > a song > Guitar > a difficulty;
+  play with the keyboard, a gamepad or the RB guitar; Esc pauses.
+- The bass (choose Bass on the difficulty screen) and the drums
+  (`--part drum`, an RB drum kit as a gamepad: LB kick, B Y X A pads).
+- Does the RB guitar's fret / strum map feel right? Are the venues too
+  bright or dark against the real game?
+- Options > Enhanced Options.
+
 ## Overall estimate
 
 Written at the start (2026-11-09 13:51), from the measured times of
