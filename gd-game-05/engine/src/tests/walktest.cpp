@@ -163,7 +163,12 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         wait(1500);
         key(SDLK_RETURN);  // the difficulty
         at("game_screen", 60000);
-        wait(2000);
+        wait(4000);
+        key(SDLK_ESCAPE);  // pause (Start)
+        at("pause_screen", 10000);
+        key(SDLK_RETURN);  // RESUME (the focus)
+        at("game_screen", 10000);
+        wait(1000);
     } else if (scenario == "dev_cheats") {
         // GD02-045: Enhanced > Developer Keyboard Cheats on, then a real 'l'
         // key (SDL event, through the app's bound-key filter) runs cheats.dta's

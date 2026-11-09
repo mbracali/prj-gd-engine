@@ -547,6 +547,7 @@ void Interp::installGh2Builtins() {
     addBuiltin("stagekit_get_bank_mode", [](Interp&, const DataNode&) { return Value::integer(0); });
     addBuiltin("stagekit_led_shift", [](Interp&, const DataNode&) { return Value::integer(0); });
     addBuiltin("stagekit_set_bank_state", [](Interp&, const DataNode&) { return Value::integer(0); });
+    addBuiltin("stagekit_pause", [](Interp&, const DataNode&) { return Value::integer(0); });
     // {find_obj a b c}: object a, then its child b ({a find b}), then c.
     addBuiltin("find_obj", [](Interp& in, const DataNode& c) {
         ScriptObject* o = nullptr;

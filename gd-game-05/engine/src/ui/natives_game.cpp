@@ -481,6 +481,8 @@ public:
         }
         // The band name generator's AI (BandNameAI) is not there [I].
         if (msg == "is_advanced_band_name_ai_active") return r = Value::integer(0), true;
+        if (msg == "get_player") return r = Value::obj(in.findObject("player" + std::to_string(std::clamp(intArg(args, 0), 0, 1)))), true;
+        if (msg == "is_game_over") return r = Value::integer(props.count("game_over") && props["game_over"].truthy() ? 1 : 0), true;
         if (msg == "load_all_chars" || msg == "load_crowd_audio" || msg == "reset_config" || msg == "unload_crowd_audio")
             return r = Value::integer(0), true;
         // The solo modes' score to the profile: RB's saves are M7 (GD05-009).
@@ -787,6 +789,11 @@ private:
         if (msg == "config") return r = ui_.interp().send("game", "get_player_config", {Value::integer(index)}), true;
         if (msg == "is_net") return r = Value::integer(0), true;
         if (msg == "finalize_stats") return true;
+        if (msg == "can_pause") return r = Value::integer(1), true;  // [I] RB's (the intro, a remote player) not read
+        // After the pause (pause.dta resume): the watcher's input back on, the
+        // vocal style re-read; the port's watcher never stops taking input,
+        // the vocals are not in the game yet (D7) [I].
+        if (msg == "enable_swings" || msg == "update_vocal_style") return true;
         if (msg == "stats_finalized") return r = Value::integer(1), true;
         if (msg == "notes_hit") return r = Value::integer(p ? p->notesHit() : 0), true;
         if (msg == "notes_hit_fraction") return r = Value::real(p && gems > 0 ? float(p->notesHit()) / float(gems) : 0.0f), true;
@@ -1018,6 +1025,13 @@ public:
         // RB: the performer whose score the solo modes keep (endgame.dta) [I: player 0 for one player].
         if (msg == "is_active_player") return r = Value::integer(intArg(args, 0) == 0 ? 1 : 0), true;  // one local player [I]
         if (msg == "main_performer") return r = Value::obj(ui_.interp().findObject("player0")), true;
+        // never_allow_input (pause.dta): the pause screen blocks the players' input itself [I].
+        if (msg == "never_allow_input") return true;
+        // {beatmatch player n}: the player object while a song is loaded (ui/game.dta on_pause).
+        if (msg == "player") {
+            const int p = intArg(args, 0);
+            return r = ui_.host().gameLoaded() && p == 0 ? Value::obj(ui_.interp().findObject("player0")) : Value::integer(0), true;
+        }
         if (msg == "foreach_active_player") {
             std::string var = args.empty() ? std::string() : args[0].str();
             if (!var.empty() && var[0] == '$') var = var.substr(1);

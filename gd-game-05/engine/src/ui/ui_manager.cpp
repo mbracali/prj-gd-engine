@@ -1176,6 +1176,14 @@ void UiManager::routeButton(int button, int player) {
         return;
     }
     if (s != current_ || !pending_.empty()) return;
+    // RB: Start in the song pauses: GamePanel's native side calls its
+    // on_pause handler with the player (ui/game.dta on_pause checks the rest)
+    // [C data: the handler; I: the native caller is not read].
+    if (button == kPad_Start)
+        if (ScriptObject* g = interp_.findObject("game"); g && g->handler("on_pause") && s->name() == "game_screen") {
+            callScript(g, "on_pause", {Value::integer(player)});
+            return;
+        }
     // RB: the player's slot (its state's BUTTON_DOWN_MSG, then the type's).
     if (!slots_.empty() && !slots_.front()->dispatch("button_down", args).isUnhandled()) {
         checkSlotsReady();

@@ -235,7 +235,9 @@ void installRbNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Scr
     session->on("num_players", [](std::vector<Value>&) { return Value::integer(1); });  // [I] solo until M7's band modes
     session->on("is_busy", no);
     session->on("disabled", no);
-    session->on("state", no);
+    // {session state}: kNetInGame (the .dtb's 2) while a song is loaded
+    // (ui/game.dta on_pause) [C data], else 0 [I: the other states' values].
+    session->on("state", [&ui](std::vector<Value>&) { return Value::integer(ui.host().gameLoaded() ? 2 : 0); });
     session->on("num_open_slots", no);
     session->quiet({"clear", "send_to_all", "send_to_player", "set_all_local_ready_status", "set_invites_allowed", "ignore_remote_messages", "done_loading"});
     RbHost* platform = add(std::make_unique<RbHost>(ui, "platform_mgr"));
@@ -270,7 +272,10 @@ void installRbNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Scr
         return Value::integer(0);
     });
     sink->quiet({"set_net_sync", "net_sync", "set_block_mode", "force_reset_screen", "dismiss_event", "hide_network_busy_icon",
-                 "show_network_busy_icon", "check_controllers", "set_controller_level"});
+                 "show_network_busy_icon", "set_controller_level"});
+    // check_controllers: every player's controller is there (ui/game.dta: FALSE
+    // pushes pause_controller_screen) [I: the port's own disconnect pause is the input layer's].
+    sink->on("check_controllers", yes);
     RbHost* tour = add(std::make_unique<RbHost>(ui, "tour"));
     tour->on("performer", no);
     tour->quiet({"clear_performer"});
