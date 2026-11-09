@@ -2,6 +2,14 @@
 
 ## 1.1.13
 
+Highlights
+- New backend implementation for all games: Graphics Backend (SDL3, Vulkan, OpenGL3) and Audio Backend (miniaudio, OpenAL, FAudio) in every game's Enhanced menu, on the new shared gd-engine-core; local, the game as before, stays the default.
+- Better consistency on the Enhanced menus across games: the same backend rows, Restart Now / Later pop-up and backend label everywhere.
+- Preparation for mod support.
+- 100+ bugs resolved in Guitar Hero III.
+- Rock Band 1 is starting to boot.
+
+Details
 - Every game: Enhanced > Performance & Graphics gets Graphics Backend (local, SDL3, Vulkan, OpenGL3) and Audio Backend (local, miniaudio, OpenAL, FAudio), the new shared gd-engine-core backends. local, the game as before, stays the default; a backend that cannot start falls back to local. The new backends are experimental (tested on Linux).
 - Changing a backend asks Restart Now or Later; Restart Now starts the game again inside the launcher on the new backend, back on the Enhanced menu. The Enhanced menu shows the backends in use.
 - The launcher hands its window to a game on SDL3 or Vulkan and takes it back afterwards; every game module ships the OpenAL Soft library and its licences.
