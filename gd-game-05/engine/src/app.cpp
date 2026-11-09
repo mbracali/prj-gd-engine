@@ -52,6 +52,7 @@
 #include "render/hud_view.h"
 #include "render/scene_gpu.h"
 #include "render/track_view.h"
+#include "render/rb_track_view.h"
 #include "render/band_view.h"
 #include "render/venue_view.h"
 #include "scene/milo.h"
@@ -555,6 +556,8 @@ private:
     std::unique_ptr<gfx::SceneCache> sceneCache_;
     std::unique_ptr<TrackView> track_;
     std::unique_ptr<HudView> hud_;
+    // Rock Band's highway (render/rb_track_view.h), when GH2's is not on the disc.
+    std::unique_ptr<RbTrackView> rbTrack_;
     // The venue behind the track (M8): set by the venue code once a venue is
     // loaded; draws the world with the renderer, materials with
     // DrawContext::hdr = `hdr` (GH2's HDR buffer, render/post_fx.h).
@@ -1333,8 +1336,19 @@ bool App::prepareTrack() {
         hud->load(*data_, *milos_, hudFile(mode_));
         track_ = std::move(track), track2_ = std::move(track2), hud_ = std::move(hud);
     } catch (const std::exception& ex) {
-        SDL_Log("GH2's track or HUD could not be loaded (%s); using the debug highway", ex.what());
-        track_.reset(), track2_.reset(), hud_.reset(), sceneCache_.reset(), milos_.reset();
+        track_.reset(), track2_.reset(), hud_.reset();
+        // Rock Band: its own track (trackpanel.milo / tracksystem.milo), the
+        // debug HUD's text over it until RB's HUD is drawn (M4) [I].
+        try {
+            auto rb = std::make_unique<RbTrackView>();
+            rb->load(*data_, *milos_, "guitar");
+            rbTrack_ = std::move(rb);
+            SDL_Log("RB's track loaded in %.0f ms", double(SDL_GetTicksNS() - start) / 1e6);
+            return false;
+        } catch (const std::exception& ex2) {
+            SDL_Log("RB's track could not be loaded (%s); using the debug highway", ex2.what());
+        }
+        rbTrack_.reset(), sceneCache_.reset(), milos_.reset();
         return false;
     }
     SDL_Log("track and HUD loaded in %.0f ms", double(SDL_GetTicksNS() - start) / 1e6);
@@ -3348,6 +3362,18 @@ void App::drawSong(float t) {
                 frames = 0, last = now, work = 0, particles = 0;
             }
         }
+    } else if (rbTrack_ && sceneCache_) {
+        drawWorld();
+        RbTrackView::PlayerView pv;
+        const Player* p = player_.get();
+        pv.chart = &p->chart();
+        pv.hit = [p](int i) { return p->gemHit(i) || !p->owned(i); };
+        pv.missed = [p, t](int i) { return !p->gemHit(i) && p->chart().gems[size_t(i)].ms < t - 150.0f; };  // [I] the miss window
+        pv.phraseIntact = [p](int ph) { return p->phraseIntact(ph); };
+        pv.overdriveActive = p->starPowerActive();
+        rbTrack_->setLefty(input_.lefty(0));
+        rbTrack_->draw(canvas_.renderer(), *sceneCache_, *song_, pv, t + float(videoOffsetMs_), speed);
+        highway_.drawHud(canvas_, *player_, title);
     } else {
         highway_.draw(canvas_, *song_, *player_, t, speed, title, flashes_);
         char buf[64];
