@@ -86,7 +86,7 @@ private:
     // Starts `e`'s decode on a worker when it is long; false: decode it at once.
     bool startStream(Entry& e);
     std::vector<std::shared_ptr<Job>> jobs_;  // started (joined at close)
-    SDL_AudioDeviceID device_ = 0;
+    bool device_ = false;  // its output is open (audiodev::openFx)
     std::unordered_map<uint32_t, std::shared_ptr<Entry>> entries_;
     struct Voice {
         uint32_t id = 0;

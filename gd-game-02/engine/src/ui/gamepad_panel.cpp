@@ -4,7 +4,7 @@
 // repository root, its mockup as an ASCII layout there): gd01's
 // (gd-game-01/engine/src/ui/gamepad_panel.cpp) with the same structure,
 // rows, flow and mouse, drawn with PortDraw (GH2's menu font and colours;
-// docs/knowledge/universal_launcher.md).
+// docs/guidelines/universal_launcher.md).
 #include "ui/gamepad_panel.h"
 
 #include <SDL3/SDL.h>

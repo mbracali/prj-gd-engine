@@ -5,7 +5,7 @@
 // src/ui/enhanced_panel.cpp, itself gd01's EnhancedPanel): its sections,
 // rows, check boxes, dropdowns, scrollbar, Back / Export / Import,
 // explanation box and mouse, in the game's menu font and colours (PortDraw)
-// over a still shot of a venue (docs/knowledge/universal_launcher.md).
+// over a still shot of a venue (docs/guidelines/universal_launcher.md).
 #include "ui/enhanced_panel.h"
 
 #include <SDL3/SDL.h>
@@ -43,6 +43,16 @@ const std::vector<EnhancedSetting>& enhancedSettings() {
         {"max_fps", {"60", "120", "144", "240", "unlimited"}},
         {"fps_counter", {"off", "on"}},
         {"hdr", {"none", "emulated", "true"}},
+        // Enhanced > Performance > Graphics / Audio backend (GDCORE-009,
+        // engine-backend-guidelines.md 4): read once at start-up
+        // (startupGraphicsBackend / startupAudioBackend in app.h); no mode
+        // changes them. Only what this build offers (no OpenGL on macOS, rule 7).
+#ifdef __APPLE__
+        {"graphics_backend", {"local", "sdl3", "vulkan"}},
+#else
+        {"graphics_backend", {"local", "sdl3", "vulkan", "opengl3"}},
+#endif
+        {"audio_backend", {"local", "miniaudio", "openal", "faudio"}},
         {"internal_res", {"0", "448", "480", "720", "800", "900", "1080", "1440", "2160"}},
         {"widescreen", {"off", "on"}},
         {"sharp_ui", {"off", "on"}},
@@ -166,9 +176,16 @@ void migrateEnhanced(Json& e) {
     map("light_dust", {{"on", "1.5x"}, {"off", "none"}});
     // XInput and Rock Band guitars are always on; Ground Fog and Light
     // Streaks were removed from every game (0.0.2): their values are dropped.
+    // Graphics / Audio backend: a value this build cannot offer (an unknown
+    // id, OpenGL3 on macOS) is dropped (GDCORE-009).
+    auto backendKept = [](const std::string& k, const Json& v) {
+        if (k != "graphics_backend" && k != "audio_backend") return true;
+        const EnhancedSetting* s = enhancedSetting(k);
+        return v.type == Json::Type::String && s && enhancedValid(*s, v.str());
+    };
     Json kept = Json::object();
     for (const auto& [k, v] : e.o)
-        if (k != "xinput" && k != "rockband" && k != "ground_fog" && k != "light_streaks") kept.set(k, v);
+        if (k != "xinput" && k != "rockband" && k != "ground_fog" && k != "light_streaks" && backendKept(k, v)) kept.set(k, v);
     e = std::move(kept);
 }
 
@@ -248,6 +265,26 @@ const std::vector<Item>& items() {
          "Removes the calibration: the audio and video delays go back to 0 ms, as before calibrating."},
         {Kind::Separator, "", "", true, ""},
         {Kind::Section, "graphics", "PERFORMANCE & GRAPHICS", true, "Window, frame rate, image quality and the venue's effects."},
+        // engine-backend-guidelines.md 4 (GDCORE-009): the gd-engine-core
+        // backends, first in the section (universal-menus.md "Backends").
+        {Kind::Choice, "graphics_backend", "Graphics Backend", true,
+         "The library the game draws with. local: the game's own OpenGL renderer, as always. SDL3: SDL's GPU API "
+         "(Vulkan, Metal or Direct3D 12 underneath). Vulkan: Vulkan directly. "
+#ifndef __APPLE__
+         "OpenGL3: the shared OpenGL 3.3 / GLES 3 renderer. "
+#endif
+         "If the one chosen cannot start, the game uses local. Takes effect when the game starts again: Restart Now does it at once.",
+         {{"local", "local"}, {"sdl3", "SDL3"}, {"vulkan", "Vulkan"},
+#ifndef __APPLE__
+          {"opengl3", "OpenGL3"},  // no OpenGL on macOS (engine-backend-guidelines.md rule 7)
+#endif
+         }},
+        {Kind::Choice, "audio_backend", "Audio Backend", true,
+         "The library the game plays its sound through. local: the game's own audio output, as always. "
+         "miniaudio: the shared mixer for every system. OpenAL: OpenAL Soft, 3D sound. FAudio: the XAudio2 "
+         "re-implementation. If the one chosen cannot start, the game uses local. Takes effect when the game "
+         "starts again: Restart Now does it at once.",
+         {{"local", "local"}, {"miniaudio", "miniaudio"}, {"openal", "OpenAL"}, {"faudio", "FAudio"}}},
         {Kind::Choice, "screen_mode", "Screen Mode", true,
          "Windowed; full screen at the desktop's resolution; or full screen without a border (a window covering the "
          "screen, the quickest to switch away from).",
@@ -409,6 +446,9 @@ public:
 
     std::string fileName() override { return ""; }
     bool drawsSomething() const override { return true; }
+    // Back answers the open pop-up (Restart Now / Later, a dropdown, the
+    // calibration), not the screen.
+    bool claimsBack() const override { return ask_ >= 0 || dropdown_ >= 0 || cal_.phase != 0; }
 
     void enter() override {
         rebuild();
@@ -422,6 +462,7 @@ public:
             entered_ = true;
         }
         dropdown_ = -1;
+        ask_ = -1;
         cal_ = Calib{};
         scroll_ = scrollTarget_ = 0;
         keepVisible();
@@ -439,6 +480,7 @@ public:
         (void)player;
         if (rows_.empty()) return false;
         if (cal_.phase != 0) return calibButton(button), true;
+        if (ask_ >= 0) return askButton(button), true;
         const Item& it = item(focus_);
         if (dropdown_ >= 0) {  // the open dropdown takes the input
             const int n = int(it.options.size());
@@ -451,7 +493,7 @@ public:
                 setValue(it, it.options[size_t(ddFocus_)].value);
             } else if (button == kPad_Tri) {
                 dropdown_ = -1;
-                ui.playSfx("button_back");
+                ui.playSfx("button_toggle");
             }
             return true;
         }
@@ -486,6 +528,7 @@ public:
             return true;
         }
         x -= d_.offset();
+        if (ask_ >= 0) return askMouse(x, y, click), true;
         if (dropdown_ < 0) {
             // Back / Export / Import under the list (the mockup).
             for (int b = 0; b < 3; ++b) {
@@ -515,7 +558,7 @@ public:
                 else if (click) dropdown_ = -1, setValue(it, it.options[k].value);
                 return true;
             }
-            if (click) dropdown_ = -1, ui.playSfx("button_back");
+            if (click) dropdown_ = -1, ui.playSfx("button_toggle");
             return true;
         }
         for (size_t r = 0; r < rows_.size(); ++r) {
@@ -569,6 +612,8 @@ public:
             for (int pass : {0, 1}) d_.begin(pass), drawDropdown();
         if (cal_.phase != 0)
             for (int pass : {0, 1}) d_.begin(pass), drawCalib();
+        if (ask_ >= 0)
+            for (int pass : {0, 1}) d_.begin(pass), drawAsk();
     }
 
 private:
@@ -663,9 +708,15 @@ private:
         if (!editable(it)) return ui.playSfx("button_error");
         for (const Option& o : it.options)
             if (v == o.value && !o.ok) return ui.playSfx("button_error");
+        const std::string before = ui.host().enhancedValue(it.key);
         ui.host().setEnhancedValue(it.key, v);
         rebuild();  // a choice may show or hide its dependent row
         ui.playSfx("button_select");
+        // A backend other than the one running: ask to restart now or later
+        // (the value is saved already: Later keeps it for the next start).
+        const std::string key = it.key;
+        if ((key == "graphics_backend" || key == "audio_backend") && v != before && v != ui.host().enhancedValue(key + "_now"))
+            ask_ = 0;
     }
     void activate() {
         const Item& it = item(focus_);
@@ -883,6 +934,62 @@ private:
         }
     }
 
+    // -- Restart Now / Later: after a Graphics or Audio Backend change
+    // (universal-menus.md "Backends"; gd01's), in this page's look: a dark
+    // box with the orange top line, GH2's menu font. Left / right (or up /
+    // down) moves, select chooses, back is Later; the mouse hovers and
+    // clicks. Restart Now ends the game and starts it again on the new
+    // backends, back on this screen (runApp).
+    static constexpr float kAskX0 = 330, kAskX1 = 950, kAskY0 = 250, kAskY1 = 470, kAskBtnY0 = 400, kAskBtnY1 = 440, kAskBtnW = 220;
+    static void askButtonRect(int b, float& x0, float& x1) {
+        const float cx = (kAskX0 + kAskX1) * 0.5f;
+        x0 = b == 0 ? cx - 20 - kAskBtnW : cx + 20, x1 = x0 + kAskBtnW;
+    }
+    void askChoose(int b) {
+        ask_ = -1;
+        if (b == 0) {
+            ui.playSfx("button_select");
+            ui.host().setEnhancedValue("restart_now", "1");
+        } else {
+            ui.playSfx("button_toggle");
+        }
+    }
+    void askButton(int button) {
+        if (button == kPad_DLeft || button == kPad_DRight || button == kPad_DUp || button == kPad_DDown) ask_ = 1 - ask_, ui.playSfx("button_toggle");
+        else if (button == kPad_X) askChoose(ask_);
+        else if (button == kPad_Tri) askChoose(1);
+    }
+    void askMouse(float x, float y, bool click) {
+        for (int b = 0; b < 2; ++b) {
+            float x0, x1;
+            askButtonRect(b, x0, x1);
+            if (x < x0 || x > x1 || y < kAskBtnY0 || y > kAskBtnY1) continue;
+            if (ask_ != b) ask_ = b, ui.playSfx("button_toggle");
+            if (click) askChoose(b);
+            return;
+        }
+    }
+    void drawAsk() {
+        const float o = d_.offset(), cx = (kAskX0 + kAskX1) * 0.5f + o;
+        d_.quad(o, 0, kScreenW + o, kScreenH, {0, 0, 0, 0.6f});
+        d_.quad(kAskX0 + o, kAskY0, kAskX1 + o, kAskY1, {0.06f, 0.06f, 0.08f, 0.96f});
+        d_.frame(kAskX0 + o, kAskY0, kAskX1 + o, kAskY1, 1.5f, PortDraw::kEdge);
+        d_.quad(kAskX0 + o, kAskY0, kAskX1 + o, kAskY0 + 5, kAccent);
+        d_.text("RESTART THE GAME?", cx, kAskY0 + 50, 34, kTitle, 0x22);
+        d_.text("The new backend runs when the game starts again.", cx, kAskY0 + 100, 22, kNormal, 0x22);
+        d_.text("Restart now, or keep playing and use it next time.", cx, kAskY0 + 128, 22, kNormal, 0x22);
+        for (int b = 0; b < 2; ++b) {
+            float x0, x1;
+            askButtonRect(b, x0, x1);
+            x0 += o, x1 += o;
+            const Color c = b == 0 ? Color{0.45f, 0.95f, 0.5f, 1} : Color{1, 0.86f, 0.35f, 1};  // green, yellow (the page's buttons)
+            const bool h = ask_ == b;
+            d_.quad(x0, kAskBtnY0, x1, kAskBtnY1, {c[0], c[1], c[2], h ? 0.4f : 0.2f});
+            d_.frame(x0, kAskBtnY0, x1, kAskBtnY1, h ? 3.0f : 1.5f, c);
+            d_.text(b == 0 ? "Restart Now" : "Later", (x0 + x1) * 0.5f, (kAskBtnY0 + kAskBtnY1) * 0.5f + 1, 22, h ? kFocused : kNormal, 0x22);
+        }
+    }
+
     // -- Audio / Video Calibration (gd01's; the original had none). A beat
     // every 750 ms: the audio step plays a tick, the video step flashes a
     // ring silently. After 3 lead-in beats, each press is matched to the
@@ -920,7 +1027,7 @@ private:
     void calibButton(int button) {
         if (button == kPad_Tri) {  // cancel (or close the result)
             cal_.phase = 0;
-            ui.playSfx("button_back");
+            ui.playSfx("button_toggle");
             return;
         }
         if (cal_.phase == 3) {
@@ -992,6 +1099,7 @@ private:
     std::vector<int> rows_;  // indexes into items() of the rows shown
     std::map<std::string, bool> collapsed_;
     int focus_ = 0, dropdown_ = -1, ddFocus_ = 0, hoverButton_ = -1;
+    int ask_ = -1;  // the Restart Now / Later pop-up: -1 closed, else the focused button
     bool entered_ = false;
     bool backdropMissed_ = false;  // drawn without the backdrop since entering (it fades in when it comes)
     double backdropFromMs_ = -1;

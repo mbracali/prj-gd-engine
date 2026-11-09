@@ -7,6 +7,8 @@
 
 #include <SDL3/SDL.h>
 
+#include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -22,14 +24,27 @@ struct GameRun {
     std::string error;      // why it did not start
     double seconds = 0;     // how long the game ran
     bool unloaded = false;  // the library left the process (its globals start fresh next time)
+    int windowSwitches = 0; // request_window calls that made the window again (sdk/gd_host.h)
+    bool windowLost = false;  // the launcher's OpenGL window could not be made again afterwards
 };
 
 // Arguments for the games' own command lines, after the program name and
 // before the disc image (the launcher's `-- <game args>`, main.cpp).
 void setExtraGameArgs(const std::vector<std::string>& args);
 
-GameRun runGameModule(SDL_Window* window, SDL_GLContext context, const Game& game, const std::string& launcherVersion,
-                      ActionLog& log);
+// Makes the launcher's window again for a graphics API (GD_WINDOW_API_*,
+// sdk/gd_host.h request_window): releases the launcher's OpenGL context and
+// objects for another API, makes them again for OpenGL. Gives the window and
+// context to use from now on (context null when not OpenGL); false with
+// `error` when it cannot (the window and context are then as they were).
+using WindowSwitch = std::function<bool(uint32_t api, SDL_Window*& window, SDL_GLContext& context, std::string& error)>;
+
+// `switchWindow` empty: the module only gets the OpenGL window (request_window
+// answers NULL for any other API). After the game, a window it had made for
+// another API is made an OpenGL one again (`window` / `context` then say
+// which); GameRun::error says so if that failed.
+GameRun runGameModule(SDL_Window*& window, SDL_GLContext& context, const Game& game, const std::string& launcherVersion,
+                      ActionLog& log, const WindowSwitch& switchWindow = {});
 
 // The game's menu sounds (gd_game_ui_sounds, optional): loads the module,
 // lets it give each sound to `sound`, unloads it. Returns how many it gave;

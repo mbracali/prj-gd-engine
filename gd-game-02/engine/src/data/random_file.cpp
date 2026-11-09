@@ -3,6 +3,16 @@
 #include "data/random_file.h"
 
 #include <stdexcept>
+#include <string>
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 namespace {
 
@@ -26,8 +36,26 @@ uint64_t size64(std::FILE* f) {
 
 }  // namespace
 
+// Windows: paths are UTF-8 (the launcher, SDL, the file dialogs), but fopen
+// reads its argument in the ANSI code page, so a disc in a folder or with a
+// name outside it (a user folder with an accent, Música, Japanese) would not
+// open while the launcher had recognised it (docs/guidelines/usual-bugs.md:
+// the launcher cannot load ISOs on Windows). Open it as a wide path there;
+// everywhere else (and if the text is not valid UTF-8) fopen as before.
+static std::FILE* openForReading(const std::string& path) {
+#ifdef _WIN32
+    const int n = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path.c_str(), -1, nullptr, 0);
+    if (n > 0) {
+        std::wstring wide(size_t(n), L'\0');
+        MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path.c_str(), -1, wide.data(), n);
+        if (std::FILE* f = _wfopen(wide.c_str(), L"rb")) return f;
+    }
+#endif
+    return std::fopen(path.c_str(), "rb");
+}
+
 std::unique_ptr<RandomFile> RandomFile::open(const std::string& path) {
-    std::FILE* f = std::fopen(path.c_str(), "rb");
+    std::FILE* f = openForReading(path);
     if (!f) return nullptr;
     uint64_t size = size64(f);
     return std::unique_ptr<RandomFile>(new RandomFile(f, size));

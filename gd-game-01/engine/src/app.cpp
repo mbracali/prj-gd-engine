@@ -29,6 +29,7 @@
 #include "game/rules.h"
 #include "game/song_db.h"
 #include "input/input.h"
+#include "gd/core/render/device.h"
 #include "render/hdr_output.h"
 #include "render/highway.h"
 #include "render/scene_renderer.h"
@@ -182,6 +183,10 @@ const std::map<std::string, Json>& enhancedDefaults() {
         {"cheat_no_venue", Json::boolean(false)},   {"cheat_monkey_crowd", Json::boolean(false)},
         {"cheat_skull_crowd", Json::boolean(false)}, {"audio_offset", Json::string("0")},
         {"video_offset", Json::string("0")},
+        // Enhanced > Performance > Graphics / Audio backend (GDCORE-006): read
+        // once at start-up (startupGraphicsBackend / startupAudioBackend); no
+        // Mode button sets them.
+        {"graphics_backend", Json::string("local")}, {"audio_backend", Json::string("local")},
         };
         for (auto& [k, v] : profileValues(false)) m[k] = v;
         return m;
@@ -209,6 +214,13 @@ const std::map<std::string, std::set<std::string>>& enhancedChoices() {
         {"color_grade", {"off", "warm", "cold", "vintage", "noir", "neon", "sepia"}},
         {"sharpening", {"off", "low", "high"}},
         {"hdr", {"none", "emulated", "true"}},
+        // engine-backend-guidelines.md 1 / rule 7: only what the platform can run (no OpenGL on macOS).
+#ifdef __APPLE__
+        {"graphics_backend", {"local", "sdl3", "vulkan"}},
+#else
+        {"graphics_backend", {"local", "sdl3", "vulkan", "opengl3"}},
+#endif
+        {"audio_backend", {"local", "miniaudio", "openal", "faudio"}},
         {"hopo_mode", {"original", "forgiving"}}};
     return c;
 }
@@ -251,10 +263,36 @@ void migrateEnhanced(Json& e) {
     map("light_dust", {{"true", "1.5x"}, {"false", "none"}});
     // XInput and Rock Band guitars are always on now; Ground Fog and Light
     // Streaks were removed (1.1.7): their saved values are dropped.
+    // A backend this build does not offer (OpenGL3 copied from another OS to
+    // macOS, a typo) is dropped: the game starts on local (GDCORE-006).
+    auto offered = [&](const std::string& k, const Json& v) {
+        if (k != "graphics_backend" && k != "audio_backend") return true;
+        const auto& c = enhancedChoices().at(k);
+        return v.type == Json::Type::String && c.count(v.s) > 0;
+    };
     Json kept = Json::object();
     for (const auto& [k, v] : e.o)
-        if (k != "xinput" && k != "rockband" && k != "ground_fog" && k != "light_streaks") kept.set(k, v);
+        if (k != "xinput" && k != "rockband" && k != "ground_fog" && k != "light_streaks" && offered(k, v)) kept.set(k, v);
     e = std::move(kept);
+}
+// Enhanced > Performance > Graphics / Audio backend as the game started with
+// them (GDCORE-006): latched by App::run right after enhanced.json is read, so
+// a change in the menu applies on the next start (engine-backend-guidelines.md
+// rule 4). Read through startupGraphicsBackend / startupAudioBackend (app.h).
+struct StartupBackends {
+    bool latched = false;
+    std::string graphics = "local", audio = "local";
+};
+StartupBackends& startupBackends() {
+    static StartupBackends b;
+    return b;
+}
+// `e` is enhanced.json after migrateEnhanced (anything not offered is gone).
+void latchStartupBackends(const Json& e) {
+    StartupBackends& b = startupBackends();
+    b.latched = true;
+    b.graphics = e.has("graphics_backend") ? e["graphics_backend"].str() : "local";
+    b.audio = e.has("audio_backend") ? e["audio_backend"].str() : "local";
 }
 // Number settings (as strings, ms) and their range.
 const std::map<std::string, std::pair<int, int>>& enhancedRanges() {
@@ -299,7 +337,7 @@ void rememberPath(const std::string& path) {
 class App {
 public:
     explicit App(const Options& o) : opt_(o), difficulty_(std::clamp(o.difficulty, 0, 3)) {}
-    int run();
+    int run(int* restartSlot = nullptr);  // restartSlot: set (the profile slot) when Restart Now ends the run
 
 private:
     enum class Screen { NeedData, Menu, Playing, Paused, Results, SceneView, PanelView };
@@ -378,6 +416,7 @@ private:
     float venueMs_ = -1e9f;                 // song time of the last venue update
     void updateVenue(float t);
     bool running_ = true;
+    bool restart_ = false;  // Enhanced > Graphics / Audio backend > Restart Now
     Screen screen_ = Screen::NeedData;
     std::string message_;
 
@@ -461,6 +500,7 @@ private:
     };
     std::map<std::string, std::unique_ptr<VenueObjectProxy>> venueProxies_;
     void drawFpsCounter();
+    void drawBackendLabel();
     uint64_t uiTicks_ = 0;
     void backToMenu();
     void uiButton(const InputEvent& e);
@@ -497,6 +537,7 @@ private:
         uint64_t pos = 0, startNs = 0, next = 0;
         int texture = 0;
         SDL_AudioStream* audio = nullptr;
+        std::unique_ptr<AudioRoute> route;  // the song's audio backend when not local (owns `audio`)
         Image frame;
     };
     std::unique_ptr<Movie> movie_;
@@ -722,9 +763,18 @@ void App::tryLoadData(const std::string& path) {
             hooks.enhancedValue = [this](const std::string& key) {
                 if (key == "upscaler_status") return renderer_.upscalerStatus();  // read-only, for the AI Upscaling help
                 if (key == "hdr_status") return hdrStatus();                      // read-only, for the HDR help
+                if (key == "graphics_backend_now") return renderer_.backend();    // read-only: what draws (after a fallback)
+                if (key == "audio_backend_now")                                   // read-only: what plays
+                    return mixer_.outputBackend().empty() ? std::string("local") : mixer_.outputBackend();
                 return enhanced(key).str();
             };
-            hooks.setEnhancedValue = [this](const std::string& key, const std::string& v) { setEnhanced(key, Json::string(v)); };
+            hooks.setEnhancedValue = [this](const std::string& key, const std::string& v) {
+                if (key == "restart_now") {  // not a setting: Enhanced's Restart Now
+                    restart_ = true, running_ = false;
+                    return;
+                }
+                setEnhanced(key, Json::string(v));
+            };
             hooks.userFiles = [this](const std::string& action) { userFiles(action); };
             hooks.userFilesStatus = [this] { return userFilesStatus_; };
             hooks.menuBackdrop = [this](bool on) {
@@ -780,8 +830,10 @@ void App::tryLoadData(const std::string& path) {
                         break;
                     }
                 if (const char* slot = SDL_getenv("GD01_SLOT")) campaign_->setSlot(std::atoi(slot));  // e.g. 8: The Glitches
+                if (opt_.startSlot >= 0) campaign_->setSlot(opt_.startSlot);  // Restart Now: the profile played
                 ui_->interp().var("autosave") = Value::integer(1);
                 const char* screen = SDL_getenv("GD01_SCREEN");  // dev aid: open this screen, e.g. credits
+                if (!screen && !opt_.startScreen.empty()) screen = opt_.startScreen.c_str();
                 ui_->gotoScreen(screen ? screen : "main");
             } else {
                 ui_->boot(false);
@@ -1302,8 +1354,23 @@ void App::startMovie(const std::string& file) {
         return;
     }
     SDL_AudioSpec spec{SDL_AUDIO_S16, PssMovie::kAudioChannels, PssMovie::kAudioRate};
-    m->audio = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, nullptr, nullptr);
-    if (m->audio) SDL_ResumeAudioStreamDevice(m->audio);
+    if (!mixer_.outputBackend().empty()) {
+        // The movie's sound through the same backend as the game's (its own
+        // output: the picture follows the wall clock, as on local).
+        std::string why;
+        m->route = AudioRoute::open(mixer_.outputBackend(), spec, nullptr, nullptr, why);
+        if (m->route && m->route->start(why)) {
+            m->audio = m->route->stream();
+            SDL_Log("movie %s: audio through %s", path.c_str(), mixer_.outputBackend().c_str());
+        } else {
+            m->route.reset();
+            SDL_Log("movie %s: audio backend %s failed (%s); using local", path.c_str(), mixer_.outputBackend().c_str(), why.c_str());
+        }
+    }
+    if (!m->audio) {
+        m->audio = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, nullptr, nullptr);
+        if (m->audio) SDL_ResumeAudioStreamDevice(m->audio);
+    }
     mixer_.stopMusic(0);  // the movie plays alone
     m->startNs = SDL_GetTicksNS();
     movie_ = std::move(m);
@@ -1355,6 +1422,30 @@ void App::drawFpsCounter() {
     }
 }
 
+// Enhanced Settings only: the graphics and audio backends this run uses (after
+// any fallback to local), on the line just above the FPS counter's (beside
+// it, and on it when the counter is off, the help bar's legend takes the
+// room) (universal-menus.md, Graphics / Audio backend).
+void App::drawBackendLabel() {
+    if (!ui_ || movie_ || screen_ != Screen::Menu || ui_->currentScreen() != "enhanced_settings") return;
+    auto label = [](const std::string& id) -> std::string {
+        static const std::map<std::string, std::string> k = {{"sdl3", "SDL3"},          {"vulkan", "Vulkan"}, {"opengl3", "OpenGL3"},
+                                                             {"miniaudio", "miniaudio"}, {"openal", "OpenAL"}, {"faudio", "FAudio"}};
+        auto it = k.find(id);
+        return it == k.end() ? std::string("local") : it->second;
+    };
+    // The chosen one that could not start is named after it (rule 2's fallback, shown).
+    auto shown = [&](const std::string& running, const std::string& chosen) {
+        return label(running) + (chosen != running && label(chosen) != "local" ? " (" + label(chosen) + " could not start)" : "");
+    };
+    const std::string audio = mixer_.outputBackend().empty() ? "local" : mixer_.outputBackend();
+    const std::string s = "Graphics: " + shown(renderer_.backend(), startupGraphicsBackend()) +
+                          "   Audio: " + shown(audio, startupAudioBackend());
+    const float y = 667;  // always above the counter's line: there the help bar's legend starts at x 200
+    ui_->drawText("impactor.font", s, 25, y + 2, 20, {0, 0, 0, 0.6f}, 0x41);  // shadow
+    ui_->drawText("impactor.font", s, 23, y, 20, {1, 1, 1, 0.9f}, 0x41);
+}
+
 // The version on the main title screen, top right: the FPS counter's font and
 // size, in white.
 void App::drawVersion() {
@@ -1366,7 +1457,8 @@ void App::drawVersion() {
 
 void App::endMovie() {
     if (!movie_) return;
-    if (movie_->audio) SDL_DestroyAudioStream(movie_->audio);
+    if (movie_->route) movie_->route.reset();  // stops its output, destroys `audio`
+    else if (movie_->audio) SDL_DestroyAudioStream(movie_->audio);
     movie_.reset();
     uiTicks_ = SDL_GetTicksNS();  // the UI clock was frozen
 }
@@ -2425,7 +2517,7 @@ bool setGlAttributes() {
     return gles;
 }
 
-int App::run() {
+int App::run(int* restartSlot) {
     // The Enhanced Settings first (before SDL starts).
     if (std::ifstream in(enhancedPath()); in) {
         std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
@@ -2437,6 +2529,8 @@ int App::run() {
         }
         if (enhanced_.type != Json::Type::Object) enhanced_ = Json::object();
     }
+    latchStartupBackends(enhanced_);  // this start's backends (startupGraphicsBackend / startupAudioBackend)
+    SDL_Log("backends: graphics %s, audio %s", startupBackends().graphics.c_str(), startupBackends().audio.c_str());
     gpu::preferDedicated();  // hybrid machines: the dedicated GPU, before SDL picks one
 #ifdef __ANDROID__
     SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");  // the back button is the game's Back, not "leave the app"
@@ -2474,20 +2568,34 @@ int App::run() {
         SDL_GetWindowSize(window_, &w, &h);
         renderer_.windowToMenu(nx * float(w), ny * float(h), mx, my);
     });
-    setGlAttributes();
+    const bool gles = setGlAttributes();
+    // Enhanced > Graphics backend (GDCORE-005): local, or a gd-engine-core
+    // backend; GD01_GRAPHICS_BACKEND=<id> overrides it (development aid, tests).
+    // Decided before the window: SDL3 GPU and Vulkan need a window made for
+    // their API (in the launcher, prepareWindow asks it for one;
+    // gd-engine-core/docs/render.md section 5). Local and opengl3 keep the
+    // OpenGL window.
+    const char* backendOverride = SDL_getenv("GD01_GRAPHICS_BACKEND");
+    const std::string backendId = backendOverride ? backendOverride : startupGraphicsBackend();
+    namespace gr = gd::core::render;
+    gr::Backend coreBackend = gr::Backend::OpenGL3;
+    const bool gpuWindow = gr::parseBackend(backendId.c_str(), coreBackend) && coreBackend != gr::Backend::OpenGL3 && gr::backendCompiled(coreBackend);
+    if (gpuWindow) gr::prepareWindow(coreBackend, gles);
     // Development aid: GD01_WINDOW=<w>x<h> sets the starting window size (e.g. ultrawide tests).
     int winW = int(kScreenW), winH = int(kScreenH);
     if (const char* ws = SDL_getenv("GD01_WINDOW")) std::sscanf(ws, "%dx%d", &winW, &winH);
-    const SDL_WindowFlags winFlags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY
+    const SDL_WindowFlags winFlagsGl = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY
 #ifdef __ANDROID__
-                                     | SDL_WINDOW_FULLSCREEN
+                                       | SDL_WINDOW_FULLSCREEN
 #endif
         ;
+    const SDL_WindowFlags winFlags = gpuWindow ? (winFlagsGl & ~SDL_WINDOW_OPENGL) | SDL_WindowFlags(gr::windowFlags(coreBackend)) : winFlagsGl;
     // Enhanced > HDR > True HDR: the window's surface is chosen now (render/hdr_output.h).
     // A window or surface that cannot be made with it is made again without (Emulated).
+    // The surface probe is OpenGL's: on the SDL3 GPU / Vulkan backends True HDR runs as Emulated.
     hdrSurface_ = hdr::Surface::Sdr;
-    hdrReason_ = hdr::unsupportedReason();
-    const bool wantHdr = enhanced("hdr").str() == "true" && hdr::request();
+    hdrReason_ = gpuWindow ? std::string("True HDR is not on the ") + backendId + " graphics backend yet" : hdr::unsupportedReason();
+    const bool wantHdr = !gpuWindow && enhanced("hdr").str() == "true" && hdr::request();
     window_ = SDL_CreateWindow(kAppTitle, winW, winH, winFlags);
     if (wantHdr) {
         if (window_) {
@@ -2513,7 +2621,20 @@ int App::run() {
     setAppWindowIcon(window_);
     installDesktopEntry();
     std::string glError;
+    renderer_.setBackend(backendId);
     bool glOk = window_ && renderer_.init(window_, glError);
+    if (gpuWindow && !glOk) {
+        // The backend did not start (Renderer::init logged why): the window is
+        // made again for OpenGL and local runs on it (rule 2: never a black
+        // screen). In the launcher the shim gets its OpenGL window back.
+        SDL_Log("graphics backend: %s: making the window again for OpenGL (local)", backendId.c_str());
+        if (window_) SDL_DestroyWindow(window_);
+        gr::prepareWindow(gr::Backend::OpenGL3, gles);
+        window_ = SDL_CreateWindow(kAppTitle, winW, winH, winFlagsGl);
+        if (window_) setAppWindowIcon(window_);
+        renderer_.setBackend("local");
+        glOk = window_ && renderer_.init(window_, glError);
+    }
     if (glOk) renderer_.setHdrSurface(int(hdrSurface_));
     gpu::started(glOk, renderer_.gpuName());
     if (!glOk) {
@@ -2524,7 +2645,13 @@ int App::run() {
     applyEnhanced();
 
     std::string audioError;
-    if (!mixer_.open(audioError)) {
+    // Enhanced > Audio backend, as latched at start-up (applies on the next
+    // start); a gd-engine-core backend that does not start leaves local.
+    // Development aid: GD01_AUDIO_BACKEND=<id> overrides it (the walks on
+    // each backend).
+    std::string audioBackend = startupAudioBackend();
+    if (const char* b = SDL_getenv("GD01_AUDIO_BACKEND"); b && *b) audioBackend = b;
+    if (!mixer_.open(audioError, audioBackend)) {
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, kAppTitle, ("Cannot open audio: " + audioError).c_str(), window_);
         return 1;
     }
@@ -2606,6 +2733,7 @@ int App::run() {
         drawVersion();
         if (!movie_) drawTouchButtons();
         if (enhancedOn("fps_counter")) drawFpsCounter();
+        drawBackendLabel();
         captureDebugScreenshot();
         renderer_.endFrame();
     }
@@ -2615,12 +2743,51 @@ int App::run() {
     renderer_.shutdown();
     SDL_DestroyWindow(window_);
     SDL_Quit();
+    if (restart_ && restartSlot) *restartSlot = campaign_ ? campaign_->slot() : 0;
     return 0;
 }
 
 }  // namespace
 
-int runApp(const Options& options) { return App(options).run(); }
+// Enhanced > Graphics / Audio backend > Restart Now (universal-menus.md):
+// the App ends and starts again in the same process (in the launcher too: the
+// module keeps running, so the launcher's window is handed over again), back
+// on Enhanced Settings with the same profile.
+int runApp(const Options& options) {
+    Options o = options;
+    for (;;) {
+        int restartSlot = -1;
+        const int r = App(o).run(&restartSlot);
+        if (restartSlot < 0) return r;
+        SDL_Log("restart: Enhanced Settings asked for a restart (the new backends)");
+        o = options;
+        o.song.clear(), o.panel.clear(), o.viewScene.clear();
+        o.skipBoot = true;
+        o.startScreen = "enhanced_settings";
+        o.startSlot = restartSlot;
+    }
+}
+
+std::string startupGraphicsBackend() {
+    if (!startupBackends().latched) {  // asked before App::run read the settings: read them now
+        Json e = Json::object();
+        if (std::ifstream in(enhancedPath()); in) {
+            try {
+                e = Json::parse(std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>()));
+            } catch (const std::exception&) {
+                e = Json::object();
+            }
+        }
+        migrateEnhanced(e);
+        latchStartupBackends(e.type == Json::Type::Object ? e : Json::object());
+    }
+    return startupBackends().graphics;
+}
+
+std::string startupAudioBackend() {
+    startupGraphicsBackend();  // latches both
+    return startupBackends().audio;
+}
 
 namespace {
 // The universal controls' rules (universal_mechanisms.md 1.1.4 / 1.2.1),
@@ -2692,6 +2859,26 @@ int inputSelfTest() {
           "1.1.6 enhanced.json migrated");
     for (const auto& [k, v] : old.o)
         if (auto c = enhancedChoices().find(k); c != enhancedChoices().end()) check(v.type == Json::Type::String && c->second.count(v.s), "migrated value valid");
+    // GDCORE-006: Graphics / Audio backend default local; no Mode button sets
+    // them; a value this build does not offer is dropped at load.
+    check(enhancedDefaults().at("graphics_backend").str() == "local" && enhancedDefaults().at("audio_backend").str() == "local",
+          "backends default local");
+    for (const char* m : {"steam_deck", "original", "clean", "max_hd", "max_4k", "budget", "good_old_days"}) {
+        auto p = enhancedPreset(m);
+        check(!p.empty() && !p.count("graphics_backend") && !p.count("audio_backend"), "a mode keeps the backends");
+    }
+    check(!profileValues(true).count("graphics_backend") && !profileValues(false).count("audio_backend"), "the build profiles keep the backends");
+    Json be = Json::parse(R"({"graphics_backend":"vulkan","audio_backend":"openal"})");
+    migrateEnhanced(be);
+    check(be["graphics_backend"].str() == "vulkan" && be["audio_backend"].str() == "openal", "offered backends kept");
+    be = Json::parse(R"({"graphics_backend":"metal","audio_backend":true,"bloom":"2x"})");
+    migrateEnhanced(be);
+    check(!be.has("graphics_backend") && !be.has("audio_backend") && be["bloom"].str() == "2x", "unknown backends dropped");
+#ifdef __APPLE__
+    be = Json::parse(R"({"graphics_backend":"opengl3"})");
+    migrateEnhanced(be);
+    check(!be.has("graphics_backend"), "no OpenGL3 on macOS");
+#endif
     std::printf(failures ? "input self-test: %d of %d checks failed\n" : "input self-test: all %d checks passed\n", failures ? failures : checks, checks);
     return failures;
 }

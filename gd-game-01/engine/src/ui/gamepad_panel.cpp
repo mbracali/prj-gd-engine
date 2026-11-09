@@ -15,7 +15,7 @@
 namespace {
 
 // [I] Not in the original game: the universal Gamepad menu
-// (docs/knowledge/universal_mechanisms.md 1.2.1, its mockup as an
+// (docs/guidelines/universal_mechanisms.md 1.2.1, its mockup as an
 // ASCII layout there). Self-contained so the other games can copy it: it
 // only needs SelectHost (drawing, sounds, dialogs) and Input.
 //

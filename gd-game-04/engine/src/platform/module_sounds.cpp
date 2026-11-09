@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 // gd_game_ui_sounds: GH3's own menu sounds for the launcher's menus
-// (docs/adding-a-game.md "Menu sounds"): the samples of the scripts' sound
+// (docs/platform/adding-a-game.md "Menu sounds"): the samples of the scripts' sound
 // events ui_sfx_scroll (move), ui_sfx_select (select, play) and
 // Generic_Menu_Back_SFX (back, error) [C data: global_sound_events.qb].
 #include <exception>

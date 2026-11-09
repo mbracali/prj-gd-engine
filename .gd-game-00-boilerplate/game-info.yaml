@@ -12,7 +12,7 @@ guitar_dream_version: "0.0.0"
 ready_to_play: false
 completeness: 0
 # How the launcher recognises the game's disc image by its content (see
-# docs/adding-a-game.md); any one matching signature identifies it.
+# docs/platform/adding-a-game.md); any one matching signature identifies it.
 iso_signatures:
   - format: xdvdfs          # xdvdfs (Xbox, Xbox 360) or iso9660 (PlayStation 2, ...)
     xex_title_id: "00000000"  # Xbox 360: default.xex's title ID

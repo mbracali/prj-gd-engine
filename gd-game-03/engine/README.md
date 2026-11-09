@@ -46,7 +46,7 @@ a frame-time breakdown every 2 s.
 
 ## Controls
 
-The default controls (docs/knowledge/universal_mechanisms.md 1.1.4):
+The default controls (docs/guidelines/universal_mechanisms.md 1.1.4):
 
 | Action | Keyboard | Gamepad (XInput) |
 |---|---|---|

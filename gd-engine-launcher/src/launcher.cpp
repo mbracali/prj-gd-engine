@@ -101,7 +101,7 @@ bool Launcher::init() {
     // Development aid: GDUL_WINDOW=<w>x<h> sets the starting window size.
     int winW = 1280, winH = 720;
     if (const char* ws = SDL_getenv("GDUL_WINDOW")) SDL_sscanf(ws, "%dx%d", &winW, &winH);
-    window_ = SDL_CreateWindow(kTitle, winW, winH, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
+    window_ = makeWindow(GD_WINDOW_API_OPENGL, winW, winH, int(SDL_WINDOWPOS_UNDEFINED), int(SDL_WINDOWPOS_UNDEFINED), 0);
     if (!window_) {
         SDL_Log("gdul: cannot open the window: %s", SDL_GetError());
         return false;
@@ -117,10 +117,9 @@ bool Launcher::init() {
         }
         stbi_image_free(px);
     }
-    context_ = SDL_GL_CreateContext(window_);
     std::string error;
-    if (!context_ || !SDL_GL_MakeCurrent(window_, context_) || !gfx_.init(error)) {
-        SDL_Log("gdul: cannot start OpenGL: %s", context_ ? error.c_str() : SDL_GetError());
+    if (!startGl(error)) {
+        SDL_Log("gdul: cannot start OpenGL: %s", error.c_str());
         return false;
     }
     restoreWindow();
@@ -203,6 +202,119 @@ void Launcher::shutdown() {
     if (window_) SDL_DestroyWindow(window_);
     if (icon_) SDL_DestroySurface(icon_);
     SDL_Quit();
+}
+
+// The launcher's window for a graphics API: OpenGL (its own, and every game
+// module's at first), or what a module asked for with request_window. `keep`:
+// the full screen / borderless state carried over; x, y: the place
+// (SDL_WINDOWPOS_UNDEFINED: the system chooses).
+SDL_Window* Launcher::makeWindow(uint32_t api, int w, int h, int x, int y, SDL_WindowFlags keep) {
+    SDL_WindowFlags flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY | keep;
+    switch (api) {
+    case GD_WINDOW_API_OPENGL: flags |= SDL_WINDOW_OPENGL; break;
+    case GD_WINDOW_API_VULKAN: flags |= SDL_WINDOW_VULKAN; break;
+    case GD_WINDOW_API_METAL: flags |= SDL_WINDOW_METAL; break;
+    default: break;  // SDL_GPU: SDL_ClaimWindowForGPUDevice sets the window up itself
+    }
+    SDL_PropertiesID props = SDL_CreateProperties();
+    SDL_SetStringProperty(props, SDL_PROP_WINDOW_CREATE_TITLE_STRING, kTitle);
+    SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_WIDTH_NUMBER, w);
+    SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_HEIGHT_NUMBER, h);
+    SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_X_NUMBER, x);
+    SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_Y_NUMBER, y);
+    SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_FLAGS_NUMBER, Sint64(flags));
+    SDL_Window* win = SDL_CreateWindowWithProperties(props);
+    SDL_DestroyProperties(props);
+    if (!win) return nullptr;
+#if !defined(__ANDROID__)
+    SDL_SetWindowMinimumSize(win, 960, 540);
+#endif
+    if (icon_) SDL_SetWindowIcon(win, icon_);
+    return win;
+}
+
+// The launcher's GL context and 2D renderer on window_ (OpenGL window).
+bool Launcher::startGl(std::string& error) {
+    context_ = SDL_GL_CreateContext(window_);
+    if (!context_ || !SDL_GL_MakeCurrent(window_, context_)) {
+        error = SDL_GetError();
+        if (context_) SDL_GL_DestroyContext(context_);
+        context_ = nullptr;
+        return false;
+    }
+    SDL_GL_SetSwapInterval(1);
+    if (!gfx_.init(error)) {
+        gfx_.shutdown();
+        SDL_GL_MakeCurrent(window_, nullptr);
+        SDL_GL_DestroyContext(context_);
+        context_ = nullptr;
+        return false;
+    }
+    return true;
+}
+
+void Launcher::stopGl() {
+    if (!context_) return;
+    SDL_GL_MakeCurrent(window_, context_);
+    gfx_.shutdown();
+    SDL_GL_MakeCurrent(window_, nullptr);
+    SDL_GL_DestroyContext(context_);
+    context_ = nullptr;
+}
+
+// request_window (sdk/gd_host.h): the window made again for `api`, at the
+// size, place, full screen state and title it has now (the game's). A window
+// carries one graphics API: an OpenGL context and a GPU swapchain cannot
+// share it, Vulkan and Metal surfaces want it made for them, and SDL cannot
+// turn a window back into an OpenGL one. The launcher's GL objects go with
+// its context (gfx_ makes them again from the built-in resources).
+bool Launcher::switchWindowApi(uint32_t api, std::string& error) {
+    if (api == windowApi_ && window_) return true;
+    int w = 1280, h = 720, x = int(SDL_WINDOWPOS_UNDEFINED), y = int(SDL_WINDOWPOS_UNDEFINED);
+    SDL_GetWindowSize(window_, &w, &h);
+    SDL_GetWindowPosition(window_, &x, &y);
+    const SDL_WindowFlags was = SDL_GetWindowFlags(window_);
+    const SDL_WindowFlags keep = was & (SDL_WINDOW_FULLSCREEN | SDL_WINDOW_BORDERLESS | SDL_WINDOW_ALWAYS_ON_TOP);
+    const SDL_DisplayMode* fsMode = SDL_GetWindowFullscreenMode(window_);
+    SDL_DisplayMode mode{};
+    if (fsMode) mode = *fsMode;
+    const std::string title = SDL_GetWindowTitle(window_);
+    const uint32_t oldApi = windowApi_;
+    SDL_Window* old = window_;
+    stopGl();
+#if defined(__ANDROID__)
+    // One window at a time: the old one goes first.
+    SDL_DestroyWindow(old);
+    old = nullptr;
+#endif
+    SDL_Window* win = makeWindow(api, w, h, x, y, keep);
+    if (!win) {
+        error = std::string("the window cannot be made: ") + SDL_GetError();
+        // As it was: the old window (or a new one like it, on Android) and its GL context.
+        if (!old) old = makeWindow(oldApi, w, h, x, y, keep);
+        window_ = old;
+        if (window_ && oldApi == GD_WINDOW_API_OPENGL) {
+            std::string e2;
+            if (!startGl(e2)) SDL_Log("gdul: the OpenGL context cannot be made again: %s", e2.c_str());
+        }
+        return false;
+    }
+    if (old) SDL_DestroyWindow(old);
+    window_ = win;
+    windowApi_ = api;
+    SDL_SetWindowTitle(window_, title.c_str());
+    if (fsMode) SDL_SetWindowFullscreenMode(window_, &mode);
+    SDL_ShowWindow(window_);
+    SDL_RaiseWindow(window_);
+    if (api == GD_WINDOW_API_OPENGL && !startGl(error)) {
+        error = "no OpenGL context on the new window: " + error;
+        return false;
+    }
+    SDL_GetWindowSizeInPixels(window_, &pw_, &ph_);
+    log_.add(std::string("window: made again for ") +
+             (api == GD_WINDOW_API_OPENGL ? "OpenGL" : api == GD_WINDOW_API_SDL_GPU ? "SDL_GPU" : api == GD_WINDOW_API_VULKAN ? "Vulkan" : "Metal") +
+             " (" + std::to_string(w) + "x" + std::to_string(h) + ((keep & SDL_WINDOW_FULLSCREEN) ? ", full screen" : "") + ")");
+    return true;
 }
 
 // The launcher's window as it is (windowed), to put back after a game.
@@ -747,7 +859,22 @@ void Launcher::play(Game& g) {
     sounds_.close();
     closeGamepads();
     rememberWindow();
-    GameRun r = runGameModule(window_, context_, g, catalog_.launcherVersion(), log_);
+    GameRun r = runGameModule(window_, context_, g, catalog_.launcherVersion(), log_,
+                              [this](uint32_t api, SDL_Window*& w, SDL_GLContext& c, std::string& error) {
+                                  const bool ok = switchWindowApi(api, error);
+                                  w = window_, c = context_;
+                                  return ok;
+                              });
+    if (r.windowLost || !window_ || !context_) {
+        // Nothing to draw the launcher with: say so and stop (never a black window).
+        std::fprintf(stderr, "Guitar Dream Universal Launcher: %s\n", r.error.c_str());
+        log_.add("launcher stopped: " + r.error);
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, kTitle, ("The launcher cannot draw its window again: " + r.error).c_str(), nullptr);
+        lastExit_ = r.started ? r.exitCode : 1;
+        exitCode_ = 1;
+        running_ = false;
+        return;
+    }
     restoreWindow();
     openGamepads();
     sounds_.open();

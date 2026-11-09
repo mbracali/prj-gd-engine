@@ -77,7 +77,51 @@ typedef struct GdHost {
     // (gdul 0.1.6) GD_HOST_* flags: what the launcher knows about the
     // machine. Read only when `size` covers it (an older launcher: 0).
     uint32_t flags;
+
+    // (gdul 1.1.13, optional: GD_HOST_HAS(host, request_window).) The window
+    // for another graphics API than OpenGL: gd-engine-core's SDL3 GPU and
+    // Vulkan backends (gd-engine-core/docs/render.md section 5). A window
+    // cannot carry a GL context and a GPU swapchain at once, and Vulkan /
+    // Metal surfaces want a window made for them, so the launcher releases
+    // its OpenGL context and makes the window again for `api`
+    // (GD_WINDOW_API_*: same size, place, full screen state and title). It
+    // returns the SDL_Window* to draw into from now on (also in `window`;
+    // `gl_context` is NULL while the window is not an OpenGL one); the window
+    // the module had before may be gone. NULL: the launcher cannot (no Vulkan
+    // loader...): the window is as it was, an OpenGL one.
+    // GD_WINDOW_API_OPENGL asks for an OpenGL window again (a module whose
+    // backend failed to start). Before asking for another API, or returning
+    // from gd_game_run, the module releases the window (destroys its GPU
+    // device / Vulkan surface); the launcher takes its OpenGL window back by
+    // itself after gd_game_run. Called on the thread that runs gd_game_run.
+    // The module shim calls it from SDL_CreateWindow (gd_module_shim.h): a
+    // game written on gd-engine-core needs no code of its own for it.
+    void* (*request_window)(void* user, uint32_t api);
+    void* request_window_user;
 } GdHost;
+
+// The graphics APIs of request_window.
+#define GD_WINDOW_API_OPENGL 0u   // SDL_WINDOW_OPENGL: the launcher's own (every module starts with it)
+#define GD_WINDOW_API_SDL_GPU 1u  // no graphics flag: for SDL_ClaimWindowForGPUDevice
+#define GD_WINDOW_API_VULKAN 2u   // SDL_WINDOW_VULKAN: for SDL_Vulkan_CreateSurface
+#define GD_WINDOW_API_METAL 3u    // SDL_WINDOW_METAL: for SDL_Metal_CreateView (macOS / iOS)
+
+// A GdHost field the launcher has (its `size` covers it) and has set.
+#define GD_HOST_HAS(h, field) ((h)->size >= offsetof(GdHost, field) + sizeof((h)->field) && (h)->field)
+
+// How gd-engine-core and the module shim talk about the window (SDL global
+// properties, strings: the core is not built with the shim). Its
+// gd::core::render::prepareWindow(backend) sets GD_PROP_WINDOW_API_REQUEST to
+// the backend's id ("opengl3", "sdl3", "vulkan") before the game makes its
+// window; the shim's SDL_CreateWindow asks request_window for that API and
+// sets GD_PROP_WINDOW (a pointer property: the launcher's window it returns)
+// and GD_PROP_WINDOW_API (what that window is made for: "opengl3", "sdl3",
+// "vulkan", "metal"); gd::core::render::createDevice refuses a backend that
+// window is not made for, with the reason (and the game falls back to
+// OpenGL). All are cleared at gdshim_begin / gdshim_end.
+#define GD_PROP_WINDOW_API_REQUEST "gd.render.window_api_request"
+#define GD_PROP_WINDOW_API "gd.render.window_api"
+#define GD_PROP_WINDOW "gd.render.window"
 
 // A handheld PC (a Steam Deck: the launcher's Steam Deck download, or the
 // SteamDeck=1 environment / DMI board "Jupiter" or "Galileo"): a module

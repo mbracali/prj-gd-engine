@@ -31,7 +31,7 @@ struct WalkHost {
 // SDL_VIDEO_DRIVER=offscreen SDL_AUDIO_DRIVER=dummy. Each step waits for a
 // flow state (ui_flow_manager_state[0]) or for a song to be playing / over,
 // then presses its buttons. The walk passes when every step was reached.
-// The port's own screens' walks (docs/knowledge/universal_launcher.md "Tests
+// The port's own screens' walks (docs/guidelines/universal_launcher.md "Tests
 // every game keeps"): mouse (the mouse alone: main menu -> OPTIONS ->
 // ENHANCED -> In-Game Max FPS's dropdown set to 60 -> right click -> the
 // help bar's BACK -> main), gamepads (the yellow fret -> GAMEPADS -> the
@@ -57,6 +57,12 @@ public:
     // Every action the menus got (the app counts them; stickyaxis checks them).
     void countPress(Action a) { ++presses_[size_t(a)]; }
     bool done() const { return step_ >= steps_.size(); }
+    // Restart Now as the walk's last act (Enhanced's backends): the walk is
+    // over once its last step's acts are done (the restarted game's walk,
+    // "<walk>_restarted", goes on).
+    void endAtRestart() {
+        if (!steps_.empty() && step_ + 1 == steps_.size() && key_ >= steps_.back().keys.size()) step_ = steps_.size();
+    }
     void sawQuit() { quitSeen_ = true; }  // the main menu's three-Back quit
     bool failed() const { return failed_; }
     // The exit code and a summary line.

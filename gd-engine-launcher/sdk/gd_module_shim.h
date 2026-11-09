@@ -9,7 +9,12 @@
 //   SDL_Init / SDL_Quit             -> init / quit only the subsystems the game
 //                                      asked for (SDL counts them), never SDL as a whole
 //   SDL_CreateWindow                -> the launcher's window (a hidden window,
-//                                      e.g. a shader test, stays a real one)
+//                                      e.g. a shader test, stays a real one),
+//                                      made for the graphics API the game asked
+//                                      for (gd-engine-core's prepareWindow:
+//                                      GD_PROP_WINDOW_API_REQUEST, or the
+//                                      SDL_WINDOW_VULKAN / METAL flag): the
+//                                      launcher's request_window (gd_host.h)
 //   SDL_DestroyWindow               -> nothing for the launcher's window
 //   SDL_GL_CreateContext / Destroy  -> real contexts on that window, tracked so
 //                                      none outlives the game
@@ -62,6 +67,12 @@ void gdshim_set_exploring(bool on);
 bool gdshim_make_current();
 // Sets an environment variable for the game (SDL's copy and the C library's).
 void gdshim_setenv(const char* name, const char* value);
+// The launcher's window made for `api` (GD_WINDOW_API_*), what SDL_CreateWindow
+// does when the game asked for another API; NULL when the launcher cannot
+// (the window stays an OpenGL one). The API the window is made for now:
+// gdshim_window_api().
+SDL_Window* gdshim_request_window(uint32_t api);
+uint32_t gdshim_window_api();
 
 #ifdef __ANDROID__
 #include <stdio.h>

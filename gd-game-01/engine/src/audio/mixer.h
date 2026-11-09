@@ -14,6 +14,32 @@
 #include "audio/spu.h"
 #include "data/vgs.h"
 
+// Enhanced > Audio backend (audio_backend; gd-engine-core/docs/audio.md): an
+// output of gd-engine-core (miniaudio, OpenAL, FAudio) playing an SDL audio
+// stream that is not bound to an SDL device. The stream converts from the
+// game's format (`src`) to the output's; the output's thread pulls it, which
+// runs the stream's get callback, as SDL's own device thread would.
+class AudioRoute {
+public:
+    // Null + `error` when the backend cannot run here or the build has no
+    // gd-engine-core audio (the caller then uses SDL's device: local).
+    static std::unique_ptr<AudioRoute> open(const std::string& backend, const SDL_AudioSpec& src,
+                                            SDL_AudioStreamCallback get, void* user, std::string& error);
+    ~AudioRoute();  // stops the output, then destroys the stream
+    AudioRoute(const AudioRoute&) = delete;
+    AudioRoute& operator=(const AudioRoute&) = delete;
+    bool start(std::string& error);
+    SDL_AudioStream* stream() const { return stream_; }
+    double latencyMs() const;
+    std::string name() const;
+
+private:
+    AudioRoute() = default;
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+    SDL_AudioStream* stream_ = nullptr;
+};
+
 // Plays a song's multitrack audio and provides the song clock.
 class Mixer {
 public:
@@ -23,7 +49,12 @@ public:
     Mixer& operator=(const Mixer&) = delete;
 
     // Opens the default playback device; returns false and sets `error` on failure.
-    bool open(std::string& error);
+    // `backend` (Enhanced audio_backend): "local" (or "") is SDL's device, as
+    // always; another id plays through that gd-engine-core output, falling
+    // back to local (logged) when it cannot start.
+    bool open(std::string& error, const std::string& backend = "local");
+    // The gd-engine-core backend in use, "" on local.
+    const std::string& outputBackend() const { return routedBackend_; }
     // Releases the device; must run before SDL_Quit().
     void close();
 
@@ -96,6 +127,11 @@ private:
     void fill(int frames);
 
     SDL_AudioStream* stream_ = nullptr;
+    std::unique_ptr<AudioRoute> route_;  // a gd-engine-core output draining stream_ (not local)
+    std::string routedBackend_;
+    void resumeDevice() {
+        if (!route_) SDL_ResumeAudioStreamDevice(stream_);  // a routed stream has no SDL device
+    }
     int rate_ = 44100;
 
     std::mutex mutex_;  // guards the fields below against the audio thread

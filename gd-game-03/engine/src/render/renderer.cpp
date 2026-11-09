@@ -7,6 +7,7 @@
 #include <cstdlib>
 
 #include "render/camera.h"
+#include "render/core_backend.h"
 #include "render/enhanced_lights.h"
 #include "render/spotlight_view.h"
 
@@ -83,7 +84,8 @@ ProgramDesc Renderer::canvasProgramDesc() {
 
 bool Renderer::init(SDL_Window* window, std::string& error) {
     window_ = window;
-    device_ = createGlDevice(window, error);
+    // Local: gd03's OpenGL device; else a gd-engine-core backend (render/core_backend.h).
+    device_ = rendererBackend() == Backend::Local ? createGlDevice(window, error) : createCoreDevice(rendererBackend(), window, error);
     if (!device_) return false;
     canvasProgram_ = device_->createProgram(canvasProgramDesc(), error);
     if (!canvasProgram_) {

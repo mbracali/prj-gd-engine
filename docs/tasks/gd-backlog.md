@@ -9,7 +9,7 @@ notes and links).
 
 - **Read it before you start** and **update it at the start and at the end
   of every task** (mark what you start as 🟡, what you finish as ✅, add what
-  you found). See [docs/knowledge/general_guidelines.md](../knowledge/general_guidelines.md).
+  you found). See [docs/guidelines/general_guidelines.md](../guidelines/general_guidelines.md).
 - Every item has a stable ID: `GDUL-` launcher, `GDREL-` releases and
   packaging, `GDSITE-` site, `GDALL-` all games, `GDNN-` gd-game-NN. **Never
   renumber or reuse an ID**; new items take the next free number in their
@@ -26,7 +26,7 @@ notes and links).
   2026-10-28, being worked on in `feature/20261028-gen-improvements`.
 - "From" says where an item came from: the old backlog's table and number,
   or the request that added it.
-- Guidelines: [../knowledge/](../knowledge). Studies and ../spikes:
+- Guidelines: [../knowledge/](../guidelines). Studies and ../spikes:
   [../spikes/](../spikes/README.md) (an implementable study becomes an Enhancement
   here).
 
@@ -34,7 +34,7 @@ notes and links).
 
 [Universal launcher](#universal-launcher) ·
 [Releases & packaging](#releases--packaging) · [Site](#site) ·
-[All games](#all-games) ·
+[All games](#all-games) · [gd-engine-core](#gd-engine-core) ·
 [gd-game-01](#gd-game-01-guitar-hero-playstation-2) ·
 [gd-game-02](#gd-game-02-guitar-hero-ii-xbox-360) · gd-game-03 … gd-game-26
 (one Discovery task each)
@@ -46,7 +46,7 @@ The Guitar Dream Universal Launcher (`gd-engine-launcher/`): every platform (Lin
 
 | ID | Class | Status | Item | Notes | From |
 |---|---|---|---|---|---|
-| GDUL-001 | Bugfix | ✅ | Every launcher build on every platform carries every ready module. Android showed "This launcher build has no gd-game-01 module" | Recurrent bug that must never happen again ([docs/knowledge/universal_launcher.md](../knowledge/universal_launcher.md) "Never forget a package"); see GDREL-002 Done (gdul 0.1.6): gd01 is a module in the APK; build.sh and verify_bundle.sh require every ready game on every system, macOS too. | Wave B 10-28 |
+| GDUL-001 | Bugfix | ✅ | Every launcher build on every platform carries every ready module. Android showed "This launcher build has no gd-game-01 module" | Recurrent bug that must never happen again ([docs/guidelines/universal_launcher.md](../guidelines/universal_launcher.md) "Never forget a package"); see GDREL-002 Done (gdul 0.1.6): gd01 is a module in the APK; build.sh and verify_bundle.sh require every ready game on every system, macOS too. | Wave B 10-28 |
 | GDUL-002 | Bugfix | ✅ | Android 15: loading an ISO fails with `Cannot open /data/data/io.github.mbracali.gdul/files/original_isos`. Find whether it is ours or the device's, and make it work | Recurrent bug: the launcher unable to load ISOs (especially Android and Windows). `gd-engine-launcher/README.md` "Discs" Done (gdul 0.1.6): the disc is read in place through SAF (persistable permission, /proc/self/fd via the module shim), no copy; the message came from "Open folder" on the private folder. | Wave B 10-28 |
 | GDUL-003 | Enhancement | ✅ | Window: windowed on all desktop builds; Android has no window mode (leave its settings alone) | Done: desktop builds stay windowed; the window code no longer runs on Android. | Wave B 10-28 |
 | GDUL-004 | Bugfix | ✅ | Explore models: characters' hands / arms go inside the body. Show characters in a T-pose by default; keep the animation menu | Done (0.1.6): rest pose by default (gd02 a T-pose; GH1's bind pose has the arms down). | Wave B 10-28 |
@@ -60,7 +60,7 @@ The Guitar Dream Universal Launcher (`gd-engine-launcher/`): every platform (Lin
 | GDUL-023 | Enhancement | ❌ | gd01's and gd02's own APKs still copy the picked disc into internal storage: read it in place as the launcher does (owner decision) |  | Wave B 10-28 |
 | GDUL-024 | Enhancement | ❌ | gd01: runtime handheld profile from GD_HOST_HANDHELD (today only the Deck download has gd01's Deck defaults) | Needs a gd01 change | Wave B 10-28 |
 | GDUL-025 | Enhancement | ❌ | An undefined-symbol check for the APK's modules (Linux modules get `ldd -r`) |  | Wave B 10-28 |
-| GDUL-026 | Enhancement | ❌ | build.sh prunes local_builds to the current and previous launcher versions by itself | docs/knowledge/general_guidelines.md "Packages" | Wave B 10-28 |
+| GDUL-026 | Enhancement | ❌ | build.sh prunes local_builds to the current and previous launcher versions by itself | docs/guidelines/general_guidelines.md "Packages" | Wave B 10-28 |
 | GDUL-009 | Enhancement | ✅ | Spike: PS Vita homebrew | [docs/spikes/study_ps_vita.md](../spikes/study_ps_vita.md) | Wave B 10-28 |
 | GDUL-010 | Enhancement | ✅ | Spike: Nintendo 3DS homebrew | `docs/spikes/study_3ds.md` (being written; earlier [../spikes/study_3ds_old.md](../spikes/study_3ds_old.md): not viable) | Wave B 10-28 |
 | GDUL-011 | Enhancement | ✅ | Spike: iOS | [docs/spikes/study_ios.md](../spikes/study_ios.md); gd-game-01's iOS item is GD01-219 | Wave B 10-28 |
@@ -70,13 +70,13 @@ The Guitar Dream Universal Launcher (`gd-engine-launcher/`): every platform (Lin
 
 ## Releases & packaging
 
-Builds, bundles, signing and stores. The process is [docs/release-process.md](../release-process.md).
+Builds, bundles, signing and stores. The process is [docs/platform/release-process.md](../platform/release-process.md).
 
 | ID | Class | Status | Item | Notes | From |
 |---|---|---|---|---|---|
 | GDREL-001 | Enhancement | ✅ | Bring back the separate **Steam Deck release** with its own out-of-the-box settings (MANDATORY) | As gd-game-01 did: `gd-game-01/README.md` per-build defaults table (Steam Deck column), `gd-game-01/build_commands/build-steamdeck.sh`, the old `steamdeck` job (Steam Runtime sniper SDK, `-DGD0N_STEAM_DECK=ON`, `STEAM-DECK.txt`). [docs/spikes/study_steam_deck.md](../spikes/study_steam_deck.md) advised against it; the owner overruled it Done (gdul 0.1.6): `build.sh steamdeck` (sniper container, GD01/GD02_STEAM_DECK modules, STEAM-DECK.txt) and a steamdeck release job. Still to test on a real Deck in Gaming Mode. | Wave B 10-28 |
-| GDREL-002 | Bugfix | ✅ | gdul 0.1.1's Windows download shipped without gd02's module: `scripts/verify_bundle.sh` now checks every build and every release archive; build steps run in `bash -euo pipefail` | [docs/release-process.md](../release-process.md) "Never again: incomplete bundles". Still happened on Android: GDUL-001 | New 10-28 |
-| GDREL-003 | Enhancement | 🟡 in progress (wave B) | After every bugfix / improvement, build everything locally: the latest launcher with all the latest game modules (no macOS); keep only the current and the previous version in the launcher's `local_builds` | [docs/knowledge/general_guidelines.md](../knowledge/general_guidelines.md) "Packages" | Wave B 10-28 |
+| GDREL-002 | Bugfix | ✅ | gdul 0.1.1's Windows download shipped without gd02's module: `scripts/verify_bundle.sh` now checks every build and every release archive; build steps run in `bash -euo pipefail` | [docs/platform/release-process.md](../platform/release-process.md) "Never again: incomplete bundles". Still happened on Android: GDUL-001 | New 10-28 |
+| GDREL-003 | Enhancement | 🟡 in progress (wave B) | After every bugfix / improvement, build everything locally: the latest launcher with all the latest game modules (no macOS); keep only the current and the previous version in the launcher's `local_builds` | [docs/guidelines/general_guidelines.md](../guidelines/general_guidelines.md) "Packages" | Wave B 10-28 |
 | GDREL-004 | Enhancement | ❌ | macOS: Developer ID, hardened runtime, notarize, staple (US$99/yr) | [docs/spikes/study_macos_trust.md](../spikes/study_macos_trust.md) | New 10-28 |
 | GDREL-005 | Enhancement | ❌ | Windows code signing (OV cloud certificate, later) | [docs/spikes/study_windows_trust.md](../spikes/study_windows_trust.md): keep unsigned for now | New 10-28 |
 | GDREL-006 | Enhancement | ❌ | Google Play: AAB, Play App Signing, 12 testers for 14 days; register for developer verification | [docs/spikes/study_google_play.md](../spikes/study_google_play.md); main risk is IP | New 10-28 |
@@ -101,8 +101,8 @@ Items every game module shares. Each game tracks its own work in its section.
 |---|---|---|---|---|---|
 | GDALL-001 | Enhancement | ✅ (Windows: GD01-309) | Enhanced menu: HDR output (opt-in) | [docs/spikes/study_hdr.md](../spikes/study_hdr.md): FP16 pipeline plus a GL→Vulkan HDR presenter, 3 to 5 weeks. Added in wave B as a backlog item | New 10-28 |
 | GDALL-002 | Enhancement | 🟡 in progress (wave B) | Enhanced menu: one option that removes 100% of the effects (motion blur, bloom, film grain, etc.) | gd02: Remove All Effects done (GD02-129); gd01 still to do | Wave B 10-28 |
-| GDALL-003 | Enhancement | 🟡 in progress (wave B) | Enhanced menus follow [docs/knowledge/universal_launcher.md](../knowledge/universal_launcher.md): options on the left, dropdowns for multiple choice, checkboxes for on / off, a static close-up of the vocalist on the right with the whole band in view, every change rendered at once on the band |  | Wave B 10-28 |
-| GDALL-004 | Enhancement | 🟡 in progress (wave B) | Controls follow the guideline: every game works with the mouse, Enter is always Start, a touch is a mouse click, the same touch controls and on-screen buttons in every game | [docs/knowledge/universal_launcher.md](../knowledge/universal_launcher.md) | Wave B 10-28 |
+| GDALL-003 | Enhancement | 🟡 in progress (wave B) | Enhanced menus follow [docs/guidelines/universal_launcher.md](../guidelines/universal_launcher.md): options on the left, dropdowns for multiple choice, checkboxes for on / off, a static close-up of the vocalist on the right with the whole band in view, every change rendered at once on the band |  | Wave B 10-28 |
+| GDALL-004 | Enhancement | 🟡 in progress (wave B) | Controls follow the guideline: every game works with the mouse, Enter is always Start, a touch is a mouse click, the same touch controls and on-screen buttons in every game | [docs/guidelines/universal_launcher.md](../guidelines/universal_launcher.md) | Wave B 10-28 |
 | GDALL-005 | Bugfix | 🟡 in progress (wave B) | The strum icon is broken in half in every menu (gd-game-01 and gd-game-02) | Tracked per game: see the gd-game-01 and gd-game-02 sections | Wave B 10-28 |
 | GDALL-006 | Enhancement | 🟡 in progress (wave B) | Newer games' shaders in older games (recurring): gd-game-02's advanced shaders as gd-game-01 Enhanced options | [docs/spikes/study_shader_ports.md](../spikes/study_shader_ports.md): see GDALL-008..015 | Wave B 10-28 |
 | GDALL-007 | Enhancement | 🟡 in progress (wave B) | New render backends: Vulkan, DirectX on Windows, Metal on Apple, an OpenGL fallback | [docs/spikes/study_backends.md](../spikes/study_backends.md): SDL3 GPU API behind gd02's device layer, OpenGL fallback; see GDALL-016..020 | Wave B 10-28 |
@@ -127,9 +127,9 @@ Items every game module shares. Each game tracks its own work in its section.
 | GDALL-026 | Enhancement | ❌ | gd02 audio-latency calibration screen (TVs) | study_lg_tv, 3–5 days | Spike 10-28 |
 | GDALL-027 | Enhancement | ➖ later | Samsung Tizen (WASM web app only; the ISO is out of reach): Emscripten launcher, TV spike, LAN asset server | [docs/spikes/study_samsung_tv.md](../spikes/study_samsung_tv.md), low priority | Spike 10-28 |
 | GDALL-028 | Enhancement | ➖ later | 3DS feasibility spike (only if the owner asks) | [docs/spikes/study_3ds.md](../spikes/study_3ds.md) | Spike 10-28 |
-| GDALL-029 | Enhancement | ✅ | Enhanced menus paired: every Enhanced feature of gd-game-01 that fits GH2 implemented in gd-game-02 (same layout, names, defaults, behaviour), and the parity table kept in the guideline | `docs/knowledge/universal_launcher.md` "Enhanced options: parity" (6 had, 30 done, 6 N/A; Light Streaks and Ground Fog removed 10-30, GDALL-031); GD02-097..129; gd02 walks enhanced / mouse / cheats check each option | Owner 10-28 |
+| GDALL-029 | Enhancement | ✅ | Enhanced menus paired: every Enhanced feature of gd-game-01 that fits GH2 implemented in gd-game-02 (same layout, names, defaults, behaviour), and the parity table kept in the guideline | `docs/guidelines/universal_launcher.md` "Enhanced options: parity" (6 had, 30 done, 6 N/A; Light Streaks and Ground Fog removed 10-30, GDALL-031); GD02-097..129; gd02 walks enhanced / mouse / cheats check each option | Owner 10-28 |
 | GDALL-030 | Bugfix | ❌ | Run 0.1.7 on a real Windows PC, a Steam Deck, an Android device and macOS | PARITY_GAPS.md | 2026-10-29 |
-| GDALL-031 | Enhancement | ✅ | Rule: universal menus open on the next frame (heavy work preloaded or async, fade-in only for a part still loading); Ground Fog and Light Streaks removed from every Enhanced menu, not to be added to future games | Done: ../knowledge/universal_mechanisms.md 1.2 and "Removed from every game's Enhanced menu"; docs/knowledge/universal_launcher.md (Enhanced menu background and transition, parity rows removed) | Owner 10-30 |
+| GDALL-031 | Enhancement | ✅ | Rule: universal menus open on the next frame (heavy work preloaded or async, fade-in only for a part still loading); Ground Fog and Light Streaks removed from every Enhanced menu, not to be added to future games | Done: ../knowledge/universal_mechanisms.md 1.2 and "Removed from every game's Enhanced menu"; docs/guidelines/universal_launcher.md (Enhanced menu background and transition, parity rows removed) | Owner 10-30 |
 | GDALL-033 | Enhancement | ➖ dropped | DLSS in every game: no new DLSS work (DLSS 5, MSVC build for DLSS on Windows, DLSS in gd02-gd04). gd01 keeps its working DLSS 4 / DLAA as is; FSR stays | Owner 11-02: "We are dropping DLSS for all the games. Lets go with what we have" | Owner 11-02 |
 
 
@@ -165,7 +165,7 @@ shipped in the universal launcher.
 
 | ID | Class | Status | Item | Notes | From |
 |---|---|---|---|---|---|
-| GD01-292 | Enhancement | ✅ | ../knowledge/universal_mechanisms.md at the root: the owner's 2026-10-29 "Universal menus" requirements (sections 1.x), table fixes, the two mockups as ASCII; linked from docs/knowledge/universal_launcher.md | Done (gd01 1.1.7): ../knowledge/universal_mechanisms.md; linked from docs/knowledge, universal_launcher.md and README.md | Universal menus 10-29 |
+| GD01-292 | Enhancement | ✅ | ../guidelines/universal_mechanisms.md at the root: the owner's 2026-10-29 "Universal menus" requirements (sections 1.x), table fixes, the two mockups as ASCII; linked from docs/guidelines/universal_launcher.md | Done (gd01 1.1.7): ../knowledge/universal_mechanisms.md; linked from docs/knowledge, universal_launcher.md and README.md | Universal menus 10-29 |
 | GD01-293 | Enhancement | ✅ | 1.1.1 Every logo, credit and movie screen skips with green, red, left click, touch, Enter or Start | Done (gd01 1.1.7): logos (already), movie (+ red, left click), credits (green / Start / Enter / click; CreditsPanel). Walks logo_skip, logo_click, band (movie by red), mouse (credits by green) | Universal menus 10-29 |
 | GD01-294 | Bugfix | ✅ | 1.1.2 Band naming: any up / down input changes the letter, Start and Enter confirm the name and move on, green confirms a letter | Done (gd01 1.1.7): the keyboard Start key (Enter) accepts the name (InputEvent::startKey); any Up / Down (arrows, d-pad, strum) changes the letter; green takes it. Walk band ("CD") | Universal menus 10-29 |
 | GD01-295 | Enhancement | ✅ | 1.1.3 Universal Access Buttons: mouse / touch click every option; Up / Down / Start / Confirm / Cancel pills in GH1's help-bar style where the original has none; Gamepads from the main screen | Done (gd01 1.1.7): UiSystem::PanelObj::addAccessButtons adds CONFIRM / BACK / START (text entry) / UP-DOWN pills where missing; the UP/DOWN pill clicks (upper half up, lower half down). GAMEPADS: blue fret / help item (gd01 keeps blue). [I] which screens get which pill is the port's rule (doc 1.1.3) | Universal menus 10-29 |
@@ -193,6 +193,24 @@ shipped in the universal launcher.
 | GDALL-034 | Enhancement | ✅ | #57: 144 FPS in Max FPS, every game | 60 / 120 / 144 / 240 (/ Unlimited) in gd01-gd04; pacing already works for any cap (vsync when the refresh rate is a multiple, otherwise paced) | GitHub 11-03 Owner 11-04 |
 | GDALL-035 | Enhancement | ✅ | #47: no way to remove the calibration | Enhanced > Reset Calibration (gd01, gd02, gd03): the audio and video delays go back to 0 ms; the help box shows the current values. gd04 has no calibration screen yet. Walk calibration_reset (gd01) | GitHub 11-01 Owner 11-04 |
 | GDALL-036 | Bugfix | 🟡 needs a phone | #55: GH2 and Encore at 10-15 fps in songs on Android (S25 Ultra); menus smooth | Not reproducible on PC (the GLES path and CPU-decoded textures run 185+ fps). Likely cause: every draw writes its uniforms with glBufferSubData into a buffer the GPU may still read, which Adreno / Mali drivers answer with a stall or a buffer copy; a song has ~600 draws, a menu ~20. Android now uses the unsynchronized glMapBufferRange path macOS already used (gd02, gd03, gd04); checked on GLES on PC (walk quickplay, frame by eye). Needs a test on the phone | GitHub 11-03 Owner 11-04 |
+| GDALL-037 | Enhancement | ✅ | Repo organization (1.1.13 spec §6): docs/knowledge -> docs/guidelines (+ universal_mechanisms.md, universal-menus.md, engine-backend-guidelines.md, usual-bugs.md, universal-behaviors.md from universal-behaviors.md); KICKOFFs -> docs/spikes; adding-a-game / release-process -> docs/platform; res -> docs/res; gd-engine-tools/README.md; every link updated | Done with git mv (history kept); links re-pointed from each file's old place; scripts using the root res/ (make_icons.py, make_store_art.py, .gitignore) follow; universal-menus.md is universal_mechanisms.md §1.2 (pointer left there); the requirement's attached menus spec was not in the message, so the existing one is the base | Owner 11-06 (1.1.13) |
+
+## gd-engine-core
+
+The universal backends every game can load (1.1.13 spec: [engine-backend-guidelines.md](../guidelines/engine-backend-guidelines.md)).
+
+| ID | Class | Status | Item | Notes | From |
+|---|---|---|---|---|---|
+| GDCORE-001 | Enhancement | ✅ | gd-engine-core: folders platform / inputs / audio / render / image / ui, CMake library, pinned third-party fetch (single headers vendored), built for Linux, Steam Deck, Windows, Android | gd-engine-core/: top-level CMake (areas, gdcore), cmake/gdcore_deps.cmake pins (SHA-256, shared download cache), third_party/ (stb, bcdec, miniaudio), platform/ (paths, files, disc reader), docs/; gdcore_selftest 15/15; gd01 + its module link it; packages verified on 5 builds | Owner 11-06 (1.1.13) |
+| GDCORE-002 | Enhancement | ✅ | Audio backends: interface + miniaudio, OpenAL Soft (shared library, LGPL), FAudio | gd::core::audio::Output: miniaudio 0.11.25, OpenAL Soft 1.25.2 (own .so, loaded from the module's folder), FAudio 26.10; self-test on null devices; gd01 walks pass on all four | Owner 11-06 (1.1.13) |
+| GDCORE-003 | Enhancement | ✅ | Image backends: stb_image (+ write, resize2), bcdec + libktx, SDL3_image | gd::core::image::Decoder: stb (load / save / resize2), bcdec + libktx 4.4.2 (BCn, DDS, KTX / KTX2; ETC decoder off: Ericsson licence), SDL3_image 3.4.8 (static, stb backend) | Owner 11-06 (1.1.13) |
+| GDCORE-004 | Enhancement | ✅ | Render interface + backends: OpenGL 3.3 / GLES 3.0, SDL3 GPU (Vulkan / D3D12 / Metal), Vulkan | Done: OpenGL3, SDL3 GPU, Vulkan (SPIR-V at build time, or at run time with glslang for gd02-04's per-material shaders), occlusion queries (opengl3, vulkan), window hand-over; launcher 1.1.13 | Owner 11-06 (1.1.13) |
+| GDCORE-005 | Enhancement | ✅ | gd-game-01 behind the core: Graphics backend and Audio backend selectable (default local = today's code) | Done: graphics opengl3 / sdl3 / vulkan and audio miniaudio / OpenAL / FAudio selectable; every pair played in the launcher (Linux); launcher 1.1.13 | Owner 11-06 (1.1.13) |
+| GDCORE-006 | Enhancement | ✅ | Enhanced > Performance: Graphics backend / Audio backend dropdowns (local + the core's) in every game; selectable on gd-game-01 only | All four games; gd01 selectable, gd02 / 03 / 04 greyed at local (a saved other value dropped); presets never change them | Owner 11-06 (1.1.13) |
+| GDCORE-007 | Enhancement | ✅ | Packages carry the core's shared libraries (OpenAL Soft, licences); the launcher's window shared with a module on a non-GL backend | Done: core libraries and licences in every module on Linux, Steam Deck, Windows, Android (verify_bundle); window hand-over GL <-> SDL_GPU / Vulkan tested with Restart Now in the launcher; launcher 1.1.13 | Owner 11-06 (1.1.13) |
+| GDCORE-008 | Enhancement | ✅ | gd-game-02 behind the core: Graphics backend and Audio backend selectable (default local), Restart Now / Later, backend label (universal-menus.md "Backends") | 11:35 -> 12:37 (about 1 h, two agents in parallel + integration). Graphics: gfx::RenderDevice over gd::core::render (opengl3 = local bit-exact; sdl3 = vulkan, 0.8-3.4 % of pixels at mesh edges / blurs), run-time SPIR-V (glslang: GH2's per-material shaders); audio: miniaudio / OpenAL / FAudio; Enhanced rows first, Restart Now / Later, label. Walks pass on local / opengl3, quickplay on sdl3 / vulkan (virtual KWin). Left: owner test, packages, True HDR on the core, Vulkan on 16-sampler mobile drivers; every backend pair and Restart Now played in the launcher (Linux, 11-06); launcher 1.1.13 | Owner 11-06 (1.1.13) |
+| GDCORE-009 | Enhancement | ✅ | gd-game-03 behind the core: Graphics backend and Audio backend selectable (default local), Restart Now / Later, backend label | 15:48 -> 16:36 merged and tested; packages 17:34 (Linux, Steam Deck, Windows, Android verified, OpenAL + licences in every module) (graphics ~50 min, audio + menu ~40 min, in parallel). opengl3 within 0.05 % of local (off by 1); sdl3 = vulkan, 1.4-6.1 % (character edges); copyToTarget and opaque targets handled. Walks pass on local / opengl3, quickplay on sdl3 / vulkan (virtual KWin). Left: owner test, True HDR on the core; every backend pair and Restart Now played in the launcher (Linux, 11-06); launcher 1.1.13 | Owner 11-06 (1.1.13) |
+| GDCORE-010 | Enhancement | ✅ | gd-game-04 behind the core: Graphics backend and Audio backend selectable (default local), Restart Now / Later, backend label | 15:48 -> 17:14 merged and tested; packages 17:34 (Linux, Steam Deck, Windows, Android verified, OpenAL + licences in every module) (graphics ~77 min, audio + menu ~17 min, in parallel). Core gained occlusion queries (opengl3, vulkan). opengl3 = local bit-exact; vulkan 0.01-0.09 %; sdl3 draws the venue flares unoccluded (SDL_GPU has no occlusion queries). Song + sound effects through the core audio. Restart Now replays GH3's boot flow under a black screen to reach Enhanced. Walks pass on local / opengl3, quickplay on sdl3 / vulkan. Left: owner test, sdl3 flares; every backend pair and Restart Now played in the launcher (Linux, 11-06); launcher 1.1.13 | Owner 11-06 (1.1.13) |
 | GD01-290 | Bugfix | ✅ | Main guitarist's movement still weird: sometimes a force seems to pull him to a spot | Follows old B85 (docs/character_animation.md §5) Done (gd01 1.1.6): port-only standGuard / snapHome / hold-to-spot removed; the original pose hold (FUN_001958b0) holds where the walk ended; root motion ignores the phase snap. | Wave B 10-28 |
 | GD01-291 | Bugfix | ✅ | The strum icon is broken in half in every menu (as gd-game-02 #10) | Old B29 fixed the help bar's strum icon; it is back gd01 draws the asset exactly as the original (64×16 texture has a light / dark split, same in GH2): need the owner's screenshot or a reference before changing anything. | Wave B 10-28 Owner 11-02: fixed |
 | GD01-037 | Bugfix | ✅ | Weird glitches in the venues | Needs specifics (venue / moment); candidates in "Venue artifacts" below | Bugs 10-21 r1 B3 11-02: not reproduced in a frame sweep of Toxic Summer Fest and the big club (no see-through, no flat frames); the listed causes are fixed (GD01-249, 251, 252) |
@@ -700,7 +718,7 @@ universal launcher, not released on its own.
 
 | ID | Class | Status | Item | Notes | From |
 |---|---|---|---|---|---|
-| GD03-001 | Original | ✅ | Full reimplementation (decompile + recompile, 100% match), milestones M0–M10 of the kickoff; the agent adds one row per milestone and per finding | [../knowledge/GD-GAME-03_KICKOFF.md](../knowledge/GD-GAME-03_KICKOFF.md); progress in `gd-game-03/agents/PROGRESS.md` 0.1.12: Encore 100%: every milestone and finding closed. | Owner 10-28 |
+| GD03-001 | Original | ✅ | Full reimplementation (decompile + recompile, 100% match), milestones M0–M10 of the kickoff; the agent adds one row per milestone and per finding | [../knowledge/GD-GAME-03_KICKOFF.md](../spikes/GD-GAME-03_KICKOFF.md); progress in `gd-game-03/agents/PROGRESS.md` 0.1.12: Encore 100%: every milestone and finding closed. | Owner 10-28 |
 | GD03-002 | Original | ✅ | M0 set-up: folder layout, engine = gd-game-02's renamed with the PS2 layers (ISO 9660, ARK v3, dtb cipher, VGS, SPU ADPCM) from gd-game-01; Ghidra headless project and exports; REA tried (opens the ELF, no MIPS analysis) | `gd-game-03/agents/CONTEXT.md`, `DECISIONS.md` D1-D3 | Milestones M0 |
 | GD03-003 | Original | ✅ | M1 data layer: milo directory v24 and the ~30 classes older than GH2 360's, PS2 textures, every milo / texture / dtb decodes (`--scenetest`) | `gd-game-03/docs/formats.md`; most layouts from the 360 Load's old-revision branches + every record ending at its marker, few re-read in SLUS_215.86 | Milestones M1 |
 | GD03-004 | Original | ✅ | M2 songs (VGS), charts, gameplay rules re-confirmed in SLUS_215.86 (`--selftest`, `--sfxtest`) | | Milestones M2 |
@@ -770,7 +788,7 @@ universal launcher, not released on its own.
 
 | ID | Class | Status | Item | Notes | From |
 |---|---|---|---|---|---|
-| GD04-001 | Original | 🟡 in progress (M0-M9 gates passed with the approximations in GD04-006..011) | Full reimplementation (decompile + recompile, 100% match), milestones M0–M10 of the kickoff; the agent adds one row per milestone and per finding | [../knowledge/GD-GAME-04_KICKOFF.md](../knowledge/GD-GAME-04_KICKOFF.md); progress in `gd-game-04/agents/PROGRESS.md` | Owner 10-28 |
+| GD04-001 | Original | 🟡 in progress (M0-M9 gates passed with the approximations in GD04-006..011) | Full reimplementation (decompile + recompile, 100% match), milestones M0–M10 of the kickoff; the agent adds one row per milestone and per finding | [../knowledge/GD-GAME-04_KICKOFF.md](../spikes/GD-GAME-04_KICKOFF.md); progress in `gd-game-04/agents/PROGRESS.md` | Owner 10-28 |
 | GD04-002 | Original | ✅ | M0 set-up: rip, Ghidra project + export (32,998 functions), DumpAsm / ReadF, engine shell copied from gd-game-02's engine-independent layers (gd04), title ID 415607F7 | `gd-game-04/agents/CONTEXT.md`, `DECISIONS.md` | Kickoff M0 |
 | GD04-003 | Original | ✅ | M1 data layer: every pak type decodes to its end in Python and C++ (`--formattest`): QB, textures, scenes / models / skins, Havok, animations, skeletons, fonts, .wav, .nqb, .pfx, .table, .dbg; FMOD song banks (`--sfxtest`) | `gd-game-04/docs/formats.md` | Kickoff M1 |
 | GD04-004 | Original | ✅ | M2: audio, charts, the judge, co-op, face-off / pro face-off, battle and boss rules; the last unknowns confirmed [C]: whammy_cutoff (row 977.8), the star-miss boundary, tilt units, the gem builder's phrase test (face-off fixed), the battle card roll (fixed), the raise-axe side, CrowdDecrease's early returns (no-fail as cheat_nofail); now also drawn / modelled: the held sustain's head at row 977.8, the tilt's 3 frames apart from Select, the raise-axe prompt on the other player's side, end_credits (no health loss) | `gd-game-04/docs/FINDINGS.md` | Kickoff M2 |
@@ -779,7 +797,7 @@ universal launcher, not released on its own.
 | GD04-007 | Original | 🟡 approximated | M5: the 8 venues in 3D behind the highway (zone scenes placed by node), the song's camera cuts and light show; `--venuetest` (60 vs 240 fps identical). One approximated material shader; no crowd, light cones, particles, pyro, LODs | `docs/venues.md` 0.1.12: GH3's shaders on every mesh (334 / 334 on z_dive), crowd, light volumes, flares, particles and pyro are in (docs/venues.md 5-6); drum pulses added (drumkick_left / _right from the drum notes, Block anytypes waits on them). Left: volume lights / projectors, encore / boss / win / lose transitions and cameras, two-player arrays, ScreenFlash, characters receiving shadows, ; 0.1.12 also: particleobject nodes emit (z_party's fires / smoke / sparks by performance via emitrate, z_video's), Create / Kill (SafeCreate: z_party's Christmas lights by performance), CreateParticleSystem (z_party's lantern sparks), the store's Create / Kill / light groups; SongWon / SongLost transitions: the venue stays for GH3's 8 s end transition with no HUD / gems (play_outro), the guitarist / bassist in win / lose (Win_SmStg / Lose_SmStg on the small stages) by mode, cameras_win / cameras_lose, the crowd's lighters off (Common_SongWon_Transition) [C data]. Fixed on the way: the native start_gem_scroller now also spawns destroy_loading_screen (the script's own call): with playing_song = 1 (GD04-042) nothing else took the loading screen down, so it covered the whole song | Kickoff M5 |
 | GD04-008 | Original | 🟡 approximated | M6: the band (guitarist, bassist, drummer, singer) at their waypoints, skinned and animated on the song; cameras aim at them; `--chartest` (82 bodies, 113 instruments, 60 vs 240 fps, golden poses). One shading program; no walk-to-node, intro / win stances, 2P layouts | `docs/band.md` | Kickoff M6 |
 | GD04-009 | Original | 🟡 approximated | M7: career (cash, autosave, per-band sections), co-op career, face-off, pro face-off, battle (8 attacks, sudden death), boss battles, Vault, cheats, saves (JSON), The Glitches; walks career, coop, faceoff, proface, battle, boss, vault, cheats, glitches, pause, attract pass. Gaps: battle visuals (bolts, card flights); quickplay co-op is online-only in GH3 | `docs/modes.md`, `docs/flow.md` | Kickoff M7 |
-| GD04-010 | Enhancement | 🟡 approximated | M8: GAMEPADS (yellow on the main menu), Enhanced Options (blue on Options, D8), mouse on GH3's menus, enhanced.json / controllers.json; walks mouse, gamepads, stickyaxis. Greyed rows: touch, calibration, graphics enhancers, cut content; the port's pills are plain shapes | `docs/knowledge/universal_launcher.md`, DECISIONS D8 0.1.12: Disable Shaky Camera stays greyed with the reason (GH3's cameras never shake: BossBattle_CameraShake is an empty script) [C script]; Developer Debug Menu added (GD04-041) | Kickoff M8 |
+| GD04-010 | Enhancement | 🟡 approximated | M8: GAMEPADS (yellow on the main menu), Enhanced Options (blue on Options, D8), mouse on GH3's menus, enhanced.json / controllers.json; walks mouse, gamepads, stickyaxis. Greyed rows: touch, calibration, graphics enhancers, cut content; the port's pills are plain shapes | `docs/guidelines/universal_launcher.md`, DECISIONS D8 0.1.12: Disable Shaky Camera stays greyed with the reason (GH3's cameras never shake: BossBattle_CameraShake is an empty script) [C script]; Developer Debug Menu added (GD04-041) | Kickoff M8 |
 | GD04-011 | Original | 🟡 approximated | M9: module (gd_game_run, gd_game_ui_sounds), ready_to_play true; `build.sh all --force` under the lock builds and verifies Linux, Steam Deck, Windows and Android bundles with gd-game-04; the launcher plays it on Linux and under Wine (Windows bundle), 25 s quit, exit 0. Not run: a real Windows PC, an Android device, a Steam Deck, macOS. Android still copies the disc (the gd02 picker) | | Kickoff M9 |
 | GD04-012 | Original | ✅ | GH3's controller layouts: Xbox guitar A B Y X LB + strum bar, whammy, Back / tilt Star Power; gamepad LT LB RB RT A frets with D-pad / left-stick strum, A select, B back (confirmed in the original under Xenia; GetHeldPattern 0x82100FC0) | `engine/src/input/input.cpp`, DECISIONS D4 | M0 |
 | GD04-013 | Original | ✅ | Online, leaderboards, achievements: stubbed and logged (not in the port) | | Kickoff | 0.1.12: dropped as GH2: the main menu's ONLINE (was XBOX LIVE) ends at "Online play is not available in GD-Engine." (its Leaderboards / Downloadable Content are inside it); the store's DOWNLOADS finds no content (Marketplace call a no-op); achievements stay stubbed (not shown on PC); every save / online text in PC wording (GD04-039)
@@ -890,144 +908,144 @@ universal launcher, not released on its own.
 
 | ID | Class | Status | Item | Notes | From |
 |---|---|---|---|---|---|
-| GD05-001 | Original | ❌ | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-05/agent-instructions.md`, [docs/adding-a-game.md](../adding-a-game.md) | New 10-28 |
+| GD05-001 | Original | ❌ | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-05/agent-instructions.md`, [docs/platform/adding-a-game.md](../platform/adding-a-game.md) | New 10-28 |
 
 
 ## gd-game-06: Guitar Hero: Aerosmith (Xbox 360)
 
 | ID | Class | Status | Item | Notes | From |
 |---|---|---|---|---|---|
-| GD06-001 | Original | ❌ | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-06/agent-instructions.md`, [docs/adding-a-game.md](../adding-a-game.md) | New 10-28 |
+| GD06-001 | Original | ❌ | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-06/agent-instructions.md`, [docs/platform/adding-a-game.md](../platform/adding-a-game.md) | New 10-28 |
 
 
 ## gd-game-07: Guitar Hero World Tour (Xbox 360)
 
 | ID | Class | Status | Item | Notes | From |
 |---|---|---|---|---|---|
-| GD07-001 | Original | ❌ | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-07/agent-instructions.md`, [docs/adding-a-game.md](../adding-a-game.md) | New 10-28 |
+| GD07-001 | Original | ❌ | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-07/agent-instructions.md`, [docs/platform/adding-a-game.md](../platform/adding-a-game.md) | New 10-28 |
 
 
 ## gd-game-08: Rock Band 2 (Xbox 360)
 
 | ID | Class | Status | Item | Notes | From |
 |---|---|---|---|---|---|
-| GD08-001 | Original | ❌ | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-08/agent-instructions.md`, [docs/adding-a-game.md](../adding-a-game.md) | New 10-28 |
+| GD08-001 | Original | ❌ | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-08/agent-instructions.md`, [docs/platform/adding-a-game.md](../platform/adding-a-game.md) | New 10-28 |
 
 
 ## gd-game-09: The Beatles: Rock Band (Xbox 360)
 
 | ID | Class | Status | Item | Notes | From |
 |---|---|---|---|---|---|
-| GD09-001 | Original | ❌ | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-09/agent-instructions.md`, [docs/adding-a-game.md](../adding-a-game.md) | New 10-28 |
+| GD09-001 | Original | ❌ | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-09/agent-instructions.md`, [docs/platform/adding-a-game.md](../platform/adding-a-game.md) | New 10-28 |
 
 
 ## gd-game-10: Guitar Hero: Metallica (Xbox 360)
 
 | ID | Class | Status | Item | Notes | From |
 |---|---|---|---|---|---|
-| GD10-001 | Original | ❌ | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-10/agent-instructions.md`, [docs/adding-a-game.md](../adding-a-game.md) | New 10-28 |
+| GD10-001 | Original | ❌ | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-10/agent-instructions.md`, [docs/platform/adding-a-game.md](../platform/adding-a-game.md) | New 10-28 |
 
 
 ## gd-game-11: Guitar Hero: Smash Hits (Xbox 360)
 
 | ID | Class | Status | Item | Notes | From |
 |---|---|---|---|---|---|
-| GD11-001 | Original | ❌ | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-11/agent-instructions.md`, [docs/adding-a-game.md](../adding-a-game.md) | New 10-28 |
+| GD11-001 | Original | ❌ | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-11/agent-instructions.md`, [docs/platform/adding-a-game.md](../platform/adding-a-game.md) | New 10-28 |
 
 
 ## gd-game-12: Guitar Hero 5 (Xbox 360)
 
 | ID | Class | Status | Item | Notes | From |
 |---|---|---|---|---|---|
-| GD12-001 | Original | ❌ | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-12/agent-instructions.md`, [docs/adding-a-game.md](../adding-a-game.md) | New 10-28 |
+| GD12-001 | Original | ❌ | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-12/agent-instructions.md`, [docs/platform/adding-a-game.md](../platform/adding-a-game.md) | New 10-28 |
 
 
 ## gd-game-13: Lego Rock Band (Xbox 360)
 
 | ID | Class | Status | Item | Notes | From |
 |---|---|---|---|---|---|
-| GD13-001 | Original | ❌ | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-13/agent-instructions.md`, [docs/adding-a-game.md](../adding-a-game.md) | New 10-28 |
+| GD13-001 | Original | ❌ | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-13/agent-instructions.md`, [docs/platform/adding-a-game.md](../platform/adding-a-game.md) | New 10-28 |
 
 
 ## gd-game-14: Band Hero (Xbox 360)
 
 | ID | Class | Status | Item | Notes | From |
 |---|---|---|---|---|---|
-| GD14-001 | Original | ❌ | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-14/agent-instructions.md`, [docs/adding-a-game.md](../adding-a-game.md) | New 10-28 |
+| GD14-001 | Original | ❌ | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-14/agent-instructions.md`, [docs/platform/adding-a-game.md](../platform/adding-a-game.md) | New 10-28 |
 
 
 ## gd-game-15: Guitar Hero: Van Halen (Xbox 360)
 
 | ID | Class | Status | Item | Notes | From |
 |---|---|---|---|---|---|
-| GD15-001 | Original | ❌ | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-15/agent-instructions.md`, [docs/adding-a-game.md](../adding-a-game.md) | New 10-28 |
+| GD15-001 | Original | ❌ | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-15/agent-instructions.md`, [docs/platform/adding-a-game.md](../platform/adding-a-game.md) | New 10-28 |
 
 
 ## gd-game-16: Green Day: Rock Band (Xbox 360)
 
 | ID | Class | Status | Item | Notes | From |
 |---|---|---|---|---|---|
-| GD16-001 | Original | ❌ | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-16/agent-instructions.md`, [docs/adding-a-game.md](../adding-a-game.md) | New 10-28 |
+| GD16-001 | Original | ❌ | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-16/agent-instructions.md`, [docs/platform/adding-a-game.md](../platform/adding-a-game.md) | New 10-28 |
 
 
 ## gd-game-17: Guitar Hero: Warriors of Rock (Xbox 360)
 
 | ID | Class | Status | Item | Notes | From |
 |---|---|---|---|---|---|
-| GD17-001 | Original | ❌ | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-17/agent-instructions.md`, [docs/adding-a-game.md](../adding-a-game.md) | New 10-28 |
+| GD17-001 | Original | ❌ | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-17/agent-instructions.md`, [docs/platform/adding-a-game.md](../platform/adding-a-game.md) | New 10-28 |
 
 
 ## gd-game-18: Rock Band 3 (Xbox 360)
 
 | ID | Class | Status | Item | Notes | From |
 |---|---|---|---|---|---|
-| GD18-001 | Original | ❌ | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-18/agent-instructions.md`, [docs/adding-a-game.md](../adding-a-game.md) | New 10-28 |
+| GD18-001 | Original | ❌ | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-18/agent-instructions.md`, [docs/platform/adding-a-game.md](../platform/adding-a-game.md) | New 10-28 |
 
 
 ## gd-game-19: Rock Band 4 (Xbox One)
 
 | ID | Class | Status | Item | Notes | From |
 |---|---|---|---|---|---|
-| GD19-001 | Original | ❌ | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-19/agent-instructions.md`, [docs/adding-a-game.md](../adding-a-game.md) | New 10-28 |
+| GD19-001 | Original | ❌ | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-19/agent-instructions.md`, [docs/platform/adding-a-game.md](../platform/adding-a-game.md) | New 10-28 |
 
 ## gd-game-20: Guitar Hero: On Tour (Nintendo DS)
 
 | ID | Class | Status | Item | Notes | From |
 |---|---|---|---|---|---|
-| GD20-001 | Original | ❌ | Discovery: the cartridge / UMD and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-20/agent-instructions.md`, [docs/adding-a-game.md](../adding-a-game.md) | New 11-04 |
+| GD20-001 | Original | ❌ | Discovery: the cartridge / UMD and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-20/agent-instructions.md`, [docs/platform/adding-a-game.md](../platform/adding-a-game.md) | New 11-04 |
 
 ## gd-game-21: Guitar Hero On Tour: Decades (Nintendo DS)
 
 | ID | Class | Status | Item | Notes | From |
 |---|---|---|---|---|---|
-| GD21-001 | Original | ❌ | Discovery: the cartridge / UMD and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-21/agent-instructions.md`, [docs/adding-a-game.md](../adding-a-game.md) | New 11-04 |
+| GD21-001 | Original | ❌ | Discovery: the cartridge / UMD and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-21/agent-instructions.md`, [docs/platform/adding-a-game.md](../platform/adding-a-game.md) | New 11-04 |
 
 ## gd-game-22: Guitar Hero On Tour: Modern Hits (Nintendo DS)
 
 | ID | Class | Status | Item | Notes | From |
 |---|---|---|---|---|---|
-| GD22-001 | Original | ❌ | Discovery: the cartridge / UMD and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-22/agent-instructions.md`, [docs/adding-a-game.md](../adding-a-game.md) | New 11-04 |
+| GD22-001 | Original | ❌ | Discovery: the cartridge / UMD and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-22/agent-instructions.md`, [docs/platform/adding-a-game.md](../platform/adding-a-game.md) | New 11-04 |
 
 ## gd-game-23: Band Hero (Nintendo DS)
 
 | ID | Class | Status | Item | Notes | From |
 |---|---|---|---|---|---|
-| GD23-001 | Original | ❌ | Discovery: the cartridge / UMD and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-23/agent-instructions.md`, [docs/adding-a-game.md](../adding-a-game.md) | New 11-04 |
+| GD23-001 | Original | ❌ | Discovery: the cartridge / UMD and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-23/agent-instructions.md`, [docs/platform/adding-a-game.md](../platform/adding-a-game.md) | New 11-04 |
 
 ## gd-game-24: Rock Band Unplugged (PlayStation Portable)
 
 | ID | Class | Status | Item | Notes | From |
 |---|---|---|---|---|---|
-| GD24-001 | Original | ❌ | Discovery: the cartridge / UMD and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-24/agent-instructions.md`, [docs/adding-a-game.md](../adding-a-game.md) | New 11-04 |
+| GD24-001 | Original | ❌ | Discovery: the cartridge / UMD and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-24/agent-instructions.md`, [docs/platform/adding-a-game.md](../platform/adding-a-game.md) | New 11-04 |
 
 ## gd-game-25: DJ Hero (Xbox 360)
 
 | ID | Class | Status | Item | Notes | From |
 |---|---|---|---|---|---|
-| GD25-001 | Original | ❌ | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-25/agent-instructions.md`, [docs/adding-a-game.md](../adding-a-game.md) | New 11-05 |
+| GD25-001 | Original | ❌ | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-25/agent-instructions.md`, [docs/platform/adding-a-game.md](../platform/adding-a-game.md) | New 11-05 |
 
 ## gd-game-26: DJ Hero 2 (Xbox 360)
 
 | ID | Class | Status | Item | Notes | From |
 |---|---|---|---|---|---|
-| GD26-001 | Original | ❌ | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-26/agent-instructions.md`, [docs/adding-a-game.md](../adding-a-game.md) | New 11-05 |
+| GD26-001 | Original | ❌ | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-26/agent-instructions.md`, [docs/platform/adding-a-game.md](../platform/adding-a-game.md) | New 11-05 |

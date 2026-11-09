@@ -67,9 +67,10 @@ The open dream engine is a bigger project. The idea is to create a engine that e
 | id         | Name                 | Done          |
 | ---------- | -------------------- | ------------- |
 | gd-tool-01 | Additive music menu  | Concept phase |
-| gd-tool-02 | Music mod / DLC menu | Concept phase |
-| gd-tool-03 | Band mod menu        | --            |
-| gd-tool-04 | Open dream engine    | --            |
+| gd-tool-02 | Dream charter engine | Concept phase |
+| gd-tool-03 | Music and DLC Mods   | Concept phase |
+| gd-tool-04 | Band mod menu        | --            |
+| gd-tool-05 | Open dream engine    | --            |
 
 
 
@@ -80,14 +81,18 @@ prj-gd-engine/
   README.md LICENSE LICENSE-ADDITIONAL-TERMS.md
   .gd-game-00-boilerplate/   the template for a new game folder
   .github/                   workflows and the repo guard
-  docs/                      the official codebase documentation (the engine's shared docs)
-    tasks/gd-backlog.md      THE single backlog (every game, the launcher, releases, the site)
+  docs/                      the official codebase documentation (and the site)
+    guidelines/              the rules for every task (read before working): general guidelines,
+                             universal launcher, mechanisms, menus, behaviours, engine backends, usual bugs
+    tasks/gd-backlog.md      THE single backlog (every game, the core, the launcher, releases, the site)
     tasks/PARITY_GAPS.md     the parity gaps
-    knowledge/               the rules for every task (read before working), the kickoffs
-    knowledge/universal_mechanisms.md  the menus and mechanisms every game has (the owner's reference)
-    spikes/                  studies and spikes (platforms, signing, stores, HDR...)
+    platform/                adding a game, the release process
+    spikes/                  studies and spikes (platforms, signing, stores, HDR...), the kickoffs
+    res/                     official Guitar Dream assets (icon, store art)
+  gd-engine-core/            the universal backends every game can load (platform, inputs, audio, render, image, ui)
   gd-engine-launcher/        the Guitar Dream Universal Launcher
-  res/                       official Guitar Dream assets (icon)
+  gd-engine-tools/           shared tools (in construction)
+  gd-tool-01/ ... gd-tool-05/  one folder per tool in the table above
   original_isos/             your own disc images and ROMs (git-ignored)
   gd-game-01/ ... gd-game-26/
 ```
@@ -100,11 +105,17 @@ layout for now) has `README.md`, `agent-instructions.md` (how the system works a
 `game-info.yaml` holds the game's id, names, launch date, platforms, its
 Guitar Dream version, whether it is ready to play and how complete it is.
 
+Every tool folder has `README.md`, `agent-instructions.md`, `CHANGELOG.md`,
+`local_build.sh`, `tool-info.yaml`, `build_commands/`, `docs/`, `src/`,
+`agents/` and the git-ignored `local_builds/`. `tool-info.yaml` holds the
+tool's id, name, the status from the table above and its version. Nothing
+in these folders is built yet.
+
 # Before you work
 
-Read [docs/knowledge/](docs/knowledge/) (general guidelines, the universal
+Read [docs/guidelines/](docs/guidelines/) (general guidelines, the universal
 launcher rules and the behaviours every game shares),
-[docs/knowledge/universal_mechanisms.md](docs/knowledge/universal_mechanisms.md) (the menus and mechanisms
+[docs/guidelines/universal_mechanisms.md](docs/guidelines/universal_mechanisms.md) (the menus and mechanisms
 every game has) and the single backlog
 [docs/tasks/gd-backlog.md](docs/tasks/gd-backlog.md). Update the backlog at the start and at the end
 of every task. Studies and spikes are in [docs/spikes/](docs/spikes/README.md).
@@ -147,6 +158,6 @@ their owners; this project is not affiliated with or endorsed by them.
 - [docs/README.md](docs/README.md): the official codebase documentation
 - [docs/legal.md](docs/legal.md): what never goes into this repo, and why
 - [docs/contributing.md](docs/contributing.md): branches, commits, pull requests
-- [docs/release-process.md](docs/release-process.md): how the launcher (with every game) is released
-- [docs/adding-a-game.md](docs/adding-a-game.md): starting a new game folder
+- [docs/platform/release-process.md](docs/platform/release-process.md): how the launcher (with every game) is released
+- [docs/platform/adding-a-game.md](docs/platform/adding-a-game.md): starting a new game folder
 - Each game's own README, `docs/` and `CHANGELOG.md`

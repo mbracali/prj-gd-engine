@@ -5,17 +5,126 @@
 #include <algorithm>
 #include <cstdio>
 #include <cmath>
+#include <cstring>
+
+#if GDCORE_HAS_AUDIO
+#include "gd/core/audio/output.h"
+#endif
+
+struct AudioRoute::Impl {
+#if GDCORE_HAS_AUDIO
+    std::unique_ptr<gd::core::audio::Output> out;
+    int frameBytes = 0;
+#endif
+};
+
+std::unique_ptr<AudioRoute> AudioRoute::open(const std::string& backend, const SDL_AudioSpec& src,
+                                             SDL_AudioStreamCallback get, void* user, std::string& error) {
+#if GDCORE_HAS_AUDIO
+    std::unique_ptr<AudioRoute> r(new AudioRoute());
+    r->impl_ = std::make_unique<Impl>();
+    r->impl_->out = gd::core::audio::create(backend, error);
+    if (!r->impl_->out) return nullptr;
+    gd::core::audio::Spec want;
+    want.sampleRate = src.freq;  // no resampling where the device takes the game's rate
+    want.channels = 2;
+    // Headless (SDL's dummy driver: the self-tests, the walks): the
+    // backend's null device, which consumes in real time like SDL's dummy.
+    const char* drv = SDL_GetCurrentAudioDriver();
+    want.nullDevice = drv && std::strcmp(drv, "dummy") == 0;
+    AudioRoute* self = r.get();
+    if (!r->impl_->out->open(want, [self](float* out, int frames) {
+            const int bytes = frames * self->impl_->frameBytes;
+            int got = self->stream_ ? SDL_GetAudioStreamData(self->stream_, out, bytes) : 0;
+            if (got < 0) got = 0;
+            if (got < bytes) std::memset(reinterpret_cast<char*>(out) + got, 0, size_t(bytes - got));  // underrun: silence, as SDL
+        }, error))
+        return nullptr;
+    const gd::core::audio::Spec spec = r->impl_->out->spec();
+    r->impl_->frameBytes = spec.channels * int(sizeof(float));
+    const SDL_AudioSpec dst{SDL_AUDIO_F32, spec.channels, spec.sampleRate};
+    r->stream_ = SDL_CreateAudioStream(&src, &dst);
+    if (!r->stream_) {
+        error = SDL_GetError();
+        return nullptr;
+    }
+    if (get) SDL_SetAudioStreamGetCallback(r->stream_, get, user);
+    return r;
+#else
+    (void)src, (void)get, (void)user;
+    error = "this build has no gd-engine-core audio (" + backend + ")";
+    return nullptr;
+#endif
+}
+
+AudioRoute::~AudioRoute() {
+#if GDCORE_HAS_AUDIO
+    if (impl_ && impl_->out) impl_->out->close();  // no pull after this
+#endif
+    if (stream_) SDL_DestroyAudioStream(stream_);
+}
+
+bool AudioRoute::start(std::string& error) {
+#if GDCORE_HAS_AUDIO
+    return impl_->out->start(error);
+#else
+    error = "no gd-engine-core audio";
+    return false;
+#endif
+}
+
+double AudioRoute::latencyMs() const {
+#if GDCORE_HAS_AUDIO
+    return impl_->out->latencyMs();
+#else
+    return 0;
+#endif
+}
+
+std::string AudioRoute::name() const {
+#if GDCORE_HAS_AUDIO
+    return impl_->out->name();
+#else
+    return "";
+#endif
+}
 
 Mixer::~Mixer() { close(); }
 
 void Mixer::close() {
+    if (route_) {
+        route_.reset();  // stops the output, destroys stream_
+        stream_ = nullptr;
+    }
     if (stream_) SDL_DestroyAudioStream(stream_);
     stream_ = nullptr;
     std::lock_guard<std::mutex> lock(mutex_);
     vgs_.reset();
 }
 
-bool Mixer::open(std::string& error) {
+bool Mixer::open(std::string& error, const std::string& backend) {
+    if (!backend.empty() && backend != "local") {
+        // Enhanced > Audio backend: the song mix through a gd-engine-core
+        // output; any failure leaves the game on local (SDL's device).
+        std::string why;
+        SDL_AudioSpec src{SDL_AUDIO_F32, 2, rate_};
+        route_ = AudioRoute::open(backend, src, &Mixer::callback, this, why);
+        if (route_) {
+            stream_ = route_->stream();
+            // The output's buffering, held back from the song clock as the SDL device's is.
+            outputLatencyMs_ = std::min(100.0, route_->latencyMs());
+            if (route_->start(why)) {
+                routedBackend_ = backend;
+                SDL_Log("audio: backend %s: %s (%.1f ms held back from the song clock)", backend.c_str(), route_->name().c_str(),
+                        outputLatencyMs_);
+                return true;
+            }
+            route_.reset();
+            stream_ = nullptr;
+            outputLatencyMs_ = 0;
+        }
+        SDL_Log("audio: backend %s failed (%s); using local", backend.c_str(), why.c_str());
+    }
     SDL_AudioSpec spec{SDL_AUDIO_F32, 2, rate_};
     stream_ = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, &Mixer::callback, this);
     if (!stream_) {
@@ -64,7 +173,7 @@ void Mixer::play(std::unique_ptr<VgsStream> stream, std::vector<Track> tracks, d
         paused_ = false;
     }
     SDL_UnlockAudioStream(stream_);
-    SDL_ResumeAudioStreamDevice(stream_);
+    resumeDevice();
 }
 
 void Mixer::stop() {
@@ -168,7 +277,7 @@ void Mixer::playStream(int slot, std::unique_ptr<VgsStream> stream, std::vector<
         s.playing = true;
     }
     SDL_UnlockAudioStream(stream_);
-    SDL_ResumeAudioStreamDevice(stream_);
+    resumeDevice();
 }
 
 void Mixer::stopStream(int slot, double fadeMs) {

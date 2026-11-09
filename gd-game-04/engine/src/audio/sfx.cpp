@@ -26,16 +26,9 @@ uint16_t le16(const uint8_t* p) { return uint16_t(p[0] | p[1] << 8); }
 Sfx::~Sfx() { close(); }
 
 bool Sfx::open(std::string& error) {
-    device_ = SDL_OpenAudioDevice(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, nullptr);
-    if (!device_) {
-        error = SDL_GetError();
-        return false;
-    }
-    // GD04_AUDIODUMP: this device's mix too (audiodev::dumpPostmix).
-    if (audiodev::dumpEnabled())
-        SDL_SetAudioPostmixCallback(
-            device_, [](void*, const SDL_AudioSpec* spec, float* buffer, int bytes) { audiodev::dumpPostmix(1, "sfx", spec, buffer, bytes); }, nullptr);
-    return true;
+    // Its own logical device, or the gd-engine-core output (audiodev::openFx).
+    device_ = audiodev::openFx(error);
+    return device_;
 }
 
 void Sfx::close() {
@@ -43,8 +36,8 @@ void Sfx::close() {
     for (auto& j : jobs_)
         if (j->thread.joinable()) j->thread.join();
     jobs_.clear();
-    if (device_) SDL_CloseAudioDevice(device_);
-    device_ = 0;
+    if (device_) audiodev::closeFx();
+    device_ = false;
 }
 
 void Sfx::addPak(const Disc& disc, const std::string& pakPath) {
@@ -234,7 +227,7 @@ uint32_t Sfx::play(uint32_t sample, float volume, float pitch, uint32_t buss) {
     // Bound first: a stream made without an output format holds nothing
     // until it has one (the data put before was dropped: no sound effect
     // was ever heard).
-    const bool bound = SDL_BindAudioStream(device_, s);
+    const bool bound = audiodev::bindFx(s);
     bool put = true;
     if (job) {
         voice.job = job;
@@ -298,13 +291,13 @@ void Sfx::pauseBuss(uint32_t buss, bool paused) {
     for (Voice& v : voices_) {
         if (!buss || !soundBusses().under(v.buss, buss) || v.paused == paused) continue;
         v.paused = paused;
-        if (paused) SDL_UnbindAudioStream(v.stream);
-        else if (device_) SDL_BindAudioStream(device_, v.stream);
+        if (paused) audiodev::unbindFx(v.stream);
+        else if (device_) audiodev::bindFx(v.stream);
     }
 }
 
 void Sfx::stopAll() {
-    for (Voice& v : voices_) SDL_DestroyAudioStream(v.stream);
+    for (Voice& v : voices_) audiodev::unbindFx(v.stream), SDL_DestroyAudioStream(v.stream);
     voices_.clear();
 }
 
@@ -326,6 +319,7 @@ void Sfx::update() {
     voices_.erase(std::remove_if(voices_.begin(), voices_.end(),
                                  [](const Voice& v) {
                                      if (v.paused || v.job || SDL_GetAudioStreamAvailable(v.stream) > 0) return false;
+                                     audiodev::unbindFx(v.stream);
                                      SDL_DestroyAudioStream(v.stream);
                                      return true;
                                  }),

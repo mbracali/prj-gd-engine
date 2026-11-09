@@ -13,7 +13,7 @@
 # Deck download (Linux built in the Steam Runtime "sniper" SDK), and publishes
 # gdul-<v>-<os>-<arch> (.tar.gz, .zip, .apk; os: linux, steamdeck, windows,
 # macos, android) and SHA256SUMS.txt.
-# See docs/release-process.md.
+# See docs/platform/release-process.md.
 name: gdul release
 
 on:
