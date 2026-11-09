@@ -483,6 +483,34 @@ private:
     // Rock Band's vocals (wave 02): the judge, the voice and the track;
     // player_ carries the judge's numbers (Player::setExternal).
     std::unique_ptr<RbBonus> rbBonus_;  // solos, drum fills, the Big Rock Ending (wave 02)
+    // Rock Band's band (wave 02): players 2..4, each on its own part, track
+    // and judge; player_ stays player 1 [I: RB's band rules, docs/parity.md].
+    struct RbSeat {
+        std::string part;
+        int pad = 1, difficulty = 3;
+        std::unique_ptr<Player> player;
+        std::unique_ptr<VocalPlayer> vocal;
+        std::unique_ptr<VocalInput> mic;
+        std::unique_ptr<Autoplay> bot;
+        std::unique_ptr<RbTrackView> track;
+        std::unique_ptr<RbBonus> bonus;
+        float rating = 0.5f, pitch = -1, loud = 0;
+        int phrasesHit = 0;
+        const char* lastRating = nullptr;
+        float lastRatingMs = -1e9f;
+        bool out = false;  // failed out, waiting for a save
+    };
+    std::vector<RbSeat> seats_;
+    std::vector<GameSetup::RbMember> rbBandSetup_;
+    bool player0Out_ = false;
+    int unisonBonuses_ = 0, saves_ = 0;
+    std::map<int, std::pair<int, int>> unison_;  // an Overdrive phrase's start tick -> (captured, players with it)
+    std::vector<std::pair<std::string, float>> bandNotices_;
+    void makeSeats(bool autoplay);
+    void updateSeats(float t, bool over, const std::vector<PlayerEvent>& events0);
+    void drawSeats(float t, float speed);
+    void drawBandHud(float t);
+    Player* seatPlayer(int pad);
     std::unique_ptr<VocalPlayer> vocal_;
     std::unique_ptr<VocalInput> mic_;
     VocalTrackView vocalView_;
@@ -493,6 +521,7 @@ private:
     void updateVocals(float t);
     void drawRbTracks(float t, float speed);
     void drawRbNotices(float t);
+    void drawRbTrack0(float t, float speed);
     int rbTrackFrames_ = 0;  // frames RB's instrument track drew (the walks)
     float overdriveDrainMs() const;
     std::unique_ptr<VorbisStream> pendingStream_;
@@ -547,7 +576,11 @@ private:
         if (!player2_) return rules_.trackSpeed[size_t(difficulty_)];
         return (rules_.trackSpeed[size_t(difficulties_[0])] + rules_.trackSpeed[size_t(difficulties_[1])]) * 0.5f;
     }
-    Autoplay* botFor(const Player* p) { return p == player_.get() ? bot_.get() : bot2_.get(); }
+    Autoplay* botFor(const Player* p) {
+        for (const RbSeat& st : seats_)
+            if (st.player.get() == p) return st.bot.get();
+        return p == player_.get() ? bot_.get() : bot2_.get();
+    }
     bool songLost() const { return coopBand_ ? coopBand_->failed() : player_ && player_->failed(); }
     bool songLostForUi() const override { return songLost(); }
     // Development aid: GD05_FAIL_AT=<song ms> fails the song then.
@@ -864,7 +897,7 @@ int App::run() {
                 synth_->stats().plays, synth_->stats().voices, (unsigned long long)synth_->player().started(), synth_->stats().decoded,
                 synth_->stats().decodeMs, synth_->stats().decodeFailures + synth_->stats().unresolved);
     synth_.reset();
-    hud_.reset(), track_.reset(), track2_.reset(), rbTrack_.reset();
+    seats_.clear(), hud_.reset(), track_.reset(), track2_.reset(), rbTrack_.reset();
     sceneCache_.reset();
     milos_.reset();
     // A controller was used: its report (the save folder) for bug reports.
@@ -888,7 +921,7 @@ bool App::loadData(const std::string& path) {
         unloadVenue();
         dropGameParsers();
         ui_.reset();
-        hud_.reset(), track_.reset(), track2_.reset(), rbTrack_.reset();
+        seats_.clear(), hud_.reset(), track_.reset(), track2_.reset(), rbTrack_.reset();
         sceneCache_.reset(), milos_.reset();
         trackTried_ = false;
         synth_.reset();
@@ -962,6 +995,18 @@ bool App::loadSong(const SongInfo& info, int difficulty, bool autoplay, float ba
             if (const char* d2 = SDL_getenv("GD05_DIFF2")) difficulties_[1] = std::clamp(std::atoi(d2), 0, kDifficultyCount - 1);
             parts_ = {"guitar", "guitar"};
             if (!options_.part.empty()) parts_[0] = options_.part;
+            // --part guitar,bass,drum,vocals: a band, one player per part (the others autoplay).
+            rbBandSetup_.clear();
+            if (parts_[0].find(',') != std::string::npos) {
+                std::string rest = parts_[0];
+                parts_[0] = rest.substr(0, rest.find(','));
+                rest = rest.substr(rest.find(',') + 1);
+                for (int pad = 1; !rest.empty() && pad < 4; ++pad) {
+                    const size_t c = rest.find(',');
+                    rbBandSetup_.push_back({rest.substr(0, c), difficulty_, pad});
+                    rest = c == std::string::npos ? std::string() : rest.substr(c + 1);
+                }
+            }
             if (mode_ == DevMode::Coop) {
                 // The second instrument the song has (song_provider get_instrument 1).
                 const SongAudio& a = info.coopAudio ? *info.coopAudio : info.audio;
@@ -1002,7 +1047,9 @@ bool App::loadSong(const SongInfo& info, int difficulty, bool autoplay, float ba
         // blue = their frets, the green pad = the green fret (an Xbox 360
         // drum kit's LB, B, Y, X, A) [I: RB's drum watcher is DrumPlayer,
         // not wired yet]. The chart's lanes are permuted to those frets.
-        if (part0 == Part::Drums)
+        bool anyDrums = part0 == Part::Drums;
+        for (const auto& m : rbBandSetup_) anyDrums |= m.part == "drum" || m.part == "drums";
+        if (anyDrums)
             for (Chart& c : song_->charts[size_t(Part::Drums)])
                 for (Gem& g : c.gems) {
                     const uint8_t f = g.frets;
@@ -1014,7 +1061,8 @@ bool App::loadSong(const SongInfo& info, int difficulty, bool autoplay, float ba
         // cannot fail, a co-op player cannot end the game (0x822C6B98); the
         // co-op band's meter does (game/band_performer.h) [C].
         // Enhanced Options > No Fail Mode (as --no-fail).
-        const bool noFail = options_.noFail || enhancedValue("no_fail") == "on" || autoplay || mode_ != DevMode::Single;
+        // A band's players fail out and are saved by the band (updateSeats), never alone.
+        const bool noFail = options_.noFail || enhancedValue("no_fail") == "on" || autoplay || mode_ != DevMode::Single || !rbBandSetup_.empty();
         const ScoreConfig* config = coop ? &rules_.coop : &rules_.solo;  // modes.dta score_config
         // The watcher follows the device that acted last: a guitar or the
         // keyboard strums, a gamepad's frets strum (GH2's joypad_guitar).
@@ -1037,6 +1085,7 @@ bool App::loadSong(const SongInfo& info, int difficulty, bool autoplay, float ba
         bot_ = autoplay ? std::make_unique<Autoplay>(player_->chart(), faceOff ? 0 : -1) : nullptr;
         vocal_.reset(), mic_.reset();
         rbBonus_ = part0 != Part::Vocals ? std::make_unique<RbBonus>(*song_, part0, static_cast<Difficulty>(difficulties_[0]), rules_) : nullptr;
+        seats_.clear();
         vocalRating_ = 0.5f, vocalRatingName_ = nullptr, vocalRatingMs_ = -1e9f, vocalPhrasesHit_ = 0;
         if (part0 == Part::Vocals) {
             vocal_ = std::make_unique<VocalPlayer>(*song_, static_cast<Difficulty>(difficulties_[0]), rules_);
@@ -1057,6 +1106,7 @@ bool App::loadSong(const SongInfo& info, int difficulty, bool autoplay, float ba
                 }
         }
         player2_.reset(), bot2_.reset(), coopBand_.reset();
+        if (!rbBandSetup_.empty()) makeSeats(autoplay);
         sharedMeter_ = {};
         guitarHeard_ = true;
         activeGem_ = 0, activePlayers_ = 0;
@@ -1424,7 +1474,7 @@ bool App::prepareTrack() {
         } catch (const std::exception& ex2) {
             SDL_Log("RB's track could not be loaded (%s); using the debug highway", ex2.what());
         }
-        rbTrack_.reset(), sceneCache_.reset(), milos_.reset();
+        seats_.clear(), rbTrack_.reset(), sceneCache_.reset(), milos_.reset();
         return false;
     }
     SDL_Log("track and HUD loaded in %.0f ms", double(SDL_GetTicksNS() - start) / 1e6);
@@ -1662,6 +1712,7 @@ void App::handleAction(const InputEvent& a) {
 // The player a pad plays for: with one player every device; with two the
 // player whose pad (gamecfg set_player) it is.
 Player* App::playerFor(int pad) {
+    if (!seats_.empty()) return pad == pads_[0] ? player_.get() : seatPlayer(pad);
     if (!player2_) return player_.get();
     if (pads_[1] == pad) return player2_.get();
     if (pads_[0] == pad) return player_.get();
@@ -1690,6 +1741,11 @@ void App::playerAction(const InputEvent& a) {
         }
         return;
     }
+    for (RbSeat& st : seats_)
+        if (st.vocal && st.player.get() == p) {
+            if (a.action == Action::StarPower && a.down && st.vocal->deployOverdrive(lastT_, overdriveDrainMs())) bandNotices_.push_back({"OVERDRIVE!", lastT_});
+            return;
+        }
     if (vocal_ && p == player_.get()) {
         // The singer's Overdrive: any deploy press in a gap between phrases [I].
         if (a.action == Action::StarPower && a.down && vocal_->deployOverdrive(t, overdriveDrainMs()) && ui_)
@@ -1739,6 +1795,224 @@ int App::controllerType(int pad) {
         if (n.find("drum") != std::string::npos) return 0;
     }
     return 1;
+}
+
+// ---- Rock Band's band (wave 02) ----------------------------------------
+// Players 2..4 (GameSetup::rbBand, or --part a,b,c,d): each its part's
+// judge (the gem Player, or the vocal judge carried by an empty-chart
+// Player), RB's track for its instrument, its bonuses. A player whose pad
+// has no controller autoplays (a development aid for --part lists) [I].
+void App::makeSeats(bool autoplay) {
+    seats_.clear();
+    unison_.clear(), bandNotices_.clear();
+    unisonBonuses_ = saves_ = 0;
+    player0Out_ = false;
+    bool haveVocals = vocal_ != nullptr;
+    for (const GameSetup::RbMember& m : rbBandSetup_) {
+        RbSeat st;
+        st.pad = m.pad, st.difficulty = std::clamp(m.difficulty, 0, kDifficultyCount - 1);
+        Part part = partFor(*song_, m.part == "drums" ? "drum" : m.part, false);
+        if (part == Part::Vocals && (song_->vocals.empty() || haveVocals)) part = Part::Guitar;
+        if (part == Part::Vocals) haveVocals = true;
+        st.part = part == Part::Drums ? "drum" : part == Part::Bass ? "bass" : part == Part::Vocals ? "vocals" : "guitar";
+        const Rules& r = rules_;
+        st.player = std::make_unique<Player>(*song_, part, static_cast<Difficulty>(st.difficulty), r,
+                                             part == Part::Drums ? ControllerMode::Joypad : ControllerMode::Guitar, true, -1, nullptr);
+        st.player->setNumber(int(seats_.size()) + 1);
+        st.player->setCalibrationMs(calibrationMs());
+        const bool bot = autoplay || !input_.padConnected(m.pad);
+        if (part == Part::Vocals) {
+            st.vocal = std::make_unique<VocalPlayer>(*song_, static_cast<Difficulty>(st.difficulty), rules_);
+            if (!bot) {
+                st.mic = std::make_unique<VocalInput>();
+                std::string err;
+                if (!st.mic->open("sdl3", err)) st.mic.reset();
+            }
+        } else {
+            if (bot) st.bot = std::make_unique<Autoplay>(st.player->chart(), -1);
+            st.bonus = std::make_unique<RbBonus>(*song_, part, static_cast<Difficulty>(st.difficulty), rules_);
+        }
+        if (bot && part == Part::Vocals) st.loud = -2;  // the autoplay sings (updateSeats)
+        SDL_Log("band: player %d plays %s (%s)%s", int(seats_.size()) + 2, st.part.c_str(), difficultyName(static_cast<Difficulty>(st.difficulty)),
+                bot ? ", autoplay" : "");
+        seats_.push_back(std::move(st));
+    }
+    // Unison: an Overdrive phrase every instrument player has (the same start).
+    std::vector<const Chart*> charts;
+    if (!vocal_) charts.push_back(&player_->chart());
+    for (const RbSeat& st : seats_)
+        if (!st.vocal) charts.push_back(&st.player->chart());
+    if (charts.size() > 1)
+        for (const Chart* c : charts)
+            for (const StarPhrase& ph : c->phrases) ++unison_[ph.startTick].second;
+}
+
+Player* App::seatPlayer(int pad) {
+    for (RbSeat& st : seats_)
+        if (st.pad == pad) return st.player.get();
+    return nullptr;
+}
+
+void App::updateSeats(float t, bool over, const std::vector<PlayerEvent>& events0) {
+    const int players = 1 + int(seats_.size());
+    // Unison and saves from every player's events.
+    auto phraseCaptured = [&](const Player& p, const PlayerEvent& e) {
+        if (e.kind != PlayerEvent::Kind::PhraseCaptured || e.gem < 0 || size_t(e.gem) >= p.chart().gems.size()) return;
+        const int ph = p.chart().gems[size_t(e.gem)].phrase;
+        if (ph < 0 || size_t(ph) >= p.chart().phrases.size()) return;
+        auto it = unison_.find(p.chart().phrases[size_t(ph)].startTick);
+        if (it == unison_.end() || it->second.second < 2) return;
+        if (++it->second.first == it->second.second) {
+            // Every instrument captured it: the Unison bonus, a second
+            // phrase's worth of Overdrive each (unison_phrase reward 2.0) [I].
+            ++unisonBonuses_;
+            bandNotices_.push_back({"UNISON BONUS!", t});
+            auto boost = [&](Player& q) { q.setStarMeter(q.starMeter() + rules_.solo.starPower.phrase); };
+            if (!vocal_) boost(*player_);
+            for (RbSeat& st : seats_)
+                if (!st.vocal) boost(*st.player);
+        }
+    };
+    bool deployed = false;
+    for (const PlayerEvent& e : events0) {
+        phraseCaptured(*player_, e);
+        deployed |= e.kind == PlayerEvent::Kind::StarPowerStart;
+    }
+    for (RbSeat& st : seats_) {
+        if (over) break;
+        Player& p = *st.player;
+        if (st.vocal) {
+            float loud = 0, pitch = -1;
+            if (st.mic) pitch = st.mic->poll(t, loud);
+            else if (st.loud == -2 || st.loud >= 0) {
+                pitch = st.vocal->targetPitch(t);
+                loud = st.vocal->noteAt(t) ? 0.3f : 0.0f;
+            }
+            st.pitch = pitch;
+            if (!st.mic) st.loud = loud > 0 ? loud : -2;
+            else st.loud = loud;
+            if (!st.out) st.vocal->sing(t, pitch, loud);
+            const bool wasOd = st.vocal->overdriveActive();
+            st.vocal->update(t);
+            deployed |= !wasOd && st.vocal->overdriveActive();
+            for (const VocalPlayer::Event& e : st.vocal->takeEvents()) {
+                if (e.kind != VocalPlayer::Event::Kind::PhraseRated) continue;
+                st.lastRating = VocalPlayer::ratingName(e.rating), st.lastRatingMs = t;
+                static const float kStep[] = {-0.12f, -0.06f, 0.0f, 0.05f, 0.08f};
+                st.rating = std::clamp(st.rating + kStep[int(e.rating)], 0.0f, 1.0f);
+                if (e.rating >= VocalPlayer::Rating::Okay) ++st.phrasesHit;
+            }
+            int mult = 1;
+            if (auto it = rules_.rb.streakMultipliers.find("vocals"); it != rules_.rb.streakMultipliers.end())
+                for (const auto& [count, m] : it->second)
+                    if (st.vocal->streak() >= count) mult = m;
+            p.setExternal(st.vocal->score(), st.vocal->streak(), mult, st.vocal->overdriveActive(), st.vocal->overdrive(), st.rating, st.phrasesHit);
+        } else {
+            if (st.bot && !st.out) st.bot->feed(p, t);
+            p.update(t);
+            const std::vector<PlayerEvent> ev = p.takeEvents();
+            if (st.bonus) st.bonus->update(p, ev, t);
+            for (const PlayerEvent& e : ev) {
+                phraseCaptured(p, e);
+                deployed |= e.kind == PlayerEvent::Kind::StarPowerStart;
+                if (e.kind == PlayerEvent::Kind::Hit && ui_) ui_->gameEvent("hit", {Value::integer(int(&st - seats_.data()) + 1)});
+            }
+            st.rating = p.rockMeter();
+        }
+    }
+    if (over) return;
+    // Failing out and saving [I: RB's band crowd rules (crowd_loss_per_sec,
+    // save_level, multiplayer_lose_level) as read in scoring.dtb, their use
+    // inferred]: a player whose meter empties is out; any other player's
+    // Overdrive deploy saves every player who is out, back at save_level.
+    const float r0 = vocal_ ? vocalRating_ : player_->rockMeter();
+    if (!player0Out_ && r0 <= 0.0f) player0Out_ = true, bandNotices_.push_back({"PLAYER 1 FAILED!", t});
+    for (RbSeat& st : seats_)
+        if (!st.out && st.rating <= 0.0f) {
+            st.out = true;
+            bandNotices_.push_back({"PLAYER " + std::to_string(int(&st - seats_.data()) + 2) + " FAILED!", t});
+        }
+    if (deployed) {
+        const float back = rules_.rb.saveLevel > 0 ? 0.5f : 0.5f;
+        if (player0Out_) {
+            player0Out_ = false, ++saves_;
+            if (vocal_) vocalRating_ = back;
+            else player_->setCrowdRating(back);
+            bandNotices_.push_back({"PLAYER 1 SAVED!", t});
+        }
+        for (RbSeat& st : seats_)
+            if (st.out) {
+                st.out = false, ++saves_;
+                st.rating = back;
+                if (!st.vocal) st.player->setCrowdRating(back);
+                bandNotices_.push_back({"PLAYER " + std::to_string(int(&st - seats_.data()) + 2) + " SAVED!", t});
+            }
+    }
+    // The band fails when its mean meter (the players out count 0) is under
+    // multiplayer_lose_level, or everyone is out.
+    float sum = player0Out_ ? 0.0f : r0;
+    int out = player0Out_ ? 1 : 0;
+    for (const RbSeat& st : seats_) sum += st.out ? 0.0f : st.rating, out += st.out;
+    const bool noFail = options_.noFail || enhancedValue("no_fail") == "on" || bot_ != nullptr;
+    if (!noFail && !songLost() && (out == players || sum / float(players) < rules_.rb.multiplayerLoseLevel)) player_->forceFail();
+}
+
+void App::drawSeats(float t, float speed) {
+    for (RbSeat& st : seats_) {
+        if (st.vocal) {
+            VocalTrackView::State vs;
+            vs.t = t + float(videoOffsetMs_);
+            vs.voicePitch = st.pitch, vs.loudness = std::max(0.0f, st.loud);
+            vs.lastRating = st.lastRating, vs.lastRatingMs = st.lastRatingMs;
+            vocalView_.draw(canvas_, song_->vocals, *st.vocal, vs);
+            continue;
+        }
+        if (!st.track) continue;
+        RbTrackView::PlayerView pv;
+        const Player* p = st.player.get();
+        pv.chart = &p->chart();
+        pv.hit = [p](int i) { return p->gemHit(i) || !p->owned(i); };
+        pv.missed = [p, t](int i) { return !p->gemHit(i) && p->chart().gems[size_t(i)].ms < t - 150.0f; };
+        pv.phraseIntact = [p](int ph) { return p->phraseIntact(ph); };
+        pv.overdriveActive = p->starPowerActive();
+        pv.heldGem = p->sustainGem();
+        if (st.part == "drum") pv.laneOfBit = {4, 1, 2, 3, 0};
+        st.track->draw(canvas_.renderer(), *sceneCache_, *song_, pv, t + float(videoOffsetMs_), speed);
+    }
+}
+
+// The band's numbers under each track: score, multiplier, the Overdrive and
+// crowd meters, FAILED; the band's score at the top [I: a stand-in for RB's
+// own HUD (track/gen/scoreboard.milo, band_power_meter.milo, crowd_meter.milo)].
+void App::drawBandHud(float t) {
+    canvas_.flush();
+    struct Row {
+        std::string part;
+        const Player* p;
+        float rating;
+        bool out;
+    };
+    std::vector<Row> rows;
+    if (!vocal_) rows.push_back({parts_[0], player_.get(), player_->rockMeter(), player0Out_});
+    for (const RbSeat& st : seats_)
+        if (!st.vocal) rows.push_back({st.part, st.player.get(), st.rating, st.out});
+    const float w = kScreenW / float(std::max<size_t>(1, rows.size()));
+    for (size_t i = 0; i < rows.size(); ++i) {
+        const Row& r = rows[i];
+        const float x = w * float(i) + 12, y = kScreenH - 46;
+        char b[64];
+        std::snprintf(b, sizeof b, "%s %d x%d", r.part.c_str(), r.p->score(), r.p->multiplier());
+        canvas_.text(x, y, 1.5f, r.out ? SDL_Color{240, 80, 70, 255} : SDL_Color{235, 235, 240, 255}, r.out ? r.part + " FAILED" : std::string(b));
+        canvas_.fillRect(x, y + 16, w - 40, 6, {30, 30, 40, 220});
+        canvas_.fillRect(x, y + 16, (w - 40) * r.p->starMeter(), 6, r.p->starPowerActive() ? SDL_Color{120, 220, 255, 255} : SDL_Color{240, 200, 70, 255});
+        canvas_.fillRect(x, y + 24, w - 40, 4, {30, 30, 40, 220});
+        canvas_.fillRect(x, y + 24, (w - 40) * r.rating, 4, r.rating < 0.25f ? SDL_Color{230, 60, 50, 255} : SDL_Color{110, 210, 90, 255});
+    }
+    char b[48];
+    std::snprintf(b, sizeof b, "BAND %d", gameCounter(0, "band_score"));
+    canvas_.text(kScreenW - 260, kScreenH - 70, 2, {255, 230, 120, 255}, b);
+    for (const auto& [text, ms] : bandNotices_)
+        if (t - ms >= 0 && t - ms < 2500) canvas_.textCentered(kScreenW * 0.5f, 290, 3, {255, 235, 120, 255}, text);
 }
 
 // Overdrive's length on the vocals: band_energy's deploy beats (32,
@@ -1964,6 +2238,7 @@ void App::updateSong(float t) {
         return ph >= 0 && size_t(ph) < c.phrases.size() && c.phrases[size_t(ph)].firstGem == e.gem;
     };
     if (rbBonus_ && !over) rbBonus_->update(*player_, events, t);
+    if (!seats_.empty()) updateSeats(t, over || paused_, events);
     for (const PlayerEvent& e : events) spStarted_[0] += phraseStart(player_.get(), e);
     for (const PlayerEvent& e : events2) spStarted_[1] += phraseStart(player2_.get(), e);
     for (const PlayerEvent& e : events2) {
@@ -2320,6 +2595,7 @@ bool App::gameLoad(const GameSetup& setup, std::string& error) {
     difficulties_ = {std::clamp(setup.difficulty, 0, kDifficultyCount - 1), std::clamp(setup.difficulties[1], 0, kDifficultyCount - 1)};
     parts_ = setup.parts;
     pads_ = setup.pads;
+    rbBandSetup_ = setup.rbBand;
     input_.setLefty(setup.leftys[0] || setup.lefty, setup.leftys[1]);
     if (!loadSong(*it, setup.difficulty, autoplay, setup.bandVolume, setup.guitarVolume, setup.fastIntro)) {
         error = message_;
@@ -2362,6 +2638,14 @@ int App::gameCounter(int player, const std::string& key) const {
     if (key == "score") return player_ ? player_->score() : 0;
     if (key == "part_vocals") return parts_[0] == "vocals" ? 1 : 0;
     if (key == "rb_track_frames") return rbTrackFrames_;
+    if (key == "band_players") return 1 + int(seats_.size());
+    if (key == "unison_bonuses") return unisonBonuses_;
+    if (key == "band_saves") return saves_;
+    if (key == "band_score") {
+        int sc = player_ ? player_->score() : 0;
+        for (const RbSeat& st : seats_) sc += st.player ? st.player->score() : 0;
+        return sc;
+    }
     if (key == "solos_done") return rbBonus_ ? rbBonus_->solosDone() : 0;
     if (key == "solo_bonus") return rbBonus_ ? rbBonus_->bonusTotal() : 0;
     if (key == "fills_shown") return rbBonus_ ? rbBonus_->fillsShown() : 0;
@@ -2720,7 +3004,7 @@ void App::drawTrack() {
         updateTouchLanes();
     } else if ((vocal_ || rbTrack_) && sceneCache_ && !debugHighway_) {
         drawRbTracks(lastT_, speed);
-        highway_.drawHud(canvas_, *player_, info_ ? info_->name : "");
+        if (seats_.empty()) highway_.drawHud(canvas_, *player_, info_ ? info_->name : "");
     } else {
         highway_.draw(canvas_, *song_, *player_, lastT_, speed, info_ ? info_->name : "", flashes_);
     }
@@ -2730,6 +3014,31 @@ void App::drawTrack() {
 // the vocal track, or the instrument's (trackpanel's TrackDir guitar /
 // bass / drum).
 void App::drawRbTracks(float t, float speed) {
+    if (!seats_.empty()) {
+        // The instruments' tracks side by side under the vocals [I: RB's
+        // layout per player count, track_panel.dta's positions, not read].
+        std::vector<RbTrackView*> tracks;
+        for (RbSeat& st : seats_)  // loaded here: the milo library comes with the song's track (prepareTrack)
+            if (!st.vocal && !st.track && milos_) try {
+                    auto tv = std::make_unique<RbTrackView>();
+                    tv->load(*data_, *milos_, st.part);
+                    st.track = std::move(tv);
+                } catch (const std::exception& e) {
+                    SDL_Log("band: %s track: %s", st.part.c_str(), e.what());
+                    st.part += "!";  // not again
+                }
+        if (rbTrack_ && !vocal_) tracks.push_back(rbTrack_.get());
+        for (RbSeat& st : seats_)
+            if (st.track) tracks.push_back(st.track.get());
+        const float n = float(tracks.size());
+        if (tracks.size() > 1)
+            for (size_t i = 0; i < tracks.size(); ++i) tracks[i]->setScreenRect({float(i) / n, 0.6f, 1.0f / n, 0.4f});
+    }
+    drawRbTrack0(t, speed);
+    if (!seats_.empty()) drawSeats(t, speed), drawBandHud(t);
+}
+
+void App::drawRbTrack0(float t, float speed) {
     if (vocal_) {
         VocalTrackView::State vs;
         vs.t = t + float(videoOffsetMs_);
@@ -3653,7 +3962,7 @@ void App::drawSong(float t) {
     } else if ((vocal_ || rbTrack_) && sceneCache_) {
         drawWorld();
         drawRbTracks(t, speed);
-        highway_.drawHud(canvas_, *player_, title);
+        if (seats_.empty()) highway_.drawHud(canvas_, *player_, title);
     } else {
         highway_.draw(canvas_, *song_, *player_, t, speed, title, flashes_);
         char buf[64];

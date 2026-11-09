@@ -134,7 +134,45 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         press(kX);  // the focused difficulty: ready
         at("game_screen", 60000);  // through loading_screen and the loading tips
     };
-    if (scenario == "quickplay_vocals" || scenario == "quickplay_drums") {
+    if (scenario == "band_quickplay") {
+        // Rock Band's Band Quickplay (ui/main.dta, matchmaking_band.dta,
+        // selsong / seldiff): Multiplayer > Band Quickplay > Local, the
+        // players join in the band lobby (player 1 on the guitar, player 2
+        // on the drums: GD05_INSTRUMENT), the song, each player's difficulty.
+        SDL_setenv_unsafe("GD05_INSTRUMENT", "guitar,drum,vocals,bass", 1);
+        endMs_ = 30000;
+        wait(300);
+        press(kX);
+        at("splash_screen", 30000);
+        press(kX);
+        at("main_screen");
+        press(kDown), wait(200);
+        press(kX);  // MULTIPLAYER
+        at("main_multimode_screen");
+        press(kX);  // BAND QUICKPLAY (bandqp.btn, the focus)
+        at("main_bandcoop_screen");
+        press(kX);  // LOCAL
+        at("matchmaking_band_screen", 30000);
+        wait(1500);
+        pressP(kX, 1);  // player 2 joins
+        wait(1500);
+        pressP(kX, 1);
+        wait(1500);
+        press(kX);
+        wait(1500);
+        press(kX);
+        wait(1500);
+        press(kStart);
+        at("qp_selsong_screen", 30000);
+        press(kX);
+        wait(2000);
+        press(kX), wait(1500), press(kX), wait(1500);
+        pressP(kX, 1), wait(1500), pressP(kX, 1);
+        at("game_screen", 60000);
+        wait(3000);
+        check("counter:band_players:2");
+        at("endgame_waiting_screen", 90000);
+    } else if (scenario == "quickplay_vocals" || scenario == "quickplay_drums") {
         // Rock Band's instrument per player (wave 02): the controller type
         // decides the part (seldiff.dta: a drum or a vocals controller
         // skips the guitar / bass choice). The singer autoplays (the walk's

@@ -330,9 +330,10 @@ void RbTrackView::draw(gfx::Renderer& r, gfx::SceneCache& cache, const Song& son
     if (!track_) return;
     int vx, vy, vw, vh;
     r.pictureRect(vx, vy, vw, vh);
-    const bool sub = screenRect_ != std::array<float, 4>{0, 0, 1, 1};
-    viewW_ = std::max(1, int(float(vw) * screenRect_[2])), viewH_ = std::max(1, int(float(vh) * screenRect_[3]));
-    if (sub) r.device().setViewport(vx + int(float(vw) * screenRect_[0]), vy + int(float(vh) * screenRect_[1]), viewW_, viewH_);
+    const std::array<float, 4> rect = hasLayout_ ? layout_ : screenRect_;
+    const bool sub = rect != std::array<float, 4>{0, 0, 1, 1};
+    viewW_ = std::max(1, int(float(vw) * rect[2])), viewH_ = std::max(1, int(float(vh) * rect[3]));
+    if (sub) r.device().setViewport(vx + int(float(vw) * rect[0]), vy + int(float(vh) * rect[1]), viewW_, viewH_);
     frameSet_ = false;
     speed_ = trackSpeed;
     nowY_ = yOf(nowMs);

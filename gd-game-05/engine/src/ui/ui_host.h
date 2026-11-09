@@ -55,6 +55,14 @@ public:
         std::array<std::string, 2> parts{"guitar", "guitar"};
         std::array<bool, 2> leftys{false, false};
         std::array<int, 2> pads{0, 1};
+        // Rock Band's band (wave 02): every player past the first, up to
+        // four in all (the session's player configs): part, difficulty, pad.
+        struct RbMember {
+            std::string part;
+            int difficulty = 1;
+            int pad = 1;
+        };
+        std::vector<RbMember> rbBand;
         // The mode's song_block (config/modes.dta: practice's song_practice_1
         // .. _3, the pre-slowed audio; empty or `song`: the song's own) and
         // skip_intro (practice: GamePanel sends intro_skip, not the intro).

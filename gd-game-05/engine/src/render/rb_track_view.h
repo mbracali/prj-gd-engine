@@ -59,6 +59,9 @@ public:
     bool loaded() const { return track_ != nullptr; }
     const std::string& part() const { return part_; }
     void setLefty(bool lefty) { lefty_ = lefty; }
+    // The players' layout (wave 02): the share of the screen the track
+    // draws in (x, y, w, h from the top left), else its camera's own.
+    void setScreenRect(const std::array<float, 4>& r) { layout_ = r, hasLayout_ = true; }
     void draw(gfx::Renderer& r, gfx::SceneCache& cache, const Song& song, const PlayerView& player, float nowMs, float trackSpeed);
 
 private:
@@ -92,6 +95,8 @@ private:
     int viewW_ = 1280, viewH_ = 720;
     float yPerSecond_ = 60, bottomY_ = -10, topY_ = 120, speed_ = 1, nowY_ = 0;
     std::array<float, 5> slotX_{-8, -4, 0, 4, 8};
+    std::array<float, 4> layout_{0, 0, 1, 1};
+    bool hasLayout_ = false;
     std::array<SlotSet, 5> sets_{};
     std::array<std::string, 5> slotColors_{"green", "red", "yellow", "blue", "orange"};
     const scene::TrackWidget *barW_ = nullptr, *beatW_ = nullptr, *halfBeatW_ = nullptr;
