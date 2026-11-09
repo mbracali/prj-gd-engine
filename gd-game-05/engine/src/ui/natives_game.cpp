@@ -1065,6 +1065,7 @@ public:
         if (msg == "get_controller_type_from_controller") return r = Value::integer(ui_.host().controllerType(intArg(args, 0))), true;
         if (msg == "get_num_participants") return r = in.send("session", "num_players", {}), true;
         if (msg == "has_participating_guitar_controller") return r = in.send("game", "has_participating_guitar_controller", {}), true;
+        if (msg == "get_controller_type_from_pad") return r = Value::integer(ui_.host().controllerType(intArg(args, 0))), true;
         if (msg == "auto_assign_missing_slots" || msg == "debug_get_force_controller" || msg == "foreach_player_config") return true;
         // A handler of the mode's table (practice's full_speed_block,
         // pre_processed_audio: GameConfig evaluates the mode's entry) [C data: modes.dta].

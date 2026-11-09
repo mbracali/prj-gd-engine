@@ -3028,6 +3028,7 @@ void App::drawTrack() {
 // the vocal track, or the instrument's (trackpanel's TrackDir guitar /
 // bass / drum).
 void App::drawRbTracks(float t, float speed) {
+    if (const char* tr = SDL_getenv("GD05_TRACK"); tr && *tr == '0') return;  // development aid: the venue alone
     if (!seats_.empty()) {
         // The instruments' tracks side by side under the vocals [I: RB's
         // layout per player count, track_panel.dta's positions, not read].

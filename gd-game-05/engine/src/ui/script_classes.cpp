@@ -927,6 +927,9 @@ bool ScreenObj::nativeButtonDown(int button, int player) {
 bool ScreenObj::handleNative(Interp&, const std::string& msg, std::vector<Value>& args, Value& r) {
     r = Value::integer(0);
     if (msg == "backwards_anim") return ui.setBackwardsAnim(), true;
+    // RB's reenter_screen (ui/lose.dta, pause.dta: restart the song): the
+    // screen entered again, the game panel reloading its song [I].
+    if (msg == "reenter_screen") return ui.gotoScreen(name()), true;
     if (msg == "reset_ambient" || msg == "turn_off_ambient" || msg == "wait_for_sfx") return true;
     if (msg == "enable" || msg == "disable") {
         if (!args.empty() && args[0].type == Value::Type::Object)

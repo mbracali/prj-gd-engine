@@ -134,7 +134,33 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         press(kX);  // the focused difficulty: ready
         at("game_screen", 60000);  // through loading_screen and the loading tips
     };
-    if (scenario == "rock_shop") {
+    if (scenario == "rb_lose" || scenario == "credits") {
+        // RB's lose screen (ui/lose.dta: retry / new song / quit) after a
+        // failed Quickplay song; the credits from the options.
+        if (scenario == "rb_lose") {
+            failMs_ = 8000;
+            rbQuickplay();
+            at("lose_screen", 40000);
+            wait(1500);
+            check("print_focus");
+            press(kX);  // the focused choice (retry)
+            at("loading_screen|game_screen", 30000);
+        } else {
+            wait(300);
+            press(kX);
+            at("splash_screen", 30000);
+            press(kX);
+            at("main_screen");
+            for (int i = 0; i < 3; ++i) press(kDown), wait(200);
+            press(kX);  // OPTIONS
+            at("options_screen");
+            for (int i = 0; i < 8; ++i) {
+                wait(400);
+                check("print_focus");
+                press(kDown);
+            }
+        }
+    } else if (scenario == "rock_shop") {
         // RB's Rock Shop (ui/shop.dta) from the Solo Tour's hub: a new
         // character, the shop, clothing, a store, a shirt bought and worn.
         wait(300);

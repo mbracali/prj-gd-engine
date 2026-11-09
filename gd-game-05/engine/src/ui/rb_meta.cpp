@@ -1188,7 +1188,25 @@ public:
     }
 };
 
+// AudioLatencyPanel (ui/options.dta, the A/V calibration): its click track
+// [I: the port's calibration is Enhanced Options' (GDALL-038); the panel's
+// audio is answered with the time since start_audio].
+class AudioLatencyPanelObj : public PanelObj {
+public:
+    using PanelObj::PanelObj;
+    bool handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) override {
+        if (msg == "preload_audio" || msg == "stop_audio") return r = Value::integer(0), true;
+        if (msg == "start_audio") return startMs_ = double(SDL_GetTicks()), r = Value::integer(0), true;
+        if (msg == "get_audio_time") return r = Value::real(startMs_ > 0 ? float(double(SDL_GetTicks()) - startMs_) : 0.0f), true;
+        return PanelObj::handleNative(in, msg, args, r);
+    }
+
+private:
+    double startMs_ = 0;
+};
+
 std::unique_ptr<ScriptObject> makeRbMetaClass(UiManager& ui, const std::string& cls, const std::string& name) {
+    if (cls == "AudioLatencyPanel" || name.rfind("calibrate_", 0) == 0) return std::make_unique<AudioLatencyPanelObj>(ui, name, cls);
     if (cls == "OutfitPanel") return std::make_unique<OutfitPanelObj>(ui, name, cls);
     if (cls == "CharPanel") return std::make_unique<CharPanelObj>(ui, name, cls);
     if (cls == "BandCreatePanel") return std::make_unique<BandCreatePanelObj>(ui, name, cls);
@@ -1436,6 +1454,46 @@ void installRbMeta(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Script
         return to.empty() ? std::string("qp_selsong_screen") : to;
     };
     in.addBuiltin("get_band_provider", [&m](Interp&, const DataNode&) { return Value::obj(m.bandList); });
+    // The options' character / band data lists (ui/options.dta): the
+    // profile's characters and bands; deleting one removes it from the save.
+    RbList* charData = list("char_data_provider");
+    charData->build = [&m] {
+        std::vector<std::string> v;
+        for (RbCharObj* c : m.chars) v.push_back(c->name());
+        return v;
+    };
+    charData->label = m.charList->label;
+    charData->extra = [&m, charData](Interp& in2, const std::string& msg, std::vector<Value>& a, Value& r) {
+        if (msg == "init") return charData->refresh(), true;
+        if (msg == "get_char") return r = Value::obj(in2.findObject(charData->symbol(iArg(a, 0)))), true;
+        if (msg == "delete_character") {
+            const std::string id = charData->symbol(iArg(a, 0));
+            m.chars.erase(std::remove_if(m.chars.begin(), m.chars.end(), [&](RbCharObj* c) { return c->name() == id; }), m.chars.end());
+            m.save(), charData->refresh(), m.charList->refresh();
+            return true;
+        }
+        return false;
+    };
+    for (const char* n : {"band_data_provider", "band_quit_provider"}) {
+        RbList* bandData = list(n);
+        bandData->build = [&m] {
+            std::vector<std::string> v;
+            for (RbBandObj* b : m.bands) v.push_back(b->name());
+            return v;
+        };
+        bandData->label = m.bandList->label;
+        bandData->extra = [&m, bandData](Interp& in2, const std::string& msg, std::vector<Value>& a, Value& r) {
+            if (msg == "init") return bandData->refresh(), true;
+            if (msg == "get_band") return r = Value::obj(in2.findObject(bandData->symbol(iArg(a, 0)))), true;
+            if (msg == "delete_band" || msg == "remove_band") {
+                const std::string id = bandData->symbol(iArg(a, 0));
+                m.bands.erase(std::remove_if(m.bands.begin(), m.bands.end(), [&](RbBandObj* b) { return b->name() == id; }), m.bands.end());
+                m.save(), bandData->refresh(), m.bandList->refresh();
+                return true;
+            }
+            return false;
+        };
+    }
     // The creator's new character (charcreator_panel get_tour_char) and the
     // Solo Tour's stand-in when no character was made: a profile character
     // from the instrument's first premade look [I].

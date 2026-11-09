@@ -378,6 +378,7 @@ void installRbNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Scr
     RbHost* sink = add(std::make_unique<RbHost>(ui, "band_ui_sink"));
     sink->on("has_event", no);
     sink->on("is_network_busy", no);
+    sink->on("get_controller_type", [&ui](std::vector<Value>& a) { return Value::integer(ui.host().controllerType(a.empty() ? 0 : a[0].integerValue())); });
     sink->on("is_forced_transition_active", no);
     // sync_screen <screen> [depth]: the band's screen change, local only here [I: the network sync].
     sink->on("sync_screen", [&ui](std::vector<Value>& a) {
