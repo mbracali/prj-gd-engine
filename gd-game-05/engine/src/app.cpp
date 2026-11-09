@@ -933,6 +933,7 @@ bool App::loadSong(const SongInfo& info, int difficulty, bool autoplay, float ba
             difficulties_ = {difficulty_, difficulty_};
             if (const char* d2 = SDL_getenv("GD05_DIFF2")) difficulties_[1] = std::clamp(std::atoi(d2), 0, kDifficultyCount - 1);
             parts_ = {"guitar", "guitar"};
+            if (!options_.part.empty()) parts_[0] = options_.part;
             if (mode_ == DevMode::Coop) {
                 // The second instrument the song has (song_provider get_instrument 1).
                 const SongAudio& a = info.coopAudio ? *info.coopAudio : info.audio;
@@ -961,7 +962,26 @@ bool App::loadSong(const SongInfo& info, int difficulty, bool autoplay, float ba
         // [C]; the others play every gem.
         const bool faceOff = mode_ == DevMode::FaceOff;
         // One player plays the guitar, except in practice (practice_selpart: the guitar or the bass).
-        const Part part0 = two || mode_ == DevMode::Practice ? partFor(*song_, parts_[0], coopBlock) : Part::Guitar;
+        // Rock Band: the player's instrument (the slot's track type) [C data].
+        Part part0 = partFor(*song_, parts_[0], coopBlock);
+        // Vocals need the vocal judge in the game loop (M4/M8, GD05-006): the guitar until then.
+        if (part0 == Part::Vocals) {
+            SDL_Log("vocals are not playable in this build yet: the guitar part instead");
+            part0 = Part::Guitar;
+        }
+        parts_[0] = part0 == Part::Drums ? "drum" : part0 == Part::Bass ? "bass" : "guitar";
+        // The drums, wave 01 (DECISIONS D6): GH2's joypad watcher on the
+        // drum chart, the pads as frets: kick = the orange fret, red, yellow,
+        // blue = their frets, the green pad = the green fret (an Xbox 360
+        // drum kit's LB, B, Y, X, A) [I: RB's drum watcher is DrumPlayer,
+        // not wired yet]. The chart's lanes are permuted to those frets.
+        if (part0 == Part::Drums)
+            for (Chart& c : song_->charts[size_t(Part::Drums)])
+                for (Gem& g : c.gems) {
+                    const uint8_t f = g.frets;
+                    g.frets = uint8_t(((f & 1) << 4) | (f & 0x0E) | ((f >> 4) & 1));
+                    g.hopo = false;
+                }
         const Part part1 = partFor(*song_, parts_[1], coop);
         // Two players never fail on their own meters: competitive modes
         // cannot fail, a co-op player cannot end the game (0x822C6B98); the
@@ -981,7 +1001,8 @@ bool App::loadSong(const SongInfo& info, int difficulty, bool autoplay, float ba
             return ControllerMode::Guitar;
         };
         player_ = std::make_unique<Player>(*song_, part0, static_cast<Difficulty>(difficulties_[0]), rules_,
-                                           two ? modeOfPad(pads_[0]) : input_.lastMode(), noFail, faceOff ? 0 : -1, config);
+                                           part0 == Part::Drums ? ControllerMode::Joypad : two ? modeOfPad(pads_[0]) : input_.lastMode(), noFail,
+                                           faceOff ? 0 : -1, config);
         player_->setCalibrationMs(calibrationMs());
         player_->setBigNotes(song_->bigNotes[size_t(part0)]);
         if (part0 == Part::Bass) player_->setBassRanges(song_->bassRanges);
@@ -1277,9 +1298,11 @@ void App::beginSong() {
     if (startMs > 0) pendingStream_->seek(uint64_t(startMs / 1000.0 * pendingStream_->sampleRate()));
     // The channels of the part played are the player's track; the others the background (0x82336910) [C].
     const std::array<std::string, 2> practicePart{parts_[0], parts_[0]};
+    // One player on another instrument than the guitar: its channels are the player's track.
+    const bool ownPart = !player2_ && parts_[0] != "guitar";
     mixer_.setBackgroundDb(practice ? practiceBackgroundDb() : 0.0f);
     mixer_.play(std::move(pendingStream_),
-                mixerTracks(audio, player2_ ? &parts_ : practice ? &practicePart : nullptr), leadInMs_);
+                mixerTracks(audio, player2_ ? &parts_ : practice || ownPart ? &practicePart : nullptr), leadInMs_);
     mixer_.setSpeed(float(speed));
     mixer_.setClock(speed, std::max(0.0, startMs));
     // beatmatch set_paused before the game began (the tutorials' lessons
@@ -3364,6 +3387,14 @@ void App::drawSong(float t) {
         }
     } else if (rbTrack_ && sceneCache_) {
         drawWorld();
+        // The instrument's track (trackpanel's TrackDir guitar / bass / drum).
+        if (rbTrack_->part() != parts_[0] && milos_) try {
+                auto rb = std::make_unique<RbTrackView>();
+                rb->load(*data_, *milos_, parts_[0]);
+                rbTrack_ = std::move(rb);
+            } catch (const std::exception& e) {
+                SDL_Log("RB's %s track: %s", parts_[0].c_str(), e.what());
+            }
         RbTrackView::PlayerView pv;
         const Player* p = player_.get();
         pv.chart = &p->chart();
@@ -3371,6 +3402,8 @@ void App::drawSong(float t) {
         pv.missed = [p, t](int i) { return !p->gemHit(i) && p->chart().gems[size_t(i)].ms < t - 150.0f; };  // [I] the miss window
         pv.phraseIntact = [p](int ph) { return p->phraseIntact(ph); };
         pv.overdriveActive = p->starPowerActive();
+        // The drums' permuted lanes back to the chart's (kick = lane 0).
+        if (parts_[0] == "drum") pv.laneOfBit = {4, 1, 2, 3, 0};
         rbTrack_->setLefty(input_.lefty(0));
         rbTrack_->draw(canvas_.renderer(), *sceneCache_, *song_, pv, t + float(videoOffsetMs_), speed);
         highway_.drawHud(canvas_, *player_, title);

@@ -224,6 +224,12 @@ void RbTrackView::drawGems(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, co
     const float behindMs = (bottomY_ - 1) / (yPerSecond_ * speed_) * 1000.0f;
     auto first = std::lower_bound(gems.begin(), gems.end(), nowMs + behindMs, [](const Gem& g, float v) { return g.ms < v; });
     auto last = std::lower_bound(first, gems.end(), nowMs + aheadMs, [](const Gem& g, float v) { return g.ms < v; });
+    static bool logged = false;
+    if (!logged && nowMs > 20000 && SDL_getenv("GD05_TRACKLOG")) {
+        logged = true;
+        SDL_Log("RB track %s at %.0f ms: gems %d..%d of %zu, first frets %d at %.0f ms", part_.c_str(), double(nowMs), int(first - gems.begin()),
+                int(last - gems.begin()), gems.size(), first != gems.end() ? first->frets : -1, first != gems.end() ? double(first->ms) : -1.0);
+    }
     // Far to near; the drums' kick first (under the pads' gems).
     for (auto it = last; it != first;) {
         --it;
@@ -234,15 +240,19 @@ void RbTrackView::drawGems(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, co
         const bool missed = player.missed && player.missed(i);
         const bool hopo = !drums_ && g.hopo && i > 0;
         const bool star = !missed && !player.overdriveActive && g.phrase >= 0 && (!player.phraseIntact || player.phraseIntact(g.phrase));
-        for (int f = 0; f < 5; ++f) {
-            if (!(g.frets & (1u << f))) continue;
+        for (int b = 0; b < 5; ++b) {
+            if (!(g.frets & (1u << b))) continue;
+            const int f = player.laneOfBit[size_t(b)];
             const SlotSet& s = sets_[size_t(f)];
             const scene::TrackWidget* w = missed ? (hopo ? s.missHopo : s.miss) : star ? (hopo ? s.starHopo : s.star) : hopo ? s.hopo : s.normal;
             if (!w) w = s.normal;
             // The kick's widget spans the track from its middle [I].
             // Colour: the guitar's slot f; the drums' pads are red, yellow, blue, green (lanes 1-4), the kick orange [C data: slot_colors; I: the drums' order].
             const int color = missed || star ? -1 : drums_ ? (f == 0 ? 4 : f) : f;
-            drawWidget(mr, cache, w, drums_ && f == 0 ? 0.0f : slotX(f), y, color);
+            // The drums' four pads between the five slots (-6, -2, 2, 6 for
+            // slots -8..8) [I: RB's drum slot positions are not read].
+            const float x = !drums_ ? slotX(f) : f == 0 ? 0.0f : (slotX(f - 1) + slotX(f)) * 0.5f;
+            drawWidget(mr, cache, w, x, y, color);
         }
     }
 }

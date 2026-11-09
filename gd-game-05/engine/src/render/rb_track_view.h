@@ -47,6 +47,7 @@ public:
         std::function<bool(int gem)> missed;   // passed unhit: the miss widget
         std::function<bool(int phrase)> phraseIntact;  // Overdrive phrase still capturable: star widgets
         bool overdriveActive = false;
+        std::array<int, 5> laneOfBit{0, 1, 2, 3, 4};  // the gem's bit -> the track's lane
     };
 
     RbTrackView();

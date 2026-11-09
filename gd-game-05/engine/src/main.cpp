@@ -182,6 +182,7 @@ int run(int argc, char** argv) {
         };
         if (a == "--song") opt.song = value();
         else if (a == "--difficulty") opt.difficulty = std::atoi(value().c_str());
+        else if (a == "--part") opt.part = value();
         else if (a == "--autoplay") opt.autoplay = true;
         else if (a == "--no-fail") opt.noFail = true;
         else if (a == "--selftest") selftest = true;

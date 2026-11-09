@@ -314,6 +314,10 @@ public:
             setup.difficulties[p] = s.players[p].difficulty;
             const int t = s.players[p].track;
             setup.parts[p] = t >= 0 && t < int(inst.size()) ? inst[size_t(t)] : std::string("guitar");
+            // Rock Band: the slot's track type (seldiff.dta set_track_type:
+            // kTrackDrum 0, kTrackBass 1, kTrackGuitar 2, kTrackVocals 3) [C data].
+            static const char* const kRbTracks[] = {"drum", "bass", "guitar", "vocals"};
+            if (const int tt = s.players[p].trackType; tt >= 0 && tt <= 3) setup.parts[p] = kRbTracks[tt];
             setup.leftys[p] = o.lefty[p];
             setup.pads[p] = s.players[p].padnum;
         }

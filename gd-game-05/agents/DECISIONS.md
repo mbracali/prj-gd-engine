@@ -50,3 +50,23 @@ pattern). Each says what, why and how to undo it.
 - **Why:** there is no Xbox Live profile or memory unit on PC; gd-game-02
   did the same with GH2's memory card flow.
 - **Undo:** `engine/src/ui/rb_natives.cpp` (memcardmgr, platform_mgr).
+
+## D6. Drums played through GH2's joypad watcher in wave 01 (2026-11-09)
+- **What:** with the drum part, the player is gd02's `Player` in joypad
+  mode on the drum chart, the pads as frets (kick = orange / LB, red, yellow,
+  blue, green pad = green / A, as an Xbox 360 drum kit reports them); the
+  chart's lanes are permuted to those frets at song load and back for the
+  track. `game/drum_player.cpp` (RB's drum rules from scoring.dtb, tested by
+  `--selftest`) is not the in-game judge yet.
+- **Why:** it makes the drums playable on RB's track now with the HUD,
+  endgame and save paths the guitar uses; the joypad watcher already hits a
+  gem by pressing its frets (no strum) and a chord within 50 ms.
+- **Undo:** `engine/src/app.cpp` (the `Part::Drums` branch in the song
+  load); wire `DrumPlayer` in its place (GD05-018).
+
+## D7. Vocals fall back to the guitar part in wave 01 (2026-11-09)
+- **What:** choosing the vocals plays the guitar part (logged); the vocal
+  judge and pitch detector exist and pass `--selftest` but are not in the
+  game loop, nor is a vocal track drawn.
+- **Why:** time: the highway, the band and the launcher came first.
+- **Undo:** `engine/src/app.cpp` (`part0 == Part::Vocals`).

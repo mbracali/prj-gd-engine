@@ -8,6 +8,7 @@ struct Options {
     std::string dataPath;  // disc image or extracted folder
     std::string song;      // --song <id>: play it, then quit
     int difficulty = 3;    // 0 Easy .. 3 Expert
+    std::string part;      // --part guitar | bass | drum: the instrument played (the song's PART track)
     bool autoplay = false;
     bool noFail = false;
     std::string walk;      // --walktest <scenario> (tests/walktest.h)
