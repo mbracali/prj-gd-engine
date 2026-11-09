@@ -44,6 +44,16 @@ float VocalPlayer::targetPitch(float t) const {
     return -1;
 }
 
+bool VocalPlayer::noteAt(float t) const {
+    size_t lo = 0, hi = track_.notes.size();
+    while (lo < hi) {
+        const size_t mid = (lo + hi) / 2;
+        if (track_.notes[mid].ms <= t) lo = mid + 1;
+        else hi = mid;
+    }
+    return lo > 0 && t <= track_.notes[lo - 1].ms + track_.notes[lo - 1].durationMs;
+}
+
 void VocalPlayer::sing(float t, float midiPitch, float loudness) {
     const float dt = lastT_ < -1e8f ? 0.0f : std::clamp(t - lastT_, 0.0f, 100.0f);
     lastT_ = t;

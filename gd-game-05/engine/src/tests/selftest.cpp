@@ -21,6 +21,7 @@
 #include "game/autoplay.h"
 #include "game/drum_player.h"
 #include "game/vocal_player.h"
+#include "audio/pitch_detector.h"
 #include "game/band_performer.h"
 #include "game/key_script.h"
 #include "game/song_db.h"
@@ -706,6 +707,55 @@ int runSelfTest(const std::string& dataPath) {
                         part == int(Part::Vocals) ? "phrases rated Awesome" : part == int(Part::Drums) ? "drum notes (with and without kick)" : "gems",
                         totals[part].failed);
         std::printf("drums: %d notes hit; vocals: %d phrases rated Awesome\n", drumNotes, vocalPhrases);
+        // The microphone path, headless: a synthesised voice (a sawtooth at
+        // the target pitch, an octave below for the low notes) through the
+        // pitch detector into the vocal judge, every song's Expert vocals;
+        // GD05_VOCALS_FILE feeds a recorded voice the same way in a song.
+        {
+            int songsSung = 0, phrasesOk = 0, phrasesAll = 0;
+            for (const SongInfo& info : songs) {
+                if (info.tutorial) continue;
+                Song sg;
+                try {
+                    sg = loadChart(data, info, rules);
+                } catch (const std::exception&) {
+                    continue;
+                }
+                if (sg.vocals.empty()) continue;
+                const Rules vr = rulesForInstrument(rules, "vocals");
+                VocalPlayer v(sg, Difficulty::Expert, vr);
+                constexpr int kRate = 16000, kStep = 160;  // 10 ms packets
+                PitchDetector det(kRate);
+                double phase = 0;
+                std::vector<float> buf(kStep);
+                for (float t = -500; t < sg.endMs + 3000; t += 10) {
+                    float target = v.targetPitch(t + 30);  // the detector's window lags ~half its length
+                    if (target < 0 && v.noteAt(t + 30)) target = 57;  // a talky: any voice
+                    for (int k = 0; k < kStep; ++k) {
+                        float x = 0;
+                        if (target > 0) {
+                            const double hz = 440.0 * std::pow(2.0, (target - 69) / 12.0);
+                            phase += hz / kRate;
+                            phase -= std::floor(phase);
+                            x = float(0.3 * (2 * phase - 1));
+                        }
+                        buf[size_t(k)] = x;
+                    }
+                    det.push(buf.data(), kStep);
+                    float loud = 0;
+                    const float p = det.pitch(loud);
+                    v.sing(t, p, loud);
+                    v.update(t);
+                }
+                ++songsSung;
+                phrasesAll += v.phrasesRated(VocalPlayer::Rating::Awful);
+                phrasesOk += v.phrasesRated(VocalPlayer::Rating::Great);
+            }
+            const bool ok = songsSung > 0 && phrasesOk * 10 >= phrasesAll * 9;
+            std::printf("vocals through the pitch detector: %d songs, %d of %d phrases rated Great or better%s\n", songsSung, phrasesOk,
+                        phrasesAll, ok ? "" : " (FAIL: under 90%)");
+            chartFailures += ok ? 0 : 1;
+        }
         std::printf("%d gems hit as hammer-ons / pull-offs (%d in the strummed run: a fret press hits an eligible HOPO\n"
                     "  before the strum, which is then forgiven, as in GH2); %d songs with their own hopo_threshold\n",
                     hopos, strumHopos, ownThreshold);

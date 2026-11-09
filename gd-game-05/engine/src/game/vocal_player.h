@@ -50,6 +50,8 @@ public:
 
     // The target pitch at time t (for the pitch arrow and the autoplay), or -1.
     float targetPitch(float t) const;
+    // Whether a note (pitched or a talky) is due at t.
+    bool noteAt(float t) const;
 
 private:
     float vocal(const char* key, float fallback) const;

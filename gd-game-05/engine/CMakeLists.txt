@@ -36,6 +36,7 @@ target_sources(gd05 PRIVATE
   src/audio/sfx_player.cpp
   src/audio/synth.cpp
   src/audio/vorbis_stream.cpp
+  src/audio/pitch_detector.cpp
   src/audio/xaudio_reverb.cpp
   src/audio/xma_decoder.cpp
   src/char/char_objects.cpp
