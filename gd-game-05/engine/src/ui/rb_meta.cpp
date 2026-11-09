@@ -1213,6 +1213,9 @@ std::unique_ptr<ScriptObject> makeRbMetaClass(UiManager& ui, const std::string& 
     if (cls == "DialogPanel") return std::make_unique<QuietPanelObj>(ui, name, cls, std::set<std::string>{"set_player_num"});
     if (cls == "CharCreatorPanel") return std::make_unique<CharCreatorPanelObj>(ui, name, cls);
     if (cls == "WorldMapPanel") return std::make_unique<QuietPanelObj>(ui, name, cls, std::set<std::string>{"sync"});
+    if (cls == "PracticePanel")
+        return std::make_unique<QuietPanelObj>(ui, name, cls, std::set<std::string>{"in_vocal_mode", "set_in_vocal_mode", "set_pitch_shift_ratio"});
+    if (cls == "PracticeBackgroundPanel") return std::make_unique<QuietPanelObj>(ui, name, cls, std::set<std::string>{"select_cam", "select_camera_shot"});
     if (name == "practice_space_panel")
         return std::make_unique<QuietPanelObj>(ui, name, cls, std::set<std::string>{"select_cam", "set_creator_player_num", "play_attitude_group", "set_char_player_num"});
     return nullptr;

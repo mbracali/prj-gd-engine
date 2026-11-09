@@ -363,15 +363,18 @@ void readEnviron(In& in, Environ& e) {
     in.fs(e.colorXfm.outHi);
 }
 
-// RndLight::Load RB 0x821AACC8 (rev 12) [C]: colour, type, range,
-// falloff_start, the preset flags, the cone, the texture, the colour owner.
+// RndLight::Load RB 0x821AACC8 (rev 12) [C]: colour, range, type,
+// falloff_start (the object's +0xD0 range, +0xD8 type, +0xD4 falloff_start:
+// the light-kind switches test +0xD8, 0x821A8900 uses +0xD0 as the range;
+// every RB light's second field is 0..4 [C data]), the preset flags, the
+// cone, the texture, the colour owner.
 void readLight(In& in, Light& l) {
     expectVersion(l.version, 12, "Light");
     l.header = readObjectHeader(in);
     readTrans(in, l.trans);
     in.fs(l.color);
-    l.type = in.i32();
     l.range = in.f();
+    l.type = in.i32();
     l.falloffStart = in.f();
     l.animateColorFromPreset = in.b();
     l.animatePositionFromPreset = in.b();

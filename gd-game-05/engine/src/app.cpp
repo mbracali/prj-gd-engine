@@ -2652,6 +2652,7 @@ int App::gameCounter(int player, const std::string& key) const {
     if (key == "score") return player_ ? player_->score() : 0;
     if (key == "part_vocals") return parts_[0] == "vocals" ? 1 : 0;
     if (key == "rb_track_frames") return rbTrackFrames_;
+    if (key == "ms_per_beat") return song_ && song_->beats.size() > 1 ? int((song_->beats.back().ms - song_->beats.front().ms) / float(song_->beats.size() - 1)) : 500;
     if (key == "band_players") return 1 + int(seats_.size());
     if (key == "unison_bonuses") return unisonBonuses_;
     if (key == "band_saves") return saves_;

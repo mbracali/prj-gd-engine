@@ -233,6 +233,13 @@ bool ComponentObj::buttonDown(int button, int player) {
 }
 
 bool ComponentObj::handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) {
+    // RB: milo objects the scripts poke that the port does not animate
+    // (EventTrigger trigger, PostProc select, the ending bonus reset,
+    // TrackDir practice_reset) [I], logged once.
+    if (msg == "trigger" || msg == "select" || msg == "practice_reset" || (msg == "reset" && object && object->cls != "BandList")) {
+        panel->ui.logOnce("STUB-quiet " + name() + " " + msg);
+        return r = Value::integer(0), true;
+    }
     UiManager& ui = panel->ui;
     gfx::UiView* v = panel->view.get();
     const auto argStr = [&](size_t i) { return i < args.size() ? args[i].str() : std::string(); };

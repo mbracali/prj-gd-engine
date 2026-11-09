@@ -132,3 +132,21 @@ Not applied yet (GD05-018):
 - Unsettled: which notes become HOPOs, the 50 ms overstrum gap (+0x5C has no
   reader found), the section queries (watcher vtable +0x1C..+0x2C, +0x60/+0x64:
   fills, coda, solos), kick handling.
+
+## Venue lights and WorldDir overrides (wave 02)
+- RndLight::Load (RB 0x821AACC8) reads colour, **range, type, falloff_start**
+  (the object's +0xD0 / +0xD8 / +0xD4; the kind switches test +0xD8,
+  0x821A8900 reads +0xD0 as the range) [C]; every RB light's type is 0..4
+  [C data]: 0 point, 1 directional, 2 fake spot, 3 floor spot, 4 shadow ref.
+  Wave 01 read type and range swapped: every point light shone without
+  falloff (the white venues).
+- The environ select (RB ~0x827D7580): with any point light only the point
+  lights (at most 4, 0x827D6F00); else the directional ones (0x827D7090);
+  fake spots per drawn object, floor spots in the projected slots
+  (0x827D72E8); a light black in 8 bits is skipped. Colours are HDR on
+  purpose: nothing divides them on the CPU [C]. The port draws points or
+  directionals; fake and floor spots are not drawn yet [I].
+- WorldDir (SyncProperty 0x82289DC8) hide_overrides and mat_overrides of a
+  venue variant's own record: the meshes that take the variant's materials
+  (arena_geom's stage uses the green placeholder temp.mat otherwise) and the
+  objects it hides; now applied at load (game/venue.cpp) [C data; I: timing].

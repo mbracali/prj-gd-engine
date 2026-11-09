@@ -226,7 +226,7 @@ public:
     Trans trans;
     std::array<float, 4> color{1, 1, 1, 1};
     float range = 0;
-    int type = 0;  // Q: GH1: 0 Point, 1 Directional; GH2 adds spot types
+    int type = 0;  // GH1: 0 Point, 1 Directional; RB [C]: 0 point, 1 directional, 2 fake spot, 3 floor spot, 4 shadow ref
     bool animateColorFromPreset = false, animatePositionFromPreset = false;
     float topRadius = 0, botRadius = 0, softness = 0, displacement = 0;
     std::string texture;

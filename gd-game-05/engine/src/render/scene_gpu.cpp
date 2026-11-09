@@ -635,10 +635,26 @@ LightEnv SceneCache::lightEnv(const scene::Environ& e, const ScenePose* pose) {
     }
     env.fade = e.fadeOut, env.fadeStart = e.fadeStart, env.fadeEnd = e.fadeEnd;
     int point = 0, dir = 0;
+    // Rock Band's environ select (RB ~0x827D7580) [C]: with any point light
+    // (type 0) only the point lights, at most 4 (0x827D6F00); else the
+    // directional ones (type 1, 0x827D7090) up to 7. Fake spots (2) need the
+    // drawn object's direction and floor spots (3) the projected slots: not
+    // drawn yet [I]; shadow refs (4) never light. A light whose colour is 0
+    // in 8 bits is skipped.
+    bool rbEnv = false, rbHasPoint = false;
+    for (const std::string& name : e.lights)
+        if (auto* l = e.dir ? e.dir->resolve<scene::Light>(name) : nullptr; l && l->bigEndian) {
+            rbEnv = true;
+            const bool lit = std::max({l->color[0], l->color[1], l->color[2]}) * 255.0f >= 0.5f;
+            if (l->type == 0 && lit && (!pose || pose->showing(l))) rbHasPoint = true;
+        }
     for (const std::string& name : e.lights) {
         auto* l = e.dir ? e.dir->resolve<scene::Light>(name) : nullptr;
         if (!l || env.lightCount >= 7) continue;
         if (pose && !pose->showing(l)) continue;
+        if (rbEnv && l->bigEndian) {
+            if (rbHasPoint ? (l->type != 0 || point >= 4) : l->type != 1) continue;
+        }
         const scene::Xfm w = pose ? pose->world(l) : l->trans.world;
         Light& g = env.lights[env.lightCount++];
         g.color = {l->color[0], l->color[1], l->color[2]};
@@ -647,6 +663,10 @@ LightEnv SceneCache::lightEnv(const scene::Environ& e, const ScenePose* pose) {
         if (const ScenePose::LightState* st = pose ? pose->light(l) : nullptr) {
             if (st->hasColor) g.color = {st->color[0], st->color[1], st->color[2]};
             if (st->hasRange) g.range = st->range;
+        }
+        if (rbEnv && std::max({g.color.x, g.color.y, g.color.z}) * 255.0f < 0.5f) {
+            --env.lightCount;  // RB skips a light black in 8 bits [C]
+            continue;
         }
         // [I] GH1's light types: 0 point, 1 directional. A directional light
         // shines along its +y axis, so the vector towards it is -y.
@@ -665,7 +685,7 @@ LightEnv SceneCache::lightEnv(const scene::Environ& e, const ScenePose* pose) {
     bool rb = false;
     for (const std::string& name : e.lights)
         if (auto* l = e.dir ? e.dir->resolve<scene::Light>(name) : nullptr) rb = rb || l->bigEndian;
-    if (rb && point > 0 && dir > 0) {
+    if (rb && !rbEnv && point > 0 && dir > 0) {
         env.directional = false;
         int k = 0;
         for (const std::string& name : e.lights) {

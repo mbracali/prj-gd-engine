@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "game/venue.h"
+#include "render/scene_gpu.h"
 
 #include <SDL3/SDL.h>
 
@@ -102,6 +103,22 @@ Venue::Venue(const GameData& data, std::string name, VenueVariant variant, const
         linked.clear();
         for (const auto& q : parts_)
             if (q.milo != p.milo) linked.push_back(&q.milo->root());
+    }
+    // Rock Band's WorldDir overrides (SyncProperty RB 0x82289DC8:
+    // hide_overrides, mat_overrides; applied by the load, 0x8228B6C8 ->
+    // 0x822870D8) [C data; I: the order]: a variant's own record names the
+    // meshes that take its materials (arena_geom's stage draws with the
+    // placeholder temp.mat otherwise) and the objects it hides.
+    for (const auto& p : parts_) {
+        const scene::Directory& root = p.milo->root();
+        auto* self = root.self ? root.self->as<scene::DirObj>() : nullptr;
+        if (!self || !self->hasWorld) continue;
+        for (const auto& [meshName, matName] : self->world.matOverrides)
+            if (auto* mesh = root.find<scene::Mesh>(meshName) ? root.find<scene::Mesh>(meshName) : root.find<scene::Mesh>(meshName + ".mesh"))
+                mesh->mat = matName.find('.') == std::string::npos ? matName + ".mat" : matName;
+        for (const std::string& hide : self->world.subdirHides)
+            if (scene::Object* o = root.find(hide))
+                if (auto* d = const_cast<scene::Draw*>(gfx::drawOf(o))) d->showing = false;
     }
 }
 

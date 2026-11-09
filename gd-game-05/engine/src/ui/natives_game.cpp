@@ -240,6 +240,9 @@ public:
         if (msg == "get_symbol") return r = Value::symbol(symbol(intArg(args, 0))), true;
         if (msg == "is_active") return r = Value::integer(active(intArg(args, 0)) ? 1 : 0), true;
         if (msg == "set_start_section") return startRow_ = intArg(args, 0) + 1, true;
+        if (msg == "init_sections") return load(), true;  // RB practice.dta
+        if (msg == "get_section_start_ms") return r = Value::real(entry(intArg(args, 0, -1)).startMs), true;
+        if (msg == "get_section_end_ms") return r = Value::real(entry(intArg(args, 0, -1)).endMs), true;
         if (msg == "section_after_last") {
             const Value ps = gameCfgValue(ui_, "practice_sections");
             const int last = ps.type == Value::Type::Array && ps.array && ps.array->size() > 1 ? in.evalValue((*ps.array)[1]).integerValue() : -1;
@@ -760,6 +763,7 @@ public:
     bool handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) override {
         r = Value::integer(0);
         if (msg == "extend_anim") return r = Value::obj(this), true;
+        if (msg == "practice_reset") return true;  // RB practice.dta: the track starts again with the song [I]
         if (msg == "animate") {
             std::vector<Value> a{Value::integer(p_)};
             for (const Value& raw : args) {
@@ -834,6 +838,7 @@ private:
         }
         // RB's player stats (endgame.dta send_player_stats) [I: counters not kept yet are 0].
         if (msg == "player_num") return r = Value::integer(index), true;
+        if (msg == "add_sinks") return true;  // RB practice.dta: callbacks the port's practice does not need [I]
         if (msg == "difficulty") return r = Value::integer(ui_.session().players[size_t(std::clamp(index, 0, 3))].difficulty), true;
         if (msg == "band_energy") return r = Value::real(p ? p->starMeter() : 0.0f), true;
         if (msg == "get_times_failed") return r = Value::integer(0), true;  // [I] the band's fail-outs are not counted per player yet
@@ -1065,6 +1070,26 @@ public:
         if (msg == "get_controller_type_from_controller") return r = Value::integer(ui_.host().controllerType(intArg(args, 0))), true;
         if (msg == "get_num_participants") return r = in.send("session", "num_players", {}), true;
         if (msg == "has_participating_guitar_controller") return r = in.send("game", "has_participating_guitar_controller", {}), true;
+        // RB practice (wave 02): the chosen sections in (practice_sections),
+        // get_section_bounds[_tick] <section> $start $end sets the variables
+        // (their names come by name: Interp::byNameMessages) [I: the natives].
+        if (msg == "set_section" || msg == "get_section" || msg == "get_section_bounds" || msg == "get_section_bounds_tick") {
+            Session& ss = ui_.session();
+            Value& v = ss.cfgSet["practice_sections"];
+            if (v.type != Value::Type::Array || !v.array || v.array->size() < 2) v = Value::list({Value::integer(-1), Value::integer(-1)});
+            if (msg == "set_section") return (*v.array)[size_t(std::clamp(intArg(args, 0), 0, 1))] = Value::integer(intArg(args, 1, -1)), true;
+            if (msg == "get_section") return r = Value::integer(in.evalValue((*v.array)[size_t(std::clamp(intArg(args, 0), 0, 1))]).integerValue()), true;
+            auto* sp = dynamic_cast<SectionProviderObj*>(in.findObject("section_provider"));
+            if (sp && sp->numData() <= 1) sp->load();
+            const UiHost::Section e = sp ? sp->entry(intArg(args, 0, -1)) : UiHost::Section{};
+            const bool ticks = msg == "get_section_bounds_tick";
+            for (size_t k = 1; k < 3 && k < args.size(); ++k) {
+                std::string name = args[k].str();
+                if (!name.empty() && name[0] == '$') name = name.substr(1);
+                in.var(name) = ticks ? Value::real(float(k == 1 ? e.startTick : e.endTick)) : Value::real(k == 1 ? e.startMs : e.endMs);
+            }
+            return true;
+        }
         if (msg == "get_controller_type_from_pad") return r = Value::integer(ui_.host().controllerType(intArg(args, 0))), true;
         if (msg == "auto_assign_missing_slots" || msg == "debug_get_force_controller" || msg == "foreach_player_config") return true;
         // A handler of the mode's table (practice's full_speed_block,
@@ -1098,6 +1123,9 @@ public:
         if (msg == "active_player") return r = Value::obj(ui_.interp().findObject("player" + std::to_string(std::clamp(intArg(args, 0), 0, 3)))), true;
         // never_allow_input (pause.dta): the pause screen blocks the players' input itself [I].
         if (msg == "never_allow_input") return true;
+        // RB practice.dta: the song's beat length and the start of play [I].
+        if (msg == "ms_per_beat") return r = Value::real(float(std::max(1, ui_.host().gameCounter(0, "ms_per_beat")))), true;
+        if (msg == "start" || msg == "set_time_paused") return true;
         // {beatmatch player n}: the player object while a song is loaded (ui/game.dta on_pause).
         if (msg == "player") {
             const int p = intArg(args, 0);
@@ -1156,6 +1184,15 @@ void installGameNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<S
     add(std::make_unique<PlayerObj>(ui, "band", -1));
     add(std::make_unique<BeatmatchObj>(ui));
     add(std::make_unique<SectionProviderObj>(ui));
+    // Rock Band's practice (ui/practice.dta): the provider is also
+    // practice_section_provider; gamecfg set_section / get_section keep the
+    // chosen sections in (practice_sections), get_section_bounds[_tick]
+    // <section> $start $end set the two variables [C data: the uses; I: the
+    // natives] (wave 02).
+    auto* sp = dynamic_cast<SectionProviderObj*>(in.findObject("section_provider"));
+    in.registerAs("practice_section_provider", sp);
+    in.byNameMessages.push_back("get_section_bounds");
+    in.byNameMessages.push_back("get_section_bounds_tick");
 }
 
 bool MsgSinks::handle(Interp& in, const std::string& msg, const std::vector<Value>& args) {

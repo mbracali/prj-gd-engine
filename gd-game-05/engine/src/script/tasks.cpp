@@ -105,6 +105,8 @@ public:
     bool handleNative(Interp&, const std::string& msg, std::vector<Value>& a, Value& r) override {
         if (msg == "seconds") return r = Value::real(float(mgr_.time(kTaskSeconds))), true;
         if (msg == "beat" || msg == "beats") return r = Value::real(float(mgr_.time(kTaskBeats))), true;
+        // RB practice.dta: the song position in ticks (480 a beat) [I: beats x 480].
+        if (msg == "total_tick") return r = Value::real(float(mgr_.time(kTaskBeats) * 480.0)), true;
         if (msg == "ui_seconds") return r = Value::real(float(mgr_.time(kTaskUISeconds))), true;
         if (msg == "tutorial_seconds") return r = Value::real(float(mgr_.time(kTaskTutorialSeconds))), true;
         if (msg == "time") return r = Value::real(float(mgr_.time(a.empty() ? 0 : a[0].integerValue()))), true;
