@@ -351,6 +351,9 @@ bool ComponentObj::handleNative(Interp& in, const std::string& msg, std::vector<
         return true;
     }
     if (msg == "selected_pos") return r = Value::integer(selected), true;
+    // RB's BandList rows shown at once (the town list) [I: the list keeps its own].
+    if (msg == "num_display") return r = Value::integer(numDisplay_), true;
+    if (msg == "set_num_display") return numDisplay_ = args.empty() ? numDisplay_ : args[0].integerValue(), r = Value::integer(0), true;
     if (msg == "selected_sym") {
         auto* p = dynamic_cast<ListProvider*>(provider);
         return r = Value::symbol(p ? p->symbol(selected) : std::string()), true;
@@ -826,6 +829,7 @@ bool PanelObj::handleNative(Interp& in, const std::string& msg, std::vector<Valu
     if (msg == "set_focus") {
         const std::string n = argStr(0);
         if (n.empty() || component(n)) setFocus(n, false);
+        else if (SDL_getenv("GD05_UILOG")) SDL_Log("ui: %s set_focus %s: no such component (loaded %d)", name().c_str(), n.c_str(), int(loaded));
         return true;
     }
     if (msg == "focus_name") return r = Value::symbol(focus), true;

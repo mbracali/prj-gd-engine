@@ -15,6 +15,7 @@
 #include "data/dta.h"
 #include "data/game_data.h"
 #include "render/canvas.h"
+#include "ui/rb_meta.h"
 #include "scene/milo.h"
 #include "scene/ui_objects.h"
 #include "scene/ui_styles.h"
@@ -873,6 +874,7 @@ const std::vector<std::string>& knownClasses() {
 
 std::unique_ptr<ScriptObject> makeClassObject(UiManager& ui, const std::string& cls, const std::string& name) {
     if (auto m = makeMultiClass(ui, cls, name)) return m;
+    if (auto rb = makeRbMetaClass(ui, cls, name)) return rb;  // Rock Band's meta panels (ui/rb_meta.cpp)
     if (cls == "GHScreen" || cls == "UIScreen" || cls == "TrackBudgetScreen" || cls == "MultiFocusScreen")
         return std::make_unique<GenericScreen>(ui, name, cls);
     if (auto g = makeGameClass(ui, cls, name)) return g;

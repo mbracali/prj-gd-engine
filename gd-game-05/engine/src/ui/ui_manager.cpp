@@ -491,7 +491,13 @@ bool UiManager::inGame() const {
     return g && g->up;
 }
 
-void UiManager::gotoScreen(const std::string& name, bool back) {
+void UiManager::gotoScreen(const std::string& name0, bool back) {
+    std::string name = name0;
+    if (redirect)
+        if (std::string to = redirect(name, back); !to.empty() && to != name) {
+            if (interp_.logReport) SDL_Log("ui: %s replaced by %s", name.c_str(), to.c_str());
+            name = to;
+        }
     if (!screen(name)) {
         interp_.onUnknown("screen " + name);
         return;

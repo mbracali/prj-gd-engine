@@ -240,4 +240,6 @@ public:
     // kControllerNone 3, config/macros.dta): the drum kit and the
     // microphone as devices, or the player's choice in GAMEPADS.
     virtual int controllerType(int /*pad*/) { return 1; }
+    // Whether local player `pad` has a controller (the band lobby).
+    virtual bool padConnected(int /*pad*/) { return false; }
 };

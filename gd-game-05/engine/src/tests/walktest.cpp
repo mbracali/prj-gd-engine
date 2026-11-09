@@ -134,12 +134,119 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         press(kX);  // the focused difficulty: ready
         at("game_screen", 60000);  // through loading_screen and the loading tips
     };
-    if (scenario == "band_quickplay") {
-        // Rock Band's Band Quickplay (ui/main.dta, matchmaking_band.dta,
-        // selsong / seldiff): Multiplayer > Band Quickplay > Local, the
-        // players join in the band lobby (player 1 on the guitar, player 2
-        // on the drums: GD05_INSTRUMENT), the song, each player's difficulty.
-        SDL_setenv_unsafe("GD05_INSTRUMENT", "guitar,drum,vocals,bass", 1);
+    if (scenario == "solo_tour") {
+        // RB's Solo Tour (ui/tour_solo.dta): Solo > Tour, a character (made
+        // in the creator the first time), the hub, the gig guide, a
+        // difficulty, the first event, its song, the results, the gig's end.
+        endMs_ = 20000;
+        wait(300);
+        press(kX);
+        at("splash_screen", 30000);
+        press(kX);
+        at("main_screen");
+        press(kX);  // SOLO
+        at("main_solomode_screen");
+        press(kDown), wait(200);
+        press(kX);  // TOUR
+        at("tour_solo_char_screen", 30000);
+        wait(800);
+        press(kX);  // create new
+        wait(800);
+        press(kX);  // male
+        at("charcreator_maker_screen", 20000);
+        wait(1500);
+        press(kX);  // NAME (the offered name is taken)
+        wait(800);
+        for (int i = 0; i < 4; ++i) press(kDown), wait(200);
+        press(kX);  // CREATE
+        at("charcreator_confirm_screen", 10000);
+        wait(1500);
+        check("print_focus");
+        press(kUp), wait(400);
+        check("print_focus");
+        press(kX);  // yes
+        at("tour_solo_hub_screen", 30000);
+        wait(1000);
+        press(kX);  // GIG GUIDE (gigguide.btn, the focus)
+        at("tour_solo_diff_screen");
+        press(kX);  // the difficulty
+        at("tour_solo_guitar_welcome_screen|tour_solo_event_screen", 20000);
+        wait(800);
+        press(kX);
+        at("tour_solo_event_screen", 20000);
+        wait(1000);
+        press(kX);  // the first event
+        at("game_screen", 60000);
+        wait(2000);
+        at("tour_solo_endgame_screen", 90000);
+        wait(1000);
+        press(kX);
+        at("tour_solo_gigcomplete_screen", 20000);
+        wait(1000);
+        press(kX);
+        at("tour_solo_event_screen|tour_solo_hub_screen|tour_solo_newtown_screen", 40000);
+    } else if (scenario == "screens") {
+        // The screen sweep (runCheck "sweep"): every screen from the main menu.
+        wait(300);
+        press(kX);
+        at("splash_screen", 30000);
+        press(kX);
+        at("main_screen");
+        steps_.push_back({S::Check, "sweep", 0, 0});
+    } else if (scenario == "band_tour") {
+        // RB's Band World Tour (ui/tour_band_sel.dta, tour_band.dta):
+        // Multiplayer > Band World Tour, a new band (the lobby's stand-in
+        // joins two players), its name, the hub, the gig guide, the hints, a
+        // gig, its song, the results.
+        SDL_setenv_unsafe("GD05_INSTRUMENT", "guitar,drum,vocals,guitar", 1);
+        SDL_setenv_unsafe("GD05_BAND_PLAYERS", "2", 1);
+        endMs_ = 20000;
+        wait(300);
+        press(kX);
+        at("splash_screen", 30000);
+        press(kX);
+        at("main_screen");
+        press(kDown), wait(200);
+        press(kX);  // MULTIPLAYER
+        at("main_multimode_screen");
+        press(kDown), wait(200);
+        press(kX);  // BAND WORLD TOUR
+        at("tour_band_sel_screen", 20000);
+        wait(800);
+        press(kX);  // a new band
+        at("tour_band_create_screen", 20000);
+        wait(1200);
+        press(kX);  // NAME (the offered name is taken)
+        wait(800);
+        for (int i = 0; i < 2; ++i) press(kDown), wait(200);
+        press(kX);  // ACCEPT
+        at("tour_band_hub_screen", 30000);
+        wait(1000);
+        press(kX);  // GIG GUIDE
+        // The first-time hints (welcome, first gig ...), each continued with X.
+        for (int i = 0; i < 6; ++i) {
+            wait(2500);
+            check("print_focus");
+            press(kX);
+        }
+        at("game_screen", 60000);
+        wait(2000);
+        check("counter:band_players:2");
+        at("tour_band_endgame_screen", 300000);  // through the gig's set list
+        wait(1000);
+        press(kX);
+        at("tour_band_gigcomplete_screen", 20000);
+        wait(1000);
+        press(kX);
+        at("tour_band_event_screen|tour_band_hub_screen|tour_band_firstgig_screen|tour_band_firstgig_checkmarks_screen|tour_band_newvan_screen|tour_band_newitem_screen|tour_band_firstvenue_screen", 40000);
+    } else if (scenario == "band_quickplay") {
+        // RB's Band Quickplay (ui/main.dta, selsong / seldiff): Multiplayer >
+        // Band Quickplay > Local; the band lobby joins four players (the
+        // port's stand-in, DECISIONS D10: GD05_BAND_PLAYERS, the instruments
+        // from GD05_INSTRUMENT; players without a controller autoplay), the
+        // song, the leader's difficulty, the song with four tracks.
+        SDL_setenv_unsafe("GD05_INSTRUMENT", "guitar,drum,vocals,guitar", 1);
+        SDL_setenv_unsafe("GD05_BAND_PLAYERS", "4", 1);
         endMs_ = 30000;
         wait(300);
         press(kX);
@@ -152,26 +259,18 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         press(kX);  // BAND QUICKPLAY (bandqp.btn, the focus)
         at("main_bandcoop_screen");
         press(kX);  // LOCAL
-        at("matchmaking_band_screen", 30000);
-        wait(1500);
-        pressP(kX, 1);  // player 2 joins
-        wait(1500);
-        pressP(kX, 1);
-        wait(1500);
-        press(kX);
-        wait(1500);
-        press(kX);
-        wait(1500);
-        press(kStart);
         at("qp_selsong_screen", 30000);
-        press(kX);
-        wait(2000);
+        wait(800);
+        press(kX);  // the first entry
+        at("qp_seldiff_screen|qp_seldiff_solo_screen", 20000);
+        wait(1500);
         press(kX), wait(1500), press(kX), wait(1500);
-        pressP(kX, 1), wait(1500), pressP(kX, 1);
         at("game_screen", 60000);
         wait(3000);
-        check("counter:band_players:2");
+        check("counter:band_players:4");
+        check("counter:rb_track_frames:30");
         at("endgame_waiting_screen", 90000);
+        at("qp_endgame_screen", 30000);
     } else if (scenario == "quickplay_vocals" || scenario == "quickplay_drums") {
         // Rock Band's instrument per player (wave 02): the controller type
         // decides the part (seldiff.dta: a drum or a vocals controller
@@ -1820,6 +1919,64 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
             if (shown != (g <= n)) return fail("freebird" + std::to_string(g) + ".grp " + (shown ? "shown" : "hidden"));
         }
         return pass();
+    }
+    if (s.screen == "print_focus") {
+        ui::PanelObj* fp = ui.focusPanel();
+        std::printf("  focus: screen %s panel %s component %s (up %d)\n", ui.currentScreen().c_str(), fp ? fp->name().c_str() : "-",
+                    fp ? fp->focus.c_str() : "-", fp ? int(fp->up) : -1);
+        return pass();
+    }
+    if (s.screen == "sweep") {
+        // Every screen of the scripts, opened in turn (ui goto_screen) and
+        // left 700 ms: reached or not, and the script gaps (UNHANDLED /
+        // UNKNOWN / STUB keys) it added. Screens that load a song, a movie
+        // or a tutorial are skipped (they need a game set up). A report,
+        // not a pass / fail: the ledger's menu rows quote it.
+        static std::vector<std::string> list;
+        static size_t at = 0;
+        static double since = -1;
+        static std::set<std::string> seen;
+        static int reached = 0, clean = 0;
+        auto gaps = [&] {
+            std::vector<std::string> v;
+            for (const auto* m : {&ui.interp().unhandledCounts(), &ui.interp().unknownCounts(), &ui.interp().stubCounts()})
+                for (const auto& [k, n] : *m)
+                    if (seen.insert(k).second) v.push_back(k);
+            return v;
+        };
+        if (list.empty()) {
+            for (const std::string& n : ui.interp().objectNames()) {
+                ScriptObject* o = ui.interp().objectNamed(n);
+                if (!o || o->className().find("Screen") == std::string::npos) continue;
+                static const char* const kSkip[] = {"game_screen", "loading", "gen_weights", "vocal_test", "movie", "preload", "load_song",
+                                                    "tutorials_", "drum_trainer_", "intro", "attract", "featurette", "uploader", "autoload",
+                                                    "auto_load", "practice_game", "network", "server_connect", "signin", "matchmaking_hth"};
+                bool skip = false;
+                for (const char* k : kSkip) skip |= n.find(k) != std::string::npos;
+                if (!skip) list.push_back(n);
+            }
+            gaps();
+            std::printf("  sweep: %d screens\n", int(list.size()));
+        }
+        if (at >= list.size()) {
+            std::printf("  sweep: %d of %d screens reached, %d with no new script gap\n", reached, int(list.size()), clean);
+            return pass();
+        }
+        if (since < 0) {
+            ui.gotoScreen(list[at]);
+            since = nowMs;
+            return;
+        }
+        const bool there = ui.currentScreen() == list[at] && !ui.inTransition();
+        if (!(there && nowMs - since >= 500) && nowMs - since < 2500) return;
+        const bool ok = ui.currentScreen() == list[at];
+        const std::vector<std::string> g = gaps();
+        reached += ok, clean += ok && g.empty();
+        std::string gs;
+        for (const std::string& k : g) gs += " [" + k + "]";
+        std::printf("  sweep %-45s %s%s\n", list[at].c_str(), ok ? "reached" : ("NOT reached (on " + ui.currentScreen() + ")").c_str(), gs.c_str());
+        ++at, since = -1;
+        return;
     }
     if (s.screen == "dev_cheat_on") {
         ui.host().setEnhancedValue("dev_key_cheats", "on");

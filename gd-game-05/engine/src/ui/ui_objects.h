@@ -49,6 +49,7 @@ public:
     // UIList
     ScriptObject* provider = nullptr;
     int selected = 0;  // provider data index
+    int numDisplay_ = 5;  // RB set_num_display
     void refreshList();
     // UISlider
     std::vector<std::string> faders;  // an Sfx's faders (add_fader)

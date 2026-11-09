@@ -22,6 +22,7 @@
 #include "game/song_db.h"
 #include "render/ui_view.h"
 #include "ui/natives.h"
+#include "ui/rb_meta.h"
 #include "ui/ui_host.h"
 #include "ui/ui_manager.h"
 
@@ -232,18 +233,47 @@ void installRbNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Scr
     // Online play is not in the port (GD05-013): a local session, signed out.
     RbHost* session = add(std::make_unique<RbHost>(ui, "session"));
     session->on("mode", no);  // kNetLocal
-    session->on("num_players", [](std::vector<Value>&) { return Value::integer(1); });  // [I] solo until M7's band modes
+    // The local players in the session: player 0 and the band lobby's (wave 02).
+    session->on("num_players", [&ui](std::vector<Value>&) {
+        int n = 1;
+        for (size_t k = 1; k < ui.session().players.size(); ++k) n += ui.session().players[k].participating;
+        return Value::integer(n);
+    });
     session->on("is_busy", no);
     session->on("disabled", no);
     // {session state}: kNetInGame (the .dtb's 2) while a song is loaded
     // (ui/game.dta on_pause) [C data], else 0 [I: the other states' values].
     // {session has_player n}: the one local player [I].
-    session->on("has_player", [](std::vector<Value>& a) { return Value::integer(!a.empty() && a[0].integerValue() == 0 ? 1 : 0); });
+    session->on("has_player", [&ui](std::vector<Value>& a) {
+        const int n = a.empty() ? -1 : a[0].integerValue();
+        return Value::integer(n == 0 || (n > 0 && n < 4 && ui.session().players[size_t(n)].participating) ? 1 : 0);
+    });
     session->on("state", [&ui](std::vector<Value>&) { return Value::integer(ui.host().gameLoaded() ? 2 : 0); });
     session->on("num_open_slots", no);
+    // The session's sinks (add_sink <panel>): told start_loading_msg once every
+    // player config is ready (PlayerConfig set_ready -> check_ready) [I].
+    static std::vector<ScriptObject*> sessionSinks;
+    sessionSinks.clear();
+    session->on("add_sink", [](std::vector<Value>& a) {
+        if (!a.empty() && a[0].object && std::find(sessionSinks.begin(), sessionSinks.end(), a[0].object) == sessionSinks.end())
+            sessionSinks.push_back(a[0].object);
+        return Value::integer(0);
+    });
+    session->on("remove_sink", [](std::vector<Value>& a) {
+        if (!a.empty()) sessionSinks.erase(std::remove(sessionSinks.begin(), sessionSinks.end(), a[0].object), sessionSinks.end());
+        return Value::integer(0);
+    });
+    session->on("check_ready", [&ui](std::vector<Value>&) {
+        const std::vector<ScriptObject*> sinks = sessionSinks;
+        for (ScriptObject* o : sinks) ui.callScript(o, "start_loading_msg");
+        return Value::integer(0);
+    });
     session->quiet({"clear", "send_to_all", "send_to_player", "set_all_local_ready_status", "set_invites_allowed", "ignore_remote_messages", "done_loading"});
     RbHost* platform = add(std::make_unique<RbHost>(ui, "platform_mgr"));
-    platform->on("is_player_signed_in", no);
+    // Signed in: every local player has the port's profile (rb_profile.json,
+    // ui/rb_meta.cpp), never a guest; the Xbox save screens stay skipped
+    // (memcardmgr) [I: wave 02 changes D4's "nobody signed in"].
+    platform->on("is_player_signed_in", yes);
     platform->on("guide_showing", no);
     platform->on("has_player_signin_changed", no);
     platform->on("is_enter_cancel_swapped", no);
@@ -253,6 +283,44 @@ void installRbNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Scr
     // The profiles' save data: RB's saves are M7 (GD05-009; DECISIONS D4).
     profiles->stub({"get_save_data_from_player", "get_char_options_from_player"});
     profiles->on("first_timer", no);
+    profiles->on("can_player_create_char", yes);
+    profiles->on("is_char_name_unique", yes);
+    profiles->on("is_band_name_unique", yes);
+    profiles->on("can_char_create_band", yes);
+    profiles->on("can_char_join_band", yes);
+    profiles->on("get_mapped_profile_from_player", [](std::vector<Value>&) { return Value::integer(0); });
+    profiles->on("get_max_chars_per_inst", [](std::vector<Value>&) { return Value::integer(10); });
+    profiles->on("get_all_unlocked", no);
+    profiles->quiet({"rebuild_profile_map"});
+    // show_keyboard <player> <length> <title> <desc> <default> <panel>: the
+    // name is taken as offered (VIRTUAL_KEYBOARD_RESULT_MSG ok) [I: no typed
+    // entry in the port yet; the creator's random name stands].
+    platform->on("show_keyboard", [&ui](std::vector<Value>& a) {
+        ScriptObject* to = a.size() >= 6 ? (a[5].object ? a[5].object : ui.interp().findObject(a[5].str())) : nullptr;
+        if (SDL_getenv("GD05_UILOG")) SDL_Log("ui: show_keyboard (%d args) -> %s", int(a.size()), to ? to->name().c_str() : "nobody");
+        if (to) {
+            // VIRTUAL_KEYBOARD_RESULT_MSG is (virtual_keyboard_result_msg ($ok $text)) [C data: macros].
+            ui.callScript(to, "virtual_keyboard_result_msg", {Value::integer(1), Value::string(a[4].str())});
+            // The creator's name field (its handler checks the focus panel,
+            // which a keyboard answered at once does not change) [I].
+            if (to->name() == "charcreator_maker_panel") {
+                const Value c = ui.interp().send("charcreator_panel", "get_tour_char", {});
+                if (c.object && ui.interp().send(c.object, "get_char_name", {}).str().empty())
+                    ui.interp().send(c.object, "set_char_name", {Value::string(a[4].str())});
+                ui.callScript(to, "update_name_label");
+            }
+            if (to->name() == "tour_band_create_panel") {
+                const Value b = ui.interp().send("tour", "performer", {});
+                if (b.object && ui.interp().send(b.object, "band_name", {}).str().empty())
+                    ui.interp().send(b.object, "set_band_name", {Value::string(a[4].str().empty() ? std::string("The Port Band") : a[4].str())});
+                ui.callScript(to, "update_band");
+            }
+        } else {
+            ui.logOnce("show_keyboard: no panel to answer");
+        }
+        return Value::integer(0);
+    });
+    platform->on("player_has_online_privilege", no);
     profiles->on("get_sync_offset", no);
     profiles->on("get_default_sync_offset_ms", no);
     profiles->on("has_profile_map", no);
@@ -267,13 +335,14 @@ void installRbNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Scr
     memcard->quiet({"saveload_profile_complete", "saveload_all_complete", "select_device"});
     RbHost* sink = add(std::make_unique<RbHost>(ui, "band_ui_sink"));
     sink->on("has_event", no);
+    sink->on("is_network_busy", no);
     sink->on("is_forced_transition_active", no);
     // sync_screen <screen> [depth]: the band's screen change, local only here [I: the network sync].
     sink->on("sync_screen", [&ui](std::vector<Value>& a) {
         if (!a.empty()) ui.gotoScreen(a[0].type == Value::Type::Object && a[0].object ? a[0].object->name() : a[0].str(), false);
         return Value::integer(0);
     });
-    sink->quiet({"set_net_sync", "net_sync", "set_block_mode", "dismiss_event", "hide_network_busy_icon",
+    sink->quiet({"enable_lefty_override", "set_net_sync", "net_sync", "set_block_mode", "dismiss_event", "hide_network_busy_icon",
                  "show_network_busy_icon", "set_controller_level"});
     // check_controllers: every player's controller is there (ui/game.dta: FALSE
     // pushes pause_controller_screen) [I: the port's own disconnect pause is the input layer's].
@@ -284,9 +353,46 @@ void installRbNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Scr
         if (!a.empty()) ui.gotoScreen(a[0].type == Value::Type::Object && a[0].object ? a[0].object->name() : a[0].str(), false);
         return Value::integer(0);
     });
-    RbHost* tour = add(std::make_unique<RbHost>(ui, "tour"));
-    tour->on("performer", no);
-    tour->quiet({"clear_performer"});
+    installRbMeta(ui, in, owned);
+    in.addBuiltin("localize_token", in.builtin("localize"));
+    // basename <name>: the name without its extension (easy.btn -> easy) [I: RB's builtin, by its use].
+    in.addBuiltin("basename", [](Interp& i2, const DataNode& cmd) {
+        const Value v = cmd.children.size() > 1 ? i2.eval(cmd.children[1]) : Value::symbol("");
+        std::string n = v.type == Value::Type::Object && v.object ? v.object->name() : v.str();
+        if (const size_t sl = n.find_last_of("/\\"); sl != std::string::npos) n = n.substr(sl + 1);
+        if (const size_t d = n.rfind('.'); d != std::string::npos) n = n.substr(0, d);
+        return Value::symbol(n);
+    });
+    // shop find_token <gender> <category> <outfit>: the outfit's name token (the outfit's own symbol) [I].
+    add(std::make_unique<RbHost>(ui, "shop"))->on("find_token", [](std::vector<Value>& a) { return Value::symbol(strArg(a, 2)); });
+    // cnv_instrumenttoicon <instrument>: its icon character (track_icons) [C data].
+    in.addBuiltin("cnv_instrumenttoicon", [](Interp& i2, const DataNode& cmd) {
+        const std::string t = cmd.children.size() > 1 ? i2.eval(cmd.children[1]).str() : std::string();
+        return Value::string(t == "drum" ? "D" : t == "vocals" ? "V" : t == "bass" ? "B" : "G");
+    });
+    // presence_mgr: Xbox Live rich presence, not in the port (GD05-013).
+    add(std::make_unique<RbHost>(ui, "presence_mgr"))->quiet({"set_mode", "set_presence", "update", "set_prepare_to_rock", "set_assembling_band"});
+    // entity_uploader: Rock Central (online) checks a new name or band; not
+    // in the port (GD05-013): done at once, accepted (ROCK_CENTRAL_OP_COMPLETE_MSG
+    // with a code that is no error) [I].
+    RbHost* uploader = add(std::make_unique<RbHost>(ui, "entity_uploader"));
+    auto uploaded = [&ui](std::vector<Value>& a) {
+        ScriptObject* to = a.size() >= 2 ? (a[1].object ? a[1].object : ui.interp().findObject(a[1].str())) : nullptr;
+        if (SDL_getenv("GD05_UILOG")) SDL_Log("ui: entity_uploader (%d args) -> %s", int(a.size()), to ? to->name().c_str() : "nobody");
+        if (to) {
+            // (rock_central_op_complete_msg ($success $arg1 $arg2)), RB_RETCODE_SUCCESS [C data: macros].
+            ui.callScript(to, "rock_central_op_complete_msg", {Value::integer(1), Value::integer(0), Value::integer(0)});
+        }
+        return Value::integer(0);
+    };
+    uploader->on("update_char", uploaded);
+    uploader->on("update_band", uploaded);
+    // get_font_char_from_controller_type <kController*>: the instrument's icon
+    // character (config/tour_solo.dta track_icons' first row) [C data].
+    in.addBuiltin("get_font_char_from_controller_type", [](Interp& i2, const DataNode& cmd) {
+        const int t = cmd.children.size() > 1 ? i2.eval(cmd.children[1]).integerValue() : 1;
+        return Value::string(t == 0 ? "D" : t == 2 ? "V" : "G");
+    });  // tour, the profile's characters and bands (ui/rb_meta.cpp)
     RbHost* charCache = add(std::make_unique<RbHost>(ui, "char_cache"));
     // The characters' cache: the band's loading is M6's (GD05-008) [I].
     charCache->quiet({"cache_update", "cache_enable", "cache_clear", "iterate", "light_characters", "load_instruments",

@@ -112,6 +112,9 @@ public:
     // Screens entered so far, in order (the walk test).
     const std::vector<std::string>& history() const { return history_; }
     void gotoScreen(const std::string& name, bool back = false);
+    // A screen the port replaces (Rock Band's band lobby, ui/rb_meta.cpp):
+    // given the screen asked for, the one to go to instead, or empty.
+    std::function<std::string(const std::string& name, bool back)> redirect;
     void pushScreen(const std::string& name);
     void popScreen(const std::string& name);
     Interp& interp() { return interp_; }

@@ -272,7 +272,10 @@ public:
     void pauseVoice(bool paused) override;
     unsigned playerFrets(int player) override { return player >= 0 && player < 2 ? padFrets_[size_t(player)] : 0u; }
     int playerStrums(int player) override { return player >= 0 && player < 2 ? padStrums_[size_t(player)] : 0; }
-    const Player* gamePlayer(int index) const override { return index == 0 ? player_.get() : player2_.get(); }
+    const Player* gamePlayer(int index) const override {
+        if (index >= 1 && size_t(index - 1) < seats_.size()) return seats_[size_t(index - 1)].player.get();
+        return index == 0 ? player_.get() : player2_.get();
+    }
     SongResult lastResult(int index) const override { return index >= 0 && index < 2 ? lastResult_[size_t(index)] : SongResult{}; }
     std::array<SongResult, 2> lastResult_{};
     const BandPerformer* gameBand() const override { return coopBand_.get(); }
@@ -314,6 +317,7 @@ public:
     void creditsMusic(bool on) override;
     void playMovie(const std::string& name) override;
     void applyOptions(float band, float guitar, float fx, bool lefty0, bool lefty1, int syncOffsetMs) override;
+    bool padConnected(int pad) override { return input_.padConnected(pad); }
     int controllerType(int pad) override;
     void quit() override { running_ = false; }
     bool playSfx(const std::string& name) override { return playSfxArgs(name, 0, 0, 0); }

@@ -48,12 +48,21 @@ public:
         }
         if (msg == "get_difficulty" || msg == "difficulty") return r = Value::integer(p.difficulty), true;
         if (chars::playerConfigNative(ui_, p, msg, args, r)) return true;
-        if (msg == "set_track_type") return p.trackType = intArg(args, 0), true;
+        if (msg == "set_track_type") {
+            // An int (kTrack*) or the instrument's symbol (tour_solo.dta: {$pcfg
+            // set_track_type {$char get_instrument}}) [C data].
+            if (!args.empty() && !args[0].isNumber()) {
+                const std::string sym = nameOf(args[0]);
+                p.trackType = sym == "drum" ? 0 : sym == "bass" ? 1 : sym == "vocals" ? 3 : 2;
+                return true;
+            }
+            return p.trackType = intArg(args, 0), true;
+        }
         if (msg == "get_track_type") return r = Value::integer(p.trackType), true;
         // Rock Band's PlayerConfig messages (ui/*.dta): RB's track types are
         // kTrackDrum 0, kTrackBass 1, kTrackGuitar 2, kTrackVocals 3 [C data: macros.dta].
         if (msg == "player" || msg == "player_num") return r = Value::integer(i_), true;
-        if (msg == "is_local_player" || msg == "is_participating") return r = Value::integer(i_ == 0 ? 1 : 0), true;
+        if (msg == "is_local_player" || msg == "is_participating") return r = Value::integer(i_ == 0 || p.participating ? 1 : 0), true;
         if (msg == "get_track_sym") {
             static const char* const kTracks[] = {"drum", "bass", "guitar", "vocals", "none"};
             return r = Value::symbol(kTracks[std::clamp(p.trackType, 0, 4)]), true;
@@ -75,7 +84,14 @@ public:
         if (msg == "set_ui_waiting") return uiWaiting_ = args.empty() ? Value::integer(0) : args[0], true;
         if (msg == "ui_waiting") return r = uiWaiting_, true;
         if (msg == "is_ready") return r = Value::integer(ready_ ? 1 : 0), true;
-        if (msg == "set_ready") return ready_ = !args.empty() && args[0].truthy(), true;
+        if (msg == "set_ready") {
+            ready_ = !args.empty() && args[0].truthy();
+            // Every local player ready: the session's sinks start loading
+            // (tour_solo.dta: session add_sink, then start_loading_msg) [I: the
+            // session's own check is not read].
+            if (ready_) in.send("session", "check_ready", {}, false);
+            return true;
+        }
         if (msg == "intro_name") return r = Value::string(i_ == 0 ? "PLAYER 1" : "PLAYER " + std::to_string(i_ + 1)), true;
         return false;
     }
@@ -257,6 +273,8 @@ public:
         gGame = this;
         configs_[0] = std::make_unique<PlayerConfigObj>(ui, 0);
         configs_[1] = std::make_unique<PlayerConfigObj>(ui, 1);
+        configs_[2] = std::make_unique<PlayerConfigObj>(ui, 2);
+        configs_[3] = std::make_unique<PlayerConfigObj>(ui, 3);
         bank_ = std::make_unique<SmallObj>("bank_loader", "BankLoader");
         video_ = std::make_unique<SmallObj>("video_provider", "VideoProvider");
     }
@@ -325,6 +343,15 @@ public:
             if (const int tt = s.players[p].trackType; tt >= 0 && tt <= 3) setup.parts[p] = kRbTracks[tt];
             setup.leftys[p] = o.lefty[p];
             setup.pads[p] = s.players[p].padnum;
+        }
+        // Rock Band's band: the session's other players, each its slot's
+        // part, its difficulty, its pad (the player's number) (wave 02).
+        static const char* const kRbParts[] = {"drum", "bass", "guitar", "vocals"};
+        for (size_t p = 1; p < s.players.size(); ++p) {
+            const Session::PlayerCfg& pc = s.players[p];
+            if (!pc.participating) continue;
+            const int tt = pc.trackType >= 0 && pc.trackType <= 3 ? pc.trackType : (pc.controllerType == 0 ? 0 : pc.controllerType == 2 ? 3 : 2);
+            setup.rbBand.push_back({kRbParts[tt], pc.difficulty, int(p)});
         }
         // The audio block (modes.dta song_block), skip_intro and practice's
         // speed and sections (PS2 0x00106840: practice_speeds[practice_speed]
@@ -463,9 +490,14 @@ public:
         }
         if (msg == "get_venue") return r = Value::symbol(s.venue), true;
         if (msg == "set_venue") return s.venue = argStr(0), true;
-        if (msg == "get_player_config") return r = Value::obj(configs_[size_t(std::clamp(intArg(args, 0), 0, 1))].get()), true;
+        if (msg == "get_player_config") return r = Value::obj(configs_[size_t(std::clamp(intArg(args, 0), 0, 3))].get()), true;
         // RB: one local player participates (the band modes: M7) [I].
-        if (msg == "is_player_participating") return r = Value::integer(intArg(args, 0) == 0 ? 1 : 0), true;
+        if (msg == "get_num_participants") return r = in.send("session", "num_players", {}), true;
+        if (msg == "get_player_num_from_slot_num") return r = Value::integer(intArg(args, 0)), true;  // [I] slot n is player n
+        if (msg == "is_player_participating") {
+            const int n = intArg(args, 0);
+            return r = Value::integer(n == 0 || (n > 0 && n < 4 && ui.session().players[size_t(n)].participating) ? 1 : 0), true;
+        }
         // RB's game panel queries (ui/game.dta, loading.dta) [I where noted].
         if (msg == "lost") return r = Value::integer(ui.host().songLostForUi() ? 1 : 0), true;
         if (msg == "foreach_local_player" || msg == "foreach_local_player_config" || msg == "foreach_player_config") {
@@ -473,8 +505,14 @@ public:
             std::string var = args.empty() ? std::string() : args[0].str();
             if (!var.empty() && var[0] == '$') var = var.substr(1);
             const Value saved = in.var(var);
-            in.var(var) = msg == "foreach_local_player" ? Value::obj(in.findObject("player0")) : Value::obj(configs_[0].get());  // [I] one player
-            for (size_t k = 1; k < args.size(); ++k) r = in.evalValue(args[k]);
+            // Every player in the session (player 0, and the band's) [I: RB's order].
+            for (int n = 0; n < 4; ++n) {
+                if (n > 0 && !ui.session().players[size_t(n)].participating) continue;
+                ScriptObject* who = msg == "foreach_local_player" ? in.findObject("player" + std::to_string(n)) : configs_[size_t(n)].get();
+                if (!who) continue;
+                in.var(var) = Value::obj(who);
+                for (size_t k = 1; k < args.size(); ++k) r = in.evalValue(args[k]);
+            }
             in.var(var) = saved;
             return true;
         }
@@ -486,7 +524,7 @@ public:
         }
         // The band name generator's AI (BandNameAI) is not there [I].
         if (msg == "is_advanced_band_name_ai_active") return r = Value::integer(0), true;
-        if (msg == "get_player") return r = Value::obj(in.findObject("player" + std::to_string(std::clamp(intArg(args, 0), 0, 1)))), true;
+        if (msg == "get_player") return r = Value::obj(in.findObject("player" + std::to_string(std::clamp(intArg(args, 0), 0, 3)))), true;
         if (msg == "is_game_over") return r = Value::integer(props.count("game_over") && props["game_over"].truthy() ? 1 : 0), true;
         if (msg == "load_all_chars" || msg == "load_crowd_audio" || msg == "reset_config" || msg == "unload_crowd_audio")
             return r = Value::integer(0), true;
@@ -635,7 +673,7 @@ public:
     }
 
 private:
-    std::array<std::unique_ptr<PlayerConfigObj>, 2> configs_;
+    std::array<std::unique_ptr<PlayerConfigObj>, 4> configs_;
     std::unique_ptr<SmallObj> bank_, video_;
     std::vector<std::pair<ScriptObject*, std::set<std::string>>> sinks_;
     bool pendingBegin_ = false;
@@ -658,7 +696,7 @@ public:
     }
     bool handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) override {
         r = Value::integer(0);
-        static const std::set<std::string> kTrack = {"reset", "set_frame", "animate", "explode", "pop_smasher", "set_smasher_glowing",
+        static const std::set<std::string> kTrack = {"reset", "reload", "set_frame", "animate", "explode", "pop_smasher", "set_smasher_glowing",
                                                      "sync_to_time", "intro_skip", "set_track_in", "set_track_out"};
         static const std::set<std::string> kHud = {"reset", "set_meters_showing", "set_win_showing", "show_message", "on_game_over",
                                                    "find", "intro_skip", "set_paused"};
@@ -791,6 +829,15 @@ private:
         }
         // RB's player stats (endgame.dta send_player_stats) [I: counters not kept yet are 0].
         if (msg == "player_num") return r = Value::integer(index), true;
+        if (msg == "difficulty") return r = Value::integer(ui_.session().players[size_t(std::clamp(index, 0, 3))].difficulty), true;
+        if (msg == "band_energy") return r = Value::real(p ? p->starMeter() : 0.0f), true;
+        if (msg == "get_times_failed") return r = Value::integer(0), true;  // [I] the band's fail-outs are not counted per player yet
+        if (msg == "notes_per_streak") return r = Value::integer(0), true;
+        if (msg == "instrument") {
+            static const char* const kTracks[] = {"drum", "bass", "guitar", "vocals", "guitar"};
+            return r = Value::symbol(kTracks[std::clamp(ui_.session().players[size_t(std::clamp(index, 0, 3))].trackType, 0, 4)]), true;
+        }
+        if (msg == "get_saved_count") return r = Value::integer(ui_.host().gameCounter(index, "band_saves")), true;
         if (msg == "config") return r = ui_.interp().send("game", "get_player_config", {Value::integer(index)}), true;
         if (msg == "is_net") return r = Value::integer(0), true;
         if (msg == "finalize_stats") return true;
@@ -1011,6 +1058,7 @@ public:
             return r = Value::symbol(ct == 0 ? "drum" : ct == 2 ? "vocals" : "guitar"), true;
         }
         if (msg == "get_controller_type_from_controller") return r = Value::integer(ui_.host().controllerType(intArg(args, 0))), true;
+        if (msg == "get_num_participants") return r = in.send("session", "num_players", {}), true;
         if (msg == "auto_assign_missing_slots" || msg == "debug_get_force_controller" || msg == "foreach_player_config") return true;
         // A handler of the mode's table (practice's full_speed_block,
         // pre_processed_audio: GameConfig evaluates the mode's entry) [C data: modes.dta].
@@ -1039,6 +1087,8 @@ public:
         // RB: the performer whose score the solo modes keep (endgame.dta) [I: player 0 for one player].
         if (msg == "is_active_player") return r = Value::integer(intArg(args, 0) == 0 ? 1 : 0), true;  // one local player [I]
         if (msg == "main_performer") return r = Value::obj(ui_.interp().findObject("player0")), true;
+        // {beatmatch active_player n} (ui/lose.dta) [C data: the use].
+        if (msg == "active_player") return r = Value::obj(ui_.interp().findObject("player" + std::to_string(std::clamp(intArg(args, 0), 0, 3)))), true;
         // never_allow_input (pause.dta): the pause screen blocks the players' input itself [I].
         if (msg == "never_allow_input") return true;
         // {beatmatch player n}: the player object while a song is loaded (ui/game.dta on_pause).
@@ -1068,7 +1118,7 @@ private:
 // a new song starts with no sinks on them [C].
 void GamePanelObj::clearPlayerSinks() {
     Interp& in = ui.interp();
-    for (const char* n : {"player0", "player1"})
+    for (const char* n : {"player0", "player1", "player2", "player3"})
         if (auto* p = dynamic_cast<PlayerObj*>(in.findObject(n))) p->clearSinks();
     for (const char* n : {"player_matcher0", "player_matcher1"})
         if (auto* m = dynamic_cast<MatcherObj*>(in.findObject(n))) m->clearSinks();
@@ -1092,6 +1142,8 @@ void installGameNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<S
     add(std::make_unique<GameCfgObj>(ui));
     add(std::make_unique<PlayerObj>(ui, "player0", 0));
     add(std::make_unique<PlayerObj>(ui, "player1", 1));
+    add(std::make_unique<PlayerObj>(ui, "player2", 2));  // Rock Band's band (wave 02)
+    add(std::make_unique<PlayerObj>(ui, "player3", 3));
     add(std::make_unique<MatcherObj>("player_matcher0"));
     add(std::make_unique<MatcherObj>("player_matcher1"));
     add(std::make_unique<PlayerObj>(ui, "band", -1));

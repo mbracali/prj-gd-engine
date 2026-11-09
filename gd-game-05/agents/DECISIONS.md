@@ -79,3 +79,46 @@ pattern). Each says what, why and how to undo it.
   game loop, nor is a vocal track drawn.
 - **Why:** time: the highway, the band and the launcher came first.
 - **Undo:** `engine/src/app.cpp` (`part0 == Part::Vocals`).
+
+## D8. Wave 02: a signed-in local profile (2026-11-09)
+- **What:** `platform_mgr is_player_signed_in` answers TRUE for every local
+  player: the port's own profile (`rb_profile.json` in the save folder,
+  version 1: characters, bands, the tours' stars, money, items, hints seen)
+  stands for the Xbox profile. The Xbox save screens stay skipped: the
+  scripts' `xbox_autosave_start` is answered natively (save the JSON, then
+  the screen change the save would have made). Rock Central (online name
+  checks, `entity_uploader`) accepts at once.
+- **Why:** RB's tours and the character creator need a signed-in profile;
+  D4's "nobody signed in" blocked them.
+- **Undo:** `ui/rb_natives.cpp` (platform_mgr, entity_uploader), `ui/rb_meta.cpp` (xbox_autosave_start).
+
+## D9. Vocals without a microphone, names without a keyboard (2026-11-09)
+- **What:** with no microphone the vocal judge hears silence (the song
+  plays, the phrases rate Awful); `GD05_VOCALS_FILE=<wav>` sings a file.
+  RB's on-screen keyboard (`platform_mgr show_keyboard`) is answered at once
+  with the offered text (a random character or band name).
+- **Why:** the owner's real-device checks cover the mic; typing names is a
+  port feature still to come (gd-game-04's typed names are the model).
+- **Undo:** `audio/vocal_input.cpp`, `ui/rb_natives.cpp` (show_keyboard).
+
+## D10. The band lobby is a stand-in (2026-11-09)
+- **What:** `matchmaking_band_screen` (RB's lobby: each player joins a slot
+  with a button, picks a character, a leader) is skipped: every local
+  player with a controller joins (`GD05_BAND_PLAYERS=<n>` in the tests) with
+  the premade character of their instrument (GAMEPADS' instrument or the
+  device), player 1 leads, a second guitarist plays the bass, and the
+  mode's `post_matchmaking_screen` follows. Band players without a
+  controller autoplay. Other players use the leader's difficulty.
+- **Why:** breadth first (wave 02 target): Band Quickplay and the Band World
+  Tour are reachable now; the real lobby (four slot panels, per-player
+  input) is a later wave.
+- **Undo:** `ui/rb_meta.cpp` (`ui.redirect`), `GD05_REAL_LOBBY=1` shows the real screen.
+
+## D11. Band play layout and rules [I] (2026-11-09)
+- **What:** the instruments' tracks side by side in the lower part, the
+  vocal track on top; a player whose meter empties fails out and any other
+  player's Overdrive saves them; the band fails under
+  multiplayer_lose_level; Unison gives a phrase's worth of Overdrive again.
+- **Why:** RB's band rules are not read in the XEX yet; the values are
+  scoring.dtb's.
+- **Undo:** `app.cpp` (makeSeats / updateSeats / drawSeats).

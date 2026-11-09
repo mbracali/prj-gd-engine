@@ -298,6 +298,16 @@ public:
     void onUnknown(const std::string& head);
     void onError(const std::string& what);  // script errors ({fail ...}, exceptions)
     const std::map<std::string, int>& unhandledCounts() const { return unhandled_; }
+    // The registered objects' names (the walks' screen sweep).
+    std::vector<std::string> objectNames() const {
+        std::vector<std::string> v;
+        for (const auto& [n, o] : objects_) v.push_back(n);
+        return v;
+    }
+    ScriptObject* objectNamed(const std::string& n) const {
+        auto it = objects_.find(n);
+        return it == objects_.end() ? nullptr : it->second;
+    }
     const std::map<std::string, int>& stubCounts() const { return stubs_; }
     const std::map<std::string, int>& unknownCounts() const { return unknown_; }
     const std::vector<std::string>& errors() const { return errors_; }
