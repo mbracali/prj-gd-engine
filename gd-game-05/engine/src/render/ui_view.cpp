@@ -206,6 +206,19 @@ Camera UiView::defaultCamera() {
 
 Camera UiView::camera() const {
     const auto* own = milo_ && milo_->root().self ? milo_->root().self->as<scene::DirObj>() : nullptr;
+    // A RenderDir (RB's song list): the inline PanelDir it renders, drawn
+    // directly (draw()), takes that panel's own camera [I] (GD05-022).
+    if (milo_ && milo_->root().cls == "RenderDir")
+        for (const auto& [owner, sub] : milo_->root().subdirs)
+            if (sub && sub->cls == "PanelDir" && sub->self)
+                if (const auto* inner = sub->self->as<scene::DirObj>(); inner && inner->hasPanel && !inner->panel.cam.empty()) {
+                    own = inner;
+                    if (SDL_getenv("GD05_UILOG")) {
+                        static bool once = false;
+                        if (!once) once = true, SDL_Log("ui: RenderDir %s draws its panel with %s", milo_->root().name.c_str(), inner->panel.cam.c_str());
+                    }
+                    break;
+                }
     const scene::Cam* c = own && own->hasPanel ? (find(own->panel.cam) ? find(own->panel.cam)->as<scene::Cam>() : nullptr) : nullptr;
     if (!c) return defaultCamera();
     Camera cam;
