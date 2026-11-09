@@ -138,3 +138,11 @@ Differences from GH2 found on the way [C data]:
 - MIDI tracks: PART GUITAR, PART BASS, PART DRUMS, PART VOCALS, EVENTS, VENUE, BEAT in all 62 song charts. Gem lanes are base + 0..4 of each difficulty's octave (60, 72, 84, 96); special pitches read by the parser's note handler RB 0x8249F990: 116 Overdrive phrase, 103 solo, 120..124 fill / Big Rock Ending lanes; a gem shorter than 161 ticks has no sustain (RB 0x8249FB68) [C]. The parser's defaults (RB 0x824A1770): num_slots 5, phrase_slot 7, player_slot 9, the vocal range 36..84 [C].
 - PART VOCALS: notes 36..84 with MIDI lyric events (meta 5) at the note's tick; 105 / 106 phrase markers; 96 / 97 percussion; 116 Overdrive. Lyric suffixes `#`, `^` (talkies), `-` (joined), `=` (a shown hyphen), `+` (a slide) [C data; their scoring I].
 - Drum mix events `[mix <difficulty> drums<n>...]` select a beatmatcher.dtb submix.
+
+## WorldInstance
+
+v0 (PreLoad RB 0x822CC990, PostLoad RB 0x822CDF98) [C]: u32 0; the shared
+directory's file (a string); then a whole RndDir record (u32 10, ObjectDir
+v19 fields, Object header, Anim, Draw, Trans, environ, test_event). The
+engine decodes it with the directories (`scene/objects.cpp` decodeDir) and
+keeps the file as the proxy file.

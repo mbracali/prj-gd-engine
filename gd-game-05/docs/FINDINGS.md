@@ -44,3 +44,47 @@ are always Rock Band's.
   are [I] until RB's vocal scorer is read.
 - **Band mechanics** (the band meter, saving a bandmate, Unison bonus, Big
   Rock Ending, solo awards, stars): not implemented yet (GD05-004).
+
+## Highway (M4) [C data unless marked]
+
+- `ui/track_panel.dta`: `track_panel` loads `track/trackpanel.milo`, a
+  PanelDir whose TrackDirs `guitar`, `bass` and `drum` proxy
+  `track/tracksystem.milo` (TrackDir v5: y_per_second 52, y -21..180, slots
+  x -8 -4 0 4 8, draw group `static.grp`, anim group `rig.grp`, camera
+  `game.cam`).
+- `config/track_graphics.dtb` keeps its `#define`s: `(gems (guitar
+  GUITAR_SET) (drum DRUM_SET))` names the macro; the macro's body follows its
+  Define node. Per slot: normal, normal_hopo, star, star_hopo, unison, miss,
+  miss_hopo, mash widgets; the drums' slot 0 is the kick (`gem_kick.wid`),
+  slots 1-4 red, yellow, blue, green.
+- The gem meshes share `prism_mat.mat` / `prism_glow_blue.mat`; per-colour
+  copies exist (`prism_mat_green.mat` ...). The swap per slot is [I].
+- The track's textures are in `track/track_shared.milo`; the tails'
+  template and `tail_<colour>.mat` in `track/gem_tail.milo`.
+- `static.grp` holds every instrument's parts (`guitar_draw.grp`,
+  `drum_draw.grp`, the bass superstreak plane, the spotlight, the Unison
+  hit); which shows when is [I].
+
+## Venues and camera (M5)
+
+- `config/macros.dta` VENUES: blank_01, small_club_01..12, big_club_01..12,
+  theater_01..09, arena_01..08; each `world/<kind>/<venue>/gen/<venue>.milo`
+  (WorldDir v17), the kind's shared milos in `world/<kind>/gen`.
+- WorldInstance v0 (RB 0x822CC990 / 0x822CDF98) [C]: the shared
+  directory's file, then a whole RndDir record; 2683 + 286 on the disc, all
+  decoded. Drawn as proxies of their file.
+- Band slots are CompositeCharacters `player_guitar0/1`, `player_bass0/1`,
+  `player_drum0/1`, `player_vocals0/1` in `world/<kind>/gen/<kind>_char.milo`.
+- BandCamShot categories in small_club_01: INTRO, INTRO_MULTI,
+  INTRO_QUICK, INTRO_VENUE, NORMAL (110), directed_* (guitar, bass,
+  drums, vocals, duo_*, all, bre ...), WIN, WIN_POST, WIN_QUICK, LOSE,
+  OUTRO_MULTI, BFTB_* (fail / revive).
+- The VENUE track (greengrass): notes 37-39, 48, 50, 60-64, 70-73, 87;
+  texts `[lighting (<adjective>)]`, `[do_directed_cut <category>]`,
+  `[FogOn]` / `[FogOff]`, `[verse]`, `[chorus]`, `[bonusfx]`.
+  `config/midi_verify.dta` lists the allowed ones. The port cuts to a
+  NORMAL shot on note 60 and to the named category on do_directed_cut [I:
+  RB's BandDirector chooses by the members in view, not read].
+- Lights: an RB Environ mixes point lights (range, falloff_start) and
+  directional ones; colours go past 1.0 (3.2, 8.0, 6.7). The port lights
+  each by its kind, falloff from falloff_start to range [I: RB's shader].
