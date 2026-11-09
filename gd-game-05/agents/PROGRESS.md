@@ -68,3 +68,53 @@ Not tested yet: Android build, local_build.sh packages (M9).
 
 Next: M1, the data layer (class versions, vocals files, Bink). Time used:
 ~15 min; estimate unchanged (12-14 h for M0..M9).
+
+## 2026-11-09 14:58, M1 data layer (gate passed); M2 started
+
+Done (M1):
+- Milo: RB's payload is big-endian per file; inline sub-directories follow
+  their owner's end marker; relative paths from the source folder; every
+  class on the disc has a known layout. Two research agents read the Load
+  routines in the XEX and checked Python decoders over the whole disc
+  (render / UI: 93,480 instances exact; characters / synth: 43,177 exact;
+  both re-run by me); I ported the layouts into the C++ decoders (Load
+  addresses in the code and in docs/formats.md).
+- `.mogg` version 11 decrypted (AES-128 counter mode; own AES; DECISIONS D3,
+  OPEN_QUESTIONS Q3). Bink in FFmpeg; `--videotest` added.
+- RB's sound samples: XMA, big-endian PCM16, empty placeholders.
+
+Verified (fresh binary, `engine/build/linux/gd05 "$ISO" --<test>`, with the
+CONTEXT.md environment):
+- `--scenetest` -> `3451 milo files parsed, 0 failed, 467 inline sub-directories`,
+  `proxy directories: 364 resolve to an archive file, 0 do not`,
+  `ui text chain: 1656 components resolve ..., 0 do not`,
+  `scene test passed: 0 typed objects failed, 0 files failed` (exit 0).
+- `--videotest` -> `videotest: 14 videos, 44189 frames decoded; 0 failed`, `videotest: OK`.
+- `--sfxtest` -> `moggs: 374 files (374 version 11, decrypted), 416833 Ogg pages walked to each file's end, 22300 s of audio ...; 0 failed`, `sfxtest: OK` (exit 0).
+- `--selftest` (M2 so far) -> `291 .dtb scripts decoded, 0 failed`;
+  `PART GUITAR 308 charts, 138360 gems, 0 not fully hit`;
+  `PART BASS 244 charts, 141962 gems, 0 not fully hit`;
+  `PART DRUMS 584 charts, 499457 drum notes (with and without kick), 0 not fully hit`;
+  `PART VOCALS 252 charts, 8648 phrases rated Awesome, 0 not fully hit`;
+  `all charts fully hit` (exit 0).
+- `ninja -C engine/build/linux` and `engine/build_windows.sh` -> 0 warnings.
+- `python3 -I tools/milo.py scan extracted/ark` -> `3451 files parsed, 0 failed, 467 inline sub-directories`.
+- `pgrep -fa gd05` -> nothing running.
+
+Gate notes (honest):
+- 10,128 objects of 19 classes are kept raw in C++ (layouts known and
+  verified in Python; ported when used: WorldInstance and PropAnim at M5).
+- `tools/tex.py` does not read RB's big-endian inline bitmap headers yet
+  (the C++ does: every Tex decodes).
+- The selftest's GH2 judge regression checks (GH2's 50-point values, co-op,
+  face-off) are reported, not counted; the PC-wording check finds 38 RB
+  strings that name the Xbox 360 or a console (M3); GH2's script sound
+  list is informational until M3's audit.
+
+M2 state: the four judges play every chart; the rules in FINDINGS.md are
+from the data [C data] but the judges' logic for RB is [I] (guitar / bass
+are GH2's judge, drums and vocals new). Band mechanics (band meter, saves,
+Unison, Big Rock Endings, solo awards, stars) are not built yet.
+
+Next: M3 (RB's front end through its own scripts), then M4 highways. Time
+used: ~1 h 10 min of wall clock; the estimate stays 12-14 h for M0..M9.

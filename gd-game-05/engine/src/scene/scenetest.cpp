@@ -275,7 +275,9 @@ int runSceneTest(const std::string& dataPath) {
                 Milo& milo = lib.load(p);
                 milo.root().forEach([&](Object& o) {
                     const auto* label = o.as<UILabel>();
-                    const auto* slider = o.as<BandSlider>();
+                    // RB's UISlider (a BandSlider here) carries no text [C data:
+                    // its type has no resource text]; only GH2's BandSlider did.
+                    const auto* slider = o.cls == "BandSlider" ? o.as<BandSlider>() : nullptr;
                     if (!label && !slider) return;
                     const std::string& token = label ? (label->localize ? label->textToken : std::string()) : slider->textToken;
                     if (!token.empty()) {
@@ -321,10 +323,8 @@ int runSceneTest(const std::string& dataPath) {
         for (const auto& m : tokenProblems) std::printf("  %s\n", m.c_str());
         // The venue classes (M8): every object on the disc, by class
         // (docs/venues.md); a different count means a file or class went missing.
-        static const std::pair<const char*, int> kVenueCounts[] = {
-            {"CamShot", 440}, {"LightPreset", 174}, {"Spotlight", 341}, {"EventTrigger", 344}, {"WorldDir (own)", 24},
-            {"WorldCrowd", 15}, {"PostProc", 28}, {"Flare", 23}, {"LightAnim", 9}, {"EnvAnim", 34}, {"Set", 50},
-            {"CubeTex", 60}, {"Waypoint", 68}, {"CamAnim", 2}};
+        // RB's whole-disc counts [C data: every instance decodes exactly].
+        static const std::pair<const char*, int> kVenueCounts[] = {{"BandCamShot", 2075}, {"LightPreset", 174}, {"Spotlight", 675}, {"EventTrigger", 2917}, {"WorldDir (own)", 102}, {"WorldCrowd", 24}, {"PostProc", 102}, {"Flare", 97}, {"LightAnim", 84}, {"EnvAnim", 27}, {"Set", 61}, {"CubeTex", 157}};
         int countFailures = 0;
         std::string counts;
         for (const auto& [cls, want] : kVenueCounts) {
@@ -339,13 +339,7 @@ int runSceneTest(const std::string& dataPath) {
         std::printf("venue classes decoded: %s (%s)\n", counts.c_str(), countFailures ? "MISMATCH" : "as expected");
         // The character classes (M9, char/char_objects.h; their directory
         // records are --chartest's): every object on the disc, by class.
-        static const std::pair<const char*, int> kCharCounts[] = {
-            {"CharClipSamples", 1994}, {"CharClipGroup", 330},   {"CharClipFilter", 82},    {"CharBone", 5797},
-            {"Character", 85},         {"BandCharacter", 16},    {"CharDriver", 58},        {"CharDriverMidi", 38},
-            {"CharIKHand", 38},        {"CharIKMidi", 19},       {"CharHair", 92},          {"CharLookAt", 36},
-            {"CharEyes", 18},          {"CharWeightSetter", 38}, {"CharUpperTwist", 88},    {"CharForeTwist", 79},
-            {"CharServoBone", 57},     {"CharWalk", 19},         {"CharPosConstraint", 4},  {"CharIKRod", 4},
-            {"OutfitLoader", 20},      {"FaceFxLipSyncServo", 22}};
+        static const std::pair<const char*, int> kCharCounts[] = {{"CharClipSamples", 9704}, {"CharClipGroup", 9197}, {"CharClipFilter", 297}, {"CharBone", 14208}, {"Character", 50}, {"CompositeCharacter", 153}, {"CharDriver", 171}, {"CharDriverMidi", 66}, {"CharIKHand", 22}, {"CharIKMidi", 2}, {"CharHair", 225}, {"CharLookAt", 14}, {"CharEyes", 6}, {"CharWeightSetter", 29}, {"CharUpperTwist", 14}, {"CharForeTwist", 14}, {"CharServoBone", 77}, {"OutfitLoader", 6}, {"OutfitConfig", 1383}, {"FaceFxLipSyncServo", 6}};
         const int venueCountFailures = countFailures;
         counts.clear();
         for (const auto& [cls, want] : kCharCounts) {

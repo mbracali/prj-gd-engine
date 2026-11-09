@@ -279,7 +279,13 @@ std::string resolveMiloRelative(const std::string& fromArkPath, const std::strin
         }
     };
     size_t slash = fromArkPath.rfind('/');
-    if (slash != std::string::npos) push(fromArkPath.substr(0, slash));
+    std::string base = slash != std::string::npos ? fromArkPath.substr(0, slash) : std::string();
+    // RB's paths are relative to the milo's source folder, the parent of the
+    // gen/ folder it is compiled into [C data: every proxy on the disc
+    // resolves this way] (GH2's data wrote "../" for it).
+    if (base == "gen") base.clear();
+    else if (base.size() > 4 && base.compare(base.size() - 4, 4, "/gen") == 0) base.resize(base.size() - 4);
+    if (!base.empty()) push(base);
     push(rel);
     std::string out;
     for (const auto& p : parts) out += (out.empty() ? "" : "/") + p;

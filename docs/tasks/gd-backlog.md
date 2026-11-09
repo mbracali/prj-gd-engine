@@ -915,8 +915,8 @@ universal launcher, not released on its own.
 |---|---|---|---|---|---|
 | GD05-001 | Original | ✅ | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | Kickoff: [docs/spikes/GD-GAME-05_KICKOFF.md](../spikes/GD-GAME-05_KICKOFF.md) (wave 01, branch `feature/20261109-rockband1-wave01`). First look at the disc [C]: XDVDFS, title ID 45410829, `gen/main.hdr` + `main_0/1.ark` read by gd-game-02's `tools/ark.py` as is (4,588 files), Bink videos. `gd-game-05/agent-instructions.md`, [docs/platform/adding-a-game.md](../platform/adding-a-game.md) | New 10-28 Owner 11-09 |
 | GD05-002 | Original | ✅ | M0 set-up: gd-game-02's engine copied and renamed (gd05, GD05_), rip, Ghidra project + export, agents/ notes, game-info.yaml (title ID 45410829, 0.0.1); gate: builds with 0 warnings, boots to a log line listing the archive | `gd-game-05/agents/CONTEXT.md`, `PROGRESS.md`, `DECISIONS.md` | Kickoff M0 |
-| GD05-003 | Original | 🟡 | M1 data layer: ARK / DTA / cipher confirmed for RB; Milo (every class on the disc), textures, .mogg track maps, MIDI (every RB track), the vocal files, Bink; Python tools byte-exact; gate: --scenetest every Milo to its end, every texture, every .dtb, --videotest every .bik | `gd-game-05/docs/formats.md` | Kickoff M1 |
-| GD05-004 | Original | ❌ | M2 songs, audio, gameplay core: song list, charts for every part / difficulty, stem mix and miss mutes, sfx; the rules from the XEX (guitar / bass, drums, vocals, Overdrive, band multiplier, Unison, saves, Big Rock Endings, stars); gate: --selftest all charts fully hit on every part, --sfxtest | `gd-game-05/docs/FINDINGS.md` | Kickoff M2 |
+| GD05-003 | Original | ✅ | M1 data layer: ARK / DTA / cipher confirmed for RB; Milo (every class on the disc), textures, .mogg track maps, MIDI (every RB track), the vocal files, Bink; Python tools byte-exact; gate: --scenetest every Milo to its end, every texture, every .dtb, --videotest every .bik | `gd-game-05/docs/formats.md` | Kickoff M1 |
+| GD05-004 | Original | 🟡 | M2 songs, audio, gameplay core: song list, charts for every part / difficulty, stem mix and miss mutes, sfx; the rules from the XEX (guitar / bass, drums, vocals, Overdrive, band multiplier, Unison, saves, Big Rock Endings, stars); gate: --selftest all charts fully hit on every part, --sfxtest | `gd-game-05/docs/FINDINGS.md` | Kickoff M2 |
 | GD05-005 | Original | ❌ | M3 scripts, UI, the asset audit (--audittest, missing natives counted); gate: --scripttest, --uitest, --walktest quickplay boot to results | `gd-game-05/docs/audit.md` | Kickoff M3 |
 | GD05-006 | Original | ❌ | M4 highways and HUD: guitar / bass, drums, vocals track; Overdrive, solos, BREs, band meter; 1-4 players; song start order | | Kickoff M4 |
 | GD05-007 | Original | ❌ | M5 venues, crowd, cameras, lighting; gate: --venuetest every venue / shot, 60 vs 240 fps | | Kickoff M5 |
@@ -926,6 +926,14 @@ universal launcher, not released on its own.
 | GD05-011 | Enhancement | ❌ | M9 launcher module and packages (gd_game_run / explore / ui_sounds, build_module_05, every bundle) | | Kickoff M9 |
 | GD05-012 | Original | ❌ | M10 close the gaps: audit rows, the parity ledger (`gd-game-05/docs/parity.md`) | | Kickoff M10 |
 | GD05-013 | Original | ❌ | Online, leaderboards, achievements, the Music Store / DLC: stubbed and logged (not in the port) | | Kickoff |
+| GD05-014 | Original | ✅ | RB's milo payload is big-endian, inline directories follow their owner's marker, paths are relative to the source folder; every class's layout from its RB Load routine | `docs/formats.md` (class table with RB Load addresses); `--scenetest` passes | M1 |
+| GD05-015 | Original | ✅ | `.mogg` version 11: AES-128 counter mode, key at RB 0x828B9AB4 (own AES; owner question OPEN_QUESTIONS Q3) | `data/mogg.cpp`, `data/aes128.cpp`; `--sfxtest` walks all 374 | M1 |
+| GD05-016 | Original | ✅ | Bink movies: FFmpeg bink + binkaudio decoders, `--videotest` | `video/wmv_player.cpp` (name kept from gd02) | M1 |
+| GD05-017 | Original | 🟡 | 19 classes kept raw in C++ (WorldInstance, PropAnim, MeshDeform, PatchRenderer, TexRenderer, BandMeshLauncher, Movie, ...): port when used | layouts verified in the research decoders | M1 |
+| GD05-018 | Original | 🟡 approximated | Drum judge and vocal judge: rules from the data, logic [I] until RB's watchers are read | `game/drum_player.cpp`, `game/vocal_player.cpp`, docs/FINDINGS.md | M2 |
+| GD05-019 | Original | ❌ | Band mechanics: band meter, saving a bandmate, Unison bonus, Big Rock Endings, solo awards, stars, band multiplier | scoring.dtb blocks loaded (`RbScoring`) | M2 |
+| GD05-020 | Original | ❌ | PC wording: 38 RB strings name the Xbox 360 or a console | `--selftest` reports them | M2 |
+| GD05-021 | Original | 🟡 | Guitar / bass judge: GH2's rules (gd02) with RB's points and streaks; re-read RB's watcher (HOPO rule, windows) | `game/player.cpp` | M2 |
 
 
 ## gd-game-06: Guitar Hero: Aerosmith (Xbox 360)

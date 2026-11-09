@@ -99,10 +99,90 @@ void checkVersion(uint32_t v, const char* cls, uint32_t want) {
 CamTarget camTarget(Rd& r) {
     CamTarget t;
     t.rev = r.u32();
-    if (t.rev >= 0x1c) bad("CamShot target revision " + std::to_string(t.rev));
+    if (t.rev >= 0x1c && t.rev != 36) bad("CamShot target revision " + std::to_string(t.rev));  // RB: 36 (RB 0x8228EBA8)
     t.object = r.str();
     t.subpart = r.str();
     return t;
+}
+
+// RB: BandCamShot::Load RB 0x822D9640 (rev 14): CamShot::Load RB 0x82296E20
+// (rev 36; keyframe RB 0x822947A0, target ref RB 0x8228EBA8), then the
+// band targets (RB 0x822D6E90), next_shot and zero_time [C: every
+// instance decodes exactly, agents' whole-disc check; names from the
+// property tables, a few I].
+void readBandCamShot(Rd& r, BandCamShot& c) {
+    checkVersion(c.version, "BandCamShot", 14);
+    checkVersion(r.u32(), "CamShot", 36);
+    c.header = r.header();
+    r.anim(c.anim);
+    c.keyframes.resize(r.count(100));
+    for (auto& k : c.keyframes) {
+        k.duration = r.f();
+        k.blend = r.f();
+        k.blendEase = r.f();
+        k.fieldOfView = r.f();
+        r.xfm(k.xfm);
+        r.fs(k.screenOffset);
+        k.blurDepth = r.f();
+        k.maxBlur = r.f();
+        k.minBlur = r.f();
+        k.focusBlurMultiplier = r.f();
+        k.targets.resize(r.count(12));
+        for (auto& t : k.targets) t = camTarget(r);
+        k.focalTarget = camTarget(r);
+        k.parent = camTarget(r);
+        k.useParentRotation = r.b();
+        k.shakeNoiseAmp = r.f();
+        k.shakeNoiseFreq = r.f();
+        r.fs(k.shakeMaxAngle);
+        k.zoomFov = r.f();
+    }
+    c.looping = r.b();
+    c.loopKeyframe = r.i32();
+    c.pathEase = r.f();
+    c.nearPlane = r.f();
+    c.farPlane = r.f();
+    c.useDepthOfField = r.b();
+    c.filter = r.f();
+    c.clampHeight = r.f();
+    c.path = r.str();
+    c.fadeTime = r.f();
+    c.category = r.str();
+    c.selectionWeight = r.f();
+    c.platformOnly = r.i32();
+    c.crowd3d.resize(r.count(8));
+    for (auto& p : c.crowd3d) p.first = r.u32(), p.second = r.u32();
+    c.unused = r.u32();
+    c.hideList = r.strs();
+    c.showList = r.strs();
+    c.crowd = r.str();
+    c.crowdRotate = r.i32();
+    c.glowSpot = r.str();
+    c.drawOverrides = r.strs();
+    c.postProcOverrides = r.strs();
+    c.ps3PerPixel = r.b();
+    c.bandTargets.resize(r.count(40));
+    for (auto& t : c.bandTargets) {
+        t.target = r.str();
+        t.teleport = r.b();
+        r.xfm(t.to);
+        t.anim = r.str();
+        t.returns = r.b();
+        t.freeze = r.b();
+        t.freezeDelay = r.f();
+        t.fastForward = r.f();
+        t.forwardEvent = r.str();
+        t.selfShadow = r.b();
+        t.spotCutout = r.b();
+        t.floorShadow = r.b();
+        t.targetIk = r.str();
+        t.worldIk = r.str();
+        t.worldProp = r.str();
+        t.targetProp = r.str();
+        t.envOverride = r.str();
+    }
+    c.nextShot = r.str();
+    c.zeroTime = r.f();
 }
 
 // CamShot::Load @ 0x8222de20; keyframe @ 0x8222a5b8 (the field offsets in
@@ -275,7 +355,7 @@ void readWorldCrowd(Rd& r, WorldCrowd& c) {
         ch.density = r.f();
         ch.radius = r.f();
     }
-    c.environ = r.str();  // RB: no rotate bool; an environ name before the placements
+    c.environName = r.str();  // RB: no rotate bool; an environ name before the placements
     for (auto& ch : c.characters) {
         ch.placements.resize(r.count(48));
         for (auto& x : ch.placements) r.xfm(x);
@@ -437,6 +517,7 @@ template <class T> WorldDecoder dec(void (*fn)(Rd&, T&)) {
 const std::map<std::string, WorldDecoder>& worldDecoders() {
     static const std::map<std::string, WorldDecoder> m = {
         {"CamShot", dec<CamShot>(readCamShot)},
+        {"BandCamShot", dec<BandCamShot>(readBandCamShot)},
         {"LightPreset", dec<LightPreset>(readLightPreset)},
         {"Spotlight", dec<Spotlight>(readSpotlight)},
         {"WorldCrowd", dec<WorldCrowd>(readWorldCrowd)},

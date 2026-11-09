@@ -44,6 +44,7 @@ public:
         Xfm xfm;                 // the camera (world, or under `parent`)
         std::array<float, 2> screenOffset{};  // where the target is framed
         float blurDepth = 0, maxBlur = 0, focusBlurMultiplier = 0;  // depth of field
+        float minBlur = 0;  // RB
         std::vector<CamTarget> targets;
         CamTarget focalTarget;   // +0xec (Q: order of focal / parent from the field offsets)
         CamTarget parent;        // +0x9c: the keyframe moves with it
@@ -69,12 +70,30 @@ public:
     std::vector<std::string> hideList;  // objects hidden while the shot runs
     std::string crowd;        // the WorldCrowd it shows
     std::string glowSpot;     // Q: a spotlight
+    // RB (CamShot rev 36) [C order]:
+    int loopKeyframe = 0, platformOnly = 0, crowdRotate = 0;
+    std::vector<std::string> showList, drawOverrides, postProcOverrides;
+    bool ps3PerPixel = false;
 
     // The length in frames: every keyframe's duration and blend.
     float lengthFrames() const;
     // A director flag from the header's properties (camshot.dta), e.g.
     // flag("facing") -> "left"; empty when absent.
     std::string flag(const std::string& key) const;
+};
+
+// RB's BandCamShot v14 (RB 0x822D9640): a CamShot and the band's targets.
+class BandCamShot : public CamShot {
+public:
+    struct Target {
+        std::string target, anim, forwardEvent, targetIk, worldIk, worldProp, targetProp, envOverride;
+        bool teleport = false, returns = false, freeze = false, selfShadow = false, spotCutout = false, floorShadow = false;
+        Xfm to;
+        float freezeDelay = 0, fastForward = 0;
+    };
+    std::vector<Target> bandTargets;
+    std::string nextShot;
+    float zeroTime = 0;
 };
 
 // LightPreset v9 (Load @ 0x82243660): a lighting look, keyframes of every
@@ -181,7 +200,7 @@ public:
     std::vector<Character> characters;
     float unknown = 0;  // GH2: f32 before show_3d_only
     bool show3dOnly = false;
-    std::string environ;  // RB rev 8
+    std::string environName;  // RB rev 8 (never "environ": a MinGW macro)
     int lod = 0;          // RB rev 8 [name I]
 };
 

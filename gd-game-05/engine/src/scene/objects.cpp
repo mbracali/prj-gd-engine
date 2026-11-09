@@ -799,10 +799,11 @@ bool hudPre(In& in, DirObj& d, bool own) {
     auto u8 = [&] { h.values.push_back(in.u8()); };
     const std::string& cls = d.cls;
     if (cls == "BandCrowdMeterDir") {
-        expectVersion(d.version, 3, cls.c_str());
+        // RB's BandCrowdMeter (PreLoad RB 0x822ED498, rev 1) [C]: the slot
+        // anims (a name list, own record only), f32 peak_value, then RndDir.
+        expectVersion(d.version, 1, cls.c_str());
+        if (own) list();
         u32();
-        if (own)
-            for (int i = 0; i < 5; ++i) ref();
     } else if (cls == "BandScoreDisplay") {
         expectVersion(d.version, 3, cls.c_str());
         if (own) {
