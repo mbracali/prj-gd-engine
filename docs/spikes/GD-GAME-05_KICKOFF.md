@@ -190,7 +190,7 @@ Then read:
   - game data, ISOs, rips, decoded assets or screenshots of the game;
   - decompiler output or Ghidra files.
   - Never paste decompiled code (or the disc's shader code) into tracked files. Describe the behaviour in your own words, with addresses.
-  - `python3 .github/scripts/repo_guard.py` must report 0 problems before every commit. It also rejects personal paths in comments (`C:\Users\<name>`): write generic examples.
+  - `python3 .github/scripts/repo_guard.py` must report 0 problems before every commit. It also rejects personal home paths in comments and docs: write generic examples ("a user folder with an accent").
 - **GitHub Actions.** Never start workflows; only release builds run on GitHub. Build locally.
 - **Matching the original.** 100% parity with the original is non-negotiable.
   - Every behaviour comes from the original executable and data.
