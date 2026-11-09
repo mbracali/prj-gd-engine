@@ -61,6 +61,7 @@ target_sources(gd05 PRIVATE
   src/devaids/screenshot.cpp
   src/game/camera_director.cpp
   src/game/band.cpp
+  src/game/rb_band.cpp
   src/game/band_performer.cpp
   src/game/chart.cpp
   src/game/drum_player.cpp

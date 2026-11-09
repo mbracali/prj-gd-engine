@@ -14,6 +14,7 @@
 class World;
 namespace chr {
 class Character;
+class Skeleton;
 }
 
 // Draws the band's characters (game/band.h) where their venue slots sit in
@@ -61,6 +62,16 @@ public:
 
 private:
     void drawMesh(gfx::MaterialRenderer& mr, chr::Character& c, const scene::Mesh& m);
+    // Rock Band's many-bone meshes, skinned on the CPU (drawMesh).
+    struct CpuSkin {
+        bool cpu = false;
+        std::vector<float> packed, work;
+        std::vector<uint16_t> indices;
+        std::unique_ptr<gfx::DynamicMesh> mesh;
+    };
+    std::map<const scene::Mesh*, CpuSkin> cpuSkin_;
+    bool cpuSkinned(const scene::Mesh& geom);
+    gfx::GpuMesh skinOnCpu(const scene::Mesh& geom, chr::Skeleton& sk);
     scene::Xfm flattened(scene::Xfm x) const;
     // The member's started effects (game/band.h Member::fx): the proxied milo's
     // particle systems at the object's transform under its parent bone.

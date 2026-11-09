@@ -601,6 +601,7 @@ Band::Member* Band::memberOf(const scene::Object* o) const {
 
 // game change_chars 0x822B7670.
 void Band::assemble(const GameData& data, const SongInfo& song) {
+    if (assembleRb(data, song)) return;  // Rock Band's venue slots
     const SongBand sb = songBand(data, song.id);
     bandList_ = sb.band.empty() ? defaultBand(data) : sb.band;
     // The venue's slots: Character / BandCharacter objects other than the crowd's.
@@ -1575,8 +1576,10 @@ void Band::update(double seconds, double beats, const std::array<float, 3>* came
     if (entered_) pollFaces();
     Interp& in = world_.interp();
     const float faceSong = float(in.tasks().time(kTaskSeconds)), faceUi = float(in.tasks().time(kTaskUISeconds));
-    for (auto& m : members_)
+    for (auto& m : members_) {
         if (m->type == "guitarist" && entered_) guitarPoll(*m, dB);
+        if (startsWith(m->type, "rb_") && entered_) rbPoll(*m);
+    }
     for (auto& m : members_) {
         chr::Character& c = *m->character;
         chr::Skeleton& sk = c.skeleton();

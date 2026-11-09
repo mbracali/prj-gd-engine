@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <stdexcept>
 
 #include "data/game_data.h"
@@ -86,8 +87,10 @@ Character::Character(const GameData& data, const std::string& path, ClipLibrary&
     if (!d.self) throw std::runtime_error(path_ + ": no directory record");
     own_ = scene::decodeCharacterDir(*d.self);
     // Outfits (OutfitLoader, merged as they load).
+    // A loader name starting with '+' is a Rock Band outfit piece (game/
+    // rb_band.cpp): merged whatever the character's loaders are.
     for (const auto& [loader, file] : outfits)
-        if (!file.empty() && d.get(loader)) loadOutfit(data, file);
+        if (!file.empty() && (loader.rfind('+', 0) == 0 || d.get(loader))) loadOutfit(data, file);
     skeleton_.build(d);
     // LOD and shadow groups.
     for (const auto& l : own_->lods) lodGroups_.push_back(d.get(l.group) ? d.get(l.group)->as<scene::Group>() : nullptr);
@@ -169,6 +172,35 @@ void Character::loadOutfit(const GameData& data, const std::string& outfitPath) 
         if (od.self) oown = scene::decodeCharacterDir(*od.self);
     } catch (const std::exception&) {
     }
+    // Rock Band's outfit pieces [C data: char/<gender>/outfits]: a piece
+    // (torso/gen/worntshirt_vintage) names its geometry milo in its
+    // ObjectDir subdirs ("worntshirt/worntshirt_resource.milo", relative to
+    // the piece's source folder) and sets that milo's material textures in
+    // its (clothing_obj (target <mat>) (diffuse_tex ...) (normal_map ...)
+    // (specular_map ...)) property. The geometry merges first, then the
+    // piece (its textures), then the property [I: the OutfitLoader's
+    // order, RB 0x8230F488, not read].
+    std::vector<const scene::DataNode*> clothing;
+    if (oown) {
+        for (const std::string& sub : oown->objectDir.subdirs) {
+            if (sub.empty()) continue;
+            const std::string p = scene::findMiloRelative(data, outfitPath, sub);
+            if (data.exists(p)) loadOutfit(data, p);
+        }
+        // Every array under the property holding a "target" (a struct of
+        // key / value pairs, stored flat or as (key value) arrays).
+        std::function<void(const scene::DataNode&)> collect = [&](const scene::DataNode& n) {
+            bool hasTarget = false;
+            for (size_t i = 0; i < n.children.size(); ++i) {
+                const scene::DataNode& c = n.children[i];
+                if (c.str == "target" || (!c.children.empty() && c.children[0].str == "target")) hasTarget = true;
+            }
+            if (hasTarget) clothing.push_back(&n);
+            else
+                for (const scene::DataNode& c : n.children) collect(c);
+        };
+        if (oown->header.hasProps) collect(oown->header.props);
+    }
     // The outfit's LOD and shadow groups, as objects: they may share their
     // names with the character's (battleaxe's "shadow", the "lod0.grp"s),
     // which a lookup by name after the merge would mistake for the
@@ -228,6 +260,26 @@ void Character::loadOutfit(const GameData& data, const std::string& outfitPath) 
         const scene::Object* cg = own_->shadow.empty() ? nullptr : d.get(own_->shadow);
         if (const scene::Group* g = cg ? cg->as<scene::Group>() : nullptr) merge(g, outfitShadow);
         else if (!outfitShadow_) outfitShadow_ = outfitShadow;
+    }
+    // The pieces' texture choices on the merged materials.
+    for (const scene::DataNode* c : clothing) {
+        auto value = [&](const char* key) -> std::string {
+            for (size_t i = 0; i < c->children.size(); ++i) {
+                const scene::DataNode& k = c->children[i];
+                if (k.children.size() > 1 && k.children[0].str == key) return k.children[1].str;
+                if (k.children.empty() && k.str == key && i + 1 < c->children.size()) return c->children[i + 1].str;
+            }
+            return {};
+        };
+        scene::Object* mo = d.get(value("target"));
+        auto* mat = mo ? mo->as<scene::Mat>() : nullptr;
+        if (!mat) continue;
+        auto set = [&](const char* key, std::string& field) {
+            if (std::string v = value(key); !v.empty()) field = v;
+        };
+        set("diffuse_tex", mat->diffuseTex);
+        set("normal_map", mat->normalMap);
+        set("specular_map", mat->specularMap);
     }
     outfits_.push_back(std::move(m));
 }

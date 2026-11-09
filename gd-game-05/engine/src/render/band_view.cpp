@@ -175,6 +175,63 @@ std::vector<const scene::Mesh*> BandView::meshesToDraw(const chr::Character& c, 
     return out;
 }
 
+bool BandView::cpuSkinned(const scene::Mesh& geom) {
+    auto it = cpuSkin_.find(&geom);
+    if (it != cpuSkin_.end()) return it->second.cpu;
+    CpuSkin& cs = cpuSkin_[&geom];
+    cs.cpu = geom.bones.size() > 4;
+    for (const auto& v : geom.verts)
+        for (int k = 0; k < 4 && !cs.cpu; ++k)
+            if (v.color[k] > 0 && v.bones[k] != k) cs.cpu = true;
+    if (cs.cpu) {
+        cs.packed = gfx::packVertices(geom);
+        cs.indices.reserve(geom.faces.size() * 3);
+        for (const auto& f : geom.faces) cs.indices.insert(cs.indices.end(), {f[0], f[1], f[2]});
+        cs.mesh = std::make_unique<gfx::DynamicMesh>(cache_.device());
+    }
+    return cs.cpu;
+}
+
+gfx::GpuMesh BandView::skinOnCpu(const scene::Mesh& geom, chr::Skeleton& sk) {
+    CpuSkin& cs = cpuSkin_[&geom];
+    std::vector<scene::Xfm> xf(geom.bones.size());
+    for (size_t i = 0; i < geom.bones.size(); ++i) {
+        const int b = sk.find(geom.bones[i].name);
+        xf[i] = flattened(b >= 0 ? scene::compose(geom.bones[i].offset, sk.world(b)) : sk.root());
+    }
+    std::vector<float>& out = cs.work;
+    out = cs.packed;
+    const size_t n = std::min(geom.verts.size(), out.size() / 16);
+    for (size_t i = 0; i < n; ++i) {
+        const scene::MeshVertex& v = geom.verts[i];
+        float* o = &out[i * 16];
+        float w[4] = {v.color[0], v.color[1], v.color[2], v.color[3]};
+        float sum = w[0] + w[1] + w[2] + w[3];
+        if (sum <= 1e-6f) w[0] = 1, sum = 1;
+        float p[3] = {0, 0, 0}, nr[3] = {0, 0, 0}, t[3] = {0, 0, 0};
+        for (int k = 0; k < 4; ++k) {
+            if (w[k] <= 0) continue;
+            const size_t bi = v.bones[k] < xf.size() ? v.bones[k] : 0;
+            const scene::Xfm& x = xf[bi];
+            const float wk = w[k] / sum;
+            for (int c = 0; c < 3; ++c) {
+                p[c] += wk * (v.pos[0] * x.rot[size_t(c)] + v.pos[1] * x.rot[size_t(3 + c)] + v.pos[2] * x.rot[size_t(6 + c)] + x.pos[size_t(c)]);
+                nr[c] += wk * (v.normal[0] * x.rot[size_t(c)] + v.normal[1] * x.rot[size_t(3 + c)] + v.normal[2] * x.rot[size_t(6 + c)]);
+                t[c] += wk * (o[12] * x.rot[size_t(c)] + o[13] * x.rot[size_t(3 + c)] + o[14] * x.rot[size_t(6 + c)]);
+            }
+        }
+        const float nl = std::sqrt(nr[0] * nr[0] + nr[1] * nr[1] + nr[2] * nr[2]);
+        const float tl = std::sqrt(t[0] * t[0] + t[1] * t[1] + t[2] * t[2]);
+        for (int c = 0; c < 3; ++c) {
+            o[c] = p[c];
+            o[3 + c] = nl > 0 ? nr[c] / nl : 0;
+            o[12 + c] = tl > 0 ? t[c] / tl : 0;
+        }
+        o[6] = o[7] = o[8] = o[9] = 1;  // the weights were in the colour
+    }
+    return cs.mesh->upload(out, cs.indices);
+}
+
 void BandView::drawMesh(gfx::MaterialRenderer& mr, chr::Character& c, const scene::Mesh& m) {
     const gfx::GpuMesh* cached = cache_.mesh(&m);
     if (!cached || !m.dir) return;
@@ -198,7 +255,14 @@ void BandView::drawMesh(gfx::MaterialRenderer& mr, chr::Character& c, const scen
     const scene::Xfm world = self >= 0 ? sk.world(self) : sk.root();
     bones[0] = gfx::toMat4(flattened(world));
     int boneCount = 1;
-    if (g.skinned && !geom->bones.empty()) {
+    if (g.skinned && !geom->bones.empty() && cpuSkinned(*geom)) {
+        // Rock Band's meshes index any number of bones per vertex (four u16
+        // indices into the mesh's bone list, docs/formats.md) where the
+        // shader's palette has four: skinned here on the CPU, in world space.
+        g = skinOnCpu(*geom, sk);
+        bones[0] = gfx::toMat4(flattened(scene::Xfm{}));
+        g.skinned = false;
+    } else if (g.skinned && !geom->bones.empty()) {
         boneCount = int(std::min<size_t>(geom->bones.size(), 4));
         for (int i = 0; i < boneCount; ++i) {
             const auto& bone = geom->bones[size_t(i)];

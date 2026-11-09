@@ -51,7 +51,15 @@ public:
         bool campaignFinal = false;            // the career's last song (win_finals, kWinGameWalkSpot)
         bool encore = false;                   // an encore follows (kEncoreWalkSpot, post-game idle)
         uint32_t seed = 0x42414e44u;           // the band's random numbers
+        // Rock Band: the premade character per instrument (guitar, bass,
+        // drum, vocals -> characters.dtb prefab name); empty: the port's pick.
+        std::map<std::string, std::string> rbPrefab;
     };
+    // Rock Band's premade characters whose names start with `instrument`
+    // (guitar0, guitar1 ... in config/gen/characters.dtb).
+    static std::vector<std::string> rbPrefabs(const GameData& data, const std::string& instrument);
+    // The premade character each instrument got (Rock Band).
+    const std::map<std::string, std::string>& rbPrefabUsed() const { return rbPrefabUsed_; }
 
     // Loads the band into `world`'s venue for `song` (its (band ...),
     // quickplay character and guitar, anim tempo). `objects` is the tree
@@ -153,6 +161,9 @@ public:
 
 private:
     void assemble(const GameData& data, const SongInfo& song);
+    bool assembleRb(const GameData& data, const SongInfo& song);  // game/rb_band.cpp
+    void rbPoll(Member& m);
+    void rbSkin(const GameData& data, chr::Character& c, const DataNode* prefab);
     void makeScripts(const DataNode* objects);
     void registerDir(Member& m, const scene::Directory& d);
     void setupFace(Member& m, scene::Object* servo);
@@ -218,4 +229,5 @@ private:
     std::vector<float> walkArrivals_;
     bool first_ = true, entered_ = false;
     bool won_ = false, over_ = false;
+    std::map<std::string, std::string> rbPrefabUsed_;
 };
