@@ -144,7 +144,7 @@ confirm every rule in the XEX.
   - gd-game-04 (a new engine) reached `ready_to_play` (M0..M9) in about 6.5 h (10-28 22:00 → 10-29 04:26);
   - gd-game-04 then needed about a week of owner waves (100+ fixes) to reach 96%.
 
-  Rock Band reuses like gd-game-03 but is much wider (four instruments, four players, vocals, Bink, the character creator). Plan **8 to 12 h for M0..M9**, then parity waves.
+  Rock Band reuses like gd-game-03 but is much wider (four instruments, four players, vocals with the core's microphone input, Bink, the full character creator and Rock Shop). Plan **10 to 14 h for M0..M9**, then parity waves.
   - Write the estimate at the top of `PROGRESS.md` and revise it at each gate.
 - **Commit and push at every milestone gate** (section 7) on `feature/20261109-rockband1-wave01`. **No PR**: the owner opens PR gates.
 - **Resume.** If `PROGRESS.md` already exists, read it, `DECISIONS.md` and the backlog, then continue from the last gate. Don't redo finished work.
@@ -179,9 +179,8 @@ Then read:
     - `gd-engine-launcher/scripts/build.sh` (your `build_module_05`);
     - `gd-engine-launcher/games.yaml`, if needed;
     - the FFmpeg decoder list for Bink in your own `build_common.sh` copy.
-  - **Never modify `gd-game-01..04/` or `gd-engine-core/`.**
-    - Copy what you need into your folder.
-    - Something the core must gain (for example microphone capture for vocals) goes to `OPEN_QUESTIONS.md` and the backlog's gd-engine-core section, and waits for the owner.
+  - **Never modify `gd-game-01..04/`.** Copy what you need into your folder.
+  - **`gd-engine-core/`: only the microphone input** (owner, 11-09): add an audio *input* (capture) interface next to `gd::core::audio::Output`, with backends behind its factory (SDL3 capture; miniaudio / OpenAL capture where they have it), its self-test, and a row in the backlog's gd-engine-core section. Nothing else in the core changes; other needs go to `OPEN_QUESTIONS.md` and wait for the owner.
     - Shared code moves to a common place later, by the owner's decision (rule of two; a shared Harmonix library for gd02 / gd03 / gd05 is a candidate, not a task).
 - **Commits as the owner.**
   - Use `git commit -s`.
@@ -208,7 +207,7 @@ Then read:
 - **Processes.**
   - Every command that runs the game gets a `timeout`. Only one game process at a time.
   - Never leave background processes behind. Check with `pgrep -fa gd05` before you finish a milestone, and kill by PID only (never `pkill -f`).
-  - With a real Rock Band guitar plugged in, run the tests with `SDL_GAMECONTROLLER_IGNORE_DEVICES=0x1bad/0x0002 SDL_JOYSTICK_IGNORE_DEVICES=0x1bad/0x0002`.
+  - The owner's Rock Band guitar (`1bad:0002`), drum kit and USB microphone may be plugged in. Run the self-tests with them ignored: `SDL_GAMECONTROLLER_IGNORE_DEVICES` / `SDL_JOYSTICK_IGNORE_DEVICES` with the guitar's and the drum kit's ids (read the kit's from the log the first time), and the dummy audio driver so no real mic is opened. Real-device checks (detect, bind, a song on drums and on vocals) are for the owner: list them in `PROGRESS.md` under "for the owner to play".
   - Tests use a scratch `XDG_DATA_HOME`: never touch `~/.local/share/gd-engine`.
   - Don't work around a blocked command: find an allowed way, or note it and move on.
 - **Subagents.**
@@ -503,5 +502,9 @@ Band's waves are short:
 6. **Android microphone:** may the launcher's APK ask for `RECORD_AUDIO` (only when a game opens the mic)?
 7. **A shared Harmonix library** (ARK, DTA, Milo, mogg, MIDI) for gd02 / gd03 / gd05: now, or after Rock Band reaches 99%?
 
-## Owner's answers
-- (none yet)
+## Owner's answers (2026-11-09)
+- Vocals: the microphone, as the original, through a new audio input (capture) interface in gd-engine-core, so every Rock Band game reuses it (section 3).
+- Hardware: the owner has a Rock Band guitar, a Rock Band drum kit and a USB microphone; drums and vocals get real-device checks by the owner.
+- Character creator: the **full creator and the Rock Shop in wave 01** (M6, M7).
+- Shared Harmonix library: after Rock Band reaches 99%; copy gd-game-02's code into gd-game-05 now.
+- Still open: questions 3 (help bar placement) and 6 (Android `RECORD_AUDIO`).
