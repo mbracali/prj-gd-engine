@@ -53,6 +53,10 @@
 #include "render/scene_gpu.h"
 #include "render/track_view.h"
 #include "render/rb_track_view.h"
+#include "render/vocal_track_view.h"
+#include "audio/vocal_input.h"
+#include "game/vocal_player.h"
+#include "game/rb_bonus.h"
 #include "render/band_view.h"
 #include "render/venue_view.h"
 #include "scene/milo.h"
@@ -310,6 +314,7 @@ public:
     void creditsMusic(bool on) override;
     void playMovie(const std::string& name) override;
     void applyOptions(float band, float guitar, float fx, bool lefty0, bool lefty1, int syncOffsetMs) override;
+    int controllerType(int pad) override;
     void quit() override { running_ = false; }
     bool playSfx(const std::string& name) override { return playSfxArgs(name, 0, 0, 0); }
     bool playSfxArgs(const std::string& name, float volumeDb, float pan, float transpose) override;
@@ -475,6 +480,21 @@ private:
     bool hadDevice_[2] = {};  // each slot had a device at the song's start (gameDeviceLost)
     std::unique_ptr<Player> player_;
     std::unique_ptr<Autoplay> bot_;
+    // Rock Band's vocals (wave 02): the judge, the voice and the track;
+    // player_ carries the judge's numbers (Player::setExternal).
+    std::unique_ptr<RbBonus> rbBonus_;  // solos, drum fills, the Big Rock Ending (wave 02)
+    std::unique_ptr<VocalPlayer> vocal_;
+    std::unique_ptr<VocalInput> mic_;
+    VocalTrackView vocalView_;
+    float vocalRating_ = 0.5f, voicePitch_ = -1, voiceLoud_ = 0;
+    const char* vocalRatingName_ = nullptr;
+    float vocalRatingMs_ = -1e9f;
+    int vocalPhrasesHit_ = 0;
+    void updateVocals(float t);
+    void drawRbTracks(float t, float speed);
+    void drawRbNotices(float t);
+    int rbTrackFrames_ = 0;  // frames RB's instrument track drew (the walks)
+    float overdriveDrainMs() const;
     std::unique_ptr<VorbisStream> pendingStream_;
     float bandVolume_ = 1, guitarVolume_ = 1;
     int syncOffsetMs_ = 0;
@@ -972,12 +992,11 @@ bool App::loadSong(const SongInfo& info, int difficulty, bool autoplay, float ba
         // One player plays the guitar, except in practice (practice_selpart: the guitar or the bass).
         // Rock Band: the player's instrument (the slot's track type) [C data].
         Part part0 = partFor(*song_, parts_[0], coopBlock);
-        // Vocals need the vocal judge in the game loop (M4/M8, GD05-006): the guitar until then.
-        if (part0 == Part::Vocals) {
-            SDL_Log("vocals are not playable in this build yet: the guitar part instead");
-            part0 = Part::Guitar;
-        }
-        parts_[0] = part0 == Part::Drums ? "drum" : part0 == Part::Bass ? "bass" : "guitar";
+        // Vocals (wave 02): the vocal judge (VocalPlayer) on PART VOCALS, the
+        // voice from the microphone (or GD05_VOCALS_FILE); player_ plays the
+        // empty gem chart and carries the judge's numbers.
+        if (part0 == Part::Vocals && song_->vocals.empty()) part0 = Part::Guitar;
+        parts_[0] = part0 == Part::Drums ? "drum" : part0 == Part::Bass ? "bass" : part0 == Part::Vocals ? "vocals" : "guitar";
         // The drums, wave 01 (DECISIONS D6): GH2's joypad watcher on the
         // drum chart, the pads as frets: kick = the orange fret, red, yellow,
         // blue = their frets, the green pad = the green fret (an Xbox 360
@@ -1016,6 +1035,27 @@ bool App::loadSong(const SongInfo& info, int difficulty, bool autoplay, float ba
         if (part0 == Part::Bass) player_->setBassRanges(song_->bassRanges);
         player_->setForgivingHopos(enhancedValue("hopo_mode") == "forgiving");
         bot_ = autoplay ? std::make_unique<Autoplay>(player_->chart(), faceOff ? 0 : -1) : nullptr;
+        vocal_.reset(), mic_.reset();
+        rbBonus_ = part0 != Part::Vocals ? std::make_unique<RbBonus>(*song_, part0, static_cast<Difficulty>(difficulties_[0]), rules_) : nullptr;
+        vocalRating_ = 0.5f, vocalRatingName_ = nullptr, vocalRatingMs_ = -1e9f, vocalPhrasesHit_ = 0;
+        if (part0 == Part::Vocals) {
+            vocal_ = std::make_unique<VocalPlayer>(*song_, static_cast<Difficulty>(difficulties_[0]), rules_);
+            if (!autoplay || SDL_getenv("GD05_VOCALS_FILE")) {
+                mic_ = std::make_unique<VocalInput>();
+                std::string err;
+                if (mic_->open(startupAudioBackend() == "miniaudio" ? "miniaudio" : "sdl3", err))
+                    SDL_Log("vocals: the voice from %s", mic_->name().c_str());
+                else
+                    SDL_Log("vocals: no microphone (%s): the judge hears silence", err.c_str()), mic_.reset();
+            }
+            SDL_Log("vocals: %d phrases, %d notes", vocal_->phrases(), int(song_->vocals.notes.size()));
+            if (SDL_getenv("GD05_VOCALLOG"))
+                for (size_t i = 0; i < 4 && i < song_->vocals.phrases.size(); ++i) {
+                    const VocalPhrase& ph = song_->vocals.phrases[i];
+                    SDL_Log("phrase %d: %.0f..%.0f notes %d..%d first note %.0f", int(i), double(ph.startMs), double(ph.endMs), ph.firstNote, ph.lastNote,
+                            ph.firstNote >= 0 ? double(song_->vocals.notes[size_t(ph.firstNote)].ms) : -1.0);
+                }
+        }
         player2_.reset(), bot2_.reset(), coopBand_.reset();
         sharedMeter_ = {};
         guitarHeard_ = true;
@@ -1410,7 +1450,7 @@ void App::endSong() {
         res = {};
         if (!p) continue;
         res.valid = true, res.failed = p->failed(), res.score = p->score(), res.notesHit = p->notesHit();
-        res.gems = int(p->chart().gems.size()), res.longestStreak = p->longestStreak(), res.stars = p->stars();
+        res.gems = int(p->chart().gems.size()), res.longestStreak = p->longestStreak(), res.stars = RbBonus::stars(rules_, p->score(), p->baseScore());
     }
     if (player2_)
         SDL_Log("player 2: score %d, %d/%d notes, longest streak %d", player2_->score(), player2_->notesHit(),
@@ -1650,7 +1690,14 @@ void App::playerAction(const InputEvent& a) {
         }
         return;
     }
+    if (vocal_ && p == player_.get()) {
+        // The singer's Overdrive: any deploy press in a gap between phrases [I].
+        if (a.action == Action::StarPower && a.down && vocal_->deployOverdrive(t, overdriveDrainMs()) && ui_)
+            ui_->gameEvent("sp_engage", {Value::integer(0), Value::integer(1)});
+        return;
+    }
     p->update(t);
+    if (rbBonus_ && p == player_.get() && isFret(a.action) && a.down) rbBonus_->codaStrike(fretOf(a.action), t);
     if (isFret(a.action)) {
         if (a.down) p->fretDown(fretOf(a.action), t);
         else p->fretUp(fretOf(a.action), t);
@@ -1661,6 +1708,77 @@ void App::playerAction(const InputEvent& a) {
     } else if (a.action == Action::Whammy && !a.analog) {
         p->setWhammy(a.down);  // a key or button; an analog bar is sampled every frame
     }
+}
+
+// The instrument of local player `pad` (RB's kController*): GD05_INSTRUMENT
+// (a list per player: guitar, bass, drum, vocals) first, then the
+// player's GAMEPADS choice (Enhanced "instrument_p<n>"), then the device:
+// a drum kit (its name says drum) plays the drums [I: the port's
+// detection; RB asks the controller's type].
+int App::controllerType(int pad) {
+    auto typeOf = [](const std::string& v) {
+        if (v == "drum" || v == "drums") return 0;
+        if (v == "vocals" || v == "mic") return 2;
+        if (v == "guitar" || v == "bass") return 1;
+        return -1;
+    };
+    if (const char* e = SDL_getenv("GD05_INSTRUMENT")) {
+        std::string v = e;
+        for (int i = 0; i < pad && !v.empty(); ++i) {
+            const size_t c = v.find(',');
+            v = c == std::string::npos ? std::string() : v.substr(c + 1);
+        }
+        v = v.substr(0, v.find(','));
+        if (const int t = typeOf(v); t >= 0) return t;
+    }
+    if (const int t = typeOf(enhancedValue("instrument_p" + std::to_string(pad + 1))); t >= 0) return t;
+    for (const Input::Device& d : input_.devices()) {
+        if (d.player != pad) continue;
+        std::string n = d.name;
+        for (char& c : n) c = char(std::tolower(static_cast<unsigned char>(c)));
+        if (n.find("drum") != std::string::npos) return 0;
+    }
+    return 1;
+}
+
+// Overdrive's length on the vocals: band_energy's deploy beats (32,
+// scoring.dtb) at the song's mean beat [I: RB drains by the tempo map].
+float App::overdriveDrainMs() const {
+    if (!song_ || song_->beats.size() < 2) return 16000.0f;
+    const float beatMs = (song_->beats.back().ms - song_->beats.front().ms) / float(song_->beats.size() - 1);
+    return 32.0f * beatMs;
+}
+
+// One frame of the singer: the voice (the microphone, the file, or the
+// autoplay singing the target), the judge, its ratings into the crowd
+// meter and the HUD's numbers [I: the crowd steps per rating].
+void App::updateVocals(float t) {
+    float loud = 0, pitch = -1;
+    if (mic_) pitch = mic_->poll(t, loud);
+    if (bot_ && !mic_) {
+        pitch = vocal_->targetPitch(t);
+        loud = vocal_->noteAt(t) ? 0.3f : 0.0f;
+    }
+    voicePitch_ = pitch, voiceLoud_ = loud;
+    if (SDL_getenv("GD05_VOCALLOG")) {
+        static float next = 0;
+        if (t >= next) next = t + 2000, SDL_Log("vocals %.0f: pitch %.1f loud %.2f target %.1f phrase %d score %d drawn %d", double(t), double(pitch), double(loud), double(vocal_->targetPitch(t)), vocal_->phraseAt(t), vocal_->score(), vocalView_.notesDrawn());
+    }
+    vocal_->sing(t, pitch, loud);
+    vocal_->update(t);
+    for (const VocalPlayer::Event& e : vocal_->takeEvents()) {
+        if (e.kind != VocalPlayer::Event::Kind::PhraseRated) continue;
+        vocalRatingName_ = VocalPlayer::ratingName(e.rating);
+        vocalRatingMs_ = t;
+        static const float kStep[] = {-0.12f, -0.06f, 0.0f, 0.05f, 0.08f};
+        vocalRating_ = std::clamp(vocalRating_ + kStep[int(e.rating)], 0.0f, 1.0f);
+        if (e.rating >= VocalPlayer::Rating::Okay) ++vocalPhrasesHit_;
+    }
+    int mult = 1;
+    if (auto it = rules_.rb.streakMultipliers.find("vocals"); it != rules_.rb.streakMultipliers.end())
+        for (const auto& [count, m] : it->second)
+            if (vocal_->streak() >= count) mult = m;
+    player_->setExternal(vocal_->score(), vocal_->streak(), mult, vocal_->overdriveActive(), vocal_->overdrive(), vocalRating_, vocalPhrasesHit_);
 }
 
 // The song clock for this frame: the mixer's, then (after the song is over)
@@ -1823,6 +1941,7 @@ void App::updateSong(float t) {
             else player_->forceFail();
         }
         player_->update(t);
+        if (vocal_) updateVocals(t);
         if (player2_) {
             if (bot2_) bot2_->feed(*player2_, t);
             player2_->update(t);
@@ -1844,6 +1963,7 @@ void App::updateSong(float t) {
         const int ph = size_t(e.gem) < c.gems.size() ? c.gems[size_t(e.gem)].phrase : -1;
         return ph >= 0 && size_t(ph) < c.phrases.size() && c.phrases[size_t(ph)].firstGem == e.gem;
     };
+    if (rbBonus_ && !over) rbBonus_->update(*player_, events, t);
     for (const PlayerEvent& e : events) spStarted_[0] += phraseStart(player_.get(), e);
     for (const PlayerEvent& e : events2) spStarted_[1] += phraseStart(player2_.get(), e);
     for (const PlayerEvent& e : events2) {
@@ -2232,6 +2352,23 @@ int App::gameCounter(int player, const std::string& key) const {
         return 0;
     }
     if (key == "spot_shadows") return venueView_ ? venueView_->spotlights().shadowsTotal() : 0;
+    // Rock Band (wave 02): the vocals, the band on stage, the part played.
+    if (key == "vocal_notes_drawn") return vocalView_.notesDrawn();
+    if (key == "vocal_lyrics_drawn") return vocalView_.lyricsDrawn();
+    if (key == "vocal_score") return vocal_ ? vocal_->score() : 0;
+    if (key == "vocal_phrases_rated") return vocal_ ? vocal_->phrasesRated(VocalPlayer::Rating::Awful) : 0;
+    if (key == "band_members") return band_ ? int(band_->members().size()) : 0;
+    if (key == "band_meshes") return venueView_ ? venueView_->bandView().meshesDrawn() : 0;
+    if (key == "score") return player_ ? player_->score() : 0;
+    if (key == "part_vocals") return parts_[0] == "vocals" ? 1 : 0;
+    if (key == "rb_track_frames") return rbTrackFrames_;
+    if (key == "solos_done") return rbBonus_ ? rbBonus_->solosDone() : 0;
+    if (key == "solo_bonus") return rbBonus_ ? rbBonus_->bonusTotal() : 0;
+    if (key == "fills_shown") return rbBonus_ ? rbBonus_->fillsShown() : 0;
+    if (key == "fills_deployed") return rbBonus_ ? rbBonus_->fillsDeployed() : 0;
+    if (key == "coda_pot") return rbBonus_ ? rbBonus_->codaPot() : 0;
+    if (key == "stars") return player_ ? RbBonus::stars(rules_, player_->score(), player_->baseScore()) : 0;
+    if (key == "part_drum") return parts_[0] == "drum" ? 1 : 0;
     const int p = std::clamp(player, 0, 1);
     if (key == "sp_phrases") return spPhrases_[p];
     if (key == "sp_started") return spStarted_[p];
@@ -2581,9 +2718,69 @@ void App::drawTrack() {
         track_->draw(canvas_.renderer(), *sceneCache_, *song_, *player_, drawT, speed);
         if (track2_ && player2_) track2_->draw(canvas_.renderer(), *sceneCache_, *song_, *player2_, drawT, speed);
         updateTouchLanes();
+    } else if ((vocal_ || rbTrack_) && sceneCache_ && !debugHighway_) {
+        drawRbTracks(lastT_, speed);
+        highway_.drawHud(canvas_, *player_, info_ ? info_->name : "");
     } else {
         highway_.draw(canvas_, *song_, *player_, lastT_, speed, info_ ? info_->name : "", flashes_);
     }
+}
+
+// Rock Band's tracks (wave 02: the same through the menus and --song):
+// the vocal track, or the instrument's (trackpanel's TrackDir guitar /
+// bass / drum).
+void App::drawRbTracks(float t, float speed) {
+    if (vocal_) {
+        VocalTrackView::State vs;
+        vs.t = t + float(videoOffsetMs_);
+        vs.voicePitch = voicePitch_, vs.loudness = voiceLoud_;
+        vs.lastRating = vocalRatingName_, vs.lastRatingMs = vocalRatingMs_;
+        vocalView_.draw(canvas_, song_->vocals, *vocal_, vs);
+        return;
+    }
+    if (!rbTrack_) return;
+    if (rbTrack_->part() != parts_[0] && milos_) try {
+            auto rb = std::make_unique<RbTrackView>();
+            rb->load(*data_, *milos_, parts_[0]);
+            rbTrack_ = std::move(rb);
+        } catch (const std::exception& e) {
+            SDL_Log("RB's %s track: %s", parts_[0].c_str(), e.what());
+        }
+    RbTrackView::PlayerView pv;
+    const Player* p = player_.get();
+    pv.chart = &p->chart();
+    pv.hit = [p](int i) { return p->gemHit(i) || !p->owned(i); };
+    pv.missed = [p, t](int i) { return !p->gemHit(i) && p->chart().gems[size_t(i)].ms < t - 150.0f; };  // [I] the miss window
+    pv.phraseIntact = [p](int ph) { return p->phraseIntact(ph); };
+    pv.overdriveActive = p->starPowerActive();
+    pv.heldGem = p->sustainGem();
+    // The drums' permuted lanes back to the chart's (kick = lane 0).
+    if (parts_[0] == "drum") pv.laneOfBit = {4, 1, 2, 3, 0};
+    rbTrack_->setLefty(input_.lefty(0));
+    rbTrack_->draw(canvas_.renderer(), *sceneCache_, *song_, pv, t + float(videoOffsetMs_), speed);
+    ++rbTrackFrames_;
+    drawRbNotices(t);
+}
+
+// The bonuses' notices over the track [I: RB shows them with the track's
+// own widgets (track/gen/player_feedback.milo), not ported yet].
+void App::drawRbNotices(float t) {
+    if (!rbBonus_) return;
+    canvas_.flush();
+    const float share = rbBonus_->soloShare(t);
+    if (share >= 0) {
+        char b[48];
+        std::snprintf(b, sizeof b, "SOLO! %d%%", int(share * 100));
+        canvas_.textCentered(kScreenW * 0.5f, 200, 3, {120, 200, 255, 255}, b);
+    }
+    if (rbBonus_->fillActive(t)) canvas_.textCentered(kScreenW * 0.5f, 200, 3, {255, 200, 80, 255}, "FILL! HIT THE CRASH");
+    if (rbBonus_->inCoda(t) && !rbBonus_->codaBanked()) {
+        char b[48];
+        std::snprintf(b, sizeof b, "BIG ROCK ENDING %d", rbBonus_->codaPot());
+        canvas_.textCentered(kScreenW * 0.5f, 200, 3, {255, 120, 60, 255}, b);
+    }
+    for (const RbBonus::Notice& n : rbBonus_->notices())
+        if (t - n.ms >= 0 && t - n.ms < 2500) canvas_.textCentered(kScreenW * 0.5f, 250, 3, {255, 235, 120, 255}, n.text);
 }
 
 void App::drawHud() {
@@ -3453,28 +3650,9 @@ void App::drawSong(float t) {
                 frames = 0, last = now, work = 0, particles = 0;
             }
         }
-    } else if (rbTrack_ && sceneCache_) {
+    } else if ((vocal_ || rbTrack_) && sceneCache_) {
         drawWorld();
-        // The instrument's track (trackpanel's TrackDir guitar / bass / drum).
-        if (rbTrack_->part() != parts_[0] && milos_) try {
-                auto rb = std::make_unique<RbTrackView>();
-                rb->load(*data_, *milos_, parts_[0]);
-                rbTrack_ = std::move(rb);
-            } catch (const std::exception& e) {
-                SDL_Log("RB's %s track: %s", parts_[0].c_str(), e.what());
-            }
-        RbTrackView::PlayerView pv;
-        const Player* p = player_.get();
-        pv.chart = &p->chart();
-        pv.hit = [p](int i) { return p->gemHit(i) || !p->owned(i); };
-        pv.missed = [p, t](int i) { return !p->gemHit(i) && p->chart().gems[size_t(i)].ms < t - 150.0f; };  // [I] the miss window
-        pv.phraseIntact = [p](int ph) { return p->phraseIntact(ph); };
-        pv.overdriveActive = p->starPowerActive();
-        pv.heldGem = p->sustainGem();
-        // The drums' permuted lanes back to the chart's (kick = lane 0).
-        if (parts_[0] == "drum") pv.laneOfBit = {4, 1, 2, 3, 0};
-        rbTrack_->setLefty(input_.lefty(0));
-        rbTrack_->draw(canvas_.renderer(), *sceneCache_, *song_, pv, t + float(videoOffsetMs_), speed);
+        drawRbTracks(t, speed);
         highway_.drawHud(canvas_, *player_, title);
     } else {
         highway_.draw(canvas_, *song_, *player_, t, speed, title, flashes_);

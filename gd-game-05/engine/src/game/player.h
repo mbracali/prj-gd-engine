@@ -178,6 +178,13 @@ public:
     // early) [I for GH2].
     bool guitarAudible() const { return guitarAudible_; }
     std::vector<PlayerEvent> takeEvents();
+    // Rock Band's vocals (game/vocal_player.h, wave 02): the singer's
+    // judge scores, and this player (on the empty gem chart) carries its
+    // numbers for the HUD, the band and the results. A rating at 0 fails
+    // the song unless no-fail.
+    void setExternal(int score, int streak, int baseMultiplier, bool overdrive, float meter, float rating, int phrasesHit);
+    // Rock Band's bonuses (game/rb_bonus.h): solo awards, the Big Rock Ending.
+    void addBonus(int points) { score_ += float(points); }
 
 private:
     // ---- watcher

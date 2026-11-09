@@ -302,7 +302,12 @@ void installRbNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Scr
     // panel that asked (wait_for_session_ready) gets session_ready_complete_msg
     // [I: the original's SessionMgr completes asynchronously].
     RbHost* sessionMgr = add(std::make_unique<RbHost>(ui, "session_mgr"));
-    sessionMgr->on("add_local_player", [&ui](std::vector<Value>&) {
+    sessionMgr->on("add_local_player", [&ui](std::vector<Value>& a) {
+        // add_local_player <player> <controller type> (main.dta) [C data].
+        if (a.size() > 1) {
+            const int n = a[0].integerValue();
+            if (n >= 0 && size_t(n) < ui.session().players.size()) ui.session().players[size_t(n)].controllerType = a[1].integerValue();
+        }
         if (ScriptObject* w = ui.sessionWaiter()) {
             ui.setSessionWaiter(nullptr);
             ui.interp().send(w, "session_ready_complete_msg", {});
@@ -328,6 +333,12 @@ void installRbNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Scr
     songMgr->on("song_artist", [&ui](std::vector<Value>& a) {
         const int i = songInfoIndex(ui, strArg(a, 0));
         return Value::string(i >= 0 ? ui.host().songs()[size_t(i)].artist : std::string());
+    });
+    // song_mgr vocal_gender <song>: songs.dtb's (vocal_gender male|female) [C data].
+    songMgr->on("vocal_gender", [&ui](std::vector<Value>& a) {
+        const int i = songInfoIndex(ui, strArg(a, 0));
+        const std::string g = i >= 0 ? ui.host().songs()[size_t(i)].vocalGender : std::string();
+        return Value::symbol(g.empty() ? "male" : g);
     });
     songMgr->on("by_line", [&ui](std::vector<Value>& a) {
         const int i = songInfoIndex(ui, strArg(a, 0));

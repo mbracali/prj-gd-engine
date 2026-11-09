@@ -58,14 +58,16 @@ public:
             static const char* const kTracks[] = {"drum", "bass", "guitar", "vocals", "none"};
             return r = Value::symbol(kTracks[std::clamp(p.trackType, 0, 4)]), true;
         }
-        if (msg == "get_controller_sym") return r = Value::symbol(p.trackType == 0 ? "drum" : p.trackType == 3 ? "vocals" : "guitar"), true;
-        if (msg == "get_controller_type") return r = Value::integer(p.trackType == 0 ? 2 : p.trackType == 3 ? 3 : 1), true;
+        // The controller: kControllerDrum 0, kControllerGuitar 1, kControllerVocals 2 [C data: macros.dta].
+        if (msg == "get_controller_sym") return r = Value::symbol(p.controllerType == 0 ? "drum" : p.controllerType == 2 ? "vocals" : "guitar"), true;
+        if (msg == "get_controller_type") return r = Value::integer(p.controllerType), true;
+        if (msg == "set_controller_type") return p.controllerType = intArg(args, 0, 1), true;
         if (msg == "get_difficulty_sym") return r = Value::symbol(difficultySym(p.difficulty)), true;
         if (msg == "get_char") {
             // A character object; until the player has one, the stand-in of
             // the player's controller (ui/rb_natives.cpp, M6) [I].
             ScriptObject* c = in.findObject(p.character);
-            if (!c) c = in.findObject(std::string("prefab_") + (p.trackType == 0 ? "drum" : p.trackType == 3 ? "vocals" : "guitar"));
+            if (!c) c = in.findObject(std::string("prefab_") + (p.controllerType == 0 ? "drum" : p.controllerType == 2 ? "vocals" : "guitar"));
             return r = c ? Value::obj(c) : Value::integer(0), true;
         }
         if (msg == "set_char") return p.character = args.empty() ? p.character : nameOf(args[0]), true;
@@ -800,14 +802,16 @@ private:
         if (msg == "stats_finalized") return r = Value::integer(1), true;
         if (msg == "notes_hit") return r = Value::integer(p ? p->notesHit() : 0), true;
         if (msg == "notes_hit_fraction") return r = Value::real(p && gems > 0 ? float(p->notesHit()) / float(gems) : 0.0f), true;
-        if (msg == "failed_deploy" || msg == "saved_count" || msg == "fill_hit_count" || msg == "strummed_down" || msg == "strummed_up" ||
+        if (msg == "fill_hit_count") return r = Value::integer(ui_.host().gameCounter(index, "fills_deployed")), true;
+        if (msg == "failed_deploy" || msg == "saved_count" || msg == "strummed_down" || msg == "strummed_up" ||
             msg == "deploy_count" || msg == "solo_percentage")
             return r = Value::integer(0), true;
         if (msg == "score") return r = Value::integer(p ? p->score() : 0), true;
         if (msg == "percent_hit") return r = Value::integer(p && gems > 0 ? p->notesHit() * 100 / gems : 0), true;
-        if (msg == "num_stars") return r = Value::integer(p ? p->stars() : 0), true;
+        // Rock Band's stars (game/rb_bonus.h: star_thresholds.dtb).
+        if (msg == "num_stars") return r = Value::integer(p ? ui_.host().gameCounter(index, "stars") : 0), true;
         if (msg == "star_rating") {
-            const int n = std::clamp(p ? p->stars() : 0, 0, 5);
+            const int n = std::clamp(p ? ui_.host().gameCounter(index, "stars") : 0, 0, 5);
             return r = Value::string(std::string(size_t(n), '*') + std::string(size_t(5 - n), '_')), true;
         }
         if (msg == "longest_streak") return r = Value::integer(p ? p->longestStreak() : 0), true;
@@ -1002,8 +1006,11 @@ public:
         if (msg == "is_instrument_connected") return r = Value::integer(!args.empty() && args[0].str() == "guitar" ? 1 : 0), true;
         if (msg == "get_player_num_from_slot_num") return r = Value::integer(intArg(args, 0)), true;
         if (msg == "is_player_local") return r = Value::integer(intArg(args, 0) == 0 ? 1 : 0), true;
-        if (msg == "get_instrument_from_controller") return r = Value::symbol("guitar"), true;
-        if (msg == "get_controller_type_from_controller") return r = Value::integer(1), true;
+        if (msg == "get_instrument_from_controller") {
+            const int ct = ui_.host().controllerType(intArg(args, 0));
+            return r = Value::symbol(ct == 0 ? "drum" : ct == 2 ? "vocals" : "guitar"), true;
+        }
+        if (msg == "get_controller_type_from_controller") return r = Value::integer(ui_.host().controllerType(intArg(args, 0))), true;
         if (msg == "auto_assign_missing_slots" || msg == "debug_get_force_controller" || msg == "foreach_player_config") return true;
         // A handler of the mode's table (practice's full_speed_block,
         // pre_processed_audio: GameConfig evaluates the mode's entry) [C data: modes.dta].

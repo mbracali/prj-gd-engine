@@ -134,10 +134,49 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         press(kX);  // the focused difficulty: ready
         at("game_screen", 60000);  // through loading_screen and the loading tips
     };
-    if (scenario == "quickplay") {
+    if (scenario == "quickplay_vocals" || scenario == "quickplay_drums") {
+        // Rock Band's instrument per player (wave 02): the controller type
+        // decides the part (seldiff.dta: a drum or a vocals controller
+        // skips the guitar / bass choice). The singer autoplays (the walk's
+        // song keys sing the target) or, with GD05_VOCALS_FILE, sings a file.
+        const bool vocals = scenario == "quickplay_vocals";
+        SDL_setenv_unsafe("GD05_INSTRUMENT", vocals ? "vocals" : "drum", 1);
+        endMs_ = vocals ? 95000 : 30000;
+        wait(300);
+        press(kX);
+        at("splash_screen", 30000);
+        press(kX);
+        at("main_screen");
+        press(kX);  // SOLO
+        at("main_solomode_screen");
+        press(kX);  // QUICKPLAY
+        at("qp_selsong_screen");
+        wait(500);
+        press(kX);  // the first entry (random_song)
+        at("qp_seldiff_solo_screen");
+        wait(1500);
+        press(kX);  // the focused difficulty: ready
+        at("game_screen", 60000);
+        wait(3000);
+        check(vocals ? "counter:part_vocals:1" : "counter:part_drum:1");
+        if (!vocals) check("counter:rb_track_frames:30");  // RB's own track through the menus, not the debug highway
+        check("counter:band_members:4");
+        check("counter:band_meshes:20");
+        if (vocals) {
+            wait(85000);  // into the song's first phrases
+            check("counter:vocal_notes_drawn:1");
+            check("counter:vocal_phrases_rated:1");
+            check("counter:vocal_score:1");
+        }
+        at("endgame_waiting_screen", 150000);
+        at("qp_endgame_screen", 20000);
+        wait(1000);
+    } else if (scenario == "quickplay") {
         endMs_ = 30000;  // the song ends early (the walk's end time)
         rbQuickplay();
         wait(3000);
+        check("counter:rb_track_frames:30");
+        check("counter:band_members:4");
         at("endgame_waiting_screen", 90000);  // modes.dta win_screen (the default mode)
         at("qp_endgame_screen", 20000);       // the mode's endgame_screen once the stats are in
         wait(1000);
@@ -1751,6 +1790,17 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
     if (s.screen == "dev_cheat_bound") {
         std::printf("  dev cheats: after the bound key '1', on %s\n", ui.currentScreen().c_str());
         if (ui.currentScreen() != "game_screen") return fail("a key bound to a control ran a developer cheat");
+        return pass();
+    }
+    // counter:<key>:<min>: the game's counter (App::gameCounter) reaches min.
+    if (s.screen.rfind("counter:", 0) == 0) {
+        const std::string rest = s.screen.substr(8);
+        const size_t c = rest.rfind(':');
+        const std::string key = rest.substr(0, c);
+        const int want = c == std::string::npos ? 1 : std::atoi(rest.c_str() + c + 1);
+        const int got = ui.host().gameCounter(0, key);
+        std::printf("  counter %s: %d (want at least %d)\n", key.c_str(), got, want);
+        if (got < want) return fail(key + " is " + std::to_string(got));
         return pass();
     }
     if (s.screen == "qp_footer") {

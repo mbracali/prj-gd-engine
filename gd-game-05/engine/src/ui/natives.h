@@ -72,6 +72,7 @@ struct Session {
         std::string guitar, skin;
         int padnum = 0;
         int trackType = 2;  // kTrackGuitar (0x822BD6E8)
+        int controllerType = 1;  // RB kControllerGuitar (session_mgr add_local_player, set_controller_type)
         // gamecfg set_track: the index of the instrument played in the
         // song's (tracks ...) (song_provider get_instrument), 0 the guitar.
         int track = 0;

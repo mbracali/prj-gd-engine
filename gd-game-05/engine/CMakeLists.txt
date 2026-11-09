@@ -62,6 +62,9 @@ target_sources(gd05 PRIVATE
   src/game/camera_director.cpp
   src/game/band.cpp
   src/game/rb_band.cpp
+  src/game/rb_bonus.cpp
+  src/audio/vocal_input.cpp
+  src/render/vocal_track_view.cpp
   src/game/band_performer.cpp
   src/game/chart.cpp
   src/game/drum_player.cpp

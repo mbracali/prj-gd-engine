@@ -59,6 +59,13 @@ void RbTrackView::load(const GameData& data, scene::MiloLibrary& library, const 
     // The slots: five for the guitar and the drums (the kick's slot 0 is the
     // whole track's middle) [C data: TrackDir slots].
     for (size_t i = 0; i < slotX_.size() && i < td.slots.size(); ++i) slotX_[i] = td.slots[i][0];
+    // The drums' four pads across the track (slots 1..4), the kick (slot 0)
+    // its middle [I: the drum TrackDir shares the guitar's five slots; the
+    // pads' spacing is the smasher plate's pads, not read].
+    if (drums_ && slotX_[4] > slotX_[1]) {
+        const float lo = slotX_[0], hi = slotX_[4], step = (hi - lo) / 4.0f;
+        slotX_ = {0.5f * (lo + hi), lo + step * 0.5f, lo + step * 1.5f, lo + step * 2.5f, lo + step * 3.5f};
+    }
 
     // config/track_graphics.dtb (gem (gems (guitar GUITAR_SET) (drum DRUM_SET)))
     // [C data]: per slot the widget of each kind.

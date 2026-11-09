@@ -79,6 +79,43 @@ void VocalPlayer::sing(float t, float midiPitch, float loudness) {
     }
 }
 
+int VocalPlayer::phraseAt(float t) const {
+    for (size_t i = 0; i < track_.phrases.size(); ++i) {
+        const VocalPhrase& p = track_.phrases[i];
+        if (t >= p.startMs && t <= p.endMs) return int(i);
+        if (p.startMs > t) break;
+    }
+    return -1;
+}
+
+float VocalPlayer::sungShare(int phrase) const {
+    if (phrase < 0 || size_t(phrase) >= track_.phrases.size()) return 0;
+    const VocalPhrase& ph = track_.phrases[size_t(phrase)];
+    float total = 0, sung = 0;
+    for (int k = ph.firstNote; k >= 0 && k <= ph.lastNote; ++k) {
+        total += std::max(track_.notes[size_t(k)].durationMs, 1.0f);
+        sung += sungMs_[size_t(k)];
+    }
+    return total > 0 ? std::min(1.0f, sung / total) : 0.0f;
+}
+
+bool VocalPlayer::deployOverdrive(float t, float drainMs) {
+    if (odActive_ || meter_ < 0.5f || phraseAt(t) >= 0) return false;
+    odActive_ = true;
+    odDrainPerMs_ = drainMs > 0 ? 1.0f / drainMs : 1.0f / 16000.0f;
+    return true;
+}
+
+const char* VocalPlayer::ratingName(Rating r) {
+    switch (r) {
+    case Rating::Awful: return "AWFUL";
+    case Rating::Meh: return "MESSY";
+    case Rating::Okay: return "OK";
+    case Rating::Great: return "STRONG";
+    default: return "AWESOME";
+    }
+}
+
 void VocalPlayer::percussion(float t) {
     for (const Percussion& p : track_.percussion) {
         if (!p.shown || std::fabs(p.ms - t) > slopMs_) continue;
@@ -115,7 +152,7 @@ void VocalPlayer::finishPhrase(int phrase) {
     if (auto it = rules_.rb.streakMultipliers.find("vocals"); it != rules_.rb.streakMultipliers.end())
         for (const auto& [count, m] : it->second)
             if (streak_ >= count) mult = m;
-    score_ += int(std::lround(vocal("phrase_value", 400) * f)) * mult;
+    score_ += int(std::lround(vocal("phrase_value", 400) * f)) * mult * (odActive_ ? 2 : 1);
     if (ph.overdrive && r >= Rating::Okay) {
         meter_ = std::min(1.0f, meter_ + rules_.solo.starPower.phrase);
         events_.push_back({Event::Kind::PhraseCaptured, phrase, r, f});
@@ -141,6 +178,13 @@ void VocalPlayer::update(float t) {
         return end + slopMs_;
     };
     while (nextPhrase_ < track_.phrases.size() && doneAt(track_.phrases[nextPhrase_]) < t) finishPhrase(int(nextPhrase_++));
+    // Overdrive drains while active.
+    const float dt = odLastT_ < -1e8f ? 0.0f : std::max(0.0f, t - odLastT_);
+    odLastT_ = t;
+    if (odActive_) {
+        meter_ -= dt * odDrainPerMs_;
+        if (meter_ <= 0) meter_ = 0, odActive_ = false;
+    }
 }
 
 std::vector<VocalPlayer::Event> VocalPlayer::takeEvents() {

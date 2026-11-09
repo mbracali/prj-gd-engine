@@ -227,4 +227,9 @@ public:
     // The backdrop's band is posed and its singer framed on the right (tests).
     virtual bool menuBackdropFramed() { return false; }
     virtual void quit() = 0;
+    // Rock Band: the controller type of local player `pad`'s instrument
+    // (kControllerDrum 0, kControllerGuitar 1, kControllerVocals 2,
+    // kControllerNone 3, config/macros.dta): the drum kit and the
+    // microphone as devices, or the player's choice in GAMEPADS.
+    virtual int controllerType(int /*pad*/) { return 1; }
 };

@@ -21,6 +21,7 @@
 #include "game/autoplay.h"
 #include "game/drum_player.h"
 #include "game/vocal_player.h"
+#include "game/rb_bonus.h"
 #include "audio/pitch_detector.h"
 #include "game/band_performer.h"
 #include "game/key_script.h"
@@ -599,7 +600,7 @@ int runSelfTest(const std::string& dataPath) {
         std::printf("%zu songs; slop %.0f ms, head %d, tail %d, hopo_threshold %d ticks\n", songs.size(), rules.slopMs,
                     rules.headPoints, rules.tailPoints, rules.hopoThresholdTicks);
 
-        int audioFailures = 0, chartFailures = 0, hopos = 0, strumHopos = 0, ownThreshold = 0, drumNotes = 0, vocalPhrases = 0;
+        int audioFailures = 0, chartFailures = 0, hopos = 0, strumHopos = 0, ownThreshold = 0, drumNotes = 0, vocalPhrases = 0, rbSolos = 0, rbPerfectSolos = 0, rbEndings = 0;
         PartTotals totals[kPartCount];
         for (const SongInfo& info : songs) {
             ownThreshold += info.audio.hopoThresholdTicks > 0;
@@ -673,12 +674,18 @@ int runSelfTest(const std::string& dataPath) {
                     Player s(song, pt, diff, partRules, ControllerMode::Guitar, false);
                     Player p(song, pt, diff, partRules, ControllerMode::Guitar, false);
                     Autoplay strummer(s.chart(), -1, false), bot(p.chart());
+                    RbBonus bonus(song, pt, diff, partRules);  // solos and the Big Rock Ending (wave 02)
                     for (float t = -1000; t < song.endMs + 5000; t += 4) {
                         strummer.feed(s, t), bot.feed(p, t);
                         s.update(t), p.update(t);
-                        for (const PlayerEvent& e : p.takeEvents()) hopos += e.kind == PlayerEvent::Kind::Hopo;
+                        const std::vector<PlayerEvent> ev = p.takeEvents();
+                        for (const PlayerEvent& e : ev) hopos += e.kind == PlayerEvent::Kind::Hopo;
+                        bonus.update(p, ev, t);
                         for (const PlayerEvent& e : s.takeEvents()) strumHopos += e.kind == PlayerEvent::Kind::Hopo;
                     }
+                    rbSolos += int(p.chart().solos.size());
+                    for (const RbBonus::Notice& n : bonus.notices()) rbPerfectSolos += n.text.rfind("100% PERFECT SOLO", 0) == 0;
+                    rbEndings += bonus.codaBanked();
                     const int total = static_cast<int>(p.chart().gems.size());
                     const bool ok = p.notesHit() == total && !p.failed() && s.notesHit() == total && !s.failed();
                     PartTotals& pt2 = totals[part];
@@ -707,6 +714,10 @@ int runSelfTest(const std::string& dataPath) {
                         part == int(Part::Vocals) ? "phrases rated Awesome" : part == int(Part::Drums) ? "drum notes (with and without kick)" : "gems",
                         totals[part].failed);
         std::printf("drums: %d notes hit; vocals: %d phrases rated Awesome\n", drumNotes, vocalPhrases);
+        // Rock Band's bonuses on the autoplayed guitar and bass charts: every
+        // solo a perfect solo, every Big Rock Ending banked by its final chord.
+        std::printf("solos: %d of %d perfect; Big Rock Endings banked: %d\n", rbPerfectSolos, rbSolos, rbEndings);
+        if (rbPerfectSolos != rbSolos) ++chartFailures;
         // The microphone path, headless: a synthesised voice (a sawtooth at
         // the target pitch, an octave below for the low notes) through the
         // pitch detector into the vocal judge, every song's Expert vocals;

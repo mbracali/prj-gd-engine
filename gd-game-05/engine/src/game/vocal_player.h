@@ -52,6 +52,18 @@ public:
     float targetPitch(float t) const;
     // Whether a note (pitched or a talky) is due at t.
     bool noteAt(float t) const;
+    // The phrase whose span holds t (-1 between phrases) and the share of
+    // its notes' time sung so far (the phrase meter).
+    int phraseAt(float t) const;
+    float sungShare(int phrase) const;
+    // Overdrive (wave 02): deployed in a gap between phrases with the
+    // meter at least half full; it drains over `drainMs` and doubles the
+    // phrases' points while active [I: RB's vocal deploy (a sound in the
+    // free section) is read as any deploy press here].
+    bool deployOverdrive(float t, float drainMs);
+    bool overdriveActive() const { return odActive_; }
+    // A Rating's name as RB's HUD shows it (AWFUL ... AWESOME).
+    static const char* ratingName(Rating r);
 
 private:
     float vocal(const char* key, float fallback) const;
@@ -69,5 +81,7 @@ private:
     float lastT_ = -1e9f;
     int score_ = 0, streak_ = 0;
     float meter_ = 0;
+    bool odActive_ = false;
+    float odDrainPerMs_ = 0, odLastT_ = -1e9f;
     std::vector<Event> events_;
 };

@@ -649,6 +649,19 @@ PerformerState Player::state() const {
     return s;
 }
 
+void Player::setExternal(int score, int streak, int baseMultiplier, bool overdrive, float meter, float rating, int phrasesHit) {
+    score_ = float(score);
+    streak_ = streak;
+    longestStreak_ = std::max(longestStreak_, streak);
+    baseMultiplier_ = std::max(1, baseMultiplier);
+    spActive_ = overdrive;
+    meter_->value = std::clamp(meter, 0.0f, 1.0f);
+    spReady_ = meter_->value >= 0.5f;
+    rating_ = std::clamp(rating, 0.0f, 1.0f);
+    notesHit_ = phrasesHit;
+    if (rating_ <= 0 && !noFail_ && !failed_) forceFail();
+}
+
 void Player::forceFail() {
     if (failed_) return;
     failed_ = true;
