@@ -48,6 +48,15 @@ const scene::Font* ScreenText::font(const std::string& name) {
     } catch (const std::exception&) {
         f = nullptr;
     }
+    // Rock Band: its fonts are in track/track_shared.milo [C data]; GH2's
+    // menu font (the port's screens' helveticablack) is RB's Chalet there [I].
+    if (!f) try {
+            const std::string rbName = base == "helveticablack" ? "Chalet-NewYorkNineteenEighty" : base;
+            if (data_.exists("track/gen/track_shared.milo_xbox"))
+                f = lib_.load("track/gen/track_shared.milo_xbox").find<scene::Font>(rbName + ".font");
+        } catch (const std::exception&) {
+            f = nullptr;
+        }
     fonts_[base] = f;
     return f;
 }

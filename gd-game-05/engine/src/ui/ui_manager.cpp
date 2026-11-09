@@ -300,6 +300,28 @@ void UiManager::portPanelLoaded(PanelObj* p) {
     if (p->name() != "options_panel" || !p->view || !p->view->milo()) return;
     scene::Directory& root = p->view->milo()->root();
     if (root.get("port_enhanced.btn")) return;
+    // Rock Band's options (ui/options.dta: audio, gameplay, calibrate_av,
+    // characterdata) [C data]: Enhanced Options goes under the last row as a
+    // copy of it, one row's gap further, the navigation wrapped through it [I].
+    if (root.get("characterdata.btn")) {
+        // The four rows sorted top to bottom (z, the milo's up); the new one a
+        // row's gap under the lowest.
+        std::vector<scene::BandButton*> rows;
+        for (const char* n : {"audio.btn", "gameplay.btn", "characterdata.btn", "calibrate_av.btn"})
+            if (auto* o = root.get(n) ? root.get(n)->as<scene::BandButton>() : nullptr) rows.push_back(o);
+        std::sort(rows.begin(), rows.end(), [](const scene::BandButton* x, const scene::BandButton* y) { return x->trans.local.pos[2] > y->trans.local.pos[2]; });
+        scene::BandButton* last = rows.back();
+        scene::BandButton* prev = rows.size() > 1 ? rows[rows.size() - 2] : nullptr;
+        auto b = std::make_unique<scene::BandButton>(*last);
+        b->name = "port_enhanced.btn";
+        b->localize = false, b->text = "ENHANCED OPTIONS", b->textToken.clear();
+        for (int k = 0; k < 3; ++k)
+            b->trans.local.pos[size_t(k)] += prev ? last->trans.local.pos[size_t(k)] - prev->trans.local.pos[size_t(k)] : 0.0f;
+        b->navDown = last->navDown;
+        last->navDown = b->name;
+        root.add(std::move(b));
+        return;
+    }
     auto button = [&](const char* name) { return root.get(name) ? root.get(name)->as<scene::BandButton>() : nullptr; };
     scene::BandButton* video = button("video_settings.btn");
     scene::BandButton* audio = button("op_audio.btn");

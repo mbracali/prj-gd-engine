@@ -638,10 +638,6 @@ LightEnv SceneCache::lightEnv(const scene::Environ& e, const ScenePose* pose) {
     for (const std::string& name : e.lights) {
         auto* l = e.dir ? e.dir->resolve<scene::Light>(name) : nullptr;
         if (!l || env.lightCount >= 7) continue;
-        // RB's light types past directional (2 and up: the spot kinds and
-        // the shadow reference) light nothing here; the Spotlights draw
-        // their own [I: RB's type names are not read].
-        if (l->bigEndian && l->type >= 2) continue;
         if (pose && !pose->showing(l)) continue;
         const scene::Xfm w = pose ? pose->world(l) : l->trans.world;
         Light& g = env.lights[env.lightCount++];
@@ -674,7 +670,7 @@ LightEnv SceneCache::lightEnv(const scene::Environ& e, const ScenePose* pose) {
         int k = 0;
         for (const std::string& name : e.lights) {
             auto* l = e.dir ? e.dir->resolve<scene::Light>(name) : nullptr;
-            if (!l || (pose && !pose->showing(l)) || l->type >= 2) continue;
+            if (!l || (pose && !pose->showing(l))) continue;
             if (k >= env.lightCount) break;
             env.lights[k++].directional = l->type == 1;
         }
