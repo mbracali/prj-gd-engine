@@ -138,7 +138,8 @@ public:
     int score() const { return int(score_); }
     int streak() const { return streak_; }
     int longestStreak() const { return longestStreak_; }
-    int multiplier() const { return baseMultiplier_ * spMultiplier(); }
+    int multiplier() const { return baseMultiplier_ * bandOrSpMultiplier(); }
+    void setBandBonus(int m) { bandBonus_ = m; }
     // The streak multiplier without Star Power's doubling (1..4).
     int baseMultiplier() const { return baseMultiplier_; }
     int notesHit() const { return notesHit_; }
@@ -209,6 +210,7 @@ private:
     void playerPass(float t, int gem);
     void penalise(float t, int gem);
     void addScore(int points);
+    void addScoreF(float points);
     void endStreak();
     void setStreak(int streak);
     void accrueSustain(float t);
@@ -224,6 +226,16 @@ private:
 
     // ---- star power
     int spMultiplier() const { return spActive_ ? sp_.multiplier : 1; }
+    // Rock Band: the band's bonus multiplier (bonuses multiplier[members
+    // deploying], RB 0x8243F810, used for every member at RB 0x824415A8)
+    // [C]; -1: this player's own (solo: 2 while deployed, the same value).
+    int bandOrSpMultiplier() const {
+        if (bandBonus_ > 0) return bandBonus_;
+        if (!rules_.rb.bandMultiplier.empty()) return rules_.rb.bandMultiplier[std::min<size_t>(spActive_ ? 1 : 0, rules_.rb.bandMultiplier.size() - 1)];
+        return spMultiplier();
+    }
+    int bandBonus_ = -1;
+    bool hopoChain_ = false;
     void spStart(bool on);
     void spAdd(float amount);
     void spGemHit(int gem);
@@ -293,6 +305,7 @@ private:
         int gem = -1;
         int max = 0;
         int earned = 0;
+        float earnedF = 0;  // RB: the unrounded share already added
     } tail_;
     bool guitarAudible_ = true;
     float bendSpeed_ = 1, bendBase_ = -1, sustainHitMs_ = 0;  // +0x78 (the bar's rest), +0x74

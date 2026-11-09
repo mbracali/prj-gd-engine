@@ -138,8 +138,11 @@ bool Player::inWindow(int gem, float t) const {
 }
 
 // 0x8234efc8 [C]: HOPO-able, k >= 1, gem k-1 hit and the last hit gem.
+// Rock Band adds the watcher's chain byte (+0x34): set by every hit
+// (RB 0x824B4BF8), cleared by every reported miss / overstrum (RB
+// 0x824B4CD8) and pass (RB 0x824B4E10); RB's check is RB 0x824C1980 [C].
 bool Player::hopoEligible(int k) const {
-    return k >= 1 && chart_.gems[size_t(k)].hopo && hit_[size_t(k) - 1] && lastHit_ == k - 1;
+    return k >= 1 && chart_.gems[size_t(k)].hopo && hit_[size_t(k) - 1] && lastHit_ == k - 1 && hopoChain_;
 }
 
 // GuitarWatcher::Swing 0x8234eb60 [C, from disassembly].
@@ -309,6 +312,7 @@ void Player::watcherHit(float t, int slot, int gem, bool hopo) {
     sustainGem_ = -1;
     hit_[size_t(gem)] = 1;
     lastHit_ = gem;
+    hopoChain_ = true;  // RB 0x824B4BF8 [C]
     // vtable +0x6c (0x8234eb28) at the end of 0x8234fe20 [C]: a HOPO hit
     // sets the HOPO-hit gem (+0x88); every hit sets +0x94 (the time
     // NonStrumSwing compares) and clears the pending strum.
@@ -339,6 +343,7 @@ void Player::watcherMiss(float t, int slot, int gem) {
         if (t >= a && t <= b) return;
     missSlot_ = slot;
     endSustain(t, false);
+    hopoChain_ = false;  // RB 0x824B4CD8 clears it on each reported miss [C]
     if (!(lastOverstrumMs_ + rules_.overstrumGapMs < t)) return;
     lastOverstrumMs_ = t;
     const int n = static_cast<int>(chart_.gems.size());
@@ -403,6 +408,7 @@ void Player::sweep(float t) {
         sweep_ = k;
         if (hit_[size_t(k)] || !owned(k)) continue;  // another player's gem passes without a penalty [C]
         if (k < firstPlayable_) continue;            // "skipped" (before the practice start) [C]
+        hopoChain_ = false;  // RB 0x824B4E10 [C]
         playerPass(t, k);
     }
 }
@@ -467,9 +473,15 @@ bool Player::inPractice(int gem) const {
 // normalisation factor (0x822bb320: 1 with one track) × base multiplier ×
 // Star Power multiplier (0x822c6c20). A co-op player (0x822DEB30) also adds
 // the normalised points to the band, which applies its own multiplier.
+void Player::addScoreF(float points) {
+    const float p = points * norm_;
+    score_ += float(baseMultiplier_ * bandOrSpMultiplier()) * p;
+    if (band_) band_->addScore(p);
+}
+
 void Player::addScore(int points) {
     const float p = float(points) * norm_;
-    score_ += float(baseMultiplier_ * spMultiplier()) * p;
+    score_ += float(baseMultiplier_ * bandOrSpMultiplier()) * p;
     if (band_) band_->addScore(p);
 }
 
@@ -569,9 +581,12 @@ void Player::accrueSustain(float t) {
     if (tail_.gem < 0) return;
     const Gem& g = chart_.gems[size_t(tail_.gem)];
     const float frac = g.durationMs > 0 ? std::clamp((t - g.ms) / g.durationMs, 0.0f, 1.0f) : 1.0f;
-    const int earned = roundHalfAway(double(frac) * tail_.max);
-    if (earned > tail_.earned) addScore(earned - tail_.earned), tail_.earned = earned;
-    if (tail_.earned >= tail_.max) finishSustain(t);
+    // Rock Band adds the unrounded max x fraction - earned each poll, never
+    // negative (RB 0x82467928, 0x82461498; the score is a float, 0x82450E78) [C].
+    const float earnedF = frac * float(tail_.max);
+    if (earnedF > tail_.earnedF) addScoreF(earnedF - tail_.earnedF), tail_.earnedF = earnedF;
+    tail_.earned = roundHalfAway(double(tail_.earnedF));
+    if (frac >= 1.0f) finishSustain(t);
 }
 
 // Sustain end 0x822c86f8 [C]: rock meter target (earned + 50) / (max + 50).
@@ -584,8 +599,9 @@ void Player::finishSustain(float t) {
     const Gem& g = chart_.gems[size_t(tail_.gem)];
     const float frac = g.durationMs > 0 ? std::clamp((t - g.ms) / g.durationMs, 0.0f, 1.0f) : 1.0f;
     if (tail_.max > 0 && float(tail_.earned) / float(tail_.max) < 0.1f) bigNoteCheck(tail_.gem);
-    const int earned = roundHalfAway(double(frac) * tail_.max);
-    if (earned > tail_.earned) addScore(earned - tail_.earned), tail_.earned = earned;
+    const float earnedF = frac * float(tail_.max);
+    if (earnedF > tail_.earnedF) addScoreF(earnedF - tail_.earnedF), tail_.earnedF = earnedF;
+    tail_.earned = roundHalfAway(double(tail_.earnedF));
     const Tail done = tail_;
     tail_ = {};
     const float head = float(rules_.headPoints);
@@ -692,7 +708,9 @@ void Player::spGemHit(int gem) {
     const StarPhrase& ph = chart_.phrases[size_t(p)];
     if (gem == ph.firstGem) spState_ = 2;
     if (spState_ == 2 && gem == ph.lastGem) {
-        spAdd(sp_.phrase);
+        // RB: a completed phrase adds band_energy spotlight_phrase (0.251;
+        // RB 0x82464A98 -> 0x82442B10 -> 0x82442A70) [C].
+        spAdd(rules_.rb.spotlightPhrase > 0 ? rules_.rb.spotlightPhrase : sp_.phrase);
         spState_ = 3;
         emit(PlayerEvent::Kind::PhraseCaptured, gem);
     }
@@ -755,7 +773,11 @@ void Player::spPoll(float t) {
         spLastBeat_ = beat, spLastMeasure_ = measure;
     }
     if (spActive_) {
-        spAdd(-static_cast<float>(sp_.deployRate * std::max(0.0, measure - spLastMeasure_)));
+        // Rock Band drains 1 / band_energy deploy_beats a beat (RB 0x82445188
+        // +0xE0, 0x82442C48 -> 0x82442260); star_power deploy_rate has no
+        // reader in RB's XEX [C]. GH2's per-measure rate otherwise.
+        if (rules_.rb.deployBeats > 0) spAdd(-static_cast<float>(std::max(0.0, beat - spLastBeat_) / double(rules_.rb.deployBeats)));
+        else spAdd(-static_cast<float>(sp_.deployRate * std::max(0.0, measure - spLastMeasure_)));
         if (meter_->value == 0) {
             spStart(false);
             spReady_ = false;

@@ -22,6 +22,7 @@ const PcString kPcStrings[] = {
     // LIVE, a console or a storage device, for PC (English: the disc's only
     // language). The Rock Central upload errors are never shown in the port
     // (the uploads are answered at once, DECISIONS D8).
+    {"error_cheating", {"Sorry, you have a cheat activated, so your scores will not be saved."}},
     {"error_ethernet_unplugged", {"You have lost the network connection. Online features are not available in GD-Engine."}},
     {"error_lost_connection", {"You have lost the network connection. Online features are not available in GD-Engine."}},
     {"game_online_tour", {"Online Tour"}},

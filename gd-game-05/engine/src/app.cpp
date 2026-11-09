@@ -1925,6 +1925,16 @@ void App::updateSeats(float t, bool over, const std::vector<PlayerEvent>& events
         }
     }
     if (over) return;
+    // The band's multiplier: bonuses multiplier[members deploying] for every
+    // member (RB 0x8243F810, 0x824415A8) [C].
+    {
+        int deploying = (vocal_ ? vocal_->overdriveActive() : player_->starPowerActive()) ? 1 : 0;
+        for (const RbSeat& st : seats_) deploying += st.vocal ? st.vocal->overdriveActive() : st.player->starPowerActive();
+        const auto& bm = rules_.rb.bandMultiplier;
+        const int bonus = bm.empty() ? 1 << std::min(deploying, 3) : bm[std::min<size_t>(size_t(deploying), bm.size() - 1)];
+        player_->setBandBonus(bonus);
+        for (RbSeat& st : seats_) st.player->setBandBonus(bonus);
+    }
     // Failing out and saving [I: RB's band crowd rules (crowd_loss_per_sec,
     // save_level, multiplayer_lose_level) as read in scoring.dtb, their use
     // inferred]: a player whose meter empties is out; any other player's

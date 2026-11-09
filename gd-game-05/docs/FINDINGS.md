@@ -88,3 +88,47 @@ are always Rock Band's.
 - Lights: an RB Environ mixes point lights (range, falloff_start) and
   directional ones; colours go past 1.0 (3.2, 8.0, 6.7). The port lights
   each by its kind, falloff from falloff_start to range [I: RB's shader].
+
+## The gem judge in RB's XEX (wave 02, read from the Ghidra exports)
+
+Applied in the code (each line names RB's address):
+- Watchers (factory RB 0x824BD060): "guitar" -> GuitarTrackWatcherImpl (0x824C1598);
+  "joypad" -> JoypadTrackWatcherImpl (0x824C0DE0), or DrumTrackWatcherImpl
+  (0x824C1250) when the track is a drum track [I: the flag's source, 0x824A62A8].
+  Base TrackWatcherImpl 0x824B6120 reads (watcher (slop 100)) for every difficulty.
+- Hit window |now + offset - gem| <= slop (0x824B4A30) [C, matches]; late
+  deadline slop - offset, +60 ms for a HOPO-eligible gem (0x824C2030);
+  hammer-on window -slop .. slop + 60 (0x824C2078); the chord / wrong-strum
+  grace 60 ms (Swing 0x824C1A88); a strum <= 52 ms after the last dropped
+  (0x824AED60) [C, matches GH2's numbers].
+- HOPO eligibility (0x824C1980) needs the watcher's chain byte, set by a hit
+  (0x824B4BF8), cleared by any reported miss / overstrum (0x824B4CD8) or
+  pass (0x824B4E10) [C, now in player.cpp].
+- Sustains: tail x duration_ticks / 480 per fret (0x82435DC0, 0x82467890);
+  added unrounded each poll (0x82467928, 0x82461498), the score a float
+  (0x82450E78) [C, now in player.cpp].
+- Streak multiplier = min(table(streak), cap), cap 6 for bass, else 4
+  (0x82441A58, 0x8245BDF0) [C; which table symbol: I].
+- hopo_threshold: beatmatcher (parser (hopo_threshold 170)), the song's
+  first (0x824A67A8) [C].
+- Overdrive: drains 1 / band_energy deploy_beats a beat (0x82445188 +0xE0,
+  0x82442C48); star_power deploy_rate has no reader; a phrase adds
+  spotlight_phrase 0.251 (0x82464A98 -> 0x82442A70); deploy at
+  deploy_threshold 0.5 (0x82442350); saving a member costs save_energy 0.5
+  (0x82442B20); whammy 0.034 a beat (0x824644E0) [C, now in player.cpp].
+- The band's multiplier: bonuses multiplier[members deploying] (1 2 4 6 8)
+  for every member (0x8243F810, 0x824415A8) [C, now in app.cpp updateSeats].
+
+Not applied yet (GD05-018):
+- Drums go through DrumTrackWatcherImpl (Swing 0x824A2320): every pad of a
+  chord is its own gem (+1 streak, its own points; 0x824A21E8), a wrong pad
+  misses the closest unhit lane of the nearest time group, the miss
+  deadline uses the next gem in the same lane (0x824A26A8), passed chords
+  penalise once per time group (0x82463F10), hits more than 1000 ms before
+  the first gem play drum_freestyle (0x824638D0). The port still plays the
+  drums through the joypad watcher (DECISIONS D6).
+- A miss more than 200 ms before its gem charges the phrase of gem - 1
+  (0x82461368).
+- Unsettled: which notes become HOPOs, the 50 ms overstrum gap (+0x5C has no
+  reader found), the section queries (watcher vtable +0x1C..+0x2C, +0x60/+0x64:
+  fills, coda, solos), kick handling.
