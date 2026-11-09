@@ -570,6 +570,14 @@ private:
     std::unique_ptr<VenueView> venueView_;
     // The camera director and the lighting presets (M8 phase 2; game/camera_director.h, game/light_presets.h).
     std::unique_ptr<CameraDirector> director_;
+    // Rock Band's shots by category (BandCamShot category: INTRO, NORMAL,
+    // directed_guitar, WIN ...), and the VENUE track's cursor (rbShots()).
+    std::map<std::string, std::vector<const scene::CamShot*>> rbShots_;
+    size_t rbVenueNote_ = 0, rbVenueEvent_ = 0;
+    uint32_t rbShotSeed_ = 1;
+    bool rbWinShot_ = false;
+    const scene::CamShot* rbShot(const std::string& category);
+    void rbShots(float t);
     // The band on stage (M9, game/band.h): made when the song begins in the venue.
     std::unique_ptr<Band> band_;
     // The players' look from the menus (GameSetup), for the band.
@@ -1256,9 +1264,14 @@ void App::beginSong() {
     // length (CamShot +0xf0 = every keyframe's duration + blend, frames at
     // 30 a second, 0x82226630) [C].
     double startMs = kTrackExtendMs;
-    if (!fastIntro_ && director_)
-        if (const scene::CamShot* shot = director_->drawShot({encoreFx_ ? "INTRO_ENCORE" : "INTRO"}))
-            startMs = std::min(-double(shot->lengthFrames()) / 30.0 * 1000.0, 0.0);
+    if (!fastIntro_ && director_) {
+        const scene::CamShot* shot = director_->drawShot({encoreFx_ ? "INTRO_ENCORE" : "INTRO"});
+        // RB: the shot of the category itself (rbShot) [I].
+        if (!shot && !rbShots_.empty())
+            if ((shot = rbShot("INTRO"))) director_->forceShot(shot);
+        if (shot) startMs = std::min(-double(shot->lengthFrames()) / 30.0 * 1000.0, 0.0);
+    }
+    rbVenueNote_ = rbVenueEvent_ = 0;
     // Practice (0x00106840): the clock starts at the practice start (no
     // intro: skip_intro, the track already out).
     const bool practice = mode_ == DevMode::Practice;
@@ -1919,6 +1932,7 @@ void App::updateSong(float t) {
         }
         if (director_) {
             director_->setStarPower(player_->starPowerActive() || (player2_ && player2_->starPowerActive()));
+            rbShots(t);
             director_->update();
             // Development aid: GD05_FORCE_SHOT=<CamShot> plays that shot whenever another starts.
             if (const char* fs = SDL_getenv("GD05_FORCE_SHOT"))
@@ -2376,6 +2390,20 @@ bool App::loadVenue(const std::string& venue, VenueVariant variant) {
         venueView_->draw(r, w, h, hdr);
         if (hdr) enhancedFrame(r);
     };
+    rbShots_.clear();
+    rbVenueNote_ = rbVenueEvent_ = 0;
+    for (const auto& p : venue_->parts())
+        for (scene::Object* o : p.milo->root().byClass("BandCamShot"))
+            if (auto* c = o->as<scene::CamShot>()) rbShots_[c->category].push_back(c);
+    if (SDL_getenv("GD05_SHOTLOG")) {
+        std::map<std::string, int> cats;
+        for (const auto& p : venue_->parts())
+            for (scene::Object* o : p.milo->root().byClass("BandCamShot"))
+                if (auto* c = o->as<scene::CamShot>()) ++cats[c->category];
+        std::string line;
+        for (const auto& [c, n] : cats) line += " " + c + ":" + std::to_string(n);
+        SDL_Log("venue shots:%s", line.c_str());
+    }
     SDL_Log("venue %s %s loaded in %.0f ms: %d milos, %d proxies, shot %s", venue.c_str(), venues::variantName(variant),
             double(SDL_GetTicksNS() - start) / 1e6, int(venue_->parts().size()), int(venue_->proxies().size()),
             venueView_->shot() ? venueView_->shot()->name.c_str() : "none");
@@ -2479,6 +2507,46 @@ void App::startBand(const SongInfo& info, const Song& song, bool backdrop) {
         SDL_Log("band: %s", e.what());
         band_.reset();
     }
+}
+
+// A Rock Band shot of `category`, at random among the venue's, not the
+// one playing when there is another [I: RB's BandDirector picks by the
+// band members in view and the shot's flags, not read yet].
+const scene::CamShot* App::rbShot(const std::string& category) {
+    auto it = rbShots_.find(category);
+    if (it == rbShots_.end() || it->second.empty()) return nullptr;
+    const auto& v = it->second;
+    rbShotSeed_ = rbShotSeed_ * 1664525u + 1013904223u;
+    size_t k = (rbShotSeed_ >> 8) % v.size();
+    if (director_ && v[k] == director_->shot() && v.size() > 1) k = (k + 1) % v.size();
+    return v[k];
+}
+
+// The VENUE track's camera (RB, ui and config/midi_verify.dta's VENUE
+// rules) [C data: the events; I: their meaning]: note 60 cuts to a NORMAL
+// shot, [do_directed_cut <category>] to that category's; WIN after the song.
+void App::rbShots(float t) {
+    if (rbShots_.empty() || !director_ || !song_) return;
+    const scene::CamShot* next = nullptr;
+    while (rbVenueNote_ < song_->venueNotes.size() && song_->venueNotes[rbVenueNote_].ms <= t) {
+        const VenueNote& n = song_->venueNotes[rbVenueNote_++];
+        if (n.track == VenueNote::Track::Venue && n.pitch == 60) next = rbShot("NORMAL");
+    }
+    while (rbVenueEvent_ < song_->venueEvents.size() && song_->venueEvents[rbVenueEvent_].ms <= t) {
+        const std::string& e = song_->venueEvents[rbVenueEvent_++].text;
+        const std::string key = "[do_directed_cut ";
+        if (e.compare(0, key.size(), key) == 0) {
+            std::string cat = e.substr(key.size());
+            while (!cat.empty() && (cat.back() == ']' || cat.back() == ' ')) cat.pop_back();
+            if (const scene::CamShot* s = rbShot(cat)) next = s;
+        }
+    }
+    if (t >= song_->endMs && !rbWinShot_) {
+        rbWinShot_ = true;
+        if (const scene::CamShot* s = rbShot(songLost() ? "LOSE" : "WIN")) next = s;
+    }
+    if (t < 0) rbWinShot_ = false;
+    if (next && next != director_->shot()) director_->forceShot(next);
 }
 
 // world_panel's milo: ../world/<v>/<v>[_mp|_coop].milo (GD05_VENUE replaces the venue).
