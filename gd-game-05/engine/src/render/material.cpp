@@ -114,8 +114,9 @@ void MaterialRenderer::setFrame(const Camera& camera, const LightEnv& env, int v
     put4(f.envAmbient, env.envAmbient.x, env.envAmbient.y, env.envAmbient.z, 1);
     for (int i = 0; i < 7; ++i) {
         const Light& l = env.lights[i];
-        put4(f.lightVec[i], l.vec.x, l.vec.y, l.vec.z, 0);
-        put4(f.lightColor[i], l.color.x, l.color.y, l.color.z, l.range > 0 ? 1.0f / l.range : 0.0f);
+        put4(f.lightVec[i], l.vec.x, l.vec.y, l.vec.z, l.falloffStart);
+        // w: 1 / range for a point light (0: no falloff), -1 for RB's directional light among points.
+        put4(f.lightColor[i], l.color.x, l.color.y, l.color.z, l.directional ? -1.0f : l.range > l.falloffStart ? 1.0f / (l.range - l.falloffStart) : 0.0f);
     }
     std::memcpy(f.fogColor, env.fogColor, sizeof f.fogColor);
     put4(f.fogRange, env.fogEnd, inverseSpan(env.fogStart, env.fogEnd), 0, 0);

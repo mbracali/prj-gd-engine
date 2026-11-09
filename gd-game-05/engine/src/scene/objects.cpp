@@ -859,7 +859,7 @@ bool isHudDirClass(const std::string& cls) {
 
 bool isDirClass(const std::string& cls) {
     return cls == "ObjectDir" || cls == "RndDir" || cls == "PanelDir" || cls == "GHTrackDir" || cls == "TrackDir" || cls == "WorldDir" ||
-           isHudDirClass(cls);
+           cls == "WorldInstance" || isHudDirClass(cls);
 }
 
 std::unique_ptr<DirObj> decodeDir(const std::string& cls, const std::string& name, const Bytes& stream, size_t start,
@@ -888,6 +888,14 @@ std::unique_ptr<DirObj> decodeDir(const std::string& cls, const std::string& nam
         expectVersion(in.u32(), kTrackDirRev, "TrackDir");
     }
     if (cls == "TrackDir") expectVersion(d->version, kTrackDirRev, "TrackDir");  // RB's track: TrackDir itself
+    // RB's WorldInstance v0 (PreLoad RB 0x822CC990, PostLoad RB 0x822CDF98)
+    // [C]: the shared directory's file, then a whole RndDir record (the
+    // instance's transform, draw and environ). Drawn as a proxy of that file.
+    std::string sharedFile;
+    if (cls == "WorldInstance") {
+        expectVersion(d->version, 0, "WorldInstance");
+        sharedFile = in.str();
+    }
     if (cls == "WorldDir") {
         // WorldDir PreLoad (0x8224e5c0): its fields, then PanelDir's chain.
         expectVersion(d->version, kWorldDirRev, "WorldDir");
@@ -916,12 +924,13 @@ std::unique_ptr<DirObj> decodeDir(const std::string& cls, const std::string& nam
     if (cls == "GHTrackDir" || cls == "TrackDir") trackDirPost(in, *d);
     else if (cls == "PanelDir") panelDirPost(in, *d);
     else if (cls == "WorldDir") worldDirPost(in, *d);
-    else if (cls == "RndDir" || isHudDirClass(cls)) rndDirPost(in, *d);
+    else if (cls == "RndDir" || cls == "WorldInstance" || isHudDirClass(cls)) rndDirPost(in, *d);
     else objectDirPost(in, *d);
     end = in.pos();
     if (in.remaining() < 4 || stream[end] != 0xAD || stream[end + 1] != 0xDE || stream[end + 2] != 0xAD ||
         stream[end + 3] != 0xDE)
         bad("directory record does not end at its end marker");
+    if (cls == "WorldInstance" && d->objectDir.proxyFile.empty()) d->objectDir.proxyFile = sharedFile;
     d->decoded = true;
     return d;
 }

@@ -13,8 +13,19 @@
 
 namespace venues {
 
+// Rock Band's venues: config/macros.dta's VENUES (blank_01, then the
+// small clubs, big clubs, theaters and arenas), each
+// world/<kind>/<venue>/gen/<venue>.milo with the kind's shared milos in
+// world/<kind>/gen [C data].
 const std::vector<std::string>& names() {
-    static const std::vector<std::string> v = {"battle", "small1", "small2", "big", "theatre", "fest", "arena", "stone"};
+    static const std::vector<std::string> v = [] {
+        std::vector<std::string> out{"blank_01"};
+        auto add = [&](const char* kind, int n) {
+            for (int i = 1; i <= n; ++i) out.push_back(std::string(kind) + (i < 10 ? "_0" : "_") + std::to_string(i));
+        };
+        add("small_club", 12), add("big_club", 12), add("theater", 9), add("arena", 8);
+        return out;
+    }();
     return v;
 }
 
@@ -23,8 +34,12 @@ bool known(const std::string& venue) { return std::find(names().begin(), names()
 const char* suffix(VenueVariant v) { return v == VenueVariant::Mp ? "_mp" : v == VenueVariant::Coop ? "_coop" : ""; }
 const char* variantName(VenueVariant v) { return v == VenueVariant::Mp ? "mp" : v == VenueVariant::Coop ? "coop" : "sp"; }
 
+// RB has one milo per venue (no _mp / _coop variants on the disc) [C data].
 std::string worldMilo(const std::string& venue, VenueVariant v) {
-    return "world/" + venue + "/gen/" + venue + suffix(v) + ".milo_xbox";
+    (void)v;
+    const size_t us = venue.rfind('_');
+    const std::string kind = us == std::string::npos ? venue : venue.substr(0, us);
+    return "world/" + kind + "/" + venue + "/gen/" + venue + ".milo_xbox";
 }
 
 std::string careerTier(const GameData& data, const std::string& song) {
@@ -49,10 +64,15 @@ std::string careerTier(const GameData& data, const std::string& song) {
     return {};
 }
 
+// Without the menus: a venue for the song, picked from the song's id
+// [I: RB's quick play picks one of VENUES at random].
 std::string forSong(const GameData& data, const SongInfo& song) {
+    (void)data;
     if (known(song.venue)) return song.venue;
-    const std::string tier = careerTier(data, song.id);
-    return known(tier) ? tier : "battle";
+    size_t h = 0;
+    for (char c : song.id) h = h * 31 + size_t(static_cast<unsigned char>(c));
+    const auto& v = names();
+    return v[1 + h % (v.size() - 1)];
 }
 
 std::string fromEnv() {

@@ -5,6 +5,7 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <set>
 #include <cmath>
 
 #include "render/image_enhance.h"
@@ -637,11 +638,16 @@ LightEnv SceneCache::lightEnv(const scene::Environ& e, const ScenePose* pose) {
     for (const std::string& name : e.lights) {
         auto* l = e.dir ? e.dir->resolve<scene::Light>(name) : nullptr;
         if (!l || env.lightCount >= 7) continue;
+        // RB's light types past directional (2 and up: the spot kinds and
+        // the shadow reference) light nothing here; the Spotlights draw
+        // their own [I: RB's type names are not read].
+        if (l->bigEndian && l->type >= 2) continue;
         if (pose && !pose->showing(l)) continue;
         const scene::Xfm w = pose ? pose->world(l) : l->trans.world;
         Light& g = env.lights[env.lightCount++];
         g.color = {l->color[0], l->color[1], l->color[2]};
         g.range = l->range;
+        g.falloffStart = l->bigEndian ? std::clamp(l->falloffStart, 0.0f, std::max(0.0f, l->range)) : 0.0f;
         if (const ScenePose::LightState* st = pose ? pose->light(l) : nullptr) {
             if (st->hasColor) g.color = {st->color[0], st->color[1], st->color[2]};
             if (st->hasRange) g.range = st->range;
@@ -656,8 +662,36 @@ LightEnv SceneCache::lightEnv(const scene::Environ& e, const ScenePose* pose) {
             ++point;
         }
     }
-    // GH2 picks one light kind per environment.
+    // GH2 picks one light kind per environment. RB mixes them: with point
+    // lights present the environment is a point one, its directional lights
+    // flagged (render/material.h Light::directional) [I].
     env.directional = dir >= point;
+    bool rb = false;
+    for (const std::string& name : e.lights)
+        if (auto* l = e.dir ? e.dir->resolve<scene::Light>(name) : nullptr) rb = rb || l->bigEndian;
+    if (rb && point > 0 && dir > 0) {
+        env.directional = false;
+        int k = 0;
+        for (const std::string& name : e.lights) {
+            auto* l = e.dir ? e.dir->resolve<scene::Light>(name) : nullptr;
+            if (!l || (pose && !pose->showing(l)) || l->type >= 2) continue;
+            if (k >= env.lightCount) break;
+            env.lights[k++].directional = l->type == 1;
+        }
+    }
+    if (SDL_getenv("GD05_ENVLOG")) {
+        static std::set<const scene::Environ*> seen;
+        if (seen.insert(&e).second) {
+            SDL_Log("environ %s: ambient %.2f %.2f %.2f, %d lights (first %.2f %.2f %.2f range %.0f), color adjust %d (rot %.2f %.2f %.2f / %.2f %.2f %.2f / %.2f %.2f %.2f, pos %.2f %.2f %.2f; b %.2f c %.2f)",
+                    e.name.c_str(), double(env.envAmbient.x), double(env.envAmbient.y), double(env.envAmbient.z), env.lightCount,
+                    env.lightCount ? double(env.lights[0].color.x) : 0.0, env.lightCount ? double(env.lights[0].color.y) : 0.0,
+                    env.lightCount ? double(env.lights[0].color.z) : 0.0, env.lightCount ? double(env.lights[0].range) : 0.0, int(e.useColorAdjust),
+                    double(e.colorXfm.xfm.rot[0]), double(e.colorXfm.xfm.rot[1]), double(e.colorXfm.xfm.rot[2]), double(e.colorXfm.xfm.rot[3]),
+                    double(e.colorXfm.xfm.rot[4]), double(e.colorXfm.xfm.rot[5]), double(e.colorXfm.xfm.rot[6]), double(e.colorXfm.xfm.rot[7]),
+                    double(e.colorXfm.xfm.rot[8]), double(e.colorXfm.xfm.pos[0]), double(e.colorXfm.xfm.pos[1]), double(e.colorXfm.xfm.pos[2]),
+                    double(e.colorXfm.brightness), double(e.colorXfm.contrast));
+        }
+    }
     return env;
 }
 

@@ -66,6 +66,10 @@ struct Light {
     Vec3 vec;            // directional: unit vector towards the light; point: position
     Vec3 color{1, 1, 1};
     float range = 0;     // point lights: distance where the light reaches zero (0: no falloff)
+    // RB: a directional light among point lights (one environment mixes
+    // both): `vec` is its direction even though the environment's lights are points.
+    bool directional = false;
+    float falloffStart = 0;  // RB: full light up to here, then down to zero at `range` [I]
 };
 
 // The lighting environment of a frame: GH2's Environ with its lights.

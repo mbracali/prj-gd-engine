@@ -51,6 +51,15 @@ pattern). Each says what, why and how to undo it.
   did the same with GH2's memory card flow.
 - **Undo:** `engine/src/ui/rb_natives.cpp` (memcardmgr, platform_mgr).
 
+## D5. The song list's rank groups by count (2026-11-09)
+- **What:** RB's song select groups the songs by rank into the nine
+  generic_tier headings; the port sorts the songs with a rank by the
+  instrument's rank (the band's for a band) and splits them into nine groups
+  of about equal size, "random_song" first.
+- **Why:** the original's grouping (RB 0x82404A10 -> 0x824024F0) is not
+  read yet; the data has the ranks and the tier names [C data], not the cut.
+- **Undo:** `engine/src/ui/rb_natives.cpp` (RbSongProvider).
+
 ## D6. Drums played through GH2's joypad watcher in wave 01 (2026-11-09)
 - **What:** with the drum part, the player is gd02's `Player` in joypad
   mode on the drum chart, the pads as frets (kick = orange / LB, red, yellow,

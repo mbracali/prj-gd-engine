@@ -145,7 +145,11 @@ void gdRegularLights(vec3 pos, vec3 n, vec3 v, vec4 specFactor, vec4 shadowPos, 
         vec3 d = uLightVec[i].xyz - pos;
         float len = length(d);
         vec3 l = d / max(len, 1e-6);
-        float falloff = 1.0 - clamp(len * uLightColor[i].w, 0.0, 1.0);
+        float falloff = 1.0 - clamp((len - uLightVec[i].w) * uLightColor[i].w, 0.0, 1.0);
+        if (uLightColor[i].w < 0.0) {  // RB: a directional light among the points
+            l = uLightVec[i].xyz;
+            falloff = 1.0;
+        }
 #if GD_SPEC_LIGHTS
         spec += uLightColor[i].rgb * gdPhong(n, l, v, specFactor.a) * falloff;
 #endif
