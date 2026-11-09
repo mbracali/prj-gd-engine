@@ -912,7 +912,7 @@ universal launcher, not released on its own.
 
 | ID | Class | Status | Item | Notes | From |
 |---|---|---|---|---|---|
-| GD05-001 | Original | ❌ | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | `gd-game-05/agent-instructions.md`, [docs/platform/adding-a-game.md](../platform/adding-a-game.md) | New 10-28 |
+| GD05-001 | Original | 🟡 | Discovery: the disc and its formats, the executable in Ghidra, what gd-game-01 / gd-game-02 give it; plan with the owner | Kickoff: [docs/spikes/GD-GAME-05_KICKOFF.md](../spikes/GD-GAME-05_KICKOFF.md) (wave 01, branch `feature/20261109-rockband1-wave01`). First look at the disc [C]: XDVDFS, title ID 45410829, `gen/main.hdr` + `main_0/1.ark` read by gd-game-02's `tools/ark.py` as is (4,588 files), Bink videos. `gd-game-05/agent-instructions.md`, [docs/platform/adding-a-game.md](../platform/adding-a-game.md) | New 10-28 Owner 11-09 |
 
 
 ## gd-game-06: Guitar Hero: Aerosmith (Xbox 360)
