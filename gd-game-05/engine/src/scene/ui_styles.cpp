@@ -228,7 +228,7 @@ std::string UiStyles::resourcePath(const GameData& data, const std::string& rel)
 // ---- Locale -----------------------------------------------------------------
 
 const std::vector<std::string>& Locale::languages() {
-    static const std::vector<std::string> v = {"eng", "fre", "deu", "ita", "esl"};
+    static const std::vector<std::string> v = {"eng"};  // RB (USA) ships English only [C data: ui/eng/]
     return v;
 }
 
@@ -237,7 +237,12 @@ void Locale::load(const GameData& data, const std::string& language) {
     if (!data.exists(dtbPath(main))) throw std::runtime_error("no locale for language '" + language + "'");
     strings_.clear();
     language_ = language;
-    for (const std::string& f : {"ui/" + language + "/locale_milo.dta", main}) {
+    // RB splits its strings over more files [C data: ui/eng/gen/locale_*.dtb].
+    for (const std::string& f : {"ui/" + language + "/locale_milo.dta", "ui/" + language + "/locale_bandnames.dta",
+                                 "ui/" + language + "/locale_charnames.dta", "ui/" + language + "/locale_clothing.dta",
+                                 "ui/" + language + "/locale_events.dta", "ui/" + language + "/locale_patch.dta",
+                                 "ui/" + language + "/locale_rockmoments.dta", "ui/" + language + "/locale_tour.dta",
+                                 "ui/" + language + "/locale_venues.dta", main}) {
         if (!data.exists(dtbPath(f))) continue;
         ::DataNode root = loadPlainDta(data, f);
         for (const auto& e : root.children)

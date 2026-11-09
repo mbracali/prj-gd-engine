@@ -80,7 +80,10 @@ std::vector<std::string> Synth::loadBanks(const GameData& data) {
         for (size_t k = 1; banks && k < banks->children.size(); ++k) {
             const DataNode& b = banks->children[k];
             if (!b.isList() || b.children.size() < 2) continue;
-            const std::string key = b.textAt(0), path = scene::miloArkPath(b.textAt(1) + ".milo");
+            // RB names the bank with its ".milo" (sound.dtb (banks (common sfx/common_bank.milo))) [C data].
+            std::string file = b.textAt(1);
+            if (file.size() < 5 || file.compare(file.size() - 5, 5, ".milo") != 0) file += ".milo";
+            const std::string key = b.textAt(0), path = scene::miloArkPath(file);
             try {
                 milos_.push_back(scene::loadMilo(data, path));
                 preload(milos_.back()->root());
@@ -97,7 +100,7 @@ std::vector<std::string> Synth::loadBanks(const GameData& data) {
     // practice_kick / _snare / _hat, sync_click.cue) [C data]; kept loaded
     // here, so those panels' sounds play by name [I: the PS2 loads it with
     // the panel].
-    try {
+    if (data.exists(scene::miloArkPath("sfx/practice_bank.milo"))) try {  // GH2's; RB has none [C data]
         milos_.push_back(scene::loadMilo(data, scene::miloArkPath("sfx/practice_bank.milo")));
         preload(milos_.back()->root());
         addBank("practice", &milos_.back()->root());
@@ -172,7 +175,16 @@ std::shared_ptr<const SfxPcm> Synth::pcm(const scene::SynthSample& s, std::strin
     bool ok = false;
     if (!s.decoded) err = "not decoded: " + s.error;
     else if (!s.sample.hasData) err = "no sample data";
-    else if (s.sample.format != scene::SampleData::kXma) err = "sample format " + std::to_string(s.sample.format) + " (only XMA is decoded)";
+    else if (s.sample.format == scene::SampleData::kPcm16b) {
+        // RB's encoding 1: 16-bit PCM, big-endian [C data: the big-endian
+        // reading is ~33x smoother over all 74 samples than little-endian].
+        const uint8_t* d = s.data();
+        const size_t n = std::min<size_t>(s.sample.size / 2, s.sample.sampleCount);
+        p->samples.resize(n);
+        for (size_t i = 0; i < n; ++i) p->samples[i] = float(int16_t(uint16_t(d[2 * i] << 8 | d[2 * i + 1]))) / 32768.0f;
+        ok = n > 0;
+        if (!ok) err = "empty PCM sample";
+    } else if (s.sample.format != scene::SampleData::kXma) err = "sample format " + std::to_string(s.sample.format) + " (only XMA and PCM are decoded)";
     else ok = xma::decode(s.data(), s.sample.size, int(s.sample.rate), 1, s.sample.sampleCount, p->samples, err);
     stats_.decodeMs += double(SDL_GetTicksNS() - t0) / 1e6;
     if (!ok) {

@@ -292,8 +292,9 @@ Song buildSong(const MidiFile& midi, int hopoThresholdTicks) {
             }
         }
     }
-    if (!song.hasPart[size_t(Part::Guitar)] && !song.hasPart[size_t(Part::Drums)] && !song.hasPart[size_t(Part::Vocals)])
-        throw std::runtime_error("chart has no PART GUITAR, PART DRUMS or PART VOCALS track");
+    bool anyPart = false;  // a tutorial chart may hold only a vocal percussion track [C data]
+    for (const MidiTrack& tr : midi.tracks) anyPart |= tr.name.rfind("PART", 0) == 0;
+    if (!anyPart) throw std::runtime_error("chart has no PART track");
 
     uint32_t lastTick = 0;
     for (const auto& t : midi.tracks)

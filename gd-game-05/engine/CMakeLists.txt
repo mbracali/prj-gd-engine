@@ -62,6 +62,8 @@ target_sources(gd05 PRIVATE
   src/game/band.cpp
   src/game/band_performer.cpp
   src/game/chart.cpp
+  src/game/drum_player.cpp
+  src/game/vocal_player.cpp
   src/game/crowd.cpp
   src/game/player.cpp
   src/game/light_presets.cpp
