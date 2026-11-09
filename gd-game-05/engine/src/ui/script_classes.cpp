@@ -18,6 +18,8 @@
 #include "ui/ui_host.h"
 #include "ui/ui_objects.h"
 #include "ui/rb_multifocus.h"
+#include "data/bytes.h"
+#include "scene/objects.h"
 
 namespace ui {
 
@@ -236,6 +238,28 @@ bool ComponentObj::handleNative(Interp& in, const std::string& msg, std::vector<
     const auto argStr = [&](size_t i) { return i < args.size() ? args[i].str() : std::string(); };
     const auto argNum = [&](size_t i, float def = 0) { return i < args.size() && args[i].isNumber() ? args[i].number() : def; };
     r = Value::integer(0);
+    // RB's Set (a list of objects, e.g. qp_endgame.milo's players.set): its
+    // (objects) property, {set size (objects)} / {set get (objects i)}.
+    // Record v0 [C data]: Hmx::Object header, u32 count, count names.
+    if ((msg == "size" || msg == "get") && !args.empty() && args[0].type == Value::Type::Array && v && v->milo()) {
+        const scene::Object* so = v->milo()->root().find(name());
+        const auto* key = args[0].array.get();
+        if (so && so->cls == "Set" && !key->empty() && key->front().str() == "objects") {
+            std::vector<std::string> names;
+            try {
+                size_t pos = 4;
+                scene::readObjectHeaderAt(so->record, pos);
+                ByteReader br(so->record.data() + pos, so->record.size() - pos);
+                const uint32_t n = br.u32m();
+                for (uint32_t k = 0; k < n && k < 4096; ++k) names.push_back(br.str(br.u32m()));
+            } catch (const std::exception&) {
+            }
+            if (msg == "size") return r = Value::integer(int(names.size())), true;
+            const int i = key->size() > 1 ? key->at(1).integerValue() : -1;
+            if (i >= 0 && size_t(i) < names.size()) r = Value::obj(panel->component(names[size_t(i)]));
+            return true;
+        }
+    }
     if (msg == "set_showing") {
         if (v) v->setShowing(name(), !args.empty() && args[0].truthy());
         return true;
@@ -315,6 +339,9 @@ bool ComponentObj::handleNative(Interp& in, const std::string& msg, std::vector<
         ScriptObject* c = panel->component(argStr(0));
         return r = Value::obj(c), true;
     }
+    // {$proxy exists name} (RB endgame.dta): as find, over the panel's
+    // components [I: a proxy's own directory is not searched apart].
+    if (msg == "exists") return r = Value::integer(panel->component(argStr(0)) ? 1 : 0), true;
     // UIList (0x8237B540)
     if (msg == "set_provider") {
         provider = !args.empty() && args[0].type == Value::Type::Object ? args[0].object : in.findObject(argStr(0));
@@ -749,6 +776,36 @@ void PanelObj::draw() {
 }
 
 bool PanelObj::handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) {
+    // {$panel iterate <Class> $var body...} (RB's ObjectDir iterate): the
+    // body once per object of the class in the panel's milo, $var the
+    // component [C data: ui/main.dta, seldiff.dta].
+    // {$panel set_frame f} (RB's helpbar, meta.dta): a RndDir's SetFrame,
+    // every animatable of the panel's milo at frame f [I].
+    if (msg == "set_frame" && !args.empty()) {
+        if (view && view->milo())
+            for (const auto& o : view->milo()->root().objects)
+                if (gfx::ScenePose::endFrame(o.get()) > 0) view->setFrame(o->name, args[0].number());
+        return r = Value::integer(0), true;
+    }
+    // RB's practice mode (M7, GD05-009): its vocal mode is not there yet.
+    if (msg == "set_in_vocal_mode" && className() == "PracticePanel") return in.onStub(name(), msg, Value::integer(0)), r = Value::integer(0), true;
+    // RB's MetaPanel: {$this meta_music} (meta.dta) [C data].
+    if (msg == "meta_music" && className() == "MetaPanel") return r = Value::obj(in.findObject("meta_music")), true;
+    if (msg == "iterate" && args.size() >= 2) {
+        r = Value::integer(0);
+        if (!view || !view->milo()) return true;
+        std::string var = args[1].str();
+        if (!var.empty() && var[0] == '$') var = var.substr(1);
+        const Value saved = in.var(var);
+        for (scene::Object* o : view->milo()->root().byClass(args[0].str())) {
+            ComponentObj* c = component(o->name);
+            if (!c) continue;
+            in.var(var) = Value::obj(c);
+            for (size_t k = 2; k < args.size(); ++k) r = in.evalValue(args[k]);
+        }
+        in.var(var) = saved;
+        return true;
+    }
     // RB's panels: wait for session_mgr's next local player (ui/rb_natives.cpp).
     if (msg == "wait_for_session_ready") return ui.setSessionWaiter(this), r = Value::integer(0), true;
     const auto argStr = [&](size_t i) { return i < args.size() ? nameOf(args[i]) : std::string(); };

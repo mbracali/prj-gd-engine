@@ -41,6 +41,13 @@ public:
     void quiet(std::initializer_list<const char*> msgs) {
         for (const char* m : msgs) fns_[m] = [](std::vector<Value>&) { return Value::integer(0); };
     }
+    // Messages the port does not have yet: 0, logged as STUBs (tests/ui_stubs.txt says why).
+    void stub(std::initializer_list<const char*> msgs) {
+        for (const char* m : msgs) {
+            const std::string msg = m;
+            fns_[msg] = [this, msg](std::vector<Value>&) { return ui_.interp().onStub(name(), msg, Value::integer(0)), Value::integer(0); };
+        }
+    }
     std::map<std::string, Value> props;
 
     bool handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) override {
@@ -113,6 +120,12 @@ public:
         auto ix = [&] { return args.empty() ? -1 : args[0].integerValue(); };
         if (msg == "set_song_mode") return mode_ = strArg(args, 0), built_ = false, true;
         if (msg == "get_display") return r = Value::integer(display_), true;
+        // The instrument the list ranks by: player 0's controller [I: one local player].
+        if (msg == "get_instrument") {
+            const Value cfg = in.send("game", "get_player_config", {Value::integer(0)});
+            r = cfg.type == Value::Type::Object ? in.send(cfg.object, "get_controller_sym", {}) : Value::symbol("guitar");
+            return true;
+        }
         if (msg == "set_display") return display_ = args.empty() ? 0 : args[0].integerValue(), built_ = false, true;
         if (msg == "cycle_display") return display_ = (display_ + 1) % 4, built_ = false, true;
         if (msg == "is_active") return r = Value::integer(active(ix()) ? 1 : 0), true;
@@ -172,6 +185,26 @@ void installRbNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Scr
     auto yes = [](std::vector<Value>&) { return Value::integer(1); };
     auto no = [](std::vector<Value>&) { return Value::integer(0); };
 
+    // A stand-in character per instrument until the characters come (M6,
+    // GD05-008): what the menus ask a character [I]. The icons are
+    // config/tour_solo.dta's track_icons, first row [C data].
+    static const std::map<std::string, std::string> kIcon = {{"bass", "B"}, {"guitar", "G"}, {"drum", "D"}, {"vocals", "V"}};
+    for (const char* inst : {"guitar", "bass", "drum", "vocals"}) {
+        RbHost* c = add(std::make_unique<RbHost>(ui, std::string("prefab_") + inst));
+        const std::string instrument = std::string(inst) == "bass" ? "guitar" : inst;
+        c->props["instrument"] = Value::symbol(instrument);
+        c->on("get_instrument", [instrument](std::vector<Value>&) { return Value::symbol(instrument); });
+        c->on("instrument_icon", [instrument](std::vector<Value>&) { return Value::string(kIcon.at(instrument)); });
+        c->on("track_icon", [instrument](std::vector<Value>& a) {
+            const std::string t = strArg(a, 0);
+            auto it = kIcon.find(t.empty() ? instrument : t);
+            return Value::string(it != kIcon.end() ? it->second : kIcon.at(instrument));
+        });
+        c->on("get_char_name", [inst](std::vector<Value>&) { return Value::string(std::string(inst) == "drum" ? "Drummer" : std::string(inst) == "vocals" ? "Singer" : "Guitarist"); });
+        c->on("get_gender", [](std::vector<Value>&) { return Value::symbol("male"); });
+        c->quiet({"money", "deform", "world_fame", "tour_score", "total_world_fame"});
+    }
+
     // gamemode: the mode's settings from config/gen/modes.dtb (defaults,
     // then the mode's own block) [C data].
     // gamemode: RB's mode switch over the same table gamecfg reads (the
@@ -211,6 +244,8 @@ void installRbNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Scr
     platform->on("is_player_a_guest", no);
     platform->quiet({"set_notify_ui_location", "disable_xmp", "enable_xmp", "signin"});
     RbHost* profiles = add(std::make_unique<RbHost>(ui, "profile_mgr"));
+    // The profiles' save data: RB's saves are M7 (GD05-009; DECISIONS D4).
+    profiles->stub({"get_save_data_from_player", "get_char_options_from_player"});
     profiles->on("first_timer", no);
     profiles->on("get_sync_offset", no);
     profiles->on("get_default_sync_offset_ms", no);
@@ -227,13 +262,21 @@ void installRbNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Scr
     RbHost* sink = add(std::make_unique<RbHost>(ui, "band_ui_sink"));
     sink->on("has_event", no);
     sink->on("is_forced_transition_active", no);
-    sink->quiet({"set_net_sync", "net_sync", "set_block_mode", "force_reset_screen", "sync_screen", "dismiss_event", "hide_network_busy_icon",
+    // sync_screen <screen> [depth]: the band's screen change, local only here [I: the network sync].
+    sink->on("sync_screen", [&ui](std::vector<Value>& a) {
+        if (!a.empty()) ui.gotoScreen(a[0].type == Value::Type::Object && a[0].object ? a[0].object->name() : a[0].str(), false);
+        return Value::integer(0);
+    });
+    sink->quiet({"set_net_sync", "net_sync", "set_block_mode", "force_reset_screen", "dismiss_event", "hide_network_busy_icon",
                  "show_network_busy_icon", "check_controllers", "set_controller_level"});
     RbHost* tour = add(std::make_unique<RbHost>(ui, "tour"));
     tour->on("performer", no);
     tour->quiet({"clear_performer"});
     RbHost* charCache = add(std::make_unique<RbHost>(ui, "char_cache"));
-    charCache->quiet({"cache_update", "cache_enable", "cache_clear", "iterate", "meta_configure_done"});
+    // The characters' cache: the band's loading is M6's (GD05-008) [I].
+    charCache->quiet({"cache_update", "cache_enable", "cache_clear", "iterate", "meta_configure_done", "light_characters", "load_instruments",
+                      "world_configure_characters", "reclaim_characters"});
+    charCache->on("loaded", yes);
     // content_mgr: the Music Store / downloads are not in the port (GD05-013):
     // the disc's content is all there is, its refresh always done.
     RbHost* content = add(std::make_unique<RbHost>(ui, "content_mgr"));
@@ -251,7 +294,7 @@ void installRbNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Scr
         return Value::integer(0);
     });
     sessionMgr->on("is_finding", no);
-    sessionMgr->quiet({"remove_local_player", "cancel_find", "update_band_leader"});
+    sessionMgr->quiet({"remove_local_player", "cancel_find", "update_band_leader", "send_to_all"});
     {
         auto sp = std::make_unique<RbSongProvider>(ui);
         in.registerObject(sp.get());
@@ -261,6 +304,19 @@ void installRbNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Scr
     songMgr->on("has_song", [&ui](std::vector<Value>& a) { return Value::integer(songInfoIndex(ui, strArg(a, 0)) >= 0 ? 1 : 0); });
     songMgr->on("is_song_shared", yes);
     songMgr->quiet({"reset_shared_songs"});
+    // song_mgr song_name / by_line: the song's name, and "by <artist>" [I: the by-line's wording is the locale's].
+    songMgr->on("song_name", [&ui](std::vector<Value>& a) {
+        const int i = songInfoIndex(ui, strArg(a, 0));
+        return Value::string(i >= 0 ? ui.host().songs()[size_t(i)].name : strArg(a, 0));
+    });
+    songMgr->on("song_artist", [&ui](std::vector<Value>& a) {
+        const int i = songInfoIndex(ui, strArg(a, 0));
+        return Value::string(i >= 0 ? ui.host().songs()[size_t(i)].artist : std::string());
+    });
+    songMgr->on("by_line", [&ui](std::vector<Value>& a) {
+        const int i = songInfoIndex(ui, strArg(a, 0));
+        return Value::string(i >= 0 ? ui.host().songs()[size_t(i)].artist : std::string());
+    });
 }
 
 }  // namespace ui

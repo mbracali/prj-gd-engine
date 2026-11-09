@@ -100,6 +100,16 @@ std::vector<std::string> Synth::loadBanks(const GameData& data) {
     // practice_kick / _snare / _hat, sync_click.cue) [C data]; kept loaded
     // here, so those panels' sounds play by name [I: the PS2 loads it with
     // the panel].
+    // RB's in-game cues (track_end.cue, ui/game.dta game_won_common) live in
+    // sfx/ingame_bank.milo, which no script names; loaded with the others
+    // [I: the original loads it with the game's panels, not read yet].
+    if (data.exists(scene::miloArkPath("sfx/ingame_bank.milo"))) try {
+        milos_.push_back(scene::loadMilo(data, scene::miloArkPath("sfx/ingame_bank.milo")));
+        preload(milos_.back()->root());
+        addBank("ingame", &milos_.back()->root());
+    } catch (const std::exception& e) {
+        problems.push_back(std::string("sfx/ingame_bank: ") + e.what());
+    }
     if (data.exists(scene::miloArkPath("sfx/practice_bank.milo"))) try {  // GH2's; RB has none [C data]
         milos_.push_back(scene::loadMilo(data, scene::miloArkPath("sfx/practice_bank.milo")));
         preload(milos_.back()->root());

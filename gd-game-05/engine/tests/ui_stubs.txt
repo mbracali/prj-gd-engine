@@ -17,3 +17,12 @@ crowd_audio play_stream
 # backlog's Flaming Head item), so their start / stop are stubs.
 guitarist0::hand_flames_*
 guitarist1::hand_flames_*
+# Rock Band (wave 01): the characters are M6 (GD05-008): available_prefab
+# gives a stand-in per instrument.
+char available_prefab
+# RB's saves and the profiles' data are M7 (GD05-009; DECISIONS D4).
+game submit_solo_song_score
+profile_mgr get_save_data_from_player
+profile_mgr get_char_options_from_player
+# RB's practice mode is M7 (GD05-009).
+practice_panel set_in_vocal_mode

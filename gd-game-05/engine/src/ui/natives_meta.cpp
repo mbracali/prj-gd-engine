@@ -679,6 +679,11 @@ public:
             return ui_.playSfx(args.empty() ? std::string() : args[0].str(), a.volume, a.pan, a.transpose), true;
         }
         if (msg == "stop_all_sfx") return ui_.host().stopAllSfx(), true;
+        // RB: {synth stop <cue>} (meta.dta music_stop) [C data].
+        if (msg == "stop") return ui_.host().stopSfx(args.empty() ? std::string() : args[0].str()), true;
+        // RB's microphones (Synth360's mic list): no change seen yet, nothing
+        // played back; the mic's menus are M8's (GD05-010) [I].
+        if (msg == "did_mics_change" || msg == "reset_mics_changed" || msg == "stop_playback_all_mics") return true;
         if (msg == "pause_all_sfx") return ui_.host().pauseAllSfx(args.empty() || args[0].truthy()), true;
         // The master Fader (0x822F7878): the mute cheat's kDbSilence / 0.
         if (msg == "set_master_vol") {
@@ -763,6 +768,7 @@ public:
         r = Value::integer(0);
         if (msg == "enabled") return r = Value::integer(set_ && gameCfgValue(ui_, "crowd_audio").truthy() ? 1 : 0), true;
         if (msg == "set_enabled") return set_ = !args.empty() && args[0].truthy(), true;
+        if (msg == "post_load") return true;  // RB: the crowd's loops load with the venue's banks (M5) [I]
         return msg == "turn_off" || msg == "set_paused";
     }
 
@@ -826,7 +832,8 @@ void installNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Scrip
     // Xbox Live and its services: logged STUBs (tests/ui_stubs.txt).
     for (const char* stub : {"achievements", "leaderboards"}) add(std::make_unique<StubObject>(stub, "XboxLive"));
     add(std::make_unique<QuietObj>(ui, "rnd", std::set<std::string>{"suspend", "unset_depth_of_field", "show_overlay", "toggle_overlay",
-                                                                     "reflect", "reset_postproc", "overlay_showing", "aspect"}));
+                                                                     "reflect", "reset_postproc", "overlay_showing", "aspect",
+                                                                     "set_in_game"}));
     add(std::make_unique<CrowdAudioObj>(ui));
     add(std::make_unique<QuietObj>(ui, "world", std::set<std::string>{"set", "get", "current_shot", "add_sink", "lighting"}));
     gMusicFader = static_cast<MusicFaderObj*>(add(std::make_unique<MusicFaderObj>(ui)));

@@ -34,7 +34,7 @@ GamePanelObj* gGame = nullptr;
 class PlayerConfigObj : public ScriptObject {
 public:
     PlayerConfigObj(UiManager& ui, int index) : ScriptObject("player_config" + std::to_string(index), "PlayerConfig"), ui_(ui), i_(index) {}
-    bool handleNative(Interp&, const std::string& msg, std::vector<Value>& args, Value& r) override {
+    bool handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) override {
         Session::PlayerCfg& p = ui_.session().players[size_t(i_)];
         r = Value::integer(0);
         if (msg == "set_difficulty") {
@@ -61,7 +61,13 @@ public:
         if (msg == "get_controller_sym") return r = Value::symbol(p.trackType == 0 ? "drum" : p.trackType == 3 ? "vocals" : "guitar"), true;
         if (msg == "get_controller_type") return r = Value::integer(p.trackType == 0 ? 2 : p.trackType == 3 ? 3 : 1), true;
         if (msg == "get_difficulty_sym") return r = Value::symbol(difficultySym(p.difficulty)), true;
-        if (msg == "get_char") return r = Value::symbol(p.character), true;
+        if (msg == "get_char") {
+            // A character object; until the player has one, the stand-in of
+            // the player's controller (ui/rb_natives.cpp, M6) [I].
+            ScriptObject* c = in.findObject(p.character);
+            if (!c) c = in.findObject(std::string("prefab_") + (p.trackType == 0 ? "drum" : p.trackType == 3 ? "vocals" : "guitar"));
+            return r = c ? Value::obj(c) : Value::integer(0), true;
+        }
         if (msg == "set_char") return p.character = args.empty() ? p.character : nameOf(args[0]), true;
         if (msg == "set_ui_waiting") return true;
         if (msg == "is_ready") return r = Value::integer(ready_ ? 1 : 0), true;
@@ -451,6 +457,28 @@ public:
         if (msg == "get_player_config") return r = Value::obj(configs_[size_t(std::clamp(intArg(args, 0), 0, 1))].get()), true;
         // RB: one local player participates (the band modes: M7) [I].
         if (msg == "is_player_participating") return r = Value::integer(intArg(args, 0) == 0 ? 1 : 0), true;
+        // RB's game panel queries (ui/game.dta, loading.dta) [I where noted].
+        if (msg == "lost") return r = Value::integer(ui.host().songLostForUi() ? 1 : 0), true;
+        if (msg == "foreach_local_player" || msg == "foreach_local_player_config") {
+            // $var bound to player 0's object (the player, or its config) [I: one local player].
+            std::string var = args.empty() ? std::string() : args[0].str();
+            if (!var.empty() && var[0] == '$') var = var.substr(1);
+            const Value saved = in.var(var);
+            in.var(var) = msg == "foreach_local_player" ? Value::obj(in.findObject("player0")) : Value::obj(configs_[0].get());
+            for (size_t k = 1; k < args.size(); ++k) r = in.evalValue(args[k]);
+            in.var(var) = saved;
+            return true;
+        }
+        if (msg == "get_venue_dir") {
+            // The venue's kind folder (world/<kind>/<venue>): small_club_06 -> small_club [C data: world/].
+            std::string v = in.send(this, "get_venue", {}, false).str();
+            const size_t us = v.rfind('_');
+            return r = Value::symbol(us != std::string::npos ? v.substr(0, us) : v), true;
+        }
+        if (msg == "load_all_chars" || msg == "load_crowd_audio" || msg == "reset_config" || msg == "unload_crowd_audio")
+            return r = Value::integer(0), true;
+        // The solo modes' score to the profile: RB's saves are M7 (GD05-009).
+        if (msg == "submit_solo_song_score") return in.onStub("game", msg, Value::integer(0)), r = Value::integer(0), true;
         if (msg == "get_difficulty") return r = Value::integer(s.players[size_t(std::clamp(intArg(args, 0), 0, 1))].difficulty), true;
         if (msg == "get_difficulty_sym")
             return r = Value::symbol(difficultySym(s.players[size_t(std::clamp(intArg(args, 0), 0, 1))].difficulty)), true;
@@ -734,6 +762,31 @@ private:
         const Player* p = ui_.host().gamePlayer(index);
         r = Value::integer(0);
         const int gems = ui_.host().gameCounter(index, "gems");
+        // RB's endgame (ui/endgame.dta): asked after the song closed, from the kept result.
+        if (!p) {
+            const UiHost::SongResult res = ui_.host().lastResult(index);
+            if (res.valid) {
+                if (msg == "score") return r = Value::integer(res.score), true;
+                if (msg == "num_stars") return r = Value::integer(res.stars), true;
+                if (msg == "notes_hit" || msg == "gems_hit") return r = Value::integer(res.notesHit), true;
+                if (msg == "longest_streak") return r = Value::integer(res.longestStreak), true;
+                if (msg == "percent_hit") return r = Value::integer(res.gems > 0 ? res.notesHit * 100 / res.gems : 0), true;
+                if (msg == "notes_hit_fraction") return r = Value::real(res.gems > 0 ? float(res.notesHit) / float(res.gems) : 0.0f), true;
+                if (msg == "failed") return r = Value::integer(res.failed ? 1 : 0), true;
+                if (msg == "win") return r = Value::integer(res.failed ? 0 : 1), true;
+            }
+        }
+        // RB's player stats (endgame.dta send_player_stats) [I: counters not kept yet are 0].
+        if (msg == "player_num") return r = Value::integer(index), true;
+        if (msg == "config") return r = ui_.interp().send("game", "get_player_config", {Value::integer(index)}), true;
+        if (msg == "is_net") return r = Value::integer(0), true;
+        if (msg == "finalize_stats") return true;
+        if (msg == "stats_finalized") return r = Value::integer(1), true;
+        if (msg == "notes_hit") return r = Value::integer(p ? p->notesHit() : 0), true;
+        if (msg == "notes_hit_fraction") return r = Value::real(p && gems > 0 ? float(p->notesHit()) / float(gems) : 0.0f), true;
+        if (msg == "failed_deploy" || msg == "saved_count" || msg == "fill_hit_count" || msg == "strummed_down" || msg == "strummed_up" ||
+            msg == "deploy_count" || msg == "solo_percentage")
+            return r = Value::integer(0), true;
         if (msg == "score") return r = Value::integer(p ? p->score() : 0), true;
         if (msg == "percent_hit") return r = Value::integer(p && gems > 0 ? p->notesHit() * 100 / gems : 0), true;
         if (msg == "num_stars") return r = Value::integer(p ? p->stars() : 0), true;
@@ -926,6 +979,7 @@ public:
         if (msg == "is_missing_mic") return true;  // 0: the vocals' mic check comes with the mic (M8)
         if (msg == "is_player_participating") return r = Value::integer(intArg(args, 0) == 0 ? 1 : 0), true;
         if (msg == "set_active_roster") return true;
+        if (msg == "load_all_chars") return true;  // the band's characters load with the venue (M6, GD05-008) [I]
         if (msg == "get_player_num_from_slot_num") return r = Value::integer(intArg(args, 0)), true;
         if (msg == "is_player_local") return r = Value::integer(intArg(args, 0) == 0 ? 1 : 0), true;
         if (msg == "get_instrument_from_controller") return r = Value::symbol("guitar"), true;
@@ -954,6 +1008,20 @@ public:
         if (msg == "set_music_speed") return ui_.host().setMusicSpeed(args.empty() ? 1.0f : args[0].number()), true;
         if (msg == "set_volume") return ui_.host().setMusicVolume(args.empty() ? 0.0f : args[0].number(), 0), true;
         if (msg == "update_practice_speed" || msg == "jump" || msg == "set_shuttle") return true;
+        if (msg == "set_realtime") return true;  // RB: the beat clock follows real time after the song [I]
+        // RB: the performer whose score the solo modes keep (endgame.dta) [I: player 0 for one player].
+        if (msg == "is_active_player") return r = Value::integer(intArg(args, 0) == 0 ? 1 : 0), true;  // one local player [I]
+        if (msg == "main_performer") return r = Value::obj(ui_.interp().findObject("player0")), true;
+        if (msg == "foreach_active_player") {
+            std::string var = args.empty() ? std::string() : args[0].str();
+            if (!var.empty() && var[0] == '$') var = var.substr(1);
+            Interp& interp = ui_.interp();
+            const Value saved = interp.var(var);
+            interp.var(var) = Value::obj(interp.findObject("player0"));
+            for (size_t k = 1; k < args.size(); ++k) r = interp.evalValue(args[k]);
+            interp.var(var) = saved;
+            return true;
+        }
         if (msg == "shuttle_active") return true;
         return false;
     }

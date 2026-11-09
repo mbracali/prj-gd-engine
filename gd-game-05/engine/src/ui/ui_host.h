@@ -105,6 +105,8 @@ public:
     // (is_missing_controller; a slot the port plays without, e.g. player 2
     // on one keyboard, never counts).
     virtual bool gameDeviceLost(int /*slot*/) const { return false; }
+    // RB's {game lost}: the song was failed.
+    virtual bool songLostForUi() const { return false; }
     // GamePanel exit: stops the song.
     virtual void gameEnd() = 0;
     // The developer cheats' {player0 lose} / {player0 win <stars>} (cheats.dta,
@@ -128,6 +130,13 @@ public:
     virtual float gameBeat() const = 0;        // the song position in beats
     virtual float songDurationMs() const = 0;  // to the song's end
     virtual const Player* gamePlayer(int index) const = 0;
+    // The last song's result per player, kept after the song closes (RB's
+    // endgame reads the players' stats once game_screen is gone).
+    struct SongResult {
+        bool valid = false, failed = false;
+        int score = 0, notesHit = 0, gems = 0, longestStreak = 0, stars = 0;
+    };
+    virtual SongResult lastResult(int /*index*/) const { return {}; }
     // The co-op band (game/band_performer.h): its score, streak, stars and
     // meter; nullptr outside co-op.
     virtual const BandPerformer* gameBand() const { return nullptr; }

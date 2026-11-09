@@ -917,7 +917,7 @@ universal launcher, not released on its own.
 | GD05-002 | Original | ✅ | M0 set-up: gd-game-02's engine copied and renamed (gd05, GD05_), rip, Ghidra project + export, agents/ notes, game-info.yaml (title ID 45410829, 0.0.1); gate: builds with 0 warnings, boots to a log line listing the archive | `gd-game-05/agents/CONTEXT.md`, `PROGRESS.md`, `DECISIONS.md` | Kickoff M0 |
 | GD05-003 | Original | ✅ | M1 data layer: ARK / DTA / cipher confirmed for RB; Milo (every class on the disc), textures, .mogg track maps, MIDI (every RB track), the vocal files, Bink; Python tools byte-exact; gate: --scenetest every Milo to its end, every texture, every .dtb, --videotest every .bik | `gd-game-05/docs/formats.md` | Kickoff M1 |
 | GD05-004 | Original | 🟡 | M2 songs, audio, gameplay core: song list, charts for every part / difficulty, stem mix and miss mutes, sfx; the rules from the XEX (guitar / bass, drums, vocals, Overdrive, band multiplier, Unison, saves, Big Rock Endings, stars); gate: --selftest all charts fully hit on every part, --sfxtest | `gd-game-05/docs/FINDINGS.md` | Kickoff M2 |
-| GD05-005 | Original | ❌ | M3 scripts, UI, the asset audit (--audittest, missing natives counted); gate: --scripttest, --uitest, --walktest quickplay boot to results | `gd-game-05/docs/audit.md` | Kickoff M3 |
+| GD05-005 | Original | 🟡 | M3 scripts, UI, the asset audit (--audittest, missing natives counted); gate: --scripttest, --uitest, --walktest quickplay boot to results. Done: `--scripttest` OK (config/band.dta), `--walktest quickplay` OK (title > Solo > Quickplay > song > difficulty (RB player slots) > loading > song > endgame). Open: `--uitest` 42 script component names not in the milos (shared macros, PS3 milo names), audit doc, PC wording | `gd-game-05/docs/audit.md` | Kickoff M3 |
 | GD05-006 | Original | ❌ | M4 highways and HUD: guitar / bass, drums, vocals track; Overdrive, solos, BREs, band meter; 1-4 players; song start order | | Kickoff M4 |
 | GD05-007 | Original | ❌ | M5 venues, crowd, cameras, lighting; gate: --venuetest every venue / shot, 60 vs 240 fps | | Kickoff M5 |
 | GD05-008 | Original | ❌ | M6 the band and the character creator (body, face, hair, outfits, instruments, IK, lip sync); gate: --chartest | | Kickoff M6 |
@@ -934,6 +934,7 @@ universal launcher, not released on its own.
 | GD05-019 | Original | ❌ | Band mechanics: band meter, saving a bandmate, Unison bonus, Big Rock Endings, solo awards, stars, band multiplier | scoring.dtb blocks loaded (`RbScoring`) | M2 |
 | GD05-020 | Original | ❌ | PC wording: 38 RB strings name the Xbox 360 or a console | `--selftest` reports them | M2 |
 | GD05-021 | Original | 🟡 | Guitar / bass judge: GH2's rules (gd02) with RB's points and streaks; re-read RB's watcher (HOPO rule, windows) | `game/player.cpp` | M2 |
+| GD05-022 | Original | ❌ | RenderDir / TexRenderer render-to-texture: RB draws some panels (the song list's cloth) into a texture; drawn flat for now [I] | `render/ui_view.cpp` | M3 |
 
 
 ## gd-game-06: Guitar Hero: Aerosmith (Xbox 360)

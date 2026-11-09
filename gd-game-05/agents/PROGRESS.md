@@ -118,3 +118,30 @@ Unison, Big Rock Endings, solo awards, stars) are not built yet.
 
 Next: M3 (RB's front end through its own scripts), then M4 highways. Time
 used: ~1 h 10 min of wall clock; the estimate stays 12-14 h for M0..M9.
+
+## 2026-11-09 15:45, M2 core done, M3 menus reach the song (in progress)
+
+Done since 14:58:
+- gd-engine-core: the microphone capture interface `gd::core::audio::Input`
+  (sdl3, miniaudio) with `gdcore_audio_input_selftest` (GDCORE-011).
+- Vocals: our own pitch detector; `--selftest` sings every song's Expert
+  vocals with a synthesised voice through it.
+- Launcher: `build_module_05` and verify_bundle's rule; gd05's FFmpeg is
+  built with the suffix `_gd05` (no clash with gd02's in the APK).
+- Front end (RB's own scripts, config/band.dta): intro movie, title, main
+  menu (RB's 3D buttons), Solo, Quickplay, the song list (RB song provider,
+  rank tiers [I]), the difficulty screen (RB's player slots), the loading
+  screens, game_screen with the song playing. Xbox profile / save flow
+  skipped (DECISIONS D4).
+
+Verified:
+- `engine/build/linux/gdcore_audio_input_selftest` -> `sdl3: ... frames pushed in real time (24576 in 0.5 s)`, `miniaudio: ... (24000 in 0.5 s)`, `input selftest: OK`.
+- `gd05 "$ISO" --selftest` -> `all charts fully hit`, `vocals through the pitch detector: 58 songs, 2132 of 2136 phrases rated Great or better` (exit 0).
+- `gd05 "$ISO" --videotest` -> `videotest: OK` (with the `_gd05` FFmpeg).
+- `gd05 "$ISO" --song greengrass --autoplay` with a screenshot at 50 s:
+  the song plays on gd02's debug highway (score, x4, Overdrive ready).
+- GD05_KEYS walk boot -> game_screen (screenshots in agents/scratch, not committed).
+
+Not done / approximate: RB's track and HUD (M4: the debug highway is
+used), RB's song list cloth (RenderDir drawn flat, GD05-022), label wrapping,
+the band modes' slots (one local player), characters as objects (M6).

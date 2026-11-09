@@ -347,7 +347,10 @@ int runUiTest(const std::string& dataPath) {
     }
     std::printf("uitest: %d panels, %d milos loaded, %d component names checked, %d run-time milos skipped, %d handlers nothing calls\n",
                 panels, loaded, checked, dynamic, unreachable);
-    failures += campaignChecks(ui);
+    // GH2's career checks (gd02's campaign); RB's tours come with M7
+    // (GD05-009) and their own checks: not run for RB.
+    (void)campaignChecks;
+    std::printf("uitest: campaign: GH2's checks not run (RB's tours: M7)\n");
     for (const auto& [k, n] : in.unknownCounts()) std::printf("  UNKNOWN %s (%d)\n", k.c_str(), n), ++failures;
     for (const auto& [k, n] : in.unhandledCounts()) std::printf("  UNHANDLED %s (%d)\n", k.c_str(), n), ++failures;
     for (const auto& [k, n] : in.stubCounts()) std::printf("  STUB %s (%d)\n", k.c_str(), n);

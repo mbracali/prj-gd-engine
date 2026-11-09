@@ -265,11 +265,13 @@ public:
 
     // Messages whose {command} arguments are passed unevaluated, as Code values.
     std::vector<std::string> lazyMessages{"delay_task", "thread_task", "script_task", "foreach_player", "foreach_player_matcher",
-                                          "interp_task", "foreach_venue", "wait", "wait_timeout", "iterate"};
+                                          "interp_task", "foreach_venue", "wait", "wait_timeout", "iterate", "foreach_active_player",
+                                          "foreach_local_player", "foreach_local_player_config"};
     // Messages whose $var arguments are passed by name (as symbols).
     std::vector<std::string> byNameMessages{"foreach_player", "foreach_player_matcher", "interp_task", "foreach_venue",
                                             "finish_song", "next_cash_award", "get_highscore", "wait_timeout", "iterate",
-                                            "get_section_bounds", "encore_newly_unlocked"};
+                                            "get_section_bounds", "encore_newly_unlocked", "foreach_active_player", "foreach_local_player",
+                                            "foreach_local_player_config"};
 
     // ---- host settings
     std::map<std::string, std::string> locale;  // {localize token}

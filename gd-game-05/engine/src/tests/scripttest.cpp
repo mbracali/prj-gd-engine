@@ -463,7 +463,7 @@ int runScriptTest(const std::string& dataPath) {
         return 1;
     }
 
-    // 1. The game's boot script, config/gh2.dta (it includes ui/ui.dta,
+    // 1. The game's boot script, config/band.dta (it includes ui/ui.dta,
     // objects.dta with the world, char, track and ui objects, songs.dta ...).
     ScriptLoader boot(*data);
     DataNode bootTree;
@@ -472,12 +472,12 @@ int runScriptTest(const std::string& dataPath) {
         bootTree = boot.load("config/band.dta");
         leftovers += leftoverDirectives(bootTree);
     } catch (const std::exception& ex) {
-        std::printf("  load config/gh2.dta: %s\n", ex.what());
+        std::printf("  load config/band.dta: %s\n", ex.what());
         ++loadFailures;
     }
-    for (const std::string& e : boot.stats.errors) std::printf("  config/gh2.dta: %s\n", e.c_str());
+    for (const std::string& e : boot.stats.errors) std::printf("  config/band.dta: %s\n", e.c_str());
     const ScriptLoader::Stats& bs = boot.stats;
-    std::printf("boot config/gh2.dta: %d files, %d #include, %d #merge, %d #define, %d #undef, %d #ifdef/#ifndef, %d #autorun, "
+    std::printf("boot config/band.dta: %d files, %d #include, %d #merge, %d #define, %d #undef, %d #ifdef/#ifndef, %d #autorun, "
                 "%d macro uses, %zu macros, %zu include/merge errors\n",
                 bs.includes + bs.merges + 1, bs.includes, bs.merges, bs.defines, bs.undefs, bs.conditionals, bs.autoruns,
                 bs.macroUses, boot.macros.size(), bs.errors.size());
@@ -548,7 +548,9 @@ int runScriptTest(const std::string& dataPath) {
         const DataNode* list = tree.find(sub);
         const DataNode* init = list ? list->find("init") : nullptr;
         if (!init) {
-            std::printf("  config/gh2.dta: no (%s (init ...))\n", sub);
+            // RB's band.dta has (ui (init ...)) but no (system (init ...)) [C data].
+            if (std::string(sub) == "system") continue;
+            std::printf("  config/band.dta: no (%s (init ...))\n", sub);
             ++runFailures;
             continue;
         }

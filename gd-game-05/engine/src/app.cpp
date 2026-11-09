@@ -268,6 +268,8 @@ public:
     unsigned playerFrets(int player) override { return player >= 0 && player < 2 ? padFrets_[size_t(player)] : 0u; }
     int playerStrums(int player) override { return player >= 0 && player < 2 ? padStrums_[size_t(player)] : 0; }
     const Player* gamePlayer(int index) const override { return index == 0 ? player_.get() : player2_.get(); }
+    SongResult lastResult(int index) const override { return index >= 0 && index < 2 ? lastResult_[size_t(index)] : SongResult{}; }
+    std::array<SongResult, 2> lastResult_{};
     const BandPerformer* gameBand() const override { return coopBand_.get(); }
     int gameCounter(int player, const std::string& key) const override;
     void setPlayerSwitch(int index, const std::string& name, bool on) override {
@@ -526,6 +528,7 @@ private:
     }
     Autoplay* botFor(const Player* p) { return p == player_.get() ? bot_.get() : bot2_.get(); }
     bool songLost() const { return coopBand_ ? coopBand_->failed() : player_ && player_->failed(); }
+    bool songLostForUi() const override { return songLost(); }
     // Development aid: GD05_FAIL_AT=<song ms> fails the song then.
     float failAtMs_ = 1e30f;
     uint64_t failTicks_ = 0;
@@ -1340,10 +1343,25 @@ bool App::prepareTrack() {
 
 void App::endSong() {
     if (!player_) return;
+    // RB: the outro's screen change (ui/game.dta game_outro) must come even
+    // when the song closes before the outro delay ran out.
+    if ((wonSent_ || lostSent_) && !outroSent_ && ui_) {
+        outroSent_ = true;
+        ui_->gameEvent("game_outro_complete");
+        ui_->gameEvent("game_outro");
+    }
     input_.setTouchLanes(0, {}), input_.setTouchLanes(1, {});  // no lanes for the fingers until the next song
     SDL_Log("%s: score %d, %d/%d notes, longest streak %d%s (audio underruns: %lld frames)", info_->id.c_str(),
             player_->score(), player_->notesHit(), int(player_->chart().gems.size()), player_->longestStreak(),
             player_->failed() ? ", failed" : "", static_cast<long long>(mixer_.underruns()));
+    for (int i = 0; i < 2; ++i) {
+        const Player* p = i == 0 ? player_.get() : player2_.get();
+        SongResult& res = lastResult_[size_t(i)];
+        res = {};
+        if (!p) continue;
+        res.valid = true, res.failed = p->failed(), res.score = p->score(), res.notesHit = p->notesHit();
+        res.gems = int(p->chart().gems.size()), res.longestStreak = p->longestStreak(), res.stars = p->stars();
+    }
     if (player2_)
         SDL_Log("player 2: score %d, %d/%d notes, longest streak %d", player2_->score(), player2_->notesHit(),
                 int(player2_->chart().gems.size()), player2_->longestStreak());
@@ -1951,6 +1969,7 @@ void App::updateSong(float t) {
             for (int p = 0; p < 2; ++p)
                 if (Player* pl = p == 0 ? player_.get() : player2_.get()) pl->setCrowdRating(1.0f);
         ui_->gameEvent("game_won_msg", {Value::integer(encoreCheck_ ? 1 : 0)});
+        ui_->gameEvent("game_won");  // RB's game panel (ui/game.dta game_won) [C data]
         ui_->gameEvent("game_over");
     }
     if (!wonSent_ && !lostSent_ && songLost()) {
@@ -1963,6 +1982,9 @@ void App::updateSong(float t) {
     if ((wonSent_ || lostSent_) && !outroSent_ && !paused_ && now >= outroAtNs_) {
         outroSent_ = true;
         ui_->gameEvent("game_outro_complete");
+        // RB: game_outro asks band_ui_sink sync_screen for the mode's win /
+        // lose screen (ui/game.dta) [C data; the delay is GH2's: I].
+        ui_->gameEvent("game_outro");
     }
 }
 
@@ -2499,16 +2521,19 @@ void App::menuMusic(bool on) {
         return;
     }
     if (music_ == Music::Menu) return;
-    // config/synth.dta (metamusic (volume -6) (music metaloop1_warpigs ...)):
-    // a random loop from sfx/streams.
-    static const char* const kLoops[] = {"metaloop1_warpigs", "metaloop2_psycho", "metaloop3_whowas", "metaloop_artillery", "metaloop_crowns",
-                                         "metaloop_ftk", "metaloop_hoods", "metaloop_rawdog", "metaloop_voivod"};
+    // RB's config/synth.dta (metamusic (volume -12.0) (fade_time 2.0) (music
+    // shellmusic_29fingers ...)) [C data]: a random loop from sfx/streams
+    // [I: the fade-in is not applied].
+    static const char* const kLoops[] = {"shellmusic_29fingers", "shellmusic_blooddoll", "shellmusic_cantletgo", "shellmusic_daylate",
+                                         "shellmusic_imsosick", "shellmusic_nightmare", "shellmusic_pleasure", "shellmusic_seven",
+                                         "shellmusic_epic", "shellmusic_suffragette", "shellmusic_thehandthatfeeds", "shellmusic_gowiththeflow",
+                                         "shellmusic_missqueen"};
     const std::string name = kLoops[SDL_GetTicks() % (sizeof kLoops / sizeof kLoops[0])];
     try {
         auto s = std::make_unique<VorbisStream>(data_->read("sfx/streams/" + name + ".mogg"));
         const int ch = s->channels();
         std::vector<Mixer::Track> tracks(static_cast<size_t>(ch));
-        for (int c = 0; c < ch; ++c) tracks[size_t(c)].pan = ch == 2 ? (c == 0 ? -1.0f : 1.0f) : 0.0f, tracks[size_t(c)].volume = 0.5f;
+        for (int c = 0; c < ch; ++c) tracks[size_t(c)].pan = ch == 2 ? (c == 0 ? -1.0f : 1.0f) : 0.0f, tracks[size_t(c)].volume = 0.25f;  // -12 dB
         mixer_.play(std::make_unique<LoopSource>(std::move(s), 0, 0, 0), tracks, 0);
         music_ = Music::Menu;
     } catch (const std::exception& e) {

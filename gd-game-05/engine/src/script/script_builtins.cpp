@@ -5,6 +5,7 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <functional>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -108,6 +109,23 @@ struct Place {
 
 void Interp::installCoreBuiltins() {
     auto arg = [](Interp& in, const DataNode& c, size_t k) { return in.evalArg(c, k); };
+
+    // {'`' (a {',' b} c)}: RB's quasiquote (ui/endgame.dta send_player_stats)
+    // [C data]: the list as data, its {',' expr} parts evaluated.
+    addBuiltin("`", [](Interp& in, const DataNode& c) {
+        if (c.children.size() < 2) return Value::list();
+        std::function<Value(const DataNode&)> quasi = [&](const DataNode& n) -> Value {
+            if (n.type == DataNode::Type::Command && n.children.size() >= 2 && n.children[0].isText() && n.children[0].s == ",")
+                return in.eval(n.children[1]);
+            if (n.type == DataNode::Type::Array) {
+                std::vector<Value> v;
+                for (const DataNode& k : n.children) v.push_back(quasi(k));
+                return Value::list(std::move(v));
+            }
+            return in.toValue(n);
+        };
+        return quasi(c.children[1]);
+    });
 
     // -- variables and definitions
     addBuiltin("set", [arg](Interp& in, const DataNode& c) {
@@ -332,6 +350,44 @@ void Interp::installCoreBuiltins() {
     addBuiltin("floor", [arg](Interp& in, const DataNode& c) { return Value::real(std::floor(arg(in, c, 1).number())); });
     addBuiltin("ceil", [arg](Interp& in, const DataNode& c) { return Value::real(std::ceil(arg(in, c, 1).number())); });
     // {random_int lo hi}: lo <= n < hi.
+    // RB's random context (ui/loading.dta: the tips and loading pictures):
+    // {seed_random_context n} seeds it, {random_context <array>} picks one
+    // element [I: the port's own generator].
+    addBuiltin("seed_random_context", [arg](Interp& in, const DataNode& c) {
+        (void)arg(in, c, 1);
+        return Value::integer(0);
+    });
+    addBuiltin("random_context", [arg](Interp& in, const DataNode& c) {
+        const Value a = arg(in, c, 1);
+        const auto* l = listOf(a);
+        if (!l || l->empty()) return Value::integer(0);
+        return in.evalValue((*l)[size_t(in.randomInt(0, int(l->size())))]);
+    });
+    // {stagekit_reset}: the Stage Kit's lights (an Xbox 360 accessory) off;
+    // the port drives no Stage Kit [C data: ui/game.dta; decision].
+    addBuiltin("stagekit_reset", [](Interp&, const DataNode&) { return Value::integer(0); });
+    // {available_prefab player instrument [gender]}: a character prefab for
+    // the player; the characters are M6 (GD05-008): a STUB, the instrument's
+    // name as the character's [I].
+    addBuiltin("available_prefab", [arg](Interp& in, const DataNode& c) {
+        in.onStub("char", "available_prefab", Value::integer(0));
+        std::string inst = c.children.size() > 2 ? arg(in, c, 2).str() : std::string("guitar");
+        if (inst != "bass" && inst != "drum" && inst != "vocals") inst = "guitar";
+        ScriptObject* o = in.findObject("prefab_" + inst);
+        return o ? Value::obj(o) : Value::integer(0);
+    });
+    // {localize_separated_int n}: n with the locale's thousands separator
+    // ("," for English) [I: the separator's locale token is not read].
+    addBuiltin("localize_separated_int", [arg](Interp& in, const DataNode& c) {
+        long long n = (long long)arg(in, c, 1).number();
+        const bool neg = n < 0;
+        std::string d = std::to_string(neg ? -n : n), out;
+        for (size_t i = 0; i < d.size(); ++i) {
+            if (i > 0 && (d.size() - i) % 3 == 0) out += ',';
+            out += d[i];
+        }
+        return Value::string(neg ? "-" + out : out);
+    });
     addBuiltin("random_int", [arg](Interp& in, const DataNode& c) {
         return Value::integer(in.randomInt(arg(in, c, 1).integerValue(), arg(in, c, 2).integerValue()));
     });

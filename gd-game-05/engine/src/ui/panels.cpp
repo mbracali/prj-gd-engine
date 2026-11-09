@@ -883,7 +883,14 @@ std::unique_ptr<ScriptObject> makeClassObject(UiManager& ui, const std::string& 
     // RB's PreloadPanel (ui/loading.dta): the song's files are read from the
     // disc as the song loads, so the preload always succeeds [I].
     if (cls == "PreloadPanel") {
-        auto p = std::make_unique<PanelObj>(ui, name, cls);
+        struct PreloadPanelObj : PanelObj {
+            using PanelObj::PanelObj;
+            bool handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) override {
+                if (msg == "clear_cache") return r = Value::integer(0), true;  // nothing cached
+                return PanelObj::handleNative(in, msg, args, r);
+            }
+        };
+        auto p = std::make_unique<PreloadPanelObj>(ui, name, cls);
         p->props["preload_ok"] = Value::integer(1);
         return p;
     }

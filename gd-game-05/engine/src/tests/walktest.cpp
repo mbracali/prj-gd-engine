@@ -112,54 +112,35 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         at("loading_screen");
         at("game_screen", 30000);
     };
-    if (scenario == "quickplay") {
-        endMs_ = 60000;  // long enough for a high score (the table's lowest is 10000)
-        // Star Power deployed once two phrases filled half the meter (20.8 s
-        // and 35.2 s on Easy): claps on its beats, sp_depleted as it runs out.
-        songKeys_ = "45000:starpower";
+    // Rock Band's way into a quick play song (ui/main.dta, selsong.dta,
+    // seldiff.dta, loading.dta) [C data]: the intro movie, the title, Solo,
+    // Quickplay, the song list's first song (random_song), the difficulty
+    // the slot focuses, then the loading screens.
+    auto rbQuickplay = [&] {
         wait(300);
-        press(kX);  // skips the three splashes (9 s otherwise)
-        check("splashes_skipped", 1000);
+        press(kX);  // the intro movie (skipped by GD05_SKIP_MOVIES in the walks anyway)
         at("splash_screen", 30000);
-        press(kX);  // any button
-        at("startup_create_save_screen");
-        press(kX);  // choose a device (create the save)
-        at("saving_screen");
-        at("guitar_help_screen");
         press(kX);
-        quickplaySong(3);
-        check("load_hold");
-        check("quickplay_venue");
-        wait(3000);
-        check("task_clock_song");
-        check("intro_sequence");
-        check("intro_camera");
-        check("star_phrase");
-        check("track_surface");
-        check("band_shadows");
-        at("endgame_screen", 90000);
-        wait(600);
-        press(kX);  // CONTINUE (me_continue.btn)
-        at("highscore_screen");
-        press(kStart);  // the name as it is
-        wait(300);
-        press(kX);
-        at("complete_screen");
-        press(kX);  // the song list (comp_selsong.btn)
-        at("meta_loading_screen");
-        at("saving_screen");
-        at("qp_selsong_screen");
-        press(kTri);  // back
         at("main_screen");
-        check("menu_sounds");  // game_outro_complete paused the game: menu sounds still play (GD02-073)
-        // A second song after one played to its end: its own venue (GD02-148).
-        wait(2000);
-        quickplaySong(0);
-        check("quickplay_venue");
-        expect_ = {"cut_scene_screen", "splash_screen", "startup_load_finder_screen", "startup_create_save_screen", "saving_screen",
-                   "guitar_help_screen", "main_screen", "qp_selsong_screen", "qp_diff_screen", "loading_screen", "game_screen",
-                   "post_show_screen", "endgame_screen", "highscore_screen", "complete_screen", "meta_loading_screen", "saving_screen",
-                   "qp_selsong_screen", "main_screen", "qp_selsong_screen", "qp_diff_screen", "loading_screen", "game_screen"};
+        press(kX);  // SOLO (solo.btn, the focus)
+        at("main_solomode_screen");
+        press(kX);  // QUICKPLAY
+        at("qp_selsong_screen");
+        wait(500);
+        press(kX);  // the first entry
+        at("qp_seldiff_solo_screen");
+        press(kX);  // the guitar slot's part (guitar.btn): RB asks guitar or bass first
+        wait(1500);  // the button's selecting animation
+        press(kX);  // the focused difficulty: ready
+        at("game_screen", 60000);  // through loading_screen and the loading tips
+    };
+    if (scenario == "quickplay") {
+        endMs_ = 30000;  // the song ends early (the walk's end time)
+        rbQuickplay();
+        wait(3000);
+        at("endgame_waiting_screen", 90000);  // modes.dta win_screen (the default mode)
+        at("qp_endgame_screen", 20000);       // the mode's endgame_screen once the stats are in
+        wait(1000);
     } else if (scenario == "dev_cheats") {
         // GD02-045: Enhanced > Developer Keyboard Cheats on, then a real 'l'
         // key (SDL event, through the app's bound-key filter) runs cheats.dta's
@@ -2967,7 +2948,8 @@ int WalkDriver::finish(ui::UiManager& ui) {
         ok = false;
     }
     // The save (quickplay): career.json with the song's high score.
-    if (scenario_ == "quickplay") {
+    // GH2's save checks (gd02's quickplay walk): RB's saves are M7 (GD05-009).
+    if (scenario_ == "gh2_quickplay") {
         std::ifstream f(ui.savePath());
         std::stringstream ss;
         ss << f.rdbuf();
@@ -2993,7 +2975,7 @@ int WalkDriver::finish(ui::UiManager& ui) {
         }
     }
     // The port's band in every save: a fresh career.json has The Glitches.
-    if (scenario_ == "quickplay" || scenario_ == "career" || scenario_ == "career_full") {
+    if (scenario_ == "career" || scenario_ == "career_full") {
         std::ifstream f(ui.savePath());
         std::stringstream ss;
         ss << f.rdbuf();
@@ -3076,8 +3058,8 @@ int WalkDriver::finish(ui::UiManager& ui) {
         std::printf("  career.json: %s\n", got.c_str());
         if (got != want) std::printf("  FAIL career.json is not: %s\n", want.c_str()), ok = false;
     }
-    // The endgame photo (quickplay): player 0's outfit, one of its four pictures, on the disc.
-    if (scenario_ == "quickplay") {
+    // The endgame photo (GH2's quickplay): player 0's outfit, one of its four pictures, on the disc.
+    if (scenario_ == "gh2_quickplay") {
         const auto& photos = ui.session().winnerPhotos;
         const std::string outfit = ui.session().players[0].outfit;
         const std::string p = photos.empty() ? std::string() : photos[0];
