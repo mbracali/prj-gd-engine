@@ -64,12 +64,16 @@ public:
         if (msg == "get_char") return r = Value::symbol(p.character), true;
         if (msg == "set_char") return p.character = args.empty() ? p.character : nameOf(args[0]), true;
         if (msg == "set_ui_waiting") return true;
+        if (msg == "is_ready") return r = Value::integer(ready_ ? 1 : 0), true;
+        if (msg == "set_ready") return ready_ = !args.empty() && args[0].truthy(), true;
+        if (msg == "intro_name") return r = Value::string(i_ == 0 ? "PLAYER 1" : "PLAYER " + std::to_string(i_ + 1)), true;
         return false;
     }
 
 private:
     UiManager& ui_;
     int i_;
+    bool ready_ = false;  // RB: the difficulty is chosen (seldiff.dta set_ready) [I: kept here, not in the session]
 };
 
 // {game get_bank_loader} reset, {game video_provider} get_video_file.
@@ -445,6 +449,8 @@ public:
         if (msg == "get_venue") return r = Value::symbol(s.venue), true;
         if (msg == "set_venue") return s.venue = argStr(0), true;
         if (msg == "get_player_config") return r = Value::obj(configs_[size_t(std::clamp(intArg(args, 0), 0, 1))].get()), true;
+        // RB: one local player participates (the band modes: M7) [I].
+        if (msg == "is_player_participating") return r = Value::integer(intArg(args, 0) == 0 ? 1 : 0), true;
         if (msg == "get_difficulty") return r = Value::integer(s.players[size_t(std::clamp(intArg(args, 0), 0, 1))].difficulty), true;
         if (msg == "get_difficulty_sym")
             return r = Value::symbol(difficultySym(s.players[size_t(std::clamp(intArg(args, 0), 0, 1))].difficulty)), true;
@@ -918,6 +924,8 @@ public:
         // player until the band modes (M7)].
         if (msg == "get_player_config" || msg == "get_player") return r = in.send("game", "get_player_config", args), true;
         if (msg == "is_missing_mic") return true;  // 0: the vocals' mic check comes with the mic (M8)
+        if (msg == "is_player_participating") return r = Value::integer(intArg(args, 0) == 0 ? 1 : 0), true;
+        if (msg == "set_active_roster") return true;
         if (msg == "get_player_num_from_slot_num") return r = Value::integer(intArg(args, 0)), true;
         if (msg == "is_player_local") return r = Value::integer(intArg(args, 0) == 0 ? 1 : 0), true;
         if (msg == "get_instrument_from_controller") return r = Value::symbol("guitar"), true;

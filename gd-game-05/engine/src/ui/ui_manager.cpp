@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "ui/ui_manager.h"
+#include "ui/rb_multifocus.h"
 
 #include <SDL3/SDL.h>
 
@@ -399,6 +400,14 @@ Value UiManager::route(const std::string& msg, std::vector<Value> args) {
     // screen, then its focus panel.
     Value r = callScript(interp_.findObject("ui"), msg, args);
     if (!r.isUnhandled()) return r;
+    // RB: the player's slot hears its panel's messages first (FOCUS_MSG, SELECT_MSG).
+    if (!slots_.empty()) {
+        r = slots_.front()->dispatch(msg, args);
+        if (!r.isUnhandled()) {
+            checkSlotsReady();
+            return r;
+        }
+    }
     if (current_) {
         if (current_->routeNative(msg, args, r)) return r;
         r = callScript(current_, msg, args);
@@ -409,6 +418,18 @@ Value UiManager::route(const std::string& msg, std::vector<Value> args) {
         }
     }
     return Value::unhandled();
+}
+
+void UiManager::checkSlotsReady() {
+    if (slots_.empty() || !current_ || phase_ != Phase::Idle) return;
+    for (auto& s : slots_)
+        if (!s->ready()) return;
+    ScreenObj* s = current_;
+    // The screen leaves: no more slot messages. The slots may be running a
+    // handler right now: they go to retiredSlots_, freed at the next screen.
+    for (auto& sl : slots_) retiredSlots_.push_back(std::move(sl));
+    slots_.clear();
+    callScript(s, "start_loading_msg");
 }
 
 Value UiManager::foreachPlayer(const std::vector<Value>& args) {
@@ -641,6 +662,10 @@ void UiManager::switchScreens() {
     }
     if (!animIn) resetMetacam();
     to->nativeEntered();
+    // RB's player slots: made for the new screen, entered and updated before its enter script.
+    for (auto& sl : slots_) retiredSlots_.push_back(std::move(sl));
+    slots_ = makePlayerSlots(*this, *to);
+    for (auto& sl : slots_) sl->dispatch("enter"), sl->dispatch("update");
     callScript(to, "enter");
     route("screen_change", {Value::obj(to), Value::obj(from), Value::integer(back_ ? 1 : 0)});
     if (animIn) {
@@ -865,6 +890,7 @@ void UiManager::updateAnims() {
 }
 
 void UiManager::update() {
+    retiredSlots_.clear();  // RB player slots retired last frame (no handler of theirs runs now)
     const double wall = double(SDL_GetTicksNS()) / 1e6;
     frameDt_ = std::clamp(wall - lastWall_, 0.0, 100.0);
     lastWall_ = wall;
@@ -1128,6 +1154,11 @@ void UiManager::routeButton(int button, int player) {
         return;
     }
     if (s != current_ || !pending_.empty()) return;
+    // RB: the player's slot (its state's BUTTON_DOWN_MSG, then the type's).
+    if (!slots_.empty() && !slots_.front()->dispatch("button_down", args).isUnhandled()) {
+        checkSlotsReady();
+        return;
+    }
     if (s->nativeButtonDown(button, player)) return;
     PanelObj* fp = s->focusPanel();
     if (!fp || !fp->up) {

@@ -269,6 +269,15 @@ private:
     const DataNode* boot_ = nullptr;
     const DataNode* modes_ = nullptr;
     ScriptObject* sessionWaiter_ = nullptr;
+    // RB's player slots of the current screen (ui/rb_multifocus.h).
+    std::vector<std::unique_ptr<class PlayerSlotObj>> slots_, retiredSlots_;
+
+public:
+    std::vector<std::unique_ptr<class PlayerSlotObj>>& playerSlots() { return slots_; }
+    // RB: after a slot changed, the screen loads the song once every slot is ready.
+    void checkSlotsReady();
+
+private:
     std::map<std::string, DataNode> macros_;
     std::vector<std::unique_ptr<ScriptObject>> natives_;
     std::unique_ptr<Session> session_;

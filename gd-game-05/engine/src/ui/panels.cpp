@@ -880,6 +880,13 @@ std::unique_ptr<ScriptObject> makeClassObject(UiManager& ui, const std::string& 
     if (auto c = store::makeClass(ui, cls, name)) return c;
     if (cls == "MetaPanel") return std::make_unique<MetaPanelObj>(ui, name);
     if (cls == "MoviePanel") return std::make_unique<MoviePanelObj>(ui, name);
+    // RB's PreloadPanel (ui/loading.dta): the song's files are read from the
+    // disc as the song loads, so the preload always succeeds [I].
+    if (cls == "PreloadPanel") {
+        auto p = std::make_unique<PanelObj>(ui, name, cls);
+        p->props["preload_ok"] = Value::integer(1);
+        return p;
+    }
     if (cls == "HelpBarPanel") return std::make_unique<HelpBarPanelObj>(ui, name);
     if (cls == "SelSongPanel") return std::make_unique<SelSongPanelObj>(ui, name);
     if (cls == "SliderPanel") return std::make_unique<SliderPanelObj>(ui, name);

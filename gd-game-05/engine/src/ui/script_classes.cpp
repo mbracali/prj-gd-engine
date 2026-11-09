@@ -17,6 +17,7 @@
 #include "ui/sfx_args.h"
 #include "ui/ui_host.h"
 #include "ui/ui_objects.h"
+#include "ui/rb_multifocus.h"
 
 namespace ui {
 
@@ -882,6 +883,16 @@ bool ScreenObj::handleNative(Interp&, const std::string& msg, std::vector<Value>
         return r = Value::symbol(p ? p->focus : std::string()), true;
     }
     if (msg == "is_up") return r = Value::integer(ui.current() == this ? 1 : 0), true;
+    // RB's MultiFocusScreen: update <slot> / export_all <msg> to the player slots (ui/rb_multifocus.h).
+    if (msg == "update" && !args.empty() && args[0].type == Value::Type::Object) {
+        if (auto* sl = dynamic_cast<PlayerSlotObj*>(args[0].object)) sl->dispatch("update"), ui.checkSlotsReady();
+        return true;
+    }
+    if (msg == "export_all") {
+        const std::string m = args.empty() ? std::string() : args[0].str();
+        for (auto& sl : ui.playerSlots()) sl->dispatch(m);
+        return true;
+    }
     // RB's UIScreen has_panel <panel>: whether the panel is one of the screen's [C data: main.dta].
     if (msg == "has_panel") {
         const std::string want = args.empty() ? std::string() : args[0].type == Value::Type::Object && args[0].object ? args[0].object->name() : args[0].str();
