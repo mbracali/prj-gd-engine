@@ -236,7 +236,7 @@ target_link_libraries(gd05 PRIVATE Threads::Threads)
 
 target_compile_definitions(gd05 PRIVATE GD05_VERSION="${PROJECT_VERSION}")
 
-# GH2's videos (src/video/wmv_player.cpp) and sound effects (XMA,
+# Rock Band's videos (Bink, src/video/wmv_player.cpp) and sound effects (XMA,
 # src/audio/xma_decoder.cpp): FFmpeg's libavformat, libavcodec
 # and libavutil as shared libraries, the minimal LGPL build of
 # build_common.sh's build_ffmpeg, installed in GD05_FFMPEG_DIR (on Android one
@@ -260,20 +260,24 @@ if(GD05_VIDEO)
   if(ffmpeg_dir)
     target_include_directories(gd05 SYSTEM PRIVATE "${ffmpeg_dir}/include")
     foreach(lib avformat avcodec avutil)
-      find_library(GD05_FFMPEG_${lib} NAMES ${lib} PATHS "${ffmpeg_dir}/lib" NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
+      # gd05's FFmpeg carries the build suffix "_gd05" (build_common.sh), so
+      # its Bink build never clashes with another module's FFmpeg in the
+      # launcher's APK, whose modules share one library folder.
+      find_library(GD05_FFMPEG_${lib} NAMES ${lib}_gd05 ${lib} PATHS "${ffmpeg_dir}/lib" NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
       if(NOT GD05_FFMPEG_${lib})
         message(FATAL_ERROR "GD05_FFMPEG_DIR: no ${lib} library in ${ffmpeg_dir}/lib")
       endif()
       add_library(gd05_ffmpeg_${lib} SHARED IMPORTED)
       if(WIN32)
-        file(GLOB dll "${ffmpeg_dir}/bin/${lib}-*.dll")
+        file(GLOB dll "${ffmpeg_dir}/bin/${lib}_gd05-*.dll" "${ffmpeg_dir}/bin/${lib}-*.dll")
+        list(GET dll 0 dll)
         set_target_properties(gd05_ffmpeg_${lib} PROPERTIES IMPORTED_IMPLIB "${GD05_FFMPEG_${lib}}" IMPORTED_LOCATION "${dll}")
         add_custom_command(TARGET gd05 POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy_if_different "${dll}" "$<TARGET_FILE_DIR:gd05>")
       else()
         set_target_properties(gd05_ffmpeg_${lib} PROPERTIES IMPORTED_LOCATION "${GD05_FFMPEG_${lib}}")
         if(NOT APPLE AND NOT ANDROID)
           # The file named by the library's SONAME (libavcodec.so.61), copied next to the program.
-          file(GLOB sonames "${ffmpeg_dir}/lib/lib${lib}.so.[0-9]*")
+          file(GLOB sonames "${ffmpeg_dir}/lib/lib${lib}_gd05.so.[0-9]*" "${ffmpeg_dir}/lib/lib${lib}.so.[0-9]*")
           list(FILTER sonames INCLUDE REGEX "\\.so\\.[0-9]+$")
           add_custom_command(TARGET gd05 POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy_if_different ${sonames} "$<TARGET_FILE_DIR:gd05>")
         endif()

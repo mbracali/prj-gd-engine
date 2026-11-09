@@ -50,7 +50,7 @@ FFMPEG_URLS=("$FFMPEG_URL"
   "https://github.com/mbracali/prj-gd-engine/releases/download/deps/ffmpeg-$FFMPEG_VERSION.tar.xz")
 FFMPEG_CONFIGURE=(--disable-everything --disable-programs --disable-doc --disable-network --disable-autodetect
   --disable-avdevice --disable-avfilter --disable-swscale --disable-swresample --disable-debug
-  --enable-shared --disable-static --enable-pic
+  --enable-shared --disable-static --enable-pic --build-suffix=_gd05
   --enable-demuxer=bink --enable-decoder=bink,binkaudio_rdft,binkaudio_dct,xma1,xma2)
 
 sha256_of() { if command -v sha256sum >/dev/null; then sha256sum "$1"; else shasum -a 256 "$1"; fi | cut -d' ' -f1; }
