@@ -164,3 +164,6 @@ struct Song {
 // the song's HOPO threshold in ticks (songs.dtb's hopo_threshold, else 170;
 // RB 0x824A67A8). Throws on malformed input.
 Song buildSong(const MidiFile& midi, int hopoThresholdTicks);
+// Rock Band's drums: every pad of a chord is its own gem at the same time
+// (DrumTrackWatcherImpl, RB 0x824A21E8) [C]; the phrases' gem indices follow.
+void splitDrumChords(Chart& chart);

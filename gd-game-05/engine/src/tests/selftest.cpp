@@ -610,7 +610,7 @@ int runSelfTest(const std::string& dataPath) {
         std::printf("%zu songs; slop %.0f ms, head %d, tail %d, hopo_threshold %d ticks\n", songs.size(), rules.slopMs,
                     rules.headPoints, rules.tailPoints, rules.hopoThresholdTicks);
 
-        int audioFailures = 0, chartFailures = 0, hopos = 0, strumHopos = 0, ownThreshold = 0, drumNotes = 0, vocalPhrases = 0, rbSolos = 0, rbPerfectSolos = 0, rbEndings = 0;
+        int audioFailures = 0, chartFailures = 0, hopos = 0, strumHopos = 0, ownThreshold = 0, drumNotes = 0, vocalPhrases = 0, rbSolos = 0, rbPerfectSolos = 0, rbEndings = 0, drumJudgeCharts = 0, drumJudgeFailed = 0;
         PartTotals totals[kPartCount];
         for (const SongInfo& info : songs) {
             ownThreshold += info.audio.hopoThresholdTicks > 0;
@@ -633,6 +633,20 @@ int runSelfTest(const std::string& dataPath) {
                         PartTotals& pt2 = totals[part];
                         if (part == int(Part::Drums)) {
                             const Rules dr = rulesForInstrument(rules, "drum");
+                            {
+                                // The game's drum judge (Player in RB's drum-watcher mode,
+                                // a gem per pad, wave 02): autoplay hits every gem.
+                                Song split = song;
+                                Chart& c = split.charts[size_t(Part::Drums)][size_t(d)];
+                                splitDrumChords(c);
+                                Player p(split, Part::Drums, diff, dr, ControllerMode::Joypad, false);
+                                p.setDrumMode(true);
+                                Autoplay bot(p.chart());
+                                for (float t = -1000; t < split.endMs + 5000; t += 4) bot.feed(p, t), p.update(t);
+                                const bool ok = p.notesHit() == int(p.chart().gems.size()) && !p.failed();
+                                drumJudgeCharts += 1, drumJudgeFailed += !ok;
+                                if (!ok) std::fprintf(stderr, "  %s drums %s (game judge): %d/%d\n", info.id.c_str(), difficultyName(diff), p.notesHit(), int(p.chart().gems.size()));
+                            }
                             for (bool noKick : {false, true}) {
                                 DrumPlayer p(song, diff, dr, false, noKick);
                                 const auto& gems = p.chart().gems;
@@ -727,6 +741,8 @@ int runSelfTest(const std::string& dataPath) {
         // Rock Band's bonuses on the autoplayed guitar and bass charts: every
         // solo a perfect solo, every Big Rock Ending banked by its final chord.
         std::printf("solos: %d of %d perfect; Big Rock Endings banked: %d\n", rbPerfectSolos, rbSolos, rbEndings);
+        std::printf("drums through the game's judge: %d charts, %d not fully hit\n", drumJudgeCharts, drumJudgeFailed);
+        chartFailures += drumJudgeFailed;
         if (rbPerfectSolos != rbSolos) ++chartFailures;
         // The microphone path, headless: a synthesised voice (a sawtooth at
         // the target pitch, an octave below for the low notes) through the

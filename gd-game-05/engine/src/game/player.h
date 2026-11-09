@@ -140,6 +140,9 @@ public:
     int longestStreak() const { return longestStreak_; }
     int multiplier() const { return baseMultiplier_ * bandOrSpMultiplier(); }
     void setBandBonus(int m) { bandBonus_ = m; }
+    // Rock Band's drums (DrumTrackWatcherImpl, Swing RB 0x824A2320): every
+    // pad of a chord is its own gem (splitDrumChords) [C].
+    void setDrumMode(bool on) { drumMode_ = on; }
     // The streak multiplier without Star Power's doubling (1..4).
     int baseMultiplier() const { return baseMultiplier_; }
     int notesHit() const { return notesHit_; }
@@ -235,6 +238,8 @@ private:
         return spMultiplier();
     }
     int bandBonus_ = -1;
+    bool drumMode_ = false;
+    float lastDrumPassMs_ = -1e9f;
     bool hopoChain_ = false;
     void spStart(bool on);
     void spAdd(float amount);

@@ -5,6 +5,7 @@
 #include "game/band_performer.h"
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 
 // Every rule below follows docs/FINDINGS.md. Addresses are GH2's
@@ -264,6 +265,36 @@ void Player::fretChange(float t, int pressed) {
 // miss [I]. No 52 ms strum filter (it would block chords) [I].
 void Player::joypadPress(int slot, float t) {
     const uint32_t bit = 1u << slot;
+    if (drumMode_) {
+        // RB's drum watcher (Swing RB 0x824A2320) [C]: the time group of the
+        // nearest gem (0x824AB4D8), the gem of that group in the pad's lane
+        // hit on its own; else a miss charged to the group's unhit gem in
+        // the closest lane (0x824A21E8); a pad far before the first gem is
+        // drum_freestyle, no penalty (0x824638D0).
+        const int n = static_cast<int>(chart_.gems.size());
+        if (n == 0 || t + offset_ < chart_.gems[0].ms - 1000.0f) return;
+        int best = -1;
+        float bestD = 1e30f;
+        for (int k = std::max(0, sweep_); k < n; ++k) {
+            const Gem& g = chart_.gems[size_t(k)];
+            if (g.ms > t + offset_ + rules_.slopMs) break;
+            if (hit_[size_t(k)] || !owned(k) || k < firstPlayable_ || !inWindow(k, t)) continue;
+            const float d = std::fabs(g.ms - (t + offset_));
+            if (d < bestD) bestD = d, best = k;
+        }
+        if (best < 0) return watcherMiss(t, slot, -1);
+        const float groupMs = chart_.gems[size_t(best)].ms;
+        int miss = -1, missDist = 99;
+        for (int k = std::max(0, sweep_); k < n; ++k) {
+            const Gem& g = chart_.gems[size_t(k)];
+            if (g.ms > groupMs + 0.5f) break;
+            if (std::fabs(g.ms - groupMs) > 0.5f || hit_[size_t(k)] || !owned(k)) continue;
+            if (g.frets & bit) return watcherHit(t, slot, k, false);
+            const int lane = std::countr_zero(unsigned(g.frets));
+            if (std::abs(lane - slot) < missDist) missDist = std::abs(lane - slot), miss = k;
+        }
+        return watcherMiss(t, slot, miss);
+    }
     if (padChordGem_ >= 0) {
         const int gem = padChordGem_;
         const Gem& g = chart_.gems[size_t(gem)];
@@ -402,13 +433,25 @@ void Player::sweep(float t) {
         const float late = k < firstPlayable_ ? 0.0f
                                               : rules_.slopMs + (hopoEligible(k) ? rules_.pendingStrumMs : 0.0f) - offset_;
         float deadline = g[size_t(k)].ms + late;
-        if (k + 1 < n) deadline = std::min(deadline, (g[size_t(k)].ms + g[size_t(k) + 1].ms) * 0.5f - offset_);
+        if (drumMode_) {
+            // RB drums: the midpoint to the next gem in the same lane (RB 0x824A26A8) [C].
+            for (int m = k + 1; m < n; ++m)
+                if (g[size_t(m)].frets & g[size_t(k)].frets) {
+                    deadline = std::min(deadline, (g[size_t(k)].ms + g[size_t(m)].ms) * 0.5f - offset_);
+                    break;
+                }
+        } else if (k + 1 < n) {
+            deadline = std::min(deadline, (g[size_t(k)].ms + g[size_t(k) + 1].ms) * 0.5f - offset_);
+        }
         if (!owned(k)) deadline = g[size_t(k)].ms;
         if (deadline >= t) return;
         sweep_ = k;
         if (hit_[size_t(k)] || !owned(k)) continue;  // another player's gem passes without a penalty [C]
         if (k < firstPlayable_) continue;            // "skipped" (before the practice start) [C]
         hopoChain_ = false;  // RB 0x824B4E10 [C]
+        // RB drums: a passed chord penalises once per time group (RB 0x82463F10) [C].
+        if (drumMode_ && std::fabs(g[size_t(k)].ms - lastDrumPassMs_) < 0.5f) continue;
+        lastDrumPassMs_ = g[size_t(k)].ms;
         playerPass(t, k);
     }
 }

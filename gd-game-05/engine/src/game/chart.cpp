@@ -339,3 +339,26 @@ Song buildSong(const MidiFile& midi, int hopoThresholdTicks) {
         }
     return song;
 }
+
+void splitDrumChords(Chart& chart) {
+    std::vector<Gem> out;
+    out.reserve(chart.gems.size() * 2);
+    std::vector<int> first(chart.gems.size()), last(chart.gems.size());
+    for (size_t i = 0; i < chart.gems.size(); ++i) {
+        const Gem& g = chart.gems[i];
+        first[i] = int(out.size());
+        for (int b = 0; b < 8; ++b)
+            if (g.frets & (1u << b)) {
+                Gem one = g;
+                one.frets = uint8_t(1u << b);
+                out.push_back(one);
+            }
+        if (int(out.size()) == first[i]) out.push_back(g);
+        last[i] = int(out.size()) - 1;
+    }
+    for (StarPhrase& p : chart.phrases) {
+        if (p.firstGem >= 0 && size_t(p.firstGem) < first.size()) p.firstGem = first[size_t(p.firstGem)];
+        if (p.lastGem >= 0 && size_t(p.lastGem) < last.size()) p.lastGem = last[size_t(p.lastGem)];
+    }
+    chart.gems = std::move(out);
+}

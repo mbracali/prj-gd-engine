@@ -1054,12 +1054,14 @@ bool App::loadSong(const SongInfo& info, int difficulty, bool autoplay, float ba
         bool anyDrums = part0 == Part::Drums;
         for (const auto& m : rbBandSetup_) anyDrums |= m.part == "drum" || m.part == "drums";
         if (anyDrums)
-            for (Chart& c : song_->charts[size_t(Part::Drums)])
+            for (Chart& c : song_->charts[size_t(Part::Drums)]) {
                 for (Gem& g : c.gems) {
                     const uint8_t f = g.frets;
                     g.frets = uint8_t(((f & 1) << 4) | (f & 0x0E) | ((f >> 4) & 1));
                     g.hopo = false;
                 }
+                splitDrumChords(c);  // RB's drum watcher: a gem per pad (wave 02)
+            }
         const Part part1 = partFor(*song_, parts_[1], coop);
         // Two players never fail on their own meters: competitive modes
         // cannot fail, a co-op player cannot end the game (0x822C6B98); the
@@ -1083,6 +1085,7 @@ bool App::loadSong(const SongInfo& info, int difficulty, bool autoplay, float ba
                                            part0 == Part::Drums ? ControllerMode::Joypad : two ? modeOfPad(pads_[0]) : input_.lastMode(), noFail,
                                            faceOff ? 0 : -1, config);
         player_->setCalibrationMs(calibrationMs());
+        player_->setDrumMode(part0 == Part::Drums);
         player_->setBigNotes(song_->bigNotes[size_t(part0)]);
         if (part0 == Part::Bass) player_->setBassRanges(song_->bassRanges);
         player_->setForgivingHopos(enhancedValue("hopo_mode") == "forgiving");
@@ -1823,6 +1826,7 @@ void App::makeSeats(bool autoplay) {
         st.player = std::make_unique<Player>(*song_, part, static_cast<Difficulty>(st.difficulty), r,
                                              part == Part::Drums ? ControllerMode::Joypad : ControllerMode::Guitar, true, -1, nullptr);
         st.player->setNumber(int(seats_.size()) + 1);
+        st.player->setDrumMode(part == Part::Drums);
         st.player->setCalibrationMs(calibrationMs());
         const bool bot = autoplay || !input_.padConnected(m.pad);
         if (part == Part::Vocals) {
