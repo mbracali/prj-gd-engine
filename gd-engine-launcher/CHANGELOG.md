@@ -1,5 +1,13 @@
 # Guitar Dream Universal Launcher: changes
 
+## 1.1.13
+
+- Every game: Enhanced > Performance & Graphics gets Graphics Backend (local, SDL3, Vulkan, OpenGL3) and Audio Backend (local, miniaudio, OpenAL, FAudio), the new shared gd-engine-core backends. local, the game as before, stays the default; a backend that cannot start falls back to local. The new backends are experimental (tested on Linux).
+- Changing a backend asks Restart Now or Later; Restart Now starts the game again inside the launcher on the new backend, back on the Enhanced menu. The Enhanced menu shows the backends in use.
+- The launcher hands its window to a game on SDL3 or Vulkan and takes it back afterwards; every game module ships the OpenAL Soft library and its licences.
+- Windows: a disc in a folder or with a name with accents or other alphabets now loads in every game (the launcher recognised it, the game could not open it).
+- gd01 1.1.11, gd02 1.1.13, gd03 1.1.6, gd04 1.1.5: the backends above. gd02 / gd03: Back in the Enhanced menu closes an open dropdown or the calibration first.
+
 ## 1.1.12
 
 - gd01 1.1.10: Max FPS 144, Reset Calibration, steady whammy hold, help bar mouse fixes, MODS removed from the help bar.

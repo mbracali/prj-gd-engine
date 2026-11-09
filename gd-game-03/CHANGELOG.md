@@ -5,10 +5,15 @@ All notable changes for players. Versions follow SemVer; release tags are
 
 ## [Unreleased]
 
+## [1.1.6] - 2026-11-09
+
 ### Added
 - Enhanced > Performance & Graphics: Audio Backend (local, miniaudio, OpenAL, FAudio) and Graphics Backend, now selectable, the first two rows of the section; local (the game as before) is the default, and a backend that cannot start falls back to local.
 - Changing a backend asks Restart Now or Later; Restart Now starts the game again on the new backend, straight back to Enhanced Options.
 - Enhanced Options shows the graphics and audio backends in use above the FPS counter.
+
+### Fixed
+- Windows: a disc in a folder or with a name outside the system's code page (accents, other alphabets) loads; the launcher recognised it but the game could not open it.
 
 ## [1.1.5] - 2026-11-05
 
