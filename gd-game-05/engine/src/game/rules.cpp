@@ -239,3 +239,11 @@ Rules loadRules(const GameData& data) {
 
     return r;
 }
+
+Rules rulesForInstrument(const Rules& rules, const std::string& instrument) {
+    Rules r = rules;
+    if (auto it = rules.rb.points.find(instrument); it != rules.rb.points.end()) r.headPoints = it->second.head, r.tailPoints = it->second.tail;
+    const char* table = instrument == "bass" ? "bass" : instrument == "vocals" ? "vocals" : "singleplayer";
+    if (auto it = rules.rb.streakMultipliers.find(table); it != rules.rb.streakMultipliers.end()) r.streaks = it->second;
+    return r;
+}

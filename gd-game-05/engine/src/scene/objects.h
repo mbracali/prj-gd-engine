@@ -135,12 +135,20 @@ public:
     std::string normalMap, emissiveMap, specularMap, customDiffuseMap, environMap;
     bool perPixelLit = false, normalize = false;
     int stencilMode = 0;
+    // RB rev 41 [C]:
+    int alphaThreshold = 0;
+    std::string fur, twoColorMask, normDetailMap, fleckShadedMask;
+    bool twoColor = false, fleckShaded = false;
+    std::array<float, 4> color2{}, substrateColor{};
+    float deNormal = 0, anisotropy = 0, normDetailTiling = 1, normDetailStrength = 0, substrateDepth = 0;
 };
 
 struct MeshVertex {
     float pos[3], normal[3];
     float color[4];  // vertex colour RGBA, or bone weights when the mesh has bones
     float uv[2];
+    uint16_t bones[4] = {0, 0, 0, 0};  // RB: bone indices
+    float tangent[4] = {0, 0, 0, 0};   // RB
 };
 
 // RndMesh v28 (Load @ 0x821c2b60).
@@ -157,7 +165,8 @@ public:
         std::string name;
         Xfm offset;
     };
-    std::vector<Bone> bones;           // up to 4
+    std::vector<Bone> bones;           // up to 4 in GH2; any count in RB
+    bool rbVertices = false;           // RB: verts carry bone indices and weights
 };
 
 // RndTransformable on its own (class "Trans", v9).
@@ -174,6 +183,7 @@ public:
     Draw draw;
     std::vector<std::string> objects;
     std::string environment, lod;  // "environ" and "lod" properties
+    std::string drawOnly;          // RB rev 13
     float lodScreenSize = 0;
 };
 
@@ -198,6 +208,16 @@ public:
     bool animateFromPreset = false;
     bool fadeOut = false;
     float fadeStart = 0, fadeEnd = 0;
+    // RB rev 9 [C]:
+    float fadeMax = 1;
+    std::string fadeRef, ambientFogOwner;
+    std::array<float, 4> fogPlanes{};  // left_out, left_opaque, right_opaque, right_out
+    bool useColorAdjust = false;
+    struct ColorXfm {
+        Xfm xfm;
+        float hue = 0, saturation = 0, lightness = 0, contrast = 0, brightness = 0;
+        std::array<float, 4> inLo{}, inHi{}, outLo{}, outHi{};
+    } colorXfm;
 };
 
 // RndLight v9 (Load @ 0x8220c3e8; names from SyncProperty @ 0x8220c888).
@@ -210,7 +230,9 @@ public:
     bool animateColorFromPreset = false, animatePositionFromPreset = false;
     float topRadius = 0, botRadius = 0, softness = 0, displacement = 0;
     std::string texture;
-    std::vector<std::string> shadowcasters;
+    std::vector<std::string> shadowcasters;  // GH2 only
+    float falloffStart = 0;                  // RB rev 12
+    std::string colorOwner;                  // RB rev 12
 };
 
 // RndTransAnim v6 (Load @ 0x821b6230).
@@ -242,6 +264,7 @@ public:
     std::string anim;  // the filtered animation
     float scale = 1, offset = 0, start = 0, end = 0, period = 0;
     int type = 0;      // Q: enum (later Harmonix code: 0 Range, 1 Loop, 2 Shuttle)
+    float snap = 0, jitter = 0;  // RB rev 2
     // The filtered frame for `frame` (0x822079B0); `framesPerUnit` of the
     // filter's rate, for a period.
     float filter(float frame, float framesPerUnit = 30) const;
@@ -370,6 +393,7 @@ struct RndDirData {
     Draw draw;
     Trans trans;
     std::string environment;  // "environ"
+    std::string testEvent;    // RB RndDir rev 10
 };
 // PanelDir v2 (PreLoad @ 0x82374378, PostLoad @ 0x823743f0); own record only.
 struct PanelDirData {

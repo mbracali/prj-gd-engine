@@ -104,8 +104,7 @@ void expectVersion(uint32_t got, uint32_t want, const char* cls) {
 DataNode readArray(In& in, int depth);
 DataNode readNode(In& in, int depth) {
     DataNode n;
-    n.type = in.u16();
-    in.u16();
+    n.type = int(in.u32());  // a u32 (GH2's little-endian u16 + u16 read the same; RB is big-endian)
     switch (n.type) {
         case 0x10:
         case 0x11:
@@ -193,11 +192,17 @@ void readTex(In& in, Tex& t) {
     t.mipMapK = in.f();
     t.type = in.i32();
     t.useExtPath = in.b();
+    // RB: every Tex record carries its bitmap, use_ext_path or not [C data].
     t.bitmap = readBitmap(in.raw());
 }
 
+// RndMat::Load RB 0x821FDB20 (rev 41) [C]: GH2's v28 with alpha_threshold
+// after alpha_cut, then after stencil_mode: fur, two_color, color2,
+// two_color_mask, de_normal, anisotropy, fleck_shaded, norm_detail_tiling,
+// norm_detail_strength, substrate_depth, substrate_color, norm_detail_map,
+// fleck_shaded_mask (names: SyncProperty RB 0x821FBC10).
 void readMat(In& in, Mat& m) {
-    expectVersion(m.version, 28, "Mat");
+    expectVersion(m.version, 41, "Mat");
     m.header = readObjectHeader(in);
     m.blend = in.i32();
     in.fs(m.color);
@@ -205,6 +210,7 @@ void readMat(In& in, Mat& m) {
     m.prelit = in.b();
     m.zMode = in.i32();
     m.alphaCut = in.b();
+    m.alphaThreshold = in.i32();
     m.alphaWrite = in.b();
     m.texGen = in.i32();
     m.texWrap = in.i32();
@@ -224,6 +230,19 @@ void readMat(In& in, Mat& m) {
     m.perPixelLit = in.b();
     m.normalize = in.b();
     m.stencilMode = in.i32();
+    m.fur = in.str();
+    m.twoColor = in.b();
+    in.fs(m.color2);
+    m.twoColorMask = in.str();
+    m.deNormal = in.f();
+    m.anisotropy = in.f();
+    m.fleckShaded = in.b();
+    m.normDetailTiling = in.f();
+    m.normDetailStrength = in.f();
+    m.substrateDepth = in.f();
+    in.fs(m.substrateColor);
+    m.normDetailMap = in.str();
+    m.fleckShadedMask = in.str();
 }
 
 // The mesh's BSP tree (@ 0x8226ab80): u8 present, plane (4 f32), front, back.
@@ -235,8 +254,12 @@ void skipBsp(In& in, int depth) {
     skipBsp(in, depth + 1);
 }
 
+// RndMesh::Load RB 0x821A02F8 (rev 34) [C]: the vertices are the console's
+// 80-byte in-memory vertex read raw (pos 4 f32, normal 4 f32, 4 bone
+// weights, uv, 4 u16 bone indices, tangent 4 f32); the bones a counted list
+// of (name, offset transform); a per-group block never present on RB's disc.
 void readMesh(In& in, Mesh& m) {
-    expectVersion(m.version, 28, "Mesh");
+    expectVersion(m.version, 34, "Mesh");
     m.header = readObjectHeader(in);
     readTrans(in, m.trans);
     readDraw(in, m.draw);
@@ -246,14 +269,19 @@ void readMesh(In& in, Mesh& m) {
     m.volume = in.u32();
     skipBsp(in, 0);
     uint32_t nv = in.u32();
-    if (nv > in.remaining() / 48) bad("implausible vertex count");
+    if (nv > in.remaining() / 80) bad("implausible vertex count");
     m.verts.resize(nv);
-    for (auto& v : m.verts) {  // @ 0x821bc118
+    for (auto& v : m.verts) {
         for (float& x : v.pos) x = in.f();
+        in.f();
         for (float& x : v.normal) x = in.f();
-        for (float& x : v.color) x = in.f();
+        in.f();
+        for (float& x : v.color) x = in.f();  // RB: the bone weights (no vertex colour) [C]
         for (float& x : v.uv) x = in.f();
+        for (uint16_t& b : v.bones) b = in.u16();
+        for (float& x : v.tangent) x = in.f();
     }
+    m.rbVertices = true;
     uint32_t nf = in.u32();
     if (nf > in.remaining() / 6) bad("implausible face count");
     m.faces.resize(nf);
@@ -264,26 +292,27 @@ void readMesh(In& in, Mesh& m) {
     for (auto& g : m.groupSizes) g = in.u8();
     // Bone 0; when set, bones 1..3 and the four offset transforms
     // (disassembly at 0x821c3278..0x821c33f4).
-    std::string bone0 = in.str();
-    if (!bone0.empty()) {
-        m.bones.resize(4);
-        m.bones[0].name = bone0;
-        for (int i = 1; i < 4; ++i) m.bones[i].name = in.str();
-        for (auto& b : m.bones) in.xfm(b.offset);
-        while (!m.bones.empty() && m.bones.back().name.empty()) m.bones.pop_back();
+    const uint32_t nb = in.u32();
+    if (nb > in.remaining() / 52) bad("implausible bone count");
+    m.bones.resize(nb);
+    for (auto& b : m.bones) {
+        b.name = in.str();
+        in.xfm(b.offset);
     }
     // A per-group vertex/index block follows only for meshes the loader keeps
     // in a platform-specific form (FUN_821bd000); GH2's data never has it.
 }
 
+// RndGroup::Load RB 0x821EB800 (rev 13) [C]: + draw_only after the environ.
 void readGroup(In& in, Group& g) {
-    expectVersion(g.version, 12, "Group");
+    expectVersion(g.version, 13, "Group");
     g.header = readObjectHeader(in);
     readAnimatable(in, g.anim);
     readTrans(in, g.trans);
     readDraw(in, g.draw);
     g.objects = in.strList();
     g.environment = in.str();
+    g.drawOnly = in.str();
     g.lod = in.str();
     g.lodScreenSize = in.f();
 }
@@ -300,8 +329,11 @@ void readCam(In& in, Cam& c) {
     c.targetTex = in.str();
 }
 
+// RndEnviron::Load RB 0x821ADBB8 (rev 9) [C]: GH2's v5 plus fade_max,
+// fade_ref, the four fog-plane distances, the ambient fog owner and the
+// colour adjustment (use_color_adjust, ColorXfm RB 0x8221A410).
 void readEnviron(In& in, Environ& e) {
-    expectVersion(e.version, 5, "Environ");
+    expectVersion(e.version, 9, "Environ");
     e.header = readObjectHeader(in);
     e.lights = in.strList();
     in.fs(e.ambientColor);
@@ -313,15 +345,34 @@ void readEnviron(In& in, Environ& e) {
     e.fadeOut = in.b();
     e.fadeStart = in.f();
     e.fadeEnd = in.f();
+    e.fadeMax = in.f();
+    e.fadeRef = in.str();
+    in.fs(e.fogPlanes);
+    e.ambientFogOwner = in.str();
+    e.useColorAdjust = in.b();
+    expectVersion(in.u32(), 0, "ColorXfm");
+    in.xfm(e.colorXfm.xfm);
+    e.colorXfm.hue = in.f();
+    e.colorXfm.saturation = in.f();
+    e.colorXfm.lightness = in.f();
+    e.colorXfm.contrast = in.f();
+    e.colorXfm.brightness = in.f();
+    in.fs(e.colorXfm.inLo);
+    in.fs(e.colorXfm.inHi);
+    in.fs(e.colorXfm.outLo);
+    in.fs(e.colorXfm.outHi);
 }
 
+// RndLight::Load RB 0x821AACC8 (rev 12) [C]: colour, type, range,
+// falloff_start, the preset flags, the cone, the texture, the colour owner.
 void readLight(In& in, Light& l) {
-    expectVersion(l.version, 9, "Light");
+    expectVersion(l.version, 12, "Light");
     l.header = readObjectHeader(in);
     readTrans(in, l.trans);
     in.fs(l.color);
-    l.range = in.f();
     l.type = in.i32();
+    l.range = in.f();
+    l.falloffStart = in.f();
     l.animateColorFromPreset = in.b();
     l.animatePositionFromPreset = in.b();
     l.topRadius = in.f();
@@ -329,7 +380,7 @@ void readLight(In& in, Light& l) {
     l.softness = in.f();
     l.displacement = in.f();
     l.texture = in.str();
-    l.shadowcasters = in.strList();
+    l.colorOwner = in.str();
 }
 
 void readTransObj(In& in, TransObj& t) {
@@ -381,8 +432,9 @@ void readMatAnim(In& in, MatAnim& a) {
     }
 }
 
+// RndAnimFilter::Load RB 0x821F1DC8 (rev 2) [C]: + snap, jitter.
 void readAnimFilter(In& in, AnimFilter& a) {
-    expectVersion(a.version, 1, "AnimFilter");
+    expectVersion(a.version, 2, "AnimFilter");
     a.header = readObjectHeader(in);
     readAnimatable(in, a.animatable);
     a.anim = in.str();
@@ -392,6 +444,8 @@ void readAnimFilter(In& in, AnimFilter& a) {
     a.end = in.f();
     a.type = in.i32();
     a.period = in.f();
+    a.snap = in.f();
+    a.jitter = in.f();
 }
 
 void readParticleSys(In& in, ParticleSys& p) {

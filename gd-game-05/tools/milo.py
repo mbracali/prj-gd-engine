@@ -30,10 +30,10 @@ Directory stream (version 25 in every file):
 Strings are u32 length + bytes.
 
 Inline sub-directories: an object that is itself a directory (RndDir,
-Character, ...) whose proxy is stored inline carries, inside its own data, a
-complete directory header (version 25, class, name, counts, object table).
-That sub-directory's own data and its objects follow (each with its own
-0xADDEADDE) before the outer object's remaining data and end marker.
+Character, ...) whose proxy is stored inline is followed, after its own end
+marker, by a complete directory (version 25, class, name, counts, object
+table, then its records with their markers) [Rock Band; GH2 nested it inside
+the record, which this tool no longer reads].
 """
 import os
 import re
@@ -121,24 +121,21 @@ def _inline_header_at(d, q, end):
 def _read_object(d, pos, cls, name, out, depth):
     """One object's data starting at pos, through its end marker.
 
-    Appends (class, name, depth, record) to out; an inline sub-directory found
-    inside the record is parsed recursively (its objects are appended at
-    depth + 1, before this object). Returns the position after the marker.
+    Appends (class, name, depth, record) to out. Inline sub-directories
+    follow the owner's end marker in Rock Band's files (each a complete
+    directory: header, records, markers); they are parsed recursively and
+    appended at depth + 1 after the owner, each followed by an '(inline)'
+    summary row. Returns the position after the last of them.
     """
-    start = pos
-    while True:
-        end = d.find(MARKER, pos)
-        if end < 0:
-            raise ValueError(f"{cls} {name}: no end marker")
-        q = d.find(struct.pack(E + "I", VERSION), pos, end)
-        while q >= 0 and not _inline_header_at(d, q, end):
-            q = d.find(struct.pack(E + "I", VERSION), q + 1, end)
-        if q < 0:
-            break
-        sub, pos = _read_dir(d, q, out, depth + 1)
+    end = d.find(MARKER, pos)
+    if end < 0:
+        raise ValueError(f"{cls} {name}: no end marker")
+    out.append((cls, name, depth, d[pos:end]))
+    pos = end + 4
+    while pos + 8 <= len(d) and d[pos:pos + 4] == struct.pack(E + "I", VERSION) and _inline_header_at(d, pos, len(d)):
+        sub, pos = _read_dir(d, pos, out, depth + 1)
         out.append(("(inline)", f"{sub['class']} {sub['name']}", depth + 1, b""))
-    out.append((cls, name, depth, d[start:end]))
-    return end + 4
+    return pos
 
 
 def _read_dir(d, pos, out, depth=0):

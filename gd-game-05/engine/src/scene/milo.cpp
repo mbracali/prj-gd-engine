@@ -139,23 +139,14 @@ private:
             }
             o->dir = &owner;
             pos = end + 4;
+            attachFollowing(pos, name, owner, depth);
             return o;
         }
-        for (;;) {
-            end = findMarker(d_, pos);
-            if (end == std::string::npos) throw std::runtime_error(cls + " " + name + ": no end marker");
-            size_t q = std::string::npos;
-            for (size_t p = pos; p + 4 <= end; ++p)
-                if (be32(&d_[p]) == kDirVersion && inlineHeaderAt(d_, p, end)) {
-                    q = p;
-                    break;
-                }
-            if (q == std::string::npos) break;
-            size_t sub = q;
-            auto d = dir(sub, &owner, depth + 1);
-            owner.subdirs.emplace_back(name, std::move(d));
-            pos = sub;
-        }
+        // Rock Band writes an object's inline sub-directory after the
+        // object's own end marker (attached below), not inside its record
+        // [C data: every file parses to its end; agents/scratch m1 split.py].
+        end = findMarker(d_, pos);
+        if (end == std::string::npos) throw std::runtime_error(cls + " " + name + ": no end marker");
         std::unique_ptr<Object> o;
         if (isSelf) {
             o = std::make_unique<Object>();
@@ -168,7 +159,16 @@ private:
         }
         o->dir = &owner;
         pos = end + 4;
+        attachFollowing(pos, name, owner, depth);
         return o;
+    }
+
+    // The inline directories that follow an object's end marker belong to it.
+    void attachFollowing(size_t& pos, const std::string& name, Directory& owner, int depth) {
+        while (pos + 8 <= d_.size() && be32(&d_[pos]) == kDirVersion && inlineHeaderAt(d_, pos, d_.size())) {
+            auto d = dir(pos, &owner, depth + 1);
+            owner.subdirs.emplace_back(name, std::move(d));
+        }
     }
 
     const Bytes& d_;

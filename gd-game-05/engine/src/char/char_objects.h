@@ -47,6 +47,8 @@ struct CharBonesSamples {
         float weight = 0;  // Q: name
         int type = kNone;
     };
+    uint32_t revision = 0;              // RB: 15 on the disc (16 read too)
+    std::vector<float> frames;          // RB rev >= 12: a float list after the header [use I]
     std::vector<Bone> bones;            // sorted by type
     std::array<uint32_t, 10> offs{};    // first bone of each type; offs[9] = bones.size()
     uint32_t compression = 0;           // 1 on the disc: quats s16 / 32767, rotations s16 / 1638.4 rad
@@ -73,6 +75,8 @@ public:
     float blendWidth = 0;       // clip+0x30
     float range = 0;            // Q: name (rev > 3)
     bool relative = false;      // Q: name (rev > 4)
+    std::string relativeTo;     // RB rev 9: an object name
+    bool doNotCompress = false; // RB rev 9
     struct Transition {
         std::string dest;                             // the clip it leads to
         std::vector<std::pair<float, float>> nodes;   // (frame in this clip, frame in dest)
@@ -156,7 +160,8 @@ CharClipSetData decodeClipSetDir(const Object& self, size_t clipCount);
 // "../../../char/<c>/og/<c>.milo", the environ).
 class CharacterObj : public Object {
 public:
-    bool band = false;            // BandCharacter
+    bool band = false;            // GH2's BandCharacter (none in RB)
+    bool composite = false;       // RB's CompositeCharacter
     bool own = false;             // the directory's own record
     ObjectDirData objectDir;
     RndDirData rnd;
@@ -168,11 +173,14 @@ public:
     std::string shadow;           // ObjPtr<RndGroup> 0x82131680
     bool selfShadow = false;
     std::string sphereBase;       // ObjPtr<RndTransformable>
+    std::array<float, 4> bounding{};  // RB rev 12: centre, radius
     struct Test {                 // CharacterTest v6 (0x8219B7E0), editor only
         std::string driver, clip1, clip2, teleportTo, showDistMap, sym6c;
         std::vector<std::string> walkPath;
         uint32_t transition = 0, internalTransition = 0, showFootsteps = 0, u74 = 0;
         bool cycleTransition = false, b69 = false, b6a = false, b6b = false, b70 = false, b71 = false;
+        std::string sym80;  // RB rev 8
+        float f84 = 0;
     } test;
 };
 // Decodes a Character / BandCharacter directory's own record (Directory::self
@@ -185,6 +193,8 @@ public:
     CharWeightable weightable;
     std::string bones;            // ObjPtr<CharBones>: the servo it writes ("bone.servo")
     std::string clips;            // FilePath of the CharClipSet ("../../anims/alterna1_main.milo")
+    std::string clipsObject;      // RB: the clips' object name when `clips` is empty
+    uint32_t apply = 0;           // RB rev 7: a u32 where GH2 had the +0x55 bool
     bool realign = false;         // rev >= 2 (+0x54); TRUE only on metal_drummer main.drv
     bool unknown55 = false;       // rev >= 5 (+0x55); 0 on the disc (Q: skips the bones' ScaleDown)
     std::string starvedClip;      // PostLoad rev >= 4: ObjPtr<CharClip> (Q: name)
@@ -203,6 +213,7 @@ public:
     std::string hand, finger;     // ObjPtr<Trans>
     std::vector<std::string> targets;
     bool orient = false, stretch = false, scaleX = false, moveElbow = true;  // Q: names
+    float elbowSwing = 0;  // RB rev 6
 };
 
 // CharIKMidi v4 (0x82184950).
@@ -214,11 +225,12 @@ public:
 // CharHair v2 (0x8217FAF0).
 class CharHair : public Object {
 public:
-    std::array<float, 6> params{};  // Q: stiffness, torsion, inertia, gravity, weight, friction
+    std::array<float, 8> params{};  // stiffness, torsion, inertia, gravity, weight, friction, min_slack, max_slack (RB rev 9)
     struct Point {
         std::array<float, 3> pos{};
         std::string bone;
         float length = 0;
+        float radius = 0;  // RB rev 9
         int type = 0;  // the collision: 0 plane, 1 / 2 outside / inside a sphere, 3 / 4 outside / inside a cylinder
         std::string collide;
         float f60 = 0, f64 = 0;
@@ -228,6 +240,7 @@ public:
         float angle = 0;
         std::vector<Point> points;
         std::array<float, 9> baseMat{}, baseMat2{};
+        uint32_t hookupFlags = 0;  // RB rev 9
     };
     std::vector<Strand> strands;
     bool simulate = false;
@@ -245,7 +258,10 @@ public:
 // CharEyes v4 (0x82172708).
 class CharEyes : public Object {
 public:
+    CharWeightable weightable;      // RB rev 7
     std::vector<std::string> eyes;  // CharLookAt names
+    std::vector<std::string> upperLids, lowerLids;  // RB rev 7: per eye
+    std::string faceServo;          // RB rev 7
     std::string rightLid;  // the right eyelid bone (char_objects.dta right_lid): blinks retarget the eyes (0x82170BA8)
     std::vector<std::pair<std::string, uint32_t>> interests;  // none on the disc
 };
@@ -256,7 +272,8 @@ public:
     CharWeightable weightable;
     std::string driver;             // ObjPtr<CharDriver>
     uint32_t flags = 0;             // kGuitarLeftIK 0x400000 / kGuitarRightIK 0x800000
-    bool invert = false;            // Q: name
+    bool invert = false;            // GH2 only
+    float offset = 0, scale = 1, baseWeight = 0, beatsPerWeight = 0;  // RB rev 5
 };
 
 // CharUpperTwist v1 (0x82182C00).
@@ -270,6 +287,72 @@ class CharForeTwist : public Object {
 public:
     float offset = 0;               // degrees (+-90)
     std::string hand, twist2;
+    float lengthScale = 1;          // RB rev 2
+};
+
+// Rock Band's other small character helpers (RB Load addresses in
+// docs/formats.md "Characters") [C layouts; names from their property tables].
+class CharNeckTwist : public Object {
+public:
+    std::string head, twist;
+};
+class CharTransCopy : public Object {
+public:
+    std::string src, dest;
+};
+class CharIKScale : public Object {
+public:
+    CharWeightable weightable;
+    std::string dest;
+    float scale = 1;
+};
+class CharGuitarString : public Object {
+public:
+    std::string nut, bridge, bend, target;
+};
+class CharBonesBlender : public Object {
+public:
+    std::string dest;
+};
+class CharPollGroup : public Object {
+public:
+    std::vector<std::string> polls;
+};
+class CharCollide : public Object {
+public:
+    Trans trans;
+    uint32_t shape = 0, flags = 0;
+    float radius = 0, length = 0;
+};
+class CharCuff : public Object {
+public:
+    Trans trans;
+    std::array<float, 3> radius{}, offset{};
+    float outerRadius = 0, eccentricity = 0;
+    bool openEnd = false;
+    std::string bone, category;
+};
+class CharMeshHide : public Object {
+public:
+    uint32_t flags = 0;
+    std::vector<std::pair<std::string, uint32_t>> hides;  // drawable, flags
+};
+// OutfitConfig v3 and ColorPalette v1: the creator's colour choices.
+class OutfitConfig : public Object {
+public:
+    struct MatEntry {
+        std::string mat, primaryPalette, secondaryPalette;
+        std::vector<std::string> textures;
+    };
+    struct Color {
+        uint32_t index = 0;
+        std::vector<MatEntry> mats;
+    };
+    std::vector<Color> colors;
+};
+class ColorPalette : public Object {
+public:
+    std::vector<std::array<float, 4>> colors;
 };
 
 // CharServoBone v1 (0x82188870) and CharWalk v1 (0x82189F80): header only.

@@ -100,11 +100,16 @@ void readAdsr(Rd& r, Adsr& a) {
     a.releaseMode = r.u32();
 }
 
-// Sfx::Load @ 0x822EE8B0 (rev 5): Hmx::Object, the maps (u32 count; each
-// @ 0x822FF580: sample name, f32 volume, pan, transpose, i32 fx core,
-// ADSR), the send (an FxSend name) and f32 send_volume [C].
+void readSequence(Rd& r, SequenceParams& p);
+
+// Sfx::Load RB 0x822322D8 (rev 9) [C]: no Hmx::Object block (read only for
+// revisions 2..5), a Sequence, the maps (u32 count; each RB 0x8223ADA8:
+// sample name, f32 volume, pan, transpose, i32 fx core, ADSR), the send (an
+// FxSend name), then the faders (RB 0x8222DB90: u32, a name list). GH2's
+// rev 5 had the object block and an f32 send_volume instead.
 void readSfx(Rd& r, Sfx& s) {
-    s.header = r.header();
+    SequenceParams seq;
+    readSequence(r, seq);
     s.maps.resize(r.count(20));
     for (auto& m : s.maps) {
         m.sample = r.str();
@@ -115,7 +120,9 @@ void readSfx(Rd& r, Sfx& s) {
         readAdsr(r, m.adsr);
     }
     s.send = r.str();
-    s.sendVolume = r.f();
+    r.u32();  // the faders' leading u32 [C RB 0x8222DB90; meaning I]
+    const uint32_t faders = r.count(4);
+    for (uint32_t i = 0; i < faders; ++i) s.faders.push_back(r.str());
 }
 
 // Sequence::Load @ 0x822EFB30 (rev 1): avg_volume, volume_spread,
@@ -153,7 +160,12 @@ template <class T> SynthDecoder dec(uint32_t version, void (*fn)(Rd&, T&)) {
 const std::map<std::string, SynthDecoder>& synthDecoders() {
     static const std::map<std::string, SynthDecoder> m = {
         {"SynthSample", dec<SynthSample>(5, readSynthSample)},
-        {"Sfx", dec<Sfx>(5, readSfx)},
+        {"Sfx", dec<Sfx>(9, readSfx)},
+        // SynthFader::Load RB 0x8222D180 (rev 0): Hmx::Object, f32 level (dB) [C].
+        {"SynthFader", dec<SynthFader>(0, [](Rd& r, SynthFader& s) {
+             s.header = r.header();
+             s.level = r.f();
+         })},
         // SfxSeq::Load @ 0x822F1280 (rev 3): Sequence, the child (ObjPtr).
         {"SfxSeq", dec<SfxSeq>(3, [](Rd& r, SfxSeq& s) {
              readSequence(r, s.params);
@@ -171,15 +183,21 @@ const std::map<std::string, SynthDecoder>& synthDecoders() {
              readGroupSeq(r, s);
              s.numSimul = r.u32();
          })},
-        // FxSendReverb::Load @ 0x822FC6F0 (rev 1): FxSend::Load
-        // @ 0x823000D8 (u32 rev < 2, Hmx::Object, next_send, stage), the
-        // environment symbol.
-        {"FxSendReverb", dec<FxSendReverb>(1, [](Rd& r, FxSendReverb& s) {
-             r.version(1, "FxSend");
+        // FxSendReverb::Load RB 0x82234D30 (rev 2): FxSend base RB
+        // 0x8223C9C0 (rev 6: Hmx::Object, next_send, stage, channels,
+        // dry / wet / input gain, bypass), the environment, then seven f32
+        // (pre_delay_ms, high_cut, low_cut, room_size, damping, diffusion,
+        // early_late) [C load order; names I].
+        {"FxSendReverb", dec<FxSendReverb>(2, [](Rd& r, FxSendReverb& s) {
+             r.version(6, "FxSend");
              s.header = r.header();
              s.nextSend = r.str();
              s.stage = r.i32();
+             r.u32();                             // channels
+             r.f(), r.f(), r.f();                 // dry, wet, input gain
+             r.b();                               // bypass
              s.environment = r.str();
+             for (float& v : s.params) v = r.f();
          })},
         // SerialGroupSeq::Load @ 0x822F5200 (rev 1): GroupSeq.
         {"SerialGroupSeq", dec<SerialGroupSeq>(1, [](Rd& r, SerialGroupSeq& s) { readGroupSeq(r, s); })},

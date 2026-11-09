@@ -82,11 +82,14 @@ Bitmap readBitmap(ByteReader& r) {
     Bitmap b;
     b.version = r.u8();
     b.bpp = r.u8();
-    b.encoding = b.version != 0 ? int(r.u32le()) : r.u8();
+    // The header is in the milo payload's order: big-endian inside RB's Tex
+    // records, little-endian in loose .png_xbox / .bmp_xbox files (their
+    // readers set milo_order to little) [C data: every texture decodes].
+    b.encoding = b.version != 0 ? int(r.u32m()) : r.u8();
     b.extraMips = r.u8();
-    b.width = r.u16le();
-    b.height = r.u16le();
-    b.bytesPerLine = r.u16le();
+    b.width = r.u16m();
+    b.height = r.u16m();
+    b.bytesPerLine = r.u16m();
     r.skip(b.version != 0 ? 19 : 6);
     b.format = formatOf(b.encoding);
     // A palette only for paletted encodings (bpp <= 8, no 0x38 bits): never in GH2.

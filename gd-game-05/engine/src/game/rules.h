@@ -151,3 +151,10 @@ struct Rules {
 
 // Loads the rules from the game data; throws std::runtime_error on failure.
 Rules loadRules(const GameData& data);
+
+// The rules one instrument plays by: its (points (<instrument> ...)) head and
+// tail and its streak multipliers (bass: (bass ...), up to 6x; vocals:
+// (vocals ...); the others: (singleplayer ...)) [C data; which table each
+// instrument uses: I]. `instrument` is songs.dtb's symbol (guitar, bass,
+// drum, vocals).
+Rules rulesForInstrument(const Rules& rules, const std::string& instrument);

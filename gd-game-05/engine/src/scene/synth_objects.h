@@ -67,7 +67,8 @@ public:
     };
     std::vector<Map> maps;
     std::string send;             // an FxSend (FXverb.send, SPverb.send) or ""
-    float sendVolume = 1;         // "send_volume"
+    float sendVolume = 1;         // GH2's "send_volume"; RB 0x822322D8 has none (kept at 1)
+    std::vector<std::string> faders;  // RB: the SynthFaders that scale it
 };
 
 // Sequence v1 (Load @ 0x822EFB30; names @ 0x822EFBE8): the random spreads a
@@ -111,11 +112,18 @@ class SerialGroupSeq : public GroupSeq {};
 // FxSendReverb v1 (Load @ 0x822FC6F0): FxSend (Load @ 0x823000D8, rev 1:
 // Hmx::Object, next_send ObjPtr, stage i32), then the environment symbol
 // (an I3DL2 preset name: "plate", "small_room" in the data) [C].
+// SynthFader v0 (RB 0x8222D180): a volume a group of sounds follows.
+class SynthFader : public Object {
+public:
+    float level = 0;  // dB
+};
+
 class FxSendReverb : public Object {
 public:
     std::string nextSend;
     int32_t stage = 0;
     std::string environment;
+    std::array<float, 7> params{};  // RB rev 2: pre_delay_ms .. early_late [names I]
 };
 
 bool isSynthClass(const std::string& cls);

@@ -129,7 +129,10 @@ const scene::Tex* UiView::textureFile(const std::string& rel) {
             ByteReader r(b);
             tex = std::make_unique<scene::Tex>();
             tex->name = tex->file = rel;
-            tex->bitmap = scene::readBitmap(r);
+            {
+                milo_order::Scope loose(false);  // loose bitmap files are little-endian [C data]
+                tex->bitmap = scene::readBitmap(r);
+            }
             tex->width = tex->bitmap.width, tex->height = tex->bitmap.height;
             tex->decoded = true;
         } catch (const std::exception& e) {

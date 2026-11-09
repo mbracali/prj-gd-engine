@@ -885,7 +885,10 @@ void TrackView::setSurface(const GameData& data, const std::string& mode, const 
                 ByteReader r(b);
                 tex = std::make_unique<scene::Tex>();
                 tex->name = tex->file = "track/surfaces/" + name + "_keep.bmp";
+                {
+                milo_order::Scope loose(false);  // loose bitmap files are little-endian [C data]
                 tex->bitmap = scene::readBitmap(r);
+            }
                 tex->width = tex->bitmap.width, tex->height = tex->bitmap.height;
                 tex->decoded = true;
             } catch (const std::exception& e) {

@@ -444,7 +444,7 @@ void Rig::Impl::build() {
         } else if (auto* h = o->as<scene::CharHair>()) {
             Hair k;
             k.name = o->name;
-            k.p = h->params;
+            std::copy_n(h->params.begin(), k.p.size(), k.p.begin());  // RB adds min / max slack [not simulated yet: I]
             k.simulate = h->simulate;
             for (const auto& s : h->strands) {
                 Hair::Strand st;

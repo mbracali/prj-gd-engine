@@ -97,18 +97,18 @@ CharWeightable weightable(Rd& r) {
 
 // ObjectDir PreLoad 0x82322598 (v17) / PostLoad 0x8231ff08; RndDir v9
 // (PreLoad 0x821ba438, PostLoad 0x821ba4c8): mirrors scene/objects.cpp.
+// RB: ObjectDir PreLoad RB 0x8247FB78 (rev 19) [C]: the viewports are four
+// vec3 each (GH2's extra u32 per viewport is gone), then the current
+// viewport, the proxy file and the subdirs; no inline-proxy u32.
 void objectDirPre(Rd& r, ObjectDirData& o) {
-    r.version({17}, "ObjectDir");
-    uint32_t n = r.count(52);
+    r.version({19}, "ObjectDir");
+    uint32_t n = r.count(48);
     o.viewports.resize(n);
-    for (auto& v : o.viewports) {
-        r.xfm(v);
-        r.u32();
-    }
+    for (auto& v : o.viewports) r.xfm(v);
     o.currentViewport = r.u32();
     o.proxyFile = r.str();
     o.subdirs = r.strs();
-    o.inlineProxy = r.u32();
+    o.inlineProxy = 0;
 }
 
 void objectDirPost(Rd& r, ObjectDirData& o, ObjectHeader& h) {
@@ -125,19 +125,22 @@ void rndDirPost(Rd& r, ObjectDirData& o, ObjectHeader& h, RndDirData& d) {
     r.draw(d.draw);
     r.trans(d.trans);
     d.environment = r.str();
+    d.testEvent = r.str();  // RB RndDir PostLoad RB 0x821B1278 (rev 10): the test event symbol [C]
 }
 
-// Character PreLoad 0x82153CF8 (rev 10; BandCharacter PreLoad 0x82126048 first: u32 1).
-void characterPre(Rd& r, CharacterObj& c, bool readBandVersion) {
-    if (readBandVersion) r.version({1}, "BandCharacter");
-    r.version({10}, "Character");
-    r.version({9}, "RndDir");
+// Character PreLoad RB 0x82307140 (rev 12) then RndDir PreLoad RB 0x821B1B28
+// (rev 10) [C]; CompositeCharacter PreLoad RB 0x822E4260 reads its u32 9 first.
+void characterPre(Rd& r, CharacterObj& c, bool readCompositeVersion) {
+    if (readCompositeVersion) r.version({9}, "CompositeCharacter");
+    r.version({12}, "Character");
+    r.version({10}, "RndDir");
     objectDirPre(r, c.objectDir);
 }
 
 // ---- clips
 
 void bonesHeader(Rd& r, CharBonesSamples& s) {
+    s.revision = r.version({11, 12, 13, 14, 15, 16}, "CharBonesSamples");
     uint32_t n = r.count(8);
     s.bones.resize(n);
     for (auto& b : s.bones) {
@@ -157,6 +160,13 @@ void bonesHeader(Rd& r, CharBonesSamples& s) {
         if (s.offs[size_t(t)] != below) bad("bone channel offsets disagree with the names");
     }
     if (s.offs[9] != n) bad("bone channel total disagrees");
+    // RB CharBonesSamples header RB 0x82366080: (rev >= 12) a float list
+    // (its use is not read yet [I]); (rev 14) a bool [C].
+    if (s.revision >= 12) {
+        s.frames.resize(r.count(4));
+        for (float& f : s.frames) f = r.f();
+    }
+    if (s.revision == 14) r.b();
     s.offset.resize(n);
     int w = 0;
     for (size_t i = 0; i < n; ++i) {
@@ -170,27 +180,42 @@ void bonesHeader(Rd& r, CharBonesSamples& s) {
 constexpr float kQuatScale = 3.051851e-05f;      // s16 / 32767 (0x8215d338)
 constexpr float kRotScale = 0.0006103515625f;    // s16 -> radians (0x821a1a58)
 
-// CharBonesSamples data 0x821A1500.
+// CharBonesSamples data RB 0x82364D10 (rev >= 15, the 360's native data):
+// one raw block of count samples in the in-memory layout of RB 0x8231E378
+// [C]: a position or scale is a vec3 padded to 16 bytes, a quaternion 4 s16
+// (compressed) or 4 f32, a one-axis rotation s16 or f32, each sample padded
+// to 16 bytes. The s16 scales are GH2's [I for RB].
 void bonesData(Rd& r, CharBonesSamples& s) {
     const bool c = s.compression != 0;
-    if (s.width > 0 && s.count > r.left()) bad("implausible sample count");  // a set without channels keeps its count
+    size_t mem = 0;
+    for (const auto& b : s.bones)
+        mem += b.type <= CharBonesSamples::kScale ? 16 : b.type == CharBonesSamples::kQuat ? (c ? 8 : 16) : (c ? 2 : 4);
+    const size_t sampleSize = (mem + 15) & ~size_t(15);
+    if (sampleSize * s.count > r.left()) bad("sample data past the end");
     s.values.resize(size_t(s.count) * size_t(s.width));
     float* out = s.values.data();
-    for (uint32_t k = 0; k < s.count; ++k)
+    for (uint32_t k = 0; k < s.count; ++k) {
+        const size_t start = r.pos();
         for (const auto& b : s.bones) {
             if (b.type <= CharBonesSamples::kScale) {
                 for (int i = 0; i < 3; ++i) *out++ = r.f();
+                r.f();  // padding
             } else if (b.type == CharBonesSamples::kQuat) {
                 for (int i = 0; i < 4; ++i) *out++ = c ? float(r.s16()) * kQuatScale : r.f();
             } else {
                 *out++ = c ? float(r.s16()) * kRotScale : r.f();
             }
         }
+        for (size_t used = r.pos() - start; used < sampleSize; ++used) r.u8();
+    }
 }
 
-// CharClip::Load 0x821A0BF0 (rev 5).
+// CharClip::Load RB 0x8231A480 (rev 9) [C]: GH2's rev 5 with the
+// "relative" bool turned into an object name, a do_not_compress bool, a u32
+// before the transitions, no enter / exit event strings, and each event's
+// name before its frame.
 void charClip(Rd& r, CharClipSamples& k) {
-    k.clipRevision = r.version({5}, "CharClip");
+    k.clipRevision = r.version({9}, "CharClip");
     k.header = r.header();
     k.startFrame = r.f();
     k.endFrame = r.f();
@@ -199,37 +224,48 @@ void charClip(Rd& r, CharClipSamples& k) {
     k.playFlags = r.u32();
     k.blendWidth = r.f();
     k.range = r.f();
-    k.relative = r.b();
-    k.transitions.resize(r.count(8));
+    k.relativeTo = r.str();
+    k.relative = !k.relativeTo.empty();
+    k.doNotCompress = r.b();
+    r.u32();  // the transitions' size [C RB 0x8231A480; meaning I]
+    k.transitions.resize(r.count(4));
     for (auto& t : k.transitions) {
         t.dest = r.str();
         t.nodes.resize(r.count(8));
         for (auto& n : t.nodes) n.first = r.f(), n.second = r.f();
     }
-    k.enterEvent = r.str();
-    k.exitEvent = r.str();
     k.events.resize(r.count(8));
     for (auto& e : k.events) {
-        e.frame = r.f();
         e.script = r.str();
+        e.frame = r.f();
     }
 }
 
+// CharClipSamples::Load RB 0x8234F8E0 (rev 13) [C]: the clip, then the full,
+// one and third CharBonesSamples, each complete (version, header, data);
+// GH2 stored the three headers first.
 void readClipSamples(Rd& r, CharClipSamples& k) {
     charClip(r, k);
     CharBonesSamples* sets[3] = {&k.full, &k.one, &k.third};
-    for (auto* s : sets) bonesHeader(r, *s);
-    for (auto* s : sets) bonesData(r, *s);
+    for (auto* s : sets) {
+        bonesHeader(r, *s);
+        bonesData(r, *s);
+    }
 }
 
-void readCharDriverBody(Rd& r, CharDriver& d) {
-    r.version({5}, "CharDriver");
+// CharDriver PreLoad RB 0x82314B48 + PostLoad RB 0x823154E8 (rev 7) [C]:
+// the clips path, and when it is empty the clips' object name; the u32
+// "apply" where GH2 had a bool; then the first clip.
+void readCharDriverBody(Rd& r, CharDriver& d, bool readVersion = true) {
+    if (readVersion) r.version({7}, "CharDriver");
     d.header = r.header();
     d.weightable = weightable(r);
     d.bones = r.str();
     d.clips = r.str();
+    if (d.clips.empty()) d.clipsObject = r.str();
     d.realign = r.b();
-    d.unknown55 = r.b();
+    d.apply = r.u32();
+    d.unknown55 = d.apply != 0;
     d.starvedClip = r.str();
 }
 
@@ -243,6 +279,7 @@ void readIKHand(Rd& r, CharIKHand& h) {
     h.stretch = r.b();
     h.scaleX = r.b();
     h.moveElbow = r.b();
+    h.elbowSwing = r.f();  // RB rev 6 (RB 0x8232F9C0) [C order; name I]
 }
 
 struct Decoder {
@@ -257,8 +294,7 @@ template <class T> Decoder dec(uint32_t version, std::function<void(Rd&, T&)> fn
 
 const std::map<std::string, Decoder>& charDecoders() {
     static const std::map<std::string, Decoder> m = {
-        // CharClipSamples::Load 0x82162C68 (rev 11).
-        {"CharClipSamples", dec<CharClipSamples>(11, readClipSamples)},
+        {"CharClipSamples", dec<CharClipSamples>(13, readClipSamples)},
         // CharBone::Load 0x8215FDF0 (rev 3).
         {"CharBone", dec<CharBone>(3, [](Rd& r, CharBone& b) {
              b.header = r.header();
@@ -278,49 +314,45 @@ const std::map<std::string, Decoder>& charDecoders() {
         // CharClipFilter 0x82163F20: the object header only (its u32 1 is the header's revision).
         {"CharClipFilter", {1, [] { return std::make_unique<CharClipFilter>(); }, [](Rd&, Object&) {}}},
         // CharDriver Load 0x8216A728 / PreLoad 0x8216BE80 / PostLoad 0x8216C800 (rev 5).
-        {"CharDriver", {5, [] { return std::make_unique<CharDriver>(); }, [](Rd& r, Object& o) {
-             // The version was read by the dispatcher: re-read the body from it.
-             auto& d = static_cast<CharDriver&>(o);
-             d.header = r.header();
-             d.weightable = weightable(r);
-             d.bones = r.str();
-             d.clips = r.str();
-             d.realign = r.b();
-             d.unknown55 = r.b();
-             d.starvedClip = r.str();
+        {"CharDriver", {7, [] { return std::make_unique<CharDriver>(); }, [](Rd& r, Object& o) {
+             readCharDriverBody(r, static_cast<CharDriver&>(o), false);  // the dispatcher read the version
          }}},
         // CharDriverMidi Pre 0x82185590 (u32 3, CharDriver Pre), Post 0x82185600 (CharDriver Post, ObjPtr<CharClip>).
         {"CharDriverMidi", dec<CharDriverMidi>(3, [](Rd& r, CharDriverMidi& d) {
              readCharDriverBody(r, d);
-             d.inactiveClip = r.str();
+             d.inactiveClip = r.str();  // RB PostLoad RB 0x823425A0: the MIDI clip [C]
          })},
         // CharIKHand::Load 0x82174470 (rev 5).
-        {"CharIKHand", dec<CharIKHand>(5, readIKHand)},
+        {"CharIKHand", dec<CharIKHand>(6, readIKHand)},
         // CharIKMidi::Load 0x82184950 (rev 4).
         {"CharIKMidi", dec<CharIKMidi>(4, [](Rd& r, CharIKMidi& k) {
              k.header = r.header();
              k.bone = r.str();
          })},
         // CharHair::Load 0x8217FAF0 (rev 2).
-        {"CharHair", dec<CharHair>(2, [](Rd& r, CharHair& h) {
+        // CharHair::Load RB 0x8233BF30 (rev 9) [C]: eight parameters
+        // (stiffness .. max_slack), strands (RB 0x8233A868: root, angle,
+        // points RB 0x823372A0: pos, bone, length, radius, outer_radius,
+        // side_length; two 3x3 matrices, a u32 hookup flag), simulate.
+        {"CharHair", dec<CharHair>(9, [](Rd& r, CharHair& h) {
              h.header = r.header();
              r.fs(h.params);
              h.strands.resize(r.count(8));
              for (auto& s : h.strands) {
                  s.root = r.str();
                  s.angle = r.f();
-                 s.points.resize(r.count(8));
-                 for (auto& p : s.points) {  // 0x8217C0F8
+                 s.points.resize(r.count(20));
+                 for (auto& p : s.points) {
                      r.fs(p.pos);
                      p.bone = r.str();
                      p.length = r.f();
-                     p.type = int(r.u32());
-                     p.collide = r.str();
-                     p.f60 = r.f();
-                     p.f64 = r.f();
+                     p.radius = r.f();
+                     p.f60 = r.f();  // outer_radius
+                     p.f64 = r.f();  // side_length
                  }
                  r.fs(s.baseMat);
                  r.fs(s.baseMat2);
+                 s.hookupFlags = r.u32();
              }
              h.simulate = r.b();
          })},
@@ -334,24 +366,36 @@ const std::map<std::string, Decoder>& charDecoders() {
              r.fs(l.values);
              l.allowRoll = r.b();
          })},
-        // CharEyes::Load 0x82172708 (rev 4).
-        {"CharEyes", dec<CharEyes>(4, [](Rd& r, CharEyes& e) {
+        // CharEyes::Load RB 0x8232CB58 (rev 7) [C]: weightable, eyes as
+        // (eye, upper lid, lower lid), interests, the face servo.
+        {"CharEyes", dec<CharEyes>(7, [](Rd& r, CharEyes& e) {
              e.header = r.header();
-             e.eyes = r.strs();
-             e.rightLid = r.str();
+             e.weightable = weightable(r);
+             const uint32_t n = r.count(12);
+             for (uint32_t i = 0; i < n; ++i) {
+                 e.eyes.push_back(r.str());
+                 e.upperLids.push_back(r.str());
+                 e.lowerLids.push_back(r.str());
+             }
              e.interests.resize(r.count(8));
              for (auto& i : e.interests) {
                  i.first = r.str();
                  i.second = r.u32();
              }
+             e.faceServo = r.str();
          })},
         // CharWeightSetter::Load 0x8218DFC0 (rev 3).
-        {"CharWeightSetter", dec<CharWeightSetter>(3, [](Rd& r, CharWeightSetter& w) {
+        // CharWeightSetter::Load RB 0x8234B6E0 (rev 5) [C]: offset, scale,
+        // base_weight, beats_per_weight after the flags (GH2's invert bool is gone).
+        {"CharWeightSetter", dec<CharWeightSetter>(5, [](Rd& r, CharWeightSetter& w) {
              w.header = r.header();
              w.weightable = weightable(r);
              w.driver = r.str();
              w.flags = r.u32();
-             w.invert = r.b();
+             w.offset = r.f();
+             w.scale = r.f();
+             w.baseWeight = r.f();
+             w.beatsPerWeight = r.f();
          })},
         // CharUpperTwist::Load 0x82182C00 (rev 1).
         {"CharUpperTwist", dec<CharUpperTwist>(1, [](Rd& r, CharUpperTwist& t) {
@@ -361,11 +405,94 @@ const std::map<std::string, Decoder>& charDecoders() {
              t.twist2 = r.str();
          })},
         // CharForeTwist::Load 0x82182018 (rev 1).
-        {"CharForeTwist", dec<CharForeTwist>(1, [](Rd& r, CharForeTwist& t) {
+        // CharForeTwist::Load RB 0x8233E670 (rev 2): + length_scale [C].
+        {"CharForeTwist", dec<CharForeTwist>(2, [](Rd& r, CharForeTwist& t) {
              t.header = r.header();
              t.offset = r.f();
              t.hand = r.str();
              t.twist2 = r.str();
+             t.lengthScale = r.f();
+         })},
+        // RB's small helpers [C: RB Load addresses in docs/formats.md].
+        {"CharNeckTwist", dec<CharNeckTwist>(1, [](Rd& r, CharNeckTwist& t) {
+             t.header = r.header();
+             t.head = r.str();
+             t.twist = r.str();
+         })},
+        {"CharTransCopy", dec<CharTransCopy>(1, [](Rd& r, CharTransCopy& t) {
+             t.header = r.header();
+             t.src = r.str();
+             t.dest = r.str();
+         })},
+        {"CharIKScale", dec<CharIKScale>(1, [](Rd& r, CharIKScale& t) {
+             t.header = r.header();
+             t.weightable = weightable(r);
+             t.dest = r.str();
+             t.scale = r.f();
+         })},
+        {"CharGuitarString", dec<CharGuitarString>(0, [](Rd& r, CharGuitarString& t) {
+             t.header = r.header();
+             t.nut = r.str();
+             t.bridge = r.str();
+             t.bend = r.str();
+             t.target = r.str();
+         })},
+        {"CharBonesBlender", dec<CharBonesBlender>(1, [](Rd& r, CharBonesBlender& t) {
+             t.header = r.header();
+             t.dest = r.str();
+         })},
+        {"CharPollGroup", dec<CharPollGroup>(1, [](Rd& r, CharPollGroup& t) {
+             t.header = r.header();
+             t.polls = r.strs();
+         })},
+        // CharCollide::Load RB 0x8232D9D0 (rev 3): trans, shape, radius, length, flags [C].
+        {"CharCollide", dec<CharCollide>(3, [](Rd& r, CharCollide& c) {
+             c.header = r.header();
+             r.trans(c.trans);
+             c.shape = r.u32();
+             c.radius = r.f();
+             c.length = r.f();
+             c.flags = r.u32();
+         })},
+        // CharCuff::Load RB 0x82334660 (rev 7) [C].
+        {"CharCuff", dec<CharCuff>(7, [](Rd& r, CharCuff& c) {
+             c.header = r.header();
+             r.trans(c.trans);
+             for (int i = 0; i < 3; ++i) c.radius[size_t(i)] = r.f(), c.offset[size_t(i)] = r.f();
+             c.outerRadius = r.f();
+             c.openEnd = r.b();
+             c.bone = r.str();
+             c.eccentricity = r.f();
+             c.category = r.str();
+         })},
+        // CharMeshHide::Load RB 0x8235CAE8 (rev 1) [C].
+        {"CharMeshHide", dec<CharMeshHide>(1, [](Rd& r, CharMeshHide& c) {
+             c.header = r.header();
+             c.flags = r.u32();
+             c.hides.resize(r.count(8));
+             for (auto& h : c.hides) h.first = r.str(), h.second = r.u32();
+         })},
+        // OutfitConfig::Load RB 0x822F9DD0 (rev 3) [C]: colours (index,
+        // materials: mat, primary / secondary palette, textures).
+        {"OutfitConfig", dec<OutfitConfig>(3, [](Rd& r, OutfitConfig& c) {
+             c.header = r.header();
+             c.colors.resize(r.count(8));
+             for (auto& col : c.colors) {
+                 col.index = r.u32();
+                 col.mats.resize(r.count(16));
+                 for (auto& m : col.mats) {
+                     m.mat = r.str();
+                     m.primaryPalette = r.str();
+                     m.secondaryPalette = r.str();
+                     m.textures = r.strs();
+                 }
+             }
+         })},
+        // ColorPalette::Load RB 0x822F8038 (rev 1): RGBA colours [C].
+        {"ColorPalette", dec<ColorPalette>(1, [](Rd& r, ColorPalette& c) {
+             c.header = r.header();
+             c.colors.resize(r.count(16));
+             for (auto& col : c.colors) r.fs(col);
          })},
         // CharServoBone::Load 0x82188870, CharWalk::Load 0x82189F80 (rev 1): header only.
         {"CharServoBone", dec<CharServoBone>(1, [](Rd& r, CharServoBone& s) { s.header = r.header(); })},
@@ -390,20 +517,20 @@ const std::map<std::string, Decoder>& charDecoders() {
              r.fs(k.xfm);
          })},
         // OutfitLoader PreLoad 0x8215B528 (rev 2).
-        {"OutfitLoader", dec<OutfitLoader>(2, [](Rd& r, OutfitLoader& o) {
+        // OutfitLoader PreLoad RB 0x8230F488 (rev 3): GH2's without the category name [C].
+        {"OutfitLoader", dec<OutfitLoader>(3, [](Rd& r, OutfitLoader& o) {
              o.header = r.header();
              o.path = r.str();
              o.categories.resize(r.u16());
              for (auto& c : o.categories) {
                  c.current = r.u8();
                  c.next = r.u8();
-                 c.name = r.str();
                  c.items.resize(r.u16());
                  for (auto& i : c.items) i.first = r.u8(), i.second = r.u8();
              }
          })},
         // FaceFxLipSyncServo v5 (Load 0x8218E378, PreLoad 0x8218FAF0, PostLoad 0x82192470).
-        {"FaceFxLipSyncServo", dec<FaceFxLipSyncServo>(5, [](Rd& r, FaceFxLipSyncServo& s) {
+        {"FaceFxLipSyncServo", dec<FaceFxLipSyncServo>(7, [](Rd& r, FaceFxLipSyncServo& s) {
              s.header = r.header();
              s.weightable = weightable(r);
              s.faceGraph = r.str();
@@ -417,15 +544,15 @@ const std::map<std::string, Decoder>& charDecoders() {
          })},
         // Character / BandCharacter in a venue's <v>_chars milo: Pre + RndDir PostLoad
         // (Character PostLoad 0x82157678 reads its own fields only for its own record).
-        {"Character", dec<CharacterObj>(10, [](Rd& r, CharacterObj& c) {
-             r.version({9}, "RndDir");
+        {"Character", dec<CharacterObj>(12, [](Rd& r, CharacterObj& c) {
+             r.version({10}, "RndDir");
              objectDirPre(r, c.objectDir);
              rndDirPost(r, c.objectDir, c.header, c.rnd);
          })},
-        {"BandCharacter", dec<CharacterObj>(1, [](Rd& r, CharacterObj& c) {
-             c.band = true;
-             r.version({10}, "Character");
-             r.version({9}, "RndDir");
+        {"CompositeCharacter", dec<CharacterObj>(9, [](Rd& r, CharacterObj& c) {
+             c.composite = true;
+             r.version({12}, "Character");
+             r.version({10}, "RndDir");
              objectDirPre(r, c.objectDir);
              rndDirPost(r, c.objectDir, c.header, c.rnd);
          })},
@@ -455,12 +582,11 @@ CharClipSetData decodeClipSetDir(const Object& self, size_t clipCount) {
         size_t pos = 0;
         milo_order::Scope order(self.bigEndian);
         Rd r(self.record, pos);
-        r.version({16}, "CharClipSet");
+        // CharClipSet PreLoad RB 0x82352AE8 / PostLoad RB 0x82354500 (rev 17)
+        // [C]: no blend width / play flags / default flags before the clips.
+        r.version({17}, "CharClipSet");
         objectDirPre(r, s.objectDir);
         objectDirPost(r, s.objectDir, s.header);
-        s.blendWidth = r.f();
-        s.playFlags = r.u32();
-        s.defaultFlags = r.u32();
         s.clips.resize(clipCount);
         for (auto& e : s.clips) {
             e.name = r.str();
@@ -489,12 +615,12 @@ std::unique_ptr<CharacterObj> decodeCharacterDir(const Object& self) {
     c->record = self.record;
     c->typed = true;
     c->own = true;
-    c->band = self.cls == "BandCharacter";
+    c->composite = self.cls == "CompositeCharacter";
     size_t pos = 0;
     milo_order::Scope order(self.bigEndian);
     c->bigEndian = self.bigEndian;
     Rd r(c->record, pos);
-    characterPre(r, *c, c->band);
+    characterPre(r, *c, c->composite);
     rndDirPost(r, c->objectDir, c->header, c->rnd);
     c->lods.resize(r.count(8));
     for (auto& l : c->lods) {
@@ -504,9 +630,11 @@ std::unique_ptr<CharacterObj> decodeCharacterDir(const Object& self) {
     c->shadow = r.str();
     c->selfShadow = r.b();
     c->sphereBase = r.str();
-    // CharacterTest::Load 0x8219B7E0 (rev 6), the editor's block.
+    // RB rev 12 (PostLoad RB 0x8230AE00): the bounding sphere [C].
+    for (float& v : c->bounding) v = r.f();
+    // CharacterTest::Load RB 0x823607C0 (rev 8), the editor's block [C].
     auto& t = c->test;
-    r.version({6}, "CharacterTest");
+    r.version({8}, "CharacterTest");
     t.driver = r.str();
     t.clip1 = r.str();
     t.clip2 = r.str();
@@ -524,6 +652,11 @@ std::unique_ptr<CharacterObj> decodeCharacterDir(const Object& self) {
     t.b70 = r.b();
     t.b71 = r.b();
     t.u74 = r.u32();
+    t.sym80 = r.str();
+    t.f84 = r.f();
+    if (c->composite) {  // CompositeCharacter PostLoad RB 0x822E6508's own fields [C order; names I]
+        r.u32(), r.str(), r.u32(), r.str(), r.u32(), r.u32(), r.str(), r.str();
+    }
     if (r.left() != 0) bad(std::to_string(r.left()) + " bytes left in the Character record");
     c->decoded = true;
     return c;
