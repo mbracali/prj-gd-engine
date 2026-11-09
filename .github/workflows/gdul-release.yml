@@ -94,7 +94,15 @@ jobs:
       - env:
           GH_TOKEN: ${{ github.token }}
           PREV: ${{ needs.check.outputs.previous }}
-        run: gh release download "$PREV" -R "$GITHUB_REPOSITORY" -D previous -p 'gdul-*' && ls -l previous
+        # GitHub's API sometimes answers HTTP 500 (1.1.13's first run): try again.
+        run: |
+          for i in 1 2 3 4 5; do
+            rm -rf previous
+            gh release download "$PREV" -R "$GITHUB_REPOSITORY" -D previous -p 'gdul-*' && break
+            [ "$i" = 5 ] && exit 1
+            echo "download failed, trying again in $((i * 15)) s"; sleep $((i * 15))
+          done
+          ls -l previous
       - uses: actions/upload-artifact@v7
         with:
           name: previous
@@ -248,7 +256,9 @@ jobs:
         run: |
           # gcc: FFmpeg's configure needs a host C compiler even when it
           # cross-compiles (without it gdul 0.1.1 shipped no gd02 module).
-          dnf install -y --setopt=install_weak_deps=False git cmake ninja-build python3 gcc mingw64-gcc-c++ mingw64-SDL3 \
+          # gcc-c++: gd-engine-core builds its shader compiler (gdcore_shaderc)
+          # for the build machine (without it 1.1.13's Windows build failed).
+          dnf install -y --setopt=install_weak_deps=False git cmake ninja-build python3 gcc gcc-c++ mingw64-gcc-c++ mingw64-SDL3 \
             zip unzip make xz diffutils >/dev/null
       - uses: actions/checkout@v7
       - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
@@ -480,6 +490,13 @@ jobs:
             echo
             echo "One program for every Guitar Dream game: it lists the games, finds or loads your own disc images and runs each game in its window. No game data is included: you need your own copies of the games."
             echo
+            # This version's section of the launcher's CHANGELOG (Highlights first).
+            news=$(awk -v h="## $V" '$0 == h { on = 1; next } on && /^## / { exit } on' gd-engine-launcher/CHANGELOG.md)
+            if [ -n "$(printf '%s' "$news" | tr -d '[:space:]')" ]; then
+              echo "### What's new"
+              printf '%s\n' "$news" | sed -e 's/^Highlights$/**Highlights**/' -e 's/^Details$/**Details**/'
+              echo
+            fi
             echo "| System | Download | Then |"
             echo "|---|---|---|"
             echo "| **Windows** 10/11 | \`gdul-$V-windows-x86_64.zip\` | Extract it and run \`Guitar Dream Universal Launcher.exe\`. |"

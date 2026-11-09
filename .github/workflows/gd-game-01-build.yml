@@ -43,7 +43,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Install the MinGW toolchain
-        run: dnf install -y --setopt=install_weak_deps=False cmake ninja-build ccache mingw64-gcc-c++ mingw64-SDL3 zip >/dev/null
+        run: dnf install -y --setopt=install_weak_deps=False cmake ninja-build ccache gcc gcc-c++ mingw64-gcc-c++ mingw64-SDL3 zip >/dev/null
       - uses: actions/cache@v6
         with:
           path: .ccache
