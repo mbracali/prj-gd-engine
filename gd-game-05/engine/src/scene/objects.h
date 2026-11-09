@@ -302,8 +302,13 @@ public:
     std::string mesh;                   // mesh emitter
     bool frameDrive = true;             // v28+: runs on its animation frame (else on the clock x 30)
     bool preSpawn = false;              // v29+: warms up on the first poll
+    // RB rev 36 [C]:
+    float screenAspect = 0, stretchScale = 0;
+    int maxBurst = 0, subsamples = 0;
+    std::array<float, 2> timeBetween{}, peakRate{}, duration{}, startOffset{}, endOffset{};
+    bool velocityAlign = false, stretchWithVelocity = false, constantArea = false, perspective = false, pauseOffscreen = false;
     struct Preserved {
-        std::array<float, 3> pos;
+        std::array<float, 4> pos;
         std::array<float, 4> color;
         float size;
     };
@@ -398,7 +403,8 @@ struct RndDirData {
 // PanelDir v2 (PreLoad @ 0x82374378, PostLoad @ 0x823743f0); own record only.
 struct PanelDirData {
     std::string cam;
-    std::string enterTrigger;  // Q: symbol, "ui_enter" everywhere
+    std::string enterTrigger;  // GH2 only
+    bool canEndWorld = false;  // RB rev 4
 };
 // TrackDir v5 (PreLoad @ 0x82364010, PostLoad @ 0x82365268; names from
 // SyncProperty @ 0x82364dd0); own record only.
@@ -445,6 +451,8 @@ struct WorldDirData {
     Xfm camXfm;
     std::vector<std::string> subdirHides;
     std::vector<std::pair<std::string, std::string>> subdirBitmaps;
+    std::vector<std::pair<std::string, std::string>> matOverrides, presetOverrides;  // RB rev 17
+    std::vector<std::string> camshots, list160, list174;                            // RB rev 17
 };
 
 class DirObj : public Object {

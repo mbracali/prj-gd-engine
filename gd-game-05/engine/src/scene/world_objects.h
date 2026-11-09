@@ -103,10 +103,11 @@ public:
     };
     struct Keyframe {
         float duration = 0, fadeOut = 0;  // frames (rate 1: 480 a beat; 0: 30 a second)
-        std::vector<SpotEntry> spots;     // per `spotlights`
+        std::vector<SpotEntry> spots;     // per `spotlights` (RB: subpart = the flare name)
         std::vector<EnvEntry> environs;   // per `environs`
         std::vector<LightEntry> lights;   // per `lights`
         std::string description;
+        std::array<float, 9> extra{};     // RB rev 13: nine f32 after the drawers [names I]
     };
     Animatable anim;
     std::vector<Keyframe> keyframes;
@@ -118,6 +119,8 @@ public:
     float fadeIn = 0;       // in 480ths of a beat
     int minExcitement = 0, maxExcitement = 0;
     bool manual = false, locked = false;
+    int platformOnly = 0;                        // RB rev 13
+    std::vector<std::string> spotlightDrawers;   // RB rev 13
 };
 
 // Spotlight v25 (Load @ 0x82238098): a stage light with its beam, floor
@@ -137,10 +140,12 @@ public:
         float brighten = 0;
         std::string xsection;
         float expand = 0;
+        int shape = 0;  // RB
         std::vector<std::string> cutouts;
     } beam;
-    std::string lightCan, target;
+    std::string lightCan, target, spotTarget;  // spotTarget: RB
     float lightCanOffset = 0;
+    bool lightCanSort = false;  // RB
     std::array<float, 4> color{};
     float intensity = 0;
     std::string spotMaterial;
@@ -154,8 +159,10 @@ public:
     bool flareVisibilityTest = false;  // stored inverted (Q)
     float lensSize = 0, lensOffset = 0;
     std::string lensMaterial;
-    std::vector<std::string> additionalObjects;
+    std::vector<std::string> additionalObjects, slaves;  // slaves: RB
     bool targetShadow = false, animateFromPreset = false;
+    bool animatePositionFromPreset = false;  // RB
+    std::string colorOwner;                   // RB
 };
 
 // WorldCrowd v6 (Load @ 0x8224a090): the audience, archetype characters
@@ -172,8 +179,10 @@ public:
         std::vector<Xfm> placements;
     };
     std::vector<Character> characters;
-    float unknown = 0;  // Q: f32 before show_3d_only
+    float unknown = 0;  // GH2: f32 before show_3d_only
     bool show3dOnly = false;
+    std::string environ;  // RB rev 8
+    int lod = 0;          // RB rev 8 [name I]
 };
 
 // EventTrigger v10 (Load @ 0x8225d708): what a venue event (hit_p0_fret1,
@@ -214,6 +223,11 @@ public:
     std::string noiseMap;
     float hue = 0, saturation = 0, lightness = 0, contrast = 0, brightness = 0;
     float threshold = 0, duration = 0, emulateFps = 0;  // Q: names
+    // RB rev 18 [C order]:
+    std::array<std::array<float, 4>, 4> levels{};  // in_lo, in_hi, out_lo, out_hi
+    bool noiseStationary = false;
+    float numLevels = 0, minIntensity = 0, f15c = 0;
+    int mirror = 0;
 };
 
 // RndFlare v4 (Load @ 0x8220ddb8): a lens flare sprite.

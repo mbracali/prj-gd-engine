@@ -35,13 +35,7 @@ public:
 // >= 1) bool localize; then the symbol text_token when localized, else the
 // string text (both set the label's Text through SetText @ 0x821D1710).
 // Also a class of its own (UILabel v1, the cheat panel's labels).
-class UILabel : public UIComponent {
-public:
-    uint32_t labelRev = 0;
-    bool localize = false;
-    std::string text;       // when !localize
-    std::string textToken;  // when localize: a locale token
-};
+
 
 // The text fields BandLabel and BandButton share (a mix-in at the same
 // offsets in both; setters @ 0x8214C498..0x8214CAB0, re-applied to the
@@ -60,6 +54,21 @@ struct BandText {
     float kerning = 0;      // replaces the font's kerning while the text is laid out (@ 0x8214CAC8)
     float textSize = 30;    // -> Text size
     float wrapWidth = 0;    // -> Text wrap width
+};
+
+class UILabel : public UIComponent {
+public:
+    uint32_t labelRev = 0;
+    bool localize = false;
+    std::string text;       // when !localize
+    std::string textToken;  // when localize: a locale token
+    // RB rev 8: the text fields every label carries [C], and BandTextComp's style.
+    BandText style;
+    int capsMode = 0, fixedLength = 0, reserveLines = 0;
+    bool markup = false;
+    float italics = 0;
+    std::string textStyle;
+    std::array<uint32_t, 4> customColors{};
 };
 
 // BandLabel v12 PreLoad @ 0x8214ACB8 (PostLoad @ 0x8214A7A8 reads nothing;
@@ -82,6 +91,7 @@ class BandButton : public UILabel {
 public:
     uint32_t buttonRev = 0;
     BandText band;
+    std::string textMesh;  // RB rev 14
 };
 
 // UIList v3: PreLoad @ 0x8237A4E8 (UIComponent), PostLoad @ 0x8237A540
@@ -94,6 +104,9 @@ public:
     bool circular = false;
     float scrollTime = 0;
     bool paginate = false;  // v3
+    // RB rev 9:
+    int32_t gridSpan = 0, speed = 0, numData = 0, autoScrollPause = 0;
+    bool scrollPastMinDisplay = false, scrollPastMaxDisplay = false;
 };
 
 // CheckBox v0 (PreLoad @ 0x82140D10, PostLoad @ 0x821408C0): UIComponent;
@@ -105,6 +118,7 @@ class CheckBox : public UIComponent {};
 class BandSlider : public UIComponent {
 public:
     std::string textToken;
+    bool vertical = false;  // RB UISlider
 };
 
 // BandTextEntry v3: PreLoad @ 0x82142DF8 (UIComponent), PostLoad @
@@ -124,6 +138,7 @@ class UIPicture : public UIComponent {};
 // block_transition.
 class UITrigger : public UIComponent {
 public:
+    std::vector<std::string> triggerEvents;  // RB: the EventTrigger's
     std::string event, anim;
     bool blockTransition = false;
 };

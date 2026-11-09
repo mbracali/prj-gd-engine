@@ -152,7 +152,10 @@ void readCamShot(Rd& r, CamShot& c) {
 }
 
 void readLightPreset(Rd& r, LightPreset& p) {
-    checkVersion(p.version, "LightPreset", 9);
+    // LightPreset::Load RB 0x822C78E8 (rev 13), keyframe RB 0x822C4D98 [C]:
+    // spot entries add a flare name, keyframes add spotlight-drawer entries
+    // (3 f32) and nine f32; the preset adds platform_only and the drawers.
+    checkVersion(p.version, "LightPreset", 13);
     p.header = r.header();
     r.anim(p.anim);
     p.keyframes.resize(r.count(16));
@@ -165,7 +168,7 @@ void readLightPreset(Rd& r, LightPreset& p) {
             r.fs(s.rotation);
             r.fs(s.color);
             s.target = r.str();
-            s.subpart = r.str();
+            s.subpart = r.str();  // RB: the flare name
             s.flare = r.b();
         }
         k.environs.resize(r.count(41));
@@ -185,6 +188,9 @@ void readLightPreset(Rd& r, LightPreset& p) {
             l.falloff = r.f();
         }
         k.description = r.str();
+        const uint32_t drawers = r.count(12);
+        for (uint32_t i = 0; i < drawers; ++i) r.f(), r.f(), r.f();
+        for (float& v : k.extra) v = r.f();
     }
     p.spotlights = r.strs();
     p.environs = r.strs();
@@ -198,10 +204,15 @@ void readLightPreset(Rd& r, LightPreset& p) {
     p.maxExcitement = r.i32();
     p.manual = r.b();
     p.locked = r.b();
+    p.platformOnly = r.i32();
+    p.spotlightDrawers = r.strs();
 }
 
 void readSpotlight(Rd& r, Spotlight& s) {
-    checkVersion(s.version, "Spotlight", 25);
+    // Spotlight::Load RB 0x822B3360 (rev 31), beam RB 0x822AF4A0 [C]: the
+    // beam gains a shape before the cutouts; spot_target, light_can_sort,
+    // slaves and the colour owner are new.
+    checkVersion(s.version, "Spotlight", 31);
     s.header = r.header();
     r.draw(s.draw);
     r.trans(s.trans);
@@ -221,10 +232,13 @@ void readSpotlight(Rd& r, Spotlight& s) {
     b.brighten = r.f();
     b.xsection = r.str();
     b.expand = r.f();
+    b.shape = r.i32();
     b.cutouts = r.strs();
     s.lightCan = r.str();
     s.target = r.str();
+    s.spotTarget = r.str();
     s.lightCanOffset = r.f();
+    s.lightCanSort = r.b();
     r.fs(s.color);
     s.intensity = r.f();
     s.spotMaterial = r.str();
@@ -241,34 +255,40 @@ void readSpotlight(Rd& r, Spotlight& s) {
     s.lensOffset = r.f();
     s.lensMaterial = r.str();
     s.additionalObjects = r.strs();
+    s.slaves = r.strs();
     s.targetShadow = r.b();
     s.animateFromPreset = r.b();
+    s.animatePositionFromPreset = r.b();
+    s.colorOwner = r.str();
 }
 
 void readWorldCrowd(Rd& r, WorldCrowd& c) {
-    checkVersion(c.version, "WorldCrowd", 6);
+    // WorldCrowd::Load RB 0x822B91E0 (rev 8) [C order per the record].
+    checkVersion(c.version, "WorldCrowd", 8);
     r.draw(c.draw);
     c.placementMesh = r.str();
     c.num = r.u32();
-    c.rotate = r.b();
     c.characters.resize(r.count(16));
-    for (auto& ch : c.characters) {
+    for (auto& ch : c.characters) {  // RB 0x822B5160
         ch.character = r.str();
         ch.height = r.f();
         ch.density = r.f();
         ch.radius = r.f();
     }
+    c.environ = r.str();  // RB: no rotate bool; an environ name before the placements
     for (auto& ch : c.characters) {
         ch.placements.resize(r.count(48));
         for (auto& x : ch.placements) r.xfm(x);
     }
-    c.unknown = r.f();
+    c.lod = r.i32();
     c.show3dOnly = r.b();
     c.header = r.header();  // the object block comes last in this class
 }
 
 void readEventTrigger(Rd& r, EventTrigger& e) {
-    checkVersion(e.version, "EventTrigger", 10);
+    // EventTrigger::Load RB 0x822123D8 (rev 11) [C]: an anim's period comes
+    // before its type, and proxy calls carry an event.
+    checkVersion(e.version, "EventTrigger", 11);
     e.header = r.header();
     e.triggerEvents = r.strs();
     e.anims.resize(r.count(30));
@@ -281,9 +301,9 @@ void readEventTrigger(Rd& r, EventTrigger& e) {
         a.rate = r.u32();
         a.start = r.f();
         a.end = r.f();
-        a.scale = r.f();
-        a.type = r.str();
         a.period = r.f();
+        a.type = r.str();
+        a.scale = r.f();
     }
     e.sounds = r.strs();
     e.shows = r.strs();
@@ -294,32 +314,46 @@ void readEventTrigger(Rd& r, EventTrigger& e) {
     e.waitForEvents = r.strs();
     e.nextRandom = r.str();
     e.proxyCalls.resize(r.count(8));
-    for (auto& p : e.proxyCalls) p.first = r.str(), p.second = r.str();
+    for (auto& p : e.proxyCalls) {
+        p.first = r.str(), p.second = r.str();
+        r.str();  // RB: the event symbol
+    }
 }
 
+// RndPostProc::Load RB 0x821913A0 -> RB 0x82190F08 (rev 18) [C]: bloom
+// colour, size, intensity, threshold, the luminance map, the shared
+// ColorXfm block (RB 0x8221A410), posterize, secs range, noise, then
+// threshold, duration, four more and the mirror mode [names partly I].
 void readPostProc(Rd& r, PostProc& p) {
-    checkVersion(p.version, "PostProc", 9);
+    checkVersion(p.version, "PostProc", 18);
     p.header = r.header();
-    r.fs(p.bloomThreshold);
-    p.bloomScale = r.f();
+    r.fs(p.bloomThreshold);  // RB: the bloom colour (RGBA)
+    p.bloomScale = r.f();    // size
     p.bloomIntensity = r.f();
-    p.bloomKernelMult = r.f();
+    p.bloomKernelMult = r.f();  // RB: the bloom threshold
     p.luminanceMap = r.str();
-    r.fs(p.colorXfm);
-    r.fs(p.intensity);
-    r.fs(p.secsRange);
-    r.fs(p.noiseBaseScale);
-    p.unknownD0 = r.f();
-    p.noiseIntensity = r.f();
-    p.noiseMap = r.str();
+    checkVersion(r.u32(), "ColorXfm", 0);
+    for (float& v : p.colorXfm) v = r.f();  // the 3x4 transform
     p.hue = r.f();
     p.saturation = r.f();
     p.lightness = r.f();
     p.contrast = r.f();
     p.brightness = r.f();
+    for (auto& lvl : p.levels) r.fs(lvl);  // in_lo, in_hi, out_lo, out_hi
+    r.fs(p.intensity);   // posterize
+    r.fs(p.secsRange);
+    r.fs(p.noiseBaseScale);
+    p.unknownD0 = r.f();
+    p.noiseIntensity = r.f();
+    p.noiseStationary = r.b();
+    p.noiseMap = r.str();
     p.threshold = r.f();
     p.duration = r.f();
     p.emulateFps = r.f();
+    p.numLevels = r.f();
+    p.minIntensity = r.f();
+    p.mirror = r.i32();
+    p.f15c = r.f();
 }
 
 void readFlare(Rd& r, Flare& f) {

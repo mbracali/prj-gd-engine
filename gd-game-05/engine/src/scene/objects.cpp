@@ -448,20 +448,29 @@ void readAnimFilter(In& in, AnimFilter& a) {
     a.jitter = in.f();
 }
 
+// RndParticleSys::Load RB 0x821D7870 (rev 36) [C]: GH2's v30 plus
+// screen_aspect, max_burst, time_between, peak_rate, duration, the start /
+// end offsets, the velocity-alignment flags, stretch_scale, perspective,
+// subsamples and pause_offscreen; shrink_ratio before grow_ratio.
 void readParticleSys(In& in, ParticleSys& p) {
-    expectVersion(p.version, 30, "ParticleSys");
+    expectVersion(p.version, 36, "ParticleSys");
     p.header = readObjectHeader(in);
-    readObjectHeader(in);  // v28+ reads the object block a second time (0x82216b38)
+    readObjectHeader(in);  // read a second time (RB 0x821D7870)
     readAnimatable(in, p.anim);
     readTrans(in, p.trans);
     readDraw(in, p.draw);
     in.fs(p.life);
+    p.screenAspect = in.f();
     in.fs(p.posLow);
     in.fs(p.posHigh);
     in.fs(p.speed);
     in.fs(p.pitch);
     in.fs(p.yaw);
     in.fs(p.emitRate);
+    p.maxBurst = in.i32();
+    in.fs(p.timeBetween);
+    in.fs(p.peakRate);
+    in.fs(p.duration);
     in.fs(p.startSize);
     in.fs(p.deltaSize);
     in.fs(p.startColorLow);
@@ -472,8 +481,8 @@ void readParticleSys(In& in, ParticleSys& p) {
     in.fs(p.force);
     p.mat = in.str();
     p.type = in.i32();
-    p.growRatio = in.f();
     p.shrinkRatio = in.f();
+    p.growRatio = in.f();
     p.midColorRatio = in.f();
     in.fs(p.midColorLow);
     in.fs(p.midColorHigh);
@@ -485,14 +494,23 @@ void readParticleSys(In& in, ParticleSys& p) {
     in.fs(p.spinSpeed);
     p.spinDamping = in.f();
     p.drag = in.f();
+    in.fs(p.startOffset);
+    in.fs(p.endOffset);
+    p.velocityAlign = in.b();
+    p.stretchWithVelocity = in.b();
+    p.constantArea = in.b();
+    p.stretchScale = in.f();
+    p.perspective = in.b();
     p.relativeMotion = in.f();
     p.relativeParent = in.str();
     p.mesh = in.str();
+    p.subsamples = in.i32();
     p.frameDrive = in.b();
+    p.pauseOffscreen = in.b();
     p.preSpawn = in.b();
-    if (in.b()) {  // preserved particles (@ 0x82212708): pos, colour, size
+    if (in.b()) {  // preserved particles: pos (4), colour (4), size
         uint32_t n = in.u32();
-        if (n > in.remaining() / 32) bad("implausible particle count");
+        if (n > in.remaining() / 36) bad("implausible particle count");
         p.preserved.resize(n);
         for (auto& q : p.preserved) {
             in.fs(q.pos);
@@ -541,7 +559,9 @@ void readMeshAnim(In& in, MeshAnim& a) {
 }
 
 void readFont(In& in, Font& f) {
-    expectVersion(f.version, 15, "Font");
+    // RndFont::Load RB 0x821A4A80 (rev 16) [C]: the same fields as GH2's v15;
+    // RB's property table names the two bools packed then monospace.
+    expectVersion(f.version, 16, "Font");
     f.header = readObjectHeader(in);
     f.mat = in.str();
     in.fs(f.cellSize);
@@ -558,8 +578,8 @@ void readFont(In& in, Font& f) {
         }
     }
     f.textureOwner = in.str();
+    f.unknown1074 = in.b();  // packed
     f.monospace = in.b();
-    f.unknown1074 = in.b();
     f.texWidth = in.u32();
     f.texHeight = in.u32();
     in.fs(f.cellUv);
@@ -680,22 +700,23 @@ namespace {
 
 // ---- The ObjectDir family ------------------------------------------------
 
-constexpr uint32_t kObjectDirRev = 17, kRndDirRev = 9, kPanelDirRev = 2, kTrackDirRev = 5, kGHTrackDirRev = 3, kWorldDirRev = 12;
+// RB: ObjectDir PreLoad RB 0x8247FB78 (rev 19), RndDir RB 0x821B1B28 /
+// 0x821B1278 (rev 10), PanelDir RB 0x82260A90 / 0x82260B08 (rev 4), TrackDir
+// RB 0x82250E88 / 0x82252610 (rev 5), WorldDir RB 0x8228C468 / 0x8228B6C8
+// (rev 17) [C].
+constexpr uint32_t kObjectDirRev = 19, kRndDirRev = 10, kPanelDirRev = 4, kTrackDirRev = 5, kGHTrackDirRev = 3, kWorldDirRev = 17;
 
 void objectDirPre(In& in, DirObj& d) {
     expectVersion(in.u32(), kObjectDirRev, "ObjectDir");
     auto& o = d.objectDir;
-    uint32_t n = in.u32();  // viewports (@ 0x82322530): Transform + u32 each (@ 0x8231dec8)
-    if (n > in.remaining() / 52) bad("implausible viewport count");
+    uint32_t n = in.u32();  // viewports: a transform each (RB: no u32 after it)
+    if (n > in.remaining() / 48) bad("implausible viewport count");
     o.viewports.resize(n);
-    for (auto& v : o.viewports) {
-        in.xfm(v);
-        in.u32();
-    }
+    for (auto& v : o.viewports) in.xfm(v);
     o.currentViewport = in.u32();
     o.proxyFile = in.str();
-    o.subdirs = in.strList();  // FilePaths (@ 0x8224e3f0)
-    o.inlineProxy = in.u32();
+    o.subdirs = in.strList();
+    o.inlineProxy = 0;  // RB: an inline directory follows the record's end marker (scene/milo.cpp)
 }
 
 void objectDirPost(In& in, DirObj& d) {
@@ -710,15 +731,15 @@ void rndDirPost(In& in, DirObj& d) {
     readDraw(in, d.rnd.draw);
     readTrans(in, d.rnd.trans);
     d.rnd.environment = in.str();
+    d.rnd.testEvent = in.str();
     d.hasRnd = true;
 }
 
 void panelDirPost(In& in, DirObj& d) {
     rndDirPost(in, d);
     d.hasPanel = true;
-    if (!d.own) return;
-    d.panel.cam = in.str();
-    d.panel.enterTrigger = in.str();
+    if (d.own) d.panel.cam = in.str();  // the cam only in a file's own record [C data]
+    d.panel.canEndWorld = in.b();
 }
 
 // WorldDir PostLoad (0x8224de60): PanelDir's, then (own record) the default
@@ -733,6 +754,17 @@ void worldDirPost(In& in, DirObj& d) {
     if (n > in.remaining() / 8) bad("implausible bitmap count");
     w.subdirBitmaps.resize(n);
     for (auto& b : w.subdirBitmaps) b.first = in.str(), b.second = in.str();
+    // RB rev 17: material and preset overrides (name pairs), the camshot
+    // list and two more name lists [C order; names I].
+    for (auto* pairs : {&w.matOverrides, &w.presetOverrides}) {
+        uint32_t k = in.u32();
+        if (k > in.remaining() / 8) bad("implausible override count");
+        pairs->resize(k);
+        for (auto& b : *pairs) b.first = in.str(), b.second = in.str();
+    }
+    w.camshots = in.strList();
+    w.list160 = in.strList();
+    w.list174 = in.strList();
 }
 
 void trackDirPost(In& in, DirObj& d) {
@@ -824,7 +856,8 @@ bool isHudDirClass(const std::string& cls) {
 }  // namespace
 
 bool isDirClass(const std::string& cls) {
-    return cls == "ObjectDir" || cls == "RndDir" || cls == "PanelDir" || cls == "GHTrackDir" || cls == "WorldDir" || isHudDirClass(cls);
+    return cls == "ObjectDir" || cls == "RndDir" || cls == "PanelDir" || cls == "GHTrackDir" || cls == "TrackDir" || cls == "WorldDir" ||
+           isHudDirClass(cls);
 }
 
 std::unique_ptr<DirObj> decodeDir(const std::string& cls, const std::string& name, const Bytes& stream, size_t start,
@@ -852,6 +885,7 @@ std::unique_ptr<DirObj> decodeDir(const std::string& cls, const std::string& nam
         d->hasGHTrack = true;
         expectVersion(in.u32(), kTrackDirRev, "TrackDir");
     }
+    if (cls == "TrackDir") expectVersion(d->version, kTrackDirRev, "TrackDir");  // RB's track: TrackDir itself
     if (cls == "WorldDir") {
         // WorldDir PreLoad (0x8224e5c0): its fields, then PanelDir's chain.
         expectVersion(d->version, kWorldDirRev, "WorldDir");
@@ -861,7 +895,7 @@ std::unique_ptr<DirObj> decodeDir(const std::string& cls, const std::string& nam
         d->hasWorld = true;
     }
     if (isHudDirClass(cls)) hudPre(in, *d, own);
-    if (cls == "GHTrackDir" || cls == "PanelDir" || cls == "WorldDir") {
+    if (cls == "GHTrackDir" || cls == "TrackDir" || cls == "PanelDir" || cls == "WorldDir") {
         if (cls == "PanelDir") expectVersion(d->version, kPanelDirRev, "PanelDir");
         else expectVersion(in.u32(), kPanelDirRev, "PanelDir");
     }
@@ -877,7 +911,7 @@ std::unique_ptr<DirObj> decodeDir(const std::string& cls, const std::string& nam
     const auto& od = d->objectDir;
     if (!own && (od.inlineProxy == 1 || od.inlineProxy == 2) && !od.proxyFile.empty()) in.seek(inlineDir(in.pos()));
     // PostLoad chain, base class first.
-    if (cls == "GHTrackDir") trackDirPost(in, *d);
+    if (cls == "GHTrackDir" || cls == "TrackDir") trackDirPost(in, *d);
     else if (cls == "PanelDir") panelDirPost(in, *d);
     else if (cls == "WorldDir") worldDirPost(in, *d);
     else if (cls == "RndDir" || isHudDirClass(cls)) rndDirPost(in, *d);

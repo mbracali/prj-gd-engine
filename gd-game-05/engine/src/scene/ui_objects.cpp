@@ -66,7 +66,7 @@ void checkVersion(uint32_t v, const char* cls, uint32_t lo, uint32_t hi) {
 }
 
 void component(Rd& r, UIComponent& c) {
-    c.componentRev = version(r, "UIComponent", 0, 1);
+    c.componentRev = version(r, "UIComponent", 1, 1);  // RB 0x82270C80 [C]
     c.header = r.header();
     r.trans(c.trans);
     r.draw(c.draw);
@@ -76,62 +76,109 @@ void component(Rd& r, UIComponent& c) {
     }
 }
 
+// UILabel PreLoad RB 0x8226C070 (rev 8) [C]: UIComponent (RB 0x82270C80,
+// rev 1), localize, the token or text, then the text fields RB moved from
+// GH2's BandLabel into every label: text_size, alignment, caps_mode,
+// markup, leading, kerning, italics, fit_type, width, height, fixed_length,
+// reserve_lines (names: SyncProperty RB 0x8226D428).
 void label(Rd& r, UILabel& l, bool ownVersion = false) {
-    if (ownVersion) checkVersion(l.labelRev = l.version, "UILabel", 0, 1);
-    else l.labelRev = version(r, "UILabel", 0, 1);
+    if (ownVersion) checkVersion(l.labelRev = l.version, "UILabel", 8, 8);
+    else l.labelRev = version(r, "UILabel", 8, 8);
     component(r, l);
-    l.localize = l.labelRev >= 1 ? r.b() : false;
+    l.localize = r.b();
     if (l.localize) l.textToken = r.str();
     else l.text = r.str();
+    BandText& t = l.style;
+    t.textSize = r.f();
+    t.alignment = r.u32();
+    l.capsMode = r.i32();
+    t.allCaps = l.capsMode == 2;
+    l.markup = r.b();
+    t.leading = r.f();
+    t.kerning = r.f();
+    l.italics = r.f();
+    t.fitText = r.u32();
+    t.width = r.f();
+    t.height = r.f();
+    t.wrapWidth = t.width;
+    l.fixedLength = r.i32();
+    l.reserveLines = r.i32();
+}
+
+// BandTextComp::Load RB 0x823007E0 (rev 1) [C]: the style symbol; with
+// "custom_colors" four more 32-bit values.
+void textComp(Rd& r, UILabel& l) {
+    version(r, "BandTextComp", 1, 1);
+    l.textStyle = r.str();
+    if (l.textStyle == "custom_colors")
+        for (auto& c : l.customColors) c = r.u32();
 }
 
 void readUILabel(Rd& r, UILabel& o) { label(r, o, true); }
 
-void bandText(Rd& r, BandText& t) {
-    t.fitText = r.u32();
-    t.width = r.f();
-    t.height = r.f();
-    t.leading = r.f();
-    t.alignment = r.u32();
-    t.jitterSeed = r.u32();
-    t.deltaX = r.f();
-    t.deltaZ = r.f();
-    t.deltaRot = r.f();
-    t.allCaps = r.b();
-    t.kerning = r.f();
-    t.textSize = r.f();
-}
 
+// BandLabel PreLoad RB 0x822FE288 (rev 15) [C]: a UILabel and its text style.
 void readBandLabel(Rd& r, BandLabel& o) {
-    checkVersion(o.version, "BandLabel", 11, 12);
+    checkVersion(o.version, "BandLabel", 15, 15);
     label(r, o);
-    bandText(r, o.band);
-    o.band.wrapWidth = o.version >= 12 ? r.f() : o.band.width;
-    r.fs(o.color);
+    textComp(r, o);
+    o.band = o.style;
 }
 
+// BandButton PreLoad RB 0x822D3D48 / PostLoad RB 0x822D5578 (rev 14) [C]:
+// UIButton (rev 0 or 1), the label, the text style, the text mesh.
 void readBandButton(Rd& r, BandButton& o) {
-    checkVersion(o.version, "BandButton", 9, 10);
-    o.buttonRev = version(r, "UIButton", 0, 0);
+    checkVersion(o.version, "BandButton", 14, 14);
+    o.buttonRev = version(r, "UIButton", 0, 1);
     label(r, o);
-    bandText(r, o.band);
-    o.band.wrapWidth = o.version >= 10 ? r.f() : o.band.width;
+    textComp(r, o);
+    o.textMesh = r.str();
+    o.band = o.style;
 }
 
+void readUIButton(Rd& r, BandButton& o) {
+    checkVersion(o.buttonRev = o.version, "UIButton", 0, 1);
+    label(r, o);
+    o.band = o.style;
+}
+
+// UIList PreLoad RB 0x82268680 / PostLoad RB 0x82268EA8 (rev 9) [C]; BandList
+// shares it [C: its vtable's Load slots].
 void readUIList(Rd& r, UIList& o) {
-    checkVersion(o.version, "UIList", 1, 3);
+    checkVersion(o.version, "UIList", 9, 9);
     component(r, o);
-    o.spacing = r.f();
-    o.arrowOffset = r.f();
-    o.fadeOffset = r.i32();
     o.displayNum = r.i32();
-    o.circular = r.b();
+    o.gridSpan = r.i32();
+    o.circular = r.i32() != 0;
+    o.scrollPastMinDisplay = r.b();
+    o.scrollPastMaxDisplay = r.b();
+    o.speed = r.i32();
+    o.numData = r.i32();
+    r.b();
     o.scrollTime = r.f();
-    if (o.version > 2) o.paginate = r.b();
-    if (o.version == 1) {
-        r.u32();
-        r.u32();
-    }
+    o.paginate = r.b();
+    r.b();
+    r.b();
+    o.autoScrollPause = r.i32();
+}
+
+// UIProxy PreLoad RB 0x8225F520 (rev 2) [C]: the UIComponent only.
+void readUIProxy(Rd& r, UIProxy& o) {
+    checkVersion(o.version, "UIProxy", 2, 2);
+    component(r, o);
+}
+
+// UISlider PreLoad RB 0x82265E00 (rev 1) [C]: UIComponent, vertical.
+void readUISlider(Rd& r, BandSlider& o) {
+    checkVersion(o.version, "UISlider", 1, 1);
+    component(r, o);
+    o.vertical = r.b();
+}
+
+// BandHighlight PreLoad RB 0x822FED20 (rev 0) [C]: UIComponent.
+void readBandHighlight(Rd& r, UIProxy& o) {
+    checkVersion(o.version, "BandHighlight", 0, 0);
+    component(r, o);
 }
 
 template <class T> void readPlain(Rd& r, T& o) {
@@ -160,11 +207,36 @@ void readBandTextEntry(Rd& r, BandTextEntry& o) {
     }
 }
 
+// UITrigger::Load RB 0x822630B0 (rev 1) [C]: a whole EventTrigger record
+// (its own rev 11, RB 0x822123D8) then block_transition. The EventTrigger
+// part is skipped field by field here (scene/world_objects.cpp decodes the
+// class itself).
 void readUITrigger(Rd& r, UITrigger& o) {
-    checkVersion(o.version, "UITrigger", 0, 0);
-    component(r, o);
-    o.event = r.str();
-    o.anim = r.str();
+    checkVersion(o.version, "UITrigger", 1, 1);
+    version(r, "EventTrigger", 11, 11);
+    o.header = r.header();
+    auto list = [&] {
+        std::vector<std::string> v(r.u32());
+        for (auto& s : v) s = r.str();
+        return v;
+    };
+    o.triggerEvents = list();
+    const uint32_t anims = r.u32();
+    for (uint32_t i = 0; i < anims; ++i) {
+        const std::string anim = r.str();
+        if (o.anim.empty()) o.anim = anim;
+        r.f(), r.b(), r.f(), r.b(), r.u32(), r.f(), r.f(), r.f();
+        r.str();
+        r.f();
+    }
+    list(), list();  // sounds, shows
+    const uint32_t hides = r.u32();
+    for (uint32_t i = 0; i < hides; ++i) r.str(), r.f();
+    list(), list(), list();  // enable, disable, wait-for events
+    r.str();                 // next link
+    const uint32_t calls = r.u32();
+    for (uint32_t i = 0; i < calls; ++i) r.str(), r.str(), r.str();
+    if (!o.triggerEvents.empty()) o.event = o.triggerEvents.front();
     o.blockTransition = r.b();
 }
 
@@ -203,7 +275,11 @@ const std::map<std::string, UiDecoder>& uiDecoders() {
         {"UIList", dec<UIList>(readUIList)},
         {"CheckBox", dec<CheckBox>(readPlain<CheckBox>)},
         {"UIPicture", dec<UIPicture>(readPlain<UIPicture>)},
-        {"UIProxy", dec<UIProxy>(readPlain<UIProxy>)},
+        {"UIProxy", dec<UIProxy>(readUIProxy)},
+        {"UIButton", dec<BandButton>(readUIButton)},
+        {"BandList", dec<UIList>(readUIList)},
+        {"UISlider", dec<BandSlider>(readUISlider)},
+        {"BandHighlight", dec<UIProxy>(readBandHighlight)},
         {"BandSlider", dec<BandSlider>(readBandSlider)},
         {"BandTextEntry", dec<BandTextEntry>(readBandTextEntry)},
         {"UITrigger", dec<UITrigger>(readUITrigger)},
