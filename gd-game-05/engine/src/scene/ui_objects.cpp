@@ -147,13 +147,17 @@ void readUIButton(Rd& r, BandButton& o) {
 void readUIList(Rd& r, UIList& o) {
     checkVersion(o.version, "UIList", 9, 9);
     component(r, o);
-    o.displayNum = r.i32();
+    // Field meanings [I: from the data: ss_song.lst's 33.0 is the rows'
+    // spacing as GH2's first UIList field, its 7 the rows shown]; the
+    // order and sizes [C: RB 0x82268680 / 0x82268EA8].
+    o.spacing = r.f();
     o.gridSpan = r.i32();
     o.circular = r.i32() != 0;
     o.scrollPastMinDisplay = r.b();
     o.scrollPastMaxDisplay = r.b();
     o.speed = r.i32();
-    o.numData = r.i32();
+    o.displayNum = r.i32();
+    o.numData = o.displayNum;
     r.b();
     o.scrollTime = r.f();
     o.paginate = r.b();

@@ -559,8 +559,9 @@ void readMeshAnim(In& in, MeshAnim& a) {
 }
 
 void readFont(In& in, Font& f) {
-    // RndFont::Load RB 0x821A4A80 (rev 16) [C]: the same fields as GH2's v15;
-    // RB's property table names the two bools packed then monospace.
+    // RndFont::Load RB 0x821A4A80 (rev 16) [C]: the same fields as GH2's v15
+    // (the two bools keep GH2's order: monospace, then the other [C data: a
+    // proportional font such as fakir_regular reads monospace FALSE]).
     expectVersion(f.version, 16, "Font");
     f.header = readObjectHeader(in);
     f.mat = in.str();
@@ -578,8 +579,8 @@ void readFont(In& in, Font& f) {
         }
     }
     f.textureOwner = in.str();
-    f.unknown1074 = in.b();  // packed
     f.monospace = in.b();
+    f.unknown1074 = in.b();
     f.texWidth = in.u32();
     f.texHeight = in.u32();
     in.fs(f.cellUv);

@@ -807,6 +807,12 @@ PanelObj* ScreenObj::focusPanel() const {
     if (focusOverride) return focusOverride;
     const DataNode* f = handler("focus");
     if (f && f->children.size() > 1 && f->children[1].isText()) return ui.panel(f->children[1].s);
+    // RB's screens with (player_panels (panel <p>) ...): every player's
+    // focus is in <p> (one local player for now) [I] (GD05-005: the
+    // per-slot player panels of the band screens).
+    if (const DataNode* pp = handler("player_panels"))
+        if (const DataNode* panel = pp->find("panel"); panel && panel->children.size() > 1 && panel->children[1].isText())
+            return ui.panel(panel->children[1].s);
     return nullptr;
 }
 

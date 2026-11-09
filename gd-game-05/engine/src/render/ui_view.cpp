@@ -2,6 +2,7 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "render/ui_view.h"
 
+#include <SDL3/SDL.h>
 #include <algorithm>
 #include <cmath>
 #include <set>
@@ -67,7 +68,11 @@ UiView::UiView(const GameData& data, scene::MiloLibrary& library, const scene::U
 UiView::~UiView() = default;
 
 void UiView::problem(const std::string& what) {
-    if (std::find(problems_.begin(), problems_.end(), what) == problems_.end()) problems_.push_back(what);
+    if (std::find(problems_.begin(), problems_.end(), what) == problems_.end()) {
+        problems_.push_back(what);
+        static const bool log = SDL_getenv("GD05_UILOG") != nullptr;
+        if (log) SDL_Log("ui view: %s", what.c_str());
+    }
 }
 
 scene::Milo* UiView::resource(const std::string& rel) {
@@ -358,7 +363,18 @@ void UiView::draw(MaterialRenderer& r) {
     hits_.clear();
     if (!milo_) return;
     viewProj_ = camera().viewProj(false);
-    const scene::Directory& root = milo_->root();
+    const scene::Directory* drawRoot = &milo_->root();
+    // RB's RenderDir panels (qp_selsong.milo: a cloth banner whose texture a
+    // TexRenderer renders from the inline PanelDir holding the list): the
+    // inline panel is drawn directly, without the banner [I] (GD05-022:
+    // render-to-texture).
+    if (drawRoot->cls == "RenderDir")
+        for (const auto& [owner, sub] : drawRoot->subdirs)
+            if (sub && sub->cls == "PanelDir") {
+                drawRoot = sub.get();
+                break;
+            }
+    const scene::Directory& root = *drawRoot;
     // The drawables no group of the panel holds, by draw order.
     std::set<std::string> held;
     for (const auto& o : root.objects)
@@ -711,10 +727,16 @@ void UiView::drawStyleMeshes(MaterialRenderer& r, const scene::Object& c) {
 void UiView::drawList(MaterialRenderer& r, const scene::Object& o) {
     const auto* list = o.as<scene::UIList>();
     auto ls = lists_.find(o.name);
-    if (!list || ls == lists_.end() || ls->second.rows.empty()) return;
+    if (!list || ls == lists_.end() || ls->second.rows.empty()) {
+        problem(o.name + ": a list with no rows (no provider set)");
+        return;
+    }
     const scene::UiStyle style = styles_.style(o.cls, o.header.type);
     scene::Milo* res = resource(style.resourceFile.empty() ? style.classResourceFile : style.resourceFile);
-    if (!res || !style.node) return;
+    if (!res || !style.node) {
+        problem(o.name + ": list type '" + o.header.type + "' has no resource");
+        return;
+    }
     // (element ((text "header.txt") (text "list.txt") (mesh "stars_gold.mesh") ...)):
     // per element its kind, name and colour column.
     struct Element {
@@ -766,9 +788,19 @@ void UiView::drawList(MaterialRenderer& r, const scene::Object& o) {
             auto it = lr.texts.find(elements[e].name);
             if (it == lr.texts.end() || it->second.empty()) continue;
             const scene::Text* tmpl = res->find<scene::Text>(elements[e].name);
+            scene::Xfm at = tmpl ? tmpl->trans.local : scene::Xfm{};
+            // RB's list elements are labels (list_song.milo's list.lbl): the
+            // label's own type gives the template Text (and its font) [C data].
+            if (!tmpl)
+                if (const auto* lbl = res->find<scene::UILabel>(elements[e].name)) {
+                    const scene::UiStyle ls = styles_.style(lbl->cls, lbl->header.type);
+                    if (scene::Milo* lres = resource(ls.resourceFile.empty() ? ls.classResourceFile : ls.resourceFile))
+                        tmpl = ls.textTemplate.empty() ? nullptr : lres->find<scene::Text>(ls.textTemplate);
+                    at = lbl->trans.local;
+                }
             if (!tmpl) continue;
             drawTemplate(r, o.name + "#" + std::to_string(row) + "#" + elements[e].name, *tmpl, it->second,
-                         scene::compose(tmpl->trans.local, rowWorld), hasRgb ? rgb : nullptr);
+                         scene::compose(at, rowWorld), hasRgb ? rgb : nullptr);
         }
     }
 }

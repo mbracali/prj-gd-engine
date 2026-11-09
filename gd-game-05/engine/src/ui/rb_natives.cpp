@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdlib>
 #include <functional>
 #include <map>
 #include <memory>
@@ -19,6 +20,7 @@
 
 #include "data/dta.h"
 #include "game/song_db.h"
+#include "render/ui_view.h"
 #include "ui/natives.h"
 #include "ui/ui_host.h"
 #include "ui/ui_manager.h"
@@ -60,6 +62,102 @@ public:
 protected:
     UiManager& ui_;
     std::map<std::string, Fn> fns_;
+};
+
+
+// song_provider, Rock Band's (ui/selsong.dta): the songs of the disc that
+// have a rank (songs.dtb), shown by the display RB's song select cycles
+// (rank first: band_ui / song_groupings in band.dtb), each group under a
+// heading, "random_song" first. Grouping by rank: the songs sorted by the
+// player's instrument's rank (the band's for a band), split into the nine
+// generic_tier groups by count [I: the original's grouping, RB 0x82404A10
+// -> 0x824024F0, is not read yet; DECISIONS D5].
+class RbSongProvider : public ListProvider {
+public:
+    explicit RbSongProvider(UiManager& ui) : ListProvider("song_provider", "SongProvider"), ui_(ui) {}
+
+    void initData() override { build(); }
+    int numData() override {
+        build();
+        return int(data_.size());
+    }
+    std::string symbol(int i) override {
+        build();
+        return i >= 0 && i < int(data_.size()) ? data_[size_t(i)] : std::string();
+    }
+    bool active(int i) override { return i >= 0 && i < int(data_.size()); }
+    void rows(std::vector<gfx::UiView::ListRow>& out, int selected, int& selectedRow) override {
+        build();
+        out.clear();
+        selectedRow = 0;
+        int headersSoFar = 0;
+        for (int i = 0; i < int(data_.size()); ++i) {
+            gfx::UiView::ListRow r;
+            for (const auto& [idx, text] : headers_)
+                if (idx == i) r.header = true, r.texts["heading.lbl"] = text, ++headersSoFar;
+            r.slot = float(i + headersSoFar);
+            const std::string& sym = data_[size_t(i)];
+            if (sym == "random_song") {
+                r.texts["list.lbl"] = ui_.localize("random_song");
+            } else {
+                const int info = songInfoIndex(ui_, sym);
+                r.texts["list.lbl"] = info >= 0 ? ui_.host().songs()[size_t(info)].name : sym;
+            }
+            if (i == selected) selectedRow = int(out.size());
+            out.push_back(std::move(r));
+        }
+    }
+    bool handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) override {
+        (void)in;
+        r = Value::integer(0);
+        auto ix = [&] { return args.empty() ? -1 : args[0].integerValue(); };
+        if (msg == "set_song_mode") return mode_ = strArg(args, 0), built_ = false, true;
+        if (msg == "get_display") return r = Value::integer(display_), true;
+        if (msg == "set_display") return display_ = args.empty() ? 0 : args[0].integerValue(), built_ = false, true;
+        if (msg == "cycle_display") return display_ = (display_ + 1) % 4, built_ = false, true;
+        if (msg == "is_active") return r = Value::integer(active(ix()) ? 1 : 0), true;
+        if (msg == "is_random") return r = Value::integer(symbol(ix()) == "random_song" ? 1 : 0), true;
+        if (msg == "is_invalid_song") return r = Value::integer(symbol(ix()).empty() ? 1 : 0), true;
+        if (msg == "get_song_to_set") {
+            std::string sym = symbol(ix());
+            if (sym == "random_song" && data_.size() > 1) sym = data_[1 + size_t(std::rand()) % (data_.size() - 1)];
+            return r = Value::symbol(sym), true;
+        }
+        if (msg == "num_data") return r = Value::integer(numData()), true;
+        if (msg == "get_random_song") return r = Value::symbol(data_.size() > 1 ? data_[1] : std::string()), true;
+        if (msg == "add_recent_song") return true;
+        return false;
+    }
+
+private:
+    void build() {
+        if (built_) return;
+        built_ = true;
+        data_ = {"random_song"};
+        headers_.clear();
+        std::vector<const SongInfo*> songs;
+        for (const SongInfo& s : ui_.host().songs())
+            if (!s.tutorial) songs.push_back(&s);
+        const std::string inst = "band";
+        std::stable_sort(songs.begin(), songs.end(), [&](const SongInfo* a, const SongInfo* b) {
+            auto ra = a->rank.count(inst) ? a->rank.at(inst) : 0, rb = b->rank.count(inst) ? b->rank.at(inst) : 0;
+            return ra < rb;
+        });
+        const int tiers = 9, n = int(songs.size());
+        for (int i = 0; i < n; ++i) {
+            const int tier = n ? i * tiers / n : 0;
+            if (i == 0 || tier != (i - 1) * tiers / n)
+                headers_.push_back({int(data_.size()), ui_.localize("generic_tier" + std::to_string(tier + 1))});
+            data_.push_back(songs[size_t(i)]->id);
+        }
+    }
+
+    UiManager& ui_;
+    std::string mode_ = "game";
+    int display_ = 0;
+    bool built_ = false;
+    std::vector<std::string> data_;
+    std::vector<std::pair<int, std::string>> headers_;
 };
 
 }  // namespace
@@ -154,6 +252,11 @@ void installRbNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Scr
     });
     sessionMgr->on("is_finding", no);
     sessionMgr->quiet({"remove_local_player", "cancel_find", "update_band_leader"});
+    {
+        auto sp = std::make_unique<RbSongProvider>(ui);
+        in.registerObject(sp.get());
+        owned.push_back(std::move(sp));
+    }
     RbHost* songMgr = add(std::make_unique<RbHost>(ui, "song_mgr"));
     songMgr->on("has_song", [&ui](std::vector<Value>& a) { return Value::integer(songInfoIndex(ui, strArg(a, 0)) >= 0 ? 1 : 0); });
     songMgr->on("is_song_shared", yes);
