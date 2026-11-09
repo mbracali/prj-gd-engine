@@ -35,7 +35,9 @@ pull requests or branches, no bots).
      and launcher module SDK (`sdk/`, `modules/gdNN/`) are the same as in that
      release's `manifest.json` is copied from it, the others are built;
    - publishes the release `gdul/vX.Y.Z` (tagged on the merge commit, marked
-     Latest) with:
+     Latest; its notes carry the `## X.Y.Z` section of
+     `gd-engine-launcher/CHANGELOG.md`, so write the Highlights there first)
+     with:
      - `gdul-<v>-linux-x86_64.tar.gz` (Ubuntu 22.04, SDL3 included:
        `gd-engine-launcher/scripts/build_linux_portable.sh`)
      - `gdul-<v>-steamdeck-x86_64.tar.gz` (the Steam Deck download: built in
