@@ -3,6 +3,8 @@
 #pragma once
 
 #include <array>
+#include <random>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -204,6 +206,13 @@ private:
     std::string winTarget_;                        // career_win: the tour's last song
     int shotN_ = 0;                                // venue_follow: screenshot number
     float nameX0_ = 0;               // the career walk's band name: where it starts
+    // rb_fuzz: the generator, steps, the main menu's buttons, pacing, the last actions.
+    std::mt19937 fuzzRng_;
+    int fuzzStep_ = 0, fuzzSteps_ = 0, fuzzChecks_ = 0, fuzzOff_ = 0, fuzzRecovered_ = 0;
+    std::set<std::string> fuzzMain_;
+    double fuzzNextMs_ = 0, fuzzActMs_ = 0, fuzzOffSince_ = -1;
+    bool fuzzSettle_ = false;
+    std::string fuzzLog_;
     // rb_keys_play: the next gem, the gems strummed, the frets held, the green key.
     size_t kbGem_ = 0;
     int kbPlayed_ = 0, kbTarget_ = -1;

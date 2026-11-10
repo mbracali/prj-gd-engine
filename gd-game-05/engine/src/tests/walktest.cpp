@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <random>
 #include <sstream>
 
 #include "data/game_data.h"
@@ -23,6 +24,7 @@
 #include "render/scene_gpu.h"
 #include "render/ui_view.h"
 #include "scene/milo.h"
+#include "scene/ui_objects.h"
 #include "script/tasks.h"
 #include "ui/campaign.h"
 #include "ui/char_select.h"
@@ -755,6 +757,20 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
             check("kb_hits");
         }
         expect_ = {"main_screen", "main_solomode_screen", "qp_selsong_screen", "qp_seldiff_solo_screen", "game_screen", "pause_screen", "game_screen"};
+    } else if (scenario == "rb_fuzz") {
+        // GD05-052 (GD05-032): menus disappearing. Seeded random input on the
+        // main menu and its sub-menus (GD05_FUZZ_SEED, GD05_FUZZ_STEPS):
+        // mouse hovers and clicks on the buttons drawn, arrows, Enter, Esc
+        // (never a third on the main menu: that quits) and the frets, fast
+        // and slow, also during transitions; every few steps the menus
+        // settle and each panel of the screen must be up, shown and have
+        // its buttons drawn on screen, with a focused panel.
+        at("splash_screen", 30000);
+        press(kX);
+        at("main_screen");
+        wait(1500);
+        check("fuzz_baseline");
+        check("fuzz", 3.6e6);
     } else if (scenario == "dev_cheats") {
         // GD02-045: Enhanced > Developer Keyboard Cheats on, then a real 'l'
         // key (SDL event, through the app's bound-key filter) runs cheats.dta's
@@ -2646,6 +2662,158 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
                 }
         return fail("the help bar's second item was not drawn");
     }
+    if (s.screen == "fuzz_baseline" || s.screen == "fuzz") {
+        // The buttons a panel of the screen draws on screen.
+        auto drawnButtons = [&](ui::PanelObj* p) {
+            std::set<std::string> out;
+            if (!p || !p->view) return out;
+            for (const gfx::UiView::Hit& h : p->view->hits()) {
+                const std::string name = h.key.substr(0, h.key.find('#'));
+                const scene::Object* o = p->view->find(name);
+                if (!o || !(o->as<scene::BandButton>() || o->cls == "UIButton") || !p->view->showing(name)) continue;
+                if (h.x1 < 0 || h.x0 > 1280 || h.y1 < 0 || h.y0 > 720 || h.x1 <= h.x0 || h.y1 <= h.y0) continue;
+                out.insert(name);
+            }
+            return out;
+        };
+        auto onMainMenu = [&] {
+            if (!ui.current()) return false;
+            for (ui::PanelObj* p : ui.current()->panels())
+                if (p->name() == "main_panel") return true;
+            return false;
+        };
+        if (s.screen == "fuzz_baseline") {
+            fuzzMain_ = drawnButtons(ui.panel("main_panel"));
+            const char* seed = SDL_getenv("GD05_FUZZ_SEED");
+            const char* steps = SDL_getenv("GD05_FUZZ_STEPS");
+            fuzzRng_.seed(seed ? unsigned(std::strtoul(seed, nullptr, 10)) : 1u);
+            fuzzSteps_ = steps ? std::max(1, std::atoi(steps)) : 2000;
+            std::printf("  fuzz: seed %s, %d steps; main_panel draws %zu buttons\n", seed ? seed : "1", fuzzSteps_, fuzzMain_.size());
+            return fuzzMain_.size() >= 5 ? pass() : fail("main_panel does not draw its five buttons");
+        }
+        auto rnd = [&](int n) { return n <= 1 ? 0 : int(fuzzRng_() % unsigned(n)); };
+        auto sendKey = [&](SDL_Keycode k) {
+            for (const bool down : {true, false}) {
+                SDL_Event e{};
+                e.type = down ? SDL_EVENT_KEY_DOWN : SDL_EVENT_KEY_UP;
+                e.key.timestamp = SDL_GetTicksNS();
+                e.key.key = k;
+                e.key.scancode = SDL_GetScancodeFromKey(k, nullptr);
+                e.key.down = down;
+                SDL_PushEvent(&e);
+            }
+        };
+        if (nowMs < fuzzNextMs_) return;
+        const std::string sc = ui.currentScreen();
+        // Settling: once the menus are still, check them.
+        if (fuzzSettle_) {
+            if (ui.inTransition() || nowMs - lastChangeMs_ < 900 || nowMs - fuzzActMs_ < 900) {
+                if (nowMs - fuzzActMs_ > 30000) return fail("fuzz: " + sc + " never settled (step " + std::to_string(fuzzStep_) + ")");
+                return;
+            }
+            fuzzSettle_ = false;
+            ++fuzzChecks_;
+            ui::PanelObj* fp = ui.focusPanel();
+            std::string why;
+            if (!onMainMenu()) {
+                // Off the main menu (the song list, GAMEPADS, a sub-screen): back out.
+                // A flow Back does not leave (the band's Join Band slots):
+                // out of this walk's scope, back to the main menu, counted.
+                if (fuzzOffSince_ < 0) fuzzOffSince_ = nowMs;
+                if (nowMs - fuzzOffSince_ > 20000) {
+                    std::printf("  fuzz: step %d: Back does not leave %s, back to the main menu\n", fuzzStep_, sc.c_str());
+                    ++fuzzRecovered_, fuzzOffSince_ = -1;
+                    ui.gotoScreen("main_screen");
+                }
+            } else if (!fp || !fp->up) {
+                why = "no panel has the focus";
+            } else {
+                fuzzOffSince_ = -1;
+                for (ui::PanelObj* p : ui.current()->panels()) {
+                    if (p->name() == "meta" || p->name() == "fx" || p->name() == "movie_panel" || p->name() == "main_lower3rd_panel") continue;
+                    if (!p->up || !p->showing || !p->view) {
+                        why = p->name() + " is not up and shown";
+                        break;
+                    }
+                    const std::set<std::string> b = drawnButtons(p);
+                    if (p->name() == "main_panel" && b != fuzzMain_) {
+                        why = "main_panel draws " + std::to_string(b.size()) + " of its " + std::to_string(fuzzMain_.size()) + " buttons";
+                        break;
+                    }
+                    if (b.empty()) {
+                        why = p->name() + " draws no button";
+                        break;
+                    }
+                }
+                if (why.empty() && !fp->focus.empty() && !drawnButtons(fp).count(fp->focus) && fp->focused() && fp->view && fp->view->find(fp->focus) &&
+                    fp->view->find(fp->focus)->as<scene::BandButton>())
+                    why = "the focused " + fp->focus + " is not drawn";
+            }
+            if (!why.empty()) {
+                std::printf("  fuzz: FAIL at step %d on %s: %s; last actions:%s\n", fuzzStep_, sc.c_str(), why.c_str(), fuzzLog_.c_str());
+                if (const char* dir = SDL_getenv("GD05_WALK_SHOTS")) ui.host().saveScreenshot(std::string(dir) + "/fuzz_fail.bmp");
+                return fail("fuzz: " + why + " on " + sc + " (step " + std::to_string(fuzzStep_) + ")");
+            }
+            if (fuzzStep_ >= fuzzSteps_) {
+                std::printf("  fuzz: %d steps, %d checks, %d off the main menu, %d recovered\n", fuzzStep_, fuzzChecks_, fuzzOff_, fuzzRecovered_);
+                return pass();
+            }
+        }
+        // One random action.
+        ++fuzzStep_;
+        fuzzActMs_ = nowMs;
+        std::string act;
+        const bool off = !onMainMenu();
+        if (off) ++fuzzOff_;
+        const int r = rnd(100);
+        if (off) {  // off the main menu: back (the walk stays on the menus); the title has none: Start
+            const int b = sc == "splash_screen" ? ui::kPad_X : ui::kPad_Tri;
+            ui.buttonDown(b, 0), ui.buttonUp(b, 0), act = sc == "splash_screen" ? "start" : "back";
+        } else if (r < 45) {
+            // The mouse on a button drawn by any panel of the screen.
+            std::vector<std::pair<std::string, std::array<float, 2>>> targets;
+            if (ui.current())
+                for (ui::PanelObj* p : ui.current()->panels())
+                    if (p->up && p->showing && p->view)
+                        for (const gfx::UiView::Hit& h : p->view->hits()) {
+                            const std::string name = h.key.substr(0, h.key.find('#'));
+                            const scene::Object* o = p->view->find(name);
+                            if (o && (o->as<scene::BandButton>() || o->cls == "UIButton"))
+                                targets.push_back({name, {(h.x0 + h.x1) * 0.5f, (h.y0 + h.y1) * 0.5f}});
+                        }
+            if (!targets.empty()) {
+                const auto& t = targets[size_t(rnd(int(targets.size())))];
+                const bool click = rnd(3) != 0;
+                ui.mouse(t.second[0], t.second[1], false);
+                if (click) ui.mouse(t.second[0], t.second[1], true);
+                act = std::string(click ? "click " : "hover ") + t.first;
+            } else {
+                ui.mouse(float(rnd(1280)), float(rnd(720)), false), act = "hover";
+            }
+        } else if (r < 75) {
+            static const SDL_Keycode keys[] = {SDLK_UP, SDLK_DOWN, SDLK_LEFT, SDLK_RIGHT, SDLK_UP, SDLK_DOWN};
+            const SDL_Keycode k = keys[rnd(6)];
+            sendKey(k), act = SDL_GetKeyName(k);
+        } else if (r < 85) {
+            sendKey(SDLK_RETURN), act = "Enter";
+        } else if (r < 93) {
+            // Esc: back (on the main menu itself the walk's back press, not
+            // Esc's count of three that quits).
+            if (sc == "main_screen" || sc == "splash_screen") ui.buttonDown(ui::kPad_Tri, 0), ui.buttonUp(ui::kPad_Tri, 0), act = "back";
+            else sendKey(SDLK_ESCAPE), act = "Esc";
+        } else {
+            static const SDL_Keycode frets[] = {SDLK_1, SDLK_2, SDLK_4, SDLK_5};  // not yellow: GAMEPADS
+            const SDL_Keycode k = frets[rnd(4)];
+            sendKey(k), act = SDL_GetKeyName(k);
+        }
+        fuzzLog_ += " " + act;
+        if (fuzzLog_.size() > 400) fuzzLog_.erase(0, fuzzLog_.size() - 400);
+        // Fast (a frame, within a transition) or slow; every few steps settle.
+        const int pace = rnd(10);
+        fuzzNextMs_ = nowMs + (pace < 5 ? 0 : pace < 8 ? 120 : 450);
+        if (rnd(6) == 0 || fuzzStep_ >= fuzzSteps_) fuzzSettle_ = true;
+        return;
+    }
     if (s.screen == "kb_guitar_attach") {
         adapter_ = Input::attachVirtualPad("1430:4748:guitar");
         return adapter_ ? pass() : fail("no virtual guitar");
@@ -4015,10 +4183,14 @@ int WalkDriver::finish(ui::UiManager& ui) {
     // The script reports.
     Interp& in = ui.interp();
     const auto wl = whitelist();
-    for (const auto& [key, n] : in.unhandledCounts()) std::printf("  FAIL UNHANDLED %s (%d)\n", key.c_str(), n), ok = false;
-    for (const auto& [key, n] : in.unknownCounts()) std::printf("  FAIL UNKNOWN %s (%d)\n", key.c_str(), n), ok = false;
+    // rb_fuzz checks the menus' panels; the script gaps of the flows it
+    // wanders into (the band's matchmaking) are other walks' and listed only.
+    const bool gapsFail = scenario_ != "rb_fuzz";
+    const char* const gapTag = gapsFail ? "FAIL" : "note";
+    for (const auto& [key, n] : in.unhandledCounts()) std::printf("  %s UNHANDLED %s (%d)\n", gapTag, key.c_str(), n), ok = ok && !gapsFail;
+    for (const auto& [key, n] : in.unknownCounts()) std::printf("  %s UNKNOWN %s (%d)\n", gapTag, key.c_str(), n), ok = ok && !gapsFail;
     for (const auto& [key, n] : in.stubCounts()) {
-        const bool w = whitelisted(key, wl);
+        const bool w = whitelisted(key, wl) || !gapsFail;
         std::printf("  %s STUB %s (%d)\n", w ? "ok  " : "FAIL", key.c_str(), n);
         ok = ok && w;
     }

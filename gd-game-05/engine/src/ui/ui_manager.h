@@ -359,6 +359,8 @@ private:
         bool started = true;  // false until a delayed anim's start
     };
     std::vector<Anim> anims_;
+    // The animations each exited panel's exit triggers posed (enterPanel forgets them).
+    std::map<PanelObj*, std::set<std::string>> exitPosed_;
     std::map<std::string, std::unique_ptr<ScriptObject>> namedTasks_;
     void endTask(const std::string& task);
 

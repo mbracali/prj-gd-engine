@@ -632,8 +632,33 @@ void UiManager::releaseSharedFrames() {
     }
 }
 
+// A panel the next screen does not hold is exited, and RB unloads it (the
+// panel's screen count, UIPanel Unload, see releaseSharedFrames): it comes
+// back freshly loaded, its exit animations' objects where its file has
+// them. The port keeps it loaded, so on entering again what its exit
+// triggers posed is forgotten (and their animations stopped) [C: the
+// unload; I: forgetting only those]. GD05-052: main_panel's ui_exit_back
+// (solo.tnm .. training.tnm 25 -> 0, the buttons out to the title) has no
+// ui_enter counterpart, so after the title the main menu came back without
+// its buttons.
 void UiManager::enterPanel(PanelObj* p) {
     if (p->up) return;
+    if (auto it = exitPosed_.find(p); it != exitPosed_.end()) {
+        if (p->view && p->view->milo()) {
+            std::unordered_set<const scene::Object*> objects;
+            for (const std::string& name : it->second) {
+                stopAnimation(p, name);
+                const scene::Object* a = p->view->find(name);
+                if (!a || a->dir != &p->view->milo()->root()) continue;  // shared directories keep theirs (setViewFrame)
+                objects.insert(a);
+                const std::string target = a->as<scene::TransAnim>() ? a->as<scene::TransAnim>()->trans
+                                         : a->as<scene::MatAnim>() ? a->as<scene::MatAnim>()->mat : std::string();
+                if (const scene::Object* t = target.empty() ? nullptr : p->view->find(target)) objects.insert(t);
+            }
+            p->view->pose().forget(objects);
+        }
+        exitPosed_.erase(it);
+    }
     p->enter();
 }
 
@@ -641,7 +666,10 @@ void UiManager::exitPanel(PanelObj* p) {
     if (!p->up) return;
     for (const char* ev : {"ui_exit", back_ ? "ui_exit_back" : "ui_exit_forward"})
         if (p->view)
-            for (const gfx::UiView::Trigger& t : p->view->triggers(ev)) setViewFrame(p, t.anim->name, t.endFrame);
+            for (const gfx::UiView::Trigger& t : p->view->triggers(ev)) {
+                setViewFrame(p, t.anim->name, t.endFrame);
+                exitPosed_[p].insert(t.anim->name);
+            }
     p->exit();
 }
 
