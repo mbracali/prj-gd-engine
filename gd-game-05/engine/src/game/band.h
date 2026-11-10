@@ -109,7 +109,12 @@ public:
         std::unique_ptr<ScriptObject> script;
         std::unique_ptr<facefx::LipSync> lip;
         std::unique_ptr<facefx::ExpressionScript> expr;
+        std::string shotGroup;  // RB: the camera shot's clip group for this member (BandCamShot target anim)
     };
+    // Rock Band's BandCamShot start (RB 0x822D8108) [C data; I: no IK, props,
+    // fast-forward or return]: each target's member plays its clip group
+    // (stand, closeup, sit ...) and, with teleport, moves to the target's `to`.
+    void rbShotTargets(const std::vector<std::pair<std::string, std::string>>& groups, const std::vector<std::pair<std::string, scene::Xfm>>& moves);
     const std::vector<std::unique_ptr<Member>>& members() const { return members_; }
     Member* member(const std::string& slot) const;
     chr::Character* character(const std::string& slot) const;

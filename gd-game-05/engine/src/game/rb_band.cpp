@@ -231,6 +231,17 @@ void Band::rbSkin(const GameData& data, chr::Character& c, const DataNode* prefa
 
 // The members' motion [I]: the main driver keeps a clip of the "stand"
 // group playing (another one as the last nears its end).
+void Band::rbShotTargets(const std::vector<std::pair<std::string, std::string>>& groups, const std::vector<std::pair<std::string, scene::Xfm>>& moves) {
+    for (const auto& [slot, group] : groups)
+        if (Member* m = member(slot); m && m->character && m->shotGroup != group) {
+            m->shotGroup = group;
+            if (chr::ClipDriver* d = m->character->mainDriver())
+                if (chr::ClipSet* set = d->clipSet(); set && set->group(group) && !over_) d->playGroup(group, 0);
+        }
+    for (const auto& [slot, to] : moves)
+        if (Member* m = member(slot); m && m->character) m->character->teleport(to);
+}
+
 void Band::rbPoll(Member& m) {
     chr::ClipDriver* d = m.character->mainDriver();
     if (!d && !m.character->drivers().empty()) d = m.character->drivers().front().get();
@@ -243,7 +254,8 @@ void Band::rbPoll(Member& m) {
         if (n.clip) need = n.frame >= n.clip->endFrame - std::max(1.0f, n.clip->blendWidth);
     }
     if (!need) return;
-    const char* group = over_ ? (won_ ? "win" : "lose") : "stand";
+    std::string group = over_ ? (won_ ? "win" : "lose") : m.shotGroup.empty() ? "stand" : m.shotGroup;
+    if (!set->group(group)) group = "stand";
     if (!set->group(group)) group = "realtime_idle";
     if (set->group(group)) d->playGroup(group, 0);
 }

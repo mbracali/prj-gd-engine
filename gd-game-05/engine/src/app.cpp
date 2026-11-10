@@ -3189,6 +3189,17 @@ void App::rbShots(float t) {
     if (next && next != director_->shot()) {
         static const bool log = SDL_getenv("GD05_SHOTLOG") != nullptr;
         if (log) SDL_Log("shot %.0f: %s (%s, %s %s)", double(t), next->name.c_str(), next->category.c_str(), next->flag("distance").c_str(), next->flag("facing").c_str());
+        if (const auto* bs = dynamic_cast<const scene::BandCamShot*>(next)) {
+            std::vector<std::pair<std::string, std::string>> groups;
+            std::vector<std::pair<std::string, scene::Xfm>> moves;
+            static const bool noTeleport = SDL_getenv("GD05_NO_TELEPORT") != nullptr;
+            for (const auto& tg : bs->bandTargets) {
+                if (log) SDL_Log("  target %s anim %s teleport %d", tg.target.c_str(), tg.anim.c_str(), int(tg.teleport));
+                if (!tg.anim.empty()) groups.emplace_back(tg.target, tg.anim);
+                if (tg.teleport && !noTeleport) moves.emplace_back(tg.target, tg.to);
+            }
+            if (band_) band_->rbShotTargets(groups, moves);
+        }
         director_->forceShot(next);
     }
 }
