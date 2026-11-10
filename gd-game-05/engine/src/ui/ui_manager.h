@@ -228,6 +228,7 @@ public:
     // The port's GAMEPADS button, bottom left of the main menu (Owner wave 05,
     // GD05-036): its rectangle in menu units when it shows.
     bool gamepadsButton(float& x0, float& y0, float& x1, float& y1) const;
+    bool onMainMenu() const;
     void drawGamepadsButton();
     // The wheel: one Up (-1) or Down (+1) press.
     void wheel(int dir);

@@ -183,6 +183,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         mouseOn("solo.btn", 1);
         at("main_solomode_screen");
         wait(800);
+        check("gamepads_button");  // GD05-048: on every sub-menu too
         press(kTri);
         at("main_screen");
         wait(1500);
@@ -191,10 +192,12 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         mouseOn("multi.btn", 1);
         at("main_multimode_screen");
         wait(1500);
+        check("gamepads_button");
         // From the sub-menu, a click on another main menu button opens its menu.
         mouseOn("tutorial.btn", 1);
         at("training_menu_screen");
         wait(800);
+        check("gamepads_button");
         press(kTri);
         at("main_screen");
         wait(1500);
@@ -202,6 +205,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         mouseOn("options.btn", 1);
         at("options_screen");
         wait(800);
+        check("gamepads_button");
         mouseOn("port_enhanced.btn", 1);
         at("enhanced_options_screen");
         wait(800);
@@ -214,7 +218,22 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         check("gamepads_button");
         check("click_gamepads_button");
         at("gamepads_screen", 3000);
-        expect_ = {"main_screen", "main_solomode_screen", "main_screen", "main_multimode_screen", "training_menu_screen", "main_screen", "options_screen", "enhanced_options_screen", "options_screen", "main_screen", "gamepads_screen"};
+        wait(800);
+        // GD05-048: GAMEPADS from a sub-menu, back to that sub-menu.
+        press(kTri);
+        at("main_screen");
+        wait(1500);
+        mouseOn("solo.btn", 1);
+        at("main_solomode_screen");
+        wait(800);
+        check("click_gamepads_button");
+        at("gamepads_screen", 3000);
+        wait(800);
+        press(kTri);
+        at("main_solomode_screen");
+        wait(800);
+        expect_ = {"main_screen", "main_solomode_screen", "main_screen", "main_multimode_screen", "training_menu_screen", "main_screen", "options_screen", "enhanced_options_screen", "options_screen", "main_screen", "gamepads_screen",
+                   "main_screen", "main_solomode_screen", "gamepads_screen", "main_solomode_screen"};
     } else if (scenario == "rb_owner_bugs") {
         // Wave 03's owner bugs. GD05-023: nothing of a venue plays before a
         // song (the Enhanced Options backdrop is silent). GD05-024: the red

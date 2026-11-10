@@ -1208,9 +1208,20 @@ void UiManager::yellowButton() {
     gamepadsAtMs_ = double(SDL_GetTicksNS()) / 1e6 + 750;
 }
 
+// The main menu: main_screen and every screen that shows main_panel beside
+// its sub-menu (main_solomode_screen, options_screen, training_menu_screen,
+// main_multimode_screen, main_community_screen ... [C data: their (panels
+// ...)]). The port's GAMEPADS button shows on all of them (GD05-048).
+bool UiManager::onMainMenu() const {
+    if (!current_) return false;
+    for (const PanelObj* p : current_->panels())
+        if (p && p->name() == "main_panel") return true;
+    return false;
+}
+
 void UiManager::openGamepads() {
     gamepadsAtMs_ = -1;
-    if (splash_ >= 0 || phase_ != Phase::Idle || !pending_.empty() || currentScreen() != "main_screen") return;
+    if (splash_ >= 0 || phase_ != Phase::Idle || !pending_.empty() || !onMainMenu()) return;
     playSfx("button_select");
     // Back returns to the main menu (which allows no back of its own, so the
     // screen would not take it as its back screen).
@@ -1221,9 +1232,10 @@ void UiManager::openGamepads() {
 // [I] Port (Owner wave 05, GD05-036): GAMEPADS as a button in the bottom-left
 // corner of the main menu, drawn like the options menu's buttons (a dark
 // pill with a light rim, white text, the focused one lit) and always there
-// while the main menu shows; a click (or the yellow fret) opens it.
+// while the main menu shows, whichever sub-menu is open (onMainMenu); a
+// click (or the yellow fret on main_screen) opens it.
 bool UiManager::gamepadsButton(float& x0, float& y0, float& x1, float& y1) const {
-    if (splash_ >= 0 || !current_ || current_->name() != "main_screen") return false;
+    if (splash_ >= 0 || !onMainMenu()) return false;
     x0 = 52, y0 = 650, x1 = 292, y1 = 692;
     return true;
 }
