@@ -37,7 +37,11 @@ float FontMetrics::kerning() const { return owner_->spacing; }
 float FontMetrics::kern(unsigned char prev, unsigned char c, float kerning) const {
     if (prev == 0 || c == 0 || owner_->monospace) return 0;
     float k = kerning;
-    const uint32_t key = uint32_t(prev) | uint32_t(c) << 8;
+    // The table's key is the first char as a byte, OR the second as a
+    // signed char shifted up 8 (sign-extended): pairs ending in an accented
+    // letter are stored as 0xffff..xx (fakir_regular.font: ffffe446 is
+    // 'F' + 0xE4) [C data] (GD05-051).
+    const uint32_t key = uint32_t(prev) | (uint32_t(int32_t(int8_t(c))) << 8);
     for (const auto& [pair, amount] : owner_->kerning)
         if (pair == key) {
             k += amount;
@@ -309,10 +313,21 @@ std::array<float, 2> fitScale(const TextLayout& layout, const TextStyle& style, 
     float sx = width > 0 ? width / w : 1, sz = 1;
     float top, bottom;
     layout.extent(style, top, bottom);
-    const float h = std::fabs(bottom - top);
+    // RB measures the height in the font's cell aspect: the lines' extent
+    // times cell height / cell width (RndText size RB 0x82214FE8: *(font +
+    // 0x104c) / *(font + 0x1048)) [C] (GD05-051: the song list's names,
+    // fakir 59 x 84, size 30 in a 30 high box, shrink to 28).
+    const float aspect = style.size > 0 && layout.lineHeight > 0 ? layout.lineHeight / style.size : 1.0f;
+    const float h = std::fabs(bottom - top) * aspect;
     if (h > 0 && height > 0) sz = height / h;
     if (mode == 2) {
-        const float k = std::min({sx, sz, 1.0f});
+        // BandLabel's fit (RB 0x8226DDA8): the text size goes down 0.2 at a
+        // time from text_size until the text fits the box [C].
+        float k = std::min({sx, sz, 1.0f});
+        if (k < 1.0f && style.size > 0) {
+            const float steps = std::ceil((style.size - style.size * k) / 0.2f - 1e-3f);
+            k = std::max(0.0f, style.size - 0.2f * steps) / style.size;
+        }
         sx = sz = k;
     }
     return {sx, sz};
