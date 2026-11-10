@@ -131,7 +131,10 @@ public:
     // selects; the port's own panels test their rows. True when hit.
     virtual bool mouse(float x, float y, bool click);
     // The help bar's items (HelpBarPanel); false for the others.
-    virtual bool helpMouse(float /*x*/, float /*y*/, bool /*click*/) { return false; }
+    // RB's help bar (meta.dta HELPBAR_HANDLERS, a UIPanel): a click on an
+    // action (its label or its icon) presses that action's button, as the
+    // universal mechanisms' clickable help items (universal_mechanisms.md 1.1.3).
+    virtual bool helpMouse(float x, float y, bool click);
     // Joypad repeat overrides ((joypad (hold_ms) (repeat_ms))).
     bool repeatTiming(float& holdMs, float& repeatMs) const;
 

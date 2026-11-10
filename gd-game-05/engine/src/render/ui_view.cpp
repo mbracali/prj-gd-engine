@@ -875,7 +875,8 @@ void UiView::drawLabel(MaterialRenderer& r, const scene::UILabel& l, const scene
     world = scene::compose(scaleXfm(lt->fit[0], 1, lt->fit[1]), world);
     const Mat4 wm = toMat4(world);
     texts_.draw(r, &l, *lt->font, lt->layout, wm, matColor);
-    if (l.as<scene::BandButton>() || l.cls == "UIButton") addLayoutHit(l.name, lt->layout, wm);
+    // Buttons, and RB's labels too (the help bar's actions take clicks).
+    if (l.as<scene::BandButton>() || l.cls == "UIButton" || l.bigEndian) addLayoutHit(l.name, lt->layout, wm);
     ++textsDrawn_;
 }
 

@@ -506,6 +506,30 @@ ComponentObj* PanelObj::component(const std::string& name) {
     return raw;
 }
 
+bool PanelObj::helpMouse(float x, float y, bool click) {
+    if ((name() != "helpbar" && name() != "helpbar_dialog") || !view || !showing) return false;
+    static const struct {
+        const char* action;
+        const char* icon;
+        int button;
+    } kItems[] = {{"red_action.lbl", "red1.lbl", kPad_Tri},
+                  {"green_action.lbl", "green1.lbl", kPad_X},
+                  {"yellow_action.lbl", "yellow1.lbl", kPad_Circle},
+                  {"blue_action.lbl", "blue1.lbl", kPad_Square}};
+    for (const auto& it : kItems) {
+        if (!view->showing(it.action) || view->text(it.action).empty()) continue;
+        float x0 = 1e9f, y0 = 1e9f, x1 = -1e9f, y1 = -1e9f;
+        for (const gfx::UiView::Hit& h : view->hits())
+            if (h.key == it.action || h.key == it.icon)
+                x0 = std::min(x0, h.x0), y0 = std::min(y0, h.y0), x1 = std::max(x1, h.x1), y1 = std::max(y1, h.y1);
+        constexpr float kPad = 6;
+        if (x1 < x0 || x < x0 - kPad || x > x1 + kPad || y < y0 - kPad || y > y1 + kPad) continue;
+        if (click) ui.buttonDown(it.button, 0), ui.buttonUp(it.button, 0);
+        return true;
+    }
+    return false;
+}
+
 ComponentObj* PanelObj::scopedComponent(const std::string& scope, const std::string& name) {
     if (scope.empty() || name.empty() || !view) return nullptr;
     const std::string key = scope + "/" + name;

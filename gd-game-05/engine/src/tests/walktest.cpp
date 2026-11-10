@@ -148,6 +148,13 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         wait(1500);
         check("counter:menu_movie_frames:60");
         check("counter_max:menu_venue_sounds:0");
+        press(kX);  // SOLO
+        at("main_solomode_screen");
+        press(kX);  // QUICKPLAY
+        at("qp_selsong_screen");
+        wait(800);
+        check("click_helpbar_back");
+        at("main_solomode_screen");
     } else if (scenario == "rb_owner_bugs") {
         // Wave 03's owner bugs. GD05-023: nothing of a venue plays before a
         // song (the Enhanced Options backdrop is silent). GD05-024: the red
@@ -2293,6 +2300,19 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         if (actions < 2) return fail("the help bar shows fewer than two actions");
         if (icons < actions) return fail("an action without its icon");
         return pass();
+    }
+    if (s.screen == "click_helpbar_back") {
+        // A click on the help bar's Back (its red action) goes back, as red.
+        ui::PanelObj* hb = ui.panel("helpbar");
+        if (!hb || !hb->view) return fail("no help bar");
+        for (const gfx::UiView::Hit& h : hb->view->hits())
+            if (h.key == "red_action.lbl") {
+                const float x = (h.x0 + h.x1) / 2, y = (h.y0 + h.y1) / 2;
+                std::printf("  help bar: click on Back at %.0f, %.0f\n", x, y);
+                ui.mouse(x, y, true);
+                return pass();
+            }
+        return fail("the help bar's Back was not drawn");
     }
     if (s.screen == "song_list_layout") {
         // RB's song list (qp_selsong.milo, wave 03): drawn through its
