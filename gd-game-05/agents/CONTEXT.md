@@ -74,6 +74,21 @@ Front end (wave 03, `docs/frontend.md`):
   camera. Python checks:
 `python3 -I tools/milo.py scan extracted/ark`, `python3 -I tools/dtb.py dump extracted/ark extracted/dta`.
 
+Wave 04 (the cloth, the loading band, transitions, the fret board):
+- `--walktest rb_pause_quit`: pause, QUIT, confirm yes, the main menu.
+  `rb_boot` probes black frames (`probe_black` ... `no_black`; RB's own fx
+  fade through black is not counted); `rb_owner_bugs` checks
+  `song_list_layout` (the cloth polled) and `loading_icons`.
+- Development aids: `GD05_SONGLIST_FLAT=1` shows the song list's texture
+  flat (wave 03's); `GD05_CLOTHLOG=1` logs the cloth's root and its screen
+  bounds; `GD05_TRACKLOG=1` logs the track's camera, the now bar's screen
+  place, the draw group's and the smashers' materials, the tails;
+  `GD05_TAILTEST=1` gives every guitar / bass gem a 600 ms tail;
+  `GD05_BLACK_SHOTS=<dir>` saves the black frames the probe counts.
+- Highway shots: `gd05 "$ISO" --song <id> --autoplay --part guitar|bass|drum
+  --difficulty 3` with `GD05_SCREENSHOT=<f.bmp> GD05_SCREENSHOT_AT=<song
+  ms>[,<ms>...]` (song times; the autoplay lets go of the sustains it hits).
+
 ## Clocks
 Inherited from gd02 (`gd-game-02/docs/audio_and_charts.md`): the song clock
 is the mixer's (audio frames played, held back by the device latency), the

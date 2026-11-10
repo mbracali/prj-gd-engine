@@ -184,10 +184,10 @@ void RbTrackView::load(const GameData& data, scene::MiloLibrary& library, const 
                 const scene::Mesh* m = o ? o->as<scene::Mesh>() : nullptr;
                 const scene::Mat* mt = m ? g->dir->resolve<scene::Mat>(m->mat) : nullptr;
                 const scene::Object* tx = mt && !mt->diffuseTex.empty() ? g->dir->resolve(mt->diffuseTex) : nullptr;
-                SDL_Log("  draw %s %s mat %s tex %s (%s) blend %d alpha %.2f color %.2f %.2f %.2f texgen %d z %d env %s next %s verts %zu", o ? o->cls.c_str() : "?",
+                SDL_Log("  draw %s %s mat %s tex %s (%s) blend %d alpha %.2f color %.2f %.2f %.2f texgen %d z %d env %s next %s verts %d", o ? o->cls.c_str() : "?",
                         n.c_str(), m ? m->mat.c_str() : "", mt ? mt->diffuseTex.c_str() : "", tx ? tx->cls.c_str() : "missing", mt ? mt->blend : -1,
                         mt ? double(mt->color[3]) : 0.0, mt ? double(mt->color[0]) : 0.0, mt ? double(mt->color[1]) : 0.0, mt ? double(mt->color[2]) : 0.0,
-                        mt ? mt->texGen : -1, mt ? mt->zMode : -1, mt ? mt->environMap.c_str() : "", mt ? mt->nextPass.c_str() : "", m ? m->verts.size() : size_t(0));
+                        mt ? mt->texGen : -1, mt ? mt->zMode : -1, mt ? mt->environMap.c_str() : "", mt ? mt->nextPass.c_str() : "", m ? int(m->verts.size()) : 0);
             }
     SDL_Log("RB track %s: y_per_second %.1f, y %.1f..%.1f, slots %.2f %.2f %.2f %.2f %.2f, draw %s, anim %s, camera %s", part.c_str(),
             double(yPerSecond_), double(bottomY_), double(topY_), double(slotX_[0]), double(slotX_[1]), double(slotX_[2]), double(slotX_[3]),
@@ -334,9 +334,9 @@ void RbTrackView::drawGroup(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, c
             if (static int n = 0; SDL_getenv("GD05_TRACKLOG") && n < 40 && depth > 0) {
                 ++n;
                 const scene::Mat* mt = m->dir ? m->dir->resolve<scene::Mat>(m->mat) : nullptr;
-                SDL_Log("  smasher mesh %s (%s) mat '%s' %s color %.2f %.2f %.2f %.2f tex %s blend %d verts %zu vcol %.2f %.2f %.2f %.2f", m->name.c_str(),
+                SDL_Log("  smasher mesh %s (%s) mat '%s' %s color %.2f %.2f %.2f %.2f tex %s blend %d verts %d vcol %.2f %.2f %.2f %.2f", m->name.c_str(),
                         m->dir ? m->dir->name.c_str() : "", m->mat.c_str(), mt ? "ok" : "none", mt ? double(mt->color[0]) : 0.0, mt ? double(mt->color[1]) : 0.0,
-                        mt ? double(mt->color[2]) : 0.0, mt ? double(mt->color[3]) : 0.0, mt ? mt->diffuseTex.c_str() : "", mt ? mt->blend : -1, m->verts.size(),
+                        mt ? double(mt->color[2]) : 0.0, mt ? double(mt->color[3]) : 0.0, mt ? mt->diffuseTex.c_str() : "", mt ? mt->blend : -1, int(m->verts.size()),
                         m->verts.empty() ? 0.0 : double(m->verts[0].color[0]), m->verts.empty() ? 0.0 : double(m->verts[0].color[1]),
                         m->verts.empty() ? 0.0 : double(m->verts[0].color[2]), m->verts.empty() ? 0.0 : double(m->verts[0].color[3]));
             }
@@ -565,8 +565,8 @@ void RbTrackView::drawTails(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, c
     for (auto it = tailStates_.begin(); it != tailStates_.end();) it = it->second.seen ? std::next(it) : tailStates_.erase(it);
     if (static int logs = 0; SDL_getenv("GD05_TRACKLOG") && logs < 6 && !tailRanges_.empty()) {
         ++logs;
-        SDL_Log("RB track: %zu tail strips, %zu verts, held gem %d, row %zu verts x %.2f..%.2f z %.2f, v1 %.2f", tailRanges_.size(), tailVerts_.size() / 16,
-                player.heldGem, row.size(), double(row.front()[0]), double(row.back()[0]), double(row.front()[1]), double(tailRowV1_));
+        SDL_Log("RB track: %d tail strips, %d verts, held gem %d, row %d verts x %.2f..%.2f z %.2f, v1 %.2f", int(tailRanges_.size()), int(tailVerts_.size() / 16),
+                player.heldGem, int(row.size()), double(row.front()[0]), double(row.back()[0]), double(row.front()[1]), double(tailRowV1_));
     }
     if (tailRanges_.empty()) return;
     if (!tailMesh_) tailMesh_ = std::make_unique<gfx::DynamicMesh>(cache.device());
@@ -611,7 +611,7 @@ void RbTrackView::draw(gfx::Renderer& r, gfx::SceneCache& cache, const Song& son
                     viewW_, viewH_, double(rect[0]), double(rect[1]), double(rect[2]), double(rect[3]));
         }
         if (smasherGroup_) {
-            SDL_Log("RB track: smasher group %s showing %d, %zu objects", smasherGroup_->name.c_str(), int(pose_.showing(smasherGroup_)), smasherGroup_->objects.size());
+            SDL_Log("RB track: smasher group %s showing %d, %d objects", smasherGroup_->name.c_str(), int(pose_.showing(smasherGroup_)), int(smasherGroup_->objects.size()));
             std::function<void(const scene::Group*, int)> dump = [&](const scene::Group* g, int depth) {
                 for (const std::string& n : g->objects) {
                     const scene::Object* o = g->dir ? g->dir->resolve(n) : nullptr;
