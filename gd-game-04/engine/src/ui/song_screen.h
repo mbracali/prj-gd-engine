@@ -209,6 +209,7 @@ private:
     // The live input between steps, per player.
     std::array<uint8_t, 2> held_{};
     std::array<bool, 2> strum_{}, star_{}, tilt_{};
+    std::array<bool, 2> barStrum_{};  // the strum bar moved this step (FrameInput::fretStrum is the rest)
     std::array<float, 2> whammyBar_{};
     std::array<bool, 2> whammyKey_{};
     double finishedAt_ = -1;

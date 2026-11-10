@@ -53,6 +53,8 @@ public:
     static inline bool countBlack = false;
     static inline bool countBlackLit = false;
     static inline int blackFrames = 0;
+    // Walks (shot:<name> with GD04_WALK_SHOTS=<dir>): the next presented frame is saved there.
+    static inline std::string shotPath;
 
     // Triangles (three vertices each). `texture` is a gfx::TextureId's id,
     // 0 for plain colour (the vertices' uv are then ignored).

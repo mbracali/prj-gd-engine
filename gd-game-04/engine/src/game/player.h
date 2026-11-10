@@ -16,6 +16,7 @@
 struct FrameInput {
     uint8_t frets = 0;     // held, bit 0 green .. bit 4 orange
     bool strum = false;    // the strum bar moved this frame (a pad: any fret change)
+    bool fretStrum = false;  // the strum came only from a fret press (a joypad, Require Strum off): Easy Chords
     bool starPower = false;  // Select held this frame (deploys at once) [C 0x82112D7C]
     bool tilt = false;       // the guitar tilted this frame (deploys after star_power_trigger_frames frames) [C 0x82112F28]
     float whammy = 0;      // 0 rest .. 1
@@ -73,6 +74,13 @@ class Player {
 public:
     // Enhanced > Forgiving Hammer-ons & Pull-offs (set by the app).
     static inline bool forgivingHopos = false;
+    // Enhanced > Accessibility > Easy Chords (GDALL-039) [the port's]: a chord
+    // counts when the shape is any non-empty part of it (no fret outside it),
+    // and its sustain lasts while such a shape is held. Off: as the original.
+    static inline bool easyChords = false;
+    static bool chordShape(uint8_t shape, uint8_t frets) {
+        return easyChords ? shape != 0 && (shape & ~frets) == 0 : shape == frets;
+    }
     // `inputOffsetMs`: the input offset (xenon_input_offset + the song's +
     // calibration) [C script gem_scroller]; 0 in the self-test.
     Player(const NoteTrack& track, const Tuning& tuning, int difficulty, bool noFail, float inputOffsetMs = 0);
@@ -144,6 +152,7 @@ private:
     std::array<double, 16> histTime_{};
     size_t histPos_ = 0;
     uint8_t lastHitMask_ = 0;     // 0x829E3A20: cleared by a miss / overstrum
+    int easyChordHit_ = -1;       // Easy Chords: the last chord hit (its other frets' presses do not overstrum)
     double pendingMs_ = -1;       // 0x829E4B3C: a strum still forming (strum_before_forming)
     double tapTimerMs_ = -1;      // 0x829CD710
     uint8_t tappedMask_ = 0;      // 0x829BD540

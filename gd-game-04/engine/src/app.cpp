@@ -848,6 +848,7 @@ void App::applyEnhanced(const std::string& key) {
         ps.grain = idx("film_grain", {"none", "light", "medium", "strong", "stronger"});
         ps.chromatic = idx("chromatic", {"none", "light", "medium", "strong"});
         Player::forgivingHopos = enhanced_.get("hopo_mode") == "forgiving";
+        Player::easyChords = enhanced_.on("easy_chords");
         VenueStage::extras.shadowsAll = enhanced_.on("shadows_all");
         VenueStage::extras.moreLights = idx("more_lights", {"none", "1.5x", "2x", "2.5x"});
         VenueStage::extras.lightDust = idx("light_dust", {"none", "1.5x", "2x", "2.5x"});

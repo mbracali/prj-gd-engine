@@ -22,7 +22,7 @@ uint8_t highest(uint8_t m) {
 }
 
 bool matches(uint8_t shape, const TrackNote& n) {
-    if (n.chord()) return shape == n.frets;  // a chord needs the exact shape
+    if (n.chord()) return Player::chordShape(shape, n.frets);  // a chord needs the exact shape (Easy Chords: a part of it)
     return highest(shape) == n.frets;
 }
 
@@ -155,6 +155,7 @@ void Player::hit(size_t i, double now, bool tap) {
     // Earlier notes the scan passed over are missed [C 0x82120700].
     while (cur_ < i) miss(cur_++, now);
     const TrackNote& n = t_.notes[i];
+    easyChordHit_ = easyChords && n.chord() ? int(i) : -1;
     ++st_.currentRun;
     syncMultiplierRun();
     st_.bestRun = std::max(st_.bestRun, st_.currentRun);
@@ -202,7 +203,7 @@ void Player::updateSustain(double now, double dt, const FrameInput& in) {
     (void)dt;
     if (sus_.note < 0) return;
     const TrackNote& n = t_.notes[size_t(sus_.note)];
-    const bool held = n.chord() ? in.frets == n.frets : highest(in.frets) == n.frets;  // [C 0x8211C9D0]
+    const bool held = n.chord() ? chordShape(in.frets, n.frets) : highest(in.frets) == n.frets;  // [C 0x8211C9D0]
     const int mult = st_.multiplier();
     // An overstrum since the sustain started: 0x8211C9D0 clears the flag and
     // takes the released path (whammy_off finished 0, the tail dead, no more
@@ -373,7 +374,12 @@ void Player::frame(double now, double dt, const FrameInput& raw) {
     }
     // 6. A strum with no note in reach: an overstrum, unless it is the
     // strum after a tap on the same frets [C 0x821208B0].
-    if (in.strum && !hitSomething && (cur_ >= n || double(notes[cur_].time) > base + E)) {
+    // Easy Chords: a fret press (a joypad, Require Strum off) of the chord just
+    // hit, while it is still in its window, is the rest of that chord [the port's].
+    const bool chordRest = easyChords && in.fretStrum && easyChordHit_ >= 0 && in.frets &&
+                           (in.frets & ~notes[size_t(easyChordHit_)].frets) == 0 &&
+                           double(notes[size_t(easyChordHit_)].time) >= base - lateFor(size_t(easyChordHit_), tu_.checkTimeLate * 1000.0);
+    if (in.strum && !hitSomething && !chordRest && (cur_ >= n || double(notes[cur_].time) > base + E)) {
         if (!(tapTimerMs_ >= 0 && (in.frets & tappedMask_))) overstrum(now);
         pendingMs_ = -1;
     }

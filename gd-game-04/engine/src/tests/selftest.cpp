@@ -193,6 +193,7 @@ int runSelfTest(const std::string& discPath) {
         if (!playChart(globals, s, c, totals, why)) fail(s.name + ": " + why);
     }
     printPlayTotals(totals);
+    if (totals.easyChordRuns == 0) fail("easy chords (GDALL-039): no chord to check");
     // The input layer's rules on virtual controllers (gd03's checks: two slots,
     // no double inputs, the axis rest rules, Require Strum, controllers.json v2).
     std::printf("input checks (virtual controllers):\n");

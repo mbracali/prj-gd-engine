@@ -438,7 +438,10 @@ Walk::Walk(const std::string& name) : name_(name) {
                            // Audio Backend (GDCORE-010): local, the one running, chosen again asks nothing.
                            "click:row:audio_backend", "click:option:0", "check:asking=0", "check:enhanced:audio_backend=local",
                            // Export User Files, a setting changed, Load User Settings brings it back (the dialogs answered with the save folder).
-                           "dialog:savedir", "click:row:export", "set:enhanced:max_fps=60", "click:row:load_settings", "check:enhanced:max_fps=120", "click:row:load_progress", "set:enhanced:audio_offset=40", "set:enhanced:video_offset=-20", "click:row:calibrate_reset", "check:enhanced:audio_offset=0", "check:enhanced:video_offset=0",
+                           // Accessibility > Easy Chords (GDALL-039): off on a fresh save; on, exported, and loaded back.
+                           "check:enhanced:easy_chords=off", "click:row:easy_chords", "check:enhanced:easy_chords=on", "shot:enhanced_accessibility",
+                           "dialog:savedir", "click:row:export", "set:enhanced:max_fps=60", "set:enhanced:easy_chords=off", "click:row:load_settings",
+                           "check:enhanced:max_fps=120", "check:enhanced:easy_chords=on", "click:row:load_progress", "set:enhanced:audio_offset=40", "set:enhanced:video_offset=-20", "click:row:calibrate_reset", "check:enhanced:audio_offset=0", "check:enhanced:video_offset=0",
                            "click:row:cheat_air_guitar", "check:global:Cheat_AirGuitar=1", "click:row:cheat_air_guitar", "check:global:Cheat_AirGuitar=2",
                            "rclick"},
                           10000});
@@ -1333,6 +1336,10 @@ bool Walk::act(const std::string& what, FrontEnd& fe, WalkHost& host) {
         const float got = v ? v->number() : -1;
         std::printf("  global: %s = %g\n", kv.substr(0, eq).c_str(), double(got));
         return got == std::atof(kv.c_str() + eq + 1) ? true : fail("global " + kv);
+    }
+    if (starts("shot:")) {  // shot:<name>: the next frame saved as <GD04_WALK_SHOTS>/<name>.bmp
+        if (const char* dir = SDL_getenv("GD04_WALK_SHOTS")) Canvas::shotPath = std::string(dir) + "/" + rest("shot:") + ".bmp";
+        return true;
     }
     if (what == "dialog:savedir") {  // GD04_DIALOG: the user-file dialogs answered with the walk's save folder
         SDL_setenv_unsafe("GD04_DIALOG", host.walkSaveDir().c_str(), 1);

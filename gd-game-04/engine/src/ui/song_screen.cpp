@@ -330,6 +330,7 @@ void SongScreen::handle(const InputEvent& e) {
         if (e.down && (e.joypad || e.fretsStrum)) strum_[p] = true;
     } else if (e.action == Action::Strum && e.down) {
         strum_[p] = true;
+        barStrum_[p] = true;
     } else if (e.action == Action::StarPower) {
         // Select at once, the tilt after its frames (Player) [C 0x82112F28].
         (e.tilt ? tilt_ : star_)[p] = e.down;
@@ -355,6 +356,8 @@ void SongScreen::tick(double nowMs, Mixer& mixer) {
         for (size_t p = 0; p < 2; ++p) {
             in[p].frets = held_[p];
             in[p].strum = strum_[p];
+            in[p].fretStrum = strum_[p] && !barStrum_[p];
+            barStrum_[p] = false;
             in[p].starPower = star_[p];
             in[p].tilt = tilt_[p];
             in[p].whammy = whammy(int(p));

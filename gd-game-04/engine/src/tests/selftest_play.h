@@ -26,6 +26,8 @@ struct PlayTotals {
     size_t overstrumCuts = 0, overstrumCutFails = 0;
     // #69: guitar expert played late by a calibrated audio delay (cases run, failed).
     size_t calibrationRuns = 0, calibrationFails = 0;
+    // GDALL-039: Enhanced > Accessibility > Easy Chords, off and on (charts checked, failed).
+    size_t easyChordRuns = 0, easyChordFails = 0;
 };
 
 // Plays every part and difficulty of a chart with the autoplayer; false and

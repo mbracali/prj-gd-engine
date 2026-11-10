@@ -167,6 +167,97 @@ bool strumBeforeFirst(const NoteTrack& track, const Tuning& tu, std::string& why
     return false;
 }
 
+// Enhanced > Accessibility > Easy Chords (GDALL-039): the first chord with
+// room around it, strummed with `frets` held. Off (the default, as the
+// original) one fret of the chord misses; on, any part of it hits and scores
+// as the whole chord, a fret outside it misses, and the chord's sustain lasts
+// on one of its frets. True when the chart has no such chord or every case holds.
+bool easyChords(const NoteTrack& track, const Tuning& tu, PlayTotals& t, std::string& why) {
+    int target = -1;
+    for (size_t i = 1; i + 1 < track.notes.size(); ++i) {
+        const TrackNote& n = track.notes[i];
+        if (!n.chord() || n.hopo || n.frets == 0x1f || n.time - track.notes[i - 1].time < 400 || track.notes[i + 1].time - n.time < 400 ||
+            (n.sustain && track.notes[i + 1].time - (n.time + n.holdMs) < 200))
+            continue;
+        target = int(i);
+        break;
+    }
+    if (target < 0) return true;
+    const TrackNote& n = track.notes[size_t(target)];
+    const double frame = 1000.0 / 60.0, at = n.time;
+    uint8_t low = 0;
+    for (int b = 0; b < 5 && !low; ++b)
+        if (n.frets & (1u << b)) low = uint8_t(1u << b);
+    uint8_t outside = 0;
+    for (int b = 0; b < 5 && !outside; ++b)
+        if (!(n.frets & (1u << b))) outside = uint8_t(1u << b);
+    struct Run { bool hit; long long score; };
+    // `release`: the frets let go after 50 ms (the sustain's test).
+    auto run = [&](bool easy, uint8_t frets, uint8_t release = 0) {
+        const bool keep = Player::easyChords;
+        Player::easyChords = easy;
+        Player p(track, tu, 3, true);
+        p.setSongLengthMs(at + 4000);
+        p.startAt(at - 300);  // the notes before it are not played
+        bool strummed = false;
+        const double end = n.sustain ? at + n.holdMs + 50 : at + 300;
+        for (double now = at - 600; now < end; now += frame) {
+            FrameInput in;
+            if (now >= at - 50) in.frets = frets;
+            if (release && now >= at + 50) in.frets = uint8_t(frets & ~release);
+            if (!strummed && now >= at) in.strum = true, strummed = true;
+            p.frame(now, frame, in);
+        }
+        Player::easyChords = keep;
+        bool hit = false;
+        for (const PlayerEvent& e : p.events()) hit = hit || (e.kind == PlayerEvent::Kind::Hit && e.note == target);
+        return Run{hit, (long long)p.stats().score};
+    };
+    std::string bad;
+    const Run full = run(false, n.frets), offOne = run(false, low), onFull = run(true, n.frets), onOne = run(true, low);
+    if (!full.hit) bad += "off: the whole chord missed; ";
+    if (offOne.hit) bad += "off: one fret of the chord hit; ";
+    if (!onFull.hit || onFull.score != full.score) bad += "on: the whole chord changed; ";
+    if (!onOne.hit || onOne.score != full.score) bad += "on: one fret did not hit as the whole chord; ";
+    if (run(true, uint8_t(low | outside)).hit) bad += "on: a fret outside the chord hit; ";
+    if (run(true, outside).hit) bad += "on: only a fret outside the chord hit; ";
+    if (n.sustain && n.holdMs >= 300) {
+        const Run cutOn = run(true, n.frets, uint8_t(n.frets & ~low)), cutOff = run(false, n.frets, uint8_t(n.frets & ~low));
+        if (cutOn.score != full.score || cutOff.score >= full.score) bad += "on: the sustain did not last on one of its frets; ";
+    }
+    {
+        // Frets that strum (a joypad, Require Strum off): the chord's first fret
+        // hits it, the next fret of it pressed two frames later is no overstrum.
+        const bool keep = Player::easyChords;
+        Player::easyChords = true;
+        Player p(track, tu, 3, true);
+        p.setSongLengthMs(at + 4000);
+        p.startAt(at - 300);
+        uint8_t second = uint8_t(n.frets & ~low);
+        second = uint8_t(second & (~second + 1));
+        uint8_t held = 0;
+        int step = 0;
+        for (double now = at - 600; now < at + 300; now += frame) {
+            FrameInput in;
+            bool press = false;
+            if (now >= at - 10 && step == 0) held |= low, press = true, step = 1;
+            else if (step >= 1 && step < 3) ++step;
+            else if (step == 3) held |= second, press = true, step = 4;
+            in.frets = held, in.strum = press, in.fretStrum = press;
+            p.frame(now, frame, in);
+        }
+        Player::easyChords = keep;
+        bool hit = false;
+        for (const PlayerEvent& e : p.events()) hit = hit || (e.kind == PlayerEvent::Kind::Hit && e.note == target);
+        if (!hit || p.stats().overstrums != 0) bad += "on, frets that strum: the chord's next fret was an overstrum; ";
+    }
+    ++t.easyChordRuns;
+    if (bad.empty()) return true;
+    ++t.easyChordFails;
+    why = "easy chords (note " + std::to_string(target) + "): " + bad;
+    return false;
+}
+
 }  // namespace
 
 bool playChart(const Globals& g, const SongInfo& song, const Chart& chart, PlayTotals& t, std::string& why) {
@@ -221,6 +312,13 @@ bool playChart(const Globals& g, const SongInfo& song, const Chart& chart, PlayT
     if (!chart.notes(Part::Guitar, 3).empty()) {
         std::string w;
         if (!calibration(buildTrack(chart, Part::Guitar, 3, tu, scale), tu, t, w)) {
+            if (ok) why = "guitar expert: " + w;
+            ok = false;
+        }
+    }
+    if (!chart.notes(Part::Guitar, 3).empty()) {
+        std::string w;
+        if (!easyChords(buildTrack(chart, Part::Guitar, 3, tu, scale), tu, t, w)) {
             if (ok) why = "guitar expert: " + w;
             ok = false;
         }
@@ -311,6 +409,7 @@ void printPlayTotals(const PlayTotals& t) {
                 t.coopCharts, t.coopNotes, t.coopStarPower, t.battles, t.battleAttacks, t.battleKos);
     std::printf("overstrum during a sustain: %zu sustains cut, %zu not ended\n", t.overstrumCuts, t.overstrumCutFails);
     std::printf("calibration (#69): %zu guitar expert runs played when heard, %zu failed\n", t.calibrationRuns, t.calibrationFails);
+    std::printf("easy chords (GDALL-039): %zu guitar expert chords checked off and on, %zu failed\n", t.easyChordRuns, t.easyChordFails);
     std::printf("autoplay: score (strummed) %lld, HOPO landings %zu, phrases captured %zu, charts failing %zu\n",
                 static_cast<long long>(t.score), t.hopos, t.phrasesCaptured, t.failedCharts);
 }

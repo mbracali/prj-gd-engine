@@ -243,6 +243,11 @@ std::vector<Item> buildItems(qs::Vm& vm) {
          "flashes, every effect above and the camera's shake. The options above keep their values for when you turn "
          "this off."},
         {Kind::Separator, "", "", true, ""},
+        {Kind::Section, "accessibility", "ACCESSIBILITY", true, "Ways to make the game easier to play on any controller."},
+        {Kind::Check, "easy_chords", "Easy Chords", true,
+         "A chord counts when you press any of its frets (one or more of them, none outside the chord). Off, "
+         "as the original: every fret of the chord."},
+        {Kind::Separator, "", "", true, ""},
         {Kind::Section, "cheats", "CHEATS & ENHANCERS", true, "Your user files, the original game's cheats and more ways to bend the rules."},
         {Kind::Button, "export", "Export User Files", true,
          "Choose a folder to save two files in: GD04-user-settings.json with every Enhanced Option, and "
