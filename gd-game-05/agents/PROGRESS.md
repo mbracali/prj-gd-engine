@@ -5,7 +5,7 @@ Rock Band (Xbox 360) -> `gd05`. Kickoff: `docs/spikes/GD-GAME-05_KICKOFF.md`
 bottom. "Verified" lines quote the command and its output; "built only" and
 "not tested" are said explicitly.
 
-## Final report, wave 04 (2026-11-10, agent time 05:55 -> END_TIME)
+## Final report, wave 04 (2026-11-10, about 2.3 h of agent time, 05:55 -> 08:15)
 
 The owner's goal: the menus even better (colours, delays, animations, the
 cloth, the loading screen's band, the menus' strange behaviour) and a first
@@ -72,7 +72,32 @@ The owner's points (what was wrong, the fix, how verified):
   Shelter, Tom Sawyer, (Don't Fear) The Reaper, Maps); tails with
   GD05_TAILTEST=1.
 
-GATE_RESULTS
+Verified by running (Linux, the final binary, one process at a time,
+scratch XDG per run, dummy audio, the RB guitar ignored):
+- Walk gate, all 19 OK: rb_boot (0 black frames; RB's own fx fade through
+  black not counted), rb_owner_bugs (song_list_layout on the cloth,
+  loading_icons), rb_pause_quit (new), quickplay, keys, quickplay_drums,
+  quickplay_vocals, band_quickplay, solo_tour, band_tour, score_duel,
+  tug_of_war, rock_shop, creator, credits, rb_lose, rb_lose_quit,
+  tutorials, rb_practice. (score_duel / tug_of_war first failed on
+  natives the faster transitions now reach: band_to_slot, get_result,
+  max_delta_points, player_config score; added [I], then OK.)
+- `--scenetest`, `--scripttest`, `--videotest` (14 videos, 44189 frames),
+  `--sfxtest`, `--selftest` (all charts fully hit): exit 0. `--uitest`
+  still FAILED on script names other panels own (68 lines; 8 more now
+  found through the screens' panels) as in wave 03.
+- Packages: `gd-engine-launcher/scripts/build.sh all --force` exit 0, every
+  module 0 compiler warnings on every platform; every bundle `complete (5
+  game module(s) with their libraries)`: linux, steamdeck, windows,
+  android-arm64.
+- Linux launcher: `--play gd05 --iso ... --exit-after`,
+  GDUL_GAME_QUIT_AFTER=25000 -> `gd05 0.0.4 started`, `back from
+  gd-game-05: exit code 0 after 25.1 s`.
+- Wine (Proton Experimental, own prefix), the Windows launcher, same
+  command -> `gd05 0.0.4 started`, `back from gd-game-05: exit code 0 after
+  25.1 s`.
+
+Built only (not run): Steam Deck, Android.
 
 What is left:
 - Fret board: the tails' glow line; hit flames, sparks and the smasher
