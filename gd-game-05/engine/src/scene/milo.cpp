@@ -335,7 +335,7 @@ void useProxyFiles(const GameData& data, const std::string& path, Directory& dir
             sub->subdirs.emplace_back(n, std::move(ss));
         }
         sub->clearIndex();
-        if (SDL_getenv("GD05_UILOG")) SDL_Log("milo %s: inline %s from %s (%zu objects)", path.c_str(), sub->name.c_str(), file.c_str(), sub->objects.size());
+        if (SDL_getenv("GD05_UILOG")) SDL_Log("milo %s: inline %s from %s (%llu objects)", path.c_str(), sub->name.c_str(), file.c_str(), static_cast<unsigned long long>(sub->objects.size()));
     }
 }
 }  // namespace

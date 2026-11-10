@@ -322,7 +322,7 @@ void TaskMgr::run(Task& t, double now) {
                     const DataNode& n = *t.body[t.index];
                     std::string head = n.children.empty() ? n.s : n.children[0].isText() ? n.children[0].s : (n.children[0].children.empty() ? "?" : n.children[0].children[0].s);
                     if (!n.children.empty() && n.children.size() > 1 && n.children[1].isText()) head += " " + n.children[1].s;
-                    SDL_Log("task %s [%zu/%zu] %s", t.name().c_str(), t.index, t.body.size(), head.c_str());
+                    SDL_Log("task %s [%llu/%llu] %s", t.name().c_str(), static_cast<unsigned long long>(t.index), static_cast<unsigned long long>(t.body.size()), head.c_str());
                 }
                 in_.eval(*t.body[t.index]);
                 if (t.dead) break;

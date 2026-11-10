@@ -2137,7 +2137,7 @@ int App::rbStars(const Player* p) const {
     int base = p->baseScore(), bonus = rbBonus_ && p == player_.get() ? rbBonus_->soloBonusMax() : 0;
     if (vocal_ && p == player_.get()) base = int(vocal_->phrases()) * int(rules_.rb.vocals.count("phrase_value") ? rules_.rb.vocals.at("phrase_value")[size_t(std::clamp(difficulties_[0], 0, 3))] : 400);
     for (const RbSeat& st : seats_)
-        if (st.player.get() == p && st.bonus) bonus = st.bonus->soloBonusMax(), set = set;
+        if (st.player.get() == p && st.bonus) bonus = st.bonus->soloBonusMax();
     const int diff = p == player_.get() ? difficulties_[0] : 3;
     return RbBonus::stars(rules_, p->score(), base, bonus, set, diff);
 }
