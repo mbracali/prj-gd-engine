@@ -2882,6 +2882,69 @@ int inputSelfTest() {
     std::printf(failures ? "input self-test: %d of %d checks failed\n" : "input self-test: all %d checks passed\n", failures ? failures : checks, checks);
     return failures;
 }
+
+// #77 (GD01-315): the guitar copy around a sustain followed at once by a
+// different single note (the sustain running up to the next gem, as in about
+// half of GH1's Expert sustains). The original's rule (FUN_00264018 ->
+// UnmuteBeatMatchAudio_v18 0x265df0): letting the sustain go while time is
+// left (`0.0 < remaining`) silences the guitar until the next hit; nothing
+// else does. So: moving late (after the sustain's end) or strumming the next
+// note while still holding never mutes; moving early mutes until the strum,
+// as the original does. Returns the failures (0 when no such pair exists).
+int sustainAudioSelfTest(const std::vector<SongInfo>& songs, GameData& data, const Rules& rules) {
+    int failures = 0, checks = 0;
+    auto check = [&](bool ok, const char* what) {
+        ++checks;
+        if (!ok) ++failures, std::printf("sustain audio self-test FAILED: %s\n", what);
+    };
+    for (const SongInfo& info : songs) {
+        Song song = buildSong(parseMidi(data.read(info.midiPath)));
+        const auto& gems = song.charts[3].gems;
+        for (size_t i = 1; i + 1 < gems.size(); ++i) {
+            const Gem &a = gems[i], &b = gems[i + 1];
+            const float end = a.ms + a.durationMs;
+            if (a.noSustain || a.fretCount() != 1 || b.fretCount() != 1 || b.hopo || a.frets == b.frets ||
+                b.ms - end > 1 || b.ms - end < 0 || a.ms - gems[i - 1].ms < 200 || a.durationMs < 200)
+                continue;
+            const int fa = std::countr_zero(unsigned(a.frets)), fb = std::countr_zero(unsigned(b.frets));
+            // move: when the hand goes from a's fret to b's; strum: b's strum.
+            // `heldStrum`: strum b while a's fret is still down, then move.
+            auto run = [&](float move, float strum, bool heldStrum, float& mutedMs) {
+                Player p(song, Difficulty(3), rules, ControllerMode::Guitar, true);
+                mutedMs = 0;
+                bool moved = false, strummed = false;
+                for (float t = a.ms - 100; t < b.ms + 150; t += 1) {
+                    if (t == a.ms - 100) p.update(t);
+                    if (t == a.ms - 2) p.fretDown(fa, t);
+                    if (t == a.ms) p.strum(t);
+                    if (heldStrum && !strummed && t >= strum) p.strum(t), strummed = true;
+                    if (!moved && t >= move) {
+                        if (fb > fa) p.fretDown(fb, t), p.fretUp(fa, t);
+                        else p.fretUp(fa, t), p.fretDown(fb, t);
+                        moved = true;
+                    }
+                    if (!heldStrum && !strummed && t >= strum) p.strum(t), strummed = true;
+                    p.update(t);
+                    if (t >= a.ms && !p.guitarAudible()) mutedMs += 1;
+                }
+                return p.gemHit(int(i)) && p.gemHit(int(i + 1));
+            };
+            float muted = 0;
+            check(run(end + 3, b.ms + 8, false, muted) && muted == 0, "moved just after the sustain's end: never muted");
+            check(run(end + 3, end + 3, false, muted) && muted == 0, "moved and strummed together just after the end: never muted");
+            check(run(b.ms - 20, b.ms - 30, true, muted) && muted == 0, "strummed early while holding: never muted");
+            check(run(b.ms - 30, b.ms - 30, false, muted) && muted == 0, "moved and strummed early together: never muted");
+            check(run(end - 30, b.ms - 2, false, muted) && muted > 20 && muted < 40,
+                  "let go 30 ms early: muted until the strum, as the original (_v18)");
+            std::printf(failures ? "sustain audio self-test (%s gem %d): %d of %d checks failed\n"
+                                 : "sustain audio self-test (%s gem %d): all %d checks passed\n",
+                        info.id.c_str(), int(i), failures ? failures : checks, checks);
+            return failures;
+        }
+    }
+    std::printf("sustain audio self-test: no sustain running into a different note found\n");
+    return 0;
+}
 }  // namespace
 
 int runSelfTest(const Options& options) {
@@ -2893,6 +2956,7 @@ int runSelfTest(const Options& options) {
         auto songs = loadSongs(data);
         std::printf("%u songs in %s; slop %.0f ms, head %d, tail %d\n", unsigned(songs.size()), data.description().c_str(),
                     rules.slopMs, rules.headPoints, rules.tailPoints);
+        if (sustainAudioSelfTest(songs, data, rules)) return 1;
         int failures = 0, hopos = 0;
         for (const SongInfo& info : songs) {
             Song song = buildSong(parseMidi(data.read(info.midiPath)));
