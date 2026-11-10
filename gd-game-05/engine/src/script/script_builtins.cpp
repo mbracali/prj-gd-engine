@@ -357,11 +357,78 @@ void Interp::installCoreBuiltins() {
         (void)arg(in, c, 1);
         return Value::integer(0);
     });
+    // RB's RandomContext (0x823CD810, conditions 0x823CCF30) [C]: each
+    // entry (token cond...) weighs 10 unless a (weight w) sets it, and 0
+    // when a condition fails; the conditions are (and ...) (or ...) (not c)
+    // (mode_property p v): {gamemode get p} is v; (diff d...), (instrument
+    // i...), (song s...), (artist "a"...): the player's / the song's is one
+    // of them; (venue v...) and (unlocked x) [I: false and true: the
+    // loading screens' tour pictures]. One entry is picked by weight and
+    // its token returned (config/tips.dta, loading_screens.dta).
     addBuiltin("random_context", [arg](Interp& in, const DataNode& c) {
         const Value a = arg(in, c, 1);
         const auto* l = listOf(a);
         if (!l || l->empty()) return Value::integer(0);
-        return in.evalValue((*l)[size_t(in.randomInt(0, int(l->size())))]);
+        Value cfg = in.send("gamecfg", "get_player_config", {Value::integer(0)}, false);
+        auto playerSym = [&](const char* msg) { return cfg.type == Value::Type::Object ? in.send(cfg.object, msg, {}, false).str() : std::string(); };
+        const std::string song = in.send("gamecfg", "get_song", {}, false).str();
+        std::function<bool(const Value&, int&)> cond = [&](const Value& v, int& weight) -> bool {
+            const auto* cl = listOf(v);
+            if (!cl || cl->empty()) return true;
+            const std::string key = (*cl)[0].str();
+            auto anyOf = [&](const std::string& x) {
+                for (size_t k = 1; k < cl->size(); ++k)
+                    if ((*cl)[k].str() == x) return true;
+                return false;
+            };
+            if (key == "weight") return weight = cl->size() > 1 ? (*cl)[1].integerValue() : weight, true;
+            if (key == "and") {
+                for (size_t k = 1; k < cl->size(); ++k)
+                    if (!cond((*cl)[k], weight)) return false;
+                return true;
+            }
+            if (key == "or") {
+                for (size_t k = 1; k < cl->size(); ++k)
+                    if (cond((*cl)[k], weight)) return true;
+                return false;
+            }
+            if (key == "not") return cl->size() > 1 && !cond((*cl)[1], weight);
+            if (key == "mode_property") {
+                if (cl->size() < 3) return false;
+                const Value got = in.send("gamemode", "get", {(*cl)[1]}, false);
+                const Value& want = (*cl)[2];
+                if (want.str() == "TRUE") return got.truthy();
+                if (want.str() == "FALSE") return !got.truthy();
+                return want.isNumber() ? got.integerValue() == want.integerValue() : got.str() == want.str();
+            }
+            if (key == "diff") return anyOf(playerSym("get_difficulty_sym"));
+            if (key == "instrument") return anyOf(playerSym("get_track_sym")) || anyOf(playerSym("get_controller_sym"));
+            if (key == "song") return anyOf(song);
+            if (key == "artist") return !song.empty() && anyOf(in.send("song_mgr", "song_artist", {Value::symbol(song)}, false).str());
+            if (key == "venue") return false;
+            if (key == "unlocked") return true;
+            return false;
+        };
+        std::vector<std::pair<Value, int>> picks;
+        int total = 0;
+        for (const Value& raw : *l) {
+            const Value e = in.evalValue(raw);
+            const auto* el = listOf(e);
+            int weight = 10;
+            bool ok = true;
+            if (el && !el->empty())
+                for (size_t k = 1; k < el->size() && ok; ++k) ok = cond((*el)[k], weight);
+            if (!ok || weight <= 0) continue;
+            picks.push_back({el && !el->empty() ? (*el)[0] : e, weight});
+            total += weight;
+        }
+        if (picks.empty() || total <= 0) return Value::integer(0);
+        int at = in.randomInt(0, total);
+        for (const auto& [v, w] : picks) {
+            if (at < w) return v;
+            at -= w;
+        }
+        return picks.back().first;
     });
     // {stagekit_reset}: the Stage Kit's lights (an Xbox 360 accessory) off;
     // the port drives no Stage Kit [C data: ui/game.dta; decision].
