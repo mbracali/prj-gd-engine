@@ -37,23 +37,23 @@ code is there but nothing ran it, and it scores as missing.
 | 5 | Front end | Training menu: tutorials list, Drum Trainer menu | 1 | approximate | 0.5 | the training menu and the tutorials' lesson menu open (`tutorials` walk) | GD05-009 |
 | 6 | Front end | Pause, restart, quit, controller-lost pause | 1 | approximate | 0.5 | pause / resume (`keys`); restart from the lose screen (`rb_lose`); quit unchecked | GD05-005 |
 | 7 | Front end | Loading screens and tips | 1 | works | 1 | `--walktest quickplay` |  |
-| 8 | Front end | Credits (main menu and tour end) | 1 | stand-in | 0.25 | credits_screen opens (screen sweep); not looked at | GD05-009 |
+| 8 | Front end | Credits (main menu and tour end) | 1 | approximate | 0.5 | credits_screen scrolls RB's config/credits.dtb rows (heading, title_name ...) in list_credits.milo's labels; the labels' placement is off [I] | GD05-009 |
 | 9 | Front end | Lose screen, retry, quit | 1 | approximate | 0.5 | `rb_lose`: a failed song, RB's lose screen, retry | GD05-009 |
 | 10 | Port | Help bar, Enhanced Options, GAMEPADS, cheats, The Glitches | 2 | approximate | 1 | Enhanced reachable; GAMEPADS: four players, Drums / Vocals instruments (built only); help bar not placed | GD05-010 |
 | 11 | Gameplay | Guitar: hit windows, HOPOs, sustains, whammy, streak multiplier | 5 | works | 5 | RB's guitar watcher read in the XEX (FINDINGS: window, HOPO chain, sustains, multipliers) [C]; `--selftest` all charts; unsettled: which notes become HOPOs, the 50 ms overstrum gap | GD05-021 |
 | 12 | Gameplay | Bass (6x multiplier) | 2 | works | 2 | as guitar, the 6x cap for bass [C RB 0x8245BDF0] | GD05-021 |
-| 13 | Gameplay | Drums: pads, kick, judge | 4 | approximate | 2 | RB's drum watcher (a gem per pad, nearest group, lanes, chords passed once, freestyle before the first gem) [C], `--selftest` all 292 drum charts through it; kick / no-kick and the kit's buttons unsettled (D6) | GD05-018 |
+| 13 | Gameplay | Drums: pads, kick, judge | 4 | works | 4 | RB's drum watcher read in the XEX [C] (a gem per pad, the nearest time group, the closest lane on a miss, same-lane deadlines, chords passed once, freestyle before the first gem); `--selftest` plays all 292 drum charts through it; the kit's buttons map as frets (D6) | GD05-018 |
 | 14 | Gameplay | Vocals: mic pitch, phrases, talkies, percussion, scoring | 6 | approximate | 3 | RB's vocal scoring read in the XEX [C] (accuracy curve, octave rule, hit multipliers, caps, strict ratings, streak on Awesome, scream deploy in freestyle, tambourine taps); `--selftest` sings every chart and taps 10180 of 10180 tambourine gems; talkies' speech matcher and the pitch detector are the port's [I] | GD05-018 |
 | 15 | Gameplay | Every difficulty per part, no-kick / lefty options | 1 | approximate | 0.5 | every difficulty plays; no-kick / lefty options unchecked |  |
 | 16 | Gameplay | A/V calibration moves drawing and judging | 1 | stand-in | 0.25 | the port's offset moves the judge; the RB tracks draw with the video offset; RB's calibration screens not wired |  |
 | 17 | Gameplay | Audio: stems, miss mute per part, sfx | 2 | approximate | 1 | `--sfxtest`; stems by part; miss mute unchecked |  |
 | 18 | Gameplay | Song start order and countdown | 1 | approximate | 0.5 | intro then track |  |
 | 19 | Band | Overdrive: gain (phrases, whammy), deploy (tilt / Select, drum fill, vocals), sound | 3 | approximate | 1.5 | drain per beat, spotlight_phrase, band multiplier, the singer's scream deploy, the fill's crash after 3 hits [C]; the Overdrive sound effect unchecked | GD05-019 |
-| 20 | Band | Band meter, crowd, failing out, saving a bandmate | 2 | approximate | 1 | fail-out, saves (at most two, save_level, save_energy), the out member's drain, the band meter [C]; the brink delay not done | GD05-019 |
+| 20 | Band | Band meter, crowd, failing out, saving a bandmate | 2 | works | 2 | RB's fail-out, saves (at most two, save_level, save_energy, back from the brink), the out member's drain and the band meter [C] | GD05-019 |
 | 21 | Band | Unison bonus | 1 | approximate | 0.5 | Unison with failed members excluded [C]; the phrase mask's exact rule [I] | GD05-019 |
 | 22 | Band | Solos (solo section, % and bonus) | 1 | works | 1 | RB's solo award (percent, award, bonus x the solo's gems) [C]; `--selftest` 232 of 232 solos perfect | GD05-019 |
 | 23 | Band | Drum fills and freestyle | 1 | approximate | 0.5 | the crash deploys after crash_fill_ready_hits [C]; when a fill shows [I] | GD05-019 |
-| 24 | Band | Big Rock Endings | 1 | approximate | 0.5 | RB's pot (min(gap, 1500 ms) x 100 / s a lane) [C], banked by the final gem; the band-wide all-or-nothing not done; `--selftest` 176 banked | GD05-019 |
+| 24 | Band | Big Rock Endings | 1 | works | 1 | RB's coda pot (min(gap, 1500 ms) x 100 / s a lane) and the band-wide all-or-nothing [C]; `--selftest` 176 banked | GD05-019 |
 | 25 | Band | Stars and score (thresholds, results) | 1 | works | 1 | band_thresholds by the band's instrument set, bonus_thresholds, Expert for gold [C]; the bonus base is the solos' [I] | GD05-019 |
 | 26 | HUD | Guitar / bass / drum highway: gems, colours, sustains, beat lines, now bar | 3 | approximate | 1.5 | RB's track through the menus (`rb_track_frames` counter); flat sustains | GD05-006 |
 | 27 | HUD | Vocal track: lyrics, pitch tubes, arrow, phrase markers | 2 | approximate | 1 | the port's vocal track (tubes, lyrics, arrow, phrase meter), not RB's widgets | GD05-006 |
@@ -71,7 +71,7 @@ code is there but nothing ran it, and it scores as missing.
 | 39 | Modes | Band World Tour (cities, venues, gigs, fans, stars, unlocks, cash) | 4 | approximate | 2 | `band_tour` walk: band, name, hub, hints, gig set list, results | GD05-009 |
 | 40 | Modes | Practice (sections, speeds) | 1 | stand-in | 0.25 | practice reaches its game screen (sections, speed); not checked by ear | GD05-009 |
 | 41 | Modes | Tutorials (guitar, drums, vocals) and the Drum Trainer | 2 | missing | 0 | the lesson menu opens; no lesson runs | GD05-009 |
-| 42 | Custom | Character creator | 3 | stand-in | 0.75 | the maker (name, hometown, attitude), confirm, the profile; appearance lists through OutfitPanel unchecked; no 3D preview | GD05-008 |
+| 42 | Custom | Character creator | 3 | approximate | 1.5 | `creator` walk: maker (name, hometown, attitude), appearance (hair / head lists), confirm, saved; the created look is the one on stage in its gigs; no 3D preview, no physique / colours | GD05-008 |
 | 43 | Custom | Rock Shop (clothes, hair, tattoos, make-up, instruments) | 2 | approximate | 1 | `rock_shop` walk: the punk store's torso list, an affordable shirt bought (money paid by the script) and worn; no 3D preview, no colours | GD05-009 |
 | 44 | Custom | Bands: create, name, logo, line-up | 1 | approximate | 0.5 | a band created and named in `band_tour`; no logo | GD05-009 |
 | 45 | Saves | Profiles, scores, tour progress, unlocks (versioned JSON) | 3 | approximate | 1.5 | rb_profile.json (characters, bands, tours); Quickplay scores not saved | GD05-009 |

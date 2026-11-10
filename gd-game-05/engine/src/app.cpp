@@ -54,6 +54,7 @@
 #include "render/track_view.h"
 #include "render/rb_track_view.h"
 #include "render/vocal_track_view.h"
+#include "render/crowd_view.h"
 #include "audio/vocal_input.h"
 #include "game/vocal_player.h"
 #include "game/rb_bonus.h"
@@ -2728,6 +2729,7 @@ int App::gameCounter(int player, const std::string& key) const {
     if (key == "vocal_score") return vocal_ ? vocal_->score() : 0;
     if (key == "vocal_phrases_rated") return vocal_ ? vocal_->phrasesRated(VocalPlayer::Rating::Awful) : 0;
     if (key == "band_members") return band_ ? int(band_->members().size()) : 0;
+    if (key == "crowd_drawn") return venueView_ ? venueView_->crowdView().charactersDrawn() : 0;
     if (key == "band_meshes") return venueView_ ? venueView_->bandView().meshesDrawn() : 0;
     if (key == "score") return player_ ? player_->score() : 0;
     if (key == "part_vocals") return parts_[0] == "vocals" ? 1 : 0;

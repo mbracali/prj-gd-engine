@@ -460,6 +460,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         at("game_screen", 60000);
         wait(3000);
         check(vocals ? "counter:part_vocals:1" : "counter:part_drum:1");
+        check("counter:crowd_drawn:0");  // reported (the audience: GD05-007)
         if (!vocals) check("counter:rb_track_frames:30");  // RB's own track through the menus, not the debug highway
         check("counter:band_members:4");
         check("counter:band_meshes:20");

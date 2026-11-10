@@ -593,6 +593,13 @@ void UiView::drawLabel(MaterialRenderer& r, const scene::UILabel& l, const scene
         const scene::UiState st = state(l.name);
         const auto c = styles_.buttonColor(*panel, st);
         color[0] = c[0], color[1] = c[1], color[2] = c[2];
+        // Rock Band's text buttons (types button / button_alt ...: one font,
+        // no state meshes): the focused one lit, the others dimmed [I: RB
+        // marks the focus with BandHighlight objects, not drawn yet].
+        if (b->textMesh.empty() && milo_->bigEndian()) {
+            const float k = st == scene::UiState::Focused || st == scene::UiState::Selecting ? 2.5f : st == scene::UiState::Disabled ? 0.3f : 0.6f;
+            color[0] *= k, color[1] *= k, color[2] *= k;
+        }
         matColor = color;
         if (st == scene::UiState::Focused || st == scene::UiState::Selecting) {
             const float s = styles_.focusScale(*panel);
