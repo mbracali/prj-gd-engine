@@ -5,6 +5,100 @@ Rock Band (Xbox 360) -> `gd05`. Kickoff: `docs/spikes/GD-GAME-05_KICKOFF.md`
 bottom. "Verified" lines quote the command and its output; "built only" and
 "not tested" are said explicitly.
 
+## Final report, wave 03 (2026-11-10, about 2.9 h of agent time, 00:26 -> 03:20)
+
+The owner's goal: the start of the game and the menus as the original.
+The screen-by-screen audit is `docs/frontend.md` (made with the new
+`tools/frontend.py`, the scripts' screen graph): of its 17 rows (the flow
+from boot through Quickplay, a song, the results and back, plus the options
+screens) **13 match, 3 differ, 1 is out of scope** (game_screen's HUD),
+none missing. Ledger (`python3 tools/parity.py docs/parity.md`):
+**61.00%** (was 60; Front end 9.0 / 14). gd05 **0.0.3** (CHANGELOG),
+game-info.yaml completeness 0.61.
+
+The owner's bugs (cause, fix, how verified):
+- **People screaming at the start (GD05-023).** Cause: the port's Enhanced
+  Options backdrop, a venue posed at boot before the intro movie, sent its
+  crowd an excitement change, which played the venue's crowd_upto_good
+  cheer. Fix: the backdrop's world is silent (D16). RB's own menu ambience
+  (meta.dta: the shell music and shell_crowd.cue, muffled on the song list)
+  plays as the scripts say. Verified: GD05_SFXLOG=1 boot logs (no
+  crowd_upto_good, the shell crowd only); walks `rb_boot` and
+  `rb_owner_bugs` check `counter_max:menu_venue_sounds:0`.
+- **Key 2 in Quickplay loads another song (GD05-024).** Key 2 is the red
+  fret, which the menus read as back (kPad_Tri). Cause: the port kept
+  GH2's "back to the screen we came from", so on game_screen, before the
+  first note, red went back to the loading screens, which loaded the song
+  again. Fix: RB's UIScreen (0x8225AEE8) goes back only to a screen's own
+  `(back ...)`; `goto_screen`'s third argument plays the backward
+  transition (D15). Verified: walk `rb_owner_bugs` presses keyboard 2 eight
+  times as the song starts, `counter_max:song_loads:1`. Keys audit in
+  docs/frontend.md (developer keys need an environment variable or the
+  Enhanced developer switch, off by default).
+
+Also changed (each verified by screenshots I looked at, and the walks):
+- The menus' background concert video (movie_panel, rb_video*.bik,
+  MoviePanel's pick rule 0x828557E8); the intro at its own 16:9.
+- Main menu: the metal words lit by their group's environ (no dark first
+  letters), the golden focused pill, the lower third's skull wave.
+- RenderDir panels drawn as RB draws them (TexRenderers into textures,
+  their own camera): the difficulty screen (koi banner, the player card:
+  guitar / bass, then the difficulty, READY), the shop and tour rooms. The
+  song list's texture is shown flat under the title bar [I] (D17).
+- UI inline proxies use their files and draw under their holders (the
+  slots, the results' player panel); slots' scripts in their own
+  directory; text colours from color_presets.dta; RB labels' own text
+  fields, markup and fit types.
+- The help bar shows (actions, fret icons), takes clicks, and carries
+  GAMEPADS on the main menu (D19); loading tips as RB's RandomContext;
+  the lose screen's % complete; dialogs' messages; attract mode.
+
+Verified by running (Linux, this build, one process at a time, scratch
+XDG, dummy audio, the RB guitar ignored):
+- Gate, every walk OK: rb_boot, rb_owner_bugs, quickplay, keys,
+  quickplay_drums, quickplay_vocals, band_quickplay, solo_tour, band_tour,
+  score_duel, tug_of_war, rock_shop, creator, credits, rb_lose,
+  rb_lose_quit, tutorials, rb_practice.
+- `--selftest` (all charts fully hit), `--scenetest`, `--scripttest`,
+  `--videotest`, `--sfxtest`: exit 0. `--uitest` still lists the 42
+  component names of wave 01 (names other panels of the same screen own;
+  docs/frontend.md).
+- Attract mode: a 75 s idle run (movies skipped) goes title > attract >
+  title > attract (log).
+- Packages: `gd-engine-launcher/scripts/build.sh all --force` exit 0, every
+  module 0 compiler warnings; every bundle `complete (5 game module(s) with
+  their libraries)`: linux, steamdeck, windows, android-arm64.
+- Linux launcher: `--play gd05 --iso ... --exit-after`,
+  GDUL_GAME_QUIT_AFTER=25000 -> `gd05 0.0.3 started`, `back from
+  gd-game-05: exit code 0 after 25.1 s`.
+
+Built only (not run): Windows (no Wine run this wave), Steam Deck, Android.
+
+What is left (docs/frontend.md):
+- The song list on its swaying cloth through its camera (GD05-022;
+  GD05_SONGLIST_3D=1 shows the camera's framing, which hides the top rows).
+- The results' stars label, the audio options' slider pods.
+- QUIT from the pause screen, the credits (behind Community), the tours'
+  screens and the band lobby (D10) screen by screen; the in-game HUD.
+
+## For the owner to play (wave 03)
+- Start the game: the intro fills the screen; on the title and the menus a
+  concert video plays behind; you hear the menu music and a calm crowd, no
+  cheering.
+- Wait 30 s on the title: the attract videos play, then the title again.
+- Main menu: whole metal words, the gold focused pill; moving plays a
+  click; GAMEPADS at the bottom right (yellow fret or a click).
+- Solo > Quickplay: the list on its cloth, headings in gold, the yellow
+  highlight; the help bar (Back / Change Sorting / Choose Song) takes
+  clicks; Back returns to the Solo menu.
+- Pick a song: the difficulty screen's koi banner and card, GUITAR / BASS
+  first, then the difficulty, READY; the loading tip is a real sentence.
+- In the song, press 2 (red) right at the start: the song keeps going.
+- Esc: the pause screen (Return to Game / Select). Fail a song: the %
+  complete; QUIT: the confirm dialog's message is readable.
+- The results: your panel (difficulty, % hit, streak); then NEW SONG /
+  REPLAY / EXIT.
+
 ## Final report, wave 02 (2026-11-09, about 5.2 h of agent time, 18:05 -> 23:15)
 
 Completeness from the ledger (docs/parity.md, `python3 tools/parity.py
