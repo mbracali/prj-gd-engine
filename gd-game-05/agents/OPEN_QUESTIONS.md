@@ -37,3 +37,17 @@ chosen default is in `DECISIONS.md`.
    (No emulator: a photo or a memory of the original screen would settle it.)
    **Answered by the data (same day):** the RenderDir's own transform was
    missing (D20); with it the first row is below the title bar.
+
+## Wave 05
+1. Create a Band's background while naming (tour_band_create_screen): the
+   port shows the rehearsal room from a camera looking up at the ceiling
+   (a lamp top left, the red curtain). Is the original's view of the band in
+   the room? (Not settled from the data this wave.)
+2. Venues still blow out to white in songs (GD05-042). Wave 05's reading of
+   RB's shaders (Xenos disassembly of ark/xbox_shaders) says RB's lights are
+   uploaded unscaled and RB's lighting maths matches GH2's, but RB adds the
+   environ's ColorXfm (gColorXfmEnv) to every shader, a bloom mask in alpha
+   (sat(dot(gBloomColor, col))), a final post of sat(ColorXfm . (frame +
+   bloom * intensity)) and no luminance map. The white is still there with
+   the post off, so the next step is the world's own fog / additive layers
+   and those shader terms (PROGRESS.md wave 05).

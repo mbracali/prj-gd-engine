@@ -289,3 +289,33 @@ pattern). Each says what, why and how to undo it.
   for none [C data; I: the index rule, the native is not read]. The stars
   font draws `*` and the gold digits; the port wrote `***__`.
 - **Undo:** `starSymbol` in ui/natives_game.cpp.
+
+## D25
+- **What (wave 05, GD05-030):** RB's display gamma ramp, rnd (gamma 0.85)
+  from config/default.dta, set by RB 0x8246BD90 as pow(i/256, gamma) [C].
+  The port draws into a frame target and shows pow(c, 0.85) (device
+  setOutputGamma, local and core backends); screenshots are ramped too.
+- **Undo:** `GD05_GAMMA=1`, or `dev.setOutputGamma` in App::applyEnhanced.
+
+## D26
+- **What (wave 05, GD05-036 / 037):** GAMEPADS is a port button in the main
+  menu's bottom-left corner (a pill like RB's menu buttons, white text,
+  orange on hover), drawn by UiManager::drawGamepadsButton on main_screen
+  only; the main menu's help bar patch is gone (RB's main_screen has none).
+  A click on a button of a non-focus panel (main_panel beside its sub-menus)
+  gives that panel the focus (set_focus_panel) and selects [I].
+- **Undo:** `gamepadsButton` / `drawGamepadsButton` and the mouse fallback
+  in ui/ui_manager.cpp.
+
+## D27
+- **What (wave 05, GD05-035):** the port's screens: GH2's bold menu font
+  (helveticablack) is RB's kabel_bold (ui/resource/gen) [I]; a prelit font
+  material takes the text's colour in its vertices (the state colour
+  replaces the text's); the port screens use RB's help bar format.
+- **Undo:** ScreenText::font, TextDrawer::draw, port_screens.cpp patches.
+
+## D28
+- **What (wave 05, GD05-041):** RB's anim tempo bits (16 slow, 32 medium,
+  64 fast, mask 112; macros.dta) filter rb_* members' clips [C data]; the
+  drummer falls back to `sit` (RB's drum type start_group) [C data].
+- **Undo:** Band::filterClips, Band::rbPoll.
