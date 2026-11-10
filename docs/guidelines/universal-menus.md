@@ -224,6 +224,8 @@ components: we will.
 | Performance & graphics | More Lights on Venues | None, 1.5x, 2x, 2.5x | Dropdown |
 | Performance & graphics | Dust in Light Beams | None, 1.5x, 2x, 2.5x | Dropdown (always available) |
 | *(space)* | | | |
+| Accessibility | Easy Chords | A chord counts when you press any of its frets (one or more of them, none outside the chord) (`easy_chords`) | Check box, **off by default** (the original's rules). Every game; Rock Band: guitar and bass only. See "Accessibility" in [universal_mechanisms.md](universal_mechanisms.md) |
+| *(space)* | | | |
 | Cheats & enhancers | Export User Files | Exports the user's settings and progress as JSON files | Button |
 | Cheats & enhancers | Load User Settings | Loads a user settings JSON file | Button |
 | Cheats & enhancers | Load User Progress | Loads a user progress JSON file | Button |
