@@ -4,6 +4,7 @@
 
 #include <functional>
 #include <map>
+#include <set>
 #include <memory>
 #include <string>
 #include <vector>
@@ -78,6 +79,20 @@ public:
     // The frame last set on it (0 before any).
     float frame(const std::string& object) const;
     void setShowing(const std::string& object, bool showing);
+    void setShowing(const scene::Object* object, bool showing) { if (object) pose_.setShowing(object, showing); }
+    bool showing(const scene::Object* object) const { return object && pose_.showing(object); }
+    // `name` in the inline directory `scope` (RB's player slots: slot0..3
+    // of seldiff_solo.milo, each its own copy of seldiffpart_player.milo);
+    // nullptr when there is no such directory or object.
+    scene::Object* findIn(const std::string& scope, const std::string& name) const;
+    std::vector<scene::Object*> byClassIn(const std::string& scope, const std::string& cls) const;
+    // A player slot's directory shown or not (MultiFocusScreen: a slot no
+    // player has is hidden); a hidden one's TexRenderer draws nothing and
+    // the meshes showing its texture are hidden.
+    void setScopeShowing(const std::string& scope, bool showing) {
+        if (showing) hiddenScopes_.erase(scope);
+        else hiddenScopes_.insert(scope);
+    }
     bool showing(const std::string& object) const;
     // set_local_pos / set_local_scale: replace one part of the object's local transform.
     void setLocalPos(const std::string& object, float x, float y, float z);
@@ -259,6 +274,7 @@ private:
     bool drawRenderDir3d(MaterialRenderer& r);
     void drawRoots(MaterialRenderer& r, const scene::Directory& dir);
     std::map<const scene::Object*, TargetId> rdTargets_;
+    std::set<std::string> hiddenScopes_;
     void addLayoutHit(const std::string& key, const TextLayout& layout, const Mat4& world);
     int textsDrawn_ = 0, meshesDrawn_ = 0;
     std::vector<std::string> problems_;

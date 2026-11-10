@@ -178,7 +178,14 @@ void ScriptLoader::preprocess(const DataNode& in, DataNode& out, const std::stri
         if (n.type == T::Symbol) {  // macro use: splice its elements
             if (auto it = macros.find(n.s); it != macros.end()) {
                 ++stats.macroUses;
-                for (const DataNode& c : it->second.children) out.children.push_back(c);
+                for (const DataNode& c : it->second.children) {
+                    out.children.push_back(c);
+                    // An empty array a macro holds is one array every use
+                    // shares (meta.dta's connected_controller_types (()):
+                    // push_back / resize change it for every reader, as the
+                    // DataArray the original's macro references) [I].
+                    if (c.type == T::Array && c.children.empty()) out.children.back().s = "#macro:" + n.s;
+                }
                 continue;
             }
         }
@@ -489,6 +496,11 @@ Value Interp::toValue(const DataNode& n) {
     case T::Symbol: return Value::symbol(n.s);
     case T::String: return Value::string(n.s);
     case T::Array: {
+        if (n.children.empty() && n.s.rfind("#macro:", 0) == 0) {
+            auto it = sharedMacroArrays_.find(n.s);
+            if (it == sharedMacroArrays_.end()) it = sharedMacroArrays_.emplace(n.s, Value::list()).first;
+            return it->second;
+        }
         std::vector<Value> v;
         v.reserve(n.children.size());
         for (const DataNode& c : n.children) v.push_back(toValue(c));

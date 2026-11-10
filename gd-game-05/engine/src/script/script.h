@@ -239,6 +239,8 @@ public:
     void destroyObject(ScriptObject* object);
     // Called for names no registered object has (e.g. a panel's components).
     std::function<ScriptObject*(const std::string&)> resolver;
+    // The empty arrays macros hold, shared by every use (Interp::toValue).
+    std::map<std::string, Value> sharedMacroArrays_;
     // Called before an object is destroyed by {delete} or a replacing `new`.
     std::function<void(ScriptObject*)> onDestroy;
 

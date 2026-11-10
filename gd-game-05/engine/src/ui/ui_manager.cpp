@@ -394,6 +394,9 @@ ScriptObject* UiManager::resolve(const std::string& name) {
     }
     if (thisPanel)
         if (ComponentObj* c = thisPanel->component(name)) return c;
+    // A player slot's code: its own directory's components first.
+    if (auto* slot = dynamic_cast<PlayerSlotObj*>(self.object); slot && !slot->scope().empty())
+        if (ComponentObj* c = slot->panel().scopedComponent(slot->scope(), name)) return c;
     if (ScreenObj* s = next_ ? next_ : current_) {
         if (PanelObj* fp = s->focusPanel(); fp && !fp->acceptsAnyName())
             if (ComponentObj* c = fp->component(name)) return c;

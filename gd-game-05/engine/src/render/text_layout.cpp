@@ -295,7 +295,9 @@ std::array<float, 2> fitScale(const TextLayout& layout, const TextStyle& style, 
     if (mode == 0 || layout.text.empty()) return s;
     const float w = layout.maxWidth();
     if (!(w > 0)) return s;
-    float sx = width / w, sz = 1;
+    // A box side of 0 does not constrain (helpbar.milo's icon labels:
+    // kFitJust with width and height 0 drew at scale 0).
+    float sx = width > 0 ? width / w : 1, sz = 1;
     float top, bottom;
     layout.extent(style, top, bottom);
     const float h = std::fabs(bottom - top);

@@ -83,11 +83,11 @@ public:
             if (!flagProp("preload") || current_.empty()) pick();
             return;
         }
-        const DataNode* videos = prop("videos");
-        if (!videos || videos->children.size() < 2 || !videos->children[1].isText()) return;
-        const std::vector<std::string> files = videoFiles(videos->children[1].s);
-        if (files.empty()) return;
-        ui.host().playMovie(files.front());
+        // The non-looping ones (the intro, the attract mode's five song
+        // videos) pick by the same rule, then play modally.
+        const std::string file = choose();
+        if (file.empty()) return;
+        ui.host().playMovie(file);
         if (handler("movie_done")) ui.interp().send(this, "movie_done", {});
         else ui.logOnce("MoviePanel " + name() + ": no movie_done");
     }
@@ -110,10 +110,14 @@ private:
     }
     bool looping() const { return flagProp("loop"); }
     void pick() {
+        current_ = choose();
+        if (!current_.empty()) ui.host().menuMovie(current_);
+    }
+    std::string choose() {
         const DataNode* videos = prop("videos");
-        if (!videos || videos->children.size() < 2 || !videos->children[1].isText()) return;
+        if (!videos || videos->children.size() < 2 || !videos->children[1].isText()) return {};
         const std::vector<std::string> files = videoFiles(videos->children[1].s);
-        if (files.empty()) return;
+        if (files.empty()) return {};
         std::string f;
         for (int guard = 0; guard < 64; ++guard) {
             f = files[size_t(SDL_rand(Sint32(files.size())))];
@@ -122,8 +126,7 @@ private:
         recent_.push_back(f);
         if (recent_.size() >= files.size())
             while (recent_.size() > files.size() / 2) recent_.erase(recent_.begin());
-        current_ = f;
-        ui.host().menuMovie(f);
+        return f;
     }
     std::vector<std::string> videoFiles(const std::string& key) {
         std::vector<std::string> out;

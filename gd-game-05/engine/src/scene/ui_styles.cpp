@@ -152,7 +152,30 @@ std::array<float, 3> unpackColor(int p) {
 
 // ---- UiStyles ---------------------------------------------------------------
 
-void UiStyles::load(const GameData& data) { root_ = loadPlainDta(data, "ui/ui_objects.dta"); }
+void UiStyles::load(const GameData& data) {
+    root_ = loadPlainDta(data, "ui/ui_objects.dta");
+    try {
+        presets_ = loadPlainDta(data, "ui/color_presets.dta");
+    } catch (const std::exception&) {
+        presets_ = ::DataNode();  // GH2 has none
+    }
+}
+
+bool UiStyles::textStyleColor(const std::string& style, const std::array<uint32_t, 4>& custom, UiState state, std::array<float, 3>& out) const {
+    const int i = std::clamp(int(state), 0, 3);
+    if (style == "custom_colors") {
+        out = unpackColor(int(custom[size_t(i)]));
+        return true;
+    }
+    if (presets_.children.empty()) return false;
+    const ::DataNode* e = style.empty() ? nullptr : presets_.find(style);
+    if (!e) e = presets_.find("default_colors");
+    if (!e || e->children.size() < size_t(i) + 2) return false;
+    const ::DataNode& entry = e->children[size_t(i) + 1];
+    if (entry.children.size() < 2 || entry.children[1].type != ::DataNode::Type::Int) return false;
+    out = unpackColor(entry.children[1].i);
+    return true;
+}
 
 const ::DataNode* UiStyles::classNode(const std::string& cls) const { return root_.find(cls); }
 

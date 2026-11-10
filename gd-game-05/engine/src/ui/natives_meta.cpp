@@ -794,6 +794,11 @@ public:
             return ui_.playSfx(args.empty() ? "" : args[0].str(), a.volume, a.pan, a.transpose), true;
         }
         if (msg == "show" && name() == "cheat_display") return SDL_Log("cheat: %s", args.empty() ? "" : args[0].str().c_str()), true;
+        // {rnd aspect}: the port draws 16:9 (1280 x 720 units), so
+        // kWidescreenAspect (2, system macros.dta); 0 was kSquareAspect,
+        // which put the help bar at its 4:3 frame and loaded fx_standard.milo
+        // instead of fx_widescreen.milo (20 scripts ask) [C data: the enum].
+        if (msg == "aspect" && name() == "rnd") return r = Value::integer(2), true;
         return msgs_.count(msg) != 0;
     }
 

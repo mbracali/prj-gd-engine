@@ -60,6 +60,12 @@ public:
     // button's directory (its own property array, then its PanelDir type's
     // default), a packed colour r | g << 8 | b << 16.
     std::array<float, 3> buttonColor(const Object& panelDir, UiState state) const;
+    // Rock Band's text colour (BandTextComp 0x822FFDF0) [C]: the preset
+    // named by the label's text style in ui/color_presets.dta (missing:
+    // default_colors), its (state + 1)th entry: normal_color, focus_color,
+    // disabled_color, selecting_color; "custom_colors" uses the record's
+    // four. false when the presets did not load.
+    bool textStyleColor(const std::string& style, const std::array<uint32_t, 4>& custom, UiState state, std::array<float, 3>& out) const;
     // focus_scale of the button's directory (1 when unset).
     float focusScale(const Object& panelDir) const;
 
@@ -71,6 +77,7 @@ private:
     const ::DataNode* classNode(const std::string& cls) const;
     const ::DataNode* dirTypeProperty(const Object& dir, const std::string& key) const;
     ::DataNode root_;
+    ::DataNode presets_;  // ui/color_presets.dta
 };
 
 // {pack_color r g b} as GH2 stores it (0..1 each -> r | g << 8 | b << 16).

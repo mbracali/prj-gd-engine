@@ -94,6 +94,9 @@ public:
     // The component `name` (a milo object, or a known component the panel
     // keeps state for); nullptr when the panel has no such object.
     virtual ComponentObj* component(const std::string& name);
+    // A component of the inline directory `scope` (a player slot's own
+    // copy), named as the scripts name it; nullptr when that has none.
+    ComponentObj* scopedComponent(const std::string& scope, const std::string& name);
     bool acceptsAnyName() const { return anyComponent_; }
     ComponentObj* focused() { return focus.empty() ? nullptr : component(focus); }
     void setFocus(const std::string& name, bool notify);
@@ -147,6 +150,7 @@ public:
 
 protected:
     std::map<std::string, std::unique_ptr<ComponentObj>> components_;
+    std::map<std::string, std::unique_ptr<ComponentObj>> scoped_;  // scopedComponent's
     // The panel's milo is the program's (the HUD, the track): any name is
     // one of its components, kept as a name only.
     bool anyComponent_ = false;

@@ -15,6 +15,7 @@
 
 #include <SDL3/SDL.h>
 
+#include "render/ui_view.h"
 #include "ui/ui_manager.h"
 #include "ui/ui_objects.h"
 
@@ -30,12 +31,34 @@ PlayerSlotObj::PlayerSlotObj(UiManager& ui, ScreenObj& screen, PanelObj& panel, 
     setTypeDef(&type, 1);
     props["slot_num"] = Value::integer(slotNum);
     props["slot"] = Value::symbol(slot);
+    // seldiff_solo.milo / seldiff.milo: each slot's own inline copy of
+    // seldiffpart_player.milo, slot0..slot3 [C data]: the slot's scripts
+    // name its components (seldiff.grp, selpart.grp, medium.btn) there, not
+    // the panel's own seldiff.grp of the same name.
+    const std::string own = "slot" + std::to_string(slotNum);
+    if (panel.view && panel.view->findIn(own, "ready.lbl")) scope_ = own;
 }
 
 PlayerSlotObj::~PlayerSlotObj() { ui_.interp().unregisterObject(this); }
 
 bool PlayerSlotObj::handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) {
     // The panel's component natives, as the slot's own.
+    if (!scope_.empty() && msg == "find" && !args.empty())
+        if (ComponentObj* c = panel_.scopedComponent(scope_, args[0].str())) return r = Value::obj(c), true;
+    if (!scope_.empty() && msg == "iterate" && args.size() >= 2 && panel_.view) {
+        r = Value::integer(0);
+        std::string var = args[1].str();
+        if (!var.empty() && var[0] == '$') var = var.substr(1);
+        const Value saved = in.var(var);
+        for (scene::Object* o : panel_.view->byClassIn(scope_, args[0].str())) {
+            ComponentObj* c = panel_.scopedComponent(scope_, o->name);
+            if (!c) continue;
+            in.var(var) = Value::obj(c);
+            for (size_t k = 2; k < args.size(); ++k) r = in.evalValue(args[k]);
+        }
+        in.var(var) = saved;
+        return true;
+    }
     if (msg == "find" || msg == "set_focus" || msg == "iterate" || msg == "disable" || msg == "enable" || msg == "focus_name" ||
         msg == "is_up")
         return r = in.send(&panel_, msg, args), true;
@@ -77,6 +100,9 @@ std::vector<std::unique_ptr<PlayerSlotObj>> makePlayerSlots(UiManager& ui, Scree
         const DataNode& first = slots->children[1].isList() && !slots->children[1].children.empty() ? slots->children[1].children[0] : slots->children[1];
         if (first.isText()) slot = first.s;
     }
+    // The slots no player has (one local player: slot1..3) are hidden.
+    if (panel->view)
+        for (int n = 1; n < 4; ++n) panel->view->setScopeShowing("slot" + std::to_string(n), false);
     auto s = std::make_unique<PlayerSlotObj>(ui, screen, *panel, *type, pp->find("options"), 0, slot);
     ui.interp().registerObject(s.get());
     out.push_back(std::move(s));

@@ -26,6 +26,8 @@ public:
     Value dispatch(const std::string& msg, std::vector<Value> args = {});
     bool ready();
     PanelObj& panel() { return panel_; }
+    // The slot's own directory in the panel ("slot<N>"), empty without one.
+    const std::string& scope() const { return scope_; }
 
 private:
     UiManager& ui_;
@@ -33,6 +35,7 @@ private:
     PanelObj& panel_;
     const DataNode* options_;
     bool showing_ = true;
+    std::string scope_;
 };
 
 // The slots of `screen` (none when it has no player_panels).

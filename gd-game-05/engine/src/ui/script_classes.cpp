@@ -271,11 +271,14 @@ bool ComponentObj::handleNative(Interp& in, const std::string& msg, std::vector<
             return true;
         }
     }
+    // By the object itself when there is one (a player slot's copy shares
+    // its name with the other slots' and the panel's own).
     if (msg == "set_showing") {
-        if (v) v->setShowing(name(), !args.empty() && args[0].truthy());
+        if (v && object) v->setShowing(object, !args.empty() && args[0].truthy());
+        else if (v) v->setShowing(name(), !args.empty() && args[0].truthy());
         return true;
     }
-    if (msg == "showing") return r = Value::integer(v && v->showing(name()) ? 1 : 0), true;
+    if (msg == "showing") return r = Value::integer(v && (object ? v->showing(object) : v->showing(name())) ? 1 : 0), true;
     if (msg == "set_text") {
         // A token is localized (UILabel SetTextToken); other text shows as is.
         const std::string s = argStr(0);
@@ -447,7 +450,7 @@ bool ComponentObj::handleNative(Interp& in, const std::string& msg, std::vector<
 }
 
 Value ComponentObj::getProp(Interp& in, const std::string& key) {
-    if (key == "showing") return Value::integer(panel->view && panel->view->showing(name()) ? 1 : 0);
+    if (key == "showing") return Value::integer(panel->view && (object ? panel->view->showing(object) : panel->view->showing(name())) ? 1 : 0);
     // A label's or button's locale token (RB shop.dta: {$component get text_token}) [C data: the record].
     if (key == "text_token" && object && !props.count(key))
         if (const auto* l = object->as<scene::UILabel>(); l && l->localize) return Value::symbol(l->textToken);
@@ -456,7 +459,8 @@ Value ComponentObj::getProp(Interp& in, const std::string& key) {
 
 void ComponentObj::setProp(Interp& in, const std::string& key, const Value& v) {
     if (key == "showing") {
-        if (panel->view) panel->view->setShowing(name(), v.truthy());
+        if (panel->view && object) panel->view->setShowing(object, v.truthy());
+        else if (panel->view) panel->view->setShowing(name(), v.truthy());
         return;
     }
     if (key == "text_token") {
@@ -497,6 +501,18 @@ ComponentObj* PanelObj::component(const std::string& name) {
     c->directory = dir;
     ComponentObj* raw = c.get();
     components_[name] = std::move(c);
+    return raw;
+}
+
+ComponentObj* PanelObj::scopedComponent(const std::string& scope, const std::string& name) {
+    if (scope.empty() || name.empty() || !view) return nullptr;
+    const std::string key = scope + "/" + name;
+    if (auto it = scoped_.find(key); it != scoped_.end()) return it->second.get();
+    const scene::Object* o = view->findIn(scope, name);
+    if (!o) return nullptr;
+    auto c = std::make_unique<ComponentObj>(this, o, name);
+    ComponentObj* raw = c.get();
+    scoped_[key] = std::move(c);
     return raw;
 }
 

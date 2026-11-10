@@ -166,6 +166,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         at("qp_selsong_screen");
         wait(800);
         check("song_list_layout");
+        check("rb_helpbar");
         press(kX);  // the first entry
         at("qp_seldiff_solo_screen");
         press(kX);
@@ -2275,6 +2276,22 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         const int money = c.object ? ui.interp().send(c.object, "money", {}).integerValue() : -1;
         std::printf("  shop: %d outfit(s) worn, %d money left\n", n, money);
         if (n < 1) return fail("no outfit was chosen");
+        return pass();
+    }
+    if (s.screen == "rb_helpbar") {
+        // RB's help bar (meta.dta HELPBAR_HANDLERS, helpbar.milo): the
+        // screen's (helpbar ...) actions shown with their fret icons.
+        ui::PanelObj* hb = ui.panel("helpbar");
+        if (!hb || !hb->view || !hb->up) return fail("no help bar up");
+        int actions = 0, icons = 0;
+        std::string line;
+        for (const char* a : {"red_action.lbl", "green_action.lbl", "yellow_action.lbl", "blue_action.lbl"})
+            if (hb->view->showing(a) && !hb->view->text(a).empty()) ++actions, line += std::string(a) + "=" + hb->view->text(a) + " ";
+        for (const char* c : {"red1.lbl", "green1.lbl", "yellow1.lbl", "blue1.lbl"})
+            if (hb->view->showing(c) && !hb->view->text(c).empty()) ++icons, line += std::string(c) + "=" + hb->view->text(c) + " ";
+        std::printf("  help bar: %d actions, %d icons: %s\n", actions, icons, line.c_str());
+        if (actions < 2) return fail("the help bar shows fewer than two actions");
+        if (icons < actions) return fail("an action without its icon");
         return pass();
     }
     if (s.screen == "song_list_layout") {

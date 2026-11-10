@@ -47,6 +47,7 @@ public:
         index_.clear();
         return objects.back().get();
     }
+    void clearIndex() { index_.clear(); }
     // Searches this directory, then its inline sub-directories (depth first).
     Object* find(const std::string& name) const;
     template <class T> T* find(const std::string& name) const {
@@ -98,6 +99,8 @@ public:
     bool bigEndian() const { return bigEndian_; }  // the payload's byte order
     Directory& root() { return *root_; }
     const Directory& root() const { return *root_; }
+    // Takes the parsed root directory (the milo is empty afterwards).
+    std::unique_ptr<Directory> releaseRoot() { return std::move(root_); }
 
     Object* find(const std::string& name) const { return root_->find(name); }
     template <class T> T* find(const std::string& name) const { return root_->find<T>(name); }

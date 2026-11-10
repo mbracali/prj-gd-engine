@@ -112,6 +112,11 @@ bool UiView::drawRenderDir3d(MaterialRenderer& r) {
                 if (sub && (sub->name == n || owner == n)) panel = sub.get();
         }
         if (!panel || !out || out->width <= 0 || out->height <= 0) continue;
+        const bool hidden = hiddenScopes_.count(panel->name) > 0;
+        for (const auto& m : outer.objects)
+            if (const auto* mesh = m->as<scene::Mesh>())
+                if (const scene::Mat* mat = findMat(*mesh, mesh->mat); mat && mat->diffuseTex == out->name) pose_.setShowing(mesh, !hidden);
+        if (hidden) continue;
         TargetId& t = rdTargets_[o.get()];
         if (!t.id) {
             std::string error;
@@ -379,6 +384,33 @@ float UiView::frame(const std::string& object) const {
     return it == frames_.end() ? 0.0f : it->second;
 }
 
+namespace {
+const scene::Directory* subdirNamed(const scene::Directory& d, const std::string& name, int depth) {
+    if (depth > 4) return nullptr;
+    for (const auto& [owner, sub] : d.subdirs) {
+        if (!sub) continue;
+        if (sub->name == name || owner == name) return sub.get();
+        if (const scene::Directory* x = subdirNamed(*sub, name, depth + 1)) return x;
+    }
+    return nullptr;
+}
+}  // namespace
+
+scene::Object* UiView::findIn(const std::string& scope, const std::string& name) const {
+    if (!milo_) return nullptr;
+    const scene::Directory* d = subdirNamed(milo_->root(), scope, 0);
+    return d ? d->find(name) : nullptr;
+}
+
+std::vector<scene::Object*> UiView::byClassIn(const std::string& scope, const std::string& cls) const {
+    std::vector<scene::Object*> out;
+    if (!milo_) return out;
+    if (const scene::Directory* d = subdirNamed(milo_->root(), scope, 0))
+        for (const auto& o : d->objects)
+            if (o->cls == cls) out.push_back(o.get());
+    return out;
+}
+
 void UiView::setShowing(const std::string& object, bool showing) {
     if (const scene::Object* o = find(object)) pose_.setShowing(o, showing);
 }
@@ -544,8 +576,9 @@ void UiView::draw(MaterialRenderer& r) {
             r.setFrame(ic, env, outTex->width, outTex->height);
             r.forceAlphaWrite = true;
             viewProj_ = ic.viewProj(false);
-            // Where it shows: 552 high from under the title bar, centred [I].
-            constexpr float kTop = 150, kH = 560;
+            // Where it shows: from under the title bar to above the help
+            // bar, centred, at the texture's aspect [I].
+            constexpr float kTop = 150, kH = 500;
             const float w = kH * float(outTex->width) / float(outTex->height);
             rendered_.texture = dev.targetTexture(renderTarget_);
             rendered_.x0 = (1280 - w) / 2, rendered_.x1 = rendered_.x0 + w, rendered_.y0 = kTop, rendered_.y1 = kTop + kH;
@@ -662,7 +695,13 @@ void UiView::drawObject(MaterialRenderer& r, const scene::Object& o, int depth) 
         return;
     }
     if (const auto* t = o.as<scene::Text>()) return drawText(r, *t);
-    if (const auto* l = o.as<scene::BandLabel>()) return drawLabel(r, *l, &l->band, l->color.data());
+    if (const auto* l = o.as<scene::BandLabel>()) {
+        // Rock Band: the text style's preset colour (BandTextComp) [C].
+        std::array<float, 3> c{};
+        if (l->bigEndian && styles_.textStyleColor(l->textStyle, l->customColors, state(l->name) == scene::UiState::Disabled ? scene::UiState::Disabled : scene::UiState::Normal, c))
+            return drawLabel(r, *l, &l->band, c.data());
+        return drawLabel(r, *l, &l->band, l->color.data());
+    }
     if (const auto* b = o.as<scene::BandButton>()) {
         // RB's BandButton: its type's resource meshes per state (border,
         // inlay), then its text_mesh (a modelled word in the same resource,
@@ -779,15 +818,11 @@ void UiView::drawLabel(MaterialRenderer& r, const scene::UILabel& l, const scene
     const scene::Object* panel = milo_->root().self.get();
     if (const auto* b = l.as<scene::BandButton>(); b && panel) {
         const scene::UiState st = state(l.name);
-        const auto c = styles_.buttonColor(*panel, st);
+        // Rock Band: the text style's preset colour for the state
+        // (BandTextComp 0x822FFDF0, ui/color_presets.dta) [C].
+        std::array<float, 3> c{};
+        if (!(l.bigEndian && styles_.textStyleColor(l.textStyle, l.customColors, st, c))) c = styles_.buttonColor(*panel, st);
         color[0] = c[0], color[1] = c[1], color[2] = c[2];
-        // Rock Band's text buttons (types button / button_alt ...: one font,
-        // no state meshes): the focused one lit, the others dimmed [I: RB
-        // marks the focus with BandHighlight objects, not drawn yet].
-        if (b->textMesh.empty() && milo_->bigEndian()) {
-            const float k = st == scene::UiState::Focused || st == scene::UiState::Selecting ? 2.5f : st == scene::UiState::Disabled ? 0.3f : 0.6f;
-            color[0] *= k, color[1] *= k, color[2] *= k;
-        }
         matColor = color;
         if (st == scene::UiState::Focused || st == scene::UiState::Selecting) {
             const float s = styles_.focusScale(*panel);

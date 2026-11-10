@@ -2,6 +2,8 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "scene/milo.h"
 
+#include <SDL3/SDL.h>
+
 #include <algorithm>
 #include <cctype>
 #include <stdexcept>
@@ -301,11 +303,49 @@ std::string findMiloRelative(const GameData& data, const std::string& fromArkPat
     return data.exists(q) ? q : p;
 }
 
+namespace {
+// A UI milo's inline proxied directories (seldiff_solo.milo's slot0..3:
+// PanelDir records naming seldiffpart_player.milo) carry a cached copy of
+// the proxied file as it was when the panel was saved; the disc ships the
+// file too, newer: the slots' cache lacks the file's seldiff.grp,
+// selpart.grp, bass.grp and border.mesh that seldiff.dta shows and hides.
+// The file's objects replace the cache [I: RB's ObjectDir inline_proxy
+// rule (PreLoad RB 0x8247FB78) is not read; the scripts need the file's].
+void useProxyFiles(const GameData& data, const std::string& path, Directory& dir, int depth) {
+    if (depth > 4) return;
+    for (auto& [owner, sub] : dir.subdirs) {
+        if (!sub) continue;
+        useProxyFiles(data, path, *sub, depth + 1);
+        const auto* d = sub->self ? sub->self->as<DirObj>() : nullptr;
+        if (!d || d->objectDir.proxyFile.empty()) continue;
+        const std::string file = findMiloRelative(data, path, d->objectDir.proxyFile);
+        if (!data.exists(miloArkPath(file))) continue;
+        std::unique_ptr<Directory> fresh;
+        try {
+            Milo m(data.read(miloArkPath(file)), miloArkPath(file));
+            fresh = m.releaseRoot();
+        } catch (const std::exception&) {
+            continue;
+        }
+        if (!fresh || fresh->cls != sub->cls) continue;
+        sub->objects = std::move(fresh->objects);
+        for (auto& o : sub->objects) o->dir = sub.get();
+        for (auto& [n, ss] : fresh->subdirs) {
+            if (ss) ss->parent = sub.get();
+            sub->subdirs.emplace_back(n, std::move(ss));
+        }
+        sub->clearIndex();
+        if (SDL_getenv("GD05_UILOG")) SDL_Log("milo %s: inline %s from %s (%zu objects)", path.c_str(), sub->name.c_str(), file.c_str(), sub->objects.size());
+    }
+}
+}  // namespace
+
 Milo& MiloLibrary::load(const std::string& path) {
     std::string p = miloArkPath(path);
     auto it = milos_.find(p);
     if (it != milos_.end()) return *it->second;
     auto m = loadMilo(data_, p);
+    if (p.rfind("ui/", 0) == 0) useProxyFiles(data_, p, m->root(), 0);
     Milo& ref = *m;
     milos_.emplace(p, std::move(m));
     return ref;
