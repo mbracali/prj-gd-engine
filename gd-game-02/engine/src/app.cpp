@@ -983,6 +983,7 @@ bool App::loadSong(const SongInfo& info, int difficulty, bool autoplay, float ba
         player_->setBigNotes(song_->bigNotes[size_t(part0)]);
         if (part0 == Part::Bass) player_->setBassRanges(song_->bassRanges);
         player_->setForgivingHopos(enhancedValue("hopo_mode") == "forgiving");
+        player_->setEasyChords(enhancedValue("easy_chords") == "on");
         bot_ = autoplay ? std::make_unique<Autoplay>(player_->chart(), faceOff ? 0 : -1) : nullptr;
         player2_.reset(), bot2_.reset(), coopBand_.reset();
         sharedMeter_ = {};
@@ -996,6 +997,7 @@ bool App::loadSong(const SongInfo& info, int difficulty, bool autoplay, float ba
             player2_->setBigNotes(song_->bigNotes[size_t(part1)]);
             if (part1 == Part::Bass) player2_->setBassRanges(song_->bassRanges);
             player2_->setForgivingHopos(enhancedValue("hopo_mode") == "forgiving");
+            player2_->setEasyChords(enhancedValue("easy_chords") == "on");
             // Without the menus the second player always autoplays.
             if (autoplay || !ui_) bot2_ = std::make_unique<Autoplay>(player2_->chart(), faceOff ? 1 : -1);
             normaliseScores(*player_, *player2_);
