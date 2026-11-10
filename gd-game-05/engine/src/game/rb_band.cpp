@@ -122,7 +122,8 @@ bool Band::assembleRb(const GameData& data, const SongInfo& song) {
         const DataNode* pre = cands[(h + (instrument == "bass" ? 7u : 0u)) % cands.size()];
         for (const DataNode* c : cands)
             if (!want.empty() && text(c, 0) == want) pre = c;
-        const std::string gender = text(pre->find("gender")).empty() ? "male" : text(pre->find("gender"));
+        const Config::RbLook* look = config_.rbLooks.count(instrument) ? &config_.rbLooks.at(instrument) : nullptr;
+        const std::string gender = look ? look->gender : text(pre->find("gender")).empty() ? "male" : text(pre->find("gender"));
         const std::string baseInst = instrument == "bass" ? "guitar" : instrument;
         const std::string base = "char/" + gender + "/gen/" + gender + "_" + baseInst + ".milo_xbox";
         std::map<std::string, std::string> outfits;
@@ -136,10 +137,14 @@ bool Band::assembleRb(const GameData& data, const SongInfo& song) {
                 problems_.push_back(text(pre, 0) + ": no " + path);
             }
         };
-        if (const DataNode* o = pre->find("outfit")) {
-            for (size_t i = 1; i < o->children.size(); ++i) {
-                const DataNode& piece = o->children[i];
-                const std::string cat = text(&piece, 0), name = text(&piece, 1);
+        std::vector<std::pair<std::string, std::string>> pieces;
+        if (look) {
+            for (const auto& [cat, name] : look->outfit) pieces.emplace_back(cat, name);
+        } else if (const DataNode* o = pre->find("outfit")) {
+            for (size_t i = 1; i < o->children.size(); ++i) pieces.emplace_back(text(&o->children[i], 0), text(&o->children[i], 1));
+        }
+        {
+            for (const auto& [cat, name] : pieces) {
                 if (cat.empty() || name.empty() || name == "none") continue;
                 if (cat == "guitar" || cat == "bass" || cat == "mic" || cat == "drum") {
                     // The member's own instrument only (a guitarist's bass stays in the closet).
@@ -164,12 +169,12 @@ bool Band::assembleRb(const GameData& data, const SongInfo& song) {
             problems_.push_back(m->slot + ": " + e.what());
             continue;
         }
-        rbSkin(data, *m->character, pre);
+        rbSkin(data, *m->character, pre, look ? look->skin : -1);
         m->character->setXfm(slotXfm(*m));
         if (!it->second->rnd.environment.empty() && it->second->dir)
             m->character->slotEnviron = it->second->dir->resolve<scene::Environ>(it->second->rnd.environment);
         if (log) {
-            SDL_Log("band: %s <- %s (%s, %d pieces)", m->slot.c_str(), text(pre, 0).c_str(), base.c_str(), int(outfits.size()));
+            SDL_Log("band: %s <- %s (%s, %d pieces)", m->slot.c_str(), look ? "the player's own character" : text(pre, 0).c_str(), base.c_str(), int(outfits.size()));
             for (const std::string& b : m->character->unresolvedBones()) SDL_Log("band:   unresolved bone %s", b.c_str());
         }
         rbPrefabUsed_[instrument] = text(pre, 0);
@@ -185,7 +190,7 @@ bool Band::assembleRb(const GameData& data, const SongInfo& song) {
 // The port has no render-to-texture for them yet (GD05-022): every
 // material whose diffuse texture is such a placeholder is drawn in the
 // prefab's skin colour (skin_color_index) instead [I].
-void Band::rbSkin(const GameData& data, chr::Character& c, const DataNode* prefab) {
+void Band::rbSkin(const GameData& data, chr::Character& c, const DataNode* prefab, int skinIndex) {
     static std::vector<std::array<float, 4>> skin;
     static bool loaded = false;
     if (!loaded) {
@@ -199,6 +204,7 @@ void Band::rbSkin(const GameData& data, chr::Character& c, const DataNode* prefa
     }
     int idx = 0;
     if (const DataNode* n = prefab->find("skin_color_index"); n && n->children.size() > 1) idx = n->intAt(1);
+    if (skinIndex >= 0) idx = skinIndex;
     std::array<float, 4> tone{0.8f, 0.62f, 0.5f, 1};
     if (idx >= 0 && size_t(idx) < skin.size()) tone = skin[size_t(idx)];
     c.forEachObject([&](scene::Object& o) {

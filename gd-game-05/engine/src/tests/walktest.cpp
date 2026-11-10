@@ -160,6 +160,44 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
                 press(kDown);
             }
         }
+    } else if (scenario == "creator") {
+        // RB's character creator (ui/charcreator.dta): Solo Tour > new
+        // character > the maker > PHYSIQUE (the appearance panel: hair and
+        // head lists through OutfitPanel) > a hair chosen.
+        wait(300);
+        press(kX);
+        at("splash_screen", 30000);
+        press(kX);
+        at("main_screen");
+        press(kX);
+        at("main_solomode_screen");
+        press(kDown), wait(200);
+        press(kX);
+        at("tour_solo_char_screen", 30000);
+        wait(800);
+        press(kX), wait(800), press(kX);
+        at("charcreator_maker_screen", 20000);
+        wait(1500);
+        press(kX);  // the name
+        wait(800);
+        for (int i = 0; i < 3; ++i) press(kDown), wait(200);
+        press(kX);  // PHYSIQUE
+        at("charcreator_appearance_screen", 20000);
+        wait(1200);
+        check("print_focus");
+        for (int i = 0; i < 6; ++i) {
+            press(kDown), wait(300);
+            check("print_focus");
+        }
+        mouseOn("hair.btn", 1);
+        wait(800);
+        check("print_focus");
+        press(kDown), wait(300), press(kDown), wait(300);
+        check("print_focus");
+        press(kX);
+        wait(1200);
+        check("print_focus");
+        check("creator_hair");
     } else if (scenario == "rock_shop") {
         // RB's Rock Shop (ui/shop.dta) from the Solo Tour's hub: a new
         // character, the shop, clothing, a store, a shirt bought and worn.
@@ -2044,6 +2082,13 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
             const bool shown = fp && fp->view && fp->view->showing("freebird" + std::to_string(g) + ".grp");
             if (shown != (g <= n)) return fail("freebird" + std::to_string(g) + ".grp " + (shown ? "shown" : "hidden"));
         }
+        return pass();
+    }
+    if (s.screen == "creator_hair") {
+        const Value c = ui.interp().send("charcreator_panel", "get_tour_char", {});
+        const std::string hair = c.object ? ui.interp().send(c.object, "get_outfit", {Value::symbol("hair")}).str() : std::string();
+        std::printf("  creator: hair %s\n", hair.c_str());
+        if (hair.empty() || hair == "none") return fail("no hair chosen");
         return pass();
     }
     if (s.screen == "print_focus") {

@@ -143,6 +143,9 @@ public:
     // Rock Band's drums (DrumTrackWatcherImpl, Swing RB 0x824A2320): every
     // pad of a chord is its own gem (splitDrumChords) [C].
     void setDrumMode(bool on) { drumMode_ = on; }
+    // A saved member returns from the brink at this gem (RB 0x82442060): the
+    // gems before it pass without a penalty [C].
+    void skipUntil(int gem) { firstPlayable_ = std::max(firstPlayable_, gem); }
     // A deploy spent on saving a bandmate (RB 0x82442B20 -> 0x82442AC0) [C]:
     // no Overdrive, the energy less save_energy.
     void spendSave(float cost) {

@@ -412,6 +412,11 @@ bool RbCharObj::handleNative(Interp& in, const std::string& msg, std::vector<Val
     if (msg == "deform" || msg == "update" || msg == "print_guid" || msg == "set_dirty") return true;
     if (msg == "has_outfit") return r = Value::integer(d.owned.count(sArg(args, 1)) || (d.outfit.count(sArg(args, 0)) && d.outfit[sArg(args, 0)] == sArg(args, 1)) ? 1 : 0), true;
     if (msg == "has_group_selection") return r = Value::integer(0), true;  // [I] colour groups not offered yet
+    if (msg == "outfit_list") {
+        std::vector<Value> v;
+        for (const auto& [k, o] : d.outfit) v.push_back(Value::list({Value::symbol(k), Value::symbol(o)}));
+        return r = Value::list(std::move(v)), true;
+    }
     if (msg == "get_outfit") return r = Value::symbol(d.outfit.count(sArg(args, 0)) ? d.outfit[sArg(args, 0)] : "none"), true;
     if (msg == "set_outfit") return d.outfit[sArg(args, 0)] = sArg(args, 1), true;
     // The solo performer.
@@ -934,7 +939,15 @@ public:
         }
         if (msg == "free" || msg == "free_all") return r = Value::integer(0), true;
         if (msg == "get_char" || msg == "get_tour_char") {
-            if (!creating && gMeta) creating = gMeta->newChar();
+            if (!creating && gMeta) {
+                creating = gMeta->newChar();
+                std::vector<Value> a{Value::integer(getProp(in, "char_player_num").integerValue()), Value::symbol("male")};
+                handleNative(in, "request", a, r);
+            }
+            if (creating && creating->d.outfit.empty()) {
+                std::vector<Value> a{Value::integer(getProp(in, "char_player_num").integerValue()), Value::symbol(creating->d.gender)};
+                handleNative(in, "request", a, r);
+            }
             return r = Value::obj(creating), true;
         }
         if (msg == "random_char_name") {
@@ -1133,7 +1146,7 @@ public:
                 gMeta->save();
                 if (component(cat + ".btn")) setFocus(cat + ".btn", true);
             }
-            return false;
+            return handler(msg) == nullptr;  // the script's camera runs next when it has one
         }
         if (msg == "find_outfit_config" || msg == "find_patch_renderer" || msg == "find_patch_color") return r = Value::symbol(""), true;
         if (msg == "num_bought") return r = Value::integer(bought_), true;

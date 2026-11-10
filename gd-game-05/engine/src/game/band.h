@@ -54,6 +54,14 @@ public:
         // Rock Band: the premade character per instrument (guitar, bass,
         // drum, vocals -> characters.dtb prefab name); empty: the port's pick.
         std::map<std::string, std::string> rbPrefab;
+        // A player's own character per instrument (the creator's): gender,
+        // skin colour index and the outfit (category -> piece).
+        struct RbLook {
+            std::string gender = "male";
+            int skin = 0;
+            std::map<std::string, std::string> outfit;
+        };
+        std::map<std::string, RbLook> rbLooks;
     };
     // Rock Band's premade characters whose names start with `instrument`
     // (guitar0, guitar1 ... in config/gen/characters.dtb).
@@ -163,7 +171,7 @@ private:
     void assemble(const GameData& data, const SongInfo& song);
     bool assembleRb(const GameData& data, const SongInfo& song);  // game/rb_band.cpp
     void rbPoll(Member& m);
-    void rbSkin(const GameData& data, chr::Character& c, const DataNode* prefab);
+    void rbSkin(const GameData& data, chr::Character& c, const DataNode* prefab, int skinIndex = -1);
     void makeScripts(const DataNode* objects);
     void registerDir(Member& m, const scene::Directory& d);
     void setupFace(Member& m, scene::Object* servo);

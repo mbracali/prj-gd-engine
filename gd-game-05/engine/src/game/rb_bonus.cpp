@@ -81,10 +81,8 @@ void RbBonus::update(Player& player, const std::vector<PlayerEvent>& events, flo
             notices_.push_back({"OVERDRIVE!", t});
         }
         if (codaMs_ >= 0 && !codaDone_ && e.gem == codaLastGem_) {
-            codaDone_ = codaBanked_ = true;
-            player.addBonus(codaPot_);
-            bonus_ += codaPot_;
-            notices_.push_back({"BIG ROCK ENDING! +" + std::to_string(codaPot_), t});
+            codaDone_ = codaHit_ = true;
+            if (!deferCoda_) bankCoda(player, t);
         }
     }
     // A missed final chord loses the pot.
@@ -168,4 +166,18 @@ int RbBonus::stars(const Rules& rules, int score, int baseScore, int bonusBase, 
         n = int(i) + 1;
     }
     return std::min(n, 6);
+}
+
+void RbBonus::bankCoda(Player& player, float t) {
+    if (codaBanked_) return;
+    codaBanked_ = true;
+    player.addBonus(codaPot_);
+    bonus_ += codaPot_;
+    notices_.push_back({"BIG ROCK ENDING! +" + std::to_string(codaPot_), t});
+}
+
+void RbBonus::loseCoda(float t) {
+    if (codaBanked_ || codaLost_) return;
+    codaLost_ = true;
+    notices_.push_back({"ENDING BLOWN", t});
 }

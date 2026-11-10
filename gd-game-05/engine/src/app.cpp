@@ -1995,6 +1995,14 @@ void App::updateSeats(float t, bool over, const std::vector<PlayerEvent>& events
             if (isOut(k) && fails_[size_t(k)] <= 2) {
                 setOut(k, false), ++saves_, saved = true;
                 setRating(k, rules_.rb.saveLevel);
+                // Back from the brink after time_to_return_from_brink, at the first
+                // gem from then (RB 0x82442060, 0x82452E68) [C].
+                Player* who = k == 0 ? player_.get() : seats_[size_t(k - 1)].player.get();
+                const auto& gems = who->chart().gems;
+                const float back = t0 + rules_.rb.timeToReturnFromBrink * 1000.0f;
+                int g = 0;
+                while (g < int(gems.size()) && gems[size_t(g)].ms < back) ++g;
+                who->skipUntil(g);
                 bandNotices_.push_back({"PLAYER " + std::to_string(k + 1) + " SAVED!", t0});
             }
         if (saved)
@@ -2003,6 +2011,22 @@ void App::updateSeats(float t, bool over, const std::vector<PlayerEvent>& events
                                            : (seats_[size_t(q - 1)].vocal ? seats_[size_t(q - 1)].vocal->overdriveActive() : seats_[size_t(q - 1)].player->starPowerActive());
                 if (active) spend(q, rules_.rb.saveEnergy);
             }
+    }
+    // The band's Big Rock Ending: all bank or all lose once every
+    // instrument member resolved it (RB 0x82440838) [C].
+    {
+        std::vector<std::pair<RbBonus*, Player*>> cod;
+        if (rbBonus_ && rbBonus_->hasCoda()) cod.push_back({rbBonus_.get(), player_.get()});
+        for (RbSeat& st : seats_)
+            if (st.bonus && st.bonus->hasCoda()) cod.push_back({st.bonus.get(), st.player.get()});
+        bool all = !cod.empty(), anyBlown = false;
+        for (auto& [b, p] : cod) {
+            b->setDeferCoda(true);
+            all = all && b->codaResolved();
+            anyBlown = anyBlown || (b->codaResolved() && !b->codaHit());
+        }
+        if (all)
+            for (auto& [b, p] : cod) anyBlown ? b->loseCoda(t0) : b->bankCoda(*p, t0);
     }
     float sum = 0;
     for (int k = 0; k < players; ++k)
@@ -2957,6 +2981,26 @@ void App::startBand(const SongInfo& info, const Song& song, bool backdrop) {
         cfg.character = bandOutfit_, cfg.guitar = bandGuitar_, cfg.skin = bandSkin_;
         cfg.encore = encoreCheck_, cfg.campaignFinal = campaignFinal_;
         if (const char* c = SDL_getenv("GD05_CHAR")) cfg.character[0] = c;
+        // Rock Band: the players' own characters (the creator's) on stage in
+        // their instrument's slot [I: RB's slot choice].
+        if (ui_) {
+            Interp& in = ui_->interp();
+            for (int p = 0; p < 4; ++p) {
+                const std::string part = p == 0 ? parts_[0] : (size_t(p - 1) < rbBandSetup_.size() ? rbBandSetup_[size_t(p - 1)].part : std::string());
+                if (part.empty()) continue;
+                const Value pc = in.send("game", "get_player_config", {Value::integer(p)});
+                const Value ch = pc.object ? in.send(pc.object, "get_char", {}) : Value::integer(0);
+                if (!ch.object || ch.object->className() != "TourCharLocal") continue;
+                Band::Config::RbLook look;
+                look.gender = in.send(ch.object, "get_gender", {}).str();
+                look.skin = in.send(ch.object, "skin_color", {}).integerValue();
+                const Value ol = in.send(ch.object, "outfit_list", {});
+                if (ol.array)
+                    for (const Value& e : *ol.array)
+                        if (e.array && e.array->size() >= 2) look.outfit[(*e.array)[0].str()] = (*e.array)[1].str();
+                if (!look.outfit.empty()) cfg.rbLooks[part == "drums" ? "drum" : part] = look;
+            }
+        }
         if (const char* g = SDL_getenv("GD05_GUITAR")) cfg.guitar[0] = g, cfg.skin[0].clear();
         if (const char* k = SDL_getenv("GD05_SKIN")) cfg.skin[0] = k;
     }

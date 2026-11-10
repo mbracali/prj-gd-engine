@@ -45,6 +45,15 @@ public:
     int fillsDeployed() const { return fillsDeployed_; }
     int codaPot() const { return codaPot_; }
     bool codaBanked() const { return codaBanked_; }
+    // The band's ending (RB 0x82440838) [C]: the band waits until every
+    // member hit or blew the last coda gem; then all bank (0x8245B710) or
+    // all lose (coda_blown, 0x8243FB28). setDeferCoda(true) leaves it to the band.
+    void setDeferCoda(bool on) { deferCoda_ = on; }
+    bool hasCoda() const { return codaMs_ >= 0 && codaLastGem_ >= 0; }
+    bool codaResolved() const { return codaDone_; }
+    bool codaHit() const { return codaHit_; }
+    void bankCoda(Player& player, float t);
+    void loseCoda(float t);
     bool inSolo(float t) const;
     // The current solo's share hit so far (-1 outside a solo).
     float soloShare(float t) const;
@@ -73,7 +82,7 @@ private:
     // The coda.
     float codaMs_ = -1;
     int codaPot_ = 0, codaLastGem_ = -1;
-    bool codaBanked_ = false, codaDone_ = false;
+    bool codaBanked_ = false, codaDone_ = false, codaHit_ = false, deferCoda_ = false, codaLost_ = false;
     float laneLast_[5] = {-1e9f, -1e9f, -1e9f, -1e9f, -1e9f};
     std::vector<Notice> notices_;
 };

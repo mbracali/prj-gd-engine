@@ -813,6 +813,16 @@ private:
             gfx::UiView::ListRow r;
             r.slot = float(i) - pos_;
             const auto& l = lines_[size_t(i)];
+            // Rock Band's rows (config/credits.dtb): (heading t) (heading2 t)
+            // (title_name title name) (centered t) (blank) (), drawn with
+            // ui/resource list_credits.milo's heading / heading2 / left /
+            // right / center labels [C data; I: which label each type uses].
+            const std::string type = l.empty() ? std::string() : l[0];
+            if (type == "heading") r.texts["heading.lbl"] = l.size() > 1 ? l[1] : "";
+            else if (type == "heading2") r.texts["heading2.lbl"] = l.size() > 1 ? l[1] : "";
+            else if (type == "title_name") r.texts["left.lbl"] = l.size() > 1 ? l[1] : "", r.texts["right.lbl"] = l.size() > 2 ? l[2] : "";
+            else if (type != "blank" && l.size() > 1) r.texts["center.lbl"] = l[1];
+            // GH2's (gd-game-02) positional rows.
             if (l.size() == 1) r.texts["center.txt"] = l[0];
             if (l.size() == 2) r.texts["title.txt"] = l[0], r.texts["name.txt"] = l[1];
             if (l.size() == 3) r.texts["centername.txt"] = l[1];

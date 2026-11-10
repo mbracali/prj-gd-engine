@@ -236,7 +236,7 @@ bool ComponentObj::handleNative(Interp& in, const std::string& msg, std::vector<
     // RB: milo objects the scripts poke that the port does not animate
     // (EventTrigger trigger, PostProc select, the ending bonus reset,
     // TrackDir practice_reset) [I], logged once.
-    if (msg == "trigger" || msg == "select" || msg == "practice_reset" || (msg == "reset" && object && object->cls != "BandList")) {
+    if (msg == "trigger" || msg == "select" || msg == "practice_reset" || msg == "set_colors" || (msg == "reset" && object && object->cls != "BandList")) {
         panel->ui.logOnce("STUB-quiet " + name() + " " + msg);
         return r = Value::integer(0), true;
     }
