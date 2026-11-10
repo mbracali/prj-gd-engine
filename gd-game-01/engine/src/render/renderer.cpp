@@ -1275,6 +1275,12 @@ void Renderer::updateHdr() {
     hdrOn_ = SDL_GetBooleanProperty(props, SDL_PROP_WINDOW_HDR_ENABLED_BOOLEAN, false);
     hdrWhite_ = std::max(1.0f, SDL_GetFloatProperty(props, SDL_PROP_WINDOW_SDR_WHITE_LEVEL_FLOAT, 1.0f));
     hdrHeadroom_ = std::max(1.0f, SDL_GetFloatProperty(props, SDL_PROP_WINDOW_HDR_HEADROOM_FLOAT, 1.0f));
+    if (deviceHdr_ && hdrSurface_ && !hdrOn_ && SDL_getenv("GAMESCOPE_WAYLAND_DISPLAY")) {
+        // Steam Deck Gaming Mode (#80): the game is an X11 window, so SDL never sees HDR, but
+        // gamescope offers its HDR colour spaces only while its HDR output is on. Its SDR content
+        // sits at BT.2408's 203 nits; the Deck OLED peaks at 1000 (the metadata we send).
+        hdrOn_ = true, hdrWhite_ = 203.0f / 80.0f, hdrHeadroom_ = 1000.0f / 203.0f;
+    }
     if (!hdrOn_ || hdrHeadroom_ <= 1.0f) {
         hdrOn_ = false, hdrHeadroom_ = 1;
         // A PQ surface is absolute: SDR white at BT.2408's 203 nits.
@@ -1282,6 +1288,14 @@ void Renderer::updateHdr() {
     }
     const std::string st = hdrStatus();
     if (st != hdrLogged_) SDL_Log("hdr: %s", (hdrLogged_ = st).c_str());
+}
+
+int Renderer::deviceHdrSurface(std::string& reason) const {
+    if (!core_) {
+        reason = "the Vulkan graphics backend did not start";
+        return 0;
+    }
+    return core_->deviceHdrSurface(reason);
 }
 
 std::string Renderer::hdrStatus() const {

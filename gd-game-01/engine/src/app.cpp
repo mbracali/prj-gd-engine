@@ -2622,10 +2622,21 @@ int App::run(int* restartSlot) {
     const SDL_WindowFlags winFlags = gpuWindow ? (winFlagsGl & ~SDL_WINDOW_OPENGL) | SDL_WindowFlags(gr::windowFlags(coreBackend)) : winFlagsGl;
     // Enhanced > HDR > True HDR: the window's surface is chosen now (render/hdr_output.h).
     // A window or surface that cannot be made with it is made again without (Emulated).
-    // The surface probe is OpenGL's: on the SDL3 GPU / Vulkan backends True HDR runs as Emulated.
+    // The surface probe is OpenGL's; the Vulkan backend asks its swapchain instead (#80: the
+    // only True HDR path in Steam Deck Gaming Mode, through gamescope's WSI layer). On SDL3 GPU
+    // True HDR runs as Emulated.
+    const bool trueHdr = enhanced("hdr").str() == "true";
+#if defined(__linux__) && !defined(__ANDROID__)
+    const bool vulkanHdr = gpuWindow && coreBackend == gr::Backend::Vulkan;  // Linux only: elsewhere unchanged
+#else
+    const bool vulkanHdr = false;
+#endif
     hdrSurface_ = hdr::Surface::Sdr;
-    hdrReason_ = gpuWindow ? std::string("True HDR is not on the ") + backendId + " graphics backend yet" : hdr::unsupportedReason();
-    const bool wantHdr = !gpuWindow && enhanced("hdr").str() == "true" && hdr::request();
+    hdrReason_ = vulkanHdr ? "" : gpuWindow ? std::string("True HDR is not on the ") + backendId + " graphics backend yet" : hdr::unsupportedReason();
+    if (!gpuWindow && !hdrReason_.empty() && SDL_getenv("GAMESCOPE_WAYLAND_DISPLAY"))
+        hdrReason_ = "in Steam Deck Gaming Mode (gamescope) OpenGL has no HDR; set Graphics Backend to Vulkan";
+    renderer_.requestDeviceHdr(vulkanHdr && trueHdr);
+    const bool wantHdr = !gpuWindow && trueHdr && hdr::request();
     window_ = SDL_CreateWindow(kAppTitle, winW, winH, winFlags);
     if (wantHdr) {
         if (window_) {
@@ -2644,12 +2655,17 @@ int App::run(int* restartSlot) {
             window_ = SDL_CreateWindow(kAppTitle, winW, winH, winFlags);
         }
     }
-    if (enhanced("hdr").str() == "true")
-        SDL_Log("hdr: %s", hdrSurface_ == hdr::Surface::ScRgb ? "scRGB surface (linear, RGBA16F)"
-                           : hdrSurface_ == hdr::Surface::Pq  ? "BT.2020 PQ surface"
-                                                              : ("unavailable (" + hdrReason_ + "), using Emulated").c_str());
     setAppWindowIcon(window_);
     installDesktopEntry();
+    if (vulkanHdr && trueHdr && window_ && !SDL_getenv("GAMESCOPE_WAYLAND_DISPLAY") &&
+        !SDL_GetBooleanProperty(SDL_GetDisplayProperties(SDL_GetDisplayForWindow(window_)), SDL_PROP_DISPLAY_HDR_ENABLED_BOOLEAN, false)) {
+        // A desktop whose display shows SDR: an SDR swapchain, as before (some drivers offer HDR10
+        // anyway). Under gamescope SDL cannot tell; its WSI layer offers HDR only while HDR is on.
+        hdrReason_ = SDL_strcmp(SDL_GetCurrentVideoDriver(), "wayland") == 0
+                         ? "HDR is off for this display (turn it on in the system's display settings)"
+                         : "needs a Wayland desktop session with HDR on, or Steam Deck Gaming Mode";
+        renderer_.requestDeviceHdr(false);
+    }
     std::string glError;
     renderer_.setBackend(backendId);
     bool glOk = window_ && renderer_.init(window_, glError);
@@ -2665,6 +2681,17 @@ int App::run(int* restartSlot) {
         renderer_.setBackend("local");
         glOk = window_ && renderer_.init(window_, glError);
     }
+    if (vulkanHdr && trueHdr && glOk) {
+        int s = 0;
+        if (!hdrReason_.empty()) s = 0;  // not asked (the display shows SDR)
+        else if (renderer_.backend() == "vulkan") s = renderer_.deviceHdrSurface(hdrReason_);
+        else hdrReason_ = "the Vulkan graphics backend did not start";
+        hdrSurface_ = s == 2 ? hdr::Surface::Pq : s == 1 ? hdr::Surface::ScRgb : hdr::Surface::Sdr;
+    }
+    if (trueHdr)
+        SDL_Log("hdr: %s", hdrSurface_ == hdr::Surface::ScRgb ? "scRGB surface (linear, RGBA16F)"
+                           : hdrSurface_ == hdr::Surface::Pq  ? (vulkanHdr ? "HDR10 (BT.2020 PQ) Vulkan swapchain" : "BT.2020 PQ surface")
+                                                              : ("unavailable (" + hdrReason_ + "), using Emulated").c_str());
     if (glOk) renderer_.setHdrSurface(int(hdrSurface_));
     gpu::started(glOk, renderer_.gpuName());
     if (!glOk) {

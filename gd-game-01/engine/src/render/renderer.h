@@ -172,8 +172,16 @@ public:
     // (hdr::Surface: 0 SDR, 1 scRGB, 2 PQ). With one, the frame draws into an
     // RGBA16F target and endFrame converts it (paper white from the window's
     // HDR properties, re-read on SDL_EVENT_WINDOW_HDR_STATE_CHANGED).
-    void setHdrSurface(int surface) { hdrSurface_ = surface, hdrDirty_ = true; }
+    void setHdrSurface(int surface) {
+        hdrSurface_ = surface, hdrDirty_ = true;
+        if (surface) updateHdr();  // the window's HDR state now, for the start-up log
+    }
     void hdrStateChanged() { hdrDirty_ = true; }
+    // True HDR on the Vulkan backend (#80): before init, asks its swapchain for an
+    // HDR colour space (gamescope / Wayland); after init, what it got (hdr::Surface
+    // values) or why not.
+    void requestDeviceHdr(bool on) { deviceHdr_ = on; }
+    int deviceHdrSurface(std::string& reason) const;
     // What True HDR outputs now, or "off: <why>" when the display shows SDR.
     std::string hdrStatus() const;
 
@@ -233,6 +241,7 @@ private:
     bool mainBound_ = false;
     // True HDR output (setHdrSurface): the window's state and the conversion pass.
     int hdrSurface_ = 0;
+    bool deviceHdr_ = false;  // requestDeviceHdr
     bool hdrDirty_ = true, hdrOn_ = false;
     float hdrWhite_ = 1, hdrHeadroom_ = 1;  // scRGB units (1 = 80 nits); headroom in paper whites
     std::string hdrLogged_;

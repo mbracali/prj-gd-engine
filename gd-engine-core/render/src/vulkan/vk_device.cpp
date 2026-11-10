@@ -319,6 +319,8 @@ public:
     void drawableSize(int& w, int& h) const override { SDL_GetWindowSizeInPixels(info_.window, &w, &h); }
     void present(Texture src, const Rect& srcRect, Filter filter, bool flipVertical) override;
     void setPresentMode(PresentMode mode) override;
+    int hdrSurface() const override { return hdrSurface_; }
+    std::string hdrReason() const override { return hdrReason_; }
     void endFrame() override;
 
     void pushDebugGroup(const char* name) override;
@@ -429,6 +431,11 @@ private:
     std::vector<VkSemaphore> renderDone_;  // one per swapchain image
     bool swapDirty_ = false;
     bool presentLogged_ = false;
+    // True HDR (info_.hdrOutput): the swapchain's colour space (0 SDR, 1 scRGB, 2 PQ) and why SDR.
+    bool colorSpaceExt_ = false, hdrMetadataExt_ = false;
+    bool hdrLogged_ = false;
+    int hdrSurface_ = 0;
+    std::string hdrReason_;
 
     VkPipelineCache pipelineCache_ = VK_NULL_HANDLE;
     VkDescriptorSetLayout texLayout_ = VK_NULL_HANDLE, uboLayout_ = VK_NULL_HANDLE;
@@ -594,6 +601,9 @@ bool VulkanDevice::createInstance(std::string& error) {
     }
     debugUtils_ = hasExt(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
     if (debugUtils_) enable.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+    // True HDR: the HDR colour spaces need VK_EXT_swapchain_colorspace.
+    colorSpaceExt_ = info_.hdrOutput && hasExt(VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME);
+    if (colorSpaceExt_) enable.push_back(VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME);
 
     VkApplicationInfo app{VK_STRUCTURE_TYPE_APPLICATION_INFO};
     app.pApplicationName = "Guitar Dream Engine";
@@ -684,6 +694,9 @@ bool VulkanDevice::createLogicalDevice(std::string& error) {
     if (surface_) {
         if (!hasExt(VK_KHR_SWAPCHAIN_EXTENSION_NAME)) return error = "the Vulkan device has no VK_KHR_swapchain", false;
         enable.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
+        // True HDR: the mastering metadata (gamescope tone maps with it); optional.
+        hdrMetadataExt_ = info_.hdrOutput && colorSpaceExt_ && hasExt(VK_EXT_HDR_METADATA_EXTENSION_NAME);
+        if (hdrMetadataExt_) enable.push_back(VK_EXT_HDR_METADATA_EXTENSION_NAME);
     }
     if (hasExt("VK_KHR_portability_subset")) enable.push_back("VK_KHR_portability_subset");
     // Dynamic rendering: core in 1.3; the extension (with what it needs) on 1.1 / 1.2.
@@ -1023,6 +1036,33 @@ bool VulkanDevice::createSwapchain() {
     for (VkFormat want : {VK_FORMAT_B8G8R8A8_UNORM, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_A2B10G10R10_UNORM_PACK32})
         for (auto& f : formats)
             if (!found && f.format == want && f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) chosen = f, found = true;
+    // True HDR: an HDR10 (PQ, BT.2020) or scRGB surface instead, when offered.
+    int hdr = 0;
+    if (info_.hdrOutput) {
+        if (!colorSpaceExt_) hdrReason_ = "the Vulkan driver has no VK_EXT_swapchain_colorspace";
+        else {
+            const struct {
+                VkFormat format;
+                VkColorSpaceKHR space;
+                int kind;
+            } want[] = {{VK_FORMAT_A2B10G10R10_UNORM_PACK32, VK_COLOR_SPACE_HDR10_ST2084_EXT, 2},
+                        {VK_FORMAT_A2R10G10B10_UNORM_PACK32, VK_COLOR_SPACE_HDR10_ST2084_EXT, 2},
+                        {VK_FORMAT_R16G16B16A16_SFLOAT, VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT, 1}};
+            for (auto& w : want)
+                for (auto& f : formats)
+                    if (!hdr && f.format == w.format && f.colorSpace == w.space && (features(f.format) & VK_FORMAT_FEATURE_BLIT_DST_BIT))
+                        chosen = f, hdr = w.kind;
+            if (!hdr)
+                hdrReason_ = SDL_getenv("GAMESCOPE_WAYLAND_DISPLAY")
+                                 ? "gamescope offers no HDR colour space (turn HDR on in the Steam Deck's display settings)"
+                                 : "the window's Vulkan surface offers no HDR colour space (is the display's HDR on?)";
+        }
+        if (hdr != hdrSurface_ || !hdrLogged_)
+            hdrLogged_ = true, SDL_Log("gdcore render (vulkan): %s", hdr == 2 ? "HDR10 swapchain (BT.2020 PQ)"
+                                                  : hdr == 1 ? "scRGB swapchain (extended sRGB, linear)"
+                                                             : ("no HDR swapchain: " + hdrReason_).c_str());
+        if (hdr) hdrReason_.clear();
+    }
     if (!(features(chosen.format) & VK_FORMAT_FEATURE_BLIT_DST_BIT)) return fail("the swapchain format cannot be blitted into");
 
     vkGetPhysicalDeviceSurfacePresentModesKHR(gpu_, surface_, &n, nullptr);
@@ -1065,6 +1105,17 @@ bool VulkanDevice::createSwapchain() {
     if (r != VK_SUCCESS) return fail(vkError("vkCreateSwapchainKHR", r));
     swapchain_ = sw;
     swapFormat_ = chosen.format;
+    hdrSurface_ = hdr;
+    if (hdr == 2 && hdrMetadataExt_ && vkSetHdrMetadataEXT) {
+        // The image's mastering display, as the OpenGL path's EGL metadata: BT.709 primaries (what the
+        // game draws), D65, 1000 nits.
+        VkHdrMetadataEXT md{VK_STRUCTURE_TYPE_HDR_METADATA_EXT};
+        md.displayPrimaryRed = {0.640f, 0.330f}, md.displayPrimaryGreen = {0.300f, 0.600f}, md.displayPrimaryBlue = {0.150f, 0.060f};
+        md.whitePoint = {0.3127f, 0.3290f};
+        md.maxLuminance = 1000, md.minLuminance = 0.0001f;
+        md.maxContentLightLevel = 1000, md.maxFrameAverageLightLevel = 400;
+        vkSetHdrMetadataEXT(device_, 1, &swapchain_, &md);
+    }
     swapExtent_ = extent;
     vkGetSwapchainImagesKHR(device_, swapchain_, &n, nullptr);
     swapImages_.resize(n);

@@ -273,6 +273,11 @@ walk_enhanced_hdr() {
     run enhanced_frame 5000 "" GD01_SKIP_BOOT=1 GD01_SCREEN=enhanced_settings GD01_FIXED_CLOCK=16.6667
     hashes+=("$(md5sum < "$work/enhanced_frame/shot.bmp" | cut -c1-32)")
   done
+  # #80: True HDR in Steam Deck Gaming Mode (gamescope) on OpenGL says why and what to change.
+  printf '%s\n' '{"bloom":"original","hdr":"true"}' > "$s/gd-engine/gd01/enhanced.json"
+  run enhanced_hdr_gamescope 3000 "" GD01_SKIP_BOOT=1 GD01_SCREEN=enhanced_settings GAMESCOPE_WAYLAND_DISPLAY=gamescope-0
+  result enhanced_hdr_gamescope "$(has enhanced_hdr_gamescope "hdr: mode true - True HDR unavailable: in Steam Deck Gaming Mode (gamescope) OpenGL has no HDR; set Graphics Backend to Vulkan")" \
+    "True HDR under gamescope on OpenGL: fallback reason names the Vulkan backend"
   seed="$keep"
   result enhanced_hdr_frame "$([ "${hashes[0]}" = "${hashes[1]}" ] && [ "${hashes[0]}" != "${hashes[2]}" ] && echo 1 || echo 0)" \
     "fixed frame: HDR None identical to no HDR key, Emulated differs"
