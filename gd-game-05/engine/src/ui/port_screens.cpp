@@ -31,6 +31,8 @@ const char* const kPortScreens = R"DTA(
    (helpbar (default ((fret1 help_select) (fret2 help_back) (strum help_updown))))
 }
 (port_patches
+   (gamepads_screen (helpbar (helpbar_back helpbar_select)))
+   (enhanced_options_screen (helpbar (helpbar_back helpbar_select)))
    (main_not_logged_in_screen
       (enter
          {signin_changed_title.lbl set_localized_text "NO XBOX LIVE"}

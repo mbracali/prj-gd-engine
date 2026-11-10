@@ -368,11 +368,25 @@ void TextDrawer::draw(MaterialRenderer& r, const void* key, const scene::Font& f
         e->key = key;
     }
     e->used = true;
-    if (!e->gpu.vertices || !sameVerts(e->verts, layout.verts)) {
+    const scene::Mat* mat = font.dir ? font.dir->resolve<scene::Mat>(font.mat) : nullptr;
+    // A prelit font material (RB's Chalet in track_shared.milo) takes its
+    // colour from the vertices, not the material: the text's colour goes
+    // into them (GD05-030: the port's orange titles and gold names were
+    // drawn white) [I: RndText colours its vertices].
+    const bool vertexColor = matColor && mat && cache_.material(*mat).prelit &&
+                             (matColor[0] != 1.0f || matColor[1] != 1.0f || matColor[2] != 1.0f);
+    std::vector<scene::MeshVertex> tinted;
+    if (vertexColor) {
+        tinted = layout.verts;
+        for (scene::MeshVertex& v : tinted)
+            for (int k = 0; k < 3; ++k) v.color[k] *= matColor[k];
+    }
+    const std::vector<scene::MeshVertex>& verts = vertexColor ? tinted : layout.verts;
+    if (!e->gpu.vertices || !sameVerts(e->verts, verts)) {
         if (e->gpu.vertices) cache_.device().destroyBuffer(e->gpu.vertices);
         if (e->gpu.indices) cache_.device().destroyBuffer(e->gpu.indices);
         scene::Mesh m;
-        m.verts = layout.verts;
+        m.verts = verts;
         m.faces = layout.faces;
         const std::vector<float> v = packVertices(m);
         e->gpu = GpuMesh{};
@@ -380,9 +394,8 @@ void TextDrawer::draw(MaterialRenderer& r, const void* key, const scene::Font& f
         e->gpu.indices = cache_.device().createBuffer(BufferKind::Index, layout.faces.size() * 6, layout.faces.data(), false);
         e->gpu.indexCount = int(layout.faces.size() * 3);
         e->gpu.tangents = true;
-        e->verts = layout.verts;
+        e->verts = verts;
     }
-    const scene::Mat* mat = font.dir ? font.dir->resolve<scene::Mat>(font.mat) : nullptr;
     const Mat4 bones[1] = {world};
     if (!mat) {
         Material plain;

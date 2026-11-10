@@ -48,7 +48,18 @@ const scene::Font* ScreenText::font(const std::string& name) {
     } catch (const std::exception&) {
         f = nullptr;
     }
-    // Rock Band: its fonts are in track/track_shared.milo [C data]; GH2's
+    // Rock Band: its UI fonts are in ui/resource/gen; GH2's bold menu font
+    // (the port's screens' helveticablack) is RB's Kabel Bold there, the
+    // closest heavy face (Owner wave 05: the Enhanced menu as the other
+    // games') [I].
+    if (!f) try {
+            const std::string rbName = base == "helveticablack" ? "kabel_bold" : base;
+            const std::string rbPath = "ui/resource/gen/" + rbName + ".milo_xbox";
+            if (data_.exists(rbPath)) f = lib_.load(rbPath).find<scene::Font>(rbName + ".font");
+        } catch (const std::exception&) {
+            f = nullptr;
+        }
+    // Rock Band: other fonts are in track/track_shared.milo [C data]; GH2's
     // menu font (the port's screens' helveticablack) is RB's Chalet there [I].
     if (!f) try {
             const std::string rbName = base == "helveticablack" ? "Chalet-NewYorkNineteenEighty" : base;

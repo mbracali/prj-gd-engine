@@ -202,13 +202,19 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         mouseOn("options.btn", 1);
         at("options_screen");
         wait(800);
+        mouseOn("port_enhanced.btn", 1);
+        at("enhanced_options_screen");
+        wait(800);
+        press(kTri);
+        at("options_screen");
+        wait(800);
         press(kTri);
         at("main_screen");
         wait(1500);
         check("gamepads_button");
         check("click_gamepads_button");
         at("gamepads_screen", 3000);
-        expect_ = {"main_screen", "main_solomode_screen", "main_screen", "main_multimode_screen", "training_menu_screen", "main_screen", "options_screen", "main_screen", "gamepads_screen"};
+        expect_ = {"main_screen", "main_solomode_screen", "main_screen", "main_multimode_screen", "training_menu_screen", "main_screen", "options_screen", "enhanced_options_screen", "options_screen", "main_screen", "gamepads_screen"};
     } else if (scenario == "rb_owner_bugs") {
         // Wave 03's owner bugs. GD05-023: nothing of a venue plays before a
         // song (the Enhanced Options backdrop is silent). GD05-024: the red
