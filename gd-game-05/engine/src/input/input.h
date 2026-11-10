@@ -152,7 +152,8 @@ public:
     // Player slots like console pad ports: the first pad takes slot 0, the
     // second slot 1 (a removed pad frees its slot) unless the Gamepads screen
     // gave the device a player. The keyboard plays for slot 0 when no pad
-    // holds it, else for the lowest empty slot (or its chosen player). With
+    // holds it, else for the lowest empty slot (or its chosen player), else
+    // for player 1 beside the pad (GD05-050). With
     // the split keyboard it plays both: P2 on H J K L ; (frets), N / M
     // (strum), B (Star Power), O (Start).
     bool padConnected(int slot) const;

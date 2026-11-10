@@ -376,7 +376,11 @@ int Input::keyboardSlot() const {
         for (const auto& [id, m] : midiDevs_) taken = taken || m.slot == s;
         if (!taken) return s;
     }
-    return -1;
+    // Every slot held by a pad (a Rock Band guitar left plugged in): the
+    // keyboard still plays, for player 1, as gd02's one-player songs take
+    // every device (GD05-050; the owner could not play with the keyboard).
+    // GAMEPADS' None (-1) still turns it off.
+    return 0;
 }
 
 // Held by another connected pad or MIDI port, or chosen for the keyboard.

@@ -1728,15 +1728,19 @@ void App::handleAction(const InputEvent& a) {
             if (isFret(a.action)) f = a.down ? f | (1u << fretOf(a.action)) : f & ~(1u << fretOf(a.action));
             if (a.action == Action::Strum && a.down) ++padStrums_[size_t(a.player)];
         }
+        // One player in a song: every device plays it (playerFor) and every
+        // device's Start pauses it, as gd02's (GD05-050: the keyboard, player
+        // 2 beside a guitar left plugged in, could not pause).
+        InputEvent ev = a;
+        if (player_ && !player2_ && seats_.size() <= 1) ev.player = 0;  // a song (also paused)
         // In a song Back (Esc, a joypad's B) pauses like Start, as in gd01:
         // game_screen pauses on kPad_Start only.
-        if (a.action == Action::Back && input_.inGame()) {
-            InputEvent start = a;
-            start.action = Action::Start;
-            ui_->action(start);
+        if (ev.action == Action::Back && input_.inGame()) {
+            ev.action = Action::Start;
+            ui_->action(ev);
             return;
         }
-        ui_->action(a);
+        ui_->action(ev);
         return;
     }
     if (player_) {

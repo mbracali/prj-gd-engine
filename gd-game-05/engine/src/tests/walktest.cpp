@@ -712,6 +712,49 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         key(SDLK_RETURN);  // RESUME (the focus)
         at("game_screen", 10000);
         wait(1000);
+    } else if (scenario == "rb_keys_play" || scenario == "rb_keys_rebind") {
+        // GD05-050: a song played with the keyboard alone, through SDL's
+        // key events and the input layer (docs/guidelines/
+        // universal_mechanisms.md, the keyboard table): frets 1..5, strum on
+        // Down, Overdrive on Tab, pause on Enter. rb_keys_rebind first binds
+        // the green fret to Q as GAMEPADS' Customize inputs saves it, and
+        // plays green with Q (1 no longer plays it).
+        autoplay_ = false;
+        // rb_keys_play: a guitar left plugged in holds player 1 (the owner's
+        // setup): the keyboard still plays the one-player song and pauses it.
+        if (scenario == "rb_keys_play") check("kb_guitar_attach");
+        at("splash_screen", 30000);
+        key(SDLK_RETURN);
+        at("main_screen");
+        wait(1500);
+        if (scenario == "rb_keys_rebind") check("kb_bind_q"), wait(300), check("kb_save_q");
+        key(SDLK_RETURN);  // SOLO
+        at("main_solomode_screen");
+        key(SDLK_RETURN);  // QUICKPLAY
+        at("qp_selsong_screen");
+        wait(500);
+        key(SDLK_DOWN);
+        wait(300);
+        key(SDLK_RETURN);
+        at("qp_seldiff_solo_screen");
+        key(SDLK_RETURN);  // guitar
+        wait(1500);
+        key(SDLK_RETURN);  // the difficulty
+        at("game_screen", 60000);
+        check("kb_play 30", 90000);
+        check("kb_hits");
+        key(SDLK_RETURN);  // pause (Start)
+        at("pause_screen", 10000);
+        wait(500);
+        key(SDLK_RETURN);  // RESUME
+        at("game_screen", 10000);
+        check("kb_play 20", 90000);
+        check("kb_hits");
+        if (scenario == "rb_keys_play") {
+            check("kb_play od", 150000);  // on to the first Overdrive deployed with Tab
+            check("kb_hits");
+        }
+        expect_ = {"main_screen", "main_solomode_screen", "qp_selsong_screen", "qp_seldiff_solo_screen", "game_screen", "pause_screen", "game_screen"};
     } else if (scenario == "dev_cheats") {
         // GD02-045: Enhanced > Developer Keyboard Cheats on, then a real 'l'
         // key (SDL event, through the app's bound-key filter) runs cheats.dta's
@@ -2602,6 +2645,101 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
                     return pass();
                 }
         return fail("the help bar's second item was not drawn");
+    }
+    if (s.screen == "kb_guitar_attach") {
+        adapter_ = Input::attachVirtualPad("1430:4748:guitar");
+        return adapter_ ? pass() : fail("no virtual guitar");
+    }
+    if (s.screen == "kb_bind_q") {
+        // GAMEPADS > Customize inputs > Green fret > Key 1, then Q pressed
+        // (the capture takes the next key event).
+        ui.input().beginEdit("keyboard");
+        ui.input().beginCapture("keyboard", Input::Control::Green, 0);
+        for (const bool down : {true, false}) {
+            SDL_Event e{};
+            e.type = down ? SDL_EVENT_KEY_DOWN : SDL_EVENT_KEY_UP;
+            e.key.timestamp = SDL_GetTicksNS();
+            e.key.key = SDLK_Q;
+            e.key.scancode = SDL_SCANCODE_Q;
+            e.key.down = down;
+            SDL_PushEvent(&e);
+        }
+        return pass();
+    }
+    if (s.screen == "kb_save_q") {
+        // ... and Save: controllers.json has it, the game plays green on Q.
+        ui.input().commitEdit();
+        kbGreen_ = SDLK_Q;
+        const auto& g = ui.input().bindings("keyboard")[size_t(Input::Control::Green)];
+        const bool bound = !g.empty() && g[0].kind == Input::Source::Kind::Key && g[0].index == int(SDLK_Q);
+        const char* dir = SDL_getenv("GD05_SAVE_DIR");
+        std::ifstream f(std::filesystem::path(dir ? dir : "") / "controllers.json");
+        std::stringstream ss;
+        ss << f.rdbuf();
+        bool saved = false;
+        try {
+            const Json root = Json::parse(ss.str());
+            for (const Json& j : root["devices"]["keyboard"]["bindings"]["green"].a)
+                saved = saved || (j["kind"].str() == "key" && int(j["index"].num()) == int(SDLK_Q));
+        } catch (const std::exception&) {
+        }
+        std::printf("  gamepads: green %s, controllers.json %s\n", bound ? "on Q" : "not on Q", saved ? "has it" : "does not");
+        return bound && saved ? pass() : fail("the keyboard's green fret was not rebound to Q and saved");
+    }
+    if (s.screen.rfind("kb_play ", 0) == 0) {
+        // Plays player 1's gems with key events: the gem's frets held from
+        // 70 ms before it, a strum (Down) at it; with "od", until Overdrive
+        // was deployed with Tab once it was ready.
+        const Player* pl = ui.host().gamePlayer(0);
+        if (!pl || !ui.host().gameLoaded() || ui.currentScreen() != "game_screen") return nowMs - stepStart_ > s.ms ? fail("no song to play") : void();
+        const bool od = s.screen == "kb_play od";
+        const int want = od ? 0 : std::atoi(s.screen.c_str() + 8);
+        if (kbTarget_ < 0) kbTarget_ = kbPlayed_ + want, kbOdAsked_ = false;
+        const double t = ui.host().gameTimeMs();
+        auto send = [&](SDL_Keycode k, bool down) {
+            SDL_Event e{};
+            e.type = down ? SDL_EVENT_KEY_DOWN : SDL_EVENT_KEY_UP;
+            e.key.timestamp = SDL_GetTicksNS();
+            e.key.key = k;
+            e.key.scancode = SDL_GetScancodeFromKey(k, nullptr);
+            e.key.down = down;
+            SDL_PushEvent(&e);
+        };
+        const SDL_Keycode frets[5] = {SDL_Keycode(kbGreen_), SDLK_2, SDLK_3, SDLK_4, SDLK_5};
+        auto hold = [&](unsigned mask) {
+            for (int f = 0; f < 5; ++f)
+                if (((mask >> f) & 1) != ((kbHeld_ >> f) & 1)) send(frets[f], (mask >> f) & 1);
+            kbHeld_ = mask;
+        };
+        const auto& gems = pl->chart().gems;
+        while (kbGem_ < gems.size() && (gems[kbGem_].ms < t - 60 || !gems[kbGem_].ownedBy(0))) ++kbGem_;
+        if (kbGem_ < gems.size()) {
+            const Gem& g = gems[kbGem_];
+            if (t >= g.ms - 70 && kbHeld_ != g.frets) hold(g.frets);
+            if (t >= g.ms - 8) {
+                send(SDLK_DOWN, true), send(SDLK_DOWN, false);
+                ++kbGem_, ++kbPlayed_;
+            }
+        }
+        if (od && pl->starPowerReady() && !kbOdAsked_) send(SDLK_TAB, true), send(SDLK_TAB, false), kbOdAsked_ = true;
+        if (od && pl->starPowerActive()) {
+            std::printf("  keyboard: Overdrive deployed with Tab at %.0f ms\n", t);
+            hold(0), kbTarget_ = -1;
+            return pass();
+        }
+        if (!od && kbPlayed_ >= kbTarget_) {
+            hold(0), kbTarget_ = -1;
+            return pass();
+        }
+        if (nowMs - stepStart_ > s.ms) return fail(od ? "Overdrive was never deployed with the keyboard" : "the song ended before the keyboard played its gems");
+        return;
+    }
+    if (s.screen == "kb_hits") {
+        const Player* pl = ui.host().gamePlayer(0);
+        const int hit = pl ? pl->notesHit() : 0;
+        std::printf("  keyboard: %d gems strummed, %d notes hit (player 1: %s)\n", kbPlayed_, hit, ui.input().playerDevice(0).c_str());
+        if (kbPlayed_ < 10) return fail("the keyboard played too few gems");
+        return hit * 10 >= kbPlayed_ * 9 ? pass() : fail("the keyboard's frets and strums did not hit the notes");
     }
     if (s.screen == "gp_p1_keyboard") {
         ui.input().setPlayer("keyboard", 0);

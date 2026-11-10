@@ -204,6 +204,12 @@ private:
     std::string winTarget_;                        // career_win: the tour's last song
     int shotN_ = 0;                                // venue_follow: screenshot number
     float nameX0_ = 0;               // the career walk's band name: where it starts
+    // rb_keys_play: the next gem, the gems strummed, the frets held, the green key.
+    size_t kbGem_ = 0;
+    int kbPlayed_ = 0, kbTarget_ = -1;
+    unsigned kbHeld_ = 0;
+    bool kbOdAsked_ = false;
+    unsigned kbGreen_ = '1';  // an SDL_Keycode (SDLK_1)
 
     void runCheck(ui::UiManager& ui, const Step& s, double nowMs);
 };
