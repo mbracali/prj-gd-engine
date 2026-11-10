@@ -156,3 +156,55 @@ pattern). Each says what, why and how to undo it.
   (ambience, controller locks, fades, metronome) are quiet for now.
 - **Why:** it keeps the lessons' timing and words exactly the original's.
 - **Undo:** `RbTutorialPanelObj` (ui/rb_meta.cpp).
+
+## D15. Back goes only to a screen's own (back ...) (2026-11-10, wave 03)
+- **What:** RB's UIScreen button_down (RB 0x8225AEE8) [C]: kPad_Tri goes to
+  the screen's (back <screen>) (evaluated: `{gamemode get ...}`,
+  `$lose_confirm_screen_return_to`) with the backward transition; a screen
+  without one ignores kPad_Tri. GH2's "back to the screen we came from"
+  (GHScreen) is gone. `{ui goto_screen x <force> <back>}` plays the
+  backward transition when its third argument is true.
+- **Why:** the owner's key 2 bug (GD05-024): the red fret before a song's
+  first note sent game_screen back to the loading screens, which loaded the
+  song again.
+- **Undo:** `ScreenObj::nativeButtonDown` / `backTarget` (ui/script_classes.cpp).
+
+## D16. The Enhanced Options backdrop is silent (2026-11-10, wave 03)
+- **What:** the port's backdrop venue (posed at boot for Enhanced Options)
+  plays no sound: its world is `silent` (sounds counted, not played; no
+  crowd stream).
+- **Why:** the owner's "people screaming at the start" (GD05-023): the
+  backdrop's excitement change played the venue's crowd_upto_good cheer at
+  boot. RB's own menu ambience (meta.dta music_start: shell_crowd.cue with
+  the shell music) stays, as the scripts play it.
+- **Undo:** `world_->silent` in `App::loadBackdrop`.
+
+## D17. RB's menus: background video, RenderDirs, proxies (2026-11-10, wave 03)
+- **What:**
+  - movie_panel ((videos background) (loop TRUE)) plays rb_video*.bik behind
+    the menu panels, chosen by MoviePanel's rule (0x828557E8) [C], no sound.
+  - A RenderDir panel draws each TexRenderer's panel into its texture and
+    its own scene through its own camera (seldiff_solo's koi banner and
+    cards, the shop and tour rooms) [C data]. The song list (a RenderDir
+    whose record names its inline panel as the input panel) is drawn flat:
+    its texture under the title bar, centred [I] (its banner camera framed
+    the cloth off the screen; GD05-022 keeps the cloth mesh and sway open).
+  - A UI milo's inline proxied directory takes its proxy file's objects
+    when the disc has the file [I]: the inline copies were stale
+    (seldiff_solo's slots lacked seldiff.grp / selpart.grp that the scripts
+    show and hide).
+  - Text colours from ui/color_presets.dta by the label's text style
+    (BandTextComp 0x822FFDF0) [C].
+  - `{rnd aspect}` answers kWidescreenAspect (the port is 16:9).
+- **Undo:** ui/panels.cpp MoviePanelObj, render/ui_view.cpp drawRenderDir3d
+  and the flat path, scene/milo.cpp useProxyFiles, scene/ui_styles.cpp
+  textStyleColor, ui/natives_meta.cpp (rnd).
+
+## D18. Macro arrays are shared, RandomContext is RB's (2026-11-10, wave 03)
+- **What:** an empty array a #define holds is one array for every use
+  (meta.dta's connected_controller_types, endgame's SELECTED_AWARDS) [I:
+  how Milo's macro DataArrays are referenced]; `{random_context ...}`
+  weighs and filters as RB's (0x823CD810 / 0x823CCF30) [C]; `venue` is
+  false and `unlocked` true [I].
+- **Why:** the help bar's icons and the loading tips.
+- **Undo:** script/script.cpp (macro splice, toValue), script_builtins.cpp.
