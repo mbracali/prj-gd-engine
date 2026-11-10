@@ -20,6 +20,7 @@
 #include "render/highway2d.h"
 #include "script/globals.h"
 #include "tests/selftest_play.h"
+#include "ui/song_screen.h"
 
 // The whammy's pitch shifter on a 440 Hz sine: untouched at rest, down by the
 // script's most (pitch 0.943, 415 Hz) under the bar, the lag jumping back
@@ -41,6 +42,24 @@ static void checkWibble(const std::function<void(const std::string&)>& fail) {
     h.setAllWhammyValues(1.0f);
     for (float v : w)
         if (v != 1.0f) return fail("SetAllWhammyValues left an entry");
+}
+
+// #70 (GD04-115): the song's input from the keyboard. With Require Strum
+// off a key's fret press strums on its own; the Whammy key holds the bar
+// at 1 while a pad's resting bar (its value set every frame) reads 0.
+static void checkSongKeys(const std::function<void(const std::string&)>& fail) {
+    SongScreen s;
+    InputEvent fret{Action::Fret0, true, 0, ControllerMode::Joypad, 0};
+    fret.fretsStrum = true;
+    s.handle(fret);
+    if (!s.strumPending(0)) fail("song keys: a fret with Require Strum off did not strum");
+    s.setWhammy(0, 0.0f);
+    s.handle(InputEvent{Action::Whammy, true, 0, ControllerMode::Joypad, 0});
+    s.setWhammy(0, 0.0f);  // the next frame's pad poll, its bar at rest
+    if (s.whammy(0) != 1.0f) fail("song keys: a resting pad bar cancelled the Whammy key");
+    s.handle(InputEvent{Action::Whammy, false, 0, ControllerMode::Joypad, 0});
+    s.setWhammy(0, 0.4f);
+    if (s.whammy(0) != 0.4f) fail("song keys: the Whammy key let go did not hand back to the bar");
 }
 
 static void checkFastPitch(const std::function<void(const std::string&)>& fail) {
@@ -128,6 +147,7 @@ int runSelfTest(const std::string& discPath) {
     checkFastPitch(fail);
     checkGuitarFx(fail);
     checkWibble(fail);
+    checkSongKeys(fail);
 
     Globals globals;
     try {

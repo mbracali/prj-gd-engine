@@ -589,6 +589,17 @@ Walk::Walk(const std::string& name) : name_(name) {
         steps_.push_back({"port_gamepads", ops, 10000});
         steps_.push_back({"main_menu_fs", {"click:item"}, 10000});
         steps_.push_back({"port_gamepads", {}, 10000});
+    } else if (name == "keyboard") {
+        // #70 (GD04-115): a quick play song on the keyboard alone, with
+        // Require Strum off and a virtual Xbox pad plugged in (its sticks:
+        // an analog whammy at rest). The frets alone hit the notes and the
+        // Whammy key bends a held sustain (App::walkKeyBot plays it).
+        steps_ = boot;
+        steps_.push_back({"main_menu_fs", {"xpad_attach", "keyboard_p1", "keyboard_nostrum", D, D, C}, 10000});
+        steps_.push_back({"quickplay_select_difficulty_fs", {C}, 20000});
+        steps_.push_back({"quickplay_setlist_fs", {C}, 20000});
+        steps_.push_back({"song", {}, 30000});
+        steps_.push_back({"song_over", {"check:keyplay"}, 600000});
     } else if (name == "stickyaxis") {
         // An adapter whose D-pad is an axis resting off centre (a virtual
         // pad, 0079:0006:dpadaxis=-32768) plugged in at the main menu: no
@@ -1303,6 +1314,24 @@ bool Walk::act(const std::string& what, FrontEnd& fe, WalkHost& host) {
     }
     if (what == "pad_detach") {
         SDL_DetachVirtualJoystick(SDL_JoystickID(adapter_));
+        return true;
+    }
+    if (what == "keyboard_p1") {  // the keyboard kept on player 1 with a pad plugged in
+        host.walkInput().setPlayer("keyboard", 0);
+        return true;
+    }
+    if (what == "keyboard_nostrum") {  // the Gamepads screen's Require Strum: Off for the keyboard
+        host.walkInput().setRequireStrum("keyboard", false);
+        return true;
+    }
+    if (what == "check:keyplay") {
+        std::printf("  keyboard: %d notes pressed, %d hit; sustains held %d frames (%d with the Whammy key), whammy %.2f with it, %.2f without\n",
+                    keyNotes, keyHits, keyHoldFrames, keyWhammyFrames, double(keyWhammy), double(keyRest));
+        if (keyNotes < 10) return fail("the keyboard pressed only " + std::to_string(keyNotes) + " notes");
+        if (keyHits * 10 < keyNotes * 9) return fail("the fret keys alone (Require Strum off) hit " + std::to_string(keyHits) + " of " +
+                                                     std::to_string(keyNotes) + " notes");
+        if (keyHoldFrames == 0) return fail("no sustain was held");
+        if (keyWhammyFrames < 10 || keyWhammy < 0.99f || keyRest > 0.01f) return fail("the Whammy key does not move the whammy on a held sustain");
         return true;
     }
     if (what == "keyboard_p2") {  // the keyboard given player 2 (the Gamepads screen's Bind to)

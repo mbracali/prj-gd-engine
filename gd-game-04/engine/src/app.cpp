@@ -186,6 +186,14 @@ private:
     // GH3's song scripts over the native core (D10; GD04_NO_HOOKS=1: off, the earlier path).
     std::unique_ptr<SongHooks> hooks_;
     std::unique_ptr<Walk> walk_;
+    // The keyboard walk's player (#70, GD04-115): the keys it holds now.
+    struct KeyBot {
+        size_t next = 0;      // player 1's next note
+        uint8_t frets = 0;    // fret keys held
+        double from = 0, until = 0;
+        bool sustain = false, whammy = false;
+    } keyBot_;
+    void walkKeyBot();
     uint64_t lastFrameNs_ = 0;
     bool pauseSeen_ = false;  // GH3's PauseGame came after Start
     uint64_t pausedAtNs_ = 0;
@@ -237,6 +245,59 @@ private:
     int fpsFrames_ = 0;
     double fps_ = 0;
 };
+
+// The keyboard walk (#70, GD04-115): player 1's notes on the keyboard's
+// fret keys alone (Require Strum off, no strum key), each pressed on its
+// note and let go 50 ms later or at its hold's end; the Whammy key (Shift)
+// held over each sustain's last two thirds. The walk plugs in a virtual
+// Xbox pad first: its resting sticks (an analog whammy at 0) are what used
+// to cancel the key every frame.
+void App::walkKeyBot() {
+    if (!song_ || !walk_ || !walk_->playsKeys()) return;
+    const Match& m = song_->match();
+    const NoteTrack& tr = m.track(0);
+    const double now = song_->songMs();
+    auto key = [&](SDL_Keycode k, bool down) {
+        SDL_Event e{};
+        e.type = down ? SDL_EVENT_KEY_DOWN : SDL_EVENT_KEY_UP;
+        e.key.timestamp = SDL_GetTicksNS();
+        e.key.key = k;
+        e.key.down = down;
+        e.key.windowID = SDL_GetWindowID(window_);
+        handleEvent(e);
+    };
+    static constexpr SDL_Keycode kFret[5] = {SDLK_1, SDLK_2, SDLK_3, SDLK_4, SDLK_5};
+    KeyBot& b = keyBot_;
+    auto release = [&] {
+        for (int f = 0; f < 5; ++f)
+            if (b.frets & (1u << f)) key(kFret[f], false);
+        if (b.whammy) key(SDLK_LSHIFT, false);
+        b.frets = 0, b.whammy = b.sustain = false;
+    };
+    // Read before this frame's keys reach it: what the last frame (its pad
+    // poll included) left on the held sustain.
+    if (m.player(0).sustaining() >= 0) {
+        ++walk_->keyHoldFrames;
+        if (b.whammy) ++walk_->keyWhammyFrames, walk_->keyWhammy = std::min(walk_->keyWhammy, song_->whammy(0));
+        else walk_->keyRest = std::max(walk_->keyRest, song_->whammy(0));
+    }
+    while (b.next < tr.notes.size() && now >= double(tr.notes[b.next].time)) {
+        const TrackNote& n = tr.notes[b.next++];
+        release();
+        for (int f = 0; f < 5; ++f)
+            if (n.frets & (1u << f)) key(kFret[f], true);
+        b.frets = n.frets, b.sustain = n.sustain, b.from = n.time;
+        b.until = n.sustain ? double(n.time) + n.holdMs - 30 : double(n.time) + 50;
+    }
+    // The notes pressed long enough ago to be judged, before the walk's forced end.
+    const double judgedTo = std::min(now, song_->walkEndMs_ > 0 ? song_->walkEndMs_ : now) - 200;
+    int judged = 0;
+    for (size_t i = 0; i < b.next; ++i) judged += double(tr.notes[i].time) < judgedTo;
+    walk_->keyNotes = judged;
+    if (b.frets && now >= b.until) release();
+    if (b.sustain && !b.whammy && now >= b.from + (b.until - b.from) / 3) key(SDLK_LSHIFT, true), b.whammy = true;
+    walk_->keyHits = m.player(0).stats().notesHit;
+}
 
 void App::walkKey(int keycode) {
     // A real key through the input layer (bindings, capture), as SDL would send it.
@@ -1436,8 +1497,8 @@ void App::frame() {
         for (int s = 0; s < 2; ++s) hadDevice_[s] = input_.padConnected(s), unplugReported_[s] = false;
         // Enhanced > CHEATS: Autoplay and No Fail Mode (as --autoplay / --no-fail).
         // The attract mode plays itself (player1_status.bot_play) [C script create_attract_mode].
-        const bool autoplay = options_.autoplay || walk_ || SDL_getenv("GD04_AUTOPLAY") || enhanced_.on("autoplay") || front_->attractMode();
-        const bool noFail = options_.noFail || enhanced_.on("no_fail");
+        const bool autoplay = options_.autoplay || (walk_ && !walk_->playsKeys()) || SDL_getenv("GD04_AUTOPLAY") || enhanced_.on("autoplay") || front_->attractMode();
+        const bool noFail = options_.noFail || enhanced_.on("no_fail") || (walk_ && walk_->playsKeys());
         // The mode and the two players (start_gem_scroller's globals).
         const FrontEnd::SongRequest& rq = front_->songRequest;
         SongSetup setup;
@@ -1814,6 +1875,7 @@ int App::run() {
                 exitCode_ = walk_->finish(*front_);
                 running_ = false;
             }
+            walkKeyBot();
         }
         if (!running_) break;
         if (front_) {

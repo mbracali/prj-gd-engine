@@ -69,6 +69,14 @@ public:
     int finish(FrontEnd& fe) const;
     // Song counters the walk checks (set by the app).
     int songsStarted = 0, songsEnded = 0;
+    // The keyboard walk (#70, GD04-115): the app plays the song on the
+    // keyboard's keys (App::walkKeyBot), not autoplay, and counts here: the
+    // notes pressed (200 ms ago or more) and hit, the frames a sustain was held (with the Whammy
+    // key down), the lowest whammy value with the key down on one and the
+    // highest without it.
+    bool playsKeys() const { return name_ == "keyboard"; }
+    int keyNotes = 0, keyHits = 0, keyHoldFrames = 0, keyWhammyFrames = 0;
+    float keyWhammy = 1, keyRest = 0;
 
 private:
     // A button, or an act of the port's walks ("click:menu:<element>",

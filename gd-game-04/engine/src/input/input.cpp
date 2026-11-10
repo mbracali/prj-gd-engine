@@ -363,6 +363,7 @@ void Input::emit(std::vector<InputEvent>& out, Action a, bool down, uint64_t ts,
     lastMode_ = mode;
     out.push_back({a, down, ts, mode, player, a == Action::Whammy && curAnalog_, curJoypad_, enterKey});
     out.back().tilt = a == Action::StarPower && curTilt_;
+    out.back().fretsStrum = curFretsStrum_ && isFret(a);
 }
 
 // The keyboard's chosen player, else the lowest one no pad holds (none with two pads).
@@ -747,7 +748,9 @@ void Input::releaseAll(Pad& p, uint64_t ts, std::vector<InputEvent>& out) {
     p.whammyAxis = 0;
     curGuitar_ = !joypad, curJoypad_ = joypad, curAnalog_ = p.analogWhammy;
     const ControllerMode mode = requireStrum("pad:" + std::to_string(SDL_GetGamepadID(p.pad))) ? ControllerMode::Guitar : ControllerMode::Joypad;
+    curFretsStrum_ = mode == ControllerMode::Joypad;
     controlEdges(was, p.down, mode, p.slot, joypad, ts, out);
+    curFretsStrum_ = false;
     static constexpr Action kHelp[4] = {Action::Left, Action::Right, Action::Confirm, Action::Back};
     for (size_t k = 0; k < 4; ++k)
         if (p.helper[k]) p.helper[k] = false, emit(out, kHelp[k], false, ts, ControllerMode::Joypad, std::max(p.slot, 0));
@@ -903,7 +906,9 @@ void Input::keyEvent(const SDL_KeyboardEvent& k, std::vector<InputEvent>& out) {
     }
     // Require Strum off: the keyboard plays like the original's joypad (frets also strum).
     const ControllerMode mode = requireStrum("keyboard") ? ControllerMode::Guitar : ControllerMode::Joypad;
+    curFretsStrum_ = mode == ControllerMode::Joypad;
     controlEdges(was, keyControls_, mode, kb, false, ts, out);
+    curFretsStrum_ = false;
     if (bound) return;
     // Esc / Backspace, Enter and the arrows work the menus whatever the
     // bindings (or the keyboard's player) are, unless bound to something
@@ -983,8 +988,10 @@ void Input::update(Pad& p, uint64_t ts, std::vector<InputEvent>& out) {
         if (p.down[size_t(C::Gyro)] != was[size_t(C::Gyro)]) p.tilt = p.down[size_t(C::Gyro)] ? tiltOn && !buttonOn : p.tilt;
     }
     curGuitar_ = !joypad, curJoypad_ = joypad, curAnalog_ = p.analogWhammy, curTilt_ = p.tilt;
-    controlEdges(was, p.down, requireStrum("pad:" + std::to_string(SDL_GetGamepadID(p.pad))) ? ControllerMode::Guitar : ControllerMode::Joypad,
-                 p.slot, joypad, ts, out);
+    const ControllerMode mode = requireStrum("pad:" + std::to_string(SDL_GetGamepadID(p.pad))) ? ControllerMode::Guitar : ControllerMode::Joypad;
+    curFretsStrum_ = mode == ControllerMode::Joypad;
+    controlEdges(was, p.down, mode, p.slot, joypad, ts, out);
+    curFretsStrum_ = false;
     // The built-in menu helpers: d-pad left / right; a gamepad's south (select) and east (back).
     const std::array<bool, 4> help = {p.buttons[SDL_GAMEPAD_BUTTON_DPAD_LEFT], p.buttons[SDL_GAMEPAD_BUTTON_DPAD_RIGHT],
                                       joypad && p.buttons[SDL_GAMEPAD_BUTTON_SOUTH], joypad && p.buttons[SDL_GAMEPAD_BUTTON_EAST]};
