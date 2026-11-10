@@ -133,6 +133,8 @@ public:
     // Text in a game font on the menu screen (SelectHost; also the FPS counter).
     void drawText(const std::string& font, const std::string& text, float x, float y, float height,
                   const std::array<float, 4>& rgba, uint32_t align) override;
+    // drawText's width for `text` at line height `height`.
+    float textWidth(const std::string& font, const std::string& text, float height) override;
     // Mouse support (the port's): hovering a menu entry focuses it like the
     // pad would, a click selects it; CONTINUE / BACK in the help bar press
     // those buttons. `x`, `y` in 1280 x 720 menu units. True when over something.
@@ -148,6 +150,20 @@ public:
     // any key or pad press): that pill is the only highlight on the screen.
     bool helpHover_ = false;
     bool helpHovered() const;
+    // The right end of the help bar's last label in menu units (0: no help bar).
+    float helpBarRight() const;
+    // [I] Port (#76): the song list row under the pointer takes the list's
+    // highlight (the blue name) while the selection stays where it is: the
+    // list keeps the selected row in one slot, so moving the selection on a
+    // hover would scroll the list under the pointer. A click selects the row;
+    // a key or pad press, or the pointer leaving the rows, gives the
+    // highlight back to the selection.
+    const void* hoverList_ = nullptr;
+    int hoverRow_ = -1, loggedHoverRow_ = -1;
+    // The keyboard types the name on a text entry (NAME YOUR BAND, #76): a
+    // printable key the entry's letters include is taken as that letter (and
+    // not as a game key). True when the key was taken.
+    bool typeKey(int keycode);
     // Enhanced > Disable Menu Transitions (#76): screens change at once, without
     // the original's camera swing and fade (off by default: the original).
     void setNoTransitions(bool on) { noTransitions_ = on; }
@@ -286,7 +302,6 @@ private:
     bool drawMenuBackdrop(float& focusX, float& focusY) override {
         return hooks_.drawMenuBackdrop && hooks_.drawMenuBackdrop(focusX, focusY);
     }
-    float textWidth(const std::string& font, const std::string& text, float height) override;
     // The screen transition for native pages: phase 0 idle, 1 out, 2 in; t 0..1; going back.
     void transition(int& phase, float& t, bool& back) override;
     Value screenValue() override;

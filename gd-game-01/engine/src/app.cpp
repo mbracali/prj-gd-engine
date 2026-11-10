@@ -506,6 +506,10 @@ private:
     void backToMenu();
     void uiButton(const InputEvent& e);
     void injectDebugKeys(std::vector<InputEvent>& out);
+    // NAME YOUR BAND (#76): a key typed into the focused text entry is the
+    // name's, not a game key (its release too). True when it was taken.
+    bool typedKey(const SDL_Event& e);
+    std::set<SDL_Keycode> typedKeys_;
     // Touch: the highways' lanes on screen while a song plays (Input::setTouchLanes).
     void updateTouchLanes();
     void songPreview(const std::string& id);
@@ -1311,7 +1315,7 @@ void App::injectDebugKeys(std::vector<InputEvent>& out) {
                 ev.key.timestamp = SDL_GetTicksNS();
                 ev.key.key = SDL_Keycode(key.code);
                 ev.key.down = down;
-                input_.handle(ev, out);
+                if (!typedKey(ev)) input_.handle(ev, out);
             } else if (virtualPad_) {
                 SDL_SetJoystickVirtualButton(virtualPad_, key.code, down);
             }
@@ -1333,6 +1337,20 @@ void App::injectDebugKeys(std::vector<InputEvent>& out) {
         if (key.edge >= 0) out.push_back({key.action, true, SDL_GetTicksNS(), ControllerMode::Joypad, key.player});
         if (key.edge <= 0) out.push_back({key.action, false, SDL_GetTicksNS(), ControllerMode::Joypad, key.player});
     }
+}
+
+bool App::typedKey(const SDL_Event& e) {
+    if (e.type == SDL_EVENT_KEY_UP) return typedKeys_.erase(e.key.key) > 0;
+    if (e.type != SDL_EVENT_KEY_DOWN || !ui_ || movie_ || screen_ != Screen::Menu) return false;
+    if (e.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_GUI)) return false;
+    // A key bound to a control (the keyboard's frets 1-5, Start ...) keeps it:
+    // the green fret always takes the letter (universal_mechanisms.md 1.1.2).
+    for (const auto& slots : input_.bindings("keyboard"))
+        for (const Input::Source& b : slots)
+            if (b.kind == Input::Source::Kind::Key && b.index == int(e.key.key)) return false;
+    if (!ui_->typeKey(int(e.key.key))) return false;
+    typedKeys_.insert(e.key.key);
+    return true;
 }
 
 void App::startMovie(const std::string& file) {
@@ -1425,9 +1443,10 @@ void App::drawFpsCounter() {
 }
 
 // Enhanced Settings only: the graphics and audio backends this run uses (after
-// any fallback to local), on the line just above the FPS counter's (beside
-// it, and on it when the counter is off, the help bar's legend takes the
-// room) (universal-menus.md, Graphics / Audio backend).
+// any fallback to local), bottom right, one per line, right of the help bar
+// (universal-menus.md, Graphics / Audio backend). [I] Port (#76): above the
+// FPS counter it ran over the help bar's SELECT pill; there it read as part
+// of the help bar.
 void App::drawBackendLabel() {
     if (!ui_ || movie_ || screen_ != Screen::Menu || ui_->currentScreen() != "enhanced_settings") return;
     auto label = [](const std::string& id) -> std::string {
@@ -1441,11 +1460,19 @@ void App::drawBackendLabel() {
         return label(running) + (chosen != running && label(chosen) != "local" ? " (" + label(chosen) + " could not start)" : "");
     };
     const std::string audio = mixer_.outputBackend().empty() ? "local" : mixer_.outputBackend();
-    const std::string s = "Graphics: " + shown(renderer_.backend(), startupGraphicsBackend()) +
-                          "   Audio: " + shown(audio, startupAudioBackend());
-    const float y = 667;  // always above the counter's line: there the help bar's legend starts at x 200
-    ui_->drawText("impactor.font", s, 25, y + 2, 20, {0, 0, 0, 0.6f}, 0x41);  // shadow
-    ui_->drawText("impactor.font", s, 23, y, 20, {1, 1, 1, 0.9f}, 0x41);
+    const std::array<std::string, 2> lines = {"Graphics: " + shown(renderer_.backend(), startupGraphicsBackend()),
+                                              "Audio: " + shown(audio, startupAudioBackend())};
+    // Right-aligned at the FPS counter's margin; smaller when a long line
+    // (a backend that could not start) would reach the help bar.
+    const float right = kScreenW - 23, room = right - std::max(ui_->helpBarRight() + 32, kScreenW * 0.5f);
+    float size = 20;
+    for (const std::string& l : lines)
+        if (const float w = ui_->textWidth("impactor.font", l, size); w > room) size = std::max(12.0f, size * room / w);
+    for (size_t k = 0; k < lines.size(); ++k) {
+        const float y = 697 - float(lines.size() - 1 - k) * (size + 4);  // bottoms; the last on the FPS counter's line
+        ui_->drawText("impactor.font", lines[k], right + 2, y + 2, size, {0, 0, 0, 0.6f}, 0x44);  // shadow
+        ui_->drawText("impactor.font", lines[k], right, y, size, {1, 1, 1, 0.9f}, 0x44);
+    }
 }
 
 // The version on the main title screen, top right: the FPS counter's font and
@@ -2713,7 +2740,7 @@ int App::run(int* restartSlot) {
                 renderer_.windowToMenu(click ? e.button.x : e.motion.x, click ? e.button.y : e.motion.y, mx, my);
                 ui_->mouse(mx, my, click);
             }
-            input_.handle(e, actions);
+            if (!typedKey(e)) input_.handle(e, actions);
         }
         input_.poll(SDL_GetTicksNS(), actions);
         for (auto [mx, my] : input_.takeMenuTaps())  // a tap in the menus is a click

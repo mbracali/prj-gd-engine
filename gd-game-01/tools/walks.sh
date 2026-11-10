@@ -15,7 +15,8 @@
 # Walks (all by default): selftest logo_skip band quickplay mouse enhanced
 # gamepads gamepads_pad store. song_end and career_win are run by name (each plays a whole song). "band" runs first when another walk needs its save.
 # The universal menus (universal_mechanisms.md) are covered by: logo_skip and
-# band (1.1.1 skips, 1.1.2 band naming), mouse (1.1.3, credits skip),
+# band (1.1.1 skips, 1.1.2 band naming, band_typing), mouse (1.1.3, credits skip,
+# song row hover, one Back in Enhanced),
 # enhanced (1.2.2 Modes, old enhanced.json, HDR, backends), gamepads / gamepads_pad (1.2.1).
 set -uo pipefail
 bin="$(realpath "$1")"
@@ -77,6 +78,19 @@ walk_band() {
   ok=$(( $(has band "goto_screen nameprof") && $(has band "goto_screen main") && $(json "$(save band)/career.json" "d['profiles'][0]['name'] == 'CD'") ))
   result band "$ok" "logos, movie (red) skipped; band named CD with up / down, green and Enter"
   [ "$ok" = 1 ] && seed="$work/band/xdg"
+  walk_band_typing
+}
+
+# NAME YOUR BAND with the keyboard (#76): letters typed straight in (H is
+# also a player 2 key: here it is a letter), Backspace deletes the last one,
+# Enter accepts the name "ROCKH".
+walk_band_typing() {
+  local keep="$seed"
+  seed=""
+  run band_typing 31000 "1500:keyReturn,9500:keyReturn,13000:keyReturn,17500:red,20500:keyReturn,23500:keyReturn,26000:keyR,26200:keyO,26400:keyC,26600:keyK,26800:keyBackspace,27000:keyK,27200:keyH,27400:keyReturn"
+  seed="$keep"
+  result band_typing "$(( $(has band_typing "goto_screen nameprof") && $(json "$(save band_typing)/career.json" "d['profiles'][0]['name'] == 'ROCKH'") ))" \
+    "band name typed on the keyboard, Backspace deletes, Enter accepts ROCKH"
 }
 
 walk_quickplay() {
@@ -99,19 +113,44 @@ walk_song_end() {
 }
 
 # Mouse only: OPTIONS, Enhanced Settings, collapse MODES and CONTROLS, the Resolution
-# dropdown (720p), BACK in the help bar, Enhanced again, its own "< Back",
+# dropdown (720p), its own "< Back", Enhanced again, "< Back" again,
 # then Credits, skipped with green (1.1.1).
 walk_mouse() {
   needs_band
-  run mouse 24000 "3000:click640_554,5500:click520_376,8000:click200_190,8500:click200_252,9000:click480_455,9300:keyUp,9400:keyUp,9500:keyUp,9700:keyReturn,10500:click460_684,13000:click520_376,15500:click150_606,18000:click600_564,21000:green" GD01_SKIP_BOOT=1
+  run mouse 24000 "3000:click640_554,5500:click520_376,8000:click200_190,8500:click200_252,9000:click480_455,9300:keyUp,9400:keyUp,9500:keyUp,9700:keyReturn,10500:click150_606,13000:click520_376,15500:click150_606,18000:click600_564,21000:green" GD01_SKIP_BOOT=1
   local backs
   backs=$(grep -c "goto_screen options" "$work/mouse.log")
   result mouse "$(( $(json "$(save mouse)/enhanced.json" "d['internal_res'] == '720'") && backs >= 4 && $(has mouse "goto_screen credits") ))" \
-    "clicks through Options and Enhanced, a dropdown, help-bar BACK, < Back, credits skipped"
+    "clicks through Options and Enhanced, a dropdown, < Back twice, credits skipped"
   # The main menu's GAMEPADS pill opens GAMEPADS on a click (#51).
   run mouse_gamepads 6000 "3000:hover560_685,3500:click560_685" GD01_SKIP_BOOT=1
   result mouse_gamepads "$(has mouse_gamepads "goto_screen gamepads")" "a click on the help bar's GAMEPADS opens GAMEPADS"
   walk_mouse_highlight
+  walk_mouse_song_hover
+  walk_enhanced_one_back
+}
+
+# The song list (#76): the pointer on Smoke on the Water (row 3) highlights
+# it while the selection stays on the first song (no scroll); Down gives the
+# highlight back to the selection, which moves one row (to row 1).
+walk_mouse_song_hover() {
+  run mouse_song_hover 6000 "3000:keyDown,3300:keyReturn,4500:hover450_542,5000:keyDown" GD01_SKIP_BOOT=1
+  local seq
+  seq="$(grep -o "ui: hover row -*[0-9]*" "$work/mouse_song_hover.log" | tr '\n' '|')"
+  result mouse_song_hover "$(( $(has mouse_song_hover "goto_screen qp_selsong") && $([ "$seq" = "ui: hover row 3|ui: hover row -1|" ] && echo 1 || echo 0) ))" \
+    "the hovered song row takes the highlight, a key gives it back ($seq)"
+}
+
+# Enhanced Settings has one Back (#76): its own "< Back"; the help bar shows
+# no BACK (the pointer where it was lights nothing; SELECT still lights), and
+# Esc still goes back to OPTIONS.
+walk_enhanced_one_back() {
+  run enhanced_one_back 8000 "3000:click520_376,5000:hover490_687,5500:hover240_687,6000:hover640_200,6500:keyEscape" GD01_SKIP_BOOT=1 GD01_SCREEN=options
+  local seq
+  seq="$(grep -o "ui: highlight [a-z ]*" "$work/enhanced_one_back.log" | tr '\n' '|')"
+  result enhanced_one_back "$(( $(has enhanced_one_back "goto_screen enhanced_settings") && $(grep -c "goto_screen options" "$work/enhanced_one_back.log") >= 2 && \
+    $([ "$seq" = "ui: highlight help bar|ui: highlight menu focus|" ] && echo 1 || echo 0) ))" \
+    "no BACK in Enhanced's help bar, < Back and Esc still go back ($seq)"
 }
 
 # One highlight at a time (#76): the mouse on the help bar's BACK takes the

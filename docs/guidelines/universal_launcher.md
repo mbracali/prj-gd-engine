@@ -287,7 +287,8 @@ Reference code:
 ### Mouse (every screen, original and port)
 
 - Hovering a menu entry focuses it, the same way the pad would. A list
-  takes clicks only; a hover would scroll it.
+  takes clicks only; a hover would scroll it (gd-game-01 highlights the
+  hovered row without moving the selection, #76).
 - A left click selects. A click on a list row moves the selection to that
   row, then selects it.
 - A right click is Back.

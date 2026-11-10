@@ -53,6 +53,7 @@ public:
         : ScriptObject(name), ui_(ui), panel_(panel), kind_(kind) {}
     bool handleNative(Interp&, const std::string& msg, std::vector<Value>& args, Value& result) override;
     bool button(int b);  // focused component input
+    bool type(char c);   // TextEntry: a letter typed on the keyboard (#76)
     // RndScrollList with the "song" style: one song_element.view row per
     // provider item, `spacing` apart going down (docs/ui_system.md 2).
     void drawList(const UiObj& list, const Mat4& vp, const Mat4& world);
@@ -72,6 +73,10 @@ public:
     std::string entered_;
     int letter_ = 0;
     bool done_ = false;
+    // The port's keyboard typing (#76): the letter being chosen was picked by
+    // the player (up / down, a typed key), so the next typed key takes it
+    // first; the last change came from a typed key.
+    bool touched_ = false, typed_ = false;
     // Slider: value, step count, editing (the "selected" style state), whether
     // the pod was ever placed (until then it sits at its template x).
     int pos_ = 0, steps_ = 1;
@@ -1395,7 +1400,10 @@ void UiSystem::PanelObj::addAccessButtons(std::vector<std::pair<std::string, std
                                   (focus && focus->kind() == UiObj::Kind::List));
     if (!has("fret1") && fp && (fp->native_ || !fp->vertical_.empty() || !fp->horizontal_.empty() || entry))
         out.insert(out.begin(), {"fret1", "help_select"});
-    if (!has("fret2") && ui_.current_->flag("allow_back", true) && ui_.current_->back_) {
+    // [I] Port (#76): a screen with its own "< Back" control (Enhanced
+    // Settings, universal-menus.md 1.2.2.1) shows no second BACK in the help
+    // bar; red and Esc still go back.
+    if (!has("fret2") && ui_.current_->flag("allow_back", true) && !ui_.current_->flag("own_back", false) && ui_.current_->back_) {
         auto at = std::find_if(out.begin(), out.end(), [](const auto& e) { return e.first != "fret1"; });
         out.insert(at, {"fret2", "help_back"});
     }
@@ -1630,7 +1638,7 @@ bool UiSystem::ComponentObj::handleNative(Interp&, const std::string& msg, std::
     auto arg = [&](size_t k) { return k < a.size() ? a[k] : Value::integer(0); };
     if (kind_ == UiObj::Kind::TextEntry) {
         if (msg == "get_text") return r = Value::string(done_ ? entered_ : entryText()), true;
-        if (msg == "set_text") return entered_ = arg(0).str(), letter_ = 0, done_ = false, showEntry(), true;
+        if (msg == "set_text") return entered_ = arg(0).str(), letter_ = 0, done_ = false, touched_ = typed_ = false, showEntry(), true;
         if (msg == "is_done") return r = Value::integer(done_), true;
         if (msg == "no_text_entered") return r = Value::integer(entered_.empty()), true;
         if (msg == "user_can_scroll") return r = Value::integer(!done_), true;
@@ -1685,6 +1693,28 @@ bool UiSystem::ComponentObj::handleNative(Interp&, const std::string& msg, std::
     return false;
 }
 
+// [I] Port (#76): a letter typed on the keyboard. The name on screen is the
+// text so far plus the letter being chosen (START accepts both, as in GH1),
+// so a typed letter becomes the letter being chosen, after the one before it
+// (if the player picked it) is taken: the screen shows what was typed, and
+// Enter accepts it. Backspace (back) deletes, as red does.
+bool UiSystem::ComponentObj::type(char c) {
+    if (kind_ != UiObj::Kind::TextEntry || done_) return false;
+    const UiObj* u = panel_.scene_ ? panel_.scene_->scene().find(name())->ui.get() : nullptr;
+    const UiResources::Style& st = ui_.res_->style("textentry", u ? u->style : "");
+    size_t at = st.characters.find(c);
+    if (at == std::string::npos && c >= 'a' && c <= 'z') at = st.characters.find(char(c - 'a' + 'A'));
+    if (at == std::string::npos && c >= 'A' && c <= 'Z') at = st.characters.find(char(c - 'A' + 'a'));
+    if (at == std::string::npos || st.characters.empty()) return false;
+    if (touched_) {
+        if (int(entered_.size()) >= st.length - 1) return true;  // full: the key is still the name's
+        entered_ += st.characters[size_t(letter_) % st.characters.size()];
+    }
+    letter_ = int(at), touched_ = typed_ = true;
+    showEntry();
+    return true;
+}
+
 // TextEntry: the text so far plus the letter being chosen.
 std::string UiSystem::ComponentObj::entryText() const {
     const UiObj* u = panel_.scene_ ? panel_.scene_->scene().find(name())->ui.get() : nullptr;
@@ -1732,6 +1762,8 @@ bool UiSystem::ComponentObj::button(int b) {
         // splash.dta's help text: strum cycles the letter, fret1 takes it and
         // moves on, fret2 deletes, START accepts (TEXT_ENTRY_MSG).
         if (done_) return false;
+        const bool wasTyped = typed_;
+        typed_ = false;
         // The port's (universal_mechanisms.md 1.1.2): the keyboard's Start
         // key (Enter) and keyboard Enter always finish the name, like START;
         // fret1 (green) / X still take the letter; any up / down changes it.
@@ -1743,14 +1775,23 @@ bool UiSystem::ComponentObj::button(int b) {
         const UiResources::Style& st = ui_.res_->style("textentry", u ? u->style : "");
         int n = std::max(1, int(st.characters.size()));
         bool back = ui_.interp_.send("meta", "is_back_button", {Value::integer(b), Value::integer(0)}).truthy();
-        if (b == Up || b == Down) letter_ = (letter_ + (b == Down ? 1 : n - 1)) % n;
+        if (b == Up || b == Down) letter_ = (letter_ + (b == Down ? 1 : n - 1)) % n, touched_ = true;
         else if (select) {
             if (int(entered_.size()) < st.length - 1 && !st.characters.empty()) entered_ += st.characters[size_t(letter_)];
+            touched_ = false;
         } else if (back) {
-            if (entered_.empty()) return false;  // nothing to delete: the screen's back
+            if (entered_.empty()) {
+                // [I] Port (#76): Backspace after typing clears the last typed
+                // letter (back to the first letter, as the screen opened).
+                if (!wasTyped || !touched_) return false;  // nothing to delete: the screen's back
+                letter_ = 0, touched_ = false;
+                showEntry();
+                return true;
+            }
             letter_ = int(st.characters.find(entered_.back()));
             if (letter_ < 0) letter_ = 0;
             entered_.pop_back();
+            touched_ = true, typed_ = wasTyped;
         } else if (b == Start) {
             entered_ = entryText();
             while (!entered_.empty() && entered_.back() == ' ') entered_.pop_back();
@@ -1816,7 +1857,8 @@ void UiSystem::ComponentObj::drawList(const UiObj& list, const Mat4& vp, const M
         off.pos = {0, 0, -spacing * float(1 + k + 2 * headers)};
         Mat4 elem = world * Mat4::fromRowXfm(off.rot, off.pos);
         std::string key = name() + "#" + std::to_string(k);
-        bool hl = k == selected_ && !p->focusMuted();
+        const bool hovering = ui_.hoverList_ == this && ui_.hoverRow_ >= 0;
+        bool hl = (hovering ? k == ui_.hoverRow_ : k == selected_) && !p->focusMuted();
         const auto& c = hl ? highlight : text;
         p->drawText(key, r.text, "song_name.txt", c, vp, elem * local("song_name.txt"));
         if (!r.score.empty()) p->drawText(key + "#s", r.score, "song_score.txt", c, vp, elem * local("song_score.txt"));
@@ -2050,7 +2092,8 @@ UiSystem::UiSystem(Renderer& renderer, const GameData& data, Hooks hooks)
                 (animate_transition 0)
                 (panels meta enhanced_settings helpbar)
                 (focus enhanced_settings)
-                (helpbar (default ((fret1 help_select) (fret2 help_back) (strum help_updown))))}
+                (own_back TRUE)
+                (helpbar (default ((fret1 help_select) (strum help_updown))))}
             {new_gamepad_panel gamepads (rnd_file "")}
             {new_gh_screen gamepads
                 (animate_transition 0)
@@ -2284,6 +2327,7 @@ bool UiSystem::inGame() const {
 
 void UiSystem::gotoScreen(const std::string& name) {
     if (SDL_getenv("GD01_UILOG")) SDL_Log("ui: goto_screen %s", name.c_str());  // development aid
+    hoverList_ = nullptr, hoverRow_ = -1;
     ScreenObj* next = screen(name);
     if (!next) {
         SDL_Log("ui: no screen %s", name.c_str());
@@ -2428,6 +2472,10 @@ void UiSystem::draw() {
     if (const bool hh = helpHovered(); hh != loggedHelpHover_) {  // development aid (walk mouse_highlight)
         loggedHelpHover_ = hh;
         if (SDL_getenv("GD01_UILOG")) SDL_Log("ui: highlight %s", hh ? "help bar" : "menu focus");
+    }
+    if (hoverRow_ != loggedHoverRow_) {  // development aid (walk mouse_song_hover)
+        loggedHoverRow_ = hoverRow_;
+        if (SDL_getenv("GD01_UILOG")) SDL_Log("ui: hover row %d", hoverRow_);
     }
     if (!logos_.empty()) {
         // The logos' own backgrounds are black: so is the screen around them.
@@ -2643,6 +2691,7 @@ void UiSystem::buttonDown(int button, bool guitar, int player) {
     // kind of controller just pressed (the original read player 1's only).
     guitar_ = guitar;
     helpHover_ = false;  // a key or pad press puts the highlight back on the menu's focus (#76)
+    hoverList_ = nullptr, hoverRow_ = -1;
     if (button == Up || button == Down || button == Left || button == Right) held_[size_t(player & 1)] = {button, 0, false};
     if (!logos_.empty()) {
         // The original's logos are not skippable; the port skips them all on
@@ -2672,6 +2721,25 @@ void UiSystem::playerSetup(int p, std::string& character, std::string& guitar) c
     guitar = g->players[p]->skin.empty() ? g->players[p]->guitar : g->players[p]->skin;
 }
 
+bool UiSystem::typeKey(int keycode) {
+    if (keycode < 0x20 || keycode > 0x7e) return false;  // Enter, Backspace, Esc, Tab, arrows: their actions
+    if (!logos_.empty() || phase_ != Phase::Idle || !current_) return false;
+    PanelObj* fp = focusPanel();
+    ComponentObj* c = fp ? fp->component(fp->focus_) : nullptr;
+    if (!c || !c->type(char(keycode))) return false;
+    hoverList_ = nullptr, hoverRow_ = -1;
+    if (SDL_getenv("GD01_UILOG")) SDL_Log("ui: typed %c", char(keycode));  // development aid (walk band_typing)
+    return true;
+}
+
+float UiSystem::helpBarRight() const {
+    PanelObj* hb = panel("helpbar");
+    float right = 0;
+    if (hb && hb->up_)
+        for (const auto& [elem, h] : hb->helpElems_) right = std::max(right, h.x1);
+    return right;
+}
+
 bool UiSystem::helpHovered() const {
     if (!helpHover_) return false;
     PanelObj* hb = panel("helpbar");
@@ -2695,6 +2763,7 @@ bool UiSystem::mouse(float x, float y, bool click) {
     }
     wheelHold_ = false;
     helpHover_ = false;
+    hoverList_ = nullptr, hoverRow_ = -1;
     auto inside = [&](const Panel::Hit& h, float pad) { return x >= h.x0 - pad && x <= h.x1 + pad && y >= h.y0 - pad && y <= h.y1 + pad; };
     const int select = guitar_ ? R2 : Cross;
     auto press = [&](int b) {
@@ -2730,9 +2799,12 @@ bool UiSystem::mouse(float x, float y, bool click) {
                          std::find(fp->horizontal_.begin(), fp->horizontal_.end(), comp) != fp->horizontal_.end();
         if (c->kind() == UiObj::Kind::List && hash != std::string::npos) {
             // The list keeps its selection in one slot: a hover would scroll
-            // it, so lists only take clicks (and the wheel).
-            if (!click) return true;
+            // it, so a hover only highlights the row (#76); a click selects it.
             int row = std::atoi(h.key.c_str() + hash + 1);
+            if (!click) {
+                hoverList_ = c, hoverRow_ = row;
+                return true;
+            }
             if (fp->focus_ != comp) fp->setFocus(comp);
             if (row != c->selected_) {
                 int dir = row > c->selected_ ? 1 : -1;
