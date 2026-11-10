@@ -53,6 +53,12 @@ public:
     const std::vector<Notice>& notices() const { return notices_; }
     // Stars for `score` against the base score (0..6, 6 = gold).
     static int stars(const Rules& rules, int score, int baseScore);
+    // RB's stars (RB 0x82435A00, 0x82435918) [C]: level i (1..7) needs score
+    // >= band_thresholds[the band's instrument set][i] x base + bonus_thresholds[i]
+    // x bonusBase, and the difficulty_thresholds' difficulty; 6 = gold.
+    static int stars(const Rules& rules, int score, int baseScore, int bonusBase, std::vector<std::string> instruments, int difficulty);
+    // The most solo bonus the chart can give (the stars' bonus base) [I: RB's bonus base may add the coda's].
+    int soloBonusMax() const;
 
 private:
     Chart& chart_;
@@ -63,7 +69,7 @@ private:
     int bonus_ = 0, solosDone_ = 0, fillsShown_ = 0, fillsDeployed_ = 0;
     // Fills.
     size_t nextFill_ = 0;
-    int activeFill_ = -1, fillLastGem_ = -1;
+    int activeFill_ = -1, fillLastGem_ = -1, fillHits_ = 0;
     // The coda.
     float codaMs_ = -1;
     int codaPot_ = 0, codaLastGem_ = -1;

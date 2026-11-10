@@ -87,6 +87,8 @@ struct RbScoring {
     // star_thresholds.dtb: (thresholds ...) the solo stars as multiples of
     // the base score, and (band_thresholds ((instruments) ...)).
     std::vector<float> starThresholds;
+    std::vector<float> bonusStarThresholds;   // (bonus_thresholds ...) per level
+    std::vector<int> difficultyStarThresholds;  // (difficulty_thresholds (...)) the lowest difficulty per level
     std::vector<std::pair<std::vector<std::string>, std::vector<float>>> bandStarThresholds;
 };
 

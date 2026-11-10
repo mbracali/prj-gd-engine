@@ -356,7 +356,7 @@ private:
         double ms = 0;
         bool repeating = false;
     };
-    std::array<Held, 2> held_{};
+    std::array<Held, 4> held_{};
     float holdMs_ = 1000, repeatMs_ = 80;
 };
 

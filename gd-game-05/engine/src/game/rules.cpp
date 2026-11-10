@@ -211,6 +211,11 @@ Rules loadRules(const GameData& data) {
         DataNode st = parseDtb(data.read("config/gen/star_thresholds.dtb"));
         if (const DataNode* t = st.find("thresholds"))
             for (size_t i = 1; i < t->children.size(); ++i) rb.starThresholds.push_back(t->floatAt(i));
+        if (const DataNode* b = st.find("bonus_thresholds"))
+            for (size_t i = 1; i < b->children.size(); ++i) rb.bonusStarThresholds.push_back(b->floatAt(i));
+        if (const DataNode* d = st.find("difficulty_thresholds"); d && d->children.size() > 1 && d->children[1].isList())
+            for (const DataNode& n : d->children[1].children)
+                rb.difficultyStarThresholds.push_back(n.isText() ? (n.s == "kDifficultyExpert" ? 3 : n.s == "kDifficultyHard" ? 2 : n.s == "kDifficultyMedium" ? 1 : 0) : n.i);
         if (const DataNode* bt = st.find("band_thresholds"))
             for (size_t i = 1; i < bt->children.size(); ++i) {
                 const DataNode& e = bt->children[i];

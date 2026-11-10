@@ -223,3 +223,42 @@ calibration (no reference), RB's director rules (random shot per category).
 
 Next: M6 band on stage (prefab characters), then M9 launcher module and
 packages, then M10 by impact. Time used: 3.0 h of the 12-14 h estimate.
+
+## 2026-11-09 22:00, wave 02 gate 1 (ledger 50.5%)
+
+Done since wave 01 (each in the commits of this branch):
+- The parity ledger (docs/parity.md, tools/parity.py): 21.0% at the start.
+- The band on stage: premade characters (characters.dtb) in the venue's
+  four slots, built from their outfit pieces and instruments, CPU skinning.
+- Vocals in the game: the mic (core input), GD05_VOCALS_FILE, the vocal
+  track; RB's vocal scoring, scream deploy and tambourine from the XEX.
+- RB's track through the menus (it was the debug highway there in wave 01).
+- Band play for up to four (tracks side by side, vocals on top), RB's band
+  multiplier, fail-out and saves, Unison; solos, fills, Big Rock Endings,
+  stars from the XEX; RB's guitar watcher rules (HOPO chain, sustains) and
+  drum watcher (a gem per pad).
+- Meta game: profile JSON, Solo Tour, Band World Tour, the creator's maker,
+  Band Quickplay and head-to-head through the menus (lobby stand-in, D10),
+  the Rock Shop, options, lose / retry, practice's sections.
+- Venue lights read as RB stores them; WorldDir material overrides.
+- PC wording of RB's strings; four players in the input layer; Drums and
+  Vocals instruments in GAMEPADS (built only).
+
+Verified (fresh build, CONTEXT.md environment):
+- walks: quickplay, quickplay_drums, quickplay_vocals, band_quickplay,
+  solo_tour, band_tour, score_duel, tug_of_war, rock_shop, rb_lose -> OK
+  (`--walktest <w>` -> `walktest <w>: OK`).
+- `--scenetest` -> `scene test passed: 0 typed objects failed, 0 files failed`;
+  `--scripttest` -> OK; `--videotest` -> OK; `--sfxtest` -> OK.
+- `--selftest` -> exit 0: all charts fully hit; 232 of 232 solos perfect;
+  176 endings banked; 292 drum charts through the game's drum judge;
+  tambourine 10180 of 10180; vocals through the pitch detector 2136 of 2136;
+  PC wording 0 strings left.
+- screen sweep (`--walktest screens`): 235 of 252 screens reached (before
+  the later natives).
+
+Built only: GAMEPADS Drums / Vocals rows, four-player input slots, the
+Android RECORD_AUDIO request (launcher APK not rebuilt yet).
+
+Next: toward 60%: tutorials, crowd, creator appearance, camera, HUD,
+animation, the help bar, the real-device checklist. Time used: about 4 h.

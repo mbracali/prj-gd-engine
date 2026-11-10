@@ -119,7 +119,7 @@ public:
         int player = 0;  // 0 or 1, -1: none (the menus only)
     };
     // The instrument types of the Gamepad menu (GH2 has neither drums nor vocals).
-    enum class Instrument { Guitar, Gamepad, Midi };
+    enum class Instrument { Guitar, Gamepad, Midi, Drums, Vocals };  // Rock Band adds the drums and the vocals (wave 02)
     static const char* instrumentName(Instrument i);
 
     // Before SDL_Init: started by Steam (Game Mode, or any game Steam
@@ -158,7 +158,7 @@ public:
     bool padConnected(int slot) const;
     // Players 1..2 (GH2 has two). Player 1 is always on; a player turned off
     // has no device (its device works the menus only) until turned on again.
-    static constexpr int kPlayers = 2;
+    static constexpr int kPlayers = 4;  // Rock Band: four local players (wave 02)
     bool playerEnabled(int player) const { return player == 0 || (player == 1 && p2Enabled_); }
     void setPlayerEnabled(int player, bool on);
     // The device bound to `player` ("" none).
@@ -186,8 +186,8 @@ public:
     // 0x822b3c50 from the player's lefty flag]; a guitar keeps its frets (GH2
     // gives lefty_guitar the same watcher [C: 0x8234a278]) and its strum up /
     // down move the menus the other way (held upside down) [I].
-    void setLefty(bool p1, bool p2) { lefty_ = {p1, p2}; }
-    bool lefty(int player) const { return player >= 0 && player < 2 && lefty_[size_t(player)]; }
+    void setLefty(bool p1, bool p2) { lefty_[0] = p1, lefty_[1] = p2; }
+    bool lefty(int player) const { return player >= 0 && player < kPlayers && lefty_[size_t(player)]; }
     void setRockBand(bool on);
 
     // -- the Gamepad menu
@@ -391,7 +391,9 @@ private:
 
     std::map<std::string, Bindings> overrides_;  // by GUID ("keyboard" for the keyboard)
     std::map<std::string, int> players_;         // chosen players by GUID
-    std::map<std::string, Profile> types_;       // chosen controller types by GUID
+    std::map<std::string, Profile> types_;
+    // Rock Band: the part a device plays chosen in GAMEPADS (by guid): Drums / Vocals.
+    std::map<std::string, Instrument> rbParts_;       // chosen controller types by GUID
     std::string saveDir_;                        // "" = the SDL pref dir
     bool loaded_ = false, capturing_ = false, inGame_ = false;
     std::string captureId_;
@@ -445,19 +447,19 @@ private:
     // the pause corner (0 top right, 1 top left, 2 none).
     std::array<int, kTouchOptions> touchOpt_ = {0, 0, 1, 0};
     bool touchUsed_ = false;  // the screen was touched since the last key or button
-    std::array<bool, 2> lefty_{};
+    std::array<bool, kPlayers> lefty_{};
     bool curGuitar_ = false;  // the device being read is a guitar (lefty strum)
     bool curJoypad_ = false;  // the device being read plays with the joypad layout (InputEvent::joypad)
     bool curAnalog_ = false;  // the device being read has an analog whammy
     bool touch_ = true, gamepadPlay_ = true, rockBand_ = false, rbMappings_ = false;
     std::function<void(float, float, float&, float&)> toMenu_;
-    std::array<TouchLanes, 2> lanes_;
+    std::array<TouchLanes, kPlayers> lanes_;
     std::unordered_map<SDL_FingerID, Finger> fingers_;
     struct PendingStrum {
         bool on = false;
         uint64_t dueNs = 0, ts = 0;
     };
-    std::array<PendingStrum, 2> strum_;
+    std::array<PendingStrum, kPlayers> strum_;
     std::vector<std::pair<float, float>> menuTaps_;
     int keyboardSlot() const;
     bool splitKeyboard_ = false;

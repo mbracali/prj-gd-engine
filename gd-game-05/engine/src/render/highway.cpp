@@ -153,7 +153,7 @@ void Highway::drawHud(Canvas& r, const Player& player, const std::string& title)
     r.fillRect(sx, my + mh * (1 - player.starMeter()), sw, mh * player.starMeter(),
              player.starPowerReady() || star ? kStarColor : SDL_Color{60, 120, 160, 255});
     r.fillRect(sx - 4, my + mh * 0.5f - 1, sw + 8, 2, kWhite);
-    r.text(sx - 6, my + mh + 12, 1.5f, {200, 200, 210, 255}, "SP");
+    r.text(sx - 6, my + mh + 12, 1.5f, {200, 200, 210, 255}, "OD");
     if (player.starPowerReady())
-        r.textCentered(kScreenW * 0.5f, 650, 2, kStarColor, "STAR POWER READY");
+        r.textCentered(kScreenW * 0.5f, 650, 2, kStarColor, "OVERDRIVE READY");
 }

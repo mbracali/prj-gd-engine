@@ -610,7 +610,7 @@ int runSelfTest(const std::string& dataPath) {
         std::printf("%zu songs; slop %.0f ms, head %d, tail %d, hopo_threshold %d ticks\n", songs.size(), rules.slopMs,
                     rules.headPoints, rules.tailPoints, rules.hopoThresholdTicks);
 
-        int audioFailures = 0, chartFailures = 0, hopos = 0, strumHopos = 0, ownThreshold = 0, drumNotes = 0, vocalPhrases = 0, rbSolos = 0, rbPerfectSolos = 0, rbEndings = 0, drumJudgeCharts = 0, drumJudgeFailed = 0;
+        int audioFailures = 0, chartFailures = 0, hopos = 0, strumHopos = 0, ownThreshold = 0, drumNotes = 0, vocalPhrases = 0, rbSolos = 0, rbPerfectSolos = 0, rbEndings = 0, drumJudgeCharts = 0, drumJudgeFailed = 0, tambGems = 0, tambHits = 0;
         PartTotals totals[kPartCount];
         for (const SongInfo& info : songs) {
             ownThreshold += info.audio.hopoThresholdTicks > 0;
@@ -670,9 +670,12 @@ int runSelfTest(const std::string& dataPath) {
                             VocalPlayer v(song, diff, vr);
                             for (float t = -1000; t < song.endMs + 5000; t += 1) {
                                 const float target = v.targetPitch(t);
-                                v.sing(t, target, 0.5f);  // the exact pitch (a talky: any voice)
+                                v.sing(t, target, v.percussionDue(t) ? 1.0f : 0.5f);  // the exact pitch (a talky: any voice), a tap on each tambourine gem
                                 if (int(t) % 16 == 0) v.update(t);
                             }
+                            int shown = 0;
+                            for (const Percussion& pc : song.vocals.percussion) shown += pc.shown;
+                            tambGems += shown, tambHits += v.percussionHits();
                             const int want = v.phrasesRated(VocalPlayer::Rating::Awful);
                             const int top = v.phrasesRated(VocalPlayer::Rating::Awesome);
                             const bool ok = want > 0 && top == want;
@@ -742,6 +745,8 @@ int runSelfTest(const std::string& dataPath) {
         // solo a perfect solo, every Big Rock Ending banked by its final chord.
         std::printf("solos: %d of %d perfect; Big Rock Endings banked: %d\n", rbPerfectSolos, rbSolos, rbEndings);
         std::printf("drums through the game's judge: %d charts, %d not fully hit\n", drumJudgeCharts, drumJudgeFailed);
+        std::printf("tambourine: %d of %d gems tapped\n", tambHits, tambGems);
+        if (tambHits != tambGems) ++chartFailures;
         chartFailures += drumJudgeFailed;
         if (rbPerfectSolos != rbSolos) ++chartFailures;
         // The microphone path, headless: a synthesised voice (a sawtooth at

@@ -507,6 +507,9 @@ private:
     std::vector<RbSeat> seats_;
     std::vector<GameSetup::RbMember> rbBandSetup_;
     bool player0Out_ = false;
+    std::array<int, 4> fails_{};
+    std::array<float, 4> outMs_{};
+
     int unisonBonuses_ = 0, saves_ = 0;
     std::map<int, std::pair<int, int>> unison_;  // an Overdrive phrase's start tick -> (captured, players with it)
     std::vector<std::pair<std::string, float>> bandNotices_;
@@ -528,6 +531,7 @@ private:
     void drawRbTrack0(float t, float speed);
     int rbTrackFrames_ = 0;  // frames RB's instrument track drew (the walks)
     float overdriveDrainMs() const;
+    int rbStars(const Player* p) const;
     std::unique_ptr<VorbisStream> pendingStream_;
     float bandVolume_ = 1, guitarVolume_ = 1;
     int syncOffsetMs_ = 0;
@@ -1096,6 +1100,7 @@ bool App::loadSong(const SongInfo& info, int difficulty, bool autoplay, float ba
         vocalRating_ = 0.5f, vocalRatingName_ = nullptr, vocalRatingMs_ = -1e9f, vocalPhrasesHit_ = 0;
         if (part0 == Part::Vocals) {
             vocal_ = std::make_unique<VocalPlayer>(*song_, static_cast<Difficulty>(difficulties_[0]), rules_);
+            vocal_->setDrainMs(overdriveDrainMs());
             if (!autoplay || SDL_getenv("GD05_VOCALS_FILE")) {
                 mic_ = std::make_unique<VocalInput>();
                 std::string err;
@@ -1507,7 +1512,7 @@ void App::endSong() {
         res = {};
         if (!p) continue;
         res.valid = true, res.failed = p->failed(), res.score = p->score(), res.notesHit = p->notesHit();
-        res.gems = int(p->chart().gems.size()), res.longestStreak = p->longestStreak(), res.stars = RbBonus::stars(rules_, p->score(), p->baseScore());
+        res.gems = int(p->chart().gems.size()), res.longestStreak = p->longestStreak(), res.stars = rbStars(p);
     }
     if (player2_)
         SDL_Log("player 2: score %d, %d/%d notes, longest streak %d", player2_->score(), player2_->notesHit(),
@@ -1750,13 +1755,10 @@ void App::playerAction(const InputEvent& a) {
     }
     for (RbSeat& st : seats_)
         if (st.vocal && st.player.get() == p) {
-            if (a.action == Action::StarPower && a.down && st.vocal->deployOverdrive(lastT_, overdriveDrainMs())) bandNotices_.push_back({"OVERDRIVE!", lastT_});
-            return;
+            return;  // the singer deploys by singing (screamPoll) [C]
         }
     if (vocal_ && p == player_.get()) {
-        // The singer's Overdrive: any deploy press in a gap between phrases [I].
-        if (a.action == Action::StarPower && a.down && vocal_->deployOverdrive(t, overdriveDrainMs()) && ui_)
-            ui_->gameEvent("sp_engage", {Value::integer(0), Value::integer(1)});
+        // The singer deploys by singing loud in a freestyle section (VocalPlayer screamPoll, RB 0x82458F70) [C]: no button.
         return;
     }
     p->update(t);
@@ -1797,6 +1799,10 @@ int App::controllerType(int pad) {
     if (const int t = typeOf(enhancedValue("instrument_p" + std::to_string(pad + 1))); t >= 0) return t;
     for (const Input::Device& d : input_.devices()) {
         if (d.player != pad) continue;
+        // GAMEPADS' instrument (Drums, Vocals) for the player's device.
+        const Input::Instrument inst = input_.instrument(d.id);
+        if (inst == Input::Instrument::Drums) return 0;
+        if (inst == Input::Instrument::Vocals) return 2;
         std::string n = d.name;
         for (char& c : n) c = char(std::tolower(static_cast<unsigned char>(c)));
         if (n.find("drum") != std::string::npos) return 0;
@@ -1814,6 +1820,7 @@ void App::makeSeats(bool autoplay) {
     unison_.clear(), bandNotices_.clear();
     unisonBonuses_ = saves_ = 0;
     player0Out_ = false;
+    fails_ = {}, outMs_ = {};
     bool haveVocals = vocal_ != nullptr;
     for (const GameSetup::RbMember& m : rbBandSetup_) {
         RbSeat st;
@@ -1831,6 +1838,7 @@ void App::makeSeats(bool autoplay) {
         const bool bot = autoplay || !input_.padConnected(m.pad);
         if (part == Part::Vocals) {
             st.vocal = std::make_unique<VocalPlayer>(*song_, static_cast<Difficulty>(st.difficulty), rules_);
+            st.vocal->setDrainMs(overdriveDrainMs());
             if (!bot) {
                 st.mic = std::make_unique<VocalInput>();
                 std::string err;
@@ -1870,7 +1878,10 @@ void App::updateSeats(float t, bool over, const std::vector<PlayerEvent>& events
         if (ph < 0 || size_t(ph) >= p.chart().phrases.size()) return;
         auto it = unison_.find(p.chart().phrases[size_t(ph)].startTick);
         if (it == unison_.end() || it->second.second < 2) return;
-        if (++it->second.first == it->second.second) {
+        // Members out of play neither block nor get it (RB 0x82465950, 0x82465C00) [C].
+        int outNow = (!vocal_ && player0Out_) ? 1 : 0;
+        for (const RbSeat& q : seats_) outNow += !q.vocal && q.out;
+        if (++it->second.first + outNow == it->second.second && it->second.first >= 2) {
             // Every instrument captured it: the Unison bonus, a second
             // phrase's worth of Overdrive each (unison_phrase reward 2.0) [I].
             ++unisonBonuses_;
@@ -1906,8 +1917,7 @@ void App::updateSeats(float t, bool over, const std::vector<PlayerEvent>& events
             for (const VocalPlayer::Event& e : st.vocal->takeEvents()) {
                 if (e.kind != VocalPlayer::Event::Kind::PhraseRated) continue;
                 st.lastRating = VocalPlayer::ratingName(e.rating), st.lastRatingMs = t;
-                static const float kStep[] = {-0.12f, -0.06f, 0.0f, 0.05f, 0.08f};
-                st.rating = std::clamp(st.rating + kStep[int(e.rating)], 0.0f, 1.0f);
+                st.rating = std::clamp(st.rating + 0.1f * (float(int(e.rating)) / 4.0f - st.rating), 0.0f, 1.0f);  // RB 0x824673D0 [C]
                 if (e.rating >= VocalPlayer::Rating::Okay) ++st.phrasesHit;
             }
             int mult = 1;
@@ -1937,42 +1947,68 @@ void App::updateSeats(float t, bool over, const std::vector<PlayerEvent>& events
         const auto& bm = rules_.rb.bandMultiplier;
         const int bonus = bm.empty() ? 1 << std::min(deploying, 3) : bm[std::min<size_t>(size_t(deploying), bm.size() - 1)];
         player_->setBandBonus(bonus);
-        for (RbSeat& st : seats_) st.player->setBandBonus(bonus);
+        if (vocal_) vocal_->setBandBonus(bonus);
+        for (RbSeat& st : seats_) {
+            st.player->setBandBonus(bonus);
+            if (st.vocal) st.vocal->setBandBonus(bonus);
+        }
     }
-    // Failing out and saving [I: RB's band crowd rules (crowd_loss_per_sec,
-    // save_level, multiplayer_lose_level) as read in scoring.dtb, their use
-    // inferred]: a player whose meter empties is out; any other player's
-    // Overdrive deploy saves every player who is out, back at save_level.
-    const float r0 = vocal_ ? vocalRating_ : player_->rockMeter();
-    if (!player0Out_ && r0 <= 0.0f) player0Out_ = true, bandNotices_.push_back({"PLAYER 1 FAILED!", t});
-    for (RbSeat& st : seats_)
-        if (!st.out && st.rating <= 0.0f) {
-            st.out = true;
-            bandNotices_.push_back({"PLAYER " + std::to_string(int(&st - seats_.data()) + 2) + " FAILED!", t});
+    // Failing out and saving (RB's Player states, 0x82444BB8; fail check
+    // 0x824418C8, save loop 0x8243F548, deploy 0x82442B20) [C]: a member
+    // whose meter falls to the lose level fails out (energy 0, every
+    // member's deploy stopped); while out their meter drains below it by
+    // crowd_loss_per_sec x (players - 1); another member's deploy saves
+    // every member out who has failed at most twice (back at save_level,
+    // judged again after time_to_return_from_brink) and costs the deployer
+    // save_energy instead of Overdrive; the band fails when the members'
+    // weighted meter (equal weights, scoring.dtb (weights)) is under
+    // multiplayer_lose_level. [I: the lose level as the meter's 0, the
+    // brink kept as muted judging-on.]
+    const float t0 = t;
+    auto isOut = [&](int idx) { return idx == 0 ? player0Out_ : seats_[size_t(idx - 1)].out; };
+    auto setOut = [&](int idx, bool v) { (idx == 0 ? player0Out_ : seats_[size_t(idx - 1)].out) = v; };
+    auto rating = [&](int idx) {
+        if (idx == 0) return vocal_ ? vocalRating_ : player_->rockMeter();
+        return seats_[size_t(idx - 1)].rating;
+    };
+    auto setRating = [&](int idx, float v) {
+        if (idx == 0) { if (vocal_) vocalRating_ = v; else player_->setCrowdRating(v); return; }
+        RbSeat& st = seats_[size_t(idx - 1)];
+        st.rating = v;
+        if (!st.vocal) st.player->setCrowdRating(v);
+    };
+    auto spend = [&](int idx, float cost) {
+        if (idx == 0) { if (vocal_) vocal_->spendSave(cost); else player_->spendSave(cost); return; }
+        RbSeat& st = seats_[size_t(idx - 1)];
+        if (st.vocal) st.vocal->spendSave(cost); else st.player->spendSave(cost);
+    };
+    for (int k = 0; k < players; ++k)
+        if (!isOut(k) && rating(k) <= 0.0f) {
+            setOut(k, true);
+            ++fails_[size_t(k)], outMs_[size_t(k)] = t0;
+            for (int q = 0; q < players; ++q) spend(q, q == k ? 1.0f : 0.0f);  // its energy gone, every deploy stopped
+            bandNotices_.push_back({"PLAYER " + std::to_string(k + 1) + " FAILED!", t0});
         }
     if (deployed) {
-        const float back = rules_.rb.saveLevel > 0 ? 0.5f : 0.5f;
-        if (player0Out_) {
-            player0Out_ = false, ++saves_;
-            if (vocal_) vocalRating_ = back;
-            else player_->setCrowdRating(back);
-            bandNotices_.push_back({"PLAYER 1 SAVED!", t});
-        }
-        for (RbSeat& st : seats_)
-            if (st.out) {
-                st.out = false, ++saves_;
-                st.rating = back;
-                if (!st.vocal) st.player->setCrowdRating(back);
-                bandNotices_.push_back({"PLAYER " + std::to_string(int(&st - seats_.data()) + 2) + " SAVED!", t});
+        bool saved = false;
+        for (int k = 0; k < players; ++k)
+            if (isOut(k) && fails_[size_t(k)] <= 2) {
+                setOut(k, false), ++saves_, saved = true;
+                setRating(k, rules_.rb.saveLevel);
+                bandNotices_.push_back({"PLAYER " + std::to_string(k + 1) + " SAVED!", t0});
+            }
+        if (saved)
+            for (int q = 0; q < players; ++q) {
+                const bool active = q == 0 ? (vocal_ ? vocal_->overdriveActive() : player_->starPowerActive())
+                                           : (seats_[size_t(q - 1)].vocal ? seats_[size_t(q - 1)].vocal->overdriveActive() : seats_[size_t(q - 1)].player->starPowerActive());
+                if (active) spend(q, rules_.rb.saveEnergy);
             }
     }
-    // The band fails when its mean meter (the players out count 0) is under
-    // multiplayer_lose_level, or everyone is out.
-    float sum = player0Out_ ? 0.0f : r0;
-    int out = player0Out_ ? 1 : 0;
-    for (const RbSeat& st : seats_) sum += st.out ? 0.0f : st.rating, out += st.out;
+    float sum = 0;
+    for (int k = 0; k < players; ++k)
+        sum += isOut(k) ? -(t0 - outMs_[size_t(k)]) * rules_.rb.crowdLossPerSec * 0.001f * float(players - 1) : rating(k);
     const bool noFail = options_.noFail || enhancedValue("no_fail") == "on" || bot_ != nullptr;
-    if (!noFail && !songLost() && (out == players || sum / float(players) < rules_.rb.multiplayerLoseLevel)) player_->forceFail();
+    if (!noFail && !songLost() && sum / float(players) < rules_.rb.multiplayerLoseLevel) player_->forceFail();
 }
 
 void App::drawSeats(float t, float speed) {
@@ -2033,6 +2069,21 @@ void App::drawBandHud(float t) {
         if (t - ms >= 0 && t - ms < 2500) canvas_.textCentered(kScreenW * 0.5f, 290, 3, {255, 235, 120, 255}, text);
 }
 
+// RB's stars for a player (RbBonus::stars with the band's instrument set,
+// the solo bonus base, the player's difficulty) [C: the rule; I: the base].
+int App::rbStars(const Player* p) const {
+    std::vector<std::string> set{vocal_ ? "vocals" : parts_[0]};
+    for (const RbSeat& st : seats_) set.push_back(st.part);
+    for (std::string& x : set)
+        if (x == "drum") x = "drum";
+    int base = p->baseScore(), bonus = rbBonus_ && p == player_.get() ? rbBonus_->soloBonusMax() : 0;
+    if (vocal_ && p == player_.get()) base = int(vocal_->phrases()) * int(rules_.rb.vocals.count("phrase_value") ? rules_.rb.vocals.at("phrase_value")[size_t(std::clamp(difficulties_[0], 0, 3))] : 400);
+    for (const RbSeat& st : seats_)
+        if (st.player.get() == p && st.bonus) bonus = st.bonus->soloBonusMax(), set = set;
+    const int diff = p == player_.get() ? difficulties_[0] : 3;
+    return RbBonus::stars(rules_, p->score(), base, bonus, set, diff);
+}
+
 // Overdrive's length on the vocals: band_energy's deploy beats (32,
 // scoring.dtb) at the song's mean beat [I: RB drains by the tempo map].
 float App::overdriveDrainMs() const {
@@ -2049,7 +2100,7 @@ void App::updateVocals(float t) {
     if (mic_) pitch = mic_->poll(t, loud);
     if (bot_ && !mic_) {
         pitch = vocal_->targetPitch(t);
-        loud = vocal_->noteAt(t) ? 0.3f : 0.0f;
+        loud = vocal_->percussionDue(t) ? 0.6f : vocal_->noteAt(t) ? 0.3f : 0.0f;  // taps the tambourine's gems
     }
     voicePitch_ = pitch, voiceLoud_ = loud;
     if (SDL_getenv("GD05_VOCALLOG")) {
@@ -2062,8 +2113,9 @@ void App::updateVocals(float t) {
         if (e.kind != VocalPlayer::Event::Kind::PhraseRated) continue;
         vocalRatingName_ = VocalPlayer::ratingName(e.rating);
         vocalRatingMs_ = t;
-        static const float kStep[] = {-0.12f, -0.06f, 0.0f, 0.05f, 0.08f};
-        vocalRating_ = std::clamp(vocalRating_ + kStep[int(e.rating)], 0.0f, 1.0f);
+        // RB 0x824537E8 -> 0x824673D0 [C]: the meter moves toward rating / 4 by
+        // the vocals' crowd phrase_weight (0.1, scoring.dtb) each phrase.
+        vocalRating_ = std::clamp(vocalRating_ + 0.1f * (float(int(e.rating)) / 4.0f - vocalRating_), 0.0f, 1.0f);
         if (e.rating >= VocalPlayer::Rating::Okay) ++vocalPhrasesHit_;
     }
     int mult = 1;
@@ -2670,7 +2722,7 @@ int App::gameCounter(int player, const std::string& key) const {
     if (key == "fills_shown") return rbBonus_ ? rbBonus_->fillsShown() : 0;
     if (key == "fills_deployed") return rbBonus_ ? rbBonus_->fillsDeployed() : 0;
     if (key == "coda_pot") return rbBonus_ ? rbBonus_->codaPot() : 0;
-    if (key == "stars") return player_ ? RbBonus::stars(rules_, player_->score(), player_->baseScore()) : 0;
+    if (key == "stars") return player_ ? rbStars(player_.get()) : 0;
     if (key == "part_drum") return parts_[0] == "drum" ? 1 : 0;
     const int p = std::clamp(player, 0, 1);
     if (key == "sp_phrases") return spPhrases_[p];

@@ -2,6 +2,8 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #pragma once
 
+#include <algorithm>
+
 #include <vector>
 
 #include "game/chart.h"
@@ -24,7 +26,7 @@ class VocalPlayer {
 public:
     enum class Rating { Awful, Meh, Okay, Great, Awesome };
     struct Event {
-        enum class Kind { PhraseRated, PhraseCaptured, Percussion, PercussionMiss };
+        enum class Kind { PhraseRated, PhraseCaptured, Percussion, PercussionMiss, Deployed };
         Kind kind;
         int phrase;
         Rating rating = Rating::Awful;
@@ -37,6 +39,10 @@ public:
     void sing(float t, float midiPitch, float loudness);
     // A percussion strike (any button / a tap on the mic) in a percussion section.
     void percussion(float t);
+    // The mic's level each frame for the tambourine's taps (sing calls it).
+    void tambourinePoll(float t, float loudness);
+    bool percussionDue(float t) const;  // the autoplay's taps
+    int percussionHits() const { return percHits_; }
     void update(float t);
 
     const VocalTrack& track() const { return track_; }
@@ -62,6 +68,11 @@ public:
     // free section) is read as any deploy press here].
     bool deployOverdrive(float t, float drainMs);
     bool overdriveActive() const { return odActive_; }
+    // The band's multiplier while deploying (the Overdrive bonus, RB band +0x68) and the drain.
+    void setBandBonus(int m) { bandBonus_ = std::max(1, m); }
+    void setDrainMs(float ms) { drainMs_ = ms; }
+    void spendSave(float cost) { odActive_ = false, meter_ = std::max(0.0f, meter_ - cost); }
+    bool inFreestyle(float t) const;
     // A Rating's name as RB's HUD shows it (AWFUL ... AWESOME).
     static const char* ratingName(Rating r);
 
@@ -70,6 +81,11 @@ private:
     void finishPhrase(int phrase);
 
     const VocalTrack& track_;
+    const TempoMap* tempo_ = nullptr;
+    size_t nextPerc_ = 0;
+    int percHits_ = 0;
+    bool tapArmed_ = true;
+    float tapMin_ = 1, tapPeak_ = 0;
     const Rules& rules_;
     int difficulty_;
     float slopMs_ = 120, marginSemis_ = 1.5f;
@@ -83,5 +99,10 @@ private:
     float meter_ = 0;
     bool odActive_ = false;
     float odDrainPerMs_ = 0, odLastT_ = -1e9f;
+    std::vector<float> credit_, bonus_, maxW_;
+    int bandBonus_ = 2;
+    float drainMs_ = 16000.0f, loudMs_ = 0;
+    float noteWeight(const VocalNote& n) const;
+    void screamPoll(float t, float loudness, float dt);
     std::vector<Event> events_;
 };

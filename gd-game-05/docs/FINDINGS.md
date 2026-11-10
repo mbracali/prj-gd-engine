@@ -150,3 +150,48 @@ Not applied yet (GD05-018):
   venue variant's own record: the meshes that take the variant's materials
   (arena_geom's stage uses the green placeholder temp.mat otherwise) and the
   objects it hides; now applied at load (game/venue.cpp) [C data; I: timing].
+
+## Vocals in RB's XEX (wave 02; VocalPlayer around RB 0x82452000..0x8245AA00)
+Applied (game/vocal_player.cpp):
+- Each frame credits the one best active note over [start - slop, end +
+  slop] (0x82453B68, 0x82455E18) with dt x hit multiplier x accuracy
+  (0x82454208); accuracy 10^-(d/pitch_margin)^2, 0 under 0.01 (0x82455D78);
+  octaves folded only within 2.5 semitones modulo 12 (0x82453A20); hit
+  multiplier pitch_hit_multiplier / nonpitch_hit_multiplier (x
+  nonpitch_easy_multiplier for '^') x short_note_multiplier under
+  short_note_threshold_ms; the credit capped by the phrase maximum (notes'
+  ms x note_length_factor, under 40 ms none; 0x82452800) and by
+  vocal_cap_growth x the weights reached [C].
+- Rating: the highest threshold strictly passed (0x824587A0); points
+  round(phrase_value x credit/max) x streak multiplier + the Overdrive bonus
+  the same way (0x824587EC); only Awesome extends the streak (0x824537E8);
+  an Overdrive phrase pays spotlight_phrase only when Awesome (0x824661B8) [C].
+- The singer deploys by singing at 0.1 or louder for over 390 ms inside a
+  freestyle section (phrase start + freestyle_pad to the first note -
+  freestyle_pad when at least freestyle_min_duration, or an empty phrase;
+  0x824AD9D0, 0x82458F70; vocals.dta set_scream_thresholds) [C].
+- The crowd meter moves toward rating / 4 by phrase_weight 0.1 (0x824673D0) [C].
+Not applied: the talkies' speech matcher (Fonix: any voice counts, [I]),
+the dropped-credit feedback ring (0x824531F0), slides' start / end pitch
+interpolation, the phrases re-cut end to end (0x824AD9D0), the tambourine
+(mic onsets, +/-120 ticks, 25 points; 0x82456080). RB detects pitch with
+Fonix at 16 kHz; the port's own detector stands in [I].
+
+## Band bonuses in RB's XEX (wave 02)
+Applied (game/rb_bonus.cpp, app.cpp updateSeats):
+- Solos: at the span's end, truncate(hit x 100 / total), the highest award
+  at or below, bonus x the solo's gems (0x8245F268, 0x8245DF78) [C].
+- Big Rock Ending: each strike adds trunc(min(now - the lane's last
+  strike, max_mash_ms) x point_rate / 1000) (0x8245EF20) [C]; banked by the
+  final gem (the band-wide wait, 0x82440838, is per player here [I]).
+- Fills: the crash deploys after crash_fill_ready_hits pad hits in the
+  fill (0x824C1370, 0x824C1530) [C; when a fill shows: I].
+- Stars: band_thresholds by the band's instrument set x base +
+  bonus_thresholds x bonus base, difficulty_thresholds' Expert for gold
+  (0x82435A00, 0x82435918) [C; the bonus base: I].
+- Fail-out (0x824418C8), saves by a deploy for members failed at most twice
+  at save_level costing save_energy (0x8243F548, 0x82442B20), the out
+  member's meter draining by crowd_loss_per_sec x (players - 1), the band's
+  weighted meter under multiplayer_lose_level (0x82466D28) [C]; the brink
+  delay (time_to_return_from_brink) is not applied [I].
+- Unison: members out of play neither block nor receive it (0x82465950) [C].

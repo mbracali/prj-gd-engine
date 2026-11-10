@@ -1045,7 +1045,7 @@ bool UiManager::textEntryFocused() {
 }
 
 void UiManager::buttonDown(int button, int player) {
-    player = std::clamp(player, 0, 1);
+    player = std::clamp(player, 0, 3);
     if (button >= 0 && button < 16) ++presses_[size_t(button)];
     if (isDirection(button)) held_[size_t(player)] = {button, 0, false};
     if (splash_ < 0) feedCheats(button);
@@ -1229,7 +1229,7 @@ bool UiManager::typeKey(int code) {
 }
 
 void UiManager::buttonUp(int button, int player) {
-    player = std::clamp(player, 0, 1);
+    player = std::clamp(player, 0, 3);
     if (held_[size_t(player)].button == button) held_[size_t(player)] = {};
     if (splash_ >= 0 || !current_ || phase_ != Phase::Idle) return;
     const std::vector<Value> args{Value::integer(button), Value::integer(player)};

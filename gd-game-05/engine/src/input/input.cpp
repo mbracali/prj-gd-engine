@@ -135,6 +135,8 @@ const char* Input::instrumentName(Instrument i) {
     case Instrument::Guitar: return "5 Fret Guitar";
     case Instrument::Gamepad: return "Gamepad";
     case Instrument::Midi: return "Generic MIDI";
+    case Instrument::Drums: return "Drums";
+    case Instrument::Vocals: return "Vocals (microphone)";
     }
     return "";
 }
@@ -448,7 +450,9 @@ void Input::load() {
         if (t[kTouchKeys[i]].type == Json::Type::Number) touchOpt_[size_t(i)] = std::clamp(int(t[kTouchKeys[i]].n), 0, 2);
     if (root["player2"].type == Json::Type::Bool) p2Enabled_ = root["player2"].b;
     for (const auto& [guid, d] : root["devices"].o) {
-        if (d["player"].type == Json::Type::Number) players_[guid] = std::clamp(int(d["player"].n), -1, 1);
+        if (d["player"].type == Json::Type::Number) players_[guid] = std::clamp(int(d["player"].n), -1, kPlayers - 1);
+        if (d["rb_part"].str() == "drums") rbParts_[guid] = Instrument::Drums;
+        if (d["rb_part"].str() == "vocals") rbParts_[guid] = Instrument::Vocals;
         if (d["require_strum"].type == Json::Type::Bool) requireStrum_[guid] = d["require_strum"].b;
         else if (guid == "keyboard" && d["frets_strum"].truthy()) requireStrum_[guid] = false;  // version 1
         for (int t = 0; t < kTypes; ++t)
@@ -497,8 +501,10 @@ void Input::save() const {
     for (const auto& [g, p] : players_) ids.insert(g);
     for (const auto& [g, t] : types_) ids.insert(g);
     for (const auto& [g, t] : requireStrum_) ids.insert(g);
+    for (const auto& [g, t] : rbParts_) ids.insert(g);
     for (const std::string& g : ids) {
         Json d = Json::object();
+        if (auto it = rbParts_.find(g); it != rbParts_.end()) d.set("rb_part", Json::string(it->second == Instrument::Drums ? "drums" : "vocals"));
         if (auto it = requireStrum_.find(g); it != requireStrum_.end()) d.set("require_strum", Json::boolean(it->second));
         if (auto it = players_.find(g); it != players_.end()) d.set("player", Json::number(it->second));
         if (auto it = types_.find(g); it != types_.end()) d.set("type", Json::string(kTypeKeys[size_t(it->second)]));
@@ -1328,18 +1334,27 @@ void Input::discardEdit() {
 }
 
 Input::Instrument Input::instrument(const std::string& id) const {
+    if (auto it = rbParts_.find(guidOf(id)); it != rbParts_.end()) return it->second;
     if (midiById(id)) return Instrument::Midi;
     if (const Pad* p = padById(id)) return p->profile == Profile::Joypad ? Instrument::Gamepad : Instrument::Guitar;
     return Instrument::Guitar;  // the keyboard and touch play the guitar part
 }
 
 std::vector<Input::Instrument> Input::instruments(const std::string& id) const {
-    if (midiById(id)) return {Instrument::Midi};
-    if (padById(id)) return {Instrument::Guitar, Instrument::Gamepad};
-    return {Instrument::Guitar};
+    if (midiById(id)) return {Instrument::Midi, Instrument::Drums};
+    if (padById(id)) return {Instrument::Guitar, Instrument::Gamepad, Instrument::Drums, Instrument::Vocals};
+    return {Instrument::Guitar, Instrument::Drums, Instrument::Vocals};
 }
 
 void Input::setInstrument(const std::string& id, Instrument i) {
+    // Rock Band's parts: the player's instrument in the menus (the drum
+    // kit, a microphone) [I: the port's choice; RB asks the controller].
+    if (i == Instrument::Drums || i == Instrument::Vocals) {
+        rbParts_[guidOf(id)] = i;
+        save();
+        return;
+    }
+    rbParts_.erase(guidOf(id));
     Pad* p = padById(id);
     if (!p || i == Instrument::Midi || instrument(id) == i) return;
     // A guitar: the detected guitar type, else a PS2 guitar (adapter), as
@@ -1540,7 +1555,7 @@ void Input::touchEvent(const SDL_TouchFingerEvent& f, bool down, std::vector<Inp
     }
     // The nearest lane at the finger's height, within 0.6 of the lane spacing.
     float best = 1e9f;
-    for (int p = 0; p < 2; ++p) {
+    for (int p = 0; p < kPlayers; ++p) {
         const TouchLanes& l = lanes_[size_t(p)];
         if (!l.active) continue;
         float dy = l.farY[2] - l.nearY[2];
@@ -1767,7 +1782,7 @@ void Input::pollShake(uint64_t nowNs, std::vector<InputEvent>& out) {
 void Input::poll(uint64_t nowNs, std::vector<InputEvent>& out) {
     pollShake(nowNs, out);
     pollMidi(nowNs, out);
-    for (int p = 0; p < 2; ++p) {
+    for (int p = 0; p < kPlayers; ++p) {
         PendingStrum& s = strum_[size_t(p)];
         if (!s.on || nowNs < s.dueNs) continue;
         s.on = false;

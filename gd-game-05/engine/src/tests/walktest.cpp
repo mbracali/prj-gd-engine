@@ -193,11 +193,18 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         wait(1000);
         press(kX);  // CLOTHING
         at("shop_clothing_screen", 20000);
-        for (int i = 0; i < 5; ++i) {
-            wait(1500);
-            check("print_focus");
-            press(kX);
-        }
+        wait(1500);
+        press(kX);  // the first store (punk)
+        at("shop_clothing_genre_screen", 20000);
+        wait(1500);
+        press(kX);  // TORSO: its list
+        wait(1200);
+        for (int i = 0; i < 5; ++i) press(kDown), wait(250);  // flannelcoat_checked, 99: affordable with the 100 a new character has
+        check("print_focus");
+        press(kX);  // buy: the confirm screen
+        wait(1500);
+        check("print_focus");
+        press(kX);  // yes
         wait(1500);
         check("print_focus");
         check("counter:shop_bought:1");
@@ -2115,8 +2122,8 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
     // counter:<key>:<min>: the game's counter (App::gameCounter) reaches min.
     if (s.screen == "counter:shop_bought:1") {
         // An outfit chosen in the shop (worn, bought when it costs).
-        ui::PanelObj* fp = ui.focusPanel();
-        const int n = fp ? ui.interp().send(fp, "num_bought", {}).integerValue() : 0;
+        ScriptObject* panel = ui.interp().findObject("shop_clothing_genre_panel");
+        const int n = panel ? ui.interp().send(panel, "num_bought", {}).integerValue() : 0;
         const Value c = ui.interp().send("tour", "performer", {});
         const int money = c.object ? ui.interp().send(c.object, "money", {}).integerValue() : -1;
         std::printf("  shop: %d outfit(s) worn, %d money left\n", n, money);

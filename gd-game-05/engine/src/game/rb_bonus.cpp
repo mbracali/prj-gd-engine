@@ -55,11 +55,15 @@ bool RbBonus::fillActive(float t) const {
 }
 
 void RbBonus::codaStrike(int lane, float t) {
+    // A pad hit in a shown fill (the drum watcher's freestyle count, RB 0x824C1370) [C].
+    if (fillActive(t) && fillLastGem_ >= 0 && t < chart_.gems[size_t(fillLastGem_)].ms - 100.0f) ++fillHits_;
     if (!inCoda(t) || codaDone_ || lane < 0 || lane > 4) return;
     if (codaLastGem_ >= 0 && t >= chart_.gems[size_t(codaLastGem_)].ms - 200) return;  // the final chord is judged
-    if (t - laneLast_[lane] < float(rules_.rb.codaMaxMashMs) * 0.1f) return;  // one strike counts per lane per mash step [I]
+    // RB 0x8245EF20 [C]: each strike adds trunc(min(now - the lane's last
+    // strike, max_mash_ms) x point_rate / 1000): 100 points a second a lane.
+    const float since = std::min(t - std::max(laneLast_[lane], codaMs_), float(rules_.rb.codaMaxMashMs));
     laneLast_[lane] = t;
-    codaPot_ += rules_.rb.codaPointRate;
+    codaPot_ += int(std::max(0.0f, since) * float(rules_.rb.codaPointRate) * 0.001f);
 }
 
 void RbBonus::update(Player& player, const std::vector<PlayerEvent>& events, float t) {
@@ -67,7 +71,9 @@ void RbBonus::update(Player& player, const std::vector<PlayerEvent>& events, flo
         if (e.kind != PlayerEvent::Kind::Hit || e.gem < 0 || size_t(e.gem) >= chart_.gems.size()) continue;
         const Gem& g = chart_.gems[size_t(e.gem)];
         if (g.solo >= 0 && size_t(g.solo) < soloHits_.size()) ++soloHits_[size_t(g.solo)];
-        if (activeFill_ >= 0 && e.gem == fillLastGem_) {
+        // The crash deploys once crash_fill_ready_hits fill notes were hit
+        // before it (RB 0x824C1530 -> 0x8245EDD0) [C; the off-by-one: I].
+        if (activeFill_ >= 0 && e.gem == fillLastGem_ && fillHits_ >= rules_.solo.starPower.crashFillReadyHits) {
             // The fill's crash: Overdrive deployed.
             player.starPowerButton(t);
             player.starPowerEngage(false, t);
@@ -90,14 +96,17 @@ void RbBonus::update(Player& player, const std::vector<PlayerEvent>& events, flo
         }
     }
     // Solos end: the award.
-    while (nextSolo_ < chart_.solos.size() && chart_.solos[nextSolo_].endMs + 250 < t) {
+    // At the solo's end (RB 0x8245F268): truncate(hit x 100 / total), the
+    // highest award at or below it (0x82435BD0), bonus x the solo's gems
+    // (0x8245DF78) [C].
+    while (nextSolo_ < chart_.solos.size() && chart_.solos[nextSolo_].endMs < t) {
         const size_t i = nextSolo_++;
         if (!soloGems_[i]) continue;
         const int pct = int(std::floor(100.0f * float(soloHits_[i]) / float(soloGems_[i])));
         const RbScoring::Award* award = nullptr;
         for (const RbScoring::Award& a : rules_.rb.guitarSolo)
             if (pct >= a.percent) award = &a;
-        const int points = award ? award->bonus * soloHits_[i] : 0;
+        const int points = award ? award->bonus * soloGems_[i] : 0;
         player.addBonus(points);
         bonus_ += points;
         ++solosDone_;
@@ -111,7 +120,7 @@ void RbBonus::update(Player& player, const std::vector<PlayerEvent>& events, flo
             if (codaMs_ >= 0 && f.startMs >= codaMs_ - 1) continue;
             if (!player.starPowerReady()) continue;
             // Freestyle: the fill's gems are nobody's but its last (the crash).
-            activeFill_ = int(i), fillLastGem_ = -1;
+            activeFill_ = int(i), fillLastGem_ = -1, fillHits_ = 0;
             for (size_t k = 0; k < chart_.gems.size(); ++k)
                 if (chart_.gems[k].ms >= f.startMs - 1 && chart_.gems[k].ms <= f.endMs + 1) fillLastGem_ = int(k);
             for (size_t k = 0; k < chart_.gems.size(); ++k) {
@@ -130,5 +139,33 @@ int RbBonus::stars(const Rules& rules, int score, int baseScore) {
     int n = 0;
     for (float th : rules.rb.starThresholds)
         if (r >= th) ++n;
+    return std::min(n, 6);
+}
+
+int RbBonus::soloBonusMax() const {
+    int top = 0;
+    for (const RbScoring::Award& a : rules_.rb.guitarSolo) top = std::max(top, a.bonus);
+    int n = 0;
+    for (int g : soloGems_) n += g;
+    return top * n;
+}
+
+int RbBonus::stars(const Rules& rules, int score, int baseScore, int bonusBase, std::vector<std::string> instruments, int difficulty) {
+    if (baseScore <= 0) return 0;
+    std::sort(instruments.begin(), instruments.end());
+    const std::vector<float>* th = nullptr;
+    for (const auto& [who, v] : rules.rb.bandStarThresholds) {
+        std::vector<std::string> w = who;
+        std::sort(w.begin(), w.end());
+        if (w == instruments) th = &v;
+    }
+    if (!th) return stars(rules, score, baseScore);
+    int n = 0;
+    for (size_t i = 0; i < th->size(); ++i) {
+        const float bonus = i < rules.rb.bonusStarThresholds.size() ? rules.rb.bonusStarThresholds[i] : 0.0f;
+        if (float(score) < (*th)[i] * float(baseScore) + bonus * float(bonusBase)) break;
+        if (i < rules.rb.difficultyStarThresholds.size() && difficulty < rules.rb.difficultyStarThresholds[i]) break;
+        n = int(i) + 1;
+    }
     return std::min(n, 6);
 }

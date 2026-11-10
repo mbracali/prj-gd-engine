@@ -143,6 +143,13 @@ public:
     // Rock Band's drums (DrumTrackWatcherImpl, Swing RB 0x824A2320): every
     // pad of a chord is its own gem (splitDrumChords) [C].
     void setDrumMode(bool on) { drumMode_ = on; }
+    // A deploy spent on saving a bandmate (RB 0x82442B20 -> 0x82442AC0) [C]:
+    // no Overdrive, the energy less save_energy.
+    void spendSave(float cost) {
+        spActive_ = false, engaged_ = false;
+        meter_->value = std::max(0.0f, meter_->value - cost);
+        spReady_ = meter_->value >= sp_.readyLevel;
+    }
     // The streak multiplier without Star Power's doubling (1..4).
     int baseMultiplier() const { return baseMultiplier_; }
     int notesHit() const { return notesHit_; }

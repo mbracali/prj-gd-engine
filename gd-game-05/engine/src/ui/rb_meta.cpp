@@ -399,6 +399,7 @@ bool RbCharObj::handleNative(Interp& in, const std::string& msg, std::vector<Val
     if (msg == "set_attitude") return d.attitude = sArg(args, 0), true;
     if (msg == "money") return r = Value::integer(d.money), true;
     if (msg == "cheat_add_money") return d.money += iArg(args, 0), true;
+    if (msg == "set_money") return d.money = iArg(args, 0, d.money), m.save(), true;  // the shop pays (shop.dta) [C data]
     if (msg == "tour_score") return r = Value::integer(d.score), true;
     if (msg == "hometown") return r = Value::symbol(d.hometown), true;
     if (msg == "set_hometown") return d.hometown = sArg(args, 0), true;
@@ -1022,6 +1023,7 @@ public:
     bool handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) override {
         if (msg == "cost") return r = Value::integer(cost(sArg(args, 0))), true;
         if (msg == "token") return r = Value::symbol(sArg(args, 0)), true;  // the outfit's own name token [C data: locale]
+        if (msg == "is_closet_category") return r = Value::integer(0), true;
         return RbList::handleNative(in, msg, args, r);
     }
     int cost(const std::string& o) const {
@@ -1122,7 +1124,8 @@ public:
                     OutfitList* l = listFor(cat);
                     ComponentObj* comp = component(focus);
                     const std::string o = l->symbol(comp ? comp->selected : 0);
-                    if (!o.empty() && !c->d.owned.count(o) && l->cost(o) <= c->d.money) c->d.money -= l->cost(o), c->d.owned.insert(o);
+                    // The script pays (set_money, shop_confirm_screen); this keeps it owned.
+                    if (!o.empty()) c->d.owned.insert(o);
                     if (!o.empty() && (c->d.owned.count(o) || l->cost(o) == 0)) c->d.outfit[cat] = o, ++bought_;
                 } else if (stored_.count(cat)) {
                     c->d.outfit[cat] = stored_[cat];
@@ -1205,7 +1208,21 @@ private:
     double startMs_ = 0;
 };
 
+// OutfitConfigPanel color_select_panel (ui/shop.dta): init <outfit panel>
+// keeps the panel the confirm screen answers to [C data: the uses; I: no
+// colour choice yet].
+class OutfitConfigPanelObj : public PanelObj {
+public:
+    using PanelObj::PanelObj;
+    bool handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) override {
+        if (msg == "init") return props["outfit_panel"] = args.empty() ? Value::integer(0) : args[0], r = Value::integer(0), true;
+        if (msg == "clear" || msg == "store" || msg == "undo") return r = Value::integer(0), true;
+        return PanelObj::handleNative(in, msg, args, r);
+    }
+};
+
 std::unique_ptr<ScriptObject> makeRbMetaClass(UiManager& ui, const std::string& cls, const std::string& name) {
+    if (cls == "OutfitConfigPanel") return std::make_unique<OutfitConfigPanelObj>(ui, name, cls);
     if (cls == "AudioLatencyPanel" || name.rfind("calibrate_", 0) == 0) return std::make_unique<AudioLatencyPanelObj>(ui, name, cls);
     if (cls == "OutfitPanel") return std::make_unique<OutfitPanelObj>(ui, name, cls);
     if (cls == "CharPanel") return std::make_unique<CharPanelObj>(ui, name, cls);

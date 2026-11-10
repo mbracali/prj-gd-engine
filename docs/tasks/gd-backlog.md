@@ -930,10 +930,10 @@ universal launcher, not released on its own.
 | GD05-015 | Original | ✅ | `.mogg` version 11: AES-128 counter mode, key at RB 0x828B9AB4 (own AES; owner question OPEN_QUESTIONS Q3) | `data/mogg.cpp`, `data/aes128.cpp`; `--sfxtest` walks all 374 | M1 |
 | GD05-016 | Original | ✅ | Bink movies: FFmpeg bink + binkaudio decoders, `--videotest` | `video/wmv_player.cpp` (name kept from gd02) | M1 |
 | GD05-017 | Original | 🟡 | 18 classes kept raw in C++ (WorldInstance now decoded; PropAnim, MeshDeform, PatchRenderer, TexRenderer, BandMeshLauncher, Movie, ...): port when used | layouts verified in the research decoders | M1 |
-| GD05-018 | Original | 🟡 approximated | Drum judge and vocal judge: rules from the data, logic [I] until RB's watchers are read | `game/drum_player.cpp`, `game/vocal_player.cpp`, docs/FINDINGS.md | M2 |
-| GD05-019 | Original | ❌ | Band mechanics: band meter, saving a bandmate, Unison bonus, Big Rock Endings, solo awards, stars, band multiplier | scoring.dtb blocks loaded (`RbScoring`) | M2 |
-| GD05-020 | Original | ❌ | PC wording: 38 RB strings name the Xbox 360 or a console | `--selftest` reports them | M2 |
-| GD05-021 | Original | 🟡 | Guitar / bass judge: GH2's rules (gd02) with RB's points and streaks; re-read RB's watcher (HOPO rule, windows) | `game/player.cpp` | M2 |
+| GD05-018 | Original | 🟡 | Drum judge and vocal judge: wave 02 read both in the XEX (FINDINGS): RB's drum watcher (a gem per pad) and vocal scoring, scream deploy, tambourine applied [C]; open: kick / no-kick, talkies' speech matcher, slides | `game/player.cpp`, `game/vocal_player.cpp` | M2, wave 02 |
+| GD05-019 | Original | 🟡 | Band mechanics: wave 02 from the XEX: band multiplier, fail-out / saves, Unison, solos, fills, Big Rock Endings, stars [C]; open: brink delay, band-wide coda, when fills show | `game/rb_bonus.cpp`, `app.cpp` updateSeats | M2, wave 02 |
+| GD05-020 | Original | ✅ | PC wording: RB's strings that name the Xbox 360 / Xbox LIVE rewritten (scene/pc_strings.cpp); the Rock Central errors never show; `--selftest` counts it: 0 left | `scene/pc_strings.cpp` | M2, wave 02 |
+| GD05-021 | Original | ✅ | Guitar / bass judge: GH2's rules (gd02) with RB's points and streaks; re-read RB's watcher (HOPO rule, windows) | `game/player.cpp` | M2 |
 | GD05-022 | Original | ❌ | RenderDir / TexRenderer render-to-texture: RB draws some panels (the song list's cloth) into a texture; drawn flat for now [I] | `render/ui_view.cpp` | M3 |
 
 
