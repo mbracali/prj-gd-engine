@@ -122,6 +122,14 @@ void CrowdView::draw(gfx::MaterialRenderer& mr, const scene::WorldCrowd& c, cons
     for (const Crowd::State& st : crowd.crowds())
         if (st.crowd == &c) s = &st;
     if (!s) return;
+    if (SDL_getenv("GD05_CROWDDBG")) {
+        static int n = 0;
+        if (n++ % 300 == 0) {
+            int actors = 0;
+            for (const Crowd::Archetype& a : s->archetypes) actors += a.actor && a.actor->character ? 1 : 0;
+            SDL_Log("crowd %s: %d archetypes, %d with actors, full2d %.2f full3d %.2f", c.name.c_str(), int(s->archetypes.size()), actors, s->full2d, s->full3d);
+        }
+    }
     // The placement mesh's world transform (the card camera's distance, the
     // archetypes' rotation).
     scene::Xfm mesh;

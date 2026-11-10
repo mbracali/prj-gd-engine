@@ -48,7 +48,7 @@ code is there but nothing ran it, and it scores as missing.
 | 16 | Gameplay | A/V calibration moves drawing and judging | 1 | stand-in | 0.25 | the port's offset moves the judge; the RB tracks draw with the video offset; RB's calibration screens not wired |  |
 | 17 | Gameplay | Audio: stems, miss mute per part, sfx | 2 | approximate | 1 | `--sfxtest`; stems by part; miss mute unchecked |  |
 | 18 | Gameplay | Song start order and countdown | 1 | approximate | 0.5 | intro then track |  |
-| 19 | Band | Overdrive: gain (phrases, whammy), deploy (tilt / Select, drum fill, vocals), sound | 3 | approximate | 1.5 | drain per beat, spotlight_phrase, band multiplier, the singer's scream deploy, the fill's crash after 3 hits [C]; the Overdrive sound effect unchecked | GD05-019 |
+| 19 | Band | Overdrive: gain (phrases, whammy), deploy (tilt / Select, drum fill, vocals), sound | 3 | works | 3 | drain per beat, spotlight_phrase, band multiplier, the singer's scream deploy, the fill's crash after 3 hits [C]; player.dta deploy / stop_deploy play rp_deployed_<part>.cue / rp_depleted_<part>.cue (`quickplay` walk with GD05_AUTODEPLOY, logged) | GD05-019 |
 | 20 | Band | Band meter, crowd, failing out, saving a bandmate | 2 | works | 2 | RB's fail-out, saves (at most two, save_level, save_energy, back from the brink), the out member's drain and the band meter [C] | GD05-019 |
 | 21 | Band | Unison bonus | 1 | approximate | 0.5 | Unison with failed members excluded [C]; the phrase mask's exact rule [I] | GD05-019 |
 | 22 | Band | Solos (solo section, % and bonus) | 1 | works | 1 | RB's solo award (percent, award, bonus x the solo's gems) [C]; `--selftest` 232 of 232 solos perfect | GD05-019 |
@@ -60,8 +60,8 @@ code is there but nothing ran it, and it scores as missing.
 | 28 | HUD | RB's HUD: score, multiplier, band meter, Overdrive bar, notices | 3 | stand-in | 0.75 | the debug text HUD and the port's band HUD | GD05-006 |
 | 29 | HUD | 2 to 4 players on screen | 2 | approximate | 1 | the instruments side by side, vocals on top (`band_quickplay`) | GD05-006 |
 | 30 | Stage | Venues with lighting and effects | 4 | approximate | 2 | lights read as RB stores them, WorldDir overrides applied; some venues still too bright [I] | GD05-007 |
-| 31 | Stage | Camera director (venue track) | 2 | stand-in | 0.5 | random shot per VENUE-track category | GD05-007 |
-| 32 | Stage | Crowd | 1 | missing | 0 | no crowd seen | GD05-007 |
+| 31 | Stage | Camera director (venue track) | 2 | approximate | 1 | RB's pick_new_shot [C data]: coop_ shots only, PS3 ones dropped, NORMAL re-keyed by focus flags, held focus notes 61..64 / 70..73, facing alternation, no far after far, the deck and selection_weight, directed cuts hold note-60 picks, LOSE at the fail; GD05_SHOTLOG shows the picks; no intro chains, no band targets (teleports), no BFTB shots | GD05-007 |
+| 32 | Stage | Crowd | 1 | stand-in | 0.25 | the WorldCrowd archetypes load and draw (the `crowd_drawn` counter: 70 in small_club_09); not yet confirmed by eye | GD05-007 |
 | 33 | Stage | Band members: characters, outfits, instruments | 4 | approximate | 2 | the four slots filled with premade characters and their outfit pieces and instruments; skin colours flat; `band_members` counter | GD05-008 |
 | 34 | Stage | Band animation: song-driven clips, lip sync, IK | 3 | stand-in | 0.75 | the base character's stand / win / lose clips; no playing or lip sync | GD05-008 |
 | 35 | Modes | Solo Quickplay | 3 | approximate | 1.5 | `--walktest quickplay` | GD05-009 |

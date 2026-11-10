@@ -136,6 +136,7 @@ struct VenueNote {
     int tick;
     Track track;
     int pitch;
+    float endMs = -1;  // the note-off (VENUE: the camera's held flags)
 };
 
 struct Song {

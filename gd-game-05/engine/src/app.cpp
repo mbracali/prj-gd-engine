@@ -12,6 +12,7 @@
 #include <fstream>
 #include <functional>
 #include <map>
+#include <set>
 #include <memory>
 #include <mutex>
 #include <sstream>
@@ -637,8 +638,10 @@ private:
     std::map<std::string, std::vector<const scene::CamShot*>> rbShots_;
     size_t rbVenueNote_ = 0, rbVenueEvent_ = 0;
     uint32_t rbShotSeed_ = 1;
-    bool rbWinShot_ = false;
-    const scene::CamShot* rbShot(const std::string& category);
+    bool rbWinShot_ = false, rbLoseShot_ = false;
+    float rbNextCamMs_ = -1e9f;
+    std::set<const scene::CamShot*> rbShotUsed_;
+    const scene::CamShot* rbShot(const std::string& category, const std::function<bool(const scene::CamShot&)>& ok = {});
     void rbShots(float t);
     // The band on stage (M9, game/band.h): made when the song begins in the venue.
     std::unique_ptr<Band> band_;
@@ -2279,8 +2282,10 @@ void App::gameCallbacks(int player, const std::vector<PlayerEvent>& events, size
     case K::HeldNoteReleased: in.send(perf, "held_note_released_callback", {Value::real(e.value)}, false); break;
     case K::PhraseCaptured: ui_->callScript(perf, "phrase_captured", {num}); break;
     case K::PhraseMissed: ui_->callScript(perf, "phrase_miss", {Value::integer(e.gem)}); break;
-    case K::StarPowerStart: ui_->callScript(perf, "start_using", {num}); break;
-    case K::StarPowerEnd: ui_->callScript(perf, "stop_using", {num}); break;
+    // Rock Band's player.dta: deploy / stop_deploy (rp_deployed_<track>.cue,
+    // rp_depleted_<track>.cue, the track's deploy) [C data]; GH2's start_using / stop_using.
+    case K::StarPowerStart: ui_->callScript(perf, perf && perf->handler("deploy") ? "deploy" : "start_using", {num}); break;
+    case K::StarPowerEnd: ui_->callScript(perf, perf && perf->handler("stop_deploy") ? "stop_deploy" : "stop_using", {num}); break;
     case K::WhammyStart: ui_->callScript(perf, "whammy_start", {}); break;
     case K::WhammyEnd: ui_->callScript(perf, "whammy_end", {}); break;
     case K::StarGemHit: ui_->callScript(perf, "star_gem_hit", {}); break;
@@ -2305,6 +2310,9 @@ void App::updateSong(float t) {
     if (!over && !paused_) {
         keys_.feed(*player_, t);
         if (bot_) bot_->feed(*player_, t);
+        // A test aid: GD05_AUTODEPLOY=1 deploys Overdrive as soon as it is ready.
+        static const bool autoDeploy = SDL_getenv("GD05_AUTODEPLOY") != nullptr;
+        if (bot_ && autoDeploy && player_->starPowerReady()) player_->starPowerButton(t);
         if (t >= failAtMs_ && !songLost()) {
             if (coopBand_) coopBand_->forceFail();
             else player_->forceFail();
@@ -2909,10 +2917,31 @@ bool App::loadVenue(const std::string& venue, VenueVariant variant) {
         if (hdr) enhancedFrame(r);
     };
     rbShots_.clear();
+    rbShotUsed_.clear();
+    rbNextCamMs_ = -1e9f;
+    rbWinShot_ = rbLoseShot_ = false;
     rbVenueNote_ = rbVenueEvent_ = 0;
+    // RB's world enter (worldbase.dta) [C data]: the mode's shots only
+    // (change_proxies keeps coop_ in a band), no PS3-only ones
+    // (platform_only 4), and each NORMAL shot re-keyed NORMAL<b><d><g><v>
+    // by its focus flags (a far one NORMAL1111); special ones never picked.
+    bool anyCoop = false;
     for (const auto& p : venue_->parts())
-        for (scene::Object* o : p.milo->root().byClass("BandCamShot"))
-            if (auto* c = o->as<scene::CamShot>(); c && !c->keyframes.empty()) rbShots_[c->category].push_back(c);  // a shot with no keyframe frames nothing
+        for (scene::Object* o : p.milo->root().byClass("BandCamShot")) anyCoop |= o->name.rfind("coop_", 0) == 0;
+    for (const auto& p : venue_->parts())
+        for (scene::Object* o : p.milo->root().byClass("BandCamShot")) {
+            auto* c = o->as<scene::CamShot>();
+            if (!c || c->keyframes.empty()) continue;  // a shot with no keyframe frames nothing
+            if (anyCoop && c->name.rfind("coop_", 0) != 0) continue;
+            if (c->platformOnly == 4 || c->name.find("_ps3_") != std::string::npos) continue;
+            std::string cat = c->category;
+            if (cat == "NORMAL") {
+                if (c->flag("special") == "TRUE" || c->flag("special") == "1") continue;
+                auto on = [&](const char* k) { const std::string f = c->flag(k); return f == "TRUE" || f == "1" ? '1' : '0'; };
+                cat += c->flag("distance") == "far" ? std::string("1111") : std::string{on("bass_focus"), on("drums_focus"), on("guitar_focus"), on("vocal_focus")};
+            }
+            rbShots_[cat].push_back(c);
+        }
     if (SDL_getenv("GD05_SHOTLOG")) {
         std::map<std::string, int> cats;
         for (const auto& p : venue_->parts())
@@ -2922,6 +2951,8 @@ bool App::loadVenue(const std::string& venue, VenueVariant variant) {
         for (const auto& [c, n] : cats) line += " " + c + ":" + std::to_string(n);
         SDL_Log("venue shots:%s", line.c_str());
     }
+    if (SDL_getenv("GD05_VENUELOG"))
+        for (const auto& part : venue_->parts()) SDL_Log("venue part: %s", part.path.c_str());
     SDL_Log("venue %s %s loaded in %.0f ms: %d milos, %d proxies, shot %s", venue.c_str(), venues::variantName(variant),
             double(SDL_GetTicksNS() - start) / 1e6, int(venue_->parts().size()), int(venue_->proxies().size()),
             venueView_->shot() ? venueView_->shot()->name.c_str() : "none");
@@ -3050,41 +3081,116 @@ void App::startBand(const SongInfo& info, const Song& song, bool backdrop) {
 // A Rock Band shot of `category`, at random among the venue's, not the
 // one playing when there is another [I: RB's BandDirector picks by the
 // band members in view and the shot's flags, not read yet].
-const scene::CamShot* App::rbShot(const std::string& category) {
+const scene::CamShot* App::rbShot(const std::string& category, const std::function<bool(const scene::CamShot&)>& ok) {
     auto it = rbShots_.find(category);
     if (it == rbShots_.end() || it->second.empty()) return nullptr;
-    const auto& v = it->second;
+    // RB's picker (0x8229F0D0) [C]: the unused shots that pass the filter
+    // first (all of them reset when none is left), weighted by
+    // selection_weight; the current shot is not restarted.
+    std::vector<const scene::CamShot*> pool;
+    for (int pass = 0; pass < 2 && pool.empty(); ++pass) {
+        if (pass == 1)
+            for (const scene::CamShot* c : it->second) rbShotUsed_.erase(c);
+        for (const scene::CamShot* c : it->second)
+            if ((!ok || ok(*c)) && !rbShotUsed_.count(c)) pool.push_back(c);
+    }
+    if (pool.empty()) return nullptr;
+    float total = 0;
+    for (const scene::CamShot* c : pool) total += std::max(0.0f, c->selectionWeight);
     rbShotSeed_ = rbShotSeed_ * 1664525u + 1013904223u;
-    size_t k = (rbShotSeed_ >> 8) % v.size();
-    if (director_ && v[k] == director_->shot() && v.size() > 1) k = (k + 1) % v.size();
-    return v[k];
+    float r = float((rbShotSeed_ >> 8) & 0xFFFF) / 65536.0f * total;
+    const scene::CamShot* pick = pool.back();
+    for (const scene::CamShot* c : pool)
+        if ((r -= std::max(0.0f, c->selectionWeight)) < 0) {
+            pick = c;
+            break;
+        }
+    rbShotUsed_.insert(pick);
+    return pick;
 }
 
-// The VENUE track's camera (RB, ui and config/midi_verify.dta's VENUE
-// rules) [C data: the events; I: their meaning]: note 60 cuts to a NORMAL
-// shot, [do_directed_cut <category>] to that category's; WIN after the song.
+// The VENUE track's camera (worldbase.dta pick_new_shot, midi_parsers.dta's
+// world_camera_parser / world_focus_parser) [C data]: note 60 picks a
+// NORMAL<bass drums guitar vocal> shot from the held focus notes 61..64 and
+// the held 70..73 (no_behind, force_far, force_closeup, no_closeup), facing
+// alternating and no far after far; [do_directed_cut <cat>] forces that
+// category's shot and holds note-60 picks for its min_time + zero_time;
+// LOSE when the band fails, WIN after the song. [I: the 1/8-beat lead, the
+// intro chains, the shots' band targets.]
 void App::rbShots(float t) {
     if (rbShots_.empty() || !director_ || !song_) return;
     const scene::CamShot* next = nullptr;
+    auto held = [&](int pitch) {
+        for (const VenueNote& n : song_->venueNotes)
+            if (n.track == VenueNote::Track::Venue && n.pitch == pitch && n.ms <= t + 1 && (n.endMs < 0 ? n.ms + 1 >= t : n.endMs > t)) return true;
+        return false;
+    };
+    auto pickNormal = [&] {
+        const scene::CamShot* cur = director_->shot();
+        const std::string facing = cur ? cur->flag("facing") : std::string();
+        const std::string dist = cur ? cur->flag("distance") : std::string();
+        bool focus[4] = {held(61), held(62), held(63), held(64)};  // bass, drums, guitar, vocal
+        if (focus[1] && focus[0] + focus[2] + focus[3] >= 2) focus[1] = false;
+        const bool any = focus[0] || focus[1] || focus[2] || focus[3];
+        const bool forceFar = held(71), forceClose = held(72), noClose = held(73) || (forceClose && focus[0] + focus[1] + focus[2] + focus[3] > 1);
+        const bool noBehind = held(70) || dist == "behind";
+        bool farOk = dist != "far" && !any;
+        std::string cat;
+        if (forceFar) cat = "NORMAL1111";
+        else if (any) cat = std::string("NORMAL") + (focus[0] ? '1' : '0') + (focus[1] ? '1' : '0') + (focus[2] ? '1' : '0') + (focus[3] ? '1' : '0');
+        else {
+            static const char* kCats[] = {"0001", "0010", "0100", "1000", "1111", "1100", "0110", "0011"};
+            rbShotSeed_ = rbShotSeed_ * 1664525u + 1013904223u;
+            cat = std::string("NORMAL") + kCats[(rbShotSeed_ >> 8) % 8];
+        }
+        auto filter = [&](const scene::CamShot& c) {
+            const std::string f = c.flag("facing"), d = c.flag("distance");
+            if (c.flag("one_time") == "TRUE" && rbShotUsed_.count(&c)) return false;
+            if (dist != "behind" && !facing.empty() && facing != "null" && f == facing) return false;  // alternate left / right
+            if (forceFar) return d == "far";
+            if (forceClose && !noClose) return d == "closeup";
+            if (d == "far" && !farOk) return false;
+            if (d == "behind" && noBehind) return false;
+            if (d == "closeup" && noClose) return false;
+            return true;
+        };
+        const scene::CamShot* s = rbShot(cat, filter);
+        if (!s) s = rbShot(cat);
+        if (!s) s = rbShot("NORMAL1111", filter);
+        return s;
+    };
     while (rbVenueNote_ < song_->venueNotes.size() && song_->venueNotes[rbVenueNote_].ms <= t) {
         const VenueNote& n = song_->venueNotes[rbVenueNote_++];
-        if (n.track == VenueNote::Track::Venue && n.pitch == 60) next = rbShot("NORMAL");
+        if (n.track == VenueNote::Track::Venue && n.pitch == 60 && t >= rbNextCamMs_ && !rbLoseShot_)
+            if (const scene::CamShot* s = pickNormal()) next = s;
     }
     while (rbVenueEvent_ < song_->venueEvents.size() && song_->venueEvents[rbVenueEvent_].ms <= t) {
         const std::string& e = song_->venueEvents[rbVenueEvent_++].text;
         const std::string key = "[do_directed_cut ";
-        if (e.compare(0, key.size(), key) == 0) {
+        if (e.compare(0, key.size(), key) == 0 && !rbLoseShot_) {
             std::string cat = e.substr(key.size());
             while (!cat.empty() && (cat.back() == ']' || cat.back() == ' ')) cat.pop_back();
-            if (const scene::CamShot* s = rbShot(cat)) next = s;
+            if (const scene::CamShot* s = rbShot(cat)) {
+                next = s;
+                const float minT = std::atof(s->flag("min_time").c_str()), zero = std::atof(s->flag("zero_time").c_str());
+                rbNextCamMs_ = t + (minT + zero) / 30.0f * 1000.0f;
+            }
         }
     }
-    if (t >= song_->endMs && !rbWinShot_) {
-        rbWinShot_ = true;
-        if (const scene::CamShot* s = rbShot(songLost() ? "LOSE" : "WIN")) next = s;
+    if (songLost() && !rbLoseShot_) {
+        rbLoseShot_ = true;  // game_lost: LOSE at the moment the band fails [C data]
+        if (const scene::CamShot* s = rbShot("LOSE")) next = s;
     }
-    if (t < 0) rbWinShot_ = false;
-    if (next && next != director_->shot()) director_->forceShot(next);
+    if (t >= song_->endMs && !rbWinShot_ && !rbLoseShot_) {
+        rbWinShot_ = true;
+        if (const scene::CamShot* s = rbShot("WIN")) next = s;
+    }
+    if (t < 0) rbWinShot_ = rbLoseShot_ = false, rbNextCamMs_ = -1e9f;
+    if (next && next != director_->shot()) {
+        static const bool log = SDL_getenv("GD05_SHOTLOG") != nullptr;
+        if (log) SDL_Log("shot %.0f: %s (%s, %s %s)", double(t), next->name.c_str(), next->category.c_str(), next->flag("distance").c_str(), next->flag("facing").c_str());
+        director_->forceShot(next);
+    }
 }
 
 // world_panel's milo: ../world/<v>/<v>[_mp|_coop].milo (GD05_VENUE replaces the venue).

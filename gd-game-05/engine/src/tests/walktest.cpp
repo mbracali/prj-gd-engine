@@ -474,7 +474,8 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         at("qp_endgame_screen", 20000);
         wait(1000);
     } else if (scenario == "quickplay") {
-        endMs_ = 30000;  // the song ends early (the walk's end time)
+        endMs_ = 30000;  // the song ends early (the walk's end time; GD05_WALK_END overrides)
+        if (const char* e = SDL_getenv("GD05_WALK_END")) endMs_ = float(std::atof(e));
         rbQuickplay();
         wait(3000);
         check("counter:rb_track_frames:30");

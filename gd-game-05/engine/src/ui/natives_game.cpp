@@ -764,6 +764,9 @@ public:
         r = Value::integer(0);
         if (msg == "extend_anim") return r = Value::obj(this), true;
         if (msg == "practice_reset") return true;  // RB practice.dta: the track starts again with the song [I]
+        // RB's deploy / stop_deploy (player.dta send_track): the program's track view draws Overdrive itself.
+        if (msg == "deploy" || msg == "stop_deploy") return true;
+        if (msg == "get_dir") return r = Value::obj(this), true;
         if (msg == "animate") {
             std::vector<Value> a{Value::integer(p_)};
             for (const Value& raw : args) {
@@ -841,6 +844,10 @@ private:
         if (msg == "add_sinks") return true;  // RB practice.dta: callbacks the port's practice does not need [I]
         if (msg == "difficulty") return r = Value::integer(ui_.session().players[size_t(std::clamp(index, 0, 3))].difficulty), true;
         if (msg == "band_energy") return r = Value::real(p ? p->starMeter() : 0.0f), true;
+        // RB player.dta's deploy / stop_deploy and the HUD's state [C data].
+        if (msg == "can_deploy") return r = Value::integer(p && p->starPowerReady() ? 1 : 0), true;
+        if (msg == "is_deploying") return r = Value::integer(p && p->starPowerActive() ? 1 : 0), true;
+        if (msg == "popup_help" || msg == "enable_drum_solos") return true;  // [I] RB's help popups are not drawn
         if (msg == "get_times_failed") return r = Value::integer(0), true;  // [I] the band's fail-outs are not counted per player yet
         if (msg == "notes_per_streak") return r = Value::integer(0), true;
         if (msg == "instrument") {

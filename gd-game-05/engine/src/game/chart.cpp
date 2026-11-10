@@ -302,7 +302,13 @@ Song buildSong(const MidiFile& midi, int hopoThresholdTicks) {
     if (const MidiTrack* venue = findTrack(midi, "VENUE"))
         for (const MidiEvent& e : venue->events) {
             if (e.isNoteOn()) song.venueNotes.push_back({float(song.tempo.tickToMs(e.tick)), int(e.tick), VenueNote::Track::Venue, e.data1});
-            else if (e.status == 0xFF && e.data1 == 0x01)
+            else if (e.isNoteOff()) {
+                for (auto it = song.venueNotes.rbegin(); it != song.venueNotes.rend(); ++it)
+                    if (it->track == VenueNote::Track::Venue && it->pitch == e.data1 && it->endMs < 0) {
+                        it->endMs = float(song.tempo.tickToMs(e.tick));
+                        break;
+                    }
+            } else if (e.status == 0xFF && e.data1 == 0x01)
                 song.venueEvents.push_back({float(song.tempo.tickToMs(e.tick)), int(e.tick), eventText(e.text)});
         }
     if (const MidiTrack* beat = findTrack(midi, "BEAT"))
