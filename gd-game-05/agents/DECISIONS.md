@@ -390,3 +390,10 @@ pattern). Each says what, why and how to undo it.
   player 2: the song could not be paused or resumed from the keyboard.
 - **Undo:** App::handleAction's `ev.player = 0`, Input::keyboardSlot's
   fallback.
+
+## Owner: completeness 36% (2026-11-10)
+- **What:** the owner set Rock Band's completeness to 36% (game-info.yaml
+  0.36, README, the site) after playing the build; the parity ledger
+  (docs/parity.md, 61%) scores rows too generously for what a player sees.
+- **How to apply:** never raise game-info.yaml above the owner's figure
+  without the owner's OK; report the ledger's figure next to it.
