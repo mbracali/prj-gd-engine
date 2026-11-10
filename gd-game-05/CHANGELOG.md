@@ -13,6 +13,20 @@ inside the Guitar Dream Universal Launcher's release
   a TV, which on a TV cancels out).
 - The sub-menus show their orange highlight bar on the focused item
   (QUICKPLAY under SOLO).
+- The sub-menus' orange bar stays inside the button, under its metal rim
+  (no orange box around it any more).
+- Options > Enhanced Options has its button background like the others.
+- The GAMEPADS button stays on the main menu whichever sub-menu is open.
+- Labels are no longer grey on the menus without lights of their own (the
+  results, fail, pause, tour, shop, band and practice screens).
+- The keyboard plays a song (frets, strum, Overdrive on Tab, Enter to
+  pause and resume) even with a guitar left plugged in; keys changed in
+  GAMEPADS work in the song.
+- The song list's names fit their rows as on the original (smaller text).
+- The main menu no longer loses its buttons after going back to the title
+  and pressing Start.
+- The Enhanced Options backdrop shows the band on stage through one of the
+  venue's own camera shots.
 
 ## [0.0.5] - 2026-11-10
 

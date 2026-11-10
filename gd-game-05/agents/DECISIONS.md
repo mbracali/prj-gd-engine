@@ -348,3 +348,45 @@ pattern). Each says what, why and how to undo it.
   disabled.mat (0x822FF4F8 / 0x822FF428 / 0x822FEE60) [C; I: the material
   swap by name, the 0.1 s slide not drawn].
 - **Undo:** UiView::drawHighlight / setUiFocus.
+
+## D31
+- **What (2026-11-10, GD05-053):** the Enhanced Options backdrop (the
+  port's own: RB has no such screen, D16) shows one of the venue's own band
+  shots instead of the port's hand-made singer close-up (which put the
+  camera inside the drum kit): from RB's picker categories NORMAL1111 (the
+  far shots of the whole band) then directed_all, the shot whose camera
+  (CameraDirector::evaluate at frame 0) shows most of the band's heads in
+  the part of the picture the Enhanced boxes leave free (right half, above
+  the help box). It plays as in a song (band targets' clips, the director)
+  for the backdrop's posing second, then freezes [C: the shots; I: the
+  choice].
+- **Undo:** App::updateBackdrop's shot block.
+
+## D32
+- **What (2026-11-10, GD05-049):** a panel without an environ of its own
+  draws in RB's UI environ, ambient (ui (env (ambient 1 1 1)))
+  (config/default.dta; UIManager::Init RB 0x82259408 creates the environ
+  and sets its ambient from it) [C]. The port fell back to GH2's 0.3, so
+  every use_environ font (kabel_bold, avantgarde, bodoni ...) of such a
+  panel was a third of its colour preset: the grey labels.
+- **Undo:** UiView::defaultEnvironment / setDefaultAmbient.
+
+## D33
+- **What (2026-11-10, GD05-052):** a panel exited by a screen change is
+  unloaded by RB and loads fresh when it enters again (the panel's screen
+  count); the port keeps it loaded, so on entering again it forgets what
+  its exit triggers posed and stops their animations [C: the unload; I:
+  forgetting only those]. main_panel's ui_exit_back slides its five buttons
+  out (solo.tnm .. training.tnm 25 -> 0) with no ui_enter to bring them
+  back: after Back to the title and Start, the main menu had no buttons.
+- **Undo:** UiManager::enterPanel / exitPanel (exitPosed_).
+
+## D34
+- **What (2026-11-10, GD05-050):** in a one-player song every device plays
+  for player 1 (gd02's rule) and every device's Start / menu press acts as
+  player 1 while the song lives (paused too); the keyboard falls back to
+  player 1 when pads hold every enabled slot. A Rock Band guitar left
+  plugged in held player 1 and the keyboard's Enter (Start) went to
+  player 2: the song could not be paused or resumed from the keyboard.
+- **Undo:** App::handleAction's `ev.player = 0`, Input::keyboardSlot's
+  fallback.

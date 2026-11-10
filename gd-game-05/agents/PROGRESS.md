@@ -702,3 +702,31 @@ animation, the help bar, the real-device checklist. Time used: about 4 h.
 - Left: the lit orange is still ~1.3x brighter than the reference; the
   highlight's orange frame (normal.mat) shows over the pill's rim; the
   fail screen and band naming labels not compared.
+
+## 2026-11-10, wave 05 retest (GD05-046..053)
+
+- 046 highlight box: resource/highlight.milo's highlight.mesh (normal.mat,
+  an orange frame wider than the button) is hidden in the file; the port
+  drew it. Only shown meshes now; the bar (highlight_sub.mesh) sits under
+  the rim as in ref.png.
+- 047 Enhanced Options button: each options row's background is a
+  submenu*.mesh parented to its button in options.milo; the port's copy
+  now gets a copy of it, one resting step under Calibrate.
+- 048 GAMEPADS: shown and clickable on every screen with main_panel.
+- 049 grey labels [C]: panels without an environ drew at GH2's 0.3
+  ambient; RB's UIManager::Init (0x82259408) makes a UI environ with
+  (ui (env (ambient 1 1 1))) (D32). Shots of 18 screens look right; the
+  band hub's list stays dark (its own environ, not compared).
+- 050 keyboard: with a guitar plugged in the keyboard is player 2 and its
+  Start did not pause / resume; one-player songs take every device as
+  player 1 (D34). Walks rb_keys_play, rb_keys_rebind.
+- 051 song list: RB's BandLabel fit (0x8226DDA8 / 0x82214FE8) measures
+  height in the font's cell aspect and steps the size by 0.2: names 30 ->
+  28; accented kerning pairs (sign-extended keys) found. Left: the
+  heading row overlapping the highlight bar.
+- 052 disappearing menus: walk rb_fuzz (seed 1) failed at step 27: after
+  Back to the title and Start main_panel had no buttons (its ui_exit_back
+  slid them out; RB reloads the panel fresh). enterPanel forgets exit
+  poses (D33); 2000 steps pass (327 checks).
+- 053 Enhanced backdrop: the venue's own band shots (D31) instead of the
+  port's close-up inside the drum kit.

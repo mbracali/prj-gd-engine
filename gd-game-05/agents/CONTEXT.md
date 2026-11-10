@@ -96,3 +96,14 @@ track clock follows it; the sfx log and screenshot timestamps are wall
 clock. Rock Band adds the vocal pitch clock (the mic capture) and the
 input / video calibration: documented in `docs/audio_and_charts.md` as they
 land.
+
+Wave 05 retest (2026-11-10):
+- `--walktest rb_keys_play`: a quick play song played with key events only
+  (frets 1-5, strum Down, Tab Overdrive, Enter pause / resume) beside a
+  virtual guitar holding player 1; `rb_keys_rebind`: GAMEPADS' capture and
+  Save of green on Q, then played with Q.
+- `--walktest rb_fuzz`: seeded random mouse / key input on the main menu and
+  its sub-menus (`GD05_FUZZ_SEED`, default 1; `GD05_FUZZ_STEPS`, default
+  2000; ~10 min); every few steps the screen's panels must be up, shown and
+  draw their buttons on screen, with a focused panel. On a failure it prints
+  the last actions and saves `fuzz_fail.bmp` under `GD05_WALK_SHOTS`.
