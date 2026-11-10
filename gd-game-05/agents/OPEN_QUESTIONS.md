@@ -26,3 +26,12 @@ chosen default is in `DECISIONS.md`.
 2. Android: the launcher asks for the microphone permission the first time
    the app starts (not when a game opens the mic).
 3. The mogg key as a constant in the source is OK.
+
+## Wave 04 (2026-11-10)
+
+4. The song list's cloth (D20): with every value from the disc (cloth.cam at
+   the rest banner_lower3rd.tnm ends at, the cloth's bones, the list's
+   position in its panel) the first row ("Random Song") sits half under the
+   title bar. Is the original's first row fully visible (so something in
+   the port's list or camera is still off), or does the banner overlap it?
+   (No emulator: a photo or a memory of the original screen would settle it.)

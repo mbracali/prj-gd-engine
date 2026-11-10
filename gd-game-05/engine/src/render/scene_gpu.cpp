@@ -94,6 +94,7 @@ template <class A> const A* keysOf(const A& a) {
 
 void ScenePose::clear() {
     local_.clear();
+    dirXfm_.clear();
     mats_.clear();
     showing_.clear();
     meshAnims_.clear();
@@ -165,6 +166,13 @@ scene::Xfm ScenePose::world(const scene::Object* o, const scene::Xfm& own) const
         if (auto it = dirBase_.find(o->dir); it != dirBase_.end() && it->second && it->second != o) x = scene::compose(own, world(it->second));
     if (t && !t->parent.empty() && o->dir && !toDir) {
         const scene::Object* p = o->dir->resolve(t->parent);
+        // Parented to its own directory (not an object of it): a RndDir is
+        // a RndTransformable too (RB's RndDir rev 10 keeps one), so the
+        // object hangs from the directory's own transform (qp_selsong's
+        // RenderDir: turned 9.5 degrees and set back 121; the tour hub's 217
+        // to the left) [C data; I: the root directory's world is its local].
+        if (!p && t->parent == o->dir->name)
+            if (auto it = dirXfm_.find(o->dir); it != dirXfm_.end()) x = scene::compose(own, it->second);
         if (p && p != o && transOf(p)) {
             const scene::Xfm pw = world(p);
             if (t->constraint == 2) {

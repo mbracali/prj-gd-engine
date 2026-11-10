@@ -34,6 +34,9 @@ public:
     // qp_endgame.milo player0..3: tour_endgame_player.milo under a PanelDir
     // object's transform): its objects without a parent hang from `owner`.
     void setDirBase(const scene::Directory* d, const scene::Object* owner) { dirBase_[d] = owner; }
+    // A directory's own transform (a RenderDir's RndTransformable, read from
+    // its record): the objects parented to the directory hang from it.
+    void setDirXfm(const scene::Directory* d, const scene::Xfm& x) { dirXfm_[d] = x; }
     struct MatState {
         bool hasColor = false, hasAlpha = false, hasXfm = false;
         float rgb[3] = {1, 1, 1};
@@ -110,6 +113,7 @@ public:
 
 private:
     std::map<const scene::Directory*, const scene::Object*> dirBase_;
+    std::map<const scene::Directory*, scene::Xfm> dirXfm_;
     void transAnim(const scene::TransAnim& a, float frame);
     void matAnim(const scene::MatAnim& a, float frame);
 

@@ -2,6 +2,8 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "render/ui_cloth.h"
 
+#include <SDL3/SDL.h>
+
 #include <algorithm>
 #include <cmath>
 
@@ -16,6 +18,12 @@ std::unique_ptr<UiCloth> UiCloth::make(const scene::Directory& dir, RenderDevice
 }
 
 UiCloth::UiCloth(const scene::Directory& dir, RenderDevice& device) : dir_(dir), device_(device) {
+    if (SDL_getenv("GD05_CLOTHLOG"))
+        for (const auto& o : dir.objects)
+            if (const scene::Trans* t = transOf(o.get()); t && (o->name == "Box01.mesh" || o->name == "popup_bg.mesh" || o->name == "cloth_controller.mesh"))
+                SDL_Log("cloth: %s parent '%s', dir '%s' (self %s, trans %d, parent dir %d), resolves %s", o->name.c_str(), t->parent.c_str(), dir.name.c_str(),
+                        dir.self ? dir.self->cls.c_str() : "-", dir.self && transOf(dir.self.get()) ? 1 : 0, dir.parent ? 1 : 0,
+                        dir.resolve(t->parent) ? dir.resolve(t->parent)->cls.c_str() : "nothing");
     sk_.build(dir);
     rig_ = std::make_unique<chr::Rig>(dir, sk_);
     for (const auto& o : dir.objects) {

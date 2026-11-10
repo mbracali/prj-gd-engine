@@ -184,6 +184,25 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         check("counter_max:song_loads:1");
         screen("game_screen");
         check("counter_max:menu_venue_sounds:0");
+    } else if (scenario == "rb_pause_quit") {
+        // Wave 04 (GD05-028): the pause screen's QUIT (pause.dta pause_quit
+        // -> confirm_quit_screen, no.btn focused), yes, back to the main menu
+        // through meta_loading_quit_early_screen; the song stays loaded once.
+        rbQuickplay();
+        wait(3000);
+        key(SDLK_ESCAPE);
+        at("pause_screen", 10000);
+        wait(800);
+        for (int i = 0; i < 4; ++i) press(kDown), wait(250);  // resume, restart, lefty, new song, QUIT
+        check("print_focus");
+        press(kX);  // QUIT
+        at("confirm_quit_screen", 10000);
+        wait(800);
+        check("print_focus");
+        press(kUp), wait(300);  // no.btn -> yes.btn
+        press(kX);  // yes
+        at("main_screen", 40000);
+        check("counter_max:song_loads:1");
     } else if (scenario == "rb_lose_quit") {
         // RB's lose screen's QUIT (lose.dta: confirm_goto meta_loading_main_screen) back to the main menu.
         failMs_ = 8000;

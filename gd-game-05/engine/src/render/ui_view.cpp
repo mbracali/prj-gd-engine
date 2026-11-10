@@ -5,6 +5,7 @@
 #include <SDL3/SDL.h>
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <functional>
 #include <set>
 
@@ -87,6 +88,37 @@ std::vector<std::string> recordNames(const Bytes& rec) {
     }
     return out;
 }
+// A RenderDir record's RndTransformable (rev 9: local then world 3x4
+// matrices, both with unit rows): the first such block in the record [I:
+// found by its shape; the RenderDir class is not decoded].
+bool renderDirXfm(const Bytes& r, scene::Xfm& out) {
+    auto f = [&](size_t p) {
+        const uint32_t b = uint32_t(r[p]) << 24 | uint32_t(r[p + 1]) << 16 | uint32_t(r[p + 2]) << 8 | r[p + 3];
+        float v;
+        std::memcpy(&v, &b, 4);
+        return v;
+    };
+    for (size_t i = 0; i + 4 + 96 <= r.size(); ++i) {
+        if (r[i] != 0 || r[i + 1] != 0 || r[i + 2] != 0 || r[i + 3] != 9) continue;
+        bool ok = true;
+        float m[24];
+        for (int k = 0; k < 24 && ok; ++k) {
+            m[k] = f(i + 4 + size_t(k) * 4);
+            ok = std::isfinite(m[k]) && std::fabs(m[k]) < 1e6f;
+        }
+        for (int mat = 0; mat < 2 && ok; ++mat)
+            for (int row = 0; row < 3 && ok; ++row) {
+                const float* q = m + mat * 12 + row * 3;
+                const float l = q[0] * q[0] + q[1] * q[1] + q[2] * q[2];
+                ok = std::fabs(l - 1.0f) < 0.02f;
+            }
+        if (!ok) continue;
+        for (size_t k = 0; k < 9; ++k) out.rot[k] = m[k];
+        out.pos = {m[9], m[10], m[11]};
+        return true;
+    }
+    return false;
+}
 }  // namespace
 
 int UiView::clothPolls() const { return cloth_ ? cloth_->polls() : 0; }
@@ -95,7 +127,15 @@ bool UiView::drawRenderDir3d(MaterialRenderer& r) {
     const scene::Directory& outer = milo_->root();
     // The RenderDir's own pollables (the cloth: CharTransCopy, CharHair),
     // once a frame before it draws [C data; the 60 Hz step: rig.cpp].
-    if (!clothChecked_) clothChecked_ = true, cloth_ = UiCloth::make(outer, cache_.device());
+    if (!clothChecked_) {
+        clothChecked_ = true;
+        cloth_ = UiCloth::make(outer, cache_.device());
+        // The RenderDir's own RndTransformable (its record keeps RndDir rev
+        // 10's transform after the ObjectDir part) [C data]: what its
+        // objects parented to the directory hang from.
+        scene::Xfm dx;
+        if (outer.self && renderDirXfm(outer.self->record, dx)) pose_.setDirXfm(&outer, dx);
+    }
     if (cloth_) {
         const double now = double(SDL_GetTicksNS()) / 1e6;
         const double dt = clothLastMs_ < 0 ? 0 : std::clamp(now - clothLastMs_, 0.0, 100.0);

@@ -4,6 +4,30 @@ All notable changes for players. Versions follow SemVer; gd-game-05 ships
 inside the Guitar Dream Universal Launcher's release
 (`docs/platform/release-process.md`).
 
+## [0.0.4] - 2026-11-10
+
+### Fixed
+- The loading screen's band (guitarist, singer, drummer, bassist) stands
+  side by side and moves, instead of four icons piled on one spot.
+- The strike line's fret smashers are drawn, each in its colour (green,
+  red, yellow, blue, orange; the drum pads red, yellow, blue, green and the
+  orange kick).
+- The gems keep their own colours (the green gems no longer take another
+  texture), and the drum gems sit on their pads without overlapping.
+- Sustain tails show: thin glowing lines that wobble with the whammy bar
+  and fade at their end, as in Rock Band.
+- Screen changes no longer wait a second with nothing moving: screens
+  change as Rock Band's do, waiting only for the animations Rock Band
+  waits for.
+
+### Changed
+- The song list, the difficulty / instrument card and the shop, tour and
+  creator rooms hang on their swaying cloth, seen through their own
+  cameras.
+- Menu animations play as Rock Band plays them: their speed, delays and
+  loops (the lights, the pause menu's buttons coming in one after another,
+  the loading animations), and a main menu button moves when chosen.
+
 ## [0.0.3] - 2026-11-10
 
 ### Fixed

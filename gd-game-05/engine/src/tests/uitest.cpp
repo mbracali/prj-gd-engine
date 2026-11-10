@@ -285,6 +285,15 @@ int runUiTest(const std::string& dataPath) {
     if (ui.bootTree()) collectSends(*ui.bootTree(), sends);
     int unreachable = 0;
     int panels = 0, loaded = 0, checked = 0, dynamic = 0;
+    // Each panel's milo names, and the names its scripts use that its own
+    // milo lacks: resolved after the loop through the screens that hold it
+    // (UiManager::resolve looks in the screen's panels, as RB's UIScreen
+    // does for a panel's component names [I]).
+    std::map<std::string, std::set<std::string>> panelNames;
+    struct Unknown {
+        std::string panel, name, path;
+    };
+    std::vector<Unknown> unknowns;
     for (ScriptObject* o : ui.madeObjects()) {
         auto* p = dynamic_cast<ui::PanelObj*>(o);
         if (!p) continue;
@@ -339,12 +348,29 @@ int runUiTest(const std::string& dataPath) {
             }
         for (const std::string& r : refs) {
             ++checked;
-            if (!names.count(r)) {
-                std::printf("  UNKNOWN component %s of %s (%s)\n", r.c_str(), p->name().c_str(), path.c_str());
-                in.onUnknown("component " + p->name() + " " + r);
-            }
+            if (!names.count(r)) unknowns.push_back({p->name(), r, path});
         }
+        panelNames[p->name()] = std::move(names);
     }
+    int viaScreen = 0;
+    for (const Unknown& u : unknowns) {
+        bool found = false;
+        for (ScriptObject* o : ui.madeObjects()) {
+            auto* sc = dynamic_cast<ui::ScreenObj*>(o);
+            if (!sc || found) continue;
+            const auto ps = sc->panels();
+            if (std::none_of(ps.begin(), ps.end(), [&](ui::PanelObj* q) { return q->name() == u.panel; })) continue;
+            for (ui::PanelObj* q : ps)
+                if (auto it = panelNames.find(q->name()); it != panelNames.end() && it->second.count(u.name)) found = true;
+        }
+        if (found) {
+            ++viaScreen;
+            continue;
+        }
+        std::printf("  UNKNOWN component %s of %s (%s)\n", u.name.c_str(), u.panel.c_str(), u.path.c_str());
+        in.onUnknown("component " + u.panel + " " + u.name);
+    }
+    std::printf("uitest: %d component names found in another panel of the panel's screens\n", viaScreen);
     std::printf("uitest: %d panels, %d milos loaded, %d component names checked, %d run-time milos skipped, %d handlers nothing calls\n",
                 panels, loaded, checked, dynamic, unreachable);
     // GH2's career checks (gd02's campaign); RB's tours come with M7
