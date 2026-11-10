@@ -5,6 +5,109 @@ Rock Band (Xbox 360) -> `gd05`. Kickoff: `docs/spikes/GD-GAME-05_KICKOFF.md`
 bottom. "Verified" lines quote the command and its output; "built only" and
 "not tested" are said explicitly.
 
+## Final report, wave 05 (2026-11-10, about 4.5 h of agent time, 08:50 -> 13:20)
+
+The owner's wave 05 list (agents/WAVE05_REQUIREMENTS.md). Ledger
+(`python3 tools/parity.py docs/parity.md`): **61.00%** (unchanged: no
+parity row is complete yet). gd05 **0.0.5** (CHANGELOG).
+
+Each requirement: cause, fix, how verified.
+- **2.1 Colour grading (GD05-030, partly).** Cause found [C]: RB sets a
+  display gamma ramp from rnd (gamma 0.85) (config/default.dta; RB
+  0x8246BD90 builds pow(i/256, gamma)); the port showed the frame linear.
+  Fix: every frame through pow(c, 0.85) (setOutputGamma, local + core
+  backends, screenshots ramped; D25). Second shared cause: prelit fonts
+  ignored their text colour (port titles white, state colours lost) (D27).
+  Verified: main menu label 214 -> 219, menus / venue brighter in shots;
+  core opengl3 renders. Open: the main menu's focused orange still looks
+  gold; the main menu labels are lit by main_buttons.env (lights 0.38 + 1.0).
+- **2.2 Create a Band background (GD05-031): not fixed.** Shots added to
+  band_tour (shot_band_create / shot_band_naming): the room from a camera
+  looking up. OPEN_QUESTIONS wave 05 #1.
+- **2.3 Menus disappearing (GD05-032): not reproduced** (rb_mouse goes
+  back and forth through four sub-menus, all draw). Needs the owner's steps.
+- **2.4 Esc x3 (GD05-033): fixed.** RB's main menu goes back to the title,
+  which reset the count. Verified: new walk rb_esc3 (the game quits).
+- **2.5 Stutter (GD05-034): measured, not fixed.** GD05_HITCHLOG=<ms>:
+  a 2.4 s frame as game_screen starts (venue 0.5 s, track 0.1 s, band
+  ~1.8 s), smaller ones on the song list (0.25 s). Rule added to
+  docs/guidelines/usual-bugs.md (loader thread, bounded uploads, start on
+  the loading screen). The loader thread is the next step.
+- **3.1 Enhanced menu (GD05-035): fixed.** Orange titles / gold names (prelit
+  colour), Kabel Bold as the bold menu font, RB's Back / Select help bar.
+  Verified: screenshot next to gd02's Enhanced Options; layout and space
+  unchanged.
+- **3.2 GAMEPADS (GD05-036): done.** A pill button bottom left of the main
+  menu (D26); the old help bar patch is gone (RB's main menu has none).
+  Verified: rb_mouse checks it twice and clicks it (gamepads_screen); shot.
+- **3.3 Mouse (GD05-037): fixed.** A click on a main menu button beside an
+  open sub-menu now selects it (non-focus panel). Verified: rb_mouse (SOLO,
+  MULTIPLAYER, TRAINING from the sub-menu, OPTIONS, Enhanced, GAMEPADS).
+- **3.4 Instrument / difficulty paper (GD05-038): texture fixed.** Cause:
+  the proxied seldiffpart_player.milo's own subdirectory
+  (seldiffpart_common.milo, border.tex) was not loaded (GD05_TEXLOG showed
+  "border.tex of border.mat: not found"). Verified: shot, the ornate dark
+  paper with its silver frame; the wave is wave 04's cloth. Label colours
+  follow color_presets.dta select_difficulty.
+- **3.5 Loading icons / 3.6 fail screen (GD05-039 / 040): partly.** Both
+  brighter through the gamma ramp; the fail screen's labels are still grey
+  (lit by its panel lights); not compared item by item.
+- **4 Drummer (GD05-041): fixed.** Cause [C data]: GH2's tempo mask 3 met
+  RB's kLeftArm / kRightArm bits, deleting every drummer clip in slow songs
+  (bind pose, collapsed). RB's bits 16/32/64, mask 112; sit fallback (D28).
+  Verified: Creep (slow) logs no "no clip in group" (was 46k lines).
+- **4 Overbright (GD05-042) / filters (GD05-043): not fixed.** RB's shaders
+  read (Xenos disassembly, a read-only helper): lights uploaded unscaled,
+  same lighting maths; RB adds the environ ColorXfm, a bloom mask in alpha
+  and a final post sat(ColorXfm . (frame + bloom * intensity)) with no
+  luminance map. A light now takes its colour owner's colour [C]. The white
+  wash remains even with GD05_POST=0 (OPEN_QUESTIONS wave 05 #2).
+- **4 Hands (GD05-044) / fret board (GD05-045): not started.** Plan: RB's
+  MidiParser format ({new MidiParser ...}: guitar_fret, guitar_strum,
+  guitar_fret_pos, drums_*), CompositeCharacter types guitar / drum /
+  vocal so RB's enter scripts run (every member logs "no Character type
+  'rb_*'"), then the dmidi / ikmidi sinks.
+
+Verified by running (Linux, the final binary, one process at a time,
+scratch XDG per run, dummy audio, the RB guitar ignored):
+- Walk gate, all 21 OK: rb_boot, rb_owner_bugs, rb_pause_quit, rb_esc3
+  (new), rb_mouse (new), quickplay, keys, quickplay_drums,
+  quickplay_vocals, band_quickplay, solo_tour, score_duel, tug_of_war,
+  rock_shop, creator, credits, rb_lose, rb_lose_quit, tutorials,
+  rb_practice; band_tour OK (with the naming shots).
+- Shots looked at: main menu (gamma, GAMEPADS button), Enhanced Options
+  next to gd02's, the difficulty card, the fail screen, band naming,
+  Creep / Tom Sawyer highway (drummer clips, the white wash still there).
+- Packages: `gd-engine-launcher/scripts/build.sh all` exit 0, 0 compiler
+  warnings; linux, steamdeck, windows, android each `complete (5 game
+  module(s) with their libraries)`; local_builds keeps 1.1.12 and 1.1.13.
+- Linux launcher `--play gd05 --exit-after`: `gd05 0.0.5 started`, exit 0.
+- Wine (Proton Experimental, own prefix), Windows launcher, `--iso` from
+  `.../Ação Música [RB]/Rock Bánd (USA).iso`, GDUL_GAME_QUIT_AFTER=25000:
+  `gd05 0.0.5: 99 songs from disc image ...Ação Música [RB]/Rock Bánd
+  (USA).iso`, `back from gd-game-05: exit code 0 after 25.1 s`.
+- The core opengl3 backend renders with the gamma ramp (a song shot).
+
+Built only: the vulkan / sdl3 backends' gamma pass, Steam Deck, Android.
+
+What is left (next wave): the venue white wash (shader ColorXfm, bloom
+mask, RB's final post, then the fog / additive layers; GD05-042 / 043);
+the loader thread for the load stutter (GD05-034); RB's MidiParser and
+character types for the hands (GD05-044); hit flames / Overdrive / solo /
+fill / BRE (GD05-045); Create a Band's camera (GD05-031); the menus
+disappearing (GD05-032, needs the steps); the main menu's focused orange
+and the fail screen's grey labels (GD05-030 / 040).
+
+Owner's checklist:
+- Main menu: whites brighter? GAMEPADS bottom left, click it; Esc three
+  times quits.
+- Click SOLO, then MULTIPLAYER while SOLO's sub-menu is open.
+- Options > Enhanced Options: orange titles, bold font, Back / Select.
+- Quickplay > difficulty card: the ornate paper.
+- A slow song (Creep, Dani California) on drums: the drummer at his kit.
+- Tell us the steps for "menus disappearing" and how Create a Band's
+  naming background looks on the original.
+
 ## Final report, wave 04 (2026-11-10, about 2.3 h of agent time, 05:55 -> 08:15)
 
 The owner's goal: the menus even better (colours, delays, animations, the
