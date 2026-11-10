@@ -4,7 +4,7 @@ All notable changes for players. Versions follow SemVer; gd-game-05 ships
 inside the Guitar Dream Universal Launcher's release
 (`docs/platform/release-process.md`).
 
-## [Unreleased]
+## [0.0.6] - 2026-11-10
 
 ### Fixed
 - Menu colours as on the original: the focused buttons are a deep orange

@@ -1,5 +1,17 @@
 # Guitar Dream Universal Launcher: changes
 
+## 1.1.14
+
+Highlights
+- Rock Band (gd-game-05) is in: Solo and Band Quickplay, Solo Tour and Band World Tour, Score Duel and Tug of War, practice and tutorials, the Rock Shop and the character creator, on guitar, bass, drums and vocals (microphone), 2 to 4 players. 36% complete: still rough in places.
+- Rock Band's menus as the original's: the start of the game, the colours, the cloth behind the song list and the difficulty card, the loading screen's band icons, the GAMEPADS button on the main menu.
+
+Details
+- gd05 0.0.6 (Rock Band, Xbox 360): see its CHANGELOG.
+- Android: the launcher asks for the microphone the first time it starts (Rock Band's vocals).
+- gd-engine-core: an audio input (microphone capture) interface, shared by every game that needs it.
+- The site and README: completeness per game (Rock Band 36%), the setlist up to gd-game-26.
+
 ## 1.1.13
 
 Highlights
