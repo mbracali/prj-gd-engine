@@ -1697,8 +1697,15 @@ void App::updateCursor() {
 // plays, Back quits.
 void App::handleAction(const InputEvent& a) {
     if (ui_) {
-        // gd01's: Escape (Back) three times in a row on the main menu quits.
-        if (a.down) escapes_ = a.action == Action::Back && ui_->currentScreen() == "main_screen" ? escapes_ + 1 : 0;
+        // gd01's: Escape (Back) three times in a row on the main menu quits
+        // (universal-behaviors.md). RB's main menu goes back to the title
+        // (splash_screen): the presses in a row that began on the main menu
+        // go on counting there (GD05-033).
+        if (a.down) {
+            const std::string& sc = ui_->currentScreen();
+            const bool counts = sc == "main_screen" || (sc == "splash_screen" && escapes_ > 0);
+            escapes_ = a.action == Action::Back && counts ? escapes_ + 1 : 0;
+        }
         if (escapes_ >= 3) {
             running_ = false;
             return;

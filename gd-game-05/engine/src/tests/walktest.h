@@ -188,6 +188,7 @@ private:
     std::string lastScreen_;           // screen-change times, for load_hold (GD02-155)
     double lastChangeMs_ = 0, lastLoadingMs_ = -1;  // a "mark" wait's time, for "until" waits (steps on a fixed beat)
     bool done_ = false, failed_ = false, autoplay_ = true;
+    bool expectQuit_ = false;  // check expect_quit: the game quitting ends the walk well
     float endMs_ = 1e30f, failMs_ = 1e30f;
     std::string songKeys_;
     std::string error_;

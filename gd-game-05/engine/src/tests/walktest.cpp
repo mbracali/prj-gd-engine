@@ -157,6 +157,18 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         at("main_solomode_screen");
         wait(1000);
         check("no_black");  // title > main > solo > song list > back: no black frame
+    } else if (scenario == "rb_esc3") {
+        // Wave 05 (GD05-033, universal-behaviors.md): Esc three times in a
+        // row on the main menu quits the game.
+        at("splash_screen", 30000);
+        wait(1500);
+        press(kX);
+        at("main_screen");
+        wait(1500);
+        check("expect_quit");
+        for (int i = 0; i < 3; ++i) key(SDLK_ESCAPE), wait(250);
+        wait(3000);
+        check("quit_missed");
     } else if (scenario == "rb_owner_bugs") {
         // Wave 03's owner bugs. GD05-023: nothing of a venue plays before a
         // song (the Enhanced Options backdrop is silent). GD05-024: the red
@@ -2310,6 +2322,11 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         if (icons < actions) return fail("an action without its icon");
         return pass();
     }
+    if (s.screen == "expect_quit") {  // the game may quit from here on (finish counts it done)
+        expectQuit_ = true;
+        return pass();
+    }
+    if (s.screen == "quit_missed") return fail("the game did not quit (Esc three times on " + ui.currentScreen() + ")");
     if (s.screen == "click_helpbar_back") {
         // A click on the help bar's Back (its red action) goes back, as red.
         ui::PanelObj* hb = ui.panel("helpbar");
@@ -3614,6 +3631,10 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
 }
 
 int WalkDriver::finish(ui::UiManager& ui) {
+    if (!done_ && !failed_ && expectQuit_) {
+        std::printf("  ok   the game quit (expected)\n");
+        done_ = true;
+    }
     bool ok = !failed_ && done_;
     std::printf("walktest %s:\n", scenario_.c_str());
     if (!error_.empty()) std::printf("  FAIL %s\n", error_.c_str());
