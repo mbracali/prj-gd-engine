@@ -567,3 +567,14 @@ Android RECORD_AUDIO request (launcher APK not rebuilt yet).
 
 Next: toward 60%: tutorials, crowd, creator appearance, camera, HUD,
 animation, the help bar, the real-device checklist. Time used: about 4 h.
+
+## Wave 05 running log (2026-11-10)
+
+- GD05-030 (colours): RB sets a display gamma ramp from rnd (gamma 0.85)
+  (config/default.dta; RB 0x8246BD90 builds pow(i/256, gamma) and sets it
+  as the gamma ramp) [C]. The port now shows every frame through pow(c,
+  0.85) (device setOutputGamma; local and core backends; screenshots
+  ramped). Verified: main menu label max 214 -> 219, venue / menus
+  brighter (shots); core opengl3 run renders.
+- GD05-033 (Esc x3): RB's main menu Back goes to the title, which reset
+  the count. Fixed; verified by the new walk rb_esc3 (the game quits).
