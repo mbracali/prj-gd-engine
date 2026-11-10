@@ -887,6 +887,9 @@ int App::run() {
         const gfx::DeviceInfo& di = canvas_.renderer().device().info();
         SDL_Log("perf: %s %s on %s, video driver %s", di.api.c_str(), di.version.c_str(), di.gpu.c_str(), SDL_GetCurrentVideoDriver());
     }
+    const int hitchMs = SDL_getenv("GD05_HITCHLOG") ? std::atoi(SDL_getenv("GD05_HITCHLOG")) : 0;
+    uint64_t hitchMaxNs = 0;
+    int hitches = 0;
     while (running_) {
         const uint64_t frameStart = SDL_GetTicksNS();
         SDL_Event e;
@@ -909,6 +912,14 @@ int App::run() {
         // frames a second instead of spinning; gd01's frame limiter comes
         // with its renderer.
         const uint64_t spent = SDL_GetTicksNS() - frameStart;
+        // Development aid (GD05-034, the load stutter): GD05_HITCHLOG=<ms>
+        // logs every frame whose work took longer, with its screen; the
+        // longest and the count print at the end.
+        if (hitchMs > 0 && spent > uint64_t(hitchMs) * 1'000'000ull) {
+            ++hitches;
+            hitchMaxNs = std::max(hitchMaxNs, spent);
+            SDL_Log("hitch: %.1f ms on %s%s", double(spent) / 1e6, ui_ ? ui_->currentScreen().c_str() : "-", player_ ? " (song)" : "");
+        }
         if (spent < kMinFrameNs) SDL_DelayNS(kMinFrameNs - spent);
         if (perf) {
             const uint64_t now = SDL_GetTicksNS();
@@ -923,6 +934,7 @@ int App::run() {
     // Restart Now as a walk's last step: the walk is over (its checks go on
     // in the restarted game's walk, runApp).
     if (walk_ && ui_ && restart_) walk_->poll(*ui_, double(SDL_GetTicksNS()) / 1e6);
+    if (hitchMs > 0) SDL_Log("hitches: %d frames over %d ms, longest %.1f ms", hitches, hitchMs, double(hitchMaxNs) / 1e6);
     if (walk_ && ui_) exitCode_ = walk_->finish(*ui_);
     endSong();
     stopMusic();
