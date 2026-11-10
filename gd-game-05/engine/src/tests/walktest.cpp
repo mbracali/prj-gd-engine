@@ -155,7 +155,23 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         // not leave game_screen nor load the song again (RB's UIScreen goes
         // back only to its own (back ...), 0x8225AEE8).
         endMs_ = 40000;
-        rbQuickplay();
+        wait(300);
+        press(kX);
+        at("splash_screen", 30000);
+        press(kX);
+        at("main_screen");
+        press(kX);  // SOLO
+        at("main_solomode_screen");
+        press(kX);  // QUICKPLAY
+        at("qp_selsong_screen");
+        wait(800);
+        check("song_list_layout");
+        press(kX);  // the first entry
+        at("qp_seldiff_solo_screen");
+        press(kX);
+        wait(1500);
+        press(kX);
+        at("game_screen", 60000);
         for (int i = 0; i < 8; ++i) key(SDLK_2), wait(250);
         check("counter_max:song_loads:1");
         wait(2000);
@@ -2259,6 +2275,27 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         const int money = c.object ? ui.interp().send(c.object, "money", {}).integerValue() : -1;
         std::printf("  shop: %d outfit(s) worn, %d money left\n", n, money);
         if (n < 1) return fail("no outfit was chosen");
+        return pass();
+    }
+    if (s.screen == "song_list_layout") {
+        // RB's song list (qp_selsong.milo, wave 03): drawn through its
+        // texture onto the screen; its rows (names, headings) do not run
+        // into each other and sit inside the cloth's place.
+        ui::PanelObj* p = ui.panel("qp_selsong_panel");
+        if (!p || !p->view) return fail("no qp_selsong_panel view");
+        const auto& rd = p->view->rendered();
+        std::vector<gfx::UiView::Hit> rows;
+        for (const gfx::UiView::Hit& h : p->view->hits())
+            if (h.key.rfind("ss_song.lst#", 0) == 0) rows.push_back(h);
+        std::sort(rows.begin(), rows.end(), [](const auto& a, const auto& b) { return a.y0 < b.y0; });
+        std::printf("  song list: texture %s, %zu row texts\n", rd.texture.id ? "drawn" : "none", rows.size());
+        if (!rd.texture.id) return fail("the song list's texture was not drawn");
+        if (rows.size() < 5) return fail("too few rows drawn");
+        for (size_t i = 0; i + 1 < rows.size(); ++i) {
+            const float overlap = rows[i].y1 - rows[i + 1].y0, h = std::min(rows[i].y1 - rows[i].y0, rows[i + 1].y1 - rows[i + 1].y0);
+            if (overlap > 0.35f * h) return fail(rows[i].key + " runs into " + rows[i + 1].key);
+            if (rows[i].x0 < rd.x0 - 1 || rows[i].x1 > rd.x1 + 1) return fail(rows[i].key + " outside the cloth");
+        }
         return pass();
     }
     // counter_max:<key>:<max>: the game's counter stays at or under max.

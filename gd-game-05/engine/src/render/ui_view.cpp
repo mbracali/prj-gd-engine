@@ -65,7 +65,9 @@ UiView::UiView(const GameData& data, scene::MiloLibrary& library, const scene::U
                SceneCache& cache)
     : data_(data), lib_(library), styles_(styles), locale_(locale), cache_(cache), texts_(cache) {}
 
-UiView::~UiView() = default;
+UiView::~UiView() {
+    if (renderTarget_.id) cache_.device().destroyTarget(renderTarget_);
+}
 
 void UiView::problem(const std::string& what) {
     if (std::find(problems_.begin(), problems_.end(), what) == problems_.end()) {
@@ -206,8 +208,8 @@ Camera UiView::defaultCamera() {
 
 Camera UiView::camera() const {
     const auto* own = milo_ && milo_->root().self ? milo_->root().self->as<scene::DirObj>() : nullptr;
-    // A RenderDir (RB's song list): the inline PanelDir it renders, drawn
-    // directly (draw()), takes that panel's own camera [I] (GD05-022).
+    // A RenderDir (RB's song list): the inline PanelDir its TexRenderer
+    // draws into a texture (draw()) takes that panel's own camera.
     if (milo_ && milo_->root().cls == "RenderDir")
         for (const auto& [owner, sub] : milo_->root().subdirs)
             if (sub && sub->cls == "PanelDir" && sub->self)
@@ -377,16 +379,57 @@ void UiView::draw(MaterialRenderer& r) {
     if (!milo_) return;
     viewProj_ = camera().viewProj(false);
     const scene::Directory* drawRoot = &milo_->root();
-    // RB's RenderDir panels (qp_selsong.milo: a cloth banner whose texture a
-    // TexRenderer renders from the inline PanelDir holding the list): the
-    // inline panel is drawn directly, without the banner [I] (GD05-022:
-    // render-to-texture).
+    rendered_ = Rendered{};
+    // RB's RenderDir panels (qp_selsong.milo): a TexRenderer draws the
+    // inline PanelDir holding the list (through its meta.cam) into
+    // cloth_texture_wide.tex, 480 x 552 [C data], which the RenderDir's
+    // cloth banner shows through cloth.cam, swaying (CharHair). The port
+    // draws the texture flat where the banner hangs, under the title bar
+    // [I] (GD05-022: the banner's mesh, camera moves and sway).
+    const scene::Directory* inner = nullptr;
     if (drawRoot->cls == "RenderDir")
         for (const auto& [owner, sub] : drawRoot->subdirs)
             if (sub && sub->cls == "PanelDir") {
-                drawRoot = sub.get();
+                inner = sub.get();
                 break;
             }
+    const scene::Tex* outTex = nullptr;
+    if (inner)
+        for (const auto& o : drawRoot->objects)
+            if (const auto* t = o->as<scene::Tex>(); t && t->bitmap.empty() && t->width > 0 && t->height > 0) outTex = t;
+    if (inner && !outTex) drawRoot = inner;  // no output texture: the panel itself, on the screen
+    RenderDevice& dev = cache_.device();
+    TargetId prevTarget{};
+    int vx = 0, vy = 0, vw = 0, vh = 0;
+    if (inner && outTex) {
+        if (!renderTarget_.id) {
+            std::string error;
+            renderTarget_ = dev.createTarget(TargetDesc{outTex->width, outTex->height, true, TargetFormat::RGBA8}, error);
+            if (!renderTarget_.id) problem("RenderDir " + drawRoot->name + ": " + error);
+        }
+        if (renderTarget_.id) {
+            prevTarget = dev.currentTarget();
+            dev.currentViewport(vx, vy, vw, vh);
+            dev.setTarget(renderTarget_);
+            dev.setViewport(0, 0, outTex->width, outTex->height);
+            const float clear[4] = {0, 0, 0, 0};
+            dev.clear(clear, true);
+            Camera ic = camera();
+            ic.aspect = float(outTex->width) / float(outTex->height);
+            LightEnv env = environment();
+            if (const auto* own = inner->self ? inner->self->as<scene::DirObj>() : nullptr; own && own->hasRnd)
+                if (const scene::Environ* e = inner->find<scene::Environ>(own->rnd.environment)) env = cache_.lightEnv(*e, &pose_);
+            r.setFrame(ic, env, outTex->width, outTex->height);
+            r.forceAlphaWrite = true;
+            viewProj_ = ic.viewProj(false);
+            // Where it shows: 552 high from under the title bar, centred [I].
+            constexpr float kTop = 150, kH = 560;
+            const float w = kH * float(outTex->width) / float(outTex->height);
+            rendered_.texture = dev.targetTexture(renderTarget_);
+            rendered_.x0 = (1280 - w) / 2, rendered_.x1 = rendered_.x0 + w, rendered_.y0 = kTop, rendered_.y1 = kTop + kH;
+        }
+        drawRoot = inner;
+    }
     const scene::Directory& root = *drawRoot;
     // The drawables no group of the panel holds, by draw order.
     std::set<std::string> held;
@@ -401,7 +444,19 @@ void UiView::draw(MaterialRenderer& r) {
         const scene::Draw* db = drawOf(b);
         return (da ? da->order : 0) < (db ? db->order : 0);
     });
+    const size_t firstHit = hits_.size();
     for (const scene::Object* o : roots) drawObject(r, *o, 0);
+    if (rendered_.texture.id) {
+        r.forceAlphaWrite = false;
+        dev.setTarget(prevTarget);
+        dev.setViewport(vx, vy, vw, vh);
+        // The hits from the texture's picture to its place on the screen.
+        for (size_t i = firstHit; i < hits_.size(); ++i) {
+            Hit& h = hits_[i];
+            const float sx = (rendered_.x1 - rendered_.x0) / 1280.0f, sy = (rendered_.y1 - rendered_.y0) / 720.0f;
+            h.x0 = rendered_.x0 + h.x0 * sx, h.x1 = rendered_.x0 + h.x1 * sx, h.y0 = rendered_.y0 + h.y0 * sy, h.y1 = rendered_.y0 + h.y1 * sy;
+        }
+    }
     // The subdirectories' screen masks (metacam's meta_edge.mask darkens the transitions).
     for (scene::Milo* m : subdirs_)
         for (scene::ScreenMask* sm : m->root().all<scene::ScreenMask>())
@@ -641,7 +696,7 @@ float UiView::templateWidth(const scene::Text& tmpl, const std::string& str) {
 }
 
 float UiView::drawTemplate(MaterialRenderer& r, const std::string& key, const scene::Text& tmpl, const std::string& str,
-                           const scene::Xfm& world, const float* rgb, float alpha, int align) {
+                           const scene::Xfm& world, const float* rgb, float alpha, int align, const scene::BandText* style) {
     const scene::Font* font = tmpl.dir ? tmpl.dir->resolve<scene::Font>(tmpl.font) : nullptr;
     if (!font || str.empty()) return 0;
     auto& lt = keyed_[key];
@@ -653,10 +708,18 @@ float UiView::drawTemplate(MaterialRenderer& r, const std::string& key, const sc
         TextStyle st;
         st.size = tmpl.size, st.leading = tmpl.leading, st.wrapWidth = tmpl.wrapWidth, st.italics = tmpl.italics;
         st.align = align >= 0 ? align : tmpl.align, st.capsMode = tmpl.capsMode, st.markup = tmpl.markup, st.color = tmpl.color;
+        // An RB label's own text fields (UILabel rev 8: text_size, alignment,
+        // leading, kerning, fit_type, width, height) [C].
+        if (style) {
+            st.size = style->textSize, st.leading = style->leading, st.wrapWidth = style->wrapWidth;
+            st.align = align >= 0 ? align : int(style->alignment), st.capsMode = style->allCaps ? 2 : tmpl.capsMode;
+            st.overrideKerning = true, st.kerning = style->kerning;
+        }
         lt->layout = layoutText(&fm, str, st);
+        lt->fit = style ? fitScale(lt->layout, st, style->fitText, style->width, style->height) : std::array<float, 2>{1, 1};
     }
     const float tint[4] = {1, 1, 1, alpha};
-    const Mat4 wm = toMat4(world);
+    const Mat4 wm = toMat4(scene::compose(scaleXfm(lt->fit[0], 1, lt->fit[1]), world));
     texts_.draw(r, lt.get(), *font, lt->layout, wm, rgb, alpha < 1 ? tint : nullptr);
     addLayoutHit(key, lt->layout, wm);
     ++textsDrawn_;
@@ -789,6 +852,26 @@ void UiView::drawList(MaterialRenderer& r, const scene::Object& o) {
     const scene::Xfm lw = componentWorld(o);
     const ListState& s = ls->second;
     const int shown = list->displayNum > 0 ? list->displayNum : int(s.rows.size());
+    // The selected row's highlight: (highlight "highlight.mesh" (colors
+    // (normal r g b) (selecting ...) (disabled ...))) [C data], the mesh at
+    // its own place in the row, tinted by the list's state.
+    if (const ::DataNode* hl = style.node->find("highlight"); hl && hl->children.size() > 1 && hl->children[1].isText() &&
+                                                               s.selected >= 0 && s.selected < int(s.rows.size()) && s.selected < shown)
+        if (const scene::Mesh* hm = res->find<scene::Mesh>(hl->children[1].s)) {
+            float tint[4] = {1, 1, 1, 1};
+            if (const ::DataNode* hc = hl->find("colors")) {
+                const ::DataNode* c = hc->find(st == scene::UiState::Selecting ? "selecting" : st == scene::UiState::Disabled ? "disabled" : "normal");
+                if (c && c->children.size() >= 4)
+                    for (int k = 0; k < 3; ++k) tint[k] = c->floatAt(size_t(k + 1));
+            }
+            const ListRow& sr = s.rows[size_t(s.selected)];
+            const float off = (sr.slot > -1 ? sr.slot : float(s.selected)) * list->spacing;
+            const scene::Xfm at = scene::compose(hm->trans.local, scene::compose(vertical ? moveXfm(0, 0, -off) : moveXfm(off, 0, 0), lw));
+            if (cache_.mesh(hm)) {
+                drawMesh(r, cache_, *hm, toMat4(at), &pose_, findMat(*hm, hm->mat), tint);
+                ++meshesDrawn_;
+            }
+        }
     for (int row = 0; row < int(s.rows.size()) && row < shown; ++row) {
         const ListRow& lr = s.rows[size_t(row)];
         const float off = (lr.slot > -1 ? lr.slot : float(row)) * list->spacing;
@@ -819,6 +902,7 @@ void UiView::drawList(MaterialRenderer& r, const scene::Object& o) {
             if (it == lr.texts.end() || it->second.empty()) continue;
             const scene::Text* tmpl = res->find<scene::Text>(elements[e].name);
             scene::Xfm at = tmpl ? tmpl->trans.local : scene::Xfm{};
+            const scene::BandText* style = nullptr;
             // RB's list elements are labels (list_song.milo's list.lbl): the
             // label's own type gives the template Text (and its font) [C data].
             if (!tmpl)
@@ -827,10 +911,19 @@ void UiView::drawList(MaterialRenderer& r, const scene::Object& o) {
                     if (scene::Milo* lres = resource(ls.resourceFile.empty() ? ls.classResourceFile : ls.resourceFile))
                         tmpl = ls.textTemplate.empty() ? nullptr : lres->find<scene::Text>(ls.textTemplate);
                     at = lbl->trans.local;
+                    style = &lbl->style;
                 }
             if (!tmpl) continue;
+            // A heading row's heading (list_song.milo's heading.lbl, 17 units
+            // under list.lbl) in its own slot sits where the songs' names
+            // do: lower, it ran into the first song [I].
+            if (lr.header && elements[e].name == "heading.lbl")
+                if (const scene::Object* first = res->find(elements[0].name)) {
+                    if (const auto* fl = first->as<scene::UILabel>()) at.pos[2] = fl->trans.local.pos[2];
+                    else if (const auto* ft = first->as<scene::Text>()) at.pos[2] = ft->trans.local.pos[2];
+                }
             drawTemplate(r, o.name + "#" + std::to_string(row) + "#" + elements[e].name, *tmpl, it->second,
-                         scene::compose(at, rowWorld), hasRgb ? rgb : nullptr);
+                         scene::compose(at, rowWorld), hasRgb ? rgb : nullptr, 1, -1, style);
         }
     }
 }

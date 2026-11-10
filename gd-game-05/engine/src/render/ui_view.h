@@ -141,8 +141,18 @@ public:
     std::function<void(MaterialRenderer&)> overlay;
     // Text in a template Text's font and style at `world`; returns its width.
     // `key` keeps the layout between frames.
+    // RB's RenderDir (qp_selsong.milo): after draw(), the texture its
+    // TexRenderer drew the inline panel into and where it shows on the
+    // screen (1280 x 720 units); id 0 for other panels.
+    struct Rendered {
+        TextureId texture{};
+        float x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+        bool bottomUp = true;
+    };
+    const Rendered& rendered() const { return rendered_; }
     float drawTemplate(MaterialRenderer& r, const std::string& key, const scene::Text& tmpl, const std::string& str,
-                       const scene::Xfm& world, const float* rgb = nullptr, float alpha = 1, int align = -1);
+                       const scene::Xfm& world, const float* rgb = nullptr, float alpha = 1, int align = -1,
+                       const scene::BandText* style = nullptr);
     float templateWidth(const scene::Text& tmpl, const std::string& str);
     void drawMeshAt(MaterialRenderer& r, const scene::Mesh& mesh, const scene::Mat* mat, const scene::Xfm& world);
     // The width drawTemplate gives `str` (no draw).
@@ -242,6 +252,8 @@ private:
     std::vector<MaskDraw> masks_;
     std::vector<Hit> hits_;
     Mat4 viewProj_;  // the frame's camera, for the hits
+    TargetId renderTarget_{};
+    Rendered rendered_;
     void addLayoutHit(const std::string& key, const TextLayout& layout, const Mat4& world);
     int textsDrawn_ = 0, meshesDrawn_ = 0;
     std::vector<std::string> problems_;

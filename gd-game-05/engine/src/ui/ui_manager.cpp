@@ -1276,6 +1276,16 @@ void UiManager::drawView(gfx::UiView& v) {
     };
     v.draw(r.materials());
     v.maskNow = nullptr;
+    // RB's RenderDir: its texture where it shows (gfx::UiView::rendered).
+    if (const gfx::UiView::Rendered& rd = v.rendered(); rd.texture.id) {
+        canvas_.flush();
+        const float v0 = rd.bottomUp ? 1.0f : 0.0f, v1 = 1.0f - v0;
+        const Vertex a{rd.x0, rd.y0, 0, 0, v0, 255, 255, 255, 255}, b{rd.x1, rd.y0, 0, 1, v0, 255, 255, 255, 255};
+        const Vertex c{rd.x1, rd.y1, 0, 1, v1, 255, 255, 255, 255}, d{rd.x0, rd.y1, 0, 0, v1, 255, 255, 255, 255};
+        const Vertex quad[6] = {a, b, c, a, c, d};
+        canvas_.draw(quad, 6, int(rd.texture.id), Blend::Alpha);
+        canvas_.flush();
+    }
     drawMasks(v);
 }
 

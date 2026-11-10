@@ -136,6 +136,7 @@ void MaterialRenderer::draw(const GpuMesh& mesh, const Mat4* bones, const Materi
     c.program = shaders_.program(key);
     if (!c.program) return;
     c.state = materialPipeline(m, &env_);
+    if (forceAlphaWrite) c.state.alphaWrite = true;
     c.layout = &meshLayout(mesh.skinned, mesh.tangents);
     c.vertices = mesh.vertices;
     c.vertexOffset = mesh.vertexOffset;

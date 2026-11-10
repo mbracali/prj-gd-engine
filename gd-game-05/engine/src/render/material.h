@@ -126,6 +126,9 @@ public:
     // Per-frame constants: camera and lighting (uploaded once; call again
     // each frame, after the frame has begun).
     void setFrame(const Camera& camera, const LightEnv& env, int viewportW, int viewportH, TextureId sceneDepth = {});
+    // Every draw writes its alpha (a texture drawn at run time whose alpha
+    // its user blends with: RB's song list).
+    bool forceAlphaWrite = false;
     // The last setFrame's camera and viewport, to change only the lights
     // (a Group's environ while its objects draw).
     void setLightEnv(const LightEnv& env) { setFrame(lastCamera_, env, lastW_, lastH_, sceneDepth_); }

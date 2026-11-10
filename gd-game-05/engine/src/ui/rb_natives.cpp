@@ -102,9 +102,19 @@ public:
         selectedRow = 0;
         int headersSoFar = 0;
         for (int i = 0; i < int(data_.size()); ++i) {
-            gfx::UiView::ListRow r;
+            // A heading is a row of its own, the slot above its first song
+            // (list_song.milo's heading.lbl sits 17 units lower in its row
+            // than list.lbl: drawn in the song's row it overlapped the song).
             for (const auto& [idx, text] : headers_)
-                if (idx == i) r.header = true, r.texts["heading.lbl"] = text, ++headersSoFar;
+                if (idx == i) {
+                    gfx::UiView::ListRow h;
+                    h.header = true;
+                    h.texts["heading.lbl"] = text;
+                    h.slot = float(i + headersSoFar);
+                    ++headersSoFar;
+                    out.push_back(std::move(h));
+                }
+            gfx::UiView::ListRow r;
             r.slot = float(i + headersSoFar);
             const std::string& sym = data_[size_t(i)];
             if (sym == "random_song") {
