@@ -93,3 +93,6 @@ preset) are tracked in the backlog, not here.
 |---|---|---|
 | 2026-11-09 18:30 (wave 02 start) | 21.0% | the ledger agrees with wave 01's 0.2 |
 | 2026-11-09 22:00 (wave 02 gate 1) | 50.5% | band on stage, vocals, band play, tours, shop, judges read in the XEX |
+| 2026-11-09 23:15 (wave 02 end) | 60.0% | wave 02 final report |
+| 2026-11-10 03:20 (wave 03 end) | 61.0% | the front end screen by screen |
+| 2026-11-10 (wave 04 end) | 61.0% | the cloth, the loading band, RB's trigger timing and transitions, the smashers, gems and tails: the rows touched still miss parts (the results' stars, hit effects, Overdrive visuals), so no row changed its score |

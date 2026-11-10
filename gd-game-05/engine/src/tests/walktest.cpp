@@ -16,6 +16,7 @@
 
 #include "data/game_data.h"
 #include "data/json.h"
+#include "render/canvas.h"
 #include "game/player.h"
 #include "game/song_db.h"
 #include "input/input.h"
@@ -139,6 +140,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         // rb_video*.bik), the main menu over it.
         // The walks skip the intro movie (GD05_SKIP_MOVIES): straight to the title.
         at("splash_screen", 30000);
+        check("probe_black");
         wait(1500);
         check("counter:menu_movie_frames:20");
         press(kX);
@@ -153,6 +155,8 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         wait(800);
         check("click_helpbar_back");
         at("main_solomode_screen");
+        wait(1000);
+        check("no_black");  // title > main > solo > song list > back: no black frame
     } else if (scenario == "rb_owner_bugs") {
         // Wave 03's owner bugs. GD05-023: nothing of a venue plays before a
         // song (the Enhanced Options backdrop is silent). GD05-024: the red
@@ -2318,6 +2322,14 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
                 return pass();
             }
         return fail("the help bar's Back was not drawn");
+    }
+    // gd04's black-frame probe (usual-bugs.md): probe_black starts
+    // counting, no_black fails on any all-black frame presented since.
+    if (s.screen == "probe_black") return Canvas::countBlack = true, Canvas::countBlackLit = false, Canvas::blackFrames = 0, pass();
+    if (s.screen == "no_black") {
+        Canvas::countBlack = false;
+        std::printf("  black frames: %d\n", Canvas::blackFrames);
+        return Canvas::blackFrames == 0 ? pass() : fail(std::to_string(Canvas::blackFrames) + " black frames presented");
     }
     if (s.screen == "loading_icons") {
         // Wave 04 (GD05-026): loading.milo's band, four inline icon

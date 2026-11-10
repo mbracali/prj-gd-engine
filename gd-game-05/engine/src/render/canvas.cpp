@@ -2,6 +2,8 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "render/canvas.h"
 
+#include <string>
+
 #include <cstddef>
 #include <cstring>
 
@@ -87,6 +89,27 @@ void Canvas::end() {
     flush();
     drawNs += SDL_GetTicksNS() - beginNs_;
     ++drawnFrames;
+    if (countBlack)
+        if (SDL_Surface* s = renderer_.readPixels()) {
+            if (SDL_Surface* c = SDL_ConvertSurface(s, SDL_PIXELFORMAT_RGBA32)) {
+                uint64_t sum = 0, n = 0;
+                for (int y = 0; y < c->h; y += 4)
+                    for (int x = 0; x < c->w; x += 4) {
+                        const uint8_t* px = static_cast<const uint8_t*>(c->pixels) + size_t(y) * size_t(c->pitch) + size_t(x) * 4;
+                        sum += (px[0] * 54u + px[1] * 183u + px[2] * 19u) >> 8, ++n;
+                    }
+                const double luma = n ? double(sum) / double(n) : 0;
+                if (luma >= 1) countBlackLit = true;
+                else if (countBlackLit && !expectBlack) {
+                    ++blackFrames;
+                    SDL_Log("walk: a black frame presented (%d, luma %.2f)", blackFrames, luma);
+                    if (const char* dir = SDL_getenv("GD05_BLACK_SHOTS"))  // development aid: the black frames themselves
+                        SDL_SaveBMP(c, (std::string(dir) + "/black_" + std::to_string(blackFrames) + ".bmp").c_str());
+                }
+                SDL_DestroySurface(c);
+            }
+            SDL_DestroySurface(s);
+        }
     renderer_.endFrame();
 }
 

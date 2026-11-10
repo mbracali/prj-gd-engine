@@ -38,6 +38,16 @@ public:
     // GD05_PERF: the time from begin() to the present (drawing, on the CPU)
     // and the frames drawn, summed until the caller clears them.
     uint64_t drawNs = 0;
+    // The walks' black-frame probe (gd04's probe:black / check:no_black,
+    // usual-bugs.md): while countBlack, every presented frame's mean
+    // brightness is read; an all-black frame after the first lit one counts.
+    static inline bool countBlack = false;
+    static inline bool countBlackLit = false;
+    static inline int blackFrames = 0;
+    // Set by the menus while RB's own fade through black runs (ui/main.dta's
+    // fx panel: fade.mnm on black.mat, frame 0 opaque .. 25 clear): those
+    // black frames are the original's, not counted.
+    static inline bool expectBlack = false;
     int drawnFrames = 0;
 
     // Triangles (three vertices each). `texture` is a gfx::TextureId's id,

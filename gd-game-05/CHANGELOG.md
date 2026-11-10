@@ -19,6 +19,8 @@ inside the Guitar Dream Universal Launcher's release
 - Screen changes no longer wait a second with nothing moving: screens
   change as Rock Band's do, waiting only for the animations Rock Band
   waits for.
+- The results show the stars earned (gold ones too).
+- QUIT from the pause menu is checked all the way back to the main menu.
 
 ### Changed
 - The song list, the difficulty / instrument card and the shop, tour and

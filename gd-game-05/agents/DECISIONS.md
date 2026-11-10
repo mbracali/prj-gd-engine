@@ -282,3 +282,10 @@ pattern). Each says what, why and how to undo it.
   lerps' direction, the star tails' colour blend, no glow line].
 - **Why:** GD05-029, the owner's "how the notes are displayed".
 - **Undo:** `RbTrackView::drawWidget`, `drawTails` / `pollTail`.
+
+## D24. The results' stars: scoring.dta's symbols (2026-11-10, wave 04)
+- **What:** a performer's star_rating is config/scoring.dta's (star_ratings
+  (symbols (* ** *** **** ***** 66666 77777))) entry n - 1 for n stars, ""
+  for none [C data; I: the index rule, the native is not read]. The stars
+  font draws `*` and the gold digits; the port wrote `***__`.
+- **Undo:** `starSymbol` in ui/natives_game.cpp.

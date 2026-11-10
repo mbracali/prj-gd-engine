@@ -1371,6 +1371,12 @@ void UiManager::drawPanels(ScreenObj* s, bool outgoing) {
 
 void UiManager::draw() {
     if (headless_) return;
+    // RB's fade through black (the fx panel's fade.mnm, main.dta fade_out /
+    // fade_in): the walks' black-frame probe leaves those frames out.
+    {
+        PanelObj* fx = panel("fx");
+        Canvas::expectBlack = fx && fx->up && fx->view && fx->view->frame("fade.mnm") < 24.9f;
+    }
     if (splash_ >= 0) {
         drawSplash();
     } else {

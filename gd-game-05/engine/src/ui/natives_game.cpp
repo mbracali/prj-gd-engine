@@ -23,6 +23,28 @@
 namespace ui {
 
 namespace {
+// config/scoring.dta (star_ratings (symbols (* ** *** **** ***** 66666
+// 77777))) [C data]: the label text of n stars, n >= 1 (the stars font
+// draws '*' as a star, '6' / '7' as the gold ones); none for 0 [I: the
+// index rule of the native, not read].
+std::string starSymbol(ui::UiManager& ui, int stars) {
+    if (stars <= 0) return "";
+    static const std::vector<std::string> fallback{"*", "**", "***", "****", "*****", "66666", "77777"};
+    std::vector<std::string> symbols = fallback;
+    if (const DataNode* boot = ui.bootTree())
+        if (const DataNode* sr = boot->find("star_ratings"))
+            if (const DataNode* sy = sr->find("symbols"); sy && sy->children.size() > 1) {
+                symbols.clear();
+                for (size_t k = 1; k < sy->children.size(); ++k) {
+                    const DataNode& e = sy->children[k];  // 66666 reads as a number
+                    symbols.push_back(e.type == DataNode::Type::Int ? std::to_string(e.i) : e.s);
+                }
+            }
+    return symbols.empty() ? std::string() : symbols[size_t(std::min<int>(stars, int(symbols.size())) - 1)];
+}
+}  // namespace
+
+namespace {
 
 std::string nameOf(const Value& v) { return v.type == Value::Type::Object && v.object ? v.object->name() : v.str(); }
 int intArg(const std::vector<Value>& a, size_t i, int def = 0) { return i < a.size() && a[i].isNumber() ? a[i].integerValue() : def; }
@@ -47,6 +69,11 @@ public:
             return p.difficulty = std::clamp(d, 0, 3), true;
         }
         if (msg == "get_difficulty" || msg == "difficulty") return r = Value::integer(p.difficulty), true;
+        // {$pcfg score} (endgame.dta, head to head): the player's score [I].
+        if (msg == "score") {
+            const Player* pl = ui_.host().gamePlayer(i_);
+            return r = Value::integer(pl ? long(pl->score()) : 0), true;
+        }
         if (chars::playerConfigNative(ui_, p, msg, args, r)) return true;
         if (msg == "set_track_type") {
             // An int (kTrack*) or the instrument's symbol (tour_solo.dta: {$pcfg
@@ -721,6 +748,10 @@ public:
             else ui.host().hudCommand(msg, args);
             return true;
         }
+        // {hth_track_panel band_to_slot n} (endgame.dta set_results, head
+        // to head): the track slot of side n; the port lays side n in slot n
+        // [I: the native is not read].
+        if (track_ && msg == "band_to_slot") return r = Value::integer(std::clamp(intArg(args, 0), 0, 1)), true;
         // RB's track panel: its first track ({coop_track_panel get_first_track}, the tutorials) [I: the first player's].
         if (track_ && msg == "get_first_track") {
             ScriptObject* t = in.findObject("track_dir0");
@@ -817,10 +848,7 @@ public:
                 r = Value::integer(0);
                 if (msg == "score") return r = Value::integer(b->score()), true;
                 if (msg == "num_stars") return r = Value::integer(b->stars()), true;
-                if (msg == "star_rating") {
-                    const int n = std::clamp(b->stars(), 0, 5);
-                    return r = Value::string(std::string(size_t(n), '*') + std::string(size_t(5 - n), '_')), true;
-                }
+                if (msg == "star_rating") return r = Value::string(starSymbol(ui_, b->stars())), true;
                 if (msg == "longest_streak") return r = Value::integer(b->longestStreak()), true;
                 if (msg == "current_streak") return r = Value::integer(b->streak()), true;
                 if (msg == "base_multiplier") return r = Value::integer(b->baseMultiplier()), true;
@@ -888,10 +916,7 @@ private:
         if (msg == "percent_hit") return r = Value::integer(p && gems > 0 ? p->notesHit() * 100 / gems : 0), true;
         // Rock Band's stars (game/rb_bonus.h: star_thresholds.dtb).
         if (msg == "num_stars") return r = Value::integer(p ? ui_.host().gameCounter(index, "stars") : 0), true;
-        if (msg == "star_rating") {
-            const int n = std::clamp(p ? ui_.host().gameCounter(index, "stars") : 0, 0, 5);
-            return r = Value::string(std::string(size_t(n), '*') + std::string(size_t(5 - n), '_')), true;
-        }
+        if (msg == "star_rating") return r = Value::string(starSymbol(ui_, p ? ui_.host().gameCounter(index, "stars") : 0)), true;
         if (msg == "longest_streak") return r = Value::integer(p ? p->longestStreak() : 0), true;
         if (msg == "current_streak") return r = Value::integer(p ? p->streak() : 0), true;
         if (msg == "gems_hit") return r = Value::integer(p ? p->notesHit() : 0), true;
@@ -1141,6 +1166,22 @@ public:
         // RB: the performer whose score the solo modes keep (endgame.dta) [I: player 0 for one player].
         if (msg == "is_active_player") return r = Value::integer(intArg(args, 0) == 0 ? 1 : 0), true;  // one local player [I]
         if (msg == "main_performer") return r = Value::obj(ui_.interp().findObject("player0")), true;
+        // {beatmatch get_result TRUE} (endgame.dta, head to head): kWonTie,
+        // kWonBand0 or kWonBand1 by the two sides' scores [I: the native and
+        // its argument are not read].
+        // {beatmatch max_delta_points} (endgame.dta, Tug of War): scoring.dta
+        // (tug_of_war (max_delta (5000 10000 15000 20000))) by the first
+        // player's difficulty [C data; I: the native's index].
+        if (msg == "max_delta_points") {
+            static const int kMaxDelta[4] = {5000, 10000, 15000, 20000};
+            return r = Value::integer(kMaxDelta[std::clamp(ui_.session().players[0].difficulty, 0, 3)]), true;
+        }
+        if (msg == "get_result") {
+            const Player* a = ui_.host().gamePlayer(0);
+            const Player* b = ui_.host().gamePlayer(1);
+            const long sa = a ? long(a->score()) : 0, sb = b ? long(b->score()) : 0;
+            return r = Value::integer(sa == sb ? 5 : sa > sb ? 3 : 4), true;  // kWonTie 5, kWonBand0 3, kWonBand1 4 (macros.dta)
+        }
         // {beatmatch active_player n} (ui/lose.dta) [C data: the use].
         if (msg == "active_player") return r = Value::obj(ui_.interp().findObject("player" + std::to_string(std::clamp(intArg(args, 0), 0, 3)))), true;
         // never_allow_input (pause.dta): the pause screen blocks the players' input itself [I].

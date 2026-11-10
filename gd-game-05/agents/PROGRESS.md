@@ -5,6 +5,103 @@ Rock Band (Xbox 360) -> `gd05`. Kickoff: `docs/spikes/GD-GAME-05_KICKOFF.md`
 bottom. "Verified" lines quote the command and its output; "built only" and
 "not tested" are said explicitly.
 
+## Final report, wave 04 (2026-11-10, agent time 05:55 -> END_TIME)
+
+The owner's goal: the menus even better (colours, delays, animations, the
+cloth, the loading screen's band, the menus' strange behaviour) and a first
+look at the fret board, all as the original. Ledger (`python3 tools/parity.py
+docs/parity.md`): **61.00%** (unchanged: every row touched still misses a
+part, below). gd05 **0.0.4** (CHANGELOG). Front end audit
+(`docs/frontend.md`): **14 of 17 rows match** (was 13), 2 differ, 1 out of
+scope. Fret board audit (`docs/highway.md`, new): **8 of 12 elements
+match**, 1 differs, 3 missing.
+
+The owner's points (what was wrong, the fix, how verified):
+- **The cloth is missing in the song list, instrument and difficulty
+  selection (GD05-022).** Wrong: nothing polled the RenderDirs' own
+  CharTransCopy / CharHair, so the cloth never moved and its mesh was drawn
+  unskinned; the song list was shown as a flat texture; the RenderDir's own
+  transform was ignored (the song list's cloth sat too close, its first row
+  under the title bar; the tour hub's menu ran off the screen). Fix: each
+  RenderDir polls its CharTransCopy (RB 0x8233F6F8) and hair once a frame,
+  skins its cloth (render/ui_cloth.cpp), takes its own RndTransformable
+  from its record; the song list is drawn through cloth.cam (D20).
+  Verified: walk `rb_owner_bugs` check `song_list_layout` (on the cloth,
+  287 polls, 7 rows inside it); screenshots at several times (the cloth
+  sways; Random Song right under the title bar; the difficulty card; the
+  tour hub's menu cloth on screen).
+- **The band members' icons on the loading screen are all wrong
+  (GD05-026).** Wrong: the four icons (load_icon_*.milo, whose root is
+  "loading") stood on one spot and never moved. Fix: a proxy object
+  parented to its file's root hangs from its holder; a RndDir used as an
+  anim sets its MatAnims (the texture swaps) (D22). Verified: walk check
+  `loading_icons` (x 97 / 134 / 178 / 217); shots (the singer and the
+  drummer swap frames; the guitarist's filter plays 0..0 and holds, as the
+  data says).
+- **Colours, delays, animations (GD05-027).** Wrong: every trigger anim
+  ran from 0 to its end in end/30 s (no start, scale, delay or loop);
+  scripts' (loop) / (delay) were ignored; buttons had no selecting
+  animation. Fix: UITrigger anims as RndAnimatable::Animate (0x8221BE38),
+  script animate as 0x8221C040, BandButton selecting_anim over
+  select_frames (0x822D4848, 0x82270768) (D21). Verified: the walks; shots
+  of the main menu during a selection (the button moves) and of the
+  looping menu lights and loading animations.
+- **Menu screens behave strangely (GD05-028).** Wrong: every screen change
+  waited a fixed 0.5 s out + 0.5 s in (GH2's metacam) with the input
+  dropped and nothing moving. RB waits only while a panel's
+  block_transition trigger runs (UITrigger 0x82262B28 / 0x82262918,
+  PanelDir 0x8225FEE0 / 0x8225FF60) (D21): most RB screens change at once,
+  the dialogs wait for their exit. Also: the results' stars use
+  scoring.dta's symbols (`*` .. `*****`, gold `66666`; it wrote `***__`,
+  and `_` is not in the stars font) [I: the index rule]. New walk
+  `rb_pause_quit` (pause QUIT, confirm with no.btn, yes, main menu, the song
+  loaded once); gd04's black-frame probe (`probe_black` / `no_black`) in
+  `rb_boot`; `--uitest` resolves a panel's names through its screens'
+  panels.
+- **The fret board (GD05-029).** Wrong: the strike line's smashers were not
+  drawn (inline RndDirs in a group); the gems' materials were swapped for
+  "slot" materials RB does not use (the green gems took prism_green.tex);
+  the tails were flat strips sampling the dark part of their texture
+  (invisible); the drum pads sat at -6 -2 2 6. Fix (D23): the smashers in
+  their slot colours (gem_smasher.dta set_color through the PropAnims
+  particle_slot_colors / smasher_glow); the gems' own materials; RB's tail
+  builder (0x8281A8C8 / 0x8281C928 / 0x8281C4A0 / 0x8281BC48: 4.444-unit
+  segments, the whammy wobble, alpha, end fade, the template's uv); the drum
+  pads where the drum smashers stand (-7.5 -2.5 2.5 7.5). Verified:
+  screenshots of guitar, bass and drums at several song times (Gimme
+  Shelter, Tom Sawyer, (Don't Fear) The Reaper, Maps); tails with
+  GD05_TAILTEST=1.
+
+GATE_RESULTS
+
+What is left:
+- Fret board: the tails' glow line; hit flames, sparks and the smasher
+  press (the smashers' EventTriggers, particles, BandMeshLaunchers);
+  Overdrive / solo / fill / BRE highway visuals; the stand-in HUD's
+  "OVERDRIVE READY" over the strike line.
+- Front end: the audio sliders' pods; the confirm dialogs' dim YES / NO
+  (lit by splash.grp's environ [I]); the creator's 3D preview; the credits
+  and the band lobby screen by screen; `--uitest` still lists script names
+  of shared handlers (rank0.lbl ...) other panels own.
+
+## For the owner to play (wave 04)
+- Solo > Quickplay: the song list hangs on its cloth, turned a little, and
+  sways; Random Song is the first row, right under the title bar; the
+  difficulty card sways too.
+- Pick a song: on the loading screen the band (guitarist, singer, drummer,
+  bassist) stands side by side at the bottom right; the singer and the
+  drummer move.
+- Move around the menus: screens change at once (no second of waiting);
+  choose a main menu button and watch it move; the pause menu's buttons
+  come in one after another.
+- In a song: five coloured smashers on the strike line (drums: red,
+  yellow, blue, green pads and the orange kick); sustains are thin glowing
+  lines; hold one and move the whammy: it wobbles and brightens.
+- Finish a song with stars: the results show them (gold for five on
+  Expert as the font's gold star).
+- Esc > QUIT > Yes: back to the main menu.
+- Solo > Tour: the hub's menu cloth is fully on screen.
+
 ## Final report, wave 03 (2026-11-10, about 2.9 h of agent time, 00:26 -> 03:20)
 
 The owner's goal: the start of the game and the menus as the original.
