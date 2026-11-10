@@ -2,6 +2,7 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #pragma once
 
+#include <cstdint>
 #include <cstdio>
 #include <memory>
 #include <string>
@@ -62,8 +63,40 @@ public:
     bool hasSound() const;
 
 private:
+    friend class MenuMovie;
     struct Impl;
     std::unique_ptr<Impl> impl_;
+};
+
+// RB's MoviePanel with (loop TRUE) (ui/main.dta movie_panel: (videos
+// background), rb_video*.bik, 1280x720, no sound): a video playing behind
+// the menus' panels, looping, drawn in the panel's place in the screen's
+// draw order. Decoded on its own thread; the picture follows a clock that
+// runs only while the movie is drawn (so it does not race ahead during a
+// song). Without video support it draws nothing.
+class MenuMovie {
+public:
+    MenuMovie();
+    ~MenuMovie();
+    MenuMovie(const MenuMovie&) = delete;
+    MenuMovie& operator=(const MenuMovie&) = delete;
+    // Opens videos/<name> and starts decoding (a looping movie); false with `error`.
+    bool open(const GameData& data, const std::string& name, std::string& error);
+    void close();
+    const std::string& name() const { return name_; }
+    // Draws the current picture over the whole frame (its aspect kept);
+    // false when there is none yet.
+    bool draw(Canvas& canvas);
+    int framesShown() const { return shown_; }
+
+private:
+    struct Gl;
+    std::unique_ptr<WmvPlayer> player_;
+    std::unique_ptr<Gl> gl_;
+    std::string name_;
+    double clockMs_ = 0;
+    uint64_t lastNs_ = 0;
+    int shown_ = 0;
 };
 
 // MetaPanel's play_movie: plays videos/<name> modally and returns how it

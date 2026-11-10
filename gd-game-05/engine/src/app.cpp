@@ -333,6 +333,13 @@ public:
     void menuMusic(bool on) override;
     void creditsMusic(bool on) override;
     void playMovie(const std::string& name) override;
+    void menuMovie(const std::string& name) override {
+        if (name.empty() || !data_) return menuMovie_.close();
+        if (name == menuMovie_.name()) return;
+        std::string error;
+        if (!menuMovie_.open(*data_, name, error)) SDL_Log("menu movie %s: %s", name.c_str(), error.c_str());
+    }
+    bool drawMenuMovie() override { return menuMovie_.draw(canvas_); }
     void applyOptions(float band, float guitar, float fx, bool lefty0, bool lefty1, int syncOffsetMs) override;
     bool padConnected(int pad) override { return input_.padConnected(pad); }
     int controllerType(int pad) override;
@@ -547,6 +554,7 @@ private:
     void drawRbNotices(float t);
     void drawRbTrack0(float t, float speed);
     int rbTrackFrames_ = 0;  // frames RB's instrument track drew (the walks)
+    MenuMovie menuMovie_;       // the menus' background video (movie_panel)
     int songLoads_ = 0;         // songs loaded (the walks: a key must not reload the song, GD05-024)
     int menuVenueSounds_ = 0;   // venue sounds played before the first song (the walks: none at boot, GD05-023)
     float overdriveDrainMs() const;
@@ -929,6 +937,7 @@ int App::run() {
     seats_.clear(), hud_.reset(), track_.reset(), track2_.reset(), rbTrack_.reset();
     sceneCache_.reset();
     milos_.reset();
+    menuMovie_.close();  // its textures go before the device
     // A controller was used: its report (the save folder) for bug reports.
     if (input_.anyPad() && input_.writeReport()) SDL_Log("controller report: %s", input_.reportPath().c_str());
     input_.close();
@@ -2761,6 +2770,7 @@ int App::gameCounter(int player, const std::string& key) const {
     if (key == "part_vocals") return parts_[0] == "vocals" ? 1 : 0;
     if (key == "rb_track_frames") return rbTrackFrames_;
     if (key == "song_loads") return songLoads_;
+    if (key == "menu_movie_frames") return menuMovie_.framesShown();
     if (key == "menu_venue_sounds") return menuVenueSounds_;
     if (key == "ms_per_beat") return song_ && song_->beats.size() > 1 ? int((song_->beats.back().ms - song_->beats.front().ms) / float(song_->beats.size() - 1)) : 500;
     if (key == "band_players") return 1 + int(seats_.size());

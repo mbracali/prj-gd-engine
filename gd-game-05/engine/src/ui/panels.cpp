@@ -63,37 +63,83 @@ public:
 // RB's MoviePanel (ui/main.dta: intro_movie_panel, movie_panel,
 // attract_movie_panel ...): (videos <key>) names a list in videos.dtb,
 // (loop) and (audio) say how it plays, movie_done runs at the end [C data].
-// A non-looping one plays modally through the Bink player on enter, then
-// sends movie_done; the looping menu background is not drawn yet [I]
-// (GD05-005: RB's MoviePanel streams behind the menus).
+// The panel (0x82855908) keeps the list's files; it picks one at load with
+// (preload TRUE), else at enter (0x82855A58): a random one not among the
+// recently played, which are forgotten down to half the list once all have
+// played (0x828557E8) [C]. A non-looping one plays modally through the Bink
+// player on enter, then sends movie_done; a looping one (movie_panel's
+// rb_video*.bik) plays behind the menus' panels in its place in the
+// screen's draw order.
 class MoviePanelObj : public PanelObj {
 public:
     MoviePanelObj(UiManager& ui, const std::string& name) : PanelObj(ui, name, "MoviePanel") {}
+    void load() override {
+        PanelObj::load();
+        if (looping() && flagProp("preload")) pick();
+    }
     void enter() override {
         PanelObj::enter();
-        auto prop = [&](const char* key) -> const DataNode* { return typeDef() ? typeDef()->find(key) : nullptr; };
-        const DataNode* loop = prop("loop");
-        const bool looping = loop && loop->children.size() > 1 && loop->children[1].isText() && loop->children[1].s == "TRUE";
+        if (looping()) {
+            if (!flagProp("preload") || current_.empty()) pick();
+            return;
+        }
         const DataNode* videos = prop("videos");
-        if (looping || !videos || videos->children.size() < 2 || !videos->children[1].isText()) return;
-        const std::string file = firstVideo(videos->children[1].s);
-        if (file.empty()) return;
-        ui.host().playMovie(file);
+        if (!videos || videos->children.size() < 2 || !videos->children[1].isText()) return;
+        const std::vector<std::string> files = videoFiles(videos->children[1].s);
+        if (files.empty()) return;
+        ui.host().playMovie(files.front());
         if (handler("movie_done")) ui.interp().send(this, "movie_done", {});
         else ui.logOnce("MoviePanel " + name() + ": no movie_done");
     }
+    void unload() override {
+        if (looping()) ui.host().menuMovie(""), current_.clear();
+        PanelObj::unload();
+    }
+    void draw() override {
+        if (looping()) ui.host().drawMenuMovie();
+    }
+    bool drawsSomething() const override { return false; }
 
 private:
-    std::string firstVideo(const std::string& key) {
+    const DataNode* prop(const char* key) const { return typeDef() ? typeDef()->find(key) : nullptr; }
+    bool flagProp(const char* key) const {
+        const DataNode* n = prop(key);
+        if (!n || n->children.size() < 2) return false;
+        const DataNode& v = n->children[1];
+        return v.type == DataNode::Type::Int ? v.i != 0 : v.isText() && v.s == "TRUE";
+    }
+    bool looping() const { return flagProp("loop"); }
+    void pick() {
+        const DataNode* videos = prop("videos");
+        if (!videos || videos->children.size() < 2 || !videos->children[1].isText()) return;
+        const std::vector<std::string> files = videoFiles(videos->children[1].s);
+        if (files.empty()) return;
+        std::string f;
+        for (int guard = 0; guard < 64; ++guard) {
+            f = files[size_t(SDL_rand(Sint32(files.size())))];
+            if (std::find(recent_.begin(), recent_.end(), f) == recent_.end()) break;
+        }
+        recent_.push_back(f);
+        if (recent_.size() >= files.size())
+            while (recent_.size() > files.size() / 2) recent_.erase(recent_.begin());
+        current_ = f;
+        ui.host().menuMovie(f);
+    }
+    std::vector<std::string> videoFiles(const std::string& key) {
+        std::vector<std::string> out;
         try {
             const DataNode root = parseDtb(ui.data().read("config/gen/videos.dtb"));
             if (const DataNode* e = root.find(key))
-                if (const DataNode* f = e->find("files"); f && f->children.size() > 1 && f->children[1].isText()) return f->children[1].s;
+                if (const DataNode* f = e->find("files"))
+                    for (size_t i = 1; i < f->children.size(); ++i)
+                        if (f->children[i].isText()) out.push_back(f->children[i].s);
         } catch (const std::exception& ex) {
             ui.logOnce(std::string("videos.dtb: ") + ex.what());
         }
-        return {};
+        return out;
     }
+    std::vector<std::string> recent_;
+    std::string current_;
 };
 
 // HelpBarPanel `helpbar` (helpbar.milo, 0x8229A8C0): the buttons and their

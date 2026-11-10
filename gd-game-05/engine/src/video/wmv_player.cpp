@@ -149,6 +149,10 @@ struct WmvPlayer::Impl {
     std::atomic<bool> abort{false};
     std::shared_ptr<SoundQueue> sound = std::make_shared<SoundQueue>();
     std::thread thread;
+    // A looping movie (MoviePanel (loop TRUE), video only): at the end the
+    // file starts again, its pictures' times going on from the last one.
+    bool loop = false;
+    double loopBaseMs = 0, lastMs = 0, frameMs = 33.4;
 
     ~Impl() { close(); }
 
@@ -236,7 +240,8 @@ struct WmvPlayer::Impl {
                 return false;
             }
             Frame f;
-            f.ms = toMs(frame->best_effort_timestamp, vIndex);
+            f.ms = toMs(frame->best_effort_timestamp, vIndex) + loopBaseMs;
+            lastMs = f.ms;
             f.w = frame->width, f.h = frame->height;
             const int cw = (f.w + 1) / 2, ch = (f.h + 1) / 2;
             copyPlane(f.y, frame->data[0], frame->linesize[0], f.w, f.h);
@@ -294,6 +299,28 @@ struct WmvPlayer::Impl {
                 receiveSound();
             }
             av_packet_unref(pkt);
+        }
+        if (more && !abort && loop) {
+            // The decoder's last pictures, then the file again from its start.
+            for (;;) {
+                avcodec_send_packet(vctx, nullptr);
+                if (!receiveVideo(sink) || abort) break;
+                avcodec_flush_buffers(vctx);
+                if (av_seek_frame(fmt, vIndex, 0, AVSEEK_FLAG_BACKWARD) < 0) break;
+                loopBaseMs = lastMs + frameMs;
+                bool going = true;
+                while (going && !abort) {
+                    const int r = av_read_frame(fmt, pkt);
+                    if (r < 0) break;
+                    if (pkt->stream_index == vIndex) {
+                        if (const int s2 = avcodec_send_packet(vctx, pkt); s2 < 0) logDecodeError(s2);
+                        going = receiveVideo(sink);
+                    }
+                    av_packet_unref(pkt);
+                }
+                if (!going || abort) break;
+            }
+            more = false;
         }
         if (more && !abort) {  // the decoders' last pictures and samples
             avcodec_send_packet(vctx, nullptr);
@@ -545,8 +572,12 @@ WmvPlayer::Result WmvPlayer::play(Canvas& canvas, Mixer& mixer, Input& input) {
         canvas.begin(SDL_Color{0, 0, 0, 255});
         canvas.flush();
         if (shown) {
-            // 4:3 inside the 1280x720 picture: 960x720, pillarboxed.
-            constexpr float w = kScreenH * 4 / 3, x0 = (kScreenW - w) / 2, x1 = x0 + w, y1 = kScreenH;
+            // The picture at its own aspect inside the 1280x720 frame: RB's
+            // 1280x720 videos fill it (intro (fill_width TRUE)), a 4:3 one
+            // is pillarboxed. (The 4:3 squeeze GH2's 720x480 needed made
+            // RB's intro narrow, wave 03.)
+            const float aspect = texH > 0 ? float(texW) / float(texH) : 4.0f / 3;
+            const float w = std::min(float(kScreenW), kScreenH * aspect), x0 = (kScreenW - w) / 2, x1 = x0 + w, y1 = kScreenH;
             const Vertex a{x0, 0, 0, 0, 0, 255, 255, 255, 255}, b{x1, 0, 0, 1, 0, 255, 255, 255, 255};
             const Vertex c{x1, y1, 0, 1, 1, 255, 255, 255, 255}, e2{x0, y1, 0, 0, 1, 255, 255, 255, 255};
             const Vertex quad[6] = {a, b, c, a, c, e2};
@@ -578,6 +609,119 @@ WmvPlayer::Result WmvPlayer::play(Canvas& canvas, Mixer& mixer, Input& input) {
     return result;
 }
 
+// ---------------------------------------------------------------- MenuMovie
+
+struct MenuMovie::Gl {
+    gfx::RenderDevice* dev = nullptr;
+    gfx::ProgramId program{};
+    gfx::BufferId vbuf{};
+    gfx::VertexLayout layout;
+    gfx::TextureId planes[3]{};
+    int w = 0, h = 0;
+    ~Gl() {
+        if (!dev) return;
+        for (gfx::TextureId t : planes) dev->destroyTexture(t);
+        dev->destroyBuffer(vbuf);
+        dev->destroyProgram(program);
+    }
+};
+
+MenuMovie::MenuMovie() = default;
+MenuMovie::~MenuMovie() { close(); }
+
+void MenuMovie::close() {
+    if (player_) player_->impl_->stopThread();
+    player_.reset();
+    gl_.reset();
+    name_.clear();
+    clockMs_ = 0, lastNs_ = 0;
+}
+
+bool MenuMovie::open(const GameData& data, const std::string& name, std::string& error) {
+    close();
+    auto p = std::make_unique<WmvPlayer>();
+    if (!p->open(data, "videos/" + name, error)) return false;
+    WmvPlayer::Impl& d = *p->impl_;
+    d.loop = true;
+    const AVStream* vs = d.fmt->streams[d.vIndex];
+    const AVRational fr = vs->avg_frame_rate.num ? vs->avg_frame_rate : vs->r_frame_rate;
+    if (fr.num > 0 && fr.den > 0) d.frameMs = 1000.0 * fr.den / fr.num;
+    // The movie's own sound is not played ((audio FALSE); RB's have none).
+    avcodec_free_context(&d.actx);
+    d.aIndex = -1;
+    d.thread = std::thread([&d] { d.run(); });
+    player_ = std::move(p);
+    name_ = name;
+    return true;
+}
+
+bool MenuMovie::draw(Canvas& canvas) {
+    if (!player_) return false;
+    WmvPlayer::Impl& d = *player_->impl_;
+    // The clock runs while the movie is drawn: a pause (a song) holds it.
+    const uint64_t now = SDL_GetTicksNS();
+    if (lastNs_) clockMs_ += std::min(100.0, double(now - lastNs_) / 1e6);
+    lastNs_ = now;
+    std::optional<Frame> due;
+    {
+        std::lock_guard lock(d.m);
+        while (!d.frames.empty() && d.frames.front().ms <= clockMs_) {
+            due = std::move(d.frames.front());
+            d.frames.pop_front();
+        }
+    }
+    d.cv.notify_all();
+    gfx::RenderDevice& dev = canvas.renderer().device();
+    std::string error;
+    if (!gl_) {
+        gl_ = std::make_unique<Gl>();
+        gl_->dev = &dev;
+        gl_->program = dev.createProgram(gfx::Renderer::videoProgramDesc(), error);
+        gl_->vbuf = dev.createBuffer(gfx::BufferKind::Vertex, 6 * sizeof(Vertex), nullptr, true);
+        gl_->layout.stride = sizeof(Vertex);
+        gl_->layout.attribs[0] = {gfx::kAttribPos, 3, gfx::AttribType::Float, uint16_t(offsetof(Vertex, x))};
+        gl_->layout.attribs[1] = {gfx::kAttribUv, 2, gfx::AttribType::Float, uint16_t(offsetof(Vertex, u))};
+        gl_->layout.attribs[2] = {gfx::kAttribColor, 4, gfx::AttribType::UNorm8, uint16_t(offsetof(Vertex, r))};
+        if (!gl_->program) SDL_Log("video %s: the video shader does not compile: %s", name_.c_str(), error.c_str());
+    }
+    Gl& g = *gl_;
+    if (!g.program) return false;
+    if (due) {
+        if (!g.planes[0] || g.w != due->w || g.h != due->h) {
+            for (gfx::TextureId& t : g.planes) dev.destroyTexture(t), t = {};
+            g.w = due->w, g.h = due->h;
+            const int cw = (g.w + 1) / 2, ch = (g.h + 1) / 2;
+            const gfx::TexLevel ly{due->y.data(), due->y.size()}, lu{due->u.data(), due->u.size()}, lv{due->v.data(), due->v.size()};
+            g.planes[0] = dev.createTexture({g.w, g.h, 1, gfx::TexFormat::R8, gfx::TexKind::Tex2D}, &ly, error);
+            g.planes[1] = dev.createTexture({cw, ch, 1, gfx::TexFormat::R8, gfx::TexKind::Tex2D}, &lu, error);
+            g.planes[2] = dev.createTexture({cw, ch, 1, gfx::TexFormat::R8, gfx::TexKind::Tex2D}, &lv, error);
+        } else {
+            dev.updateTexture(g.planes[0], due->y.data(), size_t(g.w));
+            dev.updateTexture(g.planes[1], due->u.data(), size_t((g.w + 1) / 2));
+            dev.updateTexture(g.planes[2], due->v.data(), size_t((g.w + 1) / 2));
+        }
+    }
+    if (!g.planes[0] || !g.planes[1] || !g.planes[2]) return false;
+    canvas.flush();
+    const float aspect = g.h > 0 ? float(g.w) / float(g.h) : 16.0f / 9;
+    const float w = std::min(float(kScreenW), kScreenH * aspect), x0 = (kScreenW - w) / 2, x1 = x0 + w, y1 = kScreenH;
+    const Vertex a{x0, 0, 0, 0, 0, 255, 255, 255, 255}, b{x1, 0, 0, 1, 0, 255, 255, 255, 255};
+    const Vertex c{x1, y1, 0, 1, 1, 255, 255, 255, 255}, e2{x0, y1, 0, 0, 1, 255, 255, 255, 255};
+    const Vertex quad[6] = {a, b, c, a, c, e2};
+    dev.updateBuffer(g.vbuf, 0, quad, sizeof quad);
+    gfx::DrawCall call;
+    call.program = g.program;
+    call.layout = &g.layout;
+    call.vertices = g.vbuf;
+    call.count = 6;
+    for (int i = 0; i < 3; ++i) call.textures[i] = g.planes[i], call.samplers[i] = {gfx::Filter::Linear, gfx::Wrap::Clamp, 0};
+    const gfx::Mat4 proj = gfx::Mat4::ortho2D(0, kScreenW, 0, kScreenH);
+    call.uniforms[0] = {proj.m, sizeof proj.m};
+    dev.draw(call);
+    ++shown_;
+    return true;
+}
+
 #else  // !GD05_VIDEO: built without FFmpeg
 
 struct WmvPlayer::Impl {};
@@ -602,6 +746,15 @@ WmvPlayer::Result WmvPlayer::play(Canvas&, Mixer&, Input&) { return Result::Unav
 int WmvPlayer::dumpFrames(int, std::FILE*) { return -1; }
 long long WmvPlayer::frameCount() const { return -1; }
 bool WmvPlayer::hasSound() const { return false; }
+struct MenuMovie::Gl {};
+MenuMovie::MenuMovie() = default;
+MenuMovie::~MenuMovie() = default;
+void MenuMovie::close() {}
+bool MenuMovie::open(const GameData&, const std::string&, std::string& error) {
+    error = "built without video support";
+    return false;
+}
+bool MenuMovie::draw(Canvas&) { return false; }
 
 #endif  // GD05_VIDEO
 

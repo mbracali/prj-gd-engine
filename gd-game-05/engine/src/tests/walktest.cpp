@@ -134,7 +134,21 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         press(kX);  // the focused difficulty: ready
         at("game_screen", 60000);  // through loading_screen and the loading tips
     };
-    if (scenario == "rb_owner_bugs") {
+    if (scenario == "rb_boot") {
+        // Rock Band's boot (ui/main.dta, docs/frontend.md): the intro movie,
+        // the title over the menus' background video (movie_panel,
+        // rb_video*.bik), the main menu over it.
+        wait(300);
+        press(kX);
+        at("splash_screen", 30000);
+        wait(1500);
+        check("counter:menu_movie_frames:20");
+        press(kX);
+        at("main_screen");
+        wait(1500);
+        check("counter:menu_movie_frames:60");
+        check("counter_max:menu_venue_sounds:0");
+    } else if (scenario == "rb_owner_bugs") {
         // Wave 03's owner bugs. GD05-023: nothing of a venue plays before a
         // song (the Enhanced Options backdrop is silent). GD05-024: the red
         // fret (keyboard 2) and Esc's back before and during the song do

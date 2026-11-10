@@ -209,6 +209,10 @@ public:
     virtual void creditsMusic(bool on) = 0;
     // meta play_movie: plays videos/<name> modally.
     virtual void playMovie(const std::string& name) = 0;
+    // A looping MoviePanel (the menus' background, videos/<name>): opens it
+    // (an empty name closes it) and draws its current picture.
+    virtual void menuMovie(const std::string& /*name*/) {}
+    virtual bool drawMenuMovie() { return false; }
     // The options' volumes (0..1) for the songs, and lefty per player.
     virtual void applyOptions(float bandVolume, float guitarVolume, float fxVolume, bool lefty0, bool lefty1, int syncOffsetMs) = 0;
     // The port's Enhanced Options (ui/enhanced_panel.h): a setting's value
