@@ -463,8 +463,18 @@ void UiView::drawObject(MaterialRenderer& r, const scene::Object& o, int depth) 
         if (auto it = objectDraws.find(o.name); it != objectDraws.end() && it->second) return it->second(r);
     if (!pose_.showing(&o)) return;
     if (const auto* g = o.as<scene::Group>()) {
+        // A group's environ lights its objects (RndGroup draws with its
+        // environ selected; main.milo's buttons.grp: main_buttons.env, whose
+        // lights give the buttons' metal words their look; without it the
+        // panel's logo.env point light, near the words' plane, left their
+        // first letters dark).
+        const scene::Environ* env = nullptr;
+        if (!g->environment.empty() && o.dir) env = o.dir->resolve<scene::Environ>(g->environment);
+        const LightEnv saved = env ? r.lightEnv() : LightEnv{};
+        if (env) r.setLightEnv(cache_.lightEnv(*env, &pose_));
         for (const std::string& name : g->objects)
             if (const scene::Object* c = o.dir ? o.dir->resolve(name) : find(name); c && c != &o) drawObject(r, *c, depth + 1);
+        if (env) r.setLightEnv(saved);
         return;
     }
     if (const auto* m = o.as<scene::Mesh>()) {

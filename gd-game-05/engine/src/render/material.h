@@ -126,6 +126,10 @@ public:
     // Per-frame constants: camera and lighting (uploaded once; call again
     // each frame, after the frame has begun).
     void setFrame(const Camera& camera, const LightEnv& env, int viewportW, int viewportH, TextureId sceneDepth = {});
+    // The last setFrame's camera and viewport, to change only the lights
+    // (a Group's environ while its objects draw).
+    void setLightEnv(const LightEnv& env) { setFrame(lastCamera_, env, lastW_, lastH_, sceneDepth_); }
+    const LightEnv& lightEnv() const { return env_; }
     // `bones`: ctx.bones transforms (one for a rigid mesh).
     void draw(const GpuMesh& mesh, const Mat4* bones, const Material& m, const DrawContext& ctx);
 
@@ -135,6 +139,8 @@ private:
     StdFrameBlock frame_{};
     UniformData frameStaged_;
     LightEnv env_;
+    Camera lastCamera_;
+    int lastW_ = 0, lastH_ = 0;
     TextureId sceneDepth_;
 };
 

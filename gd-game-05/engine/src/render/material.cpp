@@ -105,6 +105,7 @@ float inverseSpan(float start, float end) { return end != start ? 1.0f / (end - 
 void MaterialRenderer::setFrame(const Camera& camera, const LightEnv& env, int viewportW, int viewportH, TextureId sceneDepth) {
     env_ = env;
     sceneDepth_ = sceneDepth;
+    lastCamera_ = camera, lastW_ = viewportW, lastH_ = viewportH;
     StdFrameBlock& f = frame_;
     f = {};
     put16(f.viewProj, camera.viewProj(device_.info().clipDepthZeroToOne));
