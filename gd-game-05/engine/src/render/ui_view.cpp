@@ -925,7 +925,10 @@ void UiView::drawObject(MaterialRenderer& r, const scene::Object& o, int depth) 
 // disabled unless its panel holds the UI's focus, then normal [C]. The
 // state picks the bar's material by name, normal.mat (orange) or
 // disabled.mat (white) [I: the resource's meshes name normal.mat; the
-// slide is not drawn].
+// slide is not drawn]. Only the resource's shown meshes draw: the bar is
+// highlight_sub.mesh (its own textured material, inside the button's rim);
+// highlight.mesh, the normal.mat frame, is hidden in the resource [C:
+// resource/highlight.milo, its Draw showing flag].
 void UiView::drawHighlight(MaterialRenderer& r, const scene::Object& o) {
     const scene::Object* target = nullptr;
     if (!focus_.empty() && o.dir) target = o.dir->resolve(focus_);
@@ -950,6 +953,7 @@ void UiView::drawHighlight(MaterialRenderer& r, const scene::Object& o) {
                 const scene::Object* up = t->parent.empty() ? nullptr : res->find(t->parent);
                 p = up != p ? up : nullptr;
             }
+            if (!m->draw.showing) continue;  // highlight.mesh (normal.mat's frame) is hidden in the resource
             drawMeshAt(r, *m, m->mat == "normal.mat" ? bar : nullptr, scene::compose(local, world));
         }
 }
