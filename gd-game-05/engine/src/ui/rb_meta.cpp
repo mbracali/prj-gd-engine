@@ -1460,7 +1460,7 @@ void installRbMeta(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Script
         return v;
     };
     m.charList->label = [&m](const std::string& s) {
-        if (s == "create_new") return m.localizeOr("create_new_char");
+        if (s == "create_new") return m.localizeOr("char_provider_create_new");
         for (RbCharObj* c : m.chars)
             if (c->name() == s) return c->d.name;
         return s;
@@ -1488,7 +1488,7 @@ void installRbMeta(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Script
         return v;
     };
     m.bandList->label = [&m](const std::string& s) {
-        if (s == "create_new") return m.localizeOr("create_new_band");
+        if (s == "create_new") return m.localizeOr("char_provider_create_new");
         for (RbBandObj* b : m.bands)
             if (b->name() == s) return b->d.name;
         return s;

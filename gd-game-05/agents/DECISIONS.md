@@ -208,3 +208,13 @@ pattern). Each says what, why and how to undo it.
   false and `unlocked` true [I].
 - **Why:** the help bar's icons and the loading tips.
 - **Undo:** script/script.cpp (macro splice, toValue), script_builtins.cpp.
+
+## D19. GAMEPADS on the main menu's help bar (2026-11-10, wave 03)
+- **What:** RB's main_screen has no help bar; the port adds RB's own help
+  bar panel to it with one item, GAMEPADS on the yellow action (the yellow
+  fret or a click opens the port's GAMEPADS screen). RB's help bar takes
+  clicks on every action (its label or icon presses its button).
+- **Why:** the owner's answer to Q1 (universal access buttons, "always a way
+  to set up the gamepads, mostly on the main screen"), placed in RB's own
+  help bar strip so it covers nothing of the menu.
+- **Undo:** port_patches main_screen in ui/port_screens.cpp; PanelObj::helpMouse.

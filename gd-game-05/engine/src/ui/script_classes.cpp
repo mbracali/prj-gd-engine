@@ -524,6 +524,8 @@ bool PanelObj::helpMouse(float x, float y, bool click) {
                 x0 = std::min(x0, h.x0), y0 = std::min(y0, h.y0), x1 = std::max(x1, h.x1), y1 = std::max(y1, h.y1);
         constexpr float kPad = 6;
         if (x1 < x0 || x < x0 - kPad || x > x1 + kPad || y < y0 - kPad || y > y1 + kPad) continue;
+        // The port's GAMEPADS item (the main menu's yellow action) opens its screen.
+        if (click && view->text(it.action) == ui.localize("port_gamepads")) return ui.openGamepads(), true;
         if (click) ui.buttonDown(it.button, 0), ui.buttonUp(it.button, 0);
         return true;
     }

@@ -5,6 +5,7 @@
 #include <SDL3/SDL.h>
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <set>
 
 #include "data/bytes.h"
@@ -227,6 +228,28 @@ std::vector<scene::Milo*> UiView::linkSubdirs(scene::Milo& milo, int depth) {
             problem(p + ": " + e.what());
         }
     }
+    // The inline proxied directories' own subdirectories (pat_rock_3.milo's
+    // waves_skulls_03 names waves_skulls_2_common.milo, which holds the
+    // skulls' textures; seldiff's slots name seldiffpart_common.milo).
+    std::function<void(scene::Directory&, int)> inlineSubs = [&](scene::Directory& d, int level) {
+        if (level > 4) return;
+        for (auto& [owner, sub] : d.subdirs) {
+            if (!sub) continue;
+            if (const auto* so = sub->self ? sub->self->as<scene::DirObj>() : nullptr)
+                for (const std::string& name : so->objectDir.subdirs) {
+                    const std::string p = scene::findMiloRelative(data_, milo.path(), name);
+                    if (!data_.exists(p)) continue;
+                    try {
+                        scene::Milo& m = lib_.load(p);
+                        if (std::find(sub->linked.begin(), sub->linked.end(), &m.root()) == sub->linked.end()) sub->linked.push_back(&m.root());
+                    } catch (const std::exception& e) {
+                        problem(p + ": " + e.what());
+                    }
+                }
+            inlineSubs(*sub, level + 1);
+        }
+    };
+    if (depth == 0) inlineSubs(milo.root(), 0);
     return out;
 }
 
