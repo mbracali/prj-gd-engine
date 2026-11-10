@@ -152,7 +152,22 @@ void Catalog::load() {
         addDiscDir(platform::join(base, "original_isos"), "next to the program");
     }
 #else
-    addDiscDir(platform::join(base, "original_isos"), "next to the program");
+    // In an AppImage the program's folder is a read-only mount at a random
+    // path (/tmp/.mount_*): "next to the program" is next to the .AppImage
+    // file itself ($APPIMAGE, set by its runtime), in an original_isos folder
+    // or right beside it. Only when this program runs from that mount
+    // ($APPDIR), not when another AppImage's variables leaked into ours. (The
+    // mount's own original_isos/ only has the README: not listed.)
+    const char* appImage = SDL_getenv("APPIMAGE");
+    const char* appDir = SDL_getenv("APPDIR");
+    if (appImage && *appImage && appDir && *appDir && base.rfind(appDir, 0) == 0) {
+        const std::string beside = platform::parentDir(appImage);
+        addDiscDir(platform::join(beside, "original_isos"), "next to the AppImage");
+        addDiscDir(beside, "next to the AppImage");
+        SDL_Log("gdul: running from the AppImage %s", appImage);
+    } else {
+        addDiscDir(platform::join(base, "original_isos"), "next to the program");
+    }
 #endif
     // Always writable, whatever the program's folder is (Program Files, a
     // read-only image, a translocated app).

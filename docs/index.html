@@ -138,6 +138,7 @@
           <a href="https://github.com/mbracali/prj-gd-engine/releases/latest" data-asset="windows-x86_64"><b>Windows</b><span class="file">Windows 10 / 11 (64-bit)</span></a>
           <a href="https://github.com/mbracali/prj-gd-engine/releases/latest" data-asset="macos-arm64"><b>macOS</b><span class="file">Apple silicon</span></a>
           <a href="https://github.com/mbracali/prj-gd-engine/releases/latest" data-asset="linux-x86_64"><b>Linux</b><span class="file">Any distribution from 2022 on</span></a>
+          <a href="https://github.com/mbracali/prj-gd-engine/releases/latest" data-asset="x86_64.AppImage"><b>Linux AppImage</b><span class="file">One file, updates with AppImageUpdate</span></a>
         </div>
         <div class="dlcard" style="--c:var(--yellow)">
           <span class="os">Roadie releases</span><span class="kind">Handhelds</span>
@@ -295,7 +296,7 @@
       if (!/^gdul\//.test(rel.tag_name || "")) return;
       document.getElementById("ver").textContent = `Universal Launcher ${rel.tag_name.replace(/^gdul\/v/, "")} is out. Free. Bring your own discs.`;
       for (const a of document.querySelectorAll(".dlcard a[data-asset]")) {
-        const f = (rel.assets || []).find(x => x.name.includes(a.dataset.asset) && (a.dataset.asset === "steamdeck" || !x.name.includes("steamdeck")));
+        const f = (rel.assets || []).find(x => x.name.includes(a.dataset.asset) && !x.name.endsWith(".zsync") && (a.dataset.asset === "steamdeck" || !x.name.includes("steamdeck")));
         if (f) { a.href = f.browser_download_url; a.querySelector(".file").textContent = f.name; }
       }
     })

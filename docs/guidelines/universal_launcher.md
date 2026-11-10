@@ -45,7 +45,7 @@ incomplete bundles".
   `gd-engine-launcher/scripts/build.sh`). A ready game without a module for a
   system is a bug to fix, not a build to ship.
 - **`scripts/verify_bundle.sh` runs on every build** `build.sh` assembles and,
-  in the release workflow, on every archive (`.tar.gz`, `.zip`, `.apk`) before
+  in the release workflow, on every archive (`.tar.gz`, `.zip`, `.apk`, `.AppImage`) before
   it is uploaded. For each ready game it requires:
   - the module, non-empty, exporting `gd_game_run` (objdump / nm);
   - its libraries (gd02: FFmpeg's avformat, avcodec, avutil and the LGPL

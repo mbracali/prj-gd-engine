@@ -5,11 +5,14 @@
 #
 #   gd-engine-launcher/local_builds/gdul-<version>-<os>-<arch>/   (git-ignored)
 #
-# Usage: gd-engine-launcher/scripts/build.sh [linux] [steamdeck] [windows] [macos] [android] [all]
+# Usage: gd-engine-launcher/scripts/build.sh [linux] [appimage] [steamdeck] [windows] [macos] [android] [all]
 #                                            [--force] [--previous <folder>]
 #   (no build)  the one for the system you are on
 #   linux       Linux x86-64, with this machine's compiler and SDL3 (cmake,
 #               ninja, a C++20 compiler, SDL3 development files)
+#   appimage    the Linux build (this version's linux folder; built first when
+#               there is none) packed as gdul-<version>-x86_64.AppImage and its
+#               .zsync, in gdul-<version>-appimage-x86_64/ (scripts/build_appimage.sh)
 #   steamdeck   Steam Deck (on Linux): gdul-<version>-steamdeck-x86_64, built in
 #               Valve's Steam Runtime 3 "sniper" SDK container (podman or docker;
 #               registry.gitlab.steamos.cloud/steamrt/sniper/sdk), with every
@@ -61,12 +64,12 @@ esac
 targets=() force=0 previous="${GDUL_PREVIOUS_BUILD:-}"
 while [ $# -gt 0 ]; do
   case "$1" in
-    linux|steamdeck|windows|macos|android) targets+=("$1") ;;
-    all) targets+=(linux steamdeck windows macos android) ;;
+    linux|appimage|steamdeck|windows|macos|android) targets+=("$1") ;;
+    all) targets+=(linux appimage steamdeck windows macos android) ;;
     --force) force=1 ;;
     --previous) [ $# -ge 2 ] || { echo "build.sh: --previous needs a folder" >&2; exit 2; }; previous="$2"; shift ;;
     --previous=*) previous="${1#--previous=}" ;;
-    -h|--help) sed -n '4,46p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '4,48p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "build.sh: unknown build or option $1 (see --help)" >&2; exit 2 ;;
   esac
   shift
@@ -768,6 +771,24 @@ PY
   say "${G}Ready: gd-engine-launcher/local_builds/$name/${N}"
 }
 
+# The AppImage: this version's Linux build folder (built first when there is
+# none) packed by build_appimage.sh, then verified like every download.
+build_appimage() {
+  local linux="$out_root/gdul-$version-linux-x86_64" dir="$out_root/gdul-$version-appimage-x86_64"
+  local name="gdul-$version-x86_64.AppImage"
+  echo "${B}${C}=== $name ===${N}"
+  if [ ! -f "$linux/gd-engine-games/manifest.json" ]; then
+    say "No gdul-$version-linux-x86_64 yet: building it first"
+    build_os linux || return 1
+  fi
+  rm -rf "$dir.new"
+  step appimage "Packing $name from gdul-$version-linux-x86_64" "$here/build_appimage.sh" "$linux" "$dir.new" || return 1
+  "$here/verify_bundle.sh" "$dir.new/$name"
+  rm -rf "$dir"
+  mv "$dir.new" "$dir"
+  say "${G}Ready: gd-engine-launcher/local_builds/gdul-$version-appimage-x86_64/$name (+ .zsync)${N}"
+}
+
 echo "${B}Guitar Dream Universal Launcher $version: build${N}"
 if command -v python3 >/dev/null; then
   if (cd "$repo" && python3 .github/scripts/repo_guard.py) > "$logs/repo-guard.log" 2>&1; then
@@ -794,6 +815,7 @@ build_steamdeck_in_container() {
 can_build() {
   case "$1" in
     windows) return 0 ;;
+    appimage) [ "$host" = linux ] ;;
     steamdeck) [ "$host" = linux ] && { in_steamrt || [ -n "$(container_runner)" ]; } ;;
     android) { [ "$host" = linux ] || [ "$host" = macos ]; } && android_ready ;;
     *) [ "$host" = "$1" ] ;;
@@ -803,6 +825,9 @@ for t in "${targets[@]}"; do
   if [ "$t" = steamdeck ] && [ "$host" = linux ] && ! in_steamrt && can_build "$t"; then
     # (Its log, logs/build-steamdeck.log, is written inside the container.)
     { set +e; build_steamdeck_in_container; rc=$?; set -e; }
+    [ "$rc" = 0 ] || failed=$((failed + 1))
+  elif [ "$t" = appimage ] && can_build "$t"; then
+    { set +e; ( set -e; build_appimage ) 2>&1 | tee "$logs/build-appimage.log"; rc=${PIPESTATUS[0]}; set -e; }
     [ "$rc" = 0 ] || failed=$((failed + 1))
   elif can_build "$t"; then
     { set +e; ( set -e; build_os "$t" ) 2>&1 | tee "$logs/build-$t.log"; rc=${PIPESTATUS[0]}; set -e; }
