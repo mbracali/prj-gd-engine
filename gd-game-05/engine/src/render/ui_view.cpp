@@ -67,6 +67,111 @@ UiView::UiView(const GameData& data, scene::MiloLibrary& library, const scene::U
 
 UiView::~UiView() {
     if (renderTarget_.id) cache_.device().destroyTarget(renderTarget_);
+    for (auto& [o, t] : rdTargets_) cache_.device().destroyTarget(t);
+}
+
+namespace {
+// The length-prefixed names in a raw record (a class the port keeps raw).
+std::vector<std::string> recordNames(const Bytes& rec) {
+    std::vector<std::string> out;
+    for (size_t i = 0; i + 4 < rec.size(); ++i) {
+        const uint32_t n = uint32_t(rec[i]) << 24 | uint32_t(rec[i + 1]) << 16 | uint32_t(rec[i + 2]) << 8 | uint32_t(rec[i + 3]);
+        if (n < 3 || n > 64 || i + 4 + n > rec.size()) continue;
+        bool printable = true;
+        for (size_t k = 0; k < n && printable; ++k) printable = rec[i + 4 + k] >= 0x20 && rec[i + 4 + k] < 0x7f;
+        if (!printable) continue;
+        out.emplace_back(reinterpret_cast<const char*>(rec.data() + i + 4), n);
+        i += 3 + n;
+    }
+    return out;
+}
+}  // namespace
+
+bool UiView::drawRenderDir3d(MaterialRenderer& r) {
+    const scene::Directory& outer = milo_->root();
+    const scene::Cam* outerCam = nullptr;
+    const scene::Environ* outerEnv = nullptr;
+    if (outer.self)
+        for (const std::string& n : recordNames(outer.self->record)) {
+            if (!outerCam) outerCam = outer.find<scene::Cam>(n);
+            if (!outerEnv) outerEnv = outer.find<scene::Environ>(n);
+        }
+    if (!outerCam) return false;
+    RenderDevice& dev = cache_.device();
+    const TargetId prev = dev.currentTarget();
+    int vx, vy, vw, vh;
+    dev.currentViewport(vx, vy, vw, vh);
+    const LightEnv screenEnv = r.lightEnv();
+    for (const auto& o : outer.objects) {
+        if (o->cls != "TexRenderer") continue;
+        const scene::Directory* panel = nullptr;
+        const scene::Tex* out = nullptr;
+        for (const std::string& n : recordNames(o->record)) {
+            if (const scene::Tex* t = outer.find<scene::Tex>(n)) out = t;
+            for (const auto& [owner, sub] : outer.subdirs)
+                if (sub && (sub->name == n || owner == n)) panel = sub.get();
+        }
+        if (!panel || !out || out->width <= 0 || out->height <= 0) continue;
+        TargetId& t = rdTargets_[o.get()];
+        if (!t.id) {
+            std::string error;
+            t = dev.createTarget(TargetDesc{out->width, out->height, true, TargetFormat::RGBA8}, error);
+            if (!t.id) continue;
+        }
+        dev.setTarget(t);
+        dev.setViewport(0, 0, out->width, out->height);
+        const float clear[4] = {0, 0, 0, 0};
+        dev.clear(clear, true);
+        Camera ic = defaultCamera();
+        LightEnv env = screenEnv;
+        if (const auto* own = panel->self ? panel->self->as<scene::DirObj>() : nullptr) {
+            if (own->hasPanel)
+                if (const scene::Cam* c = panel->find<scene::Cam>(own->panel.cam)) {
+                    ic.world = toMat4(pose_.world(c));
+                    ic.yFov = c->yFov, ic.nearPlane = c->nearPlane, ic.farPlane = c->farPlane;
+                }
+            if (own->hasRnd)
+                if (const scene::Environ* e = panel->find<scene::Environ>(own->rnd.environment)) env = cache_.lightEnv(*e, &pose_);
+        }
+        ic.aspect = float(out->width) / float(out->height);
+        r.setFrame(ic, env, out->width, out->height);
+        viewProj_ = ic.viewProj(false);
+        r.forceAlphaWrite = true;
+        drawRoots(r, *panel);
+        r.forceAlphaWrite = false;
+        for (const auto& m : outer.objects)
+            if (auto* mat = m->as<scene::Mat>(); mat && mat->diffuseTex == out->name) {
+                ScenePose::MatState& st = pose_.matState(mat);
+                st.texId = dev.targetTexture(t);
+                st.flipV = true;
+            }
+    }
+    dev.setTarget(prev);
+    dev.setViewport(vx, vy, vw, vh);
+    dev.clear(nullptr, true);
+    Camera oc;
+    oc.world = toMat4(pose_.world(outerCam));
+    oc.yFov = outerCam->yFov, oc.nearPlane = outerCam->nearPlane, oc.farPlane = outerCam->farPlane;
+    r.setFrame(oc, outerEnv ? cache_.lightEnv(*outerEnv, &pose_) : screenEnv, vw, vh);
+    viewProj_ = oc.viewProj(false);
+    drawRoots(r, outer);
+    return true;
+}
+
+void UiView::drawRoots(MaterialRenderer& r, const scene::Directory& root) {
+    std::set<std::string> held;
+    for (const auto& o : root.objects)
+        if (const auto* g = o->as<scene::Group>())
+            for (const std::string& m : g->objects) held.insert(m);
+    std::vector<const scene::Object*> roots;
+    for (const auto& o : root.objects)
+        if (!held.count(o->name) && !o->as<scene::DirObj>() && (drawOf(o.get()) || o->as<scene::Text>())) roots.push_back(o.get());
+    std::stable_sort(roots.begin(), roots.end(), [](const scene::Object* a, const scene::Object* b) {
+        const scene::Draw* da = drawOf(a);
+        const scene::Draw* db = drawOf(b);
+        return (da ? da->order : 0) < (db ? db->order : 0);
+    });
+    for (const scene::Object* o : roots) drawObject(r, *o, 0);
 }
 
 void UiView::problem(const std::string& what) {
@@ -380,6 +485,23 @@ void UiView::draw(MaterialRenderer& r) {
     viewProj_ = camera().viewProj(false);
     const scene::Directory* drawRoot = &milo_->root();
     rendered_ = Rendered{};
+    // A RenderDir is drawn as the original draws it (drawRenderDir3d: its
+    // TexRenderers' panels into their textures, its own scene through its
+    // camera: seldiff_solo's koi banner and the slots' cards). One whose
+    // record names its inline panel as the one that takes the input
+    // (qp_selsong's qp_sel_song, the list) is drawn flat below [I]: its
+    // banner camera framed the cloth off the screen (GD05-022).
+    if (drawRoot->cls == "RenderDir") {
+        bool cloth = false;
+        if (drawRoot->self)
+            for (const std::string& n : recordNames(drawRoot->self->record))
+                for (const auto& [owner, sub] : drawRoot->subdirs)
+                    if (sub && sub->cls == "PanelDir" && (sub->name == n || owner == n)) cloth = true;
+        if (!cloth && drawRenderDir3d(r)) {
+            texts_.collect();
+            return;
+        }
+    }
     // RB's RenderDir panels (qp_selsong.milo): a TexRenderer draws the
     // inline PanelDir holding the list (through its meta.cam) into
     // cloth_texture_wide.tex, 480 x 552 [C data], which the RenderDir's
@@ -555,7 +677,8 @@ void UiView::drawObject(MaterialRenderer& r, const scene::Object& o, int depth) 
         }
         return drawLabel(r, *b, &b->band, nullptr);
     }
-    if (const auto* u = o.as<scene::UILabel>()) return drawLabel(r, *u, nullptr, nullptr);
+    // RB labels (UILabel rev 8) carry their own text fields [C].
+    if (const auto* u = o.as<scene::UILabel>()) return drawLabel(r, *u, u->bigEndian && u->labelRev >= 8 ? &u->style : nullptr, nullptr);
     if (o.as<scene::UIList>()) return drawList(r, o);
     if (o.as<scene::BandTextEntry>()) return drawTextEntry(r, o);
     if (const auto* sm = o.as<scene::ScreenMask>()) {

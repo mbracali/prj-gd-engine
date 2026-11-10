@@ -613,10 +613,18 @@ Material SceneCache::material(const scene::Mat& mat, const ScenePose* pose) {
         if (s->hasAlpha) g.alpha = s->alpha;
         if (s->hasXfm) texXfm = s->texXfm;
         if (s->tex) g.diffuseTex = texture(s->tex);
+        if (s->texId.id) g.diffuseTex = s->texId;
     }
     if (!g.diffuseTex && !mat.diffuseTex.empty() && mat.dir)
         if (const auto* t = mat.dir->resolve<scene::Tex>(mat.diffuseTex); t && t->bitmap.empty() && t->file.empty()) g.unfilled = true;
-    g.texXfm = toMat4(texCoordXfm(texXfm, mat.texGen));
+    scene::Xfm uvXfm = texCoordXfm(texXfm, mat.texGen);
+    if (const ScenePose::MatState* s = pose ? pose->mat(&mat) : nullptr; s && s->flipV) {
+        scene::Xfm flip;
+        flip.rot = {1, 0, 0, 0, -1, 0, 0, 0, 1};
+        flip.pos = {0, 1, 0};
+        uvXfm = scene::compose(uvXfm, flip);
+    }
+    g.texXfm = toMat4(uvXfm);
     return g;
 }
 

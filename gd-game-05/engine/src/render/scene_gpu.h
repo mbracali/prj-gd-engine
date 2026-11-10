@@ -36,6 +36,10 @@ public:
         float alpha = 1;
         scene::Xfm texXfm;
         const scene::Tex* tex = nullptr;
+        // A texture drawn at run time (a TexRenderer's render target), and
+        // whether its rows run bottom up (a GL target).
+        TextureId texId{};
+        bool flipV = false;
     };
 
     void clear();

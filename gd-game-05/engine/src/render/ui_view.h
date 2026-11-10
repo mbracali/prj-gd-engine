@@ -254,6 +254,11 @@ private:
     Mat4 viewProj_;  // the frame's camera, for the hits
     TargetId renderTarget_{};
     Rendered rendered_;
+    // RB's RenderDir drawn as the original: every TexRenderer's panel into
+    // its texture, then the RenderDir's own objects through its camera.
+    bool drawRenderDir3d(MaterialRenderer& r);
+    void drawRoots(MaterialRenderer& r, const scene::Directory& dir);
+    std::map<const scene::Object*, TargetId> rdTargets_;
     void addLayoutHit(const std::string& key, const TextLayout& layout, const Mat4& world);
     int textsDrawn_ = 0, meshesDrawn_ = 0;
     std::vector<std::string> problems_;

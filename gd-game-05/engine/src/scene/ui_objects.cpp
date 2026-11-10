@@ -100,7 +100,10 @@ void label(Rd& r, UILabel& l, bool ownVersion = false) {
     t.fitText = r.u32();
     t.width = r.f();
     t.height = r.f();
-    t.wrapWidth = t.width;
+    // fit_type (system/run/config macros.dta): kFitWrap 0 wraps at width;
+    // kFitStretched 1 and kFitJust 2 scale the one line to the box, so they
+    // never wrap ("PLAYER 1" broke into "PLAYE / R 1" on the slots).
+    t.wrapWidth = t.fitText == 0 ? t.width : 0;
     l.fixedLength = r.i32();
     l.reserveLines = r.i32();
 }
