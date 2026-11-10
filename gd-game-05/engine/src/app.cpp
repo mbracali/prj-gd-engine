@@ -2088,6 +2088,7 @@ void App::drawSeats(float t, float speed) {
         pv.phraseIntact = [p](int ph) { return p->phraseIntact(ph); };
         pv.overdriveActive = p->starPowerActive();
         pv.heldGem = p->sustainGem();
+        pv.whammy = p->whammyBar();
         if (st.part == "drum") pv.laneOfBit = {4, 1, 2, 3, 0};
         st.track->draw(canvas_.renderer(), *sceneCache_, *song_, pv, t + float(videoOffsetMs_), speed);
     }
@@ -3334,6 +3335,7 @@ void App::drawRbTrack0(float t, float speed) {
     pv.phraseIntact = [p](int ph) { return p->phraseIntact(ph); };
     pv.overdriveActive = p->starPowerActive();
     pv.heldGem = p->sustainGem();
+    pv.whammy = p->whammyBar();
     // The drums' permuted lanes back to the chart's (kick = lane 0).
     if (parts_[0] == "drum") pv.laneOfBit = {4, 1, 2, 3, 0};
     rbTrack_->setLefty(input_.lefty(0));

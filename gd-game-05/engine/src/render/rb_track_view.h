@@ -3,6 +3,7 @@
 #pragma once
 
 #include <array>
+#include <map>
 #include <functional>
 #include <memory>
 #include <string>
@@ -50,6 +51,7 @@ public:
         bool overdriveActive = false;
         std::array<int, 5> laneOfBit{0, 1, 2, 3, 4};  // the gem's bit -> the track's lane
         int heldGem = -1;  // the sustain being held (its tail shortens from the now bar)
+        float whammy = 0;  // the whammy bar (0 rest .. 1): the held tail's wobble and brightness
     };
 
     RbTrackView();
@@ -95,6 +97,9 @@ private:
     int viewW_ = 1280, viewH_ = 720;
     float yPerSecond_ = 60, bottomY_ = -10, topY_ = 120, speed_ = 1, nowY_ = 0;
     std::array<float, 5> slotX_{-8, -4, 0, 4, 8};
+    // The drums' lanes: the kick (0) and the pads where smasher_plate_drum's
+    // gem_smasher0..4 stand [C data].
+    std::array<float, 5> drumX_{0, -7.5f, -2.5f, 2.5f, 7.5f};
     std::array<float, 4> layout_{0, 0, 1, 1};
     bool hasLayout_ = false;
     std::array<SlotSet, 5> sets_{};
@@ -111,5 +116,33 @@ private:
         int firstIndex, indexCount;
     };
     std::vector<TailRange> tailRanges_;
+    // RB's tail (TailBuilder RB 0x8281A970 / 0x8281A8C8, poll 0x8281C928,
+    // rows 0x8281C4A0) [C]: track_graphics' (gem ...) tail values.
+    struct TailCfg {
+        float pulseRate = 64, pulseSmoothing = 0.5f, offsetX = 0, minAlpha = 0.5f, maxAlpha = 1, alphaSmoothing = 0.25f,
+              fadeDistance = 20, minFreq = 15, maxFreq = 4.5f, minAmp = 0.25f, maxAmp = 1.5f;
+        int segments = 90;          // 0x5A [C 0x8281A8C8]
+        float segLen = 4.4444447f;  // 0x408E38E4 [C 0x8281A8C8]
+    } tailCfg_;
+    // One tail's wobble (0x8281C928): 300 samples written at pulse_rate a
+    // second while held, the phase, the smoothed whammy and alpha.
+    struct TailState {
+        std::array<float, 300> ring{};
+        int head = 0;
+        float phase = 0, smoothW = 0, smoothA = 0;
+        double clockMs = -1;
+        bool seen = false;
+    };
+    std::map<long, TailState> tailStates_;
+    std::vector<std::array<float, 4>> tailRow_;  // tail02.mesh's cross-section: x, z, u, v (by x)
+    float tailRowV1_ = 1;                        // the template's v at its second row
+    float lastTailMs_ = -1e9f;
+    void pollTail(TailState& t, bool held, float whammy, float nowMs);
+    // The smashers' colours: each gem_smasherN's PropAnims set to its slot
+    // colour's frame (gem_smasher.dta set_color).
+    void colorSmashers();
+    // A PropAnim's material keys at `frame` (diffuse_tex: the step key's
+    // Tex; color: linear) into pose_; false when its record is not read.
+    bool applyPropAnim(const scene::Object& anim, float frame);
     const scene::Group* smasherGroup_ = nullptr;  // smasher_plate_<instrument>'s draw_order.grp
 };

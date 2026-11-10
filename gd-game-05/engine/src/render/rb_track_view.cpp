@@ -5,7 +5,9 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <functional>
 #include <cmath>
+#include <cstring>
 #include <stdexcept>
 
 #include "data/dta.h"
@@ -73,6 +75,17 @@ void RbTrackView::load(const GameData& data, scene::MiloLibrary& library, const 
     if (const DataNode* sc = cfg.find("slot_colors"))
         for (size_t i = 0; i < 5 && i + 1 < sc->children.size(); ++i) slotColors_[i] = sc->textAt(i + 1);
     const DataNode* gem = cfg.find("gem");
+    // The tails' values (TailBuilder RB 0x8281A970 reads them from (gem ...)) [C].
+    if (gem) {
+        auto num = [&](const char* k, float& v) {
+            if (const DataNode* n = gem->find(k); n && n->children.size() > 1) v = n->floatAt(1);
+        };
+        num("tail_pulse_rate", tailCfg_.pulseRate), num("tail_pulse_smoothing", tailCfg_.pulseSmoothing);
+        num("tail_offset_x", tailCfg_.offsetX), num("tail_min_alpha", tailCfg_.minAlpha), num("tail_max_alpha", tailCfg_.maxAlpha);
+        num("tail_alpha_smoothing", tailCfg_.alphaSmoothing), num("tail_fade_distance", tailCfg_.fadeDistance);
+        num("tail_min_freq", tailCfg_.minFreq), num("tail_max_freq", tailCfg_.maxFreq);
+        num("tail_min_amp", tailCfg_.minAmp), num("tail_max_amp", tailCfg_.maxAmp);
+    }
     const DataNode* gems = gem ? gem->find("gems") : nullptr;
     const DataNode* set = gems ? gems->find(drums_ ? "drum" : part == "bass" ? "bass" : "guitar") : nullptr;
     auto widget = [&](const DataNode* slot, const char* kind) -> const scene::TrackWidget* {
@@ -113,9 +126,23 @@ void RbTrackView::load(const GameData& data, scene::MiloLibrary& library, const 
     // smasher_plate_guitar / _drum, its draw_order.grp [C data].
     for (const auto& [owner, d] : track_->root().subdirs)
         if (owner == (drums_ ? "smasher_plate_drum" : "smasher_plate_guitar")) smasherGroup_ = d->get("draw_order.grp") ? d->get("draw_order.grp")->as<scene::Group>() : nullptr;
+    colorSmashers();
     // The sustain tails' template and materials (track/gem_tail.milo) [C data].
     try {
         tails_ = &library.load("track/gen/gem_tail.milo_xbox");
+        // tail02.mesh's first row (its lowest y), by x: the cross-section
+        // every row of the tail repeats (0x8281A8C8 copies its vertices) [C].
+        if (const scene::Mesh* t = tails_->find<scene::Mesh>("tail02.mesh"); t && t->verts.size() >= 4) {
+            float y0 = 1e9f, y1 = 1e9f;
+            for (const auto& v : t->verts) y0 = std::min(y0, v.pos[1]);
+            for (const auto& v : t->verts)
+                if (v.pos[1] > y0 + 1e-3f) y1 = std::min(y1, v.pos[1]);
+            for (const auto& v : t->verts)
+                if (std::fabs(v.pos[1] - y0) < 1e-3f) tailRow_.push_back({v.pos[0], v.pos[2], v.uv[0], v.uv[1]});
+            for (const auto& v : t->verts)
+                if (y1 < 1e9f && std::fabs(v.pos[1] - y1) < 1e-3f) tailRowV1_ = v.uv[1];
+            std::sort(tailRow_.begin(), tailRow_.end(), [](const auto& a, const auto& b) { return a[0] < b[0]; });
+        }
         // Its materials' textures are track_shared's too [I].
         scene::Milo& shared = library.load("track/gen/track_shared.milo_xbox");
         auto& linked = tails_->root().linked;
@@ -148,12 +175,131 @@ void RbTrackView::load(const GameData& data, scene::MiloLibrary& library, const 
                 const scene::Mesh* m = o ? o->as<scene::Mesh>() : nullptr;
                 const scene::Mat* mt = m ? g->dir->resolve<scene::Mat>(m->mat) : nullptr;
                 const scene::Object* tx = mt && !mt->diffuseTex.empty() ? g->dir->resolve(mt->diffuseTex) : nullptr;
-                SDL_Log("  draw %s %s mat %s tex %s (%s)", o ? o->cls.c_str() : "?", n.c_str(), m ? m->mat.c_str() : "", mt ? mt->diffuseTex.c_str() : "",
-                        tx ? tx->cls.c_str() : "missing");
+                SDL_Log("  draw %s %s mat %s tex %s (%s) blend %d alpha %.2f color %.2f %.2f %.2f texgen %d z %d env %s next %s verts %zu", o ? o->cls.c_str() : "?",
+                        n.c_str(), m ? m->mat.c_str() : "", mt ? mt->diffuseTex.c_str() : "", tx ? tx->cls.c_str() : "missing", mt ? mt->blend : -1,
+                        mt ? double(mt->color[3]) : 0.0, mt ? double(mt->color[0]) : 0.0, mt ? double(mt->color[1]) : 0.0, mt ? double(mt->color[2]) : 0.0,
+                        mt ? mt->texGen : -1, mt ? mt->zMode : -1, mt ? mt->environMap.c_str() : "", mt ? mt->nextPass.c_str() : "", m ? m->verts.size() : size_t(0));
             }
     SDL_Log("RB track %s: y_per_second %.1f, y %.1f..%.1f, slots %.2f %.2f %.2f %.2f %.2f, draw %s, anim %s, camera %s", part.c_str(),
             double(yPerSecond_), double(bottomY_), double(topY_), double(slotX_[0]), double(slotX_[1]), double(slotX_[2]), double(slotX_[3]),
             double(slotX_[4]), drawGroup_.c_str(), animGroup_.c_str(), cam_->name.c_str());
+}
+
+
+// PropAnim (RB rev 5) [C data, read here only as far as the smashers need,
+// checked against every PropAnim of tracksystem.milo]: the object header,
+// the RndAnimatable part, then keysets: the target's name, its property
+// path (a one-symbol DataArray: 11 bytes then the symbol), the key type (0
+// float, 1 colour, 2 object; 3 and 5 are not read: the keysets after one
+// are skipped), a u32, for objects one more, the keys (value, frame), then
+// one u32 (two after colour keys).
+bool RbTrackView::applyPropAnim(const scene::Object& anim, float frame) {
+    const Bytes& r = anim.record;
+    size_t p = 0;
+    auto u32 = [&](uint32_t& v) {
+        if (p + 4 > r.size()) return false;
+        v = uint32_t(r[p]) << 24 | uint32_t(r[p + 1]) << 16 | uint32_t(r[p + 2]) << 8 | r[p + 3];
+        p += 4;
+        return true;
+    };
+    auto f32 = [&](float& v) {
+        uint32_t b;
+        if (!u32(b)) return false;
+        std::memcpy(&v, &b, 4);
+        return true;
+    };
+    auto str = [&](std::string& out) {
+        uint32_t n;
+        if (!u32(n) || n > 256 || p + n > r.size()) return false;
+        out.assign(reinterpret_cast<const char*>(r.data() + p), n);
+        p += n;
+        return true;
+    };
+    uint32_t v, sets;
+    std::string type;
+    if (!u32(v) || v != 5 || !u32(v) || !str(type) || !u32(v)) return false;
+    ++p;
+    float fr;
+    if (!u32(v) || !f32(fr) || !u32(v) || !u32(sets) || sets > 256) return false;
+    for (uint32_t k = 0; k < sets; ++k) {
+        std::string target, prop;
+        uint32_t ktype, count;
+        if (!str(target)) return false;
+        p += 11;
+        if (!str(prop) || !u32(ktype) || !u32(v)) return false;
+        if (ktype == 2 && !u32(v)) return false;
+        if (!u32(count) || count > 4096) return false;
+        const scene::Mat* mat = anim.dir ? anim.dir->resolve<scene::Mat>(target) : nullptr;
+        if (ktype == 2) {
+            std::string pick;
+            for (uint32_t i = 0; i < count; ++i) {
+                std::string name;
+                float kf;
+                if (!str(name) || !f32(kf)) return false;
+                if (i == 0 || kf <= frame + 1e-3f) pick = name;
+            }
+            p += 4;
+            if (mat && prop == "diffuse_tex")
+                if (const scene::Tex* t = anim.dir->resolve<scene::Tex>(pick)) pose_.matState(mat).tex = t;
+        } else if (ktype == 1) {
+            std::array<float, 4> out{};
+            std::array<float, 5> prev{};
+            bool have = false;
+            for (uint32_t i = 0; i < count; ++i) {
+                std::array<float, 5> cur{};
+                for (float& x : cur)
+                    if (!f32(x)) return false;
+                if (!have || cur[4] <= frame) {
+                    out = {cur[0], cur[1], cur[2], cur[3]};
+                } else if (prev[4] <= frame && cur[4] > frame) {
+                    const float t = (frame - prev[4]) / (cur[4] - prev[4]);
+                    for (size_t c = 0; c < 4; ++c) out[c] = prev[c] + (cur[c] - prev[c]) * t;
+                }
+                prev = cur, have = true;
+            }
+            p += 8;
+            if (mat && prop == "color" && have) {
+                gfx::ScenePose::MatState& st = pose_.matState(mat);
+                st.hasColor = true;
+                st.rgb[0] = out[0], st.rgb[1] = out[1], st.rgb[2] = out[2];
+                st.hasAlpha = true;
+                st.alpha = out[3];
+            }
+        } else if (ktype == 0) {
+            p += size_t(count) * 8 + 4;
+        } else {
+            return true;  // a key type the smashers' colours do not need: the rest is skipped
+        }
+        if (p > r.size()) return false;
+    }
+    return true;
+}
+
+void RbTrackView::colorSmashers() {
+    // gem_smasher.dta set_color [C data]: particle_slot_colors.anim at the
+    // colour's index (green 0 .. orange 4), smasher_glow.anim at 20 x it.
+    // The guitar's smashers are the slots' colours (slot_colors); the drums'
+    // kick (gem_smasher0) orange, the pads red, yellow, blue, green [I: the
+    // native caller of set_color is not read].
+    static const char* kNames[5] = {"green", "red", "yellow", "blue", "orange"};
+    for (const auto& [owner, plate] : track_->root().subdirs) {
+        if (!plate || owner != (drums_ ? "smasher_plate_drum" : "smasher_plate_guitar")) continue;
+        for (const auto& [o2, d] : plate->subdirs) {
+            if (!d || o2.rfind("gem_smasher", 0) != 0 || o2.size() != 12) continue;
+            const int slot = o2[11] - '0';
+            if (slot < 0 || slot > 4) continue;
+            if (drums_)
+                if (const scene::Object* holder = plate->get(o2)) drumX_[size_t(slot)] = pose_.world(holder).pos[0];
+            std::string color = drums_ ? (slot == 0 ? "orange" : slot == 1 ? "red" : slot == 2 ? "yellow" : slot == 3 ? "blue" : "green") : slotColors_[size_t(slot)];
+            int index = 0;
+            for (int i = 0; i < 5; ++i)
+                if (color == kNames[i]) index = i;
+            bool ok = true;
+            if (const scene::Object* a = d->get("particle_slot_colors.anim")) ok = applyPropAnim(*a, float(index)) && ok;
+            if (const scene::Object* a = d->get("smasher_glow.anim")) ok = applyPropAnim(*a, float(20 * index)) && ok;
+            if (!ok) SDL_Log("RB track: %s: a PropAnim was not read", o2.c_str());
+        }
+    }
 }
 
 void RbTrackView::setEnv(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, const scene::Environ* env) {
@@ -176,10 +322,30 @@ void RbTrackView::drawGroup(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, c
         const scene::Object* o = g->dir->resolve(n);
         if (!o || o == g || !pose_.showing(o)) continue;
         if (auto* m = o->as<scene::Mesh>()) {
+            if (static int n = 0; SDL_getenv("GD05_TRACKLOG") && n < 40 && depth > 0) {
+                ++n;
+                const scene::Mat* mt = m->dir ? m->dir->resolve<scene::Mat>(m->mat) : nullptr;
+                SDL_Log("  smasher mesh %s (%s) mat '%s' %s color %.2f %.2f %.2f %.2f tex %s blend %d verts %zu vcol %.2f %.2f %.2f %.2f", m->name.c_str(),
+                        m->dir ? m->dir->name.c_str() : "", m->mat.c_str(), mt ? "ok" : "none", mt ? double(mt->color[0]) : 0.0, mt ? double(mt->color[1]) : 0.0,
+                        mt ? double(mt->color[2]) : 0.0, mt ? double(mt->color[3]) : 0.0, mt ? mt->diffuseTex.c_str() : "", mt ? mt->blend : -1, m->verts.size(),
+                        m->verts.empty() ? 0.0 : double(m->verts[0].color[0]), m->verts.empty() ? 0.0 : double(m->verts[0].color[1]),
+                        m->verts.empty() ? 0.0 : double(m->verts[0].color[2]), m->verts.empty() ? 0.0 : double(m->verts[0].color[3]));
+            }
             setEnv(mr, cache, env);
             gfx::drawMesh(mr, cache, *m, gfx::toMat4(pose_.world(m)), &pose_);
         } else if (auto* sub = o->as<scene::Group>()) {
             drawGroup(mr, cache, sub, env, depth + 1);
+        } else if (o->as<scene::DirObj>()) {
+            // An inline RndDir in the group (the smasher plate's
+            // gem_smashers.grp: gem_smasher0..4, one fret each): its own
+            // draw_order.grp under the object's transform [C data; I: RndDir
+            // draws that group].
+            for (const auto& [owner, d] : g->dir->subdirs)
+                if (d && owner == o->name) {
+                    pose_.setDirBase(d.get(), o);
+                    if (const scene::Object* dg = d->get("draw_order.grp"))
+                        if (auto* dgg = dg->as<scene::Group>()) drawGroup(mr, cache, dgg, env, depth + 1);
+                }
         }
     }
 }
@@ -208,7 +374,13 @@ void RbTrackView::drawWidget(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, 
         scene::Xfm x0;
         if (w->allowRotation) x0.rot = pose_.local(m).rot;
         x0.pos = {x, y, 0};
-        gfx::drawMesh(mr, cache, *m, gfx::toMat4(x0), &pose_, slotMat(*m, colorSlot));
+        // RB colours the gems by the meshes themselves (each slot's mesh maps
+        // its colour of prism_gems.tex): the slot colours swap materials only
+        // for the tails (0x82819A48, called by the TailBuilder 0x8281A970)
+        // [C]. Swapping prism_mat for prism_mat_<colour> drew the green gems
+        // with prism_green.tex through the atlas' coordinates (GD05-029).
+        (void)colorSlot;
+        gfx::drawMesh(mr, cache, *m, gfx::toMat4(x0), &pose_);
     }
 }
 
@@ -262,26 +434,64 @@ void RbTrackView::drawGems(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, co
             const int color = missed || star ? -1 : drums_ ? (f == 0 ? 4 : f) : f;
             // The drums' four pads between the five slots (-6, -2, 2, 6 for
             // slots -8..8) [I: RB's drum slot positions are not read].
-            const float x = !drums_ ? slotX(f) : f == 0 ? 0.0f : (slotX(f - 1) + slotX(f)) * 0.5f;
+            // The drums' pads where the drum smashers stand (-7.5 -2.5 2.5
+            // 7.5) [C data]; wave 01 put them at -6 -2 2 6 [I].
+            const float x = !drums_ ? slotX(f) : (lefty_ ? -drumX_[size_t(f)] : drumX_[size_t(f)]);
             drawWidget(mr, cache, w, x, y, color);
         }
     }
 }
 
-// The sustain tails: a flat strip per sustained gem and slot, from the gem
-// (or the now bar while held) to its end, tail_<colour>.mat (tail_miss once
-// missed, tail_star for an Overdrive phrase); the drums have none [C data:
-// the materials; I: the shape, GH2's built tails are not ported (no whammy
-// wobble, no glow line)].
+// One tail's poll (RB 0x8281C928) [C]: while held, at pulse_rate samples a
+// second (TaskMgr time; the port's song clock), the whammy smoothed by
+// pulse_smoothing, the frequency and amplitude between their min and max
+// by it, a sample sin(phase) x amplitude written to the 300-entry ring and
+// the phase advanced by frequency / pulse_rate; the alpha smoothed towards
+// the whammy by alpha_smoothing once a poll, between min and max alpha.
+// Not held: phase 0, alpha min_alpha. [I: the lerps' direction (the
+// decompiler shows fnmsubs); the held / whammy states 2 and 3 as held.]
+void RbTrackView::pollTail(TailState& t, bool held, float whammy, float nowMs) {
+    const TailCfg& c = tailCfg_;
+    if (!held) {
+        t.phase = 0, t.smoothA = 0, t.clockMs = -1;
+        return;
+    }
+    const double step = 1000.0 / std::max(1.0f, c.pulseRate);
+    if (t.clockMs < 0 || nowMs < t.clockMs - 1000) t.clockMs = nowMs;
+    for (int guard = 0; t.clockMs + step <= nowMs && guard < 256; ++guard) {
+        t.clockMs += step;
+        t.smoothW += (whammy - t.smoothW) * c.pulseSmoothing;
+        const float freq = c.minFreq + (c.maxFreq - c.minFreq) * t.smoothW;
+        const float amp = c.minAmp + (c.maxAmp - c.minAmp) * t.smoothW;
+        t.head = (t.head + 1) % 300;
+        t.ring[size_t(t.head)] = std::sin(t.phase) * amp;
+        t.phase += freq / std::max(1.0f, c.pulseRate);
+    }
+    t.smoothA += (whammy - t.smoothA) * c.alphaSmoothing;
+}
+
+// The sustain tails as RB builds them (0x8281C4A0) [C]: tail02.mesh's
+// cross-section repeated every segment (90 of 4.444), from the gem (the now
+// bar while held) to the tail's end; a row d from the start is (1 +
+// ring[head - d / 2]) wide (the wobble runs down the tail), the last
+// fade_distance fade out, the alpha the poll's. tail_<colour>.mat (the
+// slot's colour, 0x82819A48), tail_miss once missed; an Overdrive phrase's
+// tail takes tail_star's colour [I: RB blends it by a value not read]. The
+// glow line (tail_glow_*) is not drawn [I]. The drums have no tails.
 void RbTrackView::drawTails(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, const PlayerView& player, float nowMs) {
     if (!player.chart || !tails_ || drums_) return;
     const scene::Mesh* tmpl = tails_->find<scene::Mesh>("tail02.mesh");
     if (!tmpl) return;
+    if (nowMs < lastTailMs_ - 1000) tailStates_.clear();  // a restart
+    lastTailMs_ = nowMs;
     tailVerts_.clear(), tailIndices_.clear(), tailRanges_.clear();
     const auto& gems = player.chart->gems;
     const float aheadMs = topY_ / (yPerSecond_ * speed_) * 1000.0f;
     auto last = std::lower_bound(gems.begin(), gems.end(), nowMs + aheadMs, [](const Gem& g, float v) { return g.ms < v; });
-    constexpr float kHalfWidth = 0.5f, kZ = 0.05f;
+    const TailCfg& c = tailCfg_;
+    static const std::vector<std::array<float, 4>> kFlat{{-0.5f, 0.05f, 0, 0}, {0.5f, 0.05f, 1, 0}};
+    const auto& row = tailRow_.size() >= 2 ? tailRow_ : kFlat;
+    for (auto& [k, t] : tailStates_) t.seen = false;
     for (auto it = gems.begin(); it != last; ++it) {
         const Gem& g = *it;
         if (g.noSustain || g.durationMs <= 0) continue;
@@ -293,28 +503,51 @@ void RbTrackView::drawTails(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, c
         if (hit && !held) continue;  // done or let go
         const bool missed = player.missed && player.missed(i);
         const bool star = !missed && g.phrase >= 0 && (!player.phraseIntact || player.phraseIntact(g.phrase));
-        float y0 = held ? 0.0f : std::max(yOf(g.ms - nowMs), bottomY_);
+        const float y0 = held ? 0.0f : std::max(yOf(g.ms - nowMs), bottomY_);
         const float y1 = std::min(endRel, topY_);
         if (y1 <= y0 + 0.01f) continue;
+        TailState& ts = tailStates_[long(i)];
+        ts.seen = true;
+        pollTail(ts, held, player.whammy, nowMs);
+        const float alpha = held ? c.minAlpha + (c.maxAlpha - c.minAlpha) * ts.smoothA : c.minAlpha;
+        const float len = endRel - y0;  // the whole tail, its far end may be past the top
         for (int b = 0; b < 5; ++b) {
             if (!(g.frets & (1u << b))) continue;
             const int f = player.laneOfBit[size_t(b)];
-            const std::string name = missed ? "tail_miss.mat" : star ? "tail_star.mat" : "tail_" + slotColors_[size_t(f)] + ".mat";
+            const std::string name = missed ? "tail_miss.mat" : "tail_" + slotColors_[size_t(f)] + ".mat";
             const scene::Mat* mat = tails_->find<scene::Mat>(name);
             if (!mat) continue;
-            const float x = slotX(f);
-            const float c[4] = {mat->color[0], mat->color[1], mat->color[2], mat->color[3]};
+            const scene::Mat* starMat = star ? tails_->find<scene::Mat>("tail_star.mat") : nullptr;
+            const float* col = starMat ? starMat->color.data() : mat->color.data();
+            const float x = slotX(f) + c.offsetX;
             const uint16_t base = uint16_t(tailVerts_.size() / 16);
-            if (base > 65000) break;
-            auto vertex = [&](float vx, float vy, float u, float v) {
-                tailVerts_.insert(tailVerts_.end(), {vx, vy, kZ, 0, 0, 1, c[0], c[1], c[2], c[3], u, v, 1, 0, 0, 1});
-            };
-            vertex(x - kHalfWidth, y0, 0, 0), vertex(x + kHalfWidth, y0, 1, 0), vertex(x + kHalfWidth, y1, 1, 1), vertex(x - kHalfWidth, y1, 0, 1);
+            const size_t n = row.size();
+            int rows = 0;
+            for (int sgi = 0; sgi <= c.segments; ++sgi) {
+                float d = float(sgi) * c.segLen;
+                const bool lastRow = d >= y1 - y0;
+                if (lastRow) d = y1 - y0;
+                const float y = y0 + d;
+                const float scale = held ? 1.0f + ts.ring[size_t(((ts.head - int(d * 0.5f)) % 300 + 300) % 300)] : 1.0f;
+                float a = alpha;
+                if (len - d < c.fadeDistance) a *= std::max(0.0f, (len - d) / c.fadeDistance);
+                const float v = row[0][3] + (tailRowV1_ - row[0][3]) * (d / c.segLen);
+                for (const auto& p : row)
+                    tailVerts_.insert(tailVerts_.end(), {x + p[0] * scale, y, p[1], 0, 0, 1, col[0], col[1], col[2], col[3] * a, p[2], v, 1, 0, 0, 1});
+                ++rows;
+                if (lastRow) break;
+            }
+            if (base + rows * n > 65000) break;
             const int first = int(tailIndices_.size());
-            for (uint16_t k : {0, 1, 2, 0, 2, 3}) tailIndices_.push_back(uint16_t(base + k));
-            tailRanges_.push_back({mat, first, 6});
+            for (int r2 = 0; r2 + 1 < rows; ++r2)
+                for (size_t q = 0; q + 1 < n; ++q) {
+                    const uint16_t a0 = uint16_t(base + r2 * n + q), a1 = uint16_t(a0 + 1), b0 = uint16_t(a0 + n), b1 = uint16_t(b0 + 1);
+                    for (uint16_t k : {a0, a1, b1, a0, b1, b0}) tailIndices_.push_back(k);
+                }
+            tailRanges_.push_back({mat, first, int(tailIndices_.size()) - first});
         }
     }
+    for (auto it = tailStates_.begin(); it != tailStates_.end();) it = it->second.seen ? std::next(it) : tailStates_.erase(it);
     if (tailRanges_.empty()) return;
     if (!tailMesh_) tailMesh_ = std::make_unique<gfx::DynamicMesh>(cache.device());
     const gfx::GpuMesh all = tailMesh_->upload(tailVerts_, tailIndices_);
@@ -349,6 +582,31 @@ void RbTrackView::draw(gfx::Renderer& r, gfx::SceneCache& cache, const Song& son
     camera_.world = gfx::toMat4(pose_.world(cam_));
     camera_.yFov = cam_->yFov, camera_.nearPlane = cam_->nearPlane, camera_.farPlane = cam_->farPlane;
     camera_.aspect = float(viewW_) / float(viewH_);
+    if (static bool logged = false; !logged && SDL_getenv("GD05_TRACKLOG")) {
+        logged = true;
+        const gfx::Mat4 vp = camera_.viewProj(false);
+        for (float y : {bottomY_, 0.0f, topY_}) {
+            const float cy = vp.at(1, 1) * y + vp.at(1, 3), cw = vp.at(3, 1) * y + vp.at(3, 3);
+            SDL_Log("RB track: y %.1f at screen %.3f (0 top .. 1 bottom), view %d x %d rect %.2f %.2f %.2f %.2f", double(y), double(0.5f - 0.5f * cy / cw),
+                    viewW_, viewH_, double(rect[0]), double(rect[1]), double(rect[2]), double(rect[3]));
+        }
+        if (smasherGroup_) {
+            SDL_Log("RB track: smasher group %s showing %d, %zu objects", smasherGroup_->name.c_str(), int(pose_.showing(smasherGroup_)), smasherGroup_->objects.size());
+            std::function<void(const scene::Group*, int)> dump = [&](const scene::Group* g, int depth) {
+                for (const std::string& n : g->objects) {
+                    const scene::Object* o = g->dir ? g->dir->resolve(n) : nullptr;
+                    if (!o) { SDL_Log("%*s%s: missing", depth * 2, "", n.c_str()); continue; }
+                    const scene::Xfm w = pose_.world(o);
+                    const scene::Trans* t = gfx::transOf(o);
+                    SDL_Log("%*s%s %s showing %d at %.2f %.2f %.2f parent %s", depth * 2, "", o->cls.c_str(), n.c_str(), int(pose_.showing(o)), double(w.pos[0]), double(w.pos[1]),
+                            double(w.pos[2]), t ? t->parent.c_str() : "-");
+                    if (auto* sg = o->as<scene::Group>(); sg && depth < 3) dump(sg, depth + 1);
+                }
+            };
+            dump(smasherGroup_, 1);
+        }
+        else SDL_Log("RB track: no smasher group");
+    }
 
     drawGroup(mr, cache, get<scene::Group>(drawGroup_), trackEnv_);
     drawBeatLines(mr, cache, song, nowMs);

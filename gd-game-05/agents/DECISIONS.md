@@ -220,3 +220,62 @@ pattern). Each says what, why and how to undo it.
   to set up the gamepads, mostly on the main screen"), placed in RB's own
   help bar strip so it covers nothing of the menu.
 - **Undo:** port_patches main_screen in ui/port_screens.cpp; PanelObj::helpMouse.
+
+## D20. The cloth: RenderDir pollables, skinned, through its camera (2026-11-10, wave 04)
+- **What:** a RenderDir with a CharHair (qp_selsong, seldiff, the shop,
+  tour and creator RenderDirs) polls its own objects once a frame before it
+  draws: CharTransCopy (RB 0x8233F6F8 [C]: the dest's local transform
+  becomes the source's) and the CharHair strands (the character code's
+  hair, 60 Hz), then draws its skinned meshes (popup_bg.mesh on bone_01..10)
+  on the CPU (render/ui_cloth.cpp). The song list is drawn through
+  cloth.cam like the other RenderDirs (GD05_SONGLIST_FLAT=1 shows wave 03's
+  flat texture). The list's mouse hits map the texture over the cloth's
+  screen bounds [I: the bend is left out]. The inline panel's copy of the
+  cloth (drawn into the texture) is not skinned: its bones are not in its
+  directory [I].
+- **Why:** GD05-022, the owner's "the cloth is missing".
+- **Residual [I]:** with cloth.cam at its rest (banner_lower3rd.tnm plays
+  40 -> 0 and ends there) the title bar covers the cloth's top, so the first
+  row ("Random Song") sits half under the bar. Every value is the disc's;
+  what the original does differently (the bar, the list's first row) is not
+  found yet (OPEN_QUESTIONS).
+- **Undo:** `UiView::drawRenderDir3d` (cloth_), render/ui_cloth.*.
+
+## D21. UITrigger anims as RB plays them; transitions wait on blocking triggers (2026-11-10, wave 04)
+- **What:** each trigger anim plays from its start to its end frame at the
+  rate's fps x scale (or |end - start| / period), after its delay, looping
+  for type loop, from the current frame for dest (RndAnimatable::Animate RB
+  0x8221BE38 [C]); a 0..0 range sets frame 0 (wave 03 played the whole
+  anim). A screen change waits while a panel is Exiting / Entering: one of
+  its block_transition triggers has not run the longest of its anims'
+  whole ranges / 30 s (UITrigger 0x82262B28 / 0x82262918, PanelDir
+  0x8225FEE0 / 0x8225FF60) [C]; GH2's fixed 0.5 s out + 0.5 s in (its
+  metacam) is gone [I: the UIManager poll's states]. Input stays dropped
+  during a transition, as before. Script `animate` takes (loop a b) and
+  (delay d) (0x8221C040) [C].
+- **Why:** the owner's "delays, animations" and "strange behaviour": every
+  RB screen change took a second with nothing moving; the lights, buttons'
+  cascades (pause's 0.09 s delays) and loops never ran.
+- **Undo:** `UiView::triggers`, `UiManager::animateTrigger`, beginTransition / switchScreens.
+
+## D22. A proxy file's objects under its root hang from their holder (2026-11-10, wave 04)
+- **What:** an inline directory replaced by its proxy file (D17) keeps the
+  file's root name; an object whose parent is that name hangs from the
+  object that holds the directory (RndTransformable's parent is the dir
+  itself). A RndDir used as an anim (an AnimFilter's target) sets its
+  anims' frames [I: which of its objects count].
+- **Why:** GD05-026: loading.milo's band (load_icon_guitar / vox / drum /
+  bass from their files, root "loading") all stood on one spot, frozen.
+- **Undo:** `ScenePose::world` (toDir), `Directory::proxyRoot`, ScenePose::setFrame (heldDir).
+
+## D23. RB's gems and tails (2026-11-10, wave 04)
+- **What:** the gems draw with their meshes' own materials (no slot
+  colour swap: RB swaps per slot only the tails' materials, 0x82819A48 from
+  the TailBuilder 0x8281A970) [C]. The tails are RB's: tail02.mesh's
+  cross-section every 4.444 for up to 90 segments (0x8281A8C8), a 300-sample
+  wobble written at tail_pulse_rate while held (amplitude and frequency by
+  the smoothed whammy), the alpha between tail_min_alpha and tail_max_alpha,
+  the last tail_fade_distance fading (0x8281C928 / 0x8281C4A0) [C; I: the
+  lerps' direction, the star tails' colour blend, no glow line].
+- **Why:** GD05-029, the owner's "how the notes are displayed".
+- **Undo:** `RbTrackView::drawWidget`, `drawTails` / `pollTail`.
