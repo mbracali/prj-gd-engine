@@ -156,10 +156,11 @@ struct Play {
 };
 
 Play play(const Song& song, const Rules& rules, const std::string& script, float untilMs = 0,
-          ControllerMode mode = ControllerMode::Guitar, std::vector<int> bigNotes = {}) {
+          ControllerMode mode = ControllerMode::Guitar, std::vector<int> bigNotes = {}, bool easyChords = false) {
     Play r;
     r.p = std::make_unique<Player>(song, Part::Guitar, Difficulty::Expert, rules, mode, false);
     r.p->setBigNotes(std::move(bigNotes));
+    r.p->setEasyChords(easyChords);
     KeyScript keys(script);
     if (!keys.valid()) throw std::runtime_error("bad key script: " + script);
     if (untilMs <= 0) untilMs = song.endMs;
@@ -549,6 +550,35 @@ int runRuleChecks(const Rules& rules) {
         }
         std::printf("      (rock meter: failed after %d passes, expected %d)\n", r2.p->penalties(), expect);
         check("rock meter: the song fails once the rating drops below lose_level", r2.p->failed() && r2.p->penalties() == expect);
+    }
+    {
+        // Enhanced > Accessibility > Easy Chords (GDALL-039, guitar and bass): off by default, as the original.
+        Song c = makeSong({{1000, G | R | Y}, {3000, G | B}, {5000, R}});
+        const std::string one = "990:+red,1000:strum,1100:-red", outside = "2990:+green,2995:+yellow,3000:strum";
+        Play off = play(c, rules, one, 1500);
+        check("easy chords off (the default): one fret of a chord misses, as the original",
+              !off.p->easyChords() && !off.p->gemHit(0) && off.count(K::Miss, 0) + off.count(K::Pass, 0) >= 1);
+        Play on = play(c, rules, one + "," + outside, 3500, ControllerMode::Guitar, {}, true);
+        Play all = play(c, rules, "990:+green,991:+red,992:+yellow,1000:strum", 1500, ControllerMode::Guitar, {}, true);
+        Play full = play(c, rules, "990:+green,991:+red,992:+yellow,1000:strum", 1500);
+        check("easy chords on: one fret of the chord hits, scored as the whole chord; a fret outside the chord misses",
+              on.p->gemHit(0) && on.count(K::Miss, 0) == 0 && !on.p->gemHit(1) && on.count(K::Miss, 1) == 1 &&
+                  all.p->gemHit(0) && all.p->score() == full.p->score() && on.p->score() == full.p->score());
+        Play gy = play(c, rules, "980:+green,990:+yellow,1000:strum", 1500, ControllerMode::Guitar, {}, true);
+        Play ob = play(c, rules, "2990:+blue,3000:strum", 3500, ControllerMode::Guitar, {}, true);
+        check("easy chords on: green + yellow of green-red-yellow hits; blue alone of green-blue hits",
+              gy.p->gemHit(0) && ob.p->gemHit(1));
+        Song s = makeSong({{1000, G | R, 960}, {5000, R}});
+        Play held = play(s, rules, "998:+green,999:+red,1000:strum,1480:-green,2500:-red", 3000, ControllerMode::Guitar, {}, true);
+        Play both = play(s, rules, "998:+green,999:+red,1000:strum,2500:-green,2500:-red", 3000);
+        Play cut = play(s, rules, "998:+green,999:+red,1000:strum,1480:-green,2500:-red", 3000);
+        check("easy chords on: a chord's sustain lasts while one of its frets is held (off: letting go of one ends it)",
+              held.p->score() == both.p->score() && cut.p->score() < both.p->score());
+        Play pad = play(c, rules, "1000:+red,1001:-red", 1500, ControllerMode::Joypad, {}, true);
+        Play padOff = play(c, rules, "1000:+red,1001:-red", 1500, ControllerMode::Joypad);
+        check("easy chords on, joypad: one fret of the chord hits (off: the window runs out)", pad.p->gemHit(0) && !padOff.p->gemHit(0));
+        Play pad2 = play(c, rules, "1000:+red,1030:+green,1100:-red,1100:-green", 1500, ControllerMode::Joypad, {}, true);
+        check("easy chords on, joypad: the chord's next fret after the hit is no overstrum", pad2.p->gemHit(0) && pad2.count(K::Miss) == 0);
     }
     return failures;
 }
