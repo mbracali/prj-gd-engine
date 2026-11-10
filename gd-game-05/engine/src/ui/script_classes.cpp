@@ -328,16 +328,22 @@ bool ComponentObj::handleNative(Interp& in, const std::string& msg, std::vector<
                 for (Value& e : *copy) e = in.evalValue(e);
                 a.array = std::move(copy);
             }
+        // RB 0x8221C040 [C]: (blend) (range a b) (loop a b: also loops)
+        // (dest d: from the current frame) (period p) (delay d) (units u)
+        // (name n) (wait).
         const float end = v->endFrame(name());
         float from = optionNumber(args, "range", 1, 0), to = optionNumber(args, "range", 2, end);
+        const bool loop = option(args, "loop") != nullptr;
+        if (loop) from = optionNumber(args, "loop", 1, 0), to = optionNumber(args, "loop", 2, end);
         if (option(args, "dest")) from = v->frame(name()), to = optionNumber(args, "dest", 1, end);
         const float period = optionNumber(args, "period", 1, -1);
         const int units = int(optionNumber(args, "units", 1, float(kTaskUISeconds)));
         const float seconds = period > 0 ? period : std::fabs(to - from) / 30.0f;
+        const float delay = optionNumber(args, "delay", 1, 0);
         const Value* task = option(args, "name");
         std::string taskName;
         if (task && task->array->size() > 1) taskName = (*task->array)[1].str();
-        ui.animate(panel, name(), from, to, seconds, units, taskName);
+        ui.animate(panel, name(), from, to, seconds, units, taskName, loop, delay);
         return true;
     }
     if (msg == "stop_animation") return ui.stopAnimation(panel, name()), true;
@@ -727,16 +733,22 @@ void PanelObj::navigate(int button) {
     if (cur != focus && !isDisabled(cur)) setFocus(cur, true);
 }
 
+// ui_objects.dta (UIComponent (select_frames 30)), read by RB 0x82270BD0
+// and counted down per poll (0x82270768) [C]: 30 frames at 60 Hz.
+constexpr double kSelectMs = 500;
+
 void PanelObj::selectStart(ComponentObj* c, int button, int player) {
     // UIComponent select (0x8236F058): Selecting, component_select_start
     // now, component_select after select_frames (30 frames, ui_objects.dta).
     selecting = c->name();
-    selectEndMs = ui.nowMs() + 500;
+    selectEndMs = ui.nowMs() + kSelectMs;
+    if (view) view->setSelectProgress(selecting, 0);
     applyStates();
     ui.route("component_select_start", {Value::obj(c), Value::integer(button), Value::integer(player)});
 }
 
 void PanelObj::pollSelect() {
+    if (!selecting.empty() && view) view->setSelectProgress(selecting, float(1.0 - (selectEndMs - ui.nowMs()) / kSelectMs));
     if (selecting.empty() || ui.nowMs() < selectEndMs) return;
     const std::string name = selecting;
     selecting.clear();

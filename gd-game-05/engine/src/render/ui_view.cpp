@@ -904,6 +904,21 @@ scene::Xfm UiView::componentWorld(const scene::Object& o) const {
     const scene::Trans* t = transOf(&o);
     if (t && !t->parent.empty() && o.dir)
         if (const scene::Object* p = o.dir->resolve(t->parent); p && p != &o && transOf(p)) world = scene::compose(world, pose_.world(p));
+    // BandButton selecting (RB 0x822D4848) [C]: its type's selecting_anim
+    // (button_main.milo's selecting.tnm) sampled at endFrame x (select_frames
+    // - left) / select_frames, its translation added to the button's.
+    if (o.as<scene::BandButton>() && state(o.name) == scene::UiState::Selecting)
+        if (const ::DataNode* a = styles_.typeProperty(o.cls, o.header.type, "selecting_anim"); a && a->children.size() > 1 && a->children[1].isText()) {
+            const scene::UiStyle style = styles_.style(o.cls, o.header.type);
+            if (scene::Milo* res = const_cast<UiView*>(this)->resource(style.resourceFile.empty() ? style.classResourceFile : style.resourceFile))
+                if (const auto* ta = res->find<scene::TransAnim>(a->textAt(1))) {
+                    const auto it = selectProgress_.find(o.name);
+                    const float t01 = it != selectProgress_.end() ? std::clamp(it->second, 0.0f, 1.0f) : 0.0f;
+                    std::array<float, 3> p{};
+                    if (scene::sampleLinear(ta->transKeys, t01 * ScenePose::endFrame(ta), p))
+                        for (size_t k = 0; k < 3; ++k) world.pos[k] += p[k];
+                }
+        }
     return world;
 }
 

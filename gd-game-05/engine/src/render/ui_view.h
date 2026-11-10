@@ -105,6 +105,9 @@ public:
     void setLocalEuler(const std::string& object, float x, float y, float z);
     // A component's state (BandButton colours: normal / focus / disabled / selecting_color).
     void setState(const std::string& component, scene::UiState state);
+    // How far a selection has gone (0..1 over select_frames): a BandButton
+    // type's selecting_anim plays over it (RB 0x822D4848).
+    void setSelectProgress(const std::string& component, float t) { selectProgress_[component] = t; }
     void clearStates() { states_.clear(); }
     scene::UiState state(const std::string& component) const;
     void setCheck(const std::string& component, bool on) { checks_[component] = on; }
@@ -305,6 +308,7 @@ private:
     std::set<const scene::Directory*> texRendered_;  // the TexRenderers' panels
     // A RenderDir's swaying cloth (render/ui_cloth.h), polled once a frame.
     std::unique_ptr<UiCloth> cloth_;
+    std::map<std::string, float> selectProgress_;
     bool clothChecked_ = false;
     double clothLastMs_ = -1;
     // The cloth mesh's screen bounds (1280 x 720 units) last frame: where
