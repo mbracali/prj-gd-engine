@@ -179,6 +179,7 @@ const std::map<std::string, Json>& enhancedDefaults() {
         {"no_menu_transitions", Json::boolean(false)},
         {"cut_content", Json::boolean(false)},    {"no_fail", Json::boolean(false)},
         {"autoplay", Json::boolean(false)},
+        {"easy_chords", Json::boolean(false)},  // Enhanced > Accessibility (GDALL-039): off, as the original
         {"cheat_air_guitar", Json::boolean(false)}, {"cheat_gh_guitar", Json::boolean(false)},
         {"cheat_unlock_all", Json::boolean(false)}, {"cheat_full_meter", Json::boolean(false)},
         {"cheat_no_venue", Json::boolean(false)},   {"cheat_monkey_crowd", Json::boolean(false)},
@@ -943,7 +944,7 @@ void App::startSong(size_t index, ControllerMode mode) {
             hitting2_ = false;
         }
         for (Player* p : {player_.get(), player2_.get()})
-            if (p) p->setForgivingHopos(enhanced("hopo_mode").str() == "forgiving");
+            if (p) p->setForgivingHopos(enhanced("hopo_mode").str() == "forgiving"), p->setEasyChords(enhancedOn("easy_chords"));
         mixer_.stopMusic(0);
         previewing_ = false;
         endMs_ = -1;
@@ -3002,6 +3003,78 @@ int sustainAudioSelfTest(const std::vector<SongInfo>& songs, GameData& data, con
     std::printf("sustain audio self-test: no sustain running into a different note found\n");
     return 0;
 }
+
+// Enhanced > Accessibility > Easy Chords (GDALL-039): off (the default, as the
+// original) a chord strummed with one of its frets misses; on, any part of it
+// hits and scores as the whole chord, a fret outside it misses, and a held
+// chord's sustain lasts while any of its frets is held.
+int easyChordsSelfTest(const std::vector<SongInfo>& songs, GameData& data, const Rules& rules) {
+    int failures = 0, checks = 0;
+    auto check = [&](bool ok, const char* what) {
+        ++checks;
+        if (!ok) ++failures, std::printf("easy chords self-test FAILED: %s\n", what);
+    };
+    for (const SongInfo& info : songs) {
+        Song song = buildSong(parseMidi(data.read(info.midiPath)));
+        const auto& gems = song.charts[3].gems;
+        for (size_t i = 1; i + 1 < gems.size(); ++i) {
+            const Gem& g = gems[i];
+            if (g.fretCount() < 2 || g.fretCount() > 4 || g.hopo || g.ms - gems[i - 1].ms < 300 || gems[i + 1].ms - g.ms < 300)
+                continue;
+            const uint32_t outside = ~g.frets & 0x1fu;
+            const int low = std::countr_zero(unsigned(g.frets)), out = std::countr_zero(unsigned(outside));
+            // Holds `frets` from 20 ms before the gem, strums on it; returns hit and the score.
+            auto run = [&](bool easy, uint32_t frets, int& score, float releaseMs = 0, uint32_t release = 0) {
+                Player p(song, Difficulty(3), rules, ControllerMode::Guitar, true);
+                p.setEasyChords(easy);
+                for (float t = g.ms - 200; t < g.ms + 250; t += 1) {
+                    if (t == g.ms - 20)
+                        for (int f = 0; f < 5; ++f)
+                            if (frets >> f & 1u) p.fretDown(f, t);
+                    if (t == g.ms) p.strum(t);
+                    if (release && t == releaseMs)
+                        for (int f = 0; f < 5; ++f)
+                            if (release >> f & 1u) p.fretUp(f, t);
+                    p.update(t);
+                }
+                score = p.score();
+                return p.gemHit(int(i));
+            };
+            int full = 0, part = 0, sc = 0;
+            check(run(false, g.frets, full), "off: the whole chord hits");
+            check(!run(false, 1u << low, sc), "off (default): one fret of the chord misses, as the original");
+            check(run(true, g.frets, sc) && sc == full, "on: the whole chord hits as before");
+            check(run(true, 1u << low, part) && part == full, "on: one fret of the chord hits, scored as the whole chord");
+            check(!run(true, (1u << low) | (1u << out), sc), "on: a chord fret with a fret outside the chord misses");
+            check(!run(true, 1u << out, sc), "on: a fret outside the chord misses");
+            {
+                // A joypad: the chord's first fret hits it; its next fret 30 ms later is no overstrum.
+                Player p(song, Difficulty(3), rules, ControllerMode::Joypad, true);
+                p.setEasyChords(true);
+                const int second = std::countr_zero(unsigned(g.frets & ~(1u << low)));
+                for (float t = g.ms - 200; t < g.ms + 250; t += 1) {
+                    if (t == g.ms) p.fretDown(low, t);
+                    if (t == g.ms + 30) p.fretDown(second, t);
+                    p.update(t);
+                }
+                check(p.gemHit(int(i)) && p.missCount() == 0, "on, joypad: one fret hits the chord, its next fret is no overstrum");
+            }
+            if (g.durationMs >= 200 && !g.noSustain) {
+                int both = 0, one = 0, offOne = 0;
+                run(true, g.frets, both);
+                run(true, g.frets, one, g.ms + 50, g.frets & ~(1u << low));
+                run(false, g.frets, offOne, g.ms + 50, g.frets & ~(1u << low));
+                check(one == both && offOne < both, "on: the sustain holds on one of its frets (off: it ends)");
+            }
+            std::printf(failures ? "easy chords self-test (%s gem %d): %d of %d checks failed\n"
+                                 : "easy chords self-test (%s gem %d): all %d checks passed\n",
+                        info.id.c_str(), int(i), failures ? failures : checks, checks);
+            return failures;
+        }
+    }
+    std::printf("easy chords self-test FAILED: no chord found\n");
+    return 1;
+}
 }  // namespace
 
 int runSelfTest(const Options& options) {
@@ -3014,6 +3087,7 @@ int runSelfTest(const Options& options) {
         std::printf("%u songs in %s; slop %.0f ms, head %d, tail %d\n", unsigned(songs.size()), data.description().c_str(),
                     rules.slopMs, rules.headPoints, rules.tailPoints);
         if (sustainAudioSelfTest(songs, data, rules)) return 1;
+        if (easyChordsSelfTest(songs, data, rules)) return 1;
         int failures = 0, hopos = 0;
         for (const SongInfo& info : songs) {
             Song song = buildSong(parseMidi(data.read(info.midiPath)));

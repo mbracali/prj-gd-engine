@@ -178,6 +178,7 @@ walk_enhanced() {
   result enhanced "$(json "$(save enhanced)/enhanced.json" "d['color_grade'] == 'sepia' and d['internal_res'] == '448' and d['bloom'] == '3x' and d['fps_counter'] is True and 'rockband' not in d and 'xinput' not in d and d['hdr'] == 'none'")" \
     "Good Old Days preset applied over a migrated 1.1.6 file"
   walk_no_transitions
+  walk_easy_chords
   walk_enhanced_hdr
   walk_calibration_reset
   walk_enhanced_backends
@@ -199,6 +200,30 @@ walk_no_transitions() {
   ms_on="$(sed -n 's/.*ui: screen options up after \([0-9]*\) ms.*/\1/p' "$work/nt_on.log" | head -1)"
   result no_transitions "$(( $(json "$(save nt_set)/enhanced.json" "d['no_menu_transitions'] is True and not d.get('no_shaky_cam', False)") && ${ms_off:-0} >= 900 && ${ms_on:-9999} < 100 ))" \
     "off by default (${ms_off:-?} ms), Enhanced saves it, the next start loads it (${ms_on:-?} ms)"
+}
+
+# Enhanced > Accessibility > Easy Chords (GDALL-039): off on a fresh save (an
+# export says false); Enter turns it on (saved) and Export writes it; from a
+# fresh save again, Load User Settings with that file turns it on. Rows: 39
+# downs reach Disable Menu Transitions, then ACCESSIBILITY, Easy Chords,
+# CHEATS & ENHANCERS, Export User Files, Load User Settings.
+walk_easy_chords() {
+  local s keys="" keep="$seed" i
+  s="$work/easy_chords_seed" && rm -rf "$s" && cp -r "$seed" "$s"
+  printf '{}\n' > "$s/gd-engine/gd01/enhanced.json"
+  seed="$s"
+  for i in $(seq 0 40); do keys+="$((2500 + i * 60)):keyDown,"; done  # down to Easy Chords
+  mkdir -p "$work/ec_default" "$work/ec_on"
+  run ec_default 8000 "${keys}5200:keyDown,5400:keyDown,5600:keyReturn" GD01_SKIP_BOOT=1 GD01_SCREEN=enhanced_settings GD01_DIALOG="$work/ec_default"
+  run ec_on 8000 "${keys}5200:keyReturn,5600:keyDown,5800:keyDown,6000:keyReturn" GD01_SKIP_BOOT=1 GD01_SCREEN=enhanced_settings GD01_DIALOG="$work/ec_on"
+  run ec_load 8000 "${keys}5200:keyDown,5400:keyDown,5600:keyDown,5800:keyReturn" GD01_SKIP_BOOT=1 GD01_SCREEN=enhanced_settings \
+    GD01_DIALOG="$work/ec_on/GD01-user-settings.json"
+  seed="$keep"
+  result easy_chords "$(( $(json "$work/ec_default/GD01-user-settings.json" "d['easy_chords'] is False") && \
+    $(json "$(save ec_on)/enhanced.json" "d['easy_chords'] is True") && \
+    $(json "$work/ec_on/GD01-user-settings.json" "d['easy_chords'] is True") && \
+    $(json "$(save ec_load)/enhanced.json" "d['easy_chords'] is True") ))" \
+    "off by default, Enter turns it on and saves it, Export writes it, Load User Settings brings it back"
 }
 
 # Enhanced > Graphics Backend / Audio Backend (GDCORE-006): a value the build

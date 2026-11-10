@@ -42,6 +42,10 @@ public:
     // frets were let go, an early window as wide as a strum's, and a wrong
     // fret does not lock the gem out.
     void setForgivingHopos(bool on) { forgivingHopos_ = on; }
+    // Enhanced > Accessibility > Easy Chords (GDALL-039): a chord counts when
+    // the held frets are any non-empty part of it (no fret outside it), and
+    // its sustain holds while any of its frets is held. Off: as the original.
+    void setEasyChords(bool on) { easyChords_ = on; }
     void setWhammyValue(float value, float t);
     float whammyValue() const { return whammyValue_; }
     // The whammy bend (FUN_00263e60; docs/whammy_audio_plan.md): the guitar's
@@ -148,6 +152,10 @@ private:
     bool strummed_ = false;
     float allUpMs_ = -1e9f;        // when the last fret was let go (strummed_ ends a pad frame later)
     bool forgivingHopos_ = false;
+    bool easyChords_ = false;
+    bool chordMatch(uint32_t frets, uint32_t held) const {
+        return easyChords_ ? held != 0 && (held & ~frets) == 0 : frets == held;
+    }
     float lastStrumMs_ = -1e9f;
     bool whammyHeld_ = false, whammyMoving_ = false;
     float whammyValue_ = 0, whammyLastT_ = -1, whammyMovedT_ = -1e9f;
