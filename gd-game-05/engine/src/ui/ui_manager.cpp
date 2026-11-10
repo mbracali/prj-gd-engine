@@ -320,11 +320,45 @@ void UiManager::portPanelLoaded(PanelObj* p) {
         auto b = std::make_unique<scene::BandButton>(*last);
         b->name = "port_enhanced.btn";
         b->localize = false, b->text = "ENHANCED OPTIONS", b->textToken.clear();
-        for (int k = 0; k < 3; ++k)
-            b->trans.local.pos[size_t(k)] += prev ? last->trans.local.pos[size_t(k)] - prev->trans.local.pos[size_t(k)] : 0.0f;
+        // The rows rest where their TransAnims end (audio.tnm ...
+        // calibrate_system.tnm slide them in [C data]): the step between the
+        // last two rows' resting places, the copy under the last row's group.
+        auto rest = [&](const scene::BandButton* x) {
+            std::array<float, 3> p{x->trans.local.pos[0], x->trans.local.pos[1], x->trans.local.pos[2]};
+            for (const auto& o : root.objects)
+                if (const auto* ta = o->as<scene::TransAnim>(); ta && ta->trans == x->name && !ta->transKeys.empty())
+                    p = ta->transKeys.back().v;
+            // Each row hangs from its own group (calibrate_system.grp ...),
+            // offset up a little each [C data].
+            if (const auto* g = root.get(x->trans.parent) ? root.get(x->trans.parent)->as<scene::Group>() : nullptr)
+                for (size_t k = 0; k < 3; ++k) p[k] += g->trans.local.pos[k];
+            return p;
+        };
+        if (prev) {
+            const auto pl = rest(last), pp = rest(prev);
+            const auto* g = root.get(last->trans.parent) ? root.get(last->trans.parent)->as<scene::Group>() : nullptr;
+            for (size_t k = 0; k < 3; ++k) b->trans.local.pos[k] = pl[k] + (pl[k] - pp[k]) - (g ? g->trans.local.pos[k] : 0.0f);
+        }
         b->navDown = last->navDown;
         last->navDown = b->name;
+        b->uid = scene::Object::nextUid();
+        // Each row's background is its own mesh parented to the button and
+        // drawn by main_qpmode.grp (submenu03.mesh under calibrate_av.btn
+        // [C data: options.milo]): the copy gets a copy of the last row's.
+        const scene::Mesh* lastBg = nullptr;
+        for (const auto& o : root.objects)
+            if (const auto* m = o->as<scene::Mesh>(); m && m->trans.parent == last->name) lastBg = m;
         root.add(std::move(b));
+        if (lastBg) {
+            auto bg = std::make_unique<scene::Mesh>(*lastBg);
+            bg->name = "port_enhanced_bg.mesh";
+            bg->trans.parent = "port_enhanced.btn";
+            bg->uid = scene::Object::nextUid();
+            for (const auto& o : root.objects)
+                if (auto* g = o->as<scene::Group>(); g && std::find(g->objects.begin(), g->objects.end(), lastBg->name) != g->objects.end())
+                    g->objects.insert(std::find(g->objects.begin(), g->objects.end(), lastBg->name), bg->name);
+            root.add(std::move(bg));
+        }
         return;
     }
     auto button = [&](const char* name) { return root.get(name) ? root.get(name)->as<scene::BandButton>() : nullptr; };
