@@ -102,6 +102,11 @@ public:
     void setWhammy(bool held) { whammyKey_ = held; }
     // Watcher +0x2c: added to the input time (the player's lag setting) [C].
     void setCalibrationMs(float ms) { offset_ = ms; }
+    // Enhanced > Audio / Video Calibration (gd01's, #69): the song time the
+    // track is drawn at. The heard delay moves the drawing with the judging
+    // (the gems reach the line when they are heard), the seen delay draws it
+    // ahead; GH2's own sync offset moves the judging only.
+    static float calibratedDrawMs(float songMs, float audioMs, float videoMs) { return songMs - audioMs + videoMs; }
     // set_whammystarpowerenabled / set_mercuryswitchenabled (the tutorials'
     // switches, 0x822C7060) [C].
     void setWhammyStarPowerEnabled(bool on) { whammyStarPowerEnabled_ = on; }

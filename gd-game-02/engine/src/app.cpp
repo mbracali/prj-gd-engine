@@ -481,6 +481,11 @@ private:
     // GH2's sync offset (options, the lag screen stores -lag) less the
     // calibrated audio delay: the watcher's input offset (+0x2c).
     float calibrationMs() const { return float(syncOffsetMs_ - audioOffsetMs_); }
+    // The time the track is drawn at (#69, as gd01): the calibrated audio
+    // delay moves the drawing with the judging, so the gems reach the line
+    // when they are heard; the video delay draws it that much ahead. GH2's
+    // own sync offset moves the judging only, as the original's watcher.
+    float trackDrawMs(float t) const { return Player::calibratedDrawMs(t, float(audioOffsetMs_), float(videoOffsetMs_)); }
     double leadInMs_ = kLeadInMs;
     bool fastIntro_ = false;
     // The intro (beginSong): extend_track's song time, sent yet; the
@@ -2447,8 +2452,9 @@ void App::drawTrack() {
     // The Hyper Speed cheat: track_speed x 1.5 (0x826967B8) [C].
     if (ui_ && ui_->cheatOn("cheat_hyper_speed_mode")) speed *= 1.5f;
     if (track_ && !debugHighway_) {
-        // Audio / Video Calibration: the highway drawn ahead by the video delay.
-        const float drawT = lastT_ + float(videoOffsetMs_);
+        // Audio / Video Calibration: the highway follows the heard delay and
+        // is drawn ahead by the video delay (trackDrawMs).
+        const float drawT = trackDrawMs(lastT_);
         track_->draw(canvas_.renderer(), *sceneCache_, *song_, *player_, drawT, speed);
         if (track2_ && player2_) track2_->draw(canvas_.renderer(), *sceneCache_, *song_, *player2_, drawT, speed);
         updateTouchLanes();
@@ -3296,8 +3302,8 @@ void App::drawSong(float t) {
         // Development aid: GD02_TRACK=0 hides the track (to look at the band).
         const char* showTrack = SDL_getenv("GD02_TRACK");
         if (!showTrack || *showTrack != '0') {
-            track_->draw(canvas_.renderer(), *sceneCache_, *song_, *player_, t + float(videoOffsetMs_), speed);
-            if (track2_ && player2_) track2_->draw(canvas_.renderer(), *sceneCache_, *song_, *player2_, t + float(videoOffsetMs_), speed);
+            track_->draw(canvas_.renderer(), *sceneCache_, *song_, *player_, trackDrawMs(t), speed);
+            if (track2_ && player2_) track2_->draw(canvas_.renderer(), *sceneCache_, *song_, *player2_, trackDrawMs(t), speed);
             updateTouchLanes();
         }
         // Development aid: GD02_HUD=0 hides the HUD (to look at the track).

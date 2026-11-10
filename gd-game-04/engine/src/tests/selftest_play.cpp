@@ -3,6 +3,7 @@
 #include "tests/selftest_play.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 
@@ -14,6 +15,7 @@
 #include "game/tuning.h"
 #include "game/song_db.h"
 #include "script/globals.h"
+#include "ui/song_screen.h"
 
 namespace {
 
@@ -50,6 +52,51 @@ bool playOnce(const NoteTrack& track, const Tuning& tu, int diff, bool tap, Play
     if (tap) t.hopos += size_t(s.hopoHits);
     else t.score += s.score;
     t.phrasesCaptured += size_t(s.phrasesCaptured);
+    return true;
+}
+
+// #69: Enhanced > Audio / Video Calibration with a large heard delay
+// (wireless headphones, a soundbar). The judge's input offset is the
+// song's - (lag_calibration + the audio delay), as the app sets it; the
+// notes are played when they are heard (note time + the audio delay):
+// every note hit, and the highway drawn at the song time - the audio delay
+// + the video delay (the note on the line when heard). No delay: no change.
+// Played on the chart's time under +180 ms, notes are missed.
+int playLate(const NoteTrack& track, const Tuning& tu, double audioMs, double playedLateMs) {
+    Player p(track, tu, 3, true, float(0.0 - audioMs));
+    Autoplay ap(track, false);
+    const double frame = 1000.0 / 60.0;
+    const double start = track.notes.front().time - 2000.0, end = track.notes.back().time + track.notes.back().length + 3000.0 + audioMs;
+    p.setSongLengthMs(end);
+    for (double now = start; now < end; now += frame) p.frame(now, frame, ap.input(now - playedLateMs, frame, p));
+    const PlayerStats& s = p.stats();
+    return s.misses || s.overstrums ? -1 : s.notesHit;
+}
+
+bool calibration(const NoteTrack& track, const Tuning& tu, PlayTotals& t, std::string& why) {
+    if (track.notes.empty()) return true;
+    const int total = int(track.notes.size());
+    struct Case { double audio, video; } cases[] = {{0, 0}, {180, 0}, {180, 60}, {-60, 0}, {300, 100}};
+    for (const Case& c : cases) {
+        ++t.calibrationRuns;
+        SongSetup setup;
+        setup.audioOffsetMs = c.audio, setup.videoOffsetMs = c.video;
+        const double gem = track.notes[track.notes.size() / 2].time;
+        const double drawn = (gem + c.audio) + setup.drawOffsetMs();  // the highway's time when the note is heard
+        const int hit = playLate(track, tu, c.audio, c.audio);
+        if (hit != total || std::abs(drawn - (gem + c.video)) > 0.01) {
+            ++t.calibrationFails;
+            why = "calibration audio " + std::to_string(int(c.audio)) + " ms, video " + std::to_string(int(c.video)) + " ms: hit " +
+                  std::to_string(hit) + " of " + std::to_string(total) + ", drawn " + std::to_string(drawn - gem) + " ms off";
+            return false;
+        }
+    }
+    ++t.calibrationRuns;
+    if (playLate(track, tu, 180, 0) == total || SongSetup{}.drawOffsetMs() != 0.0) {
+        ++t.calibrationFails;
+        why = "calibration: +180 ms played on the chart's time still hit every note";
+        return false;
+    }
     return true;
 }
 
@@ -171,6 +218,13 @@ bool playChart(const Globals& g, const SongInfo& song, const Chart& chart, PlayT
             ok = false;
         }
     }
+    if (!chart.notes(Part::Guitar, 3).empty()) {
+        std::string w;
+        if (!calibration(buildTrack(chart, Part::Guitar, 3, tu, scale), tu, t, w)) {
+            if (ok) why = "guitar expert: " + w;
+            ok = false;
+        }
+    }
     // Face-off: each player's notes (guitar, every difficulty) [C 0x82104558].
     for (int d = 0; d < kDifficulties; ++d) {
         if (chart.notes(Part::Guitar, d).empty() || chart.faceOffP1.empty()) continue;
@@ -256,6 +310,7 @@ void printPlayTotals(const PlayTotals& t) {
     std::printf("two players: co-op %zu charts (%zu notes, Star Power raised together %zu times), battles %zu (%zu attacks, %zu KOs)\n",
                 t.coopCharts, t.coopNotes, t.coopStarPower, t.battles, t.battleAttacks, t.battleKos);
     std::printf("overstrum during a sustain: %zu sustains cut, %zu not ended\n", t.overstrumCuts, t.overstrumCutFails);
+    std::printf("calibration (#69): %zu guitar expert runs played when heard, %zu failed\n", t.calibrationRuns, t.calibrationFails);
     std::printf("autoplay: score (strummed) %lld, HOPO landings %zu, phrases captured %zu, charts failing %zu\n",
                 static_cast<long long>(t.score), t.hopos, t.phrasesCaptured, t.failedCharts);
 }

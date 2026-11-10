@@ -6,6 +6,9 @@ matches the tag's version. Nothing is released yet.
 
 ## [Unreleased]
 
+### Fixed
+- Enhanced > Audio / Video Calibration with a large audio delay (wireless headphones, a TV soundbar): the highway now moves with the timing, as in gd01, so the notes reach the line when you hear them and register when played then (#69). With no calibration nothing changes.
+
 ## [1.1.13] - 2026-11-09
 
 ### Added

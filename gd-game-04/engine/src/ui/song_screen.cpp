@@ -176,7 +176,7 @@ bool SongScreen::start(const Disc& disc, const Globals& g, const SongInfo& song,
     // input_offset = time_input_offset (the song's input_offset; the 360's
     // default -66 ms is left out, D7) - lag_calibration [C script gem_scroller].
     ms.inputOffsetMs = float(song.inputOffset - setup.lagMs);
-    videoOffsetMs_ = setup.videoOffsetMs;
+    drawOffsetMs_ = setup.drawOffsetMs();
     match_ = std::make_unique<Match>();
     if (!match_->start(chart_, tuning_, &g, ms, setup.bossProps, error)) return false;
     player_ = &match_->player(0);
@@ -589,7 +589,7 @@ void SongScreen::draw(Canvas& c, double now, const TextureCache* textures) {
         for (int p = 0; p < 2 && !highwayHidden_; ++p) {
             Highway2D& hw = p == 0 ? highway_ : highway2_;
             hw.setEffects(effects(p, now));
-            hw.draw(c, *textures, match_->track(p), match_->player(p), now + videoOffsetMs_, shownHeld_[size_t(p)]);
+            hw.draw(c, *textures, match_->track(p), match_->player(p), now + drawOffsetMs_, shownHeld_[size_t(p)]);
         }
         if (hud2pOk_ && !hudHidden_) hud2p_.draw(c, *textures, *match_, now);
         intro_.draw(c, introText_, now);
@@ -597,7 +597,7 @@ void SongScreen::draw(Canvas& c, double now, const TextureCache* textures) {
     }
     const NoteTrack& track_ = match_->track(0);
     if (highwayOk_ && textures && !std::getenv("GD04_DEBUG_HIGHWAY")) {
-        if (!highwayHidden_) highway_.draw(c, *textures, track_, *player_, now + videoOffsetMs_, shownHeld_[0]);
+        if (!highwayHidden_) highway_.draw(c, *textures, track_, *player_, now + drawOffsetMs_, shownHeld_[0]);
         if (!hudHidden_) hud_.draw(c, *textures, now);
         intro_.draw(c, introText_, now);
         if (std::getenv("GD04_HUD_NUMBERS")) {  // development aid: the numbers behind the HUD

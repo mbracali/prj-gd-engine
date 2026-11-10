@@ -127,6 +127,13 @@ interpreter, gd-game-02/docs/ui_and_frontend.md). What this disc changes:
   widescreen is the Enhanced Options' Widescreen (16:9). The lag
   calibration (lag_panel) plays practice_bank's countdown and
   sync_click.cue; `{lag animate}` animates lag.milo's own anims.
+- The sync offset (set_sync_offset, 0x0010ded8) goes to each player's
+  +0x104, added to the hit time (0x001111d0, 0x00111320), and to the
+  watchers (0x00123130): the judging only, the track is not moved [C].
+  Enhanced > Audio / Video Calibration (gd01's) subtracts audio_offset from
+  it and draws the track that much later too (#69, as gd01: the gems reach
+  the line when they are heard); video_offset draws it ahead
+  (`Player::calibratedDrawMs`).
 
 ## Cheats
 - config/long_cheats.dta names PS2 guitar buttons: G_GREEN kPad_R2, G_RED

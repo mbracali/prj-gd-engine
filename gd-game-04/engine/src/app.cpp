@@ -1513,8 +1513,10 @@ void App::frame() {
         setup.speed = rq.speed, setup.slowPitch = rq.slowPitch;
         setup.lefty = {rq.lefty[0], rq.lefty[1]};
         // GH3's lag_calibration plus Enhanced > Calibration's audio delay
-        // (judged later by it); the video delay draws the highway ahead.
-        setup.lagMs = rq.lagMs + std::atof(enhanced_.get("audio_offset").c_str());
+        // (judged later by it, the highway drawn later with it, #69); the
+        // video delay draws the highway ahead.
+        setup.audioOffsetMs = std::atof(enhanced_.get("audio_offset").c_str());
+        setup.lagMs = rq.lagMs + setup.audioOffsetMs;
         setup.videoOffsetMs = std::atof(enhanced_.get("video_offset").c_str());
         setup.endCredits = rq.endCredits;
         setup.transition = rq.transition;

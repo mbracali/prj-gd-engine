@@ -697,6 +697,52 @@ int checkPcWording(const GameData& data) {
     return failures;
 }
 
+// #69: Enhanced > Audio / Video Calibration with a large heard delay
+// (wireless headphones, a soundbar). The gems are played when they are
+// heard (chart time + the audio delay): every gem is hit, the track draws
+// the gem on the line at that time (plus the video delay ahead), and with
+// no delay nothing changes; unshifted play under +180 ms misses.
+static int checkCalibration(const GameData& data, const std::vector<SongInfo>& songs, const Rules& rules) {
+    for (const SongInfo& info : songs) {
+        Song song;
+        try {
+            song = loadChart(data, info, rules);
+        } catch (const std::exception&) {
+            continue;
+        }
+        if (!song.hasPart[size_t(Part::Guitar)]) continue;
+        auto play = [&](float audioMs, float playedLateMs) {
+            Player p(song, Part::Guitar, Difficulty::Expert, rules, ControllerMode::Guitar, true);
+            p.setCalibrationMs(0.0f - audioMs);  // the app's calibrationMs(): sync offset - audio delay
+            Autoplay bot(p.chart());
+            bot.delay(playedLateMs);
+            for (float t = -1000; t < song.endMs + 5000; t += 4) bot.feed(p, t), p.update(t);
+            return p.notesHit();
+        };
+        const int total = int(Player(song, Part::Guitar, Difficulty::Expert, rules, ControllerMode::Guitar, true).chart().gems.size());
+        int failures = 0;
+        struct Case { float audio, video; } cases[] = {{0, 0}, {180, 0}, {180, 60}, {-60, 0}, {300, 100}};
+        for (const Case& c : cases) {
+            const int hit = play(c.audio, c.audio);
+            // The gem on the line (drawn at its own time, minus the video delay) when it is heard.
+            const float gem = song.endMs * 0.5f;
+            const float drawn = Player::calibratedDrawMs(gem + c.audio, c.audio, c.video);
+            const bool ok = hit == total && std::abs(drawn - (gem + c.video)) < 0.01f;
+            std::printf("calibration: %s audio %+.0f ms, video %+.0f ms: %d/%d hit when heard, gem drawn at %+.0f ms%s\n",
+                        info.id.c_str(), double(c.audio), double(c.video), hit, total, double(drawn - gem), ok ? "" : " FAILED");
+            failures += !ok;
+        }
+        const int early = play(180, 0);  // played on the chart's time, not when heard
+        std::printf("calibration: audio +180 ms played on the chart's time: %d/%d hit (expected fewer)\n", early, total);
+        failures += early >= total;
+        // No calibration: the draw time is the song time itself.
+        failures += Player::calibratedDrawMs(1234.5f, 0, 0) != 1234.5f;
+        return failures;
+    }
+    std::printf("calibration: no song with a guitar part\n");
+    return 1;
+}
+
 int runSelfTest(const std::string& dataPath) {
     try {
         GameData data(dataPath);
@@ -786,12 +832,13 @@ int runSelfTest(const std::string& dataPath) {
         std::printf("input checks (virtual controllers):\n");
         const int inputFailures = runInputChecks();
         std::printf(inputFailures ? "%d input check(s) failed\n" : "all input checks passed\n", inputFailures);
+        const int calibrationFailures = checkCalibration(data, songs, rules);
         const int wordingFailures = checkPcWording(data);
         std::printf(wordingFailures ? "%d string(s) still name the PS2 or a console\n" : "PC wording: no PS2 or console in any language\n",
                     wordingFailures);
         std::printf("%d song audio file(s) with problems, %d script(s) not decoded\n", audioFailures, scriptFailures);
         std::printf(chartFailures ? "%d chart(s) not fully hit\n" : "all charts fully hit\n", chartFailures);
-        return chartFailures || audioFailures || scriptFailures || ruleFailures || inputFailures || wordingFailures ? 1 : 0;
+        return chartFailures || audioFailures || scriptFailures || ruleFailures || inputFailures || wordingFailures || calibrationFailures ? 1 : 0;
     } catch (const std::exception& ex) {
         std::fprintf(stderr, "self-test failed: %s\n", ex.what());
         return 2;
