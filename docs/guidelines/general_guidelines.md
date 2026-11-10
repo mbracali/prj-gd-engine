@@ -44,9 +44,13 @@ alike. Read every file in [docs/guidelines/](.) before you start.
 
 - **Codebase.** When something is finished, commit and push it. The owner
   says when it is time for a pull request.
-- **Version.** At PR time, bump the version of everything that changed: each
-  game module (`game-info.yaml` `guitar_dream_version`, its CHANGELOG) and the
-  launcher (`gd-engine-launcher/launcher-info.yaml`, its CHANGELOG).
+- **Version.** **NEVER bump the launcher version (`launcher_version` in
+  `gd-engine-launcher/launcher-info.yaml`) unless the owner explicitly asks
+  for it.** A launcher bump merged into `main` starts a public release, so
+  it has a huge impact. "Commit, push and PR" is **not** a request to bump.
+  Bump a game module's version (`game-info.yaml` `guitar_dream_version`, its
+  engine version, its CHANGELOG) only when the owner asks for a bump as well.
+  When a bump seems due, ask the owner first; never bump on your own.
 - **Packages.** After any bugfix or improvement, build everything locally:
   the latest launcher with all the latest game modules (every platform except
   macOS). In the launcher's `local_builds/` keep only the current and the
