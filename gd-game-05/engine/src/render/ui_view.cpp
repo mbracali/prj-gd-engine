@@ -910,11 +910,48 @@ void UiView::drawObject(MaterialRenderer& r, const scene::Object& o, int depth) 
         }
         return;
     }
+    if (o.cls == "BandHighlight") return drawHighlight(r, o);
     if (o.as<scene::UIProxy>() || o.as<scene::BandPlacer>()) {
         if (auto it = objectDraws.find(o.name); it != objectDraws.end() && it->second) it->second(r);
         return;
     }
     if (o.as<scene::UIPicture>() || o.as<scene::CheckBox>() || o.as<scene::BandSlider>()) return drawStyleMeshes(r, o);
+}
+
+// RB's BandHighlight (main_solomode.milo's highlight.hlit): its type's
+// resource (resource/highlight.milo) under its panel's focused component:
+// on a focus change it takes that component as its parent and slides there
+// in anim_duration (0x822FF428 / 0x822FEE60 / 0x822FF4F8); each poll it is
+// disabled unless its panel holds the UI's focus, then normal [C]. The
+// state picks the bar's material by name, normal.mat (orange) or
+// disabled.mat (white) [I: the resource's meshes name normal.mat; the
+// slide is not drawn].
+void UiView::drawHighlight(MaterialRenderer& r, const scene::Object& o) {
+    const scene::Object* target = nullptr;
+    if (!focus_.empty() && o.dir) target = o.dir->resolve(focus_);
+    if (!target || target == &o || !transOf(target)) return;
+    const scene::UiStyle style = styles_.style(o.cls, o.header.type);
+    scene::Milo* res = resource(style.resourceFile.empty() ? style.classResourceFile : style.resourceFile);
+    if (!res) return;
+    scene::Xfm world = componentWorld(o);
+    const scene::Xfm at = componentWorld(*target);
+    world.pos = at.pos;
+    const scene::Mat* bar = res->find<scene::Mat>(uiFocus_ ? "normal.mat" : "disabled.mat");
+    for (const auto& obj : res->root().objects)
+        if (const auto* m = obj ? obj->as<scene::Mesh>() : nullptr) {
+            // The mesh's own place in the resource (the bar stands upright
+            // through its rotation), up its parents there.
+            scene::Xfm local;
+            int depth = 0;
+            for (const scene::Object* p = m; p && depth < 8; ++depth) {
+                const scene::Trans* t = transOf(p);
+                if (!t) break;
+                local = scene::compose(local, t->local);
+                const scene::Object* up = t->parent.empty() ? nullptr : res->find(t->parent);
+                p = up != p ? up : nullptr;
+            }
+            drawMeshAt(r, *m, m->mat == "normal.mat" ? bar : nullptr, scene::compose(local, world));
+        }
 }
 
 void UiView::drawText(MaterialRenderer& r, const scene::Text& t) {

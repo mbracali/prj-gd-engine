@@ -681,3 +681,24 @@ animation, the help bar, the real-device checklist. Time used: about 4 h.
   brighter (shots); core opengl3 run renders.
 - GD05-033 (Esc x3): RB's main menu Back goes to the title, which reset
   the count. Fixed; verified by the new walk rb_esc3 (the game quits).
+
+## 2026-11-10, GD05-030 follow-up: menu colours (owner's reference)
+
+- Causes [C]: (1) D25's pow(c, 0.85) ignored the XDK's composition of the
+  ramp with its sRGB-to-TV (BT.709) table (RB 0x8253DFB8 / 0x8253DE28):
+  on an HDTV the net is about identity, so the port was too bright;
+  (2) RB's per-pixel shaders (ark/xbox_shaders) tint the light sum by the
+  material colour once and take the highlight from the first light only;
+  the port squared the colour and added every light's highlight (the
+  focused button's orange went tan, labels grey); (3) BandHighlight was
+  not drawn (no orange bar under QUICKPLAY). D25 replaced, D29, D30.
+- Measured (1200x675 boxes; ref / before / after): SOLO top (79,21,4) /
+  (185,140,113) / (115,45,7); SOLO middle (108,72,13) / (172,140,91) /
+  (135,88,15); QUICKPLAY bar (113,57,5) / (11,12,11) / (177,91,0); labels
+  (97th pct) QUICKPLAY 182 / 162 / 182, SOLO TOUR 97 / 55 / 96.
+- Verified: gate (agents/scratch/menu/gate.sh) all 21 walks OK, selftest,
+  scenetest, scripttest, videotest, sfxtest OK. Background video: Bink,
+  tv range, BT.601 limited conversion already right (Y avg 56-58).
+- Left: the lit orange is still ~1.3x brighter than the reference; the
+  highlight's orange frame (normal.mat) shows over the pill's rim; the
+  fail screen and band naming labels not compared.

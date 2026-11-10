@@ -171,7 +171,7 @@ public:
     void setFrameCap(int fps) override;
     void setInternalHeight(int height) override { internalH_ = std::max(0, height); }
     void setHdrSurface(int surface) override { hdrSurface_ = surface, hdrDirty_ = true; }
-    void setOutputGamma(float gamma) override { gamma_ = gamma > 0 ? gamma : 1.0f; }
+    void setOutputGamma(float gamma) override { gamma_ = gamma > 0 ? gamma : 0.0f; }
     void hdrStateChanged() override { hdrDirty_ = true; }
     float hdrHeadroom() const override { return hdrSurface_ && hdrOn_ ? hdrHeadroom_ : 1.0f; }
     std::string hdrStatus() const override;
@@ -227,7 +227,7 @@ private:
     int frameW_ = 0, frameH_ = 0;
     // True HDR output (setHdrSurface): the window's state and the conversion pass.
     int hdrSurface_ = 0;
-    float gamma_ = 1;  // setOutputGamma
+    float gamma_ = 0;  // setOutputGamma (0: none)
     bool hdrDirty_ = true, hdrOn_ = false;
     float hdrWhite_ = 1, hdrHeadroom_ = 1;  // scRGB units (1 = 80 nits); headroom in paper whites
     std::string hdrLogged_;
@@ -581,7 +581,7 @@ void GlDevice::beginFrame() {
     // An HDR surface: the frame always draws off screen (RGBA16F), endFrame converts it.
     if (hdrSurface_) updateHdr();
     const bool f16 = hdrSurface_ != 0;
-    if ((internalH_ > 0 && wh > 0 && internalH_ != wh) || ((f16 || gamma_ != 1.0f) && wh > 0)) {
+    if ((internalH_ > 0 && wh > 0 && internalH_ != wh) || ((f16 || gamma_ > 0) && wh > 0)) {
         const bool scaled = internalH_ > 0 && internalH_ != wh;
         const int w = scaled ? std::max(1, int(std::lround(double(ww) * internalH_ / wh))) : ww, h = scaled ? internalH_ : wh;
         const GlTarget* f = targets_.get(frame_.id);
@@ -816,7 +816,7 @@ void GlDevice::setFrameCap(int fps) {
 void GlDevice::endFrame() {
     const uint64_t start = SDL_GetTicksNS();
     // True HDR: the frame converted for the HDR surface.
-    if (frameOn_ && (frameF16_ || gamma_ != 1.0f) && targets_.get(frame_.id)) {
+    if (frameOn_ && (frameF16_ || gamma_ > 0) && targets_.get(frame_.id)) {
         int ww = 0, wh = 0;
         SDL_GetWindowSizeInPixels(window_, &ww, &wh);
         outputHdr(ww, wh);
@@ -870,13 +870,13 @@ const char* kHdrFragment = R"(
 in vec2 vUv;
 out vec4 fragColor;
 layout(std140) uniform GdHdr {
-    vec4 uHdr;  // x paper white (scRGB units), y 1: PQ, z the gamma ramp's exponent, w 1: SDR (the ramp only)
+    vec4 uHdr;  // x paper white (scRGB units), y 1: PQ, z the gamma ramp's exponent (0: none), w 1: SDR (the ramp only)
 };
 uniform sampler2D sTex;
 void main() {
     vec3 c = max(texture(sTex, vUv).rgb, 0.0);
-    // The display's gamma ramp (setOutputGamma); SDR: that is all.
-    c = pow(c, vec3(uHdr.z));
+    // The Xbox's output to a TV (setOutputGamma); SDR: that is all.
+    if (uHdr.z > 0.0) c = gdOutputCurve(c, uHdr.z);
     if (uHdr.w > 0.5) {
         fragColor = vec4(c, 1.0);
         return;
@@ -921,7 +921,7 @@ void GlDevice::outputHdr(int ww, int wh) {
         hdrTried_ = true;
         ProgramDesc d;
         d.name = "hdr_output";
-        d.vertex = kHdrVertex, d.fragment = kHdrFragment;
+        d.vertex = kHdrVertex, d.fragment = std::string(kOutputCurveGlsl) + kHdrFragment;
         d.uniformBlocks = {"GdHdr"};
         d.samplers = {"sTex"};
         std::string error;
@@ -967,10 +967,24 @@ void GlDevice::outputHdr(int ww, int wh) {
 
 }  // namespace
 
+float outputCurve(float c, float gamma) {
+    const double x = std::pow(std::clamp(double(c), 0.0, 1.0), double(gamma));
+    const double lin = x <= 0.04045 ? x / 12.92 : std::pow((x + 0.055) / 1.055, 2.4);  // RB 0x8253DCC8
+    return float(lin < 0.018 ? lin * 4.5 : 1.099 * std::pow(lin, 0.45) - 0.099);      // RB 0x8253DD78
+}
+
+const char* const kOutputCurveGlsl = R"(
+vec3 gdOutputCurve(vec3 c, float gamma) {
+    c = pow(clamp(c, 0.0, 1.0), vec3(gamma));
+    vec3 lin = mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c));
+    return mix(lin * 4.5, 1.099 * pow(lin, vec3(0.45)) - 0.099, step(0.018, lin));
+}
+)";
+
 void applyOutputGamma(SDL_Surface* s, float gamma) {
-    if (!s || gamma == 1.0f || gamma <= 0) return;
+    if (!s || gamma <= 0) return;
     uint8_t lut[256];
-    for (int i = 0; i < 256; ++i) lut[i] = uint8_t(std::lround(std::pow(i / 255.0, double(gamma)) * 255.0));
+    for (int i = 0; i < 256; ++i) lut[i] = uint8_t(std::lround(double(outputCurve(float(i / 255.0), gamma)) * 255.0));
     for (int y = 0; y < s->h; ++y) {
         uint8_t* p = static_cast<uint8_t*>(s->pixels) + size_t(y) * size_t(s->pitch);
         for (int x = 0; x < s->w; ++x, p += 4) p[0] = lut[p[0]], p[1] = lut[p[1]], p[2] = lut[p[2]];

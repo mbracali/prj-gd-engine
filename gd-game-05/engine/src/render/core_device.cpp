@@ -196,7 +196,7 @@ public:
     void endFrame() override;
     void setFrameCap(int fps) override;
     void setInternalHeight(int height) override { internalH_ = std::max(0, height); }
-    void setOutputGamma(float gamma) override { gamma_ = gamma > 0 ? gamma : 1.0f; }
+    void setOutputGamma(float gamma) override { gamma_ = gamma > 0 ? gamma : 0.0f; }
     std::string hdrStatus() const override {
         return std::string("off: True HDR is not on the ") + backendId(backend_) + " graphics backend yet";
     }
@@ -237,8 +237,8 @@ private:
     // or the internal resolution's) and presented scaled.
     int internalH_ = 0;
     TargetId frameTarget_;
-    // setOutputGamma: the frame ramped into gammaTarget_, which is presented.
-    float gamma_ = 1;
+    // setOutputGamma: the frame converted into gammaTarget_, which is presented (0: none).
+    float gamma_ = 0;
     TargetId gammaTarget_;
     ProgramId gammaProgram_;
     BufferId gammaTriangle_;
@@ -833,18 +833,18 @@ SDL_Surface* CoreDevice::readPixels(int x, int y, int w, int h) {
     return s;
 }
 
-// The display's gamma ramp (setOutputGamma): the frame through pow(c, gamma)
-// into gammaTarget_, presented instead of it. Empty: present the frame.
+// The Xbox's output to a TV (setOutputGamma, outputCurve): the frame through
+// it into gammaTarget_, presented instead of it. Empty: present the frame.
 TargetId CoreDevice::applyGamma() {
     const CTarget* f = targets_.get(frameTarget_.id);
-    if (gamma_ == 1.0f || !f) return {};
+    if (gamma_ <= 0 || !f) return {};
     if (!gammaTried_) {
         gammaTried_ = true;
         ProgramDesc d;
         d.name = "output_gamma";
         d.vertex = "layout(location = 0) in vec2 aPos;\nout vec2 vUv;\nvoid main() {\n    vUv = aPos * 0.5 + 0.5;\n    gl_Position = vec4(aPos, 0.0, 1.0);\n}\n";
-        d.fragment = "in vec2 vUv;\nout vec4 fragColor;\nlayout(std140) uniform GdGamma {\n    vec4 uGamma;\n};\nuniform sampler2D sTex;\n"
-                     "void main() {\n    fragColor = vec4(pow(max(texture(sTex, vUv).rgb, 0.0), vec3(uGamma.x)), 1.0);\n}\n";
+        d.fragment = std::string("in vec2 vUv;\nout vec4 fragColor;\nlayout(std140) uniform GdGamma {\n    vec4 uGamma;\n};\nuniform sampler2D sTex;\n") +
+                     kOutputCurveGlsl + "void main() {\n    fragColor = vec4(gdOutputCurve(texture(sTex, vUv).rgb, uGamma.x), 1.0);\n}\n";
         d.uniformBlocks = {"GdGamma"};
         d.samplers = {"sTex"};
         std::string error;

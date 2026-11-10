@@ -290,12 +290,18 @@ pattern). Each says what, why and how to undo it.
   font draws `*` and the gold digits; the port wrote `***__`.
 - **Undo:** `starSymbol` in ui/natives_game.cpp.
 
-## D25
-- **What (wave 05, GD05-030):** RB's display gamma ramp, rnd (gamma 0.85)
-  from config/default.dta, set by RB 0x8246BD90 as pow(i/256, gamma) [C].
-  The port draws into a frame target and shows pow(c, 0.85) (device
-  setOutputGamma, local and core backends); screenshots are ramped too.
-- **Undo:** `GD05_GAMMA=1`, or `dev.setOutputGamma` in App::applyEnhanced.
+## D25 (replaced 2026-11-10, GD05-030 follow-up)
+- **What:** the port shows what the Xbox 360 sends an HDTV. RB's ramp
+  pow(i/256, 0.85) (rnd (gamma 0.85), RB 0x8246BD90, set once at device
+  reset 0x8246D220) goes through the XDK's 0x8252B898 / 0x8253DFB8, which
+  composes it with 0x8253DE28's table: the value read as sRGB (0x8253DCC8)
+  and re-encoded for VdGetCurrentDisplayGamma's display, BT.709 on a TV
+  (0x8253DD78) [C]. On an HDTV the two nearly cancel (0.2 -> 0.193, 0.5 ->
+  0.509; shadows a bit darker), so the old pow(c, 0.85) alone made every
+  frame too bright (the owner's "washed out"). Device setOutputGamma(g) now
+  applies BT709(sRGBdecode(c^g)) (render/device.h outputCurve; local, core
+  and HDR paths, screenshots too).
+- **Undo:** `GD05_GAMMA=0` (none) or another exponent; outputCurve.
 
 ## D26
 - **What (wave 05, GD05-036 / 037):** GAMEPADS is a port button in the main
@@ -319,3 +325,26 @@ pattern). Each says what, why and how to undo it.
   64 fast, mask 112; macros.dta) filter rb_* members' clips [C data]; the
   drummer falls back to `sit` (RB's drum type start_group) [C data].
 - **Undo:** Band::filterClips, Band::rbPoll.
+
+## D29
+- **What (2026-11-10, GD05-030):** RB's per-pixel shaders (ark/xbox_shaders,
+  read with a Xenos disassembler as a read-only helper): the light sum is
+  tinted by the material colour once (sum * gDiffuse + ambient * gDiffuse)
+  and the base variant of every lit + specular shader takes its highlight
+  from the first light only (gLight c64 / gLightCol c72; the environ's
+  +0x13c bits add terms) [C data]. The port squared the colour and lit the
+  highlight from every light: the focused button's orange went tan
+  (button_focused.mat: specular 0.5, power 1, under main_buttons.env's
+  white second light) and the sub-menu labels grey (colour 0.44 squared).
+  Per-vertex lighting keeps GH2's rule [I].
+- **Undo:** GD_SPEC_DIR / GD_SPEC_POINT and the per-pixel tint in
+  render/standard_shader.cpp.
+
+## D30
+- **What (2026-11-10, GD05-030):** RB's BandHighlight (main_solomode's
+  highlight.hlit) is drawn: its resource (resource/highlight.milo) at its
+  panel's focused component, each mesh at its own place in the resource;
+  normal.mat (orange) while its panel holds the UI focus, else
+  disabled.mat (0x822FF4F8 / 0x822FF428 / 0x822FEE60) [C; I: the material
+  swap by name, the 0.1 s slide not drawn].
+- **Undo:** UiView::drawHighlight / setUiFocus.

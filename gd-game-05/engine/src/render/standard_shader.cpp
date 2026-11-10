@@ -16,9 +16,10 @@
 // - Lights (up to 7; the projected ones come last): directional lights add
 //   colour * N.L, with a Phong highlight colour * (R.V)^power for the first
 //   four; point lights add colour * N.L * (1 - clamp(distance / range)) and
-//   a highlight scaled the same way. The light sum is tinted by the material
-//   colour, and per-vertex lighting is tinted by it once more on top (the
-//   game multiplies twice there, which we keep).
+//   a highlight scaled the same way. Per pixel (RB's shaders) only the
+//   first light gives a highlight. The light sum is tinted by the material
+//   colour, and per-vertex lighting is tinted by it once more on top (GH2
+//   multiplies twice there, which we keep; RB's per-pixel shaders once).
 // - Specular is off when an environment map is on: the reflection (cube map
 //   along R = reflect(-V, N), mip bias = specular power) times the specular
 //   colour replaces it.
@@ -51,6 +52,18 @@ const char* kCommon = R"(
 #  endif
 #endif
 #define GD_SPEC_LIGHTS (GD_SPECULAR && !GD_ENV_MAP)
+// Rock Band's per-pixel shaders (ark/xbox_shaders, the base variant of
+// every lit + specular pixel shader) take the highlight from the first
+// light only (gLight c64 / gLightCol c72), the others light the diffuse
+// [C data]; per vertex the port keeps GH2's rule (the first four
+// directional lights, every point light).
+#if GD_PER_PIXEL
+#  define GD_SPEC_DIR 1
+#  define GD_SPEC_POINT 1
+#else
+#  define GD_SPEC_DIR 4
+#  define GD_SPEC_POINT 8
+#endif
 #define GD_NEEDS_VIEW (GD_ENV_MAP || (GD_PER_PIXEL && GD_LIGHTS > 0) || GD_PROJ_LIGHTS > 0)
 
 layout(std140) uniform GdFrame {
@@ -127,7 +140,7 @@ void gdRegularLights(vec3 pos, vec3 n, vec3 v, vec4 specFactor, vec4 shadowPos, 
         vec3 l = uLightVec[i].xyz;
         diff += uLightColor[i].rgb * gdLambert(n, l);
 #if GD_SPEC_LIGHTS
-        if (i < 4) spec += uLightColor[i].rgb * gdPhong(n, l, v, specFactor.a);
+        if (i < GD_SPEC_DIR) spec += uLightColor[i].rgb * gdPhong(n, l, v, specFactor.a);
 #endif
 #if GD_SHADOW && defined(GD_FRAGMENT)
         if (i == 0) {
@@ -151,7 +164,7 @@ void gdRegularLights(vec3 pos, vec3 n, vec3 v, vec4 specFactor, vec4 shadowPos, 
             falloff = 1.0;
         }
 #if GD_SPEC_LIGHTS
-        spec += uLightColor[i].rgb * gdPhong(n, l, v, specFactor.a) * falloff;
+        if (i < GD_SPEC_POINT) spec += uLightColor[i].rgb * gdPhong(n, l, v, specFactor.a) * falloff;
 #endif
 #if GD_SHADOW && defined(GD_FRAGMENT)
         if (i == 0) {
@@ -377,10 +390,18 @@ void main() {
     vec4 shadowPos = vec4(0.0);
 #endif
     gdRegularLights(vWorld.xyz, n, v, specFactor, shadowPos, lit.rgb, spec);
-#if GD_PROJ_LIGHTS > 0
-    gdProjectedLights(vWorld.xyz, n, v, specFactor, lit.rgb, spec);
-#endif
+#if !GD_PER_PIXEL
     lit *= uDiffuse;
+#endif
+    // Per pixel, RB's shaders tint the light sum by the material colour once
+    // (gdRegularLights did): sum * gDiffuse + ambient * gDiffuse, then the
+    // diffuse map (ark/xbox_shaders) [C data]; the projected lights' share
+    // is tinted once too.
+#if GD_PROJ_LIGHTS > 0
+    vec3 projLit = vec3(0.0);
+    gdProjectedLights(vWorld.xyz, n, v, specFactor, projLit, spec);
+    lit.rgb += projLit * uDiffuse.rgb;
+#endif
 #endif
     lit += vColor;
 #if GD_DIFFUSE_MAP

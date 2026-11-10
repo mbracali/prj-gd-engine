@@ -4,6 +4,16 @@ All notable changes for players. Versions follow SemVer; gd-game-05 ships
 inside the Guitar Dream Universal Launcher's release
 (`docs/platform/release-process.md`).
 
+## [Unreleased]
+
+### Fixed
+- Menu colours as on the original: the focused buttons are a deep orange
+  again (not pale tan), the sub-menu labels light grey and white, and the
+  picture is no longer washed out (the 0.85 gamma is what the console sends
+  a TV, which on a TV cancels out).
+- The sub-menus show their orange highlight bar on the focused item
+  (QUICKPLAY under SOLO).
+
 ## [0.0.5] - 2026-11-10
 
 ### Fixed

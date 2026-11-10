@@ -3808,9 +3808,10 @@ void App::applyEnhanced() {
     gfx::RenderDevice& dev = canvas_.renderer().device();
     dev.setInternalHeight(std::clamp(std::atoi(enhancedValue("internal_res").c_str()), 0, 4320));
     // Rock Band's display gamma ramp: rnd (gamma 0.85) from config/default.dta,
-    // set on the Xbox as the gamma ramp (pow(i / 256, gamma), RB 0x8246BD90)
-    // [C] (GD05-030): every pixel shown brighter, whites and colours as the
-    // original's. GD05_GAMMA overrides it (1: none).
+    // set on the Xbox as the gamma ramp (pow(i / 256, gamma), RB 0x8246BD90),
+    // which the XDK composes with its sRGB-to-TV conversion (RB 0x8253DFB8)
+    // [C]: the device shows what the console sends an HDTV (render/device.h
+    // setOutputGamma; D25). GD05_GAMMA overrides the exponent (0: none).
     {
         float gamma = 0.85f;
         if (const DataNode* rnd = ui_ && ui_->bootTree() ? ui_->bootTree()->find("rnd") : nullptr)

@@ -72,6 +72,8 @@ public:
     std::string text(const std::string& component) const;
     // The focused component (a button draws focus_color and focus_scale).
     void setFocus(const std::string& component) { focus_ = component; }
+    // The panel holds the UI's focus (RB's BandHighlight: normal, else disabled).
+    void setUiFocus(bool on) { uiFocus_ = on; }
 
     // ---- driven by the UI manager
     ScenePose& pose() { return pose_; }
@@ -258,6 +260,7 @@ private:
     void drawText(MaterialRenderer& r, const scene::Text& t);
     void drawStyleMeshes(MaterialRenderer& r, const scene::Object& component);
     void drawList(MaterialRenderer& r, const scene::Object& list);
+    void drawHighlight(MaterialRenderer& r, const scene::Object& highlight);
     void drawTextEntry(MaterialRenderer& r, const scene::Object& entry);
     void addMask(const scene::ScreenMask& m);
     scene::Xfm componentWorld(const scene::Object& o) const;
@@ -283,6 +286,7 @@ private:
     std::map<std::string, std::string> overrides_;
     std::map<std::string, float> wrapWidths_;  // set_wrap_width
     std::string focus_;
+    bool uiFocus_ = true;
     std::map<std::string, scene::UiState> states_;
     std::map<std::string, bool> checks_;
     std::map<std::string, std::pair<int, int>> sliders_;

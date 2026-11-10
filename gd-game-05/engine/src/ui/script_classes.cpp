@@ -850,6 +850,7 @@ bool PanelObj::mouse(float x, float y, bool click) {
 void PanelObj::draw() {
     if (showing && path.rfind("world/", 0) == 0) ui.host().worldDraw();
     if (!view || !showing) return;
+    view->setUiFocus(ui.focusPanel() == this);  // BandHighlight's state
     ui.drawView(*view);
 }
 
