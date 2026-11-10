@@ -256,6 +256,9 @@ void Band::rbPoll(Member& m) {
     if (!need) return;
     std::string group = over_ ? (won_ ? "win" : "lose") : m.shotGroup.empty() ? "stand" : m.shotGroup;
     if (!set->group(group)) group = "stand";
+    // RB's drum type starts in (start_group sit) (char_objects.dta): the
+    // drummer has no stand group (GD05-041).
+    if (!set->group(group)) group = "sit";
     if (!set->group(group)) group = "realtime_idle";
     if (set->group(group)) d->playGroup(group, 0);
 }

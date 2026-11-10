@@ -727,7 +727,14 @@ LightEnv SceneCache::lightEnv(const scene::Environ& e, const ScenePose* pose) {
         g.color = {l->color[0], l->color[1], l->color[2]};
         g.range = l->range;
         g.falloffStart = l->bigEndian ? std::clamp(l->falloffStart, 0.0f, std::max(0.0f, l->range)) : 0.0f;
-        if (const ScenePose::LightState* st = pose ? pose->light(l) : nullptr) {
+        // RB uploads the colour of the light's colour owner (RB 0x827D6F00:
+        // *(light+0xCC)+0xB4) [C]: a light that names another takes its
+        // colour, as a preset set it (GD05-042).
+        const scene::Light* owner = l;
+        if (l->bigEndian && !l->colorOwner.empty() && e.dir)
+            if (auto* o = e.dir->resolve<scene::Light>(l->colorOwner)) owner = o;
+        if (owner != l) g.color = {owner->color[0], owner->color[1], owner->color[2]};
+        if (const ScenePose::LightState* st = pose ? pose->light(owner) : nullptr) {
             if (st->hasColor) g.color = {st->color[0], st->color[1], st->color[2]};
             if (st->hasRange) g.range = st->range;
         }

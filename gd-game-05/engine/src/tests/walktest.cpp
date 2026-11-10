@@ -469,8 +469,10 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         press(kX);  // a new band
         at("tour_band_create_screen", 20000);
         wait(1200);
+        check("shot_band_create");
         press(kX);  // NAME (the offered name is taken)
         wait(800);
+        check("shot_band_naming");
         for (int i = 0; i < 2; ++i) press(kDown), wait(200);
         press(kX);  // ACCEPT
         at("tour_band_hub_screen", 30000);

@@ -787,6 +787,16 @@ void Band::filterClips(Member& m) {
     chr::ClipSet* set = d ? d->clipSet() : nullptr;
     if (!set) return;
     const uint32_t tempo = uint32_t(animTempo_);
+    if (m.type.rfind("rb_", 0) == 0) {
+        // Rock Band's tempo bits (config/macros.dta): kTempoSlow 16,
+        // kTempoMedium 32, kTempoFast 64, kTempoAll 112; bits 1 and 2 are
+        // kLeftArm / kRightArm, set on every drummer clip. GH2's mask (3)
+        // deleted all of the drummer's clips in a slow song, so he stood in
+        // his bind pose, collapsed and invisible (GD05-041) [C data].
+        constexpr uint32_t kRbTempo[3] = {16, 32, 64};
+        set->deleteDomainAny(kRbTempo[std::clamp(int(tempo), 0, 2)], 112, true);
+        return;
+    }
     if (m.type != "guitarist") {
         set->deleteDomainAny(tempo, kTempoMask, true);
         return;
