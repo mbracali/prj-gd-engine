@@ -143,6 +143,15 @@ void RbTrackView::load(const GameData& data, scene::MiloLibrary& library, const 
                 if (y1 < 1e9f && std::fabs(v.pos[1] - y1) < 1e-3f) tailRowV1_ = v.uv[1];
             std::sort(tailRow_.begin(), tailRow_.end(), [](const auto& a, const auto& b) { return a[0] < b[0]; });
         }
+        if (SDL_getenv("GD05_TRACKLOG"))
+            for (const char* n : {"tail_red.mat", "tail_glow_red.mat", "tail_star.mat"})
+                if (const scene::Mat* mt = tails_->find<scene::Mat>(n))
+                    SDL_Log("RB track: %s blend %d color %.2f %.2f %.2f %.2f tex %s texgen %d z %d cull %d next %s", n, mt->blend, double(mt->color[0]), double(mt->color[1]),
+                            double(mt->color[2]), double(mt->color[3]), mt->diffuseTex.c_str(), mt->texGen, mt->zMode, int(mt->cull), mt->nextPass.c_str());
+        if (SDL_getenv("GD05_TRACKLOG"))
+            if (const scene::Mesh* t = tails_->find<scene::Mesh>("tail02.mesh"))
+                for (const auto& v : t->verts)
+                    SDL_Log("RB track: tail02 vert %.2f %.2f %.2f uv %.2f %.2f", double(v.pos[0]), double(v.pos[1]), double(v.pos[2]), double(v.uv[0]), double(v.uv[1]));
         // Its materials' textures are track_shared's too [I].
         scene::Milo& shared = library.load("track/gen/track_shared.milo_xbox");
         auto& linked = tails_->root().linked;
@@ -493,7 +502,10 @@ void RbTrackView::drawTails(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, c
     const auto& row = tailRow_.size() >= 2 ? tailRow_ : kFlat;
     for (auto& [k, t] : tailStates_) t.seen = false;
     for (auto it = gems.begin(); it != last; ++it) {
-        const Gem& g = *it;
+        Gem g = *it;
+        // Development aid: GD05_TAILTEST=1 gives every gem a 600 ms tail.
+        static const bool tailTest = SDL_getenv("GD05_TAILTEST") != nullptr;
+        if (tailTest && !drums_) g.noSustain = false, g.durationMs = 600;
         if (g.noSustain || g.durationMs <= 0) continue;
         const float endRel = yOf(g.ms + g.durationMs - nowMs);
         if (endRel < bottomY_) continue;
@@ -528,12 +540,15 @@ void RbTrackView::drawTails(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, c
                 const bool lastRow = d >= y1 - y0;
                 if (lastRow) d = y1 - y0;
                 const float y = y0 + d;
-                const float scale = held ? 1.0f + ts.ring[size_t(((ts.head - int(d * 0.5f)) % 300 + 300) % 300)] : 1.0f;
+                // 0x8281BC48: a row's vertices are the template row's, moved
+                // sideways by the row's sample (x + (1 + sample) - 1), its uv
+                // kept; the last row (0x8281BCD8) closes at the centre.
+                const float shift = held ? ts.ring[size_t(((ts.head - int(d * 0.5f)) % 300 + 300) % 300)] : 0.0f;
                 float a = alpha;
                 if (len - d < c.fadeDistance) a *= std::max(0.0f, (len - d) / c.fadeDistance);
-                const float v = row[0][3] + (tailRowV1_ - row[0][3]) * (d / c.segLen);
                 for (const auto& p : row)
-                    tailVerts_.insert(tailVerts_.end(), {x + p[0] * scale, y, p[1], 0, 0, 1, col[0], col[1], col[2], col[3] * a, p[2], v, 1, 0, 0, 1});
+                    tailVerts_.insert(tailVerts_.end(),
+                                      {x + (lastRow ? 0.0f : p[0]) + shift, y, p[1], 0, 0, 1, col[0], col[1], col[2], col[3] * a, p[2], p[3], 1, 0, 0, 1});
                 ++rows;
                 if (lastRow) break;
             }
@@ -548,6 +563,11 @@ void RbTrackView::drawTails(gfx::MaterialRenderer& mr, gfx::SceneCache& cache, c
         }
     }
     for (auto it = tailStates_.begin(); it != tailStates_.end();) it = it->second.seen ? std::next(it) : tailStates_.erase(it);
+    if (static int logs = 0; SDL_getenv("GD05_TRACKLOG") && logs < 6 && !tailRanges_.empty()) {
+        ++logs;
+        SDL_Log("RB track: %zu tail strips, %zu verts, held gem %d, row %zu verts x %.2f..%.2f z %.2f, v1 %.2f", tailRanges_.size(), tailVerts_.size() / 16,
+                player.heldGem, row.size(), double(row.front()[0]), double(row.back()[0]), double(row.front()[1]), double(tailRowV1_));
+    }
     if (tailRanges_.empty()) return;
     if (!tailMesh_) tailMesh_ = std::make_unique<gfx::DynamicMesh>(cache.device());
     const gfx::GpuMesh all = tailMesh_->upload(tailVerts_, tailIndices_);
