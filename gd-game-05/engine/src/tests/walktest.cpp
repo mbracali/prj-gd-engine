@@ -117,8 +117,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
     // Quickplay, the song list's first song (random_song), the difficulty
     // the slot focuses, then the loading screens.
     auto rbQuickplay = [&] {
-        wait(300);
-        press(kX);  // the intro movie (skipped by GD05_SKIP_MOVIES in the walks anyway)
+        // The walks skip the intro movie (GD05_SKIP_MOVIES): straight to the title.
         at("splash_screen", 30000);
         press(kX);
         at("main_screen");
@@ -138,8 +137,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         // Rock Band's boot (ui/main.dta, docs/frontend.md): the intro movie,
         // the title over the menus' background video (movie_panel,
         // rb_video*.bik), the main menu over it.
-        wait(300);
-        press(kX);
+        // The walks skip the intro movie (GD05_SKIP_MOVIES): straight to the title.
         at("splash_screen", 30000);
         wait(1500);
         check("counter:menu_movie_frames:20");
@@ -162,8 +160,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         // not leave game_screen nor load the song again (RB's UIScreen goes
         // back only to its own (back ...), 0x8225AEE8).
         endMs_ = 40000;
-        wait(300);
-        press(kX);
+        // The walks skip the intro movie (GD05_SKIP_MOVIES): straight to the title.
         at("splash_screen", 30000);
         press(kX);
         at("main_screen");
@@ -214,8 +211,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
             press(kX);  // the focused choice (retry)
             at("loading_screen|game_screen", 30000);
         } else {
-            wait(300);
-            press(kX);
+            // The walks skip the intro movie (GD05_SKIP_MOVIES): straight to the title.
             at("splash_screen", 30000);
             press(kX);
             at("main_screen");
@@ -232,8 +228,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         // RB's character creator (ui/charcreator.dta): Solo Tour > new
         // character > the maker > PHYSIQUE (the appearance panel: hair and
         // head lists through OutfitPanel) > a hair chosen.
-        wait(300);
-        press(kX);
+        // The walks skip the intro movie (GD05_SKIP_MOVIES): straight to the title.
         at("splash_screen", 30000);
         press(kX);
         at("main_screen");
@@ -269,8 +264,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
     } else if (scenario == "rock_shop") {
         // RB's Rock Shop (ui/shop.dta) from the Solo Tour's hub: a new
         // character, the shop, clothing, a store, a shirt bought and worn.
-        wait(300);
-        press(kX);
+        // The walks skip the intro movie (GD05_SKIP_MOVIES): straight to the title.
         at("splash_screen", 30000);
         press(kX);
         at("main_screen");
@@ -319,8 +313,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         // in the creator the first time), the hub, the gig guide, a
         // difficulty, the first event, its song, the results, the gig's end.
         endMs_ = 20000;
-        wait(300);
-        press(kX);
+        // The walks skip the intro movie (GD05_SKIP_MOVIES): straight to the title.
         at("splash_screen", 30000);
         press(kX);
         at("main_screen");
@@ -367,8 +360,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         at("tour_solo_event_screen|tour_solo_hub_screen|tour_solo_newtown_screen", 40000);
     } else if (scenario == "screens") {
         // The screen sweep (runCheck "sweep"): every screen from the main menu.
-        wait(300);
-        press(kX);
+        // The walks skip the intro movie (GD05_SKIP_MOVIES): straight to the title.
         at("splash_screen", 30000);
         press(kX);
         at("main_screen");
@@ -381,8 +373,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         SDL_setenv_unsafe("GD05_INSTRUMENT", "guitar,drum,vocals,guitar", 1);
         SDL_setenv_unsafe("GD05_BAND_PLAYERS", "2", 1);
         endMs_ = 20000;
-        wait(300);
-        press(kX);
+        // The walks skip the intro movie (GD05_SKIP_MOVIES): straight to the title.
         at("splash_screen", 30000);
         press(kX);
         at("main_screen");
@@ -423,8 +414,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         // RB's Training menu (ui/training.dta): Tutorials, Practice, the Drum Trainer.
         if (scenario == "drum_trainer") SDL_setenv_unsafe("GD05_INSTRUMENT", "drum", 1);
         endMs_ = 20000;
-        wait(300);
-        press(kX);
+        // The walks skip the intro movie (GD05_SKIP_MOVIES): straight to the title.
         at("splash_screen", 30000);
         press(kX);
         at("main_screen");
@@ -447,8 +437,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         // section of the list, the second speed; the practice clock starts
         // a measure before that section ("practice:" log line).
         endMs_ = 60000;
-        wait(300);
-        press(kX);
+        // The walks skip the intro movie (GD05_SKIP_MOVIES): straight to the title.
         at("splash_screen", 30000);
         press(kX);
         at("main_screen");
@@ -489,8 +478,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         const bool tow = scenario == "tug_of_war";
         SDL_setenv_unsafe("GD05_INSTRUMENT", "guitar,guitar", 1);
         endMs_ = 25000;
-        wait(300);
-        press(kX);
+        // The walks skip the intro movie (GD05_SKIP_MOVIES): straight to the title.
         at("splash_screen", 30000);
         press(kX);
         at("main_screen");
@@ -520,8 +508,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         SDL_setenv_unsafe("GD05_INSTRUMENT", "guitar,drum,vocals,guitar", 1);
         SDL_setenv_unsafe("GD05_BAND_PLAYERS", "4", 1);
         endMs_ = 30000;
-        wait(300);
-        press(kX);
+        // The walks skip the intro movie (GD05_SKIP_MOVIES): straight to the title.
         at("splash_screen", 30000);
         press(kX);
         at("main_screen");
@@ -551,8 +538,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         const bool vocals = scenario == "quickplay_vocals";
         SDL_setenv_unsafe("GD05_INSTRUMENT", vocals ? "vocals" : "drum", 1);
         endMs_ = vocals ? 95000 : 30000;
-        wait(300);
-        press(kX);
+        // The walks skip the intro movie (GD05_SKIP_MOVIES): straight to the title.
         at("splash_screen", 30000);
         press(kX);
         at("main_screen");
@@ -600,8 +586,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         // The keyboard through SDL's events (as a player without a
         // controller): Enter starts at the title and selects in the menus,
         // the arrows move [I: the port's keyboard map, docs/controls.md].
-        wait(300);
-        key(SDLK_RETURN);
+        // The walks skip the intro movie (GD05_SKIP_MOVIES): straight to the title.
         at("splash_screen", 30000);
         key(SDLK_RETURN);
         at("main_screen");
@@ -2325,13 +2310,20 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         for (const gfx::UiView::Hit& h : p->view->hits())
             if (h.key.rfind("ss_song.lst#", 0) == 0) rows.push_back(h);
         std::sort(rows.begin(), rows.end(), [](const auto& a, const auto& b) { return a.y0 < b.y0; });
-        std::printf("  song list: texture %s, %zu row texts\n", rd.texture.id ? "drawn" : "none", rows.size());
-        if (!rd.texture.id) return fail("the song list's texture was not drawn");
+        // Wave 04 (GD05-022): the texture on the swaying cloth through
+        // cloth.cam; the cloth is polled every frame (CharTransCopy, the
+        // hair) and its mesh moves.
+        float cx0 = rd.x0, cy0 = rd.y0, cx1 = rd.x1, cy1 = rd.y1;
+        const bool cloth = p->view->clothRect(cx0, cy0, cx1, cy1);
+        std::printf("  song list: %s, %d cloth polls, %zu row texts, cloth %.0f..%.0f x %.0f..%.0f\n",
+                    cloth ? "on the cloth" : rd.texture.id ? "flat texture" : "none", p->view->clothPolls(), rows.size(), double(cx0), double(cx1), double(cy0), double(cy1));
+        if (!cloth && !rd.texture.id) return fail("the song list's texture was not drawn");
+        if (!SDL_getenv("GD05_SONGLIST_FLAT") && (!cloth || p->view->clothPolls() < 10)) return fail("the cloth is not polled");
         if (rows.size() < 5) return fail("too few rows drawn");
         for (size_t i = 0; i + 1 < rows.size(); ++i) {
             const float overlap = rows[i].y1 - rows[i + 1].y0, h = std::min(rows[i].y1 - rows[i].y0, rows[i + 1].y1 - rows[i + 1].y0);
             if (overlap > 0.35f * h) return fail(rows[i].key + " runs into " + rows[i + 1].key);
-            if (rows[i].x0 < rd.x0 - 1 || rows[i].x1 > rd.x1 + 1) return fail(rows[i].key + " outside the cloth");
+            if (rows[i].x0 < cx0 - 1 || rows[i].x1 > cx1 + 1) return fail(rows[i].key + " outside the cloth");
         }
         return pass();
     }

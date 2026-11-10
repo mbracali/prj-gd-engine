@@ -615,7 +615,7 @@ void PanelObj::enter() {
     // turned it off; without it the menus got darker at every return.
     if (view)
         for (const char* ev : {"ui_enter", ui.transitionBack() ? "ui_enter_back" : "ui_enter_forward"})
-            for (const gfx::UiView::Trigger& t : view->triggers(ev)) ui.animate(this, t.anim->name, 0, t.endFrame, t.endFrame / 30.0f, kTaskUISeconds);
+            for (const gfx::UiView::Trigger& t : view->triggers(ev)) ui.animateTrigger(this, t);
     applyStates();
     ui.callScript(this, "enter");
     applyStates();

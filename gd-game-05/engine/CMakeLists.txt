@@ -114,6 +114,7 @@ target_sources(gd05 PRIVATE
   src/render/track_view.cpp
   src/render/rb_track_view.cpp
   src/render/ui_view.cpp
+  src/render/ui_cloth.cpp
   src/render/venue_view.cpp
   src/scene/anim.cpp
   src/scene/bitmap.cpp

@@ -13,6 +13,7 @@
 #include <vector>
 #include <utility>
 
+#include "render/ui_view.h"
 #include "script/script.h"
 #include "ui/career.h"
 
@@ -147,7 +148,11 @@ public:
     // Plays an anim / group of a panel over time: frames from..to over
     // `seconds` (units: kTaskUISeconds, kTaskSeconds...); looping by the data.
     // `task`: the task's (name ...), an object `exists` finds while it runs.
-    void animate(PanelObj* panel, const std::string& object, float from, float to, float seconds, int units, const std::string& task = "");
+    void animate(PanelObj* panel, const std::string& object, float from, float to, float seconds, int units, const std::string& task = "",
+                 bool loop = false, double delay = 0);
+    // A UITrigger's anim as RndAnimatable::Animate (RB 0x8221BE38) plays it
+    // (gfx::UiView::Trigger: its range, fps, rate's clock, delay, loop, dest).
+    void animateTrigger(PanelObj* panel, const gfx::UiView::Trigger& t);
     void stopAnimation(PanelObj* panel, const std::string& object);
     // A task clock in seconds (kTaskSeconds: game time, paused with the
     // game; kTaskUISeconds: the menus'; kTaskBeats: the song's beats).
@@ -345,6 +350,8 @@ private:
         double start, length;  // in the units' clock (s)
         int units;
         std::string task;  // (name ...): registered while it runs
+        bool loop = false;  // wraps from..to (AnimTask's loop, type loop)
+        bool started = true;  // false until a delayed anim's start
     };
     std::vector<Anim> anims_;
     std::map<std::string, std::unique_ptr<ScriptObject>> namedTasks_;

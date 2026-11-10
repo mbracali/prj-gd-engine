@@ -614,17 +614,24 @@ void UiManager::beginTransition(ScreenObj* next, bool back) {
     // menus) also skips the outgoing screen's: it opens on the next frame.
     const bool animOut = current_ && current_->flag("animate_transition", true) && next->flag("animate_transition", true) && !headless_;
     if (animOut) {
-        // The outgoing panels' ui_exit triggers.
+        // The outgoing panels' ui_exit triggers, each anim as its trigger
+        // says (RndAnimatable::Animate RB 0x8221BE38). RB's screen waits
+        // while a panel is Exiting (PanelDir 0x8225FF60: one of its
+        // block_transition triggers still blocking, UITrigger 0x82262918)
+        // [C]; the port's phase lasts the longest block [I: the UIManager
+        // poll's states].
+        double block = 0;
         for (PanelObj* p : current_->panels())
             if (p->up && !next->hasPanel(p) && p->view)
                 for (const char* ev : {"ui_exit", back_ ? "ui_exit_back" : "ui_exit_forward"})
-                    for (const gfx::UiView::Trigger& t : p->view->triggers(ev))
-                        // The name's zoom leaves from where the name left it, with no jump (GD02-143).
-                        animate(p, t.anim->name, t.anim->name == "nameprof.tnm" ? p->view->frame(t.anim->name) : 0, t.endFrame,
-                                float(transitionMs_ / 1000.0), kTaskUISeconds);
+                    for (const gfx::UiView::Trigger& t : p->view->triggers(ev)) {
+                        animateTrigger(p, t);
+                        block = std::max(block, double(t.blockSeconds));
+                    }
         phase_ = Phase::Out;
         phaseMs_ = 0;
-        phaseLen_ = transitionMs_;
+        phaseLen_ = block * 1000;
+        if (const char* l = SDL_getenv("GD05_UILOG"); l && *l && *l != '0') SDL_Log("ui: exit %s blocks %.0f ms", current_->name().c_str(), phaseLen_);
         return;
     }
     switchScreens();
@@ -707,9 +714,17 @@ void UiManager::switchScreens() {
         if (ScriptObject* h = interp_.findObject(hb); h && h->handler("update")) callScript(h, "update", {Value::obj(to)});
     route("screen_change", {Value::obj(to), Value::obj(from), Value::integer(back_ ? 1 : 0)});
     if (animIn) {
+        // RB's screen is Entering while one of its panels' block_transition
+        // enter triggers blocks (PanelDir 0x8225FEE0, UITrigger 0x82262918) [C].
+        double block = 0;
+        for (PanelObj* p : entered_)
+            if (p->view)
+                for (const char* ev : {"ui_enter", back_ ? "ui_enter_back" : "ui_enter_forward"})
+                    for (const gfx::UiView::Trigger& t : p->view->triggers(ev)) block = std::max(block, double(t.blockSeconds));
         phase_ = Phase::In;
         phaseMs_ = 0;
-        phaseLen_ = transitionMs_;
+        phaseLen_ = block * 1000;
+        if (const char* l = SDL_getenv("GD05_UILOG"); l && *l && *l != '0') SDL_Log("ui: enter %s blocks %.0f ms", to->name().c_str(), phaseLen_);
         applyTransitionPose(0);
     } else {
         phase_ = Phase::Complete;
@@ -862,6 +877,7 @@ double UiManager::clockSeconds(int units) const {
     switch (units) {
     case kTaskUISeconds: return uiMs_ / 1000.0;
     case kTaskBeats: return host_.gameLoaded() ? host_.gameBeat() : 0.0;
+    case kTaskTutorialSeconds: return tutorialMs_ / 1000.0;
     default: return taskSeconds();
     }
 }
@@ -876,21 +892,44 @@ double UiManager::taskSeconds() const {
     return host_.gameLoaded() ? host_.gameTimeMs() / 1000.0 : secondsMs_ / 1000.0;
 }
 
-void UiManager::animate(PanelObj* panel, const std::string& object, float from, float to, float seconds, int units, const std::string& task) {
+void UiManager::animate(PanelObj* panel, const std::string& object, float from, float to, float seconds, int units, const std::string& task,
+                        bool loop, double delay) {
     stopAnimation(panel, object);
     if (!panel || !panel->view) return;
-    setViewFrame(panel, object, from);
-    if (seconds <= 0) {
+    if (delay <= 0) setViewFrame(panel, object, from);
+    if (seconds <= 0 && delay <= 0) {
         setViewFrame(panel, object, to);
         return;
     }
-    anims_.push_back({panel, object, from, to, clockSeconds(units), double(seconds), units, task});
+    Anim a{panel, object, from, to, clockSeconds(units) + std::max(0.0, delay), std::max(1e-3, double(seconds)), units, task};
+    a.loop = loop && seconds > 0;
+    a.started = delay <= 0;
+    anims_.push_back(a);
     // A named task is an object while it runs ({exists unlock_anim}, unlock_venue_panel's poll).
     if (!task.empty() && !namedTasks_.count(task)) {
         auto o = std::make_unique<ScriptObject>(task, "Task");
         interp_.registerObject(o.get());
         namedTasks_[task] = std::move(o);
     }
+}
+
+// RndAnimatable::Animate (RB 0x8221BE38) [C]: dest starts from the
+// anim's current frame; the delay is in the rate's units (k30_fps: song
+// seconds, k480_fpb / k1_fpb: beats, k30_fps_ui: menu seconds,
+// k30_fps_tutorial: the tutorial's).
+void UiManager::animateTrigger(PanelObj* panel, const gfx::UiView::Trigger& t) {
+    if (!panel || !panel->view || !t.anim) return;
+    int units = kTaskUISeconds;
+    switch (t.rate) {
+    case 0: units = kTaskSeconds; break;
+    case 1:
+    case 3: units = kTaskBeats; break;
+    case 4: units = kTaskTutorialSeconds; break;
+    default: units = kTaskUISeconds;
+    }
+    const float from = t.dest ? panel->view->frame(t.anim->name) : t.startFrame;
+    const float seconds = t.fps > 0 ? std::abs(t.endFrame - from) / t.fps : 0;
+    animate(panel, t.anim->name, from, t.endFrame, seconds, units, "", t.loop, t.delay);
 }
 
 void UiManager::endTask(const std::string& task) {
@@ -915,9 +954,18 @@ void UiManager::stopAnimation(PanelObj* panel, const std::string& object) {
 void UiManager::updateAnims() {
     for (size_t i = 0; i < anims_.size();) {
         Anim& a = anims_[i];
-        const double t = std::clamp((clockSeconds(a.units) - a.start) / a.length, 0.0, 1.0);
+        const double now = clockSeconds(a.units);
+        if (now < a.start) {  // a delayed anim (EventTrigger delay) has not begun
+            ++i;
+            continue;
+        }
+        a.started = true;
+        double t = (now - a.start) / a.length;
+        // AnimTask's loop (type loop): from..to again and again [C 0x8221BE38].
+        if (a.loop) t -= std::floor(t);
+        t = std::clamp(t, 0.0, 1.0);
         setViewFrame(a.panel, a.object, a.from + float(t) * (a.to - a.from));
-        if (t >= 1) {
+        if (t >= 1 && !a.loop) {
             const std::string task = a.task;
             anims_.erase(anims_.begin() + long(i));
             endTask(task);

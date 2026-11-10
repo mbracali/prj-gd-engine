@@ -10,6 +10,7 @@
 
 #include "data/bytes.h"
 #include "data/game_data.h"
+#include "render/ui_cloth.h"
 #include "scene/bitmap.h"
 #include "scene/milo.h"
 #include "scene/ui_objects.h"
@@ -88,8 +89,19 @@ std::vector<std::string> recordNames(const Bytes& rec) {
 }
 }  // namespace
 
+int UiView::clothPolls() const { return cloth_ ? cloth_->polls() : 0; }
+
 bool UiView::drawRenderDir3d(MaterialRenderer& r) {
     const scene::Directory& outer = milo_->root();
+    // The RenderDir's own pollables (the cloth: CharTransCopy, CharHair),
+    // once a frame before it draws [C data; the 60 Hz step: rig.cpp].
+    if (!clothChecked_) clothChecked_ = true, cloth_ = UiCloth::make(outer, cache_.device());
+    if (cloth_) {
+        const double now = double(SDL_GetTicksNS()) / 1e6;
+        const double dt = clothLastMs_ < 0 ? 0 : std::clamp(now - clothLastMs_, 0.0, 100.0);
+        clothLastMs_ = now;
+        cloth_->poll(pose_, dt / 1000.0);
+    }
     const scene::Cam* outerCam = nullptr;
     const scene::Environ* outerEnv = nullptr;
     if (outer.self)
@@ -103,6 +115,7 @@ bool UiView::drawRenderDir3d(MaterialRenderer& r) {
     int vx, vy, vw, vh;
     dev.currentViewport(vx, vy, vw, vh);
     const LightEnv screenEnv = r.lightEnv();
+    const size_t firstHit = hits_.size();
     for (const auto& o : outer.objects) {
         if (o->cls != "TexRenderer") continue;
         const scene::Directory* panel = nullptr;
@@ -161,7 +174,17 @@ bool UiView::drawRenderDir3d(MaterialRenderer& r) {
     oc.yFov = outerCam->yFov, oc.nearPlane = outerCam->nearPlane, oc.farPlane = outerCam->farPlane;
     r.setFrame(oc, outerEnv ? cache_.lightEnv(*outerEnv, &pose_) : screenEnv, vw, vh);
     viewProj_ = oc.viewProj(false);
+    const size_t texHits = hits_.size();
     drawRoots(r, outer);
+    // The texture's hits (the list's rows) to where the cloth shows them:
+    // its texture over the cloth mesh's screen bounds [I: the sway's bend
+    // is left out].
+    if (cloth_ && clothX1_ > clothX0_)
+        for (size_t i = firstHit; i < texHits; ++i) {
+            Hit& h = hits_[i];
+            const float sx = (clothX1_ - clothX0_) / 1280.0f, sy = (clothY1_ - clothY0_) / 720.0f;
+            h.x0 = clothX0_ + h.x0 * sx, h.x1 = clothX0_ + h.x1 * sx, h.y0 = clothY0_ + h.y0 * sy, h.y1 = clothY0_ + h.y1 * sy;
+        }
     return true;
 }
 
@@ -291,6 +314,7 @@ const scene::Tex* UiView::textureFile(const std::string& rel) {
 void UiView::load(const std::string& path) {
     milo_ = &lib_.load(path);
     pose_.clear();
+    cloth_.reset(), clothChecked_ = false, clothLastMs_ = -1;
     // The character select's door stands closed until a character swings it
     // (0x8228F250); the scripts hand it over at TRANSITION_COMPLETE, so it must
     // not show the milo's open pose before that (GD02-147).
@@ -316,16 +340,43 @@ std::vector<UiView::Trigger> UiView::triggers(const std::string& event) const {
             if (t->anims.empty()) {
                 const scene::Object* a = t->dir ? t->dir->resolve(t->anim) : nullptr;
                 if (!a) a = find(t->anim);
-                if (a) out.push_back({a, t->blockTransition, ScenePose::endFrame(a)});
+                if (a) {
+                    Trigger tr;
+                    tr.anim = a, tr.blockTransition = t->blockTransition, tr.endFrame = ScenePose::endFrame(a);
+                    tr.blockSeconds = t->blockTransition ? tr.endFrame / 30.0f : 0;
+                    out.push_back(tr);
+                }
                 continue;
             }
+            float block = 0;
+            if (t->blockTransition)
+                for (const scene::UITrigger::Anim& an : t->anims) {
+                    const scene::Object* a = t->dir ? t->dir->resolve(an.name) : nullptr;
+                    if (!a) a = find(an.name);
+                    if (a) block = std::max(block, ScenePose::endFrame(a) / 30.0f);
+                }
             for (const scene::UITrigger::Anim& an : t->anims) {
                 const scene::Object* a = t->dir ? t->dir->resolve(an.name) : nullptr;
                 if (!a) a = find(an.name);
-                if (!a) continue;
-                const float full = ScenePose::endFrame(a);
-                const float end = an.type == "range" && an.end != an.start ? std::clamp(an.end, 0.0f, full) : full;
-                out.push_back({a, t->blockTransition, end});
+                if (!a || !an.enable) continue;
+                // RndAnimatable::Animate (RB 0x8221BE38) [C]: start and end as
+                // the record gives them (start: the current frame for dest);
+                // fps = |end - start| / period, or the rate's fps (30 for
+                // every rate but k480_fpb, 0x82884D14) x scale; loop for type
+                // loop. A range of 0..0 sets frame 0 (main.milo's multi.tnm).
+                Trigger tr;
+                tr.anim = a;
+                tr.blockTransition = t->blockTransition;
+                tr.startFrame = an.start, tr.endFrame = an.end;
+                tr.dest = an.type == "dest";
+                tr.loop = an.type == "loop";
+                tr.rate = int(an.rate);
+                const float rateFps = an.rate == 1 ? 480.0f : 30.0f;
+                tr.fps = an.period != 0 ? std::abs(tr.endFrame - tr.startFrame) / an.period : rateFps * an.scale;
+                tr.delay = an.delay;
+                tr.wait = an.wait;
+                tr.blockSeconds = block;
+                out.push_back(tr);
             }
         }
     return out;
@@ -569,9 +620,10 @@ void UiView::draw(MaterialRenderer& r) {
             for (const std::string& n : recordNames(drawRoot->self->record))
                 for (const auto& [owner, sub] : drawRoot->subdirs)
                     if (sub && sub->cls == "PanelDir" && (sub->name == n || owner == n)) cloth = true;
-        // Development aid: GD05_SONGLIST_3D=1 draws it as the others (the
-        // cloth through cloth.cam at banner_lower3rd.tnm frame 3, unswayed).
-        if (const char* e = SDL_getenv("GD05_SONGLIST_3D"); e && *e == '1') cloth = false;
+        // The cloth (GD05-022, wave 04) is drawn as the others now: its
+        // texture on the swaying banner through cloth.cam. Development aid:
+        // GD05_SONGLIST_FLAT=1 shows the texture flat as wave 03 did.
+        if (const char* e = SDL_getenv("GD05_SONGLIST_FLAT"); !e || *e != '1') cloth = false;
         if (!cloth && drawRenderDir3d(r)) {
             texts_.collect();
             return;
@@ -664,6 +716,28 @@ void UiView::draw(MaterialRenderer& r) {
     texts_.collect();
 }
 
+void UiView::clothBounds(const scene::Mesh& mesh) {
+    const std::vector<float>* v = cloth_ ? cloth_->vertices(mesh) : nullptr;
+    if (!v) return;
+    float x0 = 1e9f, y0 = 1e9f, x1 = -1e9f, y1 = -1e9f;
+    const Mat4& m = viewProj_;
+    for (size_t i = 0; i + 2 < v->size(); i += 16) {
+        const float px = (*v)[i], py = (*v)[i + 1], pz = (*v)[i + 2];
+        const float cx = m.at(0, 0) * px + m.at(0, 1) * py + m.at(0, 2) * pz + m.at(0, 3);
+        const float cy = m.at(1, 0) * px + m.at(1, 1) * py + m.at(1, 2) * pz + m.at(1, 3);
+        const float cw = m.at(3, 0) * px + m.at(3, 1) * py + m.at(3, 2) * pz + m.at(3, 3);
+        if (cw <= 1e-4f) continue;
+        const float sx = (cx / cw + 1) * 640.0f, sy = (1 - cy / cw) * 360.0f;
+        x0 = std::min(x0, sx), x1 = std::max(x1, sx), y0 = std::min(y0, sy), y1 = std::max(y1, sy);
+    }
+    if (x1 > x0 && y1 > y0) clothX0_ = x0, clothY0_ = y0, clothX1_ = x1, clothY1_ = y1;
+    if (SDL_getenv("GD05_CLOTHLOG") && cloth_->polls() % 60 == 1) {
+        float zmin = 1e9f, zmax = -1e9f;
+        for (size_t i = 0; i + 2 < v->size(); i += 16) zmin = std::min(zmin, (*v)[i + 2]), zmax = std::max(zmax, (*v)[i + 2]);
+        SDL_Log("cloth %s: screen %.0f..%.0f x %.0f..%.0f, z %.1f..%.1f", mesh.name.c_str(), double(x0), double(x1), double(y0), double(y1), double(zmin), double(zmax));
+    }
+}
+
 void UiView::addHit(const std::string& key, const float lo[3], const float hi[3], const Mat4& world) {
     float x0 = 1e9f, y0 = 1e9f, x1 = -1e9f, y1 = -1e9f;
     for (int c = 0; c < 8; ++c) {
@@ -749,6 +823,13 @@ void UiView::drawObject(MaterialRenderer& r, const scene::Object& o, int depth) 
     if (const auto* m = o.as<scene::Mesh>()) {
         if (!cache_.mesh(m)) return;
         const auto mm = meshMat_.find(m->name);
+        if (cloth_ && !m->bones.empty())
+            if (const GpuMesh* g = cloth_->skinned(*m, pose_)) {
+                drawMesh(r, cache_, *m, toMat4(scene::Xfm{}), &pose_, findMat(*m, mm != meshMat_.end() ? mm->second : m->mat), nullptr, g);
+                ++meshesDrawn_;
+                clothBounds(*m);
+                return;
+            }
         drawMesh(r, cache_, *m, toMat4(pose_.world(m)), &pose_, findMat(*m, mm != meshMat_.end() ? mm->second : m->mat));
         ++meshesDrawn_;
         return;

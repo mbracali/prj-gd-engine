@@ -2,6 +2,7 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #pragma once
 
+#include <cmath>
 #include <functional>
 #include <map>
 #include <set>
@@ -36,6 +37,8 @@ struct BandText;
 // frames, showing, component states, list rows, text entries, sliders and
 // check boxes, and an overlay (the help bar's buttons).
 namespace gfx {
+
+class UiCloth;
 
 class UiView {
 public:
@@ -145,10 +148,24 @@ public:
 
     // UITriggers of the panel and its subdirectories for an event (ui_enter,
     // ui_exit_forward...): the anim each plays.
+    // RndAnimatable::Animate (RB 0x8221BE38) [C]: from `startFrame` (the
+    // anim's current frame for type dest) to `endFrame` at `fps` frames a
+    // second in the rate's clock (`rate`: 0 song seconds, 1 / 3 beats, 2 UI
+    // seconds, 4 tutorial), after `delay` (same units); loop wraps between
+    // the two (type loop).
     struct Trigger {
         const scene::Object* anim = nullptr;
         bool blockTransition = false;
         float endFrame = 0;
+        float startFrame = 0, fps = 30, delay = 0;
+        int rate = 2;
+        bool loop = false, dest = false, wait = false;
+        // UITrigger::Trigger (RB 0x82262B28) [C]: a block_transition
+        // trigger blocks (IsBlocking 0x82262918) for the longest of its
+        // anims' whole frame ranges / 30 s, whatever its own range.
+        float blockSeconds = 0;
+        // Seconds (of the rate's clock) from start to end.
+        float seconds() const { return fps > 0 ? std::abs(endFrame - startFrame) / fps : 0; }
     };
     std::vector<Trigger> triggers(const std::string& event) const;
 
@@ -165,6 +182,14 @@ public:
         bool bottomUp = true;
     };
     const Rendered& rendered() const { return rendered_; }
+    // The cloth's polls so far (0: none; walk checks).
+    int clothPolls() const;
+    // The cloth mesh's screen bounds last frame (1280 x 720 units); false without a cloth.
+    bool clothRect(float& x0, float& y0, float& x1, float& y1) const {
+        if (!clothPolls() || clothX1_ <= clothX0_) return false;
+        x0 = clothX0_, y0 = clothY0_, x1 = clothX1_, y1 = clothY1_;
+        return true;
+    }
     float drawTemplate(MaterialRenderer& r, const std::string& key, const scene::Text& tmpl, const std::string& str,
                        const scene::Xfm& world, const float* rgb = nullptr, float alpha = 1, int align = -1,
                        const scene::BandText* style = nullptr);
@@ -207,6 +232,8 @@ public:
     const std::vector<Hit>& hits() const { return hits_; }
     // Records `key` from a local box (lo..hi) placed by `world`.
     void addHit(const std::string& key, const float lo[3], const float hi[3], const Mat4& world);
+    // The skinned cloth mesh's screen bounds (clothX0_..): through viewProj_.
+    void clothBounds(const scene::Mesh& mesh);
 
     int textsDrawn() const { return textsDrawn_; }
     int meshesDrawn() const { return meshesDrawn_; }
@@ -276,6 +303,13 @@ private:
     std::map<const scene::Object*, TargetId> rdTargets_;
     std::set<std::string> hiddenScopes_;
     std::set<const scene::Directory*> texRendered_;  // the TexRenderers' panels
+    // A RenderDir's swaying cloth (render/ui_cloth.h), polled once a frame.
+    std::unique_ptr<UiCloth> cloth_;
+    bool clothChecked_ = false;
+    double clothLastMs_ = -1;
+    // The cloth mesh's screen bounds (1280 x 720 units) last frame: where
+    // the texture's hits go (the list's rows under the mouse) [I].
+    float clothX0_ = 0, clothY0_ = 0, clothX1_ = 0, clothY1_ = 0;
     void addLayoutHit(const std::string& key, const TextLayout& layout, const Mat4& world);
     int textsDrawn_ = 0, meshesDrawn_ = 0;
     std::vector<std::string> problems_;

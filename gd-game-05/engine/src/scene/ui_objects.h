@@ -145,6 +145,13 @@ public:
     struct Anim {
         std::string name, type;
         float start = 0, end = 0;
+        // RndAnimatable::Animate (RB 0x8221BE38) [C]: the delay (in the
+        // rate's units), the rate (0 k30_fps, 1 k480_fpb, 2 k30_fps_ui,
+        // 3 k1_fpb, 4 k30_fps_tutorial), the period (0: the rate's fps x
+        // scale) and wait (after the blocking anim).
+        float blend = 0, delay = 0, period = 0, scale = 1;
+        uint32_t rate = 2;
+        bool wait = false, enable = true;
     };
     std::vector<Anim> anims;
 };

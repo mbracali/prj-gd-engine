@@ -235,11 +235,11 @@ void readUITrigger(Rd& r, UITrigger& o) {
         UITrigger::Anim a;
         a.name = r.str();
         if (o.anim.empty()) o.anim = a.name;
-        r.f(), r.b(), r.f(), r.b(), r.u32();
+        a.blend = r.f(), a.wait = r.b(), a.delay = r.f(), a.enable = r.b(), a.rate = r.u32();
         a.start = r.f(), a.end = r.f();
-        r.f();
+        a.period = r.f();
         a.type = r.str();
-        r.f();
+        a.scale = r.f();
         o.anims.push_back(a);
     }
     list(), list();  // sounds, shows
