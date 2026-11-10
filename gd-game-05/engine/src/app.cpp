@@ -685,9 +685,7 @@ private:
         std::unique_ptr<Song> song;
         WorldDriver driver;
         float fromMs = 0;
-        bool framed = false;  // the shot's target and direction are set
-        gfx::Vec3 target, dir;
-        float dist = 300, spread = 100;
+        bool framed = false;  // the band shot is picked (updateBackdrop)
         int lightPart = -1;
     };
     std::unique_ptr<Backdrop> backdrop_;
@@ -4092,14 +4090,14 @@ void App::loadBackdrop() {
     // show the band (GD02-074).
     for (int i = 0; backdrop_ && (i < 45 || (!backdrop_->framed && i < 195)); ++i) updateBackdrop();
     if (!band_) SDL_Log("enhanced options: backdrop %s has no band", venue.c_str());
-    else if (backdrop_ && !backdrop_->framed) SDL_Log("enhanced options: backdrop %s: the singer never showed", venue.c_str());
+    else if (backdrop_ && !backdrop_->framed) SDL_Log("enhanced options: backdrop %s: no band shot", venue.c_str());
     if (backdrop_) backdrop_->frozen = true, backdropWarm_ = !backdropShown_;
     if (const char* l = SDL_getenv("GD05_UILOG"); l && *l && *l != '0')
         SDL_Log("ui: menu backdrop loaded in %.1f ms", double(SDL_GetTicksNS() - t0) / 1e6);
 }
 
-// The backdrop's band is there, the camera on its singer, and the singer's
-// head in the right half of the picture (the Enhanced walk's check).
+// The backdrop's band is there, the shot picked, and the singer's head in
+// the picture (the Enhanced walk's check).
 bool App::menuBackdropFramed() {
     if (!backdrop_ || !backdrop_->framed || !band_ || !venueView_) return false;
     scene::Xfm head;
@@ -4108,7 +4106,7 @@ bool App::menuBackdropFramed() {
     const gfx::Mat4 vp = cam.viewProj(false);
     float c[4];
     for (int r = 0; r < 4; ++r) c[r] = vp.at(r, 0) * head.pos[0] + vp.at(r, 1) * head.pos[1] + vp.at(r, 2) * head.pos[2] + vp.at(r, 3);
-    return c[3] > 0 && c[0] / c[3] > 0 && c[0] / c[3] < 1 && std::fabs(c[1] / c[3]) < 1;
+    return c[3] > 0 && std::fabs(c[0] / c[3]) < 1 && std::fabs(c[1] / c[3]) < 1;
 }
 
 bool App::drawMenuBackdrop() {
@@ -4141,62 +4139,59 @@ void App::updateBackdrop() {
         const std::array<float, 3> cam{c.x, c.y, c.z};
         band_->update(world_->seconds(), world_->beats(), &cam);
     }
-    // The shot (docs/guidelines/universal_launcher.md, gd01's Enhanced pose): a
-    // still close-up of the singer, on the right of the picture beside the
-    // options' box, from the audience's side a little to one flank so the
-    // rest of the band stands behind and beside them.
-    if (!b.framed && band_) {
-        scene::Xfm singer, other;
-        if (band_->objectXfm("singer", "bone_head.mesh", singer)) {
-            b.target = {singer.pos[0], singer.pos[1], singer.pos[2] - 4};
-            // The stage's front: from the drummer (at the back) to the
-            // singer; else towards the venue's first shot.
-            gfx::Vec3 dir = venueView_->camera().position() - b.target;
-            if (scene::Xfm drummer; band_->objectXfm("drummer", "bone_head.mesh", drummer))
-                dir = gfx::Vec3{singer.pos[0] - drummer.pos[0], singer.pos[1] - drummer.pos[1], 0};
-            dir.z = 0;
-            if (gfx::dot(dir, dir) < 1e-6f) dir = {0, -1, 0};
-            b.dir = gfx::normalize(dir);
-            const gfx::Vec3 side{-b.dir.y, b.dir.x, 0};
-            float spread = 40;
-            for (const char* who : {"guitarist0", "drummer", "bassist"})
-                if (band_->objectXfm(who, "bone_head.mesh", other)) {
-                    const gfx::Vec3 p{other.pos[0], other.pos[1], other.pos[2]};
-                    spread = std::max(spread, std::fabs(gfx::dot(p - b.target, side)));
+    // The shot (D31, GD05-053): one of the venue's own band shots, as RB's
+    // picker has them (rbShots: NORMAL1111, the far shots of the whole band,
+    // then directed_all), the one that shows most of the band's heads where
+    // the Enhanced Options' boxes leave the picture free (the right half,
+    // above the help box) [C: the shots and their playback; I: the choice].
+    // It plays like a song's shot (its band targets' clips, the director),
+    // then freezes with the band.
+    if (!b.framed && band_ && director_ && b.simMs >= 500) {  // the band posed half a second first
+        std::vector<scene::Xfm> heads;
+        for (const auto& m : band_->members()) {
+            scene::Xfm h;
+            if (band_->objectXfm(m->slot, "bone_head.mesh", h) || band_->objectXfm(m->slot, "", h)) heads.push_back(h);
+            if (SDL_getenv("GD05_UILOG")) SDL_Log("enhanced options: member %s at %.0f %.0f %.0f", m->slot.c_str(), h.pos[0], h.pos[1], h.pos[2]);
+        }
+        const scene::CamShot* best = nullptr;
+        int bestScore = -1;
+        for (const char* cat : {"NORMAL1111", "directed_all"}) {
+            auto it = rbShots_.find(cat);
+            if (it == rbShots_.end()) continue;
+            for (const scene::CamShot* c : it->second) {
+                const gfx::Camera cam = CameraDirector::evaluate(*world_, *c, 0);
+                const gfx::Mat4 vp = cam.viewProj(false);
+                int score = 0;
+                for (const scene::Xfm& head : heads) {
+                    float q[4];
+                    for (int r = 0; r < 4; ++r) q[r] = vp.at(r, 0) * head.pos[0] + vp.at(r, 1) * head.pos[1] + vp.at(r, 2) * head.pos[2] + vp.at(r, 3);
+                    if (q[3] <= 0) continue;
+                    const float x = q[0] / q[3], y = q[1] / q[3];
+                    if (x > -1 && x < 1 && y > -1 && y < 1) score += 1;          // in the picture
+                    if (x > -0.05f && x < 0.95f && y > -0.2f && y < 0.9f) score += 2;  // beside the options' boxes
                 }
-            b.spread = spread;
-            // Close on the singer, with the band behind: about two of the
-            // band's half widths away [I: the port's framing].
-            b.dist = std::clamp(spread * 2.6f, 140.0f, 220.0f);
-            const gfx::Vec3 shot = venueView_->camera().position() - b.target;
-            // No farther than the venue's shot of the moment (the audience's
-            // fences and rigging stand behind it), but never into the band:
-            // a close shot at that moment put the camera inside the singer
-            // and the backdrop showed no one.
-            b.dist = std::max(110.0f, std::min(b.dist, 0.8f * std::sqrt(shot.x * shot.x + shot.y * shot.y)));
-            SDL_Log("enhanced options: backdrop on %s, spread %.0f, distance %.0f", b.info->id.c_str(), spread, b.dist);
+                if (score > bestScore) best = c, bestScore = score;
+            }
+            if (bestScore >= int(heads.size()) * 3) break;
+        }
+        if (best) {
+            if (const auto* bs = dynamic_cast<const scene::BandCamShot*>(best)) {
+                std::vector<std::pair<std::string, std::string>> groups;
+                std::vector<std::pair<std::string, scene::Xfm>> moves;
+                for (const auto& tg : bs->bandTargets) {
+                    if (!tg.anim.empty()) groups.emplace_back(tg.target, tg.anim);
+                    if (tg.teleport) moves.emplace_back(tg.target, tg.to);
+                }
+                band_->rbShotTargets(groups, moves);
+            }
+            director_->forceShot(best);
+            SDL_Log("enhanced options: backdrop on %s, shot %s (%s), score %d", b.info->id.c_str(), best->name.c_str(), best->category.c_str(), bestScore);
             b.framed = true;
         }
     }
-    if (b.framed) {
-        // Following the singer while the band poses (then frozen).
-        if (scene::Xfm singer; band_ && band_->objectXfm("singer", "bone_head.mesh", singer))
-            b.target = b.target + (gfx::Vec3{singer.pos[0], singer.pos[1], singer.pos[2] - 4} - b.target) * (1 - std::exp(-0.033f / 0.3f));
-        constexpr float kYaw = -0.3f;                 // the camera this far round to the singer's side (radians)
-        constexpr float kFocusX = 0.3f, kFocusY = 0.25f;  // where the singer's face lands, in NDC (right, up)
-        constexpr float kFov = 0.6f;
-        const gfx::Vec3 d{b.dir.x * std::cos(kYaw) - b.dir.y * std::sin(kYaw), b.dir.x * std::sin(kYaw) + b.dir.y * std::cos(kYaw), 0};
-        gfx::Vec3 eye = b.target + d * b.dist;
-        eye.z = b.target.z + b.dist * 0.06f;
-        // Look to the left of and below the singer so the face sits at the focus.
-        const float t = std::tan(kFov * 0.5f), aspect = 16.0f / 9.0f;
-        const gfx::Vec3 fwd = gfx::normalize(b.target - eye);
-        const gfx::Vec3 right = gfx::normalize(gfx::cross(fwd, gfx::Vec3{0, 0, 1}));
-        const gfx::Vec3 up = gfx::cross(right, fwd);
-        const float range = std::sqrt(gfx::dot(b.target - eye, b.target - eye));
-        gfx::Camera cam = gfx::Camera::lookAt(eye, b.target - right * (kFocusX * range * t * aspect) - up * (kFocusY * range * t));
-        cam.yFov = kFov;
-        venueView_->setCamera(cam);
+    if (b.framed && director_) {
+        director_->update();
+        if (director_->hasCamera()) venueView_->setCamera(director_->camera());
     }
     venueView_->update();
 }
