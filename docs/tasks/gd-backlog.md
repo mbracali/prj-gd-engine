@@ -942,6 +942,22 @@ universal launcher, not released on its own.
 | GD05-027 | Original | 🟡 | Owner (wave 04): menu feel. Done: UITrigger anims as RndAnimatable::Animate (0x8221BE38: range, fps x scale, period, delay, loop, dest), script animate (loop) (delay) (0x8221C040), BandButton selecting_anim over select_frames (0x822D4848), transitions wait only on block_transition triggers (D21). Open: the help bar's ornate leader anims, list scroll / highlight anim_duration, fx panel fades checked by eye only | `gd-game-05/docs/frontend.md` | Owner 11-10 |
 | GD05-028 | Original | 🟡 | Owner (wave 04): strange behaviour in the menus. Found and fixed: GH2's fixed 1 s transitions (input dropped, nothing moving) replaced by RB's blocking-trigger waits (D21); the walks' boot presses meant for the skipped intro; new walk `rb_pause_quit` (pause QUIT -> confirm -> main menu); `--uitest` resolves a panel's names through its screens' panels. Open: the results' stars label (RB's star_rating string not read), the audio sliders' pods, the tours' screens' framing | `gd-game-05/docs/frontend.md` | Owner 11-10 |
 | GD05-029 | Original | 🟡 | Owner (wave 04): the fret board. Done (docs/highway.md, D23): smashers drawn (inline RndDirs) in their slot colours (PropAnim particle_slot_colors / smasher_glow); gems without the slot material swap; RB's tails (0x8281A8C8 / 0x8281C928 / 0x8281C4A0 / 0x8281BC48: segments, whammy wobble, alpha, end fade, uv); drum pads at the drum smashers (-7.5 .. 7.5). Open: the tails' glow line, hit flames / sparks / smasher press, Overdrive / solo / fill / BRE highway visuals | `render/rb_track_view.cpp`, `gd-game-05/docs/highway.md` | Owner 11-10 |
+| GD05-030 | Bugfix | 🟡 in progress (wave 05) | Owner (wave 05) 2.1: colour grading: white menu labels grey, the main menu's orange weak (also Create a Band) | wave 05 started | Owner 11-10 |
+| GD05-031 | Bugfix | 🟡 in progress (wave 05) | Owner (wave 05) 2.2: Create a Band: the background while naming the band is strange | wave 05 started | Owner 11-10 |
+| GD05-032 | Bugfix | 🟡 in progress (wave 05) | Owner (wave 05) 2.3: menus disappearing when going back and forth | wave 05 started | Owner 11-10 |
+| GD05-033 | Bugfix | 🟡 in progress (wave 05) | Owner (wave 05) 2.4: Esc three times on the main menu must quit (universal-behaviors.md) | wave 05 started | Owner 11-10 |
+| GD05-034 | Bugfix | 🟡 in progress (wave 05) | Owner (wave 05) 2.5: micro stutter when loading a song, a character, a venue | wave 05 started | Owner 11-10 |
+| GD05-035 | Enhancement | 🟡 in progress (wave 05) | Owner (wave 05) 3.1: Enhanced menu with the other games' look and feel (keep its extra space) | wave 05 started | Owner 11-10 |
+| GD05-036 | Enhancement | 🟡 in progress (wave 05) | Owner (wave 05) 3.2: GAMEPADS button bottom-left, the options menu buttons' look | wave 05 started | Owner 11-10 |
+| GD05-037 | Bugfix | 🟡 in progress (wave 05) | Owner (wave 05) 3.3: mouse: a click on a main menu button hid GAMEPADS and made the others unclickable | wave 05 started | Owner 11-10 |
+| GD05-038 | Bugfix | 🟡 in progress (wave 05) | Owner (wave 05) 3.4: instrument / difficulty selection: colours; the paper's texture and wave, options selectable on it | wave 05 started | Owner 11-10 |
+| GD05-039 | Bugfix | 🟡 in progress (wave 05) | Owner (wave 05) 3.5: loading screen band icons washed out | wave 05 started | Owner 11-10 |
+| GD05-040 | Bugfix | 🟡 in progress (wave 05) | Owner (wave 05) 3.6: fail screen colour grading | wave 05 started | Owner 11-10 |
+| GD05-041 | Bugfix | 🟡 in progress (wave 05) | Owner (wave 05) 4: the drummer is not visible | wave 05 started | Owner 11-10 |
+| GD05-042 | Bugfix | 🟡 in progress (wave 05) | Owner (wave 05) 4: venue lighting overbright | wave 05 started | Owner 11-10 |
+| GD05-043 | Original | 🟡 in progress (wave 05) | Owner (wave 05) 4: the venue's post-process filters on the band (world) only, not the fret board | wave 05 started | Owner 11-10 |
+| GD05-044 | Original | 🟡 in progress (wave 05) | Owner (wave 05) 4: the band members' hands (fret hand, strum, drum sticks) | wave 05 started | Owner 11-10 |
+| GD05-045 | Original | 🟡 in progress (wave 05) | Owner (wave 05) 4: a functional fret board (hit flames, smasher press, Overdrive, solo, fill, BRE visuals) | wave 05 started | Owner 11-10 |
 
 
 ## gd-game-06: Guitar Hero: Aerosmith (Xbox 360)
