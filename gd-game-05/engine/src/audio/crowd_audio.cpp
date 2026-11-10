@@ -181,6 +181,9 @@ void CrowdAudio::play(Stream s, bool loop) {
     voice_ = Voice();
     playing_.store(kStreams);
     if (e.file.empty()) return;
+    // Development aid: GD05_SFXLOG=1 also logs the crowd's streams.
+    static const bool log = [] { const char* l = SDL_getenv("GD05_SFXLOG"); return l && *l && *l != '0'; }();
+    if (log) SDL_Log("crowd audio: %s plays %s%s", venue_.c_str(), e.file.c_str(), loop ? " (loop)" : "");
     voice_.stream = int(s);
     voice_.loop = loop;
     voice_.gain = gainOf(s);

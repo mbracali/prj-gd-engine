@@ -922,14 +922,25 @@ bool ScreenObj::inBackChain(const ScreenObj* s) const {
     return false;
 }
 
+ScreenObj* ScreenObj::backTarget() {
+    if (handler("back")) {
+        const Value b = ui.interp().evalValue(getProp(ui.interp(), "back"));  // ($lose_confirm_screen_return_to)
+        if (b.isText() || b.type == Value::Type::Object) return ui.screen(nameOf(b));
+        return nullptr;
+    }
+    return back;
+}
+
 bool ScreenObj::nativeButtonDown(int button, int player) {
-    // GHScreen button_down (0x8229EED0) [C]: kPad_Tri with allow_back and a
-    // back screen: the focus panel may answer first, else back to it, and
-    // screen_back to the UI.
-    ScreenObj* target = back;
-    if (Value b = const_cast<ScreenObj*>(this)->getProp(ui.interp(), "back_screen"); b.isText() || b.type == Value::Type::Object)
-        if (ScreenObj* s = ui.screen(nameOf(b))) target = s;
-    if (button != kPad_Tri || !flag("allow_back", true) || !target) return false;
+    // RB's UIScreen button_down (0x8225AEE8) [C]: when the screen allows the
+    // player (allow_player), kPad_Tri with a (back <screen>) runs {ui
+    // goto_screen <back> ... TRUE}. There is no history: a screen without
+    // (back ...) does nothing on kPad_Tri (game_screen, the loading screens;
+    // GH2's GHScreen went back to the screen it came from, which made the red
+    // fret before a song's first note reload the song: GD05-024).
+    if (button != kPad_Tri) return false;
+    ScreenObj* target = backTarget();
+    if (!target) return false;
     if (PanelObj* fp = focusPanel(); fp && fp->claimsBack()) return false;  // the port's pop-up: back closes it
     if (PanelObj* fp = focusPanel()) {
         Value r = ui.callScript(fp, "button_down", {Value::integer(button), Value::integer(player)});

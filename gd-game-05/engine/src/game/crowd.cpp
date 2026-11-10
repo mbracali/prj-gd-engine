@@ -578,6 +578,7 @@ void Crowd::listen(Interp& in, const std::string& msg, const std::vector<Value>&
     auto arg = [&](size_t k) { return k < args.size() ? in.evalValue(args[k]) : Value::integer(0); };
     const double now = world_.seconds();
     syncAudio(in);
+    if (world_.silent) audio_->setEnabled(false, now);  // the backdrop: no crowd stream either
     if (msg == "intro_start_msg") {
         // 0x822DFCA8 [C]: crowd_begin (+0x64) whatever $encore, then the stream.
         const bool fast = arg(0).truthy(), encore = arg(1).truthy();

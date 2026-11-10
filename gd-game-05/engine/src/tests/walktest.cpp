@@ -134,7 +134,21 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         press(kX);  // the focused difficulty: ready
         at("game_screen", 60000);  // through loading_screen and the loading tips
     };
-    if (scenario == "rb_lose_quit") {
+    if (scenario == "rb_owner_bugs") {
+        // Wave 03's owner bugs. GD05-023: nothing of a venue plays before a
+        // song (the Enhanced Options backdrop is silent). GD05-024: the red
+        // fret (keyboard 2) and Esc's back before and during the song do
+        // not leave game_screen nor load the song again (RB's UIScreen goes
+        // back only to its own (back ...), 0x8225AEE8).
+        endMs_ = 40000;
+        rbQuickplay();
+        for (int i = 0; i < 8; ++i) key(SDLK_2), wait(250);
+        check("counter_max:song_loads:1");
+        wait(2000);
+        check("counter_max:song_loads:1");
+        screen("game_screen");
+        check("counter_max:menu_venue_sounds:0");
+    } else if (scenario == "rb_lose_quit") {
         // RB's lose screen's QUIT (lose.dta: confirm_goto meta_loading_main_screen) back to the main menu.
         failMs_ = 8000;
         rbQuickplay();
@@ -2231,6 +2245,17 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         const int money = c.object ? ui.interp().send(c.object, "money", {}).integerValue() : -1;
         std::printf("  shop: %d outfit(s) worn, %d money left\n", n, money);
         if (n < 1) return fail("no outfit was chosen");
+        return pass();
+    }
+    // counter_max:<key>:<max>: the game's counter stays at or under max.
+    if (s.screen.rfind("counter_max:", 0) == 0) {
+        const std::string rest = s.screen.substr(12);
+        const size_t c = rest.rfind(':');
+        const std::string key = rest.substr(0, c);
+        const int most = std::atoi(rest.c_str() + c + 1);
+        const int got = ui.host().gameCounter(0, key);
+        std::printf("  counter %s: %d (want at most %d)\n", key.c_str(), got, most);
+        if (got > most) return fail(key + " is " + std::to_string(got));
         return pass();
     }
     if (s.screen.rfind("counter:", 0) == 0) {

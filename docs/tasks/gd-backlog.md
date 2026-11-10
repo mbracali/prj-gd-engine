@@ -935,6 +935,9 @@ universal launcher, not released on its own.
 | GD05-020 | Original | ✅ | PC wording: RB's strings that name the Xbox 360 / Xbox LIVE rewritten (scene/pc_strings.cpp); the Rock Central errors never show; `--selftest` counts it: 0 left | `scene/pc_strings.cpp` | M2, wave 02 |
 | GD05-021 | Original | ✅ | Guitar / bass judge: GH2's rules (gd02) with RB's points and streaks; re-read RB's watcher (HOPO rule, windows) | `game/player.cpp` | M2 |
 | GD05-022 | Original | ❌ | RenderDir / TexRenderer render-to-texture: RB draws some panels (the song list's cloth) into a texture; drawn flat for now [I] | `render/ui_view.cpp` | M3 |
+| GD05-023 | Original | 🟡 | Owner bug (wave 03): crowd screaming at the start of the game. Cause: the port's Enhanced Options backdrop (a venue posed at boot) sent its crowd an excitement change, which played the venue's crowd_upto_good cheer under the intro movie | `app.cpp` loadBackdrop, `game/world.h` silent | Owner 11-10 |
+| GD05-024 | Original | 🟡 | Owner bug (wave 03): key 2 (red fret) in Quickplay makes another song load. Cause: GH2's "back to the screen you came from" (GHScreen) kept for RB; RB's UIScreen (0x8225AEE8) goes back only to a screen's own (back ...), so the red fret before the first note sent game_screen back to the loading screens | `ui/script_classes.cpp` nativeButtonDown | Owner 11-10 |
+| GD05-025 | Original | 🟡 | Wave 03: the front end screen by screen against the disc (boot, menus, the flow into and out of a song): colours, sounds, order, transitions, keys | `gd-game-05/docs/frontend.md` | Owner 11-10 |
 
 
 ## gd-game-06: Guitar Hero: Aerosmith (Xbox 360)

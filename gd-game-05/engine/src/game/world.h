@@ -136,6 +136,10 @@ public:
     void stopSound(const std::string& name);
     // Told each sound playSound plays (the walk tests' record).
     std::function<void(const std::string&)> onSound;
+    // A silent world (the port's Enhanced Options backdrop, posed behind the
+    // menus): its sounds are counted but not played (GD05-023: its crowd's
+    // cheer played at boot, under the intro movie).
+    bool silent = false;
     // The script object of a venue object (created on first use).
     ScriptObject* scriptFor(scene::Object* o) { return objectFor(o); }
     // The world panel entered (WORLD_OBJECT_BASE enter + `start`): call

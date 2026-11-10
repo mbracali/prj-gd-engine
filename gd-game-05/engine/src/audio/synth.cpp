@@ -268,6 +268,14 @@ bool Synth::play(const std::string& name, float volumeDb, float pan, float trans
 
 bool Synth::play(const scene::Object& o, float volumeDb, float pan, float transpose) {
     if (!o.as<scene::Sfx>() && !o.as<scene::SequenceObj>()) return false;
+    // Development aid: GD05_SFXLOG=1 logs every sound object started (the
+    // banks', the venues' and the scripts' alike) and how many of it play.
+    static const bool log = [] { const char* l = SDL_getenv("GD05_SFXLOG"); return l && *l && *l != '0'; }();
+    if (log) {
+        int same = 0;
+        for (const auto& p : playing_) same += p->obj == &o ? 1 : 0;
+        SDL_Log("synth: %s (%.1f dB)%s", o.name.c_str(), double(volumeDb), same ? (" over " + std::to_string(same) + " playing").c_str() : "");
+    }
     auto in = std::make_unique<Inst>();
     in->obj = &o;
     in->volume = volumeDb, in->pan = pan, in->transpose = transpose;

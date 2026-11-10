@@ -62,7 +62,9 @@ public:
     bool handleNative(Interp&, const std::string& msg, std::vector<Value>& args, Value& r) override {
         const auto argStr = [&](size_t i) { return i < args.size() ? args[i].str() : std::string(); };
         r = Value::integer(0);
-        if (msg == "goto_screen" || msg == "reset_screen") return ui_.gotoScreen(argStr(0)), true;
+        // {ui goto_screen <screen> <force> <back>}: the third argument plays
+        // the backward transition (RB's scripts: {ui goto_screen x FALSE TRUE}).
+        if (msg == "goto_screen" || msg == "reset_screen") return ui_.gotoScreen(argStr(0), args.size() > 2 && args[2].truthy()), true;
         // RB: {ui sync_screen <screen> <depth>}: the band's screen change, local here [I: the network sync].
         if (msg == "sync_screen") return ui_.gotoScreen(argStr(0)), true;
         if (msg == "push_screen") return ui_.pushScreen(argStr(0)), true;
@@ -674,9 +676,8 @@ void UiManager::switchScreens() {
         phase_ = Phase::Complete;
         return;
     }
-    // GHScreen Enter (0x822A0408): the back screen is the one we came from,
-    // when that one allows going back (and we are not going back).
-    if (!back_ && from && from != to && from->flag("allow_back", true)) to->back = from;
+    // RB's screens have no back history (UIScreen 0x8225AEE8 reads only the
+    // screen's own (back ...)): GH2's "back to where we came from" is gone.
     const bool animIn = to->flag("animate_transition", true) && !headless_;
     to->focusOverride = nullptr;
     for (PanelObj* p : to->panels()) loadPanel(p);

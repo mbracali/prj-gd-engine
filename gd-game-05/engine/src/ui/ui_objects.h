@@ -157,8 +157,11 @@ class ScreenObj : public ScriptObject {
 public:
     ScreenObj(UiManager& ui, const std::string& name, const std::string& cls);
     UiManager& ui;
-    ScreenObj* back = nullptr;
+    ScreenObj* back = nullptr;  // the port's screens only (GAMEPADS): RB's come from (back ...)
     bool backSet = false;
+    // RB's back screen: the screen's (back <screen>) evaluated (UIScreen
+    // SetTypeDef 0x8225B470 keeps it at +0x34) [C], else the port's `back`.
+    ScreenObj* backTarget();
     PanelObj* focusOverride = nullptr;  // set_focus_panel (cleared as the screen enters)
     std::vector<PanelObj*> panels() const;
     PanelObj* focusPanel() const;
@@ -166,7 +169,7 @@ public:
     bool hasPanel(const PanelObj* p) const;
     bool inBackChain(const ScreenObj* s) const;  // 0x8229E8E0
     bool handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) override;
-    // GHScreen's button_down (0x8229EED0): the auto back on kPad_Tri.
+    // RB's UIScreen button_down (0x8225AEE8): kPad_Tri goes to (back ...).
     virtual bool nativeButtonDown(int button, int player);
     // The screen class's own handling of a routed message (UIManager
     // Handle), before the screen's script as Milo's natives come first

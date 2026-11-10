@@ -174,7 +174,7 @@ private:
         const bool entry = focus && focus->isTextEntry();
         const bool navigable = fp && fp->navigable();
         if (!has("fret1") && fp && (focus || !fp->view) && fp->drawsSomething()) out.insert(out.begin(), {"fret1", "help_select"});
-        if (!has("fret2") && screen->flag("allow_back", true) && screen->back) {
+        if (!has("fret2") && screen->backTarget()) {
             auto at = std::find_if(out.begin(), out.end(), [](const auto& e) { return e.first != "fret1"; });
             out.insert(at, {"fret2", "help_back"});
         }

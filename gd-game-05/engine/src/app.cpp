@@ -547,6 +547,8 @@ private:
     void drawRbNotices(float t);
     void drawRbTrack0(float t, float speed);
     int rbTrackFrames_ = 0;  // frames RB's instrument track drew (the walks)
+    int songLoads_ = 0;         // songs loaded (the walks: a key must not reload the song, GD05-024)
+    int menuVenueSounds_ = 0;   // venue sounds played before the first song (the walks: none at boot, GD05-023)
     float overdriveDrainMs() const;
     int rbStars(const Player* p) const;
     std::unique_ptr<VorbisStream> pendingStream_;
@@ -1009,6 +1011,7 @@ void App::startUi() {
 }
 
 bool App::loadSong(const SongInfo& info, int difficulty, bool autoplay, float band, float guitar, bool fastIntro) {
+    ++songLoads_;
     endSong();
     stopMusic();
     mixer_.setVolumeDb(0);
@@ -2757,6 +2760,8 @@ int App::gameCounter(int player, const std::string& key) const {
     if (key == "score") return player_ ? player_->score() : 0;
     if (key == "part_vocals") return parts_[0] == "vocals" ? 1 : 0;
     if (key == "rb_track_frames") return rbTrackFrames_;
+    if (key == "song_loads") return songLoads_;
+    if (key == "menu_venue_sounds") return menuVenueSounds_;
     if (key == "ms_per_beat") return song_ && song_->beats.size() > 1 ? int((song_->beats.back().ms - song_->beats.front().ms) / float(song_->beats.size() - 1)) : 500;
     if (key == "band_players") return 1 + int(seats_.size());
     if (key == "unison_bonuses") return unisonBonuses_;
@@ -2860,7 +2865,10 @@ bool App::loadVenue(const std::string& venue, VenueVariant variant) {
         for (const auto& p : venue_->problems()) SDL_Log("venue: %s", p.c_str());
         const DataNode* objects = ui_ && ui_->bootTree() ? ui_->bootTree()->find("objects") : nullptr;
         world_ = std::make_unique<World>(*venue_, ui_ ? &ui_->interp() : nullptr, objects);
-        world_->onSound = [this](const std::string& name) { recordSfx(name); };
+        world_->onSound = [this](const std::string& name) {
+            if (songLoads_ == 0) ++menuVenueSounds_;  // before the first song: only the backdrop's world
+            recordSfx(name);
+        };
         if (synth_) {
             world_->setSynth(synth_.get());
             // The venue bank's samples decode now, not at their first cue.
@@ -4013,6 +4021,7 @@ void App::loadBackdrop() {
         }
     if (!b->info) b->info = &songs_.front();
     if (!loadVenue(venue, VenueVariant::Single)) return;
+    world_->silent = true;  // silent and still: no crowd cheer at boot (GD05-023)
     try {
         b->song = std::make_unique<Song>(loadChart(*data_, *b->info, rules_));
     } catch (const std::exception& e) {
