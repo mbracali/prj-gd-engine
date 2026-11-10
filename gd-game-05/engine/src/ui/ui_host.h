@@ -146,6 +146,7 @@ public:
     struct SongResult {
         bool valid = false, failed = false;
         int score = 0, notesHit = 0, gems = 0, longestStreak = 0, stars = 0;
+        int percentComplete = 0;  // how far the song got (the fail's time over its length)
     };
     virtual SongResult lastResult(int /*index*/) const { return {}; }
     // The co-op band (game/band_performer.h): its score, streak, stars and

@@ -1544,6 +1544,9 @@ void App::endSong() {
         if (!p) continue;
         res.valid = true, res.failed = p->failed(), res.score = p->score(), res.notesHit = p->notesHit();
         res.gems = int(p->chart().gems.size()), res.longestStreak = p->longestStreak(), res.stars = rbStars(p);
+        // lose.dta's "{percent_complete}% complete" asks after the song closed.
+        const float at = failMs_ > -1e8f ? failMs_ : lastT_;
+        res.percentComplete = song_ && song_->endMs > 0 ? std::clamp(int(at * 100.0f / song_->endMs), 0, 100) : 0;
     }
     if (player2_)
         SDL_Log("player 2: score %d, %d/%d notes, longest streak %d", player2_->score(), player2_->notesHit(),

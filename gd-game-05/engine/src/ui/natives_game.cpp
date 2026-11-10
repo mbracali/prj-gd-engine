@@ -849,6 +849,7 @@ private:
                 if (msg == "notes_hit_fraction") return r = Value::real(res.gems > 0 ? float(res.notesHit) / float(res.gems) : 0.0f), true;
                 if (msg == "failed") return r = Value::integer(res.failed ? 1 : 0), true;
                 if (msg == "win") return r = Value::integer(res.failed ? 0 : 1), true;
+                if (msg == "percent_complete") return r = Value::integer(res.percentComplete), true;
             }
         }
         // RB's player stats (endgame.dta send_player_stats) [I: counters not kept yet are 0].
