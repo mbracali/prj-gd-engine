@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include "ui/port_draw.h"
 #include <cstring>
 #include <ctime>
 #include <unordered_set>
@@ -858,16 +859,8 @@ void UiManager::updateHelpbar() {
         }
         if (pick) display = interp_.toValue(pick->children[1]);
     }
-    // The port's main menu also offers GAMEPADS on the yellow fret, before
-    // the strum bar, as gd01's does (not in GH2).
-    if (current_->name() == "main_screen" && display.type == Value::Type::Array && display.array) {
-        std::vector<Value> items = *display.array;
-        auto strum = std::find_if(items.begin(), items.end(), [](const Value& e) {
-            return e.type == Value::Type::Array && e.array && !e.array->empty() && (*e.array)[0].str() == "strum";
-        });
-        items.insert(strum, Value::list({Value::symbol("fret3"), Value::symbol("port_gamepads")}));
-        display = Value::list(std::move(items));
-    }
+    // The port's GAMEPADS is its own button on the main menu (drawGamepadsButton),
+    // not a help bar item (Owner wave 05).
     setHelpbarDisplay(*this, display);
 }
 
@@ -1191,6 +1184,47 @@ void UiManager::openGamepads() {
     gotoScreen("gamepads_screen");
 }
 
+// [I] Port (Owner wave 05, GD05-036): GAMEPADS as a button in the bottom-left
+// corner of the main menu, drawn like the options menu's buttons (a dark
+// pill with a light rim, white text, the focused one lit) and always there
+// while the main menu shows; a click (or the yellow fret) opens it.
+bool UiManager::gamepadsButton(float& x0, float& y0, float& x1, float& y1) const {
+    if (splash_ >= 0 || !current_ || current_->name() != "main_screen") return false;
+    x0 = 52, y0 = 650, x1 = 292, y1 = 692;
+    return true;
+}
+
+namespace {
+// A pill (half circles at both ends) as the RB menus' buttons.
+void pill(PortDraw& pd, float x0, float y0, float x1, float y1, const PortDraw::Color& c) {
+    const float r = (y1 - y0) * 0.5f, cy = (y0 + y1) * 0.5f;
+    pd.quad(x0 + r, y0, x1 - r, y1, c);
+    constexpr int kSeg = 12;
+    for (int i = 0; i < kSeg; ++i) {
+        const float a0 = float(M_PI) * (0.5f + float(i) / kSeg), a1 = float(M_PI) * (0.5f + float(i + 1) / kSeg);
+        pd.triangle(x0 + r, cy, x0 + r + r * std::cos(a0), cy - r * std::sin(a0), x0 + r + r * std::cos(a1), cy - r * std::sin(a1), c);
+        pd.triangle(x1 - r, cy, x1 - r - r * std::cos(a0), cy - r * std::sin(a0), x1 - r - r * std::cos(a1), cy - r * std::sin(a1), c);
+    }
+}
+}  // namespace
+
+void UiManager::drawGamepadsButton() {
+    float x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+    if (!gamepadsButton(x0, y0, x1, y1)) return;
+    const bool hover = mouseX_ >= x0 && mouseX_ <= x1 && mouseY_ >= y0 && mouseY_ <= y1;
+    PortDraw pd(*this);
+    pd.begin(0);
+    pill(pd, x0, y0, x1, y1, hover ? PortDraw::Color{0.95f, 0.62f, 0.2f, 1} : PortDraw::Color{0.78f, 0.78f, 0.78f, 0.9f});
+    pill(pd, x0 + 2.5f, y0 + 2.5f, x1 - 2.5f, y1 - 2.5f, hover ? PortDraw::Color{0.55f, 0.3f, 0.06f, 0.95f} : PortDraw::Color{0.04f, 0.04f, 0.04f, 0.9f});
+    // The yellow fret's mark (the yellow fret opens it too).
+    const float cy = (y0 + y1) * 0.5f;
+    pd.quad(x0 + 22, cy - 4, x0 + 46, cy + 4, PortDraw::Color{0.96f, 0.85f, 0.1f, 1});
+    canvas_.flush();
+    pd.begin(1);
+    pd.text("GAMEPADS", (x0 + 56 + x1 - 18) * 0.5f, cy, (y1 - y0) * 0.62f, PortDraw::Color{1, 1, 1, 1}, 0x22);
+    canvas_.flush();
+}
+
 bool UiManager::mouse(float x, float y, bool click) {
     if (splash_ >= 0) {
         if (click) skipSplashes();
@@ -1200,10 +1234,35 @@ bool UiManager::mouse(float x, float y, bool click) {
     mouseX_ = x, mouseY_ = y;
     if (wheelHold_ && !click && std::hypot(x - wheelX_, y - wheelY_) <= kWheelHoverSlack) return true;
     wheelHold_ = false;
+    if (float x0, y0, x1, y1; gamepadsButton(x0, y0, x1, y1) && x >= x0 && x <= x1 && y >= y0 && y <= y1) {
+        if (click) openGamepads();
+        return true;
+    }
     for (PanelObj* p : current_->panels())
         if (p->up && p->helpMouse(x, y, click)) return true;
     PanelObj* fp = current_->focusPanel();
-    return fp && fp->up && fp->mouse(x, y, click);
+    if (fp && fp->up && fp->mouse(x, y, click)) return true;
+    // [I] Port (Owner wave 05, GD05-037): a click on a button of another
+    // panel on the screen (RB's main menu buttons beside their sub-menus:
+    // main_panel on main_solomode_screen, options_screen...) gives that
+    // panel the focus, as the screen's set_focus_panel does, and selects it:
+    // main_panel's SELECT_START_MSG opens its menu from any of them.
+    if (!click) return false;
+    for (PanelObj* p : current_->panels()) {
+        if (p == fp || !p->up || !p->showing || !p->view) continue;
+        bool onButton = false;
+        for (const gfx::UiView::Hit& h : p->view->hits()) {
+            if (x < h.x0 || x > h.x1 || y < h.y0 || y > h.y1) continue;
+            const scene::Object* o = p->view->find(h.key.substr(0, h.key.find('#')));
+            if (o && (o->as<scene::BandButton>() || o->cls == "UIButton") && p->view->showing(o->name)) onButton = true;
+        }
+        if (!onButton) continue;
+        PanelObj* was = current_->focusOverride;
+        current_->focusOverride = p;
+        if (p->mouse(x, y, true)) return true;
+        current_->focusOverride = was;
+    }
+    return false;
 }
 
 void UiManager::wheel(int dir) {
@@ -1381,6 +1440,7 @@ void UiManager::draw() {
         drawSplash();
     } else {
         drawPanels(current_, phase_ == Phase::Out);
+        drawGamepadsButton();
     }
     canvas_.flush();
     if (text_) text_->collect();

@@ -169,6 +169,46 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         for (int i = 0; i < 3; ++i) key(SDLK_ESCAPE), wait(250);
         wait(3000);
         check("quit_missed");
+    } else if (scenario == "rb_mouse") {
+        // Wave 05 (GD05-036 / 037): the port's GAMEPADS button (bottom left)
+        // stays on the main menu and every main menu button opens its menu
+        // on a click, also after coming back.
+        at("splash_screen", 30000);
+        wait(1500);
+        press(kX);
+        at("main_screen");
+        wait(1500);
+        check("gamepads_button");
+        mouseOn("solo.btn", 0), wait(200);
+        mouseOn("solo.btn", 1);
+        at("main_solomode_screen");
+        wait(800);
+        press(kTri);
+        at("main_screen");
+        wait(1500);
+        check("gamepads_button");
+        mouseOn("multi.btn", 0), wait(200);
+        mouseOn("multi.btn", 1);
+        at("main_multimode_screen");
+        wait(1500);
+        // From the sub-menu, a click on another main menu button opens its menu.
+        mouseOn("tutorial.btn", 1);
+        at("training_menu_screen");
+        wait(800);
+        press(kTri);
+        at("main_screen");
+        wait(1500);
+        mouseOn("options.btn", 0), wait(200);
+        mouseOn("options.btn", 1);
+        at("options_screen");
+        wait(800);
+        press(kTri);
+        at("main_screen");
+        wait(1500);
+        check("gamepads_button");
+        check("click_gamepads_button");
+        at("gamepads_screen", 3000);
+        expect_ = {"main_screen", "main_solomode_screen", "main_screen", "main_multimode_screen", "training_menu_screen", "main_screen", "options_screen", "main_screen", "gamepads_screen"};
     } else if (scenario == "rb_owner_bugs") {
         // Wave 03's owner bugs. GD05-023: nothing of a venue plays before a
         // song (the Enhanced Options backdrop is silent). GD05-024: the red
@@ -2137,6 +2177,12 @@ void WalkDriver::poll(ui::UiManager& ui, double nowMs) {
             if (fp && fp->view)
                 for (const gfx::UiView::Hit& h : fp->view->hits())
                     if (h.key == s.screen) x = (h.x0 + h.x1) * 0.5f, y = (h.y0 + h.y1) * 0.5f, found = true;
+            // Another panel's on the screen (RB's main menu beside its sub-menus).
+            if (!found && ui.current())
+                for (ui::PanelObj* p : ui.current()->panels())
+                    if (p != fp && p->up && p->showing && p->view)
+                        for (const gfx::UiView::Hit& h : p->view->hits())
+                            if (!found && h.key == s.screen) x = (h.x0 + h.x1) * 0.5f, y = (h.y0 + h.y1) * 0.5f, found = true;
             if (!found) {
                 error_ = "the mouse: " + s.screen + " was not drawn (on " + ui.currentScreen() + ")";
                 failed_ = done_ = true;
@@ -2324,6 +2370,17 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
     }
     if (s.screen == "expect_quit") {  // the game may quit from here on (finish counts it done)
         expectQuit_ = true;
+        return pass();
+    }
+    if (s.screen == "gamepads_button" || s.screen == "click_gamepads_button") {
+        // The port's GAMEPADS button (bottom left of the main menu).
+        float x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+        if (!ui.gamepadsButton(x0, y0, x1, y1)) return fail("no GAMEPADS button on " + ui.currentScreen());
+        std::printf("  GAMEPADS button: %.0f %.0f .. %.0f %.0f\n", double(x0), double(y0), double(x1), double(y1));
+        if (s.screen == "click_gamepads_button") {
+            ui.mouse((x0 + x1) * 0.5f, (y0 + y1) * 0.5f, false);
+            ui.mouse((x0 + x1) * 0.5f, (y0 + y1) * 0.5f, true);
+        }
         return pass();
     }
     if (s.screen == "quit_missed") return fail("the game did not quit (Esc three times on " + ui.currentScreen() + ")");
