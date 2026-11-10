@@ -493,7 +493,8 @@ public:
         }
         if (msg == "get_venue") return r = Value::symbol(s.venue), true;
         if (msg == "set_venue") return s.venue = argStr(0), true;
-        if (msg == "get_player_config") return r = Value::obj(configs_[size_t(std::clamp(intArg(args, 0), 0, 3))].get()), true;
+        if (msg == "get_player_config" || msg == "get_participant_config") return r = Value::obj(configs_[size_t(std::clamp(intArg(args, 0), 0, 3))].get()), true;
+        if (msg == "set_player_slot_num") return true;  // RB's tutorials: the player's slot is the first [I]
         // RB: one local player participates (the band modes: M7) [I].
         if (msg == "get_num_participants") return r = in.send("session", "num_players", {}), true;
         if (msg == "has_participating_guitar_controller") {
@@ -714,6 +715,11 @@ public:
             else ui.host().hudCommand(msg, args);
             return true;
         }
+        // RB's track panel: its first track ({coop_track_panel get_first_track}, the tutorials) [I: the first player's].
+        if (track_ && msg == "get_first_track") {
+            ScriptObject* t = in.findObject("track_dir0");
+            return r = t ? Value::obj(t) : Value::integer(0), true;
+        }
         if (track_ ? kTrack.count(msg) : kHud.count(msg)) {
             if (msg == "set_paused") paused = !args.empty() && args[0].truthy();
             if (track_ && msg == "animate") {
@@ -848,6 +854,7 @@ private:
         if (msg == "can_deploy") return r = Value::integer(p && p->starPowerReady() ? 1 : 0), true;
         if (msg == "is_deploying") return r = Value::integer(p && p->starPowerActive() ? 1 : 0), true;
         if (msg == "popup_help" || msg == "enable_drum_solos") return true;  // [I] RB's help popups are not drawn
+        if (msg == "enable_phrase_bonus" || msg == "set_auto_play" || msg == "set_tutorial_arrow") return true;  // RB's tutorials [I: not done]
         if (msg == "get_times_failed") return r = Value::integer(0), true;  // [I] the band's fail-outs are not counted per player yet
         if (msg == "notes_per_streak") return r = Value::integer(0), true;
         if (msg == "instrument") {
@@ -1098,7 +1105,7 @@ public:
             return true;
         }
         if (msg == "get_controller_type_from_pad") return r = Value::integer(ui_.host().controllerType(intArg(args, 0))), true;
-        if (msg == "auto_assign_missing_slots" || msg == "debug_get_force_controller" || msg == "foreach_player_config") return true;
+        if (msg == "auto_assign_missing_slots" || msg == "reset_config" || msg == "debug_get_force_controller" || msg == "foreach_player_config") return true;
         // A handler of the mode's table (practice's full_speed_block,
         // pre_processed_audio: GameConfig evaluates the mode's entry) [C data: modes.dta].
         if (const DataNode* modes = ui_.modes())
@@ -1115,7 +1122,8 @@ private:
 class BeatmatchObj : public ScriptObject {
 public:
     explicit BeatmatchObj(UiManager& ui) : ScriptObject("beatmatch", "Beatmatch"), ui_(ui) {}
-    bool handleNative(Interp&, const std::string& msg, std::vector<Value>& args, Value& r) override {
+    bool timePaused_ = false;
+    bool handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) override {
         r = Value::integer(0);
         if (msg == "set_paused") return ui_.host().setMusicPaused(!args.empty() && args[0].truthy()), true;
         if (msg == "paused") return r = Value::integer(ui_.host().musicPaused() ? 1 : 0), true;
@@ -1132,7 +1140,9 @@ public:
         if (msg == "never_allow_input") return true;
         // RB practice.dta: the song's beat length and the start of play [I].
         if (msg == "ms_per_beat") return r = Value::real(float(std::max(1, ui_.host().gameCounter(0, "ms_per_beat")))), true;
-        if (msg == "start" || msg == "set_time_paused") return true;
+        if (msg == "start") return true;
+        if (msg == "set_time_paused") return timePaused_ = !args.empty() && in.evalValue(args[0]).truthy(), true;
+        if (msg == "time_paused") return r = Value::integer(timePaused_ ? 1 : 0), true;
         // {beatmatch player n}: the player object while a song is loaded (ui/game.dta on_pause).
         if (msg == "player") {
             const int p = intArg(args, 0);

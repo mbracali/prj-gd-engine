@@ -99,6 +99,9 @@ public:
     // `volumeDb`; whether it still plays (held by synth pause_all_sfx);
     // stopped (reset_vo).
     virtual bool playVoice(const std::string& /*path*/, float /*volumeDb*/) { return false; }
+    // RB: a microphone is there (opened in a song, else probed) and hears someone.
+    virtual bool micConnected() { return false; }
+    virtual bool micTalking() { return false; }
     virtual bool voicePlaying() { return false; }
     virtual void stopVoice() {}
     // The voice-over held (tut_pause_screen's {tutorial set_paused TRUE}) or let go on.

@@ -110,6 +110,19 @@ std::vector<std::string> Synth::loadBanks(const GameData& data) {
     } catch (const std::exception& e) {
         problems.push_back(std::string("sfx/ingame_bank: ") + e.what());
     }
+    // RB's tutorials' cues (music_intro.cue ...): tutorial/<part>_tutorial_audio.milo
+    // [C data; I: loaded here with the others, not with the lesson].
+    for (const char* bank : {"guitar", "drum", "vocals"}) {
+        const std::string path = scene::miloArkPath(std::string("tutorial/") + bank + "_tutorial_audio.milo");
+        if (!data.exists(path)) continue;
+        try {
+            milos_.push_back(scene::loadMilo(data, path));
+            preload(milos_.back()->root());
+            addBank(std::string("tutorial_") + bank, &milos_.back()->root());
+        } catch (const std::exception& e) {
+            problems.push_back(path + ": " + e.what());
+        }
+    }
     if (data.exists(scene::miloArkPath("sfx/practice_bank.milo"))) try {  // GH2's; RB has none [C data]
         milos_.push_back(scene::loadMilo(data, scene::miloArkPath("sfx/practice_bank.milo")));
         preload(milos_.back()->root());

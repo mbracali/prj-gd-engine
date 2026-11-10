@@ -134,7 +134,23 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         press(kX);  // the focused difficulty: ready
         at("game_screen", 60000);  // through loading_screen and the loading tips
     };
-    if (scenario == "rb_lose" || scenario == "credits") {
+    if (scenario == "rb_lose_quit") {
+        // RB's lose screen's QUIT (lose.dta: confirm_goto meta_loading_main_screen) back to the main menu.
+        failMs_ = 8000;
+        rbQuickplay();
+        at("lose_screen", 40000);
+        wait(1500);
+        for (int i = 0; i < 4; ++i) press(kDown), wait(250);  // restart, difficulty, new song, practice, QUIT
+        check("print_focus");
+        press(kX);  // QUIT
+        wait(2000);
+        press(kUp), wait(300);  // no.btn (the focus) -> yes.btn
+        check("print_focus");
+        press(kX);  // yes
+        wait(2000);
+        check("print_focus");
+        at("main_screen", 40000);
+    } else if (scenario == "rb_lose" || scenario == "credits") {
         // RB's lose screen (ui/lose.dta: retry / new song / quit) after a
         // failed Quickplay song; the credits from the options.
         if (scenario == "rb_lose") {
@@ -373,6 +389,46 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
             press(kX);
         }
         wait(8000);
+        check("print_focus");
+    } else if (scenario == "rb_practice") {
+        // RB's Practice (ui/practice.dta): a song, a difficulty, the third
+        // section of the list, the second speed; the practice clock starts
+        // a measure before that section ("practice:" log line).
+        endMs_ = 60000;
+        wait(300);
+        press(kX);
+        at("splash_screen", 30000);
+        press(kX);
+        at("main_screen");
+        press(kDown), wait(200), press(kDown), wait(200);
+        press(kX);  // TRAINING
+        at("training_menu_screen", 20000);
+        wait(800);
+        press(kDown), wait(200);
+        press(kX);  // PRACTICE
+        at("practice_selsong_screen", 20000);
+        wait(1500);
+        press(kX);
+        at("qp_seldiff_solo_screen", 20000);
+        wait(2500);
+        press(kX);
+        wait(2500);
+        press(kX);  // the difficulty, then ready
+        at("practice_sel_section_screen", 30000);
+        wait(1500);
+        press(kDown), wait(300), press(kDown), wait(300);
+        check("print_focus");
+        press(kX);  // the start section
+        wait(1500);
+        press(kDown), wait(300);
+        press(kX);  // the end section, one further
+        at("practice_sel_speed_screen", 20000);
+        wait(1000);
+        press(kDown), wait(300);
+        check("print_focus");
+        press(kX);
+        at("practice_game_screen", 40000);
+        wait(12000);
         check("print_focus");
     } else if (scenario == "score_duel" || scenario == "tug_of_war") {
         // RB's head to head (ui/main.dta): Multiplayer > Head to Head >

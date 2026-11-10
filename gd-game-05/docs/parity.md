@@ -38,7 +38,7 @@ code is there but nothing ran it, and it scores as missing.
 | 6 | Front end | Pause, restart, quit, controller-lost pause | 1 | approximate | 0.5 | pause / resume (`keys`); restart from the lose screen (`rb_lose`); quit unchecked | GD05-005 |
 | 7 | Front end | Loading screens and tips | 1 | works | 1 | `--walktest quickplay` |  |
 | 8 | Front end | Credits (main menu and tour end) | 1 | approximate | 0.5 | credits_screen scrolls RB's config/credits.dtb rows (heading, title_name ...) in list_credits.milo's labels; the labels' placement is off [I] | GD05-009 |
-| 9 | Front end | Lose screen, retry, quit | 1 | approximate | 0.5 | `rb_lose`: a failed song, RB's lose screen, retry | GD05-009 |
+| 9 | Front end | Lose screen, retry, quit | 1 | works | 1 | `rb_lose`: a failed song, RB's lose screen, retry; `rb_lose_quit`: QUIT, the confirm's yes, back to the main menu (and its practice choice reaches practice) | GD05-009 |
 | 10 | Port | Help bar, Enhanced Options, GAMEPADS, cheats, The Glitches | 2 | approximate | 1 | Enhanced reachable; GAMEPADS: four players, Drums / Vocals instruments (built only); help bar not placed | GD05-010 |
 | 11 | Gameplay | Guitar: hit windows, HOPOs, sustains, whammy, streak multiplier | 5 | works | 5 | RB's guitar watcher read in the XEX (FINDINGS: window, HOPO chain, sustains, multipliers) [C]; `--selftest` all charts; unsettled: which notes become HOPOs, the 50 ms overstrum gap | GD05-021 |
 | 12 | Gameplay | Bass (6x multiplier) | 2 | works | 2 | as guitar, the 6x cap for bass [C RB 0x8245BDF0] | GD05-021 |
@@ -61,7 +61,7 @@ code is there but nothing ran it, and it scores as missing.
 | 29 | HUD | 2 to 4 players on screen | 2 | approximate | 1 | the instruments side by side, vocals on top (`band_quickplay`) | GD05-006 |
 | 30 | Stage | Venues with lighting and effects | 4 | approximate | 2 | lights read as RB stores them, WorldDir overrides applied; some venues still too bright [I] | GD05-007 |
 | 31 | Stage | Camera director (venue track) | 2 | approximate | 1 | RB's pick_new_shot [C data]: coop_ shots only, PS3 ones dropped, NORMAL re-keyed by focus flags, held focus notes 61..64 / 70..73, facing alternation, no far after far, the deck and selection_weight, directed cuts hold note-60 picks, LOSE at the fail, the shots' band targets; GD05_SHOTLOG shows the picks; no intro chains, no BFTB shots | GD05-007 |
-| 32 | Stage | Crowd | 1 | stand-in | 0.25 | the WorldCrowd archetypes load and draw (the `crowd_drawn` counter: 70 in small_club_09); not yet confirmed by eye | GD05-007 |
+| 32 | Stage | Crowd | 1 | approximate | 0.5 | the WorldCrowd archetypes load and draw (`crowd_drawn` counter); seen in arena_07's far shot; small_club_09's cards lie flat [I: their facing] | GD05-007 |
 | 33 | Stage | Band members: characters, outfits, instruments | 4 | approximate | 2 | the four slots filled with premade characters and their outfit pieces and instruments; skin colours flat; `band_members` counter | GD05-008 |
 | 34 | Stage | Band animation: song-driven clips, lip sync, IK | 3 | approximate | 1.5 | each camera shot's band targets (BandCamShot, RB 0x822D8108) [C data]: the members play the shot's clip group (stand, closeup, sit, extreme_closeup ...) and teleport to its marks; win / lose groups after the song; seen in small_club_09 screenshots; no IK, props, lip sync files (singer.fac not on disc) or drum-note anims | GD05-008 |
 | 35 | Modes | Solo Quickplay | 3 | approximate | 1.5 | `--walktest quickplay` | GD05-009 |
@@ -69,8 +69,8 @@ code is there but nothing ran it, and it scores as missing.
 | 37 | Modes | Head-to-head: Score Duel, Tug of War | 2 | approximate | 1 | `score_duel`, `tug_of_war` walks; Tug of War's split parts and meter not done | GD05-009 |
 | 38 | Modes | Solo Tour (per instrument) | 3 | approximate | 1.5 | `solo_tour` walk: creator, hub, gig guide, hints, event, song, results, gig complete | GD05-009 |
 | 39 | Modes | Band World Tour (cities, venues, gigs, fans, stars, unlocks, cash) | 4 | approximate | 2 | `band_tour` walk: band, name, hub, hints, gig set list, results | GD05-009 |
-| 40 | Modes | Practice (sections, speeds) | 1 | stand-in | 0.25 | practice reaches its game screen (sections, speed); not checked by ear | GD05-009 |
-| 41 | Modes | Tutorials (guitar, drums, vocals) and the Drum Trainer | 2 | missing | 0 | the lesson menu opens; no lesson runs | GD05-009 |
+| 40 | Modes | Practice (sections, speeds) | 1 | approximate | 0.5 | `rb_practice` walk: song, difficulty, start and end sections, 90% speed; the practice clock starts a measure before the section and practice_end comes at its end (logged) | GD05-009 |
+| 41 | Modes | Tutorials (guitar, drums, vocals) and the Drum Trainer | 2 | approximate | 1 | `tutorials` walk with guitar, drums and vocals: the lesson menu, the lesson's own scripts (thread tasks on the tutorial clock), voice-overs from tutorial/streams, the cues of the tutorial banks; guitar tuning by frets; finishing a lesson by playing unchecked; the Drum Trainer not reached | GD05-009 |
 | 42 | Custom | Character creator | 3 | approximate | 1.5 | `creator` walk: maker (name, hometown, attitude), appearance (hair / head lists), confirm, saved; the created look is the one on stage in its gigs; no 3D preview, no physique / colours | GD05-008 |
 | 43 | Custom | Rock Shop (clothes, hair, tattoos, make-up, instruments) | 2 | approximate | 1 | `rock_shop` walk: the punk store's torso list, an affordable shirt bought (money paid by the script) and worn; no 3D preview, no colours | GD05-009 |
 | 44 | Custom | Bands: create, name, logo, line-up | 1 | approximate | 0.5 | a band created and named in `band_tour`; no logo | GD05-009 |

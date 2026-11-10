@@ -195,3 +195,31 @@ Applied (game/rb_bonus.cpp, app.cpp updateSeats):
   weighted meter under multiplayer_lose_level (0x82466D28) [C]; the brink
   delay (time_to_return_from_brink) is not applied [I].
 - Unison: members out of play neither block nor receive it (0x82465950) [C].
+
+## The camera director (wave 02; mostly script: world/worldbase.dta, config/midi_parsers.dta, band_objects.dta)
+- VENUE note 60 asks for a new shot, 1/8 beat early [C]. Notes 61..64
+  (bass, drums, guitar, vocal focus) and 70..73 (no_behind, force_far,
+  force_closeup, no_closeup) are flags held from note-on to note-off [C].
+- At world enter, every NORMAL shot is renamed NORMAL<b><d><g><v> from its
+  focus flags; a far shot in coop becomes NORMAL1111. `special` shots are
+  never picked [C].
+- `change_proxies` keeps only the mode's shots (`coop_` in a band). PS3
+  shots are `platform_only` 4 [C].
+- A pick:
+  - with no focus flag, the category is drawn from 0001 0010 0100 1000
+    1111 1100 0110 0011;
+  - facing alternates left / right;
+  - no far shot after a far shot, none with a focus flag;
+  - no behind shot after a behind shot [C].
+- The picker (WorldDir 0x8229F0D0) draws from the unused shots that pass
+  the filter, and resets them when none is left; each draw is weighted by
+  `selection_weight` [C].
+- `[do_directed_cut <cat>]` forces a shot of that category and blocks
+  note-60 picks for (min_time + zero_time) / 30 s [C].
+- LOSE plays when the band fails; WIN after the song. In a band, WIN is a
+  chain: WIN_PRE, one shot per player, WIN_POST [C, not done].
+- BandCamShot start (0x822D8108): each band target's member plays the
+  target's clip group, and teleports to `to` when the target says so [C;
+  IK and props not done].
+- Scripts' tasks: Rock Band passes the units first and positionally
+  (`{thread_task kTaskTutorialSeconds (script ...)}`); GH2 used `(units ...)` [C data].

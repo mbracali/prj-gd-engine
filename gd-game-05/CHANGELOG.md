@@ -4,6 +4,38 @@ All notable changes for players. Versions follow SemVer; gd-game-05 ships
 inside the Guitar Dream Universal Launcher's release
 (`docs/platform/release-process.md`).
 
+## [0.0.2] - 2026-11-09
+
+### Added
+- The band on stage: Rock Band's characters in their outfits and
+  instruments, each camera shot posing and placing them; your own created
+  character plays in its gigs.
+- Vocals with a real microphone: Rock Band's pitch scoring, phrases,
+  talkies, the tambourine and Overdrive by singing; on Android the game
+  asks for the microphone at first start.
+- Drums judged as Rock Band does (pads, kick, fills that deploy Overdrive,
+  freestyle).
+- Overdrive (gain, deploy, its sounds), the band multiplier, Unison
+  bonuses, guitar solos with their percent bonus, Big Rock Endings,
+  failing out and saving a bandmate, stars.
+- Local multiplayer for 2 to 4 players: Band Quickplay, Score Duel and
+  Tug of War; Drums and Vocals as instruments in GAMEPADS.
+- Solo Tour and Band World Tour with saves, the Rock Shop, the character
+  creator (name, hometown, hair, head), bands.
+- Practice (sections and speeds), the tutorials for guitar, drums and
+  vocals with their voice-overs, the credits, the lose screen's retry and
+  quit.
+- The camera follows each song's venue track the way Rock Band picks its
+  shots; the crowd in the venues.
+
+### Known gaps
+- The HUD is a simple one, not Rock Band's; no help bar yet.
+- Some venues are too bright; small clubs' crowds lie flat.
+- The character creator has no 3D preview, physique or colours; the band
+  lobby is a simple stand-in.
+- Finishing a tutorial lesson by playing and the Drum Trainer are not
+  checked yet.
+
 ## [0.0.1] - 2026-11-09
 
 ### Added

@@ -128,6 +128,8 @@ public:
         if (msg == "set_showing") return w_.setShowing(o_, !args.empty() && in.evalValue(args[0]).truthy()), true;
         if (msg == "showing") return r = Value::integer(w_.pose_.showing(o_) ? 1 : 0), true;
         if (msg == "dir") return r = Value::obj(w_.script()), true;
+        // RB's venue band-name labels (world_objects.dta band_name_label) [I: the venue's 3D text is not drawn yet].
+        if (msg == "set_localized" && o_->cls == "BandLabel") return true;
         if (auto* t = o_->as<scene::EventTrigger>()) {
             if (msg == "trigger") return w_.trigger(t), true;
             if (msg == "enable") return w_.setTriggerEnabled(t, true), true;

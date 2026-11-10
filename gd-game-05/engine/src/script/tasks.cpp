@@ -199,6 +199,16 @@ void readSpec(Interp& in, const DataNode& cmd, size_t first, std::vector<const D
               bool& once, std::string& name, std::vector<std::string>& preserve) {
     for (size_t k = first; k < cmd.children.size(); ++k) {
         const DataNode& a = cmd.children[k];
+        // Rock Band's form: the units first, positional ({thread_task
+        // kTaskTutorialSeconds (script ...)}, tutorial/*.dta) [C data].
+        if (k == first && a.type != DataNode::Type::Array) {
+            const Value v = in.eval(a);
+            if (v.isNumber()) units = v.integerValue();
+            else if (v.str() == "kTaskBeats") units = kTaskBeats;
+            else if (v.str() == "kTaskUISeconds") units = kTaskUISeconds;
+            else if (v.str() == "kTaskTutorialSeconds") units = kTaskTutorialSeconds;
+            continue;
+        }
         if (a.type != DataNode::Type::Array || a.children.empty() || !a.children[0].isText()) continue;
         const std::string& key = a.children[0].s;
         auto value = [&] { return a.children.size() > 1 ? in.eval(a.children[1]) : Value::integer(0); };
@@ -307,6 +317,13 @@ void TaskMgr::run(Task& t, double now) {
             int guard = 0;
             while (!t.dead && t.index < t.body.size()) {
                 t.sleepReq = t.waitHold = t.loopReq = t.exitReq = false;
+                static const bool tlog = SDL_getenv("GD05_TASKLOG") != nullptr;
+                if (tlog) {
+                    const DataNode& n = *t.body[t.index];
+                    std::string head = n.children.empty() ? n.s : n.children[0].isText() ? n.children[0].s : (n.children[0].children.empty() ? "?" : n.children[0].children[0].s);
+                    if (!n.children.empty() && n.children.size() > 1 && n.children[1].isText()) head += " " + n.children[1].s;
+                    SDL_Log("task %s [%zu/%zu] %s", t.name().c_str(), t.index, t.body.size(), head.c_str());
+                }
                 in_.eval(*t.body[t.index]);
                 if (t.dead) break;
                 if (t.exitReq) {

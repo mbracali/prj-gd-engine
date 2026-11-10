@@ -982,6 +982,75 @@ private:
     std::set<std::string> quiet_;
 };
 
+// Rock Band's tutorial main panels (GuitarTutorialPanel, DrumTutorialPanel,
+// VocalsTutorialPanel; tutorial/*.dta) [C data: the messages; I: the
+// natives]: the voice-over plays tutorial/streams/<vo>.mogg through the
+// host's voice stream (tutorial_vo.dta's aliases), is_vo_playing follows
+// it; the tutorial player is player0; the lesson's ambience, controller
+// locks, fades, metronome and autoplayed endings are not done (quiet).
+class RbTutorialPanelObj : public PanelObj {
+public:
+    RbTutorialPanelObj(UiManager& u, const std::string& name, const std::string& cls) : PanelObj(u, name, cls) {}
+    bool handleNative(Interp& in, const std::string& msg, std::vector<Value>& args, Value& r) override {
+        r = Value::integer(0);
+        if (SDL_getenv("GD05_TUTLOG")) SDL_Log("tutorial: %s %s", name().c_str(), msg.c_str());
+        if (msg == "play_vo" && !args.empty()) {
+            std::string vo = in.evalValue(args[0]).str();
+            if (aliases_.empty()) {
+                try {
+                    ScriptLoader loader(ui.data());
+                    const DataNode& t = in.keep(loader.load("tutorial/tutorial_vo.dta"));
+                    for (const DataNode& e : t.children)
+                        if (e.isList() && e.children.size() >= 2 && e.children[0].isText() && e.children[1].isText()) aliases_[e.children[0].s] = e.children[1].s;
+                } catch (const std::exception& e) {
+                    ui.logOnce(std::string("tutorial: tutorial_vo.dta: ") + e.what());
+                }
+                aliases_[""] = "";
+            }
+            if (auto it = aliases_.find(vo); it != aliases_.end() && !it->second.empty()) vo = it->second;
+            const bool ok = ui.host().playVoice("tutorial/streams/" + vo + ".mogg", 0.0f);
+            if (!ok) ui.logOnce("tutorial: no voice-over " + vo);
+            static const bool log = SDL_getenv("GD05_TUTLOG") != nullptr;
+            if (log) SDL_Log("tutorial: voice-over %s%s", vo.c_str(), ok ? "" : " (missing)");
+            return true;
+        }
+        if (msg == "is_vo_playing") return r = Value::integer(ui.host().voicePlaying() ? 1 : 0), true;
+        if (msg == "reset_vo") return ui.host().stopVoice(), true;
+        if (msg == "pause_vo" || msg == "unpause_vo") return ui.host().pauseVoice(msg == "pause_vo"), true;
+        if (msg == "get_tutorial_player") {
+            ScriptObject* p = in.findObject("player" + std::to_string(player_));
+            return r = p ? Value::obj(p) : Value::integer(0), true;
+        }
+        if (msg == "set_tutorial_player") return player_ = args.empty() ? 0 : std::clamp(in.evalValue(args[0]).integerValue(), 0, 3), true;
+        // The guitar lesson's tuning (frets.dta): every fret pressed once
+        // ends it [I: RB's tuning rules not read; the frets held come from the host].
+        if (msg == "start_tuning_mode") return tuning_ = true, tuned_ = 0, true;
+        if (msg == "end_tuning_mode") return tuning_ = false, true;
+        if (msg == "is_tuning") {
+            if (tuning_) {
+                tuned_ |= ui.host().playerFrets(player_);
+                if ((tuned_ & 0x1F) == 0x1F) tuning_ = false;
+            }
+            return r = Value::integer(tuning_ ? 1 : 0), true;
+        }
+        if (msg == "all_frets_off") return true;
+        static const std::set<std::string> kQuiet = {
+            "add_names", "start_ambient_loop", "stop_ambient_loop", "pause_ambient_loop", "start_autoplay_bre", "stop_autoplay_bre",
+            "mute_all_tracks", "disable_controller", "enable_controller", "reset_controller", "set_sfx_volume", "set_paused", "pause",
+            "unpause", "hide_all_ui", "fade_song_in", "fade_song_out", "fade_top_in", "fade_top_out", "set_top_visible",
+            "set_top_invisible", "set_metronome", "set_inc_dec", "end_hopo_train", "is_hopo_training",
+            "beat_callback"};
+        if (kQuiet.count(msg)) return ui.logOnce("STUB-quiet " + className() + " " + msg), true;
+        return PanelObj::handleNative(in, msg, args, r);
+    }
+
+private:
+    int player_ = 0;
+    bool tuning_ = false;
+    unsigned tuned_ = 0;
+    std::map<std::string, std::string> aliases_;
+};
+
 }  // namespace
 
 // The band create panel's random_band_name (tour_band.dta) [I: RB's list of names is not read].
@@ -1235,6 +1304,7 @@ public:
 };
 
 std::unique_ptr<ScriptObject> makeRbMetaClass(UiManager& ui, const std::string& cls, const std::string& name) {
+    if (cls == "GuitarTutorialPanel" || cls == "DrumTutorialPanel" || cls == "VocalsTutorialPanel") return std::make_unique<RbTutorialPanelObj>(ui, name, cls);
     if (cls == "OutfitConfigPanel") return std::make_unique<OutfitConfigPanelObj>(ui, name, cls);
     if (cls == "AudioLatencyPanel" || name.rfind("calibrate_", 0) == 0) return std::make_unique<AudioLatencyPanelObj>(ui, name, cls);
     if (cls == "OutfitPanel") return std::make_unique<OutfitPanelObj>(ui, name, cls);

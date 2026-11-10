@@ -15,6 +15,7 @@
 #include <cstdlib>
 #include <functional>
 #include <map>
+#include <set>
 #include <memory>
 #include <string>
 #include <vector>
@@ -282,7 +283,15 @@ void installRbNatives(UiManager& ui, Interp& in, std::vector<std::unique_ptr<Scr
     platform->quiet({"set_notify_ui_location", "disable_xmp", "enable_xmp", "signin"});
     RbHost* profiles = add(std::make_unique<RbHost>(ui, "profile_mgr"));
     // The profiles' save data: RB's saves are M7 (GD05-009; DECISIONS D4).
-    profiles->on("get_save_data_from_player", no);  // the achievements' profile: none (GD05-013)
+    profiles->on("get_save_data_from_player", no);
+    // A player's options (the tutorials' lessons done, tutorial_lesson_menu.dta) [I: kept for the session].
+    {
+        RbHost* po = add(std::make_unique<RbHost>(ui, "player_options"));
+        static std::set<std::string> done;
+        po->on("is_lesson_complete", [&ui](std::vector<Value>& a) { return Value::integer(!a.empty() && done.count(ui.interp().evalValue(a[0]).str()) ? 1 : 0); });
+        po->on("set_lesson_complete", [&ui](std::vector<Value>& a) { if (!a.empty()) done.insert(ui.interp().evalValue(a[0]).str()); return Value::integer(0); });
+        profiles->on("get_options_from_player", [po](std::vector<Value>&) { return Value::obj(po); });
+    }  // the achievements' profile: none (GD05-013)
     // The profile's options (ui/options*.dta): RB's volumes run 0..11
     // [C data: the sliders' 12 steps], each step about 2 dB below the next
     // [I]; the music's mix follows the background (the band) and the

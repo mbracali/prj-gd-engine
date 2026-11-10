@@ -269,6 +269,21 @@ public:
     float gameBackgroundDb() const override { return mode_ == DevMode::Practice ? practiceBackgroundDb() : 0.0f; }
     std::string gameAudioPath() const override { return audio_ ? audio_->moggPath : std::string(); }
     bool playVoice(const std::string& path, float volumeDb) override;
+    bool micConnected() override {
+        if (mic_ || SDL_getenv("GD05_VOCALS_FILE")) return true;
+        // Probed at most every 5 s (opening a capture device is slow).
+        const double now = double(SDL_GetTicksNS()) / 1e9;
+        if (now - micProbeAt_ > 5.0) {
+            micProbeAt_ = now;
+            VocalInput probe;
+            std::string err;
+            micProbed_ = probe.open(startupAudioBackend() == "miniaudio" ? "miniaudio" : "sdl3", err);
+        }
+        return micProbed_;
+    }
+    bool micTalking() override { return mic_ && micLoud_; }
+    double micProbeAt_ = -1e9;
+    bool micProbed_ = false, micLoud_ = false;
     bool voicePlaying() override;
     void stopVoice() override;
     void pauseVoice(bool paused) override;
@@ -2125,7 +2140,7 @@ float App::overdriveDrainMs() const {
 // meter and the HUD's numbers [I: the crowd steps per rating].
 void App::updateVocals(float t) {
     float loud = 0, pitch = -1;
-    if (mic_) pitch = mic_->poll(t, loud);
+    if (mic_) pitch = mic_->poll(t, loud), micLoud_ = pitch > 0;  // talking: a pitch heard [I]
     if (bot_ && !mic_) {
         pitch = vocal_->targetPitch(t);
         loud = vocal_->percussionDue(t) ? 0.6f : vocal_->noteAt(t) ? 0.3f : 0.0f;  // taps the tambourine's gems

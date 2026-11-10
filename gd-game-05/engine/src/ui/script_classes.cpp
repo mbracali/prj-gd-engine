@@ -7,6 +7,8 @@
 #include <cmath>
 #include <cstdlib>
 #include <utility>
+
+#include "data/game_data.h"
 #include <vector>
 
 #include "render/scene_gpu.h"
@@ -236,7 +238,9 @@ bool ComponentObj::handleNative(Interp& in, const std::string& msg, std::vector<
     // RB: milo objects the scripts poke that the port does not animate
     // (EventTrigger trigger, PostProc select, the ending bonus reset,
     // TrackDir practice_reset) [I], logged once.
-    if (msg == "trigger" || msg == "select" || msg == "practice_reset" || msg == "set_colors" || (msg == "reset" && object && object->cls != "BandList")) {
+    // The vocal track's directory (track_paneldir.dta milo_apply, the tutorials) [I: its display options not done].
+    if (msg == "set_configuration" || msg == "set_enable_vocals_options" || msg == "get_display_mode") return r = Value::integer(0), true;
+    if (msg == "trigger" || msg == "select" || msg == "practice_reset" || msg == "set_colors" || (msg == "reset" && (!object || object->cls != "BandList"))) {
         panel->ui.logOnce("STUB-quiet " + name() + " " + msg);
         return r = Value::integer(0), true;
     }
@@ -510,6 +514,11 @@ void PanelObj::load() {
     const std::string file = fileName();
     if (!file.empty()) {
         path = scene::miloArkPath(scene::resolveMiloRelative("ui/panel.milo", file));
+        // A file is relative to the script that names it: RB's tutorial
+        // panels (tutorial/*.dta) name tutorial/ milos [C data; the port
+        // keeps no script file per node, so tutorial/ is tried next].
+        if (!ui.data().exists(path))
+            if (const std::string alt = scene::miloArkPath(scene::resolveMiloRelative("tutorial/panel.milo", file)); ui.data().exists(alt)) path = alt;
         std::string error;
         if (path.rfind("world/", 0) == 0) {
             // The venue (world_panel): the program's (game/world.h).

@@ -679,6 +679,9 @@ public:
             return ui_.playSfx(args.empty() ? std::string() : args[0].str(), a.volume, a.pan, a.transpose), true;
         }
         if (msg == "stop_all_sfx") return ui_.host().stopAllSfx(), true;
+        // RB's microphones (tutorials, vocal checks): one mic, the host's [I: per pad not kept].
+        if (msg == "is_mic_connected") return r = Value::integer(ui_.host().micConnected() ? 1 : 0), true;
+        if (msg == "is_mic_user_talking") return r = Value::integer(ui_.host().micTalking() ? 1 : 0), true;
         // RB: {synth stop <cue>} (meta.dta music_stop) [C data].
         if (msg == "stop") return ui_.host().stopSfx(args.empty() ? std::string() : args[0].str()), true;
         // RB's microphones (Synth360's mic list): no change seen yet, nothing

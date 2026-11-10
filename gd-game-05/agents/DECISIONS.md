@@ -122,3 +122,37 @@ pattern). Each says what, why and how to undo it.
 - **Why:** RB's band rules are not read in the XEX yet; the values are
   scoring.dtb's.
 - **Undo:** `app.cpp` (makeSeats / updateSeats / drawSeats).
+
+## D12. The help bar is Rock Band's own panel, placement not done yet (2026-11-09)
+- **What:** the owner asked for gd-game-02's help bar, placed where it does
+  not cover Rock Band's elements. Rock Band ships its own help bar
+  (`helpbar.milo`, meta.dta's HELPBAR_HANDLERS: the icons per controller
+  and the action labels along the bottom edge, below the screens' panels).
+  The port keeps that panel and its placement (the bottom strip Rock Band
+  reserves for it) rather than drawing gd-game-02's over it. It is loaded,
+  updated and drawn, but its meshes and labels still land off screen, so
+  nothing shows yet (GD05-005).
+- **Why:** Rock Band's layout leaves the bottom strip free for this bar, so
+  it covers nothing. The port's extras (GAMEPADS on the main menu, the
+  items as mouse buttons) go into it the way gd-game-02 adds them.
+- **Undo:** `ui/ui_manager.cpp` updateHelpbar / the screen-change call of
+  `helpbar update`.
+
+## D13. Camera shots move the band [C data, I] (2026-11-09)
+- **What:** each BandCamShot's band targets apply when the shot starts.
+  The member plays the target's clip group and, with teleport, moves to
+  its mark. The marks are not restored afterwards; the next shot sets its
+  own. IK, props and fast-forward are not done.
+  `GD05_NO_TELEPORT=1` turns off the moves.
+- **Why:** Rock Band's shots are authored around those marks. Without
+  them the closeups framed empty stage or the inside of the set.
+- **Undo:** `Band::rbShotTargets` (game/rb_band.cpp) and its call in `App::rbShots`.
+
+## D14. Tutorials run their own scripts on the tutorial clock (2026-11-09)
+- **What:** Rock Band's tutorial lessons run as written (tutorial/*.dta
+  thread tasks, now with the positional task units). Their voice-overs
+  come from tutorial/streams and their cues from the tutorial banks
+  (loaded with the others). The tutorial panels' other natives
+  (ambience, controller locks, fades, metronome) are quiet for now.
+- **Why:** it keeps the lessons' timing and words exactly the original's.
+- **Undo:** `RbTutorialPanelObj` (ui/rb_meta.cpp).
