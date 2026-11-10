@@ -6,14 +6,15 @@ body:
     id: game
     attributes:
       label: Game
-      options: [gd-game-01 (Guitar Hero, PS2)]
+      options: [Guitar Hero 1, Guitar Hero 2, Guitar Hero 80s, Rock Band 1, Game Launcher]
     validations:
       required: true
   - type: input
     id: version
     attributes:
       label: Version and platform
-      placeholder: "gd01 0.1.0-alpha, Windows 11, RTX 3060"
+      options: [Windows, macOS, Linux, Steam Deck, Android]
+      placeholder: "Windows"
     validations:
       required: true
   - type: textarea
