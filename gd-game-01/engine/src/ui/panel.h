@@ -46,6 +46,10 @@ public:
     // Component state, as the scripts and the navigator set it.
     void setState(const std::string& component, UiResources::State state) { states_[component] = state; }
     UiResources::State state(const std::string& component) const;
+    // [I] Port (#76): while the mouse points at a help bar button, focused
+    // components draw as normal ones, so only one thing is highlighted.
+    void setFocusMuted(bool muted) { focusMuted_ = muted; }
+    bool focusMuted() const { return focusMuted_; }
     // Text shown instead of the component's localized token.
     void setText(const std::string& component, const std::string& text) { texts_[component] = text; }
     std::string text(const std::string& component) const;
@@ -93,6 +97,7 @@ private:
     ListDraw listDraw_;
     std::string camera_;
     std::map<std::string, UiResources::State> states_;
+    bool focusMuted_ = false;
     std::map<std::string, std::string> texts_;
     struct CachedText {
         std::string key;

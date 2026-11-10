@@ -176,6 +176,7 @@ const std::map<std::string, Json>& enhancedDefaults() {
         {"max_fps", Json::string("120")},         {"fps_counter", Json::boolean(false)},
         {"internal_res", Json::string("1080")},   {"ai_upscaling_mode", Json::string("quality")},
         {"hopo_mode", Json::string("original")},  {"no_shaky_cam", Json::boolean(false)},
+        {"no_menu_transitions", Json::boolean(false)},
         {"cut_content", Json::boolean(false)},    {"no_fail", Json::boolean(false)},
         {"autoplay", Json::boolean(false)},
         {"cheat_air_guitar", Json::boolean(false)}, {"cheat_gh_guitar", Json::boolean(false)},
@@ -816,6 +817,7 @@ void App::tryLoadData(const std::string& path) {
                 }
             };
             ui_ = std::make_unique<UiSystem>(renderer_, *data_, hooks);
+            ui_->setNoTransitions(enhancedOn("no_menu_transitions"));
             applyCheats();
             loadBackdrop();  // Enhanced Settings' backdrop, ready before the menu opens
             bool skipBoot = opt_.skipBoot || SDL_getenv("GD01_SKIP_BOOT");
@@ -2009,6 +2011,7 @@ void App::applyEnhanced() {
         applyVenueLights(*venue_);
     }
     if (backdrop_) applyVenueLights(*backdrop_);  // Enhanced Settings shows the change at once
+    if (ui_) ui_->setNoTransitions(enhancedOn("no_menu_transitions"));  // #76
     // Screen mode: windowed, fullscreen (the display's mode at the desktop
     // size) or borderless (fullscreen at the desktop's own mode).
     std::string mode = enhanced("screen_mode").str();

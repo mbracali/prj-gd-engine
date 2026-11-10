@@ -402,6 +402,11 @@ public:
     void draw() {
         if (scene_) scene_->clearHits();
         if (!showing_) return;
+        // [I] Port (#76): one highlight at a time; the help bar's hovered
+        // pill wins over the menu's focus while the mouse is on it.
+        const bool muted = name() != "helpbar" && ui_.helpHovered();
+        if (scene_) scene_->setFocusMuted(muted);
+        if (native_) native_->setFocusMuted(muted);
         if (native_) native_->drawBefore();
         if (scene_ && (!native_ || native_->drawsScene())) {
             if (name() == "helpbar") drawHelpbar();
@@ -1455,7 +1460,7 @@ void UiSystem::PanelObj::drawHelpbar() {
     const auto lastElems = helpElems_;
     size_t elemIndex = 0;
     auto hovered = [&] {
-        if (elemIndex >= lastElems.size()) return false;
+        if (!ui_.helpHover_ || elemIndex >= lastElems.size()) return false;
         const Panel::Hit& h = lastElems[elemIndex].second;
         return ui_.mouseX_ >= h.x0 - 4 && ui_.mouseX_ <= h.x1 + 4 && ui_.mouseY_ >= h.y0 - 4 && ui_.mouseY_ <= h.y1 + 4;
     };
@@ -1811,7 +1816,7 @@ void UiSystem::ComponentObj::drawList(const UiObj& list, const Mat4& vp, const M
         off.pos = {0, 0, -spacing * float(1 + k + 2 * headers)};
         Mat4 elem = world * Mat4::fromRowXfm(off.rot, off.pos);
         std::string key = name() + "#" + std::to_string(k);
-        bool hl = k == selected_;
+        bool hl = k == selected_ && !p->focusMuted();
         const auto& c = hl ? highlight : text;
         p->drawText(key, r.text, "song_name.txt", c, vp, elem * local("song_name.txt"));
         if (!r.score.empty()) p->drawText(key + "#s", r.score, "song_score.txt", c, vp, elem * local("song_score.txt"));
@@ -1831,6 +1836,7 @@ void UiSystem::ComponentObj::drawSlider(const UiObj& slider, const Mat4& vp, con
     const Scene& rs = ui_.res_->scene();
     // Style state: selected while editing (FUN_001284f0), else the component's state.
     UiResources::State state = p->state(name());
+    if (p->focusMuted() && state == UiResources::Focused) state = UiResources::Normal;
     if (editing_ && state != UiResources::Disabled) state = UiResources::Selected;
     // Parts: part.world = slider.world * part.local (0x127ed0).
     auto local = [&](const std::string& n) -> Xfm {
@@ -2292,6 +2298,7 @@ void UiSystem::gotoScreen(const std::string& name) {
     }
     ScreenObj* cur = current_;
     target_ = next;
+    gotoMs_ = frameMs_;
     // GHScreen_v5: going back when the target is in this screen's back chain.
     goingBack_ = !forward_;
     for (ScreenObj* s = cur ? cur->back_ : nullptr; s && !goingBack_; s = s->back_) goingBack_ = s == next;
@@ -2299,7 +2306,8 @@ void UiSystem::gotoScreen(const std::string& name) {
     if (cur) exitScreen(cur, next);
     // [I] The port's universal menus (Enhanced Settings, GAMEPADS) have no
     // transition: they open on the next frame (universal_mechanisms.md).
-    if (cur && cur->flag("animate_transition", true) && next->flag("animate_transition", true)) {
+    // Enhanced > Disable Menu Transitions (#76): every screen opens that way.
+    if (!noTransitions_ && cur && cur->flag("animate_transition", true) && next->flag("animate_transition", true)) {
         // Out-anim (FUN_00143290): forward exits play meta_cam_pause_right_out,
         // backward ones meta_cam_right_in reversed; the ambient fades out.
         phase_ = Phase::Out;
@@ -2319,7 +2327,7 @@ void UiSystem::startIn() {
     enterScreen(target_);
     entering_ = false;
     drawn_ = current_;
-    if (!current_->flag("animate_transition", true)) finishTransition();
+    if (noTransitions_ || !current_->flag("animate_transition", true)) finishTransition();
 }
 
 void UiSystem::finishTransition() {
@@ -2329,6 +2337,8 @@ void UiSystem::finishTransition() {
     target_ = nullptr;
     forward_ = true;
     applyTransitionAnims(1.0f);
+    if (SDL_getenv("GD01_UILOG") && current_)  // development aid (walk no_transitions)
+        SDL_Log("ui: screen %s up after %.0f ms", current_->name().c_str(), double(frameMs_ - gotoMs_));
     route("transition_complete", {{"new_screen", Value::obj(current_)}, {"old_screen", Value::obj(transitionFrom_)}});
     if (!pending_.empty() && frameMs_ >= holdUntilMs_) {
         std::string next = std::move(pending_);
@@ -2415,6 +2425,10 @@ void UiSystem::update(float dtMs) {
 }
 
 void UiSystem::draw() {
+    if (const bool hh = helpHovered(); hh != loggedHelpHover_) {  // development aid (walk mouse_highlight)
+        loggedHelpHover_ = hh;
+        if (SDL_getenv("GD01_UILOG")) SDL_Log("ui: highlight %s", hh ? "help bar" : "menu focus");
+    }
     if (!logos_.empty()) {
         // The logos' own backgrounds are black: so is the screen around them.
         renderer_.beginWide(100.0f);
@@ -2628,6 +2642,7 @@ void UiSystem::buttonDown(int button, bool guitar, int player) {
     // [I] Port: every controller drives the menus, so select / back follow the
     // kind of controller just pressed (the original read player 1's only).
     guitar_ = guitar;
+    helpHover_ = false;  // a key or pad press puts the highlight back on the menu's focus (#76)
     if (button == Up || button == Down || button == Left || button == Right) held_[size_t(player & 1)] = {button, 0, false};
     if (!logos_.empty()) {
         // The original's logos are not skippable; the port skips them all on
@@ -2657,6 +2672,15 @@ void UiSystem::playerSetup(int p, std::string& character, std::string& guitar) c
     guitar = g->players[p]->skin.empty() ? g->players[p]->guitar : g->players[p]->skin;
 }
 
+bool UiSystem::helpHovered() const {
+    if (!helpHover_) return false;
+    PanelObj* hb = panel("helpbar");
+    if (!hb || !hb->up_) return false;
+    for (const auto& [elem, h] : hb->helpElems_)
+        if (mouseX_ >= h.x0 - 4 && mouseX_ <= h.x1 + 4 && mouseY_ >= h.y0 - 4 && mouseY_ <= h.y1 + 4) return true;
+    return false;
+}
+
 bool UiSystem::mouse(float x, float y, bool click) {
     if (!logos_.empty() && click) {  // a click or tap skips the boot logos, like a button
         buttonDown(Start, guitar_, 0);
@@ -2670,6 +2694,7 @@ bool UiSystem::mouse(float x, float y, bool click) {
         wheelHold_ = false;
     }
     wheelHold_ = false;
+    helpHover_ = false;
     auto inside = [&](const Panel::Hit& h, float pad) { return x >= h.x0 - pad && x <= h.x1 + pad && y >= h.y0 - pad && y <= h.y1 + pad; };
     const int select = guitar_ ? R2 : Cross;
     auto press = [&](int b) {
@@ -2686,6 +2711,9 @@ bool UiSystem::mouse(float x, float y, bool click) {
                 if (click && b >= 0) press(b);
                 // The main menu's GAMEPADS (yellow): as the yellow fret does (app.cpp) (#51).
                 if (click && elem == "fret3") gotoScreen("gamepads");
+                // Pointing (not a click or tap, which acts at once and may
+                // change the screen) gives the pill the only highlight.
+                helpHover_ = !click;
                 return true;
             }
     PanelObj* fp = focusPanel();

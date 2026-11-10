@@ -144,6 +144,16 @@ public:
     // row under it again and undo the scroll (#51).
     float mouseX_ = -1e9f, mouseY_ = -1e9f, wheelX_ = 0, wheelY_ = 0;
     bool wheelHold_ = false;
+    // [I] Port (#76): the mouse last moved onto a help bar button (cleared by
+    // any key or pad press): that pill is the only highlight on the screen.
+    bool helpHover_ = false;
+    bool helpHovered() const;
+    // Enhanced > Disable Menu Transitions (#76): screens change at once, without
+    // the original's camera swing and fade (off by default: the original).
+    void setNoTransitions(bool on) { noTransitions_ = on; }
+    bool noTransitions_ = false;
+    bool loggedHelpHover_ = false;
+    float gotoMs_ = 0;  // frameMs_ at the last screen change
     static constexpr float kWheelHoverSlack = 24;
     // `player`: the pad slot (player_num in the scripts).
     void buttonDown(int button, bool guitar, int player = 0);

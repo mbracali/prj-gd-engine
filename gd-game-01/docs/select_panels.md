@@ -585,3 +585,23 @@ General ordering **[C]**:
 - The exact parenting performed by FUN_001da100 in guitar finalize is not confirmed.
 - That one poll equals one vsync (60 Hz) is assumed for the spin and idle speeds.
 - The order of the career guitar list from FUN_0013d898 (campaign category 3) is not documented here.
+
+## 8. Port additions to the menus (#76, GD01-316)
+These are the port's, not the original's ([I]):
+- **One highlight at a time.** While the mouse points at a help bar button
+  (CONTINUE, BACK, GAMEPADS, UP / DOWN), that pill is the only highlight: the
+  menu's focused entry, the song list's blue row, a slider and the native
+  panels' focus (Enhanced Settings, GAMEPADS) draw as normal ones
+  (`Panel::setFocusMuted`, `NativePanel::setFocusMuted`, `UiSystem::helpHovered`).
+  A key or pad press, or the mouse on a menu entry, gives the highlight back to
+  the focus. In Enhanced Settings a hovered `< Back` / Export / Import does the
+  same to the focused row. Walk `mouse_highlight`.
+- **Help bar boxes.** `help_box_mid` / `help_box_corner` (32 x 32, SrcAlpha
+  blend plus the PS2's alpha test) are drawn without the alpha test, so the
+  rounded ends have a smooth edge instead of a staircase on large screens.
+- **Sharper Text & Sprites** treats font sheets as glyphs: x4 up to 512 px and
+  their anti-aliased edges tightened (`enhanceImage(..., glyphs)`), so menu text
+  stays crisp. Off by default (Original Feel), as before.
+- **Enhanced > Disable Menu Transitions** (`no_menu_transitions`, off by
+  default): every screen opens at once, as the universal menus already do,
+  without the original's 500 ms out and in anims. Walk `no_transitions`.

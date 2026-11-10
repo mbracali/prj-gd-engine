@@ -111,6 +111,18 @@ walk_mouse() {
   # The main menu's GAMEPADS pill opens GAMEPADS on a click (#51).
   run mouse_gamepads 6000 "3000:hover560_685,3500:click560_685" GD01_SKIP_BOOT=1
   result mouse_gamepads "$(has mouse_gamepads "goto_screen gamepads")" "a click on the help bar's GAMEPADS opens GAMEPADS"
+  walk_mouse_highlight
+}
+
+# One highlight at a time (#76): the mouse on the help bar's BACK takes the
+# highlight from the menu's focus; a key press gives it back; the mouse on a
+# menu entry keeps it there.
+walk_mouse_highlight() {
+  run mouse_highlight 6000 "3000:hover490_687,3600:keyDown,4200:hover490_687,4800:hover640_340" GD01_SKIP_BOOT=1 GD01_SCREEN=options
+  local seq
+  seq="$(grep -o "ui: highlight [a-z ]*" "$work/mouse_highlight.log" | tr '\n' '|')"
+  result mouse_highlight "$([ "$seq" = "ui: highlight help bar|ui: highlight menu focus|ui: highlight help bar|ui: highlight menu focus|" ] && echo 1 || echo 0)" \
+    "help bar hover mutes the menu focus; a key or a menu hover gives it back ($seq)"
 }
 
 # Enhanced: a 1.1.6 enhanced.json (old values, XInput / Rock Band toggles)
@@ -126,9 +138,28 @@ walk_enhanced() {
   seed="$keep"
   result enhanced "$(json "$(save enhanced)/enhanced.json" "d['color_grade'] == 'sepia' and d['internal_res'] == '448' and d['bloom'] == '3x' and d['fps_counter'] is True and 'rockband' not in d and 'xinput' not in d and d['hdr'] == 'none'")" \
     "Good Old Days preset applied over a migrated 1.1.6 file"
+  walk_no_transitions
   walk_enhanced_hdr
   walk_calibration_reset
   walk_enhanced_backends
+}
+
+# Enhanced > Disable Menu Transitions (#76): off by default (OPTIONS opens after
+# the original's out and in anims, about 1 s); Enhanced turns it on (the last
+# row of PERFORMANCE & GRAPHICS) and saves it; the next start loads it and
+# OPTIONS opens at once.
+walk_no_transitions() {
+  local keys="" keep="$seed" i ms_on ms_off
+  run nt_default 6000 "3000:click640_554" GD01_SKIP_BOOT=1
+  for i in $(seq 0 38); do keys+="$((2500 + i * 60)):keyDown,"; done
+  run nt_set 7000 "${keys}5500:keyReturn" GD01_SKIP_BOOT=1 GD01_SCREEN=enhanced_settings
+  seed="$work/nt_set/xdg"
+  run nt_on 6000 "3000:click640_554" GD01_SKIP_BOOT=1
+  seed="$keep"
+  ms_off="$(sed -n 's/.*ui: screen options up after \([0-9]*\) ms.*/\1/p' "$work/nt_default.log" | head -1)"
+  ms_on="$(sed -n 's/.*ui: screen options up after \([0-9]*\) ms.*/\1/p' "$work/nt_on.log" | head -1)"
+  result no_transitions "$(( $(json "$(save nt_set)/enhanced.json" "d['no_menu_transitions'] is True and not d.get('no_shaky_cam', False)") && ${ms_off:-0} >= 900 && ${ms_on:-9999} < 100 ))" \
+    "off by default (${ms_off:-?} ms), Enhanced saves it, the next start loads it (${ms_on:-?} ms)"
 }
 
 # Enhanced > Graphics Backend / Audio Backend (GDCORE-006): a value the build
