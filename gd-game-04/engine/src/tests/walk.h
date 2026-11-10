@@ -5,6 +5,7 @@
 #include <array>
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "input/input.h"
@@ -88,6 +89,7 @@ private:
         int player = 0;  // the controller pressing it (1: player 2's)
         Op(Action x, double d = 300) : a(x), delayMs(d) {}
         Op(const char* s, double d = 300) : act(s), delayMs(d) {}
+        Op(std::string s, double d = 300) : act(std::move(s)), delayMs(d) {}
         static Op p2(Action x, double d = 300) {
             Op o(x, d);
             o.player = 1;

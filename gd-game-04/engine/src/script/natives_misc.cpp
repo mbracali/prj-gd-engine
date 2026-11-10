@@ -11,6 +11,7 @@
 #include <memory>
 
 #include "data/qbkey.h"
+#include "script/atoms.h"
 #include "script/vm.h"
 
 namespace {
@@ -61,6 +62,8 @@ void addMiscNatives(qs::Vm& vm) {
         if (qb::Struct* l = locals(run)) Vm::set(*l, qbkey::key("difficulty"), Vm::makeInt(*difficulty));
         return true;
     });
+    // The career's atoms (GD04-116): they read the same difficulty.
+    addAtomNatives(vm, difficulty);
     // mod a = x b = y -> mod [C use: TileSprite].
     vm.addNative("mod", [](Vm&, ScriptRun& run, qb::Struct& p) {
         const int a = int(Vm::number(Vm::param(p, K("a")), 0)), b = int(Vm::number(Vm::param(p, K("b")), 1));

@@ -105,6 +105,45 @@ Walk::Walk(const std::string& name) : name_(name) {
         steps_.push_back({"career_cash_reward_fs", {C}, 30000, true});  // the song's cash (Progression_AwardCash)
         steps_.push_back({"career_unlock_1_fs", {C}, 30000, true});
         steps_.push_back({"career_setlist_fs", {}, 30000});
+    } else if (name == "career_encore") {
+        // #84 (GD04-116): a new band on Medium wins three of tier 1's songs
+        // (GH3_Career_NumSongToProgress medium = 3); the third win's
+        // UpdateAtoms Progression completes the tier's songs and runs
+        // Progression_TierEncoreUnlock (current_transition = preencore) ->
+        // GuitarEvent_SongWon_Spawned's preencore -> preencore_win_song ->
+        // career_encore_confirmation_fs -> start_encore: the encore (Rock and
+        // Roll All Nite, encorep1) -> won: Progression_TierEncoreComplete,
+        // Progression_TierComplete (careertier1.complete, tier 2 unlocked)
+        // [C scripts guitar_progression.qb, the career flow states].
+        steps_ = boot;
+        steps_.push_back({"main_menu_fs", {C}, 10000});
+        steps_.push_back({"career_choose_band_fs", {C}, 20000, true});
+        steps_.push_back({"career_enter_band_name_fs", {C, C, C, Action::Start}, 20000, true});
+        steps_.push_back({"career_select_difficulty_fs", {D, C}, 20000});  // MEDIUM
+        steps_.push_back({"career_select_character_fs", {C}, 20000, true});
+        steps_.push_back({"career_character_hub_fs", {"check:global:current_difficulty=medium", C}, 20000});
+        steps_.push_back({"career_select_venue_fs", {C}, 20000});
+        const char* songs[] = {"slowride", "talkdirtytome", "hitmewithyourbestshot"};
+        for (int i = 0; i < 3; ++i) {
+            steps_.push_back({"career_setlist_fs", {Op(std::string("setlist:") + songs[i]), C}, 30000});
+            steps_.push_back({"song", {}, 30000});
+            steps_.push_back({"song_over", {}, 600000});
+            if (i == 2) break;
+            // No encore before the third win.
+            steps_.push_back({"career_newspaper_fs", {Op("check:tag:careertier1.num_songs_to_progress=" + std::to_string(2 - i)), C}, 30000});
+            steps_.push_back({"career_cash_reward_fs", {C}, 30000, true});
+            steps_.push_back({"career_unlock_1_fs", {C}, 30000, true});
+        }
+        steps_.push_back({"career_encore_confirmation_fs",
+                          {"check:tag:careertier1.num_songs_to_progress=0", "check:global:setlist_previous_tier=1", "check:global:setlist_previous_song=4", "check:tag:careertier1.complete=0",
+                           // PLAY ENCORE once the score, cash, stars and the crowd's shout are in (g_encore_ready)
+                           Op("check:global:g_encore_ready=1", 8000), C},
+                          60000});
+        steps_.push_back({"song", {"check:global:current_song=rocknrollallnite"}, 60000});
+        steps_.push_back({"song_over", {}, 600000});
+        steps_.push_back({"career_newspaper_fs", {"check:tag:careertier1.complete=1", "check:global:progression_completion_tier=1", C}, 60000});
+        // The tier complete: the sponsor (Progression_TierEncoreComplete), then on to tier 2.
+        steps_.push_back({"career_sponsored_fs", {}, 60000});
     } else if (name == "career_quickplay") {
         // A career song in the venue picked (career_select_venue_fs), then
         // back to the main menu and a quick play song: each song loads its own
@@ -248,8 +287,10 @@ Walk::Walk(const std::string& name) : name_(name) {
         steps_.push_back({"career_character_hub_fs",
                           {"check:tag:careertier8.complete=1", "check:tag:career_song1_tier8.stars=5", "check:tag:Instrument_focus01.unlocked=1", C},
                           20000});
-        // Its venues are unlocked too: the list moves (owner report 1.4).
-        steps_.push_back({"career_select_venue_fs", {"check:tag:venue_z_hell.unlocked=1", "check:focus:venue_3", "key:Up", "wait", "check:focus:venue_4", B}, 20000});
+        // Its venues are unlocked too: the list moves (owner report 1.4). The
+        // career's atoms (GD04-116) leave current_level on the last tier's
+        // venue (Progression_UnlockTier 8: z_hell), so the list starts there.
+        steps_.push_back({"career_select_venue_fs", {"check:tag:venue_z_hell.unlocked=1", "check:focus:venue_7", "key:Down", "wait", "check:focus:venue_6", B}, 20000});
         steps_.push_back({"career_character_hub_fs", {}, 20000});
 
     } else if (name == "setlist_tabs") {
@@ -468,9 +509,12 @@ Walk::Walk(const std::string& name) : name_(name) {
         steps_.push_back({"career_select_difficulty_fs", {C}, 20000});
         steps_.push_back({"career_select_character_fs", {C}, 20000, true});
         steps_.push_back({"career_character_hub_fs", {"unlock:all", C}, 20000});  // the venues unlocked (as progress does)
-        steps_.push_back({"career_select_venue_fs", {"check:focus:venue_3", Action::Up, "wait", "check:focus:venue_4", Action::Up, "wait", "check:focus:venue_5", D, "wait",
-                                                     "check:focus:venue_4", "key:Down", "wait", "check:focus:venue_3", "key:Up", "wait",
-                                                     "check:focus:venue_4", B}, 20000});
+        // A new career starts on tier 1's venue: Progression_Init, the first
+        // atom, sets current_level (z_party) (GD04-116; before, the global's
+        // default z_artdeco).
+        steps_.push_back({"career_select_venue_fs", {"check:focus:venue_0", Action::Up, "wait", "check:focus:venue_1", Action::Up, "wait", "check:focus:venue_2", D, "wait",
+                                                     "check:focus:venue_1", "key:Down", "wait", "check:focus:venue_0", "key:Up", "wait",
+                                                     "check:focus:venue_1", B}, 20000});
         steps_.push_back({"career_character_hub_fs", {}, 20000});
     } else if (name == "hub") {
         // The character hub's CHANGE OUTFIT and CHANGE GUITAR screens
@@ -790,7 +834,7 @@ std::vector<Walk::Press> Walk::update(FrontEnd& fe, bool songPlaying, double now
                 }
                 fe.vm().run(qbkey::key(name.c_str()), params);
             } else if (op.act.rfind("setlist:", 0) == 0) {
-                // Down until the setlist's cursor (setlist_selection_tier /
+                // Down (or Up) until the setlist's cursor (setlist_selection_tier /
                 // _song, set by the items' focus handlers) is on the song.
                 const qb::Value* sl = fe.vm().global(qbkey::key("g_gh3_setlist"));
                 if (sl && !sl->st) sl = fe.vm().globals().find(sl->key);  // it names the tier global (GH3_Career_Songs)
@@ -802,7 +846,17 @@ std::vector<Walk::Press> Walk::update(FrontEnd& fe, bool songPlaying, double now
                         if (const qb::Value* songs = fe.vm().globals().field(*t->st, qbkey::key("songs")); songs && songs->arr &&
                             song >= 0 && size_t(song) < songs->arr->values.size())
                             at = songs->arr->values[size_t(song)].key;
-                if (at != qbkey::key(op.act.substr(8).c_str())) {
+                // Up when the song is above the cursor (a career whose atoms put
+                // the setlist on a later tier, GD04-116), else Down.
+                const uint32_t want = qbkey::key(op.act.substr(8).c_str());
+                bool above = false;
+                if (sl && sl->st)
+                    for (int t = 1; t <= tier && !above; ++t)
+                        if (const qb::Value* tv = fe.vm().globals().field(*sl->st, qbkey::key(("tier" + std::to_string(t)).c_str())); tv && tv->st)
+                            if (const qb::Value* songs = fe.vm().globals().field(*tv->st, qbkey::key("songs")); songs && songs->arr)
+                                for (size_t k = 0; k < songs->arr->values.size() && (t < tier || int(k) < song); ++k)
+                                    if (songs->arr->values[k].key == want) above = true;
+                if (at != want) {
                     if (++seek_ > 80) {
                         failed_ = true, failure_ = "the setlist has no " + op.act.substr(8);
                         SDL_Log("walk: FAILED: %s", failure_.c_str());
@@ -810,7 +864,7 @@ std::vector<Walk::Press> Walk::update(FrontEnd& fe, bool songPlaying, double now
                     }
                     if (SDL_getenv("GD04_WALKLOG")) SDL_Log("walk: setlist at tier %d song %d (%s)", tier, song, qbkey::name(at).c_str());
                     --key_;  // again next time
-                    out.push_back(Press{Action::Down, op.player});
+                    out.push_back(Press{above ? Action::Up : Action::Down, op.player});
                 } else {
                     SDL_Log("walk: setlist on %s (tier %d, song %d)", op.act.substr(8).c_str(), tier, song);
                 }
