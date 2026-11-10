@@ -287,9 +287,23 @@ std::vector<UiView::Trigger> UiView::triggers(const std::string& event) const {
     for (scene::Milo* m : all)
         for (scene::UITrigger* t : m->root().all<scene::UITrigger>()) {
             if (t->event != event || t->anim.empty()) continue;
-            const scene::Object* a = t->dir ? t->dir->resolve(t->anim) : nullptr;
-            if (!a) a = find(t->anim);
-            if (a) out.push_back({a, t->blockTransition, ScenePose::endFrame(a)});
+            // Every anim of the trigger (dialog.milo's popup.trg: the panel's
+            // popup.tnm, then popup_text.tnm and four fades), to its range's
+            // end when it has one [C data].
+            if (t->anims.empty()) {
+                const scene::Object* a = t->dir ? t->dir->resolve(t->anim) : nullptr;
+                if (!a) a = find(t->anim);
+                if (a) out.push_back({a, t->blockTransition, ScenePose::endFrame(a)});
+                continue;
+            }
+            for (const scene::UITrigger::Anim& an : t->anims) {
+                const scene::Object* a = t->dir ? t->dir->resolve(an.name) : nullptr;
+                if (!a) a = find(an.name);
+                if (!a) continue;
+                const float full = ScenePose::endFrame(a);
+                const float end = an.type == "range" && an.end != an.start ? std::clamp(an.end, 0.0f, full) : full;
+                out.push_back({a, t->blockTransition, end});
+            }
         }
     return out;
 }
@@ -812,6 +826,11 @@ void UiView::drawLabel(MaterialRenderer& r, const scene::UILabel& l, const scene
         st.italics = tmpl->italics, st.markup = tmpl->markup;
         if (band) {
             st.size = band->textSize, st.leading = band->leading, st.wrapWidth = band->wrapWidth;
+            // kFitJust in a box two lines high or more (dialog.milo's
+            // msg.lbl) wraps at its width, then shrinks to the box; in a
+            // one-line box (the slots' PLAYER 1) it stays one line [I].
+            if (band->fitText == 2 && band->width > 0 && band->height >= 1.8f * band->textSize * std::max(band->leading, 0.5f))
+                st.wrapWidth = band->width;
             st.align = band->alignment, st.capsMode = band->allCaps ? 2 : 0;
             st.overrideKerning = true, st.kerning = band->kerning;
         } else {

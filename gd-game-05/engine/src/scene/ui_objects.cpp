@@ -230,11 +230,17 @@ void readUITrigger(Rd& r, UITrigger& o) {
     o.triggerEvents = list();
     const uint32_t anims = r.u32();
     for (uint32_t i = 0; i < anims; ++i) {
-        const std::string anim = r.str();
-        if (o.anim.empty()) o.anim = anim;
-        r.f(), r.b(), r.f(), r.b(), r.u32(), r.f(), r.f(), r.f();
-        r.str();
+        // EventTrigger's Anim: the animatable, blend, wait, delay, enable,
+        // rate, start, end, period, type ("range"), scale [C: rev 11].
+        UITrigger::Anim a;
+        a.name = r.str();
+        if (o.anim.empty()) o.anim = a.name;
+        r.f(), r.b(), r.f(), r.b(), r.u32();
+        a.start = r.f(), a.end = r.f();
         r.f();
+        a.type = r.str();
+        r.f();
+        o.anims.push_back(a);
     }
     list(), list();  // sounds, shows
     const uint32_t hides = r.u32();

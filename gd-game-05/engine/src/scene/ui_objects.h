@@ -141,6 +141,12 @@ public:
     std::vector<std::string> triggerEvents;  // RB: the EventTrigger's
     std::string event, anim;
     bool blockTransition = false;
+    // RB: every anim the trigger plays, with its (range start end) [C].
+    struct Anim {
+        std::string name, type;
+        float start = 0, end = 0;
+    };
+    std::vector<Anim> anims;
 };
 
 // UIProxy v0 (PreLoad @ 0x82377E18, PostLoad @ 0x823787F8): UIComponent;
