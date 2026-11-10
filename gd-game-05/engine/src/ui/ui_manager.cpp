@@ -178,6 +178,13 @@ bool UiManager::init(std::string& error, bool headless) {
     }
     macros_ = loader_->macros;
     modes_ = boot_->find("modes");
+    // The UI's environ ambient (ui (env (ambient r g b))) [C data], see
+    // gfx::UiView::setDefaultAmbient.
+    for (const DataNode& n : boot_->children)
+        if (n.isList() && n.children.size() > 1 && n.children[0].isText() && n.textAt(0) == "ui")
+            if (const DataNode* env = n.find("env"))
+                if (const DataNode* a = env->find("ambient"); a && a->children.size() > 3)
+                    gfx::UiView::setDefaultAmbient(a->floatAt(1), a->floatAt(2), a->floatAt(3));
     // $syscfg: the system config (config/gh2.dta and its includes), read
     // by {find $syscfg ...} (modes.dta practice's pre_processed_audio,
     // cheats_funcs.dta) [C data].

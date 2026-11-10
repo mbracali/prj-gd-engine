@@ -60,8 +60,15 @@ public:
     std::string cameraName() const;
     // GH2's ui camera (config/default.dta), for panels without one.
     static Camera defaultCamera();
-    // The panel's environ (ui.env), or the default one.
+    // The panel's environ (ui.env), or the UI's own (defaultEnvironment).
     LightEnv environment();
+    // RB's UIManager makes one environ for the UI, its ambient from config
+    // (ui (env (ambient 1 1 1))) (UIManager::Init RB 0x82259408 sets
+    // env->data+0x3c from it) [C]: panels without an environ of their own
+    // draw in it (GD05-049: the port's fallback, GH2's 0.3 ambient, made
+    // every label of such a panel grey).
+    static void setDefaultAmbient(float r, float g, float b);
+    static LightEnv defaultEnvironment();
 
     // Replaces a label's / button's string (empty: its own).
     void setText(const std::string& component, const std::string& text);

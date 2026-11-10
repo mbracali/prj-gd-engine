@@ -468,12 +468,24 @@ Camera UiView::camera() const {
     return cam;
 }
 
+namespace {
+Vec3 gUiAmbient{1, 1, 1};  // config/default.dta (ui (env (ambient 1 1 1))) [C data]
+}  // namespace
+
+void UiView::setDefaultAmbient(float r, float g, float b) { gUiAmbient = {r, g, b}; }
+
+LightEnv UiView::defaultEnvironment() {
+    LightEnv env;
+    env.envAmbient = gUiAmbient;
+    return env;
+}
+
 LightEnv UiView::environment() {
     const auto* own = milo_ && milo_->root().self ? milo_->root().self->as<scene::DirObj>() : nullptr;
     if (own && own->hasRnd)
         if (const scene::Object* e = find(own->rnd.environment); e && e->as<scene::Environ>())
             return cache_.lightEnv(*e->as<scene::Environ>(), &pose_);
-    return LightEnv{};
+    return defaultEnvironment();
 }
 
 void UiView::setText(const std::string& component, const std::string& text) {
