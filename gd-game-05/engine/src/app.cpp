@@ -3788,6 +3788,17 @@ void App::applyEnhanced() {
     if (player2_) player2_->setCalibrationMs(calibrationMs());
     gfx::RenderDevice& dev = canvas_.renderer().device();
     dev.setInternalHeight(std::clamp(std::atoi(enhancedValue("internal_res").c_str()), 0, 4320));
+    // Rock Band's display gamma ramp: rnd (gamma 0.85) from config/default.dta,
+    // set on the Xbox as the gamma ramp (pow(i / 256, gamma), RB 0x8246BD90)
+    // [C] (GD05-030): every pixel shown brighter, whites and colours as the
+    // original's. GD05_GAMMA overrides it (1: none).
+    {
+        float gamma = 0.85f;
+        if (const DataNode* rnd = ui_ && ui_->bootTree() ? ui_->bootTree()->find("rnd") : nullptr)
+            if (const DataNode* g = rnd->find("gamma"); g && g->children.size() > 1) gamma = g->floatAt(1);
+        if (const char* e = SDL_getenv("GD05_GAMMA")) gamma = float(std::atof(e));
+        dev.setOutputGamma(gamma);
+    }
     auto frameCap = [&] { return enhancedValue("max_fps") == "unlimited" ? 0 : std::clamp(std::atoi(enhancedValue("max_fps").c_str()), 30, 1000); };
     if (!SDL_getenv("GD05_FPS")) dev.setFrameCap(frameCap());
     // Controls: touch (always on on Android); Rock Band guitars and gamepads

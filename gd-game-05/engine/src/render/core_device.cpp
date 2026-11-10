@@ -196,6 +196,7 @@ public:
     void endFrame() override;
     void setFrameCap(int fps) override;
     void setInternalHeight(int height) override { internalH_ = std::max(0, height); }
+    void setOutputGamma(float gamma) override { gamma_ = gamma > 0 ? gamma : 1.0f; }
     std::string hdrStatus() const override {
         return std::string("off: True HDR is not on the ") + backendId(backend_) + " graphics backend yet";
     }
@@ -236,6 +237,13 @@ private:
     // or the internal resolution's) and presented scaled.
     int internalH_ = 0;
     TargetId frameTarget_;
+    // setOutputGamma: the frame ramped into gammaTarget_, which is presented.
+    float gamma_ = 1;
+    TargetId gammaTarget_;
+    ProgramId gammaProgram_;
+    BufferId gammaTriangle_;
+    bool gammaTried_ = false;
+    TargetId applyGamma();
     int frameW_ = 0, frameH_ = 0;
 
     // Pass state.
@@ -821,7 +829,58 @@ SDL_Surface* CoreDevice::readPixels(int x, int y, int w, int h) {
     if (!s) return nullptr;
     for (int row = 0; row < h; ++row)
         std::memcpy(static_cast<uint8_t*>(s->pixels) + size_t(row) * size_t(s->pitch), &rows[size_t(h - 1 - row) * size_t(w) * 4], size_t(w) * 4);
+    applyOutputGamma(s, gamma_);
     return s;
+}
+
+// The display's gamma ramp (setOutputGamma): the frame through pow(c, gamma)
+// into gammaTarget_, presented instead of it. Empty: present the frame.
+TargetId CoreDevice::applyGamma() {
+    const CTarget* f = targets_.get(frameTarget_.id);
+    if (gamma_ == 1.0f || !f) return {};
+    if (!gammaTried_) {
+        gammaTried_ = true;
+        ProgramDesc d;
+        d.name = "output_gamma";
+        d.vertex = "layout(location = 0) in vec2 aPos;\nout vec2 vUv;\nvoid main() {\n    vUv = aPos * 0.5 + 0.5;\n    gl_Position = vec4(aPos, 0.0, 1.0);\n}\n";
+        d.fragment = "in vec2 vUv;\nout vec4 fragColor;\nlayout(std140) uniform GdGamma {\n    vec4 uGamma;\n};\nuniform sampler2D sTex;\n"
+                     "void main() {\n    fragColor = vec4(pow(max(texture(sTex, vUv).rgb, 0.0), vec3(uGamma.x)), 1.0);\n}\n";
+        d.uniformBlocks = {"GdGamma"};
+        d.samplers = {"sTex"};
+        std::string error;
+        gammaProgram_ = createProgram(d, error);
+        const float tri[6] = {-1, -1, 3, -1, -1, 3};
+        gammaTriangle_ = createBuffer(BufferKind::Vertex, sizeof tri, tri, false);
+        if (!gammaProgram_ || !gammaTriangle_) SDL_Log("render: gamma ramp shader: %s; showing the frame unramped", error.c_str());
+    }
+    if (!gammaProgram_ || !gammaTriangle_) return {};
+    const CTarget* g = targets_.get(gammaTarget_.id);
+    if (!g || g->w != f->w || g->h != f->h) {
+        if (g) destroyTarget(gammaTarget_);
+        std::string error;
+        gammaTarget_ = createTarget(TargetDesc{f->w, f->h, false, TargetFormat::RGBA8}, error);
+        if (!gammaTarget_) return {};
+    }
+    static VertexLayout layout = [] {
+        VertexLayout l;
+        l.stride = 8;
+        l.attribs[0] = {0, 2, AttribType::Float, 0};
+        return l;
+    }();
+    setTarget(gammaTarget_);
+    const float block[4] = {gamma_, 0, 0, 0};
+    DrawCall c;
+    c.program = gammaProgram_;
+    c.state.alphaWrite = true;
+    c.layout = &layout;
+    c.vertices = gammaTriangle_;
+    c.count = 3;
+    c.textures[0] = targetTexture(frameTarget_);
+    c.samplers[0] = SamplerState{Filter::Nearest, Wrap::Clamp, 0};
+    c.uniforms[0] = UniformData{block, sizeof block, 0};
+    draw(c);
+    if (inPass_) endPass();
+    return gammaTarget_;
 }
 
 // The frame cap, as local's (gl_device.cpp setFrameCap): vsync where the
@@ -856,7 +915,8 @@ void CoreDevice::endFrame() {
         now = SDL_GetTicksNS();
         nextFrameNs_ = nextFrameNs_ + paceNs_ >= now ? nextFrameNs_ + paceNs_ : now + paceNs_;
     }
-    if (const CTarget* f = targets_.get(frameTarget_.id)) {
+    const TargetId ramped = applyGamma();
+    if (const CTarget* f = targets_.get((ramped ? ramped : frameTarget_).id)) {
         // Stored bottom-up (GL style): presented flipped, scaled as local's blit.
         dev_->present(textures_.get(f->color.id)->tex, core::Rect{0, 0, f->w, f->h}, core::Filter::Linear, true);
     }

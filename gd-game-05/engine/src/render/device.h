@@ -221,6 +221,11 @@ public:
     // UI at the display's paper white, highlights above 1.0 up to its
     // headroom), re-reading the window's HDR state after hdrStateChanged
     // (SDL_EVENT_WINDOW_HDR_STATE_CHANGED).
+    // The display's gamma ramp: every pixel shown as pow(c, gamma) (Rock
+    // Band's rnd (gamma 0.85), set as the Xbox's gamma ramp, RB 0x8246BD90
+    // [C]). 1: none. A frame target is used while it is not 1; readPixels
+    // returns the ramped picture, as the screen shows it.
+    virtual void setOutputGamma(float gamma) { (void)gamma; }
     virtual void setHdrSurface(int surface) { (void)surface; }
     virtual void hdrStateChanged() {}
     // The display's headroom in paper whites while it shows HDR on the surface (1: SDR).
@@ -236,6 +241,8 @@ public:
 // (forward compatible, as macOS requires) or OpenGL ES 3.0 on Android and
 // with GD05_GLES=1.
 SDL_WindowFlags prepareWindow();
+// readPixels' gamma ramp on the CPU (setOutputGamma).
+void applyOutputGamma(SDL_Surface* s, float gamma);
 // Creates the OpenGL device for a window made with prepareWindow's flags.
 std::unique_ptr<RenderDevice> createGlDevice(SDL_Window* window, std::string& error);
 
