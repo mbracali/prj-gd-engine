@@ -958,6 +958,14 @@ universal launcher, not released on its own.
 | GD05-043 | Original | ❌ | Owner (wave 05) 4: the venue's post-process filters on the band (world) only, not the fret board | wave 05: RB's final post = sat(ColorXfm . (frame + bloom * intensity)), no luminance map, bloom mask in alpha [C]; not implemented yet | Owner 11-10 |
 | GD05-044 | Original | ❌ | Owner (wave 05) 4: the band members' hands (fret hand, strum, drum sticks) | wave 05: plan from RB's data: RB MidiParser ({new MidiParser ...}: guitar_fret, guitar_strum, guitar_fret_pos, drums_*), CompositeCharacter types guitar / drum / vocal so the enter scripts run, then the dmidi / ikmidi sinks (PROGRESS.md wave 05) | Owner 11-10 |
 | GD05-045 | Original | ❌ | Owner (wave 05) 4: a functional fret board (hit flames, smasher press, Overdrive, solo, fill, BRE visuals) | wave 05: not started (hit flames, smasher press, Overdrive / solo / fill / BRE) | Owner 11-10 |
+| GD05-046 | Bugfix | 🟡 | Owner (wave 05 retest) 1: main menu sub-menus: an orange box beyond the button (BandHighlight too big / over the rim) | started 11-10 | Owner 11-10 |
+| GD05-047 | Bugfix | 🟡 | Owner (wave 05 retest) 2: Options > Enhanced Options button has no background | started 11-10 | Owner 11-10 |
+| GD05-048 | Bugfix | 🟡 | Owner (wave 05 retest) 3: GAMEPADS button hidden while a main menu sub-menu is open | started 11-10 | Owner 11-10 |
+| GD05-049 | Bugfix | 🟡 | Owner (wave 05 retest) 4: grey labels on the other menus (screen by screen) | started 11-10 | Owner 11-10 |
+| GD05-050 | Bugfix | 🟡 | Owner (wave 05 retest) 5: keyboard cannot play a song through GAMEPADS / default mapping | started 11-10 | Owner 11-10 |
+| GD05-051 | Bugfix | 🟡 | Owner (wave 05 retest) 6: song list font spacing (kerning, letter / line spacing, fitting) | started 11-10 | Owner 11-10 |
+| GD05-052 | Bugfix | 🟡 | Owner (wave 05 retest) 7: menus disappearing: fuzz walk, root cause, regression test (with GD05-032) | started 11-10 | Owner 11-10 |
+| GD05-053 | Bugfix | 🟡 | Owner (wave 05 retest) 8: Enhanced Options backdrop shows the band badly (shot, poses, lighting) | started 11-10 | Owner 11-10 |
 
 
 ## gd-game-06: Guitar Hero: Aerosmith (Xbox 360)
