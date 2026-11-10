@@ -989,6 +989,7 @@ bool App::loadSong(const SongInfo& info, int difficulty, bool autoplay, float ba
                                            two ? modeOfPad(pads_[0]) : input_.lastMode(), noFail, faceOff ? 0 : -1, config);
         player_->setCalibrationMs(calibrationMs());
         player_->setForgivingHopos(enhancedValue("hopo_mode") == "forgiving");
+        player_->setEasyChords(enhancedValue("easy_chords") == "on");
         player_->setBigNotes(song_->bigNotes[size_t(part0)]);
         // The mode's crowd_rating_active (modes.dta: FALSE in practice and
         // the tutorials) is the performers' +0x44 (0x001107d8) [C].
@@ -1005,6 +1006,7 @@ bool App::loadSong(const SongInfo& info, int difficulty, bool autoplay, float ba
             player2_->setNumber(1);
             player2_->setCalibrationMs(calibrationMs());
             player2_->setForgivingHopos(enhancedValue("hopo_mode") == "forgiving");
+            player2_->setEasyChords(enhancedValue("easy_chords") == "on");
             player2_->setBigNotes(song_->bigNotes[size_t(part1)]);
             player2_->setCrowdActive(crowdActive);
             // Without the menus the second player always autoplays.
