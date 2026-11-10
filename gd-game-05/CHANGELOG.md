@@ -4,6 +4,28 @@ All notable changes for players. Versions follow SemVer; gd-game-05 ships
 inside the Guitar Dream Universal Launcher's release
 (`docs/platform/release-process.md`).
 
+## [0.0.5] - 2026-11-10
+
+### Fixed
+- Brighter, truer colours everywhere: the game now applies Rock Band's own
+  display gamma (0.85), so whites are white and the menus' orange is
+  stronger.
+- Esc three times on the main menu quits again (Rock Band's main menu goes
+  back to the title, which reset the count).
+- The instrument and difficulty card has its ornate paper again instead of
+  a plain white sheet.
+- The drummer is back on stage in slow songs (his animations were all
+  filtered out), and sits at his kit.
+- Clicking a main menu button while another one's sub-menu is open now
+  opens its menu.
+- Enhanced Options and GAMEPADS: orange titles and gold names (they were
+  white), a bold menu font and Rock Band's Back / Select help bar, as in
+  the other games.
+
+### Added
+- GAMEPADS is a button in the main menu's bottom-left corner, always there
+  (click it, or press the yellow fret).
+
 ## [0.0.4] - 2026-11-10
 
 ### Fixed
