@@ -112,6 +112,7 @@ bool UiView::drawRenderDir3d(MaterialRenderer& r) {
                 if (sub && (sub->name == n || owner == n)) panel = sub.get();
         }
         if (!panel || !out || out->width <= 0 || out->height <= 0) continue;
+        texRendered_.insert(panel);
         const bool hidden = hiddenScopes_.count(panel->name) > 0;
         for (const auto& m : outer.objects)
             if (const auto* mesh = m->as<scene::Mesh>())
@@ -170,7 +171,7 @@ void UiView::drawRoots(MaterialRenderer& r, const scene::Directory& root) {
             for (const std::string& m : g->objects) held.insert(m);
     std::vector<const scene::Object*> roots;
     for (const auto& o : root.objects)
-        if (!held.count(o->name) && !o->as<scene::DirObj>() && (drawOf(o.get()) || o->as<scene::Text>())) roots.push_back(o.get());
+        if (!held.count(o->name) && (drawOf(o.get()) || o->as<scene::Text>())) roots.push_back(o.get());
     std::stable_sort(roots.begin(), roots.end(), [](const scene::Object* a, const scene::Object* b) {
         const scene::Draw* da = drawOf(a);
         const scene::Draw* db = drawOf(b);
@@ -556,6 +557,7 @@ void UiView::draw(MaterialRenderer& r) {
     TargetId prevTarget{};
     int vx = 0, vy = 0, vw = 0, vh = 0;
     if (inner && outTex) {
+        texRendered_.insert(inner);
         if (!renderTarget_.id) {
             std::string error;
             renderTarget_ = dev.createTarget(TargetDesc{outTex->width, outTex->height, true, TargetFormat::RGBA8}, error);
@@ -672,6 +674,21 @@ void UiView::drawObject(MaterialRenderer& r, const scene::Object& o, int depth) 
     if (o.as<scene::UIProxy>())
         if (auto it = objectDraws.find(o.name); it != objectDraws.end() && it->second) return it->second(r);
     if (!pose_.showing(&o)) return;
+    // An object holding an inline proxied directory (qp_endgame.milo's
+    // player0..3) draws that directory's objects under its own transform;
+    // one a TexRenderer draws into its texture (the song list, the slots)
+    // is drawn there only.
+    if (o.as<scene::DirObj>()) {
+        if (!o.dir) return;
+        for (const auto& [owner, sub] : o.dir->subdirs)
+            if (sub && owner == o.name) {
+                if (texRendered_.count(sub.get())) return;
+                pose_.setDirBase(sub.get(), &o);
+                drawRoots(r, *sub);
+                return;
+            }
+        return;
+    }
     if (const auto* g = o.as<scene::Group>()) {
         // A group's environ lights its objects (RndGroup draws with its
         // environ selected; main.milo's buttons.grp: main_buttons.env, whose

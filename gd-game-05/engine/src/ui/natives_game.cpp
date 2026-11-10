@@ -61,7 +61,13 @@ public:
         if (msg == "get_track_type") return r = Value::integer(p.trackType), true;
         // Rock Band's PlayerConfig messages (ui/*.dta): RB's track types are
         // kTrackDrum 0, kTrackBass 1, kTrackGuitar 2, kTrackVocals 3 [C data: macros.dta].
-        if (msg == "player" || msg == "player_num") return r = Value::integer(i_), true;
+        if (msg == "player_num") return r = Value::integer(i_), true;
+        // RB's PlayerConfig player: the player's Player object (endgame.dta
+        // {{$pcfg player} notes_hit_fraction}, longest_streak, score).
+        if (msg == "player") {
+            if (ScriptObject* po = in.findObject("player" + std::to_string(i_))) return r = Value::obj(po), true;
+            return r = Value::integer(i_), true;
+        }
         if (msg == "is_local_player" || msg == "is_participating") return r = Value::integer(i_ == 0 || p.participating ? 1 : 0), true;
         if (msg == "get_track_sym") {
             static const char* const kTracks[] = {"drum", "bass", "guitar", "vocals", "none"};

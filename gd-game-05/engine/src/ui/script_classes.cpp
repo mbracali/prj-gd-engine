@@ -266,7 +266,8 @@ bool ComponentObj::handleNative(Interp& in, const std::string& msg, std::vector<
             } catch (const std::exception&) {
             }
             if (msg == "size") return r = Value::integer(int(names.size())), true;
-            const int i = key->size() > 1 ? key->at(1).integerValue() : -1;
+            // (objects $slot): the index is the array's variable, evaluated.
+            const int i = key->size() > 1 ? ui.interp().evalValue(key->at(1)).integerValue() : -1;
             if (i >= 0 && size_t(i) < names.size()) r = Value::obj(panel->component(names[size_t(i)]));
             return true;
         }
@@ -349,13 +350,14 @@ bool ComponentObj::handleNative(Interp& in, const std::string& msg, std::vector<
     }
     if (msg == "get_state") return r = Value::integer(int(state())), true;
     if (msg == "set_state") return setState(static_cast<scene::UiState>(int(argNum(0)))), true;
-    if (msg == "find") {
-        ScriptObject* c = panel->component(argStr(0));
-        return r = Value::obj(c), true;
+    // {$proxy find name} / {$proxy exists name} (RB endgame.dta's
+    // players.set entries): a directory object's own inline directory
+    // first (player1's player.grp, not player0's), else the panel's.
+    if (msg == "find" || msg == "exists") {
+        ScriptObject* c = object && object->as<scene::DirObj>() ? panel->scopedComponent(name(), argStr(0)) : nullptr;
+        if (!c) c = panel->component(argStr(0));
+        return r = msg == "find" ? Value::obj(c) : Value::integer(c ? 1 : 0), true;
     }
-    // {$proxy exists name} (RB endgame.dta): as find, over the panel's
-    // components [I: a proxy's own directory is not searched apart].
-    if (msg == "exists") return r = Value::integer(panel->component(argStr(0)) ? 1 : 0), true;
     // UIList (0x8237B540)
     if (msg == "set_provider") {
         provider = !args.empty() && args[0].type == Value::Type::Object ? args[0].object : in.findObject(argStr(0));

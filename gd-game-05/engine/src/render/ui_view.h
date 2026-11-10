@@ -275,6 +275,7 @@ private:
     void drawRoots(MaterialRenderer& r, const scene::Directory& dir);
     std::map<const scene::Object*, TargetId> rdTargets_;
     std::set<std::string> hiddenScopes_;
+    std::set<const scene::Directory*> texRendered_;  // the TexRenderers' panels
     void addLayoutHit(const std::string& key, const TextLayout& layout, const Mat4& world);
     int textsDrawn_ = 0, meshesDrawn_ = 0;
     std::vector<std::string> problems_;

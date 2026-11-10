@@ -155,6 +155,8 @@ V normV(const V& a) {
 scene::Xfm ScenePose::world(const scene::Object* o, const scene::Xfm& own) const {
     scene::Xfm x = own;
     const scene::Trans* t = transOf(o);
+    if (t && t->parent.empty() && o->dir && !dirBase_.empty())
+        if (auto it = dirBase_.find(o->dir); it != dirBase_.end() && it->second && it->second != o) x = scene::compose(own, world(it->second));
     if (t && !t->parent.empty() && o->dir) {
         const scene::Object* p = o->dir->resolve(t->parent);
         if (p && p != o && transOf(p)) {
