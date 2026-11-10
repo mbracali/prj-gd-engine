@@ -559,14 +559,19 @@ void UiView::draw(MaterialRenderer& r) {
     // TexRenderers' panels into their textures, its own scene through its
     // camera: seldiff_solo's koi banner and the slots' cards). One whose
     // record names its inline panel as the one that takes the input
-    // (qp_selsong's qp_sel_song, the list) is drawn flat below [I]: its
-    // banner camera framed the cloth off the screen (GD05-022).
+    // (qp_selsong's qp_sel_song, the list) is drawn flat below [I]: through
+    // its banner camera (cloth.cam at lower3rd.trg's frame 3) the cloth's
+    // top rows sit under the title bar, and its sway (CharHair) and the
+    // list's scrolling there are not done (GD05-022).
     if (drawRoot->cls == "RenderDir") {
         bool cloth = false;
         if (drawRoot->self)
             for (const std::string& n : recordNames(drawRoot->self->record))
                 for (const auto& [owner, sub] : drawRoot->subdirs)
                     if (sub && sub->cls == "PanelDir" && (sub->name == n || owner == n)) cloth = true;
+        // Development aid: GD05_SONGLIST_3D=1 draws it as the others (the
+        // cloth through cloth.cam at banner_lower3rd.tnm frame 3, unswayed).
+        if (const char* e = SDL_getenv("GD05_SONGLIST_3D"); e && *e == '1') cloth = false;
         if (!cloth && drawRenderDir3d(r)) {
             texts_.collect();
             return;

@@ -187,8 +187,10 @@ pattern). Each says what, why and how to undo it.
     its own scene through its own camera (seldiff_solo's koi banner and
     cards, the shop and tour rooms) [C data]. The song list (a RenderDir
     whose record names its inline panel as the input panel) is drawn flat:
-    its texture under the title bar, centred [I] (its banner camera framed
-    the cloth off the screen; GD05-022 keeps the cloth mesh and sway open).
+    its texture under the title bar, centred [I]. Through its own camera
+    (cloth.cam at lower3rd.trg's frame 3; GD05_SONGLIST_3D=1 shows it) the
+    cloth is big and its top rows sit under the title bar; the sway
+    (CharHair) is not done (GD05-022).
   - A UI milo's inline proxied directory takes its proxy file's objects
     when the disc has the file [I]: the inline copies were stale
     (seldiff_solo's slots lacked seldiff.grp / selpart.grp that the scripts
