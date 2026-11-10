@@ -274,7 +274,11 @@ bool Synth::play(const scene::Object& o, float volumeDb, float pan, float transp
     if (log) {
         int same = 0;
         for (const auto& p : playing_) same += p->obj == &o ? 1 : 0;
-        SDL_Log("synth: %s (%.1f dB)%s", o.name.c_str(), double(volumeDb), same ? (" over " + std::to_string(same) + " playing").c_str() : "");
+        std::string loops;
+        if (const auto* sfx = o.as<scene::Sfx>())
+            for (const auto& m : sfx->maps)
+                if (const auto* ss = dynamic_cast<const scene::SynthSample*>(resolveIn(o, m.sample)); ss && ss->looping) loops = " (looping sample)";
+        SDL_Log("synth: %s (%.1f dB)%s%s", o.name.c_str(), double(volumeDb), same ? (" over " + std::to_string(same) + " playing").c_str() : "", loops.c_str());
     }
     auto in = std::make_unique<Inst>();
     in->obj = &o;

@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cctype>
 #include <cstring>
 
 #include "render/scene_gpu.h"
@@ -83,7 +84,15 @@ size_t parseTag(const std::string& text, size_t p, RunStyle& s, const TextStyle&
     size_t q = p + 1;
     const bool open = q < text.size() && text[q] != '/';
     if (!open) ++q;
-    auto starts = [&](const char* w) { return text.compare(q, std::strlen(w), w) == 0; };
+    // Case-insensitive: an all-caps label upper-cases its tags too (RB's
+    // "DOLBY<SUP>(R)</SUP> DIGITAL" in the audio options).
+    auto starts = [&](const char* w) {
+        const size_t n = std::strlen(w);
+        if (q + n > text.size()) return false;
+        for (size_t k = 0; k < n; ++k)
+            if (std::tolower(static_cast<unsigned char>(text[q + k])) != w[k]) return false;
+        return true;
+    };
     if (starts("sup")) {
         s.size = open ? base.size * 0.7f : base.size;
         q += 3;

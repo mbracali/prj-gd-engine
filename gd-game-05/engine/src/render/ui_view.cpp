@@ -846,7 +846,8 @@ void UiView::drawLabel(MaterialRenderer& r, const scene::UILabel& l, const scene
         }
         FontMetrics fm(*font);
         TextStyle st;
-        st.italics = tmpl->italics, st.markup = tmpl->markup;
+        // RB labels carry their own markup flag (UILabel rev 8) [C].
+        st.italics = tmpl->italics, st.markup = tmpl->markup || (l.bigEndian && l.markup);
         if (band) {
             st.size = band->textSize, st.leading = band->leading, st.wrapWidth = band->wrapWidth;
             // kFitJust in a box two lines high or more (dialog.milo's
