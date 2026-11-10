@@ -234,12 +234,15 @@ pattern). Each says what, why and how to undo it.
   cloth (drawn into the texture) is not skinned: its bones are not in its
   directory [I].
 - **Why:** GD05-022, the owner's "the cloth is missing".
-- **Residual [I]:** with cloth.cam at its rest (banner_lower3rd.tnm plays
-  40 -> 0 and ends there) the title bar covers the cloth's top, so the first
-  row ("Random Song") sits half under the bar. Every value is the disc's;
-  what the original does differently (the bar, the list's first row) is not
-  found yet (OPEN_QUESTIONS).
-- **Undo:** `UiView::drawRenderDir3d` (cloth_), render/ui_cloth.*.
+- **The RenderDir's own transform [C data; I: found in its raw record by
+  its shape]:** a RenderDir is a RndDir, so a RndTransformable: its record
+  keeps one (qp_selsong: turned 9.5 degrees about z, set back 121 and down
+  84; the tour hub: 217 to the left). The objects parented to the directory
+  (the cloth's root, popup_bg) hang from it (ScenePose::setDirXfm). Without
+  it the song list's first row sat half under the title bar and the tour
+  hub's menu ran off the right edge; with it both sit as the disc places
+  them.
+- **Undo:** `UiView::drawRenderDir3d` (cloth_, renderDirXfm), render/ui_cloth.*, ScenePose::setDirXfm.
 
 ## D21. UITrigger anims as RB plays them; transitions wait on blocking triggers (2026-11-10, wave 04)
 - **What:** each trigger anim plays from its start to its end frame at the

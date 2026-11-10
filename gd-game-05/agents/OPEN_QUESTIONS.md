@@ -35,3 +35,5 @@ chosen default is in `DECISIONS.md`.
    title bar. Is the original's first row fully visible (so something in
    the port's list or camera is still off), or does the banner overlap it?
    (No emulator: a photo or a memory of the original screen would settle it.)
+   **Answered by the data (same day):** the RenderDir's own transform was
+   missing (D20); with it the first row is below the title bar.

@@ -56,8 +56,9 @@ boot, Solo > Quickplay, a song, the results, back. "Walk" means a
   skins the cloth (render/ui_cloth.cpp, D20); the song list is drawn through
   cloth.cam like the others (banner_lower3rd.tnm plays 40 -> 0). Check: walk
   `rb_owner_bugs` `song_list_layout` (on the cloth, polled, rows inside it);
-  shots at several times (the cloth sways). Residual [I]: the first row sits
-  half under the title bar at the camera's rest.
+  shots at several times (the cloth sways). The RenderDir's own transform
+  (turned 9.5 degrees, set back) carries the cloth: with it the first row
+  sits below the title bar, the tour hub's menu cloth is on screen (D20).
 - **Loading screen band icons (GD05-026).** loading.milo's four icons
   (load_icon_guitar / vox / drum / bass, from their proxy files whose root is
   "loading") all stood on one spot and did not move: a proxy object
@@ -91,11 +92,11 @@ boot, Solo > Quickplay, a song, the results, back. "Walk" means a
 | 5 | main_screen | matches | the five metal words (button_main.milo's word meshes) lit by buttons.grp's main_buttons.env (they were lit by logo.env: dark first letters), the focused pill golden, background video, pat_rock_3 lower third with its skull wave (waves_skulls_2.milo, textured from its own subdirectory); focus moves play button_toggle, select button_select, back button_back (ui.dta). The port adds GAMEPADS to RB's help bar here (D19). Shots, GD05_SFXLOG. |
 | 6 | main_solomode_screen, main_multimode_screen, main_bandcoop_screen, training_menu_screen, options_screen | matches | the side pills; text colours from color_presets.dta (D17); back plays the backward transition and button_back. Shots. Options' port row ENHANCED OPTIONS has no pill [I]. |
 | 6b | options_audio_screen, options_gameplay_screen, options_savedata_screen | differs | the panels, PLAYER pill, help bar and DOLBY(R) DIGITAL (markup) show; the audio sliders show their bar but not their pod, two not at all. Shots. |
-| 7 | qp_selsong_screen | differs | the list is drawn by its TexRenderer into its 480x552 texture, shown on the swaying cloth through cloth.cam (wave 04, D20); the first row sits half under the title bar at the camera's rest [I]. Help bar: Back / Change Sorting / Choose Song with fret icons. Walk checks `song_list_layout` (on the cloth, polled), `rb_helpbar`; shots. |
+| 7 | qp_selsong_screen | matches | the list is drawn by its TexRenderer into its 480x552 texture, shown on the swaying cloth through cloth.cam, the cloth turned and set back by the RenderDir's own transform (wave 04, D20); seven rows as ss_song.lst's display count. Help bar: Back / Change Sorting / Choose Song with fret icons. Walk checks `song_list_layout` (on the cloth, polled), `rb_helpbar`; shots. |
 | 8 | qp_seldiff_solo_screen | matches | seldiff_solo.milo drawn as RB draws it: the koi banner (CHOOSE DIFFICULTY, the song and artist), the branches, the player card from its TexRenderer, hanging as a cloth that sways (wave 04); GUITAR / BASS first, then the difficulties, READY; the slots no player has hidden. Walks quickplay / keys, shots. |
 | 9 | loading_screen > preloading > real_loading > loading_tip_screen(_2, _3) | matches | the tip picked as RB's RandomContext (weights, conditions; it showed a raw tips.dta entry before); the band's four icons side by side, animated (wave 04, D22). Walk `loading_icons`, shots. |
 | 10 | game_screen | out of scope | the HUD is still the port's stand-in (wave 02). Red before the first note no longer leaves the screen (#owner bug 2). |
-| 11 | pause_screen | matches | PLAYER 1, PAUSED, RESUME / RESTART / LEFTY MODE / NEW SONG / QUIT, help bar Return to Game / Select. Walk keys (pause, resume), shot; QUIT from it not run. |
+| 11 | pause_screen | matches | PLAYER 1, PAUSED, RESUME / RESTART / LEFTY MODE / NEW SONG / QUIT, help bar Return to Game / Select. Walk keys (pause, resume); wave 04: walk `rb_pause_quit` (QUIT, confirm_quit_screen with no.btn focused, yes, main menu, the song loaded once), shots. |
 | 12 | endgame_waiting_screen > qp_endgame_screen | differs | song, score, the player's panel (tour_endgame_player.milo: PLAYER 1, the instrument, difficulty, % hit, note streak), Continue. The stars label is empty [I: the stars font's glyphs]. Shot. |
 | 13 | qp_complete_screen | matches | NEW SONG / REPLAY / EXIT, Select. Shot. |
 | 14 | lose_screen | matches | SONG FAILED, the song, "4% complete" (kept with the result after the song closed; it read 0), RETRY / CHANGE DIFFICULTY / NEW SONG / PRACTICE / QUIT. Walks rb_lose, rb_lose_quit, shot. |
@@ -129,16 +130,15 @@ buttons. At run time the port resolves a name through the screen's panels
 
 ## Counts
 
-Of the 17 rows above (the 16 of the flow and 6b): 13 match, 3 differ
-(the song list's cloth, the results' stars, the audio sliders), 1 is out of
-scope (game_screen's HUD), and none is missing.
+Wave 04: of the 17 rows above (the 16 of the flow and 6b): 14 match, 2
+differ (the results' stars, the audio sliders' pods), 1 is out of scope
+(game_screen's HUD), none is missing. (Wave 03: 13 / 3 / 1.)
 
 ## Left for the next wave
 
-- The song list on its swaying cloth through cloth.cam (GD05_SONGLIST_3D=1
-  shows the camera's framing; the list's scrolling there and the CharHair
-  sway are not done).
-- The results' stars (the stars font's glyphs), the audio sliders' pods.
-- QUIT from the pause screen; the credits (reached through Community >
-  Special Features, behind the port's Xbox LIVE notice); the tours'
-  screens and the band lobby (D10) screen by screen.
+- The results' stars (RB's star_rating string: the stars font has `*` and
+  letters, not `_`; the native was not read), the audio sliders' pods.
+- The confirm dialogs' YES / NO are dim: their text is lit by splash.grp's
+  environ [I: whether RB lights the text the same way].
+- The credits (behind Community > Special Features), the band lobby (D10)
+  screen by screen; the creator's 3D preview ("Loading" stays behind it).
