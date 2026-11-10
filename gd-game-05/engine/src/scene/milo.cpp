@@ -335,6 +335,23 @@ void useProxyFiles(const GameData& data, const std::string& path, Directory& dir
             if (ss) ss->parent = sub.get();
             sub->subdirs.emplace_back(n, std::move(ss));
         }
+        // The file's own subdirectories (seldiffpart_player.milo names
+        // seldiffpart_common.milo, which holds the paper's border.tex),
+        // loaded with it: GD05-038, the difficulty card was a plain white
+        // sheet (border.mat's texture not found).
+        if (const auto* fd = fresh->self ? fresh->self->as<DirObj>() : nullptr)
+            for (const std::string& n : fd->objectDir.subdirs) {
+                const std::string f2 = findMiloRelative(data, file, n);
+                if (!data.exists(miloArkPath(f2))) continue;
+                try {
+                    Milo m2(data.read(miloArkPath(f2)), miloArkPath(f2));
+                    std::unique_ptr<Directory> d2 = m2.releaseRoot();
+                    if (!d2) continue;
+                    d2->parent = sub.get();
+                    sub->subdirs.emplace_back(n, std::move(d2));
+                } catch (const std::exception&) {
+                }
+            }
         sub->clearIndex();
         if (SDL_getenv("GD05_UILOG")) SDL_Log("milo %s: inline %s from %s (%llu objects)", path.c_str(), sub->name.c_str(), file.c_str(), static_cast<unsigned long long>(sub->objects.size()));
     }

@@ -484,7 +484,13 @@ bool SceneCache::stale(const scene::Object* o) {
 
 TextureId SceneCache::texture(const scene::Object* owner, const std::string& name) {
     if (name.empty() || !owner || !owner->dir) return {};
-    return texture(owner->dir->resolve<scene::Tex>(name));
+    const scene::Tex* t = owner->dir->resolve<scene::Tex>(name);
+    // Development aid: GD05_TEXLOG=1 logs a texture name that does not resolve.
+    if (!t && SDL_getenv("GD05_TEXLOG")) {
+        static std::set<std::string> seen;
+        if (seen.insert(owner->name + "|" + name).second) SDL_Log("texture %s of %s: not found (dir %s)", name.c_str(), owner->name.c_str(), owner->dir->name.c_str());
+    }
+    return texture(t);
 }
 
 TextureId SceneCache::texture(const scene::Tex* tex) {
@@ -505,6 +511,18 @@ TextureId SceneCache::texture(const scene::Tex* tex) {
     case scene::Bitmap::Format::ATI2: format = TexFormat::BC5; break;
     case scene::Bitmap::Format::RGBA8: format = TexFormat::RGBA8; break;
     default: known = false; break;
+    }
+    // Development aid: GD05_TEXDUMP=<dir> saves each texture's first level as <name>.bmp.
+    if (const char* dump = SDL_getenv("GD05_TEXDUMP"); dump && known && !b.empty()) {
+        std::vector<uint8_t> rgba;
+        if (decodeToRgba8(format, b.level(0), b.levels[0].size, b.width, b.height, rgba))
+            if (SDL_Surface* sf = SDL_CreateSurfaceFrom(b.width, b.height, SDL_PIXELFORMAT_RGBA32, rgba.data(), b.width * 4)) {
+                std::string n = tex->name;
+                for (char& c : n)
+                    if (c == '/' || c == '\\') c = '_';
+                SDL_SaveBMP(sf, (std::string(dump) + "/" + n + ".bmp").c_str());
+                SDL_DestroySurface(sf);
+            }
     }
     std::vector<uint8_t> sharp;
     int sw = b.width, sh = b.height;
