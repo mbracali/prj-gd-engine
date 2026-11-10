@@ -124,6 +124,7 @@ module_systems_01="linux steamdeck windows macos android"
 module_systems_02="linux steamdeck windows macos android"
 module_systems_03="linux steamdeck windows macos android"
 module_systems_04="linux steamdeck windows macos android"
+module_systems_05="linux steamdeck windows macos android"
 
 # module_inputs_hash <NN>: what a module takes from the launcher besides its
 # game's sources (the module SDK, modules/gdNN/); a module is reused only when
@@ -316,6 +317,79 @@ build_module_02() {
   esac
   ship_core_runtime "$os" "$work" "$dest"  # gd-engine-core: its shared libraries and licences
   # glslang, linked for the sdl3 / vulkan graphics backends' run-time SPIR-V (GD02_RUNTIME_SPIRV).
+  if [ -f "$work/glslang-LICENSE.txt" ]; then cp "$work/glslang-LICENSE.txt" "$dest/licenses/glslang-LICENSE.txt"; fi
+  cp "$engine/third_party/stb_vorbis/LICENSE.txt" "$dest/licenses/stb_vorbis-LICENSE.txt"
+  (. "$engine/build_common.sh"; ship_ffmpeg_licence "$ffmpeg" "$dest")
+  cp "$engine/README.md" "$dest/README.md"
+}
+
+# gd-game-05 (Rock Band, Xbox 360): gd02's engine family; FFmpeg with the
+# Bink and XMA decoders (gd-game-05/engine/build_common.sh), the same
+# packaging as gd02.
+build_module_05() {
+  local os="$1" work="$2" dest="$3" engine="$repo/gd-game-05/engine" ffmpeg
+  ffmpeg="$engine/build/ffmpeg/$os/ffmpeg-prefix"
+  (
+    cd "$engine"
+    # shellcheck source=/dev/null
+    . ./build_common.sh
+    if [ "$os" = windows ] && [ "$host" != windows ]; then
+      build_ffmpeg build/ffmpeg/windows Windows --disable-x86asm --enable-cross-compile --target-os=mingw32 --arch=x86_64 \
+        --cross-prefix=x86_64-w64-mingw32- --pkg-config=false
+    elif [ "$os" = windows ]; then
+      build_ffmpeg build/ffmpeg/windows Windows --disable-x86asm
+    elif [ "$os" = macos ]; then
+      build_ffmpeg build/ffmpeg/macos macOS --disable-x86asm
+    elif [ "$os" = android ]; then
+      # The same options as build_android.sh (the same build, reused).
+      local tc="$ANDROID_NDK/toolchains/llvm/prebuilt/$NDK_HOST/bin" arch=aarch64 triple=aarch64-linux-android
+      [ "$android_abi" = x86_64 ] && arch=x86_64 triple=x86_64-linux-android
+      build_ffmpeg "build/ffmpeg/android/$android_abi" "Android $android_abi, NDK $(basename "$ANDROID_NDK")" --enable-cross-compile \
+        --target-os=android --arch="$arch" --cc="$tc/${triple}24-clang" --cxx="$tc/${triple}24-clang++" \
+        --nm="$tc/llvm-nm" --ar="$tc/llvm-ar" --ranlib="$tc/llvm-ranlib" --strip="$tc/llvm-strip" --pkg-config=false \
+        --disable-x86asm --extra-ldflags=-Wl,-z,max-page-size=16384
+    elif [ "$os" = steamdeck ]; then  # in the sniper container (build_steamdeck.sh), as build_linux_steamdeck.sh
+      build_ffmpeg build/ffmpeg/steamdeck "Steam Deck" --disable-x86asm --cc="${CC:-gcc}"
+    else
+      build_ffmpeg build/ffmpeg/linux Linux --disable-x86asm
+    fi
+  )
+  local ffmpeg_arg="$ffmpeg" sdl_arg="" deck=""
+  [ "$os" = steamdeck ] && deck="-DGD05_STEAM_DECK=ON"
+  if [ "$os" = android ]; then
+    ffmpeg="$engine/build/ffmpeg/android/$android_abi/ffmpeg-prefix"
+    ffmpeg_arg="$engine/build/ffmpeg/android"  # gd05's CMakeLists.txt adds <ABI>/ffmpeg-prefix
+    sdl_arg="-DGD05_SDL3_SOURCE=$SDL3_SRC"
+  fi
+  # shellcheck disable=SC2046
+  cmake -S "$engine" -B "$work" -G Ninja -DCMAKE_BUILD_TYPE=Release -DGD05_MODULE=ON -DGD05_VIDEO=ON \
+    -DGD05_FFMPEG_DIR="$ffmpeg_arg" $sdl_arg $deck $(cmake_args "$os")
+  cmake --build "$work" --target gd05_module
+  mkdir -p "$dest/licenses"
+  case "$os" in
+    windows)
+      cp "$work/gd-game-05.dll" "$ffmpeg"/bin/av*.dll "$dest/"
+      (. "$engine/build_common.sh"; ship_winpthread "$dest" "$dest/licenses") ;;
+    linux|steamdeck)
+      cp "$work/gd-game-05.so" "$dest/"
+      for lib in avformat avcodec avutil; do
+        cp -L "$(ls "$ffmpeg/lib/lib${lib}_gd05.so."[0-9]* | grep -E '\.so\.[0-9]+$' | head -1)" "$dest/"
+      done ;;
+    macos)
+      cp "$work/gd-game-05.dylib" "$dest/"
+      for lib in avformat avcodec avutil; do
+        cp -L "$(ls "$ffmpeg/lib/lib${lib}_gd05".[0-9]*.dylib | grep -E "lib${lib}_gd05\.[0-9]+\.dylib\$" | head -1)" "$dest/"
+      done
+      macos_fix_module "$dest" ;;
+    android)
+      # In the APK's native library folder (lib*.so only); native-libs.txt
+      # lists them, to find them again in a released APK.
+      # gd05's FFmpeg has the build suffix _gd05: no clash with gd02's in the APK's one lib folder.
+      cp "$work/libgd-game-05.so" "$ffmpeg"/lib/libavformat_gd05.so "$ffmpeg"/lib/libavcodec_gd05.so "$ffmpeg"/lib/libavutil_gd05.so "$dest/"
+      printf '%s\n' libgd-game-05.so libavformat_gd05.so libavcodec_gd05.so libavutil_gd05.so > "$dest/native-libs.txt" ;;
+  esac
+  ship_core_runtime "$os" "$work" "$dest"  # gd-engine-core: its shared libraries and licences
+  # glslang, linked for the sdl3 / vulkan graphics backends' run-time SPIR-V (GD05_RUNTIME_SPIRV).
   if [ -f "$work/glslang-LICENSE.txt" ]; then cp "$work/glslang-LICENSE.txt" "$dest/licenses/glslang-LICENSE.txt"; fi
   cp "$engine/third_party/stb_vorbis/LICENSE.txt" "$dest/licenses/stb_vorbis-LICENSE.txt"
   (. "$engine/build_common.sh"; ship_ffmpeg_licence "$ffmpeg" "$dest")

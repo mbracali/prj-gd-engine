@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: LicenseRef-GDE-PolyForm-NC-1.0.0-plus-terms
+# Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
+# The script STUBs the walk test (gd05 --walktest) accepts: what the port does
+# not have on purpose, one prefix per line ("<object> <message>" as
+# GD05_UILOG=1 prints them; a line ending in * matches any message).
+# Xbox Live and its services (no Live in the port).
+achievements *
+leaderboards *
+# RB's online server (Xbox Live; not in the port).
+server *
+content_mgr *
+profilemgr signin (Xbox Live)
+profilemgr show_marketplace (Xbox Live)
+# crowd_audio play_stream wingame (stone, after the game is won): a plain
+# mogg, not wired until the career's ending (M10).
+crowd_audio play_stream
+# The guitarists' hand flames (char_objects.dta hand_flames: in a solo at
+# the peak, also systest's): the particle systems are not drawn yet (the
+# backlog's Flaming Head item), so their start / stop are stubs.
+guitarist0::hand_flames_*
+guitarist1::hand_flames_*
+# Rock Band (wave 01): the characters are M6 (GD05-008): available_prefab
+# gives a stand-in per instrument.
+char available_prefab
+# RB's saves and the profiles' data are M7 (GD05-009; DECISIONS D4).
+game submit_solo_song_score
+profile_mgr get_save_data_from_player
+profile_mgr get_char_options_from_player
+# RB's practice mode is M7 (GD05-009).
+practice_panel set_in_vocal_mode
+# RB's crowd characters (the venues' WorldCrowd members): their enter and
+# clip groups are not animated yet (M5, GD05-007).
+crowd:*

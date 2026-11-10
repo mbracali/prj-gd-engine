@@ -190,6 +190,16 @@ for gi in "${game_infos[@]}"; do
         esac
       done
       nonempty "$d/licenses/FFmpeg-LICENSE.LGPL-2.1.txt" ;;
+    05)  # FFmpeg with the build suffix _gd05 (Bink videos, XMA sound effects) and its LGPL notice
+      for lib in avformat avcodec avutil; do
+        case "$os" in
+          windows) one_of "$id: ${lib}_gd05-*.dll" "$libs/${lib}_gd05"-*.dll ;;
+          linux) one_of "$id: lib${lib}_gd05.so.N" "$libs/lib${lib}_gd05".so.[0-9]* ;;
+          macos) one_of "$id: lib${lib}_gd05.N.dylib" "$libs/lib${lib}_gd05".[0-9]*.dylib ;;
+          android) one_of "$id: lib${lib}_gd05.so" "$libs/lib${lib}_gd05.so" ;;
+        esac
+      done
+      nonempty "$d/licenses/FFmpeg-LICENSE.LGPL-2.1.txt" ;;
     01)  # NVIDIA DLSS on Linux, next to the launcher (when the build had the SDK; always in CI)
       if [ "$os" = linux ] && { [ -f "$d/root-files.txt" ] || [ "${GDUL_REQUIRE_DLSS:-}" = 1 ] || [ "${CI:-}" = true ]; }; then
         one_of "$id: libnvidia-ngx-dlss.so.* next to the launcher" "$bundle"/libnvidia-ngx-dlss.so.*

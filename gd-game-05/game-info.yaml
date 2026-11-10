@@ -7,6 +7,10 @@ nick_name: "Rock Band"
 launch: 2007-11-20
 platforms: [Xbox 360, PlayStation 3, PlayStation 2, Wii]
 based_on: Xbox 360
-guitar_dream_version: "0.0.0"
-ready_to_play: false
-completeness: 0
+guitar_dream_version: "0.0.5"
+ready_to_play: true
+completeness: 0.36
+# How the launcher recognises this game's disc image (by content, not name).
+iso_signatures:
+  - format: xdvdfs          # Xbox 360 disc
+    xex_title_id: "45410829"  # default.xex title ID (Rock Band, USA)
