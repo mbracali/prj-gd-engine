@@ -177,6 +177,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         wait(1500);
         press(kX);
         at("game_screen", 60000);
+        check("loading_icons");  // the loading panel stays loaded
         for (int i = 0; i < 8; ++i) key(SDLK_2), wait(250);
         check("counter_max:song_loads:1");
         wait(2000);
@@ -2298,6 +2299,28 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
                 return pass();
             }
         return fail("the help bar's Back was not drawn");
+    }
+    if (s.screen == "loading_icons") {
+        // Wave 04 (GD05-026): loading.milo's band, four inline icon
+        // directories from their proxy files (load_icon_*.milo, root
+        // "loading"): each icon mesh hangs from its holder (guitar, vox and
+        // drum under load_icon_bass), so the four stand side by side; the
+        // AnimFilters play the directories' texture swaps.
+        ui::PanelObj* p = ui.panel("loading_panel");
+        if (!p || !p->view) return fail("no loading_panel view");
+        std::vector<float> xs;
+        for (const char* d : {"load_icon_guitar", "load_icon_vox", "load_icon_drum", "load_icon_bass"}) {
+            const char* m = std::string(d) == "load_icon_guitar" ? "guitar.mesh" : std::string(d) == "load_icon_vox" ? "vox.mesh"
+                          : std::string(d) == "load_icon_drum" ? "drummer.mesh" : "bass.mesh";
+            const scene::Object* o = p->view->findIn(d, m);
+            if (!o) return fail(std::string("no ") + m + " in " + d);
+            xs.push_back(p->view->pose().world(o).pos[0]);
+        }
+        std::printf("  loading icons at x %.1f %.1f %.1f %.1f\n", double(xs[0]), double(xs[1]), double(xs[2]), double(xs[3]));
+        for (size_t i = 0; i < xs.size(); ++i)
+            for (size_t j = i + 1; j < xs.size(); ++j)
+                if (std::fabs(xs[i] - xs[j]) < 20) return fail("two band icons stand on each other");
+        return pass();
     }
     if (s.screen == "song_list_layout") {
         // RB's song list (qp_selsong.milo, wave 03): drawn through its

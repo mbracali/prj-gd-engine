@@ -155,9 +155,15 @@ V normV(const V& a) {
 scene::Xfm ScenePose::world(const scene::Object* o, const scene::Xfm& own) const {
     scene::Xfm x = own;
     const scene::Trans* t = transOf(o);
-    if (t && t->parent.empty() && o->dir && !dirBase_.empty())
+    // A proxy file's object whose parent is the file's own root (loading.milo's
+    // load_icon_guitar: guitar.mesh under "loading") hangs from the directory,
+    // so from the object that holds it (RndTransformable's parent is the dir).
+    const bool toDir = t && o->dir && !o->dir->proxyRoot.empty() && t->parent == o->dir->proxyRoot;
+    if (toDir) {
         if (auto it = dirBase_.find(o->dir); it != dirBase_.end() && it->second && it->second != o) x = scene::compose(own, world(it->second));
-    if (t && !t->parent.empty() && o->dir) {
+    } else if (t && t->parent.empty() && o->dir && !dirBase_.empty())
+        if (auto it = dirBase_.find(o->dir); it != dirBase_.end() && it->second && it->second != o) x = scene::compose(own, world(it->second));
+    if (t && !t->parent.empty() && o->dir && !toDir) {
         const scene::Object* p = o->dir->resolve(t->parent);
         if (p && p != o && transOf(p)) {
             const scene::Xfm pw = world(p);
@@ -217,6 +223,19 @@ bool ScenePose::showing(const scene::Object* o) const {
     return !d || d->showing;
 }
 
+namespace {
+// The inline directory an object of `dir` holds (a RndDir as an object), or nullptr.
+const scene::Directory* heldDir(const scene::Object* o) {
+    if (!o || !o->dir || !o->as<scene::DirObj>()) return nullptr;
+    for (const auto& [owner, sub] : o->dir->subdirs)
+        if (sub && owner == o->name) return sub.get();
+    return nullptr;
+}
+bool dirAnimatable(const scene::Object& o) {
+    return o.as<scene::TransAnim>() || o.as<scene::MatAnim>() || o.as<scene::MeshAnim>() || o.as<scene::LightAnim>() || o.as<scene::EnvAnim>();
+}
+}  // namespace
+
 float ScenePose::endFrame(const scene::Object* anim) {
     if (!anim) return 0;
     if (auto* t = anim->as<scene::TransAnim>()) {
@@ -239,6 +258,12 @@ float ScenePose::endFrame(const scene::Object* anim) {
         float f = 0;
         for (const std::string& n : g->objects)
             if (const scene::Object* o = g->dir ? g->dir->resolve(n) : nullptr; o && o != g) f = std::max(f, endFrame(o));
+        return f;
+    }
+    if (const scene::Directory* d = heldDir(anim)) {
+        float f = 0;
+        for (const auto& o : d->objects)
+            if (dirAnimatable(*o)) f = std::max(f, endFrame(o.get()));
         return f;
     }
     return 0;
@@ -280,6 +305,12 @@ void ScenePose::setFrame(const scene::Object* anim, float frame) {
         }
     } else if (anim->as<scene::ParticleSys>() || anim->as<scene::ParticleSysAnim>()) {
         animFrames_[anim] = frame;
+    } else if (const scene::Directory* d = heldDir(anim)) {
+        // RndDir::SetFrame: the directory's anims at the frame [I: which of
+        // its objects count as its anims] (loading.milo's band icons, the
+        // AnimFilters' load_icon_* targets: MatAnims swapping textures).
+        for (const auto& o : d->objects)
+            if (dirAnimatable(*o)) setFrame(o.get(), frame);
     }
 }
 

@@ -34,6 +34,9 @@ public:
     // Inline sub-directories, keyed by the object that holds each.
     std::vector<std::pair<std::string, std::unique_ptr<Directory>>> subdirs;
     Directory* parent = nullptr;
+    // The proxy file's own root name when the objects came from it
+    // (useProxyFiles): a parent of that name is this directory itself.
+    std::string proxyRoot;
     // Directories of other milos this one's ObjectDir subdirs name (a
     // PanelDir's ../metacam.milo...), linked by the code that loads them
     // (render/ui_view.cpp): find() searches them after the inline ones.

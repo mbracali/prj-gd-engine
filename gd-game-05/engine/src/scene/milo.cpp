@@ -328,6 +328,7 @@ void useProxyFiles(const GameData& data, const std::string& path, Directory& dir
             continue;
         }
         if (!fresh || fresh->cls != sub->cls) continue;
+        sub->proxyRoot = fresh->name;
         sub->objects = std::move(fresh->objects);
         for (auto& o : sub->objects) o->dir = sub.get();
         for (auto& [n, ss] : fresh->subdirs) {
