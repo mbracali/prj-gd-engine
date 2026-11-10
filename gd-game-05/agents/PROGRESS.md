@@ -5,6 +5,95 @@ Rock Band (Xbox 360) -> `gd05`. Kickoff: `docs/spikes/GD-GAME-05_KICKOFF.md`
 bottom. "Verified" lines quote the command and its output; "built only" and
 "not tested" are said explicitly.
 
+## Final report, wave 02 (2026-11-09, about 5.2 h of agent time, 18:05 -> 23:15)
+
+Completeness from the ledger (docs/parity.md, `python3 tools/parity.py
+docs/parity.md`): **60.00%** (wave start 21.0%). By area:
+- Front end 8.0 / 14
+- Port 1.0 / 2
+- Gameplay 16.25 / 22
+- Band 9.0 / 10
+- HUD 4.25 / 10
+- Stage 7.0 / 14
+- Modes 9.0 / 18
+- Custom 3.0 / 6
+- Saves 1.5 / 3
+- Video 1.0 / 1
+
+game-info.yaml completeness 0.6, gd05 0.0.2 (CHANGELOG).
+
+Verified by running (Linux, this build; one process at a time, scratch
+XDG, dummy audio, RB guitar ignored):
+- The gate: every walk OK.
+  - quickplay, quickplay_drums, quickplay_vocals, band_quickplay
+    (rerun OK after the venue band-name label fix);
+  - solo_tour, band_tour, score_duel, tug_of_war;
+  - rock_shop, creator, credits;
+  - rb_lose (retry), rb_lose_quit (QUIT to the main menu);
+  - tutorials (guitar; drums and vocals with GD05_INSTRUMENT: voice-overs play);
+  - rb_practice (section 3..4 at 90%: the clock starts a measure before).
+- `--selftest` (all charts fully hit), `--scenetest`, `--scripttest`,
+  `--videotest`, `--sfxtest`: all exit 0.
+- Overdrive's deploy and depleted cues play (quickplay with
+  GD05_AUTODEPLOY, logged).
+- The camera picks follow the RB rules (GD05_SHOTLOG). The shots' band
+  targets pose and place the band (screenshots in small_club_09). The
+  crowd shows in arena_07's far shot. The created character is on stage
+  in its gigs (log).
+- Packages: `gd-engine-launcher/scripts/build.sh all` exit 0. Every bundle
+  is `complete (5 game module(s) with their libraries)`: linux, steamdeck,
+  windows, android-arm64.
+- Linux launcher: `--play gd05 --iso ... --exit-after` with
+  GDUL_GAME_QUIT_AFTER=25000 -> `gd05 0.0.2 started`,
+  `back from gd-game-05: exit code 0 after 25.1 s`.
+- Wine (Proton Experimental, own prefix), same command -> `back from
+  gd-game-05: exit code 0 after 25.1 s`, 99 songs.
+
+Built only (not run by me):
+- The real microphone path (the null device under the dummy driver
+  stands in), Android's RECORD_AUDIO prompt, the RB drum kit as a device,
+  2 to 4 real pads.
+- Steam Deck and Android packages.
+
+Approximate:
+- RB's HUD is the port's simple one (stand-in).
+- The help bar does not show (D12).
+- Some venues are too bright.
+- Small clubs' crowd cards lie flat.
+- Main menu: the first letter of each button word is dark.
+- The song list cloth is flat (GD05-022) and its rows crowd together.
+- The difficulty screen's labels overlap.
+- Creator: no 3D preview, physique or colours.
+- The band lobby is a stand-in (D10).
+- Tutorials: finishing a lesson by playing is unchecked.
+- Camera: no intro chains or BFTB shots.
+
+Missing:
+- The Drum Trainer (not reached).
+- A/V calibration's own screens wired to the judge.
+- Leaderboards, online and DLC (GD05-013, out of scope).
+
+## For the owner to play (wave 02)
+- Solo > Quickplay > a song with the RB guitar: frets, strum, tilt or
+  Select deploys Overdrive (listen for the deploy sound), solos show their %.
+- GAMEPADS: Player 2 Instrument Drums with the RB drum kit; play a song on
+  drums; hit the fill's crash with Overdrive ready.
+- The USB mic: Player Vocals in GAMEPADS (or Vocals on the difficulty
+  screen); sing a song and watch the pitch arrow; tap the mic in tambourine
+  sections; shout in a freestyle section to deploy.
+- Android: first start asks for the microphone.
+- Multiplayer > Band > Quickplay with 2 to 4 pads; let one player fail and
+  save them with Overdrive.
+- Multiplayer > Head to Head: Score Duel and Tug of War.
+- Solo Tour and Band World Tour: create a character (name, hair, head),
+  play a gig, check your character is on stage, buy clothes in the Rock
+  Shop, quit and restart (the save).
+- Training: the tutorials for guitar, drums and vocals (do the lessons
+  finish when played?), Practice by section and speed.
+- Fail a song: Retry, New Song, Practice, Quit.
+- Options > Credits; Options > Enhanced Options.
+- Look: are venues too bright? Does the band look right in closeups?
+
 ## Final report, wave 01 (2026-11-09, about 4.3 h of agent time)
 
 Works (verified on Linux, fresh builds):
