@@ -30,8 +30,8 @@ code is there but nothing ran it, and it scores as missing.
 
 | # | Area | Feature | Weight | Status | Score | How checked / what is missing | Backlog |
 |---|---|---|---|---|---|---|---|
-| 1 | Front end | Boot: intro movie, title, attract, main menu | 2 | approximate | 1 | walks reach the main menu (`quickplay`, `keys`); the menu buttons' labels overlap them [I], no attract mode | GD05-005 |
-| 2 | Front end | Solo menu, Quickplay song list, difficulty / instrument, results | 3 | approximate | 1.5 | `--walktest quickplay`; the song list cloth is drawn flat (GD05-022) | GD05-022 |
+| 1 | Front end | Boot: intro movie, title, attract, main menu | 2 | works | 2 | wave 03: walks `rb_boot` (background video frames, no venue sound at boot, help bar click), `rb_owner_bugs`; the intro at 16:9, the attract mode reached after 30 s on the title (log), the main menu's metal words lit by their group's environ, GAMEPADS on the help bar (D19); screenshots | GD05-025 |
+| 2 | Front end | Solo menu, Quickplay song list, difficulty / instrument, results | 3 | approximate | 1.5 | wave 03: walks `quickplay`, `keys`, `rb_owner_bugs` (`song_list_layout`, `rb_helpbar`); the difficulty screen drawn as RB draws it (koi banner, the slot card, part then difficulty), results with the player panel; the song list's texture is shown flat, not on its swaying cloth [I], the results' stars label is empty | GD05-022 |
 | 3 | Front end | Multiplayer menus (band, head-to-head, Tug of War) | 2 | approximate | 1 | `band_quickplay`, `score_duel`, `tug_of_war` walks; RB's band / head-to-head lobby is the port's stand-in (DECISIONS D10) | GD05-009 |
 | 4 | Front end | Options: gameplay, audio, vocals, A/V calibration, character / band / save data | 2 | approximate | 1 | `credits` walk (options), screen sweep reaches the audio, gameplay, calibration, character / band data screens; volumes apply; calibration's click track [I] | GD05-009 |
 | 5 | Front end | Training menu: tutorials list, Drum Trainer menu | 1 | approximate | 0.5 | the training menu and the tutorials' lesson menu open (`tutorials` walk) | GD05-009 |

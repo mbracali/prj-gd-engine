@@ -58,7 +58,20 @@ export SDL_GAMECONTROLLER_IGNORE_DEVICES=0x1bad/0x0002 SDL_JOYSTICK_IGNORE_DEVIC
 timeout 120 engine/build/linux/gd05 "$ISO" --scenetest
 ```
 Each milestone adds its tests here; `PROGRESS.md` has each one's last
-verified output. Python checks:
+verified output.
+
+Front end (wave 03, `docs/frontend.md`):
+- `--walktest rb_boot`: the title and main menu over the background video,
+  no venue sound before the first song, a click on the song list's help bar
+  Back. `--walktest rb_owner_bugs`: the song list's layout and help bar,
+  then keyboard 2 during the song's start does not reload it.
+- `python3 -I tools/frontend.py extracted/dta [screen...]` (or `--md`): the
+  scripts' screens, panels, back and the screens each goes to.
+- Development aids: `GD05_SFXLOG=1` logs every sound object started
+  (`synth: ...`, "over N playing", looping samples) and the crowd streams;
+  `GD05_SHOTS=<dir>` saves each settled screen; `GD05_UILOG=1` logs screen
+  changes; `GD05_SONGLIST_3D=1` draws the song list through its banner
+  camera. Python checks:
 `python3 -I tools/milo.py scan extracted/ark`, `python3 -I tools/dtb.py dump extracted/ark extracted/dta`.
 
 ## Clocks

@@ -4,6 +4,32 @@ All notable changes for players. Versions follow SemVer; gd-game-05 ships
 inside the Guitar Dream Universal Launcher's release
 (`docs/platform/release-process.md`).
 
+## [0.0.3] - 2026-11-10
+
+### Fixed
+- No more crowd cheering at the start of the game: the menus play Rock
+  Band's own music and crowd ambience only.
+- Pressing the red fret (keyboard 2) as a song starts no longer loads the
+  song again; back goes only where each screen's own back goes, with the
+  backward transition.
+- The main menu's words are whole and lit (no dark first letters), the
+  focused button golden.
+- The loading screens show a real tip instead of raw data; the lose screen
+  shows how far the song got; confirm dialogs' messages are readable.
+
+### Changed
+- The menus play Rock Band's concert videos behind them, and the intro
+  movie fills the screen.
+- The song list sits on its cloth with readable rows, headings and the
+  highlight bar; the difficulty screen is Rock Band's own (the koi banner,
+  the player card: guitar or bass first, then the difficulty); the results
+  show the player's panel; the shop and tour rooms are drawn as in Rock
+  Band.
+- Menu text takes Rock Band's colours; the help bar shows its actions with
+  fret icons and takes mouse clicks; GAMEPADS is on the main menu's help
+  bar.
+- After 30 seconds on the title screen the attract videos play.
+
 ## [0.0.2] - 2026-11-09
 
 ### Added
