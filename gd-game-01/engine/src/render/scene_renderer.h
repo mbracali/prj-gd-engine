@@ -5,6 +5,7 @@
 #include <array>
 #include <functional>
 #include <map>
+#include <set>
 #include <string>
 #include <unordered_set>
 
@@ -32,6 +33,7 @@ public:
         float tint[4] = {1, 1, 1, 1};
         int texture = 0;  // replaces the stage-0 texture when set
         int geometry = 0;  // draws this renderer mesh (dynamicMesh) with the mesh's material
+        bool smoothEdges = false;  // a blended material draws without its alpha cutout (soft edges)
     };
     // Draws one mesh with options (used for gameplay elements).
     void drawMesh(const std::string& mesh, const Mat4& viewProj, const Mat4& model, const MeshOptions& options);
@@ -72,6 +74,11 @@ public:
     void replaceTexture(const std::string& tex, const Image& image);
     // Texture handle for a Tex object of this scene (0 when missing).
     int textureHandle(const std::string& tex) { return texture(tex, false); }
+    // A font's sheet: "Sharper Text & Sprites" upscales it as glyphs (enhanceImage).
+    int glyphTextureHandle(const std::string& tex) {
+        glyphTextures_.insert(tex);
+        return texture(tex, false);
+    }
 
 private:
     struct DrawMesh {
@@ -168,6 +175,7 @@ private:
     std::map<std::string, int> particleMeshes_;
     std::vector<int> dynamic_;
     bool uiTextures_ = false;
+    std::set<std::string> glyphTextures_;  // glyphTextureHandle's
     size_t dynamicUsed_ = 0;
     void setMatFlags(Renderer::RenderState& st, const MatObj* mat) const;
 

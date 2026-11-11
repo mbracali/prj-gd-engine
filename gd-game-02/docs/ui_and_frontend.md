@@ -330,8 +330,11 @@ walktests' career.json check.
     Rock Band guitars (`Input::setRockBand`), XInput gamepads that play
     (`Input::setGamepadPlay`).
   - **Audio / Video Calibration** (gd01's): `audio_offset` is subtracted
-    from the watcher's input offset (with GH2's own sync offset),
-    `video_offset` draws the track that much ahead.
+    from the watcher's input offset (with GH2's own sync offset) and the
+    track is drawn that much later with it (#69, as gd01: the gems reach the
+    line when they are heard), `video_offset` draws the track that much
+    ahead (`Player::calibratedDrawMs`). GH2's own sync offset moves the
+    judging only, as the original's watcher `+0x2c` [C].
   - **Picture**: Internal Resolution draws every frame into an off-screen
     target of that height (`RenderDevice::setInternalHeight`); Sharper Text
     and Sprites decodes and upscales the menus' textures made after it is

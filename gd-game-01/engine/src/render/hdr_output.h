@@ -14,6 +14,9 @@
 //            EGL_EXT_gl_colorspace_scrgb_linear, else
 //            EGL_EXT_gl_colorspace_bt2020_pq (+ SMPTE 2086 metadata when the
 //            driver has it). X11 (and so the Steam Deck's game mode) has none.
+//   Linux, Vulkan backend (#80): the swapchain's HDR10 / scRGB colour space
+//            (gd-engine-core DeviceCreateInfo::hdrOutput), which gamescope's
+//            WSI layer offers in Steam Deck Gaming Mode while its HDR is on.
 //   macOS, Android: no OpenGL HDR path.
 // Anything missing falls back to Emulated (tone mapped to SDR), never to a
 // black window: App retries the window without the request when it fails.

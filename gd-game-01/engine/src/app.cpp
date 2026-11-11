@@ -176,8 +176,10 @@ const std::map<std::string, Json>& enhancedDefaults() {
         {"max_fps", Json::string("120")},         {"fps_counter", Json::boolean(false)},
         {"internal_res", Json::string("1080")},   {"ai_upscaling_mode", Json::string("quality")},
         {"hopo_mode", Json::string("original")},  {"no_shaky_cam", Json::boolean(false)},
+        {"no_menu_transitions", Json::boolean(false)},
         {"cut_content", Json::boolean(false)},    {"no_fail", Json::boolean(false)},
         {"autoplay", Json::boolean(false)},
+        {"easy_chords", Json::boolean(false)},  // Enhanced > Accessibility (GDALL-039): off, as the original
         {"cheat_air_guitar", Json::boolean(false)}, {"cheat_gh_guitar", Json::boolean(false)},
         {"cheat_unlock_all", Json::boolean(false)}, {"cheat_full_meter", Json::boolean(false)},
         {"cheat_no_venue", Json::boolean(false)},   {"cheat_monkey_crowd", Json::boolean(false)},
@@ -505,6 +507,10 @@ private:
     void backToMenu();
     void uiButton(const InputEvent& e);
     void injectDebugKeys(std::vector<InputEvent>& out);
+    // NAME YOUR BAND (#76): a key typed into the focused text entry is the
+    // name's, not a game key (its release too). True when it was taken.
+    bool typedKey(const SDL_Event& e);
+    std::set<SDL_Keycode> typedKeys_;
     // Touch: the highways' lanes on screen while a song plays (Input::setTouchLanes).
     void updateTouchLanes();
     void songPreview(const std::string& id);
@@ -816,6 +822,7 @@ void App::tryLoadData(const std::string& path) {
                 }
             };
             ui_ = std::make_unique<UiSystem>(renderer_, *data_, hooks);
+            ui_->setNoTransitions(enhancedOn("no_menu_transitions"));
             applyCheats();
             loadBackdrop();  // Enhanced Settings' backdrop, ready before the menu opens
             bool skipBoot = opt_.skipBoot || SDL_getenv("GD01_SKIP_BOOT");
@@ -937,7 +944,7 @@ void App::startSong(size_t index, ControllerMode mode) {
             hitting2_ = false;
         }
         for (Player* p : {player_.get(), player2_.get()})
-            if (p) p->setForgivingHopos(enhanced("hopo_mode").str() == "forgiving");
+            if (p) p->setForgivingHopos(enhanced("hopo_mode").str() == "forgiving"), p->setEasyChords(enhancedOn("easy_chords"));
         mixer_.stopMusic(0);
         previewing_ = false;
         endMs_ = -1;
@@ -1309,7 +1316,7 @@ void App::injectDebugKeys(std::vector<InputEvent>& out) {
                 ev.key.timestamp = SDL_GetTicksNS();
                 ev.key.key = SDL_Keycode(key.code);
                 ev.key.down = down;
-                input_.handle(ev, out);
+                if (!typedKey(ev)) input_.handle(ev, out);
             } else if (virtualPad_) {
                 SDL_SetJoystickVirtualButton(virtualPad_, key.code, down);
             }
@@ -1331,6 +1338,20 @@ void App::injectDebugKeys(std::vector<InputEvent>& out) {
         if (key.edge >= 0) out.push_back({key.action, true, SDL_GetTicksNS(), ControllerMode::Joypad, key.player});
         if (key.edge <= 0) out.push_back({key.action, false, SDL_GetTicksNS(), ControllerMode::Joypad, key.player});
     }
+}
+
+bool App::typedKey(const SDL_Event& e) {
+    if (e.type == SDL_EVENT_KEY_UP) return typedKeys_.erase(e.key.key) > 0;
+    if (e.type != SDL_EVENT_KEY_DOWN || !ui_ || movie_ || screen_ != Screen::Menu) return false;
+    if (e.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_GUI)) return false;
+    // A key bound to a control (the keyboard's frets 1-5, Start ...) keeps it:
+    // the green fret always takes the letter (universal_mechanisms.md 1.1.2).
+    for (const auto& slots : input_.bindings("keyboard"))
+        for (const Input::Source& b : slots)
+            if (b.kind == Input::Source::Kind::Key && b.index == int(e.key.key)) return false;
+    if (!ui_->typeKey(int(e.key.key))) return false;
+    typedKeys_.insert(e.key.key);
+    return true;
 }
 
 void App::startMovie(const std::string& file) {
@@ -1423,9 +1444,10 @@ void App::drawFpsCounter() {
 }
 
 // Enhanced Settings only: the graphics and audio backends this run uses (after
-// any fallback to local), on the line just above the FPS counter's (beside
-// it, and on it when the counter is off, the help bar's legend takes the
-// room) (universal-menus.md, Graphics / Audio backend).
+// any fallback to local), bottom right, one per line, right of the help bar
+// (universal-menus.md, Graphics / Audio backend). [I] Port (#76): above the
+// FPS counter it ran over the help bar's SELECT pill; there it read as part
+// of the help bar.
 void App::drawBackendLabel() {
     if (!ui_ || movie_ || screen_ != Screen::Menu || ui_->currentScreen() != "enhanced_settings") return;
     auto label = [](const std::string& id) -> std::string {
@@ -1439,11 +1461,19 @@ void App::drawBackendLabel() {
         return label(running) + (chosen != running && label(chosen) != "local" ? " (" + label(chosen) + " could not start)" : "");
     };
     const std::string audio = mixer_.outputBackend().empty() ? "local" : mixer_.outputBackend();
-    const std::string s = "Graphics: " + shown(renderer_.backend(), startupGraphicsBackend()) +
-                          "   Audio: " + shown(audio, startupAudioBackend());
-    const float y = 667;  // always above the counter's line: there the help bar's legend starts at x 200
-    ui_->drawText("impactor.font", s, 25, y + 2, 20, {0, 0, 0, 0.6f}, 0x41);  // shadow
-    ui_->drawText("impactor.font", s, 23, y, 20, {1, 1, 1, 0.9f}, 0x41);
+    const std::array<std::string, 2> lines = {"Graphics: " + shown(renderer_.backend(), startupGraphicsBackend()),
+                                              "Audio: " + shown(audio, startupAudioBackend())};
+    // Right-aligned at the FPS counter's margin; smaller when a long line
+    // (a backend that could not start) would reach the help bar.
+    const float right = kScreenW - 23, room = right - std::max(ui_->helpBarRight() + 32, kScreenW * 0.5f);
+    float size = 20;
+    for (const std::string& l : lines)
+        if (const float w = ui_->textWidth("impactor.font", l, size); w > room) size = std::max(12.0f, size * room / w);
+    for (size_t k = 0; k < lines.size(); ++k) {
+        const float y = 697 - float(lines.size() - 1 - k) * (size + 4);  // bottoms; the last on the FPS counter's line
+        ui_->drawText("impactor.font", lines[k], right + 2, y + 2, size, {0, 0, 0, 0.6f}, 0x44);  // shadow
+        ui_->drawText("impactor.font", lines[k], right, y, size, {1, 1, 1, 0.9f}, 0x44);
+    }
 }
 
 // The version on the main title screen, top right: the FPS counter's font and
@@ -2009,6 +2039,7 @@ void App::applyEnhanced() {
         applyVenueLights(*venue_);
     }
     if (backdrop_) applyVenueLights(*backdrop_);  // Enhanced Settings shows the change at once
+    if (ui_) ui_->setNoTransitions(enhancedOn("no_menu_transitions"));  // #76
     // Screen mode: windowed, fullscreen (the display's mode at the desktop
     // size) or borderless (fullscreen at the desktop's own mode).
     std::string mode = enhanced("screen_mode").str();
@@ -2592,10 +2623,21 @@ int App::run(int* restartSlot) {
     const SDL_WindowFlags winFlags = gpuWindow ? (winFlagsGl & ~SDL_WINDOW_OPENGL) | SDL_WindowFlags(gr::windowFlags(coreBackend)) : winFlagsGl;
     // Enhanced > HDR > True HDR: the window's surface is chosen now (render/hdr_output.h).
     // A window or surface that cannot be made with it is made again without (Emulated).
-    // The surface probe is OpenGL's: on the SDL3 GPU / Vulkan backends True HDR runs as Emulated.
+    // The surface probe is OpenGL's; the Vulkan backend asks its swapchain instead (#80: the
+    // only True HDR path in Steam Deck Gaming Mode, through gamescope's WSI layer). On SDL3 GPU
+    // True HDR runs as Emulated.
+    const bool trueHdr = enhanced("hdr").str() == "true";
+#if defined(__linux__) && !defined(__ANDROID__)
+    const bool vulkanHdr = gpuWindow && coreBackend == gr::Backend::Vulkan;  // Linux only: elsewhere unchanged
+#else
+    const bool vulkanHdr = false;
+#endif
     hdrSurface_ = hdr::Surface::Sdr;
-    hdrReason_ = gpuWindow ? std::string("True HDR is not on the ") + backendId + " graphics backend yet" : hdr::unsupportedReason();
-    const bool wantHdr = !gpuWindow && enhanced("hdr").str() == "true" && hdr::request();
+    hdrReason_ = vulkanHdr ? "" : gpuWindow ? std::string("True HDR is not on the ") + backendId + " graphics backend yet" : hdr::unsupportedReason();
+    if (!gpuWindow && !hdrReason_.empty() && SDL_getenv("GAMESCOPE_WAYLAND_DISPLAY"))
+        hdrReason_ = "in Steam Deck Gaming Mode (gamescope) OpenGL has no HDR; set Graphics Backend to Vulkan";
+    renderer_.requestDeviceHdr(vulkanHdr && trueHdr);
+    const bool wantHdr = !gpuWindow && trueHdr && hdr::request();
     window_ = SDL_CreateWindow(kAppTitle, winW, winH, winFlags);
     if (wantHdr) {
         if (window_) {
@@ -2614,12 +2656,17 @@ int App::run(int* restartSlot) {
             window_ = SDL_CreateWindow(kAppTitle, winW, winH, winFlags);
         }
     }
-    if (enhanced("hdr").str() == "true")
-        SDL_Log("hdr: %s", hdrSurface_ == hdr::Surface::ScRgb ? "scRGB surface (linear, RGBA16F)"
-                           : hdrSurface_ == hdr::Surface::Pq  ? "BT.2020 PQ surface"
-                                                              : ("unavailable (" + hdrReason_ + "), using Emulated").c_str());
     setAppWindowIcon(window_);
     installDesktopEntry();
+    if (vulkanHdr && trueHdr && window_ && !SDL_getenv("GAMESCOPE_WAYLAND_DISPLAY") &&
+        !SDL_GetBooleanProperty(SDL_GetDisplayProperties(SDL_GetDisplayForWindow(window_)), SDL_PROP_DISPLAY_HDR_ENABLED_BOOLEAN, false)) {
+        // A desktop whose display shows SDR: an SDR swapchain, as before (some drivers offer HDR10
+        // anyway). Under gamescope SDL cannot tell; its WSI layer offers HDR only while HDR is on.
+        hdrReason_ = SDL_strcmp(SDL_GetCurrentVideoDriver(), "wayland") == 0
+                         ? "HDR is off for this display (turn it on in the system's display settings)"
+                         : "needs a Wayland desktop session with HDR on, or Steam Deck Gaming Mode";
+        renderer_.requestDeviceHdr(false);
+    }
     std::string glError;
     renderer_.setBackend(backendId);
     bool glOk = window_ && renderer_.init(window_, glError);
@@ -2635,6 +2682,17 @@ int App::run(int* restartSlot) {
         renderer_.setBackend("local");
         glOk = window_ && renderer_.init(window_, glError);
     }
+    if (vulkanHdr && trueHdr && glOk) {
+        int s = 0;
+        if (!hdrReason_.empty()) s = 0;  // not asked (the display shows SDR)
+        else if (renderer_.backend() == "vulkan") s = renderer_.deviceHdrSurface(hdrReason_);
+        else hdrReason_ = "the Vulkan graphics backend did not start";
+        hdrSurface_ = s == 2 ? hdr::Surface::Pq : s == 1 ? hdr::Surface::ScRgb : hdr::Surface::Sdr;
+    }
+    if (trueHdr)
+        SDL_Log("hdr: %s", hdrSurface_ == hdr::Surface::ScRgb ? "scRGB surface (linear, RGBA16F)"
+                           : hdrSurface_ == hdr::Surface::Pq  ? (vulkanHdr ? "HDR10 (BT.2020 PQ) Vulkan swapchain" : "BT.2020 PQ surface")
+                                                              : ("unavailable (" + hdrReason_ + "), using Emulated").c_str());
     if (glOk) renderer_.setHdrSurface(int(hdrSurface_));
     gpu::started(glOk, renderer_.gpuName());
     if (!glOk) {
@@ -2710,7 +2768,7 @@ int App::run(int* restartSlot) {
                 renderer_.windowToMenu(click ? e.button.x : e.motion.x, click ? e.button.y : e.motion.y, mx, my);
                 ui_->mouse(mx, my, click);
             }
-            input_.handle(e, actions);
+            if (!typedKey(e)) input_.handle(e, actions);
         }
         input_.poll(SDL_GetTicksNS(), actions);
         for (auto [mx, my] : input_.takeMenuTaps())  // a tap in the menus is a click
@@ -2882,6 +2940,141 @@ int inputSelfTest() {
     std::printf(failures ? "input self-test: %d of %d checks failed\n" : "input self-test: all %d checks passed\n", failures ? failures : checks, checks);
     return failures;
 }
+
+// #77 (GD01-315): the guitar copy around a sustain followed at once by a
+// different single note (the sustain running up to the next gem, as in about
+// half of GH1's Expert sustains). The original's rule (FUN_00264018 ->
+// UnmuteBeatMatchAudio_v18 0x265df0): letting the sustain go while time is
+// left (`0.0 < remaining`) silences the guitar until the next hit; nothing
+// else does. So: moving late (after the sustain's end) or strumming the next
+// note while still holding never mutes; moving early mutes until the strum,
+// as the original does. Returns the failures (0 when no such pair exists).
+int sustainAudioSelfTest(const std::vector<SongInfo>& songs, GameData& data, const Rules& rules) {
+    int failures = 0, checks = 0;
+    auto check = [&](bool ok, const char* what) {
+        ++checks;
+        if (!ok) ++failures, std::printf("sustain audio self-test FAILED: %s\n", what);
+    };
+    for (const SongInfo& info : songs) {
+        Song song = buildSong(parseMidi(data.read(info.midiPath)));
+        const auto& gems = song.charts[3].gems;
+        for (size_t i = 1; i + 1 < gems.size(); ++i) {
+            const Gem &a = gems[i], &b = gems[i + 1];
+            const float end = a.ms + a.durationMs;
+            if (a.noSustain || a.fretCount() != 1 || b.fretCount() != 1 || b.hopo || a.frets == b.frets ||
+                b.ms - end > 1 || b.ms - end < 0 || a.ms - gems[i - 1].ms < 200 || a.durationMs < 200)
+                continue;
+            const int fa = std::countr_zero(unsigned(a.frets)), fb = std::countr_zero(unsigned(b.frets));
+            // move: when the hand goes from a's fret to b's; strum: b's strum.
+            // `heldStrum`: strum b while a's fret is still down, then move.
+            auto run = [&](float move, float strum, bool heldStrum, float& mutedMs) {
+                Player p(song, Difficulty(3), rules, ControllerMode::Guitar, true);
+                mutedMs = 0;
+                bool moved = false, strummed = false;
+                for (float t = a.ms - 100; t < b.ms + 150; t += 1) {
+                    if (t == a.ms - 100) p.update(t);
+                    if (t == a.ms - 2) p.fretDown(fa, t);
+                    if (t == a.ms) p.strum(t);
+                    if (heldStrum && !strummed && t >= strum) p.strum(t), strummed = true;
+                    if (!moved && t >= move) {
+                        if (fb > fa) p.fretDown(fb, t), p.fretUp(fa, t);
+                        else p.fretUp(fa, t), p.fretDown(fb, t);
+                        moved = true;
+                    }
+                    if (!heldStrum && !strummed && t >= strum) p.strum(t), strummed = true;
+                    p.update(t);
+                    if (t >= a.ms && !p.guitarAudible()) mutedMs += 1;
+                }
+                return p.gemHit(int(i)) && p.gemHit(int(i + 1));
+            };
+            float muted = 0;
+            check(run(end + 3, b.ms + 8, false, muted) && muted == 0, "moved just after the sustain's end: never muted");
+            check(run(end + 3, end + 3, false, muted) && muted == 0, "moved and strummed together just after the end: never muted");
+            check(run(b.ms - 20, b.ms - 30, true, muted) && muted == 0, "strummed early while holding: never muted");
+            check(run(b.ms - 30, b.ms - 30, false, muted) && muted == 0, "moved and strummed early together: never muted");
+            check(run(end - 30, b.ms - 2, false, muted) && muted > 20 && muted < 40,
+                  "let go 30 ms early: muted until the strum, as the original (_v18)");
+            std::printf(failures ? "sustain audio self-test (%s gem %d): %d of %d checks failed\n"
+                                 : "sustain audio self-test (%s gem %d): all %d checks passed\n",
+                        info.id.c_str(), int(i), failures ? failures : checks, checks);
+            return failures;
+        }
+    }
+    std::printf("sustain audio self-test: no sustain running into a different note found\n");
+    return 0;
+}
+
+// Enhanced > Accessibility > Easy Chords (GDALL-039): off (the default, as the
+// original) a chord strummed with one of its frets misses; on, any part of it
+// hits and scores as the whole chord, a fret outside it misses, and a held
+// chord's sustain lasts while any of its frets is held.
+int easyChordsSelfTest(const std::vector<SongInfo>& songs, GameData& data, const Rules& rules) {
+    int failures = 0, checks = 0;
+    auto check = [&](bool ok, const char* what) {
+        ++checks;
+        if (!ok) ++failures, std::printf("easy chords self-test FAILED: %s\n", what);
+    };
+    for (const SongInfo& info : songs) {
+        Song song = buildSong(parseMidi(data.read(info.midiPath)));
+        const auto& gems = song.charts[3].gems;
+        for (size_t i = 1; i + 1 < gems.size(); ++i) {
+            const Gem& g = gems[i];
+            if (g.fretCount() < 2 || g.fretCount() > 4 || g.hopo || g.ms - gems[i - 1].ms < 300 || gems[i + 1].ms - g.ms < 300)
+                continue;
+            const uint32_t outside = ~g.frets & 0x1fu;
+            const int low = std::countr_zero(unsigned(g.frets)), out = std::countr_zero(unsigned(outside));
+            // Holds `frets` from 20 ms before the gem, strums on it; returns hit and the score.
+            auto run = [&](bool easy, uint32_t frets, int& score, float releaseMs = 0, uint32_t release = 0) {
+                Player p(song, Difficulty(3), rules, ControllerMode::Guitar, true);
+                p.setEasyChords(easy);
+                for (float t = g.ms - 200; t < g.ms + 250; t += 1) {
+                    if (t == g.ms - 20)
+                        for (int f = 0; f < 5; ++f)
+                            if (frets >> f & 1u) p.fretDown(f, t);
+                    if (t == g.ms) p.strum(t);
+                    if (release && t == releaseMs)
+                        for (int f = 0; f < 5; ++f)
+                            if (release >> f & 1u) p.fretUp(f, t);
+                    p.update(t);
+                }
+                score = p.score();
+                return p.gemHit(int(i));
+            };
+            int full = 0, part = 0, sc = 0;
+            check(run(false, g.frets, full), "off: the whole chord hits");
+            check(!run(false, 1u << low, sc), "off (default): one fret of the chord misses, as the original");
+            check(run(true, g.frets, sc) && sc == full, "on: the whole chord hits as before");
+            check(run(true, 1u << low, part) && part == full, "on: one fret of the chord hits, scored as the whole chord");
+            check(!run(true, (1u << low) | (1u << out), sc), "on: a chord fret with a fret outside the chord misses");
+            check(!run(true, 1u << out, sc), "on: a fret outside the chord misses");
+            {
+                // A joypad: the chord's first fret hits it; its next fret 30 ms later is no overstrum.
+                Player p(song, Difficulty(3), rules, ControllerMode::Joypad, true);
+                p.setEasyChords(true);
+                const int second = std::countr_zero(unsigned(g.frets & ~(1u << low)));
+                for (float t = g.ms - 200; t < g.ms + 250; t += 1) {
+                    if (t == g.ms) p.fretDown(low, t);
+                    if (t == g.ms + 30) p.fretDown(second, t);
+                    p.update(t);
+                }
+                check(p.gemHit(int(i)) && p.missCount() == 0, "on, joypad: one fret hits the chord, its next fret is no overstrum");
+            }
+            if (g.durationMs >= 200 && !g.noSustain) {
+                int both = 0, one = 0, offOne = 0;
+                run(true, g.frets, both);
+                run(true, g.frets, one, g.ms + 50, g.frets & ~(1u << low));
+                run(false, g.frets, offOne, g.ms + 50, g.frets & ~(1u << low));
+                check(one == both && offOne < both, "on: the sustain holds on one of its frets (off: it ends)");
+            }
+            std::printf(failures ? "easy chords self-test (%s gem %d): %d of %d checks failed\n"
+                                 : "easy chords self-test (%s gem %d): all %d checks passed\n",
+                        info.id.c_str(), int(i), failures ? failures : checks, checks);
+            return failures;
+        }
+    }
+    std::printf("easy chords self-test FAILED: no chord found\n");
+    return 1;
+}
 }  // namespace
 
 int runSelfTest(const Options& options) {
@@ -2893,6 +3086,8 @@ int runSelfTest(const Options& options) {
         auto songs = loadSongs(data);
         std::printf("%u songs in %s; slop %.0f ms, head %d, tail %d\n", unsigned(songs.size()), data.description().c_str(),
                     rules.slopMs, rules.headPoints, rules.tailPoints);
+        if (sustainAudioSelfTest(songs, data, rules)) return 1;
+        if (easyChordsSelfTest(songs, data, rules)) return 1;
         int failures = 0, hopos = 0;
         for (const SongInfo& info : songs) {
             Song song = buildSong(parseMidi(data.read(info.midiPath)));

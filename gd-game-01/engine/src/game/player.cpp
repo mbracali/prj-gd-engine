@@ -136,7 +136,7 @@ void Player::watcherStrum(float t, int fret, bool guitarStrum) {
         return;
     }
     if (!hit_[i]) {
-        bool match = g.fretCount() == 1 ? lowestFret(g.frets) == fret : g.frets == held_;
+        bool match = g.fretCount() == 1 ? lowestFret(g.frets) == fret : chordMatch(g.frets, held_);
         if (match) {
             hitGem(t, i, false);
             return;
@@ -155,6 +155,8 @@ void Player::watcherStrum(float t, int fret, bool guitarStrum) {
     } else if (i == hopoHit_) {
         hopoHit_ = -1;  // strumming a note already hit as a HOPO is forgiven
         emit(PlayerEvent::Kind::SwingAtHopo, i);
+    } else if (easyChords_ && !guitarStrum && g.fretCount() >= 2 && fret >= 0 && (g.frets >> fret & 1u)) {
+        // Easy Chords: another fret of a chord already hit (a joypad's press) is not an overstrum.
     } else {
         overstrum(t, i, fret);
     }
@@ -165,7 +167,8 @@ void Player::watcherFretDown(int fret, float t) {
     held_ |= 1u << fret;
     if (sustainGem_ != -1) {
         const Gem& g = chart_.gems[sustainGem_];
-        if (fret > highestFret(g.frets) || g.fretCount() >= 2) endSustainEarly(t);
+        const bool chordFret = easyChords_ && g.fretCount() >= 2 && (g.frets >> fret & 1u);  // Easy Chords: its own fret
+        if (fret > highestFret(g.frets) || (g.fretCount() >= 2 && !chordFret)) endSustainEarly(t);
     }
     pendingCheck(t, fret);
 }
@@ -175,7 +178,7 @@ void Player::watcherFretUp(int fret, float t) {
     held_ &= ~(1u << fret);
     if (sustainGem_ != -1) {
         uint32_t need = chart_.gems[sustainGem_].frets;
-        if ((held_ & need) != need) endSustainEarly(t);
+        if (easyChords_ && chart_.gems[sustainGem_].fretCount() >= 2 ? (held_ & need) == 0 : (held_ & need) != need) endSustainEarly(t);
     }
     pendingCheck(t, -1);
 }
@@ -185,7 +188,7 @@ void Player::pendingCheck(float t, int fret) {
     if (pending_ == -1 || pendingDeadline_ <= t) return;
     int i = pending_;
     const Gem& g = chart_.gems[i];
-    bool match = (g.fretCount() == 1 && fret != -1) ? lowestFret(g.frets) == fret : g.frets == held_;
+    bool match = (g.fretCount() == 1 && fret != -1) ? lowestFret(g.frets) == fret : chordMatch(g.frets, held_);
     if (match) {
         hitGem(t, i, false);
         if (g.fretCount() > 1) chordStrumMs_ = t;

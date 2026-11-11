@@ -130,7 +130,7 @@ int UiResources::fontTexture(const std::string& name) {
     if (!f || !f->font) return 0;
     const SceneObject* mat = scene_->find(f->font->mat);
     if (!mat || !mat->mat || mat->mat->stages.empty()) return 0;
-    return renderer_->textureHandle(mat->mat->stages[0].tex);
+    return renderer_->glyphTextureHandle(mat->mat->stages[0].tex);
 }
 
 int UiResources::fontZMode(const std::string& name) const {
@@ -160,6 +160,10 @@ void UiResources::drawMeshAt(const std::string& mesh, const Mat4& viewProj, cons
     const SceneObject* mat = o && o->mesh ? scene_->find(o->mesh->mat) : nullptr;
     if (mat && mat->mat && mat->mat->useEnviron)
         for (int k = 0; k < 3; ++k) opt.tint[k] *= std::clamp(ambient[size_t(k)], 0.0f, 1.0f);
+    // [I] Port (#76): the help bar's rounded boxes (32 x 32 corner texture,
+    // SrcAlpha blend plus the PS2's alpha test) keep a smooth blended edge
+    // instead of the alpha test's staircase, which shows on large screens.
+    opt.smoothEdges = mesh.rfind("help_box_", 0) == 0;
     renderer_->drawMesh(mesh, viewProj, world, opt);
 }
 

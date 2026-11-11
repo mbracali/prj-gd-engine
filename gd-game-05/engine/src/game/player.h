@@ -117,6 +117,12 @@ public:
     // arrives plays by itself.
     void setForgivingHopos(bool on) { forgiving_ = on; }
     bool forgivingHopos() const { return forgiving_; }
+    // Enhanced Options > Accessibility > Easy Chords (GDALL-039) [the port's]:
+    // a chord counts when the held frets are any non-empty part of it (no fret
+    // outside it), and its sustain lasts while any of its frets is held. Off:
+    // as the original.
+    void setEasyChords(bool on) { easyChords_ = on; }
+    bool easyChords() const { return easyChords_; }
     // Practice: gems before `firstGem` are skipped (watcher +0x1c) and the
     // player counts only gems with ticks in [startTick, endTick) (+0xf0/+0xf4) [C].
     void setPracticeRange(int firstGem, int startTick, int endTick);
@@ -286,6 +292,10 @@ private:
     // Watcher fields (offsets of the guitar watcher, FINDINGS "Watcher fields").
     float offset_ = 0;            // +0x2c calibration
     bool forgiving_ = false;
+    bool easyChords_ = false;
+    bool chordMatch(uint32_t frets, uint32_t held) const {
+        return easyChords_ ? held != 0 && (held & ~frets) == 0 : frets == held;
+    }
     int lastHit_ = -1;            // +0x18
     int firstPlayable_ = 0;       // +0x1c
     int sustainGem_ = -1;         // +0x24

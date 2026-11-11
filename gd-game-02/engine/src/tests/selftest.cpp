@@ -152,10 +152,11 @@ struct Play {
 };
 
 Play play(const Song& song, const Rules& rules, const std::string& script, float untilMs = 0,
-          ControllerMode mode = ControllerMode::Guitar, std::vector<int> bigNotes = {}) {
+          ControllerMode mode = ControllerMode::Guitar, std::vector<int> bigNotes = {}, bool easyChords = false) {
     Play r;
     r.p = std::make_unique<Player>(song, Part::Guitar, Difficulty::Expert, rules, mode, false);
     r.p->setBigNotes(std::move(bigNotes));
+    r.p->setEasyChords(easyChords);
     KeyScript keys(script);
     if (!keys.valid()) throw std::runtime_error("bad key script: " + script);
     if (untilMs <= 0) untilMs = song.endMs;
@@ -546,6 +547,35 @@ int runRuleChecks(const Rules& rules) {
         std::printf("      (rock meter: failed after %d passes, expected %d)\n", r2.p->penalties(), expect);
         check("rock meter: the song fails once the rating drops below lose_level", r2.p->failed() && r2.p->penalties() == expect);
     }
+    {
+        // Enhanced > Accessibility > Easy Chords (GDALL-039): off by default, as the original.
+        Song c = makeSong({{1000, G | R | Y}, {3000, G | B}, {5000, R}});
+        const std::string one = "990:+red,1000:strum,1100:-red", outside = "2990:+green,2995:+yellow,3000:strum";
+        Play off = play(c, rules, one, 1500), off2 = play(c, rules, one, 1500, ControllerMode::Guitar, {}, false);
+        check("easy chords off (the default): one fret of a chord misses, as the original",
+              !off.p->easyChords() && !off.p->gemHit(0) && off.count(K::Miss, 0) == 1 && !off2.p->gemHit(0));
+        Play on = play(c, rules, one + "," + outside, 3500, ControllerMode::Guitar, {}, true);
+        Play all = play(c, rules, "990:+green,991:+red,992:+yellow,1000:strum", 1500, ControllerMode::Guitar, {}, true);
+        Play full = play(c, rules, "990:+green,991:+red,992:+yellow,1000:strum", 1500);
+        check("easy chords on: one fret of the chord hits, scored as the whole chord; a fret outside the chord misses",
+              on.p->gemHit(0) && on.count(K::Miss, 0) == 0 && !on.p->gemHit(1) && on.count(K::Miss, 1) == 1 &&
+                  all.p->gemHit(0) && all.p->score() == full.p->score() && on.p->score() == full.p->score());
+        Play gy = play(c, rules, "980:+green,990:+yellow,1000:strum", 1500, ControllerMode::Guitar, {}, true);
+        Play ob = play(c, rules, "2990:+blue,3000:strum", 3500, ControllerMode::Guitar, {}, true);
+        check("easy chords on: green + yellow of green-red-yellow hits; blue alone of green-blue hits",
+              gy.p->gemHit(0) && ob.p->gemHit(1));
+        Song s = makeSong({{1000, G | R, 960}, {5000, R}});
+        Play held = play(s, rules, "998:+green,999:+red,1000:strum,1480:-green,2500:-red", 3000, ControllerMode::Guitar, {}, true);
+        Play both = play(s, rules, "998:+green,999:+red,1000:strum,2500:-green,2500:-red", 3000);
+        Play cut = play(s, rules, "998:+green,999:+red,1000:strum,1480:-green,2500:-red", 3000);
+        check("easy chords on: a chord's sustain lasts while one of its frets is held (off: letting go of one ends it)",
+              held.p->score() == both.p->score() && cut.p->score() < both.p->score());
+        Play pad = play(c, rules, "1000:+red,1001:-red", 1500, ControllerMode::Joypad, {}, true);
+        Play padOff = play(c, rules, "1000:+red,1001:-red", 1500, ControllerMode::Joypad);
+        check("easy chords on, joypad: one fret of the chord hits (off: the window runs out)", pad.p->gemHit(0) && !padOff.p->gemHit(0));
+        Play pad2 = play(c, rules, "1000:+red,1030:+green,1100:-red,1100:-green", 1500, ControllerMode::Joypad, {}, true);
+        check("easy chords on, joypad: the chord's next fret after the hit is no overstrum", pad2.p->gemHit(0) && pad2.count(K::Miss) == 0);
+    }
     return failures;
 }
 
@@ -584,6 +614,52 @@ int checkPcWording(const GameData& data) {
         }
     }
     return failures;
+}
+
+// #69: Enhanced > Audio / Video Calibration with a large heard delay
+// (wireless headphones, a soundbar). The gems are played when they are
+// heard (chart time + the audio delay): every gem is hit, the track draws
+// the gem on the line at that time (plus the video delay ahead), and with
+// no delay nothing changes; unshifted play under +180 ms misses.
+static int checkCalibration(const GameData& data, const std::vector<SongInfo>& songs, const Rules& rules) {
+    for (const SongInfo& info : songs) {
+        Song song;
+        try {
+            song = loadChart(data, info, rules);
+        } catch (const std::exception&) {
+            continue;
+        }
+        if (!song.hasPart[size_t(Part::Guitar)]) continue;
+        auto play = [&](float audioMs, float playedLateMs) {
+            Player p(song, Part::Guitar, Difficulty::Expert, rules, ControllerMode::Guitar, true);
+            p.setCalibrationMs(0.0f - audioMs);  // the app's calibrationMs(): sync offset - audio delay
+            Autoplay bot(p.chart());
+            bot.delay(playedLateMs);
+            for (float t = -1000; t < song.endMs + 5000; t += 4) bot.feed(p, t), p.update(t);
+            return p.notesHit();
+        };
+        const int total = int(Player(song, Part::Guitar, Difficulty::Expert, rules, ControllerMode::Guitar, true).chart().gems.size());
+        int failures = 0;
+        struct Case { float audio, video; } cases[] = {{0, 0}, {180, 0}, {180, 60}, {-60, 0}, {300, 100}};
+        for (const Case& c : cases) {
+            const int hit = play(c.audio, c.audio);
+            // The gem on the line (drawn at its own time, minus the video delay) when it is heard.
+            const float gem = song.endMs * 0.5f;
+            const float drawn = Player::calibratedDrawMs(gem + c.audio, c.audio, c.video);
+            const bool ok = hit == total && std::abs(drawn - (gem + c.video)) < 0.01f;
+            std::printf("calibration: %s audio %+.0f ms, video %+.0f ms: %d/%d hit when heard, gem drawn at %+.0f ms%s\n",
+                        info.id.c_str(), double(c.audio), double(c.video), hit, total, double(drawn - gem), ok ? "" : " FAILED");
+            failures += !ok;
+        }
+        const int early = play(180, 0);  // played on the chart's time, not when heard
+        std::printf("calibration: audio +180 ms played on the chart's time: %d/%d hit (expected fewer)\n", early, total);
+        failures += early >= total;
+        // No calibration: the draw time is the song time itself.
+        failures += Player::calibratedDrawMs(1234.5f, 0, 0) != 1234.5f;
+        return failures;
+    }
+    std::printf("calibration: no song with a guitar part\n");
+    return 1;
 }
 
 int runSelfTest(const std::string& dataPath) {
@@ -698,12 +774,13 @@ int runSelfTest(const std::string& dataPath) {
                 bassFailures = 1;
             }
         }
+        const int calibrationFailures = checkCalibration(data, songs, rules);
         const int wordingFailures = checkPcWording(data);
         std::printf(wordingFailures ? "%d string(s) still name the Xbox 360 or a console\n" : "PC wording: no Xbox 360 or console in any language\n",
                     wordingFailures);
         std::printf("%d song audio file(s) with problems, %d script(s) not decoded\n", audioFailures, scriptFailures);
         std::printf(chartFailures ? "%d chart(s) not fully hit\n" : "all charts fully hit\n", chartFailures);
-        return chartFailures || audioFailures || scriptFailures || ruleFailures || inputFailures || wordingFailures || bassFailures ? 1 : 0;
+        return chartFailures || audioFailures || scriptFailures || ruleFailures || inputFailures || wordingFailures || bassFailures || calibrationFailures ? 1 : 0;
     } catch (const std::exception& ex) {
         std::fprintf(stderr, "self-test failed: %s\n", ex.what());
         return 2;

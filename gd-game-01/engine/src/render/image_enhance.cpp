@@ -43,11 +43,12 @@ std::vector<float> pass(const std::vector<float>& src, int sw, int sh, int f, bo
 
 }  // namespace
 
-Image enhanceImage(const Image& in) {
+Image enhanceImage(const Image& in, bool glyphs) {
     const int w = in.width, h = in.height;
     if (w <= 0 || h <= 0) return in;
     const int maxDim = std::max(w, h);
-    const int f = maxDim <= 256 ? 4 : maxDim <= 512 ? 2 : 1;
+    // A font sheet goes x4 up to 512 px (the menus magnify their glyphs the most).
+    const int f = maxDim <= 256 || (glyphs && maxDim <= 512) ? 4 : maxDim <= 512 ? 2 : 1;
     if (f == 1) return in;
     // Premultiplied, so transparent texels add no dark fringe.
     std::vector<float> src(size_t(w) * size_t(h) * 4);
@@ -61,7 +62,9 @@ Image enhanceImage(const Image& in) {
     }
     // Glyph sheets and cut-out sprites have mostly hard alpha: their upscaled
     // edges are tightened again instead of staying a soft ramp.
-    const bool hardAlpha = visible > 0 && float(mid) / float(visible) < 0.25f;
+    // A font sheet's anti-aliased glyph edges are coverage too: tightened the
+    // same way, so menu text stays crisp however large it is drawn (#76).
+    const bool hardAlpha = visible > 0 && (glyphs || float(mid) / float(visible) < 0.25f);
     std::vector<float> dst = pass(pass(src, w, h, f, true), w * f, h, f, false);
     Image out;
     out.width = w * f, out.height = h * f;

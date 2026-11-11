@@ -221,7 +221,7 @@ false, GetLatestContentIndexFile (82134408) false [I].
   glow_menu_element); first time: `PlayMovieAndWait {movie='GH3_Intro' noblack
   noletterbox}`; SetMenuAutoRepeatTimes (0.3, 0.05); kill_start_key_binding;
   UnPauseGame; current_num_players = 1; disable_pause; spawn Menu_Music_On;
-  DeRegisterAtoms / RegisterAtoms achievement (stubs); resets setlist globals,
+  DeRegisterAtoms / RegisterAtoms achievement (the achievement list is not run, GD04-013); resets setlist globals,
   current_song = WelcomeToTheJungle, character_id axel; safe_create_gh3_pause_menu
   (only if no Pause_Menu element); `new_menu scrollid=main_menu_scrolling_menu
   vmenuid=vmenu_main_menu`; TextElements CAREER / CO-OP CAREER / QUICKPLAY /
@@ -587,7 +587,7 @@ faithful, playable path; S = safe as a stub with the given return.
 | S | ReAcquireControllers, GetEnterButtonAssignment, ResumeControllerChecking, UnBindGuitarControllerStatus, SetInput, SetButtonEventMappings | 82283d20, 820ebe00, 820e7bd0, 82100d98, 82100bb8, 8214b0a0 | press any button, song start, pause | no-ops; enter button = A [I] |
 | S | NetSessionFunc, RefreshSigninStatus, StartGameProfileSettingsRead, GetGameProfileSetting, MassiveInit, IsHost, SendNetMessage | 821643e8, 820e7e80, 821408f8, 82140950, 822437e8, 82201e18, 820dad60 | sign-in, stats | no-ops; GetGameProfileSetting false, IsHost false |
 | S | EnumContentFiles, EnumContentFilesFinished, IsEnumContentFilesDamaged, GetLatestContentIndexFile, GetContentFolderIndexFromFile | 82134ef8, 82134ff0, 82134188, 82134408, 82134378 | DLC scan, song/venue paks | false / `device` not `content` |
-| S | RegisterAtoms, DeRegisterAtoms, UpdateAtoms, PrintScriptInfo, UnPauseSpawnedScript, English (true), French/German/Spanish/Italian (false) | 821237f0, 82118088, 821182a8, 82265538, 82266ac0, 8218c880 ... | menus | no-ops |
+| S | PrintScriptInfo, UnPauseSpawnedScript, English (true), French/German/Spanish/Italian (false) | 82265538, 82266ac0, 8218c880 ... | menus | no-ops; RegisterAtoms / UpdateAtoms / DeRegisterAtoms (821237f0, 821182a8, 82118088): script/atoms.cpp, modes.md "Career progression atoms" (GD04-116) |
 | S | DataBufferPut*/Get*, ClearDataBuffer, ReadDataBuffer, GetRandomSeeds, SetRandomSeeds, TextOutput* | 820ffc68 ... | replay recording, stats dump | no-ops (replay only read with `replay` param) |
 | S (first song) | venue/band/crowd/camera/lights: CompositeObjectExists (false), CreateCompositeObject*, IsCreated (false), IsInNodeArray (false), Create/Kill, SetViewportProperties, PrepassViewport*, CreateViewportTextureOverride, ScreenFX_*, LightShow_*, PlayIGCCam, CameraCut_*, Create2DParticleSystem, DeleteTeslaEffectObject, ChangeNodeFlag, GetNodeFlag, ResetWaypoints, DoesWaypointExist (false) | various | start_gem_scroller, kill_gem_scroller | returns that skip creation; none of their loops wait on them except crowd_create_lighters (bounded to 15) |
 

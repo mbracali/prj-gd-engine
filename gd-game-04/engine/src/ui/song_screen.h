@@ -52,9 +52,14 @@ struct SongSetup {
     std::array<bool, 2> lefty{false, false};
     // user_options.lag_calibration (ms): input_offset = the song's - this [C script gem_scroller].
     double lagMs = 0;
-    // Enhanced > Audio / Video Calibration: the video delay draws the highway
-    // this far ahead (the audio delay is added to lagMs by the app).
+    // Enhanced > Audio / Video Calibration (gd01's, #69): the audio delay
+    // (also added to lagMs by the app) moves the highway with the judging,
+    // so the gems reach the line when they are heard; the video delay draws
+    // it that much ahead. GH3's lag_calibration moves the judging only.
+    double audioOffsetMs = 0;
     double videoOffsetMs = 0;
+    // The highway's draw time less the song time.
+    double drawOffsetMs() const { return videoOffsetMs - audioOffsetMs; }
     bool endCredits = false;  // end_credits = 1 (the credits song) [C script start_gem_scroller]
     // current_transition's key (0: fastintro): the intro's length (its
     // Default_<t>_Transition time) and cameras (Common_<t>_Transition's
@@ -149,9 +154,15 @@ public:
     const SongInfo& song() const { return song_; }
     bool twoPlayers() const { return twoPlayers_; }
     // The bar's position, 0 rest .. 1: analog bars set it every frame, a key
-    // or button through handle().
-    void setWhammy(int player, float value) { whammy_[size_t(player & 1)] = value; }
-    float whammy(int player) const { return whammy_[size_t(player & 1)]; }
+    // or button through handle() (held: 1). Kept apart, so a connected pad's
+    // resting bar does not cancel the keyboard's Whammy key (#70, GD04-115).
+    void setWhammy(int player, float value) { whammyBar_[size_t(player & 1)] = value; }
+    // A strum waiting for the next judge step (the self-test's check).
+    bool strumPending(int player) const { return strum_[size_t(player & 1)]; }
+    float whammy(int player) const {
+        const size_t p = size_t(player & 1);
+        return whammyKey_[p] ? 1.0f : whammyBar_[p];
+    }
     // The player's highway (its sustain tails' wibble: SetNewWhammyValue /
     // SetAllWhammyValues): player 0 the left / only one, 1 the right.
     Highway2D& highwayOf(int player) { return (player & 1) && twoPlayers_ ? highway2_ : highway_; }
@@ -198,13 +209,15 @@ private:
     // The live input between steps, per player.
     std::array<uint8_t, 2> held_{};
     std::array<bool, 2> strum_{}, star_{}, tilt_{};
-    std::array<float, 2> whammy_{};
+    std::array<bool, 2> barStrum_{};  // the strum bar moved this step (FrameInput::fretStrum is the rest)
+    std::array<float, 2> whammyBar_{};
+    std::array<bool, 2> whammyKey_{};
     double finishedAt_ = -1;
     // The SongWon / SongLost transition's length (Default_SongWon_Transition
     // time 8000 [C data]); the outro started (the venue told).
     double transitionMs_ = 8000;
-    bool holdClock_ = false;
-    double videoOffsetMs_ = 0;  // the mixer paused until the venue is up (frame)
+    bool holdClock_ = false;  // the mixer paused until the venue is up (frame)
+    double drawOffsetMs_ = 0;  // the highway's draw time - now (video - audio calibration)
     double leadInMs_ = 3000;  // the intro transition's time before the music
     std::string introCameras_ = "cameras_fastintro";
     bool introFast_ = true;

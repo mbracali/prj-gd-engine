@@ -136,9 +136,13 @@ public:
     virtual void drawAfter() {}   // over it
     virtual bool drawsScene() const { return true; }  // false: the panel's scene is drawn elsewhere
     void setScene(Panel* scene) { scene_ = scene; }
+    // [I] Port (#76): the mouse points at a help bar button; the panel's own
+    // focus draws unhighlighted meanwhile (one highlight at a time).
+    void setFocusMuted(bool muted) { focusMuted_ = muted; }
 
 protected:
     Panel* scene_ = nullptr;
+    bool focusMuted_ = false;
 };
 
 // The in-game panels (game_panels.cpp): new_hud_panel, new_track_panel.

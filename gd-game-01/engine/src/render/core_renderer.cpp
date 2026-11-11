@@ -226,6 +226,7 @@ bool CoreRenderer::init(SDL_Window* window, gr::Backend backend, const gr::GlHoo
     info.window = window;
     info.gl = hooks;
     info.cacheDir = prefDir();  // the Vulkan pipeline cache lives with the settings
+    info.hdrOutput = r_.deviceHdr_;  // True HDR on Vulkan (#80): an HDR swapchain when offered
     dev_ = gr::createDevice(info, error);
     if (!dev_) return false;
     r_.gpuName_ = dev_->caps().gpu;
@@ -420,6 +421,11 @@ gr::Pipeline CoreRenderer::pipeline(Program program, Blend blend, bool depthTest
 
 void CoreRenderer::beginFrame(SDL_Color clear) {
     dev_->beginFrame();
+    if (r_.deviceHdr_ && dev_->hdrSurface() != r_.hdrSurface_) {
+        // The swapchain was made again with another colour space (the display's HDR turned off or on).
+        SDL_Log("hdr: the Vulkan swapchain is now %s", dev_->hdrSurface() ? "HDR" : ("SDR: " + dev_->hdrReason()).c_str());
+        r_.setHdrSurface(dev_->hdrSurface());
+    }
     if (r_.hdrSurface_) r_.updateHdr();  // the window's HDR state (paper white, headroom), as local
     ensureFrame();
     const int w = frameW_, h = frameH_;
@@ -1014,6 +1020,12 @@ void CoreRenderer::endScene(const PostFrame& frame) {
     ensurePass();
     applyRects();
     post_->blit(out, frameF16_ ? gr::Format::RGBA16F : gr::Format::RGBA8, gr::kWriteRGB, gr::Format::D24);
+}
+
+int CoreRenderer::deviceHdrSurface(std::string& reason) const {
+    const int s = dev_ ? dev_->hdrSurface() : 0;
+    if (!s) reason = dev_ ? dev_->hdrReason() : "no graphics device";
+    return s;
 }
 
 // Renderer::hdrStatus's text (the same window state, read by Renderer::updateHdr).

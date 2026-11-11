@@ -168,7 +168,7 @@ void Player::swing(float t, int slot, bool isStrum) {
         const Gem& g = chart_.gems[size_t(j)];
         // Single: the highest held fret is the gem's (lower frets may be
         // held: anchoring). Chord: the held mask is exactly the chord.
-        const bool match = g.fretCount() == 1 ? (slot >= 0 && g.frets == (1u << slot)) : g.frets == held_;
+        const bool match = g.fretCount() == 1 ? (slot >= 0 && g.frets == (1u << slot)) : chordMatch(g.frets, held_);
         if (match) {
             watcherHit(t, slot, j, false);
             return;
@@ -222,7 +222,7 @@ void Player::watcherFretDown(int slot, float t) {
         // ends the sustain (a lower one, an anchor, does not); on a chord any
         // press does (the chord's frets are all held already).
         const Gem& g = chart_.gems[size_t(sustainGem_)];
-        const bool release = g.fretCount() == 1 ? slot > highestFret(g.frets) : true;
+        const bool release = g.fretCount() == 1 ? slot > highestFret(g.frets) : !(easyChords_ && (g.frets & bit));  // Easy Chords: its own fret holds
         if (release) endSustain(t, true);
     }
     fretChange(t, slot);
@@ -233,7 +233,11 @@ void Player::watcherFretDown(int slot, float t) {
 void Player::watcherFretUp(int slot, float t) {
     const uint32_t bit = 1u << slot;
     held_ &= ~bit;
-    if (sustainGem_ >= 0 && (chart_.gems[size_t(sustainGem_)].frets & bit)) endSustain(t, true);
+    if (sustainGem_ >= 0 && (chart_.gems[size_t(sustainGem_)].frets & bit)) {
+        const Gem& g = chart_.gems[size_t(sustainGem_)];
+        // Easy Chords: a chord's sustain lasts while any of its frets is held.
+        if (!(easyChords_ && g.fretCount() > 1 && (held_ & g.frets) != 0)) endSustain(t, true);
+    }
     fretChange(t, -1);
 }
 
@@ -245,7 +249,7 @@ void Player::fretChange(float t, int pressed) {
     if (pending_.gem < 0 || !(t < pending_.deadline)) return;
     const int gem = pending_.gem;
     const Gem& g = chart_.gems[size_t(gem)];
-    const bool match = (g.fretCount() == 1 && pressed >= 0) ? g.frets == (1u << pressed) : held_ == g.frets;
+    const bool match = (g.fretCount() == 1 && pressed >= 0) ? g.frets == (1u << pressed) : chordMatch(g.frets, held_);
     if (match) {
         clearPending();
         watcherHit(t, pressed >= 0 ? pressed : highestFret(held_), gem, false);
@@ -283,6 +287,10 @@ void Player::joypadPress(int slot, float t) {
         return;
     }
     const int i = nearestGem(t + offset_);
+    // Easy Chords: another fret of a chord already hit (its press) is not an overstrum.
+    if (easyChords_ && i >= 0 && owned(i) && hit_[size_t(i)] && chart_.gems[size_t(i)].fretCount() > 1 && (chart_.gems[size_t(i)].frets & bit) &&
+        inWindow(i, t))
+        return;
     int j = i;
     if ((!owned(i) || hit_[size_t(i)]) && i + 1 < n) j = i + 1;
     if (j < firstPlayable_) return;
@@ -313,6 +321,10 @@ void Player::joypadPress(int slot, float t) {
             return;
         }
         if (g.frets & bit) {
+            if (easyChords_) {  // Easy Chords: one fret of the chord is the chord
+                watcherHit(t, slot, j, false);
+                return;
+            }
             padChordGem_ = j, padChordGot_ = bit, padChordSlot_ = slot, padChordDeadline_ = t + rules_.joypadChordMs;
             return;
         }

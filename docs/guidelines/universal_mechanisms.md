@@ -268,6 +268,46 @@ Remove All Effects turns HDR off with every other effect). An
 `enhanced.json` or settings file without `hdr` loads as None; Export, Load
 User Settings and the value checks include it.
 
+## Accessibility (2026-11-10, #67, GDALL-039)
+
+A section of the Enhanced menu, **Accessibility**, just before Cheats &
+enhancers, in every game (owner, #67). Its options are Enhanced options:
+**off by default**, so the original gameplay stays exactly as it is unless a
+player turns one on. Saved in `enhanced.json`, written by Export User Files
+and read by Load User Settings like every other option (a file without the
+key loads as off). No Mode button changes them.
+
+**Easy Chords** (`easy_chords`; gd-game-01 stores a boolean, the others
+`off` / `on`), for keyboards (key rollover, F1-F5 far apart) and
+accessibility. Help text: "A chord counts when you press any of its frets
+(one or more of them, none outside the chord). Off, as the original: every
+fret of the chord."
+
+- **On:** a chord gem (2 to 5 frets) is hit when the held frets are a
+  non-empty part of the chord's frets: one fret of it is enough, a fret
+  outside the chord misses (green + yellow on a green-red-yellow chord hits;
+  green + orange + yellow on a green-orange chord misses). Everything else
+  stays each game's own: the strum and its windows, the 60 ms wrong-strum
+  grace (GH2 / Encore / RB) or the form-before / after-strumming windows
+  (GH3), HOPO and tap rules (chords stay strummed where the original says
+  so), and single notes with their anchoring.
+- **Frets that strum** (a joypad, or Require Strum off): the first fret of
+  the chord hits it at once; the chord's other frets pressed while it is
+  still in its window are not overstrums.
+- **Sustains:** a chord's sustain lasts while any of its frets is held; a
+  fret outside the chord pressed during it ends it, as before.
+- **Score:** the hit scores as if the whole chord were played (the head and
+  the sustain's points count every fret of the chord), so the score and
+  the stars do not drop with the option on.
+- **Rock Band (gd-game-05):** guitar and bass only; drums and vocals are
+  never affected.
+- **Off:** the judge runs exactly as before (every fret of the chord, no
+  other). Self-tests in every game check it: off (a fresh save), one fret of
+  a chord misses; on, one fret hits and scores as the whole chord, a fret
+  outside the chord misses, the sustain lasts on one fret. Walks check the
+  save, Export and Load User Settings (gd-game-01 `easy_chords`, gd-game-02 /
+  03 `enhanced`, gd-game-04 `mouse`, gd-game-05 `rb_enhanced`).
+
 ## Decisions taken for gd-game-01 (2026-10-29)
 
 - gd-game-01 implemented this first; gd-game-02 (0.1.8) copies its

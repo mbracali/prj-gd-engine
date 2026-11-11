@@ -40,6 +40,20 @@ pull requests or branches, no bots).
      with:
      - `gdul-<v>-linux-x86_64.tar.gz` (Ubuntu 22.04, SDL3 included:
        `gd-engine-launcher/scripts/build_linux_portable.sh`)
+     - `gdul-<v>-x86_64.AppImage` and `gdul-<v>-x86_64.AppImage.zsync` (#83:
+       the same Linux build in one file,
+       `gd-engine-launcher/scripts/build_appimage.sh`, with pinned
+       appimagetool and runtime, SHA-256 checked, cached in
+       `~/.cache/gd-engine/appimage/`). Its update information is
+       `gh-releases-zsync|mbracali|prj-gd-engine|latest|gdul-*-x86_64.AppImage.zsync`,
+       so AppImageUpdate and AppManager update it from the Latest release.
+       Inside it the launcher looks for discs next to the `.AppImage` file
+       (`$APPIMAGE`: beside it and in `original_isos/` there), saves in the
+       usual XDG folder and loads the modules from the mount. The site's
+       Linux button keeps the `.tar.gz` ("linux-x86_64" is not in the
+       AppImage's name); its AppImage button matches "x86_64.AppImage",
+       never the `.zsync`. Locally: `build.sh appimage` (or `linux appimage`)
+       makes `local_builds/gdul-<v>-appimage-x86_64/`.
      - `gdul-<v>-steamdeck-x86_64.tar.gz` (the Steam Deck download: built in
        Valve's Steam Runtime 3 "sniper" SDK container,
        `gd-engine-launcher/scripts/build_steamdeck.sh`, every module with
@@ -97,7 +111,8 @@ folder per platform and the same file a release would publish.
 - Each `build.sh` step runs in a fresh `bash -euo pipefail` (with
   `inherit_errexit`): any failing command fails the step and the build.
 - `scripts/verify_bundle.sh` runs on every build `build.sh` assembles and, in
-  the release workflow, on every archive (`.tar.gz`, `.zip`, `.apk`) before it
+  the release workflow, on every archive (`.tar.gz`, `.zip`, `.apk`,
+  `.AppImage`: also its update information and `.zsync`) before it
   is uploaded. For each game in `games.yaml` with `ready_to_play: true` (on
   every system, no exemption) it requires the
   module, non-empty, exporting `gd_game_run` (objdump / nm), its libraries

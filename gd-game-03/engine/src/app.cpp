@@ -481,6 +481,11 @@ private:
     // GH2's sync offset (options, the lag screen stores -lag) less the
     // calibrated audio delay: the watcher's input offset (+0x2c).
     float calibrationMs() const { return float(syncOffsetMs_ - audioOffsetMs_); }
+    // The time the track is drawn at (#69, as gd01): the calibrated audio
+    // delay moves the drawing with the judging, so the gems reach the line
+    // when they are heard; the video delay draws it that much ahead. GH2's
+    // own sync offset moves the judging only, as the original's watcher.
+    float trackDrawMs(float t) const { return Player::calibratedDrawMs(t, float(audioOffsetMs_), float(videoOffsetMs_)); }
     double leadInMs_ = kLeadInMs;
     bool fastIntro_ = false;
     // The intro (beginSong): extend_track's song time, sent yet; the
@@ -984,6 +989,7 @@ bool App::loadSong(const SongInfo& info, int difficulty, bool autoplay, float ba
                                            two ? modeOfPad(pads_[0]) : input_.lastMode(), noFail, faceOff ? 0 : -1, config);
         player_->setCalibrationMs(calibrationMs());
         player_->setForgivingHopos(enhancedValue("hopo_mode") == "forgiving");
+        player_->setEasyChords(enhancedValue("easy_chords") == "on");
         player_->setBigNotes(song_->bigNotes[size_t(part0)]);
         // The mode's crowd_rating_active (modes.dta: FALSE in practice and
         // the tutorials) is the performers' +0x44 (0x001107d8) [C].
@@ -1000,6 +1006,7 @@ bool App::loadSong(const SongInfo& info, int difficulty, bool autoplay, float ba
             player2_->setNumber(1);
             player2_->setCalibrationMs(calibrationMs());
             player2_->setForgivingHopos(enhancedValue("hopo_mode") == "forgiving");
+            player2_->setEasyChords(enhancedValue("easy_chords") == "on");
             player2_->setBigNotes(song_->bigNotes[size_t(part1)]);
             player2_->setCrowdActive(crowdActive);
             // Without the menus the second player always autoplays.
@@ -2443,8 +2450,9 @@ void App::drawTrack() {
     // The Hyper Speed cheat: track_speed x 1.5 (0x826967B8) [C].
     if (ui_ && ui_->cheatOn("cheat_hyper_speed_mode")) speed *= 1.5f;
     if (track_ && !debugHighway_) {
-        // Audio / Video Calibration: the highway drawn ahead by the video delay.
-        const float drawT = lastT_ + float(videoOffsetMs_);
+        // Audio / Video Calibration: the highway follows the heard delay and
+        // is drawn ahead by the video delay (trackDrawMs).
+        const float drawT = trackDrawMs(lastT_);
         track_->draw(canvas_.renderer(), *sceneCache_, *song_, *player_, drawT, speed);
         if (track2_ && player2_) track2_->draw(canvas_.renderer(), *sceneCache_, *song_, *player2_, drawT, speed);
         updateTouchLanes();
@@ -3323,8 +3331,8 @@ void App::drawSong(float t) {
         // Development aid: GD03_TRACK=0 hides the track (to look at the band).
         const char* showTrack = SDL_getenv("GD03_TRACK");
         if (!showTrack || *showTrack != '0') {
-            track_->draw(canvas_.renderer(), *sceneCache_, *song_, *player_, t + float(videoOffsetMs_), speed);
-            if (track2_ && player2_) track2_->draw(canvas_.renderer(), *sceneCache_, *song_, *player2_, t + float(videoOffsetMs_), speed);
+            track_->draw(canvas_.renderer(), *sceneCache_, *song_, *player_, trackDrawMs(t), speed);
+            if (track2_ && player2_) track2_->draw(canvas_.renderer(), *sceneCache_, *song_, *player2_, trackDrawMs(t), speed);
             updateTouchLanes();
         }
         // Development aid: GD03_HUD=0 hides the HUD (to look at the track).

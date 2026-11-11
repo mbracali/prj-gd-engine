@@ -102,6 +102,13 @@ bool Canvas::end(bool holdIfEmpty) {
     }
     heldSinceNs_ = 0;
     presentedContent_ = !empty;
+    if (!shotPath.empty()) {
+        if (SDL_Surface* s = renderer_.readPixels()) {
+            if (!SDL_SaveBMP(s, shotPath.c_str())) SDL_Log("walk shot: cannot save %s: %s", shotPath.c_str(), SDL_GetError());
+            SDL_DestroySurface(s);
+        }
+        shotPath.clear();
+    }
     // GD04_FRAMEPROBE=1 (development aid): every presented frame's mean
     // brightness (0..255) and the time since the last one, so black or
     // stalled frames between screens can be counted (the transitions).

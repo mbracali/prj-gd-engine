@@ -327,6 +327,12 @@ struct DeviceCreateInfo {
     // A folder the backend may keep its caches in across runs (the game's
     // pref folder; Vulkan: its pipeline cache). Empty: nothing on disk.
     std::string cacheDir;
+    // True HDR (Vulkan only; the other backends ignore it): the swapchain
+    // takes an HDR colour space when the surface offers one, BT.2020 PQ
+    // (HDR10) first, then scRGB (extended sRGB, linear). Steam Deck Gaming
+    // Mode offers them through gamescope's WSI layer when its HDR is on; a
+    // Wayland desktop through Mesa. Device::hdrSurface says what it got.
+    bool hdrOutput = false;
 };
 
 // Window flags and attributes a backend needs: call prepareWindow before
@@ -427,6 +433,12 @@ public:
     virtual void present(Texture src, const Rect& srcRect, Filter filter, bool flipVertical = false) = 0;
     virtual void setPresentMode(PresentMode mode) = 0;
     virtual void endFrame() = 0;
+    // The window's colour space with DeviceCreateInfo::hdrOutput: 0 SDR,
+    // 1 scRGB (linear, 1.0 = 80 nits), 2 BT.2020 PQ. It can change when the
+    // swapchain is made again (the display's HDR turned off). hdrReason: why
+    // it is SDR.
+    virtual int hdrSurface() const { return 0; }
+    virtual std::string hdrReason() const { return "this graphics backend has no HDR swapchain"; }
 
     // Occlusion queries ------------------------------------------------------
     // The samples that passed the depth and stencil tests in the draws

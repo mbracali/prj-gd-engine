@@ -105,6 +105,7 @@ target_sources(gd04 PRIVATE
   src/script/globals.cpp
   src/script/pc_strings.cpp
   src/script/natives_core.cpp
+  src/script/atoms.cpp
   src/script/natives_misc.cpp
   src/script/vm.cpp
   src/tests/audittest.cpp

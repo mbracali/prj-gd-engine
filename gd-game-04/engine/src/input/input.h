@@ -64,6 +64,10 @@ struct InputEvent {
     // StarPower from a tilt (an axis binding) with no button held: GH3 waits
     // star_power_trigger_frames for it, Select deploys at once [C 0x82112F28].
     bool tilt = false;
+    // A fret of a keyboard or pad set to Require Strum off: its press also
+    // strums (the song's joypad watcher; #70, GD04-115). Touch strums its
+    // chords itself; MIDI keeps its own path.
+    bool fretsStrum = false;
 };
 
 // For logs (GD04_INPUTLOG).
@@ -456,6 +460,7 @@ private:
     bool curJoypad_ = false;  // the device being read plays with the joypad layout (InputEvent::joypad)
     bool curAnalog_ = false;  // the device being read has an analog whammy
     bool curTilt_ = false;    // the device's Star Power is held by its tilt axis only
+    bool curFretsStrum_ = false;  // the keyboard or pad being read has Require Strum off (InputEvent::fretsStrum)
     bool touch_ = true, gamepadPlay_ = true, rockBand_ = false, rbMappings_ = false;
     std::function<void(float, float, float&, float&)> toMenu_;
     std::array<TouchLanes, 2> lanes_;

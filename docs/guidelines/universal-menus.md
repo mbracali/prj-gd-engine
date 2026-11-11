@@ -224,6 +224,8 @@ components: we will.
 | Performance & graphics | More Lights on Venues | None, 1.5x, 2x, 2.5x | Dropdown |
 | Performance & graphics | Dust in Light Beams | None, 1.5x, 2x, 2.5x | Dropdown (always available) |
 | *(space)* | | | |
+| Accessibility | Easy Chords | A chord counts when you press any of its frets (one or more of them, none outside the chord) (`easy_chords`) | Check box, **off by default** (the original's rules). Every game; Rock Band: guitar and bass only. See "Accessibility" in [universal_mechanisms.md](universal_mechanisms.md) |
+| *(space)* | | | |
 | Cheats & enhancers | Export User Files | Exports the user's settings and progress as JSON files | Button |
 | Cheats & enhancers | Load User Settings | Loads a user settings JSON file | Button |
 | Cheats & enhancers | Load User Progress | Loads a user progress JSON file | Button |
@@ -255,8 +257,9 @@ first; the others when they adopt the core):
   Enhanced Settings, with the same profile. A backend that cannot start falls
   back to local (engine-backend-guidelines.md rule 2).
 - **Indicator:** on the Enhanced Settings screen only, the backends in use are
-  shown in small white text: `Graphics: <name>   Audio: <name>`, always on the
-  line just above the FPS counter's place, whether the counter is on or off
-  (beside it, and on its own line, the help bar's legend takes the room). It shows what really runs: a
+  shown in small white text: `Graphics: <name>` and `Audio: <name>`, one per
+  line, bottom right, right of the help bar (the last line on the FPS
+  counter's line), whether the counter is on or off; it never runs over the
+  help bar's pills (above the FPS counter it ran over SELECT, #76). It shows what really runs: a
   chosen backend that could not start is shown as `local (<name> could not
   start)`.

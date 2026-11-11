@@ -103,7 +103,16 @@ frame rate, resolution and touch follow the system:
 Emulated (high dynamic range tone mapped to any screen) or True HDR (an HDR
 display on Windows, or on a Linux Wayland desktop whose driver offers an
 scRGB / PQ surface; it starts with the game, and falls back to Emulated
-with the reason in the help box where it cannot run).
+with the reason in the help box and in gd01.log where it cannot run).
+
+True HDR on a Steam Deck OLED (or any HDR screen under gamescope): Gaming
+Mode with HDR on in Steam > Settings > Display, and Enhanced > Graphics
+Backend set to **Vulkan**, then restart the game. Gaming Mode runs the game
+as an X11 window, where OpenGL has no HDR; the Vulkan backend asks gamescope
+for an HDR10 (BT.2020 PQ) swapchain, which gamescope offers only while its
+HDR is on. In Desktop Mode, turn HDR on in Plasma's System Settings >
+Display & Monitor first (Wayland session; Vulkan or OpenGL). gd01.log says
+`hdr: HDR10 (BT.2020 PQ) Vulkan swapchain` when it works, or why not.
 
 Settings saved by 1.1.6 and older keep their meaning (for example Bloom High
 is now 3x, Chromatic Aberration on is Medium). XInput gamepads and Rock Band

@@ -176,7 +176,7 @@ bool SongScreen::start(const Disc& disc, const Globals& g, const SongInfo& song,
     // input_offset = time_input_offset (the song's input_offset; the 360's
     // default -66 ms is left out, D7) - lag_calibration [C script gem_scroller].
     ms.inputOffsetMs = float(song.inputOffset - setup.lagMs);
-    videoOffsetMs_ = setup.videoOffsetMs;
+    drawOffsetMs_ = setup.drawOffsetMs();
     match_ = std::make_unique<Match>();
     if (!match_->start(chart_, tuning_, &g, ms, setup.bossProps, error)) return false;
     player_ = &match_->player(0);
@@ -323,16 +323,23 @@ void SongScreen::handle(const InputEvent& e) {
     if (isFret(e.action)) {
         const uint8_t bit = uint8_t(1u << fretOf(e.action));
         held_[p] = e.down ? uint8_t(held_[p] | bit) : uint8_t(held_[p] & ~bit);
-        // A joypad's fret press also strums (gd-game-02's input layer) [I for GH3].
-        if (e.down && e.joypad) strum_[p] = true;
+        // A joypad's fret press also strums (gd-game-02's input layer) [I for
+        // GH3], and so does a keyboard's or pad's with Require Strum off
+        // (the keyboard is never a joypad, so e.joypad alone missed it: #70,
+        // GD04-115).
+        if (e.down && (e.joypad || e.fretsStrum)) strum_[p] = true;
     } else if (e.action == Action::Strum && e.down) {
         strum_[p] = true;
+        barStrum_[p] = true;
     } else if (e.action == Action::StarPower) {
         // Select at once, the tilt after its frames (Player) [C 0x82112F28].
         (e.tilt ? tilt_ : star_)[p] = e.down;
         if (!e.down) star_[p] = tilt_[p] = false;
     } else if (e.action == Action::Whammy) {
-        whammy_[p] = e.down ? 1.0f : 0.0f;
+        // A key or button is fully pressed while held; an analog bar's
+        // position comes from setWhammy() every frame (GD04-115).
+        if (e.analog) whammyBar_[p] = e.down ? 1.0f : 0.0f;
+        else whammyKey_[p] = e.down;
     }
 }
 
@@ -349,9 +356,11 @@ void SongScreen::tick(double nowMs, Mixer& mixer) {
         for (size_t p = 0; p < 2; ++p) {
             in[p].frets = held_[p];
             in[p].strum = strum_[p];
+            in[p].fretStrum = strum_[p] && !barStrum_[p];
+            barStrum_[p] = false;
             in[p].starPower = star_[p];
             in[p].tilt = tilt_[p];
-            in[p].whammy = whammy_[p];
+            in[p].whammy = whammy(int(p));
             strum_[p] = false;
         }
         match_->frame(stepMs_, kStepMs, in);
@@ -373,7 +382,7 @@ void SongScreen::tick(double nowMs, Mixer& mixer) {
             Player& pl = match_->player(p);
             Highway2D& hw = p == 0 ? highway_ : highway2_;
             hw.step(pl.stats(), stepMs_, kStepMs, match_->battleMode(), twoModes);
-            hw.stepTails(pl, match_->track(p), stepMs_, whammy_[size_t(p)], !match_->battleMode());
+            hw.stepTails(pl, match_->track(p), stepMs_, whammy(p), !match_->battleMode());
             const bool other = match_->mode() == GameMode::Coop || match_->mode() == GameMode::Boss;
             for (const PlayerEvent& ev : pl.events()) {
                 if (p == 0 && venue_ && ev.note >= 0 && (ev.kind == PlayerEvent::Kind::Hit || ev.kind == PlayerEvent::Kind::Miss))
@@ -583,7 +592,7 @@ void SongScreen::draw(Canvas& c, double now, const TextureCache* textures) {
         for (int p = 0; p < 2 && !highwayHidden_; ++p) {
             Highway2D& hw = p == 0 ? highway_ : highway2_;
             hw.setEffects(effects(p, now));
-            hw.draw(c, *textures, match_->track(p), match_->player(p), now + videoOffsetMs_, shownHeld_[size_t(p)]);
+            hw.draw(c, *textures, match_->track(p), match_->player(p), now + drawOffsetMs_, shownHeld_[size_t(p)]);
         }
         if (hud2pOk_ && !hudHidden_) hud2p_.draw(c, *textures, *match_, now);
         intro_.draw(c, introText_, now);
@@ -591,7 +600,7 @@ void SongScreen::draw(Canvas& c, double now, const TextureCache* textures) {
     }
     const NoteTrack& track_ = match_->track(0);
     if (highwayOk_ && textures && !std::getenv("GD04_DEBUG_HIGHWAY")) {
-        if (!highwayHidden_) highway_.draw(c, *textures, track_, *player_, now + videoOffsetMs_, shownHeld_[0]);
+        if (!highwayHidden_) highway_.draw(c, *textures, track_, *player_, now + drawOffsetMs_, shownHeld_[0]);
         if (!hudHidden_) hud_.draw(c, *textures, now);
         intro_.draw(c, introText_, now);
         if (std::getenv("GD04_HUD_NUMBERS")) {  // development aid: the numbers behind the HUD

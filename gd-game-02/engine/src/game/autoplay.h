@@ -88,6 +88,12 @@ public:
         }
     }
 
+    // A player who hears the song `ms` late plays every step that much later
+    // (the calibration self-test, #69).
+    void delay(float ms) {
+        for (Step& s : steps_) s.t += ms;
+    }
+
 private:
     struct Step {
         float t;

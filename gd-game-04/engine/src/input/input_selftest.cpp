@@ -89,7 +89,7 @@ int runInputChecks() {
         in.setInGame(false);
         out.clear();
         key(SDLK_1, true), key(SDLK_F1, true);
-        check(count(Action::Fret0, true) == 1 && out.size() == 1, "1 + F1: green pressed once");
+        check(count(Action::Fret0, true) == 1 && out.size() == 1 && !out[0].fretsStrum, "1 + F1: green pressed once (Require Strum on: no strum)");
         out.clear();
         key(SDLK_1, false);
         check(out.empty(), "1 released, F1 held: green stays");
@@ -131,8 +131,17 @@ int runInputChecks() {
               "Require Strum off saved on Save");
         out.clear();
         key(SDLK_2, true);
-        check(out.size() == 1 && out[0].action == Action::Fret1 && out[0].mode == ControllerMode::Joypad, "... a fret then also strums (joypad mode)");
+        check(out.size() == 1 && out[0].action == Action::Fret1 && out[0].mode == ControllerMode::Joypad && out[0].fretsStrum,
+              "... a fret then also strums (joypad mode, fretsStrum: the song strums it, #70 GD04-115)");
         key(SDLK_2, false);
+        out.clear();
+        in.setInGame(true);
+        key(SDLK_LSHIFT, true);
+        check(out.size() == 1 && out[0].action == Action::Whammy && out[0].down && !out[0].analog && !out[0].fretsStrum,
+              "Shift: the Whammy key, held (not an analog bar)");
+        key(SDLK_LSHIFT, false);
+        in.setInGame(false);
+        out.clear();
     }
     {
         // controllers.json of 0.1.7 (version 1): its keyboard bindings carry over.

@@ -236,6 +236,46 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         wait(800);
         expect_ = {"main_screen", "main_solomode_screen", "main_screen", "main_multimode_screen", "training_menu_screen", "main_screen", "options_screen", "enhanced_options_screen", "options_screen", "main_screen", "gamepads_screen",
                    "main_screen", "main_solomode_screen", "gamepads_screen", "main_solomode_screen"};
+    } else if (scenario == "rb_enhanced") {
+        // Enhanced Options > ACCESSIBILITY > Easy Chords (GDALL-039): off on a
+        // fresh save; on (saved), exported (GD05_DIALOG: the walk's folder);
+        // turned off again, Load User Settings brings it back on.
+        at("splash_screen", 30000);
+        wait(1500);
+        press(kX);
+        at("main_screen");
+        wait(1500);
+        mouseOn("options.btn", 0), wait(200);
+        mouseOn("options.btn", 1);
+        at("options_screen");
+        wait(800);
+        mouseOn("port_enhanced.btn", 1);
+        at("enhanced_options_screen");
+        wait(800);
+        check("enhanced_easy_chords_default");
+        // MODES > Steam Deck down to Easy Chords (the desktop's rows; Android has Shake for Whammy too).
+#ifdef __ANDROID__
+        for (int i = 0; i < 41; ++i) press(kDown), wait(100);
+#else
+        for (int i = 0; i < 40; ++i) press(kDown), wait(100);
+#endif
+        wait(300);
+        check("shot_enhanced_accessibility_focus");
+        press(kX), wait(300);
+        check("enhanced_easy_chords");
+        check("shot_enhanced_accessibility");
+        press(kDown), wait(120), press(kDown), wait(120), press(kX), wait(300);  // CHEATS & ENHANCERS > Export User Files
+        check("enhanced_easy_chords_exported");
+        press(kUp), wait(120), press(kUp), wait(120), press(kX), wait(300);
+        check("enhanced_easy_chords_off");
+        press(kDown), wait(120), press(kDown), wait(120), press(kDown), wait(120), press(kX), wait(300);  // Load User Settings
+        check("enhanced_easy_chords_loaded");
+        press(kTri);
+        at("options_screen");
+        wait(800);
+        press(kTri);
+        at("main_screen");
+        expect_ = {"main_screen", "options_screen", "enhanced_options_screen", "options_screen", "main_screen"};
     } else if (scenario == "rb_owner_bugs") {
         // Wave 03's owner bugs. GD05-023: nothing of a venue plays before a
         // song (the Enhanced Options backdrop is silent). GD05-024: the red
@@ -1439,12 +1479,22 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         check("enhanced_no_effects");
         press(kX), wait(400);
         check("enhanced_effects_back");
+        // ACCESSIBILITY > Easy Chords (GDALL-039): off on a fresh save; on,
+        // saved, exported; turned off again, Load User Settings brings it back.
+        check("enhanced_easy_chords_default");
+        press(kDown), wait(120);
+        row(kX);
+        wait(300);
+        check("enhanced_easy_chords");
         // CHEATS & ENHANCERS: Export User Files, Load User Settings, Load
         // User Progress (GD05_DIALOG: the walk's folder).
         press(kDown), wait(120);
         row(kX);
         wait(300);
         check("enhanced_exported");
+        press(kUp), wait(120), press(kUp), wait(120), press(kX), wait(300);
+        check("enhanced_easy_chords_off");
+        press(kDown), wait(120), press(kDown), wait(120);
         row(kX);
         wait(300);
         check("enhanced_settings_loaded");
@@ -3302,6 +3352,31 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         } else if (w == "enhanced_enhancers") {
             want("shadows_all", "on"), want("more_lights", "2x"), want("light_dust", "1.5x"), want("no_shaky_cam", "on");
             state("shadows", 1, kMany), state("beams", 1, kMany), state("motes", 1, kMany), state("shake", 0, 0);
+        } else if (w == "enhanced_easy_chords_default") {
+            const std::string got = ui.host().enhancedValue("easy_chords");
+            const std::string file = saved.has("easy_chords") ? saved["easy_chords"].str() : "(unset)";
+            std::printf("  enhanced: easy_chords %s (enhanced.json %s)\n", got.c_str(), file.c_str());
+            if (got != "off" || (file != "(unset)" && file != "off")) problems = "Easy Chords is not off by default";
+        } else if (w == "enhanced_easy_chords") {
+            want("easy_chords", "on");
+        } else if (w == "enhanced_easy_chords_exported") {
+            status("Exported to");
+            const char* dir = SDL_getenv("GD05_DIALOG");
+            try {
+                std::ifstream in(std::filesystem::path(dir ? dir : "") / "GD05-user-settings.json");
+                std::stringstream ss;
+                ss << in.rdbuf();
+                const Json j = Json::parse(ss.str());
+                std::printf("  exported easy_chords: %s\n", j.has("easy_chords") ? j["easy_chords"].str().c_str() : "(missing)");
+                if (!j.has("easy_chords") || j["easy_chords"].str() != "on") problems = "easy_chords on was not exported";
+            } catch (const std::exception&) {
+                problems = "GD05-user-settings.json does not parse";
+            }
+        } else if (w == "enhanced_easy_chords_loaded") {
+            status("Settings loaded");
+            want("easy_chords", "on");
+        } else if (w == "enhanced_easy_chords_off") {
+            want("easy_chords", "off");
         } else if (w == "enhanced_exported") {
             status("Exported to");
             const char* dir = SDL_getenv("GD05_DIALOG");
@@ -3319,6 +3394,8 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
                 std::stringstream ss;
                 ss << in.rdbuf();
                 Json j = Json::parse(ss.str());
+                if (!j.has("easy_chords") || j["easy_chords"].str() != "on")
+                    problems += std::string(problems.empty() ? "" : "; ") + "easy_chords on was not exported";
                 j.set("ground_fog", Json::string("2x")), j.set("light_streaks", Json::string("medium"));
                 j.set("graphics_backend", Json::string("vulkan")), j.set("audio_backend", Json::string("openal"));  // GDCORE-006
                 std::ofstream(d / "GD05-user-settings.json") << j.dump(2);
@@ -3373,6 +3450,7 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         } else if (w == "enhanced_settings_loaded") {
             status("Settings loaded");
             want("more_lights", "2x"), want("internal_res", "480"), want("antialiasing", "fxaa");
+            want("easy_chords", "on");
             for (const char* gone : {"ground_fog", "light_streaks"})
                 if (saved.has(gone)) problems += std::string(problems.empty() ? "" : "; ") + gone + " (removed) was loaded";
             // The file's backends are loaded (GDCORE-008): they apply on the next start.

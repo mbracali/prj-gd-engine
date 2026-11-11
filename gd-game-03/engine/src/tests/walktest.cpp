@@ -877,12 +877,23 @@ WalkDriver::WalkDriver(const std::string& name)
         check("enhanced_no_effects");
         press(kX), wait(400);
         check("enhanced_effects_back");
+        // ACCESSIBILITY > Easy Chords (GDALL-039): off on a fresh save; on,
+        // saved, exported; turned off again, Load User Settings brings it back.
+        check("enhanced_easy_chords_default");
+        press(kDown), wait(120);
+        row(kX);
+        wait(300);
+        check("enhanced_easy_chords");
+        check("shot_enhanced_accessibility");  // GD03_WALK_SHOTS=<dir>: the ACCESSIBILITY section
         // CHEATS & ENHANCERS: Export User Files, Load User Settings, Load
         // User Progress (GD03_DIALOG: the walk's folder).
         press(kDown), wait(120);
         row(kX);
         wait(300);
         check("enhanced_exported");
+        press(kUp), wait(120), press(kUp), wait(120), press(kX), wait(300);
+        check("enhanced_easy_chords_off");
+        press(kDown), wait(120), press(kDown), wait(120);
         row(kX);
         wait(300);
         check("enhanced_settings_loaded");
@@ -2197,7 +2208,7 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
     if (s.screen.rfind("enhanced_mode_", 0) == 0 || s.screen == "enhanced_res_720" || s.screen == "enhanced_fps_unlimited" ||
         s.screen == "enhanced_exported" || s.screen == "enhanced_settings_loaded" || s.screen == "enhanced_progress_loaded" ||
         s.screen == "enhanced_backends" || s.screen == "enhanced_backends_start" || s.screen == "enhanced_backends_saved" ||
-        s.screen == "enhanced_backends_restarted") {
+        s.screen == "enhanced_backends_restarted" || s.screen.rfind("enhanced_easy_chords", 0) == 0) {
         // The universal Enhanced menu (universal_mechanisms.md 1.2.2): what
         // is in effect, in enhanced.json and the panel's status line.
         Json saved = Json::object();
@@ -2243,6 +2254,15 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
             want("internal_res", "720");
         } else if (w == "enhanced_fps_unlimited") {
             want("max_fps", "unlimited");
+        } else if (w == "enhanced_easy_chords_default") {
+            const std::string got = ui.host().enhancedValue("easy_chords");
+            const std::string file = saved.has("easy_chords") ? saved["easy_chords"].str() : "(unset)";
+            std::printf("  enhanced: easy_chords %s (enhanced.json %s)\n", got.c_str(), file.c_str());
+            if (got != "off" || (file != "(unset)" && file != "off")) problems = "Easy Chords is not off by default";
+        } else if (w == "enhanced_easy_chords") {
+            want("easy_chords", "on");
+        } else if (w == "enhanced_easy_chords_off") {
+            want("easy_chords", "off");
         } else if (w == "enhanced_exported") {
             status("Exported to");
             for (const char* f : {"GD03-user-settings.json", "GD03-user-progress.json"}) {
@@ -2259,6 +2279,8 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
                 std::stringstream ss;
                 ss << in.rdbuf();
                 Json j = Json::parse(ss.str());
+                if (!j.has("easy_chords") || j["easy_chords"].str() != "on")
+                    problems += std::string(problems.empty() ? "" : "; ") + "easy_chords on was not exported";
                 j.set("ground_fog", Json::string("full")), j.set("light_streaks", Json::string("on")), j.set("xinput", Json::string("off"));
                 j.set("graphics_backend", Json::string("vulkan")), j.set("audio_backend", Json::string("openal"));  // GDCORE-009
                 j.set("internal_res", Json::string("720"));
@@ -2312,6 +2334,7 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         } else if (w == "enhanced_settings_loaded") {
             status("Settings loaded");
             want("internal_res", "720"), want("max_fps", "60");
+            want("easy_chords", "on");
             for (const char* gone : {"ground_fog", "light_streaks", "xinput"})
                 if (saved.has(gone)) add(std::string(gone) + " (removed) was loaded");
             // The file's backends are loaded (GDCORE-009): they apply on the next start.

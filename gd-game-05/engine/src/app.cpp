@@ -1134,6 +1134,7 @@ bool App::loadSong(const SongInfo& info, int difficulty, bool autoplay, float ba
         player_->setBigNotes(song_->bigNotes[size_t(part0)]);
         if (part0 == Part::Bass) player_->setBassRanges(song_->bassRanges);
         player_->setForgivingHopos(enhancedValue("hopo_mode") == "forgiving");
+        player_->setEasyChords(enhancedValue("easy_chords") == "on" && part0 != Part::Drums);  // guitar and bass only
         bot_ = autoplay ? std::make_unique<Autoplay>(player_->chart(), faceOff ? 0 : -1) : nullptr;
         vocal_.reset(), mic_.reset();
         rbBonus_ = part0 != Part::Vocals ? std::make_unique<RbBonus>(*song_, part0, static_cast<Difficulty>(difficulties_[0]), rules_) : nullptr;
@@ -1171,6 +1172,7 @@ bool App::loadSong(const SongInfo& info, int difficulty, bool autoplay, float ba
             player2_->setBigNotes(song_->bigNotes[size_t(part1)]);
             if (part1 == Part::Bass) player2_->setBassRanges(song_->bassRanges);
             player2_->setForgivingHopos(enhancedValue("hopo_mode") == "forgiving");
+            player2_->setEasyChords(enhancedValue("easy_chords") == "on" && part1 != Part::Drums);  // guitar and bass only
             // Without the menus the second player always autoplays.
             if (autoplay || !ui_) bot2_ = std::make_unique<Autoplay>(player2_->chart(), faceOff ? 1 : -1);
             normaliseScores(*player_, *player2_);

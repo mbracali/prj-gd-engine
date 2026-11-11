@@ -45,7 +45,7 @@ incomplete bundles".
   `gd-engine-launcher/scripts/build.sh`). A ready game without a module for a
   system is a bug to fix, not a build to ship.
 - **`scripts/verify_bundle.sh` runs on every build** `build.sh` assembles and,
-  in the release workflow, on every archive (`.tar.gz`, `.zip`, `.apk`) before
+  in the release workflow, on every archive (`.tar.gz`, `.zip`, `.apk`, `.AppImage`) before
   it is uploaded. For each ready game it requires:
   - the module, non-empty, exporting `gd_game_run` (objdump / nm);
   - its libraries (gd02: FFmpeg's avformat, avcodec, avutil and the LGPL
@@ -287,7 +287,8 @@ Reference code:
 ### Mouse (every screen, original and port)
 
 - Hovering a menu entry focuses it, the same way the pad would. A list
-  takes clicks only; a hover would scroll it.
+  takes clicks only; a hover would scroll it (gd-game-01 highlights the
+  hovered row without moving the selection, #76).
 - A left click selects. A click on a list row moves the selection to that
   row, then selects it.
 - A right click is Back.

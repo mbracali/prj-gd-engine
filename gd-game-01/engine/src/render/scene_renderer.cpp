@@ -215,6 +215,7 @@ void SceneRenderer::drawMesh(const std::string& mesh, const Mat4& viewProj, cons
     st.uvOffset[0] += opt.uvOffset[0];
     st.uvOffset[1] += opt.uvOffset[1];
     for (int i = 0; i < 4; ++i) st.tint[i] *= opt.tint[i];
+    if (opt.smoothEdges && dm->mat && (dm->mat->blend == 3 || dm->mat->blend == 4)) st.alphaCutout = false;
     if (opt.geometry) {
         renderer_.drawMesh(opt.geometry, mvp.m.data(), st);
         return;
@@ -266,7 +267,7 @@ int SceneRenderer::texture(const std::string& name, bool repeat) {
     if (!t && lookup_) t = lookup_(name);
     int id = 0;
     if (t && t->tex && t->tex->image.width > 0)
-        id = renderer_.createTexture(enhance ? enhanceImage(t->tex->image) : t->tex->image, repeat);
+        id = renderer_.createTexture(enhance ? enhanceImage(t->tex->image, glyphTextures_.count(name) > 0) : t->tex->image, repeat);
     textures_[key] = id;
     return id;
 }

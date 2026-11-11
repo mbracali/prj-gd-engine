@@ -167,6 +167,56 @@ tubes, multiplier lights and nixies per player; the battle hand's card
 textures over the default icons [I: slot placement] and the card's name at
 `attack_ready_text_pos_p<n>`.
 
+## 8a. Career progression atoms (GD04-116, #84) [C unless noted]
+
+Tiers, encores, bosses and the next tier come from GH3's atoms, not from
+Progression_SongWon itself. career_select_difficulty_flow_state_func (and
+co-op's) runs SetProgressionDifficulty, DeRegisterAtoms, `RegisterAtoms
+name = Progression $GH3_Career_Progression` (co-op:
+GH3_CoopCareer_Progression) and UpdateAtoms; Progression_SongWon and
+Progression_SongFailed run `UpdateAtoms name = Progression` [C scripts].
+An atom is `{name Type = scr atom_script atom_params depends_on}`; a
+condition is `Type = atom` (those atoms complete) or `Type = scr` (the
+script returns true; permanent by default: once met it is not asked again
+until the atom is locked again), with an optional `required` array per
+difficulty (0: the condition is not needed). The XEX (script/atoms.cpp has
+every address): an atom starts locked; UpdateAtoms walks the list in order
+(0x822B0978); a locked atom whose conditions are met, in order up to the
+first unmet one (0x8239EBE0), turns active: the atoms waiting on it are
+disabled, its script is spawned and run now (0x8239EDB8, 0x82422D08); when
+the script has ended it is complete, and the atoms it disabled are locked
+again and updated at once (0x8239E8F8, 0x8239F158, 0x82422D90). An atom
+still running stops the pass [I: the script atom's vtable +8]; tool_only
+atoms complete without their script on a retail disc (0x8239E960).
+
+So, per tier: `career_tierN_songscomplete` (Progression_CheckSongComplete:
+GH3_Career_NumSongToProgress songs with more than 2 stars: Easy / Medium 3,
+Hard / Expert 4; it keeps `careertierN.num_songs_to_progress`) ->
+`career_tierN_encoreunlock` (Progression_TierEncoreUnlock: the encore song
+tag, its unlock, current_transition = preencore; its Progression_AlwaysBlock
+condition has required [0, 0, 0, 0]) -> the encore won ->
+`career_tierN_encorecomplete` (Progression_TierEncoreComplete: sponsored,
+the completion movie) -> `career_tierN_complete` (Progression_TierComplete:
+`careertierN.complete`, the next tier and venue unlocked; tier 8 finishes
+the game). Tiers 2, 5 and 8 put the boss first: bossunlock (preboss) ->
+bosscomplete -> encoreunlock. Tier 8 has no encore. A failed song changes
+no stars, so nothing moves; quick play, face-off, pro face-off and battle
+register no atoms; Progression_EndOfFirstUpdate (the last atom) clears the
+"last song" flags the first update set. Progression_Init (the first atom) sets
+current_level to tier 1's venue, so a new career's venue select starts on
+z_party (before: the global's default, z_artdeco); a finished career's on
+the last tier's. The song won with the preencore
+transition: GuitarEvent_SongWon_Spawned plays Transition preencore
+(cameras_preencore), then preencore_win_song -> career_encore_confirmation_fs
+-> start_encore (current_transition = encore) -> the encore song.
+
+The achievement list (Achievement_Atoms) is not run: it only awards Xbox
+achievements (GD04-013). Before GD04-116 the three natives were no-ops, so
+no tier ever completed in a played career (#84). Walk `career_encore`: a new
+band on Medium wins Slow Ride, Talk Dirty to Me (no encore yet), Hit Me
+with Your Best Shot -> the encore offer -> Rock and Roll All Nite ->
+`careertier1.complete`.
+
 ## 8. End of the song
 
 `FrontEnd::songEnded` fills player1_status and player2_status (score,
