@@ -14,6 +14,7 @@
 #include "data/pak.h"
 #include "data/qb.h"
 #include "data/qbkey.h"
+#include "data/qs.h"
 #include "script/pc_strings.h"
 #include "script/bytecode.h"
 #include "script/globals.h"
@@ -90,6 +91,18 @@ int runScriptTest(const std::string& discPath) {
         }
     }
     std::printf("scripts: %zu tokenized, %zu tokens\n", scripts, tokens);
+
+    // 1b. PC wording (GD10-035): no localized string names the console, its
+    // storage devices, gamer profiles or the console's online services.
+    qstr::load(*disc);
+    size_t qsChecked = 0;
+    qstr::each([&](uint32_t key, const std::string& text) {
+        ++qsChecked;
+        if ((consoleWording(text) || text.find("PlayStation") != std::string::npos || text.find("Dashboard") != std::string::npos) &&
+            ++failures <= 20)
+            std::printf("FAIL console wording in qs %08x: \"%.80s\"\n", key, text.c_str());
+    });
+    std::printf("qs: %zu strings checked\n", qsChecked);
 
     // 2. The boot script against the natives there are.
     Globals g;

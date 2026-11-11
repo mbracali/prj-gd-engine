@@ -3,6 +3,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <string>
 
 #include "data/qb.h"
@@ -25,6 +26,8 @@ const std::string* find(uint32_t key);
 // table puts on many entries [I: the mark's meaning], or "" if unknown.
 std::string text(uint32_t key);
 size_t size();
+// Every string of the table (tests).
+void each(const std::function<void(uint32_t, const std::string&)>& fn);
 // Turns every QsKey inside `v` (structs and arrays included) into a String
 // with its text, so the UI code reads them as GH3's strings.
 void resolve(qb::Value& v);

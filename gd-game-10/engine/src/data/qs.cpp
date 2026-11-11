@@ -10,6 +10,7 @@
 #include "data/disc.h"
 #include "data/pak.h"
 #include "data/qbkey.h"
+#include "script/pc_strings.h"
 
 namespace qstr {
 namespace {
@@ -60,7 +61,7 @@ void parse(const uint8_t* d, size_t n) {
             if (ok && q0 != std::u32string::npos && q1 > q0) {
                 std::string s;
                 for (size_t i = q0 + 1; i < q1; ++i) appendUtf8(s, line[i]);
-                table()[key] = std::move(s);
+                table()[key] = pcstrings::pcQsText(s);  // PC wording (GD10-035)
             }
         }
         line.clear();
@@ -107,6 +108,10 @@ std::string text(uint32_t key) {
 }
 
 size_t size() { return table().size(); }
+
+void each(const std::function<void(uint32_t, const std::string&)>& fn) {
+    for (const auto& [k, v] : table()) fn(k, v);
+}
 
 void resolve(qb::Value& v) {
     if (v.type == qb::Type::QsKey) {

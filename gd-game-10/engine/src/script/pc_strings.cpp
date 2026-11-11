@@ -7,6 +7,8 @@
 // the port (GD10-013), so their messages say so.
 #include "script/pc_strings.h"
 
+#include <cctype>
+#include <string>
 #include <unordered_map>
 
 #include "data/qbkey.h"
@@ -81,6 +83,90 @@ void apply(qb::Value& v, int depth) {
 }
 
 }  // namespace
+
+namespace {
+
+// gh4's localized strings (qs.pak; GD10-035): whole strings first (the
+// text without a leading \L), then the wording rules on what is left.
+const std::unordered_map<std::string, std::string>& qsTable() {
+    static const std::unordered_map<std::string, std::string> t = {
+        {"Xbox LIVE", "ONLINE"},
+        {"Xbox LIVE:", "ONLINE:"},
+        {"Xbox LIVE Main Menu", "Online Main Menu"},
+        {"PlayStation®Network", "ONLINE"},
+        {"GAMER CARD", "PROFILE"},
+        {"Gamer card", "Profile"},
+        {"VIEW GAMER CARD", "VIEW PROFILE"},
+        {"Press \\m0 to view GAMER CARD.", "Press \\m0 to view PROFILE."},
+        {"gamertag", "player name"},
+        {"GAMERTAG", "PLAYER NAME"},
+        {"1. Plug Xbox 360 Controller in", "1. Plug in a gamepad"},
+        {"Controller not signed in", "Controller not in use"},
+        {"Any changes will not be saved. If using multiple controllers, use a signed in controller to edit and save changes.",
+         "Any changes will not be saved."},
+        {"You are not signed in to a gamer profile. You will be unable to save any game content until you sign in.",
+         "No save profile is in use. You will be unable to save any game content."},
+        {"You are not signed in to a gamer profile. You will be unable to access any downloadable content until you sign into a gamer profile.",
+         "No save profile is in use. You will be unable to access any downloadable content."},
+        {"You are signed in as a guest. Guest profiles cannot save their progress or settings. Do you wish to continue without saving?",
+         "No save profile is in use. Progress and settings will not be saved. Do you wish to continue without saving?"},
+        {"A user sign in change has caused the game to lose ownership of saves and achievements. As a result, the game has restarted.",
+         "The save profile changed. As a result, the game has restarted."},
+        {"While the Always Drum Fill, Always Slide, or the Auto Kick cheat(s) are enabled you will no longer be able to earn achievements, "
+         "earn high scores, or post scores to any leaderboard. Always Drum Fill, Always Slide, and Auto Kick cheats will not function when "
+         "playing on Xbox LIVE.",
+         "While the Always Drum Fill, Always Slide, or the Auto Kick cheat(s) are enabled you will no longer be able to earn high scores."},
+        {"This game saves data automatically at certain points. Do not switch off the power when the HDD access indicator is flashing.",
+         "This game saves data automatically at certain points. Do not close the game while it is saving."},
+        {"Purchase using Microsoft® points.", kNoOnline},
+    };
+    return t;
+}
+
+void replaceAll(std::string& s, const char* from, const char* to) {
+    const size_t n = std::char_traits<char>::length(from), m = std::char_traits<char>::length(to);
+    for (size_t at = s.find(from); at != std::string::npos; at = s.find(from, at + m)) s.replace(at, n, to);
+}
+
+bool containsNoCase(const std::string& s, const char* what) {
+    std::string low = s;
+    for (char& c : low) c = char(std::tolower(static_cast<unsigned char>(c)));
+    return low.find(what) != std::string::npos;
+}
+
+}  // namespace
+
+std::string pcQsText(const std::string& text) {
+    const bool l = text.size() >= 2 && text[0] == '\\' && text[1] == 'L';
+    std::string s = l ? text.substr(2) : text;
+    auto it = qsTable().find(s);
+    if (it != qsTable().end()) return (l ? "\\L" : "") + it->second;
+    const std::string before = s;
+    // Pads, headsets and the console.
+    replaceAll(s, "Xbox 360 Controllers", "gamepads");
+    replaceAll(s, "Xbox 360 Controller", "gamepad");
+    replaceAll(s, "Xbox 360 Headsets", "headsets");
+    replaceAll(s, "Xbox 360 Headset", "headset");
+    replaceAll(s, "your Xbox 360 console", "the system");
+    replaceAll(s, "the Xbox 360 console", "the system");
+    replaceAll(s, "turn off your console", "turn off the system");
+    // Saving: no storage devices on PC.
+    replaceAll(s, "No storage device was selected or the in-use storage device is unavailable.", "The save location is unavailable.");
+    replaceAll(s, "No storage device selected or found. If no storage device is available,", "No save location found. If none is available,");
+    replaceAll(s, "without selecting a storage device", "without a save location");
+    replaceAll(s, "storage device", "save location");
+    replaceAll(s, "STORAGE DEVICE", "SAVE LOCATION");
+    replaceAll(s, "Please return to the Xbox Dashboard and delete some existing data", "Please free some disk space");
+    // Online play is not in the port: its preferences name it plainly, the rest say so.
+    replaceAll(s, "for Xbox LIVE play", "for online play");
+    replaceAll(s, "the Xbox LIVE lobby", "the online lobby");
+    if (s.find("Xbox LIVE") != std::string::npos || s.find("PlayStation®Network") != std::string::npos ||
+        containsNoCase(s, "gamer profile") || s.find("Xbox Dashboard") != std::string::npos ||
+        s.find("set your console") != std::string::npos || s.find("signed in to enter the lobby") != std::string::npos)
+        s = kNoOnline;
+    if (s == before) return text;
+    return (l ? "\\L" : "") + s;
+}
 
 const std::string& pcText(const std::string& text) {
     const auto& t = table();

@@ -16,6 +16,12 @@ namespace pcstrings {
 // no PC version. GH3's disc is English only.
 const std::string& pcText(const std::string& text);
 
+// gh4's localized strings (qs.pak) in the port's PC wording (GD10-035):
+// whole-string rewrites, then rules (pads, headsets, the console, storage
+// devices; online-only messages say online play is not in the port). A
+// leading \L is kept. `text` itself when nothing names the console.
+std::string pcQsText(const std::string& text);
+
 // Applies pcText to every string in a struct (a script's inline structs:
 // `textblock = { Text = ... }`).
 void applyToStruct(qb::Struct& st);
