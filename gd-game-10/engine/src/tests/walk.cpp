@@ -435,7 +435,7 @@ Walk::Walk(const std::string& name) : name_(name) {
         steps_.push_back({"career_newspaper_fs", {}, 60000});
     } else if (name == "menus") {
         // Every main menu item (CAREER .. MUSIC STUDIO), its screen and the
-        // first item under it, each saved (GD10_WALK_SHOTS), then Back to the
+        // focused item under it, each saved (GD10_WALK_SHOTS), then Back to the
         // main menu, which must come back each time [C: create_main_menu's
         // seven items].
         steps_ = boot;
@@ -447,7 +447,7 @@ Walk::Walk(const std::string& name) : name_(name) {
             std::vector<Op> k = {"wait", "wait"};
             for (int d = 0; d < i; ++d) k.push_back(D);
             const std::string tag = "menus_" + std::to_string(i);
-            for (Op o : {Op(C), Op("wait"), Op("wait"), Op("wait"), Op("wait"), Op("wait"), Op("wait"), Op("shot:" + tag + "a@"), Op(D), Op("wait"),
+            for (Op o : {Op(C), Op("wait"), Op("wait"), Op("wait"), Op("wait"), Op("wait"), Op("wait"), Op("shot:" + tag + "a@"), Op("wait"),
                          Op(C), Op("wait"), Op("wait"), Op("wait"), Op("wait"), Op("wait"), Op("wait"), Op("shot:" + tag + "b@"), Op(B), Op("wait"),
                          Op("wait"), Op("wait"), Op("wait"), Op("backto:main_menu_fs")})
                 k.push_back(o);

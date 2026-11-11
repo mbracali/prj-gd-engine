@@ -95,7 +95,13 @@ void UiStates::leave(Entry& e, bool remove) {
 
 void UiStates::handle(uint32_t event, const qb::Struct& data) {
     const uint32_t state = keyOf(data.find(K("state")));
-    if (log_) SDL_Log("ui event: %s %s", qbkey::name(event).c_str(), state ? qbkey::name(state).c_str() : "");
+    if (log_) {
+        std::string ds;
+        for (const qb::Item& it : data.items)
+            ds += " " + (it.name ? qbkey::name(it.name) : std::string("_")) + ":" + qb::typeName(it.value.type) +
+                  (it.value.type == qb::Type::Key || it.value.type == qb::Type::KeyPtr ? "=" + qbkey::name(it.value.key) : std::string());
+        SDL_Log("ui event: %s %s {%s }", qbkey::name(event).c_str(), state ? qbkey::name(state).c_str() : "", ds.c_str());
+    }
     if (state && !states_.count(state)) {
         vm_.logOnce("UNHANDLED ui state " + qbkey::name(state));
         return;

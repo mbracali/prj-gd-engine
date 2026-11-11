@@ -426,6 +426,16 @@ void UiSystem::applyProps(Element& e, const qb::Struct& p, bool create) {
         if (e.type == kSprite && e.texture && newDimsW >= 0) e.sx *= scaleX, e.sy *= scaleY;
         else e.sx = scaleX, e.sy = scaleY;
     }
+    // The port has no online play: the main menu's Xbox LIVE item (gh4 sets
+    // its main_menu_select_online handler after making it) is greyed and
+    // skipped as create_main_menu's demo_mode_disable does (GD10-101) [C script].
+    if (qs::Vm::param(p, K("event_handlers")))
+        for (const Element::Handler& h : e.handlers)
+            if (h.script == K("main_menu_select_online") || h.script == K("main_menu_select_xbox_live")) {
+                e.rgba = {128, 128, 128, 255}, e.notFocusable = true;
+                for (auto& c : e.children)
+                    if (c->type == kText || c->type == kTextBlock) c->rgba = {128, 128, 128, 255};
+            }
     if (e.upperCase && !e.text.empty()) e.text = upperText(e.text);
     if (e.type == kText || e.type == kTextBlock) measureText(e);
 }
@@ -740,6 +750,20 @@ bool UiSystem::launch(Element* target, uint32_t event, const qb::Struct& data) {
         for (const qb::Item& it : data.items) qs::Vm::set(params, it.name, it.value);
         ++stats_.handlersRun;
         handled = true;
+        // GD10_HANDLERLOG=1: each handler run with its params' names (two levels).
+        static const bool hlog = [] { const char* v = SDL_getenv("GD10_HANDLERLOG"); return v && *v && *v != '0'; }();
+        if (hlog) {
+            std::string ps;
+            for (const qb::Item& it : params.items) {
+                ps += " " + (it.name ? qbkey::name(it.name) : std::string("_")) + ":" + qb::typeName(it.value.type);
+                if (it.value.st) {
+                    ps += "{";
+                    for (const qb::Item& f : it.value.st->items) ps += (f.name ? qbkey::name(f.name) : std::string("_")) + ":" + qb::typeName(f.value.type) + " ";
+                    ps += "}";
+                }
+            }
+            SDL_Log("ui handler %s %s:%s", qbkey::name(event).c_str(), qbkey::name(h.script).c_str(), ps.c_str());
+        }
         bool r = false;
         vm_.run(h.script, params, &r, id);  // the element is the handler's object [I: options_menu_hilight's gettags]
         if (!find(id)) return true;  // destroyed by its handler
@@ -1966,9 +1990,16 @@ void UiSystem::addNatives() {
                 vm_.logOnce("ui: no desc " + dn);
             } else {
                 // The call's props stay on this element; the desc's root is
-                // its child 0, so a just = [center center] with no dims moves
-                // nothing (D14).
+                // its child 0. Without dims it covers its parent, top-left
+                // (its just unused): new_cheat's centred root lands mid-screen,
+                // make_menu_frontend's just = [center center] moves nothing;
+                // with dims (the helper pills, 1024 x 36) the call's just
+                // places it (D14 [I]).
                 descSetProps(*raw, p);
+                if (!Vm::param(p, K("dims"))) {
+                    raw->w = parent->w, raw->h = parent->h;
+                    raw->justX = raw->justY = -1;
+                }
             }
         }
         // The main menu's XBOX LIVE (ONLINE: no online play in the port) as

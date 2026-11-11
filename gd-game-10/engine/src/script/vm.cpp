@@ -648,9 +648,12 @@ qb::Struct scriptParams(qb::Struct p) {
     qb::Struct out;
     for (qb::Item& it : p.items) {
         if (it.name == 0 && it.value.type == qb::Type::Struct && it.value.st) {
-            for (const qb::Item& sub : it.value.st->items) {
-                if (sub.name) Vm::set(out, sub.name, sub.value);
-                else out.items.push_back(sub);
+            // Included structs nest (add_menu_frontend_item's pad_params =
+            // {container_id <pad_choose_params>}: generic_event_choose's
+            // `state` is two levels down; Extras / Cheats never opened) [I].
+            for (qb::Item& sub : scriptParams(*it.value.st).items) {
+                if (sub.name) Vm::set(out, sub.name, std::move(sub.value));
+                else out.items.push_back(std::move(sub));
             }
         } else if (it.name) {
             Vm::set(out, it.name, std::move(it.value));
