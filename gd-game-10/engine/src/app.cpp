@@ -253,7 +253,10 @@ private:
 // Xbox pad first: its resting sticks (an analog whammy at 0) are what used
 // to cancel the key every frame.
 void App::walkKeyBot() {
-    if (!song_ || !walk_ || !walk_->playsKeys()) return;
+    // GD10_KEYBOT=1 (development aid): the same player on any song, strumming
+    // each note with the Down key (Require Strum on), as a keyboard player would.
+    static const bool envBot = SDL_getenv("GD10_KEYBOT") != nullptr;
+    if (!song_ || !((walk_ && walk_->playsKeys()) || envBot)) return;
     const Match& m = song_->match();
     const NoteTrack& tr = m.track(0);
     const double now = song_->songMs();
@@ -276,7 +279,7 @@ void App::walkKeyBot() {
     };
     // Read before this frame's keys reach it: what the last frame (its pad
     // poll included) left on the held sustain.
-    if (m.player(0).sustaining() >= 0) {
+    if (walk_ && m.player(0).sustaining() >= 0) {
         ++walk_->keyHoldFrames;
         if (b.whammy) ++walk_->keyWhammyFrames, walk_->keyWhammy = std::min(walk_->keyWhammy, song_->whammy(0));
         else walk_->keyRest = std::max(walk_->keyRest, song_->whammy(0));
@@ -288,6 +291,16 @@ void App::walkKeyBot() {
             if (n.frets & (1u << f)) key(kFret[f], true);
         b.frets = n.frets, b.sustain = n.sustain, b.from = n.time;
         b.until = n.sustain ? double(n.time) + n.holdMs - 30 : double(n.time) + 50;
+        if (envBot && !walk_) {
+            key(SDLK_DOWN, true), key(SDLK_DOWN, false);
+            if (b.next % 100 == 0)
+                SDL_Log("keybot: %zu notes pressed, %d hit, %d missed, %d overstrums, score %d", b.next, m.player(0).stats().notesHit,
+                        m.player(0).stats().misses, m.player(0).stats().overstrums, int(m.player(0).stats().score));
+        }
+    }
+    if (!walk_) {
+        if (b.frets && now >= b.until) release();
+        return;
     }
     // The notes pressed long enough ago to be judged, before the walk's forced end.
     const double judgedTo = std::min(now, song_->walkEndMs_ > 0 ? song_->walkEndMs_ : now) - 200;
@@ -1883,6 +1896,8 @@ int App::run() {
                 running_ = false;
             }
             walkKeyBot();
+        } else if (song_) {
+            walkKeyBot();  // GD10_KEYBOT on a song without a walk
         }
         if (!running_) break;
         if (front_) {
