@@ -880,7 +880,7 @@ bool Vm::run(uint32_t name, const qb::Struct& params, bool* result, uint32_t obj
     r->handler = object != 0;
     Frame f;
     f.code = c;
-    f.locals = std::make_shared<qb::Struct>(params);
+    f.locals = std::make_shared<qb::Struct>(scriptParams(params));  // an included struct gives its fields (gh4 transitions)
     r->frames.push_back(std::move(f));
     const bool alive = step(*r, 1 << 20);
     if (result) *result = true;
@@ -896,7 +896,14 @@ uint32_t Vm::spawn(uint32_t name, const qb::Struct& params, uint32_t spawnedBy) 
         minLoadingShownMs_ = minLoadingShownMs_ < 0 ? shown : std::min(minLoadingShownMs_, shown);
         loadingShownMs_ = -1;
     }
-    if (const char* v = SDL_getenv("GD10_VMTRACE"); v && *v && *v != '0') SDL_Log("qscript: %.0f ms spawn %s", clockMs_, qbkey::name(name).c_str());
+    if (const char* v = SDL_getenv("GD10_VMTRACE"); v && *v && *v != '0') {
+        std::string ps;
+        for (const qb::Item& it : params.items) {
+            ps += " " + (it.name ? qbkey::name(it.name) : std::string("_")) + ":" + qb::typeName(it.value.type);
+            if (it.value.type == qb::Type::Key || it.value.type == qb::Type::KeyPtr) ps += "=" + qbkey::name(it.value.key);
+        }
+        SDL_Log("qscript: %.0f ms spawn %s (%s)", clockMs_, qbkey::name(name).c_str(), ps.c_str());
+    }
     if (!c) {
         if (unhandledNames_.insert(name).second) logOnce("UNHANDLED spawn " + qbkey::name(name));
         return 0;
@@ -908,7 +915,7 @@ uint32_t Vm::spawn(uint32_t name, const qb::Struct& params, uint32_t spawnedBy) 
     r->spawnedBy = spawnedBy;
     Frame f;
     f.code = c;
-    f.locals = std::make_shared<qb::Struct>(params);
+    f.locals = std::make_shared<qb::Struct>(scriptParams(params));  // as run()
     r->frames.push_back(std::move(f));
     const uint32_t id = r->id;
     runs_.push_back(std::move(r));

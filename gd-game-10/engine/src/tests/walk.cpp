@@ -48,8 +48,8 @@ Walk::Walk(const std::string& name) : name_(name) {
         {"uistate_optimal_drum", {"wait", "wait", C}, 60000, true},
         {"main_menu_fs", {}, 60000},
     };
-    if (name == "qp4") {
-        // gh4 (Metallica) Quickplay, being built (M4): the main menu's
+    if (name == "qp4" || name == "quickplay") {
+        // gh4 (Metallica) Quickplay (M4): the main menu's
         // QUICKPLAY (second item), single player, guitar, the set list.
         steps_ = boot;
         steps_.push_back({"main_menu_fs", {"wait", "wait", "wait", "wait", "wait", "wait", "wait", D, C}, 10000});
@@ -64,7 +64,10 @@ Walk::Walk(const std::string& name) : name_(name) {
         steps_.push_back({"uistate_select_difficulty", {"wait", "wait", "wait", "wait", D, D, D, D, "wait", C}, 20000});
         steps_.push_back({"song", {}, 30000});
         steps_.push_back({"song_over", {}, 600000});
-        steps_.push_back({"uistate_never", {}, 15000});
+        // The results (song breakdown), then on.
+        steps_.push_back({"uistate_song_breakdown", {"wait", "wait", "wait", "wait", "wait", "wait", C}, 30000});
+        steps_.push_back({"uistate_cash_rewards_3", {"wait", "wait", "wait", "wait", "wait", "wait", C}, 30000, true});
+        steps_.push_back({"uistate_setlist", {"wait"}, 30000});
     } else if (name == "quickplay" || name == "lose") {
         steps_ = boot;
         steps_.push_back({"main_menu_fs", {D, D, C}, 10000});  // career, co-op career, QUICKPLAY
