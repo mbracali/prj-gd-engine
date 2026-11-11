@@ -164,9 +164,13 @@ struct Program {
     gfx::ProgramId id;
     uint16_t samplers = 0, cubes = 0, attribs = 0;
     std::string name;
+    bool compiling = false;  // begun (RenderDevice::beginProgram), not polled ready yet
 };
 
-// Programs of one device, by template key. Not thread-safe.
+// Programs of one device, by template key. Not thread-safe. Every Programs
+// of a device shares its compiled programs (the menus' zone, the song's
+// same zone, the next song's: compiled once a run, no-stutter rule); they
+// live as long as the device.
 class Programs {
 public:
     ~Programs() { shutdown(); }
@@ -177,13 +181,17 @@ public:
     // when the template is unknown or its shaders cannot be translated.
     const Program* get(uint32_t templateKey, matlib::Technique t = matlib::Default);
     // Whether get() made (or failed) that program before: no GL work left.
-    bool has(uint32_t templateKey, matlib::Technique t = matlib::Default) const {
-        return programs_.count(uint64_t(templateKey) << 8 | t) != 0;
-    }
+    bool has(uint32_t templateKey, matlib::Technique t = matlib::Default) const;
     // A named technique of a template (the filter templates' passes, e.g.
     // ImmediateMode's "_2D_Cutoff"), its Default variant; null when missing
     // or not translated.
     const Program* get(uint32_t templateKey, const std::string& technique);
+    // A program asked for ahead (no-stutter rule): compiled in the driver's
+    // background where it can (OpenGL), else now; settle() polls them, true
+    // once every asked one is ready (get() of one not ready waits for it).
+    void request(uint32_t templateKey, matlib::Technique t = matlib::Default);
+    void request(uint32_t templateKey, const std::string& technique);
+    bool settle();
     const matlib::Library* library() const { return lib_.get(); }
     gfx::TextureId white() const { return white_; }
     gfx::TextureId whiteCube() const { return whiteCube_; }
@@ -191,9 +199,12 @@ public:
 private:
     gfx::RenderDevice* dev_ = nullptr;
     std::shared_ptr<const matlib::Library> lib_;
-    std::unordered_map<uint64_t, std::unique_ptr<Program>> programs_;  // null entry: failed
-    std::unordered_map<std::string, std::unique_ptr<Program>> named_;
-    std::unique_ptr<Program> make(int vs, int ps, const std::string& name);
+    std::unordered_map<uint64_t, std::shared_ptr<Program>> programs_;  // null entry: failed
+    std::unordered_map<std::string, std::shared_ptr<Program>> named_;
+    std::unique_ptr<Program> make(int vs, int ps, const std::string& name, bool async);
+    const Program* shared(const std::string& id, int vs, int ps, const std::string& name, std::shared_ptr<Program>& local, bool async = false);
+    const Program* ready(std::shared_ptr<Program>& p);  // waits for a compiling one; null if it failed
+    std::vector<std::shared_ptr<Program>> requested_;
     gfx::TextureId white_, whiteCube_;
 };
 

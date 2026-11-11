@@ -5,6 +5,7 @@
 #include <SDL3/SDL.h>
 
 #include <cstddef>
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -170,7 +171,20 @@ struct DevicePerf {
 
 class RenderDevice {
 public:
+    RenderDevice() : serial_(nextSerial()) {}
     virtual ~RenderDevice() = default;
+    // This device's number in the process (never reused, unlike its address:
+    // caches of its objects outlive a restart's device, gh3shader::Programs).
+    uint64_t serial() const { return serial_; }
+
+private:
+    static uint64_t nextSerial() {
+        static std::atomic<uint64_t> n{0};
+        return ++n;
+    }
+    uint64_t serial_;
+
+public:
     virtual const DeviceInfo& info() const = 0;
 
     // Resources. Creation returns an empty handle and sets `error` on failure.
@@ -185,6 +199,15 @@ public:
     virtual void updateBuffer(BufferId b, size_t offset, const void* data, size_t size) = 0;
     virtual void destroyBuffer(BufferId b) = 0;
     virtual ProgramId createProgram(const ProgramDesc& desc, std::string& error) = 0;
+    // The same without waiting for the driver where it compiles in the
+    // background (OpenGL's KHR_parallel_shader_compile): poll programStatus
+    // (1 ready, 0 still compiling, -1 failed: `error`, the program gone)
+    // before drawing with it; a draw with it waits for it.
+    virtual ProgramId beginProgram(const ProgramDesc& desc, std::string& error) { return createProgram(desc, error); }
+    virtual int programStatus(ProgramId p, std::string& error) {
+        (void)error;
+        return p ? 1 : -1;
+    }
     virtual void destroyProgram(ProgramId p) = 0;
     // An RGBA8 colour target with an optional depth buffer; its colour (and
     // depth) can be sampled through targetTexture / targetDepth.

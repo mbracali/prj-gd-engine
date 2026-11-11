@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "render/device.h"
@@ -151,6 +153,8 @@ public:
     uint64_t drawCalls() const override { return drawCalls_; }
     void destroyBuffer(BufferId b) override;
     ProgramId createProgram(const ProgramDesc& desc, std::string& error) override;
+    ProgramId beginProgram(const ProgramDesc& desc, std::string& error) override;
+    int programStatus(ProgramId p, std::string& error) override;
     void destroyProgram(ProgramId p) override;
     TargetId createTarget(int width, int height, bool depth, std::string& error) override {
         return createTarget(TargetDesc{width, height, depth, TargetFormat::RGBA8}, error);
@@ -218,6 +222,16 @@ private:
     Slots<GlTexture> textures_;
     Slots<GlBuffer> buffers_;
     Slots<GLuint> programs_;
+    // KHR_parallel_shader_compile: programs linking in the driver's threads
+    // (beginProgram) until programStatus (or a draw) finishes them.
+    bool parallelCompile_ = false;
+    struct PendingProgram {
+        GLuint vs = 0, fs = 0;
+        std::vector<std::string> blocks, samplers;
+    };
+    std::unordered_map<uint32_t, PendingProgram> pendingPrograms_;
+    std::string programSource(const ProgramDesc& desc, bool vertex) const;
+    bool finishProgram(GLuint p, const std::vector<std::string>& blocks, const std::vector<std::string>& samplers, std::string& error);
     Slots<GlTarget> targets_;
     TextureId white_;
     GLuint vao_ = 0;
@@ -314,6 +328,19 @@ bool GlDevice::init(std::string& error) {
     info_.rgtc = !forceDecode && (!info_.es || gl::hasExtension("GL_EXT_texture_compression_rgtc"));
     SDL_Log("render: %s on %s (BC1/BC3 %s, BC5 %s)", info_.version.c_str(), info_.gpu.c_str(),
             info_.s3tc ? "native" : "CPU-decoded", info_.rgtc ? "native" : "CPU-decoded");
+    // Programs compiled in the driver's threads (beginProgram): a venue's
+    // shaders under the loading screen without holding its frames (one could
+    // take 100 ms on a cold driver cache). GD10_NO_PARALLEL_COMPILE=1: off (development aid).
+    if (!SDL_getenv("GD10_NO_PARALLEL_COMPILE"))
+        for (const char* ext : {"GL_KHR_parallel_shader_compile", "GL_ARB_parallel_shader_compile"})
+            if (gl::hasExtension(ext)) {
+                using MaxThreads = void(APIENTRY*)(GLuint);
+                const bool khr = ext[3] == 'K';
+                if (auto f = reinterpret_cast<MaxThreads>(SDL_GL_GetProcAddress(khr ? "glMaxShaderCompilerThreadsKHR" : "glMaxShaderCompilerThreadsARB")))
+                    f(0xFFFFFFFFu);  // as many as the driver likes
+                parallelCompile_ = true;
+                break;
+            }
 
     gl::glGenVertexArrays(1, &vao_);
     gl::glBindVertexArray(vao_);
@@ -590,15 +617,96 @@ GLuint compileStage(GLenum stage, const std::string& source, std::string& error)
     return s;
 }
 
-ProgramId GlDevice::createProgram(const ProgramDesc& desc, std::string& error) {
-    ++perf_.created;
+std::string GlDevice::programSource(const ProgramDesc& desc, bool vertex) const {
     const std::string header = info_.es ? "#version 300 es\nprecision highp float;\nprecision highp int;\n"
                                           "precision highp sampler2D;\nprecision highp samplerCube;\n"
                                         : "#version 330 core\n";
-    const std::string common = header + desc.defines + "#line 1\n";
-    GLuint vs = compileStage(GL_VERTEX_SHADER, common + "#define GD_VERTEX 1\n" + desc.vertex, error);
+    return header + desc.defines + "#line 1\n" + (vertex ? "#define GD_VERTEX 1\n" + desc.vertex : "#define GD_FRAGMENT 1\n" + desc.fragment);
+}
+
+ProgramId GlDevice::beginProgram(const ProgramDesc& desc, std::string& error) {
+    if (!parallelCompile_) return createProgram(desc, error);
+    ++perf_.created;
+    PendingProgram pp;
+    GLuint* stage[2] = {&pp.vs, &pp.fs};
+    for (int i = 0; i < 2; ++i) {
+        *stage[i] = gl::glCreateShader(i ? GL_FRAGMENT_SHADER : GL_VERTEX_SHADER);
+        const std::string src = programSource(desc, i == 0);
+        const char* text = src.c_str();
+        gl::glShaderSource(*stage[i], 1, &text, nullptr);
+        gl::glCompileShader(*stage[i]);  // (no status asked: the driver's threads compile it)
+    }
+    GLuint p = gl::glCreateProgram();
+    gl::glAttachShader(p, pp.vs);
+    gl::glAttachShader(p, pp.fs);
+    gl::glLinkProgram(p);
+    pp.blocks = desc.uniformBlocks, pp.samplers = desc.samplers;
+    const ProgramId id{programs_.add(p)};
+    pendingPrograms_.emplace(id.id, std::move(pp));
+    return id;
+}
+
+int GlDevice::programStatus(ProgramId id, std::string& error) {
+    auto it = pendingPrograms_.find(id.id);
+    if (it == pendingPrograms_.end()) return programs_.get(id.id) ? 1 : -1;
+    GLuint* p = programs_.get(id.id);
+    constexpr GLenum kCompletionStatus = 0x91B1;  // GL_COMPLETION_STATUS_KHR
+    GLint done = 0;
+    gl::glGetProgramiv(*p, kCompletionStatus, &done);
+    if (!done) return 0;
+    PendingProgram pp = std::move(it->second);
+    pendingPrograms_.erase(it);
+    bool ok = finishProgram(*p, pp.blocks, pp.samplers, error);
+    if (!ok) {
+        for (GLuint s : {pp.vs, pp.fs}) {
+            GLint c = 0;
+            gl::glGetShaderiv(s, GL_COMPILE_STATUS, &c);
+            if (c) continue;
+            char log[2048] = {};
+            gl::glGetShaderInfoLog(s, sizeof log, nullptr, log);
+            error = std::string(s == pp.vs ? "vertex shader: " : "fragment shader: ") + log;
+        }
+    }
+    gl::glDeleteShader(pp.vs);
+    gl::glDeleteShader(pp.fs);
+    if (!ok) {
+        gl::glDeleteProgram(*p);
+        programs_.remove(id.id);
+        return -1;
+    }
+    return 1;
+}
+
+// A linked program's status, uniform blocks and samplers (false: `error`).
+bool GlDevice::finishProgram(GLuint p, const std::vector<std::string>& blocks, const std::vector<std::string>& samplers, std::string& error) {
+    GLint ok = 0;
+    gl::glGetProgramiv(p, GL_LINK_STATUS, &ok);
+    if (!ok) {
+        char log[2048] = {};
+        gl::glGetProgramInfoLog(p, sizeof log, nullptr, log);
+        error = std::string("link: ") + log;
+        return false;
+    }
+    for (size_t i = 0; i < blocks.size() && i < size_t(kMaxUniformBlocks); ++i) {
+        if (blocks[i].empty()) continue;
+        GLuint index = gl::glGetUniformBlockIndex(p, blocks[i].c_str());
+        if (index != GL_INVALID_INDEX) gl::glUniformBlockBinding(p, index, GLuint(i));
+    }
+    gl::glUseProgram(p);
+    for (size_t i = 0; i < samplers.size() && i < size_t(kMaxTextureSlots); ++i) {
+        if (samplers[i].empty()) continue;
+        GLint loc = gl::glGetUniformLocation(p, samplers[i].c_str());
+        if (loc >= 0) gl::glUniform1i(loc, GLint(i));
+    }
+    gl::glUseProgram(program_);
+    return true;
+}
+
+ProgramId GlDevice::createProgram(const ProgramDesc& desc, std::string& error) {
+    ++perf_.created;
+    GLuint vs = compileStage(GL_VERTEX_SHADER, programSource(desc, true), error);
     if (!vs) return {};
-    GLuint fs = compileStage(GL_FRAGMENT_SHADER, common + "#define GD_FRAGMENT 1\n" + desc.fragment, error);
+    GLuint fs = compileStage(GL_FRAGMENT_SHADER, programSource(desc, false), error);
     if (!fs) {
         gl::glDeleteShader(vs);
         return {};
@@ -609,31 +717,19 @@ ProgramId GlDevice::createProgram(const ProgramDesc& desc, std::string& error) {
     gl::glLinkProgram(p);
     gl::glDeleteShader(vs);
     gl::glDeleteShader(fs);
-    GLint ok = 0;
-    gl::glGetProgramiv(p, GL_LINK_STATUS, &ok);
-    if (!ok) {
-        char log[2048] = {};
-        gl::glGetProgramInfoLog(p, sizeof log, nullptr, log);
-        error = std::string("link: ") + log;
+    if (!finishProgram(p, desc.uniformBlocks, desc.samplers, error)) {
         gl::glDeleteProgram(p);
         return {};
     }
-    for (size_t i = 0; i < desc.uniformBlocks.size() && i < size_t(kMaxUniformBlocks); ++i) {
-        if (desc.uniformBlocks[i].empty()) continue;
-        GLuint index = gl::glGetUniformBlockIndex(p, desc.uniformBlocks[i].c_str());
-        if (index != GL_INVALID_INDEX) gl::glUniformBlockBinding(p, index, GLuint(i));
-    }
-    gl::glUseProgram(p);
-    for (size_t i = 0; i < desc.samplers.size() && i < size_t(kMaxTextureSlots); ++i) {
-        if (desc.samplers[i].empty()) continue;
-        GLint loc = gl::glGetUniformLocation(p, desc.samplers[i].c_str());
-        if (loc >= 0) gl::glUniform1i(loc, GLint(i));
-    }
-    gl::glUseProgram(program_);
     return {programs_.add(p)};
 }
 
 void GlDevice::destroyProgram(ProgramId id) {
+    if (auto pp = pendingPrograms_.find(id.id); pp != pendingPrograms_.end()) {
+        gl::glDeleteShader(pp->second.vs);
+        gl::glDeleteShader(pp->second.fs);
+        pendingPrograms_.erase(pp);
+    }
     if (GLuint* p = programs_.get(id.id)) {
         if (program_ == *p) gl::glUseProgram(0), program_ = 0;
         gl::glDeleteProgram(*p);
@@ -885,6 +981,12 @@ void GlDevice::bindUniforms(int binding, const UniformData& u) {
 }
 
 void GlDevice::draw(const DrawCall& c) {
+    if (!pendingPrograms_.empty() && pendingPrograms_.count(c.program.id)) {
+        // Drawn before it was polled ready: finished now (waits for the driver).
+        std::string err;
+        while (programStatus(c.program, err) == 0) {}
+        if (!err.empty()) SDL_Log("render: program: %s", err.c_str());
+    }
     const GLuint* prog = programs_.get(c.program.id);
     const GlBuffer* vb = buffers_.get(c.vertices.id);
     if (!prog || !vb || !c.layout || c.count <= 0) return;

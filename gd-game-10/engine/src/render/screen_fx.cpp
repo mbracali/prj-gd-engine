@@ -60,7 +60,7 @@ bool ScreenFx::init(gfx::RenderDevice& dev, std::shared_ptr<const matlib::Librar
     d.fragment = kCopyFragment;
     d.samplers = {"sTex"};
     std::string err;
-    copy_ = dev.createProgram(d, err);
+    copy_ = dev.beginProgram(d, err);
     if (!copy_ || !quad_) {
         SDL_Log("screen fx: %s", err.c_str());
         shutdown();
@@ -68,10 +68,23 @@ bool ScreenFx::init(gfx::RenderDevice& dev, std::shared_ptr<const matlib::Librar
     }
     // Every pass the chain can run, compiled with the venue (no compile in
     // the first frame an effect turns on).
-    for (const char* t : {"_2D_DepthOfFieldNear", "_2D_Tex_NoViewport", "_2D_Cutoff"}) (void)gh3_.get(immediate_, t);
-    for (const char* t : {"_2D_Tex_BS_NoViewport", "_2D_ComposeBloom0"}) (void)gh3_.get(immediateAlt_, t);
-    for (const char* t : {"_2D_DownSample4x", "_2D_GaussianBlur7x7H", "_2D_GaussianBlur7x7V", "_2D_GaussianBlur7x7"}) (void)gh3_.get(filter_, t);
+    // (Asked for here, ready once settle() says so.)
+    for (const char* t : {"_2D_DepthOfFieldNear", "_2D_Tex_NoViewport", "_2D_Cutoff"}) gh3_.request(immediate_, t);
+    for (const char* t : {"_2D_Tex_BS_NoViewport", "_2D_ComposeBloom0"}) gh3_.request(immediateAlt_, t);
+    for (const char* t : {"_2D_DownSample4x", "_2D_GaussianBlur7x7H", "_2D_GaussianBlur7x7V", "_2D_GaussianBlur7x7"}) gh3_.request(filter_, t);
     return true;
+}
+
+bool ScreenFx::settle() {
+    if (!dev_) return true;
+    if (!copyReady_) {
+        std::string err;
+        const int r = dev_->programStatus(copy_, err);
+        if (r == 0) return false;
+        copyReady_ = true;
+        if (r < 0) SDL_Log("screen fx: %s", err.c_str()), copy_ = {};
+    }
+    return gh3_.settle();
 }
 
 void ScreenFx::shutdown() {
@@ -82,7 +95,7 @@ void ScreenFx::shutdown() {
     }
     if (quad_) dev_->destroyBuffer(quad_);
     if (copy_) dev_->destroyProgram(copy_);
-    quad_ = {}, copy_ = {};
+    quad_ = {}, copy_ = {}, copyReady_ = false;
     gh3_.shutdown();
     dev_ = nullptr;
 }

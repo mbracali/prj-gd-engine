@@ -10,10 +10,14 @@
 #include <cstddef>
 #include <cstring>
 #include <exception>
+#include <map>
 #include <mutex>
+#include <tuple>
+#include <vector>
 
 #include "data/disc.h"
 #include "data/qbkey.h"
+#include "render/hitch.h"
 
 namespace gh3shader {
 
@@ -91,13 +95,27 @@ void Programs::init(gfx::RenderDevice& dev, std::shared_ptr<const matlib::Librar
     whiteCube_ = dev.createTexture({1, 1, 1, gfx::TexFormat::RGBA8, gfx::TexKind::Cube}, faces, err);
 }
 
+namespace {
+
+// The programs of every Programs, by device serial, library and template /
+// technique: compiled once a run (they stay until the device goes).
+struct SharedPrograms {
+    std::mutex mutex;
+    std::map<std::tuple<uint64_t, const matlib::Library*, std::string>, std::shared_ptr<Program>> programs;
+    std::vector<std::shared_ptr<const matlib::Library>> libraries;  // kept: their addresses stay theirs
+};
+
+SharedPrograms& sharedPrograms() {
+    static SharedPrograms s;
+    return s;
+}
+
+}  // namespace
+
 void Programs::shutdown() {
     if (!dev_) return;
-    for (auto& [k, p] : programs_)
-        if (p && p->id) dev_->destroyProgram(p->id);
-    programs_.clear();
-    for (auto& [k, p] : named_)
-        if (p && p->id) dev_->destroyProgram(p->id);
+    programs_.clear();  // (shared: they stay with the device)
+    requested_.clear();
     named_.clear();
     if (white_) dev_->destroyTexture(white_);
     if (whiteCube_) dev_->destroyTexture(whiteCube_);
@@ -106,16 +124,21 @@ void Programs::shutdown() {
     lib_.reset();
 }
 
-std::unique_ptr<Program> Programs::make(int vs, int ps, const std::string& name) {
+std::unique_ptr<Program> Programs::make(int vs, int ps, const std::string& name, bool async) {
     std::unique_ptr<Program> out;
-    const xenos::Program x = xenos::translate(lib_->shader(vs), lib_->shader(ps));
+    hitch::Scope hs("shader");
+    const xenos::Program x = [&] {
+        hitch::Scope ht("shader translate");
+        return xenos::translate(lib_->shader(vs), lib_->shader(ps));
+    }();
     if (!x.ok) {
         SDL_Log("gh3 shader %s: not translated: %s", name.c_str(), x.error.c_str());
         return out;
     }
     if (SDL_getenv("GD10_XENOS_DUMP")) SDL_Log("gh3 shader %s\n--- vertex\n%s\n--- pixel\n%s", name.c_str(), x.vertex.c_str(), x.fragment.c_str());
     std::string err;
-    const gfx::ProgramId pid = dev_->createProgram(programDesc(x, name, dev_->info().clipDepthZeroToOne), err);
+    const gfx::ProgramDesc desc = programDesc(x, name, dev_->info().clipDepthZeroToOne);
+    const gfx::ProgramId pid = async ? dev_->beginProgram(desc, err) : dev_->createProgram(desc, err);
     if (!pid) {
         SDL_Log("gh3 shader %s: %s", name.c_str(), err.c_str());
         return out;
@@ -124,34 +147,120 @@ std::unique_ptr<Program> Programs::make(int vs, int ps, const std::string& name)
     out->id = pid;
     out->samplers = x.samplers, out->cubes = x.cubes, out->attribs = x.attribs;
     out->name = name;
+    out->compiling = async;
     return out;
+}
+
+const Program* Programs::ready(std::shared_ptr<Program>& p) {
+    if (p && p->compiling) {
+        std::string err;
+        int r;
+        while ((r = dev_->programStatus(p->id, err)) == 0) {}
+        p->compiling = false;
+        if (r < 0) {
+            SDL_Log("gh3 shader %s: %s", p->name.c_str(), err.c_str());
+            p->id = {};
+        }
+    }
+    return p && p->id ? p.get() : nullptr;
+}
+
+void Programs::request(uint32_t key, matlib::Technique t) {
+    if (!dev_ || !lib_) return;
+    const uint64_t id = uint64_t(key) << 8 | t;
+    if (programs_.count(id)) return;
+    const matlib::Template* tp = lib_->find(key);
+    const bool ok = tp && tp->vs[t] >= 0 && tp->ps[t] >= 0;
+    std::shared_ptr<Program>& local = programs_[id];
+    shared(std::to_string(key) + "#" + std::to_string(int(t)), ok ? tp->vs[t] : -1, ok ? tp->ps[t] : -1, tp ? tp->name : std::string(), local, true);
+    if (local && local->compiling) requested_.push_back(local);
+}
+
+void Programs::request(uint32_t key, const std::string& technique) {
+    if (!dev_ || !lib_) return;
+    const std::string id = std::to_string(key) + ":" + technique;
+    if (named_.count(id)) return;
+    const matlib::Template* tp = lib_->find(key);
+    const matlib::TechniqueRef* tr = tp ? tp->technique(technique) : nullptr;
+    const bool ok = tr && tr->vs[0] >= 0 && tr->ps[0] >= 0;
+    std::shared_ptr<Program>& local = named_[id];
+    shared(id, ok ? tr->vs[0] : -1, ok ? tr->ps[0] : -1, ok ? tp->name + "." + technique : std::string(), local, true);
+    if (local && local->compiling) requested_.push_back(local);
+}
+
+bool Programs::settle() {
+    // Finished a slice a frame: a driver may do the last of its work as the
+    // program is first asked about (NVIDIA: 20..45 ms each on a cold cache).
+    bool first = true;
+    for (auto it = requested_.begin(); it != requested_.end();) {
+        Program& p = **it;
+        if (p.compiling) {
+            if (!first && !hitch::sliceLeft()) return false;
+            first = false;
+            std::string err;
+            const int r = dev_->programStatus(p.id, err);
+            if (r == 0) {
+                ++it;
+                continue;
+            }
+            p.compiling = false;
+            if (r < 0) {
+                SDL_Log("gh3 shader %s: %s", p.name.c_str(), err.c_str());
+                p.id = {};
+            }
+        }
+        it = requested_.erase(it);
+    }
+    return requested_.empty();
+}
+
+const Program* Programs::shared(const std::string& id, int vs, int ps, const std::string& name, std::shared_ptr<Program>& local, bool async) {
+    SharedPrograms& sp = sharedPrograms();
+    const auto key = std::make_tuple(dev_->serial(), lib_.get(), id);
+    {
+        std::lock_guard<std::mutex> lock(sp.mutex);
+        if (auto it = sp.programs.find(key); it != sp.programs.end()) {
+            local = it->second;
+            return async ? local.get() : ready(local);
+        }
+    }
+    if (vs >= 0 && ps >= 0) local = make(vs, ps, name, async);
+    {
+        std::lock_guard<std::mutex> lock(sp.mutex);
+        if (std::find(sp.libraries.begin(), sp.libraries.end(), lib_) == sp.libraries.end()) sp.libraries.push_back(lib_);
+        sp.programs[key] = local;
+    }
+    return async ? local.get() : ready(local);
+}
+
+bool Programs::has(uint32_t key, matlib::Technique t) const {
+    if (programs_.count(uint64_t(key) << 8 | t)) return true;
+    if (!dev_ || !lib_) return false;
+    SharedPrograms& sp = sharedPrograms();
+    std::lock_guard<std::mutex> lock(sp.mutex);
+    return sp.programs.count(std::make_tuple(dev_->serial(), lib_.get(), std::to_string(key) + "#" + std::to_string(int(t)))) != 0;
 }
 
 const Program* Programs::get(uint32_t key, matlib::Technique t) {
     if (!dev_ || !lib_) return nullptr;
     const uint64_t id = uint64_t(key) << 8 | t;
     auto it = programs_.find(id);
-    if (it != programs_.end()) return it->second.get();
-    std::unique_ptr<Program> out;
+    if (it != programs_.end()) return ready(it->second);
     const matlib::Template* tp = lib_->find(key);
-    if (tp && tp->vs[t] >= 0 && tp->ps[t] >= 0) out = make(tp->vs[t], tp->ps[t], tp->name);
-    const Program* r = out.get();
-    programs_[id] = std::move(out);
-    return r;
+    const bool ok = tp && tp->vs[t] >= 0 && tp->ps[t] >= 0;
+    return shared(std::to_string(key) + "#" + std::to_string(int(t)), ok ? tp->vs[t] : -1, ok ? tp->ps[t] : -1, tp ? tp->name : std::string(),
+                  programs_[id]);
 }
 
 const Program* Programs::get(uint32_t key, const std::string& technique) {
     if (!dev_ || !lib_) return nullptr;
     const std::string id = std::to_string(key) + ":" + technique;
     auto it = named_.find(id);
-    if (it != named_.end()) return it->second.get();
-    std::unique_ptr<Program> out;
+    if (it != named_.end()) return ready(it->second);
     const matlib::Template* tp = lib_->find(key);
     const matlib::TechniqueRef* tr = tp ? tp->technique(technique) : nullptr;
-    if (tr && tr->vs[0] >= 0 && tr->ps[0] >= 0) out = make(tr->vs[0], tr->ps[0], tp->name + "." + technique);
-    const Program* r = out.get();
-    named_[id] = std::move(out);
-    return r;
+    const bool ok = tr && tr->vs[0] >= 0 && tr->ps[0] >= 0;
+    return shared(id, ok ? tr->vs[0] : -1, ok ? tr->ps[0] : -1, ok ? tp->name + "." + technique : std::string(), named_[id]);
 }
 
 void fillMaterialConstants(const scene::Material& m, float alphaRef, MaterialConstants& out) {

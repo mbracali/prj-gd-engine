@@ -77,6 +77,9 @@ class ScreenFx {
 public:
     ~ScreenFx() { shutdown(); }
     bool init(gfx::RenderDevice& dev, std::shared_ptr<const matlib::Library> lib);
+    // Its passes' programs compiled (init only asks for them: no-stutter
+    // rule); true once they are all ready, polled a frame at a time.
+    bool settle();
     void shutdown();
     // Redirects drawing to the scene target (the current viewport's size);
     // false when the effects cannot run (draw straight to the target then).
@@ -102,6 +105,7 @@ private:
     gh3shader::Programs gh3_;
     gfx::BufferId quad_;
     gfx::ProgramId copy_;
+    bool copyReady_ = false;  // its programStatus said so (settle)
     Target scene_, quarterA_, quarterB_, copyA_, copyB_, depthCopy_;
     Target sceneQ_, halves_[4];  // the scene's quarter, and the steps down to the effects' fixed size
     Target sixteenA_, sixteenB_;  // dof blurresolution sixteenth
