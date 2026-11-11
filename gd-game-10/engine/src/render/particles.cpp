@@ -677,7 +677,7 @@ int Particles::attachStep(gfx::RenderDevice& dev, const Disc& disc, std::string&
         white_ = dev.createTexture({1, 1, 1, gfx::TexFormat::RGBA8, gfx::TexKind::Tex2D}, &l, error);
         return 0;
     }
-    for (bool first = true; pr.next < pr.textures.size() && (first || hitch::sliceLeft()); ++pr.next, first = false) {
+    for (; pr.next < pr.textures.size() && hitch::slice(); ++pr.next) {
         const auto& [key, t] = pr.textures[pr.next];
         std::string err;
         auto levels = t.texLevels();

@@ -155,6 +155,7 @@ public:
     ProgramId createProgram(const ProgramDesc& desc, std::string& error) override;
     ProgramId beginProgram(const ProgramDesc& desc, std::string& error) override;
     int programStatus(ProgramId p, std::string& error) override;
+    bool backgroundCompile() const override { return parallelCompile_; }
     void destroyProgram(ProgramId p) override;
     TargetId createTarget(int width, int height, bool depth, std::string& error) override {
         return createTarget(TargetDesc{width, height, depth, TargetFormat::RGBA8}, error);

@@ -26,6 +26,7 @@ struct State {
     int depth = 0;
     double logMs = -1;  // GD10_HITCHLOG
     double lastWork = 0;
+    bool sliceTaken = false;  // a load's piece ran this frame
     int hitches = 0;
     double longest = 0;
     std::string longestAt;
@@ -52,11 +53,18 @@ void frameBegin() {
     s.frameOpen = true;
     s.scopes.clear();
     s.depth = 0;
+    s.sliceTaken = false;
 }
 
 double frameMs() { return st().frameOpen ? double(SDL_GetTicksNS() - st().frameStart) / 1e6 : 0; }
 
-bool sliceLeft() { return !onRenderThread() || frameMs() < kSliceMs; }
+bool slice() {
+    if (!onRenderThread()) return true;
+    State& s = st();
+    const bool ok = !s.sliceTaken || frameMs() < kSliceMs;
+    s.sliceTaken = true;
+    return ok;
+}
 
 void frameEnd(const char* screen) {
     State& s = st();

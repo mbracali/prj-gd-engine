@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdlib>
 #include <cstring>
 #include <exception>
 #include <map>
@@ -116,6 +117,7 @@ void Programs::shutdown() {
     if (!dev_) return;
     programs_.clear();  // (shared: they stay with the device)
     requested_.clear();
+    deferred_.clear();
     named_.clear();
     if (white_) dev_->destroyTexture(white_);
     if (whiteCube_) dev_->destroyTexture(whiteCube_);
@@ -167,6 +169,10 @@ const Program* Programs::ready(std::shared_ptr<Program>& p) {
 
 void Programs::request(uint32_t key, matlib::Technique t) {
     if (!dev_ || !lib_) return;
+    if (!dev_->backgroundCompile()) {
+        deferred_.emplace_back(key, "#" + std::to_string(int(t)));
+        return;
+    }
     const uint64_t id = uint64_t(key) << 8 | t;
     if (programs_.count(id)) return;
     const matlib::Template* tp = lib_->find(key);
@@ -178,6 +184,10 @@ void Programs::request(uint32_t key, matlib::Technique t) {
 
 void Programs::request(uint32_t key, const std::string& technique) {
     if (!dev_ || !lib_) return;
+    if (!dev_->backgroundCompile()) {
+        deferred_.emplace_back(key, technique);
+        return;
+    }
     const std::string id = std::to_string(key) + ":" + technique;
     if (named_.count(id)) return;
     const matlib::Template* tp = lib_->find(key);
@@ -191,12 +201,20 @@ void Programs::request(uint32_t key, const std::string& technique) {
 bool Programs::settle() {
     // Finished a slice a frame: a driver may do the last of its work as the
     // program is first asked about (NVIDIA: 20..45 ms each on a cold cache).
-    bool first = true;
+    size_t done = 0;
+    for (; done < deferred_.size(); ++done) {
+        const auto& [key, t] = deferred_[done];
+        const bool cached = t[0] == '#' ? has(key, matlib::Technique(std::atoi(t.c_str() + 1))) : named_.count(std::to_string(key) + ":" + t) != 0;
+        if (!cached && !hitch::slice()) break;
+        if (t[0] == '#') (void)get(key, matlib::Technique(std::atoi(t.c_str() + 1)));
+        else (void)get(key, t);
+    }
+    deferred_.erase(deferred_.begin(), deferred_.begin() + std::ptrdiff_t(done));
+    if (!deferred_.empty()) return false;
     for (auto it = requested_.begin(); it != requested_.end();) {
         Program& p = **it;
         if (p.compiling) {
-            if (!first && !hitch::sliceLeft()) return false;
-            first = false;
+            if (!hitch::slice()) return false;
             std::string err;
             const int r = dev_->programStatus(p.id, err);
             if (r == 0) {

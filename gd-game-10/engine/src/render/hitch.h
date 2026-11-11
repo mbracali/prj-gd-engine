@@ -14,9 +14,10 @@ void frameBegin();
 void frameEnd(const char* screen);
 // Milliseconds since frameBegin.
 double frameMs();
-// A load's uploads and compiles go on in this frame while it has spent less
-// than the slice budget (8 ms): the first slice of a frame always runs.
-bool sliceLeft();
+// Whether a load may do one more piece of its uploads and compiles in this
+// frame: while the frame has spent less than the slice budget (8 ms), and
+// always one piece a frame (of all the loads: they go on in turn).
+bool slice();
 // The hitch log's summary (frames over the budget, the longest, by screen).
 void report();
 // The last frame's work without its present (a "present" scope: the swap,

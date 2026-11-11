@@ -205,6 +205,8 @@ private:
     const Program* shared(const std::string& id, int vs, int ps, const std::string& name, std::shared_ptr<Program>& local, bool async = false);
     const Program* ready(std::shared_ptr<Program>& p);  // waits for a compiling one; null if it failed
     std::vector<std::shared_ptr<Program>> requested_;
+    // Asked for on a device that compiles at once: made by settle, a slice a frame.
+    std::vector<std::pair<uint32_t, std::string>> deferred_;  // (template, "#<technique>" or a technique name)
     gfx::TextureId white_, whiteCube_;
 };
 

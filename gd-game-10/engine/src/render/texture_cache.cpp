@@ -215,7 +215,7 @@ int TextureCache::commit(Prepared& pr, bool sliced) {
     };
     for (; pr.next < pr.items.size(); ++pr.next) {
         // A slice a frame (the loading screen and menus keep their frame rate).
-        if (sliced && n > 0 && !hitch::sliceLeft()) break;
+        if (sliced && !hitch::slice()) break;
         const Prepared::Item& it = pr.items[pr.next];
         if (it.kind == Prepared::Item::Tex) {
             upload(it.key, it.tex);

@@ -208,6 +208,8 @@ public:
         (void)error;
         return p ? 1 : -1;
     }
+    // Whether beginProgram returns before the program is compiled.
+    virtual bool backgroundCompile() const { return false; }
     virtual void destroyProgram(ProgramId p) = 0;
     // An RGBA8 colour target with an optional depth buffer; its colour (and
     // depth) can be sampled through targetTexture / targetDepth.

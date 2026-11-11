@@ -35,7 +35,7 @@ public:
     bool init(gfx::RenderDevice& dev, const Disc& disc, const venue::Venue& v, const std::vector<uint32_t>& hide, std::string& error);
     // The same in parts (no-stutter rule): prepare (any thread, before) reads
     // and decodes; initStep (the render thread, once a frame) uploads the
-    // textures and compiles the programs a slice at a time (hitch::sliceLeft),
+    // textures and compiles the programs a slice at a time (hitch::slice),
     // then builds the geometry. More until Done or Failed (`error`).
     void prepare(const Disc& disc, const venue::Venue& v);
     enum class InitStep { More, Done, Failed };

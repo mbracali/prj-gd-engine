@@ -319,7 +319,7 @@ VenueView::InitStep VenueView::initStep(gfx::RenderDevice& dev, const Disc& disc
     if (pr.step == 1) {
         // The textures, a slice a frame (the first of a call always).
         hitch::Scope hs("venue textures");
-        for (bool first = true; pr.next < pr.textures.size() && (first || hitch::sliceLeft()); ++pr.next, first = false) {
+        for (; pr.next < pr.textures.size() && hitch::slice(); ++pr.next) {
             if (pr.next == pr.zoneTextures) zoneTextureCount_ = textures_.size();
             const gh3tex::Texture& t = pr.textures[pr.next];
             if (textures_.count(t.key)) continue;
@@ -357,7 +357,7 @@ VenueView::InitStep VenueView::initStep(gfx::RenderDevice& dev, const Disc& disc
         // a slice a frame (OpenGL compiles them in the driver's threads, the
         // others now), then waited for frame by frame.
         hitch::Scope hs("venue programs");
-        for (bool first = true; pr.next < pr.programs.size() && (first || hitch::sliceLeft()); ++pr.next, first = false)
+        for (; pr.next < pr.programs.size() && hitch::slice(); ++pr.next)
             gh3_.request(pr.programs[pr.next].first, pr.programs[pr.next].second);
         if (pr.next < pr.programs.size() || !gh3_.settle()) return InitStep::More;
         const int ps = dev.programStatus(program_, error);  // the approximation's
@@ -558,7 +558,7 @@ VenueView::InitStep VenueView::build(gfx::RenderDevice& dev, const venue::Venue&
         const bool vtx = pr.phase == 2;
         const uint8_t* src = vtx ? reinterpret_cast<const uint8_t*>(verts.data()) : reinterpret_cast<const uint8_t*>(idx.data());
         const size_t total = vtx ? verts.size() * sizeof(Vtx) : idx.size() * sizeof(uint32_t);
-        for (bool first = true; pr.uploaded < total && (first || hitch::sliceLeft()); first = false) {
+        while (pr.uploaded < total && hitch::slice()) {
             const size_t n = std::min(kChunk, total - pr.uploaded);
             dev.updateBuffer(vtx ? vb_ : ib_, pr.uploaded, src + pr.uploaded, n);
             pr.uploaded += n;
@@ -584,11 +584,11 @@ VenueView::InitStep VenueView::build(gfx::RenderDevice& dev, const venue::Venue&
                 ull(stats_.hiddenMeshes), ull(stats_.gh3Meshes), ull(stats_.fallbackMeshes));
         return InitStep::Done;
     }
-    for (bool first = true; pr.part < v.parts.size(); ++pr.part, pr.sector = 0) {
+    for (; pr.part < v.parts.size(); ++pr.part, pr.sector = 0) {
         const venue::Part& part = v.parts[pr.part];
         const scene::Scene& sc = part.scene;
-        for (; pr.sector < sc.sectors.size(); ++pr.sector, first = false) {
-            if (!first && !hitch::sliceLeft()) return InitStep::More;  // more sectors next frame
+        for (; pr.sector < sc.sectors.size(); ++pr.sector) {
+            if (!hitch::slice()) return InitStep::More;  // more sectors next frame
             const size_t si = pr.sector;
             const scene::Sector& sec = sc.sectors[si];
             const int ni = part.sectorNode[si];
@@ -606,7 +606,7 @@ VenueView::InitStep VenueView::build(gfx::RenderDevice& dev, const venue::Venue&
     }
     if (pr.phase == 0) {
         pr.phase = 1;
-        if (!hitch::sliceLeft()) return InitStep::More;  // the housings and the vertex buffer next frame
+        if (!hitch::slice()) return InitStep::More;  // the housings and the vertex buffer next frame
     }
     // The light housings: game objects of the _gfx node array with a
     // lightvolumetype and a Model (LightHousings/GO_LightHousing02/
