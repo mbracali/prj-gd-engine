@@ -251,6 +251,7 @@ bool VenueStage::start(const Disc& disc, const Globals& g, const std::string& zo
 
 bool VenueStage::attach(gfx::RenderDevice& device, const Disc& disc, std::string& error) {
     if (!venue_) return bool(view_);
+    hitch::AllAtOnce all;  // at once: the slices would refuse every piece after this frame's first
     while (!attachStep(device, disc, error))
         if (!view_ && !pendingView_) return false;
     return bool(view_);
@@ -277,7 +278,9 @@ bool VenueStage::attachStep(gfx::RenderDevice& device, const Disc& disc, std::st
     case 1:
         if (band_) {
             std::string berr;
-            if (!band_->attach(device, berr)) SDL_Log("band: %s", berr.c_str());
+            const int r = band_->attachStep(device, berr);
+            if (r == 0) return false;  // the next member next frame
+            if (r < 0) SDL_Log("band: %s", berr.c_str());
         }
         break;
     case 2: {
@@ -326,7 +329,9 @@ bool VenueStage::attachStep(gfx::RenderDevice& device, const Disc& disc, std::st
     case 5:
         if (crowd_) {
             std::string cerr;
-            if (!crowd_->attach(device, gh3shader::library(disc), cerr)) {
+            const int r = crowd_->attachStep(device, gh3shader::library(disc), cerr);
+            if (r == 0) return false;  // the next ped next frame
+            if (r < 0) {
                 SDL_Log("crowd: %s", cerr.c_str());
                 crowd_.reset();
             }
@@ -683,7 +688,8 @@ void VenueStage::draw(double ms) {
         // venue_DOF: the shot's dof (a DOF_*_tod_manager's screen_FX[0]), else
         // DOF_Off_TOD_Manager's, set when the cut starts [C CameraCuts_StartCallback].
         screenfx::Params p = fxParams_;
-        if (globals_) screenfx::readDof(*globals_, cameras_.shot().dof, p);
+        // ApplyScreenFx effect = next_screenfx (the camera notes' TOD manager) then the shot's dof [C].
+        if (globals_) screenfx::readShot(*globals_, cameras_.shot().screenFx, cameras_.shot().dof, p);
         // ScreenFlash (z_prison's flares): FlashBS on the venue viewport, a
         // bright_sat of its own after the TOD's [C scripts misclightutils.qb].
         if (float b = 1, c = 1; particles_ && particles_->flash(ms, b, c)) {
@@ -699,6 +705,7 @@ void VenueStage::draw(double ms) {
         if (post.bokeh <= 0) p.dof.on = false;
         else p.dof.blurRadius *= kBokeh[std::min(post.bokeh, 4)];
         if (!post.original) p.bloom.on = false, p.brightSat[0].on = p.brightSat[1].on = false;  // Remove All Effects
+        if (!post.original) p.noise.on = p.vignette.on = p.ink.on = false;
         if (!post.gameBloom) p.bloom.on = false;  // Enhanced > Bloom: None
         VenueView::jitterX = VenueView::jitterY = 0;
         bool chained = false;

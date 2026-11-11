@@ -167,6 +167,9 @@ void CameraDirector::applyNote(const ChartEvent& e) {
             changeNow_ = true;
         } else if (scr == K("CameraCuts_SetArrayPrefix")) {
             setArrayPrefix(params, e.length);
+        } else if (scr == K("CameraCuts_SetNextScreenFx")) {
+            // change next_screenfx = <effect>: applied at the next cut [C script].
+            nextScreenFx_ = params ? keyOf(params->find(K("effect"))) : 0;
         }
         return;
     }
@@ -243,6 +246,7 @@ void CameraDirector::startShot(double t) {
     const qb::Value* arr = arrKey ? global(arrKey) : nullptr;
     shot_ = Shot{};
     shot_.start = t;
+    shot_.screenFx = nextScreenFx_;
     shot_.array = arrKey;
     ++cuts_;
     keys_.clear();

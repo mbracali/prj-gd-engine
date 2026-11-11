@@ -94,6 +94,7 @@ public:
         int index = 0;
         uint32_t name = 0, type = 0, script = 0;
         uint32_t dof = 0;  // its dof (a DOF_*_tod_manager global; 0: DOF_Off_TOD_Manager)
+        uint32_t screenFx = 0;  // next_screenfx when it started (ApplyScreenFx; 0: none) [C script]
     };
     const Shot& shot() const { return shot_; }
     int cuts() const { return cuts_; }
@@ -142,6 +143,7 @@ private:
     std::string prefix_ = "cameras";
     uint32_t goodArray_ = 0, normalArray_ = 0, poorArray_ = 0;
     uint32_t forceType_ = 0, nextName_ = 0, lastType_ = 0;
+    uint32_t nextScreenFx_ = 0;  // CameraCuts_SetNextScreenFx effect (screen_fx.cpp readShot)
     bool changeNow_ = false, enabled_ = true;
     bool allowNotes_ = true;      // CameraCuts_AllowNoteScripts
     double forceChange_ = 0;      // CameraCuts_ForceChangeTime (ms; 0: none)
