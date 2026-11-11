@@ -5,6 +5,46 @@ Rock Band (Xbox 360) -> `gd05`. Kickoff: `docs/spikes/GD-GAME-05_KICKOFF.md`
 bottom. "Verified" lines quote the command and its output; "built only" and
 "not tested" are said explicitly.
 
+## Wave 06b (owner's retest, 2026-11-11 evening)
+
+- **Real guitar still silent (GD05-058).** His 17:35 session (launcher,
+  window made again for Vulkan): the report listed his guitar but no raw
+  event at all, and 0 of 326 notes. Cause [C SDL 3.4,
+  SDL_PrivateJoystickShouldIgnoreEvent]: with windows and no keyboard focus
+  SDL drops every joystick / gamepad event. Proven: a window made again
+  without focus got 0 events, 2 with SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS.
+  Fix: the hint (D41). Walk rb_owner_guitar (his GUID via
+  GD05_TEST_PAD_GUID, his controllers.json imported, the window without
+  focus): 29 of 30 hit, 28 of 29 hat strums reach the song as Strum; with
+  SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS=0 it fails 0 of 30 (his bug).
+  The report and GD05_INPUTLOG=1 log every raw event and the game's
+  decision; `--inputcapture` (also through the launcher: --play gd05
+  --exit-after -- --inputcapture) writes input-capture.txt. His bindings
+  already list Orange=LB, Whammy=Right Stick X, Gyro=Right Stick Y/Back.
+- **Title round trip (GD05-059).** The port switched screens at once and
+  faded after (the new screen flashed at full, then dimmed); going back the
+  main menu vanished at once. RB exits the old panels and loads the new
+  ones as the transition starts while the old screen shows; main_panel's
+  load / exit fade the fx panel to black (D41). Walk rb_title_back: shots
+  at 33..2500 ms both ways: the buttons slide out (button_exit.trg) under
+  the fade, PRESS START flashes and fades, the new screen fades in.
+- **Text colours (GD05-054).** Walk rb_text_colors: per text element the
+  expected glyph-core colour from the data (preset / material colour,
+  lights, ambient, font texel, D25 curve) vs the drawn pixels, fail > 8%
+  darker. Worst before: tour_band_welcome title 22 vs 180 (a blackmask drawn
+  over it: RB sorts draws, D43), now 180. Options audio 190/190, gameplay
+  104/107, Create a Band 236/236 and 127/127, pause 217/217 and 153/162,
+  help bar 215/218. Second gamma, sRGB, premultiplied alpha, double
+  colour and mips ruled out by measurement. LOADING bright at once (owner
+  decision D44, 28 -> 253).
+- **In-song HUD (GD05-060).** trackpanel.milo's own elements replace the
+  stand-in (D45): drawn boxes vs milo boxes within 0-4 px (solo: Overdrive
+  meter 3, score 0, multiplier 2, rock meter 1; band: 13 boxes within 2),
+  values = the Player's. Not done: the vocal HUD, head-to-head's panel,
+  side angles, streak pop-ups, gamertags.
+- **rb_keys_rebind**: a load flake (26 of 30 hits with eight walks at
+  once); hit floor 80% as the device walks; walk save folders unique.
+
 ## Wave 06 (owner's 0.0.6 report, 2026-11-11, 14:50 -> ~18:30, me + 4 subagents)
 
 Each item: cause, fix, how verified.

@@ -18,6 +18,8 @@
 #include "data/game_data.h"
 #include "data/json.h"
 #include "render/canvas.h"
+#include "render/device.h"
+#include "scene/bitmap.h"
 #include "game/player.h"
 #include "game/song_db.h"
 #include "input/input.h"
@@ -70,7 +72,10 @@ bool whitelisted(const std::string& key, const std::vector<std::string>& wl) {
 
 }  // namespace
 
+static void measureTextColors(ui::UiManager& ui, const std::string& tag, std::vector<std::string>& bad);
+
 WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
+    textColors_ = scenario == "rb_text_colors" || SDL_getenv("GD05_TEXTCOLORS");
     using S = Step;
     auto screen = [&](const char* s, double timeout = 20000) { steps_.push_back({S::Screen, s, 0, timeout}); };
     auto press = [&](int b) { steps_.push_back({S::Press, "", b, 0}); };
@@ -233,6 +238,84 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         at("pause_screen", 10000);
         wait(800);
         check("bright:pause");
+    } else if (scenario == "rb_text_colors") {
+        // GD05 owner report (0.0.7): menu text darker than RB's. Every text
+        // of every screen on the way (measured once each has rested, plus the
+        // textcolors:<tag> states) against RB's colour from the data
+        // (measureTextColors): the main menu and its sub-menus, every
+        // options screen, the song list, the difficulty, loading, the song's
+        // pause. GD05_TEXTCOLORS=1 measures any other walk's screens the same
+        // way (band_tour: Create a Band; creator; rock_shop; credits;
+        // tutorials; rb_lose: the fail screen; quickplay: the results).
+        at("splash_screen", 30000);
+        wait(1500);
+        press(kX);
+        at("main_screen");
+        wait(1500);
+        check("textcolors:main_solo");
+        const char* subs[3][2] = {{"main_multimode_screen", "multi"}, {"training_menu_screen", "training"}, {"options_screen", "options"}};
+        for (int i = 0; i < 3; ++i) {
+            press(kDown), wait(300);
+            check((std::string("textcolors:main_") + subs[i][1]).c_str());
+        }
+        for (int i = 0; i < 3; ++i) press(kUp), wait(300);
+        for (int i = 0; i < 2; ++i) {
+            press(kDown), wait(300);
+            press(kX);
+            at(subs[i][0]);
+            wait(1000);
+            press(kDown), wait(300);
+            check((std::string("textcolors:") + subs[i][1] + "_2nd").c_str());
+            press(kTri);
+            at("main_screen");
+            wait(1000);
+        }
+        press(kDown), wait(300);  // OPTIONS
+        press(kX);
+        at("options_screen");
+        wait(1000);
+        const char* opts[5] = {"options_audio_screen", "options_gameplay_screen", "options_savedata_screen", "calibrate_av_chooser_screen", ""};
+        for (int i = 0; i < 4; ++i) {
+            if (i) press(kDown), wait(300);
+            check((std::string("textcolors:options_") + std::to_string(i)).c_str());
+            press(kX);
+            at(opts[i]);
+            wait(1000);
+            press(kDown), wait(300);
+            check((std::string("textcolors:") + opts[i] + "_2nd").c_str());
+            press(kTri);
+            at("options_screen");
+            wait(1000);
+        }
+        press(kTri);
+        at("main_screen");
+        wait(1500);
+        for (int i = 0; i < 3; ++i) press(kUp), wait(300);  // SOLO
+        press(kX);
+        at("main_solomode_screen");
+        wait(800);
+        press(kDown), wait(300);
+        check("textcolors:solo_2nd");
+        press(kUp), wait(300);
+        press(kX);  // QUICKPLAY
+        at("qp_selsong_screen");
+        wait(2500);
+        check("textcolors:songlist");
+        press(kX);
+        at("qp_seldiff_solo_screen");
+        wait(800);
+        press(kX);
+        wait(1500);
+        check("textcolors:seldiff_diff");
+        press(kX);
+        check("textcolors:loading:loading_panel");
+        at("game_screen", 60000);
+        wait(3000);
+        key(SDLK_ESCAPE);
+        at("pause_screen", 10000);
+        wait(1000);
+        press(kDown), wait(300);
+        check("textcolors:pause_2nd");
     } else if (scenario == "rb_mouse") {
         // Wave 05 (GD05-036 / 037): the port's GAMEPADS button (bottom left)
         // stays on the main menu and every main menu button opens its menu
@@ -736,6 +819,13 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         check("counter:band_players:4");
         check("counter:rb_track_frames:30");
         at("endgame_waiting_screen", 90000);
+        // GD05-058: RB's own HUD (render/rb_hud_view.h): each element drawn alone
+        // lands within 4 px of the box its milo data gives; the score, the
+        // multiplier, the Overdrive and crowd meters show the players' values.
+        check("counter:rb_hud_probes:1");
+        check("counter:rb_hud_boxes:9");
+        check("counter_max:rb_hud_box_err_px:4");
+        check("counter_max:rb_hud_value_errors:0");
         at("qp_endgame_screen", 30000);
     } else if (scenario == "quickplay_vocals" || scenario == "quickplay_drums") {
         // Rock Band's instrument per player (wave 02): the controller type
@@ -824,6 +914,13 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         check("counter:rb_track_frames:30");
         check("counter:band_members:4");
         at("endgame_waiting_screen", 90000);  // modes.dta win_screen (the default mode)
+        // GD05-058: RB's own HUD (render/rb_hud_view.h): each element drawn alone
+        // lands within 4 px of the box its milo data gives; the score, the
+        // multiplier, the Overdrive and crowd meters show the players' values.
+        check("counter:rb_hud_probes:1");
+        check("counter:rb_hud_boxes:5");
+        check("counter_max:rb_hud_box_err_px:4");
+        check("counter_max:rb_hud_value_errors:0");
         at("qp_endgame_screen", 20000);       // the mode's endgame_screen once the stats are in
         wait(1000);
         press(kX);  // continue (SELECT_START_MSG: ui sync_screen qp_complete_screen)
@@ -972,6 +1069,13 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         check("counter:rb_fx_burns:1");
         check("counter:rb_fx_deploys:1");
         check("counter_max:rb_fx_deploys_no_visual:0");
+        // GD05-058: RB's own HUD (render/rb_hud_view.h): each element drawn alone
+        // lands within 4 px of the box its milo data gives; the score, the
+        // multiplier, the Overdrive and crowd meters show the players' values.
+        check("counter:rb_hud_probes:1");
+        check("counter:rb_hud_boxes:5");
+        check("counter_max:rb_hud_box_err_px:4");
+        check("counter_max:rb_hud_value_errors:0");
         if (!pad) {
             // Gems let pass and a wrong strum: the miss sound, the guitar
             // stem muted; the next hits bring it back.
@@ -2449,6 +2553,19 @@ void WalkDriver::poll(ui::UiManager& ui, double nowMs) {
         if (lastScreen_ == "loading_screen") lastLoadingMs_ = nowMs - lastChangeMs_;
         lastScreen_ = ui.currentScreen(), lastChangeMs_ = nowMs;
     }
+    // rb_text_colors / GD05_TEXTCOLORS=1: each screen's texts, once, after
+    // 1.5 s out of any transition (the fx panel's fade over).
+    if (textColors_) {
+        ui::ScreenObj* sc = ui.current();
+        if (sc)
+            for (ui::PanelObj* p : sc->panels())
+                if (p->view) p->view->setTextProbes(true);
+        if (!sc || ui.inTransition() || textColorsSince_ < lastChangeMs_) textColorsSince_ = sc && !ui.inTransition() ? nowMs : -1;
+        else if (!textColorsSeen_.count(lastScreen_) && nowMs - textColorsSince_ >= 1500) {
+            textColorsSeen_.insert(lastScreen_);
+            measureTextColors(ui, lastScreen_, textColorsBad_);
+        }
+    }
     // career: the band has bought Judy Nails' second outfit and the SG's
     // white skin in the store (M10), so both choices offer two.
     if ((scenario_ == "career" || scenario_ == "career_full" || scenario_ == "career_song" || scenario_ == "career_encore" ||
@@ -2561,9 +2678,257 @@ static bool mainCamera(ui::UiManager& ui, std::array<float, 3>& pos) {
     return true;
 }
 
+// ---- rb_text_colors (GD05 owner report: menu text darker than RB's) --------
+// Every text the current screen's panels drew last frame (UiView text
+// probes): the colour RB's shader gives its glyph cores, from the data, and
+// the colour on the screen there. Expected, per pixel where the font
+// texture's alpha is 1 over the pixel's whole footprint: (sum of the lights
+// * gDiffuse + base * gAmbient) * texel * (intensify ? 2 : 1), base the
+// vertex colour (prelit) or gDiffuse (ark/xbox_shaders: per vertex and per
+// pixel alike, the light sum tinted once), then the console's output
+// (outputCurve, D25). Drawn: the screenshot's pixel. A text whose glyph
+// cores are more than 8% darker than expected fails.
+static void measureTextColors(ui::UiManager& ui, const std::string& tag, std::vector<std::string>& bad) {
+    ui::ScreenObj* sc = ui.current();
+    if (!sc) return;
+    const char* dir = SDL_getenv("GD05_WALK_SHOTS");
+    const std::string path = std::string(dir ? dir : SDL_GetBasePath()) + "/tc_" + tag + ".bmp";
+    if (!ui.host().saveScreenshot(path)) return;
+    SDL_Surface* raw = SDL_LoadBMP(path.c_str());
+    SDL_Surface* img = raw ? SDL_ConvertSurface(raw, SDL_PIXELFORMAT_RGBA32) : nullptr;
+    if (raw) SDL_DestroySurface(raw);
+    if (!img) return;
+    float gamma = 0.85f;
+    if (const char* e = SDL_getenv("GD05_GAMMA")) gamma = float(std::atof(e));
+    struct Tex {
+        int w = 0, h = 0;
+        std::vector<uint8_t> rgba;
+    };
+    std::map<const scene::Tex*, Tex> texs;
+    auto luma = [](const float* c) { return 0.299f * c[0] + 0.587f * c[1] + 0.114f * c[2]; };
+    std::printf("  text colours %s on %s:\n", tag.c_str(), ui.currentScreen().c_str());
+    if (SDL_getenv("GD05_TEXTCOLORS_DEBUG"))
+        if (ui::PanelObj* fx = ui.panel("fx"); fx && fx->view) std::printf("    fx up %d showing %d fade.mnm frame %.2f\n", int(fx->up), int(fx->showing), fx->view->frame("fade.mnm"));
+    for (ui::PanelObj* panel : sc->panels()) {
+        if (SDL_getenv("GD05_TEXTCOLORS_DEBUG"))
+            std::printf("    panel %s view %d up %d showing %d texts %d probes %zu\n", panel->name().c_str(), panel->view ? 1 : 0, int(panel->up),
+                        int(panel->showing), panel->view ? panel->view->textsDrawn() : -1, panel->view ? panel->view->textProbes().size() : 0);
+        if (SDL_getenv("GD05_TEXTCOLORS_DEBUG") && panel->view)
+            for (const gfx::UiView::MaskDraw& m : panel->view->masks())
+                std::printf("      mask rgba %.2f %.2f %.2f %.2f blend %d rect %.2f %.2f %.2f %.2f\n", m.rgba[0], m.rgba[1], m.rgba[2], m.rgba[3], m.blend, m.rect[0],
+                            m.rect[1], m.rect[2], m.rect[3]);
+        if (SDL_getenv("GD05_TEXTCOLORS_DEBUG") && panel->view && panel->view->milo()) {
+            std::vector<const scene::Milo*> ms{panel->view->milo()};
+            for (const scene::Milo* m : panel->view->subdirs()) ms.push_back(m);
+            for (const scene::Milo* m : ms)
+                for (const scene::Environ* e : m->root().all<scene::Environ>()) {
+                    const auto& x = e->colorXfm;
+                    std::printf("      environ %s amb %.2f %.2f %.2f lights %zu colour_adjust %d hue %.2f sat %.2f light %.2f contrast %.2f bright %.2f in %.2f..%.2f out %.2f..%.2f rot %.2f %.2f %.2f pos %.2f\n",
+                                e->name.c_str(), e->ambientColor[0], e->ambientColor[1], e->ambientColor[2], e->lights.size(), int(e->useColorAdjust), x.hue,
+                                x.saturation, x.lightness, x.contrast, x.brightness, x.inLo[0], x.inHi[0], x.outLo[0], x.outHi[0], x.xfm.rot[0], x.xfm.rot[4],
+                                x.xfm.rot[8], x.xfm.pos[0]);
+                }
+        }
+        if (!panel->view || !panel->up || !panel->showing) continue;
+        for (const gfx::TextProbe& p : panel->view->textProbes()) {
+            std::string flags = p.m.prelit ? "prelit" : "lit";
+            const int lights = p.m.useEnviron ? p.env.lightCount - p.env.projectedCount : 0;
+            if (p.m.useEnviron) flags += " env L" + std::to_string(lights);
+            if (p.m.perPixelLit) flags += " pp";
+            if (SDL_getenv("GD05_TEXTCOLORS_DEBUG")) {
+                std::printf("      %s: colour %.3f %.3f %.3f a %.2f vtx %.3f %.3f %.3f amb %.2f %.2f %.2f envamb %.2f %.2f %.2f spec %.2f blend %d intens %d\n", p.name.c_str(),
+                            p.m.color[0], p.m.color[1], p.m.color[2], p.m.alpha, p.verts.empty() ? 0.f : p.verts[0].color[0], p.verts.empty() ? 0.f : p.verts[0].color[1],
+                            p.verts.empty() ? 0.f : p.verts[0].color[2], p.env.ambient.x, p.env.ambient.y, p.env.ambient.z, p.env.envAmbient.x, p.env.envAmbient.y,
+                            p.env.envAmbient.z, p.m.specularRgb[0], int(p.m.blend), int(p.m.intensify));
+                for (int i = 0; i < lights; ++i)
+                    std::printf("        light %d colour %.2f %.2f %.2f vec %.1f %.1f %.1f range %.0f start %.0f dir %d\n", i, p.env.lights[i].color.x, p.env.lights[i].color.y,
+                                p.env.lights[i].color.z, p.env.lights[i].vec.x, p.env.lights[i].vec.y, p.env.lights[i].vec.z, p.env.lights[i].range,
+                                p.env.lights[i].falloffStart, int(p.env.directional || p.env.lights[i].directional));
+            }
+            auto skip = [&](const char* why) {
+                std::printf("    %-22s %-30s %-16s skipped: %s\n", panel->name().c_str(), p.name.c_str(), flags.c_str(), why);
+            };
+            if (p.indirect) {
+                skip("drawn into a 3D RenderDir's texture");
+                continue;
+            }
+            if (p.m.alpha < 0.95f) {
+                skip("material alpha < 0.95");
+                continue;
+            }
+            if (p.m.blend != gfx::MatBlend::SrcAlpha && p.m.blend != gfx::MatBlend::Src && p.m.blend != gfx::MatBlend::PreMultAlpha) {
+                skip("additive / other blend");
+                continue;
+            }
+            const scene::Tex* t = p.mat && p.mat->dir && !p.mat->diffuseTex.empty() ? p.mat->dir->resolve<scene::Tex>(p.mat->diffuseTex) : nullptr;
+            if (!t || t->bitmap.empty() || p.verts.empty()) {
+                skip("no font texture");
+                continue;
+            }
+            Tex& tx = texs[t];
+            if (!tx.w && scene::decodeBitmapRgba(t->bitmap, 0, tx.rgba)) tx.w = t->bitmap.width, tx.h = t->bitmap.height;
+            if (!tx.w) {
+                skip("font texture does not decode");
+                continue;
+            }
+            if (SDL_getenv("GD05_TEXTCOLORS_DEBUG")) {
+                // The texture's opaque texels: their rgb's spread.
+                std::vector<int> l;
+                for (size_t i = 0; i + 3 < tx.rgba.size(); i += 4)
+                    if (tx.rgba[i + 3] >= 250) l.push_back((299 * tx.rgba[i] + 587 * tx.rgba[i + 1] + 114 * tx.rgba[i + 2]) / 1000);
+                std::sort(l.begin(), l.end());
+                if (!l.empty())
+                    std::printf("      texture %s (%s, fmt %d, %dx%d): opaque texels %zu, luma p10 %d p50 %d p90 %d max %d\n", t->name.c_str(), p.mat->name.c_str(),
+                                int(t->bitmap.format), tx.w, tx.h, l.size(), l[l.size() / 10], l[l.size() / 2], l[l.size() * 9 / 10], l.back());
+            }
+            // RB's colour before the texture, per pixel (RB's text materials
+            // are per-pixel lit: a big title's light falls off across it).
+            gfx::Vec3 n{p.verts[0].normal[0], p.verts[0].normal[1], p.verts[0].normal[2]};
+            {
+                const gfx::Vec3 o = p.world.transformPoint({0, 0, 0}), q = p.world.transformPoint(n);
+                n = {q.x - o.x, q.y - o.y, q.z - o.z};
+                const float l = std::sqrt(n.x * n.x + n.y * n.y + n.z * n.z);
+                if (l > 0) n = {n.x / l, n.y / l, n.z / l};
+            }
+            const float* base = p.m.prelit ? p.verts[0].color : p.m.color;
+            const gfx::Vec3 amb = p.m.useEnviron ? p.env.envAmbient : p.env.ambient;
+            auto shadeAt = [&](const gfx::Vec3& pos, float* shade) {
+                shade[0] = base[0] * amb.x, shade[1] = base[1] * amb.y, shade[2] = base[2] * amb.z;
+                for (int i = 0; i < lights; ++i) {
+                    const gfx::Light& L = p.env.lights[i];
+                    gfx::Vec3 l = L.vec;
+                    float fall = 1;
+                    if (!p.env.directional && !L.directional) {
+                        gfx::Vec3 d{L.vec.x - pos.x, L.vec.y - pos.y, L.vec.z - pos.z};
+                        const float len = std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z);
+                        l = len > 1e-6f ? gfx::Vec3{d.x / len, d.y / len, d.z / len} : d;
+                        if (L.range > L.falloffStart) fall = 1 - std::clamp((len - L.falloffStart) / (L.range - L.falloffStart), 0.0f, 1.0f);
+                    }
+                    const float lam = std::max(0.0f, n.x * l.x + n.y * l.y + n.z * l.z) * fall;
+                    shade[0] += L.color.x * lam * p.m.color[0], shade[1] += L.color.y * lam * p.m.color[1], shade[2] += L.color.z * lam * p.m.color[2];
+                }
+            };
+            const float mult = p.m.intensify ? 2.0f : 1.0f;
+            // The glyph cores, triangle by triangle.
+            const float sx = float(img->w) / 1280.0f, sy = float(img->h) / 720.0f;
+            double sumE[3] = {0, 0, 0}, sumD[3] = {0, 0, 0};
+            int count = 0;
+            for (const auto& f : p.faces) {
+                float X[3], Y[3], W[3], U[3], V[3];
+                gfx::Vec3 P[3];
+                bool ok = true;
+                for (int k = 0; k < 3; ++k) {
+                    const scene::MeshVertex& v = p.verts[f[size_t(k)]];
+                    const gfx::Vec3 w = p.world.transformPoint({v.pos[0], v.pos[1], v.pos[2]});
+                    P[k] = w;
+                    const gfx::Mat4& m = p.viewProj;
+                    const float cx = m.at(0, 0) * w.x + m.at(0, 1) * w.y + m.at(0, 2) * w.z + m.at(0, 3);
+                    const float cy = m.at(1, 0) * w.x + m.at(1, 1) * w.y + m.at(1, 2) * w.z + m.at(1, 3);
+                    const float cw = m.at(3, 0) * w.x + m.at(3, 1) * w.y + m.at(3, 2) * w.z + m.at(3, 3);
+                    if (cw <= 1e-4f) ok = false;
+                    X[k] = (p.rect[0] + (cx / cw + 1) * 0.5f * (p.rect[2] - p.rect[0])) * sx;
+                    Y[k] = (p.rect[1] + (1 - cy / cw) * 0.5f * (p.rect[3] - p.rect[1])) * sy;
+                    W[k] = 1.0f / cw;
+                    const gfx::Vec3 uv = p.m.texXfm.transformPoint({v.uv[0], v.uv[1], 0});
+                    U[k] = uv.x * float(tx.w), V[k] = uv.y * float(tx.h);
+                }
+                const float area = (X[1] - X[0]) * (Y[2] - Y[0]) - (X[2] - X[0]) * (Y[1] - Y[0]);
+                if (!ok || std::fabs(area) < 0.5f) continue;
+                // Texels per pixel along the edges: the footprint's radius.
+                float k = 0;
+                for (int e = 0; e < 3; ++e) {
+                    const int a = e, b = (e + 1) % 3;
+                    const float dp = std::hypot(X[b] - X[a], Y[b] - Y[a]), dt = std::hypot(U[b] - U[a], V[b] - V[a]);
+                    if (dp > 0.5f) k = std::max(k, dt / dp);
+                }
+                const int r = int(std::ceil(0.5f * k)) + 1;
+                const int x0 = std::max(0, int(std::floor(std::min({X[0], X[1], X[2]})))), x1 = std::min(img->w - 1, int(std::ceil(std::max({X[0], X[1], X[2]}))));
+                const int y0 = std::max(0, int(std::floor(std::min({Y[0], Y[1], Y[2]})))), y1 = std::min(img->h - 1, int(std::ceil(std::max({Y[0], Y[1], Y[2]}))));
+                for (int py = y0; py <= y1; ++py)
+                    for (int px = x0; px <= x1; ++px) {
+                        const float qx = float(px) + 0.5f, qy = float(py) + 0.5f;
+                        const float b0 = ((X[1] - qx) * (Y[2] - qy) - (X[2] - qx) * (Y[1] - qy)) / area;
+                        const float b1 = ((X[2] - qx) * (Y[0] - qy) - (X[0] - qx) * (Y[2] - qy)) / area;
+                        const float b2 = 1 - b0 - b1;
+                        if (b0 < 0 || b1 < 0 || b2 < 0) continue;
+                        const float iw = b0 * W[0] + b1 * W[1] + b2 * W[2];
+                        const float u = (b0 * U[0] * W[0] + b1 * U[1] * W[1] + b2 * U[2] * W[2]) / iw;
+                        const float v = (b0 * V[0] * W[0] + b1 * V[1] * W[1] + b2 * V[2] * W[2]) / iw;
+                        const int tu = int(std::floor(u)), tv = int(std::floor(v));
+                        int minA = 255;
+                        for (int dy = -r; dy <= r && minA >= 250; ++dy)
+                            for (int dx = -r; dx <= r; ++dx) {
+                                const int xx = std::clamp(tu + dx, 0, tx.w - 1), yy = std::clamp(tv + dy, 0, tx.h - 1);
+                                minA = std::min(minA, int(tx.rgba[(size_t(yy) * size_t(tx.w) + size_t(xx)) * 4 + 3]));
+                            }
+                        if (minA < 250) continue;
+                        // The texel colour the sampler gives: the texels the pixel covers.
+                        const float rc = std::max(0.5f, 0.5f * k);
+                        float texel[3] = {0, 0, 0};
+                        int nt = 0;
+                        for (int yy = int(std::floor(v - rc)); yy <= int(std::floor(v + rc)); ++yy)
+                            for (int xx = int(std::floor(u - rc)); xx <= int(std::floor(u + rc)); ++xx) {
+                                const uint8_t* q = &tx.rgba[(size_t(std::clamp(yy, 0, tx.h - 1)) * size_t(tx.w) + size_t(std::clamp(xx, 0, tx.w - 1))) * 4];
+                                texel[0] += q[0], texel[1] += q[1], texel[2] += q[2];
+                                ++nt;
+                            }
+                        if (!nt) continue;
+                        const Uint8* d = static_cast<const Uint8*>(img->pixels) + py * img->pitch + px * 4;
+                        float shade[3];
+                        {
+                            const float a0 = b0 * W[0] / iw, a1 = b1 * W[1] / iw, a2 = b2 * W[2] / iw;
+                            shadeAt({a0 * P[0].x + a1 * P[1].x + a2 * P[2].x, a0 * P[0].y + a1 * P[1].y + a2 * P[2].y, a0 * P[0].z + a1 * P[1].z + a2 * P[2].z}, shade);
+                        }
+                        for (int ch = 0; ch < 3; ++ch) {
+                            const float e = std::clamp(shade[ch] * texel[ch] / (255.0f * float(nt)) * mult, 0.0f, 1.0f);
+                            sumE[ch] += gfx::outputCurve(e, gamma) * 255.0;
+                            sumD[ch] += d[ch];
+                        }
+                        ++count;
+                    }
+            }
+            if (count < 12) {
+                skip(count ? "under 12 glyph-core pixels" : "no glyph-core pixel on the screen");
+                continue;
+            }
+            float E[3], D[3];
+            for (int ch = 0; ch < 3; ++ch) E[ch] = float(sumE[ch] / count), D[ch] = float(sumD[ch] / count);
+            const float ratio = luma(E) > 1 ? luma(D) / luma(E) : 1;
+            const bool dark = ratio < 0.92f;
+            std::printf("    %-22s %-30s %-16s exp %3.0f %3.0f %3.0f  drawn %3.0f %3.0f %3.0f  ratio %.2f  n %d%s\n", panel->name().c_str(), p.name.c_str(),
+                        flags.c_str(), E[0], E[1], E[2], D[0], D[1], D[2], ratio, count, dark ? "  DARK" : "");
+            if (dark) {
+                char line[256];
+                std::snprintf(line, sizeof line, "%s %s/%s: drawn %.0f %.0f %.0f, expected %.0f %.0f %.0f (%.2f)", tag.c_str(), panel->name().c_str(),
+                              p.name.c_str(), D[0], D[1], D[2], E[0], E[1], E[2], ratio);
+                bad.push_back(line);
+            }
+        }
+    }
+    SDL_DestroySurface(img);
+}
+
 void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
     auto fail = [&](const std::string& e) { error_ = e, failed_ = done_ = true; };
     auto pass = [&] { ++step_, stepStart_ = -1; };
+    if (s.screen.rfind("textcolors:", 0) == 0) {
+        // rb_text_colors: textcolors:<tag> measures the screen once it has
+        // rested 700 ms (the probes on from the first poll).
+        // textcolors:<tag>:<panel> waits for that panel instead (the loading
+        // screens hold their transition).
+        static double seenMs = -1;
+        const std::string rest = s.screen.substr(11);
+        const size_t c = rest.find(':');
+        if (ui::ScreenObj* sc = ui.current())
+            for (ui::PanelObj* p : sc->panels())
+                if (p->view) p->view->setTextProbes(true);
+        if (c == std::string::npos ? ui.inTransition() : !(ui.panel(rest.substr(c + 1)) && ui.panel(rest.substr(c + 1))->up)) return;
+        if (seenMs < 0) seenMs = nowMs;
+        if (nowMs - seenMs < 700) return;
+        seenMs = -1;
+        measureTextColors(ui, rest.substr(0, c), textColorsBad_);
+        return pass();
+    }
     if (s.screen.rfind("bright:", 0) == 0) {
         // rb_bright: bright:<tag>[:<panel>] waits (loading screens: until
         // the panel is up), saves the frame, prints each hit box's 97th
@@ -2638,15 +3003,16 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         static const std::map<std::string, std::vector<std::pair<std::string, int>>> floors = {
             {"main", {{"solo.btn", 190}, {"multi.btn", 190}, {"tutorial.btn", 190}, {"options.btn", 190}, {"community.btn", 190}}},
             // The audio sliders were edge-on (2-3 px, 10..118; slider.grp's turn
-            // left out); the LOADING word, unlit until loading.tnm's glint
-            // reaches it, 25 (as RB lights it: a guard, not a fix).
+            // left out); the LOADING word bright from the start (owner
+            // decision D44: its focus colour in the UI environ; it was 25,
+            // unlit until loading.tnm's glint reached it).
             {"audio", {{"instruments.sld", 120}, {"background.sld", 120}, {"crowd.sld", 120}, {"sfx.sld", 120}}},
             {"options", {{"audio.btn", 170}, {"gameplay.btn", 80}, {"characterdata.btn", 80}, {"calibrate_av.btn", 80}, {"port_enhanced.btn", 75}}},
             {"solo", {{"quickplay.btn", 150}, {"tour.btn", 80}}},
             {"songlist", {{"ss_song.lst#0#list.lbl", 120}, {"ss_song.lst#2#list.lbl", 95}}},
             {"seldiff", {{"player.lbl", 190}, {"guitar.lbl", 180}, {"choose_diff.lbl", 150}}},
             {"seldiff2", {{"easy.btn", 115}, {"medium.btn", 125}, {"hard.btn", 120}, {"expert.btn", 120}}},
-            {"loading", {{"tip.lbl", 190}, {"band_icons", 150}, {"loading_word", 18}}},
+            {"loading", {{"tip.lbl", 190}, {"band_icons", 150}, {"loading_word", 200}}},
             {"pause", {{"pause_title.lbl", 220}, {"0.btn", 160}, {"4.btn", 110}}},
         };
         if (auto it = floors.find(tag); it != floors.end())
@@ -4639,6 +5005,11 @@ int WalkDriver::finish(ui::UiManager& ui) {
     std::string seq;
     for (const std::string& s : ui.history()) seq += (seq.empty() ? "" : " > ") + s;
     std::printf("  screens: %s\n", seq.c_str());
+    if (textColors_ || !textColorsBad_.empty()) {
+        std::printf("  text colours: %zu screens measured, %zu texts too dark\n", textColorsSeen_.size(), textColorsBad_.size());
+        for (const std::string& b : textColorsBad_) std::printf("  FAIL text too dark: %s\n", b.c_str());
+        if (!textColorsBad_.empty()) ok = false;
+    }
     size_t k = 0;
     for (const std::string& s : ui.history())
         if (k < expect_.size() && s == expect_[k]) ++k;

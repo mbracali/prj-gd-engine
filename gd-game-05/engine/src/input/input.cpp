@@ -1195,6 +1195,14 @@ void Input::setPlayer(const std::string& id, int player) {
     Pad* mine = padById(id);
     MidiDev* midi = midiById(id);
     if (!mine && !midi && id != "keyboard") return;
+    if (id == "keyboard") {
+        // The keyboard shares its player with a pad that has it (keyboardSlot
+        // falls back the same way): taking player 1 for the keyboard left the
+        // owner's guitar at None (his controllers.json, GD05-058).
+        players_["keyboard"] = player;
+        save();
+        return;
+    }
     if (player >= 0) {  // one device per player: the one that had it swaps to this one's old player
         const int old = mine ? mine->slot : midi ? midi->slot : keyboardSlot();
         if (id != "keyboard" && keyboardSlot() == player) players_["keyboard"] = old;

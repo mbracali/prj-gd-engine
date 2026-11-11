@@ -487,6 +487,35 @@ pattern). Each says what, why and how to undo it.
 - **Undo:** Input::prepareSdl / load's hint; UiManager::beginTransition's
   early exit / load, updateTransition's fxFadingOut hold.
 
+## D43
+- **What (2026-11-11, GD05-054):** a directory's drawables sort as RB's
+  (0x821B3A48 / comparator 0x821FF100): by draw order, then the same class
+  by name [C]; different classes keep the file's order [I].
+  tour_band_welcome's all.grp (blackmask, 85% black) now draws first:
+  "Congratulations!" 22 -> 180 (expected 180 from its colour, material,
+  lights and the D25 curve; walk rb_text_colors).
+- **Undo:** sortDraws in render/ui_view.cpp.
+
+## D44 (Owner decision)
+- **What (2026-11-11):** LOADING reads bright from the moment the loading
+  screen shows: drawn at its own focus colour (custom_colors 0xfdfdfd) in
+  RB's UI environ (ambient 1). RB draws it at normal 0x3b3b3b under
+  ornate_leader.env (ambient 0), lit only while loading.tnm sweeps
+  loading.lit (range 35) across the word (keys 0 / 25 / 50, rate 2, from
+  enter) [C data]. p97 28 -> 253.
+- **Undo:** the loading.lbl block in UiView::drawObject.
+
+## D45
+- **What (2026-11-11, GD05-060):** RB's in-song HUD is trackpanel.milo's
+  own elements (render/rb_hud_view.h), placed by its track_configuration
+  objects (N_player_wide: objects / visibles / xfms) through the panel's
+  Cam.cam and driven as their RndDir type scripts do (track/gen/*.dta)
+  [C data]; scoreboard values follow the TrackPanel poll 0x82803750 [C];
+  the per-track senders are not traced [I]. In a band each gem track draws
+  the one-player picture scaled so its now bar sits on its own Overdrive
+  meter [I: RB uses one camera with x_offset / side_angle].
+- **Undo:** App::rbHud_, RbTrackView rects from RbHudView::trackRects.
+
 ## Owner: completeness 36% (2026-11-10)
 - **What:** the owner set Rock Band's completeness to 36% (game-info.yaml
   0.36, README, the site) after playing the build; the parity ledger

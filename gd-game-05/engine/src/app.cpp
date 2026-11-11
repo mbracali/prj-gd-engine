@@ -54,6 +54,7 @@
 #include "render/hud_view.h"
 #include "render/scene_gpu.h"
 #include "render/track_view.h"
+#include "render/rb_hud_view.h"
 #include "render/rb_track_view.h"
 #include "render/vocal_track_view.h"
 #include "render/crowd_view.h"
@@ -662,6 +663,17 @@ private:
     std::unique_ptr<HudView> hud_;
     // Rock Band's highway (render/rb_track_view.h), when GH2's is not on the disc.
     std::unique_ptr<RbTrackView> rbTrack_;
+    // Rock Band's in-song HUD (render/rb_hud_view.h, GD05-058).
+    std::unique_ptr<RbHudView> rbHud_;
+    RbHudView::State rbHudState(float t) const;
+    void drawRbHud(float t);
+    // The walks' HUD check (GD05-058): each element drawn alone, its pixels'
+    // box against the box its milo data gives; the shown values against
+    // the players' (rb_hud_* counters).
+    void rbHudProbe();
+    bool rbHudProbeDue_ = false;
+    float rbHudNextProbeMs_ = 15000;
+    int rbHudProbes_ = 0, rbHudBoxes_ = 0, rbHudBoxErrPx_ = 0, rbHudValueErrors_ = 0;
     // The venue behind the track (M8): set by the venue code once a venue is
     // loaded; draws the world with the renderer, materials with
     // DrawContext::hdr = `hdr` (GH2's HDR buffer, render/post_fx.h).
@@ -962,7 +974,7 @@ int App::run() {
                 synth_->stats().plays, synth_->stats().voices, (unsigned long long)synth_->player().started(), synth_->stats().decoded,
                 synth_->stats().decodeMs, synth_->stats().decodeFailures + synth_->stats().unresolved);
     synth_.reset();
-    seats_.clear(), hud_.reset(), track_.reset(), track2_.reset(), rbTrack_.reset();
+    seats_.clear(), hud_.reset(), track_.reset(), track2_.reset(), rbTrack_.reset(), rbHud_.reset();
     sceneCache_.reset();
     milos_.reset();
     menuMovie_.close();  // its textures go before the device
@@ -987,7 +999,7 @@ bool App::loadData(const std::string& path) {
         unloadVenue();
         dropGameParsers();
         ui_.reset();
-        seats_.clear(), hud_.reset(), track_.reset(), track2_.reset(), rbTrack_.reset();
+        seats_.clear(), hud_.reset(), track_.reset(), track2_.reset(), rbTrack_.reset(), rbHud_.reset();
         sceneCache_.reset(), milos_.reset();
         trackTried_ = false;
         synth_.reset();
@@ -1444,6 +1456,7 @@ void App::beginSong() {
     if (skipIntro_) extendAtMs_ = float(startMs) - 10000.0f;
     extendSent_ = skipIntro_;
     rbExtendMs_ = skipIntro_ || practice ? float(startMs) : float(std::max(startMs, 0.0));
+    if (rbHud_) rbHud_->reset(rbExtendMs_);  // track_panel.dta on_reset / on_extend (intro.trig)
     controllersLive_ = false;
     heldBeforeLive_ = {};
     introSfx_ = 0;
@@ -1543,12 +1556,19 @@ bool App::prepareTrack() {
             auto rb = std::make_unique<RbTrackView>();
             rb->load(*data_, *milos_, "guitar");
             rbTrack_ = std::move(rb);
+            try {
+                auto hud = std::make_unique<RbHudView>();
+                hud->load(*data_, *milos_);
+                rbHud_ = std::move(hud);
+            } catch (const std::exception& ex3) {
+                SDL_Log("RB's HUD could not be loaded (%s)", ex3.what());
+            }
             SDL_Log("RB's track loaded in %.0f ms", double(SDL_GetTicksNS() - start) / 1e6);
             return false;
         } catch (const std::exception& ex2) {
             SDL_Log("RB's track could not be loaded (%s); using the debug highway", ex2.what());
         }
-        seats_.clear(), rbTrack_.reset(), sceneCache_.reset(), milos_.reset();
+        seats_.clear(), rbTrack_.reset(), rbHud_.reset(), sceneCache_.reset(), milos_.reset();
         return false;
     }
     SDL_Log("track and HUD loaded in %.0f ms", double(SDL_GetTicksNS() - start) / 1e6);
@@ -2847,6 +2867,10 @@ int App::gameCounter(int player, const std::string& key) const {
     if (key == "score") return player_ ? player_->score() : 0;
     if (key == "part_vocals") return parts_[0] == "vocals" ? 1 : 0;
     if (key == "rb_track_frames") return rbTrackFrames_;
+    if (key == "rb_hud_probes") return rbHudProbes_;
+    if (key == "rb_hud_boxes") return rbHudBoxes_;
+    if (key == "rb_hud_box_err_px") return rbHudBoxErrPx_;
+    if (key == "rb_hud_value_errors") return rbHudValueErrors_;
     // GD05-045: the fret board's effects (render/rb_track_view.h FxStats).
     if (key == "rb_fx_hits") return RbTrackView::fxStats().hits;
     if (key == "rb_fx_hits_no_flame") return RbTrackView::fxStats().hitsNoFx;
@@ -2934,6 +2958,7 @@ void App::hudCommand(const std::string& msg, const std::vector<Value>& args) {
 // GD05_POST=0; the track and HUD then go on top, as GH2's final pass leaves
 // them out. No venue yet: nothing is drawn and the frame is as before.
 void App::drawWorld() {
+    if (rbHudProbeDue_) rbHudProbe();  // under the frame, which the world then covers
     if (!worldDraw_) return;
     canvas_.flush();
     gfx::Renderer& r = canvas_.renderer();
@@ -3365,7 +3390,7 @@ void App::drawTrack() {
         updateTouchLanes();
     } else if ((vocal_ || rbTrack_) && sceneCache_ && !debugHighway_) {
         drawRbTracks(lastT_, speed);
-        if (seats_.empty()) highway_.drawHud(canvas_, *player_, info_ ? info_->name : "");
+        if (seats_.empty() && !rbHud_) highway_.drawHud(canvas_, *player_, info_ ? info_->name : "");
     } else {
         highway_.draw(canvas_, *song_, *player_, lastT_, speed, info_ ? info_->name : "", flashes_);
     }
@@ -3393,11 +3418,152 @@ void App::drawRbTracks(float t, float speed) {
         for (RbSeat& st : seats_)
             if (st.track) tracks.push_back(st.track.get());
         const float n = float(tracks.size());
+        // RB's HUD places the tracks under their meters (RbHudView::trackRects).
+        const auto* rects = rbHud_ ? &rbHud_->trackRects() : nullptr;
         if (tracks.size() > 1)
-            for (size_t i = 0; i < tracks.size(); ++i) tracks[i]->setScreenRect({float(i) / n, 0.6f, 1.0f / n, 0.4f});
+            for (size_t i = 0; i < tracks.size(); ++i)
+                tracks[i]->setScreenRect(rects && rects->size() == tracks.size() ? (*rects)[i] : std::array<float, 4>{float(i) / n, 0.6f, 1.0f / n, 0.4f});
     }
     drawRbTrack0(t, speed);
-    if (!seats_.empty()) drawSeats(t, speed), drawBandHud(t);
+    if (!seats_.empty()) drawSeats(t, speed);
+    if (rbHud_) drawRbHud(t);
+    else if (!seats_.empty()) drawBandHud(t);
+}
+
+// What RB's HUD shows (render/rb_hud_view.h): each gem track's player, the
+// band's score, stars and crowd [C: the elements' inputs; I: the band's
+// rating as the mean of the players' when several play].
+RbHudView::State App::rbHudState(float t) const {
+    RbHudView::State s;
+    auto maxMult = [&](const std::string& part) {
+        int m = 4;
+        if (auto it = rules_.rb.streakMultipliers.find(part); it != rules_.rb.streakMultipliers.end())
+            for (const auto& [count, mult] : it->second) m = std::max(m, mult);
+        return m;
+    };
+    auto track = [&](const std::string& part, const Player* p, float rating, bool out, const RbBonus* bonus) {
+        RbHudView::Track tr;
+        tr.part = part;
+        tr.introAtMs = rbIntroAt(int(s.tracks.size()));
+        tr.name = "Player " + std::to_string(s.tracks.size() + 1);  // [I: RB shows the gamertag]
+        tr.streak = p->streak();
+        tr.streakMultiplier = p->baseMultiplier();
+        tr.totalMultiplier = p->multiplier();
+        tr.maxMultiplier = maxMult(part);
+        tr.energy = p->starMeter();
+        tr.deploying = p->starPowerActive();
+        tr.rating = rating;
+        tr.failed = out;
+        if (bonus) {
+            const float share = bonus->soloShare(t);
+            tr.soloActive = share >= 0, tr.soloPercent = share >= 0 ? int(share * 100) : 0;
+        }
+        s.tracks.push_back(tr);
+    };
+    if (!vocal_) track(parts_[0], player_.get(), player_->rockMeter(), player0Out_, rbBonus_.get());
+    for (const RbSeat& st : seats_)
+        if (!st.vocal && st.player) track(st.part, st.player.get(), st.rating, st.out, st.bonus.get());
+    s.vocals = vocal_ != nullptr;
+    for (const RbSeat& st : seats_) s.vocals = s.vocals || st.vocal != nullptr;
+    s.participants = 1 + int(seats_.size());
+    s.bandScore = seats_.empty() ? player_->score() : gameCounter(0, "band_score");
+    s.stars = float(rbStars(player_.get()));
+    float sum = 0;
+    int n = 0;
+    if (!vocal_) sum += player_->rockMeter(), ++n;
+    for (const RbSeat& st : seats_) sum += st.rating, ++n;
+    if (vocal_) sum += vocalRating_, ++n;
+    s.crowd = n ? std::clamp(sum / float(n), 0.0f, 1.0f) : 0.5f;
+    // The excitement 0..4 by fifths of the meter (kExcitementPeak 4) [I].
+    s.excitement = std::clamp(int(s.crowd * 5.0f), 0, 4);
+    s.bandMultiplier = 1;
+    for (const RbHudView::Track& tr : s.tracks)
+        if (tr.deploying) s.bandMultiplier = std::max(s.bandMultiplier, tr.totalMultiplier / std::max(1, tr.streakMultiplier));
+    s.lost = songLost();
+    s.coda = rbBonus_ && rbBonus_->inCoda(t) && !rbBonus_->codaBanked();
+    s.codaScore = rbBonus_ ? rbBonus_->codaPot() : 0;
+    return s;
+}
+
+void App::drawRbHud(float t) {
+    if (const char* h = SDL_getenv("GD05_HUD"); h && *h == '0') return;  // development aid: the track alone
+    canvas_.flush();
+    if (rbHud_->introAt() != rbExtendMs_) rbHud_->reset(rbExtendMs_);
+    const RbHudView::State st = rbHudState(t);
+    rbHud_->draw(canvas_.renderer(), *sceneCache_, st, t);
+    // The walks (or GD05_HUD_PROBE=1): a probe at 15 s and every 20 s after,
+    // on the next frame, under its picture.
+    if ((walk_ || envOn("GD05_HUD_PROBE")) && t >= rbHudNextProbeMs_ && rbHudProbes_ < 6 && !paused_) {
+        rbHudProbeDue_ = true;
+        rbHudNextProbeMs_ = t + 20000;
+        // The values now: what the elements show against the players' state.
+        int errors = 0;
+        auto fmt = [](int n) {
+            std::string d = std::to_string(std::max(0, n)), out;
+            for (size_t i = 0; i < d.size(); ++i) out += (i > 0 && (d.size() - i) % 3 == 0 ? "," : ""), out += d[i];
+            return out;
+        };
+        const RbHudView::Shown sh = rbHud_->shown(0);
+        const int score = seats_.empty() ? player_->score() : gameCounter(0, "band_score");
+        if (sh.score != fmt(score)) ++errors;
+        std::string mult;
+        if (!st.tracks.empty()) {
+            const RbHudView::Track& t0 = st.tracks[0];
+            const Player* p0 = vocal_ ? seats_.front().player.get() : player_.get();
+            if (t0.totalMultiplier > 1) mult = std::to_string(p0 ? p0->multiplier() : 0) + "x";
+            if (sh.multiplier != mult) ++errors;
+            if (std::fabs(sh.energyFrame - (p0 ? p0->starMeter() : -1)) > 0.001f) ++errors;
+        }
+        if (std::fabs(sh.crowdFrame - st.crowd) > 0.001f) ++errors;
+        SDL_Log("rb hud values at %.0f ms: score '%s' (player %d), multiplier '%s' (player '%s'), Overdrive frame %.3f (player %.3f), "
+                "crowd frame %.3f (band %.3f), wipe %.2f: %d errors",
+                double(t), sh.score.c_str(), score, sh.multiplier.c_str(), mult.c_str(), double(sh.energyFrame),
+                double(st.tracks.empty() ? -1.0f : st.tracks[0].energy), double(sh.crowdFrame), double(st.crowd), double(sh.wipeFrame), errors);
+        rbHudValueErrors_ += errors;
+    }
+}
+
+void App::rbHudProbe() {
+    rbHudProbeDue_ = false;
+    if (!rbHud_ || !sceneCache_) return;
+    canvas_.flush();
+    gfx::Renderer& r = canvas_.renderer();
+    // Cleared to magenta, which no HUD part draws: dark parts count too.
+    const float black[4] = {0, 0, 0, 1}, key[4] = {1, 0, 1, 1};
+    int worst = 0, boxes = 0;
+    for (const RbHudView::Box& e : rbHud_->expectedBoxes()) {
+        r.device().clear(key, true);
+        rbHud_->drawOnly(r, *sceneCache_, e.name);
+        SDL_Surface* raw = canvas_.readPixels();
+        SDL_Surface* c = raw ? SDL_ConvertSurface(raw, SDL_PIXELFORMAT_RGBA32) : nullptr;
+        if (raw) SDL_DestroySurface(raw);
+        if (!c) continue;
+        int x0 = c->w, y0 = c->h, x1 = -1, y1 = -1;
+        for (int y = 0; y < c->h; ++y) {
+            const uint8_t* row = static_cast<const uint8_t*>(c->pixels) + size_t(y) * size_t(c->pitch);
+            for (int x = 0; x < c->w; ++x) {
+                const uint8_t* px = row + size_t(x) * 4;
+                if (255 - px[0] + px[1] + 255 - px[2] > 24) x0 = std::min(x0, x), x1 = std::max(x1, x), y0 = std::min(y0, y), y1 = std::max(y1, y);
+            }
+        }
+        const float sx = 1280.0f / float(c->w), sy = 720.0f / float(c->h);
+        SDL_DestroySurface(c);
+        int err = 999;
+        float dx0 = 0, dy0 = 0, dx1 = 0, dy1 = 0;
+        if (x1 >= 0) {
+            dx0 = float(x0) * sx, dy0 = float(y0) * sy, dx1 = float(x1 + 1) * sx, dy1 = float(y1 + 1) * sy;
+            err = e.strict ? int(std::lround(std::max({std::fabs(dx0 - e.x0), std::fabs(dy0 - e.y0), std::fabs(dx1 - e.x1), std::fabs(dy1 - e.y1)})))
+                           : int(std::lround(std::max({0.0f, e.x0 - dx0, e.y0 - dy0, dx1 - e.x1, dy1 - e.y1})));  // inside the box
+        }
+        SDL_Log("rb hud box %-20s expected %4.0f %4.0f - %4.0f %4.0f  drawn %4.0f %4.0f - %4.0f %4.0f  off %d px%s (%s)", e.name.c_str(), double(e.x0),
+                double(e.y0), double(e.x1), double(e.y1), double(dx0), double(dy0), double(dx1), double(dy1), err, e.strict ? "" : " outside", rbHud_->configuration().c_str());
+        worst = std::max(worst, err);
+        ++boxes;
+    }
+    r.device().clear(black, true);
+    ++rbHudProbes_;
+    rbHudBoxes_ = boxes;
+    rbHudBoxErrPx_ = std::max(rbHudBoxErrPx_, worst);
 }
 
 void App::drawRbTrack0(float t, float speed) {
@@ -3434,7 +3600,7 @@ void App::drawRbTrack0(float t, float speed) {
     rbTrack_->setIntroAt(rbIntroAt(0));
     rbTrack_->draw(canvas_.renderer(), *sceneCache_, *song_, pv, t + float(videoOffsetMs_), speed);
     ++rbTrackFrames_;
-    drawRbNotices(t);
+    if (!rbHud_) drawRbNotices(t);
 }
 
 // The bonuses' notices over the track [I: RB shows them with the track's
@@ -4346,7 +4512,7 @@ void App::drawSong(float t) {
     } else if ((vocal_ || rbTrack_) && sceneCache_) {
         drawWorld();
         drawRbTracks(t, speed);
-        if (seats_.empty()) highway_.drawHud(canvas_, *player_, title);
+        if (seats_.empty() && !rbHud_) highway_.drawHud(canvas_, *player_, title);
     } else {
         highway_.draw(canvas_, *song_, *player_, t, speed, title, flashes_);
         char buf[64];
@@ -4355,7 +4521,7 @@ void App::drawSong(float t) {
         canvas_.text(24, 44, 1.5f, {160, 160, 170, 255}, buf);
     }
     // GH2's HUD shows "SONG FAILED!" itself (HudView).
-    if (songLost() && !gh2) canvas_.textCentered(kScreenW * 0.5f, 330, 4, {230, 60, 60, 255}, "SONG FAILED");
+    if (songLost() && !gh2 && !rbHud_) canvas_.textCentered(kScreenW * 0.5f, 330, 4, {230, 60, 60, 255}, "SONG FAILED");
     else if (paused_) canvas_.textCentered(kScreenW * 0.5f, 330, 4, {235, 235, 240, 255}, "PAUSED");
     if (captureDebugScreenshot(canvas_, true, t)) running_ = false;
     canvas_.end();

@@ -123,6 +123,36 @@ bool renderDirXfm(const Bytes& r, scene::Xfm& out) {
 
 int UiView::clothPolls() const { return cloth_ ? cloth_->polls() : 0; }
 
+// RB's RndDir draw list (RB 0x821B3A48 sorts it with 0x821FF100) [C]: by
+// draw order; at the same order, objects of the same class by name
+// (strcmp). Classes compare by their Symbol's address, which the port cannot
+// know: different classes keep the directory's order [I].
+// tour_band_welcome.milo's all.grp (blackmask.mesh, 85% black) draws
+// before art.grp and the texts' group, as in RB; in the file's order it
+// covered the popup ("Congratulations!" at 12% of its colour).
+static void sortDraws(std::vector<const scene::Object*>& roots) {
+    auto orderOf = [](const scene::Object* o) {
+        const scene::Draw* d = drawOf(o);
+        return d ? d->order : 0.0f;
+    };
+    std::stable_sort(roots.begin(), roots.end(), [&](const scene::Object* a, const scene::Object* b) { return orderOf(a) < orderOf(b); });
+    for (size_t i = 0; i < roots.size();) {
+        size_t j = i;
+        while (j < roots.size() && orderOf(roots[j]) == orderOf(roots[i])) ++j;
+        // Within [i, j): each class's places, refilled by name.
+        std::map<std::string, std::vector<size_t>> places;
+        for (size_t k = i; k < j; ++k) places[roots[k]->cls].push_back(k);
+        for (auto& [cls, at] : places) {
+            if (at.size() < 2) continue;
+            std::vector<const scene::Object*> objs;
+            for (size_t k : at) objs.push_back(roots[k]);
+            std::sort(objs.begin(), objs.end(), [](const scene::Object* a, const scene::Object* b) { return std::strcmp(a->name.c_str(), b->name.c_str()) < 0; });
+            for (size_t k = 0; k < at.size(); ++k) roots[at[k]] = objs[k];
+        }
+        i = j;
+    }
+}
+
 bool UiView::drawRenderDir3d(MaterialRenderer& r) {
     const scene::Directory& outer = milo_->root();
     // The RenderDir's own pollables (the cloth: CharTransCopy, CharHair),
@@ -236,11 +266,7 @@ void UiView::drawRoots(MaterialRenderer& r, const scene::Directory& root) {
     std::vector<const scene::Object*> roots;
     for (const auto& o : root.objects)
         if (!held.count(o->name) && (drawOf(o.get()) || o->as<scene::Text>())) roots.push_back(o.get());
-    std::stable_sort(roots.begin(), roots.end(), [](const scene::Object* a, const scene::Object* b) {
-        const scene::Draw* da = drawOf(a);
-        const scene::Draw* db = drawOf(b);
-        return (da ? da->order : 0) < (db ? db->order : 0);
-    });
+    sortDraws(roots);
     for (const scene::Object* o : roots) drawObject(r, *o, 0);
 }
 
@@ -654,6 +680,7 @@ void UiView::draw(MaterialRenderer& r) {
     textsDrawn_ = meshesDrawn_ = 0;
     masks_.clear();
     hits_.clear();
+    textProbes_.clear();
     if (!milo_) return;
     viewProj_ = camera().viewProj(false);
     const scene::Directory* drawRoot = &milo_->root();
@@ -677,6 +704,7 @@ void UiView::draw(MaterialRenderer& r) {
         // GD05_SONGLIST_FLAT=1 shows the texture flat as wave 03 did.
         if (const char* e = SDL_getenv("GD05_SONGLIST_FLAT"); !e || *e != '1') cloth = false;
         if (!cloth && drawRenderDir3d(r)) {
+            for (TextProbe& p : textProbes_) p.indirect = true;  // into a texture on a 3D banner
             texts_.collect();
             return;
         }
@@ -742,11 +770,7 @@ void UiView::draw(MaterialRenderer& r) {
     std::vector<const scene::Object*> roots;
     for (const auto& o : root.objects)
         if (!held.count(o->name) && (drawOf(o.get()) || o->as<scene::Text>())) roots.push_back(o.get());
-    std::stable_sort(roots.begin(), roots.end(), [](const scene::Object* a, const scene::Object* b) {
-        const scene::Draw* da = drawOf(a);
-        const scene::Draw* db = drawOf(b);
-        return (da ? da->order : 0) < (db ? db->order : 0);
-    });
+    sortDraws(roots);
     const size_t firstHit = hits_.size();
     for (const scene::Object* o : roots) drawObject(r, *o, 0);
     if (rendered_.texture.id) {
@@ -765,6 +789,10 @@ void UiView::draw(MaterialRenderer& r) {
         for (scene::ScreenMask* sm : m->root().all<scene::ScreenMask>())
             if (pose_.showing(sm)) addMask(*sm);
     if (overlay) overlay(r);
+    for (TextProbe& p : textProbes_) {
+        p.viewProj = viewProj_;
+        if (rendered_.texture.id) p.rect[0] = rendered_.x0, p.rect[1] = rendered_.y0, p.rect[2] = rendered_.x1, p.rect[3] = rendered_.y1;
+    }
     texts_.collect();
 }
 
@@ -901,6 +929,22 @@ void UiView::drawObject(MaterialRenderer& r, const scene::Object& o, int depth) 
     }
     if (const auto* t = o.as<scene::Text>()) return drawText(r, *t);
     if (const auto* l = o.as<scene::BandLabel>()) {
+        // Owner decision (D44): LOADING (loading.milo's loading.lbl, beside
+        // loading.tnm) reads bright from the moment the loading screen shows:
+        // its own focus colour (custom_colors 0xfdfdfd) in RB's UI environ
+        // (ambient 1, no lights). RB draws it at its normal 0x3b3b3b under
+        // ornate_leader.env (ambient 0), bright only while loading.tnm's
+        // glint (loading.lit, range 35) crosses the word, ~4.5 s in.
+        if (l->bigEndian && l->name == "loading.lbl" && l->textStyle == "custom_colors" && l->dir && l->dir->find<scene::TransAnim>("loading.tnm")) {
+            std::array<float, 3> c{};
+            if (styles_.textStyleColor(l->textStyle, l->customColors, scene::UiState::Focused, c)) {
+                const LightEnv saved = r.lightEnv();
+                r.setLightEnv(defaultEnvironment());
+                drawLabel(r, *l, &l->band, c.data());
+                r.setLightEnv(saved);
+                return;
+            }
+        }
         // Rock Band: the text style's preset colour (BandTextComp) [C].
         std::array<float, 3> c{};
         if (l->bigEndian && styles_.textStyleColor(l->textStyle, l->customColors, state(l->name) == scene::UiState::Disabled ? scene::UiState::Disabled : scene::UiState::Normal, c))
@@ -1001,6 +1045,7 @@ void UiView::drawText(MaterialRenderer& r, const scene::Text& t) {
         lt->layout = layoutText(&fm, str, st);
         lt->font = font;
     }
+    texts_.probeName = t.name;
     texts_.draw(r, &t, *font, lt->layout, toMat4(pose_.world(&t)));
     ++textsDrawn_;
 }
@@ -1105,6 +1150,7 @@ void UiView::drawLabel(MaterialRenderer& r, const scene::UILabel& l, const scene
     }
     world = scene::compose(scaleXfm(lt->fit[0], 1, lt->fit[1]), world);
     const Mat4 wm = toMat4(world);
+    texts_.probeName = l.name;
     texts_.draw(r, &l, *lt->font, lt->layout, wm, matColor);
     // Buttons, and RB's labels too (the help bar's actions take clicks).
     if (l.as<scene::BandButton>() || l.cls == "UIButton" || l.bigEndian) addLayoutHit(l.name, lt->layout, wm);
@@ -1146,6 +1192,7 @@ float UiView::drawTemplate(MaterialRenderer& r, const std::string& key, const sc
     }
     const float tint[4] = {1, 1, 1, alpha};
     const Mat4 wm = toMat4(scene::compose(scaleXfm(lt->fit[0], 1, lt->fit[1]), world));
+    texts_.probeName = key;
     texts_.draw(r, lt.get(), *font, lt->layout, wm, rgb, alpha < 1 ? tint : nullptr);
     addLayoutHit(key, lt->layout, wm);
     ++textsDrawn_;
