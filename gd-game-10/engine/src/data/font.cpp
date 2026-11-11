@@ -44,13 +44,16 @@ Font parseFont(const uint8_t* d, size_t size) {
     need(size > kGlyphs + 4, "fnt: short");
     ByteReader r(d, size);
     Font f;
-    // gh4 (Metallica) adds one f32 after `tracking` (1.0 in every font on
-    // the disc [C data]; meaning [I], kept as `scale`), which moves every
+    // gh4 (Metallica) adds one f32 after `tracking` (1.0 .. 10.0 on the disc
+    // [C data]; meaning [I], kept as `scale`), which moves every
     // later field by 4: glyph table at 0x200A8 instead of 0x200A4.
     const size_t sh = (be32at(d + 0x14) == kGlyphs + 4 && be32at(d + 0x10) != kGlyphs) ? 4 : 0;
-    f.vShift = int32_t(r.u32be());
-    f.bearing = int32_t(r.u32be());
-    f.tracking = int32_t(r.u32be());
+    // gh4 stores these three as f32 (whole numbers: bearing 10.0, tracking
+    // -3.0 in fontgrid_text_a8) [C data: every font on the disc].
+    auto field = [&r, sh]() { return sh ? int32_t(std::lround(f32be(r))) : int32_t(r.u32be()); };
+    f.vShift = field();
+    f.bearing = field();
+    f.tracking = field();
     if (sh) f.scale = f32be(r);
     f.lineHeight = f32be(r);
     need(r.u32be() == kGlyphs + sh, "fnt: glyph table offset");
@@ -81,8 +84,11 @@ Font parseFont(const uint8_t* d, size_t size) {
             need(std::isfinite(*fl[i]), "fnt: glyph value");
             if (i < 4) need(*fl[i] >= 0.0f && *fl[i] <= 1.0f, "fnt: glyph uv");
         }
-        g.xOffset = int32_t(r.u32be());
-        g.advanceAdjust = int32_t(r.u32be());
+        // gh4: f32 too (A, T, Y: 3.0 / -3.0 in fontgrid_text_a8; read as
+        // integers they threw the glyph and the rest of the line off screen:
+        // "EASY" drawn as "E") [C data].
+        g.xOffset = field();
+        g.advanceAdjust = field();
     }
     zeros(d, glyphEnd, f.textureOffset, "fnt: glyph padding");
     // Texture: 0x28-byte header (magic 0x0A281102, u16 width, height at +8),

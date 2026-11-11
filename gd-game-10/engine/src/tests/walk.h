@@ -108,6 +108,7 @@ private:
     size_t step_ = 0;
     size_t key_ = 0;
     double reachedAt_ = -1, stepStart_ = 0, lastKey_ = 0;
+    bool autoShot_ = false;  // GD10_WALK_SHOTS: this step's screenshot taken
     bool failed_ = false;
     double songSeenAt_ = -1;      // when the song (still playing) started, walk time
     bool loadingChecked_ = false;

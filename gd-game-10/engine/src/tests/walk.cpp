@@ -842,6 +842,23 @@ std::vector<Walk::Press> Walk::update(FrontEnd& fe, bool songPlaying, double now
         return out;
     }
     // Reached: its buttons one by one (a screen gets 1 s to build first).
+    // GD10_WALK_SHOTS=<dir>: every reached screen saved once, 1 s in (before
+    // its first button), as <dir>/<step>_<state>.bmp.
+    // A screen still under gh4's loading screen waits for it (up to 8 s).
+    const bool loadingUp = fe.ui().loadingScreenUp() || fe.ui().find(qbkey::key("loading_screen_container"));
+    if (!autoShot_ && now - reachedAt_ >= (loadingUp ? 8000.0 : 1000.0) && s.state != "song" && s.state != "song_over") {
+        autoShot_ = true;
+        if (const char* dir = SDL_getenv("GD10_WALK_SHOTS")) {
+            char n[16];
+            std::snprintf(n, sizeof n, "%02zu_", step_);
+            Canvas::shotPath = std::string(dir) + "/" + n + s.state + ".bmp";
+        }
+        // GD10_UIDUMP=walk: the element tree of every reached screen, in the log.
+        if (const char* d = SDL_getenv("GD10_UIDUMP"); d && std::strcmp(d, "walk") == 0) {
+            SDL_Log("ui-dump of %s:", s.state.c_str());
+            fe.ui().dump();
+        }
+    }
     if (key_ < s.keys.size()) {
         const Op& op = s.keys[key_];
         if (now - lastKey_ >= (key_ == 0 ? std::max(1000.0, op.delayMs) : op.delayMs)) {
@@ -912,6 +929,7 @@ std::vector<Walk::Press> Walk::update(FrontEnd& fe, bool songPlaying, double now
     if (now - lastKey_ >= 300.0) {
         ++step_;
         reachedAt_ = -1;
+        autoShot_ = false;
         stepStart_ = now;
     }
     return out;

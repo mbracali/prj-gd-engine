@@ -1765,8 +1765,16 @@ void UiSystem::addNatives() {
         if (raw->type == K("descinterface")) {
             const qb::Value* d = Vm::param(p, K("desc"));
             const std::string dn = d ? (d->type == qb::Type::String ? d->str : qbkey::name(d->key)) : std::string();
-            if (!buildDesc(*raw, dn)) vm_.logOnce("ui: no desc " + dn);
-            else descSetProps(*raw, p);
+            if (!buildDesc(*raw, dn)) {
+                vm_.logOnce("ui: no desc " + dn);
+            } else {
+                // The call's `just` does not move the desc's root (D14 [I]):
+                // make_menu_frontend's just = [center center] at pos (0, 0)
+                // is the full-screen career / game mode menu in the original.
+                qb::Struct q = p;
+                q.items.erase(std::remove_if(q.items.begin(), q.items.end(), [](const qb::Item& it) { return it.name == K("just"); }), q.items.end());
+                descSetProps(*raw, q);
+            }
         }
         // The main menu's XBOX LIVE (ONLINE: no online play in the port) as
         // GH3 disables it in demo mode: create_main_menu's demo_mode_disable

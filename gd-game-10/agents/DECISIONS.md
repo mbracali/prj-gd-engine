@@ -97,3 +97,13 @@ disc) and test charts. Undo: ui/natives_gh4.cpp.
 What: gh4 lays its highway out from highway_pos_table, not GH3's
 perspective tables; until that is decoded the song draws the debug highway
 (labelled on screen). Undo: render/highway2d.cpp when done.
+
+## D14. A descinterface call's `just` does not move the desc's root [I] (2026-11-11)
+
+What: `CreateScreenElement {type = descinterface ... just = [center center]}`
+keeps the desc root's own just (main_menu_bg: [-1 -1] at (0, 0)). Why:
+make_menu_frontend (career, game mode, instrument menus) and 20 other
+full-screen descs pass just = center at pos (0, 0); applied to the root it
+drew the 1280 x 720 picture centred on the top-left corner (the "skull art
+over the menus" of the proof of concept). The XEX's descinterface element is
+not read yet. Undo: ui_system.cpp CreateScreenElement's descinterface branch.

@@ -23,7 +23,7 @@ struct Font {
     int32_t vShift = 0;    // header +0 (subtracted from the glyph top)
     int32_t bearing = 0;   // header +4 (per-glyph x offset)
     int32_t tracking = 0;  // header +8 (extra advance per glyph)
-    float scale = 1;       // gh4 only: header +0xC (1.0 on the disc) [I]
+    float scale = 1;       // gh4 only: header +0xC (1.0 .. 10.0 on the disc) [I]
     float lineHeight = 0;  // header +0xC (GH3) / +0x10 (gh4)
     float spaceWidth = 0;  // +0x2005C (advance of ' ' when it has no glyph)
     std::vector<uint16_t> charMap;      // 65536 entries, UTF-16 unit -> glyph index (0 = glyph 0)
