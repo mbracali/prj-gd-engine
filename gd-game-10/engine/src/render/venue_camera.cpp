@@ -92,6 +92,7 @@ void CameraDirector::init(const Venue& v, const Globals& g, const Chart& chart, 
     qb::Value s;
     s.type = qb::Type::String;
     s.str = !introPrefix_.empty() ? introPrefix_ : leadInMs > 3000.5 ? "cameras_intro" : "cameras_fastintro";
+    introUsed_ = s.str;
     p.items.push_back({K("prefix"), s});
     qb::Value cn;
     cn.type = qb::Type::Key;
@@ -322,7 +323,24 @@ void CameraDirector::startShot(double t) {
     auto cam = [&](const char* n) { return readCam(params ? structOf(params->find(K(n))) : nullptr); };
     if (!script || script == K("CameraCuts_StaticCamControl")) {
         keys_.push_back(readCam(e));
-    } else if (script == K("CameraCuts_TwoCam") || script == K("CameraCuts_SpecialStepMove")) {
+    } else if (script == K("CameraCuts_SpecialStepMove")) {
+        // cam1, then stepTime s of 0.05 s linear steps: pos = cam1.pos +
+        // (cam2.pos - cam1.pos) c + StepDir sin(c StepNum 360 deg), c = 0..1;
+        // then cam2 over FinalRotTime (smooth) [C script].
+        ctl_ = Ctl::StepMove;
+        keys_ = {cam("cam1"), cam("cam2")};
+        auto num = [&](const char* n, float d) {
+            const qb::Value* v = params ? params->find(K(n)) : nullptr;
+            return v ? v->number() : d;
+        };
+        stepTime_ = std::max(0.05f, num("stepTime", 1));
+        stepNum_ = num("StepNum", 0);
+        finalRot_ = num("FinalRotTime", 0);
+        stepDir_ = {};
+        if (const qb::Value* d = params ? params->find(K("StepDir")) : nullptr; d && d->type == qb::Type::Vector)
+            stepDir_ = {d->f[0], d->f[1], d->f[2]};
+        handCam_ = true;  // CameraCuts_SetHandCamParams (position 0, rotation -0.8) [C]
+    } else if (script == K("CameraCuts_TwoCam")) {
         ctl_ = Ctl::TwoCam;
         keys_ = {cam("cam1"), cam("cam2")};
         handCam_ = hasFlag(params, K("UseHandCam"));
@@ -528,6 +546,18 @@ CamPose CameraDirector::pose(double ms) const {
     switch (ctl_) {
     case Ctl::Static: p = world(k0); break;
     case Ctl::TwoCam: p = blend(world(k0), world(k1), mix = smooth(s)); break;
+    case Ctl::StepMove: {
+        const double c = std::clamp(since / stepTime_, 0.0, 1.0);
+        Keyed k = k0;
+        const float sn = float(std::sin(c * stepNum_ * 360.0 * 3.14159265358979 / 180.0));
+        for (size_t i = 0; i < 3; ++i) k.pos[i] = k0.pos[i] + (k1.pos[i] - k0.pos[i]) * float(c) + stepDir_[i] * sn;
+        p = world(k);
+        if (since > stepTime_) {
+            const float u = finalRot_ > 0 ? float(std::clamp((since - stepTime_) / finalRot_, 0.0, 1.0)) : 1.0f;
+            p = blend(p, world(k1), mix = smooth(u));
+        }
+        break;
+    }
     case Ctl::HandCam:
         p = world(k0);
         if (zoomFov_ > 0) p.fov = k0.fov + (zoomFov_ - k0.fov) * smooth(s);

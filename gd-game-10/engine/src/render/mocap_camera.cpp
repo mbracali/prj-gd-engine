@@ -87,6 +87,36 @@ void MocapCameras::init(const Venue& v, const Globals& g, const std::vector<qb::
     if (std::getenv("GD10_CAMLOG")) SDL_Log("camera: %zu mocap camera anims", segs_.size());
 }
 
+void MocapCameras::addTransition(const Venue& v, const Globals& g, const std::string& transition, double atMs, const ClipLookup& zoneClips) {
+    if (!haveRig_ || !zoneClips) return;
+    const uint32_t key = v.key("_" + transition + "_Transition");
+    const qb::Value* tv = g.find(key);
+    for (size_t i = 0; !tv && i < v.files.size(); ++i) tv = v.files[i].find(key);
+    const qb::Struct* tr = structOf(tv);
+    const qb::Value* tab = tr ? tr->find(K("ScriptTable")) : nullptr;
+    if (!tab || tab->type != qb::Type::Array || !tab->arr) return;
+    for (const qb::Value& e : tab->arr->values) {
+        const qb::Struct* st = structOf(&e);
+        const qb::Struct* params = st ? structOf(st->find(K("params"))) : nullptr;
+        if (!params || keyOf(st->find(K("scr"))) != K("SpecialCamera_PlayAnim")) continue;
+        const std::string obj = strOf(params->find(K("obj")));
+        const uint32_t anim = keyOf(params->find(K("anim")));
+        const uint32_t tgt = v.key("_" + obj);
+        const Node* n = v.node(tgt);
+        const anim::Clip* c = anim ? zoneClips(anim) : nullptr;
+        const qb::Value* when = st->find(K("time"));
+        if (!c || !n) {
+            if (std::getenv("GD10_CAMLOG")) SDL_Log("camera: transition anim %s on %s: %s", qbkey::names().get(anim).c_str(), obj.c_str(), !c ? "no anim" : "no node");
+            continue;
+        }
+        Seg sg;
+        sg.target = tgt, sg.t = atMs + (when ? when->number() : 0.0), sg.clip = c;
+        sg.pos = n->pos, sg.rot = n->rot;
+        segs_.push_back(sg);
+    }
+    std::stable_sort(segs_.begin(), segs_.end(), [](const Seg& a, const Seg& b) { return a.t < b.t; });
+}
+
 const MocapCameras::Seg* MocapCameras::at(uint32_t tgt, double ms) const {
     const Seg* last = nullptr;
     for (const Seg& s : segs_) {

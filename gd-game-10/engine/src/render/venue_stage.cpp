@@ -12,6 +12,7 @@
 #include <cstdlib>
 #include <exception>
 
+#include "data/pak.h"
 #include "data/qbkey.h"
 #include "render/gh3_shader.h"
 #include "render/hitch.h"
@@ -156,6 +157,25 @@ bool VenueStage::start(const Disc& disc, const Globals& g, const std::string& zo
                         return nullptr;
                     },
                     from);
+        // The zone transition's camera anim (z_forum_Intro_Transition: SpecialCamera_PlayAnim
+        // TRG_Geo_Camera_Performance_DRUM01 ven_forum_camera_intro), from the zone pak's clips.
+        {
+            const std::string& ic = cameras_.introCameras();
+            const std::string tr = ic == "cameras_intro" ? "Intro" : ic == "cameras_fastintro" ? "FastIntro" : ic == "cameras_encore" ? "Encore"
+                                   : ic == "cameras_boss" ? "Boss" : "";
+            if (!tr.empty()) {
+                try {
+                    auto zc = std::make_shared<band::ClipMap>(band::readPakClips(*Pak::shared(disc, "DATA/COMPRESSED/ZONES/" + zone + ".pak.xen")));
+                    zoneCamClips_ = zc;
+                    mocap_.addTransition(*venue_, g, tr, from, [zc](uint32_t k) -> const anim::Clip* {
+                        auto it = zc->find(k);
+                        return it == zc->end() ? nullptr : it->second.get();
+                    });
+                } catch (const std::exception& ex) {
+                    SDL_Log("camera: %s: %s", zone.c_str(), ex.what());
+                }
+            }
+        }
         venue::MocapCameras* mc = &mocap_;
         cameras_.setLockLookup([mc](uint32_t t, uint32_t bone, double ms, venue::Vec3& p, venue::Quat& q) { return mc->frame(t, bone, ms, p, q); },
                                [mc](uint32_t t, double ms) { return mc->animated(t, ms); });

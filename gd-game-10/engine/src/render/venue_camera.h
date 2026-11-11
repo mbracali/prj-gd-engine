@@ -60,7 +60,9 @@ public:
     // The intro transition's camera prefix (cameras_intro, cameras_encore,
     // cameras_boss...); empty: chosen by the lead-in (fast or full intro).
     void setIntroCameras(const std::string& prefix) { introPrefix_ = prefix; }
-    std::string introPrefix_;
+    // The intro transition's camera prefix in use (cameras_intro, cameras_fastintro, cameras_encore, ...).
+    const std::string& introCameras() const { return introUsed_; }
+    std::string introPrefix_, introUsed_;
     // Advances to song time `ms` (monotonic), processing every camera note
     // and every cut up to it in time order (a cut picks its camera array by
     // the performance at its own time).
@@ -168,7 +170,7 @@ private:
     Shot shot_;
     int cuts_ = 0;
     std::vector<Shot> history_;
-    enum class Ctl : uint8_t { Static, TwoCam, HandCam, HandCamZoom2, QuickZoom, Pan, Orbit, OrbitMorph, Spline, Script };
+    enum class Ctl : uint8_t { Static, TwoCam, StepMove, HandCam, HandCamZoom2, QuickZoom, Pan, Orbit, OrbitMorph, Spline, Script };
     Ctl ctl_ = Ctl::Static;
     std::vector<Keyed> keys_;     // cam1 / cam2 / ... (or the single params pose)
     uint32_t scriptRun_ = 0;      // Ctl::Script: the zone VM's run
@@ -181,6 +183,8 @@ private:
     double calcAt_ = 0, camTime_ = 0;  // when CalcTime ran and the camera_time it returned (s)
     float zoomFov_ = 0;           // HandCam's random zoom target (0: none)
     float orbitRad_ = 0;          // total orbit angle
+    float stepTime_ = 1, stepNum_ = 0, finalRot_ = 0;  // CameraCuts_SpecialStepMove's stepTime, StepNum, FinalRotTime
+    Vec3 stepDir_{};
     bool orbit1_ = true, orbit2_ = true, handCam_ = false;
     BoneLookup lookup_;
     LockLookup lockLookup_;

@@ -34,6 +34,11 @@ public:
     // target plays nothing then (or is not a camera lock target).
     bool frame(uint32_t target, uint32_t bone, double ms, Vec3& pos, Quat& rot) const;
     bool animated(uint32_t target, double ms) const;
+    // The zone transition's SpecialCamera_PlayAnim {obj anim} entries
+    // (<zone>_<transition>_Transition's ScriptTable, at the transition's
+    // start `atMs`): <zone>_<obj> (a Profile_Ven_Camera_Obj node) plays the
+    // zone pak's anim where it stands [C scripts and data].
+    void addTransition(const Venue& v, const Globals& g, const std::string& transition, double atMs, const ClipLookup& zoneClips);
     size_t segments() const { return segs_.size(); }
 
 private:

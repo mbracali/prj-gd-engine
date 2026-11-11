@@ -130,6 +130,7 @@ private:
     std::unique_ptr<venue::Venue> venue_;
     venue::CameraDirector cameras_;
     venue::MocapCameras mocap_;  // the camera lock targets (mocap / moment cameras)
+    std::shared_ptr<const band::ClipMap> zoneCamClips_;  // the zone pak's clips (its transition camera anims)
     venue::LightShow lights_;
     std::unique_ptr<VenueView> view_;
     std::unique_ptr<VenueView> pendingView_;  // prepared (start), uploading (attachStep 0)
