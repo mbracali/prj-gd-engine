@@ -61,7 +61,23 @@ bool Highway2D::init(const Globals& g, int difficulty, int players, int player) 
     // highway's container moved by x_offset_p2 left (player 1) or right
     // (player 2) (generate_pos_table, setup_highway) [C script].
     const bool two = players == 2;
-    auto tw = [&](const char* name, float fallback) { return num(g, (std::string(name) + (two ? "2" : "1")).c_str(), fallback); };
+    // gh4 (Metallica): one struct per layout, highway_guitar1 / _guitar2
+    // {highway_playline highway_height highway_top_width widthoffsetfactor
+    // gem_start_scale [6] gem_end_scale [6] perspectivefact perspectiveexp
+    // ...} (setup_highway copies it into highway_pos_table) [C data
+    // guitar_gems.qb]; GH3's "...1" / "...2" globals as the fallback.
+    const qb::Value* hs = g.find(qbkey::key(two ? "highway_guitar2" : "highway_guitar1"));
+    const qb::Struct* hw = hs && hs->type == qb::Type::Struct && hs->st ? hs->st.get() : nullptr;
+    auto tw = [&](const char* name, float fallback) {
+        if (hw) {
+            if (const qb::Value* v = g.field(*hw, qbkey::key(name))) {
+                if (v->type == qb::Type::Array && v->arr && !v->arr->values.empty()) return v->arr->values[0].number();
+                if (v->type == qb::Type::Pair) return v->f[1];
+                if (v->type == qb::Type::Float || v->type == qb::Type::Int) return v->number();
+            }
+        }
+        return num(g, (std::string(name) + (two ? "2" : "1")).c_str(), fallback);
+    };
     playline_ = tw("highway_playline", 655);
     height_ = tw("highway_height", 350);
     topWidth_ = tw("highway_top_width", 160);
@@ -69,7 +85,7 @@ bool Highway2D::init(const Globals& g, int difficulty, int players, int player) 
     fade_ = tw("highway_fade", 30);
     tiling_ = tw("gHighwayTiling", 1.5f);
     gemStart_ = tw("gem_start_scale", 0.25f);
-    gemEnd_ = gemStart_ * (1 + widthOffset_);
+    gemEnd_ = hw && g.field(*hw, qbkey::key("gem_end_scale")) ? tw("gem_end_scale", 1.0f) : gemStart_ * (1 + widthOffset_);
     starScale_ = tw("gem_star_scale", 1.3f);
     gemJust_ = tw("gem_y_just", 0.83f);
     starJust_ = tw("star_y_just", 0.5f);
@@ -112,12 +128,19 @@ bool Highway2D::init(const Globals& g, int difficulty, int players, int player) 
     if (two) scroll *= num(g, "p2_scroll_time_factor", 0.8f);
     travelMs_ = (scroll - num(g, "destroy_time", 1.0f)) * 1000.0f;
     // The perspective rows [C script generate_pos_table].
-    const qb::Value* ft = arrayGlobal(g, "heightPerspFactTable");
-    const qb::Value* et = arrayGlobal(g, "heightPerspExpTable");
-    if (!ft || !et) return false;
-    const size_t hh = size_t(std::clamp(int(height_) - 162, 0, 510));
-    if (hh >= ft->arr->values.size() || hh >= et->arr->values.size()) return false;
-    const double F = ft->arr->values[hh].number(), E = et->arr->values[hh].number();
+    double F = 0, E = 0;
+    if (hw && g.field(*hw, qbkey::key("perspectivefact")) && g.field(*hw, qbkey::key("perspectiveexp"))) {
+        // gh4: the layout's own factor and exponent [C data].
+        F = g.field(*hw, qbkey::key("perspectivefact"))->number();
+        E = g.field(*hw, qbkey::key("perspectiveexp"))->number();
+    } else {
+        const qb::Value* ft = arrayGlobal(g, "heightPerspFactTable");
+        const qb::Value* et = arrayGlobal(g, "heightPerspExpTable");
+        if (!ft || !et) return false;
+        const size_t hh = size_t(std::clamp(int(height_) - 162, 0, 510));
+        if (hh >= ft->arr->values.size() || hh >= et->arr->values.size()) return false;
+        F = ft->arr->values[hh].number(), E = et->arr->values[hh].number();
+    }
     std::vector<double> d(kRows);
     d[0] = 1;
     for (int i = 1; i < kRows; ++i) d[size_t(i)] = std::pow(d[size_t(i - 1)] * F, E);
@@ -127,6 +150,11 @@ bool Highway2D::init(const Globals& g, int difficulty, int players, int player) 
     accum_.assign(kRows, 0);
     for (int i = 0; i < kRows; ++i) d_[size_t(i)] = float(d[size_t(i)] / sum);
     for (int i = 1; i < kRows; ++i) accum_[size_t(i)] = accum_[size_t(i - 1)] + d_[size_t(i)];
+    // gh4: the lanes and travel are read, but its gems are 3D (Gem_Set_01's
+    // scene) and its skins live in highway_<name> paks: until those draw,
+    // the song keeps the labelled debug highway (D13); GD10_GH4_HIGHWAY=1
+    // draws this one (development aid).
+    if (hw && !SDL_getenv("GD10_GH4_HIGHWAY")) return false;
     return travelMs_ > 0;
 }
 
