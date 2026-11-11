@@ -291,6 +291,7 @@ void UiSystem::applyProps(Element& e, const qb::Struct& p, bool create) {
                     if (pi.value.type == qb::Type::Pair) a = pi.value.f[0], b = pi.value.f[1];
                 if (qs::Vm::flag(*v.st, K("relative"))) e.x += a, e.y += b;
                 else if (qs::Vm::flag(*v.st, K("proportional")) && e.parent) e.x = a * e.parent->w, e.y = b * e.parent->h;
+                else if (qs::Vm::flag(*v.st, K("absolute"))) absoluteToLocal(e, a, b, e.x, e.y);
                 else e.x = a, e.y = b;
             } else {
                 readPair(v, e.x, e.y);
@@ -910,6 +911,7 @@ void UiSystem::startMorph(Element& e, const qb::Struct& p) {
             for (const qb::Item& pi : v->st->items)
                 if (pi.value.type == qb::Type::Pair) a = pi.value.f[0], b = pi.value.f[1];
             if (qs::Vm::flag(*v->st, K("relative"))) m.x1 += a, m.y1 += b;
+            else if (qs::Vm::flag(*v->st, K("absolute"))) absoluteToLocal(e, a, b, m.x1, m.y1);
             else m.x1 = a, m.y1 = b;
         } else {
             readPair(*v, m.x1, m.y1);
@@ -998,6 +1000,41 @@ void UiSystem::dump() const {
                 e.text.substr(0, 40).c_str());
         for (size_t k = e.children.size(); k-- > 0;) stack.push_back({e.children[k].get(), n.depth + 1});
     }
+}
+
+UiSystem::Frame UiSystem::frameOf(const Element& e) const {
+    // The same composition as draw() [C 0x8221BF88], from the root down.
+    std::vector<const Element*> chain;
+    for (const Element* x = &e; x && x != root_.get(); x = x->parent) chain.push_back(x);
+    Frame f;  // the root's frame: (0, 0), scale 1
+    for (size_t k = chain.size(); k-- > 0;) {
+        const Element& x = *chain[k];
+        const Element& p = x.parent ? *x.parent : *root_;
+        const float anX = x.posAnchorGiven ? x.posAnchorX : p.anchorX, anY = x.posAnchorGiven ? x.posAnchorY : p.anchorY;
+        const float ax = (anX + 1) / 2 * p.w * f.wsx, ay = (anY + 1) / 2 * p.h * f.wsy;
+        const float offX = ax + x.x * f.wsx, offY = ay + x.y * f.wsy;
+        const float pr = f.wrot * kDeg;
+        Frame g;
+        g.wx = f.cx + offX * std::cos(pr) - offY * std::sin(pr), g.wy = f.cy + offX * std::sin(pr) + offY * std::cos(pr);
+        g.wsx = f.wsx * x.sx, g.wsy = f.wsy * x.sy;
+        g.wrot = x.preserveOrientation ? x.rot : f.wrot + x.rot;
+        const float jx = (x.justX + 1) / 2 * x.w * g.wsx, jy = (x.justY + 1) / 2 * x.h * g.wsy;
+        const float r = g.wrot * kDeg;
+        g.cx = g.wx - (jx * std::cos(r) - jy * std::sin(r)), g.cy = g.wy - (jx * std::sin(r) + jy * std::cos(r));
+        f = g;
+    }
+    return f;
+}
+
+void UiSystem::absoluteToLocal(const Element& e, float x, float y, float& lx, float& ly) const {
+    const Element& p = e.parent ? *e.parent : *root_;
+    const Frame f = e.parent && e.parent != root_.get() ? frameOf(p) : Frame{};
+    const float pr = -f.wrot * kDeg;
+    const float dx = x - f.cx, dy = y - f.cy;
+    const float offX = dx * std::cos(pr) - dy * std::sin(pr), offY = dx * std::sin(pr) + dy * std::cos(pr);
+    const float anX = e.posAnchorGiven ? e.posAnchorX : p.anchorX, anY = e.posAnchorGiven ? e.posAnchorY : p.anchorY;
+    const float ax = (anX + 1) / 2 * p.w * f.wsx, ay = (anY + 1) / 2 * p.h * f.wsy;
+    lx = f.wsx != 0 ? (offX - ax) / f.wsx : 0, ly = f.wsy != 0 ? (offY - ay) / f.wsy : 0;
 }
 
 void UiSystem::draw(Canvas& c) {
@@ -1877,6 +1914,12 @@ void UiSystem::addNatives() {
             qb::Value v;
             v.type = qb::Type::Pair;
             v.f[0] = e->x, v.f[1] = e->y;
+            // `summed`: on screen (the pos point through every parent) [I:
+            // mainmenu_focus puts the highlight there with pos = {absolute}].
+            if (Vm::flag(p, K("summed"))) {
+                const Frame f = frameOf(*e);
+                v.f[0] = f.wx, v.f[1] = f.wy;
+            }
             Vm::set(*l, K("ScreenElementPos"), v);
         }
         return true;

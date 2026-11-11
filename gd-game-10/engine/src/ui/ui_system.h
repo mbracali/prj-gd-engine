@@ -234,6 +234,15 @@ private:
     Element* resolve(const qb::Value* v) const;
     bool member(qs::ScriptRun& run, uint32_t obj, uint32_t method, qb::Struct& p, bool& handled);
     void startMorph(Element& e, const qb::Struct& p);
+    // An element's screen frame as draw() composes it: the point its pos
+    // lands on (wx, wy), its top-left (cx, cy), world scale and rotation.
+    struct Frame {
+        float wx = 0, wy = 0, cx = 0, cy = 0, wsx = 1, wsy = 1, wrot = 0;
+    };
+    Frame frameOf(const Element& e) const;
+    // The local pos that puts e's pos point on screen point (x, y) (`pos =
+    // {absolute (x, y)}`).
+    void absoluteToLocal(const Element& e, float x, float y, float& lx, float& ly) const;
 
     qs::Vm& vm_;
     const Disc& disc_;
