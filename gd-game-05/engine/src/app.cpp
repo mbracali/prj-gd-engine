@@ -2124,6 +2124,8 @@ void App::drawSeats(float t, float speed) {
         pv.overdriveActive = p->starPowerActive();
         pv.heldGem = p->sustainGem();
         pv.whammy = p->whammyBar();
+        pv.heldFrets = p->heldFrets();
+        pv.struck = [p](int i) { return p->gemHit(i); };
         if (st.part == "drum") pv.laneOfBit = {4, 1, 2, 3, 0};
         st.track->setIntroAt(rbIntroAt(gemTrack++));
         st.track->draw(canvas_.renderer(), *sceneCache_, *song_, pv, t + float(videoOffsetMs_), speed);
@@ -2816,6 +2818,13 @@ int App::gameCounter(int player, const std::string& key) const {
     if (key == "score") return player_ ? player_->score() : 0;
     if (key == "part_vocals") return parts_[0] == "vocals" ? 1 : 0;
     if (key == "rb_track_frames") return rbTrackFrames_;
+    // GD05-045: the fret board's effects (render/rb_track_view.h FxStats).
+    if (key == "rb_fx_hits") return RbTrackView::fxStats().hits;
+    if (key == "rb_fx_hits_no_flame") return RbTrackView::fxStats().hitsNoFx;
+    if (key == "rb_fx_deploys") return RbTrackView::fxStats().deploys;
+    if (key == "rb_fx_deploys_no_visual") return RbTrackView::fxStats().deploysNoFx;
+    if (key == "rb_fx_glows") return RbTrackView::fxStats().glows;
+    if (key == "rb_fx_burns") return RbTrackView::fxStats().burns;
     if (key == "song_loads") return songLoads_;
     if (key == "menu_movie_frames") return menuMovie_.framesShown();
     if (key == "menu_venue_sounds") return menuVenueSounds_;
@@ -3388,6 +3397,8 @@ void App::drawRbTrack0(float t, float speed) {
     pv.overdriveActive = p->starPowerActive();
     pv.heldGem = p->sustainGem();
     pv.whammy = p->whammyBar();
+    pv.heldFrets = p->heldFrets();
+    pv.struck = [p](int i) { return p->gemHit(i); };
     // The drums' permuted lanes back to the chart's (kick = lane 0).
     if (parts_[0] == "drum") pv.laneOfBit = {4, 1, 2, 3, 0};
     rbTrack_->setLefty(input_.lefty(0));

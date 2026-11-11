@@ -453,6 +453,21 @@ pattern). Each says what, why and how to undo it.
 - **Undo:** UiView::drawStyleMeshes' slider world, rb_natives
   global_options_pad_set, makeRbMetaClass's screen check.
 
+## D40
+- **What (2026-11-11, GD05-045):** the fret board's effects are
+  tracksystem.milo's own EventTriggers, played by RbTrackView: the
+  gem_smasher.dta / gem_track.dta handlers (hit / hit_bonus, burn /
+  stop_burn, miss, combo, set_glow, deploy / stop_deploy) from changes in
+  the player's state [I: which native sends each]; particle_trigger
+  launches BandMeshLaunchers and part_launcher launches each system once
+  [C data; I: counts]. PropAnims are read in full (120/120 in
+  tracksystem.milo) [C data]. ParticleSys rev 36 reads grow_ratio before
+  shrink_ratio: the other order left the hit flares at size 0 [C data];
+  this also changes venue / band particles (their walks pass; shots not
+  compared).
+- **Undo:** RbTrackView::fxEvents / fxUpdate / drawSmasherFx,
+  readParticleSys' order.
+
 ## Owner: completeness 36% (2026-11-10)
 - **What:** the owner set Rock Band's completeness to 36% (game-info.yaml
   0.36, README, the site) after playing the build; the parity ledger

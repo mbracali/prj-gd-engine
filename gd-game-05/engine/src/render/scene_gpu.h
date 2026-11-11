@@ -47,6 +47,10 @@ public:
         // whether its rows run bottom up (a GL target).
         TextureId texId{};
         bool flipV = false;
+        // A PropAnim's emissive_map / emissive_multiplier (Rock Band's track).
+        bool hasEmissive = false, hasEmissiveMap = false;
+        float emissiveMultiplier = 1;
+        const scene::Tex* emissiveTex = nullptr;
     };
 
     void clear();

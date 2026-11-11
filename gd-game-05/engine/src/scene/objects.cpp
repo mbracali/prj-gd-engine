@@ -454,7 +454,7 @@ void readAnimFilter(In& in, AnimFilter& a) {
 // RndParticleSys::Load RB 0x821D7870 (rev 36) [C]: GH2's v30 plus
 // screen_aspect, max_burst, time_between, peak_rate, duration, the start /
 // end offsets, the velocity-alignment flags, stretch_scale, perspective,
-// subsamples and pause_offscreen; shrink_ratio before grow_ratio.
+// subsamples and pause_offscreen.
 void readParticleSys(In& in, ParticleSys& p) {
     expectVersion(p.version, 36, "ParticleSys");
     p.header = readObjectHeader(in);
@@ -484,8 +484,11 @@ void readParticleSys(In& in, ParticleSys& p) {
     in.fs(p.force);
     p.mat = in.str();
     p.type = in.i32();
-    p.shrinkRatio = in.f();
+    // GH2's order: grow_ratio, then shrink_ratio (GD05-045). Read the other
+    // way round, the track's hit flares (radial_flare.part: 0, 1) grew over
+    // their whole life while shrinking from their birth: never drawn.
     p.growRatio = in.f();
+    p.shrinkRatio = in.f();
     p.midColorRatio = in.f();
     in.fs(p.midColorLow);
     in.fs(p.midColorHigh);

@@ -673,6 +673,8 @@ Material SceneCache::material(const scene::Mat& mat, const ScenePose* pose) {
         if (s->hasXfm) texXfm = s->texXfm;
         if (s->tex) g.diffuseTex = texture(s->tex);
         if (s->texId.id) g.diffuseTex = s->texId;
+        if (s->hasEmissive) g.emissiveMultiplier = s->emissiveMultiplier;
+        if (s->hasEmissiveMap) g.emissiveMap = s->emissiveTex ? texture(s->emissiveTex) : TextureId{};
     }
     if (!g.diffuseTex && !mat.diffuseTex.empty() && mat.dir)
         if (const auto* t = mat.dir->resolve<scene::Tex>(mat.diffuseTex); t && t->bitmap.empty() && t->file.empty()) g.unfilled = true;

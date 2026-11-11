@@ -916,6 +916,15 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         check("dev_hits");
         checkS(pad ? "dev_play pad od" : "dev_play guitar od", 150000);  // Overdrive deployed by tilt / Back
         check("dev_hits");
+        // GD05-045: the fret board's effects from RB's track milo: every
+        // hit launched its smashers' flames, the frets held lit their
+        // smashers, a sustain burned, the deploy showed its spotlight.
+        check("counter:rb_fx_hits:20");
+        check("counter_max:rb_fx_hits_no_flame:0");
+        check("counter:rb_fx_glows:1");
+        check("counter:rb_fx_burns:1");
+        check("counter:rb_fx_deploys:1");
+        check("counter_max:rb_fx_deploys_no_visual:0");
         if (!pad) {
             // Gems let pass and a wrong strum: the miss sound, the guitar
             // stem muted; the next hits bring it back.

@@ -13,6 +13,7 @@ inside the Guitar Dream Universal Launcher's release
 - Missed notes play the miss sound again (miss_gtr / miss_bass / drum misses from the original's player handlers).
 - The loading screen's band icons are lit by their own light (they were dark olive).
 - Options > Audio: the volume sliders show as full bars again (they were drawn edge-on, almost black); Options > Calibrate opens.
+- The fret board reacts as in Rock Band: hit flames, shockwaves and glass shards from the smashers, held frets light their smashers, sustains burn, misses flash, Overdrive phrases flash when captured, and deploying Overdrive brings the golden spotlight to the track.
 - Venue shots get their film look again (ProFilm post-processing was never selected when the band appeared); the highway rises in at the song start as in the original.
 
 ## [0.0.6] - 2026-11-10
