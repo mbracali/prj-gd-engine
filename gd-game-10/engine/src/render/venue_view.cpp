@@ -183,6 +183,7 @@ void VenueView::shutdown() {
     textures_.clear();
     items_.clear();
     groups_.clear();
+    groupsMore_.clear();
     dev_ = nullptr;
 }
 
@@ -388,14 +389,26 @@ VenueView::InitStep VenueView::build(gfx::RenderDevice& dev, const venue::Venue&
 
     std::vector<Vtx>& verts = pr.verts;
     std::vector<uint32_t>& idx = pr.idx;
-    auto groupOf = [&](uint32_t key) {
+    // An object's light groups (823C9FD8 [C]): `lightgroup`, then
+    // lightgroup2, lightgroup3, ... while the node has them (at most 32);
+    // `empty` names no group [I: no light carries it].
+    auto groupOf = [&](const venue::Node* node) {
+        uint32_t key = node ? node->lightGroup : 0;
         if (!key) key = K("none");
+        std::array<uint32_t, 3> more{};
+        if (node && node->st)
+            for (int k = 0; k < 3; ++k) {
+                const qb::Value* g = node->st->find(qbkey::key("lightgroup" + std::to_string(k + 2)));
+                if (!g || (g->type != qb::Type::Key && g->type != qb::Type::KeyPtr)) break;
+                more[size_t(k)] = g->key == K("empty") ? 0 : g->key;
+            }
         for (size_t i = 0; i < groups_.size(); ++i)
-            if (groups_[i] == key) return int(i);
+            if (groups_[i] == key && groupsMore_[i] == more) return int(i);
         groups_.push_back(key);
+        groupsMore_.push_back(more);
         return int(groups_.size() - 1);
     };
-    if (groups_.empty()) groupOf(K("none"));
+    if (groups_.empty()) groupOf(nullptr);
     // One mesh: its vertices (moved by `place`, or left in model space for
     // a housing, which draws at its live transform), indices and item.
     auto addMesh = [&](const scene::Scene& sc, const scene::Mesh& m, const venue::Node* place, int ni, const venue::Node* node,
@@ -456,7 +469,7 @@ VenueView::InitStep VenueView::build(gfx::RenderDevice& dev, const venue::Venue&
         it.center = {(lo[0] + hi[0]) * 0.5f, (lo[1] + hi[1]) * 0.5f, (lo[2] + hi[2]) * 0.5f};
         it.node = ni;
         it.housing = housing;
-        it.group = groupOf(node ? node->lightGroup : 0);
+        it.group = groupOf(node);
         // The node's lod_dist2: not drawn farther from the camera [I: lod_dist1..2 is a
         // fade or a lower LOD; every venue node has 150/151 or 400/401 m].
         if (node && node->st)
@@ -752,7 +765,7 @@ void VenueView::lightAt(const std::vector<venue::LightState>& lights, const venu
     for (size_t i = 0; i < v_->lights.size() && i < lights.size(); ++i) {
         const venue::Light& l = v_->lights[i];
         if (!l.createdAtStart && !(l.createdOn && show.flag(l.createdOn))) continue;
-        in.push_back(gh3shader::lightIn(l, lights[i]));
+        in.push_back(gh3shader::lightIn(l, lights[i], v_));
     }
     if (in.empty()) return;
     gh3shader::ObjectConstants oc;
@@ -797,9 +810,11 @@ void VenueView::draw(const venue::CamPose& cam, const std::vector<venue::LightSt
         // GH3's light manager: every created light whose group serves this one [C 822BB680].
         for (size_t i = 0; i < v_->lights.size() && i < lights.size(); ++i) {
             const venue::Light& l = v_->lights[i];
-            if (!gh3shader::groupLights(l.group, groups_[gi])) continue;
+            bool serves = gh3shader::groupLights(l.group, groups_[gi]);
+            for (uint32_t g : groupsMore_[gi]) serves = serves || (g && l.group == g);
+            if (!serves) continue;
             if (!l.createdAtStart && !(l.createdOn && show.flag(l.createdOn))) continue;
-            groupIn[gi].push_back(gh3shader::lightIn(l, lights[i]));
+            groupIn[gi].push_back(gh3shader::lightIn(l, lights[i], v_));
         }
         LightUniforms lu{};
         int n = 0;
@@ -831,6 +846,25 @@ void VenueView::draw(const venue::CamPose& cam, const std::vector<venue::LightSt
         }
         lu.info[0] = float(n);
         groupLights[gi] = d.stageUniforms(&lu, sizeof lu);
+    }
+    // GD10_LIGHTS_LOG=<ms> (development aid): every light's live values and
+    // each group's lights, once, at the first frame past <ms>.
+    if (static const char* ll = SDL_getenv("GD10_LIGHTS_LOG"); ll && seconds_ * 1000.0 >= std::atof(ll)) {
+        static bool done = false;
+        if (!done) {
+            done = true;
+            static const char* kType[] = {"amb", "dir", "point", "spot", "prt"};
+            std::printf("lights at %.0f ms (snapshot %s):\n", seconds_ * 1000.0, qbkey::names().get(show.snapshot()).c_str());
+            for (size_t i = 0; i < v_->lights.size() && i < lights.size(); ++i) {
+                const venue::Light& l = v_->lights[i];
+                const venue::LightState& s = lights[i];
+                const bool on = l.createdAtStart || (l.createdOn && show.flag(l.createdOn));
+                std::printf("  %-44s %-5s grp %-10s %s i %.3f rgb %.2f %.2f %.2f att %.1f..%.1f dyn %d\n", qbkey::names().get(l.name).c_str(),
+                            kType[int(l.type) < 5 ? int(l.type) : 0], qbkey::names().get(l.group).c_str(), on ? "on " : "off", s.intensity,
+                            s.color[0], s.color[1], s.color[2], l.attenStart, l.attenEnd, int(l.dynamic));
+            }
+            for (size_t gi = 0; gi < groups_.size(); ++gi) std::printf("  group %s: %zu lights\n", qbkey::names().get(groups_[gi]).c_str(), groupIn[gi].size());
+        }
     }
 
     // The blended items back to front within their draw order.

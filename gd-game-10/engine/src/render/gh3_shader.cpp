@@ -145,7 +145,16 @@ std::unique_ptr<Program> Programs::make(int vs, int ps, const std::string& name,
         SDL_Log("gh3 shader %s: not translated: %s", name.c_str(), x.error.c_str());
         return out;
     }
-    if (SDL_getenv("GD10_XENOS_DUMP")) SDL_Log("gh3 shader %s\n--- vertex\n%s\n--- pixel\n%s", name.c_str(), x.vertex.c_str(), x.fragment.c_str());
+    if (SDL_getenv("GD10_XENOS_DUMP")) {
+        SDL_Log("gh3 shader %s\n--- vertex\n%s\n--- pixel\n%s", name.c_str(), x.vertex.c_str(), x.fragment.c_str());
+        // The constant tables: set (0 bool, 1 int, 2 float4, 3 sampler), register, count.
+        for (int s : {vs, ps}) {
+            std::string t;
+            for (const matlib::Constant& c : lib_->shader(s).constants)
+                t += " " + c.name + "=" + "bifs"[c.set & 3] + std::to_string(c.reg) + (c.count > 1 ? "x" + std::to_string(c.count) : "");
+            SDL_Log("gh3 shader %s %s constants:%s", name.c_str(), s == vs ? "vertex" : "pixel", t.c_str());
+        }
+    }
     std::string err;
     const gfx::ProgramDesc desc = programDesc(x, name, dev_->info().clipDepthZeroToOne);
     const gfx::ProgramId pid = async ? dev_->beginProgram(desc, err) : dev_->createProgram(desc, err);
@@ -299,8 +308,18 @@ void fillMaterialConstants(const scene::Material& m, float alphaRef, MaterialCon
     out.vs[63][0] = -1.0f;
 }
 
-LightIn lightIn(const venue::Light& l, const venue::LightState& s) {
+LightIn lightIn(const venue::Light& l, const venue::LightState& s, const venue::Venue* v) {
     LightIn li;
+    // The node's flags as 8240F560 reads them: dynamic 0x4, shadow 0x8,
+    // vertexlight 0x10, noSH 0x20 [C]. (One light node on the disc spells
+    // it "vetexlight": not the flag.)
+    static const uint32_t kVertexLight = qbkey::key("vertexlight"), kNoSh = qbkey::key("noSH");
+    if (const venue::Node* n = v ? v->node(l.name) : nullptr; n && n->st)
+        for (const qb::Item& it : n->st->items) {
+            if (it.name != 0 || it.value.type != qb::Type::Key) continue;
+            if (it.value.key == kVertexLight) li.vertexLight = true;
+            else if (it.value.key == kNoSh) li.noSh = true;
+        }
     li.type = l.type == venue::LightType::Ambient ? LightIn::Ambient : l.type == venue::LightType::Directional ? LightIn::Directional
               : l.type == venue::LightType::Point ? LightIn::Point : l.type == venue::LightType::Prt ? LightIn::Prt : LightIn::Spot;
     for (int k = 0; k < 4; ++k) li.prt[k] = {l.prt[k][0], l.prt[k][1], l.prt[k][2]};
@@ -358,6 +377,7 @@ void lightObject(const LightIn* lights, size_t count, const gfx::Vec3& p, Object
     std::stable_sort(cand, cand + n, [](const Cand& x, const Cand& y) { return x.score > y.score; });
     gfx::Vec3 amb{}, sh[4]{};
     const Cand* slot[4] = {};
+    gfx::Vec3 slotDir[4];
     int ndir = 0, npoint = 0, nspot = 0;
     auto addSh = [&](const gfx::Vec3& c, const gfx::Vec3& travel) {
         // 823DA668: SH0 += C x 4/17, SH1..3 += C x 8/17 x l (l = towards the light) [C].
@@ -374,13 +394,16 @@ void lightObject(const LightIn* lights, size_t count, const gfx::Vec3& p, Object
     for (int i = 0; i < n; ++i) {
         const Cand& c = cand[i];
         const LightIn& l = *c.l;
+        // 824D7220's type switch [C]: a light that takes no vertex slot is
+        // a directional one (from the light to `p` for a point light).
+        auto asDirectional = [&](const gfx::Vec3& col, const gfx::Vec3& travel) {
+            if (ndir > 0 && !l.noSh) addSh(col, travel);
+            if (ndir < 4) slotDir[ndir] = travel, slot[ndir++] = &c;
+        };
         switch (l.type) {
-        case LightIn::Directional:
-            if (ndir > 0) addSh(l.color * c.inten, norm(l.dir));
-            if (ndir < 4) slot[ndir++] = &c;
-            break;
+        case LightIn::Directional: asDirectional(l.color * c.inten, norm(l.dir)); break;
         case LightIn::Point:
-            if (npoint < 4) {
+            if (l.vertexLight && npoint < 4) {
                 // The vertex shaders light by distance and N.L themselves [C microcode].
                 const gfx::Vec3 col = l.color * c.inten;
                 out.set(kRegPointLight + 4 * npoint, l.pos.x, l.pos.y, l.pos.z, 1);
@@ -388,12 +411,12 @@ void lightObject(const LightIn* lights, size_t count, const gfx::Vec3& p, Object
                 out.reg(kRegPointAtten)[npoint] = l.attA;
                 out.reg(kRegPointAtten + 1)[npoint] = l.attB;
                 ++npoint;
-            } else {
-                addSh(l.color * (c.inten * c.att), norm(p - l.pos));
+            } else if (!(l.vertexLight && l.noSh)) {
+                asDirectional(l.color * (c.inten * c.att), norm(p - l.pos));
             }
             break;
         case LightIn::Spot:
-            if (nspot < 5) {
+            if (l.vertexLight && nspot < 5) {
                 const gfx::Vec3 col = l.color * c.inten, dir = norm(l.dir);
                 const int r = kRegSpotLight + 4 * nspot;
                 out.set(r, dir.x, dir.y, dir.z, 0);
@@ -408,15 +431,16 @@ void lightObject(const LightIn* lights, size_t count, const gfx::Vec3& p, Object
                     out.set(r + 3, l.attA, l.attB, l.coneX, l.coneY);  // c211 [C microcode]
                 }
                 ++nspot;
-            } else {
+            } else if (!(l.vertexLight && l.noSh)) {
+                // Into the SH only, x clamp((P - pos) . dir, 0, 1): no slot, no
+                // attenuation, no cone [C].
                 const float along = std::clamp(gfx::dot(p - l.pos, l.dir), 0.0f, 1.0f);
-                addSh(l.color * (c.inten * along), norm(p - l.pos));
+                if (!l.noSh) addSh(l.color * (c.inten * along), norm(p - l.pos));
             }
             break;
         case LightIn::Ambient: amb = amb + l.color * c.inten; break;
         case LightIn::Prt:
-            // 823DAFA8: SH0..3 += coeff0..3 x the candidate's intensity (no
-            // colour, no slot) [C].
+            // SH0..3 += coeff0..3 x the candidate's intensity (no colour, no slot) [C].
             for (int k = 0; k < 4; ++k) sh[k] = sh[k] + l.prt[k] * c.inten;
             break;
         }
@@ -426,7 +450,7 @@ void lightObject(const LightIn* lights, size_t count, const gfx::Vec3& p, Object
     for (int k = 0; k < ndir; ++k) {
         const LightIn& l = *slot[k]->l;
         const float a = slot[k]->scale;
-        const gfx::Vec3 dir = l.dir;
+        const gfx::Vec3 dir = slotDir[k];  // a point light's: from it to the object (GH3's rule) [I for gh4]
         const gfx::Vec3 spec = l.color * (l.specular * a);
         if (k == 0) {
             const gfx::Vec3 col = l.color * (l.intensity * a);

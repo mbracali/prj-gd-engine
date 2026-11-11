@@ -98,33 +98,37 @@ struct LightIn {
     float coneX = 1, coneY = 0;    // spot: cone = saturate((cos - X) x Y), X = cos(field / 2), Y = 1 / (cos(hotspot / 2) - X)
     bool dynamic = false;          // a candidate everywhere (no box)
     bool shadowLight = false;      // ranked x 50000
+    bool vertexLight = false;      // `vertexlight` (record flag 0x10): a g_PointLight / g_SpotLight slot [C 8240F560, 824D7220]
+    bool noSh = false;             // `noSH` (flag 0x20): never added to the SH [C]
     gfx::Vec3 boxCenter, boxHalf{1e9f, 1e9f, 1e9f};
     float groupScale = 1;          // the group's intensity x the fade weight x the modulation (1)
     gfx::Vec3 prt[4];              // Prt: its SH terms (coeff0..3)
 };
-LightIn lightIn(const venue::Light& l, const venue::LightState& s);
+// `v`: the venue the light is a node of, for its node flags (vertexlight,
+// noSH); without it the light takes no vertex slot.
+LightIn lightIn(const venue::Light& l, const venue::LightState& s, const venue::Venue* v = nullptr);
 // The light group rule of the candidate query (822BB680): the object's
 // group, `band` lights for an `alt_band` object, and `defaultgroup` (a
 // light without a lightgroup) everywhere [C].
 bool groupLights(uint32_t lightGroup, uint32_t objectGroup);
 
 // The light registers of an object at `p` (a mesh: its bounding sphere's
-// centre; a model: its origin), gh4's layout [C data: the registers and
-// what the microcode does with them; I: which light takes which slot, the
-// executable's light set is VMX128 code not read yet, docs/render.md
-// "Lights"]. The candidates are GH3's (823DA990: the lights whose box
-// holds `p` and the dynamic ones, at most 32, ranked by luminance x
-// intensity x attenuation, x 50000 for shadow lights). The first
-// directional light is the key light (c161..c163), the next three take
-// the specular slots (c164..c169) and the L1 spherical harmonics (4/17,
-// 8/17 l, c172..c175); the first four point lights are the vertex
-// shaders' g_PointLight (c176 + 4i: position, colour x intensity; c248 /
-// c249: attend^2, 1 / (attend^2 - attstart^2)), the first five spot
-// lights g_SpotLight (c192 + 4i: direction, position, colour x intensity;
-// c250..c253 and c211: distance and cone terms); lights beyond those go
-// into the SH as GH3's did. Ambient lights sum into c160 and SH0 (the
-// shaders read one or the other, never both [C data]); a prt light adds
-// its coeff0..3 x intensity to the SH.
+// centre; a model: its origin), gh4's light set 824D7220 [C: read with a
+// VMX128 decoder; docs/render.md "Lights"]. Candidates: the lights whose
+// box holds `p` and the dynamic ones, at most 32, ranked by luminance x
+// intensity x the group's intensity x the master intensity (1) x
+// attenuation, x 50000 for shadow lights. Then, by rank:
+// - directional: the first four take the slots (key light c161..c163,
+//   then the specular slots c164..c169); all but the first also go into
+//   the SH, unless noSH;
+// - point: a `vertexlight` one takes a g_PointLight slot (c176 + 4i, c248
+//   / c249) while fewer than four; otherwise, unless it is a vertexlight
+//   with noSH, as a directional light shining from it (colour x intensity
+//   x attenuation into the SH, a slot while fewer than four directional);
+// - spot: a `vertexlight` one takes a g_SpotLight slot (c192 + 4i,
+//   c250..c253, the fifth's c211) while fewer than five; otherwise, unless
+//   vertexlight with noSH, into the SH x clamp((P - pos) . dir, 0, 1);
+// - ambient: c160 and SH0; prt: its coeff0..3 x intensity into the SH.
 void lightObject(const LightIn* lights, size_t count, const gfx::Vec3& p, ObjectConstants& out);
 // The light a camera-facing sprite at `p` takes from an object's registers
 // (lit particles): the SH's constant term (with the ambient) and 4/17 of the

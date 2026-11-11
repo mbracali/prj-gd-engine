@@ -2,6 +2,7 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -136,7 +137,10 @@ private:
     gfx::ProgramId program_;
     gfx::BufferId vb_, ib_;
     std::vector<Item> items_;
-    std::vector<uint32_t> groups_;  // light group keys
+    std::vector<uint32_t> groups_;  // light group keys (a node's lightgroup)
+    // The node's further groups (lightgroup2..4, 0: none), one per groups_
+    // entry: a light serves the object when it serves any of them [C 823C9FD8].
+    std::vector<std::array<uint32_t, 3>> groupsMore_;
     struct Mat {
         gh3shader::MaterialConstants consts;
         gfx::TextureId tex[16];
