@@ -52,9 +52,10 @@ Walk::Walk(const std::string& name) : name_(name) {
         // gh4 (Metallica) Quickplay, being built (M4): the main menu's
         // QUICKPLAY (second item), then the screens as they come.
         steps_ = boot;
-        steps_.push_back({"main_menu_fs", {"wait", "wait", D, C}, 10000});
+        steps_.push_back({"main_menu_fs", {"wait", "wait", "wait", "wait", "wait", "wait", "wait", D, C}, 10000});
         steps_.push_back({"uistate_game_mode", {"wait", "wait", C}, 20000});
         steps_.push_back({"uistate_select_instrument", {"wait", "wait", C}, 20000});
+        steps_.push_back({"uistate_select_difficulty", {"wait", "wait", C}, 20000});
         steps_.push_back({"uistate_never", {}, 15000});
     } else if (name == "quickplay" || name == "lose") {
         steps_ = boot;

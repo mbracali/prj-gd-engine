@@ -169,6 +169,13 @@ void UiStates::addNatives() {
             const uint32_t ev = keyOf(Vm::param(p, K("event_id")));
             qb::Struct data;
             if (const qb::Struct* d = structOf(Vm::param(p, K("event_data")))) data = *d;
+            if (log_) {
+                std::string from;
+                for (const qs::ScriptRun* r = &run; r; r = r->caller)
+                    for (const auto& f : r->frames)
+                        if (f.code) from += " < " + qbkey::name(f.code->name);
+                SDL_Log("ui event posted: %s%s", qbkey::name(ev).c_str(), from.c_str());
+            }
             if (ev) events_.emplace_back(ev, std::move(data));
             return true;
         }

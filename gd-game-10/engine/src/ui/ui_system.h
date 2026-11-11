@@ -41,6 +41,11 @@ struct Element {
     // from), used instead of the parent's child_anchor [I].
     bool posAnchorGiven = false;
     float posAnchorX = -1, posAnchorY = -1;
+    // The morphable values before the last applyProps (gh4 se_setprops with time).
+    struct Snapshot {
+        bool valid = false;
+        float x = 0, y = 0, sx = 1, sy = 1, alpha = 1, rot = 0;
+    } lastBefore;
     uint32_t desc = 0;  // gh4 descinterface: the uidesc_<name> global it was built from
     float ijustX = 0, ijustY = 0;          // internal_just (menus, text)
     float sx = 1, sy = 1, alpha = 1, rot = 0, z = 0;  // rot in degrees
@@ -135,6 +140,7 @@ public:
     Element* descAlias(Element& e, uint32_t alias);
     void descSetProps(Element& e, const qb::Struct& p);
     bool descGetProp(Element& e, uint32_t name, qb::Value& out);
+    void morphFromSetProps(Element& e, const qb::Struct& p);
     // DisplayLoadingScreen's picture is up (over everything).
     bool loadingScreenUp() const { return loadingTex_ != 0; }
     Element& root() { return *root_; }

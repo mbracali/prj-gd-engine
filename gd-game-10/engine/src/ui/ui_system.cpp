@@ -240,6 +240,7 @@ void UiSystem::setTexture(Element& e, uint32_t key) {
 
 void UiSystem::applyProps(Element& e, const qb::Struct& p, bool create) {
     (void)create;
+    e.lastBefore = {true, e.x, e.y, e.sx, e.sy, e.alpha, e.rot};
     // gh4's menuelement: GH3's vmenu, or its hmenu with isvertical = false
     // (desc menus, CreateScreenElement type = menuelement) [C data uidesc_*; I].
     if (e.type == K("menuelement")) e.type = kVMenu;
@@ -849,6 +850,29 @@ void UiSystem::scrollMenu(Element& s) {
         box(it, i, t, ih);
         it.alpha = (s.scroll <= t && t + ih <= window + s.scroll) ? 1.0f : 0.0f;
     }
+}
+
+// se_setprops with time: applyProps has already set the end values; undo
+// those of the morphable props and morph to them instead.
+void UiSystem::morphFromSetProps(Element& e, const qb::Struct& p) {
+    (void)p;
+    if (!e.lastBefore.valid) return;
+    qb::Struct target;
+    const Element::Snapshot& b = e.lastBefore;
+    auto pair = [](float a, float c) {
+        qb::Value v;
+        v.type = qb::Type::Pair;
+        v.f[0] = a, v.f[1] = c;
+        return v;
+    };
+    if (b.x != e.x || b.y != e.y) qs::Vm::set(target, K("pos"), pair(e.x, e.y));
+    if (b.sx != e.sx || b.sy != e.sy) qs::Vm::set(target, K("scale"), pair(e.sx, e.sy));
+    if (b.alpha != e.alpha) qs::Vm::set(target, K("alpha"), qs::Vm::makeFloat(e.alpha));
+    if (b.rot != e.rot) qs::Vm::set(target, K("rot_angle"), qs::Vm::makeFloat(e.rot));
+    for (const char* n : {"time", "motion"})
+        if (const qb::Value* v = qs::Vm::param(p, K(n))) qs::Vm::set(target, K(n), *v);
+    e.x = b.x, e.y = b.y, e.sx = b.sx, e.sy = b.sy, e.alpha = b.alpha, e.rot = b.rot;
+    startMorph(e, target);
 }
 
 void UiSystem::startMorph(Element& e, const qb::Struct& p) {
@@ -1487,6 +1511,28 @@ bool UiSystem::member(qs::ScriptRun& run, uint32_t obj, uint32_t method, qb::Str
         if (!e) return false;
         if (e->desc) descSetProps(*e, p);
         else applyProps(*e, p, false);
+        // With time = s: pos / scale / alpha / rot_angle / rgba move there
+        // over that time (GH3's DoMorph), the rest at once [C scripts:
+        // DifficultyInterface fades in with se_setprops alpha = 1 time = ...; I].
+        if (const qb::Value* t = qs::Vm::param(p, K("time")); t && t->number() > 0) morphFromSetProps(*e, p);
+        return true;
+    }
+    if (method == K("se_waitprops")) {
+        // Waits for the element's morphs (its own and its desc parts') to end.
+        if (!e) return true;
+        const uint32_t id = e->id;
+        run.waitFor = [this, id] {
+            Element* x = find(id);
+            if (!x) return true;
+            std::vector<const Element*> st{x};
+            while (!st.empty()) {
+                const Element* y = st.back();
+                st.pop_back();
+                if (y->morph.active) return false;
+                for (auto& c : y->children) st.push_back(c.get());
+            }
+            return true;
+        };
         return true;
     }
     if (method == K("obj_spawnscript") || method == K("obj_spawnscriptnow")) {
@@ -1499,7 +1545,7 @@ bool UiSystem::member(qs::ScriptRun& run, uint32_t obj, uint32_t method, qb::Str
         if (!scr) return false;
         qb::Struct args;
         if (const qb::Value* ps = qs::Vm::param(p, K("params")); ps && ps->st) args = *ps->st;
-        const uint32_t id = vm_.spawnOn(scr, args, obj);
+        const uint32_t id = vm_.spawnOn(scr, args, e->id);
         if (id && method == K("obj_spawnscriptnow")) vm_.runNow(id);
         return true;
     }
@@ -1633,7 +1679,7 @@ bool UiSystem::member(qs::ScriptRun& run, uint32_t obj, uint32_t method, qb::Str
     if (e) {
         if (const qb::Value* g = vm_.global(method); g && g->type == qb::Type::Script) {
             bool result = true;
-            vm_.run(method, p, &result, obj);
+            vm_.run(method, p, &result, e->id);  // the element itself, not an alias of it
             return result;
         }
     }
