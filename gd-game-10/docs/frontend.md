@@ -16,7 +16,16 @@ XEX address; [I] = inferred.
   given, replaces tracking and drops bearing [C 0x824D11B0].
 - The menu fonts (fontgrid_text_a6, fontgrid_title_a1, buttons_x360, ...)
   live in `PAK/ui_shared.pak`; fontgrid_text_a8 in `ZONES/global.pak` [C data].
-- A descinterface element wraps its desc: the desc's root is child 0 (D14).
+- A descinterface element wraps its desc: the desc's root is child 0; without
+  dims it covers its parent top-left, with dims the call's just places it
+  (D14). A desc's z_priorities sit on the nearest z given above it (the help
+  bar, z 100000, over the screens' art).
+- Script params: included structs nest (add_menu_frontend_item's
+  `choose_state` reached generic_event_choose two levels down) [I].
+- Start in a song: root_window's pad_start handler handle_pause_event, which
+  opens uistate_pausemenu (with from_handler) [C scripts].
+- ui_event_exists_in_stack needs `stack_size` from menustack_getstackcontents
+  [C script].
 - `setprops` / `SetScreenElementProps` / `se_setprops` reach a desc's named
   props; `se_getprops` without names returns all of them [C scripts].
 - Text blocks: fit_width (wrap, expand dims, scale each line if larger / to
@@ -33,23 +42,39 @@ XEX address; [I] = inferred.
 
 ## Screens (flow order)
 
+Counts: 21 screens looked at; 14 match (no difference seen), 5 differ, 2
+not reached; sub-screens of Backstage, Settings and Music Studio below the
+first level are not audited yet.
+
 | Screen | State | Matches | Differs / missing |
 |---|---|---|---|
 | Legal, boot movies | UIstate_boot_* | movies, skip with A | - |
 | Press start | uistate_boot_iis | art, logo, text | - |
 | Drum tip pop-up | uistate_optimal_drum | only with an RB drum kit (isRBDrum false) | - |
-| Main menu | uistate_mainmenu | art, seven items, highlight scribble, help bar pills | item size vs logo unconfirmed |
-| Career / Quickplay game mode | uistate_game_mode | art (hand, jaw, skull), items, highlight | - |
-| Instrument | uistate_select_instrument | as game mode | - |
-| Head to Head | uistate_select_controller | art, Back works | help bar partly behind the art |
-| Xbox LIVE | uistate_signin_warning | warning pop-up text | port: no online (shows the original's not-signed-in warning) |
-| Backstage | uistate_backstage | badge art, items (typewriter font), highlight | sub-screens not audited |
-| Settings | uistate_options | items, highlight | sub-screens (cheats, save/load, calibrate, audio, functional) not audited |
-| Music Studio | uistate_jam | sign-in -> memcard -> download scan -> jam | jam screen not audited |
-| Set list | uistate_setlist | songs, sections, scroll bar, help bar | scrolling position being fixed |
-| Difficulty pop-up | uistate_select_difficulty | frame, five items, icons | - |
+| Main menu | uistate_mainmenu | art, seven items (menu fonts), highlight, help bar, GAMEPADS pill | Xbox LIVE greyed (port: no online); item size vs logo unconfirmed |
+| Game mode | uistate_game_mode | art, items, highlight, help bar | - |
+| Band (game mode) | UIstate_generic_alert_popup | "two controllers" warning as the original | - |
+| Instrument | uistate_select_instrument | art, items, highlight | - |
+| Head to Head | uistate_select_controller | art, help bar, Back | controller icons not checked |
+| Backstage | uistate_backstage | badge, typewriter items, highlight, help bar | - |
+| Practice (Backstage) | uistate_select_instrument | reached | - |
+| Settings | uistate_options | items, highlight, help bar + ENHANCED | - |
+| Cheats | uistate_options_cheats | title, bone slots, snakes, scroll bar | cheat list box empty |
+| Music Studio | uistate_jam | sign-in, memcard, download scan, jam | jam screen itself not audited (band characters missing: CAS) |
+| Set list | uistate_setlist | songs, sections, scroll, stars, difficulty icons, help bar | long titles squeezed per line (fit rule [I]); help bar over the last row |
+| Difficulty pop-up | uistate_select_difficulty | frame, five items, icons, title | - |
 | Loading | create_loading_screen | tip, picture | - |
-| Results | uistate_song_breakdown | title, stars, score, multiplier, streak table | background behind the sheet black (venue) |
-| Cash rewards | uistate_cash_rewards_3 | milestones, gig / career totals, rank | milestone descriptions clipped |
-| Pause | uistate_pausemenu | not audited | - |
-| Credits, Extras | - | not audited | - |
+| Gameplay pause | uistate_pausemenu | PAUSED, six items, focus colours, Back resumes | item spacing tight |
+| Results | uistate_song_breakdown | title, stars, score, multiplier, streak table, help bar | highest multiplier reads 1x on autoplay; black sides (venue) |
+| Cash rewards | uistate_cash_rewards_3 | milestones, gig / career totals, rank, logo | Rock Rank title wraps small; milestone descriptions clipped |
+| Credits | - | not reached | - |
+| Extras | uistate_extras | reached (state posts now) | not looked at |
+
+## Walks
+
+- `--walktest menus` (every main menu item, its focused item, Back to the
+  main menu; `GD10_WALK_MENUS=<digits>` picks items): passes.
+- `--walktest quickplay`: passes (boot to the results and back to the set list).
+- `--walktest qp_pause`: passes (Esc pauses, Back resumes, the pause items).
+- `--walktest fuzz` (300 seeded random presses, `GD10_SEED`; a menu must
+  keep the focus with text shown, never 8 s without): passes on seeds 7, 99.

@@ -196,3 +196,42 @@ AttachHudWidget natives, see OPEN_QUESTIONS 4); the original shaders'
 light constants; drums (0x2000, Expert+ double kick, OPEN_QUESTIONS 5);
 the stage floor near the camera draws white under the approximation in
 z_Meadowlands; gamepads / guitars verified only by the input selftest.
+
+## 2026-11-11 10:10 Front end (menus agent, GD10-020)
+
+Time: about 2 h 15 min of agent time (07:55 -> 10:10), own build dir
+`engine/build/ui`. Audit: `docs/frontend.md`.
+
+Fixed (cause in brackets):
+- Text clipped ("E / H / EXPER", "HIGHES / NO"): gh4 fonts store bearing,
+  tracking and glyph offsets as f32 at other offsets [C 0x824D11B0, 0x82454C78].
+- Menus in the wrong font: ui_shared.pak's fonts were never loaded.
+- Skull art over the career / difficulty menus, black screens: a
+  descinterface's own props were applied to the desc's root (D14 rewritten:
+  the root is the element's child 0, as setup_band_hud needs).
+- Pop-ups showing OVERWRITTEN / MESSAGE: setprops did not reach desc props.
+- Highlights at the top-left corner: `summed` / `{absolute}` positions.
+- Help bar: menus' fit_major / fit_minor, pos_anchor'ed children, se_getprops
+  of desc props, meta_button_map by name, desc z on its parent's.
+- Set list empty / one row: gh4 `scrollingmenu`.
+- Results score 000,000: player statuses lacked is_local_client, so
+  Progression_UpdateDetailedStatsForGig kept nothing.
+- Music Studio fell to the boot drum tip: menustack_getstackcontents without
+  stack_size; isRBDrum.
+- Extras / Cheats / Band never opened: included structs in script params
+  only flattened one level.
+- No pause menu: Start now goes through handle_pause_event.
+- Xbox LIVE greyed (no online; the sign-in had no way back).
+
+Verified (build/ui/gd10, headless, scratch XDG_DATA_HOME):
+- `--walktest menus` -> "walktest menus: passed"
+- `--walktest quickplay` -> "walktest quickplay: passed"
+- `--walktest qp_pause` -> "walktest qp_pause: passed" ("song: resumed (UnPauseGame)")
+- `--walktest fuzz` (GD10_SEED 7, 99) -> "walk: fuzz: 300 presses, the menus kept the focus", passed
+- `--scripttest` -> "every script tokenizes; boot ran (71 natives to write)"
+- Screenshots looked at for every screen in the audit.
+
+Not done: sub-screens below the first level (Extras, credits, calibration,
+audio, save/load, jam), career flow, text fit rules beyond the descs'
+values ([I]), cash rewards' Rock Rank title, sound cues per screen (logged
+only).

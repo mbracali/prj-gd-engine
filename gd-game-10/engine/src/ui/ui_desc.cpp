@@ -58,6 +58,18 @@ bool UiSystem::buildDesc(Element& e, const std::string& name) {
         if (const qb::Value* t = props->find(K("type")); t && t->key) rootRaw->type = t->key;
         applyProps(*rootRaw, *props, true);
     }
+    // A desc's z_priorities sit on the descinterface element's own: the help
+    // bar's pills (user_control_container, z 100000) over a screen's art (the
+    // settings skull at 123..128), the pop-ups' at 500 [I].
+    // The base: the descinterface's z, else its nearest ancestor's with one
+    // (a helper pill made inside the help bar's menu).
+    float baseZ = 0;
+    for (const Element* a = &e; a; a = a->parent)
+        if (a->zGiven) {
+            baseZ = a->z;
+            break;
+        }
+    if (rootRaw->zGiven) rootRaw->z += baseZ;
     struct Todo {
         Element* parent;
         const qb::Struct* node;
@@ -82,6 +94,7 @@ bool UiSystem::buildDesc(Element& e, const std::string& name) {
         byId_[raw->id] = raw;
         t.parent->children.push_back(std::move(c));
         if (props) applyProps(*raw, *props, true);
+        if (raw->zGiven) raw->z += baseZ;  // desc z on top of the element's own (below)
         ++stats_.created;
         addChildren(raw, t.node);
     }
