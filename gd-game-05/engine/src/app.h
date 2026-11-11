@@ -12,6 +12,7 @@ struct Options {
     bool autoplay = false;
     bool noFail = false;
     std::string walk;      // --walktest <scenario> (tests/walktest.h)
+    bool inputCapture = false;  // --inputcapture: log the controllers' raw events and what a song does with them
     // A restart from Enhanced > Graphics / Audio Backend (Restart Now): no
     // boot screens, this screen opens.
     std::string startScreen;

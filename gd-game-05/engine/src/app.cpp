@@ -373,6 +373,15 @@ private:
     bool loadData(const std::string& path);
     void startUi();
     void frameNeedData();
+    // --inputcapture (GD05-058): no disc; every raw controller / key event and
+    // the song input path's result to input-capture.txt, on screen too.
+    void startCapture();
+    void frameCapture();
+    bool capture_ = false;
+    std::ofstream captureOut_;
+    std::string captureFile_;
+    std::vector<std::string> captureTail_;
+    std::array<int, 8> captureCounts_{};  // strums, frets 1..5, whammy, Overdrive
     bool loadSong(const SongInfo& info, int difficulty, bool autoplay, float band, float guitar, bool fastIntro);
     void beginSong();
     bool startSong(size_t index);
@@ -865,7 +874,8 @@ int App::run() {
 
     // The disc image: the command line's, else the remembered one (or an .iso
     // next to the program); without one, the first screen asks for it.
-    const std::string path = options_.dataPath.empty() ? loadRememberedPath() : options_.dataPath;
+    if (options_.inputCapture) startCapture();
+    const std::string path = options_.inputCapture ? std::string() : options_.dataPath.empty() ? loadRememberedPath() : options_.dataPath;
     if (!path.empty()) loadData(path);
     if ((!options_.song.empty() || walk_) && !data_) {
         std::fprintf(stderr, "%s: %s\n", app::kProgram, dataMessage_.empty() ? "no disc image given" : dataMessage_.c_str());
@@ -909,7 +919,8 @@ int App::run() {
             metaBackgroundSfx();
         }
         pollUserFiles();  // Enhanced Options > Export / Load User Files' dialogs
-        if (ui_) frameUi();
+        if (capture_) frameCapture();
+        else if (ui_) frameUi();
         else if (player_) frameSong();
         else if (!data_) frameNeedData();
         else frameList();
@@ -1595,6 +1606,23 @@ void App::endSong() {
 void App::handleEvent(const SDL_Event& e) {
     if (e.type == SDL_EVENT_QUIT) {
         running_ = false;
+        return;
+    }
+    if (capture_) {
+        if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_ESCAPE) {
+            running_ = false;
+            return;
+        }
+        actions_.clear();
+        input_.setInGame(true), input_.setOnePlayerSong(true);  // what a one-player song gets
+        input_.handle(e, actions_);
+        for (const InputEvent& a : actions_) {
+            if (!a.down) continue;
+            if (a.action == Action::Strum) ++captureCounts_[0];
+            else if (isFret(a.action)) ++captureCounts_[size_t(1 + fretOf(a.action))];
+            else if (a.action == Action::Whammy) ++captureCounts_[6];
+            else if (a.action == Action::StarPower) ++captureCounts_[7];
+        }
         return;
     }
     // A text entry takes typed letters, space and backspace (GH2's key message,
@@ -4335,6 +4363,48 @@ void App::drawSong(float t) {
 
 // The first screen, shown until there is a disc image. All its drawing is
 // here, in one place, for the renderer that replaces the debug canvas.
+void App::startCapture() {
+    capture_ = true;
+    std::string dir = input_.reportPath();
+    dir = dir.substr(0, dir.find_last_of("/\\") + 1);
+    captureFile_ = dir + "input-capture.txt";
+    captureOut_.open(captureFile_);
+    captureOut_ << app::kProgram << " " << app::kVersion << " input capture (send this file with a bug report)\n";
+    int v = SDL_GetVersion();
+    captureOut_ << "SDL " << SDL_VERSIONNUM_MAJOR(v) << "." << SDL_VERSIONNUM_MINOR(v) << "." << SDL_VERSIONNUM_MICRO(v) << ", video "
+                << (SDL_GetCurrentVideoDriver() ? SDL_GetCurrentVideoDriver() : "?") << "\n"
+                << "Each line: a raw event (the device's own numbers), the gamepad button SDL maps it to, then what a\n"
+                << "one-player song does with it (-> action) or why it is ignored.\n\n";
+    input_.setTraceSink([this](const std::string& l) {
+        captureOut_ << l << "\n";
+        captureOut_.flush();
+        captureTail_.push_back(l);
+        if (captureTail_.size() > 16) captureTail_.erase(captureTail_.begin());
+    });
+    SDL_Log("input capture: %s", captureFile_.c_str());
+}
+
+void App::frameCapture() {
+    const SDL_Color text{235, 235, 240, 255}, dim{150, 150, 165, 255}, accent{255, 210, 80, 255};
+    canvas_.begin({14, 12, 20, 255});
+    canvas_.textCentered(kScreenW * 0.5f, 40, 3, text, "Input capture");
+    canvas_.textCentered(kScreenW * 0.5f, 85, 1.8f, accent, "Strum down 5 times, strum up 5 times, press each fret (green to orange),");
+    canvas_.textCentered(kScreenW * 0.5f, 110, 1.8f, accent, "move the whammy bar, tilt the guitar up, press Start. Then Esc.");
+    std::string devs;
+    for (const Input::Device& d : input_.devices())
+        if (d.id != "touch") devs += (devs.empty() ? "" : "   ") + d.name + " (" + (d.player < 0 ? "no player" : "player " + std::to_string(d.player + 1)) + ")";
+    canvas_.textCentered(kScreenW * 0.5f, 145, 1.4f, dim, devs);
+    char c[160];
+    std::snprintf(c, sizeof c, "strums %d   frets %d %d %d %d %d   whammy %d   Overdrive %d", captureCounts_[0], captureCounts_[1], captureCounts_[2],
+                  captureCounts_[3], captureCounts_[4], captureCounts_[5], captureCounts_[6], captureCounts_[7]);
+    canvas_.textCentered(kScreenW * 0.5f, 180, 2, text, c);
+    float y = 230;
+    for (const std::string& l : captureTail_) canvas_.text(60, y, 1.3f, dim, l), y += 26;
+    canvas_.textCentered(kScreenW * 0.5f, 690, 1.3f, dim, "Saved to " + captureFile_);
+    if (captureDebugScreenshot(canvas_, false, 0)) running_ = false;
+    canvas_.end();
+}
+
 void App::frameNeedData() {
     if (SDL_getenv("GD05_DIALOG") && !picker_.busy() && dataMessage_.empty()) picker_.open(window_);  // headless tests
     const SDL_Color text{235, 235, 240, 255}, dim{150, 150, 165, 255}, accent{255, 210, 80, 255}, bad{240, 90, 80, 255};

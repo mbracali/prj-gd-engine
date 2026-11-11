@@ -264,6 +264,13 @@ public:
     // last raw button / axis / hat events, for bug reports.
     std::string reportPath() const;
     bool writeReport() const;
+    // GD05-058: every raw joystick / gamepad event and what the input path
+    // did with it (an action, or ignored and why), kept for the report (the
+    // last few hundred) and logged with GD05_INPUTLOG=1; a sink (the
+    // --inputcapture file) gets each line too.
+    void trace(const std::string& line);
+    void setTraceSink(std::function<void(const std::string&)> sink) { traceSink_ = std::move(sink); }
+    const std::vector<std::string>& traceLines() const { return trace_; }
     // Where controllers.json and the report go (default: the SDL pref dir;
     // the self-test uses its own folder). With a trailing separator.
     void setSaveDir(std::string dir) {
@@ -486,6 +493,10 @@ private:
         char kind;  // 'b' button, 'a' axis, 'h' hat (joystick events: the device's own numbers)
         int index, value;
     };
+    std::vector<std::string> trace_;  // the last kTraceLines (oldest first)
+    std::function<void(const std::string&)> traceSink_;
+    bool traceLog_ = false;
+    std::map<SDL_JoystickID, std::array<uint64_t, 2>> eventCounts_;  // joystick, gamepad events by device
     std::vector<RawEvent> raw_;  // the last kRawEvents, oldest first (for the report)
     std::unordered_map<SDL_JoystickID, Pad> pads_;
     ControllerMode lastMode_ = ControllerMode::Guitar;

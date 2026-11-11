@@ -468,6 +468,25 @@ pattern). Each says what, why and how to undo it.
 - **Undo:** RbTrackView::fxEvents / fxUpdate / drawSmasherFx,
   readParticleSys' order.
 
+## D41
+- **What (2026-11-11, GD05-058 / 059):** (1) controllers send while no
+  window has the keyboard focus (SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS):
+  without it SDL drops every joystick and gamepad event then [C: SDL 3.4
+  SDL_PrivateJoystickShouldIgnoreEvent; proven: a window made again without
+  focus got 0 events, 2 with the hint]. The owner's session of 11-11 17:35
+  (the launcher made the window again for Vulkan) logged no raw event at all
+  from his guitar and 0 notes hit; the report now prints the focus state and
+  every raw event with what the game did with it (GD05_INPUTLOG=1 logs them;
+  `--inputcapture` writes input-capture.txt). (2) Transitions: RB's
+  GotoScreen exits the old screen's panels and loads the new screen's as the
+  transition starts (UIScreen Exit; a panel's load script every time its
+  screen comes up), while the old screen still shows; main.dta's main_panel
+  fades the fx panel to black on load and on exit and the new screen fades
+  in on TRANSITION_COMPLETE. The port's switch waits for that fade (at most
+  2 s; on the 360 the panel loads covered it [I]).
+- **Undo:** Input::prepareSdl / load's hint; UiManager::beginTransition's
+  early exit / load, updateTransition's fxFadingOut hold.
+
 ## Owner: completeness 36% (2026-11-10)
 - **What:** the owner set Rock Band's completeness to 36% (game-info.yaml
   0.36, README, the site) after playing the build; the parity ledger

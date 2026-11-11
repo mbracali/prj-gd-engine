@@ -774,6 +774,35 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         at("endgame_waiting_screen", 150000);
         at("qp_endgame_screen", 20000);
         wait(1000);
+    } else if (scenario == "rb_title_back") {
+        // GD05-059: Press Start -> main menu -> Back to Press Start, with
+        // screenshots at fixed moments both ways (GD05_WALK_SHOTS:
+        // title_<tag>.bmp) and the fx panel's fade / the panels' transition
+        // state printed at each.
+        at("splash_screen", 30000);
+        wait(1500);
+        check("tshot:splash_rest");
+        key(SDLK_RETURN);
+        for (const char* t : {"fwd_0033", "fwd_0100", "fwd_0250", "fwd_0500", "fwd_0750", "fwd_1000", "fwd_1500", "fwd_2500"}) {
+            static double last = 0;
+            const double ms = std::atof(t + 4);
+            wait(ms - last), last = ms;
+            steps_.push_back({S::Check, std::string("tshot:") + t, 0, 0});
+        }
+        at("main_screen");
+        wait(1500);
+        check("tshot:main_rest");
+        key(SDLK_ESCAPE);
+        for (const char* t : {"back_0033", "back_0100", "back_0250", "back_0500", "back_0750", "back_1000", "back_1500", "back_2500"}) {
+            static double last = 0;
+            const double ms = std::atof(t + 5);
+            wait(ms - last), last = ms;
+            steps_.push_back({S::Check, std::string("tshot:") + t, 0, 0});
+        }
+        at("splash_screen", 20000);
+        wait(1500);
+        check("tshot:splash_again");
+        expect_ = {"splash_screen", "main_screen", "splash_screen"};
     } else if (scenario == "rb_band_start") {
         // GD05-054: the song's first seconds (the band's entrance, the intro
         // shot, the first shots and the track) draw nothing without its
@@ -872,7 +901,7 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
             check("kb_hits");
         }
         expect_ = {"main_screen", "main_solomode_screen", "qp_selsong_screen", "qp_seldiff_solo_screen", "game_screen", "pause_screen", "game_screen"};
-    } else if (scenario == "rb_guitar_play" || scenario == "rb_guitar_none" || scenario == "rb_pad_play") {
+    } else if (scenario == "rb_guitar_play" || scenario == "rb_guitar_none" || scenario == "rb_pad_play" || scenario == "rb_owner_guitar") {
         // GD05-056: a song played with a device's own SDL events (a virtual
         // joystick that is the owner's Harmonix Rock Band Guitar 1bad:0002:
         // 11 buttons, 6 axes, a hat, his SDL mapping; or a generic Xbox 360
@@ -882,18 +911,24 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
         // is the owner's controllers.json (the keyboard player 1, the guitar
         // None): the one-player song still takes the guitar (D34).
         autoplay_ = false;
-        const bool pad = scenario == "rb_pad_play", none = scenario == "rb_guitar_none";
+        // rb_owner_guitar (GD05-058): the guitar with the owner's GUID and his
+        // controllers.json of 2026-11-11 17:36 (keyboard player 1, the guitar
+        // None, his keyboard bindings), imported as GAMEPADS' Load does.
+        const bool owner = scenario == "rb_owner_guitar";
+        const bool pad = scenario == "rb_pad_play", none = scenario == "rb_guitar_none" || owner;
         auto checkS = [&](const std::string& what, double timeout = 0) { steps_.push_back({S::Check, what, 0, timeout}); };
         // A button press on the device (SDL button / hat numbers of the device).
         auto dev = [&](const std::string& what) { checkS("dev_set " + what + " 1"), wait(90), checkS("dev_set " + what + " 0"), wait(220); };
         const std::string green = "b0", strumDown = "hat4", start = pad ? "b6" : "b7";
+        if (owner) check("dev_owner_guid");
         checkS(pad ? "dev_attach 045e:028e" : "dev_attach 1bad:0002:rbguitar");
+        if (owner) check("dev_owner_json");
         at("splash_screen", 30000);
         wait(500);  // the device settles (its first 300 ms are its rest values)
         if (pad || none) key(SDLK_RETURN); else dev(start);
         at("main_screen");
         wait(1500);
-        if (none) checkS("dev_owner_players");
+        if (none && !owner) checkS("dev_owner_players");
         checkS("dev_players");
         if (pad || none) {
             key(SDLK_RETURN), at("main_solomode_screen"), key(SDLK_RETURN), at("qp_selsong_screen"), wait(500);
@@ -905,8 +940,20 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
             dev(green), wait(1500), dev(green);  // guitar, then the difficulty
         }
         at("game_screen", 60000);
+        // The owner's session: the window made again for Vulkan without the
+        // keyboard focus (SDL then drops every joystick event unless
+        // background events are allowed): the song played with no focus.
+        if (owner) check("dev_unfocus");
         checkS(pad ? "dev_play pad 30" : "dev_play guitar 30", 90000);
         check("dev_hits");
+        if (owner) {
+            // The rest (pause, sustain, Overdrive, a miss) is rb_guitar_none's
+            // with the same controllers.json; a hidden window's song does not
+            // go on after a pause (offscreen).
+            check("dev_trace");
+            check("dev_refocus");
+            expect_ = {"main_screen", "main_solomode_screen", "qp_selsong_screen", "qp_seldiff_solo_screen", "game_screen"};
+        } else {
         dev(start);  // pause
         at("pause_screen", 10000);
         wait(500);
@@ -932,7 +979,9 @@ WalkDriver::WalkDriver(const std::string& scenario) : scenario_(scenario) {
             check("dev_play guitar 8", 60000);
             check("dev_audible");
         }
+        if (!pad) check("dev_trace");
         expect_ = {"main_screen", "main_solomode_screen", "qp_selsong_screen", "qp_seldiff_solo_screen", "game_screen", "pause_screen", "game_screen"};
+        }
     } else if (scenario == "rb_fuzz") {
         // GD05-052 (GD05-032): menus disappearing. Seeded random input on the
         // main menu and its sub-menus (GD05_FUZZ_SEED, GD05_FUZZ_STEPS):
@@ -2820,6 +2869,15 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         }
         return pass();
     }
+    if (s.screen.rfind("tshot:", 0) == 0) {  // rb_title_back: a named shot and the transition state
+        const std::string tag = s.screen.substr(6);
+        if (const char* dir = SDL_getenv("GD05_WALK_SHOTS")) ui.host().saveScreenshot(std::string(dir) + "/title_" + tag + ".bmp");
+        std::string panels;
+        if (ui::ScreenObj* sc = ui.screen(ui.currentScreen()))
+            for (ui::PanelObj* p : sc->panels()) panels += " " + p->name() + (p->up ? "" : "(down)");
+        std::printf("  %-12s %s:%s%s\n", tag.c_str(), ui.currentScreen().c_str(), panels.c_str(), ui.inTransition() ? " [transition]" : "");
+        return pass();
+    }
     if (s.screen == "band_start_shot") {  // rb_band_start's screenshots (GD05_WALK_SHOTS)
         static int n = 0;
         char name[32];
@@ -3209,6 +3267,45 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         return pass();
     }
     const std::string devId = "pad:" + std::to_string(adapter_);
+    if (s.screen == "dev_unfocus") {
+        SDL_Window* w = SDL_GetKeyboardFocus();
+        if (w) SDL_HideWindow(w);
+        SDL_PumpEvents();
+        std::printf("  keyboard focus: %s (background events %s)\n", SDL_GetKeyboardFocus() ? "on a window" : "none",
+                    SDL_GetHintBoolean(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, false) ? "on" : "off");
+        return SDL_GetKeyboardFocus() ? fail("the window kept the keyboard focus") : pass();
+    }
+    if (s.screen == "dev_refocus") {
+        int n = 0;
+        if (SDL_Window** ws = SDL_GetWindows(&n)) {
+            for (int i = 0; i < n; ++i) SDL_ShowWindow(ws[i]);
+            SDL_free(ws);
+        }
+        return pass();
+    }
+    if (s.screen == "dev_owner_guid") {
+        SDL_setenv_unsafe("GD05_TEST_PAD_GUID", "03006f16ad1b00000200000003010000", 1);
+        return pass();
+    }
+    if (s.screen == "dev_owner_json") {
+        const char* dir = SDL_getenv("GD05_SAVE_DIR");
+        const std::string file = std::string(dir ? dir : "") + "owner-controllers.json";
+        auto keys = [](std::initializer_list<long long> k) {
+            std::string a = "[";
+            for (long long v : k) a += std::string(a.size() > 1 ? "," : "") + "{\"index\":" + std::to_string(v) + ",\"kind\":\"key\"}";
+            return a + "]";
+        };
+        std::ofstream(file) << "{\"devices\":{\"03006f16ad1b00000200000003010000\":{\"name\":\"Harmonix Rock Band Guitar\",\"player\":-1},"
+                               "\"keyboard\":{\"bindings\":{"
+                            << "\"blue\":" << keys({52, 1073741885}) << ",\"green\":" << keys({49, 1073741882})
+                            << ",\"guitar_select\":" << keys({9}) << ",\"guitar_start\":" << keys({13}) << ",\"gyro\":" << keys({9})
+                            << ",\"menu_down\":" << keys({1073741905}) << ",\"menu_up\":" << keys({1073741906})
+                            << ",\"orange\":" << keys({53, 1073741886}) << ",\"red\":" << keys({50, 1073741883}) << ",\"select\":" << keys({9})
+                            << ",\"start\":" << keys({13}) << ",\"strum_down\":" << keys({1073741905}) << ",\"strum_up\":" << keys({1073741906})
+                            << ",\"whammy\":" << keys({1073742049, 1073742053}) << ",\"yellow\":" << keys({51, 1073741884})
+                            << "},\"player\":0}},\"player2\":false,\"touch\":{\"buttons\":0,\"pause_corner\":0,\"swipe_down\":1,\"swipe_up\":0},\"version\":2}\n";
+        return ui.input().importFrom(file) ? pass() : fail("the owner's controllers.json did not load");
+    }
     if (s.screen == "dev_owner_players") {
         // The owner's controllers.json: the keyboard player 1, the guitar None.
         ui.input().setPlayer("keyboard", 0);
@@ -3223,7 +3320,7 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
             if (d.id == devId) slot = d.player, profile = d.profile;
         }
         if (slot == -2) return fail("the virtual device is not a gamepad");
-        if (scenario_ == "rb_guitar_none") return slot == -1 ? pass() : fail("the guitar is not None");
+        if (scenario_ == "rb_guitar_none" || scenario_ == "rb_owner_guitar") return slot == -1 ? pass() : fail("the guitar is not None");
         if (scenario_ == "rb_guitar_play" && profile != "Xbox 360 guitar") return fail("the Rock Band guitar is not typed an Xbox 360 guitar");
         return slot == 0 ? pass() : fail("the device is not player 1");
     }
@@ -3348,6 +3445,23 @@ void WalkDriver::runCheck(ui::UiManager& ui, const Step& s, double nowMs) {
         if (nowMs - stepStart_ > s.ms)
             return fail(od ? "Overdrive was never deployed with the device" : sus ? "no sustain held with the whammy" : "the song ended before the device played its gems");
         return;
+    }
+    if (s.screen == "dev_trace") {
+        // The input lines: the hat's raw events, each strum down reaching the song as Strum, none ignored.
+        int hats = 0, strums = 0, ignored = 0;
+        bool afterHat = false;
+        for (const std::string& l : ui.input().traceLines()) {
+            if (l.find(" hat 0 = 4 (down)") != std::string::npos) ++hats, afterHat = true;
+            else if (afterHat && l.find("-> Strum down") != std::string::npos && l.find("in a song") != std::string::npos) ++strums, afterHat = false;
+            if (l.find("ignored") != std::string::npos) ++ignored;
+        }
+        for (const std::string& l : ui.input().traceLines())
+            if (l.find(" hat 0 = 4") != std::string::npos) {
+                std::printf("  trace: %s\n", l.c_str());
+                break;
+            }
+        std::printf("  input trace: %d hat strums down, %d reached the song as Strum, %d ignored lines\n", hats, strums, ignored);
+        return hats > 10 && strums * 10 >= hats * 9 ? pass() : fail("hat strums did not reach the song");
     }
     if (s.screen == "dev_audible") {
         const Player* pl = ui.host().gamePlayer(0);

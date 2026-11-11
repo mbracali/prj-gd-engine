@@ -272,6 +272,10 @@ void Input::setRockBand(bool on) {
 }
 
 void Input::prepareSdl() {
+    // Controllers keep sending while SDL thinks no window has the keyboard
+    // (a window made again for another graphics API in the launcher): SDL
+    // otherwise drops every joystick and gamepad event then (GD05-058).
+    SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
     if (SDL_getenv("SDL_GAMECONTROLLER_IGNORE_DEVICES") || SDL_getenv("SDL_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT"))
         SDL_setenv_unsafe("SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD", "1", 0);  // read from the environment (SDL_gamepad.c)
 }
@@ -392,6 +396,8 @@ void Input::emit(std::vector<InputEvent>& out, Action a, bool down, uint64_t ts,
         }
     }
     // TODO(multiplayer): per player; gd05 plays one player, fed by every slot.
+    trace(std::string("  -> ") + actionName(a) + (down ? " down" : " up") + ", player " + std::to_string(player + 1) +
+          (mode == ControllerMode::Guitar ? ", strummed (guitar)" : ", frets strum (joypad)") + (inGame() ? ", in a song" : ", menus"));
     lastMode_ = mode;
     out.push_back({a, down, ts, mode, player, a == Action::Whammy && curAnalog_, curJoypad_, enterKey});
 }
@@ -466,7 +472,17 @@ std::string Input::savePath(const char* file) const {
     return dir + file;
 }
 
+void Input::trace(const std::string& line) {
+    const std::string l = std::to_string(double(SDL_GetTicksNS()) / 1e9).substr(0, 9) + " s  " + line;
+    if (traceLog_) SDL_Log("input: %s", line.c_str());
+    if (traceSink_) traceSink_(l);
+    trace_.push_back(l);
+    if (trace_.size() > 600) trace_.erase(trace_.begin(), trace_.begin() + 200);
+}
+
 void Input::load() {
+    SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");  // as prepareSdl (the launcher started SDL)
+    if (const char* l = SDL_getenv("GD05_INPUTLOG")) traceLog_ = *l && *l != '0';
     loaded_ = true;
     std::ifstream in(savePath("controllers.json"));
     if (!in) return;
@@ -593,9 +609,16 @@ void Input::handle(const SDL_Event& e, std::vector<InputEvent>& out) {
     case SDL_EVENT_JOYSTICK_BUTTON_DOWN:
     case SDL_EVENT_JOYSTICK_BUTTON_UP:
         raw_.push_back({e.jbutton.timestamp, e.jbutton.which, 'b', e.jbutton.button, e.jbutton.down ? 1 : 0});
+        ++eventCounts_[e.jbutton.which][0];
+        trace("raw controller " + std::to_string(e.jbutton.which) + " button " + std::to_string(e.jbutton.button) + " = " +
+              (e.jbutton.down ? "1" : "0") + " (t " + std::to_string(e.jbutton.timestamp / 1000000) + " ms)");
         break;
     case SDL_EVENT_JOYSTICK_HAT_MOTION:
         raw_.push_back({e.jhat.timestamp, e.jhat.which, 'h', e.jhat.hat, e.jhat.value});
+        ++eventCounts_[e.jhat.which][0];
+        trace("raw controller " + std::to_string(e.jhat.which) + " hat " + std::to_string(e.jhat.hat) + " = " + std::to_string(e.jhat.value) +
+              (e.jhat.value & SDL_HAT_UP ? " (up)" : e.jhat.value & SDL_HAT_DOWN ? " (down)" : e.jhat.value == SDL_HAT_CENTERED ? " (centred)" : "") +
+              " (t " + std::to_string(e.jhat.timestamp / 1000000) + " ms)");
         break;
     case SDL_EVENT_JOYSTICK_AXIS_MOTION: {
         // Axes report constantly: kept when they move a sixth of their range from the last one kept.
@@ -605,7 +628,12 @@ void Input::handle(const SDL_Event& e, std::vector<InputEvent>& out) {
                 last = r->value;
                 break;
             }
-        if (std::abs(int(e.jaxis.value) - last) > 10000) raw_.push_back({e.jaxis.timestamp, e.jaxis.which, 'a', e.jaxis.axis, e.jaxis.value});
+        ++eventCounts_[e.jaxis.which][0];
+        if (std::abs(int(e.jaxis.value) - last) > 10000) {
+            raw_.push_back({e.jaxis.timestamp, e.jaxis.which, 'a', e.jaxis.axis, e.jaxis.value});
+            trace("raw controller " + std::to_string(e.jaxis.which) + " axis " + std::to_string(e.jaxis.axis) + " = " + std::to_string(e.jaxis.value) +
+                  " (t " + std::to_string(e.jaxis.timestamp / 1000000) + " ms)");
+        }
         // A button the mapping reads from this axis: from the axis's rest.
         if (auto it = pads_.find(e.jaxis.which); it != pads_.end() && !it->second.axisButtons.empty()) {
             Pad& p = it->second;
@@ -654,6 +682,10 @@ void Input::handle(const SDL_Event& e, std::vector<InputEvent>& out) {
         char guid[64];
         SDL_GUIDToString(SDL_GetGamepadGUIDForID(id), guid, sizeof guid);
         np.guid = guid;
+        // Tests: GD05_TEST_PAD_GUID gives a virtual controller a real device's
+        // GUID (SDL's virtual bus has its own), so a saved controllers.json
+        // of that device applies to it as to the real one (GD05-058).
+        if (const char* g = SDL_getenv("GD05_TEST_PAD_GUID"); g && *g && SDL_IsJoystickVirtual(id)) np.guid = g;
         np.name = SDL_GetGamepadName(pad) ? SDL_GetGamepadName(pad) : "Gamepad";
         if (auto t = types_.find(np.guid); t != types_.end()) np.profile = profile = t->second;  // chosen in GAMEPADS
         // The axes' rest values as connected (a whammy bar rests at -32768).
@@ -705,6 +737,9 @@ void Input::handle(const SDL_Event& e, std::vector<InputEvent>& out) {
         break;
     case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
     case SDL_EVENT_GAMEPAD_BUTTON_UP:
+        ++eventCounts_[e.gbutton.which][1];
+        trace(std::string("gamepad ") + std::to_string(e.gbutton.which) + " " + SDL_GetGamepadStringForButton(SDL_GamepadButton(e.gbutton.button)) +
+              (e.gbutton.down ? " down" : " up") + (pads_.count(e.gbutton.which) ? "" : " (not an open pad: ignored)"));
         if (auto it = pads_.find(e.gbutton.which); it != pads_.end() && e.gbutton.button < SDL_GAMEPAD_BUTTON_COUNT) {
             Pad& p = it->second;
             const size_t b = e.gbutton.button;
@@ -712,6 +747,7 @@ void Input::handle(const SDL_Event& e, std::vector<InputEvent>& out) {
             if (e.gbutton.timestamp < p.settleNs) p.stuck[b] = e.gbutton.down;
             if (p.stuck[b]) {  // held since it connected: nothing until released
                 if (!e.gbutton.down) p.stuck[b] = false;
+                trace("  ignored: held since the controller connected (counts after its release)");
                 break;
             }
             p.buttons[b] = e.gbutton.down;
@@ -872,6 +908,14 @@ bool Input::writeReport() const {
                     << ", USB id " << hex4(SDL_GetJoystickVendorForID(all[k])) << ":" << hex4(SDL_GetJoystickProductForID(all[k])) << "\n";
         SDL_free(all);
     }
+    out << "\nEvents seen this session (joystick / gamepad), by controller:";
+    if (eventCounts_.empty()) out << " none";
+    for (const auto& [id, c] : eventCounts_) out << "  " << id << ": " << c[0] << " / " << c[1];
+    out << "\nSDL: keyboard focus " << (SDL_GetKeyboardFocus() ? "on a window" : "none") << ", joystick events "
+        << (SDL_JoystickEventsEnabled() ? "on" : "off") << ", gamepad events " << (SDL_GamepadEventsEnabled() ? "on" : "off")
+        << ", background events " << (SDL_GetHintBoolean(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, false) ? "on" : "off") << "\n";
+    out << "\nLast input lines (raw events and what the game did with them):\n";
+    for (const std::string& l : trace_) out << "  " << l << "\n";
     out << "\nLast raw events (the device's own button / axis / hat numbers):\n";
     for (const RawEvent& r : raw_)
         out << "  " << double(r.ns) / 1e9 << " s  controller " << r.id << "  "
@@ -882,6 +926,7 @@ bool Input::writeReport() const {
 void Input::keyEvent(const SDL_KeyboardEvent& k, std::vector<InputEvent>& out) {
     const bool down = k.down;
     const uint64_t ts = k.timestamp;
+    if (!k.repeat) trace(std::string("key ") + SDL_GetKeyName(k.key) + (down ? " down" : " up"));
     if (detect_ >= 0 && down) {  // Bind to: Detect... (Esc cancels)
         if (k.key == SDLK_ESCAPE) detect_ = -1;
         else detectFrom("keyboard");
@@ -1058,6 +1103,8 @@ Input::ActionSet Input::actionsOf(const std::array<bool, size_t(Control::Count)>
 void Input::controlEdges(const std::array<bool, size_t(Control::Count)>& was, const std::array<bool, size_t(Control::Count)>& now,
                          ControllerMode mode, int player, bool joypad, uint64_t ts, std::vector<InputEvent>& out) {
     const ActionSet before = actionsOf(was, joypad, player), after = actionsOf(now, joypad, player);
+    if (player < 0 && inGame() && !onePlayerSong_ && was != now)
+        trace("  ignored: the controller has no player (GAMEPADS None) in a song with more players; only Start counts");
     const int pl = std::max(player, 0);
     const bool keyboardStart = device_ == -1 && !inGame();
     for (size_t k = 0; k < after.on.size(); ++k) {

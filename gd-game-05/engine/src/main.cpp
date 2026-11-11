@@ -62,6 +62,8 @@ void usage() {
         "                       and golden poses\n"
         "  --venuetest          load the 8 venues (one player, face-off, co-op): their milos, classes, references and\n"
         "                       scripts, headlessly\n"
+        "  --inputcapture       a window that logs every controller / key event and what a song does with it to\n"
+        "                       input-capture.txt in the save folder (strum, frets, whammy, tilt; Esc ends)\n"
         "  --walktest <walk>    play through the menus with scripted buttons and check them: quickplay, lose, pause,\n"
         "                       attract, career, career_full, career_song, career_encore, career_venues, career_venues_input, career_glitches, back, enhanced, cheats, coop, faceoff, proface,\n"
         "                       practice, practice_menus, tutorial, tutorial1, tutorial2, tutorial3, options, flaming_head, dev_cheats (headless: SDL_VIDEO_DRIVER=offscreen SDL_AUDIO_DRIVER=dummy)\n"
@@ -196,6 +198,7 @@ int run(int argc, char** argv) {
         else if (a == "--videotest") videotest = true;
         else if (a == "--facefxtest") facefxtest = true;
         else if (a == "--walktest") opt.walk = value();
+        else if (a == "--inputcapture") opt.inputCapture = true;
         else if (a == "--view") viewPath = value();
         else if (a == "--playmovie") movie = value();
         else if (a == "--help" || a == "-h") { usage(); return 0; }
