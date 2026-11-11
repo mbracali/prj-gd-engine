@@ -200,7 +200,7 @@ for gi in "${game_infos[@]}"; do
     done < "$d/core-libs.txt"
   fi
   case "$nn" in
-    02)  # FFmpeg (videos, sound effects) and its LGPL notice
+    02|10)  # FFmpeg (videos, sound effects) and its LGPL notice
       for lib in avformat avcodec avutil; do
         case "$os" in
           windows) one_of "$id: $lib-*.dll" "$libs/$lib"-*.dll ;;
