@@ -21,6 +21,12 @@ struct ChartNote {
     uint8_t frets = 0;    // bit 0 green .. bit 4 orange [C data: bits 0-4 and 0x20 only]
     bool open = false;    // gh4: an open note (flags 0x20; bass) [I]
     bool flag20 = false;  // mask bit 0x20 [I: GH3's forced (HOPO-flip) flag; confirm in the XEX]
+    // gh4: flags 0x40 = the note is a hammer-on, decided when the chart was
+    // built (ProcessHammerOns 0x8214EE70 writes the same bit for jam songs:
+    // single fret, not the previous note's, within the first beat /
+    // default_hammer_on_measure_scale) [C 0x8214EE70; data: 1267 of 1270
+    // Enter Sandman expert notes match that rule, the rest forced].
+    bool gh4 = false, hopo = false;
 };
 
 struct ChartPhrase {

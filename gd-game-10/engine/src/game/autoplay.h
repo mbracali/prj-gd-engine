@@ -27,7 +27,9 @@ public:
             const bool prevHit = next_ > 0 && player.current() >= next_;
             // A HOPO on the same fret as the note before cannot be tapped
             // (the tap needs another fret, 0x82120160): strum it.
-            const bool tappable = n.hopo && !n.chord() && prevHit && n.frets != t_.notes[next_ - 1].frets;
+            // An open HOPO (gh4 bass, D9) is tapped by lifting every fret at
+            // its time; the autoplay's frets are already up then: strum it.
+            const bool tappable = n.hopo && !n.chord() && n.frets && prevHit && n.frets != t_.notes[next_ - 1].frets;
             // A note the judge already took (an early tap while a chord
             // sustain's top fret matched it) is not strummed again: a second
             // strum within strum_before_forming would be a bum note.

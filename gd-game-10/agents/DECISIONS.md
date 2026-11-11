@@ -65,11 +65,17 @@ Why: `--songaudiotest entersandman` levels against the chart (vocals pair
 silent until 1:10, bank 3's second pair silent). Undo: kGh4Pairs in
 audio/song_stream.cpp, once the XEX's table is found.
 
-## D9. Chart note flags [I] (2026-11-11)
+## D9. Chart note flags [C] (2026-11-11, confirmed 11-11)
 
-What: (time, packed) pairs: frets 0x1f, 0x20 open, 0x40 forced (GH3's 0x20
-flip); 0x0f80 / 0x2000 unused for now. Open notes match with no fret held.
-Undo: game/chart.cpp, game/player.cpp.
+What: (time, packed) pairs: frets 0x1f, 0x20 open, 0x40 the note is a
+hammer-on (not a flip): ProcessHammerOns (0x8214EE70, jam songs only)
+writes the same bit: single fret (an open note a value of its own), not
+the previous note's, within the first beat / default_hammer_on_measure_scale
+[C]; on the disc 1267 of 1270 Enter Sandman expert notes match that rule
+(the rest forced). Two entries at one time are one chord (frets ORed, the
+longer length) [C data; I: the merge, the original keeps a length per
+fret]. 0x0f80 / 0x2000 unused for now. Undo: game/chart.cpp,
+game/note_track.cpp, game/player.cpp (lastHitMask_ of an open note).
 
 ## D10. The Glitches stand-in (2026-11-11)
 
@@ -92,11 +98,11 @@ tutorials, sync / debug charts and the jam session. Why: the native's rule
 is not read yet; this hides the Death Magnetic DLC songs (no audio on the
 disc) and test charts. Undo: ui/natives_gh4.cpp.
 
-## D13. The debug highway stands in for gh4's highway (2026-11-11)
+## D13. The debug highway stands in for gh4's highway (2026-11-11, done 11-11)
 
-What: gh4 lays its highway out from highway_pos_table, not GH3's
-perspective tables; until that is decoded the song draws the debug highway
-(labelled on screen). Undo: render/highway2d.cpp when done.
+Done: the song draws gh4's own highway (highway_guitar1 layout, the CAS
+highway skin, gems / buttons / tails from the script-built materials, D15).
+The debug highway remains for data without the gh4 tables.
 
 ## D14. A descinterface call's `just` does not move the desc's root [I] (2026-11-11)
 
@@ -107,3 +113,22 @@ full-screen descs pass just = center at pos (0, 0); applied to the root it
 drew the 1280 x 720 picture centred on the top-left corner (the "skull art
 over the menus" of the proof of concept). The XEX's descinterface element is
 not read yet. Undo: ui_system.cpp CreateScreenElement's descinterface branch.
+
+## D15. gh4 highway materials drawn as layered sprites [I] (2026-11-11)
+
+What: guitar_material.qb builds each gem / button / whammy material from a
+template (ImmediateMode_AlphaFade_UI_3Pass, AnimatedTexture_UI_3Pass,
+WhammyBar_UI) with up to three grey textures (basic_gems.tex) tinted by the
+gem set's colours (standard_gems / _stars / _fx) [C data]. MaterialLibrary
+(MATL v3) is not decoded, so the passes are drawn in order, colour x
+texture, alpha-blended (added for blendmode add), colours clamped to 1; the
+whammy glow (m_glowcolor, m_glowintensity) is left out. Undo:
+render/gem_materials.cpp, render/highway2d.cpp (gemGh4, matSprite).
+
+## D16. The default guitarist's highway [I] (2026-11-11)
+
+What: the highway skin is the character profile's appearance
+CAS_Guitar_Highway desc_id -> CAS_Highways_List (highway_pak,
+highway_texture) [C data]; with no character_id (a direct `--song`) the
+first Preset_Musician_Profiles_Modifiable entry (James) is used. Undo:
+ui/song_screen.cpp highwayTexture.

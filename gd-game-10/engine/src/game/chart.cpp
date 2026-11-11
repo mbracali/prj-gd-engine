@@ -2,6 +2,7 @@
 // Guitar Dream Engine, https://github.com/mbracali/prj-gd-engine. See LICENSE and LICENSE-ADDITIONAL-TERMS.md.
 #include "game/chart.h"
 
+#include <algorithm>
 #include <stdexcept>
 
 #include "data/disc.h"
@@ -101,9 +102,9 @@ Chart loadChart(const Disc& disc, const std::string& song) {
                 auto& out = c.parts[p].notes[size_t(d)];
                 // gh4 (Metallica): (time, packed) pairs, packed = flags << 16 |
                 // length (ms); flags: frets 0x1f (green 0x01 .. orange 0x10),
-                // 0x20 an open note, 0x40 forced (GH3's 0x20 flip) [C data: every
-                // chart; meanings I, D9], 0x0f80 per-lane bits (all set on
-                // guitar) and 0x2000 (drums) not used here yet.
+                // 0x20 an open note [C 0x8214EE70], 0x40 a hammer-on (the chart's
+                // own decision, D9) [C 0x8214EE70], 0x0f80 per-lane bits (all set
+                // on guitar) and 0x2000 (drums) not used here yet.
                 const bool gh4 = a->values.size() % 2 == 0 && a->values.size() >= 2 && (uint32_t(intOf(a->values[1])) >> 16) != 0;
                 if (gh4) {
                     out.reserve(a->values.size() / 2);
@@ -115,8 +116,21 @@ Chart loadChart(const Disc& disc, const std::string& song) {
                         const uint32_t flags = packed >> 16;
                         n.frets = uint8_t(flags & 0x1f);
                         n.open = (flags & 0x20) != 0;
-                        n.flag20 = (flags & 0x40) != 0;
+                        n.gh4 = true;
+                        n.hopo = (flags & 0x40) != 0;
                         if (!n.frets && !n.open) continue;  // no lane at all [I]
+                        // Two entries at one time are one chord whose frets
+                        // sustain for different lengths (the gem expansion keeps a
+                        // length per fret, as GH3's input_array) [C data: Master of
+                        // Puppets hard, 99369 ms; I: the merge]; the longer one kept.
+                        if (!out.empty() && out.back().time == n.time) {
+                            ChartNote& b = out.back();
+                            b.frets = uint8_t(b.frets | n.frets);
+                            b.open = b.open || n.open;
+                            b.length = std::max(b.length, n.length);
+                            b.hopo = false;  // a chord is never a hammer-on [C 0x8214EE70]
+                            continue;
+                        }
                         out.push_back(n);
                     }
                 } else {

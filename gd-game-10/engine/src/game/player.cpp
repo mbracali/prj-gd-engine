@@ -164,7 +164,10 @@ void Player::hit(size_t i, double now, bool tap) {
     ++st_.totalNotes;
     if (rules_.coop && partner_) ++partner_->st_.notesHit, ++partner_->st_.totalNotes;  // co-op: both count [C 0x8210BB40]
     addScore(double(kPointsPerNote) * st_.multiplier() * n.fretCount());  // [C 0x8210BB40]
-    lastHitMask_ = n.frets;
+    // gh4: an open note is a button value of its own (0x100000 beside the
+    // frets' 0x10000 .. 0x1), so a fretted HOPO after it differs from it and
+    // can be tapped [C 0x8214EE70]; 0x20 stands for it here.
+    lastHitMask_ = n.frets ? n.frets : n.open ? uint8_t(0x20) : uint8_t(0);
     pendingMs_ = -1;
     if (tap) {
         ++st_.hopoHits;

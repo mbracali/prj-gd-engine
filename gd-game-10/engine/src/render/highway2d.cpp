@@ -727,7 +727,21 @@ void Highway2D::drawTail(Canvas& c, const TextureCache& tex, const TrackNote& n,
     const uint32_t key = t && t->dead                                        ? kWhammyDead
                          : (t && t->star) || player.stats().starPowerActive ? kWhammyStarPower
                                                                               : kWhammy[fret];
-    const int texId = int(tex.find(key).id);
+    int texId = int(tex.find(key).id);
+    uint8_t cr = 255, cg = 255, cb = 255;
+    if (gh4_) {
+        // gh4: Mat_Whammy_<fret> / _Star / _Dead: WhammyBAR_Grey tinted by the
+        // gem set's colour (m_pspass0materialcolor) [C data; the WhammyBar
+        // shader's glow left out, I].
+        static const uint32_t kDead = qbkey::key("Mat_Whammy_Dead");
+        const gemmat::Lane& ln = gems_.lane(fret);
+        const uint32_t mat = t && t->dead ? kDead : (t && t->star) || player.stats().starPowerActive ? ln.spWhammy : ln.whammy;
+        if (const gemmat::Material* m = gems_.find(mat); m && !m->passes.empty()) {
+            texId = int(tex.find(m->passes[0].texture).id);
+            auto ch = [](float f) { return uint8_t(std::clamp(f, 0.0f, 1.0f) * 255.0f + 0.5f); };
+            cr = ch(m->passes[0].color[0]), cg = ch(m->passes[0].color[1]), cb = ch(m->passes[0].color[2]);
+        }
+    }
     for (size_t s = 0; s + 1 < rows.size(); ++s) {
         const float va = rowDepth(float(rows[s])), vb = rowDepth(float(rows[s + 1]));
         const float wa = whammyTop_ * (1 + whammyOffset_ * va) * 0.5f * scaleAt(rows[s]);
@@ -735,8 +749,8 @@ void Highway2D::drawTail(Canvas& c, const TextureCache& tex, const TrackNote& n,
         const float xa = laneX(lane, va), xb = laneX(lane, vb), ya = yAt(va), yb = yAt(vb);
         const auto A = uint8_t(255 * alphaAt(ya)), B = uint8_t(255 * alphaAt(yb));
         const float ta = vAt(rows[s]), tb = vAt(rows[s + 1]);
-        const Vertex p0{xa - wa, ya, 0, 0, ta, 255, 255, 255, A}, p1{xa + wa, ya, 0, 1, ta, 255, 255, 255, A};
-        const Vertex p2{xb + wb, yb, 0, 1, tb, 255, 255, 255, B}, p3{xb - wb, yb, 0, 0, tb, 255, 255, 255, B};
+        const Vertex p0{xa - wa, ya, 0, 0, ta, cr, cg, cb, A}, p1{xa + wa, ya, 0, 1, ta, cr, cg, cb, A};
+        const Vertex p2{xb + wb, yb, 0, 1, tb, cr, cg, cb, B}, p3{xb - wb, yb, 0, 0, tb, cr, cg, cb, B};
         const Vertex q[6] = {p0, p1, p2, p0, p2, p3};
         c.draw(q, 6, texId, Blend::Alpha);
     }

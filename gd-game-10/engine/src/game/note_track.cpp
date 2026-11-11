@@ -84,7 +84,7 @@ NoteTrack buildTrack(const Chart& chart, Part part, int difficulty, const Tuning
         }
         // Bit 0x20 flips it, on notes with a length [C 0x821047FC].
         const bool flip = c.flag20 && c.length != 0;
-        n.hopo = natural != flip;
+        n.hopo = c.gh4 ? c.hopo : natural != flip;  // gh4: the chart's 0x40 (D9) [C 0x8214EE70]
         n.sustain = float(c.length) > 0.5f * first;
         n.holdMs = n.sustain ? int32_t(float(c.length) - tuning.whammyShorten * first) : 0;
         if (n.sustain && float(c.length) > tuning.whammyShorten * first)
