@@ -979,6 +979,10 @@ universal launcher, not released on its own.
 | GD05-051 | Bugfix | 🟡 | Owner (wave 05 retest) 6: song list font spacing (kerning, letter / line spacing, fitting) | wave 05 retest: RB's fit measures height in the font's cell aspect and steps the size by 0.2 (0x8226DDA8 / 0x82214FE8): names 30 -> 28; accented kerning pairs found. Not done: the heading row (WARMUP SONGS) still overlaps the highlight bar; no reference shot | Owner 11-10 |
 | GD05-052 | Bugfix | ✅ | Owner (wave 05 retest) 7: menus disappearing: fuzz walk, root cause, regression test (with GD05-032) | wave 05 retest: walk rb_fuzz (seeded, 2000 steps) reproduced it at step 27: main_panel's ui_exit_back slid the buttons out, nothing brought them back after the title; enterPanel forgets exit poses (D33). 2000 steps pass | Owner 11-10 |
 | GD05-053 | Bugfix | ✅ | Owner (wave 05 retest) 8: Enhanced Options backdrop shows the band badly (shot, poses, lighting) | wave 05 retest: the hand-made close-up sat in the drum kit; now one of the venue's NORMAL1111 / directed_all shots (D31). Shot checked | Owner 11-10 |
+| GD05-054 | Bugfix | 🟡 | Owner (wave 06) 1+2: letters, icons, the loading screen, LOADING label, band icons and some options darker than the original (every menu) | wave 06: in progress | Owner 11-11 |
+| GD05-055 | Bugfix | 🟡 | Owner (wave 06) 3: missing shaders when the band starts (draws without their shader) | wave 06: in progress | Owner 11-11 |
+| GD05-056 | Bugfix | 🟡 | Owner (wave 06) 4: the song ignores the Rock Band guitar (1bad:0002); playable with guitar, keyboard and a pad | wave 06: in progress | Owner 11-11 |
+| GD05-057 | Bugfix | 🟡 | Owner (wave 06) 4: gameplay end to end (band, highway rise, gems / sustains / Overdrive, hit / miss sounds, stems, HUD, results) | wave 06: in progress | Owner 11-11 |
 
 
 ## gd-game-06: Guitar Hero: Aerosmith (Xbox 360)
